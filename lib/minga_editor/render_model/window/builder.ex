@@ -1,6 +1,6 @@
-defmodule MingaEditor.SemanticWindow.Builder do
+defmodule MingaEditor.RenderModel.Window.Builder do
   @moduledoc """
-  Builds a `SemanticWindow` from the same data the Content stage uses.
+  Builds a `RenderWindow` from the same data the Content stage uses.
 
   Called during `build_window_content/2` when the frontend has GUI
   capabilities. Captures the pre-resolved semantic data that the GUI
@@ -15,12 +15,13 @@ defmodule MingaEditor.SemanticWindow.Builder do
   window's content rect, with fold/wrap adjustments applied).
   """
 
-  alias Minga.Buffer
+  alias Minga.Config
   alias Minga.Core.Decorations
   alias Minga.Core.Decorations.BlockDecoration
   alias Minga.Core.Decorations.FoldRegion
   alias Minga.Core.Decorations.HighlightRange
   alias Minga.Core.HlTodo
+  alias Minga.Core.IndentGuide
   alias Minga.Core.Unicode
   alias Minga.Diagnostics
   alias MingaEditor.DisplayMap
@@ -28,14 +29,19 @@ defmodule MingaEditor.SemanticWindow.Builder do
   alias MingaEditor.RenderPipeline.Scroll.WindowScroll
   alias MingaEditor.Renderer.Composition
   alias MingaEditor.Renderer.Context
-  alias MingaEditor.SemanticWindow
-  alias MingaEditor.SemanticWindow.DiagnosticRange
-  alias MingaEditor.SemanticWindow.DocumentHighlightRange
-  alias MingaEditor.SemanticWindow.ResolvedAnnotation
-  alias MingaEditor.SemanticWindow.SearchMatch
-  alias MingaEditor.SemanticWindow.Selection
-  alias MingaEditor.SemanticWindow.Span
-  alias MingaEditor.SemanticWindow.VisualRow
+  alias Minga.RenderModel.Window, as: RenderWindow
+  alias Minga.RenderModel.Window.Annotation
+  alias Minga.RenderModel.Window.Cursorline
+  alias Minga.RenderModel.Window.DiagnosticRange
+  alias Minga.RenderModel.Window.DocumentHighlight
+  alias Minga.RenderModel.Window.Gutter
+  alias Minga.RenderModel.Window.GutterEntry
+  alias Minga.RenderModel.Window.IndentGuides
+  alias Minga.RenderModel.Window.Row
+  alias Minga.RenderModel.Window.SearchMatch
+  alias Minga.RenderModel.Window.Selection
+  alias Minga.RenderModel.Window.Span
+  alias MingaEditor.Renderer.Gutter, as: EditorGutter
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Viewport
   alias Minga.LSP.SyncServer
@@ -44,13 +50,13 @@ defmodule MingaEditor.SemanticWindow.Builder do
   @type state :: EditorState.t() | MingaEditor.RenderPipeline.Input.t()
 
   @doc """
-  Builds a `SemanticWindow` for one editor window.
+  Builds a `RenderWindow` for one editor window.
 
   Called from the Content stage with the same `WindowScroll` and
   `Context` that drive the draw-based rendering.
   """
-  @spec build(state(), WindowScroll.t(), Context.t()) :: SemanticWindow.t()
-  def build(state, scroll, ctx) do
+  @spec build(state(), WindowScroll.t(), Context.t(), keyword()) :: RenderWindow.t()
+  def build(state, scroll, ctx, opts \\ []) do
     %WindowScroll{
       win_id: win_id,
       is_active: is_active,
@@ -61,11 +67,15 @@ defmodule MingaEditor.SemanticWindow.Builder do
       lines: lines,
       snapshot: snapshot,
       window: window,
+      win_layout: win_layout,
       visible_line_map: visible_line_map,
       wrap_on: wrap_on
     } = scroll
 
     visible_rows = Viewport.content_rows(viewport)
+    content_kind = Keyword.get(opts, :content_kind, :buffer)
+    rect = win_layout.content
+    {content_row, _content_col, _content_width, _content_height} = rect
 
     # Build visual rows from the same data the draw path uses
     visual_rows =
@@ -135,7 +145,7 @@ defmodule MingaEditor.SemanticWindow.Builder do
       )
 
     # Diagnostic inline ranges in display coordinates
-    diagnostic_ranges = build_diagnostic_ranges(window, viewport, visible_rows)
+    diagnostic_ranges = build_diagnostic_ranges(snapshot.file_path, viewport, visible_rows)
 
     # Document highlights in display coordinates
     doc_highlights =
@@ -149,8 +159,10 @@ defmodule MingaEditor.SemanticWindow.Builder do
     annotations =
       build_annotations(ctx.decorations, viewport.top, viewport_bottom)
 
-    %SemanticWindow{
+    %RenderWindow{
       window_id: win_id,
+      content_kind: content_kind,
+      rect: rect,
       rows: visual_rows,
       cursor_row: display_cursor_row,
       cursor_col: display_cursor_col,
@@ -162,6 +174,9 @@ defmodule MingaEditor.SemanticWindow.Builder do
       diagnostic_ranges: diagnostic_ranges,
       document_highlights: doc_highlights,
       annotations: annotations,
+      gutter: build_gutter(scroll, ctx, content_kind),
+      cursorline: build_cursorline(content_row, display_cursor_row, is_active, ctx),
+      indent_guides: build_indent_guides(scroll, ctx, content_kind),
       full_refresh: true
     }
   end
@@ -175,7 +190,7 @@ defmodule MingaEditor.SemanticWindow.Builder do
           boolean(),
           Context.t(),
           map()
-        ) :: [VisualRow.t()]
+        ) :: [Row.t()]
   defp build_visual_rows(lines, first_line, visible_line_map, _wrap_on, ctx, snapshot) do
     if visible_line_map != nil do
       build_visual_rows_folded(lines, first_line, visible_line_map, ctx, snapshot)
@@ -190,7 +205,7 @@ defmodule MingaEditor.SemanticWindow.Builder do
           non_neg_integer(),
           Context.t(),
           map()
-        ) :: [VisualRow.t()]
+        ) :: [Row.t()]
   defp build_visual_rows_sequential(lines, first_line, ctx, snapshot) do
     first_byte_off = snapshot.first_line_byte_offset
 
@@ -213,12 +228,12 @@ defmodule MingaEditor.SemanticWindow.Builder do
       {composed_text, spans} =
         compose_line(line_text, hl_segments, ctx, buf_line, line_byte_offset)
 
-      %VisualRow{
+      %Row{
         row_type: :normal,
         buf_line: buf_line,
         text: composed_text,
         spans: spans,
-        content_hash: VisualRow.compute_hash(composed_text, spans)
+        content_hash: Row.compute_hash(composed_text, spans)
       }
     end)
   end
@@ -230,7 +245,7 @@ defmodule MingaEditor.SemanticWindow.Builder do
           [DisplayMap.entry()],
           Context.t(),
           map()
-        ) :: [VisualRow.t()]
+        ) :: [Row.t()]
   defp build_visual_rows_folded(lines, first_line, visible_line_map, ctx, snapshot) do
     line_byte_offsets =
       build_line_byte_offsets(lines, first_line, snapshot.first_line_byte_offset)
@@ -247,18 +262,18 @@ defmodule MingaEditor.SemanticWindow.Builder do
           non_neg_integer(),
           Context.t(),
           %{non_neg_integer() => non_neg_integer()}
-        ) :: VisualRow.t()
+        ) :: Row.t()
   defp build_visual_row_entry(buf_line, :normal, lines, first_line, ctx, line_byte_offsets) do
     line_text = line_at(lines, buf_line, first_line)
     line_byte_offset = Map.get(line_byte_offsets, buf_line, 0)
     {composed, spans} = compose_line(line_text, nil, ctx, buf_line, line_byte_offset)
 
-    %VisualRow{
+    %Row{
       row_type: :normal,
       buf_line: buf_line,
       text: composed,
       spans: spans,
-      content_hash: VisualRow.compute_hash(composed, spans)
+      content_hash: Row.compute_hash(composed, spans)
     }
   end
 
@@ -275,12 +290,12 @@ defmodule MingaEditor.SemanticWindow.Builder do
     {composed, spans} = compose_line(line_text, nil, ctx, buf_line, line_byte_offset)
     {composed, spans} = append_fold_summary(composed, spans, hidden_count, ctx)
 
-    %VisualRow{
+    %Row{
       row_type: :fold_start,
       buf_line: buf_line,
       text: composed,
       spans: spans,
-      content_hash: VisualRow.compute_hash(composed, spans)
+      content_hash: Row.compute_hash(composed, spans)
     }
   end
 
@@ -294,12 +309,12 @@ defmodule MingaEditor.SemanticWindow.Builder do
        ) do
     text = virtual_text_to_string(vt)
 
-    %VisualRow{
+    %Row{
       row_type: :virtual_line,
       buf_line: buf_line,
       text: text,
       spans: virtual_text_spans(vt),
-      content_hash: VisualRow.compute_hash(text, [])
+      content_hash: Row.compute_hash(text, [])
     }
   end
 
@@ -318,12 +333,12 @@ defmodule MingaEditor.SemanticWindow.Builder do
     text = Enum.map_join(segments, fn {t, _style} -> t end)
     spans = segments_to_spans(segments)
 
-    %VisualRow{
+    %Row{
       row_type: :block,
       buf_line: buf_line,
       text: text,
       spans: spans,
-      content_hash: VisualRow.compute_hash(text, spans)
+      content_hash: Row.compute_hash(text, spans)
     }
   end
 
@@ -338,12 +353,12 @@ defmodule MingaEditor.SemanticWindow.Builder do
     hidden = FoldRegion.hidden_count(fold)
     text = " ··· #{hidden} lines"
 
-    %VisualRow{
+    %Row{
       row_type: :fold_start,
       buf_line: buf_line,
       text: text,
       spans: [],
-      content_hash: VisualRow.compute_hash(text, [])
+      content_hash: Row.compute_hash(text, [])
     }
   end
 
@@ -485,8 +500,8 @@ defmodule MingaEditor.SemanticWindow.Builder do
   @spec adjust_cursor_col_for_shape(
           non_neg_integer(),
           non_neg_integer(),
-          SemanticWindow.cursor_shape(),
-          [VisualRow.t()]
+          RenderWindow.cursor_shape(),
+          [Row.t()]
         ) :: non_neg_integer()
   defp adjust_cursor_col_for_shape(row, col, :block, visual_rows) do
     row_width = visual_rows |> Enum.at(row) |> visual_row_width()
@@ -500,36 +515,282 @@ defmodule MingaEditor.SemanticWindow.Builder do
 
   defp adjust_cursor_col_for_shape(_row, col, _shape, _visual_rows), do: col
 
-  @spec visual_row_width(VisualRow.t() | nil) :: non_neg_integer()
+  @spec visual_row_width(Row.t() | nil) :: non_neg_integer()
   defp visual_row_width(nil), do: 0
-  defp visual_row_width(%VisualRow{text: text}), do: Unicode.display_width(text)
+  defp visual_row_width(%Row{text: text}), do: Unicode.display_width(text)
+
+  # ── Gutter ─────────────────────────────────────────────────────────────
+
+  @spec build_gutter(WindowScroll.t(), Context.t(), RenderWindow.content_kind()) ::
+          Gutter.t() | nil
+  defp build_gutter(%WindowScroll{} = scroll, %Context{} = ctx, :buffer) do
+    %WindowScroll{
+      win_id: win_id,
+      win_layout: %{content: {content_row, content_col, full_width, content_height}},
+      cursor_line: cursor_line,
+      snapshot: snapshot,
+      content_w: _content_w,
+      line_number_style: line_number_style,
+      is_active: is_active
+    } = scroll
+
+    line_count = max(snapshot.line_count, 0)
+
+    line_number_width =
+      if line_number_style == :none, do: 0, else: Viewport.gutter_width(line_count)
+
+    sign_col_width = EditorGutter.sign_column_width() + EditorGutter.fold_column_width()
+
+    %Gutter{
+      window_id: win_id,
+      content_row: content_row,
+      content_col: content_col,
+      content_height: content_height,
+      is_active: is_active,
+      content_width: full_width,
+      cursor_line: max(cursor_line, 0),
+      line_number_style: line_number_style,
+      line_number_width: line_number_width,
+      sign_col_width: sign_col_width,
+      entries: build_gutter_entries(scroll, ctx, line_count)
+    }
+  end
+
+  defp build_gutter(_scroll, _ctx, _content_kind), do: nil
+
+  @spec build_gutter_entries(WindowScroll.t(), Context.t(), non_neg_integer()) :: [
+          GutterEntry.t()
+        ]
+  defp build_gutter_entries(_scroll, _ctx, 0), do: []
+
+  defp build_gutter_entries(%WindowScroll{} = scroll, %Context{} = ctx, line_count) do
+    fold_ranges = scroll.window.fold_ranges || []
+    fold_start_lines = MapSet.new(fold_ranges, & &1.start_line)
+    fold_end_by_start = Map.new(fold_ranges, fn range -> {range.start_line, range.end_line} end)
+
+    scroll
+    |> gutter_visible_entries(line_count)
+    |> Enum.map(&resolve_gutter_entry(&1, fold_start_lines, fold_end_by_start, ctx, line_count))
+  end
+
+  @spec gutter_visible_entries(WindowScroll.t(), non_neg_integer()) :: [
+          {non_neg_integer(), term()}
+        ]
+  defp gutter_visible_entries(%WindowScroll{visible_line_map: entries}, _line_count)
+       when is_list(entries), do: entries
+
+  defp gutter_visible_entries(
+         %WindowScroll{viewport: viewport, win_layout: %{content: {_row, _col, _width, height}}},
+         _line_count
+       ) do
+    if height <= 0 do
+      []
+    else
+      Enum.map(0..(height - 1), fn row -> {viewport.top + row, :normal} end)
+    end
+  end
+
+  @spec resolve_gutter_entry(
+          {non_neg_integer(), term()},
+          MapSet.t(non_neg_integer()),
+          %{non_neg_integer() => non_neg_integer()},
+          Context.t(),
+          non_neg_integer()
+        ) :: GutterEntry.t()
+  defp resolve_gutter_entry(
+         {buf_line, row_type},
+         fold_start_lines,
+         fold_end_by_start,
+         ctx,
+         line_count
+       )
+       when buf_line < line_count do
+    sign_type = resolve_sign_type(buf_line, ctx.diagnostic_signs, ctx.git_signs)
+    display_type = resolve_display_type(row_type, fold_start_lines, buf_line)
+    fold_end_line = Map.get(fold_end_by_start, buf_line, 0xFFFF_FFFF)
+
+    case sign_type do
+      :none ->
+        resolve_annotation_entry(buf_line, display_type, fold_end_line, ctx.decorations)
+
+      _ ->
+        %GutterEntry{
+          buf_line: buf_line,
+          display_type: display_type,
+          sign_type: sign_type,
+          fold_end_line: fold_end_line
+        }
+    end
+  end
+
+  defp resolve_gutter_entry(
+         {buf_line, _row_type},
+         _fold_start_lines,
+         _fold_end_by_start,
+         _ctx,
+         _line_count
+       ) do
+    %GutterEntry{
+      buf_line: buf_line,
+      display_type: :normal,
+      sign_type: :none,
+      fold_end_line: 0xFFFF_FFFF
+    }
+  end
+
+  @spec resolve_display_type(term(), MapSet.t(non_neg_integer()), non_neg_integer()) ::
+          GutterEntry.display_type()
+  defp resolve_display_type({:fold_start, _hidden}, _fold_start_lines, _buf_line), do: :fold_start
+
+  defp resolve_display_type({:decoration_fold, _fold}, _fold_start_lines, _buf_line),
+    do: :fold_start
+
+  defp resolve_display_type(:normal, fold_start_lines, buf_line) do
+    if MapSet.member?(fold_start_lines, buf_line), do: :fold_open, else: :normal
+  end
+
+  defp resolve_display_type(_row_type, _fold_start_lines, _buf_line), do: :normal
+
+  @spec resolve_annotation_entry(
+          non_neg_integer(),
+          GutterEntry.display_type(),
+          non_neg_integer(),
+          Decorations.t()
+        ) :: GutterEntry.t()
+  defp resolve_annotation_entry(
+         buf_line,
+         display_type,
+         fold_end_line,
+         %Decorations{} = decorations
+       ) do
+    decorations
+    |> Decorations.annotations_for_line(buf_line)
+    |> Enum.filter(fn ann -> ann.kind == :gutter_icon end)
+    |> annotation_gutter_entry(buf_line, display_type, fold_end_line)
+  end
+
+  @spec annotation_gutter_entry(
+          [Decorations.LineAnnotation.t()],
+          non_neg_integer(),
+          GutterEntry.display_type(),
+          non_neg_integer()
+        ) :: GutterEntry.t()
+  defp annotation_gutter_entry([], buf_line, display_type, fold_end_line) do
+    %GutterEntry{
+      buf_line: buf_line,
+      display_type: display_type,
+      sign_type: :none,
+      fold_end_line: fold_end_line
+    }
+  end
+
+  defp annotation_gutter_entry([ann | _], buf_line, display_type, fold_end_line) do
+    %GutterEntry{
+      buf_line: buf_line,
+      display_type: display_type,
+      sign_type: :annotation,
+      fold_end_line: fold_end_line,
+      sign_fg: ann.fg,
+      sign_text: String.slice(ann.text, 0, 2)
+    }
+  end
+
+  @spec resolve_sign_type(non_neg_integer(), %{non_neg_integer() => atom()}, %{
+          non_neg_integer() => atom()
+        }) :: GutterEntry.sign_type()
+  defp resolve_sign_type(buf_line, diag_signs, git_signs) do
+    case Map.get(diag_signs, buf_line) do
+      :error -> :diag_error
+      :warning -> :diag_warning
+      :info -> :diag_info
+      :hint -> :diag_hint
+      nil -> resolve_git_sign(buf_line, git_signs)
+    end
+  end
+
+  @spec resolve_git_sign(non_neg_integer(), %{non_neg_integer() => atom()}) ::
+          GutterEntry.sign_type()
+  defp resolve_git_sign(buf_line, git_signs) do
+    case Map.get(git_signs, buf_line) do
+      :added -> :git_added
+      :modified -> :git_modified
+      :deleted -> :git_deleted
+      _ -> :none
+    end
+  end
+
+  # ── Cursorline ─────────────────────────────────────────────────────────
+
+  @spec build_cursorline(non_neg_integer(), non_neg_integer(), boolean(), Context.t()) ::
+          Cursorline.t() | nil
+  defp build_cursorline(_content_row, _cursor_row, false, _ctx), do: nil
+
+  defp build_cursorline(content_row, cursor_row, true, %Context{cursorline_bg: bg})
+       when is_integer(bg), do: %Cursorline{row: content_row + cursor_row, bg_rgb: bg}
+
+  defp build_cursorline(_content_row, _cursor_row, true, %Context{}), do: Cursorline.disabled()
+
+  # ── Indent guides ──────────────────────────────────────────────────────
+
+  @spec build_indent_guides(WindowScroll.t(), Context.t(), RenderWindow.content_kind()) ::
+          IndentGuides.t()
+  defp build_indent_guides(%WindowScroll{win_id: win_id}, _ctx, content_kind)
+       when content_kind != :buffer, do: IndentGuides.empty(win_id)
+
+  defp build_indent_guides(%WindowScroll{} = scroll, %Context{} = ctx, :buffer) do
+    if indent_guides_enabled?() do
+      lines = Enum.take(scroll.lines, Viewport.content_rows(scroll.viewport))
+      {guides, levels} = IndentGuide.compute_with_levels(lines, ctx.tab_width, ctx.cursor_col)
+      indent_guides_from_guides(scroll.win_id, ctx.tab_width, guides, levels)
+    else
+      IndentGuides.empty(scroll.win_id)
+    end
+  end
+
+  @spec indent_guides_enabled?() :: boolean()
+  defp indent_guides_enabled? do
+    Config.get(:indent_guides)
+  catch
+    :exit, _ -> true
+  end
+
+  @spec indent_guides_from_guides(non_neg_integer(), pos_integer(), [IndentGuide.guide()], [
+          non_neg_integer()
+        ]) :: IndentGuides.t()
+  defp indent_guides_from_guides(win_id, tab_width, [], _levels),
+    do: %IndentGuides{
+      window_id: win_id,
+      tab_width: tab_width,
+      active_guide_col: 0xFFFF,
+      guide_cols: [],
+      line_indent_levels: []
+    }
+
+  defp indent_guides_from_guides(win_id, tab_width, guides, levels) do
+    active_guide = Enum.find(guides, fn guide -> guide.active end)
+    active_col = if active_guide, do: active_guide.col, else: 0xFFFF
+
+    %IndentGuides{
+      window_id: win_id,
+      tab_width: tab_width,
+      active_guide_col: active_col,
+      guide_cols: Enum.map(guides, & &1.col),
+      line_indent_levels: levels
+    }
+  end
 
   # ── Diagnostics ────────────────────────────────────────────────────────
 
-  @spec build_diagnostic_ranges(
-          MingaEditor.Window.t(),
-          Viewport.t(),
-          pos_integer()
-        ) :: [DiagnosticRange.t()]
-  defp build_diagnostic_ranges(window, viewport, visible_rows) do
-    buf = window.buffer
+  @spec build_diagnostic_ranges(String.t() | nil, Viewport.t(), pos_integer()) :: [
+          DiagnosticRange.t()
+        ]
+  defp build_diagnostic_ranges(nil, _viewport, _visible_rows), do: []
 
-    if is_pid(buf) do
-      case Buffer.file_path(buf) do
-        nil ->
-          []
-
-        path ->
-          uri = SyncServer.path_to_uri(path)
-          diagnostics = Diagnostics.for_uri(uri)
-          viewport_bottom = viewport.top + visible_rows
-          DiagnosticRange.from_diagnostics(diagnostics, viewport.top, viewport_bottom)
-      end
-    else
-      []
-    end
-  catch
-    :exit, _ -> []
+  defp build_diagnostic_ranges(path, viewport, visible_rows) when is_binary(path) do
+    uri = SyncServer.path_to_uri(path)
+    diagnostics = Diagnostics.for_uri(uri)
+    viewport_bottom = viewport.top + visible_rows
+    DiagnosticRange.from_diagnostics(diagnostics, viewport.top, viewport_bottom)
   end
 
   # ── Document highlights ─────────────────────────────────────────────────
@@ -538,7 +799,7 @@ defmodule MingaEditor.SemanticWindow.Builder do
           [Minga.LSP.DocumentHighlight.t()] | nil,
           non_neg_integer(),
           non_neg_integer()
-        ) :: [DocumentHighlightRange.t()]
+        ) :: [DocumentHighlight.t()]
   defp build_document_highlights(nil, _top, _bottom), do: []
   defp build_document_highlights([], _top, _bottom), do: []
 
@@ -548,7 +809,7 @@ defmodule MingaEditor.SemanticWindow.Builder do
       hl.start_line < viewport_bottom and hl.end_line >= viewport_top
     end)
     |> Enum.map(fn hl ->
-      %DocumentHighlightRange{
+      %DocumentHighlight{
         start_row: hl.start_line - viewport_top,
         start_col: hl.start_col,
         end_row: hl.end_line - viewport_top,
@@ -561,7 +822,7 @@ defmodule MingaEditor.SemanticWindow.Builder do
   # ── Line annotations ──────────────────────────────────────────────────
 
   @spec build_annotations(Decorations.t(), non_neg_integer(), non_neg_integer()) ::
-          [ResolvedAnnotation.t()]
+          [Annotation.t()]
   defp build_annotations(%Decorations{annotations: []}, _top, _bottom), do: []
 
   defp build_annotations(%Decorations{} = decorations, viewport_top, viewport_bottom) do
@@ -571,7 +832,7 @@ defmodule MingaEditor.SemanticWindow.Builder do
     end)
     |> Enum.sort_by(fn ann -> {ann.line, ann.priority} end)
     |> Enum.map(fn ann ->
-      %ResolvedAnnotation{
+      %Annotation{
         row: ann.line - viewport_top,
         kind: ann.kind,
         fg: ann.fg,
@@ -634,7 +895,7 @@ defmodule MingaEditor.SemanticWindow.Builder do
         width = Unicode.display_width(text)
 
         if width > 0 do
-          span = Span.from_face(style, col, col + width)
+          span = Span.from_face(style, col, col + width, font_id_for_face(style))
           {[span | acc], col + width}
         else
           {acc, col}
@@ -642,5 +903,22 @@ defmodule MingaEditor.SemanticWindow.Builder do
       end)
 
     Enum.reverse(spans)
+  end
+
+  @spec font_id_for_face(Minga.Core.Face.t()) :: non_neg_integer()
+  defp font_id_for_face(%Minga.Core.Face{font_family: nil}), do: 0
+
+  defp font_id_for_face(%Minga.Core.Face{font_family: family}) when is_binary(family) do
+    case MingaEditor.UI.FontRegistry.process_registry() do
+      nil ->
+        0
+
+      registry ->
+        {font_id, updated_registry, _new?} =
+          MingaEditor.UI.FontRegistry.get_or_register(registry, family)
+
+        MingaEditor.UI.FontRegistry.put_process_registry(updated_registry)
+        font_id
+    end
   end
 end

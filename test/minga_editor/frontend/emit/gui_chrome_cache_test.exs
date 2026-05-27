@@ -1,9 +1,8 @@
-defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
+defmodule MingaEditor.Frontend.Emit.AdapterGUIChromeCacheTest do
   @moduledoc """
   Tests fingerprint-based change detection in the RenderModel adapter path.
 
-  All chrome components have been migrated from the legacy `sync_swiftui_chrome`
-  path to the `RenderModel.UI.Builder` + `Adapter.GUI` path. These tests verify
+  All chrome components use the `RenderModel.UI.Builder` + `Adapter.GUI` path. These tests verify
   that the adapter correctly handles fingerprint caching and change detection.
   """
 

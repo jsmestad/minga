@@ -95,7 +95,7 @@ defmodule MingaEditor.RenderPipeline.ChromeTest do
       assert chrome.modeline_click_regions == []
     end
 
-    test "status bar data is computed for GUI (consumed by Emit.GUI 0x76 opcode)" do
+    test "status bar data is computed for GUI (consumed by 0x76 opcode)" do
       state = gui_state()
       {scrolls, cursor_info, state, layout} = run_through_content(state)
 

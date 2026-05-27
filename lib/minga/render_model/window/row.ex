@@ -1,4 +1,4 @@
-defmodule MingaEditor.SemanticWindow.VisualRow do
+defmodule Minga.RenderModel.Window.Row do
   @moduledoc """
   A single visual row in the semantic window.
 
@@ -15,7 +15,7 @@ defmodule MingaEditor.SemanticWindow.VisualRow do
   - `:wrap_continuation` — a continuation row from word wrapping
   """
 
-  alias MingaEditor.SemanticWindow.Span
+  alias Minga.RenderModel.Window.Span
 
   @enforce_keys [:row_type, :buf_line, :text, :spans]
   defstruct row_type: :normal,

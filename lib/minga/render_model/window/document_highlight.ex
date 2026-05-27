@@ -1,4 +1,4 @@
-defmodule MingaEditor.SemanticWindow.DocumentHighlightRange do
+defmodule Minga.RenderModel.Window.DocumentHighlight do
   @moduledoc """
   A document highlight range in display coordinates for the GUI protocol.
 

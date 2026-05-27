@@ -4,7 +4,7 @@ defmodule MingaEditor.StatusBar.Data do
 
   Computed once per frame from editor state and consumed by both rendering
   paths: `Chrome.TUI` feeds it to `Modeline.render/5` as cell draws;
-  `Emit.GUI` encodes it as the 0x76 structured opcode for SwiftUI.
+  the GUI emit path encodes it as the 0x76 structured opcode for SwiftUI.
 
   The two variants reflect the two kinds of focused window content:
   - `{:buffer, t:buffer_data()}` — a normal buffer window

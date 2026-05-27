@@ -148,15 +148,11 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @op_gui_status_bar Opcodes.gui_status_bar()
   @op_gui_picker Opcodes.gui_picker()
   @op_gui_agent_chat Opcodes.gui_agent_chat()
-  @op_gui_gutter_sep Opcodes.gui_gutter_sep()
-  @op_gui_cursorline Opcodes.gui_cursorline()
-  @op_gui_gutter Opcodes.gui_gutter()
   @op_gui_bottom_panel Opcodes.gui_bottom_panel()
   @op_gui_picker_preview Opcodes.gui_picker_preview()
   @op_gui_tool_manager Opcodes.gui_tool_manager()
   @op_gui_minibuffer Opcodes.gui_minibuffer()
   @op_clipboard_write Opcodes.clipboard_write()
-  @op_gui_indent_guides Opcodes.gui_indent_guides()
   @op_gui_line_spacing Opcodes.gui_line_spacing()
   @op_gui_file_tree Opcodes.gui_file_tree()
   @op_gui_file_tree_selection Opcodes.gui_file_tree_selection()
@@ -164,7 +160,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @op_gui_hover_popup Opcodes.gui_hover_popup()
   @op_gui_signature_help Opcodes.gui_signature_help()
   @op_gui_float_popup Opcodes.gui_float_popup()
-  @op_gui_split_separators Opcodes.gui_split_separators()
   @op_gui_git_status Opcodes.gui_git_status()
   @op_gui_workspaces Opcodes.gui_workspaces()
   @op_gui_board Opcodes.gui_board()
@@ -309,11 +304,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @section_selection 0x0C
   @section_workspace 0x0D
 
-  # gui_gutter sections
-  @section_gutter_window 0x01
-  @section_gutter_config 0x02
-  @section_gutter_entries 0x03
-
   # gui_picker sections
   @section_picker_header 0x01
   @section_picker_query 0x02
@@ -350,8 +340,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     :cursorline,
     :cursor_blink
   ]
-
-  @no_fold_range 0xFFFF_FFFF
 
   # ── Types ──
 
@@ -465,198 +453,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   # ═══════════════════════════════════════════════════════════════════════════
   # Encoding (BEAM → Frontend)
   # ═══════════════════════════════════════════════════════════════════════════
-
-  # ── Cursorline ──
-
-  @doc """
-  Encodes a gui_cursorline command.
-
-  Sends the cursor screen row and cursorline background color to the GUI
-  frontend so it can draw the highlight as a native Metal quad instead of
-  a full-width space fill draw.
-
-  `row` is the screen row (0-indexed). `bg_rgb` is a 24-bit RGB color value.
-  Pass `row = 0xFFFF` and `bg_rgb = 0` to indicate no cursorline (inactive
-  window or cursorline disabled).
-  """
-  @spec encode_gui_cursorline(non_neg_integer(), non_neg_integer()) :: binary()
-  def encode_gui_cursorline(row, bg_rgb)
-      when is_integer(row) and is_integer(bg_rgb) do
-    r = bg_rgb >>> 16 &&& 0xFF
-    g = bg_rgb >>> 8 &&& 0xFF
-    b = bg_rgb &&& 0xFF
-    <<@op_gui_cursorline, row::16, r::8, g::8, b::8>>
-  end
-
-  # ── Gutter ──
-
-  @typedoc "Line number display style for the GUI gutter."
-  @type line_number_style :: :hybrid | :absolute | :relative | :none
-
-  @typedoc "Sign type for the gutter sign column."
-  @type sign_type ::
-          :none
-          | :git_added
-          | :git_modified
-          | :git_deleted
-          | :diag_error
-          | :diag_warning
-          | :diag_info
-          | :diag_hint
-          | :annotation
-
-  @typedoc "Display type for a gutter row."
-  @type display_type ::
-          :normal | :fold_start | :fold_continuation | :wrap_continuation | :fold_open
-
-  @typedoc """
-  A single gutter entry for one visible line.
-
-  When `sign_type` is `:annotation`, `sign_fg` and `sign_text` carry the
-  annotation icon's color and text. For all other sign types these fields
-  are absent or ignored.
-  """
-  @type gutter_entry :: %{
-          required(:buf_line) => non_neg_integer(),
-          required(:display_type) => display_type(),
-          required(:sign_type) => sign_type(),
-          optional(:fold_end_line) => non_neg_integer(),
-          optional(:sign_fg) => non_neg_integer(),
-          optional(:sign_text) => String.t()
-        }
-
-  @typedoc "Gutter data for a single window."
-  @type gutter_data :: %{
-          window_id: non_neg_integer(),
-          content_row: non_neg_integer(),
-          content_col: non_neg_integer(),
-          content_height: non_neg_integer(),
-          is_active: boolean(),
-          content_width: non_neg_integer(),
-          cursor_line: non_neg_integer(),
-          line_number_style: line_number_style(),
-          line_number_width: non_neg_integer(),
-          sign_col_width: non_neg_integer(),
-          entries: [gutter_entry()]
-        }
-
-  @doc """
-  Encodes a gui_gutter command for one window.
-
-  One message is sent per window (not batched). Each message includes
-  the window's screen position so the GUI knows where to render.
-
-  Wire format:
-    opcode(1) + window_id(2) + content_row(2) + content_col(2) + content_height(2)
-    + is_active(1) + content_width(2) + cursor_line(4) + line_number_style(1)
-    + line_number_width(1) + sign_col_width(1) + line_count(2) + entries...
-
-  Per entry:
-    buf_line(4) + display_type(1) + sign_type(1) + fold_end_line(4)
-
-  `fold_end_line` is `0xFFFFFFFF` when the row has no fold range.
-  """
-  @spec encode_gui_gutter(gutter_data()) :: binary()
-  def encode_gui_gutter(
-        %{
-          window_id: window_id,
-          content_row: row,
-          content_col: col,
-          content_height: height,
-          is_active: active,
-          cursor_line: cursor_line,
-          line_number_style: style,
-          line_number_width: ln_width,
-          sign_col_width: sign_width,
-          entries: entries
-        } = data
-      ) do
-    content_width = Map.get(data, :content_width, 0)
-    style_byte = encode_line_number_style(style)
-    active_byte = if active, do: 1, else: 0
-    count = length(entries)
-
-    entry_binaries =
-      Enum.map(entries, fn entry ->
-        fold_end_line = Map.get(entry, :fold_end_line, @no_fold_range)
-
-        base =
-          <<entry.buf_line::32, encode_display_type(entry.display_type)::8,
-            encode_sign_type(entry.sign_type)::8, fold_end_line::32>>
-
-        case entry.sign_type do
-          :annotation ->
-            fg = Map.get(entry, :sign_fg, 0)
-            text = Map.get(entry, :sign_text, "")
-            text_len = byte_size(text)
-            fg_r = fg >>> 16 &&& 0xFF
-            fg_g = fg >>> 8 &&& 0xFF
-            fg_b = fg &&& 0xFF
-            <<base::binary, fg_r::8, fg_g::8, fg_b::8, text_len::8, text::binary>>
-
-          _ ->
-            base
-        end
-      end)
-
-    entries_payload = IO.iodata_to_binary([<<count::16>> | entry_binaries])
-
-    sections = [
-      encode_section(
-        @section_gutter_window,
-        <<window_id::16, row::16, col::16, height::16, active_byte::8, content_width::16>>
-      ),
-      encode_section(
-        @section_gutter_config,
-        <<cursor_line::32, style_byte::8, ln_width::8, sign_width::8>>
-      ),
-      encode_section(@section_gutter_entries, entries_payload)
-    ]
-
-    IO.iodata_to_binary([<<@op_gui_gutter, length(sections)::8>> | sections])
-  end
-
-  @spec encode_line_number_style(line_number_style()) :: non_neg_integer()
-  defp encode_line_number_style(:hybrid), do: 0
-  defp encode_line_number_style(:absolute), do: 1
-  defp encode_line_number_style(:relative), do: 2
-  defp encode_line_number_style(:none), do: 3
-
-  @spec encode_display_type(display_type()) :: non_neg_integer()
-  defp encode_display_type(:normal), do: 0
-  defp encode_display_type(:fold_start), do: 1
-  defp encode_display_type(:fold_continuation), do: 2
-  defp encode_display_type(:wrap_continuation), do: 3
-  defp encode_display_type(:fold_open), do: 4
-
-  @spec encode_sign_type(sign_type()) :: non_neg_integer()
-  defp encode_sign_type(:none), do: 0
-  defp encode_sign_type(:git_added), do: 1
-  defp encode_sign_type(:git_modified), do: 2
-  defp encode_sign_type(:git_deleted), do: 3
-  defp encode_sign_type(:diag_error), do: 4
-  defp encode_sign_type(:diag_warning), do: 5
-  defp encode_sign_type(:diag_info), do: 6
-  defp encode_sign_type(:diag_hint), do: 7
-  defp encode_sign_type(:annotation), do: 8
-
-  # ── Gutter separator ──
-
-  @doc """
-  Encodes a gui_gutter_separator command.
-
-  Sends the gutter column position and separator color to the GUI frontend.
-  `col` is the cell column at the right edge of the gutter (0 = no separator).
-  `color_rgb` is a 24-bit RGB color value.
-  """
-  @spec encode_gui_gutter_separator(non_neg_integer(), non_neg_integer()) :: binary()
-  def encode_gui_gutter_separator(col, color_rgb)
-      when is_integer(col) and is_integer(color_rgb) do
-    r = color_rgb >>> 16 &&& 0xFF
-    g = color_rgb >>> 8 &&& 0xFF
-    b = color_rgb &&& 0xFF
-    <<@op_gui_gutter_sep, col::16, r::8, g::8, b::8>>
-  end
 
   # ── Bottom panel ──
 
@@ -1490,58 +1286,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     payload_len = 1 + 2 + text_len
 
     <<@op_clipboard_write, payload_len::16, target_byte::8, text_len::16, text_bytes::binary>>
-  end
-
-  # ── Indent guides (forward-compatible, 0x91) ──
-
-  @typedoc "Indent guide data for one window."
-  @type indent_guide_data :: %{
-          window_id: non_neg_integer(),
-          tab_width: pos_integer(),
-          active_guide_col: non_neg_integer(),
-          guide_cols: [non_neg_integer()],
-          line_indent_levels: [non_neg_integer()]
-        }
-
-  @doc """
-  Encodes a gui_indent_guides command for one window.
-
-  Uses the forward-compatible 0x90+ format: opcode(1) + payload_length(2) + payload.
-  Payload: window_id(2) + tab_width(1) + active_guide_col(2) + guide_count(1) + guide_cols(2 each)
-           + line_count(2) + indent_levels(1 each).
-
-  `active_guide_col` of 0xFFFF means no active guide. Guide columns are
-  character-unit offsets from the content start (not screen left).
-  `line_indent_levels` gives the effective indent level per visible line so the
-  frontend can draw guide segments only in whitespace, not through text.
-  """
-  @spec encode_gui_indent_guides(indent_guide_data()) :: binary()
-  def encode_gui_indent_guides(%{
-        window_id: win_id,
-        tab_width: tab_width,
-        active_guide_col: active_col,
-        guide_cols: cols,
-        line_indent_levels: levels
-      }) do
-    guide_count = length(cols)
-    guide_bytes = for col <- cols, into: <<>>, do: <<col::16>>
-    line_count = length(levels)
-    level_bytes = for lvl <- levels, into: <<>>, do: <<min(lvl, 255)::8>>
-
-    # 2 (win_id) + 1 (tab_width) + 2 (active_col) + 1 (guide_count) + 2*guide_count + 2 (line_count) + line_count
-    payload_len = 6 + 2 * guide_count + 2 + line_count
-
-    <<@op_gui_indent_guides, payload_len::16, win_id::16, tab_width::8, active_col::16,
-      guide_count::8, guide_bytes::binary, line_count::16, level_bytes::binary>>
-  end
-
-  @doc """
-  Encodes a gui_indent_guides command with no guides (empty).
-  """
-  @spec encode_gui_indent_guides_empty(non_neg_integer()) :: binary()
-  def encode_gui_indent_guides_empty(win_id) do
-    # payload: win_id(2) + tab_width(1) + active_col(2) + guide_count(1) = 6 bytes
-    <<@op_gui_indent_guides, 6::16, win_id::16, 0::8, 0xFFFF::16, 0::8>>
   end
 
   # ── Line spacing (forward-compatible, 0x92) ──
@@ -4506,57 +4250,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   defp notification_level_byte(:error), do: 2
   defp notification_level_byte(:success), do: 3
   defp notification_level_byte(:progress), do: 4
-
-  # ── Split Separators ──
-
-  @typedoc "A vertical split separator."
-  @type vertical_separator ::
-          {col :: non_neg_integer(), start_row :: non_neg_integer(), end_row :: non_neg_integer()}
-
-  @typedoc "A horizontal split separator with filename."
-  @type horizontal_separator ::
-          {row :: non_neg_integer(), col :: non_neg_integer(), width :: non_neg_integer(),
-           filename :: String.t()}
-
-  @doc """
-  Encodes a gui_split_separators command (0x84).
-
-  Wire format:
-    opcode(1) + border_color_rgb(3) +
-    vertical_count(1) + verticals... +
-    horizontal_count(1) + horizontals...
-
-  Each vertical: col(2) + start_row(2) + end_row(2)
-  Each horizontal: row(2) + col(2) + width(2) + filename_len(2) + filename
-  """
-  @spec encode_gui_split_separators(
-          non_neg_integer(),
-          [vertical_separator()],
-          [horizontal_separator()]
-        ) :: binary()
-  def encode_gui_split_separators(border_color_rgb, verticals, horizontals) do
-    r = border_color_rgb >>> 16 &&& 0xFF
-    g = border_color_rgb >>> 8 &&& 0xFF
-    b = border_color_rgb &&& 0xFF
-
-    vert_data =
-      Enum.map(verticals, fn {col, start_row, end_row} ->
-        <<col::16, start_row::16, end_row::16>>
-      end)
-
-    horiz_data =
-      Enum.map(horizontals, fn {row, col, width, filename} ->
-        name_bytes = IO.iodata_to_binary(filename)
-        <<row::16, col::16, width::16, byte_size(name_bytes)::16, name_bytes::binary>>
-      end)
-
-    IO.iodata_to_binary([
-      <<@op_gui_split_separators, r::8, g::8, b::8, length(verticals)::8>>,
-      vert_data,
-      <<length(horizontals)::8>>,
-      horiz_data
-    ])
-  end
 
   # ── Git status panel (0x85) ──
 

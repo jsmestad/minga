@@ -15,7 +15,7 @@ defmodule MingaEditor.Renderer.Caches do
     `block_render_cache` is a within-frame cache reset after each window render.
   - **Emit** (`emit_prev_*`, `last_title`, `last_window_bg`):
     consumed by `Frontend.Emit` stage 7.
-  - **GUI chrome** (`last_gui_*`): fingerprint caches inside `Emit.GUI`.
+  - **GUI chrome** (`last_gui_*`): fingerprint caches for structured GUI payloads.
   """
 
   defstruct [

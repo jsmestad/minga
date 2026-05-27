@@ -2,25 +2,21 @@ defmodule MingaEditor.Frontend.Emit do
   @moduledoc """
   Stage 7: Emit.
 
-  Dispatches to `Emit.TUI` or `Emit.GUI` based on frontend capabilities,
+  Dispatches to the TUI or GUI emit path based on frontend capabilities,
   then handles shared concerns (viewport tracking, title, window background).
 
   TUI: converts the composed `Frame` into protocol command binaries using
   scroll region optimization when possible (see `Emit.TUI`).
 
-  GUI: filters SwiftUI-owned chrome from the frame, converts to Metal
-  cell-grid commands, then syncs structured chrome data via dedicated
-  protocol opcodes (see `Emit.GUI`).
+  GUI: emits any remaining cell-grid commands, then syncs structured render models through the core GUI adapter.
   """
 
   alias MingaEditor.DisplayList
   alias MingaEditor.DisplayList.Frame
   alias MingaEditor.RenderPipeline.Chrome
   alias MingaEditor.Frontend.Emit.Context
-  alias MingaEditor.Frontend.Emit.GUI, as: EmitGUI
   alias MingaEditor.Frontend.Emit.TUI, as: EmitTUI
   alias MingaEditor.Frontend.Protocol
-  alias MingaEditor.Frontend.Protocol.GUIWindowContent
   alias MingaEditor.Renderer.Caches
   alias MingaEditor.UI.FontRegistry
   alias Minga.Telemetry
@@ -30,7 +26,7 @@ defmodule MingaEditor.Frontend.Emit do
 
   @doc """
   Converts the frame to protocol command binaries and sends them to
-  the frontend port. Dispatches to `Emit.TUI` or `Emit.GUI` based on
+  the frontend port. Dispatches to the TUI or GUI emit path based on
   frontend capabilities.
 
   Also sends title and window background color when they change
@@ -60,24 +56,27 @@ defmodule MingaEditor.Frontend.Emit do
   # since it doesn't affect the Metal render pass.
   @spec emit_gui(Frame.t(), ctx(), Chrome.t() | nil, Caches.t()) :: Caches.t()
   defp emit_gui(frame, ctx, chrome, caches) do
-    # Frame commands WITHOUT batch_end (we append it after Metal-critical chrome)
-    frame_cmds =
-      frame
-      |> EmitGUI.filter_frame_for_gui()
-      |> DisplayList.to_commands(batch_end: false)
+    # Frame commands WITHOUT batch_end (we append it after model-driven GUI window commands)
+    frame_cmds = DisplayList.to_commands(frame, batch_end: false)
 
-    # Semantic window content (0x80 opcode)
-    window_content_cmds = build_gui_window_content_commands(frame)
+    window_models = gui_window_models(frame)
+    status_bar_data = chrome && chrome.status_bar_data
+    minibuffer_data = chrome && chrome.minibuffer_data
 
-    # Metal-critical chrome: gutter, cursorline, gutter separator
-    metal_chrome_cmds = EmitGUI.build_metal_commands(ctx)
+    {ui_model, ctx} =
+      MingaEditor.RenderModel.UI.Builder.build_ui(ctx, status_bar_data, minibuffer_data)
+
+    {window_content_cmds, adapter_gui_caches} =
+      Minga.Frontend.Adapter.GUI.encode_windows(window_models, caches.adapter_gui_caches)
+
+    {metal_ui_cmds, adapter_gui_caches} =
+      Minga.Frontend.Adapter.GUI.encode_metal_ui(ui_model, adapter_gui_caches)
+
+    caches = %{caches | adapter_gui_caches: adapter_gui_caches}
 
     # Bundle everything into one atomic port message, with batch_end last
     all_metal =
-      frame_cmds ++
-        window_content_cmds ++
-        metal_chrome_cmds ++
-        [Protocol.encode_batch_end()]
+      frame_cmds ++ window_content_cmds ++ metal_ui_cmds ++ [Protocol.encode_batch_end()]
 
     all_metal = flush_font_registration_commands() ++ all_metal
     caches = update_tracking(ctx, caches)
@@ -90,12 +89,6 @@ defmodule MingaEditor.Frontend.Emit do
       caches = send_window_bg(ctx, caches)
 
       # Core adapter: migrated UI components
-      status_bar_data = chrome && chrome.status_bar_data
-      minibuffer_data = chrome && chrome.minibuffer_data
-
-      {ui_model, ctx} =
-        MingaEditor.RenderModel.UI.Builder.build_ui(ctx, status_bar_data, minibuffer_data)
-
       {adapter_cmds, adapter_caches} =
         Minga.Frontend.Adapter.GUI.encode_ui(ui_model, caches.adapter_gui_caches)
 
@@ -199,16 +192,13 @@ defmodule MingaEditor.Frontend.Emit do
     }
   end
 
-  # ── GUI window content (0x80) ────────────────────────────────────────────
+  # ── GUI window models ───────────────────────────────────────────────────
 
-  # Builds gui_window_content commands for each buffer window that has
-  # a semantic struct attached. Returns encoded commands for bundling
-  # into the atomic Metal frame.
-  @spec build_gui_window_content_commands(Frame.t()) :: [binary()]
-  defp build_gui_window_content_commands(frame) do
-    Enum.flat_map(frame.windows, fn
-      %DisplayList.WindowFrame{semantic: nil} -> []
-      %DisplayList.WindowFrame{semantic: semantic} -> [GUIWindowContent.encode(semantic)]
+  @spec gui_window_models(Frame.t()) :: [Minga.RenderModel.Window.t()]
+  defp gui_window_models(%Frame{} = frame) do
+    Enum.flat_map(frame.windows, fn %DisplayList.WindowFrame{} = wf ->
+      [wf.window_model | wf.additional_window_models]
+      |> Enum.reject(&is_nil/1)
     end)
   end
 

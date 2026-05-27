@@ -1,4 +1,4 @@
-defmodule Minga.Test.GUIWindowContentDecoder do
+defmodule Minga.Test.GUIWindowDecoder do
   @moduledoc """
   Test-only decoder for the gui_window_content (0x80) wire format.
 

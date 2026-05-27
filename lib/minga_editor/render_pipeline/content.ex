@@ -9,6 +9,7 @@ defmodule MingaEditor.RenderPipeline.Content do
 
   alias MingaEditor.Agent.View.DashboardRenderer
   alias MingaEditor.Agent.View.PromptRenderer
+  alias MingaEditor.Agent.View.PromptRenderWindow
   alias MingaEditor.Agent.ViewContext
   alias Minga.Core.Decorations
   alias Minga.Core.Unicode
@@ -20,10 +21,11 @@ defmodule MingaEditor.RenderPipeline.Content do
   alias MingaEditor.Layout
 
   alias Minga.Core.Face
+  alias Minga.RenderModel.Window, as: RenderWindow
   alias MingaEditor.RenderPipeline.AgentChatPrefetch
   alias MingaEditor.RenderPipeline.ContentHelpers
   alias MingaEditor.RenderPipeline.Scroll.WindowScroll
-  alias MingaEditor.SemanticWindow
+  alias MingaEditor.RenderModel.Window.Builder, as: WindowModelBuilder
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.Viewport
   alias MingaEditor.Window
@@ -136,7 +138,10 @@ defmodule MingaEditor.RenderPipeline.Content do
     ctx_fp = ContentHelpers.context_fingerprint(render_ctx, is_active)
     window = Window.detect_context_change(window, ctx_fp)
 
-    # Render lines with dirty-aware loop
+    gui? = MingaEditor.Frontend.gui?(state.capabilities)
+
+    # Render lines with dirty-aware loop. GUI buffer windows build the canonical window model below
+    # instead of building throwaway DisplayList draw layers.
     line_opts = %{
       first_line: first_line,
       cursor_line: cursor_line,
@@ -155,21 +160,10 @@ defmodule MingaEditor.RenderPipeline.Content do
     }
 
     {gutter_layer, line_layer, rows_used, window} =
-      cond do
-        wrap_on and scroll.visible_line_map == nil ->
-          # Wrapping currently runs only on the plain sequential path.
-          # When a visible_line_map is present, folding/virtual-line bookkeeping
-          # takes priority so we do not count hidden display-map entries as rows.
-          wrap_opts = Map.drop(line_opts, [:visible_line_map, :fold_map])
-          {g, l, r} = ContentHelpers.render_lines_wrapped(lines, visible_rows, wrap_opts)
-          {DisplayList.draws_to_layer_sorted(g), DisplayList.draws_to_layer_sorted(l), r, window}
-
-        scroll.visible_line_map == nil ->
-          ContentHelpers.render_lines_nowrap_layers(lines, line_opts)
-
-        true ->
-          {g, l, r, window} = ContentHelpers.render_lines_nowrap(lines, line_opts)
-          {DisplayList.draws_to_layer_sorted(g), DisplayList.draws_to_layer_sorted(l), r, window}
+      if gui? do
+        {%{}, %{}, visible_rows, window}
+      else
+        render_display_layers(lines, visible_rows, line_opts, scroll, wrap_on, window)
       end
 
     # Tilde lines for empty space below content
@@ -231,23 +225,25 @@ defmodule MingaEditor.RenderPipeline.Content do
         nil
       end
 
-    # Build semantic window for GUI frontends (Phase 1 of #828).
-    # Captures the same data the draw path uses, pre-resolved for the GUI.
-    semantic =
-      if MingaEditor.Frontend.gui?(state.capabilities) do
-        SemanticWindow.Builder.build(state, scroll, render_ctx)
+    # Build the canonical window model for GUI frontends. GUI buffer windows use this model
+    # instead of DisplayList draw layers for gutter, content, cursorline, and indent guides.
+    window_model =
+      if gui? do
+        WindowModelBuilder.build(state, %{scroll | window: window}, render_ctx,
+          content_kind: :buffer
+        )
       else
         nil
       end
 
     win_frame = %WindowFrame{
       rect: {0, 0, content_width, content_height},
-      gutter: gutter_layer,
-      lines: line_layer,
-      tilde_lines: DisplayList.draws_to_layer_sorted(tilde_draws),
+      gutter: if(gui?, do: %{}, else: gutter_layer),
+      lines: if(gui?, do: %{}, else: line_layer),
+      tilde_lines: if(gui?, do: %{}, else: DisplayList.draws_to_layer_sorted(tilde_draws)),
       modeline: %{},
       cursor: buf_cursor,
-      semantic: semantic
+      window_model: window_model
     }
 
     cursor_info = buf_cursor
@@ -273,6 +269,53 @@ defmodule MingaEditor.RenderPipeline.Content do
     state = %{state | workspace: %{ws | windows: %{ws.windows | map: new_map}}}
 
     {win_frame, cursor_info, state}
+  end
+
+  @spec render_display_layers(
+          [String.t()],
+          pos_integer(),
+          map(),
+          WindowScroll.t(),
+          boolean(),
+          Window.t()
+        ) ::
+          {DisplayList.render_layer(), DisplayList.render_layer(), non_neg_integer(), Window.t()}
+  defp render_display_layers(
+         lines,
+         visible_rows,
+         line_opts,
+         %{visible_line_map: nil},
+         true,
+         window
+       ) do
+    # Wrapping currently runs only on the plain sequential path. When a visible_line_map is present,
+    # folding/virtual-line bookkeeping takes priority so we do not count hidden display-map entries as rows.
+    wrap_opts = Map.drop(line_opts, [:visible_line_map, :fold_map])
+
+    {gutter_draws, line_draws, rows_used} =
+      ContentHelpers.render_lines_wrapped(lines, visible_rows, wrap_opts)
+
+    {DisplayList.draws_to_layer_sorted(gutter_draws),
+     DisplayList.draws_to_layer_sorted(line_draws), rows_used, window}
+  end
+
+  defp render_display_layers(
+         lines,
+         _visible_rows,
+         line_opts,
+         %{visible_line_map: nil},
+         _wrap_on,
+         _window
+       ) do
+    ContentHelpers.render_lines_nowrap_layers(lines, line_opts)
+  end
+
+  defp render_display_layers(lines, _visible_rows, line_opts, _scroll, _wrap_on, _window) do
+    {gutter_draws, line_draws, rows_used, window} =
+      ContentHelpers.render_lines_nowrap(lines, line_opts)
+
+    {DisplayList.draws_to_layer_sorted(gutter_draws),
+     DisplayList.draws_to_layer_sorted(line_draws), rows_used, window}
   end
 
   @spec cursor_visual_position(map()) :: {integer(), non_neg_integer(), non_neg_integer()}
@@ -460,7 +503,8 @@ defmodule MingaEditor.RenderPipeline.Content do
         col_off: col_off,
         chat_width: chat_width,
         chat_height: chat_height,
-        height: height
+        height: height,
+        prompt_rect: prompt_rect
       )
     end
   end
@@ -480,7 +524,7 @@ defmodule MingaEditor.RenderPipeline.Content do
          ctx,
          _window,
          %AgentChatPrefetch{} = prefetch,
-         _win_layout,
+         win_layout,
          sidebar_draws,
          prompt_draws,
          opts
@@ -490,6 +534,7 @@ defmodule MingaEditor.RenderPipeline.Content do
     chat_width = Keyword.fetch!(opts, :chat_width)
     chat_height = Keyword.fetch!(opts, :chat_height)
     height = Keyword.fetch!(opts, :height)
+    prompt_rect = Keyword.fetch!(opts, :prompt_rect)
 
     %AgentChatPrefetch{
       win_id: win_id,
@@ -542,17 +587,14 @@ defmodule MingaEditor.RenderPipeline.Content do
     fold_map = window.fold_map
 
     visible_line_map =
-      case DisplayMap.compute(
-             fold_map,
-             decorations,
-             first_line,
-             visible_rows,
-             line_count,
-             content_w
-           ) do
-        nil -> nil
-        %DisplayMap{} = dm -> DisplayMap.to_visible_line_map(dm)
-      end
+      build_visible_line_map(
+        fold_map,
+        decorations,
+        first_line,
+        visible_rows,
+        line_count,
+        content_w
+      )
 
     # Detect scroll/structural invalidation (viewport_top, gutter, line count,
     # buffer version). The normal buffer path does this in the Scroll stage;
@@ -571,6 +613,8 @@ defmodule MingaEditor.RenderPipeline.Content do
     # Detect context changes to invalidate dirty-line cache
     ctx_fp = ContentHelpers.context_fingerprint(render_ctx, is_active)
     window = Window.detect_context_change(window, ctx_fp)
+
+    gui? = MingaEditor.Frontend.gui?(state.capabilities)
 
     # Render lines
     ln_style = if line_number_style == :none, do: :none, else: :absolute
@@ -593,7 +637,7 @@ defmodule MingaEditor.RenderPipeline.Content do
     }
 
     {gutter_draws, line_draws, rendered_rows, window} =
-      ContentHelpers.render_lines_nowrap(snapshot.lines, opts)
+      render_agent_lines(gui?, snapshot.lines, visible_rows, opts)
 
     # Snapshot render state so future frames can detect changes.
     # Without this, dirty_lines stays empty and content is never re-rendered.
@@ -621,40 +665,194 @@ defmodule MingaEditor.RenderPipeline.Content do
     tilde_draws = build_tilde_draws(rendered_rows, chat_height, row_off, col_off)
 
     buf_cursor =
-      if is_active do
-        adjusted_cc =
-          Decorations.buf_col_to_display_col(render_ctx.decorations, cursor_line, cursor_col)
-
-        cr = cursor_line - viewport.top + row_off
-        cc = gutter_w + adjusted_cc - viewport.left + col_off
-        Cursor.new(cr, cc, Minga.Editing.cursor_shape(state))
-      else
-        nil
-      end
+      build_agent_buffer_cursor(is_active, %{
+        decorations: render_ctx.decorations,
+        cursor_line: cursor_line,
+        cursor_col: cursor_col,
+        viewport: viewport,
+        row_off: row_off,
+        col_off: col_off,
+        gutter_w: gutter_w,
+        state: state
+      })
 
     # Prompt cursor (overrides buffer cursor when input is focused).
     # cursor_position_in_rect needs the full content rect to compute
     # the prompt position correctly (it subdivides internally).
     full_rect = {row_off, col_off, chat_width, height}
+    final_cursor = prefer_prompt_cursor(prompt_cursor(ctx, full_rect), buf_cursor)
 
-    prompt_cursor =
-      case PromptRenderer.cursor_position_in_rect(ctx, full_rect) do
-        {row, col} -> Cursor.new(row, col, :beam)
-        nil -> nil
-      end
+    chat_win_layout = %{win_layout | content: {row_off, col_off, chat_width, chat_height}}
 
-    final_cursor = if prompt_cursor != nil, do: prompt_cursor, else: buf_cursor
-
-    frame = %WindowFrame{
-      rect: {0, 0, chat_width, height},
-      gutter: DisplayList.draws_to_layer(gutter_draws),
-      lines: DisplayList.draws_to_layer(line_draws ++ prompt_draws ++ sidebar_draws),
-      tilde_lines: DisplayList.draws_to_layer(tilde_draws),
-      modeline: %{},
-      cursor: final_cursor
+    model_scroll = %WindowScroll{
+      win_id: win_id,
+      window: window,
+      win_layout: chat_win_layout,
+      is_active: is_active,
+      viewport: viewport,
+      cursor_line: cursor_line,
+      cursor_byte_col: cursor_byte_col,
+      cursor_col: cursor_col,
+      first_line: first_line,
+      lines: snapshot.lines,
+      snapshot: snapshot,
+      gutter_w: gutter_w,
+      content_w: content_w,
+      has_sign_column: true,
+      preview_matches: [],
+      line_number_style: line_number_style,
+      wrap_on: true,
+      buf_version: buf_version,
+      width_oracle: MingaEditor.Frontend.Capabilities.width_oracle(state.capabilities),
+      git_signs: %{},
+      visible_line_map: visible_line_map
     }
 
+    {window_model, additional_window_models} =
+      agent_window_models(gui?, state, model_scroll, render_ctx, ctx, chat_width, prompt_rect)
+
+    frame =
+      agent_window_frame(gui?, %{
+        chat_width: chat_width,
+        height: height,
+        gutter_draws: gutter_draws,
+        line_draws: line_draws,
+        prompt_draws: prompt_draws,
+        sidebar_draws: sidebar_draws,
+        tilde_draws: tilde_draws,
+        cursor: final_cursor,
+        window_model: window_model,
+        additional_window_models: additional_window_models
+      })
+
     {frame, final_cursor, state}
+  end
+
+  @spec build_visible_line_map(
+          FoldMap.t(),
+          Decorations.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: [{non_neg_integer(), term()}] | nil
+  defp build_visible_line_map(
+         fold_map,
+         decorations,
+         first_line,
+         visible_rows,
+         line_count,
+         content_w
+       ) do
+    case DisplayMap.compute(
+           fold_map,
+           decorations,
+           first_line,
+           visible_rows,
+           line_count,
+           content_w
+         ) do
+      nil -> nil
+      %DisplayMap{} = dm -> DisplayMap.to_visible_line_map(dm)
+    end
+  end
+
+  @spec render_agent_lines(boolean(), [String.t()], non_neg_integer(), map()) ::
+          {[DisplayList.draw()], [DisplayList.draw()], non_neg_integer(), Window.t()}
+  defp render_agent_lines(true, _lines, visible_rows, %{window: window}) do
+    {[], [], visible_rows, window}
+  end
+
+  defp render_agent_lines(false, lines, _visible_rows, opts) do
+    ContentHelpers.render_lines_nowrap(lines, opts)
+  end
+
+  @spec build_agent_buffer_cursor(boolean(), map()) :: Cursor.t() | nil
+  defp build_agent_buffer_cursor(false, _params), do: nil
+
+  defp build_agent_buffer_cursor(true, params) do
+    adjusted_cc =
+      Decorations.buf_col_to_display_col(
+        params.decorations,
+        params.cursor_line,
+        params.cursor_col
+      )
+
+    cr = params.cursor_line - params.viewport.top + params.row_off
+    cc = params.gutter_w + adjusted_cc - params.viewport.left + params.col_off
+    Cursor.new(cr, cc, Minga.Editing.cursor_shape(params.state))
+  end
+
+  @spec prompt_cursor(
+          ViewContext.t(),
+          {non_neg_integer(), non_neg_integer(), pos_integer(), pos_integer()}
+        ) :: Cursor.t() | nil
+  defp prompt_cursor(ctx, full_rect) do
+    case PromptRenderer.cursor_position_in_rect(ctx, full_rect) do
+      {row, col} -> Cursor.new(row, col, :beam)
+      nil -> nil
+    end
+  end
+
+  @spec prefer_prompt_cursor(Cursor.t() | nil, Cursor.t() | nil) :: Cursor.t() | nil
+  defp prefer_prompt_cursor(nil, buf_cursor), do: buf_cursor
+  defp prefer_prompt_cursor(%Cursor{} = prompt_cursor, _buf_cursor), do: prompt_cursor
+
+  @spec agent_window_models(
+          boolean(),
+          state(),
+          WindowScroll.t(),
+          MingaEditor.Renderer.Context.t(),
+          ViewContext.t(),
+          pos_integer(),
+          {non_neg_integer(), non_neg_integer(), pos_integer(), pos_integer()}
+        ) :: {RenderWindow.t() | nil, [RenderWindow.t()]}
+  defp agent_window_models(
+         false,
+         _state,
+         _model_scroll,
+         _render_ctx,
+         _ctx,
+         _chat_width,
+         _prompt_rect
+       ),
+       do: {nil, []}
+
+  defp agent_window_models(true, state, model_scroll, render_ctx, ctx, chat_width, prompt_rect) do
+    window_model =
+      WindowModelBuilder.build(state, model_scroll, render_ctx, content_kind: :agent_chat)
+
+    inner_width = PromptRenderer.input_inner_width(PromptRenderer.input_box_width(chat_width))
+    prompt_window_model = PromptRenderWindow.build(ctx, inner_width, prompt_rect)
+    {window_model, [prompt_window_model]}
+  end
+
+  @spec agent_window_frame(boolean(), map()) :: WindowFrame.t()
+  defp agent_window_frame(true, params) do
+    %WindowFrame{
+      rect: {0, 0, params.chat_width, params.height},
+      gutter: %{},
+      lines: DisplayList.draws_to_layer(params.sidebar_draws),
+      tilde_lines: %{},
+      modeline: %{},
+      cursor: params.cursor,
+      window_model: params.window_model,
+      additional_window_models: params.additional_window_models
+    }
+  end
+
+  defp agent_window_frame(false, params) do
+    %WindowFrame{
+      rect: {0, 0, params.chat_width, params.height},
+      gutter: DisplayList.draws_to_layer(params.gutter_draws),
+      lines:
+        DisplayList.draws_to_layer(
+          params.line_draws ++ params.prompt_draws ++ params.sidebar_draws
+        ),
+      tilde_lines: DisplayList.draws_to_layer(params.tilde_draws),
+      modeline: %{},
+      cursor: params.cursor
+    }
   end
 
   # Renders help overlay content as display list draws in the chat area.

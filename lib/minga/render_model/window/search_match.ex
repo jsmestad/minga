@@ -1,4 +1,4 @@
-defmodule MingaEditor.SemanticWindow.SearchMatch do
+defmodule Minga.RenderModel.Window.SearchMatch do
   @moduledoc """
   A search match in display coordinates.
 

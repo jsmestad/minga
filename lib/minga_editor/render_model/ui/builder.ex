@@ -16,6 +16,7 @@ defmodule MingaEditor.RenderModel.UI.Builder do
   alias MingaEditor.RenderModel.UI.FileTreeBuilder
   alias MingaEditor.RenderModel.UI.FloatPopupBuilder
   alias MingaEditor.RenderModel.UI.GitStatusBuilder
+  alias MingaEditor.RenderModel.UI.GutterSeparatorBuilder
   alias MingaEditor.RenderModel.UI.HoverPopupBuilder
   alias MingaEditor.RenderModel.UI.MinibufferBuilder
   alias MingaEditor.RenderModel.UI.NotificationsBuilder
@@ -24,6 +25,7 @@ defmodule MingaEditor.RenderModel.UI.Builder do
   alias MingaEditor.RenderModel.UI.SearchStateBuilder
   alias MingaEditor.RenderModel.UI.SidebarsBuilder
   alias MingaEditor.RenderModel.UI.SignatureHelpBuilder
+  alias MingaEditor.RenderModel.UI.SplitSeparatorsBuilder
   alias MingaEditor.RenderModel.UI.StatusBarBuilder
   alias MingaEditor.RenderModel.UI.TabBarBuilder
   alias MingaEditor.RenderModel.UI.ThemeBuilder
@@ -77,7 +79,9 @@ defmodule MingaEditor.RenderModel.UI.Builder do
       extension_overlay: ExtensionOverlayBuilder.build(ctx),
       extension_panel: ExtensionPanelBuilder.build(),
       hover_popup: HoverPopupBuilder.build(ctx),
-      float_popup: FloatPopupBuilder.build(ctx)
+      float_popup: FloatPopupBuilder.build(ctx),
+      gutter_separator: GutterSeparatorBuilder.build(ctx),
+      split_separators: SplitSeparatorsBuilder.build(ctx)
     }
 
     {ui, ctx}

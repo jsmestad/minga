@@ -5,6 +5,9 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
   """
   use ExUnit.Case, async: true
 
+  alias Minga.Frontend.Adapter.GUI.WindowEncoder
+  alias Minga.RenderModel.Window
+  alias Minga.RenderModel.Window.IndentGuides
   alias Minga.SystemObserver.ProcessSnapshot
   alias Minga.SystemObserver.TreeNode
   alias MingaEditor.State.Tab
@@ -538,7 +541,7 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
     end
   end
 
-  describe "encode_gui_indent_guides/1" do
+  describe "WindowEncoder indent guide encoding" do
     test "encodes guides with correct opcode, window_id, and columns" do
       data = %{
         window_id: 1,
@@ -548,7 +551,7 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
         line_indent_levels: [1, 2, 2, 1, 0]
       }
 
-      binary = ProtocolGUI.encode_gui_indent_guides(data)
+      binary = encode_indent_guides(data)
 
       <<0x91, payload_len::16, win_id::16, tw::8, active_col::16, count::8, rest::binary>> =
         binary
@@ -568,7 +571,14 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
     end
 
     test "encodes empty guide list" do
-      binary = ProtocolGUI.encode_gui_indent_guides_empty(3)
+      binary =
+        encode_indent_guides(%{
+          window_id: 3,
+          tab_width: 0,
+          active_guide_col: 0xFFFF,
+          guide_cols: [],
+          line_indent_levels: []
+        })
 
       <<0x91, payload_len::16, win_id::16, _tw::8, active_col::16, count::8>> = binary
 
@@ -589,7 +599,7 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
         line_indent_levels: [2, 4, 4, 3, 1]
       }
 
-      binary = ProtocolGUI.encode_gui_indent_guides(data)
+      binary = encode_indent_guides(data)
 
       <<0x91, _len::16, _win::16, _tw::8, _active::16, count::8, rest::binary>> = binary
 
@@ -614,7 +624,7 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
         line_indent_levels: [300, 0, 256, 255]
       }
 
-      binary = ProtocolGUI.encode_gui_indent_guides(data)
+      binary = encode_indent_guides(data)
 
       <<0x91, _len::16, _win::16, _tw::8, _active::16, _count::8, _col::16, line_count::16,
         levels::binary>> = binary
@@ -1151,6 +1161,27 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
 
   defp status_sections(<<0x76, count::8, rest::binary>>) do
     parse_status_sections(rest, count, %{})
+  end
+
+  defp encode_indent_guides(data) do
+    model = %Window{
+      window_id: data.window_id,
+      content_kind: :buffer,
+      rect: {0, 0, 1, 1},
+      rows: [],
+      cursor_row: 0,
+      cursor_col: 0,
+      cursor_shape: :block,
+      indent_guides: %IndentGuides{
+        window_id: data.window_id,
+        tab_width: data.tab_width,
+        active_guide_col: data.active_guide_col,
+        guide_cols: data.guide_cols,
+        line_indent_levels: data.line_indent_levels
+      }
+    }
+
+    Enum.find(WindowEncoder.encode(model), fn <<opcode::8, _rest::binary>> -> opcode == 0x91 end)
   end
 
   defp take_modeline_segment(

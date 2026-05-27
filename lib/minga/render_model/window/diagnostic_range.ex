@@ -1,4 +1,4 @@
-defmodule MingaEditor.SemanticWindow.DiagnosticRange do
+defmodule Minga.RenderModel.Window.DiagnosticRange do
   @moduledoc """
   A diagnostic inline range in display coordinates.
 

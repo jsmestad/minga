@@ -8,7 +8,7 @@ defmodule MingaEditor.Renderer.Composition do
   3. Text splitting at display column boundaries
 
   These functions are used by both `Renderer.Line` (draw-based path) and
-  `SemanticWindow.Builder` (semantic 0x80 path) to ensure both paths
+  the window render-model builder (semantic 0x80 path) to ensure both paths
   produce identical composed output for the same input.
 
   All functions are pure calculations with no rendering or viewport
@@ -87,7 +87,7 @@ defmodule MingaEditor.Renderer.Composition do
   merge_highlights → apply_conceals → inject_inline_virtual_text.
 
   Returns the final composed segments suitable for conversion to either
-  draw commands (Line.ex) or text + spans (SemanticWindow.Builder).
+  draw commands (Line.ex) or text + spans (window render-model builder).
   """
   @spec compose_segments(
           [styled_segment()],
@@ -132,16 +132,16 @@ defmodule MingaEditor.Renderer.Composition do
   from each segment's Face, with display column coordinates.
   """
   @spec segments_to_text_and_spans([styled_segment()]) ::
-          {String.t(), [MingaEditor.SemanticWindow.Span.t()]}
+          {String.t(), [Minga.RenderModel.Window.Span.t()]}
   def segments_to_text_and_spans(segments) do
-    alias MingaEditor.SemanticWindow.Span
+    alias Minga.RenderModel.Window.Span
 
     {spans_rev, text_parts, _col} =
       Enum.reduce(segments, {[], [], 0}, fn {text, face}, {spans, parts, col} ->
         width = Unicode.display_width(text)
 
         if width > 0 do
-          span = Span.from_face(face, col, col + width)
+          span = Span.from_face(face, col, col + width, font_id_for_face(face))
           {[span | spans], [text | parts], col + width}
         else
           {spans, parts, col}
@@ -149,6 +149,23 @@ defmodule MingaEditor.Renderer.Composition do
       end)
 
     {text_parts |> Enum.reverse() |> Enum.join(), Enum.reverse(spans_rev)}
+  end
+
+  @spec font_id_for_face(Face.t()) :: non_neg_integer()
+  defp font_id_for_face(%Face{font_family: nil}), do: 0
+
+  defp font_id_for_face(%Face{font_family: family}) when is_binary(family) do
+    case MingaEditor.UI.FontRegistry.process_registry() do
+      nil ->
+        0
+
+      registry ->
+        {font_id, updated_registry, _new?} =
+          MingaEditor.UI.FontRegistry.get_or_register(registry, family)
+
+        MingaEditor.UI.FontRegistry.put_process_registry(updated_registry)
+        font_id
+    end
   end
 
   # ── Invisible character substitution (private) ─────────────────────────
