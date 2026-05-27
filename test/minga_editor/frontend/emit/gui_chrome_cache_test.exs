@@ -152,47 +152,29 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
       assert opcode_cmds(cmds, 0x85) == []
     end
 
-    test "closed chrome surfaces cache their not-visible state and return updated context" do
-      {ctx, caches, _cmds} = sync_chrome(gui_state())
+    test "closed chrome surfaces are handled by adapter (no longer emitted through sync_swiftui_chrome)" do
+      # Picker, agent chat, minibuffer, and bottom panel are now handled by
+      # the RenderModel adapter path. sync_swiftui_chrome no longer produces
+      # these opcodes.
+      {ctx, _caches, cmds} = sync_chrome(gui_state())
 
-      assert caches.last_gui_picker_fp == :closed
-      assert caches.last_gui_agent_chat_fp == :not_visible
       assert is_map(ctx)
-      assert Map.has_key?(ctx, :message_store)
+      assert opcode_count(cmds, 0x77) == 0, "picker should not appear (handled by adapter)"
+      assert opcode_count(cmds, 0x78) == 0, "agent chat should not appear (handled by adapter)"
+      assert opcode_count(cmds, 0x7F) == 0, "minibuffer should not appear (handled by adapter)"
     end
 
-    test "picker cache fingerprints open picker content" do
+    test "picker is no longer emitted by sync_swiftui_chrome (handled by adapter)" do
       state = gui_state()
       state_a = open_test_picker(state, "a.txt")
-      state_b = open_test_picker(state, "b.txt")
 
-      {_ctx, caches, _cmds} = sync_chrome(state_a)
-      refute caches.last_gui_picker_fp in [:closed, nil]
+      {_ctx, _caches, cmds} = sync_chrome(state_a)
 
-      {_ctx, caches2, _cmds} = sync_chrome(state_b, caches)
-      refute caches2.last_gui_picker_fp == caches.last_gui_picker_fp
+      assert opcode_count(cmds, 0x77) == 0,
+             "picker command should not appear (handled by adapter)"
     end
 
-    test "picker cache fingerprints mode prefix changes" do
-      state = gui_state()
-      state_a = open_test_picker(state, "same.txt")
-      state_b = open_test_picker(state, "same.txt", ">")
-
-      {_ctx, caches, _cmds} = sync_chrome(state_a)
-      {_ctx, caches2, _cmds} = sync_chrome(state_b, caches)
-
-      refute caches2.last_gui_picker_fp == caches.last_gui_picker_fp
-    end
-
-    test "picker sync emits source-provided GUI preview content" do
-      state = open_test_picker_with_source(gui_state(), "preview", PreviewSource)
-
-      {_ctx, _caches, cmds} = sync_chrome(state)
-
-      assert Enum.any?(cmds, &String.contains?(&1, "source preview"))
-    end
-
-    test "minibuffer cache changes when encoded candidate metadata changes" do
+    test "minibuffer is no longer emitted by sync_swiftui_chrome (handled by adapter)" do
       state = gui_state()
 
       data_a =
@@ -206,61 +188,33 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
           }
         ])
 
-      {_ctx, caches, _cmds} = sync_chrome(state, %Caches{}, data_a)
+      {_ctx, _caches, cmds} = sync_chrome(state, %Caches{}, data_a)
 
-      data_b =
-        minibuffer_data([
-          %{
-            label: "edit",
-            description: "Open file",
-            match_score: 80,
-            annotation: "buffer",
-            match_positions: [1],
-            total_candidates: 2
-          }
-        ])
-
-      {_ctx, caches2, cmds} = sync_chrome(state, caches, data_b)
-
-      assert has_opcode?(cmds, 0x7F)
-      refute caches2.last_gui_minibuffer == caches.last_gui_minibuffer
+      assert opcode_count(cmds, 0x7F) == 0,
+             "minibuffer command should not appear (handled by adapter)"
     end
 
-    test "agent chat fingerprints include encoded content" do
-      # Workspace fingerprints are now handled by the RenderModel adapter path.
+    test "agent chat is no longer emitted by sync_swiftui_chrome (handled by adapter)" do
+      # Agent chat is now handled by the RenderModel adapter path.
+      # sync_swiftui_chrome should NOT produce agent chat commands (0x78).
       chat_state = agent_chat_state()
-      {_ctx, chat_caches, _cmds} = sync_chrome(chat_state)
-      Minga.Buffer.move_to(chat_state.workspace.agent_ui.panel.prompt_buffer, {0, 1})
-      {_ctx, chat_caches2, _cmds} = sync_chrome(chat_state, chat_caches)
-      refute chat_caches2.last_gui_agent_chat_fp == chat_caches.last_gui_agent_chat_fp
+      {_ctx, _caches, cmds} = sync_chrome(chat_state)
 
-      thinking_state = put_in(chat_state.workspace.agent_ui.panel.thinking_level, "high")
-      {_ctx, chat_caches3, cmds} = sync_chrome(thinking_state, chat_caches2)
-
-      assert [chat_cmd] = opcode_cmds(cmds, 0x78)
-      assert <<0x78, _section_count::8, sections::binary>> = chat_cmd
-
-      assert <<level_len::16, level::binary-size(level_len)>> =
-               gui_agent_chat_section!(sections, 0x08)
-
-      assert level == "high"
-      refute chat_caches3.last_gui_agent_chat_fp == chat_caches2.last_gui_agent_chat_fp
+      assert opcode_count(cmds, 0x78) == 0,
+             "agent chat command should not appear (handled by adapter)"
     end
 
-    test "switching from Board to Traditional hides Board companion chrome once" do
+    test "switching from Board to Traditional no longer emits change summary through sync_swiftui_chrome" do
+      # Change summary (0x89) is now handled by the RenderModel adapter path.
       board_state = %{gui_state() | shell: BoardPayloadShell}
 
       {_ctx, caches, board_cmds} = sync_chrome(board_state)
-      # 0x87 (board) and 0x88 (agent context) are now handled by the RenderModel adapter path
       assert [] = opcode_cmds(board_cmds, 0x87)
+      assert [] = opcode_cmds(board_cmds, 0x89)
 
-      {_ctx, caches, dismiss_cmds} = sync_chrome(gui_state(), caches)
-      # 0x87 (board) and 0x88 (agent context) are now handled by the RenderModel adapter path
-      assert [<<0x89, 0::8, _::binary>>] = opcode_cmds(dismiss_cmds, 0x89)
-
-      {_ctx, _caches, repeated_cmds} = sync_chrome(gui_state(), caches)
-      # 0x87 (board) and 0x88 (agent context) are now handled by the RenderModel adapter path
-      assert [] = opcode_cmds(repeated_cmds, 0x89)
+      {_ctx, _caches, dismiss_cmds} = sync_chrome(gui_state(), caches)
+      assert [] = opcode_cmds(dismiss_cmds, 0x89),
+             "change summary should not appear (handled by adapter)"
     end
 
     test "switching from Board to Traditional emits one Board dismiss payload via adapter" do
@@ -343,32 +297,16 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
     end
   end
 
-  defp has_opcode?(cmds, opcode), do: Enum.any?(cmds, &opcode?(&1, opcode))
   defp opcode_count(cmds, opcode), do: cmds |> opcode_cmds(opcode) |> length()
   defp opcode_cmds(cmds, opcode), do: Enum.filter(cmds, &opcode?(&1, opcode))
   defp opcode?(<<opcode, _::binary>>, opcode), do: true
   defp opcode?(_, _opcode), do: false
 
-  defp gui_agent_chat_section!(sections, target_id),
-    do: do_gui_agent_chat_section!(sections, target_id)
-
-  defp do_gui_agent_chat_section!(
-         <<target_id::8, len::16, payload::binary-size(len), _rest::binary>>,
-         target_id
-       ),
-       do: payload
-
-  defp do_gui_agent_chat_section!(
-         <<_id::8, len::16, _payload::binary-size(len), rest::binary>>,
-         target_id
-       ),
-       do: do_gui_agent_chat_section!(rest, target_id)
-
-  defp open_test_picker(state, label, mode_prefix \\ "") do
-    open_test_picker_with_source(state, label, nil, mode_prefix)
+  defp open_test_picker(state, label, _mode_prefix \\ "") do
+    open_test_picker_with_source(state, label, nil, "")
   end
 
-  defp open_test_picker_with_source(state, label, source, mode_prefix \\ "") do
+  defp open_test_picker_with_source(state, label, source, mode_prefix) do
     item = %MingaEditor.UI.Picker.Item{id: "same-id", label: label}
     picker = MingaEditor.UI.Picker.new([item], title: "Test")
 
