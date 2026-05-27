@@ -1,0 +1,60 @@
+defmodule Minga.Frontend.Adapter.GUI.Caches do
+  @moduledoc false
+
+  @type t :: %__MODULE__{
+          last_theme_fp: integer() | nil,
+          last_breadcrumb_fp: integer() | nil,
+          last_which_key_fp: integer() | nil,
+          last_notifications_fp: integer() | nil,
+          last_search_state_fp: integer() | nil,
+          last_git_status_fp: integer() | nil,
+          last_agent_context_fp: integer() | nil,
+          last_observatory_fp: integer() | :hidden | nil,
+          last_board_fp: integer() | :dismissed | nil,
+          last_tab_bar_fp: integer() | :suppressed | nil,
+          last_workspaces_fp: integer() | :suppressed | nil,
+          last_sidebars_fp: integer() | nil,
+          last_file_tree_fp: Minga.RenderModel.UI.FileTree.fingerprint() | nil,
+          last_picker_fp: integer() | :closed | nil,
+          last_minibuffer_fp: term(),
+          last_completion_fp: integer() | nil,
+          last_signature_help_fp: integer() | nil,
+          last_agent_chat_fp: integer() | :not_visible | nil,
+          last_bottom_panel_fp: integer() | nil,
+          last_change_summary_fp: integer() | :hidden | nil,
+          last_edit_timeline_fp: integer() | :hidden | nil,
+          last_extension_overlay_fp: integer() | nil,
+          last_extension_panel_fp: integer() | nil,
+          last_hover_popup_fp: integer() | nil,
+          last_float_popup_fp: integer() | nil
+        }
+
+  defstruct last_theme_fp: nil,
+            last_breadcrumb_fp: nil,
+            last_which_key_fp: nil,
+            last_notifications_fp: nil,
+            last_search_state_fp: nil,
+            last_git_status_fp: nil,
+            last_agent_context_fp: nil,
+            last_observatory_fp: nil,
+            last_board_fp: nil,
+            last_tab_bar_fp: nil,
+            last_workspaces_fp: nil,
+            last_sidebars_fp: nil,
+            last_file_tree_fp: nil,
+            last_picker_fp: nil,
+            last_minibuffer_fp: nil,
+            last_completion_fp: nil,
+            last_signature_help_fp: nil,
+            last_agent_chat_fp: nil,
+            last_bottom_panel_fp: nil,
+            last_change_summary_fp: nil,
+            last_edit_timeline_fp: nil,
+            last_extension_overlay_fp: nil,
+            last_extension_panel_fp: nil,
+            last_hover_popup_fp: nil,
+            last_float_popup_fp: nil
+
+  @spec new() :: t()
+  def new, do: %__MODULE__{}
+end

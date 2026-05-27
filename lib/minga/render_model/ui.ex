@@ -1,0 +1,61 @@
+defmodule Minga.RenderModel.UI do
+  @moduledoc false
+
+  @type t :: %__MODULE__{
+          theme: term(),
+          breadcrumb: term(),
+          which_key: term(),
+          notifications: term(),
+          search_state: term(),
+          git_status: term(),
+          agent_context: term(),
+          status_bar: term(),
+          observatory: term(),
+          board: term(),
+          tab_bar: term(),
+          workspaces: term(),
+          sidebars: term(),
+          file_tree: term(),
+          picker: term(),
+          minibuffer: term(),
+          completion: term(),
+          signature_help: term(),
+          agent_chat: term(),
+          bottom_panel: term(),
+          change_summary: term(),
+          edit_timeline: term(),
+          extension_overlay: term(),
+          extension_panel: term(),
+          hover_popup: term(),
+          float_popup: term()
+        }
+
+  defstruct [
+    :theme,
+    :breadcrumb,
+    :which_key,
+    :notifications,
+    :search_state,
+    :git_status,
+    :agent_context,
+    :status_bar,
+    :observatory,
+    :board,
+    :tab_bar,
+    :workspaces,
+    :sidebars,
+    :file_tree,
+    :picker,
+    :minibuffer,
+    :completion,
+    :signature_help,
+    :agent_chat,
+    :bottom_panel,
+    :change_summary,
+    :edit_timeline,
+    :extension_overlay,
+    :extension_panel,
+    :hover_popup,
+    :float_popup
+  ]
+end

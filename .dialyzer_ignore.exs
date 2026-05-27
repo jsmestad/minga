@@ -1,26 +1,5 @@
 # Dialyzer warnings to ignore.
-#
-# All 4 are opaque MapSet warnings from Board.State containing
-# tool_declined: MapSet.new() as a struct default. Dialyzer considers
-# constructing or passing a struct with an opaque field as an opaque
-# violation. This is a known limitation; the code is correct.
 [
-  # Board.State.new/0 returns a struct containing MapSet.new()
-  {"lib/minga_editor/shell/board/state.ex", :contract_with_opaque},
-  # Board.Persistence.restore_state/1 returns Board.State with MapSet default
-  {"lib/minga_editor/shell/board/persistence.ex", :contract_with_opaque},
-  # Board.create_card/2 receives Board.State with opaque MapSet field
-  {"lib/minga_editor/shell/board.ex", :call_without_opaque},
-  # emit/gui.ex constructs Board.State to encode a "dismissed" board message
-  {"lib/minga_editor/frontend/emit/gui.ex", :call_without_opaque},
-  # emit/gui.ex has dialyzer false positives on pattern match (tabs list handling, build_you_card_tab_bar catch-all)
-  {"lib/minga_editor/frontend/emit/gui.ex", :pattern_match},
-  {"lib/minga_editor/frontend/emit/gui.ex", :pattern_match_cov},
-  # build_gutter_entries return type narrowing after emit decoupling
-  {"lib/minga_editor/frontend/emit/gui.ex", :invalid_contract},
-  # Invalidation.full_redraw/1 constructs a struct literal with
-  # chrome_regions: MapSet.new(); same opaque-MapSet limitation as Board.State.
-  {"lib/minga_editor/render_pipeline/invalidation.ex", :contract_with_opaque},
   # llm_db 2026.4.8 / req_llm 1.11.0: Dialyzer can't resolve LLMDB.models/0 or
   # LLMDB.Model.t/0 across dep boundaries (persistent_term-backed Store). Works at runtime.
   {"lib/minga_agent/cost_calculator.ex", :unknown_function},

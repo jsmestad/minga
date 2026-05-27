@@ -64,6 +64,7 @@ defmodule Minga.Credo.DependencyDirectionCheck do
     "Minga.Editing.Model",
     "Minga.Core",
     "Minga.Mode",
+    "Minga.RenderModel",
     "Minga.Command.Parser",
     "Minga.Keymap.Bindings",
     "Minga.Keymap.KeyParser",
