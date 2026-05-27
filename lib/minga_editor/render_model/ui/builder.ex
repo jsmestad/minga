@@ -8,6 +8,7 @@ defmodule MingaEditor.RenderModel.UI.Builder do
   alias MingaEditor.RenderModel.UI.BreadcrumbBuilder
   alias MingaEditor.RenderModel.UI.FileTreeBuilder
   alias MingaEditor.RenderModel.UI.GitStatusBuilder
+  alias MingaEditor.RenderModel.UI.MinibufferBuilder
   alias MingaEditor.RenderModel.UI.NotificationsBuilder
   alias MingaEditor.RenderModel.UI.ObservatoryBuilder
   alias MingaEditor.RenderModel.UI.PickerBuilder
@@ -21,8 +22,8 @@ defmodule MingaEditor.RenderModel.UI.Builder do
   alias MingaEditor.StatusBar.Data, as: StatusBarData
   alias Minga.RenderModel
 
-  @spec build_ui(Context.t(), StatusBarData.t() | nil) :: RenderModel.UI.t()
-  def build_ui(%Context{} = ctx, status_bar_data \\ nil) do
+  @spec build_ui(Context.t(), StatusBarData.t() | nil, term()) :: RenderModel.UI.t()
+  def build_ui(%Context{} = ctx, status_bar_data \\ nil, minibuffer_data \\ nil) do
     file_path = active_buffer_path(ctx)
     root = file_tree_root(ctx)
     active_buf = active_buffer_pid(ctx)
@@ -44,7 +45,8 @@ defmodule MingaEditor.RenderModel.UI.Builder do
       workspaces: WorkspacesBuilder.build(ctx),
       sidebars: SidebarsBuilder.build(ctx),
       file_tree: FileTreeBuilder.build(ctx),
-      picker: PickerBuilder.build(ctx)
+      picker: PickerBuilder.build(ctx),
+      minibuffer: MinibufferBuilder.build(minibuffer_data)
     }
   end
 

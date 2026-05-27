@@ -11,7 +11,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
 
   @spec build(Context.t()) :: PickerModel.t()
   def build(ctx) do
-    case ctx.shell_state.modal do
+    case get_in_modal(ctx) do
       {:picker,
        %{picker_ui: picker_ui = %{picker: picker, source: source, action_menu: action_menu}}}
       when picker != nil ->
@@ -23,6 +23,10 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
         build_closed()
     end
   end
+
+  @spec get_in_modal(Context.t()) :: term()
+  defp get_in_modal(%{shell_state: %{modal: modal}}), do: modal
+  defp get_in_modal(_ctx), do: nil
 
   @spec build_open(Context.t(), Picker.t(), module() | nil, term(), String.t(), atom()) ::
           PickerModel.t()

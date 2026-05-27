@@ -29,7 +29,6 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   alias MingaEditor.DisplayMap
   alias MingaEditor.FoldMap
   alias MingaEditor.Layout
-  alias MingaEditor.MinibufferData
   alias MingaEditor.Renderer.Caches
   alias MingaEditor.Renderer.Gutter
   alias MingaEditor.Shell.Traditional.Chrome.Helpers, as: ChromeHelpers
@@ -115,19 +114,18 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   a single `MingaEditor.Frontend.send_commands` call to reduce port write
   overhead.
 
-  `status_bar_data` is accepted for API compatibility but no longer used
-  here; the status bar is now handled by the RenderModel adapter path.
+  `status_bar_data` and `minibuffer_data` are accepted for API compatibility
+  but no longer used here; both are now handled by the RenderModel adapter path.
   """
-  @spec sync_swiftui_chrome(ctx(), term(), MinibufferData.t() | nil, Caches.t()) ::
+  @spec sync_swiftui_chrome(ctx(), term(), term(), Caches.t()) ::
           {ctx(), Caches.t()}
-  def sync_swiftui_chrome(ctx, _status_bar_data, minibuffer_data, caches) do
+  def sync_swiftui_chrome(ctx, _status_bar_data, _minibuffer_data, caches) do
     # Use map_reduce to thread caches through each builder function.
     # Each build_gui_* function returns {cmd | nil, updated_caches}.
     # Note: status_bar is now handled by the RenderModel adapter path.
     builders = [
       &build_gui_completion_cmd/2,
       &build_gui_agent_chat_cmd/2,
-      fn ctx, caches -> build_gui_minibuffer_cmd(ctx, minibuffer_data, caches) end,
       &build_gui_hover_popup_cmd/2,
       &build_gui_signature_help_cmd/2,
       &build_gui_float_popup_cmd/2,
@@ -218,46 +216,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
 
   # ── Status bar ──
   # ── Minibuffer ──
-
-  # Sends the gui_minibuffer opcode only when the data has changed since
-  # the last frame. Uses a content hash to avoid re-encoding and resending
-  # identical minibuffer state every render cycle.
-
-  @spec build_gui_minibuffer_cmd(ctx(), MinibufferData.t() | nil, Caches.t()) ::
-          {binary() | nil, Caches.t()}
-  defp build_gui_minibuffer_cmd(_ctx, %MinibufferData{} = data, caches) do
-    fingerprint = minibuffer_fingerprint(data)
-
-    if fingerprint != caches.last_gui_minibuffer do
-      {ProtocolGUI.encode_gui_minibuffer(data), %{caches | last_gui_minibuffer: fingerprint}}
-    else
-      {nil, caches}
-    end
-  end
-
-  defp build_gui_minibuffer_cmd(_ctx, nil, caches) do
-    if caches.last_gui_minibuffer != :hidden do
-      {ProtocolGUI.encode_gui_minibuffer(%MinibufferData{visible: false}),
-       %{caches | last_gui_minibuffer: :hidden}}
-    else
-      {nil, caches}
-    end
-  end
-
-  # Produces a lightweight fingerprint for change detection. Captures all
-  # fields that affect the rendered output without allocating a full
-  # encoded binary.
-  @spec minibuffer_fingerprint(MinibufferData.t()) :: term()
-  defp minibuffer_fingerprint(%MinibufferData{visible: false}), do: :hidden
-
-  defp minibuffer_fingerprint(%MinibufferData{} = d) do
-    {d.visible, d.mode, d.cursor_pos, d.prompt, d.input, d.context, d.selected_index,
-     length(d.candidates), d.total_candidates,
-     Enum.map(d.candidates, fn c ->
-       {c.label, c.description, c.match_score, Map.get(c, :annotation, ""),
-        Map.get(c, :match_positions, [])}
-     end)}
-  end
+  # (Both now handled by the RenderModel adapter path)
 
   # ── Agent chat ──
 

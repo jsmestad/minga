@@ -91,7 +91,8 @@ defmodule MingaEditor.Frontend.Emit do
 
       # Core adapter: migrated UI components
       status_bar_data = chrome && chrome.status_bar_data
-      ui_model = MingaEditor.RenderModel.UI.Builder.build_ui(ctx, status_bar_data)
+      minibuffer_data = chrome && chrome.minibuffer_data
+      ui_model = MingaEditor.RenderModel.UI.Builder.build_ui(ctx, status_bar_data, minibuffer_data)
 
       {adapter_cmds, adapter_caches} =
         Minga.Frontend.Adapter.GUI.encode_ui(ui_model, caches.adapter_gui_caches)
