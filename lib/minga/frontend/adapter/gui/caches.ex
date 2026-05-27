@@ -13,7 +13,8 @@ defmodule Minga.Frontend.Adapter.GUI.Caches do
           last_board_fp: integer() | :dismissed | nil,
           last_tab_bar_fp: integer() | :suppressed | nil,
           last_workspaces_fp: integer() | :suppressed | nil,
-          last_sidebars_fp: integer() | nil
+          last_sidebars_fp: integer() | nil,
+          last_file_tree_fp: Minga.RenderModel.UI.FileTree.fingerprint() | nil
         }
 
   defstruct last_theme_fp: nil,
@@ -27,7 +28,8 @@ defmodule Minga.Frontend.Adapter.GUI.Caches do
             last_board_fp: nil,
             last_tab_bar_fp: nil,
             last_workspaces_fp: nil,
-            last_sidebars_fp: nil
+            last_sidebars_fp: nil,
+            last_file_tree_fp: nil
 
   @spec new() :: t()
   def new, do: %__MODULE__{}

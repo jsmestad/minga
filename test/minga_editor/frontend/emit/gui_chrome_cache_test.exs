@@ -3,18 +3,12 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
 
   use ExUnit.Case, async: true
 
-  alias Minga.Diagnostics
-  alias Minga.Diagnostics.Diagnostic
-  alias Minga.LSP.SyncServer
-  alias Minga.Project.FileTree
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.Frontend.Emit.GUI, as: EmitGUI
   alias MingaEditor.MinibufferData
   alias MingaEditor.Renderer.Caches
   alias MingaEditor.Frontend.Protocol.GUI.BoardCardPayload
   alias MingaEditor.Frontend.Protocol.GUI.BoardPayload
-  alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
   alias MingaEditor.State.Tab
@@ -91,8 +85,6 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
     def preview(_item, _ctx), do: [[{"source preview", 0xFFFFFF, false}]]
   end
 
-  @moduletag :tmp_dir
-
   describe "sync_swiftui_chrome/4 fingerprint caching" do
     test "first frame sends chrome commands, then unchanged frames send nothing" do
       state = gui_state()
@@ -141,64 +133,15 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
              "tab bar command should not appear (handled by adapter)"
     end
 
-    test "hidden file tree cache includes project root and resends when it changes" do
-      first_root = "/tmp/first-project"
-      second_root = "/tmp/second-project"
+    test "file tree is no longer emitted by sync_swiftui_chrome (handled by adapter)" do
+      state = gui_state()
+      {_ctx, _caches, cmds} = sync_chrome(state)
 
-      first_state =
-        gui_state()
-        |> EditorState.update_file_tree(&%{&1 | project_root: first_root})
+      assert opcode_count(cmds, 0x93) == 0,
+             "file tree command should not appear (handled by adapter)"
 
-      {_ctx, caches, first_cmds} = sync_chrome(first_state)
-      assert Enum.any?(first_cmds, &hidden_tree_cmd_for_root?(&1, first_root))
-      assert caches.last_gui_file_tree_fp == {:no_tree, first_root}
-
-      second_state =
-        gui_state()
-        |> EditorState.update_file_tree(&%{&1 | project_root: second_root})
-
-      {_ctx, caches2, second_cmds} = sync_chrome(second_state, caches)
-
-      assert Enum.any?(second_cmds, &hidden_tree_cmd_for_root?(&1, second_root))
-      assert caches2.last_gui_file_tree_fp == {:no_tree, second_root}
-    end
-
-    test "ready file tree rows are cached, but diagnostics and selection changes emit targeted updates",
-         %{tmp_dir: tmp_dir} do
-      {state, file_tree, file_path} = ready_file_tree_state(tmp_dir, count: 300)
-
-      {_ctx, caches, first_cmds} = sync_chrome(state)
-      assert has_opcode?(first_cmds, 0x93)
-
-      {_ctx, caches2, cached_cmds} = sync_chrome(state, caches)
-      assert caches2.last_gui_file_tree_fp == caches.last_gui_file_tree_fp
-      refute has_opcode?(cached_cmds, 0x93)
-
-      moved_state =
-        EditorState.set_file_tree(
-          state,
-          FileTreeState.replace_tree(file_tree, FileTree.select(file_tree.tree, 42))
-        )
-
-      {_ctx, _caches3, moved_cmds} = sync_chrome(moved_state, caches)
-      refute has_opcode?(moved_cmds, 0x93)
-      assert opcode_count(moved_cmds, 0x94) == 1
-
-      uri = SyncServer.path_to_uri(file_path)
-      on_exit(fn -> Diagnostics.clear(:gui_file_tree_cache_test, uri) end)
-
-      :ok =
-        Diagnostics.publish(:gui_file_tree_cache_test, uri, [
-          %Diagnostic{
-            range: %{start_line: 0, start_col: 0, end_line: 0, end_col: 1},
-            severity: :error,
-            message: "boom"
-          }
-        ])
-
-      {_ctx, _caches4, diagnostic_cmds} = sync_chrome(state, caches)
-      assert has_opcode?(diagnostic_cmds, 0x93)
-      refute has_opcode?(diagnostic_cmds, 0x94)
+      assert opcode_count(cmds, 0x94) == 0,
+             "file tree selection command should not appear (handled by adapter)"
     end
 
     test "git syncing and toast changes no longer emit through sync_swiftui_chrome (moved to adapter)" do
@@ -420,38 +363,6 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
          target_id
        ),
        do: do_gui_agent_chat_section!(rest, target_id)
-
-  defp hidden_tree_cmd_for_root?(
-         <<0x93, payload_len::32, payload::binary-size(payload_len)>>,
-         root
-       ) do
-    root_len = byte_size(root)
-
-    match?(
-      <<2::8, tree_flags::8, 0::8, 0::16, ^root_len::16, ^root::binary-size(^root_len), 0::16,
-        0::16, 0::16>>
-      when Bitwise.band(tree_flags, 0x01) == 0,
-      payload
-    )
-  end
-
-  defp hidden_tree_cmd_for_root?(_cmd, _root), do: false
-
-  defp ready_file_tree_state(tmp_dir, opts) do
-    count = Keyword.fetch!(opts, :count)
-    root = Path.join(tmp_dir, "gui-file-tree")
-    File.mkdir_p!(root)
-
-    for index <- 1..count do
-      filename = "file_#{String.pad_leading(Integer.to_string(index), 3, "0")}.ex"
-      File.write!(Path.join(root, filename), "")
-    end
-
-    file_path = Path.join(root, "file_001.ex")
-    file_tree = FileTreeState.open(%FileTreeState{}, FileTree.new(root, width: 32), nil)
-    state = gui_state() |> EditorState.set_file_tree(file_tree)
-    {state, file_tree, file_path}
-  end
 
   defp open_test_picker(state, label, mode_prefix \\ "") do
     open_test_picker_with_source(state, label, nil, mode_prefix)
