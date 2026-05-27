@@ -10,6 +10,8 @@ defmodule Minga.Integration.GUIProtocolTest do
   # async: false: spawns the headless Swift test harness as a real OS process via Port.open/2
   use ExUnit.Case, async: false
 
+  alias Minga.Frontend.Adapter.GUI.WindowEncoder
+  alias Minga.Protocol.Opcodes
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
   alias MingaEditor.UI.Picker
 
@@ -460,7 +462,7 @@ defmodule Minga.Integration.GUIProtocolTest do
 
   describe "gui_gutter_separator" do
     test "round-trips gutter separator col and color", %{port: port} do
-      cmd = ProtocolGUI.encode_gui_gutter_separator(4, 0x3F444A)
+      cmd = <<Opcodes.gui_gutter_sep(), 4::16, 0x3F, 0x44, 0x4A>>
       Port.command(port, cmd)
 
       assert_receive {^port, {:data, json}}, 5_000
@@ -501,25 +503,42 @@ defmodule Minga.Integration.GUIProtocolTest do
 
   describe "gui_gutter" do
     test "round-trips gutter with entries", %{port: port} do
-      gutter_data = %{
+      alias Minga.RenderModel.Window
+      alias Minga.RenderModel.Window.Gutter
+      alias Minga.RenderModel.Window.GutterEntry
+
+      model = %Window{
         window_id: 1,
-        content_row: 0,
-        content_col: 5,
-        content_height: 24,
-        content_width: 80,
-        is_active: true,
-        cursor_line: 10,
-        line_number_style: :hybrid,
-        line_number_width: 4,
-        sign_col_width: 1,
-        entries: [
-          %{buf_line: 8, display_type: :normal, sign_type: :git_added},
-          %{buf_line: 9, display_type: :fold_start, sign_type: :none},
-          %{buf_line: 10, display_type: :wrap_continuation, sign_type: :diag_error}
-        ]
+        content_kind: :buffer,
+        rect: {0, 0, 80, 24},
+        cursor_row: 0,
+        cursor_col: 0,
+        cursor_shape: :block,
+        rows: [],
+        gutter: %Gutter{
+          window_id: 1,
+          content_row: 0,
+          content_col: 5,
+          content_height: 24,
+          content_width: 80,
+          is_active: true,
+          cursor_line: 10,
+          line_number_style: :hybrid,
+          line_number_width: 4,
+          sign_col_width: 1,
+          entries: [
+            %GutterEntry{buf_line: 8, display_type: :normal, sign_type: :git_added},
+            %GutterEntry{buf_line: 9, display_type: :fold_start, sign_type: :none},
+            %GutterEntry{buf_line: 10, display_type: :wrap_continuation, sign_type: :diag_error}
+          ]
+        }
       }
 
-      cmd = ProtocolGUI.encode_gui_gutter(gutter_data)
+      cmd =
+        Enum.find(WindowEncoder.encode(model), fn <<opcode::8, _rest::binary>> ->
+          opcode == Opcodes.gui_gutter()
+        end)
+
       Port.command(port, cmd)
 
       assert_receive {^port, {:data, json}}, 5_000
@@ -938,7 +957,7 @@ defmodule Minga.Integration.GUIProtocolTest do
 
   describe "gui_cursorline" do
     test "round-trips visible and hidden cursorline states", %{port: port} do
-      decoded = round_trip(port, ProtocolGUI.encode_gui_cursorline(12, 0x2C323C))
+      decoded = round_trip(port, <<Opcodes.gui_cursorline(), 12::16, 0x2C, 0x32, 0x3C>>)
 
       assert decoded["type"] == "gui_cursorline"
       assert decoded["row"] == 12
@@ -946,7 +965,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["g"] == 0x32
       assert decoded["b"] == 0x3C
 
-      decoded = round_trip(port, ProtocolGUI.encode_gui_cursorline(0xFFFF, 0))
+      decoded = round_trip(port, <<Opcodes.gui_cursorline(), 0xFFFF::16, 0, 0, 0>>)
 
       assert decoded["type"] == "gui_cursorline"
       assert decoded["row"] == 0xFFFF
@@ -958,17 +977,19 @@ defmodule Minga.Integration.GUIProtocolTest do
 
   describe "gui_window_content" do
     test "round-trips window content with rows, selection, and diagnostics", %{port: port} do
-      alias MingaEditor.SemanticWindow
-      alias MingaEditor.SemanticWindow.{DiagnosticRange, Selection, Span, VisualRow}
+      alias Minga.RenderModel.Window
+      alias Minga.RenderModel.Window.{DiagnosticRange, Row, Selection, Span}
 
-      sw = %SemanticWindow{
+      sw = %Window{
         window_id: 7,
+        content_kind: :buffer,
+        rect: {0, 0, 80, 20},
         full_refresh: true,
         cursor_row: 1,
         cursor_col: 3,
         cursor_shape: :beam,
         rows: [
-          %VisualRow{
+          %Row{
             row_type: :normal,
             buf_line: 0,
             text: "def foo do",
@@ -977,7 +998,7 @@ defmodule Minga.Integration.GUIProtocolTest do
               %Span{start_col: 0, end_col: 3, fg: 0x51AFEF, bg: 0x282C34, attrs: 0x01}
             ]
           },
-          %VisualRow{
+          %Row{
             row_type: :fold_start,
             buf_line: 1,
             text: "  :ok",
@@ -998,8 +1019,7 @@ defmodule Minga.Integration.GUIProtocolTest do
         ]
       }
 
-      alias MingaEditor.Frontend.Protocol.GUIWindowContent
-      cmd = GUIWindowContent.encode(sw)
+      cmd = WindowEncoder.encode_window_content(sw)
       Port.command(port, cmd)
 
       assert_receive {^port, {:data, json}}, 5_000

@@ -34,12 +34,11 @@ defmodule MingaEditor.Shell.Traditional.Chrome.GUI do
           Cursor.t() | nil
         ) :: Chrome.t()
   def build(state, layout, _scrolls, _cursor_info) do
-    # Compute status bar data (used by Emit.GUI to encode the 0x76 opcode).
+    # Compute status bar data (used by the GUI adapter to encode the 0x76 opcode).
     # No cell rendering for the GUI — SwiftUI owns the status bar surface.
     status_bar_data = status_bar_data(state)
 
-    # Split separators are sent via the dedicated 0x84 opcode in
-    # Emit.GUI.build_metal_commands. No cell-grid draws needed.
+    # Split separators are sent via the dedicated 0x84 opcode by the GUI adapter. No cell-grid draws needed.
 
     # Structured minibuffer data for native SwiftUI rendering (0x7F opcode).
     # No cell-grid fallback; the SwiftUI MinibufferView is the only path.

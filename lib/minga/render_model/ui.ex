@@ -27,7 +27,9 @@ defmodule Minga.RenderModel.UI do
           extension_overlay: term(),
           extension_panel: term(),
           hover_popup: term(),
-          float_popup: term()
+          float_popup: term(),
+          gutter_separator: term(),
+          split_separators: term()
         }
 
   defstruct [
@@ -56,6 +58,8 @@ defmodule Minga.RenderModel.UI do
     :extension_overlay,
     :extension_panel,
     :hover_popup,
-    :float_popup
+    :float_popup,
+    :gutter_separator,
+    :split_separators
   ]
 end

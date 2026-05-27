@@ -1,9 +1,9 @@
-defmodule MingaEditor.Agent.View.PromptSemanticWindow do
+defmodule MingaEditor.Agent.View.PromptRenderWindow do
   @moduledoc """
-  Builds a `SemanticWindow` from the agent prompt buffer state.
+  Builds a `RenderWindow` from the agent prompt buffer state.
 
   Translates prompt buffer content, cursor position, vim mode, visual
-  selection, and paste placeholder lines into the same `SemanticWindow`
+  selection, and paste placeholder lines into the same `RenderWindow`
   struct used by the GUI window content pipeline (0x80 opcode). This
   lets the macOS Metal renderer draw the prompt with identical cursor
   shapes, selection overlays, and styled spans as regular editor buffers.
@@ -11,30 +11,31 @@ defmodule MingaEditor.Agent.View.PromptSemanticWindow do
   The prompt uses a reserved window_id (65534) that the Swift renderer
   recognizes for special positioning (bottom of the agent chat panel).
 
-  Called from `MingaEditor.Frontend.Emit.GUI` when the agent chat is visible.
+  Called from the content stage when the GUI agent chat prompt is visible.
   """
 
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.ViewContext
-  alias MingaEditor.SemanticWindow
-  alias MingaEditor.SemanticWindow.Selection
-  alias MingaEditor.SemanticWindow.Span
-  alias MingaEditor.SemanticWindow.VisualRow
+  alias Minga.RenderModel.Window, as: RenderWindow
+  alias Minga.RenderModel.Window.IndentGuides
+  alias Minga.RenderModel.Window.Row
+  alias Minga.RenderModel.Window.Selection
+  alias Minga.RenderModel.Window.Span
   alias MingaEditor.Input.Wrap, as: InputWrap
   alias MingaEditor.UI.Theme
 
   @typedoc "Agent view context."
   @type ctx :: ViewContext.t()
 
-  @doc "Reserved window_id for the agent prompt SemanticWindow."
+  @doc "Reserved window_id for the agent prompt RenderWindow."
   @spec prompt_window_id() :: pos_integer()
   def prompt_window_id, do: 65_534
 
   @max_input_lines 8
 
   @doc """
-  Builds a `SemanticWindow` for the agent prompt buffer.
+  Builds a `RenderWindow` for the agent prompt buffer.
 
   Returns `nil` when the agent chat is not visible or the prompt buffer
   is not available.
@@ -43,16 +44,18 @@ defmodule MingaEditor.Agent.View.PromptSemanticWindow do
   inside the prompt box (excluding borders and padding). The caller
   computes this from the chat panel width.
   """
-  @spec build(ctx(), pos_integer()) :: SemanticWindow.t() | nil
-  def build(%ViewContext{} = ctx, inner_width) when inner_width > 0 do
+  @spec build(ctx(), pos_integer(), RenderWindow.rect() | nil) :: RenderWindow.t() | nil
+  def build(ctx, inner_width, rect \\ nil)
+
+  def build(%ViewContext{} = ctx, inner_width, rect) when inner_width > 0 do
     panel = ctx.ui_state.panel
 
     if is_pid(panel.prompt_buffer) do
-      build_from_panel(ctx, panel, inner_width)
+      build_from_panel(ctx, panel, inner_width, rect)
     end
   end
 
-  def build(_, _), do: nil
+  def build(_, _, _), do: nil
 
   @doc """
   Returns the prompt height in visual rows (excluding borders).
@@ -70,8 +73,9 @@ defmodule MingaEditor.Agent.View.PromptSemanticWindow do
 
   # ── Private ─────────────────────────────────────────────────────────────
 
-  @spec build_from_panel(ctx(), Panel.t(), pos_integer()) :: SemanticWindow.t()
-  defp build_from_panel(ctx, panel, inner_width) do
+  @spec build_from_panel(ctx(), Panel.t(), pos_integer(), RenderWindow.rect() | nil) ::
+          RenderWindow.t()
+  defp build_from_panel(ctx, panel, inner_width, rect) do
     lines = Panel.input_lines(panel)
     cursor = Panel.input_cursor(panel)
     mode = ctx.editing.mode
@@ -109,8 +113,10 @@ defmodule MingaEditor.Agent.View.PromptSemanticWindow do
     # Selection overlay
     selection = build_selection(mode, mode_state, cursor, scroll, inner_width, lines)
 
-    %SemanticWindow{
+    %RenderWindow{
       window_id: prompt_window_id(),
+      content_kind: :agent_prompt,
+      rect: rect || {0, 0, inner_width, visible_count},
       rows: visual_rows,
       cursor_row: max(display_cursor_row, 0),
       cursor_col: max(display_cursor_col, 0),
@@ -121,6 +127,7 @@ defmodule MingaEditor.Agent.View.PromptSemanticWindow do
       diagnostic_ranges: [],
       document_highlights: [],
       annotations: [],
+      indent_guides: IndentGuides.empty(prompt_window_id()),
       full_refresh: true
     }
   end
@@ -132,7 +139,7 @@ defmodule MingaEditor.Agent.View.PromptSemanticWindow do
           Panel.t(),
           Theme.Agent.t(),
           pos_integer()
-        ) :: VisualRow.t()
+        ) :: Row.t()
   defp build_visual_row(vl, line_text, _logical_idx, panel, at, inner_width) do
     {display_text, fg_color, bg_color} =
       if UIState.paste_placeholder?(line_text) and vl.col_offset == 0 do
@@ -173,12 +180,12 @@ defmodule MingaEditor.Agent.View.PromptSemanticWindow do
         []
       end
 
-    %VisualRow{
+    %Row{
       row_type: :normal,
       buf_line: 0,
       text: display_text,
       spans: spans,
-      content_hash: VisualRow.compute_hash(display_text, spans)
+      content_hash: Row.compute_hash(display_text, spans)
     }
   end
 
@@ -239,7 +246,7 @@ defmodule MingaEditor.Agent.View.PromptSemanticWindow do
 
   defp build_selection(_, _, _, _, _, _), do: nil
 
-  @spec cursor_shape_for_mode(atom()) :: SemanticWindow.cursor_shape()
+  @spec cursor_shape_for_mode(atom()) :: RenderWindow.cursor_shape()
   defp cursor_shape_for_mode(:insert), do: :beam
   defp cursor_shape_for_mode(:normal), do: :block
   defp cursor_shape_for_mode(:visual), do: :block

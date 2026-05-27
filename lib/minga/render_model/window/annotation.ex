@@ -1,8 +1,8 @@
-defmodule MingaEditor.SemanticWindow.ResolvedAnnotation do
+defmodule Minga.RenderModel.Window.Annotation do
   @moduledoc """
   A line annotation resolved to display coordinates for GUI rendering.
 
-  Built by the SemanticWindow.Builder from buffer decorations, this struct
+  Built by the window render-model builder from buffer decorations, this struct
   contains the display row and the annotation's visual properties. Consumed
   by the GUI protocol encoder (0x80 wire format) and the TUI render pipeline.
   """

@@ -3,7 +3,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
 
   alias MingaAgent.Session, as: AgentSession
   alias MingaEditor.Agent.UIState
-  alias MingaEditor.Agent.View.PromptSemanticWindow
+  alias MingaEditor.Agent.View.PromptRenderWindow
   alias Minga.Buffer
   alias Minga.RenderModel.UI.AgentChat
   alias MingaEditor.Frontend.Emit.Context
@@ -33,7 +33,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
         prompt_cursor = UIState.input_cursor(panel)
         prompt_line_count = UIState.input_line_count(panel)
         inner_width = max(ctx.viewport.cols - 10, 20)
-        visible_rows = PromptSemanticWindow.visible_rows(panel, inner_width)
+        visible_rows = PromptRenderWindow.visible_rows(panel, inner_width)
 
         {:erlang.phash2(
            {:visible, ctx.shell_state.agent.runtime.status,
@@ -145,7 +145,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
       {cursor_line, cursor_col} = UIState.input_cursor(panel)
       vim_mode = ctx.editing.mode
       inner_width = max(ctx.viewport.cols - 10, 20)
-      visible_rows = PromptSemanticWindow.visible_rows(panel, inner_width)
+      visible_rows = PromptRenderWindow.visible_rows(panel, inner_width)
       prompt_completion = build_prompt_completion(panel)
 
       %{

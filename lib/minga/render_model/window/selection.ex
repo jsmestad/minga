@@ -1,4 +1,4 @@
-defmodule MingaEditor.SemanticWindow.Selection do
+defmodule Minga.RenderModel.Window.Selection do
   @moduledoc """
   Visual selection overlay in display coordinates.
 
@@ -8,11 +8,7 @@ defmodule MingaEditor.SemanticWindow.Selection do
   """
 
   @enforce_keys [:type]
-  defstruct type: :none,
-            start_row: 0,
-            start_col: 0,
-            end_row: 0,
-            end_col: 0
+  defstruct [:type, start_row: 0, start_col: 0, end_row: 0, end_col: 0]
 
   @type selection_type :: :char | :line | :block
 

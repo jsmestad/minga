@@ -1,8 +1,8 @@
-defmodule MingaEditor.Frontend.Protocol.GUIWindowContent do
+defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   @moduledoc """
   Binary protocol encoder for the `gui_window_content` opcode (0x80).
 
-  Encodes a `SemanticWindow` struct into the wire format for GUI frontends.
+  Encodes a `RenderWindow` struct into the wire format for GUI frontends.
   This replaces draw_text commands for buffer windows, sending pre-resolved
   semantic data that Swift renders directly via CoreText.
 
@@ -63,18 +63,25 @@ defmodule MingaEditor.Frontend.Protocol.GUIWindowContent do
 
   import Bitwise
 
-  alias MingaEditor.SemanticWindow
-  alias MingaEditor.SemanticWindow.DiagnosticRange
-  alias MingaEditor.SemanticWindow.DocumentHighlightRange
-  alias MingaEditor.SemanticWindow.ResolvedAnnotation
-  alias MingaEditor.SemanticWindow.SearchMatch
-  alias MingaEditor.SemanticWindow.Selection
-  alias MingaEditor.SemanticWindow.Span
-  alias MingaEditor.SemanticWindow.VisualRow
+  alias Minga.RenderModel.Window, as: RenderWindow
+  alias Minga.RenderModel.Window.Annotation
+  alias Minga.RenderModel.Window.Cursorline
+  alias Minga.RenderModel.Window.DiagnosticRange
+  alias Minga.RenderModel.Window.DocumentHighlight
+  alias Minga.RenderModel.Window.Gutter
+  alias Minga.RenderModel.Window.GutterEntry
+  alias Minga.RenderModel.Window.IndentGuides
+  alias Minga.RenderModel.Window.Row
+  alias Minga.RenderModel.Window.SearchMatch
+  alias Minga.RenderModel.Window.Selection
+  alias Minga.RenderModel.Window.Span
 
   alias Minga.Protocol.Opcodes
 
   @op_gui_window_content Opcodes.gui_window_content()
+  @op_gui_cursorline Opcodes.gui_cursorline()
+  @op_gui_gutter Opcodes.gui_gutter()
+  @op_gui_indent_guides Opcodes.gui_indent_guides()
 
   # Sectioned format section IDs
   @section_wc_header 0x01
@@ -85,13 +92,30 @@ defmodule MingaEditor.Frontend.Protocol.GUIWindowContent do
   @section_wc_highlights 0x06
   @section_wc_annotations 0x07
 
+  @section_gutter_window 0x01
+  @section_gutter_config 0x02
+  @section_gutter_entries 0x03
+  @no_fold_range 0xFFFF_FFFF
+
   @doc """
-  Encodes a `SemanticWindow` into the 0x80 wire format (sectioned).
+  Encodes a `RenderWindow` into the 0x80 wire format (sectioned).
 
   Returns a single binary suitable for sending via `MingaEditor.Frontend.send_commands/2`.
   """
-  @spec encode(SemanticWindow.t()) :: binary()
-  def encode(%SemanticWindow{} = sw) do
+  @spec encode(RenderWindow.t()) :: [binary()]
+  def encode(%RenderWindow{} = window) do
+    [encode_window_content(window)] ++ encode_frame_metadata(window)
+  end
+
+  @doc "Encodes per-frame window metadata that the GUI clears and rebuilds every batch."
+  @spec encode_frame_metadata(RenderWindow.t()) :: [binary()]
+  def encode_frame_metadata(%RenderWindow{} = window) do
+    encode_gutter(window.gutter) ++
+      encode_cursorline(window.cursorline) ++ encode_indent_guides(window.indent_guides)
+  end
+
+  @spec encode_window_content(RenderWindow.t()) :: binary()
+  def encode_window_content(%RenderWindow{} = sw) do
     # Flags byte: bit 0 = full_refresh, bit 1 = cursor_visible
     flags =
       if(sw.full_refresh, do: 1, else: 0) |||
@@ -137,13 +161,13 @@ defmodule MingaEditor.Frontend.Protocol.GUIWindowContent do
 
   # ── Rows ─────────────────────────────────────────────────────────────────
 
-  @spec encode_rows([VisualRow.t()]) :: iodata()
+  @spec encode_rows([Row.t()]) :: iodata()
   defp encode_rows(rows) do
     Enum.map(rows, &encode_row/1)
   end
 
-  @spec encode_row(VisualRow.t()) :: binary()
-  defp encode_row(%VisualRow{} = row) do
+  @spec encode_row(Row.t()) :: binary()
+  defp encode_row(%Row{} = row) do
     row_type = encode_row_type(row.row_type)
     text_bytes = row.text
     text_len = byte_size(text_bytes)
@@ -158,7 +182,7 @@ defmodule MingaEditor.Frontend.Protocol.GUIWindowContent do
     ])
   end
 
-  @spec encode_row_type(VisualRow.row_type()) :: non_neg_integer()
+  @spec encode_row_type(Row.row_type()) :: non_neg_integer()
   defp encode_row_type(:normal), do: 0
   defp encode_row_type(:fold_start), do: 1
   defp encode_row_type(:virtual_line), do: 2
@@ -235,36 +259,36 @@ defmodule MingaEditor.Frontend.Protocol.GUIWindowContent do
 
   # ── Document highlights ─────────────────────────────────────────────────
 
-  @spec encode_document_highlights([DocumentHighlightRange.t()]) :: binary()
+  @spec encode_document_highlights([DocumentHighlight.t()]) :: binary()
   defp encode_document_highlights(highlights) do
     count = length(highlights)
     entries = Enum.map(highlights, &encode_document_highlight/1)
     IO.iodata_to_binary([<<count::16>> | entries])
   end
 
-  @spec encode_document_highlight(DocumentHighlightRange.t()) :: binary()
-  defp encode_document_highlight(%DocumentHighlightRange{} = h) do
+  @spec encode_document_highlight(DocumentHighlight.t()) :: binary()
+  defp encode_document_highlight(%DocumentHighlight{} = h) do
     kind = encode_highlight_kind(h.kind)
 
     <<h.start_row::16, h.start_col::16, h.end_row::16, h.end_col::16, kind::8>>
   end
 
-  @spec encode_highlight_kind(DocumentHighlightRange.kind()) :: non_neg_integer()
+  @spec encode_highlight_kind(DocumentHighlight.kind()) :: non_neg_integer()
   defp encode_highlight_kind(:text), do: 1
   defp encode_highlight_kind(:read), do: 2
   defp encode_highlight_kind(:write), do: 3
 
   # ── Line annotations ─────────────────────────────────────────────────────
 
-  @spec encode_annotations([ResolvedAnnotation.t()]) :: binary()
+  @spec encode_annotations([Annotation.t()]) :: binary()
   defp encode_annotations(annotations) do
     count = length(annotations)
     entries = Enum.map(annotations, &encode_annotation/1)
     IO.iodata_to_binary([<<count::16>> | entries])
   end
 
-  @spec encode_annotation(ResolvedAnnotation.t()) :: binary()
-  defp encode_annotation(%ResolvedAnnotation{} = ann) do
+  @spec encode_annotation(Annotation.t()) :: binary()
+  defp encode_annotation(%Annotation{} = ann) do
     kind = encode_annotation_kind(ann.kind)
     fg_r = ann.fg >>> 16 &&& 0xFF
     fg_g = ann.fg >>> 8 &&& 0xFF
@@ -285,9 +309,130 @@ defmodule MingaEditor.Frontend.Protocol.GUIWindowContent do
   defp encode_annotation_kind(:inline_text), do: 1
   defp encode_annotation_kind(:gutter_icon), do: 2
 
+  # ── Gutter ──────────────────────────────────────────────────────────────
+
+  @spec encode_gutter(Gutter.t() | nil) :: [binary()]
+  defp encode_gutter(nil), do: []
+  defp encode_gutter(%Gutter{} = gutter), do: [encode_gutter_binary(gutter)]
+
+  @spec encode_gutter_binary(Gutter.t()) :: binary()
+  defp encode_gutter_binary(%Gutter{} = gutter) do
+    entries_payload =
+      IO.iodata_to_binary([
+        <<length(gutter.entries)::16>> | Enum.map(gutter.entries, &encode_gutter_entry/1)
+      ])
+
+    active_byte = if gutter.is_active, do: 1, else: 0
+
+    sections = [
+      encode_section(
+        @section_gutter_window,
+        <<gutter.window_id::16, gutter.content_row::16, gutter.content_col::16,
+          gutter.content_height::16, active_byte::8, gutter.content_width::16>>
+      ),
+      encode_section(
+        @section_gutter_config,
+        <<gutter.cursor_line::32, encode_line_number_style(gutter.line_number_style)::8,
+          gutter.line_number_width::8, gutter.sign_col_width::8>>
+      ),
+      encode_section(@section_gutter_entries, entries_payload)
+    ]
+
+    IO.iodata_to_binary([<<@op_gui_gutter, length(sections)::8>> | sections])
+  end
+
+  @spec encode_gutter_entry(GutterEntry.t()) :: binary()
+  defp encode_gutter_entry(%GutterEntry{} = entry) do
+    fold_end_line = entry.fold_end_line || @no_fold_range
+
+    base =
+      <<entry.buf_line::32, encode_display_type(entry.display_type)::8,
+        encode_sign_type(entry.sign_type)::8, fold_end_line::32>>
+
+    case entry.sign_type do
+      :annotation ->
+        fg = entry.sign_fg || 0
+        text = entry.sign_text || ""
+        <<base::binary, red(fg)::8, green(fg)::8, blue(fg)::8, byte_size(text)::8, text::binary>>
+
+      _ ->
+        base
+    end
+  end
+
+  @spec encode_line_number_style(Gutter.line_number_style()) :: non_neg_integer()
+  defp encode_line_number_style(:hybrid), do: 0
+  defp encode_line_number_style(:absolute), do: 1
+  defp encode_line_number_style(:relative), do: 2
+  defp encode_line_number_style(:none), do: 3
+
+  @spec encode_display_type(GutterEntry.display_type()) :: non_neg_integer()
+  defp encode_display_type(:normal), do: 0
+  defp encode_display_type(:fold_start), do: 1
+  defp encode_display_type(:fold_continuation), do: 2
+  defp encode_display_type(:wrap_continuation), do: 3
+  defp encode_display_type(:fold_open), do: 4
+
+  @spec encode_sign_type(GutterEntry.sign_type()) :: non_neg_integer()
+  defp encode_sign_type(:none), do: 0
+  defp encode_sign_type(:git_added), do: 1
+  defp encode_sign_type(:git_modified), do: 2
+  defp encode_sign_type(:git_deleted), do: 3
+  defp encode_sign_type(:diag_error), do: 4
+  defp encode_sign_type(:diag_warning), do: 5
+  defp encode_sign_type(:diag_info), do: 6
+  defp encode_sign_type(:diag_hint), do: 7
+  defp encode_sign_type(:annotation), do: 8
+
+  # ── Cursorline ─────────────────────────────────────────────────────────
+
+  @spec encode_cursorline(Cursorline.t() | nil) :: [binary()]
+  defp encode_cursorline(nil), do: []
+
+  defp encode_cursorline(%Cursorline{row: row, bg_rgb: bg_rgb}) do
+    [<<@op_gui_cursorline, row::16, red(bg_rgb)::8, green(bg_rgb)::8, blue(bg_rgb)::8>>]
+  end
+
+  # ── Indent guides ──────────────────────────────────────────────────────
+
+  @spec encode_indent_guides(IndentGuides.t() | nil) :: [binary()]
+  defp encode_indent_guides(nil), do: []
+
+  defp encode_indent_guides(%IndentGuides{guide_cols: []} = guides) do
+    [
+      <<@op_gui_indent_guides, 6::16, guides.window_id::16, guides.tab_width::8, 0xFFFF::16,
+        0::8>>
+    ]
+  end
+
+  defp encode_indent_guides(%IndentGuides{} = guides) do
+    guide_count = length(guides.guide_cols)
+    guide_bytes = for col <- guides.guide_cols, into: <<>>, do: <<col::16>>
+    line_count = length(guides.line_indent_levels)
+    level_bytes = for level <- guides.line_indent_levels, into: <<>>, do: <<min(level, 255)::8>>
+    payload_len = 6 + 2 * guide_count + 2 + line_count
+
+    [
+      <<@op_gui_indent_guides, payload_len::16, guides.window_id::16, guides.tab_width::8,
+        guides.active_guide_col::16, guide_count::8, guide_bytes::binary, line_count::16,
+        level_bytes::binary>>
+    ]
+  end
+
+  # ── Color helpers ──────────────────────────────────────────────────────
+
+  @spec red(non_neg_integer()) :: non_neg_integer()
+  defp red(rgb), do: rgb >>> 16 &&& 0xFF
+
+  @spec green(non_neg_integer()) :: non_neg_integer()
+  defp green(rgb), do: rgb >>> 8 &&& 0xFF
+
+  @spec blue(non_neg_integer()) :: non_neg_integer()
+  defp blue(rgb), do: rgb &&& 0xFF
+
   # ── Cursor shape ────────────────────────────────────────────────────────
 
-  @spec encode_cursor_shape(SemanticWindow.cursor_shape()) :: non_neg_integer()
+  @spec encode_cursor_shape(RenderWindow.cursor_shape()) :: non_neg_integer()
   defp encode_cursor_shape(:block), do: 0
   defp encode_cursor_shape(:beam), do: 1
   defp encode_cursor_shape(:underline), do: 2

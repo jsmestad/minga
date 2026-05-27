@@ -15,6 +15,7 @@ defmodule Minga.Frontend.Adapter.GUI do
   alias Minga.Frontend.Adapter.GUI.FileTreeEncoder
   alias Minga.Frontend.Adapter.GUI.FloatPopupEncoder
   alias Minga.Frontend.Adapter.GUI.GitStatusEncoder
+  alias Minga.Frontend.Adapter.GUI.GutterSeparatorEncoder
   alias Minga.Frontend.Adapter.GUI.HoverPopupEncoder
   alias Minga.Frontend.Adapter.GUI.MinibufferEncoder
   alias Minga.Frontend.Adapter.GUI.PickerEncoder
@@ -23,10 +24,12 @@ defmodule Minga.Frontend.Adapter.GUI do
   alias Minga.Frontend.Adapter.GUI.SearchStateEncoder
   alias Minga.Frontend.Adapter.GUI.SignatureHelpEncoder
   alias Minga.Frontend.Adapter.GUI.SidebarsEncoder
+  alias Minga.Frontend.Adapter.GUI.SplitSeparatorsEncoder
   alias Minga.Frontend.Adapter.GUI.StatusBarEncoder
   alias Minga.Frontend.Adapter.GUI.TabBarEncoder
   alias Minga.Frontend.Adapter.GUI.ThemeEncoder
   alias Minga.Frontend.Adapter.GUI.WhichKeyEncoder
+  alias Minga.Frontend.Adapter.GUI.WindowEncoder
   alias Minga.Frontend.Adapter.GUI.WorkspacesEncoder
   alias Minga.RenderModel
 
@@ -61,15 +64,60 @@ defmodule Minga.Frontend.Adapter.GUI do
     {:float_popup, FloatPopupEncoder}
   ]
 
+  @metal_component_encoders [
+    {:gutter_separator, GutterSeparatorEncoder},
+    {:split_separators, SplitSeparatorsEncoder}
+  ]
+
+  @spec encode_windows([RenderModel.Window.t()], Caches.t()) :: {[binary()], Caches.t()}
+  def encode_windows(windows, %Caches{} = caches) when is_list(windows) do
+    {cmds, caches} =
+      windows
+      |> Enum.filter(&buffer_window?/1)
+      |> Enum.reduce({[], caches}, fn window, {cmds_acc, caches_acc} ->
+        encode_window(window, cmds_acc, caches_acc)
+      end)
+
+    {Enum.reverse(cmds), caches}
+  end
+
+  @spec encode_metal_ui(RenderModel.UI.t(), Caches.t()) :: {[binary()], Caches.t()}
+  def encode_metal_ui(%RenderModel.UI{} = ui, %Caches{} = caches) do
+    encode_components(ui, @metal_component_encoders, caches)
+  end
+
   @spec encode_ui(RenderModel.UI.t(), Caches.t()) :: {[binary()], Caches.t()}
   def encode_ui(%RenderModel.UI{} = ui, %Caches{} = caches) do
+    encode_components(ui, @component_encoders, caches)
+  end
+
+  @spec encode_components(RenderModel.UI.t(), [{atom(), module()}], Caches.t()) ::
+          {[binary()], Caches.t()}
+  defp encode_components(%RenderModel.UI{} = ui, component_encoders, %Caches{} = caches) do
     {cmds, caches} =
-      Enum.reduce(@component_encoders, {[], caches}, fn {field, encoder},
-                                                        {cmds_acc, caches_acc} ->
+      Enum.reduce(component_encoders, {[], caches}, fn {field, encoder}, {cmds_acc, caches_acc} ->
         encode_component(Map.get(ui, field), encoder, cmds_acc, caches_acc)
       end)
 
     {Enum.reverse(cmds), caches}
+  end
+
+  @spec buffer_window?(term()) :: boolean()
+  defp buffer_window?(%RenderModel.Window{content_kind: :buffer}), do: true
+  defp buffer_window?(_window), do: false
+
+  @spec encode_window(RenderModel.Window.t(), [binary()], Caches.t()) :: {[binary()], Caches.t()}
+  defp encode_window(%RenderModel.Window{} = window, cmds, %Caches{} = caches) do
+    fp = :erlang.phash2(window)
+    metadata = WindowEncoder.encode_frame_metadata(window)
+
+    if Map.get(caches.last_window_fps, window.window_id) == fp do
+      {Enum.reverse(metadata) ++ cmds, caches}
+    else
+      encoded = [WindowEncoder.encode_window_content(window) | metadata]
+      caches = %{caches | last_window_fps: Map.put(caches.last_window_fps, window.window_id, fp)}
+      {Enum.reverse(encoded) ++ cmds, caches}
+    end
   end
 
   @spec encode_component(term(), module(), [binary()], Caches.t()) :: {[binary()], Caches.t()}
