@@ -9,6 +9,7 @@ defmodule Minga.Frontend.Adapter.GUI do
   alias Minga.Frontend.Adapter.GUI.NotificationsEncoder
   alias Minga.Frontend.Adapter.GUI.ObservatoryEncoder
   alias Minga.Frontend.Adapter.GUI.SearchStateEncoder
+  alias Minga.Frontend.Adapter.GUI.SidebarsEncoder
   alias Minga.Frontend.Adapter.GUI.StatusBarEncoder
   alias Minga.Frontend.Adapter.GUI.TabBarEncoder
   alias Minga.Frontend.Adapter.GUI.ThemeEncoder
@@ -72,6 +73,11 @@ defmodule Minga.Frontend.Adapter.GUI do
         do: WorkspacesEncoder.encode(ui.workspaces, caches),
         else: {nil, caches}
 
+    {sidebars_cmd, caches} =
+      if ui.sidebars,
+        do: SidebarsEncoder.encode(ui.sidebars, caches),
+        else: {nil, caches}
+
     cmds =
       Enum.reject(
         [
@@ -86,7 +92,8 @@ defmodule Minga.Frontend.Adapter.GUI do
           observatory_cmd,
           board_cmd,
           tab_bar_cmd,
-          workspaces_cmd
+          workspaces_cmd,
+          sidebars_cmd
         ],
         &is_nil/1
       )

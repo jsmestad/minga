@@ -10,6 +10,7 @@ defmodule MingaEditor.RenderModel.UI.Builder do
   alias MingaEditor.RenderModel.UI.NotificationsBuilder
   alias MingaEditor.RenderModel.UI.ObservatoryBuilder
   alias MingaEditor.RenderModel.UI.SearchStateBuilder
+  alias MingaEditor.RenderModel.UI.SidebarsBuilder
   alias MingaEditor.RenderModel.UI.StatusBarBuilder
   alias MingaEditor.RenderModel.UI.TabBarBuilder
   alias MingaEditor.RenderModel.UI.ThemeBuilder
@@ -38,7 +39,8 @@ defmodule MingaEditor.RenderModel.UI.Builder do
       observatory: ObservatoryBuilder.build(ctx.shell_state),
       board: BoardBuilder.build(gui_payload),
       tab_bar: TabBarBuilder.build(ctx),
-      workspaces: WorkspacesBuilder.build(ctx)
+      workspaces: WorkspacesBuilder.build(ctx),
+      sidebars: SidebarsBuilder.build(ctx)
     }
   end
 

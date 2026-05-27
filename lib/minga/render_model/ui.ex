@@ -13,7 +13,8 @@ defmodule Minga.RenderModel.UI do
           observatory: term(),
           board: term(),
           tab_bar: term(),
-          workspaces: term()
+          workspaces: term(),
+          sidebars: term()
         }
 
   defstruct [
@@ -28,6 +29,7 @@ defmodule Minga.RenderModel.UI do
     :observatory,
     :board,
     :tab_bar,
-    :workspaces
+    :workspaces,
+    :sidebars
   ]
 end
