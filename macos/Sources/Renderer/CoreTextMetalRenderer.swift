@@ -1353,7 +1353,7 @@ final class CoreTextMetalRenderer {
     }
 
     /// Computes a conservative atlas slot count for all text textures that may be touched by the current frame.
-    static func atlasSlotDemand(frameState: FrameState, windowContents: [UInt16: GUIWindowContent]) -> Int {
+    nonisolated static func atlasSlotDemand(frameState: FrameState, windowContents: [UInt16: GUIWindowContent]) -> Int {
         let bufferRows = windowContents.values.reduce(0) { total, content in
             total + content.rows.count
         }
@@ -1375,13 +1375,13 @@ final class CoreTextMetalRenderer {
         return max(demand + slack, 1)
     }
 
-    private static func gutterTextureDemand(_ gutter: Wire.WindowGutter) -> Int {
+    private nonisolated static func gutterTextureDemand(_ gutter: Wire.WindowGutter) -> Int {
         gutter.entries.reduce(0) { total, entry in
             total + lineNumberTextureDemand(gutter) + signTextureDemand(entry.signType)
         }
     }
 
-    private static func lineNumberTextureDemand(_ gutter: Wire.WindowGutter) -> Int {
+    private nonisolated static func lineNumberTextureDemand(_ gutter: Wire.WindowGutter) -> Int {
         if gutter.lineNumberStyle != .none && gutter.lineNumberWidth > 0 {
             return 1
         }
@@ -1389,7 +1389,7 @@ final class CoreTextMetalRenderer {
         return 0
     }
 
-    private static func signTextureDemand(_ signType: Wire.GutterSignType) -> Int {
+    private nonisolated static func signTextureDemand(_ signType: Wire.GutterSignType) -> Int {
         switch signType {
         case .diagError, .diagWarning, .diagInfo, .diagHint, .annotation:
             return 1
