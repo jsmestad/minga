@@ -4,3 +4,4 @@
 import os
 
 let startupLog = OSLog(subsystem: "com.minga.app", category: "Startup")
+let renderLog = OSLog(subsystem: "com.minga.app", category: "Render")

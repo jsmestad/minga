@@ -161,8 +161,9 @@ defmodule MingaEditor.Renderer.LineTest do
           editing_model: :vim
         )
 
+      frame_ref = HeadlessPort.prepare_await(port)
       send(editor, {:minga_input, {:ready, 80, 24}})
-      :ok = HeadlessPort.await_frame(port)
+      {:ok, _snapshot} = HeadlessPort.collect_frame(frame_ref)
 
       # Should show a normal editor with an empty buffer, not a dashboard
       screen = for row <- 0..23, do: HeadlessPort.get_row_text(port, row)

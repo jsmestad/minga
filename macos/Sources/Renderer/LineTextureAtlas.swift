@@ -14,6 +14,20 @@ struct AtlasEntry {
     let pixelHeight: Int
 }
 
+/// Reserved atlas slot awaiting upload.
+struct Reservation {
+    let key: AtlasKey
+    let slotIndex: Int
+    let contentHash: Int
+    let reason: MissReason
+}
+
+/// Result of looking up or reserving an atlas entry.
+enum AtlasLookupResult {
+    case hit(AtlasEntry)
+    case reserved(Reservation)
+}
+
 @MainActor
 final class LineTextureAtlas {
     /// The atlas texture.
@@ -35,6 +49,12 @@ final class LineTextureAtlas {
 
     /// Number of allocated slots.
     var slotCount: Int { allocator.capacity }
+
+    /// Texture uploads performed in the current frame.
+    private(set) var frameTextureUploads: Int = 0
+
+    /// Bytes uploaded to the texture atlas in the current frame.
+    private(set) var frameTextureUploadBytes: Int = 0
 
     init(device: MTLDevice, slotHeight: Int) {
         self.device = device
@@ -71,58 +91,46 @@ final class LineTextureAtlas {
     }
 
     func beginFrame() {
+        frameTextureUploads = 0
+        frameTextureUploadBytes = 0
         allocator.beginFrame()
     }
 
-    /// Check atlas cache. Returns entry if hit, nil if miss.
-    func cachedEntry(forKey key: UInt16, contentHash: Int) -> AtlasEntry? {
-        let result = allocator.allocate(key: key, contentHash: contentHash)
-        switch result {
+    /// Look up an atlas entry or reserve one slot that the caller must rasterize and commit.
+    func lookupOrReserve(key: AtlasKey, contentHash: Int) -> AtlasLookupResult? {
+        switch allocator.lookupOrReserve(key: key, contentHash: contentHash) {
         case .hit(let slotIndex):
-            return AtlasEntry(
-                slotIndex: slotIndex,
-                pixelWidth: allocator.pixelWidth(forSlot: slotIndex),
-                pixelHeight: slotHeight
+            return .hit(
+                AtlasEntry(
+                    slotIndex: slotIndex,
+                    pixelWidth: allocator.pixelWidth(forSlot: slotIndex),
+                    pixelHeight: slotHeight
+                )
             )
-        default:
+        case .reserved(let slotIndex, let reason):
+            return .reserved(Reservation(key: key, slotIndex: slotIndex, contentHash: contentHash, reason: reason))
+        case .full:
             return nil
         }
     }
 
-    /// Upload bitmap into the atlas. Allocates a slot if needed.
-    func upload(key: UInt16, contentHash: Int,
-                pointer: UnsafeRawPointer, pixelWidth: Int,
-                bytesPerRow: Int) -> AtlasEntry? {
+    /// Upload bitmap into a previously reserved atlas slot.
+    func commitUpload(reservation: Reservation, pointer: UnsafeRawPointer, pixelWidth: Int, bytesPerRow: Int) -> AtlasEntry? {
         guard let tex = texture else { return nil }
 
-        let result = allocator.allocate(key: key, contentHash: contentHash)
-        let slotIndex: Int
-
-        switch result {
-        case .hit(let idx):
-            // Already cached and uploaded.
-            return AtlasEntry(slotIndex: idx, pixelWidth: allocator.pixelWidth(forSlot: idx), pixelHeight: slotHeight)
-        case .miss(let idx):
-            slotIndex = idx
-        case .evicted(let idx, _):
-            slotIndex = idx
-        case .full:
-            return nil
-        }
-
-        // Upload bitmap into the slot region.
-        let yOffset = slotIndex * slotHeight
+        let yOffset = reservation.slotIndex * slotHeight
         let uploadWidth = min(pixelWidth, atlasWidth)
         let region = MTLRegion(
             origin: MTLOrigin(x: 0, y: yOffset, z: 0),
             size: MTLSize(width: uploadWidth, height: slotHeight, depth: 1)
         )
-        tex.replace(region: region, mipmapLevel: 0,
-                    withBytes: pointer, bytesPerRow: bytesPerRow)
+        tex.replace(region: region, mipmapLevel: 0, withBytes: pointer, bytesPerRow: bytesPerRow)
 
-        allocator.markUploaded(slotIndex: slotIndex, contentHash: contentHash, pixelWidth: pixelWidth)
+        frameTextureUploads += 1
+        frameTextureUploadBytes += bytesPerRow * slotHeight
+        allocator.markUploaded(slotIndex: reservation.slotIndex, contentHash: reservation.contentHash, pixelWidth: uploadWidth)
 
-        return AtlasEntry(slotIndex: slotIndex, pixelWidth: pixelWidth, pixelHeight: slotHeight)
+        return AtlasEntry(slotIndex: reservation.slotIndex, pixelWidth: uploadWidth, pixelHeight: slotHeight)
     }
 
     /// Compute UV for a slot.

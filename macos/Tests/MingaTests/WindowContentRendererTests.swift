@@ -136,6 +136,103 @@ struct DisplayColumnMappingTests {
     }
 }
 
+@Suite("Window Content Renderer - Frame Metrics")
+struct WindowContentFrameMetricsTests {
+    @MainActor
+    private func makeRendererAndAtlas() -> (WindowContentRenderer, LineTextureAtlas)? {
+        guard let device = MTLCreateSystemDefaultDevice() else { return nil }
+        let fm = FontManager(name: "Menlo", size: 13.0, scale: 2.0)
+        let rasterizer = BitmapRasterizer()
+        let renderer = WindowContentRenderer(device: device, fontManager: fm, rasterizer: rasterizer)
+        let atlas = LineTextureAtlas(device: device, slotHeight: renderer.linePixelHeight)
+        atlas.ensureCapacity(maxSlots: 8, width: 1024)
+        return (renderer, atlas)
+    }
+
+    @Test("Buffer row metrics distinguish rasterized rows from reused rows")
+    @MainActor func bufferRowMetrics() throws {
+        guard let (renderer, atlas) = makeRendererAndAtlas() else { return }
+        let row = GUIVisualRow(rowType: .normal, bufLine: 0, contentHash: 42, text: "hello", spans: [])
+
+        atlas.beginFrame()
+        var metrics = FrameMetrics()
+        let first = renderer.renderRowToAtlas(displayRow: 0, row: row, windowId: 1, atlas: atlas, metrics: &metrics)
+        #expect(first != nil)
+        #expect(metrics.bufferRowsRasterized == 1)
+        #expect(metrics.bufferRowsReused == 0)
+        #expect(metrics.atlasNewKeys == 1)
+        #expect(atlas.frameTextureUploads == 1)
+
+        atlas.beginFrame()
+        metrics.reset()
+        let second = renderer.renderRowToAtlas(displayRow: 0, row: row, windowId: 1, atlas: atlas, metrics: &metrics)
+        #expect(second != nil)
+        #expect(metrics.bufferRowsRasterized == 0)
+        #expect(metrics.bufferRowsReused == 1)
+        #expect(atlas.frameTextureUploads == 0)
+    }
+
+    @Test("Same display row in different windows uses distinct atlas slots")
+    @MainActor func sameRowDifferentWindowsUsesDistinctSlots() throws {
+        guard let (renderer, atlas) = makeRendererAndAtlas() else { return }
+        let left = GUIVisualRow(rowType: .normal, bufLine: 0, contentHash: 42, text: "left", spans: [])
+        let right = GUIVisualRow(rowType: .normal, bufLine: 0, contentHash: 99, text: "right", spans: [])
+
+        atlas.beginFrame()
+        var metrics = FrameMetrics()
+        let leftEntry = renderer.renderRowToAtlas(displayRow: 0, row: left, windowId: 1, atlas: atlas, metrics: &metrics)
+        let rightEntry = renderer.renderRowToAtlas(displayRow: 0, row: right, windowId: 2, atlas: atlas, metrics: &metrics)
+
+        #expect(leftEntry != nil)
+        #expect(rightEntry != nil)
+        #expect(leftEntry?.slotIndex != rightEntry?.slotIndex)
+        #expect(metrics.bufferRowsRasterized == 2)
+        #expect(metrics.atlasHashChanges == 0)
+    }
+
+    @Test("Changed row hash records hash-change miss reason")
+    @MainActor func changedHashMetrics() throws {
+        guard let (renderer, atlas) = makeRendererAndAtlas() else { return }
+        let original = GUIVisualRow(rowType: .normal, bufLine: 0, contentHash: 42, text: "hello", spans: [])
+        let changed = GUIVisualRow(rowType: .normal, bufLine: 0, contentHash: 43, text: "hello!", spans: [])
+
+        atlas.beginFrame()
+        var metrics = FrameMetrics()
+        _ = renderer.renderRowToAtlas(displayRow: 0, row: original, windowId: 1, atlas: atlas, metrics: &metrics)
+
+        atlas.beginFrame()
+        metrics.reset()
+        _ = renderer.renderRowToAtlas(displayRow: 0, row: changed, windowId: 1, atlas: atlas, metrics: &metrics)
+        #expect(metrics.bufferRowsRasterized == 1)
+        #expect(metrics.atlasHashChanges == 1)
+    }
+
+    @Test("Atlas slot demand accounts for split-window texture entries")
+    func atlasDemandCountsSplitWindows() {
+        let rows = [GUIVisualRow(rowType: .normal, bufLine: 0, contentHash: 1, text: "row", spans: [])]
+        let left = GUIWindowContent(windowId: 1, fullRefresh: true, cursorRow: 0, cursorCol: 0, cursorShape: .block, rows: rows, selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: [], lineAnnotations: [GUILineAnnotation(row: 0, kind: .inlineText, fg: 0xFFFFFF, bg: 0, text: "hint")])
+        let right = GUIWindowContent(windowId: 2, fullRefresh: true, cursorRow: 0, cursorCol: 0, cursorShape: .block, rows: rows, selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: [])
+
+        var frameState = FrameState(cols: 80, rows: 2)
+        frameState.windowGutters = [
+            1: Wire.WindowGutter(windowId: 1, contentRow: 0, contentCol: 0, contentHeight: 2, isActive: true, contentWidth: 40, cursorLine: 0, lineNumberStyle: .absolute, lineNumberWidth: 2, signColWidth: 2, entries: [Wire.GutterEntry(bufLine: 0, displayType: .normal, signType: .diagError)]),
+            2: Wire.WindowGutter(windowId: 2, contentRow: 0, contentCol: 40, contentHeight: 2, isActive: false, contentWidth: 40, cursorLine: 0, lineNumberStyle: .absolute, lineNumberWidth: 2, signColWidth: 2, entries: [Wire.GutterEntry(bufLine: 0, displayType: .normal, signType: .annotation, signFg: 0xFFFFFF, signText: "●")])
+        ]
+        frameState.horizontalSeparators = [Wire.HorizontalSeparator(row: 1, col: 0, width: 80, filename: "split.ex")]
+
+        let demand = CoreTextMetalRenderer.atlasSlotDemand(frameState: frameState, windowContents: [1: left, 2: right])
+
+        #expect(demand >= 2 + 1 + 4 + 1 + 32)
+    }
+
+    @Test("FrameMetrics reset clears all counters")
+    func frameMetricsReset() {
+        var metrics = FrameMetrics(bufferRowsRasterized: 1, bufferRowsReused: 2, otherTexturesRasterized: 3, otherTexturesReused: 4, textureUploads: 5, textureUploadBytes: 6, atlasNewKeys: 7, atlasHashChanges: 8, atlasEvictions: 9)
+        metrics.reset()
+        #expect(metrics == FrameMetrics())
+    }
+}
+
 @Suite("GUIState Frame Lifecycle")
 struct GUIStateFrameTests {
     @Test("beginFrame preserves windowContents as fallback")

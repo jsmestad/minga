@@ -19,6 +19,7 @@ defmodule MingaEditor.RenderPipeline.Content do
   alias MingaEditor.DisplayMap
   alias MingaEditor.FoldMap
   alias MingaEditor.Layout
+  alias Minga.Telemetry
 
   alias Minga.Core.Face
   alias Minga.RenderModel.Window, as: RenderWindow
@@ -229,9 +230,11 @@ defmodule MingaEditor.RenderPipeline.Content do
     # instead of DisplayList draw layers for gutter, content, cursorline, and indent guides.
     window_model =
       if gui? do
-        WindowModelBuilder.build(state, %{scroll | window: window}, render_ctx,
-          content_kind: :buffer
-        )
+        Telemetry.span([:minga, :render, :window_model_build], %{window_id: scroll.win_id}, fn ->
+          WindowModelBuilder.build(state, %{scroll | window: window}, render_ctx,
+            content_kind: :buffer
+          )
+        end)
       else
         nil
       end
@@ -820,7 +823,13 @@ defmodule MingaEditor.RenderPipeline.Content do
 
   defp agent_window_models(true, state, model_scroll, render_ctx, ctx, chat_width, prompt_rect) do
     window_model =
-      WindowModelBuilder.build(state, model_scroll, render_ctx, content_kind: :agent_chat)
+      Telemetry.span(
+        [:minga, :render, :window_model_build],
+        %{window_id: model_scroll.win_id},
+        fn ->
+          WindowModelBuilder.build(state, model_scroll, render_ctx, content_kind: :agent_chat)
+        end
+      )
 
     inner_width = PromptRenderer.input_inner_width(PromptRenderer.input_box_width(chat_width))
     prompt_window_model = PromptRenderWindow.build(ctx, inner_width, prompt_rect)

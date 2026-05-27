@@ -10,11 +10,15 @@ defmodule Minga.Telemetry do
 
   Events follow the `:telemetry` convention of atom lists:
 
-      [:minga, :render, :pipeline]   # full render frame
-      [:minga, :render, :stage]      # individual render stage
-      [:minga, :input, :dispatch]    # keystroke dispatch
-      [:minga, :command, :execute]   # command execution
-      [:minga, :port, :emit]         # port command emission
+      [:minga, :render, :pipeline]           # full render frame
+      [:minga, :render, :stage]              # individual render stage
+      [:minga, :render, :window_model_build] # window render model construction
+      [:minga, :render, :ui_model_build]     # GUI chrome model construction
+      [:minga, :render, :adapter_encode]     # GUI adapter encoding with byte breakdown
+      [:minga, :render, :emit_prepare]       # command assembly and cast dispatch
+      [:minga, :input, :dispatch]            # keystroke dispatch
+      [:minga, :command, :execute]           # command execution
+      [:minga, :port, :write]                # actual frontend port write
 
   ## Zero Overhead
 
@@ -54,7 +58,7 @@ defmodule Minga.Telemetry do
 
   ## Examples
 
-      Telemetry.execute([:minga, :port, :emit], %{byte_count: 4096}, %{})
+      Telemetry.execute([:minga, :port, :write], %{byte_count: 4096}, %{})
 
   """
   @spec execute([atom()], map(), map()) :: :ok

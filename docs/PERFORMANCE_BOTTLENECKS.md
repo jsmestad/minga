@@ -55,7 +55,8 @@ The buffer facade already has `Minga.Buffer.apply_edits/3` which would give:
 | `[:minga, :render, :stage]` | ✅ All 7 stages (invalidation, layout, scroll, content, agent_content, chrome, compose) |
 | `[:minga, :input, :dispatch]` | ✅ In `Editor` |
 | `[:minga, :command, :execute]` | ✅ In `Editor.Commands` |
-| `[:minga, :port, :emit]` | ✅ In `RenderPipeline` |
+| `[:minga, :render, :emit_prepare]` | ✅ In `RenderPipeline` |
+| `[:minga, :port, :write]` | ✅ In `Frontend.Manager` |
 | `[:minga, :buffer, :operation]` | Not yet instrumented |
 | `[:minga, :agent, :tool]` | Not yet instrumented |
 

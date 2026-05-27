@@ -24,7 +24,7 @@ defmodule Minga.Telemetry.IntegrationTest do
         [:minga, :command, :execute, :stop],
         [:minga, :render, :pipeline, :stop],
         [:minga, :render, :stage, :stop],
-        [:minga, :port, :emit, :stop]
+        [:minga, :render, :emit_prepare, :stop]
       ],
       fn event, measurements, metadata, _config ->
         send(self, {:telemetry_event, event, measurements, metadata})

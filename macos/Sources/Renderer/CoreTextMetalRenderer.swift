@@ -16,6 +16,7 @@ import Metal
 import QuartzCore
 import AppKit
 import os.log
+import os.signpost
 
 private let rendererLog = OSLog(subsystem: "com.minga.editor", category: "Renderer")
 
@@ -269,6 +270,9 @@ final class CoreTextMetalRenderer {
     /// Line texture atlas for batched instanced drawing.
     private(set) var atlas: LineTextureAtlas?
 
+    /// Per-frame render metrics emitted through os_signpost.
+    private var frameMetrics = FrameMetrics()
+
     /// Metal buffer for line GPU instances (one instanced draw call).
     private var instanceBuffer: MTLBuffer?
     private var maxInstanceSlots: Int = 0
@@ -300,6 +304,18 @@ final class CoreTextMetalRenderer {
                 contentScale: Float, scrollOffset: SIMD2<Float> = .zero,
                 scrollTargetWindowId: UInt16? = nil) {
 
+        frameMetrics.reset()
+        let renderSignpostID = OSSignpostID(log: renderLog)
+        os_signpost(.begin, log: renderLog, name: "Frame", signpostID: renderSignpostID)
+        defer {
+            os_signpost(.end, log: renderLog, name: "Frame", signpostID: renderSignpostID,
+                        "buffer_rows_rasterized=%{public}d buffer_rows_reused=%{public}d other_textures_rasterized=%{public}d other_textures_reused=%{public}d texture_uploads=%{public}d texture_upload_bytes=%{public}d atlas_new_keys=%{public}d atlas_hash_changes=%{public}d atlas_evictions=%{public}d",
+                        frameMetrics.bufferRowsRasterized, frameMetrics.bufferRowsReused,
+                        frameMetrics.otherTexturesRasterized, frameMetrics.otherTexturesReused,
+                        frameMetrics.textureUploads, frameMetrics.textureUploadBytes,
+                        frameMetrics.atlasNewKeys, frameMetrics.atlasHashChanges, frameMetrics.atlasEvictions)
+        }
+
         // Store theme colors reference for helper methods.
         self.currentThemeColors = themeColors
 
@@ -322,7 +338,7 @@ final class CoreTextMetalRenderer {
 
         // Ensure atlas can hold all lines (content + gutter + semantic).
         if let atlas {
-            let neededSlots = Int(frameState.rows) * 4
+            let neededSlots = CoreTextMetalRenderer.atlasSlotDemand(frameState: frameState, windowContents: windowContents)
             let atlasPixelWidth = Int(ceil(CGFloat(frameState.cols) * CGFloat(cellW) * CGFloat(scale)))
             atlas.ensureCapacity(maxSlots: neededSlots, width: atlasPixelWidth)
             atlas.beginFrame()
@@ -491,8 +507,11 @@ final class CoreTextMetalRenderer {
                 }
 
                 // Render pre-clipped line textures into atlas.
+                var rowEntriesByRow: [UInt16: AtlasEntry] = [:]
                 for (rowIdx, clippedRow) in clippedRows.enumerated() {
-                    if let atlas, let entry = wcr.renderRowToAtlas(displayRow: UInt16(rowIdx), row: clippedRow, atlas: atlas) {
+                    let displayRow = UInt16(rowIdx)
+                    if let atlas, let entry = wcr.renderRowToAtlas(displayRow: displayRow, row: clippedRow, windowId: content.windowId, atlas: atlas, metrics: &frameMetrics) {
+                        rowEntriesByRow[displayRow] = entry
                         let yPos = scrollableWindowRowOffset + Float(rowIdx) * displayCellH * scale
                         let textYOffset = (displayCellH - cellH) * scale * 0.5
 
@@ -514,31 +533,16 @@ final class CoreTextMetalRenderer {
                     }
 
                     for (rowIndex, rowAnnotations) in annotationsByRow {
-                        let linePixelWidth: Float
-                        if Int(rowIndex) < clippedRows.count {
-                            let clippedRow = clippedRows[Int(rowIndex)]
-                            if let lineEntry = wcr.renderRowToAtlas(displayRow: rowIndex, row: clippedRow, atlas: atlas) {
-                                linePixelWidth = Float(lineEntry.pixelWidth)
-                            } else {
-                                linePixelWidth = 0
-                            }
-                        } else {
-                            linePixelWidth = 0
-                        }
-
+                        let linePixelWidth = Float(rowEntriesByRow[rowIndex]?.pixelWidth ?? 0)
                         let rowY = scrollableWindowRowOffset + Float(rowIndex) * displayCellH * scale
                         var cursorX = contentColOffset + linePixelWidth
                             + Float(wcr.annotationGap) * scale
 
                         for (annIdx, ann) in rowAnnotations.enumerated() {
-                            // Key scheme: 0xB000 + row*4 + annIdx. Caps at 4 cached
-                            // annotations per row; overflow-safe for large row indices.
-                            let rawKey = 0xB000 + Int(rowIndex) * 4 + min(annIdx, 3)
-                            guard rawKey <= Int(UInt16.max) else { continue }
-                            let annKey = UInt16(rawKey)
+                            let annKey = AtlasKey.lineAnnotation(windowId: content.windowId, row: rowIndex, subIndex: UInt16(min(annIdx, Int(UInt16.max))))
 
                             guard let annEntry = wcr.renderAnnotationToAtlas(
-                                annotation: ann, key: annKey, atlas: atlas
+                                annotation: ann, key: annKey, atlas: atlas, metrics: &frameMetrics
                             ) else { continue }
 
                             let (uvOrigin, uvSize) = atlas.uvForSlot(annEntry.slotIndex, pixelWidth: annEntry.pixelWidth)
@@ -829,7 +833,7 @@ final class CoreTextMetalRenderer {
             }
 
             // Horizontal separators: 1px-high line + centered filename label
-            for horiz in frameState.horizontalSeparators {
+            for (separatorIndex, horiz) in frameState.horizontalSeparators.enumerated() {
                 let hY = Float(horiz.row) * displayCellH * scale + (displayCellH * scale * 0.5) - 0.5
                 let hX = Float(horiz.col) * cellW * scale
                 let hW = Float(horiz.width) * cellW * scale
@@ -849,9 +853,9 @@ final class CoreTextMetalRenderer {
                 // Centered filename label rendered as a CoreText texture
                 if !horiz.filename.isEmpty, let atlas = atlas, let wcr = windowContentRenderer {
                     let labelHash = horiz.filename.hashValue ^ Int(frameState.splitBorderColor)
-                    let labelKey = UInt16(0xF000) &+ horiz.row
+                    let labelKey = AtlasKey.splitLabel(row: horiz.row, subIndex: UInt16(min(separatorIndex, Int(UInt16.max))))
                     if let entry = wcr.renderSimpleText(horiz.filename, fg: frameState.splitBorderColor,
-                                                         key: labelKey, contentHash: labelHash, atlas: atlas) {
+                                                         key: labelKey, contentHash: labelHash, atlas: atlas, metrics: &frameMetrics) {
                         // Center the label text within the separator width
                         let labelW = Float(entry.pixelWidth)
                         let centerX = hX + (hW - labelW) * 0.5
@@ -953,8 +957,25 @@ final class CoreTextMetalRenderer {
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: 1)
         }
 
+        if let atlas {
+            frameMetrics.textureUploads = atlas.frameTextureUploads
+            frameMetrics.textureUploadBytes = atlas.frameTextureUploadBytes
+        }
+
         encoder.endEncoding()
         cmdBuf.present(drawable)
+        let commitTime = CACurrentMediaTime()
+        cmdBuf.addCompletedHandler { completedBuffer in
+            let completionLatencyMs = (CACurrentMediaTime() - commitTime) * 1000.0
+            let gpuStart = completedBuffer.gpuStartTime
+            let gpuEnd = completedBuffer.gpuEndTime
+
+            if gpuStart > 0, gpuEnd > gpuStart {
+                os_signpost(.event, log: renderLog, name: "GPU Timing", signpostID: renderSignpostID, "gpu_ms=%{public}.3f commit_to_complete_ms=%{public}.3f", (gpuEnd - gpuStart) * 1000.0, completionLatencyMs)
+            } else {
+                os_signpost(.event, log: renderLog, name: "GPU Timing", signpostID: renderSignpostID, "gpu_ms=%{public}.3f commit_to_complete_ms=%{public}.3f", 0.0, completionLatencyMs)
+            }
+        }
         cmdBuf.commit()
     }
 
@@ -991,7 +1012,7 @@ final class CoreTextMetalRenderer {
             // Sign column (leftmost in gutter)
             if signColWidth > 0 {
                 renderGutterSign(
-                    entry: entry, screenRow: screenRow, yPos: yPos, xOffset: xOffset,
+                    entry: entry, windowId: gutter.windowId, screenRow: screenRow, yPos: yPos, xOffset: xOffset,
                     cellW: cellW, cellH: cellH, scale: scale,
                     frameState: frameState,
                     bgQuads: &bgQuads, lineInstances: &lineInstances,
@@ -1045,7 +1066,7 @@ final class CoreTextMetalRenderer {
     /// using Metal quads. Diagnostic signs (E/W/I/H) are rendered as
     /// CTLine textures in the diagnostic color.
     private func renderGutterSign(
-        entry: Wire.GutterEntry, screenRow: UInt16, yPos: Float, xOffset: Float,
+        entry: Wire.GutterEntry, windowId: UInt16, screenRow: UInt16, yPos: Float, xOffset: Float,
         cellW: Float, cellH: Float, scale: Float,
         frameState: FrameState,
         bgQuads: inout [QuadGPU],
@@ -1081,11 +1102,11 @@ final class CoreTextMetalRenderer {
 
         case .diagError, .diagWarning, .diagInfo, .diagHint:
             let (text, fg) = diagnosticSignTextAndColor(entry.signType, frameState: frameState)
-            let cacheKey = UInt16(0x8000) &+ screenRow
+            let cacheKey = AtlasKey.diagnosticSign(windowId: windowId, row: screenRow)
             let contentHash = gutterContentHash(text: text, fg: fg)
             if let atlas, let wcr = windowContentRenderer,
                let entry = wcr.renderSimpleText(text, fg: fg, bold: true,
-                                                 key: cacheKey, contentHash: contentHash, atlas: atlas) {
+                                                 key: cacheKey, contentHash: contentHash, atlas: atlas, metrics: &frameMetrics) {
                 let (uvOrigin, uvSize) = atlas.uvForSlot(entry.slotIndex, pixelWidth: entry.pixelWidth)
                 var lineGPU = LineGPU()
                 lineGPU.position = SIMD2<Float>(xOffset, yPos)
@@ -1099,11 +1120,11 @@ final class CoreTextMetalRenderer {
             // Render annotation icon text with the annotation's custom fg color.
             let text = entry.signText.isEmpty ? "●" : entry.signText
             let fg = entry.signFg
-            let cacheKey = UInt16(0x8800) &+ screenRow
+            let cacheKey = AtlasKey.annotationIcon(windowId: windowId, row: screenRow)
             let contentHash = gutterContentHash(text: text, fg: fg)
             if let atlas, let wcr = windowContentRenderer,
                let atlasEntry = wcr.renderSimpleText(text, fg: fg, bold: false,
-                                                      key: cacheKey, contentHash: contentHash, atlas: atlas) {
+                                                      key: cacheKey, contentHash: contentHash, atlas: atlas, metrics: &frameMetrics) {
                 let (uvOrigin, uvSize) = atlas.uvForSlot(atlasEntry.slotIndex, pixelWidth: atlasEntry.pixelWidth)
                 var lineGPU = LineGPU()
                 lineGPU.position = SIMD2<Float>(xOffset, yPos)
@@ -1258,11 +1279,11 @@ final class CoreTextMetalRenderer {
         let padCols = max(lnWidth - numberStr.count - 1, 0)
         let startCol = UInt16(signColWidth + padCols)
 
-        let cacheKey = UInt16(0x9000) &+ screenRow
+        let cacheKey = AtlasKey.gutterLineNumber(windowId: gutter.windowId, row: screenRow)
         let contentHash = gutterContentHash(text: numberStr, fg: fg)
         if let atlas, let wcr = windowContentRenderer,
            let entry = wcr.renderSimpleText(numberStr, fg: fg,
-                                             key: cacheKey, contentHash: contentHash, atlas: atlas) {
+                                             key: cacheKey, contentHash: contentHash, atlas: atlas, metrics: &frameMetrics) {
             let (uvOrigin, uvSize) = atlas.uvForSlot(entry.slotIndex, pixelWidth: entry.pixelWidth)
             let xPos = xOffset + Float(startCol) * cellW * scale
             var lineGPU = LineGPU()
@@ -1329,6 +1350,52 @@ final class CoreTextMetalRenderer {
         hasher.combine(text)
         hasher.combine(fg)
         return hasher.finalize()
+    }
+
+    /// Computes a conservative atlas slot count for all text textures that may be touched by the current frame.
+    static func atlasSlotDemand(frameState: FrameState, windowContents: [UInt16: GUIWindowContent]) -> Int {
+        let bufferRows = windowContents.values.reduce(0) { total, content in
+            total + content.rows.count
+        }
+
+        let lineAnnotations = windowContents.values.reduce(0) { total, content in
+            total + content.lineAnnotations.filter { $0.kind != .gutterIcon }.count
+        }
+
+        let gutterTextures = frameState.windowGutters.values.reduce(0) { total, gutter in
+            total + gutterTextureDemand(gutter)
+        }
+
+        let splitLabels = frameState.horizontalSeparators.reduce(0) { total, separator in
+            total + (separator.filename.isEmpty ? 0 : 1)
+        }
+
+        let demand = bufferRows + lineAnnotations + gutterTextures + splitLabels
+        let slack = max(Int(frameState.rows), 32)
+        return max(demand + slack, 1)
+    }
+
+    private static func gutterTextureDemand(_ gutter: Wire.WindowGutter) -> Int {
+        gutter.entries.reduce(0) { total, entry in
+            total + lineNumberTextureDemand(gutter) + signTextureDemand(entry.signType)
+        }
+    }
+
+    private static func lineNumberTextureDemand(_ gutter: Wire.WindowGutter) -> Int {
+        if gutter.lineNumberStyle != .none && gutter.lineNumberWidth > 0 {
+            return 1
+        }
+
+        return 0
+    }
+
+    private static func signTextureDemand(_ signType: Wire.GutterSignType) -> Int {
+        switch signType {
+        case .diagError, .diagWarning, .diagInfo, .diagHint, .annotation:
+            return 1
+        case .gitAdded, .gitModified, .gitDeleted, .none:
+            return 0
+        }
     }
 
     // MARK: - Private

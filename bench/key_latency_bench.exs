@@ -8,7 +8,7 @@ defmodule Minga.Bench.KeyLatency do
     [:minga, :input, :dispatch, :stop],
     [:minga, :render, :pipeline, :stop],
     [:minga, :render, :stage, :stop],
-    [:minga, :port, :emit, :stop]
+    [:minga, :render, :emit_prepare, :stop]
   ]
 
   @runs 5
@@ -121,7 +121,7 @@ defmodule Minga.Bench.KeyLatency do
       p95_wall_us: percentile(wall, 0.95),
       input_us: median_duration(events, [:minga, :input, :dispatch, :stop]),
       render_us: median_duration(events, [:minga, :render, :pipeline, :stop]),
-      port_us: median_duration(events, [:minga, :port, :emit, :stop]),
+      port_us: median_duration(events, [:minga, :render, :emit_prepare, :stop]),
       content_us: median_stage_duration(events, :content),
       chrome_us: median_stage_duration(events, :chrome),
       emit_us: median_stage_duration(events, :emit)
@@ -154,7 +154,7 @@ defmodule Minga.Bench.KeyLatency do
       "motion_latency_us" => median_field(motion_summaries, :median_wall_us),
       "input_dispatch_us" => median_field(insert_summaries, :input_us),
       "render_us" => median_field(insert_summaries, :render_us),
-      "port_emit_us" => median_field(insert_summaries, :port_us),
+      "emit_prepare_us" => median_field(insert_summaries, :port_us),
       "content_stage_us" => median_field(insert_summaries, :content_us),
       "chrome_stage_us" => median_field(insert_summaries, :chrome_us),
       "emit_stage_us" => median_field(insert_summaries, :emit_us)
@@ -163,7 +163,8 @@ defmodule Minga.Bench.KeyLatency do
     Enum.each(metrics, fn {name, value} -> IO.puts("METRIC #{name}=#{format_number(value)}") end)
   end
 
-  defp median_field(summaries, field), do: summaries |> Enum.map(&Map.fetch!(&1, field)) |> median()
+  defp median_field(summaries, field),
+    do: summaries |> Enum.map(&Map.fetch!(&1, field)) |> median()
 
   defp median([]), do: 0
 

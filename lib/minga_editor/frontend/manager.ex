@@ -151,8 +151,12 @@ defmodule MingaEditor.Frontend.Manager do
   end
 
   def handle_cast({:send_commands, commands}, state) do
-    batch = IO.iodata_to_binary(commands)
-    Port.command(state.port, batch)
+    :telemetry.span([:minga, :port, :write], %{}, fn ->
+      batch = IO.iodata_to_binary(commands)
+      Port.command(state.port, batch)
+      {:ok, %{byte_count: byte_size(batch)}}
+    end)
+
     {:noreply, state}
   end
 

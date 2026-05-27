@@ -69,16 +69,27 @@ defmodule Minga.Frontend.Adapter.GUI do
     {:split_separators, SplitSeparatorsEncoder}
   ]
 
+  @type window_metrics :: WindowEncoder.metrics()
+
   @spec encode_windows([RenderModel.Window.t()], Caches.t()) :: {[binary()], Caches.t()}
   def encode_windows(windows, %Caches{} = caches) when is_list(windows) do
-    {cmds, caches} =
+    {cmds, caches, _metrics} = encode_windows_with_metrics(windows, caches)
+    {cmds, caches}
+  end
+
+  @spec encode_windows_with_metrics([RenderModel.Window.t()], Caches.t()) ::
+          {[binary()], Caches.t(), window_metrics()}
+  def encode_windows_with_metrics(windows, %Caches{} = caches) when is_list(windows) do
+    {cmds, caches, metrics} =
       windows
       |> Enum.filter(&buffer_window?/1)
-      |> Enum.reduce({[], caches}, fn window, {cmds_acc, caches_acc} ->
-        encode_window(window, cmds_acc, caches_acc)
+      |> Enum.reduce({[], caches, empty_window_metrics()}, fn window,
+                                                              {cmds_acc, caches_acc, metrics_acc} ->
+        {cmds, caches, metrics} = encode_window_with_metrics(window, cmds_acc, caches_acc)
+        {cmds, caches, merge_window_metrics(metrics_acc, metrics)}
       end)
 
-    {Enum.reverse(cmds), caches}
+    {Enum.reverse(cmds), caches, metrics}
   end
 
   @spec encode_metal_ui(RenderModel.UI.t(), Caches.t()) :: {[binary()], Caches.t()}
@@ -106,18 +117,38 @@ defmodule Minga.Frontend.Adapter.GUI do
   defp buffer_window?(%RenderModel.Window{content_kind: :buffer}), do: true
   defp buffer_window?(_window), do: false
 
-  @spec encode_window(RenderModel.Window.t(), [binary()], Caches.t()) :: {[binary()], Caches.t()}
-  defp encode_window(%RenderModel.Window{} = window, cmds, %Caches{} = caches) do
+  @spec encode_window_with_metrics(RenderModel.Window.t(), [binary()], Caches.t()) ::
+          {[binary()], Caches.t(), window_metrics()}
+  defp encode_window_with_metrics(%RenderModel.Window{} = window, cmds, %Caches{} = caches) do
     fp = :erlang.phash2(window)
-    metadata = WindowEncoder.encode_frame_metadata(window)
+    {metadata, metadata_metrics} = WindowEncoder.encode_frame_metadata_with_metrics(window)
 
     if Map.get(caches.last_window_fps, window.window_id) == fp do
-      {Enum.reverse(metadata) ++ cmds, caches}
+      {Enum.reverse(metadata) ++ cmds, caches, metadata_metrics}
     else
-      encoded = [WindowEncoder.encode_window_content(window) | metadata]
+      {content, content_metrics} = WindowEncoder.encode_window_content_with_metrics(window)
+      encoded = [content | metadata]
       caches = %{caches | last_window_fps: Map.put(caches.last_window_fps, window.window_id, fp)}
-      {Enum.reverse(encoded) ++ cmds, caches}
+
+      {Enum.reverse(encoded) ++ cmds, caches,
+       merge_window_metrics(content_metrics, metadata_metrics)}
     end
+  end
+
+  @spec empty_window_metrics() :: window_metrics()
+  defp empty_window_metrics do
+    %{row_bytes: 0, overlay_bytes: 0, gutter_bytes: 0, annotation_bytes: 0, metadata_bytes: 0}
+  end
+
+  @spec merge_window_metrics(window_metrics(), window_metrics()) :: window_metrics()
+  defp merge_window_metrics(left, right) do
+    %{
+      row_bytes: left.row_bytes + right.row_bytes,
+      overlay_bytes: left.overlay_bytes + right.overlay_bytes,
+      gutter_bytes: left.gutter_bytes + right.gutter_bytes,
+      annotation_bytes: left.annotation_bytes + right.annotation_bytes,
+      metadata_bytes: left.metadata_bytes + right.metadata_bytes
+    }
   end
 
   @spec encode_component(term(), module(), [binary()], Caches.t()) :: {[binary()], Caches.t()}
