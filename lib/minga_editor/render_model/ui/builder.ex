@@ -4,6 +4,7 @@ defmodule MingaEditor.RenderModel.UI.Builder do
   alias Minga.Buffer
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.RenderModel.UI.AgentContextBuilder
+  alias MingaEditor.RenderModel.UI.BoardBuilder
   alias MingaEditor.RenderModel.UI.BreadcrumbBuilder
   alias MingaEditor.RenderModel.UI.GitStatusBuilder
   alias MingaEditor.RenderModel.UI.NotificationsBuilder
@@ -32,7 +33,8 @@ defmodule MingaEditor.RenderModel.UI.Builder do
       git_status: build_git_status(ctx),
       agent_context: AgentContextBuilder.build(gui_payload),
       status_bar: build_status_bar(sb_data, ctx),
-      observatory: ObservatoryBuilder.build(ctx.shell_state)
+      observatory: ObservatoryBuilder.build(ctx.shell_state),
+      board: BoardBuilder.build(gui_payload)
     }
   end
 

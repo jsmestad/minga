@@ -2,6 +2,7 @@ defmodule Minga.Frontend.Adapter.GUI do
   @moduledoc false
 
   alias Minga.Frontend.Adapter.GUI.AgentContextEncoder
+  alias Minga.Frontend.Adapter.GUI.BoardEncoder
   alias Minga.Frontend.Adapter.GUI.BreadcrumbEncoder
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Frontend.Adapter.GUI.GitStatusEncoder
@@ -54,6 +55,11 @@ defmodule Minga.Frontend.Adapter.GUI do
         do: ObservatoryEncoder.encode(ui.observatory, caches),
         else: {nil, caches}
 
+    {board_cmd, caches} =
+      if ui.board,
+        do: BoardEncoder.encode(ui.board, caches),
+        else: {nil, caches}
+
     cmds =
       Enum.reject(
         [
@@ -65,7 +71,8 @@ defmodule Minga.Frontend.Adapter.GUI do
           git_status_cmd,
           agent_context_cmd,
           status_bar_cmd,
-          observatory_cmd
+          observatory_cmd,
+          board_cmd
         ],
         &is_nil/1
       )

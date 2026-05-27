@@ -147,7 +147,6 @@ defmodule MingaEditor.Frontend.Emit.GUI do
       &build_gui_hover_popup_cmd/2,
       &build_gui_signature_help_cmd/2,
       &build_gui_float_popup_cmd/2,
-      &build_gui_board_cmd/2,
       &build_gui_change_summary_cmd/2,
       &build_gui_edit_timeline_cmd/2,
       &build_gui_extension_overlay_cmd/2,
@@ -1628,79 +1627,6 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     else
       {nil, ctx, caches}
     end
-  end
-
-  # ── Board ──
-
-  @spec build_gui_board_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
-  defp build_gui_board_cmd(%{shell: shell} = ctx, caches) do
-    case shell.gui_payload(ctx) do
-      {:board, %MingaEditor.Frontend.Protocol.GUI.BoardPayload{} = board} ->
-        build_gui_board_payload_cmd(board, caches)
-
-      nil ->
-        dismiss_gui_board_cmd(caches)
-
-      other ->
-        unsupported_gui_payload_cmd(other, caches)
-    end
-  end
-
-  @spec unsupported_gui_payload_cmd(term(), Caches.t()) :: {binary() | nil, Caches.t()}
-  defp unsupported_gui_payload_cmd(payload, caches) do
-    Log.warning(
-      :render,
-      "Unsupported GUI shell payload #{inspect(payload)}; dismissing Board surface"
-    )
-
-    dismiss_gui_board_cmd(caches)
-  end
-
-  @spec build_gui_board_payload_cmd(
-          MingaEditor.Frontend.Protocol.GUI.BoardPayload.t(),
-          Caches.t()
-        ) ::
-          {binary() | nil, Caches.t()}
-  defp build_gui_board_payload_cmd(board, caches) do
-    # Always send when Board is active so the GUI stays in sync.
-    # The fingerprint covers card count, focused card, zoom state, and
-    # card statuses so we skip encoding when nothing changed.
-    fp = board_fingerprint(board)
-
-    if fp != caches.last_gui_board_fp do
-      {ProtocolGUI.encode_gui_board(board), %{caches | last_gui_board_fp: fp}}
-    else
-      {nil, caches}
-    end
-  end
-
-  # Board not active: send visible=false once to dismiss.
-  # Must NOT synthesize a shell payload when the active shell did not provide one.
-  # Instead, build a minimal board with zoomed_into set so visible encodes as 0.
-  defp dismiss_gui_board_cmd(caches) do
-    if caches.last_gui_board_fp != :dismissed do
-      {ProtocolGUI.encode_gui_board(MingaEditor.Frontend.Protocol.GUI.BoardPayload.hidden()),
-       %{caches | last_gui_board_fp: :dismissed}}
-    else
-      {nil, caches}
-    end
-  end
-
-  @spec board_fingerprint(MingaEditor.Frontend.Protocol.GUI.BoardPayload.t()) :: integer()
-  defp board_fingerprint(board) do
-    cards =
-      Enum.map(board.cards, fn card ->
-        {card.id, card.status, card.kind, card.task, card.display_task, card.model,
-         card.created_at, card.recent_files, card.sparkline}
-      end)
-
-    :erlang.phash2({
-      board.focused_card_id,
-      board.zoomed_card_id,
-      board.filter_mode?,
-      board.filter_text,
-      cards
-    })
   end
 
   # ── Change Summary ──

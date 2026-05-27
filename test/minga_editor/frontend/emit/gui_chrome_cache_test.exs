@@ -321,34 +321,36 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
       board_state = %{gui_state() | shell: BoardPayloadShell}
 
       {_ctx, caches, board_cmds} = sync_chrome(board_state)
-      assert [<<0x87, 1::8, _::binary>>] = opcode_cmds(board_cmds, 0x87)
-      # 0x88 (agent context) is now handled by the RenderModel adapter path
+      # 0x87 (board) and 0x88 (agent context) are now handled by the RenderModel adapter path
+      assert [] = opcode_cmds(board_cmds, 0x87)
 
       {_ctx, caches, dismiss_cmds} = sync_chrome(gui_state(), caches)
-      assert [<<0x87, 0::8, _::binary>>] = opcode_cmds(dismiss_cmds, 0x87)
-      # 0x88 (agent context) is now handled by the RenderModel adapter path
+      # 0x87 (board) and 0x88 (agent context) are now handled by the RenderModel adapter path
       assert [<<0x89, 0::8, _::binary>>] = opcode_cmds(dismiss_cmds, 0x89)
 
       {_ctx, _caches, repeated_cmds} = sync_chrome(gui_state(), caches)
-      assert [] = opcode_cmds(repeated_cmds, 0x87)
-      # 0x88 (agent context) is now handled by the RenderModel adapter path
+      # 0x87 (board) and 0x88 (agent context) are now handled by the RenderModel adapter path
       assert [] = opcode_cmds(repeated_cmds, 0x89)
     end
 
-    test "switching from Board to Traditional emits one Board dismiss payload" do
+    test "switching from Board to Traditional emits one Board dismiss payload via adapter" do
+      # Board (0x87) is now handled by the RenderModel adapter path.
+      # This test verifies sync_swiftui_chrome does NOT emit board commands.
       board_state = %{gui_state() | shell: BoardPayloadShell}
 
       {_ctx, caches, board_cmds} = sync_chrome(board_state)
-      assert [<<0x87, 1::8, _::binary>>] = opcode_cmds(board_cmds, 0x87)
+      assert [] = opcode_cmds(board_cmds, 0x87)
 
       {_ctx, caches, dismiss_cmds} = sync_chrome(gui_state(), caches)
-      assert [<<0x87, 0::8, _::binary>>] = opcode_cmds(dismiss_cmds, 0x87)
+      assert [] = opcode_cmds(dismiss_cmds, 0x87)
 
       {_ctx, _caches, repeated_cmds} = sync_chrome(gui_state(), caches)
       assert [] = opcode_cmds(repeated_cmds, 0x87)
     end
 
-    test "unsupported shell GUI payload dismisses Board without crashing" do
+    test "unsupported shell GUI payload dismisses Board via adapter without crashing" do
+      # Board (0x87) is now handled by the RenderModel adapter path.
+      # The unsupported payload warning is emitted by the board builder.
       board_state = %{gui_state() | shell: BoardPayloadShell}
 
       {_ctx, caches, _board_cmds} = sync_chrome(board_state)
@@ -358,7 +360,8 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
         with_log(fn -> sync_chrome(unsupported_state, caches) end)
 
       assert log =~ "Unsupported GUI shell payload"
-      assert [<<0x87, 0::8, _::binary>>] = opcode_cmds(cmds, 0x87)
+      # Board commands are no longer emitted through sync_swiftui_chrome
+      assert [] = opcode_cmds(cmds, 0x87)
     end
 
     test "workspace fingerprint updates when the last agent workspace disappears" do
