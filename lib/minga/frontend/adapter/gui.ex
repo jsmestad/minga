@@ -5,6 +5,7 @@ defmodule Minga.Frontend.Adapter.GUI do
   alias Minga.Frontend.Adapter.GUI.BoardEncoder
   alias Minga.Frontend.Adapter.GUI.BreadcrumbEncoder
   alias Minga.Frontend.Adapter.GUI.Caches
+  alias Minga.Frontend.Adapter.GUI.CompletionEncoder
   alias Minga.Frontend.Adapter.GUI.FileTreeEncoder
   alias Minga.Frontend.Adapter.GUI.GitStatusEncoder
   alias Minga.Frontend.Adapter.GUI.MinibufferEncoder
@@ -96,6 +97,11 @@ defmodule Minga.Frontend.Adapter.GUI do
         do: MinibufferEncoder.encode(ui.minibuffer, caches),
         else: {nil, caches}
 
+    {completion_cmd, caches} =
+      if ui.completion,
+        do: CompletionEncoder.encode(ui.completion, caches),
+        else: {nil, caches}
+
     cmds =
       Enum.reject(
         [
@@ -114,7 +120,8 @@ defmodule Minga.Frontend.Adapter.GUI do
           sidebars_cmd,
           file_tree_cmd,
           picker_cmd,
-          minibuffer_cmd
+          minibuffer_cmd,
+          completion_cmd
         ],
         &is_nil/1
       )

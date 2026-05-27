@@ -17,7 +17,8 @@ defmodule Minga.RenderModel.UI do
           sidebars: term(),
           file_tree: term(),
           picker: term(),
-          minibuffer: term()
+          minibuffer: term(),
+          completion: term()
         }
 
   defstruct [
@@ -36,6 +37,7 @@ defmodule Minga.RenderModel.UI do
     :sidebars,
     :file_tree,
     :picker,
-    :minibuffer
+    :minibuffer,
+    :completion
   ]
 end

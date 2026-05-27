@@ -6,6 +6,7 @@ defmodule MingaEditor.RenderModel.UI.Builder do
   alias MingaEditor.RenderModel.UI.AgentContextBuilder
   alias MingaEditor.RenderModel.UI.BoardBuilder
   alias MingaEditor.RenderModel.UI.BreadcrumbBuilder
+  alias MingaEditor.RenderModel.UI.CompletionBuilder
   alias MingaEditor.RenderModel.UI.FileTreeBuilder
   alias MingaEditor.RenderModel.UI.GitStatusBuilder
   alias MingaEditor.RenderModel.UI.MinibufferBuilder
@@ -46,7 +47,8 @@ defmodule MingaEditor.RenderModel.UI.Builder do
       sidebars: SidebarsBuilder.build(ctx),
       file_tree: FileTreeBuilder.build(ctx),
       picker: PickerBuilder.build(ctx),
-      minibuffer: MinibufferBuilder.build(minibuffer_data)
+      minibuffer: MinibufferBuilder.build(minibuffer_data),
+      completion: CompletionBuilder.build(ctx)
     }
   end
 

@@ -30,7 +30,6 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   alias MingaEditor.FoldMap
   alias MingaEditor.Layout
   alias MingaEditor.Renderer.Caches
-  alias MingaEditor.Renderer.Gutter
   alias MingaEditor.Shell.Traditional.Chrome.Helpers, as: ChromeHelpers
   alias MingaEditor.RenderPipeline.ContentHelpers
   alias MingaEditor.Viewport
@@ -124,7 +123,6 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     # Each build_gui_* function returns {cmd | nil, updated_caches}.
     # Note: status_bar is now handled by the RenderModel adapter path.
     builders = [
-      &build_gui_completion_cmd/2,
       &build_gui_agent_chat_cmd/2,
       &build_gui_hover_popup_cmd/2,
       &build_gui_signature_help_cmd/2,
@@ -153,58 +151,8 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     {ctx, caches}
   end
 
-  # ── Completion ──
-
-  @spec build_gui_completion_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
-  defp build_gui_completion_cmd(%{completion: comp} = ctx, caches) do
-    {cursor_row, cursor_col} = current_cursor_screen_pos(ctx)
-    fp = :erlang.phash2({comp, cursor_row, cursor_col})
-
-    if fp != caches.last_gui_completion_fp do
-      {ProtocolGUI.encode_gui_completion(comp, cursor_row, cursor_col),
-       %{caches | last_gui_completion_fp: fp}}
-    else
-      {nil, caches}
-    end
-  end
-
-  @spec current_cursor_screen_pos(ctx()) :: {non_neg_integer(), non_neg_integer()}
-  defp current_cursor_screen_pos(ctx) do
-    active = ctx.windows.active
-    layout = ctx.layout
-
-    case {Map.get(layout.window_layouts, active), Map.get(ctx.windows.map, active)} do
-      {%{content: {row, col, _w, _h}}, %{buffer: buf, viewport: viewport} = window}
-      when is_pid(buf) ->
-        {line, column} = Buffer.cursor(buf)
-        total_lines = Buffer.line_count(buf)
-        line_number_style = Buffer.get_option(buf, :line_numbers)
-
-        number_width =
-          if line_number_style == :none, do: 0, else: Viewport.gutter_width(total_lines)
-
-        gutter_width = Gutter.total_width(number_width)
-        visible_line = visible_cursor_line(window, line)
-
-        {
-          max(row + visible_line - viewport.top, 0),
-          max(col + column + gutter_width - viewport.left, 0)
-        }
-
-      {%{content: {row, col, _w, _h}}, _window} ->
-        {row, col}
-
-      _ ->
-        {0, 0}
-    end
-  catch
-    :exit, _ -> {0, 0}
-  end
-
-  @spec visible_cursor_line(MingaEditor.Window.t(), non_neg_integer()) :: non_neg_integer()
-  defp visible_cursor_line(%{fold_map: fold_map}, line) do
-    if FoldMap.empty?(fold_map), do: line, else: FoldMap.buffer_to_visible(fold_map, line)
-  end
+  # ── Completion, Status bar, Minibuffer ──
+  # (All now handled by the RenderModel adapter path)
 
   @spec active_buffer_path(ctx()) :: String.t() | nil
   defp active_buffer_path(ctx) do
@@ -213,10 +161,6 @@ defmodule MingaEditor.Frontend.Emit.GUI do
       buf -> Buffer.file_path(buf)
     end
   end
-
-  # ── Status bar ──
-  # ── Minibuffer ──
-  # (Both now handled by the RenderModel adapter path)
 
   # ── Agent chat ──
 
