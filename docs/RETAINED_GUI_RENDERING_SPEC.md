@@ -4,7 +4,254 @@ The rendering pipeline has too many parts, too many lines of code, and is unnece
 
 ## Status
 
-Phase 1 implementation plan: [#2005](https://github.com/jsmestad/minga/issues/2005). Detailed PR-level plan at `docs/RENDERING_SIMPLIFICATION_PLAN.md`.
+Phases 1, 2, and 3 moved the architecture in the right direction, but the implementation stopped short of the full data-shape goal. Phase 1 unified the GUI chrome path, Phase 2 introduced `Minga.RenderModel.Window` for GUI buffer windows, and Phase 3 added instrumentation. The remaining debt is explicit now: several UI models still carry pre-encoded protocol binaries, there is no top-level `%Minga.RenderModel{}` frame object yet, row identity and content epochs are not implemented, and Swift still keys retained row textures by display row.
+
+The remediation plan below is the source of truth for completing the simplification work before starting delta protocol work.
+
+## Remediation plan
+
+This plan closes the gap between the retained GUI rendering spec and the implementation that landed in Phases 1, 2, and 3.
+
+### Current diagnosis
+
+The first stack moved Minga in the right direction, but it mixed path unification with data-shape redesign. Path unification mostly landed. Data-shape redesign did not land for every surface.
+
+Three things are now true:
+
+1. GUI chrome has one orchestration path: `MingaEditor.RenderModel.UI.Builder` builds UI models, `Minga.Frontend.Adapter.GUI` encodes them, and `MingaEditor.Frontend.Emit` sends the commands.
+2. GUI buffer windows have a real core model: `Minga.RenderModel.Window` carries rows, spans, gutter, cursorline, indent guides, selections, search matches, diagnostics, highlights, and annotations.
+3. Instrumentation exists for BEAM model build time, adapter encode byte counts, emit preparation, Swift atlas reuse, row rasterization, texture uploads, and frame timing.
+
+The remaining problem is that several structures are named like render models but still contain encoded protocol binaries. That keeps old encoding shapes alive and prevents the render model from being the single visible truth.
+
+### What must be fixed now
+
+The remediation has four goals:
+
+1. Replace pre-encoded UI payloads with semantic core models.
+2. Make `Minga.RenderModel` a real top-level frame model, not separate `ui_model` and `window_models` values carried through `emit_gui/4`.
+3. Finish the GUI window model contract: wrapped visual rows, non-buffer window surfaces, agent ownership boundaries, content epochs, and reset semantics.
+4. Start retained rendering only after model ownership is fixed, using stable row IDs and epochs rather than display-row cache keys.
+
+### Non-negotiable rules
+
+These rules prevent the same compromise from repeating:
+
+- A `Minga.RenderModel.*` struct must not store a protocol command binary as its primary payload.
+- A `MingaEditor.RenderModel.*Builder` must not call `MingaEditor.Frontend.Protocol.GUI.encode_gui_*`.
+- A core GUI encoder must accept a semantic model and return bytes. It must not call `Buffer`, `Options`, `Language`, `MingaEditor`, or any process.
+- A component is not migrated until the old `ProtocolGUI.encode_gui_*` function is deleted or moved to a core protocol module with a semantic-model interface.
+- Adapter caches may store fingerprints and last encoded state. They must not become the visible model.
+- No new delta protocol work starts until content epochs and full reset behavior exist.
+
+### Remediation stack
+
+#### 0. Add guardrails before more rendering work
+
+Add cheap checks that make the intended architecture hard to drift away from.
+
+Acceptance criteria:
+
+- A test or Credo check fails when a `Minga.RenderModel.UI.*` struct defines `:encoded`, `:selection_encoded`, `:cmd`, or another protocol-binary payload field.
+- A test or Credo check fails when files under `lib/minga_editor/render_model/` alias `MingaEditor.Frontend.Protocol.GUI`.
+- `MingaEditor.Renderer.Caches` no longer carries stale `last_gui_*` fields that are not read anywhere.
+- `docs/RETAINED_GUI_RENDERING_SPEC.md` and this plan agree on what counts as complete.
+
+#### 1. Introduce the top-level render model
+
+Create the object the spec originally asked for: one BEAM-owned visible frame model.
+
+Target shape:
+
+```elixir
+%Minga.RenderModel{
+  windows: [%Minga.RenderModel.Window{}],
+  ui: %Minga.RenderModel.UI{},
+  cursor: cursor_model,
+  title: title,
+  window_bg: window_bg
+}
+```
+
+Acceptance criteria:
+
+- `emit_gui/4` receives or builds one `%Minga.RenderModel{}` and passes that to `Minga.Frontend.Adapter.GUI.encode/2`.
+- The adapter owns command ordering between Metal-critical commands and SwiftUI chrome commands.
+- `emit_gui/4` no longer separately threads `window_models`, `ui_model`, `metal_ui_cmds`, and `adapter_cmds` as independent render truths.
+- Existing wire format remains unchanged.
+
+#### 2. Finish the GUI window model contract
+
+`Minga.RenderModel.Window` is the best current data shape, but it is not finished.
+
+Acceptance criteria:
+
+- Wrapped lines produce multiple `Row` structs with `row_type: :wrap_continuation`, correct text slices, correct spans, correct cursor display coordinates, and tests with long ASCII, Unicode, tabs, and virtual text.
+- `RenderModel.Window` gets `content_epoch` and reset triggers for frontend ready, window creation, window destruction, buffer switch, resize, font change, theme change, fold or wrap mode change, parser reset, and protocol recovery.
+- `full_refresh` is tied to epoch/reset semantics instead of being a loose flag that is always true.
+- Non-buffer window content is either encoded as first-class `content_kind` models or explicitly excluded from the GUI adapter with a tracked follow-up and no misleading `additional_window_models` path.
+- GUI window content tests cover folds, wraps, virtual lines, block decorations, diagnostic overlays, document highlights, search overlays, cursor visibility, and horizontal scroll.
+
+#### 3. Replace pre-encoded UI models with semantic models
+
+This is the Phase 1 debt. Work component by component, but do not call a component complete until the model is semantic and the old encoder path is gone.
+
+Already semantic or mostly semantic:
+
+- `theme`
+- `breadcrumb`
+- `which_key`
+- `notifications`
+- `search_state`
+- `git_status`
+- `agent_context`
+- `gutter_separator`
+- `split_separators`
+
+Still pre-encoded and must be replaced:
+
+- `status_bar`
+- `observatory`
+- `board`
+- `tab_bar`
+- `workspaces`
+- `sidebars`
+- `file_tree`
+- `picker`
+- `minibuffer`
+- `completion`
+- `signature_help`
+- `agent_chat`
+- `bottom_panel`
+- `change_summary`
+- `edit_timeline`
+- `extension_overlay`
+- `extension_panel`
+- `hover_popup`
+- `float_popup`
+
+Recommended order:
+
+1. Status bar, tab bar, workspaces. These are high-frequency and expose dirty markers, icons, and workspace summary shapes that should be semantic.
+2. Sidebars and file tree. Preserve the file tree selection-only fast path, but make it a model-level fast path (`selection_epoch` or `selection_fingerprint`), not a pre-encoded command.
+3. Input surfaces: picker, minibuffer, completion, signature help. These are focus-sensitive and need clean model ownership before more GUI input work.
+4. Popups and extensions: hover popup, float popup, extension overlay, extension panel. These prove extension surfaces can publish model data without editor protocol surgery.
+5. Agent surfaces: agent chat, bottom panel, change summary, edit timeline, board. These are the largest and should move with the MingaAgent boundary cleanup in step 4.
+6. Cleanup: delete migrated `ProtocolGUI.encode_gui_*` functions, split remaining protocol helpers into focused core modules, and remove compatibility tests that only prove the deleted path.
+
+Acceptance criteria per component:
+
+- The core model struct has domain fields, not `encoded` binary fields.
+- The builder accepts specific inputs and returns the semantic model.
+- The encoder lives in `lib/minga/frontend/adapter/gui/` or a core protocol module it calls.
+- The encoder is a pure function of the model and adapter caches.
+- Tests exist at the model, builder, and encoder boundaries.
+- The old `ProtocolGUI.encode_gui_*` function is deleted or moved to core with a semantic-model interface.
+- Swift receives byte-identical output unless the component intentionally changes protocol shape with a documented decoder update.
+
+#### 4. Move agent UI ownership out of the editor
+
+The spec says `MingaAgent` should produce agent UI models. That is not true yet for the complex agent surfaces.
+
+Acceptance criteria:
+
+- Agent chat, prompt, board, change summary, bottom panel, and edit timeline model builders live in `MingaAgent` or consume input structs owned by `MingaAgent`.
+- `MingaEditor.RenderPipeline.Content` no longer imports `MingaEditor.Agent.View.*` modules for agent rendering.
+- `MingaEditor.RenderModel.UI.AgentChatBuilder` no longer reaches into `MingaEditor.Agent.UIState` or calls `MingaAgent.Session` directly. The editor extracts a narrow input contract and hands it to `MingaAgent`.
+- `MingaAgent` imports core render model types but does not import `MingaEditor` for rendering.
+
+#### 5. Use Phase 3 instrumentation to set the retained-rendering baseline
+
+Do not optimize from intuition. Record the current behavior before changing row identity or protocol shape.
+
+Measure these scenarios in the GUI frontend:
+
+- Cursor move without scroll.
+- One-line scroll.
+- Page scroll.
+- Text edit on one line.
+- Text edit that changes syntax spans across multiple lines.
+- Selection drag across visible rows.
+- Search next and search previous.
+- File tree cursor move.
+- Picker typing with preview visible.
+- Agent chat append while a response streams.
+
+Record these metrics:
+
+- BEAM window model build time.
+- BEAM UI model build time.
+- GUI adapter encode time.
+- Row bytes, overlay bytes, gutter bytes, annotation bytes, metadata bytes, chrome bytes, and frame command bytes.
+- Swift buffer rows rasterized.
+- Swift buffer rows reused.
+- Texture uploads and upload bytes.
+- Frame render duration.
+
+Acceptance criteria:
+
+- `docs/PERFORMANCE.md` or a linked performance note contains baseline numbers for the scenarios above.
+- Phase 4 work names the metric it is expected to improve before implementation starts.
+
+#### 6. Add stable row identity and content epochs
+
+This is where retained rendering becomes real. The current Swift atlas keys buffer rows by display row, which means scrolling changes the key even when the same logical row is still visible.
+
+Target row shape:
+
+```elixir
+%Minga.RenderModel.Window.Row{
+  row_id: row_id,
+  row_type: :normal,
+  buffer_id: buffer_id,
+  source_line: 12,
+  visual_index: 0,
+  decoration_id: nil,
+  text: text,
+  spans: spans,
+  content_hash: content_hash
+}
+```
+
+Acceptance criteria:
+
+- BEAM rows include deterministic `row_id` values that distinguish normal lines, wrapped continuations, fold summaries, virtual lines, block decorations, and future widget rows.
+- Swift decodes row IDs and uses `window_id + content_epoch + row_id + content_hash` for atlas reuse instead of `window_id + display_row + content_hash`.
+- Cursor movement without scroll produces zero row rasterizations.
+- One-line scroll rasterizes only the newly exposed durable rows in the common case.
+- Text edits rasterize only affected rows plus rows whose syntax or layout actually changed.
+- Epoch mismatch causes conservative recovery through a full refresh, not stale rendering.
+
+#### 7. Move DisplayList behind the TUI adapter
+
+Do this after GUI model ownership is fixed. The TUI adapter proof is useful, but it is not the production path yet.
+
+Acceptance criteria:
+
+- TUI output is derived from `Minga.RenderModel`, not from `DisplayList.WindowFrame` as the pipeline-level product.
+- `DisplayList` remains only as a TUI adapter detail if it is still useful.
+- Both GUI and TUI consume the same visible model for buffer windows and shared chrome data.
+
+### Definition of complete
+
+The rendering simplification is complete when all of these are true:
+
+- There is one top-level `%Minga.RenderModel{}` for a rendered frame.
+- Core render model structs contain semantic fields, not pre-encoded protocol binaries.
+- GUI encoders live in core and are pure functions of render models plus adapter caches.
+- `MingaEditor.Frontend.Protocol.GUI` no longer owns render-model encoding for migrated surfaces.
+- GUI buffer row retention is keyed by BEAM-authored row identity and content epoch, not display row.
+- Agent UI models are produced by `MingaAgent` or by agent-owned input contracts, not by editor render modules reaching into agent internals.
+- TUI derives from the same model or has a documented adapter-only compatibility layer.
+
+### What not to do next
+
+- Do not add delta opcodes before stable row identity and content epochs are working.
+- Do not migrate another component by wrapping a binary command in a model struct.
+- Do not keep both old and new paths for the same component after a swap.
+- Do not treat display-row atlas keys as retained rendering.
+- Do not use instrumentation as a checkbox. Use it to decide the next optimization.
+
 
 ## The problem
 
