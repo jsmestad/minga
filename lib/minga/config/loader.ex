@@ -54,7 +54,8 @@ defmodule Minga.Config.Loader do
           after_error: String.t() | nil,
           lsp_settings: %{atom() => map()},
           keymap_server: keymap_server(),
-          options_server: options_server()
+          options_server: options_server(),
+          cleanup_callbacks: %{atom() => ContributionCleanup.cleanup_fun()} | nil
         }
 
   # ── Client API ──────────────────────────────────────────────────────────────
@@ -88,7 +89,12 @@ defmodule Minga.Config.Loader do
       )
       |> Options.validate_server!()
 
-    Agent.start_link(fn -> load_all(keymap_server, options_server, Minga.SafeMode.active?()) end,
+    cleanup_callbacks = Keyword.get(opts, :cleanup_callbacks)
+
+    Agent.start_link(
+      fn ->
+        load_all(keymap_server, options_server, Minga.SafeMode.active?(), cleanup_callbacks)
+      end,
       name: name
     )
   end
@@ -201,7 +207,8 @@ defmodule Minga.Config.Loader do
     # Stop all running extensions first. If that fails, do not tear down
     # registries or start a new load, because the old extension tree is still
     # partially live and a reset would orphan it.
-    stop_all_error = stop_all_extensions()
+    cleanup_callbacks = Agent.get(server, &Map.get(&1, :cleanup_callbacks))
+    stop_all_error = stop_all_extensions(cleanup_callbacks)
 
     if stop_all_error do
       Agent.update(server, fn state -> %{state | load_error: stop_all_error} end)
@@ -248,7 +255,7 @@ defmodule Minga.Config.Loader do
 
       # Re-run the full load sequence (includes starting extensions).
       # Reload deliberately ignores startup safe mode so fixed config can be loaded without restarting.
-      new_state = load_all(keymap_server, options_server, false)
+      new_state = load_all(keymap_server, options_server, false, cleanup_callbacks)
       Agent.update(server, fn _ -> new_state end)
 
       # Return error if any stage had problems
@@ -278,14 +285,22 @@ defmodule Minga.Config.Loader do
   # callback) won't see this dict and will fall back to registered defaults.
   # Extensions are skipped in test mode, so this only affects long-lived runtime
   # callers.
-  @spec load_all(keymap_server(), options_server(), boolean()) :: state()
-  defp load_all(keymap_server, options_server, safe_mode?) when is_boolean(safe_mode?) do
+  @spec load_all(
+          keymap_server(),
+          options_server(),
+          boolean(),
+          %{atom() => ContributionCleanup.cleanup_fun()} | nil
+        ) :: state()
+  defp load_all(keymap_server, options_server, safe_mode?, cleanup_callbacks)
+       when is_boolean(safe_mode?) do
     previous_keymap_server = Process.put(:minga_config_keymap, keymap_server)
     previous_options_server = Process.put(:minga_config_options, options_server)
     previous_lsp_settings = Process.put(:minga_config_lsp_settings, %{})
 
     try do
-      config_cleanup_error = cleanup_source_owned_config_contributions(keymap_server)
+      config_cleanup_error =
+        cleanup_source_owned_config_contributions(keymap_server, cleanup_callbacks)
+
       config_path = resolve_config_path()
       config_dir = Path.dirname(config_path)
 
@@ -293,7 +308,7 @@ defmodule Minga.Config.Loader do
       register_default_popup_rules()
 
       if safe_mode? do
-        safe_mode_state(config_path, config_dir, keymap_server, options_server)
+        safe_mode_state(config_path, config_dir, keymap_server, options_server, cleanup_callbacks)
       else
         # 1. Compile user modules
         {loaded_modules, modules_errors} = compile_user_modules(config_dir)
@@ -345,7 +360,7 @@ defmodule Minga.Config.Loader do
         start_all_error =
           if Process.whereis(Minga.Extension.Supervisor) != nil &&
                Application.get_env(:minga, :load_extensions, true) do
-            start_all_extensions()
+            start_all_extensions(cleanup_callbacks)
           end
 
         load_error =
@@ -370,7 +385,8 @@ defmodule Minga.Config.Loader do
           after_error: after_error,
           lsp_settings: lsp_settings,
           keymap_server: keymap_server,
-          options_server: options_server
+          options_server: options_server,
+          cleanup_callbacks: cleanup_callbacks
         }
       end
     after
@@ -380,8 +396,14 @@ defmodule Minga.Config.Loader do
     end
   end
 
-  @spec safe_mode_state(String.t(), String.t(), keymap_server(), options_server()) :: state()
-  defp safe_mode_state(config_path, config_dir, keymap_server, options_server) do
+  @spec safe_mode_state(
+          String.t(),
+          String.t(),
+          keymap_server(),
+          options_server(),
+          %{atom() => ContributionCleanup.cleanup_fun()} | nil
+        ) :: state()
+  defp safe_mode_state(config_path, config_dir, keymap_server, options_server, cleanup_callbacks) do
     %{
       config_path: config_path,
       load_error: nil,
@@ -394,7 +416,8 @@ defmodule Minga.Config.Loader do
       after_error: nil,
       lsp_settings: %{},
       keymap_server: keymap_server,
-      options_server: options_server
+      options_server: options_server,
+      cleanup_callbacks: cleanup_callbacks
     }
   end
 
@@ -479,9 +502,14 @@ defmodule Minga.Config.Loader do
     :ok
   end
 
-  @spec start_all_extensions() :: String.t() | nil
-  defp start_all_extensions do
-    case ExtSupervisor.start_all() do
+  @spec start_all_extensions(%{atom() => ContributionCleanup.cleanup_fun()} | nil) ::
+          String.t() | nil
+  defp start_all_extensions(cleanup_callbacks) do
+    case ExtSupervisor.start_all(
+           Minga.Extension.Supervisor,
+           Minga.Extension.Registry,
+           cleanup_opts(cleanup_callbacks)
+         ) do
       :ok ->
         nil
 
@@ -492,9 +520,14 @@ defmodule Minga.Config.Loader do
     end
   end
 
-  @spec stop_all_extensions() :: String.t() | nil
-  defp stop_all_extensions do
-    case ExtSupervisor.stop_all() do
+  @spec stop_all_extensions(%{atom() => ContributionCleanup.cleanup_fun()} | nil) ::
+          String.t() | nil
+  defp stop_all_extensions(cleanup_callbacks) do
+    case ExtSupervisor.stop_all(
+           Minga.Extension.Supervisor,
+           Minga.Extension.Registry,
+           cleanup_opts(cleanup_callbacks)
+         ) do
       :ok ->
         nil
 
@@ -505,9 +538,14 @@ defmodule Minga.Config.Loader do
     end
   end
 
-  @spec cleanup_source_owned_config_contributions(keymap_server()) :: String.t() | nil
-  defp cleanup_source_owned_config_contributions(keymap_server) do
-    case ContributionCleanup.unregister_source(:config, keymap: keymap_server) do
+  @spec cleanup_source_owned_config_contributions(
+          keymap_server(),
+          %{atom() => ContributionCleanup.cleanup_fun()} | nil
+        ) :: String.t() | nil
+  defp cleanup_source_owned_config_contributions(keymap_server, cleanup_callbacks) do
+    cleanup_opts = Keyword.merge([keymap: keymap_server], cleanup_opts(cleanup_callbacks))
+
+    case ContributionCleanup.unregister_source(:config, cleanup_opts) do
       :ok ->
         nil
 
@@ -517,6 +555,10 @@ defmodule Minga.Config.Loader do
         msg
     end
   end
+
+  @spec cleanup_opts(%{atom() => ContributionCleanup.cleanup_fun()} | nil) :: keyword()
+  defp cleanup_opts(nil), do: []
+  defp cleanup_opts(callbacks) when is_map(callbacks), do: [callbacks: callbacks]
 
   @spec merge_error_messages([String.t() | nil]) :: String.t() | nil
   defp merge_error_messages(messages) do
