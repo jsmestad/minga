@@ -10,6 +10,7 @@ defmodule MingaEditor.RenderModel.UI.Builder do
   alias MingaEditor.RenderModel.UI.GitStatusBuilder
   alias MingaEditor.RenderModel.UI.NotificationsBuilder
   alias MingaEditor.RenderModel.UI.ObservatoryBuilder
+  alias MingaEditor.RenderModel.UI.PickerBuilder
   alias MingaEditor.RenderModel.UI.SearchStateBuilder
   alias MingaEditor.RenderModel.UI.SidebarsBuilder
   alias MingaEditor.RenderModel.UI.StatusBarBuilder
@@ -42,7 +43,8 @@ defmodule MingaEditor.RenderModel.UI.Builder do
       tab_bar: TabBarBuilder.build(ctx),
       workspaces: WorkspacesBuilder.build(ctx),
       sidebars: SidebarsBuilder.build(ctx),
-      file_tree: FileTreeBuilder.build(ctx)
+      file_tree: FileTreeBuilder.build(ctx),
+      picker: PickerBuilder.build(ctx)
     }
   end
 

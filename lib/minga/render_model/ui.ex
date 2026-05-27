@@ -15,7 +15,8 @@ defmodule Minga.RenderModel.UI do
           tab_bar: term(),
           workspaces: term(),
           sidebars: term(),
-          file_tree: term()
+          file_tree: term(),
+          picker: term()
         }
 
   defstruct [
@@ -32,6 +33,7 @@ defmodule Minga.RenderModel.UI do
     :tab_bar,
     :workspaces,
     :sidebars,
-    :file_tree
+    :file_tree,
+    :picker
   ]
 end
