@@ -46,6 +46,7 @@ defmodule Minga.Test.HeadlessPort do
           {:name, GenServer.name()}
           | {:width, pos_integer()}
           | {:height, pos_integer()}
+          | {:capabilities, MingaEditor.Frontend.Capabilities.t()}
 
   defmodule State do
     @moduledoc false
@@ -56,6 +57,7 @@ defmodule Minga.Test.HeadlessPort do
       grid: [],
       cursor: {0, 0},
       cursor_shape: :block,
+      capabilities: MingaEditor.Frontend.Capabilities.default(),
       subscribers: [],
       waiters: [],
       frame_count: 0
@@ -67,6 +69,7 @@ defmodule Minga.Test.HeadlessPort do
             grid: [[map()]],
             cursor: {non_neg_integer(), non_neg_integer()},
             cursor_shape: MingaEditor.Frontend.Protocol.cursor_shape(),
+            capabilities: MingaEditor.Frontend.Capabilities.t(),
             subscribers: [pid()],
             waiters: [{pid(), reference()}],
             frame_count: non_neg_integer()
@@ -232,7 +235,8 @@ defmodule Minga.Test.HeadlessPort do
     state = %State{
       width: width,
       height: height,
-      grid: blank_grid(width, height)
+      grid: blank_grid(width, height),
+      capabilities: Keyword.get(opts, :capabilities, MingaEditor.Frontend.Capabilities.default())
     }
 
     {:ok, state}
@@ -253,7 +257,7 @@ defmodule Minga.Test.HeadlessPort do
   end
 
   def handle_call(:capabilities, _from, state) do
-    {:reply, MingaEditor.Frontend.Capabilities.default(), state}
+    {:reply, state.capabilities, state}
   end
 
   def handle_call(:ready?, _from, state) do

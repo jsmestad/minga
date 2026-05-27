@@ -130,6 +130,65 @@ defmodule MingaEditor.RenderPipelineTest do
       end
     end
 
+    test "GUI pipeline emits render model and adapter telemetry" do
+      parent = self()
+      handler_id = "gui-render-telemetry-#{System.unique_integer([:positive])}"
+
+      :telemetry.attach_many(
+        handler_id,
+        [
+          [:minga, :render, :window_model_build, :stop],
+          [:minga, :render, :ui_model_build, :stop],
+          [:minga, :render, :adapter_encode, :stop],
+          [:minga, :render, :emit_prepare, :stop]
+        ],
+        fn event, measurements, metadata, _config ->
+          send(parent, {:gui_telemetry, event, measurements, metadata})
+        end,
+        nil
+      )
+
+      try do
+        state = gui_state(sidebar_registry: Process.get(:sidebar_registry))
+        result = run_pipeline(state)
+        assert %EditorState{} = result
+        assert_receive {:"$gen_cast", {:send_commands, _commands}}
+
+        assert_receive {:gui_telemetry, [:minga, :render, :window_model_build, :stop],
+                        %{duration: window_duration}, %{window_id: 1}}
+
+        assert_receive {:gui_telemetry, [:minga, :render, :ui_model_build, :stop],
+                        %{duration: ui_duration}, _metadata}
+
+        assert_receive {:gui_telemetry, [:minga, :render, :adapter_encode, :stop],
+                        %{duration: encode_duration}, encode_metadata}
+
+        assert_receive {:gui_telemetry, [:minga, :render, :emit_prepare, :stop],
+                        %{duration: emit_duration}, %{byte_count: byte_count}}
+
+        assert window_duration >= 0
+        assert ui_duration >= 0
+        assert encode_duration >= 0
+        assert emit_duration >= 0
+        assert byte_count > 0
+
+        for key <- [
+              :window_row_bytes,
+              :window_overlay_bytes,
+              :window_gutter_bytes,
+              :window_annotation_bytes,
+              :window_metadata_bytes,
+              :metal_ui_bytes,
+              :chrome_bytes,
+              :frame_cmd_bytes
+            ] do
+          assert Map.has_key?(encode_metadata, key)
+        end
+      after
+        :telemetry.detach(handler_id)
+      end
+    end
+
     test "focus tree completion overlay uses the post-scroll viewport" do
       state = base_state(content: long_content(80), rows: 10, cols: 80)
       buffer = state.workspace.buffers.active

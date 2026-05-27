@@ -249,6 +249,33 @@ defmodule MingaEditor.Frontend.ManagerTest do
 
       assert :ok = Manager.send_commands(name, [Protocol.encode_clear()])
     end
+
+    test "send_commands emits actual port write telemetry when connected" do
+      name = unique_name()
+      parent = self()
+      handler_id = "manager-port-write-#{System.unique_integer([:positive])}"
+
+      :telemetry.attach(
+        handler_id,
+        [:minga, :port, :write, :stop],
+        fn _event, measurements, metadata, _config ->
+          send(parent, {:port_write, measurements, metadata})
+        end,
+        nil
+      )
+
+      try do
+        {_pid, _fake_port} = start_connected(name)
+        command = Protocol.encode_clear()
+
+        assert :ok = Manager.send_commands(name, [command])
+        assert_receive {:port_write, %{duration: duration}, %{byte_count: byte_count}}, 1_000
+        assert duration >= 0
+        assert byte_count == byte_size(command)
+      after
+        :telemetry.detach(handler_id)
+      end
+    end
   end
 
   defp start_manager(name) do

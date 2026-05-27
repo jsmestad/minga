@@ -64,13 +64,31 @@ defmodule MingaEditor.Frontend.Emit do
     minibuffer_data = chrome && chrome.minibuffer_data
 
     {ui_model, ctx} =
-      MingaEditor.RenderModel.UI.Builder.build_ui(ctx, status_bar_data, minibuffer_data)
+      Telemetry.span([:minga, :render, :ui_model_build], %{}, fn ->
+        MingaEditor.RenderModel.UI.Builder.build_ui(ctx, status_bar_data, minibuffer_data)
+      end)
 
-    {window_content_cmds, adapter_gui_caches} =
-      Minga.Frontend.Adapter.GUI.encode_windows(window_models, caches.adapter_gui_caches)
+    {window_content_cmds, metal_ui_cmds, adapter_cmds, adapter_gui_caches} =
+      Telemetry.span_with_stop_metadata([:minga, :render, :adapter_encode], %{}, fn ->
+        {window_content_cmds, adapter_gui_caches, window_metrics} =
+          Minga.Frontend.Adapter.GUI.encode_windows_with_metrics(
+            window_models,
+            caches.adapter_gui_caches
+          )
 
-    {metal_ui_cmds, adapter_gui_caches} =
-      Minga.Frontend.Adapter.GUI.encode_metal_ui(ui_model, adapter_gui_caches)
+        {metal_ui_cmds, adapter_gui_caches} =
+          Minga.Frontend.Adapter.GUI.encode_metal_ui(ui_model, adapter_gui_caches)
+
+        {adapter_cmds, adapter_gui_caches} =
+          Minga.Frontend.Adapter.GUI.encode_ui(ui_model, adapter_gui_caches)
+
+        result = {window_content_cmds, metal_ui_cmds, adapter_cmds, adapter_gui_caches}
+
+        metadata =
+          adapter_encode_metadata(window_metrics, metal_ui_cmds, adapter_cmds, frame_cmds)
+
+        {result, metadata}
+      end)
 
     caches = %{caches | adapter_gui_caches: adapter_gui_caches}
 
@@ -81,18 +99,12 @@ defmodule MingaEditor.Frontend.Emit do
     all_metal = flush_font_registration_commands() ++ all_metal
     caches = update_tracking(ctx, caches)
 
-    byte_count = IO.iodata_length(all_metal)
+    byte_count = IO.iodata_length(all_metal) + IO.iodata_length(adapter_cmds)
 
-    Telemetry.span([:minga, :port, :emit], %{byte_count: byte_count}, fn ->
+    Telemetry.span([:minga, :render, :emit_prepare], %{byte_count: byte_count}, fn ->
       MingaEditor.Frontend.send_commands(ctx.port_manager, all_metal)
       caches = send_title(ctx, caches)
       caches = send_window_bg(ctx, caches)
-
-      # Core adapter: migrated UI components
-      {adapter_cmds, adapter_caches} =
-        Minga.Frontend.Adapter.GUI.encode_ui(ui_model, caches.adapter_gui_caches)
-
-      caches = %{caches | adapter_gui_caches: adapter_caches}
 
       if adapter_cmds != [] do
         MingaEditor.Frontend.send_commands(ctx.port_manager, adapter_cmds)
@@ -110,12 +122,31 @@ defmodule MingaEditor.Frontend.Emit do
     caches = update_tracking(ctx, caches)
     byte_count = IO.iodata_length(commands)
 
-    Telemetry.span([:minga, :port, :emit], %{byte_count: byte_count}, fn ->
+    Telemetry.span([:minga, :render, :emit_prepare], %{byte_count: byte_count}, fn ->
       MingaEditor.Frontend.send_commands(ctx.port_manager, commands)
       caches = send_title(ctx, caches)
       caches = send_window_bg(ctx, caches)
       caches
     end)
+  end
+
+  @spec adapter_encode_metadata(
+          Minga.Frontend.Adapter.GUI.window_metrics(),
+          [binary()],
+          [binary()],
+          [binary()]
+        ) :: map()
+  defp adapter_encode_metadata(window_metrics, metal_ui_cmds, adapter_cmds, frame_cmds) do
+    %{
+      window_row_bytes: window_metrics.row_bytes,
+      window_overlay_bytes: window_metrics.overlay_bytes,
+      window_gutter_bytes: window_metrics.gutter_bytes,
+      window_annotation_bytes: window_metrics.annotation_bytes,
+      window_metadata_bytes: window_metrics.metadata_bytes,
+      metal_ui_bytes: IO.iodata_length(metal_ui_cmds),
+      chrome_bytes: IO.iodata_length(adapter_cmds),
+      frame_cmd_bytes: IO.iodata_length(frame_cmds)
+    }
   end
 
   # ── Font registry context (shared) ───────────────────────────────────────

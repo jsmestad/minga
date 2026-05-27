@@ -97,6 +97,15 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   @section_gutter_entries 0x03
   @no_fold_range 0xFFFF_FFFF
 
+  @typedoc "Per-section byte metrics for encoded window content."
+  @type metrics :: %{
+          row_bytes: non_neg_integer(),
+          overlay_bytes: non_neg_integer(),
+          gutter_bytes: non_neg_integer(),
+          annotation_bytes: non_neg_integer(),
+          metadata_bytes: non_neg_integer()
+        }
+
   @doc """
   Encodes a `RenderWindow` into the 0x80 wire format (sectioned).
 
@@ -110,12 +119,31 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   @doc "Encodes per-frame window metadata that the GUI clears and rebuilds every batch."
   @spec encode_frame_metadata(RenderWindow.t()) :: [binary()]
   def encode_frame_metadata(%RenderWindow{} = window) do
-    encode_gutter(window.gutter) ++
-      encode_cursorline(window.cursorline) ++ encode_indent_guides(window.indent_guides)
+    {commands, _metrics} = encode_frame_metadata_with_metrics(window)
+    commands
+  end
+
+  @doc "Encodes per-frame window metadata with byte metrics."
+  @spec encode_frame_metadata_with_metrics(RenderWindow.t()) :: {[binary()], metrics()}
+  def encode_frame_metadata_with_metrics(%RenderWindow{} = window) do
+    gutter = encode_gutter(window.gutter)
+    metadata = encode_cursorline(window.cursorline) ++ encode_indent_guides(window.indent_guides)
+
+    {gutter ++ metadata,
+     empty_metrics()
+     |> Map.put(:gutter_bytes, IO.iodata_length(gutter))
+     |> Map.put(:metadata_bytes, IO.iodata_length(metadata))}
   end
 
   @spec encode_window_content(RenderWindow.t()) :: binary()
   def encode_window_content(%RenderWindow{} = sw) do
+    {binary, _metrics} = encode_window_content_with_metrics(sw)
+    binary
+  end
+
+  @doc "Encodes window content with per-section byte metrics."
+  @spec encode_window_content_with_metrics(RenderWindow.t()) :: {binary(), metrics()}
+  def encode_window_content_with_metrics(%RenderWindow{} = sw) do
     # Flags byte: bit 0 = full_refresh, bit 1 = cursor_visible
     flags =
       if(sw.full_refresh, do: 1, else: 0) |||
@@ -135,17 +163,42 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
     highlight_payload = IO.iodata_to_binary(encode_document_highlights(sw.document_highlights))
     annotation_payload = IO.iodata_to_binary(encode_annotations(sw.annotations))
 
+    header_section = encode_section(@section_wc_header, header_payload)
+    rows_section = encode_section(@section_wc_rows, rows_payload)
+    selection_section = encode_section(@section_wc_selection, selection_payload)
+    search_section = encode_section(@section_wc_search, matches_payload)
+    diagnostic_section = encode_section(@section_wc_diagnostics, diag_payload)
+    highlight_section = encode_section(@section_wc_highlights, highlight_payload)
+    annotation_section = encode_section(@section_wc_annotations, annotation_payload)
+
     sections = [
-      encode_section(@section_wc_header, header_payload),
-      encode_section(@section_wc_rows, rows_payload),
-      encode_section(@section_wc_selection, selection_payload),
-      encode_section(@section_wc_search, matches_payload),
-      encode_section(@section_wc_diagnostics, diag_payload),
-      encode_section(@section_wc_highlights, highlight_payload),
-      encode_section(@section_wc_annotations, annotation_payload)
+      header_section,
+      rows_section,
+      selection_section,
+      search_section,
+      diagnostic_section,
+      highlight_section,
+      annotation_section
     ]
 
-    IO.iodata_to_binary([<<@op_gui_window_content, length(sections)::8>> | sections])
+    binary = IO.iodata_to_binary([<<@op_gui_window_content, length(sections)::8>> | sections])
+
+    metrics = %{
+      row_bytes: byte_size(rows_section),
+      overlay_bytes:
+        byte_size(selection_section) + byte_size(search_section) + byte_size(diagnostic_section) +
+          byte_size(highlight_section),
+      gutter_bytes: 0,
+      annotation_bytes: byte_size(annotation_section),
+      metadata_bytes: 2 + byte_size(header_section)
+    }
+
+    {binary, metrics}
+  end
+
+  @spec empty_metrics() :: metrics()
+  defp empty_metrics do
+    %{row_bytes: 0, overlay_bytes: 0, gutter_bytes: 0, annotation_bytes: 0, metadata_bytes: 0}
   end
 
   @spec encode_section(non_neg_integer(), binary()) :: binary()

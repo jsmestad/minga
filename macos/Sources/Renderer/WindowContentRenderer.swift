@@ -197,21 +197,26 @@ final class WindowContentRenderer {
 
     /// Render a visual row into an atlas slot.
     ///
-    /// Checks the atlas cache first (using a key offset of 0xA000 to avoid
-    /// collision with content/gutter keys). On miss, rasterizes and uploads.
-    func renderRowToAtlas(displayRow: UInt16, row: GUIVisualRow,
-                          atlas: LineTextureAtlas) -> AtlasEntry? {
+    /// Checks the atlas cache first using a window-scoped buffer-row key. On miss, rasterizes and uploads.
+    func renderRowToAtlas(displayRow: UInt16, row: GUIVisualRow, windowId: UInt16,
+                          atlas: LineTextureAtlas, metrics: inout FrameMetrics) -> AtlasEntry? {
         let hash = Int(row.contentHash)
-        let key = 0xA000 + displayRow  // Namespace to avoid collisions
+        let key = AtlasKey.bufferRow(windowId: windowId, row: displayRow)
 
         guard !row.text.isEmpty else { return nil }
+        guard let lookup = atlas.lookupOrReserve(key: key, contentHash: hash) else { return nil }
 
-        // Atlas cache hit.
-        if let entry = atlas.cachedEntry(forKey: key, contentHash: hash) {
+        switch lookup {
+        case .hit(let entry):
+            metrics.bufferRowsReused += 1
             return entry
+        case .reserved(let reservation):
+            return rasterizeRowToAtlas(row: row, reservation: reservation, atlas: atlas, metrics: &metrics)
         }
+    }
 
-        // Build attributed string and CTLine.
+    private func rasterizeRowToAtlas(row: GUIVisualRow, reservation: Reservation,
+                                     atlas: LineTextureAtlas, metrics: inout FrameMetrics) -> AtlasEntry? {
         let attributedString = buildAttributedString(text: row.text, spans: row.spans)
         let ctLine = CTLineCreateWithAttributedString(attributedString)
 
@@ -223,14 +228,15 @@ final class WindowContentRenderer {
         let pixelWidth = min(Int(ceil(lineWidth * scale)), maxLinePixelWidth)
         guard pixelWidth > 0, linePixelHeight > 0 else { return nil }
 
-        // Rasterize into pooled bitmap.
         let result = rasterizer.rasterize(ctLine, width: pixelWidth, height: linePixelHeight,
                                           scale: scale, descent: descent)
 
-        // Upload into atlas slot.
-        return atlas.upload(key: key, contentHash: hash,
-                           pointer: result.pointer, pixelWidth: pixelWidth,
-                           bytesPerRow: result.bytesPerRow)
+        guard let entry = atlas.commitUpload(reservation: reservation,
+                                             pointer: result.pointer, pixelWidth: pixelWidth,
+                                             bytesPerRow: result.bytesPerRow) else { return nil }
+        metrics.bufferRowsRasterized += 1
+        metrics.recordMiss(reservation.reason)
+        return entry
     }
 
     // MARK: - Simple Text Rendering
@@ -251,16 +257,23 @@ final class WindowContentRenderer {
     ///   - atlas: The texture atlas to upload into.
     /// - Returns: An atlas entry, or nil if the text is empty.
     func renderSimpleText(_ text: String, fg: UInt32, bold: Bool = false,
-                          key: UInt16, contentHash: Int,
-                          atlas: LineTextureAtlas) -> AtlasEntry? {
+                          key: AtlasKey, contentHash: Int,
+                          atlas: LineTextureAtlas, metrics: inout FrameMetrics) -> AtlasEntry? {
         guard !text.isEmpty else { return nil }
+        guard let lookup = atlas.lookupOrReserve(key: key, contentHash: contentHash) else { return nil }
 
-        // Atlas cache hit.
-        if let entry = atlas.cachedEntry(forKey: key, contentHash: contentHash) {
+        switch lookup {
+        case .hit(let entry):
+            metrics.otherTexturesReused += 1
             return entry
+        case .reserved(let reservation):
+            return rasterizeSimpleTextToAtlas(text, fg: fg, bold: bold, reservation: reservation, atlas: atlas, metrics: &metrics)
         }
+    }
 
-        // Build attributed string with single font + color.
+    private func rasterizeSimpleTextToAtlas(_ text: String, fg: UInt32, bold: Bool,
+                                            reservation: Reservation, atlas: LineTextureAtlas,
+                                            metrics: inout FrameMetrics) -> AtlasEntry? {
         let fgColor = nsColor(from: fg)
         let font = bold ? (fontManager.primary.ctFontBold ?? fontManager.primary.ctFont) : fontManager.primary.ctFont
         let ligatures = fontManager.primary.ligaturesEnabled ? 2 : 0
@@ -280,28 +293,38 @@ final class WindowContentRenderer {
         let pixelWidth = min(Int(ceil(lineWidth * scale)), maxLinePixelWidth)
         guard pixelWidth > 0, linePixelHeight > 0 else { return nil }
 
-        // Rasterize into pooled bitmap.
         let result = rasterizer.rasterize(ctLine, width: pixelWidth, height: linePixelHeight,
                                           scale: scale, descent: descent)
 
-        // Upload into atlas slot.
-        return atlas.upload(key: key, contentHash: contentHash,
-                           pointer: result.pointer, pixelWidth: pixelWidth,
-                           bytesPerRow: result.bytesPerRow)
+        guard let entry = atlas.commitUpload(reservation: reservation,
+                                             pointer: result.pointer, pixelWidth: pixelWidth,
+                                             bytesPerRow: result.bytesPerRow) else { return nil }
+        metrics.otherTexturesRasterized += 1
+        metrics.recordMiss(reservation.reason)
+        return entry
     }
 
     // MARK: - Annotation Rendering
 
     /// Renders a pill badge annotation into the atlas.
     func renderPillToAtlas(text: String, fg: UInt32, bg: UInt32,
-                           key: UInt16, contentHash: Int,
-                           atlas: LineTextureAtlas) -> AtlasEntry? {
+                           key: AtlasKey, contentHash: Int,
+                           atlas: LineTextureAtlas, metrics: inout FrameMetrics) -> AtlasEntry? {
         guard !text.isEmpty else { return nil }
+        guard let lookup = atlas.lookupOrReserve(key: key, contentHash: contentHash) else { return nil }
 
-        if let entry = atlas.cachedEntry(forKey: key, contentHash: contentHash) {
+        switch lookup {
+        case .hit(let entry):
+            metrics.otherTexturesReused += 1
             return entry
+        case .reserved(let reservation):
+            return rasterizePillToAtlas(text: text, fg: fg, bg: bg, reservation: reservation, atlas: atlas, metrics: &metrics)
         }
+    }
 
+    private func rasterizePillToAtlas(text: String, fg: UInt32, bg: UInt32,
+                                      reservation: Reservation, atlas: LineTextureAtlas,
+                                      metrics: inout FrameMetrics) -> AtlasEntry? {
         let fgColor = nsColor(from: fg)
         let ligatures = fontManager.primary.ligaturesEnabled ? 2 : 0
         let attrs: [NSAttributedString.Key: Any] = [
@@ -323,7 +346,6 @@ final class WindowContentRenderer {
         let clampedWidth = max(pillWidth, pillContentHeight)
 
         let pixelWidth = Int(ceil(clampedWidth * scale))
-        // Match atlas slot height for consistent upload.
         let pixelHeight = linePixelHeight
         guard pixelWidth > 0, pixelHeight > 0 else { return nil }
 
@@ -340,26 +362,29 @@ final class WindowContentRenderer {
             hPad: pillHPad, cornerRadius: pillCornerRadius
         )
 
-        return atlas.upload(key: key, contentHash: contentHash,
-                           pointer: result.pointer, pixelWidth: pixelWidth,
-                           bytesPerRow: result.bytesPerRow)
+        guard let entry = atlas.commitUpload(reservation: reservation,
+                                             pointer: result.pointer, pixelWidth: pixelWidth,
+                                             bytesPerRow: result.bytesPerRow) else { return nil }
+        metrics.otherTexturesRasterized += 1
+        metrics.recordMiss(reservation.reason)
+        return entry
     }
 
     /// Renders a line annotation (pill or inline text) into the atlas.
     func renderAnnotationToAtlas(annotation: GUILineAnnotation,
-                                 key: UInt16, atlas: LineTextureAtlas) -> AtlasEntry? {
+                                 key: AtlasKey, atlas: LineTextureAtlas, metrics: inout FrameMetrics) -> AtlasEntry? {
         let contentHash = annotationContentHash(annotation)
 
         switch annotation.kind {
         case .inlinePill:
             return renderPillToAtlas(
                 text: annotation.text, fg: annotation.fg, bg: annotation.bg,
-                key: key, contentHash: contentHash, atlas: atlas
+                key: key, contentHash: contentHash, atlas: atlas, metrics: &metrics
             )
         case .inlineText:
             return renderSimpleText(
                 annotation.text, fg: annotation.fg,
-                key: key, contentHash: contentHash, atlas: atlas
+                key: key, contentHash: contentHash, atlas: atlas, metrics: &metrics
             )
         case .gutterIcon:
             return nil

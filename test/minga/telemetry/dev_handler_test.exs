@@ -131,24 +131,81 @@ defmodule Minga.Telemetry.DevHandlerTest do
     end
   end
 
-  describe "port emit events" do
+  describe "render emit prepare events" do
     test "handler receives byte_count in metadata" do
       self = self()
 
       :telemetry.attach(
-        "test-port-emit",
-        [:minga, :port, :emit, :stop],
+        "test-render-emit-prepare",
+        [:minga, :render, :emit_prepare, :stop],
         fn _event, measurements, metadata, _config ->
-          send(self, {:emit_stop, measurements, metadata})
+          send(self, {:emit_prepare_stop, measurements, metadata})
         end,
         nil
       )
 
-      Telemetry.span([:minga, :port, :emit], %{byte_count: 1234}, fn -> :ok end)
+      Telemetry.span([:minga, :render, :emit_prepare], %{byte_count: 1234}, fn -> :ok end)
 
-      assert_received {:emit_stop, %{duration: _}, %{byte_count: 1234}}
+      assert_received {:emit_prepare_stop, %{duration: _}, %{byte_count: 1234}}
     after
-      :telemetry.detach("test-port-emit")
+      :telemetry.detach("test-render-emit-prepare")
+    end
+  end
+
+  describe "render model and adapter events" do
+    test "handler receives adapter encode byte metadata" do
+      self = self()
+
+      :telemetry.attach(
+        "test-adapter-encode",
+        [:minga, :render, :adapter_encode, :stop],
+        fn _event, measurements, metadata, _config ->
+          send(self, {:adapter_encode_stop, measurements, metadata})
+        end,
+        nil
+      )
+
+      Telemetry.span_with_stop_metadata([:minga, :render, :adapter_encode], %{}, fn ->
+        {:ok,
+         %{
+           window_row_bytes: 1,
+           window_overlay_bytes: 2,
+           window_gutter_bytes: 3,
+           window_annotation_bytes: 4,
+           window_metadata_bytes: 5,
+           metal_ui_bytes: 6,
+           chrome_bytes: 7,
+           frame_cmd_bytes: 8
+         }}
+      end)
+
+      assert_received {:adapter_encode_stop, %{duration: _},
+                       %{window_row_bytes: 1, chrome_bytes: 7}}
+    after
+      :telemetry.detach("test-adapter-encode")
+    end
+  end
+
+  describe "port write events" do
+    test "handler receives byte_count in metadata" do
+      self = self()
+
+      :telemetry.attach(
+        "test-port-write",
+        [:minga, :port, :write, :stop],
+        fn _event, measurements, metadata, _config ->
+          send(self, {:port_write_stop, measurements, metadata})
+        end,
+        nil
+      )
+
+      Telemetry.span_with_stop_metadata([:minga, :port, :write], %{}, fn ->
+        {:ok, %{byte_count: 1234}}
+      end)
+
+      assert_received {:port_write_stop, %{duration: _}, %{byte_count: 1234}}
+    after
+      :telemetry.detach("test-port-write")
     end
   end
 

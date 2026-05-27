@@ -62,7 +62,14 @@ defmodule Minga.Test.EditorCase do
     sidebar_registry =
       Keyword.get_lazy(opts, :sidebar_registry, fn -> start_sidebar_registry(id) end)
 
-    {:ok, port} = HeadlessPort.start_link(width: width, height: height)
+    port_opts = [width: width, height: height]
+
+    port_opts =
+      if Keyword.has_key?(opts, :capabilities),
+        do: [{:capabilities, Keyword.fetch!(opts, :capabilities)} | port_opts],
+        else: port_opts
+
+    {:ok, port} = HeadlessPort.start_link(port_opts)
     buffer_opts = [content: content, events_registry: events_registry]
     buffer_opts = if file_path, do: [{:file_path, file_path} | buffer_opts], else: buffer_opts
 
@@ -151,7 +158,14 @@ defmodule Minga.Test.EditorCase do
     sidebar_registry =
       Keyword.get_lazy(opts, :sidebar_registry, fn -> start_sidebar_registry(id) end)
 
-    {:ok, port} = HeadlessPort.start_link(width: width, height: height)
+    port_opts = [width: width, height: height]
+
+    port_opts =
+      if Keyword.has_key?(opts, :capabilities),
+        do: [{:capabilities, Keyword.fetch!(opts, :capabilities)} | port_opts],
+        else: port_opts
+
+    {:ok, port} = HeadlessPort.start_link(port_opts)
 
     # Inject clipboard mode directly on the buffer so the Editor never
     # reads the global Config.Options for clipboard. Each test is isolated.

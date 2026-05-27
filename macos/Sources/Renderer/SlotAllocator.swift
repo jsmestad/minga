@@ -7,6 +7,51 @@
 
 import simd
 
+/// Collision-free cache key for atlas entries.
+struct AtlasKey: Hashable, CustomStringConvertible {
+    enum Namespace: String, Hashable {
+        case bufferRow
+        case gutterLineNumber
+        case diagnosticSign
+        case annotationIcon
+        case lineAnnotation
+        case splitLabel
+    }
+
+    let namespace: Namespace
+    let windowId: UInt16
+    let row: UInt16
+    let subIndex: UInt16
+
+    var description: String {
+        "\(namespace.rawValue)(window: \(windowId), row: \(row), sub: \(subIndex))"
+    }
+
+    static func bufferRow(windowId: UInt16, row: UInt16) -> AtlasKey {
+        AtlasKey(namespace: .bufferRow, windowId: windowId, row: row, subIndex: 0)
+    }
+
+    static func gutterLineNumber(windowId: UInt16, row: UInt16) -> AtlasKey {
+        AtlasKey(namespace: .gutterLineNumber, windowId: windowId, row: row, subIndex: 0)
+    }
+
+    static func diagnosticSign(windowId: UInt16, row: UInt16) -> AtlasKey {
+        AtlasKey(namespace: .diagnosticSign, windowId: windowId, row: row, subIndex: 0)
+    }
+
+    static func annotationIcon(windowId: UInt16, row: UInt16) -> AtlasKey {
+        AtlasKey(namespace: .annotationIcon, windowId: windowId, row: row, subIndex: 0)
+    }
+
+    static func lineAnnotation(windowId: UInt16, row: UInt16, subIndex: UInt16) -> AtlasKey {
+        AtlasKey(namespace: .lineAnnotation, windowId: windowId, row: row, subIndex: subIndex)
+    }
+
+    static func splitLabel(row: UInt16, subIndex: UInt16) -> AtlasKey {
+        AtlasKey(namespace: .splitLabel, windowId: 0, row: row, subIndex: subIndex)
+    }
+}
+
 /// Metadata for one slot in the atlas.
 struct AtlasSlot {
     var contentHash: Int = 0
@@ -14,15 +59,22 @@ struct AtlasSlot {
     var lastWrittenFrame: UInt64 = 0
 }
 
-/// Result of a slot allocation request.
-enum SlotResult: Equatable {
+/// Reason an atlas key needs rasterization and upload.
+enum MissReason: Equatable {
+    /// The key was not present in the atlas.
+    case newKey
+    /// The key was present, but its content hash changed.
+    case hashChanged
+    /// The atlas was full and the least-recently-used key was evicted.
+    case evicted(oldKey: AtlasKey)
+}
+
+/// Result of a slot lookup or reservation request.
+enum LookupResult: Equatable {
     /// Cache hit: the slot already contains the right content.
     case hit(slotIndex: Int)
-    /// Cache miss: the slot needs new content uploaded.
-    /// For a reused key with changed hash, the slot index is the same.
-    case miss(slotIndex: Int)
-    /// All slots were full. An old slot was evicted to make room.
-    case evicted(slotIndex: Int, evictedKey: UInt16)
+    /// Cache miss: the slot is reserved and needs new content uploaded.
+    case reserved(slotIndex: Int, reason: MissReason)
     /// No slots available (capacity 0).
     case full
 }
@@ -32,7 +84,7 @@ struct SlotAllocator {
     private var slots: [AtlasSlot] = []
 
     /// Maps cache keys to slot indices.
-    private var keyToSlot: [UInt16: Int] = [:]
+    private var keyToSlot: [AtlasKey: Int] = [:]
 
     /// Free slot indices.
     private var freeSlots: [Int] = []
@@ -65,37 +117,34 @@ struct SlotAllocator {
         frameCounter += 1
     }
 
-    /// Request a slot for the given key and content hash.
+    /// Look up an existing slot or reserve one upload slot for the given key and content hash.
     ///
     /// - `.hit`: slot is cached with matching hash. No upload needed.
-    /// - `.miss`: slot is assigned but content changed. Upload needed.
-    /// - `.evicted`: an old slot was freed to make room. Upload needed.
+    /// - `.reserved(.hashChanged)`: existing key reused its slot with new content. Upload needed.
+    /// - `.reserved(.newKey)`: new key took a free slot. Upload needed.
+    /// - `.reserved(.evicted)`: an old key was evicted to make room. Upload needed.
     /// - `.full`: no capacity.
-    mutating func allocate(key: UInt16, contentHash: Int) -> SlotResult {
-        // Existing key: check if hash matches.
+    mutating func lookupOrReserve(key: AtlasKey, contentHash: Int) -> LookupResult {
         if let slotIndex = keyToSlot[key] {
             slots[slotIndex].lastWrittenFrame = frameCounter
             if slots[slotIndex].contentHash == contentHash {
                 return .hit(slotIndex: slotIndex)
             }
-            // Same key, different hash: reuse slot, caller re-uploads.
-            return .miss(slotIndex: slotIndex)
+            return .reserved(slotIndex: slotIndex, reason: .hashChanged)
         }
 
-        // New key: allocate a free slot.
         if let free = freeSlots.popLast() {
             keyToSlot[key] = free
             slots[free].lastWrittenFrame = frameCounter
-            return .miss(slotIndex: free)
+            return .reserved(slotIndex: free, reason: .newKey)
         }
 
-        // No free slots: evict LRU.
         guard let (evictIndex, evictedKey) = evictOldest() else {
             return .full
         }
         keyToSlot[key] = evictIndex
         slots[evictIndex].lastWrittenFrame = frameCounter
-        return .evicted(slotIndex: evictIndex, evictedKey: evictedKey)
+        return .reserved(slotIndex: evictIndex, reason: .evicted(oldKey: evictedKey))
     }
 
     /// Mark a slot as successfully uploaded with the given hash and width.
@@ -147,7 +196,7 @@ struct SlotAllocator {
 
     // MARK: - Private
 
-    private mutating func evictOldest() -> (index: Int, key: UInt16)? {
+    private mutating func evictOldest() -> (index: Int, key: AtlasKey)? {
         guard !slots.isEmpty else { return nil }
 
         var oldestFrame: UInt64 = .max

@@ -205,6 +205,48 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
     assert opcodes(second_commands) == [Opcodes.gui_gutter()]
   end
 
+  test "adapter reports per-section byte metrics from emitted commands" do
+    row = %Row{
+      row_type: :normal,
+      buf_line: 7,
+      text: "hello",
+      spans: [%Span{start_col: 0, end_col: 5, fg: 0xFF0000, bg: 0x000000, attrs: 1}],
+      content_hash: 123
+    }
+
+    model =
+      window(
+        rows: [row],
+        selection: %Selection{type: :char, start_row: 0, start_col: 1, end_row: 0, end_col: 4},
+        annotations: [%Annotation{row: 0, kind: :inline_text, text: "hint", fg: 0x123456, bg: 0}],
+        gutter: gutter_model(),
+        cursorline: %Cursorline{row: 0, bg_rgb: 0x112233}
+      )
+
+    {commands, caches, metrics} = AdapterGUI.encode_windows_with_metrics([model], Caches.new())
+
+    assert metrics.row_bytes > 0
+    assert metrics.overlay_bytes > 0
+    assert metrics.gutter_bytes > 0
+    assert metrics.annotation_bytes > 0
+    assert metrics.metadata_bytes > 0
+
+    assert IO.iodata_length(commands) ==
+             metrics.row_bytes + metrics.overlay_bytes + metrics.gutter_bytes +
+               metrics.annotation_bytes + metrics.metadata_bytes
+
+    {cached_commands, _caches, cached_metrics} =
+      AdapterGUI.encode_windows_with_metrics([model], caches)
+
+    assert cached_metrics.row_bytes == 0
+    assert cached_metrics.overlay_bytes == 0
+    assert cached_metrics.annotation_bytes == 0
+    assert cached_metrics.gutter_bytes > 0
+
+    assert IO.iodata_length(cached_commands) ==
+             cached_metrics.gutter_bytes + cached_metrics.metadata_bytes
+  end
+
   test "adapter skips non-buffer window models until the GUI protocol carries their rect" do
     model = window(content_kind: :agent_prompt, window_id: 65_534)
 

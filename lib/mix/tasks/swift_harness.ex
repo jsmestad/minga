@@ -36,15 +36,31 @@ defmodule Mix.Tasks.Swift.Harness do
 
     args = sources ++ ["-o", output]
 
+    System.find_executable("swiftc")
+    |> run_with_swiftc(args, output)
+  end
+
+  @spec run_with_swiftc(nil | String.t(), [String.t()], String.t()) :: :ok
+  defp run_with_swiftc(nil, _args, _output) do
+    Mix.shell().info("swiftc not found; skipping Swift test harness build")
+    :ok
+  end
+
+  defp run_with_swiftc(swiftc, args, output) do
     Mix.shell().info("Building Swift test harness...")
 
-    case System.cmd("swiftc", args, stderr_to_stdout: true) do
-      {_output, 0} ->
-        Mix.shell().info("Swift test harness built: #{output}")
-        :ok
+    swiftc
+    |> System.cmd(args, stderr_to_stdout: true)
+    |> handle_swiftc_result(output)
+  end
 
-      {error_output, code} ->
-        Mix.raise("swiftc failed (exit #{code}):\n#{error_output}")
-    end
+  @spec handle_swiftc_result({String.t(), non_neg_integer()}, String.t()) :: :ok
+  defp handle_swiftc_result({_output, 0}, output) do
+    Mix.shell().info("Swift test harness built: #{output}")
+    :ok
+  end
+
+  defp handle_swiftc_result({error_output, code}, _output) do
+    Mix.raise("swiftc failed (exit #{code}):\n#{error_output}")
   end
 end
