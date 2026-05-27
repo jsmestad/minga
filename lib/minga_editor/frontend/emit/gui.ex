@@ -145,7 +145,6 @@ defmodule MingaEditor.Frontend.Emit.GUI do
       &build_gui_sidebars_cmd/2,
       &build_gui_file_tree_cmd/2,
       &build_gui_git_status_cmd/2,
-      &build_gui_which_key_cmd/2,
       &build_gui_completion_cmd/2,
       fn ctx, caches -> build_gui_status_bar_cmd(ctx, sb_data, caches) end,
       &build_gui_picker_cmd/2,
@@ -574,19 +573,6 @@ defmodule MingaEditor.Frontend.Emit.GUI do
         })
 
       {cmd, %{caches | last_gui_git_status_fp: fp}}
-    else
-      {nil, caches}
-    end
-  end
-
-  # ── Which-key ──
-
-  @spec build_gui_which_key_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
-  defp build_gui_which_key_cmd(%{shell_state: %{whichkey: wk}}, caches) do
-    fp = :erlang.phash2(wk)
-
-    if fp != caches.last_gui_which_key_fp do
-      {ProtocolGUI.encode_gui_which_key(wk), %{caches | last_gui_which_key_fp: fp}}
     else
       {nil, caches}
     end
