@@ -80,6 +80,42 @@ defmodule Minga.TelemetryTest do
     end
   end
 
+  describe "span_with_stop_metadata/3" do
+    test "returns the function's result and emits computed stop metadata" do
+      self = self()
+
+      :telemetry.attach_many(
+        "test-span-with-stop-metadata",
+        [
+          [:minga, :test, :dynamic, :start],
+          [:minga, :test, :dynamic, :stop]
+        ],
+        fn event, measurements, metadata, _config ->
+          send(self, {:telemetry, event, measurements, metadata})
+        end,
+        nil
+      )
+
+      result =
+        Telemetry.span_with_stop_metadata([:minga, :test, :dynamic], %{stage: :encode}, fn ->
+          {:encoded, %{byte_count: 1234}}
+        end)
+
+      assert result == :encoded
+
+      assert_received {:telemetry, [:minga, :test, :dynamic, :start], %{system_time: _},
+                       %{stage: :encode}}
+
+      assert_received {:telemetry, [:minga, :test, :dynamic, :stop], %{duration: duration},
+                       %{stage: :encode, byte_count: 1234}}
+
+      assert is_integer(duration)
+      assert duration >= 0
+    after
+      :telemetry.detach("test-span-with-stop-metadata")
+    end
+  end
+
   describe "execute/3" do
     test "emits a single event with measurements and metadata" do
       self = self()

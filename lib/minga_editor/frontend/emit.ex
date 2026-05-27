@@ -69,7 +69,7 @@ defmodule MingaEditor.Frontend.Emit do
       end)
 
     {window_content_cmds, metal_ui_cmds, adapter_cmds, adapter_gui_caches} =
-      :telemetry.span([:minga, :render, :adapter_encode], %{}, fn ->
+      Telemetry.span_with_stop_metadata([:minga, :render, :adapter_encode], %{}, fn ->
         {window_content_cmds, adapter_gui_caches, window_metrics} =
           Minga.Frontend.Adapter.GUI.encode_windows_with_metrics(
             window_models,

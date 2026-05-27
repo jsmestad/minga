@@ -27,6 +27,7 @@ defmodule MingaEditor.Frontend.Manager do
 
   @behaviour MingaEditor.Frontend.Adapter
 
+  alias Minga.Telemetry
   alias MingaEditor.Frontend.Protocol
 
   @typedoc "Renderer backend."
@@ -151,7 +152,7 @@ defmodule MingaEditor.Frontend.Manager do
   end
 
   def handle_cast({:send_commands, commands}, state) do
-    :telemetry.span([:minga, :port, :write], %{}, fn ->
+    Telemetry.span_with_stop_metadata([:minga, :port, :write], %{}, fn ->
       batch = IO.iodata_to_binary(commands)
       Port.command(state.port, batch)
       {:ok, %{byte_count: byte_size(batch)}}

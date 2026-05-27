@@ -165,7 +165,7 @@ defmodule Minga.Telemetry.DevHandlerTest do
         nil
       )
 
-      :telemetry.span([:minga, :render, :adapter_encode], %{}, fn ->
+      Telemetry.span_with_stop_metadata([:minga, :render, :adapter_encode], %{}, fn ->
         {:ok,
          %{
            window_row_bytes: 1,
@@ -199,7 +199,9 @@ defmodule Minga.Telemetry.DevHandlerTest do
         nil
       )
 
-      :telemetry.span([:minga, :port, :write], %{}, fn -> {:ok, %{byte_count: 1234}} end)
+      Telemetry.span_with_stop_metadata([:minga, :port, :write], %{}, fn ->
+        {:ok, %{byte_count: 1234}}
+      end)
 
       assert_received {:port_write_stop, %{duration: _}, %{byte_count: 1234}}
     after

@@ -22,7 +22,8 @@ defmodule Minga.Telemetry do
 
   ## Zero Overhead
 
-  `:telemetry.span/3` calls `System.monotonic_time/0` twice and wraps
+  `Minga.Telemetry.span/3` and `span_with_stop_metadata/3` delegate to
+  `:telemetry.span/3`, which calls `System.monotonic_time/0` twice and wraps
   the function in a closure. Cost is ~100ns per span. On a 16ms frame
   budget with ~10 spans, that's noise. When no handler is attached,
   the event emission is a no-op ETS lookup.
@@ -47,6 +48,28 @@ defmodule Minga.Telemetry do
       when is_list(event) and is_map(metadata) and is_function(fun, 0) do
     :telemetry.span(event, metadata, fn ->
       {fun.(), metadata}
+    end)
+  end
+
+  @doc """
+  Wraps a function call in a `:telemetry` span when stop metadata is computed inside the timed work.
+
+  Use this instead of calling `:telemetry.span/3` directly when the stop event needs metadata that is not known before the function runs, such as encoded byte counts or an output binary size. The callback must return `{result, stop_metadata}`. The start event receives the initial metadata, and the stop event receives the initial metadata merged with `stop_metadata`.
+
+  ## Examples
+
+      Telemetry.span_with_stop_metadata([:minga, :render, :adapter_encode], %{}, fn ->
+        {commands, metrics} = encode_commands()
+        {commands, %{byte_count: metrics.total_bytes}}
+      end)
+
+  """
+  @spec span_with_stop_metadata([atom()], map(), (-> {result, map()})) :: result when result: var
+  def span_with_stop_metadata(event, metadata, fun)
+      when is_list(event) and is_map(metadata) and is_function(fun, 0) do
+    :telemetry.span(event, metadata, fn ->
+      {result, stop_metadata} = fun.()
+      {result, Map.merge(metadata, stop_metadata)}
     end)
   end
 
