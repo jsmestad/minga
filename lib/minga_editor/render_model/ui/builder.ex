@@ -7,6 +7,7 @@ defmodule MingaEditor.RenderModel.UI.Builder do
   alias MingaEditor.RenderModel.UI.BreadcrumbBuilder
   alias MingaEditor.RenderModel.UI.GitStatusBuilder
   alias MingaEditor.RenderModel.UI.NotificationsBuilder
+  alias MingaEditor.RenderModel.UI.ObservatoryBuilder
   alias MingaEditor.RenderModel.UI.SearchStateBuilder
   alias MingaEditor.RenderModel.UI.StatusBarBuilder
   alias MingaEditor.RenderModel.UI.ThemeBuilder
@@ -30,7 +31,8 @@ defmodule MingaEditor.RenderModel.UI.Builder do
       search_state: SearchStateBuilder.build(ctx.search, active_buf),
       git_status: build_git_status(ctx),
       agent_context: AgentContextBuilder.build(gui_payload),
-      status_bar: build_status_bar(sb_data, ctx)
+      status_bar: build_status_bar(sb_data, ctx),
+      observatory: ObservatoryBuilder.build(ctx.shell_state)
     }
   end
 

@@ -6,6 +6,7 @@ defmodule Minga.Frontend.Adapter.GUI do
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Frontend.Adapter.GUI.GitStatusEncoder
   alias Minga.Frontend.Adapter.GUI.NotificationsEncoder
+  alias Minga.Frontend.Adapter.GUI.ObservatoryEncoder
   alias Minga.Frontend.Adapter.GUI.SearchStateEncoder
   alias Minga.Frontend.Adapter.GUI.StatusBarEncoder
   alias Minga.Frontend.Adapter.GUI.ThemeEncoder
@@ -48,6 +49,11 @@ defmodule Minga.Frontend.Adapter.GUI do
         do: StatusBarEncoder.encode(ui.status_bar, caches),
         else: {nil, caches}
 
+    {observatory_cmd, caches} =
+      if ui.observatory,
+        do: ObservatoryEncoder.encode(ui.observatory, caches),
+        else: {nil, caches}
+
     cmds =
       Enum.reject(
         [
@@ -58,7 +64,8 @@ defmodule Minga.Frontend.Adapter.GUI do
           search_state_cmd,
           git_status_cmd,
           agent_context_cmd,
-          status_bar_cmd
+          status_bar_cmd,
+          observatory_cmd
         ],
         &is_nil/1
       )

@@ -8,7 +8,8 @@ defmodule Minga.Frontend.Adapter.GUI.Caches do
           last_notifications_fp: integer() | nil,
           last_search_state_fp: integer() | nil,
           last_git_status_fp: integer() | nil,
-          last_agent_context_fp: integer() | nil
+          last_agent_context_fp: integer() | nil,
+          last_observatory_fp: integer() | :hidden | nil
         }
 
   defstruct last_theme_fp: nil,
@@ -17,7 +18,8 @@ defmodule Minga.Frontend.Adapter.GUI.Caches do
             last_notifications_fp: nil,
             last_search_state_fp: nil,
             last_git_status_fp: nil,
-            last_agent_context_fp: nil
+            last_agent_context_fp: nil,
+            last_observatory_fp: nil
 
   @spec new() :: t()
   def new, do: %__MODULE__{}

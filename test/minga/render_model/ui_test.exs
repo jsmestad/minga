@@ -15,6 +15,7 @@ defmodule Minga.RenderModel.UITest do
       assert ui.git_status == nil
       assert ui.agent_context == nil
       assert ui.status_bar == nil
+      assert ui.observatory == nil
     end
   end
 end

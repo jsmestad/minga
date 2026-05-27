@@ -9,7 +9,8 @@ defmodule Minga.RenderModel.UI do
           search_state: term(),
           git_status: term(),
           agent_context: term(),
-          status_bar: term()
+          status_bar: term(),
+          observatory: term()
         }
 
   defstruct [
@@ -20,6 +21,7 @@ defmodule Minga.RenderModel.UI do
     :search_state,
     :git_status,
     :agent_context,
-    :status_bar
+    :status_bar,
+    :observatory
   ]
 end
