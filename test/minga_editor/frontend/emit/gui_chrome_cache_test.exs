@@ -95,14 +95,16 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
   @moduletag :tmp_dir
 
   describe "sync_swiftui_chrome/4 fingerprint caching" do
-    test "first frame sends chrome commands, then unchanged frames send only status bar" do
+    test "first frame sends chrome commands, then unchanged frames send nothing" do
       state = gui_state()
 
       {_ctx, caches, first_cmds} = sync_chrome(state)
       assert first_cmds != []
 
+      # Status bar (0x76) is now handled by the RenderModel adapter path,
+      # so the second sync_chrome call produces no commands.
       {_ctx, _caches, second_cmds} = sync_chrome(state, caches)
-      assert Enum.map(second_cmds, &opcode!/1) == [0x76]
+      assert second_cmds == []
     end
 
     test "theme is no longer emitted through sync_swiftui_chrome (migrated to adapter)" do
@@ -115,21 +117,21 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
              "theme command should not appear in sync_swiftui_chrome output"
     end
 
-    test "re-sends chrome when state changes between calls (excluding theme)" do
+    test "re-sends chrome when state changes between calls (excluding theme and status bar)" do
       state = gui_state(content: long_content(50))
       {_ctx, caches, _cmds} = sync_chrome(state)
 
       # Change the theme. Theme is now handled by the adapter, so 0x74
-      # should NOT appear in sync_swiftui_chrome output. But other state
-      # changes (like status bar reflecting new theme colors) still re-send.
+      # should NOT appear in sync_swiftui_chrome output. Status bar (0x76)
+      # is also now handled by the adapter path.
       changed_state = %{state | theme: MingaEditor.UI.Theme.get!(:one_dark)}
       {_ctx, _caches2, cmds} = sync_chrome(changed_state, caches)
 
       assert opcode_count(cmds, 0x74) == 0,
              "theme command should not appear after theme change (handled by adapter)"
 
-      # Status bar still re-sends because it includes theme-derived colors
-      assert length(cmds) >= 1, "expected at least status bar after theme change"
+      assert opcode_count(cmds, 0x76) == 0,
+             "status bar command should not appear (handled by adapter)"
     end
 
     test "tab bar cache changes when active buffer dirty state changes" do
@@ -428,7 +430,6 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
   defp has_opcode?(cmds, opcode), do: Enum.any?(cmds, &opcode?(&1, opcode))
   defp opcode_count(cmds, opcode), do: cmds |> opcode_cmds(opcode) |> length()
   defp opcode_cmds(cmds, opcode), do: Enum.filter(cmds, &opcode?(&1, opcode))
-  defp opcode!(<<opcode, _::binary>>), do: opcode
   defp opcode?(<<opcode, _::binary>>, opcode), do: true
   defp opcode?(_, _opcode), do: false
 

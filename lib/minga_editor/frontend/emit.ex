@@ -90,7 +90,8 @@ defmodule MingaEditor.Frontend.Emit do
       caches = send_window_bg(ctx, caches)
 
       # Core adapter: migrated UI components
-      ui_model = MingaEditor.RenderModel.UI.Builder.build_ui(ctx)
+      status_bar_data = chrome && chrome.status_bar_data
+      ui_model = MingaEditor.RenderModel.UI.Builder.build_ui(ctx, status_bar_data)
 
       {adapter_cmds, adapter_caches} =
         Minga.Frontend.Adapter.GUI.encode_ui(ui_model, caches.adapter_gui_caches)
@@ -102,7 +103,6 @@ defmodule MingaEditor.Frontend.Emit do
       end
 
       # SwiftUI chrome: separate messages, safe (no Metal impact)
-      status_bar_data = chrome && chrome.status_bar_data
       minibuffer_data = chrome && chrome.minibuffer_data
       {_ctx, caches} = EmitGUI.sync_swiftui_chrome(ctx, status_bar_data, minibuffer_data, caches)
       caches

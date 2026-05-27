@@ -8,16 +8,19 @@ defmodule MingaEditor.RenderModel.UI.Builder do
   alias MingaEditor.RenderModel.UI.GitStatusBuilder
   alias MingaEditor.RenderModel.UI.NotificationsBuilder
   alias MingaEditor.RenderModel.UI.SearchStateBuilder
+  alias MingaEditor.RenderModel.UI.StatusBarBuilder
   alias MingaEditor.RenderModel.UI.ThemeBuilder
   alias MingaEditor.RenderModel.UI.WhichKeyBuilder
+  alias MingaEditor.StatusBar.Data, as: StatusBarData
   alias Minga.RenderModel
 
-  @spec build_ui(Context.t()) :: RenderModel.UI.t()
-  def build_ui(%Context{} = ctx) do
+  @spec build_ui(Context.t(), StatusBarData.t() | nil) :: RenderModel.UI.t()
+  def build_ui(%Context{} = ctx, status_bar_data \\ nil) do
     file_path = active_buffer_path(ctx)
     root = file_tree_root(ctx)
     active_buf = active_buffer_pid(ctx)
     gui_payload = shell_gui_payload(ctx)
+    sb_data = status_bar_data || ctx.status_bar_data
 
     %RenderModel.UI{
       theme: ThemeBuilder.build(ctx.theme),
@@ -26,7 +29,8 @@ defmodule MingaEditor.RenderModel.UI.Builder do
       notifications: NotificationsBuilder.build(ctx.notifications),
       search_state: SearchStateBuilder.build(ctx.search, active_buf),
       git_status: build_git_status(ctx),
-      agent_context: AgentContextBuilder.build(gui_payload)
+      agent_context: AgentContextBuilder.build(gui_payload),
+      status_bar: build_status_bar(sb_data, ctx)
     }
   end
 
@@ -68,6 +72,14 @@ defmodule MingaEditor.RenderModel.UI.Builder do
   @spec file_tree_root(Context.t()) :: String.t()
   defp file_tree_root(%{file_tree: %{tree: %{root: r}}}) when is_binary(r), do: r
   defp file_tree_root(_ctx), do: ""
+
+  @spec build_status_bar(StatusBarData.t() | nil, Context.t()) ::
+          Minga.RenderModel.UI.StatusBar.t() | nil
+  defp build_status_bar(nil, _ctx), do: nil
+
+  defp build_status_bar(status_bar_data, ctx) do
+    StatusBarBuilder.build(status_bar_data, ctx.theme, ctx)
+  end
 
   @spec shell_gui_payload(Context.t()) :: term()
   defp shell_gui_payload(%{shell: shell} = ctx) do

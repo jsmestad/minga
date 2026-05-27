@@ -8,7 +8,8 @@ defmodule Minga.RenderModel.UI do
           notifications: term(),
           search_state: term(),
           git_status: term(),
-          agent_context: term()
+          agent_context: term(),
+          status_bar: term()
         }
 
   defstruct [
@@ -18,6 +19,7 @@ defmodule Minga.RenderModel.UI do
     :notifications,
     :search_state,
     :git_status,
-    :agent_context
+    :agent_context,
+    :status_bar
   ]
 end

@@ -44,7 +44,6 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   alias MingaEditor.RenderPipeline.ContentHelpers
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.TabBar
-  alias MingaEditor.StatusBar.Data, as: StatusBarData
   alias MingaEditor.Session.ChromeState
   alias MingaEditor.Viewport
   alias MingaEditor.Window.Content
@@ -128,24 +127,21 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   a single `MingaEditor.Frontend.send_commands` call to reduce port write
   overhead.
 
-  `status_bar_data` is pre-computed by the Chrome stage and passed through
-  to avoid re-calling Buffer for cursor/file info on the same frame.
-  When nil (e.g. non-GUI fallback paths), it is computed here.
+  `status_bar_data` is accepted for API compatibility but no longer used
+  here; the status bar is now handled by the RenderModel adapter path.
   """
-  @spec sync_swiftui_chrome(ctx(), StatusBarData.t() | nil, MinibufferData.t() | nil, Caches.t()) ::
+  @spec sync_swiftui_chrome(ctx(), term(), MinibufferData.t() | nil, Caches.t()) ::
           {ctx(), Caches.t()}
-  def sync_swiftui_chrome(ctx, status_bar_data, minibuffer_data, caches) do
-    sb_data = status_bar_data || ctx.status_bar_data
-
+  def sync_swiftui_chrome(ctx, _status_bar_data, minibuffer_data, caches) do
     # Use map_reduce to thread caches through each builder function.
     # Each build_gui_* function returns {cmd | nil, updated_caches}.
+    # Note: status_bar is now handled by the RenderModel adapter path.
     builders = [
       &build_gui_tab_bar_cmd/2,
       &build_gui_workspaces_cmd/2,
       &build_gui_sidebars_cmd/2,
       &build_gui_file_tree_cmd/2,
       &build_gui_completion_cmd/2,
-      fn ctx, caches -> build_gui_status_bar_cmd(ctx, sb_data, caches) end,
       &build_gui_picker_cmd/2,
       &build_gui_agent_chat_cmd/2,
       fn ctx, caches -> build_gui_minibuffer_cmd(ctx, minibuffer_data, caches) end,
@@ -591,16 +587,6 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   end
 
   # ── Status bar ──
-  # Status bar changes on every scroll frame (cursor line), so it's always sent.
-  # No fingerprint caching; the encoding cost is small (fixed-size struct).
-
-  @spec build_gui_status_bar_cmd(ctx(), StatusBarData.t(), Caches.t()) :: {binary(), Caches.t()}
-  defp build_gui_status_bar_cmd(ctx, status_bar_data, caches) do
-    status_bar_data = StatusBarData.with_modeline_segments(status_bar_data, ctx.theme)
-    chrome_state = ChromeState.from_editor_state(ctx)
-    {ProtocolGUI.encode_gui_status_bar(status_bar_data, chrome_state), caches}
-  end
-
   # ── Minibuffer ──
 
   # Sends the gui_minibuffer opcode only when the data has changed since
