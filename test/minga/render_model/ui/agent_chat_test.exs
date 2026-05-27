@@ -18,9 +18,9 @@ defmodule Minga.RenderModel.UI.AgentChatTest do
     end
 
     test "accepts visible state with integer fingerprint" do
-      model = %AgentChat{encoded: <<0x78, 1>>, fingerprint: 12345}
+      model = %AgentChat{encoded: <<0x78, 1>>, fingerprint: 12_345}
 
-      assert model.fingerprint == 12345
+      assert model.fingerprint == 12_345
     end
   end
 end

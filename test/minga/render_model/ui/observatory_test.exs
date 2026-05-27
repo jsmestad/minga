@@ -19,10 +19,10 @@ defmodule Minga.RenderModel.UI.ObservatoryTest do
     end
 
     test "accepts visible state with integer fingerprint" do
-      obs = %Observatory{visible: true, encoded: <<0x9A, 0>>, fingerprint: 12345}
+      obs = %Observatory{visible: true, encoded: <<0x9A, 0>>, fingerprint: 12_345}
 
       assert obs.visible == true
-      assert obs.fingerprint == 12345
+      assert obs.fingerprint == 12_345
     end
   end
 end

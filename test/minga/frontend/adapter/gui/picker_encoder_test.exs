@@ -24,7 +24,7 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
     test "encodes open picker" do
       model = %Picker{
         encoded: <<@op_gui_picker, 1::8, "picker_data">>,
-        fingerprint: 54321
+        fingerprint: 54_321
       }
 
       caches = Caches.new()
@@ -57,7 +57,7 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
 
       model2 = %Picker{
         encoded: <<@op_gui_picker, 1::8, "data!">>,
-        fingerprint: 99999
+        fingerprint: 99_999
       }
 
       caches = Caches.new()
@@ -71,7 +71,7 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
     test "transitions from open to closed" do
       open_model = %Picker{
         encoded: <<@op_gui_picker, 1::8, "data!">>,
-        fingerprint: 12345
+        fingerprint: 12_345
       }
 
       closed_model = %Picker{

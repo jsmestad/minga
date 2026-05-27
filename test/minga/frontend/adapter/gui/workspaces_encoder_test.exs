@@ -20,7 +20,7 @@ defmodule Minga.Frontend.Adapter.GUI.WorkspacesEncoderTest do
     test "encodes workspaces with payload" do
       model = %Workspaces{
         encoded: <<@op_gui_workspaces, 0::16, "workspace_data">>,
-        fingerprint: 12345
+        fingerprint: 12_345
       }
 
       caches = Caches.new()
@@ -53,7 +53,7 @@ defmodule Minga.Frontend.Adapter.GUI.WorkspacesEncoderTest do
 
       model2 = %Workspaces{
         encoded: <<@op_gui_workspaces, 5::16, "hello">>,
-        fingerprint: 99999
+        fingerprint: 99_999
       }
 
       caches = Caches.new()

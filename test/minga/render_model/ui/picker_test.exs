@@ -18,9 +18,9 @@ defmodule Minga.RenderModel.UI.PickerTest do
     end
 
     test "accepts open state with integer fingerprint" do
-      model = %Picker{encoded: <<0x77, 1>>, fingerprint: 12345}
+      model = %Picker{encoded: <<0x77, 1>>, fingerprint: 12_345}
 
-      assert model.fingerprint == 12345
+      assert model.fingerprint == 12_345
     end
   end
 end

@@ -11,7 +11,7 @@ defmodule Minga.Frontend.Adapter.GUI.HoverPopupEncoderTest do
     test "encodes hover popup on first call" do
       model = %HoverPopup{
         encoded: <<@op_gui_hover_popup, 0>>,
-        fingerprint: 12345
+        fingerprint: 12_345
       }
 
       caches = Caches.new()
@@ -24,7 +24,7 @@ defmodule Minga.Frontend.Adapter.GUI.HoverPopupEncoderTest do
     test "returns nil on second call with same fingerprint" do
       model = %HoverPopup{
         encoded: <<@op_gui_hover_popup, 0>>,
-        fingerprint: 12345
+        fingerprint: 12_345
       }
 
       caches = Caches.new()
@@ -39,12 +39,12 @@ defmodule Minga.Frontend.Adapter.GUI.HoverPopupEncoderTest do
     test "re-encodes when fingerprint changes" do
       model1 = %HoverPopup{
         encoded: <<@op_gui_hover_popup, 0>>,
-        fingerprint: 12345
+        fingerprint: 12_345
       }
 
       model2 = %HoverPopup{
         encoded: <<@op_gui_hover_popup, 1, 0::16, 0::16, 0, 0::16, 0::16>>,
-        fingerprint: 99999
+        fingerprint: 99_999
       }
 
       caches = Caches.new()

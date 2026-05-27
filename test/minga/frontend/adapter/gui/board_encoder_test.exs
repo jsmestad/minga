@@ -24,7 +24,7 @@ defmodule Minga.Frontend.Adapter.GUI.BoardEncoderTest do
     test "encodes active board" do
       model = %Board{
         encoded: <<@op_gui_board, 1::8, "board_data">>,
-        fingerprint: 12345
+        fingerprint: 12_345
       }
 
       caches = Caches.new()
@@ -57,7 +57,7 @@ defmodule Minga.Frontend.Adapter.GUI.BoardEncoderTest do
 
       model2 = %Board{
         encoded: <<@op_gui_board, 1::8, "data">>,
-        fingerprint: 99999
+        fingerprint: 99_999
       }
 
       caches = Caches.new()
@@ -71,7 +71,7 @@ defmodule Minga.Frontend.Adapter.GUI.BoardEncoderTest do
     test "transitions from active to dismissed" do
       active_model = %Board{
         encoded: <<@op_gui_board, 1::8, "data">>,
-        fingerprint: 12345
+        fingerprint: 12_345
       }
 
       dismissed_model = %Board{

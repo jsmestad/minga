@@ -26,7 +26,7 @@ defmodule Minga.Frontend.Adapter.GUI.ObservatoryEncoderTest do
       model = %Observatory{
         visible: true,
         encoded: <<@op_gui_observatory, 10::32, "visible_data">>,
-        fingerprint: 12345
+        fingerprint: 12_345
       }
 
       caches = Caches.new()
@@ -62,7 +62,7 @@ defmodule Minga.Frontend.Adapter.GUI.ObservatoryEncoderTest do
       model2 = %Observatory{
         visible: true,
         encoded: <<@op_gui_observatory, 5::32, "data!">>,
-        fingerprint: 99999
+        fingerprint: 99_999
       }
 
       caches = Caches.new()
@@ -77,7 +77,7 @@ defmodule Minga.Frontend.Adapter.GUI.ObservatoryEncoderTest do
       visible_model = %Observatory{
         visible: true,
         encoded: <<@op_gui_observatory, 5::32, "data!">>,
-        fingerprint: 12345
+        fingerprint: 12_345
       }
 
       hidden_model = %Observatory{

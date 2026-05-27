@@ -20,7 +20,7 @@ defmodule Minga.Frontend.Adapter.GUI.TabBarEncoderTest do
     test "encodes standard tab bar" do
       model = %TabBar{
         encoded: <<@op_gui_tab_bar, 0::8, 1::8, "tab_data">>,
-        fingerprint: 12345
+        fingerprint: 12_345
       }
 
       caches = Caches.new()
@@ -53,7 +53,7 @@ defmodule Minga.Frontend.Adapter.GUI.TabBarEncoderTest do
 
       model2 = %TabBar{
         encoded: <<@op_gui_tab_bar, 1::8, 2::8, "more">>,
-        fingerprint: 99999
+        fingerprint: 99_999
       }
 
       caches = Caches.new()

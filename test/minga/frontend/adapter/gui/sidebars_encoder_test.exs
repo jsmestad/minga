@@ -20,7 +20,7 @@ defmodule Minga.Frontend.Adapter.GUI.SidebarsEncoderTest do
     test "encodes sidebars with payload" do
       model = %Sidebars{
         encoded: <<@op_gui_sidebars, 0::32, "sidebar_data">>,
-        fingerprint: 12345
+        fingerprint: 12_345
       }
 
       caches = Caches.new()
@@ -53,7 +53,7 @@ defmodule Minga.Frontend.Adapter.GUI.SidebarsEncoderTest do
 
       model2 = %Sidebars{
         encoded: <<@op_gui_sidebars, 5::32, "hello">>,
-        fingerprint: 99999
+        fingerprint: 99_999
       }
 
       caches = Caches.new()

@@ -11,7 +11,7 @@ defmodule Minga.Frontend.Adapter.GUI.CompletionEncoderTest do
     test "encodes completion" do
       model = %Completion{
         encoded: <<@op_gui_completion, 0::8>>,
-        fingerprint: 12345
+        fingerprint: 12_345
       }
 
       caches = Caches.new()
@@ -24,7 +24,7 @@ defmodule Minga.Frontend.Adapter.GUI.CompletionEncoderTest do
     test "returns nil on second call with same fingerprint" do
       model = %Completion{
         encoded: <<@op_gui_completion, 0::8>>,
-        fingerprint: 12345
+        fingerprint: 12_345
       }
 
       caches = Caches.new()
@@ -39,12 +39,12 @@ defmodule Minga.Frontend.Adapter.GUI.CompletionEncoderTest do
     test "re-encodes when fingerprint changes" do
       model1 = %Completion{
         encoded: <<@op_gui_completion, 0::8>>,
-        fingerprint: 11111
+        fingerprint: 11_111
       }
 
       model2 = %Completion{
         encoded: <<@op_gui_completion, 1::8, "items">>,
-        fingerprint: 22222
+        fingerprint: 22_222
       }
 
       caches = Caches.new()

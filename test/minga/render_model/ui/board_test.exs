@@ -18,9 +18,9 @@ defmodule Minga.RenderModel.UI.BoardTest do
     end
 
     test "accepts integer fingerprint for active board" do
-      board = %Board{encoded: <<0x87, 1>>, fingerprint: 12345}
+      board = %Board{encoded: <<0x87, 1>>, fingerprint: 12_345}
 
-      assert board.fingerprint == 12345
+      assert board.fingerprint == 12_345
     end
   end
 end

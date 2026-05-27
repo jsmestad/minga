@@ -12,10 +12,10 @@ defmodule Minga.RenderModel.UI.WorkspacesTest do
     end
 
     test "accepts binary encoded and integer fingerprint" do
-      ws = %Workspaces{encoded: <<0x98, 0, 5, "data">>, fingerprint: 12345}
+      ws = %Workspaces{encoded: <<0x98, 0, 5, "data">>, fingerprint: 12_345}
 
       assert ws.encoded == <<0x98, 0, 5, "data">>
-      assert ws.fingerprint == 12345
+      assert ws.fingerprint == 12_345
     end
   end
 end

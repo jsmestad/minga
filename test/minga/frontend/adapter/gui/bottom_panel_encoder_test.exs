@@ -11,7 +11,7 @@ defmodule Minga.Frontend.Adapter.GUI.BottomPanelEncoderTest do
     test "encodes bottom panel" do
       model = %BottomPanel{
         encoded: <<@op_gui_bottom_panel, 0::8>>,
-        fingerprint: 12345
+        fingerprint: 12_345
       }
 
       caches = Caches.new()
@@ -24,7 +24,7 @@ defmodule Minga.Frontend.Adapter.GUI.BottomPanelEncoderTest do
     test "returns nil on second call with same fingerprint" do
       model = %BottomPanel{
         encoded: <<@op_gui_bottom_panel, 0::8>>,
-        fingerprint: 12345
+        fingerprint: 12_345
       }
 
       caches = Caches.new()
@@ -39,12 +39,12 @@ defmodule Minga.Frontend.Adapter.GUI.BottomPanelEncoderTest do
     test "re-encodes when fingerprint changes" do
       model1 = %BottomPanel{
         encoded: <<@op_gui_bottom_panel, 0::8>>,
-        fingerprint: 11111
+        fingerprint: 11_111
       }
 
       model2 = %BottomPanel{
         encoded: <<@op_gui_bottom_panel, 1::8, "data">>,
-        fingerprint: 22222
+        fingerprint: 22_222
       }
 
       caches = Caches.new()

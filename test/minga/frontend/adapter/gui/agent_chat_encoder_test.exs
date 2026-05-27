@@ -24,7 +24,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoderTest do
     test "encodes visible agent chat" do
       model = %AgentChat{
         encoded: <<@op_gui_agent_chat, 1::8, "chat_data">>,
-        fingerprint: 54321
+        fingerprint: 54_321
       }
 
       caches = Caches.new()
@@ -57,7 +57,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoderTest do
 
       model2 = %AgentChat{
         encoded: <<@op_gui_agent_chat, 1::8, "data!">>,
-        fingerprint: 99999
+        fingerprint: 99_999
       }
 
       caches = Caches.new()
@@ -71,7 +71,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoderTest do
     test "transitions from visible to not_visible" do
       visible_model = %AgentChat{
         encoded: <<@op_gui_agent_chat, 1::8, "data!">>,
-        fingerprint: 12345
+        fingerprint: 12_345
       }
 
       hidden_model = %AgentChat{

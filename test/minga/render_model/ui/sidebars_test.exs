@@ -12,10 +12,10 @@ defmodule Minga.RenderModel.UI.SidebarsTest do
     end
 
     test "accepts binary encoded and integer fingerprint" do
-      sidebars = %Sidebars{encoded: <<0x9F, 0, 0, 0, 5, "data">>, fingerprint: 12345}
+      sidebars = %Sidebars{encoded: <<0x9F, 0, 0, 0, 5, "data">>, fingerprint: 12_345}
 
       assert sidebars.encoded == <<0x9F, 0, 0, 0, 5, "data">>
-      assert sidebars.fingerprint == 12345
+      assert sidebars.fingerprint == 12_345
     end
   end
 end

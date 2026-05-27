@@ -44,7 +44,7 @@ defmodule Minga.Frontend.Adapter.GUI.EditTimelineEncoderTest do
 
       model2 = %EditTimeline{
         encoded: <<@op_gui_edit_timeline, 1::8, "data">>,
-        fingerprint: 99999
+        fingerprint: 99_999
       }
 
       caches = Caches.new()

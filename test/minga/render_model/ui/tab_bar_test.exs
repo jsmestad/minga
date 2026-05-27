@@ -12,10 +12,10 @@ defmodule Minga.RenderModel.UI.TabBarTest do
     end
 
     test "accepts binary encoded and integer fingerprint" do
-      tab_bar = %TabBar{encoded: <<0x71, 0, 1>>, fingerprint: 12345}
+      tab_bar = %TabBar{encoded: <<0x71, 0, 1>>, fingerprint: 12_345}
 
       assert tab_bar.encoded == <<0x71, 0, 1>>
-      assert tab_bar.fingerprint == 12345
+      assert tab_bar.fingerprint == 12_345
     end
 
     test "accepts suppressed fingerprint with nil encoded" do

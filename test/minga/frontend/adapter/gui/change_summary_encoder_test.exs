@@ -44,7 +44,7 @@ defmodule Minga.Frontend.Adapter.GUI.ChangeSummaryEncoderTest do
 
       model2 = %ChangeSummary{
         encoded: <<@op_gui_change_summary, 1::16, "data">>,
-        fingerprint: 99999
+        fingerprint: 99_999
       }
 
       caches = Caches.new()

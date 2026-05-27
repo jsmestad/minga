@@ -11,7 +11,7 @@ defmodule Minga.Frontend.Adapter.GUI.ExtensionPanelEncoderTest do
     test "encodes extension panel on first call" do
       model = %ExtensionPanel{
         encoded: <<@op_gui_extension_panel, 1::16, 0>>,
-        fingerprint: 12345
+        fingerprint: 12_345
       }
 
       caches = Caches.new()
@@ -24,7 +24,7 @@ defmodule Minga.Frontend.Adapter.GUI.ExtensionPanelEncoderTest do
     test "returns nil on second call with same fingerprint" do
       model = %ExtensionPanel{
         encoded: <<@op_gui_extension_panel, 1::16, 0>>,
-        fingerprint: 12345
+        fingerprint: 12_345
       }
 
       caches = Caches.new()
@@ -39,12 +39,12 @@ defmodule Minga.Frontend.Adapter.GUI.ExtensionPanelEncoderTest do
     test "re-encodes when fingerprint changes" do
       model1 = %ExtensionPanel{
         encoded: <<@op_gui_extension_panel, 1::16, 0>>,
-        fingerprint: 12345
+        fingerprint: 12_345
       }
 
       model2 = %ExtensionPanel{
         encoded: <<@op_gui_extension_panel, 3::16, 1, "ab">>,
-        fingerprint: 99999
+        fingerprint: 99_999
       }
 
       caches = Caches.new()
