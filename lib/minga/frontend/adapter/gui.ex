@@ -76,7 +76,9 @@ defmodule Minga.Frontend.Adapter.GUI do
   defp encode_component(nil, _encoder, cmds, caches), do: {cmds, caches}
 
   defp encode_component(value, encoder, cmds, caches) do
-    {cmd, caches} = encoder.encode(value, caches)
-    {[cmd | cmds], caches}
+    case encoder.encode(value, caches) do
+      {nil, caches} -> {cmds, caches}
+      {cmd, caches} -> {[cmd | cmds], caches}
+    end
   end
 end
