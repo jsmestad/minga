@@ -283,16 +283,8 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
       refute caches2.last_gui_minibuffer == caches.last_gui_minibuffer
     end
 
-    test "workspace, agent chat, and board fingerprints include encoded content" do
-      state = gui_state()
-      tab_bar = tab_bar_with_two_workspaces()
-      state_a = put_in(state.shell_state.tab_bar, tab_bar)
-      {_ctx, caches, _cmds} = sync_chrome(state_a)
-      [_, tab_b] = tab_bar.tabs
-      state_b = put_in(state.shell_state.tab_bar, %{tab_bar | active_id: tab_b.id})
-      {_ctx, caches2, _cmds} = sync_chrome(state_b, caches)
-      refute caches2.last_gui_workspaces_fp == caches.last_gui_workspaces_fp
-
+    test "agent chat fingerprints include encoded content" do
+      # Workspace fingerprints are now handled by the RenderModel adapter path.
       chat_state = agent_chat_state()
       {_ctx, chat_caches, _cmds} = sync_chrome(chat_state)
       Minga.Buffer.move_to(chat_state.workspace.agent_ui.panel.prompt_buffer, {0, 1})
@@ -359,31 +351,14 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
       assert [] = opcode_cmds(cmds, 0x87)
     end
 
-    test "workspace fingerprint updates when the last agent workspace disappears" do
+    test "workspaces are no longer emitted by sync_swiftui_chrome (handled by adapter)" do
       state = gui_state()
       tab_bar = tab_bar_with_two_workspaces()
       state_with_agents = put_in(state.shell_state.tab_bar, tab_bar)
-      {_ctx, caches, first_cmds} = sync_chrome(state_with_agents)
+      {_ctx, _caches, first_cmds} = sync_chrome(state_with_agents)
 
-      assert Enum.any?(first_cmds, &opcode?(&1, 0x98))
-      assert caches.last_gui_workspaces_fp != nil
-
-      tab_bar_without_agents =
-        tab_bar
-        |> TabBar.remove_workspace(1)
-        |> TabBar.remove_workspace(2)
-
-      state_without_agents = put_in(state.shell_state.tab_bar, tab_bar_without_agents)
-      {_ctx, caches2, second_cmds} = sync_chrome(state_without_agents, caches)
-
-      workspaces_cmd = Enum.find(second_cmds, &opcode?(&1, 0x98))
-      assert <<0x98, payload_len::16, payload::binary-size(payload_len)>> = workspaces_cmd
-      assert <<2::8, _active::16, _mode::8, _flags::8, 1::8, _rest::binary>> = payload
-      assert caches2.last_gui_workspaces_fp != nil
-
-      {_ctx, caches3, third_cmds} = sync_chrome(state_without_agents, caches2)
-      refute Enum.any?(third_cmds, &opcode?(&1, 0x98))
-      assert caches3.last_gui_workspaces_fp == caches2.last_gui_workspaces_fp
+      assert opcode_count(first_cmds, 0x98) == 0,
+             "workspace command should not appear (handled by adapter)"
     end
 
     test "agent chat survives dead prompt buffer process" do

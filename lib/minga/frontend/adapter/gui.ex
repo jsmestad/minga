@@ -13,6 +13,7 @@ defmodule Minga.Frontend.Adapter.GUI do
   alias Minga.Frontend.Adapter.GUI.TabBarEncoder
   alias Minga.Frontend.Adapter.GUI.ThemeEncoder
   alias Minga.Frontend.Adapter.GUI.WhichKeyEncoder
+  alias Minga.Frontend.Adapter.GUI.WorkspacesEncoder
   alias Minga.RenderModel
 
   @spec encode_ui(RenderModel.UI.t(), Caches.t()) :: {[binary()], Caches.t()}
@@ -66,6 +67,11 @@ defmodule Minga.Frontend.Adapter.GUI do
         do: TabBarEncoder.encode(ui.tab_bar, caches),
         else: {nil, caches}
 
+    {workspaces_cmd, caches} =
+      if ui.workspaces,
+        do: WorkspacesEncoder.encode(ui.workspaces, caches),
+        else: {nil, caches}
+
     cmds =
       Enum.reject(
         [
@@ -79,7 +85,8 @@ defmodule Minga.Frontend.Adapter.GUI do
           status_bar_cmd,
           observatory_cmd,
           board_cmd,
-          tab_bar_cmd
+          tab_bar_cmd,
+          workspaces_cmd
         ],
         &is_nil/1
       )

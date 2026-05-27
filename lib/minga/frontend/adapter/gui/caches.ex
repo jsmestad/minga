@@ -11,7 +11,8 @@ defmodule Minga.Frontend.Adapter.GUI.Caches do
           last_agent_context_fp: integer() | nil,
           last_observatory_fp: integer() | :hidden | nil,
           last_board_fp: integer() | :dismissed | nil,
-          last_tab_bar_fp: integer() | :suppressed | nil
+          last_tab_bar_fp: integer() | :suppressed | nil,
+          last_workspaces_fp: integer() | :suppressed | nil
         }
 
   defstruct last_theme_fp: nil,
@@ -23,7 +24,8 @@ defmodule Minga.Frontend.Adapter.GUI.Caches do
             last_agent_context_fp: nil,
             last_observatory_fp: nil,
             last_board_fp: nil,
-            last_tab_bar_fp: nil
+            last_tab_bar_fp: nil,
+            last_workspaces_fp: nil
 
   @spec new() :: t()
   def new, do: %__MODULE__{}

@@ -18,6 +18,7 @@ defmodule Minga.RenderModel.UITest do
       assert ui.observatory == nil
       assert ui.board == nil
       assert ui.tab_bar == nil
+      assert ui.workspaces == nil
     end
   end
 end

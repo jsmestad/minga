@@ -41,8 +41,6 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   alias MingaEditor.Shell.Traditional.Chrome.Helpers, as: ChromeHelpers
   alias MingaEditor.RenderPipeline.ContentHelpers
   alias MingaEditor.State.FileTree, as: FileTreeState
-  alias MingaEditor.State.TabBar
-  alias MingaEditor.Session.ChromeState
   alias MingaEditor.Viewport
   alias MingaEditor.Window.Content
   alias MingaEditor.Frontend.Emit.Context
@@ -135,7 +133,6 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     # Each build_gui_* function returns {cmd | nil, updated_caches}.
     # Note: status_bar is now handled by the RenderModel adapter path.
     builders = [
-      &build_gui_workspaces_cmd/2,
       &build_gui_sidebars_cmd/2,
       &build_gui_file_tree_cmd/2,
       &build_gui_completion_cmd/2,
@@ -167,34 +164,6 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     end
 
     {ctx, caches}
-  end
-
-  @spec build_gui_workspaces_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
-  defp build_gui_workspaces_cmd(%{shell_state: %{tab_bar: %TabBar{}}} = ctx, caches) do
-    chrome_state = ChromeState.from_editor_state(ctx)
-    fp = workspaces_fingerprint(chrome_state)
-
-    if fp != caches.last_gui_workspaces_fp do
-      {ProtocolGUI.encode_gui_workspaces(chrome_state), %{caches | last_gui_workspaces_fp: fp}}
-    else
-      {nil, caches}
-    end
-  end
-
-  defp build_gui_workspaces_cmd(_ctx, caches), do: {nil, caches}
-
-  @spec workspaces_fingerprint(ChromeState.t()) :: integer()
-  defp workspaces_fingerprint(%ChromeState{} = chrome_state) do
-    :erlang.phash2({
-      chrome_state.active_workspace_id,
-      chrome_state.background_count,
-      chrome_state.attention_count,
-      chrome_state.draft_count,
-      chrome_state.conflict_count,
-      chrome_state.mode,
-      chrome_state.visible_tabs,
-      chrome_state.workspaces
-    })
   end
 
   # ── File tree ──
