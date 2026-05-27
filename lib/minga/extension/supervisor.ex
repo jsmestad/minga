@@ -157,13 +157,17 @@ defmodule Minga.Extension.Supervisor do
 
   @spec stop_all() :: :ok | {:error, [stop_failure()]}
   @spec stop_all(GenServer.server(), GenServer.server()) :: :ok | {:error, [stop_failure()]}
+  @spec stop_all(GenServer.server(), GenServer.server(), start_opts()) ::
+          :ok | {:error, [stop_failure()]}
   def stop_all, do: stop_all(__MODULE__, ExtRegistry)
 
-  def stop_all(supervisor, registry) do
+  def stop_all(supervisor, registry), do: stop_all(supervisor, registry, [])
+
+  def stop_all(supervisor, registry, opts) do
     failures =
       ExtRegistry.all(registry)
       |> Enum.reduce([], fn {name, entry}, failures ->
-        case stop_extension(supervisor, registry, name, entry) do
+        case stop_extension(supervisor, registry, name, entry, opts) do
           :ok -> failures
           {:error, reason} -> [%{extension: name, reason: reason} | failures]
         end

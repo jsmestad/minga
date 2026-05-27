@@ -1,5 +1,5 @@
 defmodule Minga.Extension.SourceCleanupTest do
-  # Exercises global source-owned registries that use ETS or persistent_term.
+  # Not async: uses process-global language, theme, input, recipe, and modeline registries.
   use ExUnit.Case, async: false
 
   import ExUnit.CaptureLog
@@ -106,16 +106,7 @@ defmodule Minga.Extension.SourceCleanupTest do
 
   test "failed init reports cleanup failures and still runs later cleanup callbacks",
        ctx do
-    assert :ok =
-             ContributionCleanup.register(:aaa_cleanup_failure, fn _source ->
-               raise "cleanup failure"
-             end)
-
-    assert :ok =
-             ContributionCleanup.register(:zzz_cleanup_followup, fn source ->
-               send(self(), {:cleanup_followup, source})
-               :ok
-             end)
+    callbacks = cleanup_failure_callbacks(self(), followup?: true)
 
     {path, cleanup} =
       make_extension("CleanupFailure", """
@@ -148,8 +139,6 @@ defmodule Minga.Extension.SourceCleanupTest do
 
     on_exit(fn ->
       cleanup.()
-      ContributionCleanup.unregister(:aaa_cleanup_failure)
-      ContributionCleanup.unregister(:zzz_cleanup_followup)
       :code.purge(Minga.TestExtensions.CleanupFailure)
       :code.delete(Minga.TestExtensions.CleanupFailure)
     end)
@@ -167,7 +156,8 @@ defmodule Minga.Extension.SourceCleanupTest do
                    :cleanup_failure,
                    entry,
                    command_registry: ctx.command_registry,
-                   keymap: ctx.keymap
+                   keymap: ctx.keymap,
+                   callbacks: callbacks
                  )
 
         assert Enum.any?(failures, fn
@@ -401,12 +391,7 @@ defmodule Minga.Extension.SourceCleanupTest do
     assert :ok =
              Minga.Keymap.Active.bind(ctx.keymap, :insert, "C-j", :config_cmd, "Config binding")
 
-    assert :ok =
-             ContributionCleanup.register(:aaa_cleanup_failure, fn _source ->
-               raise "cleanup failure"
-             end)
-
-    on_exit(fn -> ContributionCleanup.unregister(:aaa_cleanup_failure) end)
+    callbacks = cleanup_failure_callbacks(self(), followup?: false)
 
     {path, cleanup} =
       make_extension("KeybindCleanupFailure", """
@@ -450,7 +435,8 @@ defmodule Minga.Extension.SourceCleanupTest do
                :keybind_cleanup_failure,
                entry,
                command_registry: ctx.command_registry,
-               keymap: ctx.keymap
+               keymap: ctx.keymap,
+               callbacks: callbacks
              )
 
     assert reason =~ "already"
@@ -534,7 +520,9 @@ defmodule Minga.Extension.SourceCleanupTest do
       )
 
     healthy_ref = Process.monitor(healthy_pid)
-    assert {:error, failures} = ExtSupervisor.stop_all(ctx.supervisor, ctx.registry)
+
+    assert {:error, failures} =
+             ExtSupervisor.stop_all(ctx.supervisor, ctx.registry, callbacks: %{})
 
     assert Enum.any?(failures, fn
              %{extension: :stop_all_broken, reason: reason} -> reason != nil
@@ -635,6 +623,7 @@ defmodule Minga.Extension.SourceCleanupTest do
              Minga.Config.ModelineSegments.lookup(:source_cleanup_segment)
 
     editor_pid = start_fake_editor(source_cleanup_editor_state())
+    callbacks = source_cleanup_callbacks(editor_pid)
 
     {:ok, running_entry} = ExtRegistry.get(ctx.registry, :source_cleanup)
 
@@ -645,8 +634,11 @@ defmodule Minga.Extension.SourceCleanupTest do
                :source_cleanup,
                running_entry,
                command_registry: ctx.command_registry,
-               keymap: ctx.keymap
+               keymap: ctx.keymap,
+               callbacks: callbacks
              )
+
+    assert_receive {:fake_editor_cleanup_feature_state, {:extension, :source_cleanup}}, 1_000
 
     cleaned_editor_state = fake_editor_state(editor_pid)
     stop_fake_editor(editor_pid)
@@ -679,6 +671,37 @@ defmodule Minga.Extension.SourceCleanupTest do
     assert :error = MingaEditor.UI.Theme.get(:source_cleanup_theme)
     assert Minga.Tool.Recipe.Registry.get(:source_cleanup_recipe) == nil
     assert Minga.Config.ModelineSegments.lookup(:source_cleanup_segment) == nil
+  end
+
+  @spec cleanup_failure_callbacks(pid(), keyword()) :: %{
+          atom() => ContributionCleanup.cleanup_fun()
+        }
+  defp cleanup_failure_callbacks(test_pid, opts) do
+    callbacks = %{
+      aaa_cleanup_failure: fn _source ->
+        raise "cleanup failure"
+      end
+    }
+
+    if Keyword.get(opts, :followup?, false) do
+      Map.put(callbacks, :zzz_cleanup_followup, fn source ->
+        send(test_pid, {:cleanup_followup, source})
+        :ok
+      end)
+    else
+      callbacks
+    end
+  end
+
+  @spec source_cleanup_callbacks(pid()) :: %{atom() => ContributionCleanup.cleanup_fun()}
+  defp source_cleanup_callbacks(editor_pid) do
+    %{
+      feature_state: fn source ->
+        GenServer.call(editor_pid, {:cleanup_feature_state, source}, :infinity)
+      end,
+      input_handlers: &MingaEditor.Input.unregister_source/1,
+      themes: &MingaEditor.UI.Theme.unregister_source/1
+    }
   end
 
   @spec source_cleanup_editor_state() :: EditorState.t()
@@ -726,9 +749,8 @@ defmodule Minga.Extension.SourceCleanupTest do
 
     pid =
       spawn_link(fn ->
-        Process.register(self(), MingaEditor)
         send(caller, :fake_editor_ready)
-        fake_editor_loop(state)
+        fake_editor_loop(state, caller)
       end)
 
     assert_receive :fake_editor_ready
@@ -750,19 +772,19 @@ defmodule Minga.Extension.SourceCleanupTest do
     :ok
   end
 
-  @spec fake_editor_loop(EditorState.t()) :: no_return()
-  defp fake_editor_loop(state) do
+  @spec fake_editor_loop(EditorState.t(), pid()) :: no_return()
+  defp fake_editor_loop(state, test_pid) do
     receive do
       {:"$gen_call", from, {:cleanup_feature_state, source}} ->
         GenServer.reply(from, :ok)
-        fake_editor_loop(EditorState.drop_feature_state_source(state, source))
+        send(test_pid, {:fake_editor_cleanup_feature_state, source})
+        fake_editor_loop(EditorState.drop_feature_state_source(state, source), test_pid)
 
       {:get_state, caller} ->
         send(caller, {:fake_editor_state, state})
-        fake_editor_loop(state)
+        fake_editor_loop(state, test_pid)
 
       :stop ->
-        Process.unregister(MingaEditor)
         exit(:normal)
     end
   end

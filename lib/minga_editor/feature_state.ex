@@ -133,21 +133,37 @@ defmodule MingaEditor.FeatureState do
 
   @doc "Cleanup callback bridge used by `Minga.Extension.ContributionCleanup`."
   @spec unregister_source(source()) :: :ok | {:error, term()}
-  def unregister_source(source) do
+  def unregister_source(source), do: unregister_source(source, MingaEditor)
+
+  @doc "Cleanup callback bridge against an explicit editor server. Useful for tests."
+  @spec unregister_source(source(), GenServer.server() | nil) :: :ok | {:error, term()}
+  def unregister_source(source, editor_server) do
     if valid_source?(source) do
-      unregister_valid_source(source)
+      unregister_valid_source(source, editor_server)
     else
       :ok
     end
   end
 
-  @spec unregister_valid_source(source()) :: :ok | {:error, term()}
-  defp unregister_valid_source(source) do
-    case Process.whereis(MingaEditor) do
+  @spec unregister_valid_source(source(), GenServer.server() | nil) :: :ok | {:error, term()}
+  defp unregister_valid_source(_source, nil), do: :ok
+
+  defp unregister_valid_source(source, pid) when is_pid(pid) do
+    unregister_from_editor_pid(source, pid)
+  end
+
+  defp unregister_valid_source(source, name) when is_atom(name) do
+    case Process.whereis(name) do
       nil -> :ok
-      pid when pid == self() -> unregister_from_editor_process(source)
-      pid -> GenServer.call(pid, {:cleanup_feature_state, source}, :infinity)
+      pid -> unregister_from_editor_pid(source, pid)
     end
+  end
+
+  @spec unregister_from_editor_pid(source(), pid()) :: :ok | {:error, term()}
+  defp unregister_from_editor_pid(source, pid) do
+    if pid == self(),
+      do: unregister_from_editor_process(source),
+      else: GenServer.call(pid, {:cleanup_feature_state, source}, :infinity)
   end
 
   @spec unregister_from_editor_process(source()) :: :ok

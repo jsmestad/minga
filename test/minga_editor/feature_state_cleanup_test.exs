@@ -1,6 +1,5 @@
 defmodule MingaEditor.FeatureStateCleanupTest do
-  # Registers a temporary process under the global MingaEditor name.
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias MingaEditor.FeatureState
 
@@ -10,7 +9,7 @@ defmodule MingaEditor.FeatureStateCleanupTest do
     pid = start_fake_editor()
 
     try do
-      assert FeatureState.unregister_source(@source) == :ok
+      assert FeatureState.unregister_source(@source, pid) == :ok
       assert_received {:cleanup_finished, @source}
     after
       stop_fake_editor(pid)
@@ -61,7 +60,6 @@ defmodule MingaEditor.FeatureStateCleanupTest do
 
   @spec fake_editor_loop(pid()) :: no_return()
   defp fake_editor_loop(test_pid) do
-    Process.register(self(), MingaEditor)
     send(test_pid, :fake_editor_ready)
     fake_editor_receive(test_pid)
   end
@@ -75,11 +73,10 @@ defmodule MingaEditor.FeatureStateCleanupTest do
         fake_editor_receive(test_pid)
 
       {:run_self_cleanup, caller, source} ->
-        send(caller, {:self_cleanup_result, FeatureState.unregister_source(source)})
+        send(caller, {:self_cleanup_result, FeatureState.unregister_source(source, self())})
         fake_editor_receive(test_pid)
 
       :stop ->
-        Process.unregister(MingaEditor)
         exit(:normal)
     end
   end

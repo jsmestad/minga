@@ -912,7 +912,10 @@ defmodule Minga.Config.LoaderTest do
 
     test "reload clears stale config-owned keybinds, themes, languages, recipes, and scopes",
          ctx do
-      ContributionCleanup.unregister_source(:config, keymap: ctx.keymap_server)
+      ContributionCleanup.unregister_source(:config,
+        keymap: ctx.keymap_server,
+        callbacks: %{themes: &Theme.unregister_source/1}
+      )
 
       {minga_dir, cleanup} =
         make_config_dir("""
@@ -951,7 +954,11 @@ defmodule Minga.Config.LoaderTest do
       on_exit(cleanup)
 
       on_exit(fn ->
-        ContributionCleanup.unregister_source(:config, keymap: ctx.keymap_server)
+        ContributionCleanup.unregister_source(:config,
+          keymap: ctx.keymap_server,
+          callbacks: %{themes: &Theme.unregister_source/1}
+        )
+
         Theme.unregister_source(:config)
       end)
 
@@ -1048,17 +1055,17 @@ defmodule Minga.Config.LoaderTest do
 
       on_exit(cleanup)
 
+      cleanup_callbacks = %{
+        loader_reload_cleanup_failure: fn
+          :config -> raise "cleanup failure"
+          _source -> :ok
+        end
+      }
+
       name = :"loader_reload_cleanup_failure_#{System.unique_integer([:positive])}"
       {:ok, pid} = Loader.start_link(name: name)
       assert Loader.load_error(pid) == nil
-
-      assert :ok =
-               ContributionCleanup.register(:loader_reload_cleanup_failure, fn
-                 :config -> raise "cleanup failure"
-                 _source -> :ok
-               end)
-
-      on_exit(fn -> ContributionCleanup.unregister(:loader_reload_cleanup_failure) end)
+      Agent.update(pid, &Map.put(&1, :cleanup_callbacks, cleanup_callbacks))
 
       assert {:error, msg} = Loader.reload(pid)
       assert msg =~ "Config reload cleanup for :config failed"
@@ -1213,11 +1220,18 @@ defmodule Minga.Config.LoaderTest do
         :code.delete(ext_module)
       end)
 
-      cleanup_family =
-        String.to_atom("loader_reload_start_all_cleanup_#{System.unique_integer([:positive])}")
+      cleanup_callbacks = %{
+        loader_reload_start_all_cleanup: fn
+          {:extension, :loader_start_all_failure} ->
+            raise "cleanup failure"
+
+          _source ->
+            :ok
+        end
+      }
 
       name = :"loader_reload_start_all_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name)
+      {:ok, pid} = Loader.start_link(name: name, cleanup_callbacks: cleanup_callbacks)
       assert Loader.load_error(pid) == nil
 
       File.write!(
@@ -1227,17 +1241,6 @@ defmodule Minga.Config.LoaderTest do
         extension :loader_start_all_failure, path: #{inspect(ext_dir)}
         """
       )
-
-      assert :ok =
-               ContributionCleanup.register(cleanup_family, fn
-                 {:extension, :loader_start_all_failure} ->
-                   raise "cleanup failure"
-
-                 _source ->
-                   :ok
-               end)
-
-      on_exit(fn -> ContributionCleanup.unregister(cleanup_family) end)
 
       assert {:error, msg} = Loader.reload(pid)
       assert msg =~ "Extension start_all failed"

@@ -1,5 +1,5 @@
 defmodule Minga.Extension.ContributionCleanupTest do
-  # Exercises global cleanup registries and persistent_term callback tables.
+  # Not async: uses process-global Minga.Language.Registry.
   use ExUnit.Case, async: false
 
   alias Minga.Extension.ContributionCleanup
@@ -12,7 +12,6 @@ defmodule Minga.Extension.ContributionCleanupTest do
     keymap = start_supervised!({KeymapActive, name: keymap_name})
 
     on_exit(fn ->
-      ContributionCleanup.unregister(:cleanup_followup)
       LanguageRegistry.unregister_source({:extension, :cleanup_test})
     end)
 
@@ -21,6 +20,7 @@ defmodule Minga.Extension.ContributionCleanupTest do
 
   test "continues cleanup after one family fails and reports the failure", %{keymap: keymap} do
     source = {:extension, :cleanup_test}
+    test_pid = self()
 
     assert :ok =
              LanguageRegistry.register(
@@ -33,16 +33,18 @@ defmodule Minga.Extension.ContributionCleanupTest do
                source
              )
 
-    assert :ok =
-             ContributionCleanup.register(:cleanup_followup, fn callback_source ->
-               send(self(), {:cleanup_followup, callback_source})
-               :ok
-             end)
+    callbacks = %{
+      cleanup_followup: fn callback_source ->
+        send(test_pid, {:cleanup_followup, callback_source})
+        :ok
+      end
+    }
 
     assert {:error, failures} =
              ContributionCleanup.unregister_source(source,
                command_registry: :missing_cleanup_registry,
-               keymap: keymap
+               keymap: keymap,
+               callbacks: callbacks
              )
 
     assert Enum.any?(failures, fn
