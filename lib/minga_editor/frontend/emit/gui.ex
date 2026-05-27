@@ -122,7 +122,6 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     builders = [
       &build_gui_hover_popup_cmd/2,
       &build_gui_float_popup_cmd/2,
-      &build_gui_change_summary_cmd/2,
       &build_gui_edit_timeline_cmd/2,
       &build_gui_extension_overlay_cmd/2,
       &build_gui_extension_panel_cmd/2
@@ -647,50 +646,6 @@ defmodule MingaEditor.Frontend.Emit.GUI do
       {:rows, n} -> n
       n when is_integer(n) -> n
       _ -> max(div(viewport_size, 2), 1)
-    end
-  end
-
-  # ── Change Summary ──
-
-  @spec build_gui_change_summary_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
-
-  # Change summary visible when zoomed into an agent card (not You card)
-  defp build_gui_change_summary_cmd(%{shell: shell} = ctx, caches) do
-    case shell.gui_payload(ctx) do
-      {:board, %{zoomed_card_id: card_id}} when card_id != nil ->
-        build_gui_change_summary_for_board_card(card_id, caches)
-
-      _other ->
-        hide_gui_change_summary(caches)
-    end
-  end
-
-  @spec build_gui_change_summary_for_board_card(pos_integer(), Caches.t()) ::
-          {binary() | nil, Caches.t()}
-  defp build_gui_change_summary_for_board_card(card_id, caches) do
-    # TODO: Compute diff stats from the card's touched files
-    # For now, send empty list to test the UI
-    entries = []
-    selected_index = 0
-
-    fp = :erlang.phash2({card_id, entries})
-
-    if fp != caches.last_gui_change_summary_fp do
-      {ProtocolGUI.encode_gui_change_summary(entries, selected_index),
-       %{caches | last_gui_change_summary_fp: fp}}
-    else
-      {nil, caches}
-    end
-  end
-
-  # Board grid or other shells: hide change summary
-  @spec hide_gui_change_summary(Caches.t()) :: {binary() | nil, Caches.t()}
-  defp hide_gui_change_summary(caches) do
-    if caches.last_gui_change_summary_fp != :hidden do
-      {ProtocolGUI.encode_gui_change_summary([], 0),
-       %{caches | last_gui_change_summary_fp: :hidden}}
-    else
-      {nil, caches}
     end
   end
 

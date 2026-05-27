@@ -20,7 +20,8 @@ defmodule Minga.Frontend.Adapter.GUI.Caches do
           last_completion_fp: integer() | nil,
           last_signature_help_fp: integer() | nil,
           last_agent_chat_fp: integer() | :not_visible | nil,
-          last_bottom_panel_fp: integer() | nil
+          last_bottom_panel_fp: integer() | nil,
+          last_change_summary_fp: integer() | :hidden | nil
         }
 
   defstruct last_theme_fp: nil,
@@ -41,7 +42,8 @@ defmodule Minga.Frontend.Adapter.GUI.Caches do
             last_completion_fp: nil,
             last_signature_help_fp: nil,
             last_agent_chat_fp: nil,
-            last_bottom_panel_fp: nil
+            last_bottom_panel_fp: nil,
+            last_change_summary_fp: nil
 
   @spec new() :: t()
   def new, do: %__MODULE__{}

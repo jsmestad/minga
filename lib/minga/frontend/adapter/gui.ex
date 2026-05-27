@@ -7,6 +7,7 @@ defmodule Minga.Frontend.Adapter.GUI do
   alias Minga.Frontend.Adapter.GUI.BottomPanelEncoder
   alias Minga.Frontend.Adapter.GUI.BreadcrumbEncoder
   alias Minga.Frontend.Adapter.GUI.Caches
+  alias Minga.Frontend.Adapter.GUI.ChangeSummaryEncoder
   alias Minga.Frontend.Adapter.GUI.CompletionEncoder
   alias Minga.Frontend.Adapter.GUI.FileTreeEncoder
   alias Minga.Frontend.Adapter.GUI.GitStatusEncoder
@@ -120,6 +121,11 @@ defmodule Minga.Frontend.Adapter.GUI do
         do: BottomPanelEncoder.encode(ui.bottom_panel, caches),
         else: {nil, caches}
 
+    {change_summary_cmd, caches} =
+      if ui.change_summary,
+        do: ChangeSummaryEncoder.encode(ui.change_summary, caches),
+        else: {nil, caches}
+
     cmds =
       Enum.reject(
         [
@@ -142,7 +148,8 @@ defmodule Minga.Frontend.Adapter.GUI do
           completion_cmd,
           signature_help_cmd,
           agent_chat_cmd,
-          bottom_panel_cmd
+          bottom_panel_cmd,
+          change_summary_cmd
         ],
         &is_nil/1
       )
