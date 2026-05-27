@@ -97,7 +97,7 @@ defmodule MingaEditor.RenderModel.UI.Builder do
   end
 
   @spec build_which_key(Context.t()) :: Minga.RenderModel.UI.WhichKey.t() | nil
-  defp build_which_key(%{shell_state: %{whichkey: wk}}) when not is_nil(wk) do
+  defp build_which_key(%{shell_state: %{whichkey: wk}}) when wk != nil do
     WhichKeyBuilder.build(wk)
   end
 

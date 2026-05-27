@@ -30,165 +30,52 @@ defmodule Minga.Frontend.Adapter.GUI do
   alias Minga.Frontend.Adapter.GUI.WorkspacesEncoder
   alias Minga.RenderModel
 
+  # Ordered list of {field, encoder_module} pairs for component encoding.
+  # Each encoder exposes encode/2 that returns {binary(), Caches.t()}.
+  @component_encoders [
+    {:theme, ThemeEncoder},
+    {:breadcrumb, BreadcrumbEncoder},
+    {:which_key, WhichKeyEncoder},
+    {:notifications, NotificationsEncoder},
+    {:search_state, SearchStateEncoder},
+    {:git_status, GitStatusEncoder},
+    {:agent_context, AgentContextEncoder},
+    {:status_bar, StatusBarEncoder},
+    {:observatory, ObservatoryEncoder},
+    {:board, BoardEncoder},
+    {:tab_bar, TabBarEncoder},
+    {:workspaces, WorkspacesEncoder},
+    {:sidebars, SidebarsEncoder},
+    {:file_tree, FileTreeEncoder},
+    {:picker, PickerEncoder},
+    {:minibuffer, MinibufferEncoder},
+    {:completion, CompletionEncoder},
+    {:signature_help, SignatureHelpEncoder},
+    {:agent_chat, AgentChatEncoder},
+    {:bottom_panel, BottomPanelEncoder},
+    {:change_summary, ChangeSummaryEncoder},
+    {:edit_timeline, EditTimelineEncoder},
+    {:extension_overlay, ExtensionOverlayEncoder},
+    {:extension_panel, ExtensionPanelEncoder},
+    {:hover_popup, HoverPopupEncoder},
+    {:float_popup, FloatPopupEncoder}
+  ]
+
   @spec encode_ui(RenderModel.UI.t(), Caches.t()) :: {[binary()], Caches.t()}
   def encode_ui(%RenderModel.UI{} = ui, %Caches{} = caches) do
-    {theme_cmd, caches} =
-      if ui.theme, do: ThemeEncoder.encode(ui.theme, caches), else: {nil, caches}
+    {cmds, caches} =
+      Enum.reduce(@component_encoders, {[], caches}, fn {field, encoder}, {cmds_acc, caches_acc} ->
+        encode_component(Map.get(ui, field), encoder, cmds_acc, caches_acc)
+      end)
 
-    {breadcrumb_cmd, caches} =
-      if ui.breadcrumb, do: BreadcrumbEncoder.encode(ui.breadcrumb, caches), else: {nil, caches}
+    {Enum.reverse(cmds), caches}
+  end
 
-    {which_key_cmd, caches} =
-      if ui.which_key, do: WhichKeyEncoder.encode(ui.which_key, caches), else: {nil, caches}
+  @spec encode_component(term(), module(), [binary()], Caches.t()) :: {[binary()], Caches.t()}
+  defp encode_component(nil, _encoder, cmds, caches), do: {cmds, caches}
 
-    {notifications_cmd, caches} =
-      if ui.notifications,
-        do: NotificationsEncoder.encode(ui.notifications, caches),
-        else: {nil, caches}
-
-    {search_state_cmd, caches} =
-      if ui.search_state,
-        do: SearchStateEncoder.encode(ui.search_state, caches),
-        else: {nil, caches}
-
-    {git_status_cmd, caches} =
-      if ui.git_status,
-        do: GitStatusEncoder.encode(ui.git_status, caches),
-        else: {nil, caches}
-
-    {agent_context_cmd, caches} =
-      if ui.agent_context,
-        do: AgentContextEncoder.encode(ui.agent_context, caches),
-        else: {nil, caches}
-
-    {status_bar_cmd, caches} =
-      if ui.status_bar,
-        do: StatusBarEncoder.encode(ui.status_bar, caches),
-        else: {nil, caches}
-
-    {observatory_cmd, caches} =
-      if ui.observatory,
-        do: ObservatoryEncoder.encode(ui.observatory, caches),
-        else: {nil, caches}
-
-    {board_cmd, caches} =
-      if ui.board,
-        do: BoardEncoder.encode(ui.board, caches),
-        else: {nil, caches}
-
-    {tab_bar_cmd, caches} =
-      if ui.tab_bar,
-        do: TabBarEncoder.encode(ui.tab_bar, caches),
-        else: {nil, caches}
-
-    {workspaces_cmd, caches} =
-      if ui.workspaces,
-        do: WorkspacesEncoder.encode(ui.workspaces, caches),
-        else: {nil, caches}
-
-    {sidebars_cmd, caches} =
-      if ui.sidebars,
-        do: SidebarsEncoder.encode(ui.sidebars, caches),
-        else: {nil, caches}
-
-    {file_tree_cmd, caches} =
-      if ui.file_tree,
-        do: FileTreeEncoder.encode(ui.file_tree, caches),
-        else: {nil, caches}
-
-    {picker_cmd, caches} =
-      if ui.picker,
-        do: PickerEncoder.encode(ui.picker, caches),
-        else: {nil, caches}
-
-    {minibuffer_cmd, caches} =
-      if ui.minibuffer,
-        do: MinibufferEncoder.encode(ui.minibuffer, caches),
-        else: {nil, caches}
-
-    {completion_cmd, caches} =
-      if ui.completion,
-        do: CompletionEncoder.encode(ui.completion, caches),
-        else: {nil, caches}
-
-    {signature_help_cmd, caches} =
-      if ui.signature_help,
-        do: SignatureHelpEncoder.encode(ui.signature_help, caches),
-        else: {nil, caches}
-
-    {agent_chat_cmd, caches} =
-      if ui.agent_chat,
-        do: AgentChatEncoder.encode(ui.agent_chat, caches),
-        else: {nil, caches}
-
-    {bottom_panel_cmd, caches} =
-      if ui.bottom_panel,
-        do: BottomPanelEncoder.encode(ui.bottom_panel, caches),
-        else: {nil, caches}
-
-    {change_summary_cmd, caches} =
-      if ui.change_summary,
-        do: ChangeSummaryEncoder.encode(ui.change_summary, caches),
-        else: {nil, caches}
-
-    {edit_timeline_cmd, caches} =
-      if ui.edit_timeline,
-        do: EditTimelineEncoder.encode(ui.edit_timeline, caches),
-        else: {nil, caches}
-
-    {extension_overlay_cmd, caches} =
-      if ui.extension_overlay,
-        do: ExtensionOverlayEncoder.encode(ui.extension_overlay, caches),
-        else: {nil, caches}
-
-    {extension_panel_cmd, caches} =
-      if ui.extension_panel,
-        do: ExtensionPanelEncoder.encode(ui.extension_panel, caches),
-        else: {nil, caches}
-
-    {hover_popup_cmd, caches} =
-      if ui.hover_popup,
-        do: HoverPopupEncoder.encode(ui.hover_popup, caches),
-        else: {nil, caches}
-
-    {float_popup_cmd, caches} =
-      if ui.float_popup,
-        do: FloatPopupEncoder.encode(ui.float_popup, caches),
-        else: {nil, caches}
-
-    cmds =
-      Enum.reject(
-        [
-          theme_cmd,
-          breadcrumb_cmd,
-          which_key_cmd,
-          notifications_cmd,
-          search_state_cmd,
-          git_status_cmd,
-          agent_context_cmd,
-          status_bar_cmd,
-          observatory_cmd,
-          board_cmd,
-          tab_bar_cmd,
-          workspaces_cmd,
-          sidebars_cmd,
-          file_tree_cmd,
-          picker_cmd,
-          minibuffer_cmd,
-          completion_cmd,
-          signature_help_cmd,
-          agent_chat_cmd,
-          bottom_panel_cmd,
-          change_summary_cmd,
-          edit_timeline_cmd,
-          extension_overlay_cmd,
-          extension_panel_cmd,
-          hover_popup_cmd,
-          float_popup_cmd
-        ],
-        &is_nil/1
-      )
-
-    {cmds, caches}
+  defp encode_component(value, encoder, cmds, caches) do
+    {cmd, caches} = encoder.encode(value, caches)
+    {[cmd | cmds], caches}
   end
 end
