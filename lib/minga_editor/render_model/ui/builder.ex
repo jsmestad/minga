@@ -4,6 +4,7 @@ defmodule MingaEditor.RenderModel.UI.Builder do
   alias Minga.Buffer
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.RenderModel.UI.BreadcrumbBuilder
+  alias MingaEditor.RenderModel.UI.GitStatusBuilder
   alias MingaEditor.RenderModel.UI.NotificationsBuilder
   alias MingaEditor.RenderModel.UI.SearchStateBuilder
   alias MingaEditor.RenderModel.UI.ThemeBuilder
@@ -21,8 +22,22 @@ defmodule MingaEditor.RenderModel.UI.Builder do
       breadcrumb: BreadcrumbBuilder.build(file_path, root),
       which_key: build_which_key(ctx),
       notifications: NotificationsBuilder.build(ctx.notifications),
-      search_state: SearchStateBuilder.build(ctx.search, active_buf)
+      search_state: SearchStateBuilder.build(ctx.search, active_buf),
+      git_status: build_git_status(ctx)
     }
+  end
+
+  @spec build_git_status(Context.t()) :: Minga.RenderModel.UI.GitStatus.t()
+  defp build_git_status(%{
+         shell_state: %{git_status_panel: %{} = data},
+         git_syncing: syncing,
+         git_toast: toast
+       }) do
+    GitStatusBuilder.build(data, syncing, toast)
+  end
+
+  defp build_git_status(%{git_syncing: syncing, git_toast: toast}) do
+    GitStatusBuilder.build(nil, syncing, toast)
   end
 
   @spec build_which_key(Context.t()) :: Minga.RenderModel.UI.WhichKey.t() | nil

@@ -26,7 +26,8 @@ defmodule MingaEditor.RenderModel.UI.BuilderTest do
       assert ui.notifications.items == []
       assert %Minga.RenderModel.UI.SearchState{} = ui.search_state
       assert ui.search_state.active == false
-      assert ui.git_status == nil
+      assert %Minga.RenderModel.UI.GitStatus{} = ui.git_status
+      assert ui.git_status.repo_state == :not_a_repo
     end
 
     # Build a minimal emit context with just the required keys.

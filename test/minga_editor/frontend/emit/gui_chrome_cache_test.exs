@@ -204,35 +204,12 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
       refute has_opcode?(diagnostic_cmds, 0x94)
     end
 
-    test "git syncing and toast changes re-send hidden git status command" do
+    test "git syncing and toast changes no longer emit through sync_swiftui_chrome (moved to adapter)" do
+      # Git status was migrated to the RenderModel + Adapter path.
+      # sync_swiftui_chrome no longer produces 0x85 opcodes.
       state = gui_state()
-      {_ctx, caches, _cmds} = sync_chrome(state)
-
-      syncing_state =
-        state
-        |> MingaEditor.State.set_git_toast(%{
-          message: "Push failed: fetch first",
-          level: :error,
-          action: :pull_and_retry,
-          dismiss_ref: make_ref()
-        })
-        |> Map.put(
-          :git_remote_op,
-          {make_ref(), make_ref(), {"/tmp/repo", "Pushed", "Push failed"}}
-        )
-
-      {_ctx, caches2, syncing_cmds} = sync_chrome(syncing_state, caches)
-
-      assert [
-               <<0x85, _repo_state::8, 1::8, _ahead::16, _behind::16, 0::16, 0::16, 1::8,
-                 _level::8, 1::8, _msg_len::16, _msg::binary>>
-             ] = opcode_cmds(syncing_cmds, 0x85)
-
-      refute caches2.last_gui_git_status_fp == caches.last_gui_git_status_fp
-
-      {_ctx, caches3, stopped_cmds} = sync_chrome(state, caches2)
-      assert [<<0x85, _repo_state::8, 0::8, _rest::binary>>] = opcode_cmds(stopped_cmds, 0x85)
-      refute caches3.last_gui_git_status_fp == caches2.last_gui_git_status_fp
+      {_ctx, _caches, cmds} = sync_chrome(state)
+      assert opcode_cmds(cmds, 0x85) == []
     end
 
     test "closed chrome surfaces cache their not-visible state and return updated context" do

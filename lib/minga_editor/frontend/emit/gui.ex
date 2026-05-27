@@ -144,7 +144,6 @@ defmodule MingaEditor.Frontend.Emit.GUI do
       &build_gui_workspaces_cmd/2,
       &build_gui_sidebars_cmd/2,
       &build_gui_file_tree_cmd/2,
-      &build_gui_git_status_cmd/2,
       &build_gui_completion_cmd/2,
       fn ctx, caches -> build_gui_status_bar_cmd(ctx, sb_data, caches) end,
       &build_gui_picker_cmd/2,
@@ -530,51 +529,6 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   @spec present_path(String.t() | nil) :: [String.t()]
   defp present_path(nil), do: []
   defp present_path(path), do: [path]
-
-  @spec git_status_panel_map(map()) :: map()
-  defp git_status_panel_map(%{__struct__: _module} = panel), do: Map.from_struct(panel)
-  defp git_status_panel_map(panel), do: panel
-
-  # ── Git status panel ──
-
-  @spec build_gui_git_status_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
-  defp build_gui_git_status_cmd(
-         %{shell_state: %{git_status_panel: %{} = data}, git_syncing: syncing, git_toast: toast},
-         caches
-       ) do
-    enriched = data |> git_status_panel_map() |> Map.merge(%{syncing: syncing, git_toast: toast})
-    fp = :erlang.phash2(enriched)
-
-    if fp != caches.last_gui_git_status_fp do
-      {ProtocolGUI.encode_gui_git_status(enriched), %{caches | last_gui_git_status_fp: fp}}
-    else
-      {nil, caches}
-    end
-  end
-
-  defp build_gui_git_status_cmd(%{git_syncing: syncing, git_toast: toast}, caches) do
-    fp = {:no_git, syncing, toast}
-
-    if caches.last_gui_git_status_fp != fp do
-      cmd =
-        ProtocolGUI.encode_gui_git_status(%{
-          repo_state: :not_a_repo,
-          syncing: syncing,
-          branch: "",
-          ahead: 0,
-          behind: 0,
-          entries: [],
-          entry_base_path: "",
-          last_commit_message: "",
-          stash_count: 0,
-          git_toast: toast
-        })
-
-      {cmd, %{caches | last_gui_git_status_fp: fp}}
-    else
-      {nil, caches}
-    end
-  end
 
   # ── Completion ──
 

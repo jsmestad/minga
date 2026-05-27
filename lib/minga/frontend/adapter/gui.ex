@@ -3,6 +3,7 @@ defmodule Minga.Frontend.Adapter.GUI do
 
   alias Minga.Frontend.Adapter.GUI.BreadcrumbEncoder
   alias Minga.Frontend.Adapter.GUI.Caches
+  alias Minga.Frontend.Adapter.GUI.GitStatusEncoder
   alias Minga.Frontend.Adapter.GUI.NotificationsEncoder
   alias Minga.Frontend.Adapter.GUI.SearchStateEncoder
   alias Minga.Frontend.Adapter.GUI.ThemeEncoder
@@ -30,9 +31,21 @@ defmodule Minga.Frontend.Adapter.GUI do
         do: SearchStateEncoder.encode(ui.search_state, caches),
         else: {nil, caches}
 
+    {git_status_cmd, caches} =
+      if ui.git_status,
+        do: GitStatusEncoder.encode(ui.git_status, caches),
+        else: {nil, caches}
+
     cmds =
       Enum.reject(
-        [theme_cmd, breadcrumb_cmd, which_key_cmd, notifications_cmd, search_state_cmd],
+        [
+          theme_cmd,
+          breadcrumb_cmd,
+          which_key_cmd,
+          notifications_cmd,
+          search_state_cmd,
+          git_status_cmd
+        ],
         &is_nil/1
       )
 
