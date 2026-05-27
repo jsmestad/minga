@@ -15,6 +15,7 @@ defmodule MingaEditor.RenderModel.UI.Builder do
   alias MingaEditor.RenderModel.UI.PickerBuilder
   alias MingaEditor.RenderModel.UI.SearchStateBuilder
   alias MingaEditor.RenderModel.UI.SidebarsBuilder
+  alias MingaEditor.RenderModel.UI.SignatureHelpBuilder
   alias MingaEditor.RenderModel.UI.StatusBarBuilder
   alias MingaEditor.RenderModel.UI.TabBarBuilder
   alias MingaEditor.RenderModel.UI.ThemeBuilder
@@ -48,7 +49,8 @@ defmodule MingaEditor.RenderModel.UI.Builder do
       file_tree: FileTreeBuilder.build(ctx),
       picker: PickerBuilder.build(ctx),
       minibuffer: MinibufferBuilder.build(minibuffer_data),
-      completion: CompletionBuilder.build(ctx)
+      completion: CompletionBuilder.build(ctx),
+      signature_help: SignatureHelpBuilder.build(ctx)
     }
   end
 

@@ -13,6 +13,7 @@ defmodule Minga.Frontend.Adapter.GUI do
   alias Minga.Frontend.Adapter.GUI.NotificationsEncoder
   alias Minga.Frontend.Adapter.GUI.ObservatoryEncoder
   alias Minga.Frontend.Adapter.GUI.SearchStateEncoder
+  alias Minga.Frontend.Adapter.GUI.SignatureHelpEncoder
   alias Minga.Frontend.Adapter.GUI.SidebarsEncoder
   alias Minga.Frontend.Adapter.GUI.StatusBarEncoder
   alias Minga.Frontend.Adapter.GUI.TabBarEncoder
@@ -102,6 +103,11 @@ defmodule Minga.Frontend.Adapter.GUI do
         do: CompletionEncoder.encode(ui.completion, caches),
         else: {nil, caches}
 
+    {signature_help_cmd, caches} =
+      if ui.signature_help,
+        do: SignatureHelpEncoder.encode(ui.signature_help, caches),
+        else: {nil, caches}
+
     cmds =
       Enum.reject(
         [
@@ -121,7 +127,8 @@ defmodule Minga.Frontend.Adapter.GUI do
           file_tree_cmd,
           picker_cmd,
           minibuffer_cmd,
-          completion_cmd
+          completion_cmd,
+          signature_help_cmd
         ],
         &is_nil/1
       )

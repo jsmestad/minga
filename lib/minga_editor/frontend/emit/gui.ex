@@ -125,7 +125,6 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     builders = [
       &build_gui_agent_chat_cmd/2,
       &build_gui_hover_popup_cmd/2,
-      &build_gui_signature_help_cmd/2,
       &build_gui_float_popup_cmd/2,
       &build_gui_change_summary_cmd/2,
       &build_gui_edit_timeline_cmd/2,
@@ -733,19 +732,6 @@ defmodule MingaEditor.Frontend.Emit.GUI do
 
     if fp != caches.last_gui_hover_popup_fp do
       {ProtocolGUI.encode_gui_hover_popup(popup), %{caches | last_gui_hover_popup_fp: fp}}
-    else
-      {nil, caches}
-    end
-  end
-
-  # ── Signature help ──
-
-  @spec build_gui_signature_help_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
-  defp build_gui_signature_help_cmd(%{shell_state: %{signature_help: sh}}, caches) do
-    fp = :erlang.phash2(sh)
-
-    if fp != caches.last_gui_signature_help_fp do
-      {ProtocolGUI.encode_gui_signature_help(sh), %{caches | last_gui_signature_help_fp: fp}}
     else
       {nil, caches}
     end

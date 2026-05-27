@@ -18,7 +18,8 @@ defmodule Minga.RenderModel.UI do
           file_tree: term(),
           picker: term(),
           minibuffer: term(),
-          completion: term()
+          completion: term(),
+          signature_help: term()
         }
 
   defstruct [
@@ -38,6 +39,7 @@ defmodule Minga.RenderModel.UI do
     :file_tree,
     :picker,
     :minibuffer,
-    :completion
+    :completion,
+    :signature_help
   ]
 end
