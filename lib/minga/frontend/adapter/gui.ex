@@ -64,7 +64,8 @@ defmodule Minga.Frontend.Adapter.GUI do
   @spec encode_ui(RenderModel.UI.t(), Caches.t()) :: {[binary()], Caches.t()}
   def encode_ui(%RenderModel.UI{} = ui, %Caches{} = caches) do
     {cmds, caches} =
-      Enum.reduce(@component_encoders, {[], caches}, fn {field, encoder}, {cmds_acc, caches_acc} ->
+      Enum.reduce(@component_encoders, {[], caches}, fn {field, encoder},
+                                                        {cmds_acc, caches_acc} ->
         encode_component(Map.get(ui, field), encoder, cmds_acc, caches_acc)
       end)
 
