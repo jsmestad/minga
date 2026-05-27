@@ -5,6 +5,7 @@ defmodule MingaEditor.RenderModel.UI.Builder do
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.RenderModel.UI.BreadcrumbBuilder
   alias MingaEditor.RenderModel.UI.NotificationsBuilder
+  alias MingaEditor.RenderModel.UI.SearchStateBuilder
   alias MingaEditor.RenderModel.UI.ThemeBuilder
   alias MingaEditor.RenderModel.UI.WhichKeyBuilder
   alias Minga.RenderModel
@@ -13,12 +14,14 @@ defmodule MingaEditor.RenderModel.UI.Builder do
   def build_ui(%Context{} = ctx) do
     file_path = active_buffer_path(ctx)
     root = file_tree_root(ctx)
+    active_buf = active_buffer_pid(ctx)
 
     %RenderModel.UI{
       theme: ThemeBuilder.build(ctx.theme),
       breadcrumb: BreadcrumbBuilder.build(file_path, root),
       which_key: build_which_key(ctx),
-      notifications: NotificationsBuilder.build(ctx.notifications)
+      notifications: NotificationsBuilder.build(ctx.notifications),
+      search_state: SearchStateBuilder.build(ctx.search, active_buf)
     }
   end
 
@@ -28,6 +31,10 @@ defmodule MingaEditor.RenderModel.UI.Builder do
   end
 
   defp build_which_key(_ctx), do: nil
+
+  @spec active_buffer_pid(Context.t()) :: pid() | nil
+  defp active_buffer_pid(%{buffers: %{active: buf}}) when is_pid(buf), do: buf
+  defp active_buffer_pid(_ctx), do: nil
 
   @spec active_buffer_path(Context.t()) :: String.t() | nil
   defp active_buffer_path(%{buffers: %{active: buf}}) when is_pid(buf) do

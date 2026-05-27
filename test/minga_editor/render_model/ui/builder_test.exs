@@ -24,7 +24,8 @@ defmodule MingaEditor.RenderModel.UI.BuilderTest do
       assert ui.breadcrumb.root == ""
       assert %Minga.RenderModel.UI.Notifications{} = ui.notifications
       assert ui.notifications.items == []
-      assert ui.search_state == nil
+      assert %Minga.RenderModel.UI.SearchState{} = ui.search_state
+      assert ui.search_state.active == false
       assert ui.git_status == nil
     end
 
