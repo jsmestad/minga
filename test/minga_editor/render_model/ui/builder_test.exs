@@ -11,12 +11,14 @@ defmodule MingaEditor.RenderModel.UI.BuilderTest do
       assert function_exported?(Builder, :build_ui, 1)
     end
 
-    test "returns a UI struct with all nil fields" do
+    test "returns a UI struct with theme populated and other fields nil" do
       ctx = build_minimal_context()
       ui = Builder.build_ui(ctx)
 
       assert %RenderModel.UI{} = ui
-      assert ui.theme == nil
+      assert %Minga.RenderModel.UI.Theme{} = ui.theme
+      assert ui.theme.name == ctx.theme.name
+      assert is_list(ui.theme.color_slots)
       assert ui.breadcrumb == nil
       assert ui.which_key == nil
       assert ui.notifications == nil
@@ -30,7 +32,7 @@ defmodule MingaEditor.RenderModel.UI.BuilderTest do
       %MingaEditor.Frontend.Emit.Context{
         port_manager: self(),
         capabilities: MingaEditor.Frontend.Capabilities.default(),
-        theme: MingaEditor.UI.Theme.default(),
+        theme: MingaEditor.UI.Theme.get!(:doom_one),
         font_registry: MingaEditor.UI.FontRegistry.new(),
         windows: %MingaEditor.State.Windows{map: %{}, active: 1},
         layout: %MingaEditor.Layout{

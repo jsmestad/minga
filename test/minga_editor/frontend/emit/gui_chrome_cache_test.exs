@@ -105,34 +105,31 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
       assert Enum.map(second_cmds, &opcode!/1) == [0x76]
     end
 
-    test "theme fingerprint includes color content, not only theme name" do
+    test "theme is no longer emitted through sync_swiftui_chrome (migrated to adapter)" do
+      # Theme encoding moved to the RenderModel + Adapter path.
+      # sync_swiftui_chrome should NOT produce theme commands (0x74).
       state = gui_state()
-      {_ctx, caches, _cmds} = sync_chrome(state)
-      theme = state.theme
+      {_ctx, _caches, cmds} = sync_chrome(state)
 
-      changed_theme = %{
-        theme
-        | editor: %{theme.editor | bg: Bitwise.bxor(theme.editor.bg, 0x000001)}
-      }
-
-      changed_state = %{state | theme: changed_theme}
-
-      {_ctx, caches2, cmds} = sync_chrome(changed_state, caches)
-
-      assert opcode_count(cmds, 0x74) == 1
-      assert length(cmds) > 1
-      refute caches2.last_gui_theme == caches.last_gui_theme
+      assert opcode_count(cmds, 0x74) == 0,
+             "theme command should not appear in sync_swiftui_chrome output"
     end
 
-    test "re-sends chrome when state changes between calls" do
+    test "re-sends chrome when state changes between calls (excluding theme)" do
       state = gui_state(content: long_content(50))
       {_ctx, caches, _cmds} = sync_chrome(state)
 
+      # Change the theme. Theme is now handled by the adapter, so 0x74
+      # should NOT appear in sync_swiftui_chrome output. But other state
+      # changes (like status bar reflecting new theme colors) still re-send.
       changed_state = %{state | theme: MingaEditor.UI.Theme.get!(:one_dark)}
       {_ctx, _caches2, cmds} = sync_chrome(changed_state, caches)
 
-      assert opcode_count(cmds, 0x74) == 1, "expected theme command after theme change"
-      assert length(cmds) > 1, "expected more than just status bar after theme change"
+      assert opcode_count(cmds, 0x74) == 0,
+             "theme command should not appear after theme change (handled by adapter)"
+
+      # Status bar still re-sends because it includes theme-derived colors
+      assert length(cmds) >= 1, "expected at least status bar after theme change"
     end
 
     test "tab bar cache changes when active buffer dirty state changes" do

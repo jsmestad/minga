@@ -140,7 +140,6 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     # Use map_reduce to thread caches through each builder function.
     # Each build_gui_* function returns {cmd | nil, updated_caches}.
     builders = [
-      &build_gui_theme_cmd/2,
       &build_gui_tab_bar_cmd/2,
       &build_gui_workspaces_cmd/2,
       &build_gui_sidebars_cmd/2,
@@ -183,27 +182,6 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     end
 
     {ctx, caches}
-  end
-
-  # ── Theme ──
-
-  @spec build_gui_theme_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
-  defp build_gui_theme_cmd(ctx, caches) do
-    theme_fp = theme_fingerprint(ctx.theme)
-
-    if theme_fp != caches.last_gui_theme do
-      {ProtocolGUI.encode_gui_theme(ctx.theme), %{caches | last_gui_theme: theme_fp}}
-    else
-      {nil, caches}
-    end
-  end
-
-  @spec theme_fingerprint(MingaEditor.UI.Theme.t()) :: integer()
-  defp theme_fingerprint(theme) do
-    :erlang.phash2({
-      theme.name,
-      MingaEditor.UI.Theme.Slots.to_color_pairs(theme)
-    })
   end
 
   # ── Tab bar ──
