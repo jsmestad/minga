@@ -22,7 +22,11 @@ defmodule Minga.Frontend.Adapter.GUI.Caches do
           last_agent_chat_fp: integer() | :not_visible | nil,
           last_bottom_panel_fp: integer() | nil,
           last_change_summary_fp: integer() | :hidden | nil,
-          last_edit_timeline_fp: integer() | :hidden | nil
+          last_edit_timeline_fp: integer() | :hidden | nil,
+          last_extension_overlay_fp: integer() | nil,
+          last_extension_panel_fp: integer() | nil,
+          last_hover_popup_fp: integer() | nil,
+          last_float_popup_fp: integer() | nil
         }
 
   defstruct last_theme_fp: nil,
@@ -45,7 +49,11 @@ defmodule Minga.Frontend.Adapter.GUI.Caches do
             last_agent_chat_fp: nil,
             last_bottom_panel_fp: nil,
             last_change_summary_fp: nil,
-            last_edit_timeline_fp: nil
+            last_edit_timeline_fp: nil,
+            last_extension_overlay_fp: nil,
+            last_extension_panel_fp: nil,
+            last_hover_popup_fp: nil,
+            last_float_popup_fp: nil
 
   @spec new() :: t()
   def new, do: %__MODULE__{}

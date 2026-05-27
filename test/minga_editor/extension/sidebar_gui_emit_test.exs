@@ -1,17 +1,17 @@
 defmodule MingaEditor.Extension.SidebarGUIEmitTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Frontend.Adapter.GUI, as: AdapterGUI
+  alias Minga.Frontend.Adapter.GUI.Caches, as: AdapterCaches
   alias Minga.Project.FileTree
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.FileTree.Feature, as: FileTreeFeature
   alias MingaEditor.Frontend.Emit.Context
-  alias MingaEditor.Frontend.Emit.GUI, as: EmitGUI
   alias MingaEditor.GitStatus.Panel, as: GitStatusPanel
-  alias MingaEditor.Renderer.Caches
+  alias MingaEditor.RenderModel.UI.Builder
   alias MingaEditor.Sidebar.BuiltinSurfaces
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.FileTree, as: FileTreeState
-  alias MingaEditor.StatusBar.Data, as: StatusBarData
 
   import MingaEditor.RenderPipeline.TestHelpers
 
@@ -142,16 +142,12 @@ defmodule MingaEditor.Extension.SidebarGUIEmitTest do
     refute Enum.any?(second_cmds, &match?(<<0x9F, _::binary>>, &1))
   end
 
-  defp sync_chrome(state, caches \\ %Caches{}) do
-    {ctx, caches} =
-      EmitGUI.sync_swiftui_chrome(
-        Context.from_editor_state(state),
-        StatusBarData.from_state(state),
-        nil,
-        caches
-      )
+  defp sync_chrome(state, adapter_caches \\ AdapterCaches.new()) do
+    ctx = Context.from_editor_state(state)
+    {ui_model, ctx} = Builder.build_ui(ctx)
+    {cmds, adapter_caches} = AdapterGUI.encode_ui(ui_model, adapter_caches)
 
-    {ctx, caches, collect_port_casts() |> List.flatten()}
+    {ctx, adapter_caches, cmds}
   end
 
   defp gui_sidebars_payload!(cmds) do
@@ -191,14 +187,4 @@ defmodule MingaEditor.Extension.SidebarGUIEmitTest do
   end
 
   defp take_string16(<<len::16, value::binary-size(len), rest::binary>>), do: {value, rest}
-
-  defp collect_port_casts, do: collect_port_casts([])
-
-  defp collect_port_casts(acc) do
-    receive do
-      {:"$gen_cast", {:send_commands, cmds}} -> collect_port_casts([cmds | acc])
-    after
-      0 -> Enum.reverse(acc)
-    end
-  end
 end

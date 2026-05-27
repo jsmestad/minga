@@ -10,8 +10,12 @@ defmodule Minga.Frontend.Adapter.GUI do
   alias Minga.Frontend.Adapter.GUI.ChangeSummaryEncoder
   alias Minga.Frontend.Adapter.GUI.CompletionEncoder
   alias Minga.Frontend.Adapter.GUI.EditTimelineEncoder
+  alias Minga.Frontend.Adapter.GUI.ExtensionOverlayEncoder
+  alias Minga.Frontend.Adapter.GUI.ExtensionPanelEncoder
   alias Minga.Frontend.Adapter.GUI.FileTreeEncoder
+  alias Minga.Frontend.Adapter.GUI.FloatPopupEncoder
   alias Minga.Frontend.Adapter.GUI.GitStatusEncoder
+  alias Minga.Frontend.Adapter.GUI.HoverPopupEncoder
   alias Minga.Frontend.Adapter.GUI.MinibufferEncoder
   alias Minga.Frontend.Adapter.GUI.PickerEncoder
   alias Minga.Frontend.Adapter.GUI.NotificationsEncoder
@@ -132,6 +136,26 @@ defmodule Minga.Frontend.Adapter.GUI do
         do: EditTimelineEncoder.encode(ui.edit_timeline, caches),
         else: {nil, caches}
 
+    {extension_overlay_cmd, caches} =
+      if ui.extension_overlay,
+        do: ExtensionOverlayEncoder.encode(ui.extension_overlay, caches),
+        else: {nil, caches}
+
+    {extension_panel_cmd, caches} =
+      if ui.extension_panel,
+        do: ExtensionPanelEncoder.encode(ui.extension_panel, caches),
+        else: {nil, caches}
+
+    {hover_popup_cmd, caches} =
+      if ui.hover_popup,
+        do: HoverPopupEncoder.encode(ui.hover_popup, caches),
+        else: {nil, caches}
+
+    {float_popup_cmd, caches} =
+      if ui.float_popup,
+        do: FloatPopupEncoder.encode(ui.float_popup, caches),
+        else: {nil, caches}
+
     cmds =
       Enum.reject(
         [
@@ -156,7 +180,11 @@ defmodule Minga.Frontend.Adapter.GUI do
           agent_chat_cmd,
           bottom_panel_cmd,
           change_summary_cmd,
-          edit_timeline_cmd
+          edit_timeline_cmd,
+          extension_overlay_cmd,
+          extension_panel_cmd,
+          hover_popup_cmd,
+          float_popup_cmd
         ],
         &is_nil/1
       )

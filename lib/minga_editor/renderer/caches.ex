@@ -52,9 +52,7 @@ defmodule MingaEditor.Renderer.Caches do
     last_gui_minibuffer: nil,
     last_gui_picker_fp: nil,
     last_gui_agent_chat_fp: nil,
-    last_gui_hover_popup_fp: nil,
     last_gui_signature_help_fp: nil,
-    last_gui_float_popup_fp: nil,
     last_gui_notifications_fp: nil,
     last_gui_observatory_fp: nil,
     last_gui_bottom_panel_fp: nil,
@@ -62,8 +60,6 @@ defmodule MingaEditor.Renderer.Caches do
     last_gui_agent_context_fp: nil,
     last_gui_change_summary_fp: nil,
     last_gui_edit_timeline_fp: nil,
-    last_gui_extension_overlays_fp: nil,
-    last_gui_extension_panels_fp: nil,
     last_gui_search_state_fp: nil,
 
     # ── Core adapter caches (render-model migration) ─────────────────────────
@@ -103,9 +99,7 @@ defmodule MingaEditor.Renderer.Caches do
           last_gui_minibuffer: term(),
           last_gui_picker_fp: integer() | :closed | nil,
           last_gui_agent_chat_fp: integer() | :not_visible | nil,
-          last_gui_hover_popup_fp: integer() | nil,
           last_gui_signature_help_fp: integer() | nil,
-          last_gui_float_popup_fp: integer() | nil,
           last_gui_notifications_fp: integer() | nil,
           last_gui_observatory_fp: integer() | :hidden | nil,
           last_gui_bottom_panel_fp: integer() | nil,
@@ -113,8 +107,6 @@ defmodule MingaEditor.Renderer.Caches do
           last_gui_agent_context_fp: term(),
           last_gui_change_summary_fp: integer() | :hidden | nil,
           last_gui_edit_timeline_fp: integer() | :hidden | nil,
-          last_gui_extension_overlays_fp: integer() | nil,
-          last_gui_extension_panels_fp: integer() | nil,
           last_gui_search_state_fp: integer() | nil,
           adapter_gui_caches: Minga.Frontend.Adapter.GUI.Caches.t()
         }

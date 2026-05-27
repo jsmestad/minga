@@ -21,6 +21,10 @@ defmodule Minga.RenderModel.UITest do
       assert ui.workspaces == nil
       assert ui.sidebars == nil
       assert ui.file_tree == nil
+      assert ui.extension_overlay == nil
+      assert ui.extension_panel == nil
+      assert ui.hover_popup == nil
+      assert ui.float_popup == nil
     end
   end
 end

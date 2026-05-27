@@ -1,22 +1,23 @@
 defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
-  @moduledoc "Tests fingerprint-based change detection in `sync_swiftui_chrome/4`."
+  @moduledoc """
+  Tests fingerprint-based change detection in the RenderModel adapter path.
+
+  All chrome components have been migrated from the legacy `sync_swiftui_chrome`
+  path to the `RenderModel.UI.Builder` + `Adapter.GUI` path. These tests verify
+  that the adapter correctly handles fingerprint caching and change detection.
+  """
 
   use ExUnit.Case, async: true
 
+  alias Minga.Frontend.Adapter.GUI, as: AdapterGUI
+  alias Minga.Frontend.Adapter.GUI.Caches, as: AdapterCaches
   alias MingaEditor.Frontend.Emit.Context
-  alias MingaEditor.Frontend.Emit.GUI, as: EmitGUI
-  alias MingaEditor.MinibufferData
-  alias MingaEditor.Renderer.Caches
   alias MingaEditor.Frontend.Protocol.GUI.BoardCardPayload
   alias MingaEditor.Frontend.Protocol.GUI.BoardPayload
-  alias MingaEditor.State.ModalOverlay
-  alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
+  alias MingaEditor.RenderModel.UI.Builder
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
-  alias MingaEditor.State.Windows
   alias MingaEditor.StatusBar.Data, as: StatusBarData
-  alias MingaEditor.Window
-  alias MingaEditor.WindowTree
   alias MingaEditor.Test.UnknownGuiPayloadShell
 
   import ExUnit.CaptureLog
@@ -85,177 +86,89 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
     def preview(_item, _ctx), do: [[{"source preview", 0xFFFFFF, false}]]
   end
 
-  describe "sync_swiftui_chrome/4 fingerprint caching" do
-    test "first frame sends chrome commands, then unchanged frames send nothing" do
+  describe "adapter fingerprint caching" do
+    test "first frame sends chrome commands, then fingerprinted components are cached" do
       state = gui_state()
 
-      {_ctx, caches, first_cmds} = sync_chrome(state)
+      {_ctx, caches, first_cmds} = encode_via_adapter(state)
       assert first_cmds != []
 
-      # Status bar (0x76) is now handled by the RenderModel adapter path,
-      # so the second sync_chrome call produces no commands.
-      {_ctx, _caches, second_cmds} = sync_chrome(state, caches)
-      assert second_cmds == []
+      # The second call re-emits the status bar (no fingerprint, always sent)
+      # but all fingerprinted components should be cached.
+      {_ctx, _caches, second_cmds} = encode_via_adapter(state, caches)
+
+      # Only status bar (0x76) should appear; everything else is cached
+      non_status_bar = Enum.reject(second_cmds, &opcode?(&1, 0x76))
+      assert non_status_bar == [], "Only status bar should be re-emitted on unchanged second frame"
     end
 
-    test "theme is no longer emitted through sync_swiftui_chrome (migrated to adapter)" do
-      # Theme encoding moved to the RenderModel + Adapter path.
-      # sync_swiftui_chrome should NOT produce theme commands (0x74).
+    test "theme is emitted through adapter on first call" do
       state = gui_state()
-      {_ctx, _caches, cmds} = sync_chrome(state)
+      {_ctx, _caches, cmds} = encode_via_adapter(state)
 
-      assert opcode_count(cmds, 0x74) == 0,
-             "theme command should not appear in sync_swiftui_chrome output"
+      assert opcode_count(cmds, 0x74) == 1,
+             "theme command should appear in adapter output"
     end
 
-    test "re-sends chrome when state changes between calls (excluding theme and status bar)" do
+    test "re-sends chrome when state changes between calls" do
       state = gui_state(content: long_content(50))
-      {_ctx, caches, _cmds} = sync_chrome(state)
+      {_ctx, caches, _cmds} = encode_via_adapter(state)
 
-      # Change the theme. Theme is now handled by the adapter, so 0x74
-      # should NOT appear in sync_swiftui_chrome output. Status bar (0x76)
-      # is also now handled by the adapter path.
       changed_state = %{state | theme: MingaEditor.UI.Theme.get!(:one_dark)}
-      {_ctx, _caches2, cmds} = sync_chrome(changed_state, caches)
+      {_ctx, _caches2, cmds} = encode_via_adapter(changed_state, caches)
 
-      assert opcode_count(cmds, 0x74) == 0,
-             "theme command should not appear after theme change (handled by adapter)"
-
-      assert opcode_count(cmds, 0x76) == 0,
-             "status bar command should not appear (handled by adapter)"
+      assert opcode_count(cmds, 0x74) == 1,
+             "theme command should appear after theme change"
     end
 
-    test "tab bar is no longer emitted by sync_swiftui_chrome (handled by adapter)" do
+    test "tab bar is emitted through adapter" do
       state = put_in(gui_state().shell_state.tab_bar, TabBar.new(Tab.new_file(1, "test.ex")))
-      {_ctx, _caches, cmds} = sync_chrome(state)
+      {_ctx, _caches, cmds} = encode_via_adapter(state)
 
-      assert opcode_count(cmds, 0x71) == 0,
-             "tab bar command should not appear (handled by adapter)"
+      assert opcode_count(cmds, 0x71) == 1,
+             "tab bar command should appear in adapter output"
     end
 
-    test "file tree is no longer emitted by sync_swiftui_chrome (handled by adapter)" do
-      state = gui_state()
-      {_ctx, _caches, cmds} = sync_chrome(state)
+    test "board is emitted through adapter" do
+      board_state = %{gui_state() | shell: BoardPayloadShell}
+      {_ctx, _caches, cmds} = encode_via_adapter(board_state)
 
-      assert opcode_count(cmds, 0x93) == 0,
-             "file tree command should not appear (handled by adapter)"
-
-      assert opcode_count(cmds, 0x94) == 0,
-             "file tree selection command should not appear (handled by adapter)"
+      assert opcode_count(cmds, 0x87) == 1,
+             "board command should appear in adapter output"
     end
 
-    test "git syncing and toast changes no longer emit through sync_swiftui_chrome (moved to adapter)" do
-      # Git status was migrated to the RenderModel + Adapter path.
-      # sync_swiftui_chrome no longer produces 0x85 opcodes.
-      state = gui_state()
-      {_ctx, _caches, cmds} = sync_chrome(state)
-      assert opcode_cmds(cmds, 0x85) == []
-    end
-
-    test "closed chrome surfaces are handled by adapter (no longer emitted through sync_swiftui_chrome)" do
-      # Picker, agent chat, minibuffer, and bottom panel are now handled by
-      # the RenderModel adapter path. sync_swiftui_chrome no longer produces
-      # these opcodes.
-      {ctx, _caches, cmds} = sync_chrome(gui_state())
-
-      assert is_map(ctx)
-      assert opcode_count(cmds, 0x77) == 0, "picker should not appear (handled by adapter)"
-      assert opcode_count(cmds, 0x78) == 0, "agent chat should not appear (handled by adapter)"
-      assert opcode_count(cmds, 0x7F) == 0, "minibuffer should not appear (handled by adapter)"
-    end
-
-    test "picker is no longer emitted by sync_swiftui_chrome (handled by adapter)" do
-      state = gui_state()
-      state_a = open_test_picker(state, "a.txt")
-
-      {_ctx, _caches, cmds} = sync_chrome(state_a)
-
-      assert opcode_count(cmds, 0x77) == 0,
-             "picker command should not appear (handled by adapter)"
-    end
-
-    test "minibuffer is no longer emitted by sync_swiftui_chrome (handled by adapter)" do
-      state = gui_state()
-
-      data_a =
-        minibuffer_data([
-          %{
-            label: "edit",
-            description: "Open file",
-            match_score: 80,
-            annotation: "file",
-            match_positions: [0]
-          }
-        ])
-
-      {_ctx, _caches, cmds} = sync_chrome(state, %Caches{}, data_a)
-
-      assert opcode_count(cmds, 0x7F) == 0,
-             "minibuffer command should not appear (handled by adapter)"
-    end
-
-    test "agent chat is no longer emitted by sync_swiftui_chrome (handled by adapter)" do
-      # Agent chat is now handled by the RenderModel adapter path.
-      # sync_swiftui_chrome should NOT produce agent chat commands (0x78).
-      chat_state = agent_chat_state()
-      {_ctx, _caches, cmds} = sync_chrome(chat_state)
-
-      assert opcode_count(cmds, 0x78) == 0,
-             "agent chat command should not appear (handled by adapter)"
-    end
-
-    test "switching from Board to Traditional no longer emits change summary through sync_swiftui_chrome" do
-      # Change summary (0x89) is now handled by the RenderModel adapter path.
+    test "board dismiss is emitted through adapter" do
       board_state = %{gui_state() | shell: BoardPayloadShell}
 
-      {_ctx, caches, board_cmds} = sync_chrome(board_state)
-      assert [] = opcode_cmds(board_cmds, 0x87)
-      assert [] = opcode_cmds(board_cmds, 0x89)
+      {_ctx, caches, _cmds} = encode_via_adapter(board_state)
+      {_ctx, _caches, dismiss_cmds} = encode_via_adapter(gui_state(), caches)
 
-      {_ctx, _caches, dismiss_cmds} = sync_chrome(gui_state(), caches)
-      assert [] = opcode_cmds(dismiss_cmds, 0x89),
-             "change summary should not appear (handled by adapter)"
-    end
-
-    test "switching from Board to Traditional emits one Board dismiss payload via adapter" do
-      # Board (0x87) is now handled by the RenderModel adapter path.
-      # This test verifies sync_swiftui_chrome does NOT emit board commands.
-      board_state = %{gui_state() | shell: BoardPayloadShell}
-
-      {_ctx, caches, board_cmds} = sync_chrome(board_state)
-      assert [] = opcode_cmds(board_cmds, 0x87)
-
-      {_ctx, caches, dismiss_cmds} = sync_chrome(gui_state(), caches)
-      assert [] = opcode_cmds(dismiss_cmds, 0x87)
-
-      {_ctx, _caches, repeated_cmds} = sync_chrome(gui_state(), caches)
-      assert [] = opcode_cmds(repeated_cmds, 0x87)
+      assert opcode_count(dismiss_cmds, 0x87) == 1,
+             "board dismiss should appear in adapter output"
     end
 
     test "unsupported shell GUI payload dismisses Board via adapter without crashing" do
-      # Board (0x87) is now handled by the RenderModel adapter path.
-      # The unsupported payload warning is emitted by the board builder.
       board_state = %{gui_state() | shell: BoardPayloadShell}
 
-      {_ctx, caches, _board_cmds} = sync_chrome(board_state)
+      {_ctx, caches, _board_cmds} = encode_via_adapter(board_state)
       unsupported_state = %{gui_state() | shell: UnknownGuiPayloadShell}
 
       {{_ctx, _caches, cmds}, log} =
-        with_log(fn -> sync_chrome(unsupported_state, caches) end)
+        with_log(fn -> encode_via_adapter(unsupported_state, caches) end)
 
       assert log =~ "Unsupported GUI shell payload"
-      # Board commands are no longer emitted through sync_swiftui_chrome
-      assert [] = opcode_cmds(cmds, 0x87)
+      assert opcode_count(cmds, 0x87) == 1,
+             "board dismiss should appear in adapter output"
     end
 
-    test "workspaces are no longer emitted by sync_swiftui_chrome (handled by adapter)" do
+    test "workspaces are emitted through adapter" do
       state = gui_state()
       tab_bar = tab_bar_with_two_workspaces()
       state_with_agents = put_in(state.shell_state.tab_bar, tab_bar)
-      {_ctx, _caches, first_cmds} = sync_chrome(state_with_agents)
+      {_ctx, _caches, first_cmds} = encode_via_adapter(state_with_agents)
 
-      assert opcode_count(first_cmds, 0x98) == 0,
-             "workspace command should not appear (handled by adapter)"
+      assert opcode_count(first_cmds, 0x98) == 1,
+             "workspace command should appear in adapter output"
     end
 
     test "agent chat survives dead prompt buffer process" do
@@ -270,69 +183,24 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
         | workspace: %{state.workspace | agent_ui: %{state.workspace.agent_ui | panel: panel}}
       }
 
-      {ctx, _caches, _cmds} = sync_chrome(state)
+      {ctx, _caches, _cmds} = encode_via_adapter(state)
       assert is_map(ctx)
     end
   end
 
-  defp sync_chrome(state, caches \\ %Caches{}, minibuffer_data \\ nil) do
-    {ctx, caches} =
-      EmitGUI.sync_swiftui_chrome(
-        Context.from_editor_state(state),
-        StatusBarData.from_state(state),
-        minibuffer_data,
-        caches
-      )
+  defp encode_via_adapter(state, adapter_caches \\ AdapterCaches.new(), status_bar_data \\ nil) do
+    ctx = Context.from_editor_state(state)
+    sb_data = status_bar_data || StatusBarData.from_state(state)
+    {ui_model, ctx} = Builder.build_ui(ctx, sb_data)
+    {cmds, adapter_caches} = AdapterGUI.encode_ui(ui_model, adapter_caches)
 
-    {ctx, caches, collect_port_casts() |> List.flatten()}
-  end
-
-  defp collect_port_casts, do: collect_port_casts([])
-
-  defp collect_port_casts(acc) do
-    receive do
-      {:"$gen_cast", {:send_commands, cmds}} -> collect_port_casts([cmds | acc])
-    after
-      0 -> Enum.reverse(acc)
-    end
+    {ctx, adapter_caches, cmds}
   end
 
   defp opcode_count(cmds, opcode), do: cmds |> opcode_cmds(opcode) |> length()
   defp opcode_cmds(cmds, opcode), do: Enum.filter(cmds, &opcode?(&1, opcode))
   defp opcode?(<<opcode, _::binary>>, opcode), do: true
   defp opcode?(_, _opcode), do: false
-
-  defp open_test_picker(state, label, _mode_prefix \\ "") do
-    open_test_picker_with_source(state, label, nil, "")
-  end
-
-  defp open_test_picker_with_source(state, label, source, mode_prefix) do
-    item = %MingaEditor.UI.Picker.Item{id: "same-id", label: label}
-    picker = MingaEditor.UI.Picker.new([item], title: "Test")
-
-    picker_state = %MingaEditor.State.Picker{
-      picker: picker,
-      source: source,
-      action_menu: nil,
-      mode_prefix: mode_prefix
-    }
-
-    ModalOverlay.open(state, :picker, PickerPayload.new(picker_state))
-  end
-
-  defp minibuffer_data([first | _] = candidates) do
-    %MinibufferData{
-      visible: true,
-      mode: 0,
-      cursor_pos: 1,
-      prompt: ":",
-      input: "e",
-      context: "",
-      selected_index: 0,
-      candidates: candidates,
-      total_candidates: Map.get(first, :total_candidates, length(candidates))
-    }
-  end
 
   defp tab_bar_with_two_workspaces do
     tab_bar = TabBar.new(Tab.new_file(1, "a.ex"))
@@ -345,37 +213,4 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
     |> TabBar.move_tab_to_workspace(tab_b.id, workspace_b.id)
   end
 
-  defp agent_chat_state do
-    state = gui_state()
-    {:ok, chat_buf} = Minga.Buffer.start_link(content: "")
-    {:ok, prompt_buf} = Minga.Buffer.start_link(content: "ab")
-    {:ok, session} = Agent.start_link(fn -> nil end)
-    Agent.stop(session)
-
-    window = Window.new_agent_chat(1, chat_buf, 24, 80)
-
-    workspace = %{
-      state.workspace
-      | windows: %Windows{tree: WindowTree.new(1), map: %{1 => window}, active: 1, next_id: 2},
-        agent_ui: %{
-          state.workspace.agent_ui
-          | panel: %{state.workspace.agent_ui.panel | prompt_buffer: prompt_buf}
-        }
-    }
-
-    tab = Tab.new_agent(1, "Agent") |> Tab.set_session(session)
-
-    tab_bar =
-      tab
-      |> TabBar.new()
-      |> TabBar.update_workspace(0, fn active_workspace ->
-        active_workspace
-        |> MingaEditor.State.Workspace.set_session(session)
-        |> MingaEditor.State.Workspace.set_agent_ui(workspace.agent_ui)
-      end)
-
-    state
-    |> Map.put(:workspace, workspace)
-    |> put_in([Access.key(:shell_state), Access.key(:tab_bar)], tab_bar)
-  end
 end

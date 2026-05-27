@@ -23,7 +23,11 @@ defmodule Minga.RenderModel.UI do
           agent_chat: term(),
           bottom_panel: term(),
           change_summary: term(),
-          edit_timeline: term()
+          edit_timeline: term(),
+          extension_overlay: term(),
+          extension_panel: term(),
+          hover_popup: term(),
+          float_popup: term()
         }
 
   defstruct [
@@ -48,6 +52,10 @@ defmodule Minga.RenderModel.UI do
     :agent_chat,
     :bottom_panel,
     :change_summary,
-    :edit_timeline
+    :edit_timeline,
+    :extension_overlay,
+    :extension_panel,
+    :hover_popup,
+    :float_popup
   ]
 end

@@ -11,8 +11,12 @@ defmodule MingaEditor.RenderModel.UI.Builder do
   alias MingaEditor.RenderModel.UI.ChangeSummaryBuilder
   alias MingaEditor.RenderModel.UI.CompletionBuilder
   alias MingaEditor.RenderModel.UI.EditTimelineBuilder
+  alias MingaEditor.RenderModel.UI.ExtensionOverlayBuilder
+  alias MingaEditor.RenderModel.UI.ExtensionPanelBuilder
   alias MingaEditor.RenderModel.UI.FileTreeBuilder
+  alias MingaEditor.RenderModel.UI.FloatPopupBuilder
   alias MingaEditor.RenderModel.UI.GitStatusBuilder
+  alias MingaEditor.RenderModel.UI.HoverPopupBuilder
   alias MingaEditor.RenderModel.UI.MinibufferBuilder
   alias MingaEditor.RenderModel.UI.NotificationsBuilder
   alias MingaEditor.RenderModel.UI.ObservatoryBuilder
@@ -69,7 +73,11 @@ defmodule MingaEditor.RenderModel.UI.Builder do
       agent_chat: AgentChatBuilder.build(ctx),
       bottom_panel: bottom_panel,
       change_summary: ChangeSummaryBuilder.build(gui_payload),
-      edit_timeline: EditTimelineBuilder.build(ctx)
+      edit_timeline: EditTimelineBuilder.build(ctx),
+      extension_overlay: ExtensionOverlayBuilder.build(ctx),
+      extension_panel: ExtensionPanelBuilder.build(),
+      hover_popup: HoverPopupBuilder.build(ctx),
+      float_popup: FloatPopupBuilder.build(ctx)
     }
 
     {ui, ctx}

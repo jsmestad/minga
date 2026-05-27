@@ -105,8 +105,6 @@ defmodule MingaEditor.Frontend.Emit do
         MingaEditor.Frontend.send_commands(ctx.port_manager, adapter_cmds)
       end
 
-      # SwiftUI chrome: separate messages, safe (no Metal impact)
-      {_ctx, caches} = EmitGUI.sync_swiftui_chrome(ctx, status_bar_data, minibuffer_data, caches)
       caches
     end)
   end

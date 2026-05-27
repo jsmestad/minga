@@ -11,10 +11,13 @@ defmodule MingaEditor.Frontend.Emit.GUI do
      Gutter is also stripped from window frames since the GUI renders it
      natively.
 
-  2. **Chrome synchronization**: sends structured chrome data (tab bar,
-     file tree, which-key, completion, breadcrumb, status bar, picker,
-     agent chat, theme) to the native GUI frontend via dedicated protocol
-     opcodes. These are separate from the cell-grid rendering commands.
+  2. **Metal-critical commands**: builds gutter, cursorline, gutter
+     separator, split separator, and indent guide commands that must be
+     bundled with the main frame for atomic delivery to the Metal render pass.
+
+  All chrome synchronization (tab bar, file tree, status bar, picker,
+  agent chat, theme, popups, etc.) is handled by the RenderModel adapter
+  path in `Minga.Frontend.Adapter.GUI`.
 
   Called from `Emit.emit/3` only when the frontend has GUI capabilities.
   """
@@ -26,7 +29,6 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   alias MingaEditor.DisplayMap
   alias MingaEditor.FoldMap
   alias MingaEditor.Layout
-  alias MingaEditor.Renderer.Caches
   alias MingaEditor.Shell.Traditional.Chrome.Helpers, as: ChromeHelpers
   alias MingaEditor.RenderPipeline.ContentHelpers
   alias MingaEditor.Viewport
@@ -93,51 +95,6 @@ defmodule MingaEditor.Frontend.Emit.GUI do
       build_gui_gutter_separator_commands(ctx) ++
       build_gui_split_separator_commands(ctx) ++
       build_gui_indent_guide_commands(ctx)
-  end
-
-  @doc """
-  Sends SwiftUI chrome data to the native frontend.
-
-  These update `@Observable` properties on SwiftUI state objects
-  (tab bar, file tree, status bar, picker, etc.). SwiftUI coalesces its
-  own view updates independently of Metal vsync, so these are safe to
-  send as separate port messages after the atomic Metal frame.
-
-  Each chrome component uses fingerprint-based change detection via the
-  `Caches` struct to skip re-encoding and re-sending when nothing changed.
-  During j/k scroll, only the status bar (cursor position) changes;
-  everything else is skipped. All changed chrome commands are batched into
-  a single `MingaEditor.Frontend.send_commands` call to reduce port write
-  overhead.
-
-  `status_bar_data` and `minibuffer_data` are accepted for API compatibility
-  but no longer used here; both are now handled by the RenderModel adapter path.
-  """
-  @spec sync_swiftui_chrome(ctx(), term(), term(), Caches.t()) ::
-          {ctx(), Caches.t()}
-  def sync_swiftui_chrome(ctx, _status_bar_data, _minibuffer_data, caches) do
-    # Use map_reduce to thread caches through each builder function.
-    # Each build_gui_* function returns {cmd | nil, updated_caches}.
-    # Note: status_bar is now handled by the RenderModel adapter path.
-    builders = [
-      &build_gui_hover_popup_cmd/2,
-      &build_gui_float_popup_cmd/2,
-      &build_gui_extension_overlay_cmd/2,
-      &build_gui_extension_panel_cmd/2
-    ]
-
-    {cmds, caches} =
-      Enum.map_reduce(builders, caches, fn build_fn, acc_caches ->
-        build_fn.(ctx, acc_caches)
-      end)
-
-    chrome_cmds = Enum.reject(cmds, &is_nil/1)
-
-    if chrome_cmds != [] do
-      MingaEditor.Frontend.send_commands(ctx.port_manager, chrome_cmds)
-    end
-
-    {ctx, caches}
   end
 
   # ── Gutter separator ──
@@ -479,19 +436,6 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     end
   end
 
-  # ── Hover popup ──
-
-  @spec build_gui_hover_popup_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
-  defp build_gui_hover_popup_cmd(%{shell_state: %{hover_popup: popup}}, caches) do
-    fp = :erlang.phash2(popup)
-
-    if fp != caches.last_gui_hover_popup_fp do
-      {ProtocolGUI.encode_gui_hover_popup(popup), %{caches | last_gui_hover_popup_fp: fp}}
-    else
-      {nil, caches}
-    end
-  end
-
   # ── Split separators ──
 
   @spec build_gui_split_separator_commands(ctx()) :: [binary()]
@@ -514,216 +458,6 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     else
       # No splits: send empty separator data to clear any previous state
       [ProtocolGUI.encode_gui_split_separators(0, [], [])]
-    end
-  end
-
-  # ── Float popup ──
-
-  @spec build_gui_float_popup_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
-  defp build_gui_float_popup_cmd(
-         %{shell_state: %{observatory_inspection: %{visible: true} = data}},
-         caches
-       ) do
-    fp = :erlang.phash2({:observatory_inspection, data})
-
-    if fp != caches.last_gui_float_popup_fp do
-      {ProtocolGUI.encode_gui_float_popup(data), %{caches | last_gui_float_popup_fp: fp}}
-    else
-      {nil, caches}
-    end
-  end
-
-  defp build_gui_float_popup_cmd(ctx, caches) do
-    float_window = find_float_popup_window(ctx)
-
-    fp = float_popup_fingerprint(ctx, float_window)
-
-    if fp != caches.last_gui_float_popup_fp do
-      cmd =
-        if float_window do
-          data = build_float_popup_data(ctx, float_window)
-          ProtocolGUI.encode_gui_float_popup(data)
-        else
-          ProtocolGUI.encode_gui_float_popup(%{
-            visible: false,
-            title: "",
-            lines: [],
-            width: 0,
-            height: 0
-          })
-        end
-
-      {cmd, %{caches | last_gui_float_popup_fp: fp}}
-    else
-      {nil, caches}
-    end
-  end
-
-  @spec float_popup_fingerprint(ctx(), MingaEditor.Window.t() | nil) :: integer()
-  defp float_popup_fingerprint(_ctx, nil), do: :erlang.phash2(nil)
-
-  defp float_popup_fingerprint(ctx, window) do
-    rule = window.popup_meta.rule
-    vp = ctx.viewport
-    width = resolve_float_dim(rule, :width, vp.cols)
-    height = resolve_float_dim(rule, :height, vp.rows)
-
-    buffer_fp =
-      try do
-        {Buffer.buffer_name(window.buffer), Buffer.version(window.buffer)}
-      catch
-        :exit, _ -> :dead
-      end
-
-    :erlang.phash2({window.buffer, window.popup_meta, width, height, buffer_fp})
-  end
-
-  @spec find_float_popup_window(ctx()) :: MingaEditor.Window.t() | nil
-  defp find_float_popup_window(ctx) do
-    Enum.find_value(ctx.windows.map, fn
-      {_id,
-       %{
-         popup_meta: %MingaEditor.UI.Popup.Active{
-           rule: %Minga.Popup.Rule{display: :float}
-         }
-       } = w} ->
-        w
-
-      _ ->
-        nil
-    end)
-  end
-
-  @spec build_float_popup_data(ctx(), MingaEditor.Window.t()) :: ProtocolGUI.float_popup_data()
-  defp build_float_popup_data(ctx, window) do
-    rule = window.popup_meta.rule
-    vp = ctx.viewport
-
-    width = resolve_float_dim(rule, :width, vp.cols)
-    height = resolve_float_dim(rule, :height, vp.rows)
-
-    # Interior dimensions (subtract 2 for border)
-    interior_h = max(height - 2, 1)
-    interior_w = max(width - 2, 1)
-
-    {title, lines} =
-      try do
-        name = Buffer.buffer_name(window.buffer)
-        snapshot = Buffer.render_snapshot(window.buffer, 0, interior_h)
-        trimmed = Enum.map(snapshot.lines, &String.slice(&1, 0, interior_w))
-        {name, trimmed}
-      catch
-        :exit, _ -> {"", []}
-      end
-
-    %{visible: true, title: title, lines: lines, width: width, height: height}
-  end
-
-  @spec resolve_float_dim(Minga.Popup.Rule.t(), :width | :height, pos_integer()) ::
-          pos_integer()
-  defp resolve_float_dim(rule, dim, viewport_size) do
-    val =
-      case dim do
-        :width -> rule.width || rule.size || {:percent, 50}
-        :height -> rule.height || rule.size || {:percent, 50}
-      end
-
-    case val do
-      {:percent, pct} -> max(div(viewport_size * pct, 100), 1)
-      {:cols, n} -> n
-      {:rows, n} -> n
-      n when is_integer(n) -> n
-      _ -> max(div(viewport_size, 2), 1)
-    end
-  end
-
-  # ── Extension Overlays ──
-
-  @spec build_gui_extension_overlay_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
-  defp build_gui_extension_overlay_cmd(ctx, caches) do
-    overlay_entries = build_extension_overlay_entries(ctx)
-    fp = :erlang.phash2(overlay_entries)
-
-    if fp != caches.last_gui_extension_overlays_fp do
-      cmd = ProtocolGUI.encode_gui_extension_overlays(overlay_entries)
-      {cmd, %{caches | last_gui_extension_overlays_fp: fp}}
-    else
-      {nil, caches}
-    end
-  end
-
-  @spec build_extension_overlay_entries(ctx()) :: [ProtocolGUI.extension_overlay_entry()]
-  defp build_extension_overlay_entries(ctx) do
-    overlays = Minga.Extension.Overlay.all()
-
-    if overlays == [] do
-      []
-    else
-      Enum.flat_map(overlays, &resolve_overlay_to_entries(&1, ctx))
-    end
-  end
-
-  @spec resolve_overlay_to_entries(Minga.Extension.Overlay.entry(), ctx()) ::
-          [ProtocolGUI.extension_overlay_entry()]
-  defp resolve_overlay_to_entries(overlay, ctx) do
-    Enum.flat_map(ctx.layout.window_layouts, fn {win_id, win_layout} ->
-      window = Map.get(ctx.windows.map, win_id)
-      maybe_overlay_entry(overlay, window, win_id, win_layout)
-    end)
-  end
-
-  @spec maybe_overlay_entry(
-          Minga.Extension.Overlay.entry(),
-          term(),
-          pos_integer(),
-          Layout.window_layout()
-        ) :: [ProtocolGUI.extension_overlay_entry()]
-  defp maybe_overlay_entry(overlay, %{buffer: buf} = window, win_id, win_layout)
-       when is_pid(buf) do
-    if buf == overlay.buffer do
-      viewport_top = max(window.render_cache.last_viewport_top, 0)
-      {_row, _col, _w, content_height} = win_layout.content
-      {line, col} = overlay.position
-      row = line - viewport_top
-
-      if row >= 0 and row < content_height do
-        style = overlay.style
-
-        [
-          %{
-            extension: to_string(overlay.extension),
-            overlay_id: to_string(overlay.overlay_id),
-            window_id: win_id,
-            row: row,
-            col: col,
-            shape: ProtocolGUI.overlay_shape_byte(overlay.shape),
-            fg: Map.get(style, :fg, 0x51AFEF),
-            opacity: Map.get(style, :opacity, 102),
-            content: overlay.content
-          }
-        ]
-      else
-        []
-      end
-    else
-      []
-    end
-  end
-
-  defp maybe_overlay_entry(_overlay, _window, _win_id, _win_layout), do: []
-
-  # ── Extension Panels ──
-
-  @spec build_gui_extension_panel_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
-  defp build_gui_extension_panel_cmd(_ctx, caches) do
-    panels = Minga.Extension.Panel.visible()
-    fp = :erlang.phash2(panels)
-
-    if fp != caches.last_gui_extension_panels_fp do
-      cmd = ProtocolGUI.encode_gui_extension_panels(panels)
-      {cmd, %{caches | last_gui_extension_panels_fp: fp}}
-    else
-      {nil, caches}
     end
   end
 
