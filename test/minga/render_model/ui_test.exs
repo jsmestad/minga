@@ -1,0 +1,18 @@
+defmodule Minga.RenderModel.UITest do
+  use ExUnit.Case, async: true
+
+  alias Minga.RenderModel.UI
+
+  describe "%UI{}" do
+    test "creates a struct with all nil fields" do
+      ui = %UI{}
+
+      assert ui.theme == nil
+      assert ui.breadcrumb == nil
+      assert ui.which_key == nil
+      assert ui.notifications == nil
+      assert ui.search_state == nil
+      assert ui.git_status == nil
+    end
+  end
+end
