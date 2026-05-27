@@ -13,7 +13,7 @@ defmodule MingaEditor.RenderModel.UI.BuilderTest do
 
     test "returns a UI struct with theme, breadcrumb, and notifications populated" do
       ctx = build_minimal_context()
-      ui = Builder.build_ui(ctx)
+      {ui, _ctx} = Builder.build_ui(ctx)
 
       assert %RenderModel.UI{} = ui
       assert %Minga.RenderModel.UI.Theme{} = ui.theme

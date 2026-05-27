@@ -6,6 +6,7 @@ defmodule MingaEditor.RenderModel.UI.Builder do
   alias MingaEditor.RenderModel.UI.AgentChatBuilder
   alias MingaEditor.RenderModel.UI.AgentContextBuilder
   alias MingaEditor.RenderModel.UI.BoardBuilder
+  alias MingaEditor.RenderModel.UI.BottomPanelBuilder
   alias MingaEditor.RenderModel.UI.BreadcrumbBuilder
   alias MingaEditor.RenderModel.UI.CompletionBuilder
   alias MingaEditor.RenderModel.UI.FileTreeBuilder
@@ -25,7 +26,8 @@ defmodule MingaEditor.RenderModel.UI.Builder do
   alias MingaEditor.StatusBar.Data, as: StatusBarData
   alias Minga.RenderModel
 
-  @spec build_ui(Context.t(), StatusBarData.t() | nil, term()) :: RenderModel.UI.t()
+  @spec build_ui(Context.t(), StatusBarData.t() | nil, term()) ::
+          {RenderModel.UI.t(), Context.t()}
   def build_ui(%Context{} = ctx, status_bar_data \\ nil, minibuffer_data \\ nil) do
     file_path = active_buffer_path(ctx)
     root = file_tree_root(ctx)
@@ -33,7 +35,17 @@ defmodule MingaEditor.RenderModel.UI.Builder do
     gui_payload = shell_gui_payload(ctx)
     sb_data = status_bar_data || ctx.status_bar_data
 
-    %RenderModel.UI{
+    # Bottom panel has a side effect: encoding may advance the message_store cursor.
+    {bottom_panel, new_message_store} = BottomPanelBuilder.build(ctx)
+
+    ctx =
+      if new_message_store != nil and Map.has_key?(ctx, :message_store) do
+        %{ctx | message_store: new_message_store}
+      else
+        ctx
+      end
+
+    ui = %RenderModel.UI{
       theme: ThemeBuilder.build(ctx.theme),
       breadcrumb: BreadcrumbBuilder.build(file_path, root),
       which_key: build_which_key(ctx),
@@ -52,8 +64,11 @@ defmodule MingaEditor.RenderModel.UI.Builder do
       minibuffer: MinibufferBuilder.build(minibuffer_data),
       completion: CompletionBuilder.build(ctx),
       signature_help: SignatureHelpBuilder.build(ctx),
-      agent_chat: AgentChatBuilder.build(ctx)
+      agent_chat: AgentChatBuilder.build(ctx),
+      bottom_panel: bottom_panel
     }
+
+    {ui, ctx}
   end
 
   @spec build_git_status(Context.t()) :: Minga.RenderModel.UI.GitStatus.t()

@@ -20,7 +20,8 @@ defmodule Minga.RenderModel.UI do
           minibuffer: term(),
           completion: term(),
           signature_help: term(),
-          agent_chat: term()
+          agent_chat: term(),
+          bottom_panel: term()
         }
 
   defstruct [
@@ -42,6 +43,7 @@ defmodule Minga.RenderModel.UI do
     :minibuffer,
     :completion,
     :signature_help,
-    :agent_chat
+    :agent_chat,
+    :bottom_panel
   ]
 end

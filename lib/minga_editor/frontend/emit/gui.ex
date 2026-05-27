@@ -135,10 +135,6 @@ defmodule MingaEditor.Frontend.Emit.GUI do
 
     chrome_cmds = Enum.reject(cmds, &is_nil/1)
 
-    # Bottom panel is special: it also returns updated ctx (for message_store).
-    {panel_cmd, ctx, caches} = build_gui_bottom_panel_cmd(ctx, caches)
-    chrome_cmds = if panel_cmd, do: chrome_cmds ++ [panel_cmd], else: chrome_cmds
-
     if chrome_cmds != [] do
       MingaEditor.Frontend.send_commands(ctx.port_manager, chrome_cmds)
     end
@@ -651,27 +647,6 @@ defmodule MingaEditor.Frontend.Emit.GUI do
       {:rows, n} -> n
       n when is_integer(n) -> n
       _ -> max(div(viewport_size, 2), 1)
-    end
-  end
-
-  # ── Bottom panel ──
-
-  # Bottom panel is special: it returns {cmd | nil, updated_ctx, updated_caches} because
-  # encode_gui_bottom_panel may advance the message_store cursor when new
-  # entries have arrived. We still fingerprint to skip encoding when the
-  # panel hasn't changed.
-  @spec build_gui_bottom_panel_cmd(ctx(), Caches.t()) :: {binary() | nil, ctx(), Caches.t()}
-  defp build_gui_bottom_panel_cmd(
-         %{shell_state: %{bottom_panel: panel}, message_store: store} = ctx,
-         caches
-       ) do
-    fp = :erlang.phash2({panel, store})
-
-    if fp != caches.last_gui_bottom_panel_fp do
-      {cmd, new_store} = ProtocolGUI.encode_gui_bottom_panel(panel, store)
-      {cmd, %{ctx | message_store: new_store}, %{caches | last_gui_bottom_panel_fp: fp}}
-    else
-      {nil, ctx, caches}
     end
   end
 
