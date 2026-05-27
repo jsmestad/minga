@@ -49,6 +49,7 @@ defmodule MingaEditor.RenderModel.UI.ThemeBuilderTest do
 
         assert %Theme{} = model
         assert model.name == theme_name
+
         assert length(model.color_slots) > 0,
                "Theme #{theme_name} should have at least one color slot"
       end

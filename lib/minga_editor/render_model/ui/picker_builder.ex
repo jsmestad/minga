@@ -32,7 +32,9 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
           PickerModel.t()
   defp build_open(ctx, picker, source, action_menu, mode_prefix, load_status) do
     has_preview = source != nil and Picker.Source.gui_preview?(source)
-    fp = picker_fingerprint(picker, has_preview, action_menu, mode_prefix, @max_items, load_status)
+
+    fp =
+      picker_fingerprint(picker, has_preview, action_menu, mode_prefix, @max_items, load_status)
 
     preview_lines = if has_preview, do: build_picker_preview(ctx)
 
@@ -71,7 +73,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
         ) ::
           integer()
   defp picker_fingerprint(picker, has_preview, action_menu, mode_prefix, max_items, load_status) do
-    limit = if max_items > 0, do: max_items, else: picker.max_visible
+    limit = max_items
 
     visible_items =
       picker.filtered

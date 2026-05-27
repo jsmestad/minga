@@ -99,7 +99,9 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
 
       # Only status bar (0x76) should appear; everything else is cached
       non_status_bar = Enum.reject(second_cmds, &opcode?(&1, 0x76))
-      assert non_status_bar == [], "Only status bar should be re-emitted on unchanged second frame"
+
+      assert non_status_bar == [],
+             "Only status bar should be re-emitted on unchanged second frame"
     end
 
     test "theme is emitted through adapter on first call" do
@@ -157,6 +159,7 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
         with_log(fn -> encode_via_adapter(unsupported_state, caches) end)
 
       assert log =~ "Unsupported GUI shell payload"
+
       assert opcode_count(cmds, 0x87) == 1,
              "board dismiss should appear in adapter output"
     end
@@ -212,5 +215,4 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
     |> TabBar.move_tab_to_workspace(1, workspace_a.id)
     |> TabBar.move_tab_to_workspace(tab_b.id, workspace_b.id)
   end
-
 end

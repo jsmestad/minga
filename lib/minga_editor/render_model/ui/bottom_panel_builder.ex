@@ -22,7 +22,7 @@ defmodule MingaEditor.RenderModel.UI.BottomPanelBuilder do
 
   def build(%{message_store: store}) do
     # No bottom_panel in shell_state; produce a hidden panel
-    hidden_panel = %{visible: false}
+    hidden_panel = %MingaEditor.BottomPanel{}
     fp = :erlang.phash2({hidden_panel, store})
     {cmd, new_store} = ProtocolGUI.encode_gui_bottom_panel(hidden_panel, store)
 

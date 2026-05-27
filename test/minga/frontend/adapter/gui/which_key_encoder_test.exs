@@ -49,6 +49,7 @@ defmodule Minga.Frontend.Adapter.GUI.WhichKeyEncoderTest do
 
     test "re-encodes when model changes" do
       model1 = %WhichKey{visible: false}
+
       model2 = %WhichKey{
         visible: true,
         prefix: "SPC",

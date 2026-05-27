@@ -68,15 +68,16 @@ defmodule Minga.Frontend.Adapter.GUI.NotificationsEncoderTest do
     end
 
     test "produces byte-identical output to legacy ProtocolGUI with notifications" do
-      notification = Notification.new(%{
-        id: "notify-1",
-        level: :warning,
-        title: "Warning!",
-        body: "Something happened",
-        source: "test-source",
-        created_at: 1_700_000_000,
-        actions: [%{id: "dismiss", label: "Dismiss"}]
-      })
+      notification =
+        Notification.new(%{
+          id: "notify-1",
+          level: :warning,
+          title: "Warning!",
+          body: "Something happened",
+          source: "test-source",
+          created_at: 1_700_000_000,
+          actions: [%{id: "dismiss", label: "Dismiss"}]
+        })
 
       center = NotificationCenter.upsert(NotificationCenter.new(), notification)
       legacy_binary = ProtocolGUI.encode_gui_notifications(center)
@@ -90,29 +91,32 @@ defmodule Minga.Frontend.Adapter.GUI.NotificationsEncoderTest do
     end
 
     test "produces byte-identical output to legacy ProtocolGUI with multiple notifications" do
-      n1 = Notification.new(%{
-        id: "n1",
-        level: :info,
-        title: "Info",
-        created_at: 1_700_000_000
-      })
+      n1 =
+        Notification.new(%{
+          id: "n1",
+          level: :info,
+          title: "Info",
+          created_at: 1_700_000_000
+        })
 
-      n2 = Notification.new(%{
-        id: "n2",
-        level: :error,
-        title: "Error",
-        body: "Big problem",
-        created_at: 1_700_000_001,
-        dismissable: false
-      })
+      n2 =
+        Notification.new(%{
+          id: "n2",
+          level: :error,
+          title: "Error",
+          body: "Big problem",
+          created_at: 1_700_000_001,
+          dismissable: false
+        })
 
-      n3 = Notification.new(%{
-        id: "n3",
-        level: :success,
-        title: "Done",
-        auto_dismiss_ms: 3000,
-        created_at: 1_700_000_002
-      })
+      n3 =
+        Notification.new(%{
+          id: "n3",
+          level: :success,
+          title: "Done",
+          auto_dismiss_ms: 3000,
+          created_at: 1_700_000_002
+        })
 
       center =
         NotificationCenter.new()
@@ -131,12 +135,13 @@ defmodule Minga.Frontend.Adapter.GUI.NotificationsEncoderTest do
     end
 
     test "produces byte-identical output for progress level" do
-      notification = Notification.new(%{
-        id: "progress-1",
-        level: :progress,
-        title: "Loading...",
-        created_at: 1_700_000_000
-      })
+      notification =
+        Notification.new(%{
+          id: "progress-1",
+          level: :progress,
+          title: "Loading...",
+          created_at: 1_700_000_000
+        })
 
       center = NotificationCenter.upsert(NotificationCenter.new(), notification)
       legacy_binary = ProtocolGUI.encode_gui_notifications(center)

@@ -16,14 +16,15 @@ defmodule MingaEditor.RenderModel.UI.NotificationsBuilderTest do
     end
 
     test "converts notifications preserving all fields" do
-      notification = Notification.new(%{
-        id: "test-1",
-        level: :warning,
-        title: "Warning!",
-        body: "Something happened",
-        source: "test-source",
-        created_at: 1_000_000
-      })
+      notification =
+        Notification.new(%{
+          id: "test-1",
+          level: :warning,
+          title: "Warning!",
+          body: "Something happened",
+          source: "test-source",
+          created_at: 1_000_000
+        })
 
       center = NotificationCenter.upsert(NotificationCenter.new(), notification)
       model = NotificationsBuilder.build(center)
@@ -40,12 +41,13 @@ defmodule MingaEditor.RenderModel.UI.NotificationsBuilderTest do
     end
 
     test "converts nil body and source to empty strings" do
-      notification = Notification.new(%{
-        id: "test-2",
-        level: :info,
-        title: "Info",
-        created_at: 1_000_000
-      })
+      notification =
+        Notification.new(%{
+          id: "test-2",
+          level: :info,
+          title: "Info",
+          created_at: 1_000_000
+        })
 
       center = NotificationCenter.upsert(NotificationCenter.new(), notification)
       model = NotificationsBuilder.build(center)
@@ -56,13 +58,14 @@ defmodule MingaEditor.RenderModel.UI.NotificationsBuilderTest do
     end
 
     test "converts actions" do
-      notification = Notification.new(%{
-        id: "test-3",
-        level: :error,
-        title: "Error",
-        created_at: 1_000_000,
-        actions: [%{id: "retry", label: "Retry"}]
-      })
+      notification =
+        Notification.new(%{
+          id: "test-3",
+          level: :error,
+          title: "Error",
+          created_at: 1_000_000,
+          actions: [%{id: "retry", label: "Retry"}]
+        })
 
       center = NotificationCenter.upsert(NotificationCenter.new(), notification)
       model = NotificationsBuilder.build(center)

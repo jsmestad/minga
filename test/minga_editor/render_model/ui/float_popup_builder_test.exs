@@ -22,13 +22,14 @@ defmodule MingaEditor.RenderModel.UI.FloatPopupBuilderTest do
     end
 
     test "produces byte-identical output to legacy for hidden float popup" do
-      legacy_binary = ProtocolGUI.encode_gui_float_popup(%{
-        visible: false,
-        title: "",
-        lines: [],
-        width: 0,
-        height: 0
-      })
+      legacy_binary =
+        ProtocolGUI.encode_gui_float_popup(%{
+          visible: false,
+          title: "",
+          lines: [],
+          width: 0,
+          height: 0
+        })
 
       ctx = build_minimal_context(%{})
       model = FloatPopupBuilder.build(ctx)
@@ -38,7 +39,14 @@ defmodule MingaEditor.RenderModel.UI.FloatPopupBuilderTest do
     end
 
     test "builds observatory inspection float popup" do
-      inspection_data = %{visible: true, title: "Inspect", lines: ["line1"], width: 40, height: 20}
+      inspection_data = %{
+        visible: true,
+        title: "Inspect",
+        lines: ["line1"],
+        width: 40,
+        height: 20
+      }
+
       ctx = build_minimal_context(%{observatory_inspection: inspection_data})
 
       model = FloatPopupBuilder.build(ctx)
@@ -48,7 +56,14 @@ defmodule MingaEditor.RenderModel.UI.FloatPopupBuilderTest do
     end
 
     test "produces byte-identical output to legacy for observatory inspection" do
-      inspection_data = %{visible: true, title: "Inspect", lines: ["line1"], width: 40, height: 20}
+      inspection_data = %{
+        visible: true,
+        title: "Inspect",
+        lines: ["line1"],
+        width: 40,
+        height: 20
+      }
+
       legacy_binary = ProtocolGUI.encode_gui_float_popup(inspection_data)
 
       ctx = build_minimal_context(%{observatory_inspection: inspection_data})

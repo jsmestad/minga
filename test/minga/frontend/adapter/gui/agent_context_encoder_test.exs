@@ -35,8 +35,8 @@ defmodule Minga.Frontend.Adapter.GUI.AgentContextEncoderTest do
       task_len = byte_size("Fix build")
       timestamp_unix = DateTime.to_unix(ts)
 
-      assert <<@op_gui_agent_context, 1::8, ^task_len::16, "Fix build", ^timestamp_unix::64,
-               1::8, 0::8>> = cmd
+      assert <<@op_gui_agent_context, 1::8, ^task_len::16, "Fix build", ^timestamp_unix::64, 1::8,
+               0::8>> = cmd
     end
 
     test "encodes can_approve=true" do
@@ -162,7 +162,9 @@ defmodule Minga.Frontend.Adapter.GUI.AgentContextEncoderTest do
 
       for status <- [:idle, :working, :iterating, :needs_you, :done, :errored] do
         can_approve = status in [:needs_you, :done]
-        legacy_binary = ProtocolGUI.encode_gui_agent_context(true, "task", ts, status, can_approve)
+
+        legacy_binary =
+          ProtocolGUI.encode_gui_agent_context(true, "task", ts, status, can_approve)
 
         model = %AgentContext{
           visible: true,

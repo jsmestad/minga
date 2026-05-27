@@ -23,8 +23,7 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoder do
 
       _previous_fp ->
         # Structural change or first render: send full tree
-        {model.encoded,
-         %{caches | last_file_tree_fp: {:ready, structural_fp, selection_fp}}}
+        {model.encoded, %{caches | last_file_tree_fp: {:ready, structural_fp, selection_fp}}}
     end
   end
 

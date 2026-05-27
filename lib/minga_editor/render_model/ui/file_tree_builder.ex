@@ -191,8 +191,6 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilder do
     |> MapSet.new()
   end
 
-  defp dirty_paths(_), do: MapSet.new()
-
   @spec dirty_buffer_path(pid()) :: [String.t()]
   defp dirty_buffer_path(pid) when is_pid(pid) do
     if Buffer.dirty?(pid), do: present_path(Buffer.file_path(pid)), else: []
