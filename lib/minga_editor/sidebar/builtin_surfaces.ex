@@ -52,7 +52,7 @@ defmodule MingaEditor.Sidebar.BuiltinSurfaces do
         description: "Runtime process tree",
         placement: :left,
         priority: 30,
-        preferred_width: 30,
+        preferred_width: 52,
         visible?: visible?,
         focused?: visible?,
         semantic_kind: "observatory",

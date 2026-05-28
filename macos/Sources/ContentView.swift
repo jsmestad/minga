@@ -125,7 +125,7 @@ struct StartupOverlay: View {
 struct ContentView: View {
     var appState: AppState
     @State private var rightPaneHeight: CGFloat = 600
-    @State private var sidebarWidth: CGFloat = 240
+    @State private var sidebarWidth: CGFloat = SidebarSizing.defaultWidth
     @State private var changeSummaryWidth: CGFloat = 280
 
     private let activityBarWidth: CGFloat = 32
@@ -189,8 +189,18 @@ struct ContentView: View {
         .ignoresSafeArea(.container, edges: .top)
         .preferredColorScheme(appState.windowBgIsDark ? .dark : .light)
         .onAppear {
-            sidebarWidth = CGFloat(appState.gui.fileTreeState.treeWidth) * 7.5
+            applyActiveSidebarPreferredWidth()
         }
+        .onChange(of: appState.gui.sidebarHostState.activeSidebar) { _, _ in
+            applyActiveSidebarPreferredWidth()
+        }
+    }
+
+    private func applyActiveSidebarPreferredWidth() {
+        sidebarWidth = SidebarSizing.widthByApplyingPreferred(
+            for: appState.gui.sidebarHostState.activeSidebar,
+            currentWidth: sidebarWidth
+        )
     }
 
     // MARK: - Unified Toolbar

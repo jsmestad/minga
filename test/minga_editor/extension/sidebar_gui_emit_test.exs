@@ -50,6 +50,9 @@ defmodule MingaEditor.Extension.SidebarGUIEmitTest do
 
     assert Enum.map(entries, & &1.id) == ["file_tree", "git_status", "observatory"]
     assert Enum.all?(entries, &(not &1.visible?))
+
+    observatory = Enum.find(entries, &(&1.id == "observatory"))
+    assert observatory.preferred_width == 52
   end
 
   test "registered git status sidebar metadata carries visibility and badge count", %{

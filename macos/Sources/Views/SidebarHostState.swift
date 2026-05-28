@@ -105,7 +105,7 @@ final class SidebarHostState {
             order: 30,
             visible: false,
             focused: false,
-            preferredWidth: 30,
+            preferredWidth: 52,
             badgeCount: nil
         ))
     ]
