@@ -64,6 +64,28 @@ struct MessageEntry: Identifiable, Equatable {
         Self.subsystemColor(for: subsystem)
     }
 
+    /// Static lookup for level color by ID (used by filter bar + severity summary).
+    static func levelColor(for level: UInt8) -> Color {
+        switch level {
+        case 0: return .gray
+        case 1: return .green
+        case 2: return .yellow
+        case 3: return .red
+        default: return .gray
+        }
+    }
+
+    /// Static lookup for a human-readable level name (used for tooltips).
+    static func levelName(for level: UInt8) -> String {
+        switch level {
+        case 0: return "Debug"
+        case 1: return "Info"
+        case 2: return "Warning"
+        case 3: return "Error"
+        default: return "Unknown"
+        }
+    }
+
     /// Static lookup for subsystem name by ID (used by filter bar).
     static func subsystemName(for sub: UInt8) -> String {
         switch sub {

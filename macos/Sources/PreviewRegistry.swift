@@ -47,6 +47,8 @@ enum PreviewRegistry {
             notificationStackPreview()
         case "BottomPanelView":
             bottomPanelPreview()
+        case "MessagesContentView":
+            messagesContentPreview()
         case "BottomPanelEmpty":
             bottomPanelEmptyPreview()
         case "SettingsView":
@@ -1012,6 +1014,22 @@ enum PreviewRegistry {
         return BottomPanelView(state: state, theme: theme, encoder: nil, availableHeight: 600)
             .frame(width: 800, height: 250)
             .background(theme.editorBg)
+    }
+
+    private static func messagesContentPreview() -> some View {
+        let state = MessagesContentState()
+        let theme = populatedTheme()
+        populateMessages(state)
+
+        return MessagesContentView(
+            state: state,
+            theme: theme,
+            encoder: nil,
+            usesPreviewEagerLayout: PreviewSnapshotPolicy.shouldUseEagerLayout(for: "MessagesContentView")
+        )
+        .frame(width: 800, height: 360)
+        .background(theme.editorBg)
+        .preferredColorScheme(.dark)
     }
 
     private static func bottomPanelEmptyPreview() -> some View {
