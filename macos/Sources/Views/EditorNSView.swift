@@ -1072,7 +1072,7 @@ final class EditorNSView: MTKView {
         if dividerDragState != .none {
             setDividerCursorState(dividerDragState)
         }
-        let (row, col) = cellPosition(from: event)
+        let (row, col) = dividerDragState == .none ? cellPosition(from: event) : dividerPressCellPosition(at: point, state: dividerDragState)
         let cc = UInt8(clamping: event.clickCount)
         encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_LEFT,
                                modifiers: modifierBits(from: event.modifierFlags),
@@ -1087,7 +1087,7 @@ final class EditorNSView: MTKView {
         }
 
         let point = convert(event.locationInWindow, from: nil)
-        let (row, col) = cellPosition(from: event)
+        let (row, col) = dividerDragState == .none ? cellPosition(from: event) : rawCellPosition(at: point)
         encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_LEFT,
                                modifiers: modifierBits(from: event.modifierFlags),
                                eventType: MOUSE_RELEASE)
@@ -1193,12 +1193,13 @@ final class EditorNSView: MTKView {
             return
         }
 
+        let point = convert(event.locationInWindow, from: nil)
         if dividerDragState != .none {
             setDividerCursorState(dividerDragState)
         } else if !shouldSendTextDrag(for: event) {
             return
         }
-        let (row, col) = cellPosition(from: event)
+        let (row, col) = dividerDragState == .none ? cellPosition(from: event) : rawCellPosition(at: point)
         encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_LEFT,
                                modifiers: modifierBits(from: event.modifierFlags),
                                eventType: MOUSE_DRAG)
@@ -1209,6 +1210,7 @@ final class EditorNSView: MTKView {
         setDividerCursorState(dividerHitState(at: point))
         updateGutterHover(at: point)
         let (row, col) = cellPosition(from: event)
+        clearSmoothScrollOffsetIfPointerLeftTarget(row: row, col: col)
         guard row != lastMoveRow || col != lastMoveCol else { return }
         lastMoveRow = row
         lastMoveCol = col
@@ -1357,6 +1359,29 @@ final class EditorNSView: MTKView {
 
     private func smoothScrollTargetWindowId(row: Int16, col: Int16) -> UInt16? {
         EditorNSView.smoothScrollTargetWindowId(row: row, col: col, windowGutters: dispatcher.frameState.windowGutters)
+    }
+
+    private func clearSmoothScrollOffsetIfPointerLeftTarget(row: Int16, col: Int16) {
+        let pointerWindowId = smoothScrollTargetWindowId(row: row, col: col)
+        guard Self.shouldResetSmoothScrollTarget(
+            currentTargetWindowId: scrollTargetWindowId,
+            pointerWindowId: pointerWindowId,
+            pixelOffset: scrollPixelOffset
+        ) else { return }
+
+        resetSmoothScrollOffsetPreservingTarget()
+        needsDisplay = true
+    }
+
+    private func resetSmoothScrollOffsetPreservingTarget() {
+        scrollAccumulator.reset()
+        scrollPixelOffset = 0
+    }
+
+    nonisolated static func shouldResetSmoothScrollTarget(currentTargetWindowId: UInt16?, pointerWindowId: UInt16?, pixelOffset: CGFloat) -> Bool {
+        guard pixelOffset != 0 else { return false }
+        guard let currentTargetWindowId else { return false }
+        return pointerWindowId != currentTargetWindowId
     }
 
     nonisolated static func smoothScrollTargetWindowId(row: Int16, col: Int16, windowGutters: [UInt16: Wire.WindowGutter]) -> UInt16? {
@@ -1689,20 +1714,117 @@ final class EditorNSView: MTKView {
     private func cellPosition(from event: NSEvent) -> (row: Int16, col: Int16) {
         let point = convert(event.locationInWindow, from: nil)
         let row = Int16(point.y / effectiveCellHeight)
+        let col = cellColumn(at: point, row: row)
+        return (row, col)
+    }
+
+    private func rawCellPosition(at point: NSPoint) -> (row: Int16, col: Int16) {
+        let row = max(0, Int16(point.y / effectiveCellHeight))
+        let col = max(0, Int16(point.x / cellWidth))
+        return (row, col)
+    }
+
+    private func dividerPressCellPosition(at point: NSPoint, state: DividerCursorState) -> (row: Int16, col: Int16) {
+        let raw = rawCellPosition(at: point)
+
+        switch state {
+        case .vertical:
+            guard let separatorCol = verticalSeparatorCol(at: point) else { return raw }
+            return (raw.row, Int16(separatorCol))
+        case .horizontal:
+            guard let separatorRow = horizontalSeparatorRow(at: point) else { return raw }
+            return (Int16(separatorRow), raw.col)
+        case .none:
+            return raw
+        }
+    }
+
+    private func verticalSeparatorCol(at point: NSPoint) -> UInt16? {
+        let fs = dispatcher.frameState
+        let hitHalfTolerance = dividerHitHalfTolerance
+        let displayCellH = effectiveCellHeight
+
+        for vertical in fs.verticalSeparators {
+            let x = CGFloat(vertical.col) * cellWidth
+            let startY = CGFloat(vertical.startRow) * displayCellH
+            let endY = CGFloat(Int(vertical.endRow) + 1) * displayCellH
+            if abs(point.x - x) <= hitHalfTolerance && point.y >= startY && point.y < endY {
+                return vertical.col
+            }
+        }
+
+        return nil
+    }
+
+    private func horizontalSeparatorRow(at point: NSPoint) -> UInt16? {
+        let fs = dispatcher.frameState
+        let hitHalfTolerance = dividerHitHalfTolerance
+        let displayCellH = effectiveCellHeight
+
+        for horizontal in fs.horizontalSeparators {
+            let x = CGFloat(horizontal.col) * cellWidth
+            let y = CGFloat(horizontal.row) * displayCellH + (displayCellH * 0.5) - (0.5 / (window?.backingScaleFactor ?? 1.0))
+            let width = CGFloat(horizontal.width) * cellWidth
+            if abs(point.y - y) <= hitHalfTolerance && point.x >= x && point.x < x + width {
+                return horizontal.row
+            }
+        }
+
+        return nil
+    }
+
+    private func cellColumn(at point: NSPoint, row: Int16) -> Int16 {
+        guard let gutter = gutterForCellPosition(at: point, row: row) else {
+            return fallbackCellColumn(at: point)
+        }
+
+        let windowLeft = CGFloat(gutter.contentCol) * cellWidth
+        let localX = point.x - windowLeft
+        let gutterCols = CGFloat(gutter.lineNumberWidth) + CGFloat(gutter.signColWidth)
+        guard gutterCols > 0 else {
+            return max(0, Int16(point.x / cellWidth))
+        }
+
+        let localCol = localCellColumn(at: localX, gutterCols: gutterCols)
+        return max(0, Int16(gutter.contentCol) + localCol)
+    }
+
+    private func gutterForCellPosition(at point: NSPoint, row: Int16) -> Wire.WindowGutter? {
+        guard row >= 0 else { return nil }
+        let rowValue = Int(row)
+        let frameState = dispatcher.frameState
+        let windowIds = dispatcher.currentFrameGutterWindowIds.isEmpty ? Set(frameState.windowGutters.keys) : dispatcher.currentFrameGutterWindowIds
+
+        return windowIds.compactMap { frameState.windowGutters[$0] }
+            .filter { gutter in
+                let startRow = Int(gutter.contentRow)
+                let endRow = startRow + Int(gutter.contentHeight)
+                let startX = CGFloat(gutter.contentCol) * cellWidth
+                let endX = startX + CGFloat(CoreTextMetalRenderer.windowWidthCols(gutter: gutter, frameCols: frameState.cols)) * cellWidth
+                return rowValue >= startRow && rowValue < endRow && point.x >= startX && point.x < endX
+            }
+            .max { lhs, rhs in lhs.contentCol < rhs.contentCol }
+    }
+
+    private func fallbackCellColumn(at point: NSPoint) -> Int16 {
         let gutterCols = CGFloat(dispatcher.frameState.gutterCol)
         guard gutterCols > 0 else {
-            return (row, max(0, Int16(point.x / cellWidth)))
+            return max(0, Int16(point.x / cellWidth))
         }
+
+        return localCellColumn(at: point.x, gutterCols: gutterCols)
+    }
+
+    private func localCellColumn(at localX: CGFloat, gutterCols: CGFloat) -> Int16 {
         let leftMargin = CoreTextMetalRenderer.gutterLeftMarginPt
         let rightGap = CoreTextMetalRenderer.gutterRightGapPt
         let gutterPixelEnd = leftMargin + gutterCols * cellWidth
-        let col: Int16
-        if point.x < gutterPixelEnd {
-            col = max(0, Int16((point.x - leftMargin) / cellWidth))
-        } else {
-            col = max(0, Int16((point.x - leftMargin - rightGap) / cellWidth))
+
+        if localX < gutterPixelEnd {
+            return max(0, Int16((localX - leftMargin) / cellWidth))
         }
-        return (row, col)
+
+        return max(0, Int16((localX - leftMargin - rightGap) / cellWidth))
     }
 }
 

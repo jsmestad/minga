@@ -30,7 +30,7 @@ The remediation has four goals:
 
 1. Replace pre-encoded UI payloads with semantic core models.
 2. Make `Minga.RenderModel` a real top-level frame model, not separate `ui_model` and `window_models` values carried through `emit_gui/4`.
-3. Finish the GUI window model contract: wrapped visual rows, non-buffer window surfaces, agent ownership boundaries, content epochs, and reset semantics.
+3. Finish the GUI window model contract: wrapped visual rows, pane geometry, input hit regions, non-buffer window surfaces, agent ownership boundaries, content epochs, and reset semantics.
 4. Start retained rendering only after model ownership is fixed, using stable row IDs and epochs rather than display-row cache keys.
 
 ### Non-negotiable rules
@@ -42,6 +42,7 @@ These rules prevent the same compromise from repeating:
 - A core GUI encoder must accept a semantic model and return bytes. It must not call `Buffer`, `Options`, `Language`, `MingaEditor`, or any process.
 - A component is not migrated until the old `ProtocolGUI.encode_gui_*` function is deleted or moved to a core protocol module with a semantic-model interface.
 - Adapter caches may store fingerprints and last encoded state. They must not become the visible model.
+- Pane rendering and input routing must be window-scoped. No GUI renderer or input path may use active-window gutter geometry, global frame width, or row-only cursorline state for pane-local drawing or hit testing.
 - No new delta protocol work starts until content epochs and full reset behavior exist.
 
 ### Remediation stack
@@ -80,17 +81,25 @@ Acceptance criteria:
 - `emit_gui/4` no longer separately threads `window_models`, `ui_model`, `metal_ui_cmds`, and `adapter_cmds` as independent render truths.
 - Existing wire format remains unchanged.
 
-#### 2. Finish the GUI window model contract
+#### 2. Finish the GUI window model, pane geometry, and hit-region contract
 
-`Minga.RenderModel.Window` is the best current data shape, but it is not finished.
+`Minga.RenderModel.Window` is the best current data shape, but it is not finished. Every GUI window needs one BEAM-authored pane geometry model derived from `Layout.get/1` and `WindowTree`. It must include the window id, total rect, content rect, text rect, gutter rect and metrics, clip rect, viewport summary, and input hit regions for text, gutter and fold controls, status/modeline targets, and split dividers. Swift may convert points to pixels and render native effects, but it must not infer pane ownership from active-window state, frame width, or global gutter fields.
 
 Acceptance criteria:
 
 - Wrapped lines produce multiple `Row` structs with `row_type: :wrap_continuation`, correct text slices, correct spans, correct cursor display coordinates, and tests with long ASCII, Unicode, tabs, and virtual text.
+- `RenderModel.Window` carries BEAM-authored pane geometry: `window_id`, total/content/text/gutter rects, clip rect, viewport, gutter metrics, and divider/hit-region metadata.
+- The GUI adapter sends enough window-scoped geometry for Swift to build one authoritative `PaneGeometry` per `window_id`; stale geometry is cleared on window destruction, split close, buffer switch, resize, frontend ready, and protocol recovery.
+- `CoreTextMetalRenderer` clips text, overlays, cursorline, gutters, indent guides, diagnostics, and selections to the owning pane rect. It no longer uses global `frameState.cols`, viewport width, or global `gutterCol` for pane-local drawing.
+- Cursorline is window-scoped, not row-only. In side-by-side splits, the active pane cursorline is clipped to that pane and never spans another pane.
+- `EditorNSView` hit testing resolves through the same pane geometry used for rendering. Pixel-to-cell conversion, gutter hover, fold chevrons, scroll targeting, and divider detection use clicked-pane geometry, not active/global gutter state.
+- Divider hover, press, drag, and release use one shared hit-region contract. If hover shows a resize cursor, the subsequent drag routes as split resize, not text selection.
+- Smooth scroll fractional offset is bound to the gesture's initial `window_id` until the gesture ends. Pointer movement or focus changes during the gesture must not transfer the offset to another pane.
+- BEAM mouse handling uses clicked-window targets for fold gutter, buffer content, resize, and scroll actions. Regression coverage includes inactive-pane gutter clicks, split close stale geometry, side-by-side clipping, cursorline pane clipping, divider drag, and smooth scroll across focus transitions.
 - `RenderModel.Window` gets `content_epoch` and reset triggers for frontend ready, window creation, window destruction, buffer switch, resize, font change, theme change, fold or wrap mode change, parser reset, and protocol recovery.
 - `full_refresh` is tied to epoch/reset semantics instead of being a loose flag that is always true.
 - Non-buffer window content is either encoded as first-class `content_kind` models or explicitly excluded from the GUI adapter with a tracked follow-up and no misleading `additional_window_models` path.
-- GUI window content tests cover folds, wraps, virtual lines, block decorations, diagnostic overlays, document highlights, search overlays, cursor visibility, and horizontal scroll.
+- GUI window content tests cover folds, wraps, virtual lines, block decorations, diagnostic overlays, document highlights, search overlays, cursor visibility, horizontal scroll, pane-local hit testing, and divider resizing.
 
 #### 3. Replace pre-encoded UI models with semantic models
 

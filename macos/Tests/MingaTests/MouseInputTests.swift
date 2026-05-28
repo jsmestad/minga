@@ -80,6 +80,56 @@ struct MouseInputTests {
         #expect(call.clickCount == 1)
     }
 
+    @Test("mouseDown snaps vertical divider press to separator column")
+    @MainActor func leftMouseDownSnapsVerticalDividerPress() throws {
+        let spy = SpyEncoder()
+        guard let view = makeView(spy: spy) else { return }
+        let cw = view.cellWidth
+        let ch = view.cellHeight
+
+        view.dispatcher.dispatch(.guiSplitSeparators(
+            borderColor: 0x555555,
+            verticals: [Wire.VerticalSeparator(col: 40, startRow: 0, endRow: 23)],
+            horizontals: []
+        ))
+
+        guard let event = mouseEvent(type: .leftMouseDown, location: NSPoint(x: cw * 40 - 1, y: ch * 5.5)) else { return }
+        view.mouseDown(with: event)
+
+        #expect(spy.mouseEventCalls.count == 1)
+        #expect(spy.mouseEventCalls[0].row == 5)
+        #expect(spy.mouseEventCalls[0].col == 40)
+    }
+
+    @Test("mouseDown maps split pane content with per-window gutter padding")
+    @MainActor func leftMouseDownUsesPaneGutter() throws {
+        let spy = SpyEncoder()
+        guard let view = makeView(spy: spy) else { return }
+        let cw = view.cellWidth
+        let ch = view.cellHeight
+
+        let clickedGutter = Wire.WindowGutter(
+            windowId: 1, contentRow: 0, contentCol: 0, contentHeight: 12,
+            isActive: false, contentWidth: 40, cursorLine: 3, lineNumberStyle: .hybrid,
+            lineNumberWidth: 4, signColWidth: 1, entries: []
+        )
+        let activeWideGutter = Wire.WindowGutter(
+            windowId: 2, contentRow: 0, contentCol: 41, contentHeight: 24,
+            isActive: true, contentWidth: 39, cursorLine: 3, lineNumberStyle: .hybrid,
+            lineNumberWidth: 8, signColWidth: 1, entries: []
+        )
+        view.dispatcher.dispatch(.guiGutter(data: clickedGutter))
+        view.dispatcher.dispatch(.guiGutter(data: activeWideGutter))
+
+        let firstTextColX = CoreTextMetalRenderer.gutterLeftMarginPt + CGFloat(clickedGutter.lineNumberWidth + clickedGutter.signColWidth) * cw + CoreTextMetalRenderer.gutterRightGapPt + cw * 0.2
+        guard let event = mouseEvent(type: .leftMouseDown, location: NSPoint(x: firstTextColX, y: ch * 2.5)) else { return }
+        view.mouseDown(with: event)
+
+        #expect(spy.mouseEventCalls.count == 1)
+        #expect(spy.mouseEventCalls[0].row == 2)
+        #expect(spy.mouseEventCalls[0].col == 5)
+    }
+
     @Test("mouseUp sends left button release")
     @MainActor func leftMouseUp() throws {
         let spy = SpyEncoder()
@@ -226,6 +276,15 @@ struct MouseInputTests {
     }
 
     // MARK: - Mouse move (deduplication)
+
+    @Test("smooth scroll target resets when pointer leaves target pane")
+    func smoothScrollTargetResetsWhenPointerLeavesTargetPane() {
+        #expect(EditorNSView.shouldResetSmoothScrollTarget(currentTargetWindowId: 1, pointerWindowId: 2, pixelOffset: 4) == true)
+        #expect(EditorNSView.shouldResetSmoothScrollTarget(currentTargetWindowId: 1, pointerWindowId: nil, pixelOffset: 4) == true)
+        #expect(EditorNSView.shouldResetSmoothScrollTarget(currentTargetWindowId: 1, pointerWindowId: 1, pixelOffset: 4) == false)
+        #expect(EditorNSView.shouldResetSmoothScrollTarget(currentTargetWindowId: 1, pointerWindowId: 2, pixelOffset: 0) == false)
+        #expect(EditorNSView.shouldResetSmoothScrollTarget(currentTargetWindowId: nil, pointerWindowId: 2, pixelOffset: 4) == false)
+    }
 
     @Test("mouseMoved sends motion event")
     @MainActor func mouseMove() throws {
