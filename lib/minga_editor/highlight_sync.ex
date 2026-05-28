@@ -608,8 +608,12 @@ defmodule MingaEditor.HighlightSync do
   defp apply_evictions(state, [], _remaining_timestamps), do: state
 
   defp apply_evictions(state, evicted_ids, remaining_timestamps) do
-    # Action: send close_buffer commands to the Zig parser.
-    Enum.each(evicted_ids, fn {_pid, id} -> ParserManager.close_buffer(id) end)
+    # Action: close parser state and drop crash-recovery tracking.
+    # Hidden buffers stay evicted until they are shown again.
+    Enum.each(evicted_ids, fn {_pid, id} ->
+      ParserManager.close_buffer(id)
+      ParserManager.unregister_buffer(id)
+    end)
 
     Minga.Log.debug(
       :editor,

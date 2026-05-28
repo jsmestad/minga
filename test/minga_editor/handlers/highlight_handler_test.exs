@@ -43,6 +43,21 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
     %{state | workspace: %{state.workspace | highlight: updated_hl}}
   end
 
+  @spec with_buffer_tracking(EditorState.t(), pid(), non_neg_integer(), non_neg_integer()) ::
+          EditorState.t()
+  defp with_buffer_tracking(state, pid, buffer_id, last_active_ms_ago) do
+    state = with_buffer_id(state, pid, buffer_id)
+    hl = state.workspace.highlight
+    now = System.monotonic_time(:millisecond)
+
+    updated_hl = %{
+      hl
+      | last_active_at: Map.put(hl.last_active_at, pid, now - last_active_ms_ago)
+    }
+
+    %{state | workspace: %{state.workspace | highlight: updated_hl}}
+  end
+
   describe "setup and parser lifecycle" do
     test "setup, parser status, eviction, and catch-all messages return the expected effects" do
       {_, setup_effects} = HighlightHandler.handle(base_state(), :setup_highlight)
@@ -92,6 +107,50 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
 
       assert {^catch_all_state, []} =
                HighlightHandler.handle(catch_all_state, {:minga_highlight, :unknown_event})
+    end
+
+    test "parser tree eviction protects visible split buffers while evicting hidden buffers" do
+      state = base_state()
+      active = active_buffer(state)
+
+      visible_buf =
+        start_supervised!({Minga.Buffer.Process, content: "visible"},
+          id: {:highlight_handler_test_visible_buf, make_ref()}
+        )
+
+      hidden_buf =
+        start_supervised!({Minga.Buffer.Process, content: "hidden"},
+          id: {:highlight_handler_test_hidden_buf, make_ref()}
+        )
+
+      stale_ms = 10 * 60 * 1_000
+
+      visible_window = Window.new(2, visible_buf, 24, 80)
+
+      state =
+        state
+        |> with_buffer_tracking(active, 1, stale_ms)
+        |> with_buffer_tracking(visible_buf, 2, stale_ms)
+        |> with_buffer_tracking(hidden_buf, 3, stale_ms)
+
+      workspace = %{
+        state.workspace
+        | windows: %{
+            state.workspace.windows
+            | map: Map.put(state.workspace.windows.map, 2, visible_window),
+              next_id: 3
+          }
+      }
+
+      state = %{state | workspace: workspace}
+
+      {new_state, _effects} = HighlightHandler.handle(state, :evict_parser_trees)
+
+      assert Map.get(new_state.workspace.highlight.buffer_ids, active) == 1
+      assert Map.get(new_state.workspace.highlight.buffer_ids, visible_buf) == 2
+      refute Map.has_key?(new_state.workspace.highlight.buffer_ids, hidden_buf)
+      refute Map.has_key?(new_state.workspace.highlight.reverse_buffer_ids, 3)
+      refute Map.has_key?(new_state.workspace.highlight.last_active_at, hidden_buf)
     end
 
     test "grammar and port log messages are translated to log effects" do
