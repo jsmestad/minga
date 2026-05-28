@@ -13,12 +13,13 @@ import Foundation
 @Suite("PickerItem Computed Properties")
 struct PickerItemComputedTests {
 
-    @Test("icon extracts first character of label")
-    func iconExtraction() {
+    @Test("icon is empty for plain labels")
+    func iconPlainLabel() {
         let item = PickerItem(id: 0, iconColor: 0, label: "editor.ex",
                              description: "", annotation: "",
                              matchPositions: [], isTwoLine: false, isMarked: false)
-        #expect(item.icon == "e")
+        #expect(item.hasLeadingIcon == false)
+        #expect(item.icon == "")
     }
 
     @Test("icon returns empty string for empty label")
@@ -35,15 +36,33 @@ struct PickerItemComputedTests {
         let item = PickerItem(id: 0, iconColor: 0, label: "\u{F024B}lib",
                              description: "", annotation: "",
                              matchPositions: [], isTwoLine: false, isMarked: false)
+        #expect(item.hasLeadingIcon == true)
         #expect(item.icon == "\u{F024B}")
     }
 
-    @Test("displayLabel drops first character (icon)")
-    func displayLabel() {
+    @Test("displayLabel keeps plain labels intact")
+    func displayLabelPlainText() {
         let item = PickerItem(id: 0, iconColor: 0, label: "editor.ex",
                              description: "", annotation: "",
                              matchPositions: [], isTwoLine: false, isMarked: false)
-        #expect(item.displayLabel == "ditor.ex")
+        #expect(item.displayLabel == "editor.ex")
+    }
+
+    @Test("displayLabel keeps colored plain labels intact")
+    func displayLabelColoredPlainText() {
+        let item = PickerItem(id: 0, iconColor: 0x51AFEF, label: "Workspace",
+                             description: "", annotation: "",
+                             matchPositions: [], isTwoLine: false, isMarked: false)
+        #expect(item.hasLeadingIcon == false)
+        #expect(item.displayLabel == "Workspace")
+    }
+
+    @Test("displayLabel drops icon and spacer")
+    func displayLabelWithIconAndSpacer() {
+        let item = PickerItem(id: 0, iconColor: 0x51AFEF, label: "\u{F024B} lib",
+                             description: "", annotation: "",
+                             matchPositions: [], isTwoLine: false, isMarked: false)
+        #expect(item.displayLabel == "lib")
     }
 
     @Test("displayLabel returns full label when single character")
@@ -54,16 +73,22 @@ struct PickerItemComputedTests {
         #expect(item.displayLabel == "x")
     }
 
-    @Test("displayMatchPositions adjusts by -1 and filters negatives")
-    func matchPositionAdjustment() {
-        // Label: "editor.ex" -> icon='e', displayLabel="ditor.ex"
-        // Match at position 0 (the icon) should be filtered out (adjusted to -1)
-        // Match at position 1 ('d') should become 0
-        // Match at position 4 ('o') should become 3
+    @Test("displayMatchPositions keeps plain label positions")
+    func matchPositionPlainLabel() {
         let item = PickerItem(id: 0, iconColor: 0, label: "editor.ex",
                              description: "", annotation: "",
                              matchPositions: [0, 1, 4], isTwoLine: false, isMarked: false)
-        #expect(item.displayMatchPositions == Set([0, 3]))
+        #expect(item.displayMatchPositions == Set([0, 1, 4]))
+    }
+
+    @Test("displayMatchPositions adjusts for icon and spacer")
+    func matchPositionIconAdjustment() {
+        // Label: "icon lib" -> displayLabel="lib"
+        // Match positions in the removed icon/spacer prefix are filtered out.
+        let item = PickerItem(id: 0, iconColor: 0x51AFEF, label: "\u{F024B} lib",
+                             description: "", annotation: "",
+                             matchPositions: [0, 2, 4], isTwoLine: false, isMarked: false)
+        #expect(item.displayMatchPositions == Set([0, 2]))
     }
 
     @Test("displayMatchPositions with no matches returns empty set")
@@ -76,8 +101,6 @@ struct PickerItemComputedTests {
 
     @Test("displayMatchPositions filters positions beyond label range")
     func matchPositionOutOfRange() {
-        // Label: "ab" -> displayLabel="b" (length 1)
-        // Match at position 5 -> adjusted to 4, which is >= displayLabel.count
         let item = PickerItem(id: 0, iconColor: 0, label: "ab",
                              description: "", annotation: "",
                              matchPositions: [5], isTwoLine: false, isMarked: false)

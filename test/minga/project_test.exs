@@ -188,6 +188,26 @@ defmodule Minga.ProjectTest do
 
       assert project in Project.known_projects(name)
     end
+
+    test "does not add test fixture tmp projects to known projects", %{tmp_dir: tmp} do
+      project =
+        Path.join([
+          tmp,
+          "tmp",
+          "MingaEditor.UI.Picker.FileSourceTest",
+          "test-files-opened",
+          "frecency_picker_project_123"
+        ])
+
+      File.mkdir_p!(project)
+
+      {_pid, name} = start_project!()
+      Project.switch(name, project)
+      flush(name)
+
+      assert Project.root(name) == project
+      refute project in Project.known_projects(name)
+    end
   end
 
   describe "invalidate/1" do
@@ -238,6 +258,25 @@ defmodule Minga.ProjectTest do
       flush(name)
 
       refute bogus in Project.known_projects(name)
+    end
+
+    test "add ignores test fixture tmp projects", %{tmp_dir: tmp} do
+      project =
+        Path.join([
+          tmp,
+          "tmp",
+          "MingaEditor.DropOpenDirectoryTest",
+          "test-dropping-a-directory",
+          "project"
+        ])
+
+      File.mkdir_p!(project)
+
+      {_pid, name} = start_project!()
+      Project.add(name, project)
+      flush(name)
+
+      refute project in Project.known_projects(name)
     end
   end
 
