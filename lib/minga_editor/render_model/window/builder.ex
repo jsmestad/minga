@@ -27,6 +27,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   alias Minga.Diagnostics
   alias MingaEditor.DisplayMap
   alias MingaEditor.FoldMap
+  alias MingaEditor.Layout
   alias MingaEditor.RenderPipeline.Scroll.WindowScroll
   alias MingaEditor.Renderer.Composition
   alias MingaEditor.Renderer.Context
@@ -49,6 +50,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   alias MingaEditor.Renderer.Gutter, as: EditorGutter
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Viewport
+  alias MingaEditor.WindowTree
   alias Minga.LSP.SyncServer
   alias MingaEditor.UI.Highlight
 
@@ -213,10 +215,52 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       gutter: build_gutter(scroll, ctx, content_kind),
       cursorline: build_cursorline(content_row, display_cursor_row, is_active, ctx),
       indent_guides: build_indent_guides(scroll, ctx, content_kind),
-      geometry: build_geometry(scroll, content_kind),
-      content_epoch: content_epoch(scroll, content_kind),
-      full_refresh: full_refresh?(scroll, content_kind)
+      geometry: build_geometry(state, scroll, content_kind),
+      content_epoch: scroll.content_epoch,
+      full_refresh: scroll.full_refresh
     }
+  end
+
+  @doc "Returns the source buffer position for a click in wrapped composed rows."
+  @spec wrapped_source_position(
+          [String.t()],
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          Context.t(),
+          map()
+        ) :: {:ok, non_neg_integer(), non_neg_integer()} | :error
+  def wrapped_source_position(
+        lines,
+        first_line,
+        visual_row,
+        display_col,
+        %Context{} = ctx,
+        options
+      )
+      when is_list(lines) and is_integer(first_line) and is_integer(visual_row) and
+             is_integer(display_col) and is_map(options) do
+    lines
+    |> build_visual_entries_wrapped(first_line, ctx, %{
+      first_line_byte_offset: 0,
+      options: options
+    })
+    |> Enum.at(visual_row)
+    |> source_position_from_visual_entry(display_col, ctx.decorations)
+  end
+
+  @spec source_position_from_visual_entry(
+          visual_row_entry() | nil,
+          non_neg_integer(),
+          Decorations.t()
+        ) ::
+          {:ok, non_neg_integer(), non_neg_integer()} | :error
+  defp source_position_from_visual_entry(nil, _display_col, _decorations), do: :error
+
+  defp source_position_from_visual_entry(entry, display_col, decorations) do
+    composed_col = entry.source_start_col + max(display_col - entry.indent_width, 0)
+    buffer_col = Decorations.display_col_to_buf_col(decorations, entry.buf_line, composed_col)
+    {:ok, entry.buf_line, buffer_col}
   end
 
   # ── Visual row building ────────────────────────────────────────────────
@@ -808,7 +852,8 @@ defmodule MingaEditor.RenderModel.Window.Builder do
 
   @spec build_gutter(WindowScroll.t(), Context.t(), RenderWindow.content_kind()) ::
           Gutter.t() | nil
-  defp build_gutter(%WindowScroll{} = scroll, %Context{} = ctx, :buffer) do
+  defp build_gutter(%WindowScroll{} = scroll, %Context{} = ctx, content_kind)
+       when content_kind in [:buffer, :agent_chat] do
     %WindowScroll{
       win_id: win_id,
       win_layout: %{content: {content_row, content_col, full_width, content_height}},
@@ -842,8 +887,8 @@ defmodule MingaEditor.RenderModel.Window.Builder do
 
   defp build_gutter(_scroll, _ctx, _content_kind), do: nil
 
-  @spec build_geometry(WindowScroll.t(), RenderWindow.content_kind()) :: PaneGeometry.t()
-  defp build_geometry(%WindowScroll{} = scroll, content_kind) do
+  @spec build_geometry(state(), WindowScroll.t(), RenderWindow.content_kind()) :: PaneGeometry.t()
+  defp build_geometry(state, %WindowScroll{} = scroll, content_kind) do
     metrics = gutter_metrics(scroll, content_kind)
     gutter_width = GutterMetrics.total_width(metrics)
     content_rect = scroll.win_layout.content
@@ -863,12 +908,13 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       clip_rect: text_rect,
       viewport: viewport_summary(scroll, text_width),
       gutter_metrics: metrics,
-      hit_regions: hit_regions(scroll.win_id, text_rect, gutter_rect, metrics)
+      hit_regions: hit_regions(state, scroll.win_id, text_rect, gutter_rect, metrics)
     }
   end
 
   @spec gutter_metrics(WindowScroll.t(), RenderWindow.content_kind()) :: GutterMetrics.t()
-  defp gutter_metrics(%WindowScroll{} = scroll, :buffer) do
+  defp gutter_metrics(%WindowScroll{} = scroll, content_kind)
+       when content_kind in [:buffer, :agent_chat] do
     line_count = max(scroll.snapshot.line_count, 0)
 
     line_number_width =
@@ -917,15 +963,18 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   end
 
   @spec hit_regions(
+          state(),
           non_neg_integer(),
           PaneGeometry.rect(),
           PaneGeometry.rect(),
           GutterMetrics.t()
-        ) :: [
-          HitRegion.t()
-        ]
-  defp hit_regions(window_id, text_rect, gutter_rect, %GutterMetrics{} = metrics) do
-    [text_hit_region(window_id, text_rect)] ++ gutter_hit_regions(window_id, gutter_rect, metrics)
+        ) :: [HitRegion.t()]
+  defp hit_regions(state, window_id, text_rect, gutter_rect, %GutterMetrics{} = metrics) do
+    [text_hit_region(window_id, text_rect)] ++
+      gutter_hit_regions(window_id, gutter_rect, metrics) ++
+      modeline_hit_regions(state, window_id) ++
+      status_bar_hit_regions(state, window_id) ++
+      divider_hit_regions(state, window_id)
   end
 
   @spec text_hit_region(non_neg_integer(), PaneGeometry.rect()) :: HitRegion.t()
@@ -943,7 +992,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
          {row, col, width, height} = gutter_rect,
          %GutterMetrics{} = metrics
        ) do
-    fold_col = col + max(metrics.line_number_width + metrics.sign_col_width - 1, 0)
+    fold_col = col + max(metrics.sign_col_width - 1, 0)
     fold_width = if metrics.sign_col_width > 0 and fold_col < col + width, do: 1, else: 0
 
     [
@@ -965,29 +1014,102 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     end)
   end
 
-  @spec content_epoch(WindowScroll.t(), RenderWindow.content_kind()) :: non_neg_integer()
-  defp content_epoch(%WindowScroll{} = scroll, :buffer) do
-    :erlang.phash2({
-      scroll.win_id,
-      scroll.buf_version,
-      scroll.snapshot.line_count,
-      scroll.content_w,
-      scroll.gutter_w,
-      scroll.wrap_on,
-      scroll.line_number_style
-    })
+  @spec modeline_hit_regions(state(), non_neg_integer()) :: [HitRegion.t()]
+  defp modeline_hit_regions(state, window_id) do
+    state
+    |> Layout.get()
+    |> Map.get(:window_layouts, %{})
+    |> Map.get(window_id)
+    |> modeline_hit_region(window_id)
   end
 
-  defp content_epoch(%WindowScroll{} = scroll, content_kind) do
-    :erlang.phash2({scroll.win_id, content_kind})
+  @spec modeline_hit_region(map() | nil, non_neg_integer()) :: [HitRegion.t()]
+  defp modeline_hit_region(%{modeline: {_row, _col, _width, 0}}, _window_id), do: []
+  defp modeline_hit_region(nil, _window_id), do: []
+
+  defp modeline_hit_region(%{modeline: rect}, window_id) do
+    [
+      %HitRegion{
+        kind: :modeline,
+        rect: rect,
+        window_id: window_id,
+        target: %{window_id: window_id}
+      }
+    ]
   end
 
-  @spec full_refresh?(WindowScroll.t(), RenderWindow.content_kind()) :: boolean()
-  defp full_refresh?(%WindowScroll{window: %{render_cache: %{dirty_lines: :all}}}, :buffer),
-    do: true
+  @spec status_bar_hit_regions(state(), non_neg_integer()) :: [HitRegion.t()]
+  defp status_bar_hit_regions(state, window_id) do
+    case Layout.get(state).status_bar do
+      nil ->
+        []
 
-  defp full_refresh?(%WindowScroll{}, :buffer), do: false
-  defp full_refresh?(_scroll, _content_kind), do: true
+      rect ->
+        [
+          %HitRegion{
+            kind: :status_bar,
+            rect: rect,
+            window_id: window_id,
+            target: %{window_id: window_id}
+          }
+        ]
+    end
+  end
+
+  @spec divider_hit_regions(state(), non_neg_integer()) :: [HitRegion.t()]
+  defp divider_hit_regions(state, window_id) do
+    layout = Layout.get(state)
+    windows = state.workspace.windows
+
+    verticals =
+      if windows.tree == nil do
+        []
+      else
+        collect_vertical_dividers(windows.tree, layout.editor_area)
+      end
+
+    horizontals =
+      Enum.map(layout.horizontal_separators, fn {row, col, width, _filename} ->
+        {row, col, width, 1}
+      end)
+
+    Enum.map(verticals ++ horizontals, fn rect ->
+      %HitRegion{
+        kind: :divider,
+        rect: rect,
+        window_id: window_id,
+        target: %{window_id: window_id}
+      }
+    end)
+  end
+
+  @spec collect_vertical_dividers(WindowTree.t(), Layout.rect()) :: [PaneGeometry.rect()]
+  defp collect_vertical_dividers({:leaf, _id}, _rect), do: []
+
+  defp collect_vertical_dividers(
+         {:split, :vertical, left, right, size},
+         {row, col, width, height}
+       ) do
+    usable = width - 1
+    left_width = WindowTree.clamp_size(size, usable)
+    right_width = max(usable - left_width, 1)
+    separator_col = col + left_width
+
+    [{row, separator_col, 1, height}] ++
+      collect_vertical_dividers(left, {row, col, left_width, height}) ++
+      collect_vertical_dividers(right, {row, separator_col + 1, right_width, height})
+  end
+
+  defp collect_vertical_dividers(
+         {:split, :horizontal, top, bottom, size},
+         {row, col, width, height}
+       ) do
+    top_height = WindowTree.clamp_size(size, height)
+    bottom_height = max(height - top_height, 1)
+
+    collect_vertical_dividers(top, {row, col, width, top_height}) ++
+      collect_vertical_dividers(bottom, {row + top_height, col, width, bottom_height})
+  end
 
   @spec build_gutter_entries(WindowScroll.t(), Context.t(), non_neg_integer()) :: [
           GutterEntry.t()
@@ -1471,9 +1593,9 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       %Selection{
         type: :char,
         start_row: start_entry.display_row,
-        start_col: visual_col_for_source_col(start_entry, start_col),
+        start_col: selection_visual_col(start_entry, start_col, :start),
         end_row: end_entry.display_row,
-        end_col: visual_col_for_source_col(end_entry, end_col)
+        end_col: selection_visual_col(end_entry, end_col, :end)
       }
     else
       _ -> nil
@@ -1634,6 +1756,17 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       []
     end
   end
+
+  @spec selection_visual_col(visual_row_entry(), non_neg_integer(), :start | :end) ::
+          non_neg_integer()
+  defp selection_visual_col(entry, source_col, :start) when source_col <= entry.source_start_col,
+    do: 0
+
+  defp selection_visual_col(entry, source_col, :end) when source_col >= entry.source_end_col,
+    do: entry.row_width
+
+  defp selection_visual_col(entry, source_col, _endpoint),
+    do: visual_col_for_source_col(entry, source_col)
 
   @spec visual_col_for_source_byte(visual_row_entry(), non_neg_integer()) :: non_neg_integer()
   defp visual_col_for_source_byte(entry, source_byte) do

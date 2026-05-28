@@ -103,7 +103,6 @@ defmodule Minga.Frontend.Adapter.GUI do
   def encode_windows_with_metrics(windows, %Caches{} = caches) when is_list(windows) do
     {cmds, caches, metrics} =
       windows
-      |> Enum.filter(&buffer_window?/1)
       |> Enum.reduce({[], caches, empty_window_metrics()}, fn window,
                                                               {cmds_acc, caches_acc, metrics_acc} ->
         {cmds, caches, metrics} = encode_window_with_metrics(window, cmds_acc, caches_acc)
@@ -133,10 +132,6 @@ defmodule Minga.Frontend.Adapter.GUI do
 
     {Enum.reverse(cmds), caches}
   end
-
-  @spec buffer_window?(term()) :: boolean()
-  defp buffer_window?(%RenderModel.Window{content_kind: :buffer}), do: true
-  defp buffer_window?(_window), do: false
 
   @spec encode_window_with_metrics(RenderModel.Window.t(), [binary()], Caches.t()) ::
           {[binary()], Caches.t(), window_metrics()}

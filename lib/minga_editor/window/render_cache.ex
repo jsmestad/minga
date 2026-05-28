@@ -56,7 +56,11 @@ defmodule MingaEditor.Window.RenderCache do
           last_line_count: integer(),
           last_cursor_line: integer(),
           last_buf_version: integer(),
-          last_context_fingerprint: context_fingerprint()
+          last_context_fingerprint: context_fingerprint(),
+          content_epoch: non_neg_integer(),
+          reset_pending: boolean(),
+          last_reset_fingerprint: term(),
+          total_visual_rows_cache: {term(), non_neg_integer()} | nil
         }
 
   defstruct dirty_lines: %{},
@@ -68,7 +72,11 @@ defmodule MingaEditor.Window.RenderCache do
             last_line_count: -1,
             last_cursor_line: -1,
             last_buf_version: -1,
-            last_context_fingerprint: nil
+            last_context_fingerprint: nil,
+            content_epoch: 0,
+            reset_pending: true,
+            last_reset_fingerprint: nil,
+            total_visual_rows_cache: nil
 
   @doc """
   Returns a fresh cache with all lines dirty and no cached draws.
@@ -78,7 +86,27 @@ defmodule MingaEditor.Window.RenderCache do
   """
   @spec reset() :: t()
   def reset do
-    %__MODULE__{dirty_lines: :all}
+    %__MODULE__{dirty_lines: :all, reset_pending: true}
+  end
+
+  @doc "Returns a fresh cache invalidation while preserving retained-render epoch state."
+  @spec reset(t()) :: t()
+  def reset(%__MODULE__{} = cache) do
+    %{
+      cache
+      | dirty_lines: :all,
+        cached_gutter: %{},
+        cached_content: %{},
+        last_viewport_top: -1,
+        last_viewport_cache_key: -1,
+        last_gutter_w: -1,
+        last_line_count: -1,
+        last_cursor_line: -1,
+        last_buf_version: -1,
+        last_context_fingerprint: nil,
+        reset_pending: true,
+        total_visual_rows_cache: nil
+    }
   end
 
   @doc """
@@ -109,8 +137,10 @@ defmodule MingaEditor.Window.RenderCache do
   Checks current frame parameters against last-frame tracking fields
   and marks all lines dirty if anything requiring a full redraw has changed.
 
-  Structural triggers: viewport scroll, gutter width, line count, buffer
-  version, first frame (sentinel values).
+  Structural redraw triggers: viewport scroll, gutter width, line count, buffer
+  version, first frame (sentinel values). Only first frame and gutter-width
+  geometry changes request a retained-GUI epoch reset; ordinary text edits and
+  line-count changes use row hashes without bumping the content epoch.
   """
   @spec detect_invalidation(
           t(),
@@ -178,14 +208,16 @@ defmodule MingaEditor.Window.RenderCache do
       ) do
     first_frame = cache.last_buf_version < 0
 
+    geometry_reset = first_frame or cache.last_gutter_w != gutter_w
+
     needs_full =
-      first_frame or
+      geometry_reset or
         cache.last_viewport_top != viewport_top or
         cache.last_viewport_cache_key != viewport_cache_key or
-        cache.last_gutter_w != gutter_w or
         cache.last_line_count != line_count
 
     cache = if needs_full, do: %{cache | dirty_lines: :all}, else: cache
+    cache = if geometry_reset, do: %{cache | reset_pending: true}, else: cache
 
     if cache.last_buf_version != buf_version and cache.last_buf_version >= 0 do
       %{cache | dirty_lines: :all}
@@ -209,6 +241,37 @@ defmodule MingaEditor.Window.RenderCache do
     else
       cache
     end
+  end
+
+  @doc "Marks the next retained GUI frame as a frontend-state reset."
+  @spec mark_reset_pending(t()) :: t()
+  def mark_reset_pending(%__MODULE__{} = cache) do
+    %{cache | reset_pending: true}
+  end
+
+  @doc "Prepares the retained GUI content epoch for the current frame."
+  @spec prepare_epoch(t(), term()) :: {t(), non_neg_integer(), boolean()}
+  def prepare_epoch(%__MODULE__{} = cache, reset_fingerprint) do
+    reset? = cache.reset_pending or cache.last_reset_fingerprint != reset_fingerprint
+    epoch = if reset?, do: cache.content_epoch + 1, else: cache.content_epoch
+
+    {%{
+       cache
+       | content_epoch: epoch,
+         reset_pending: false,
+         last_reset_fingerprint: reset_fingerprint
+     }, epoch, reset?}
+  end
+
+  @doc "Returns a cached wrapped visual row total when the key matches."
+  @spec cached_total_visual_rows(t(), term()) :: non_neg_integer() | nil
+  def cached_total_visual_rows(%__MODULE__{total_visual_rows_cache: {key, total}}, key), do: total
+  def cached_total_visual_rows(%__MODULE__{}, _key), do: nil
+
+  @doc "Stores the wrapped visual row total for the current cache key."
+  @spec put_total_visual_rows(t(), term(), non_neg_integer()) :: t()
+  def put_total_visual_rows(%__MODULE__{} = cache, key, total) when is_integer(total) do
+    %{cache | total_visual_rows_cache: {key, total}}
   end
 
   @doc """

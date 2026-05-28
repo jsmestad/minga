@@ -113,6 +113,82 @@ defmodule MingaEditor.MouseTest do
       assert BufferProcess.cursor(buffer) == {1, 2}
     end
 
+    test "wrapped visual row offset maps top-screen clicks into the visible continuation row" do
+      {state, buffer} = start_mouse_state(String.duplicate("a", 120), width: 20)
+      assert {:ok, true} = BufferProcess.set_option(buffer, :wrap, true)
+      assert {:ok, false} = BufferProcess.set_option(buffer, :linebreak, false)
+
+      state =
+        EditorState.update_window(state, state.workspace.windows.active, fn window ->
+          viewport = MingaEditor.Viewport.put_top_visual(window.viewport, 0, 1, 3)
+          Window.set_viewport(window, viewport)
+        end)
+
+      {content_row, content_col} = active_content_origin(state)
+
+      gutter_width =
+        MingaEditor.Mouse.HitTest.buffer_gutter_width(buffer, BufferProcess.line_count(buffer))
+
+      target =
+        MingaEditor.Mouse.HitTest.resolve_buffer(
+          state,
+          content_row,
+          content_col + gutter_width + 2
+        )
+
+      assert {:buffer, target} = target
+      assert MingaEditor.Mouse.Target.Buffer.position(target) == {0, 76}
+
+      state = mouse(state, content_row, content_col + gutter_width + 2, :left, :press)
+
+      assert BufferProcess.cursor(buffer) == {0, 76}
+      assert active_viewport(state).visual_row_offset == 1
+    end
+
+    test "wrapped mouse hit testing uses composed inline virtual text wrap boundaries" do
+      {state, buffer} = start_mouse_state(String.duplicate("a", 100))
+      assert {:ok, true} = BufferProcess.set_option(buffer, :wrap, true)
+      assert {:ok, false} = BufferProcess.set_option(buffer, :linebreak, false)
+      assert {:ok, :none} = BufferProcess.set_option(buffer, :line_numbers, :none)
+
+      BufferProcess.add_virtual_text(buffer, {0, 70},
+        placement: :inline,
+        segments: [{String.duplicate("V", 20), Minga.Core.Face.new()}]
+      )
+
+      {content_row, content_col} = active_content_origin(state)
+
+      target = MingaEditor.Mouse.HitTest.resolve_buffer(state, content_row + 1, content_col)
+
+      assert {:buffer, target} = target
+      assert MingaEditor.Mouse.Target.Buffer.position(target) == {0, 70}
+    end
+
+    test "wrapped mouse hit testing does not adjust inline virtual text twice" do
+      {state, buffer} = start_mouse_state(String.duplicate("a", 100))
+      assert {:ok, true} = BufferProcess.set_option(buffer, :wrap, true)
+      assert {:ok, false} = BufferProcess.set_option(buffer, :linebreak, false)
+      assert {:ok, :none} = BufferProcess.set_option(buffer, :line_numbers, :none)
+
+      BufferProcess.add_virtual_text(buffer, {0, 70},
+        placement: :inline,
+        segments: [{String.duplicate("V", 20), Minga.Core.Face.new()}]
+      )
+
+      {content_row, content_col} = active_content_origin(state)
+      click_col_after_virtual_text = content_col + 25
+
+      target =
+        MingaEditor.Mouse.HitTest.resolve_buffer(
+          state,
+          content_row + 1,
+          click_col_after_virtual_text
+        )
+
+      assert {:buffer, target} = target
+      assert MingaEditor.Mouse.Target.Buffer.position(target) == {0, 79}
+    end
+
     test "native GUI Ctrl-left click positions the cursor without TUI goto-definition feedback" do
       {state, buffer} = start_mouse_state("hello\nworld\nfoo bar baz")
       state = set_capabilities(state, :native_gui)

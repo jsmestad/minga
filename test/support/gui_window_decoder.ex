@@ -28,7 +28,8 @@ defmodule Minga.Test.GUIWindowDecoder do
       diagnostic_ranges: [],
       document_highlights: [],
       annotations: [],
-      geometry: nil
+      geometry: nil,
+      cursorline: nil
     }
 
     {result, <<>>} = decode_sections(rest, section_count, result)
@@ -98,6 +99,10 @@ defmodule Minga.Test.GUIWindowDecoder do
     %{result | geometry: geometry}
   end
 
+  defp decode_section(0x09, <<row::16, r::8, g::8, b::8>>, result) do
+    %{result | cursorline: %{row: row, bg_rgb: r <<< 16 ||| g <<< 8 ||| b}}
+  end
+
   defp decode_section(_unknown, _payload, result), do: result
 
   defp decode_content_epoch(<<content_epoch::32, _rest::binary>>), do: content_epoch
@@ -153,6 +158,7 @@ defmodule Minga.Test.GUIWindowDecoder do
   defp decode_hit_kind(3), do: :fold_control
   defp decode_hit_kind(4), do: :modeline
   defp decode_hit_kind(5), do: :divider
+  defp decode_hit_kind(6), do: :status_bar
 
   # ── Rows ─────────────────────────────────────────────────────────────────
 

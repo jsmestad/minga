@@ -50,7 +50,50 @@ struct CommandDispatcherRoutingTests {
         // windowGutters persists through clear (gutter positions are
         // stable between frames, only change on resize/split)
         #expect(dispatcher.frameState.windowGutters[1] != nil)
-        #expect(dispatcher.currentFrameGutterWindowIds.isEmpty)
+        #expect(dispatcher.currentFrameWindowIds.isEmpty)
+    }
+
+    @Test("clear plus batchEnd prunes retained windows when frame has no live window ids")
+    @MainActor func clearBatchEndPrunesEmptyFrame() {
+        let (dispatcher, gui) = makeDispatcher()
+        gui.windowContents[1] = GUIWindowContent(
+            windowId: 1, fullRefresh: false,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block,
+            rows: [], selection: nil,
+            searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: []
+        )
+        dispatcher.frameState.windowGutters[1] = Wire.WindowGutter(
+            windowId: 1, contentRow: 0, contentCol: 0, contentHeight: 10,
+            isActive: true, contentWidth: 40, cursorLine: 0, lineNumberStyle: .absolute,
+            lineNumberWidth: 2, signColWidth: 1, entries: []
+        )
+        dispatcher.frameState.windowIndentGuides[1] = IndentGuideData(windowId: 1, tabWidth: 2, activeGuideCol: 0xFFFF, guideCols: [], lineIndentLevels: [])
+        dispatcher.frameState.verticalSeparators = [Wire.VerticalSeparator(col: 20, startRow: 0, endRow: 9)]
+
+        dispatcher.dispatch(.clear)
+        dispatcher.dispatch(.batchEnd)
+
+        #expect(gui.windowContents.isEmpty)
+        #expect(dispatcher.frameState.windowGutters.isEmpty)
+        #expect(dispatcher.frameState.windowIndentGuides.isEmpty)
+        #expect(dispatcher.frameState.verticalSeparators.isEmpty)
+    }
+
+    @Test("metadata-only batchEnd without clear preserves retained windows")
+    @MainActor func metadataOnlyBatchEndPreservesRetainedWindows() {
+        let (dispatcher, gui) = makeDispatcher()
+        gui.windowContents[1] = GUIWindowContent(
+            windowId: 1, fullRefresh: false,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block,
+            rows: [], selection: nil,
+            searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: []
+        )
+
+        dispatcher.dispatch(.batchEnd)
+
+        #expect(gui.windowContents[1] != nil)
     }
 
     @Test("setCursor updates frameState cursor position")
@@ -635,7 +678,7 @@ struct CommandDispatcherRoutingTests {
         dispatcher.dispatch(.guiGutter(data: gutter))
 
         #expect(dispatcher.frameState.windowGutters[1] != nil)
-        #expect(dispatcher.currentFrameGutterWindowIds.contains(1))
+        #expect(dispatcher.currentFrameWindowIds.contains(1))
         // Active window gutter syncs gutterCol
         #expect(dispatcher.frameState.gutterCol == 5) // 4 + 1
     }

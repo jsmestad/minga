@@ -394,8 +394,8 @@ defmodule MingaEditor.Window do
   invalid.
   """
   @spec invalidate(t()) :: t()
-  def invalidate(%__MODULE__{} = window) do
-    %{window | render_cache: RenderCache.reset()}
+  def invalidate(%__MODULE__{render_cache: cache} = window) do
+    %{window | render_cache: RenderCache.reset(cache)}
   end
 
   @doc """
@@ -514,6 +514,31 @@ defmodule MingaEditor.Window do
   @spec detect_context_change(t(), RenderCache.context_fingerprint()) :: t()
   def detect_context_change(%__MODULE__{render_cache: cache} = window, fingerprint) do
     %{window | render_cache: RenderCache.detect_context_change(cache, fingerprint)}
+  end
+
+  @doc "Marks the next retained GUI frame as a frontend-state reset without discarding TUI draw caches."
+  @spec mark_frontend_reset_pending(t()) :: t()
+  def mark_frontend_reset_pending(%__MODULE__{render_cache: cache} = window) do
+    %{window | render_cache: RenderCache.mark_reset_pending(cache)}
+  end
+
+  @doc "Prepares the retained GUI content epoch for the current frame."
+  @spec prepare_render_epoch(t(), term()) :: {t(), non_neg_integer(), boolean()}
+  def prepare_render_epoch(%__MODULE__{render_cache: cache} = window, reset_fingerprint) do
+    {cache, epoch, full_refresh?} = RenderCache.prepare_epoch(cache, reset_fingerprint)
+    {%{window | render_cache: cache}, epoch, full_refresh?}
+  end
+
+  @doc "Returns a cached wrapped visual row total when the key matches."
+  @spec cached_total_visual_rows(t(), term()) :: non_neg_integer() | nil
+  def cached_total_visual_rows(%__MODULE__{render_cache: cache}, key) do
+    RenderCache.cached_total_visual_rows(cache, key)
+  end
+
+  @doc "Stores the wrapped visual row total for the current cache key."
+  @spec put_total_visual_rows(t(), term(), non_neg_integer()) :: t()
+  def put_total_visual_rows(%__MODULE__{render_cache: cache} = window, key, total) do
+    %{window | render_cache: RenderCache.put_total_visual_rows(cache, key, total)}
   end
 
   @doc """

@@ -9,6 +9,10 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
   alias MingaEditor.RenderPipeline.Scroll
   alias MingaEditor.Renderer.Context
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Windows
+  alias MingaEditor.Viewport
+  alias MingaEditor.Window, as: EditorWindow
+  alias MingaEditor.WindowTree
   alias Minga.RenderModel.Window
 
   import MingaEditor.RenderPipeline.TestHelpers
@@ -74,9 +78,53 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       assert model.geometry.viewport.rows == 23
       assert model.geometry.gutter_metrics.line_number_width == 3
       assert model.geometry.gutter_metrics.sign_col_width == 3
+
+      assert Enum.find(model.geometry.hit_regions, &(&1.kind == :fold_control)).rect ==
+               {0, 2, 1, 23}
+
       assert Enum.map(model.geometry.hit_regions, & &1.kind) == [:text, :gutter, :fold_control]
       assert is_integer(model.content_epoch)
       assert model.full_refresh == true
+    end
+
+    test "split pane geometry includes divider hit regions" do
+      state = gui_state(content: "left\nright")
+      buffer = state.workspace.buffers.active
+      {:ok, tree} = WindowTree.split(state.workspace.windows.tree, 1, :vertical, 2)
+      second = EditorWindow.new(2, buffer, 24, 80)
+
+      windows = %Windows{
+        state.workspace.windows
+        | tree: tree,
+          map: Map.put(state.workspace.windows.map, 2, second),
+          next_id: 3
+      }
+
+      state = %{state | workspace: %{state.workspace | windows: windows}}
+
+      {[left, right], _cursor, _state} = build_content(state)
+
+      divider_regions =
+        [left.window_model, right.window_model]
+        |> Enum.flat_map(& &1.geometry.hit_regions)
+        |> Enum.filter(&(&1.kind == :divider))
+
+      assert Enum.any?(divider_regions, &(&1.rect == {0, 39, 1, 23}))
+    end
+
+    test "ordinary buffer edits change row hashes without bumping content epoch or forcing refresh" do
+      state = gui_state(content: "hello")
+      {[wf], _cursor, state} = build_content(state)
+      epoch = wf.window_model.content_epoch
+      old_hash = hd(wf.window_model.rows).content_hash
+      assert wf.window_model.full_refresh == true
+
+      :ok = BufferProcess.insert_text(state.workspace.buffers.active, "!")
+      {[wf], _cursor, _state} = build_content(state)
+
+      assert wf.window_model.content_epoch == epoch
+      assert wf.window_model.full_refresh == false
+      assert hd(wf.window_model.rows).content_hash != old_hash
     end
 
     test "wrapped lines produce continuation rows and cursor coordinates inside the visual row" do
@@ -106,6 +154,37 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       {[wf], _cursor, _state} = build_content(state)
 
       assert wf.window_model.geometry.viewport.total_visual_rows == 20
+    end
+
+    test "wrapped selection starts at the pane edge when visual row offset hides its start" do
+      content = "\tabcdef界ghijABCDEFGHIJ"
+      state = gui_state(rows: 3, cols: 18, content: content)
+      buffer = state.workspace.buffers.active
+      assert {:ok, true} = BufferProcess.set_option(buffer, :wrap, true)
+      assert {:ok, false} = BufferProcess.set_option(buffer, :linebreak, false)
+      assert {:ok, 4} = BufferProcess.set_option(buffer, :tab_width, 4)
+      :ok = BufferProcess.move_to(buffer, {0, 16})
+
+      win_id = state.workspace.windows.active
+      window = Map.fetch!(state.workspace.windows.map, win_id)
+      viewport = Viewport.put_top_visual(window.viewport, 0, 1, 3)
+      window = EditorWindow.set_viewport(window, viewport)
+
+      windows =
+        Windows.set_map(
+          state.workspace.windows,
+          Map.put(state.workspace.windows.map, win_id, window)
+        )
+
+      state = %{state | workspace: %{state.workspace | windows: windows}}
+
+      model = build_window_model(state, visual_selection: {:char, {0, 0}, {0, 17}})
+
+      assert hd(model.rows).row_type == :wrap_continuation
+      assert model.selection.start_row == 0
+      assert model.selection.start_col == 0
+      assert model.selection.end_row >= 0
+      assert model.selection.end_col > model.selection.start_col
     end
 
     test "wrapped overlay coordinates use visual rows and byte columns after previous wraps" do

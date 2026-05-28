@@ -25,6 +25,7 @@ struct WindowContentBuilder {
     var diagnosticRanges: [(startRow: UInt16, startCol: UInt16, endRow: UInt16, endCol: UInt16, severity: UInt8)] = []
     var documentHighlights: [(startRow: UInt16, startCol: UInt16, endRow: UInt16, endCol: UInt16, kind: UInt8)] = []
     var paneGeometryPayload: Data?
+    var cursorline: (row: UInt16, r: UInt8, g: UInt8, b: UInt8)?
 
     struct RowBuilder {
         var rowType: UInt8 = 0  // normal
@@ -128,6 +129,12 @@ struct WindowContentBuilder {
         ]
         if let paneGeometryPayload {
             sections.append(buildSection(0x08, paneGeometryPayload))
+        }
+        if let cursorline {
+            var payload = Data()
+            appendU16(&payload, cursorline.row)
+            payload.append(contentsOf: [cursorline.r, cursorline.g, cursorline.b])
+            sections.append(buildSection(0x09, payload))
         }
 
         var data = Data()
@@ -315,6 +322,19 @@ struct WindowContentDecoderTests {
         #expect(geometry.gutterMetrics.lineNumberWidth == 2)
         #expect(geometry.gutterMetrics.signColWidth == 3)
         #expect(geometry.hitRegions.map(\.kind) == [.text, .foldControl])
+    }
+
+    @Test("Decode pane-local cursorline")
+    func decodePaneLocalCursorline() throws {
+        var builder = WindowContentBuilder(windowId: 7)
+        builder.cursorline = (row: 3, r: 0x11, g: 0x22, b: 0x33)
+
+        let (cmd, _) = try decodeCommand(data: builder.build(), offset: 0)
+        guard case .guiWindowContent(let content) = cmd else {
+            Issue.record("Expected .guiWindowContent"); return
+        }
+
+        #expect(content.cursorline == GUICursorline(row: 3, bg: 0x112233))
     }
 
     @Test("Decode rows with text and buf_line")

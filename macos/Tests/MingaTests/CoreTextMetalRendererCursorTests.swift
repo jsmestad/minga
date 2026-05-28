@@ -326,6 +326,51 @@ struct CoreTextMetalRendererCursorTests {
         #expect(renderer.cursorAnimationGeneration == 0)
     }
 
+    @Test("hidden active semantic cursor is skipped so visible prompt cursor wins")
+    func hiddenActiveSemanticCursorIsSkippedSoPromptWins() {
+        var frameState = FrameState(cols: 80, rows: 24)
+        frameState.windowGutters[1] = Wire.WindowGutter(
+            windowId: 1, contentRow: 0, contentCol: 0, contentHeight: 20,
+            isActive: true, contentWidth: 80, cursorLine: 1, lineNumberStyle: .none,
+            lineNumberWidth: 0, signColWidth: 0, entries: []
+        )
+        frameState.windowGutters[65_534] = Wire.WindowGutter(
+            windowId: 65_534, contentRow: 21, contentCol: 2, contentHeight: 2,
+            isActive: true, contentWidth: 40, cursorLine: 0, lineNumberStyle: .none,
+            lineNumberWidth: 0, signColWidth: 0, entries: []
+        )
+
+        let hiddenChat = GUIWindowContent(
+            windowId: 1, fullRefresh: true, cursorVisible: false,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block,
+            rows: [], selection: nil,
+            searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: []
+        )
+        let visiblePrompt = GUIWindowContent(
+            windowId: 65_534, fullRefresh: true, cursorVisible: true,
+            cursorRow: 0, cursorCol: 3, cursorShape: .beam,
+            rows: [], selection: nil,
+            searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: []
+        )
+
+        let cursor = CoreTextMetalRenderer.resolveCursor(
+            frameState: frameState,
+            windowContents: [1: hiddenChat, 65_534: visiblePrompt],
+            cellW: 8,
+            displayCellH: 16,
+            scale: 1,
+            gutterLeftMarginPx: 0,
+            gutterPaddingPx: 0
+        )
+
+        #expect(cursor?.windowId == 65_534)
+        #expect(cursor?.shape == .beam)
+        #expect(cursor?.x == 40)
+        #expect(cursor?.y == 336)
+    }
+
     @Test("hidden semantic cursor suppresses legacy fallback after dispatcher sync")
     @MainActor func hiddenSemanticCursorSuppressesFallback() {
         let gui = GUIState()

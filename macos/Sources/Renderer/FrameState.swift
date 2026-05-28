@@ -87,6 +87,8 @@ struct FrameState {
     /// Does NOT clear windowGutters (prevents blank-gutter flash).
     mutating func beginFrame() {
         dirty = true
+        cursorlineRow = 0xFFFF
+        cursorlineBg = 0
     }
 
     /// Resize the grid. Marks dirty.

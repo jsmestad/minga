@@ -7,8 +7,12 @@ defmodule MingaEditor.Mouse.HitTest do
   alias MingaEditor.BufferDecorations
   alias MingaEditor.DisplayMap
   alias MingaEditor.FoldMap
+  alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Layout
   alias MingaEditor.Mouse.Target.Buffer, as: BufferTarget
+  alias MingaEditor.RenderModel.Window.Builder, as: WindowModelBuilder
+  alias MingaEditor.RenderPipeline.ContentHelpers
+  alias MingaEditor.Renderer.Context
   alias MingaEditor.Renderer.Gutter
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Viewport
@@ -131,17 +135,18 @@ defmodule MingaEditor.Mouse.HitTest do
     display_col = visible_col + viewport_left(window)
 
     first_line = display_map_scroll_top(fold_map, scroll_top)
+    text_width = content_text_width(buf, total_lines, content_w)
 
-    case DisplayMap.compute(
-           fold_map,
-           decs,
-           first_line,
-           win_h,
-           total_lines,
-           content_text_width(buf, total_lines, content_w)
-         ) do
+    case DisplayMap.compute(fold_map, decs, first_line, win_h, total_lines, text_width) do
       nil ->
-        direct_position(buf, local_row, win_h, local_row + scroll_top, display_col, total_lines)
+        direct_or_wrapped_position(state, buf, window, %{
+          local_row: local_row,
+          win_h: win_h,
+          scroll_top: scroll_top,
+          display_col: display_col,
+          text_width: text_width,
+          total_lines: total_lines
+        })
 
       %DisplayMap{} = display_map ->
         display_map_position(
@@ -271,6 +276,97 @@ defmodule MingaEditor.Mouse.HitTest do
     end
   end
 
+  @typep position_params :: %{
+           required(:local_row) => integer(),
+           required(:win_h) => pos_integer(),
+           required(:scroll_top) => non_neg_integer(),
+           required(:display_col) => non_neg_integer(),
+           required(:text_width) => pos_integer(),
+           required(:total_lines) => non_neg_integer()
+         }
+
+  @spec direct_or_wrapped_position(state() | nil, pid(), Window.t() | nil, position_params()) ::
+          position_result()
+  defp direct_or_wrapped_position(state, buf, %Window{} = window, params) do
+    if Buffer.get_option(buf, :wrap) do
+      wrapped_position(state, buf, window, params)
+    else
+      direct_position(
+        buf,
+        params.local_row,
+        params.win_h,
+        params.local_row + params.scroll_top,
+        params.display_col,
+        params.total_lines
+      )
+    end
+  end
+
+  defp direct_or_wrapped_position(_state, buf, _window, params) do
+    direct_position(
+      buf,
+      params.local_row,
+      params.win_h,
+      params.local_row + params.scroll_top,
+      params.display_col,
+      params.total_lines
+    )
+  end
+
+  @spec wrapped_position(state() | nil, pid(), Window.t(), position_params()) :: position_result()
+  defp wrapped_position(_state, _buf, _window, %{local_row: local_row, win_h: win_h})
+       when local_row < 0 or local_row >= win_h,
+       do: :miss
+
+  defp wrapped_position(state, buf, window, params) do
+    visual_row = window.viewport.visual_row_offset + params.local_row
+    fetch_count = max(params.win_h + window.viewport.visual_row_offset + 1, 1)
+    snapshot = Buffer.render_snapshot(buf, params.scroll_top, fetch_count)
+    ctx = wrapped_position_context(state, buf, window, snapshot, params.text_width)
+
+    case WindowModelBuilder.wrapped_source_position(
+           snapshot.lines,
+           params.scroll_top,
+           visual_row,
+           params.display_col,
+           ctx,
+           snapshot.options
+         ) do
+      {:ok, line, col} ->
+        buffer_position(buf, params.local_row, params.win_h, line, col, params.total_lines)
+
+      :error ->
+        :miss
+    end
+  end
+
+  @spec wrapped_position_context(
+          state() | nil,
+          pid(),
+          Window.t(),
+          Minga.Buffer.RenderSnapshot.t(),
+          pos_integer()
+        ) :: Context.t()
+  defp wrapped_position_context(state, buf, window, snapshot, text_width) do
+    decorations = ContentHelpers.window_decorations(state, window, snapshot.decorations)
+    options = snapshot.options
+
+    %Context{
+      viewport: window.viewport,
+      gutter_w: buffer_gutter_width(buf, snapshot.line_count),
+      content_w: text_width,
+      decorations: decorations,
+      tab_width: Map.get(options, :tab_width, 2),
+      show_invisible: Map.get(options, :show_invisible, false),
+      wrap_on: true,
+      width_oracle: width_oracle(state)
+    }
+  end
+
+  @spec width_oracle(state() | nil) :: Minga.Core.WidthOracle.t()
+  defp width_oracle(%{capabilities: capabilities}), do: Capabilities.width_oracle(capabilities)
+  defp width_oracle(_state), do: %Minga.Core.WidthOracle.Monospace{}
+
   defp direct_position(_buffer, row, visible_rows, _line, _col, _total_lines)
        when row < 0 or row >= visible_rows,
        do: :miss
@@ -279,9 +375,21 @@ defmodule MingaEditor.Mouse.HitTest do
        when target_line < 0 or target_line >= total_lines,
        do: :miss
 
-  defp direct_position(buffer, _row, _visible_rows, target_line, target_col, _total_lines) do
+  defp direct_position(buffer, row, visible_rows, target_line, target_col, total_lines) do
     adjusted_col = adjust_col_for_virtual_text(buffer, target_line, target_col)
-    {:position, {target_line, clamp_col_to_line(buffer, target_line, adjusted_col)}}
+    buffer_position(buffer, row, visible_rows, target_line, adjusted_col, total_lines)
+  end
+
+  defp buffer_position(_buffer, row, visible_rows, _line, _col, _total_lines)
+       when row < 0 or row >= visible_rows,
+       do: :miss
+
+  defp buffer_position(_buffer, _row, _visible_rows, target_line, _col, total_lines)
+       when target_line < 0 or target_line >= total_lines,
+       do: :miss
+
+  defp buffer_position(buffer, _row, _visible_rows, target_line, target_col, _total_lines) do
+    {:position, {target_line, clamp_col_to_line(buffer, target_line, target_col)}}
   end
 
   defp adjust_col_for_virtual_text(buffer, line, display_col) do

@@ -69,6 +69,19 @@ defmodule MingaEditor.RenderPipeline.ScrollTest do
       assert "gamma" in scroll.lines
     end
 
+    test "wrapped total visual rows cache is persisted on the returned window state" do
+      content = Enum.map_join(1..10, "\n", fn _idx -> "abcdefghijklmnopqrstuv" end)
+      state = gui_state(rows: 4, cols: 20, content: content)
+      buffer = state.workspace.buffers.active
+      assert {:ok, true} = BufferProcess.set_option(buffer, :wrap, true)
+      assert {:ok, false} = BufferProcess.set_option(buffer, :linebreak, false)
+
+      {_scrolls, state, _layout} = run_through_scroll(state)
+      window = Map.fetch!(state.workspace.windows.map, state.workspace.windows.active)
+
+      assert {_cache_key, 20} = window.render_cache.total_visual_rows_cache
+    end
+
     test "scroll result has correct cursor at line 0" do
       state = base_state()
       {scrolls, _state, _layout} = run_through_scroll(state)

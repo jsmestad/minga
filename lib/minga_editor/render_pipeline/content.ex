@@ -708,7 +708,10 @@ defmodule MingaEditor.RenderPipeline.Content do
       buf_version: buf_version,
       width_oracle: MingaEditor.Frontend.Capabilities.width_oracle(state.capabilities),
       git_signs: %{},
-      visible_line_map: visible_line_map
+      visible_line_map: visible_line_map,
+      content_epoch:
+        :erlang.phash2({win_id, :agent_chat, chat_width, chat_height, line_number_style}),
+      full_refresh: false
     }
 
     {window_model, additional_window_models} =
@@ -832,8 +835,14 @@ defmodule MingaEditor.RenderPipeline.Content do
       )
 
     inner_width = PromptRenderer.input_inner_width(PromptRenderer.input_box_width(chat_width))
-    prompt_window_model = PromptRenderWindow.build(ctx, inner_width, prompt_rect)
-    {window_model, [prompt_window_model]}
+
+    additional_window_models =
+      case PromptRenderWindow.build(ctx, inner_width, prompt_rect) do
+        nil -> []
+        prompt_window_model -> [prompt_window_model]
+      end
+
+    {window_model, additional_window_models}
   end
 
   @spec agent_window_frame(boolean(), map()) :: WindowFrame.t()

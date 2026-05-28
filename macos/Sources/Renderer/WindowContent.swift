@@ -175,11 +175,17 @@ struct GUIHitRegion: Sendable, Equatable {
         case foldControl = 3
         case modeline = 4
         case divider = 5
+        case statusBar = 6
     }
 
     let kind: Kind
     let rect: GUICellRect
     let windowId: UInt16
+}
+
+struct GUICursorline: Sendable, Equatable {
+    let row: UInt16
+    let bg: UInt32
 }
 
 struct GUIPaneGeometry: Sendable, Equatable {
@@ -222,6 +228,7 @@ final class GUIWindowContent: Sendable {
     let documentHighlights: [GUIDocumentHighlight]
     let lineAnnotations: [GUILineAnnotation]
     let paneGeometry: GUIPaneGeometry?
+    let cursorline: GUICursorline?
 
     init(windowId: UInt16, fullRefresh: Bool, contentEpoch: UInt32 = 0, cursorVisible: Bool = true,
          cursorRow: UInt16, cursorCol: UInt16, cursorShape: CursorShape,
@@ -231,7 +238,8 @@ final class GUIWindowContent: Sendable {
          diagnosticUnderlines: [GUIDiagnosticUnderline],
          documentHighlights: [GUIDocumentHighlight],
          lineAnnotations: [GUILineAnnotation] = [],
-         paneGeometry: GUIPaneGeometry? = nil) {
+         paneGeometry: GUIPaneGeometry? = nil,
+         cursorline: GUICursorline? = nil) {
         self.windowId = windowId
         self.fullRefresh = fullRefresh
         self.contentEpoch = contentEpoch
@@ -247,5 +255,6 @@ final class GUIWindowContent: Sendable {
         self.documentHighlights = documentHighlights
         self.lineAnnotations = lineAnnotations
         self.paneGeometry = paneGeometry
+        self.cursorline = cursorline
     }
 }

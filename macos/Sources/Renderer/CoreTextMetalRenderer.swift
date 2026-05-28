@@ -343,9 +343,8 @@ final class CoreTextMetalRenderer {
             atlas.ensureCapacity(maxSlots: neededSlots, width: atlasPixelWidth)
             atlas.beginFrame()
 
-            if windowContents.values.contains(where: { $0.fullRefresh }) {
-                atlas.invalidateAll()
-                windowContentRenderer?.invalidateAll()
+            for content in windowContents.values where content.fullRefresh {
+                atlas.invalidateWindow(content.windowId)
             }
 
             if neededSlots > maxInstanceSlots {
@@ -401,27 +400,6 @@ final class CoreTextMetalRenderer {
         var bgQuads: [QuadGPU] = []
         var lineInstances: [LineGPU] = []
 
-        // Cursorline: draw only inside the active split pane. The protocol currently carries a global screen row without a window id, so infer the pane from the active gutter geometry.
-        if frameState.cursorlineRow != 0xFFFF && frameState.cursorlineBg != 0 {
-            // In side-by-side splits, row-only matching can apply one pane's fractional trackpad offset to another pane's cursorline. Keep the cursorline snapped until the protocol exposes an owning window id.
-            let cursorlineOffsetY: Float = 0
-            let yPos = Float(frameState.cursorlineRow) * displayCellH * scale - cursorlineOffsetY
-            let bounds = CoreTextMetalRenderer.cursorlineHorizontalBounds(
-                row: frameState.cursorlineRow,
-                gutters: frameState.windowGutters,
-                frameCols: frameState.cols,
-                cellW: cellW,
-                scale: scale,
-                viewportWidth: Float(viewportSize.width)
-            )
-            var clQuad = QuadGPU()
-            clQuad.position = SIMD2<Float>(bounds.x, yPos)
-            clQuad.size = SIMD2<Float>(bounds.width, displayCellH * scale)
-            clQuad.color = colorFromU24(frameState.cursorlineBg, default: defaultBg)
-            clQuad.alpha = 1.0
-            bgQuads.append(clQuad)
-        }
-
         // Semantic window content rendering (from 0x80 opcode).
         // Buffer windows with semantic content rendered via WindowContentRenderer;
         // their line textures come from WindowContentRenderer instead.
@@ -456,6 +434,16 @@ final class CoreTextMetalRenderer {
                     viewportWidth: Float(viewportSize.width)
                 )
                 let contentRightPx = windowBounds.x + windowBounds.width
+
+                if let cursorline = content.cursorline, cursorline.bg != 0 {
+                    let yPos = scrollableWindowRowOffset + Float(cursorline.row) * displayCellH * scale
+                    var clQuad = QuadGPU()
+                    clQuad.position = SIMD2<Float>(windowBounds.x, yPos)
+                    clQuad.size = SIMD2<Float>(windowBounds.width, displayCellH * scale)
+                    clQuad.color = colorFromU24(cursorline.bg, default: defaultBg)
+                    clQuad.alpha = 1.0
+                    bgQuads.append(clQuad)
+                }
 
                 // Horizontal scroll: shift line textures and overlays left by scrollLeft columns.
                 // The gutter stays fixed; only content past the gutter edge scrolls.
@@ -1691,9 +1679,11 @@ final class CoreTextMetalRenderer {
         gutterLeftMarginPx: Float,
         gutterPaddingPx: Float
     ) -> RenderCursor? {
-        for (windowId, gutter) in frameState.windowGutters where gutter.isActive {
-            guard let content = windowContents[windowId] else { continue }
-            guard content.cursorVisible else { return nil }
+        var sawActiveSemanticCursorOwner = false
+        for windowId in semanticCursorWindowIds(frameState.windowGutters) {
+            guard let gutter = frameState.windowGutters[windowId], let content = windowContents[windowId] else { continue }
+            sawActiveSemanticCursorOwner = true
+            guard content.cursorVisible else { continue }
 
             let fallbackTextCol = UInt16(Int(gutter.contentCol) + Int(gutter.lineNumberWidth) + Int(gutter.signColWidth))
             let contentColOffset = Float(content.paneGeometry?.textRect.col ?? fallbackTextCol) * cellW * scale + gutterLeftMarginPx + gutterPaddingPx
@@ -1705,6 +1695,7 @@ final class CoreTextMetalRenderer {
             return RenderCursor(x: x, y: y, shape: content.cursorShape, windowId: windowId)
         }
 
+        if sawActiveSemanticCursorOwner { return nil }
         guard frameState.cursorVisible else { return nil }
 
         let cursorPadding: Float = (frameState.gutterCol > 0 && frameState.cursorCol >= frameState.gutterCol)
@@ -1712,6 +1703,23 @@ final class CoreTextMetalRenderer {
         let x = Float(frameState.cursorCol) * cellW * scale + cursorPadding
         let y = Float(frameState.cursorRow) * displayCellH * scale
         return RenderCursor(x: x, y: y, shape: frameState.cursorShape)
+    }
+
+    /// Returns active semantic cursor owners in deterministic priority order. The agent prompt uses a reserved window id and must win over the retained chat content when both are active during focus transitions.
+    nonisolated static func semanticCursorWindowIds(_ gutters: [UInt16: Wire.WindowGutter]) -> [UInt16] {
+        gutters.values
+            .filter(\.isActive)
+            .map(\.windowId)
+            .sorted { lhs, rhs in
+                let leftPriority = semanticCursorPriority(windowId: lhs)
+                let rightPriority = semanticCursorPriority(windowId: rhs)
+                if leftPriority == rightPriority { return lhs < rhs }
+                return leftPriority < rightPriority
+            }
+    }
+
+    nonisolated static func semanticCursorPriority(windowId: UInt16) -> Int {
+        windowId == 65_534 ? 0 : 1
     }
 
     /// Converts the semantic cursor column into the rendered column for the active cursor shape.

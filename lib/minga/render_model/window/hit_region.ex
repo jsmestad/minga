@@ -3,7 +3,7 @@ defmodule Minga.RenderModel.Window.HitRegion do
   Window-scoped input hit region authored by the BEAM.
   """
 
-  @type kind :: :text | :gutter | :fold_control | :modeline | :divider
+  @type kind :: :text | :gutter | :fold_control | :modeline | :status_bar | :divider
   @type rect ::
           {row :: non_neg_integer(), col :: non_neg_integer(), width :: non_neg_integer(),
            height :: non_neg_integer()}

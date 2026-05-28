@@ -61,7 +61,9 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
       hit_regions: [
         %HitRegion{kind: :text, rect: {2, 8, 33, 10}, window_id: 1},
         %HitRegion{kind: :gutter, rect: {2, 3, 5, 10}, window_id: 1},
-        %HitRegion{kind: :fold_control, rect: {2, 7, 1, 10}, window_id: 1}
+        %HitRegion{kind: :fold_control, rect: {2, 7, 1, 10}, window_id: 1},
+        %HitRegion{kind: :divider, rect: {0, 41, 1, 20}, window_id: 1},
+        %HitRegion{kind: :status_bar, rect: {23, 0, 80, 1}, window_id: 1}
       ]
     }
   end
@@ -192,7 +194,14 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
     assert decoded.geometry.viewport.top == 5
     assert decoded.geometry.viewport.cols == 33
     assert decoded.geometry.gutter_metrics == %{line_number_width: 2, sign_col_width: 3}
-    assert Enum.map(decoded.geometry.hit_regions, & &1.kind) == [:text, :gutter, :fold_control]
+
+    assert Enum.map(decoded.geometry.hit_regions, & &1.kind) == [
+             :text,
+             :gutter,
+             :fold_control,
+             :divider,
+             :status_bar
+           ]
   end
 
   test "encodes every selection type" do
@@ -230,9 +239,11 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
     assert opcodes == [
              Opcodes.gui_window_content(),
              Opcodes.gui_gutter(),
-             Opcodes.gui_cursorline(),
              Opcodes.gui_indent_guides()
            ]
+
+    decoded = commands |> hd() |> GUIWindowDecoder.decode()
+    assert decoded.cursorline == %{row: 6, bg_rgb: 0x112233}
   end
 
   test "adapter re-emits per-frame gutter metadata when window content is cached" do
@@ -243,6 +254,21 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
 
     assert opcodes(first_commands) == [Opcodes.gui_window_content(), Opcodes.gui_gutter()]
     assert opcodes(second_commands) == [Opcodes.gui_gutter()]
+  end
+
+  test "adapter cache reset re-emits unchanged window content after frontend recovery" do
+    model = window(gutter: gutter_model(), content_epoch: 7, full_refresh: true)
+
+    {_first_commands, caches} = AdapterGUI.encode_windows([model], Caches.new())
+    {cached_commands, _caches} = AdapterGUI.encode_windows([model], caches)
+    {recovered_commands, _caches} = AdapterGUI.encode_windows([model], Caches.new())
+
+    assert opcodes(cached_commands) == [Opcodes.gui_gutter()]
+    assert opcodes(recovered_commands) == [Opcodes.gui_window_content(), Opcodes.gui_gutter()]
+
+    recovered_window = recovered_commands |> hd() |> GUIWindowDecoder.decode()
+    assert recovered_window.full_refresh == true
+    assert recovered_window.content_epoch == 7
   end
 
   test "adapter reports per-section byte metrics from emitted commands" do
@@ -287,9 +313,12 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
              cached_metrics.gutter_bytes + cached_metrics.metadata_bytes
   end
 
-  test "adapter skips non-buffer window models until the GUI protocol carries their rect" do
+  test "adapter encodes first-class non-buffer window models" do
     model = window(content_kind: :agent_prompt, window_id: 65_534)
 
-    assert {[], %Caches{}} = AdapterGUI.encode_windows([model], Caches.new())
+    {commands, _caches} = AdapterGUI.encode_windows([model], Caches.new())
+
+    assert opcodes(commands) == [Opcodes.gui_window_content()]
+    assert commands |> hd() |> GUIWindowDecoder.decode() |> Map.fetch!(:window_id) == 65_534
   end
 end

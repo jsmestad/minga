@@ -81,7 +81,6 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   alias Minga.Protocol.Opcodes
 
   @op_gui_window_content Opcodes.gui_window_content()
-  @op_gui_cursorline Opcodes.gui_cursorline()
   @op_gui_gutter Opcodes.gui_gutter()
   @op_gui_indent_guides Opcodes.gui_indent_guides()
 
@@ -94,6 +93,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   @section_wc_highlights 0x06
   @section_wc_annotations 0x07
   @section_wc_geometry 0x08
+  @section_wc_cursorline 0x09
 
   @section_gutter_window 0x01
   @section_gutter_config 0x02
@@ -166,6 +166,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
     highlight_payload = IO.iodata_to_binary(encode_document_highlights(sw.document_highlights))
     annotation_payload = IO.iodata_to_binary(encode_annotations(sw.annotations))
     geometry_payload = encode_geometry(sw.geometry)
+    cursorline_payload = encode_cursorline_section(sw.cursorline, sw.rect)
 
     header_section = encode_section(@section_wc_header, header_payload)
     rows_section = encode_section(@section_wc_rows, rows_payload)
@@ -175,6 +176,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
     highlight_section = encode_section(@section_wc_highlights, highlight_payload)
     annotation_section = encode_section(@section_wc_annotations, annotation_payload)
     geometry_sections = geometry_sections(geometry_payload)
+    cursorline_sections = cursorline_sections(cursorline_payload)
 
     sections =
       [
@@ -185,7 +187,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
         diagnostic_section,
         highlight_section,
         annotation_section
-      ] ++ geometry_sections
+      ] ++ geometry_sections ++ cursorline_sections
 
     binary = IO.iodata_to_binary([<<@op_gui_window_content, length(sections)::8>> | sections])
 
@@ -196,7 +198,9 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
           byte_size(highlight_section),
       gutter_bytes: 0,
       annotation_bytes: byte_size(annotation_section),
-      metadata_bytes: 2 + byte_size(header_section) + IO.iodata_length(geometry_sections)
+      metadata_bytes:
+        2 + byte_size(header_section) + IO.iodata_length(geometry_sections) +
+          IO.iodata_length(cursorline_sections)
     }
 
     {binary, metrics}
@@ -215,6 +219,10 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   @spec geometry_sections(binary() | nil) :: [binary()]
   defp geometry_sections(nil), do: []
   defp geometry_sections(payload), do: [encode_section(@section_wc_geometry, payload)]
+
+  @spec cursorline_sections(binary() | nil) :: [binary()]
+  defp cursorline_sections(nil), do: []
+  defp cursorline_sections(payload), do: [encode_section(@section_wc_cursorline, payload)]
 
   @spec encode_geometry(PaneGeometry.t() | nil) :: binary() | nil
   defp encode_geometry(nil), do: nil
@@ -256,6 +264,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   defp encode_hit_kind(:fold_control), do: 3
   defp encode_hit_kind(:modeline), do: 4
   defp encode_hit_kind(:divider), do: 5
+  defp encode_hit_kind(:status_bar), do: 6
 
   @doc """
   Returns the opcode constant for gui_window_content.
@@ -491,10 +500,19 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   # ── Cursorline ─────────────────────────────────────────────────────────
 
   @spec encode_cursorline(Cursorline.t() | nil) :: [binary()]
-  defp encode_cursorline(nil), do: []
+  defp encode_cursorline(_cursorline), do: []
 
-  defp encode_cursorline(%Cursorline{row: row, bg_rgb: bg_rgb}) do
-    [<<@op_gui_cursorline, row::16, red(bg_rgb)::8, green(bg_rgb)::8, blue(bg_rgb)::8>>]
+  @spec encode_cursorline_section(Cursorline.t() | nil, RenderWindow.rect()) :: binary() | nil
+  defp encode_cursorline_section(nil, _rect), do: nil
+  defp encode_cursorline_section(%Cursorline{bg_rgb: 0}, _rect), do: nil
+  defp encode_cursorline_section(%Cursorline{row: 0xFFFF}, _rect), do: nil
+
+  defp encode_cursorline_section(
+         %Cursorline{row: row, bg_rgb: bg_rgb},
+         {rect_row, _col, _width, height}
+       ) do
+    local_row = row |> Kernel.-(rect_row) |> max(0) |> min(max(height - 1, 0))
+    <<local_row::16, red(bg_rgb)::8, green(bg_rgb)::8, blue(bg_rgb)::8>>
   end
 
   # ── Indent guides ──────────────────────────────────────────────────────

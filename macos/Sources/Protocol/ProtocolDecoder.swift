@@ -1575,6 +1575,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         var wcHighlights: [GUIDocumentHighlight] = []
         var wcAnnotations: [GUILineAnnotation] = []
         var wcPaneGeometry: GUIPaneGeometry?
+        var wcCursorline: GUICursorline?
 
         for _ in 0..<wcSectionCount {
             guard data.count >= wcPos + 3 else { throw ProtocolDecodeError.malformed }
@@ -1704,6 +1705,10 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             case 0x08:
                 wcPaneGeometry = try decodePaneGeometry(data: data, start: wcSStart, end: wcSStart + wcSLen)
 
+            case 0x09:
+                guard wcSLen >= 5 else { break }
+                wcCursorline = GUICursorline(row: readU16(data, wcSStart), bg: readU24(data, wcSStart + 2))
+
             default: break
             }
 
@@ -1725,7 +1730,8 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             diagnosticUnderlines: wcDiags,
             documentHighlights: wcHighlights,
             lineAnnotations: wcAnnotations,
-            paneGeometry: wcPaneGeometry
+            paneGeometry: wcPaneGeometry,
+            cursorline: wcCursorline
         )
         return (.guiWindowContent(data: content), wcPos - offset)
 

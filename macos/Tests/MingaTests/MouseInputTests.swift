@@ -28,6 +28,7 @@ struct MouseInputTests {
         ctRenderer.setupRenderers(fontManager: fm)
         let view = EditorNSView(encoder: spy, fontFace: face, dispatcher: disp,
                                 coreTextRenderer: ctRenderer, fontManager: fm)
+        view.guiState = guiState
         // Give the view a real frame so cellPosition math works.
         // Without a window, convert(_:from:) returns the point unchanged,
         // so locationInWindow IS the local point.
@@ -35,6 +36,32 @@ struct MouseInputTests {
                            width: CGFloat(face.cellWidth) * 80,
                            height: CGFloat(face.cellHeight) * 24)
         return view
+    }
+
+    @MainActor
+    private func installPaneGeometryDivider(view: EditorNSView, dividerCol: UInt16) {
+        let geometry = GUIPaneGeometry(
+            windowId: 1,
+            totalRect: GUICellRect(row: 0, col: 0, width: 80, height: 24),
+            contentRect: GUICellRect(row: 0, col: 0, width: 80, height: 24),
+            textRect: GUICellRect(row: 0, col: 0, width: 80, height: 24),
+            gutterRect: GUICellRect(row: 0, col: 0, width: 0, height: 24),
+            clipRect: GUICellRect(row: 0, col: 0, width: 80, height: 24),
+            viewport: GUIViewportSummary(top: 0, left: 0, rows: 24, cols: 80, totalLines: 24, visualRowOffset: 0, totalVisualRows: 24),
+            gutterMetrics: GUIGutterMetrics(lineNumberWidth: 0, signColWidth: 0),
+            hitRegions: [
+                GUIHitRegion(kind: .divider, rect: GUICellRect(row: 0, col: dividerCol, width: 0, height: 24), windowId: 1)
+            ]
+        )
+
+        view.guiState?.windowContents[1] = GUIWindowContent(
+            windowId: 1, fullRefresh: true,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block,
+            rows: [], selection: nil,
+            searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: [],
+            paneGeometry: geometry
+        )
     }
 
     /// Creates a mouse event at the given pixel position.
@@ -99,6 +126,47 @@ struct MouseInputTests {
         #expect(spy.mouseEventCalls.count == 1)
         #expect(spy.mouseEventCalls[0].row == 5)
         #expect(spy.mouseEventCalls[0].col == 40)
+    }
+
+    @Test("mouseDown outside divider pixel tolerance uses normal cell coordinates")
+    @MainActor func leftMouseDownOutsideVerticalDividerToleranceDoesNotSnap() throws {
+        let spy = SpyEncoder()
+        guard let view = makeView(spy: spy) else { return }
+        let cw = view.cellWidth
+        let ch = view.cellHeight
+
+        view.dispatcher.dispatch(.guiSplitSeparators(
+            borderColor: 0x555555,
+            verticals: [Wire.VerticalSeparator(col: 40, startRow: 0, endRow: 23)],
+            horizontals: []
+        ))
+
+        guard let event = mouseEvent(type: .leftMouseDown, location: NSPoint(x: cw * 40 - cw * 0.75, y: ch * 5.5)) else { return }
+        view.mouseDown(with: event)
+
+        #expect(spy.mouseEventCalls.count == 1)
+        #expect(spy.mouseEventCalls[0].row == 5)
+        #expect(spy.mouseEventCalls[0].col == 39)
+    }
+
+    @Test("mouseDown uses paneGeometry divider tolerance without guiSplitSeparators")
+    @MainActor func leftMouseDownUsesPaneGeometryDividerTolerance() throws {
+        let spy = SpyEncoder()
+        guard let view = makeView(spy: spy) else { return }
+        let cw = view.cellWidth
+        let ch = view.cellHeight
+        installPaneGeometryDivider(view: view, dividerCol: 40)
+
+        guard let leftEvent = mouseEvent(type: .leftMouseDown, location: NSPoint(x: cw * 40 - 1, y: ch * 5.5)) else { return }
+        view.mouseDown(with: leftEvent)
+        guard let rightEvent = mouseEvent(type: .leftMouseDown, location: NSPoint(x: cw * 40 + 1, y: ch * 6.5)) else { return }
+        view.mouseDown(with: rightEvent)
+
+        #expect(spy.mouseEventCalls.count == 2)
+        #expect(spy.mouseEventCalls[0].row == 5)
+        #expect(spy.mouseEventCalls[0].col == 40)
+        #expect(spy.mouseEventCalls[1].row == 6)
+        #expect(spy.mouseEventCalls[1].col == 40)
     }
 
     @Test("mouseDown maps split pane content with per-window gutter padding")
@@ -284,6 +352,17 @@ struct MouseInputTests {
         #expect(EditorNSView.shouldResetSmoothScrollTarget(currentTargetWindowId: 1, pointerWindowId: 1, pixelOffset: 4) == false)
         #expect(EditorNSView.shouldResetSmoothScrollTarget(currentTargetWindowId: 1, pointerWindowId: 2, pixelOffset: 0) == false)
         #expect(EditorNSView.shouldResetSmoothScrollTarget(currentTargetWindowId: nil, pointerWindowId: 2, pixelOffset: 4) == false)
+    }
+
+    @Test("smooth scroll routing keeps the gesture target cell after the pointer moves")
+    func smoothScrollRoutingKeepsGestureTargetCell() {
+        let routedTarget = EditorNSView.smoothScrollEventCellPosition(targetCell: (row: 5, col: 12), row: 5, col: 40)
+        #expect(routedTarget.row == 5)
+        #expect(routedTarget.col == 12)
+
+        let fallbackTarget = EditorNSView.smoothScrollEventCellPosition(targetCell: nil, row: 5, col: 40)
+        #expect(fallbackTarget.row == 5)
+        #expect(fallbackTarget.col == 40)
     }
 
     @Test("mouseMoved sends motion event")
