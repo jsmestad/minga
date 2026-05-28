@@ -123,7 +123,7 @@ final class CoreTextMetalRenderer {
     private var targetCursorShape: CursorShape = .block
     private var targetCursorWindowId: UInt16?
     private var cursorAnimationStartTime: CFTimeInterval = 0
-    private let cursorAnimationDuration: CFTimeInterval = 0.08
+    private let cursorAnimationDuration: CFTimeInterval = 0.035
 
     /// Scroll indicator opacity (0.0 = hidden, 1.0 = fully visible).
     /// Set by EditorNSView based on scroll activity and fade timer.
@@ -1527,9 +1527,8 @@ final class CoreTextMetalRenderer {
         }
 
         let progress = CoreTextMetalRenderer.cursorAnimationProgress(now: now, startTime: cursorAnimationStartTime, duration: cursorAnimationDuration)
-        let eased = CoreTextMetalRenderer.easeOutCubic(progress)
-        currentCursorX = CoreTextMetalRenderer.lerp(startCursorX, targetCursorX, eased)
-        currentCursorY = CoreTextMetalRenderer.lerp(startCursorY, targetCursorY, eased)
+        currentCursorX = CoreTextMetalRenderer.lerp(startCursorX, targetCursorX, progress)
+        currentCursorY = CoreTextMetalRenderer.lerp(startCursorY, targetCursorY, progress)
 
         if progress >= 1.0 {
             cursorAnimating = false
@@ -1543,11 +1542,6 @@ final class CoreTextMetalRenderer {
     nonisolated static func cursorAnimationProgress(now: CFTimeInterval, startTime: CFTimeInterval, duration: CFTimeInterval) -> Float {
         guard duration > 0 else { return 1.0 }
         return min(max(Float((now - startTime) / duration), 0.0), 1.0)
-    }
-
-    nonisolated static func easeOutCubic(_ progress: Float) -> Float {
-        let clamped = min(max(progress, 0.0), 1.0)
-        return 1.0 - powf(1.0 - clamped, 3.0)
     }
 
     nonisolated static func lerp(_ start: Float, _ end: Float, _ progress: Float) -> Float {
@@ -1627,8 +1621,8 @@ final class CoreTextMetalRenderer {
     }
 
     nonisolated static func interpolateCursor(start: RenderCursor, target: RenderCursor, progress: Float) -> RenderCursor {
-        let eased = easeOutCubic(progress)
-        return RenderCursor(x: lerp(start.x, target.x, eased), y: lerp(start.y, target.y, eased), shape: target.shape, windowId: target.windowId)
+        let clamped = min(max(progress, 0.0), 1.0)
+        return RenderCursor(x: lerp(start.x, target.x, clamped), y: lerp(start.y, target.y, clamped), shape: target.shape, windowId: target.windowId)
     }
 
     private func snapCursorAnimationToTarget() {

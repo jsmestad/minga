@@ -227,13 +227,13 @@ struct CoreTextMetalRendererCursorTests {
 
     @Test("cursor animation progress clamps to timeline bounds")
     func cursorAnimationProgressClamps() {
-        #expect(CoreTextMetalRenderer.cursorAnimationProgress(now: 0.0, startTime: 1.0, duration: 0.08) == 0.0)
-        #expect(CoreTextMetalRenderer.cursorAnimationProgress(now: 1.04, startTime: 1.0, duration: 0.08) == 0.5)
-        #expect(CoreTextMetalRenderer.cursorAnimationProgress(now: 1.2, startTime: 1.0, duration: 0.08) == 1.0)
+        #expect(CoreTextMetalRenderer.cursorAnimationProgress(now: 0.0, startTime: 1.0, duration: 0.035) == 0.0)
+        #expect(abs(CoreTextMetalRenderer.cursorAnimationProgress(now: 1.0175, startTime: 1.0, duration: 0.035) - 0.5) < 0.001)
+        #expect(CoreTextMetalRenderer.cursorAnimationProgress(now: 1.2, startTime: 1.0, duration: 0.035) == 1.0)
     }
 
-    @Test("cursor animation uses cubic ease-out interpolation")
-    func cursorAnimationUsesCubicEaseOut() {
+    @Test("cursor animation uses linear interpolation")
+    func cursorAnimationUsesLinearInterpolation() {
         let start = RenderCursor(x: 0, y: 0, shape: .block)
         let target = RenderCursor(x: 100, y: 40, shape: .beam)
 
@@ -242,8 +242,8 @@ struct CoreTextMetalRendererCursorTests {
         let atEnd = CoreTextMetalRenderer.interpolateCursor(start: start, target: target, progress: 1)
 
         #expect(atStart == RenderCursor(x: 0, y: 0, shape: .beam))
-        #expect(abs(halfway.x - 87.5) < 0.001)
-        #expect(abs(halfway.y - 35.0) < 0.001)
+        #expect(abs(halfway.x - 50.0) < 0.001)
+        #expect(abs(halfway.y - 20.0) < 0.001)
         #expect(atEnd == target)
     }
 
