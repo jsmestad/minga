@@ -100,7 +100,7 @@ private struct MessagesFilterBar: View {
     let theme: ThemeColors
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Spacing.sm) {
             // Level toggles
             levelToggles
 
@@ -139,15 +139,15 @@ private struct MessagesFilterBar: View {
                 .help("Reset all filters")
             }
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
+        .padding(.horizontal, Spacing.sm)
+        .padding(.vertical, Spacing.xs)
         .background(theme.tabBg.opacity(0.5))
     }
 
     // MARK: - Level toggles
 
     private var levelToggles: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: Spacing.xs) {
             levelButton(level: 0, label: "D", color: .gray)
             levelButton(level: 1, label: "I", color: .green)
             levelButton(level: 2, label: "W", color: .yellow)
@@ -177,7 +177,7 @@ private struct MessagesFilterBar: View {
     // MARK: - Subsystem toggles
 
     private var subsystemToggles: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: Spacing.xs) {
             ForEach(Array(state.presentSubsystems).sorted(), id: \.self) { sub in
                 subsystemPill(sub: sub)
             }

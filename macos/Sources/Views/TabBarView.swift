@@ -508,11 +508,11 @@ struct TabBarView: View {
             if tab.isAgent {
                 Image(systemName: "cpu")
                     .font(.system(size: 11))
-                    .foregroundStyle(tab.isActive ? theme.tabActiveFg : theme.tabInactiveFg)
+                    .foregroundStyle(tab.isActive ? theme.tabActiveFg : theme.tabSecondaryFg)
             } else {
                 Text(tab.icon)
                     .font(.custom("Symbols Nerd Font Mono", size: 12))
-                    .foregroundStyle(tab.isActive ? theme.tabActiveFg : theme.tabInactiveFg)
+                    .foregroundStyle(tab.isActive ? theme.tabActiveFg : theme.tabSecondaryFg)
             }
 
             // Label: pinned and agent tabs stay compact; the tooltip carries the full name.
@@ -521,7 +521,7 @@ struct TabBarView: View {
                     .font(.system(size: 11.5))
                     .lineLimit(1)
                     .truncationMode(.middle)
-                    .foregroundStyle(tab.isActive ? theme.tabActiveFg : theme.tabInactiveFg)
+                    .foregroundStyle(tab.isActive ? theme.tabActiveFg : theme.tabSecondaryFg)
             }
 
             if !tab.isPinned {

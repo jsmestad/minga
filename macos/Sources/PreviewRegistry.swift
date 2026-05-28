@@ -244,7 +244,11 @@ enum PreviewRegistry {
 
         if agentVisible {
             populateAgentChat(appState.gui.agentChatState)
-        } else {
+        } else if mode == .insert {
+            // Completion fires while typing, so show it in the insert-mode
+            // preview. The normal-mode editor stays clean so its snapshot
+            // shows the editor surface (cursorline, indent guides, diagnostics)
+            // rather than a popup covering the code.
             populateCompletion(appState.gui.completionState)
         }
 
@@ -288,6 +292,18 @@ enum PreviewRegistry {
         dispatcher.frameState.totalLineCount = 1250
         dispatcher.frameState.viewportTopLine = 38
         dispatcher.frameState.scrollIndicatorColor = 0x5C6370
+        // Indent guides for the visible window, matching previewEditorRows()
+        // (2-space Elixir indent). The cursor's enclosing level (col 2) is the
+        // active guide. Exercises the same render path the BEAM drives via the
+        // gui_indent_guides (0x91) opcode so the snapshot reflects the real
+        // editor surface rather than underselling it.
+        dispatcher.frameState.windowIndentGuides[1] = IndentGuideData(
+            windowId: 1,
+            tabWidth: 2,
+            activeGuideCol: 2,
+            guideCols: [0, 2],
+            lineIndentLevels: [0, 1, 1, 1, 2, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        )
         dispatcher.frameState.windowGutters[1] = Wire.WindowGutter(
             windowId: 1,
             contentRow: 1,
@@ -295,7 +311,7 @@ enum PreviewRegistry {
             contentHeight: 22,
             isActive: true,
             contentWidth: 108,
-            cursorLine: 42,
+            cursorLine: 43,
             lineNumberStyle: .absolute,
             lineNumberWidth: 3,
             signColWidth: 1,
@@ -313,7 +329,11 @@ enum PreviewRegistry {
             searchMatches: [],
             diagnosticUnderlines: [GUIDiagnosticUnderline(startRow: 4, startCol: 20, endRow: 4, endCol: 31, severity: .warning)],
             documentHighlights: [GUIDocumentHighlight(startRow: 5, startCol: 4, endRow: 5, endCol: 10, kind: .read)],
-            lineAnnotations: []
+            lineAnnotations: [],
+            // Current-line band on the cursor row. The renderer reads the
+            // per-window cursorline (CoreTextMetalRenderer drawWindowedContent),
+            // not frameState, so it must be set here to render.
+            cursorline: GUICursorline(row: 5, bg: 0x2C323C)
         )
     }
 
