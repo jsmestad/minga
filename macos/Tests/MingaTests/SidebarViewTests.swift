@@ -78,7 +78,7 @@ struct ActivityBarViewTests {
         [
             Wire.SidebarMetadata(id: "file_tree", displayName: "File Tree", semanticKind: "file_tree", icon: "folder", order: 10, visible: true, focused: false, preferredWidth: 30, badgeCount: nil),
             Wire.SidebarMetadata(id: "git_status", displayName: "Git Status", semanticKind: "git_status", icon: "point.3.filled.connected.trianglepath.dotted", order: 20, visible: true, focused: false, preferredWidth: 30, badgeCount: gitBadgeCount),
-            Wire.SidebarMetadata(id: "observatory", displayName: "BEAM Observatory", semanticKind: "observatory", icon: "network", order: 30, visible: true, focused: false, preferredWidth: 30, badgeCount: nil)
+            Wire.SidebarMetadata(id: "observatory", displayName: "BEAM Observatory", semanticKind: "observatory", icon: "network", order: 30, visible: true, focused: false, preferredWidth: 52, badgeCount: nil)
         ]
     }
 }
@@ -87,6 +87,24 @@ struct ActivityBarViewTests {
 
 @Suite("SidebarContainer View Structure")
 struct SidebarContainerViewTests {
+    @Test("Observatory preferred width expands initial and maximum sidebar width")
+    @MainActor func observatoryPreferredWidthExpandsSidebarWidth() {
+        let item = SidebarItem(Wire.SidebarMetadata(id: "observatory", displayName: "BEAM Observatory", semanticKind: "observatory", icon: "network", order: 30, visible: true, focused: true, preferredWidth: 52, badgeCount: nil))
+
+        #expect(SidebarSizing.preferredWidth(for: item) == 416)
+        #expect(SidebarSizing.maxWidth(for: item) == 560)
+        #expect(SidebarSizing.widthByApplyingPreferred(for: item, currentWidth: 240) == 416)
+    }
+
+    @Test("Default-width sidebars keep compact maximum width")
+    @MainActor func defaultWidthSidebarsKeepCompactMaximumWidth() {
+        let item = SidebarItem(Wire.SidebarMetadata(id: "file_tree", displayName: "File Tree", semanticKind: "file_tree", icon: "folder", order: 10, visible: true, focused: true, preferredWidth: 30, badgeCount: nil))
+
+        #expect(SidebarSizing.preferredWidth(for: item) == 240)
+        #expect(SidebarSizing.maxWidth(for: item) == 360)
+        #expect(SidebarSizing.widthByApplyingPreferred(for: item, currentWidth: 240) == 240)
+    }
+
     @Test("Unknown visible sidebar renders generic fallback")
     @MainActor func unknownSidebarFallback() throws {
         let guiState = GUIState()

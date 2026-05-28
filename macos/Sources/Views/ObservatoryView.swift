@@ -50,11 +50,8 @@ struct ObservatoryView: View {
             }
             .padding(.vertical, 6)
         }
-        .focusable()
-        .onKeyPress(.escape) {
-            dismissInspection()
-            return .handled
-        }
+        .focusable(false)
+        .focusEffectDisabled()
     }
 
     private func row(_ node: ObservatoryNode) -> some View {
@@ -115,12 +112,14 @@ struct ObservatoryView: View {
                     .lineLimit(1)
                     .foregroundStyle(theme.treeFg.opacity(0.55))
             }
-
-            Spacer(minLength: 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             Text(formatBytes(UInt64(node.memory)))
                 .font(.caption2.monospacedDigit())
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
                 .foregroundStyle(theme.treeFg.opacity(0.55))
+                .frame(minWidth: 52, alignment: .trailing)
                 .padding(.horizontal, 5)
                 .padding(.vertical, 2)
                 .background(theme.treeSelectionBg.opacity(0.35), in: Capsule())

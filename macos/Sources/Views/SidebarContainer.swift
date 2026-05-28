@@ -4,6 +4,34 @@
 
 import SwiftUI
 
+enum SidebarSizing {
+    static let columnWidth: CGFloat = 8
+    static let defaultWidth: CGFloat = 240
+    static let minWidth: CGFloat = 180
+    static let baseMaxWidth: CGFloat = 360
+    static let maxExtraWidth: CGFloat = 144
+    static let hardMaxWidth: CGFloat = 560
+
+    static func preferredWidth(for item: SidebarItem?) -> CGFloat {
+        guard let item else { return defaultWidth }
+        return max(defaultWidth, CGFloat(item.preferredWidth) * columnWidth)
+    }
+
+    static func maxWidth(for item: SidebarItem?) -> CGFloat {
+        let preferred = preferredWidth(for: item)
+        guard preferred > defaultWidth else { return baseMaxWidth }
+        return min(max(baseMaxWidth, preferred + maxExtraWidth), hardMaxWidth)
+    }
+
+    static func clamp(_ width: CGFloat, for item: SidebarItem?) -> CGFloat {
+        min(max(width, minWidth), maxWidth(for: item))
+    }
+
+    static func widthByApplyingPreferred(for item: SidebarItem?, currentWidth: CGFloat) -> CGFloat {
+        clamp(max(currentWidth, preferredWidth(for: item)), for: item)
+    }
+}
+
 struct SidebarContainer: View {
     let guiState: GUIState
     let activeSidebar: SidebarItem
@@ -13,9 +41,6 @@ struct SidebarContainer: View {
     let gitBranch: String
     let leadingPadding: CGFloat
     @Binding var sidebarWidth: CGFloat
-
-    private let sidebarMinWidth: CGFloat = 180
-    private let sidebarMaxWidth: CGFloat = 360
 
     @State private var isDraggingResize: Bool = false
     @State private var dragStartWidth: CGFloat = 0
@@ -66,7 +91,7 @@ struct SidebarContainer: View {
                             dragStartWidth = sidebarWidth
                         }
                         let newWidth = dragStartWidth + value.translation.width
-                        sidebarWidth = min(max(newWidth, sidebarMinWidth), sidebarMaxWidth)
+                        sidebarWidth = SidebarSizing.clamp(newWidth, for: activeSidebar)
                     }
                     .onEnded { _ in
                         isDraggingResize = false
