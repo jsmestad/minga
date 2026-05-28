@@ -8,6 +8,7 @@ defmodule Minga.DotRepeatTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Config.Options
   alias MingaEditor
 
   @escape 27
@@ -20,7 +21,18 @@ defmodule Minga.DotRepeatTest do
     events_registry = :"dot_repeat_events_#{id}"
     project_root = isolated_project_root(id)
     start_supervised!({Minga.Events, name: events_registry})
-    {:ok, buffer} = BufferProcess.start_link(content: content, events_registry: events_registry)
+
+    options_server =
+      start_supervised!({Options, name: nil, events_registry: events_registry},
+        id: {:dot_repeat_options, id}
+      )
+
+    {:ok, buffer} =
+      BufferProcess.start_link(
+        content: content,
+        events_registry: events_registry,
+        options_server: options_server
+      )
 
     {:ok, editor} =
       MingaEditor.start_link(
@@ -30,6 +42,8 @@ defmodule Minga.DotRepeatTest do
         width: 80,
         height: 24,
         editing_model: :vim,
+        view_mode: :editor,
+        options_server: options_server,
         events_registry: events_registry,
         project_root: project_root,
         suppress_tool_prompts: true

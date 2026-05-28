@@ -95,7 +95,8 @@ defmodule MingaEditor.Startup do
     dashboard = nil
 
     # Decide mode FIRST, then create the right window type.
-    {keymap_scope, _agentic_state} = startup_view_state(backend)
+    {keymap_scope, agentic_state} =
+      startup_view_state(backend, Keyword.get(opts, :view_mode), options_server)
 
     initial_window_id = 1
 
@@ -134,7 +135,8 @@ defmodule MingaEditor.Startup do
           active: initial_window_id,
           next_id: initial_window_id + 1
         },
-        keymap_scope: keymap_scope
+        keymap_scope: keymap_scope,
+        agent_ui: agentic_state
       }
       |> MingaEditor.Session.State.set_file_tree(file_tree)
 
@@ -362,15 +364,27 @@ defmodule MingaEditor.Startup do
   @spec startup_view_state(EditorState.backend()) :: {atom(), UIState.t()}
   def startup_view_state(backend) do
     cli_flags = Minga.CLI.startup_flags()
-    startup_view_state(backend, cli_flags.view_mode)
+    startup_view_state(backend, cli_flags.view_mode, nil)
   end
 
-  @spec startup_view_state(EditorState.backend(), Minga.CLI.view_mode()) :: {atom(), UIState.t()}
-  defp startup_view_state(_backend, :editor), do: editor_view_state()
-  defp startup_view_state(_backend, :agentic), do: agent_view_state()
+  @spec startup_view_state(
+          EditorState.backend(),
+          Minga.CLI.view_mode() | nil,
+          Minga.Config.Options.server() | nil
+        ) :: {atom(), UIState.t()}
+  defp startup_view_state(backend, nil, options_server) do
+    cli_flags = Minga.CLI.startup_flags()
+    startup_view_state(backend, cli_flags.view_mode, options_server)
+  end
 
-  defp startup_view_state(_backend, :auto),
+  defp startup_view_state(_backend, :editor, _options_server), do: editor_view_state()
+  defp startup_view_state(_backend, :agentic, _options_server), do: agent_view_state()
+
+  defp startup_view_state(_backend, :auto, nil),
     do: startup_view_state_from_config(Config.get(:startup_view))
+
+  defp startup_view_state(_backend, :auto, options_server),
+    do: startup_view_state_from_config(Minga.Config.Options.get(options_server, :startup_view))
 
   @spec startup_view_state_from_config(atom()) :: {atom(), UIState.t()}
   defp startup_view_state_from_config(:agent), do: agent_view_state()
