@@ -156,6 +156,11 @@ final class ThemeColors {
     var treeSecondaryFg: Color { treeFg.opacity(0.78) }
     var treeMutedFg: Color { treeFg.opacity(0.62) }
     var treeDisabledFg: Color { treeFg.opacity(0.42) }
+    // Inactive tab content derives from the active tab foreground so it stays
+    // legible and theme-correct. The active/inactive distinction is carried by
+    // the active tab's background fill and top accent bar, so the inactive
+    // label sits at the "secondary" tier rather than the darkest flat color.
+    var tabSecondaryFg: Color { tabActiveFg.opacity(0.78) }
     var agentSecondaryFg: Color { agentTextFg.opacity(0.78) }
     var agentMutedFg: Color { agentTextFg.opacity(0.62) }
     var agentDisabledFg: Color { agentTextFg.opacity(0.42) }
@@ -273,6 +278,30 @@ final class ThemeColors {
         }
     }
 
+}
+
+/// Shared spacing scale for SwiftUI chrome.
+///
+/// A 4pt modular grid. Reach for the nearest step instead of ad-hoc magic
+/// numbers so spacing rhythm stays consistent across views. A 4pt grid reads
+/// more evenly for dense UI layout than a literal golden-ratio scale (φ suits
+/// type and section rhythm better than control gaps), so the steps below are
+/// the de-facto 4pt system used by Apple, Material, and Tailwind.
+enum Spacing {
+    /// 2pt: hairline. Badge internals, dot-to-glyph.
+    static let hairline: CGFloat = 2
+    /// 4pt: tight inline groups (chips, toggles, icon-to-label).
+    static let xs: CGFloat = 4
+    /// 8pt: default control/element gap.
+    static let sm: CGFloat = 8
+    /// 12pt: row padding, label-to-content, comfortable rows.
+    static let md: CGFloat = 12
+    /// 16pt: separation between distinct groups.
+    static let lg: CGFloat = 16
+    /// 20pt: section/panel padding.
+    static let xl: CGFloat = 20
+    /// 32pt: major section breaks.
+    static let xxl: CGFloat = 32
 }
 
 /// File-private helper to create a Color from a 24-bit RGB integer.

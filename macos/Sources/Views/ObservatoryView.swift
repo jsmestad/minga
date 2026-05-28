@@ -23,7 +23,7 @@ struct ObservatoryView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
             HStack {
                 Text("BEAM Observatory")
                     .font(.headline)
@@ -38,24 +38,24 @@ struct ObservatoryView: View {
                 .font(.caption)
                 .foregroundStyle(theme.treeFg.opacity(0.55))
         }
-        .padding(10)
+        .padding(Spacing.md)
     }
 
     private var treeList: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 2) {
+            LazyVStack(alignment: .leading, spacing: Spacing.hairline) {
                 ForEach(visibleTreeNodes()) { node in
                     row(node)
                 }
             }
-            .padding(.vertical, 6)
+            .padding(.vertical, Spacing.sm)
         }
         .focusable(false)
         .focusEffectDisabled()
     }
 
     private func row(_ node: ObservatoryNode) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Spacing.sm) {
             Button {
                 activateRow(node)
             } label: {
@@ -75,14 +75,17 @@ struct ObservatoryView: View {
             }
             .buttonStyle(.plain)
         }
-        .padding(.leading, CGFloat(node.depth) * 14 + 8)
-        .padding(.trailing, 8)
-        .padding(.vertical, 4)
+        // 12pt per depth level (down from 14) keeps deep nodes from starving
+        // the name column; the right-side memory/sparkline cluster is tightened
+        // in rowMainContent for the same reason.
+        .padding(.leading, CGFloat(node.depth) * Spacing.md + Spacing.sm)
+        .padding(.trailing, Spacing.sm)
+        .padding(.vertical, Spacing.xs)
         .background(selectedNodeId == node.id ? theme.treeSelectionBg.opacity(0.55) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
     }
 
     private func rowMainContent(_ node: ObservatoryNode) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Spacing.xs) {
             if node.isSupervisor {
                 Image(systemName: disclosureIcon(node))
                     .font(.caption)
@@ -97,8 +100,8 @@ struct ObservatoryView: View {
                 .foregroundStyle(classColor(node))
                 .frame(width: 14)
 
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 4) {
+            VStack(alignment: .leading, spacing: Spacing.hairline) {
+                HStack(spacing: Spacing.xs) {
                     Circle()
                         .fill(statusColor(node))
                         .frame(width: 6, height: 6)
@@ -119,13 +122,13 @@ struct ObservatoryView: View {
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
                 .foregroundStyle(theme.treeFg.opacity(0.55))
-                .frame(minWidth: 52, alignment: .trailing)
-                .padding(.horizontal, 5)
-                .padding(.vertical, 2)
+                .frame(minWidth: 46, alignment: .trailing)
+                .padding(.horizontal, Spacing.xs)
+                .padding(.vertical, Spacing.hairline)
                 .background(theme.treeSelectionBg.opacity(0.35), in: Capsule())
 
             SparklineView(data: node.sparkline, color: statusColor(node))
-                .frame(width: 48, height: 16)
+                .frame(width: 40, height: 16)
         }
         .contentShape(Rectangle())
     }
