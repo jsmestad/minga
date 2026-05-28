@@ -425,13 +425,11 @@ defmodule MingaEditor.Handlers.HighlightHandler do
   @spec handle_evict_parser_trees(EditorState.t()) :: {EditorState.t(), [highlight_effect()]}
   defp handle_evict_parser_trees(state) do
     ttl_seconds = Minga.Config.get(:parser_tree_ttl)
-    agent_buf = state |> AgentAccess.agent() |> Map.get(:buffer)
-    protected = if is_pid(agent_buf), do: [agent_buf], else: []
 
     new_state =
       HighlightSync.evict_inactive(state,
         ttl_ms: ttl_seconds * 1_000,
-        protected_pids: protected
+        protected_pids: parser_eviction_protected_pids(state)
       )
 
     effects =
@@ -442,6 +440,23 @@ defmodule MingaEditor.Handlers.HighlightHandler do
       end
 
     {new_state, effects}
+  end
+
+  @spec parser_eviction_protected_pids(EditorState.t()) :: [pid()]
+  defp parser_eviction_protected_pids(state) do
+    agent_buf = state |> AgentAccess.agent() |> Map.get(:buffer)
+
+    [agent_buf | visible_window_buffers(state)]
+    |> Enum.filter(&is_pid/1)
+    |> Enum.uniq()
+  end
+
+  @spec visible_window_buffers(EditorState.t()) :: [pid()]
+  defp visible_window_buffers(state) do
+    state.workspace.windows.map
+    |> Map.values()
+    |> Enum.map(& &1.buffer)
+    |> Enum.filter(&is_pid/1)
   end
 
   # Returns true if the given buffer PID is visible in any window.
