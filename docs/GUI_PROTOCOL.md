@@ -516,6 +516,7 @@ Display type values:
 | 2 | fold continuation |
 | 3 | wrap continuation |
 | 4 | fold open |
+| 5 | blank gutter row |
 
 Sign type values:
 | Value | Sign |
@@ -529,8 +530,9 @@ Sign type values:
 | 6 | diagnostic info |
 | 7 | diagnostic hint |
 | 8 | annotation |
+| 9 | git removed |
 
-Diagnostics take priority over git signs (same line shows only the highest-priority sign). The GUI frontend renders line numbers natively using its font engine, computing relative/absolute display from `buf_line` and `cursor_line`. Git signs are drawn as colored bars; diagnostic signs as colored text characters. Fold indicators render in the dedicated fold column when `display_type` is `fold_start` or `fold_open`.
+Diagnostics take priority over git signs (same line shows only the highest-priority sign). The GUI frontend renders line numbers natively using its font engine, computing relative/absolute display from `buf_line` and `cursor_line`. Git added, modified, and deleted signs are drawn as colored bars; git removed signs are rendered as `-` text for diff-view removed lines. Fold indicators render in the dedicated fold column when `display_type` is `fold_start` or `fold_open`. Blank gutter rows and wrap continuations do not render line numbers.
 
 When this opcode is sent, the BEAM strips `WindowFrame.gutter` from the cell-grid frame output, so no draw_text commands are sent for gutter content. The TUI rendering path is unaffected.
 

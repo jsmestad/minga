@@ -80,6 +80,10 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
       assert restarted.parser_status == :available
       assert restarted.workspace.highlight.version == 0
 
+      assert Enum.all?(Map.values(restarted.workspace.windows.map), fn %Window{} = window ->
+               window.render_cache.reset_pending == true
+             end)
+
       assert Enum.all?(restarted.workspace.highlight.highlights, fn {_pid, hl} ->
                hl.version == 0
              end)

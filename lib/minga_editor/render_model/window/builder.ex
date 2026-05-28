@@ -212,7 +212,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       diagnostic_ranges: diagnostic_ranges,
       document_highlights: doc_highlights,
       annotations: annotations,
-      gutter: build_gutter(scroll, ctx, content_kind),
+      gutter: build_gutter(scroll, ctx, content_kind, visual_entries),
       cursorline: build_cursorline(content_row, display_cursor_row, is_active, ctx),
       indent_guides: build_indent_guides(scroll, ctx, content_kind),
       geometry: build_geometry(state, scroll, content_kind),
@@ -709,6 +709,8 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           non_neg_integer()
         ) :: {String.t(), [Span.t()]}
   defp compose_line(line_text, hl_segments, ctx, buf_line, line_byte_offset) do
+    ctx = maybe_reveal_conceals(ctx, buf_line)
+
     # Start with highlight segments or plain text
     segments =
       case hl_segments do
@@ -735,6 +737,20 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     # Convert to composed text + spans
     Composition.segments_to_text_and_spans(segments)
   end
+
+  @spec maybe_reveal_conceals(Context.t(), non_neg_integer()) :: Context.t()
+  defp maybe_reveal_conceals(
+         %Context{cursor_line: buf_line, decorations: decorations} = ctx,
+         buf_line
+       ) do
+    if Decorations.has_conceal_ranges?(decorations) do
+      Context.with_decorations(ctx, Decorations.without_conceals(decorations))
+    else
+      ctx
+    end
+  end
+
+  defp maybe_reveal_conceals(%Context{} = ctx, _buf_line), do: ctx
 
   @spec append_fold_summary(String.t(), [Span.t()], non_neg_integer(), Context.t()) ::
           {String.t(), [Span.t()]}
@@ -904,9 +920,13 @@ defmodule MingaEditor.RenderModel.Window.Builder do
 
   # ── Gutter ─────────────────────────────────────────────────────────────
 
-  @spec build_gutter(WindowScroll.t(), Context.t(), RenderWindow.content_kind()) ::
-          Gutter.t() | nil
-  defp build_gutter(%WindowScroll{} = scroll, %Context{} = ctx, content_kind)
+  @spec build_gutter(
+          WindowScroll.t(),
+          Context.t(),
+          RenderWindow.content_kind(),
+          [visual_row_entry()]
+        ) :: Gutter.t() | nil
+  defp build_gutter(%WindowScroll{} = scroll, %Context{} = ctx, content_kind, visual_entries)
        when content_kind in [:buffer, :agent_chat] do
     %WindowScroll{
       win_id: win_id,
@@ -935,11 +955,11 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       line_number_style: line_number_style,
       line_number_width: line_number_width,
       sign_col_width: sign_col_width,
-      entries: build_gutter_entries(scroll, ctx, line_count)
+      entries: build_gutter_entries(scroll, ctx, line_count, visual_entries)
     }
   end
 
-  defp build_gutter(_scroll, _ctx, _content_kind), do: nil
+  defp build_gutter(_scroll, _ctx, _content_kind, _visual_entries), do: nil
 
   @spec build_geometry(state(), WindowScroll.t(), RenderWindow.content_kind()) :: PaneGeometry.t()
   defp build_geometry(state, %WindowScroll{} = scroll, content_kind) do
@@ -1165,37 +1185,32 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       collect_vertical_dividers(bottom, {row + top_height, col, width, bottom_height})
   end
 
-  @spec build_gutter_entries(WindowScroll.t(), Context.t(), non_neg_integer()) :: [
-          GutterEntry.t()
-        ]
-  defp build_gutter_entries(_scroll, _ctx, 0), do: []
+  @spec build_gutter_entries(
+          WindowScroll.t(),
+          Context.t(),
+          non_neg_integer(),
+          [visual_row_entry()]
+        ) :: [GutterEntry.t()]
+  defp build_gutter_entries(_scroll, _ctx, 0, _visual_entries), do: []
 
-  defp build_gutter_entries(%WindowScroll{} = scroll, %Context{} = ctx, line_count) do
+  defp build_gutter_entries(
+         %WindowScroll{} = scroll,
+         %Context{} = ctx,
+         line_count,
+         visual_entries
+       ) do
     fold_ranges = scroll.window.fold_ranges
     fold_start_lines = MapSet.new(fold_ranges, & &1.start_line)
     fold_end_by_start = Map.new(fold_ranges, fn range -> {range.start_line, range.end_line} end)
 
-    scroll
-    |> gutter_visible_entries(line_count)
+    visual_entries
+    |> Enum.map(&visual_gutter_entry/1)
     |> Enum.map(&resolve_gutter_entry(&1, fold_start_lines, fold_end_by_start, ctx, line_count))
   end
 
-  @spec gutter_visible_entries(WindowScroll.t(), non_neg_integer()) :: [
-          {non_neg_integer(), term()}
-        ]
-  defp gutter_visible_entries(%WindowScroll{visible_line_map: entries}, _line_count)
-       when is_list(entries), do: entries
-
-  defp gutter_visible_entries(
-         %WindowScroll{viewport: viewport, win_layout: %{content: {_row, _col, _width, height}}},
-         _line_count
-       ) do
-    if height <= 0 do
-      []
-    else
-      Enum.map(0..(height - 1), fn row -> {viewport.top + row, :normal} end)
-    end
-  end
+  @spec visual_gutter_entry(visual_row_entry()) :: {non_neg_integer(), term()}
+  defp visual_gutter_entry(%{buf_line: buf_line, row: %Row{row_type: row_type}}),
+    do: {buf_line, row_type}
 
   @spec resolve_gutter_entry(
           {non_neg_integer(), term()},
@@ -1204,6 +1219,27 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           Context.t(),
           non_neg_integer()
         ) :: GutterEntry.t()
+  defp resolve_gutter_entry(
+         {buf_line, :wrap_continuation},
+         _fold_start_lines,
+         _fold_end_by_start,
+         _ctx,
+         _line_count
+       ) do
+    blank_gutter_entry(buf_line, :wrap_continuation)
+  end
+
+  defp resolve_gutter_entry(
+         {buf_line, row_type},
+         _fold_start_lines,
+         _fold_end_by_start,
+         _ctx,
+         _line_count
+       )
+       when row_type in [:virtual_line, :block] do
+    blank_gutter_entry(buf_line, :blank)
+  end
+
   defp resolve_gutter_entry(
          {buf_line, row_type},
          fold_start_lines,
@@ -1237,9 +1273,14 @@ defmodule MingaEditor.RenderModel.Window.Builder do
          _ctx,
          _line_count
        ) do
+    blank_gutter_entry(buf_line, :normal)
+  end
+
+  @spec blank_gutter_entry(non_neg_integer(), GutterEntry.display_type()) :: GutterEntry.t()
+  defp blank_gutter_entry(buf_line, display_type) do
     %GutterEntry{
       buf_line: buf_line,
-      display_type: :normal,
+      display_type: display_type,
       sign_type: :none,
       fold_end_line: 0xFFFF_FFFF
     }
@@ -1247,6 +1288,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
 
   @spec resolve_display_type(term(), MapSet.t(non_neg_integer()), non_neg_integer()) ::
           GutterEntry.display_type()
+  defp resolve_display_type(:fold_start, _fold_start_lines, _buf_line), do: :fold_start
   defp resolve_display_type({:fold_start, _hidden}, _fold_start_lines, _buf_line), do: :fold_start
 
   defp resolve_display_type({:decoration_fold, _fold}, _fold_start_lines, _buf_line),
@@ -1321,6 +1363,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     case Map.get(git_signs, buf_line) do
       :added -> :git_added
       :modified -> :git_modified
+      :removed -> :git_removed
       :deleted -> :git_deleted
       _ -> :none
     end

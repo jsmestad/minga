@@ -93,6 +93,20 @@ defmodule MingaEditor.Agent.View.PromptRenderWindowTest do
       assert resized.full_refresh == false
     end
 
+    test "honors retained reset epoch and full-refresh from the parent agent window" do
+      ctx = prompt_ctx("hello", input_focused: true, cursor: {0, 5}, mode: :insert)
+
+      model =
+        PromptRenderWindow.build(ctx, 40, {10, 2, 40, 3}, content_epoch: 1, full_refresh: true)
+
+      reset =
+        PromptRenderWindow.build(ctx, 40, {10, 2, 40, 3}, content_epoch: 2, full_refresh: true)
+
+      assert model.full_refresh == true
+      assert reset.full_refresh == true
+      assert reset.content_epoch != model.content_epoch
+    end
+
     test "maps visual selection into prompt display coordinates" do
       ctx =
         prompt_ctx("abcdef",

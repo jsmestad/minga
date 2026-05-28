@@ -486,6 +486,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   defp encode_display_type(:fold_continuation), do: 2
   defp encode_display_type(:wrap_continuation), do: 3
   defp encode_display_type(:fold_open), do: 4
+  defp encode_display_type(:blank), do: 5
 
   @spec encode_sign_type(GutterEntry.sign_type()) :: non_neg_integer()
   defp encode_sign_type(:none), do: 0
@@ -497,6 +498,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   defp encode_sign_type(:diag_info), do: 6
   defp encode_sign_type(:diag_hint), do: 7
   defp encode_sign_type(:annotation), do: 8
+  defp encode_sign_type(:git_removed), do: 9
 
   # ── Cursorline ─────────────────────────────────────────────────────────
 

@@ -177,6 +177,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
         Face.new(fg: state.theme.editor.indent_guide_active_fg || state.theme.gutter.current_fg),
       hl_todo_faces: MingaEditor.UI.Theme.hl_todo_faces(state.theme),
       cursor_col: Map.get(params, :cursor_col, cursor_display_col(lines, cursor, first_line)),
+      cursor_line: elem(cursor, 0),
       hover_row: extract_hover_row(state),
       fold_ranges: window.fold_ranges
     }
@@ -1286,7 +1287,8 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       ctx.indent_guide_face,
       ctx.indent_guide_active_face,
       ctx.hl_todo_faces,
-      ctx.cursor_col
+      ctx.cursor_col,
+      ctx.cursor_line
     }
   end
 

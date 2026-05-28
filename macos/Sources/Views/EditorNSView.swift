@@ -102,6 +102,12 @@ final class EditorNSView: MTKView {
     /// Last viewport top used for scroll indicator change detection.
     private var lastViewportTopForScroll: UInt32 = 0xFFFF_FFFF
 
+    private struct GridDimensions {
+        let cols: UInt16
+        let rawRows: UInt16
+        let effectiveRows: UInt16
+    }
+
     /// First responder guard that prevents SwiftUI from stealing keyboard focus.
     /// Installed when the view moves to a window.
     private var firstResponderGuard: FirstResponderGuard?
@@ -402,6 +408,29 @@ final class EditorNSView: MTKView {
         dispatcher.frameState.dirty = false
     }
 
+    private func currentGridDimensions() -> GridDimensions {
+        gridDimensions(width: frame.width, height: frame.height)
+    }
+
+    private func gridDimensions(width: CGFloat, height: CGFloat, cellWidth: CGFloat? = nil, cellHeight: CGFloat? = nil) -> GridDimensions {
+        let resolvedCellWidth = cellWidth ?? self.cellWidth
+        let resolvedCellHeight = cellHeight ?? self.cellHeight
+        guard resolvedCellWidth > 0, resolvedCellHeight > 0 else {
+            return GridDimensions(cols: 1, rawRows: 1, effectiveRows: 1)
+        }
+
+        let gutterPad: CGFloat = dispatcher.frameState.gutterCol > 0 ? CoreTextMetalRenderer.gutterPixelPaddingPt : 0
+        let cols = UInt16(max((width - gutterPad) / resolvedCellWidth, 1))
+        let rawRows = UInt16(max(height / resolvedCellHeight, 1))
+        let effectiveRows = effectiveRows(from: rawRows, lineSpacing: dispatcher.frameState.lineSpacing)
+        return GridDimensions(cols: cols, rawRows: rawRows, effectiveRows: effectiveRows)
+    }
+
+    private func effectiveRows(from rawRows: UInt16, lineSpacing: Float) -> UInt16 {
+        let spacing = max(Double(lineSpacing), 1.0)
+        return UInt16(max(floor(Double(rawRows) / spacing), 1))
+    }
+
     // MARK: - Font update
 
     /// Called when the BEAM sends a set_font command or the display scale changes.
@@ -415,13 +444,11 @@ final class EditorNSView: MTKView {
         let newCellH = CGFloat(newFace.cellHeight)
         guard newCellW > 0, newCellH > 0 else { return }
 
-        let gutterPad: CGFloat = dispatcher.frameState.gutterCol > 0 ? CoreTextMetalRenderer.gutterPixelPaddingPt : 0
-        let newCols = UInt16(max((frame.width - gutterPad) / newCellW, 1))
-        let newRows = UInt16(max(frame.height / newCellH, 1))
+        let grid = gridDimensions(width: frame.width, height: frame.height, cellWidth: newCellW, cellHeight: newCellH)
 
-        if newCols != dispatcher.frameState.cols || newRows != dispatcher.frameState.rows {
-            dispatcher.frameState.resize(newCols: newCols, newRows: newRows)
-            encoder.sendResize(cols: newCols, rows: newRows)
+        if grid.cols != dispatcher.frameState.cols || grid.effectiveRows != dispatcher.frameState.rows {
+            dispatcher.frameState.resize(newCols: grid.cols, newRows: grid.effectiveRows)
+            encoder.sendResize(cols: grid.cols, rows: grid.rawRows)
         }
 
         // Force a full re-render.
@@ -503,19 +530,17 @@ final class EditorNSView: MTKView {
     private func sendCurrentGridSize(reason: String) {
         guard frame.width > 0, frame.height > 0 else { return }
 
-        let gutterPad: CGFloat = dispatcher.frameState.gutterCol > 0 ? CoreTextMetalRenderer.gutterPixelPaddingPt : 0
-        let cols = UInt16(max((frame.width - gutterPad) / cellWidth, 1))
-        let rows = UInt16(max(frame.height / cellHeight, 1))
-        dispatcher.frameState.resize(newCols: cols, newRows: rows)
+        let grid = currentGridDimensions()
+        dispatcher.frameState.resize(newCols: grid.cols, newRows: grid.effectiveRows)
 
         if readySent {
-            encoder.sendResize(cols: cols, rows: rows)
+            encoder.sendResize(cols: grid.cols, rows: grid.rawRows)
         } else {
             readySent = true
-            encoder.sendReady(cols: cols, rows: rows)
+            encoder.sendReady(cols: grid.cols, rows: grid.rawRows)
         }
 
-        PortLogger.info("\(reason): \(cols)x\(rows) cells")
+        PortLogger.info("\(reason): \(grid.cols)x\(grid.rawRows) raw cells, \(grid.effectiveRows) effective rows")
     }
 
     private func measureTrafficLightPosition(in window: NSWindow) {
@@ -637,22 +662,20 @@ final class EditorNSView: MTKView {
 
         guard newSize.width > 0, newSize.height > 0 else { return }
 
-        let gutterPad: CGFloat = dispatcher.frameState.gutterCol > 0 ? CoreTextMetalRenderer.gutterPixelPaddingPt : 0
-        let newCols = UInt16(max((newSize.width - gutterPad) / cellWidth, 1))
-        let newRows = UInt16(max(newSize.height / cellHeight, 1))
+        let grid = gridDimensions(width: newSize.width, height: newSize.height)
 
         if !readySent {
             // First real frame size: send the ready event with actual
             // window dimensions so the BEAM never sees wrong defaults.
             readySent = true
-            dispatcher.frameState.resize(newCols: newCols, newRows: newRows)
-            encoder.sendReady(cols: newCols, rows: newRows)
-            os_signpost(.event, log: startupLog, name: "ReadySent", "%{public}dx%{public}d", newCols, newRows)
-            PortLogger.info("Window ready: \(newCols)x\(newRows) cells (\(Int(newSize.width))x\(Int(newSize.height))pt)")
-        } else if newCols != dispatcher.frameState.cols || newRows != dispatcher.frameState.rows {
-            dispatcher.frameState.resize(newCols: newCols, newRows: newRows)
-            encoder.sendResize(cols: newCols, rows: newRows)
-            PortLogger.info("Window resized: \(newCols)x\(newRows) cells")
+            dispatcher.frameState.resize(newCols: grid.cols, newRows: grid.effectiveRows)
+            encoder.sendReady(cols: grid.cols, rows: grid.rawRows)
+            os_signpost(.event, log: startupLog, name: "ReadySent", "%{public}dx%{public}d", grid.cols, grid.rawRows)
+            PortLogger.info("Window ready: \(grid.cols)x\(grid.rawRows) raw cells, \(grid.effectiveRows) effective rows (\(Int(newSize.width))x\(Int(newSize.height))pt)")
+        } else if grid.cols != dispatcher.frameState.cols || grid.effectiveRows != dispatcher.frameState.rows {
+            dispatcher.frameState.resize(newCols: grid.cols, newRows: grid.effectiveRows)
+            encoder.sendResize(cols: grid.cols, rows: grid.rawRows)
+            PortLogger.info("Window resized: \(grid.cols)x\(grid.rawRows) raw cells, \(grid.effectiveRows) effective rows")
         }
     }
 
@@ -691,16 +714,11 @@ final class EditorNSView: MTKView {
     /// so the BEAM adjusts its viewport.
     func lineSpacingChanged(_ spacing: Float) {
         guard frame.width > 0, frame.height > 0 else { return }
-        let effectiveCellH = cellHeight * CGFloat(spacing)
-        guard effectiveCellH > 0 else { return }
+        let grid = currentGridDimensions()
 
-        let newRows = UInt16(max(frame.height / effectiveCellH, 1))
-        let gutterPad: CGFloat = dispatcher.frameState.gutterCol > 0 ? CoreTextMetalRenderer.gutterPixelPaddingPt : 0
-        let cols = UInt16(max((frame.width - gutterPad) / cellWidth, 1))
-
-        if newRows != dispatcher.frameState.rows {
-            dispatcher.frameState.resize(newCols: cols, newRows: newRows)
-            encoder.sendResize(cols: cols, rows: newRows)
+        if grid.cols != dispatcher.frameState.cols || grid.effectiveRows != dispatcher.frameState.rows {
+            dispatcher.frameState.resize(newCols: grid.cols, newRows: grid.effectiveRows)
+            encoder.sendResize(cols: grid.cols, rows: grid.rawRows)
         }
     }
 
@@ -1678,7 +1696,7 @@ final class EditorNSView: MTKView {
         switch entry.displayType {
         case .foldOpen, .foldStart:
             return (gutter, entry)
-        case .normal, .foldContinuation, .wrapContinuation:
+        case .normal, .foldContinuation, .wrapContinuation, .blank:
             return nil
         }
     }

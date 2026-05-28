@@ -126,6 +126,10 @@ defmodule Minga.Core.Decorations do
   @spec new() :: t()
   def new, do: %__MODULE__{}
 
+  @doc "Returns a copy with conceal ranges removed without changing the decoration version."
+  @spec without_conceals(t()) :: t()
+  def without_conceals(%__MODULE__{} = decs), do: %{decs | conceal_ranges: []}
+
   # ── Highlight range API ──────────────────────────────────────────────────
 
   @doc """

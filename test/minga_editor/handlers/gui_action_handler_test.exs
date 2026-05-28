@@ -15,6 +15,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
   alias MingaEditor.Handlers.GuiActionHandler
   alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.Window
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.ResourcePressure
   alias MingaEditor.State.Tab
@@ -181,6 +182,36 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     assert log =~ "missing_extension_for_gui_action/refresh"
   end
 
+  test "font size actions mark retained window state reset-pending", %{sidebar_registry: table} do
+    state = table |> base_state() |> clear_window_reset_pending()
+
+    new_state = GuiActionHandler.dispatch(state, {:font_size_adjust, :increase})
+
+    assert new_state.font_size_override != nil
+
+    assert Enum.all?(Map.values(new_state.workspace.windows.map), fn %Window{} = window ->
+             window.render_cache.reset_pending == true
+           end)
+  end
+
+  test "font size reset clears override and marks retained state reset-pending", %{
+    sidebar_registry: table
+  } do
+    state =
+      table
+      |> base_state()
+      |> clear_window_reset_pending()
+      |> Map.put(:font_size_override, 18)
+
+    new_state = GuiActionHandler.dispatch(state, {:font_size_adjust, :reset})
+
+    assert new_state.font_size_override == nil
+
+    assert Enum.all?(Map.values(new_state.workspace.windows.map), fn %Window{} = window ->
+             window.render_cache.reset_pending == true
+           end)
+  end
+
   test "native GUI sidebar actions route to extension-owned sidebars", %{sidebar_registry: table} do
     assert :ok =
              Sidebar.register(table, {:extension, :gui_action_test}, %{
@@ -270,6 +301,16 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
   defp base_state(sidebar_registry, opts \\ []) do
     opts = Keyword.put(opts, :sidebar_registry, sidebar_registry)
     TestHelpers.base_state(opts)
+  end
+
+  defp clear_window_reset_pending(state) do
+    windows =
+      Map.new(state.workspace.windows.map, fn {id, %Window{} = window} ->
+        {window, _epoch, _full_refresh?} = Window.prepare_render_epoch(window, {:stable})
+        {id, window}
+      end)
+
+    put_in(state.workspace.windows.map, windows)
   end
 
   defp power_thermal_events_registry do

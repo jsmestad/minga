@@ -1510,13 +1510,15 @@ struct GUIGutterDecoderTests {
 
         // Section 0x03: Entries
         var entries = Data()
-        appendU16(&entries, 3) // entry count
+        appendU16(&entries, 4) // entry count
         // Entry 1
         appendU32(&entries, 8); entries.append(0); entries.append(1); appendU32(&entries, UInt32.max) // normal, gitAdded, no fold range
         // Entry 2
         appendU32(&entries, 9); entries.append(1); entries.append(0); appendU32(&entries, 14) // foldStart, none, fold end
         // Entry 3
         appendU32(&entries, 10); entries.append(3); entries.append(4); appendU32(&entries, UInt32.max) // wrapContinuation, diagError, no fold range
+        // Entry 4
+        appendU32(&entries, 11); entries.append(5); entries.append(9); appendU32(&entries, UInt32.max) // blank, gitRemoved, no fold range
 
         var data = Data()
         data.append(OP_GUI_GUTTER)
@@ -1541,13 +1543,15 @@ struct GUIGutterDecoderTests {
         #expect(gutterData.lineNumberStyle == .hybrid)
         #expect(gutterData.lineNumberWidth == 4)
         #expect(gutterData.signColWidth == 1)
-        #expect(gutterData.entries.count == 3)
+        #expect(gutterData.entries.count == 4)
         #expect(gutterData.entries[0].bufLine == 8)
         #expect(gutterData.entries[0].signType == .gitAdded)
         #expect(gutterData.entries[1].displayType == .foldStart)
         #expect(gutterData.entries[1].foldEndLine == 14)
         #expect(gutterData.entries[2].displayType == .wrapContinuation)
         #expect(gutterData.entries[2].signType == .diagError)
+        #expect(gutterData.entries[3].displayType == .blank)
+        #expect(gutterData.entries[3].signType == .gitRemoved)
     }
 
     @Test("Decode gui_gutter with legacy window section layout")

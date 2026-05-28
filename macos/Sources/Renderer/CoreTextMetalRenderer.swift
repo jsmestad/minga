@@ -1099,7 +1099,7 @@ final class CoreTextMetalRenderer {
             }
 
             // Line number (after sign and fold columns)
-            if gutter.lineNumberStyle != .none && gutter.lineNumberWidth > 0 {
+            if gutter.lineNumberStyle != .none && gutter.lineNumberWidth > 0 && shouldRenderLineNumber(for: entry) {
                 renderGutterLineNumber(
                     entry: entry, gutter: gutter,
                     screenRow: screenRow, yPos: yPos, xOffset: xOffset,
@@ -1152,8 +1152,8 @@ final class CoreTextMetalRenderer {
             quad.alpha = 1.0
             bgQuads.append(quad)
 
-        case .diagError, .diagWarning, .diagInfo, .diagHint:
-            let (text, fg) = diagnosticSignTextAndColor(entry.signType, frameState: frameState)
+        case .gitRemoved, .diagError, .diagWarning, .diagInfo, .diagHint:
+            let (text, fg) = gutterTextSignAndColor(entry.signType, frameState: frameState)
             let cacheKey = AtlasKey.diagnosticSign(windowId: windowId, row: screenRow)
             let contentHash = gutterContentHash(text: text, fg: fg)
             if let atlas, let wcr = windowContentRenderer,
@@ -1245,7 +1245,7 @@ final class CoreTextMetalRenderer {
         case .foldOpen:
             guard isMouseInGutter && gutterHoverWindowId == gutter.windowId else { return }
             collapsed = false
-        case .normal, .foldContinuation, .wrapContinuation:
+        case .normal, .foldContinuation, .wrapContinuation, .blank:
             return
         }
 
@@ -1376,6 +1376,7 @@ final class CoreTextMetalRenderer {
         case .gitAdded: return colorFromU24(frameState.gutterColors.gitAddedFg, default: .zero)
         case .gitModified: return colorFromU24(frameState.gutterColors.gitModifiedFg, default: .zero)
         case .gitDeleted: return colorFromU24(frameState.gutterColors.gitDeletedFg, default: .zero)
+        case .gitRemoved: return colorFromU24(frameState.gutterColors.gitDeletedFg, default: .zero)
         case .diagError: return colorFromU24(frameState.gutterColors.errorFg, default: .zero)
         case .diagWarning: return colorFromU24(frameState.gutterColors.warningFg, default: .zero)
         case .diagInfo: return colorFromU24(frameState.gutterColors.infoFg, default: .zero)
@@ -1385,9 +1386,10 @@ final class CoreTextMetalRenderer {
         }
     }
 
-    /// Returns the sign character and fg color (as U24) for a diagnostic sign type.
-    private func diagnosticSignTextAndColor(_ signType: Wire.GutterSignType, frameState: FrameState) -> (String, UInt32) {
+    /// Returns the sign character and fg color (as U24) for a text-rendered gutter sign.
+    private func gutterTextSignAndColor(_ signType: Wire.GutterSignType, frameState: FrameState) -> (String, UInt32) {
         switch signType {
+        case .gitRemoved: return ("-", frameState.gutterColors.gitDeletedFg)
         case .diagError: return ("E", frameState.gutterColors.errorFg)
         case .diagWarning: return ("W", frameState.gutterColors.warningFg)
         case .diagInfo: return ("I", frameState.gutterColors.infoFg)
@@ -1450,10 +1452,19 @@ final class CoreTextMetalRenderer {
 
     private nonisolated static func signTextureDemand(_ signType: Wire.GutterSignType) -> Int {
         switch signType {
-        case .diagError, .diagWarning, .diagInfo, .diagHint, .annotation:
+        case .gitRemoved, .diagError, .diagWarning, .diagInfo, .diagHint, .annotation:
             return 1
         case .gitAdded, .gitModified, .gitDeleted, .none:
             return 0
+        }
+    }
+
+    private func shouldRenderLineNumber(for entry: Wire.GutterEntry) -> Bool {
+        switch entry.displayType {
+        case .wrapContinuation, .blank:
+            return false
+        case .normal, .foldStart, .foldContinuation, .foldOpen:
+            return true
         }
     }
 

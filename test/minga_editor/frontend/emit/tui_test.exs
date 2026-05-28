@@ -6,11 +6,19 @@ defmodule MingaEditor.Frontend.Emit.TUITest do
 
   use ExUnit.Case, async: true
 
+  alias Minga.RenderModel, as: CoreRenderModel
+  alias Minga.RenderModel.Cursor, as: RenderCursor
+  alias Minga.RenderModel.Window, as: RenderWindow
+  alias Minga.RenderModel.Window.Gutter
+  alias Minga.RenderModel.Window.GutterEntry
+  alias Minga.RenderModel.Window.PaneGeometry
+  alias Minga.RenderModel.Window.Row
   alias MingaEditor.DisplayList
-  alias MingaEditor.DisplayList.{Cursor, Frame, Overlay}
+  alias MingaEditor.DisplayList.{Cursor, Frame, Overlay, WindowFrame}
   alias MingaEditor.Frontend.Emit
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.Frontend.Emit.TUI, as: EmitTUI
+  alias MingaEditor.Frontend.Protocol
 
   import MingaEditor.RenderPipeline.TestHelpers
 
@@ -47,6 +55,130 @@ defmodule MingaEditor.Frontend.Emit.TUITest do
       assert_receive {:"$gen_cast", {:send_commands, commands}}
       assert is_list(commands)
       assert Enum.all?(commands, &is_binary/1)
+    end
+  end
+
+  describe "render model TUI output" do
+    test "full redraw takes buffer content from render model instead of legacy window layers" do
+      frame = %Frame{
+        cursor: Cursor.new(0, 0, :block),
+        windows: [
+          %WindowFrame{
+            rect: {0, 0, 20, 1},
+            lines: DisplayList.draws_to_layer([DisplayList.draw(0, 0, "legacy")]),
+            gutter: %{},
+            tilde_lines: %{},
+            modeline: %{}
+          }
+        ]
+      }
+
+      render_model = render_model_with_rows(["model"])
+
+      commands =
+        EmitTUI.build_commands_from_deltas(
+          render_model,
+          frame,
+          Context.from_editor_state(base_state()),
+          nil
+        )
+
+      texts = decoded_draw_texts(commands)
+
+      assert "model" in texts
+      refute "legacy" in texts
+    end
+
+    test "scroll redraw filters newly exposed rows from render model cells" do
+      frame = %Frame{cursor: Cursor.new(0, 0, :block)}
+      render_model = render_model_with_rows(["row0", "row1", "row2"])
+
+      commands =
+        EmitTUI.build_commands_from_deltas(
+          render_model,
+          frame,
+          Context.from_editor_state(base_state()),
+          [
+            %{win_id: 1, delta: 1, content_rect: {0, 0, 20, 3}}
+          ]
+        )
+
+      texts = decoded_draw_texts(commands)
+
+      assert "row2" in texts
+      refute "row0" in texts
+      refute "row1" in texts
+    end
+
+    test "scroll redraw includes exposed gutter cells and tilde filler from render model" do
+      frame = %Frame{cursor: Cursor.new(0, 0, :block)}
+      render_model = render_model_with_gutter_and_tilde()
+
+      commands =
+        EmitTUI.build_commands_from_deltas(
+          render_model,
+          frame,
+          Context.from_editor_state(base_state()),
+          [
+            %{win_id: 1, delta: 2, content_rect: {0, 0, 20, 3}}
+          ]
+        )
+
+      draws = decoded_draws(commands)
+
+      assert Enum.any?(draws, &(&1.row == 1 and &1.col == 0 and &1.text == "E "))
+      assert Enum.any?(draws, &(&1.row == 1 and &1.col == 4 and &1.text == "row1"))
+      assert Enum.any?(draws, &(&1.row == 2 and &1.col == 4 and &1.text == "~"))
+      refute Enum.any?(draws, &(&1.row == 0 and &1.text == "row0"))
+    end
+
+    test "scroll redraw clears cursorline redraw rows before drawing model content" do
+      frame = %Frame{cursor: Cursor.new(0, 0, :block)}
+      render_model = render_model_with_rows(["row0", "x", "row2"])
+
+      commands =
+        EmitTUI.build_commands_from_deltas(
+          render_model,
+          frame,
+          Context.from_editor_state(base_state()),
+          [
+            %{win_id: 1, delta: 1, content_rect: {0, 0, 20, 3}, redraw_rows: [1]}
+          ]
+        )
+
+      draws = decoded_draws(commands)
+
+      clear_index =
+        Enum.find_index(
+          draws,
+          &(&1.row == 1 and &1.col == 0 and &1.text == String.duplicate(" ", 20))
+        )
+
+      content_index = Enum.find_index(draws, &(&1.row == 1 and &1.col == 0 and &1.text == "x"))
+
+      assert is_integer(clear_index)
+      assert is_integer(content_index)
+      assert clear_index < content_index
+    end
+
+    test "scroll redraw also repaints shifted previous and current cursorline rows" do
+      state = base_state(rows: 24, cols: 80, content: long_content(100))
+
+      state1 = state |> seed_state(0) |> set_cached_cursor_line(5)
+      frame1 = build_frame_with_window(state1, viewport_top: 0)
+      {caches, _} = Emit.emit(frame1, Context.from_editor_state(state1), nil)
+      assert_receive {:"$gen_cast", {:send_commands, _}}
+
+      state2 = state |> simulate_scroll(1) |> set_cached_cursor_line(6)
+      frame2 = build_frame_with_window(state2, viewport_top: 1)
+      Emit.emit(frame2, Context.from_editor_state(state2), nil, caches)
+
+      assert_receive {:"$gen_cast", {:send_commands, commands}}
+      texts = decoded_draw_texts(commands)
+
+      refute match?([<<0x12>> | _], commands)
+      assert "line 6: content" in texts
+      assert "line 7: content" in texts
     end
   end
 
@@ -404,5 +536,130 @@ defmodule MingaEditor.Frontend.Emit.TUITest do
     test "handles empty layer" do
       assert EmitTUI.filter_layer_by_ranges(%{}, [0..5]) == []
     end
+  end
+
+  @spec set_cached_cursor_line(MingaEditor.State.t(), non_neg_integer()) :: MingaEditor.State.t()
+  defp set_cached_cursor_line(state, cursor_line) do
+    win_id = state.workspace.windows.active
+    window = Map.fetch!(state.workspace.windows.map, win_id)
+    render_cache = %{window.render_cache | last_cursor_line: cursor_line}
+    window = %{window | render_cache: render_cache}
+    put_in(state.workspace.windows.map, Map.put(state.workspace.windows.map, win_id, window))
+  end
+
+  @spec render_model_with_rows([String.t()]) :: CoreRenderModel.t()
+  defp render_model_with_rows(texts) do
+    rows =
+      texts
+      |> Enum.with_index()
+      |> Enum.map(fn {text, index} ->
+        %Row{
+          row_id: Row.stable_id(:normal, index),
+          row_type: :normal,
+          buf_line: index,
+          text: text,
+          spans: [],
+          content_hash: :erlang.phash2(text)
+        }
+      end)
+
+    CoreRenderModel.new(
+      [
+        %RenderWindow{
+          window_id: 1,
+          content_kind: :buffer,
+          rect: {0, 0, 20, max(length(rows), 1)},
+          rows: rows,
+          cursor_row: 0,
+          cursor_col: 0,
+          cursor_shape: :block
+        }
+      ],
+      %Minga.RenderModel.UI{},
+      RenderCursor.new(0, 0, :block)
+    )
+  end
+
+  @spec render_model_with_gutter_and_tilde() :: CoreRenderModel.t()
+  defp render_model_with_gutter_and_tilde do
+    rows = [
+      %Row{
+        row_id: Row.stable_id(:normal, 0),
+        row_type: :normal,
+        buf_line: 0,
+        text: "row0",
+        spans: [],
+        content_hash: 1
+      },
+      %Row{
+        row_id: Row.stable_id(:normal, 1),
+        row_type: :normal,
+        buf_line: 1,
+        text: "row1",
+        spans: [],
+        content_hash: 2
+      }
+    ]
+
+    CoreRenderModel.new(
+      [
+        %RenderWindow{
+          window_id: 1,
+          content_kind: :buffer,
+          rect: {0, 0, 20, 3},
+          geometry: %PaneGeometry{
+            window_id: 1,
+            total_rect: {0, 0, 20, 3},
+            content_rect: {0, 0, 20, 3},
+            text_rect: {0, 4, 16, 3},
+            gutter_rect: {0, 0, 4, 3},
+            clip_rect: {0, 4, 16, 3},
+            viewport: nil,
+            gutter_metrics: nil,
+            hit_regions: []
+          },
+          gutter: %Gutter{
+            window_id: 1,
+            content_row: 0,
+            content_col: 0,
+            content_height: 3,
+            is_active: true,
+            content_width: 20,
+            cursor_line: 1,
+            line_number_style: :absolute,
+            line_number_width: 1,
+            sign_col_width: 3,
+            entries: [
+              %GutterEntry{buf_line: 0, display_type: :normal, sign_type: :none},
+              %GutterEntry{buf_line: 1, display_type: :normal, sign_type: :diag_error}
+            ]
+          },
+          rows: rows,
+          cursor_row: 0,
+          cursor_col: 0,
+          cursor_shape: :block
+        }
+      ],
+      %Minga.RenderModel.UI{},
+      RenderCursor.new(0, 0, :block)
+    )
+  end
+
+  @spec decoded_draw_texts([binary()]) :: [String.t()]
+  defp decoded_draw_texts(commands) do
+    commands
+    |> decoded_draws()
+    |> Enum.map(& &1.text)
+  end
+
+  @spec decoded_draws([binary()]) :: [map()]
+  defp decoded_draws(commands) do
+    Enum.flat_map(commands, fn command ->
+      case Protocol.decode_command(command) do
+        {:ok, {:draw_text, draw}} -> [draw]
+        {:ok, {:draw_styled_text, draw}} -> [draw]
+        _ -> []
+      end
+    end)
   end
 end

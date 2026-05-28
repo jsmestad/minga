@@ -1,12 +1,13 @@
 defmodule MingaEditor.RenderModel.Builder do
   @moduledoc """
-  Builds the top-level `Minga.RenderModel` for the GUI emit path.
+  Builds the top-level `Minga.RenderModel` for frontend adapters.
 
-  The render pipeline still produces a `DisplayList.Frame` for the TUI path during the migration. This builder extracts the semantic GUI window models already attached to that frame, builds UI chrome models, and returns one core render model that the GUI adapter can encode.
+  The render pipeline still carries a `DisplayList.Frame` as a compatibility shell for TUI chrome during the migration. This builder extracts the semantic window models attached to that frame, builds UI chrome models, and returns one core render model that frontend adapters can encode or composite.
   """
 
   alias Minga.RenderModel
   alias Minga.RenderModel.Cursor
+  alias Minga.RenderModel.UI
   alias MingaEditor.DisplayList
   alias MingaEditor.DisplayList.Frame
   alias MingaEditor.DisplayList.WindowFrame
@@ -31,6 +32,18 @@ defmodule MingaEditor.RenderModel.Builder do
       )
 
     {model, ctx}
+  end
+
+  @doc "Builds a render model with window content and frame side-channel fields only."
+  @spec build_windows(Frame.t(), Context.t()) :: RenderModel.t()
+  def build_windows(%Frame{} = frame, %Context{} = ctx) do
+    RenderModel.new(
+      window_models(frame),
+      %UI{},
+      cursor_model(frame.cursor),
+      ctx.title,
+      ctx.theme.editor.bg
+    )
   end
 
   @spec window_models(Frame.t()) :: [RenderModel.Window.t()]

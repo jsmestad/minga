@@ -418,6 +418,7 @@ defmodule MingaEditor.Handlers.HighlightHandler do
         |> Highlighting.set_highlights(reset_highlights)
       end)
       |> Map.put(:parser_status, :available)
+      |> EditorState.reset_frontend_render_state()
 
     {new_state, [{:log_message, "Parser restarted, syntax highlighting recovered"}]}
   end

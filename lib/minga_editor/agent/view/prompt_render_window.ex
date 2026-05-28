@@ -49,18 +49,19 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
   inside the prompt box (excluding borders and padding). The caller
   computes this from the chat panel width.
   """
-  @spec build(ctx(), pos_integer(), RenderWindow.rect() | nil) :: RenderWindow.t() | nil
-  def build(ctx, inner_width, rect \\ nil)
+  @spec build(ctx(), pos_integer(), RenderWindow.rect() | nil, keyword()) ::
+          RenderWindow.t() | nil
+  def build(ctx, inner_width, rect \\ nil, opts \\ [])
 
-  def build(%ViewContext{} = ctx, inner_width, rect) when inner_width > 0 do
+  def build(%ViewContext{} = ctx, inner_width, rect, opts) when inner_width > 0 do
     panel = ctx.ui_state.panel
 
     if is_pid(panel.prompt_buffer) do
-      build_from_panel(ctx, panel, inner_width, rect)
+      build_from_panel(ctx, panel, inner_width, rect, opts)
     end
   end
 
-  def build(_, _, _), do: nil
+  def build(_, _, _, _), do: nil
 
   @doc """
   Returns the prompt height in visual rows (excluding borders).
@@ -78,9 +79,9 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
 
   # ── Private ─────────────────────────────────────────────────────────────
 
-  @spec build_from_panel(ctx(), Panel.t(), pos_integer(), RenderWindow.rect() | nil) ::
+  @spec build_from_panel(ctx(), Panel.t(), pos_integer(), RenderWindow.rect() | nil, keyword()) ::
           RenderWindow.t()
-  defp build_from_panel(ctx, panel, inner_width, rect) do
+  defp build_from_panel(ctx, panel, inner_width, rect, opts) do
     lines = Panel.input_lines(panel)
     cursor = Panel.input_cursor(panel)
     mode = ctx.editing.mode
@@ -140,8 +141,15 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
       geometry:
         prompt_geometry(prompt_id, rect, inner_width, visible_count, total_visual, scroll),
       content_epoch:
-        prompt_content_epoch(prompt_id, rect, inner_width, visible_count, total_visual),
-      full_refresh: false
+        prompt_content_epoch(
+          prompt_id,
+          rect,
+          inner_width,
+          visible_count,
+          total_visual,
+          Keyword.get(opts, :content_epoch, 0)
+        ),
+      full_refresh: Keyword.get(opts, :full_refresh, false)
     }
   end
 
@@ -150,10 +158,18 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
           RenderWindow.rect(),
           pos_integer(),
           pos_integer(),
+          non_neg_integer(),
           non_neg_integer()
         ) :: non_neg_integer()
-  defp prompt_content_epoch(window_id, rect, inner_width, visible_count, total_visual) do
-    :erlang.phash2({window_id, rect, inner_width, visible_count, total_visual})
+  defp prompt_content_epoch(
+         window_id,
+         rect,
+         inner_width,
+         visible_count,
+         total_visual,
+         reset_epoch
+       ) do
+    :erlang.phash2({window_id, rect, inner_width, visible_count, total_visual, reset_epoch})
   end
 
   @spec prompt_gutter(pos_integer(), RenderWindow.rect(), boolean()) :: Gutter.t()
