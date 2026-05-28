@@ -170,6 +170,51 @@ defmodule MingaEditor.StartupTest do
   end
 
   describe "build_initial_state/1" do
+    test "uses supplied options server for automatic startup view" do
+      options_server = start_supervised!({Options, name: nil})
+      {:ok, :agent} = Options.set(options_server, :startup_view, :agent)
+      Application.put_env(:minga, :cli_startup_flags, %{view_mode: :auto, no_context: false})
+
+      state =
+        Startup.build_initial_state(
+          backend: :headless,
+          port_manager: nil,
+          parser_manager: nil,
+          options_server: options_server,
+          width: 80,
+          height: 24,
+          sidebar_registry: private_sidebar_registry()
+        )
+
+      assert state.workspace.keymap_scope == :agent
+      assert state.workspace.agent_ui.view.active
+    after
+      Application.delete_env(:minga, :cli_startup_flags)
+    end
+
+    test "explicit view_mode overrides configured startup view" do
+      options_server = start_supervised!({Options, name: nil})
+      {:ok, :agent} = Options.set(options_server, :startup_view, :agent)
+      Application.put_env(:minga, :cli_startup_flags, %{view_mode: :auto, no_context: false})
+
+      state =
+        Startup.build_initial_state(
+          backend: :headless,
+          port_manager: nil,
+          parser_manager: nil,
+          options_server: options_server,
+          view_mode: :editor,
+          width: 80,
+          height: 24,
+          sidebar_registry: private_sidebar_registry()
+        )
+
+      assert state.workspace.keymap_scope == :editor
+      refute state.workspace.agent_ui.view.active
+    after
+      Application.delete_env(:minga, :cli_startup_flags)
+    end
+
     test "registers FileTree dynamic sidebar and input contributions" do
       Input.reset_handlers()
       sidebar_registry = private_sidebar_registry()
