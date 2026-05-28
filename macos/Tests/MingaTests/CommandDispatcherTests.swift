@@ -658,6 +658,52 @@ struct CommandDispatcherRoutingTests {
 
     // MARK: - Batch lifecycle
 
+    @Test("batchEnd prunes stale window geometry when a new gutter frame arrives")
+    @MainActor func batchEndPrunesStaleWindowGeometry() {
+        let (dispatcher, gui) = makeDispatcher()
+        let liveContent = GUIWindowContent(
+            windowId: 1, fullRefresh: true,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block,
+            rows: [], selection: nil,
+            searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: []
+        )
+        let staleContent = GUIWindowContent(
+            windowId: 2, fullRefresh: true,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block,
+            rows: [], selection: nil,
+            searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: []
+        )
+        let liveGutter = Wire.WindowGutter(
+            windowId: 1, contentRow: 0, contentCol: 0, contentHeight: 24,
+            isActive: true, contentWidth: 80, cursorLine: 10, lineNumberStyle: .hybrid,
+            lineNumberWidth: 4, signColWidth: 1, entries: []
+        )
+        let staleGutter = Wire.WindowGutter(
+            windowId: 2, contentRow: 12, contentCol: 0, contentHeight: 12,
+            isActive: false, contentWidth: 80, cursorLine: 10, lineNumberStyle: .hybrid,
+            lineNumberWidth: 4, signColWidth: 1, entries: []
+        )
+
+        gui.windowContents[1] = liveContent
+        gui.windowContents[2] = staleContent
+        dispatcher.frameState.windowGutters[1] = liveGutter
+        dispatcher.frameState.windowGutters[2] = staleGutter
+        dispatcher.frameState.windowIndentGuides[2] = IndentGuideData(windowId: 2, tabWidth: 2, activeGuideCol: 0xFFFF, guideCols: [], lineIndentLevels: [])
+
+        dispatcher.dispatch(.clear)
+        dispatcher.dispatch(.guiGutter(data: liveGutter))
+        dispatcher.dispatch(.guiWindowContent(data: liveContent))
+        dispatcher.dispatch(.batchEnd)
+
+        #expect(dispatcher.frameState.windowGutters[1] != nil)
+        #expect(dispatcher.frameState.windowGutters[2] == nil)
+        #expect(gui.windowContents[1] === liveContent)
+        #expect(gui.windowContents[2] == nil)
+        #expect(dispatcher.frameState.windowIndentGuides[2] == nil)
+    }
+
     @Test("batchEnd fires onFirstRender once then clears it")
     @MainActor func batchEndFiresFirstRenderOnce() {
         let (dispatcher, _) = makeDispatcher()

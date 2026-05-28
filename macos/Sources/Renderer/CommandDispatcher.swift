@@ -111,6 +111,7 @@ final class CommandDispatcher {
             frameState.cursorShape = shape
 
         case .batchEnd:
+            pruneStaleWindowGeometry()
             if let firstRender = onFirstRender {
                 firstRender()
                 onFirstRender = nil
@@ -517,5 +518,13 @@ final class CommandDispatcher {
         }
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
+    }
+
+    private func pruneStaleWindowGeometry() {
+        guard !currentFrameGutterWindowIds.isEmpty else { return }
+        let liveWindowIds = currentFrameGutterWindowIds
+        frameState.windowGutters = frameState.windowGutters.filter { liveWindowIds.contains($0.key) }
+        frameState.windowIndentGuides = frameState.windowIndentGuides.filter { liveWindowIds.contains($0.key) }
+        guiState.windowContents = guiState.windowContents.filter { liveWindowIds.contains($0.key) }
     }
 }

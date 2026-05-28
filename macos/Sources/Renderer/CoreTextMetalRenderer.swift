@@ -396,16 +396,22 @@ final class CoreTextMetalRenderer {
         var bgQuads: [QuadGPU] = []
         var lineInstances: [LineGPU] = []
 
-        // Cursorline: draw a full-width bg fill on the cursor row.
+        // Cursorline: draw only inside the active split pane. The protocol currently carries a global screen row without a window id, so infer the pane from the active gutter geometry.
         if frameState.cursorlineRow != 0xFFFF && frameState.cursorlineBg != 0 {
-            // gui_cursorline currently carries only a global screen row, not the owning window id.
-            // In side-by-side splits, row-only matching can apply one pane's fractional trackpad offset to another pane's cursorline.
-            // Keep the cursorline snapped until the protocol exposes an owning window id.
+            // In side-by-side splits, row-only matching can apply one pane's fractional trackpad offset to another pane's cursorline. Keep the cursorline snapped until the protocol exposes an owning window id.
             let cursorlineOffsetY: Float = 0
             let yPos = Float(frameState.cursorlineRow) * displayCellH * scale - cursorlineOffsetY
+            let bounds = CoreTextMetalRenderer.cursorlineHorizontalBounds(
+                row: frameState.cursorlineRow,
+                gutters: frameState.windowGutters,
+                frameCols: frameState.cols,
+                cellW: cellW,
+                scale: scale,
+                viewportWidth: Float(viewportSize.width)
+            )
             var clQuad = QuadGPU()
-            clQuad.position = SIMD2<Float>(0, yPos)
-            clQuad.size = SIMD2<Float>(Float(viewportSize.width), displayCellH * scale)
+            clQuad.position = SIMD2<Float>(bounds.x, yPos)
+            clQuad.size = SIMD2<Float>(bounds.width, displayCellH * scale)
             clQuad.color = colorFromU24(frameState.cursorlineBg, default: defaultBg)
             clQuad.alpha = 1.0
             bgQuads.append(clQuad)
@@ -434,12 +440,27 @@ final class CoreTextMetalRenderer {
                 let scrollableWindowRowOffset = windowRowOffset - windowScrollOffsetPx.y
                 let gutterWidth = Float(gutter.lineNumberWidth) + Float(gutter.signColWidth)
                 let contentColOffset = (Float(gutter.contentCol) + gutterWidth) * cellW * scale + gutterLeftMarginPx + gutterPaddingPx
+                let windowBounds = CoreTextMetalRenderer.windowHorizontalBounds(
+                    gutter: gutter,
+                    frameCols: frameState.cols,
+                    cellW: cellW,
+                    scale: scale,
+                    viewportWidth: Float(viewportSize.width)
+                )
+                let contentRightPx = windowBounds.x + windowBounds.width
 
                 // Horizontal scroll: shift line textures and overlays left by scrollLeft columns.
                 // The gutter stays fixed; only content past the gutter edge scrolls.
                 let scrollLeftInt = Int(content.scrollLeft)
                 let hScrollPx = Float(scrollLeftInt) * cellW * scale
-                let contentCols = max(Int(frameState.cols) - Int(gutter.lineNumberWidth) - Int(gutter.signColWidth), 1)
+                let contentCols = CoreTextMetalRenderer.visibleTextCols(
+                    gutter: gutter,
+                    frameCols: frameState.cols,
+                    cellW: cellW,
+                    scale: scale,
+                    gutterLeftMarginPx: gutterLeftMarginPx,
+                    gutterPaddingPx: gutterPaddingPx
+                )
 
                 // Selection overlay quads (drawn before text).
                 if let sel = content.selection {
@@ -451,7 +472,7 @@ final class CoreTextMetalRenderer {
                         visibleRows: content.rows.count,
                         visibleCols: contentCols,
                         cellW: cellW, cellH: displayCellH, scale: scale,
-                        viewportWidth: Float(viewportSize.width),
+                        viewportWidth: contentRightPx,
                         quads: &semanticOverlayQuads
                     )
                 }
@@ -462,12 +483,15 @@ final class CoreTextMetalRenderer {
                     // Document highlights are typically single-line (one identifier).
                     // Draw on startRow only; multi-row highlights are rare for this feature.
                     let hlY = scrollableWindowRowOffset + Float(highlight.startRow) * displayCellH * scale
-                    let hlX = contentColOffset + Float(highlight.startCol) * cellW * scale - hScrollPx
-                    let hlW = Float(highlight.endCol - highlight.startCol) * cellW * scale
+                    let rawHlX = contentColOffset + Float(highlight.startCol) * cellW * scale - hScrollPx
+                    let rawHlRight = rawHlX + Float(highlight.endCol - highlight.startCol) * cellW * scale
+                    let hlX = max(rawHlX, contentColOffset)
+                    let hlRight = min(rawHlRight, contentRightPx)
+                    guard hlRight > hlX else { continue }
 
                     var quad = QuadGPU()
                     quad.position = SIMD2<Float>(hlX, hlY)
-                    quad.size = SIMD2<Float>(hlW, displayCellH * scale)
+                    quad.size = SIMD2<Float>(hlRight - hlX, displayCellH * scale)
                     // Write references get a warmer amber tint; read/text get a subtle blue-gray.
                     // Colors are driven by the theme via ThemeColors slots 0x59/0x5A.
                     quad.color = highlight.kind == .write
@@ -480,12 +504,15 @@ final class CoreTextMetalRenderer {
                 // Search match overlay quads (drawn before text).
                 for match in content.searchMatches {
                     let matchY = scrollableWindowRowOffset + Float(match.row) * displayCellH * scale
-                    let matchX = contentColOffset + Float(match.startCol) * cellW * scale - hScrollPx
-                    let matchW = Float(match.endCol - match.startCol) * cellW * scale
+                    let rawMatchX = contentColOffset + Float(match.startCol) * cellW * scale - hScrollPx
+                    let rawMatchRight = rawMatchX + Float(match.endCol - match.startCol) * cellW * scale
+                    let matchX = max(rawMatchX, contentColOffset)
+                    let matchRight = min(rawMatchRight, contentRightPx)
+                    guard matchRight > matchX else { continue }
 
                     var quad = QuadGPU()
                     quad.position = SIMD2<Float>(matchX, matchY)
-                    quad.size = SIMD2<Float>(matchW, displayCellH * scale)
+                    quad.size = SIMD2<Float>(matchRight - matchX, displayCellH * scale)
                     quad.color = match.isCurrent
                         ? SIMD3<Float>(0.95, 0.75, 0.0)    // current match: gold
                         : SIMD3<Float>(0.35, 0.35, 0.15)   // other matches: dim gold
@@ -546,12 +573,15 @@ final class CoreTextMetalRenderer {
                             ) else { continue }
 
                             let (uvOrigin, uvSize) = atlas.uvForSlot(annEntry.slotIndex, pixelWidth: annEntry.pixelWidth)
+                            let visiblePixelWidth = min(Float(annEntry.pixelWidth), contentRightPx - cursorX)
+                            guard visiblePixelWidth > 0 else { continue }
+                            let visibleUVWidth = uvSize.x * visiblePixelWidth / Float(annEntry.pixelWidth)
 
                             var lineGPU = LineGPU()
                             lineGPU.position = SIMD2<Float>(cursorX, rowY)
-                            lineGPU.size = SIMD2<Float>(Float(annEntry.pixelWidth), Float(annEntry.pixelHeight))
+                            lineGPU.size = SIMD2<Float>(visiblePixelWidth, Float(annEntry.pixelHeight))
                             lineGPU.uvOrigin = uvOrigin
-                            lineGPU.uvSize = uvSize
+                            lineGPU.uvSize = SIMD2<Float>(visibleUVWidth, uvSize.y)
                             lineInstances.append(lineGPU)
 
                             cursorX += Float(annEntry.pixelWidth) + Float(wcr.annotationSpacing) * scale
@@ -569,12 +599,15 @@ final class CoreTextMetalRenderer {
                     }
 
                     let diagY = scrollableWindowRowOffset + Float(diag.startRow) * displayCellH * scale + displayCellH * scale - 2.0 * scale
-                    let diagX = contentColOffset + Float(diag.startCol) * cellW * scale - hScrollPx
-                    let diagW = Float(diag.endCol - diag.startCol) * cellW * scale
+                    let rawDiagX = contentColOffset + Float(diag.startCol) * cellW * scale - hScrollPx
+                    let rawDiagRight = rawDiagX + Float(diag.endCol - diag.startCol) * cellW * scale
+                    let diagX = max(rawDiagX, contentColOffset)
+                    let diagRight = min(rawDiagRight, contentRightPx)
+                    guard diagRight > diagX else { continue }
 
                     var quad = QuadGPU()
                     quad.position = SIMD2<Float>(diagX, diagY)
-                    quad.size = SIMD2<Float>(diagW, 2.0 * scale)
+                    quad.size = SIMD2<Float>(diagRight - diagX, 2.0 * scale)
                     quad.color = diagColor
                     quad.alpha = 1.0
                     diagnosticQuads.append(quad)
@@ -642,6 +675,14 @@ final class CoreTextMetalRenderer {
             guard let gutter = frameState.windowGutters[guideData.windowId] else { continue }
             let gutterWidth = Float(gutter.lineNumberWidth) + Float(gutter.signColWidth)
             let windowContentColOffset = (Float(gutter.contentCol) + gutterWidth) * cellW * scale + gutterLeftMarginPx + gutterPaddingPx
+            let windowBounds = CoreTextMetalRenderer.windowHorizontalBounds(
+                gutter: gutter,
+                frameCols: frameState.cols,
+                cellW: cellW,
+                scale: scale,
+                viewportWidth: Float(viewportSize.width)
+            )
+            let contentRightPx = windowBounds.x + windowBounds.width
             let guideScrollOffsetY = CoreTextMetalRenderer.smoothScrollOffset(
                 for: guideData.windowId,
                 targetWindowId: scrollTargetWindowId,
@@ -660,10 +701,12 @@ final class CoreTextMetalRenderer {
                 guideQuads.reserveCapacity(guideData.guideCols.count)
                 for col in guideData.guideCols {
                     let guideX = windowContentColOffset + Float(col) * cellW * scale
+                    let guideWidth = min(1.0 * scale, contentRightPx - guideX)
+                    guard guideWidth > 0 else { continue }
                     let isActive = col == guideData.activeGuideCol
                     var quad = QuadGPU()
                     quad.position = SIMD2<Float>(guideX, contentTopY)
-                    quad.size = SIMD2<Float>(1.0 * scale, contentHeightPx)
+                    quad.size = SIMD2<Float>(guideWidth, contentHeightPx)
                     quad.color = inactiveFg
                     quad.alpha = isActive ? 0.4 : 0.15
                     guideQuads.append(quad)
@@ -677,10 +720,12 @@ final class CoreTextMetalRenderer {
                         // Strict < so guides appear only in whitespace, not at the text-start column.
                         guard guideLevel < level else { continue }
                         let guideX = windowContentColOffset + Float(col) * cellW * scale
+                        let guideWidth = min(1.0 * scale, contentRightPx - guideX)
+                        guard guideWidth > 0 else { continue }
                         let isActive = col == guideData.activeGuideCol
                         var quad = QuadGPU()
                         quad.position = SIMD2<Float>(guideX, lineY)
-                        quad.size = SIMD2<Float>(1.0 * scale, lineCellH)
+                        quad.size = SIMD2<Float>(guideWidth, lineCellH)
                         quad.color = inactiveFg
                         quad.alpha = isActive ? 0.4 : 0.15
                         guideQuads.append(quad)
@@ -873,14 +918,21 @@ final class CoreTextMetalRenderer {
                         encoder.setVertexBytes(&uniforms, length: MemoryLayout<CTUniformsGPU>.size, index: 1)
                         encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: 1)
 
-                        // Render the label texture
+                        // Render the label texture immediately. The main line texture pass has already run by the time split separators are drawn, so queuing this into lineInstances would leave only the background gap visible.
                         let (uvOrigin, uvSize) = atlas.uvForSlot(entry.slotIndex, pixelWidth: entry.pixelWidth)
                         var lineGPU = LineGPU()
                         lineGPU.position = SIMD2<Float>(centerX, labelY)
                         lineGPU.size = SIMD2<Float>(Float(entry.pixelWidth), Float(entry.pixelHeight))
                         lineGPU.uvOrigin = uvOrigin
                         lineGPU.uvSize = uvSize
-                        lineInstances.append(lineGPU)
+
+                        if let atlasTexture = atlas.texture {
+                            encoder.setRenderPipelineState(linePipeline)
+                            encoder.setVertexBytes(&lineGPU, length: MemoryLayout<LineGPU>.stride, index: 0)
+                            encoder.setVertexBytes(&uniforms, length: MemoryLayout<CTUniformsGPU>.size, index: 1)
+                            encoder.setFragmentTexture(atlasTexture, index: 0)
+                            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: 1)
+                        }
                     }
                 }
             }
@@ -1505,6 +1557,73 @@ final class CoreTextMetalRenderer {
     nonisolated static func smoothScrollOffset(for windowId: UInt16?, targetWindowId: UInt16?, scrollOffsetPx: SIMD2<Float>) -> SIMD2<Float> {
         guard let windowId, let targetWindowId, windowId == targetWindowId else { return .zero }
         return scrollOffsetPx
+    }
+
+    nonisolated static func windowWidthCols(gutter: Wire.WindowGutter, frameCols: UInt16) -> Int {
+        if gutter.contentWidth > 0 {
+            return Int(gutter.contentWidth)
+        }
+
+        return max(Int(frameCols) - Int(gutter.contentCol), 1)
+    }
+
+    nonisolated static func visibleTextCols(
+        gutter: Wire.WindowGutter,
+        frameCols: UInt16,
+        cellW: Float,
+        scale: Float,
+        gutterLeftMarginPx: Float,
+        gutterPaddingPx: Float
+    ) -> Int {
+        let gutterCols = Int(gutter.lineNumberWidth) + Int(gutter.signColWidth)
+        let availableCols = max(windowWidthCols(gutter: gutter, frameCols: frameCols) - gutterCols, 1)
+        let cellWidthPx = max(cellW * scale, 1)
+        let paddingCols = Int(ceil((gutterLeftMarginPx + gutterPaddingPx) / cellWidthPx))
+        return max(availableCols - paddingCols, 1)
+    }
+
+    nonisolated static func windowHorizontalBounds(
+        gutter: Wire.WindowGutter,
+        frameCols: UInt16,
+        cellW: Float,
+        scale: Float,
+        viewportWidth: Float
+    ) -> (x: Float, width: Float) {
+        let left = Float(gutter.contentCol) * cellW * scale
+        let right = min(left + Float(windowWidthCols(gutter: gutter, frameCols: frameCols)) * cellW * scale, viewportWidth)
+        return (x: left, width: max(right - left, 0))
+    }
+
+    nonisolated static func cursorlineHorizontalBounds(
+        row: UInt16,
+        gutters: [UInt16: Wire.WindowGutter],
+        frameCols: UInt16,
+        cellW: Float,
+        scale: Float,
+        viewportWidth: Float
+    ) -> (x: Float, width: Float) {
+        let rowIndex = Int(row)
+        let matchingGutter = gutters.values.first { gutter in
+            let start = Int(gutter.contentRow)
+            let end = start + Int(gutter.contentHeight)
+            return gutter.isActive && rowIndex >= start && rowIndex < end
+        } ?? gutters.values.first { gutter in
+            let start = Int(gutter.contentRow)
+            let end = start + Int(gutter.contentHeight)
+            return rowIndex >= start && rowIndex < end
+        }
+
+        guard let matchingGutter else {
+            return (x: 0, width: viewportWidth)
+        }
+
+        return windowHorizontalBounds(
+            gutter: matchingGutter,
+            frameCols: frameCols,
+            cellW: cellW,
+            scale: scale,
+            viewportWidth: viewportWidth
+        )
     }
 
     nonisolated static func interpolateCursor(start: RenderCursor, target: RenderCursor, progress: Float) -> RenderCursor {

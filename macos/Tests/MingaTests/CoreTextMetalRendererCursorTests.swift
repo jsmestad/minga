@@ -70,6 +70,52 @@ struct CoreTextMetalRendererCursorTests {
         #expect(CoreTextMetalRenderer.smoothScrollOffset(for: nil, targetWindowId: 1, scrollOffsetPx: offset) == .zero)
     }
 
+    @Test("split panes use per-window text width for semantic clipping")
+    func splitPanesUsePerWindowTextWidthForSemanticClipping() {
+        let gutter = Wire.WindowGutter(
+            windowId: 1, contentRow: 0, contentCol: 0, contentHeight: 20,
+            isActive: true, contentWidth: 40, cursorLine: 3, lineNumberStyle: .hybrid,
+            lineNumberWidth: 4, signColWidth: 1, entries: []
+        )
+
+        #expect(CoreTextMetalRenderer.visibleTextCols(
+            gutter: gutter,
+            frameCols: 100,
+            cellW: 8,
+            scale: 2,
+            gutterLeftMarginPx: 0,
+            gutterPaddingPx: 0
+        ) == 35)
+    }
+
+    @Test("cursorline is clipped to the active split pane")
+    func cursorlineIsClippedToActiveSplitPane() {
+        let gutters: [UInt16: Wire.WindowGutter] = [
+            1: Wire.WindowGutter(
+                windowId: 1, contentRow: 0, contentCol: 0, contentHeight: 20,
+                isActive: true, contentWidth: 40, cursorLine: 3, lineNumberStyle: .hybrid,
+                lineNumberWidth: 4, signColWidth: 1, entries: []
+            ),
+            2: Wire.WindowGutter(
+                windowId: 2, contentRow: 0, contentCol: 41, contentHeight: 20,
+                isActive: false, contentWidth: 39, cursorLine: 3, lineNumberStyle: .hybrid,
+                lineNumberWidth: 4, signColWidth: 1, entries: []
+            )
+        ]
+
+        let bounds = CoreTextMetalRenderer.cursorlineHorizontalBounds(
+            row: 5,
+            gutters: gutters,
+            frameCols: 80,
+            cellW: 8,
+            scale: 2,
+            viewportWidth: 1_600
+        )
+
+        #expect(bounds.x == 0)
+        #expect(bounds.width == 640)
+    }
+
     @Test("smooth scroll target requires content column even for one row match")
     func smoothScrollTargetRequiresContentColumnForSingleRowMatch() {
         let gutters: [UInt16: Wire.WindowGutter] = [
