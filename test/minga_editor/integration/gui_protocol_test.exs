@@ -990,6 +990,7 @@ defmodule Minga.Integration.GUIProtocolTest do
         cursor_shape: :beam,
         rows: [
           %Row{
+            row_id: Row.stable_id(:normal, 0),
             row_type: :normal,
             buf_line: 0,
             text: "def foo do",
@@ -999,6 +1000,7 @@ defmodule Minga.Integration.GUIProtocolTest do
             ]
           },
           %Row{
+            row_id: Row.stable_id(:fold_start, 1),
             row_type: :fold_start,
             buf_line: 1,
             text: "  :ok",
@@ -1036,10 +1038,12 @@ defmodule Minga.Integration.GUIProtocolTest do
       [r1, r2] = decoded["rows"]
       assert r1["text"] == "def foo do"
       assert r1["row_type"] == 0
+      assert r1["row_id"] == Row.stable_id(:normal, 0)
       assert r1["buf_line"] == 0
       assert length(r1["spans"]) == 1
       assert hd(r1["spans"])["fg"] == 0x51AFEF
       assert r2["row_type"] == 1
+      assert r2["row_id"] == Row.stable_id(:fold_start, 1)
       assert r2["text"] == "  :ok"
 
       assert decoded["selection"]["type"] == 1

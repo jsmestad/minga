@@ -95,6 +95,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
 
   test "encodes window content from the core window model" do
     row = %Row{
+      row_id: Row.stable_id(:normal, 7),
       row_type: :normal,
       buf_line: 7,
       text: "hello",
@@ -111,6 +112,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
 
     assert decoded.window_id == 1
     assert hd(decoded.rows).text == "hello"
+    assert hd(decoded.rows).row_id == Row.stable_id(:normal, 7)
     assert hd(decoded.rows).buf_line == 7
     assert hd(decoded.rows).spans |> hd() |> Map.fetch!(:fg) == 0xFF0000
     assert decoded.selection.start_col == 1
@@ -118,6 +120,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
 
   test "encodes full window content overlays and cursor flags" do
     row = %Row{
+      row_id: Row.stable_id(:virtual_line, 11, 0, 4),
       row_type: :virtual_line,
       buf_line: 11,
       text: "héllo",
@@ -166,6 +169,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
     assert decoded.cursor_shape == :underline
     assert decoded.scroll_left == 2
     assert hd(decoded.rows).row_type == :virtual_line
+    assert hd(decoded.rows).row_id == Row.stable_id(:virtual_line, 11, 0, 4)
     assert hd(decoded.rows).text == "héllo"
 
     assert hd(decoded.rows).spans |> hd() |> Map.take([:attrs, :font_weight, :font_id]) == %{
@@ -273,6 +277,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
 
   test "adapter reports per-section byte metrics from emitted commands" do
     row = %Row{
+      row_id: Row.stable_id(:normal, 7),
       row_type: :normal,
       buf_line: 7,
       text: "hello",

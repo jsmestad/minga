@@ -18,7 +18,7 @@ import AppKit
 /// Renders `GUIWindowContent` rows into cached Metal line textures.
 ///
 /// Each row's text + spans produce an `NSAttributedString` → `CTLine` →
-/// bitmap → `MTLTexture`, cached by content hash.
+/// bitmap → `MTLTexture`, cached by stable row identity plus content hash.
 @MainActor
 final class WindowContentRenderer {
     /// Metal device for texture creation.
@@ -30,8 +30,8 @@ final class WindowContentRenderer {
     /// Shared pooled bitmap rasterizer.
     private let rasterizer: BitmapRasterizer
 
-    /// Per-row texture cache keyed by display row index.
-    private var lineCache: [UInt16: CachedLineTexture] = [:]
+    /// Per-row texture cache keyed by BEAM-authored row identity.
+    private var lineCache: [UInt64: CachedLineTexture] = [:]
 
     /// Frame counter for LRU eviction.
     private var frameCounter: UInt64 = 0
@@ -136,13 +136,14 @@ final class WindowContentRenderer {
     ///
     /// Returns the cached texture if the content hash matches, or
     /// rasterizes a new texture from the row's text + spans.
-    func renderRow(displayRow: UInt16, row: GUIVisualRow, contentEpoch: UInt32 = 0) -> CachedLineTexture? {
+    func renderRow(displayRow _: UInt16, row: GUIVisualRow, contentEpoch: UInt32 = 0) -> CachedLineTexture? {
         let hash = epochContentHash(row.contentHash, contentEpoch)
+        let key = row.rowId
 
         // Cache hit check.
-        if var cached = lineCache[displayRow], cached.contentHash == hash {
+        if var cached = lineCache[key], cached.contentHash == hash {
             cached.lastUsedFrame = frameCounter
-            lineCache[displayRow] = cached
+            lineCache[key] = cached
             return cached
         }
 
@@ -191,17 +192,17 @@ final class WindowContentRenderer {
             pixelWidth: pixelWidth,
             pixelHeight: pixelHeight
         )
-        lineCache[displayRow] = cached
+        lineCache[key] = cached
         return cached
     }
 
     /// Render a visual row into an atlas slot.
     ///
-    /// Checks the atlas cache first using a window-scoped buffer-row key. On miss, rasterizes and uploads.
-    func renderRowToAtlas(displayRow: UInt16, row: GUIVisualRow, windowId: UInt16, contentEpoch: UInt32 = 0,
+    /// Checks the atlas cache first using a window-scoped stable row key. On miss, rasterizes and uploads.
+    func renderRowToAtlas(displayRow _: UInt16, row: GUIVisualRow, windowId: UInt16, contentEpoch: UInt32 = 0,
                           atlas: LineTextureAtlas, metrics: inout FrameMetrics) -> AtlasEntry? {
         let hash = epochContentHash(row.contentHash, contentEpoch)
-        let key = AtlasKey.bufferRow(windowId: windowId, row: displayRow)
+        let key = AtlasKey.bufferRow(windowId: windowId, rowId: row.rowId)
 
         guard !row.text.isEmpty else { return nil }
         guard let lookup = atlas.lookupOrReserve(key: key, contentHash: hash) else { return nil }
@@ -424,7 +425,7 @@ final class WindowContentRenderer {
             let clipStart = min(scrollLeft, totalDisplayCols)
             let clipEnd = min(scrollLeft + viewportCols, totalDisplayCols)
             guard clipStart < clipEnd else {
-                return GUIVisualRow(rowType: row.rowType, bufLine: row.bufLine,
+                return GUIVisualRow(rowType: row.rowType, rowId: row.rowId, bufLine: row.bufLine,
                                    contentHash: scrollContentHash(row.contentHash, scrollLeft: scrollLeft),
                                    text: "", spans: [])
             }
@@ -437,7 +438,7 @@ final class WindowContentRenderer {
             let clipStart = min(scrollLeft, totalDisplayCols)
             let clipEnd = min(scrollLeft + viewportCols, totalDisplayCols)
             guard clipStart < clipEnd, clipEnd < columnMap.count else {
-                return GUIVisualRow(rowType: row.rowType, bufLine: row.bufLine,
+                return GUIVisualRow(rowType: row.rowType, rowId: row.rowId, bufLine: row.bufLine,
                                    contentHash: scrollContentHash(row.contentHash, scrollLeft: scrollLeft),
                                    text: "", spans: [])
             }
@@ -450,7 +451,7 @@ final class WindowContentRenderer {
         let newHash = scrollContentHash(row.contentHash, scrollLeft: scrollLeft)
 
         return GUIVisualRow(
-            rowType: row.rowType, bufLine: row.bufLine,
+            rowType: row.rowType, rowId: row.rowId, bufLine: row.bufLine,
             contentHash: newHash, text: clippedText, spans: clippedSpans
         )
     }

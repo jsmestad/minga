@@ -343,9 +343,7 @@ final class CoreTextMetalRenderer {
             atlas.ensureCapacity(maxSlots: neededSlots, width: atlasPixelWidth)
             atlas.beginFrame()
 
-            for content in windowContents.values where content.fullRefresh {
-                atlas.invalidateWindow(content.windowId)
-            }
+            Self.invalidateFullRefreshWindows(in: atlas, windowContents: windowContents)
 
             if neededSlots > maxInstanceSlots {
                 maxInstanceSlots = neededSlots
@@ -1407,6 +1405,13 @@ final class CoreTextMetalRenderer {
     }
 
     /// Computes a conservative atlas slot count for all text textures that may be touched by the current frame.
+    @MainActor
+    static func invalidateFullRefreshWindows(in atlas: LineTextureAtlas, windowContents: [UInt16: GUIWindowContent]) {
+        for content in windowContents.values where content.fullRefresh {
+            atlas.invalidateWindow(content.windowId)
+        }
+    }
+
     nonisolated static func atlasSlotDemand(frameState: FrameState, windowContents: [UInt16: GUIWindowContent]) -> Int {
         let bufferRows = windowContents.values.reduce(0) { total, content in
             total + content.rows.count

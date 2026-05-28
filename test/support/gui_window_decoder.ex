@@ -165,8 +165,8 @@ defmodule Minga.Test.GUIWindowDecoder do
   defp decode_rows(rest, 0, acc), do: {Enum.reverse(acc), rest}
 
   defp decode_rows(
-         <<row_type::8, buf_line::32, content_hash::32, text_len::32, text::binary-size(text_len),
-           span_count::16, rest::binary>>,
+         <<row_type::8, row_id::64, buf_line::32, content_hash::32, text_len::32,
+           text::binary-size(text_len), span_count::16, rest::binary>>,
          remaining,
          acc
        ) do
@@ -174,6 +174,7 @@ defmodule Minga.Test.GUIWindowDecoder do
 
     row = %{
       row_type: decode_row_type(row_type),
+      row_id: row_id,
       buf_line: buf_line,
       content_hash: content_hash,
       text: text,

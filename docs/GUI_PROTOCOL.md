@@ -705,7 +705,7 @@ content past the viewport's left edge becomes visible. The gutter stays fixed.
 content_epoch: BEAM-authored version for retained frontend resources owned by this window. A frontend must discard retained row state for a window when the epoch changes or when `full_refresh` is set.
 
 Per visual row:
-  row_type(1) + buf_line(4) + content_hash(4) + text_len(4) + text(text_len) + span_count(2) + spans...
+  row_type(1) + row_id(8) + buf_line(4) + content_hash(4) + text_len(4) + text(text_len) + span_count(2) + spans...
 
 Row types:
   0 = normal, 1 = fold_start, 2 = virtual_line, 3 = block_decoration, 4 = wrap_continuation
@@ -760,7 +760,7 @@ Rects are cell-space tuples encoded as row(2), col(2), width(2), height(2). Hit 
 
 The frontend renders selection and search matches as Metal quads behind text (not baked into line textures). This enables zero re-rasterization when the selection changes. Diagnostic underlines are rendered as quads after text.
 
-`content_hash` is a per-row hash computed by the BEAM. The frontend uses it for CTLine texture cache invalidation: if the hash matches, the cached texture is reused without re-rasterization.
+`row_id` is a BEAM-authored stable identity for the durable visual row, and each row ID must be unique within a window frame. `content_hash` is a per-row hash computed by the BEAM. The frontend keys retained CTLine textures by `window_id + content_epoch + row_id + content_hash`, so scrolling can reuse the same logical row even when its display row changes.
 
 When `gui_window_content` is present for a window, the BEAM does not send draw_text commands for that window's buffer content. Overlays (hover popups, signature help) have dedicated GUI opcodes (0x81, 0x82) and are rendered natively by SwiftUI. Gutter data (0x7B) and cursor position continue through their existing opcodes, while window-local cursorline is carried in gui_window_content section 0x09.
 

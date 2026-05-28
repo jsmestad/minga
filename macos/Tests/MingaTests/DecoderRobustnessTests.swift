@@ -277,6 +277,101 @@ struct DecoderTruncatedGUIChromeTests {
             try decodeCommand(data: data, offset: 0)
         }
     }
+
+    @Test("gui_window_content truncated advertised row payload")
+    func truncatedWindowContentRow() {
+        var rowBytes = Data()
+        rowBytes.append(0x00) // rowType = normal
+        appendU64(&rowBytes, 1)
+        appendU32(&rowBytes, 0)
+        appendU32(&rowBytes, 0x1234_5678)
+        appendU32(&rowBytes, 1)
+        rowBytes.append(0x61)
+        rowBytes.append(0x00) // only one byte of span_count
+
+        let data = windowContentData(rowsPayload: windowContentRowsPayload(rowBytes: rowBytes))
+        expectMalformedWindowContent(data)
+    }
+
+    @Test("gui_window_content truncated advertised span payload")
+    func truncatedWindowContentSpan() {
+        var rowBytes = Data()
+        rowBytes.append(0x00) // rowType = normal
+        appendU64(&rowBytes, 1)
+        appendU32(&rowBytes, 0)
+        appendU32(&rowBytes, 0x1234_5678)
+        appendU32(&rowBytes, 1)
+        rowBytes.append(0x61)
+        appendU16(&rowBytes, 1)
+        appendU16(&rowBytes, 0)
+        appendU16(&rowBytes, 1)
+        rowBytes.append(contentsOf: [0xFF, 0x00, 0x00])
+        rowBytes.append(contentsOf: [0x00, 0x00, 0x00])
+        rowBytes.append(0x00)
+        rowBytes.append(0x00) // missing the last byte of the span payload
+
+        let data = windowContentData(rowsPayload: windowContentRowsPayload(rowBytes: rowBytes))
+        expectMalformedWindowContent(data)
+    }
+}
+
+private func windowContentData(rowsPayload: Data) -> Data {
+    var headerPayload = Data()
+    appendU16(&headerPayload, 1)
+    headerPayload.append(0x03)
+    appendU16(&headerPayload, 0)
+    appendU16(&headerPayload, 0)
+    headerPayload.append(0x00)
+    appendU16(&headerPayload, 0)
+
+    var data = Data([OP_GUI_WINDOW_CONTENT, 2])
+    data.append(0x01)
+    appendU16(&data, UInt16(headerPayload.count))
+    data.append(headerPayload)
+    data.append(0x02)
+    appendU16(&data, UInt16(rowsPayload.count))
+    data.append(rowsPayload)
+    return data
+}
+
+private func windowContentRowsPayload(rowBytes: Data) -> Data {
+    var payload = Data()
+    appendU16(&payload, 1)
+    payload.append(rowBytes)
+    return payload
+}
+
+private func appendU16(_ data: inout Data, _ value: UInt16) {
+    data.append(UInt8(value >> 8))
+    data.append(UInt8(value & 0xFF))
+}
+
+private func appendU32(_ data: inout Data, _ value: UInt32) {
+    data.append(UInt8((value >> 24) & 0xFF))
+    data.append(UInt8((value >> 16) & 0xFF))
+    data.append(UInt8((value >> 8) & 0xFF))
+    data.append(UInt8(value & 0xFF))
+}
+
+private func appendU64(_ data: inout Data, _ value: UInt64) {
+    data.append(UInt8((value >> 56) & 0xFF))
+    data.append(UInt8((value >> 48) & 0xFF))
+    data.append(UInt8((value >> 40) & 0xFF))
+    data.append(UInt8((value >> 32) & 0xFF))
+    data.append(UInt8((value >> 24) & 0xFF))
+    data.append(UInt8((value >> 16) & 0xFF))
+    data.append(UInt8((value >> 8) & 0xFF))
+    data.append(UInt8(value & 0xFF))
+}
+
+private func expectMalformedWindowContent(_ data: Data) {
+    do {
+        _ = try decodeCommand(data: data, offset: 0)
+        Issue.record("Expected ProtocolDecodeError.malformed")
+    } catch ProtocolDecodeError.malformed {
+    } catch {
+        Issue.record("Expected ProtocolDecodeError.malformed, got \(error)")
+    }
 }
 
 // MARK: - Forward-compatible unknown opcodes (0x90+)

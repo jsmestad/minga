@@ -339,7 +339,9 @@ enum PreviewRegistry {
         ]
 
         return rows.enumerated().map { index, row in
-            GUIVisualRow(rowType: .normal, bufLine: UInt32(38 + index), contentHash: UInt32(index + 1), text: row.0, spans: row.1)
+            let bufLine = UInt32(38 + index)
+            let rowId = (UInt64(1) << 60) | (UInt64(bufLine) << 28)
+            return GUIVisualRow(rowType: .normal, rowId: rowId, bufLine: bufLine, contentHash: UInt32(index + 1), text: row.0, spans: row.1)
         }
     }
 
