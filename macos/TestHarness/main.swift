@@ -258,7 +258,7 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
                  "fg": Int(s.fg), "bg": Int(s.bg), "attrs": Int(s.attrs),
                  "font_weight": Int(s.fontWeight), "font_id": Int(s.fontId)]
             }
-            return ["row_type": Int(row.rowType.rawValue), "buf_line": Int(row.bufLine),
+            return ["row_type": Int(row.rowType.rawValue), "row_id": Int(row.rowId), "buf_line": Int(row.bufLine),
                     "content_hash": Int(row.contentHash), "text": row.text, "spans": spans]
         }
         var result: [String: Any] = [

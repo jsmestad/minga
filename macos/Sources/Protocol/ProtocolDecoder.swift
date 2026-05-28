@@ -1603,12 +1603,13 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 wcRows.reserveCapacity(rowCount)
                 var rp = wcSStart + 2
                 for _ in 0..<rowCount {
-                    guard rp + 13 <= wcSStart + wcSLen else { break }
+                    guard rp + 21 <= wcSStart + wcSLen else { break }
                     let rowType = GUIVisualRowType(rawValue: data[rp]) ?? .normal
-                    let bufLine = readU32(data, rp + 1)
-                    let contentHash = readU32(data, rp + 5)
-                    let textLen = Int(readU32(data, rp + 9))
-                    rp += 13
+                    let rowId = readU64(data, rp + 1)
+                    let bufLine = readU32(data, rp + 9)
+                    let contentHash = readU32(data, rp + 13)
+                    let textLen = Int(readU32(data, rp + 17))
+                    rp += 21
                     guard rp + textLen <= wcSStart + wcSLen else { break }
                     let text = String(data: data[rp..<(rp + textLen)], encoding: .utf8) ?? ""
                     rp += textLen
@@ -1625,7 +1626,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                         ))
                         rp += 13
                     }
-                    wcRows.append(GUIVisualRow(rowType: rowType, bufLine: bufLine, contentHash: contentHash, text: text, spans: spans))
+                    wcRows.append(GUIVisualRow(rowType: rowType, rowId: rowId, bufLine: bufLine, contentHash: contentHash, text: text, spans: spans))
                 }
 
             case 0x03: // Selection: type(1), if != 0: start_row(2) + start_col(2) + end_row(2) + end_col(2)

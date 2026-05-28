@@ -5,7 +5,7 @@ import Testing
 import simd
 
 private func testKey(_ raw: UInt16) -> AtlasKey {
-    AtlasKey.bufferRow(windowId: 0, row: raw)
+    AtlasKey.bufferRow(windowId: 0, rowId: UInt64(raw))
 }
 
 @Suite("SlotAllocator — Allocation")
@@ -197,8 +197,8 @@ struct SlotAllocatorCapacityTests {
     func invalidateWindow() {
         var alloc = SlotAllocator()
         alloc.ensureCapacity(maxSlots: 4)
-        let win1 = AtlasKey.bufferRow(windowId: 1, row: 0)
-        let win2 = AtlasKey.bufferRow(windowId: 2, row: 0)
+        let win1 = AtlasKey.bufferRow(windowId: 1, rowId: 0)
+        let win2 = AtlasKey.bufferRow(windowId: 2, rowId: 0)
 
         guard case .reserved(let slot1, .newKey) = alloc.lookupOrReserve(key: win1, contentHash: 11) else { Issue.record("Expected win1 reserve"); return }
         alloc.markUploaded(slotIndex: slot1, contentHash: 11, pixelWidth: 100)

@@ -215,7 +215,7 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
           Theme.Agent.t(),
           pos_integer()
         ) :: Row.t()
-  defp build_visual_row(vl, line_text, _logical_idx, panel, at, inner_width) do
+  defp build_visual_row(vl, line_text, logical_idx, panel, at, inner_width) do
     {display_text, fg_color, bg_color} =
       if UIState.paste_placeholder?(line_text) and vl.col_offset == 0 do
         case UIState.paste_block_index(line_text) do
@@ -256,8 +256,10 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
       end
 
     %Row{
+      row_id: Row.stable_id(:normal, logical_idx, vl.col_offset),
       row_type: :normal,
-      buf_line: 0,
+      buf_line: logical_idx,
+      visual_index: vl.col_offset,
       text: display_text,
       spans: spans,
       content_hash: Row.compute_hash(display_text, spans)

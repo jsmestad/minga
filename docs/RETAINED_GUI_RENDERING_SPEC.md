@@ -4,7 +4,7 @@ The rendering pipeline has too many parts, too many lines of code, and is unnece
 
 ## Status
 
-Phases 1, 2, and 3 moved the architecture in the right direction, but the implementation stopped short of the full data-shape goal. Phase 1 unified the GUI chrome path, Phase 2 introduced `Minga.RenderModel.Window` for GUI buffer windows, and Phase 3 added instrumentation. The remaining debt is explicit now: several UI models still carry pre-encoded protocol binaries, there is no top-level `%Minga.RenderModel{}` frame object yet, row identity and content epochs are not implemented, and Swift still keys retained row textures by display row.
+Phases 1, 2, 3, and the full-frame part of Phase 4 moved the architecture in the right direction, but the implementation stopped short of the full data-shape goal. Phase 1 unified the GUI chrome path, Phase 2 introduced `Minga.RenderModel.Window` for GUI buffer windows, Phase 3 added instrumentation, and Phase 4 added BEAM-authored row IDs with Swift atlas reuse keyed by stable row identity instead of display row. The remaining debt is explicit now: some ownership boundaries are still editor-heavy, reset semantics need a full audit before delta protocol work, and the TUI still needs to move behind the shared render model adapter.
 
 The remediation plan below is the source of truth for completing the simplification work before starting delta protocol work.
 
@@ -204,7 +204,7 @@ Acceptance criteria:
 
 #### 6. Add stable row identity and content epochs
 
-This is where retained rendering becomes real. The current Swift atlas keys buffer rows by display row, which means scrolling changes the key even when the same logical row is still visible.
+This is where retained rendering becomes real. Before Phase 4, the Swift atlas keyed buffer rows by display row, which meant scrolling changed the key even when the same logical row was still visible.
 
 Target row shape:
 
@@ -301,7 +301,7 @@ Emit
 Swift
     ├─ GUIWindowContent state
     ├─ CoreText line rasterization
-    ├─ LineTextureAtlas (keyed by display row)
+    ├─ LineTextureAtlas (keyed by stable row identity)
     └─ Metal draw pass
 ```
 
@@ -600,6 +600,8 @@ Measure before optimizing. Add instrumentation for:
 This tells you whether row identity, protocol size, CoreText rasterization, or Metal uploads are the real bottleneck, and prevents optimizing the wrong thing.
 
 ### Phase 4: Stable row identity
+
+Implementation status: the full-frame GUI path now includes `row_id` on every `Minga.RenderModel.Window.Row`, encodes it in `gui_window_content`, decodes it in Swift, and keys buffer row atlas entries by `window_id + row_id` with `content_epoch + content_hash` as the invalidation hash. Full frames are still sent.
 
 Give durable rows a BEAM-generated stable identity. Change Swift to cache line textures by row identity plus content hash instead of display row.
 

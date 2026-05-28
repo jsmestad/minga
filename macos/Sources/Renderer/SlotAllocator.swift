@@ -20,35 +20,35 @@ struct AtlasKey: Hashable, CustomStringConvertible {
 
     let namespace: Namespace
     let windowId: UInt16
-    let row: UInt16
+    let row: UInt64
     let subIndex: UInt16
 
     var description: String {
         "\(namespace.rawValue)(window: \(windowId), row: \(row), sub: \(subIndex))"
     }
 
-    static func bufferRow(windowId: UInt16, row: UInt16) -> AtlasKey {
-        AtlasKey(namespace: .bufferRow, windowId: windowId, row: row, subIndex: 0)
+    static func bufferRow(windowId: UInt16, rowId: UInt64) -> AtlasKey {
+        AtlasKey(namespace: .bufferRow, windowId: windowId, row: rowId, subIndex: 0)
     }
 
     static func gutterLineNumber(windowId: UInt16, row: UInt16) -> AtlasKey {
-        AtlasKey(namespace: .gutterLineNumber, windowId: windowId, row: row, subIndex: 0)
+        AtlasKey(namespace: .gutterLineNumber, windowId: windowId, row: UInt64(row), subIndex: 0)
     }
 
     static func diagnosticSign(windowId: UInt16, row: UInt16) -> AtlasKey {
-        AtlasKey(namespace: .diagnosticSign, windowId: windowId, row: row, subIndex: 0)
+        AtlasKey(namespace: .diagnosticSign, windowId: windowId, row: UInt64(row), subIndex: 0)
     }
 
     static func annotationIcon(windowId: UInt16, row: UInt16) -> AtlasKey {
-        AtlasKey(namespace: .annotationIcon, windowId: windowId, row: row, subIndex: 0)
+        AtlasKey(namespace: .annotationIcon, windowId: windowId, row: UInt64(row), subIndex: 0)
     }
 
     static func lineAnnotation(windowId: UInt16, row: UInt16, subIndex: UInt16) -> AtlasKey {
-        AtlasKey(namespace: .lineAnnotation, windowId: windowId, row: row, subIndex: subIndex)
+        AtlasKey(namespace: .lineAnnotation, windowId: windowId, row: UInt64(row), subIndex: subIndex)
     }
 
     static func splitLabel(row: UInt16, subIndex: UInt16) -> AtlasKey {
-        AtlasKey(namespace: .splitLabel, windowId: 0, row: row, subIndex: subIndex)
+        AtlasKey(namespace: .splitLabel, windowId: 0, row: UInt64(row), subIndex: subIndex)
     }
 }
 

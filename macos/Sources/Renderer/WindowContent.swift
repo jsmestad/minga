@@ -51,10 +51,20 @@ struct GUIHighlightSpan: Sendable, Equatable {
 /// and conceal ranges. The `text` field is the final composed UTF-8 string.
 struct GUIVisualRow: Sendable, Equatable {
     let rowType: GUIVisualRowType
+    let rowId: UInt64
     let bufLine: UInt32
     let contentHash: UInt32
     let text: String
     let spans: [GUIHighlightSpan]
+
+    init(rowType: GUIVisualRowType, rowId: UInt64 = 0, bufLine: UInt32, contentHash: UInt32, text: String, spans: [GUIHighlightSpan]) {
+        self.rowType = rowType
+        self.rowId = rowId
+        self.bufLine = bufLine
+        self.contentHash = contentHash
+        self.text = text
+        self.spans = spans
+    }
 }
 
 // MARK: - Selection overlay

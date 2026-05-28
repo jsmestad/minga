@@ -327,6 +327,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
         compose_line(line_text, hl_segments, ctx, buf_line, line_byte_offset)
 
       row = %Row{
+        row_id: Row.stable_id(:normal, buf_line),
         row_type: :normal,
         buf_line: buf_line,
         text: composed_text,
@@ -388,6 +389,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       indent_width = Map.get(visual_row, :indent_width, 0)
 
       row = %Row{
+        row_id: Row.stable_id(row_type, buf_line, visual_index),
         row_type: row_type,
         buf_line: buf_line,
         visual_index: visual_index,
@@ -520,28 +522,68 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     line_byte_offsets =
       build_line_byte_offsets(lines, first_line, snapshot.first_line_byte_offset)
 
-    Enum.map(visible_line_map, fn {buf_line, entry_type} ->
-      row =
-        build_visual_row_entry(buf_line, entry_type, lines, first_line, ctx, line_byte_offsets)
+    {entries, _counters} =
+      Enum.map_reduce(visible_line_map, %{}, fn {buf_line, entry_type}, counters ->
+        {visual_identity_index, counters} = next_visual_identity(buf_line, entry_type, counters)
 
-      visual_entry(row, 0, Unicode.display_width(row.text), 0)
-    end)
+        row =
+          build_visual_row_entry(
+            buf_line,
+            entry_type,
+            lines,
+            first_line,
+            ctx,
+            line_byte_offsets,
+            visual_identity_index
+          )
+
+        {visual_entry(row, 0, Unicode.display_width(row.text), 0), counters}
+      end)
+
+    entries
   end
+
+  @spec next_visual_identity(non_neg_integer(), term(), map()) :: {non_neg_integer(), map()}
+  defp next_visual_identity(buf_line, entry_type, counters) do
+    case visual_identity_key(buf_line, entry_type) do
+      nil ->
+        {0, counters}
+
+      key ->
+        index = Map.get(counters, key, 0)
+        {index, Map.put(counters, key, index + 1)}
+    end
+  end
+
+  @spec visual_identity_key(non_neg_integer(), term()) :: term() | nil
+  defp visual_identity_key(buf_line, {:virtual_line, _vt}), do: {buf_line, :virtual_line}
+  defp visual_identity_key(buf_line, {:block, _block, _line_idx}), do: {buf_line, :block}
+  defp visual_identity_key(_buf_line, _entry_type), do: nil
 
   @spec build_visual_row_entry(
           non_neg_integer(),
-          DisplayMap.entry() | atom(),
+          term(),
           [String.t()],
           non_neg_integer(),
           Context.t(),
-          %{non_neg_integer() => non_neg_integer()}
+          %{non_neg_integer() => non_neg_integer()},
+          non_neg_integer()
         ) :: Row.t()
-  defp build_visual_row_entry(buf_line, :normal, lines, first_line, ctx, line_byte_offsets) do
+  defp build_visual_row_entry(
+         buf_line,
+         :normal,
+         lines,
+         first_line,
+         ctx,
+         line_byte_offsets,
+         _index
+       ) do
     line_text = line_at(lines, buf_line, first_line)
     line_byte_offset = Map.get(line_byte_offsets, buf_line, 0)
     {composed, spans} = compose_line(line_text, nil, ctx, buf_line, line_byte_offset)
 
     %Row{
+      row_id: Row.stable_id(:normal, buf_line),
       row_type: :normal,
       buf_line: buf_line,
       text: composed,
@@ -556,7 +598,8 @@ defmodule MingaEditor.RenderModel.Window.Builder do
          lines,
          first_line,
          ctx,
-         line_byte_offsets
+         line_byte_offsets,
+         _index
        ) do
     line_text = line_at(lines, buf_line, first_line)
     line_byte_offset = Map.get(line_byte_offsets, buf_line, 0)
@@ -564,6 +607,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     {composed, spans} = append_fold_summary(composed, spans, hidden_count, ctx)
 
     %Row{
+      row_id: Row.stable_id(:fold_start, buf_line, 0, hidden_count),
       row_type: :fold_start,
       buf_line: buf_line,
       text: composed,
@@ -578,16 +622,21 @@ defmodule MingaEditor.RenderModel.Window.Builder do
          _lines,
          _first_line,
          _ctx,
-         _line_byte_offsets
+         _line_byte_offsets,
+         visual_identity_index
        ) do
     text = virtual_text_to_string(vt)
 
+    spans = virtual_text_spans(vt)
+
     %Row{
+      row_id: Row.stable_id(:virtual_line, buf_line, visual_identity_index),
       row_type: :virtual_line,
       buf_line: buf_line,
+      visual_index: visual_identity_index,
       text: text,
-      spans: virtual_text_spans(vt),
-      content_hash: Row.compute_hash(text, [])
+      spans: spans,
+      content_hash: Row.compute_hash(text, spans)
     }
   end
 
@@ -597,7 +646,8 @@ defmodule MingaEditor.RenderModel.Window.Builder do
          _lines,
          _first_line,
          ctx,
-         _line_byte_offsets
+         _line_byte_offsets,
+         visual_identity_index
        ) do
     # Block decorations render via callback; capture the rendered text using the same text width as the draw path.
     rendered_lines = block.render.(ctx.content_w)
@@ -607,8 +657,10 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     spans = segments_to_spans(segments)
 
     %Row{
+      row_id: Row.stable_id(:block, buf_line, visual_identity_index),
       row_type: :block,
       buf_line: buf_line,
+      visual_index: visual_identity_index,
       text: text,
       spans: spans,
       content_hash: Row.compute_hash(text, spans)
@@ -621,12 +673,14 @@ defmodule MingaEditor.RenderModel.Window.Builder do
          _lines,
          _first_line,
          _ctx,
-         _line_byte_offsets
+         _line_byte_offsets,
+         _index
        ) do
     hidden = FoldRegion.hidden_count(fold)
     text = " ··· #{hidden} lines"
 
     %Row{
+      row_id: Row.stable_id(:fold_start, buf_line, 0, Row.discriminator(fold.id)),
       row_type: :fold_start,
       buf_line: buf_line,
       text: text,

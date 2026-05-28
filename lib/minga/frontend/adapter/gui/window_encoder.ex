@@ -21,6 +21,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   per visible row:
     row_type:           u8       (0=normal, 1=fold_start, 2=virtual_line,
                                   3=block, 4=wrap_continuation)
+    row_id:             u64      (stable retained-render identity)
     buf_line:           u32
     content_hash:       u32      (for CTLine cache invalidation)
     text_len:           u32
@@ -289,8 +290,8 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
     spans_binary = Enum.map(row.spans, &encode_span/1)
 
     IO.iodata_to_binary([
-      <<row_type::8, row.buf_line::32, row.content_hash::32, text_len::32, text_bytes::binary,
-        span_count::16>>
+      <<row_type::8, row.row_id::64, row.buf_line::32, row.content_hash::32, text_len::32,
+        text_bytes::binary, span_count::16>>
       | spans_binary
     ])
   end

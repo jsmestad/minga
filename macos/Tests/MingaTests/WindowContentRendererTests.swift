@@ -152,7 +152,7 @@ struct WindowContentFrameMetricsTests {
     @Test("Buffer row metrics distinguish rasterized rows from reused rows")
     @MainActor func bufferRowMetrics() throws {
         guard let (renderer, atlas) = makeRendererAndAtlas() else { return }
-        let row = GUIVisualRow(rowType: .normal, bufLine: 0, contentHash: 42, text: "hello", spans: [])
+        let row = GUIVisualRow(rowType: .normal, rowId: 100, bufLine: 0, contentHash: 42, text: "hello", spans: [])
 
         atlas.beginFrame()
         var metrics = FrameMetrics()
@@ -172,11 +172,51 @@ struct WindowContentFrameMetricsTests {
         #expect(atlas.frameTextureUploads == 0)
     }
 
+    @Test("Same row identity reuses atlas slot after display row changes")
+    @MainActor func sameRowIdentityReusesAfterScroll() throws {
+        guard let (renderer, atlas) = makeRendererAndAtlas() else { return }
+        let row = GUIVisualRow(rowType: .normal, rowId: 200, bufLine: 10, contentHash: 42, text: "same", spans: [])
+
+        atlas.beginFrame()
+        var metrics = FrameMetrics()
+        let first = renderer.renderRowToAtlas(displayRow: 0, row: row, windowId: 1, atlas: atlas, metrics: &metrics)
+        #expect(first != nil)
+        #expect(metrics.bufferRowsRasterized == 1)
+
+        atlas.beginFrame()
+        metrics.reset()
+        let second = renderer.renderRowToAtlas(displayRow: 1, row: row, windowId: 1, atlas: atlas, metrics: &metrics)
+        #expect(second?.slotIndex == first?.slotIndex)
+        #expect(metrics.bufferRowsRasterized == 0)
+        #expect(metrics.bufferRowsReused == 1)
+        #expect(atlas.frameTextureUploads == 0)
+    }
+
+    @Test("Different row identity rasterizes even on the same display row")
+    @MainActor func differentRowIdentityMissesOnSameDisplayRow() throws {
+        guard let (renderer, atlas) = makeRendererAndAtlas() else { return }
+        let firstRow = GUIVisualRow(rowType: .normal, rowId: 300, bufLine: 0, contentHash: 42, text: "same", spans: [])
+        let secondRow = GUIVisualRow(rowType: .normal, rowId: 301, bufLine: 1, contentHash: 42, text: "same", spans: [])
+
+        atlas.beginFrame()
+        var metrics = FrameMetrics()
+        let first = renderer.renderRowToAtlas(displayRow: 0, row: firstRow, windowId: 1, atlas: atlas, metrics: &metrics)
+        #expect(first != nil)
+
+        atlas.beginFrame()
+        metrics.reset()
+        let second = renderer.renderRowToAtlas(displayRow: 0, row: secondRow, windowId: 1, atlas: atlas, metrics: &metrics)
+        #expect(second != nil)
+        #expect(second?.slotIndex != first?.slotIndex)
+        #expect(metrics.bufferRowsRasterized == 1)
+        #expect(metrics.atlasNewKeys == 1)
+    }
+
     @Test("Same display row in different windows uses distinct atlas slots")
     @MainActor func sameRowDifferentWindowsUsesDistinctSlots() throws {
         guard let (renderer, atlas) = makeRendererAndAtlas() else { return }
-        let left = GUIVisualRow(rowType: .normal, bufLine: 0, contentHash: 42, text: "left", spans: [])
-        let right = GUIVisualRow(rowType: .normal, bufLine: 0, contentHash: 99, text: "right", spans: [])
+        let left = GUIVisualRow(rowType: .normal, rowId: 400, bufLine: 0, contentHash: 42, text: "left", spans: [])
+        let right = GUIVisualRow(rowType: .normal, rowId: 400, bufLine: 0, contentHash: 99, text: "right", spans: [])
 
         atlas.beginFrame()
         var metrics = FrameMetrics()
@@ -193,8 +233,8 @@ struct WindowContentFrameMetricsTests {
     @Test("Changed row hash records hash-change miss reason")
     @MainActor func changedHashMetrics() throws {
         guard let (renderer, atlas) = makeRendererAndAtlas() else { return }
-        let original = GUIVisualRow(rowType: .normal, bufLine: 0, contentHash: 42, text: "hello", spans: [])
-        let changed = GUIVisualRow(rowType: .normal, bufLine: 0, contentHash: 43, text: "hello!", spans: [])
+        let original = GUIVisualRow(rowType: .normal, rowId: 500, bufLine: 0, contentHash: 42, text: "hello", spans: [])
+        let changed = GUIVisualRow(rowType: .normal, rowId: 500, bufLine: 0, contentHash: 43, text: "hello!", spans: [])
 
         atlas.beginFrame()
         var metrics = FrameMetrics()
@@ -210,7 +250,7 @@ struct WindowContentFrameMetricsTests {
     @Test("Changed content epoch rerasterizes a row with the same row hash")
     @MainActor func changedContentEpochMetrics() throws {
         guard let (renderer, atlas) = makeRendererAndAtlas() else { return }
-        let row = GUIVisualRow(rowType: .normal, bufLine: 0, contentHash: 42, text: "hello", spans: [])
+        let row = GUIVisualRow(rowType: .normal, rowId: 600, bufLine: 0, contentHash: 42, text: "hello", spans: [])
 
         atlas.beginFrame()
         var metrics = FrameMetrics()
@@ -223,9 +263,57 @@ struct WindowContentFrameMetricsTests {
         #expect(metrics.atlasHashChanges == 1)
     }
 
+    @Test("Full-refresh window content invalidates retained atlas rows")
+    @MainActor func fullRefreshWindowInvalidatesAtlasRows() throws {
+        guard let (renderer, atlas) = makeRendererAndAtlas() else { return }
+        let row = GUIVisualRow(rowType: .normal, rowId: 650, bufLine: 0, contentHash: 42, text: "hello", spans: [])
+
+        atlas.beginFrame()
+        var metrics = FrameMetrics()
+        let first = renderer.renderRowToAtlas(displayRow: 0, row: row, windowId: 1, atlas: atlas, metrics: &metrics)
+        #expect(first != nil)
+        #expect(metrics.bufferRowsRasterized == 1)
+
+        let content = GUIWindowContent(windowId: 1, fullRefresh: true, cursorRow: 0, cursorCol: 0, cursorShape: .block, rows: [row], selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: [])
+        atlas.beginFrame()
+        CoreTextMetalRenderer.invalidateFullRefreshWindows(in: atlas, windowContents: [1: content])
+        metrics.reset()
+        let second = renderer.renderRowToAtlas(displayRow: 0, row: row, windowId: 1, atlas: atlas, metrics: &metrics)
+        #expect(second != nil)
+        #expect(metrics.bufferRowsRasterized == 1)
+        #expect(metrics.bufferRowsReused == 0)
+        #expect(metrics.atlasNewKeys == 1)
+    }
+
+    @Test("Horizontal scroll keeps row identity but changes the atlas hash")
+    @MainActor func horizontalScrollChangesAtlasHash() throws {
+        guard let (renderer, atlas) = makeRendererAndAtlas() else { return }
+        let row = GUIVisualRow(rowType: .normal, rowId: 675, bufLine: 0, contentHash: 42, text: "abcdef", spans: [])
+        let left = renderer.clipRowToViewport(row, scrollLeft: 0, viewportCols: 3)
+        let scrolled = renderer.clipRowToViewport(row, scrollLeft: 2, viewportCols: 3)
+
+        #expect(left.rowId == row.rowId)
+        #expect(scrolled.rowId == row.rowId)
+        #expect(left.text == "abc")
+        #expect(scrolled.text == "cde")
+        #expect(left.contentHash != scrolled.contentHash)
+
+        atlas.beginFrame()
+        var metrics = FrameMetrics()
+        _ = renderer.renderRowToAtlas(displayRow: 0, row: left, windowId: 1, atlas: atlas, metrics: &metrics)
+        #expect(metrics.bufferRowsRasterized == 1)
+
+        atlas.beginFrame()
+        metrics.reset()
+        _ = renderer.renderRowToAtlas(displayRow: 0, row: scrolled, windowId: 1, atlas: atlas, metrics: &metrics)
+        #expect(metrics.bufferRowsRasterized == 1)
+        #expect(metrics.bufferRowsReused == 0)
+        #expect(metrics.atlasHashChanges == 1)
+    }
+
     @Test("Atlas slot demand accounts for split-window texture entries")
     func atlasDemandCountsSplitWindows() {
-        let rows = [GUIVisualRow(rowType: .normal, bufLine: 0, contentHash: 1, text: "row", spans: [])]
+        let rows = [GUIVisualRow(rowType: .normal, rowId: 700, bufLine: 0, contentHash: 1, text: "row", spans: [])]
         let left = GUIWindowContent(windowId: 1, fullRefresh: true, cursorRow: 0, cursorCol: 0, cursorShape: .block, rows: rows, selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: [], lineAnnotations: [GUILineAnnotation(row: 0, kind: .inlineText, fg: 0xFFFFFF, bg: 0, text: "hint")])
         let right = GUIWindowContent(windowId: 2, fullRefresh: true, cursorRow: 0, cursorCol: 0, cursorShape: .block, rows: rows, selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: [])
 

@@ -29,6 +29,7 @@ struct WindowContentBuilder {
 
     struct RowBuilder {
         var rowType: UInt8 = 0  // normal
+        var rowId: UInt64 = 0
         var bufLine: UInt32 = 0
         var contentHash: UInt32 = 12345
         var text: String = ""
@@ -62,6 +63,7 @@ struct WindowContentBuilder {
         appendU16(&rowsPayload, UInt16(rows.count))
         for row in rows {
             rowsPayload.append(row.rowType)
+            appendU64(&rowsPayload, row.rowId)
             appendU32(&rowsPayload, row.bufLine)
             appendU32(&rowsPayload, row.contentHash)
             let textBytes = Array(row.text.utf8)
@@ -211,6 +213,17 @@ struct WindowContentBuilder {
         data.append(UInt8((value >> 8) & 0xFF))
         data.append(UInt8(value & 0xFF))
     }
+
+    private func appendU64(_ data: inout Data, _ value: UInt64) {
+        data.append(UInt8((value >> 56) & 0xFF))
+        data.append(UInt8((value >> 48) & 0xFF))
+        data.append(UInt8((value >> 40) & 0xFF))
+        data.append(UInt8((value >> 32) & 0xFF))
+        data.append(UInt8((value >> 24) & 0xFF))
+        data.append(UInt8((value >> 16) & 0xFF))
+        data.append(UInt8((value >> 8) & 0xFF))
+        data.append(UInt8(value & 0xFF))
+    }
 }
 
 // MARK: - Tests
@@ -337,12 +350,12 @@ struct WindowContentDecoderTests {
         #expect(content.cursorline == GUICursorline(row: 3, bg: 0x112233))
     }
 
-    @Test("Decode rows with text and buf_line")
+    @Test("Decode rows with row_id, text, and buf_line")
     func decodeRows() throws {
         var builder = WindowContentBuilder()
         builder.rows = [
-            .init(rowType: 0, bufLine: 0, text: "hello"),
-            .init(rowType: 0, bufLine: 1, text: "world"),
+            .init(rowType: 0, rowId: 0x1000_0000_0000_0001, bufLine: 0, text: "hello"),
+            .init(rowType: 0, rowId: 0x1000_0001_0000_0000, bufLine: 1, text: "world"),
         ]
 
         let (cmd, _) = try decodeCommand(data: builder.build(), offset: 0)
@@ -352,8 +365,10 @@ struct WindowContentDecoderTests {
 
         #expect(content.rows.count == 2)
         #expect(content.rows[0].text == "hello")
+        #expect(content.rows[0].rowId == 0x1000_0000_0000_0001)
         #expect(content.rows[0].bufLine == 0)
         #expect(content.rows[1].text == "world")
+        #expect(content.rows[1].rowId == 0x1000_0001_0000_0000)
         #expect(content.rows[1].bufLine == 1)
     }
 
