@@ -29,7 +29,7 @@ struct WindowContentBuilder {
 
     struct RowBuilder {
         var rowType: UInt8 = 0  // normal
-        var rowId: UInt64 = 0
+        var rowId: UInt64
         var bufLine: UInt32 = 0
         var contentHash: UInt32 = 12345
         var text: String = ""
@@ -376,11 +376,11 @@ struct WindowContentDecoderTests {
     func decodeRowTypes() throws {
         var builder = WindowContentBuilder()
         builder.rows = [
-            .init(rowType: 0, text: "normal"),
-            .init(rowType: 1, text: "fold"),
-            .init(rowType: 2, text: "virtual"),
-            .init(rowType: 3, text: "block"),
-            .init(rowType: 4, text: "wrap"),
+            .init(rowType: 0, rowId: 1, text: "normal"),
+            .init(rowType: 1, rowId: 2, text: "fold"),
+            .init(rowType: 2, rowId: 3, text: "virtual"),
+            .init(rowType: 3, rowId: 4, text: "block"),
+            .init(rowType: 4, rowId: 5, text: "wrap"),
         ]
 
         let (cmd, _) = try decodeCommand(data: builder.build(), offset: 0)
@@ -398,7 +398,7 @@ struct WindowContentDecoderTests {
     @Test("Decode multi-byte UTF-8 text")
     func decodeUTF8() throws {
         var builder = WindowContentBuilder()
-        builder.rows = [.init(text: "🥨日本語héllo")]
+        builder.rows = [.init(rowId: 1, text: "🥨日本語héllo")]
 
         let (cmd, _) = try decodeCommand(data: builder.build(), offset: 0)
         guard case .guiWindowContent(let content) = cmd else {
@@ -411,7 +411,7 @@ struct WindowContentDecoderTests {
     @Test("Decode content_hash")
     func decodeContentHash() throws {
         var builder = WindowContentBuilder()
-        builder.rows = [.init(contentHash: 0xDEADBEEF, text: "x")]
+        builder.rows = [.init(rowId: 1, contentHash: 0xDEADBEEF, text: "x")]
 
         let (cmd, _) = try decodeCommand(data: builder.build(), offset: 0)
         guard case .guiWindowContent(let content) = cmd else {
@@ -431,7 +431,7 @@ struct WindowContentDecoderTests {
             attrs: 0x03,  // bold + italic
             fontWeight: 5, fontId: 2
         )
-        builder.rows = [.init(text: "hello world", spans: [span])]
+        builder.rows = [.init(rowId: 1, text: "hello world", spans: [span])]
 
         let (cmd, _) = try decodeCommand(data: builder.build(), offset: 0)
         guard case .guiWindowContent(let content) = cmd else {
@@ -555,7 +555,7 @@ struct WindowContentDecoderTests {
     @Test("Decode consumes entire binary (no leftover bytes)")
     func decodeConsumesAllBytes() throws {
         var builder = WindowContentBuilder()
-        builder.rows = [.init(text: "hello", spans: [
+        builder.rows = [.init(rowId: 1, text: "hello", spans: [
             .init(startCol: 0, endCol: 5, fgR: 0xFF, fgG: 0, fgB: 0)
         ])]
         builder.selectionType = 1
@@ -573,11 +573,11 @@ struct WindowContentDecoderTests {
     func decodeCompleteWindow() throws {
         var builder = WindowContentBuilder(windowId: 7, cursorRow: 1, cursorCol: 3, cursorShape: 1)
         builder.rows = [
-            .init(rowType: 0, bufLine: 0, text: "def foo do", spans: [
+            .init(rowType: 0, rowId: 1, bufLine: 0, text: "def foo do", spans: [
                 .init(startCol: 0, endCol: 3, fgR: 0x51, fgG: 0xAF, fgB: 0xEF, attrs: 0x01),
                 .init(startCol: 4, endCol: 7, fgR: 0xEC, fgG: 0xBE, fgB: 0x7B),
             ]),
-            .init(rowType: 1, bufLine: 1, text: "  :ok ··· 3 lines"),
+            .init(rowType: 1, rowId: 2, bufLine: 1, text: "  :ok ··· 3 lines"),
         ]
         builder.selectionType = 1
         builder.selectionCoords = (0, 0, 0, 10)

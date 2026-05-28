@@ -24,10 +24,12 @@ defmodule Minga.RenderModel.Window.Row do
   @row_id_visual_shift 12
   @row_id_line_mask 0xFFFF_FFFF
   @row_id_visual_mask 0xFFFF
+  @row_id_decoration_mask 0x0FFF_FFFF
   @row_id_discriminator_mask 0x0FFF
   @row_id_discriminator_range @row_id_discriminator_mask + 1
+  @row_id_decoration_range @row_id_decoration_mask + 1
 
-  @enforce_keys [:row_type, :buf_line, :text, :spans]
+  @enforce_keys [:row_id, :row_type, :buf_line, :text, :spans]
   defstruct row_id: 0,
             row_type: :normal,
             buf_line: 0,
@@ -63,6 +65,16 @@ defmodule Minga.RenderModel.Window.Row do
   @doc "Returns a small discriminator suitable for the low bits of `stable_id/4`."
   @spec discriminator(term()) :: non_neg_integer()
   def discriminator(value), do: :erlang.phash2(value, @row_id_discriminator_range)
+
+  @doc "Builds a stable row identity for decoration-driven rows."
+  @spec stable_decoration_id(row_type(), non_neg_integer(), term()) :: row_id()
+  def stable_decoration_id(row_type, buf_line, decoration_key) do
+    kind_bits = row_type_tag(row_type) <<< @row_id_kind_shift
+    line_bits = (buf_line &&& @row_id_line_mask) <<< @row_id_line_shift
+    decoration_bits = :erlang.phash2(decoration_key, @row_id_decoration_range)
+
+    kind_bits ||| line_bits ||| decoration_bits
+  end
 
   @doc "Computes a content hash for cache invalidation."
   @spec compute_hash(String.t(), [Span.t()]) :: non_neg_integer()

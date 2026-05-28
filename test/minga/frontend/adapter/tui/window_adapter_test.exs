@@ -27,6 +27,7 @@ defmodule Minga.Frontend.Adapter.TUI.WindowAdapterTest do
       window(
         [
           %Row{
+            row_id: Row.stable_id(:normal, 0),
             row_type: :normal,
             buf_line: 0,
             text: "abcdef",
@@ -56,6 +57,7 @@ defmodule Minga.Frontend.Adapter.TUI.WindowAdapterTest do
       window(
         [
           %Row{
+            row_id: Row.stable_id(:normal, 0),
             row_type: :normal,
             buf_line: 0,
             text: "a日b",
@@ -79,6 +81,7 @@ defmodule Minga.Frontend.Adapter.TUI.WindowAdapterTest do
       window(
         [
           %Row{
+            row_id: Row.stable_id(:normal, 0),
             row_type: :normal,
             buf_line: 0,
             text: "\tb",
@@ -100,9 +103,30 @@ defmodule Minga.Frontend.Adapter.TUI.WindowAdapterTest do
     model =
       window(
         [
-          %Row{row_type: :normal, buf_line: 0, text: "abcd", spans: [], content_hash: 1},
-          %Row{row_type: :normal, buf_line: 1, text: "abcd", spans: [], content_hash: 2},
-          %Row{row_type: :normal, buf_line: 2, text: "abcd", spans: [], content_hash: 3}
+          %Row{
+            row_id: Row.stable_id(:normal, 0),
+            row_type: :normal,
+            buf_line: 0,
+            text: "abcd",
+            spans: [],
+            content_hash: 1
+          },
+          %Row{
+            row_id: Row.stable_id(:normal, 1),
+            row_type: :normal,
+            buf_line: 1,
+            text: "abcd",
+            spans: [],
+            content_hash: 2
+          },
+          %Row{
+            row_id: Row.stable_id(:normal, 2),
+            row_type: :normal,
+            buf_line: 2,
+            text: "abcd",
+            spans: [],
+            content_hash: 3
+          }
         ],
         selection: %Selection{type: :block, start_row: 0, start_col: 1, end_row: 2, end_col: 3}
       )

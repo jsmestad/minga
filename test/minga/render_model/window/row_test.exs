@@ -20,4 +20,23 @@ defmodule Minga.RenderModel.Window.RowTest do
       assert Enum.uniq(ids) == ids
     end
   end
+
+  describe "stable_decoration_id/3" do
+    test "is deterministic for virtual text and block decoration identities" do
+      vt_id = make_ref()
+      block_id = make_ref()
+
+      assert Row.stable_decoration_id(:virtual_line, 12, vt_id) ==
+               Row.stable_decoration_id(:virtual_line, 12, vt_id)
+
+      assert Row.stable_decoration_id(:virtual_line, 12, vt_id) !=
+               Row.stable_decoration_id(:virtual_line, 12, make_ref())
+
+      assert Row.stable_decoration_id(:block, 12, {block_id, 0}) !=
+               Row.stable_decoration_id(:block, 12, {block_id, 1})
+
+      assert Row.stable_decoration_id(:fold_start, 12, block_id) ==
+               Row.stable_decoration_id(:fold_start, 12, block_id)
+    end
+  end
 end

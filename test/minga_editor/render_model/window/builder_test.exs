@@ -2,7 +2,9 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Core.Decorations
   alias Minga.Core.Face
+  alias Minga.Editing.Fold.Range, as: FoldRange
   alias Minga.Editing.Search.Match
   alias MingaEditor.Layout
   alias MingaEditor.RenderModel.Window.Builder
@@ -152,21 +154,23 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       assert model.cursor_col == 12
     end
 
-    test "virtual line rows use unique stable row IDs per anchor line" do
+    test "virtual line row IDs stay stable when earlier siblings are removed" do
       state = gui_state(content: "line\nnext")
       buffer = state.workspace.buffers.active
 
-      BufferProcess.add_virtual_text(buffer, {0, 0},
-        segments: [{"first virtual", Face.new()}],
-        placement: :above,
-        priority: 0
-      )
+      first_id =
+        BufferProcess.add_virtual_text(buffer, {0, 0},
+          segments: [{"first virtual", Face.new()}],
+          placement: :above,
+          priority: 0
+        )
 
-      BufferProcess.add_virtual_text(buffer, {0, 0},
-        segments: [{"second virtual", Face.new()}],
-        placement: :above,
-        priority: 1
-      )
+      second_id =
+        BufferProcess.add_virtual_text(buffer, {0, 0},
+          segments: [{"second virtual", Face.new()}],
+          placement: :above,
+          priority: 1
+        )
 
       {[wf], _cursor, _state} = build_content(state)
 
@@ -174,26 +178,36 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       assert Enum.map(virtual_rows, & &1.text) == ["first virtual", "second virtual"]
 
       assert Enum.map(virtual_rows, & &1.row_id) == [
-               Row.stable_id(:virtual_line, 0, 0),
-               Row.stable_id(:virtual_line, 0, 1)
+               Row.stable_decoration_id(:virtual_line, 0, first_id),
+               Row.stable_decoration_id(:virtual_line, 0, second_id)
              ]
+
+      :ok = BufferProcess.remove_virtual_text(buffer, first_id)
+
+      {[wf], _cursor, _state} = build_content(state)
+
+      [remaining] = Enum.filter(wf.window_model.rows, &(&1.row_type == :virtual_line))
+      assert remaining.text == "second virtual"
+      assert remaining.row_id == Row.stable_decoration_id(:virtual_line, 0, second_id)
     end
 
-    test "block decoration rows use unique stable row IDs per anchor line" do
+    test "block decoration row IDs stay stable when earlier siblings are removed" do
       state = gui_state(content: "line\nnext")
       buffer = state.workspace.buffers.active
 
-      BufferProcess.add_block_decoration(buffer, 0,
-        placement: :above,
-        render: fn _width -> [{"first block", Face.new()}] end,
-        priority: 0
-      )
+      first_id =
+        BufferProcess.add_block_decoration(buffer, 0,
+          placement: :above,
+          render: fn _width -> [{"first block", Face.new()}] end,
+          priority: 0
+        )
 
-      BufferProcess.add_block_decoration(buffer, 0,
-        placement: :above,
-        render: fn _width -> [{"second block", Face.new()}] end,
-        priority: 1
-      )
+      second_id =
+        BufferProcess.add_block_decoration(buffer, 0,
+          placement: :above,
+          render: fn _width -> [{"second block", Face.new()}] end,
+          priority: 1
+        )
 
       {[wf], _cursor, _state} = build_content(state)
 
@@ -201,9 +215,55 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       assert Enum.map(block_rows, & &1.text) == ["first block", "second block"]
 
       assert Enum.map(block_rows, & &1.row_id) == [
-               Row.stable_id(:block, 0, 0),
-               Row.stable_id(:block, 0, 1)
+               Row.stable_decoration_id(:block, 0, {first_id, 0}),
+               Row.stable_decoration_id(:block, 0, {second_id, 0})
              ]
+
+      :ok = BufferProcess.remove_block_decoration(buffer, first_id)
+
+      {[wf], _cursor, _state} = build_content(state)
+
+      [remaining] = Enum.filter(wf.window_model.rows, &(&1.row_type == :block))
+      assert remaining.text == "second block"
+      assert remaining.row_id == Row.stable_decoration_id(:block, 0, {second_id, 0})
+    end
+
+    test "fold-start rows use stable ids for window folds" do
+      state = gui_state(content: "line 1\nline 2\nline 3")
+      window = Map.fetch!(state.workspace.windows.map, state.workspace.windows.active)
+      window = EditorWindow.set_fold_ranges(window, [FoldRange.new!(0, 2)])
+      window = EditorWindow.fold_at(window, 0)
+
+      windows =
+        Windows.set_map(
+          state.workspace.windows,
+          Map.put(state.workspace.windows.map, state.workspace.windows.active, window)
+        )
+
+      state = %{state | workspace: %{state.workspace | windows: windows}}
+
+      {[wf], _cursor, _state} = build_content(state)
+
+      [fold_row] = Enum.filter(wf.window_model.rows, &(&1.row_type == :fold_start))
+      assert fold_row.row_id == Row.stable_id(:fold_start, 0, 0, 2)
+    end
+
+    test "decoration fold rows use stable decoration ids" do
+      state = gui_state(content: "line 1\nline 2\nline 3")
+      buffer = state.workspace.buffers.active
+
+      :ok =
+        BufferProcess.batch_decorations(buffer, fn decs ->
+          {_id, decs} = Decorations.add_fold_region(decs, 0, 2, closed: true)
+          decs
+        end)
+
+      [fold] = BufferProcess.decorations(buffer).fold_regions
+
+      {[wf], _cursor, _state} = build_content(state)
+
+      [fold_row] = Enum.filter(wf.window_model.rows, &(&1.row_type == :fold_start))
+      assert fold_row.row_id == Row.stable_decoration_id(:fold_start, 0, fold.id)
     end
 
     test "wrapped geometry reports total visual rows for the whole buffer" do

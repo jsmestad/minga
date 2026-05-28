@@ -630,7 +630,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     spans = virtual_text_spans(vt)
 
     %Row{
-      row_id: Row.stable_id(:virtual_line, buf_line, visual_identity_index),
+      row_id: Row.stable_decoration_id(:virtual_line, buf_line, vt.id),
       row_type: :virtual_line,
       buf_line: buf_line,
       visual_index: visual_identity_index,
@@ -657,7 +657,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     spans = segments_to_spans(segments)
 
     %Row{
-      row_id: Row.stable_id(:block, buf_line, visual_identity_index),
+      row_id: Row.stable_decoration_id(:block, buf_line, {block.id, line_idx}),
       row_type: :block,
       buf_line: buf_line,
       visual_index: visual_identity_index,
@@ -680,7 +680,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     text = " ··· #{hidden} lines"
 
     %Row{
-      row_id: Row.stable_id(:fold_start, buf_line, 0, Row.discriminator(fold.id)),
+      row_id: Row.stable_decoration_id(:fold_start, buf_line, fold.id),
       row_type: :fold_start,
       buf_line: buf_line,
       text: text,

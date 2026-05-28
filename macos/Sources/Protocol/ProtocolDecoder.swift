@@ -1598,36 +1598,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 }
 
             case 0x02: // Rows: row_count(2) + rows...
-                guard wcSLen >= 2 else { break }
-                let rowCount = Int(readU16(data, wcSStart))
-                wcRows.reserveCapacity(rowCount)
-                var rp = wcSStart + 2
-                for _ in 0..<rowCount {
-                    guard rp + 21 <= wcSStart + wcSLen else { break }
-                    let rowType = GUIVisualRowType(rawValue: data[rp]) ?? .normal
-                    let rowId = readU64(data, rp + 1)
-                    let bufLine = readU32(data, rp + 9)
-                    let contentHash = readU32(data, rp + 13)
-                    let textLen = Int(readU32(data, rp + 17))
-                    rp += 21
-                    guard rp + textLen <= wcSStart + wcSLen else { break }
-                    let text = String(data: data[rp..<(rp + textLen)], encoding: .utf8) ?? ""
-                    rp += textLen
-                    guard rp + 2 <= wcSStart + wcSLen else { break }
-                    let spanCount = Int(readU16(data, rp)); rp += 2
-                    var spans: [GUIHighlightSpan] = []
-                    spans.reserveCapacity(spanCount)
-                    for _ in 0..<spanCount {
-                        guard rp + 13 <= wcSStart + wcSLen else { break }
-                        spans.append(GUIHighlightSpan(
-                            startCol: readU16(data, rp), endCol: readU16(data, rp + 2),
-                            fg: readU24(data, rp + 4), bg: readU24(data, rp + 7),
-                            attrs: data[rp + 10], fontWeight: data[rp + 11], fontId: data[rp + 12]
-                        ))
-                        rp += 13
-                    }
-                    wcRows.append(GUIVisualRow(rowType: rowType, rowId: rowId, bufLine: bufLine, contentHash: contentHash, text: text, spans: spans))
-                }
+                wcRows = try decodeWindowContentRows(data: data, start: wcSStart, end: wcSStart + wcSLen)
 
             case 0x03: // Selection: type(1), if != 0: start_row(2) + start_col(2) + end_row(2) + end_col(2)
                 guard wcSLen >= 1 else { break }
@@ -2966,6 +2937,55 @@ private func decodeStatusBarSegments(data: Data, pos: inout Int, count: Int, end
     }
 
     return segments
+}
+
+private func decodeWindowContentRows(data: Data, start: Int, end: Int) throws -> [GUIVisualRow] {
+    guard start + 2 <= end else { throw ProtocolDecodeError.malformed }
+    let rowCount = Int(readU16(data, start))
+    var pos = start + 2
+    var rows: [GUIVisualRow] = []
+    rows.reserveCapacity(rowCount)
+
+    for _ in 0..<rowCount {
+        let row = try decodeWindowContentRow(data: data, pos: &pos, end: end)
+        rows.append(row)
+    }
+
+    guard pos == end else { throw ProtocolDecodeError.malformed }
+    return rows
+}
+
+private func decodeWindowContentRow(data: Data, pos: inout Int, end: Int) throws -> GUIVisualRow {
+    guard pos + 21 <= end else { throw ProtocolDecodeError.malformed }
+    let rowType = GUIVisualRowType(rawValue: data[pos]) ?? .normal
+    let rowId = readU64(data, pos + 1)
+    let bufLine = readU32(data, pos + 9)
+    let contentHash = readU32(data, pos + 13)
+    let textLen = Int(readU32(data, pos + 17))
+    pos += 21
+
+    guard pos + textLen <= end else { throw ProtocolDecodeError.malformed }
+    let text = String(data: data[pos..<(pos + textLen)], encoding: .utf8) ?? ""
+    pos += textLen
+
+    guard pos + 2 <= end else { throw ProtocolDecodeError.malformed }
+    let spanCount = Int(readU16(data, pos))
+    pos += 2
+
+    var spans: [GUIHighlightSpan] = []
+    spans.reserveCapacity(spanCount)
+
+    for _ in 0..<spanCount {
+        guard pos + 13 <= end else { throw ProtocolDecodeError.malformed }
+        spans.append(GUIHighlightSpan(
+            startCol: readU16(data, pos), endCol: readU16(data, pos + 2),
+            fg: readU24(data, pos + 4), bg: readU24(data, pos + 7),
+            attrs: data[pos + 10], fontWeight: data[pos + 11], fontId: data[pos + 12]
+        ))
+        pos += 13
+    }
+
+    return GUIVisualRow(rowType: rowType, rowId: rowId, bufLine: bufLine, contentHash: contentHash, text: text, spans: spans)
 }
 
 private struct DecodedChatMessageCandidate {

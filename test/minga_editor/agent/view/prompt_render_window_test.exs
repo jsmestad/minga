@@ -5,6 +5,7 @@ defmodule MingaEditor.Agent.View.PromptRenderWindowTest do
   alias MingaEditor.Agent.ViewContext
   alias MingaEditor.Agent.UIState
   alias Minga.Buffer
+  alias Minga.RenderModel.Window.Row
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.UI.Theme
   alias MingaEditor.VimState
@@ -64,18 +65,22 @@ defmodule MingaEditor.Agent.View.PromptRenderWindowTest do
       assert Enum.map(model.rows, & &1.text) == ["hello"]
     end
 
-    test "uses row hashes for prompt edits without forcing full refresh" do
+    test "uses row hashes and stable row IDs for prompt edits without forcing full refresh" do
       ctx = prompt_ctx("hello", input_focused: true, cursor: {0, 5}, mode: :insert)
       model = PromptRenderWindow.build(ctx, 40, {10, 2, 40, 3})
-      old_hash = hd(model.rows).content_hash
+      [row] = model.rows
+      old_hash = row.content_hash
+      old_row_id = row.row_id
 
       assert model.full_refresh == false
+      assert old_row_id == Row.stable_id(:normal, 0, 0)
 
       Buffer.insert_text(ctx.ui_state.panel.prompt_buffer, "!")
       updated = PromptRenderWindow.build(ctx, 40, {10, 2, 40, 3})
 
       assert updated.content_epoch == model.content_epoch
       assert updated.full_refresh == false
+      assert hd(updated.rows).row_id == old_row_id
       assert hd(updated.rows).content_hash != old_hash
     end
 

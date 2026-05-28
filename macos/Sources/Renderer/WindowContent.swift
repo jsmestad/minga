@@ -57,7 +57,7 @@ struct GUIVisualRow: Sendable, Equatable {
     let text: String
     let spans: [GUIHighlightSpan]
 
-    init(rowType: GUIVisualRowType, rowId: UInt64 = 0, bufLine: UInt32, contentHash: UInt32, text: String, spans: [GUIHighlightSpan]) {
+    init(rowType: GUIVisualRowType, rowId: UInt64, bufLine: UInt32, contentHash: UInt32, text: String, spans: [GUIHighlightSpan]) {
         self.rowType = rowType
         self.rowId = rowId
         self.bufLine = bufLine

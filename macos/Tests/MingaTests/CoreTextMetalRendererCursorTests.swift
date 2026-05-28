@@ -157,7 +157,7 @@ struct CoreTextMetalRendererCursorTests {
         let content = GUIWindowContent(
             windowId: 1, fullRefresh: true,
             cursorRow: 0, cursorCol: 4, cursorShape: .block,
-            rows: [GUIVisualRow(rowType: .normal, bufLine: 0, contentHash: 1, text: "this", spans: [])],
+            rows: [GUIVisualRow(rowType: .normal, rowId: 1, bufLine: 0, contentHash: 1, text: "this", spans: [])],
             selection: nil,
             searchMatches: [], diagnosticUnderlines: [],
             documentHighlights: []
@@ -171,7 +171,7 @@ struct CoreTextMetalRendererCursorTests {
         let content = GUIWindowContent(
             windowId: 1, fullRefresh: true,
             cursorRow: 0, cursorCol: 4, cursorShape: .beam,
-            rows: [GUIVisualRow(rowType: .normal, bufLine: 0, contentHash: 1, text: "this", spans: [])],
+            rows: [GUIVisualRow(rowType: .normal, rowId: 1, bufLine: 0, contentHash: 1, text: "this", spans: [])],
             selection: nil,
             searchMatches: [], diagnosticUnderlines: [],
             documentHighlights: []
@@ -185,7 +185,7 @@ struct CoreTextMetalRendererCursorTests {
         let content = GUIWindowContent(
             windowId: 1, fullRefresh: true,
             cursorRow: 0, cursorCol: 2, cursorShape: .block,
-            rows: [GUIVisualRow(rowType: .normal, bufLine: 0, contentHash: 1, text: "界", spans: [])],
+            rows: [GUIVisualRow(rowType: .normal, rowId: 1, bufLine: 0, contentHash: 1, text: "界", spans: [])],
             selection: nil,
             searchMatches: [], diagnosticUnderlines: [],
             documentHighlights: []
