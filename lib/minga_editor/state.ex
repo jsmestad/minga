@@ -1624,6 +1624,16 @@ defmodule MingaEditor.State do
     update_workspace(state, &SessionState.invalidate_all_windows/1)
   end
 
+  @doc "Clears frontend-retained render state after a frontend ready/recovery event."
+  @spec reset_frontend_render_state(t()) :: t()
+  def reset_frontend_render_state(%__MODULE__{} = state) do
+    state
+    |> update_workspace(&SessionState.mark_frontend_reset_pending/1)
+    |> then(fn state ->
+      %{state | caches: MingaEditor.Renderer.Caches.reset_frontend_state(state.caches)}
+    end)
+  end
+
   @doc """
   Returns the terminal-level viewport: total screen rows/cols reported by
   the frontend on resize. Used for screen-spanning chrome (picker,

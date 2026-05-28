@@ -18,10 +18,15 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.ViewContext
   alias Minga.RenderModel.Window, as: RenderWindow
+  alias Minga.RenderModel.Window.Gutter
+  alias Minga.RenderModel.Window.GutterMetrics
+  alias Minga.RenderModel.Window.HitRegion
   alias Minga.RenderModel.Window.IndentGuides
+  alias Minga.RenderModel.Window.PaneGeometry
   alias Minga.RenderModel.Window.Row
   alias Minga.RenderModel.Window.Selection
   alias Minga.RenderModel.Window.Span
+  alias Minga.RenderModel.Window.Viewport, as: RenderViewport
   alias MingaEditor.Input.Wrap, as: InputWrap
   alias MingaEditor.UI.Theme
 
@@ -113,10 +118,13 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
     # Selection overlay
     selection = build_selection(mode, mode_state, cursor, scroll, inner_width, lines)
 
+    prompt_id = prompt_window_id()
+    rect = rect || {0, 0, inner_width, visible_count}
+
     %RenderWindow{
-      window_id: prompt_window_id(),
+      window_id: prompt_id,
       content_kind: :agent_prompt,
-      rect: rect || {0, 0, inner_width, visible_count},
+      rect: rect,
       rows: visual_rows,
       cursor_row: max(display_cursor_row, 0),
       cursor_col: max(display_cursor_col, 0),
@@ -127,8 +135,75 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
       diagnostic_ranges: [],
       document_highlights: [],
       annotations: [],
-      indent_guides: IndentGuides.empty(prompt_window_id()),
-      full_refresh: true
+      gutter: prompt_gutter(prompt_id, rect, panel.input_focused),
+      indent_guides: IndentGuides.empty(prompt_id),
+      geometry:
+        prompt_geometry(prompt_id, rect, inner_width, visible_count, total_visual, scroll),
+      content_epoch:
+        prompt_content_epoch(prompt_id, rect, inner_width, visible_count, total_visual),
+      full_refresh: false
+    }
+  end
+
+  @spec prompt_content_epoch(
+          pos_integer(),
+          RenderWindow.rect(),
+          pos_integer(),
+          pos_integer(),
+          non_neg_integer()
+        ) :: non_neg_integer()
+  defp prompt_content_epoch(window_id, rect, inner_width, visible_count, total_visual) do
+    :erlang.phash2({window_id, rect, inner_width, visible_count, total_visual})
+  end
+
+  @spec prompt_gutter(pos_integer(), RenderWindow.rect(), boolean()) :: Gutter.t()
+  defp prompt_gutter(window_id, {row, col, width, height}, active?) do
+    %Gutter{
+      window_id: window_id,
+      content_row: row,
+      content_col: col,
+      content_height: height,
+      is_active: active?,
+      content_width: width,
+      cursor_line: 0,
+      line_number_style: :none,
+      line_number_width: 0,
+      sign_col_width: 0,
+      entries: []
+    }
+  end
+
+  @spec prompt_geometry(
+          pos_integer(),
+          RenderWindow.rect(),
+          pos_integer(),
+          pos_integer(),
+          pos_integer(),
+          non_neg_integer()
+        ) :: PaneGeometry.t()
+  defp prompt_geometry(window_id, rect, inner_width, visible_count, total_visual, scroll) do
+    metrics = %GutterMetrics{line_number_width: 0, sign_col_width: 0}
+
+    %PaneGeometry{
+      window_id: window_id,
+      total_rect: rect,
+      content_rect: rect,
+      text_rect: rect,
+      gutter_rect: {elem(rect, 0), elem(rect, 1), 0, elem(rect, 3)},
+      clip_rect: rect,
+      viewport: %RenderViewport{
+        top: scroll,
+        left: 0,
+        rows: visible_count,
+        cols: inner_width,
+        total_lines: total_visual,
+        visual_row_offset: 0,
+        total_visual_rows: total_visual
+      },
+      gutter_metrics: metrics,
+      hit_regions: [
+        %HitRegion{kind: :text, rect: rect, window_id: window_id, target: %{window_id: window_id}}
+      ]
     }
   end
 

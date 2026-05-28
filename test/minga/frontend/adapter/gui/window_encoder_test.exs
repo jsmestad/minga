@@ -12,11 +12,15 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
   alias Minga.RenderModel.Window.DocumentHighlight
   alias Minga.RenderModel.Window.Gutter
   alias Minga.RenderModel.Window.GutterEntry
+  alias Minga.RenderModel.Window.GutterMetrics
+  alias Minga.RenderModel.Window.HitRegion
   alias Minga.RenderModel.Window.IndentGuides
+  alias Minga.RenderModel.Window.PaneGeometry
   alias Minga.RenderModel.Window.Row
   alias Minga.RenderModel.Window.SearchMatch
   alias Minga.RenderModel.Window.Selection
   alias Minga.RenderModel.Window.Span
+  alias Minga.RenderModel.Window.Viewport
   alias Minga.Test.GUIWindowDecoder
 
   defp window(opts) do
@@ -38,7 +42,29 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
       gutter: Keyword.get(opts, :gutter, nil),
       cursorline: Keyword.get(opts, :cursorline, nil),
       indent_guides: Keyword.get(opts, :indent_guides, nil),
+      geometry: Keyword.get(opts, :geometry, nil),
+      content_epoch: Keyword.get(opts, :content_epoch, 0),
       full_refresh: Keyword.get(opts, :full_refresh, true)
+    }
+  end
+
+  defp geometry_model do
+    %PaneGeometry{
+      window_id: 1,
+      total_rect: {1, 2, 40, 12},
+      content_rect: {2, 3, 38, 10},
+      text_rect: {2, 8, 33, 10},
+      gutter_rect: {2, 3, 5, 10},
+      clip_rect: {2, 8, 33, 10},
+      viewport: %Viewport{top: 5, left: 2, rows: 10, cols: 33, total_lines: 200},
+      gutter_metrics: %GutterMetrics{line_number_width: 2, sign_col_width: 3},
+      hit_regions: [
+        %HitRegion{kind: :text, rect: {2, 8, 33, 10}, window_id: 1},
+        %HitRegion{kind: :gutter, rect: {2, 3, 5, 10}, window_id: 1},
+        %HitRegion{kind: :fold_control, rect: {2, 7, 1, 10}, window_id: 1},
+        %HitRegion{kind: :divider, rect: {0, 41, 1, 20}, window_id: 1},
+        %HitRegion{kind: :status_bar, rect: {23, 0, 80, 1}, window_id: 1}
+      ]
     }
   end
 
@@ -155,6 +181,29 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
     assert hd(decoded.annotations).text == "hint"
   end
 
+  test "encodes content epoch and pane geometry" do
+    decoded =
+      window(content_epoch: 42, geometry: geometry_model())
+      |> WindowEncoder.encode_window_content()
+      |> GUIWindowDecoder.decode()
+
+    assert decoded.content_epoch == 42
+    assert decoded.geometry.window_id == 1
+    assert decoded.geometry.total_rect == {1, 2, 40, 12}
+    assert decoded.geometry.text_rect == {2, 8, 33, 10}
+    assert decoded.geometry.viewport.top == 5
+    assert decoded.geometry.viewport.cols == 33
+    assert decoded.geometry.gutter_metrics == %{line_number_width: 2, sign_col_width: 3}
+
+    assert Enum.map(decoded.geometry.hit_regions, & &1.kind) == [
+             :text,
+             :gutter,
+             :fold_control,
+             :divider,
+             :status_bar
+           ]
+  end
+
   test "encodes every selection type" do
     for type <- [:char, :line, :block] do
       decoded =
@@ -190,9 +239,11 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
     assert opcodes == [
              Opcodes.gui_window_content(),
              Opcodes.gui_gutter(),
-             Opcodes.gui_cursorline(),
              Opcodes.gui_indent_guides()
            ]
+
+    decoded = commands |> hd() |> GUIWindowDecoder.decode()
+    assert decoded.cursorline == %{row: 6, bg_rgb: 0x112233}
   end
 
   test "adapter re-emits per-frame gutter metadata when window content is cached" do
@@ -203,6 +254,21 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
 
     assert opcodes(first_commands) == [Opcodes.gui_window_content(), Opcodes.gui_gutter()]
     assert opcodes(second_commands) == [Opcodes.gui_gutter()]
+  end
+
+  test "adapter cache reset re-emits unchanged window content after frontend recovery" do
+    model = window(gutter: gutter_model(), content_epoch: 7, full_refresh: true)
+
+    {_first_commands, caches} = AdapterGUI.encode_windows([model], Caches.new())
+    {cached_commands, _caches} = AdapterGUI.encode_windows([model], caches)
+    {recovered_commands, _caches} = AdapterGUI.encode_windows([model], Caches.new())
+
+    assert opcodes(cached_commands) == [Opcodes.gui_gutter()]
+    assert opcodes(recovered_commands) == [Opcodes.gui_window_content(), Opcodes.gui_gutter()]
+
+    recovered_window = recovered_commands |> hd() |> GUIWindowDecoder.decode()
+    assert recovered_window.full_refresh == true
+    assert recovered_window.content_epoch == 7
   end
 
   test "adapter reports per-section byte metrics from emitted commands" do
@@ -247,9 +313,12 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
              cached_metrics.gutter_bytes + cached_metrics.metadata_bytes
   end
 
-  test "adapter skips non-buffer window models until the GUI protocol carries their rect" do
+  test "adapter encodes first-class non-buffer window models" do
     model = window(content_kind: :agent_prompt, window_id: 65_534)
 
-    assert {[], %Caches{}} = AdapterGUI.encode_windows([model], Caches.new())
+    {commands, _caches} = AdapterGUI.encode_windows([model], Caches.new())
+
+    assert opcodes(commands) == [Opcodes.gui_window_content()]
+    assert commands |> hd() |> GUIWindowDecoder.decode() |> Map.fetch!(:window_id) == 65_534
   end
 end

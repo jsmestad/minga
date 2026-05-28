@@ -21,12 +21,15 @@ defmodule Minga.Test.GUIWindowDecoder do
       cursor_col: 0,
       cursor_shape: :block,
       scroll_left: 0,
+      content_epoch: 0,
       rows: [],
       selection: nil,
       search_matches: [],
       diagnostic_ranges: [],
       document_highlights: [],
-      annotations: []
+      annotations: [],
+      geometry: nil,
+      cursorline: nil
     }
 
     {result, <<>>} = decode_sections(rest, section_count, result)
@@ -45,8 +48,8 @@ defmodule Minga.Test.GUIWindowDecoder do
   end
 
   defp decode_section(0x01, payload, result) do
-    <<window_id::16, flags::8, cursor_row::16, cursor_col::16, cursor_shape::8, scroll_left::16>> =
-      payload
+    <<window_id::16, flags::8, cursor_row::16, cursor_col::16, cursor_shape::8, scroll_left::16,
+      rest::binary>> = payload
 
     %{
       result
@@ -56,7 +59,8 @@ defmodule Minga.Test.GUIWindowDecoder do
         cursor_row: cursor_row,
         cursor_col: cursor_col,
         cursor_shape: decode_cursor_shape(cursor_shape),
-        scroll_left: scroll_left
+        scroll_left: scroll_left,
+        content_epoch: decode_content_epoch(rest)
     }
   end
 
@@ -90,7 +94,71 @@ defmodule Minga.Test.GUIWindowDecoder do
     %{result | annotations: annotations}
   end
 
+  defp decode_section(0x08, payload, result) do
+    {geometry, <<>>} = decode_geometry(payload)
+    %{result | geometry: geometry}
+  end
+
+  defp decode_section(0x09, <<row::16, r::8, g::8, b::8>>, result) do
+    %{result | cursorline: %{row: row, bg_rgb: r <<< 16 ||| g <<< 8 ||| b}}
+  end
+
   defp decode_section(_unknown, _payload, result), do: result
+
+  defp decode_content_epoch(<<content_epoch::32, _rest::binary>>), do: content_epoch
+  defp decode_content_epoch(_rest), do: 0
+
+  defp decode_geometry(
+         <<window_id::16, total::binary-size(8), content::binary-size(8), text::binary-size(8),
+           gutter::binary-size(8), clip::binary-size(8), viewport_top::32, viewport_left::16,
+           viewport_rows::16, viewport_cols::16, total_lines::32, visual_row_offset::16,
+           total_visual_rows::32, line_number_width::16, sign_col_width::16, hit_count::8,
+           rest::binary>>
+       ) do
+    {hit_regions, rest} = decode_hit_regions(rest, hit_count, [])
+
+    geometry = %{
+      window_id: window_id,
+      total_rect: decode_rect(total),
+      content_rect: decode_rect(content),
+      text_rect: decode_rect(text),
+      gutter_rect: decode_rect(gutter),
+      clip_rect: decode_rect(clip),
+      viewport: %{
+        top: viewport_top,
+        left: viewport_left,
+        rows: viewport_rows,
+        cols: viewport_cols,
+        total_lines: total_lines,
+        visual_row_offset: visual_row_offset,
+        total_visual_rows: total_visual_rows
+      },
+      gutter_metrics: %{line_number_width: line_number_width, sign_col_width: sign_col_width},
+      hit_regions: hit_regions
+    }
+
+    {geometry, rest}
+  end
+
+  defp decode_rect(<<row::16, col::16, width::16, height::16>>), do: {row, col, width, height}
+
+  defp decode_hit_regions(rest, 0, acc), do: {Enum.reverse(acc), rest}
+
+  defp decode_hit_regions(
+         <<kind::8, rect::binary-size(8), window_id::16, rest::binary>>,
+         remaining,
+         acc
+       ) do
+    region = %{kind: decode_hit_kind(kind), rect: decode_rect(rect), window_id: window_id}
+    decode_hit_regions(rest, remaining - 1, [region | acc])
+  end
+
+  defp decode_hit_kind(1), do: :text
+  defp decode_hit_kind(2), do: :gutter
+  defp decode_hit_kind(3), do: :fold_control
+  defp decode_hit_kind(4), do: :modeline
+  defp decode_hit_kind(5), do: :divider
+  defp decode_hit_kind(6), do: :status_bar
 
   # ── Rows ─────────────────────────────────────────────────────────────────
 

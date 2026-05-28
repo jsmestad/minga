@@ -1567,12 +1567,15 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         var wcCursorCol: UInt16 = 0
         var wcCursorShape: CursorShape = .block
         var wcScrollLeft: UInt16 = 0
+        var wcContentEpoch: UInt32 = 0
         var wcRows: [GUIVisualRow] = []
         var wcSelection: GUISelectionOverlay? = nil
         var wcMatches: [GUISearchMatch] = []
         var wcDiags: [GUIDiagnosticUnderline] = []
         var wcHighlights: [GUIDocumentHighlight] = []
         var wcAnnotations: [GUILineAnnotation] = []
+        var wcPaneGeometry: GUIPaneGeometry?
+        var wcCursorline: GUICursorline?
 
         for _ in 0..<wcSectionCount {
             guard data.count >= wcPos + 3 else { throw ProtocolDecodeError.malformed }
@@ -1582,7 +1585,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             guard data.count >= wcSStart + wcSLen else { throw ProtocolDecodeError.malformed }
 
             switch wcSId {
-            case 0x01: // Header: window_id(2) + flags(1) + cursor_row(2) + cursor_col(2) + cursor_shape(1) + scroll_left(2)
+            case 0x01: // Header: window_id(2) + flags(1) + cursor_row(2) + cursor_col(2) + cursor_shape(1) + scroll_left(2) + optional content_epoch(4)
                 guard wcSLen >= 10 else { break }
                 wcWindowId = readU16(data, wcSStart)
                 wcFlags = data[wcSStart + 2]
@@ -1590,6 +1593,9 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 wcCursorCol = readU16(data, wcSStart + 5)
                 wcCursorShape = CursorShape(rawValue: data[wcSStart + 7]) ?? .block
                 wcScrollLeft = readU16(data, wcSStart + 8)
+                if wcSLen >= 14 {
+                    wcContentEpoch = readU32(data, wcSStart + 10)
+                }
 
             case 0x02: // Rows: row_count(2) + rows...
                 guard wcSLen >= 2 else { break }
@@ -1696,6 +1702,13 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                     wcAnnotations.append(GUILineAnnotation(row: annRow, kind: annKind, fg: annFg, bg: annBg, text: annText))
                 }
 
+            case 0x08:
+                wcPaneGeometry = try decodePaneGeometry(data: data, start: wcSStart, end: wcSStart + wcSLen)
+
+            case 0x09:
+                guard wcSLen >= 5 else { break }
+                wcCursorline = GUICursorline(row: readU16(data, wcSStart), bg: readU24(data, wcSStart + 2))
+
             default: break
             }
 
@@ -1705,6 +1718,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         let content = GUIWindowContent(
             windowId: wcWindowId,
             fullRefresh: (wcFlags & 0x01) != 0,
+            contentEpoch: wcContentEpoch,
             cursorVisible: (wcFlags & 0x02) != 0,
             cursorRow: wcCursorRow,
             cursorCol: wcCursorCol,
@@ -1715,7 +1729,9 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             searchMatches: wcMatches,
             diagnosticUnderlines: wcDiags,
             documentHighlights: wcHighlights,
-            lineAnnotations: wcAnnotations
+            lineAnnotations: wcAnnotations,
+            paneGeometry: wcPaneGeometry,
+            cursorline: wcCursorline
         )
         return (.guiWindowContent(data: content), wcPos - offset)
 
@@ -3223,6 +3239,74 @@ private func decodeChatMessageCandidates(data: Data, start: Int, end: Int) throw
     default:
         throw ProtocolDecodeError.malformed
     }
+}
+
+private func decodePaneGeometry(data: Data, start: Int, end: Int) throws -> GUIPaneGeometry {
+    var pos = start
+    guard pos + 2 <= end else { throw ProtocolDecodeError.malformed }
+    let windowId = readU16(data, pos)
+    pos += 2
+
+    let totalRect = try readCellRect(data, pos, end)
+    pos += 8
+    let contentRect = try readCellRect(data, pos, end)
+    pos += 8
+    let textRect = try readCellRect(data, pos, end)
+    pos += 8
+    let gutterRect = try readCellRect(data, pos, end)
+    pos += 8
+    let clipRect = try readCellRect(data, pos, end)
+    pos += 8
+
+    guard pos + 20 <= end else { throw ProtocolDecodeError.malformed }
+    let viewport = GUIViewportSummary(
+        top: readU32(data, pos),
+        left: readU16(data, pos + 4),
+        rows: readU16(data, pos + 6),
+        cols: readU16(data, pos + 8),
+        totalLines: readU32(data, pos + 10),
+        visualRowOffset: readU16(data, pos + 14),
+        totalVisualRows: readU32(data, pos + 16)
+    )
+    pos += 20
+
+    guard pos + 5 <= end else { throw ProtocolDecodeError.malformed }
+    let metrics = GUIGutterMetrics(lineNumberWidth: readU16(data, pos), signColWidth: readU16(data, pos + 2))
+    let hitCount = Int(data[pos + 4])
+    pos += 5
+
+    var hitRegions: [GUIHitRegion] = []
+    hitRegions.reserveCapacity(hitCount)
+    for _ in 0..<hitCount {
+        guard pos + 11 <= end else { throw ProtocolDecodeError.malformed }
+        let kind = GUIHitRegion.Kind(rawValue: data[pos]) ?? .text
+        let rect = try readCellRect(data, pos + 1, end)
+        let regionWindowId = readU16(data, pos + 9)
+        hitRegions.append(GUIHitRegion(kind: kind, rect: rect, windowId: regionWindowId))
+        pos += 11
+    }
+
+    return GUIPaneGeometry(
+        windowId: windowId,
+        totalRect: totalRect,
+        contentRect: contentRect,
+        textRect: textRect,
+        gutterRect: gutterRect,
+        clipRect: clipRect,
+        viewport: viewport,
+        gutterMetrics: metrics,
+        hitRegions: hitRegions
+    )
+}
+
+private func readCellRect(_ data: Data, _ offset: Int, _ end: Int) throws -> GUICellRect {
+    guard offset + 8 <= end else { throw ProtocolDecodeError.malformed }
+    return GUICellRect(
+        row: readU16(data, offset),
+        col: readU16(data, offset + 2),
+        width: readU16(data, offset + 4),
+        height: readU16(data, offset + 6)
+    )
 }
 
 private func readU16(_ data: Data, _ offset: Int) -> UInt16 {

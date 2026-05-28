@@ -64,6 +64,30 @@ defmodule MingaEditor.Agent.View.PromptRenderWindowTest do
       assert Enum.map(model.rows, & &1.text) == ["hello"]
     end
 
+    test "uses row hashes for prompt edits without forcing full refresh" do
+      ctx = prompt_ctx("hello", input_focused: true, cursor: {0, 5}, mode: :insert)
+      model = PromptRenderWindow.build(ctx, 40, {10, 2, 40, 3})
+      old_hash = hd(model.rows).content_hash
+
+      assert model.full_refresh == false
+
+      Buffer.insert_text(ctx.ui_state.panel.prompt_buffer, "!")
+      updated = PromptRenderWindow.build(ctx, 40, {10, 2, 40, 3})
+
+      assert updated.content_epoch == model.content_epoch
+      assert updated.full_refresh == false
+      assert hd(updated.rows).content_hash != old_hash
+    end
+
+    test "bumps prompt content epoch when geometry reset fingerprint changes" do
+      ctx = prompt_ctx("hello", input_focused: true, cursor: {0, 5}, mode: :insert)
+      model = PromptRenderWindow.build(ctx, 40, {10, 2, 40, 3})
+      resized = PromptRenderWindow.build(ctx, 32, {10, 2, 32, 3})
+
+      assert resized.content_epoch != model.content_epoch
+      assert resized.full_refresh == false
+    end
+
     test "maps visual selection into prompt display coordinates" do
       ctx =
         prompt_ctx("abcdef",

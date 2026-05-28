@@ -676,25 +676,33 @@ One 0x80 message is sent per buffer window per frame. Agent chat windows do not 
 
 | Section ID | Name | Content |
 |-----------|------|--------|
-| 0x01 | Header | window_id, flags, cursor_row, cursor_col, cursor_shape, scroll_left |
+| 0x01 | Header | window_id, flags, cursor_row, cursor_col, cursor_shape, scroll_left, content_epoch |
 | 0x02 | Rows | row_count + rows (positional per row with spans) |
 | 0x03 | Selection | selection_type + coordinates |
 | 0x04 | SearchMatches | match_count + matches |
 | 0x05 | Diagnostics | range_count + diagnostic ranges |
 | 0x06 | DocumentHighlights | highlight_count + highlights |
 | 0x07 | LineAnnotations | annotation_count + annotations |
+| 0x08 | PaneGeometry | window-scoped pane geometry, viewport summary, gutter metrics, and hit regions |
+| 0x09 | Cursorline | window-local cursorline row and background color |
 
 ```
-opcode(1) + window_id(2) + flags(1) + cursor_row(2) + cursor_col(2) + cursor_shape(1) + scroll_left(2) + visible_row_count(2) + rows... + selection + search_matches + diagnostic_ranges
+opcode(1) + section_count(1) + sections...
+
+Header section:
+  window_id(2) + flags(1) + cursor_row(2) + cursor_col(2) + cursor_shape(1) + scroll_left(2) + content_epoch(4)
 
 Flags:
   bit 0: full_refresh (1 = all rows changed, 0 = incremental)
+  bit 1: cursor_visible (1 = show cursor, 0 = hide cursor)
 
 Cursor shape: 0 = block, 1 = beam, 2 = underline
 
 scroll_left: horizontal scroll offset in display columns. When > 0, the frontend
 shifts line textures and overlay quads left by scroll_left * cell_width so that
 content past the viewport's left edge becomes visible. The gutter stays fixed.
+
+content_epoch: BEAM-authored version for retained frontend resources owned by this window. A frontend must discard retained row state for a window when the epoch changes or when `full_refresh` is set.
 
 Per visual row:
   row_type(1) + buf_line(4) + content_hash(4) + text_len(4) + text(text_len) + span_count(2) + spans...
@@ -736,13 +744,25 @@ Line annotations section:
   fg/bg are 24-bit RGB. text is UTF-8, text_len is byte length.
   The frontend renders inline_pill as rounded-rect pills, inline_text as styled
   text after line content, and gutter_icon in the sign column.
+
+Cursorline section:
+  local_row(2) + r(1) + g(1) + b(1)
+
+Pane geometry section:
+  window_id(2)
+  total_rect(8) + content_rect(8) + text_rect(8) + gutter_rect(8) + clip_rect(8)
+  viewport_top(4) + viewport_left(2) + viewport_rows(2) + viewport_cols(2) + total_lines(4) + visual_row_offset(2) + total_visual_rows(4)
+  line_number_width(2) + sign_col_width(2) + hit_region_count(1)
+  Per hit region: kind(1) + rect(8) + window_id(2)
+
+Rects are cell-space tuples encoded as row(2), col(2), width(2), height(2). Hit region kinds are 1=text, 2=gutter, 3=fold_control, 4=modeline, 5=divider, 6=status_bar. Swift converts these rects to pixels, but pane ownership and input targets come from the BEAM-authored geometry.
 ```
 
 The frontend renders selection and search matches as Metal quads behind text (not baked into line textures). This enables zero re-rasterization when the selection changes. Diagnostic underlines are rendered as quads after text.
 
 `content_hash` is a per-row hash computed by the BEAM. The frontend uses it for CTLine texture cache invalidation: if the hash matches, the cached texture is reused without re-rasterization.
 
-When `gui_window_content` is present for a window, the BEAM does not send draw_text commands for that window's buffer content. Overlays (hover popups, signature help) have dedicated GUI opcodes (0x81, 0x82) and are rendered natively by SwiftUI. Gutter data (0x7B), cursorline (0x7A), and cursor position continue through their existing opcodes.
+When `gui_window_content` is present for a window, the BEAM does not send draw_text commands for that window's buffer content. Overlays (hover popups, signature help) have dedicated GUI opcodes (0x81, 0x82) and are rendered natively by SwiftUI. Gutter data (0x7B) and cursor position continue through their existing opcodes, while window-local cursorline is carried in gui_window_content section 0x09.
 
 ### 0x81 — gui_hover_popup
 

@@ -194,6 +194,22 @@ struct SlotAllocator {
         freeSlots = Array((0..<capacity).reversed())
     }
 
+    /// Clear slots belonging to one window. Capacity and unrelated window slots are preserved.
+    mutating func invalidateWindow(_ windowId: UInt16) {
+        let removed = keyToSlot.filter { key, _slotIndex in key.windowId == windowId }
+        guard !removed.isEmpty else { return }
+
+        for (_key, slotIndex) in removed {
+            slots[slotIndex].contentHash = 0
+            slots[slotIndex].pixelWidth = 0
+            freeSlots.append(slotIndex)
+        }
+
+        for key in removed.keys {
+            keyToSlot.removeValue(forKey: key)
+        }
+    }
+
     // MARK: - Private
 
     private mutating func evictOldest() -> (index: Int, key: AtlasKey)? {

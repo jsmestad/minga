@@ -143,4 +143,8 @@ final class LineTextureAtlas {
     func invalidateAll() {
         allocator.invalidateAll()
     }
+
+    func invalidateWindow(_ windowId: UInt16) {
+        allocator.invalidateWindow(windowId)
+    }
 }

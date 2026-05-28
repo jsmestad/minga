@@ -75,8 +75,12 @@ final class CommandDispatcher {
     let guiState: GUIState
 
     /// Window ids that arrived in the current frame batch. Used for input hit testing so stale
-    /// retained gutter data can still render without being clickable.
-    private(set) var currentFrameGutterWindowIds: Set<UInt16> = []
+    /// retained pane geometry can still render without being clickable.
+    private(set) var currentFrameWindowIds: Set<UInt16> = []
+
+    /// True after a protocol clear starts a real render frame. Metadata-only updates that do not
+    /// start with clear must not prune retained window geometry.
+    private var frameHasClear: Bool = false
 
     init(cols: UInt16, rows: UInt16, guiState: GUIState) {
         self.frameState = FrameState(cols: cols, rows: rows)
@@ -89,7 +93,8 @@ final class CommandDispatcher {
         case .clear:
             frameState.beginFrame()
             guiState.beginFrame()
-            currentFrameGutterWindowIds.removeAll(keepingCapacity: true)
+            currentFrameWindowIds.removeAll(keepingCapacity: true)
+            frameHasClear = true
 
         case .drawText, .drawStyledText:
             // Legacy cell-grid text rendering. All content now flows through
@@ -313,7 +318,7 @@ final class CommandDispatcher {
 
         case .guiGutter(let data):
             frameState.windowGutters[data.windowId] = data
-            currentFrameGutterWindowIds.insert(data.windowId)
+            currentFrameWindowIds.insert(data.windowId)
             if data.isActive {
                 frameState.gutterCol = UInt16(data.lineNumberWidth) + UInt16(data.signColWidth)
                 // Derive viewport top from the first gutter entry's buffer line.
@@ -325,6 +330,7 @@ final class CommandDispatcher {
 
         case .guiWindowContent(let data):
             guiState.windowContents[data.windowId] = data
+            currentFrameWindowIds.insert(data.windowId)
             // BEAM controls cursor visibility per window. When the minibuffer
             // or other overlay has focus, cursor_visible is false.
             frameState.cursorVisible = data.cursorVisible
@@ -521,10 +527,17 @@ final class CommandDispatcher {
     }
 
     private func pruneStaleWindowGeometry() {
-        guard !currentFrameGutterWindowIds.isEmpty else { return }
-        let liveWindowIds = currentFrameGutterWindowIds
+        guard frameHasClear else { return }
+        defer { frameHasClear = false }
+
+        let liveWindowIds = currentFrameWindowIds
         frameState.windowGutters = frameState.windowGutters.filter { liveWindowIds.contains($0.key) }
         frameState.windowIndentGuides = frameState.windowIndentGuides.filter { liveWindowIds.contains($0.key) }
         guiState.windowContents = guiState.windowContents.filter { liveWindowIds.contains($0.key) }
+
+        if liveWindowIds.isEmpty {
+            frameState.verticalSeparators.removeAll(keepingCapacity: true)
+            frameState.horizontalSeparators.removeAll(keepingCapacity: true)
+        }
     }
 }

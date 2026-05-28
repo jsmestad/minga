@@ -62,4 +62,15 @@ defmodule MingaEditor.Renderer.Caches do
   @doc "Creates a fresh Caches struct with first-frame defaults."
   @spec new() :: t()
   def new, do: %__MODULE__{}
+
+  @doc "Clears frontend-retained state tracking after the frontend reports ready again."
+  @spec reset_frontend_state(t()) :: t()
+  def reset_frontend_state(%__MODULE__{} = caches) do
+    %{
+      caches
+      | adapter_gui_caches: Minga.Frontend.Adapter.GUI.Caches.new(),
+        last_title: nil,
+        last_window_bg: nil
+    }
+  end
 end

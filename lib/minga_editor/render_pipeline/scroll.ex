@@ -67,7 +67,10 @@ defmodule MingaEditor.RenderPipeline.Scroll do
       :buf_version,
       :width_oracle,
       git_signs: %{},
-      visible_line_map: nil
+      visible_line_map: nil,
+      total_visual_rows: nil,
+      content_epoch: 0,
+      full_refresh: true
     ]
 
     @type t :: %__MODULE__{
@@ -91,7 +94,11 @@ defmodule MingaEditor.RenderPipeline.Scroll do
             buf_version: non_neg_integer(),
             width_oracle: Minga.Core.WidthOracle.t(),
             git_signs: %{non_neg_integer() => atom()},
-            visible_line_map: [VisibleLines.line_entry()] | [MingaEditor.DisplayMap.entry()] | nil
+            visible_line_map:
+              [VisibleLines.line_entry()] | [MingaEditor.DisplayMap.entry()] | nil,
+            total_visual_rows: non_neg_integer() | nil,
+            content_epoch: non_neg_integer(),
+            full_refresh: boolean()
           }
   end
 

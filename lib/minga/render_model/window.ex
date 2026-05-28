@@ -12,6 +12,7 @@ defmodule Minga.RenderModel.Window do
     DocumentHighlight,
     Gutter,
     IndentGuides,
+    PaneGeometry,
     Row,
     SearchMatch,
     Selection
@@ -41,6 +42,8 @@ defmodule Minga.RenderModel.Window do
             gutter: nil,
             cursorline: nil,
             indent_guides: nil,
+            geometry: nil,
+            content_epoch: 0,
             full_refresh: true
 
   @type t :: %__MODULE__{
@@ -61,6 +64,8 @@ defmodule Minga.RenderModel.Window do
           gutter: Gutter.t() | nil,
           cursorline: Cursorline.t() | nil,
           indent_guides: IndentGuides.t() | nil,
+          geometry: PaneGeometry.t() | nil,
+          content_epoch: non_neg_integer(),
           full_refresh: boolean()
         }
 end

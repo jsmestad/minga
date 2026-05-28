@@ -10,6 +10,7 @@ defmodule Minga.Frontend.Adapter.GUI do
   alias Minga.Frontend.Adapter.GUI.ChangeSummaryEncoder
   alias Minga.Frontend.Adapter.GUI.CompletionEncoder
   alias Minga.Frontend.Adapter.GUI.EditTimelineEncoder
+  alias Minga.Frontend.Adapter.GUI.EncodedFrame
   alias Minga.Frontend.Adapter.GUI.ExtensionOverlayEncoder
   alias Minga.Frontend.Adapter.GUI.ExtensionPanelEncoder
   alias Minga.Frontend.Adapter.GUI.FileTreeEncoder
@@ -71,6 +72,26 @@ defmodule Minga.Frontend.Adapter.GUI do
 
   @type window_metrics :: WindowEncoder.metrics()
 
+  @doc "Encodes a full GUI render model into Metal-critical and SwiftUI chrome command groups."
+  @spec encode(RenderModel.t(), Caches.t()) :: EncodedFrame.t()
+  def encode(%RenderModel{} = model, %Caches{} = caches) do
+    {window_content_cmds, caches, window_metrics} =
+      encode_windows_with_metrics(model.windows, caches)
+
+    {metal_ui_cmds, caches} = encode_metal_ui(model.ui, caches)
+    {chrome_cmds, caches} = encode_ui(model.ui, caches)
+
+    metal_commands = window_content_cmds ++ metal_ui_cmds
+
+    metrics = %{
+      window: window_metrics,
+      metal_ui_bytes: IO.iodata_length(metal_ui_cmds),
+      chrome_bytes: IO.iodata_length(chrome_cmds)
+    }
+
+    EncodedFrame.new(metal_commands, chrome_cmds, caches, metrics)
+  end
+
   @spec encode_windows([RenderModel.Window.t()], Caches.t()) :: {[binary()], Caches.t()}
   def encode_windows(windows, %Caches{} = caches) when is_list(windows) do
     {cmds, caches, _metrics} = encode_windows_with_metrics(windows, caches)
@@ -82,7 +103,6 @@ defmodule Minga.Frontend.Adapter.GUI do
   def encode_windows_with_metrics(windows, %Caches{} = caches) when is_list(windows) do
     {cmds, caches, metrics} =
       windows
-      |> Enum.filter(&buffer_window?/1)
       |> Enum.reduce({[], caches, empty_window_metrics()}, fn window,
                                                               {cmds_acc, caches_acc, metrics_acc} ->
         {cmds, caches, metrics} = encode_window_with_metrics(window, cmds_acc, caches_acc)
@@ -112,10 +132,6 @@ defmodule Minga.Frontend.Adapter.GUI do
 
     {Enum.reverse(cmds), caches}
   end
-
-  @spec buffer_window?(term()) :: boolean()
-  defp buffer_window?(%RenderModel.Window{content_kind: :buffer}), do: true
-  defp buffer_window?(_window), do: false
 
   @spec encode_window_with_metrics(RenderModel.Window.t(), [binary()], Caches.t()) ::
           {[binary()], Caches.t(), window_metrics()}

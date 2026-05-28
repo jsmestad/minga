@@ -128,12 +128,22 @@ defmodule MingaEditor.Session.State do
   """
   @spec invalidate_all_windows(t()) :: t()
   def invalidate_all_windows(%__MODULE__{windows: ws} = wspace) do
-    windows =
-      Enum.reduce(ws.map, ws, fn {id, _window}, acc ->
-        Windows.update(acc, id, &Window.invalidate/1)
-      end)
-
+    windows = update_all_windows(ws, &Window.invalidate/1)
     %{wspace | windows: windows}
+  end
+
+  @doc "Marks all window retained-GUI render caches reset-pending after frontend state loss."
+  @spec mark_frontend_reset_pending(t()) :: t()
+  def mark_frontend_reset_pending(%__MODULE__{windows: ws} = wspace) do
+    windows = update_all_windows(ws, &Window.mark_frontend_reset_pending/1)
+    %{wspace | windows: windows}
+  end
+
+  @spec update_all_windows(Windows.t(), (Window.t() -> Window.t())) :: Windows.t()
+  defp update_all_windows(ws, fun) do
+    Enum.reduce(ws.map, ws, fn {id, _window}, acc ->
+      Windows.update(acc, id, fun)
+    end)
   end
 
   @doc """

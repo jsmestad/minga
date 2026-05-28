@@ -13,6 +13,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
   alias Minga.Buffer
   alias Minga.Core.Decorations
   alias Minga.Core.Unicode
+  alias Minga.Core.WidthOracle
   alias Minga.Core.WrapMap
   alias MingaEditor.DisplayMap
   alias MingaEditor.FoldMap
@@ -232,7 +233,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
 
       {:ok, scroll} ->
         updated_window =
-          window
+          scroll.window
           |> Window.set_viewport(scroll.viewport)
           |> Window.detect_invalidation(
             scroll.viewport.top,
@@ -250,7 +251,16 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
             scroll.line_number_style
           )
 
-        scroll = %{scroll | window: updated_window}
+        {updated_window, content_epoch, full_refresh?} =
+          Window.prepare_render_epoch(updated_window, render_reset_fingerprint(scroll))
+
+        scroll = %{
+          scroll
+          | window: updated_window,
+            content_epoch: content_epoch,
+            full_refresh: full_refresh?
+        }
+
         new_map = Map.put(st.workspace.windows.map, win_id, updated_window)
 
         windows = Windows.set_map(st.workspace.windows, new_map)
@@ -422,6 +432,17 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
         {lines, []}
       end
 
+    {total_visual_rows, window} =
+      total_visual_rows_for_frontend(
+        state,
+        window,
+        wrap_on,
+        visible_line_map,
+        content_w,
+        width_oracle,
+        snapshot
+      )
+
     %WindowScroll{
       win_id: win_id,
       window: window,
@@ -443,7 +464,86 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
       buf_version: snapshot.version,
       width_oracle: width_oracle,
       git_signs: ContentHelpers.signs_for_window(state, window),
-      visible_line_map: visible_line_map
+      visible_line_map: visible_line_map,
+      total_visual_rows: total_visual_rows
+    }
+  end
+
+  @spec total_visual_rows_for_frontend(
+          state(),
+          Window.t(),
+          boolean(),
+          [VisibleLines.line_entry()] | [DisplayMap.entry()] | nil,
+          pos_integer(),
+          Minga.Core.WidthOracle.t(),
+          Minga.Buffer.RenderSnapshot.t()
+        ) :: {non_neg_integer() | nil, Window.t()}
+  defp total_visual_rows_for_frontend(state, window, true, nil, content_w, oracle, snapshot) do
+    if Capabilities.gui?(state.capabilities) do
+      key = total_visual_rows_cache_key(snapshot, content_w, oracle)
+
+      case Window.cached_total_visual_rows(window, key) do
+        nil ->
+          total = visual_rows_to_eof(window.buffer, 0, content_w, oracle)
+          {total, Window.put_total_visual_rows(window, key, total)}
+
+        total ->
+          {total, window}
+      end
+    else
+      {nil, window}
+    end
+  end
+
+  defp total_visual_rows_for_frontend(
+         _state,
+         window,
+         _wrap_on,
+         _visible_line_map,
+         _content_w,
+         _oracle,
+         _snapshot
+       ),
+       do: {nil, window}
+
+  @spec total_visual_rows_cache_key(
+          Minga.Buffer.RenderSnapshot.t(),
+          pos_integer(),
+          Minga.Core.WidthOracle.t()
+        ) :: term()
+  defp total_visual_rows_cache_key(snapshot, content_w, oracle) do
+    options = snapshot.options
+
+    {
+      snapshot.version,
+      content_w,
+      Map.get(options, :breakindent, true),
+      Map.get(options, :linebreak, true),
+      Map.get(options, :tab_width, 2),
+      WidthOracle.fingerprint(oracle)
+    }
+  end
+
+  @spec render_reset_fingerprint(WindowScroll.t()) :: term()
+  defp render_reset_fingerprint(%WindowScroll{} = scroll) do
+    options = scroll.snapshot.options
+
+    {
+      scroll.win_id,
+      scroll.window.buffer,
+      scroll.win_layout.total,
+      scroll.win_layout.content,
+      scroll.content_w,
+      scroll.gutter_w,
+      scroll.wrap_on,
+      scroll.line_number_style,
+      scroll.viewport.rows,
+      scroll.viewport.cols,
+      scroll.window.fold_map,
+      Map.get(options, :breakindent, true),
+      Map.get(options, :linebreak, true),
+      Map.get(options, :tab_width, 2),
+      WidthOracle.fingerprint(scroll.width_oracle)
     }
   end
 

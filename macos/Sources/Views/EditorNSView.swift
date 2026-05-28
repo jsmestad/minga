@@ -336,6 +336,10 @@ final class EditorNSView: MTKView {
     /// Nil means the event location did not resolve to a scrollable editor window, so fractional offset is disabled instead of shifting every pane.
     private var scrollTargetWindowId: UInt16?
 
+    /// Cell position that owns the current precise scroll gesture.
+    /// Nil means the gesture has not latched onto a scroll target yet.
+    private var scrollTargetCellPosition: (row: Int16, col: Int16)?
+
     /// Schedule a render on the next vsync. Multiple calls between vsyncs
     /// are coalesced by MTKView into a single draw() call.
     func renderFrame() {
@@ -373,7 +377,7 @@ final class EditorNSView: MTKView {
         }
 
         let validGutterHoverWindowId = gutterHoverWindowId.flatMap { windowId in
-            dispatcher.currentFrameGutterWindowIds.contains(windowId) ? windowId : nil
+            dispatcher.currentFrameWindowIds.contains(windowId) ? windowId : nil
         }
         let validGutterHoverRow = validGutterHoverWindowId == nil ? nil : gutterHoverRow
         let validMouseInGutter = isMouseInGutter && validGutterHoverWindowId != nil
@@ -1318,16 +1322,18 @@ final class EditorNSView: MTKView {
     private func handleTrackpadScroll(event: NSEvent, row: Int16, col: Int16, mods: UInt8) {
         if event.phase == .began {
             scrollAccumulator.reset()
-            scrollTargetWindowId = smoothScrollTargetWindowId(row: row, col: col)
-        } else if scrollTargetWindowId == nil {
-            scrollTargetWindowId = smoothScrollTargetWindowId(row: row, col: col)
+            scrollTargetWindowId = nil
+            scrollTargetCellPosition = nil
         }
+
+        establishSmoothScrollTargetIfNeeded(row: row, col: col)
+        let targetCell = Self.smoothScrollEventCellPosition(targetCell: scrollTargetCellPosition, row: row, col: col)
 
         // Vertical: smooth sub-line pixel offset
         let vEvents = scrollAccumulator.accumulateVertical(
             deltaY: event.scrollingDeltaY, cellHeight: effectiveCellHeight)
         for e in vEvents {
-            sendScrollEvent(e, row: row, col: col, mods: mods)
+            sendScrollEvent(e, row: targetCell.row, col: targetCell.col, mods: mods)
         }
         scrollPixelOffset = scrollTargetWindowId == nil ? 0 : scrollAccumulator.pixelOffsetY
 
@@ -1335,7 +1341,7 @@ final class EditorNSView: MTKView {
         let hEvents = scrollAccumulator.accumulateHorizontal(
             deltaX: event.scrollingDeltaX, cellWidth: cellWidth)
         for e in hEvents {
-            sendScrollEvent(e, row: row, col: col, mods: mods)
+            sendScrollEvent(e, row: targetCell.row, col: targetCell.col, mods: mods)
         }
 
         // Snap to zero when gesture/momentum ends
@@ -1355,10 +1361,35 @@ final class EditorNSView: MTKView {
         scrollAccumulator.reset()
         scrollPixelOffset = 0
         scrollTargetWindowId = nil
+        scrollTargetCellPosition = nil
+    }
+
+    private func establishSmoothScrollTargetIfNeeded(row: Int16, col: Int16) {
+        if scrollTargetWindowId == nil {
+            scrollTargetWindowId = smoothScrollTargetWindowId(row: row, col: col)
+        }
+
+        if scrollTargetWindowId != nil && scrollTargetCellPosition == nil {
+            scrollTargetCellPosition = (row, col)
+        }
+    }
+
+    nonisolated static func smoothScrollEventCellPosition(targetCell: (row: Int16, col: Int16)?, row: Int16, col: Int16) -> (row: Int16, col: Int16) {
+        targetCell ?? (row, col)
     }
 
     private func smoothScrollTargetWindowId(row: Int16, col: Int16) -> UInt16? {
-        EditorNSView.smoothScrollTargetWindowId(row: row, col: col, windowGutters: dispatcher.frameState.windowGutters)
+        if let contents = guiState?.windowContents {
+            let rowValue = Int(row)
+            let colValue = Int(col)
+            let geometry = contents.values
+                .compactMap(\.paneGeometry)
+                .filter { rowColInCellRect(row: rowValue, col: colValue, rect: $0.contentRect) }
+                .max { lhs, rhs in lhs.contentRect.col < rhs.contentRect.col }
+            if let geometry { return geometry.windowId }
+        }
+
+        return EditorNSView.smoothScrollTargetWindowId(row: row, col: col, windowGutters: dispatcher.frameState.windowGutters)
     }
 
     private func clearSmoothScrollOffsetIfPointerLeftTarget(row: Int16, col: Int16) {
@@ -1600,28 +1631,12 @@ final class EditorNSView: MTKView {
     }
 
     private func dividerHitState(at point: NSPoint) -> DividerCursorState {
-        let fs = dispatcher.frameState
-        let hitHalfTolerance = dividerHitHalfTolerance
-        let displayCellH = effectiveCellHeight
-
-        for vertical in fs.verticalSeparators {
-            let x = CGFloat(vertical.col) * cellWidth
-            let startY = CGFloat(vertical.startRow) * displayCellH
-            let endY = CGFloat(Int(vertical.endRow) + 1) * displayCellH
-            if abs(point.x - x) <= hitHalfTolerance && point.y >= startY && point.y < endY {
-                return .vertical
-            }
+        if let region = dividerHitRegion(at: point) {
+            return region.rect.height > region.rect.width ? .vertical : .horizontal
         }
 
-        for horizontal in fs.horizontalSeparators {
-            let x = CGFloat(horizontal.col) * cellWidth
-            let y = CGFloat(horizontal.row) * displayCellH + (displayCellH * 0.5) - (0.5 / (window?.backingScaleFactor ?? 1.0))
-            let width = CGFloat(horizontal.width) * cellWidth
-            if abs(point.y - y) <= hitHalfTolerance && point.x >= x && point.x < x + width {
-                return .horizontal
-            }
-        }
-
+        if verticalSeparatorColFromFrameState(at: point) != nil { return .vertical }
+        if horizontalSeparatorRowFromFrameState(at: point) != nil { return .horizontal }
         return .none
     }
 
@@ -1694,7 +1709,12 @@ final class EditorNSView: MTKView {
     private func gutterHit(at point: NSPoint) -> (gutter: Wire.WindowGutter, rowIndex: Int)? {
         let screenRow = Int(point.y / effectiveCellHeight)
 
-        for windowId in dispatcher.currentFrameGutterWindowIds {
+        if let geometry = paneGeometryGutterHit(at: point, screenRow: screenRow),
+           let gutter = dispatcher.frameState.windowGutters[geometry.windowId] {
+            return (gutter, screenRow - Int(geometry.gutterRect.row))
+        }
+
+        for windowId in dispatcher.currentFrameWindowIds {
             guard let gutter = dispatcher.frameState.windowGutters[windowId] else { continue }
             let startRow = Int(gutter.contentRow)
             let endRow = startRow + Int(gutter.contentHeight)
@@ -1740,37 +1760,17 @@ final class EditorNSView: MTKView {
     }
 
     private func verticalSeparatorCol(at point: NSPoint) -> UInt16? {
-        let fs = dispatcher.frameState
-        let hitHalfTolerance = dividerHitHalfTolerance
-        let displayCellH = effectiveCellHeight
-
-        for vertical in fs.verticalSeparators {
-            let x = CGFloat(vertical.col) * cellWidth
-            let startY = CGFloat(vertical.startRow) * displayCellH
-            let endY = CGFloat(Int(vertical.endRow) + 1) * displayCellH
-            if abs(point.x - x) <= hitHalfTolerance && point.y >= startY && point.y < endY {
-                return vertical.col
-            }
+        if let region = dividerHitRegion(at: point), region.rect.height > region.rect.width {
+            return region.rect.col
         }
-
-        return nil
+        return verticalSeparatorColFromFrameState(at: point)
     }
 
     private func horizontalSeparatorRow(at point: NSPoint) -> UInt16? {
-        let fs = dispatcher.frameState
-        let hitHalfTolerance = dividerHitHalfTolerance
-        let displayCellH = effectiveCellHeight
-
-        for horizontal in fs.horizontalSeparators {
-            let x = CGFloat(horizontal.col) * cellWidth
-            let y = CGFloat(horizontal.row) * displayCellH + (displayCellH * 0.5) - (0.5 / (window?.backingScaleFactor ?? 1.0))
-            let width = CGFloat(horizontal.width) * cellWidth
-            if abs(point.y - y) <= hitHalfTolerance && point.x >= x && point.x < x + width {
-                return horizontal.row
-            }
+        if let region = dividerHitRegion(at: point), region.rect.width >= region.rect.height {
+            return region.rect.row
         }
-
-        return nil
+        return horizontalSeparatorRowFromFrameState(at: point)
     }
 
     private func cellColumn(at point: NSPoint, row: Int16) -> Int16 {
@@ -1793,7 +1793,13 @@ final class EditorNSView: MTKView {
         guard row >= 0 else { return nil }
         let rowValue = Int(row)
         let frameState = dispatcher.frameState
-        let windowIds = dispatcher.currentFrameGutterWindowIds.isEmpty ? Set(frameState.windowGutters.keys) : dispatcher.currentFrameGutterWindowIds
+
+        if let geometry = paneGeometryHit(at: point, screenRow: rowValue),
+           let gutter = frameState.windowGutters[geometry.windowId] {
+            return gutter
+        }
+
+        let windowIds = dispatcher.currentFrameWindowIds.isEmpty ? Set(frameState.windowGutters.keys) : dispatcher.currentFrameWindowIds
 
         return windowIds.compactMap { frameState.windowGutters[$0] }
             .filter { gutter in
@@ -1804,6 +1810,111 @@ final class EditorNSView: MTKView {
                 return rowValue >= startRow && rowValue < endRow && point.x >= startX && point.x < endX
             }
             .max { lhs, rhs in lhs.contentCol < rhs.contentCol }
+    }
+
+    private func paneGeometryGutterHit(at point: NSPoint, screenRow: Int) -> GUIPaneGeometry? {
+        paneGeometries(at: point, screenRow: screenRow)
+            .filter { geometry in
+                geometry.hitRegions.contains { region in
+                    (region.kind == .gutter || region.kind == .foldControl) && pointInCellRect(point, screenRow: screenRow, rect: region.rect)
+                }
+            }
+            .max { lhs, rhs in lhs.gutterRect.col < rhs.gutterRect.col }
+    }
+
+    private func paneGeometryHit(at point: NSPoint, screenRow: Int) -> GUIPaneGeometry? {
+        paneGeometries(at: point, screenRow: screenRow)
+            .max { lhs, rhs in lhs.totalRect.col < rhs.totalRect.col }
+    }
+
+    private func paneGeometries(at point: NSPoint, screenRow: Int) -> [GUIPaneGeometry] {
+        guard let contents = guiState?.windowContents else { return [] }
+        let rawCol = Int(point.x / cellWidth)
+
+        return contents.values.compactMap(\.paneGeometry).filter { geometry in
+            rowColInCellRect(row: screenRow, col: rawCol, rect: geometry.totalRect)
+        }
+    }
+
+    private func hitRegion(at point: NSPoint, kind: GUIHitRegion.Kind) -> GUIHitRegion? {
+        guard let contents = guiState?.windowContents else { return nil }
+        let screenRow = Int(point.y / effectiveCellHeight)
+        let rawCol = Int(point.x / cellWidth)
+
+        return contents.values
+            .compactMap(\.paneGeometry)
+            .flatMap(\.hitRegions)
+            .filter { region in
+                region.kind == kind && rowColInCellRect(row: screenRow, col: rawCol, rect: region.rect)
+            }
+            .max { lhs, rhs in lhs.rect.col < rhs.rect.col }
+    }
+
+    private func dividerHitRegion(at point: NSPoint) -> GUIHitRegion? {
+        guard let contents = guiState?.windowContents else { return nil }
+        let screenRow = Int(point.y / effectiveCellHeight)
+        let rawCol = Int(point.x / cellWidth)
+
+        return contents.values
+            .compactMap(\.paneGeometry)
+            .flatMap(\.hitRegions)
+            .filter { region in
+                region.kind == .divider && pointInDividerHitBounds(point, screenRow: screenRow, rawCol: rawCol, region: region)
+            }
+            .max { lhs, rhs in lhs.rect.col < rhs.rect.col }
+    }
+
+    private func pointInDividerHitBounds(_ point: NSPoint, screenRow: Int, rawCol: Int, region: GUIHitRegion) -> Bool {
+        if region.rect.height > region.rect.width {
+            let startRow = Int(region.rect.row)
+            let endRow = startRow + Int(region.rect.height)
+            return screenRow >= startRow && screenRow < endRow && pointInDividerLineTolerance(point, region: region)
+        }
+
+        let startCol = Int(region.rect.col)
+        let endCol = startCol + Int(region.rect.width)
+        return rawCol >= startCol && rawCol < endCol && pointInDividerLineTolerance(point, region: region)
+    }
+
+    private func pointInDividerLineTolerance(_ point: NSPoint, region: GUIHitRegion) -> Bool {
+        if region.rect.height > region.rect.width {
+            let lineX = CGFloat(region.rect.col) * cellWidth
+            return abs(point.x - lineX) <= dividerHitHalfTolerance
+        }
+
+        let lineY = CGFloat(region.rect.row) * effectiveCellHeight + effectiveCellHeight * 0.5
+        return abs(point.y - lineY) <= dividerHitHalfTolerance
+    }
+
+    private func verticalSeparatorColFromFrameState(at point: NSPoint) -> UInt16? {
+        let screenRow = Int(point.y / effectiveCellHeight)
+        return dispatcher.frameState.verticalSeparators.first { separator in
+            let lineX = CGFloat(separator.col) * cellWidth
+            return screenRow >= Int(separator.startRow) && screenRow <= Int(separator.endRow) && abs(point.x - lineX) <= dividerHitHalfTolerance
+        }?.col
+    }
+
+    private func horizontalSeparatorRowFromFrameState(at point: NSPoint) -> UInt16? {
+        let rawCol = Int(point.x / cellWidth)
+        return dispatcher.frameState.horizontalSeparators.first { separator in
+            let lineY = CGFloat(separator.row) * effectiveCellHeight + effectiveCellHeight * 0.5
+            let startCol = Int(separator.col)
+            let endCol = startCol + Int(separator.width)
+            return rawCol >= startCol && rawCol < endCol && abs(point.y - lineY) <= dividerHitHalfTolerance
+        }?.row
+    }
+
+    private func pointInCellRect(_ point: NSPoint, screenRow: Int, rect: GUICellRect) -> Bool {
+        let rawCol = Int(point.x / cellWidth)
+        return rowColInCellRect(row: screenRow, col: rawCol, rect: rect)
+    }
+
+    private func rowColInCellRect(row: Int, col: Int, rect: GUICellRect) -> Bool {
+        let startRow = Int(rect.row)
+        let endRow = startRow + Int(rect.height)
+        let startCol = Int(rect.col)
+        let endCol = startCol + Int(rect.width)
+        return row >= startRow && row < endRow && col >= startCol && col < endCol
     }
 
     private func fallbackCellColumn(at point: NSPoint) -> Int16 {

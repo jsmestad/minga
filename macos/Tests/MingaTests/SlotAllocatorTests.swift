@@ -192,6 +192,26 @@ struct SlotAllocatorCapacityTests {
             Issue.record("Expected .reserved(.newKey) after invalidate, got \(r)"); return
         }
     }
+
+    @Test("invalidateWindow clears only slots for that window")
+    func invalidateWindow() {
+        var alloc = SlotAllocator()
+        alloc.ensureCapacity(maxSlots: 4)
+        let win1 = AtlasKey.bufferRow(windowId: 1, row: 0)
+        let win2 = AtlasKey.bufferRow(windowId: 2, row: 0)
+
+        guard case .reserved(let slot1, .newKey) = alloc.lookupOrReserve(key: win1, contentHash: 11) else { Issue.record("Expected win1 reserve"); return }
+        alloc.markUploaded(slotIndex: slot1, contentHash: 11, pixelWidth: 100)
+        guard case .reserved(let slot2, .newKey) = alloc.lookupOrReserve(key: win2, contentHash: 22) else { Issue.record("Expected win2 reserve"); return }
+        alloc.markUploaded(slotIndex: slot2, contentHash: 22, pixelWidth: 100)
+
+        alloc.invalidateWindow(1)
+
+        #expect(alloc.lookupOrReserve(key: win2, contentHash: 22) == .hit(slotIndex: slot2))
+        guard case .reserved(_, .newKey) = alloc.lookupOrReserve(key: win1, contentHash: 11) else {
+            Issue.record("Expected win1 to be evicted by window invalidation"); return
+        }
+    }
 }
 
 @Suite("SlotAllocator — UV Computation")

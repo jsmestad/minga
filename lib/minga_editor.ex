@@ -431,7 +431,8 @@ defmodule MingaEditor do
     new_state = %{
       (state
        |> EditorState.set_terminal_viewport(vp)
-       |> EditorState.set_viewport(vp))
+       |> EditorState.set_viewport(vp)
+       |> EditorState.reset_frontend_render_state())
       | capabilities: caps,
         layout: nil
     }
