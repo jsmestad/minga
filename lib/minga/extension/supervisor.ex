@@ -328,6 +328,7 @@ defmodule Minga.Extension.Supervisor do
     cmd_registry = Keyword.get(opts, :command_registry, Minga.Command.Registry)
     keymap = Keyword.get(opts, :keymap, Minga.Keymap.Active)
     mark_start_attempt(registry, name)
+    purge_recompilable_module(entry)
 
     with {:ok, module} <-
            run_lifecycle_phase(name, :load, opts, fn -> compile_extension(entry.path) end),
@@ -1372,6 +1373,16 @@ defmodule Minga.Extension.Supervisor do
         {:error, "application #{package_atom} not found after Mix.install"}
     end
   end
+
+  @spec purge_recompilable_module(ExtRegistry.entry()) :: :ok
+  defp purge_recompilable_module(%{source_type: source_type, module: module})
+       when source_type in [:path, :git] and is_atom(module) and module != nil do
+    :code.purge(module)
+    :code.delete(module)
+    :ok
+  end
+
+  defp purge_recompilable_module(_entry), do: :ok
 
   @spec compile_extension(String.t()) :: {:ok, module()} | {:error, String.t()}
   defp compile_extension(path) do

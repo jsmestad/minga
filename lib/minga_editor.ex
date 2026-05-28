@@ -73,6 +73,7 @@ defmodule MingaEditor do
           | {:width, pos_integer()}
           | {:height, pos_integer()}
           | {:editing_model, :vim | :cua}
+          | {:view_mode, Minga.CLI.view_mode()}
           | {:shell, :traditional | :board | module()}
           | {:project_root, String.t() | nil}
           | {:swap_dir, String.t()}

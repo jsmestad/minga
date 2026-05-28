@@ -1910,13 +1910,21 @@ defmodule Minga.Extension.LifecycleContractTest do
 
     assert_receive {:stale_monitor_terminal_exit_blocked, monitor_pid}
 
-    assert {:ok, pid_b} =
-             ExtSupervisor.start_extension(
-               ctx.supervisor,
-               ctx.registry,
-               :stale_monitor_race,
-               entry
-             )
+    restart_log =
+      capture_log(fn ->
+        result =
+          ExtSupervisor.start_extension(
+            ctx.supervisor,
+            ctx.registry,
+            :stale_monitor_race,
+            entry
+          )
+
+        send(test_pid, {:stale_monitor_restart_result, result})
+      end)
+
+    assert_receive {:stale_monitor_restart_result, {:ok, pid_b}}
+    refute restart_log =~ "redefining module Minga.TestExtensions.StaleMonitorRace"
 
     assert_receive {:telemetry, [:minga, :extension, :lifecycle, :crash_restart_count],
                     %{count: 0}, %{extension: :stale_monitor_race, phase: :crash_restart_count}}
