@@ -492,12 +492,12 @@ defmodule Minga.Project do
 
   @spec add_to_known(t(), String.t()) :: t()
   defp add_to_known(state, root) do
-    if root in state.known_projects do
-      state
-    else
+    if persistable_known_project?(root) and root not in state.known_projects do
       new_known = [root | state.known_projects]
       if persist_known_projects?(), do: persist_known_projects(new_known)
       %{state | known_projects: new_known}
+    else
+      state
     end
   end
 
@@ -534,12 +534,32 @@ defmodule Minga.Project do
       {:ok, content} ->
         content
         |> String.split("\n", trim: true)
-        |> Enum.filter(&File.dir?/1)
+        |> Enum.filter(&(File.dir?(&1) and persistable_known_project?(&1)))
 
       {:error, _} ->
         []
     end
   end
+
+  @spec persistable_known_project?(String.t()) :: boolean()
+  defp persistable_known_project?(root) when is_binary(root) do
+    root
+    |> Path.split()
+    |> test_fixture_project_segments?()
+    |> Kernel.not()
+  end
+
+  @spec test_fixture_project_segments?([String.t()]) :: boolean()
+  defp test_fixture_project_segments?(["tmp", module_dir | rest]) do
+    test_fixture_module_dir?(module_dir) or test_fixture_project_segments?([module_dir | rest])
+  end
+
+  defp test_fixture_project_segments?([_head | rest]), do: test_fixture_project_segments?(rest)
+  defp test_fixture_project_segments?([]), do: false
+
+  @spec test_fixture_module_dir?(String.t()) :: boolean()
+  defp test_fixture_module_dir?("MingaEditor." <> _rest), do: true
+  defp test_fixture_module_dir?(_module_dir), do: false
 
   @spec make_relative(String.t(), String.t()) :: String.t() | nil
   defp make_relative(abs_path, root) do

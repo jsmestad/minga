@@ -254,10 +254,12 @@ struct PickerOverlay: View {
 
     @ViewBuilder
     private func itemIcon(_ item: PickerItem) -> some View {
-        Text(item.icon)
-            .font(.custom("Symbols Nerd Font Mono", size: 13))
-            .foregroundStyle(iconColor(item.iconColor))
-            .frame(width: 18, alignment: .center)
+        if item.hasLeadingIcon {
+            Text(item.icon)
+                .font(.custom("Symbols Nerd Font Mono", size: 13))
+                .foregroundStyle(iconColor(item.iconColor))
+                .frame(width: 18, alignment: .center)
+        }
     }
 
     @ViewBuilder

@@ -16,25 +16,36 @@ struct PickerItem: Identifiable {
     let isTwoLine: Bool
     let isMarked: Bool
 
-    /// Extract the first character as the icon (Nerd Font devicon).
+    /// Whether the label starts with a separate icon glyph.
+    var hasLeadingIcon: Bool {
+        guard let first = label.first else { return false }
+        return first.isPrivateUseScalar
+    }
+
+    /// Extract the leading icon glyph when the label intentionally includes one.
     var icon: String {
-        guard let first = label.first else { return "" }
+        guard hasLeadingIcon, let first = label.first else { return "" }
         return String(first)
     }
 
-    /// The label text without the leading icon character.
+    /// The label text without the leading icon glyph and its spacer.
     var displayLabel: String {
-        guard label.count > 1 else { return label }
-        return String(label.dropFirst())
+        String(label.dropFirst(displayPrefixLength))
     }
 
-    /// Match positions adjusted for the display label (offset by -1 to skip icon).
+    /// Match positions adjusted for the visible label after removing an icon prefix.
     /// Only includes positions that fall within the display label range.
     var displayMatchPositions: Set<Int> {
         Set(matchPositions.compactMap { pos in
-            let adjusted = Int(pos) - 1  // Skip icon character
+            let adjusted = Int(pos) - displayPrefixLength
             return adjusted >= 0 && adjusted < displayLabel.count ? adjusted : nil
         })
+    }
+
+    private var displayPrefixLength: Int {
+        guard hasLeadingIcon else { return 0 }
+        let afterIcon = label.dropFirst()
+        return afterIcon.first == " " ? 2 : 1
     }
 }
 
@@ -136,5 +147,16 @@ final class PickerState {
         hasPreview = false
         loadStatus = .ready
         actionMenu = nil
+    }
+}
+
+private extension Character {
+    var isPrivateUseScalar: Bool {
+        unicodeScalars.contains { scalar in
+            let value = scalar.value
+            return (value >= 0xE000 && value <= 0xF8FF) ||
+                (value >= 0xF0000 && value <= 0xFFFFD) ||
+                (value >= 0x100000 && value <= 0x10FFFD)
+        }
     }
 }
