@@ -52,10 +52,10 @@ Add cheap checks that make the intended architecture hard to drift away from.
 
 Acceptance criteria:
 
-- A test or Credo check fails when a `Minga.RenderModel.UI.*` struct defines `:encoded`, `:selection_encoded`, `:cmd`, or another protocol-binary payload field.
-- A test or Credo check fails when files under `lib/minga_editor/render_model/` alias `MingaEditor.Frontend.Protocol.GUI`.
+- A test or Credo check fails when a new `Minga.RenderModel.UI.*` struct defines `:encoded`, `:selection_encoded`, `:cmd`, or another protocol-binary payload field. Existing pre-encoded components remain in an explicit legacy allowlist that must shrink as each component migrates.
+- A test or Credo check fails when a new file under `lib/minga_editor/render_model/` references `MingaEditor.Frontend.Protocol.GUI`. Existing legacy references remain in an explicit allowlist that must shrink as each builder migrates.
 - `MingaEditor.Renderer.Caches` no longer carries stale `last_gui_*` fields that are not read anywhere.
-- `docs/RETAINED_GUI_RENDERING_SPEC.md` and this plan agree on what counts as complete.
+- `docs/RETAINED_GUI_RENDERING_SPEC.md` and the executable guardrail allowlists agree on what counts as remaining legacy debt.
 
 #### 1. Introduce the top-level render model
 
@@ -104,7 +104,7 @@ Already semantic or mostly semantic:
 - `notifications`
 - `search_state`
 - `git_status`
-- `agent_context`
+- `agent_context` (semantic model, but `agent_context_builder` still has a tracked legacy `MingaEditor.Frontend.Protocol.GUI` type dependency)
 - `gutter_separator`
 - `split_separators`
 

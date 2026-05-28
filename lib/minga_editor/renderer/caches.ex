@@ -9,13 +9,13 @@ defmodule MingaEditor.Renderer.Caches do
 
   ## Ownership by stage
 
-  - **Chrome** (`chrome_prev_*`): `RenderPipeline` — stage 5 fingerprint cache.
+  - **Chrome** (`chrome_prev_*`): `RenderPipeline`, stage 5 fingerprint cache.
   - **Content** (`search_decoration_cache`, `doc_highlight_cache`): consumed by
     `ContentHelpers.build_render_ctx/3`; cleared when the fingerprint changes.
     `block_render_cache` is a within-frame cache reset after each window render.
   - **Emit** (`emit_prev_*`, `last_title`, `last_window_bg`):
     consumed by `Frontend.Emit` stage 7.
-  - **GUI chrome** (`last_gui_*`): fingerprint caches for structured GUI payloads.
+  - **Adapter** (`adapter_gui_caches`): core GUI adapter fingerprint state.
   """
 
   defstruct [
@@ -39,29 +39,6 @@ defmodule MingaEditor.Renderer.Caches do
     last_title: nil,
     last_window_bg: nil,
 
-    # ── GUI chrome fingerprints ───────────────────────────────────────────────
-    last_gui_theme: nil,
-    last_gui_tab_bar_fp: nil,
-    last_gui_workspaces_fp: nil,
-    last_gui_file_tree_fp: nil,
-    last_gui_sidebars_fp: nil,
-    last_gui_git_status_fp: nil,
-    last_gui_which_key_fp: nil,
-    last_gui_completion_fp: nil,
-    last_gui_breadcrumb_fp: nil,
-    last_gui_minibuffer: nil,
-    last_gui_picker_fp: nil,
-    last_gui_agent_chat_fp: nil,
-    last_gui_signature_help_fp: nil,
-    last_gui_notifications_fp: nil,
-    last_gui_observatory_fp: nil,
-    last_gui_bottom_panel_fp: nil,
-    last_gui_board_fp: nil,
-    last_gui_agent_context_fp: nil,
-    last_gui_change_summary_fp: nil,
-    last_gui_edit_timeline_fp: nil,
-    last_gui_search_state_fp: nil,
-
     # ── Core adapter caches (render-model migration) ─────────────────────────
     adapter_gui_caches: Minga.Frontend.Adapter.GUI.Caches.new()
   ]
@@ -79,35 +56,6 @@ defmodule MingaEditor.Renderer.Caches do
           emit_prev_editing_mode: atom() | nil,
           last_title: String.t() | nil,
           last_window_bg: non_neg_integer() | nil,
-          last_gui_theme: integer() | nil,
-          last_gui_tab_bar_fp: integer() | nil,
-          last_gui_workspaces_fp: integer() | nil,
-          last_gui_file_tree_fp:
-            integer()
-            | {:ready, non_neg_integer(), non_neg_integer()}
-            | {:file_tree_state, String.t(), non_neg_integer(), term()}
-            | {:no_tree, String.t()}
-            | nil,
-          last_gui_sidebars_fp: integer() | nil,
-          last_gui_git_status_fp:
-            integer()
-            | {:no_git, boolean(), MingaEditor.Frontend.Protocol.GUI.git_toast() | nil}
-            | nil,
-          last_gui_which_key_fp: integer() | nil,
-          last_gui_completion_fp: integer() | nil,
-          last_gui_breadcrumb_fp: integer() | nil,
-          last_gui_minibuffer: term(),
-          last_gui_picker_fp: integer() | :closed | nil,
-          last_gui_agent_chat_fp: integer() | :not_visible | nil,
-          last_gui_signature_help_fp: integer() | nil,
-          last_gui_notifications_fp: integer() | nil,
-          last_gui_observatory_fp: integer() | :hidden | nil,
-          last_gui_bottom_panel_fp: integer() | nil,
-          last_gui_board_fp: integer() | :dismissed | nil,
-          last_gui_agent_context_fp: term(),
-          last_gui_change_summary_fp: integer() | :hidden | nil,
-          last_gui_edit_timeline_fp: integer() | :hidden | nil,
-          last_gui_search_state_fp: integer() | nil,
           adapter_gui_caches: Minga.Frontend.Adapter.GUI.Caches.t()
         }
 
