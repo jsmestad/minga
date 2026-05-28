@@ -422,6 +422,16 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
         {lines, []}
       end
 
+    total_visual_rows =
+      total_visual_rows_for_frontend(
+        state,
+        window.buffer,
+        wrap_on,
+        visible_line_map,
+        content_w,
+        width_oracle
+      )
+
     %WindowScroll{
       win_id: win_id,
       window: window,
@@ -443,9 +453,36 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
       buf_version: snapshot.version,
       width_oracle: width_oracle,
       git_signs: ContentHelpers.signs_for_window(state, window),
-      visible_line_map: visible_line_map
+      visible_line_map: visible_line_map,
+      total_visual_rows: total_visual_rows
     }
   end
+
+  @spec total_visual_rows_for_frontend(
+          state(),
+          pid(),
+          boolean(),
+          [VisibleLines.line_entry()] | [DisplayMap.entry()] | nil,
+          pos_integer(),
+          Minga.Core.WidthOracle.t()
+        ) :: non_neg_integer() | nil
+  defp total_visual_rows_for_frontend(state, buf, true, nil, content_w, oracle) do
+    if Capabilities.gui?(state.capabilities) do
+      visual_rows_to_eof(buf, 0, content_w, oracle)
+    else
+      nil
+    end
+  end
+
+  defp total_visual_rows_for_frontend(
+         _state,
+         _buf,
+         _wrap_on,
+         _visible_line_map,
+         _content_w,
+         _oracle
+       ),
+       do: nil
 
   @spec maybe_adjust_wrapped_viewport(map()) ::
           {Viewport.t(), non_neg_integer(), map(), [String.t()], String.t(), non_neg_integer()}

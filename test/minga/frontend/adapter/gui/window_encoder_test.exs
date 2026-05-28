@@ -12,11 +12,15 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
   alias Minga.RenderModel.Window.DocumentHighlight
   alias Minga.RenderModel.Window.Gutter
   alias Minga.RenderModel.Window.GutterEntry
+  alias Minga.RenderModel.Window.GutterMetrics
+  alias Minga.RenderModel.Window.HitRegion
   alias Minga.RenderModel.Window.IndentGuides
+  alias Minga.RenderModel.Window.PaneGeometry
   alias Minga.RenderModel.Window.Row
   alias Minga.RenderModel.Window.SearchMatch
   alias Minga.RenderModel.Window.Selection
   alias Minga.RenderModel.Window.Span
+  alias Minga.RenderModel.Window.Viewport
   alias Minga.Test.GUIWindowDecoder
 
   defp window(opts) do
@@ -38,7 +42,27 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
       gutter: Keyword.get(opts, :gutter, nil),
       cursorline: Keyword.get(opts, :cursorline, nil),
       indent_guides: Keyword.get(opts, :indent_guides, nil),
+      geometry: Keyword.get(opts, :geometry, nil),
+      content_epoch: Keyword.get(opts, :content_epoch, 0),
       full_refresh: Keyword.get(opts, :full_refresh, true)
+    }
+  end
+
+  defp geometry_model do
+    %PaneGeometry{
+      window_id: 1,
+      total_rect: {1, 2, 40, 12},
+      content_rect: {2, 3, 38, 10},
+      text_rect: {2, 8, 33, 10},
+      gutter_rect: {2, 3, 5, 10},
+      clip_rect: {2, 8, 33, 10},
+      viewport: %Viewport{top: 5, left: 2, rows: 10, cols: 33, total_lines: 200},
+      gutter_metrics: %GutterMetrics{line_number_width: 2, sign_col_width: 3},
+      hit_regions: [
+        %HitRegion{kind: :text, rect: {2, 8, 33, 10}, window_id: 1},
+        %HitRegion{kind: :gutter, rect: {2, 3, 5, 10}, window_id: 1},
+        %HitRegion{kind: :fold_control, rect: {2, 7, 1, 10}, window_id: 1}
+      ]
     }
   end
 
@@ -153,6 +177,22 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
     assert hd(decoded.diagnostic_ranges).severity == :warning
     assert hd(decoded.document_highlights).kind == :write
     assert hd(decoded.annotations).text == "hint"
+  end
+
+  test "encodes content epoch and pane geometry" do
+    decoded =
+      window(content_epoch: 42, geometry: geometry_model())
+      |> WindowEncoder.encode_window_content()
+      |> GUIWindowDecoder.decode()
+
+    assert decoded.content_epoch == 42
+    assert decoded.geometry.window_id == 1
+    assert decoded.geometry.total_rect == {1, 2, 40, 12}
+    assert decoded.geometry.text_rect == {2, 8, 33, 10}
+    assert decoded.geometry.viewport.top == 5
+    assert decoded.geometry.viewport.cols == 33
+    assert decoded.geometry.gutter_metrics == %{line_number_width: 2, sign_col_width: 3}
+    assert Enum.map(decoded.geometry.hit_regions, & &1.kind) == [:text, :gutter, :fold_control]
   end
 
   test "encodes every selection type" do

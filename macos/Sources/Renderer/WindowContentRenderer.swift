@@ -136,8 +136,8 @@ final class WindowContentRenderer {
     ///
     /// Returns the cached texture if the content hash matches, or
     /// rasterizes a new texture from the row's text + spans.
-    func renderRow(displayRow: UInt16, row: GUIVisualRow) -> CachedLineTexture? {
-        let hash = Int(row.contentHash)
+    func renderRow(displayRow: UInt16, row: GUIVisualRow, contentEpoch: UInt32 = 0) -> CachedLineTexture? {
+        let hash = epochContentHash(row.contentHash, contentEpoch)
 
         // Cache hit check.
         if var cached = lineCache[displayRow], cached.contentHash == hash {
@@ -198,9 +198,9 @@ final class WindowContentRenderer {
     /// Render a visual row into an atlas slot.
     ///
     /// Checks the atlas cache first using a window-scoped buffer-row key. On miss, rasterizes and uploads.
-    func renderRowToAtlas(displayRow: UInt16, row: GUIVisualRow, windowId: UInt16,
+    func renderRowToAtlas(displayRow: UInt16, row: GUIVisualRow, windowId: UInt16, contentEpoch: UInt32 = 0,
                           atlas: LineTextureAtlas, metrics: inout FrameMetrics) -> AtlasEntry? {
-        let hash = Int(row.contentHash)
+        let hash = epochContentHash(row.contentHash, contentEpoch)
         let key = AtlasKey.bufferRow(windowId: windowId, row: displayRow)
 
         guard !row.text.isEmpty else { return nil }
@@ -213,6 +213,10 @@ final class WindowContentRenderer {
         case .reserved(let reservation):
             return rasterizeRowToAtlas(row: row, reservation: reservation, atlas: atlas, metrics: &metrics)
         }
+    }
+
+    private func epochContentHash(_ contentHash: UInt32, _ contentEpoch: UInt32) -> Int {
+        Int(contentHash) &* 31 &+ Int(contentEpoch)
     }
 
     private func rasterizeRowToAtlas(row: GUIVisualRow, reservation: Reservation,

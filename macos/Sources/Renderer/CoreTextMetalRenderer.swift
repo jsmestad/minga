@@ -343,6 +343,11 @@ final class CoreTextMetalRenderer {
             atlas.ensureCapacity(maxSlots: neededSlots, width: atlasPixelWidth)
             atlas.beginFrame()
 
+            if windowContents.values.contains(where: { $0.fullRefresh }) {
+                atlas.invalidateAll()
+                windowContentRenderer?.invalidateAll()
+            }
+
             if neededSlots > maxInstanceSlots {
                 maxInstanceSlots = neededSlots
                 instanceBuffer = device.makeBuffer(
@@ -431,16 +436,19 @@ final class CoreTextMetalRenderer {
                     continue
                 }
 
+                let paneGeometry = content.paneGeometry
                 let windowScrollOffsetPx = CoreTextMetalRenderer.smoothScrollOffset(
                     for: content.windowId,
                     targetWindowId: scrollTargetWindowId,
                     scrollOffsetPx: smoothScrollOffsetPx
                 )
-                let windowRowOffset = Float(gutter.contentRow) * displayCellH * scale
+                let windowRowOffset = Float(paneGeometry?.textRect.row ?? gutter.contentRow) * displayCellH * scale
                 let scrollableWindowRowOffset = windowRowOffset - windowScrollOffsetPx.y
-                let gutterWidth = Float(gutter.lineNumberWidth) + Float(gutter.signColWidth)
-                let contentColOffset = (Float(gutter.contentCol) + gutterWidth) * cellW * scale + gutterLeftMarginPx + gutterPaddingPx
+                let fallbackTextCol = UInt16(Int(gutter.contentCol) + Int(gutter.lineNumberWidth) + Int(gutter.signColWidth))
+                let textCol = Float(paneGeometry?.textRect.col ?? fallbackTextCol)
+                let contentColOffset = textCol * cellW * scale + gutterLeftMarginPx + gutterPaddingPx
                 let windowBounds = CoreTextMetalRenderer.windowHorizontalBounds(
+                    geometry: paneGeometry,
                     gutter: gutter,
                     frameCols: frameState.cols,
                     cellW: cellW,
@@ -454,6 +462,7 @@ final class CoreTextMetalRenderer {
                 let scrollLeftInt = Int(content.scrollLeft)
                 let hScrollPx = Float(scrollLeftInt) * cellW * scale
                 let contentCols = CoreTextMetalRenderer.visibleTextCols(
+                    geometry: paneGeometry,
                     gutter: gutter,
                     frameCols: frameState.cols,
                     cellW: cellW,
@@ -480,6 +489,7 @@ final class CoreTextMetalRenderer {
                 // Document highlight overlay quads (drawn before search matches,
                 // so search matches paint over them when they overlap).
                 for highlight in content.documentHighlights {
+                    guard highlight.endCol > highlight.startCol else { continue }
                     // Document highlights are typically single-line (one identifier).
                     // Draw on startRow only; multi-row highlights are rare for this feature.
                     let hlY = scrollableWindowRowOffset + Float(highlight.startRow) * displayCellH * scale
@@ -503,6 +513,7 @@ final class CoreTextMetalRenderer {
 
                 // Search match overlay quads (drawn before text).
                 for match in content.searchMatches {
+                    guard match.endCol > match.startCol else { continue }
                     let matchY = scrollableWindowRowOffset + Float(match.row) * displayCellH * scale
                     let rawMatchX = contentColOffset + Float(match.startCol) * cellW * scale - hScrollPx
                     let rawMatchRight = rawMatchX + Float(match.endCol - match.startCol) * cellW * scale
@@ -537,7 +548,7 @@ final class CoreTextMetalRenderer {
                 var rowEntriesByRow: [UInt16: AtlasEntry] = [:]
                 for (rowIdx, clippedRow) in clippedRows.enumerated() {
                     let displayRow = UInt16(rowIdx)
-                    if let atlas, let entry = wcr.renderRowToAtlas(displayRow: displayRow, row: clippedRow, windowId: content.windowId, atlas: atlas, metrics: &frameMetrics) {
+                    if let atlas, let entry = wcr.renderRowToAtlas(displayRow: displayRow, row: clippedRow, windowId: content.windowId, contentEpoch: content.contentEpoch, atlas: atlas, metrics: &frameMetrics) {
                         rowEntriesByRow[displayRow] = entry
                         let yPos = scrollableWindowRowOffset + Float(rowIdx) * displayCellH * scale
                         let textYOffset = (displayCellH - cellH) * scale * 0.5
@@ -591,6 +602,7 @@ final class CoreTextMetalRenderer {
 
                 // Diagnostic underline quads (drawn after text).
                 for diag in content.diagnosticUnderlines {
+                    guard diag.endCol > diag.startCol else { continue }
                     let diagColor: SIMD3<Float> = switch diag.severity {
                     case .error:   SIMD3<Float>(1.0, 0.42, 0.42)   // red
                     case .warning: SIMD3<Float>(0.93, 0.75, 0.48)  // yellow
@@ -673,9 +685,11 @@ final class CoreTextMetalRenderer {
             guard !guideData.guideCols.isEmpty else { continue }
 
             guard let gutter = frameState.windowGutters[guideData.windowId] else { continue }
-            let gutterWidth = Float(gutter.lineNumberWidth) + Float(gutter.signColWidth)
-            let windowContentColOffset = (Float(gutter.contentCol) + gutterWidth) * cellW * scale + gutterLeftMarginPx + gutterPaddingPx
+            let paneGeometry = windowContents[guideData.windowId]?.paneGeometry
+            let fallbackTextCol = UInt16(Int(gutter.contentCol) + Int(gutter.lineNumberWidth) + Int(gutter.signColWidth))
+            let windowContentColOffset = Float(paneGeometry?.textRect.col ?? fallbackTextCol) * cellW * scale + gutterLeftMarginPx + gutterPaddingPx
             let windowBounds = CoreTextMetalRenderer.windowHorizontalBounds(
+                geometry: paneGeometry,
                 gutter: gutter,
                 frameCols: frameState.cols,
                 cellW: cellW,
@@ -983,7 +997,7 @@ final class CoreTextMetalRenderer {
         let viewportTop = frameState.viewportTopLine
 
         if totalLines > visibleRows && viewportTop != 0xFFFF_FFFF && scrollIndicatorAlpha > 0 {
-            let viewportH = Float(viewportSize.height) * scale
+            let viewportH = Float(viewportSize.height)
             let indicatorWidth: Float = 6.0 * scale
             let indicatorMargin: Float = 2.0 * scale
             let trackHeight = viewportH
@@ -994,7 +1008,7 @@ final class CoreTextMetalRenderer {
             let maxTop = Float(max(Int64(totalLines) - Int64(visibleRows), 1))
             let thumbY = (Float(viewportTop) / maxTop) * (trackHeight - thumbHeight)
 
-            let thumbX = Float(viewportSize.width) * scale - indicatorWidth - indicatorMargin
+            let thumbX = Float(viewportSize.width) - indicatorWidth - indicatorMargin
 
             var scrollQuad = QuadGPU()
             scrollQuad.position = SIMD2<Float>(thumbX, thumbY)
@@ -1568,6 +1582,7 @@ final class CoreTextMetalRenderer {
     }
 
     nonisolated static func visibleTextCols(
+        geometry: GUIPaneGeometry?,
         gutter: Wire.WindowGutter,
         frameCols: UInt16,
         cellW: Float,
@@ -1575,6 +1590,12 @@ final class CoreTextMetalRenderer {
         gutterLeftMarginPx: Float,
         gutterPaddingPx: Float
     ) -> Int {
+        if let geometry {
+            let cellWidthPx = max(cellW * scale, 1)
+            let paddingCols = Int(ceil((gutterLeftMarginPx + gutterPaddingPx) / cellWidthPx))
+            return max(Int(geometry.textRect.width) - paddingCols, 1)
+        }
+
         let gutterCols = Int(gutter.lineNumberWidth) + Int(gutter.signColWidth)
         let availableCols = max(windowWidthCols(gutter: gutter, frameCols: frameCols) - gutterCols, 1)
         let cellWidthPx = max(cellW * scale, 1)
@@ -1583,12 +1604,19 @@ final class CoreTextMetalRenderer {
     }
 
     nonisolated static func windowHorizontalBounds(
+        geometry: GUIPaneGeometry?,
         gutter: Wire.WindowGutter,
         frameCols: UInt16,
         cellW: Float,
         scale: Float,
         viewportWidth: Float
     ) -> (x: Float, width: Float) {
+        if let geometry {
+            let left = Float(geometry.clipRect.col) * cellW * scale
+            let right = min(left + Float(geometry.clipRect.width) * cellW * scale, viewportWidth)
+            return (x: left, width: max(right - left, 0))
+        }
+
         let left = Float(gutter.contentCol) * cellW * scale
         let right = min(left + Float(windowWidthCols(gutter: gutter, frameCols: frameCols)) * cellW * scale, viewportWidth)
         return (x: left, width: max(right - left, 0))
@@ -1618,6 +1646,7 @@ final class CoreTextMetalRenderer {
         }
 
         return windowHorizontalBounds(
+            geometry: nil,
             gutter: matchingGutter,
             frameCols: frameCols,
             cellW: cellW,
@@ -1666,12 +1695,13 @@ final class CoreTextMetalRenderer {
             guard let content = windowContents[windowId] else { continue }
             guard content.cursorVisible else { return nil }
 
-            let gutterWidth = Float(gutter.lineNumberWidth) + Float(gutter.signColWidth)
-            let contentColOffset = (Float(gutter.contentCol) + gutterWidth) * cellW * scale + gutterLeftMarginPx + gutterPaddingPx
+            let fallbackTextCol = UInt16(Int(gutter.contentCol) + Int(gutter.lineNumberWidth) + Int(gutter.signColWidth))
+            let contentColOffset = Float(content.paneGeometry?.textRect.col ?? fallbackTextCol) * cellW * scale + gutterLeftMarginPx + gutterPaddingPx
             let hScrollPx = Float(content.scrollLeft) * cellW * scale
             let cursorCol = resolvedSemanticCursorCol(content)
             let x = contentColOffset + Float(cursorCol) * cellW * scale - hScrollPx
-            let y = (Float(gutter.contentRow) + Float(content.cursorRow)) * displayCellH * scale
+            let textRow = content.paneGeometry?.textRect.row ?? gutter.contentRow
+            let y = (Float(textRow) + Float(content.cursorRow)) * displayCellH * scale
             return RenderCursor(x: x, y: y, shape: content.cursorShape, windowId: windowId)
         }
 

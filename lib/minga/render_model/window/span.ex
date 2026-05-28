@@ -42,6 +42,27 @@ defmodule Minga.RenderModel.Window.Span do
     }
   end
 
+  @doc "Clips a span to a source display-column range and rebases it into a visual row."
+  @spec rebase_to_visual_row(t(), non_neg_integer(), non_neg_integer(), non_neg_integer()) :: [
+          t()
+        ]
+  def rebase_to_visual_row(%__MODULE__{} = span, source_start, source_end, indent_width) do
+    start_col = max(span.start_col, source_start)
+    end_col = min(span.end_col, source_end)
+
+    if end_col > start_col do
+      [
+        %__MODULE__{
+          span
+          | start_col: start_col - source_start + indent_width,
+            end_col: end_col - source_start + indent_width
+        }
+      ]
+    else
+      []
+    end
+  end
+
   @spec encode_attrs(Face.t()) :: non_neg_integer()
   defp encode_attrs(%Face{} = face) do
     if(face.bold, do: 1, else: 0) |||

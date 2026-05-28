@@ -1694,6 +1694,11 @@ final class EditorNSView: MTKView {
     private func gutterHit(at point: NSPoint) -> (gutter: Wire.WindowGutter, rowIndex: Int)? {
         let screenRow = Int(point.y / effectiveCellHeight)
 
+        if let geometry = paneGeometryGutterHit(at: point, screenRow: screenRow),
+           let gutter = dispatcher.frameState.windowGutters[geometry.windowId] {
+            return (gutter, screenRow - Int(geometry.gutterRect.row))
+        }
+
         for windowId in dispatcher.currentFrameGutterWindowIds {
             guard let gutter = dispatcher.frameState.windowGutters[windowId] else { continue }
             let startRow = Int(gutter.contentRow)
@@ -1793,6 +1798,12 @@ final class EditorNSView: MTKView {
         guard row >= 0 else { return nil }
         let rowValue = Int(row)
         let frameState = dispatcher.frameState
+
+        if let geometry = paneGeometryHit(at: point, screenRow: rowValue),
+           let gutter = frameState.windowGutters[geometry.windowId] {
+            return gutter
+        }
+
         let windowIds = dispatcher.currentFrameGutterWindowIds.isEmpty ? Set(frameState.windowGutters.keys) : dispatcher.currentFrameGutterWindowIds
 
         return windowIds.compactMap { frameState.windowGutters[$0] }
@@ -1804,6 +1815,41 @@ final class EditorNSView: MTKView {
                 return rowValue >= startRow && rowValue < endRow && point.x >= startX && point.x < endX
             }
             .max { lhs, rhs in lhs.contentCol < rhs.contentCol }
+    }
+
+    private func paneGeometryGutterHit(at point: NSPoint, screenRow: Int) -> GUIPaneGeometry? {
+        paneGeometries(at: point, screenRow: screenRow)
+            .filter { geometry in
+                pointInCellRect(point, screenRow: screenRow, rect: geometry.gutterRect)
+            }
+            .max { lhs, rhs in lhs.gutterRect.col < rhs.gutterRect.col }
+    }
+
+    private func paneGeometryHit(at point: NSPoint, screenRow: Int) -> GUIPaneGeometry? {
+        paneGeometries(at: point, screenRow: screenRow)
+            .max { lhs, rhs in lhs.totalRect.col < rhs.totalRect.col }
+    }
+
+    private func paneGeometries(at point: NSPoint, screenRow: Int) -> [GUIPaneGeometry] {
+        guard let contents = guiState?.windowContents else { return [] }
+        let rawCol = Int(point.x / cellWidth)
+
+        return contents.values.compactMap(\.paneGeometry).filter { geometry in
+            rowColInCellRect(row: screenRow, col: rawCol, rect: geometry.totalRect)
+        }
+    }
+
+    private func pointInCellRect(_ point: NSPoint, screenRow: Int, rect: GUICellRect) -> Bool {
+        let rawCol = Int(point.x / cellWidth)
+        return rowColInCellRect(row: screenRow, col: rawCol, rect: rect)
+    }
+
+    private func rowColInCellRect(row: Int, col: Int, rect: GUICellRect) -> Bool {
+        let startRow = Int(rect.row)
+        let endRow = startRow + Int(rect.height)
+        let startCol = Int(rect.col)
+        let endCol = startCol + Int(rect.width)
+        return row >= startRow && row < endRow && col >= startCol && col < endCol
     }
 
     private func fallbackCellColumn(at point: NSPoint) -> Int16 {

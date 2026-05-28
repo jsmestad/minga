@@ -79,6 +79,7 @@ struct CoreTextMetalRendererCursorTests {
         )
 
         #expect(CoreTextMetalRenderer.visibleTextCols(
+            geometry: nil,
             gutter: gutter,
             frameCols: 100,
             cellW: 8,

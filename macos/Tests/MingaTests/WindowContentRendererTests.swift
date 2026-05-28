@@ -207,6 +207,22 @@ struct WindowContentFrameMetricsTests {
         #expect(metrics.atlasHashChanges == 1)
     }
 
+    @Test("Changed content epoch rerasterizes a row with the same row hash")
+    @MainActor func changedContentEpochMetrics() throws {
+        guard let (renderer, atlas) = makeRendererAndAtlas() else { return }
+        let row = GUIVisualRow(rowType: .normal, bufLine: 0, contentHash: 42, text: "hello", spans: [])
+
+        atlas.beginFrame()
+        var metrics = FrameMetrics()
+        _ = renderer.renderRowToAtlas(displayRow: 0, row: row, windowId: 1, contentEpoch: 10, atlas: atlas, metrics: &metrics)
+
+        atlas.beginFrame()
+        metrics.reset()
+        _ = renderer.renderRowToAtlas(displayRow: 0, row: row, windowId: 1, contentEpoch: 11, atlas: atlas, metrics: &metrics)
+        #expect(metrics.bufferRowsRasterized == 1)
+        #expect(metrics.atlasHashChanges == 1)
+    }
+
     @Test("Atlas slot demand accounts for split-window texture entries")
     func atlasDemandCountsSplitWindows() {
         let rows = [GUIVisualRow(rowType: .normal, bufLine: 0, contentHash: 1, text: "row", spans: [])]

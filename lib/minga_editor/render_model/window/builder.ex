@@ -23,6 +23,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   alias Minga.Core.HlTodo
   alias Minga.Core.IndentGuide
   alias Minga.Core.Unicode
+  alias Minga.Core.WrapMap
   alias Minga.Diagnostics
   alias MingaEditor.DisplayMap
   alias MingaEditor.FoldMap
@@ -36,11 +37,15 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   alias Minga.RenderModel.Window.DocumentHighlight
   alias Minga.RenderModel.Window.Gutter
   alias Minga.RenderModel.Window.GutterEntry
+  alias Minga.RenderModel.Window.GutterMetrics
+  alias Minga.RenderModel.Window.HitRegion
   alias Minga.RenderModel.Window.IndentGuides
+  alias Minga.RenderModel.Window.PaneGeometry
   alias Minga.RenderModel.Window.Row
   alias Minga.RenderModel.Window.SearchMatch
   alias Minga.RenderModel.Window.Selection
   alias Minga.RenderModel.Window.Span
+  alias Minga.RenderModel.Window.Viewport, as: RenderViewport
   alias MingaEditor.Renderer.Gutter, as: EditorGutter
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Viewport
@@ -48,6 +53,19 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   alias MingaEditor.UI.Highlight
 
   @type state :: EditorState.t() | MingaEditor.RenderPipeline.Input.t()
+  @typep visual_row_entry :: %{
+           row: Row.t(),
+           buf_line: non_neg_integer(),
+           visual_index: non_neg_integer(),
+           display_row: non_neg_integer(),
+           source_text: String.t(),
+           source_start_byte: non_neg_integer(),
+           source_end_byte: non_neg_integer(),
+           source_start_col: non_neg_integer(),
+           source_end_col: non_neg_integer(),
+           indent_width: non_neg_integer(),
+           row_width: non_neg_integer()
+         }
 
   @doc """
   Builds a `RenderWindow` for one editor window.
@@ -62,6 +80,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       is_active: is_active,
       viewport: viewport,
       cursor_line: cursor_line,
+      cursor_byte_col: _cursor_byte_col,
       cursor_col: cursor_col,
       first_line: first_line,
       lines: lines,
@@ -72,21 +91,19 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       wrap_on: wrap_on
     } = scroll
 
-    visible_rows = Viewport.content_rows(viewport)
+    visible_row_count = Viewport.content_rows(viewport)
     content_kind = Keyword.get(opts, :content_kind, :buffer)
     rect = win_layout.content
     {content_row, _content_col, _content_width, _content_height} = rect
 
-    # Build visual rows from the same data the draw path uses
-    visual_rows =
-      build_visual_rows(
-        lines,
-        first_line,
-        visible_line_map,
-        wrap_on,
-        ctx,
-        snapshot
-      )
+    # Build visual rows from the same data the draw path uses.
+    visual_entries =
+      lines
+      |> build_visual_entries(first_line, visible_line_map, wrap_on, ctx, snapshot)
+      |> trim_visual_entries(viewport.visual_row_offset, visible_row_count)
+
+    visual_rows = Enum.map(visual_entries, & &1.row)
+    wrapped_coordinates? = wrap_on and visible_line_map == nil
 
     # Cursor in display coordinates
     {display_cursor_row, display_cursor_col} =
@@ -95,7 +112,9 @@ defmodule MingaEditor.RenderModel.Window.Builder do
         cursor_col,
         viewport,
         window.fold_map,
-        ctx.decorations
+        ctx.decorations,
+        visual_entries,
+        wrapped_coordinates?
       )
 
     cursor_shape =
@@ -125,39 +144,56 @@ defmodule MingaEditor.RenderModel.Window.Builder do
 
     # Selection in display coordinates
     selection =
-      Selection.from_visual_selection(
+      build_selection(
         ctx.visual_selection,
-        viewport.top,
-        visible_rows,
-        viewport.left,
-        viewport.cols
+        viewport,
+        visible_row_count,
+        visual_entries,
+        wrapped_coordinates?
       )
 
     # Search matches in display coordinates
-    viewport_bottom = viewport.top + visible_rows
+    viewport_bottom = viewport.top + visible_row_count
 
     search_matches =
-      SearchMatch.from_context_matches(
+      build_search_matches(
         ctx.search_matches,
         ctx.confirm_match,
-        viewport.top,
-        viewport_bottom
+        viewport,
+        viewport_bottom,
+        visual_entries,
+        wrapped_coordinates?
       )
 
     # Diagnostic inline ranges in display coordinates
-    diagnostic_ranges = build_diagnostic_ranges(snapshot.file_path, viewport, visible_rows)
+    diagnostic_ranges =
+      build_diagnostic_ranges(
+        snapshot.file_path,
+        viewport,
+        visible_row_count,
+        visual_entries,
+        wrapped_coordinates?
+      )
 
     # Document highlights in display coordinates
     doc_highlights =
       build_document_highlights(
         state.workspace.document_highlights,
-        viewport.top,
-        viewport_bottom
+        viewport,
+        viewport_bottom,
+        visual_entries,
+        wrapped_coordinates?
       )
 
     # Line annotations in display coordinates
     annotations =
-      build_annotations(ctx.decorations, viewport.top, viewport_bottom)
+      build_annotations(
+        ctx.decorations,
+        viewport.top,
+        viewport_bottom,
+        visual_entries,
+        wrapped_coordinates?
+      )
 
     %RenderWindow{
       window_id: win_id,
@@ -177,41 +213,59 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       gutter: build_gutter(scroll, ctx, content_kind),
       cursorline: build_cursorline(content_row, display_cursor_row, is_active, ctx),
       indent_guides: build_indent_guides(scroll, ctx, content_kind),
-      full_refresh: true
+      geometry: build_geometry(scroll, content_kind),
+      content_epoch: content_epoch(scroll, content_kind),
+      full_refresh: full_refresh?(scroll, content_kind)
     }
   end
 
   # ── Visual row building ────────────────────────────────────────────────
 
-  @spec build_visual_rows(
+  @spec build_visual_entries(
           [String.t()],
           non_neg_integer(),
           [DisplayMap.entry()] | nil,
           boolean(),
           Context.t(),
           map()
-        ) :: [Row.t()]
-  defp build_visual_rows(lines, first_line, visible_line_map, _wrap_on, ctx, snapshot) do
-    if visible_line_map != nil do
-      build_visual_rows_folded(lines, first_line, visible_line_map, ctx, snapshot)
-    else
-      build_visual_rows_sequential(lines, first_line, ctx, snapshot)
-    end
+        ) :: [visual_row_entry()]
+  defp build_visual_entries(lines, first_line, visible_line_map, wrap_on, ctx, snapshot) do
+    build_visual_entries_for_mode(lines, first_line, visible_line_map, wrap_on, ctx, snapshot)
   end
 
-  # Sequential path (no folds): one visual row per line
-  @spec build_visual_rows_sequential(
+  @spec build_visual_entries_for_mode(
+          [String.t()],
+          non_neg_integer(),
+          [DisplayMap.entry()] | nil,
+          boolean(),
+          Context.t(),
+          map()
+        ) :: [visual_row_entry()]
+  defp build_visual_entries_for_mode(lines, first_line, visible_line_map, _wrap_on, ctx, snapshot)
+       when is_list(visible_line_map) do
+    build_visual_entries_folded(lines, first_line, visible_line_map, ctx, snapshot)
+  end
+
+  defp build_visual_entries_for_mode(lines, first_line, nil, true, ctx, snapshot) do
+    build_visual_entries_wrapped(lines, first_line, ctx, snapshot)
+  end
+
+  defp build_visual_entries_for_mode(lines, first_line, nil, false, ctx, snapshot) do
+    build_visual_entries_sequential(lines, first_line, ctx, snapshot)
+  end
+
+  # Sequential path (no folds): one visual row per line.
+  @spec build_visual_entries_sequential(
           [String.t()],
           non_neg_integer(),
           Context.t(),
           map()
-        ) :: [Row.t()]
-  defp build_visual_rows_sequential(lines, first_line, ctx, snapshot) do
+        ) :: [visual_row_entry()]
+  defp build_visual_entries_sequential(lines, first_line, ctx, snapshot) do
     first_byte_off = snapshot.first_line_byte_offset
 
     lines_with_offsets = build_lines_with_offsets(lines, first_byte_off)
 
-    # Pre-compute highlight segments for all visible lines
     highlight_segments_list =
       if ctx.highlight do
         Highlight.styles_for_visible_lines(ctx.highlight, lines_with_offsets)
@@ -228,30 +282,205 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       {composed_text, spans} =
         compose_line(line_text, hl_segments, ctx, buf_line, line_byte_offset)
 
-      %Row{
+      row = %Row{
         row_type: :normal,
         buf_line: buf_line,
         text: composed_text,
         spans: spans,
         content_hash: Row.compute_hash(composed_text, spans)
       }
+
+      visual_entry(row, 0, Unicode.display_width(composed_text), 0)
     end)
   end
 
-  # Fold-aware path: walks visible_line_map entries
-  @spec build_visual_rows_folded(
+  @spec build_visual_entries_wrapped([String.t()], non_neg_integer(), Context.t(), map()) :: [
+          visual_row_entry()
+        ]
+  defp build_visual_entries_wrapped(lines, first_line, ctx, snapshot) do
+    first_byte_off = snapshot.first_line_byte_offset
+    lines_with_offsets = build_lines_with_offsets(lines, first_byte_off)
+
+    highlight_segments_list =
+      if ctx.highlight do
+        Highlight.styles_for_visible_lines(ctx.highlight, lines_with_offsets)
+      else
+        List.duplicate(nil, length(lines))
+      end
+
+    lines_with_offsets
+    |> Enum.zip(highlight_segments_list)
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {{{line_text, line_byte_offset}, hl_segments}, idx} ->
+      buf_line = first_line + idx
+
+      {composed_text, spans} =
+        compose_line(line_text, hl_segments, ctx, buf_line, line_byte_offset)
+
+      wrap_composed_entries(composed_text, spans, buf_line, wrap_options(ctx, snapshot.options))
+    end)
+  end
+
+  @spec wrap_composed_entries(String.t(), [Span.t()], non_neg_integer(), keyword()) :: [
+          visual_row_entry()
+        ]
+  defp wrap_composed_entries(composed_text, spans, buf_line, opts) do
+    [visual_rows] = WrapMap.compute([composed_text], Keyword.fetch!(opts, :content_width), opts)
+
+    visual_rows
+    |> Enum.with_index()
+    |> Enum.map(fn {visual_row, visual_index} ->
+      text = WrapMap.display_text(visual_row)
+      row_type = if visual_index == 0, do: :normal, else: :wrap_continuation
+      row_spans = spans_for_visual_row(spans, composed_text, visual_row)
+      source_start = visual_row_source_start(composed_text, visual_row)
+      source_end = visual_row_source_end(source_start, visual_row)
+      source_start_byte = Map.get(visual_row, :byte_offset, 0)
+
+      source_end_byte =
+        source_start_byte +
+          byte_size(Map.get(visual_row, :source_text, Map.get(visual_row, :text, "")))
+
+      indent_width = Map.get(visual_row, :indent_width, 0)
+
+      row = %Row{
+        row_type: row_type,
+        buf_line: buf_line,
+        visual_index: visual_index,
+        text: text,
+        spans: row_spans,
+        content_hash: Row.compute_hash(text, row_spans)
+      }
+
+      visual_entry(
+        row,
+        composed_text,
+        source_start,
+        source_end,
+        source_start_byte,
+        source_end_byte,
+        indent_width
+      )
+    end)
+  end
+
+  @spec wrap_options(Context.t(), map()) :: keyword()
+  defp wrap_options(%Context{} = ctx, options) do
+    [
+      content_width: max(ctx.content_w, 1),
+      breakindent: Map.get(options, :breakindent, true),
+      linebreak: Map.get(options, :linebreak, true),
+      oracle: ctx.width_oracle,
+      tab_width: ctx.tab_width
+    ]
+  end
+
+  @spec trim_visual_entries([visual_row_entry()], non_neg_integer(), non_neg_integer()) :: [
+          visual_row_entry()
+        ]
+  defp trim_visual_entries(entries, offset, row_count) do
+    entries
+    |> drop_visual_entry_offset(offset)
+    |> Enum.take(row_count)
+    |> Enum.with_index()
+    |> Enum.map(fn {entry, display_row} -> %{entry | display_row: display_row} end)
+  end
+
+  @spec drop_visual_entry_offset([visual_row_entry()], non_neg_integer()) :: [visual_row_entry()]
+  defp drop_visual_entry_offset(entries, 0), do: entries
+
+  defp drop_visual_entry_offset(entries, offset) do
+    case Enum.drop(entries, offset) do
+      [] -> entries |> List.last() |> List.wrap()
+      visible -> visible
+    end
+  end
+
+  @spec visual_entry(Row.t(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
+          visual_row_entry()
+  defp visual_entry(%Row{} = row, source_start_col, source_end_col, indent_width) do
+    visual_entry(
+      row,
+      row.text,
+      source_start_col,
+      source_end_col,
+      0,
+      byte_size(row.text),
+      indent_width
+    )
+  end
+
+  @spec visual_entry(
+          Row.t(),
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: visual_row_entry()
+  defp visual_entry(
+         %Row{} = row,
+         source_text,
+         source_start_col,
+         source_end_col,
+         source_start_byte,
+         source_end_byte,
+         indent_width
+       ) do
+    %{
+      row: row,
+      buf_line: row.buf_line,
+      visual_index: row.visual_index,
+      display_row: 0,
+      source_text: source_text,
+      source_start_byte: source_start_byte,
+      source_end_byte: source_end_byte,
+      source_start_col: source_start_col,
+      source_end_col: source_end_col,
+      indent_width: indent_width,
+      row_width: Unicode.display_width(row.text)
+    }
+  end
+
+  @spec spans_for_visual_row([Span.t()], String.t(), WrapMap.visual_row()) :: [Span.t()]
+  defp spans_for_visual_row(spans, composed_text, visual_row) do
+    source_start = visual_row_source_start(composed_text, visual_row)
+    source_end = visual_row_source_end(source_start, visual_row)
+    indent_width = Map.get(visual_row, :indent_width, 0)
+
+    spans
+    |> Enum.flat_map(&Span.rebase_to_visual_row(&1, source_start, source_end, indent_width))
+  end
+
+  @spec visual_row_source_start(String.t(), WrapMap.visual_row()) :: non_neg_integer()
+  defp visual_row_source_start(composed_text, visual_row) do
+    Unicode.display_col(composed_text, Map.get(visual_row, :byte_offset, 0))
+  end
+
+  @spec visual_row_source_end(non_neg_integer(), WrapMap.visual_row()) :: non_neg_integer()
+  defp visual_row_source_end(source_start, visual_row) do
+    source_text = Map.get(visual_row, :source_text, Map.get(visual_row, :text, ""))
+    source_start + Unicode.display_width(source_text)
+  end
+
+  # Fold-aware path: walks visible_line_map entries.
+  @spec build_visual_entries_folded(
           [String.t()],
           non_neg_integer(),
           [DisplayMap.entry()],
           Context.t(),
           map()
-        ) :: [Row.t()]
-  defp build_visual_rows_folded(lines, first_line, visible_line_map, ctx, snapshot) do
+        ) :: [visual_row_entry()]
+  defp build_visual_entries_folded(lines, first_line, visible_line_map, ctx, snapshot) do
     line_byte_offsets =
       build_line_byte_offsets(lines, first_line, snapshot.first_line_byte_offset)
 
     Enum.map(visible_line_map, fn {buf_line, entry_type} ->
-      build_visual_row_entry(buf_line, entry_type, lines, first_line, ctx, line_byte_offsets)
+      row =
+        build_visual_row_entry(buf_line, entry_type, lines, first_line, ctx, line_byte_offsets)
+
+      visual_entry(row, 0, Unicode.display_width(row.text), 0)
     end)
   end
 
@@ -482,9 +711,31 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           non_neg_integer(),
           Viewport.t(),
           FoldMap.t(),
-          Decorations.t()
+          Decorations.t(),
+          [visual_row_entry()],
+          boolean()
         ) :: {non_neg_integer(), non_neg_integer()}
-  defp compute_display_cursor(cursor_line, cursor_col, viewport, fold_map, decorations) do
+  defp compute_display_cursor(
+         cursor_line,
+         cursor_col,
+         _viewport,
+         _fold_map,
+         decorations,
+         visual_entries,
+         true
+       ) do
+    compute_wrapped_display_cursor(cursor_line, cursor_col, decorations, visual_entries)
+  end
+
+  defp compute_display_cursor(
+         cursor_line,
+         cursor_col,
+         viewport,
+         fold_map,
+         decorations,
+         _visual_entries,
+         false
+       ) do
     visible_cursor =
       if FoldMap.empty?(fold_map) do
         cursor_line
@@ -495,6 +746,40 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     row = max(visible_cursor - viewport.top, 0)
     col = Decorations.buf_col_to_display_col(decorations, cursor_line, cursor_col)
     {row, col}
+  end
+
+  @spec compute_wrapped_display_cursor(
+          non_neg_integer(),
+          non_neg_integer(),
+          Decorations.t(),
+          [visual_row_entry()]
+        ) :: {non_neg_integer(), non_neg_integer()}
+  defp compute_wrapped_display_cursor(cursor_line, cursor_col, decorations, visual_entries) do
+    cursor_display_col = Decorations.buf_col_to_display_col(decorations, cursor_line, cursor_col)
+
+    visual_entries
+    |> Enum.filter(&(&1.buf_line == cursor_line))
+    |> visual_entry_for_source_col(cursor_display_col)
+    |> cursor_position_from_visual_entry(cursor_display_col)
+  end
+
+  @spec visual_entry_for_source_col([visual_row_entry()], non_neg_integer()) ::
+          visual_row_entry() | nil
+  defp visual_entry_for_source_col([], _cursor_display_col), do: nil
+
+  defp visual_entry_for_source_col(entries, cursor_display_col) do
+    Enum.find(entries, fn entry ->
+      cursor_display_col >= entry.source_start_col and cursor_display_col < entry.source_end_col
+    end) || List.last(entries)
+  end
+
+  @spec cursor_position_from_visual_entry(visual_row_entry() | nil, non_neg_integer()) ::
+          {non_neg_integer(), non_neg_integer()}
+  defp cursor_position_from_visual_entry(nil, cursor_display_col), do: {0, cursor_display_col}
+
+  defp cursor_position_from_visual_entry(entry, cursor_display_col) do
+    col = max(cursor_display_col - entry.source_start_col + entry.indent_width, 0)
+    {entry.display_row, col}
   end
 
   @spec adjust_cursor_col_for_shape(
@@ -536,10 +821,9 @@ defmodule MingaEditor.RenderModel.Window.Builder do
 
     line_count = max(snapshot.line_count, 0)
 
-    line_number_width =
-      if line_number_style == :none, do: 0, else: Viewport.gutter_width(line_count)
-
-    sign_col_width = EditorGutter.sign_column_width() + EditorGutter.fold_column_width()
+    metrics = gutter_metrics(scroll, :buffer)
+    line_number_width = metrics.line_number_width
+    sign_col_width = metrics.sign_col_width
 
     %Gutter{
       window_id: win_id,
@@ -558,13 +842,160 @@ defmodule MingaEditor.RenderModel.Window.Builder do
 
   defp build_gutter(_scroll, _ctx, _content_kind), do: nil
 
+  @spec build_geometry(WindowScroll.t(), RenderWindow.content_kind()) :: PaneGeometry.t()
+  defp build_geometry(%WindowScroll{} = scroll, content_kind) do
+    metrics = gutter_metrics(scroll, content_kind)
+    gutter_width = GutterMetrics.total_width(metrics)
+    content_rect = scroll.win_layout.content
+    total_rect = Map.get(scroll.win_layout, :total, content_rect)
+    {row, col, width, height} = content_rect
+    gutter_rect = {row, col, min(gutter_width, width), height}
+    text_col = col + min(gutter_width, width)
+    text_width = max(width - gutter_width, 0)
+    text_rect = {row, text_col, text_width, height}
+
+    %PaneGeometry{
+      window_id: scroll.win_id,
+      total_rect: total_rect,
+      content_rect: content_rect,
+      text_rect: text_rect,
+      gutter_rect: gutter_rect,
+      clip_rect: text_rect,
+      viewport: viewport_summary(scroll, text_width),
+      gutter_metrics: metrics,
+      hit_regions: hit_regions(scroll.win_id, text_rect, gutter_rect, metrics)
+    }
+  end
+
+  @spec gutter_metrics(WindowScroll.t(), RenderWindow.content_kind()) :: GutterMetrics.t()
+  defp gutter_metrics(%WindowScroll{} = scroll, :buffer) do
+    line_count = max(scroll.snapshot.line_count, 0)
+
+    line_number_width =
+      if scroll.line_number_style == :none, do: 0, else: Viewport.gutter_width(line_count)
+
+    %GutterMetrics{
+      line_number_width: line_number_width,
+      sign_col_width: EditorGutter.sign_column_width() + EditorGutter.fold_column_width()
+    }
+  end
+
+  defp gutter_metrics(_scroll, _content_kind) do
+    %GutterMetrics{line_number_width: 0, sign_col_width: 0}
+  end
+
+  @spec viewport_summary(WindowScroll.t(), non_neg_integer()) :: RenderViewport.t()
+  defp viewport_summary(%WindowScroll{} = scroll, text_width) do
+    %RenderViewport{
+      top: scroll.viewport.top,
+      left: scroll.viewport.left,
+      rows: Viewport.content_rows(scroll.viewport),
+      cols: text_width,
+      total_lines: max(scroll.snapshot.line_count, 0),
+      visual_row_offset: scroll.viewport.visual_row_offset,
+      total_visual_rows: total_visual_rows(scroll)
+    }
+  end
+
+  @spec total_visual_rows(WindowScroll.t()) :: non_neg_integer()
+  defp total_visual_rows(%WindowScroll{total_visual_rows: total})
+       when is_integer(total) and total > 0,
+       do: total
+
+  defp total_visual_rows(%WindowScroll{wrap_on: false, snapshot: snapshot}),
+    do: max(snapshot.line_count, 0)
+
+  defp total_visual_rows(%WindowScroll{} = scroll) do
+    scroll.lines
+    |> WrapMap.compute(max(scroll.content_w, 1),
+      breakindent: Map.get(scroll.snapshot.options, :breakindent, true),
+      linebreak: Map.get(scroll.snapshot.options, :linebreak, true),
+      oracle: scroll.width_oracle,
+      tab_width: Map.get(scroll.snapshot.options, :tab_width, 2)
+    )
+    |> WrapMap.visual_row_count()
+  end
+
+  @spec hit_regions(
+          non_neg_integer(),
+          PaneGeometry.rect(),
+          PaneGeometry.rect(),
+          GutterMetrics.t()
+        ) :: [
+          HitRegion.t()
+        ]
+  defp hit_regions(window_id, text_rect, gutter_rect, %GutterMetrics{} = metrics) do
+    [text_hit_region(window_id, text_rect)] ++ gutter_hit_regions(window_id, gutter_rect, metrics)
+  end
+
+  @spec text_hit_region(non_neg_integer(), PaneGeometry.rect()) :: HitRegion.t()
+  defp text_hit_region(window_id, rect) do
+    %HitRegion{kind: :text, rect: rect, window_id: window_id, target: %{window_id: window_id}}
+  end
+
+  @spec gutter_hit_regions(non_neg_integer(), PaneGeometry.rect(), GutterMetrics.t()) :: [
+          HitRegion.t()
+        ]
+  defp gutter_hit_regions(_window_id, {_row, _col, 0, _height}, _metrics), do: []
+
+  defp gutter_hit_regions(
+         window_id,
+         {row, col, width, height} = gutter_rect,
+         %GutterMetrics{} = metrics
+       ) do
+    fold_col = col + max(metrics.line_number_width + metrics.sign_col_width - 1, 0)
+    fold_width = if metrics.sign_col_width > 0 and fold_col < col + width, do: 1, else: 0
+
+    [
+      %HitRegion{
+        kind: :gutter,
+        rect: gutter_rect,
+        window_id: window_id,
+        target: %{window_id: window_id}
+      },
+      %HitRegion{
+        kind: :fold_control,
+        rect: {row, fold_col, fold_width, height},
+        window_id: window_id,
+        target: %{window_id: window_id}
+      }
+    ]
+    |> Enum.reject(fn %HitRegion{rect: {_row, _col, region_width, region_height}} ->
+      region_width == 0 or region_height == 0
+    end)
+  end
+
+  @spec content_epoch(WindowScroll.t(), RenderWindow.content_kind()) :: non_neg_integer()
+  defp content_epoch(%WindowScroll{} = scroll, :buffer) do
+    :erlang.phash2({
+      scroll.win_id,
+      scroll.buf_version,
+      scroll.snapshot.line_count,
+      scroll.content_w,
+      scroll.gutter_w,
+      scroll.wrap_on,
+      scroll.line_number_style
+    })
+  end
+
+  defp content_epoch(%WindowScroll{} = scroll, content_kind) do
+    :erlang.phash2({scroll.win_id, content_kind})
+  end
+
+  @spec full_refresh?(WindowScroll.t(), RenderWindow.content_kind()) :: boolean()
+  defp full_refresh?(%WindowScroll{window: %{render_cache: %{dirty_lines: :all}}}, :buffer),
+    do: true
+
+  defp full_refresh?(%WindowScroll{}, :buffer), do: false
+  defp full_refresh?(_scroll, _content_kind), do: true
+
   @spec build_gutter_entries(WindowScroll.t(), Context.t(), non_neg_integer()) :: [
           GutterEntry.t()
         ]
   defp build_gutter_entries(_scroll, _ctx, 0), do: []
 
   defp build_gutter_entries(%WindowScroll{} = scroll, %Context{} = ctx, line_count) do
-    fold_ranges = scroll.window.fold_ranges || []
+    fold_ranges = scroll.window.fold_ranges
     fold_start_lines = MapSet.new(fold_ranges, & &1.start_line)
     fold_end_by_start = Map.new(fold_ranges, fn range -> {range.start_line, range.end_line} end)
 
@@ -779,53 +1210,207 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     }
   end
 
-  # ── Diagnostics ────────────────────────────────────────────────────────
+  # ── Overlays ───────────────────────────────────────────────────────────
 
-  @spec build_diagnostic_ranges(String.t() | nil, Viewport.t(), pos_integer()) :: [
-          DiagnosticRange.t()
-        ]
-  defp build_diagnostic_ranges(nil, _viewport, _visible_rows), do: []
+  @spec build_selection(
+          Selection.visual_selection(),
+          Viewport.t(),
+          pos_integer(),
+          [visual_row_entry()],
+          boolean()
+        ) :: Selection.t() | nil
+  defp build_selection(selection, viewport, visible_rows, _visual_entries, false) do
+    Selection.from_visual_selection(
+      selection,
+      viewport.top,
+      visible_rows,
+      viewport.left,
+      viewport.cols
+    )
+  end
 
-  defp build_diagnostic_ranges(path, viewport, visible_rows) when is_binary(path) do
+  defp build_selection(nil, _viewport, _visible_rows, _visual_entries, true), do: nil
+
+  defp build_selection(
+         {:char, {sl, sc}, {el, ec}},
+         _viewport,
+         _visible_rows,
+         visual_entries,
+         true
+       ) do
+    build_wrapped_char_selection(sl, sc, el, ec, visual_entries)
+  end
+
+  defp build_selection(
+         {:line, start_line, end_line},
+         _viewport,
+         _visible_rows,
+         visual_entries,
+         true
+       ) do
+    build_wrapped_line_selection(start_line, end_line, visual_entries)
+  end
+
+  @spec build_search_matches(
+          [Minga.Editing.Search.Match.t()],
+          Minga.Editing.Search.Match.t() | nil,
+          Viewport.t(),
+          non_neg_integer(),
+          [visual_row_entry()],
+          boolean()
+        ) :: [SearchMatch.t()]
+  defp build_search_matches(
+         matches,
+         confirm_match,
+         viewport,
+         viewport_bottom,
+         _visual_entries,
+         false
+       ) do
+    SearchMatch.from_context_matches(matches, confirm_match, viewport.top, viewport_bottom)
+  end
+
+  defp build_search_matches(
+         matches,
+         confirm_match,
+         _viewport,
+         _viewport_bottom,
+         visual_entries,
+         true
+       ) do
+    Enum.flat_map(matches, fn %{line: line, col: col, length: len} = match ->
+      project_byte_range(line, col, line, col + len, visual_entries, fn row,
+                                                                        start_col,
+                                                                        _end_row,
+                                                                        end_col ->
+        %SearchMatch{
+          row: row,
+          start_col: start_col,
+          end_col: end_col,
+          is_current: confirm_match != nil and match == confirm_match
+        }
+      end)
+    end)
+  end
+
+  @spec build_diagnostic_ranges(
+          String.t() | nil,
+          Viewport.t(),
+          pos_integer(),
+          [visual_row_entry()],
+          boolean()
+        ) :: [DiagnosticRange.t()]
+  defp build_diagnostic_ranges(nil, _viewport, _visible_rows, _visual_entries, _wrapped?), do: []
+
+  defp build_diagnostic_ranges(path, viewport, visible_rows, visual_entries, wrapped?)
+       when is_binary(path) do
     uri = SyncServer.path_to_uri(path)
     diagnostics = Diagnostics.for_uri(uri)
     viewport_bottom = viewport.top + visible_rows
-    DiagnosticRange.from_diagnostics(diagnostics, viewport.top, viewport_bottom)
+
+    if wrapped? do
+      Enum.flat_map(diagnostics, &diagnostic_to_wrapped_ranges(&1, visual_entries))
+    else
+      DiagnosticRange.from_diagnostics(diagnostics, viewport.top, viewport_bottom)
+    end
+  end
+
+  @spec diagnostic_to_wrapped_ranges(Diagnostics.Diagnostic.t(), [visual_row_entry()]) :: [
+          DiagnosticRange.t()
+        ]
+  defp diagnostic_to_wrapped_ranges(%{range: range, severity: severity}, visual_entries) do
+    project_byte_range(
+      range.start_line,
+      range.start_col,
+      range.end_line,
+      range.end_col,
+      visual_entries,
+      fn start_row, start_col, end_row, end_col ->
+        %DiagnosticRange{
+          start_row: start_row,
+          start_col: start_col,
+          end_row: end_row,
+          end_col: end_col,
+          severity: severity
+        }
+      end
+    )
   end
 
   # ── Document highlights ─────────────────────────────────────────────────
 
   @spec build_document_highlights(
           [Minga.LSP.DocumentHighlight.t()] | nil,
+          Viewport.t(),
           non_neg_integer(),
-          non_neg_integer()
+          [visual_row_entry()],
+          boolean()
         ) :: [DocumentHighlight.t()]
-  defp build_document_highlights(nil, _top, _bottom), do: []
-  defp build_document_highlights([], _top, _bottom), do: []
+  defp build_document_highlights(nil, _viewport, _bottom, _visual_entries, _wrapped?), do: []
+  defp build_document_highlights([], _viewport, _bottom, _visual_entries, _wrapped?), do: []
 
-  defp build_document_highlights(highlights, viewport_top, viewport_bottom) do
+  defp build_document_highlights(highlights, viewport, viewport_bottom, _visual_entries, false) do
     highlights
     |> Enum.filter(fn hl ->
-      hl.start_line < viewport_bottom and hl.end_line >= viewport_top
+      hl.start_line < viewport_bottom and hl.end_line >= viewport.top
     end)
     |> Enum.map(fn hl ->
       %DocumentHighlight{
-        start_row: hl.start_line - viewport_top,
+        start_row: hl.start_line - viewport.top,
         start_col: hl.start_col,
-        end_row: hl.end_line - viewport_top,
+        end_row: hl.end_line - viewport.top,
         end_col: hl.end_col,
         kind: hl.kind
       }
     end)
   end
 
+  defp build_document_highlights(highlights, _viewport, _viewport_bottom, visual_entries, true) do
+    Enum.flat_map(highlights, fn hl ->
+      project_range(
+        hl.start_line,
+        hl.start_col,
+        hl.end_line,
+        hl.end_col,
+        visual_entries,
+        fn start_row, start_col, end_row, end_col ->
+          %DocumentHighlight{
+            start_row: start_row,
+            start_col: start_col,
+            end_row: end_row,
+            end_col: end_col,
+            kind: hl.kind
+          }
+        end
+      )
+    end)
+  end
+
   # ── Line annotations ──────────────────────────────────────────────────
 
-  @spec build_annotations(Decorations.t(), non_neg_integer(), non_neg_integer()) ::
-          [Annotation.t()]
-  defp build_annotations(%Decorations{annotations: []}, _top, _bottom), do: []
+  @spec build_annotations(
+          Decorations.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          [visual_row_entry()],
+          boolean()
+        ) :: [Annotation.t()]
+  defp build_annotations(
+         %Decorations{annotations: []},
+         _top,
+         _bottom,
+         _visual_entries,
+         _wrapped?
+       ),
+       do: []
 
-  defp build_annotations(%Decorations{} = decorations, viewport_top, viewport_bottom) do
+  defp build_annotations(
+         %Decorations{} = decorations,
+         viewport_top,
+         viewport_bottom,
+         _visual_entries,
+         false
+       ) do
     decorations.annotations
     |> Enum.filter(fn ann ->
       ann.line >= viewport_top and ann.line < viewport_bottom
@@ -840,6 +1425,229 @@ defmodule MingaEditor.RenderModel.Window.Builder do
         text: ann.text
       }
     end)
+  end
+
+  defp build_annotations(
+         %Decorations{} = decorations,
+         _viewport_top,
+         _viewport_bottom,
+         visual_entries,
+         true
+       ) do
+    decorations.annotations
+    |> Enum.sort_by(fn ann -> {ann.line, ann.priority} end)
+    |> Enum.flat_map(fn ann ->
+      case first_visual_entry_for_line(visual_entries, ann.line) do
+        nil ->
+          []
+
+        entry ->
+          [
+            %Annotation{
+              row: entry.display_row,
+              kind: ann.kind,
+              fg: ann.fg,
+              bg: ann.bg,
+              text: ann.text
+            }
+          ]
+      end
+    end)
+  end
+
+  @spec build_wrapped_char_selection(
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          [visual_row_entry()]
+        ) :: Selection.t() | nil
+  defp build_wrapped_char_selection(start_line, start_col, end_line, end_col, visual_entries) do
+    selected_entries = visual_entries_for_line_range(visual_entries, start_line, end_line)
+
+    with [_ | _] <- selected_entries,
+         start_entry <- selection_endpoint_entry(selected_entries, start_line, start_col, :first),
+         end_entry <- selection_endpoint_entry(selected_entries, end_line, end_col, :last) do
+      %Selection{
+        type: :char,
+        start_row: start_entry.display_row,
+        start_col: visual_col_for_source_col(start_entry, start_col),
+        end_row: end_entry.display_row,
+        end_col: visual_col_for_source_col(end_entry, end_col)
+      }
+    else
+      _ -> nil
+    end
+  end
+
+  @spec build_wrapped_line_selection(non_neg_integer(), non_neg_integer(), [visual_row_entry()]) ::
+          Selection.t() | nil
+  defp build_wrapped_line_selection(start_line, end_line, visual_entries) do
+    case visual_entries_for_line_range(visual_entries, start_line, end_line) do
+      [] ->
+        nil
+
+      entries ->
+        start_entry = hd(entries)
+        end_entry = List.last(entries)
+
+        %Selection{
+          type: :line,
+          start_row: start_entry.display_row,
+          start_col: 0,
+          end_row: end_entry.display_row,
+          end_col: 0
+        }
+    end
+  end
+
+  @spec selection_endpoint_entry(
+          [visual_row_entry()],
+          non_neg_integer(),
+          non_neg_integer(),
+          :first | :last
+        ) :: visual_row_entry()
+  defp selection_endpoint_entry(entries, line, col, fallback) do
+    line_entries = Enum.filter(entries, &(&1.buf_line == line))
+
+    if line_entries == [] do
+      endpoint_fallback(entries, fallback)
+    else
+      visual_entry_for_source_col(line_entries, col) || endpoint_fallback(entries, fallback)
+    end
+  end
+
+  @spec endpoint_fallback([visual_row_entry()], :first | :last) :: visual_row_entry()
+  defp endpoint_fallback(entries, :first), do: hd(entries)
+  defp endpoint_fallback(entries, :last), do: List.last(entries)
+
+  @spec visual_entries_for_line_range([visual_row_entry()], non_neg_integer(), non_neg_integer()) ::
+          [
+            visual_row_entry()
+          ]
+  defp visual_entries_for_line_range(visual_entries, start_line, end_line) do
+    Enum.filter(visual_entries, fn entry ->
+      entry.buf_line >= start_line and entry.buf_line <= end_line
+    end)
+  end
+
+  @spec first_visual_entry_for_line([visual_row_entry()], non_neg_integer()) ::
+          visual_row_entry() | nil
+  defp first_visual_entry_for_line(visual_entries, line) do
+    Enum.find(visual_entries, &(&1.buf_line == line))
+  end
+
+  @spec project_range(
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          [visual_row_entry()],
+          (non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer() -> term())
+        ) :: [term()]
+  defp project_range(start_line, start_col, end_line, end_col, visual_entries, build_range) do
+    visual_entries
+    |> visual_entries_for_line_range(start_line, end_line)
+    |> Enum.flat_map(
+      &project_entry_range(&1, start_line, start_col, end_line, end_col, build_range)
+    )
+  end
+
+  @spec project_entry_range(
+          visual_row_entry(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          (non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer() -> term())
+        ) :: [term()]
+  defp project_entry_range(entry, start_line, start_col, end_line, end_col, build_range) do
+    range_start =
+      if entry.buf_line == start_line,
+        do: max(start_col, entry.source_start_col),
+        else: entry.source_start_col
+
+    range_end =
+      if entry.buf_line == end_line,
+        do: min(end_col, entry.source_end_col),
+        else: entry.source_end_col
+
+    if range_end > range_start do
+      [
+        build_range.(
+          entry.display_row,
+          visual_col_for_source_col(entry, range_start),
+          entry.display_row,
+          visual_col_for_source_col(entry, range_end)
+        )
+      ]
+    else
+      []
+    end
+  end
+
+  @spec project_byte_range(
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          [visual_row_entry()],
+          (non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer() -> term())
+        ) :: [term()]
+  defp project_byte_range(start_line, start_byte, end_line, end_byte, visual_entries, build_range) do
+    visual_entries
+    |> visual_entries_for_line_range(start_line, end_line)
+    |> Enum.flat_map(
+      &project_entry_byte_range(&1, start_line, start_byte, end_line, end_byte, build_range)
+    )
+  end
+
+  @spec project_entry_byte_range(
+          visual_row_entry(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          (non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer() -> term())
+        ) :: [term()]
+  defp project_entry_byte_range(entry, start_line, start_byte, end_line, end_byte, build_range) do
+    range_start =
+      if entry.buf_line == start_line,
+        do: max(start_byte, entry.source_start_byte),
+        else: entry.source_start_byte
+
+    range_end =
+      if entry.buf_line == end_line,
+        do: min(end_byte, entry.source_end_byte),
+        else: entry.source_end_byte
+
+    if range_end > range_start do
+      [
+        build_range.(
+          entry.display_row,
+          visual_col_for_source_byte(entry, range_start),
+          entry.display_row,
+          visual_col_for_source_byte(entry, range_end)
+        )
+      ]
+    else
+      []
+    end
+  end
+
+  @spec visual_col_for_source_byte(visual_row_entry(), non_neg_integer()) :: non_neg_integer()
+  defp visual_col_for_source_byte(entry, source_byte) do
+    source_col = Unicode.display_col(entry.source_text, source_byte)
+    visual_col_for_source_col(entry, source_col)
+  end
+
+  @spec visual_col_for_source_col(visual_row_entry(), non_neg_integer()) :: non_neg_integer()
+  defp visual_col_for_source_col(entry, source_col) do
+    source_col
+    |> min(entry.source_end_col)
+    |> max(entry.source_start_col)
+    |> Kernel.-(entry.source_start_col)
+    |> Kernel.+(entry.indent_width)
   end
 
   # ── Helpers ────────────────────────────────────────────────────────────

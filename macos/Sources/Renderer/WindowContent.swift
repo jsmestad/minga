@@ -144,6 +144,56 @@ struct GUILineAnnotation: Sendable, Equatable {
     let text: String
 }
 
+// MARK: - Pane geometry
+
+struct GUICellRect: Sendable, Equatable {
+    let row: UInt16
+    let col: UInt16
+    let width: UInt16
+    let height: UInt16
+}
+
+struct GUIViewportSummary: Sendable, Equatable {
+    let top: UInt32
+    let left: UInt16
+    let rows: UInt16
+    let cols: UInt16
+    let totalLines: UInt32
+    let visualRowOffset: UInt16
+    let totalVisualRows: UInt32
+}
+
+struct GUIGutterMetrics: Sendable, Equatable {
+    let lineNumberWidth: UInt16
+    let signColWidth: UInt16
+}
+
+struct GUIHitRegion: Sendable, Equatable {
+    enum Kind: UInt8, Sendable {
+        case text = 1
+        case gutter = 2
+        case foldControl = 3
+        case modeline = 4
+        case divider = 5
+    }
+
+    let kind: Kind
+    let rect: GUICellRect
+    let windowId: UInt16
+}
+
+struct GUIPaneGeometry: Sendable, Equatable {
+    let windowId: UInt16
+    let totalRect: GUICellRect
+    let contentRect: GUICellRect
+    let textRect: GUICellRect
+    let gutterRect: GUICellRect
+    let clipRect: GUICellRect
+    let viewport: GUIViewportSummary
+    let gutterMetrics: GUIGutterMetrics
+    let hitRegions: [GUIHitRegion]
+}
+
 // MARK: - Window content
 
 /// Complete semantic content for one editor window.
@@ -154,6 +204,7 @@ struct GUILineAnnotation: Sendable, Equatable {
 final class GUIWindowContent: Sendable {
     let windowId: UInt16
     let fullRefresh: Bool
+    let contentEpoch: UInt32
     /// Whether the BEAM wants the cursor visible in this window.
     /// False when the minibuffer or other overlay has focus.
     let cursorVisible: Bool
@@ -170,17 +221,20 @@ final class GUIWindowContent: Sendable {
     let diagnosticUnderlines: [GUIDiagnosticUnderline]
     let documentHighlights: [GUIDocumentHighlight]
     let lineAnnotations: [GUILineAnnotation]
+    let paneGeometry: GUIPaneGeometry?
 
-    init(windowId: UInt16, fullRefresh: Bool, cursorVisible: Bool = true,
+    init(windowId: UInt16, fullRefresh: Bool, contentEpoch: UInt32 = 0, cursorVisible: Bool = true,
          cursorRow: UInt16, cursorCol: UInt16, cursorShape: CursorShape,
          scrollLeft: UInt16 = 0,
          rows: [GUIVisualRow], selection: GUISelectionOverlay?,
          searchMatches: [GUISearchMatch],
          diagnosticUnderlines: [GUIDiagnosticUnderline],
          documentHighlights: [GUIDocumentHighlight],
-         lineAnnotations: [GUILineAnnotation] = []) {
+         lineAnnotations: [GUILineAnnotation] = [],
+         paneGeometry: GUIPaneGeometry? = nil) {
         self.windowId = windowId
         self.fullRefresh = fullRefresh
+        self.contentEpoch = contentEpoch
         self.cursorVisible = cursorVisible
         self.cursorRow = cursorRow
         self.cursorCol = cursorCol
@@ -192,5 +246,6 @@ final class GUIWindowContent: Sendable {
         self.diagnosticUnderlines = diagnosticUnderlines
         self.documentHighlights = documentHighlights
         self.lineAnnotations = lineAnnotations
+        self.paneGeometry = paneGeometry
     }
 }

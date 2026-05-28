@@ -17,12 +17,14 @@ struct WindowContentBuilder {
     var cursorCol: UInt16 = 0
     var cursorShape: UInt8 = 0  // block
     var scrollLeft: UInt16 = 0
+    var contentEpoch: UInt32?
     var rows: [RowBuilder] = []
     var selectionType: UInt8 = 0
     var selectionCoords: (UInt16, UInt16, UInt16, UInt16)?
     var searchMatches: [(row: UInt16, startCol: UInt16, endCol: UInt16, isCurrent: UInt8)] = []
     var diagnosticRanges: [(startRow: UInt16, startCol: UInt16, endRow: UInt16, endCol: UInt16, severity: UInt8)] = []
     var documentHighlights: [(startRow: UInt16, startCol: UInt16, endRow: UInt16, endCol: UInt16, kind: UInt8)] = []
+    var paneGeometryPayload: Data?
 
     struct RowBuilder {
         var rowType: UInt8 = 0  // normal
@@ -51,6 +53,9 @@ struct WindowContentBuilder {
         appendU16(&headerPayload, cursorCol)
         headerPayload.append(cursorShape)
         appendU16(&headerPayload, scrollLeft)
+        if let contentEpoch {
+            appendU32(&headerPayload, contentEpoch)
+        }
 
         var rowsPayload = Data()
         appendU16(&rowsPayload, UInt16(rows.count))
@@ -112,17 +117,72 @@ struct WindowContentBuilder {
         }
 
         // Build sections
+        var sections: [Data] = [
+            buildSection(0x01, headerPayload),
+            buildSection(0x02, rowsPayload),
+            buildSection(0x03, selPayload),
+            buildSection(0x04, matchPayload),
+            buildSection(0x05, diagPayload),
+            buildSection(0x06, highlightPayload),
+            buildSection(0x07, Data()) // empty annotations
+        ]
+        if let paneGeometryPayload {
+            sections.append(buildSection(0x08, paneGeometryPayload))
+        }
+
         var data = Data()
         data.append(OP_GUI_WINDOW_CONTENT)
-        data.append(7) // section_count
-        data.append(contentsOf: buildSection(0x01, headerPayload))
-        data.append(contentsOf: buildSection(0x02, rowsPayload))
-        data.append(contentsOf: buildSection(0x03, selPayload))
-        data.append(contentsOf: buildSection(0x04, matchPayload))
-        data.append(contentsOf: buildSection(0x05, diagPayload))
-        data.append(contentsOf: buildSection(0x06, highlightPayload))
-        data.append(contentsOf: buildSection(0x07, Data())) // empty annotations
+        data.append(UInt8(sections.count))
+        for section in sections {
+            data.append(contentsOf: section)
+        }
         return data
+    }
+
+    static func samplePaneGeometryPayload(windowId: UInt16 = 7) -> Data {
+        var data = Data()
+        appendU16(&data, windowId)
+        appendRect(&data, row: 1, col: 2, width: 40, height: 12)
+        appendRect(&data, row: 2, col: 3, width: 38, height: 10)
+        appendRect(&data, row: 2, col: 8, width: 33, height: 10)
+        appendRect(&data, row: 2, col: 3, width: 5, height: 10)
+        appendRect(&data, row: 2, col: 8, width: 33, height: 10)
+        appendU32(&data, 5)
+        appendU16(&data, 2)
+        appendU16(&data, 10)
+        appendU16(&data, 33)
+        appendU32(&data, 200)
+        appendU16(&data, 0)
+        appendU32(&data, 20)
+        appendU16(&data, 2)
+        appendU16(&data, 3)
+        data.append(2)
+        data.append(1)
+        appendRect(&data, row: 2, col: 8, width: 33, height: 10)
+        appendU16(&data, windowId)
+        data.append(3)
+        appendRect(&data, row: 2, col: 7, width: 1, height: 10)
+        appendU16(&data, windowId)
+        return data
+    }
+
+    private static func appendRect(_ data: inout Data, row: UInt16, col: UInt16, width: UInt16, height: UInt16) {
+        appendU16(&data, row)
+        appendU16(&data, col)
+        appendU16(&data, width)
+        appendU16(&data, height)
+    }
+
+    private static func appendU16(_ data: inout Data, _ value: UInt16) {
+        data.append(UInt8(value >> 8))
+        data.append(UInt8(value & 0xFF))
+    }
+
+    private static func appendU32(_ data: inout Data, _ value: UInt32) {
+        data.append(UInt8((value >> 24) & 0xFF))
+        data.append(UInt8((value >> 16) & 0xFF))
+        data.append(UInt8((value >> 8) & 0xFF))
+        data.append(UInt8(value & 0xFF))
     }
 
     private func buildSection(_ id: UInt8, _ payload: Data) -> Data {
@@ -229,6 +289,32 @@ struct WindowContentDecoderTests {
         }
         #expect(content3.fullRefresh == false)
         #expect(content3.cursorVisible == true)
+    }
+
+    @Test("Decode content epoch and pane geometry")
+    func decodeContentEpochAndPaneGeometry() throws {
+        var builder = WindowContentBuilder(windowId: 7)
+        builder.contentEpoch = 42
+        builder.paneGeometryPayload = WindowContentBuilder.samplePaneGeometryPayload(windowId: 7)
+
+        let (cmd, _) = try decodeCommand(data: builder.build(), offset: 0)
+        guard case .guiWindowContent(let content) = cmd else {
+            Issue.record("Expected .guiWindowContent"); return
+        }
+
+        #expect(content.contentEpoch == 42)
+        guard let geometry = content.paneGeometry else {
+            Issue.record("Expected pane geometry"); return
+        }
+
+        #expect(geometry.windowId == 7)
+        #expect(geometry.totalRect == GUICellRect(row: 1, col: 2, width: 40, height: 12))
+        #expect(geometry.textRect == GUICellRect(row: 2, col: 8, width: 33, height: 10))
+        #expect(geometry.viewport.top == 5)
+        #expect(geometry.viewport.totalLines == 200)
+        #expect(geometry.gutterMetrics.lineNumberWidth == 2)
+        #expect(geometry.gutterMetrics.signColWidth == 3)
+        #expect(geometry.hitRegions.map(\.kind) == [.text, .foldControl])
     }
 
     @Test("Decode rows with text and buf_line")

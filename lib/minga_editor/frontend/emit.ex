@@ -13,6 +13,7 @@ defmodule MingaEditor.Frontend.Emit do
 
   alias MingaEditor.DisplayList
   alias MingaEditor.DisplayList.Frame
+  alias MingaEditor.RenderModel.Builder, as: RenderModelBuilder
   alias MingaEditor.RenderPipeline.Chrome
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.Frontend.Emit.TUI, as: EmitTUI
@@ -59,55 +60,39 @@ defmodule MingaEditor.Frontend.Emit do
     # Frame commands WITHOUT batch_end (we append it after model-driven GUI window commands)
     frame_cmds = DisplayList.to_commands(frame, batch_end: false)
 
-    window_models = gui_window_models(frame)
-    status_bar_data = chrome && chrome.status_bar_data
-    minibuffer_data = chrome && chrome.minibuffer_data
-
-    {ui_model, ctx} =
+    {render_model, ctx} =
       Telemetry.span([:minga, :render, :ui_model_build], %{}, fn ->
-        MingaEditor.RenderModel.UI.Builder.build_ui(ctx, status_bar_data, minibuffer_data)
+        RenderModelBuilder.build(frame, ctx, chrome)
       end)
 
-    {window_content_cmds, metal_ui_cmds, adapter_cmds, adapter_gui_caches} =
+    encoded_frame =
       Telemetry.span_with_stop_metadata([:minga, :render, :adapter_encode], %{}, fn ->
-        {window_content_cmds, adapter_gui_caches, window_metrics} =
-          Minga.Frontend.Adapter.GUI.encode_windows_with_metrics(
-            window_models,
-            caches.adapter_gui_caches
-          )
+        encoded_frame =
+          Minga.Frontend.Adapter.GUI.encode(render_model, caches.adapter_gui_caches)
 
-        {metal_ui_cmds, adapter_gui_caches} =
-          Minga.Frontend.Adapter.GUI.encode_metal_ui(ui_model, adapter_gui_caches)
+        metadata = adapter_encode_metadata(encoded_frame.metrics, frame_cmds)
 
-        {adapter_cmds, adapter_gui_caches} =
-          Minga.Frontend.Adapter.GUI.encode_ui(ui_model, adapter_gui_caches)
-
-        result = {window_content_cmds, metal_ui_cmds, adapter_cmds, adapter_gui_caches}
-
-        metadata =
-          adapter_encode_metadata(window_metrics, metal_ui_cmds, adapter_cmds, frame_cmds)
-
-        {result, metadata}
+        {encoded_frame, metadata}
       end)
 
-    caches = %{caches | adapter_gui_caches: adapter_gui_caches}
+    caches = %{caches | adapter_gui_caches: encoded_frame.caches}
 
     # Bundle everything into one atomic port message, with batch_end last
     all_metal =
-      frame_cmds ++ window_content_cmds ++ metal_ui_cmds ++ [Protocol.encode_batch_end()]
+      frame_cmds ++ encoded_frame.metal_commands ++ [Protocol.encode_batch_end()]
 
     all_metal = flush_font_registration_commands() ++ all_metal
     caches = update_tracking(ctx, caches)
 
-    byte_count = IO.iodata_length(all_metal) + IO.iodata_length(adapter_cmds)
+    byte_count = IO.iodata_length(all_metal) + IO.iodata_length(encoded_frame.chrome_commands)
 
     Telemetry.span([:minga, :render, :emit_prepare], %{byte_count: byte_count}, fn ->
       MingaEditor.Frontend.send_commands(ctx.port_manager, all_metal)
-      caches = send_title(ctx, caches)
-      caches = send_window_bg(ctx, caches)
+      caches = send_title(render_model, caches)
+      caches = send_window_bg(render_model, caches)
 
-      if adapter_cmds != [] do
-        MingaEditor.Frontend.send_commands(ctx.port_manager, adapter_cmds)
+      if encoded_frame.chrome_commands != [] do
+        MingaEditor.Frontend.send_commands(ctx.port_manager, encoded_frame.chrome_commands)
       end
 
       caches
@@ -130,21 +115,19 @@ defmodule MingaEditor.Frontend.Emit do
     end)
   end
 
-  @spec adapter_encode_metadata(
-          Minga.Frontend.Adapter.GUI.window_metrics(),
-          [binary()],
-          [binary()],
-          [binary()]
-        ) :: map()
-  defp adapter_encode_metadata(window_metrics, metal_ui_cmds, adapter_cmds, frame_cmds) do
+  @spec adapter_encode_metadata(Minga.Frontend.Adapter.GUI.EncodedFrame.metrics(), [binary()]) ::
+          map()
+  defp adapter_encode_metadata(metrics, frame_cmds) do
+    window_metrics = metrics.window
+
     %{
       window_row_bytes: window_metrics.row_bytes,
       window_overlay_bytes: window_metrics.overlay_bytes,
       window_gutter_bytes: window_metrics.gutter_bytes,
       window_annotation_bytes: window_metrics.annotation_bytes,
       window_metadata_bytes: window_metrics.metadata_bytes,
-      metal_ui_bytes: IO.iodata_length(metal_ui_cmds),
-      chrome_bytes: IO.iodata_length(adapter_cmds),
+      metal_ui_bytes: metrics.metal_ui_bytes,
+      chrome_bytes: metrics.chrome_bytes,
       frame_cmd_bytes: IO.iodata_length(frame_cmds)
     }
   end
@@ -223,22 +206,14 @@ defmodule MingaEditor.Frontend.Emit do
     }
   end
 
-  # ── GUI window models ───────────────────────────────────────────────────
-
-  @spec gui_window_models(Frame.t()) :: [Minga.RenderModel.Window.t()]
-  defp gui_window_models(%Frame{} = frame) do
-    Enum.flat_map(frame.windows, fn %DisplayList.WindowFrame{} = wf ->
-      [wf.window_model | wf.additional_window_models]
-      |> Enum.reject(&is_nil/1)
-    end)
-  end
-
   # ── Side-channel writes (shared) ─────────────────────────────────────────
 
-  @spec send_title(ctx(), Caches.t()) :: Caches.t()
-  defp send_title(ctx, caches) do
-    title = ctx.title
+  @spec send_title(Minga.RenderModel.t() | ctx(), Caches.t()) :: Caches.t()
+  defp send_title(%Minga.RenderModel{title: title}, caches), do: do_send_title(title, caches)
+  defp send_title(ctx, caches), do: do_send_title(ctx.title, caches)
 
+  @spec do_send_title(String.t(), Caches.t()) :: Caches.t()
+  defp do_send_title(title, caches) do
     if title != caches.last_title do
       MingaEditor.Frontend.set_title(title)
       %{caches | last_title: title}
@@ -247,10 +222,14 @@ defmodule MingaEditor.Frontend.Emit do
     end
   end
 
-  @spec send_window_bg(ctx(), Caches.t()) :: Caches.t()
-  defp send_window_bg(ctx, caches) do
-    bg = ctx.theme.editor.bg
+  @spec send_window_bg(Minga.RenderModel.t() | ctx(), Caches.t()) :: Caches.t()
+  defp send_window_bg(%Minga.RenderModel{window_bg: bg}, caches),
+    do: do_send_window_bg(bg, caches)
 
+  defp send_window_bg(ctx, caches), do: do_send_window_bg(ctx.theme.editor.bg, caches)
+
+  @spec do_send_window_bg(non_neg_integer(), Caches.t()) :: Caches.t()
+  defp do_send_window_bg(bg, caches) do
     if bg != caches.last_window_bg do
       MingaEditor.Frontend.set_window_bg(bg)
       %{caches | last_window_bg: bg}

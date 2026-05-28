@@ -20,6 +20,7 @@ defmodule Minga.RenderModel.Window.Row do
   @enforce_keys [:row_type, :buf_line, :text, :spans]
   defstruct row_type: :normal,
             buf_line: 0,
+            visual_index: 0,
             text: "",
             spans: [],
             content_hash: 0
@@ -29,6 +30,7 @@ defmodule Minga.RenderModel.Window.Row do
   @type t :: %__MODULE__{
           row_type: row_type(),
           buf_line: non_neg_integer(),
+          visual_index: non_neg_integer(),
           text: String.t(),
           spans: [Span.t()],
           content_hash: non_neg_integer()

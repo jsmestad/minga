@@ -10,6 +10,7 @@ defmodule Minga.Frontend.Adapter.GUI do
   alias Minga.Frontend.Adapter.GUI.ChangeSummaryEncoder
   alias Minga.Frontend.Adapter.GUI.CompletionEncoder
   alias Minga.Frontend.Adapter.GUI.EditTimelineEncoder
+  alias Minga.Frontend.Adapter.GUI.EncodedFrame
   alias Minga.Frontend.Adapter.GUI.ExtensionOverlayEncoder
   alias Minga.Frontend.Adapter.GUI.ExtensionPanelEncoder
   alias Minga.Frontend.Adapter.GUI.FileTreeEncoder
@@ -70,6 +71,26 @@ defmodule Minga.Frontend.Adapter.GUI do
   ]
 
   @type window_metrics :: WindowEncoder.metrics()
+
+  @doc "Encodes a full GUI render model into Metal-critical and SwiftUI chrome command groups."
+  @spec encode(RenderModel.t(), Caches.t()) :: EncodedFrame.t()
+  def encode(%RenderModel{} = model, %Caches{} = caches) do
+    {window_content_cmds, caches, window_metrics} =
+      encode_windows_with_metrics(model.windows, caches)
+
+    {metal_ui_cmds, caches} = encode_metal_ui(model.ui, caches)
+    {chrome_cmds, caches} = encode_ui(model.ui, caches)
+
+    metal_commands = window_content_cmds ++ metal_ui_cmds
+
+    metrics = %{
+      window: window_metrics,
+      metal_ui_bytes: IO.iodata_length(metal_ui_cmds),
+      chrome_bytes: IO.iodata_length(chrome_cmds)
+    }
+
+    EncodedFrame.new(metal_commands, chrome_cmds, caches, metrics)
+  end
 
   @spec encode_windows([RenderModel.Window.t()], Caches.t()) :: {[binary()], Caches.t()}
   def encode_windows(windows, %Caches{} = caches) when is_list(windows) do

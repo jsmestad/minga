@@ -70,7 +70,9 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   alias Minga.RenderModel.Window.DocumentHighlight
   alias Minga.RenderModel.Window.Gutter
   alias Minga.RenderModel.Window.GutterEntry
+  alias Minga.RenderModel.Window.HitRegion
   alias Minga.RenderModel.Window.IndentGuides
+  alias Minga.RenderModel.Window.PaneGeometry
   alias Minga.RenderModel.Window.Row
   alias Minga.RenderModel.Window.SearchMatch
   alias Minga.RenderModel.Window.Selection
@@ -91,6 +93,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   @section_wc_diagnostics 0x05
   @section_wc_highlights 0x06
   @section_wc_annotations 0x07
+  @section_wc_geometry 0x08
 
   @section_gutter_window 0x01
   @section_gutter_config 0x02
@@ -154,7 +157,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
 
     header_payload =
       <<sw.window_id::16, flags::8, sw.cursor_row::16, sw.cursor_col::16, cursor_shape::8,
-        sw.scroll_left::16>>
+        sw.scroll_left::16, sw.content_epoch::32>>
 
     rows_payload = IO.iodata_to_binary([<<row_count::16>> | encode_rows(sw.rows)])
     selection_payload = IO.iodata_to_binary(encode_selection(sw.selection))
@@ -162,6 +165,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
     diag_payload = IO.iodata_to_binary(encode_diagnostic_ranges(sw.diagnostic_ranges))
     highlight_payload = IO.iodata_to_binary(encode_document_highlights(sw.document_highlights))
     annotation_payload = IO.iodata_to_binary(encode_annotations(sw.annotations))
+    geometry_payload = encode_geometry(sw.geometry)
 
     header_section = encode_section(@section_wc_header, header_payload)
     rows_section = encode_section(@section_wc_rows, rows_payload)
@@ -170,16 +174,18 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
     diagnostic_section = encode_section(@section_wc_diagnostics, diag_payload)
     highlight_section = encode_section(@section_wc_highlights, highlight_payload)
     annotation_section = encode_section(@section_wc_annotations, annotation_payload)
+    geometry_sections = geometry_sections(geometry_payload)
 
-    sections = [
-      header_section,
-      rows_section,
-      selection_section,
-      search_section,
-      diagnostic_section,
-      highlight_section,
-      annotation_section
-    ]
+    sections =
+      [
+        header_section,
+        rows_section,
+        selection_section,
+        search_section,
+        diagnostic_section,
+        highlight_section,
+        annotation_section
+      ] ++ geometry_sections
 
     binary = IO.iodata_to_binary([<<@op_gui_window_content, length(sections)::8>> | sections])
 
@@ -190,7 +196,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
           byte_size(highlight_section),
       gutter_bytes: 0,
       annotation_bytes: byte_size(annotation_section),
-      metadata_bytes: 2 + byte_size(header_section)
+      metadata_bytes: 2 + byte_size(header_section) + IO.iodata_length(geometry_sections)
     }
 
     {binary, metrics}
@@ -205,6 +211,51 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   defp encode_section(section_id, payload) do
     <<section_id::8, byte_size(payload)::16, payload::binary>>
   end
+
+  @spec geometry_sections(binary() | nil) :: [binary()]
+  defp geometry_sections(nil), do: []
+  defp geometry_sections(payload), do: [encode_section(@section_wc_geometry, payload)]
+
+  @spec encode_geometry(PaneGeometry.t() | nil) :: binary() | nil
+  defp encode_geometry(nil), do: nil
+
+  defp encode_geometry(%PaneGeometry{} = geometry) do
+    hit_regions = encode_hit_regions(geometry.hit_regions)
+
+    IO.iodata_to_binary([
+      <<geometry.window_id::16>>,
+      encode_rect(geometry.total_rect),
+      encode_rect(geometry.content_rect),
+      encode_rect(geometry.text_rect),
+      encode_rect(geometry.gutter_rect),
+      encode_rect(geometry.clip_rect),
+      <<geometry.viewport.top::32, geometry.viewport.left::16, geometry.viewport.rows::16,
+        geometry.viewport.cols::16, geometry.viewport.total_lines::32,
+        geometry.viewport.visual_row_offset::16, geometry.viewport.total_visual_rows::32,
+        geometry.gutter_metrics.line_number_width::16, geometry.gutter_metrics.sign_col_width::16,
+        length(geometry.hit_regions)::8>>,
+      hit_regions
+    ])
+  end
+
+  @spec encode_rect(PaneGeometry.rect()) :: binary()
+  defp encode_rect({row, col, width, height}) do
+    <<row::16, col::16, width::16, height::16>>
+  end
+
+  @spec encode_hit_regions([HitRegion.t()]) :: iodata()
+  defp encode_hit_regions(hit_regions) do
+    Enum.map(hit_regions, fn %HitRegion{} = region ->
+      [<<encode_hit_kind(region.kind)::8>>, encode_rect(region.rect), <<region.window_id::16>>]
+    end)
+  end
+
+  @spec encode_hit_kind(HitRegion.kind()) :: non_neg_integer()
+  defp encode_hit_kind(:text), do: 1
+  defp encode_hit_kind(:gutter), do: 2
+  defp encode_hit_kind(:fold_control), do: 3
+  defp encode_hit_kind(:modeline), do: 4
+  defp encode_hit_kind(:divider), do: 5
 
   @doc """
   Returns the opcode constant for gui_window_content.
