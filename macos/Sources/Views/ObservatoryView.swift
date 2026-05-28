@@ -50,11 +50,8 @@ struct ObservatoryView: View {
             }
             .padding(.vertical, 6)
         }
-        .focusable()
-        .onKeyPress(.escape) {
-            dismissInspection()
-            return .handled
-        }
+        .focusable(false)
+        .focusEffectDisabled()
     }
 
     private func row(_ node: ObservatoryNode) -> some View {
