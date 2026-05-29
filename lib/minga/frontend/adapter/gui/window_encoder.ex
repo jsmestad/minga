@@ -142,16 +142,17 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   end
 
   @doc "Encodes a retained viewport delta with ordered ref-or-full row entries."
-  @spec encode_viewport_delta(RenderWindow.t(), [Row.t()]) :: {binary(), boolean()}
-  def encode_viewport_delta(%RenderWindow{} = window, previous_rows)
-      when is_list(previous_rows) do
-    encode_rows_snapshot_delta(@op_gui_window_viewport_delta, window, previous_rows)
+  @spec encode_viewport_delta(RenderWindow.t(), %{non_neg_integer() => non_neg_integer()}) ::
+          {binary(), boolean()}
+  def encode_viewport_delta(%RenderWindow{} = window, previous_hashes) when is_map(previous_hashes) do
+    encode_rows_snapshot_delta(@op_gui_window_viewport_delta, window, previous_hashes)
   end
 
   @doc "Encodes a retained rows delta with ordered ref-or-full row entries."
-  @spec encode_rows_delta(RenderWindow.t(), [Row.t()]) :: {binary(), boolean()}
-  def encode_rows_delta(%RenderWindow{} = window, previous_rows) when is_list(previous_rows) do
-    encode_rows_snapshot_delta(@op_gui_window_rows_delta, window, previous_rows)
+  @spec encode_rows_delta(RenderWindow.t(), %{non_neg_integer() => non_neg_integer()}) ::
+          {binary(), boolean()}
+  def encode_rows_delta(%RenderWindow{} = window, previous_hashes) when is_map(previous_hashes) do
+    encode_rows_snapshot_delta(@op_gui_window_rows_delta, window, previous_hashes)
   end
 
   @doc "Encodes per-frame window metadata that the GUI clears and rebuilds every batch."
@@ -195,57 +196,35 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
         sw.scroll_left::16, sw.content_epoch::32>>
 
     rows_payload = IO.iodata_to_binary([<<row_count::16>> | encode_rows(sw.rows)])
-    selection_payload = IO.iodata_to_binary(encode_selection(sw.selection))
-    matches_payload = IO.iodata_to_binary(encode_search_matches(sw.search_matches))
-    diag_payload = IO.iodata_to_binary(encode_diagnostic_ranges(sw.diagnostic_ranges))
-    highlight_payload = IO.iodata_to_binary(encode_document_highlights(sw.document_highlights))
-    annotation_payload = IO.iodata_to_binary(encode_annotations(sw.annotations))
-    geometry_payload = encode_geometry(sw.geometry)
-    cursorline_payload = encode_cursorline_section(sw.cursorline, sw.rect)
-
     header_section = encode_section(@section_wc_header, header_payload)
     rows_section = encode_section(@section_wc_rows, rows_payload)
-    selection_section = encode_section(@section_wc_selection, selection_payload)
-    search_section = encode_section(@section_wc_search, matches_payload)
-    diagnostic_section = encode_section(@section_wc_diagnostics, diag_payload)
-    highlight_section = encode_section(@section_wc_highlights, highlight_payload)
-    annotation_section = encode_section(@section_wc_annotations, annotation_payload)
-    geometry_sections = geometry_sections(geometry_payload)
-    cursorline_sections = cursorline_sections(cursorline_payload)
+    overlay = overlay_sections(sw)
 
     sections =
-      [
-        header_section,
-        rows_section,
-        selection_section,
-        search_section,
-        diagnostic_section,
-        highlight_section,
-        annotation_section
-      ] ++ geometry_sections ++ cursorline_sections
+      [header_section, rows_section | overlay.sections] ++
+        overlay.geometry ++ overlay.cursorline
 
     binary = IO.iodata_to_binary([<<@op_gui_window_content, length(sections)::8>> | sections])
 
     metrics = %{
       row_bytes: byte_size(rows_section),
       overlay_bytes:
-        byte_size(selection_section) + byte_size(search_section) + byte_size(diagnostic_section) +
-          byte_size(highlight_section),
+        byte_size(overlay.selection) + byte_size(overlay.search) +
+          byte_size(overlay.diagnostics) + byte_size(overlay.highlights),
       gutter_bytes: 0,
-      annotation_bytes: byte_size(annotation_section),
+      annotation_bytes: byte_size(overlay.annotations),
       metadata_bytes:
-        2 + byte_size(header_section) + IO.iodata_length(geometry_sections) +
-          IO.iodata_length(cursorline_sections)
+        2 + byte_size(header_section) + IO.iodata_length(overlay.geometry) +
+          IO.iodata_length(overlay.cursorline)
     }
 
     {binary, metrics}
   end
 
-  @spec encode_rows_snapshot_delta(non_neg_integer(), RenderWindow.t(), [Row.t()]) ::
+  @spec encode_rows_snapshot_delta(non_neg_integer(), RenderWindow.t(), map()) ::
           {binary(), boolean()}
-  defp encode_rows_snapshot_delta(opcode, %RenderWindow{} = sw, previous_rows) do
-    previous_keys = MapSet.new(previous_rows, &row_cache_key/1)
-    {row_entries, has_refs?} = encode_delta_row_entries(sw.rows, previous_keys)
+  defp encode_rows_snapshot_delta(opcode, %RenderWindow{} = sw, previous_hashes) do
+    {row_entries, has_refs?} = encode_delta_row_entries(sw.rows, previous_hashes)
 
     rows_payload = IO.iodata_to_binary([<<length(sw.rows)::16>> | row_entries])
     sections = delta_sections(sw, rows_payload)
@@ -263,29 +242,18 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
       <<sw.window_id::16, sw.content_epoch::32, flags::8, sw.cursor_row::16, sw.cursor_col::16,
         cursor_shape::8, sw.scroll_left::16>>
 
-    selection_payload = IO.iodata_to_binary(encode_selection(sw.selection))
-    matches_payload = IO.iodata_to_binary(encode_search_matches(sw.search_matches))
-    diag_payload = IO.iodata_to_binary(encode_diagnostic_ranges(sw.diagnostic_ranges))
-    highlight_payload = IO.iodata_to_binary(encode_document_highlights(sw.document_highlights))
-    annotation_payload = IO.iodata_to_binary(encode_annotations(sw.annotations))
-    geometry_payload = encode_geometry(sw.geometry)
-    cursorline_payload = encode_cursorline_section(sw.cursorline, sw.rect)
+    header_section = encode_section(@section_wc_header, header_payload)
+    rows_section = encode_section(@section_wc_rows, rows_payload)
+    overlay = overlay_sections(sw)
 
-    [
-      encode_section(@section_wc_header, header_payload),
-      encode_section(@section_wc_rows, rows_payload),
-      encode_section(@section_wc_selection, selection_payload),
-      encode_section(@section_wc_search, matches_payload),
-      encode_section(@section_wc_diagnostics, diag_payload),
-      encode_section(@section_wc_highlights, highlight_payload),
-      encode_section(@section_wc_annotations, annotation_payload)
-    ] ++ geometry_sections(geometry_payload) ++ cursorline_sections(cursorline_payload)
+    [header_section, rows_section | overlay.sections] ++
+      overlay.geometry ++ overlay.cursorline
   end
 
-  @spec encode_delta_row_entries([Row.t()], MapSet.t()) :: {iodata(), boolean()}
-  defp encode_delta_row_entries(rows, previous_keys) do
+  @spec encode_delta_row_entries([Row.t()], map()) :: {iodata(), boolean()}
+  defp encode_delta_row_entries(rows, previous_hashes) do
     Enum.map_reduce(rows, false, fn %Row{} = row, has_refs? ->
-      if MapSet.member?(previous_keys, row_cache_key(row)) do
+      if Map.get(previous_hashes, row.row_id) == row.content_hash do
         {[<<0::8, row.row_id::64, row.content_hash::32>>], true}
       else
         {[<<1::8>>, encode_row(row)], has_refs?}
@@ -293,8 +261,26 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
     end)
   end
 
-  @spec row_cache_key(Row.t()) :: {non_neg_integer(), non_neg_integer()}
-  defp row_cache_key(%Row{} = row), do: {row.row_id, row.content_hash}
+  defp overlay_sections(%RenderWindow{} = sw) do
+    selection = encode_section(@section_wc_selection, IO.iodata_to_binary(encode_selection(sw.selection)))
+    search = encode_section(@section_wc_search, IO.iodata_to_binary(encode_search_matches(sw.search_matches)))
+    diagnostics = encode_section(@section_wc_diagnostics, IO.iodata_to_binary(encode_diagnostic_ranges(sw.diagnostic_ranges)))
+    highlights = encode_section(@section_wc_highlights, IO.iodata_to_binary(encode_document_highlights(sw.document_highlights)))
+    annotations = encode_section(@section_wc_annotations, IO.iodata_to_binary(encode_annotations(sw.annotations)))
+    geometry = geometry_sections(encode_geometry(sw.geometry))
+    cursorline = cursorline_sections(encode_cursorline_section(sw.cursorline, sw.rect))
+
+    %{
+      sections: [selection, search, diagnostics, highlights, annotations],
+      selection: selection,
+      search: search,
+      diagnostics: diagnostics,
+      highlights: highlights,
+      annotations: annotations,
+      geometry: geometry,
+      cursorline: cursorline
+    }
+  end
 
   @spec empty_metrics() :: metrics()
   defp empty_metrics do

@@ -143,7 +143,7 @@ defmodule Minga.Frontend.Adapter.GUI do
     previous_content_fp = Map.get(caches.last_window_content_fps, window.window_id)
     previous_overlay_fp = Map.get(caches.last_window_overlay_fps, window.window_id)
     previous_content_epoch = Map.get(caches.last_window_content_epochs, window.window_id)
-    previous_rows = Map.get(caches.last_window_rows, window.window_id, [])
+    previous_row_keys = Map.get(caches.last_window_row_keys, window.window_id, [])
 
     change = %{
       metadata: metadata,
@@ -153,8 +153,8 @@ defmodule Minga.Frontend.Adapter.GUI do
       previous_content_fp: previous_content_fp,
       previous_overlay_fp: previous_overlay_fp,
       previous_content_epoch: previous_content_epoch,
-      previous_rows: previous_rows,
-      delta_pending?: Map.has_key?(caches.pending_window_content_delta_fps, window.window_id)
+      previous_row_keys: previous_row_keys,
+      delta_pending?: MapSet.member?(caches.pending_window_delta_ids, window.window_id)
     }
 
     encode_window_change(window, cmds, caches, change)
@@ -210,7 +210,7 @@ defmodule Minga.Frontend.Adapter.GUI do
        )
        when previous_overlay_fp != overlay_fp do
     delta = WindowEncoder.encode_overlay_delta(window)
-    caches = put_window_fingerprints(caches, window.window_id, content_fp, overlay_fp)
+    caches = put_window_fingerprints(caches, window.window_id, content_fp, overlay_fp, nil)
     encoded = [delta | metadata]
 
     {Enum.reverse(encoded) ++ cmds, caches, add_overlay_delta_metrics(metadata_metrics, delta)}
@@ -261,11 +261,16 @@ defmodule Minga.Frontend.Adapter.GUI do
            metadata_metrics: metadata_metrics,
            content_fp: content_fp,
            overlay_fp: overlay_fp,
-           previous_rows: previous_rows
+           previous_row_keys: previous_row_keys
          }
        ) do
-    encoder = delta_encoder(window, previous_rows)
-    {delta, _has_refs?} = encoder.(window, previous_rows)
+    previous_hashes = Map.new(previous_row_keys)
+
+    {delta, _has_refs?} =
+      if viewport_delta?(window.rows, previous_hashes),
+        do: WindowEncoder.encode_viewport_delta(window, previous_hashes),
+        else: WindowEncoder.encode_rows_delta(window, previous_hashes)
+
     encoded = [delta | metadata]
 
     caches = put_window_delta_pending(caches, window.window_id, content_fp, overlay_fp, window)
@@ -274,31 +279,15 @@ defmodule Minga.Frontend.Adapter.GUI do
     {Enum.reverse(encoded) ++ cmds, caches, metrics}
   end
 
-  @spec delta_encoder(RenderModel.Window.t(), [RenderModel.Window.Row.t()]) ::
-          (RenderModel.Window.t(), [RenderModel.Window.Row.t()] -> {binary(), boolean()})
-  defp delta_encoder(%RenderModel.Window{} = window, previous_rows) do
-    if viewport_delta?(window.rows, previous_rows) do
-      &WindowEncoder.encode_viewport_delta/2
-    else
-      &WindowEncoder.encode_rows_delta/2
-    end
-  end
-
-  @spec viewport_delta?([RenderModel.Window.Row.t()], [RenderModel.Window.Row.t()]) :: boolean()
-  defp viewport_delta?(rows, previous_rows) do
-    previous_hashes_by_id = Map.new(previous_rows, &{&1.row_id, &1.content_hash})
-
+  @spec viewport_delta?([RenderModel.Window.Row.t()], %{non_neg_integer() => non_neg_integer()}) ::
+          boolean()
+  defp viewport_delta?(rows, previous_hashes) do
     Enum.all?(rows, fn row ->
-      case Map.fetch(previous_hashes_by_id, row.row_id) do
+      case Map.fetch(previous_hashes, row.row_id) do
         {:ok, hash} -> hash == row.content_hash
         :error -> true
       end
     end)
-  end
-
-  @spec put_window_fingerprints(Caches.t(), non_neg_integer(), integer(), integer()) :: Caches.t()
-  defp put_window_fingerprints(%Caches{} = caches, window_id, content_fp, overlay_fp) do
-    put_window_fingerprints(caches, window_id, content_fp, overlay_fp, nil)
   end
 
   @spec put_window_fingerprints(
@@ -314,8 +303,7 @@ defmodule Minga.Frontend.Adapter.GUI do
       | last_window_fps: Map.put(caches.last_window_fps, window_id, content_fp),
         last_window_content_fps: Map.put(caches.last_window_content_fps, window_id, content_fp),
         last_window_overlay_fps: Map.put(caches.last_window_overlay_fps, window_id, overlay_fp),
-        pending_window_content_delta_fps:
-          Map.delete(caches.pending_window_content_delta_fps, window_id)
+        pending_window_delta_ids: MapSet.delete(caches.pending_window_delta_ids, window_id)
     }
 
     put_window_snapshot(caches, window_id, window)
@@ -334,8 +322,7 @@ defmodule Minga.Frontend.Adapter.GUI do
       | last_window_fps: Map.put(caches.last_window_fps, window_id, content_fp),
         last_window_content_fps: Map.put(caches.last_window_content_fps, window_id, content_fp),
         last_window_overlay_fps: Map.put(caches.last_window_overlay_fps, window_id, overlay_fp),
-        pending_window_content_delta_fps:
-          Map.put(caches.pending_window_content_delta_fps, window_id, content_fp)
+        pending_window_delta_ids: MapSet.put(caches.pending_window_delta_ids, window_id)
     }
 
     put_window_snapshot(caches, window_id, window)
@@ -346,11 +333,13 @@ defmodule Minga.Frontend.Adapter.GUI do
   defp put_window_snapshot(caches, _window_id, nil), do: caches
 
   defp put_window_snapshot(caches, window_id, %RenderModel.Window{} = window) do
+    row_keys = Enum.map(window.rows, &{&1.row_id, &1.content_hash})
+
     %{
       caches
       | last_window_content_epochs:
           Map.put(caches.last_window_content_epochs, window_id, window.content_epoch),
-        last_window_rows: Map.put(caches.last_window_rows, window_id, window.rows)
+        last_window_row_keys: Map.put(caches.last_window_row_keys, window_id, row_keys)
     }
   end
 

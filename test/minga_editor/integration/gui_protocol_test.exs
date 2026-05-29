@@ -1087,7 +1087,7 @@ defmodule Minga.Integration.GUIProtocolTest do
         rows: [retained, replacement]
       }
 
-      {cmd, true} = WindowEncoder.encode_rows_delta(window, [retained])
+      {cmd, true} = WindowEncoder.encode_rows_delta(window, %{retained.row_id => retained.content_hash})
       Port.command(port, cmd)
 
       assert_receive {^port, {:data, json}}, 5_000
