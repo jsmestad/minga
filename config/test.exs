@@ -39,6 +39,12 @@ config :minga, infer_startup_project_root: false
 # Session GenServer lifecycle.
 config :minga, test_provider_module: Minga.Test.StubProvider
 
+# Isolate the extension compile cache so tests never read from or write to the
+# developer's real cache dir under ~/.local/share/minga.
+config :minga,
+  extension_compile_cache_dir:
+    Path.join(System.tmp_dir!(), "minga-test-ext-cache-#{System.unique_integer([:positive])}")
+
 # Disable user extension loading so tests are deterministic regardless
 # of which extensions the developer has installed locally.
 config :minga, load_extensions: false
