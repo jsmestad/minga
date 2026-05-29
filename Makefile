@@ -21,6 +21,18 @@ PREFIX  ?= $(HOME)/.local
 BINDIR   = $(PREFIX)/bin
 APP_DIR ?= /Applications
 
+# Burrito unpacks the binary's payload into a versioned cache dir named
+# <app>_erts-<ertsver>_<appver> and only re-extracts when that dir is absent.
+# The app version rarely changes during local dev, so a fresh `make install`
+# would otherwise keep running the previously extracted code. We clear minga's
+# extraction on install to force a re-unpack of the new payload.
+ifeq ($(OS),Darwin)
+  BURRITO_INSTALL_DIR := $(HOME)/Library/Application Support/.burrito
+else
+  XDG_DATA_HOME ?= $(HOME)/.local/share
+  BURRITO_INSTALL_DIR := $(XDG_DATA_HOME)/.burrito
+endif
+
 # ── Lint ────────────────────────────────────────────────────────────────
 
 # Run all lint checks. Each step runs independently so dialyzer always
@@ -94,6 +106,8 @@ install-tui: release-tui
 	@mkdir -p "$(BINDIR)"
 	cp "burrito_out/$(BURRITO_TARGET)" "$(BINDIR)/minga"
 	chmod +x "$(BINDIR)/minga"
+	@# Force Burrito to re-extract the new payload (see BURRITO_INSTALL_DIR above).
+	@rm -rf "$(BURRITO_INSTALL_DIR)"/minga_erts-*
 	@echo "\033[32mInstalled minga to $(BINDIR)/minga\033[0m"
 	@"$(BINDIR)/minga" --version || true
 
