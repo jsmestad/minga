@@ -4,15 +4,13 @@ defmodule MingaAgent.ProviderResolver do
 
   The `:agent_provider` config option controls selection:
 
-  - `:auto` (default) - checks for native API credentials first, then starts
-    the native provider with an onboarding message if no credentials exist
+  - `:auto` (default) - uses the native ReqLLM provider
   - `:native` - always uses the native ReqLLM provider
 
-  This module is called by the Session during init and by any code that
-  starts a new agent session.
+  Credential availability is checked later during provider init, not
+  during resolution, to avoid blocking session startup on network checks.
   """
 
-  alias MingaAgent.Credentials
   alias Minga.Config
 
   defmodule Resolved do
@@ -58,19 +56,7 @@ defmodule MingaAgent.ProviderResolver do
   end
 
   def resolve(:auto) do
-    resolve_auto(has_native_credentials?())
-  end
-
-  # Auto resolution priority:
-  # 1. Native provider if any API credentials are configured (env or file)
-  # 2. Native provider with no credentials (will prompt user to authenticate)
-  @spec resolve_auto(boolean()) :: resolved()
-  defp resolve_auto(true) do
     %Resolved{module: MingaAgent.Providers.Native, name: "native (auto)"}
-  end
-
-  defp resolve_auto(false) do
-    %Resolved{module: MingaAgent.Providers.Native, name: "native (auto, no credentials)"}
   end
 
   @doc """
@@ -82,11 +68,6 @@ defmodule MingaAgent.ProviderResolver do
   end
 
   # ── Private ─────────────────────────────────────────────────────────────────
-
-  @spec has_native_credentials?() :: boolean()
-  defp has_native_credentials? do
-    Credentials.any_configured?()
-  end
 
   @spec read_config_provider() :: :auto | :native
   defp read_config_provider do
