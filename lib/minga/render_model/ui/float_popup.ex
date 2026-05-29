@@ -1,18 +1,19 @@
 defmodule Minga.RenderModel.UI.FloatPopup do
   @moduledoc """
-  Pre-encoded float popup model.
-
-  The float popup has two sources: observatory inspection data and float-display
-  popup windows. The wire format includes visibility, dimensions, title, and
-  line content. The builder pre-encodes the binary and stores it here along
-  with a fingerprint for change detection.
+  Semantic floating popup model for GUI adapters.
   """
 
   @type t :: %__MODULE__{
-          encoded: binary(),
-          fingerprint: integer()
+          visible?: boolean(),
+          title: String.t(),
+          lines: [String.t()],
+          width: non_neg_integer(),
+          height: non_neg_integer()
         }
 
-  @enforce_keys [:encoded, :fingerprint]
-  defstruct [:encoded, :fingerprint]
+  defstruct visible?: false,
+            title: "",
+            lines: [],
+            width: 0,
+            height: 0
 end

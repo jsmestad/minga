@@ -1,19 +1,25 @@
 defmodule Minga.RenderModel.UI.HoverPopup do
   @moduledoc """
-  Pre-encoded hover popup model.
-
-  The hover popup wire format includes markdown content lines with typed
-  segments (plain, bold, italic, code, headers, blockquotes, etc.), anchor
-  position, focus state, scroll offset, and an optional action sidecar
-  command. The builder pre-encodes the binary and stores it here along with
-  a fingerprint for change detection.
+  Semantic hover popup model for GUI adapters.
   """
 
+  alias Minga.RenderModel.UI.HoverPopup.Line
+
   @type t :: %__MODULE__{
-          encoded: binary(),
-          fingerprint: integer()
+          visible?: boolean(),
+          anchor_row: non_neg_integer(),
+          anchor_col: non_neg_integer(),
+          focused?: boolean(),
+          scroll_offset: non_neg_integer(),
+          content_lines: [Line.t()],
+          open_action_name: String.t() | nil
         }
 
-  @enforce_keys [:encoded, :fingerprint]
-  defstruct [:encoded, :fingerprint]
+  defstruct visible?: false,
+            anchor_row: 0,
+            anchor_col: 0,
+            focused?: false,
+            scroll_offset: 0,
+            content_lines: [],
+            open_action_name: nil
 end

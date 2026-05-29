@@ -4,23 +4,30 @@ defmodule Minga.RenderModel.UI.FloatPopupTest do
   alias Minga.RenderModel.UI.FloatPopup
 
   describe "%FloatPopup{}" do
-    test "requires encoded and fingerprint" do
-      model = %FloatPopup{encoded: <<>>, fingerprint: 12_345}
+    test "defaults to hidden" do
+      model = %FloatPopup{}
 
-      assert model.encoded == <<>>
-      assert model.fingerprint == 12_345
+      refute model.visible?
+      assert model.title == ""
+      assert model.lines == []
+      assert model.width == 0
+      assert model.height == 0
     end
 
-    test "raises when required fields are missing" do
-      assert_raise ArgumentError, fn ->
-        struct!(FloatPopup, %{})
-      end
-    end
+    test "stores semantic float popup content" do
+      model = %FloatPopup{
+        visible?: true,
+        title: "Inspect",
+        lines: ["line1"],
+        width: 40,
+        height: 20
+      }
 
-    test "accepts integer fingerprint" do
-      model = %FloatPopup{encoded: <<0x83, 0>>, fingerprint: 99_999}
-
-      assert model.fingerprint == 99_999
+      assert model.visible?
+      assert model.title == "Inspect"
+      assert model.lines == ["line1"]
+      assert model.width == 40
+      assert model.height == 20
     end
   end
 end

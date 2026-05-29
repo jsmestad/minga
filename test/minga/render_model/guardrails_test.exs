@@ -10,14 +10,7 @@ defmodule Minga.RenderModel.GuardrailsTest do
                                  "board",
                                  "bottom_panel",
                                  "change_summary",
-                                 "completion",
-                                 "edit_timeline",
-                                 "extension_overlay",
-                                 "extension_panel",
-                                 "float_popup",
-                                 "hover_popup",
-                                 "observatory",
-                                 "signature_help"
+                                 "edit_timeline"
                                ])
 
   @legacy_protocol_gui_builder_files MapSet.new([
@@ -26,14 +19,7 @@ defmodule Minga.RenderModel.GuardrailsTest do
                                        "lib/minga_editor/render_model/ui/board_builder.ex",
                                        "lib/minga_editor/render_model/ui/bottom_panel_builder.ex",
                                        "lib/minga_editor/render_model/ui/change_summary_builder.ex",
-                                       "lib/minga_editor/render_model/ui/completion_builder.ex",
-                                       "lib/minga_editor/render_model/ui/edit_timeline_builder.ex",
-                                       "lib/minga_editor/render_model/ui/extension_overlay_builder.ex",
-                                       "lib/minga_editor/render_model/ui/extension_panel_builder.ex",
-                                       "lib/minga_editor/render_model/ui/float_popup_builder.ex",
-                                       "lib/minga_editor/render_model/ui/hover_popup_builder.ex",
-                                       "lib/minga_editor/render_model/ui/observatory_builder.ex",
-                                       "lib/minga_editor/render_model/ui/signature_help_builder.ex"
+                                       "lib/minga_editor/render_model/ui/edit_timeline_builder.ex"
                                      ])
 
   test "only tracked legacy UI render models carry protocol payload fields" do

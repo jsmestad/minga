@@ -2,14 +2,24 @@ defmodule MingaEditor.RenderModel.UI.ExtensionPanelBuilder do
   @moduledoc false
 
   alias Minga.RenderModel.UI.ExtensionPanel
-  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
+  alias Minga.RenderModel.UI.ExtensionPanel.Panel
 
   @spec build() :: ExtensionPanel.t()
   def build do
     panels = Minga.Extension.Panel.visible()
-    fp = :erlang.phash2(panels)
-    encoded = ProtocolGUI.encode_gui_extension_panels(panels)
+    %ExtensionPanel{panels: Enum.map(panels, &panel_model/1)}
+  end
 
-    %ExtensionPanel{encoded: encoded, fingerprint: fp}
+  @spec panel_model(Minga.Extension.Panel.entry()) :: Panel.t()
+  defp panel_model(panel) do
+    %Panel{
+      extension: to_string(panel.extension),
+      panel_id: to_string(panel.panel_id),
+      title: panel.title,
+      position: panel.position,
+      size: panel.size,
+      visible?: panel.visible,
+      content: panel.content
+    }
   end
 end

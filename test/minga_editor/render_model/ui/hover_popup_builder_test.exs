@@ -1,53 +1,41 @@
 defmodule MingaEditor.RenderModel.UI.HoverPopupBuilderTest do
   use ExUnit.Case, async: true
 
-  alias MingaEditor.RenderModel.UI.HoverPopupBuilder
   alias Minga.RenderModel.UI.HoverPopup
-  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
+  alias Minga.RenderModel.UI.HoverPopup.Line
+  alias Minga.RenderModel.UI.HoverPopup.Segment
+  alias MingaEditor.RenderModel.UI.HoverPopupBuilder
 
   import MingaEditor.RenderPipeline.TestHelpers
 
-  @op_gui_hover_popup Minga.Protocol.Opcodes.gui_hover_popup()
-
   describe "build/1" do
-    test "builds nil hover popup when shell_state has no hover_popup" do
+    test "builds hidden hover popup when shell_state has no hover_popup" do
       ctx = build_minimal_context(%{})
 
       model = HoverPopupBuilder.build(ctx)
 
       assert %HoverPopup{} = model
-      assert is_binary(model.encoded)
-      assert is_integer(model.fingerprint)
-      assert <<@op_gui_hover_popup, 0>> = model.encoded
+      refute model.visible?
+      assert model.content_lines == []
     end
 
-    test "builds nil hover popup (no shell_state hover_popup key)" do
+    test "builds hidden hover popup when hover_popup key is absent" do
       ctx = build_minimal_context(%{some_other_key: true})
 
       model = HoverPopupBuilder.build(ctx)
 
-      assert %HoverPopup{} = model
-      assert <<@op_gui_hover_popup, 0>> = model.encoded
+      refute model.visible?
+      assert model.content_lines == []
     end
 
-    test "produces byte-identical output to legacy for nil popup" do
-      legacy_binary = ProtocolGUI.encode_gui_hover_popup(nil)
-
-      ctx = build_minimal_context(%{})
-      model = HoverPopupBuilder.build(ctx)
-
-      assert model.encoded == legacy_binary,
-             "Nil hover popup: new builder output does not match legacy output"
-    end
-
-    test "builds hover popup with actual popup data" do
+    test "builds semantic hover popup data" do
       popup = %MingaEditor.HoverPopup{
         content_lines: [{[{"hello", :plain}], :text}],
         anchor_row: 5,
         anchor_col: 10,
-        focused: false,
-        scroll_offset: 0,
-        open_action: nil
+        focused: true,
+        scroll_offset: 3,
+        open_action: :open_docs
       }
 
       ctx = build_minimal_context(%{hover_popup: popup})
@@ -55,26 +43,24 @@ defmodule MingaEditor.RenderModel.UI.HoverPopupBuilderTest do
       model = HoverPopupBuilder.build(ctx)
 
       assert %HoverPopup{} = model
-      assert <<@op_gui_hover_popup, 1, _rest::binary>> = model.encoded
+      assert model.visible?
+      assert model.anchor_row == 5
+      assert model.anchor_col == 10
+      assert model.focused?
+      assert model.scroll_offset == 3
+      assert model.open_action_name == "open_docs"
+
+      assert [%Line{segments: [%Segment{text: "hello", style: :plain}], line_type: :text}] =
+               model.content_lines
     end
 
-    test "produces byte-identical output to legacy for actual popup" do
-      popup = %MingaEditor.HoverPopup{
-        content_lines: [{[{"hello", :plain}], :text}],
-        anchor_row: 5,
-        anchor_col: 10,
-        focused: false,
-        scroll_offset: 0,
-        open_action: nil
-      }
-
-      legacy_binary = ProtocolGUI.encode_gui_hover_popup(popup)
-
+    test "empty hover content builds hidden model" do
+      popup = %MingaEditor.HoverPopup{content_lines: [], anchor_row: 5, anchor_col: 10}
       ctx = build_minimal_context(%{hover_popup: popup})
+
       model = HoverPopupBuilder.build(ctx)
 
-      assert model.encoded == legacy_binary,
-             "Hover popup: new builder output does not match legacy output"
+      refute model.visible?
     end
   end
 

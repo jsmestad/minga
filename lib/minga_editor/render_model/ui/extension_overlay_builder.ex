@@ -2,19 +2,15 @@ defmodule MingaEditor.RenderModel.UI.ExtensionOverlayBuilder do
   @moduledoc false
 
   alias Minga.RenderModel.UI.ExtensionOverlay
+  alias Minga.RenderModel.UI.ExtensionOverlay.Entry
   alias MingaEditor.Frontend.Emit.Context
-  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
 
   @spec build(Context.t()) :: ExtensionOverlay.t()
   def build(%Context{} = ctx) do
-    entries = build_overlay_entries(ctx)
-    fp = :erlang.phash2(entries)
-    encoded = ProtocolGUI.encode_gui_extension_overlays(entries)
-
-    %ExtensionOverlay{encoded: encoded, fingerprint: fp}
+    %ExtensionOverlay{entries: build_overlay_entries(ctx)}
   end
 
-  @spec build_overlay_entries(Context.t()) :: [ProtocolGUI.extension_overlay_entry()]
+  @spec build_overlay_entries(Context.t()) :: [Entry.t()]
   defp build_overlay_entries(ctx) do
     overlays = Minga.Extension.Overlay.all()
 
@@ -25,8 +21,7 @@ defmodule MingaEditor.RenderModel.UI.ExtensionOverlayBuilder do
     end
   end
 
-  @spec resolve_overlay_to_entries(Minga.Extension.Overlay.entry(), Context.t()) ::
-          [ProtocolGUI.extension_overlay_entry()]
+  @spec resolve_overlay_to_entries(Minga.Extension.Overlay.entry(), Context.t()) :: [Entry.t()]
   defp resolve_overlay_to_entries(overlay, ctx) do
     Enum.flat_map(ctx.layout.window_layouts, fn {win_id, win_layout} ->
       window = Map.get(ctx.windows.map, win_id)
@@ -39,7 +34,7 @@ defmodule MingaEditor.RenderModel.UI.ExtensionOverlayBuilder do
           term(),
           pos_integer(),
           MingaEditor.Layout.window_layout()
-        ) :: [ProtocolGUI.extension_overlay_entry()]
+        ) :: [Entry.t()]
   defp maybe_overlay_entry(overlay, %{buffer: buf} = window, win_id, win_layout)
        when is_pid(buf) do
     if buf == overlay.buffer do
@@ -52,13 +47,13 @@ defmodule MingaEditor.RenderModel.UI.ExtensionOverlayBuilder do
         style = overlay.style
 
         [
-          %{
+          %Entry{
             extension: to_string(overlay.extension),
             overlay_id: to_string(overlay.overlay_id),
             window_id: win_id,
             row: row,
             col: col,
-            shape: ProtocolGUI.overlay_shape_byte(overlay.shape),
+            shape: overlay.shape,
             fg: Map.get(style, :fg, 0x51AFEF),
             opacity: Map.get(style, :opacity, 102),
             content: overlay.content

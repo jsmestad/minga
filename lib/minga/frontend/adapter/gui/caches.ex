@@ -1,6 +1,8 @@
 defmodule Minga.Frontend.Adapter.GUI.Caches do
   @moduledoc false
 
+  @type fingerprint :: term()
+
   @type t :: %__MODULE__{
           last_theme_fp: integer() | nil,
           last_breadcrumb_fp: integer() | nil,
@@ -9,7 +11,7 @@ defmodule Minga.Frontend.Adapter.GUI.Caches do
           last_search_state_fp: integer() | nil,
           last_git_status_fp: integer() | nil,
           last_agent_context_fp: integer() | nil,
-          last_observatory_fp: integer() | :hidden | nil,
+          last_observatory_fp: fingerprint() | nil,
           last_board_fp: integer() | :dismissed | nil,
           last_tab_bar_fp: integer() | :suppressed | nil,
           last_workspaces_fp: integer() | :suppressed | nil,
@@ -17,16 +19,16 @@ defmodule Minga.Frontend.Adapter.GUI.Caches do
           last_file_tree_fp: term(),
           last_picker_fp: integer() | :closed | nil,
           last_minibuffer_fp: term(),
-          last_completion_fp: integer() | nil,
-          last_signature_help_fp: integer() | nil,
+          last_completion_fp: fingerprint() | nil,
+          last_signature_help_fp: fingerprint() | nil,
           last_agent_chat_fp: integer() | :not_visible | nil,
           last_bottom_panel_fp: integer() | nil,
           last_change_summary_fp: integer() | :hidden | nil,
           last_edit_timeline_fp: integer() | :hidden | nil,
-          last_extension_overlay_fp: integer() | nil,
-          last_extension_panel_fp: integer() | nil,
-          last_hover_popup_fp: integer() | nil,
-          last_float_popup_fp: integer() | nil,
+          last_extension_overlay_fp: fingerprint() | nil,
+          last_extension_panel_fp: fingerprint() | nil,
+          last_hover_popup_fp: fingerprint() | nil,
+          last_float_popup_fp: fingerprint() | nil,
           last_gutter_separator_fp: integer() | nil,
           last_split_separators_fp: integer() | nil,
           last_window_fps: %{non_neg_integer() => integer()},

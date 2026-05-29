@@ -2,27 +2,35 @@ defmodule Minga.RenderModel.UI.ObservatoryTest do
   use ExUnit.Case, async: true
 
   alias Minga.RenderModel.UI.Observatory
+  alias Minga.RenderModel.UI.Observatory.Node
 
   describe "%Observatory{}" do
-    test "requires visible, encoded, and fingerprint" do
-      obs = %Observatory{visible: false, encoded: <<>>, fingerprint: :hidden}
+    test "defaults to hidden" do
+      obs = %Observatory{}
 
-      assert obs.visible == false
-      assert obs.encoded == <<>>
-      assert obs.fingerprint == :hidden
+      refute obs.visible?
+      assert obs.nodes == []
     end
 
-    test "raises when required fields are missing" do
-      assert_raise ArgumentError, fn ->
-        struct!(Observatory, %{})
-      end
-    end
+    test "stores semantic observatory nodes" do
+      obs = %Observatory{visible?: true, nodes: [observatory_node()]}
 
-    test "accepts visible state with integer fingerprint" do
-      obs = %Observatory{visible: true, encoded: <<0x9A, 0>>, fingerprint: 12_345}
-
-      assert obs.visible == true
-      assert obs.fingerprint == 12_345
+      assert obs.visible?
+      assert [%Node{name: ":minga_test", message_queue_len: 1}] = obs.nodes
     end
+  end
+
+  defp observatory_node do
+    %Node{
+      pid: self(),
+      parent_pid: nil,
+      name: ":minga_test",
+      process_class: :worker,
+      depth: 0,
+      memory: 1024,
+      message_queue_len: 1,
+      reductions: 10,
+      sparkline_values: [0.5]
+    }
   end
 end

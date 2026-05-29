@@ -2,20 +2,49 @@ defmodule MingaEditor.RenderModel.UI.CompletionBuilder do
   @moduledoc false
 
   alias Minga.Buffer
+  alias Minga.Editing.Completion, as: EditingCompletion
   alias Minga.RenderModel.UI.Completion
+  alias Minga.RenderModel.UI.Completion.Item
   alias MingaEditor.FoldMap
   alias MingaEditor.Frontend.Emit.Context
-  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
   alias MingaEditor.Renderer.Gutter
   alias MingaEditor.Viewport
 
   @spec build(Context.t()) :: Completion.t()
   def build(%{completion: comp} = ctx) do
     {cursor_row, cursor_col} = current_cursor_screen_pos(ctx)
-    fp = :erlang.phash2({comp, cursor_row, cursor_col})
-    encoded = ProtocolGUI.encode_gui_completion(comp, cursor_row, cursor_col)
+    completion_model(comp, cursor_row, cursor_col)
+  end
 
-    %Completion{encoded: encoded, fingerprint: fp}
+  @spec completion_model(EditingCompletion.t() | nil, non_neg_integer(), non_neg_integer()) ::
+          Completion.t()
+  defp completion_model(nil, _cursor_row, _cursor_col), do: %Completion{}
+
+  defp completion_model(%EditingCompletion{} = comp, cursor_row, cursor_col) do
+    {items, selected_offset} = EditingCompletion.visible_items(comp)
+
+    case items do
+      [] ->
+        %Completion{}
+
+      visible_items ->
+        %Completion{
+          visible?: true,
+          cursor_row: cursor_row,
+          cursor_col: cursor_col,
+          selected_offset: selected_offset,
+          items: Enum.map(visible_items, &item_model/1)
+        }
+    end
+  end
+
+  @spec item_model(EditingCompletion.item()) :: Item.t()
+  defp item_model(item) do
+    %Item{
+      kind: Map.get(item, :kind, :text),
+      label: Map.get(item, :label, ""),
+      detail: Map.get(item, :detail, "") || ""
+    }
   end
 
   @spec current_cursor_screen_pos(Context.t()) :: {non_neg_integer(), non_neg_integer()}
