@@ -208,6 +208,29 @@ struct GUIWindowOverlayDelta: Sendable, Equatable {
     let cursorline: GUICursorline?
 }
 
+enum GUIWindowRowDeltaEntry: Sendable, Equatable {
+    case reference(rowId: UInt64, contentHash: UInt32)
+    case full(GUIVisualRow)
+}
+
+struct GUIWindowRowsDelta: Sendable, Equatable {
+    let windowId: UInt16
+    let contentEpoch: UInt32
+    let cursorVisible: Bool
+    let cursorRow: UInt16
+    let cursorCol: UInt16
+    let cursorShape: CursorShape
+    let scrollLeft: UInt16
+    let rows: [GUIWindowRowDeltaEntry]
+    let selection: GUISelectionOverlay?
+    let searchMatches: [GUISearchMatch]
+    let diagnosticUnderlines: [GUIDiagnosticUnderline]
+    let documentHighlights: [GUIDocumentHighlight]
+    let lineAnnotations: [GUILineAnnotation]
+    let paneGeometry: GUIPaneGeometry?
+    let cursorline: GUICursorline?
+}
+
 struct GUIPaneGeometry: Sendable, Equatable {
     let windowId: UInt16
     let totalRect: GUICellRect
@@ -302,4 +325,55 @@ final class GUIWindowContent: Sendable {
             cursorline: delta.cursorline
         )
     }
+
+    func applyingRowsDelta(_ delta: GUIWindowRowsDelta) -> GUIWindowContent? {
+        guard delta.windowId == windowId, delta.contentEpoch == contentEpoch else {
+            return nil
+        }
+
+        var retainedRows: [GUIRetainedRowKey: GUIVisualRow] = [:]
+        for row in rows {
+            let key = GUIRetainedRowKey(rowId: row.rowId, contentHash: row.contentHash)
+            guard retainedRows[key] == nil else { return nil }
+            retainedRows[key] = row
+        }
+
+        var resolvedRows: [GUIVisualRow] = []
+        resolvedRows.reserveCapacity(delta.rows.count)
+
+        for entry in delta.rows {
+            switch entry {
+            case .reference(let rowId, let contentHash):
+                let key = GUIRetainedRowKey(rowId: rowId, contentHash: contentHash)
+                guard let row = retainedRows[key] else { return nil }
+                resolvedRows.append(row)
+            case .full(let row):
+                resolvedRows.append(row)
+            }
+        }
+
+        return GUIWindowContent(
+            windowId: windowId,
+            fullRefresh: false,
+            contentEpoch: contentEpoch,
+            cursorVisible: delta.cursorVisible,
+            cursorRow: delta.cursorRow,
+            cursorCol: delta.cursorCol,
+            cursorShape: delta.cursorShape,
+            scrollLeft: delta.scrollLeft,
+            rows: resolvedRows,
+            selection: delta.selection,
+            searchMatches: delta.searchMatches,
+            diagnosticUnderlines: delta.diagnosticUnderlines,
+            documentHighlights: delta.documentHighlights,
+            lineAnnotations: delta.lineAnnotations,
+            paneGeometry: delta.paneGeometry,
+            cursorline: delta.cursorline
+        )
+    }
+}
+
+private struct GUIRetainedRowKey: Hashable {
+    let rowId: UInt64
+    let contentHash: UInt32
 }

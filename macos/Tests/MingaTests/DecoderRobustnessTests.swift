@@ -434,11 +434,11 @@ struct DecoderForwardCompatTests {
     func skipMultipleUnknown() throws {
         var data = Data()
         // First unknown opcode (3-byte payload)
-        data.append(0xA1)
+        data.append(0xA4)
         data.append(contentsOf: [0x00, 0x03])
         data.append(contentsOf: [0xAA, 0xBB, 0xCC])
         // Second unknown opcode (0-byte payload)
-        data.append(0xA2)
+        data.append(0xA5)
         data.append(contentsOf: [0x00, 0x00])
         // Known command
         data.append(OP_CLEAR)

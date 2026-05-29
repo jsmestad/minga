@@ -52,6 +52,35 @@ func sendSelectTab(id: UInt32) {
 
 // MARK: - Command to JSON conversion
 
+func jsonUInt64(_ value: UInt64) -> Any {
+    if value <= UInt64(Int.max) {
+        return Int(value)
+    }
+    return String(value)
+}
+
+func windowRowsDeltaResult(type: String, delta: GUIWindowRowsDelta) -> [String: Any] {
+    let rows = delta.rows.map { entry -> [String: Any] in
+        switch entry {
+        case .reference(let rowId, let contentHash):
+            return ["entry_type": "ref", "row_id": jsonUInt64(rowId), "content_hash": Int(contentHash)]
+        case .full(let row):
+            return ["entry_type": "full", "row_id": jsonUInt64(row.rowId), "content_hash": Int(row.contentHash), "text": row.text]
+        }
+    }
+
+    return [
+        "type": type,
+        "window_id": Int(delta.windowId),
+        "content_epoch": Int(delta.contentEpoch),
+        "cursor_visible": delta.cursorVisible,
+        "cursor_row": Int(delta.cursorRow),
+        "cursor_col": Int(delta.cursorCol),
+        "scroll_left": Int(delta.scrollLeft),
+        "rows": rows
+    ]
+}
+
 func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
     switch command {
     case .guiTheme(let slots):
@@ -258,7 +287,7 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
                  "fg": Int(s.fg), "bg": Int(s.bg), "attrs": Int(s.attrs),
                  "font_weight": Int(s.fontWeight), "font_id": Int(s.fontId)]
             }
-            return ["row_type": Int(row.rowType.rawValue), "row_id": Int(row.rowId), "buf_line": Int(row.bufLine),
+            return ["row_type": Int(row.rowType.rawValue), "row_id": jsonUInt64(row.rowId), "buf_line": Int(row.bufLine),
                     "content_hash": Int(row.contentHash), "text": row.text, "spans": spans]
         }
         var result: [String: Any] = [
@@ -291,6 +320,12 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
             result["cursorline"] = ["row": Int(cursorline.row), "bg": Int(cursorline.bg)]
         }
         return result
+
+    case .guiWindowViewportDelta(let delta):
+        return windowRowsDeltaResult(type: "gui_window_viewport_delta", delta: delta)
+
+    case .guiWindowRowsDelta(let delta):
+        return windowRowsDeltaResult(type: "gui_window_rows_delta", delta: delta)
 
     case .drawStyledText(let row, let col, let fg, let bg, let attrs, let underlineColor, let blend, let fontWeight, let fontId, let text):
         return ["type": "draw_styled_text", "row": Int(row), "col": Int(col),

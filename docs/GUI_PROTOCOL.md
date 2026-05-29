@@ -674,7 +674,7 @@ Mode values:
 
 Semantic rendering data for a buffer window. Replaces draw_text commands for buffer content. The BEAM pre-resolves all layout (word wrap, folding, virtual text splicing, conceal ranges) and all styling (syntax highlighting colors). The frontend renders directly from this data via CoreText, with selection/search/diagnostics as overlay quads (not baked into text colors).
 
-A full 0x80 message is sent for the first frame, epoch changes, full refreshes, and durable content changes. Cursor-only frames may use `gui_window_overlay_delta` (0xA0) instead. Agent chat windows do not use this opcode. Uses sectioned envelope: `opcode(1) + section_count(1) + sections...`.
+A full 0x80 message is sent for the first frame, epoch changes, full refreshes, and recovery frames. Cursor-only frames may use `gui_window_overlay_delta` (0xA0), while viewport and visible-row snapshots may use 0xA1 or 0xA2. Agent chat windows do not use this opcode. Uses sectioned envelope: `opcode(1) + section_count(1) + sections...`.
 
 | Section ID | Name | Content |
 |-----------|------|--------|
@@ -784,6 +784,30 @@ If cursorline_present:
 ```
 
 The frontend applies the delta only when it already has `gui_window_content` for the same `window_id` and `content_epoch`. If the epoch is missing or stale, it ignores the delta and waits for the next full 0x80 refresh.
+
+### 0xA1 - gui_window_viewport_delta and 0xA2 - gui_window_rows_delta
+
+Complete visible-window snapshots for retained GUI windows. Both opcodes carry the same payload shape: `gui_window_viewport_delta` is used when row order or viewport state changes without mutating retained row content, and `gui_window_rows_delta` is used when one or more visible rows have new durable content. The row list is ordered and complete for the window's current visible rows.
+
+```
+opcode(1) + section_count(1) + sections...
+
+Header section 0x01:
+  window_id(2) + content_epoch(4) + flags(1) + cursor_row(2) + cursor_col(2) + cursor_shape(1) + scroll_left(2)
+
+Rows section 0x02:
+  row_count(2) + row_entries...
+
+Per row entry:
+  entry_type(1)
+  if entry_type == 0: row_id(8) + content_hash(4)
+  if entry_type == 1: full row payload, same row encoding used by 0x80 section 0x02
+
+Sections 0x03-0x09:
+  same selection, search, diagnostics, document highlights, annotations, geometry, and cursorline sections used by 0x80
+```
+
+The frontend applies the delta only when it already has retained content for the same `window_id` and `content_epoch`. Ref entries must resolve by `row_id + content_hash`; if any ref is missing, the frontend drops that retained window state and waits for the next full 0x80 recovery frame. The BEAM marks row and viewport deltas as pending and follows them with a full content frame, so a missed delta cannot silently advance the backend cache forever.
 
 ### 0x81 — gui_hover_popup
 

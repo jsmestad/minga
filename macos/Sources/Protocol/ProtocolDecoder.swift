@@ -198,6 +198,8 @@ enum RenderCommand: Sendable {
                          entries: [Wire.MessageEntry])
     case guiWindowContent(data: GUIWindowContent)
     case guiWindowOverlayDelta(data: GUIWindowOverlayDelta)
+    case guiWindowViewportDelta(data: GUIWindowRowsDelta)
+    case guiWindowRowsDelta(data: GUIWindowRowsDelta)
     case guiToolManager(visible: Bool, filter: UInt8, selectedIndex: UInt16, tools: [Wire.ToolEntry])
     case guiMinibuffer(visible: Bool, mode: UInt8, cursorPos: UInt16, prompt: String, input: String, context: String, selectedIndex: UInt16, totalCandidates: UInt16, candidates: [Wire.MinibufferCandidate])
     case guiHoverPopup(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, focused: Bool, scrollOffset: UInt16, lines: [Wire.HoverLine])
@@ -1735,6 +1737,14 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             return (.guiWindowOverlayDelta(data: delta), 13)
         }
 
+    case OP_GUI_WINDOW_VIEWPORT_DELTA:
+        let (delta, consumed) = try decodeWindowRowsDelta(data: data, offset: offset)
+        return (.guiWindowViewportDelta(data: delta), consumed)
+
+    case OP_GUI_WINDOW_ROWS_DELTA:
+        let (delta, consumed) = try decodeWindowRowsDelta(data: data, offset: offset)
+        return (.guiWindowRowsDelta(data: delta), consumed)
+
     case OP_GUI_TOOL_MANAGER:
         // visible(1)
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
@@ -2965,6 +2975,190 @@ private func decodeStatusBarSegments(data: Data, pos: inout Int, count: Int, end
     }
 
     return segments
+}
+
+private func decodeWindowRowsDelta(data: Data, offset: Int) throws -> (GUIWindowRowsDelta, Int) {
+    let rest = offset + 1
+    guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
+    let sectionCount = Int(data[rest])
+    var pos = rest + 1
+
+    var windowId: UInt16 = 0
+    var contentEpoch: UInt32 = 0
+    var cursorVisible = true
+    var cursorRow: UInt16 = 0
+    var cursorCol: UInt16 = 0
+    var cursorShape: CursorShape = .block
+    var scrollLeft: UInt16 = 0
+    var rows: [GUIWindowRowDeltaEntry] = []
+    var selection: GUISelectionOverlay? = nil
+    var matches: [GUISearchMatch] = []
+    var diags: [GUIDiagnosticUnderline] = []
+    var highlights: [GUIDocumentHighlight] = []
+    var annotations: [GUILineAnnotation] = []
+    var paneGeometry: GUIPaneGeometry?
+    var cursorline: GUICursorline?
+    var sawHeader = false
+    var sawRows = false
+
+    for _ in 0..<sectionCount {
+        guard data.count >= pos + 3 else { throw ProtocolDecodeError.malformed }
+        let sectionId = data[pos]
+        let sectionLen = Int(readU16(data, pos + 1))
+        let sectionStart = pos + 3
+        let sectionEnd = sectionStart + sectionLen
+        guard data.count >= sectionEnd else { throw ProtocolDecodeError.malformed }
+
+        switch sectionId {
+        case 0x01:
+            guard sectionLen >= 14 else { throw ProtocolDecodeError.malformed }
+            sawHeader = true
+            windowId = readU16(data, sectionStart)
+            contentEpoch = readU32(data, sectionStart + 2)
+            cursorVisible = data[sectionStart + 6] & 0x01 != 0
+            cursorRow = readU16(data, sectionStart + 7)
+            cursorCol = readU16(data, sectionStart + 9)
+            cursorShape = CursorShape(rawValue: data[sectionStart + 11]) ?? .block
+            scrollLeft = readU16(data, sectionStart + 12)
+
+        case 0x02:
+            sawRows = true
+            rows = try decodeWindowDeltaRows(data: data, start: sectionStart, end: sectionEnd)
+
+        case 0x03:
+            guard sectionLen >= 1 else { break }
+            let selType = data[sectionStart]
+            if selType != 0, sectionLen >= 9 {
+                selection = GUISelectionOverlay(
+                    type: GUISelectionType(rawValue: selType) ?? .char,
+                    startRow: readU16(data, sectionStart + 1), startCol: readU16(data, sectionStart + 3),
+                    endRow: readU16(data, sectionStart + 5), endCol: readU16(data, sectionStart + 7)
+                )
+            }
+
+        case 0x04:
+            guard sectionLen >= 2 else { break }
+            let count = Int(readU16(data, sectionStart))
+            var matchPos = sectionStart + 2
+            for _ in 0..<count {
+                guard matchPos + 7 <= sectionEnd else { break }
+                matches.append(GUISearchMatch(
+                    row: readU16(data, matchPos), startCol: readU16(data, matchPos + 2),
+                    endCol: readU16(data, matchPos + 4), isCurrent: data[matchPos + 6] != 0
+                ))
+                matchPos += 7
+            }
+
+        case 0x05:
+            guard sectionLen >= 2 else { break }
+            let count = Int(readU16(data, sectionStart))
+            var diagPos = sectionStart + 2
+            for _ in 0..<count {
+                guard diagPos + 9 <= sectionEnd else { break }
+                diags.append(GUIDiagnosticUnderline(
+                    startRow: readU16(data, diagPos), startCol: readU16(data, diagPos + 2),
+                    endRow: readU16(data, diagPos + 4), endCol: readU16(data, diagPos + 6),
+                    severity: GUIDiagnosticSeverity(rawValue: data[diagPos + 8]) ?? .error
+                ))
+                diagPos += 9
+            }
+
+        case 0x06:
+            guard sectionLen >= 2 else { break }
+            let count = Int(readU16(data, sectionStart))
+            var highlightPos = sectionStart + 2
+            for _ in 0..<count {
+                guard highlightPos + 9 <= sectionEnd else { break }
+                highlights.append(GUIDocumentHighlight(
+                    startRow: readU16(data, highlightPos), startCol: readU16(data, highlightPos + 2),
+                    endRow: readU16(data, highlightPos + 4), endCol: readU16(data, highlightPos + 6),
+                    kind: GUIDocumentHighlightKind(rawValue: data[highlightPos + 8]) ?? .text
+                ))
+                highlightPos += 9
+            }
+
+        case 0x07:
+            guard sectionLen >= 2 else { break }
+            let count = Int(readU16(data, sectionStart))
+            var annPos = sectionStart + 2
+            for _ in 0..<count {
+                guard annPos + 11 <= sectionEnd else { break }
+                let annRow = readU16(data, annPos)
+                let annKind = GUILineAnnotationKind(rawValue: data[annPos + 2]) ?? .inlinePill
+                let annFg = readU24(data, annPos + 3)
+                let annBg = readU24(data, annPos + 6)
+                let annTextLen = Int(readU16(data, annPos + 9))
+                annPos += 11
+                guard annPos + annTextLen <= sectionEnd else { break }
+                let annText = String(data: Data(data[annPos..<(annPos + annTextLen)]), encoding: .utf8) ?? ""
+                annPos += annTextLen
+                annotations.append(GUILineAnnotation(row: annRow, kind: annKind, fg: annFg, bg: annBg, text: annText))
+            }
+
+        case 0x08:
+            paneGeometry = try decodePaneGeometry(data: data, start: sectionStart, end: sectionEnd)
+
+        case 0x09:
+            guard sectionLen >= 5 else { break }
+            cursorline = GUICursorline(row: readU16(data, sectionStart), bg: readU24(data, sectionStart + 2))
+
+        default:
+            break
+        }
+
+        pos = sectionEnd
+    }
+
+    guard sawHeader, sawRows else { throw ProtocolDecodeError.malformed }
+
+    let delta = GUIWindowRowsDelta(
+        windowId: windowId,
+        contentEpoch: contentEpoch,
+        cursorVisible: cursorVisible,
+        cursorRow: cursorRow,
+        cursorCol: cursorCol,
+        cursorShape: cursorShape,
+        scrollLeft: scrollLeft,
+        rows: rows,
+        selection: selection,
+        searchMatches: matches,
+        diagnosticUnderlines: diags,
+        documentHighlights: highlights,
+        lineAnnotations: annotations,
+        paneGeometry: paneGeometry,
+        cursorline: cursorline
+    )
+
+    return (delta, pos - offset)
+}
+
+private func decodeWindowDeltaRows(data: Data, start: Int, end: Int) throws -> [GUIWindowRowDeltaEntry] {
+    guard start + 2 <= end else { throw ProtocolDecodeError.malformed }
+    let rowCount = Int(readU16(data, start))
+    var pos = start + 2
+    var rows: [GUIWindowRowDeltaEntry] = []
+    rows.reserveCapacity(rowCount)
+
+    for _ in 0..<rowCount {
+        guard pos + 1 <= end else { throw ProtocolDecodeError.malformed }
+        let entryKind = data[pos]
+        pos += 1
+
+        switch entryKind {
+        case 0:
+            guard pos + 12 <= end else { throw ProtocolDecodeError.malformed }
+            rows.append(.reference(rowId: readU64(data, pos), contentHash: readU32(data, pos + 8)))
+            pos += 12
+        case 1:
+            let row = try decodeWindowContentRow(data: data, pos: &pos, end: end)
+            rows.append(.full(row))
+        default:
+            throw ProtocolDecodeError.malformed
+        }
+    }
+
+    guard pos == end else { throw ProtocolDecodeError.malformed }
+    return rows
 }
 
 private func decodeWindowContentRows(data: Data, start: Int, end: Int) throws -> [GUIVisualRow] {

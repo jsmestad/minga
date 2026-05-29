@@ -1051,6 +1051,59 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["selection"]["end_col"] == 10
       assert decoded["diagnostic_count"] == 1
     end
+
+    test "round-trips rows delta with ref and full entries", %{port: port} do
+      alias Minga.RenderModel.Window
+      alias Minga.RenderModel.Window.Row
+
+      retained = %Row{
+        row_id: Row.stable_id(:normal, 0),
+        row_type: :normal,
+        buf_line: 0,
+        text: "old",
+        spans: [],
+        content_hash: 11
+      }
+
+      replacement = %Row{
+        row_id: Row.stable_id(:normal, 1),
+        row_type: :normal,
+        buf_line: 1,
+        text: "new",
+        spans: [],
+        content_hash: 22
+      }
+
+      window = %Window{
+        window_id: 7,
+        content_kind: :buffer,
+        rect: {0, 0, 80, 20},
+        full_refresh: false,
+        cursor_row: 1,
+        cursor_col: 3,
+        cursor_shape: :beam,
+        content_epoch: 42,
+        scroll_left: 2,
+        rows: [retained, replacement]
+      }
+
+      {cmd, true} = WindowEncoder.encode_rows_delta(window, [retained])
+      Port.command(port, cmd)
+
+      assert_receive {^port, {:data, json}}, 5_000
+      decoded = JSON.decode!(json)
+
+      assert decoded["type"] == "gui_window_rows_delta"
+      assert decoded["window_id"] == 7
+      assert decoded["content_epoch"] == 42
+      assert decoded["scroll_left"] == 2
+
+      assert [ref, full] = decoded["rows"]
+      assert ref["entry_type"] == "ref"
+      assert ref["row_id"] == Row.stable_id(:normal, 0)
+      assert full["entry_type"] == "full"
+      assert full["text"] == "new"
+    end
   end
 
   describe "draw_styled_text" do

@@ -31,7 +31,10 @@ defmodule Minga.Frontend.Adapter.GUI.Caches do
           last_split_separators_fp: integer() | nil,
           last_window_fps: %{non_neg_integer() => integer()},
           last_window_content_fps: %{non_neg_integer() => integer()},
-          last_window_overlay_fps: %{non_neg_integer() => integer()}
+          last_window_overlay_fps: %{non_neg_integer() => integer()},
+          last_window_content_epochs: %{non_neg_integer() => non_neg_integer()},
+          last_window_rows: %{non_neg_integer() => [Minga.RenderModel.Window.Row.t()]},
+          pending_window_content_delta_fps: %{non_neg_integer() => integer()}
         }
 
   defstruct last_theme_fp: nil,
@@ -63,7 +66,10 @@ defmodule Minga.Frontend.Adapter.GUI.Caches do
             last_split_separators_fp: nil,
             last_window_fps: %{},
             last_window_content_fps: %{},
-            last_window_overlay_fps: %{}
+            last_window_overlay_fps: %{},
+            last_window_content_epochs: %{},
+            last_window_rows: %{},
+            pending_window_content_delta_fps: %{}
 
   @spec new() :: t()
   def new, do: %__MODULE__{}

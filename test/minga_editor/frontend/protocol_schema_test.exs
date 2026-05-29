@@ -151,7 +151,9 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       gui_extension_panel: 0x9D,
       gui_search_state: 0x9E,
       gui_sidebars: 0x9F,
-      gui_window_overlay_delta: 0xA0
+      gui_window_overlay_delta: 0xA0,
+      gui_window_viewport_delta: 0xA1,
+      gui_window_rows_delta: 0xA2
     )
   end
 

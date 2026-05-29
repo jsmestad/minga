@@ -83,6 +83,8 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
 
   @op_gui_window_content Opcodes.gui_window_content()
   @op_gui_window_overlay_delta Opcodes.gui_window_overlay_delta()
+  @op_gui_window_viewport_delta Opcodes.gui_window_viewport_delta()
+  @op_gui_window_rows_delta Opcodes.gui_window_rows_delta()
   @op_gui_gutter Opcodes.gui_gutter()
   @op_gui_indent_guides Opcodes.gui_indent_guides()
 
@@ -137,6 +139,19 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
         window.cursor_col::16, cursor_shape::8>>
 
     IO.iodata_to_binary([<<@op_gui_window_overlay_delta>>, header, cursorline || []])
+  end
+
+  @doc "Encodes a retained viewport delta with ordered ref-or-full row entries."
+  @spec encode_viewport_delta(RenderWindow.t(), [Row.t()]) :: {binary(), boolean()}
+  def encode_viewport_delta(%RenderWindow{} = window, previous_rows)
+      when is_list(previous_rows) do
+    encode_rows_snapshot_delta(@op_gui_window_viewport_delta, window, previous_rows)
+  end
+
+  @doc "Encodes a retained rows delta with ordered ref-or-full row entries."
+  @spec encode_rows_delta(RenderWindow.t(), [Row.t()]) :: {binary(), boolean()}
+  def encode_rows_delta(%RenderWindow{} = window, previous_rows) when is_list(previous_rows) do
+    encode_rows_snapshot_delta(@op_gui_window_rows_delta, window, previous_rows)
   end
 
   @doc "Encodes per-frame window metadata that the GUI clears and rebuilds every batch."
@@ -225,6 +240,61 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
 
     {binary, metrics}
   end
+
+  @spec encode_rows_snapshot_delta(non_neg_integer(), RenderWindow.t(), [Row.t()]) ::
+          {binary(), boolean()}
+  defp encode_rows_snapshot_delta(opcode, %RenderWindow{} = sw, previous_rows) do
+    previous_keys = MapSet.new(previous_rows, &row_cache_key/1)
+    {row_entries, has_refs?} = encode_delta_row_entries(sw.rows, previous_keys)
+
+    rows_payload = IO.iodata_to_binary([<<length(sw.rows)::16>> | row_entries])
+    sections = delta_sections(sw, rows_payload)
+    binary = IO.iodata_to_binary([<<opcode, length(sections)::8>> | sections])
+
+    {binary, has_refs?}
+  end
+
+  @spec delta_sections(RenderWindow.t(), binary()) :: [binary()]
+  defp delta_sections(%RenderWindow{} = sw, rows_payload) do
+    cursor_shape = encode_cursor_shape(sw.cursor_shape)
+    flags = if Map.get(sw, :cursor_visible, true), do: 0x01, else: 0x00
+
+    header_payload =
+      <<sw.window_id::16, sw.content_epoch::32, flags::8, sw.cursor_row::16, sw.cursor_col::16,
+        cursor_shape::8, sw.scroll_left::16>>
+
+    selection_payload = IO.iodata_to_binary(encode_selection(sw.selection))
+    matches_payload = IO.iodata_to_binary(encode_search_matches(sw.search_matches))
+    diag_payload = IO.iodata_to_binary(encode_diagnostic_ranges(sw.diagnostic_ranges))
+    highlight_payload = IO.iodata_to_binary(encode_document_highlights(sw.document_highlights))
+    annotation_payload = IO.iodata_to_binary(encode_annotations(sw.annotations))
+    geometry_payload = encode_geometry(sw.geometry)
+    cursorline_payload = encode_cursorline_section(sw.cursorline, sw.rect)
+
+    [
+      encode_section(@section_wc_header, header_payload),
+      encode_section(@section_wc_rows, rows_payload),
+      encode_section(@section_wc_selection, selection_payload),
+      encode_section(@section_wc_search, matches_payload),
+      encode_section(@section_wc_diagnostics, diag_payload),
+      encode_section(@section_wc_highlights, highlight_payload),
+      encode_section(@section_wc_annotations, annotation_payload)
+    ] ++ geometry_sections(geometry_payload) ++ cursorline_sections(cursorline_payload)
+  end
+
+  @spec encode_delta_row_entries([Row.t()], MapSet.t()) :: {iodata(), boolean()}
+  defp encode_delta_row_entries(rows, previous_keys) do
+    Enum.map_reduce(rows, false, fn %Row{} = row, has_refs? ->
+      if MapSet.member?(previous_keys, row_cache_key(row)) do
+        {[<<0::8, row.row_id::64, row.content_hash::32>>], true}
+      else
+        {[<<1::8>>, encode_row(row)], has_refs?}
+      end
+    end)
+  end
+
+  @spec row_cache_key(Row.t()) :: {non_neg_integer(), non_neg_integer()}
+  defp row_cache_key(%Row{} = row), do: {row.row_id, row.content_hash}
 
   @spec empty_metrics() :: metrics()
   defp empty_metrics do

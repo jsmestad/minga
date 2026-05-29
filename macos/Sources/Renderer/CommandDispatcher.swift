@@ -344,6 +344,18 @@ final class CommandDispatcher {
             frameState.cursorVisible = delta.cursorVisible
             frameState.dirty = true
 
+        case .guiWindowViewportDelta(let delta), .guiWindowRowsDelta(let delta):
+            guard let current = guiState.windowContents[delta.windowId] else { break }
+            guard current.windowId == delta.windowId, current.contentEpoch == delta.contentEpoch else { break }
+            guard let updated = current.applyingRowsDelta(delta) else {
+                guiState.windowContents.removeValue(forKey: delta.windowId)
+                break
+            }
+            guiState.windowContents[delta.windowId] = updated
+            currentFrameWindowIds.insert(delta.windowId)
+            frameState.cursorVisible = delta.cursorVisible
+            frameState.dirty = true
+
         case .guiBottomPanel(let visible, let activeTabIndex, let heightPercent, let filterPreset, let tabs, let entries):
             if visible {
                 let panelTabs = tabs.enumerated().map { (i, t) in

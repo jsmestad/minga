@@ -106,7 +106,74 @@ defmodule Minga.Frontend.Adapter.GUITest do
              ]
     end
 
-    test "sends full content after an overlay delta when rows change" do
+    test "sends viewport delta when row order changes without mutating retained rows" do
+      row0 = %Row{
+        row_id: Row.stable_id(:normal, 0),
+        row_type: :normal,
+        buf_line: 0,
+        text: "zero",
+        spans: [],
+        content_hash: 1
+      }
+
+      row1 = %Row{
+        row_id: Row.stable_id(:normal, 1),
+        row_type: :normal,
+        buf_line: 1,
+        text: "one",
+        spans: [],
+        content_hash: 2
+      }
+
+      row2 = %Row{
+        row_id: Row.stable_id(:normal, 2),
+        row_type: :normal,
+        buf_line: 2,
+        text: "two",
+        spans: [],
+        content_hash: 3
+      }
+
+      window = %Window{
+        window_id: 1,
+        content_kind: :buffer,
+        rect: {0, 0, 80, 20},
+        rows: [row0, row1],
+        cursor_row: 0,
+        cursor_col: 0,
+        cursor_shape: :block,
+        content_epoch: 1,
+        full_refresh: false
+      }
+
+      first =
+        GUI.encode(
+          RenderModel.new([window], %RenderModel.UI{}, Cursor.new(0, 0, :block)),
+          Caches.new()
+        )
+
+      scrolled = %{window | rows: [row1, row2], cursor_row: 1}
+
+      second =
+        GUI.encode(
+          RenderModel.new([scrolled], %RenderModel.UI{}, Cursor.new(1, 0, :block)),
+          first.caches
+        )
+
+      recovery =
+        GUI.encode(
+          RenderModel.new([scrolled], %RenderModel.UI{}, Cursor.new(1, 0, :block)),
+          second.caches
+        )
+
+      assert Enum.map(second.metal_commands, &opcode/1) == [
+               Minga.Protocol.Opcodes.gui_window_viewport_delta()
+             ]
+
+      assert Enum.map(recovery.metal_commands, &opcode/1) == [WindowEncoder.opcode()]
+    end
+
+    test "sends rows delta after an overlay delta when rows change, then schedules full recovery" do
       old_row = %Row{
         row_id: Row.stable_id(:normal, 0),
         row_type: :normal,
@@ -143,7 +210,7 @@ defmodule Minga.Frontend.Adapter.GUITest do
         )
 
       new_row = %{old_row | text: "new", content_hash: 2}
-      changed = %{moved | rows: [new_row], content_epoch: 2}
+      changed = %{moved | rows: [new_row]}
 
       third =
         GUI.encode(
@@ -151,12 +218,22 @@ defmodule Minga.Frontend.Adapter.GUITest do
           second.caches
         )
 
+      recovery =
+        GUI.encode(
+          RenderModel.new([changed], %RenderModel.UI{}, Cursor.new(0, 1, :block)),
+          third.caches
+        )
+
       assert Enum.map(second.metal_commands, &opcode/1) == [
                Minga.Protocol.Opcodes.gui_window_overlay_delta()
              ]
 
-      assert Enum.map(third.metal_commands, &opcode/1) == [WindowEncoder.opcode()]
-      decoded = third.metal_commands |> hd() |> GUIWindowDecoder.decode()
+      assert Enum.map(third.metal_commands, &opcode/1) == [
+               Minga.Protocol.Opcodes.gui_window_rows_delta()
+             ]
+
+      assert Enum.map(recovery.metal_commands, &opcode/1) == [WindowEncoder.opcode()]
+      decoded = recovery.metal_commands |> hd() |> GUIWindowDecoder.decode()
       assert decoded.rows |> hd() |> Map.fetch!(:text) == "new"
     end
   end
