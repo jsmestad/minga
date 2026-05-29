@@ -215,10 +215,15 @@ defmodule MingaEditor.PromptUI do
   defp do_tab(state, prompt) do
     handler = prompt.handler
 
-    if Code.ensure_loaded?(handler) and function_exported?(handler, :on_tab, 1) do
+    if function_exported?(handler, :on_tab, 1) do
       new_text = handler.on_tab(prompt.text)
-      new_cursor = String.length(new_text)
-      update_prompt(state, &%{&1 | text: new_text, cursor: new_cursor})
+
+      if new_text == prompt.text do
+        state
+      else
+        new_cursor = String.length(new_text)
+        update_prompt(state, &%{&1 | text: new_text, cursor: new_cursor})
+      end
     else
       state
     end

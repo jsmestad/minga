@@ -18,18 +18,19 @@ defmodule MingaEditor.UI.Prompt.ProjectAdd do
   @impl true
   @spec on_submit(String.t(), EditorState.t()) :: EditorState.t()
   def on_submit(text, state) do
-    path = text |> String.trim() |> expand_home() |> Path.expand()
+    trimmed = String.trim(text)
 
-    cond do
-      path == "" ->
-        EditorState.set_status(state, "No path given")
+    if trimmed == "" do
+      EditorState.set_status(state, "No path given")
+    else
+      path = trimmed |> Project.expand_home() |> Path.expand()
 
-      not File.dir?(path) ->
-        EditorState.set_status(state, "Not a directory: #{path}")
-
-      true ->
+      if File.dir?(path) do
         Project.add(path)
         EditorState.set_status(state, "Added project: #{path}")
+      else
+        EditorState.set_status(state, "Not a directory: #{path}")
+      end
     end
   end
 
@@ -40,7 +41,7 @@ defmodule MingaEditor.UI.Prompt.ProjectAdd do
   @impl true
   @spec on_tab(String.t()) :: String.t()
   def on_tab(text) do
-    expanded = expand_home(text)
+    expanded = Project.expand_home(text)
     dir = Path.dirname(expanded)
     prefix = Path.basename(expanded)
 
@@ -49,7 +50,7 @@ defmodule MingaEditor.UI.Prompt.ProjectAdd do
     else
       complete_in_dir(dir, prefix)
     end
-    |> collapse_home()
+    |> Project.collapse_home()
   end
 
   # ── Private ──────────────────────────────────────────────────────────────────
@@ -88,18 +89,4 @@ defmodule MingaEditor.UI.Prompt.ProjectAdd do
     end)
   end
 
-  @spec expand_home(String.t()) :: String.t()
-  defp expand_home("~" <> rest), do: Path.expand("~") <> rest
-  defp expand_home(path), do: path
-
-  @spec collapse_home(String.t()) :: String.t()
-  defp collapse_home(path) do
-    home = Path.expand("~")
-
-    if String.starts_with?(path, home <> "/") do
-      "~" <> String.trim_leading(path, home)
-    else
-      path
-    end
-  end
 end

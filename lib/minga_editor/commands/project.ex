@@ -45,7 +45,7 @@ defmodule MingaEditor.Commands.Project do
   end
 
   def execute(state, :project_add) do
-    default = Project.resolve_root() |> collapse_home()
+    default = Project.resolve_root() |> Project.collapse_home()
     PromptUI.open(state, MingaEditor.UI.Prompt.ProjectAdd, default: default)
   end
 
@@ -69,12 +69,6 @@ defmodule MingaEditor.Commands.Project do
     Project.root()
   catch
     :exit, _ -> nil
-  end
-
-  @spec collapse_home(String.t()) :: String.t()
-  defp collapse_home(path) do
-    home = Path.expand("~")
-    if String.starts_with?(path, home <> "/"), do: "~" <> String.trim_leading(path, home), else: path
   end
 
   commands(@command_specs)
