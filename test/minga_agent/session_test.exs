@@ -1645,4 +1645,34 @@ defmodule MingaAgent.SessionTest do
              end)
     end
   end
+
+  describe "provider error presentation" do
+    test "raw provider errors are humanized in the transcript", %{tmp_dir: dir} do
+      # A custom llm_client counts as "configured", so the prompt reaches the
+      # provider, fails, and the session must show one human line instead of
+      # the raw error string.
+      client = fn _model, _messages, _opts ->
+        {:error, "provider_build_failed: missing api_key option"}
+      end
+
+      session =
+        start_subscribed_session(Native,
+          project_root: dir,
+          llm_client: client,
+          max_retries: 0,
+          config: agent_config(tool_approval: :none)
+        )
+
+      assert :ok = Session.send_prompt(session, "hey")
+
+      assert_receive {:agent_event, ^session, {:error, message}}, @event_timeout
+      refute message =~ "provider_build_failed"
+      assert message =~ "API key"
+
+      assert Enum.any?(Session.messages(session), fn
+               {:system, text, :error} -> text == message
+               _ -> false
+             end)
+    end
+  end
 end

@@ -98,13 +98,32 @@ defmodule MingaEditor.State.EventRoutingTest do
   end
 
   describe "Agent.Events.handle/2 — errors" do
-    test "error updates agent error state and logs" do
+    test "error updates agent error state and re-renders without re-logging" do
       %{state: state} = make_state()
 
       {new_state, effects} = AgentEvents.handle(state, {:error, "something broke"})
 
       assert AgentAccess.agent(new_state).error == "something broke"
-      assert {:log_warning, "Agent error: something broke"} in effects
+      assert :render in effects
+      # The session already surfaced this in the transcript and the provider
+      # logged the raw detail to the Messages panel; re-logging here would
+      # duplicate the Messages entry and force-open the panel.
+      refute Enum.any?(effects, &match?({:log_warning, _}, &1))
+    end
+  end
+
+  describe "Agent.Events.handle/2 — credentials status" do
+    test "credentials_status updates the panel flag and re-renders" do
+      %{state: state} = make_state()
+      assert AgentAccess.panel(state).credentials_configured == true
+
+      {new_state, effects} = AgentEvents.handle(state, {:credentials_status, false})
+
+      assert AgentAccess.panel(new_state).credentials_configured == false
+      assert :render in effects
+
+      {restored, _effects} = AgentEvents.handle(new_state, {:credentials_status, true})
+      assert AgentAccess.panel(restored).credentials_configured == true
     end
   end
 

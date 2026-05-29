@@ -373,7 +373,7 @@ defmodule MingaAgent.Tools.SubagentTest do
     refute_receive {:notified, :error, _}, 50
 
     assert Session.status(handle.pid) == :error
-    assert Enum.any?(Session.messages(handle.pid), &(&1 == {:system, "Error: boom", :error}))
+    assert Enum.any?(Session.messages(handle.pid), &(&1 == {:system, "boom", :error}))
   end
 
   test "background child completion notifies once", %{manager: manager} do

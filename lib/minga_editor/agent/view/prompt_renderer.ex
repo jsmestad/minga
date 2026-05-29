@@ -181,7 +181,12 @@ defmodule MingaEditor.Agent.View.PromptRenderer do
 
     line_cmds =
       if is_empty do
-        placeholder = String.slice("Type a message, Enter to send", 0, inner_width)
+        placeholder_text =
+          if panel.credentials_configured,
+            do: "Type a message, Enter to send",
+            else: "Type /auth <provider> <key> to get started"
+
+        placeholder = String.slice(placeholder_text, 0, inner_width)
         padded = String.pad_trailing(placeholder, inner_width)
         inner = left_pad <> padded <> right_pad
         fill = String.pad_trailing(inner, max(width - 2, 0))
@@ -247,6 +252,11 @@ defmodule MingaEditor.Agent.View.PromptRenderer do
   end
 
   @spec model_info_text(RenderInput.t()) :: String.t()
+  defp model_info_text(%{panel: %{credentials_configured: false}}) do
+    # No usable provider: don't advertise a model we can't call.
+    "Not configured · /auth or /login"
+  end
+
   defp model_info_text(input) do
     panel = input.panel
     model = panel.model_name |> AgentConfig.strip_provider_prefix() |> titleize()

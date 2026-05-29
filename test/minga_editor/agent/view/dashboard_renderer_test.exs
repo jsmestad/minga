@@ -47,6 +47,7 @@ defmodule MingaEditor.Agent.View.DashboardRendererTest do
       panel: %UIState.Panel{
         visible: true,
         input_focused: Keyword.get(opts, :input_focused, false),
+        credentials_configured: Keyword.get(opts, :credentials_configured, true),
         prompt_buffer: prompt_buf
       },
       view: %UIState.View{
@@ -102,6 +103,18 @@ defmodule MingaEditor.Agent.View.DashboardRendererTest do
       # The model section should show bare model name, not the prefixed spec
       assert Enum.any?(texts, &String.contains?(&1, "claude-sonnet-4"))
       refute Enum.any?(texts, &String.contains?(&1, "anthropic:claude-sonnet-4"))
+    end
+
+    test "model section shows a setup hint instead of a model when no credentials" do
+      state = base_state(credentials_configured: false)
+      ctx = ViewContext.from_editor_state(state)
+      commands = DashboardRenderer.render(ctx, {0, 80, 40, 30})
+      texts = Enum.map(commands, fn d -> elem(d, 2) end)
+
+      assert Enum.any?(texts, &String.contains?(&1, "Model"))
+      assert Enum.any?(texts, &String.contains?(&1, "Not configured"))
+      assert Enum.any?(texts, &String.contains?(&1, "/auth or /login"))
+      refute Enum.any?(texts, &String.contains?(&1, "claude-sonnet-4"))
     end
   end
 

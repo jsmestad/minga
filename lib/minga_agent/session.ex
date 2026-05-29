@@ -99,7 +99,8 @@ defmodule MingaAgent.Session do
           steering_queue: [String.t() | [ReqLLM.Message.ContentPart.t()]],
           follow_up_queue: [String.t() | [ReqLLM.Message.ContentPart.t()]],
           touched_files: %{String.t() => file_touch()},
-          boundaries: %{String.t() => EditBoundary.t()}
+          boundaries: %{String.t() => EditBoundary.t()},
+          credentials_configured: boolean()
         }
 
   # ── Public API ──────────────────────────────────────────────────────────────
@@ -385,6 +386,17 @@ defmodule MingaAgent.Session do
   end
 
   @doc """
+  Re-checks whether any provider credential is now configured.
+
+  Call after `/auth` or `/login` so the current session stops gating prompts
+  and the UI's "not configured" state clears without a restart.
+  """
+  @spec refresh_credentials(GenServer.server()) :: :ok
+  def refresh_credentials(session) do
+    GenServer.cast(session, :refresh_credentials)
+  end
+
+  @doc """
   Queues a message as a steering prompt (injected between tool calls on the next turn).
 
   When the agent is idle, behaves identically to `send_prompt/2`.
@@ -590,7 +602,12 @@ defmodule MingaAgent.Session do
       steering_queue: [],
       follow_up_queue: [],
       touched_files: %{},
-      boundaries: %{}
+      boundaries: %{},
+      # Whether any usable provider credential exists. Computed once when the
+      # provider starts (the Ollama probe can block briefly) and refreshed when
+      # the user runs /auth or /login. Gates send_prompt and drives the UI's
+      # "not configured" state so we never advertise a model we can't call.
+      credentials_configured: true
     }
 
     # Start provider asynchronously so init doesn't block
@@ -621,6 +638,21 @@ defmodule MingaAgent.Session do
     state = %{state | steering_queue: state.steering_queue ++ [content]}
     broadcast(state, {:prompt_queued, content, :steering})
     {:reply, {:queued, :steering}, state}
+  end
+
+  def handle_call({:send_prompt, content}, _from, %{credentials_configured: false} = state) do
+    # No usable provider yet. Show the user's message followed by a gentle
+    # setup nudge instead of attempting a call that would fail with a raw
+    # provider error. Reply :ok so the input clears like a normal submit.
+    {user_msg, _send_content} = build_user_message(content)
+
+    state =
+      state
+      |> append_msg(user_msg)
+      |> append_system_message(auth_required_message(), :info)
+      |> notify_messages_changed()
+
+    {:reply, :ok, state}
   end
 
   def handle_call({:send_prompt, content}, _from, state) do
@@ -1146,6 +1178,10 @@ defmodule MingaAgent.Session do
     {:noreply, state}
   end
 
+  def handle_cast(:refresh_credentials, state) do
+    {:noreply, refresh_credentials_state(state)}
+  end
+
   @impl GenServer
   def handle_info(:start_provider, state) do
     case start_provider(state) do
@@ -1154,6 +1190,7 @@ defmodule MingaAgent.Session do
         state = %{state | provider: pid}
         state = seed_provider_messages(state, state.messages)
         state = apply_pending_thinking_level(state)
+        state = refresh_credentials_state(state)
         state = maybe_show_auth_onboarding(state)
         dispatch_session_start(state)
         {:noreply, state}
@@ -1375,11 +1412,14 @@ defmodule MingaAgent.Session do
   end
 
   defp handle_provider_event(%Event.Error{message: message}, state) do
-    notify(state, :error, message)
+    # Show one human-readable line in the transcript. The raw error is already
+    # logged to the Messages panel by the provider, so we don't repeat it here.
+    friendly = humanize_error(message)
+    notify(state, :error, friendly)
     state = set_error_status(state)
-    state = %{state | error_message: message}
-    state = append_system_message(state, "Error: #{message}", :error)
-    broadcast(state, {:error, message})
+    state = %{state | error_message: friendly}
+    state = append_system_message(state, friendly, :error)
+    broadcast(state, {:error, friendly})
     state
   end
 
@@ -1830,18 +1870,33 @@ defmodule MingaAgent.Session do
   defp format_error({:spawn_failed, msg}), do: "Failed to start agent: #{msg}"
   defp format_error(reason), do: inspect(reason)
 
-  @spec apply_pending_thinking_level(state()) :: state()
-  # Shows an onboarding message when no API keys are configured and the
-  # native provider is active. Only fires once per session.
-  @spec maybe_show_auth_onboarding(map()) :: map()
-  defp maybe_show_auth_onboarding(state) do
-    if state.provider_module == MingaAgent.Providers.Native and not Credentials.any_configured?() do
-      msg =
-        "No credentials configured.\n\n" <>
-          "  /login        Sign in with your ChatGPT subscription (browser)\n" <>
-          "  /auth <provider> <key>  Add an API key (Anthropic, OpenAI, Google, etc.)\n\n" <>
-          "Run `/auth` to see status for all providers."
+  # Recomputes whether any provider credential is configured, stores it, and
+  # tells subscribers so the UI can reflect a truthful "not configured" state.
+  # `Credentials.any_configured?/0` may block briefly (Ollama probe) so this
+  # runs in the session process, off the render path.
+  @spec refresh_credentials_state(state()) :: state()
+  defp refresh_credentials_state(state) do
+    # Only the native provider resolves its own credentials from the
+    # environment. Custom providers, and any caller that injects its own
+    # `:llm_client` (tests, embedded transports), manage their own auth, so
+    # treat them as always ready.
+    configured? =
+      state.provider_module != MingaAgent.Providers.Native or
+        Keyword.has_key?(state.provider_opts, :llm_client) or
+        Credentials.any_configured?()
 
+    state = %{state | credentials_configured: configured?}
+    broadcast(state, {:credentials_status, configured?})
+    state
+  end
+
+  # Shows an onboarding message when no credentials are configured and the
+  # native provider is active. Only fires once per session. Relies on the
+  # `credentials_configured` flag set by `refresh_credentials_state/1`.
+  @spec maybe_show_auth_onboarding(state()) :: state()
+  defp maybe_show_auth_onboarding(state) do
+    if state.provider_module == MingaAgent.Providers.Native and not state.credentials_configured do
+      msg = onboarding_message()
       state = append_msg(state, Message.system(msg))
       broadcast(state, {:system_message, msg, :info})
       state
@@ -1850,6 +1905,82 @@ defmodule MingaAgent.Session do
     end
   end
 
+  @spec onboarding_message() :: String.t()
+  defp onboarding_message do
+    """
+    Welcome to Minga. Set up a provider to get started.
+
+    Add an API key (works with any supported provider):
+
+      /auth anthropic <key>     Anthropic Claude
+      /auth openai <key>        OpenAI GPT
+      /auth google <key>        Google Gemini
+      /auth openrouter <key>    OpenRouter (many models)
+      /auth groq <key>          Groq
+      /auth deepseek <key>      DeepSeek
+
+    Or sign in with a ChatGPT subscription (OpenAI accounts only):
+
+      /login                    Sign in via browser, no key needed
+
+    Ollama is detected automatically if it's running locally.
+    Run /auth to see status for all providers.\
+    """
+  end
+
+  # Shown when the user submits a prompt before any provider is configured.
+  @spec auth_required_message() :: String.t()
+  defp auth_required_message do
+    """
+    No provider is configured yet, so there's nothing to send your message to.
+
+    Set one up to get started:
+
+      /auth anthropic <key>     add an API key (most common)
+      /login                    ChatGPT subscription (OpenAI only)
+
+    Run /auth to see all providers and options.\
+    """
+  end
+
+  # Turns a raw provider error (the ugly ReqLLM struct dump) into one human
+  # line for the transcript. The full detail is still logged to the Messages
+  # panel by the provider. Already human-readable messages (MCP notices, hook
+  # vetoes, turn/cost limits) are passed through unchanged.
+  @spec humanize_error(String.t()) :: String.t()
+  defp humanize_error(message) when is_binary(message) do
+    cond do
+      String.match?(message, ~r/\b401\b/) or
+          String.contains?(message, ["unauthorized", "Unauthorized", "invalid_api_key"]) ->
+        "The provider rejected your API key. Update it with /auth <provider> <key>, then try again."
+
+      String.match?(message, ~r/\b429\b/) or String.contains?(message, "rate limit") ->
+        "Rate limited by the provider. Wait a moment and try again."
+
+      String.contains?(message, ["api_key", "API_KEY", "provider_build_failed", "Failed to build"]) ->
+        "Couldn't authenticate with the model provider. Check your API key with /auth, then try again."
+
+      String.contains?(message, ["http_streaming_failed", "econnrefused", "nxdomain", "timed out"]) ->
+        "Couldn't reach the model provider. Check your network connection and try again."
+
+      raw_struct_dump?(message) ->
+        "Something went wrong talking to the model provider. Open the Messages panel for details."
+
+      true ->
+        message
+    end
+  end
+
+  defp humanize_error(message), do: humanize_error(inspect(message))
+
+  # Detects an inspected Elixir struct/exception leaking into the message, so
+  # we never show a raw `%ReqLLM.Error{...}`-style dump in the transcript.
+  @spec raw_struct_dump?(String.t()) :: boolean()
+  defp raw_struct_dump?(message) do
+    String.contains?(message, ["%ReqLLM.", "Splode", "bread_crumbs", "stacktrace:", "#PID<"])
+  end
+
+  @spec apply_pending_thinking_level(state()) :: state()
   defp apply_pending_thinking_level(%{pending_thinking_level: nil} = state), do: state
 
   defp apply_pending_thinking_level(%{pending_thinking_level: level} = state) do

@@ -895,8 +895,17 @@ defmodule MingaAgent.Providers.Native do
     {:noreply, %{state | task: nil, streaming: false, tool_workers: %{}}}
   end
 
+  def handle_info({ref, {:error, {:reported, _reason}}}, %{task: %Task{ref: ref}} = state) do
+    # The agent loop already logged this error and emitted Error + AgentEnd via
+    # reported_error/3. Just clean up; re-emitting here would show the error
+    # twice in the transcript.
+    Process.demonitor(ref, [:flush])
+    stop_registered_tool_workers(state.tool_workers)
+    {:noreply, %{state | task: nil, streaming: false, tool_workers: %{}}}
+  end
+
   def handle_info({ref, {:error, reason}}, %{task: %Task{ref: ref}} = state) do
-    # Task completed with an error
+    # Safety net: an error reached the Task without the loop reporting it.
     Process.demonitor(ref, [:flush])
     stop_registered_tool_workers(state.tool_workers)
     formatted = format_error(reason)
@@ -1379,9 +1388,7 @@ defmodule MingaAgent.Providers.Native do
           ~s|Expected "provider:model" (e.g., "anthropic:#{lctx.model}"). | <>
           "Check :agent_model in your config."
 
-      Minga.Log.error(:agent, "[Agent.Native] #{message}")
-      emit_error_and_end(lctx.provider_pid, message)
-      {:error, :invalid_format}
+      reported_error(lctx.provider_pid, message, :invalid_format)
     else
       do_agent_loop_validated(lctx, context)
     end
@@ -1423,19 +1430,16 @@ defmodule MingaAgent.Providers.Native do
         process_and_continue(lctx, context, stream_response)
 
       {:error, reason} ->
-        emit_error_and_end(lctx.provider_pid, format_error(reason))
-        {:error, reason}
+        reported_error(lctx.provider_pid, format_error(reason), reason)
     end
   rescue
     e ->
-      emit_error_and_end(lctx.provider_pid, Exception.message(e))
-      {:error, Exception.message(e)}
+      reported_error(lctx.provider_pid, Exception.message(e), e)
   catch
     # HTTP client or session process may die mid-stream. Targeted catch
     # per AGENTS.md rule 4.
     :exit, reason ->
-      emit_error_and_end(lctx.provider_pid, inspect(reason))
-      {:error, reason}
+      reported_error(lctx.provider_pid, inspect(reason), reason)
   end
 
   # Processes a stream response and decides whether to continue (tool calls) or finish.
@@ -1514,8 +1518,7 @@ defmodule MingaAgent.Providers.Native do
 
       {:error, :stream_interrupted}
     else
-      emit_error_and_end(lctx.provider_pid, format_error(reason))
-      {:error, reason}
+      reported_error(lctx.provider_pid, format_error(reason), reason)
     end
   end
 
@@ -3024,6 +3027,18 @@ defmodule MingaAgent.Providers.Native do
     send(provider_pid, {:agent_event, %Event.Error{message: message}})
     send(provider_pid, {:agent_event, %Event.AgentEnd{usage: nil}})
     :ok
+  end
+
+  # Reports an error that occurred inside the agent loop: logs the raw detail
+  # for the Messages panel, emits Error + AgentEnd to the UI, and returns a
+  # `{:reported, reason}` sentinel. The Task-completion handler matches that
+  # sentinel and skips re-emitting, so a single failure surfaces exactly once
+  # in the transcript instead of twice.
+  @spec reported_error(pid(), String.t(), term()) :: {:error, {:reported, term()}}
+  defp reported_error(provider_pid, message, reason) do
+    Minga.Log.error(:agent, "[Agent.Native] agent loop error: #{message}")
+    emit_error_and_end(provider_pid, message)
+    {:error, {:reported, reason}}
   end
 
   @spec extract_tool_calls(ReqLLM.Response.t()) :: [map()]

@@ -36,7 +36,8 @@ defmodule MingaEditor.Agent.UIState.Panel do
           pasted_blocks: [paste_block()],
           cached_line_index: [{non_neg_integer(), MingaEditor.Agent.BufferSync.line_type()}],
           cached_styled_messages: [MingaEditor.Agent.MarkdownHighlight.styled_lines()] | nil,
-          message_version: non_neg_integer()
+          message_version: non_neg_integer(),
+          credentials_configured: boolean()
         }
 
   defstruct visible: false,
@@ -54,11 +55,20 @@ defmodule MingaEditor.Agent.UIState.Panel do
             pasted_blocks: [],
             cached_line_index: [],
             cached_styled_messages: nil,
-            message_version: 0
+            message_version: 0,
+            # Assume configured until the session reports otherwise, so the
+            # common (authed) case never flashes a "not configured" indicator.
+            credentials_configured: true
 
   @doc "Creates a new panel state with defaults."
   @spec new() :: t()
   def new, do: %__MODULE__{}
+
+  @doc "Sets whether any provider credential is configured (drives the model indicator)."
+  @spec set_credentials_configured(t(), boolean()) :: t()
+  def set_credentials_configured(%__MODULE__{} = panel, configured?) do
+    %{panel | credentials_configured: configured?}
+  end
 
   @doc "Clears the active file mention completion."
   @spec clear_mention_completion(t()) :: t()

@@ -1291,6 +1291,24 @@ defmodule MingaAgent.Providers.NativeTest do
       agent_end = Enum.find(events, &match?(%Event.AgentEnd{}, &1))
       assert agent_end != nil
     end
+
+    test "surfaces a single failure exactly once", %{tmp_dir: dir} do
+      # Regression: the agent loop emitted the error, and the Task-completion
+      # handler emitted it again, so a single failure showed up twice in the
+      # transcript. collect_events/1 stops at the first AgentEnd, so we drain
+      # afterward to prove no second Error (or AgentEnd) follows.
+      client = fake_error_client("boom once")
+      {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, max_retries: 0)
+
+      assert :ok = Native.send_prompt(pid, "Hello")
+
+      assert_receive {:agent_provider_event, %Event.Error{message: msg}}, 1_000
+      assert msg =~ "boom once"
+      assert_receive {:agent_provider_event, %Event.AgentEnd{}}, 1_000
+
+      refute_receive {:agent_provider_event, %Event.Error{}}, 200
+      refute_receive {:agent_provider_event, %Event.AgentEnd{}}, 50
+    end
   end
 
   describe "abort" do

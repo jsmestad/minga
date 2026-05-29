@@ -237,8 +237,16 @@ defmodule MingaEditor.Agent.Events do
   end
 
   def handle(state, {:error, message}) do
+    # The session already surfaced this in the transcript and the provider
+    # logged the raw detail to the Messages panel, so we only update status
+    # here. Re-logging would double the Messages entry and force-open the panel.
     state = AgentAccess.update_agent(state, &AgentState.set_error(&1, message))
-    {state, [:render, {:log_warning, "Agent error: #{message}"}]}
+    {state, [:render]}
+  end
+
+  def handle(state, {:credentials_status, configured?}) do
+    state = AgentAccess.update_panel(state, &Panel.set_credentials_configured(&1, configured?))
+    {state, [:render]}
   end
 
   def handle(state, :spinner_tick) do
