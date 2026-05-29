@@ -14,7 +14,19 @@ defmodule Minga.Session.EventRecorder do
   ## Retention
 
   A periodic sweep deletes events older than the configured retention
-  window (default: 7 days). The sweep runs once per hour.
+  window (`:event_retention_days`). The first sweep runs a few seconds
+  after boot so even short-lived CLI invocations get a chance to prune;
+  subsequent sweeps run once per hour.
+
+  ## Startup and health checks
+
+  The database is a side-car: opening it is the only synchronous step in
+  `init/1`, and that is O(1) (it only reads the file header). A structural
+  integrity check is O(database size) and must never sit on the startup
+  path, so it runs asynchronously a few seconds after boot on a separate
+  connection. If the async check reports corruption, the recorder recreates
+  the database. The check defaults to `:quick` (see
+  `Store.integrity_check/2`) and can be disabled with `health_check: :none`.
 
   ## Supervision
 
@@ -32,6 +44,9 @@ defmodule Minga.Session.EventRecorder do
   @default_db_dir Path.expand("~/.local/share/minga")
   @db_filename "events.db"
   @retention_sweep_interval_ms :timer.hours(1)
+  @initial_retention_sweep_delay_ms :timer.seconds(5)
+  @health_check_delay_ms :timer.seconds(10)
+  @default_health_check :quick
 
   @subscribed_topics [
     :buffer_saved,
@@ -48,11 +63,12 @@ defmodule Minga.Session.EventRecorder do
 
   defmodule State do
     @moduledoc false
-    @enforce_keys [:db]
-    defstruct [:db, :retention_days, :sweep_ref]
+    @enforce_keys [:db, :path]
+    defstruct [:db, :path, :retention_days, :sweep_ref]
 
     @type t :: %__MODULE__{
             db: Exqlite.Sqlite3.db(),
+            path: String.t(),
             retention_days: pos_integer(),
             sweep_ref: reference() | nil
           }
@@ -112,13 +128,15 @@ defmodule Minga.Session.EventRecorder do
     case open_or_recreate(path) do
       {:ok, db} ->
         if Keyword.get(opts, :subscribe, true), do: subscribe_to_events()
-        sweep_ref = schedule_retention_sweep()
+        sweep_ref = schedule_initial_retention_sweep(opts)
+        schedule_health_check(Keyword.get(opts, :health_check, @default_health_check), opts)
 
         Minga.Log.info(:editor, "[EventRecorder] started, logging to #{path}")
 
         {:ok,
          %State{
            db: db,
+           path: path,
            retention_days: retention_days,
            sweep_ref: sweep_ref
          }}
@@ -168,6 +186,40 @@ defmodule Minga.Session.EventRecorder do
     {:noreply, %{state | sweep_ref: sweep_ref}}
   end
 
+  # Run the integrity check off the recorder process on its own connection so
+  # a multi-second check on a large database never blocks event writes.
+  def handle_info({:run_health_check, mode}, state) do
+    parent = self()
+    path = state.path
+
+    Task.start(fn ->
+      send(parent, {:health_check_result, run_health_check(path, mode)})
+    end)
+
+    {:noreply, state}
+  end
+
+  def handle_info({:health_check_result, :healthy}, state) do
+    {:noreply, state}
+  end
+
+  def handle_info({:health_check_result, {:corrupt, messages}}, state) do
+    Minga.Log.warning(
+      :editor,
+      "[EventRecorder] integrity check failed: #{inspect(messages)}, recreating database"
+    )
+
+    Store.close(state.db)
+
+    case recreate(state.path) do
+      {:ok, db} ->
+        {:noreply, %{state | db: db}}
+
+      {:error, reason} ->
+        {:stop, reason, state}
+    end
+  end
+
   def handle_info(_msg, state) do
     {:noreply, state}
   end
@@ -185,33 +237,54 @@ defmodule Minga.Session.EventRecorder do
     Enum.each(@subscribed_topics, &Events.subscribe/1)
   end
 
+  @spec schedule_initial_retention_sweep(keyword()) :: reference()
+  defp schedule_initial_retention_sweep(opts) do
+    delay = Keyword.get(opts, :initial_sweep_delay_ms, @initial_retention_sweep_delay_ms)
+    Process.send_after(self(), :retention_sweep, delay)
+  end
+
   @spec schedule_retention_sweep() :: reference()
   defp schedule_retention_sweep do
     Process.send_after(self(), :retention_sweep, @retention_sweep_interval_ms)
+  end
+
+  @spec schedule_health_check(:quick | :full | :none, keyword()) :: reference() | :ok
+  defp schedule_health_check(:none, _opts), do: :ok
+
+  defp schedule_health_check(mode, opts) when mode in [:quick, :full] do
+    delay = Keyword.get(opts, :health_check_delay_ms, @health_check_delay_ms)
+    Process.send_after(self(), {:run_health_check, mode}, delay)
+  end
+
+  @spec run_health_check(String.t(), :quick | :full) :: :healthy | {:corrupt, [String.t()]}
+  defp run_health_check(path, mode) do
+    case Store.open(path) do
+      {:ok, db} ->
+        result = Store.integrity_check(db, mode)
+        Store.close(db)
+
+        case result do
+          {:ok, :healthy} -> :healthy
+          {:error, messages} -> {:corrupt, messages}
+        end
+
+      {:error, reason} ->
+        {:corrupt, [inspect(reason)]}
+    end
   end
 
   @spec open_or_recreate(String.t()) :: {:ok, Store.db()} | {:error, term()}
   defp open_or_recreate(path) do
     case Store.open(path) do
       {:ok, db} ->
-        case Store.integrity_check(db) do
-          {:ok, :healthy} ->
-            {:ok, db}
+        {:ok, db}
 
-          {:error, messages} ->
-            Minga.Log.warning(
-              :editor,
-              "[EventRecorder] database corrupt: #{inspect(messages)}, recreating"
-            )
-
-            Store.close(db)
-            recreate(path)
-        end
-
-      {:error, reason} when is_binary(path) ->
+      {:error, reason} ->
         # The file exists but can't be opened (e.g., garbage data that
-        # isn't a valid SQLite header). Delete and try fresh.
-        if File.exists?(path) do
+        # isn't a valid SQLite header). Delete and try fresh. Structural
+        # corruption that only surfaces under a full scan is caught later
+        # by the async health check, off the startup path.
+        if is_binary(path) and File.exists?(path) do
           Minga.Log.warning(
             :editor,
             "[EventRecorder] database unreadable: #{inspect(reason)}, recreating"

@@ -258,6 +258,89 @@ defmodule Minga.Session.EventRecorderTest do
       assert old_events == []
       assert [_ | _] = recent_events
     end
+
+    test "schedules an initial sweep far sooner than the hourly interval", %{recorder: recorder} do
+      # The first sweep must run shortly after boot (not an hour later), so
+      # short-lived sessions still prune. Assert a pending timer exists with a
+      # delay well under the recurring hour, deterministically and without sleeping.
+      state = :sys.get_state(recorder)
+      assert is_reference(state.sweep_ref)
+
+      remaining = Process.read_timer(state.sweep_ref)
+      assert is_integer(remaining)
+      assert remaining <= :timer.minutes(1)
+    end
+  end
+
+  describe "health check" do
+    test "records events normally while an async health check is enabled" do
+      tmp_dir =
+        Path.join(System.tmp_dir!(), "minga_health_#{:erlang.unique_integer([:positive])}")
+
+      File.mkdir_p!(tmp_dir)
+      on_exit(fn -> File.rm_rf!(tmp_dir) end)
+
+      unique = :erlang.unique_integer([:positive])
+
+      recorder =
+        start_supervised!(
+          Supervisor.child_spec(
+            {EventRecorder,
+             name: :"recorder_health_#{unique}",
+             db_dir: tmp_dir,
+             subscribe: false,
+             health_check: :quick,
+             health_check_delay_ms: 0},
+            id: :"recorder_health_#{unique}"
+          )
+        )
+
+      send(
+        recorder,
+        {:minga_event, :buffer_saved, %Events.BufferEvent{buffer: self(), path: "/tmp/ok.ex"}}
+      )
+
+      wait_for_processing(recorder)
+
+      # The check runs on a healthy fresh database, so the recorder stays up
+      # and keeps recording.
+      assert Process.alive?(recorder)
+
+      db = open_db(tmp_dir)
+      {:ok, [event]} = Store.events_by_type(db, :buffer_saved)
+      Store.close(db)
+      assert event.payload["path"] == "/tmp/ok.ex"
+    end
+
+    test "recreates the database when the async check reports corruption", %{
+      recorder: recorder,
+      db_dir: db_dir
+    } do
+      send(
+        recorder,
+        {:minga_event, :buffer_saved, %Events.BufferEvent{buffer: self(), path: "/tmp/before.ex"}}
+      )
+
+      wait_for_processing(recorder)
+
+      # Simulate the async check finding corruption.
+      send(recorder, {:health_check_result, {:corrupt, ["forced"]}})
+      wait_for_processing(recorder)
+
+      send(
+        recorder,
+        {:minga_event, :buffer_saved, %Events.BufferEvent{buffer: self(), path: "/tmp/after.ex"}}
+      )
+
+      wait_for_processing(recorder)
+
+      db = open_db(db_dir)
+      {:ok, events} = Store.events_by_type(db, :buffer_saved)
+      Store.close(db)
+
+      paths = Enum.map(events, & &1.payload["path"])
+      assert paths == ["/tmp/after.ex"]
+    end
   end
 
   describe "resilience" do
