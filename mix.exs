@@ -219,8 +219,8 @@ defmodule Minga.MixProject do
 
   defp deps do
     [
-      # TODO: revert to {:burrito, "~> 1.6"} once released (fix in ba67b5c)
-      {:burrito, github: "burrito-elixir/burrito", branch: "main"},
+      # TODO: revert to {:burrito, "~> 1.6"} once Zig 0.16.0 support is merged upstream
+      {:burrito, github: "jsmestad/burrito", branch: "zig-0.16.0"},
       {:file_system, "~> 1.0"},
       {:stream_data, "~> 1.0", only: [:test, :dev]},
       {:propcheck, "~> 1.5", only: :test},
