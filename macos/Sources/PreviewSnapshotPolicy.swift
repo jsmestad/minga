@@ -5,7 +5,7 @@ import Foundation
 enum PreviewSnapshotPolicy {
     private static let fullShellViews: Set<String> = ["EditorChromeView", "AgentChromeView", "DiagnosticsEditorView", "InsertModeEditorView", "HoverEditorView", "SignatureHelpEditorView"]
     private static let renderedWindowViews = fullShellViews
-    private static let eagerLayoutViews: Set<String> = ["GitStatusView", "FileTreeView", "FileTreeEmpty", "FileTreeError", "FileTreeDeep", "GitStatusClean", "GitStatusConflict", "GitStatusDense", "FileTreeRename"]
+    private static let eagerLayoutViews: Set<String> = ["GitStatusView", "FileTreeView", "FileTreeEmpty", "FileTreeError", "FileTreeDeep", "GitStatusClean", "GitStatusConflict", "GitStatusDense", "FileTreeRename", "MessagesContentView"]
 
     static func size(named name: String) -> CGSize {
         switch name {
@@ -18,6 +18,7 @@ enum PreviewSnapshotPolicy {
         case "TabBarView": CGSize(width: 800, height: 36)
         case "NotificationCenterView", "NotificationStack": CGSize(width: 800, height: 600)
         case "BottomPanelView", "BottomPanelEmpty": CGSize(width: 800, height: 250)
+        case "MessagesContentView": CGSize(width: 800, height: 360)
         case "SettingsView": CGSize(width: 600, height: 480)
         case "ToolManagerView": CGSize(width: 800, height: 600)
         case "ObservatoryView": CGSize(width: 320, height: 640)
