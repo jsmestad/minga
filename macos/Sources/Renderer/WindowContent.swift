@@ -243,6 +243,16 @@ struct GUIPaneGeometry: Sendable, Equatable {
     let hitRegions: [GUIHitRegion]
 }
 
+// MARK: - Retained row key
+
+/// Key for the retained-row lookup used by delta application.
+/// Combines row identity with a content hash so the renderer can reuse
+/// previously decoded rows when only overlays change.
+struct GUIRetainedRowKey: Hashable {
+    let rowId: UInt64
+    let contentHash: UInt32
+}
+
 // MARK: - Window content
 
 /// Complete semantic content for one editor window.
@@ -273,6 +283,11 @@ final class GUIWindowContent: Sendable {
     let paneGeometry: GUIPaneGeometry?
     let cursorline: GUICursorline?
 
+    /// Pre-built index mapping retained-row keys to their visual rows.
+    /// Used by `applyingRowsDelta` to resolve reference entries without
+    /// rebuilding the dictionary on every delta application.
+    let retainedRowIndex: [GUIRetainedRowKey: GUIVisualRow]
+
     init(windowId: UInt16, fullRefresh: Bool, contentEpoch: UInt32 = 0, cursorVisible: Bool = true,
          cursorRow: UInt16, cursorCol: UInt16, cursorShape: CursorShape,
          scrollLeft: UInt16 = 0,
@@ -299,6 +314,13 @@ final class GUIWindowContent: Sendable {
         self.lineAnnotations = lineAnnotations
         self.paneGeometry = paneGeometry
         self.cursorline = cursorline
+
+        var index: [GUIRetainedRowKey: GUIVisualRow] = [:]
+        index.reserveCapacity(rows.count)
+        for row in rows {
+            index[GUIRetainedRowKey(rowId: row.rowId, contentHash: row.contentHash)] = row
+        }
+        self.retainedRowIndex = index
     }
 
     func applyingOverlayDelta(_ delta: GUIWindowOverlayDelta) -> GUIWindowContent? {
@@ -331,13 +353,6 @@ final class GUIWindowContent: Sendable {
             return nil
         }
 
-        var retainedRows: [GUIRetainedRowKey: GUIVisualRow] = [:]
-        for row in rows {
-            let key = GUIRetainedRowKey(rowId: row.rowId, contentHash: row.contentHash)
-            guard retainedRows[key] == nil else { return nil }
-            retainedRows[key] = row
-        }
-
         var resolvedRows: [GUIVisualRow] = []
         resolvedRows.reserveCapacity(delta.rows.count)
 
@@ -345,7 +360,7 @@ final class GUIWindowContent: Sendable {
             switch entry {
             case .reference(let rowId, let contentHash):
                 let key = GUIRetainedRowKey(rowId: rowId, contentHash: contentHash)
-                guard let row = retainedRows[key] else { return nil }
+                guard let row = retainedRowIndex[key] else { return nil }
                 resolvedRows.append(row)
             case .full(let row):
                 resolvedRows.append(row)
@@ -373,7 +388,3 @@ final class GUIWindowContent: Sendable {
     }
 }
 
-private struct GUIRetainedRowKey: Hashable {
-    let rowId: UInt64
-    let contentHash: UInt32
-}
