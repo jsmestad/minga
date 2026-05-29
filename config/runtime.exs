@@ -17,24 +17,33 @@ port_mode =
 
 config :minga, port_mode: port_mode
 
-# Connected mode means the GUI app spawned us. Start the editor with
-# the GUI backend so the supervision tree boots Port.Manager, Editor,
-# and the parser. Without this, the BEAM process sits idle and the
-# Swift frontend sees only its default (empty) SwiftUI state.
+# The default Erlang logger handler writes to :standard_io (stdout). For
+# both of these modes, stdout is NOT a safe place for log text, so we redirect
+# the default handler to the Minga log file from the very start of boot:
 #
-# The default Erlang logger handler writes to :standard_io (stdout).
-# In connected mode, stdout is the binary protocol pipe to the Swift
-# frontend. Unframed log text would corrupt the {:packet, 4} protocol
-# stream, causing unknownOpcode decode errors on the Swift side.
+#   - connected mode: stdout is the {:packet, 4} binary protocol pipe to the
+#     Swift GUI. Unframed log text corrupts the stream (unknownOpcode errors).
+#   - standalone TUI: stdout is the user's terminal. Boot logs (EventRecorder,
+#     extensions, watchdog, ...) would print over the editor UI.
 #
-# Redirect the default handler to the Minga log file. This matches
-# what LoggerHandler.install() does later during Editor.init, but
-# covers the startup window before the Editor is running.
-if port_mode == :connected do
-  config :minga, start_editor: true, backend: :gui
+# This matches what LoggerHandler.install/0 does later during Editor.init, but
+# covers the startup window before the Editor is running. Headless and `mix`
+# invocations are intentionally excluded so they keep stdout/stderr logging.
+standalone_tui? =
+  System.get_env("__BURRITO") != nil and
+    "--headless" not in Enum.map(:init.get_plain_arguments(), &to_string/1)
 
+if port_mode == :connected or standalone_tui? do
   log_dir = Path.expand("~/.local/share/minga")
   File.mkdir_p!(log_dir)
   log_path = Path.join(log_dir, "minga.log")
   config :logger, :default_handler, config: [type: {:file, String.to_charlist(log_path)}]
+end
+
+# Connected mode means the GUI app spawned us. Start the editor with
+# the GUI backend so the supervision tree boots Port.Manager, Editor,
+# and the parser. Without this, the BEAM process sits idle and the
+# Swift frontend sees only its default (empty) SwiftUI state.
+if port_mode == :connected do
+  config :minga, start_editor: true, backend: :gui
 end

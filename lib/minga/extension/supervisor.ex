@@ -15,6 +15,7 @@ defmodule Minga.Extension.Supervisor do
 
   use DynamicSupervisor
 
+  alias Minga.Extension.CompileCache
   alias Minga.Extension.Git, as: ExtGit
   alias Minga.Extension.Hex, as: ExtHex
   alias Minga.Extension.Manifest
@@ -1408,41 +1409,17 @@ defmodule Minga.Extension.Supervisor do
         {:error, "no .ex files found in #{expanded}"}
 
       _ ->
-        compile_and_find_extension(files)
-    end
-  end
+        # The compile cache loads precompiled beams on a hit and recompiles
+        # (writing fresh beams) on a miss, so editing extension source still
+        # hot-reloads via a changed content hash.
+        case CompileCache.load_or_compile(expanded, files) do
+          {:ok, %{modules: modules, diagnostics: diagnostics}} ->
+            log_diagnostics(diagnostics)
+            find_extension_in_compiled(modules)
 
-  @spec compile_and_find_extension([String.t()]) :: {:ok, module()} | {:error, String.t()}
-  defp compile_and_find_extension(files) do
-    {result, diagnostics} = compile_quietly(files)
-    log_diagnostics(diagnostics)
-    result
-  rescue
-    e in [SyntaxError, TokenMissingError, CompileError] ->
-      {:error, "compile error: #{Exception.message(e)}"}
-
-    e ->
-      {:error, "error: #{Exception.message(e)}"}
-  catch
-    kind, reason ->
-      {:error, "error: #{inspect(kind)} #{inspect(reason)}"}
-  end
-
-  # Compiles extension files using ParallelCompiler so cross-module references resolve.
-  # Diagnostics go through Code.with_diagnostics, not global :standard_error mutation.
-  @spec compile_quietly([String.t()]) :: {{:ok, module()} | {:error, String.t()}, [map()]}
-  defp compile_quietly(files) do
-    Code.with_diagnostics(fn -> parallel_compile_and_find(files) end)
-  end
-
-  @spec parallel_compile_and_find([String.t()]) :: {:ok, module()} | {:error, String.t()}
-  defp parallel_compile_and_find(files) do
-    case Kernel.ParallelCompiler.compile(files, return_diagnostics: true) do
-      {:ok, modules, _diag_map} ->
-        find_extension_in_compiled(modules)
-
-      {:error, _errors, _diag_map} ->
-        {:error, "extension compilation failed (see *Messages*)"}
+          {:error, reason} ->
+            {:error, reason}
+        end
     end
   end
 

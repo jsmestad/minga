@@ -201,9 +201,13 @@ defmodule Minga.Session.EventRecorder.StoreTest do
     end
   end
 
-  describe "integrity_check/1" do
-    test "reports healthy for a valid database", %{db: db} do
+  describe "integrity_check/2" do
+    test "reports healthy for a valid database (full)", %{db: db} do
       assert {:ok, :healthy} = Store.integrity_check(db)
+    end
+
+    test "reports healthy for a valid database (quick)", %{db: db} do
+      assert {:ok, :healthy} = Store.integrity_check(db, :quick)
     end
   end
 

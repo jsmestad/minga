@@ -1,0 +1,230 @@
+defmodule Minga.Extension.CompileCache do
+  @moduledoc """
+  On-disk compile cache for path/git-sourced extensions.
+
+  Path and git extensions ship as `.ex` source and were recompiled from
+  scratch on every boot (`Kernel.ParallelCompiler`), costing hundreds of
+  milliseconds per extension on the startup critical path. This module
+  compiles each extension once, writes the resulting `.beam` files to a
+  cache keyed by a hash of the source plus the Elixir/ERTS versions, and on
+  later boots loads those beams directly (a few milliseconds) instead of
+  recompiling.
+
+  ## Invalidation
+
+  The cache key is derived from the *content* of every source file (and the
+  toolchain version), so editing an extension produces a new key and forces a
+  recompile. This keeps dev hot-reload correct: a changed file is a cache
+  miss. After a successful compile we prune the extension's other (stale) keys
+  so the cache holds one entry per extension.
+
+  Beams are toolchain-specific, so the key includes the Elixir and ERTS
+  versions: a runtime upgrade invalidates every entry automatically.
+
+  Caching can be disabled with `config :minga, extension_compile_cache: false`
+  (tests do this to stay hermetic), in which case compilation falls back to the
+  previous in-memory behaviour.
+  """
+
+  @type result ::
+          {:ok, %{modules: [module()], diagnostics: [map()], source: :cache | :compiled}}
+          | {:error, String.t()}
+
+  @doc """
+  Ensures the extension's modules are loaded, compiling and caching on a miss.
+
+  `root` is the extension directory; `files` are its sorted `.ex` paths.
+  Returns the loaded modules plus any compile diagnostics (empty on a cache
+  hit). The caller picks the module implementing the extension behaviour.
+  """
+  @spec load_or_compile(String.t(), [String.t()], keyword()) :: result()
+  def load_or_compile(root, files, opts \\ [])
+
+  def load_or_compile(_root, [], _opts), do: {:error, "no source files to compile"}
+
+  def load_or_compile(root, files, opts) when is_binary(root) and is_list(files) do
+    if Keyword.get(opts, :enabled, enabled?()) do
+      cache_root = Keyword.get(opts, :cache_dir, default_cache_dir())
+      ext_dir = Path.join(cache_root, ext_id(root))
+      dir = Path.join(ext_dir, content_key(root, files))
+
+      case load_from_cache(dir) do
+        {:ok, modules} ->
+          {:ok, %{modules: modules, diagnostics: [], source: :cache}}
+
+        :miss ->
+          compile_and_cache(files, ext_dir, dir)
+      end
+    else
+      compile_in_memory(files)
+    end
+  end
+
+  # ── Cache hit ─────────────────────────────────────────────────────────
+
+  @spec load_from_cache(String.t()) :: {:ok, [module()]} | :miss
+  defp load_from_cache(dir) do
+    beams = Path.wildcard(Path.join(dir, "*.beam"))
+
+    case beams do
+      [] ->
+        :miss
+
+      _ ->
+        load_beams(beams)
+    end
+  end
+
+  @spec load_beams([String.t()]) :: {:ok, [module()]} | :miss
+  defp load_beams(beams) do
+    Enum.reduce_while(beams, {:ok, []}, fn beam, {:ok, acc} ->
+      # Purge any already-loaded version first so the on-disk beam becomes the
+      # current code (matters for dev hot-reload, where an older version may
+      # still be loaded). load_abs takes the path without the .beam extension.
+      module = beam |> Path.basename() |> Path.rootname() |> String.to_atom()
+      :code.purge(module)
+      :code.delete(module)
+
+      case :code.load_abs(String.to_charlist(Path.rootname(beam))) do
+        {:module, loaded} -> {:cont, {:ok, [loaded | acc]}}
+        {:error, _reason} -> {:halt, :miss}
+      end
+    end)
+  end
+
+  # ── Cache miss: compile and persist ─────────────────────────────────────
+
+  @spec compile_and_cache([String.t()], String.t(), String.t()) :: result()
+  defp compile_and_cache(files, ext_dir, dir) do
+    File.mkdir_p!(dir)
+
+    {outcome, diagnostics} =
+      Code.with_diagnostics(fn ->
+        Kernel.ParallelCompiler.compile_to_path(files, dir, return_diagnostics: true)
+      end)
+
+    case outcome do
+      {:ok, _modules, _diag} ->
+        prune_stale_keys(ext_dir, dir)
+
+        # Load from the freshly written beams so the on-disk version is the
+        # one in memory. compile_to_path writes the beams but does not reload
+        # a module that was already loaded (e.g. a prior dev-reload version).
+        case load_from_cache(dir) do
+          {:ok, modules} ->
+            {:ok, %{modules: modules, diagnostics: diagnostics, source: :compiled}}
+
+          :miss ->
+            File.rm_rf(dir)
+            {:error, "compiled beams could not be loaded"}
+        end
+
+      {:error, _errors, _diag} ->
+        File.rm_rf(dir)
+        {:error, "extension compilation failed (see *Messages*)"}
+    end
+  rescue
+    e in [SyntaxError, TokenMissingError, CompileError] ->
+      File.rm_rf(dir)
+      {:error, "compile error: #{Exception.message(e)}"}
+
+    e ->
+      File.rm_rf(dir)
+      {:error, "error: #{Exception.message(e)}"}
+  catch
+    kind, reason ->
+      File.rm_rf(dir)
+      {:error, "error: #{inspect(kind)} #{inspect(reason)}"}
+  end
+
+  # Keep only the just-built key for this extension; remove older versions.
+  @spec prune_stale_keys(String.t(), String.t()) :: :ok
+  defp prune_stale_keys(ext_dir, keep_dir) do
+    keep = Path.basename(keep_dir)
+
+    case File.ls(ext_dir) do
+      {:ok, entries} ->
+        for entry <- entries, entry != keep do
+          File.rm_rf(Path.join(ext_dir, entry))
+        end
+
+        :ok
+
+      {:error, _} ->
+        :ok
+    end
+  end
+
+  # ── Caching disabled: previous in-memory behaviour ──────────────────────
+
+  @spec compile_in_memory([String.t()]) :: result()
+  defp compile_in_memory(files) do
+    {outcome, diagnostics} =
+      Code.with_diagnostics(fn ->
+        Kernel.ParallelCompiler.compile(files, return_diagnostics: true)
+      end)
+
+    case outcome do
+      {:ok, modules, _diag} ->
+        {:ok, %{modules: modules, diagnostics: diagnostics, source: :compiled}}
+
+      {:error, _errors, _diag} ->
+        {:error, "extension compilation failed (see *Messages*)"}
+    end
+  rescue
+    e in [SyntaxError, TokenMissingError, CompileError] ->
+      {:error, "compile error: #{Exception.message(e)}"}
+
+    e ->
+      {:error, "error: #{Exception.message(e)}"}
+  catch
+    kind, reason ->
+      {:error, "error: #{inspect(kind)} #{inspect(reason)}"}
+  end
+
+  # ── Keys and paths ──────────────────────────────────────────────────────
+
+  # Stable per-location id so we can prune an extension's old versions.
+  @spec ext_id(String.t()) :: String.t()
+  defp ext_id(root) do
+    :sha256
+    |> :crypto.hash(Path.expand(root))
+    |> Base.url_encode64(padding: false)
+    |> binary_part(0, 16)
+  end
+
+  # Content + toolchain hash. Relative paths keep the key stable regardless of
+  # where the extension dir lives on disk.
+  @spec content_key(String.t(), [String.t()]) :: String.t()
+  defp content_key(root, files) do
+    expanded_root = Path.expand(root)
+
+    payload =
+      files
+      |> Enum.sort()
+      |> Enum.flat_map(fn file ->
+        [Path.relative_to(file, expanded_root), "\0", File.read!(file), "\0"]
+      end)
+
+    :sha256
+    |> :crypto.hash([version_tag(), "\0" | payload])
+    |> Base.url_encode64(padding: false)
+  end
+
+  @spec version_tag() :: String.t()
+  defp version_tag do
+    "elixir-#{System.version()}-erts-#{:erlang.system_info(:version)}"
+  end
+
+  @spec enabled?() :: boolean()
+  defp enabled?, do: Application.get_env(:minga, :extension_compile_cache, true)
+
+  @spec default_cache_dir() :: String.t()
+  defp default_cache_dir do
+    Application.get_env(
+      :minga,
+      :extension_compile_cache_dir,
+      Path.join(Path.expand("~/.local/share/minga"), "extension_cache")
+    )
+  end
+end

@@ -246,14 +246,26 @@ defmodule Minga.Session.EventRecorder.Store do
   end
 
   @doc """
-  Runs `PRAGMA integrity_check` and returns the result.
+  Runs an integrity check and returns the result.
+
+  `mode` selects the SQLite pragma:
+
+  - `:full` (default) runs `PRAGMA integrity_check`, which walks every
+    page and index in the database. Cost is O(database size); on a large
+    database this takes many seconds, so never run it on a hot path.
+  - `:quick` runs `PRAGMA quick_check`, which skips the expensive index
+    consistency checks and is roughly an order of magnitude faster.
 
   Returns `{:ok, :healthy}` if the database is intact, or
-  `{:error, messages}` with the integrity check output.
+  `{:error, messages}` with the check output.
   """
-  @spec integrity_check(db()) :: {:ok, :healthy} | {:error, [String.t()]}
-  def integrity_check(db) do
-    sql = "PRAGMA integrity_check"
+  @spec integrity_check(db(), :full | :quick) :: {:ok, :healthy} | {:error, [String.t()]}
+  def integrity_check(db, mode \\ :full) do
+    sql =
+      case mode do
+        :quick -> "PRAGMA quick_check"
+        :full -> "PRAGMA integrity_check"
+      end
 
     with {:ok, stmt} <- Exqlite.Sqlite3.prepare(db, sql) do
       results = collect_rows(db, stmt)
