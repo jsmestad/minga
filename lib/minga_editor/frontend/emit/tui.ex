@@ -30,12 +30,16 @@ defmodule MingaEditor.Frontend.Emit.TUI do
   alias Minga.Core.Unicode
   alias Minga.Frontend.Adapter.TUI.WindowAdapter
   alias Minga.RenderModel
+  alias Minga.RenderModel.Cell
+  alias Minga.RenderModel.UI.CellLayer
   alias MingaEditor.DisplayList
   alias MingaEditor.DisplayList.{Frame, Overlay, WindowFrame}
   alias MingaEditor.Layout
   alias MingaEditor.Frontend.Emit.Context
+  alias MingaEditor.Frontend.Emit.TUI.CellCommandEncoder
   alias MingaEditor.Frontend.Protocol
   alias MingaEditor.Renderer.Caches
+  alias MingaEditor.Renderer.Regions
 
   @typedoc "Emit context for the TUI stage."
   @type ctx :: Context.t()
@@ -52,68 +56,64 @@ defmodule MingaEditor.Frontend.Emit.TUI do
   @max_scroll_delta 3
 
   @doc """
-  Builds protocol command binaries from a render model for the TUI renderer.
+  Builds protocol command binaries for the TUI renderer.
 
-  Detects scroll regions from tracking state and uses scroll region optimization when possible, otherwise does a full redraw. Buffer-window output comes from `Minga.RenderModel`; the legacy frame supplies TUI chrome until the chrome adapter is fully semantic.
+  Production passes a `Minga.RenderModel`, so buffer-window and chrome output come from the shared visible model. The frame clause remains only for focused legacy tests and compatibility fallbacks.
   """
-  @spec build_commands(RenderModel.t(), Frame.t(), ctx(), Caches.t()) :: [binary()]
-  def build_commands(%RenderModel{} = render_model, %Frame{} = frame, ctx, caches) do
+  @spec build_commands(RenderModel.t() | Frame.t(), ctx(), Caches.t()) :: [binary()]
+  def build_commands(%RenderModel{} = render_model, ctx, caches) do
     scroll_deltas = detect_scroll_regions(ctx, caches)
-    build_commands_from_deltas(render_model, frame, ctx, scroll_deltas)
+    build_commands_from_deltas(render_model, ctx, scroll_deltas)
   end
 
-  @doc """
-  Builds protocol command binaries from a frame for legacy callers.
-
-  Production TUI emit passes a `Minga.RenderModel`; this arity remains for focused tests and compatibility fallbacks.
-  """
-  @spec build_commands(Frame.t(), ctx(), Caches.t()) :: [binary()]
-  def build_commands(frame, ctx, caches) do
+  def build_commands(%Frame{} = frame, ctx, caches) do
     scroll_deltas = detect_scroll_regions(ctx, caches)
     build_commands_from_deltas(frame, scroll_deltas)
   end
 
-  @doc """
-  Builds protocol commands from a render model, compatibility frame, and pre-computed scroll deltas.
+  @doc "Builds protocol command binaries from a render model and legacy frame for focused compatibility tests."
+  @spec build_commands(RenderModel.t(), Frame.t(), ctx(), Caches.t()) :: [binary()]
+  def build_commands(%RenderModel{} = render_model, %Frame{} = _frame, ctx, caches) do
+    build_commands(render_model, ctx, caches)
+  end
 
-  When `scroll_deltas` is nil, performs a full redraw with model-derived buffer windows. When scroll deltas are present, sends scroll_region commands plus newly exposed model-derived window rows and compatibility chrome.
+  @doc """
+  Builds protocol commands from a render model and pre-computed scroll deltas.
+
+  When `scroll_deltas` is nil, performs a full redraw with model-derived buffer windows and cell chrome. When scroll deltas are present, sends scroll_region commands plus newly exposed model-derived window rows and model-carried cell chrome.
   """
+  @spec build_commands_from_deltas(RenderModel.t(), ctx(), [scroll_delta()] | nil) :: [binary()]
+  def build_commands_from_deltas(%RenderModel{} = render_model, ctx, nil) do
+    build_full_redraw_from_model(render_model, ctx)
+  end
+
+  def build_commands_from_deltas(%RenderModel{} = render_model, ctx, scroll_deltas) do
+    scroll_cmds = build_scroll_commands(scroll_deltas)
+    cell_layer = cell_layer(render_model)
+
+    new_content_cells =
+      collect_redraw_row_clear_cells(scroll_deltas) ++
+        collect_new_model_window_cells(render_model, ctx, scroll_deltas)
+
+    scroll_cmds ++
+      region_commands(ctx) ++
+      CellCommandEncoder.encode(CellLayer.chrome_cells(cell_layer)) ++
+      CellCommandEncoder.encode(new_content_cells) ++
+      CellCommandEncoder.encode(cell_layer.overlay_cells) ++
+      cursor_commands(render_model)
+  end
+
+  @doc "Builds protocol commands from a render model, compatibility frame, and pre-computed scroll deltas."
   @spec build_commands_from_deltas(RenderModel.t(), Frame.t(), ctx(), [scroll_delta()] | nil) :: [
           binary()
         ]
-  def build_commands_from_deltas(%RenderModel{windows: []}, %Frame{} = frame, _ctx, scroll_deltas) do
-    build_commands_from_deltas(frame, scroll_deltas)
-  end
-
-  def build_commands_from_deltas(%RenderModel{} = render_model, %Frame{} = frame, ctx, nil) do
-    build_full_redraw_from_model(render_model, frame, ctx)
-  end
-
   def build_commands_from_deltas(
         %RenderModel{} = render_model,
-        %Frame{} = frame,
+        %Frame{} = _frame,
         ctx,
         scroll_deltas
       ) do
-    scroll_cmds = build_scroll_commands(scroll_deltas)
-
-    new_content_draws =
-      collect_redraw_row_clear_draws(scroll_deltas) ++
-        collect_new_model_window_draws(render_model, ctx, scroll_deltas)
-
-    chrome_draws = collect_chrome_draws(frame) ++ collect_model_window_legacy_draws(frame)
-    overlay_draws = collect_overlay_draws(frame)
-
-    scroll_cmds ++
-      frame.regions ++
-      DisplayList.draws_to_commands(chrome_draws) ++
-      DisplayList.draws_to_commands(new_content_draws) ++
-      DisplayList.draws_to_commands(overlay_draws) ++
-      [
-        Protocol.encode_cursor_shape(frame.cursor.shape),
-        Protocol.encode_cursor(frame.cursor.row, frame.cursor.col),
-        Protocol.encode_batch_end()
-      ]
+    build_commands_from_deltas(render_model, ctx, scroll_deltas)
   end
 
   @doc """
@@ -148,117 +148,109 @@ defmodule MingaEditor.Frontend.Emit.TUI do
       ]
   end
 
-  @spec build_full_redraw_from_model(RenderModel.t(), Frame.t(), ctx()) :: [binary()]
-  defp build_full_redraw_from_model(%RenderModel{} = render_model, %Frame{} = frame, ctx) do
-    splash_draws = frame.splash || []
-    before_windows = frame.tab_bar ++ frame.file_tree ++ frame.agentic_view
-
-    after_windows =
-      frame.separators ++
-        frame.status_bar ++ frame.agent_panel ++ frame.minibuffer ++ splash_draws
-
-    legacy_window_draws = collect_model_window_legacy_draws(frame)
-    overlay_draws = collect_overlay_draws(frame)
+  @spec build_full_redraw_from_model(RenderModel.t(), ctx()) :: [binary()]
+  defp build_full_redraw_from_model(%RenderModel{} = render_model, ctx) do
+    cell_layer = cell_layer(render_model)
 
     [Protocol.encode_clear()] ++
-      frame.regions ++
-      DisplayList.draws_to_commands(before_windows) ++
+      region_commands(ctx) ++
+      CellCommandEncoder.encode(cell_layer.pre_window_cells) ++
       model_window_commands(render_model, ctx) ++
-      DisplayList.draws_to_commands(legacy_window_draws) ++
-      DisplayList.draws_to_commands(after_windows) ++
-      DisplayList.draws_to_commands(overlay_draws) ++
-      [
-        Protocol.encode_cursor_shape(frame.cursor.shape),
-        Protocol.encode_cursor(frame.cursor.row, frame.cursor.col),
-        Protocol.encode_batch_end()
-      ]
+      CellCommandEncoder.encode(cell_layer.legacy_window_cells) ++
+      CellCommandEncoder.encode(cell_layer.post_window_cells) ++
+      CellCommandEncoder.encode(cell_layer.overlay_cells) ++
+      cursor_commands(render_model)
   end
 
   @spec model_window_commands(RenderModel.t(), ctx()) :: [binary()]
   defp model_window_commands(%RenderModel{} = render_model, ctx) do
     render_model
-    |> model_window_draws(ctx)
-    |> DisplayList.draws_to_commands()
+    |> model_window_cells(ctx)
+    |> CellCommandEncoder.encode()
   end
 
-  @spec collect_new_model_window_draws(RenderModel.t(), ctx(), [scroll_delta()]) :: [
-          DisplayList.draw()
-        ]
-  defp collect_new_model_window_draws(%RenderModel{} = render_model, ctx, scroll_deltas) do
+  @spec collect_new_model_window_cells(RenderModel.t(), ctx(), [scroll_delta()]) :: [Cell.t()]
+  defp collect_new_model_window_cells(%RenderModel{} = render_model, ctx, scroll_deltas) do
     ranges = redraw_ranges(scroll_deltas)
 
     render_model
-    |> model_window_draws(ctx)
-    |> filter_draws_by_ranges(ranges)
+    |> model_window_cells(ctx)
+    |> filter_cells_by_ranges(ranges)
   end
 
-  @spec collect_redraw_row_clear_draws([scroll_delta()]) :: [DisplayList.draw()]
-  defp collect_redraw_row_clear_draws(scroll_deltas) do
-    Enum.flat_map(scroll_deltas, &redraw_row_clear_draws/1)
+  @spec collect_redraw_row_clear_cells([scroll_delta()]) :: [Cell.t()]
+  defp collect_redraw_row_clear_cells(scroll_deltas) do
+    Enum.flat_map(scroll_deltas, &redraw_row_clear_cells/1)
   end
 
-  @spec redraw_row_clear_draws(scroll_delta()) :: [DisplayList.draw()]
-  defp redraw_row_clear_draws(%{content_rect: {_top, col, width, _height}, redraw_rows: rows})
+  @spec redraw_row_clear_cells(scroll_delta()) :: [Cell.t()]
+  defp redraw_row_clear_cells(%{content_rect: {_top, col, width, _height}, redraw_rows: rows})
        when is_list(rows) and width > 0 do
     text = String.duplicate(" ", width)
 
     rows
     |> Enum.uniq()
-    |> Enum.map(fn row -> DisplayList.draw(row, col, text, Face.new()) end)
+    |> Enum.map(fn row -> Cell.new(row, col, text, Face.new()) end)
   end
 
-  defp redraw_row_clear_draws(_delta), do: []
+  defp redraw_row_clear_cells(_delta), do: []
 
-  @spec model_window_draws(RenderModel.t(), ctx()) :: [DisplayList.draw()]
-  defp model_window_draws(%RenderModel{windows: windows}, ctx) do
+  @spec model_window_cells(RenderModel.t(), ctx()) :: [Cell.t()]
+  defp model_window_cells(%RenderModel{windows: windows}, ctx) do
     opts = window_adapter_opts(ctx)
 
     windows
     |> Enum.flat_map(&WindowAdapter.to_screen_cells(&1, opts))
-    |> cells_to_draws()
+    |> window_adapter_cells_to_model_cells()
   end
 
-  @spec collect_model_window_legacy_draws(Frame.t()) :: [DisplayList.draw()]
-  defp collect_model_window_legacy_draws(%Frame{} = frame) do
-    Enum.flat_map(frame.windows, fn
-      %WindowFrame{window_model: %{content_kind: :agent_chat}, lines: lines} ->
-        DisplayList.layer_to_draws(lines)
-
-      %WindowFrame{} ->
-        []
-    end)
-  end
-
-  @spec cells_to_draws([WindowAdapter.cell()]) :: [DisplayList.draw()]
-  defp cells_to_draws(cells) do
+  @spec window_adapter_cells_to_model_cells([WindowAdapter.cell()]) :: [Cell.t()]
+  defp window_adapter_cells_to_model_cells(cells) do
     cells
     |> Enum.sort_by(fn %{row: row, col: col} -> {row, col} end)
-    |> Enum.reduce([], &append_cell_draw/2)
+    |> Enum.reduce([], &append_model_cell/2)
     |> Enum.reverse()
   end
 
-  @spec append_cell_draw(WindowAdapter.cell(), [DisplayList.draw()]) :: [DisplayList.draw()]
-  defp append_cell_draw(%{row: row, col: col, text: text, face: %Face{} = face}, [
-         {row, start_col, existing_text, %Face{} = face} | rest
+  @spec append_model_cell(WindowAdapter.cell(), [Cell.t()]) :: [Cell.t()]
+  defp append_model_cell(%{row: row, col: col, text: text, face: %Face{} = face}, [
+         %Cell{row: row, col: start_col, text: existing_text, face: %Face{} = face}
+         | rest
        ]) do
     expected_col = start_col + Unicode.display_width(existing_text)
 
     if col == expected_col do
-      [{row, start_col, existing_text <> text, face} | rest]
+      [Cell.new(row, start_col, existing_text <> text, face) | rest]
     else
-      [DisplayList.draw(row, col, text, face), {row, start_col, existing_text, face} | rest]
+      [Cell.new(row, col, text, face), Cell.new(row, start_col, existing_text, face) | rest]
     end
   end
 
-  defp append_cell_draw(%{row: row, col: col, text: text, face: %Face{} = face}, acc) do
-    [DisplayList.draw(row, col, text, face) | acc]
+  defp append_model_cell(%{row: row, col: col, text: text, face: %Face{} = face}, acc) do
+    [Cell.new(row, col, text, face) | acc]
   end
 
-  @spec filter_draws_by_ranges([DisplayList.draw()], [Range.t()]) :: [DisplayList.draw()]
-  defp filter_draws_by_ranges(draws, ranges) do
-    Enum.filter(draws, fn {row, _col, _text, _style} ->
-      Enum.any?(ranges, fn range -> row in range end)
-    end)
+  @spec filter_cells_by_ranges([Cell.t()], [Range.t()]) :: [Cell.t()]
+  defp filter_cells_by_ranges(cells, ranges) do
+    Enum.filter(cells, fn %Cell{row: row} -> Enum.any?(ranges, fn range -> row in range end) end)
+  end
+
+  @spec cell_layer(RenderModel.t()) :: CellLayer.t()
+  defp cell_layer(%RenderModel{ui: %{cell_layer: %CellLayer{} = layer}}), do: layer
+  defp cell_layer(%RenderModel{}), do: %CellLayer{}
+
+  @spec cursor_commands(RenderModel.t()) :: [binary()]
+  defp cursor_commands(%RenderModel{cursor: cursor}) do
+    [
+      Protocol.encode_cursor_shape(cursor.shape),
+      Protocol.encode_cursor(cursor.row, cursor.col),
+      Protocol.encode_batch_end()
+    ]
+  end
+
+  @spec region_commands(ctx()) :: [binary()]
+  defp region_commands(%Context{layout: layout}) do
+    Regions.define_regions(layout)
   end
 
   @spec window_adapter_opts(ctx()) :: keyword()
@@ -562,6 +554,15 @@ defmodule MingaEditor.Frontend.Emit.TUI do
   @spec collect_overlay_draws(Frame.t()) :: [DisplayList.draw()]
   def collect_overlay_draws(frame) do
     Enum.flat_map(frame.overlays, fn %Overlay{draws: draws} -> draws end)
+  end
+
+  @spec collect_redraw_row_clear_draws([scroll_delta()]) :: [DisplayList.draw()]
+  defp collect_redraw_row_clear_draws(scroll_deltas) do
+    scroll_deltas
+    |> collect_redraw_row_clear_cells()
+    |> Enum.map(fn %Cell{row: row, col: col, text: text, face: face} ->
+      DisplayList.draw(row, col, text, face)
+    end)
   end
 
   @spec collect_new_content_draws(Frame.t(), [scroll_delta()]) :: [DisplayList.draw()]

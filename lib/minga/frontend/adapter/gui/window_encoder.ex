@@ -82,6 +82,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   alias Minga.Protocol.Opcodes
 
   @op_gui_window_content Opcodes.gui_window_content()
+  @op_gui_window_overlay_delta Opcodes.gui_window_overlay_delta()
   @op_gui_gutter Opcodes.gui_gutter()
   @op_gui_indent_guides Opcodes.gui_indent_guides()
 
@@ -118,6 +119,24 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   @spec encode(RenderWindow.t()) :: [binary()]
   def encode(%RenderWindow{} = window) do
     [encode_window_content(window)] ++ encode_frame_metadata(window)
+  end
+
+  @doc "Encodes a cursor and cursorline overlay delta for a retained GUI window."
+  @spec encode_overlay_delta(RenderWindow.t()) :: binary()
+  def encode_overlay_delta(%RenderWindow{} = window) do
+    cursorline = encode_cursorline_section(window.cursorline, window.rect)
+
+    flags =
+      if(Map.get(window, :cursor_visible, true), do: 0x01, else: 0x00) |||
+        if(cursorline != nil, do: 0x02, else: 0x00)
+
+    cursor_shape = encode_cursor_shape(window.cursor_shape)
+
+    header =
+      <<window.window_id::16, window.content_epoch::32, flags::8, window.cursor_row::16,
+        window.cursor_col::16, cursor_shape::8>>
+
+    IO.iodata_to_binary([<<@op_gui_window_overlay_delta>>, header, cursorline || []])
   end
 
   @doc "Encodes per-frame window metadata that the GUI clears and rebuilds every batch."

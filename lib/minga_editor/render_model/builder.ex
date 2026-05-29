@@ -13,6 +13,7 @@ defmodule MingaEditor.RenderModel.Builder do
   alias MingaEditor.DisplayList.WindowFrame
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.RenderModel.UI.Builder, as: UIBuilder
+  alias MingaEditor.RenderModel.UI.CellLayerBuilder
   alias MingaEditor.RenderPipeline.Chrome
 
   @spec build(Frame.t(), Context.t(), Chrome.t() | nil) :: {RenderModel.t(), Context.t()}
@@ -32,6 +33,18 @@ defmodule MingaEditor.RenderModel.Builder do
       )
 
     {model, ctx}
+  end
+
+  @doc "Builds a render model for TUI output, including cell-grid chrome adapter input."
+  @spec build_tui(Frame.t(), Context.t(), Chrome.t() | nil) :: RenderModel.t()
+  def build_tui(%Frame{} = frame, %Context{} = ctx, chrome \\ nil) do
+    RenderModel.new(
+      window_models(frame),
+      %UI{cell_layer: CellLayerBuilder.build(frame, chrome)},
+      cursor_model(frame.cursor),
+      ctx.title,
+      ctx.theme.editor.bg
+    )
   end
 
   @doc "Builds a render model with window content and frame side-channel fields only."

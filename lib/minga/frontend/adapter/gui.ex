@@ -136,24 +136,131 @@ defmodule Minga.Frontend.Adapter.GUI do
   @spec encode_window_with_metrics(RenderModel.Window.t(), [binary()], Caches.t()) ::
           {[binary()], Caches.t(), window_metrics()}
   defp encode_window_with_metrics(%RenderModel.Window{} = window, cmds, %Caches{} = caches) do
-    fp = :erlang.phash2(window)
+    content_fp = window_content_fingerprint(window)
+    overlay_fp = window_overlay_fingerprint(window)
     {metadata, metadata_metrics} = WindowEncoder.encode_frame_metadata_with_metrics(window)
 
-    if Map.get(caches.last_window_fps, window.window_id) == fp do
-      {Enum.reverse(metadata) ++ cmds, caches, metadata_metrics}
-    else
-      {content, content_metrics} = WindowEncoder.encode_window_content_with_metrics(window)
-      encoded = [content | metadata]
-      caches = %{caches | last_window_fps: Map.put(caches.last_window_fps, window.window_id, fp)}
+    previous_content_fp = Map.get(caches.last_window_content_fps, window.window_id)
+    previous_overlay_fp = Map.get(caches.last_window_overlay_fps, window.window_id)
 
-      {Enum.reverse(encoded) ++ cmds, caches,
-       merge_window_metrics(content_metrics, metadata_metrics)}
-    end
+    change = %{
+      metadata: metadata,
+      metadata_metrics: metadata_metrics,
+      content_fp: content_fp,
+      overlay_fp: overlay_fp,
+      previous_content_fp: previous_content_fp,
+      previous_overlay_fp: previous_overlay_fp
+    }
+
+    encode_window_change(window, cmds, caches, change)
+  end
+
+  @spec encode_window_change(RenderModel.Window.t(), [binary()], Caches.t(), map()) ::
+          {[binary()], Caches.t(), window_metrics()}
+  defp encode_window_change(
+         %RenderModel.Window{} = window,
+         cmds,
+         %Caches{} = caches,
+         %{
+           metadata: metadata,
+           metadata_metrics: metadata_metrics,
+           content_fp: content_fp,
+           overlay_fp: overlay_fp,
+           previous_content_fp: previous_content_fp
+         }
+       )
+       when previous_content_fp != content_fp do
+    {content, content_metrics} = WindowEncoder.encode_window_content_with_metrics(window)
+    encoded = [content | metadata]
+
+    caches = put_window_fingerprints(caches, window.window_id, content_fp, overlay_fp)
+
+    {Enum.reverse(encoded) ++ cmds, caches,
+     merge_window_metrics(content_metrics, metadata_metrics)}
+  end
+
+  defp encode_window_change(
+         %RenderModel.Window{} = window,
+         cmds,
+         %Caches{} = caches,
+         %{
+           metadata: metadata,
+           metadata_metrics: metadata_metrics,
+           content_fp: content_fp,
+           overlay_fp: overlay_fp,
+           previous_overlay_fp: previous_overlay_fp
+         }
+       )
+       when previous_overlay_fp != overlay_fp do
+    delta = WindowEncoder.encode_overlay_delta(window)
+    caches = put_window_fingerprints(caches, window.window_id, content_fp, overlay_fp)
+    encoded = [delta | metadata]
+
+    {Enum.reverse(encoded) ++ cmds, caches, add_overlay_delta_metrics(metadata_metrics, delta)}
+  end
+
+  defp encode_window_change(
+         %RenderModel.Window{} = window,
+         cmds,
+         %Caches{} = caches,
+         %{metadata: metadata, metadata_metrics: metadata_metrics}
+       ) do
+    delta = WindowEncoder.encode_overlay_delta(window)
+    encoded = [delta | metadata]
+
+    {Enum.reverse(encoded) ++ cmds, caches, add_overlay_delta_metrics(metadata_metrics, delta)}
+  end
+
+  @spec put_window_fingerprints(Caches.t(), non_neg_integer(), integer(), integer()) :: Caches.t()
+  defp put_window_fingerprints(%Caches{} = caches, window_id, content_fp, overlay_fp) do
+    %{
+      caches
+      | last_window_fps: Map.put(caches.last_window_fps, window_id, content_fp),
+        last_window_content_fps: Map.put(caches.last_window_content_fps, window_id, content_fp),
+        last_window_overlay_fps: Map.put(caches.last_window_overlay_fps, window_id, overlay_fp)
+    }
+  end
+
+  @spec window_content_fingerprint(RenderModel.Window.t()) :: integer()
+  defp window_content_fingerprint(%RenderModel.Window{} = window) do
+    :erlang.phash2({
+      window.window_id,
+      window.content_kind,
+      window.rect,
+      window.content_epoch,
+      window.full_refresh,
+      window.scroll_left,
+      window.rows,
+      window.selection,
+      window.search_matches,
+      window.diagnostic_ranges,
+      window.document_highlights,
+      window.annotations,
+      window.geometry,
+      window.gutter,
+      window.indent_guides
+    })
+  end
+
+  @spec window_overlay_fingerprint(RenderModel.Window.t()) :: integer()
+  defp window_overlay_fingerprint(%RenderModel.Window{} = window) do
+    :erlang.phash2({
+      Map.get(window, :cursor_visible, true),
+      window.cursor_row,
+      window.cursor_col,
+      window.cursor_shape,
+      window.cursorline
+    })
   end
 
   @spec empty_window_metrics() :: window_metrics()
   defp empty_window_metrics do
     %{row_bytes: 0, overlay_bytes: 0, gutter_bytes: 0, annotation_bytes: 0, metadata_bytes: 0}
+  end
+
+  @spec add_overlay_delta_metrics(window_metrics(), binary()) :: window_metrics()
+  defp add_overlay_delta_metrics(metrics, delta) when is_binary(delta) do
+    %{metrics | overlay_bytes: metrics.overlay_bytes + byte_size(delta)}
   end
 
   @spec merge_window_metrics(window_metrics(), window_metrics()) :: window_metrics()

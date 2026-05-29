@@ -3,7 +3,8 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
   Handler tests for `MingaEditor.Handlers.LspEventHandler`.
   """
 
-  use ExUnit.Case, async: true
+  # async: false because these tests register clients in the singleton LSP SyncServer ETS table.
+  use ExUnit.Case, async: false
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Editing.Completion

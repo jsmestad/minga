@@ -198,6 +198,16 @@ struct GUICursorline: Sendable, Equatable {
     let bg: UInt32
 }
 
+struct GUIWindowOverlayDelta: Sendable, Equatable {
+    let windowId: UInt16
+    let contentEpoch: UInt32
+    let cursorVisible: Bool
+    let cursorRow: UInt16
+    let cursorCol: UInt16
+    let cursorShape: CursorShape
+    let cursorline: GUICursorline?
+}
+
 struct GUIPaneGeometry: Sendable, Equatable {
     let windowId: UInt16
     let totalRect: GUICellRect
@@ -266,5 +276,30 @@ final class GUIWindowContent: Sendable {
         self.lineAnnotations = lineAnnotations
         self.paneGeometry = paneGeometry
         self.cursorline = cursorline
+    }
+
+    func applyingOverlayDelta(_ delta: GUIWindowOverlayDelta) -> GUIWindowContent? {
+        guard delta.windowId == windowId, delta.contentEpoch == contentEpoch else {
+            return nil
+        }
+
+        return GUIWindowContent(
+            windowId: windowId,
+            fullRefresh: false,
+            contentEpoch: contentEpoch,
+            cursorVisible: delta.cursorVisible,
+            cursorRow: delta.cursorRow,
+            cursorCol: delta.cursorCol,
+            cursorShape: delta.cursorShape,
+            scrollLeft: scrollLeft,
+            rows: rows,
+            selection: selection,
+            searchMatches: searchMatches,
+            diagnosticUnderlines: diagnosticUnderlines,
+            documentHighlights: documentHighlights,
+            lineAnnotations: lineAnnotations,
+            paneGeometry: paneGeometry,
+            cursorline: delta.cursorline
+        )
     }
 }

@@ -214,6 +214,7 @@ final class CommandDispatcher {
 
         case .guiIndentGuides(let data):
             frameState.windowIndentGuides[data.windowId] = data
+            currentFrameWindowIds.insert(data.windowId)
             frameState.dirty = true
 
         case .guiLineSpacing(let spacing):
@@ -334,6 +335,14 @@ final class CommandDispatcher {
             // BEAM controls cursor visibility per window. When the minibuffer
             // or other overlay has focus, cursor_visible is false.
             frameState.cursorVisible = data.cursorVisible
+
+        case .guiWindowOverlayDelta(let delta):
+            guard let current = guiState.windowContents[delta.windowId] else { break }
+            guard let updated = current.applyingOverlayDelta(delta) else { break }
+            guiState.windowContents[delta.windowId] = updated
+            currentFrameWindowIds.insert(delta.windowId)
+            frameState.cursorVisible = delta.cursorVisible
+            frameState.dirty = true
 
         case .guiBottomPanel(let visible, let activeTabIndex, let heightPercent, let filterPreset, let tabs, let entries):
             if visible {

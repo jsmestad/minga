@@ -593,6 +593,12 @@ name = "gui_sidebars"
 value = 0x9F
 direction = "beam_to_frontend"
 
+[[opcodes]]
+category = "gui_semantic"
+name = "gui_window_overlay_delta"
+value = 0xA0
+direction = "beam_to_frontend"
+
 # Sub-opcodes inside gui_action (0x07).
 [[gui_actions]]
 name = "select_tab"

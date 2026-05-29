@@ -29,7 +29,9 @@ defmodule Minga.Frontend.Adapter.GUI.Caches do
           last_float_popup_fp: integer() | nil,
           last_gutter_separator_fp: integer() | nil,
           last_split_separators_fp: integer() | nil,
-          last_window_fps: %{non_neg_integer() => integer()}
+          last_window_fps: %{non_neg_integer() => integer()},
+          last_window_content_fps: %{non_neg_integer() => integer()},
+          last_window_overlay_fps: %{non_neg_integer() => integer()}
         }
 
   defstruct last_theme_fp: nil,
@@ -59,7 +61,9 @@ defmodule Minga.Frontend.Adapter.GUI.Caches do
             last_float_popup_fp: nil,
             last_gutter_separator_fp: nil,
             last_split_separators_fp: nil,
-            last_window_fps: %{}
+            last_window_fps: %{},
+            last_window_content_fps: %{},
+            last_window_overlay_fps: %{}
 
   @spec new() :: t()
   def new, do: %__MODULE__{}

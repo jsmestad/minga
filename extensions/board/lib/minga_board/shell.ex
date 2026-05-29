@@ -27,12 +27,13 @@ defmodule MingaBoard.Shell do
   @behaviour MingaEditor.Shell.BufferLifecycle
   @behaviour MingaEditor.Shell.TabQueries
 
+  alias Minga.RenderModel.UI
   alias MingaAgent.Subagent.Handle
   alias MingaEditor.DisplayList
   alias MingaEditor.DisplayList.{Cursor, Frame}
+  alias MingaEditor.RenderModel.UI.BoardBuilder
   alias MingaEditor.RenderPipeline.Chrome
   alias MingaEditor.Renderer.Regions
-  alias MingaEditor.Frontend.Emit.Context, as: EmitContext
   alias MingaEditor.Frontend.Protocol.GUI.BoardCardPayload
   alias MingaEditor.Frontend.Protocol.GUI.BoardPayload
   alias MingaBoard.AgentActivation
@@ -461,8 +462,7 @@ defmodule MingaBoard.Shell do
     if BoardState.grid_view?(editor_state.shell_state) do
       render_board_grid(editor_state)
     else
-      # Zoomed into a card: render_buffer runs the full pipeline which includes
-      # Emit.emit → sync_swiftui_chrome, so no explicit chrome call is needed here.
+      # Zoomed into a card: render_buffer runs the full pipeline, including the core GUI adapter when a GUI frontend is active, so no explicit chrome call is needed here.
       MingaEditor.Renderer.render_buffer(editor_state)
     end
   end
@@ -474,16 +474,16 @@ defmodule MingaBoard.Shell do
     if gui? do
       # GUI: send the gui_board opcode so Swift shows BoardView.
       # Thread caches so fingerprint-based skipping works across frames.
-      ctx = EmitContext.from_editor_state(editor_state)
+      ui = %UI{board: BoardBuilder.build(gui_payload(editor_state))}
 
-      {_ctx, new_caches} =
-        MingaEditor.Frontend.Emit.GUI.sync_swiftui_chrome(
-          ctx,
-          nil,
-          nil,
-          editor_state.caches
-        )
+      {chrome_cmds, adapter_caches} =
+        Minga.Frontend.Adapter.GUI.encode_ui(ui, editor_state.caches.adapter_gui_caches)
 
+      if chrome_cmds != [] do
+        MingaEditor.Frontend.send_commands(editor_state.port_manager, chrome_cmds)
+      end
+
+      new_caches = %{editor_state.caches | adapter_gui_caches: adapter_caches}
       %{editor_state | caches: new_caches}
     else
       # TUI: render card grid as cell grid commands
