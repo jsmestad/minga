@@ -144,7 +144,8 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   @doc "Encodes a retained viewport delta with ordered ref-or-full row entries."
   @spec encode_viewport_delta(RenderWindow.t(), %{non_neg_integer() => non_neg_integer()}) ::
           {binary(), boolean()}
-  def encode_viewport_delta(%RenderWindow{} = window, previous_hashes) when is_map(previous_hashes) do
+  def encode_viewport_delta(%RenderWindow{} = window, previous_hashes)
+      when is_map(previous_hashes) do
     encode_rows_snapshot_delta(@op_gui_window_viewport_delta, window, previous_hashes)
   end
 
@@ -262,11 +263,33 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   end
 
   defp overlay_sections(%RenderWindow{} = sw) do
-    selection = encode_section(@section_wc_selection, IO.iodata_to_binary(encode_selection(sw.selection)))
-    search = encode_section(@section_wc_search, IO.iodata_to_binary(encode_search_matches(sw.search_matches)))
-    diagnostics = encode_section(@section_wc_diagnostics, IO.iodata_to_binary(encode_diagnostic_ranges(sw.diagnostic_ranges)))
-    highlights = encode_section(@section_wc_highlights, IO.iodata_to_binary(encode_document_highlights(sw.document_highlights)))
-    annotations = encode_section(@section_wc_annotations, IO.iodata_to_binary(encode_annotations(sw.annotations)))
+    selection =
+      encode_section(@section_wc_selection, IO.iodata_to_binary(encode_selection(sw.selection)))
+
+    search =
+      encode_section(
+        @section_wc_search,
+        IO.iodata_to_binary(encode_search_matches(sw.search_matches))
+      )
+
+    diagnostics =
+      encode_section(
+        @section_wc_diagnostics,
+        IO.iodata_to_binary(encode_diagnostic_ranges(sw.diagnostic_ranges))
+      )
+
+    highlights =
+      encode_section(
+        @section_wc_highlights,
+        IO.iodata_to_binary(encode_document_highlights(sw.document_highlights))
+      )
+
+    annotations =
+      encode_section(
+        @section_wc_annotations,
+        IO.iodata_to_binary(encode_annotations(sw.annotations))
+      )
+
     geometry = geometry_sections(encode_geometry(sw.geometry))
     cursorline = cursorline_sections(encode_cursorline_section(sw.cursorline, sw.rect))
 
