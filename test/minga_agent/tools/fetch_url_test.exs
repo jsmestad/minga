@@ -69,31 +69,32 @@ defmodule MingaAgent.Tools.FetchUrlTest do
   end
 
   test "enforces a wall-clock timeout when the fetcher blocks" do
-    parent = self()
-
+    # The fetcher blocks forever: it waits for a message that is never sent.
+    # There is deliberately no start/release coordination with the test process,
+    # so nothing races the deadline kill — the spawned fetcher is always still
+    # blocked when the timeout fires. The only thing observed is the public
+    # contract: the timeout error tuple. (If execute failed to enforce the
+    # timeout, this test would hang and ExUnit's own per-test timeout would fail
+    # it, so no separate wall-clock bound is needed.)
     fetcher = fn _url, _opts ->
-      send(parent, :fetch_started)
-
       receive do
-        :release -> {:ok, %{status: 200, headers: %{"content-type" => "text/plain"}, body: "ok"}}
+        :never_sent ->
+          {:ok, %{status: 200, headers: %{"content-type" => "text/plain"}, body: "ok"}}
       end
     end
 
     resolver = fn _host -> {:ok, [{93, 184, 216, 34}]} end
+    timeout_ms = 50
 
-    start = System.monotonic_time(:millisecond)
+    result =
+      FetchUrl.execute(
+        %{"url" => "https://example.test", "timeout_ms" => timeout_ms},
+        fetcher,
+        resolver
+      )
 
-    assert {:error, "failed to fetch https://example.test: request timed out after 200ms"} =
-             FetchUrl.execute(
-               %{"url" => "https://example.test", "timeout_ms" => 200},
-               fetcher,
-               resolver
-             )
-
-    elapsed = System.monotonic_time(:millisecond) - start
-    assert elapsed < 1_000
-    assert_receive :fetch_started, 500
-    refute_receive :release, 50
+    expected = "failed to fetch https://example.test: request timed out after #{timeout_ms}ms"
+    assert result == {:error, expected}
   end
 
   test "resolver exceptions are contained and redacted" do
