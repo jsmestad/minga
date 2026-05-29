@@ -2,6 +2,7 @@ defmodule Minga.RenderModel.UI.ExtensionPanelTest do
   use ExUnit.Case, async: true
 
   alias Minga.RenderModel.UI.ExtensionPanel
+  alias Minga.RenderModel.UI.ExtensionPanel.Content.Text
   alias Minga.RenderModel.UI.ExtensionPanel.Panel
 
   describe "%ExtensionPanel{}" do
@@ -19,12 +20,12 @@ defmodule Minga.RenderModel.UI.ExtensionPanelTest do
         position: :bottom,
         size: {:percent, 30},
         visible?: true,
-        content: [{:text, "Hello"}]
+        content: [%Text{text: "Hello"}]
       }
 
       model = %ExtensionPanel{panels: [panel]}
 
-      assert [%Panel{extension: "demo", title: "Status", content: [{:text, "Hello"}]}] =
+      assert [%Panel{extension: "demo", title: "Status", content: [%Text{text: "Hello"}]}] =
                model.panels
     end
   end

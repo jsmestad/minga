@@ -29,11 +29,41 @@ defmodule MingaEditor.RenderModel.UI.HoverPopupBuilder do
 
   @spec line_model(tuple()) :: Line.t()
   defp line_model({segments, line_type}) do
-    %Line{segments: Enum.map(segments, &segment_model/1), line_type: line_type}
+    %Line{segments: Enum.map(segments, &segment_model/1), line_type: line_type(line_type)}
   end
 
   @spec segment_model(tuple()) :: Segment.t()
-  defp segment_model({text, style}), do: %Segment{text: text, style: style}
+  defp segment_model({text, style}), do: %Segment{text: text, style: segment_style(style)}
+
+  @spec line_type(term()) :: Line.line_type()
+  defp line_type(type)
+       when type in [:text, :code, :header, :blockquote, :list_item, :rule, :empty],
+       do: type
+
+  defp line_type({:code_header, language}), do: {:code_header, language}
+  defp line_type(_type), do: :text
+
+  @spec segment_style(term()) :: Segment.style()
+  defp segment_style(style)
+       when style in [
+              :plain,
+              :bold,
+              :italic,
+              :bold_italic,
+              :code,
+              :code_block,
+              :header1,
+              :header2,
+              :header3,
+              :blockquote,
+              :list_bullet,
+              :rule
+            ],
+       do: style
+
+  defp segment_style({:code_content, language}), do: {:code_content, language}
+  defp segment_style({:syntax, %Minga.Core.Face{} = face}), do: {:syntax, face}
+  defp segment_style(_style), do: :plain
 
   @spec open_action_name(EditorHoverPopup.open_action() | nil) :: String.t() | nil
   defp open_action_name(nil), do: nil

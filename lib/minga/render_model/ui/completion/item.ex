@@ -3,7 +3,18 @@ defmodule Minga.RenderModel.UI.Completion.Item do
   Semantic completion popup item for GUI adapters.
   """
 
-  @type kind :: atom()
+  @type kind ::
+          :text
+          | :function
+          | :method
+          | :variable
+          | :field
+          | :module
+          | :keyword
+          | :snippet
+          | :constant
+          | :struct
+          | :enum
 
   @type t :: %__MODULE__{
           kind: kind(),

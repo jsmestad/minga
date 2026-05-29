@@ -41,11 +41,29 @@ defmodule MingaEditor.RenderModel.UI.CompletionBuilder do
   @spec item_model(EditingCompletion.item()) :: Item.t()
   defp item_model(item) do
     %Item{
-      kind: Map.get(item, :kind, :text),
+      kind: completion_kind(Map.get(item, :kind, :text)),
       label: Map.get(item, :label, ""),
       detail: Map.get(item, :detail, "") || ""
     }
   end
+
+  @spec completion_kind(atom()) :: Item.kind()
+  defp completion_kind(kind)
+       when kind in [
+              :function,
+              :method,
+              :variable,
+              :field,
+              :module,
+              :keyword,
+              :snippet,
+              :constant,
+              :struct,
+              :enum
+            ],
+       do: kind
+
+  defp completion_kind(_kind), do: :text
 
   @spec current_cursor_screen_pos(Context.t()) :: {non_neg_integer(), non_neg_integer()}
   defp current_cursor_screen_pos(ctx) do

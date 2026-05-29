@@ -5,6 +5,16 @@ defmodule Minga.Frontend.Adapter.GUI.ExtensionPanelEncoder do
   alias Minga.Frontend.Adapter.GUI.Wire
   alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.UI.ExtensionPanel
+  alias Minga.RenderModel.UI.ExtensionPanel.Content.KeyValue
+  alias Minga.RenderModel.UI.ExtensionPanel.Content.Progress
+  alias Minga.RenderModel.UI.ExtensionPanel.Content.Separator
+  alias Minga.RenderModel.UI.ExtensionPanel.Content.StyledRun
+  alias Minga.RenderModel.UI.ExtensionPanel.Content.StyledText
+  alias Minga.RenderModel.UI.ExtensionPanel.Content.Table
+  alias Minga.RenderModel.UI.ExtensionPanel.Content.Text
+  alias Minga.RenderModel.UI.ExtensionPanel.Content.Tree
+  alias Minga.RenderModel.UI.ExtensionPanel.Content.TreeNode
+  alias Minga.RenderModel.UI.ExtensionPanel.Content.Unknown
   alias Minga.RenderModel.UI.ExtensionPanel.Panel
 
   @op_gui_extension_panel Opcodes.gui_extension_panel()
@@ -22,8 +32,10 @@ defmodule Minga.Frontend.Adapter.GUI.ExtensionPanelEncoder do
 
   @spec encode_command(ExtensionPanel.t()) :: binary()
   def encode_command(%ExtensionPanel{} = model) do
-    panel_binaries = Enum.map(model.panels, &encode_panel/1)
-    payload = IO.iodata_to_binary([<<length(model.panels)::8>> | panel_binaries])
+    {panel_binaries, _remaining_budget} =
+      Wire.bounded_entries(model.panels, &encode_panel/1, Wire.max_u8(), Wire.max_u16() - 1)
+
+    payload = IO.iodata_to_binary([<<length(panel_binaries)::8>> | panel_binaries])
     <<@op_gui_extension_panel, byte_size(payload)::16, payload::binary>>
   end
 
@@ -32,121 +44,135 @@ defmodule Minga.Frontend.Adapter.GUI.ExtensionPanelEncoder do
 
   @spec encode_panel(Panel.t()) :: binary()
   defp encode_panel(%Panel{} = panel) do
-    ext = to_string(panel.extension)
-    panel_id = to_string(panel.panel_id)
-    title = panel.title
+    ext = Wire.utf8_prefix_bytes(panel.extension, Wire.max_u8())
+    panel_id = Wire.utf8_prefix_bytes(panel.panel_id, Wire.max_u8())
+    title = Wire.utf8_prefix_bytes(panel.title, Wire.max_u8())
     {size_type, size_val} = encode_size(panel.size)
     position = encode_position(panel.position)
     visible = if panel.visible?, do: 1, else: 0
-    blocks = encode_content_blocks(panel.content)
+    {blocks, block_count} = encode_content_blocks(panel.content)
 
     <<byte_size(ext)::8, ext::binary, byte_size(panel_id)::8, panel_id::binary,
       byte_size(title)::8, title::binary, position::8, size_type::8, size_val::8, visible::8,
-      length(panel.content)::8, blocks::binary>>
+      block_count::8, blocks::binary>>
   end
 
   @spec encode_size(Panel.size()) :: {non_neg_integer(), non_neg_integer()}
-  defp encode_size({:percent, n}), do: {0, min(n, 255)}
-  defp encode_size({:lines, n}), do: {1, min(n, 255)}
+  defp encode_size({:percent, n}), do: {0, Wire.clamp_u8(n)}
+  defp encode_size({:lines, n}), do: {1, Wire.clamp_u8(n)}
 
   @spec encode_position(Panel.position()) :: non_neg_integer()
   defp encode_position(:bottom), do: 0
   defp encode_position(:right), do: 1
   defp encode_position(:float), do: 2
 
-  @spec encode_content_blocks([Panel.content_block()]) :: binary()
+  @spec encode_content_blocks([Panel.content_block()]) :: {binary(), non_neg_integer()}
   defp encode_content_blocks(blocks) do
-    IO.iodata_to_binary(Enum.map(blocks, &encode_content_block/1))
+    {block_binaries, _remaining_budget} =
+      Wire.bounded_entries(blocks, &encode_content_block/1, Wire.max_u8(), Wire.max_u16())
+
+    {IO.iodata_to_binary(block_binaries), length(block_binaries)}
   end
 
   @spec encode_content_block(Panel.content_block()) :: binary()
-  defp encode_content_block({:text, text}) do
+  defp encode_content_block(%Text{text: text}) do
+    text = Wire.utf8_prefix_bytes(text, Wire.max_u16())
     <<0::8, byte_size(text)::16, text::binary>>
   end
 
-  defp encode_content_block({:styled_text, runs}) do
-    run_data =
-      IO.iodata_to_binary(
-        Enum.map(runs, fn {text, fg, attrs} ->
-          bold = if Keyword.get(attrs, :bold, false), do: 1, else: 0
-          italic = if Keyword.get(attrs, :italic, false), do: 1, else: 0
-          {r, g, b} = Wire.rgb(fg)
-          <<byte_size(text)::16, text::binary, r::8, g::8, b::8, bold::8, italic::8>>
-        end)
-      )
+  defp encode_content_block(%StyledText{runs: runs}) do
+    {run_binaries, _remaining_budget} =
+      Wire.bounded_entries(runs, &encode_styled_run/1, Wire.max_u8(), Wire.max_u16())
 
-    <<1::8, length(runs)::8, run_data::binary>>
+    run_data = IO.iodata_to_binary(run_binaries)
+    <<1::8, length(run_binaries)::8, run_data::binary>>
   end
 
-  defp encode_content_block({:table, %{columns: cols, rows: rows} = table}) do
-    selected = Map.get(table, :selected, 0xFFFF)
+  defp encode_content_block(%Table{} = table) do
+    columns = Enum.take(table.columns, Wire.max_u8())
+    rows = Enum.take(table.rows, Wire.max_u16())
 
     col_data =
-      IO.iodata_to_binary(Enum.map(cols, fn col -> <<byte_size(col)::16, col::binary>> end))
+      IO.iodata_to_binary(Enum.map(columns, fn col -> encode_string16(col) end))
 
     row_data =
       IO.iodata_to_binary(
         Enum.map(rows, fn row ->
-          IO.iodata_to_binary(
-            Enum.map(row, fn cell ->
-              cell_str = to_string(cell)
-              <<byte_size(cell_str)::16, cell_str::binary>>
-            end)
-          )
+          IO.iodata_to_binary(Enum.map(row, fn cell -> encode_string16(cell) end))
         end)
       )
 
-    <<2::8, length(cols)::8, length(rows)::16, selected::16, col_data::binary, row_data::binary>>
+    <<2::8, length(columns)::8, length(rows)::16, Wire.clamp_u16(table.selected)::16,
+      col_data::binary, row_data::binary>>
   end
 
-  defp encode_content_block({:key_value, pairs}) do
+  defp encode_content_block(%KeyValue{pairs: pairs}) do
+    pairs = Enum.take(pairs, Wire.max_u8())
+
     pair_data =
       IO.iodata_to_binary(
         Enum.map(pairs, fn {key, value} ->
-          key_string = to_string(key)
-          value_string = to_string(value)
-
-          <<byte_size(key_string)::16, key_string::binary, byte_size(value_string)::16,
-            value_string::binary>>
+          [encode_string16(key), encode_string16(value)]
         end)
       )
 
     <<3::8, length(pairs)::8, pair_data::binary>>
   end
 
-  defp encode_content_block({:separator}) do
+  defp encode_content_block(%Separator{}) do
     <<4::8>>
   end
 
-  defp encode_content_block({:progress, %{label: label, percent: percent}}) do
-    percent_int = round(percent * 100)
+  defp encode_content_block(%Progress{label: label, percent: percent}) do
+    label = Wire.utf8_prefix_bytes(label, Wire.max_u16())
+    percent_int = percent |> Kernel.*(100) |> round() |> Wire.clamp_u16()
     <<5::8, byte_size(label)::16, label::binary, percent_int::16>>
   end
 
-  defp encode_content_block({:tree, %{nodes: nodes}}) do
-    node_data = encode_tree_nodes(nodes)
+  defp encode_content_block(%Tree{nodes: nodes}) do
+    node_data = encode_tree_nodes(nodes, Wire.max_u16() - 2)
     <<6::8, byte_size(node_data)::16, node_data::binary>>
   end
 
-  defp encode_content_block(_unknown), do: <<255::8>>
+  defp encode_content_block(%Unknown{}), do: <<255::8>>
 
-  @spec encode_tree_nodes([map()]) :: binary()
-  defp encode_tree_nodes(nodes) do
-    count = length(nodes)
+  @spec encode_styled_run(StyledRun.t()) :: binary()
+  defp encode_styled_run(%StyledRun{} = run) do
+    text = Wire.utf8_prefix_bytes(run.text, Wire.max_u16())
+    bold = if Map.get(run.attrs, :bold?, false), do: 1, else: 0
+    italic = if Map.get(run.attrs, :italic?, false), do: 1, else: 0
+    {r, g, b} = Wire.rgb(run.fg)
+    <<byte_size(text)::16, text::binary, r::8, g::8, b::8, bold::8, italic::8>>
+  end
 
-    node_binaries =
-      IO.iodata_to_binary(
-        Enum.map(nodes, fn node ->
-          label = node.label
-          children = Map.get(node, :children, [])
-          expanded = if Map.get(node, :expanded, false), do: 1, else: 0
-          child_data = encode_tree_nodes(children)
+  @spec encode_tree_nodes([TreeNode.t()], non_neg_integer()) :: binary()
+  defp encode_tree_nodes(nodes, budget) do
+    {data, count} = encode_tree_node_list(nodes, budget)
+    IO.iodata_to_binary([<<count::8>>, data])
+  end
 
-          <<byte_size(label)::16, label::binary, expanded::8, length(children)::8,
-            child_data::binary>>
-        end)
-      )
+  @spec encode_tree_node_list([TreeNode.t()], non_neg_integer()) :: {binary(), non_neg_integer()}
+  defp encode_tree_node_list(nodes, budget) do
+    {node_binaries, _remaining_budget} =
+      Wire.bounded_entries(nodes, &encode_tree_node/1, Wire.max_u8(), max(budget - 1, 0))
 
-    <<count::8, node_binaries::binary>>
+    {IO.iodata_to_binary(node_binaries), length(node_binaries)}
+  end
+
+  @spec encode_tree_node(TreeNode.t()) :: binary()
+  defp encode_tree_node(%TreeNode{} = node) do
+    label = Wire.utf8_prefix_bytes(node.label, Wire.max_u16())
+    expanded = if node.expanded?, do: 1, else: 0
+    child_budget = max(Wire.max_u16() - byte_size(label) - 4, 0)
+    {child_nodes, child_count} = encode_tree_node_list(node.children, child_budget)
+    child_data = IO.iodata_to_binary([<<child_count::8>>, child_nodes])
+
+    <<byte_size(label)::16, label::binary, expanded::8, child_count::8, child_data::binary>>
+  end
+
+  @spec encode_string16(iodata()) :: binary()
+  defp encode_string16(value) do
+    bytes = Wire.utf8_prefix_bytes(value, Wire.max_u16())
+    <<byte_size(bytes)::16, bytes::binary>>
   end
 end

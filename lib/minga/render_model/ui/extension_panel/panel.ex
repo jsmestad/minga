@@ -9,15 +9,10 @@ defmodule Minga.RenderModel.UI.ExtensionPanel.Panel do
   @typedoc "Panel size requested by the render model."
   @type size :: {:percent, 1..100} | {:lines, pos_integer()}
 
-  @typedoc "One semantic content block in an extension panel."
-  @type content_block ::
-          {:text, String.t()}
-          | {:styled_text, [{String.t(), non_neg_integer(), keyword()}]}
-          | {:table, map()}
-          | {:key_value, [{String.t(), String.t()}]}
-          | {:separator}
-          | {:progress, map()}
-          | {:tree, map()}
+  alias Minga.RenderModel.UI.ExtensionPanel.Content
+
+  @typedoc "One normalized semantic content block in an extension panel."
+  @type content_block :: Content.t()
 
   @type t :: %__MODULE__{
           extension: String.t(),

@@ -3,7 +3,7 @@ defmodule Minga.RenderModel.UI.ExtensionOverlay.Entry do
   One extension-owned overlay positioned in a GUI window.
   """
 
-  @type shape :: :cursor | :cursor_with_label | :label | :indicator | atom()
+  @type shape :: :cursor | :cursor_with_label | :label | :indicator
 
   @type t :: %__MODULE__{
           extension: String.t(),

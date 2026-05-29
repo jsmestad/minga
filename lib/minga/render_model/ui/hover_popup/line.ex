@@ -5,7 +5,15 @@ defmodule Minga.RenderModel.UI.HoverPopup.Line do
 
   alias Minga.RenderModel.UI.HoverPopup.Segment
 
-  @type line_type :: atom() | {atom(), term()}
+  @type line_type ::
+          :text
+          | :code
+          | {:code_header, term()}
+          | :header
+          | :blockquote
+          | :list_item
+          | :rule
+          | :empty
 
   @type t :: %__MODULE__{
           segments: [Segment.t()],

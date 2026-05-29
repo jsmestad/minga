@@ -53,7 +53,7 @@ defmodule MingaEditor.RenderModel.UI.ExtensionOverlayBuilder do
             window_id: win_id,
             row: row,
             col: col,
-            shape: overlay.shape,
+            shape: overlay_shape(overlay.shape),
             fg: Map.get(style, :fg, 0x51AFEF),
             opacity: Map.get(style, :opacity, 102),
             content: overlay.content
@@ -68,4 +68,10 @@ defmodule MingaEditor.RenderModel.UI.ExtensionOverlayBuilder do
   end
 
   defp maybe_overlay_entry(_overlay, _window, _win_id, _win_layout), do: []
+
+  @spec overlay_shape(term()) :: Entry.shape()
+  defp overlay_shape(shape) when shape in [:cursor, :cursor_with_label, :label, :indicator],
+    do: shape
+
+  defp overlay_shape(_shape), do: :indicator
 end

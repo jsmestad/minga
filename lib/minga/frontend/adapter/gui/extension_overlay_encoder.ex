@@ -22,8 +22,10 @@ defmodule Minga.Frontend.Adapter.GUI.ExtensionOverlayEncoder do
 
   @spec encode_command(ExtensionOverlay.t()) :: binary()
   def encode_command(%ExtensionOverlay{} = model) do
-    overlay_binaries = Enum.map(model.entries, &encode_entry/1)
-    payload = IO.iodata_to_binary([<<length(model.entries)::8>> | overlay_binaries])
+    {overlay_binaries, _remaining_budget} =
+      Wire.bounded_entries(model.entries, &encode_entry/1, Wire.max_u8(), Wire.max_u16() - 1)
+
+    payload = IO.iodata_to_binary([<<length(overlay_binaries)::8>> | overlay_binaries])
     <<@op_gui_extension_overlay, byte_size(payload)::16, payload::binary>>
   end
 
@@ -32,15 +34,16 @@ defmodule Minga.Frontend.Adapter.GUI.ExtensionOverlayEncoder do
 
   @spec encode_entry(Entry.t()) :: binary()
   defp encode_entry(%Entry{} = entry) do
-    ext_name = to_string(entry.extension)
-    oid = to_string(entry.overlay_id)
-    content = entry.content
+    ext_name = Wire.utf8_prefix_bytes(to_string(entry.extension), Wire.max_u8())
+    oid = Wire.utf8_prefix_bytes(to_string(entry.overlay_id), Wire.max_u8())
+    content = Wire.utf8_prefix_bytes(entry.content, Wire.max_u16())
     {r, g, b} = Wire.rgb(entry.fg)
     shape = overlay_shape_byte(entry.shape)
 
     <<byte_size(ext_name)::8, ext_name::binary, byte_size(oid)::8, oid::binary,
-      entry.window_id::16, entry.row::16, entry.col::16, shape::8, r::8, g::8, b::8,
-      entry.opacity::8, byte_size(content)::16, content::binary>>
+      Wire.clamp_u16(entry.window_id)::16, Wire.clamp_u16(entry.row)::16,
+      Wire.clamp_u16(entry.col)::16, shape::8, r::8, g::8, b::8, Wire.clamp_u8(entry.opacity)::8,
+      byte_size(content)::16, content::binary>>
   end
 
   @spec overlay_shape_byte(Entry.shape()) :: non_neg_integer()
