@@ -49,22 +49,23 @@ defmodule Minga.Extension.CompileCache do
 
   def load_or_compile(root, files, opts) when is_binary(root) and is_list(files) do
     if Keyword.get(opts, :enabled, enabled?()) do
-      case content_key(root, files) do
-        {:ok, key} ->
-          cache_root = Keyword.get(opts, :cache_dir, default_cache_dir())
-          ext_dir = Path.join(cache_root, ext_id(root))
-          dir = Path.join(ext_dir, key)
-
-          case load_from_cache(dir) do
-            {:ok, modules} -> {:ok, %{modules: modules, diagnostics: [], source: :cache}}
-            :miss -> compile_and_cache(files, ext_dir, dir)
-          end
-
-        {:error, reason} ->
-          {:error, reason}
-      end
+      load_cached(root, files, opts)
     else
       compile_in_memory(files)
+    end
+  end
+
+  @spec load_cached(String.t(), [String.t()], keyword()) :: result()
+  defp load_cached(root, files, opts) do
+    with {:ok, key} <- content_key(root, files) do
+      cache_root = Keyword.get(opts, :cache_dir, default_cache_dir())
+      ext_dir = Path.join(cache_root, ext_id(root))
+      dir = Path.join(ext_dir, key)
+
+      case load_from_cache(dir) do
+        {:ok, modules} -> {:ok, %{modules: modules, diagnostics: [], source: :cache}}
+        :miss -> compile_and_cache(files, ext_dir, dir)
+      end
     end
   end
 
