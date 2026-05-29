@@ -49,16 +49,19 @@ defmodule Minga.Extension.CompileCache do
 
   def load_or_compile(root, files, opts) when is_binary(root) and is_list(files) do
     if Keyword.get(opts, :enabled, enabled?()) do
-      cache_root = Keyword.get(opts, :cache_dir, default_cache_dir())
-      ext_dir = Path.join(cache_root, ext_id(root))
-      dir = Path.join(ext_dir, content_key(root, files))
+      case content_key(root, files) do
+        {:ok, key} ->
+          cache_root = Keyword.get(opts, :cache_dir, default_cache_dir())
+          ext_dir = Path.join(cache_root, ext_id(root))
+          dir = Path.join(ext_dir, key)
 
-      case load_from_cache(dir) do
-        {:ok, modules} ->
-          {:ok, %{modules: modules, diagnostics: [], source: :cache}}
+          case load_from_cache(dir) do
+            {:ok, modules} -> {:ok, %{modules: modules, diagnostics: [], source: :cache}}
+            :miss -> compile_and_cache(files, ext_dir, dir)
+          end
 
-        :miss ->
-          compile_and_cache(files, ext_dir, dir)
+        {:error, reason} ->
+          {:error, reason}
       end
     else
       compile_in_memory(files)
@@ -199,8 +202,9 @@ defmodule Minga.Extension.CompileCache do
   end
 
   # Content + toolchain hash. Relative paths keep the key stable regardless of
-  # where the extension dir lives on disk.
-  @spec content_key(String.t(), [String.t()]) :: String.t()
+  # where the extension dir lives on disk. Returns an error (rather than raising)
+  # if a source file vanished between globbing and reading.
+  @spec content_key(String.t(), [String.t()]) :: {:ok, String.t()} | {:error, String.t()}
   defp content_key(root, files) do
     expanded_root = Path.expand(root)
 
@@ -208,12 +212,17 @@ defmodule Minga.Extension.CompileCache do
       files
       |> Enum.sort()
       |> Enum.flat_map(fn file ->
-        [Path.relative_to(file, expanded_root), "\0", File.read!(file), "\0"]
+        case File.read(file) do
+          {:ok, content} -> [Path.relative_to(file, expanded_root), "\0", content, "\0"]
+          {:error, reason} -> throw({:read_error, file, reason})
+        end
       end)
 
-    :sha256
-    |> :crypto.hash([version_tag(), "\0" | payload])
-    |> Base.url_encode64(padding: false)
+    digest = :crypto.hash(:sha256, [version_tag(), "\0" | payload])
+    {:ok, Base.url_encode64(digest, padding: false)}
+  catch
+    {:read_error, file, reason} ->
+      {:error, "could not read extension source #{file}: #{inspect(reason)}"}
   end
 
   # Beams are tied to the toolchain *and* to minga itself: an extension compiles

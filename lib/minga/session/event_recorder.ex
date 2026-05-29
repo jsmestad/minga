@@ -273,7 +273,7 @@ defmodule Minga.Session.EventRecorder do
   @spec run_health_check(String.t(), :quick | :full) ::
           :healthy | {:corrupt, [String.t()]} | {:check_failed, term()}
   defp run_health_check(path, mode) do
-    case Store.open(path) do
+    case Store.open_readonly(path) do
       {:ok, db} ->
         result = Store.integrity_check(db, mode)
         Store.close(db)
