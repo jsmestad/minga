@@ -813,8 +813,14 @@ defmodule MingaEditor.Commands.FileTree do
     case EditorState.find_buffer_by_path(state, path) do
       nil ->
         case Commands.start_buffer(path, EditorState.options_server(state)) do
-          {:ok, pid} -> BufferRegistry.do_file_tree_open(state, pid, path, tree)
-          {:error, _} -> state
+          {:ok, pid} ->
+            BufferRegistry.do_file_tree_open(state, pid, path, tree)
+
+          {:error, :binary_file} ->
+            EditorState.set_status(state, "Cannot open binary file: #{Path.basename(path)}")
+
+          {:error, _} ->
+            EditorState.set_status(state, "Cannot open: #{Path.basename(path)}")
         end
 
       idx ->
