@@ -329,13 +329,16 @@ defmodule Minga.Frontend.Adapter.GUI do
           RenderModel.Window.t()
         ) :: Caches.t()
   defp put_window_delta_pending(%Caches{} = caches, window_id, content_fp, overlay_fp, window) do
-    caches = put_window_fingerprints(caches, window_id, content_fp, overlay_fp, window)
-
-    %{
+    caches = %{
       caches
-      | pending_window_content_delta_fps:
+      | last_window_fps: Map.put(caches.last_window_fps, window_id, content_fp),
+        last_window_content_fps: Map.put(caches.last_window_content_fps, window_id, content_fp),
+        last_window_overlay_fps: Map.put(caches.last_window_overlay_fps, window_id, overlay_fp),
+        pending_window_content_delta_fps:
           Map.put(caches.pending_window_content_delta_fps, window_id, content_fp)
     }
+
+    put_window_snapshot(caches, window_id, window)
   end
 
   @spec put_window_snapshot(Caches.t(), non_neg_integer(), RenderModel.Window.t() | nil) ::

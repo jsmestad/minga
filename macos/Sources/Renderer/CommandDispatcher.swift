@@ -346,7 +346,7 @@ final class CommandDispatcher {
 
         case .guiWindowViewportDelta(let delta), .guiWindowRowsDelta(let delta):
             guard let current = guiState.windowContents[delta.windowId] else { break }
-            guard current.windowId == delta.windowId, current.contentEpoch == delta.contentEpoch else { break }
+            guard current.contentEpoch == delta.contentEpoch else { break }
             guard let updated = current.applyingRowsDelta(delta) else {
                 guiState.windowContents.removeValue(forKey: delta.windowId)
                 break
