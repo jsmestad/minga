@@ -12,7 +12,6 @@ env:
   ELIXIR_VERSION: "1.19.5"
   OTP_VERSION: "28.4.1"
   ZIG_VERSION: "0.16.0"
-  BURRITO_ZIG_VERSION: "0.15.2"
 
 jobs:
   # ── Gate: validate tag matches mix.exs release version ────────────────
@@ -150,16 +149,11 @@ jobs:
           restore-keys: release-deps-${{ runner.os }}-${{ runner.arch }}-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-
 
       - run: mix deps.get --only prod
-      - name: Compile with project Zig
+      - name: Compile
         run: mix compile
 
-      - name: Switch to Burrito Zig
-        uses: mlugg/setup-zig@v2
-        with:
-          version: ${{ env.BURRITO_ZIG_VERSION }}
-
       - name: Build Burrito release
-        run: mix release minga --no-compile
+        run: mix release minga
 
       - name: Check release contents
         run: scripts/check-release-contents _build/prod/rel/minga
