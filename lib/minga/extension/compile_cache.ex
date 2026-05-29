@@ -18,12 +18,17 @@ defmodule Minga.Extension.CompileCache do
   miss. After a successful compile we prune the extension's other (stale) keys
   so the cache holds one entry per extension.
 
-  Beams are toolchain-specific, so the key includes the Elixir and ERTS
-  versions: a runtime upgrade invalidates every entry automatically.
+  Beams are toolchain- and minga-specific, so the key also includes the Elixir
+  and ERTS versions and minga's own application version. A runtime upgrade or a
+  minga release (which bumps `:minga`'s version) invalidates every entry
+  automatically, so an extension compiled against an older minga API is never
+  loaded against a newer one.
 
-  Caching can be disabled with `config :minga, extension_compile_cache: false`
-  (tests do this to stay hermetic), in which case compilation falls back to the
-  previous in-memory behaviour.
+  Caching can be disabled with `config :minga, extension_compile_cache: false`,
+  which falls back to the previous in-memory behaviour. Dev and test disable it:
+  dev so that in-progress edits to minga's own modules always recompile
+  extensions (no stale-beam surprises during hot-reload), and test for
+  hermeticity.
   """
 
   @type result ::
@@ -211,9 +216,15 @@ defmodule Minga.Extension.CompileCache do
     |> Base.url_encode64(padding: false)
   end
 
+  # Beams are tied to the toolchain *and* to minga itself: an extension compiles
+  # against minga's modules, so a minga build that changes an extension-facing API
+  # must invalidate cached extension beams even when the extension source is
+  # unchanged. Releases bump :minga's version, which busts the cache here. (Dev
+  # disables the cache entirely so in-progress minga edits always recompile.)
   @spec version_tag() :: String.t()
   defp version_tag do
-    "elixir-#{System.version()}-erts-#{:erlang.system_info(:version)}"
+    minga_vsn = to_string(Application.spec(:minga, :vsn) || "0")
+    "minga-#{minga_vsn}-elixir-#{System.version()}-erts-#{:erlang.system_info(:version)}"
   end
 
   @spec enabled?() :: boolean()
