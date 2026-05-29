@@ -26,6 +26,10 @@ defmodule MingaEditor.Frontend.Emit.TUI do
   changes that affect content styling (visual selection, search highlights).
   """
 
+  alias Minga.Core.Face
+  alias Minga.Core.Unicode
+  alias Minga.Frontend.Adapter.TUI.WindowAdapter
+  alias Minga.RenderModel
   alias MingaEditor.DisplayList
   alias MingaEditor.DisplayList.{Frame, Overlay, WindowFrame}
   alias MingaEditor.Layout
@@ -38,19 +42,30 @@ defmodule MingaEditor.Frontend.Emit.TUI do
 
   @typedoc "Scroll delta info for one window."
   @type scroll_delta :: %{
-          win_id: pos_integer(),
-          delta: integer(),
-          content_rect: Layout.rect()
+          required(:win_id) => pos_integer(),
+          required(:delta) => integer(),
+          required(:content_rect) => Layout.rect(),
+          optional(:redraw_rows) => [non_neg_integer()]
         }
 
   # Maximum viewport delta for scroll region optimization.
   @max_scroll_delta 3
 
   @doc """
-  Builds protocol command binaries from a frame for the TUI renderer.
+  Builds protocol command binaries from a render model for the TUI renderer.
 
-  Detects scroll regions from tracking state and uses scroll region
-  optimization when possible, otherwise does a full redraw.
+  Detects scroll regions from tracking state and uses scroll region optimization when possible, otherwise does a full redraw. Buffer-window output comes from `Minga.RenderModel`; the legacy frame supplies TUI chrome until the chrome adapter is fully semantic.
+  """
+  @spec build_commands(RenderModel.t(), Frame.t(), ctx(), Caches.t()) :: [binary()]
+  def build_commands(%RenderModel{} = render_model, %Frame{} = frame, ctx, caches) do
+    scroll_deltas = detect_scroll_regions(ctx, caches)
+    build_commands_from_deltas(render_model, frame, ctx, scroll_deltas)
+  end
+
+  @doc """
+  Builds protocol command binaries from a frame for legacy callers.
+
+  Production TUI emit passes a `Minga.RenderModel`; this arity remains for focused tests and compatibility fallbacks.
   """
   @spec build_commands(Frame.t(), ctx(), Caches.t()) :: [binary()]
   def build_commands(frame, ctx, caches) do
@@ -59,10 +74,52 @@ defmodule MingaEditor.Frontend.Emit.TUI do
   end
 
   @doc """
+  Builds protocol commands from a render model, compatibility frame, and pre-computed scroll deltas.
+
+  When `scroll_deltas` is nil, performs a full redraw with model-derived buffer windows. When scroll deltas are present, sends scroll_region commands plus newly exposed model-derived window rows and compatibility chrome.
+  """
+  @spec build_commands_from_deltas(RenderModel.t(), Frame.t(), ctx(), [scroll_delta()] | nil) :: [
+          binary()
+        ]
+  def build_commands_from_deltas(%RenderModel{windows: []}, %Frame{} = frame, _ctx, scroll_deltas) do
+    build_commands_from_deltas(frame, scroll_deltas)
+  end
+
+  def build_commands_from_deltas(%RenderModel{} = render_model, %Frame{} = frame, ctx, nil) do
+    build_full_redraw_from_model(render_model, frame, ctx)
+  end
+
+  def build_commands_from_deltas(
+        %RenderModel{} = render_model,
+        %Frame{} = frame,
+        ctx,
+        scroll_deltas
+      ) do
+    scroll_cmds = build_scroll_commands(scroll_deltas)
+
+    new_content_draws =
+      collect_redraw_row_clear_draws(scroll_deltas) ++
+        collect_new_model_window_draws(render_model, ctx, scroll_deltas)
+
+    chrome_draws = collect_chrome_draws(frame) ++ collect_model_window_legacy_draws(frame)
+    overlay_draws = collect_overlay_draws(frame)
+
+    scroll_cmds ++
+      frame.regions ++
+      DisplayList.draws_to_commands(chrome_draws) ++
+      DisplayList.draws_to_commands(new_content_draws) ++
+      DisplayList.draws_to_commands(overlay_draws) ++
+      [
+        Protocol.encode_cursor_shape(frame.cursor.shape),
+        Protocol.encode_cursor(frame.cursor.row, frame.cursor.col),
+        Protocol.encode_batch_end()
+      ]
+  end
+
+  @doc """
   Builds protocol commands from a frame and pre-computed scroll deltas.
 
-  When `scroll_deltas` is nil, performs a full redraw via `DisplayList.to_commands/1`.
-  When scroll deltas are present, sends scroll_region commands + partial content + chrome.
+  When `scroll_deltas` is nil, performs a full redraw via `DisplayList.to_commands/1`. When scroll deltas are present, sends scroll_region commands plus partial content and chrome.
   """
   @spec build_commands_from_deltas(Frame.t(), [scroll_delta()] | nil) :: [binary()]
   def build_commands_from_deltas(frame, nil) do
@@ -71,7 +128,11 @@ defmodule MingaEditor.Frontend.Emit.TUI do
 
   def build_commands_from_deltas(frame, scroll_deltas) do
     scroll_cmds = build_scroll_commands(scroll_deltas)
-    new_content_draws = collect_new_content_draws(frame, scroll_deltas)
+
+    new_content_draws =
+      collect_redraw_row_clear_draws(scroll_deltas) ++
+        collect_new_content_draws(frame, scroll_deltas)
+
     chrome_draws = collect_chrome_draws(frame)
     overlay_draws = collect_overlay_draws(frame)
 
@@ -85,6 +146,141 @@ defmodule MingaEditor.Frontend.Emit.TUI do
         Protocol.encode_cursor(frame.cursor.row, frame.cursor.col),
         Protocol.encode_batch_end()
       ]
+  end
+
+  @spec build_full_redraw_from_model(RenderModel.t(), Frame.t(), ctx()) :: [binary()]
+  defp build_full_redraw_from_model(%RenderModel{} = render_model, %Frame{} = frame, ctx) do
+    splash_draws = frame.splash || []
+    before_windows = frame.tab_bar ++ frame.file_tree ++ frame.agentic_view
+
+    after_windows =
+      frame.separators ++
+        frame.status_bar ++ frame.agent_panel ++ frame.minibuffer ++ splash_draws
+
+    legacy_window_draws = collect_model_window_legacy_draws(frame)
+    overlay_draws = collect_overlay_draws(frame)
+
+    [Protocol.encode_clear()] ++
+      frame.regions ++
+      DisplayList.draws_to_commands(before_windows) ++
+      model_window_commands(render_model, ctx) ++
+      DisplayList.draws_to_commands(legacy_window_draws) ++
+      DisplayList.draws_to_commands(after_windows) ++
+      DisplayList.draws_to_commands(overlay_draws) ++
+      [
+        Protocol.encode_cursor_shape(frame.cursor.shape),
+        Protocol.encode_cursor(frame.cursor.row, frame.cursor.col),
+        Protocol.encode_batch_end()
+      ]
+  end
+
+  @spec model_window_commands(RenderModel.t(), ctx()) :: [binary()]
+  defp model_window_commands(%RenderModel{} = render_model, ctx) do
+    render_model
+    |> model_window_draws(ctx)
+    |> DisplayList.draws_to_commands()
+  end
+
+  @spec collect_new_model_window_draws(RenderModel.t(), ctx(), [scroll_delta()]) :: [
+          DisplayList.draw()
+        ]
+  defp collect_new_model_window_draws(%RenderModel{} = render_model, ctx, scroll_deltas) do
+    ranges = redraw_ranges(scroll_deltas)
+
+    render_model
+    |> model_window_draws(ctx)
+    |> filter_draws_by_ranges(ranges)
+  end
+
+  @spec collect_redraw_row_clear_draws([scroll_delta()]) :: [DisplayList.draw()]
+  defp collect_redraw_row_clear_draws(scroll_deltas) do
+    Enum.flat_map(scroll_deltas, &redraw_row_clear_draws/1)
+  end
+
+  @spec redraw_row_clear_draws(scroll_delta()) :: [DisplayList.draw()]
+  defp redraw_row_clear_draws(%{content_rect: {_top, col, width, _height}, redraw_rows: rows})
+       when is_list(rows) and width > 0 do
+    text = String.duplicate(" ", width)
+
+    rows
+    |> Enum.uniq()
+    |> Enum.map(fn row -> DisplayList.draw(row, col, text, Face.new()) end)
+  end
+
+  defp redraw_row_clear_draws(_delta), do: []
+
+  @spec model_window_draws(RenderModel.t(), ctx()) :: [DisplayList.draw()]
+  defp model_window_draws(%RenderModel{windows: windows}, ctx) do
+    opts = window_adapter_opts(ctx)
+
+    windows
+    |> Enum.flat_map(&WindowAdapter.to_screen_cells(&1, opts))
+    |> cells_to_draws()
+  end
+
+  @spec collect_model_window_legacy_draws(Frame.t()) :: [DisplayList.draw()]
+  defp collect_model_window_legacy_draws(%Frame{} = frame) do
+    Enum.flat_map(frame.windows, fn
+      %WindowFrame{window_model: %{content_kind: :agent_chat}, lines: lines} ->
+        DisplayList.layer_to_draws(lines)
+
+      %WindowFrame{} ->
+        []
+    end)
+  end
+
+  @spec cells_to_draws([WindowAdapter.cell()]) :: [DisplayList.draw()]
+  defp cells_to_draws(cells) do
+    cells
+    |> Enum.sort_by(fn %{row: row, col: col} -> {row, col} end)
+    |> Enum.reduce([], &append_cell_draw/2)
+    |> Enum.reverse()
+  end
+
+  @spec append_cell_draw(WindowAdapter.cell(), [DisplayList.draw()]) :: [DisplayList.draw()]
+  defp append_cell_draw(%{row: row, col: col, text: text, face: %Face{} = face}, [
+         {row, start_col, existing_text, %Face{} = face} | rest
+       ]) do
+    expected_col = start_col + Unicode.display_width(existing_text)
+
+    if col == expected_col do
+      [{row, start_col, existing_text <> text, face} | rest]
+    else
+      [DisplayList.draw(row, col, text, face), {row, start_col, existing_text, face} | rest]
+    end
+  end
+
+  defp append_cell_draw(%{row: row, col: col, text: text, face: %Face{} = face}, acc) do
+    [DisplayList.draw(row, col, text, face) | acc]
+  end
+
+  @spec filter_draws_by_ranges([DisplayList.draw()], [Range.t()]) :: [DisplayList.draw()]
+  defp filter_draws_by_ranges(draws, ranges) do
+    Enum.filter(draws, fn {row, _col, _text, _style} ->
+      Enum.any?(ranges, fn range -> row in range end)
+    end)
+  end
+
+  @spec window_adapter_opts(ctx()) :: keyword()
+  defp window_adapter_opts(%Context{theme: theme}) do
+    [
+      selection_bg: theme.editor.selection_bg || 0x3E4451,
+      search_bg: theme.search.highlight_bg,
+      current_search_bg: theme.search.current_bg,
+      gutter_fg: theme.gutter.fg,
+      gutter_current_fg: theme.gutter.current_fg,
+      gutter_error_fg: theme.gutter.error_fg,
+      gutter_warning_fg: theme.gutter.warning_fg,
+      gutter_info_fg: theme.gutter.info_fg,
+      gutter_hint_fg: theme.gutter.hint_fg,
+      gutter_fold_fg: theme.gutter.fold_fg,
+      indent_guide_fg: theme.editor.indent_guide_fg || theme.gutter.fg,
+      indent_guide_active_fg: theme.editor.indent_guide_active_fg || theme.gutter.current_fg,
+      git_added_fg: theme.git.added_fg,
+      git_modified_fg: theme.git.modified_fg,
+      git_deleted_fg: theme.git.deleted_fg,
+      tilde_fg: theme.editor.tilde_fg
+    ]
   end
 
   # ── Scroll region detection ──────────────────────────────────────────────
@@ -138,12 +334,22 @@ defmodule MingaEditor.Frontend.Emit.TUI do
     prev_tops = caches.emit_prev_viewport_tops
     prev_rects = caches.emit_prev_content_rects
     prev_gutter_ws = caches.emit_prev_gutter_ws
+    prev_cursor_lines = caches.emit_prev_cursor_lines
 
-    if prev_tops == %{} or prev_rects == %{} or prev_gutter_ws == %{} do
+    if prev_tops == %{} or prev_rects == %{} or prev_gutter_ws == %{} or prev_cursor_lines == %{} do
       nil
     else
       layout = ctx.layout
-      collect_scroll_deltas(ctx, layout, prev_tops, prev_rects, prev_gutter_ws, caches)
+
+      collect_scroll_deltas(
+        ctx,
+        layout,
+        prev_tops,
+        prev_rects,
+        prev_gutter_ws,
+        prev_cursor_lines,
+        caches
+      )
     end
   end
 
@@ -153,9 +359,18 @@ defmodule MingaEditor.Frontend.Emit.TUI do
           %{pos_integer() => non_neg_integer()},
           %{pos_integer() => Layout.rect()},
           %{pos_integer() => non_neg_integer()},
+          %{pos_integer() => non_neg_integer()},
           Caches.t()
         ) :: [scroll_delta()] | nil
-  defp collect_scroll_deltas(ctx, layout, prev_tops, prev_rects, prev_gutter_ws, caches) do
+  defp collect_scroll_deltas(
+         ctx,
+         layout,
+         prev_tops,
+         prev_rects,
+         prev_gutter_ws,
+         prev_cursor_lines,
+         caches
+       ) do
     current_win_ids = MapSet.new(Map.keys(layout.window_layouts))
     prev_win_ids = MapSet.new(Map.keys(prev_tops))
 
@@ -168,7 +383,8 @@ defmodule MingaEditor.Frontend.Emit.TUI do
         tops: prev_tops,
         rects: prev_rects,
         gutter_ws: prev_gutter_ws,
-        buf_versions: prev_versions
+        buf_versions: prev_versions,
+        cursor_lines: prev_cursor_lines
       }
 
       deltas =
@@ -221,6 +437,9 @@ defmodule MingaEditor.Frontend.Emit.TUI do
     prev_version = Map.get(prev.buf_versions, win_id)
     current_version = window.render_cache.last_buf_version
 
+    prev_cursor_line = Map.get(prev.cursor_lines, win_id)
+    current_cursor_line = window.render_cache.last_cursor_line
+
     classify_scroll_delta(
       %{
         prev_rect: prev_rect,
@@ -230,7 +449,9 @@ defmodule MingaEditor.Frontend.Emit.TUI do
         prev_top: prev_top,
         cur_top: current_top,
         prev_ver: prev_version,
-        cur_ver: current_version
+        cur_ver: current_version,
+        prev_cursor_line: prev_cursor_line,
+        cur_cursor_line: current_cursor_line
       },
       win_id,
       acc
@@ -255,9 +476,56 @@ defmodule MingaEditor.Frontend.Emit.TUI do
   defp classify_scroll_delta(%{prev_ver: pv, cur_ver: cv}, _, _) when pv != cv,
     do: {:halt, :content_changed}
 
-  defp classify_scroll_delta(%{cur_rect: rect, prev_top: pt, cur_top: ct}, win_id, acc) do
-    {:cont, [%{win_id: win_id, delta: ct - pt, content_rect: rect} | acc]}
+  defp classify_scroll_delta(%{cur_rect: rect, prev_top: pt, cur_top: ct} = params, win_id, acc) do
+    {:cont,
+     [
+       %{
+         win_id: win_id,
+         delta: ct - pt,
+         content_rect: rect,
+         redraw_rows: cursorline_redraw_rows(params)
+       }
+       | acc
+     ]}
   end
+
+  @spec cursorline_redraw_rows(map()) :: [non_neg_integer()]
+  defp cursorline_redraw_rows(%{cur_top: cur_top, prev_top: prev_top} = params) do
+    delta = cur_top - prev_top
+
+    [
+      shifted_previous_cursorline_row(params, delta),
+      cursorline_screen_row(params.cur_rect, params.cur_cursor_line, cur_top)
+    ]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq()
+  end
+
+  @spec shifted_previous_cursorline_row(map(), integer()) :: non_neg_integer() | nil
+  defp shifted_previous_cursorline_row(params, delta) do
+    case cursorline_screen_row(params.prev_rect, params.prev_cursor_line, params.prev_top) do
+      nil -> nil
+      row -> keep_row_in_rect(row - delta, params.cur_rect)
+    end
+  end
+
+  @spec cursorline_screen_row(Layout.rect() | nil, term(), term()) :: non_neg_integer() | nil
+  defp cursorline_screen_row({row, _col, _width, height}, cursor_line, viewport_top)
+       when is_integer(cursor_line) and is_integer(viewport_top) do
+    rel = cursor_line - viewport_top
+
+    if rel >= 0 and rel < height do
+      row + rel
+    end
+  end
+
+  defp cursorline_screen_row(_rect, _cursor_line, _viewport_top), do: nil
+
+  @spec keep_row_in_rect(integer(), Layout.rect() | nil) :: non_neg_integer() | nil
+  defp keep_row_in_rect(row, {top, _col, _width, height}) when row >= top and row < top + height,
+    do: row
+
+  defp keep_row_in_rect(_row, _rect), do: nil
 
   # ── Command building helpers ─────────────────────────────────────────────
 
@@ -298,10 +566,10 @@ defmodule MingaEditor.Frontend.Emit.TUI do
 
   @spec collect_new_content_draws(Frame.t(), [scroll_delta()]) :: [DisplayList.draw()]
   defp collect_new_content_draws(frame, scroll_deltas) do
-    all_new_rows = Enum.map(scroll_deltas, &compute_new_rows/1)
+    rows_to_redraw = redraw_ranges(scroll_deltas)
 
     Enum.flat_map(frame.windows, fn wf ->
-      filter_window_draws_for_new_rows(wf, all_new_rows)
+      filter_window_draws_for_new_rows(wf, rows_to_redraw)
     end)
   end
 
@@ -319,6 +587,18 @@ defmodule MingaEditor.Frontend.Emit.TUI do
     else
       row..(row + abs(delta) - 1)
     end
+  end
+
+  @spec redraw_ranges([scroll_delta()]) :: [Range.t()]
+  defp redraw_ranges(scroll_deltas) do
+    Enum.flat_map(scroll_deltas, fn delta ->
+      [compute_new_rows(delta) | cursorline_redraw_ranges(Map.get(delta, :redraw_rows, []))]
+    end)
+  end
+
+  @spec cursorline_redraw_ranges([non_neg_integer()]) :: [Range.t()]
+  defp cursorline_redraw_ranges(rows) do
+    Enum.map(rows, fn row -> row..row end)
   end
 
   @spec filter_window_draws_for_new_rows(WindowFrame.t(), [Range.t()]) :: [DisplayList.draw()]

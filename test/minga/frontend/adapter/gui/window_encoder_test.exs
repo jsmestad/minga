@@ -250,6 +250,29 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
     assert decoded.cursorline == %{row: 6, bg_rgb: 0x112233}
   end
 
+  test "encodes blank gutter rows and removed diff signs" do
+    gutter = %Gutter{
+      window_id: 1,
+      content_row: 0,
+      content_col: 0,
+      content_height: 1,
+      is_active: true,
+      content_width: 80,
+      cursor_line: 0,
+      line_number_style: :absolute,
+      line_number_width: 2,
+      sign_col_width: 3,
+      entries: [%GutterEntry{buf_line: 0, display_type: :blank, sign_type: :git_removed}]
+    }
+
+    gutter_opcode = Opcodes.gui_gutter()
+    commands = WindowEncoder.encode(window(gutter: gutter))
+
+    assert <<^gutter_opcode, 3::8, 1::8, 11::16, _window::binary-size(11), 2::8, 7::16,
+             _config::binary-size(7), 3::8, 12::16, 1::16, 0::32, 5::8, 9::8, 0xFFFFFFFF::32>> =
+             List.last(commands)
+  end
+
   test "adapter re-emits per-frame gutter metadata when window content is cached" do
     model = window(gutter: gutter_model())
 

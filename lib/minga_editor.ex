@@ -1039,7 +1039,7 @@ defmodule MingaEditor do
       when name in [:font_family, :font_size, :font_weight, :font_ligatures] do
     state = %{state | font_size_override: nil}
     Startup.send_font_config(state)
-    state
+    EditorState.reset_frontend_render_state(state)
   end
 
   def apply_runtime_config_option(state, name, value)

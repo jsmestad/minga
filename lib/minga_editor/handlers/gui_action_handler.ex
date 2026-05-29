@@ -176,7 +176,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
     state = %{state | font_size_override: new_size}
     Startup.send_font_config(state)
-    state
+    EditorState.reset_frontend_render_state(state)
   end
 
   defp dispatch_action(%{shell_state: shell_state} = state, {:observatory_inspect, pid_string}) do

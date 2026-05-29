@@ -7,9 +7,13 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Core.WrapMap
+  alias MingaEditor.Agent.UIState
+  alias MingaEditor.Agent.View.PromptRenderWindow
+  alias MingaEditor.Agent.ViewContext
   alias MingaEditor.DisplayList.{Cursor, WindowFrame}
   alias MingaEditor.Layout
   alias MingaEditor.RenderPipeline
+  alias MingaEditor.RenderPipeline.AgentChatPrefetch
   alias MingaEditor.RenderPipeline.Content
   alias MingaEditor.RenderPipeline.Scroll
   alias MingaEditor.Renderer.Gutter
@@ -133,6 +137,52 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
       assert window.render_cache.last_gutter_w >= 0
       assert window.render_cache.last_line_count > 0
       assert window.render_cache.last_buf_version >= 0
+    end
+
+    test "agent prompt window receives parent reset epoch and full-refresh" do
+      state = gui_state(content: "regular buffer")
+      {:ok, agent_buf} = BufferProcess.start_link(content: "agent line")
+      win_id = state.workspace.windows.active
+      window = Window.new_agent_chat(win_id, agent_buf, 24, 80)
+      windows = %{state.workspace.windows | map: %{win_id => window}}
+      agent_ui = UIState.new() |> UIState.ensure_prompt_buffer()
+      state = %{state | workspace: %{state.workspace | windows: windows, agent_ui: agent_ui}}
+      layout = Layout.put(state) |> Layout.get()
+      win_layout = Map.fetch!(layout.window_layouts, win_id)
+      {_row, _col, content_width, _height} = win_layout.content
+      gutter_w = Gutter.total_width(Viewport.gutter_width(1))
+      snapshot = BufferProcess.render_snapshot(agent_buf, 0, 1)
+
+      prefetch = %AgentChatPrefetch{
+        win_id: win_id,
+        window: window,
+        viewport: window.viewport,
+        cursor_line: 0,
+        cursor_byte_col: 0,
+        cursor_col: 0,
+        first_line: 0,
+        snapshot: snapshot,
+        line_number_style: :absolute,
+        gutter_w: gutter_w,
+        content_w: max(content_width - gutter_w, 1),
+        buf_version: snapshot.version
+      }
+
+      {[frame], _cursor, _state} =
+        Content.build_agent_chat_content(state, layout, %{win_id => prefetch})
+
+      [prompt_model] = frame.additional_window_models
+
+      default_prompt =
+        PromptRenderWindow.build(
+          ViewContext.from_editor_state(state),
+          prompt_model.geometry.viewport.cols,
+          prompt_model.rect
+        )
+
+      assert frame.window_model.full_refresh == true
+      assert prompt_model.full_refresh == frame.window_model.full_refresh
+      assert prompt_model.content_epoch != default_prompt.content_epoch
     end
 
     test "visual_row_offset renders the correct continuation slice and cursor position" do

@@ -226,18 +226,13 @@ defmodule MingaEditor.RenderPipeline.Content do
         nil
       end
 
-    # Build the canonical window model for GUI frontends. GUI buffer windows use this model
-    # instead of DisplayList draw layers for gutter, content, cursorline, and indent guides.
+    # Build the canonical window model; TUI adapts it to cells at the frontend boundary.
     window_model =
-      if gui? do
-        Telemetry.span([:minga, :render, :window_model_build], %{window_id: scroll.win_id}, fn ->
-          WindowModelBuilder.build(state, %{scroll | window: window}, render_ctx,
-            content_kind: :buffer
-          )
-        end)
-      else
-        nil
-      end
+      Telemetry.span([:minga, :render, :window_model_build], %{window_id: scroll.win_id}, fn ->
+        WindowModelBuilder.build(state, %{scroll | window: window}, render_ctx,
+          content_kind: :buffer
+        )
+      end)
 
     win_frame = %WindowFrame{
       rect: {0, 0, content_width, content_height},
@@ -619,6 +614,24 @@ defmodule MingaEditor.RenderPipeline.Content do
 
     gui? = MingaEditor.Frontend.gui?(state.capabilities)
 
+    {window, content_epoch, full_refresh?} =
+      Window.prepare_render_epoch(
+        window,
+        agent_render_reset_fingerprint(%{
+          win_id: win_id,
+          window: window,
+          win_layout: win_layout,
+          chat_width: chat_width,
+          chat_height: chat_height,
+          content_w: content_w,
+          gutter_w: gutter_w,
+          viewport: viewport,
+          line_number_style: line_number_style,
+          options: snapshot.options,
+          width_oracle: MingaEditor.Frontend.Capabilities.width_oracle(state.capabilities)
+        })
+      )
+
     # Render lines
     ln_style = if line_number_style == :none, do: :none, else: :absolute
 
@@ -709,13 +722,12 @@ defmodule MingaEditor.RenderPipeline.Content do
       width_oracle: MingaEditor.Frontend.Capabilities.width_oracle(state.capabilities),
       git_signs: %{},
       visible_line_map: visible_line_map,
-      content_epoch:
-        :erlang.phash2({win_id, :agent_chat, chat_width, chat_height, line_number_style}),
-      full_refresh: false
+      content_epoch: content_epoch,
+      full_refresh: full_refresh?
     }
 
     {window_model, additional_window_models} =
-      agent_window_models(gui?, state, model_scroll, render_ctx, ctx, chat_width, prompt_rect)
+      agent_window_models(state, model_scroll, render_ctx, ctx, chat_width, prompt_rect)
 
     frame =
       agent_window_frame(gui?, %{
@@ -732,6 +744,32 @@ defmodule MingaEditor.RenderPipeline.Content do
       })
 
     {frame, final_cursor, state}
+  end
+
+  @spec agent_render_reset_fingerprint(map()) :: term()
+  defp agent_render_reset_fingerprint(params) do
+    options = params.options
+
+    {
+      params.win_id,
+      :agent_chat,
+      params.window.buffer,
+      params.win_layout.total,
+      params.win_layout.content,
+      params.chat_width,
+      params.chat_height,
+      params.content_w,
+      params.gutter_w,
+      true,
+      params.line_number_style,
+      params.viewport.rows,
+      params.viewport.cols,
+      params.window.fold_map,
+      Map.get(options, :breakindent, true),
+      Map.get(options, :linebreak, true),
+      Map.get(options, :tab_width, 2),
+      Minga.Core.WidthOracle.fingerprint(params.width_oracle)
+    }
   end
 
   @spec build_visible_line_map(
@@ -805,7 +843,6 @@ defmodule MingaEditor.RenderPipeline.Content do
   defp prefer_prompt_cursor(%Cursor{} = prompt_cursor, _buf_cursor), do: prompt_cursor
 
   @spec agent_window_models(
-          boolean(),
           state(),
           WindowScroll.t(),
           MingaEditor.Renderer.Context.t(),
@@ -813,18 +850,7 @@ defmodule MingaEditor.RenderPipeline.Content do
           pos_integer(),
           {non_neg_integer(), non_neg_integer(), pos_integer(), pos_integer()}
         ) :: {RenderWindow.t() | nil, [RenderWindow.t()]}
-  defp agent_window_models(
-         false,
-         _state,
-         _model_scroll,
-         _render_ctx,
-         _ctx,
-         _chat_width,
-         _prompt_rect
-       ),
-       do: {nil, []}
-
-  defp agent_window_models(true, state, model_scroll, render_ctx, ctx, chat_width, prompt_rect) do
+  defp agent_window_models(state, model_scroll, render_ctx, ctx, chat_width, prompt_rect) do
     window_model =
       Telemetry.span(
         [:minga, :render, :window_model_build],
@@ -837,9 +863,16 @@ defmodule MingaEditor.RenderPipeline.Content do
     inner_width = PromptRenderer.input_inner_width(PromptRenderer.input_box_width(chat_width))
 
     additional_window_models =
-      case PromptRenderWindow.build(ctx, inner_width, prompt_rect) do
-        nil -> []
-        prompt_window_model -> [prompt_window_model]
+      if MingaEditor.Frontend.gui?(state.capabilities) do
+        case PromptRenderWindow.build(ctx, inner_width, prompt_rect,
+               content_epoch: model_scroll.content_epoch,
+               full_refresh: model_scroll.full_refresh
+             ) do
+          nil -> []
+          prompt_window_model -> [prompt_window_model]
+        end
+      else
+        []
       end
 
     {window_model, additional_window_models}
@@ -862,14 +895,13 @@ defmodule MingaEditor.RenderPipeline.Content do
   defp agent_window_frame(false, params) do
     %WindowFrame{
       rect: {0, 0, params.chat_width, params.height},
-      gutter: DisplayList.draws_to_layer(params.gutter_draws),
-      lines:
-        DisplayList.draws_to_layer(
-          params.line_draws ++ params.prompt_draws ++ params.sidebar_draws
-        ),
-      tilde_lines: DisplayList.draws_to_layer(params.tilde_draws),
+      gutter: %{},
+      lines: DisplayList.draws_to_layer(params.prompt_draws ++ params.sidebar_draws),
+      tilde_lines: %{},
       modeline: %{},
-      cursor: params.cursor
+      cursor: params.cursor,
+      window_model: params.window_model,
+      additional_window_models: params.additional_window_models
     }
   end
 

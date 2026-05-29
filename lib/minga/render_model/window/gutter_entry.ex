@@ -4,11 +4,12 @@ defmodule Minga.RenderModel.Window.GutterEntry do
   """
 
   @type display_type ::
-          :normal | :fold_start | :fold_continuation | :wrap_continuation | :fold_open
+          :normal | :fold_start | :fold_continuation | :wrap_continuation | :fold_open | :blank
   @type sign_type ::
           :none
           | :git_added
           | :git_modified
+          | :git_removed
           | :git_deleted
           | :diag_error
           | :diag_warning

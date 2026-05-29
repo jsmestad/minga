@@ -29,6 +29,11 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
     Content.build_content(state, scrolls)
   end
 
+  defp add_conceal(decs, start_pos, end_pos) do
+    {_id, decs} = Decorations.add_conceal(decs, start_pos, end_pos, group: :test)
+    decs
+  end
+
   defp build_window_model(state, ctx_overrides) do
     state = EditorState.sync_active_window_cursor(state)
     state = MingaEditor.RenderPipeline.compute_layout(state)
@@ -131,6 +136,26 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       assert hd(wf.window_model.rows).content_hash != old_hash
     end
 
+    test "resize reset fingerprint bumps content epoch and forces full refresh" do
+      state = gui_state(content: "hello")
+      {[wf], _cursor, state} = build_content(state)
+      epoch = wf.window_model.content_epoch
+
+      resized = %{state | terminal_viewport: Viewport.new(24, 100)}
+      {[wf], _cursor, _state} = build_content(resized)
+
+      assert wf.window_model.content_epoch != epoch
+      assert wf.window_model.full_refresh == true
+    end
+
+    test "removed diff signs survive in gutter entries" do
+      state = gui_state(content: "removed\nkept")
+      model = build_window_model(state, git_signs: %{0 => :removed})
+
+      [entry | _] = model.gutter.entries
+      assert entry.sign_type == :git_removed
+    end
+
     test "wrapped lines produce continuation rows and cursor coordinates inside the visual row" do
       state = gui_state(cols: 20, content: "abcdefghijABCDEFGHIJ")
       buffer = state.workspace.buffers.active
@@ -150,6 +175,7 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
              ]
 
       assert Enum.map(model.rows, & &1.text) == ["abcdefghijABCD", "EFGHIJ"]
+      assert Enum.map(model.gutter.entries, & &1.display_type) == [:normal, :wrap_continuation]
       assert model.cursor_row == 0
       assert model.cursor_col == 12
     end
@@ -176,6 +202,10 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
 
       virtual_rows = Enum.filter(wf.window_model.rows, &(&1.row_type == :virtual_line))
       assert Enum.map(virtual_rows, & &1.text) == ["first virtual", "second virtual"]
+
+      virtual_gutters = Enum.take(wf.window_model.gutter.entries, 2)
+      assert Enum.map(virtual_gutters, & &1.display_type) == [:blank, :blank]
+      assert Enum.map(virtual_gutters, & &1.sign_type) == [:none, :none]
 
       assert Enum.map(virtual_rows, & &1.row_id) == [
                Row.stable_decoration_id(:virtual_line, 0, first_id),
@@ -214,6 +244,10 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       block_rows = Enum.filter(wf.window_model.rows, &(&1.row_type == :block))
       assert Enum.map(block_rows, & &1.text) == ["first block", "second block"]
 
+      block_gutters = Enum.take(wf.window_model.gutter.entries, 2)
+      assert Enum.map(block_gutters, & &1.display_type) == [:blank, :blank]
+      assert Enum.map(block_gutters, & &1.sign_type) == [:none, :none]
+
       assert Enum.map(block_rows, & &1.row_id) == [
                Row.stable_decoration_id(:block, 0, {first_id, 0}),
                Row.stable_decoration_id(:block, 0, {second_id, 0})
@@ -245,7 +279,9 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       {[wf], _cursor, _state} = build_content(state)
 
       [fold_row] = Enum.filter(wf.window_model.rows, &(&1.row_type == :fold_start))
+      [fold_gutter] = Enum.filter(wf.window_model.gutter.entries, &(&1.buf_line == 0))
       assert fold_row.row_id == Row.stable_id(:fold_start, 0, 0, 2)
+      assert fold_gutter.display_type == :fold_start
     end
 
     test "decoration fold rows use stable decoration ids" do
@@ -263,7 +299,9 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       {[wf], _cursor, _state} = build_content(state)
 
       [fold_row] = Enum.filter(wf.window_model.rows, &(&1.row_type == :fold_start))
+      [fold_gutter] = Enum.filter(wf.window_model.gutter.entries, &(&1.buf_line == 0))
       assert fold_row.row_id == Row.stable_decoration_id(:fold_start, 0, fold.id)
+      assert fold_gutter.display_type == :fold_start
     end
 
     test "wrapped geometry reports total visual rows for the whole buffer" do
@@ -276,6 +314,27 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       {[wf], _cursor, _state} = build_content(state)
 
       assert wf.window_model.geometry.viewport.total_visual_rows == 20
+    end
+
+    test "cursor line reveals conceals while other model rows stay concealed" do
+      state = gui_state(content: "**bold**\n**italic**")
+      buffer = state.workspace.buffers.active
+
+      BufferProcess.batch_decorations(buffer, fn decs ->
+        decs
+        |> add_conceal({0, 0}, {0, 2})
+        |> add_conceal({0, 6}, {0, 8})
+        |> add_conceal({1, 0}, {1, 2})
+        |> add_conceal({1, 8}, {1, 10})
+      end)
+
+      :ok = BufferProcess.move_to(buffer, {0, 0})
+      {[wf], _cursor, _state} = build_content(state)
+
+      assert Enum.map(wf.window_model.rows, & &1.text) |> Enum.take(2) == [
+               "**bold**",
+               "italic"
+             ]
     end
 
     test "wrapped selection starts at the pane edge when visual row offset hides its start" do
@@ -338,11 +397,11 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       assert wf.window_model.indent_guides.window_id == state.workspace.windows.active
     end
 
-    test "TUI path keeps draw layers and skips the GUI window model" do
+    test "TUI path keeps draw layers and attaches the shared window model" do
       state = base_state(content: "hello\nworld")
       {[wf], _cursor, _state} = build_content(state)
 
-      assert wf.window_model == nil
+      assert wf.window_model.rows |> Enum.map(& &1.text) |> Enum.take(2) == ["hello", "world"]
       assert map_size(wf.lines) > 0
     end
   end

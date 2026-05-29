@@ -102,15 +102,20 @@ defmodule MingaEditor.Frontend.Emit do
   # TUI emit: single send_commands call (already atomic).
   @spec emit_tui(Frame.t(), ctx(), Caches.t()) :: Caches.t()
   defp emit_tui(frame, ctx, caches) do
-    commands = EmitTUI.build_commands(frame, ctx, caches)
+    render_model =
+      Telemetry.span([:minga, :render, :ui_model_build], %{}, fn ->
+        RenderModelBuilder.build_windows(frame, ctx)
+      end)
+
+    commands = EmitTUI.build_commands(render_model, frame, ctx, caches)
     commands = flush_font_registration_commands() ++ commands
     caches = update_tracking(ctx, caches)
     byte_count = IO.iodata_length(commands)
 
     Telemetry.span([:minga, :render, :emit_prepare], %{byte_count: byte_count}, fn ->
       MingaEditor.Frontend.send_commands(ctx.port_manager, commands)
-      caches = send_title(ctx, caches)
-      caches = send_window_bg(ctx, caches)
+      caches = send_title(render_model, caches)
+      caches = send_window_bg(render_model, caches)
       caches
     end)
   end
@@ -194,6 +199,17 @@ defmodule MingaEditor.Frontend.Emit do
         end
       end)
 
+    cursor_lines =
+      Map.new(layout.window_layouts, fn {win_id, _wl} ->
+        window = Map.get(ctx.windows.map, win_id)
+
+        if window do
+          {win_id, window.render_cache.last_cursor_line}
+        else
+          {win_id, -1}
+        end
+      end)
+
     editing_mode = if ctx.editing, do: ctx.editing.mode, else: nil
 
     %{
@@ -202,6 +218,7 @@ defmodule MingaEditor.Frontend.Emit do
         emit_prev_content_rects: rects,
         emit_prev_gutter_ws: gutter_ws,
         emit_prev_buf_versions: buf_versions,
+        emit_prev_cursor_lines: cursor_lines,
         emit_prev_editing_mode: editing_mode
     }
   end

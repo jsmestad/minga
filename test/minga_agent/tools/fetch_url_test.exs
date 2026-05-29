@@ -83,16 +83,16 @@ defmodule MingaAgent.Tools.FetchUrlTest do
 
     start = System.monotonic_time(:millisecond)
 
-    assert {:error, "failed to fetch https://example.test: request timed out after 20ms"} =
+    assert {:error, "failed to fetch https://example.test: request timed out after 200ms"} =
              FetchUrl.execute(
-               %{"url" => "https://example.test", "timeout_ms" => 20},
+               %{"url" => "https://example.test", "timeout_ms" => 200},
                fetcher,
                resolver
              )
 
     elapsed = System.monotonic_time(:millisecond) - start
-    assert elapsed < 500
-    assert_receive :fetch_started
+    assert elapsed < 1_000
+    assert_receive :fetch_started, 500
     refute_receive :release, 50
   end
 

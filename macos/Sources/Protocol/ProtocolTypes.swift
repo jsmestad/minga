@@ -433,6 +433,7 @@ enum Wire {
         case foldContinuation = 2
         case wrapContinuation = 3
         case foldOpen = 4
+        case blank = 5
     }
 
     /// Sign type for the gutter sign column.
@@ -446,6 +447,7 @@ enum Wire {
         case diagInfo = 6
         case diagHint = 7
         case annotation = 8
+        case gitRemoved = 9
     }
 
     /// A single gutter entry for one visible line.

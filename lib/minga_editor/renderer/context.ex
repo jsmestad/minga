@@ -58,6 +58,7 @@ defmodule MingaEditor.Renderer.Context do
             indent_guide_active_face: nil,
             hl_todo_faces: %{},
             cursor_col: 0,
+            cursor_line: nil,
             search_colors: nil,
             document_highlight_colors: nil,
             wrap_on: false,
@@ -105,6 +106,7 @@ defmodule MingaEditor.Renderer.Context do
           indent_guide_active_face: Face.t() | nil,
           hl_todo_faces: %{atom() => Face.t()},
           cursor_col: non_neg_integer(),
+          cursor_line: non_neg_integer() | nil,
           search_colors: MingaEditor.UI.Theme.Search.t() | nil,
           document_highlight_colors: term(),
           wrap_on: boolean(),
@@ -113,4 +115,10 @@ defmodule MingaEditor.Renderer.Context do
           hover_row: non_neg_integer() | nil,
           fold_ranges: [term()]
         }
+
+  @doc "Returns the context with a different decoration set."
+  @spec with_decorations(t(), Decorations.t()) :: t()
+  def with_decorations(%__MODULE__{} = ctx, %Decorations{} = decorations) do
+    %{ctx | decorations: decorations}
+  end
 end
