@@ -494,6 +494,16 @@ defmodule MingaEditor.Agent.SlashCommand do
   end
 
   @spec do_auth_revoke(state(), String.t()) :: state()
+  defp do_auth_revoke(state, "openai_codex") do
+    case Credentials.revoke("openai_codex") do
+      :ok ->
+        emit_system_message(state, "ChatGPT subscription disconnected.")
+
+      {:error, reason} ->
+        emit_system_message(state, "✗ Failed to revoke: #{inspect(reason)}")
+    end
+  end
+
   defp do_auth_revoke(state, provider) do
     if provider in Credentials.known_providers() do
       case Credentials.revoke(provider) do
@@ -509,7 +519,7 @@ defmodule MingaEditor.Agent.SlashCommand do
     else
       emit_system_message(
         state,
-        "Unknown provider: #{provider}\nKnown providers: #{Enum.join(Credentials.known_providers(), ", ")}"
+        "Unknown provider: #{provider}\nKnown providers: #{Enum.join(Credentials.known_providers(), ", ")}, openai_codex"
       )
     end
   end

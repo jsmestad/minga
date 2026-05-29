@@ -14,7 +14,7 @@ defmodule MingaAgent.OAuth.CallbackHandlerTest do
         |> CallbackHandler.call(CallbackHandler.init([]))
 
       assert conn.status == 200
-      assert conn.resp_body =~ "Authentication successful"
+      assert conn.resp_body =~ "Received"
       assert_receive {:oauth_callback, "test_code", "test_state"}, 1000
     after
       safe_unregister(:minga_oauth_flow)
@@ -84,7 +84,7 @@ defmodule MingaAgent.OAuth.CallbackHandlerTest do
         Req.get("http://127.0.0.1:#{port}/callback?code=http_code&state=http_state")
 
       assert resp.status == 200
-      assert resp.body =~ "Authentication successful"
+      assert resp.body =~ "Received"
       assert_receive {:oauth_callback, "http_code", "http_state"}, 1000
 
       Supervisor.stop(pid, :normal)

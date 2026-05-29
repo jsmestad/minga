@@ -161,7 +161,9 @@ defmodule MingaAgent.Credentials do
   """
   @spec any_configured?() :: boolean()
   def any_configured? do
-    Enum.any?(status(), fn s -> s.configured end)
+    Enum.any?(@known_providers, fn p -> resolve(p) != :error end) or
+      oauth_configured?() or
+      ollama_available?()
   end
 
   @doc """
@@ -238,11 +240,12 @@ defmodule MingaAgent.Credentials do
   @spec oauth_configured?() :: boolean()
   def oauth_configured? do
     path = oauth_path()
+    key = MingaAgent.OAuth.provider_key()
 
     case File.read(path) do
       {:ok, content} when content != "" ->
-        case Jason.decode(content) do
-          {:ok, %{"openai-codex" => %{"access" => access}}}
+        case JSON.decode(content) do
+          {:ok, %{^key => %{"access" => access}}}
           when is_binary(access) and access != "" ->
             true
 
@@ -283,9 +286,9 @@ defmodule MingaAgent.Credentials do
     path = oauth_path()
 
     with {:ok, content} when content != "" <- File.read(path),
-         {:ok, existing} when is_map(existing) <- Jason.decode(content) do
+         {:ok, existing} when is_map(existing) <- JSON.decode(content) do
       updated = Map.delete(existing, MingaAgent.OAuth.provider_key())
-      json = Jason.encode!(updated, pretty: true)
+      json = :json.format(updated)
 
       case File.write(path, json) do
         :ok -> File.chmod(path, 0o600)

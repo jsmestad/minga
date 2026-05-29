@@ -152,7 +152,7 @@ defmodule MingaAgent.OAuth do
     with :ok <- ensure_dir(dir),
          {:ok, existing} <- read_existing(path) do
       merged = Map.merge(existing, oauth_file_payload(tokens))
-      json = Jason.encode!(merged, pretty: true)
+      json = :json.format(merged)
 
       case File.write(path, json) do
         :ok ->
@@ -202,7 +202,7 @@ defmodule MingaAgent.OAuth do
     case String.split(jwt, ".") do
       [_header, payload, _sig | _] ->
         with {:ok, decoded} <- Base.url_decode64(payload, padding: false),
-             {:ok, claims} <- Jason.decode(decoded) do
+             {:ok, claims} <- JSON.decode(decoded) do
           claims["https://api.openai.com/auth"]["user_id"] ||
             claims["chatgpt-account-id"] ||
             claims["sub"]
@@ -217,10 +217,21 @@ defmodule MingaAgent.OAuth do
 
   defp read_existing(path) do
     case File.read(path) do
-      {:ok, ""} -> {:ok, %{}}
-      {:ok, content} -> Jason.decode(content)
-      {:error, :enoent} -> {:ok, %{}}
-      {:error, reason} -> {:error, "Failed to read #{path}: #{inspect(reason)}"}
+      {:ok, ""} ->
+        {:ok, %{}}
+
+      {:ok, content} ->
+        case JSON.decode(content) do
+          {:ok, map} when is_map(map) -> {:ok, map}
+          {:ok, _non_map} -> {:ok, %{}}
+          {:error, err} -> {:error, "Failed to parse #{path}: #{Exception.message(err)}"}
+        end
+
+      {:error, :enoent} ->
+        {:ok, %{}}
+
+      {:error, reason} ->
+        {:error, "Failed to read #{path}: #{inspect(reason)}"}
     end
   end
 

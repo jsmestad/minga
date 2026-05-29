@@ -46,7 +46,7 @@ defmodule MingaAgent.OAuth.CallbackHandler do
     <head><title>Minga</title></head>
     <body style="font-family: system-ui, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0;">
       <div style="text-align: center;">
-        <h2>Authentication successful</h2>
+        <h2>Received</h2>
         <p>You can close this tab and return to Minga.</p>
       </div>
       <script>window.close();</script>

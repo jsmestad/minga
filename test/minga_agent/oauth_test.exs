@@ -115,7 +115,7 @@ defmodule MingaAgent.OAuthTest do
       assert stat.access in [:read_write, :read]
 
       {:ok, content} = File.read(path)
-      {:ok, parsed} = Jason.decode(content)
+      {:ok, parsed} = JSON.decode(content)
       assert parsed["openai-codex"]["access"] == "test_access"
       assert parsed["openai-codex"]["refresh"] == "test_refresh"
     end
@@ -124,13 +124,13 @@ defmodule MingaAgent.OAuthTest do
     test "merges with existing oauth.json content", %{tmp_dir: tmp_dir} do
       path = Path.join([tmp_dir, "minga", "oauth.json"])
       File.mkdir_p!(Path.dirname(path))
-      File.write!(path, Jason.encode!(%{"other-provider" => %{"token" => "existing"}}))
+      File.write!(path, JSON.encode!(%{"other-provider" => %{"token" => "existing"}}))
 
       tokens = %{access: "new_access", refresh: nil, expires: nil, account_id: nil}
       assert :ok = OAuth.write_oauth_file(tokens, path)
 
       {:ok, content} = File.read(path)
-      {:ok, parsed} = Jason.decode(content)
+      {:ok, parsed} = JSON.decode(content)
       assert parsed["other-provider"]["token"] == "existing"
       assert parsed["openai-codex"]["access"] == "new_access"
     end

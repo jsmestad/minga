@@ -103,14 +103,14 @@ defmodule MingaAgent.OAuth.Flow do
   defp stop_server(_), do: :ok
 
   defp open_browser(url) do
-    cmd =
+    {cmd, args} =
       case :os.type() do
-        {:unix, :darwin} -> "open"
-        {:unix, _} -> "xdg-open"
-        {:win32, _} -> "start"
+        {:unix, :darwin} -> {"open", [url]}
+        {:unix, _} -> {"xdg-open", [url]}
+        {:win32, _} -> {"cmd", ["/c", "start", "", url]}
       end
 
-    case System.cmd(cmd, [url], stderr_to_stdout: true) do
+    case System.cmd(cmd, args, stderr_to_stdout: true) do
       {_output, 0} -> :ok
       {output, code} -> {:error, "#{cmd} exited with #{code}: #{output}"}
     end
@@ -122,6 +122,9 @@ defmodule MingaAgent.OAuth.Flow do
     receive do
       {:oauth_callback, code, state} when is_binary(code) and state == expected_state ->
         exchange_and_persist(code, verifier)
+
+      {:oauth_callback, _code, nil} ->
+        {:error, "OAuth redirect was missing the state parameter. Run /login to try again."}
 
       {:oauth_callback, _code, _wrong_state} ->
         {:error, "OAuth state mismatch (possible CSRF). Run /login to try again."}
