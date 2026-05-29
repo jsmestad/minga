@@ -8,7 +8,7 @@
 ## Override any flag at runtime via ERL_FLAGS environment variable:
 ##   ERL_FLAGS="+S 2:2" mix minga
 ##
-## See docs/PERFORMANCE.md for rationale on each flag.
+## Rationale is documented inline above each flag group.
 
 ## ── Async threads ───────────────────────────────────────────────────
 ##

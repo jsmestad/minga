@@ -56,7 +56,6 @@ defmodule Minga.MixProject do
           "docs/ARCHITECTURE.md",
           "docs/PROTOCOL.md",
           "docs/BUFFER-AWARE-AGENTS.md",
-          "docs/PERFORMANCE.md",
           # Development
           "CONTRIBUTING.md",
           "docs/RELEASING.md"
@@ -83,8 +82,7 @@ defmodule Minga.MixProject do
           Architecture: [
             "docs/ARCHITECTURE.md",
             "docs/PROTOCOL.md",
-            "docs/BUFFER-AWARE-AGENTS.md",
-            "docs/PERFORMANCE.md"
+            "docs/BUFFER-AWARE-AGENTS.md"
           ],
           Development: [
             "CONTRIBUTING.md",
