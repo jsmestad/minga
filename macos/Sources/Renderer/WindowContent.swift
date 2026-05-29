@@ -297,7 +297,8 @@ final class GUIWindowContent: Sendable {
          documentHighlights: [GUIDocumentHighlight],
          lineAnnotations: [GUILineAnnotation] = [],
          paneGeometry: GUIPaneGeometry? = nil,
-         cursorline: GUICursorline? = nil) {
+         cursorline: GUICursorline? = nil,
+         retainedRowIndex existingIndex: [GUIRetainedRowKey: GUIVisualRow]? = nil) {
         self.windowId = windowId
         self.fullRefresh = fullRefresh
         self.contentEpoch = contentEpoch
@@ -315,12 +316,16 @@ final class GUIWindowContent: Sendable {
         self.paneGeometry = paneGeometry
         self.cursorline = cursorline
 
-        var index: [GUIRetainedRowKey: GUIVisualRow] = [:]
-        index.reserveCapacity(rows.count)
-        for row in rows {
-            index[GUIRetainedRowKey(rowId: row.rowId, contentHash: row.contentHash)] = row
+        if let existingIndex {
+            self.retainedRowIndex = existingIndex
+        } else {
+            var index: [GUIRetainedRowKey: GUIVisualRow] = [:]
+            index.reserveCapacity(rows.count)
+            for row in rows {
+                index[GUIRetainedRowKey(rowId: row.rowId, contentHash: row.contentHash)] = row
+            }
+            self.retainedRowIndex = index
         }
-        self.retainedRowIndex = index
     }
 
     func applyingOverlayDelta(_ delta: GUIWindowOverlayDelta) -> GUIWindowContent? {
@@ -344,7 +349,8 @@ final class GUIWindowContent: Sendable {
             documentHighlights: documentHighlights,
             lineAnnotations: lineAnnotations,
             paneGeometry: paneGeometry,
-            cursorline: delta.cursorline
+            cursorline: delta.cursorline,
+            retainedRowIndex: retainedRowIndex
         )
     }
 
