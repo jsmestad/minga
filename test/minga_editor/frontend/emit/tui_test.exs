@@ -11,6 +11,8 @@ defmodule MingaEditor.Frontend.Emit.TUITest do
   alias Minga.RenderModel.Window, as: RenderWindow
   alias Minga.RenderModel.Window.Gutter
   alias Minga.RenderModel.Window.GutterEntry
+  alias Minga.RenderModel.Cell
+  alias Minga.RenderModel.UI.CellLayer
   alias Minga.RenderModel.Window.PaneGeometry
   alias Minga.RenderModel.Window.Row
   alias MingaEditor.DisplayList
@@ -59,6 +61,36 @@ defmodule MingaEditor.Frontend.Emit.TUITest do
   end
 
   describe "render model TUI output" do
+    test "full redraw takes chrome cells from render model without a frame dependency" do
+      face = Minga.Core.Face.new(fg: 0xBBC2CF, bg: 0x282C34)
+
+      render_model =
+        CoreRenderModel.new(
+          [],
+          %Minga.RenderModel.UI{
+            cell_layer: %CellLayer{
+              pre_window_cells: [Cell.new(0, 0, "tabs", face)],
+              post_window_cells: [Cell.new(10, 0, "status", face)],
+              overlay_cells: [Cell.new(5, 5, "hover", face)]
+            }
+          },
+          RenderCursor.new(0, 0, :block)
+        )
+
+      commands =
+        EmitTUI.build_commands_from_deltas(
+          render_model,
+          Context.from_editor_state(base_state()),
+          nil
+        )
+
+      texts = decoded_draw_texts(commands)
+
+      assert "tabs" in texts
+      assert "status" in texts
+      assert "hover" in texts
+    end
+
     test "full redraw takes buffer content from render model instead of legacy window layers" do
       frame = %Frame{
         cursor: Cursor.new(0, 0, :block),

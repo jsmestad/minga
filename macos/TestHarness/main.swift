@@ -277,6 +277,21 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         }
         return result
 
+    case .guiWindowOverlayDelta(let delta):
+        var result: [String: Any] = [
+            "type": "gui_window_overlay_delta",
+            "window_id": Int(delta.windowId),
+            "content_epoch": Int(delta.contentEpoch),
+            "cursor_visible": delta.cursorVisible,
+            "cursor_row": Int(delta.cursorRow),
+            "cursor_col": Int(delta.cursorCol),
+            "cursor_shape": Int(delta.cursorShape.rawValue)
+        ]
+        if let cursorline = delta.cursorline {
+            result["cursorline"] = ["row": Int(cursorline.row), "bg": Int(cursorline.bg)]
+        }
+        return result
+
     case .drawStyledText(let row, let col, let fg, let bg, let attrs, let underlineColor, let blend, let fontWeight, let fontId, let text):
         return ["type": "draw_styled_text", "row": Int(row), "col": Int(col),
                 "fg": Int(fg), "bg": Int(bg), "attrs": Int(attrs),

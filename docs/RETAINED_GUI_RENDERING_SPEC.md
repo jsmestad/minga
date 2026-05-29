@@ -4,9 +4,9 @@ The rendering pipeline has too many parts, too many lines of code, and is unnece
 
 ## Status
 
-Phases 1, 2, 3, and the full-frame part of Phase 4 moved the architecture in the right direction, but the implementation stopped short of the full data-shape goal. Phase 1 unified the GUI chrome path, Phase 2 introduced `Minga.RenderModel.Window` for GUI buffer windows, Phase 3 added instrumentation, and Phase 4 added BEAM-authored row IDs with Swift atlas reuse keyed by stable row identity instead of display row. The remaining debt is explicit now: some ownership boundaries are still editor-heavy, reset semantics need a full audit before delta protocol work, and the TUI still needs to move behind the shared render model adapter.
+Phases 1, 2, 3, and the full-frame part of Phase 4 moved the architecture in the right direction, but the implementation stopped short of the full data-shape goal. Phase 1 unified the GUI chrome path, Phase 2 introduced `Minga.RenderModel.Window` for GUI buffer windows, Phase 3 added instrumentation, and Phase 4 added BEAM-authored row IDs with Swift atlas reuse keyed by stable row identity instead of display row. Phase 6 now routes production TUI command building through `Minga.RenderModel`: buffer windows use the shared TUI window adapter, and remaining cell-grid chrome is narrowed into `Minga.RenderModel.UI.CellLayer` compatibility data instead of being read from `DisplayList.Frame` during emit. Phase 7 has started with the smallest safe delta: cursor and cursorline updates carry `window_id + content_epoch`, and Swift ignores stale deltas instead of reusing mismatched retained state. The remaining debt is explicit now: some ownership boundaries are still editor-heavy, broader reset semantics still need macOS runtime validation, and several UI models still need to move from pre-encoded compatibility payloads to semantic core structs.
 
-The remediation plan below is the source of truth for completing the simplification work before starting delta protocol work.
+The remediation plan below is the source of truth for completing the simplification work before broader delta protocol work.
 
 ## Remediation plan
 
@@ -674,6 +674,8 @@ Full reset means: discard retained row state for this window, accept the full ro
 Minga.RenderModel.Window → TUI Adapter → DisplayList / cell commands
 ```
 
+Implementation status: production TUI emit now builds commands from `Minga.RenderModel`, not from `DisplayList.Frame`. Buffer windows are adapted from `Minga.RenderModel.Window`, while remaining cell-grid chrome is carried as `Minga.RenderModel.UI.CellLayer` compatibility data until those surfaces become fully semantic UI models.
+
 **Done when:** both frontends derive their output from `Minga.RenderModel`, and `DisplayList` is a TUI adapter detail.
 
 ### Phase 7: Delta protocol (only if measurements justify it)
@@ -683,6 +685,8 @@ Add delta messages only after stable row identity, separate overlays, content ep
 1. Overlay-only cursor and cursorline updates.
 2. Viewport updates that reference reusable row IDs and include newly exposed rows.
 3. Row updates for changed content.
+
+Implementation status: overlay-only cursor and cursorline deltas now use `gui_window_overlay_delta` (0xA0). The delta carries `window_id` and `content_epoch`, and Swift ignores it unless matching full window content is already retained for that epoch. The BEAM also emits the minimal overlay delta as the retained-window liveness marker on otherwise unchanged frames, because Swift prunes retained window content after clear-backed batches unless a window id appears in the batch. Full `gui_window_content` remains the first-frame, reset, and durable-content-change path.
 
 Every delta must carry `window_id` and `content_epoch`. If the frontend does not have that epoch, it ignores the update or requests recovery.
 

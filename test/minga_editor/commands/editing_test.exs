@@ -351,9 +351,16 @@ defmodule MingaEditor.Commands.EditingTest do
   describe "Editor GenServer smoke layer" do
     test "key routing covers insert, operator, visual, command, and paste paths" do
       {editor, buffer} = start_editor("")
-      send_key(editor, ?i)
-      Enum.each(~c"abc!", &send_key(editor, &1))
-      send_key(editor, 27)
+      assert send_key(editor, ?i) == :insert
+      assert send_key(editor, ?a) == :insert
+      assert BufferProcess.content(buffer) == "a"
+      assert send_key(editor, ?b) == :insert
+      assert BufferProcess.content(buffer) == "ab"
+      assert send_key(editor, ?c) == :insert
+      assert BufferProcess.content(buffer) == "abc"
+      assert send_key(editor, ?!) == :insert
+      assert BufferProcess.content(buffer) == "abc!"
+      assert send_key(editor, 27) == :normal
       send_key(editor, ?l)
       assert BufferProcess.content(buffer) == "abc!"
       assert BufferProcess.cursor(buffer) == {0, 3}

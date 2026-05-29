@@ -21,6 +21,21 @@ The following optimizations have been completed (see commit `8beec9d`):
 
 ---
 
+## Retained GUI Rendering Baseline
+
+Phase 7's first delta slice targets the highest-frequency case: cursor movement without durable row changes. The local Linux agent environment cannot run the macOS GUI renderer (`xcodebuild` and `swiftc` are not installed), so Swift rasterization and texture-upload counters still need to be captured on a macOS machine. The BEAM-side protocol baseline is still useful because it measures exactly what the delta replaces on the wire.
+
+Scenario measured with one 80x40 buffer window, 40 visible rows, one span per row, unchanged content epoch, and cursor movement from `{0, 0}` to `{1, 4}`:
+
+| Scenario | Metal commands | Metal bytes | Row bytes | Metadata bytes | Overlay bytes |
+|----------|----------------|-------------|-----------|----------------|---------------|
+| Initial full `gui_window_content` | 1 | 4,688 | 4,645 | 19 | 19 |
+| Cursor-only `gui_window_overlay_delta` | 1 | 13 | 0 | 0 | 13 |
+
+The overlay delta reduces BEAM-to-GUI metal bytes by 99.7% for this cursor-only fixture and carries `window_id + content_epoch` so stale frontend retained state is ignored instead of reused.
+
+---
+
 ## BEAM VM Tuning
 
 The BEAM's defaults are tuned for web servers: many concurrent connections, high throughput, long-running processes. An editor is the opposite: single user, latency-sensitive, few processes, bursty allocations from the render loop, and long idle periods between keystrokes. Minga ships custom VM flags that address three areas:

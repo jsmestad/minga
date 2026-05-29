@@ -43,7 +43,7 @@ defmodule MingaEditor.Frontend.Emit do
         if gui? do
           emit_gui(frame, ctx, chrome, caches)
         else
-          emit_tui(frame, ctx, caches)
+          emit_tui(frame, ctx, chrome, caches)
         end
 
       {caches, FontRegistry.current_process_registry(ctx.font_registry)}
@@ -100,14 +100,14 @@ defmodule MingaEditor.Frontend.Emit do
   end
 
   # TUI emit: single send_commands call (already atomic).
-  @spec emit_tui(Frame.t(), ctx(), Caches.t()) :: Caches.t()
-  defp emit_tui(frame, ctx, caches) do
+  @spec emit_tui(Frame.t(), ctx(), Chrome.t() | nil, Caches.t()) :: Caches.t()
+  defp emit_tui(frame, ctx, chrome, caches) do
     render_model =
       Telemetry.span([:minga, :render, :ui_model_build], %{}, fn ->
-        RenderModelBuilder.build_windows(frame, ctx)
+        RenderModelBuilder.build_tui(frame, ctx, chrome)
       end)
 
-    commands = EmitTUI.build_commands(render_model, frame, ctx, caches)
+    commands = EmitTUI.build_commands(render_model, ctx, caches)
     commands = flush_font_registration_commands() ++ commands
     caches = update_tracking(ctx, caches)
     byte_count = IO.iodata_length(commands)

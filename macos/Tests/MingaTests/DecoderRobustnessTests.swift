@@ -381,10 +381,10 @@ struct DecoderForwardCompatTests {
 
     @Test("Unknown opcode >= 0x90 with valid length prefix is skipped")
     func skipUnknownOpcode() throws {
-        // Opcode 0xA0 is not defined. It uses the 0x90+ convention:
+        // Opcode 0xA3 is not defined. It uses the 0x90+ convention:
         // opcode(1) + payload_length(2, big-endian) + payload(payload_length)
         var data = Data()
-        data.append(0xA0)                       // unknown opcode
+        data.append(0xA3)                       // unknown opcode
         data.append(contentsOf: [0x00, 0x04])   // payload_length = 4
         data.append(contentsOf: [0xDE, 0xAD, 0xBE, 0xEF]) // payload (4 bytes)
 
@@ -395,10 +395,10 @@ struct DecoderForwardCompatTests {
 
     @Test("Unknown opcode skipped, subsequent commands decoded correctly")
     func skipThenDecode() throws {
-        // Build a batch: unknown 0xA0 (5-byte payload) + clear + batch_end
+        // Build a batch: unknown 0xA3 (5-byte payload) + clear + batch_end
         var data = Data()
         // Unknown opcode
-        data.append(0xA0)
+        data.append(0xA3)
         data.append(contentsOf: [0x00, 0x05]) // payload_length = 5
         data.append(contentsOf: [0x01, 0x02, 0x03, 0x04, 0x05]) // 5 bytes of payload
         // Known commands that follow
@@ -489,7 +489,7 @@ struct DecoderForwardCompatTests {
     @Test("Unknown opcode >= 0x90 with truncated length throws malformed")
     func truncatedLengthThrows() {
         // Only 1 byte of the 2-byte length prefix
-        let data = Data([0xA0, 0x00])
+        let data = Data([0xA3, 0x00])
         #expect(throws: ProtocolDecodeError.self) {
             try decodeCommand(data: data, offset: 0)
         }
@@ -499,7 +499,7 @@ struct DecoderForwardCompatTests {
     func truncatedPayloadThrows() {
         // Length says 10 bytes but only 3 available
         var data = Data()
-        data.append(0xA0)
+        data.append(0xA3)
         data.append(contentsOf: [0x00, 0x0A]) // payload_length = 10
         data.append(contentsOf: [0x01, 0x02, 0x03]) // only 3 bytes
 

@@ -280,6 +280,62 @@ struct WindowContentDecoderTests {
         #expect(content.scrollLeft == 25)
     }
 
+    @Test("Decode overlay delta without cursorline")
+    func decodeOverlayDeltaWithoutCursorline() throws {
+        var data = Data([OP_GUI_WINDOW_OVERLAY_DELTA])
+        data.append(contentsOf: [0x00, 0x09]) // window_id
+        data.append(contentsOf: [0x00, 0x00, 0x00, 0x2A]) // content_epoch
+        data.append(0x01) // cursor_visible
+        data.append(contentsOf: [0x00, 0x03]) // cursor_row
+        data.append(contentsOf: [0x00, 0x07]) // cursor_col
+        data.append(0x01) // beam
+        data.append(OP_CLEAR) // next opcode proves consumed size stays aligned
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+
+        #expect(size == 13)
+        #expect(data[size] == OP_CLEAR)
+        guard case .guiWindowOverlayDelta(let delta) = cmd else {
+            Issue.record("Expected .guiWindowOverlayDelta"); return
+        }
+
+        #expect(delta.windowId == 9)
+        #expect(delta.contentEpoch == 42)
+        #expect(delta.cursorVisible == true)
+        #expect(delta.cursorRow == 3)
+        #expect(delta.cursorCol == 7)
+        #expect(delta.cursorShape == .beam)
+        #expect(delta.cursorline == nil)
+    }
+
+    @Test("Decode overlay delta with cursor and cursorline")
+    func decodeOverlayDelta() throws {
+        var data = Data([OP_GUI_WINDOW_OVERLAY_DELTA])
+        data.append(contentsOf: [0x00, 0x09]) // window_id
+        data.append(contentsOf: [0x00, 0x00, 0x00, 0x2A]) // content_epoch
+        data.append(0x03) // cursor_visible + cursorline
+        data.append(contentsOf: [0x00, 0x03]) // cursor_row
+        data.append(contentsOf: [0x00, 0x07]) // cursor_col
+        data.append(0x01) // beam
+        data.append(contentsOf: [0x00, 0x02]) // cursorline row
+        data.append(contentsOf: [0x11, 0x22, 0x33]) // cursorline bg
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+
+        #expect(size == data.count)
+        guard case .guiWindowOverlayDelta(let delta) = cmd else {
+            Issue.record("Expected .guiWindowOverlayDelta"); return
+        }
+
+        #expect(delta.windowId == 9)
+        #expect(delta.contentEpoch == 42)
+        #expect(delta.cursorVisible == true)
+        #expect(delta.cursorRow == 3)
+        #expect(delta.cursorCol == 7)
+        #expect(delta.cursorShape == .beam)
+        #expect(delta.cursorline == GUICursorline(row: 2, bg: 0x112233))
+    }
+
     @Test("Decode cursor_visible flag from flags byte bit 1")
     func decodeCursorVisible() throws {
         // flags = 0x03: full_refresh (bit 0) + cursor_visible (bit 1)

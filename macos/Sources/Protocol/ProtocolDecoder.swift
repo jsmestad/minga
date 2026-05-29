@@ -197,6 +197,7 @@ enum RenderCommand: Sendable {
                          filterPreset: UInt8, tabs: [Wire.BottomPanelTab],
                          entries: [Wire.MessageEntry])
     case guiWindowContent(data: GUIWindowContent)
+    case guiWindowOverlayDelta(data: GUIWindowOverlayDelta)
     case guiToolManager(visible: Bool, filter: UInt8, selectedIndex: UInt16, tools: [Wire.ToolEntry])
     case guiMinibuffer(visible: Bool, mode: UInt8, cursorPos: UInt16, prompt: String, input: String, context: String, selectedIndex: UInt16, totalCandidates: UInt16, candidates: [Wire.MinibufferCandidate])
     case guiHoverPopup(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, focused: Bool, scrollOffset: UInt16, lines: [Wire.HoverLine])
@@ -1706,6 +1707,33 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             cursorline: wcCursorline
         )
         return (.guiWindowContent(data: content), wcPos - offset)
+
+    case OP_GUI_WINDOW_OVERLAY_DELTA:
+        guard data.count >= rest + 12 else { throw ProtocolDecodeError.malformed }
+        let windowId = readU16(data, rest)
+        let contentEpoch = readU32(data, rest + 2)
+        let flags = data[rest + 6]
+        let cursorRow = readU16(data, rest + 7)
+        let cursorCol = readU16(data, rest + 9)
+        let cursorShape = CursorShape(rawValue: data[rest + 11]) ?? .block
+        let hasCursorline = flags & 0x02 != 0
+        let cursorVisible = flags & 0x01 != 0
+
+        if hasCursorline {
+            guard data.count >= rest + 17 else { throw ProtocolDecodeError.malformed }
+            let cursorline = GUICursorline(row: readU16(data, rest + 12), bg: readU24(data, rest + 14))
+            let delta = GUIWindowOverlayDelta(windowId: windowId, contentEpoch: contentEpoch,
+                                             cursorVisible: cursorVisible, cursorRow: cursorRow,
+                                             cursorCol: cursorCol, cursorShape: cursorShape,
+                                             cursorline: cursorline)
+            return (.guiWindowOverlayDelta(data: delta), 18)
+        } else {
+            let delta = GUIWindowOverlayDelta(windowId: windowId, contentEpoch: contentEpoch,
+                                             cursorVisible: cursorVisible, cursorRow: cursorRow,
+                                             cursorCol: cursorCol, cursorShape: cursorShape,
+                                             cursorline: nil)
+            return (.guiWindowOverlayDelta(data: delta), 13)
+        }
 
     case OP_GUI_TOOL_MANAGER:
         // visible(1)

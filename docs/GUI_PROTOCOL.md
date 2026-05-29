@@ -674,7 +674,7 @@ Mode values:
 
 Semantic rendering data for a buffer window. Replaces draw_text commands for buffer content. The BEAM pre-resolves all layout (word wrap, folding, virtual text splicing, conceal ranges) and all styling (syntax highlighting colors). The frontend renders directly from this data via CoreText, with selection/search/diagnostics as overlay quads (not baked into text colors).
 
-One 0x80 message is sent per buffer window per frame. Agent chat windows do not use this opcode. Uses sectioned envelope: `opcode(1) + section_count(1) + sections...`.
+A full 0x80 message is sent for the first frame, epoch changes, full refreshes, and durable content changes. Cursor-only frames may use `gui_window_overlay_delta` (0xA0) instead. Agent chat windows do not use this opcode. Uses sectioned envelope: `opcode(1) + section_count(1) + sections...`.
 
 | Section ID | Name | Content |
 |-----------|------|--------|
@@ -764,7 +764,26 @@ The frontend renders selection and search matches as Metal quads behind text (no
 
 `row_id` is a BEAM-authored stable identity for the durable visual row, and each row ID must be unique within a window frame. `content_hash` is a per-row hash computed by the BEAM. The frontend keys retained CTLine textures by `window_id + content_epoch + row_id + content_hash`, so scrolling can reuse the same logical row even when its display row changes.
 
-When `gui_window_content` is present for a window, the BEAM does not send draw_text commands for that window's buffer content. Overlays (hover popups, signature help) have dedicated GUI opcodes (0x81, 0x82) and are rendered natively by SwiftUI. Gutter data (0x7B) and cursor position continue through their existing opcodes, while window-local cursorline is carried in gui_window_content section 0x09.
+When `gui_window_content` is present for a window, the BEAM does not send draw_text commands for that window's buffer content. Overlays (hover popups, signature help) have dedicated GUI opcodes (0x81, 0x82) and are rendered natively by SwiftUI. Gutter data (0x7B) continues through its existing opcode, while cursor position and window-local cursorline are carried in gui_window_content section 0x09 or in overlay deltas (0xA0).
+
+### 0xA0 - gui_window_overlay_delta
+
+Cursor-only retained rendering update for one GUI window. The BEAM sends this when the durable rows and non-cursor overlays are unchanged but cursor position, cursor visibility, cursor shape, or cursorline changed. It may also send the same minimal payload as a per-frame liveness marker for an unchanged retained window, so the frontend does not prune valid retained content during clear-backed batches.
+
+```
+opcode(1) + window_id(2) + content_epoch(4) + flags(1) + cursor_row(2) + cursor_col(2) + cursor_shape(1) + optional_cursorline
+
+Flags:
+  bit 0: cursor_visible
+  bit 1: cursorline_present
+
+Cursor shape: 0 = block, 1 = beam, 2 = underline
+
+If cursorline_present:
+  local_row(2) + r(1) + g(1) + b(1)
+```
+
+The frontend applies the delta only when it already has `gui_window_content` for the same `window_id` and `content_epoch`. If the epoch is missing or stale, it ignores the delta and waits for the next full 0x80 refresh.
 
 ### 0x81 — gui_hover_popup
 

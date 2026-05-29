@@ -647,6 +647,97 @@ struct CommandDispatcherRoutingTests {
         #expect(gui.windowContents[7]?.cursorRow == 5)
     }
 
+    @Test("guiWindowOverlayDelta updates matching retained content")
+    @MainActor func guiWindowOverlayDeltaRouting() {
+        let (dispatcher, gui) = makeDispatcher()
+        gui.windowContents[7] = GUIWindowContent(
+            windowId: 7, fullRefresh: false, contentEpoch: 42,
+            cursorRow: 5, cursorCol: 10, cursorShape: .block,
+            rows: [], selection: nil,
+            searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: []
+        )
+
+        dispatcher.dispatch(.guiWindowOverlayDelta(data: GUIWindowOverlayDelta(
+            windowId: 7, contentEpoch: 42, cursorVisible: false,
+            cursorRow: 6, cursorCol: 11, cursorShape: .beam,
+            cursorline: GUICursorline(row: 6, bg: 0x112233)
+        )))
+
+        #expect(gui.windowContents[7]?.cursorVisible == false)
+        #expect(gui.windowContents[7]?.cursorRow == 6)
+        #expect(gui.windowContents[7]?.cursorCol == 11)
+        #expect(gui.windowContents[7]?.cursorShape == .beam)
+        #expect(gui.windowContents[7]?.cursorline == GUICursorline(row: 6, bg: 0x112233))
+        #expect(dispatcher.currentFrameWindowIds.contains(7))
+        #expect(dispatcher.frameState.cursorVisible == false)
+    }
+
+    @Test("guiWindowOverlayDelta clears retained cursorline when cursorline is omitted")
+    @MainActor func guiWindowOverlayDeltaClearsRetainedCursorline() {
+        let (dispatcher, gui) = makeDispatcher()
+        gui.windowContents[7] = GUIWindowContent(
+            windowId: 7, fullRefresh: false, contentEpoch: 42,
+            cursorRow: 5, cursorCol: 10, cursorShape: .block,
+            rows: [], selection: nil,
+            searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: [],
+            cursorline: GUICursorline(row: 5, bg: 0x112233)
+        )
+
+        dispatcher.dispatch(.guiWindowOverlayDelta(data: GUIWindowOverlayDelta(
+            windowId: 7, contentEpoch: 42, cursorVisible: true,
+            cursorRow: 6, cursorCol: 11, cursorShape: .beam,
+            cursorline: nil
+        )))
+
+        #expect(gui.windowContents[7]?.cursorline == nil)
+        #expect(gui.windowContents[7]?.cursorRow == 6)
+        #expect(gui.windowContents[7]?.cursorCol == 11)
+        #expect(gui.windowContents[7]?.cursorShape == .beam)
+        #expect(dispatcher.currentFrameWindowIds.contains(7))
+    }
+
+    @Test("stale guiWindowOverlayDelta is ignored without marking the window live")
+    @MainActor func staleGuiWindowOverlayDeltaIgnored() {
+        let (dispatcher, gui) = makeDispatcher()
+        let content = GUIWindowContent(
+            windowId: 7, fullRefresh: false, contentEpoch: 42,
+            cursorRow: 5, cursorCol: 10, cursorShape: .block,
+            rows: [], selection: nil,
+            searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: []
+        )
+        gui.windowContents[7] = content
+        dispatcher.frameState.cursorVisible = true
+
+        dispatcher.dispatch(.guiWindowOverlayDelta(data: GUIWindowOverlayDelta(
+            windowId: 7, contentEpoch: 41, cursorVisible: false,
+            cursorRow: 6, cursorCol: 11, cursorShape: .beam,
+            cursorline: nil
+        )))
+
+        #expect(gui.windowContents[7] === content)
+        #expect(dispatcher.currentFrameWindowIds.contains(7) == false)
+        #expect(dispatcher.frameState.cursorVisible == true)
+    }
+
+    @Test("guiWindowOverlayDelta without retained content is ignored")
+    @MainActor func missingGuiWindowOverlayDeltaIgnored() {
+        let (dispatcher, gui) = makeDispatcher()
+        dispatcher.frameState.cursorVisible = true
+
+        dispatcher.dispatch(.guiWindowOverlayDelta(data: GUIWindowOverlayDelta(
+            windowId: 7, contentEpoch: 42, cursorVisible: false,
+            cursorRow: 6, cursorCol: 11, cursorShape: .beam,
+            cursorline: nil
+        )))
+
+        #expect(gui.windowContents[7] == nil)
+        #expect(dispatcher.currentFrameWindowIds.contains(7) == false)
+        #expect(dispatcher.frameState.cursorVisible == true)
+    }
+
     @Test("guiGutterSeparator updates frameState gutter state")
     @MainActor func guiGutterSepRouting() {
         let (dispatcher, _) = makeDispatcher()

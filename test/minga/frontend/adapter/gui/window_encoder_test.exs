@@ -68,6 +68,42 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
     }
   end
 
+  test "encodes overlay delta with window id, epoch, cursor, and cursorline" do
+    model =
+      window(
+        window_id: 9,
+        rect: {10, 0, 80, 20},
+        cursor_row: 3,
+        cursor_col: 7,
+        cursor_shape: :beam,
+        cursor_visible: true,
+        content_epoch: 42,
+        cursorline: %Cursorline{row: 12, bg_rgb: 0x112233}
+      )
+
+    encoded = WindowEncoder.encode_overlay_delta(model)
+
+    assert <<opcode::8, 9::16, 42::32, flags::8, 3::16, 7::16, shape::8, 2::16, 0x11::8, 0x22::8,
+             0x33::8>> = encoded
+
+    assert opcode == Opcodes.gui_window_overlay_delta()
+    assert Bitwise.band(flags, 0x01) != 0
+    assert Bitwise.band(flags, 0x02) != 0
+    assert shape == 1
+  end
+
+  test "encodes overlay delta without cursorline as the minimal keepalive payload" do
+    encoded =
+      window(window_id: 9, cursor_visible: true, content_epoch: 42, cursorline: nil)
+      |> WindowEncoder.encode_overlay_delta()
+
+    assert <<opcode::8, 9::16, 42::32, flags::8, 0::16, 0::16, 0::8>> = encoded
+    assert opcode == Opcodes.gui_window_overlay_delta()
+    assert byte_size(encoded) == 13
+    assert Bitwise.band(flags, 0x01) != 0
+    assert Bitwise.band(flags, 0x02) == 0
+  end
+
   defp gutter_model do
     %Gutter{
       window_id: 1,
@@ -280,7 +316,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
     {second_commands, _caches} = AdapterGUI.encode_windows([model], caches)
 
     assert opcodes(first_commands) == [Opcodes.gui_window_content(), Opcodes.gui_gutter()]
-    assert opcodes(second_commands) == [Opcodes.gui_gutter()]
+    assert opcodes(second_commands) == [Opcodes.gui_window_overlay_delta(), Opcodes.gui_gutter()]
   end
 
   test "adapter cache reset re-emits unchanged window content after frontend recovery" do
@@ -290,7 +326,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
     {cached_commands, _caches} = AdapterGUI.encode_windows([model], caches)
     {recovered_commands, _caches} = AdapterGUI.encode_windows([model], Caches.new())
 
-    assert opcodes(cached_commands) == [Opcodes.gui_gutter()]
+    assert opcodes(cached_commands) == [Opcodes.gui_window_overlay_delta(), Opcodes.gui_gutter()]
     assert opcodes(recovered_commands) == [Opcodes.gui_window_content(), Opcodes.gui_gutter()]
 
     recovered_window = recovered_commands |> hd() |> GUIWindowDecoder.decode()
@@ -333,12 +369,13 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
       AdapterGUI.encode_windows_with_metrics([model], caches)
 
     assert cached_metrics.row_bytes == 0
-    assert cached_metrics.overlay_bytes == 0
+    assert cached_metrics.overlay_bytes > 0
     assert cached_metrics.annotation_bytes == 0
     assert cached_metrics.gutter_bytes > 0
 
     assert IO.iodata_length(cached_commands) ==
-             cached_metrics.gutter_bytes + cached_metrics.metadata_bytes
+             cached_metrics.overlay_bytes + cached_metrics.gutter_bytes +
+               cached_metrics.metadata_bytes
   end
 
   test "adapter encodes first-class non-buffer window models" do
