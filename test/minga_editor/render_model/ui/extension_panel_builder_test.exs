@@ -91,5 +91,66 @@ defmodule MingaEditor.RenderModel.UI.ExtensionPanelBuilderTest do
                %Unknown{}
              ] = panel.content
     end
+
+    test "normalizes malformed extension panel content into semantic defaults" do
+      :ok =
+        ExtensionPanelRegistry.set(:builder_test, :malformed, %{
+          title: "Broken",
+          position: :center,
+          size: {:lines, 0},
+          visible: true,
+          content: [
+            {:text, 123},
+            {:styled_text, [{"Styled", :bad, []}]},
+            {:table, %{columns: :bad, rows: :bad, selected: :bad}},
+            {:key_value, :bad},
+            {:separator},
+            {:progress, %{label: :bad, percent: :bad}},
+            {:tree, %{nodes: :bad}},
+            {:future_block, %{value: true}}
+          ]
+        })
+
+      model = ExtensionPanelBuilder.build()
+
+      assert %ExtensionPanel{panels: [%Panel{} = panel]} = model
+      assert panel.extension == "builder_test"
+      assert panel.panel_id == "malformed"
+      assert panel.title == "Broken"
+      assert panel.position == :bottom
+      assert panel.size == {:percent, 30}
+      assert panel.visible?
+
+      assert [
+               %Text{text: "123"},
+               %StyledText{
+                 runs: [
+                   %StyledRun{text: "Styled", fg: 0, attrs: %{bold?: false, italic?: false}}
+                 ]
+               },
+               %Table{columns: [], rows: [], selected: nil},
+               %KeyValue{pairs: []},
+               %Separator{},
+               %Progress{label: "bad", percent: 0},
+               %Tree{nodes: []},
+               %Unknown{}
+             ] = panel.content
+    end
+
+    test "treats non-list panel content as an empty content list" do
+      :ok =
+        ExtensionPanelRegistry.set(:builder_test, :non_list_content, %{
+          title: "Empty",
+          visible: true,
+          content: :bad
+        })
+
+      model = ExtensionPanelBuilder.build()
+
+      assert %ExtensionPanel{panels: [%Panel{} = panel]} = model
+      assert panel.extension == "builder_test"
+      assert panel.panel_id == "non_list_content"
+      assert panel.content == []
+    end
   end
 end

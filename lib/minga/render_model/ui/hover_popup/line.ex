@@ -5,10 +5,12 @@ defmodule Minga.RenderModel.UI.HoverPopup.Line do
 
   alias Minga.RenderModel.UI.HoverPopup.Segment
 
+  @type language :: String.t() | nil
+
   @type line_type ::
           :text
           | :code
-          | {:code_header, term()}
+          | {:code_header, language()}
           | :header
           | :blockquote
           | :list_item

@@ -89,6 +89,57 @@ defmodule Minga.Frontend.Adapter.GUI.ExtensionOverlayEncoderTest do
       assert String.valid?(ext)
       assert String.valid?(overlay_id)
     end
+
+    test "clamps numeric overlay bounds with a normal payload" do
+      command =
+        ExtensionOverlayEncoder.encode_command(%ExtensionOverlay{
+          entries: [
+            entry(
+              extension: "e",
+              overlay_id: "o",
+              window_id: 99_999,
+              row: 99_999,
+              col: 99_999,
+              opacity: 999,
+              content: "abc"
+            )
+          ]
+        })
+
+      <<@op_gui_extension_overlay, payload_len::16, payload::binary-size(payload_len)>> = command
+      <<1::8, first_entry::binary>> = payload
+
+      <<ext_len::8, _ext::binary-size(ext_len), overlay_id_len::8,
+        _overlay_id::binary-size(overlay_id_len), window_id::16, row::16, col::16, _shape::8,
+        _r::8, _g::8, _b::8, opacity::8, content_len::16, content::binary-size(content_len)>> =
+        first_entry
+
+      assert ext_len == 1
+      assert overlay_id_len == 1
+      assert window_id == 0xFFFF
+      assert row == 0xFFFF
+      assert col == 0xFFFF
+      assert opacity == 255
+      assert content_len == 3
+      assert content == "abc"
+    end
+
+    test "drops oversized overlay content when the encoded entry exceeds the budget" do
+      long_content = String.duplicate("a", 70_000)
+
+      command =
+        ExtensionOverlayEncoder.encode_command(%ExtensionOverlay{
+          entries: [
+            entry(
+              extension: "e",
+              overlay_id: "o",
+              content: long_content
+            )
+          ]
+        })
+
+      assert command == <<@op_gui_extension_overlay, 1::16, 0>>
+    end
   end
 
   defp entry(opts \\ []) do

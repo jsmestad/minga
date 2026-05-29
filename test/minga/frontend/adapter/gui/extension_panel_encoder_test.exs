@@ -106,6 +106,40 @@ defmodule Minga.Frontend.Adapter.GUI.ExtensionPanelEncoderTest do
                ProtocolGUI.encode_gui_extension_panels(legacy_panels)
     end
 
+    test "encodes nil table selection as the legacy sentinel" do
+      panel = %Panel{
+        extension: "demo",
+        panel_id: "table",
+        title: "Table",
+        position: :right,
+        size: {:lines, 7},
+        visible?: false,
+        content: [
+          %Table{
+            columns: ["Name", "Count"],
+            rows: [["alpha", "1"], ["beta", "2"]],
+            selected: nil
+          },
+          %Unknown{}
+        ]
+      }
+
+      legacy_panels = [
+        %{
+          extension: :demo,
+          panel_id: :table,
+          title: "Table",
+          position: :right,
+          size: {:lines, 7},
+          visible: false,
+          content: legacy_content(panel.content)
+        }
+      ]
+
+      assert ExtensionPanelEncoder.encode_command(%ExtensionPanel{panels: [panel]}) ==
+               ProtocolGUI.encode_gui_extension_panels(legacy_panels)
+    end
+
     test "bounds extension-controlled counts and 8-bit strings" do
       long_text = String.duplicate("å", 300)
       panels = for index <- 1..300, do: oversized_panel(index, long_text)
@@ -198,7 +232,12 @@ defmodule Minga.Frontend.Adapter.GUI.ExtensionPanelEncoderTest do
   end
 
   defp legacy_content_block(%Table{} = table) do
-    {:table, %{columns: table.columns, rows: table.rows, selected: table.selected}}
+    {:table,
+     %{
+       columns: table.columns,
+       rows: table.rows,
+       selected: legacy_table_selected(table.selected)
+     }}
   end
 
   defp legacy_content_block(%KeyValue{pairs: pairs}), do: {:key_value, pairs}
@@ -211,6 +250,10 @@ defmodule Minga.Frontend.Adapter.GUI.ExtensionPanelEncoderTest do
     do: {:tree, %{nodes: Enum.map(nodes, &legacy_tree_node/1)}}
 
   defp legacy_content_block(%Unknown{}), do: {:unknown_block, %{}}
+
+  defp legacy_table_selected(nil), do: 0xFFFF
+  defp legacy_table_selected(selected) when is_integer(selected) and selected >= 0, do: selected
+  defp legacy_table_selected(_selected), do: 0xFFFF
 
   defp legacy_tree_node(%TreeNode{} = node) do
     %{

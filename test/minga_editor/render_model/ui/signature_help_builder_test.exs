@@ -59,6 +59,35 @@ defmodule MingaEditor.RenderModel.UI.SignatureHelpBuilderTest do
                }
              ] = model.signatures
     end
+
+    test "clamps active signature and parameter into the rendered model" do
+      sh = %MingaEditor.SignatureHelp{
+        signatures: [
+          %{
+            label: "foo(a)",
+            documentation: "First",
+            parameters: [%{label: "a", documentation: "first"}]
+          },
+          %{
+            label: "bar(x, y)",
+            documentation: "Second",
+            parameters: [
+              %{label: "x", documentation: "first"},
+              %{label: "y", documentation: "second"}
+            ]
+          }
+        ],
+        active_signature: 99,
+        active_parameter: 99,
+        anchor_row: 10,
+        anchor_col: 5
+      }
+
+      model = SignatureHelpBuilder.build(%{shell_state: %{signature_help: sh}})
+
+      assert model.active_signature == 1
+      assert model.active_parameter == 1
+    end
   end
 
   defp signature_help do

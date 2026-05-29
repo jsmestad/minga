@@ -40,7 +40,7 @@ defmodule MingaEditor.RenderModel.UI.HoverPopupBuilder do
        when type in [:text, :code, :header, :blockquote, :list_item, :rule, :empty],
        do: type
 
-  defp line_type({:code_header, language}), do: {:code_header, language}
+  defp line_type({:code_header, language}), do: {:code_header, normalize_language(language)}
   defp line_type(_type), do: :text
 
   @spec segment_style(term()) :: Segment.style()
@@ -61,9 +61,24 @@ defmodule MingaEditor.RenderModel.UI.HoverPopupBuilder do
             ],
        do: style
 
-  defp segment_style({:code_content, language}), do: {:code_content, language}
+  defp segment_style({:code_content, language}), do: {:code_content, normalize_language(language)}
   defp segment_style({:syntax, %Minga.Core.Face{} = face}), do: {:syntax, face}
   defp segment_style(_style), do: :plain
+
+  @spec normalize_language(term()) :: String.t() | nil
+  defp normalize_language(language) when is_binary(language), do: language
+
+  defp normalize_language(language)
+       when is_atom(language) or is_integer(language) or is_float(language),
+       do: to_string(language)
+
+  defp normalize_language(language) when is_list(language) do
+    to_string(language)
+  rescue
+    _e in [Protocol.UndefinedError, ArgumentError, UnicodeConversionError] -> nil
+  end
+
+  defp normalize_language(_language), do: nil
 
   @spec open_action_name(EditorHoverPopup.open_action() | nil) :: String.t() | nil
   defp open_action_name(nil), do: nil

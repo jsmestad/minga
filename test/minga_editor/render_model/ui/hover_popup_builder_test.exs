@@ -54,6 +54,38 @@ defmodule MingaEditor.RenderModel.UI.HoverPopupBuilderTest do
                model.content_lines
     end
 
+    test "normalizes code block languages to semantic strings and nil" do
+      popup = %MingaEditor.HoverPopup{
+        content_lines: [
+          {
+            [
+              {"header", :code_block},
+              {"body", {:code_content, :elixir}},
+              {"fallback", {:code_content, %{bad: true}}}
+            ],
+            {:code_header, 123}
+          }
+        ],
+        anchor_row: 5,
+        anchor_col: 10,
+        focused: true,
+        scroll_offset: 3,
+        open_action: :open_docs
+      }
+
+      ctx = build_minimal_context(%{hover_popup: popup})
+
+      model = HoverPopupBuilder.build(ctx)
+
+      assert [%Line{line_type: {:code_header, "123"}, segments: segments}] = model.content_lines
+
+      assert [
+               %Segment{text: "header", style: :code_block},
+               %Segment{text: "body", style: {:code_content, "elixir"}},
+               %Segment{text: "fallback", style: {:code_content, nil}}
+             ] = segments
+    end
+
     test "empty hover content builds hidden model" do
       popup = %MingaEditor.HoverPopup{content_lines: [], anchor_row: 5, anchor_col: 10}
       ctx = build_minimal_context(%{hover_popup: popup})

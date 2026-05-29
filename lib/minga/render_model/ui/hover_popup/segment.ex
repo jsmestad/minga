@@ -3,6 +3,8 @@ defmodule Minga.RenderModel.UI.HoverPopup.Segment do
   One styled markdown segment in the GUI hover popup model.
   """
 
+  @type language :: String.t() | nil
+
   @type style ::
           :plain
           | :bold
@@ -10,7 +12,7 @@ defmodule Minga.RenderModel.UI.HoverPopup.Segment do
           | :bold_italic
           | :code
           | :code_block
-          | {:code_content, term()}
+          | {:code_content, language()}
           | :header1
           | :header2
           | :header3

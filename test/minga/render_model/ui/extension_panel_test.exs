@@ -20,13 +20,28 @@ defmodule Minga.RenderModel.UI.ExtensionPanelTest do
         position: :bottom,
         size: {:percent, 30},
         visible?: true,
-        content: [%Text{text: "Hello"}]
+        content: [
+          %Text{text: "Hello"},
+          %Minga.RenderModel.UI.ExtensionPanel.Content.Table{
+            columns: ["Name"],
+            rows: [["Minga"]],
+            selected: nil
+          }
+        ]
       }
 
       model = %ExtensionPanel{panels: [panel]}
 
-      assert [%Panel{extension: "demo", title: "Status", content: [%Text{text: "Hello"}]}] =
-               model.panels
+      assert [
+               %Panel{
+                 extension: "demo",
+                 title: "Status",
+                 content: [
+                   %Text{text: "Hello"},
+                   %Minga.RenderModel.UI.ExtensionPanel.Content.Table{selected: nil}
+                 ]
+               }
+             ] = model.panels
     end
   end
 end

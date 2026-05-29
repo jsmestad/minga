@@ -102,8 +102,10 @@ defmodule Minga.Frontend.Adapter.GUI.ExtensionPanelEncoder do
         end)
       )
 
-    <<2::8, length(columns)::8, length(rows)::16, Wire.clamp_u16(table.selected)::16,
-      col_data::binary, row_data::binary>>
+    selected = encode_selected(table.selected)
+
+    <<2::8, length(columns)::8, length(rows)::16, selected::16, col_data::binary,
+      row_data::binary>>
   end
 
   defp encode_content_block(%KeyValue{pairs: pairs}) do
@@ -135,6 +137,14 @@ defmodule Minga.Frontend.Adapter.GUI.ExtensionPanelEncoder do
   end
 
   defp encode_content_block(%Unknown{}), do: <<255::8>>
+
+  @spec encode_selected(non_neg_integer() | nil) :: non_neg_integer()
+  defp encode_selected(nil), do: 0xFFFF
+
+  defp encode_selected(selected) when is_integer(selected) and selected >= 0,
+    do: min(selected, Wire.max_u16() - 1)
+
+  defp encode_selected(_selected), do: 0xFFFF
 
   @spec encode_styled_run(StyledRun.t()) :: binary()
   defp encode_styled_run(%StyledRun{} = run) do

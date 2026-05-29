@@ -30,41 +30,53 @@ defmodule MingaEditor.RenderModel.UI.ExtensionPanelBuilder do
       position: panel_position(panel.position),
       size: panel_size(panel.size),
       visible?: panel.visible,
-      content: Enum.map(panel.content, &content_block_model/1)
+      content: content_blocks_model(panel.content)
     }
   end
+
+  @spec content_blocks_model(term()) :: [Content.t()]
+  defp content_blocks_model(blocks) when is_list(blocks),
+    do: Enum.map(blocks, &content_block_model/1)
+
+  defp content_blocks_model(_blocks), do: []
 
   @spec content_block_model(Minga.Extension.Panel.content_block() | term()) :: Content.t()
   defp content_block_model({:text, text}), do: %Text{text: to_string(text)}
 
-  defp content_block_model({:styled_text, runs}) when is_list(runs) do
-    %StyledText{runs: Enum.map(runs, &styled_run_model/1)}
+  defp content_block_model({:styled_text, runs}) do
+    %StyledText{runs: styled_runs_model(runs)}
   end
 
-  defp content_block_model({:table, %{columns: cols, rows: rows} = table})
-       when is_list(cols) and is_list(rows) do
+  defp content_block_model({:table, table}) when is_map(table) do
     %Table{
-      columns: Enum.map(cols, &to_string/1),
-      rows: Enum.map(rows, &table_row_model/1),
-      selected: non_negative_integer(Map.get(table, :selected, 0xFFFF))
+      columns: table_columns_model(Map.get(table, :columns, [])),
+      rows: table_rows_model(Map.get(table, :rows, [])),
+      selected: table_selected(Map.get(table, :selected, nil))
     }
   end
 
-  defp content_block_model({:key_value, pairs}) when is_list(pairs) do
-    %KeyValue{pairs: Enum.map(pairs, &key_value_pair_model/1)}
+  defp content_block_model({:key_value, pairs}) do
+    %KeyValue{pairs: key_value_pairs_model(pairs)}
   end
 
   defp content_block_model({:separator}), do: %Separator{}
 
-  defp content_block_model({:progress, %{label: label, percent: percent}}) do
-    %Progress{label: to_string(label), percent: number_or_zero(percent)}
+  defp content_block_model({:progress, progress}) when is_map(progress) do
+    %Progress{
+      label: to_string(Map.get(progress, :label, "")),
+      percent: number_or_zero(Map.get(progress, :percent, 0))
+    }
   end
 
-  defp content_block_model({:tree, %{nodes: nodes}}) when is_list(nodes) do
-    %Tree{nodes: Enum.map(nodes, &tree_node_model/1)}
+  defp content_block_model({:tree, tree}) when is_map(tree) do
+    %Tree{nodes: tree_nodes_model(Map.get(tree, :nodes, []))}
   end
 
   defp content_block_model(_unknown), do: %Unknown{}
+
+  @spec styled_runs_model(term()) :: [StyledRun.t()]
+  defp styled_runs_model(runs) when is_list(runs), do: Enum.map(runs, &styled_run_model/1)
+  defp styled_runs_model(_runs), do: []
 
   @spec styled_run_model(term()) :: StyledRun.t()
   defp styled_run_model({text, fg, attrs}) when is_list(attrs) do
@@ -81,23 +93,46 @@ defmodule MingaEditor.RenderModel.UI.ExtensionPanelBuilder do
   defp styled_run_model(_run),
     do: %StyledRun{text: "", fg: 0, attrs: %{bold?: false, italic?: false}}
 
+  @spec tree_nodes_model(term()) :: [TreeNode.t()]
+  defp tree_nodes_model(nodes) when is_list(nodes), do: Enum.map(nodes, &tree_node_model/1)
+  defp tree_nodes_model(_nodes), do: []
+
   @spec tree_node_model(term()) :: TreeNode.t()
   defp tree_node_model(node) when is_map(node) do
     children = Map.get(node, :children, [])
-    children = if is_list(children), do: children, else: []
 
     %TreeNode{
       label: node |> Map.get(:label, "") |> to_string(),
       expanded?: Map.get(node, :expanded, false) == true,
-      children: Enum.map(children, &tree_node_model/1)
+      children: tree_nodes_model(children)
     }
   end
 
   defp tree_node_model(_node), do: %TreeNode{label: "", expanded?: false, children: []}
 
+  @spec table_columns_model(term()) :: [String.t()]
+  defp table_columns_model(columns) when is_list(columns), do: Enum.map(columns, &to_string/1)
+  defp table_columns_model(_columns), do: []
+
+  @spec table_rows_model(term()) :: [[String.t()]]
+  defp table_rows_model(rows) when is_list(rows), do: Enum.map(rows, &table_row_model/1)
+  defp table_rows_model(_rows), do: []
+
+  @spec table_selected(term()) :: non_neg_integer() | nil
+  defp table_selected(value) when is_integer(value) and value >= 0 and value < 0xFFFF,
+    do: value
+
+  defp table_selected(_value), do: nil
+
   @spec table_row_model(term()) :: [String.t()]
   defp table_row_model(row) when is_list(row), do: Enum.map(row, &to_string/1)
   defp table_row_model(cell), do: [to_string(cell)]
+
+  @spec key_value_pairs_model(term()) :: [KeyValue.pair()]
+  defp key_value_pairs_model(pairs) when is_list(pairs),
+    do: Enum.map(pairs, &key_value_pair_model/1)
+
+  defp key_value_pairs_model(_pairs), do: []
 
   @spec key_value_pair_model(term()) :: KeyValue.pair()
   defp key_value_pair_model({key, value}), do: {to_string(key), to_string(value)}
