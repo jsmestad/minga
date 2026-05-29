@@ -114,6 +114,22 @@ defmodule Minga.CLI do
     Enum.member?(args, "--safe") or Enum.member?(args, "-Q")
   end
 
+  @doc """
+  Returns the output for info-only flags (`--version`/`-v`, `--help`/`-h`).
+
+  These flags should print and exit without booting the supervision tree,
+  so the application start path can short-circuit before doing any work.
+  Returns `:none` when the args don't request info-only output.
+  """
+  @spec info_flag_output([String.t()]) :: {:ok, String.t()} | :none
+  def info_flag_output(args) when is_list(args) do
+    cond do
+      "--version" in args or "-v" in args -> {:ok, "minga #{Minga.version()}"}
+      "--help" in args or "-h" in args -> {:ok, usage()}
+      true -> :none
+    end
+  end
+
   @doc "Returns the startup flags stored by the CLI, or defaults if none were set."
   @spec startup_flags() :: flags()
   def startup_flags do

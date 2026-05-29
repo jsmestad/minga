@@ -279,6 +279,35 @@ defmodule Minga.CLITest do
     end
   end
 
+  describe "info_flag_output/1" do
+    test "returns version output for --version and -v" do
+      assert {:ok, message} = CLI.info_flag_output(["--version"])
+      assert message =~ "minga"
+      assert message =~ Minga.version()
+
+      assert {:ok, message_v} = CLI.info_flag_output(["-v"])
+      assert message_v == message
+    end
+
+    test "returns usage output for --help and -h" do
+      assert {:ok, message} = CLI.info_flag_output(["--help"])
+      assert message =~ "Usage: minga"
+
+      assert {:ok, message_h} = CLI.info_flag_output(["-h"])
+      assert message_h == message
+    end
+
+    test "detects info flags even after other arguments" do
+      assert {:ok, _} = CLI.info_flag_output(["--editor", "--version"])
+    end
+
+    test "returns :none when no info flag is present" do
+      assert :none = CLI.info_flag_output([])
+      assert :none = CLI.info_flag_output(["README.md"])
+      assert :none = CLI.info_flag_output(["--headless"])
+    end
+  end
+
   describe "startup_project_root_from_args/1" do
     test "detects directory targets and files inside marked projects" do
       root = tmp_dir("cli-project-root")

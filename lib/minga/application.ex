@@ -63,6 +63,11 @@ defmodule Minga.Application do
   @impl true
   @spec start(Application.start_type(), term()) :: {:ok, pid()} | {:error, term()}
   def start(_type, _args) do
+    # Info-only flags (--version/--help) must not boot the supervision tree.
+    # Booting it spins up the event recorder, extensions, and watchdog just to
+    # print a string, which can add seconds of startup. Short-circuit first.
+    maybe_print_info_and_halt()
+
     # Create the log buffer ETS table owned by the supervisor process.
     # This table survives process crashes so LoggerHandler can queue messages
     # before Minga.Log.MessagesBuffer subscribes and drains it on init.
@@ -175,6 +180,25 @@ defmodule Minga.Application do
     end
 
     :ok
+  end
+
+  @spec maybe_print_info_and_halt() :: :ok
+  defp maybe_print_info_and_halt do
+    if Burrito.Util.running_standalone?() do
+      case Minga.CLI.info_flag_output(Burrito.Util.Args.argv()) do
+        {:ok, message} ->
+          IO.puts(message)
+          System.halt(0)
+
+        :none ->
+          :ok
+      end
+    else
+      :ok
+    end
+  rescue
+    # Never let argument inspection break startup; fall through to normal boot.
+    _ -> :ok
   end
 
   @spec start_editor?() :: boolean()
