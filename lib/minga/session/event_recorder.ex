@@ -284,7 +284,7 @@ defmodule Minga.Session.EventRecorder do
         # isn't a valid SQLite header). Delete and try fresh. Structural
         # corruption that only surfaces under a full scan is caught later
         # by the async health check, off the startup path.
-        if is_binary(path) and File.exists?(path) do
+        if File.exists?(path) do
           Minga.Log.warning(
             :editor,
             "[EventRecorder] database unreadable: #{inspect(reason)}, recreating"
