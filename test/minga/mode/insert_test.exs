@@ -42,6 +42,13 @@ defmodule Minga.Mode.InsertTest do
     end
   end
 
+  describe "Tab key" do
+    test "Tab (9) emits :insert_tab" do
+      assert {:execute, :insert_tab, %{insert_changed: true}} =
+               Insert.handle_key({9, 0}, fresh_state())
+    end
+  end
+
   describe "printable characters" do
     test "ASCII letter 'x' emits {:insert_char, \"x\"}" do
       assert {:execute, {:insert_char, "x"}, _} = Insert.handle_key({?x, 0}, fresh_state())

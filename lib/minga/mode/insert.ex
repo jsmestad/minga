@@ -10,6 +10,7 @@ defmodule Minga.Mode.Insert do
   | `Escape`  | Transition back to Normal mode      |
   | Backspace | Delete character before cursor      |
   | Enter     | Insert a newline                    |
+  | Tab       | Insert indentation at cursor        |
   | Arrow keys| Move cursor (without leaving Insert)|
   | Other     | Insert the UTF-8 character          |
   """
@@ -22,6 +23,7 @@ defmodule Minga.Mode.Insert do
   # Special codepoints
   @escape 27
   @enter 13
+  @tab 9
 
   # Arrow key codepoints sent by libvaxis
   @arrow_up 57_352
@@ -60,6 +62,11 @@ defmodule Minga.Mode.Insert do
   # Enter
   def handle_key({@enter, _mods}, state) do
     {:execute, :insert_newline, mark_insert_changed(state)}
+  end
+
+  # Tab
+  def handle_key({@tab, 0}, state) do
+    {:execute, :insert_tab, mark_insert_changed(state)}
   end
 
   # Arrow keys — allow cursor movement without leaving Insert mode

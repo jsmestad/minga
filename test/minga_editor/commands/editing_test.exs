@@ -105,6 +105,23 @@ defmodule MingaEditor.Commands.EditingTest do
       assert BufferProcess.cursor(buffer) == {0, 1}
     end
 
+    test "insert_tab inserts indentation at the cursor using buffer tab settings" do
+      spaces = start_buffer("ab")
+      BufferProcess.set_option(spaces, :tab_width, 4)
+      BufferProcess.set_option(spaces, :indent_with, :spaces)
+      BufferProcess.move_to(spaces, {0, 2})
+      Editing.execute(command_state(spaces), :insert_tab)
+      assert BufferProcess.content(spaces) == "ab  "
+      assert BufferProcess.cursor(spaces) == {0, 4}
+
+      tabs = start_buffer("ab")
+      BufferProcess.set_option(tabs, :indent_with, :tabs)
+      BufferProcess.move_to(tabs, {0, 2})
+      Editing.execute(command_state(tabs), :insert_tab)
+      assert BufferProcess.content(tabs) == "ab\t"
+      assert BufferProcess.cursor(tabs) == {0, 3}
+    end
+
     test "autopair pairs, deletes, skips closing delimiters, and suppresses pairing in comments or strings" do
       buffer = start_buffer("")
       BufferProcess.set_option(buffer, :autopair, true)

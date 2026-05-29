@@ -27,6 +27,7 @@ defmodule MingaEditor.Commands.Editing do
     {:delete_before, "Delete character before cursor (backspace)", true},
     {:delete_at, "Delete character at cursor (delete)", true},
     {:insert_newline, "Insert a newline at cursor", true},
+    {:insert_tab, "Insert indentation at cursor", true},
     {:insert_line_below, "Insert line below", true},
     {:insert_line_above, "Insert line above", true},
     {:join_lines, "Join lines", true},
@@ -114,6 +115,11 @@ defmodule MingaEditor.Commands.Editing do
       Buffer.insert_char(buf, char)
     end
 
+    state
+  end
+
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :insert_tab) do
+    Buffer.insert_text(buf, tab_text_at_cursor(buf))
     state
   end
 
@@ -1073,6 +1079,18 @@ defmodule MingaEditor.Commands.Editing do
   @spec do_count_leading_spaces(String.t(), non_neg_integer()) :: non_neg_integer()
   defp do_count_leading_spaces(<<" ", rest::binary>>, n), do: do_count_leading_spaces(rest, n + 1)
   defp do_count_leading_spaces(_, n), do: n
+
+  @spec tab_text_at_cursor(pid()) :: String.t()
+  defp tab_text_at_cursor(buf) do
+    if uses_tabs?(buf) do
+      "\t"
+    else
+      {_line, col} = Buffer.cursor(buf)
+      width = tab_width(buf)
+      spaces = width - rem(col, width)
+      String.duplicate(" ", spaces)
+    end
+  end
 
   # Returns {indent_string, byte_size} for one indent level.
   @spec indent_string(pid()) :: {String.t(), pos_integer()}
