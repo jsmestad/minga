@@ -75,8 +75,10 @@ struct MessageEntry: Identifiable, Equatable {
         }
     }
 
-    /// Static lookup for a human-readable level name (used for tooltips).
-    static func levelName(for level: UInt8) -> String {
+    /// Title-case level name for tooltips. Distinct from the instance `levelName`,
+    /// which returns the uppercase badge form ("WARN"); the two formats serve
+    /// different surfaces, so they are intentionally separate.
+    static func levelTooltip(for level: UInt8) -> String {
         switch level {
         case 0: return "Debug"
         case 1: return "Info"

@@ -589,6 +589,59 @@ struct MessagesContentStateLifecycleTests {
         #expect(entry.levelName == "WARN")
         #expect(entry.subsystemName == "AGENT")
     }
+
+    @Test("appendEntries while tailing does not flag new entries")
+    @MainActor func appendWhileTailing() {
+        let state = MessagesContentState()
+        #expect(state.isAutoScrolling == true)
+
+        state.appendEntries([
+            Wire.MessageEntry(id: 0, level: 1, subsystem: 0, timestampSecs: 0,
+                           filePath: "", text: "tailing")
+        ])
+        // At the bottom, new entries follow the tail rather than raising the
+        // "jump to latest" affordance.
+        #expect(state.hasNewEntries == false)
+    }
+
+    @Test("scrolledToBottom re-enables auto-scroll and clears the indicator")
+    @MainActor func scrolledToBottomResets() {
+        let state = MessagesContentState()
+        state.scrolledUp()
+        state.appendEntries([
+            Wire.MessageEntry(id: 0, level: 1, subsystem: 0, timestampSecs: 0,
+                           filePath: "", text: "new")
+        ])
+        #expect(state.hasNewEntries == true)
+
+        state.scrolledToBottom()
+        #expect(state.isAutoScrolling == true)
+        #expect(state.hasNewEntries == false)
+    }
+
+    @Test("isFiltering reflects deviation from defaults")
+    @MainActor func isFilteringReflectsState() {
+        let state = MessagesContentState()
+        #expect(state.isFiltering == false)
+
+        state.toggleLevel(0) // enabling debug deviates from the default levels
+        #expect(state.isFiltering == true)
+
+        state.resetFilters()
+        #expect(state.isFiltering == false)
+    }
+
+    @Test("MessageEntry static level lookups")
+    @MainActor func staticLevelLookups() {
+        #expect(MessageEntry.levelColor(for: 1) == .green)
+        #expect(MessageEntry.levelColor(for: 2) == .yellow)
+        #expect(MessageEntry.levelColor(for: 3) == .red)
+        #expect(MessageEntry.levelColor(for: 99) == .gray)
+
+        #expect(MessageEntry.levelTooltip(for: 0) == "Debug")
+        #expect(MessageEntry.levelTooltip(for: 2) == "Warning")
+        #expect(MessageEntry.levelTooltip(for: 99) == "Unknown")
+    }
 }
 
 // MARK: - StatusBarState

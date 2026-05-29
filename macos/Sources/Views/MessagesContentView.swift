@@ -20,9 +20,6 @@ struct MessagesContentView: View {
     /// preview harness (same pattern as FileTreeView / GitStatusView).
     var usesPreviewEagerLayout: Bool = false
 
-    /// Tracks whether the bottom anchor is visible in the scroll viewport.
-    @State private var bottomAnchorVisible: Bool = true
-
     var body: some View {
         VStack(spacing: 0) {
             MessagesFilterBar(state: state, theme: theme)
@@ -60,17 +57,18 @@ struct MessagesContentView: View {
                         Color.clear
                             .frame(height: 1)
                             .id("bottom-anchor")
-                            .onAppear { handleScrollToBottom() }
-                            .onDisappear { handleScrollUp() }
+                            .onAppear { state.scrolledToBottom() }
+                            .onDisappear { state.scrolledUp() }
                     }
                     .padding(.horizontal, Spacing.sm)
                     .padding(.vertical, Spacing.xs)
                 }
-                // Start pinned to the newest entry. We intentionally do NOT use
-                // .defaultScrollAnchor(.bottom): that keeps the view pinned to the
-                // bottom on every content change, which yanks the user down while
-                // they read history. Tailing is handled explicitly below, gated on
-                // isAutoScrolling, so scrolling up stays put.
+                // Position at the newest entry on open. Tailing is handled
+                // explicitly in the onChange handlers below, gated on
+                // isAutoScrolling, so new entries never move the viewport while
+                // the user has scrolled up to read history. We avoid
+                // .defaultScrollAnchor(.bottom) here: its bottom-pinning fought
+                // that gating and left the list blank in the snapshot harness.
                 .onAppear {
                     if state.isAutoScrolling, let last = state.filteredEntries.last {
                         proxy.scrollTo(last.id, anchor: .bottom)
@@ -113,16 +111,6 @@ struct MessagesContentView: View {
         .buttonStyle(.plain)
         .padding(Spacing.md)
     }
-
-    private func handleScrollToBottom() {
-        bottomAnchorVisible = true
-        state.scrolledToBottom()
-    }
-
-    private func handleScrollUp() {
-        bottomAnchorVisible = false
-        state.scrolledUp()
-    }
 }
 
 // MARK: - Filter bar
@@ -153,7 +141,7 @@ private struct MessagesFilterBar: View {
     // MARK: Level dots
 
     /// Severity is a small set, so dots-only (no D/I/W/E letters) keeps the bar
-    /// quiet. Inactive levels fade hard so "Debug is off" reads at a glance.
+    /// quiet. Inactive levels fade so "Debug is off" reads at a glance.
     private var levelDots: some View {
         HStack(spacing: Spacing.xs) {
             ForEach([UInt8(0), 1, 2, 3], id: \.self) { level in
@@ -173,12 +161,12 @@ private struct MessagesFilterBar: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(MessageEntry.levelName(for: level))
+        .help(MessageEntry.levelTooltip(for: level))
     }
 
     // MARK: Subsystems menu
 
-    /// Eight subsystems collapse into one menu so the bar isn't a wall of colored
+    /// All subsystems collapse into one menu so the bar isn't a wall of colored
     /// pills. The label reflects state: all-on reads muted, a single selection
     /// shows that subsystem in its color, otherwise a count.
     private var subsystemMenu: some View {
@@ -208,28 +196,38 @@ private struct MessagesFilterBar: View {
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
+        // .borderlessButton otherwise renders the label at the default control
+        // font (~13pt), oversized next to the rest of the toolbar. controlSize
+        // + an explicit font pin it to match.
+        .controlSize(.small)
+        .font(.system(size: 11, weight: .medium))
         .fixedSize()
     }
 
     @ViewBuilder
     private var subsystemMenuLabel: some View {
-        let active = state.activeSubsystems
+        // The menu only lists subsystems that have entries (`presentSubsystems`),
+        // so the label must reflect those, not the full 8-subsystem domain.
+        // Otherwise toggling an absent subsystem would show a meaningless count
+        // like "(7)" next to a menu offering a single real subsystem.
+        let present = state.presentSubsystems
+        let shown = state.activeSubsystems.intersection(present)
         HStack(spacing: Spacing.xs) {
-            if active == MessagesContentState.allSubsystems {
+            if present.isEmpty || shown == present {
                 Text("Subsystems")
                     .foregroundStyle(theme.modelineBarFg.opacity(0.6))
-            } else if active.count == 1, let only = active.first {
+            } else if shown.count == 1, let only = shown.first {
                 Text(MessageEntry.subsystemName(for: only))
                     .foregroundStyle(MessageEntry.subsystemColor(for: only))
             } else {
-                Text("Subsystems (\(active.count))")
+                Text("Subsystems (\(shown.count)/\(present.count))")
                     .foregroundStyle(theme.accent)
             }
             Image(systemName: "chevron.down")
-                .font(.system(size: 7, weight: .bold))
+                .font(.system(size: 8, weight: .semibold))
                 .foregroundStyle(theme.modelineBarFg.opacity(0.4))
         }
-        .font(.system(size: 10, weight: .medium))
+        .font(.system(size: 11, weight: .medium))
     }
 
     // MARK: Search
@@ -240,7 +238,7 @@ private struct MessagesFilterBar: View {
                 .font(.system(size: 9))
                 .foregroundStyle(theme.modelineBarFg.opacity(0.4))
             TextField("Filter messages…", text: $state.searchText)
-                .font(.system(size: 10))
+                .font(.system(size: 11))
                 .textFieldStyle(.plain)
                 .frame(minWidth: 120, maxWidth: 220)
         }
@@ -266,20 +264,20 @@ private struct MessagesFilterBar: View {
                         .fill(MessageEntry.levelColor(for: item.level))
                         .frame(width: 6, height: 6)
                     Text("\(item.count)")
-                        .font(.system(size: 9, design: .monospaced))
+                        .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(MessageEntry.levelColor(for: item.level).opacity(0.85))
                 }
             }
             if state.isFiltering {
                 Text("filtered")
-                    .font(.system(size: 9))
+                    .font(.system(size: 10))
                     .foregroundStyle(theme.modelineBarFg.opacity(0.4))
             }
         }
     }
 
-    /// Counts of the currently shown entries by severity, errors first. Levels
-    /// with no visible entries are omitted to avoid a row of zeros.
+    /// Counts of the currently shown entries, ordered error → warning → info →
+    /// debug. Levels with no visible entries are omitted to avoid a row of zeros.
     private func levelCounts() -> [(level: UInt8, count: Int)] {
         var counts: [UInt8: Int] = [:]
         for entry in state.filteredEntries {
