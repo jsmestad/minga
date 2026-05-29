@@ -27,6 +27,7 @@ defmodule MingaEditor.PromptUI do
 
   @escape 27
   @enter 13
+  @tab 9
   @backspace 127
   @arrow_left 57_350
   @arrow_right 57_351
@@ -102,6 +103,9 @@ defmodule MingaEditor.PromptUI do
       @enter ->
         new_state = prompt.handler.on_submit(prompt.text, state)
         {close(new_state), nil}
+
+      @tab ->
+        {do_tab(state, prompt), nil}
 
       @backspace ->
         {do_backspace(state, prompt), nil}
@@ -205,6 +209,24 @@ defmodule MingaEditor.PromptUI do
     cursor_pos = {row, label_len + prompt.cursor}
 
     {draws, cursor_pos}
+  end
+
+  @spec do_tab(state(), PromptState.t()) :: state()
+  defp do_tab(state, prompt) do
+    handler = prompt.handler
+
+    if function_exported?(handler, :on_tab, 1) do
+      new_text = handler.on_tab(prompt.text)
+
+      if new_text == prompt.text do
+        state
+      else
+        new_cursor = String.length(new_text)
+        update_prompt(state, &%{&1 | text: new_text, cursor: new_cursor})
+      end
+    else
+      state
+    end
   end
 
   @spec do_backspace(state(), PromptState.t()) :: state()

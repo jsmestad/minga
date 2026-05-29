@@ -118,6 +118,22 @@ defmodule Minga.Project do
     :exit, _ -> File.cwd!()
   end
 
+  @doc """
+  Replaces the home directory prefix with `~` for display.
+
+  Handles both `$HOME/...` paths and `$HOME` exactly.
+  """
+  @spec collapse_home(String.t()) :: String.t()
+  def collapse_home(path) when is_binary(path) do
+    home = Path.expand("~")
+    String.replace_prefix(path, home, "~")
+  end
+
+  @doc "Expands a leading `~` to the home directory without normalizing the rest of the path."
+  @spec expand_home(String.t()) :: String.t()
+  def expand_home("~" <> rest), do: Path.expand("~") <> rest
+  def expand_home(path) when is_binary(path), do: path
+
   @doc "Returns the cached file list for the current project."
   @spec files(GenServer.server()) :: [String.t()]
   def files(server \\ __MODULE__) do
