@@ -126,6 +126,8 @@ defmodule MingaEditor.MergeConflict.RenderTest do
 
   defp state_with_buffer(buffer, opts \\ []) do
     viewport_left = Keyword.get(opts, :viewport_left, 0)
+    {:ok, _previous} = BufferProcess.set_option(buffer, :line_numbers, :absolute)
+    {:ok, _previous} = BufferProcess.set_option(buffer, :wrap, false)
     window = Window.new(1, buffer, 24, 80)
     window = %{window | viewport: %{window.viewport | left: viewport_left}}
 

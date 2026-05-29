@@ -6,7 +6,7 @@ The rendering pipeline has too many parts, too many lines of code, and is unnece
 
 The rendering simplification now has three completed foundations and one active cleanup track. First, GUI buffer windows use `Minga.RenderModel.Window` with BEAM-authored row IDs, content epochs, and Swift atlas reuse keyed by stable row identity instead of display row. Second, production TUI command building routes through `Minga.RenderModel`: buffer windows use the shared TUI window adapter, and remaining cell-grid chrome is narrowed into `Minga.RenderModel.UI.CellLayer` compatibility data instead of being read from `DisplayList.Frame` during emit. Third, retained GUI deltas are implemented for overlays, viewport snapshots, and row snapshots with `window_id + content_epoch` guards and full-frame recovery after an un-applied delta.
 
-The active cleanup track is semantic GUI chrome. The first large wave is complete: status bar, tab bar, workspaces, sidebars, file tree, picker, and minibuffer now use core semantic render models, and `Minga.Frontend.Adapter.GUI.*` owns their wire encoding. Byte-for-byte parity tests keep the native GUI protocol stable while the legacy `ProtocolGUI.encode_gui_*` wrappers remain as temporary compatibility debt. The remaining debt is narrower now: agent-heavy surfaces, popups, completion/signature help, observatory, board, extension panels, and final `ProtocolGUI` cleanup still need the same semantic-model migration.
+The active cleanup track is semantic GUI chrome. The first waves are complete: status bar, tab bar, workspaces, sidebars, file tree, picker, minibuffer, completion, signature help, hover popup, float popup, extension overlay, extension panel, and observatory now use core semantic render models, and `Minga.Frontend.Adapter.GUI.*` owns their wire encoding. Byte-for-byte parity tests keep the native GUI protocol stable while the legacy `ProtocolGUI.encode_gui_*` wrappers remain as temporary compatibility debt. The remaining semantic-model debt is now concentrated in agent-heavy surfaces, board, and final `ProtocolGUI` cleanup.
 
 The remediation plan below is the source of truth for completing the remaining simplification work and keeping retained GUI deltas aligned with the semantic model boundary.
 
@@ -30,7 +30,7 @@ The remaining problem is that several structures are named like render models bu
 
 The remediation now has four active goals:
 
-1. Finish replacing pre-encoded UI payloads with semantic core models. The status/tab/workspace/sidebar/file-tree/picker/minibuffer wave is complete; the remaining surfaces are listed below.
+1. Finish replacing pre-encoded UI payloads with semantic core models. The non-agent chrome waves are complete; the remaining surfaces are listed below.
 2. Preserve the top-level `Minga.RenderModel` frame as the single value passed through GUI adaptation, instead of reintroducing separate `ui_model`, `window_models`, `metal_ui_cmds`, or `adapter_cmds` render truths.
 3. Finish the GUI window model contract: wrapped visual rows, pane geometry, input hit regions, non-buffer window surfaces, agent ownership boundaries, content epochs, and reset semantics.
 4. Continue retained rendering only through BEAM-authored stable row IDs, content epochs, and conservative full-frame recovery paths.
@@ -123,31 +123,28 @@ Already semantic or mostly semantic:
 - `file_tree`
 - `picker`
 - `minibuffer`
-- `gutter_separator`
-- `split_separators`
-
-Still pre-encoded and must be replaced:
-
 - `completion`
 - `signature_help`
 - `hover_popup`
 - `float_popup`
 - `extension_overlay`
 - `extension_panel`
+- `observatory`
+- `gutter_separator`
+- `split_separators`
+
+Still pre-encoded and must be replaced:
+
 - `agent_chat`
 - `bottom_panel`
 - `change_summary`
 - `edit_timeline`
 - `board`
-- `observatory`
 
 Recommended next order:
 
-1. Completion and signature help. These are the remaining focused input surfaces after picker and minibuffer moved to semantic models.
-2. Popups and extensions: hover popup, float popup, extension overlay, extension panel. These prove extension surfaces can publish model data without editor protocol surgery.
-3. Agent surfaces: agent chat, bottom panel, change summary, edit timeline, board. These are the largest and should move with the MingaAgent boundary cleanup in step 4.
-4. Observatory. This is standalone but should move with the same semantic model and core encoder pattern.
-5. Cleanup: delete migrated `ProtocolGUI.encode_gui_*` compatibility functions, split remaining protocol helpers into focused core modules, and remove compatibility tests that only prove deleted paths.
+1. Agent surfaces: agent chat, bottom panel, change summary, edit timeline, board. These are the largest and should move with the MingaAgent boundary cleanup in step 4.
+2. Cleanup: delete migrated `ProtocolGUI.encode_gui_*` compatibility functions, split remaining protocol helpers into focused core modules, and remove compatibility tests that only prove deleted paths.
 
 Acceptance criteria per component:
 
@@ -554,7 +551,7 @@ The old phase labels are now historical. They helped sequence the first implemen
 - **Stable row identity:** Full-frame GUI content carries BEAM-authored `row_id` values. Swift keys retained row resources by `window_id + row_id`, with `content_epoch + content_hash` as the invalidation hash.
 - **TUI render-model closure:** Production TUI emit builds commands from `Minga.RenderModel`. Buffer windows use the shared TUI window adapter, and remaining cell-grid chrome is isolated in `Minga.RenderModel.UI.CellLayer` compatibility data.
 - **Retained GUI deltas:** `gui_window_overlay_delta` (0xA0), `gui_window_viewport_delta` (0xA1), and `gui_window_rows_delta` (0xA2) carry `window_id + content_epoch`. Swift ignores stale deltas, drops retained state when referenced rows are missing, and BEAM follows failed row or viewport deltas with full 0x80 recovery frames.
-- **First semantic chrome wave:** Status bar, tab bar, workspaces, sidebars, file tree, picker, and minibuffer now use semantic core render models. `Minga.Frontend.Adapter.GUI.*` owns their wire encoding, with byte-for-byte parity tests against the legacy protocol helpers.
+- **Semantic non-agent chrome:** Status bar, tab bar, workspaces, sidebars, file tree, picker, minibuffer, completion, signature help, hover popup, float popup, extension overlay, extension panel, and observatory now use semantic core render models. `Minga.Frontend.Adapter.GUI.*` owns their wire encoding, with byte-for-byte parity tests against the legacy protocol helpers.
 
 ### Remaining work tracks
 
@@ -584,33 +581,30 @@ Already semantic or mostly semantic:
 - `file_tree`
 - `picker`
 - `minibuffer`
-- `gutter_separator`
-- `split_separators`
-
-Still pre-encoded and must be replaced:
-
 - `completion`
 - `signature_help`
 - `hover_popup`
 - `float_popup`
 - `extension_overlay`
 - `extension_panel`
+- `observatory`
+- `gutter_separator`
+- `split_separators`
+
+Still pre-encoded and must be replaced:
+
 - `agent_chat`
 - `bottom_panel`
 - `change_summary`
 - `edit_timeline`
 - `board`
-- `observatory`
 
 Recommended next order:
 
 | Order | Group | Components | Why this order |
 |-------|-------|------------|----------------|
-| 1 | Focused input | completion, signature help | These are the remaining focused input surfaces after picker and minibuffer moved to semantic models |
-| 2 | Popups and extensions | hover popup, float popup, extension overlay, extension panel | Proves extension surfaces can publish model data without editor protocol surgery |
-| 3 | Agent surfaces | agent chat, bottom panel, change summary, edit timeline, board | Largest group, should move with the MingaAgent boundary cleanup |
-| 4 | Observatory | observatory | Standalone, but should follow the same semantic model and core encoder pattern |
-| 5 | Protocol cleanup | migrated `ProtocolGUI.encode_gui_*` wrappers | Delete compatibility wrappers and tests once no production or compatibility caller needs them |
+| 1 | Agent surfaces | agent chat, bottom panel, change summary, edit timeline, board | Largest group, should move with the MingaAgent boundary cleanup |
+| 2 | Protocol cleanup | migrated `ProtocolGUI.encode_gui_*` wrappers | Delete compatibility wrappers and tests once no production or compatibility caller needs them |
 
 Acceptance criteria per remaining component:
 

@@ -1,81 +1,78 @@
 defmodule MingaEditor.RenderModel.UI.ObservatoryBuilderTest do
   use ExUnit.Case, async: true
 
-  alias MingaEditor.RenderModel.UI.ObservatoryBuilder
   alias Minga.RenderModel.UI.Observatory
-  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
+  alias Minga.RenderModel.UI.Observatory.Node
+  alias Minga.SystemObserver.ProcessSnapshot
+  alias Minga.SystemObserver.TreeNode
   alias MingaEditor.Observatory.Data, as: ObservatoryData
-
-  @op_gui_observatory Minga.Protocol.Opcodes.gui_observatory()
+  alias MingaEditor.RenderModel.UI.ObservatoryBuilder
 
   describe "build/1" do
     test "builds hidden observatory when not visible" do
-      shell_state = %{}
+      model = ObservatoryBuilder.build(%{})
 
-      model = ObservatoryBuilder.build(shell_state)
-
-      assert %Observatory{visible: false, fingerprint: :hidden} = model
-      assert is_binary(model.encoded)
-      assert <<@op_gui_observatory, _rest::binary>> = model.encoded
+      assert %Observatory{} = model
+      refute model.visible?
+      assert model.nodes == []
     end
 
     test "builds hidden observatory when observatory_visible is false" do
-      shell_state = %{observatory_visible: false}
+      model = ObservatoryBuilder.build(%{observatory_visible: false})
 
-      model = ObservatoryBuilder.build(shell_state)
-
-      assert %Observatory{visible: false, fingerprint: :hidden} = model
+      refute model.visible?
     end
 
     test "builds visible observatory with data" do
-      data = ObservatoryData.visible(nil, [])
+      data =
+        ObservatoryData.visible(tree_node(), [%{processes: %{self() => %{message_queue_len: 5}}}])
+
       shell_state = %{observatory_visible: true, observatory_data: data}
 
       model = ObservatoryBuilder.build(shell_state)
 
-      assert %Observatory{visible: true} = model
-      assert is_integer(model.fingerprint)
-      assert is_binary(model.encoded)
-      assert <<@op_gui_observatory, _rest::binary>> = model.encoded
+      assert %Observatory{} = model
+      assert model.visible?
+
+      assert [
+               %Node{
+                 pid: pid,
+                 parent_pid: nil,
+                 name: ":minga_test",
+                 process_class: :worker,
+                 depth: 0,
+                 memory: 1024,
+                 message_queue_len: 1,
+                 reductions: 10,
+                 sparkline_values: [0.5]
+               }
+             ] = model.nodes
+
+      assert pid == self()
     end
 
-    test "builds visible observatory with nil data (defaults to empty visible)" do
+    test "builds visible observatory with nil data as empty visible" do
       shell_state = %{observatory_visible: true, observatory_data: nil}
 
       model = ObservatoryBuilder.build(shell_state)
 
-      assert %Observatory{visible: true} = model
+      assert model.visible?
+      assert model.nodes == []
     end
+  end
 
-    test "produces byte-identical output to legacy for hidden state" do
-      legacy_binary = ProtocolGUI.encode_gui_observatory(ObservatoryData.hidden())
+  defp tree_node do
+    snapshot = %ProcessSnapshot{
+      memory: 1024,
+      message_queue_len: 1,
+      reductions: 10,
+      current_function: {MingaEditor, :loop, 1},
+      registered_name: :minga_test,
+      parent_pid: nil,
+      child_type: :worker,
+      process_class: :worker
+    }
 
-      model = ObservatoryBuilder.build(%{})
-
-      assert model.encoded == legacy_binary,
-             "Hidden observatory: new builder output does not match legacy output"
-    end
-
-    test "produces byte-identical output to legacy for visible with nil data" do
-      payload = ObservatoryData.visible(nil, [])
-      legacy_binary = ProtocolGUI.encode_gui_observatory(payload)
-
-      shell_state = %{observatory_visible: true, observatory_data: nil}
-      model = ObservatoryBuilder.build(shell_state)
-
-      assert model.encoded == legacy_binary,
-             "Visible observatory with nil data: new builder output does not match legacy output"
-    end
-
-    test "produces byte-identical output to legacy for visible with data" do
-      data = ObservatoryData.visible(nil, [])
-      legacy_binary = ProtocolGUI.encode_gui_observatory(data)
-
-      shell_state = %{observatory_visible: true, observatory_data: data}
-      model = ObservatoryBuilder.build(shell_state)
-
-      assert model.encoded == legacy_binary,
-             "Visible observatory with data: new builder output does not match legacy output"
-    end
+    %TreeNode{pid: self(), snapshot: snapshot, children: [], depth: 0}
   end
 end

@@ -2,25 +2,31 @@ defmodule Minga.RenderModel.UI.ExtensionOverlayTest do
   use ExUnit.Case, async: true
 
   alias Minga.RenderModel.UI.ExtensionOverlay
+  alias Minga.RenderModel.UI.ExtensionOverlay.Entry
 
   describe "%ExtensionOverlay{}" do
-    test "requires encoded and fingerprint" do
-      model = %ExtensionOverlay{encoded: <<>>, fingerprint: 12_345}
+    test "defaults to no entries" do
+      model = %ExtensionOverlay{}
 
-      assert model.encoded == <<>>
-      assert model.fingerprint == 12_345
+      assert model.entries == []
     end
 
-    test "raises when required fields are missing" do
-      assert_raise ArgumentError, fn ->
-        struct!(ExtensionOverlay, %{})
-      end
-    end
+    test "stores semantic overlay entries" do
+      entry = %Entry{
+        extension: "demo",
+        overlay_id: "cursor",
+        window_id: 1,
+        row: 2,
+        col: 3,
+        shape: :cursor,
+        fg: 0x51AFEF,
+        opacity: 102,
+        content: "AI"
+      }
 
-    test "accepts integer fingerprint" do
-      model = %ExtensionOverlay{encoded: <<0x9C, 0::16, 0>>, fingerprint: 99_999}
+      model = %ExtensionOverlay{entries: [entry]}
 
-      assert model.fingerprint == 99_999
+      assert [%Entry{extension: "demo", shape: :cursor, content: "AI"}] = model.entries
     end
   end
 end

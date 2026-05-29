@@ -1,18 +1,21 @@
 defmodule Minga.RenderModel.UI.Completion do
   @moduledoc """
-  Pre-encoded completion model.
-
-  The completion wire format includes kind bytes, label/detail strings,
-  icon metadata, match positions, and cursor screen position. Rather than
-  duplicating that encoding in core, the builder pre-encodes the binary
-  and stores it here along with a fingerprint for change detection.
+  Semantic completion popup model for GUI adapters.
   """
 
+  alias Minga.RenderModel.UI.Completion.Item
+
   @type t :: %__MODULE__{
-          encoded: binary(),
-          fingerprint: integer()
+          visible?: boolean(),
+          cursor_row: non_neg_integer(),
+          cursor_col: non_neg_integer(),
+          selected_offset: non_neg_integer(),
+          items: [Item.t()]
         }
 
-  @enforce_keys [:encoded, :fingerprint]
-  defstruct [:encoded, :fingerprint]
+  defstruct visible?: false,
+            cursor_row: 0,
+            cursor_col: 0,
+            selected_offset: 0,
+            items: []
 end
