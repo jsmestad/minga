@@ -825,7 +825,6 @@ Use this as the minimum bar. If Doom does it, we should do it:
 When implementing features, completing planned work, or changing architecture:
 
 - **`docs/ARCHITECTURE.md`** — Update when adding new process types, protocol opcodes, or changing supervision structure.
-- **`docs/PERFORMANCE.md`** — Mark optimizations as completed when done.
 
 ### Documentation voice and style
 

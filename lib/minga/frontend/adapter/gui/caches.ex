@@ -31,7 +31,10 @@ defmodule Minga.Frontend.Adapter.GUI.Caches do
           last_split_separators_fp: integer() | nil,
           last_window_fps: %{non_neg_integer() => integer()},
           last_window_content_fps: %{non_neg_integer() => integer()},
-          last_window_overlay_fps: %{non_neg_integer() => integer()}
+          last_window_overlay_fps: %{non_neg_integer() => integer()},
+          last_window_content_epochs: %{non_neg_integer() => non_neg_integer()},
+          last_window_row_keys: %{non_neg_integer() => [{non_neg_integer(), non_neg_integer()}]},
+          pending_window_delta_ids: MapSet.t(non_neg_integer())
         }
 
   defstruct last_theme_fp: nil,
@@ -63,7 +66,10 @@ defmodule Minga.Frontend.Adapter.GUI.Caches do
             last_split_separators_fp: nil,
             last_window_fps: %{},
             last_window_content_fps: %{},
-            last_window_overlay_fps: %{}
+            last_window_overlay_fps: %{},
+            last_window_content_epochs: %{},
+            last_window_row_keys: %{},
+            pending_window_delta_ids: MapSet.new()
 
   @spec new() :: t()
   def new, do: %__MODULE__{}

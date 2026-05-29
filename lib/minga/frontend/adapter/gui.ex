@@ -142,6 +142,8 @@ defmodule Minga.Frontend.Adapter.GUI do
 
     previous_content_fp = Map.get(caches.last_window_content_fps, window.window_id)
     previous_overlay_fp = Map.get(caches.last_window_overlay_fps, window.window_id)
+    previous_content_epoch = Map.get(caches.last_window_content_epochs, window.window_id)
+    previous_row_keys = Map.get(caches.last_window_row_keys, window.window_id, [])
 
     change = %{
       metadata: metadata,
@@ -149,7 +151,10 @@ defmodule Minga.Frontend.Adapter.GUI do
       content_fp: content_fp,
       overlay_fp: overlay_fp,
       previous_content_fp: previous_content_fp,
-      previous_overlay_fp: previous_overlay_fp
+      previous_overlay_fp: previous_overlay_fp,
+      previous_content_epoch: previous_content_epoch,
+      previous_row_keys: previous_row_keys,
+      delta_pending?: MapSet.member?(caches.pending_window_delta_ids, window.window_id)
     }
 
     encode_window_change(window, cmds, caches, change)
@@ -161,22 +166,34 @@ defmodule Minga.Frontend.Adapter.GUI do
          %RenderModel.Window{} = window,
          cmds,
          %Caches{} = caches,
+         %{delta_pending?: true} = change
+       ) do
+    encode_full_window_change(window, cmds, caches, change)
+  end
+
+  defp encode_window_change(
+         %RenderModel.Window{} = window,
+         cmds,
+         %Caches{} = caches,
          %{
-           metadata: metadata,
-           metadata_metrics: metadata_metrics,
            content_fp: content_fp,
-           overlay_fp: overlay_fp,
-           previous_content_fp: previous_content_fp
-         }
+           previous_content_fp: previous_content_fp,
+           previous_content_epoch: previous_content_epoch
+         } = change
+       )
+       when previous_content_fp != content_fp and previous_content_epoch == window.content_epoch and
+              not window.full_refresh do
+    encode_delta_window_change(window, cmds, caches, change)
+  end
+
+  defp encode_window_change(
+         %RenderModel.Window{} = window,
+         cmds,
+         %Caches{} = caches,
+         %{content_fp: content_fp, previous_content_fp: previous_content_fp} = change
        )
        when previous_content_fp != content_fp do
-    {content, content_metrics} = WindowEncoder.encode_window_content_with_metrics(window)
-    encoded = [content | metadata]
-
-    caches = put_window_fingerprints(caches, window.window_id, content_fp, overlay_fp)
-
-    {Enum.reverse(encoded) ++ cmds, caches,
-     merge_window_metrics(content_metrics, metadata_metrics)}
+    encode_full_window_change(window, cmds, caches, change)
   end
 
   defp encode_window_change(
@@ -193,7 +210,7 @@ defmodule Minga.Frontend.Adapter.GUI do
        )
        when previous_overlay_fp != overlay_fp do
     delta = WindowEncoder.encode_overlay_delta(window)
-    caches = put_window_fingerprints(caches, window.window_id, content_fp, overlay_fp)
+    caches = put_window_fingerprints(caches, window.window_id, content_fp, overlay_fp, nil)
     encoded = [delta | metadata]
 
     {Enum.reverse(encoded) ++ cmds, caches, add_overlay_delta_metrics(metadata_metrics, delta)}
@@ -211,13 +228,118 @@ defmodule Minga.Frontend.Adapter.GUI do
     {Enum.reverse(encoded) ++ cmds, caches, add_overlay_delta_metrics(metadata_metrics, delta)}
   end
 
-  @spec put_window_fingerprints(Caches.t(), non_neg_integer(), integer(), integer()) :: Caches.t()
-  defp put_window_fingerprints(%Caches{} = caches, window_id, content_fp, overlay_fp) do
-    %{
+  @spec encode_full_window_change(RenderModel.Window.t(), [binary()], Caches.t(), map()) ::
+          {[binary()], Caches.t(), window_metrics()}
+  defp encode_full_window_change(
+         %RenderModel.Window{} = window,
+         cmds,
+         %Caches{} = caches,
+         %{
+           metadata: metadata,
+           metadata_metrics: metadata_metrics,
+           content_fp: content_fp,
+           overlay_fp: overlay_fp
+         }
+       ) do
+    {content, content_metrics} = WindowEncoder.encode_window_content_with_metrics(window)
+    encoded = [content | metadata]
+
+    caches = put_window_fingerprints(caches, window.window_id, content_fp, overlay_fp, window)
+
+    {Enum.reverse(encoded) ++ cmds, caches,
+     merge_window_metrics(content_metrics, metadata_metrics)}
+  end
+
+  @spec encode_delta_window_change(RenderModel.Window.t(), [binary()], Caches.t(), map()) ::
+          {[binary()], Caches.t(), window_metrics()}
+  defp encode_delta_window_change(
+         %RenderModel.Window{} = window,
+         cmds,
+         %Caches{} = caches,
+         %{
+           metadata: metadata,
+           metadata_metrics: metadata_metrics,
+           content_fp: content_fp,
+           overlay_fp: overlay_fp,
+           previous_row_keys: previous_row_keys
+         }
+       ) do
+    previous_hashes = Map.new(previous_row_keys)
+
+    {delta, _has_refs?} =
+      if viewport_delta?(window.rows, previous_hashes),
+        do: WindowEncoder.encode_viewport_delta(window, previous_hashes),
+        else: WindowEncoder.encode_rows_delta(window, previous_hashes)
+
+    encoded = [delta | metadata]
+
+    caches = put_window_delta_pending(caches, window.window_id, content_fp, overlay_fp, window)
+    metrics = add_rows_delta_metrics(metadata_metrics, delta)
+
+    {Enum.reverse(encoded) ++ cmds, caches, metrics}
+  end
+
+  @spec viewport_delta?([RenderModel.Window.Row.t()], %{non_neg_integer() => non_neg_integer()}) ::
+          boolean()
+  defp viewport_delta?(rows, previous_hashes) do
+    Enum.all?(rows, fn row ->
+      case Map.fetch(previous_hashes, row.row_id) do
+        {:ok, hash} -> hash == row.content_hash
+        :error -> true
+      end
+    end)
+  end
+
+  @spec put_window_fingerprints(
+          Caches.t(),
+          non_neg_integer(),
+          integer(),
+          integer(),
+          RenderModel.Window.t() | nil
+        ) :: Caches.t()
+  defp put_window_fingerprints(%Caches{} = caches, window_id, content_fp, overlay_fp, window) do
+    caches = %{
       caches
       | last_window_fps: Map.put(caches.last_window_fps, window_id, content_fp),
         last_window_content_fps: Map.put(caches.last_window_content_fps, window_id, content_fp),
-        last_window_overlay_fps: Map.put(caches.last_window_overlay_fps, window_id, overlay_fp)
+        last_window_overlay_fps: Map.put(caches.last_window_overlay_fps, window_id, overlay_fp),
+        pending_window_delta_ids: MapSet.delete(caches.pending_window_delta_ids, window_id)
+    }
+
+    put_window_snapshot(caches, window_id, window)
+  end
+
+  @spec put_window_delta_pending(
+          Caches.t(),
+          non_neg_integer(),
+          integer(),
+          integer(),
+          RenderModel.Window.t()
+        ) :: Caches.t()
+  defp put_window_delta_pending(%Caches{} = caches, window_id, content_fp, overlay_fp, window) do
+    caches = %{
+      caches
+      | last_window_fps: Map.put(caches.last_window_fps, window_id, content_fp),
+        last_window_content_fps: Map.put(caches.last_window_content_fps, window_id, content_fp),
+        last_window_overlay_fps: Map.put(caches.last_window_overlay_fps, window_id, overlay_fp),
+        pending_window_delta_ids: MapSet.put(caches.pending_window_delta_ids, window_id)
+    }
+
+    put_window_snapshot(caches, window_id, window)
+  end
+
+  @spec put_window_snapshot(Caches.t(), non_neg_integer(), RenderModel.Window.t() | nil) ::
+          Caches.t()
+  defp put_window_snapshot(caches, _window_id, nil), do: caches
+
+  defp put_window_snapshot(caches, window_id, %RenderModel.Window{} = window) do
+    row_keys = Enum.map(window.rows, &{&1.row_id, &1.content_hash})
+
+    %{
+      caches
+      | last_window_content_epochs:
+          Map.put(caches.last_window_content_epochs, window_id, window.content_epoch),
+        last_window_row_keys: Map.put(caches.last_window_row_keys, window_id, row_keys)
     }
   end
 
@@ -261,6 +383,11 @@ defmodule Minga.Frontend.Adapter.GUI do
   @spec add_overlay_delta_metrics(window_metrics(), binary()) :: window_metrics()
   defp add_overlay_delta_metrics(metrics, delta) when is_binary(delta) do
     %{metrics | overlay_bytes: metrics.overlay_bytes + byte_size(delta)}
+  end
+
+  @spec add_rows_delta_metrics(window_metrics(), binary()) :: window_metrics()
+  defp add_rows_delta_metrics(metrics, delta) when is_binary(delta) do
+    %{metrics | row_bytes: metrics.row_bytes + byte_size(delta)}
   end
 
   @spec merge_window_metrics(window_metrics(), window_metrics()) :: window_metrics()

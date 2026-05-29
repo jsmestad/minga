@@ -738,6 +738,148 @@ struct CommandDispatcherRoutingTests {
         #expect(dispatcher.frameState.cursorVisible == true)
     }
 
+    @Test("guiWindowRowsDelta updates retained rows and marks window live")
+    @MainActor func guiWindowRowsDeltaRouting() {
+        let (dispatcher, gui) = makeDispatcher()
+        let retained = GUIVisualRow(rowType: .normal, rowId: 1, bufLine: 0, contentHash: 11, text: "old", spans: [])
+        let replacement = GUIVisualRow(rowType: .normal, rowId: 2, bufLine: 1, contentHash: 22, text: "new", spans: [])
+        gui.windowContents[7] = GUIWindowContent(
+            windowId: 7, fullRefresh: false, contentEpoch: 42,
+            cursorRow: 5, cursorCol: 10, cursorShape: .block,
+            rows: [retained], selection: nil,
+            searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: []
+        )
+
+        dispatcher.dispatch(.guiWindowRowsDelta(data: GUIWindowRowsDelta(
+            windowId: 7,
+            contentEpoch: 42,
+            cursorVisible: true,
+            cursorRow: 6,
+            cursorCol: 11,
+            cursorShape: .beam,
+            scrollLeft: 2,
+            rows: [.reference(rowId: 1, contentHash: 11), .full(replacement)],
+            selection: nil,
+            searchMatches: [],
+            diagnosticUnderlines: [],
+            documentHighlights: [],
+            lineAnnotations: [],
+            paneGeometry: nil,
+            cursorline: nil
+        )))
+
+        #expect(gui.windowContents[7]?.rows.map(\.text) == ["old", "new"])
+        #expect(gui.windowContents[7]?.scrollLeft == 2)
+        #expect(gui.windowContents[7]?.cursorShape == .beam)
+        #expect(dispatcher.currentFrameWindowIds.contains(7))
+    }
+
+    @Test("guiWindowViewportDelta updates retained rows and marks window live")
+    @MainActor func guiWindowViewportDeltaRouting() {
+        let (dispatcher, gui) = makeDispatcher()
+        let retained = GUIVisualRow(rowType: .normal, rowId: 1, bufLine: 0, contentHash: 11, text: "old", spans: [])
+        gui.windowContents[7] = GUIWindowContent(
+            windowId: 7, fullRefresh: false, contentEpoch: 42,
+            cursorRow: 5, cursorCol: 10, cursorShape: .block,
+            rows: [retained], selection: nil,
+            searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: []
+        )
+
+        dispatcher.dispatch(.guiWindowViewportDelta(data: GUIWindowRowsDelta(
+            windowId: 7,
+            contentEpoch: 42,
+            cursorVisible: true,
+            cursorRow: 6,
+            cursorCol: 11,
+            cursorShape: .beam,
+            scrollLeft: 2,
+            rows: [.reference(rowId: 1, contentHash: 11)],
+            selection: nil,
+            searchMatches: [],
+            diagnosticUnderlines: [],
+            documentHighlights: [],
+            lineAnnotations: [],
+            paneGeometry: nil,
+            cursorline: nil
+        )))
+
+        #expect(gui.windowContents[7]?.rows.map(\.text) == ["old"])
+        #expect(gui.windowContents[7]?.scrollLeft == 2)
+        #expect(gui.windowContents[7]?.cursorShape == .beam)
+        #expect(dispatcher.currentFrameWindowIds.contains(7))
+    }
+
+    @Test("stale guiWindowRowsDelta is ignored without clearing current content")
+    @MainActor func staleGuiWindowRowsDeltaIgnored() {
+        let (dispatcher, gui) = makeDispatcher()
+        let retained = GUIVisualRow(rowType: .normal, rowId: 1, bufLine: 0, contentHash: 11, text: "old", spans: [])
+        let content = GUIWindowContent(
+            windowId: 7, fullRefresh: false, contentEpoch: 42,
+            cursorRow: 5, cursorCol: 10, cursorShape: .block,
+            rows: [retained], selection: nil,
+            searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: []
+        )
+        gui.windowContents[7] = content
+
+        dispatcher.dispatch(.guiWindowRowsDelta(data: GUIWindowRowsDelta(
+            windowId: 7,
+            contentEpoch: 41,
+            cursorVisible: true,
+            cursorRow: 6,
+            cursorCol: 11,
+            cursorShape: .beam,
+            scrollLeft: 0,
+            rows: [.reference(rowId: 1, contentHash: 11)],
+            selection: nil,
+            searchMatches: [],
+            diagnosticUnderlines: [],
+            documentHighlights: [],
+            lineAnnotations: [],
+            paneGeometry: nil,
+            cursorline: nil
+        )))
+
+        #expect(gui.windowContents[7] === content)
+        #expect(dispatcher.currentFrameWindowIds.contains(7) == false)
+    }
+
+    @Test("guiWindowRowsDelta missing retained ref clears content for full-refresh recovery")
+    @MainActor func guiWindowRowsDeltaMissingRefClearsContent() {
+        let (dispatcher, gui) = makeDispatcher()
+        let retained = GUIVisualRow(rowType: .normal, rowId: 1, bufLine: 0, contentHash: 11, text: "old", spans: [])
+        gui.windowContents[7] = GUIWindowContent(
+            windowId: 7, fullRefresh: false, contentEpoch: 42,
+            cursorRow: 5, cursorCol: 10, cursorShape: .block,
+            rows: [retained], selection: nil,
+            searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: []
+        )
+
+        dispatcher.dispatch(.guiWindowRowsDelta(data: GUIWindowRowsDelta(
+            windowId: 7,
+            contentEpoch: 42,
+            cursorVisible: true,
+            cursorRow: 6,
+            cursorCol: 11,
+            cursorShape: .beam,
+            scrollLeft: 0,
+            rows: [.reference(rowId: 999, contentHash: 11)],
+            selection: nil,
+            searchMatches: [],
+            diagnosticUnderlines: [],
+            documentHighlights: [],
+            lineAnnotations: [],
+            paneGeometry: nil,
+            cursorline: nil
+        )))
+
+        #expect(gui.windowContents[7] == nil)
+        #expect(dispatcher.currentFrameWindowIds.contains(7) == false)
+    }
+
     @Test("guiGutterSeparator updates frameState gutter state")
     @MainActor func guiGutterSepRouting() {
         let (dispatcher, _) = makeDispatcher()

@@ -231,6 +231,79 @@ struct WindowContentBuilder {
 @Suite("GUI Window Content Decoder")
 struct WindowContentDecoderTests {
 
+    private func buildRowsDelta(opcode: UInt8, includeHeader: Bool = true, includeRows: Bool = true) -> Data {
+        var sections: [Data] = []
+
+        if includeHeader {
+            var header = Data()
+            deltaAppendU16(&header, 7)
+            deltaAppendU32(&header, 42)
+            header.append(1)
+            deltaAppendU16(&header, 1)
+            deltaAppendU16(&header, 3)
+            header.append(1)
+            deltaAppendU16(&header, 2)
+            sections.append(deltaSection(0x01, header))
+        }
+
+        if includeRows {
+            var rows = Data()
+            deltaAppendU16(&rows, 2)
+            rows.append(0)
+            deltaAppendU64(&rows, 1)
+            deltaAppendU32(&rows, 11)
+            rows.append(1)
+            rows.append(0)
+            deltaAppendU64(&rows, 2)
+            deltaAppendU32(&rows, 1)
+            deltaAppendU32(&rows, 22)
+            let text = Data("new".utf8)
+            deltaAppendU32(&rows, UInt32(text.count))
+            rows.append(text)
+            deltaAppendU16(&rows, 0)
+            sections.append(deltaSection(0x02, rows))
+        }
+
+        var data = Data()
+        data.append(opcode)
+        data.append(UInt8(sections.count))
+        for section in sections {
+            data.append(section)
+        }
+        return data
+    }
+
+    private func deltaSection(_ id: UInt8, _ payload: Data) -> Data {
+        var section = Data()
+        section.append(id)
+        deltaAppendU16(&section, UInt16(payload.count))
+        section.append(payload)
+        return section
+    }
+
+    private func deltaAppendU16(_ data: inout Data, _ value: UInt16) {
+        data.append(UInt8(value >> 8))
+        data.append(UInt8(value & 0xFF))
+    }
+
+    private func deltaAppendU32(_ data: inout Data, _ value: UInt32) {
+        data.append(UInt8((value >> 24) & 0xFF))
+        data.append(UInt8((value >> 16) & 0xFF))
+        data.append(UInt8((value >> 8) & 0xFF))
+        data.append(UInt8(value & 0xFF))
+    }
+
+    private func deltaAppendU64(_ data: inout Data, _ value: UInt64) {
+        data.append(UInt8((value >> 56) & 0xFF))
+        data.append(UInt8((value >> 48) & 0xFF))
+        data.append(UInt8((value >> 40) & 0xFF))
+        data.append(UInt8((value >> 32) & 0xFF))
+        data.append(UInt8((value >> 24) & 0xFF))
+        data.append(UInt8((value >> 16) & 0xFF))
+        data.append(UInt8((value >> 8) & 0xFF))
+        data.append(UInt8(value & 0xFF))
+    }
+
     @Test("Decode empty window (0 rows, no selection, no matches, no diagnostics)")
     func decodeEmptyWindow() throws {
         let builder = WindowContentBuilder(windowId: 42, cursorRow: 0, cursorCol: 0)
@@ -623,6 +696,151 @@ struct WindowContentDecoderTests {
         let (_, size) = try decodeCommand(data: data, offset: 0)
 
         #expect(size == data.count, "Decoder should consume all \(data.count) bytes, consumed \(size)")
+    }
+
+    @Test("Decode viewport delta with retained ref and full row entries")
+    func decodeViewportDelta() throws {
+        let data = buildRowsDelta(opcode: OP_GUI_WINDOW_VIEWPORT_DELTA)
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+
+        #expect(size == data.count)
+        guard case .guiWindowViewportDelta(let delta) = cmd else {
+            Issue.record("Expected .guiWindowViewportDelta"); return
+        }
+
+        #expect(delta.windowId == 7)
+        #expect(delta.contentEpoch == 42)
+        #expect(delta.cursorVisible == true)
+        #expect(delta.cursorRow == 1)
+        #expect(delta.cursorCol == 3)
+        #expect(delta.cursorShape == .beam)
+        #expect(delta.scrollLeft == 2)
+        #expect(delta.rows.count == 2)
+
+        guard case .reference(let rowId, let contentHash) = delta.rows[0] else {
+            Issue.record("Expected retained row ref"); return
+        }
+        #expect(rowId == 1)
+        #expect(contentHash == 11)
+
+        guard case .full(let row) = delta.rows[1] else {
+            Issue.record("Expected full row"); return
+        }
+        #expect(row.rowId == 2)
+        #expect(row.contentHash == 22)
+        #expect(row.text == "new")
+    }
+
+    @Test("Decode rows delta with retained ref and full row entries")
+    func decodeRowsDelta() throws {
+        let data = buildRowsDelta(opcode: OP_GUI_WINDOW_ROWS_DELTA)
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+
+        #expect(size == data.count)
+        guard case .guiWindowRowsDelta(let delta) = cmd else {
+            Issue.record("Expected .guiWindowRowsDelta"); return
+        }
+
+        #expect(delta.windowId == 7)
+        #expect(delta.contentEpoch == 42)
+        #expect(delta.rows.count == 2)
+    }
+
+    @Test("Rows delta decoder rejects missing required sections")
+    func decodeRowsDeltaMissingRequiredSections() throws {
+        #expect(throws: ProtocolDecodeError.self) {
+            _ = try decodeCommand(data: buildRowsDelta(opcode: OP_GUI_WINDOW_ROWS_DELTA, includeHeader: false), offset: 0)
+        }
+
+        #expect(throws: ProtocolDecodeError.self) {
+            _ = try decodeCommand(data: buildRowsDelta(opcode: OP_GUI_WINDOW_ROWS_DELTA, includeRows: false), offset: 0)
+        }
+    }
+
+    @Test("Rows delta resolves retained refs and full replacement rows")
+    func rowsDeltaAppliesRefsAndFullRows() throws {
+        let retained = GUIVisualRow(rowType: .normal, rowId: 1, bufLine: 0, contentHash: 11, text: "old", spans: [])
+        let replacement = GUIVisualRow(rowType: .normal, rowId: 2, bufLine: 1, contentHash: 22, text: "new", spans: [])
+
+        let content = GUIWindowContent(
+            windowId: 7,
+            fullRefresh: true,
+            contentEpoch: 42,
+            cursorRow: 0,
+            cursorCol: 0,
+            cursorShape: .block,
+            rows: [retained],
+            selection: nil,
+            searchMatches: [],
+            diagnosticUnderlines: [],
+            documentHighlights: []
+        )
+
+        let delta = GUIWindowRowsDelta(
+            windowId: 7,
+            contentEpoch: 42,
+            cursorVisible: true,
+            cursorRow: 1,
+            cursorCol: 2,
+            cursorShape: .beam,
+            scrollLeft: 3,
+            rows: [.reference(rowId: 1, contentHash: 11), .full(replacement)],
+            selection: nil,
+            searchMatches: [],
+            diagnosticUnderlines: [],
+            documentHighlights: [],
+            lineAnnotations: [],
+            paneGeometry: nil,
+            cursorline: nil
+        )
+
+        guard let updated = content.applyingRowsDelta(delta) else {
+            Issue.record("Expected rows delta to apply")
+            return
+        }
+        #expect(updated.rows.map { $0.text } == ["old", "new"])
+        #expect(updated.cursorShape == CursorShape.beam)
+        #expect(updated.cursorRow == 1)
+        #expect(updated.scrollLeft == 3)
+    }
+
+    @Test("Rows delta fails when a retained ref is missing")
+    func rowsDeltaMissingRefReturnsNil() throws {
+        let retained = GUIVisualRow(rowType: .normal, rowId: 1, bufLine: 0, contentHash: 11, text: "old", spans: [])
+
+        let content = GUIWindowContent(
+            windowId: 7,
+            fullRefresh: true,
+            contentEpoch: 42,
+            cursorRow: 0,
+            cursorCol: 0,
+            cursorShape: .block,
+            rows: [retained],
+            selection: nil,
+            searchMatches: [],
+            diagnosticUnderlines: [],
+            documentHighlights: []
+        )
+
+        let delta = GUIWindowRowsDelta(
+            windowId: 7,
+            contentEpoch: 42,
+            cursorVisible: true,
+            cursorRow: 0,
+            cursorCol: 0,
+            cursorShape: .block,
+            scrollLeft: 0,
+            rows: [.reference(rowId: 999, contentHash: 11)],
+            selection: nil,
+            searchMatches: [],
+            diagnosticUnderlines: [],
+            documentHighlights: [],
+            lineAnnotations: [],
+            paneGeometry: nil,
+            cursorline: nil
+        )
+
+        #expect(content.applyingRowsDelta(delta) == nil)
     }
 
     @Test("Complete window with all sections decodes correctly")

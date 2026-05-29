@@ -208,6 +208,29 @@ struct GUIWindowOverlayDelta: Sendable, Equatable {
     let cursorline: GUICursorline?
 }
 
+enum GUIWindowRowDeltaEntry: Sendable, Equatable {
+    case reference(rowId: UInt64, contentHash: UInt32)
+    case full(GUIVisualRow)
+}
+
+struct GUIWindowRowsDelta: Sendable, Equatable {
+    let windowId: UInt16
+    let contentEpoch: UInt32
+    let cursorVisible: Bool
+    let cursorRow: UInt16
+    let cursorCol: UInt16
+    let cursorShape: CursorShape
+    let scrollLeft: UInt16
+    let rows: [GUIWindowRowDeltaEntry]
+    let selection: GUISelectionOverlay?
+    let searchMatches: [GUISearchMatch]
+    let diagnosticUnderlines: [GUIDiagnosticUnderline]
+    let documentHighlights: [GUIDocumentHighlight]
+    let lineAnnotations: [GUILineAnnotation]
+    let paneGeometry: GUIPaneGeometry?
+    let cursorline: GUICursorline?
+}
+
 struct GUIPaneGeometry: Sendable, Equatable {
     let windowId: UInt16
     let totalRect: GUICellRect
@@ -218,6 +241,16 @@ struct GUIPaneGeometry: Sendable, Equatable {
     let viewport: GUIViewportSummary
     let gutterMetrics: GUIGutterMetrics
     let hitRegions: [GUIHitRegion]
+}
+
+// MARK: - Retained row key
+
+/// Key for the retained-row lookup used by delta application.
+/// Combines row identity with a content hash so the renderer can reuse
+/// previously decoded rows when only overlays change.
+struct GUIRetainedRowKey: Hashable {
+    let rowId: UInt64
+    let contentHash: UInt32
 }
 
 // MARK: - Window content
@@ -250,6 +283,11 @@ final class GUIWindowContent: Sendable {
     let paneGeometry: GUIPaneGeometry?
     let cursorline: GUICursorline?
 
+    /// Pre-built index mapping retained-row keys to their visual rows.
+    /// Used by `applyingRowsDelta` to resolve reference entries without
+    /// rebuilding the dictionary on every delta application.
+    let retainedRowIndex: [GUIRetainedRowKey: GUIVisualRow]
+
     init(windowId: UInt16, fullRefresh: Bool, contentEpoch: UInt32 = 0, cursorVisible: Bool = true,
          cursorRow: UInt16, cursorCol: UInt16, cursorShape: CursorShape,
          scrollLeft: UInt16 = 0,
@@ -259,7 +297,8 @@ final class GUIWindowContent: Sendable {
          documentHighlights: [GUIDocumentHighlight],
          lineAnnotations: [GUILineAnnotation] = [],
          paneGeometry: GUIPaneGeometry? = nil,
-         cursorline: GUICursorline? = nil) {
+         cursorline: GUICursorline? = nil,
+         retainedRowIndex existingIndex: [GUIRetainedRowKey: GUIVisualRow]? = nil) {
         self.windowId = windowId
         self.fullRefresh = fullRefresh
         self.contentEpoch = contentEpoch
@@ -276,6 +315,17 @@ final class GUIWindowContent: Sendable {
         self.lineAnnotations = lineAnnotations
         self.paneGeometry = paneGeometry
         self.cursorline = cursorline
+
+        if let existingIndex {
+            self.retainedRowIndex = existingIndex
+        } else {
+            var index: [GUIRetainedRowKey: GUIVisualRow] = [:]
+            index.reserveCapacity(rows.count)
+            for row in rows {
+                index[GUIRetainedRowKey(rowId: row.rowId, contentHash: row.contentHash)] = row
+            }
+            self.retainedRowIndex = index
+        }
     }
 
     func applyingOverlayDelta(_ delta: GUIWindowOverlayDelta) -> GUIWindowContent? {
@@ -299,7 +349,48 @@ final class GUIWindowContent: Sendable {
             documentHighlights: documentHighlights,
             lineAnnotations: lineAnnotations,
             paneGeometry: paneGeometry,
+            cursorline: delta.cursorline,
+            retainedRowIndex: retainedRowIndex
+        )
+    }
+
+    func applyingRowsDelta(_ delta: GUIWindowRowsDelta) -> GUIWindowContent? {
+        guard delta.windowId == windowId, delta.contentEpoch == contentEpoch else {
+            return nil
+        }
+
+        var resolvedRows: [GUIVisualRow] = []
+        resolvedRows.reserveCapacity(delta.rows.count)
+
+        for entry in delta.rows {
+            switch entry {
+            case .reference(let rowId, let contentHash):
+                let key = GUIRetainedRowKey(rowId: rowId, contentHash: contentHash)
+                guard let row = retainedRowIndex[key] else { return nil }
+                resolvedRows.append(row)
+            case .full(let row):
+                resolvedRows.append(row)
+            }
+        }
+
+        return GUIWindowContent(
+            windowId: windowId,
+            fullRefresh: false,
+            contentEpoch: contentEpoch,
+            cursorVisible: delta.cursorVisible,
+            cursorRow: delta.cursorRow,
+            cursorCol: delta.cursorCol,
+            cursorShape: delta.cursorShape,
+            scrollLeft: delta.scrollLeft,
+            rows: resolvedRows,
+            selection: delta.selection,
+            searchMatches: delta.searchMatches,
+            diagnosticUnderlines: delta.diagnosticUnderlines,
+            documentHighlights: delta.documentHighlights,
+            lineAnnotations: delta.lineAnnotations,
+            paneGeometry: delta.paneGeometry,
             cursorline: delta.cursorline
         )
     }
 }
+

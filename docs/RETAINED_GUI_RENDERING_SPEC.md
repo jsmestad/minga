@@ -199,7 +199,7 @@ Record these metrics:
 
 Acceptance criteria:
 
-- `docs/PERFORMANCE.md` or a linked performance note contains baseline numbers for the scenarios above.
+- The PR or linked measurement note contains baseline numbers for the scenarios above.
 - Phase 4 work names the metric it is expected to improve before implementation starts.
 
 #### 6. Add stable row identity and content epochs
@@ -484,11 +484,11 @@ Neither frontend owns fold resolution, wrap decisions, diagnostic validity, curs
 
 ### Architectural invariants
 
-These are commitments from the existing architecture docs (ARCHITECTURE.md, PROTOCOL.md, PERFORMANCE.md, AGENTS.md) that this migration must preserve. They exist as an explicit checklist so that implementation does not accidentally violate a documented guarantee.
+These are commitments from the existing architecture docs (ARCHITECTURE.md, PROTOCOL.md, AGENTS.md) that this migration must preserve. They exist as an explicit checklist so that implementation does not accidentally violate a documented guarantee.
 
 **1. DisplayList is the current stable contract.** ARCHITECTURE.md and PROTOCOL.md treat `DisplayList.WindowFrame` as the central pipeline product and TUI's primary input. Phase 6 deliberately replaces it as the canonical visible truth. This is an intentional, documented break from a prior architectural commitment. Until Phase 6, `DisplayList` continues to serve TUI unchanged. After Phase 6, it becomes a TUI adapter detail, not a pipeline-level concept.
 
-**2. Dirty-line tracking survives.** PERFORMANCE.md documents dirty-line tracking as a critical optimization: only changed lines trigger re-rendering work. The render model migration preserves this through input fingerprints on builders (unchanged inputs produce no new model) and content hashes on durable rows (unchanged rows produce no new texture work on the frontend). If a migration step breaks dirty-line tracking, that is a bug, not a tradeoff.
+**2. Dirty-line tracking survives.** Only changed lines should trigger re-rendering work. The render model migration preserves this through input fingerprints on builders (unchanged inputs produce no new model) and content hashes on durable rows (unchanged rows produce no new texture work on the frontend). If a migration step breaks dirty-line tracking, that is a bug, not a tradeoff.
 
 **3. GUI-first, TUI-capable.** The existing architecture treats GUI as the primary frontend and TUI as secondary. The Phase 2 TUI adapter proof-of-concept validates that the render model serves both frontends; it does not gate GUI development. If the TUI proof-of-concept reveals model adjustments are needed, those adjustments must not regress GUI capabilities or delay GUI-path work. The TUI adapter is a compatibility constraint, not a design driver.
 
@@ -496,7 +496,7 @@ These are commitments from the existing architecture docs (ARCHITECTURE.md, PROT
 
 **5. Headless runtime is unaffected.** ARCHITECTURE.md documents that the headless runtime (used in tests and server mode) works without rendering. `Renderer.Server` is not started in headless mode today, and that does not change. `Minga.RenderModel` types moving to core does not mean core requires rendering. The types are passive data structures; construction is opt-in by the product that needs rendering. No core module should import or depend on a running `Renderer.Server`.
 
-**6. Telemetry preservation.** PERFORMANCE.md documents existing telemetry events. Pipeline-level events in `Renderer.Server` (`:minga, :render, :pipeline`, `:coalesced`, `:frame_latency`) are unaffected by this migration. Component-level telemetry inside `Emit.GUI` (if any) must be preserved or deliberately replaced in the core adapter during each Phase 1 component swap. Phase 3 adds new instrumentation; it does not remove existing instrumentation unless the measured code path no longer exists.
+**6. Telemetry preservation.** Pipeline-level events in `Renderer.Server` (`:minga, :render, :pipeline`, `:coalesced`, `:frame_latency`) are unaffected by this migration. Component-level telemetry inside `Emit.GUI` (if any) must be preserved or deliberately replaced in the core adapter during each Phase 1 component swap. Phase 3 adds new instrumentation; it does not remove existing instrumentation unless the measured code path no longer exists.
 
 **7. Credo EX9001 validates dependency direction.** AGENTS.md documents compile-time enforcement of the three-namespace layer dependency direction (Layer 0 `Minga` ← Layer 1 `MingaEditor`/`MingaAgent` ← Layer 2). When render model types move to `lib/minga` (Layer 0), EX9001 automatically enforces that `MingaEditor` and `MingaAgent` can import them but core cannot import the products. This is free validation of the spec's dependency direction. If a core adapter accidentally imports `MingaEditor`, the build fails.
 
@@ -686,7 +686,7 @@ Add delta messages only after stable row identity, separate overlays, content ep
 2. Viewport updates that reference reusable row IDs and include newly exposed rows.
 3. Row updates for changed content.
 
-Implementation status: overlay-only cursor and cursorline deltas now use `gui_window_overlay_delta` (0xA0). The delta carries `window_id` and `content_epoch`, and Swift ignores it unless matching full window content is already retained for that epoch. The BEAM also emits the minimal overlay delta as the retained-window liveness marker on otherwise unchanged frames, because Swift prunes retained window content after clear-backed batches unless a window id appears in the batch. Full `gui_window_content` remains the first-frame, reset, and durable-content-change path.
+Implementation status: overlay-only cursor and cursorline deltas now use `gui_window_overlay_delta` (0xA0). The delta carries `window_id` and `content_epoch`, and Swift ignores it unless matching full window content is already retained for that epoch. The BEAM also emits the minimal overlay delta as the retained-window liveness marker on otherwise unchanged frames, because Swift prunes retained window content after clear-backed batches unless a window id appears in the batch. Viewport and durable-row snapshots now use `gui_window_viewport_delta` (0xA1) and `gui_window_rows_delta` (0xA2), both as complete visible-window snapshots with ordered ref-or-full row entries. Swift drops retained state if a referenced row is missing, and the BEAM follows row/viewport deltas with a full 0x80 recovery frame so backend caches do not silently advance forever after an un-applied delta. Full `gui_window_content` remains the first-frame, reset, epoch-change, and recovery path.
 
 Every delta must carry `window_id` and `content_epoch`. If the frontend does not have that epoch, it ignores the update or requests recovery.
 
