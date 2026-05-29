@@ -18,12 +18,17 @@ defmodule Minga.Extension.CompileCache do
   miss. After a successful compile we prune the extension's other (stale) keys
   so the cache holds one entry per extension.
 
-  Beams are toolchain-specific, so the key includes the Elixir and ERTS
-  versions: a runtime upgrade invalidates every entry automatically.
+  Beams are toolchain- and minga-specific, so the key also includes the Elixir
+  and ERTS versions and minga's own application version. A runtime upgrade or a
+  minga release (which bumps `:minga`'s version) invalidates every entry
+  automatically, so an extension compiled against an older minga API is never
+  loaded against a newer one.
 
-  Caching can be disabled with `config :minga, extension_compile_cache: false`
-  (tests do this to stay hermetic), in which case compilation falls back to the
-  previous in-memory behaviour.
+  Caching can be disabled with `config :minga, extension_compile_cache: false`,
+  which falls back to the previous in-memory behaviour. Dev and test disable it:
+  dev so that in-progress edits to minga's own modules always recompile
+  extensions (no stale-beam surprises during hot-reload), and test for
+  hermeticity.
   """
 
   @type result ::
@@ -44,19 +49,23 @@ defmodule Minga.Extension.CompileCache do
 
   def load_or_compile(root, files, opts) when is_binary(root) and is_list(files) do
     if Keyword.get(opts, :enabled, enabled?()) do
-      cache_root = Keyword.get(opts, :cache_dir, default_cache_dir())
-      ext_dir = Path.join(cache_root, ext_id(root))
-      dir = Path.join(ext_dir, content_key(root, files))
-
-      case load_from_cache(dir) do
-        {:ok, modules} ->
-          {:ok, %{modules: modules, diagnostics: [], source: :cache}}
-
-        :miss ->
-          compile_and_cache(files, ext_dir, dir)
-      end
+      load_cached(root, files, opts)
     else
       compile_in_memory(files)
+    end
+  end
+
+  @spec load_cached(String.t(), [String.t()], keyword()) :: result()
+  defp load_cached(root, files, opts) do
+    with {:ok, key} <- content_key(root, files) do
+      cache_root = Keyword.get(opts, :cache_dir, default_cache_dir())
+      ext_dir = Path.join(cache_root, ext_id(root))
+      dir = Path.join(ext_dir, key)
+
+      case load_from_cache(dir) do
+        {:ok, modules} -> {:ok, %{modules: modules, diagnostics: [], source: :cache}}
+        :miss -> compile_and_cache(files, ext_dir, dir)
+      end
     end
   end
 
@@ -194,8 +203,9 @@ defmodule Minga.Extension.CompileCache do
   end
 
   # Content + toolchain hash. Relative paths keep the key stable regardless of
-  # where the extension dir lives on disk.
-  @spec content_key(String.t(), [String.t()]) :: String.t()
+  # where the extension dir lives on disk. Returns an error (rather than raising)
+  # if a source file vanished between globbing and reading.
+  @spec content_key(String.t(), [String.t()]) :: {:ok, String.t()} | {:error, String.t()}
   defp content_key(root, files) do
     expanded_root = Path.expand(root)
 
@@ -203,17 +213,28 @@ defmodule Minga.Extension.CompileCache do
       files
       |> Enum.sort()
       |> Enum.flat_map(fn file ->
-        [Path.relative_to(file, expanded_root), "\0", File.read!(file), "\0"]
+        case File.read(file) do
+          {:ok, content} -> [Path.relative_to(file, expanded_root), "\0", content, "\0"]
+          {:error, reason} -> throw({:read_error, file, reason})
+        end
       end)
 
-    :sha256
-    |> :crypto.hash([version_tag(), "\0" | payload])
-    |> Base.url_encode64(padding: false)
+    digest = :crypto.hash(:sha256, [version_tag(), "\0" | payload])
+    {:ok, Base.url_encode64(digest, padding: false)}
+  catch
+    {:read_error, file, reason} ->
+      {:error, "could not read extension source #{file}: #{inspect(reason)}"}
   end
 
+  # Beams are tied to the toolchain *and* to minga itself: an extension compiles
+  # against minga's modules, so a minga build that changes an extension-facing API
+  # must invalidate cached extension beams even when the extension source is
+  # unchanged. Releases bump :minga's version, which busts the cache here. (Dev
+  # disables the cache entirely so in-progress minga edits always recompile.)
   @spec version_tag() :: String.t()
   defp version_tag do
-    "elixir-#{System.version()}-erts-#{:erlang.system_info(:version)}"
+    minga_vsn = to_string(Application.spec(:minga, :vsn) || "0")
+    "minga-#{minga_vsn}-elixir-#{System.version()}-erts-#{:erlang.system_info(:version)}"
   end
 
   @spec enabled?() :: boolean()

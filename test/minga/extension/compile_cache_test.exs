@@ -141,5 +141,16 @@ defmodule Minga.Extension.CompileCacheTest do
     test "returns an error when given no files", %{cache_dir: cache_dir} do
       assert {:error, _} = CompileCache.load_or_compile("/tmp/whatever", [], opts(cache_dir))
     end
+
+    test "returns an error (no crash) when a source file is missing", %{
+      cache_dir: cache_dir,
+      src_dir: src_dir
+    } do
+      ghost = Path.join(src_dir, "ghost.ex")
+
+      assert {:error, message} = CompileCache.load_or_compile(src_dir, [ghost], opts(cache_dir))
+      assert message =~ "ghost.ex"
+      assert Path.wildcard(Path.join(cache_dir, "**/*.beam")) == []
+    end
   end
 end

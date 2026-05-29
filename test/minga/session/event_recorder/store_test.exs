@@ -211,6 +211,27 @@ defmodule Minga.Session.EventRecorder.StoreTest do
     end
   end
 
+  describe "open_readonly/1" do
+    test "opens an existing database read-only for checks, and rejects writes" do
+      path = Path.join(System.tmp_dir!(), "store_ro_#{:erlang.unique_integer([:positive])}.db")
+      on_exit(fn -> Enum.each([path, path <> "-wal", path <> "-shm"], &File.rm/1) end)
+
+      {:ok, rw} = Store.open(path)
+      :ok = Store.insert(rw, make_record())
+      Store.close(rw)
+
+      {:ok, ro} = Store.open_readonly(path)
+      assert {:ok, :healthy} = Store.integrity_check(ro, :quick)
+      assert {:error, _} = Store.insert(ro, make_record())
+      Store.close(ro)
+    end
+
+    test "returns an error for a missing database" do
+      missing = Path.join(System.tmp_dir!(), "nope_#{:erlang.unique_integer([:positive])}.db")
+      assert {:error, _} = Store.open_readonly(missing)
+    end
+  end
+
   describe "schema" do
     test "indexes exist", %{db: db} do
       {:ok, stmt} =

@@ -197,8 +197,11 @@ defmodule Minga.Application do
       :ok
     end
   rescue
-    # Never let argument inspection break startup; fall through to normal boot.
-    _ -> :ok
+    # Never let argument inspection break startup; fall through to normal boot,
+    # but leave a breadcrumb in case this ever misfires.
+    error ->
+      Minga.Log.debug(:editor, "info-flag short-circuit skipped: #{inspect(error)}")
+      :ok
   end
 
   @spec start_editor?() :: boolean()

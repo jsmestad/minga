@@ -42,6 +42,18 @@ defmodule Minga.Session.EventRecorder.Store do
   end
 
   @doc """
+  Opens a read-only connection to an existing database.
+
+  Skips `setup/0`: a read-only handle can't run the pragmas or `CREATE TABLE`
+  statements, and an existing database doesn't need them. Use for read-only
+  work such as integrity checks so the check can never mutate the database.
+  """
+  @spec open_readonly(String.t()) :: {:ok, db()} | {:error, term()}
+  def open_readonly(db_path) do
+    Exqlite.Sqlite3.open(db_path, mode: :readonly)
+  end
+
+  @doc """
   Opens an in-memory database for testing.
   """
   @spec open_memory() :: {:ok, db()} | {:error, term()}
