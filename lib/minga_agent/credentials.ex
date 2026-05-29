@@ -18,7 +18,7 @@ defmodule MingaAgent.Credentials do
   @type provider :: String.t()
 
   @typedoc "Source where a key was found."
-  @type key_source :: :env | :file | nil
+  @type key_source :: :env | :file | :oauth | nil
 
   defmodule ProviderStatus do
     @moduledoc false
@@ -28,7 +28,7 @@ defmodule MingaAgent.Credentials do
     @type t :: %__MODULE__{
             provider: String.t(),
             configured: boolean(),
-            source: :env | :file | :local | nil
+            source: :env | :file | :local | :oauth | nil
           }
   end
 
@@ -115,30 +115,15 @@ defmodule MingaAgent.Credentials do
   """
   @spec revoke(provider()) :: :ok | {:error, term()}
   def revoke(provider) when is_binary(provider) do
-    path = credentials_path()
-
-    case read_credentials_file(path) do
-      {:ok, existing} ->
-        updated = Map.delete(existing, provider)
-        json = :json.format(updated)
-
-        with :ok <- File.write(path, json) do
-          File.chmod(path, 0o600)
-        end
-
-      {:error, :enoent} ->
-        :ok
-
-      {:error, reason} ->
-        {:error, reason}
-    end
+    revoke_api_key(provider)
+    |> merge_revoke_result(revoke_oauth_entry(provider))
   end
 
   @doc """
-  Returns the auth status for all known providers plus Ollama.
+  Returns the auth status for all known providers plus Ollama and OpenAI OAuth.
 
   Each entry shows whether a key is configured and where it was found
-  (`:env`, `:file`, or `nil`). Keys themselves are never exposed.
+  (`:env`, `:file`, `:oauth`, `:local`, or `nil`). Keys themselves are never exposed.
   """
   @spec status() :: [provider_status()]
   def status do
@@ -153,6 +138,13 @@ defmodule MingaAgent.Credentials do
         end
       end)
 
+    oauth_status =
+      if oauth_configured?() do
+        %ProviderStatus{provider: "openai_codex", configured: true, source: :oauth}
+      else
+        %ProviderStatus{provider: "openai_codex", configured: false, source: nil}
+      end
+
     ollama_up = ollama_available?()
 
     ollama_status = %ProviderStatus{
@@ -161,7 +153,7 @@ defmodule MingaAgent.Credentials do
       source: if(ollama_up, do: :local, else: nil)
     }
 
-    standard ++ [ollama_status]
+    standard ++ [oauth_status, ollama_status]
   end
 
   @doc """
@@ -169,7 +161,9 @@ defmodule MingaAgent.Credentials do
   """
   @spec any_configured?() :: boolean()
   def any_configured? do
-    Enum.any?(status(), fn s -> s.configured end)
+    Enum.any?(@known_providers, fn p -> resolve(p) != :error end) or
+      oauth_configured?() or
+      ollama_available?()
   end
 
   @doc """
@@ -234,7 +228,83 @@ defmodule MingaAgent.Credentials do
     :exit, _ -> false
   end
 
+  @doc """
+  Returns the path to `~/.config/minga/oauth.json` (XDG-aware).
+  """
+  @spec oauth_path() :: String.t()
+  def oauth_path, do: MingaAgent.OAuth.oauth_path()
+
+  @doc """
+  Returns true if an `openai-codex` entry exists in `oauth.json`.
+  """
+  @spec oauth_configured?() :: boolean()
+  def oauth_configured? do
+    path = oauth_path()
+    key = MingaAgent.OAuth.provider_key()
+
+    case File.read(path) do
+      {:ok, content} when content != "" ->
+        case JSON.decode(content) do
+          {:ok, %{^key => %{"access" => access}}}
+          when is_binary(access) and access != "" ->
+            true
+
+          _ ->
+            false
+        end
+
+      _ ->
+        false
+    end
+  end
+
   # ── Private ─────────────────────────────────────────────────────────────────
+
+  @spec revoke_api_key(provider()) :: :ok | {:error, term()}
+  defp revoke_api_key(provider) do
+    path = credentials_path()
+
+    case read_credentials_file(path) do
+      {:ok, existing} ->
+        updated = Map.delete(existing, provider)
+        json = :json.format(updated)
+
+        with :ok <- File.write(path, json) do
+          File.chmod(path, 0o600)
+        end
+
+      {:error, :enoent} ->
+        :ok
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @spec revoke_oauth_entry(provider()) :: :ok | {:error, term()}
+  defp revoke_oauth_entry("openai_codex") do
+    path = oauth_path()
+
+    with {:ok, content} when content != "" <- File.read(path),
+         {:ok, existing} when is_map(existing) <- JSON.decode(content) do
+      updated = Map.delete(existing, MingaAgent.OAuth.provider_key())
+      json = :json.format(updated)
+
+      case File.write(path, json) do
+        :ok -> File.chmod(path, 0o600)
+        error -> error
+      end
+    else
+      {:error, :enoent} -> :ok
+      _ -> :ok
+    end
+  end
+
+  defp revoke_oauth_entry(_provider), do: :ok
+
+  defp merge_revoke_result(:ok, :ok), do: :ok
+  defp merge_revoke_result({:error, _} = err, _), do: err
+  defp merge_revoke_result(_, {:error, _} = err), do: err
 
   @spec resolve_from_env(provider()) :: {:ok, String.t()} | :error
   defp resolve_from_env(provider) do

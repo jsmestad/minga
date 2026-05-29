@@ -1837,10 +1837,10 @@ defmodule MingaAgent.Session do
   defp maybe_show_auth_onboarding(state) do
     if state.provider_module == MingaAgent.Providers.Native and not Credentials.any_configured?() do
       msg =
-        "No API keys configured. Use `/auth` to get started.\n\n" <>
-          "Example: `/auth anthropic sk-ant-your-key-here`\n" <>
-          "Get your Anthropic key at: https://console.anthropic.com/settings/keys\n\n" <>
-          "Run `/auth` with no arguments to see status for all providers."
+        "No credentials configured.\n\n" <>
+          "  /login        Sign in with your ChatGPT subscription (browser)\n" <>
+          "  /auth <provider> <key>  Add an API key (Anthropic, OpenAI, Google, etc.)\n\n" <>
+          "Run `/auth` to see status for all providers."
 
       state = append_msg(state, Message.system(msg))
       broadcast(state, {:system_message, msg, :info})

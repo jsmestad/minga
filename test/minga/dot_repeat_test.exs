@@ -49,6 +49,12 @@ defmodule Minga.DotRepeatTest do
         suppress_tool_prompts: true
       )
 
+    # Drain the editor's init queue so the active buffer is wired
+    # before the first send_key. Without this, a key event can arrive
+    # before the startup handle_info pipeline finishes, making the
+    # command a no-op (no active buffer target).
+    {:ok, ^buffer} = GenServer.call(editor, :api_active_buffer)
+
     {editor, buffer}
   end
 
@@ -60,7 +66,7 @@ defmodule Minga.DotRepeatTest do
 
   defp send_key(editor, codepoint, mods \\ 0) do
     send(editor, {:minga_input, {:key_press, codepoint, mods}})
-    _ = :sys.get_state(editor, @sync_timeout)
+    GenServer.call(editor, :api_mode, @sync_timeout)
   end
 
   defp type_string(editor, text) do
