@@ -6,6 +6,9 @@ defmodule MingaAgent.ModelCatalog do
   credentials for, excluding non-chat models (embeddings, image gen,
   TTS, etc.) and deprecated/retired entries.
 
+  Codex models (openai_codex) are not in LLMDB, so they are surfaced
+  from a static list when an OAuth token is present.
+
   The output format matches what `MingaEditor.UI.Picker.AgentModelSource`
   expects: a list of maps with string keys for `"id"`, `"name"`,
   `"provider"`, `"context_window"`, and `"cost"`.
@@ -28,10 +31,20 @@ defmodule MingaAgent.ModelCatalog do
   def available_models(current_model \\ "") do
     configured_providers = configured_provider_atoms()
 
-    LLMDB.models()
-    |> Enum.filter(&include_model?(&1, configured_providers))
-    |> Enum.sort_by(&{&1.provider, &1.name})
-    |> Enum.map(&format_model(&1, current_model))
+    llmdb_models =
+      LLMDB.models()
+      |> Enum.filter(&include_model?(&1, configured_providers))
+      |> Enum.sort_by(&{&1.provider, &1.name})
+      |> Enum.map(&format_model(&1, current_model))
+
+    codex_models =
+      if Credentials.oauth_configured?() do
+        Enum.map(codex_model_list(), &format_codex_model(&1, current_model))
+      else
+        []
+      end
+
+    llmdb_models ++ codex_models
   end
 
   # ── Private ─────────────────────────────────────────────────────────────────
@@ -60,7 +73,9 @@ defmodule MingaAgent.ModelCatalog do
     end
   end
 
-  # Non-chat model ID substrings to exclude.
+  # Non-chat model ID substrings to exclude. "codex" is excluded from LLMDB
+  # results because codex models are surfaced separately via the static list
+  # when an OAuth token is present.
   @excluded_patterns ~w(embedding tts whisper moderation realtime dall-e sora codex imagen veo aqa gemma)
 
   @spec include_model?(map(), MapSet.t(atom())) :: boolean()
@@ -114,4 +129,29 @@ defmodule MingaAgent.ModelCatalog do
   end
 
   defp format_cost(_), do: %{}
+
+  # Static codex model list since LLMDB does not include openai_codex models.
+  # These are the models available via ChatGPT subscription OAuth.
+  @spec codex_model_list() :: [map()]
+  defp codex_model_list do
+    [
+      %{id: "codex-mini", name: "Codex Mini", context: 192_000},
+      %{id: "o4-mini", name: "o4-mini (Codex)", context: 200_000},
+      %{id: "o3", name: "o3 (Codex)", context: 200_000}
+    ]
+  end
+
+  @spec format_codex_model(map(), String.t()) :: model_entry()
+  defp format_codex_model(model, current_model) do
+    full_id = "openai_codex:#{model.id}"
+
+    %{
+      "id" => full_id,
+      "name" => model.name,
+      "provider" => "openai_codex",
+      "context_window" => model.context,
+      "cost" => %{},
+      "current" => full_id == current_model
+    }
+  end
 end

@@ -88,7 +88,11 @@ defmodule MingaEditor.Agent.SlashCommand do
     %Command{name: "forget", description: "Clear the persistent memory file"},
     %Command{name: "branch", description: "Branch at a turn: /branch <turn_number>"},
     %Command{name: "branches", description: "List all conversation branches"},
-    %Command{name: "switch", description: "Switch to a branch: /switch <branch_number>"}
+    %Command{name: "switch", description: "Switch to a branch: /switch <branch_number>"},
+    %Command{
+      name: "login",
+      description: "Sign in with ChatGPT (OpenAI) via browser"
+    }
   ]
 
   @doc "Returns the list of all registered slash commands."
@@ -158,6 +162,7 @@ defmodule MingaEditor.Agent.SlashCommand do
   defp dispatch(state, "branch", args), do: do_branch(state, args)
   defp dispatch(state, "branches", _args), do: do_branches(state)
   defp dispatch(state, "switch", args), do: do_switch_branch(state, args)
+  defp dispatch(state, "login", args), do: {:ok, do_login(state, args)}
 
   # /skill:name activates, /skill:off:name deactivates
   defp dispatch(state, cmd, _args) when is_binary(cmd) do
@@ -391,9 +396,9 @@ defmodule MingaEditor.Agent.SlashCommand do
     lines =
       Enum.map_join(statuses, "\n", fn s ->
         icon = if s.configured, do: "✓", else: "✗"
-        source_hint = if s.source, do: " (#{s.source})", else: ""
+        source_hint = format_source_hint(s)
         url_hint = dashboard_url_hint(s.provider)
-        "  #{icon} #{String.capitalize(s.provider)}#{source_hint}#{url_hint}"
+        "  #{icon} #{provider_display_name(s.provider)}#{source_hint}#{url_hint}"
       end)
 
     endpoint_info = format_endpoint_info()
@@ -507,6 +512,49 @@ defmodule MingaEditor.Agent.SlashCommand do
         "Unknown provider: #{provider}\nKnown providers: #{Enum.join(Credentials.known_providers(), ", ")}"
       )
     end
+  end
+
+  # ── /login ─────────────────────────────────────────────────────────────────
+
+  @spec do_login(state(), String.t()) :: state()
+  defp do_login(state, args) do
+    provider = String.trim(args)
+
+    if provider == "" or provider == "openai" do
+      start_oauth_flow(state)
+    else
+      emit_system_message(
+        state,
+        "Only OpenAI is supported for /login. Other providers use /auth <provider> <key>."
+      )
+    end
+  end
+
+  @spec start_oauth_flow(state()) :: state()
+  defp start_oauth_flow(state) do
+    state = emit_system_message(state, "Opening browser for ChatGPT sign-in...")
+
+    session = AgentAccess.session(state)
+
+    Task.Supervisor.start_child(Minga.Eval.TaskSupervisor, fn ->
+      result = MingaAgent.OAuth.Flow.run()
+
+      case result do
+        {:ok, :openai} ->
+          Session.add_system_message(session, "ChatGPT subscription connected.")
+
+        {:browser_failed, url} ->
+          Session.add_system_message(
+            session,
+            "Could not open browser. Open this URL to sign in:\n#{url}"
+          )
+
+        {:error, reason} ->
+          Session.add_system_message(session, "Login failed: #{reason}", :error)
+      end
+    end)
+
+    state
   end
 
   @spec do_instructions(state()) :: state()
@@ -938,6 +986,20 @@ defmodule MingaEditor.Agent.SlashCommand do
       [cmd, args] -> {String.downcase(cmd), args}
     end
   end
+
+  @provider_display_names %{
+    "openai_codex" => "OpenAI (ChatGPT subscription)"
+  }
+
+  @spec provider_display_name(String.t()) :: String.t()
+  defp provider_display_name(provider) do
+    Map.get(@provider_display_names, provider, String.capitalize(provider))
+  end
+
+  @spec format_source_hint(Credentials.ProviderStatus.t()) :: String.t()
+  defp format_source_hint(%{source: :oauth}), do: " (chatgpt subscription)"
+  defp format_source_hint(%{source: nil}), do: ""
+  defp format_source_hint(%{source: source}), do: " (#{source})"
 
   # Returns a short URL hint for unconfigured providers in the /auth status display.
   # Configured providers don't need the hint (user already has a key).

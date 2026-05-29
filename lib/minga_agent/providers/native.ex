@@ -392,7 +392,7 @@ defmodule MingaAgent.Providers.Native do
     # If found in the file but not in the env, set the env var so ReqLLM
     # picks it up automatically. Tests can disable this to avoid mutating
     # process-wide environment state.
-    unless Keyword.get(opts, :skip_api_key_env, false) do
+    unless Keyword.get(opts, :skip_api_key_env, false) or openai_codex_model?(model) do
       ensure_api_key_in_env(model)
     end
 
@@ -2544,6 +2544,19 @@ defmodule MingaAgent.Providers.Native do
         opts
       end
 
+    # Inject OAuth auth_mode for openai_codex models (ChatGPT subscription)
+    opts =
+      if openai_codex_model?(model) do
+        provider_options =
+          Keyword.get(opts, :provider_options, [])
+          |> Keyword.put(:auth_mode, :oauth)
+          |> Keyword.put(:oauth_file, Credentials.oauth_path())
+
+        Keyword.put(opts, :provider_options, provider_options)
+      else
+        opts
+      end
+
     maybe_add_reasoning_effort(opts, thinking_level)
   end
 
@@ -2563,6 +2576,9 @@ defmodule MingaAgent.Providers.Native do
     String.starts_with?(model, "anthropic:") or
       not String.contains?(model, ":")
   end
+
+  @spec openai_codex_model?(String.t()) :: boolean()
+  defp openai_codex_model?(model), do: String.starts_with?(model, "openai_codex:")
 
   @spec prompt_cache_enabled?(AgentConfig.t()) :: boolean()
   defp prompt_cache_enabled?(config), do: config.prompt_cache
