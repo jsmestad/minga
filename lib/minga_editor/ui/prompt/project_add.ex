@@ -88,5 +88,4 @@ defmodule MingaEditor.UI.Prompt.ProjectAdd do
       |> Enum.map_join(&elem(&1, 0))
     end)
   end
-
 end
