@@ -203,6 +203,20 @@ defmodule Minga.Session.EventRecorder do
     {:noreply, state}
   end
 
+  # The check ran on a separate connection that failed to open. The writer's
+  # own connection is still valid, so this is almost always transient (e.g. an
+  # fd limit), not corruption. Log and leave the database intact: recreating
+  # here on a false positive would delete the user's event history.
+  def handle_info({:health_check_result, {:check_failed, reason}}, state) do
+    Minga.Log.warning(
+      :editor,
+      "[EventRecorder] health check could not open a read connection: " <>
+        "#{inspect(reason)} (leaving database intact)"
+    )
+
+    {:noreply, state}
+  end
+
   def handle_info({:health_check_result, {:corrupt, messages}}, state) do
     Minga.Log.warning(
       :editor,
@@ -256,7 +270,8 @@ defmodule Minga.Session.EventRecorder do
     Process.send_after(self(), {:run_health_check, mode}, delay)
   end
 
-  @spec run_health_check(String.t(), :quick | :full) :: :healthy | {:corrupt, [String.t()]}
+  @spec run_health_check(String.t(), :quick | :full) ::
+          :healthy | {:corrupt, [String.t()]} | {:check_failed, term()}
   defp run_health_check(path, mode) do
     case Store.open(path) do
       {:ok, db} ->
@@ -264,12 +279,15 @@ defmodule Minga.Session.EventRecorder do
         Store.close(db)
 
         case result do
+          # Only an actual integrity-check failure means corruption. Failing to
+          # open the connection is reported separately so we never recreate the
+          # database on a transient open error.
           {:ok, :healthy} -> :healthy
           {:error, messages} -> {:corrupt, messages}
         end
 
       {:error, reason} ->
-        {:corrupt, [inspect(reason)]}
+        {:check_failed, reason}
     end
   end
 

@@ -341,6 +341,38 @@ defmodule Minga.Session.EventRecorderTest do
       paths = Enum.map(events, & &1.payload["path"])
       assert paths == ["/tmp/after.ex"]
     end
+
+    test "leaves the database intact when the async check cannot open a connection", %{
+      recorder: recorder,
+      db_dir: db_dir
+    } do
+      send(
+        recorder,
+        {:minga_event, :buffer_saved, %Events.BufferEvent{buffer: self(), path: "/tmp/before.ex"}}
+      )
+
+      wait_for_processing(recorder)
+
+      # A failure to open the health-check connection is transient, not
+      # corruption: the database must NOT be recreated (that would wipe history).
+      send(recorder, {:health_check_result, {:check_failed, :enoent}})
+      wait_for_processing(recorder)
+
+      send(
+        recorder,
+        {:minga_event, :buffer_saved, %Events.BufferEvent{buffer: self(), path: "/tmp/after.ex"}}
+      )
+
+      wait_for_processing(recorder)
+
+      db = open_db(db_dir)
+      {:ok, events} = Store.events_by_type(db, :buffer_saved)
+      Store.close(db)
+
+      paths = Enum.map(events, & &1.payload["path"])
+      assert "/tmp/before.ex" in paths
+      assert "/tmp/after.ex" in paths
+    end
   end
 
   describe "resilience" do
