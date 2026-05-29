@@ -6,8 +6,9 @@ defmodule MingaAgent.ModelCatalog do
   credentials for, excluding non-chat models (embeddings, image gen,
   TTS, etc.) and deprecated/retired entries.
 
-  Codex models (openai_codex) are not in LLMDB, so they are surfaced
-  from a static list when an OAuth token is present.
+  When an OAuth token is present, codex models from LLMDB's `:openai`
+  provider are included and re-tagged as `openai_codex` so ReqLLM
+  routes them through the Codex Responses API with OAuth auth.
 
   The output format matches what `MingaEditor.UI.Picker.AgentModelSource`
   expects: a list of maps with string keys for `"id"`, `"name"`,
@@ -30,21 +31,12 @@ defmodule MingaAgent.ModelCatalog do
   @spec available_models(String.t()) :: [model_entry()]
   def available_models(current_model \\ "") do
     configured_providers = configured_provider_atoms()
+    oauth = Credentials.oauth_configured?()
 
-    llmdb_models =
-      LLMDB.models()
-      |> Enum.filter(&include_model?(&1, configured_providers))
-      |> Enum.sort_by(&{&1.provider, &1.name})
-      |> Enum.map(&format_model(&1, current_model))
-
-    codex_models =
-      if Credentials.oauth_configured?() do
-        Enum.map(codex_model_list(), &format_codex_model(&1, current_model))
-      else
-        []
-      end
-
-    llmdb_models ++ codex_models
+    LLMDB.models()
+    |> Enum.filter(&include_model?(&1, configured_providers, oauth))
+    |> Enum.sort_by(&{&1.provider, &1.name})
+    |> Enum.map(&format_model(&1, current_model, oauth))
   end
 
   # ── Private ─────────────────────────────────────────────────────────────────
@@ -73,20 +65,27 @@ defmodule MingaAgent.ModelCatalog do
     end
   end
 
-  # Non-chat model ID substrings to exclude. "codex" is excluded from LLMDB
-  # results because codex models are surfaced separately via the static list
-  # when an OAuth token is present.
-  @excluded_patterns ~w(embedding tts whisper moderation realtime dall-e sora codex imagen veo aqa gemma)
+  @excluded_patterns ~w(embedding tts whisper moderation realtime dall-e sora imagen veo aqa gemma)
 
-  @spec include_model?(map(), MapSet.t(atom())) :: boolean()
-  defp include_model?(model, configured_providers) do
-    model.provider in configured_providers and
+  @spec include_model?(map(), MapSet.t(atom()), boolean()) :: boolean()
+  defp include_model?(model, configured_providers, oauth) do
+    provider_available?(model, configured_providers, oauth) and
       not model.deprecated and
       not model.retired and
       has_text_output?(model) and
       has_reasonable_context?(model) and
       not excluded_by_name?(model.id)
   end
+
+  defp provider_available?(model, configured_providers, oauth) do
+    if codex_model?(model) do
+      oauth or model.provider in configured_providers
+    else
+      model.provider in configured_providers
+    end
+  end
+
+  defp codex_model?(%{id: id}), do: String.contains?(String.downcase(id), "codex")
 
   @spec has_text_output?(map()) :: boolean()
   defp has_text_output?(%{modalities: %{output: outputs}}) when is_list(outputs) do
@@ -108,10 +107,15 @@ defmodule MingaAgent.ModelCatalog do
     Enum.any?(@excluded_patterns, &String.contains?(id_lower, &1))
   end
 
-  @spec format_model(map(), String.t()) :: model_entry()
-  defp format_model(model, current_model) do
-    provider_str = Atom.to_string(model.provider)
-    full_id = "#{provider_str}:#{model.id}"
+  @spec format_model(map(), String.t(), boolean()) :: model_entry()
+  defp format_model(model, current_model, oauth) do
+    {provider_str, full_id} =
+      if codex_model?(model) and oauth do
+        {"openai_codex", "openai_codex:#{model.id}"}
+      else
+        provider = Atom.to_string(model.provider)
+        {provider, "#{provider}:#{model.id}"}
+      end
 
     %{
       "id" => full_id,
@@ -129,29 +133,4 @@ defmodule MingaAgent.ModelCatalog do
   end
 
   defp format_cost(_), do: %{}
-
-  # Static codex model list since LLMDB does not include openai_codex models.
-  # These are the models available via ChatGPT subscription OAuth.
-  @spec codex_model_list() :: [map()]
-  defp codex_model_list do
-    [
-      %{id: "codex-mini", name: "Codex Mini", context: 192_000},
-      %{id: "o4-mini", name: "o4-mini (Codex)", context: 200_000},
-      %{id: "o3", name: "o3 (Codex)", context: 200_000}
-    ]
-  end
-
-  @spec format_codex_model(map(), String.t()) :: model_entry()
-  defp format_codex_model(model, current_model) do
-    full_id = "openai_codex:#{model.id}"
-
-    %{
-      "id" => full_id,
-      "name" => model.name,
-      "provider" => "openai_codex",
-      "context_window" => model.context,
-      "cost" => %{},
-      "current" => full_id == current_model
-    }
-  end
 end
