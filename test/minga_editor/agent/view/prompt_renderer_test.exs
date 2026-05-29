@@ -39,6 +39,7 @@ defmodule MingaEditor.Agent.View.PromptRendererTest do
       panel: %UIState.Panel{
         visible: true,
         input_focused: Keyword.get(opts, :input_focused, false),
+        credentials_configured: Keyword.get(opts, :credentials_configured, true),
         prompt_buffer: prompt_buf
       },
       view: %UIState.View{
@@ -159,6 +160,31 @@ defmodule MingaEditor.Agent.View.PromptRendererTest do
       assert Enum.any?(texts, fn text ->
                String.starts_with?(text, "╰─") and String.contains?(text, "Claude Sonnet 4")
              end)
+    end
+
+    test "bottom border shows a setup hint instead of a model when no credentials" do
+      state = base_state(credentials_configured: false)
+      ctx = ViewContext.from_editor_state(state)
+      commands = PromptRenderer.render(ctx, {30, 0, 80, 5})
+      texts = Enum.map(commands, fn d -> elem(d, 2) end)
+
+      bottom_border = Enum.find(texts, &String.starts_with?(&1, "╰─"))
+
+      assert bottom_border != nil
+      assert String.contains?(bottom_border, "Not configured")
+      assert String.contains?(bottom_border, "/auth")
+      # Never advertise a model the user cannot call.
+      refute String.contains?(bottom_border, "Claude Sonnet 4")
+    end
+
+    test "empty-input placeholder guides setup when no credentials" do
+      state = base_state(credentials_configured: false)
+      ctx = ViewContext.from_editor_state(state)
+      commands = PromptRenderer.render(ctx, {30, 0, 80, 5})
+      texts = Enum.map(commands, fn d -> elem(d, 2) end)
+
+      assert Enum.any?(texts, &String.contains?(&1, "/auth <provider> <key>"))
+      refute Enum.any?(texts, &String.contains?(&1, "Type a message"))
     end
 
     test "placeholder uses readable text color" do

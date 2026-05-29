@@ -52,6 +52,7 @@ defmodule MingaEditor.Agent.View.RenderInput do
           model_name: String.t(),
           provider_name: String.t(),
           thinking_level: String.t(),
+          credentials_configured: boolean(),
           display_start_index: non_neg_integer(),
           mention_completion: MingaAgent.FileMention.completion() | nil,
           pasted_blocks: [UIState.paste_block()]
@@ -116,6 +117,7 @@ defmodule MingaEditor.Agent.View.RenderInput do
         model_name: panel.model_name,
         provider_name: panel.provider_name,
         thinking_level: panel.thinking_level,
+        credentials_configured: panel.credentials_configured,
         display_start_index: panel.display_start_index,
         mention_completion: panel.mention_completion,
         pasted_blocks: panel.pasted_blocks

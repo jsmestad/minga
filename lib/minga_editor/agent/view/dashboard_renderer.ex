@@ -186,19 +186,31 @@ defmodule MingaEditor.Agent.View.DashboardRenderer do
     # ── Model section ──
     thinking = if panel.thinking_level != "", do: " (#{panel.thinking_level})", else: ""
 
-    model_lines = [
-      dashboard_text(
-        " Model",
-        width,
-        Face.new(fg: at.dashboard_label, bg: at.panel_bg, bold: true)
-      ),
-      dashboard_text(
-        "  #{bare_model}#{thinking}",
-        width,
-        Face.new(fg: at.text_fg, bg: at.panel_bg)
-      ),
-      dashboard_blank(width, at)
-    ]
+    model_value_lines =
+      if panel.credentials_configured do
+        [
+          dashboard_text(
+            "  #{bare_model}#{thinking}",
+            width,
+            Face.new(fg: at.text_fg, bg: at.panel_bg)
+          )
+        ]
+      else
+        # No usable provider: show a setup hint instead of a model we can't call.
+        [
+          dashboard_text("  Not configured", width, Face.new(fg: at.hint_fg, bg: at.panel_bg)),
+          dashboard_text("  /auth or /login", width, Face.new(fg: at.hint_fg, bg: at.panel_bg))
+        ]
+      end
+
+    model_lines =
+      [
+        dashboard_text(
+          " Model",
+          width,
+          Face.new(fg: at.dashboard_label, bg: at.panel_bg, bold: true)
+        )
+      ] ++ model_value_lines ++ [dashboard_blank(width, at)]
 
     # ── LSP section ──
     lsp_lines = dashboard_lsp_section(input.lsp_servers, width, at)

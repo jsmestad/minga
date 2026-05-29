@@ -450,9 +450,11 @@ defmodule MingaEditor.Agent.SlashCommand do
   defp do_auth_store(state, provider, key) do
     case validate_and_store(provider, key) do
       :ok ->
+        Session.refresh_credentials(AgentAccess.session(state))
+
         emit_system_message(
           state,
-          "✓ #{String.capitalize(provider)} API key saved. It will be used for new sessions."
+          "✓ #{String.capitalize(provider)} API key saved."
         )
 
       {:error, :unknown_provider} ->
@@ -551,6 +553,7 @@ defmodule MingaEditor.Agent.SlashCommand do
 
       case result do
         {:ok, :openai} ->
+          Session.refresh_credentials(session)
           Session.add_system_message(session, "ChatGPT subscription connected.")
 
         {:browser_failed, url} ->
