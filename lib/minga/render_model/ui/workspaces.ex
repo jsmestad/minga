@@ -1,18 +1,28 @@
 defmodule Minga.RenderModel.UI.Workspaces do
   @moduledoc """
-  Pre-encoded workspaces model.
+  Semantic workspace chrome model for GUI adapters.
 
-  The workspaces wire format involves bounded_entries encoding, workspace
-  summary serialization with RGB color decomposition, tab summary encoding,
-  and multiple flag/kind encoders. Rather than duplicating that encoding
-  in core, the builder pre-encodes the binary and stores it here along
-  with a fingerprint for change detection.
+  The model carries workspace and visible-tab facts. The GUI adapter owns payload budgeting, protocol flags, and cache fingerprints.
   """
 
+  alias Minga.RenderModel.UI.Workspaces.VisibleTab
+  alias Minga.RenderModel.UI.Workspaces.Workspace
+
+  @type mode :: :editor | :agent | :file_tree | :other
+
   @type t :: %__MODULE__{
-          encoded: binary() | nil,
-          fingerprint: integer() | :suppressed
+          visible?: boolean(),
+          active_workspace_id: non_neg_integer(),
+          mode: mode(),
+          attention_count: non_neg_integer(),
+          workspaces: [Workspace.t()],
+          visible_tabs: [VisibleTab.t()]
         }
 
-  defstruct encoded: nil, fingerprint: :suppressed
+  defstruct visible?: false,
+            active_workspace_id: 0,
+            mode: :editor,
+            attention_count: 0,
+            workspaces: [],
+            visible_tabs: []
 end

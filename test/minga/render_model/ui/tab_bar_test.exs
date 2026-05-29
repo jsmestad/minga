@@ -2,27 +2,23 @@ defmodule Minga.RenderModel.UI.TabBarTest do
   use ExUnit.Case, async: true
 
   alias Minga.RenderModel.UI.TabBar
+  alias Minga.RenderModel.UI.TabBar.Tab
 
   describe "%TabBar{}" do
-    test "defaults to nil encoded and suppressed fingerprint" do
+    test "defaults to hidden with no tabs" do
       tab_bar = %TabBar{}
 
-      assert tab_bar.encoded == nil
-      assert tab_bar.fingerprint == :suppressed
+      refute tab_bar.visible?
+      assert tab_bar.active_tab_id == nil
+      assert tab_bar.tabs == []
     end
 
-    test "accepts binary encoded and integer fingerprint" do
-      tab_bar = %TabBar{encoded: <<0x71, 0, 1>>, fingerprint: 12_345}
+    test "carries semantic tab entries" do
+      tab = %Tab{id: 1, workspace_id: 0, label: "README.md", icon: "󰈙", dirty?: true}
+      tab_bar = %TabBar{visible?: true, active_tab_id: 1, tabs: [tab]}
 
-      assert tab_bar.encoded == <<0x71, 0, 1>>
-      assert tab_bar.fingerprint == 12_345
-    end
-
-    test "accepts suppressed fingerprint with nil encoded" do
-      tab_bar = %TabBar{encoded: nil, fingerprint: :suppressed}
-
-      assert tab_bar.encoded == nil
-      assert tab_bar.fingerprint == :suppressed
+      assert tab_bar.visible?
+      assert tab_bar.tabs == [tab]
     end
   end
 end

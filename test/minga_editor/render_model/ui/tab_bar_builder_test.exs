@@ -1,22 +1,22 @@
 defmodule MingaEditor.RenderModel.UI.TabBarBuilderTest do
   use ExUnit.Case, async: true
 
-  alias MingaEditor.RenderModel.UI.TabBarBuilder
   alias Minga.RenderModel.UI.TabBar
+  alias MingaEditor.RenderModel.UI.TabBarBuilder
 
   describe "build/1" do
-    test "returns suppressed tab bar when shell has no gui_payload" do
+    test "returns hidden tab bar when shell has no gui_payload" do
       ctx = build_minimal_context()
       model = TabBarBuilder.build(ctx)
 
-      assert %TabBar{encoded: nil, fingerprint: :suppressed} = model
+      assert %TabBar{visible?: false, active_tab_id: nil, tabs: []} = model
     end
 
-    test "returns suppressed tab bar when tab_bar state is nil" do
+    test "returns hidden tab bar when tab_bar state is nil" do
       ctx = build_minimal_context(tab_bar: nil)
       model = TabBarBuilder.build(ctx)
 
-      assert %TabBar{encoded: nil, fingerprint: :suppressed} = model
+      assert %TabBar{visible?: false, active_tab_id: nil, tabs: []} = model
     end
   end
 

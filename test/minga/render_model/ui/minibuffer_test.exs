@@ -2,25 +2,32 @@ defmodule Minga.RenderModel.UI.MinibufferTest do
   use ExUnit.Case, async: true
 
   alias Minga.RenderModel.UI.Minibuffer
+  alias Minga.RenderModel.UI.Minibuffer.Candidate
 
   describe "%Minibuffer{}" do
-    test "requires encoded and fingerprint" do
-      model = %Minibuffer{encoded: <<>>, fingerprint: :hidden}
+    test "defaults to hidden" do
+      model = %Minibuffer{}
 
-      assert model.encoded == <<>>
-      assert model.fingerprint == :hidden
+      refute model.visible?
+      assert model.candidates == []
+      assert model.cursor_pos == nil
     end
 
-    test "raises when required fields are missing" do
-      assert_raise ArgumentError, fn ->
-        struct!(Minibuffer, %{})
-      end
-    end
+    test "carries visible minibuffer candidates" do
+      candidate = %Candidate{label: "write", description: "Save", match_score: 99}
 
-    test "accepts visible state with tuple fingerprint" do
-      model = %Minibuffer{encoded: <<0x7F, 1>>, fingerprint: {true, :ex, 5}}
+      model = %Minibuffer{
+        visible?: true,
+        mode: :command,
+        cursor_pos: 1,
+        prompt: ":",
+        input: "w",
+        candidates: [candidate],
+        total_candidates: 1
+      }
 
-      assert model.fingerprint == {true, :ex, 5}
+      assert model.visible?
+      assert model.candidates == [candidate]
     end
   end
 end

@@ -4,77 +4,97 @@ defmodule Minga.Frontend.Adapter.GUI.SidebarsEncoderTest do
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Frontend.Adapter.GUI.SidebarsEncoder
   alias Minga.RenderModel.UI.Sidebars
+  alias Minga.RenderModel.UI.Sidebars.Sidebar
+  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
 
   @op_gui_sidebars Minga.Protocol.Opcodes.gui_sidebars()
 
   describe "encode/2" do
-    test "returns nil when encoded is nil" do
-      model = %Sidebars{encoded: nil, fingerprint: nil}
-      caches = Caches.new()
+    test "encodes empty sidebar metadata" do
+      {cmd, _caches} = SidebarsEncoder.encode(%Sidebars{}, Caches.new())
 
-      {cmd, _caches} = SidebarsEncoder.encode(model, caches)
-
-      assert cmd == nil
+      assert <<@op_gui_sidebars, len::32, payload::binary-size(len)>> = cmd
+      assert <<1::8, 0::16, 0::16>> = payload
     end
 
-    test "encodes sidebars with payload" do
+    test "matches legacy sidebar metadata wire format" do
+      sidebars = [
+        %{
+          id: "files",
+          display_name: "Files",
+          semantic_kind: "file_tree",
+          icon: "󰙅",
+          order: 1,
+          visible?: true,
+          focused?: true,
+          preferred_width: 32,
+          badge_count: 4
+        }
+      ]
+
       model = %Sidebars{
-        encoded: <<@op_gui_sidebars, 0::32, "sidebar_data">>,
-        fingerprint: 12_345
+        active_id: "files",
+        sidebars: [
+          %Sidebar{
+            id: "files",
+            display_name: "Files",
+            semantic_kind: "file_tree",
+            icon: "󰙅",
+            order: 1,
+            visible?: true,
+            focused?: true,
+            preferred_width: 32,
+            badge_count: 4
+          }
+        ]
       }
 
-      caches = Caches.new()
+      {cmd, _caches} = SidebarsEncoder.encode(model, Caches.new())
 
-      {cmd, _caches} = SidebarsEncoder.encode(model, caches)
-
-      assert cmd == model.encoded
+      assert cmd == ProtocolGUI.encode_gui_sidebars(sidebars, "files")
     end
 
-    test "returns nil on second call with same fingerprint" do
+    test "encodes sidebar entries" do
       model = %Sidebars{
-        encoded: <<@op_gui_sidebars, 5::32, "hello">>,
-        fingerprint: 42
+        active_id: "files",
+        sidebars: [
+          %Sidebar{
+            id: "files",
+            display_name: "Files",
+            semantic_kind: "file_tree",
+            icon: "󰙅",
+            order: 1,
+            visible?: true,
+            focused?: true
+          }
+        ]
       }
 
-      caches = Caches.new()
+      {cmd, _caches} = SidebarsEncoder.encode(model, Caches.new())
 
-      {cmd1, caches} = SidebarsEncoder.encode(model, caches)
-      assert cmd1 != nil
+      assert <<@op_gui_sidebars, len::32, payload::binary-size(len)>> = cmd
 
+      assert <<1::8, 1::16, active_len::16, active::binary-size(active_len), rest::binary>> =
+               payload
+
+      assert active == "files"
+      assert <<id_len::16, id::binary-size(id_len), _entry_rest::binary>> = rest
+      assert id == "files"
+    end
+
+    test "returns nil on second call with same semantic data" do
+      model = %Sidebars{
+        active_id: "files",
+        sidebars: [
+          %Sidebar{id: "files", display_name: "Files", semantic_kind: "file_tree", order: 1}
+        ]
+      }
+
+      {cmd1, caches} = SidebarsEncoder.encode(model, Caches.new())
       {cmd2, _caches} = SidebarsEncoder.encode(model, caches)
+
+      assert cmd1 != nil
       assert cmd2 == nil
-    end
-
-    test "re-encodes when fingerprint changes" do
-      model1 = %Sidebars{
-        encoded: <<@op_gui_sidebars, 3::32, "abc">>,
-        fingerprint: 42
-      }
-
-      model2 = %Sidebars{
-        encoded: <<@op_gui_sidebars, 5::32, "hello">>,
-        fingerprint: 99_999
-      }
-
-      caches = Caches.new()
-      {_, caches} = SidebarsEncoder.encode(model1, caches)
-      {cmd2, _caches} = SidebarsEncoder.encode(model2, caches)
-
-      assert cmd2 != nil
-      assert cmd2 == model2.encoded
-    end
-
-    test "updates cache fingerprint on encode" do
-      model = %Sidebars{
-        encoded: <<@op_gui_sidebars, 3::32, "abc">>,
-        fingerprint: 42
-      }
-
-      caches = Caches.new()
-      assert caches.last_sidebars_fp == nil
-
-      {_cmd, caches} = SidebarsEncoder.encode(model, caches)
-      assert caches.last_sidebars_fp == 42
     end
   end
 end

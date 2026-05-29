@@ -14,17 +14,10 @@ defmodule Minga.RenderModel.GuardrailsTest do
                                  "edit_timeline",
                                  "extension_overlay",
                                  "extension_panel",
-                                 "file_tree",
                                  "float_popup",
                                  "hover_popup",
-                                 "minibuffer",
                                  "observatory",
-                                 "picker",
-                                 "sidebars",
-                                 "signature_help",
-                                 "status_bar",
-                                 "tab_bar",
-                                 "workspaces"
+                                 "signature_help"
                                ])
 
   @legacy_protocol_gui_builder_files MapSet.new([
@@ -37,17 +30,10 @@ defmodule Minga.RenderModel.GuardrailsTest do
                                        "lib/minga_editor/render_model/ui/edit_timeline_builder.ex",
                                        "lib/minga_editor/render_model/ui/extension_overlay_builder.ex",
                                        "lib/minga_editor/render_model/ui/extension_panel_builder.ex",
-                                       "lib/minga_editor/render_model/ui/file_tree_builder.ex",
                                        "lib/minga_editor/render_model/ui/float_popup_builder.ex",
                                        "lib/minga_editor/render_model/ui/hover_popup_builder.ex",
-                                       "lib/minga_editor/render_model/ui/minibuffer_builder.ex",
                                        "lib/minga_editor/render_model/ui/observatory_builder.ex",
-                                       "lib/minga_editor/render_model/ui/picker_builder.ex",
-                                       "lib/minga_editor/render_model/ui/sidebars_builder.ex",
-                                       "lib/minga_editor/render_model/ui/signature_help_builder.ex",
-                                       "lib/minga_editor/render_model/ui/status_bar_builder.ex",
-                                       "lib/minga_editor/render_model/ui/tab_bar_builder.ex",
-                                       "lib/minga_editor/render_model/ui/workspaces_builder.ex"
+                                       "lib/minga_editor/render_model/ui/signature_help_builder.ex"
                                      ])
 
   test "only tracked legacy UI render models carry protocol payload fields" do

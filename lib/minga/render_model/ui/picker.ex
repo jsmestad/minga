@@ -1,21 +1,41 @@
 defmodule Minga.RenderModel.UI.Picker do
   @moduledoc """
-  Pre-encoded picker model.
-
-  The picker wire format is complex (item encoding with match positions,
-  preview sub-commands, action menu, mode prefix, load status) and depends
-  on editor-layer types (UI.Picker, Picker.Source). Rather than duplicating
-  that encoding in core, the builder pre-encodes the binary and stores it
-  here along with the fingerprint for change detection.
-
-  Uses a `:closed` sentinel fingerprint when the picker is dismissed.
+  Semantic picker model for GUI adapters.
   """
 
+  alias Minga.RenderModel.UI.Picker.ActionMenu
+  alias Minga.RenderModel.UI.Picker.Item
+
+  @type load_status :: :ready | :loading | {:error, String.t()}
+  @type preview_segment :: {String.t(), non_neg_integer(), boolean()}
+
   @type t :: %__MODULE__{
-          encoded: binary(),
-          fingerprint: integer() | :closed
+          visible?: boolean(),
+          title: String.t(),
+          query: String.t(),
+          selected_index: non_neg_integer(),
+          filtered_count: non_neg_integer(),
+          total_count: non_neg_integer(),
+          marked_count: non_neg_integer(),
+          has_preview?: boolean(),
+          items: [Item.t()],
+          action_menu: ActionMenu.t() | nil,
+          mode_prefix: String.t(),
+          load_status: load_status(),
+          preview_lines: [[preview_segment()]] | nil
         }
 
-  @enforce_keys [:encoded, :fingerprint]
-  defstruct [:encoded, :fingerprint]
+  defstruct visible?: false,
+            title: "",
+            query: "",
+            selected_index: 0,
+            filtered_count: 0,
+            total_count: 0,
+            marked_count: 0,
+            has_preview?: false,
+            items: [],
+            action_menu: nil,
+            mode_prefix: "",
+            load_status: :ready,
+            preview_lines: nil
 end

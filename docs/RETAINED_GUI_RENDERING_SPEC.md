@@ -40,7 +40,7 @@ These rules prevent the same compromise from repeating:
 - A `Minga.RenderModel.*` struct must not store a protocol command binary as its primary payload.
 - A `MingaEditor.RenderModel.*Builder` must not call `MingaEditor.Frontend.Protocol.GUI.encode_gui_*`.
 - A core GUI encoder must accept a semantic model and return bytes. It must not call `Buffer`, `Options`, `Language`, `MingaEditor`, or any process.
-- A component is not migrated until the old `ProtocolGUI.encode_gui_*` function is deleted or moved to a core protocol module with a semantic-model interface.
+- A component is not production-migrated until its builder returns a semantic model and the core adapter owns encoding. Temporary `ProtocolGUI.encode_gui_*` compatibility wrappers may remain for protocol tests and external callers, but they are cleanup debt and must not be called by render-model builders.
 - Adapter caches may store fingerprints and last encoded state. They must not become the visible model.
 - Pane rendering and input routing must be window-scoped. No GUI renderer or input path may use active-window gutter geometry, global frame width, or row-only cursorline state for pane-local drawing or hit testing.
 - No new delta protocol work starts until content epochs and full reset behavior exist.
@@ -114,20 +114,20 @@ Already semantic or mostly semantic:
 - `search_state`
 - `git_status`
 - `agent_context` (semantic model, but `agent_context_builder` still has a tracked legacy `MingaEditor.Frontend.Protocol.GUI` type dependency)
-- `gutter_separator`
-- `split_separators`
-
-Still pre-encoded and must be replaced:
-
 - `status_bar`
-- `observatory`
-- `board`
 - `tab_bar`
 - `workspaces`
 - `sidebars`
 - `file_tree`
 - `picker`
 - `minibuffer`
+- `gutter_separator`
+- `split_separators`
+
+Still pre-encoded and must be replaced:
+
+- `observatory`
+- `board`
 - `completion`
 - `signature_help`
 - `agent_chat`
@@ -141,12 +141,11 @@ Still pre-encoded and must be replaced:
 
 Recommended order:
 
-1. Status bar, tab bar, workspaces. These are high-frequency and expose dirty markers, icons, and workspace summary shapes that should be semantic.
-2. Sidebars and file tree. Preserve the file tree selection-only fast path, but make it a model-level fast path (`selection_epoch` or `selection_fingerprint`), not a pre-encoded command.
-3. Input surfaces: picker, minibuffer, completion, signature help. These are focus-sensitive and need clean model ownership before more GUI input work.
-4. Popups and extensions: hover popup, float popup, extension overlay, extension panel. These prove extension surfaces can publish model data without editor protocol surgery.
-5. Agent surfaces: agent chat, bottom panel, change summary, edit timeline, board. These are the largest and should move with the MingaAgent boundary cleanup in step 4.
-6. Cleanup: delete migrated `ProtocolGUI.encode_gui_*` functions, split remaining protocol helpers into focused core modules, and remove compatibility tests that only prove the deleted path.
+1. Completion and signature help. These are the remaining focused input surfaces after picker and minibuffer moved to semantic models.
+2. Popups and extensions: hover popup, float popup, extension overlay, extension panel. These prove extension surfaces can publish model data without editor protocol surgery.
+3. Agent surfaces: agent chat, bottom panel, change summary, edit timeline, board. These are the largest and should move with the MingaAgent boundary cleanup in step 4.
+4. Observatory. This is standalone but should move with the same semantic model and core encoder pattern.
+5. Cleanup: delete migrated `ProtocolGUI.encode_gui_*` compatibility functions, split remaining protocol helpers into focused core modules, and remove compatibility tests that only prove deleted paths.
 
 Acceptance criteria per component:
 
@@ -155,7 +154,7 @@ Acceptance criteria per component:
 - The encoder lives in `lib/minga/frontend/adapter/gui/` or a core protocol module it calls.
 - The encoder is a pure function of the model and adapter caches.
 - Tests exist at the model, builder, and encoder boundaries.
-- The old `ProtocolGUI.encode_gui_*` function is deleted or moved to core with a semantic-model interface.
+- The production builder path does not call `ProtocolGUI.encode_gui_*`. Any remaining `ProtocolGUI.encode_gui_*` compatibility wrapper is documented cleanup debt and not the canonical render path.
 - Swift receives byte-identical output unless the component intentionally changes protocol shape with a documented decoder update.
 
 #### 4. Move agent UI ownership out of the editor
@@ -1090,7 +1089,7 @@ These are the six simplest components. Each is self-contained with no cross-comp
 
 **Process calls must move to the builder.** `active_buffer_path` calls `Buffer.file_path(buf)`. `compute_search_stats` queries buffer state. These are "compute what's visible" calls. They happen in the builder (which runs in `MingaEditor`'s process context and can call `Buffer`), not in the encoder (which is a pure function in core).
 
-**`ProtocolGUI` functions migrate with each swap.** When theme moves to the core adapter, `ProtocolGUI.encode_gui_theme` is either deleted (if the core encoder reimplements the encoding) or moved to a core protocol module. The function must not remain as dead code in `MingaEditor`.
+**`ProtocolGUI` functions are compatibility debt after each swap.** Once a production builder returns a semantic model and the core adapter owns encoding, any remaining `ProtocolGUI.encode_gui_*` entry point is a temporary compatibility wrapper for older tests or callers. It must not be called by render-model builders, and cleanup should either delete it or make it delegate to the core semantic encoder.
 
 ## Recommendation
 

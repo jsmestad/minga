@@ -14,7 +14,7 @@ defmodule Minga.Frontend.Adapter.GUI.Caches do
           last_tab_bar_fp: integer() | :suppressed | nil,
           last_workspaces_fp: integer() | :suppressed | nil,
           last_sidebars_fp: integer() | nil,
-          last_file_tree_fp: Minga.RenderModel.UI.FileTree.fingerprint() | nil,
+          last_file_tree_fp: term(),
           last_picker_fp: integer() | :closed | nil,
           last_minibuffer_fp: term(),
           last_completion_fp: integer() | nil,

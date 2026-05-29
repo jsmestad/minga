@@ -2,34 +2,63 @@ defmodule MingaEditor.RenderModel.UI.WorkspacesBuilder do
   @moduledoc false
 
   alias Minga.RenderModel.UI.Workspaces
-  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
+  alias Minga.RenderModel.UI.Workspaces.VisibleTab
+  alias Minga.RenderModel.UI.Workspaces.Workspace
   alias MingaEditor.Session.ChromeState
+  alias MingaEditor.Session.ChromeState.TabSummary
+  alias MingaEditor.Session.ChromeState.WorkspaceSummary
   alias MingaEditor.State.TabBar
 
   @spec build(map()) :: Workspaces.t()
   def build(%{shell_state: %{tab_bar: %TabBar{}}} = ctx) do
     chrome_state = ChromeState.from_editor_state(ctx)
-    fp = workspaces_fingerprint(chrome_state)
-    encoded = ProtocolGUI.encode_gui_workspaces(chrome_state)
 
-    %Workspaces{encoded: encoded, fingerprint: fp}
+    %Workspaces{
+      visible?: true,
+      active_workspace_id: chrome_state.active_workspace_id,
+      mode: chrome_state.mode,
+      attention_count: chrome_state.attention_count,
+      workspaces: Enum.map(chrome_state.workspaces, &workspace_model/1),
+      visible_tabs: Enum.map(chrome_state.visible_tabs, &visible_tab_model/1)
+    }
   end
 
   def build(_ctx) do
-    %Workspaces{encoded: nil, fingerprint: :suppressed}
+    %Workspaces{}
   end
 
-  @spec workspaces_fingerprint(ChromeState.t()) :: integer()
-  defp workspaces_fingerprint(%ChromeState{} = chrome_state) do
-    :erlang.phash2({
-      chrome_state.active_workspace_id,
-      chrome_state.background_count,
-      chrome_state.attention_count,
-      chrome_state.draft_count,
-      chrome_state.conflict_count,
-      chrome_state.mode,
-      chrome_state.visible_tabs,
-      chrome_state.workspaces
-    })
+  @spec workspace_model(WorkspaceSummary.t()) :: Workspace.t()
+  defp workspace_model(%WorkspaceSummary{} = workspace) do
+    %Workspace{
+      id: workspace.id,
+      kind: workspace.kind,
+      label: workspace.label,
+      icon: workspace.icon,
+      color: workspace.color,
+      status: workspace.status,
+      attention?: workspace.attention?,
+      tab_count: workspace.tab_count,
+      draft_count: workspace.draft_count,
+      conflict_count: workspace.conflict_count,
+      running_background_count: workspace.running_background_count,
+      closeable?: workspace.closeable?
+    }
+  end
+
+  @spec visible_tab_model(TabSummary.t()) :: VisibleTab.t()
+  defp visible_tab_model(%TabSummary{} = tab) do
+    %VisibleTab{
+      id: tab.id,
+      workspace_id: tab.workspace_id,
+      kind: tab.kind,
+      label: tab.label,
+      path: tab.path,
+      icon: tab.icon,
+      dirty?: tab.dirty?,
+      draft_state: tab.draft_state,
+      attention?: tab.attention?,
+      pinned?: tab.pinned?,
+      tint_color: tab.tint_color
+    }
   end
 end
