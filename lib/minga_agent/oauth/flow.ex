@@ -100,8 +100,6 @@ defmodule MingaAgent.OAuth.Flow do
     :exit, _ -> :ok
   end
 
-  defp stop_server(_), do: :ok
-
   defp open_browser(url) do
     {cmd, args} =
       case :os.type() do

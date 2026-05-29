@@ -224,7 +224,7 @@ defmodule MingaAgent.OAuth do
         case JSON.decode(content) do
           {:ok, map} when is_map(map) -> {:ok, map}
           {:ok, _non_map} -> {:ok, %{}}
-          {:error, err} -> {:error, "Failed to parse #{path}: #{Exception.message(err)}"}
+          {:error, err} -> {:error, "Failed to parse #{path}: #{inspect(err)}"}
         end
 
       {:error, :enoent} ->
