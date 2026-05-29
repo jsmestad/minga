@@ -7,6 +7,7 @@ defmodule MingaEditor.Commands.Project do
   use MingaEditor.Commands.Provider
 
   alias MingaEditor.PickerUI
+  alias MingaEditor.PromptUI
   alias MingaEditor.State, as: EditorState
   alias Minga.Mode
   alias Minga.Project
@@ -16,7 +17,7 @@ defmodule MingaEditor.Commands.Project do
   @command_specs [
     {:project_find_file, "Find file in project", true},
     {:project_invalidate, "Invalidate project cache", true},
-    {:project_add, "Add project", true},
+    {:project_add, "Add project", false},
     {:project_remove, "Remove project", true},
     {:project_switch, "Switch project", false},
     {:project_recent_files, "Recent files", false}
@@ -44,18 +45,8 @@ defmodule MingaEditor.Commands.Project do
   end
 
   def execute(state, :project_add) do
-    root = project_root()
-
-    case root do
-      nil ->
-        EditorState.set_status(state, "No project root detected")
-
-      path ->
-        Project.add(path)
-        EditorState.set_status(state, "Added project: #{Path.basename(path)}")
-    end
-  catch
-    :exit, _ -> state
+    default = Project.resolve_root() |> collapse_home()
+    PromptUI.open(state, MingaEditor.UI.Prompt.ProjectAdd, default: default)
   end
 
   def execute(state, :project_remove) do
@@ -78,6 +69,12 @@ defmodule MingaEditor.Commands.Project do
     Project.root()
   catch
     :exit, _ -> nil
+  end
+
+  @spec collapse_home(String.t()) :: String.t()
+  defp collapse_home(path) do
+    home = Path.expand("~")
+    if String.starts_with?(path, home <> "/"), do: "~" <> String.trim_leading(path, home), else: path
   end
 
   commands(@command_specs)

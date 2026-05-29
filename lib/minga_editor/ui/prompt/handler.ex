@@ -46,4 +46,14 @@ defmodule MingaEditor.UI.Prompt.Handler do
 
   @doc "Called when the user presses Escape. Receives the editor state."
   @callback on_cancel(state :: EditorState.t()) :: EditorState.t()
+
+  @doc """
+  Called when the user presses Tab. Returns the completed text.
+
+  Optional. When not implemented, Tab is a no-op. Use for shell-style
+  path completion, symbol completion, etc.
+  """
+  @callback on_tab(text :: String.t()) :: String.t()
+
+  @optional_callbacks [on_tab: 1]
 end
