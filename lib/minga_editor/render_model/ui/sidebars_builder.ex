@@ -2,9 +2,9 @@ defmodule MingaEditor.RenderModel.UI.SidebarsBuilder do
   @moduledoc false
 
   alias Minga.RenderModel.UI.Sidebars
+  alias Minga.RenderModel.UI.Sidebars.Sidebar, as: SidebarModel
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Frontend.Emit.Context
-  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
 
   @spec build(Context.t()) :: Sidebars.t()
   def build(%Context{} = ctx) do
@@ -13,17 +13,16 @@ defmodule MingaEditor.RenderModel.UI.SidebarsBuilder do
     raw_sidebars = registered_sidebar_metadata(sidebar_registry)
     active_id = active_sidebar_id(ctx, raw_sidebars, registered_active)
     sidebars = mark_active_sidebar(raw_sidebars, active_id)
-    fp = :erlang.phash2({sidebars, active_id})
-    encoded = ProtocolGUI.encode_gui_sidebars(sidebars, active_id)
 
-    %Sidebars{encoded: encoded, fingerprint: fp}
+    %Sidebars{active_id: active_id, sidebars: sidebars}
   end
 
-  @spec registered_sidebar_metadata(Sidebar.table()) :: [ProtocolGUI.sidebar_metadata()]
+  @spec registered_sidebar_metadata(Sidebar.table()) :: [SidebarModel.t()]
   defp registered_sidebar_metadata(sidebar_registry) do
-    Sidebar.all(sidebar_registry)
+    sidebar_registry
+    |> Sidebar.all()
     |> Enum.map(fn sidebar ->
-      %{
+      %SidebarModel{
         id: sidebar.id,
         display_name: sidebar.display_name,
         semantic_kind: sidebar.semantic_kind,
@@ -43,8 +42,7 @@ defmodule MingaEditor.RenderModel.UI.SidebarsBuilder do
     if count == 0, do: nil, else: count
   end
 
-  @spec active_sidebar_id(Context.t(), [ProtocolGUI.sidebar_metadata()], Sidebar.entry() | nil) ::
-          String.t()
+  @spec active_sidebar_id(Context.t(), [SidebarModel.t()], Sidebar.entry() | nil) :: String.t()
   defp active_sidebar_id(ctx, sidebars, registered_active) do
     registered_id = active_registered_sidebar_id(sidebars, registered_active)
     preferred_id = (ctx.shell_state || %{}) |> Map.get(:sidebar_active_id)
@@ -55,7 +53,7 @@ defmodule MingaEditor.RenderModel.UI.SidebarsBuilder do
     end
   end
 
-  @spec active_registered_sidebar_id([ProtocolGUI.sidebar_metadata()], Sidebar.entry() | nil) ::
+  @spec active_registered_sidebar_id([SidebarModel.t()], Sidebar.entry() | nil) ::
           String.t() | nil
   defp active_registered_sidebar_id(_sidebars, nil), do: nil
 
@@ -63,7 +61,7 @@ defmodule MingaEditor.RenderModel.UI.SidebarsBuilder do
     sidebar_visible_id(sidebars, id)
   end
 
-  @spec sidebar_visible_id([ProtocolGUI.sidebar_metadata()], String.t() | nil) :: String.t() | nil
+  @spec sidebar_visible_id([SidebarModel.t()], String.t() | nil) :: String.t() | nil
   defp sidebar_visible_id(_sidebars, nil), do: nil
 
   defp sidebar_visible_id(sidebars, id) do
@@ -72,7 +70,7 @@ defmodule MingaEditor.RenderModel.UI.SidebarsBuilder do
       else: nil
   end
 
-  @spec fallback_active_sidebar_id([ProtocolGUI.sidebar_metadata()]) :: String.t()
+  @spec fallback_active_sidebar_id([SidebarModel.t()]) :: String.t()
   defp fallback_active_sidebar_id(sidebars) do
     focused =
       sidebars
@@ -92,12 +90,10 @@ defmodule MingaEditor.RenderModel.UI.SidebarsBuilder do
     end
   end
 
-  @spec mark_active_sidebar([ProtocolGUI.sidebar_metadata()], String.t()) :: [
-          ProtocolGUI.sidebar_metadata()
-        ]
+  @spec mark_active_sidebar([SidebarModel.t()], String.t()) :: [SidebarModel.t()]
   defp mark_active_sidebar(sidebars, active_id) do
     Enum.map(sidebars, fn sidebar ->
-      %{sidebar | focused?: sidebar.visible? and sidebar.id == active_id}
+      SidebarModel.focus(sidebar, sidebar.visible? and sidebar.id == active_id)
     end)
   end
 end

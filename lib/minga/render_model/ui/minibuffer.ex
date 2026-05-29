@@ -1,20 +1,42 @@
 defmodule Minga.RenderModel.UI.Minibuffer do
   @moduledoc """
-  Pre-encoded minibuffer model.
-
-  The minibuffer wire format includes mode, prompt, input, cursor position,
-  context, and completion candidates with match positions. Rather than
-  duplicating that encoding in core, the builder pre-encodes the binary
-  and stores it here along with a fingerprint for change detection.
-
-  Uses a `:hidden` sentinel fingerprint when the minibuffer is not visible.
+  Semantic minibuffer model for GUI adapters.
   """
 
+  alias Minga.RenderModel.UI.Minibuffer.Candidate
+
+  @type mode ::
+          :command
+          | :search_forward
+          | :search_backward
+          | :search_prompt
+          | :eval
+          | :substitute_confirm
+          | :extension_confirm
+          | :describe_key
+          | :delete_confirm
+          | :branch_delete_confirm
+          | :unknown
+
   @type t :: %__MODULE__{
-          encoded: binary(),
-          fingerprint: term()
+          visible?: boolean(),
+          mode: mode(),
+          cursor_pos: non_neg_integer() | nil,
+          prompt: String.t(),
+          input: String.t(),
+          context: String.t(),
+          selected_index: non_neg_integer(),
+          candidates: [Candidate.t()],
+          total_candidates: non_neg_integer()
         }
 
-  @enforce_keys [:encoded, :fingerprint]
-  defstruct [:encoded, :fingerprint]
+  defstruct visible?: false,
+            mode: :command,
+            cursor_pos: nil,
+            prompt: "",
+            input: "",
+            context: "",
+            selected_index: 0,
+            candidates: [],
+            total_candidates: 0
 end

@@ -2,20 +2,25 @@ defmodule Minga.RenderModel.UI.WorkspacesTest do
   use ExUnit.Case, async: true
 
   alias Minga.RenderModel.UI.Workspaces
+  alias Minga.RenderModel.UI.Workspaces.VisibleTab
+  alias Minga.RenderModel.UI.Workspaces.Workspace
 
   describe "%Workspaces{}" do
-    test "defaults to nil encoded and suppressed fingerprint" do
-      ws = %Workspaces{}
+    test "defaults to hidden with no entries" do
+      workspaces = %Workspaces{}
 
-      assert ws.encoded == nil
-      assert ws.fingerprint == :suppressed
+      refute workspaces.visible?
+      assert workspaces.workspaces == []
+      assert workspaces.visible_tabs == []
     end
 
-    test "accepts binary encoded and integer fingerprint" do
-      ws = %Workspaces{encoded: <<0x98, 0, 5, "data">>, fingerprint: 12_345}
+    test "carries workspace and visible tab summaries" do
+      workspace = %Workspace{id: 0, kind: :manual, label: "Files", icon: "folder"}
+      tab = %VisibleTab{id: 10, workspace_id: 0, label: "lib.ex", icon: ""}
+      workspaces = %Workspaces{visible?: true, workspaces: [workspace], visible_tabs: [tab]}
 
-      assert ws.encoded == <<0x98, 0, 5, "data">>
-      assert ws.fingerprint == 12_345
+      assert workspaces.workspaces == [workspace]
+      assert workspaces.visible_tabs == [tab]
     end
   end
 end

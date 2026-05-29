@@ -1,14 +1,10 @@
 defmodule MingaEditor.RenderModel.UI.StatusBarBuilderTest do
   use ExUnit.Case, async: true
 
-  alias MingaEditor.RenderModel.UI.StatusBarBuilder
   alias Minga.RenderModel.UI.StatusBar
-  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
-  alias MingaEditor.Session.ChromeState
+  alias Minga.RenderModel.UI.StatusBar.Workspace
+  alias MingaEditor.RenderModel.UI.StatusBarBuilder
 
-  @op_gui_status_bar Minga.Protocol.Opcodes.gui_status_bar()
-
-  # Minimal buffer data that satisfies encode_gui_status_bar
   defp minimal_buffer_data do
     {:buffer,
      %{
@@ -46,12 +42,10 @@ defmodule MingaEditor.RenderModel.UI.StatusBarBuilderTest do
      }}
   end
 
-  # Minimal theme for with_modeline_segments
   defp minimal_theme do
     MingaEditor.UI.Theme.get!(:doom_one)
   end
 
-  # Minimal chrome state context (enough for ChromeState.from_editor_state)
   defp minimal_ctx do
     %{
       shell_state: %{tab_bar: nil},
@@ -71,35 +65,19 @@ defmodule MingaEditor.RenderModel.UI.StatusBarBuilderTest do
   end
 
   describe "build/3" do
-    test "returns a StatusBar model with pre-encoded binary" do
-      sb_data = minimal_buffer_data()
-      theme = minimal_theme()
-      ctx = minimal_ctx()
+    test "returns a semantic StatusBar model" do
+      model = StatusBarBuilder.build(minimal_buffer_data(), minimal_theme(), minimal_ctx())
 
-      model = StatusBarBuilder.build(sb_data, theme, ctx)
-
-      assert %StatusBar{encoded: encoded} = model
-      assert is_binary(encoded)
-      assert <<@op_gui_status_bar, _section_count::8, _rest::binary>> = encoded
+      assert %StatusBar{content_kind: :buffer, data: data} = model
+      assert data.file.name == "test.ex"
+      assert is_binary(data.file.icon)
+      assert is_integer(data.file.icon_color)
     end
 
-    test "produces byte-identical output to legacy ProtocolGUI path" do
-      sb_data = minimal_buffer_data()
-      theme = minimal_theme()
-      ctx = minimal_ctx()
+    test "includes active workspace summary when available" do
+      model = StatusBarBuilder.build(minimal_buffer_data(), minimal_theme(), minimal_ctx())
 
-      # Legacy path
-      sb_data_with_segments =
-        MingaEditor.StatusBar.Data.with_modeline_segments(sb_data, theme)
-
-      chrome_state = ChromeState.from_editor_state(ctx)
-      legacy_binary = ProtocolGUI.encode_gui_status_bar(sb_data_with_segments, chrome_state)
-
-      # New path
-      model = StatusBarBuilder.build(sb_data, theme, ctx)
-
-      assert model.encoded == legacy_binary,
-             "StatusBar builder output does not match legacy encoding"
+      assert %Workspace{id: 0, kind: :manual} = model.workspace
     end
   end
 end

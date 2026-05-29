@@ -4,175 +4,161 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoderTest do
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Frontend.Adapter.GUI.FileTreeEncoder
   alias Minga.RenderModel.UI.FileTree
+  alias Minga.RenderModel.UI.FileTree.Flags
+  alias Minga.RenderModel.UI.FileTree.Row
+  alias MingaEditor.FileTree.Diagnostics, as: LegacyDiagnostics
+  alias MingaEditor.FileTree.Row, as: LegacyRow
+  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
+
+  @op_gui_file_tree Minga.Protocol.Opcodes.gui_file_tree()
+  @op_gui_file_tree_selection Minga.Protocol.Opcodes.gui_file_tree_selection()
 
   describe "encode/2 - hidden/state fingerprints" do
     test "encodes hidden file tree on first call" do
-      model = %FileTree{
-        encoded: <<0x93, "hidden">>,
-        fingerprint: {:no_tree, "/tmp/project"}
-      }
+      model = %FileTree{root_path: "/tmp/project", status: :hidden}
 
-      caches = Caches.new()
+      {cmd, _caches} = FileTreeEncoder.encode(model, Caches.new())
 
-      {cmd, _caches} = FileTreeEncoder.encode(model, caches)
-
-      assert cmd == model.encoded
+      assert <<@op_gui_file_tree, _len::32, _payload::binary>> = cmd
     end
 
-    test "returns nil on second call with same fingerprint" do
-      model = %FileTree{
-        encoded: <<0x93, "hidden">>,
-        fingerprint: {:no_tree, "/tmp/project"}
-      }
+    test "returns nil on second call with same hidden tree" do
+      model = %FileTree{root_path: "/tmp/project", status: :hidden}
 
-      caches = Caches.new()
-
-      {_cmd1, caches} = FileTreeEncoder.encode(model, caches)
+      {_cmd1, caches} = FileTreeEncoder.encode(model, Caches.new())
       {cmd2, _caches} = FileTreeEncoder.encode(model, caches)
 
       assert cmd2 == nil
     end
 
-    test "re-encodes when fingerprint changes" do
-      model1 = %FileTree{
-        encoded: <<0x93, "hidden1">>,
-        fingerprint: {:no_tree, "/tmp/first"}
-      }
+    test "re-encodes when state changes" do
+      model1 = %FileTree{root_path: "/tmp/first", status: :hidden}
+      model2 = %FileTree{root_path: "/tmp/second", status: :hidden}
 
-      model2 = %FileTree{
-        encoded: <<0x93, "hidden2">>,
-        fingerprint: {:no_tree, "/tmp/second"}
-      }
-
-      caches = Caches.new()
-      {_, caches} = FileTreeEncoder.encode(model1, caches)
+      {_, caches} = FileTreeEncoder.encode(model1, Caches.new())
       {cmd2, _caches} = FileTreeEncoder.encode(model2, caches)
 
-      assert cmd2 == model2.encoded
-    end
-
-    test "encodes file_tree_state fingerprint" do
-      model = %FileTree{
-        encoded: <<0x93, "loading">>,
-        fingerprint: {:file_tree_state, "/project", 250, :loading}
-      }
-
-      caches = Caches.new()
-
-      {cmd, caches} = FileTreeEncoder.encode(model, caches)
-
-      assert cmd == model.encoded
-      assert caches.last_file_tree_fp == {:file_tree_state, "/project", 250, :loading}
+      assert <<@op_gui_file_tree, _len::32, _payload::binary>> = cmd2
     end
   end
 
-  describe "encode/2 - ready fingerprints (three-way comparison)" do
-    test "encodes full tree on first call" do
+  describe "encode/2 - ready tree selection path" do
+    test "matches legacy file-tree wire format" do
       model = %FileTree{
-        encoded: <<0x93, "full_tree">>,
-        selection_encoded: <<0x94, "selection">>,
-        fingerprint: {:ready, 111, 222}
+        root_path: "/project",
+        tree_width: 30,
+        status: :ready,
+        focused?: true,
+        selected_id: "/project/lib",
+        rows: [
+          %Row{
+            id: "/project/lib",
+            path: "/project/lib",
+            name: "lib",
+            icon: "󰉋",
+            flags: %Flags{
+              directory?: true,
+              expanded?: true,
+              active?: true,
+              dirty?: true,
+              last_child?: true
+            },
+            git_status: :modified,
+            diagnostics: {2, 1, 0, 0},
+            depth: 1,
+            guides: [true]
+          }
+        ]
       }
 
-      caches = Caches.new()
+      legacy_rows = [
+        LegacyRow.new(
+          id: "/project/lib",
+          path: "/project/lib",
+          name: "lib",
+          directory?: true,
+          expanded?: true,
+          selected?: true,
+          focused?: true,
+          active?: true,
+          dirty?: true,
+          git_status: :modified,
+          diagnostics: LegacyDiagnostics.new({2, 1, 0, 0}),
+          depth: 1,
+          guides: [true],
+          last_child?: true
+        )
+      ]
 
-      {cmd, _caches} = FileTreeEncoder.encode(model, caches)
+      {cmd, _caches} = FileTreeEncoder.encode(model, Caches.new())
 
-      assert cmd == model.encoded
+      assert cmd == ProtocolGUI.encode_gui_file_tree("/project", 30, :ready, true, legacy_rows)
+    end
+
+    test "encodes full tree on first call" do
+      model = ready_tree("/project/a.ex")
+
+      {cmd, _caches} = FileTreeEncoder.encode(model, Caches.new())
+
+      assert <<@op_gui_file_tree, _len::32, _payload::binary>> = cmd
     end
 
     test "returns nil when nothing changed" do
-      model = %FileTree{
-        encoded: <<0x93, "full_tree">>,
-        selection_encoded: <<0x94, "selection">>,
-        fingerprint: {:ready, 111, 222}
-      }
+      model = ready_tree("/project/a.ex")
 
-      caches = Caches.new()
-
-      {_cmd1, caches} = FileTreeEncoder.encode(model, caches)
+      {_cmd1, caches} = FileTreeEncoder.encode(model, Caches.new())
       {cmd2, _caches} = FileTreeEncoder.encode(model, caches)
 
       assert cmd2 == nil
     end
 
     test "sends selection-only command when only selection changes" do
-      model1 = %FileTree{
-        encoded: <<0x93, "full_tree">>,
-        selection_encoded: <<0x94, "selection1">>,
-        fingerprint: {:ready, 111, 222}
-      }
+      model1 = ready_tree("/project/a.ex")
+      model2 = ready_tree("/project/b.ex")
 
-      model2 = %FileTree{
-        encoded: <<0x93, "full_tree">>,
-        selection_encoded: <<0x94, "selection2">>,
-        fingerprint: {:ready, 111, 333}
-      }
-
-      caches = Caches.new()
-      {_, caches} = FileTreeEncoder.encode(model1, caches)
-      {cmd2, caches} = FileTreeEncoder.encode(model2, caches)
-
-      assert cmd2 == <<0x94, "selection2">>
-      assert caches.last_file_tree_fp == {:ready, 111, 333}
-    end
-
-    test "sends full tree when structural fingerprint changes" do
-      model1 = %FileTree{
-        encoded: <<0x93, "tree_v1">>,
-        selection_encoded: <<0x94, "sel_v1">>,
-        fingerprint: {:ready, 111, 222}
-      }
-
-      model2 = %FileTree{
-        encoded: <<0x93, "tree_v2">>,
-        selection_encoded: <<0x94, "sel_v2">>,
-        fingerprint: {:ready, 999, 222}
-      }
-
-      caches = Caches.new()
-      {_, caches} = FileTreeEncoder.encode(model1, caches)
+      {_, caches} = FileTreeEncoder.encode(model1, Caches.new())
       {cmd2, _caches} = FileTreeEncoder.encode(model2, caches)
 
-      assert cmd2 == <<0x93, "tree_v2">>
+      assert <<@op_gui_file_tree_selection, len::16, payload::binary-size(len)>> = cmd2
+      assert <<1::8, id_len::16, selected_id::binary-size(id_len)>> = payload
+      assert selected_id == "/project/b.ex"
     end
 
-    test "transition from hidden to ready sends full tree" do
-      hidden = %FileTree{
-        encoded: <<0x93, "hidden">>,
-        fingerprint: {:no_tree, "/project"}
-      }
+    test "sends full tree when row structure changes" do
+      model1 = ready_tree("/project/a.ex")
+      model2 = %{ready_tree("/project/a.ex") | rows: [row("/project/a.ex"), row("/project/c.ex")]}
 
-      ready = %FileTree{
-        encoded: <<0x93, "ready_tree">>,
-        selection_encoded: <<0x94, "sel">>,
-        fingerprint: {:ready, 111, 222}
-      }
+      {_, caches} = FileTreeEncoder.encode(model1, Caches.new())
+      {cmd2, _caches} = FileTreeEncoder.encode(model2, caches)
 
-      caches = Caches.new()
-      {_, caches} = FileTreeEncoder.encode(hidden, caches)
-      {cmd2, _caches} = FileTreeEncoder.encode(ready, caches)
-
-      assert cmd2 == <<0x93, "ready_tree">>
+      assert <<@op_gui_file_tree, _len::32, _payload::binary>> = cmd2
     end
+  end
 
-    test "transition from ready to hidden sends hidden command" do
-      ready = %FileTree{
-        encoded: <<0x93, "ready_tree">>,
-        selection_encoded: <<0x94, "sel">>,
-        fingerprint: {:ready, 111, 222}
-      }
+  @spec ready_tree(String.t()) :: FileTree.t()
+  defp ready_tree(selected_id) do
+    rows = Enum.map(["/project/a.ex", "/project/b.ex"], &row/1)
 
-      hidden = %FileTree{
-        encoded: <<0x93, "hidden">>,
-        fingerprint: {:no_tree, "/project"}
-      }
+    %FileTree{
+      root_path: "/project",
+      tree_width: 30,
+      status: :ready,
+      focused?: true,
+      selected_id: selected_id,
+      rows: rows
+    }
+  end
 
-      caches = Caches.new()
-      {_, caches} = FileTreeEncoder.encode(ready, caches)
-      {cmd2, _caches} = FileTreeEncoder.encode(hidden, caches)
-
-      assert cmd2 == <<0x93, "hidden">>
-    end
+  @spec row(String.t()) :: Row.t()
+  defp row(path) do
+    %Row{
+      id: path,
+      path: path,
+      name: Path.basename(path),
+      icon: "",
+      depth: 0,
+      guides: [],
+      diagnostics: {1, 0, 0, 0}
+    }
   end
 end

@@ -1,5 +1,6 @@
 defmodule MingaEditor.RemoteNodeEventsTest do
-  use Minga.Test.EditorCase, async: true
+  # SessionStore default-path tests mutate global XDG_CONFIG_HOME, so this module must not run concurrently.
+  use Minga.Test.EditorCase, async: false
 
   alias Minga.Distribution.Events.NodeConnectedEvent
   alias Minga.Distribution.Events.NodeDisconnectedEvent
@@ -15,6 +16,23 @@ defmodule MingaEditor.RemoteNodeEventsTest do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
+
+  @moduletag :tmp_dir
+
+  setup %{tmp_dir: dir} do
+    previous_config_home = System.get_env("XDG_CONFIG_HOME")
+    System.put_env("XDG_CONFIG_HOME", dir)
+
+    on_exit(fn ->
+      if previous_config_home do
+        System.put_env("XDG_CONFIG_HOME", previous_config_home)
+      else
+        System.delete_env("XDG_CONFIG_HOME")
+      end
+    end)
+
+    :ok
+  end
 
   test "node_connected marks the remote server connected" do
     ctx = start_editor("initial")

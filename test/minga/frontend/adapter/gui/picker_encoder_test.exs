@@ -4,86 +4,117 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Frontend.Adapter.GUI.PickerEncoder
   alias Minga.RenderModel.UI.Picker
+  alias Minga.RenderModel.UI.Picker.ActionMenu
+  alias Minga.RenderModel.UI.Picker.Item
+  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
+  alias MingaEditor.UI.Picker, as: LegacyPicker
+  alias MingaEditor.UI.Picker.Item, as: LegacyPickerItem
 
   @op_gui_picker Minga.Protocol.Opcodes.gui_picker()
+  @op_gui_picker_preview Minga.Protocol.Opcodes.gui_picker_preview()
 
   describe "encode/2" do
-    test "encodes closed picker" do
-      model = %Picker{
-        encoded: <<@op_gui_picker, 0::8, "closed">>,
-        fingerprint: :closed
-      }
+    test "encodes closed picker and hidden preview" do
+      {cmd, _caches} = PickerEncoder.encode(%Picker{}, Caches.new())
 
-      caches = Caches.new()
-
-      {cmd, _caches} = PickerEncoder.encode(model, caches)
-
-      assert cmd == model.encoded
+      assert cmd == <<@op_gui_picker, 0::8, @op_gui_picker_preview, 0::8>>
     end
 
-    test "encodes open picker" do
+    test "matches legacy picker and preview wire format" do
       model = %Picker{
-        encoded: <<@op_gui_picker, 1::8, "picker_data">>,
-        fingerprint: 54_321
+        visible?: true,
+        title: "Pick",
+        query: "o",
+        selected_index: 0,
+        filtered_count: 1,
+        total_count: 2,
+        marked_count: 1,
+        has_preview?: true,
+        items: [
+          %Item{
+            id: "one",
+            label: "One",
+            description: "First",
+            annotation: "open",
+            icon_color: 0x123456,
+            two_line?: true,
+            marked?: true,
+            match_positions: [0, 2]
+          }
+        ],
+        action_menu: %ActionMenu{actions: ["Open"], selected_index: 0},
+        mode_prefix: ">",
+        load_status: {:error, "boom"},
+        preview_lines: [[{"hello", 0xFFFFFF, true}]]
       }
 
-      caches = Caches.new()
+      legacy_item = %LegacyPickerItem{
+        id: "one",
+        label: "One",
+        description: "First",
+        annotation: "open",
+        icon_color: 0x123456,
+        two_line: true,
+        match_positions: [0, 2]
+      }
 
-      {cmd, _caches} = PickerEncoder.encode(model, caches)
+      legacy_picker = %LegacyPicker{
+        items: [legacy_item, %LegacyPickerItem{id: "two", label: "Two"}],
+        filtered: [legacy_item],
+        title: "Pick",
+        query: "o",
+        selected: 0,
+        marked: %{"one" => true}
+      }
 
-      assert cmd == model.encoded
+      {cmd, _caches} = PickerEncoder.encode(model, Caches.new())
+
+      assert cmd ==
+               IO.iodata_to_binary([
+                 ProtocolGUI.encode_gui_picker(
+                   legacy_picker,
+                   true,
+                   {[{"Open", :open}], 0},
+                   100,
+                   ">",
+                   {:error, "boom"}
+                 ),
+                 ProtocolGUI.encode_gui_picker_preview([[{"hello", 0xFFFFFF, true}]])
+               ])
     end
 
-    test "returns nil on second call with same fingerprint" do
+    test "encodes open picker with action menu and preview" do
       model = %Picker{
-        encoded: <<@op_gui_picker, 0::8>>,
-        fingerprint: :closed
+        visible?: true,
+        title: "Pick",
+        query: "o",
+        selected_index: 0,
+        filtered_count: 1,
+        total_count: 2,
+        marked_count: 1,
+        has_preview?: true,
+        items: [%Item{id: "one", label: "One", marked?: true, match_positions: [0]}],
+        action_menu: %ActionMenu{actions: ["open"], selected_index: 0},
+        mode_prefix: ">",
+        preview_lines: [[{"hello", 0xFFFFFF, true}]]
       }
 
-      caches = Caches.new()
+      {cmd, _caches} = PickerEncoder.encode(model, Caches.new())
 
-      {cmd1, caches} = PickerEncoder.encode(model, caches)
-      assert cmd1 != nil
+      assert <<@op_gui_picker, 6::8, _picker_sections::binary>> =
+               binary_part(cmd, 0, byte_size(cmd) - 2)
 
+      assert :binary.match(cmd, <<@op_gui_picker_preview, 1::8>>) != :nomatch
+    end
+
+    test "returns nil on second call with same semantic data" do
+      model = %Picker{}
+
+      {cmd1, caches} = PickerEncoder.encode(model, Caches.new())
       {cmd2, _caches} = PickerEncoder.encode(model, caches)
+
+      assert cmd1 != nil
       assert cmd2 == nil
-    end
-
-    test "re-encodes when fingerprint changes" do
-      model1 = %Picker{
-        encoded: <<@op_gui_picker, 0::8>>,
-        fingerprint: :closed
-      }
-
-      model2 = %Picker{
-        encoded: <<@op_gui_picker, 1::8, "data!">>,
-        fingerprint: 99_999
-      }
-
-      caches = Caches.new()
-      {_, caches} = PickerEncoder.encode(model1, caches)
-      {cmd2, _caches} = PickerEncoder.encode(model2, caches)
-
-      assert cmd2 != nil
-      assert cmd2 == model2.encoded
-    end
-
-    test "transitions from open to closed" do
-      open_model = %Picker{
-        encoded: <<@op_gui_picker, 1::8, "data!">>,
-        fingerprint: 12_345
-      }
-
-      closed_model = %Picker{
-        encoded: <<@op_gui_picker, 0::8>>,
-        fingerprint: :closed
-      }
-
-      caches = Caches.new()
-      {_, caches} = PickerEncoder.encode(open_model, caches)
-      {cmd, _caches} = PickerEncoder.encode(closed_model, caches)
-
-      assert cmd == closed_model.encoded
     end
   end
 end

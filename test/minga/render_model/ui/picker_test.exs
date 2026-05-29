@@ -2,25 +2,33 @@ defmodule Minga.RenderModel.UI.PickerTest do
   use ExUnit.Case, async: true
 
   alias Minga.RenderModel.UI.Picker
+  alias Minga.RenderModel.UI.Picker.ActionMenu
+  alias Minga.RenderModel.UI.Picker.Item
 
   describe "%Picker{}" do
-    test "requires encoded and fingerprint" do
-      model = %Picker{encoded: <<>>, fingerprint: :closed}
+    test "defaults to closed" do
+      picker = %Picker{}
 
-      assert model.encoded == <<>>
-      assert model.fingerprint == :closed
+      refute picker.visible?
+      assert picker.items == []
+      assert picker.preview_lines == nil
     end
 
-    test "raises when required fields are missing" do
-      assert_raise ArgumentError, fn ->
-        struct!(Picker, %{})
-      end
-    end
+    test "carries open picker data" do
+      item = %Item{id: "one", label: "One", marked?: true}
+      menu = %ActionMenu{actions: ["open"], selected_index: 0}
 
-    test "accepts open state with integer fingerprint" do
-      model = %Picker{encoded: <<0x77, 1>>, fingerprint: 12_345}
+      picker = %Picker{
+        visible?: true,
+        title: "Pick",
+        items: [item],
+        action_menu: menu,
+        preview_lines: [[{"line", 0xFFFFFF, false}]]
+      }
 
-      assert model.fingerprint == 12_345
+      assert picker.visible?
+      assert picker.items == [item]
+      assert picker.action_menu == menu
     end
   end
 end

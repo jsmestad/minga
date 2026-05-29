@@ -1,22 +1,22 @@
 defmodule MingaEditor.RenderModel.UI.WorkspacesBuilderTest do
   use ExUnit.Case, async: true
 
-  alias MingaEditor.RenderModel.UI.WorkspacesBuilder
   alias Minga.RenderModel.UI.Workspaces
+  alias MingaEditor.RenderModel.UI.WorkspacesBuilder
 
   describe "build/1" do
-    test "returns suppressed workspaces when tab_bar is nil" do
+    test "returns hidden workspaces when tab_bar is nil" do
       ctx = build_minimal_context(tab_bar: nil)
       model = WorkspacesBuilder.build(ctx)
 
-      assert %Workspaces{encoded: nil, fingerprint: :suppressed} = model
+      assert %Workspaces{visible?: false, workspaces: [], visible_tabs: []} = model
     end
 
-    test "returns suppressed workspaces when shell_state has no tab_bar key" do
+    test "returns hidden workspaces when shell_state has no tab_bar key" do
       ctx = build_minimal_context(shell_state: %{})
       model = WorkspacesBuilder.build(ctx)
 
-      assert %Workspaces{encoded: nil, fingerprint: :suppressed} = model
+      assert %Workspaces{visible?: false, workspaces: [], visible_tabs: []} = model
     end
   end
 

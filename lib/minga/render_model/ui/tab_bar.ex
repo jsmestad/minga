@@ -1,21 +1,19 @@
 defmodule Minga.RenderModel.UI.TabBar do
   @moduledoc """
-  Pre-encoded tab bar model.
+  Semantic tab bar model for GUI adapters.
 
-  The tab bar wire format involves complex flag encoding, dirty-bit detection
-  via Buffer.dirty?, icon resolution through Language.detect_filetype, and
-  agent status encoding. Rather than duplicating that encoding in core, the
-  builder pre-encodes the binary and stores it here along with a fingerprint
-  for change detection.
-
-  The builder also handles the board-shell suppression mode (where the tab
-  bar is not shown because the board surface takes over).
+  The model carries visible tab facts only. The GUI adapter owns protocol flag packing, active index calculation, and cache fingerprints.
   """
 
+  alias Minga.RenderModel.UI.TabBar.Tab
+
   @type t :: %__MODULE__{
-          encoded: binary() | nil,
-          fingerprint: integer() | :suppressed
+          visible?: boolean(),
+          active_tab_id: non_neg_integer() | nil,
+          tabs: [Tab.t()]
         }
 
-  defstruct encoded: nil, fingerprint: :suppressed
+  defstruct visible?: false,
+            active_tab_id: nil,
+            tabs: []
 end

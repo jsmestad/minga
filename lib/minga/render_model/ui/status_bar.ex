@@ -1,20 +1,21 @@
 defmodule Minga.RenderModel.UI.StatusBar do
   @moduledoc """
-  Pre-encoded status bar model.
+  Semantic status bar model for GUI adapters.
 
-  The status bar wire format is complex (section-based encoding with many
-  helpers) and tightly coupled to editor-layer types (ChromeState, Modeline,
-  Devicon). Rather than duplicating all encoding logic in core, the builder
-  pre-encodes the binary and stores it here. The encoder passes it through.
-
-  This still provides value: the builder is the single callsite that
-  orchestrates StatusBarData, ChromeState, and ProtocolGUI encoding.
+  The model carries status bar facts and modeline segments. The GUI adapter owns section encoding and protocol byte layout.
   """
 
+  alias Minga.RenderModel.UI.StatusBar.Data
+  alias Minga.RenderModel.UI.StatusBar.Workspace
+
+  @type content_kind :: :buffer | :agent
+
   @type t :: %__MODULE__{
-          encoded: binary()
+          content_kind: content_kind(),
+          data: Data.t(),
+          workspace: Workspace.t() | nil
         }
 
-  @enforce_keys [:encoded]
-  defstruct [:encoded]
+  @enforce_keys [:content_kind, :data]
+  defstruct [:content_kind, :data, :workspace]
 end

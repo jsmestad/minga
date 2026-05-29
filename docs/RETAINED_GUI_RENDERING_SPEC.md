@@ -4,13 +4,15 @@ The rendering pipeline has too many parts, too many lines of code, and is unnece
 
 ## Status
 
-Phases 1, 2, 3, and the full-frame part of Phase 4 moved the architecture in the right direction, but the implementation stopped short of the full data-shape goal. Phase 1 unified the GUI chrome path, Phase 2 introduced `Minga.RenderModel.Window` for GUI buffer windows, Phase 3 added instrumentation, and Phase 4 added BEAM-authored row IDs with Swift atlas reuse keyed by stable row identity instead of display row. Phase 6 now routes production TUI command building through `Minga.RenderModel`: buffer windows use the shared TUI window adapter, and remaining cell-grid chrome is narrowed into `Minga.RenderModel.UI.CellLayer` compatibility data instead of being read from `DisplayList.Frame` during emit. Phase 7 has started with the smallest safe delta: cursor and cursorline updates carry `window_id + content_epoch`, and Swift ignores stale deltas instead of reusing mismatched retained state. The remaining debt is explicit now: some ownership boundaries are still editor-heavy, broader reset semantics still need macOS runtime validation, and several UI models still need to move from pre-encoded compatibility payloads to semantic core structs.
+The rendering simplification now has three completed foundations and one active cleanup track. First, GUI buffer windows use `Minga.RenderModel.Window` with BEAM-authored row IDs, content epochs, and Swift atlas reuse keyed by stable row identity instead of display row. Second, production TUI command building routes through `Minga.RenderModel`: buffer windows use the shared TUI window adapter, and remaining cell-grid chrome is narrowed into `Minga.RenderModel.UI.CellLayer` compatibility data instead of being read from `DisplayList.Frame` during emit. Third, retained GUI deltas are implemented for overlays, viewport snapshots, and row snapshots with `window_id + content_epoch` guards and full-frame recovery after an un-applied delta.
 
-The remediation plan below is the source of truth for completing the simplification work before broader delta protocol work.
+The active cleanup track is semantic GUI chrome. The first large wave is complete: status bar, tab bar, workspaces, sidebars, file tree, picker, and minibuffer now use core semantic render models, and `Minga.Frontend.Adapter.GUI.*` owns their wire encoding. Byte-for-byte parity tests keep the native GUI protocol stable while the legacy `ProtocolGUI.encode_gui_*` wrappers remain as temporary compatibility debt. The remaining debt is narrower now: agent-heavy surfaces, popups, completion/signature help, observatory, board, extension panels, and final `ProtocolGUI` cleanup still need the same semantic-model migration.
+
+The remediation plan below is the source of truth for completing the remaining simplification work and keeping retained GUI deltas aligned with the semantic model boundary.
 
 ## Remediation plan
 
-This plan closes the gap between the retained GUI rendering spec and the implementation that landed in Phases 1, 2, and 3.
+This plan tracks the remaining gap between the retained GUI rendering target and the current implementation.
 
 ### Current diagnosis
 
@@ -26,12 +28,12 @@ The remaining problem is that several structures are named like render models bu
 
 ### What must be fixed now
 
-The remediation has four goals:
+The remediation now has four active goals:
 
-1. Replace pre-encoded UI payloads with semantic core models.
-2. Make `Minga.RenderModel` a real top-level frame model, not separate `ui_model` and `window_models` values carried through `emit_gui/4`.
+1. Finish replacing pre-encoded UI payloads with semantic core models. The status/tab/workspace/sidebar/file-tree/picker/minibuffer wave is complete; the remaining surfaces are listed below.
+2. Preserve the top-level `Minga.RenderModel` frame as the single value passed through GUI adaptation, instead of reintroducing separate `ui_model`, `window_models`, `metal_ui_cmds`, or `adapter_cmds` render truths.
 3. Finish the GUI window model contract: wrapped visual rows, pane geometry, input hit regions, non-buffer window surfaces, agent ownership boundaries, content epochs, and reset semantics.
-4. Start retained rendering only after model ownership is fixed, using stable row IDs and epochs rather than display-row cache keys.
+4. Continue retained rendering only through BEAM-authored stable row IDs, content epochs, and conservative full-frame recovery paths.
 
 ### Non-negotiable rules
 
@@ -40,7 +42,7 @@ These rules prevent the same compromise from repeating:
 - A `Minga.RenderModel.*` struct must not store a protocol command binary as its primary payload.
 - A `MingaEditor.RenderModel.*Builder` must not call `MingaEditor.Frontend.Protocol.GUI.encode_gui_*`.
 - A core GUI encoder must accept a semantic model and return bytes. It must not call `Buffer`, `Options`, `Language`, `MingaEditor`, or any process.
-- A component is not migrated until the old `ProtocolGUI.encode_gui_*` function is deleted or moved to a core protocol module with a semantic-model interface.
+- A component is not production-migrated until its builder returns a semantic model and the core adapter owns encoding. Temporary `ProtocolGUI.encode_gui_*` compatibility wrappers may remain for protocol tests and external callers, but they are cleanup debt and must not be called by render-model builders.
 - Adapter caches may store fingerprints and last encoded state. They must not become the visible model.
 - Pane rendering and input routing must be window-scoped. No GUI renderer or input path may use active-window gutter geometry, global frame width, or row-only cursorline state for pane-local drawing or hit testing.
 - No new delta protocol work starts until content epochs and full reset behavior exist.
@@ -103,7 +105,7 @@ Acceptance criteria:
 
 #### 3. Replace pre-encoded UI models with semantic models
 
-This is the Phase 1 debt. Work component by component, but do not call a component complete until the model is semantic and the old encoder path is gone.
+This is the semantic chrome debt. Work component by component, but do not call a component complete until the model is semantic, the core adapter owns encoding, and production builders no longer call the old encoder path.
 
 Already semantic or mostly semantic:
 
@@ -114,39 +116,38 @@ Already semantic or mostly semantic:
 - `search_state`
 - `git_status`
 - `agent_context` (semantic model, but `agent_context_builder` still has a tracked legacy `MingaEditor.Frontend.Protocol.GUI` type dependency)
-- `gutter_separator`
-- `split_separators`
-
-Still pre-encoded and must be replaced:
-
 - `status_bar`
-- `observatory`
-- `board`
 - `tab_bar`
 - `workspaces`
 - `sidebars`
 - `file_tree`
 - `picker`
 - `minibuffer`
+- `gutter_separator`
+- `split_separators`
+
+Still pre-encoded and must be replaced:
+
 - `completion`
 - `signature_help`
+- `hover_popup`
+- `float_popup`
+- `extension_overlay`
+- `extension_panel`
 - `agent_chat`
 - `bottom_panel`
 - `change_summary`
 - `edit_timeline`
-- `extension_overlay`
-- `extension_panel`
-- `hover_popup`
-- `float_popup`
+- `board`
+- `observatory`
 
-Recommended order:
+Recommended next order:
 
-1. Status bar, tab bar, workspaces. These are high-frequency and expose dirty markers, icons, and workspace summary shapes that should be semantic.
-2. Sidebars and file tree. Preserve the file tree selection-only fast path, but make it a model-level fast path (`selection_epoch` or `selection_fingerprint`), not a pre-encoded command.
-3. Input surfaces: picker, minibuffer, completion, signature help. These are focus-sensitive and need clean model ownership before more GUI input work.
-4. Popups and extensions: hover popup, float popup, extension overlay, extension panel. These prove extension surfaces can publish model data without editor protocol surgery.
-5. Agent surfaces: agent chat, bottom panel, change summary, edit timeline, board. These are the largest and should move with the MingaAgent boundary cleanup in step 4.
-6. Cleanup: delete migrated `ProtocolGUI.encode_gui_*` functions, split remaining protocol helpers into focused core modules, and remove compatibility tests that only prove the deleted path.
+1. Completion and signature help. These are the remaining focused input surfaces after picker and minibuffer moved to semantic models.
+2. Popups and extensions: hover popup, float popup, extension overlay, extension panel. These prove extension surfaces can publish model data without editor protocol surgery.
+3. Agent surfaces: agent chat, bottom panel, change summary, edit timeline, board. These are the largest and should move with the MingaAgent boundary cleanup in step 4.
+4. Observatory. This is standalone but should move with the same semantic model and core encoder pattern.
+5. Cleanup: delete migrated `ProtocolGUI.encode_gui_*` compatibility functions, split remaining protocol helpers into focused core modules, and remove compatibility tests that only prove deleted paths.
 
 Acceptance criteria per component:
 
@@ -155,7 +156,7 @@ Acceptance criteria per component:
 - The encoder lives in `lib/minga/frontend/adapter/gui/` or a core protocol module it calls.
 - The encoder is a pure function of the model and adapter caches.
 - Tests exist at the model, builder, and encoder boundaries.
-- The old `ProtocolGUI.encode_gui_*` function is deleted or moved to core with a semantic-model interface.
+- The production builder path does not call `ProtocolGUI.encode_gui_*`. Any remaining `ProtocolGUI.encode_gui_*` compatibility wrapper is documented cleanup debt and not the canonical render path.
 - Swift receives byte-identical output unless the component intentionally changes protocol shape with a documented decoder update.
 
 #### 4. Move agent UI ownership out of the editor
@@ -169,7 +170,7 @@ Acceptance criteria:
 - `MingaEditor.RenderModel.UI.AgentChatBuilder` no longer reaches into `MingaEditor.Agent.UIState` or calls `MingaAgent.Session` directly. The editor extracts a narrow input contract and hands it to `MingaAgent`.
 - `MingaAgent` imports core render model types but does not import `MingaEditor` for rendering.
 
-#### 5. Use Phase 3 instrumentation to set the retained-rendering baseline
+#### 5. Use instrumentation to set the retained-rendering baseline
 
 Do not optimize from intuition. Record the current behavior before changing row identity or protocol shape.
 
@@ -200,11 +201,11 @@ Record these metrics:
 Acceptance criteria:
 
 - The PR or linked measurement note contains baseline numbers for the scenarios above.
-- Phase 4 work names the metric it is expected to improve before implementation starts.
+- Retained-rendering work names the metric it is expected to improve before implementation starts.
 
 #### 6. Add stable row identity and content epochs
 
-This is where retained rendering becomes real. Before Phase 4, the Swift atlas keyed buffer rows by display row, which meant scrolling changed the key even when the same logical row was still visible.
+This is where retained rendering becomes real. Before stable row identity, the Swift atlas keyed buffer rows by display row, which meant scrolling changed the key even when the same logical row was still visible.
 
 Target row shape:
 
@@ -450,7 +451,7 @@ The remaining fields in `Renderer.Caches` (Chrome stage fingerprints, Content st
 
 The core GUI adapter subsumes both `Emit.GUI` (~2,320 lines of compute-then-encode) and the corresponding encoding functions in `ProtocolGUI` (~4,769 lines of wire-format encoding). The total code being reorganized is ~7,000 lines, not ~2,320. `ProtocolGUI`'s encoding logic is largely correct (it takes structured data and produces bytes); what changes is that it accepts `Minga.RenderModel.UI.*` types instead of ad-hoc argument lists, and it lives in core instead of `MingaEditor`.
 
-For each component swap in Phase 1, the corresponding `encode_gui_*` function in `ProtocolGUI` also moves to the core adapter or a core protocol module it calls. The encoding logic is preserved; the interface changes.
+For each remaining component swap, the corresponding `encode_gui_*` function in `ProtocolGUI` also moves to the core adapter or a core protocol module it calls. The encoding logic is preserved; the interface changes.
 
 ### ProtocolGUI cleanup
 
@@ -462,7 +463,7 @@ Each component swap must also address these items for the corresponding `encode_
 2. **Extract to a focused module.** The monolithic 4,769-line file splits as components migrate. Large encoders (`encode_gui_agent_chat` is 1,116 lines) get their own module.
 3. **Deduplicate shared helpers.** `encode_section/2` is duplicated in `gui.ex` and `gui_window_content.ex`. Enum-to-byte mappers (`encode_markdown_style` with 14 clauses, `encode_completion_kind` with 11, etc.) and string encoding helpers (`utf8_prefix_bytes`, used 33+ times) move to a shared `Minga.Frontend.Protocol.Encoding` utilities module.
 
-This is not a separate phase. It happens as part of each Phase 1 component swap. But it is required work: a component is not "swapped" until its encoder is a pure function in core with no state dependencies, no duplication, and no imports from `MingaEditor`.
+This is not a separate workstream. It happens as part of each semantic component swap. But it is required work: a component is not "swapped" until its encoder is a pure function in core with no state dependencies, no duplication, and no imports from `MingaEditor`.
 
 ### Process architecture
 
@@ -486,17 +487,17 @@ Neither frontend owns fold resolution, wrap decisions, diagnostic validity, curs
 
 These are commitments from the existing architecture docs (ARCHITECTURE.md, PROTOCOL.md, AGENTS.md) that this migration must preserve. They exist as an explicit checklist so that implementation does not accidentally violate a documented guarantee.
 
-**1. DisplayList is the current stable contract.** ARCHITECTURE.md and PROTOCOL.md treat `DisplayList.WindowFrame` as the central pipeline product and TUI's primary input. Phase 6 deliberately replaces it as the canonical visible truth. This is an intentional, documented break from a prior architectural commitment. Until Phase 6, `DisplayList` continues to serve TUI unchanged. After Phase 6, it becomes a TUI adapter detail, not a pipeline-level concept.
+**1. DisplayList is now an adapter detail.** ARCHITECTURE.md and PROTOCOL.md previously treated `DisplayList.WindowFrame` as the central pipeline product and TUI's primary input. The production TUI path now derives commands from `Minga.RenderModel`, so `DisplayList` is no longer the canonical visible truth. If it remains useful, it belongs behind the TUI adapter, not as a pipeline-level concept.
 
 **2. Dirty-line tracking survives.** Only changed lines should trigger re-rendering work. The render model migration preserves this through input fingerprints on builders (unchanged inputs produce no new model) and content hashes on durable rows (unchanged rows produce no new texture work on the frontend). If a migration step breaks dirty-line tracking, that is a bug, not a tradeoff.
 
-**3. GUI-first, TUI-capable.** The existing architecture treats GUI as the primary frontend and TUI as secondary. The Phase 2 TUI adapter proof-of-concept validates that the render model serves both frontends; it does not gate GUI development. If the TUI proof-of-concept reveals model adjustments are needed, those adjustments must not regress GUI capabilities or delay GUI-path work. The TUI adapter is a compatibility constraint, not a design driver.
+**3. GUI-first, TUI-capable.** The existing architecture treats GUI as the primary frontend and TUI as secondary. The TUI adapter work validates that the render model serves both frontends; it does not gate GUI development. If TUI support reveals model adjustments are needed, those adjustments must not regress GUI capabilities or delay GUI-path work. The TUI adapter is a compatibility constraint, not a design driver.
 
-**4. Forward-compatible protocol envelopes.** PROTOCOL.md documents versioned opcode envelopes with length-prefixed framing. Any new opcodes introduced by the core adapter (during Phase 1 component swaps or Phase 7 delta protocol) must follow the existing envelope format. The frontend must be able to skip unknown opcodes without crashing. This is already the protocol's design; the constraint is that new core adapter code must not bypass it.
+**4. Forward-compatible protocol envelopes.** PROTOCOL.md documents versioned opcode envelopes with length-prefixed framing. Any new opcode introduced by the core adapter or retained delta protocol must follow the existing envelope format. The frontend must be able to skip unknown opcodes without crashing. This is already the protocol's design; the constraint is that new core adapter code must not bypass it.
 
 **5. Headless runtime is unaffected.** ARCHITECTURE.md documents that the headless runtime (used in tests and server mode) works without rendering. `Renderer.Server` is not started in headless mode today, and that does not change. `Minga.RenderModel` types moving to core does not mean core requires rendering. The types are passive data structures; construction is opt-in by the product that needs rendering. No core module should import or depend on a running `Renderer.Server`.
 
-**6. Telemetry preservation.** Pipeline-level events in `Renderer.Server` (`:minga, :render, :pipeline`, `:coalesced`, `:frame_latency`) are unaffected by this migration. Component-level telemetry inside `Emit.GUI` (if any) must be preserved or deliberately replaced in the core adapter during each Phase 1 component swap. Phase 3 adds new instrumentation; it does not remove existing instrumentation unless the measured code path no longer exists.
+**6. Telemetry preservation.** Pipeline-level events in `Renderer.Server` (`:minga, :render, :pipeline`, `:coalesced`, `:frame_latency`) are unaffected by this migration. Component-level telemetry inside `Emit.GUI` (if any) must be preserved or deliberately replaced in the core adapter during each semantic component swap. New instrumentation should not remove existing instrumentation unless the measured code path no longer exists.
 
 **7. Credo EX9001 validates dependency direction.** AGENTS.md documents compile-time enforcement of the three-namespace layer dependency direction (Layer 0 `Minga` ← Layer 1 `MingaEditor`/`MingaAgent` ← Layer 2). When render model types move to `lib/minga` (Layer 0), EX9001 automatically enforces that `MingaEditor` and `MingaAgent` can import them but core cannot import the products. This is free validation of the spec's dependency direction. If a core adapter accidentally imports `MingaEditor`, the build fails.
 
@@ -542,72 +543,104 @@ For each component being replaced:
 
 At no point are two paths maintained for the same component. The old path works until the day it is deleted. The new path is designed from the target, checked against capabilities, and swapped in as a clean break.
 
-## Migration phases
+## Progress model
 
-The phases are reordered from the original spec. Simplification (collapsing parallel truths) comes first. Optimization (stable row identity, delta protocol) comes second.
+The old phase labels are now historical. They helped sequence the first implementation stack, but they are not the right shape for current planning because several foundations are complete while some cleanup tracks cut across those phases. Use the sections below as the working status model.
 
-### Phase 1: UI models and GUI adapter for UI components
+### Completed foundations
 
-This is the largest win per effort. `Emit.GUI`'s 25 UI component builders are ~1,800 lines of compute-then-encode. Replace them with pre-computed UI models (types in `lib/minga`, builders in the appropriate product) and a GUI adapter (in `lib/minga`) that only encodes.
+- **Top-level frame model:** GUI adaptation works from `%Minga.RenderModel{}` rather than independently threading windows, UI, cursor, title, and background as separate render truths.
+- **GUI window model:** Buffer windows use `Minga.RenderModel.Window` rows, spans, overlays, gutters, cursorline, selections, search matches, diagnostics, highlights, annotations, row IDs, and content epochs.
+- **Stable row identity:** Full-frame GUI content carries BEAM-authored `row_id` values. Swift keys retained row resources by `window_id + row_id`, with `content_epoch + content_hash` as the invalidation hash.
+- **TUI render-model closure:** Production TUI emit builds commands from `Minga.RenderModel`. Buffer windows use the shared TUI window adapter, and remaining cell-grid chrome is isolated in `Minga.RenderModel.UI.CellLayer` compatibility data.
+- **Retained GUI deltas:** `gui_window_overlay_delta` (0xA0), `gui_window_viewport_delta` (0xA1), and `gui_window_rows_delta` (0xA2) carry `window_id + content_epoch`. Swift ignores stale deltas, drops retained state when referenced rows are missing, and BEAM follows failed row or viewport deltas with full 0x80 recovery frames.
+- **First semantic chrome wave:** Status bar, tab bar, workspaces, sidebars, file tree, picker, and minibuffer now use semantic core render models. `Minga.Frontend.Adapter.GUI.*` owns their wire encoding, with byte-for-byte parity tests against the legacy protocol helpers.
 
-Work through components one at a time. Start with simple, self-contained ones (theme, breadcrumb, status bar) to establish the pattern. Then pull one agent component forward early (agent context bar is small but crosses the `MingaEditor`/`MingaAgent` boundary) to prove the system boundary contract. Then continue with the remaining groups.
+### Remaining work tracks
 
-Each component swap follows the inventory-design-replace-swap process above.
+1. **Finish semantic GUI chrome:** Migrate the remaining pre-encoded surfaces to semantic core models and core GUI encoders.
+2. **Finish pane geometry and hit regions:** Make pane geometry, clip rects, gutter metrics, split dividers, smooth scroll ownership, and mouse hit regions fully window-scoped.
+3. **Finish non-buffer and agent ownership boundaries:** Move agent-heavy UI model production behind `MingaAgent`-owned contracts and remove editor render modules reaching into agent internals.
+4. **Delete compatibility protocol debt:** Remove or delegate migrated `ProtocolGUI.encode_gui_*` wrappers after all production callers use semantic adapters.
+5. **Keep measurement attached to optimization:** Use the existing render telemetry before adding more delta shapes or optimizing BEAM-side diffing.
 
-**Component ordering:**
+### Semantic GUI chrome status
+
+This is the active cleanup track. A component is complete only when its core model struct has semantic fields, its builder returns that semantic model, its encoder lives in `lib/minga/frontend/adapter/gui/` or a core helper it calls, and the production builder path no longer calls `ProtocolGUI.encode_gui_*`.
+
+Already semantic or mostly semantic:
+
+- `theme`
+- `breadcrumb`
+- `which_key`
+- `notifications`
+- `search_state`
+- `git_status`
+- `agent_context` (semantic model, but `agent_context_builder` still has a tracked legacy `MingaEditor.Frontend.Protocol.GUI` type dependency)
+- `status_bar`
+- `tab_bar`
+- `workspaces`
+- `sidebars`
+- `file_tree`
+- `picker`
+- `minibuffer`
+- `gutter_separator`
+- `split_separators`
+
+Still pre-encoded and must be replaced:
+
+- `completion`
+- `signature_help`
+- `hover_popup`
+- `float_popup`
+- `extension_overlay`
+- `extension_panel`
+- `agent_chat`
+- `bottom_panel`
+- `change_summary`
+- `edit_timeline`
+- `board`
+- `observatory`
+
+Recommended next order:
 
 | Order | Group | Components | Why this order |
-|-------|-------|-----------|----------------|
-| 1 | Trivial standalone | theme, breadcrumb, which-key, notifications, search state, git status | Prove the pattern with zero risk |
-| 2 | Agent boundary proof | agent context | Small, but proves MingaAgent produces its own UI models via core types |
-| 3 | Status displays | status bar, observatory, board | Standalone, moderate complexity |
-| 4 | Tab/workspace | tab bar, workspaces | Share `ChromeState`, swap together |
-| 5 | Sidebar/tree | sidebars, file tree | Interact (file tree is a sidebar), swap together |
-| 6 | Input | picker, minibuffer, completion, signature help | Focus-related, moderate interaction |
-| 7 | Agent | agent chat, bottom panel, change summary, edit timeline | Share agent state, most complex |
-| 8 | Extensions | extension overlay, extension panel | Extension system |
-| 9 | Popups | hover popup, float popup | Standalone |
+|-------|-------|------------|----------------|
+| 1 | Focused input | completion, signature help | These are the remaining focused input surfaces after picker and minibuffer moved to semantic models |
+| 2 | Popups and extensions | hover popup, float popup, extension overlay, extension panel | Proves extension surfaces can publish model data without editor protocol surgery |
+| 3 | Agent surfaces | agent chat, bottom panel, change summary, edit timeline, board | Largest group, should move with the MingaAgent boundary cleanup |
+| 4 | Observatory | observatory | Standalone, but should follow the same semantic model and core encoder pattern |
+| 5 | Protocol cleanup | migrated `ProtocolGUI.encode_gui_*` wrappers | Delete compatibility wrappers and tests once no production or compatibility caller needs them |
 
-**Coexistence rule:** during Phase 1, the system has two patterns operating simultaneously: migrated components go through the core adapter, unmigrated components go through `Emit.GUI`. This is managed by a hard rule: the core adapter and `Emit.GUI` never share a component. The old `sync_swiftui_chrome` builder list shrinks by one each swap. The core adapter grows by one. The frame path calls both (core adapter for migrated components, then `Emit.GUI` for remaining ones). `Emit.GUI` only shrinks; it never gets new builders. When the last builder is swapped, `Emit.GUI` is deleted.
+Acceptance criteria per remaining component:
 
-**Done when:** `Emit.GUI` is deleted. The core adapter encodes all UI from `Minga.RenderModel.UI`. Agent UI models are produced by `MingaAgent`, not derived by `MingaEditor`.
+- The core model struct has domain fields, not `encoded` binary fields.
+- The builder accepts specific inputs and returns the semantic model.
+- The encoder lives in `lib/minga/frontend/adapter/gui/` or a core protocol module it calls.
+- The encoder is a pure function of the model and adapter caches.
+- Tests exist at the model, builder, and encoder boundaries.
+- The production builder path does not call `ProtocolGUI.encode_gui_*`. Any remaining `ProtocolGUI.encode_gui_*` compatibility wrapper is documented cleanup debt and not the canonical render path.
+- Swift receives byte-identical output unless the component intentionally changes protocol shape with a documented decoder update.
 
-### Phase 2: Unify buffer window content
+### Window geometry and retained rendering contract
 
-Stop building both `DisplayList.WindowFrame` and `SemanticWindow` for GUI frontends. The Content stage should produce one representation for buffer windows.
+The buffer-window path has stable row identity and retained deltas, but pane geometry and hit testing are not fully finished. Every GUI window still needs one BEAM-authored pane geometry model derived from `Layout.get/1` and `WindowTree`. It must include the window id, total rect, content rect, text rect, gutter rect and metrics, clip rect, viewport summary, and input hit regions for text, gutter and fold controls, status/modeline targets, and split dividers.
 
-`SemanticWindow` is already close to the right shape. It has rows with text + spans, and overlays (selection, search, diagnostics, highlights) as separate ranges. The 0x80 `gui_window_content` encoder already consumes this. Promote it (or its successor) into `Minga.RenderModel.Window`. For GUI, the Content stage builds `Minga.RenderModel.Window` directly. For TUI, it still builds `DisplayList.WindowFrame` during the transition.
+Acceptance criteria:
 
-Agent chat windows get their own content kind (`:agent_chat`) in `Minga.RenderModel.Window`. `MingaAgent` builds the window's rows, overlays, and prompt model. `MingaEditor` places the window in the render model and treats it opaquely.
+- Wrapped lines produce multiple `Row` structs with `row_type: :wrap_continuation`, correct text slices, correct spans, correct cursor display coordinates, and tests with long ASCII, Unicode, tabs, and virtual text.
+- `RenderModel.Window` carries BEAM-authored pane geometry: `window_id`, total/content/text/gutter rects, clip rect, viewport, gutter metrics, and divider/hit-region metadata.
+- The GUI adapter sends enough window-scoped geometry for Swift to build one authoritative `PaneGeometry` per `window_id`; stale geometry is cleared on window destruction, split close, buffer switch, resize, frontend ready, and protocol recovery.
+- `CoreTextMetalRenderer` clips text, overlays, cursorline, gutters, indent guides, diagnostics, and selections to the owning pane rect. It no longer uses global `frameState.cols`, viewport width, or global `gutterCol` for pane-local drawing.
+- Cursorline is window-scoped, not row-only. In side-by-side splits, the active pane cursorline is clipped to that pane and never spans another pane.
+- `EditorNSView` hit testing resolves through the same pane geometry used for rendering. Pixel-to-cell conversion, gutter hover, fold chevrons, scroll targeting, and divider detection use clicked-pane geometry, not active/global gutter state.
+- Divider hover, press, drag, and release use one shared hit-region contract. If hover shows a resize cursor, the subsequent drag routes as split resize, not text selection.
+- Smooth scroll fractional offset is bound to the gesture's initial `window_id` until the gesture ends. Pointer movement or focus changes during the gesture must not transfer the offset to another pane.
+- BEAM mouse handling uses clicked-window targets for fold gutter, buffer content, resize, and scroll actions. Regression coverage includes inactive-pane gutter clicks, split close stale geometry, side-by-side clipping, cursorline pane clipping, divider drag, and smooth scroll across focus transitions.
+- Non-buffer window content is either encoded as first-class `content_kind` models or explicitly excluded from the GUI adapter with a tracked follow-up and no misleading `additional_window_models` path.
+- GUI window content tests cover folds, wraps, virtual lines, block decorations, diagnostic overlays, document highlights, search overlays, cursor visibility, horizontal scroll, pane-local hit testing, and divider resizing.
 
-**TUI design constraint:** before finalizing `Minga.RenderModel.Window`, build a small TUI adapter proof-of-concept that derives cell output from the model for a simple case: one window, a few rows with syntax spans, one selection range, one search match. This proves the model serves both frontends before the GUI path commits to it. The TUI adapter composites rows-with-spans plus overlay ranges into cell-level Face attributes; if that compositing is unreasonably expensive or lossy compared to the current `DisplayList.WindowFrame` path, the model needs adjustment before Phase 6, not after.
-
-**Done when:** the Content stage does not build `DisplayList.WindowFrame` lines for GUI buffer windows. One representation, not two. TUI proof-of-concept demonstrates the model is shared, not GUI-only.
-
-### Phase 3: Instrumentation
-
-Measure before optimizing. Add instrumentation for:
-
-- BEAM render model build time.
-- Bytes emitted per frame.
-- Swift atlas hits and misses.
-- Rows rasterized per frame.
-- Texture uploads per frame.
-- Frame render duration.
-- Cursor move frame time.
-- One-line scroll frame time.
-
-This tells you whether row identity, protocol size, CoreText rasterization, or Metal uploads are the real bottleneck, and prevents optimizing the wrong thing.
-
-### Phase 4: Stable row identity
-
-Implementation status: the full-frame GUI path now includes `row_id` on every `Minga.RenderModel.Window.Row`, encodes it in `gui_window_content`, decodes it in Swift, and keys buffer row atlas entries by `window_id + row_id` with `content_epoch + content_hash` as the invalidation hash. Full frames are still sent.
-
-Give durable rows a BEAM-generated stable identity. Change Swift to cache line textures by row identity plus content hash instead of display row.
-
-Keep sending full frames. Do not add delta protocol yet.
-
-#### Durable rows
+### Stable row identity and epochs
 
 A durable row is the smallest unit of text rasterization and row reuse. It represents one visual row, not necessarily one buffer line.
 
@@ -632,21 +665,15 @@ A durable row carries stable identity and invalidation data:
 
 `buf_line` alone is not enough. Folds, wrapping, virtual lines, block decorations, and future block widgets can produce multiple visual rows for one buffer line or rows with no direct source line.
 
-Row identity should be deterministic and compact. Prefer a structured or numeric identity over allocating strings every frame.
-
-The rule is:
+The retained-rendering rule is:
 
 ```text
 same row_id + same content_hash + same epoch = frontend may reuse retained drawing resources
 ```
 
-#### Volatile overlays
+Volatile overlays are visual state that can change often without changing the row texture: cursor, cursorline, selection, search matches, diagnostic underlines, LSP document highlights, navigation flash, scroll indicators, hover highlights. Cursor movement should change overlays, not durable row content. Selection changes should change overlays, not row textures.
 
-Volatile overlays are visual state that can change often without changing the row texture: cursor, cursorline, selection, search matches, diagnostic underlines, LSP document highlights, navigation flash, scroll indicators, hover highlights.
-
-Cursor movement should change overlays, not durable row content. Selection changes should change overlays, not row textures.
-
-**Validation targets:**
+Validation targets:
 
 ```text
 j/k without scroll: 0 row rasterizations
@@ -654,39 +681,15 @@ one-line scroll: ~1 newly exposed row rasterized
 text edit: only affected rows rasterized
 ```
 
-### Phase 5: Content epochs and reset semantics
-
-Add a meaningful window content epoch. Define reset triggers: frontend ready, window creation/destruction, buffer switch, resize, font change, theme change, fold/wrap mode change, parser reset, protocol recovery.
-
-The invariant:
-
-```text
-A frontend may retain render state, but every retained item must be invalidatable from BEAM-authored versioned model data.
-```
+Content epochs provide the reset boundary. Reset triggers include frontend ready, window creation/destruction, buffer switch, resize, font change, theme change, fold/wrap mode change, parser reset, and protocol recovery. A frontend may retain render state, but every retained item must be invalidatable from BEAM-authored versioned model data.
 
 Full reset means: discard retained row state for this window, accept the full row list as the new visible model, set the epoch to the BEAM-authored epoch.
 
-### Phase 6: Move DisplayList behind the TUI adapter
+### Retained GUI delta status
 
-`DisplayList` stops being the central visible truth. If the TUI still wants a display list, it is an adapter output:
+Overlay-only cursor and cursorline deltas use `gui_window_overlay_delta` (0xA0). The delta carries `window_id` and `content_epoch`, and Swift ignores it unless matching full window content is already retained for that epoch. The BEAM also emits the minimal overlay delta as the retained-window liveness marker on otherwise unchanged frames, because Swift prunes retained window content after clear-backed batches unless a window id appears in the batch.
 
-```text
-Minga.RenderModel.Window → TUI Adapter → DisplayList / cell commands
-```
-
-Implementation status: production TUI emit now builds commands from `Minga.RenderModel`, not from `DisplayList.Frame`. Buffer windows are adapted from `Minga.RenderModel.Window`, while remaining cell-grid chrome is carried as `Minga.RenderModel.UI.CellLayer` compatibility data until those surfaces become fully semantic UI models.
-
-**Done when:** both frontends derive their output from `Minga.RenderModel`, and `DisplayList` is a TUI adapter detail.
-
-### Phase 7: Delta protocol (only if measurements justify it)
-
-Add delta messages only after stable row identity, separate overlays, content epochs, and full reset behavior are proven. Likely order:
-
-1. Overlay-only cursor and cursorline updates.
-2. Viewport updates that reference reusable row IDs and include newly exposed rows.
-3. Row updates for changed content.
-
-Implementation status: overlay-only cursor and cursorline deltas now use `gui_window_overlay_delta` (0xA0). The delta carries `window_id` and `content_epoch`, and Swift ignores it unless matching full window content is already retained for that epoch. The BEAM also emits the minimal overlay delta as the retained-window liveness marker on otherwise unchanged frames, because Swift prunes retained window content after clear-backed batches unless a window id appears in the batch. Viewport and durable-row snapshots now use `gui_window_viewport_delta` (0xA1) and `gui_window_rows_delta` (0xA2), both as complete visible-window snapshots with ordered ref-or-full row entries. Swift drops retained state if a referenced row is missing, and the BEAM follows row/viewport deltas with a full 0x80 recovery frame so backend caches do not silently advance forever after an un-applied delta. Full `gui_window_content` remains the first-frame, reset, epoch-change, and recovery path.
+Viewport and durable-row snapshots use `gui_window_viewport_delta` (0xA1) and `gui_window_rows_delta` (0xA2), both as complete visible-window snapshots with ordered ref-or-full row entries. Swift drops retained state if a referenced row is missing, and the BEAM follows row/viewport deltas with a full 0x80 recovery frame so backend caches do not silently advance forever after an un-applied delta. Full `gui_window_content` remains the first-frame, reset, epoch-change, and recovery path.
 
 Every delta must carry `window_id` and `content_epoch`. If the frontend does not have that epoch, it ignores the update or requests recovery.
 
@@ -712,7 +715,7 @@ The adapter does not know about input fingerprints. The builder does not know ab
 - Row ID computation can allocate too much if implemented as per-frame strings.
 - Content hashing can become expensive without caching.
 - Naive BEAM-side diffing can become the new bottleneck.
-- Full `gui_window_content` payloads keep protocol byte counts high until later phases.
+- Full `gui_window_content` payloads keep protocol byte counts high until later retained-rendering work reduces the remaining full-frame cases.
 - Epoch mistakes can cause stale visuals, so reset behavior must be conservative.
 
 The initial implementation should keep full payloads and avoid BEAM-side row diffing. Let Swift use `row_id + content_hash` to reuse retained textures first. Only add delta protocol messages after instrumentation proves protocol bytes or encode time are a real bottleneck.
@@ -739,7 +742,7 @@ Today, agent view modules (`PromptRenderer`, `DashboardRenderer`, `PromptSemanti
 
 The input contract: these modules currently take `ViewContext`, a narrow projection of `EditorState`. In the new world, `MingaAgent` defines what inputs it needs to produce its UI models (buffer content, cursor position, viewport, styled messages, etc.). `MingaEditor` extracts those inputs from `EditorState` and passes them to `MingaAgent`'s builders. The context type can live in core if both systems need it, or `MingaAgent` can define its own input struct.
 
-`MingaAgent` is also the proof-of-concept for the extensions-as-UI-contributors pattern. It is the first and most complex test case. If the render model contract is expressive enough for agent chat windows, board views, context bars, change summaries, and edit timelines, all produced by `MingaAgent` without `MingaEditor` importing a single agent module, then it is expressive enough for any extension. This is why one agent component is pulled forward to group 2 in the Phase 1 ordering.
+`MingaAgent` is also the proof-of-concept for the extensions-as-UI-contributors pattern. It is the first and most complex test case. If the render model contract is expressive enough for agent chat windows, board views, context bars, change summaries, and edit timelines, all produced by `MingaAgent` without `MingaEditor` importing a single agent module, then it is expressive enough for any extension. This is why agent surfaces remain a distinct remaining work track.
 
 ## Extensions API alignment
 
@@ -763,7 +766,7 @@ This architecture works for local native frontends and future server-client fron
 
 ## What not to do
 
-- Do not add `RenderModel` beside `DisplayList` and `SemanticWindow` while all three remain active truths. Each phase must remove a parallel truth, not add one.
+- Do not add `RenderModel` beside `DisplayList` and `SemanticWindow` while all three remain active truths. Each migration step must remove a parallel truth, not add one.
 - Do not start with row delta opcodes or overlay-only updates before content epochs and reset semantics exist.
 - Do not key caches by display row or `buf_line` alone.
 - Do not move fold, wrap, syntax, diagnostic, or cursor semantics into Swift.
@@ -843,7 +846,7 @@ lib/minga/
   render_model.ex                          # %Minga.RenderModel{} top-level struct
   render_model/
     window.ex                              # %Minga.RenderModel.Window{}
-    row.ex                                 # %Minga.RenderModel.Row{} (Phase 4)
+    row.ex                                 # %Minga.RenderModel.Row{} stable row identity
     ui.ex                                  # %Minga.RenderModel.UI{} container struct
     ui/
       theme.ex                             # %Minga.RenderModel.UI.Theme{}
@@ -862,7 +865,7 @@ lib/minga/
         theme_encoder.ex                   # encode_theme(model, caches) :: {cmd | nil, caches}
         breadcrumb_encoder.ex              # ...one encoder per component
         ...
-      tui.ex                               # Minga.Frontend.Adapter.TUI (later phases)
+      tui.ex                               # Minga.Frontend.Adapter.TUI
     protocol/
       encoding.ex                          # Shared helpers: utf8_prefix_bytes, encode_section, etc.
 
@@ -1025,7 +1028,7 @@ The frame path calls the core adapter first, then `sync_swiftui_chrome` for rema
 
 Delete `build_gui_theme_cmd`, `theme_fingerprint`, and the corresponding `ProtocolGUI.encode_gui_theme`. Delete their tests. Write new tests at the three boundaries (builder, model struct, encoder).
 
-### Coexistence mechanics during Phase 1
+### Coexistence mechanics during semantic chrome migration
 
 During the migration, both the core adapter and the shrinking `Emit.GUI` produce commands for the same frame. The wire-up in the render pipeline looks like:
 
@@ -1038,7 +1041,7 @@ During the migration, both the core adapter and the shrinking `Emit.GUI` produce
 
 The hard rule: a component is in exactly one path. The core adapter's `encode_ui` function grows a clause per swap. The `sync_swiftui_chrome` builder list shrinks by one per swap. They never overlap.
 
-When the last builder is removed from `sync_swiftui_chrome`, `Emit.GUI`'s chrome path is deleted. When all of `Emit.GUI`'s functions are migrated (including `build_metal_commands` and the gutter/cursorline/separator geometry in later phases), the entire `gui.ex` file is deleted.
+When the last builder is removed from `sync_swiftui_chrome`, `Emit.GUI`'s chrome path is deleted. When all of `Emit.GUI`'s functions are migrated, including `build_metal_commands` and the gutter/cursorline/separator geometry work, the entire `gui.ex` file is deleted.
 
 ### Capability inventories for Group 1 (trivial standalone)
 
@@ -1082,15 +1085,15 @@ These are the six simplest components. Each is self-contained with no cross-comp
 
 ### Key implementation notes
 
-**Opcode reuse.** The core adapter produces the same binary opcodes as the existing `ProtocolGUI` functions. No Swift changes are needed for Phase 1. The protocol wire format does not change; only the Elixir code that produces it changes.
+**Opcode reuse.** The core adapter produces the same binary opcodes as the existing `ProtocolGUI` functions for compatibility swaps. No Swift changes are needed unless a component intentionally changes protocol shape. The protocol wire format does not change; only the Elixir code that produces it changes.
 
-**`Minga.Frontend.Adapter.GUI.Caches` starts small.** Create it with just `last_gui_theme` for the first swap. Add one field per component as each migrates. When Phase 1 is complete, move the remaining GUI fingerprint fields from `MingaEditor.Renderer.Caches` to this struct and delete them from the editor's caches.
+**`Minga.Frontend.Adapter.GUI.Caches` owns adapter fingerprints.** Add one field per migrated component as needed. When semantic chrome migration is complete, move any remaining GUI fingerprint fields from `MingaEditor.Renderer.Caches` to this struct and delete them from the editor's caches.
 
 **Builder input contract.** For Group 1, builders take simple, specific arguments (a theme struct, a file path + root string, a whichkey struct). They do not take the full `ctx` or `EditorState`. The render model builder orchestrator (`MingaEditor.RenderModel.Builder`) extracts the right inputs from `EditorState` and calls each component builder. This keeps builders testable without constructing a full editor state.
 
 **Process calls must move to the builder.** `active_buffer_path` calls `Buffer.file_path(buf)`. `compute_search_stats` queries buffer state. These are "compute what's visible" calls. They happen in the builder (which runs in `MingaEditor`'s process context and can call `Buffer`), not in the encoder (which is a pure function in core).
 
-**`ProtocolGUI` functions migrate with each swap.** When theme moves to the core adapter, `ProtocolGUI.encode_gui_theme` is either deleted (if the core encoder reimplements the encoding) or moved to a core protocol module. The function must not remain as dead code in `MingaEditor`.
+**`ProtocolGUI` functions are compatibility debt after each swap.** Once a production builder returns a semantic model and the core adapter owns encoding, any remaining `ProtocolGUI.encode_gui_*` entry point is a temporary compatibility wrapper for older tests or callers. It must not be called by render-model builders, and cleanup should either delete it or make it delegate to the core semantic encoder.
 
 ## Recommendation
 

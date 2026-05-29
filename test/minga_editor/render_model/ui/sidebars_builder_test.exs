@@ -1,32 +1,66 @@
 defmodule MingaEditor.RenderModel.UI.SidebarsBuilderTest do
   use ExUnit.Case, async: true
 
-  alias MingaEditor.RenderModel.UI.SidebarsBuilder
   alias Minga.RenderModel.UI.Sidebars
-
-  @op_gui_sidebars Minga.Protocol.Opcodes.gui_sidebars()
+  alias MingaEditor.Extension.Sidebar
+  alias MingaEditor.RenderModel.UI.SidebarsBuilder
 
   describe "build/1" do
-    test "builds sidebars model from context with default sidebar registry" do
-      ctx = build_minimal_context()
+    test "builds semantic sidebars model from context with default sidebar registry" do
+      sidebar_registry = start_sidebar_registry()
+      ctx = build_minimal_context(sidebar_registry)
       model = SidebarsBuilder.build(ctx)
 
       assert %Sidebars{} = model
-      assert is_binary(model.encoded)
-      assert is_integer(model.fingerprint)
-      assert <<@op_gui_sidebars, _payload_len::32, _payload::binary>> = model.encoded
+      assert model.active_id == ""
+      assert model.sidebars == []
     end
 
-    test "fingerprint is consistent for same sidebar state" do
-      ctx = build_minimal_context()
+    test "selects active visible sidebar and normalizes focus" do
+      sidebar_registry = start_sidebar_registry()
+
+      assert :ok =
+               Sidebar.register(sidebar_registry, {:extension, :alpha}, %{
+                 id: "outline",
+                 display_name: "Outline",
+                 priority: 10,
+                 visible?: true,
+                 focused?: false,
+                 badge_count: nil,
+                 snapshot: [rows: [%{id: "a", badge: "!"}]]
+               })
+
+      assert :ok =
+               Sidebar.register(sidebar_registry, {:extension, :beta}, %{
+                 id: "bookmarks",
+                 display_name: "Bookmarks",
+                 priority: 20,
+                 visible?: true,
+                 focused?: true
+               })
+
+      ctx = build_minimal_context(sidebar_registry)
+      model = SidebarsBuilder.build(ctx)
+
+      assert model.active_id == "bookmarks"
+
+      assert Enum.map(model.sidebars, &{&1.id, &1.focused?, &1.badge_count}) == [
+               {"outline", false, 1},
+               {"bookmarks", true, nil}
+             ]
+    end
+
+    test "semantic model is consistent for same sidebar state" do
+      sidebar_registry = start_sidebar_registry()
+      ctx = build_minimal_context(sidebar_registry)
       model1 = SidebarsBuilder.build(ctx)
       model2 = SidebarsBuilder.build(ctx)
 
-      assert model1.fingerprint == model2.fingerprint
+      assert model1 == model2
     end
   end
 
-  defp build_minimal_context do
+  defp build_minimal_context(sidebar_registry) do
     %MingaEditor.Frontend.Emit.Context{
       port_manager: self(),
       capabilities: MingaEditor.Frontend.Capabilities.default(),
@@ -40,7 +74,14 @@ defmodule MingaEditor.RenderModel.UI.SidebarsBuilderTest do
         window_layouts: %{}
       },
       shell: MingaEditor.Shell.Traditional,
-      shell_state: %{}
+      shell_state: %{},
+      sidebar_registry: sidebar_registry
     }
+  end
+
+  defp start_sidebar_registry do
+    table = Module.concat(__MODULE__, "Sidebar#{System.unique_integer([:positive])}")
+    start_supervised!({Sidebar, name: table, notify: false})
+    table
   end
 end

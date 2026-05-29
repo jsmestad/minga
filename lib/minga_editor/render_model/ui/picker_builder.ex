@@ -3,11 +3,13 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
 
   alias Minga.Buffer
   alias Minga.RenderModel.UI.Picker, as: PickerModel
+  alias Minga.RenderModel.UI.Picker.ActionMenu
+  alias Minga.RenderModel.UI.Picker.Item, as: PickerItemModel
   alias MingaEditor.Frontend.Emit.Context
-  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
   alias MingaEditor.UI.Picker
 
   @max_items 100
+  @preview_max_lines 50
 
   @spec build(Context.t()) :: PickerModel.t()
   def build(ctx) do
@@ -20,7 +22,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
         build_open(ctx, picker, source, action_menu, mode_prefix, load_status)
 
       _ ->
-        build_closed()
+        %PickerModel{}
     end
   end
 
@@ -28,78 +30,61 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
   defp get_in_modal(%{shell_state: %{modal: modal}}), do: modal
   defp get_in_modal(_ctx), do: nil
 
-  @spec build_open(Context.t(), Picker.t(), module() | nil, term(), String.t(), atom()) ::
+  @spec build_open(
+          Context.t(),
+          Picker.t(),
+          module() | nil,
+          term(),
+          String.t(),
+          PickerModel.load_status()
+        ) ::
           PickerModel.t()
   defp build_open(ctx, picker, source, action_menu, mode_prefix, load_status) do
     has_preview = source != nil and Picker.Source.gui_preview?(source)
-
-    fp =
-      picker_fingerprint(picker, has_preview, action_menu, mode_prefix, @max_items, load_status)
-
+    items = picker.filtered |> Enum.take(@max_items) |> Enum.map(&item_model(picker, &1))
     preview_lines = if has_preview, do: build_picker_preview(ctx)
 
-    picker_cmd =
-      ProtocolGUI.encode_gui_picker(
-        picker,
-        has_preview,
-        action_menu,
-        @max_items,
-        mode_prefix,
-        load_status
-      )
-
-    preview_cmd = ProtocolGUI.encode_gui_picker_preview(preview_lines)
-    encoded = IO.iodata_to_binary([picker_cmd, preview_cmd])
-
-    %PickerModel{encoded: encoded, fingerprint: fp}
+    %PickerModel{
+      visible?: true,
+      title: picker.title,
+      query: picker.query,
+      selected_index: picker.selected,
+      filtered_count: length(picker.filtered),
+      total_count: length(picker.items),
+      marked_count: Picker.marked_count(picker),
+      has_preview?: has_preview,
+      items: items,
+      action_menu: action_menu_model(action_menu),
+      mode_prefix: mode_prefix,
+      load_status: load_status,
+      preview_lines: preview_lines
+    }
   end
 
-  @spec build_closed() :: PickerModel.t()
-  defp build_closed do
-    picker_cmd = ProtocolGUI.encode_gui_picker(nil)
-    preview_cmd = ProtocolGUI.encode_gui_picker_preview(nil)
-    encoded = IO.iodata_to_binary([picker_cmd, preview_cmd])
-
-    %PickerModel{encoded: encoded, fingerprint: :closed}
+  @spec item_model(Picker.t(), Picker.Item.t()) :: PickerItemModel.t()
+  defp item_model(picker, item) do
+    %PickerItemModel{
+      id: item.id,
+      label: item.label,
+      description: item.description || "",
+      annotation: item.annotation || "",
+      search_text: item.search_text || "",
+      icon_color: item.icon_color,
+      two_line?: item.two_line,
+      match_positions: item.match_positions,
+      marked?: Picker.marked?(picker, item)
+    }
   end
 
-  @spec picker_fingerprint(
-          Picker.t(),
-          boolean(),
-          term(),
-          String.t(),
-          non_neg_integer(),
-          atom()
-        ) ::
-          integer()
-  defp picker_fingerprint(picker, has_preview, action_menu, mode_prefix, max_items, load_status) do
-    limit = max_items
+  @spec action_menu_model(term()) :: ActionMenu.t() | nil
+  defp action_menu_model(nil), do: nil
 
-    visible_items =
-      picker.filtered
-      |> Enum.take(limit)
-      |> Enum.map(fn item ->
-        {item.id, item.label, item.description, item.annotation, item.search_text,
-         item.icon_color, item.two_line, item.match_positions, Picker.marked?(picker, item)}
-      end)
-
-    :erlang.phash2({
-      picker.title,
-      picker.query,
-      mode_prefix,
-      picker.selected,
-      length(picker.filtered),
-      length(picker.items),
-      Picker.marked_count(picker),
-      has_preview,
-      visible_items,
-      action_menu,
-      load_status
-    })
+  defp action_menu_model({actions, selected}) do
+    %ActionMenu{actions: Enum.map(actions, fn {name, _id} -> name end), selected_index: selected}
   end
 
   # Build preview content for the currently selected picker item.
-  @spec build_picker_preview(Context.t()) :: [[ProtocolGUI.preview_segment()]] | nil
+  @spec build_picker_preview(Context.t()) :: [[PickerModel.preview_segment()]] | nil
   defp build_picker_preview(
          %{shell_state: %{modal: {:picker, %{picker_ui: %{picker: picker, source: source}}}}} =
            ctx
@@ -116,10 +101,8 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
     end
   end
 
-  @preview_max_lines 50
-
   # Build preview lines for a file path item.
-  @spec build_preview_for_item(Context.t(), term()) :: [[ProtocolGUI.preview_segment()]] | nil
+  @spec build_preview_for_item(Context.t(), term()) :: [[PickerModel.preview_segment()]] | nil
   defp build_preview_for_item(ctx, id) when is_binary(id) do
     abs_path = resolve_preview_path(id)
 
@@ -141,7 +124,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
 
   defp build_preview_for_item(_ctx, _id), do: nil
 
-  @spec preview_from_buffer(Context.t(), pid()) :: [[ProtocolGUI.preview_segment()]] | nil
+  @spec preview_from_buffer(Context.t(), pid()) :: [[PickerModel.preview_segment()]] | nil
   defp preview_from_buffer(ctx, buf_pid) do
     case Map.get(ctx.highlight.highlights, buf_pid) do
       nil ->
@@ -173,7 +156,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
   end
 
   @spec build_highlighted_preview(pid(), MingaEditor.UI.Highlight.t(), Context.t()) ::
-          [[ProtocolGUI.preview_segment()]] | nil
+          [[PickerModel.preview_segment()]] | nil
   defp build_highlighted_preview(buf_pid, highlight, ctx) do
     content = Buffer.content(buf_pid)
     lines = content |> String.split("\n") |> Enum.take(@preview_max_lines)
@@ -210,7 +193,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
     end
   end
 
-  @spec read_file_preview(String.t(), Context.t()) :: [[ProtocolGUI.preview_segment()]] | nil
+  @spec read_file_preview(String.t(), Context.t()) :: [[PickerModel.preview_segment()]] | nil
   defp read_file_preview(abs_path, ctx) do
     case File.read(abs_path) do
       {:ok, content} ->

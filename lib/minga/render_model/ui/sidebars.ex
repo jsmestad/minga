@@ -1,20 +1,15 @@
 defmodule Minga.RenderModel.UI.Sidebars do
   @moduledoc """
-  Pre-encoded sidebars model.
-
-  The sidebars wire format uses a 32-bit payload length envelope and
-  encodes sidebar metadata (id, display_name, semantic_kind, icon, order,
-  flags, preferred_width, badge_count) with string16 helpers. The builder
-  also resolves the active sidebar through a priority chain (registered
-  active, preferred, focused, visible fallback). Rather than duplicating
-  that encoding in core, the builder pre-encodes the binary and stores
-  it here along with a fingerprint for change detection.
+  Semantic sidebar metadata model for GUI adapters.
   """
 
+  alias Minga.RenderModel.UI.Sidebars.Sidebar
+
   @type t :: %__MODULE__{
-          encoded: binary() | nil,
-          fingerprint: integer() | nil
+          active_id: String.t(),
+          sidebars: [Sidebar.t()]
         }
 
-  defstruct encoded: nil, fingerprint: nil
+  defstruct active_id: "",
+            sidebars: []
 end

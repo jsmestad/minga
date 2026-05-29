@@ -4,77 +4,139 @@ defmodule Minga.Frontend.Adapter.GUI.WorkspacesEncoderTest do
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Frontend.Adapter.GUI.WorkspacesEncoder
   alias Minga.RenderModel.UI.Workspaces
+  alias Minga.RenderModel.UI.Workspaces.VisibleTab
+  alias Minga.RenderModel.UI.Workspaces.Workspace
+  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
+  alias MingaEditor.Session.ChromeState
+  alias MingaEditor.Session.ChromeState.TabSummary
+  alias MingaEditor.Session.ChromeState.WorkspaceSummary
 
   @op_gui_workspaces Minga.Protocol.Opcodes.gui_workspaces()
 
   describe "encode/2" do
-    test "returns nil when workspaces are suppressed (no tab bar)" do
-      model = %Workspaces{encoded: nil, fingerprint: :suppressed}
-      caches = Caches.new()
-
-      {cmd, _caches} = WorkspacesEncoder.encode(model, caches)
-
-      assert cmd == nil
+    test "returns nil when workspaces are hidden" do
+      assert {nil, _caches} = WorkspacesEncoder.encode(%Workspaces{}, Caches.new())
     end
 
-    test "encodes workspaces with payload" do
+    test "matches legacy ChromeState wire format" do
+      chrome_state = chrome_state()
+
       model = %Workspaces{
-        encoded: <<@op_gui_workspaces, 0::16, "workspace_data">>,
-        fingerprint: 12_345
+        visible?: true,
+        active_workspace_id: chrome_state.active_workspace_id,
+        mode: chrome_state.mode,
+        attention_count: chrome_state.attention_count,
+        workspaces: [
+          %Workspace{
+            id: 2,
+            kind: :agent,
+            label: "Agent",
+            icon: "robot",
+            color: 0x123456,
+            status: :thinking,
+            attention?: true,
+            tab_count: 3,
+            draft_count: 4,
+            conflict_count: 5,
+            running_background_count: 6,
+            closeable?: true
+          }
+        ],
+        visible_tabs: [
+          %VisibleTab{
+            id: 7,
+            workspace_id: 2,
+            label: "README.md",
+            icon: "󰈙",
+            path: "/project/README.md",
+            dirty?: true,
+            draft_state: :conflict,
+            attention?: true,
+            pinned?: true,
+            tint_color: 0x654321
+          }
+        ]
       }
 
-      caches = Caches.new()
+      {cmd, _caches} = WorkspacesEncoder.encode(model, Caches.new())
 
-      {cmd, _caches} = WorkspacesEncoder.encode(model, caches)
-
-      assert cmd == model.encoded
+      assert cmd == ProtocolGUI.encode_gui_workspaces(chrome_state)
     end
 
-    test "returns nil on second call with same fingerprint" do
+    test "encodes workspace and visible tab summaries" do
       model = %Workspaces{
-        encoded: <<@op_gui_workspaces, 5::16, "hello">>,
-        fingerprint: 42
+        visible?: true,
+        active_workspace_id: 0,
+        mode: :editor,
+        workspaces: [
+          %Workspace{id: 0, kind: :manual, label: "Files", icon: "folder", tab_count: 1}
+        ],
+        visible_tabs: [
+          %VisibleTab{id: 7, workspace_id: 0, label: "README.md", icon: "󰈙", path: "/p/README.md"}
+        ]
       }
 
-      caches = Caches.new()
+      {cmd, _caches} = WorkspacesEncoder.encode(model, Caches.new())
 
-      {cmd1, caches} = WorkspacesEncoder.encode(model, caches)
-      assert cmd1 != nil
+      assert <<@op_gui_workspaces, len::16, payload::binary-size(len)>> = cmd
+      assert <<2::8, 0::16, 0::8, 0::8, 1::8, _rest::binary>> = payload
+    end
 
+    test "returns nil on second call with same semantic data" do
+      model = %Workspaces{
+        visible?: true,
+        workspaces: [%Workspace{id: 0, kind: :manual, label: "Files", icon: "folder"}]
+      }
+
+      {cmd1, caches} = WorkspacesEncoder.encode(model, Caches.new())
       {cmd2, _caches} = WorkspacesEncoder.encode(model, caches)
+
+      assert cmd1 != nil
       assert cmd2 == nil
     end
+  end
 
-    test "re-encodes when fingerprint changes" do
-      model1 = %Workspaces{
-        encoded: <<@op_gui_workspaces, 3::16, "abc">>,
-        fingerprint: 42
-      }
-
-      model2 = %Workspaces{
-        encoded: <<@op_gui_workspaces, 5::16, "hello">>,
-        fingerprint: 99_999
-      }
-
-      caches = Caches.new()
-      {_, caches} = WorkspacesEncoder.encode(model1, caches)
-      {cmd2, _caches} = WorkspacesEncoder.encode(model2, caches)
-
-      assert cmd2 != nil
-      assert cmd2 == model2.encoded
-    end
-
-    test "updates cache fingerprint on encode" do
-      model = %Workspaces{
-        encoded: <<@op_gui_workspaces, 3::16, "abc">>,
-        fingerprint: 42
-      }
-
-      caches = Caches.new()
-      assert caches.last_workspaces_fp == nil
-
-      {_cmd, caches} = WorkspacesEncoder.encode(model, caches)
-      assert caches.last_workspaces_fp == 42
-    end
+  @spec chrome_state() :: ChromeState.t()
+  defp chrome_state do
+    %ChromeState{
+      workspaces: [
+        WorkspaceSummary.new(
+          id: 2,
+          kind: :agent,
+          label: "Agent",
+          icon: "robot",
+          color: 0x123456,
+          status: :thinking,
+          attention?: true,
+          tab_count: 3,
+          draft_count: 4,
+          conflict_count: 5,
+          running_background_count: 6,
+          closeable?: true
+        )
+      ],
+      visible_tabs: [
+        TabSummary.new(
+          id: 7,
+          workspace_id: 2,
+          kind: :file,
+          label: "README.md",
+          path: "/project/README.md",
+          icon: "󰈙",
+          dirty?: true,
+          draft_state: :conflict,
+          attention?: true,
+          pinned?: true,
+          tint_color: 0x654321
+        )
+      ],
+      mode: :agent,
+      active_workspace_id: 2,
+      active_tab_id: 7,
+      background_count: 6,
+      attention_count: 1,
+      draft_count: 4,
+      conflict_count: 5
+    }
   end
 end

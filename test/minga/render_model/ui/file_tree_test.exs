@@ -2,43 +2,38 @@ defmodule Minga.RenderModel.UI.FileTreeTest do
   use ExUnit.Case, async: true
 
   alias Minga.RenderModel.UI.FileTree
+  alias Minga.RenderModel.UI.FileTree.Row
 
   describe "%FileTree{}" do
-    test "requires encoded and fingerprint" do
-      ft = %FileTree{
-        encoded: <<0x93, 0, 0, 0, 5, "data">>,
-        fingerprint: {:no_tree, "/tmp"}
-      }
+    test "defaults to hidden with no rows" do
+      file_tree = %FileTree{}
 
-      assert ft.encoded == <<0x93, 0, 0, 0, 5, "data">>
-      assert ft.fingerprint == {:no_tree, "/tmp"}
-      assert ft.selection_encoded == nil
+      assert file_tree.status == :hidden
+      assert file_tree.rows == []
+      assert file_tree.selected_id == ""
     end
 
-    test "raises when required fields are missing" do
-      assert_raise ArgumentError, fn ->
-        struct!(FileTree, %{})
-      end
-    end
-
-    test "accepts ready fingerprint with selection_encoded" do
-      ft = %FileTree{
-        encoded: <<0x93, "full_tree_data">>,
-        selection_encoded: <<0x94, "selection_data">>,
-        fingerprint: {:ready, 111, 222}
+    test "carries ready rows and selection" do
+      row = %Row{
+        id: "/project/lib",
+        path: "/project/lib",
+        name: "lib",
+        icon: "󰉋",
+        depth: 0,
+        guides: []
       }
 
-      assert ft.selection_encoded == <<0x94, "selection_data">>
-      assert {:ready, 111, 222} = ft.fingerprint
-    end
-
-    test "accepts file_tree_state fingerprint" do
-      ft = %FileTree{
-        encoded: <<0x93, "state">>,
-        fingerprint: {:file_tree_state, "/project", 250, :loading}
+      file_tree = %FileTree{
+        root_path: "/project",
+        tree_width: 30,
+        status: :ready,
+        selected_id: row.id,
+        rows: [row]
       }
 
-      assert {:file_tree_state, "/project", 250, :loading} = ft.fingerprint
+      assert file_tree.status == :ready
+      assert file_tree.rows == [row]
+      assert file_tree.selected_id == row.id
     end
   end
 end

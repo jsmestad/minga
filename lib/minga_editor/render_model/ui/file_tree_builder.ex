@@ -3,14 +3,21 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilder do
 
   alias Minga.Buffer
   alias Minga.Diagnostics, as: DiagnosticStore
+  alias Minga.Language
   alias Minga.LSP.SyncServer
   alias Minga.Project.FileTree
   alias Minga.RenderModel.UI.FileTree, as: FileTreeModel
+  alias Minga.RenderModel.UI.FileTree.Editing, as: FileTreeEditingModel
+  alias Minga.RenderModel.UI.FileTree.Flags, as: FileTreeFlagsModel
+  alias Minga.RenderModel.UI.FileTree.Row, as: FileTreeRowModel
   alias MingaEditor.FileTree.Diagnostics, as: FileTreeDiagnostics
+  alias MingaEditor.FileTree.Row
   alias MingaEditor.FileTree.Rows
   alias MingaEditor.Frontend.Emit.Context
-  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
   alias MingaEditor.State.FileTree, as: FileTreeState
+  alias MingaEditor.UI.Devicon
+
+  @folder_icon "\u{F024B}"
 
   @spec build(Context.t()) :: FileTreeModel.t()
   def build(%Context{file_tree: %{tree: %FileTree{} = tree} = file_tree} = ctx) do
@@ -18,11 +25,8 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilder do
     tree_status = FileTreeState.status(file_tree)
 
     case tree_status do
-      :ready ->
-        build_ready(tree, file_tree, ctx)
-
-      status ->
-        build_state(file_tree, status)
+      :ready -> build_ready(tree, file_tree, ctx)
+      status -> build_state(file_tree, status)
     end
   end
 
@@ -47,19 +51,9 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilder do
     dirty_path_set = dirty_paths(ctx.buffers)
     diagnostics = file_tree_diagnostics(tree.root)
 
-    structural_fp =
-      file_tree_ready_structural_fingerprint(
-        tree,
-        file_tree,
-        active_path,
-        dirty_path_set,
-        diagnostics
-      )
-
-    selection_fp = file_tree_selection_fingerprint(tree, file_tree)
-
     rows =
-      Rows.from_tree(tree,
+      tree
+      |> Rows.from_tree(
         active_path: active_path,
         dirty_paths: dirty_path_set,
         editing: Map.get(file_tree, :editing),
@@ -68,51 +62,64 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilder do
         diagnostics: diagnostics,
         selected_index: tree.cursor
       )
-
-    encoded =
-      ProtocolGUI.encode_gui_file_tree(
-        tree.root,
-        tree.width,
-        :ready,
-        file_tree_focused?(file_tree),
-        rows
-      )
-
-    selection_encoded =
-      ProtocolGUI.encode_gui_file_tree_selection(
-        selected_row_id(tree),
-        file_tree_focused?(file_tree)
-      )
+      |> Enum.map(&row_model/1)
 
     %FileTreeModel{
-      encoded: encoded,
-      selection_encoded: selection_encoded,
-      fingerprint: {:ready, structural_fp, selection_fp}
+      root_path: tree.root,
+      tree_width: tree.width,
+      status: :ready,
+      focused?: file_tree_focused?(file_tree),
+      selected_id: selected_row_id(tree),
+      rows: rows
     }
   end
 
   @spec build_state(FileTreeState.t(), FileTreeState.tree_status()) :: FileTreeModel.t()
   defp build_state(%FileTreeState{} = file_tree, status) do
-    width = FileTreeState.width(file_tree)
-    encoded = ProtocolGUI.encode_gui_file_tree(file_tree.project_root, width, status, false, [])
-
     %FileTreeModel{
-      encoded: encoded,
-      fingerprint: {:file_tree_state, file_tree.project_root || "", width, status}
+      root_path: file_tree.project_root,
+      tree_width: FileTreeState.width(file_tree),
+      status: status,
+      focused?: false,
+      selected_id: "",
+      rows: []
     }
   end
 
   @spec build_hidden(String.t() | nil) :: FileTreeModel.t()
   defp build_hidden(root_path) do
-    encoded = ProtocolGUI.encode_hidden_gui_file_tree(root_path)
+    %FileTreeModel{root_path: root_path, status: :hidden}
+  end
 
-    %FileTreeModel{
-      encoded: encoded,
-      fingerprint: {:no_tree, root_path || ""}
+  @spec row_model(Row.t()) :: FileTreeRowModel.t()
+  defp row_model(%Row{} = row) do
+    %FileTreeRowModel{
+      id: row.id,
+      path: row.path,
+      name: row.name,
+      icon: row_icon(row),
+      flags: %FileTreeFlagsModel{
+        directory?: row.directory?,
+        expanded?: row.expanded?,
+        active?: row.active?,
+        dirty?: row.dirty?,
+        last_child?: row.last_child?
+      },
+      git_status: row.git_status,
+      diagnostics: FileTreeDiagnostics.to_tuple(row.diagnostics),
+      depth: row.depth,
+      guides: row.guides,
+      editing: editing_model(row.editing)
     }
   end
 
-  # ── Helpers (moved from GUI.ex) ──
+  @spec editing_model(FileTreeState.editing() | nil) :: FileTreeEditingModel.t() | nil
+  defp editing_model(nil), do: nil
+  defp editing_model(%{type: type, text: text}), do: %FileTreeEditingModel{type: type, text: text}
+
+  @spec row_icon(Row.t()) :: String.t()
+  defp row_icon(%Row{directory?: true}), do: @folder_icon
+  defp row_icon(%Row{name: name}), do: Devicon.icon(Language.detect_filetype(name))
 
   @spec active_buffer_path(Context.t()) :: String.t() | nil
   defp active_buffer_path(%{buffers: %{active: buf}}) when is_pid(buf) do
@@ -124,34 +131,6 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilder do
   end
 
   defp active_buffer_path(_ctx), do: nil
-
-  @spec file_tree_ready_structural_fingerprint(
-          FileTree.t(),
-          FileTreeState.t(),
-          String.t() | nil,
-          MapSet.t(String.t()),
-          %{String.t() => FileTreeDiagnostics.t()}
-        ) :: non_neg_integer()
-  defp file_tree_ready_structural_fingerprint(
-         tree,
-         file_tree,
-         active_path,
-         dirty_path_set,
-         diagnostics
-       ) do
-    :erlang.phash2({
-      tree.root,
-      tree.width,
-      tree.show_hidden,
-      tree.expanded,
-      tree.entries,
-      tree.git_status,
-      Map.get(file_tree, :editing),
-      active_path,
-      dirty_path_set,
-      diagnostics
-    })
-  end
 
   @spec file_tree_diagnostics(String.t()) :: %{String.t() => FileTreeDiagnostics.t()}
   defp file_tree_diagnostics(root) when is_binary(root) do
@@ -167,16 +146,11 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilder do
     :exit, _ -> %{}
   end
 
-  @spec file_tree_selection_fingerprint(FileTree.t(), map()) :: non_neg_integer()
-  defp file_tree_selection_fingerprint(tree, file_tree) do
-    :erlang.phash2({selected_row_id(tree), file_tree_focused?(file_tree)})
-  end
-
   @spec selected_row_id(FileTree.t()) :: String.t()
   defp selected_row_id(%FileTree{entries: entries, cursor: cursor}) when is_list(entries) do
     case Enum.at(entries, cursor) do
       nil -> ""
-      entry -> MingaEditor.FileTree.Row.id_for(entry)
+      entry -> Row.id_for(entry)
     end
   end
 
