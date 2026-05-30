@@ -2,10 +2,15 @@ defmodule Minga.Session.EventRecorder do
   @moduledoc """
   Persistent event recorder for the editor's event stream.
 
-  Subscribes to `Minga.Events` topics and writes every event to an
+  Subscribes to `Minga.Events` topics and writes selected events to an
   append-only SQLite database via exqlite. The recorder is a write-only
   GenServer: it receives events via cast (never blocking the broadcaster)
   and writes them to the database synchronously within its own process.
+
+  By default only low-volume lifecycle events are persisted (see
+  `@default_persisted_topics`). High-volume events like `:buffer_changed`
+  and `:mode_changed` are still broadcast normally but not written to
+  SQLite. Set `:event_persist_all` to persist everything for diagnostics.
 
   Downstream features query the database through `Minga.Session.EventRecorder.Store`
   using separate read connections, which WAL mode supports without blocking
@@ -14,9 +19,10 @@ defmodule Minga.Session.EventRecorder do
   ## Retention
 
   A periodic sweep deletes events older than the configured retention
-  window (`:event_retention_days`). The first sweep runs a few seconds
-  after boot so even short-lived CLI invocations get a chance to prune;
-  subsequent sweeps run once per hour.
+  window (`:event_retention_days`) and enforces the `:event_size_cap_mb`
+  hard size limit. The first sweep runs a few seconds after boot so even
+  short-lived CLI invocations get a chance to prune; subsequent sweeps
+  run once per hour.
 
   ## Startup and health checks
 
@@ -59,18 +65,29 @@ defmodule Minga.Session.EventRecorder do
     :command_done
   ]
 
+  @default_persisted_topics [
+    :buffer_saved,
+    :buffer_opened,
+    :buffer_closed,
+    :git_status_changed,
+    :project_rebuilt,
+    :command_done
+  ]
+
   # ── State ─────────────────────────────────────────────────────────────
 
   defmodule State do
     @moduledoc false
     @enforce_keys [:db, :path]
-    defstruct [:db, :path, :retention_days, :sweep_ref]
+    defstruct [:db, :path, :retention_days, :sweep_ref, persist_all: false, size_cap_bytes: 0]
 
     @type t :: %__MODULE__{
             db: Exqlite.Sqlite3.db(),
             path: String.t(),
             retention_days: pos_integer(),
-            sweep_ref: reference() | nil
+            sweep_ref: reference() | nil,
+            persist_all: boolean(),
+            size_cap_bytes: non_neg_integer()
           }
   end
 
@@ -123,6 +140,16 @@ defmodule Minga.Session.EventRecorder do
         Minga.Config.get(:event_retention_days)
       end)
 
+    persist_all =
+      Keyword.get_lazy(opts, :persist_all, fn ->
+        Minga.Config.get(:event_persist_all)
+      end)
+
+    size_cap_mb =
+      Keyword.get_lazy(opts, :size_cap_mb, fn ->
+        Minga.Config.get(:event_size_cap_mb)
+      end)
+
     path = Path.join(db_dir, @db_filename)
 
     case open_or_recreate(path) do
@@ -138,7 +165,9 @@ defmodule Minga.Session.EventRecorder do
            db: db,
            path: path,
            retention_days: retention_days,
-           sweep_ref: sweep_ref
+           sweep_ref: sweep_ref,
+           persist_all: persist_all,
+           size_cap_bytes: size_cap_mb * 1_048_576
          }}
 
       {:error, reason} ->
@@ -149,38 +178,27 @@ defmodule Minga.Session.EventRecorder do
 
   @impl true
   def handle_info({:minga_event, topic, payload}, state) do
-    record = build_record(topic, payload)
+    if persist_event?(topic, state) do
+      record = build_record(topic, payload)
 
-    case Store.insert(state.db, record) do
-      :ok ->
-        :ok
+      case Store.insert(state.db, record) do
+        :ok ->
+          :ok
 
-      {:error, reason} ->
-        Minga.Log.warning(
-          :editor,
-          "[EventRecorder] failed to write event: #{inspect(reason)}"
-        )
+        {:error, reason} ->
+          Minga.Log.warning(
+            :editor,
+            "[EventRecorder] failed to write event: #{inspect(reason)}"
+          )
+      end
     end
 
     {:noreply, state}
   end
 
   def handle_info(:retention_sweep, state) do
-    cutoff = DateTime.add(DateTime.utc_now(), -state.retention_days, :day)
-
-    case Store.delete_before(state.db, cutoff) do
-      {:ok, 0} ->
-        :ok
-
-      {:ok, count} ->
-        Minga.Log.info(:editor, "[EventRecorder] retention sweep deleted #{count} events")
-
-      {:error, reason} ->
-        Minga.Log.warning(
-          :editor,
-          "[EventRecorder] retention sweep failed: #{inspect(reason)}"
-        )
-    end
+    run_time_retention(state)
+    run_size_cap_enforcement(state)
 
     sweep_ref = schedule_retention_sweep()
     {:noreply, %{state | sweep_ref: sweep_ref}}
@@ -234,6 +252,21 @@ defmodule Minga.Session.EventRecorder do
     end
   end
 
+  def handle_info(:deferred_vacuum, state) do
+    case Store.vacuum(state.db) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Minga.Log.warning(
+          :editor,
+          "[EventRecorder] VACUUM failed: #{inspect(reason)}"
+        )
+    end
+
+    {:noreply, state}
+  end
+
   def handle_info(_msg, state) do
     {:noreply, state}
   end
@@ -245,6 +278,79 @@ defmodule Minga.Session.EventRecorder do
   end
 
   # ── Private helpers ───────────────────────────────────────────────────
+
+  @spec persist_event?(Events.topic(), State.t()) :: boolean()
+  defp persist_event?(_topic, %State{persist_all: true}), do: true
+  defp persist_event?(topic, _state), do: topic in @default_persisted_topics
+
+  @spec run_time_retention(State.t()) :: :ok
+  defp run_time_retention(state) do
+    cutoff = DateTime.add(DateTime.utc_now(), -state.retention_days, :day)
+
+    case Store.delete_before(state.db, cutoff) do
+      {:ok, 0} ->
+        :ok
+
+      {:ok, count} ->
+        Minga.Log.info(:editor, "[EventRecorder] retention sweep deleted #{count} events")
+
+      {:error, reason} ->
+        Minga.Log.warning(
+          :editor,
+          "[EventRecorder] retention sweep failed: #{inspect(reason)}"
+        )
+    end
+  end
+
+  @spec run_size_cap_enforcement(State.t()) :: :ok
+  defp run_size_cap_enforcement(%State{size_cap_bytes: 0}), do: :ok
+
+  defp run_size_cap_enforcement(state) do
+    total = Store.total_file_size(state.path)
+
+    if total > state.size_cap_bytes do
+      enforce_size_cap(state, total)
+      send(self(), :deferred_vacuum)
+    end
+
+    :ok
+  end
+
+  @spec enforce_size_cap(State.t(), non_neg_integer()) :: :ok
+  defp enforce_size_cap(state, total) do
+    target = div(state.size_cap_bytes * 3, 4)
+
+    case Store.count(state.db) do
+      {:ok, row_count} ->
+        keep = max(div(row_count * target, total), 100)
+
+        case Store.delete_oldest(state.db, keep) do
+          {:ok, deleted} when deleted > 0 ->
+            Minga.Log.info(
+              :editor,
+              "[EventRecorder] size cap pruned #{deleted} events (#{format_mb(total)} -> target #{format_mb(target)})"
+            )
+
+          {:ok, _} ->
+            :ok
+
+          {:error, reason} ->
+            Minga.Log.warning(
+              :editor,
+              "[EventRecorder] size cap enforcement failed: #{inspect(reason)}"
+            )
+        end
+
+      {:error, reason} ->
+        Minga.Log.warning(
+          :editor,
+          "[EventRecorder] size cap enforcement failed: #{inspect(reason)}"
+        )
+    end
+  end
+
+  @spec format_mb(non_neg_integer()) :: String.t()
+  defp format_mb(bytes), do: "#{Float.round(bytes / 1_048_576, 1)} MiB"
 
   @spec subscribe_to_events() :: :ok
   defp subscribe_to_events do

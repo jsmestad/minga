@@ -201,6 +201,56 @@ defmodule Minga.Session.EventRecorder.StoreTest do
     end
   end
 
+  describe "delete_oldest/2" do
+    test "keeps only the newest events", %{db: db} do
+      for i <- 1..10 do
+        t = DateTime.add(~U[2025-01-01 00:00:00Z], i, :hour)
+        :ok = Store.insert(db, make_record(%{wall_clock: t, payload: %{"n" => i}}))
+      end
+
+      {:ok, deleted} = Store.delete_oldest(db, 3)
+      assert deleted == 7
+
+      {:ok, remaining} = Store.count(db)
+      assert remaining == 3
+    end
+
+    test "returns 0 when keep exceeds row count", %{db: db} do
+      :ok = Store.insert(db, make_record())
+      {:ok, deleted} = Store.delete_oldest(db, 100)
+      assert deleted == 0
+    end
+  end
+
+  describe "total_file_size/1" do
+    test "returns the combined size of db, wal, and shm files" do
+      path = Path.join(System.tmp_dir!(), "store_size_#{:erlang.unique_integer([:positive])}.db")
+      on_exit(fn -> Enum.each([path, path <> "-wal", path <> "-shm"], &File.rm/1) end)
+
+      {:ok, db} = Store.open(path)
+      :ok = Store.insert(db, make_record())
+      Store.close(db)
+
+      size = Store.total_file_size(path)
+      assert size > 0
+    end
+
+    test "returns 0 for nonexistent files" do
+      assert Store.total_file_size("/tmp/nonexistent_db_#{:rand.uniform(999_999)}.db") == 0
+    end
+  end
+
+  describe "vacuum/1" do
+    test "reclaims space after deletes", %{db: db} do
+      # In-memory DB: vacuum succeeds but size isn't measurable on disk
+      for _ <- 1..50, do: :ok = Store.insert(db, make_record())
+      {:ok, _} = Store.delete_oldest(db, 5)
+      assert :ok = Store.vacuum(db)
+      {:ok, count} = Store.count(db)
+      assert count == 5
+    end
+  end
+
   describe "integrity_check/2" do
     test "reports healthy for a valid database (full)", %{db: db} do
       assert {:ok, :healthy} = Store.integrity_check(db)

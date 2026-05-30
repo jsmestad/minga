@@ -258,6 +258,59 @@ defmodule Minga.Session.EventRecorder.Store do
   end
 
   @doc """
+  Deletes all but the newest `keep` events.
+
+  Returns the number of deleted rows.
+  """
+  @spec delete_oldest(db(), non_neg_integer()) :: {:ok, non_neg_integer()} | {:error, term()}
+  def delete_oldest(db, keep) when is_integer(keep) and keep >= 0 do
+    sql = """
+    DELETE FROM events WHERE id NOT IN (
+      SELECT id FROM events ORDER BY wall_clock DESC, id DESC LIMIT ?1
+    )
+    """
+
+    with {:ok, stmt} <- Exqlite.Sqlite3.prepare(db, sql),
+         :ok <- Exqlite.Sqlite3.bind(stmt, [keep]),
+         :done <- Exqlite.Sqlite3.step(db, stmt),
+         :ok <- Exqlite.Sqlite3.release(db, stmt) do
+      {:ok, changes(db)}
+    else
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc """
+  Returns the total file size of the database and its WAL/SHM companions.
+  """
+  @spec total_file_size(String.t()) :: non_neg_integer()
+  def total_file_size(db_path) do
+    [db_path, db_path <> "-wal", db_path <> "-shm"]
+    |> Enum.map(&file_size/1)
+    |> Enum.sum()
+  end
+
+  @spec file_size(String.t()) :: non_neg_integer()
+  defp file_size(path) do
+    case File.stat(path) do
+      {:ok, %{size: size}} -> size
+      {:error, _} -> 0
+    end
+  end
+
+  @doc """
+  Runs VACUUM to reclaim disk space after large deletes, then
+  truncates the WAL file so `total_file_size/1` reflects the
+  compacted size.
+  """
+  @spec vacuum(db()) :: :ok | {:error, term()}
+  def vacuum(db) do
+    with :ok <- execute(db, "VACUUM") do
+      execute(db, "PRAGMA wal_checkpoint(TRUNCATE)")
+    end
+  end
+
+  @doc """
   Runs an integrity check and returns the result.
 
   `mode` selects the SQLite pragma:
@@ -458,7 +511,13 @@ defmodule Minga.Session.EventRecorder.Store do
          :ok <- Exqlite.Sqlite3.release(db, stmt) do
       count
     else
-      _ -> 0
+      error ->
+        Minga.Log.warning(
+          :editor,
+          "[EventRecorder.Store] SELECT changes() failed: #{inspect(error)}"
+        )
+
+        0
     end
   end
 
