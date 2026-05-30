@@ -552,7 +552,11 @@ defmodule MingaEditor.Agent.SlashCommandTest do
 
     test "register_commands/2 with empty list is a no-op" do
       assert :ok = SlashCommand.register_commands(:test_ext_dynamic, [])
-      assert Enum.empty?(Enum.filter(SlashCommand.dynamic_commands(), fn _ -> true end) -- SlashCommand.dynamic_commands())
+
+      assert Enum.empty?(
+               Enum.filter(SlashCommand.dynamic_commands(), fn _ -> true end) --
+                 SlashCommand.dynamic_commands()
+             )
     end
   end
 end

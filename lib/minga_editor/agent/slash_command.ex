@@ -1096,7 +1096,8 @@ defmodule MingaEditor.Agent.SlashCommand do
 
   @doc "Registers slash commands contributed by an extension."
   @spec register_commands(atom(), [Command.t()]) :: :ok
-  def register_commands(extension_name, commands) when is_atom(extension_name) and is_list(commands) do
+  def register_commands(extension_name, commands)
+      when is_atom(extension_name) and is_list(commands) do
     table = ensure_table()
     Enum.each(commands, fn cmd -> :ets.insert(table, {{extension_name, cmd.name}, cmd}) end)
     :ok
@@ -1135,7 +1136,8 @@ defmodule MingaEditor.Agent.SlashCommand do
     end
   end
 
-  @spec execute_dynamic_command(state(), Command.t(), String.t()) :: {:ok, state()} | {:error, String.t()}
+  @spec execute_dynamic_command(state(), Command.t(), String.t()) ::
+          {:ok, state()} | {:error, String.t()}
   defp execute_dynamic_command(state, cmd, args) do
     command_path = cmd.execute
     trimmed_args = String.trim(args)

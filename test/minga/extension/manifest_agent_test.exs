@@ -102,13 +102,11 @@ defmodule Minga.Extension.ManifestAgentTest do
     defmodule EditorOnlyExt do
       use Minga.Extension.Editor
 
-      command(:test_cmd, "A test command",
-        execute: {Minga.Extension.ManifestAgentTest, :noop}
-      )
+      command(:test_cmd, "A test command", execute: {Minga.Extension.ManifestAgentTest, :noop})
 
       keybind(:normal, "SPC m t", :test_cmd, "Test command")
 
-      capability :filetype, :org
+      capability(:filetype, :org)
 
       @impl true
       def name, do: :manifest_editor_only
@@ -197,7 +195,7 @@ defmodule Minga.Extension.ManifestAgentTest do
         {" PAIRED ", :green, :black, [], nil}
       end
 
-      capability :filetype, :elixir
+      capability(:filetype, :elixir)
 
       @impl true
       def name, do: :manifest_paired_editor

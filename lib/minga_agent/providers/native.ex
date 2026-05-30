@@ -323,7 +323,7 @@ defmodule MingaAgent.Providers.Native do
     read_only? = Keyword.get(opts, :read_only?, false)
     config = disable_hooks_for_read_only(config, read_only?)
     ext_components = collect_extension_agent_components()
-    config = %{config | agent_hooks: config.agent_hooks ++ ext_components.hooks}
+    config = merge_extension_hooks(config, ext_components.hooks, read_only?)
     max_cost = Keyword.get(opts, :max_cost, config.max_cost)
     llm_client = Keyword.get(opts, :llm_client, &ReqLLM.stream_text/3)
     hook_runner = Keyword.get(opts, :hook_runner, &CommandRunner.run_pre_tool_use/2)
@@ -377,7 +377,10 @@ defmodule MingaAgent.Providers.Native do
     custom_tools? = Keyword.has_key?(opts, :tools)
     active_skills = load_active_skills(project_root, Keyword.get(opts, :active_skill_names, []))
     internal_tools = if read_only?, do: [], else: build_internal_tools(provider_pid)
-    mcp_configs = configured_mcp_servers(opts, config, subscriber, read_only?) ++ ext_components.mcp_servers
+
+    ext_mcp = if read_only?, do: [], else: ext_components.mcp_servers
+    mcp_configs = configured_mcp_servers(opts, config, subscriber, read_only?) ++ ext_mcp
+
     mcp_client_opts = mcp_client_opts(opts)
     mcp_enabled_override = Keyword.get(opts, :mcp_enabled?, nil)
     mcp_registry = mcp_registry_for(mcp_configs)
@@ -436,7 +439,10 @@ defmodule MingaAgent.Providers.Native do
     }
 
     if ext_components.skills != [] do
-      Minga.Log.info(:agent, "[Agent.Native] extension skills available: #{Enum.join(ext_components.skills, ", ")}")
+      Minga.Log.info(
+        :agent,
+        "[Agent.Native] extension skills available: #{Enum.join(ext_components.skills, ", ")}"
+      )
     end
 
     Minga.Log.info(:agent, "[Agent.Native] started with model=#{model} root=#{project_root}")
@@ -449,6 +455,13 @@ defmodule MingaAgent.Providers.Native do
     do: AgentConfig.without_hooks(config)
 
   defp disable_hooks_for_read_only(%AgentConfig{} = config, false), do: config
+
+  @spec merge_extension_hooks(AgentConfig.t(), [MingaAgent.Hooks.Hook.t()], boolean()) ::
+          AgentConfig.t()
+  defp merge_extension_hooks(config, _hooks, true), do: config
+
+  defp merge_extension_hooks(config, hooks, false),
+    do: %{config | agent_hooks: config.agent_hooks ++ hooks}
 
   @spec filter_base_tools_for_read_only([ReqLLM.Tool.t()], boolean()) :: [ReqLLM.Tool.t()]
   defp filter_base_tools_for_read_only(base_tools, true),
@@ -1085,7 +1098,11 @@ defmodule MingaAgent.Providers.Native do
             [hook | acc]
 
           {:error, reason} ->
-            Minga.Log.warning(:agent, "[Agent.Native] extension hook normalization failed: #{reason}")
+            Minga.Log.warning(
+              :agent,
+              "[Agent.Native] extension hook normalization failed: #{reason}"
+            )
+
             acc
         end
       end)
@@ -1106,7 +1123,11 @@ defmodule MingaAgent.Providers.Native do
             [config | acc]
 
           {:error, reason} ->
-            Minga.Log.warning(:agent, "[Agent.Native] extension MCP server normalization failed: #{reason}")
+            Minga.Log.warning(
+              :agent,
+              "[Agent.Native] extension MCP server normalization failed: #{reason}"
+            )
+
             acc
         end
       end)

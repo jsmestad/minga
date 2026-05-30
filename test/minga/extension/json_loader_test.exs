@@ -9,22 +9,33 @@ defmodule Minga.Extension.JsonLoaderTest do
   _ = :pre_tool_use
 
   @valid_manifest Jason.encode!(%{
-    "name" => "hello-world",
-    "description" => "A simple greeting plugin",
-    "version" => "0.1.0",
-    "hooks" => [
-      %{"event" => "session_start", "command" => "${MINGA_PLUGIN_ROOT}/hooks/hello.sh"}
-    ],
-    "skills" => [
-      "${MINGA_PLUGIN_ROOT}/skills/greet"
-    ],
-    "mcp_servers" => [
-      %{"name" => "my_mcp", "command" => "${MINGA_PLUGIN_ROOT}/servers/my-mcp", "args" => ["--port", "3000"]}
-    ],
-    "slash_commands" => [
-      %{"name" => "greet", "description" => "Say hello", "command" => "${MINGA_PLUGIN_ROOT}/commands/greet.sh"}
-    ]
-  })
+                    "name" => "hello-world",
+                    "description" => "A simple greeting plugin",
+                    "version" => "0.1.0",
+                    "hooks" => [
+                      %{
+                        "event" => "session_start",
+                        "command" => "${MINGA_PLUGIN_ROOT}/hooks/hello.sh"
+                      }
+                    ],
+                    "skills" => [
+                      "${MINGA_PLUGIN_ROOT}/skills/greet"
+                    ],
+                    "mcp_servers" => [
+                      %{
+                        "name" => "my_mcp",
+                        "command" => "${MINGA_PLUGIN_ROOT}/servers/my-mcp",
+                        "args" => ["--port", "3000"]
+                      }
+                    ],
+                    "slash_commands" => [
+                      %{
+                        "name" => "greet",
+                        "description" => "Say hello",
+                        "command" => "${MINGA_PLUGIN_ROOT}/commands/greet.sh"
+                      }
+                    ]
+                  })
 
   setup do
     dir = Path.join(System.tmp_dir!(), "json_loader_test_#{:erlang.unique_integer([:positive])}")
@@ -122,15 +133,20 @@ defmodule Minga.Extension.JsonLoaderTest do
     end
 
     test "does not alter non-string values", %{dir: dir} do
-      manifest = Jason.encode!(%{
-        "name" => "num-test",
-        "hooks" => [
-          %{"event" => "session_start", "command" => "${MINGA_PLUGIN_ROOT}/hook.sh"}
-        ],
-        "mcp_servers" => [
-          %{"name" => "svc", "command" => "${MINGA_PLUGIN_ROOT}/svc", "args" => ["--port", "3000"]}
-        ]
-      })
+      manifest =
+        Jason.encode!(%{
+          "name" => "num-test",
+          "hooks" => [
+            %{"event" => "session_start", "command" => "${MINGA_PLUGIN_ROOT}/hook.sh"}
+          ],
+          "mcp_servers" => [
+            %{
+              "name" => "svc",
+              "command" => "${MINGA_PLUGIN_ROOT}/svc",
+              "args" => ["--port", "3000"]
+            }
+          ]
+        })
 
       write_manifest(dir, manifest)
 
@@ -164,12 +180,17 @@ defmodule Minga.Extension.JsonLoaderTest do
     end
 
     test "unknown hook event atom returns error", %{dir: dir} do
-      manifest = Jason.encode!(%{
-        "name" => "bad-hook",
-        "hooks" => [
-          %{"event" => "this_atom_definitely_does_not_exist_#{:erlang.unique_integer([:positive])}", "command" => "hook.sh"}
-        ]
-      })
+      manifest =
+        Jason.encode!(%{
+          "name" => "bad-hook",
+          "hooks" => [
+            %{
+              "event" =>
+                "this_atom_definitely_does_not_exist_#{:erlang.unique_integer([:positive])}",
+              "command" => "hook.sh"
+            }
+          ]
+        })
 
       write_manifest(dir, manifest)
 
@@ -180,10 +201,11 @@ defmodule Minga.Extension.JsonLoaderTest do
 
   describe "missing name fallback" do
     test "uses directory basename when name field is absent", %{dir: dir} do
-      manifest = Jason.encode!(%{
-        "description" => "Nameless plugin",
-        "version" => "0.2.0"
-      })
+      manifest =
+        Jason.encode!(%{
+          "description" => "Nameless plugin",
+          "version" => "0.2.0"
+        })
 
       write_manifest(dir, manifest)
 
@@ -232,13 +254,14 @@ defmodule Minga.Extension.JsonLoaderTest do
     end
 
     test "multiple hooks are preserved in order", %{dir: dir} do
-      manifest = Jason.encode!(%{
-        "name" => "multi-hook",
-        "hooks" => [
-          %{"event" => "session_start", "command" => "first.sh"},
-          %{"event" => "pre_tool_use", "tool" => "write_*", "command" => "second.sh"}
-        ]
-      })
+      manifest =
+        Jason.encode!(%{
+          "name" => "multi-hook",
+          "hooks" => [
+            %{"event" => "session_start", "command" => "first.sh"},
+            %{"event" => "pre_tool_use", "tool" => "write_*", "command" => "second.sh"}
+          ]
+        })
 
       write_manifest(dir, manifest)
 
@@ -253,10 +276,11 @@ defmodule Minga.Extension.JsonLoaderTest do
     end
 
     test "multiple skills are preserved in order", %{dir: dir} do
-      manifest = Jason.encode!(%{
-        "name" => "multi-skill",
-        "skills" => ["skills/a", "skills/b", "skills/c"]
-      })
+      manifest =
+        Jason.encode!(%{
+          "name" => "multi-skill",
+          "skills" => ["skills/a", "skills/b", "skills/c"]
+        })
 
       write_manifest(dir, manifest)
 

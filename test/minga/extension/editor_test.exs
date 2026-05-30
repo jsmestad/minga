@@ -190,8 +190,12 @@ defmodule Minga.Extension.EditorTest do
 
     test "segment render functions are callable" do
       ctx = %{word_count: 42}
-      assert ModelineExtension.__modeline_segment_word_count__(ctx) == {" 42 ", :white, :black, [], nil}
-      assert ModelineExtension.__modeline_segment_simple_status__(%{}) == {" OK ", :green, :black, [], nil}
+
+      assert ModelineExtension.__modeline_segment_word_count__(ctx) ==
+               {" 42 ", :white, :black, [], nil}
+
+      assert ModelineExtension.__modeline_segment_simple_status__(%{}) ==
+               {" OK ", :green, :black, [], nil}
     end
 
     test "segments are in declaration order" do
@@ -204,9 +208,9 @@ defmodule Minga.Extension.EditorTest do
     defmodule CapabilityExtension do
       use Minga.Extension.Editor
 
-      capability :filetype, :org
-      capability :filetype, :markdown
-      capability :ui, :overlay
+      capability(:filetype, :org)
+      capability(:filetype, :markdown)
+      capability(:ui, :overlay)
 
       @impl true
       def name, do: :editor_cap_ext
@@ -324,7 +328,7 @@ defmodule Minga.Extension.EditorTest do
         {" ACTIVE ", :green, :black, [], nil}
       end
 
-      capability :filetype, :elixir
+      capability(:filetype, :elixir)
 
       @impl true
       def name, do: :editor_full_ext

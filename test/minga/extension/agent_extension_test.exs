@@ -63,7 +63,11 @@ defmodule Minga.Extension.AgentExtensionTest do
     end
 
     test "skills are in declaration order" do
-      assert SkillExtension.__skill_schema__() == ["skills/greet", "skills/refactor", "skills/deploy"]
+      assert SkillExtension.__skill_schema__() == [
+               "skills/greet",
+               "skills/refactor",
+               "skills/deploy"
+             ]
     end
   end
 
@@ -174,7 +178,8 @@ defmodule Minga.Extension.AgentExtensionTest do
 
       assert schema == [
                {:auto_fix, :boolean, false, "Automatically apply lint fixes"},
-               {:severity, {:enum, [:error, :warning, :info]}, :warning, "Minimum severity to report"}
+               {:severity, {:enum, [:error, :warning, :info]}, :warning,
+                "Minimum severity to report"}
              ]
     end
 
