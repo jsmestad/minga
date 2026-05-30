@@ -148,7 +148,7 @@ defmodule MingaEditor.Commands.Testing do
   end
 
   command(:test_file, "Run tests for current file", requires_buffer: true, execute: &test_file/1)
-  command(:test_all, "Run all tests", requires_buffer: true, execute: &test_all/1)
+  command(:test_all, "Run all tests", requires_buffer: false, execute: &test_all/1)
   command(:test_at_point, "Run test at cursor", requires_buffer: true, execute: &test_at_point/1)
   command(:test_rerun, "Rerun last test", requires_buffer: true, execute: &test_rerun/1)
   command(:test_output, "Show test output", requires_buffer: true, execute: &test_output/1)

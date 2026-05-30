@@ -90,6 +90,14 @@ defmodule MingaEditor.Commands.FileTree do
     EditorState.update_file_tree(state, fun)
   end
 
+  @spec project_browse(state()) :: state()
+  def project_browse(state) do
+    case file_tree_state(state) |> FileTreeState.status() |> FileTreeState.visible_status?() do
+      true -> focus_visible_tree(state)
+      false -> open(state)
+    end
+  end
+
   @spec open_or_toggle(state()) :: state()
   def open_or_toggle(state) do
     case file_tree_state(state) do
@@ -1466,5 +1474,10 @@ defmodule MingaEditor.Commands.FileTree do
   command(:tree_duplicate, "Duplicate file or folder in tree",
     requires_buffer: false,
     execute: &duplicate/1
+  )
+
+  command(:project_browse, "Browse project",
+    requires_buffer: false,
+    execute: &project_browse/1
   )
 end

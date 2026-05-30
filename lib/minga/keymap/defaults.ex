@@ -116,12 +116,15 @@ defmodule Minga.Keymap.Defaults do
     {~k(c l I), :tool_manage, "Manage tools"},
 
     # ── Project ────────────────────────────────────────────────────────────────
+    {~k(SPC), :project_find_file, "Find file in project"},
     {~k(p f), :project_find_file, "Find file in project"},
     {~k(p p), :project_switch, "Switch project"},
     {~k(p i), :project_invalidate, "Invalidate project cache"},
     {~k(p a), :project_add, "Add known project"},
     {~k(p d), :project_remove, "Remove known project"},
-    {~k(p R), :project_recent_files, "Recent files in project"},
+    {~k(p r), :project_recent_files, "Recent files in project"},
+    {~k(p .), :project_browse, "Browse project"},
+    {~k(p T), :test_all, "Test project"},
 
     # ── Open ──────────────────────────────────────────────────────────────────
     {~k(o b), :toggle_beam_observatory, "BEAM observatory"},

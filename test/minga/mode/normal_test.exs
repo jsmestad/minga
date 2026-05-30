@@ -152,15 +152,10 @@ defmodule Minga.Mode.NormalTest do
   end
 
   describe "leader key sequences" do
-    test "space starts leader mode, progress advances, repeated space restarts, and invalid keys cancel" do
+    test "space starts leader mode, progress advances, and invalid keys cancel" do
       {:execute, {:leader_start, node}, leader_state} = handle({32, 0})
       assert leader_state.leader_node == node
       assert leader_state.leader_keys == ["SPC"]
-
-      {:execute, repeated_commands, repeated_state} = handle({32, 0}, leader_state)
-      assert is_list(repeated_commands)
-      assert :leader_cancel in repeated_commands
-      assert repeated_state.leader_keys == ["SPC"]
 
       case handle({?f, 0}, leader_state) do
         {:execute, {:leader_progress, sub_node}, progressed} ->
@@ -183,6 +178,28 @@ defmodule Minga.Mode.NormalTest do
         assert cancelled.leader_keys == []
         assert cancelled.count == nil
       end
+    end
+
+    test "SPC SPC executes :project_find_file" do
+      {:execute, {:leader_start, _node}, leader_state} = handle({32, 0})
+      {:execute, commands, finished_state} = handle({32, 0}, leader_state)
+      assert is_list(commands)
+      assert :project_find_file in commands
+      assert :leader_cancel in commands
+      assert finished_state.leader_node == nil
+      assert finished_state.leader_keys == []
+    end
+
+    test "repeated space restarts leader when space is not bound at the current node" do
+      {:execute, {:leader_start, _node}, leader_state} = handle({32, 0})
+      {:execute, {:leader_progress, p_node}, p_state} = handle({?p, 0}, leader_state)
+      assert p_state.leader_node == p_node
+
+      {:execute, result, restarted} = handle({32, 0}, p_state)
+      assert is_list(result)
+      assert :leader_cancel in result
+      assert restarted.leader_keys == ["SPC"]
+      assert restarted.leader_node == leader_state.leader_node
     end
 
     test "which-key pagination keeps leader state" do
