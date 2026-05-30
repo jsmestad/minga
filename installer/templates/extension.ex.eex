@@ -6,6 +6,9 @@ defmodule <%= module %> do
   use Minga.Extension.Agent
 <% end %><%= if type == "editor" or type == "both" do %>
   use Minga.Extension.Editor
+<% end %><%= if type == "both" do %>
+  # Resolve option/3 ambiguity when both Agent and Editor surfaces are used.
+  import Minga.Extension.Editor, only: [option: 3]
 <% end %>
 <%= if type == "editor" or type == "both" do %>
   # ── Config options ──────────────────────────────────────────────────

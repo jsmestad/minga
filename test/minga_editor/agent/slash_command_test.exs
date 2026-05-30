@@ -419,72 +419,46 @@ defmodule MingaEditor.Agent.SlashCommandTest do
     end
   end
 
-  describe "dynamic command registration" do
-    alias MingaEditor.Agent.SlashCommand.Command
+  describe "dynamic commands from extension registry" do
+    alias Minga.Extension.Manifest
+    alias Minga.Extension.Registry, as: ExtRegistry
 
     setup do
-      # Clean up any dynamic commands left from previous tests
-      SlashCommand.unregister_commands(:test_ext_dynamic)
-      SlashCommand.unregister_commands(:test_ext_other)
+      # Register test extensions with slash_commands in their manifests.
+      # The Registry is already started by the application.
+      :ok = ExtRegistry.register(:test_ext_dynamic, "/tmp/test_ext", [])
+
+      ExtRegistry.update(:test_ext_dynamic,
+        manifest: %Manifest{
+          name: :test_ext_dynamic,
+          version: "0.1.0",
+          source: :path,
+          slash_commands: [
+            {:greet, "Say hello", command: "/usr/bin/echo"},
+            {:farewell, "Say goodbye", command: "/usr/bin/echo"}
+          ]
+        },
+        status: :running
+      )
 
       on_exit(fn ->
-        SlashCommand.unregister_commands(:test_ext_dynamic)
-        SlashCommand.unregister_commands(:test_ext_other)
+        ExtRegistry.unregister(:test_ext_dynamic)
+        ExtRegistry.unregister(:test_ext_other)
       end)
 
       :ok
     end
 
-    test "register_commands/2 adds commands to the registry" do
-      commands = [
-        %Command{name: "greet", description: "Say hello", execute: nil},
-        %Command{name: "farewell", description: "Say goodbye", execute: nil}
-      ]
-
-      assert :ok = SlashCommand.register_commands(:test_ext_dynamic, commands)
-
+    test "dynamic_commands/0 returns commands from extension manifests" do
       dynamic = SlashCommand.dynamic_commands()
       names = Enum.map(dynamic, & &1.name)
       assert "greet" in names
       assert "farewell" in names
     end
 
-    test "unregister_commands/1 removes all commands for an extension" do
-      commands = [
-        %Command{name: "temp_cmd", description: "Temporary", execute: nil}
-      ]
-
-      SlashCommand.register_commands(:test_ext_dynamic, commands)
-      assert Enum.any?(SlashCommand.dynamic_commands(), &(&1.name == "temp_cmd"))
-
-      SlashCommand.unregister_commands(:test_ext_dynamic)
-      refute Enum.any?(SlashCommand.dynamic_commands(), &(&1.name == "temp_cmd"))
-    end
-
-    test "unregister_commands/1 only removes commands for the specified extension" do
-      SlashCommand.register_commands(:test_ext_dynamic, [
-        %Command{name: "ext_a_cmd", description: "From ext A", execute: nil}
-      ])
-
-      SlashCommand.register_commands(:test_ext_other, [
-        %Command{name: "ext_b_cmd", description: "From ext B", execute: nil}
-      ])
-
-      SlashCommand.unregister_commands(:test_ext_dynamic)
-
-      dynamic = SlashCommand.dynamic_commands()
-      names = Enum.map(dynamic, & &1.name)
-      refute "ext_a_cmd" in names
-      assert "ext_b_cmd" in names
-    end
-
     test "dynamic commands appear in commands/0" do
-      SlashCommand.register_commands(:test_ext_dynamic, [
-        %Command{name: "dyn_in_list", description: "Dynamic in list", execute: nil}
-      ])
-
       names = SlashCommand.commands() |> Enum.map(& &1.name)
-      assert "dyn_in_list" in names
+      assert "greet" in names
 
       # Core commands are still present
       assert "help" in names
@@ -492,25 +466,45 @@ defmodule MingaEditor.Agent.SlashCommandTest do
     end
 
     test "dynamic commands appear in completions/1" do
-      SlashCommand.register_commands(:test_ext_dynamic, [
-        %Command{name: "dyntest", description: "Dynamic test", execute: nil}
-      ])
-
-      matches = SlashCommand.completions("dyn")
+      matches = SlashCommand.completions("gre")
       names = Enum.map(matches, & &1.name)
-      assert "dyntest" in names
+      assert "greet" in names
     end
 
     test "completions/1 filters dynamic commands by prefix" do
-      SlashCommand.register_commands(:test_ext_dynamic, [
-        %Command{name: "alpha_dyn", description: "Alpha", execute: nil},
-        %Command{name: "beta_dyn", description: "Beta", execute: nil}
-      ])
-
-      matches = SlashCommand.completions("alpha")
+      matches = SlashCommand.completions("fare")
       names = Enum.map(matches, & &1.name)
-      assert "alpha_dyn" in names
-      refute "beta_dyn" in names
+      assert "farewell" in names
+      refute "greet" in names
+    end
+
+    test "dynamic commands from multiple extensions are combined" do
+      :ok = ExtRegistry.register(:test_ext_other, "/tmp/test_ext_other", [])
+
+      ExtRegistry.update(:test_ext_other,
+        manifest: %Manifest{
+          name: :test_ext_other,
+          version: "0.1.0",
+          source: :path,
+          slash_commands: [{:ext_b_cmd, "From ext B", command: "/usr/bin/echo"}]
+        },
+        status: :running
+      )
+
+      dynamic = SlashCommand.dynamic_commands()
+      names = Enum.map(dynamic, & &1.name)
+      assert "greet" in names
+      assert "ext_b_cmd" in names
+    end
+
+    test "extensions without manifests are excluded" do
+      :ok = ExtRegistry.register(:test_ext_other, "/tmp/test_ext_other", [])
+      # No manifest set, so it stays nil
+
+      dynamic = SlashCommand.dynamic_commands()
+      names = Enum.map(dynamic, & &1.name)
+      # Only commands from test_ext_dynamic should appear
+      assert "greet" in names
     end
 
     test "dispatch routes unknown command to dynamic commands" do
@@ -519,44 +513,13 @@ defmodule MingaEditor.Agent.SlashCommandTest do
                SlashCommand.execute(mock_state(), "/nonexistent")
     end
 
-    test "cleanup removes dynamic commands and they disappear from listings" do
-      SlashCommand.register_commands(:test_ext_dynamic, [
-        %Command{name: "cleanup_test", description: "Will be cleaned", execute: nil}
-      ])
+    test "dynamic_commands/0 returns empty list when no extensions are registered" do
+      # Remove our test extension
+      ExtRegistry.unregister(:test_ext_dynamic)
 
-      assert Enum.any?(SlashCommand.commands(), &(&1.name == "cleanup_test"))
-
-      SlashCommand.unregister_commands(:test_ext_dynamic)
-
-      refute Enum.any?(SlashCommand.commands(), &(&1.name == "cleanup_test"))
-      refute Enum.any?(SlashCommand.completions("cleanup"), &(&1.name == "cleanup_test"))
-    end
-
-    test "registering same command name twice for same extension overwrites" do
-      SlashCommand.register_commands(:test_ext_dynamic, [
-        %Command{name: "overwrite_test", description: "Original", execute: nil}
-      ])
-
-      SlashCommand.register_commands(:test_ext_dynamic, [
-        %Command{name: "overwrite_test", description: "Updated", execute: nil}
-      ])
-
-      matching = Enum.filter(SlashCommand.dynamic_commands(), &(&1.name == "overwrite_test"))
-      assert length(matching) == 1
-      assert hd(matching).description == "Updated"
-    end
-
-    test "unregister_commands/1 is idempotent (no error on empty)" do
-      assert :ok = SlashCommand.unregister_commands(:nonexistent_extension)
-    end
-
-    test "register_commands/2 with empty list is a no-op" do
-      assert :ok = SlashCommand.register_commands(:test_ext_dynamic, [])
-
-      assert Enum.empty?(
-               Enum.filter(SlashCommand.dynamic_commands(), fn _ -> true end) --
-                 SlashCommand.dynamic_commands()
-             )
+      dynamic = SlashCommand.dynamic_commands()
+      # Should return empty (no extensions with slash commands)
+      refute Enum.any?(dynamic, &(&1.name == "greet"))
     end
   end
 end

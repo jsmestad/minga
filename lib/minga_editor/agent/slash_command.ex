@@ -1090,40 +1090,40 @@ defmodule MingaEditor.Agent.SlashCommand do
     MingaEditor.State.set_status(state, String.slice(first_line, 0, 80))
   end
 
-  # ── Dynamic command registration ────────────────────────────────────────────
+  # ── Dynamic commands from extensions ────────────────────────────────────────
 
-  @dynamic_table :minga_dynamic_slash_commands
-
-  @doc "Registers slash commands contributed by an extension."
-  @spec register_commands(atom(), [Command.t()]) :: :ok
-  def register_commands(extension_name, commands)
-      when is_atom(extension_name) and is_list(commands) do
-    table = ensure_table()
-    Enum.each(commands, fn cmd -> :ets.insert(table, {{extension_name, cmd.name}, cmd}) end)
-    :ok
-  end
-
-  @doc "Unregisters all slash commands contributed by an extension."
-  @spec unregister_commands(atom()) :: :ok
-  def unregister_commands(extension_name) when is_atom(extension_name) do
-    table = ensure_table()
-    :ets.match_delete(table, {{extension_name, :_}, :_})
-    :ok
-  end
-
-  @doc "Returns all dynamically registered commands."
+  @doc "Returns slash commands contributed by loaded extensions."
   @spec dynamic_commands() :: [Command.t()]
   def dynamic_commands do
-    table = ensure_table()
-    :ets.tab2list(table) |> Enum.map(fn {_key, cmd} -> cmd end)
+    extension_manifests()
+    |> Enum.flat_map(fn manifest -> manifest.slash_commands end)
+    |> Enum.map(&build_extension_command/1)
   end
 
-  @spec ensure_table() :: :ets.table()
-  defp ensure_table do
-    case :ets.whereis(@dynamic_table) do
-      :undefined -> :ets.new(@dynamic_table, [:named_table, :set, :public])
-      _ref -> @dynamic_table
+  @spec extension_manifests() :: [Minga.Extension.Manifest.t()]
+  defp extension_manifests do
+    case Process.whereis(Minga.Extension.Registry) do
+      nil ->
+        []
+
+      _pid ->
+        Minga.Extension.Registry.all()
+        |> Enum.map(fn {_name, entry} -> entry.manifest end)
+        |> Enum.reject(&is_nil/1)
     end
+  rescue
+    _ -> []
+  catch
+    :exit, _ -> []
+  end
+
+  @spec build_extension_command({atom(), String.t(), keyword()}) :: Command.t()
+  defp build_extension_command({cmd_name, description, opts}) do
+    %Command{
+      name: Atom.to_string(cmd_name),
+      description: description,
+      execute: Keyword.get(opts, :command)
+    }
   end
 
   # ── Dynamic command dispatch ───────────────────────────────────────────────
@@ -1141,8 +1141,9 @@ defmodule MingaEditor.Agent.SlashCommand do
   defp execute_dynamic_command(state, cmd, args) do
     command_path = cmd.execute
     trimmed_args = String.trim(args)
+    cmd_args = if trimmed_args == "", do: [], else: [trimmed_args]
 
-    case System.cmd("sh", ["-c", "#{command_path} #{trimmed_args}"], stderr_to_stdout: true) do
+    case System.cmd(command_path, cmd_args, stderr_to_stdout: true) do
       {output, 0} ->
         {:ok, emit_system_message(state, String.trim(output))}
 

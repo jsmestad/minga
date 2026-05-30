@@ -322,45 +322,14 @@ defmodule MingaAgent.Providers.Native do
     max_turns = Keyword.get(opts, :max_turns, config.max_turns)
     read_only? = Keyword.get(opts, :read_only?, false)
     config = disable_hooks_for_read_only(config, read_only?)
-    ext_components = collect_extension_agent_components()
-    config = merge_extension_hooks(config, ext_components.hooks, read_only?)
+    {config, ext_mcp_servers} = merge_extension_components(config, read_only?)
     max_cost = Keyword.get(opts, :max_cost, config.max_cost)
     llm_client = Keyword.get(opts, :llm_client, &ReqLLM.stream_text/3)
     hook_runner = Keyword.get(opts, :hook_runner, &CommandRunner.run_pre_tool_use/2)
     provider_pid = self()
 
     {fork_store, changeset} =
-      case project_view do
-        %ProjectView{} ->
-          {nil, nil}
-
-        _ ->
-          # Start a fork store for in-memory buffer isolation. Forks are created
-          # lazily when agent tools write to files that have open buffers.
-          # Not linked: fork store crash degrades gracefully (tools fall through
-          # to changeset or direct I/O) rather than killing the provider.
-          {:ok, fork_store} = GenServer.start(MingaAgent.BufferForkStore, :ok)
-          Process.monitor(fork_store)
-
-          changeset =
-            if Keyword.get(opts, :changeset, false) do
-              case MingaAgent.Changeset.create(project_root) do
-                {:ok, cs} ->
-                  Process.monitor(cs)
-                  cs
-
-                {:error, reason} ->
-                  Minga.Log.warning(
-                    :agent,
-                    "[Agent.Native] changeset creation failed: #{inspect(reason)}"
-                  )
-
-                  nil
-              end
-            end
-
-          {fork_store, changeset}
-      end
+      init_fork_store_and_changeset(project_view, project_root, opts)
 
     base_tools =
       Keyword.get(opts, :tools) ||
@@ -378,8 +347,7 @@ defmodule MingaAgent.Providers.Native do
     active_skills = load_active_skills(project_root, Keyword.get(opts, :active_skill_names, []))
     internal_tools = if read_only?, do: [], else: build_internal_tools(provider_pid)
 
-    ext_mcp = if read_only?, do: [], else: ext_components.mcp_servers
-    mcp_configs = configured_mcp_servers(opts, config, subscriber, read_only?) ++ ext_mcp
+    mcp_configs = configured_mcp_servers(opts, config, subscriber, read_only?) ++ ext_mcp_servers
 
     mcp_client_opts = mcp_client_opts(opts)
     mcp_enabled_override = Keyword.get(opts, :mcp_enabled?, nil)
@@ -438,13 +406,6 @@ defmodule MingaAgent.Providers.Native do
       tool_workers: %{}
     }
 
-    if ext_components.skills != [] do
-      Minga.Log.info(
-        :agent,
-        "[Agent.Native] extension skills available: #{Enum.join(ext_components.skills, ", ")}"
-      )
-    end
-
     Minga.Log.info(:agent, "[Agent.Native] started with model=#{model} root=#{project_root}")
 
     {:ok, state}
@@ -456,12 +417,53 @@ defmodule MingaAgent.Providers.Native do
 
   defp disable_hooks_for_read_only(%AgentConfig{} = config, false), do: config
 
-  @spec merge_extension_hooks(AgentConfig.t(), [MingaAgent.Hooks.Hook.t()], boolean()) ::
-          AgentConfig.t()
-  defp merge_extension_hooks(config, _hooks, true), do: config
+  @spec merge_extension_components(AgentConfig.t(), boolean()) ::
+          {AgentConfig.t(), [MCPServerConfig.t()]}
+  defp merge_extension_components(config, true), do: {config, []}
 
-  defp merge_extension_hooks(config, hooks, false),
-    do: %{config | agent_hooks: config.agent_hooks ++ hooks}
+  defp merge_extension_components(config, false) do
+    ext = collect_extension_agent_components()
+    config = %{config | agent_hooks: config.agent_hooks ++ ext.hooks}
+
+    if ext.skills != [] do
+      Minga.Log.info(
+        :agent,
+        "[Agent.Native] extension skills available: #{Enum.join(ext.skills, ", ")}"
+      )
+    end
+
+    {config, ext.mcp_servers}
+  end
+
+  @spec init_fork_store_and_changeset(ProjectView.t() | nil, String.t(), keyword()) ::
+          {pid() | nil, pid() | nil}
+  defp init_fork_store_and_changeset(%ProjectView{}, _project_root, _opts), do: {nil, nil}
+
+  defp init_fork_store_and_changeset(_project_view, project_root, opts) do
+    {:ok, fork_store} = GenServer.start(MingaAgent.BufferForkStore, :ok)
+    Process.monitor(fork_store)
+    changeset = maybe_create_changeset(project_root, opts)
+    {fork_store, changeset}
+  end
+
+  @spec maybe_create_changeset(String.t(), keyword()) :: pid() | nil
+  defp maybe_create_changeset(project_root, opts) do
+    if Keyword.get(opts, :changeset, false) do
+      case MingaAgent.Changeset.create(project_root) do
+        {:ok, cs} ->
+          Process.monitor(cs)
+          cs
+
+        {:error, reason} ->
+          Minga.Log.warning(
+            :agent,
+            "[Agent.Native] changeset creation failed: #{inspect(reason)}"
+          )
+
+          nil
+      end
+    end
+  end
 
   @spec filter_base_tools_for_read_only([ReqLLM.Tool.t()], boolean()) :: [ReqLLM.Tool.t()]
   defp filter_base_tools_for_read_only(base_tools, true),
