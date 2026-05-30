@@ -543,6 +543,39 @@ defmodule Minga.Extension.Lazy do
           ExtSupervisor.start_opts()
         ) :: :ok
   defp start_deferred_extension(supervisor, registry, name, entry, opts) do
+    case ExtRegistry.get(registry, name) do
+      {:ok, %{status: :stopped}} ->
+        do_start_deferred(supervisor, registry, name, entry, opts)
+
+      {:ok, %{status: status}} ->
+        Minga.Log.debug(
+          :config,
+          "Extension #{name} deferred load skipped (status: #{status})"
+        )
+
+      :error ->
+        Minga.Log.debug(:config, "Extension #{name} deferred load skipped (unregistered)")
+    end
+
+    :ok
+  rescue
+    e ->
+      Minga.Log.warning(
+        :config,
+        "Extension #{name} deferred load crashed: #{Exception.message(e)}"
+      )
+
+      :ok
+  end
+
+  @spec do_start_deferred(
+          GenServer.server(),
+          GenServer.server(),
+          atom(),
+          ExtRegistry.entry(),
+          ExtSupervisor.start_opts()
+        ) :: :ok
+  defp do_start_deferred(supervisor, registry, name, entry, opts) do
     case ExtSupervisor.start_extension(supervisor, registry, name, entry, opts) do
       {:ok, _pid} ->
         Minga.Log.info(:config, "Extension #{name} deferred load complete")
@@ -555,13 +588,5 @@ defmodule Minga.Extension.Lazy do
     end
 
     :ok
-  rescue
-    e ->
-      Minga.Log.warning(
-        :config,
-        "Extension #{name} deferred load crashed: #{Exception.message(e)}"
-      )
-
-      :ok
   end
 end
