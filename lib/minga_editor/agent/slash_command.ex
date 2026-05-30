@@ -162,7 +162,6 @@ defmodule MingaEditor.Agent.SlashCommand do
     state
     |> available_model_entries()
     |> filter_model_entries(prefix)
-    |> Enum.take(20)
     |> Enum.map(&model_completion_candidate/1)
   end
 

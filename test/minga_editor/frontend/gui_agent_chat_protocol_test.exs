@@ -52,6 +52,18 @@ defmodule MingaEditor.Frontend.GUIAgentChatProtocolTest do
     unwrap_message_frames(rest, remaining - 1, [message | acc])
   end
 
+  defp parse_prompt_candidates(<<>>, 0, acc), do: Enum.reverse(acc)
+
+  defp parse_prompt_candidates(
+         <<name_len::16, name::binary-size(name_len), desc_len::16, _desc::binary-size(desc_len),
+           rest::binary>>,
+         remaining,
+         acc
+       )
+       when remaining > 0 do
+    parse_prompt_candidates(rest, remaining - 1, [name | acc])
+  end
+
   describe "decode_gui_action for agent_tool_toggle" do
     test "decodes a valid agent_tool_toggle action" do
       assert {:ok, {:agent_tool_toggle, 7}} ==
@@ -74,6 +86,41 @@ defmodule MingaEditor.Frontend.GUIAgentChatProtocolTest do
 
     test "returns error for empty payload" do
       assert :error == ProtocolGUI.decode_gui_action(0x15, <<>>)
+    end
+  end
+
+  describe "prompt completion encoding" do
+    test "encodes all prompt completion candidates" do
+      candidates =
+        for index <- 1..25 do
+          name = "candidate-#{Integer.to_string(index) |> String.pad_leading(2, "0")}."
+          {name, "desc #{index}"}
+        end
+
+      data = %{
+        visible: true,
+        messages: [],
+        status: :idle,
+        model: "test",
+        prompt: "",
+        prompt_completion: %{
+          type: 1,
+          selected: 0,
+          anchor_line: 0,
+          anchor_col: 0,
+          candidates: candidates
+        },
+        pending_approval: nil
+      }
+
+      binary = ProtocolGUI.encode_gui_agent_chat(data)
+      completion_payload = extract_section(binary, 0x07)
+
+      <<1::8, _type::8, _selected::8, _line::16, _col::16, count::8, rest::binary>> =
+        completion_payload
+
+      assert count == 25
+      assert parse_prompt_candidates(rest, count, []) == Enum.map(candidates, &elem(&1, 0))
     end
   end
 

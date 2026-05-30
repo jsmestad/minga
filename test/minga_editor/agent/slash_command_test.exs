@@ -168,6 +168,29 @@ defmodule MingaEditor.Agent.SlashCommandTest do
         Minga.Config.set_option(:agent_models, [])
       end
     end
+
+    test "renders all configured model entries when many are available" do
+      models =
+        1..25
+        |> Enum.map(fn index ->
+          index
+          |> Integer.to_string()
+          |> String.pad_leading(2, "0")
+          |> then(&"zz-#{&1}")
+        end)
+
+      Minga.Config.set_option(:agent_models, models)
+
+      try do
+        labels =
+          SlashCommand.completion_candidates(mock_state(), "model zz") |> Enum.map(& &1.label)
+
+        assert length(labels) == 25
+        assert MapSet.new(labels) == MapSet.new(models)
+      after
+        Minga.Config.set_option(:agent_models, [])
+      end
+    end
   end
 
   describe "execute/2" do

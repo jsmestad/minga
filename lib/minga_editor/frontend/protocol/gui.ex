@@ -2802,10 +2802,11 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     type_byte = if type == :slash, do: 1, else: 0
     anchor_line = comp[:anchor_line] || 0
     anchor_col = comp[:anchor_col] || 0
+    candidate_count = min(length(candidates), 255)
 
     candidate_bins =
       candidates
-      |> Enum.take(10)
+      |> Enum.take(candidate_count)
       |> Enum.map(fn
         {name, desc} ->
           n = :erlang.iolist_to_binary([name])
@@ -2819,7 +2820,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
     IO.iodata_to_binary([
       <<1::8, type_byte::8, min(selected, 255)::8, anchor_line::16, anchor_col::16,
-        min(length(candidates), 10)::8>>
+        candidate_count::8>>
       | candidate_bins
     ])
   end
