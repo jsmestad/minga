@@ -344,28 +344,94 @@ defmodule Minga.Extension.Lazy do
     schema = command_schema(module)
 
     Enum.reduce_while(schema, :ok, fn {cmd_name, description, cmd_opts}, :ok ->
-      requires_buffer = Keyword.get(cmd_opts, :requires_buffer, false)
-
-      stub_cmd = %Command{
-        name: cmd_name,
-        description: description,
-        requires_buffer: requires_buffer,
-        execute: stub_execute_fn(supervisor, registry, name, cmd_name, cmd_registry, opts)
-      }
-
-      case Command.Registry.register_command(cmd_registry, {:extension, name}, stub_cmd) do
+      case validate_command_spec(name, cmd_name, cmd_opts) do
         :ok ->
-          {:cont, :ok}
-
-        {:error, reason} ->
-          Minga.Log.warning(
-            :config,
-            "Extension #{name} stub command #{cmd_name} rejected: #{inspect(reason)}"
+          register_single_stub_command(
+            supervisor,
+            registry,
+            name,
+            cmd_name,
+            description,
+            cmd_opts,
+            cmd_registry,
+            opts
           )
 
-          {:halt, {:error, {:stub_command_rejected, cmd_name, reason}}}
+        {:error, _reason} = error ->
+          {:halt, error}
       end
     end)
+  end
+
+  @spec validate_command_spec(atom(), atom(), keyword()) :: :ok | {:error, term()}
+  defp validate_command_spec(ext_name, cmd_name, cmd_opts) do
+    case Keyword.fetch(cmd_opts, :execute) do
+      {:ok, {mod, fun}} when is_atom(mod) and is_atom(fun) ->
+        :ok
+
+      {:ok, invalid} ->
+        reason = {:invalid_execute, cmd_name, invalid}
+
+        Minga.Log.warning(
+          :config,
+          "Extension #{ext_name} command #{cmd_name} has invalid :execute: #{inspect(invalid)}"
+        )
+
+        {:error, reason}
+
+      :error ->
+        reason = {:missing_execute, cmd_name}
+
+        Minga.Log.warning(
+          :config,
+          "Extension #{ext_name} command #{cmd_name} is missing required :execute option"
+        )
+
+        {:error, reason}
+    end
+  end
+
+  @spec register_single_stub_command(
+          GenServer.server(),
+          GenServer.server(),
+          atom(),
+          atom(),
+          String.t(),
+          keyword(),
+          GenServer.server(),
+          ExtSupervisor.start_opts()
+        ) :: {:cont, :ok} | {:halt, {:error, term()}}
+  defp register_single_stub_command(
+         supervisor,
+         registry,
+         name,
+         cmd_name,
+         description,
+         cmd_opts,
+         cmd_registry,
+         opts
+       ) do
+    requires_buffer = Keyword.get(cmd_opts, :requires_buffer, false)
+
+    stub_cmd = %Command{
+      name: cmd_name,
+      description: description,
+      requires_buffer: requires_buffer,
+      execute: stub_execute_fn(supervisor, registry, name, cmd_name, cmd_registry, opts)
+    }
+
+    case Command.Registry.register_command(cmd_registry, {:extension, name}, stub_cmd) do
+      :ok ->
+        {:cont, :ok}
+
+      {:error, reason} ->
+        Minga.Log.warning(
+          :config,
+          "Extension #{name} stub command #{cmd_name} rejected: #{inspect(reason)}"
+        )
+
+        {:halt, {:error, {:stub_command_rejected, cmd_name, reason}}}
+    end
   end
 
   @spec stub_execute_fn(
