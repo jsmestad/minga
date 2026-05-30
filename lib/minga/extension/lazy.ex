@@ -179,7 +179,7 @@ defmodule Minga.Extension.Lazy do
 
     Minga.Log.info(:config, "Extension #{name} autoloading on first use")
 
-    cleanup_contributions(name, cmd_registry, keymap, opts)
+    ExtSupervisor.cleanup_extension_contributions(name, cmd_registry, keymap, opts)
     ExtRegistry.update(registry, name, status: :stopped)
 
     case ExtSupervisor.start_extension(supervisor, registry, name, entry, opts) do
@@ -218,25 +218,6 @@ defmodule Minga.Extension.Lazy do
   defp canonical_registry_id({:global, reg_name}), do: {:global_name, reg_name}
   defp canonical_registry_id({:via, module, reg_name}), do: {:via, module, reg_name}
   defp canonical_registry_id(registry), do: registry
-
-  @spec cleanup_contributions(
-          atom(),
-          GenServer.server(),
-          GenServer.server(),
-          ExtSupervisor.start_opts()
-        ) :: :ok
-  defp cleanup_contributions(name, cmd_registry, keymap, opts) do
-    source = {:extension, name}
-
-    cleanup_opts =
-      [command_registry: cmd_registry, keymap: keymap]
-      |> Keyword.merge(Keyword.take(opts, [:callbacks]))
-
-    case Minga.Extension.ContributionCleanup.unregister_source(source, cleanup_opts) do
-      :ok -> :ok
-      {:error, _failures} -> :ok
-    end
-  end
 
   @spec compile_extension(ExtRegistry.entry()) :: {:ok, module()} | {:error, term()}
   defp compile_extension(%{source_type: :path, path: path}) when is_binary(path) do
@@ -460,7 +441,7 @@ defmodule Minga.Extension.Lazy do
   def schedule_deferred_loads(_supervisor, _registry, [], _opts), do: :ok
 
   def schedule_deferred_loads(supervisor, registry, deferred_entries, opts) do
-    spawn(fn ->
+    Task.start(fn ->
       receive do
       after
         @deferred_load_delay_ms -> :ok

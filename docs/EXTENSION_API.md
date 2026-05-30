@@ -112,8 +112,8 @@ end
 | `:eager` (default) | At boot, on the startup critical path | First-paint UI: modeline segments, themes, dashboard. Extensions that must be ready before the first frame. |
 | `:deferred` | In the background, shortly after first paint | Extensions that should be ready soon but don't need to block the first frame. |
 | `{:on_command, [atoms]}` | When any listed command is first invoked | Most extensions. Commands and keybindings appear in which-key at boot; the extension loads on first use. |
-| `{:on_filetype, [atoms]}` | When a buffer with a matching filetype opens | Language-specific extensions (org-mode, markdown tools). |
-| `{:on_key, [{mode, key_string}]}` | When a matching key sequence is pressed | Extensions activated by a specific key chord. |
+| `{:on_filetype, [atoms]}` | When a buffer with a matching filetype opens | Language-specific extensions (org-mode, markdown tools). *Reserved; stub commands autoload on invocation but filetype-open events do not yet trigger autoload automatically.* |
+| `{:on_key, [{mode, key_string}]}` | When a matching key sequence is pressed | Extensions activated by a specific key chord. *Reserved; stub commands autoload on invocation but key-press events do not yet trigger autoload automatically.* |
 
 **How it works:**
 

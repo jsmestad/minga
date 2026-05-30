@@ -155,27 +155,12 @@ defmodule Minga.Extension.Supervisor do
 
     case load_policy do
       :eager ->
-        case start_extension(supervisor, registry, name, entry, opts) do
-          {:ok, _pid} -> {failures, deferred}
-          {:error, reason} -> {failures ++ [%{extension: name, reason: reason}], deferred}
-        end
+        start_eager(supervisor, registry, name, entry, opts, failures, deferred)
 
       :deferred ->
         {failures, [{name, entry} | deferred]}
 
-      {:on_command, _} ->
-        case register_lazy_stubs(supervisor, registry, name, entry, opts) do
-          :ok -> {failures, deferred}
-          {:error, reason} -> {failures ++ [%{extension: name, reason: reason}], deferred}
-        end
-
-      {:on_filetype, _} ->
-        case register_lazy_stubs(supervisor, registry, name, entry, opts) do
-          :ok -> {failures, deferred}
-          {:error, reason} -> {failures ++ [%{extension: name, reason: reason}], deferred}
-        end
-
-      {:on_key, _} ->
+      {trigger, _} when trigger in [:on_command, :on_filetype, :on_key] ->
         case register_lazy_stubs(supervisor, registry, name, entry, opts) do
           :ok -> {failures, deferred}
           {:error, reason} -> {failures ++ [%{extension: name, reason: reason}], deferred}
@@ -187,10 +172,7 @@ defmodule Minga.Extension.Supervisor do
           "Extension #{name} has unknown load_policy: #{inspect(other)}, loading eagerly"
         )
 
-        case start_extension(supervisor, registry, name, entry, opts) do
-          {:ok, _pid} -> {failures, deferred}
-          {:error, reason} -> {failures ++ [%{extension: name, reason: reason}], deferred}
-        end
+        start_eager(supervisor, registry, name, entry, opts, failures, deferred)
     end
   end
 
@@ -207,6 +189,22 @@ defmodule Minga.Extension.Supervisor do
 
   defp register_lazy_stubs(supervisor, registry, name, entry, opts) do
     Lazy.register_stubs(supervisor, registry, name, entry, opts)
+  end
+
+  @spec start_eager(
+          GenServer.server(),
+          GenServer.server(),
+          atom(),
+          ExtRegistry.entry(),
+          start_opts(),
+          [start_failure()],
+          [{atom(), ExtRegistry.entry()}]
+        ) :: {[start_failure()], [{atom(), ExtRegistry.entry()}]}
+  defp start_eager(supervisor, registry, name, entry, opts, failures, deferred) do
+    case start_extension(supervisor, registry, name, entry, opts) do
+      {:ok, _pid} -> {failures, deferred}
+      {:error, reason} -> {failures ++ [%{extension: name, reason: reason}], deferred}
+    end
   end
 
   @doc """
@@ -1551,6 +1549,7 @@ defmodule Minga.Extension.Supervisor do
     end
   end
 
+  @doc false
   @spec cleanup_extension_contributions(
           atom(),
           GenServer.server(),
@@ -1558,7 +1557,7 @@ defmodule Minga.Extension.Supervisor do
           start_opts()
         ) ::
           :ok | {:error, [map()]}
-  defp cleanup_extension_contributions(name, cmd_registry, keymap, opts) do
+  def cleanup_extension_contributions(name, cmd_registry, keymap, opts) do
     source = {:extension, name}
 
     cleanup_opts =

@@ -385,10 +385,12 @@ defmodule Minga.Extension do
   * `{:on_command, [:cmd1, :cmd2]}` — loaded when any listed command
     is first invoked. Commands and keybindings are registered as stubs
     at boot; the extension loads transparently on first use.
-  * `{:on_filetype, [:elixir, :rust]}` — loaded when a buffer with a
-    matching filetype opens.
-  * `{:on_key, [normal: "SPC m"]}` — loaded when a matching key
-    sequence is pressed.
+  * `{:on_filetype, [:elixir, :rust]}` — reserved for future use.
+    Registers stubs like `on_command` but filetype-open events do
+    not yet trigger autoload automatically.
+  * `{:on_key, [normal: "SPC m"]}` — reserved for future use.
+    Registers stubs like `on_command` but key-press events do not
+    yet trigger autoload automatically.
 
   ## Examples
 
