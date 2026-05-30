@@ -76,7 +76,23 @@ defmodule Minga.Extension do
   """
 
   @typedoc "Extension runtime status."
-  @type extension_status :: :running | :stopped | :crashed | :load_error
+  @type extension_status :: :running | :stopped | :crashed | :load_error | :stub
+
+  @typedoc """
+  When an extension should be loaded.
+
+  * `:eager` — compile + init at boot (first-paint UI: segments, dashboard, theme).
+  * `:deferred` — load in the background shortly after first paint.
+  * `{:on_command, [atom()]}` — autoload when any listed command is first invoked.
+  * `{:on_filetype, [atom()]}` — autoload when a buffer with a matching filetype opens.
+  * `{:on_key, [{mode, key_string}]}` — autoload when a matching key sequence is pressed.
+  """
+  @type load_policy ::
+          :eager
+          | :deferred
+          | {:on_command, [atom()]}
+          | {:on_filetype, [atom()]}
+          | {:on_key, [{atom(), String.t()}]}
 
   @typedoc "Extension metadata and runtime info. See `Minga.Extension.Entry`."
   @type extension_info :: Minga.Extension.Entry.t()
@@ -222,6 +238,7 @@ defmodule Minga.Extension do
       Module.register_attribute(__MODULE__, :__extension_keybinds__, accumulate: true)
       Module.register_attribute(__MODULE__, :__extension_modeline_segments__, accumulate: true)
       Module.register_attribute(__MODULE__, :__extension_capabilities__, accumulate: true)
+      Module.put_attribute(__MODULE__, :__extension_load_policy__, :eager)
       @before_compile Minga.Extension
 
       @doc false
@@ -245,7 +262,8 @@ defmodule Minga.Extension do
           keybind: 5,
           modeline_segment: 2,
           modeline_segment: 3,
-          capability: 2
+          capability: 2,
+          load_policy: 1
         ]
     end
   end
@@ -354,6 +372,38 @@ defmodule Minga.Extension do
   end
 
   @doc """
+  Declares when this extension should be loaded.
+
+  Extensions default to `:eager` (loaded at boot). Use this macro to
+  defer loading until the extension is actually needed.
+
+  ## Policies
+
+  * `:eager` — compile + init at boot. Required for extensions that
+    contribute first-paint UI (modeline segments, themes, dashboard).
+  * `:deferred` — loaded in the background shortly after first paint.
+  * `{:on_command, [:cmd1, :cmd2]}` — loaded when any listed command
+    is first invoked. Commands and keybindings are registered as stubs
+    at boot; the extension loads transparently on first use.
+  * `{:on_filetype, [:elixir, :rust]}` — reserved for future use.
+    Registers stubs like `on_command` but filetype-open events do
+    not yet trigger autoload automatically.
+  * `{:on_key, [normal: "SPC m"]}` — reserved for future use.
+    Registers stubs like `on_command` but key-press events do not
+    yet trigger autoload automatically.
+
+  ## Examples
+
+      load_policy :deferred
+      load_policy {:on_command, [:toggle_board]}
+  """
+  defmacro load_policy(policy) do
+    quote do
+      @__extension_load_policy__ unquote(policy)
+    end
+  end
+
+  @doc """
   Declares a keybinding this extension provides.
 
   Accumulated at compile time and exposed via `__keybind_schema__/0`.
@@ -381,17 +431,8 @@ defmodule Minga.Extension do
 
   @doc false
   defmacro __before_compile__(env) do
-    options = Module.get_attribute(env.module, :__extension_options__) || []
-    commands = Module.get_attribute(env.module, :__extension_commands__) || []
-    keybinds = Module.get_attribute(env.module, :__extension_keybinds__) || []
-    modeline_segments = Module.get_attribute(env.module, :__extension_modeline_segments__) || []
-    capabilities = Module.get_attribute(env.module, :__extension_capabilities__) || []
-    # Accumulated attributes are in reverse order; restore declaration order
-    options = Enum.reverse(options)
-    commands = Enum.reverse(commands)
-    keybinds = Enum.reverse(keybinds)
-    modeline_segments = Enum.reverse(modeline_segments)
-    capabilities = Enum.reverse(capabilities)
+    {options, commands, keybinds, modeline_segments, capabilities, load_policy} =
+      read_extension_attributes(env.module)
 
     quote do
       @doc false
@@ -413,6 +454,24 @@ defmodule Minga.Extension do
       @doc false
       @spec __capability_schema__() :: [Minga.Extension.capability_spec()]
       def __capability_schema__, do: unquote(Macro.escape(capabilities))
+
+      @doc false
+      @spec __load_policy__() :: Minga.Extension.load_policy()
+      def __load_policy__, do: unquote(Macro.escape(load_policy))
     end
+  end
+
+  @spec read_extension_attributes(module()) :: {list(), list(), list(), list(), list(), term()}
+  defp read_extension_attributes(mod) do
+    options = mod |> Module.get_attribute(:__extension_options__, []) |> Enum.reverse()
+    commands = mod |> Module.get_attribute(:__extension_commands__, []) |> Enum.reverse()
+    keybinds = mod |> Module.get_attribute(:__extension_keybinds__, []) |> Enum.reverse()
+
+    modeline_segments =
+      mod |> Module.get_attribute(:__extension_modeline_segments__, []) |> Enum.reverse()
+
+    capabilities = mod |> Module.get_attribute(:__extension_capabilities__, []) |> Enum.reverse()
+    load_policy = Module.get_attribute(mod, :__extension_load_policy__) || :eager
+    {options, commands, keybinds, modeline_segments, capabilities, load_policy}
   end
 end

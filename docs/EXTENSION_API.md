@@ -80,6 +80,70 @@ Stop, failed start, and reload all run source-owned cleanup. Cleanup families ar
 
 Reload is `stop -> cleanup -> load -> manifest -> options -> init -> child start -> DSL registration`. If stop cleanup reports an error, reload reports the error instead of pretending the extension restarted cleanly.
 
+### Load Policies
+
+By default, every extension loads eagerly at boot: compile, init, start child process, register contributions. This is correct for extensions that contribute first-paint UI (modeline segments, themes, dashboard widgets), but it means every installed extension adds to startup time, even ones the user rarely invokes.
+
+The `load_policy` macro lets an extension declare when it should load. Minga registers lightweight stub commands and keybindings at boot without calling `init/1` or starting the child process. The first time a stub is triggered, the extension loads fully and the real handler takes over, all transparently within the same command dispatch.
+
+```elixir
+defmodule MingaBoard do
+  use Minga.Extension
+
+  # Load only when the user invokes :toggle_board
+  load_policy {:on_command, [:toggle_board]}
+
+  command :toggle_board, "Toggle The Board view",
+    requires_buffer: false,
+    execute: {MingaBoard.Commands, :toggle}
+
+  keybind :normal, "SPC t b", :toggle_board, "Toggle The Board"
+
+  @impl true
+  def name, do: :minga_board
+  # ...
+end
+```
+
+**Available policies:**
+
+| Policy | When it loads | Use for |
+|--------|-------------|---------|
+| `:eager` (default) | At boot, on the startup critical path | First-paint UI: modeline segments, themes, dashboard. Extensions that must be ready before the first frame. |
+| `:deferred` | In the background, shortly after first paint | Extensions that should be ready soon but don't need to block the first frame. |
+| `{:on_command, [atoms]}` | When any listed command is first invoked | Most extensions. Commands and keybindings appear in which-key at boot; the extension loads on first use. |
+| `{:on_filetype, [atoms]}` | When a buffer with a matching filetype opens | Language-specific extensions (org-mode, markdown tools). *Reserved; stub commands autoload on invocation but filetype-open events do not yet trigger autoload automatically.* |
+| `{:on_key, [{mode, key_string}]}` | When a matching key sequence is pressed | Extensions activated by a specific key chord. *Reserved; stub commands autoload on invocation but key-press events do not yet trigger autoload automatically.* |
+
+**How it works:**
+
+1. At boot, Minga compiles the extension (via the compile cache, so this is fast for unchanged sources) and reads its schema callbacks (`__command_schema__/0`, `__keybind_schema__/0`, etc.).
+2. For non-eager extensions, Minga registers stub commands whose execute function triggers a synchronous autoload, then re-dispatches the command. Keybindings are registered normally (they reference command names, so the autoload happens via the stub command).
+3. `init/1` and `child_spec/1` are NOT called until the trigger fires.
+4. On first trigger: init runs, child starts, stub contributions are replaced with real handlers, and the original command executes. The user sees no difference besides first-invocation latency.
+
+**What must stay eager:**
+
+Extensions that contribute modeline segments (`modeline_segment/2`) or other first-paint UI must use `:eager`. If a lazy extension declared a modeline segment, the segment would be missing from the first frame and pop in when the extension loads, violating the "no flash of missing-then-appearing UI" guarantee. Minga does not enforce this at compile time, but the visual result of getting it wrong is obvious.
+
+**Setting load policy from config:**
+
+Users can also set the load policy from their config declaration, overriding the extension module's default:
+
+```elixir
+# In config.exs: make a normally-eager extension lazy
+extension :my_ext, path: "~/.config/minga/extensions/my_ext",
+  load_policy: {:on_command, [:my_cmd]}
+```
+
+The config `load_policy:` option takes precedence over the module's `load_policy` macro. This lets users tune loading behavior without forking the extension.
+
+**Tradeoffs:**
+
+- Lazy extensions still compile at boot (via the compile cache), so the BEAM loads their modules. The savings come from skipping `init/1` and the child process tree.
+- First-trigger latency includes init time. For most extensions this is sub-millisecond. Extensions with expensive init (network calls, large file reads) should consider a `:deferred` policy instead, which loads in the background after first paint.
+- An extension with a deliberate runtime error in `init/1` or a command handler will register its commands/keybindings normally at boot. The error surfaces only when the extension is first triggered, which is the intended behavior.
+
 ### Manifest and capabilities
 
 Use the normal contribution macros to make declarations visible before runtime side effects run:

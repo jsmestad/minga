@@ -22,7 +22,8 @@ defmodule Minga.Extension.Manifest do
     commands: [],
     keybindings: [],
     modeline_segments: [],
-    capabilities: []
+    capabilities: [],
+    load_policy: :eager
   ]
 
   @type t :: %__MODULE__{
@@ -33,7 +34,8 @@ defmodule Minga.Extension.Manifest do
           commands: [Extension.command_spec()],
           keybindings: [Extension.keybind_spec()],
           modeline_segments: [Extension.modeline_segment_spec()],
-          capabilities: capabilities()
+          capabilities: capabilities(),
+          load_policy: Extension.load_policy()
         }
 
   @doc """
@@ -54,7 +56,8 @@ defmodule Minga.Extension.Manifest do
       commands: safe_schema(module, :__command_schema__),
       keybindings: safe_schema(module, :__keybind_schema__),
       modeline_segments: safe_schema(module, :__modeline_segment_schema__),
-      capabilities: safe_capabilities(module)
+      capabilities: safe_capabilities(module),
+      load_policy: safe_load_policy(module)
     }
   end
 
@@ -73,5 +76,12 @@ defmodule Minga.Extension.Manifest do
     if function_exported?(module, :__capability_schema__, 0),
       do: module.__capability_schema__(),
       else: []
+  end
+
+  @spec safe_load_policy(module()) :: Extension.load_policy()
+  defp safe_load_policy(module) do
+    if function_exported?(module, :__load_policy__, 0),
+      do: module.__load_policy__(),
+      else: :eager
   end
 end

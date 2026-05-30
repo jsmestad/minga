@@ -428,7 +428,9 @@ defmodule Minga.Config.Loader do
     end
 
     if Application.get_env(:minga, :load_board_extension, true) do
-      ExtRegistry.register(:minga_board, bundled_extension_path("board"), [])
+      ExtRegistry.register(:minga_board, bundled_extension_path("board"),
+        load_policy: {:on_command, [:toggle_board]}
+      )
     end
 
     :ok
