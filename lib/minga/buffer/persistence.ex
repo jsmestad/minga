@@ -20,9 +20,18 @@ defmodule Minga.Buffer.Persistence do
 
   def load_content(storage, file_path, _initial_content) do
     case read_content(storage, file_path) do
-      {:ok, text} -> {:ok, text, file_path, file_metadata(storage, file_path)}
-      {:error, :enoent} -> {:ok, "", file_path, {nil, nil}}
-      {:error, reason} -> {:error, reason}
+      {:ok, text} ->
+        if String.valid?(text) do
+          {:ok, text, file_path, file_metadata(storage, file_path)}
+        else
+          {:error, :binary_file}
+        end
+
+      {:error, :enoent} ->
+        {:ok, "", file_path, {nil, nil}}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 

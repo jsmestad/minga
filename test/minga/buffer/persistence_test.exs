@@ -52,6 +52,20 @@ defmodule Minga.Buffer.PersistenceTest do
     assert Persistence.changed_since_saved?(state, mtime, size) == true
   end
 
+  test "load_content rejects binary (non-UTF-8) files", %{tmp_dir: tmp_dir} do
+    path = Path.join(tmp_dir, "image.png")
+    File.write!(path, <<137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0>>)
+
+    assert Persistence.load_content(:local, path, "") == {:error, :binary_file}
+  end
+
+  test "load_content accepts valid UTF-8 files", %{tmp_dir: tmp_dir} do
+    path = Path.join(tmp_dir, "valid.txt")
+    File.write!(path, "hello 🌍")
+
+    assert {:ok, "hello 🌍", ^path, {_mtime, _size}} = Persistence.load_content(:local, path, "")
+  end
+
   defp saved_state(path, content, mtime, size) do
     %BufState{
       document: Document.new(content),

@@ -1459,8 +1459,14 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
       nil ->
         case Commands.start_buffer(abs_path, EditorState.options_server(state)) do
-          {:ok, pid} -> register_buffer_in_active_window(state, pid, abs_path)
-          {:error, _reason} -> EditorState.set_status(state, "Could not open #{abs_path}")
+          {:ok, pid} ->
+            register_buffer_in_active_window(state, pid, abs_path)
+
+          {:error, :binary_file} ->
+            EditorState.set_status(state, "Cannot open binary file: #{Path.basename(abs_path)}")
+
+          {:error, _reason} ->
+            EditorState.set_status(state, "Could not open #{abs_path}")
         end
     end
   end
