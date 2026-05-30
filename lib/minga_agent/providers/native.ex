@@ -351,6 +351,8 @@ defmodule MingaAgent.Providers.Native do
       configured_mcp_servers(opts, config, subscriber, read_only?) ++
         filter_ext_mcp_servers(ext_mcp_servers, opts, read_only?)
 
+    mcp_configs = deduplicate_mcp_configs(mcp_configs)
+
     mcp_client_opts = mcp_client_opts(opts)
     mcp_enabled_override = Keyword.get(opts, :mcp_enabled?, nil)
     mcp_registry = mcp_registry_for(mcp_configs)
@@ -436,6 +438,21 @@ defmodule MingaAgent.Providers.Native do
 
   defp filter_ext_mcp_servers(servers, opts, false) do
     if mcp_extension_enabled?(opts), do: servers, else: []
+  end
+
+  @spec deduplicate_mcp_configs([MCPServerConfig.t()]) :: [MCPServerConfig.t()]
+  defp deduplicate_mcp_configs(configs) do
+    {deduped, _seen} =
+      Enum.reduce(configs, {[], MapSet.new()}, fn config, {acc, seen} ->
+        if MapSet.member?(seen, config.name) do
+          Minga.Log.warning(:agent, "[Agent.Native] duplicate MCP server name ignored: #{config.name}")
+          {acc, seen}
+        else
+          {[config | acc], MapSet.put(seen, config.name)}
+        end
+      end)
+
+    Enum.reverse(deduped)
   end
 
   @spec init_fork_store_and_changeset(ProjectView.t() | nil, String.t(), keyword()) ::

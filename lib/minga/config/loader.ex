@@ -518,14 +518,22 @@ defmodule Minga.Config.Loader do
     end
   end
 
+  @plugin_name_pattern ~r/^[a-z][a-z0-9_-]*$/
+
   @spec register_plugin_entry(String.t(), String.t(), [String.t()]) :: [String.t()]
   defp register_plugin_entry(plugin_path, entry, errors) do
-    if File.dir?(plugin_path) do
-      name = String.to_atom(entry)
-      ExtRegistry.register(name, plugin_path, [])
+    register_plugin_dir(File.dir?(plugin_path), plugin_path, entry, errors)
+  end
+
+  @spec register_plugin_dir(boolean(), String.t(), String.t(), [String.t()]) :: [String.t()]
+  defp register_plugin_dir(false, _plugin_path, _entry, errors), do: errors
+
+  defp register_plugin_dir(true, plugin_path, entry, errors) do
+    if Regex.match?(@plugin_name_pattern, entry) do
+      ExtRegistry.register(String.to_atom(entry), plugin_path, [])
       errors
     else
-      errors
+      ["Plugin directory name must match [a-z][a-z0-9_-]*: #{entry}" | errors]
     end
   end
 

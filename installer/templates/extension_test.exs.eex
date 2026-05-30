@@ -1,16 +1,49 @@
-defmodule <%= module %>Test do
+<%= if type == "both" do %>defmodule <%= module %>.EditorTest do
+  use ExUnit.Case, async: true
+
+  test "editor module compiles and exports schemas" do
+    assert <%= module %>.Editor.name() == :<%= name %>_editor
+    assert is_binary(<%= module %>.Editor.description())
+    assert is_binary(<%= module %>.Editor.version())
+    assert is_list(<%= module %>.Editor.__option_schema__())
+    assert is_list(<%= module %>.Editor.__command_schema__())
+    assert is_list(<%= module %>.Editor.__keybind_schema__())
+  end
+
+  test "editor init returns {:ok, state}" do
+    assert {:ok, _state} = <%= module %>.Editor.init([])
+  end
+end
+
+defmodule <%= module %>.AgentTest do
+  use ExUnit.Case, async: true
+
+  test "agent module compiles and exports schemas" do
+    assert <%= module %>.Agent.name() == :<%= name %>_agent
+    assert is_binary(<%= module %>.Agent.description())
+    assert is_binary(<%= module %>.Agent.version())
+    assert is_list(<%= module %>.Agent.__hook_schema__())
+  end
+
+  test "agent init returns {:ok, state}" do
+    assert {:ok, _state} = <%= module %>.Agent.init([])
+  end
+end
+<% else %>defmodule <%= module %>Test do
   use ExUnit.Case, async: true
 
   test "extension module compiles and exports schemas" do
     assert <%= module %>.name() == :<%= name %>
     assert is_binary(<%= module %>.description())
     assert is_binary(<%= module %>.version())
-    assert is_list(<%= module %>.__option_schema__())
+<%= if type == "agent" do %>    assert is_list(<%= module %>.__hook_schema__())
+<% else %>    assert is_list(<%= module %>.__option_schema__())
     assert is_list(<%= module %>.__command_schema__())
     assert is_list(<%= module %>.__keybind_schema__())
-  end
+<% end %>  end
 
   test "init returns {:ok, state}" do
     assert {:ok, _state} = <%= module %>.init([])
   end
 end
+<% end %>
