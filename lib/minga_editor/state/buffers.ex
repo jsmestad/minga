@@ -10,14 +10,12 @@ defmodule MingaEditor.State.Buffers do
           active: pid() | nil,
           list: [pid()],
           active_index: non_neg_integer(),
-          messages: pid() | nil,
           help: pid() | nil
         }
 
   defstruct active: nil,
             list: [],
             active_index: 0,
-            messages: nil,
             help: nil
 
   @doc "Appends a buffer pid and makes it active."
@@ -92,7 +90,6 @@ defmodule MingaEditor.State.Buffers do
   @spec remove(t(), pid()) :: t()
   def remove(%__MODULE__{} = bs, pid) do
     new_list = Enum.reject(bs.list, &(&1 == pid))
-    messages = if bs.messages == pid, do: nil, else: bs.messages
     help = if bs.help == pid, do: nil, else: bs.help
 
     {new_active, new_index} =
@@ -110,7 +107,6 @@ defmodule MingaEditor.State.Buffers do
       | list: new_list,
         active: new_active,
         active_index: new_index,
-        messages: messages,
         help: help
     }
   end
@@ -118,10 +114,6 @@ defmodule MingaEditor.State.Buffers do
   @doc "Sets the help buffer pid."
   @spec set_help(t(), pid() | nil) :: t()
   def set_help(%__MODULE__{} = bs, pid), do: %{bs | help: pid}
-
-  @doc "Sets the messages buffer pid."
-  @spec set_messages(t(), pid() | nil) :: t()
-  def set_messages(%__MODULE__{} = bs, pid), do: %{bs | messages: pid}
 
   @doc "Overrides the active buffer pid without updating the index. Use for temporary buffer swaps where the pid is not in the buffer list."
   @spec set_active_override(t(), pid() | nil) :: t()

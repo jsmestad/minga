@@ -30,7 +30,7 @@ defmodule MingaEditor.HighlightSync do
     case Grammar.language_for_filetype(filetype) do
       {:ok, language} ->
         # Queries are pre-compiled in Zig at startup — just set language + parse
-        MingaEditor.log_to_messages("Syntax: #{language} (tree-sitter)")
+        Minga.Log.info(:editor, "Syntax: #{language} (tree-sitter)")
         send_parse_only(state, language)
 
       :unsupported ->

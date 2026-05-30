@@ -9,12 +9,12 @@ defmodule MingaEditor.Commands.BufferManagement.FrontendTest do
   alias MingaEditor.Viewport
   alias MingaEditor.Session.State, as: SessionState
 
-  defp base_state(opts \\ []) do
+  defp base_state do
     %EditorState{
       port_manager: nil,
       workspace: %SessionState{
         viewport: Viewport.new(40, 120),
-        buffers: %Buffers{messages: Keyword.get(opts, :messages)}
+        buffers: %Buffers{}
       }
     }
   end
@@ -44,16 +44,18 @@ defmodule MingaEditor.Commands.BufferManagement.FrontendTest do
   end
 
   describe "TUI.view_messages/1" do
-    test "returns status message when no messages buffer" do
-      state = BufTUI.view_messages(base_state(messages: nil))
-      assert state.shell_state.status_msg == "No messages buffer"
+    test "resolves live singleton" do
+      state = BufTUI.view_messages(base_state())
+      assert Minga.Log.MessagesBuffer.pid() != nil
+      refute state.shell_state.status_msg == "No messages buffer"
     end
   end
 
   describe "TUI.view_warnings/1" do
-    test "returns status message when no messages buffer" do
-      state = BufTUI.view_warnings(base_state(messages: nil))
-      assert state.shell_state.status_msg == "No messages buffer"
+    test "resolves live singleton" do
+      state = BufTUI.view_warnings(base_state())
+      assert Minga.Log.MessagesBuffer.pid() != nil
+      refute state.shell_state.status_msg == "No messages buffer"
     end
   end
 end

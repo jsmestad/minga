@@ -101,7 +101,8 @@ defmodule MingaEditor.Handlers.BufferRegistry do
       EditorState.update_buffers(state, &Buffers.add_background(&1, buffer_pid))
 
     state = EditorState.monitor_buffer(state, buffer_pid)
-    MingaEditor.log_message(state, "Opened (agent): #{file_path}")
+    Minga.Log.info(:editor, "Opened (agent): #{file_path}")
+    state
   end
 
   # Shared buffer registration: adds buffer to the list, logs, refreshes
@@ -111,7 +112,7 @@ defmodule MingaEditor.Handlers.BufferRegistry do
   @spec register_buffer(state(), pid(), String.t()) :: state()
   def register_buffer(state, buffer_pid, file_path) do
     state = Commands.add_buffer(state, buffer_pid)
-    state = MingaEditor.log_message(state, "Opened: #{file_path}")
+    Minga.Log.info(:editor, "Opened: #{file_path}")
 
     Events.broadcast(
       :buffer_opened,

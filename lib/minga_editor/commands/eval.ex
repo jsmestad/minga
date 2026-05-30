@@ -7,8 +7,6 @@ defmodule MingaEditor.Commands.Eval do
   line and logged to the `*Messages*` buffer.
   """
 
-  alias Minga.Buffer
-  alias Minga.Buffer.Document
   alias MingaEditor.State, as: EditorState
   alias Minga.Mode
 
@@ -130,26 +128,8 @@ defmodule MingaEditor.Commands.Eval do
   end
 
   @spec log_to_messages(state(), String.t()) :: state()
-  defp log_to_messages(%{workspace: %{buffers: %{messages: nil}}} = state, _text), do: state
-
-  defp log_to_messages(%{workspace: %{buffers: %{messages: buf}}} = state, text) do
-    time = Calendar.strftime(DateTime.utc_now(), "%H:%M:%S")
-    Buffer.append(buf, "[#{time}] #{text}\n")
-
-    # Trim to max lines (same as Editor.log_message/2)
-    line_count = Buffer.line_count(buf)
-
-    if line_count > 1000 do
-      excess = line_count - 1000
-      content = Buffer.content(buf)
-      lines = String.split(content, "\n")
-      trimmed = lines |> Enum.drop(excess) |> Enum.join("\n")
-
-      :sys.replace_state(buf, fn s ->
-        %{s | document: Document.new(trimmed)}
-      end)
-    end
-
+  defp log_to_messages(state, text) do
+    Minga.Log.info(:editor, text)
     state
   end
 end

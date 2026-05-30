@@ -141,8 +141,11 @@ defmodule Minga.API do
       Minga.API.message("Build completed!")
   """
   @spec message(String.t(), editor()) :: :ok
-  def message(text, editor \\ @default_editor) when is_binary(text) do
-    GenServer.call(editor, {:api_log_message, text})
+  def message(text, _editor \\ @default_editor) when is_binary(text) do
+    Minga.Events.broadcast(:log_message, %Minga.Events.LogMessageEvent{
+      text: text,
+      level: :info
+    })
   end
 
   @doc """

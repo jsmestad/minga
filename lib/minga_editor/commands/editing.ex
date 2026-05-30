@@ -305,11 +305,11 @@ defmodule MingaEditor.Commands.Editing do
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :undo_agent_session) do
     case Buffer.undo_agent_session(buf) do
       {:ok, count} ->
-        MingaEditor.log_to_messages("Reverted #{count} agent edit(s)")
+        Minga.Log.info(:editor, "Reverted #{count} agent edit(s)")
         state
 
       :empty ->
-        MingaEditor.log_to_messages("No agent edits to undo")
+        Minga.Log.info(:editor, "No agent edits to undo")
         state
     end
   end

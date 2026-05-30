@@ -8,22 +8,19 @@ defmodule MingaEditor.Commands.BufferManagement.TUI do
 
   @impl true
   @spec view_messages(EditorState.t()) :: EditorState.t()
-  def view_messages(%{workspace: %{buffers: %{messages: nil}}} = state) do
-    EditorState.set_status(state, "No messages buffer")
-  end
-
-  def view_messages(%{workspace: %{buffers: %{messages: msg_buf}}} = state) do
-    BufferManagement.open_special_buffer(state, "*Messages*", msg_buf)
+  def view_messages(state) do
+    case Minga.Log.MessagesBuffer.pid() do
+      nil -> EditorState.set_status(state, "No messages buffer")
+      pid -> BufferManagement.open_special_buffer(state, "*Messages*", pid)
+    end
   end
 
   @impl true
   @spec view_warnings(EditorState.t()) :: EditorState.t()
-  def view_warnings(%{workspace: %{buffers: %{messages: nil}}} = state) do
-    EditorState.set_status(state, "No messages buffer")
-  end
-
-  def view_warnings(%{workspace: %{buffers: %{messages: msg_buf}}} = state) do
-    # Warnings appear in *Messages* with [WARN] prefix (no separate buffer)
-    BufferManagement.open_special_buffer(state, "*Messages*", msg_buf)
+  def view_warnings(state) do
+    case Minga.Log.MessagesBuffer.pid() do
+      nil -> EditorState.set_status(state, "No messages buffer")
+      pid -> BufferManagement.open_special_buffer(state, "*Messages*", pid)
+    end
   end
 end

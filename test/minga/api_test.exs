@@ -179,8 +179,10 @@ defmodule Minga.APITest do
 
       assert :ok = API.message("test message", editor)
 
-      messages = GenServer.call(editor, :get_messages)
-      assert messages == ["test message"]
+      Logger.flush()
+      Process.sleep(10)
+      content = Minga.Buffer.content(Minga.Log.MessagesBuffer.pid())
+      assert content =~ "test message"
     end
   end
 

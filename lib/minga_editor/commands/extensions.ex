@@ -69,7 +69,7 @@ defmodule MingaEditor.Commands.Extensions do
     ms = Editing.mode_state(state)
     update = Enum.at(ms.updates, ms.current)
     details = Updater.details(update.name)
-    MingaEditor.log_to_messages(details)
+    Minga.Log.info(:editor, details)
     state
   end
 

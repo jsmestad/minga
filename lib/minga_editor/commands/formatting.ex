@@ -105,7 +105,7 @@ defmodule MingaEditor.Commands.Formatting do
       line_count = Buffer.line_count(buf)
       safe_line = min(cursor_line, max(line_count - 1, 0))
       Buffer.move_to(buf, {safe_line, cursor_col})
-      MingaEditor.log_to_messages("Formatted (LSP)")
+      Minga.Log.info(:editor, "Formatted (LSP)")
     end
 
     :ok
@@ -182,7 +182,7 @@ defmodule MingaEditor.Commands.Formatting do
         line_count = Buffer.line_count(buf)
         safe_line = min(cursor_line, max(line_count - 1, 0))
         Buffer.move_to(buf, {safe_line, cursor_col})
-        MingaEditor.log_to_messages("Formatted: #{buf_name}")
+        Minga.Log.info(:editor, "Formatted: #{buf_name}")
         EditorState.set_status(state, "Formatted")
 
       {:error, msg} ->
