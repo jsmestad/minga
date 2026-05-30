@@ -424,14 +424,6 @@ defmodule MingaAgent.Providers.Native do
   defp merge_extension_components(config, false) do
     ext = collect_extension_agent_components()
     config = %{config | agent_hooks: config.agent_hooks ++ ext.hooks}
-
-    if ext.skills != [] do
-      Minga.Log.info(
-        :agent,
-        "[Agent.Native] extension skills available: #{Enum.join(ext.skills, ", ")}"
-      )
-    end
-
     {config, ext.mcp_servers}
   end
 
@@ -1085,7 +1077,6 @@ defmodule MingaAgent.Providers.Native do
 
   @spec collect_extension_agent_components() :: %{
           hooks: [MingaAgent.Hooks.Hook.t()],
-          skills: [String.t()],
           mcp_servers: [MCPServerConfig.t()]
         }
   defp collect_extension_agent_components do
@@ -1110,10 +1101,6 @@ defmodule MingaAgent.Providers.Native do
       end)
       |> Enum.reverse()
 
-    skills =
-      manifests
-      |> Enum.flat_map(& &1.skills)
-
     mcp_servers =
       manifests
       |> Enum.flat_map(& &1.mcp_servers)
@@ -1135,7 +1122,7 @@ defmodule MingaAgent.Providers.Native do
       end)
       |> Enum.reverse()
 
-    %{hooks: hooks, skills: skills, mcp_servers: mcp_servers}
+    %{hooks: hooks, mcp_servers: mcp_servers}
   end
 
   @spec mcp_client_opts(keyword()) :: keyword()
