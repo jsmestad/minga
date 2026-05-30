@@ -1,7 +1,7 @@
 defmodule Minga.Extensions.RecipePacks.Misc do
   @moduledoc "Bundled recipe pack: miscellaneous language tools not grouped by ecosystem."
 
-  use Minga.Extension
+  use Minga.Extension.Editor
 
   alias Minga.Tool.Recipe
 

@@ -1,7 +1,7 @@
 defmodule Minga.Extensions.RecipePacks.Jvm do
   @moduledoc "Bundled recipe pack: JVM ecosystem tools."
 
-  use Minga.Extension
+  use Minga.Extension.Editor
 
   alias Minga.Tool.Recipe
 

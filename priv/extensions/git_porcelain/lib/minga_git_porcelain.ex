@@ -5,7 +5,7 @@ defmodule MingaGitPorcelain do
   Core Git backend primitives stay in `Minga.Git`. This extension owns the user-facing porcelain: commands, keybindings, Git status input scope, picker sources, prompts, and commit-message generation UI.
   """
 
-  use Minga.Extension
+  use Minga.Extension.Editor
 
   command :git_status_toggle, "Git status", requires_buffer: false, execute: {MingaGitPorcelain.Commands, :git_status_toggle}
   command :git_changed_files, "Changed files", requires_buffer: false, execute: {MingaGitPorcelain.Commands, :git_changed_files}

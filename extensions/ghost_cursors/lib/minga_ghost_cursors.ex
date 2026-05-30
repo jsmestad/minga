@@ -10,7 +10,7 @@ defmodule MingaGhostCursors do
   Provides `SPC a F` to jump to the file an agent is currently editing.
   """
 
-  use Minga.Extension
+  use Minga.Extension.Editor
 
   command :ghost_cursor_follow, "Jump to the file the agent is editing",
     execute: {MingaGhostCursors.Commands, :follow}

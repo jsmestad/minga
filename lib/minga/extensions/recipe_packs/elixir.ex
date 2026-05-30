@@ -1,7 +1,7 @@
 defmodule Minga.Extensions.RecipePacks.Elixir do
   @moduledoc "Bundled recipe pack: Elixir ecosystem tools."
 
-  use Minga.Extension
+  use Minga.Extension.Editor
 
   alias Minga.Tool.Recipe
 

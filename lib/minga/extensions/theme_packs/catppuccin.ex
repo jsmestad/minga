@@ -1,7 +1,7 @@
 defmodule Minga.Extensions.ThemePacks.Catppuccin do
   @moduledoc "Bundled Catppuccin theme pack: Frappe, Latte, Macchiato, and Mocha."
 
-  use Minga.Extension
+  use Minga.Extension.Editor
 
   @impl true
   @spec name() :: atom()

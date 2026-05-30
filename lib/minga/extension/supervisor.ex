@@ -21,6 +21,8 @@ defmodule Minga.Extension.Supervisor do
   alias Minga.Extension.Lazy
   alias Minga.Extension.Manifest
   alias Minga.Extension.Registry, as: ExtRegistry
+  alias MingaEditor.Agent.SlashCommand, as: AgentSlashCommand
+  alias MingaEditor.Agent.SlashCommand.Command, as: SlashCommandEntry
 
   # ── Client API ──────────────────────────────────────────────────────────────
 
@@ -410,6 +412,7 @@ defmodule Minga.Extension.Supervisor do
     with {:module, ^module} <- Code.ensure_loaded(module),
          :ok <- validate_behaviour(module, name),
          :ok <- record_extension_manifest(registry, name, module, entry.source_type),
+         :ok <- dispatch_agent_components(registry, name),
          :ok <- register_and_validate_options(name, module, entry.config),
          {:ok, _state} <-
            run_lifecycle_phase(name, :init, opts, fn -> call_init(module, entry.config) end) do
@@ -457,6 +460,7 @@ defmodule Minga.Extension.Supervisor do
            run_lifecycle_phase(name, :load, opts, fn -> compile_extension(entry.path) end),
          :ok <- validate_behaviour(module, name),
          :ok <- record_extension_manifest(registry, name, module, entry.source_type),
+         :ok <- dispatch_agent_components(registry, name),
          :ok <- register_and_validate_options(name, module, entry.config),
          {:ok, _state} <-
            run_lifecycle_phase(name, :init, opts, fn -> call_init(module, entry.config) end) do
@@ -821,6 +825,43 @@ defmodule Minga.Extension.Supervisor do
   catch
     kind, reason ->
       {:error, "manifest introspection failed: #{inspect(kind)} #{inspect(reason)}"}
+  end
+
+  @spec dispatch_agent_components(GenServer.server(), atom()) :: :ok
+  defp dispatch_agent_components(registry, name) do
+    case ExtRegistry.get(registry, name) do
+      {:ok, %{manifest: %Manifest{slash_commands: slash_commands}}} when slash_commands != [] ->
+        commands = Enum.map(slash_commands, &build_slash_command/1)
+        AgentSlashCommand.register_commands(name, commands)
+
+      _ ->
+        :ok
+    end
+  rescue
+    e ->
+      Minga.Log.warning(
+        :config,
+        "Extension #{name} agent component dispatch failed: #{Exception.message(e)}"
+      )
+
+      :ok
+  catch
+    kind, reason ->
+      Minga.Log.warning(
+        :config,
+        "Extension #{name} agent component dispatch failed: #{inspect(kind)} #{inspect(reason)}"
+      )
+
+      :ok
+  end
+
+  @spec build_slash_command({atom(), String.t(), keyword()}) :: SlashCommandEntry.t()
+  defp build_slash_command({cmd_name, description, opts}) do
+    %SlashCommandEntry{
+      name: Atom.to_string(cmd_name),
+      description: description,
+      execute: Keyword.get(opts, :command)
+    }
   end
 
   @spec run_lifecycle_phase(atom(), atom(), start_opts(), (-> result)) :: result when result: var
@@ -1453,6 +1494,7 @@ defmodule Minga.Extension.Supervisor do
          {:ok, module} <- find_extension_module(app_atom),
          :ok <- validate_behaviour(module, name),
          :ok <- record_extension_manifest(registry, name, module, entry.source_type),
+         :ok <- dispatch_agent_components(registry, name),
          :ok <- register_and_validate_options(name, module, entry.config),
          {:ok, _state} <-
            run_lifecycle_phase(name, :init, opts, fn -> call_init(module, entry.config) end) do
@@ -1528,7 +1570,7 @@ defmodule Minga.Extension.Supervisor do
 
     case files do
       [] ->
-        {:error, "no .ex files found in #{expanded}"}
+        compile_extension_files_fallback(expanded)
 
       _ ->
         # The compile cache loads precompiled beams on a hit and recompiles
@@ -1542,6 +1584,17 @@ defmodule Minga.Extension.Supervisor do
           {:error, reason} ->
             {:error, reason}
         end
+    end
+  end
+
+  @spec compile_extension_files_fallback(String.t()) :: {:ok, module()} | {:error, String.t()}
+  defp compile_extension_files_fallback(expanded) do
+    json_path = Path.join(expanded, "plugin.json")
+
+    if File.exists?(json_path) do
+      Minga.Extension.JsonLoader.load(expanded)
+    else
+      {:error, "no .ex files found in #{expanded}"}
     end
   end
 
@@ -1627,6 +1680,8 @@ defmodule Minga.Extension.Supervisor do
     cleanup_opts =
       [command_registry: cmd_registry, keymap: keymap]
       |> Keyword.merge(Keyword.take(opts, [:callbacks]))
+
+    AgentSlashCommand.unregister_commands(name)
 
     case run_lifecycle_phase(name, :cleanup, opts, fn ->
            Minga.Extension.ContributionCleanup.unregister_source(source, cleanup_opts)

@@ -322,6 +322,8 @@ defmodule MingaAgent.Providers.Native do
     max_turns = Keyword.get(opts, :max_turns, config.max_turns)
     read_only? = Keyword.get(opts, :read_only?, false)
     config = disable_hooks_for_read_only(config, read_only?)
+    ext_components = collect_extension_agent_components()
+    config = %{config | agent_hooks: config.agent_hooks ++ ext_components.hooks}
     max_cost = Keyword.get(opts, :max_cost, config.max_cost)
     llm_client = Keyword.get(opts, :llm_client, &ReqLLM.stream_text/3)
     hook_runner = Keyword.get(opts, :hook_runner, &CommandRunner.run_pre_tool_use/2)
@@ -375,7 +377,7 @@ defmodule MingaAgent.Providers.Native do
     custom_tools? = Keyword.has_key?(opts, :tools)
     active_skills = load_active_skills(project_root, Keyword.get(opts, :active_skill_names, []))
     internal_tools = if read_only?, do: [], else: build_internal_tools(provider_pid)
-    mcp_configs = configured_mcp_servers(opts, config, subscriber, read_only?)
+    mcp_configs = configured_mcp_servers(opts, config, subscriber, read_only?) ++ ext_components.mcp_servers
     mcp_client_opts = mcp_client_opts(opts)
     mcp_enabled_override = Keyword.get(opts, :mcp_enabled?, nil)
     mcp_registry = mcp_registry_for(mcp_configs)
@@ -432,6 +434,10 @@ defmodule MingaAgent.Providers.Native do
       read_only?: read_only?,
       tool_workers: %{}
     }
+
+    if ext_components.skills != [] do
+      Minga.Log.info(:agent, "[Agent.Native] extension skills available: #{Enum.join(ext_components.skills, ", ")}")
+    end
 
     Minga.Log.info(:agent, "[Agent.Native] started with model=#{model} root=#{project_root}")
 
@@ -1045,6 +1051,68 @@ defmodule MingaAgent.Providers.Native do
       {false, {:ok, _pid}} -> :running
       {false, :error} -> :not_started
     end
+  end
+
+  # ── Extension agent components ─────────────────────────────────────────────
+
+  @spec extension_manifests() :: [Minga.Extension.Manifest.t()]
+  defp extension_manifests do
+    case Process.whereis(Minga.Extension.Registry) do
+      nil ->
+        []
+
+      _pid ->
+        Minga.Extension.Registry.all()
+        |> Enum.map(fn {_name, entry} -> entry.manifest end)
+        |> Enum.reject(&is_nil/1)
+    end
+  end
+
+  @spec collect_extension_agent_components() :: %{
+          hooks: [MingaAgent.Hooks.Hook.t()],
+          skills: [String.t()],
+          mcp_servers: [MCPServerConfig.t()]
+        }
+  defp collect_extension_agent_components do
+    manifests = extension_manifests()
+
+    hooks =
+      manifests
+      |> Enum.flat_map(& &1.hooks)
+      |> Enum.reduce([], fn {event, opts}, acc ->
+        case MingaAgent.Hooks.Hook.normalize(Keyword.put(opts, :event, event)) do
+          {:ok, hook} ->
+            [hook | acc]
+
+          {:error, reason} ->
+            Minga.Log.warning(:agent, "[Agent.Native] extension hook normalization failed: #{reason}")
+            acc
+        end
+      end)
+      |> Enum.reverse()
+
+    skills =
+      manifests
+      |> Enum.flat_map(& &1.skills)
+
+    mcp_servers =
+      manifests
+      |> Enum.flat_map(& &1.mcp_servers)
+      |> Enum.reduce([], fn {name, opts}, acc ->
+        server_map = opts |> Keyword.put(:name, Atom.to_string(name)) |> Map.new()
+
+        case MCPServerConfig.normalize(server_map) do
+          {:ok, config} ->
+            [config | acc]
+
+          {:error, reason} ->
+            Minga.Log.warning(:agent, "[Agent.Native] extension MCP server normalization failed: #{reason}")
+            acc
+        end
+      end)
+      |> Enum.reverse()
+
+    %{hooks: hooks, skills: skills, mcp_servers: mcp_servers}
   end
 
   @spec mcp_client_opts(keyword()) :: keyword()

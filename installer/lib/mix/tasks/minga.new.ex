@@ -1,25 +1,28 @@
 defmodule Mix.Tasks.Minga.New do
   @moduledoc """
-  Creates a new Minga editor extension project.
+  Creates a new Minga extension project.
 
       mix minga.new my_extension
+      mix minga.new my_extension --type agent
+      mix minga.new my_extension --type both
 
   This generates a complete, compilable extension project with the
-  right directory structure, SDK dependency, and `use Minga.Extension`
-  boilerplate.
+  right directory structure, SDK dependency, and appropriate `use Minga.Extension.*`
+  boilerplate based on the selected type.
 
   ## Options
 
     * `--path` - the directory to create the project in (defaults to the extension name)
+    * `--type` - extension type: "agent", "editor" (default), or "both"
   """
 
   use Mix.Task
 
   @version "0.1.0"
 
-  @shortdoc "Creates a new Minga editor extension project"
+  @shortdoc "Creates a new Minga extension project"
 
-  @switches [path: :string]
+  @switches [path: :string, type: :string]
 
   @impl true
   def run(argv) do
@@ -42,15 +45,21 @@ defmodule Mix.Tasks.Minga.New do
       )
     end
 
+    type = Keyword.get(opts, :type, "editor")
+
+    unless type in ["agent", "editor", "both"] do
+      Mix.raise("Extension type must be one of: agent, editor, both. Got: #{type}")
+    end
+
     module = Macro.camelize(name)
     path = Keyword.get(opts, :path, name)
-    binding = [name: name, module: module, version: @version]
+    binding = [name: name, module: module, version: @version, type: type]
 
     if File.exists?(path) do
       Mix.raise("Directory #{path} already exists")
     end
 
-    Mix.shell().info("Creating Minga extension #{name}...")
+    Mix.shell().info("Creating Minga extension #{name} (type: #{type})...")
 
     File.mkdir_p!(path)
     File.mkdir_p!(Path.join(path, "lib/#{name}"))
@@ -71,6 +80,24 @@ defmodule Mix.Tasks.Minga.New do
       dest_path = Path.join(path, dest)
       File.write!(dest_path, content)
       Mix.shell().info("  * creating #{dest}")
+    end
+
+    # Create hooks directory and example script for agent types
+    if type in ["agent", "both"] do
+      hooks_path = Path.join(path, "hooks")
+      File.mkdir_p!(hooks_path)
+
+      hello_sh_path = Path.join(hooks_path, "hello.sh")
+      hello_sh_content = """
+      #!/bin/bash
+
+      # Example agent hook for #{module} extension
+      echo "Hello from #{module} agent hook!"
+      """
+
+      File.write!(hello_sh_path, hello_sh_content)
+      File.chmod!(hello_sh_path, 0o755)
+      Mix.shell().info("  * creating hooks/hello.sh")
     end
 
     Mix.shell().info("""
