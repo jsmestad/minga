@@ -48,7 +48,10 @@ defmodule Minga.Distribution.RemoteSessionE2ETest do
     # Load the app, copy this VM's :minga config onto the peer, and point its
     # config dir at a temp location, all before starting the application.
     :erpc.call(peer.node, Application, :load, [:minga])
-    :ok = :erpc.call(peer.node, Application, :put_all_env, [[minga: Application.get_all_env(:minga)]])
+
+    :ok =
+      :erpc.call(peer.node, Application, :put_all_env, [[minga: Application.get_all_env(:minga)]])
+
     :erpc.call(peer.node, System, :put_env, [[{"XDG_CONFIG_HOME", config_home}]])
 
     # The peer never ran test_helper.exs, so seed the ETS stub tables the boot
