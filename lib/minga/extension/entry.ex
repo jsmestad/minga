@@ -37,7 +37,7 @@ defmodule Minga.Extension.Entry do
     lifecycle_ref: nil,
     config: [],
     status: :stopped,
-    load_policy: :eager
+    load_policy: nil
   ]
 
   @type t :: %__MODULE__{
@@ -51,20 +51,20 @@ defmodule Minga.Extension.Entry do
           lifecycle_ref: reference() | nil,
           config: keyword(),
           status: Extension.extension_status(),
-          load_policy: Extension.load_policy()
+          load_policy: Extension.load_policy() | nil
         }
 
   @doc "Creates a path-sourced entry."
   @spec from_path(String.t(), keyword()) :: t()
   def from_path(path, config) when is_binary(path) and is_list(config) do
-    {load_policy, config} = Keyword.pop(config, :load_policy, :eager)
+    {load_policy, config} = Keyword.pop(config, :load_policy)
     %__MODULE__{source_type: :path, path: path, config: config, load_policy: load_policy}
   end
 
   @doc "Creates a module-sourced entry for a bundled extension already on the code path."
   @spec from_module(module(), keyword()) :: t()
   def from_module(module, config) when is_atom(module) and is_list(config) do
-    {load_policy, config} = Keyword.pop(config, :load_policy, :eager)
+    {load_policy, config} = Keyword.pop(config, :load_policy)
     %__MODULE__{source_type: :module, module: module, config: config, load_policy: load_policy}
   end
 
@@ -73,7 +73,7 @@ defmodule Minga.Extension.Entry do
   def from_git(url, opts) when is_binary(url) and is_list(opts) do
     {branch, opts} = Keyword.pop(opts, :branch)
     {ref, opts} = Keyword.pop(opts, :ref)
-    {load_policy, config} = Keyword.pop(opts, :load_policy, :eager)
+    {load_policy, config} = Keyword.pop(opts, :load_policy)
 
     %__MODULE__{
       source_type: :git,
@@ -88,7 +88,7 @@ defmodule Minga.Extension.Entry do
   def from_hex(package, app, opts) when is_binary(package) and is_atom(app) and is_list(opts) do
     {version, opts} = Keyword.pop(opts, :version)
     {_app, opts} = Keyword.pop(opts, :app)
-    {load_policy, config} = Keyword.pop(opts, :load_policy, :eager)
+    {load_policy, config} = Keyword.pop(opts, :load_policy)
 
     %__MODULE__{
       source_type: :hex,

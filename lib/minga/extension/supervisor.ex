@@ -163,9 +163,32 @@ defmodule Minga.Extension.Supervisor do
       :deferred ->
         {failures, [{name, entry} | deferred]}
 
-      trigger when is_tuple(trigger) ->
+      {:on_command, _} ->
         case register_lazy_stubs(supervisor, registry, name, entry, opts) do
           :ok -> {failures, deferred}
+          {:error, reason} -> {failures ++ [%{extension: name, reason: reason}], deferred}
+        end
+
+      {:on_filetype, _} ->
+        case register_lazy_stubs(supervisor, registry, name, entry, opts) do
+          :ok -> {failures, deferred}
+          {:error, reason} -> {failures ++ [%{extension: name, reason: reason}], deferred}
+        end
+
+      {:on_key, _} ->
+        case register_lazy_stubs(supervisor, registry, name, entry, opts) do
+          :ok -> {failures, deferred}
+          {:error, reason} -> {failures ++ [%{extension: name, reason: reason}], deferred}
+        end
+
+      other ->
+        Minga.Log.warning(
+          :config,
+          "Extension #{name} has unknown load_policy: #{inspect(other)}, loading eagerly"
+        )
+
+        case start_extension(supervisor, registry, name, entry, opts) do
+          {:ok, _pid} -> {failures, deferred}
           {:error, reason} -> {failures ++ [%{extension: name, reason: reason}], deferred}
         end
     end
@@ -1502,8 +1525,9 @@ defmodule Minga.Extension.Supervisor do
   defp format_position(line) when is_integer(line), do: "#{line}"
   defp format_position(_), do: "?"
 
+  @doc false
   @spec implements_extension?(module()) :: boolean()
-  defp implements_extension?(module) do
+  def implements_extension?(module) do
     Code.ensure_loaded?(module) &&
       function_exported?(module, :name, 0) &&
       function_exported?(module, :description, 0) &&
@@ -1511,8 +1535,9 @@ defmodule Minga.Extension.Supervisor do
       function_exported?(module, :init, 1)
   end
 
+  @doc false
   @spec validate_behaviour(module(), atom()) :: :ok | {:error, String.t()}
-  defp validate_behaviour(module, name) do
+  def validate_behaviour(module, name) do
     missing =
       [:name, :description, :version, :init]
       |> Enum.reject(fn

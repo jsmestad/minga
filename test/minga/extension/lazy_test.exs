@@ -449,7 +449,12 @@ defmodule Minga.Extension.LazyTest do
       assert {:on_command, [:some_cmd]} = Lazy.effective_load_policy(entry)
     end
 
-    test "returns :eager for default entry" do
+    test "returns :eager for entry with no config override (nil)" do
+      entry = %Minga.Extension.Entry{source_type: :path, load_policy: nil}
+      assert :eager = Lazy.effective_load_policy(entry)
+    end
+
+    test "returns :eager when explicitly set in config" do
       entry = %Minga.Extension.Entry{source_type: :path, load_policy: :eager}
       assert :eager = Lazy.effective_load_policy(entry)
     end
