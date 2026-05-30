@@ -25,6 +25,7 @@ defmodule MingaAgent.Session do
   alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.Credentials
   alias MingaAgent.Event
+  alias MingaAgent.EventLog
   alias MingaAgent.Hooks.Dispatcher, as: HookDispatcher
   alias MingaAgent.Hooks.SessionEndPayload
   alias MingaAgent.Hooks.SessionStartPayload
@@ -72,6 +73,7 @@ defmodule MingaAgent.Session do
   @type state :: %{
           session_id: String.t(),
           remote_token: String.t() | nil,
+          event_log_server: GenServer.server(),
           provider: pid() | nil,
           provider_module: module(),
           provider_opts: keyword(),
@@ -603,6 +605,7 @@ defmodule MingaAgent.Session do
     state = %{
       session_id: session_id,
       remote_token: Keyword.get(opts, :remote_token),
+      event_log_server: Keyword.get(opts, :event_log_server, EventLog),
       provider: nil,
       provider_module: provider_module,
       provider_opts: provider_opts,
@@ -646,6 +649,17 @@ defmodule MingaAgent.Session do
       # "not configured" state so we never advertise a model we can't call.
       credentials_configured: true
     }
+
+    EventLog.record(
+      state.session_id,
+      :session_started,
+      %{
+        model: state.model_name,
+        provider: state.provider_name,
+        background_subagent: state.background_subagent
+      },
+      state.event_log_server
+    )
 
     # Start provider asynchronously so init doesn't block
     send(self(), :start_provider)
@@ -691,6 +705,7 @@ defmodule MingaAgent.Session do
     # Agent is idle: treat follow-up as a regular prompt.
     {user_msg, send_content} = build_user_message(content)
     state = append_msg(state, user_msg)
+    record_user_message(state, user_msg)
     state = notify_messages_changed(state)
 
     case state.provider_module.send_prompt(state.provider, send_content) do
@@ -713,6 +728,7 @@ defmodule MingaAgent.Session do
         end)
 
       state = %{state | steering_queue: []}
+      Enum.each(new_msgs, &record_user_message(state, &1))
       state = append_msgs(state, new_msgs)
       state = notify_messages_changed(state)
       {:reply, steering, state}
@@ -1254,6 +1270,18 @@ defmodule MingaAgent.Session do
     # Send the execution decision directly to the blocked Task process.
     send(reply_to, {:tool_approval_response, tool_call_id, execution_decision(decision)})
 
+    EventLog.record(
+      state.session_id,
+      :approval_resolved,
+      %{
+        approval_id: tool_call_id,
+        tool_call_id: tool_call_id,
+        name: approval.name,
+        decision: decision
+      },
+      state.event_log_server
+    )
+
     state = maybe_record_rejection(state, approval, decision)
     state = %{state | pending_approval: nil}
     state = notify_messages_changed(state)
@@ -1282,9 +1310,11 @@ defmodule MingaAgent.Session do
     # provider error. Reply :ok so the input clears like a normal submit.
     {user_msg, _send_content} = build_user_message(content)
 
+    state = append_msg(state, user_msg)
+    record_user_message(state, user_msg)
+
     state =
       state
-      |> append_msg(user_msg)
       |> append_system_message(auth_required_message(), :info)
       |> notify_messages_changed()
 
@@ -1296,6 +1326,7 @@ defmodule MingaAgent.Session do
       :ok ->
         {user_msg, send_content} = build_user_message(content)
         state = append_msg(state, user_msg)
+        record_user_message(state, user_msg)
         state = notify_messages_changed(state)
 
         case state.provider_module.send_prompt(state.provider, send_content) do
@@ -1355,6 +1386,7 @@ defmodule MingaAgent.Session do
 
         state = %{state | steering_queue: [], follow_up_queue: []}
         state = append_msg(state, user_msg)
+        record_user_message(state, user_msg)
         state = notify_messages_changed(state)
 
         case state.provider_module.send_prompt(state.provider, send_content) do
@@ -1412,6 +1444,14 @@ defmodule MingaAgent.Session do
     state = append_msg(state, msg)
     state = track_active_tool_start(state, event.tool_call_id, event.name)
     state = set_working_status(state, :tool_executing)
+
+    EventLog.record(
+      state.session_id,
+      :tool_call_started,
+      %{tool_call_id: event.tool_call_id, name: event.name, args: event.args},
+      state.event_log_server
+    )
+
     broadcast(state, {:tool_started, event.name, event.args})
     notify_messages_changed(state)
   end
@@ -1473,6 +1513,14 @@ defmodule MingaAgent.Session do
 
     state = track_active_tool_end(state, event.tool_call_id)
     status = if event.is_error, do: :error, else: :done
+
+    EventLog.record(
+      state.session_id,
+      :tool_call_finished,
+      %{tool_call_id: event.tool_call_id, name: event.name, result: event.result, status: status},
+      state.event_log_server
+    )
+
     broadcast(state, {:tool_ended, event.name, event.result, status})
     notify_messages_changed(state)
   end
@@ -1867,12 +1915,90 @@ defmodule MingaAgent.Session do
 
   @spec broadcast(state(), term()) :: :ok
   defp broadcast(state, event) do
+    record_broadcast_event(state, event)
     session_pid = self()
 
     Enum.each(state.subscribers, fn pid ->
       send(pid, {:agent_event, session_pid, event})
     end)
   end
+
+  @spec record_broadcast_event(state(), term()) :: :ok
+  defp record_broadcast_event(state, event) do
+    case event_log_entry(event) do
+      {event_type, payload} ->
+        EventLog.record(state.session_id, event_type, payload, state.event_log_server)
+
+      nil ->
+        :ok
+    end
+  end
+
+  @spec event_log_entry(term()) :: {EventLog.EventRecord.event_type(), map()} | nil
+  defp event_log_entry({:text_delta, delta}), do: {:assistant_delta, %{delta: delta}}
+  defp event_log_entry({:thinking_delta, delta}), do: {:thinking_delta, %{delta: delta}}
+
+  defp event_log_entry({:tool_started, _name, _args}), do: nil
+
+  defp event_log_entry({:tool_update, tool_call_id, name, partial_result}),
+    do:
+      {:tool_call_updated,
+       %{tool_call_id: tool_call_id, name: name, partial_result: partial_result}}
+
+  defp event_log_entry({:tool_ended, _name, _result, _status}), do: nil
+
+  defp event_log_entry(
+         {:file_changed, path, before_content, after_content, tool_call_id, tool_name}
+       ),
+       do:
+         {:file_edit_proposed,
+          %{
+            path: path,
+            before_content: before_content,
+            after_content: after_content,
+            tool_call_id: tool_call_id,
+            tool_name: tool_name
+          }}
+
+  defp event_log_entry({:approval_pending, approval}),
+    do: {:approval_requested, Map.put(approval, :approval_id, approval.tool_call_id)}
+
+  defp event_log_entry({:approval_resolved, decision}),
+    do: {:approval_resolved, %{decision: decision}}
+
+  defp event_log_entry({:system_message, message, level}),
+    do: {:system_message, %{message: message, level: level}}
+
+  defp event_log_entry({:status_changed, :idle}), do: {:waiting_for_input, %{status: :idle}}
+  defp event_log_entry({:status_changed, status}), do: {:status_changed, %{status: status}}
+
+  defp event_log_entry({:prompt_queued, content, queue}),
+    do: {:prompt_queued, %{content: content, queue: queue}}
+
+  defp event_log_entry(:messages_changed), do: {:message_changed, %{changed: true}}
+  defp event_log_entry({:error, message}), do: {:error, %{message: message}}
+
+  defp event_log_entry({:context_usage, estimated_tokens, context_limit}),
+    do: {:context_usage, %{estimated_tokens: estimated_tokens, context_limit: context_limit}}
+
+  defp event_log_entry({:turn_limit_reached, current, limit}),
+    do: {:turn_limit_reached, %{current: current, limit: limit}}
+
+  defp event_log_entry({:driver_changed, pid}),
+    do: {:driver_changed, %{driver_present: is_pid(pid)}}
+
+  defp event_log_entry({:tool_auto_approved, tool_call_id, name, scope}),
+    do:
+      {:approval_resolved,
+       %{
+         approval_id: tool_call_id,
+         tool_call_id: tool_call_id,
+         name: name,
+         decision: :approve,
+         scope: scope
+       }}
+
+  defp event_log_entry(_event), do: nil
 
   # When content is a ContentPart list (images attached), extract the text
   # for the chat message and pass the full parts to the provider.
@@ -1898,6 +2024,25 @@ defmodule MingaAgent.Session do
       end)
 
     {Message.user(text, attachments), parts}
+  end
+
+  @spec record_user_message(state(), Message.t()) :: :ok
+  defp record_user_message(state, {:user, text}) do
+    EventLog.record(
+      state.session_id,
+      :user_message,
+      %{text: text, attachments: []},
+      state.event_log_server
+    )
+  end
+
+  defp record_user_message(state, {:user, text, attachments}) do
+    EventLog.record(
+      state.session_id,
+      :user_message,
+      %{text: text, attachments: attachments},
+      state.event_log_server
+    )
   end
 
   @spec parse_size_kb(String.t()) :: non_neg_integer()
@@ -2451,6 +2596,13 @@ defmodule MingaAgent.Session do
 
   @impl GenServer
   def terminate(reason, state) do
+    EventLog.record(
+      state.session_id,
+      :session_stopped,
+      %{reason: inspect(reason), status: state.status},
+      state.event_log_server
+    )
+
     dispatch_session_end(state, reason)
 
     case reason do
