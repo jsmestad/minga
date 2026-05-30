@@ -247,6 +247,42 @@ defmodule Minga.Keymap.DefaultsTest do
       assert duplicates == []
     end
 
+    # ── Project bindings (Doom-aligned) ──────────────────────────────────────────
+
+    test "SPC SPC → :project_find_file" do
+      trie = Defaults.leader_trie()
+      assert {:command, :project_find_file} = Bindings.lookup(trie, {32, 0})
+    end
+
+    test "SPC p r → :project_recent_files" do
+      trie = Defaults.leader_trie()
+      {:prefix, p_node} = Bindings.lookup(trie, {?p, 0})
+      assert {:command, :project_recent_files} = Bindings.lookup(p_node, {?r, 0})
+    end
+
+    test "SPC p . → :project_browse" do
+      trie = Defaults.leader_trie()
+      {:prefix, p_node} = Bindings.lookup(trie, {?p, 0})
+      assert {:command, :project_browse} = Bindings.lookup(p_node, {?., 0})
+    end
+
+    test "SPC p T → :test_all" do
+      trie = Defaults.leader_trie()
+      {:prefix, p_node} = Bindings.lookup(trie, {?p, 0})
+      assert {:command, :test_all} = Bindings.lookup(p_node, {?T, 0})
+    end
+
+    test "existing project bindings still resolve to their current commands" do
+      trie = Defaults.leader_trie()
+      {:prefix, p_node} = Bindings.lookup(trie, {?p, 0})
+
+      assert {:command, :project_find_file} = Bindings.lookup(p_node, {?f, 0})
+      assert {:command, :project_switch} = Bindings.lookup(p_node, {?p, 0})
+      assert {:command, :project_add} = Bindings.lookup(p_node, {?a, 0})
+      assert {:command, :project_remove} = Bindings.lookup(p_node, {?d, 0})
+      assert {:command, :project_invalidate} = Bindings.lookup(p_node, {?i, 0})
+    end
+
     # ── Search bindings ─────────────────────────────────────────────────────────
 
     test "SPC s s → :search_buffer" do
@@ -268,6 +304,13 @@ defmodule Minga.Keymap.DefaultsTest do
     end
 
     # ── Negative cases ─────────────────────────────────────────────────────────
+
+    test "SPC p R does not resolve to :project_recent_files" do
+      trie = Defaults.leader_trie()
+      {:prefix, p_node} = Bindings.lookup(trie, {?p, 0})
+      result = Bindings.lookup(p_node, {?R, 0})
+      refute match?({:command, :project_recent_files}, result)
+    end
 
     test "unknown leader prefix returns :not_found" do
       trie = Defaults.leader_trie()

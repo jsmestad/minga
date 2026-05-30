@@ -162,10 +162,24 @@ defmodule Minga.Mode.Normal do
     {:execute, {:leader_start, state.leader_trie}, new_state}
   end
 
-  # SPC pressed while already in leader mode → cancel and restart.
-  def handle_key({@space, 0}, %ModeState{leader_node: _node} = state) do
-    new_state = %{state | leader_node: state.leader_trie, leader_keys: ["SPC"]}
-    {:execute, [:leader_cancel, {:leader_start, state.leader_trie}], new_state}
+  # SPC pressed while already in leader mode: if the current node has a
+  # space binding, execute it (enables SPC SPC); otherwise cancel and restart.
+  def handle_key({@space, 0}, %ModeState{leader_node: node} = state) when is_map(node) do
+    case Bindings.lookup(node, {@space, 0}) do
+      {:command, command} ->
+        new_state = %{state | leader_node: nil, leader_keys: []}
+        {:execute, [command, :leader_cancel], new_state}
+
+      {:prefix, sub_node} ->
+        formatted = Bindings.format_key({@space, 0})
+        new_keys = [formatted | state.leader_keys]
+        new_state = %{state | leader_node: sub_node, leader_keys: new_keys}
+        {:execute, {:leader_progress, sub_node}, new_state}
+
+      :not_found ->
+        new_state = %{state | leader_node: state.leader_trie, leader_keys: ["SPC"]}
+        {:execute, [:leader_cancel, {:leader_start, state.leader_trie}], new_state}
+    end
   end
 
   # Ctrl+D / Ctrl+U while in leader mode → paginate which-key popup.

@@ -31,13 +31,16 @@ The file is plain text, one absolute path per line. You can edit it manually if 
 
 ## Keybindings
 
-All project commands live under the `SPC p` prefix:
+All project commands live under the `SPC p` prefix. These bindings are aligned with Doom Emacs:
 
 | Binding | Command | What it does |
 |---------|---------|-------------|
-| `SPC p f` | Find file in project | Opens the file finder scoped to the current project root |
+| `SPC SPC` | Find file in project | Opens the file finder scoped to the current project root |
+| `SPC p f` | Find file in project | Same as `SPC SPC` |
 | `SPC p p` | Switch project | Shows all known projects; selecting one switches the root and opens the file finder |
-| `SPC p R` | Recent files | Shows recently opened files in the current project, most recent first |
+| `SPC p r` | Recent files | Shows recently opened files in the current project, most recent first |
+| `SPC p .` | Browse project | Opens or focuses the file tree for the current project |
+| `SPC p T` | Test project | Runs the project test command if a test runner is detected |
 | `SPC p i` | Invalidate cache | Clears the cached file list and rebuilds it from disk |
 | `SPC p a` | Add project | Adds the current project root to the known-projects list |
 | `SPC p d` | Remove project | Removes the current project root from the known-projects list |
@@ -46,7 +49,7 @@ All project commands live under the `SPC p` prefix:
 
 ## Recent files
 
-Every file you open gets recorded in a per-project recent files list. `SPC p R` shows this list with the most recently opened file at the top. Recent files are scoped per project, so switching projects shows a different list.
+Every file you open gets recorded in a per-project recent files list. `SPC p r` shows this list with the most recently opened file at the top. Recent files are scoped per project, so switching projects shows a different list.
 
 By default, recent file history is persisted to `~/.config/minga/recent-files` so it survives editor restarts. The file format is tab-separated: one `root<TAB>relative_path` per line.
 
@@ -106,10 +109,14 @@ Minga's project system covers the core projectile workflow but doesn't implement
 |---------|--------|
 | Auto-detect project root | ✅ |
 | Persist known projects | ✅ |
-| `SPC p f` (find file) | ✅ |
+| `SPC SPC` / `SPC p f` (find file) | ✅ |
 | `SPC p p` (switch project) | ✅ |
+| `SPC p r` (recent files in project) | ✅ |
+| `SPC p .` (browse project) | ✅ |
+| `SPC p T` (test project) | ✅ |
 | `SPC p i` (invalidate cache) | ✅ |
-| `SPC p !` (run command in root) | Planned (needs terminal integration) |
-| `SPC p t` (terminal in root) | Planned (needs terminal emulator) |
-| `SPC p R` (recent files in project) | ✅ |
+| `SPC p !` / `SPC p &` (run command in root) | Planned (needs terminal integration) |
+| `SPC p c` (compile project) | Planned (needs compile abstraction) |
+| `SPC p k` (kill project buffers) | Planned |
+| `SPC p s` (save project buffers) | Planned |
 | Per-project file cache | Current project only; switching rebuilds |
