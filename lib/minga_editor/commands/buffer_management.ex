@@ -1809,7 +1809,7 @@ defmodule MingaEditor.Commands.BufferManagement do
 
     case Enum.find_index(visible, &(&1.id == tb.active_id)) do
       nil ->
-        state
+        EditorState.set_status(state, "Active tab not found in visible tabs")
 
       idx ->
         right_tabs = Enum.drop(visible, idx + 1)
@@ -1827,21 +1827,10 @@ defmodule MingaEditor.Commands.BufferManagement do
   defp close_tabs_to_right(state), do: state
 
   @spec close_all_file_tabs(state()) :: state()
-  defp close_all_file_tabs(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
-    active_id = tb.active_id
-    file_tabs = TabBar.visible_file_tabs(tb)
-    others = Enum.reject(file_tabs, &(&1.id == active_id))
-
-    case others do
-      [] ->
-        state
-
-      _ ->
-        tb = remove_tabs(tb, others)
-        MingaEditor.log_to_messages("Closed all tabs")
-        state = EditorState.set_tab_bar(state, tb)
-        execute(state, :force_quit)
-    end
+  defp close_all_file_tabs(%{shell_state: %{tab_bar: %TabBar{}}} = state) do
+    state
+    |> close_other_tabs()
+    |> execute(:quit)
   end
 
   defp close_all_file_tabs(state), do: state

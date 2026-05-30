@@ -625,7 +625,7 @@ struct TabBarView: View {
     }
 
     @ViewBuilder
-    private func agentTabContextMenu(for tab: TabEntry) -> some View {
+    private func closeTabMenuItems(for tab: TabEntry) -> some View {
         Button("Close") {
             encoder?.sendCloseTab(id: tab.id)
         }
@@ -640,18 +640,13 @@ struct TabBarView: View {
     }
 
     @ViewBuilder
+    private func agentTabContextMenu(for tab: TabEntry) -> some View {
+        closeTabMenuItems(for: tab)
+    }
+
+    @ViewBuilder
     private func fileTabContextMenu(for tab: TabEntry) -> some View {
-        Button("Close") {
-            encoder?.sendCloseTab(id: tab.id)
-        }
-        Button("Close Others") {
-            encoder?.sendSelectTab(id: tab.id)
-            encoder?.sendExecuteCommand(name: "close_other_tabs")
-        }
-        Button("Close All") {
-            encoder?.sendSelectTab(id: tab.id)
-            encoder?.sendExecuteCommand(name: "kill_all_buffers")
-        }
+        closeTabMenuItems(for: tab)
         Button("Close to the Right") {
             encoder?.sendSelectTab(id: tab.id)
             encoder?.sendExecuteCommand(name: "close_tabs_to_right")
