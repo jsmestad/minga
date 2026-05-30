@@ -445,7 +445,11 @@ defmodule MingaAgent.Providers.Native do
     {deduped, _seen} =
       Enum.reduce(configs, {[], MapSet.new()}, fn config, {acc, seen} ->
         if MapSet.member?(seen, config.name) do
-          Minga.Log.warning(:agent, "[Agent.Native] duplicate MCP server name ignored: #{config.name}")
+          Minga.Log.warning(
+            :agent,
+            "[Agent.Native] duplicate MCP server name ignored: #{config.name}"
+          )
+
           {acc, seen}
         else
           {[config | acc], MapSet.put(seen, config.name)}
