@@ -51,8 +51,8 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
     EditorState.switch_tab(state, tab_id)
   end
 
-  def on_select(%Item{id: {_id, {:remote, server_name, session_id, remote_pid}}}, state) do
-    Agent.connect_remote_session(state, server_name, session_id, remote_pid)
+  def on_select(%Item{id: {_id, {:remote, server_name, session_id, remote_pid, token}}}, state) do
+    Agent.connect_remote_session(state, server_name, session_id, remote_pid, token)
   end
 
   def on_select(%Item{id: {session_id, :disk}}, state) do
@@ -113,7 +113,7 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
 
   @spec remote_sessions_for_node({String.t(), node(), atom()}) :: [Item.t()]
   defp remote_sessions_for_node({server_name, remote_node, _status}) do
-    case :erpc.call(remote_node, MingaAgent.SessionManager, :list_sessions, [], 5_000) do
+    case :erpc.call(remote_node, MingaAgent.RemoteAPI, :list_sessions, [], 5_000) do
       sessions -> Enum.map(sessions, &remote_session_item(server_name, &1))
     end
   catch
@@ -126,10 +126,17 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
       []
   end
 
-  @spec remote_session_item(String.t(), {String.t(), pid(), Session.metadata()}) :: Item.t()
-  defp remote_session_item(server_name, {session_id, remote_pid, meta}) do
+  @spec remote_session_item(String.t(), MingaAgent.RemoteAPI.session_info()) :: Item.t()
+  defp remote_session_item(server_name, %{
+         session_id: session_id,
+         pid: remote_pid,
+         token: token,
+         metadata: meta
+       }) do
     %Item{
-      id: {{:remote, server_name, session_id}, {:remote, server_name, session_id, remote_pid}},
+      id:
+        {{:remote, server_name, session_id},
+         {:remote, server_name, session_id, remote_pid, token}},
       label: "[#{server_name}] #{truncate_prompt(meta.title || meta.first_prompt || session_id)}",
       description: remote_description(meta),
       annotation: Atom.to_string(meta.status)

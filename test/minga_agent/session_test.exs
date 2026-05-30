@@ -351,6 +351,15 @@ defmodule MingaAgent.SessionTest do
     %{session: session}
   end
 
+  @spec idle_process() :: pid()
+  defp idle_process do
+    spawn(fn ->
+      receive do
+        :stop -> :ok
+      end
+    end)
+  end
+
   describe "initial state" do
     test "starts idle with a system message and zero usage", %{session: session} do
       assert Session.status(session) == :idle
@@ -361,6 +370,45 @@ defmodule MingaAgent.SessionTest do
       assert usage.input == 0
       assert usage.output == 0
       assert usage.cost == 0.0
+    end
+  end
+
+  describe "remote attachment roles" do
+    test "first subscriber is driver and later subscribers are viewers", %{session: session} do
+      viewer = idle_process()
+      on_exit(fn -> Process.exit(viewer, :kill) end)
+
+      assert Session.subscriber_role(session, self()) == :driver
+      assert :ok = Session.subscribe(session, viewer)
+      assert Session.subscriber_role(session, viewer) == :viewer
+    end
+
+    test "viewer cannot send prompts while driver can", %{session: session} do
+      viewer = idle_process()
+      on_exit(fn -> Process.exit(viewer, :kill) end)
+
+      assert :ok = Session.subscribe(session, viewer, role: :viewer)
+      assert {:error, :not_driver} = Session.send_prompt_as(session, viewer, "nope")
+    end
+
+    test "driver role is vacated when the driver process dies" do
+      {:ok, session} = Session.start_link(provider: MockProvider, provider_opts: [])
+      driver = idle_process()
+      viewer = idle_process()
+
+      on_exit(fn ->
+        Process.exit(driver, :kill)
+        Process.exit(viewer, :kill)
+      end)
+
+      assert :ok = Session.subscribe(session, driver, role: :driver)
+      assert :ok = Session.subscribe(session, viewer, role: :viewer)
+
+      Process.exit(driver, :kill)
+      :sys.get_state(session)
+
+      assert :ok = Session.claim_driver(session, viewer)
+      assert Session.subscriber_role(session, viewer) == :driver
     end
   end
 

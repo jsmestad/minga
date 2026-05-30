@@ -16,6 +16,7 @@ defmodule MingaEditor.Commands.AgentSubStates do
   alias MingaEditor.Agent.View.Preview
   alias Minga.Buffer
   alias MingaEditor.Commands.Agent, as: AgentCommands
+  alias MingaEditor.Commands.AgentSession
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
@@ -279,7 +280,7 @@ defmodule MingaEditor.Commands.AgentSubStates do
     approval = agent.pending_approval
 
     if is_pid(session) and is_map(approval) do
-      Session.respond_to_approval(session, decision)
+      AgentSession.respond_to_approval_pid(session, decision)
       update_agent(state, &AgentState.clear_pending_approval/1)
     else
       state

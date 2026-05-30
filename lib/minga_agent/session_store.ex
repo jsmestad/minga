@@ -35,6 +35,7 @@ defmodule MingaAgent.SessionStore do
           required(:usage) => MingaAgent.TurnUsage.t(),
           optional(:last_message_at) => String.t(),
           optional(:title) => String.t(),
+          optional(:remote_token) => String.t() | nil,
           optional(:provider_name) => String.t(),
           optional(:branches) => [MingaAgent.Branch.t()],
           optional(:memory) => String.t() | nil
@@ -161,6 +162,7 @@ defmodule MingaAgent.SessionStore do
 
     %{
       "id" => data.id,
+      "remote_token" => Map.get(data, :remote_token),
       "timestamp" => timestamp,
       "last_message_at" => Map.get(data, :last_message_at, timestamp),
       "title" => Map.get(data, :title) || title_from_messages(messages),
@@ -225,6 +227,7 @@ defmodule MingaAgent.SessionStore do
 
     session = %{
       id: data["id"],
+      remote_token: data["remote_token"],
       timestamp: timestamp,
       last_message_at: data["last_message_at"] || timestamp,
       title: data["title"] || title_from_messages(messages),
