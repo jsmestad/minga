@@ -31,13 +31,12 @@ defmodule MingaEditor.UI.Picker.BufferSourceTest do
     pid
   end
 
-  defp fake_state(buffers, opts \\ []) do
+  defp fake_state(buffers) do
     %Context{
       buffers: %Buffers{
         list: buffers,
         active: nil,
-        active_index: 0,
-        messages: Keyword.get(opts, :messages)
+        active_index: 0
       },
       editing: VimState.new(),
       file_tree: nil,
@@ -193,7 +192,7 @@ defmodule MingaEditor.UI.Picker.BufferSourceTest do
 
       labels = Enum.map(candidates, fn %Item{label: label} -> label end)
 
-      assert length(candidates) == 1
+      refute Enum.any?(labels, &String.contains?(&1, "internal"))
       assert Enum.any?(labels, &String.contains?(&1, "*Messages*"))
     end
   end
@@ -214,19 +213,18 @@ defmodule MingaEditor.UI.Picker.BufferSourceTest do
       candidates = BufferAllSource.candidates(fake_state([file_buf, special_buf]))
       labels = Enum.map(candidates, fn %Item{label: label} -> label end)
 
-      assert length(candidates) == 2
       assert Enum.any?(labels, &String.contains?(&1, "*Messages*"))
+      assert length(candidates) >= 2
     end
   end
 
   describe "extra special buffers not in list" do
-    test "SPC b B includes messages even when not in buffer list" do
+    test "SPC b B includes messages singleton even when not in buffer list" do
       file_buf = start_buffer(content: "code")
-      messages = start_buffer(content: "", buffer_name: "*Messages*")
+      singleton = Minga.Log.MessagesBuffer.pid()
+      assert singleton != nil
 
-      state = fake_state([file_buf], messages: messages)
-      candidates = BufferAllSource.candidates(state)
-
+      candidates = BufferAllSource.candidates(fake_state([file_buf]))
       labels = Enum.map(candidates, fn %Item{label: label} -> label end)
 
       assert length(candidates) == 2
@@ -234,32 +232,26 @@ defmodule MingaEditor.UI.Picker.BufferSourceTest do
     end
 
     test "extra special buffers use {:pid, pid} keys" do
-      messages = start_buffer(content: "", buffer_name: "*Messages*")
+      singleton = Minga.Log.MessagesBuffer.pid()
 
-      state = fake_state([], messages: messages)
-      candidates = BufferAllSource.candidates(state)
-
+      candidates = BufferAllSource.candidates(fake_state([]))
       assert [%Item{id: key}] = candidates
-      assert {:pid, ^messages} = key
+      assert {:pid, ^singleton} = key
     end
 
-    test "does not duplicate special buffers already in the list" do
-      messages = start_buffer(content: "", buffer_name: "*Messages*")
+    test "does not duplicate singleton already in the list" do
+      singleton = Minga.Log.MessagesBuffer.pid()
 
-      state = fake_state([messages], messages: messages)
-      candidates = BufferAllSource.candidates(state)
-
+      candidates = BufferAllSource.candidates(fake_state([singleton]))
       assert length(candidates) == 1
     end
 
     test "SPC b b does not include extra special buffers" do
       file_buf = start_buffer(content: "code")
-      messages = start_buffer(content: "", buffer_name: "*Messages*")
 
-      state = fake_state([file_buf], messages: messages)
-      candidates = BufferSource.candidates(state)
-
+      candidates = BufferSource.candidates(fake_state([file_buf]))
       labels = Enum.map(candidates, fn %Item{label: label} -> label end)
+
       assert length(candidates) == 1
       refute Enum.any?(labels, &String.contains?(&1, "*Messages*"))
     end
@@ -267,33 +259,29 @@ defmodule MingaEditor.UI.Picker.BufferSourceTest do
 
   describe "unlisted special buffers" do
     test "SPC b B shows unlisted special buffers that are in the list" do
-      messages = start_buffer(content: "", buffer_name: "*Messages*", unlisted: true)
+      singleton = Minga.Log.MessagesBuffer.pid()
 
-      state = fake_state([messages], messages: messages)
-      candidates = BufferAllSource.candidates(state)
-
+      candidates = BufferAllSource.candidates(fake_state([singleton]))
       labels = Enum.map(candidates, fn %Item{label: label} -> label end)
+
       assert Enum.any?(labels, &String.contains?(&1, "*Messages*"))
     end
 
-    test "SPC b B shows unlisted special buffers from struct fields" do
-      messages =
-        start_buffer(content: "", buffer_name: "*Messages*", unlisted: true, persistent: true)
+    test "SPC b B shows unlisted singleton when not in list" do
+      singleton = Minga.Log.MessagesBuffer.pid()
+      assert singleton != nil
 
-      state = fake_state([], messages: messages)
-      candidates = BufferAllSource.candidates(state)
-
+      candidates = BufferAllSource.candidates(fake_state([]))
       labels = Enum.map(candidates, fn %Item{label: label} -> label end)
+
       assert length(candidates) == 1
       assert Enum.any?(labels, &String.contains?(&1, "*Messages*"))
     end
 
     test "SPC b b still hides unlisted special buffers" do
-      messages = start_buffer(content: "", buffer_name: "*Messages*", unlisted: true)
+      singleton = Minga.Log.MessagesBuffer.pid()
 
-      state = fake_state([messages], messages: messages)
-      candidates = BufferSource.candidates(state)
-
+      candidates = BufferSource.candidates(fake_state([singleton]))
       assert candidates == []
     end
 
@@ -301,30 +289,30 @@ defmodule MingaEditor.UI.Picker.BufferSourceTest do
       internal = start_buffer(content: "", buffer_name: "internal", unlisted: true)
 
       candidates = BufferAllSource.candidates(fake_state([internal]))
-      assert candidates == []
+      # Singleton still shows up as an extra special buffer
+      singleton = Minga.Log.MessagesBuffer.pid()
+      singleton_candidates = Enum.filter(candidates, fn %Item{id: id} -> id != {:pid, singleton} end)
+      assert singleton_candidates == []
     end
   end
 
   describe "edge case: all buffers are special" do
-    test "SPC b b returns empty list even with special buffers on struct" do
-      messages = start_buffer(content: "", buffer_name: "*Messages*")
+    test "SPC b b returns empty list even with singleton in list" do
+      singleton = Minga.Log.MessagesBuffer.pid()
 
-      candidates = BufferSource.candidates(fake_state([], messages: messages))
+      candidates = BufferSource.candidates(fake_state([singleton]))
       assert candidates == []
     end
 
-    test "SPC b B shows special buffers from struct fields" do
-      messages = start_buffer(content: "", buffer_name: "*Messages*")
-
-      candidates = BufferAllSource.candidates(fake_state([], messages: messages))
-
+    test "SPC b B shows singleton from extra special buffers" do
+      candidates = BufferAllSource.candidates(fake_state([]))
       assert length(candidates) == 1
     end
 
     test "SPC b B shows special buffers already in the list" do
-      messages = start_buffer(content: "", buffer_name: "*Messages*")
+      singleton = Minga.Log.MessagesBuffer.pid()
 
-      candidates = BufferAllSource.candidates(fake_state([messages]))
+      candidates = BufferAllSource.candidates(fake_state([singleton]))
       assert length(candidates) == 1
     end
   end

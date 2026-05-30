@@ -383,20 +383,6 @@ defmodule MingaEditor.StateTest do
       assert removed_active.workspace.buffers.active == buf1
       assert removed_active.workspace.buffers.list == [buf1]
 
-      messages = start_buffer("messages")
-
-      special_state =
-        put_in(new_state().workspace.buffers, %Buffers{
-          messages: messages,
-          list: [messages],
-          active: messages,
-          active_index: 0
-        })
-        |> EditorState.monitor_buffer(messages)
-        |> EditorState.remove_dead_buffer(messages)
-
-      assert special_state.workspace.buffers.messages == nil
-      assert special_state.workspace.buffers.list == []
     end
   end
 

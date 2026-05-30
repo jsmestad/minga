@@ -22,27 +22,12 @@ defmodule MingaEditor.State.BuffersTest do
       assert result.active_index == 0
     end
 
-    test "clears messages slot when it matches" do
-      bs = %Buffers{list: [:a, :msg], active: :a, active_index: 0, messages: :msg}
-      result = Buffers.remove(bs, :msg)
-
-      assert result.messages == nil
-      refute :msg in result.list
-    end
-
     test "clears help slot when it matches" do
       bs = %Buffers{list: [:a, :h], active: :a, active_index: 0, help: :h}
       result = Buffers.remove(bs, :h)
 
       assert result.help == nil
       refute :h in result.list
-    end
-
-    test "preserves messages slot when it does not match" do
-      bs = %Buffers{list: [:a, :b], active: :b, active_index: 1, messages: :a}
-      result = Buffers.remove(bs, :b)
-
-      assert result.messages == :a
     end
 
     test "no-op when pid is not present" do

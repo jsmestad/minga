@@ -281,13 +281,6 @@ defmodule MingaEditor.State.BufferLifecycleTest do
       assert closed_only.workspace.buffers.active == nil
       refute Map.has_key?(closed_only.buffer_monitors, only_buf)
 
-      msg_buf = start_buffer("")
-
-      special_state =
-        state_for_buffer(msg_buf, messages: msg_buf) |> EditorState.monitor_buffer(msg_buf)
-
-      {closed_special, _effects} = EditorState.close_buffer_pure(special_state, msg_buf)
-      assert closed_special.workspace.buffers.messages == nil
     end
 
     test "closing buffers scrubs inactive tab snapshots, including tabs whose only buffer died" do
@@ -348,8 +341,7 @@ defmodule MingaEditor.State.BufferLifecycleTest do
     buffers = %Buffers{
       active: buf,
       list: Keyword.get(opts, :list, [buf]),
-      active_index: 0,
-      messages: Keyword.get(opts, :messages)
+      active_index: 0
     }
 
     %EditorState{

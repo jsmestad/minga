@@ -252,7 +252,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
     %MingaEditor.Session.State{
       viewport: Viewport.new(24, 80),
       editing: VimState.new(),
-      buffers: %Buffers{active: buffer, list: [buffer], active_index: 0, messages: buffer},
+      buffers: %Buffers{active: buffer, list: [buffer], active_index: 0},
       windows: %Windows{
         tree: WindowTree.new(1),
         map: %{1 => Window.new(1, buffer, 24, 80)},

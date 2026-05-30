@@ -187,8 +187,7 @@ defmodule MingaEditor.Renderer.ServerTest do
       buffers: %MingaEditor.State.Buffers{
         active: buf,
         list: [buf],
-        active_index: 0,
-        messages: buf
+        active_index: 0
       },
       viewport: Viewport.new(24, 80),
       editing: MingaEditor.VimState.new(),

@@ -69,8 +69,6 @@ defmodule MingaEditor.Startup do
     subscribe_to_parser(Keyword.get(opts, :parser_manager))
     FileWatcherHelpers.maybe_watch_buffer(buffer)
 
-    messages_buf = Minga.Log.messages_buffer()
-
     log_safe_mode_startup()
 
     # Always ensure an active buffer exists. The editor's render pipeline,
@@ -124,8 +122,7 @@ defmodule MingaEditor.Startup do
         buffers: %Buffers{
           active: active_buf,
           list: buffers,
-          active_index: 0,
-          messages: messages_buf
+          active_index: 0
         },
         viewport: Viewport.new(height, width),
         editing: VimState.new(),

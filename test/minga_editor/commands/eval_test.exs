@@ -8,34 +8,22 @@ defmodule MingaEditor.Commands.EvalTest do
   alias MingaEditor.State.Buffers
   alias MingaEditor.Viewport
 
-  # ── Test helpers ──────────────────────────────────────────────────────────────
-
-  defp start_messages_buffer do
-    {:ok, pid} =
-      DynamicSupervisor.start_child(
-        Minga.Buffer.Supervisor,
-        {BufferProcess,
-         content: "", buffer_name: "*Messages*", read_only: true, unlisted: true, persistent: true}
-      )
-
-    pid
-  end
-
-  defp build_state(messages_buf \\ nil) do
+  defp build_state do
     %EditorState{
       port_manager: nil,
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
-        buffers: %Buffers{messages: messages_buf}
+        buffers: %Buffers{}
       }
     }
   end
 
-  defp messages_content(buf) do
-    BufferProcess.content(buf)
+  defp singleton_content do
+    case Minga.Log.MessagesBuffer.pid() do
+      nil -> ""
+      pid -> BufferProcess.content(pid)
+    end
   end
-
-  # ── Tests ─────────────────────────────────────────────────────────────────────
 
   describe "simple expression evaluation" do
     test "evaluates arithmetic and shows result on status line" do
@@ -104,27 +92,25 @@ defmodule MingaEditor.Commands.EvalTest do
 
   describe "messages buffer logging" do
     test "result is logged to messages buffer" do
-      messages_buf = start_messages_buffer()
-      state = build_state(messages_buf)
+      state = build_state()
       Eval.execute(state, {:eval_expression, "42"})
 
-      content = messages_content(messages_buf)
+      content = singleton_content()
       assert content =~ "Eval: 42"
       assert content =~ "=> 42"
     end
 
     test "error is logged to messages buffer" do
-      messages_buf = start_messages_buffer()
-      state = build_state(messages_buf)
+      state = build_state()
       Eval.execute(state, {:eval_expression, "1 / 0"})
 
-      content = messages_content(messages_buf)
+      content = singleton_content()
       assert content =~ "Eval error: 1 / 0"
       assert content =~ "ArithmeticError"
     end
 
-    test "works without messages buffer (nil)" do
-      state = build_state(nil)
+    test "works without messages buffer singleton" do
+      state = build_state()
       result = Eval.execute(state, {:eval_expression, "1 + 1"})
       assert result.shell_state.status_msg == "2"
     end

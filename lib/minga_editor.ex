@@ -254,7 +254,7 @@ defmodule MingaEditor do
     all_initial_pids =
       state.workspace.buffers.list ++
         Enum.filter(
-          [state.workspace.buffers.messages, state.workspace.buffers.help],
+          [state.workspace.buffers.help],
           &is_pid/1
         )
 

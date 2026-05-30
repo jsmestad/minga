@@ -38,26 +38,27 @@ defmodule MingaEditor.MessageLog do
   Warning-level messages get a `[WARN]` prefix in the gap buffer for TUI visibility.
   """
   @spec log(EditorState.t(), String.t(), MessageStore.level() | nil) :: EditorState.t()
-  def log(%{workspace: %{buffers: %{messages: nil}}} = state, _text, _level), do: state
-
-  def log(%{workspace: %{buffers: %{messages: buf}}} = state, text, level_override) do
-    # Parse prefix for subsystem detection (always) and level (when no override)
+  def log(state, text, level_override) do
     {parsed_level, subsystem, _clean_text} = MessageStore.parse_prefix(text)
     level = level_override || parsed_level
 
-    # Add [WARN]/[ERROR] prefix for TUI visibility when level is overridden
-    display_text =
-      case level_override do
-        :warning -> "[WARN] #{text}"
-        :error -> "[ERROR] #{text}"
-        _ -> text
-      end
+    case Minga.Log.MessagesBuffer.pid() do
+      nil ->
+        :ok
 
-    time = Calendar.strftime(DateTime.utc_now(), "%H:%M:%S")
-    Buffer.append(buf, "[#{time}] #{display_text}\n")
-    maybe_trim(buf)
+      buf ->
+        display_text =
+          case level_override do
+            :warning -> "[WARN] #{text}"
+            :error -> "[ERROR] #{text}"
+            _ -> text
+          end
 
-    # Dual-write: also append to the structured store for GUI rendering.
+        time = Calendar.strftime(DateTime.utc_now(), "%H:%M:%S")
+        Buffer.append(buf, "[#{time}] #{display_text}\n")
+        maybe_trim(buf)
+    end
+
     %{state | message_store: MessageStore.append(state.message_store, text, level, subsystem)}
   end
 
