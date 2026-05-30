@@ -155,9 +155,19 @@ defmodule MingaEditor.State.Workspace do
   end
 
   @doc "Sets durable remote metadata from its fields."
-  @spec put_remote_session(t(), String.t(), String.t(), connection_status()) :: t()
-  def put_remote_session(%__MODULE__{} = workspace, server_name, session_id, status \\ :connected) do
-    set_remote_session(workspace, RemoteSession.new(server_name, session_id, status))
+  @spec put_remote_session(t(), String.t(), String.t(), connection_status(), non_neg_integer()) ::
+          t()
+  def put_remote_session(
+        %__MODULE__{} = workspace,
+        server_name,
+        session_id,
+        status \\ :connected,
+        last_seen_event_id \\ 0
+      ) do
+    set_remote_session(
+      workspace,
+      RemoteSession.new(server_name, session_id, status, last_seen_event_id)
+    )
   end
 
   @doc "Updates durable remote connection status when the workspace has remote metadata."

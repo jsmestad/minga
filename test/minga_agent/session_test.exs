@@ -360,6 +360,27 @@ defmodule MingaAgent.SessionTest do
     end)
   end
 
+  @spec wait_until_subscriber_role(
+          GenServer.server(),
+          pid(),
+          Session.attachment_role() | nil,
+          non_neg_integer()
+        ) :: :ok
+  defp wait_until_subscriber_role(session, pid, expected_role, attempts \\ 20)
+
+  defp wait_until_subscriber_role(session, pid, expected_role, attempts) when attempts > 0 do
+    case Session.subscriber_role(session, pid) do
+      ^expected_role ->
+        :ok
+
+      _other ->
+        :sys.get_state(session)
+        wait_until_subscriber_role(session, pid, expected_role, attempts - 1)
+    end
+  end
+
+  defp wait_until_subscriber_role(_session, _pid, _expected_role, 0), do: :ok
+
   describe "initial state" do
     test "starts idle with a system message and zero usage", %{session: session} do
       assert Session.status(session) == :idle
@@ -404,8 +425,10 @@ defmodule MingaAgent.SessionTest do
       assert :ok = Session.subscribe(session, driver, role: :driver)
       assert :ok = Session.subscribe(session, viewer, role: :viewer)
 
+      ref = Process.monitor(driver)
       Process.exit(driver, :kill)
-      :sys.get_state(session)
+      assert_receive {:DOWN, ^ref, :process, ^driver, :killed}, @event_timeout
+      wait_until_subscriber_role(session, driver, nil)
 
       assert :ok = Session.claim_driver(session, viewer)
       assert Session.subscriber_role(session, viewer) == :driver
@@ -1009,6 +1032,20 @@ defmodule MingaAgent.SessionTest do
           assert Enum.any?(messages, &match?({:system, "Denied shell" <> _, :info}, &1))
         end
       end
+    end
+
+    test "remote driver can resolve a pending approval by stable id" do
+      session = start_subscribed_session()
+      driver = self()
+      assert :ok = Session.subscribe(session, driver, role: :driver)
+      send_approval(session)
+
+      assert {:error, :approval_not_found} =
+               Session.respond_to_approval_as(session, driver, "other-tc", :approve)
+
+      assert :ok = Session.respond_to_approval_as(session, driver, "tc1", :approve)
+      assert_receive {:tool_approval_response, "tc1", :approve}, @event_timeout
+      assert_receive {:agent_event, _, {:approval_resolved, :approve}}, @event_timeout
     end
 
     test "approve_session and approve_turn set the matching tool trust scope" do

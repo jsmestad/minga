@@ -261,7 +261,7 @@ defmodule MingaEditor.Commands.AgentSubStates do
     approval = agent.pending_approval
 
     if is_pid(session) and is_map(approval) do
-      AgentSession.respond_to_approval_pid(session, decision)
+      AgentSession.respond_to_approval_pid(session, approval.tool_call_id, decision)
       update_agent(state, &AgentState.clear_pending_approval/1)
     else
       state
