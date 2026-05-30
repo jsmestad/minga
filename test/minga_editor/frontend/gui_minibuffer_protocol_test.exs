@@ -96,6 +96,24 @@ defmodule MingaEditor.Frontend.GUIMinibufferProtocolTest do
                140, 2::16, "wq", 13::16, "Save and quit", 0::16, 1, 0::16>> = result
     end
 
+    test "generic text prompt mode encodes with cursor" do
+      data = %MinibufferData{
+        visible: true,
+        mode: 10,
+        cursor_pos: 6,
+        prompt: "Add project: ",
+        input: "~/code",
+        context: "",
+        selected_index: 0,
+        candidates: []
+      }
+
+      result = ProtocolGUI.encode_gui_minibuffer(data)
+
+      assert <<@op_gui_minibuffer, 1, 10, 6::16, 13, "Add project: ", 6::16, "~/code", 0::16, "",
+               0::16, 0::16, 0::16>> = result
+    end
+
     test "substitute confirm mode with no cursor" do
       data = %MinibufferData{
         visible: true,

@@ -47,6 +47,26 @@ defmodule MingaEditor.RenderModel.UI.MinibufferBuilderTest do
       assert [%Candidate{label: "write", annotation: "cmd"}] = model.candidates
     end
 
+    test "maps generic text prompt mode" do
+      data = %MinibufferData{
+        visible: true,
+        mode: 10,
+        cursor_pos: 6,
+        prompt: "Add project: ",
+        input: "~/code",
+        context: "",
+        selected_index: 0,
+        candidates: [],
+        total_candidates: 0
+      }
+
+      model = MinibufferBuilder.build(data)
+
+      assert %Minibuffer{visible?: true, mode: :text_prompt, cursor_pos: 6} = model
+      assert model.prompt == "Add project: "
+      assert model.input == "~/code"
+    end
+
     test "semantic model changes when input changes" do
       base = %MinibufferData{
         visible: true,

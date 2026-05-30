@@ -90,6 +90,36 @@ defmodule Minga.Frontend.Adapter.GUI.MinibufferEncoderTest do
       assert annotation == "SPC f s"
     end
 
+    test "encodes text prompt mode" do
+      model = %Minibuffer{
+        visible?: true,
+        mode: :text_prompt,
+        cursor_pos: 6,
+        prompt: "Add project: ",
+        input: "~/code",
+        context: "",
+        selected_index: 0,
+        candidates: [],
+        total_candidates: 0
+      }
+
+      legacy = %MinibufferData{
+        visible: true,
+        mode: 10,
+        cursor_pos: 6,
+        prompt: "Add project: ",
+        input: "~/code",
+        context: "",
+        selected_index: 0,
+        candidates: [],
+        total_candidates: 0
+      }
+
+      {cmd, _caches} = MinibufferEncoder.encode(model, Caches.new())
+
+      assert cmd == ProtocolGUI.encode_gui_minibuffer(legacy)
+    end
+
     test "returns nil on second call with same semantic data" do
       model = %Minibuffer{}
 

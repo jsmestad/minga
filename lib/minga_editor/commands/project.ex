@@ -18,7 +18,7 @@ defmodule MingaEditor.Commands.Project do
     {:project_find_file, "Find file in project", true},
     {:project_invalidate, "Invalidate project cache", true},
     {:project_add, "Add project", false},
-    {:project_remove, "Remove project", true},
+    {:project_remove, "Remove project", false},
     {:project_switch, "Switch project", false},
     {:project_recent_files, "Recent files", false}
   ]
@@ -50,25 +50,7 @@ defmodule MingaEditor.Commands.Project do
   end
 
   def execute(state, :project_remove) do
-    root = project_root()
-
-    case root do
-      nil ->
-        EditorState.set_status(state, "No project root detected")
-
-      path ->
-        Project.remove(path)
-        EditorState.set_status(state, "Removed project: #{Path.basename(path)}")
-    end
-  catch
-    :exit, _ -> state
-  end
-
-  @spec project_root() :: String.t() | nil
-  defp project_root do
-    Project.root()
-  catch
-    :exit, _ -> nil
+    PickerUI.open(state, MingaEditor.UI.Picker.ProjectRemoveSource)
   end
 
   commands(@command_specs)

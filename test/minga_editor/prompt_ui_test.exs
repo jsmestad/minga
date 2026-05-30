@@ -259,6 +259,17 @@ defmodule MingaEditor.PromptUITest do
     end
   end
 
+  describe "render/2" do
+    test "renders prompt using current picker theme fields" do
+      state = base_state() |> PromptUI.open(TestHandler, default: "~/code")
+
+      {draws, cursor} = PromptUI.render(state, Viewport.new(24, 80))
+
+      assert length(draws) == 2
+      assert cursor == {23, String.length("Test prompt: ~/code")}
+    end
+  end
+
   describe "close/1" do
     test "clears prompt state" do
       state =
