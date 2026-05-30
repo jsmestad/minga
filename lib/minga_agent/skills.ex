@@ -210,6 +210,13 @@ defmodule MingaAgent.Skills do
   end
 
   @spec extract_manifest_skills({atom(), map()}) :: [String.t()]
+  defp extract_manifest_skills({_name, %{path: ext_path, manifest: %{skills: paths}}})
+       when paths != [] and is_binary(ext_path) do
+    Enum.map(paths, fn skill_path ->
+      if Path.type(skill_path) == :absolute, do: skill_path, else: Path.join(ext_path, skill_path)
+    end)
+  end
+
   defp extract_manifest_skills({_name, %{manifest: %{skills: paths}}}) when paths != [], do: paths
   defp extract_manifest_skills(_entry), do: []
 
