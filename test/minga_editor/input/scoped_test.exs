@@ -682,6 +682,22 @@ defmodule MingaEditor.Input.ScopedTest do
     end
   end
 
+  describe "editor panel — slash command completion sub-state" do
+    test "filters commands and accepts without inserting an @ mention" do
+      state = base_state(keymap_scope: :editor, panel_visible: true, input_focused: true)
+
+      {:handled, state} = walk_surface_handlers(state, ?/, 0)
+      {:handled, state} = walk_surface_handlers(state, ?m, 0)
+      {:handled, state} = walk_surface_handlers(state, ?o, 0)
+      comp = AgentAccess.panel(state).mention_completion
+      assert comp.slash_candidates == [{"model", "Set the model: /model <name>"}]
+
+      {:handled, state} = walk_surface_handlers(state, 13, 0)
+      assert Minga.Buffer.content(AgentAccess.panel(state).prompt_buffer) == "/model "
+      assert AgentAccess.panel(state).mention_completion == nil
+    end
+  end
+
   describe "editor scope — panel mention completion" do
     setup do
       {:ok, agent_buf} = BufferProcess.start_link(content: "chat")

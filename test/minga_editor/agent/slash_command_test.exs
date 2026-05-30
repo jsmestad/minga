@@ -39,6 +39,33 @@ defmodule MingaEditor.Agent.SlashCommandTest do
     @impl MingaAgent.Provider
     def get_state(_pid), do: {:ok, %{model: nil, is_streaming: false, token_usage: nil}}
 
+    @impl MingaAgent.Provider
+    def get_available_models(_pid) do
+      {:ok,
+       [
+         %{
+           "id" => "anthropic:claude-sonnet-4",
+           "name" => "Claude Sonnet 4",
+           "provider" => "anthropic",
+           "context_window" => 200_000,
+           "cost" => nil
+         },
+         %{
+           "id" => "openai:gpt-4o",
+           "name" => "GPT-4o",
+           "provider" => "openai",
+           "context_window" => 128_000,
+           "cost" => nil
+         }
+       ]}
+    end
+
+    @impl MingaAgent.Provider
+    def cycle_model(_pid), do: {:ok, %{"model" => "openai:gpt-4o", "index" => 1, "total" => 1}}
+
+    @impl MingaAgent.Provider
+    def set_model(_pid, _model), do: :ok
+
     @impl GenServer
     def init(_opts), do: {:ok, %{}}
   end
@@ -124,6 +151,25 @@ defmodule MingaEditor.Agent.SlashCommandTest do
     end
   end
 
+  describe "completion_candidates/2" do
+    test "returns slash command candidates before an argument" do
+      labels = SlashCommand.completion_candidates(mock_state(), "mo") |> Enum.map(& &1.label)
+      assert "model" in labels
+      refute "help" in labels
+    end
+
+    test "returns configured model candidates after model and a space" do
+      Minga.Config.set_option(:agent_models, ["anthropic:claude-sonnet-4", "openai:gpt-4o"])
+
+      try do
+        candidates = SlashCommand.completion_candidates(mock_state(), "model gpt")
+        assert [%{label: "openai:gpt-4o", insert: "model openai:gpt-4o"}] = candidates
+      after
+        Minga.Config.set_option(:agent_models, [])
+      end
+    end
+  end
+
   describe "execute/2" do
     # Build a minimal state that the slash commands can work with
     defp mock_state(opts \\ []) do
@@ -200,8 +246,10 @@ defmodule MingaEditor.Agent.SlashCommandTest do
       assert state.shell_state.status_msg == "No agent session"
     end
 
-    test "/model without name returns error" do
-      assert {:error, "Usage: /model <name>"} = SlashCommand.execute(mock_state(), "/model")
+    test "/model without name opens the model picker" do
+      {:ok, state} = SlashCommand.execute(mock_state(session: start_session()), "/model")
+      assert {:picker, %{picker_ui: picker_ui}} = state.shell_state.modal
+      assert picker_ui.source == MingaEditor.UI.Picker.AgentModelSource
     end
 
     test "/model with name sets model (triggers restart)" do

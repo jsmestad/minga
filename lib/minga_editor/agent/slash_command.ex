@@ -11,6 +11,7 @@ defmodule MingaEditor.Agent.SlashCommand do
   alias MingaAgent.Credentials
   alias MingaAgent.Instructions
   alias MingaAgent.Memory
+  alias MingaAgent.ModelCatalog
   alias MingaAgent.Session
   alias MingaAgent.SessionExport
   alias MingaAgent.Skills
@@ -28,6 +29,13 @@ defmodule MingaEditor.Agent.SlashCommand do
 
   @typedoc "A registered slash command."
   @type command :: Command.t()
+
+  @typedoc "A completion candidate for agent slash input."
+  @type completion_candidate :: %{
+          label: String.t(),
+          insert: String.t(),
+          description: String.t()
+        }
 
   @commands [
     %Command{name: "clear", description: "Start a fresh session"},
@@ -106,6 +114,20 @@ defmodule MingaEditor.Agent.SlashCommand do
     Enum.filter(@commands, fn cmd -> String.starts_with?(cmd.name, clean) end)
   end
 
+  @doc "Returns completion candidates for the current slash input, without the leading slash."
+  @spec completion_candidates(state(), String.t()) :: [completion_candidate()]
+  def completion_candidates(state, input) when is_binary(input) do
+    if model_argument_input?(input) do
+      input
+      |> model_argument_prefix()
+      |> model_completion_candidates(state)
+    else
+      input
+      |> completions()
+      |> Enum.map(&command_completion_candidate/1)
+    end
+  end
+
   @doc """
   Parses and executes a slash command from raw input text.
 
@@ -119,6 +141,154 @@ defmodule MingaEditor.Agent.SlashCommand do
   end
 
   def execute(_state, _text), do: {:error, "Not a slash command"}
+
+  @spec command_completion_candidate(command()) :: completion_candidate()
+  defp command_completion_candidate(%Command{name: name, description: description}) do
+    %{label: name, insert: name, description: description}
+  end
+
+  @spec model_argument_input?(String.t()) :: boolean()
+  defp model_argument_input?(input), do: String.match?(input, ~r/^model\s+/)
+
+  @spec model_argument_prefix(String.t()) :: String.t()
+  defp model_argument_prefix(input) do
+    input
+    |> String.replace_prefix("model", "")
+    |> String.trim_leading()
+  end
+
+  @spec model_completion_candidates(String.t(), state()) :: [completion_candidate()]
+  defp model_completion_candidates(prefix, state) do
+    state
+    |> available_model_entries()
+    |> filter_model_entries(prefix)
+    |> Enum.take(20)
+    |> Enum.map(&model_completion_candidate/1)
+  end
+
+  @spec available_model_entries(state()) :: [map()]
+  defp available_model_entries(state) do
+    current_model = current_model(state)
+
+    session_models =
+      case AgentAccess.session(state) do
+        session when is_pid(session) -> safe_session_models(session)
+        _ -> []
+      end
+
+    configured_model_entries()
+    |> Kernel.++(session_models)
+    |> Kernel.++(ModelCatalog.available_models(current_model))
+    |> uniq_model_entries()
+  end
+
+  @spec safe_session_models(pid()) :: [map()]
+  defp safe_session_models(session) do
+    case Session.get_available_models(session) do
+      {:ok, models} when is_list(models) -> models
+      _ -> []
+    end
+  catch
+    :exit, _ -> []
+  end
+
+  @spec configured_model_entries() :: [map()]
+  defp configured_model_entries do
+    :agent_models
+    |> Config.get()
+    |> List.wrap()
+    |> Enum.filter(&is_binary/1)
+    |> Enum.map(&configured_model_entry/1)
+  end
+
+  @spec configured_model_entry(String.t()) :: map()
+  defp configured_model_entry(entry) do
+    model = entry |> String.split("|", parts: 2) |> hd() |> String.trim()
+
+    %{
+      "id" => model,
+      "name" => model,
+      "provider" => provider_label(model),
+      "context_window" => nil,
+      "cost" => nil
+    }
+  end
+
+  @spec current_model(state()) :: String.t()
+  defp current_model(state) do
+    AgentAccess.panel(state).model_name
+  end
+
+  @spec provider_label(String.t()) :: String.t()
+  defp provider_label(model) do
+    case String.split(model, ":", parts: 2) do
+      [provider, _] -> provider
+      [_] -> "custom"
+    end
+  end
+
+  @spec uniq_model_entries([map()]) :: [map()]
+  defp uniq_model_entries(entries) do
+    entries
+    |> Enum.reject(&(model_id(&1) == ""))
+    |> Enum.uniq_by(&model_id/1)
+  end
+
+  @spec filter_model_entries([map()], String.t()) :: [map()]
+  defp filter_model_entries(entries, ""), do: entries
+
+  defp filter_model_entries(entries, prefix) do
+    lower = String.downcase(prefix)
+
+    entries
+    |> Enum.filter(fn model ->
+      [model_id(model), model_name(model), model_provider(model)]
+      |> Enum.any?(&String.contains?(String.downcase(&1), lower))
+    end)
+    |> Enum.sort_by(fn model ->
+      id = model_id(model) |> String.downcase()
+      name = model_name(model) |> String.downcase()
+
+      case {String.starts_with?(id, lower), String.starts_with?(name, lower)} do
+        {true, _} -> {0, id}
+        {_, true} -> {1, id}
+        _ -> {2, id}
+      end
+    end)
+  end
+
+  @spec model_completion_candidate(map()) :: completion_candidate()
+  defp model_completion_candidate(model) do
+    id = model_id(model)
+
+    %{
+      label: id,
+      insert: "model #{id}",
+      description: model_description(model)
+    }
+  end
+
+  @spec model_description(map()) :: String.t()
+  defp model_description(model) do
+    [model_name(model), model_provider(model), model_context(model)]
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join("  ")
+  end
+
+  @spec model_id(map()) :: String.t()
+  defp model_id(model), do: model |> Map.get("id", "") |> to_string()
+
+  @spec model_name(map()) :: String.t()
+  defp model_name(model), do: model |> Map.get("name", model_id(model)) |> to_string()
+
+  @spec model_provider(map()) :: String.t()
+  defp model_provider(model), do: model |> Map.get("provider", "") |> to_string()
+
+  @spec model_context(map()) :: String.t()
+  defp model_context(%{"context_window" => ctx}) when is_integer(ctx) and ctx >= 1000,
+    do: "#{div(ctx, 1000)}k ctx"
+
+  defp model_context(_model), do: ""
 
   @doc """
   Returns true if the given text is a slash command (starts with /).
@@ -209,7 +379,9 @@ defmodule MingaEditor.Agent.SlashCommand do
   end
 
   @spec do_model(state(), String.t()) :: {:ok, state()} | {:error, String.t()}
-  defp do_model(_state, ""), do: {:error, "Usage: /model <name>"}
+  defp do_model(state, "") do
+    {:ok, PickerUI.open(state, MingaEditor.UI.Picker.AgentModelSource)}
+  end
 
   defp do_model(state, model) do
     model = String.trim(model)
