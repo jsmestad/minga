@@ -170,16 +170,11 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
 
     :sys.get_state(session)
     assert :ok = Session.send_prompt(session, "first")
-    :sys.get_state(session)
+    wait_for_status(session, :thinking)
     assert {:queued, :steering} = Session.send_prompt(session, "while busy")
     assert ["while busy"] = Session.dequeue_steering(session)
-    :sys.get_state(log_pid)
-
     {:ok, db} = EventLog.open_read_connection(db_dir: tmp_dir)
-    assert {:ok, events} = EventLog.events_after(db, "steering-session", 0, 50)
-
-    user_texts =
-      events |> Enum.filter(&(&1.event_type == :user_message)) |> Enum.map(& &1.payload["text"])
+    user_texts = wait_for_user_texts(db, "steering-session", session, log_pid)
 
     assert "first" in user_texts
     assert "while busy" in user_texts
@@ -217,6 +212,46 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
     assert {:ok, events} = EventLog.events_after(db, "crash-session", 0, 50)
     assert Enum.any?(events, &(&1.event_type == :message_changed))
     :ok = Store.close(db)
+  end
+
+  @spec wait_for_status(pid(), Session.status(), non_neg_integer()) :: Session.status()
+  defp wait_for_status(session, status, attempts \\ 20)
+
+  defp wait_for_status(session, status, attempts) when attempts > 0 do
+    current = Session.status(session)
+
+    if current == status do
+      current
+    else
+      wait_for_status(session, status, attempts - 1)
+    end
+  end
+
+  defp wait_for_status(session, _status, 0), do: Session.status(session)
+
+  @spec wait_for_user_texts(Store.db(), String.t(), pid(), pid(), non_neg_integer()) :: [
+          String.t()
+        ]
+  defp wait_for_user_texts(db, session_id, session_pid, log_pid, attempts \\ 20)
+
+  defp wait_for_user_texts(db, session_id, session_pid, log_pid, attempts) when attempts > 0 do
+    :sys.get_state(session_pid)
+    :sys.get_state(log_pid)
+    {:ok, events} = EventLog.events_after(db, session_id, 0, 50)
+
+    user_texts =
+      events |> Enum.filter(&(&1.event_type == :user_message)) |> Enum.map(& &1.payload["text"])
+
+    if "first" in user_texts and "while busy" in user_texts do
+      user_texts
+    else
+      wait_for_user_texts(db, session_id, session_pid, log_pid, attempts - 1)
+    end
+  end
+
+  defp wait_for_user_texts(db, session_id, _session_pid, _log_pid, 0) do
+    {:ok, events} = EventLog.events_after(db, session_id, 0, 50)
+    events |> Enum.filter(&(&1.event_type == :user_message)) |> Enum.map(& &1.payload["text"])
   end
 
   @spec wait_for_event(

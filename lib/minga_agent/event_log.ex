@@ -70,6 +70,10 @@ defmodule MingaAgent.EventLog do
           {:ok, [EventRecord.t()]} | {:error, term()}
   defdelegate events_after(db, session_id, last_id, limit \\ 1000), to: Store
 
+  @doc "Returns the latest event id for a session."
+  @spec latest_id(Store.db(), String.t()) :: {:ok, non_neg_integer()} | {:error, term()}
+  defdelegate latest_id(db, session_id), to: Store
+
   @impl true
   @spec init(keyword()) :: {:ok, State.t()} | {:stop, term()}
   def init(opts) do

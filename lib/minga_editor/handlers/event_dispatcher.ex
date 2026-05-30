@@ -11,7 +11,6 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   alias Minga.Events
   alias Minga.Mode.ExtensionConfirmState
   alias MingaEditor.Agent.BufferSync, as: AgentBufferSync
-  alias MingaEditor.AgentLifecycle
   alias MingaEditor.Commands
   alias MingaEditor.Frontend.Protocol
   alias MingaEditor.Handlers.EffectHandler
@@ -365,7 +364,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
        ) do
     case remote_session_pid(remote_node, session_id) do
       {:ok, pid} ->
-        restore_remote_workspace(state, workspace, pid)
+        restore_remote_workspace(state, workspace, remote_node, pid)
 
       {:error, :not_found} ->
         restore_remote_session_from_store(state, workspace, remote_node, session_id)
@@ -392,6 +391,34 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   @spec remote_api_list_sessions(node()) :: [MingaAgent.RemoteAPI.session_info()]
   defp remote_api_list_sessions(remote_node) do
     :erpc.call(remote_node, MingaAgent.RemoteAPI, :list_sessions, [], 5_000)
+  end
+
+  @spec remote_api_attach(node(), String.t(), non_neg_integer()) ::
+          {:ok, MingaAgent.RemoteAPI.attach_result()} | {:error, term()}
+  defp remote_api_attach(remote_node, session_id, last_seen_event_id) do
+    with {:ok, token} <- remote_session_token(remote_node, session_id) do
+      :erpc.call(
+        remote_node,
+        MingaAgent.RemoteAPI,
+        :attach,
+        [session_id, token, self(), [role: :driver, last_seen_event_id: last_seen_event_id]],
+        10_000
+      )
+    end
+  catch
+    :exit, reason -> {:error, {:remote_unavailable, reason}}
+  end
+
+  @spec remote_session_token(node(), String.t()) :: {:ok, String.t()} | {:error, term()}
+  defp remote_session_token(remote_node, session_id) do
+    remote_node
+    |> remote_api_list_sessions()
+    |> Enum.find_value({:error, :not_found}, fn
+      %{session_id: ^session_id, token: token} -> {:ok, token}
+      _session -> nil
+    end)
+  catch
+    :exit, reason -> {:error, {:remote_unavailable, reason}}
   end
 
   @spec restore_remote_session_from_store(EditorState.t(), Workspace.t(), node(), String.t()) ::
@@ -437,29 +464,38 @@ defmodule MingaEditor.Handlers.EventDispatcher do
 
   defp restore_ended_remote_workspace(state, %Workspace{}, _messages), do: state
 
-  @spec restore_remote_workspace(EditorState.t(), Workspace.t(), pid()) :: EditorState.t()
+  @spec restore_remote_workspace(EditorState.t(), Workspace.t(), node(), pid()) :: EditorState.t()
   defp restore_remote_workspace(
          %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
-         %Workspace{id: workspace_id} = workspace,
+         %Workspace{
+           id: workspace_id,
+           remote_session: %RemoteSession{session_id: session_id, last_seen_event_id: last_seen}
+         } = workspace,
+         remote_node,
          pid
        ) do
-    AgentSession.subscribe(pid, self())
+    case remote_api_attach(remote_node, session_id, last_seen) do
+      {:ok, %{messages: messages, snapshot: snapshot, latest_event_id: latest_event_id}} ->
+        tb = set_workspace_remote_state(tb, workspace, pid, :connected, latest_event_id)
+        state = EditorState.set_tab_bar(state, tb)
 
-    tb = set_workspace_remote_state(tb, workspace, pid, :connected)
-    state = EditorState.set_tab_bar(state, tb)
+        if active_workspace?(tb, workspace_id) do
+          state
+          |> maybe_rebuild_agent_from_workspace(workspace_id)
+          |> sync_reconnected_buffer(messages)
+          |> apply_reconnected_snapshot(snapshot)
+        else
+          state
+        end
 
-    if active_workspace?(tb, workspace_id) do
-      state
-      |> maybe_rebuild_agent_from_workspace(workspace_id)
-      |> AgentLifecycle.sync_buffer()
-    else
-      state
+      {:error, _reason} ->
+        mark_remote_workspace_status(state, workspace, :disconnected)
     end
   catch
     :exit, _reason -> mark_remote_workspace_status(state, workspace, :disconnected)
   end
 
-  defp restore_remote_workspace(state, %Workspace{}, _pid), do: state
+  defp restore_remote_workspace(state, %Workspace{}, _remote_node, _pid), do: state
 
   @spec mark_remote_tabs(EditorState.t(), String.t(), Tab.connection_status()) :: EditorState.t()
   defp mark_remote_tabs(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, server_name, status) do
@@ -510,18 +546,41 @@ defmodule MingaEditor.Handlers.EventDispatcher do
           TabBar.t(),
           Workspace.t(),
           pid() | nil,
-          RemoteSession.connection_status()
+          RemoteSession.connection_status(),
+          non_neg_integer() | nil
         ) ::
           TabBar.t()
-  defp set_workspace_remote_state(%TabBar{} = tb, %Workspace{id: workspace_id}, session, status) do
+  defp set_workspace_remote_state(
+         %TabBar{} = tb,
+         %Workspace{id: workspace_id},
+         session,
+         status,
+         latest_event_id \\ nil
+       ) do
     tb
     |> TabBar.update_workspace(workspace_id, fn workspace ->
       workspace
       |> set_workspace_live_session(session)
       |> Workspace.set_remote_connection_status(status)
+      |> maybe_set_remote_last_seen_event_id(latest_event_id)
     end)
     |> TabBar.sync_workspace_agent_tab_projection(workspace_id)
   end
+
+  @spec maybe_set_remote_last_seen_event_id(Workspace.t(), non_neg_integer() | nil) ::
+          Workspace.t()
+  defp maybe_set_remote_last_seen_event_id(
+         %Workspace{remote_session: %RemoteSession{} = remote_session} = workspace,
+         event_id
+       )
+       when is_integer(event_id) and event_id >= 0 do
+    Workspace.set_remote_session(
+      workspace,
+      RemoteSession.set_last_seen_event_id(remote_session, event_id)
+    )
+  end
+
+  defp maybe_set_remote_last_seen_event_id(%Workspace{} = workspace, _event_id), do: workspace
 
   @spec set_workspace_live_session(Workspace.t(), pid() | nil) :: Workspace.t()
   defp set_workspace_live_session(%Workspace{} = workspace, nil),
@@ -529,6 +588,32 @@ defmodule MingaEditor.Handlers.EventDispatcher do
 
   defp set_workspace_live_session(%Workspace{} = workspace, session) when is_pid(session) do
     Workspace.set_session(workspace, session)
+  end
+
+  @spec sync_reconnected_buffer(EditorState.t(), [term()]) :: EditorState.t()
+  defp sync_reconnected_buffer(state, messages) do
+    case AgentAccess.agent(state).buffer do
+      pid when is_pid(pid) ->
+        AgentBufferSync.sync(pid, messages)
+        state
+
+      _other ->
+        state
+    end
+  end
+
+  @spec apply_reconnected_snapshot(EditorState.t(), MingaAgent.Session.editor_snapshot()) ::
+          EditorState.t()
+  defp apply_reconnected_snapshot(state, snapshot) do
+    AgentAccess.update_agent(state, fn agent ->
+      AgentState.apply_session_snapshot(
+        agent,
+        Map.get(snapshot, :status, :idle),
+        Map.get(snapshot, :pending_approval),
+        Map.get(snapshot, :error),
+        Map.get(snapshot, :active_tool_name)
+      )
+    end)
   end
 
   @spec maybe_rebuild_agent_from_workspace(EditorState.t(), non_neg_integer()) :: EditorState.t()

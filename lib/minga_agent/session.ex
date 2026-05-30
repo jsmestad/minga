@@ -303,7 +303,16 @@ defmodule MingaAgent.Session do
           :ok | {:error, :no_pending_approval | :not_driver}
   def respond_to_approval_as(session, client_pid, decision)
       when is_pid(client_pid) and decision in [:approve, :approve_session, :approve_turn, :reject] do
-    GenServer.call(session, {:respond_to_approval_as, client_pid, decision})
+    respond_to_approval_as(session, client_pid, nil, decision)
+  end
+
+  @doc "Responds to a pending tool approval by stable approval id as an attached driver."
+  @spec respond_to_approval_as(GenServer.server(), pid(), String.t() | nil, approval_decision()) ::
+          :ok | {:error, :approval_not_found | :no_pending_approval | :not_driver}
+  def respond_to_approval_as(session, client_pid, approval_id, decision)
+      when is_pid(client_pid) and (is_binary(approval_id) or is_nil(approval_id)) and
+             decision in [:approve, :approve_session, :approve_turn, :reject] do
+    GenServer.call(session, {:respond_to_approval_as, client_pid, approval_id, decision})
   end
 
   @doc "Unsubscribes the calling process from session events."
@@ -650,6 +659,8 @@ defmodule MingaAgent.Session do
       credentials_configured: true
     }
 
+    mark_interrupted_work(state)
+
     EventLog.record(
       state.session_id,
       :session_started,
@@ -953,9 +964,9 @@ defmodule MingaAgent.Session do
     {:reply, meta, state}
   end
 
-  def handle_call({:respond_to_approval_as, client_pid, decision}, _from, state) do
+  def handle_call({:respond_to_approval_as, client_pid, approval_id, decision}, _from, state) do
     case driver_allowed?(state, client_pid) do
-      true -> handle_approval_response(decision, state)
+      true -> handle_approval_response(approval_id, decision, state)
       false -> {:reply, {:error, :not_driver}, state}
     end
   end
@@ -1258,12 +1269,22 @@ defmodule MingaAgent.Session do
 
   @spec handle_approval_response(approval_decision(), state()) ::
           {:reply, :ok | {:error, :no_pending_approval}, state()}
-  defp handle_approval_response(_decision, %{pending_approval: nil} = state) do
+  defp handle_approval_response(decision, state),
+    do: handle_approval_response(nil, decision, state)
+
+  @spec handle_approval_response(String.t() | nil, approval_decision(), state()) ::
+          {:reply, :ok | {:error, :approval_not_found | :no_pending_approval}, state()}
+  defp handle_approval_response(_approval_id, _decision, %{pending_approval: nil} = state) do
     Minga.Log.warning(:agent, "[Session] respond_to_approval called with no pending approval")
     {:reply, {:error, :no_pending_approval}, state}
   end
 
-  defp handle_approval_response(decision, state) do
+  defp handle_approval_response(approval_id, _decision, %{pending_approval: approval} = state)
+       when is_binary(approval_id) and approval.tool_call_id != approval_id do
+    {:reply, {:error, :approval_not_found}, state}
+  end
+
+  defp handle_approval_response(_approval_id, decision, state) do
     %{tool_call_id: tool_call_id, reply_to: reply_to} = approval = state.pending_approval
     state = maybe_set_trust_for_decision(state, approval.name, decision)
 
@@ -1921,6 +1942,89 @@ defmodule MingaAgent.Session do
     Enum.each(state.subscribers, fn pid ->
       send(pid, {:agent_event, session_pid, event})
     end)
+  end
+
+  @spec mark_interrupted_work(state()) :: :ok
+  defp mark_interrupted_work(state) do
+    with {:ok, db} <- EventLog.open_read_connection(),
+         {:ok, events} <- all_event_log_events(db, state.session_id) do
+      MingaAgent.EventLog.Store.close(db)
+      record_interrupted_work(state, events)
+    else
+      _ -> :ok
+    end
+  end
+
+  @spec all_event_log_events(EventLog.Store.db(), String.t(), non_neg_integer(), [
+          EventLog.EventRecord.t()
+        ]) ::
+          {:ok, [EventLog.EventRecord.t()]} | {:error, term()}
+  defp all_event_log_events(db, session_id, last_seen_event_id \\ 0, acc \\ []) do
+    with {:ok, events} <- EventLog.events_after(db, session_id, last_seen_event_id, 1000) do
+      case events do
+        [] ->
+          {:ok, Enum.reverse(acc)}
+
+        _ ->
+          all_event_log_events(db, session_id, List.last(events).id, Enum.reverse(events) ++ acc)
+      end
+    end
+  end
+
+  @spec record_interrupted_work(state(), [EventLog.EventRecord.t()]) :: :ok
+  defp record_interrupted_work(state, events) do
+    tool_ids = open_tool_call_ids(events)
+    approval_ids = open_approval_ids(events)
+
+    Enum.each(tool_ids, fn tool_call_id ->
+      EventLog.record(
+        state.session_id,
+        :tool_call_interrupted,
+        %{tool_call_id: tool_call_id},
+        state.event_log_server
+      )
+    end)
+
+    Enum.each(approval_ids, fn approval_id ->
+      EventLog.record(
+        state.session_id,
+        :approval_interrupted,
+        %{approval_id: approval_id, tool_call_id: approval_id},
+        state.event_log_server
+      )
+    end)
+  end
+
+  @spec open_tool_call_ids([EventLog.EventRecord.t()]) :: [String.t()]
+  defp open_tool_call_ids(events) do
+    started = ids_for(events, :tool_call_started, "tool_call_id")
+
+    closed =
+      ids_for(events, :tool_call_finished, "tool_call_id") ++
+        ids_for(events, :tool_call_interrupted, "tool_call_id")
+
+    started -- closed
+  end
+
+  @spec open_approval_ids([EventLog.EventRecord.t()]) :: [String.t()]
+  defp open_approval_ids(events) do
+    requested = ids_for(events, :approval_requested, "approval_id")
+
+    closed =
+      ids_for(events, :approval_resolved, "approval_id") ++
+        ids_for(events, :approval_interrupted, "approval_id")
+
+    requested -- closed
+  end
+
+  @spec ids_for([EventLog.EventRecord.t()], EventLog.EventRecord.event_type(), String.t()) :: [
+          String.t()
+        ]
+  defp ids_for(events, event_type, key) do
+    events
+    |> Enum.filter(&(&1.event_type == event_type))
+    |> Enum.map(&Map.get(&1.payload, key))
+    |> Enum.filter(&is_binary/1)
   end
 
   @spec record_broadcast_event(state(), term()) :: :ok

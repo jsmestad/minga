@@ -75,6 +75,21 @@ defmodule MingaAgent.EventLog.Store do
     query_events(db, sql, [session_id, last_id, limit])
   end
 
+  @doc "Returns the latest event id for a session, or 0 when it has no events."
+  @spec latest_id(db(), String.t()) :: {:ok, non_neg_integer()} | {:error, term()}
+  def latest_id(db, session_id) when is_binary(session_id) do
+    sql = "SELECT COALESCE(MAX(id), 0) FROM events WHERE session_id = ?1"
+
+    with {:ok, stmt} <- Exqlite.Sqlite3.prepare(db, sql),
+         :ok <- Exqlite.Sqlite3.bind(stmt, [session_id]),
+         {:row, [latest_id]} <- Exqlite.Sqlite3.step(db, stmt),
+         :ok <- Exqlite.Sqlite3.release(db, stmt) do
+      {:ok, latest_id}
+    else
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
   @doc "Returns the total number of agent events."
   @spec count(db()) :: {:ok, non_neg_integer()} | {:error, term()}
   def count(db) do
