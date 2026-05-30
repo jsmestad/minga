@@ -1,16 +1,8 @@
-defmodule <%= module %> do
-  @moduledoc """
-  <%= module %> extension for the Minga editor.
-  """
-<%= if type == "agent" or type == "both" do %>
-  use Minga.Extension.Agent
-<% end %><%= if type == "editor" or type == "both" do %>
+<%= if type == "both" do %>defmodule <%= module %>.Editor do
+  @moduledoc "<%= module %> editor surface: commands, keybindings, and options."
+
   use Minga.Extension.Editor
-<% end %><%= if type == "both" do %>
-  # Resolve option/3 ambiguity when both Agent and Editor surfaces are used.
-  import Minga.Extension.Editor, only: [option: 3]
-<% end %>
-<%= if type == "editor" or type == "both" do %>
+
   # ── Config options ──────────────────────────────────────────────────
   option :enabled, :boolean, default: true, description: "Enable <%= module %>"
 
@@ -20,10 +12,61 @@ defmodule <%= module %> do
 
   # ── Keybindings ─────────────────────────────────────────────────────
   keybind :normal, "SPC m h", :hello, "Hello from <%= module %>"
-<% end %>
-<%= if type == "agent" or type == "both" do %>
+
+  @impl true
+  def name, do: :<%= name %>_editor
+
+  @impl true
+  def description, do: "<%= module %> editor surface"
+
+  @impl true
+  def version, do: "0.1.0"
+
+  @impl true
+  def init(_config), do: {:ok, %{}}
+end
+
+defmodule <%= module %>.Agent do
+  @moduledoc "<%= module %> agent surface: hooks and agent components."
+
+  use Minga.Extension.Agent
+
   # ── Agent hooks ────────────────────────────────────────────────────
   hook :session_start, command: "#{__DIR__}/../hooks/hello.sh"
+
+  @impl true
+  def name, do: :<%= name %>_agent
+
+  @impl true
+  def description, do: "<%= module %> agent surface"
+
+  @impl true
+  def version, do: "0.1.0"
+
+  @impl true
+  def init(_config), do: {:ok, %{}}
+end
+<% else %>defmodule <%= module %> do
+  @moduledoc """
+  <%= module %> extension for the Minga editor.
+  """
+<%= if type == "agent" do %>
+  use Minga.Extension.Agent
+
+  # ── Agent hooks ────────────────────────────────────────────────────
+  hook :session_start, command: "#{__DIR__}/../hooks/hello.sh"
+<% else %>
+  use Minga.Extension.Editor
+
+  # ── Config options ──────────────────────────────────────────────────
+  option :enabled, :boolean, default: true, description: "Enable <%= module %>"
+
+  # ── Commands ────────────────────────────────────────────────────────
+  command :hello, "Say hello from <%= module %>",
+    execute: {<%= module %>.Commands, :hello}
+
+  # ── Keybindings ─────────────────────────────────────────────────────
+  keybind :normal, "SPC m h", :hello, "Hello from <%= module %>"
 <% end %>
 
   # ── Extension callbacks ─────────────────────────────────────────────
@@ -40,3 +83,4 @@ defmodule <%= module %> do
   @impl true
   def init(_config), do: {:ok, %{}}
 end
+<% end %>

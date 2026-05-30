@@ -235,17 +235,8 @@ defmodule Minga.Extension.Editor do
 
   @doc false
   defmacro __before_compile__(env) do
-    options = Module.get_attribute(env.module, :__extension_options__) || []
-    commands = Module.get_attribute(env.module, :__extension_commands__) || []
-    keybinds = Module.get_attribute(env.module, :__extension_keybinds__) || []
-    modeline_segments = Module.get_attribute(env.module, :__extension_modeline_segments__) || []
-    capabilities = Module.get_attribute(env.module, :__extension_capabilities__) || []
-    load_policy = Module.get_attribute(env.module, :__extension_load_policy__) || :eager
-    options = Enum.reverse(options)
-    commands = Enum.reverse(commands)
-    keybinds = Enum.reverse(keybinds)
-    modeline_segments = Enum.reverse(modeline_segments)
-    capabilities = Enum.reverse(capabilities)
+    {options, commands, keybinds, modeline_segments, capabilities, load_policy} =
+      read_editor_attributes(env.module)
 
     quote do
       @doc false
@@ -272,5 +263,19 @@ defmodule Minga.Extension.Editor do
       @spec __load_policy__() :: Minga.Extension.load_policy()
       def __load_policy__, do: unquote(Macro.escape(load_policy))
     end
+  end
+
+  @spec read_editor_attributes(module()) :: {list(), list(), list(), list(), list(), term()}
+  defp read_editor_attributes(mod) do
+    options = mod |> Module.get_attribute(:__extension_options__, []) |> Enum.reverse()
+    commands = mod |> Module.get_attribute(:__extension_commands__, []) |> Enum.reverse()
+    keybinds = mod |> Module.get_attribute(:__extension_keybinds__, []) |> Enum.reverse()
+
+    modeline_segments =
+      mod |> Module.get_attribute(:__extension_modeline_segments__, []) |> Enum.reverse()
+
+    capabilities = mod |> Module.get_attribute(:__extension_capabilities__, []) |> Enum.reverse()
+    load_policy = Module.get_attribute(mod, :__extension_load_policy__) || :eager
+    {options, commands, keybinds, modeline_segments, capabilities, load_policy}
   end
 end

@@ -235,8 +235,12 @@ defmodule Minga.Extension.JsonLoader do
   @spec normalize_hook_event(String.t()) :: {:ok, atom()} | {:error, String.t()}
   defp normalize_hook_event(str) do
     case Map.fetch(@known_hook_events, str) do
-      {:ok, event} -> {:ok, event}
-      :error -> {:error, "unknown hook event: #{inspect(str)}. Valid events: #{Enum.join(Map.keys(@known_hook_events), ", ")}"}
+      {:ok, event} ->
+        {:ok, event}
+
+      :error ->
+        {:error,
+         "unknown hook event: #{inspect(str)}. Valid events: #{Enum.join(Map.keys(@known_hook_events), ", ")}"}
     end
   end
 end

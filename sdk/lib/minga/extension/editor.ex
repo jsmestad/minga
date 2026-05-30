@@ -63,6 +63,7 @@ defmodule Minga.Extension.Editor do
       Module.register_attribute(__MODULE__, :__extension_keybinds__, accumulate: true)
       Module.register_attribute(__MODULE__, :__extension_modeline_segments__, accumulate: true)
       Module.register_attribute(__MODULE__, :__extension_capabilities__, accumulate: true)
+      Module.put_attribute(__MODULE__, :__extension_load_policy__, :eager)
       @before_compile Minga.Extension.Editor
 
       unless Module.defines?(__MODULE__, {:child_spec, 1}) do
@@ -88,7 +89,8 @@ defmodule Minga.Extension.Editor do
           keybind: 5,
           modeline_segment: 2,
           modeline_segment: 3,
-          capability: 2
+          capability: 2,
+          load_policy: 1
         ]
     end
   end
@@ -220,19 +222,21 @@ defmodule Minga.Extension.Editor do
     end
   end
 
+  @doc """
+  Sets the extension's load policy.
+
+  See `Minga.Extension` for supported policies and examples.
+  """
+  defmacro load_policy(policy) do
+    quote do
+      @__extension_load_policy__ unquote(policy)
+    end
+  end
+
   @doc false
   defmacro __before_compile__(env) do
-    options = Module.get_attribute(env.module, :__extension_options__) || []
-    commands = Module.get_attribute(env.module, :__extension_commands__) || []
-    keybinds = Module.get_attribute(env.module, :__extension_keybinds__) || []
-    modeline_segments = Module.get_attribute(env.module, :__extension_modeline_segments__) || []
-    capabilities = Module.get_attribute(env.module, :__extension_capabilities__) || []
-    # Accumulated attributes are in reverse order; restore declaration order
-    options = Enum.reverse(options)
-    commands = Enum.reverse(commands)
-    keybinds = Enum.reverse(keybinds)
-    modeline_segments = Enum.reverse(modeline_segments)
-    capabilities = Enum.reverse(capabilities)
+    {options, commands, keybinds, modeline_segments, capabilities, load_policy} =
+      read_editor_attributes(env.module)
 
     quote do
       @doc false
@@ -254,6 +258,24 @@ defmodule Minga.Extension.Editor do
       @doc false
       @spec __capability_schema__() :: [Minga.Extension.capability_spec()]
       def __capability_schema__, do: unquote(Macro.escape(capabilities))
+
+      @doc false
+      @spec __load_policy__() :: Minga.Extension.load_policy()
+      def __load_policy__, do: unquote(Macro.escape(load_policy))
     end
+  end
+
+  @spec read_editor_attributes(module()) :: {list(), list(), list(), list(), list(), term()}
+  defp read_editor_attributes(mod) do
+    options = mod |> Module.get_attribute(:__extension_options__, []) |> Enum.reverse()
+    commands = mod |> Module.get_attribute(:__extension_commands__, []) |> Enum.reverse()
+    keybinds = mod |> Module.get_attribute(:__extension_keybinds__, []) |> Enum.reverse()
+
+    modeline_segments =
+      mod |> Module.get_attribute(:__extension_modeline_segments__, []) |> Enum.reverse()
+
+    capabilities = mod |> Module.get_attribute(:__extension_capabilities__, []) |> Enum.reverse()
+    load_policy = Module.get_attribute(mod, :__extension_load_policy__) || :eager
+    {options, commands, keybinds, modeline_segments, capabilities, load_policy}
   end
 end
