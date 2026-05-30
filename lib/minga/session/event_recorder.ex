@@ -310,37 +310,37 @@ defmodule Minga.Session.EventRecorder do
 
     if total > state.size_cap_bytes do
       enforce_size_cap(state, total)
-    else
-      :ok
+      send(self(), :deferred_vacuum)
     end
+
+    :ok
   end
 
   @spec enforce_size_cap(State.t(), non_neg_integer()) :: :ok
   defp enforce_size_cap(state, total) do
     target = div(state.size_cap_bytes * 3, 4)
 
-    with {:ok, row_count} <- Store.count(state.db) do
-      keep = max(div(row_count * target, total), 100)
+    case Store.count(state.db) do
+      {:ok, row_count} ->
+        keep = max(div(row_count * target, total), 100)
 
-      case Store.delete_oldest(state.db, keep) do
-        {:ok, deleted} when deleted > 0 ->
-          Minga.Log.info(
-            :editor,
-            "[EventRecorder] size cap pruned #{deleted} events (#{format_mb(total)} -> target #{format_mb(target)})"
-          )
+        case Store.delete_oldest(state.db, keep) do
+          {:ok, deleted} when deleted > 0 ->
+            Minga.Log.info(
+              :editor,
+              "[EventRecorder] size cap pruned #{deleted} events (#{format_mb(total)} -> target #{format_mb(target)})"
+            )
 
-          send(self(), :deferred_vacuum)
+          {:ok, _} ->
+            :ok
 
-        {:ok, _} ->
-          :ok
+          {:error, reason} ->
+            Minga.Log.warning(
+              :editor,
+              "[EventRecorder] size cap enforcement failed: #{inspect(reason)}"
+            )
+        end
 
-        {:error, reason} ->
-          Minga.Log.warning(
-            :editor,
-            "[EventRecorder] size cap enforcement failed: #{inspect(reason)}"
-          )
-      end
-    else
       {:error, reason} ->
         Minga.Log.warning(
           :editor,
