@@ -12,6 +12,7 @@ defmodule MingaEditor.MinibufferDataTest do
   use ExUnit.Case, async: true
 
   alias MingaEditor.MinibufferData
+  alias MingaEditor.State.Prompt, as: PromptState
 
   describe "clamp_index/2" do
     test "returns 0 for empty list" do
@@ -33,6 +34,35 @@ defmodule MingaEditor.MinibufferDataTest do
       assert MinibufferData.clamp_index(0, 5) == 0
       assert MinibufferData.clamp_index(2, 5) == 2
       assert MinibufferData.clamp_index(4, 5) == 4
+    end
+  end
+
+  describe "from_state/1 prompt modal" do
+    test "returns a visible text prompt for generic PromptUI overlays" do
+      state = %{
+        shell_state: %{
+          modal:
+            {:prompt,
+             %{
+               prompt_ui: %PromptState{
+                 handler: MingaEditor.UI.Prompt.ProjectAdd,
+                 label: "Add project: ",
+                 text: "~/code",
+                 cursor: 6
+               }
+             }}
+        },
+        workspace: %{editing: %{mode: :normal, mode_state: %{}}}
+      }
+
+      result = MinibufferData.from_state(state)
+
+      assert result.visible == true
+      assert result.mode == 10
+      assert result.prompt == "Add project: "
+      assert result.input == "~/code"
+      assert result.cursor_pos == 6
+      assert result.candidates == []
     end
   end
 

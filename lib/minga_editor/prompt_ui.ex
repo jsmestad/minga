@@ -53,12 +53,13 @@ defmodule MingaEditor.PromptUI do
 
   - `:default` — pre-filled text (default: `""`)
   - `:context` — arbitrary map passed through to the handler (default: `nil`)
+  - `:label` — prompt label override (default: `handler_module.label()`)
   """
   @spec open(state(), module(), keyword()) :: state()
   def open(state, handler_module, opts \\ []) do
     default_text = Keyword.get(opts, :default, "")
     context = Keyword.get(opts, :context)
-    label = handler_module.label()
+    label = Keyword.get(opts, :label, handler_module.label())
 
     prompt_state = %PromptState{
       handler: handler_module,
@@ -195,8 +196,8 @@ defmodule MingaEditor.PromptUI do
     text = prompt.text
     label_len = String.length(label)
 
-    label_face = Face.new(fg: pc.prompt_fg, bg: pc.prompt_bg)
-    input_face = Face.new(fg: pc.fg, bg: pc.bg)
+    label_face = Face.new(fg: pc.highlight_fg, bg: pc.prompt_bg)
+    input_face = Face.new(fg: pc.text_fg, bg: pc.bg)
 
     total_len = label_len + String.length(text)
     padding = String.duplicate(" ", max(0, viewport.cols - total_len))

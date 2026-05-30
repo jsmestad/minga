@@ -16,6 +16,7 @@ defmodule Minga.RenderModel.UI.Minibuffer do
           | :describe_key
           | :delete_confirm
           | :branch_delete_confirm
+          | :text_prompt
           | :unknown
 
   @type t :: %__MODULE__{

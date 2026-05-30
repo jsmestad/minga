@@ -667,6 +667,7 @@ Mode values:
 | 7 | describe_key | `"Press key: "` | no | (accumulated keys) |
 | 8 | delete_confirm | `"Delete 'file.txt'? (y/n)"` | no | (empty) |
 | 9 | branch_delete_confirm | `"Delete branch feature? (y/n)"` | no | (empty) |
+| 10 | text_prompt | `"Add project: "` | yes | (empty) |
 
 `cursor_pos` is the 0-indexed character position within `input` for the beam cursor. `0xFFFF` means no cursor (prompt-only modes 5-9). `context` is right-aligned supplementary text. `match_score` is 0-255 fuzzy match quality. `candidate_count == 0` naturally represents "input visible, no completions."
 

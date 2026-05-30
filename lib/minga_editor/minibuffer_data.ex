@@ -13,6 +13,7 @@ defmodule MingaEditor.MinibufferData do
 
   alias Minga.Command
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Prompt, as: PromptState
   alias Minga.Keymap
   alias MingaEditor.UI.WhichKey
 
@@ -62,6 +63,7 @@ defmodule MingaEditor.MinibufferData do
   @mode_describe_key 7
   @mode_delete_confirm 8
   @mode_branch_delete_confirm 9
+  @mode_text_prompt 10
 
   # Maximum candidates to send (keep the list manageable)
   @max_candidates 15
@@ -88,6 +90,25 @@ defmodule MingaEditor.MinibufferData do
   `MingaEditor.Frontend.Protocol.GUI.encode_gui_minibuffer/1`.
   """
   @spec from_state(EditorState.t()) :: t()
+
+  def from_state(%{
+        shell_state: %{
+          modal: {:prompt, %{prompt_ui: %PromptState{handler: handler} = prompt_state}}
+        }
+      })
+      when handler != nil do
+    %__MODULE__{
+      visible: true,
+      mode: @mode_text_prompt,
+      cursor_pos: prompt_state.cursor,
+      prompt: prompt_state.label,
+      input: prompt_state.text,
+      context: "",
+      selected_index: 0,
+      candidates: [],
+      total_candidates: 0
+    }
+  end
 
   def from_state(%{workspace: %{editing: %{mode: :command, mode_state: ms}}}) do
     input = ms.input

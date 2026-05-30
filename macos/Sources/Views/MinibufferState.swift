@@ -29,6 +29,7 @@ enum MinibufferMode: UInt8 {
     case describeKey = 7
     case deleteConfirm = 8
     case branchDeleteConfirm = 9
+    case textPrompt = 10
 }
 
 @MainActor
@@ -54,7 +55,7 @@ final class MinibufferState {
 
     /// Whether the current mode accepts text input (shows a cursor).
     var isInputMode: Bool {
-        mode <= MinibufferMode.eval.rawValue
+        mode <= MinibufferMode.eval.rawValue || mode == MinibufferMode.textPrompt.rawValue
     }
 
     /// Whether to show a blinking cursor in the input field.
@@ -64,7 +65,7 @@ final class MinibufferState {
 
     /// Whether this is a prompt-only mode (no text input, shows action keys).
     var isPromptMode: Bool {
-        mode >= MinibufferMode.substituteConfirm.rawValue
+        mode >= MinibufferMode.substituteConfirm.rawValue && mode != MinibufferMode.textPrompt.rawValue
     }
 
     /// Whether completion candidates are present.
