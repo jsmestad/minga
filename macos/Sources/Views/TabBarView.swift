@@ -609,32 +609,77 @@ struct TabBarView: View {
         .accessibilityValue(tabAccessibilityValue(tab))
         .help(tab.label)
         .contextMenu {
-            Button(tab.isPinned ? "Unpin Tab" : "Pin Tab") {
-                performTabContextMenuAction(tab.isPinned ? .unpin : .pin, for: tab)
+            tabContextMenu(for: tab)
+        }
+    }
+
+    // MARK: - Tab context menu
+
+    @ViewBuilder
+    private func tabContextMenu(for tab: TabEntry) -> some View {
+        if tab.isAgent {
+            agentTabContextMenu(for: tab)
+        } else {
+            fileTabContextMenu(for: tab)
+        }
+    }
+
+    @ViewBuilder
+    private func agentTabContextMenu(for tab: TabEntry) -> some View {
+        Button("Close") {
+            encoder?.sendCloseTab(id: tab.id)
+        }
+        Button("Close Others") {
+            encoder?.sendSelectTab(id: tab.id)
+            encoder?.sendExecuteCommand(name: "close_other_tabs")
+        }
+        Button("Close All") {
+            encoder?.sendSelectTab(id: tab.id)
+            encoder?.sendExecuteCommand(name: "kill_all_buffers")
+        }
+    }
+
+    @ViewBuilder
+    private func fileTabContextMenu(for tab: TabEntry) -> some View {
+        Button("Close") {
+            encoder?.sendCloseTab(id: tab.id)
+        }
+        Button("Close Others") {
+            encoder?.sendSelectTab(id: tab.id)
+            encoder?.sendExecuteCommand(name: "close_other_tabs")
+        }
+        Button("Close All") {
+            encoder?.sendSelectTab(id: tab.id)
+            encoder?.sendExecuteCommand(name: "kill_all_buffers")
+        }
+        Button("Close to the Right") {
+            encoder?.sendSelectTab(id: tab.id)
+            encoder?.sendExecuteCommand(name: "close_tabs_to_right")
+        }
+
+        Divider()
+
+        Button("Copy Path") {
+            encoder?.sendTabCopyPath(id: tab.id)
+        }
+
+        Divider()
+
+        Button("Reveal in File Tree") {
+            encoder?.sendSelectTab(id: tab.id)
+            encoder?.sendExecuteCommand(name: "tree_reveal_active")
+        }
+
+        Divider()
+
+        Button(tab.isPinned ? "Unpin Tab" : "Pin Tab") {
+            performTabContextMenuAction(tab.isPinned ? .unpin : .pin, for: tab)
+        }
+        ForEach(tabContextMenuMoveItems(for: tab)) { item in
+            Button(item.title) {
+                performTabContextMenuAction(item.id, for: tab)
             }
-            Divider()
-            ForEach(tabContextMenuMoveItems(for: tab)) { item in
-                Button(item.title) {
-                    performTabContextMenuAction(item.id, for: tab)
-                }
-                .disabled(item.isDisabled)
-            }
-            Divider()
-            Button("Close") {
-                encoder?.sendCloseTab(id: tab.id)
-            }
-            Button("Close Others") {
-                encoder?.sendSelectTab(id: tab.id)
-                encoder?.sendExecuteCommand(name: "close_other_tabs")
-            }
-            Button("Close All") {
-                encoder?.sendExecuteCommand(name: "quit_all")
-            }
-            Divider()
-            Button("Copy Path") {
-                encoder?.sendTabCopyPath(id: tab.id)
-            }
-            .disabled(tab.isAgent)
+            .disabled(item.isDisabled)
         }
     }
 
