@@ -212,14 +212,13 @@ defmodule MingaAgent.Skills do
   @spec extract_manifest_skills({atom(), map()}) :: [String.t()]
   defp extract_manifest_skills({_name, %{manifest: %{skills: paths}} = entry}) when paths != [] do
     case extension_root(entry) do
-      nil ->
-        Enum.filter(paths, &(Path.type(&1) == :absolute))
-
-      root ->
-        Enum.map(paths, fn skill_path ->
-          if Path.type(skill_path) == :absolute, do: skill_path, else: Path.join(root, skill_path)
-        end)
+      nil -> Enum.filter(paths, &(Path.type(&1) == :absolute))
+      root -> Enum.map(paths, &resolve_skill_path(&1, root))
     end
+  end
+
+  defp resolve_skill_path(skill_path, root) do
+    if Path.type(skill_path) == :absolute, do: skill_path, else: Path.join(root, skill_path)
   end
 
   defp extract_manifest_skills(_entry), do: []
