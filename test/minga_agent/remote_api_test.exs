@@ -5,26 +5,14 @@ defmodule MingaAgent.RemoteAPITest do
   alias MingaAgent.RemoteAPI
   alias MingaAgent.SessionManager
 
-  setup do
-    started = []
-
-    on_exit(fn ->
-      Enum.each(started, fn session_id -> SessionManager.stop_session(session_id) end)
-    end)
-
-    %{started: started}
-  end
-
-  test "start_session returns a broker token and rejects the wrong token", %{started: started} do
+  test "start_session returns a broker token and rejects the wrong token" do
     assert {:ok, %{session_id: session_id, pid: pid, token: token}} = RemoteAPI.start_session([])
-    started = [session_id | started]
+    on_exit(fn -> SessionManager.stop_session(session_id) end)
 
     assert is_pid(pid)
     assert is_binary(token)
     assert :ok = RemoteAPI.authorize(session_id, token)
     assert {:error, :unauthorized} = RemoteAPI.authorize(session_id, "wrong-token")
-
-    Enum.each(started, fn id -> SessionManager.stop_session(id) end)
   end
 
   test "attach assigns one driver and refuses viewer mutations" do

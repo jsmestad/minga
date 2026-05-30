@@ -184,8 +184,7 @@ defmodule MingaEditor.Commands.AgentSession do
   end
 
   def send_prompt_pid(session, prompt) when is_pid(session) do
-    with {:ok, session_id} <- remote_session_id_for_pid(node(session), session),
-         {:ok, token} <- remote_session_token(node(session), session_id) do
+    with {:ok, session_id, token} <- remote_session_info_for_pid(node(session), session) do
       :erpc.call(
         node(session),
         MingaAgent.RemoteAPI,
@@ -206,8 +205,7 @@ defmodule MingaEditor.Commands.AgentSession do
   end
 
   def respond_to_approval_pid(session, decision) when is_pid(session) do
-    with {:ok, session_id} <- remote_session_id_for_pid(node(session), session),
-         {:ok, token} <- remote_session_token(node(session), session_id) do
+    with {:ok, session_id, token} <- remote_session_info_for_pid(node(session), session) do
       :erpc.call(
         node(session),
         MingaAgent.RemoteAPI,
@@ -229,8 +227,7 @@ defmodule MingaEditor.Commands.AgentSession do
   end
 
   def stop_session_pid(session) when is_pid(session) do
-    with {:ok, session_id} <- remote_session_id_for_pid(node(session), session),
-         {:ok, token} <- remote_session_token(node(session), session_id) do
+    with {:ok, session_id, token} <- remote_session_info_for_pid(node(session), session) do
       :erpc.call(node(session), MingaAgent.RemoteAPI, :stop_session, [session_id, token], 5_000)
     end
   catch
@@ -545,12 +542,13 @@ defmodule MingaEditor.Commands.AgentSession do
 
   defp stop_remote_session(state, _session), do: state
 
-  @spec remote_session_id_for_pid(node(), pid()) :: {:ok, String.t()} | {:error, term()}
-  defp remote_session_id_for_pid(remote_node, remote_pid) do
+  @spec remote_session_info_for_pid(node(), pid()) ::
+          {:ok, String.t(), String.t()} | {:error, term()}
+  defp remote_session_info_for_pid(remote_node, remote_pid) do
     case :erpc.call(remote_node, MingaAgent.RemoteAPI, :list_sessions, [], 5_000) do
       sessions when is_list(sessions) ->
         Enum.find_value(sessions, {:error, :not_found}, fn
-          %{session_id: session_id, pid: ^remote_pid} -> {:ok, session_id}
+          %{session_id: session_id, pid: ^remote_pid, token: token} -> {:ok, session_id, token}
           _session -> nil
         end)
 
@@ -563,21 +561,21 @@ defmodule MingaEditor.Commands.AgentSession do
 
   @spec stop_remote_session_by_id(node(), String.t()) :: :ok | {:error, term()}
   defp stop_remote_session_by_id(remote_node, session_id) do
-    with {:ok, token} <- remote_session_token(remote_node, session_id) do
-      :erpc.call(remote_node, MingaAgent.RemoteAPI, :stop_session, [session_id, token], 5_000)
-    end
-  catch
-    :exit, reason -> {:error, reason}
-  end
-
-  @spec remote_session_token(node(), String.t()) :: {:ok, String.t()} | {:error, term()}
-  defp remote_session_token(remote_node, session_id) do
     case :erpc.call(remote_node, MingaAgent.RemoteAPI, :list_sessions, [], 5_000) do
       sessions when is_list(sessions) ->
-        Enum.find_value(sessions, {:error, :not_found}, fn
-          %{session_id: ^session_id, token: token} -> {:ok, token}
-          _session -> nil
-        end)
+        case Enum.find(sessions, &(&1.session_id == session_id)) do
+          %{token: token} ->
+            :erpc.call(
+              remote_node,
+              MingaAgent.RemoteAPI,
+              :stop_session,
+              [session_id, token],
+              5_000
+            )
+
+          nil ->
+            {:error, :not_found}
+        end
 
       other ->
         {:error, other}
