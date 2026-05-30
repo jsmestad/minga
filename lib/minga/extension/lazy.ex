@@ -137,18 +137,17 @@ defmodule Minga.Extension.Lazy do
 
       ExtRegistry.update(registry, name, registry_fields)
 
-      case register_stub_commands(supervisor, registry, name, module, cmd_registry, opts) do
-        :ok ->
-          register_stub_keybinds(name, module, keymap)
+      with :ok <- register_stub_commands(supervisor, registry, name, module, cmd_registry, opts),
+           :ok <- register_stub_keybinds(name, module, keymap) do
+        Minga.Log.info(
+          :config,
+          "Extension #{name} registered as stub (#{inspect(manifest.load_policy)})"
+        )
 
-          Minga.Log.info(
-            :config,
-            "Extension #{name} registered as stub (#{inspect(manifest.load_policy)})"
-          )
-
-          :ok
-
+        :ok
+      else
         {:error, reason} ->
+          rollback_stub_registration(name, cmd_registry, keymap, registry, opts)
           {:error, reason}
       end
     else
@@ -165,6 +164,19 @@ defmodule Minga.Extension.Lazy do
       "Extension #{name} stub registration failed: #{inspect(reason)}"
     )
 
+    ExtRegistry.update(registry, name, status: :load_error, pid: nil, lifecycle_ref: nil)
+    :ok
+  end
+
+  @spec rollback_stub_registration(
+          atom(),
+          GenServer.server(),
+          GenServer.server(),
+          GenServer.server(),
+          ExtSupervisor.start_opts()
+        ) :: :ok
+  defp rollback_stub_registration(name, cmd_registry, keymap, registry, opts) do
+    ExtSupervisor.cleanup_extension_contributions(name, cmd_registry, keymap, opts)
     ExtRegistry.update(registry, name, status: :load_error, pid: nil, lifecycle_ref: nil)
     :ok
   end
@@ -380,22 +392,25 @@ defmodule Minga.Extension.Lazy do
     end
   end
 
-  @spec register_stub_keybinds(atom(), module(), GenServer.server()) :: :ok
+  @spec register_stub_keybinds(atom(), module(), GenServer.server()) ::
+          :ok | {:error, term()}
   defp register_stub_keybinds(name, module, keymap) do
     schema = keybind_schema(module)
 
-    Enum.each(schema, fn {mode, key_str, command, description, bind_opts} ->
+    Enum.reduce_while(schema, :ok, fn {mode, key_str, command, description, bind_opts}, :ok ->
       source_opts = Keyword.put(bind_opts, :source, {:extension, name})
 
       case Minga.Keymap.Active.bind(keymap, mode, key_str, command, description, source_opts) do
         :ok ->
-          :ok
+          {:cont, :ok}
 
         {:error, reason} ->
           Minga.Log.warning(
             :config,
             "Extension #{name} stub keybind #{inspect(key_str)} failed: #{reason}"
           )
+
+          {:halt, {:error, {:stub_keybind_rejected, key_str, reason}}}
       end
     end)
   end
