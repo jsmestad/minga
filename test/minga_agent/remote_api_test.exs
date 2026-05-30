@@ -79,6 +79,15 @@ defmodule MingaAgent.RemoteAPITest do
              )
   end
 
+  test "stop_session ends a remote session and removes it from the list" do
+    assert {:ok, %{session_id: session_id, token: token}} = RemoteAPI.start_session([])
+    assert Enum.any?(RemoteAPI.list_sessions(), &(&1.session_id == session_id))
+
+    assert :ok = RemoteAPI.stop_session(session_id, token)
+    refute Enum.any?(RemoteAPI.list_sessions(), &(&1.session_id == session_id))
+    assert {:error, :not_found} = SessionManager.get_session(session_id)
+  end
+
   test "start_or_get_for_workdir reuses the deterministic session" do
     workdir = Path.join(System.tmp_dir!(), "remote-api-workdir")
 

@@ -7,6 +7,7 @@ defmodule MingaAgent.EventLog.EventRecord do
   @type event_type ::
           :session_started
           | :session_stopped
+          | :user_disconnected
           | :user_message
           | :assistant_delta
           | :thinking_delta

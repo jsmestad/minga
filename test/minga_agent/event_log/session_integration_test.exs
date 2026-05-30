@@ -150,6 +150,47 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
     :ok = Store.close(db)
   end
 
+  test "subscriber disconnects are durably recorded", %{tmp_dir: tmp_dir} do
+    log_name = unique_name("disconnect-log")
+
+    log_pid =
+      start_supervised!(
+        {EventLog, name: log_name, db_dir: tmp_dir, retention_sweep?: false, health_check: :none}
+      )
+
+    session =
+      start_supervised!(
+        {Session,
+         session_id: "disconnect-session",
+         provider: ReplayProvider,
+         event_log_server: log_name,
+         persist?: false,
+         hooks_enabled?: false,
+         idle_gc_timeout_ms: 0}
+      )
+
+    client =
+      spawn(fn ->
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    on_exit(fn -> Process.exit(client, :kill) end)
+
+    assert :ok = Session.subscribe(session, client, role: :driver)
+    assert :ok = Session.unsubscribe(session, client)
+
+    {:ok, db} = EventLog.open_read_connection(db_dir: tmp_dir)
+    events = wait_for_event(db, "disconnect-session", :user_disconnected, session, log_pid)
+    disconnected = Enum.find(events, &(&1.event_type == :user_disconnected))
+
+    assert disconnected.payload["role"] == "driver"
+    assert disconnected.payload["reason"] == ":detached"
+    assert Session.status(session) == :idle
+    :ok = Store.close(db)
+  end
+
   test "dequeued steering prompts are recorded with content", %{tmp_dir: tmp_dir} do
     log_name = unique_name("steering-log")
 

@@ -21,6 +21,7 @@ defmodule MingaAgent.Session do
 
   use GenServer
 
+  alias Minga.Config.Options
   alias MingaAgent.Branch
   alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.Credentials
@@ -84,6 +85,8 @@ defmodule MingaAgent.Session do
           subscribers: MapSet.t(pid()),
           subscriber_roles: %{pid() => attachment_role()},
           driver: pid() | nil,
+          idle_gc_timeout_ms: non_neg_integer(),
+          idle_gc_timer: {timer_ref :: reference(), token :: reference()} | nil,
           total_usage: Event.token_usage(),
           error_message: String.t() | nil,
           pending_thinking_level: String.t() | nil,
@@ -112,6 +115,18 @@ defmodule MingaAgent.Session do
         }
 
   # ── Public API ──────────────────────────────────────────────────────────────
+
+  @doc false
+  @spec child_spec(keyword()) :: Supervisor.child_spec()
+  def child_spec(opts) do
+    %{
+      id: Keyword.get(opts, :id, __MODULE__),
+      start: {__MODULE__, :start_link, [opts]},
+      restart: :transient,
+      shutdown: 5_000,
+      type: :worker
+    }
+  end
 
   @doc "Starts a new agent session."
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -318,7 +333,13 @@ defmodule MingaAgent.Session do
   @doc "Unsubscribes the calling process from session events."
   @spec unsubscribe(GenServer.server()) :: :ok
   def unsubscribe(session) do
-    GenServer.call(session, {:unsubscribe, self()})
+    unsubscribe(session, self())
+  end
+
+  @doc "Unsubscribes the given process from session events."
+  @spec unsubscribe(GenServer.server(), pid()) :: :ok
+  def unsubscribe(session, pid) when is_pid(pid) do
+    GenServer.call(session, {:unsubscribe, pid})
   end
 
   @doc "Manually triggers context compaction on the provider."
@@ -627,6 +648,8 @@ defmodule MingaAgent.Session do
       subscribers: MapSet.new(),
       subscriber_roles: %{},
       driver: nil,
+      idle_gc_timeout_ms: Keyword.get_lazy(opts, :idle_gc_timeout_ms, &idle_gc_timeout_ms/0),
+      idle_gc_timer: nil,
       total_usage: TurnUsage.new(),
       error_message: nil,
       pending_thinking_level: initial_thinking_level,
@@ -994,7 +1017,7 @@ defmodule MingaAgent.Session do
   def handle_call({:subscribe, pid, opts}, _from, state) do
     Process.monitor(pid)
     role = Keyword.get(opts, :role, default_subscriber_role(state))
-    state = put_subscriber(state, pid, role)
+    state = state |> cancel_idle_gc_timer() |> put_subscriber(pid, role)
     {:reply, :ok, state}
   end
 
@@ -1010,7 +1033,7 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call({:unsubscribe, pid}, _from, state) do
-    {:reply, :ok, remove_subscriber(state, pid)}
+    {:reply, :ok, remove_subscriber(state, pid, :detached)}
   end
 
   def handle_call(:compact, _from, %{provider: nil} = state) do
@@ -1252,9 +1275,29 @@ defmodule MingaAgent.Session do
     {:noreply, state}
   end
 
-  def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do
+  def handle_info({:DOWN, _ref, :process, pid, reason}, state) do
     # A subscriber died, remove it and vacate the driver role if needed.
-    {:noreply, remove_subscriber(state, pid)}
+    {:noreply, remove_subscriber(state, pid, reason)}
+  end
+
+  def handle_info({:idle_gc_timeout, token}, %{idle_gc_timer: {_timer_ref, token}} = state) do
+    case idle_gc_reclaimable?(state) do
+      true ->
+        Minga.Log.info(
+          :agent,
+          "[Agent.Session] reclaiming idle detached session #{state.session_id}"
+        )
+
+        save_to_disk(state)
+        {:stop, :normal, %{state | idle_gc_timer: nil}}
+
+      false ->
+        {:noreply, maybe_schedule_idle_gc(%{state | idle_gc_timer: nil})}
+    end
+  end
+
+  def handle_info({:idle_gc_timeout, _token}, state) do
+    {:noreply, state}
   end
 
   def handle_info(:save_session, state) do
@@ -1771,7 +1814,7 @@ defmodule MingaAgent.Session do
 
     state = clear_turn_trust_for_status(state, new_status)
     broadcast(state, {:status_changed, new_status})
-    state
+    maybe_schedule_idle_gc(state)
   end
 
   @spec clear_turn_trust_for_status(state(), status()) :: state()
@@ -1916,16 +1959,79 @@ defmodule MingaAgent.Session do
     state
   end
 
-  @spec remove_subscriber(state(), pid()) :: state()
-  defp remove_subscriber(state, pid) do
+  @spec remove_subscriber(state(), pid(), term()) :: state()
+  defp remove_subscriber(state, pid, reason) do
+    was_subscribed? = MapSet.member?(state.subscribers, pid)
+    role = Map.get(state.subscriber_roles, pid)
     driver = if state.driver == pid, do: nil, else: state.driver
 
-    %{
+    state = %{
       state
       | subscribers: MapSet.delete(state.subscribers, pid),
         subscriber_roles: Map.delete(state.subscriber_roles, pid),
         driver: driver
     }
+
+    if was_subscribed? do
+      record_user_disconnected(state, pid, role, reason)
+    end
+
+    maybe_schedule_idle_gc(state)
+  end
+
+  @spec record_user_disconnected(state(), pid(), attachment_role() | nil, term()) :: :ok
+  defp record_user_disconnected(state, pid, role, reason) do
+    EventLog.record(
+      state.session_id,
+      :user_disconnected,
+      %{pid: inspect(pid), role: role, reason: inspect(reason)},
+      state.event_log_server
+    )
+  end
+
+  @spec maybe_schedule_idle_gc(state()) :: state()
+  defp maybe_schedule_idle_gc(state) do
+    schedule_idle_gc(
+      state,
+      idle_gc_reclaimable?(state),
+      state.idle_gc_timer,
+      state.idle_gc_timeout_ms
+    )
+  end
+
+  @spec schedule_idle_gc(
+          state(),
+          boolean(),
+          {timer_ref :: reference(), token :: reference()} | nil,
+          non_neg_integer()
+        ) :: state()
+  defp schedule_idle_gc(state, true, nil, timeout_ms) when timeout_ms > 0 do
+    token = make_ref()
+    timer_ref = Process.send_after(self(), {:idle_gc_timeout, token}, timeout_ms)
+    %{state | idle_gc_timer: {timer_ref, token}}
+  end
+
+  defp schedule_idle_gc(state, true, _timer, _timeout_ms), do: state
+  defp schedule_idle_gc(state, false, _timer, _timeout_ms), do: cancel_idle_gc_timer(state)
+
+  @spec cancel_idle_gc_timer(state()) :: state()
+  defp cancel_idle_gc_timer(%{idle_gc_timer: nil} = state), do: state
+
+  defp cancel_idle_gc_timer(state) do
+    {timer_ref, _token} = state.idle_gc_timer
+    Process.cancel_timer(timer_ref)
+    %{state | idle_gc_timer: nil}
+  end
+
+  @spec idle_gc_reclaimable?(state()) :: boolean()
+  defp idle_gc_reclaimable?(state) do
+    MapSet.size(state.subscribers) == 0 and state.status in [:idle, :plan, :error] and
+      state.pending_approval == nil and state.active_tool_calls == []
+  end
+
+  @spec idle_gc_timeout_ms() :: non_neg_integer()
+  defp idle_gc_timeout_ms do
+    Options.get(:agent_session_idle_timeout_ms)
   end
 
   @spec driver_allowed?(state(), pid()) :: boolean()

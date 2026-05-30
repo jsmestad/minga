@@ -435,6 +435,59 @@ defmodule MingaAgent.SessionTest do
     end
   end
 
+  describe "detached session lifecycle" do
+    test "supervised sessions restart after crashes but not normal idle reclamation" do
+      spec = Session.child_spec(provider: MockProvider, provider_opts: [])
+
+      assert spec.restart == :transient
+    end
+
+    test "idle detached sessions are reclaimed after the configured timeout" do
+      {:ok, session} =
+        Session.start_link(provider: MockProvider, provider_opts: [], idle_gc_timeout_ms: 1)
+
+      client = idle_process()
+
+      on_exit(fn -> Process.exit(client, :kill) end)
+
+      assert :ok = Session.subscribe(session, client)
+
+      ref = Process.monitor(session)
+      assert :ok = Session.unsubscribe(session, client)
+      assert_receive {:DOWN, ^ref, :process, ^session, :normal}, @event_timeout
+    end
+
+    test "active detached sessions are not reclaimed" do
+      {:ok, session} =
+        Session.start_link(provider: SlowMockProvider, provider_opts: [], idle_gc_timeout_ms: 1)
+
+      on_exit(fn -> Process.exit(session, :kill) end)
+
+      assert :ok = Session.subscribe(session)
+      assert :ok = Session.send_prompt(session, "keep working")
+      assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
+      assert :ok = Session.unsubscribe(session)
+
+      send(session, {:idle_gc_timeout, make_ref()})
+      assert Session.status(session) == :thinking
+    end
+
+    test "stale idle GC messages are ignored after a client reconnects" do
+      {:ok, session} =
+        Session.start_link(provider: MockProvider, provider_opts: [], idle_gc_timeout_ms: 60_000)
+
+      on_exit(fn -> Process.exit(session, :kill) end)
+
+      assert :ok = Session.subscribe(session)
+      assert :ok = Session.unsubscribe(session)
+      {_timer_ref, stale_token} = :sys.get_state(session).idle_gc_timer
+      assert :ok = Session.subscribe(session)
+
+      send(session, {:idle_gc_timeout, stale_token})
+      assert Session.status(session) == :idle
+    end
+  end
+
   describe "plan mode" do
     test "enter_plan sets status, broadcasts, and writes a system message", %{session: session} do
       assert :ok = Session.enter_plan(session)

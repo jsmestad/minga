@@ -74,6 +74,7 @@ defmodule Minga.Config.Options do
           | :agent_tool_permissions
           | :agent_hooks
           | :agent_session_retention_days
+          | :agent_session_idle_timeout_ms
           | :agent_panel_split
           | :startup_view
           | :agent_auto_context
@@ -288,6 +289,8 @@ defmodule Minga.Config.Options do
     {:agent_hooks, :any, [], "Agent lifecycle hook declarations loaded from config."},
     {:agent_session_retention_days, :pos_integer, 30,
      "Number of days to retain persisted agent sessions."},
+    {:agent_session_idle_timeout_ms, :non_neg_integer, 14_400_000,
+     "Milliseconds before an idle detached agent session is reclaimed; 0 disables idle reclamation."},
     {:agent_panel_split, :pos_integer, 65,
      "Percentage of available width assigned to the agent panel."},
     {:startup_view, {:enum, [:agent, :editor]}, :editor, "Initial view shown when Minga starts."},

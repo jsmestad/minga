@@ -1,0 +1,20 @@
+[Unit]
+Description=Minga headless agent daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/minga --headless
+WorkingDirectory=%h
+Restart=on-failure
+RestartSec=5
+Environment=MIX_ENV=prod
+# Set a stable cookie shared only with trusted clients.
+Environment=MINGA_COOKIE=replace-with-a-long-random-cookie
+# Optional provider credentials live on the server, not on attaching clients.
+# Environment=ANTHROPIC_API_KEY=...
+# Environment=OPENAI_API_KEY=...
+
+[Install]
+WantedBy=default.target
