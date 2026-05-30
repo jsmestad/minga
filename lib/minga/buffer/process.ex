@@ -900,9 +900,7 @@ defmodule Minga.Buffer.Process do
   def handle_call({:open, file_path}, _from, state) do
     case Persistence.read_content(state, file_path) do
       {:ok, text} when is_binary(text) ->
-        if not String.valid?(text) do
-          {:reply, {:error, :binary_file}, state}
-        else
+        if String.valid?(text) do
           first_line = text |> String.split("\n", parts: 2) |> List.first("")
           filetype = Language.detect_filetype_from_content(file_path, first_line)
 
@@ -921,6 +919,8 @@ defmodule Minga.Buffer.Process do
           unregister_path(state.file_path)
           register_path(file_path)
           {:reply, :ok, new_state}
+        else
+          {:reply, {:error, :binary_file}, state}
         end
 
       {:error, reason} ->
