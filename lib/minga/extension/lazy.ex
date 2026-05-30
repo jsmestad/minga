@@ -265,17 +265,18 @@ defmodule Minga.Extension.Lazy do
   defp resolve_hex_module(nil), do: {:error, :hex_app_name_unknown}
 
   defp resolve_hex_module(app_atom) do
-    with :ok <- ensure_hex_started(app_atom),
+    with :ok <- load_hex_app_metadata(app_atom),
          {:ok, modules} <- hex_modules(app_atom) do
       find_extension_module(modules)
     end
   end
 
-  @spec ensure_hex_started(atom()) :: :ok | {:error, term()}
-  defp ensure_hex_started(app_atom) do
-    case Application.ensure_all_started(app_atom) do
-      {:ok, _} -> :ok
-      {:error, reason} -> {:error, {:hex_app_start_failed, app_atom, reason}}
+  @spec load_hex_app_metadata(atom()) :: :ok | {:error, term()}
+  defp load_hex_app_metadata(app_atom) do
+    case Application.load(app_atom) do
+      :ok -> :ok
+      {:error, {:already_loaded, ^app_atom}} -> :ok
+      {:error, reason} -> {:error, {:hex_app_load_failed, app_atom, reason}}
     end
   end
 
