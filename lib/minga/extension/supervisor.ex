@@ -151,7 +151,7 @@ defmodule Minga.Extension.Supervisor do
          deferred,
          opts
        ) do
-    load_policy = Lazy.effective_load_policy(entry)
+    load_policy = resolve_load_policy(entry)
 
     case load_policy do
       :eager ->
@@ -160,21 +160,48 @@ defmodule Minga.Extension.Supervisor do
       :deferred ->
         {failures, [{name, entry} | deferred]}
 
-      {trigger, _} when trigger in [:on_command, :on_filetype, :on_key] ->
+      {:on_command, _} ->
         case register_lazy_stubs(supervisor, registry, name, entry, opts) do
           :ok -> {failures, deferred}
           {:error, reason} -> {failures ++ [%{extension: name, reason: reason}], deferred}
         end
 
-      other ->
+      {:on_filetype, _} ->
         Minga.Log.warning(
           :config,
-          "Extension #{name} has unknown load_policy: #{inspect(other)}, loading eagerly"
+          "Extension #{name}: on_filetype trigger is reserved; stub commands will autoload on invocation but filetype-open will not trigger autoload yet"
         )
 
-        start_eager(supervisor, registry, name, entry, opts, failures, deferred)
+        case register_lazy_stubs(supervisor, registry, name, entry, opts) do
+          :ok -> {failures, deferred}
+          {:error, reason} -> {failures ++ [%{extension: name, reason: reason}], deferred}
+        end
+
+      {:on_key, _} ->
+        Minga.Log.warning(
+          :config,
+          "Extension #{name}: on_key trigger is reserved; stub commands will autoload on invocation but key-press will not trigger autoload yet"
+        )
+
+        case register_lazy_stubs(supervisor, registry, name, entry, opts) do
+          :ok -> {failures, deferred}
+          {:error, reason} -> {failures ++ [%{extension: name, reason: reason}], deferred}
+        end
     end
   end
+
+  @spec resolve_load_policy(ExtRegistry.entry()) :: Minga.Extension.load_policy()
+  defp resolve_load_policy(%{load_policy: policy}) when not is_nil(policy), do: policy
+
+  defp resolve_load_policy(%{source_type: type} = entry)
+       when type in [:path, :git, :hex, :module] do
+    case Lazy.discover_load_policy(entry) do
+      {:ok, policy, _module} -> policy
+      {:error, _reason} -> :eager
+    end
+  end
+
+  defp resolve_load_policy(_entry), do: :eager
 
   @spec register_lazy_stubs(
           GenServer.server(),

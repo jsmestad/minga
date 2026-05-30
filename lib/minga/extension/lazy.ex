@@ -139,15 +139,21 @@ defmodule Minga.Extension.Lazy do
         end
 
       ExtRegistry.update(registry, name, registry_fields)
-      register_stub_commands(supervisor, registry, name, module, cmd_registry, opts)
-      register_stub_keybinds(name, module, keymap)
 
-      Minga.Log.info(
-        :config,
-        "Extension #{name} registered as stub (#{inspect(manifest.load_policy)})"
-      )
+      case register_stub_commands(supervisor, registry, name, module, cmd_registry, opts) do
+        :ok ->
+          register_stub_keybinds(name, module, keymap)
 
-      :ok
+          Minga.Log.info(
+            :config,
+            "Extension #{name} registered as stub (#{inspect(manifest.load_policy)})"
+          )
+
+          :ok
+
+        {:error, reason} ->
+          {:error, reason}
+      end
     else
       {:error, reason} ->
         log_stub_failure(name, reason, registry)
@@ -239,8 +245,37 @@ defmodule Minga.Extension.Lazy do
     end
   end
 
-  defp compile_extension(%{source_type: :hex}) do
-    {:error, :hex_stub_not_supported}
+  defp compile_extension(%{source_type: :hex, hex: %{app: app}} = entry) do
+    app_atom =
+      if is_atom(app) and app != nil, do: app, else: entry.manifest && entry.manifest.name
+
+    resolve_hex_module(app_atom)
+  end
+
+  @spec resolve_hex_module(atom() | nil) :: {:ok, module()} | {:error, term()}
+  defp resolve_hex_module(nil), do: {:error, :hex_app_name_unknown}
+
+  defp resolve_hex_module(app_atom) do
+    with :ok <- ensure_hex_started(app_atom),
+         {:ok, modules} <- hex_modules(app_atom) do
+      find_extension_module(modules)
+    end
+  end
+
+  @spec ensure_hex_started(atom()) :: :ok | {:error, term()}
+  defp ensure_hex_started(app_atom) do
+    case Application.ensure_all_started(app_atom) do
+      {:ok, _} -> :ok
+      {:error, reason} -> {:error, {:hex_app_start_failed, app_atom, reason}}
+    end
+  end
+
+  @spec hex_modules(atom()) :: {:ok, [module()]} | {:error, String.t()}
+  defp hex_modules(app_atom) do
+    case :application.get_key(app_atom, :modules) do
+      {:ok, modules} -> {:ok, modules}
+      :undefined -> {:error, "hex application #{app_atom} not found after install"}
+    end
   end
 
   @spec compile_from_path(String.t()) :: {:ok, module()} | {:error, term()}
@@ -294,11 +329,11 @@ defmodule Minga.Extension.Lazy do
           module(),
           GenServer.server(),
           ExtSupervisor.start_opts()
-        ) :: :ok
+        ) :: :ok | {:error, term()}
   defp register_stub_commands(supervisor, registry, name, module, cmd_registry, opts) do
     schema = command_schema(module)
 
-    Enum.each(schema, fn {cmd_name, description, cmd_opts} ->
+    Enum.reduce_while(schema, :ok, fn {cmd_name, description, cmd_opts}, :ok ->
       requires_buffer = Keyword.get(cmd_opts, :requires_buffer, false)
 
       stub_cmd = %Command{
@@ -310,13 +345,15 @@ defmodule Minga.Extension.Lazy do
 
       case Command.Registry.register_command(cmd_registry, {:extension, name}, stub_cmd) do
         :ok ->
-          :ok
+          {:cont, :ok}
 
         {:error, reason} ->
           Minga.Log.warning(
             :config,
             "Extension #{name} stub command #{cmd_name} rejected: #{inspect(reason)}"
           )
+
+          {:halt, {:error, {:stub_command_rejected, cmd_name, reason}}}
       end
     end)
   end
@@ -402,6 +439,36 @@ defmodule Minga.Extension.Lazy do
   end
 
   def effective_load_policy(_entry), do: :eager
+
+  @doc """
+  Compiles a path/git extension to discover the module's declared
+  load policy when no config-level override is set.
+
+  Returns `{:ok, policy, module}` on success so the caller can avoid
+  a redundant recompile. Returns `{:error, reason}` if compilation
+  fails, in which case the caller should fall back to `:eager`.
+  """
+  @spec discover_load_policy(ExtRegistry.entry()) ::
+          {:ok, Minga.Extension.load_policy(), module()} | {:error, term()}
+  def discover_load_policy(entry) do
+    case compile_extension(entry) do
+      {:ok, module} ->
+        policy = module_load_policy(module)
+        {:ok, policy, module}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @spec module_load_policy(module()) :: Minga.Extension.load_policy()
+  defp module_load_policy(module) do
+    if function_exported?(module, :__load_policy__, 0) do
+      module.__load_policy__()
+    else
+      :eager
+    end
+  end
 
   @doc """
   Returns true if the given load policy requires eager loading at boot.
