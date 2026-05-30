@@ -272,6 +272,17 @@ defmodule Minga.Keymap.DefaultsTest do
       assert {:command, :test_all} = Bindings.lookup(p_node, {?T, 0})
     end
 
+    test "existing project bindings still resolve to their current commands" do
+      trie = Defaults.leader_trie()
+      {:prefix, p_node} = Bindings.lookup(trie, {?p, 0})
+
+      assert {:command, :project_find_file} = Bindings.lookup(p_node, {?f, 0})
+      assert {:command, :project_switch} = Bindings.lookup(p_node, {?p, 0})
+      assert {:command, :project_add} = Bindings.lookup(p_node, {?a, 0})
+      assert {:command, :project_remove} = Bindings.lookup(p_node, {?d, 0})
+      assert {:command, :project_invalidate} = Bindings.lookup(p_node, {?i, 0})
+    end
+
     # ── Search bindings ─────────────────────────────────────────────────────────
 
     test "SPC s s → :search_buffer" do
