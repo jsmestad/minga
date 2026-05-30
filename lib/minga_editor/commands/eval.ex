@@ -7,7 +7,6 @@ defmodule MingaEditor.Commands.Eval do
   line and logged to the `*Messages*` buffer.
   """
 
-  alias MingaEditor.MessageLog
   alias MingaEditor.State, as: EditorState
   alias Minga.Mode
 
@@ -129,5 +128,8 @@ defmodule MingaEditor.Commands.Eval do
   end
 
   @spec log_to_messages(state(), String.t()) :: state()
-  defp log_to_messages(state, text), do: MessageLog.log(state, text)
+  defp log_to_messages(state, text) do
+    Minga.Log.info(:editor, text)
+    state
+  end
 end

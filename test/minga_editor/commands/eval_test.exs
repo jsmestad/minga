@@ -19,6 +19,9 @@ defmodule MingaEditor.Commands.EvalTest do
   end
 
   defp singleton_content do
+    Logger.flush()
+    Process.sleep(10)
+
     case Minga.Log.MessagesBuffer.pid() do
       nil -> ""
       pid -> BufferProcess.content(pid)

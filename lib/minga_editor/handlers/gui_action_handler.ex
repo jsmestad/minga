@@ -1507,7 +1507,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
       |> EditorState.sync_active_window_buffer()
       |> EditorState.monitor_buffer(buffer_pid)
 
-    state = MingaEditor.log_message(state, "Opened: #{file_path}")
+    Minga.Log.info(:editor, "Opened: #{file_path}")
 
     Minga.Events.broadcast(
       :buffer_opened,

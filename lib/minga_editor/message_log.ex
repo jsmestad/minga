@@ -1,66 +1,15 @@
 defmodule MingaEditor.MessageLog do
   @moduledoc """
-  Writes to the `*Messages*` buffer with timestamp prefix and line trimming.
+  GUI MessageStore helpers for the editor's `:log_message` event subscription.
 
-  This is the **unconditional tier** of the logging pipeline. Messages written
-  here always appear in `*Messages*` regardless of log level settings. Use it
-  for user-visible lifecycle events: file open, save, close, config reload, etc.
-
-  The **filterable tier** is `Minga.Log`, which routes through per-subsystem
-  log levels and is intended for diagnostic output (LSP traces, render timing,
-  debug context). `Minga.Log` eventually calls back into this module via the
-  `Minga.LoggerHandler`, but those messages are gated by subsystem log levels.
-
-  Extracted from `MingaEditor` to reduce GenServer module size.
+  All logging flows through `Minga.Log`, which broadcasts `:log_message` events.
+  `Minga.Log.MessagesBuffer` handles the gap buffer (TUI). This module handles
+  the structured `MessageStore` (GUI) via `append_to_store/3`, called by the
+  editor's `EventDispatcher` when it receives a `:log_message` broadcast.
   """
 
-  alias Minga.Buffer
-  alias Minga.Buffer.Document
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.UI.Panel.MessageStore
-
-  @max_lines 1000
-
-  @doc """
-  Appends a timestamped message to the `*Messages*` buffer and the
-  structured MessageStore (for the GUI Messages tab).
-
-  No-op if the messages buffer isn't available. Trims the buffer
-  to `#{@max_lines}` lines when it grows too large.
-  """
-  @spec log(EditorState.t(), String.t()) :: EditorState.t()
-  def log(state, text), do: log(state, text, nil)
-
-  @doc """
-  Appends a timestamped message with an explicit level override.
-
-  When `level_override` is non-nil, it is used instead of parsing the prefix.
-  Warning-level messages get a `[WARN]` prefix in the gap buffer for TUI visibility.
-  """
-  @spec log(EditorState.t(), String.t(), MessageStore.level() | nil) :: EditorState.t()
-  def log(state, text, level_override) do
-    {parsed_level, subsystem, _clean_text} = MessageStore.parse_prefix(text)
-    level = level_override || parsed_level
-
-    case Minga.Log.MessagesBuffer.pid() do
-      nil ->
-        :ok
-
-      buf ->
-        display_text =
-          case level_override do
-            :warning -> "[WARN] #{text}"
-            :error -> "[ERROR] #{text}"
-            _ -> text
-          end
-
-        time = Calendar.strftime(DateTime.utc_now(), "%H:%M:%S")
-        Buffer.append(buf, "[#{time}] #{display_text}\n")
-        maybe_trim(buf)
-    end
-
-    %{state | message_store: MessageStore.append(state.message_store, text, level, subsystem)}
-  end
 
   @doc """
   Appends an entry to the structured MessageStore without writing to the
@@ -86,22 +35,4 @@ defmodule MingaEditor.MessageLog do
   @spec frontend_prefix(EditorState.t()) :: String.t()
   def frontend_prefix(%{capabilities: %{frontend_type: :native_gui}}), do: "GUI"
   def frontend_prefix(_state), do: "ZIG"
-
-  @spec maybe_trim(pid()) :: :ok
-  defp maybe_trim(buf) do
-    line_count = Buffer.line_count(buf)
-
-    if line_count > @max_lines do
-      excess = line_count - @max_lines
-      content = Buffer.content(buf)
-      lines = String.split(content, "\n")
-      trimmed = lines |> Enum.drop(excess) |> Enum.join("\n")
-
-      :sys.replace_state(buf, fn s ->
-        %{s | document: Document.new(trimmed)}
-      end)
-    end
-
-    :ok
-  end
 end

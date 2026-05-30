@@ -8,7 +8,6 @@ defmodule MingaEditor.Commands.Testing do
 
   alias Minga.Buffer
   alias MingaEditor.Commands.BufferManagement
-  alias MingaEditor.MessageLog
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.UI.Notification
 
@@ -126,8 +125,9 @@ defmodule MingaEditor.Commands.Testing do
         dismissable: false
       )
 
+    Minga.Log.info(:editor, "[Build] Building Minga: #{command}")
+
     state
-    |> MessageLog.log("[Build] Building Minga: #{command}")
     |> EditorState.upsert_notification(notification)
   end
 

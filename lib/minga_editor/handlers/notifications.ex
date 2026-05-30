@@ -74,6 +74,7 @@ defmodule MingaEditor.Handlers.Notifications do
   defp log_notification(state, %Notification{} = notification) do
     source = if notification.source, do: "[#{notification.source}] ", else: ""
     body = if notification.body in [nil, ""], do: "", else: ": #{notification.body}"
-    MingaEditor.log_message(state, "#{source}#{notification.title}#{body}")
+    Minga.Log.info(:editor, "#{source}#{notification.title}#{body}")
+    state
   end
 end

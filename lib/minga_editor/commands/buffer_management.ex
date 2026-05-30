@@ -625,7 +625,7 @@ defmodule MingaEditor.Commands.BufferManagement do
 
     case result do
       :ok ->
-        MingaEditor.log_to_messages("Config reloaded")
+        Minga.Log.info(:editor, "Config reloaded")
         EditorState.set_status(state, "Config reloaded")
 
       {:error, msg} ->
@@ -998,7 +998,7 @@ defmodule MingaEditor.Commands.BufferManagement do
       # Free the buffer's tree-sitter parse tree in the Zig parser process.
       state = HighlightSync.close_buffer(state, buf)
 
-      MingaEditor.log_to_messages("Closed: #{buf_name}")
+      Minga.Log.info(:editor, "Closed: #{buf_name}")
 
       new_buffers = List.delete_at(buffers, idx)
       had_neighbor_tab? = has_neighbor_tab?(state)
@@ -1666,7 +1666,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   @spec finish_agent_tab_close(state(), non_neg_integer()) :: state()
   defp finish_agent_tab_close(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, workspace_id) do
     if TabBar.get_workspace(tb, workspace_id) == nil do
-      MingaEditor.log_to_messages("Closed agent tab")
+      Minga.Log.info(:editor, "Closed agent tab")
 
       state
       |> EditorState.set_keymap_scope(:editor)
@@ -1797,7 +1797,7 @@ defmodule MingaEditor.Commands.BufferManagement do
     closed_tabs = Enum.reject(TabBar.visible_file_tabs(tb), &(&1.id == active_id))
     tb = remove_tabs(tb, closed_tabs)
 
-    MingaEditor.log_to_messages("Closed other tabs")
+    Minga.Log.info(:editor, "Closed other tabs")
     EditorState.set_tab_bar(state, tb)
   end
 
@@ -1818,7 +1818,7 @@ defmodule MingaEditor.Commands.BufferManagement do
           EditorState.set_status(state, "No tabs to the right")
         else
           tb = remove_tabs(tb, right_tabs)
-          MingaEditor.log_to_messages("Closed tabs to the right")
+          Minga.Log.info(:editor, "Closed tabs to the right")
           EditorState.set_tab_bar(state, tb)
         end
     end
@@ -1889,7 +1889,7 @@ defmodule MingaEditor.Commands.BufferManagement do
     active_tab = EditorState.active_tab(state)
     label = if active_tab, do: active_tab.label, else: "tab"
     replacement_id = active_tab && replacement_tab_id(tb, active_tab)
-    MingaEditor.log_to_messages("Closed: #{label}")
+    Minga.Log.info(:editor, "Closed: #{label}")
 
     state
     |> remove_current_tab(replacement_id)
@@ -2046,7 +2046,7 @@ defmodule MingaEditor.Commands.BufferManagement do
 
     case try_lsp_format_on_save(buf) do
       {:ok, _formatted} ->
-        MingaEditor.log_to_messages("Format-on-save (LSP): #{buf_name}")
+        Minga.Log.info(:editor, "Format-on-save (LSP): #{buf_name}")
         state
 
       :not_available ->
@@ -2187,7 +2187,7 @@ defmodule MingaEditor.Commands.BufferManagement do
     case Minga.Editing.format(Buffer.content(buf), spec) do
       {:ok, formatted} ->
         Buffer.replace_content(buf, formatted)
-        MingaEditor.log_to_messages("Format-on-save: #{buf_name}")
+        Minga.Log.info(:editor, "Format-on-save: #{buf_name}")
         state
 
       {:error, msg} ->

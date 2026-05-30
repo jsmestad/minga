@@ -31,7 +31,7 @@ defmodule MingaEditor do
   alias MingaEditor.Layout
   alias MingaEditor.InlineAsk.Events, as: InlineAskEvents
   alias MingaEditor.InlineEdit.Events, as: InlineEditEvents
-  alias MingaEditor.MessageLog
+
   alias MingaEditor.NavFlash
   alias MingaEditor.Observatory
   alias MingaEditor.YankFlash
@@ -114,26 +114,6 @@ defmodule MingaEditor do
     GenServer.cast(server, :render)
   end
 
-  @doc "Log a message to the *Messages* buffer. Used by the custom Logger handler."
-  @spec log_to_messages(String.t(), GenServer.server()) :: :ok
-  def log_to_messages(text, server \\ __MODULE__) do
-    # Use cast (not call) to avoid deadlocking when Logger is invoked from
-    # inside the Editor GenServer itself.
-    GenServer.cast(server, {:log_to_messages, text})
-  end
-
-  @doc """
-  Log a warning/error to the *Warnings* buffer with auto-popup.
-
-  Used by the custom Logger handler. The popup opens without stealing
-  focus. Once the user dismisses it with `q`, new warnings are logged
-  silently until the user explicitly re-opens via `SPC b W`.
-  """
-  @spec log_to_warnings(String.t(), GenServer.server()) :: :ok
-  def log_to_warnings(text, server \\ __MODULE__) do
-    GenServer.cast(server, {:log_to_warnings, text})
-  end
-
   @doc """
   Ensures a buffer exists for the given file path, opening one if needed.
 
@@ -211,14 +191,13 @@ defmodule MingaEditor do
     state = EditorState.set_renderer(state, renderer_pid)
 
     # Logger redirect and startup messages
-    state =
-      if state.backend != :headless do
-        log_path = Minga.LoggerHandler.install()
-        state = log_message(state, "Editor started")
-        log_message(state, "Log file: #{log_path}")
-      else
-        log_message(state, "Editor started")
-      end
+    if state.backend != :headless do
+      log_path = Minga.LoggerHandler.install()
+      Minga.Log.info(:editor, "Editor started")
+      Minga.Log.info(:editor, "Log file: #{log_path}")
+    else
+      Minga.Log.info(:editor, "Editor started")
+    end
 
     state = Startup.apply_config_options(state)
     events_registry = EditorState.events_registry(state)
@@ -343,16 +322,11 @@ defmodule MingaEditor do
   def handle_call(:api_save, _from, %{workspace: %{buffers: %{active: buf}}} = state) do
     result = Buffer.save(buf)
 
-    new_state =
-      case result do
-        :ok ->
-          log_message(state, "Saved: #{Commands.Helpers.buffer_display_name(buf)}")
+    if result == :ok do
+      Minga.Log.info(:editor, "Saved: #{Commands.Helpers.buffer_display_name(buf)}")
+    end
 
-        _ ->
-          state
-      end
-
-    new_state = Renderer.render_or_async(new_state)
+    new_state = Renderer.render_or_async(state)
     {:reply, result, new_state}
   end
 
@@ -376,11 +350,6 @@ defmodule MingaEditor do
     {:reply, :ok, new_state}
   end
 
-  def handle_call({:api_log_message, text}, _from, state) do
-    new_state = log_message(state, text)
-    {:reply, :ok, new_state}
-  end
-
   def handle_call({:cleanup_feature_state, source}, _from, state) do
     state = EditorState.drop_feature_state_source(state, source)
     {:reply, :ok, Renderer.render_or_async(state)}
@@ -400,15 +369,6 @@ defmodule MingaEditor do
       state = BufferRegistry.register_buffer_background(state, pid, abs_path)
       {:noreply, state}
     end
-  end
-
-  def handle_cast({:log_to_messages, text}, state) do
-    {:noreply, log_message(state, text)}
-  end
-
-  def handle_cast({:log_to_warnings, text}, state) do
-    state = MessageLog.log(state, text, :warning)
-    {:noreply, maybe_schedule_warning_popup(state)}
   end
 
   def handle_cast(:render, state) do
@@ -461,15 +421,12 @@ defmodule MingaEditor do
   end
 
   def handle_info({:minga_input, {:capabilities_updated, caps}}, state) do
-    new_state = %{state | capabilities: caps}
+    Minga.Log.info(
+      :editor,
+      "Frontend capabilities updated: #{inspect(caps.frontend_type)}, color: #{inspect(caps.color_depth)}"
+    )
 
-    new_state =
-      log_message(
-        new_state,
-        "Frontend capabilities updated: #{inspect(caps.frontend_type)}, color: #{inspect(caps.color_depth)}"
-      )
-
-    {:noreply, new_state}
+    {:noreply, %{state | capabilities: caps}}
   end
 
   def handle_info({:minga_input, {:resize, width, height}}, state) do
@@ -518,7 +475,7 @@ defmodule MingaEditor do
   # ── File watcher notification ──
   def handle_info({:file_changed_on_disk, path} = msg, state) do
     new_state = FileWatcherHelpers.handle_file_change(state, path)
-    new_state = log_message(new_state, "External change detected: #{path}")
+    Minga.Log.info(:editor, "External change detected: #{path}")
     {new_state, effects} = FileEventHandler.handle(new_state, msg)
     {:noreply, EffectHandler.apply_effects(new_state, effects)}
   end
@@ -1387,7 +1344,8 @@ defmodule MingaEditor do
   end
 
   defp handle_paste_event_editor(state, _text) do
-    log_message(state, "Paste ignored (no active buffer)")
+    Minga.Log.info(:editor, "Paste ignored (no active buffer)")
+    state
   end
 
   # ── Tool picker refresh ─────────────────────────────────────────────
@@ -1408,10 +1366,6 @@ defmodule MingaEditor do
   end
 
   def maybe_refresh_tool_picker(state), do: state
-
-  @doc false
-  @spec log_message(state(), String.t()) :: state()
-  def log_message(state, text), do: MessageLog.log(state, text)
 
   @doc false
   @spec resolve_git_root() :: String.t() | nil
