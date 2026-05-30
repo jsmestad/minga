@@ -1,4 +1,5 @@
 defmodule MingaAgent.OAuth.FlowTest do
+  # Uses the global registered process name :minga_oauth_flow, so tests must serialize.
   use ExUnit.Case, async: false
 
   describe "registration" do

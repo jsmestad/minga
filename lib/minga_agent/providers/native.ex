@@ -2554,6 +2554,7 @@ defmodule MingaAgent.Providers.Native do
           Keyword.get(opts, :provider_options, [])
           |> Keyword.put(:auth_mode, :oauth)
           |> Keyword.put(:oauth_file, Credentials.oauth_path())
+          |> Keyword.put(:codex_originator, "minga")
 
         Keyword.put(opts, :provider_options, provider_options)
       else

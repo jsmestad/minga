@@ -1,16 +1,17 @@
 defmodule MingaAgent.OAuth.CallbackHandlerTest do
+  # Uses the global registered process name :minga_oauth_flow, so tests must serialize.
   use ExUnit.Case, async: false
 
   import Plug.Test
 
   alias MingaAgent.OAuth.CallbackHandler
 
-  describe "GET /callback" do
+  describe "GET /auth/callback" do
     test "sends code and state to registered flow process" do
       Process.register(self(), :minga_oauth_flow)
 
       conn =
-        conn(:get, "/callback?code=test_code&state=test_state")
+        conn(:get, "/auth/callback?code=test_code&state=test_state")
         |> CallbackHandler.call(CallbackHandler.init([]))
 
       assert conn.status == 200
@@ -24,7 +25,7 @@ defmodule MingaAgent.OAuth.CallbackHandlerTest do
       Process.register(self(), :minga_oauth_flow)
 
       conn =
-        conn(:get, "/callback?state=test_state")
+        conn(:get, "/auth/callback?state=test_state")
         |> CallbackHandler.call(CallbackHandler.init([]))
 
       assert conn.status == 400
@@ -34,9 +35,24 @@ defmodule MingaAgent.OAuth.CallbackHandlerTest do
       safe_unregister(:minga_oauth_flow)
     end
 
+    test "sends provider error details when OpenAI redirects with an error" do
+      Process.register(self(), :minga_oauth_flow)
+
+      conn =
+        conn(:get, "/auth/callback?error=access_denied&error_description=Nope")
+        |> CallbackHandler.call(CallbackHandler.init([]))
+
+      assert conn.status == 400
+      assert conn.resp_body =~ "access_denied"
+      assert conn.resp_body =~ "Nope"
+      assert_receive {:oauth_callback_error, {:provider_error, "access_denied: Nope"}}, 1000
+    after
+      safe_unregister(:minga_oauth_flow)
+    end
+
     test "does not crash when no flow process is registered" do
       conn =
-        conn(:get, "/callback?code=orphan&state=orphan")
+        conn(:get, "/auth/callback?code=orphan&state=orphan")
         |> CallbackHandler.call(CallbackHandler.init([]))
 
       assert conn.status == 200
@@ -46,11 +62,26 @@ defmodule MingaAgent.OAuth.CallbackHandlerTest do
       Process.register(self(), :minga_oauth_flow)
 
       conn =
-        conn(:get, "/callback?code=the_code")
+        conn(:get, "/auth/callback?code=the_code")
         |> CallbackHandler.call(CallbackHandler.init([]))
 
       assert conn.status == 200
       assert_receive {:oauth_callback, "the_code", nil}, 1000
+    after
+      safe_unregister(:minga_oauth_flow)
+    end
+  end
+
+  describe "GET /callback" do
+    test "keeps the previous callback path as a compatibility alias" do
+      Process.register(self(), :minga_oauth_flow)
+
+      conn =
+        conn(:get, "/callback?code=legacy_code&state=legacy_state")
+        |> CallbackHandler.call(CallbackHandler.init([]))
+
+      assert conn.status == 200
+      assert_receive {:oauth_callback, "legacy_code", "legacy_state"}, 1000
     after
       safe_unregister(:minga_oauth_flow)
     end
@@ -81,7 +112,7 @@ defmodule MingaAgent.OAuth.CallbackHandlerTest do
       {:ok, {_ip, port}} = ThousandIsland.listener_info(pid)
 
       {:ok, resp} =
-        Req.get("http://127.0.0.1:#{port}/callback?code=http_code&state=http_state")
+        Req.get("http://127.0.0.1:#{port}/auth/callback?code=http_code&state=http_state")
 
       assert resp.status == 200
       assert resp.body =~ "Received"

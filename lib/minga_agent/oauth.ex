@@ -11,8 +11,10 @@ defmodule MingaAgent.OAuth do
   @authorize_url "https://auth.openai.com/oauth/authorize"
   @token_url "https://auth.openai.com/oauth/token"
   @callback_port 1455
-  @redirect_uri "http://localhost:#{@callback_port}/callback"
-  @scopes "openid offline_access"
+  @fallback_callback_port 1457
+  @callback_path "/auth/callback"
+  @scopes "openid profile email offline_access"
+  @originator "minga"
   @oauth_filename "oauth.json"
   @provider_key "openai-codex"
 
@@ -23,6 +25,18 @@ defmodule MingaAgent.OAuth do
           refresh: String.t() | nil,
           expires: integer() | nil,
           account_id: String.t() | nil
+        }
+
+  @type openai_config :: %{
+          port: pos_integer(),
+          fallback_port: pos_integer(),
+          authorize_url: String.t(),
+          token_url: String.t(),
+          client_id: String.t(),
+          scopes: String.t(),
+          redirect_uri: String.t(),
+          callback_path: String.t(),
+          originator: String.t()
         }
 
   @doc """
@@ -45,36 +59,51 @@ defmodule MingaAgent.OAuth do
   end
 
   @doc """
-  Builds the full OpenAI authorize URL with all required query params.
+  Builds the full OpenAI authorize URL with Codex CLI-compatible query params.
   """
-  @spec openai_authorize_url(String.t(), String.t()) :: String.t()
-  def openai_authorize_url(challenge, state) do
+  @spec openai_authorize_url(String.t(), String.t(), pos_integer()) :: String.t()
+  def openai_authorize_url(challenge, state, port \\ @callback_port)
+      when is_binary(challenge) and is_binary(state) and is_integer(port) and port > 0 do
     params =
-      URI.encode_query(%{
-        "client_id" => @client_id,
-        "redirect_uri" => @redirect_uri,
-        "response_type" => "code",
-        "scope" => @scopes,
-        "state" => state,
-        "code_challenge" => challenge,
-        "code_challenge_method" => "S256"
-      })
+      URI.encode_query([
+        {"response_type", "code"},
+        {"client_id", @client_id},
+        {"redirect_uri", redirect_uri(port)},
+        {"scope", @scopes},
+        {"code_challenge", challenge},
+        {"code_challenge_method", "S256"},
+        {"id_token_add_organizations", "true"},
+        {"codex_cli_simplified_flow", "true"},
+        {"state", state},
+        {"originator", @originator}
+      ])
 
     "#{@authorize_url}?#{params}"
   end
 
   @doc """
+  Returns the local redirect URI for an OpenAI OAuth callback port.
+  """
+  @spec redirect_uri(pos_integer()) :: String.t()
+  def redirect_uri(port \\ @callback_port) when is_integer(port) and port > 0 do
+    "http://localhost:#{port}#{@callback_path}"
+  end
+
+  @doc """
   Returns the static OpenAI OAuth configuration.
   """
-  @spec openai_config() :: map()
+  @spec openai_config() :: openai_config()
   def openai_config do
     %{
       port: @callback_port,
+      fallback_port: @fallback_callback_port,
       authorize_url: @authorize_url,
       token_url: @token_url,
       client_id: @client_id,
       scopes: @scopes,
-      redirect_uri: @redirect_uri
+      redirect_uri: redirect_uri(),
+      callback_path: @callback_path,
+      originator: @originator
     }
   end
 
@@ -83,15 +112,17 @@ defmodule MingaAgent.OAuth do
 
   Returns `{:ok, token_response}` on success or `{:error, reason}` on failure.
   """
-  @spec exchange_code(String.t(), String.t()) :: {:ok, token_response()} | {:error, String.t()}
-  def exchange_code(code, verifier) do
+  @spec exchange_code(String.t(), String.t(), pos_integer()) ::
+          {:ok, token_response()} | {:error, String.t()}
+  def exchange_code(code, verifier, port \\ @callback_port)
+      when is_binary(code) and is_binary(verifier) and is_integer(port) and port > 0 do
     body =
       URI.encode_query(%{
         "grant_type" => "authorization_code",
         "code" => code,
         "code_verifier" => verifier,
         "client_id" => @client_id,
-        "redirect_uri" => @redirect_uri
+        "redirect_uri" => redirect_uri(port)
       })
 
     case Req.post(@token_url,
@@ -178,40 +209,93 @@ defmodule MingaAgent.OAuth do
   @spec provider_key() :: String.t()
   def provider_key, do: @provider_key
 
+  @doc "Extracts the ChatGPT account id from an OpenAI OAuth JWT when present."
+  @spec account_id_from_token(String.t() | nil) :: String.t() | nil
+  def account_id_from_token(nil), do: nil
+
+  def account_id_from_token(jwt) when is_binary(jwt) do
+    case decode_jwt_claims(jwt) do
+      {:ok, claims} -> account_id_from_claims(claims)
+      :error -> nil
+    end
+  end
+
   # ── Private ──────────────────────────────────────────────────────────────────
 
   defp parse_token_response(resp) do
-    expires_in = resp["expires_in"]
-
-    expires_ms =
-      if is_integer(expires_in) and expires_in > 0 do
-        System.system_time(:millisecond) + expires_in * 1000
-      end
+    access_token = resp["access_token"]
+    id_token = resp["id_token"]
 
     %{
-      access: resp["access_token"],
+      access: access_token,
       refresh: resp["refresh_token"],
-      expires: expires_ms,
-      account_id: extract_account_id(resp["access_token"])
+      expires: expires_ms(resp["expires_in"], access_token, id_token),
+      account_id: account_id_from_token(access_token) || account_id_from_token(id_token)
     }
   end
 
-  defp extract_account_id(nil), do: nil
+  defp expires_ms(expires_in, _access_token, _id_token)
+       when is_integer(expires_in) and expires_in > 0 do
+    System.system_time(:millisecond) + expires_in * 1000
+  end
 
-  defp extract_account_id(jwt) when is_binary(jwt) do
+  defp expires_ms(_expires_in, access_token, id_token) do
+    expires_at_from_token(access_token) || expires_at_from_token(id_token)
+  end
+
+  defp expires_at_from_token(nil), do: nil
+
+  defp expires_at_from_token(jwt) when is_binary(jwt) do
+    with {:ok, claims} <- decode_jwt_claims(jwt),
+         exp when is_integer(exp) and exp > 0 <- Map.get(claims, "exp") do
+      exp * 1000
+    else
+      _ -> nil
+    end
+  end
+
+  defp account_id_from_claims(claims) when is_map(claims) do
+    auth_claims = Map.get(claims, "https://api.openai.com/auth")
+
+    account_id_from_auth_claims(auth_claims) ||
+      string_field(claims, "chatgpt_account_id") ||
+      string_field(claims, "chatgpt-account-id")
+  end
+
+  defp account_id_from_auth_claims(claims) when is_map(claims) do
+    string_field(claims, "chatgpt_account_id") ||
+      string_field(claims, "chatgpt-account-id")
+  end
+
+  defp account_id_from_auth_claims(_claims), do: nil
+
+  defp string_field(map, key) when is_map(map) do
+    case Map.get(map, key) do
+      value when is_binary(value) and value != "" -> value
+      _ -> nil
+    end
+  end
+
+  defp decode_jwt_claims(jwt) when is_binary(jwt) do
     case String.split(jwt, ".") do
-      [_header, payload, _sig | _] ->
-        with {:ok, decoded} <- Base.url_decode64(payload, padding: false),
-             {:ok, claims} <- JSON.decode(decoded) do
-          claims["https://api.openai.com/auth"]["user_id"] ||
-            claims["chatgpt-account-id"] ||
-            claims["sub"]
-        else
-          _ -> nil
-        end
+      [_header, payload, _signature] -> decode_jwt_payload(payload)
+      _ -> :error
+    end
+  end
 
-      _ ->
-        nil
+  defp decode_jwt_payload(payload) do
+    with {:ok, decoded} <- decode_base64url(payload),
+         {:ok, claims} when is_map(claims) <- JSON.decode(decoded) do
+      {:ok, claims}
+    else
+      _ -> :error
+    end
+  end
+
+  defp decode_base64url(payload) do
+    case Base.url_decode64(payload, padding: false) do
+      {:ok, decoded} -> {:ok, decoded}
+      :error -> Base.url_decode64(payload, padding: true)
     end
   end
 

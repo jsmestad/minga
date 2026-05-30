@@ -33,8 +33,8 @@ defmodule MingaAgent.OAuthTest do
     end
   end
 
-  describe "openai_authorize_url/2" do
-    test "includes all required OAuth params" do
+  describe "openai_authorize_url/3" do
+    test "includes Codex-compatible OAuth params" do
       url = OAuth.openai_authorize_url("test_challenge", "test_state")
       uri = URI.parse(url)
       params = URI.decode_query(uri.query)
@@ -43,12 +43,30 @@ defmodule MingaAgent.OAuthTest do
       assert uri.host == "auth.openai.com"
       assert uri.path == "/oauth/authorize"
       assert params["client_id"] == "app_EMoamEEZ73f0CkXaXp7hrann"
-      assert params["redirect_uri"] == "http://localhost:1455/callback"
+      assert params["redirect_uri"] == "http://localhost:1455/auth/callback"
       assert params["response_type"] == "code"
       assert params["code_challenge"] == "test_challenge"
       assert params["code_challenge_method"] == "S256"
       assert params["state"] == "test_state"
-      assert is_binary(params["scope"])
+      assert params["id_token_add_organizations"] == "true"
+      assert params["codex_cli_simplified_flow"] == "true"
+      assert params["originator"] == "minga"
+
+      assert String.split(params["scope"], " ") == ~w(openid profile email offline_access)
+    end
+
+    test "uses the selected registered callback port" do
+      url = OAuth.openai_authorize_url("challenge", "state", 1457)
+      params = url |> URI.parse() |> Map.fetch!(:query) |> URI.decode_query()
+
+      assert params["redirect_uri"] == "http://localhost:1457/auth/callback"
+    end
+  end
+
+  describe "redirect_uri/1" do
+    test "returns the Codex allow-listed callback path" do
+      assert OAuth.redirect_uri() == "http://localhost:1455/auth/callback"
+      assert OAuth.redirect_uri(1457) == "http://localhost:1457/auth/callback"
     end
   end
 
@@ -56,11 +74,44 @@ defmodule MingaAgent.OAuthTest do
     test "returns expected static configuration" do
       config = OAuth.openai_config()
       assert config.port == 1455
+      assert config.fallback_port == 1457
       assert config.client_id == "app_EMoamEEZ73f0CkXaXp7hrann"
+      assert config.redirect_uri == "http://localhost:1455/auth/callback"
+      assert config.callback_path == "/auth/callback"
+      assert config.originator == "minga"
       assert is_binary(config.authorize_url)
       assert is_binary(config.token_url)
-      assert is_binary(config.redirect_uri)
       assert is_binary(config.scopes)
+    end
+  end
+
+  describe "account_id_from_token/1" do
+    test "prefers the ChatGPT account id from OpenAI auth claims" do
+      token =
+        jwt(%{
+          "https://api.openai.com/auth" => %{
+            "chatgpt_account_id" => "account_123",
+            "user_id" => "user_456"
+          },
+          "sub" => "sub_789"
+        })
+
+      assert OAuth.account_id_from_token(token) == "account_123"
+    end
+
+    test "ignores OIDC subject and user id when ChatGPT account id is absent" do
+      token =
+        jwt(%{
+          "https://api.openai.com/auth" => %{"user_id" => "user_456"},
+          "sub" => "sub_789"
+        })
+
+      assert OAuth.account_id_from_token(token) == nil
+    end
+
+    test "returns nil for malformed tokens" do
+      assert OAuth.account_id_from_token("not-a-jwt") == nil
+      assert OAuth.account_id_from_token(nil) == nil
     end
   end
 
@@ -143,5 +194,15 @@ defmodule MingaAgent.OAuthTest do
       assert :ok = OAuth.write_oauth_file(tokens, path)
       assert File.exists?(path)
     end
+  end
+
+  defp jwt(claims) do
+    header = %{"alg" => "none", "typ" => "JWT"}
+
+    Enum.map_join(
+      [header, claims, %{}],
+      ".",
+      &(&1 |> JSON.encode!() |> Base.url_encode64(padding: false))
+    )
   end
 end
