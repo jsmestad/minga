@@ -169,16 +169,30 @@ defmodule Minga.Extension.Supervisor do
   end
 
   @spec resolve_load_policy(ExtRegistry.entry()) :: Minga.Extension.load_policy()
-  defp resolve_load_policy(%{load_policy: policy}) when is_atom(policy) and policy != nil,
-    do: policy
-
-  defp resolve_load_policy(%{load_policy: policy}) when is_tuple(policy), do: policy
-
-  defp resolve_load_policy(entry) do
+  defp resolve_load_policy(%{load_policy: nil} = entry) do
     case Lazy.discover_load_policy(entry) do
-      {:ok, policy, _module} -> policy
+      {:ok, policy, _module} -> validate_load_policy(policy)
       {:error, _reason} -> :eager
     end
+  end
+
+  defp resolve_load_policy(%{load_policy: policy}), do: validate_load_policy(policy)
+
+  @valid_policy_atoms [:eager, :deferred]
+  @valid_trigger_tags [:on_command, :on_filetype, :on_key]
+
+  @spec validate_load_policy(term()) :: Minga.Extension.load_policy()
+  defp validate_load_policy(policy) when policy in @valid_policy_atoms, do: policy
+
+  defp validate_load_policy({tag, _} = policy) when tag in @valid_trigger_tags, do: policy
+
+  defp validate_load_policy(invalid) do
+    Minga.Log.warning(
+      :config,
+      "Invalid load_policy #{inspect(invalid)}, falling back to :eager"
+    )
+
+    :eager
   end
 
   @spec log_reserved_trigger(atom(), atom()) :: :ok
