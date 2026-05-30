@@ -39,7 +39,9 @@ end
 
 swift_exclude = if File.exists?(harness_path), do: [], else: [:swift_harness]
 
-ExUnit.start(capture_log: true, exclude: [:pi | swift_exclude])
+# `:distributed` tests boot a real peer node (Erlang distribution / epmd) and
+# are excluded by default. Run them with `mix test --include distributed`.
+ExUnit.start(capture_log: true, exclude: [:pi, :distributed | swift_exclude])
 
 # Disable clipboard sync during tests to avoid race conditions from
 # parallel tests sharing the system clipboard. Tests that specifically
