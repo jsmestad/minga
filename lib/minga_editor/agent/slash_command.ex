@@ -1108,6 +1108,7 @@ defmodule MingaEditor.Agent.SlashCommand do
 
       _pid ->
         Minga.Extension.Registry.all()
+        |> Enum.filter(fn {_name, entry} -> entry.status == :running end)
         |> Enum.map(fn {_name, entry} -> entry.manifest end)
         |> Enum.reject(&is_nil/1)
     end

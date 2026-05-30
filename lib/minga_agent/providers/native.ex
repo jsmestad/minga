@@ -347,7 +347,9 @@ defmodule MingaAgent.Providers.Native do
     active_skills = load_active_skills(project_root, Keyword.get(opts, :active_skill_names, []))
     internal_tools = if read_only?, do: [], else: build_internal_tools(provider_pid)
 
-    mcp_configs = configured_mcp_servers(opts, config, subscriber, read_only?) ++ ext_mcp_servers
+    mcp_configs =
+      configured_mcp_servers(opts, config, subscriber, read_only?) ++
+        filter_ext_mcp_servers(ext_mcp_servers, opts, read_only?)
 
     mcp_client_opts = mcp_client_opts(opts)
     mcp_enabled_override = Keyword.get(opts, :mcp_enabled?, nil)
@@ -425,6 +427,15 @@ defmodule MingaAgent.Providers.Native do
     ext = collect_extension_agent_components()
     config = %{config | agent_hooks: config.agent_hooks ++ ext.hooks}
     {config, ext.mcp_servers}
+  end
+
+  @spec filter_ext_mcp_servers([MCPServerConfig.t()], keyword(), boolean()) ::
+          [MCPServerConfig.t()]
+  defp filter_ext_mcp_servers(_servers, _opts, true), do: []
+  defp filter_ext_mcp_servers([], _opts, _read_only?), do: []
+
+  defp filter_ext_mcp_servers(servers, opts, false) do
+    if mcp_extension_enabled?(opts), do: servers, else: []
   end
 
   @spec init_fork_store_and_changeset(ProjectView.t() | nil, String.t(), keyword()) ::
@@ -1070,6 +1081,7 @@ defmodule MingaAgent.Providers.Native do
 
       _pid ->
         Minga.Extension.Registry.all()
+        |> Enum.filter(fn {_name, entry} -> entry.status == :running end)
         |> Enum.map(fn {_name, entry} -> entry.manifest end)
         |> Enum.reject(&is_nil/1)
     end

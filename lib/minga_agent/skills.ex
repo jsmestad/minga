@@ -200,6 +200,7 @@ defmodule MingaAgent.Skills do
 
       _pid ->
         Minga.Extension.Registry.all()
+        |> Enum.filter(fn {_name, entry} -> entry.status == :running end)
         |> Enum.flat_map(&extract_manifest_skills/1)
     end
   rescue
