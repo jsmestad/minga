@@ -1830,7 +1830,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   defp close_all_file_tabs(%{shell_state: %{tab_bar: %TabBar{}}} = state) do
     state
     |> close_other_tabs()
-    |> execute(:quit)
+    |> execute(:kill_buffer)
   end
 
   defp close_all_file_tabs(state), do: state
