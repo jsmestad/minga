@@ -299,11 +299,15 @@ defmodule Minga.Session.EventRecorder.Store do
   end
 
   @doc """
-  Runs VACUUM to reclaim disk space after large deletes.
+  Runs VACUUM to reclaim disk space after large deletes, then
+  truncates the WAL file so `total_file_size/1` reflects the
+  compacted size.
   """
   @spec vacuum(db()) :: :ok | {:error, term()}
   def vacuum(db) do
-    execute(db, "VACUUM")
+    with :ok <- execute(db, "VACUUM") do
+      execute(db, "PRAGMA wal_checkpoint(TRUNCATE)")
+    end
   end
 
   @doc """
