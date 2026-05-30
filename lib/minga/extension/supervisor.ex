@@ -153,7 +153,10 @@ defmodule Minga.Extension.Supervisor do
         start_eager(supervisor, registry, name, entry, opts, failures, deferred)
 
       :deferred ->
-        {failures, [{name, entry} | deferred]}
+        case validate_deferred_extension(name, entry) do
+          :ok -> {failures, [{name, entry} | deferred]}
+          {:error, reason} -> {failures ++ [%{extension: name, reason: reason}], deferred}
+        end
 
       {:on_command, _} ->
         register_lazy_or_fail(supervisor, registry, name, entry, opts, failures, deferred)
@@ -216,6 +219,24 @@ defmodule Minga.Extension.Supervisor do
     case register_lazy_stubs(supervisor, registry, name, entry, opts) do
       :ok -> {failures, deferred}
       {:error, reason} -> {failures ++ [%{extension: name, reason: reason}], deferred}
+    end
+  end
+
+  @spec validate_deferred_extension(atom(), ExtRegistry.entry()) :: :ok | {:error, term()}
+  defp validate_deferred_extension(name, entry) do
+    case Lazy.discover_load_policy(entry) do
+      {:ok, _policy, module} ->
+        with :ok <- validate_behaviour(module, name) do
+          register_and_validate_options(name, module, entry.config)
+        end
+
+      {:error, reason} ->
+        Minga.Log.warning(
+          :config,
+          "Extension #{name} deferred validation failed: #{inspect(reason)}"
+        )
+
+        {:error, reason}
     end
   end
 
