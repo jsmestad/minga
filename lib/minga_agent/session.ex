@@ -65,9 +65,13 @@ defmodule MingaAgent.Session do
   @typedoc "Active tool call tracked while the provider is executing tools."
   @type active_tool_call :: {tool_call_id :: String.t(), name :: String.t()}
 
+  @typedoc "Remote attachment role."
+  @type attachment_role :: :driver | :viewer
+
   @typedoc "Internal session state."
   @type state :: %{
           session_id: String.t(),
+          remote_token: String.t() | nil,
           provider: pid() | nil,
           provider_module: module(),
           provider_opts: keyword(),
@@ -76,6 +80,8 @@ defmodule MingaAgent.Session do
           message_ids: [pos_integer()],
           next_message_id: pos_integer(),
           subscribers: MapSet.t(pid()),
+          subscriber_roles: %{pid() => attachment_role()},
+          driver: pid() | nil,
           total_usage: Event.token_usage(),
           error_message: String.t() | nil,
           pending_thinking_level: String.t() | nil,
@@ -265,9 +271,37 @@ defmodule MingaAgent.Session do
   end
 
   @doc "Subscribes the given process to session events."
-  @spec subscribe(GenServer.server(), pid()) :: :ok
-  def subscribe(session, pid) when is_pid(pid) do
-    GenServer.call(session, {:subscribe, pid})
+  @spec subscribe(GenServer.server(), pid(), keyword()) :: :ok
+  def subscribe(session, pid, opts \\ []) when is_pid(pid) do
+    GenServer.call(session, {:subscribe, pid, opts})
+  end
+
+  @doc "Returns the current remote attachment role for a subscriber."
+  @spec subscriber_role(GenServer.server(), pid()) :: attachment_role() | nil
+  def subscriber_role(session, pid) when is_pid(pid) do
+    GenServer.call(session, {:subscriber_role, pid})
+  end
+
+  @doc "Claims the driver role for a subscribed client when the role is vacant."
+  @spec claim_driver(GenServer.server(), pid()) :: :ok | {:error, :driver_taken | :not_subscribed}
+  def claim_driver(session, pid) when is_pid(pid) do
+    GenServer.call(session, {:claim_driver, pid})
+  end
+
+  @doc "Sends a user prompt as an attached remote client."
+  @spec send_prompt_as(GenServer.server(), pid(), String.t() | [ReqLLM.Message.ContentPart.t()]) ::
+          :ok | {:queued, :steering} | {:error, term()}
+  def send_prompt_as(session, client_pid, content)
+      when is_pid(client_pid) and (is_binary(content) or is_list(content)) do
+    GenServer.call(session, {:send_prompt_as, client_pid, content})
+  end
+
+  @doc "Responds to a pending tool approval as an attached remote client."
+  @spec respond_to_approval_as(GenServer.server(), pid(), approval_decision()) ::
+          :ok | {:error, :no_pending_approval | :not_driver}
+  def respond_to_approval_as(session, client_pid, decision)
+      when is_pid(client_pid) and decision in [:approve, :approve_session, :approve_turn, :reject] do
+    GenServer.call(session, {:respond_to_approval_as, client_pid, decision})
   end
 
   @doc "Unsubscribes the calling process from session events."
@@ -568,6 +602,7 @@ defmodule MingaAgent.Session do
 
     state = %{
       session_id: session_id,
+      remote_token: Keyword.get(opts, :remote_token),
       provider: nil,
       provider_module: provider_module,
       provider_opts: provider_opts,
@@ -578,6 +613,8 @@ defmodule MingaAgent.Session do
       message_ids: [1],
       next_message_id: 2,
       subscribers: MapSet.new(),
+      subscriber_roles: %{},
+      driver: nil,
       total_usage: TurnUsage.new(),
       error_message: nil,
       pending_thinking_level: initial_thinking_level,
@@ -627,52 +664,15 @@ defmodule MingaAgent.Session do
     {:reply, :ok, state}
   end
 
-  def handle_call({:send_prompt, _text}, _from, %{provider: nil} = state) do
-    {:reply, {:error, :provider_not_ready}, state}
-  end
-
-  def handle_call({:send_prompt, content}, _from, %{status: status} = state)
-      when status in [:thinking, :tool_executing] do
-    # Agent is busy: queue the message as a steering prompt. It will be injected
-    # into the agent's context between tool calls.
-    state = %{state | steering_queue: state.steering_queue ++ [content]}
-    broadcast(state, {:prompt_queued, content, :steering})
-    {:reply, {:queued, :steering}, state}
-  end
-
-  def handle_call({:send_prompt, content}, _from, %{credentials_configured: false} = state) do
-    # No usable provider yet. Show the user's message followed by a gentle
-    # setup nudge instead of attempting a call that would fail with a raw
-    # provider error. Reply :ok so the input clears like a normal submit.
-    {user_msg, _send_content} = build_user_message(content)
-
-    state =
-      state
-      |> append_msg(user_msg)
-      |> append_system_message(auth_required_message(), :info)
-      |> notify_messages_changed()
-
-    {:reply, :ok, state}
+  def handle_call({:send_prompt_as, client_pid, content}, _from, state) do
+    case driver_allowed?(state, client_pid) do
+      true -> handle_send_prompt(content, state)
+      false -> {:reply, {:error, :not_driver}, state}
+    end
   end
 
   def handle_call({:send_prompt, content}, _from, state) do
-    case dispatch_user_prompt_submit(state, content) do
-      :ok ->
-        {user_msg, send_content} = build_user_message(content)
-        state = append_msg(state, user_msg)
-        state = notify_messages_changed(state)
-
-        case state.provider_module.send_prompt(state.provider, send_content) do
-          :ok ->
-            {:reply, :ok, state}
-
-          {:error, _} = err ->
-            {:reply, err, state}
-        end
-
-      {:error, %HookResult{} = result} ->
-        {:reply, {:error, {:hook_veto, HookResult.message(result)}}, state}
-    end
+    handle_send_prompt(content, state)
   end
 
   def handle_call({:send_follow_up, _content}, _from, %{provider: nil} = state) do
@@ -937,23 +937,15 @@ defmodule MingaAgent.Session do
     {:reply, meta, state}
   end
 
-  def handle_call({:respond_to_approval, _decision}, _from, %{pending_approval: nil} = state) do
-    Minga.Log.warning(:agent, "[Session] respond_to_approval called with no pending approval")
-    {:reply, {:error, :no_pending_approval}, state}
+  def handle_call({:respond_to_approval_as, client_pid, decision}, _from, state) do
+    case driver_allowed?(state, client_pid) do
+      true -> handle_approval_response(decision, state)
+      false -> {:reply, {:error, :not_driver}, state}
+    end
   end
 
   def handle_call({:respond_to_approval, decision}, _from, state) do
-    %{tool_call_id: tool_call_id, reply_to: reply_to} = approval = state.pending_approval
-    state = maybe_set_trust_for_decision(state, approval.name, decision)
-
-    # Send the execution decision directly to the blocked Task process.
-    send(reply_to, {:tool_approval_response, tool_call_id, execution_decision(decision)})
-
-    state = maybe_record_rejection(state, approval, decision)
-    state = %{state | pending_approval: nil}
-    state = notify_messages_changed(state)
-    broadcast(state, {:approval_resolved, decision})
-    {:reply, :ok, state}
+    handle_approval_response(decision, state)
   end
 
   def handle_call({:set_tool_trust, name, scope}, _from, state) do
@@ -972,13 +964,26 @@ defmodule MingaAgent.Session do
     {:reply, state.trust_levels, state}
   end
 
-  def handle_call({:subscribe, pid}, _from, state) do
+  def handle_call({:subscribe, pid, opts}, _from, state) do
     Process.monitor(pid)
-    {:reply, :ok, %{state | subscribers: MapSet.put(state.subscribers, pid)}}
+    role = Keyword.get(opts, :role, default_subscriber_role(state))
+    state = put_subscriber(state, pid, role)
+    {:reply, :ok, state}
+  end
+
+  def handle_call({:subscriber_role, pid}, _from, state) do
+    {:reply, Map.get(state.subscriber_roles, pid), state}
+  end
+
+  def handle_call({:claim_driver, pid}, _from, state) do
+    case claim_driver_role(state, pid) do
+      {:ok, state} -> {:reply, :ok, state}
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
   end
 
   def handle_call({:unsubscribe, pid}, _from, state) do
-    {:reply, :ok, %{state | subscribers: MapSet.delete(state.subscribers, pid)}}
+    {:reply, :ok, remove_subscriber(state, pid)}
   end
 
   def handle_call(:compact, _from, %{provider: nil} = state) do
@@ -1221,8 +1226,8 @@ defmodule MingaAgent.Session do
   end
 
   def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do
-    # A subscriber died, remove it
-    {:noreply, %{state | subscribers: MapSet.delete(state.subscribers, pid)}}
+    # A subscriber died, remove it and vacate the driver role if needed.
+    {:noreply, remove_subscriber(state, pid)}
   end
 
   def handle_info(:save_session, state) do
@@ -1233,6 +1238,77 @@ defmodule MingaAgent.Session do
 
   def handle_info(_msg, state) do
     {:noreply, state}
+  end
+
+  @spec handle_approval_response(approval_decision(), state()) ::
+          {:reply, :ok | {:error, :no_pending_approval}, state()}
+  defp handle_approval_response(_decision, %{pending_approval: nil} = state) do
+    Minga.Log.warning(:agent, "[Session] respond_to_approval called with no pending approval")
+    {:reply, {:error, :no_pending_approval}, state}
+  end
+
+  defp handle_approval_response(decision, state) do
+    %{tool_call_id: tool_call_id, reply_to: reply_to} = approval = state.pending_approval
+    state = maybe_set_trust_for_decision(state, approval.name, decision)
+
+    # Send the execution decision directly to the blocked Task process.
+    send(reply_to, {:tool_approval_response, tool_call_id, execution_decision(decision)})
+
+    state = maybe_record_rejection(state, approval, decision)
+    state = %{state | pending_approval: nil}
+    state = notify_messages_changed(state)
+    broadcast(state, {:approval_resolved, decision})
+    {:reply, :ok, state}
+  end
+
+  @spec handle_send_prompt(String.t() | [ReqLLM.Message.ContentPart.t()], state()) ::
+          {:reply, :ok | {:queued, :steering} | {:error, term()}, state()}
+  defp handle_send_prompt(_text, %{provider: nil} = state) do
+    {:reply, {:error, :provider_not_ready}, state}
+  end
+
+  defp handle_send_prompt(content, %{status: status} = state)
+       when status in [:thinking, :tool_executing] do
+    # Agent is busy: queue the message as a steering prompt. It will be injected
+    # into the agent's context between tool calls.
+    state = %{state | steering_queue: state.steering_queue ++ [content]}
+    broadcast(state, {:prompt_queued, content, :steering})
+    {:reply, {:queued, :steering}, state}
+  end
+
+  defp handle_send_prompt(content, %{credentials_configured: false} = state) do
+    # No usable provider yet. Show the user's message followed by a gentle
+    # setup nudge instead of attempting a call that would fail with a raw
+    # provider error. Reply :ok so the input clears like a normal submit.
+    {user_msg, _send_content} = build_user_message(content)
+
+    state =
+      state
+      |> append_msg(user_msg)
+      |> append_system_message(auth_required_message(), :info)
+      |> notify_messages_changed()
+
+    {:reply, :ok, state}
+  end
+
+  defp handle_send_prompt(content, state) do
+    case dispatch_user_prompt_submit(state, content) do
+      :ok ->
+        {user_msg, send_content} = build_user_message(content)
+        state = append_msg(state, user_msg)
+        state = notify_messages_changed(state)
+
+        case state.provider_module.send_prompt(state.provider, send_content) do
+          :ok ->
+            {:reply, :ok, state}
+
+          {:error, _} = err ->
+            {:reply, err, state}
+        end
+
+      {:error, %HookResult{} = result} ->
+        {:reply, {:error, {:hook_veto, HookResult.message(result)}}, state}
+    end
   end
 
   # ── Event handling ──────────────────────────────────────────────────────────
@@ -1712,6 +1788,81 @@ defmodule MingaAgent.Session do
     "Execution mode enabled. Destructive tools can run again after normal approval checks. Use /plan to return to planning."
   end
 
+  # ── Remote attachment roles ────────────────────────────────────────────────
+
+  @spec default_subscriber_role(state()) :: attachment_role()
+  defp default_subscriber_role(%{driver: nil}), do: :driver
+  defp default_subscriber_role(_state), do: :viewer
+
+  @spec put_subscriber(state(), pid(), attachment_role()) :: state()
+  defp put_subscriber(state, pid, :driver) do
+    state = %{state | subscribers: MapSet.put(state.subscribers, pid)}
+
+    case state.driver do
+      nil -> set_driver(state, pid)
+      ^pid -> set_driver(state, pid)
+      _other -> put_subscriber(state, pid, :viewer)
+    end
+  end
+
+  defp put_subscriber(state, pid, :viewer) do
+    %{
+      state
+      | subscribers: MapSet.put(state.subscribers, pid),
+        subscriber_roles: Map.put(state.subscriber_roles, pid, :viewer)
+    }
+  end
+
+  @spec claim_driver_role(state(), pid()) ::
+          {:ok, state()} | {:error, :driver_taken | :not_subscribed}
+  defp claim_driver_role(state, pid) do
+    claim_driver_role(state, pid, MapSet.member?(state.subscribers, pid), state.driver)
+  end
+
+  @spec claim_driver_role(state(), pid(), boolean(), pid() | nil) ::
+          {:ok, state()} | {:error, :driver_taken | :not_subscribed}
+  defp claim_driver_role(_state, _pid, false, _driver), do: {:error, :not_subscribed}
+  defp claim_driver_role(state, pid, true, nil), do: {:ok, set_driver(state, pid)}
+  defp claim_driver_role(state, pid, true, pid), do: {:ok, set_driver(state, pid)}
+  defp claim_driver_role(_state, _pid, true, _driver), do: {:error, :driver_taken}
+
+  @spec set_driver(state(), pid()) :: state()
+  defp set_driver(%{driver: nil, subscriber_roles: roles} = state, pid)
+       when map_size(roles) == 0 do
+    %{
+      state
+      | driver: pid,
+        subscriber_roles: Map.put(state.subscriber_roles, pid, :driver)
+    }
+  end
+
+  defp set_driver(state, pid) do
+    state = %{
+      state
+      | driver: pid,
+        subscriber_roles: Map.put(state.subscriber_roles, pid, :driver)
+    }
+
+    broadcast(state, {:driver_changed, pid})
+    state
+  end
+
+  @spec remove_subscriber(state(), pid()) :: state()
+  defp remove_subscriber(state, pid) do
+    driver = if state.driver == pid, do: nil, else: state.driver
+
+    %{
+      state
+      | subscribers: MapSet.delete(state.subscribers, pid),
+        subscriber_roles: Map.delete(state.subscriber_roles, pid),
+        driver: driver
+    }
+  end
+
+  @spec driver_allowed?(state(), pid()) :: boolean()
+  defp driver_allowed?(%{driver: pid}, pid) when is_pid(pid), do: true
+  defp driver_allowed?(_state, _pid), do: false
+
   # ── Broadcasting ────────────────────────────────────────────────────────────
 
   @spec broadcast(state(), term()) :: :ok
@@ -1949,29 +2100,64 @@ defmodule MingaAgent.Session do
   # vetoes, turn/cost limits) are passed through unchanged.
   @spec humanize_error(String.t()) :: String.t()
   defp humanize_error(message) when is_binary(message) do
-    cond do
-      String.match?(message, ~r/\b401\b/) or
-          String.contains?(message, ["unauthorized", "Unauthorized", "invalid_api_key"]) ->
-        "The provider rejected your API key. Update it with /auth <provider> <key>, then try again."
-
-      String.match?(message, ~r/\b429\b/) or String.contains?(message, "rate limit") ->
-        "Rate limited by the provider. Wait a moment and try again."
-
-      String.contains?(message, ["api_key", "API_KEY", "provider_build_failed", "Failed to build"]) ->
-        "Couldn't authenticate with the model provider. Check your API key with /auth, then try again."
-
-      String.contains?(message, ["http_streaming_failed", "econnrefused", "nxdomain", "timed out"]) ->
-        "Couldn't reach the model provider. Check your network connection and try again."
-
-      raw_struct_dump?(message) ->
-        "Something went wrong talking to the model provider. Open the Messages panel for details."
-
-      true ->
-        message
-    end
+    humanize_error_kind(classify_error(message), message)
   end
 
   defp humanize_error(message), do: humanize_error(inspect(message))
+
+  @type error_kind ::
+          :rejected_key | :rate_limited | :auth_failed | :unreachable | :raw_dump | :passthrough
+
+  @spec classify_error(String.t()) :: error_kind()
+  defp classify_error(message) do
+    classify_error_checks([
+      {:rejected_key,
+       String.match?(message, ~r/\b401\b/) or
+         String.contains?(message, ["unauthorized", "Unauthorized", "invalid_api_key"])},
+      {:rate_limited,
+       String.match?(message, ~r/\b429\b/) or String.contains?(message, "rate limit")},
+      {:auth_failed,
+       String.contains?(message, [
+         "api_key",
+         "API_KEY",
+         "provider_build_failed",
+         "Failed to build"
+       ])},
+      {:unreachable,
+       String.contains?(message, [
+         "http_streaming_failed",
+         "econnrefused",
+         "nxdomain",
+         "timed out"
+       ])},
+      {:raw_dump, raw_struct_dump?(message)}
+    ])
+  end
+
+  @spec classify_error_checks([{error_kind(), boolean()}]) :: error_kind()
+  defp classify_error_checks([{kind, true} | _rest]), do: kind
+  defp classify_error_checks([{_kind, false} | rest]), do: classify_error_checks(rest)
+  defp classify_error_checks([]), do: :passthrough
+
+  @spec humanize_error_kind(error_kind(), String.t()) :: String.t()
+  defp humanize_error_kind(:rejected_key, _message),
+    do:
+      "The provider rejected your API key. Update it with /auth <provider> <key>, then try again."
+
+  defp humanize_error_kind(:rate_limited, _message),
+    do: "Rate limited by the provider. Wait a moment and try again."
+
+  defp humanize_error_kind(:auth_failed, _message),
+    do:
+      "Couldn't authenticate with the model provider. Check your API key with /auth, then try again."
+
+  defp humanize_error_kind(:unreachable, _message),
+    do: "Couldn't reach the model provider. Check your network connection and try again."
+
+  defp humanize_error_kind(:raw_dump, _message),
+    do: "Something went wrong talking to the model provider. Open the Messages panel for details."
+
+  defp humanize_error_kind(:passthrough, message), do: message
 
   # Detects an inspected Elixir struct/exception leaking into the message, so
   # we never show a raw `%ReqLLM.Error{...}`-style dump in the transcript.
@@ -2043,6 +2229,7 @@ defmodule MingaAgent.Session do
 
     data = %{
       id: state.session_id,
+      remote_token: state.remote_token,
       timestamp: now,
       last_message_at: last_message_at,
       title: readable_title(first_user_prompt(state.messages)),
@@ -2068,6 +2255,7 @@ defmodule MingaAgent.Session do
         state = %{
           state
           | session_id: data.id,
+            remote_token: Map.get(data, :remote_token, state.remote_token),
             total_usage: data.usage,
             model_name: data.model_name,
             provider_name: Map.get(data, :provider_name, state.provider_name),

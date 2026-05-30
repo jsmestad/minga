@@ -2,7 +2,9 @@ defmodule MingaAgent.SessionManager do
   @moduledoc """
   Owns agent session lifecycle independently of any UI.
 
-  Maps human-readable session IDs (e.g., `"session-1"`) to session PIDs.
+  Maps stable session IDs to session PIDs. Local scratch sessions still use
+  human-readable generated IDs (e.g., `"session-1"`), while remote attach sessions
+  pass a deterministic `:session_id` derived from their server-side working directory.
   Sessions are started via `MingaAgent.Supervisor` (DynamicSupervisor) and
   monitored here. When a session dies, the manager broadcasts an
   `:agent_session_stopped` event so the Editor (or any subscriber) can
@@ -27,7 +29,8 @@ defmodule MingaAgent.SessionManager do
   @typedoc "An entry in the sessions map."
   @type session_entry :: %{
           pid: pid(),
-          monitor_ref: reference()
+          monitor_ref: reference(),
+          token: String.t()
         }
 
   # ── Event payload ──────────────────────────────────────────────────────────
@@ -68,6 +71,27 @@ defmodule MingaAgent.SessionManager do
           {:ok, String.t(), pid()} | {:error, term()}
   def start_session(manager, opts) do
     GenServer.call(manager, {:start_session, opts})
+  end
+
+  @doc "Starts or returns the stable session with the given ID."
+  @spec start_or_get_session(String.t(), keyword()) :: {:ok, String.t(), pid()} | {:error, term()}
+  def start_or_get_session(session_id, opts \\ []) when is_binary(session_id) do
+    start_or_get_session(__MODULE__, session_id, opts)
+  end
+
+  @doc "Starts or returns the stable session with the given ID through the given manager."
+  @spec start_or_get_session(GenServer.server(), String.t(), keyword()) ::
+          {:ok, String.t(), pid()} | {:error, term()}
+  def start_or_get_session(manager, session_id, opts) when is_binary(session_id) do
+    GenServer.call(manager, {:start_or_get_session, session_id, opts})
+  end
+
+  @doc "Builds the deterministic session ID used for a server-side working directory."
+  @spec stable_session_id_for_workdir(String.t()) :: String.t()
+  def stable_session_id_for_workdir(path) when is_binary(path) do
+    expanded = Path.expand(path)
+    digest = :crypto.hash(:sha256, expanded) |> Base.encode16(case: :lower) |> binary_part(0, 16)
+    "workdir-#{digest}"
   end
 
   @doc "Starts a background sub-agent, sends it the task asynchronously, and returns a stable handle."
@@ -157,6 +181,18 @@ defmodule MingaAgent.SessionManager do
     GenServer.call(manager, {:get_session, session_id})
   end
 
+  @doc "Returns the broker token for a live session. Used by the remote API bootstrap path."
+  @spec session_token(String.t()) :: {:ok, String.t()} | {:error, :not_found}
+  def session_token(session_id) when is_binary(session_id) do
+    session_token(__MODULE__, session_id)
+  end
+
+  @doc "Returns the broker token for a live session through the given manager."
+  @spec session_token(GenServer.server(), String.t()) :: {:ok, String.t()} | {:error, :not_found}
+  def session_token(manager, session_id) when is_binary(session_id) do
+    GenServer.call(manager, {:session_token, session_id})
+  end
+
   @doc "Looks up the session ID for a PID."
   @spec session_id_for_pid(pid()) :: {:ok, String.t()} | {:error, :not_found}
   def session_id_for_pid(pid) when is_pid(pid) do
@@ -192,6 +228,24 @@ defmodule MingaAgent.SessionManager do
   @impl GenServer
   def handle_call({:start_session, opts}, _from, state) do
     case start_managed_session(state, opts) do
+      {:existing, session_id, pid, state} ->
+        {:reply, {:ok, session_id, pid}, state}
+
+      {:ok, session_id, pid, new_state} ->
+        {:reply, {:ok, session_id, pid}, new_state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:start_or_get_session, session_id, opts}, _from, state) do
+    opts = Keyword.put(opts, :session_id, session_id)
+
+    case start_managed_session(state, opts) do
+      {:existing, session_id, pid, state} ->
+        {:reply, {:ok, session_id, pid}, state}
+
       {:ok, session_id, pid, new_state} ->
         {:reply, {:ok, session_id, pid}, new_state}
 
@@ -274,6 +328,13 @@ defmodule MingaAgent.SessionManager do
     end
   end
 
+  def handle_call({:session_token, session_id}, _from, state) do
+    case Map.fetch(state.sessions, session_id) do
+      {:ok, %{token: token}} -> {:reply, {:ok, token}, state}
+      :error -> {:reply, {:error, :not_found}, state}
+    end
+  end
+
   def handle_call({:stop_session_by_pid, pid}, _from, state) do
     case find_session_by_pid(state.sessions, pid) do
       {session_id, %{monitor_ref: ref}} ->
@@ -341,6 +402,9 @@ defmodule MingaAgent.SessionManager do
     session_opts = Keyword.put(session_opts, :background_subagent, true)
 
     case start_managed_session(state, session_opts) do
+      {:existing, _session_id, _pid, _state} ->
+        {:reply, {:error, :session_already_exists}, state}
+
       {:ok, session_id, pid, new_state} ->
         handle =
           Handle.new(
@@ -368,17 +432,34 @@ defmodule MingaAgent.SessionManager do
   end
 
   @spec start_managed_session(state(), keyword()) ::
-          {:ok, String.t(), pid(), state()} | {:error, term()}
+          {:ok, String.t(), pid(), state()}
+          | {:existing, String.t(), pid(), state()}
+          | {:error, term()}
   defp start_managed_session(state, opts) do
-    session_id = "session-#{state.next_id}"
-    opts = Keyword.put_new(opts, :session_id, session_id)
+    session_id = Keyword.get(opts, :session_id, "session-#{state.next_id}")
+
+    case Map.fetch(state.sessions, session_id) do
+      {:ok, %{pid: pid}} ->
+        {:existing, session_id, pid, state}
+
+      :error ->
+        do_start_managed_session(state, Keyword.put(opts, :session_id, session_id), session_id)
+    end
+  end
+
+  @spec do_start_managed_session(state(), keyword(), String.t()) ::
+          {:ok, String.t(), pid(), state()} | {:error, term()}
+  defp do_start_managed_session(state, opts, session_id) do
+    token = session_token_for_start(session_id, opts)
+    opts = Keyword.put(opts, :remote_token, token)
 
     case MingaAgent.Supervisor.start_session(opts) do
       {:ok, pid} ->
         ref = Process.monitor(pid)
-        entry = %{pid: pid, monitor_ref: ref}
+        entry = %{pid: pid, monitor_ref: ref, token: token}
         sessions = Map.put(state.sessions, session_id, entry)
-        new_state = %{state | sessions: sessions, next_id: state.next_id + 1}
+        next_id = next_id_after_start(state, session_id)
+        new_state = %{state | sessions: sessions, next_id: next_id}
 
         Minga.Log.info(:agent, "[SessionManager] Started session #{session_id} (#{inspect(pid)})")
         {:ok, session_id, pid, new_state}
@@ -386,6 +467,30 @@ defmodule MingaAgent.SessionManager do
       {:error, reason} ->
         {:error, reason}
     end
+  end
+
+  @spec next_id_after_start(state(), String.t()) :: pos_integer()
+  defp next_id_after_start(state, "session-" <> _suffix), do: state.next_id + 1
+  defp next_id_after_start(state, _session_id), do: state.next_id
+
+  @spec session_token_for_start(String.t(), keyword()) :: String.t()
+  defp session_token_for_start(session_id, opts) do
+    Keyword.get(opts, :remote_token) || stored_session_token(session_id, opts) || generate_token()
+  end
+
+  @spec stored_session_token(String.t(), keyword()) :: String.t() | nil
+  defp stored_session_token(session_id, opts) do
+    session_store_dir = Keyword.get(opts, :session_store_dir)
+
+    case MingaAgent.SessionStore.load(session_id, session_store_dir) do
+      {:ok, data} -> Map.get(data, :remote_token)
+      {:error, _reason} -> nil
+    end
+  end
+
+  @spec generate_token() :: String.t()
+  defp generate_token do
+    32 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false)
   end
 
   @background_prompt_retry_ms 10

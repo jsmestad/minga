@@ -27,6 +27,62 @@ defmodule MingaAgent.SessionManagerTest do
       {:ok, "session-2", _pid2} = SessionManager.start_session(manager, [])
       {:ok, "session-3", _pid3} = SessionManager.start_session(manager, [])
     end
+
+    test "honors a supplied stable session id", %{manager: manager} do
+      assert {:ok, "workdir-stable", pid} =
+               SessionManager.start_session(manager, session_id: "workdir-stable")
+
+      assert {:ok, ^pid} = SessionManager.get_session(manager, "workdir-stable")
+    end
+
+    test "start_or_get_session reuses an existing stable session", %{manager: manager} do
+      assert {:ok, "workdir-stable", pid} =
+               SessionManager.start_or_get_session(manager, "workdir-stable", [])
+
+      assert {:ok, "workdir-stable", ^pid} =
+               SessionManager.start_or_get_session(manager, "workdir-stable", [])
+    end
+
+    test "stable_session_id_for_workdir is deterministic" do
+      id = SessionManager.stable_session_id_for_workdir("/tmp/my-project")
+      assert id == SessionManager.stable_session_id_for_workdir("/tmp/my-project")
+      assert String.starts_with?(id, "workdir-")
+    end
+
+    test "mints a token for brokered remote control", %{manager: manager} do
+      {:ok, session_id, _pid} = SessionManager.start_session(manager, [])
+      assert {:ok, token} = SessionManager.session_token(manager, session_id)
+      assert is_binary(token)
+      assert byte_size(token) > 20
+    end
+
+    test "reuses a persisted remote token for a stable session", %{manager: manager} do
+      dir =
+        Path.join(
+          System.tmp_dir!(),
+          "session-manager-token-#{System.unique_integer([:positive])}"
+        )
+
+      on_exit(fn -> File.rm_rf(dir) end)
+
+      :ok =
+        MingaAgent.SessionStore.save(
+          %{
+            id: "workdir-stable",
+            remote_token: "persisted-token",
+            timestamp: DateTime.to_iso8601(DateTime.utc_now()),
+            model_name: "test",
+            messages: [],
+            usage: MingaAgent.TurnUsage.new()
+          },
+          dir
+        )
+
+      {:ok, "workdir-stable", _pid} =
+        SessionManager.start_or_get_session(manager, "workdir-stable", session_store_dir: dir)
+
+      assert {:ok, "persisted-token"} = SessionManager.session_token(manager, "workdir-stable")
+    end
   end
 
   describe "stop_session/2" do

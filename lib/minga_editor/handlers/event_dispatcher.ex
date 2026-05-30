@@ -327,7 +327,11 @@ defmodule MingaEditor.Handlers.EventDispatcher do
 
   @spec discover_remote_sessions(node(), String.t()) :: [Remote.remote_session_entry()]
   defp discover_remote_sessions(remote_node, server_name) do
-    :erpc.call(remote_node, MingaAgent.SessionManager, :list_sessions, [], 5_000)
+    remote_node
+    |> remote_api_list_sessions()
+    |> Enum.map(fn %{session_id: session_id, pid: pid, metadata: metadata} ->
+      {session_id, pid, metadata}
+    end)
   catch
     :exit, reason ->
       Minga.Log.warning(
@@ -382,9 +386,19 @@ defmodule MingaEditor.Handlers.EventDispatcher do
 
   @spec remote_session_pid(node(), String.t()) :: {:ok, pid()} | {:error, term()}
   defp remote_session_pid(remote_node, session_id) do
-    :erpc.call(remote_node, MingaAgent.SessionManager, :get_session, [session_id], 5_000)
+    remote_node
+    |> remote_api_list_sessions()
+    |> Enum.find_value({:error, :not_found}, fn
+      %{session_id: ^session_id, pid: pid} -> {:ok, pid}
+      _session -> nil
+    end)
   catch
     :exit, reason -> {:error, {:remote_unavailable, reason}}
+  end
+
+  @spec remote_api_list_sessions(node()) :: [MingaAgent.RemoteAPI.session_info()]
+  defp remote_api_list_sessions(remote_node) do
+    :erpc.call(remote_node, MingaAgent.RemoteAPI, :list_sessions, [], 5_000)
   end
 
   @spec restore_remote_session_from_store(EditorState.t(), Workspace.t(), node(), String.t()) ::

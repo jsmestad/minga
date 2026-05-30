@@ -347,9 +347,9 @@ defmodule MingaEditor.Commands.Agent do
   end
 
   @doc "Connects to an existing remote session from the session picker."
-  @spec connect_remote_session(state(), String.t(), String.t(), pid()) :: state()
-  def connect_remote_session(state, server_name, session_id, remote_pid) do
-    AgentSession.connect_remote_session(state, server_name, session_id, remote_pid)
+  @spec connect_remote_session(state(), String.t(), String.t(), pid(), String.t()) :: state()
+  def connect_remote_session(state, server_name, session_id, remote_pid, token) do
+    AgentSession.connect_remote_session(state, server_name, session_id, remote_pid, token)
   end
 
   @doc "Submits the current input text as a prompt."
@@ -419,7 +419,7 @@ defmodule MingaEditor.Commands.Agent do
   # Sends the resolved content to the LLM and handles steering queue feedback.
   @spec deliver_prompt(state(), String.t() | [ReqLLM.Message.ContentPart.t()]) :: state()
   defp deliver_prompt(state, resolved) do
-    case Session.send_prompt(AgentAccess.session(state), resolved) do
+    case AgentSession.send_prompt_pid(AgentAccess.session(state), resolved) do
       :ok ->
         state
 
