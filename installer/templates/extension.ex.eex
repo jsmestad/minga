@@ -1,44 +1,20 @@
-<%= if type == "both" do %>defmodule <%= module %>.Editor do
-  @moduledoc "<%= module %> editor surface: commands, keybindings, and options."
-
-  use Minga.Extension.Editor
-
-  # ── Config options ──────────────────────────────────────────────────
-  option :enabled, :boolean, default: true, description: "Enable <%= module %>"
-
-  # ── Commands ────────────────────────────────────────────────────────
-  command :hello, "Say hello from <%= module %>",
-    execute: {<%= module %>.Commands, :hello}
-
-  # ── Keybindings ─────────────────────────────────────────────────────
-  keybind :normal, "SPC m h", :hello, "Hello from <%= module %>"
-
-  @impl true
-  def name, do: :<%= name %>_editor
-
-  @impl true
-  def description, do: "<%= module %> editor surface"
-
-  @impl true
-  def version, do: "0.1.0"
-
-  @impl true
-  def init(_config), do: {:ok, %{}}
-end
-
-defmodule <%= module %>.Agent do
-  @moduledoc "<%= module %> agent surface: hooks and agent components."
+<%= if type == "agent" do %>defmodule <%= module %> do
+  @moduledoc """
+  <%= module %> agent extension for the Minga editor.
+  """
 
   use Minga.Extension.Agent
 
   # ── Agent hooks ────────────────────────────────────────────────────
   hook :session_start, command: "#{__DIR__}/../hooks/hello.sh"
 
-  @impl true
-  def name, do: :<%= name %>_agent
+  # ── Extension callbacks ─────────────────────────────────────────────
 
   @impl true
-  def description, do: "<%= module %> agent surface"
+  def name, do: :<%= name %>
+
+  @impl true
+  def description, do: "<%= module %> extension"
 
   @impl true
   def version, do: "0.1.0"
@@ -50,12 +26,7 @@ end
   @moduledoc """
   <%= module %> extension for the Minga editor.
   """
-<%= if type == "agent" do %>
-  use Minga.Extension.Agent
 
-  # ── Agent hooks ────────────────────────────────────────────────────
-  hook :session_start, command: "#{__DIR__}/../hooks/hello.sh"
-<% else %>
   use Minga.Extension.Editor
 
   # ── Config options ──────────────────────────────────────────────────
@@ -67,7 +38,6 @@ end
 
   # ── Keybindings ─────────────────────────────────────────────────────
   keybind :normal, "SPC m h", :hello, "Hello from <%= module %>"
-<% end %>
 
   # ── Extension callbacks ─────────────────────────────────────────────
 
