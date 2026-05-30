@@ -507,7 +507,13 @@ defmodule Minga.Session.EventRecorder.Store do
          :ok <- Exqlite.Sqlite3.release(db, stmt) do
       count
     else
-      _ -> 0
+      error ->
+        Minga.Log.warning(
+          :editor,
+          "[EventRecorder.Store] SELECT changes() failed: #{inspect(error)}"
+        )
+
+        0
     end
   end
 

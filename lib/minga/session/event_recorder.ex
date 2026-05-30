@@ -252,6 +252,21 @@ defmodule Minga.Session.EventRecorder do
     end
   end
 
+  def handle_info(:deferred_vacuum, state) do
+    case Store.vacuum(state.db) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Minga.Log.warning(
+          :editor,
+          "[EventRecorder] VACUUM failed: #{inspect(reason)}"
+        )
+    end
+
+    {:noreply, state}
+  end
+
   def handle_info(_msg, state) do
     {:noreply, state}
   end
@@ -302,21 +317,29 @@ defmodule Minga.Session.EventRecorder do
 
   @spec enforce_size_cap(State.t(), non_neg_integer()) :: :ok
   defp enforce_size_cap(state, total) do
-    target = trunc(state.size_cap_bytes * 0.75)
+    target = div(state.size_cap_bytes * 3, 4)
 
-    with {:ok, row_count} <- Store.count(state.db),
-         keep = max(div(row_count * target, total), 100),
-         {:ok, deleted} <- Store.delete_oldest(state.db, keep) do
-      if deleted > 0 do
-        Minga.Log.info(
-          :editor,
-          "[EventRecorder] size cap pruned #{deleted} events (#{format_mb(total)} -> target #{format_mb(target)})"
-        )
+    with {:ok, row_count} <- Store.count(state.db) do
+      keep = max(div(row_count * target, total), 100)
 
-        Store.vacuum(state.db)
+      case Store.delete_oldest(state.db, keep) do
+        {:ok, deleted} when deleted > 0 ->
+          Minga.Log.info(
+            :editor,
+            "[EventRecorder] size cap pruned #{deleted} events (#{format_mb(total)} -> target #{format_mb(target)})"
+          )
+
+          send(self(), :deferred_vacuum)
+
+        {:ok, _} ->
+          :ok
+
+        {:error, reason} ->
+          Minga.Log.warning(
+            :editor,
+            "[EventRecorder] size cap enforcement failed: #{inspect(reason)}"
+          )
       end
-
-      :ok
     else
       {:error, reason} ->
         Minga.Log.warning(
