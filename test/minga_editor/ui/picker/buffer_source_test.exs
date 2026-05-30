@@ -291,7 +291,10 @@ defmodule MingaEditor.UI.Picker.BufferSourceTest do
       candidates = BufferAllSource.candidates(fake_state([internal]))
       # Singleton still shows up as an extra special buffer
       singleton = Minga.Log.MessagesBuffer.pid()
-      singleton_candidates = Enum.filter(candidates, fn %Item{id: id} -> id != {:pid, singleton} end)
+
+      singleton_candidates =
+        Enum.filter(candidates, fn %Item{id: id} -> id != {:pid, singleton} end)
+
       assert singleton_candidates == []
     end
   end
