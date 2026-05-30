@@ -142,7 +142,7 @@ defmodule Minga.Extension.JsonLoader do
 
   @spec build_single_hook(map()) :: {:ok, Macro.t()} | {:error, String.t()}
   defp build_single_hook(%{"event" => event_str} = hook) do
-    case safe_to_existing_atom(event_str) do
+    case normalize_hook_event(event_str) do
       {:ok, event} ->
         opts = hook_opts_from_map(hook)
         {:ok, quote(do: hook(unquote(event), unquote(opts)))}
@@ -219,12 +219,24 @@ defmodule Minga.Extension.JsonLoader do
     if cmd["command"], do: [command: cmd["command"]], else: []
   end
 
-  # --- Atom safety ---
+  # --- Hook event validation ---
 
-  @spec safe_to_existing_atom(String.t()) :: {:ok, atom()} | {:error, String.t()}
-  defp safe_to_existing_atom(str) do
-    {:ok, String.to_existing_atom(str)}
-  rescue
-    ArgumentError -> {:error, "unknown hook event atom: #{inspect(str)}"}
+  @known_hook_events %{
+    "pre_tool_use" => :pre_tool_use,
+    "post_tool_use" => :post_tool_use,
+    "session_start" => :session_start,
+    "session_end" => :session_end,
+    "stop" => :stop,
+    "user_prompt_submit" => :user_prompt_submit,
+    "pre_compact" => :pre_compact,
+    "notification" => :notification
+  }
+
+  @spec normalize_hook_event(String.t()) :: {:ok, atom()} | {:error, String.t()}
+  defp normalize_hook_event(str) do
+    case Map.fetch(@known_hook_events, str) do
+      {:ok, event} -> {:ok, event}
+      :error -> {:error, "unknown hook event: #{inspect(str)}. Valid events: #{Enum.join(Map.keys(@known_hook_events), ", ")}"}
+    end
   end
 end

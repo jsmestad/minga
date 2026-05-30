@@ -188,27 +188,29 @@ defmodule MingaAgent.Skills do
 
   @spec discover_extension_skills() :: [skill()]
   defp discover_extension_skills do
+    extension_skill_paths()
+    |> Enum.flat_map(&load_extension_skill_path/1)
+  end
+
+  @spec extension_skill_paths() :: [String.t()]
+  defp extension_skill_paths do
     case Process.whereis(Minga.Extension.Registry) do
       nil ->
         []
 
       _pid ->
         Minga.Extension.Registry.all()
-        |> Enum.flat_map(fn {_name, entry} ->
-          case entry.manifest do
-            %{skills: paths} when paths != [] ->
-              Enum.flat_map(paths, &load_extension_skill_path/1)
-
-            _ ->
-              []
-          end
-        end)
+        |> Enum.flat_map(&extract_manifest_skills/1)
     end
   rescue
     _ -> []
   catch
     :exit, _ -> []
   end
+
+  @spec extract_manifest_skills({atom(), map()}) :: [String.t()]
+  defp extract_manifest_skills({_name, %{manifest: %{skills: paths}}}) when paths != [], do: paths
+  defp extract_manifest_skills(_entry), do: []
 
   @spec discover_in(String.t(), :global | :project | :extension) :: [skill()]
   defp discover_in(dir, source) do

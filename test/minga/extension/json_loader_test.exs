@@ -195,7 +195,7 @@ defmodule Minga.Extension.JsonLoaderTest do
       write_manifest(dir, manifest)
 
       assert {:error, msg} = JsonLoader.load(dir)
-      assert msg =~ "unknown hook event atom"
+      assert msg =~ "unknown hook event"
     end
   end
 
