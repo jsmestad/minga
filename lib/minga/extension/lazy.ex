@@ -41,9 +41,7 @@ defmodule Minga.Extension.Lazy do
   def register_stubs(supervisor, registry, name, entry, opts) do
     case compile_extension(entry) do
       {:ok, module} ->
-        do_register_stubs(supervisor, registry, name, module, entry.source_type, opts,
-          set_module: true
-        )
+        do_register_stubs(supervisor, registry, name, module, entry, opts, set_module: true)
 
       {:error, reason} ->
         log_stub_failure(name, reason, registry)
@@ -69,9 +67,7 @@ defmodule Minga.Extension.Lazy do
 
     case Code.ensure_loaded(module) do
       {:module, ^module} ->
-        do_register_stubs(supervisor, registry, name, module, entry.source_type, opts,
-          set_module: false
-        )
+        do_register_stubs(supervisor, registry, name, module, entry, opts, set_module: false)
 
       {:error, reason} ->
         log_stub_failure(name, {:module_load_failed, reason}, registry)
@@ -121,16 +117,17 @@ defmodule Minga.Extension.Lazy do
           GenServer.server(),
           atom(),
           module(),
-          Manifest.source_type(),
+          ExtRegistry.entry(),
           ExtSupervisor.start_opts(),
           keyword()
         ) :: stub_result()
-  defp do_register_stubs(supervisor, registry, name, module, source_type, opts, internal_opts) do
+  defp do_register_stubs(supervisor, registry, name, module, entry, opts, internal_opts) do
     cmd_registry = Keyword.get(opts, :command_registry, Command.Registry)
     keymap = Keyword.get(opts, :keymap, Minga.Keymap.Active)
 
     with :ok <- ExtSupervisor.validate_behaviour(module, name),
-         {:ok, manifest} <- build_manifest(module, source_type) do
+         {:ok, manifest} <- build_manifest(module, entry.source_type),
+         :ok <- ExtSupervisor.register_and_validate_options(name, module, entry.config) do
       registry_fields =
         if Keyword.get(internal_opts, :set_module, false) do
           [module: module, manifest: manifest, status: :stub]

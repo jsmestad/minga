@@ -69,7 +69,7 @@ defmodule Minga.Extension.Supervisor do
 
     {failures, deferred_entries} =
       ExtRegistry.all(registry)
-      |> Enum.reduce({[], []}, fn {name, entry}, {failures, deferred} ->
+      |> Enum.reduce({[], []}, fn {name, entry}, acc ->
         maybe_start_registered_extension(
           supervisor,
           registry,
@@ -77,8 +77,7 @@ defmodule Minga.Extension.Supervisor do
           entry,
           failed_git_names,
           hex_install_failure,
-          failures,
-          deferred,
+          acc,
           opts
         )
       end)
@@ -96,6 +95,8 @@ defmodule Minga.Extension.Supervisor do
     end
   end
 
+  @typep start_acc :: {[start_failure()], [{atom(), ExtRegistry.entry()}]}
+
   @spec maybe_start_registered_extension(
           GenServer.server(),
           GenServer.server(),
@@ -103,10 +104,9 @@ defmodule Minga.Extension.Supervisor do
           ExtRegistry.entry(),
           MapSet.t(atom()),
           start_failure() | nil,
-          [start_failure()],
-          [{atom(), ExtRegistry.entry()}],
+          start_acc(),
           start_opts()
-        ) :: {[start_failure()], [{atom(), ExtRegistry.entry()}]}
+        ) :: start_acc()
   defp maybe_start_registered_extension(
          _supervisor,
          _registry,
@@ -114,8 +114,7 @@ defmodule Minga.Extension.Supervisor do
          %{source_type: :git, path: nil},
          failed_git_names,
          _hex_install_failure,
-         failures,
-         deferred,
+         {failures, deferred},
          _opts
        ) do
     if MapSet.member?(failed_git_names, name) do
@@ -132,12 +131,11 @@ defmodule Minga.Extension.Supervisor do
          %{source_type: :hex},
          _failed_git_names,
          hex_install_failure,
-         failures,
-         deferred,
+         acc,
          _opts
        )
        when is_map(hex_install_failure) do
-    {failures, deferred}
+    acc
   end
 
   defp maybe_start_registered_extension(
@@ -147,13 +145,10 @@ defmodule Minga.Extension.Supervisor do
          entry,
          _failed_git_names,
          _hex_install_failure,
-         failures,
-         deferred,
+         {failures, deferred},
          opts
        ) do
-    load_policy = resolve_load_policy(entry)
-
-    case load_policy do
+    case resolve_load_policy(entry) do
       :eager ->
         start_eager(supervisor, registry, name, entry, opts, failures, deferred)
 
@@ -161,47 +156,54 @@ defmodule Minga.Extension.Supervisor do
         {failures, [{name, entry} | deferred]}
 
       {:on_command, _} ->
-        case register_lazy_stubs(supervisor, registry, name, entry, opts) do
-          :ok -> {failures, deferred}
-          {:error, reason} -> {failures ++ [%{extension: name, reason: reason}], deferred}
-        end
+        register_lazy_or_fail(supervisor, registry, name, entry, opts, failures, deferred)
 
       {:on_filetype, _} ->
-        Minga.Log.warning(
-          :config,
-          "Extension #{name}: on_filetype trigger is reserved; stub commands will autoload on invocation but filetype-open will not trigger autoload yet"
-        )
-
-        case register_lazy_stubs(supervisor, registry, name, entry, opts) do
-          :ok -> {failures, deferred}
-          {:error, reason} -> {failures ++ [%{extension: name, reason: reason}], deferred}
-        end
+        log_reserved_trigger(name, :on_filetype)
+        register_lazy_or_fail(supervisor, registry, name, entry, opts, failures, deferred)
 
       {:on_key, _} ->
-        Minga.Log.warning(
-          :config,
-          "Extension #{name}: on_key trigger is reserved; stub commands will autoload on invocation but key-press will not trigger autoload yet"
-        )
-
-        case register_lazy_stubs(supervisor, registry, name, entry, opts) do
-          :ok -> {failures, deferred}
-          {:error, reason} -> {failures ++ [%{extension: name, reason: reason}], deferred}
-        end
+        log_reserved_trigger(name, :on_key)
+        register_lazy_or_fail(supervisor, registry, name, entry, opts, failures, deferred)
     end
   end
 
   @spec resolve_load_policy(ExtRegistry.entry()) :: Minga.Extension.load_policy()
-  defp resolve_load_policy(%{load_policy: policy}) when not is_nil(policy), do: policy
+  defp resolve_load_policy(%{load_policy: policy}) when is_atom(policy) and policy != nil,
+    do: policy
 
-  defp resolve_load_policy(%{source_type: type} = entry)
-       when type in [:path, :git, :hex, :module] do
+  defp resolve_load_policy(%{load_policy: policy}) when is_tuple(policy), do: policy
+
+  defp resolve_load_policy(entry) do
     case Lazy.discover_load_policy(entry) do
       {:ok, policy, _module} -> policy
       {:error, _reason} -> :eager
     end
   end
 
-  defp resolve_load_policy(_entry), do: :eager
+  @spec log_reserved_trigger(atom(), atom()) :: :ok
+  defp log_reserved_trigger(name, trigger) do
+    Minga.Log.warning(
+      :config,
+      "Extension #{name}: #{trigger} trigger is reserved; stub commands autoload on invocation but the event hook is not yet wired"
+    )
+  end
+
+  @spec register_lazy_or_fail(
+          GenServer.server(),
+          GenServer.server(),
+          atom(),
+          ExtRegistry.entry(),
+          start_opts(),
+          [start_failure()],
+          [{atom(), ExtRegistry.entry()}]
+        ) :: start_acc()
+  defp register_lazy_or_fail(supervisor, registry, name, entry, opts, failures, deferred) do
+    case register_lazy_stubs(supervisor, registry, name, entry, opts) do
+      :ok -> {failures, deferred}
+      {:error, reason} -> {failures ++ [%{extension: name, reason: reason}], deferred}
+    end
+  end
 
   @spec register_lazy_stubs(
           GenServer.server(),
@@ -1890,9 +1892,10 @@ defmodule Minga.Extension.Supervisor do
     end
   end
 
+  @doc false
   @spec register_and_validate_options(atom(), module(), keyword()) ::
           :ok | {:error, String.t()}
-  defp register_and_validate_options(name, module, config) do
+  def register_and_validate_options(name, module, config) do
     if function_exported?(module, :__option_schema__, 0) do
       schema = module.__option_schema__()
       Minga.Config.register_extension_schema(name, schema, config)

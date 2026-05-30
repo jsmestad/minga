@@ -515,8 +515,8 @@ defmodule Minga.Extension.LazyTest do
       end)
 
       compile_extension!(path)
-      module = Minga.TestExtensions.DefaultPolicy
-      assert apply(module, :__load_policy__, []) == :eager
+      manifest = Minga.Extension.Manifest.from_module(Minga.TestExtensions.DefaultPolicy, :path)
+      assert manifest.load_policy == :eager
     end
 
     test "load_policy macro sets the policy" do
@@ -553,8 +553,8 @@ defmodule Minga.Extension.LazyTest do
       end)
 
       compile_extension!(path)
-      module = Minga.TestExtensions.ExplicitPolicy
-      assert apply(module, :__load_policy__, []) == {:on_command, [:explicit_cmd]}
+      manifest = Minga.Extension.Manifest.from_module(Minga.TestExtensions.ExplicitPolicy, :path)
+      assert manifest.load_policy == {:on_command, [:explicit_cmd]}
     end
 
     test "load_policy :deferred works" do
@@ -586,8 +586,8 @@ defmodule Minga.Extension.LazyTest do
       end)
 
       compile_extension!(path)
-      module = Minga.TestExtensions.DeferredPolicy
-      assert apply(module, :__load_policy__, []) == :deferred
+      manifest = Minga.Extension.Manifest.from_module(Minga.TestExtensions.DeferredPolicy, :path)
+      assert manifest.load_policy == :deferred
     end
   end
 
