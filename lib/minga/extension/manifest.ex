@@ -23,7 +23,11 @@ defmodule Minga.Extension.Manifest do
     keybindings: [],
     modeline_segments: [],
     capabilities: [],
-    load_policy: :eager
+    load_policy: :eager,
+    hooks: [],
+    skills: [],
+    mcp_servers: [],
+    slash_commands: []
   ]
 
   @type t :: %__MODULE__{
@@ -35,7 +39,11 @@ defmodule Minga.Extension.Manifest do
           keybindings: [Extension.keybind_spec()],
           modeline_segments: [Extension.modeline_segment_spec()],
           capabilities: capabilities(),
-          load_policy: Extension.load_policy()
+          load_policy: Extension.load_policy(),
+          hooks: [{atom(), keyword()}],
+          skills: [String.t()],
+          mcp_servers: [{atom(), keyword()}],
+          slash_commands: [{atom(), String.t(), keyword()}]
         }
 
   @doc """
@@ -57,7 +65,11 @@ defmodule Minga.Extension.Manifest do
       keybindings: safe_schema(module, :__keybind_schema__),
       modeline_segments: safe_schema(module, :__modeline_segment_schema__),
       capabilities: safe_capabilities(module),
-      load_policy: safe_load_policy(module)
+      load_policy: safe_load_policy(module),
+      hooks: safe_schema(module, :__hook_schema__),
+      skills: safe_schema(module, :__skill_schema__),
+      mcp_servers: safe_schema(module, :__mcp_server_schema__),
+      slash_commands: safe_schema(module, :__slash_command_schema__)
     }
   end
 

@@ -1,0 +1,14 @@
+{
+  "name": "hello-world",
+  "description": "A simple greeting plugin that demonstrates the JSON plugin format",
+  "version": "0.1.0",
+  "hooks": [
+    {
+      "event": "session_start",
+      "command": "${MINGA_PLUGIN_ROOT}/hooks/hello.sh"
+    }
+  ],
+  "skills": [
+    "${MINGA_PLUGIN_ROOT}/skills/greet"
+  ]
+}

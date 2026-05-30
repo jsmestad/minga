@@ -1528,7 +1528,7 @@ defmodule Minga.Extension.Supervisor do
 
     case files do
       [] ->
-        {:error, "no .ex files found in #{expanded}"}
+        compile_extension_files_fallback(expanded)
 
       _ ->
         # The compile cache loads precompiled beams on a hit and recompiles
@@ -1542,6 +1542,17 @@ defmodule Minga.Extension.Supervisor do
           {:error, reason} ->
             {:error, reason}
         end
+    end
+  end
+
+  @spec compile_extension_files_fallback(String.t()) :: {:ok, module()} | {:error, String.t()}
+  defp compile_extension_files_fallback(expanded) do
+    json_path = Path.join(expanded, "plugin.json")
+
+    if File.exists?(json_path) do
+      Minga.Extension.JsonLoader.load(expanded)
+    else
+      {:error, "no .ex files found in #{expanded}"}
     end
   end
 

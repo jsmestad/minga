@@ -5,7 +5,7 @@ defmodule MingaBoard do
   Core keeps the generic shell registry, dispatch, and Traditional fallback. This extension owns the Board shell implementation, input handlers, persistence, agent card lifecycle, and typed GUI payload production.
   """
 
-  use Minga.Extension
+  use Minga.Extension.Editor
 
   load_policy {:on_command, [:toggle_board]}
 

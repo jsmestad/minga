@@ -353,9 +353,10 @@ defmodule Minga.Config.Loader do
         # 7. Apply log level from config
         apply_log_level(options_server)
 
-        # 8. Register bundled extensions, then start extensions only after all config sources have had a chance
-        # to declare them.
+        # 8. Register bundled extensions, then discover plugins, then start extensions only after all
+        # config sources have had a chance to declare them.
         register_bundled_extensions()
+        plugin_error = discover_and_register_plugins()
 
         start_all_error =
           if Process.whereis(Minga.Extension.Supervisor) != nil &&
@@ -368,6 +369,7 @@ defmodule Minga.Config.Loader do
             config_cleanup_error,
             load_error,
             project_mcp_error,
+            plugin_error,
             start_all_error
           ])
 
@@ -465,6 +467,74 @@ defmodule Minga.Config.Loader do
   @spec source_extension_fallback_allowed?() :: boolean()
   defp source_extension_fallback_allowed? do
     Application.get_env(:minga, :allow_source_extension_fallback, false)
+  end
+
+  # ── Plugin Discovery ──────────────────────────────────────────────────────────
+
+  @spec discover_and_register_plugins() :: String.t() | nil
+  defp discover_and_register_plugins do
+    user_dir = user_plugins_dir()
+    project_dir = project_plugins_dir()
+
+    user_errors = register_plugins_from_dir(user_dir)
+    project_errors = register_plugins_from_dir(project_dir)
+
+    merge_error_messages(user_errors ++ project_errors)
+  end
+
+  @spec user_plugins_dir() :: String.t()
+  defp user_plugins_dir do
+    base =
+      case System.get_env("XDG_CONFIG_HOME") do
+        nil -> Path.expand("~/.config")
+        "" -> Path.expand("~/.config")
+        dir -> dir
+      end
+
+    Path.join([base, "minga", "plugins"])
+  end
+
+  @spec project_plugins_dir() :: String.t()
+  defp project_plugins_dir do
+    Path.join([File.cwd!(), ".minga", "plugins"])
+  end
+
+  @spec register_plugins_from_dir(String.t()) :: [String.t()]
+  defp register_plugins_from_dir(dir) do
+    case File.ls(dir) do
+      {:ok, entries} ->
+        entries
+        |> Enum.sort()
+        |> Enum.reduce([], fn entry, errors ->
+          plugin_path = Path.join(dir, entry)
+          register_plugin_entry(plugin_path, entry, errors)
+        end)
+
+      {:error, :enoent} ->
+        []
+
+      {:error, reason} ->
+        ["Plugin directory #{dir}: #{inspect(reason)}"]
+    end
+  end
+
+  @plugin_name_pattern ~r/^[a-z][a-z0-9_-]*$/
+
+  @spec register_plugin_entry(String.t(), String.t(), [String.t()]) :: [String.t()]
+  defp register_plugin_entry(plugin_path, entry, errors) do
+    register_plugin_dir(File.dir?(plugin_path), plugin_path, entry, errors)
+  end
+
+  @spec register_plugin_dir(boolean(), String.t(), String.t(), [String.t()]) :: [String.t()]
+  defp register_plugin_dir(false, _plugin_path, _entry, errors), do: errors
+
+  defp register_plugin_dir(true, plugin_path, entry, errors) do
+    if Regex.match?(@plugin_name_pattern, entry) do
+      ExtRegistry.register(String.to_atom(entry), plugin_path, [])
+      errors
+    else
+      ["Plugin directory name must match [a-z][a-z0-9_-]*: #{entry}" | errors]
+    end
   end
 
   @spec with_config_source(atom(), (-> term())) :: term()

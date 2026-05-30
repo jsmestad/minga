@@ -103,15 +103,15 @@ defmodule MingaEditor.Agent.SlashCommand do
     }
   ]
 
-  @doc "Returns the list of all registered slash commands."
+  @doc "Returns the list of all registered slash commands (static and dynamic)."
   @spec commands() :: [command()]
-  def commands, do: @commands
+  def commands, do: @commands ++ dynamic_commands()
 
   @doc "Returns commands whose names start with the given prefix."
   @spec completions(String.t()) :: [command()]
   def completions(prefix) when is_binary(prefix) do
     clean = String.trim_leading(prefix, "/")
-    Enum.filter(@commands, fn cmd -> String.starts_with?(cmd.name, clean) end)
+    Enum.filter(commands(), fn cmd -> String.starts_with?(cmd.name, clean) end)
   end
 
   @doc "Returns completion candidates for the current slash input, without the leading slash."
@@ -333,12 +333,12 @@ defmodule MingaEditor.Agent.SlashCommand do
   defp dispatch(state, "switch", args), do: do_switch_branch(state, args)
   defp dispatch(state, "login", args), do: {:ok, do_login(state, args)}
 
-  # /skill:name activates, /skill:off:name deactivates
-  defp dispatch(state, cmd, _args) when is_binary(cmd) do
+  # /skill:name activates, /skill:off:name deactivates, otherwise check dynamic commands
+  defp dispatch(state, cmd, args) when is_binary(cmd) do
     case parse_skill_command(cmd) do
       {:activate, name} -> do_activate_skill(state, name)
       {:deactivate, name} -> do_deactivate_skill(state, name)
-      :not_skill -> {:error, "Unknown command: /#{cmd}"}
+      :not_skill -> dispatch_dynamic(state, cmd, args)
     end
   end
 
@@ -509,7 +509,7 @@ defmodule MingaEditor.Agent.SlashCommand do
   @spec do_help(state()) :: state()
   defp do_help(state) do
     help_text =
-      @commands
+      commands()
       |> Enum.map_join("\n", fn cmd -> "  /#{cmd.name} — #{cmd.description}" end)
 
     if AgentAccess.session(state) do
@@ -1088,6 +1088,71 @@ defmodule MingaEditor.Agent.SlashCommand do
     # The full message is visible in the *Agent* chat buffer via add_system_message.
     first_line = message |> String.split("\n", parts: 2) |> hd() |> String.trim()
     MingaEditor.State.set_status(state, String.slice(first_line, 0, 80))
+  end
+
+  # ── Dynamic commands from extensions ────────────────────────────────────────
+
+  @doc "Returns slash commands contributed by loaded extensions."
+  @spec dynamic_commands() :: [Command.t()]
+  def dynamic_commands do
+    extension_manifests()
+    |> Enum.flat_map(fn manifest -> manifest.slash_commands end)
+    |> Enum.map(&build_extension_command/1)
+  end
+
+  @spec extension_manifests() :: [Minga.Extension.Manifest.t()]
+  defp extension_manifests do
+    case Process.whereis(Minga.Extension.Registry) do
+      nil ->
+        []
+
+      _pid ->
+        Minga.Extension.Registry.all()
+        |> Enum.filter(fn {_name, entry} -> entry.status == :running end)
+        |> Enum.map(fn {_name, entry} -> entry.manifest end)
+        |> Enum.reject(&is_nil/1)
+    end
+  rescue
+    _ -> []
+  catch
+    :exit, _ -> []
+  end
+
+  @spec build_extension_command({atom(), String.t(), keyword()}) :: Command.t()
+  defp build_extension_command({cmd_name, description, opts}) do
+    %Command{
+      name: Atom.to_string(cmd_name),
+      description: description,
+      execute: Keyword.get(opts, :command)
+    }
+  end
+
+  # ── Dynamic command dispatch ───────────────────────────────────────────────
+
+  @spec dispatch_dynamic(state(), String.t(), String.t()) :: {:ok, state()} | {:error, String.t()}
+  defp dispatch_dynamic(state, cmd_name, args) do
+    case Enum.find(dynamic_commands(), fn c -> c.name == cmd_name end) do
+      nil -> {:error, "Unknown command: /#{cmd_name}"}
+      cmd -> execute_dynamic_command(state, cmd, args)
+    end
+  end
+
+  @spec execute_dynamic_command(state(), Command.t(), String.t()) ::
+          {:ok, state()} | {:error, String.t()}
+  defp execute_dynamic_command(state, cmd, args) do
+    command_path = cmd.execute
+    trimmed_args = String.trim(args)
+    cmd_args = if trimmed_args == "", do: [], else: [trimmed_args]
+
+    case System.cmd(command_path, cmd_args, stderr_to_stdout: true) do
+      {output, 0} ->
+        {:ok, emit_system_message(state, String.trim(output))}
+
+      {output, _code} ->
+        {:error, "Command /#{cmd.name} failed: #{String.trim(output)}"}
+    end
+  rescue
+    e -> {:error, "Command /#{cmd.name} error: #{Exception.message(e)}"}
   end
 
   # ── Helpers ─────────────────────────────────────────────────────────────────

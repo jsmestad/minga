@@ -1,7 +1,7 @@
 defmodule Minga.Extensions.ThemePacks.One do
   @moduledoc "Bundled One theme pack: One Dark and One Light."
 
-  use Minga.Extension
+  use Minga.Extension.Editor
 
   @impl true
   @spec name() :: atom()

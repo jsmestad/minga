@@ -216,37 +216,7 @@ defmodule Minga.Extension do
   """
   defmacro __using__(_opts) do
     quote do
-      @behaviour Minga.Extension
-      Module.register_attribute(__MODULE__, :__extension_options__, accumulate: true)
-      Module.register_attribute(__MODULE__, :__extension_commands__, accumulate: true)
-      Module.register_attribute(__MODULE__, :__extension_keybinds__, accumulate: true)
-      Module.register_attribute(__MODULE__, :__extension_modeline_segments__, accumulate: true)
-      Module.register_attribute(__MODULE__, :__extension_capabilities__, accumulate: true)
-      @before_compile Minga.Extension
-
-      @doc false
-      @spec child_spec(keyword()) :: Supervisor.child_spec()
-      def child_spec(config) do
-        %{
-          id: __MODULE__,
-          start: {Agent, :start_link, [fn -> config end]},
-          restart: :permanent,
-          type: :worker
-        }
-      end
-
-      defoverridable child_spec: 1
-
-      import Minga.Extension,
-        only: [
-          option: 3,
-          command: 3,
-          keybind: 4,
-          keybind: 5,
-          modeline_segment: 2,
-          modeline_segment: 3,
-          capability: 2
-        ]
+      use Minga.Extension.Editor
     end
   end
 

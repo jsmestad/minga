@@ -1,7 +1,7 @@
 defmodule Minga.Extensions.RecipePacks.Systems do
   @moduledoc "Bundled recipe pack: systems programming ecosystem tools."
 
-  use Minga.Extension
+  use Minga.Extension.Editor
 
   alias Minga.Tool.Recipe
 

@@ -1,7 +1,7 @@
 defmodule Minga.Extensions.RecipePacks.Web do
   @moduledoc "Bundled recipe pack: Web ecosystem tools."
 
-  use Minga.Extension
+  use Minga.Extension.Editor
 
   alias Minga.Tool.Recipe
 
