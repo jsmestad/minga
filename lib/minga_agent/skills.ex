@@ -210,8 +210,40 @@ defmodule MingaAgent.Skills do
   end
 
   @spec extract_manifest_skills({atom(), map()}) :: [String.t()]
-  defp extract_manifest_skills({_name, %{manifest: %{skills: paths}}}) when paths != [], do: paths
+  defp extract_manifest_skills({_name, %{manifest: %{skills: paths}} = entry}) when paths != [] do
+    case extension_root(entry) do
+      nil -> Enum.filter(paths, &(Path.type(&1) == :absolute))
+      root -> Enum.map(paths, &resolve_skill_path(&1, root))
+    end
+  end
+
   defp extract_manifest_skills(_entry), do: []
+
+  defp resolve_skill_path(skill_path, root) do
+    if Path.type(skill_path) == :absolute, do: skill_path, else: Path.join(root, skill_path)
+  end
+
+  @spec extension_root(map()) :: String.t() | nil
+  defp extension_root(%{path: path}) when is_binary(path), do: path
+
+  defp extension_root(%{module: mod}) when is_atom(mod) and not is_nil(mod) do
+    case :code.which(mod) do
+      path when is_list(path) ->
+        path |> List.to_string() |> Path.dirname() |> Path.dirname()
+
+      _ ->
+        nil
+    end
+  end
+
+  defp extension_root(%{hex: %{app: app}}) when is_atom(app) do
+    case :code.lib_dir(app) do
+      path when is_list(path) -> List.to_string(path)
+      _ -> nil
+    end
+  end
+
+  defp extension_root(_entry), do: nil
 
   @spec discover_in(String.t(), :global | :project | :extension) :: [skill()]
   defp discover_in(dir, source) do
