@@ -18,6 +18,7 @@ defmodule Minga.Extension.Supervisor do
   alias Minga.Extension.CompileCache
   alias Minga.Extension.Git, as: ExtGit
   alias Minga.Extension.Hex, as: ExtHex
+  alias Minga.Extension.Lazy
   alias Minga.Extension.Manifest
   alias Minga.Extension.Registry, as: ExtRegistry
 
@@ -66,9 +67,9 @@ defmodule Minga.Extension.Supervisor do
     git_failures = resolve_git_extensions(registry)
     failed_git_names = MapSet.new(Enum.map(git_failures, & &1.extension))
 
-    failures =
+    {failures, deferred_entries} =
       ExtRegistry.all(registry)
-      |> Enum.reduce([], fn {name, entry}, failures ->
+      |> Enum.reduce({[], []}, fn {name, entry}, {failures, deferred} ->
         maybe_start_registered_extension(
           supervisor,
           registry,
@@ -77,11 +78,17 @@ defmodule Minga.Extension.Supervisor do
           failed_git_names,
           hex_install_failure,
           failures,
+          deferred,
           opts
         )
       end)
+
+    failures =
+      failures
       |> prepend_failure(hex_install_failure)
       |> Kernel.++(git_failures)
+
+    Lazy.schedule_deferred_loads(supervisor, registry, deferred_entries, opts)
 
     case failures do
       [] -> :ok
@@ -97,8 +104,9 @@ defmodule Minga.Extension.Supervisor do
           MapSet.t(atom()),
           start_failure() | nil,
           [start_failure()],
+          [{atom(), ExtRegistry.entry()}],
           start_opts()
-        ) :: [start_failure()]
+        ) :: {[start_failure()], [{atom(), ExtRegistry.entry()}]}
   defp maybe_start_registered_extension(
          _supervisor,
          _registry,
@@ -107,12 +115,13 @@ defmodule Minga.Extension.Supervisor do
          failed_git_names,
          _hex_install_failure,
          failures,
+         deferred,
          _opts
        ) do
     if MapSet.member?(failed_git_names, name) do
-      failures
+      {failures, deferred}
     else
-      failures ++ [%{extension: name, reason: :clone_failed}]
+      {failures ++ [%{extension: name, reason: :clone_failed}], deferred}
     end
   end
 
@@ -124,10 +133,11 @@ defmodule Minga.Extension.Supervisor do
          _failed_git_names,
          hex_install_failure,
          failures,
+         deferred,
          _opts
        )
        when is_map(hex_install_failure) do
-    failures
+    {failures, deferred}
   end
 
   defp maybe_start_registered_extension(
@@ -138,15 +148,42 @@ defmodule Minga.Extension.Supervisor do
          _failed_git_names,
          _hex_install_failure,
          failures,
+         deferred,
          opts
        ) do
-    case start_extension(supervisor, registry, name, entry, opts) do
-      {:ok, _pid} ->
-        failures
+    load_policy = Lazy.effective_load_policy(entry)
 
-      {:error, reason} ->
-        failures ++ [%{extension: name, reason: reason}]
+    case load_policy do
+      :eager ->
+        case start_extension(supervisor, registry, name, entry, opts) do
+          {:ok, _pid} -> {failures, deferred}
+          {:error, reason} -> {failures ++ [%{extension: name, reason: reason}], deferred}
+        end
+
+      :deferred ->
+        {failures, [{name, entry} | deferred]}
+
+      trigger when is_tuple(trigger) ->
+        case register_lazy_stubs(supervisor, registry, name, entry, opts) do
+          :ok -> {failures, deferred}
+          {:error, reason} -> {failures ++ [%{extension: name, reason: reason}], deferred}
+        end
     end
+  end
+
+  @spec register_lazy_stubs(
+          GenServer.server(),
+          GenServer.server(),
+          atom(),
+          ExtRegistry.entry(),
+          start_opts()
+        ) :: :ok | {:error, term()}
+  defp register_lazy_stubs(supervisor, registry, name, %{source_type: :module} = entry, opts) do
+    Lazy.register_module_stubs(supervisor, registry, name, entry, opts)
+  end
+
+  defp register_lazy_stubs(supervisor, registry, name, entry, opts) do
+    Lazy.register_stubs(supervisor, registry, name, entry, opts)
   end
 
   @doc """

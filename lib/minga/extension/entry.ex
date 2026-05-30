@@ -36,7 +36,8 @@ defmodule Minga.Extension.Entry do
     :manifest,
     lifecycle_ref: nil,
     config: [],
-    status: :stopped
+    status: :stopped,
+    load_policy: :eager
   ]
 
   @type t :: %__MODULE__{
@@ -49,31 +50,36 @@ defmodule Minga.Extension.Entry do
           manifest: Extension.Manifest.t() | nil,
           lifecycle_ref: reference() | nil,
           config: keyword(),
-          status: Extension.extension_status()
+          status: Extension.extension_status(),
+          load_policy: Extension.load_policy()
         }
 
   @doc "Creates a path-sourced entry."
   @spec from_path(String.t(), keyword()) :: t()
   def from_path(path, config) when is_binary(path) and is_list(config) do
-    %__MODULE__{source_type: :path, path: path, config: config}
+    {load_policy, config} = Keyword.pop(config, :load_policy, :eager)
+    %__MODULE__{source_type: :path, path: path, config: config, load_policy: load_policy}
   end
 
   @doc "Creates a module-sourced entry for a bundled extension already on the code path."
   @spec from_module(module(), keyword()) :: t()
   def from_module(module, config) when is_atom(module) and is_list(config) do
-    %__MODULE__{source_type: :module, module: module, config: config}
+    {load_policy, config} = Keyword.pop(config, :load_policy, :eager)
+    %__MODULE__{source_type: :module, module: module, config: config, load_policy: load_policy}
   end
 
   @doc "Creates a git-sourced entry."
   @spec from_git(String.t(), keyword()) :: t()
   def from_git(url, opts) when is_binary(url) and is_list(opts) do
     {branch, opts} = Keyword.pop(opts, :branch)
-    {ref, config} = Keyword.pop(opts, :ref)
+    {ref, opts} = Keyword.pop(opts, :ref)
+    {load_policy, config} = Keyword.pop(opts, :load_policy, :eager)
 
     %__MODULE__{
       source_type: :git,
       git: %{url: url, branch: branch, ref: ref},
-      config: config
+      config: config,
+      load_policy: load_policy
     }
   end
 
@@ -81,12 +87,14 @@ defmodule Minga.Extension.Entry do
   @spec from_hex(String.t(), atom(), keyword()) :: t()
   def from_hex(package, app, opts) when is_binary(package) and is_atom(app) and is_list(opts) do
     {version, opts} = Keyword.pop(opts, :version)
-    {_app, config} = Keyword.pop(opts, :app)
+    {_app, opts} = Keyword.pop(opts, :app)
+    {load_policy, config} = Keyword.pop(opts, :load_policy, :eager)
 
     %__MODULE__{
       source_type: :hex,
       hex: %{package: package, version: version, app: app},
-      config: config
+      config: config,
+      load_policy: load_policy
     }
   end
 end

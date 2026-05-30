@@ -7,6 +7,8 @@ defmodule MingaBoard do
 
   use Minga.Extension
 
+  load_policy {:on_command, [:toggle_board]}
+
   command(:toggle_board, "Toggle The Board view",
     requires_buffer: false,
     execute: {MingaBoard.Commands, :toggle}
