@@ -266,7 +266,8 @@ defmodule MingaAgent.Providers.NativeTest do
         {"anthropic:claude-sonnet-4-20250514", "high", :high},
         {"openai:o4-mini", "medium", :medium},
         {"deepseek:deepseek-reasoner", "low", :low},
-        {"openai:o3-mini", "off", nil}
+        {"openai:o3-mini", "off", nil},
+        {"openai_codex:gpt-5.5", "high", :high}
       ]
 
       Enum.each(cases, fn {model, thinking_level, expected_effort} ->
@@ -297,6 +298,12 @@ defmodule MingaAgent.Providers.NativeTest do
 
         provider_options = Keyword.get(opts, :provider_options, [])
         refute Keyword.has_key?(provider_options, :additional_model_request_fields)
+
+        if String.starts_with?(model, "openai_codex:") do
+          assert provider_options[:auth_mode] == :oauth
+          assert provider_options[:oauth_file] == MingaAgent.Credentials.oauth_path()
+          assert provider_options[:codex_originator] == "minga"
+        end
 
         collect_events(500)
       end)

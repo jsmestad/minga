@@ -29,22 +29,9 @@ defmodule MingaAgent.OAuth.Flow do
     state = generate_state()
     config = OAuth.openai_config()
 
-    with :ok <- register_flow(),
-         {:ok, bandit_pid} <- start_server(config.port) do
-      try do
-        url = OAuth.openai_authorize_url(pkce.challenge, state)
-
-        case open_browser(url) do
-          :ok ->
-            await_and_exchange(state, pkce.verifier)
-
-          {:error, _reason} ->
-            {:browser_failed, url}
-        end
-      after
-        stop_server(bandit_pid)
-        unregister_flow()
-      end
+    case register_flow() do
+      :ok -> run_registered_flow(pkce, state, config)
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -53,6 +40,30 @@ defmodule MingaAgent.OAuth.Flow do
   defp generate_state do
     :crypto.strong_rand_bytes(16)
     |> Base.url_encode64(padding: false)
+  end
+
+  defp run_registered_flow(pkce, state, config) do
+    case start_server(config.port, config.fallback_port) do
+      {:ok, bandit_pid, port} ->
+        try do
+          url = OAuth.openai_authorize_url(pkce.challenge, state, port)
+
+          case open_browser(url) do
+            :ok ->
+              await_and_exchange(state, pkce.verifier, port)
+
+            {:error, _reason} ->
+              {:browser_failed, url}
+          end
+        after
+          stop_server(bandit_pid)
+          unregister_flow()
+        end
+
+      {:error, reason} ->
+        unregister_flow()
+        {:error, reason}
+    end
   end
 
   defp register_flow do
@@ -74,7 +85,29 @@ defmodule MingaAgent.OAuth.Flow do
     ArgumentError -> :ok
   end
 
-  defp start_server(port) do
+  defp start_server(port, fallback_port) do
+    case start_server_on_port(port) do
+      {:ok, pid} -> {:ok, pid, port}
+      {:error, :eaddrinuse} -> start_fallback_server(port, fallback_port)
+      {:error, {:start_failed, reason}} -> {:error, start_failed_message(port, reason)}
+    end
+  end
+
+  defp start_fallback_server(port, fallback_port) do
+    case start_server_on_port(fallback_port) do
+      {:ok, pid} ->
+        {:ok, pid, fallback_port}
+
+      {:error, :eaddrinuse} ->
+        {:error,
+         "Ports #{port} and #{fallback_port} are already in use. Free one of those ports or use /auth with an API key instead."}
+
+      {:error, {:start_failed, reason}} ->
+        {:error, start_failed_message(fallback_port, reason)}
+    end
+  end
+
+  defp start_server_on_port(port) do
     case Bandit.start_link(
            plug: MingaAgent.OAuth.CallbackHandler,
            port: port,
@@ -85,13 +118,15 @@ defmodule MingaAgent.OAuth.Flow do
         {:ok, pid}
 
       {:error, {:shutdown, {:failed_to_start_child, :listener, {:listen, :eaddrinuse}}}} ->
-        {:error,
-         "Port #{port} is already in use. Free the port or use /auth with an API key instead."}
+        {:error, :eaddrinuse}
 
       {:error, reason} ->
-        {:error,
-         "Could not start callback server on port #{port}: #{inspect(reason)}. Free the port or use /auth with an API key instead."}
+        {:error, {:start_failed, reason}}
     end
+  end
+
+  defp start_failed_message(port, reason) do
+    "Could not start callback server on port #{port}: #{inspect(reason)}. Free the port or use /auth with an API key instead."
   end
 
   defp stop_server(pid) when is_pid(pid) do
@@ -116,16 +151,19 @@ defmodule MingaAgent.OAuth.Flow do
     e in [ErlangError] -> {:error, "Failed to open browser: #{Exception.message(e)}"}
   end
 
-  defp await_and_exchange(expected_state, verifier) do
+  defp await_and_exchange(expected_state, verifier, port) do
     receive do
       {:oauth_callback, code, state} when is_binary(code) and state == expected_state ->
-        exchange_and_persist(code, verifier)
+        exchange_and_persist(code, verifier, port)
 
       {:oauth_callback, _code, nil} ->
         {:error, "OAuth redirect was missing the state parameter. Run /login to try again."}
 
       {:oauth_callback, _code, _wrong_state} ->
         {:error, "OAuth state mismatch (possible CSRF). Run /login to try again."}
+
+      {:oauth_callback_error, {:provider_error, message}} ->
+        {:error, "Authorization failed: #{message}. Run /login to try again."}
 
       {:oauth_callback_error, :missing_code} ->
         {:error, "Authorization was denied or failed. Run /login to try again."}
@@ -136,8 +174,8 @@ defmodule MingaAgent.OAuth.Flow do
     end
   end
 
-  defp exchange_and_persist(code, verifier) do
-    with {:ok, tokens} <- OAuth.exchange_code(code, verifier),
+  defp exchange_and_persist(code, verifier, port) do
+    with {:ok, tokens} <- OAuth.exchange_code(code, verifier, port),
          :ok <- OAuth.write_oauth_file(tokens) do
       {:ok, :openai}
     end

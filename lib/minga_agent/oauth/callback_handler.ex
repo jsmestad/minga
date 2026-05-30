@@ -11,33 +11,69 @@ defmodule MingaAgent.OAuth.CallbackHandler do
   plug(:match)
   plug(:dispatch)
 
+  get "/auth/callback" do
+    handle_callback(conn)
+  end
+
   get "/callback" do
-    conn = Plug.Conn.fetch_query_params(conn)
-    code = conn.query_params["code"]
-    state = conn.query_params["state"]
-
-    has_code = is_binary(code) and code != ""
-
-    case Process.whereis(:minga_oauth_flow) do
-      pid when is_pid(pid) and has_code -> send(pid, {:oauth_callback, code, state})
-      pid when is_pid(pid) -> send(pid, {:oauth_callback_error, :missing_code})
-      nil -> :ok
-    end
-
-    if has_code do
-      conn
-      |> put_resp_content_type("text/html")
-      |> send_resp(200, success_html())
-    else
-      conn
-      |> put_resp_content_type("text/html")
-      |> send_resp(400, error_html())
-    end
+    handle_callback(conn)
   end
 
   match _ do
     send_resp(conn, 404, "")
   end
+
+  defp handle_callback(conn) do
+    conn = Plug.Conn.fetch_query_params(conn)
+    event = callback_event(conn.query_params)
+    notify_flow(event)
+
+    case event do
+      {:oauth_callback, _code, _state} ->
+        conn
+        |> put_resp_content_type("text/html")
+        |> send_resp(200, success_html())
+
+      {:oauth_callback_error, {:provider_error, message}} ->
+        conn
+        |> put_resp_content_type("text/html")
+        |> send_resp(400, error_html(message))
+
+      {:oauth_callback_error, :missing_code} ->
+        conn
+        |> put_resp_content_type("text/html")
+        |> send_resp(400, error_html("Missing authorization code. Please try again."))
+    end
+  end
+
+  defp callback_event(%{"code" => code, "state" => state}) when is_binary(code) and code != "" do
+    {:oauth_callback, code, state}
+  end
+
+  defp callback_event(%{"code" => code}) when is_binary(code) and code != "" do
+    {:oauth_callback, code, nil}
+  end
+
+  defp callback_event(%{"error" => error} = params) when is_binary(error) and error != "" do
+    description = Map.get(params, "error_description")
+    {:oauth_callback_error, {:provider_error, provider_error_message(error, description)}}
+  end
+
+  defp callback_event(_params), do: {:oauth_callback_error, :missing_code}
+
+  defp notify_flow(event) do
+    case Process.whereis(:minga_oauth_flow) do
+      pid when is_pid(pid) -> send(pid, event)
+      nil -> :ok
+    end
+  end
+
+  defp provider_error_message(error, description)
+       when is_binary(description) and description != "" do
+    "#{error}: #{description}"
+  end
+
+  defp provider_error_message(error, _description), do: error
 
   defp success_html do
     """
@@ -55,7 +91,9 @@ defmodule MingaAgent.OAuth.CallbackHandler do
     """
   end
 
-  defp error_html do
+  defp error_html(message) do
+    escaped_message = html_escape(message)
+
     """
     <!DOCTYPE html>
     <html>
@@ -63,10 +101,19 @@ defmodule MingaAgent.OAuth.CallbackHandler do
     <body style="font-family: system-ui, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0;">
       <div style="text-align: center;">
         <h2>Authentication failed</h2>
-        <p>Missing authorization code. Please try again.</p>
+        <p>#{escaped_message}</p>
       </div>
     </body>
     </html>
     """
+  end
+
+  defp html_escape(text) do
+    text
+    |> String.replace("&", "&amp;")
+    |> String.replace("<", "&lt;")
+    |> String.replace(">", "&gt;")
+    |> String.replace("\"", "&quot;")
+    |> String.replace("'", "&#39;")
   end
 end
