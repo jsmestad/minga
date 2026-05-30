@@ -142,7 +142,10 @@ defmodule Minga.API do
   """
   @spec message(String.t(), editor()) :: :ok
   def message(text, _editor \\ @default_editor) when is_binary(text) do
-    Minga.Log.info(:editor, text)
+    Minga.Events.broadcast(:log_message, %Minga.Events.LogMessageEvent{
+      text: text,
+      level: :info
+    })
   end
 
   @doc """

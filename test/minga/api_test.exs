@@ -2,7 +2,6 @@ defmodule Minga.APITest do
   @moduledoc false
   use ExUnit.Case, async: true
 
-  require Logger
   alias Minga.API
   alias Minga.Buffer.Process, as: BufferProcess
 

@@ -382,7 +382,6 @@ defmodule MingaEditor.StateTest do
       removed_active = EditorState.remove_dead_buffer(state, buf2)
       assert removed_active.workspace.buffers.active == buf1
       assert removed_active.workspace.buffers.list == [buf1]
-
     end
   end
 

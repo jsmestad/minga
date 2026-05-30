@@ -99,6 +99,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
         _msg
       ) do
     state = MessageLog.append_to_store(state, text, level)
+    state = MingaEditor.schedule_render(state, 16)
 
     if level in [:warning, :error] do
       MingaEditor.maybe_schedule_warning_popup(state)
