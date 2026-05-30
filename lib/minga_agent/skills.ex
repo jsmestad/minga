@@ -217,11 +217,11 @@ defmodule MingaAgent.Skills do
     end
   end
 
+  defp extract_manifest_skills(_entry), do: []
+
   defp resolve_skill_path(skill_path, root) do
     if Path.type(skill_path) == :absolute, do: skill_path, else: Path.join(root, skill_path)
   end
-
-  defp extract_manifest_skills(_entry), do: []
 
   @spec extension_root(map()) :: String.t() | nil
   defp extension_root(%{path: path}) when is_binary(path), do: path
