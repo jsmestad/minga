@@ -7,8 +7,7 @@ defmodule MingaEditor.Commands.Eval do
   line and logged to the `*Messages*` buffer.
   """
 
-  alias Minga.Buffer
-  alias Minga.Buffer.Document
+  alias MingaEditor.MessageLog
   alias MingaEditor.State, as: EditorState
   alias Minga.Mode
 
@@ -130,29 +129,5 @@ defmodule MingaEditor.Commands.Eval do
   end
 
   @spec log_to_messages(state(), String.t()) :: state()
-  defp log_to_messages(state, text) do
-    case Minga.Log.MessagesBuffer.pid() do
-      nil ->
-        state
-
-      buf ->
-        time = Calendar.strftime(DateTime.utc_now(), "%H:%M:%S")
-        Buffer.append(buf, "[#{time}] #{text}\n")
-
-        line_count = Buffer.line_count(buf)
-
-        if line_count > 1000 do
-          excess = line_count - 1000
-          content = Buffer.content(buf)
-          lines = String.split(content, "\n")
-          trimmed = lines |> Enum.drop(excess) |> Enum.join("\n")
-
-          :sys.replace_state(buf, fn s ->
-            %{s | document: Document.new(trimmed)}
-          end)
-        end
-
-        state
-    end
-  end
+  defp log_to_messages(state, text), do: MessageLog.log(state, text)
 end
