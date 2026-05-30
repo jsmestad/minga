@@ -1,34 +1,16 @@
-<%= if type == "agent" do %>defmodule <%= module %> do
-  @moduledoc """
-  <%= module %> agent extension for the Minga editor.
-  """
-
-  use Minga.Extension.Agent
-
-  # ── Agent hooks ────────────────────────────────────────────────────
-  hook :session_start, command: "#{__DIR__}/../hooks/hello.sh"
-
-  # ── Extension callbacks ─────────────────────────────────────────────
-
-  @impl true
-  def name, do: :<%= name %>
-
-  @impl true
-  def description, do: "<%= module %> extension"
-
-  @impl true
-  def version, do: "0.1.0"
-
-  @impl true
-  def init(_config), do: {:ok, %{}}
-end
-<% else %>defmodule <%= module %> do
+defmodule <%= module %> do
   @moduledoc """
   <%= module %> extension for the Minga editor.
   """
-
+<%= if type == "both" do %>
+  use Minga.Extension.Agent
   use Minga.Extension.Editor
-
+<% end %><%= if type == "agent" do %>
+  use Minga.Extension.Agent
+<% end %><%= if type == "editor" do %>
+  use Minga.Extension.Editor
+<% end %>
+<%= if type in ["editor", "both"] do %>
   # ── Config options ──────────────────────────────────────────────────
   option :enabled, :boolean, default: true, description: "Enable <%= module %>"
 
@@ -38,6 +20,10 @@ end
 
   # ── Keybindings ─────────────────────────────────────────────────────
   keybind :normal, "SPC m h", :hello, "Hello from <%= module %>"
+<% end %><%= if type in ["agent", "both"] do %>
+  # ── Agent hooks ────────────────────────────────────────────────────
+  hook :session_start, command: "#{__DIR__}/../hooks/hello.sh"
+<% end %>
 
   # ── Extension callbacks ─────────────────────────────────────────────
 
@@ -53,4 +39,3 @@ end
   @impl true
   def init(_config), do: {:ok, %{}}
 end
-<% end %>

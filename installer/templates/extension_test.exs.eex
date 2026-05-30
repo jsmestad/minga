@@ -5,10 +5,10 @@ defmodule <%= module %>Test do
     assert <%= module %>.name() == :<%= name %>
     assert is_binary(<%= module %>.description())
     assert is_binary(<%= module %>.version())
-<%= if type == "agent" do %>    assert is_list(<%= module %>.__hook_schema__())
-<% else %>    assert is_list(<%= module %>.__option_schema__())
+<%= if type in ["editor", "both"] do %>    assert is_list(<%= module %>.__option_schema__())
     assert is_list(<%= module %>.__command_schema__())
     assert is_list(<%= module %>.__keybind_schema__())
+<% end %><%= if type in ["agent", "both"] do %>    assert is_list(<%= module %>.__hook_schema__())
 <% end %>  end
 
   test "init returns {:ok, state}" do

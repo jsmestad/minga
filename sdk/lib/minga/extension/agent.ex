@@ -87,9 +87,10 @@ defmodule Minga.Extension.Agent do
         defoverridable child_spec: 1
       end
 
+      import Minga.Extension.Macros, only: [option: 3]
+
       import Minga.Extension.Agent,
         only: [
-          option: 3,
           hook: 2,
           skill: 1,
           mcp_server: 2,
@@ -98,36 +99,7 @@ defmodule Minga.Extension.Agent do
     end
   end
 
-  @doc """
-  Declares a typed config option for this extension.
-
-  Accumulated at compile time and exposed via `__option_schema__/0`.
-
-  ## Options
-
-  - `:default` (required) -- the default value when the user doesn't set it
-  - `:description` (required) -- a short human-readable description shown by `SPC h v`
-
-  ## Examples
-
-      option :auto_fix, :boolean,
-        default: false,
-        description: "Automatically apply lint fixes"
-
-      option :severity, {:enum, [:error, :warning, :info]},
-        default: :warning,
-        description: "Minimum severity to report"
-  """
-  defmacro option(name, type, opts) do
-    quote do
-      @__extension_options__ {
-        unquote(name),
-        unquote(type),
-        Keyword.fetch!(unquote(opts), :default),
-        Keyword.fetch!(unquote(opts), :description)
-      }
-    end
-  end
+  # option/3 is imported from Minga.Extension.Macros (shared with Editor).
 
   @doc """
   Declares a lifecycle hook this extension provides.

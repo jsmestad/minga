@@ -4,6 +4,7 @@ defmodule Mix.Tasks.Minga.New do
 
       mix minga.new my_extension
       mix minga.new my_extension --type agent
+      mix minga.new my_extension --type both
 
   This generates a complete, compilable extension project with the
   right directory structure, SDK dependency, and appropriate `use Minga.Extension.*`
@@ -12,7 +13,7 @@ defmodule Mix.Tasks.Minga.New do
   ## Options
 
     * `--path` - the directory to create the project in (defaults to the extension name)
-    * `--type` - extension type: "agent" or "editor" (default)
+    * `--type` - extension type: "agent", "editor" (default), or "both"
   """
 
   use Mix.Task
@@ -46,8 +47,8 @@ defmodule Mix.Tasks.Minga.New do
 
     type = Keyword.get(opts, :type, "editor")
 
-    unless type in ["agent", "editor"] do
-      Mix.raise("Extension type must be one of: agent, editor. Got: #{type}")
+    unless type in ["agent", "editor", "both"] do
+      Mix.raise("Extension type must be one of: agent, editor, both. Got: #{type}")
     end
 
     module = Macro.camelize(name)
@@ -82,7 +83,7 @@ defmodule Mix.Tasks.Minga.New do
     end
 
     # Create hooks directory and example script for agent types
-    if type == "agent" do
+    if type in ["agent", "both"] do
       hooks_path = Path.join(path, "hooks")
       File.mkdir_p!(hooks_path)
 
