@@ -55,38 +55,16 @@ defmodule MingaEditor.Agent.BufferSync do
   @spec sync(pid(), [term()], keyword()) :: [{non_neg_integer(), line_type()}]
   def sync(pid, messages, opts \\ []) do
     display_start = Keyword.get(opts, :display_start_index, 0)
+    pinned_ids = Keyword.get(opts, :pinned_ids, MapSet.new())
+    message_id_pairs = Keyword.get(opts, :message_ids, [])
+
     hidden_count = min(display_start, length(messages))
     visible_messages = Enum.drop(messages, hidden_count)
 
-    msg_types =
-      Enum.map(visible_messages, fn
-        {type, _} -> type
-        {type, _, _} -> type
-        other -> other
-      end)
+    pinned_messages = extract_pinned_messages(messages, message_id_pairs, pinned_ids, hidden_count)
 
-    Minga.Log.debug(:agent, "[buffer_sync] sync #{length(visible_messages)} msgs: #{inspect(msg_types)}")
-
-    {text, line_offsets} =
-      if hidden_count > 0 do
-        separator = "── #{hidden_count} earlier messages hidden ──"
-        {sep_text, sep_offsets} = messages_to_markdown_with_offsets([{:system, separator, :info}])
-        {msg_text, msg_offsets} = messages_to_markdown_with_offsets(visible_messages)
-
-        if msg_text == "" do
-          {sep_text, sep_offsets}
-        else
-          combined_text = sep_text <> "\n\n" <> msg_text
-
-          {_sep_idx, sep_start, sep_count} = hd(sep_offsets)
-          sep_end = sep_start + sep_count
-          shifted = Enum.map(msg_offsets, fn {idx, start, count} -> {idx + 1, start + sep_end + 1, count} end)
-
-          {combined_text, sep_offsets ++ shifted}
-        end
-      else
-        messages_to_markdown_with_offsets(visible_messages)
-      end
+    {text, line_offsets, display_messages} =
+      build_display_text(visible_messages, pinned_messages, hidden_count)
     text_lines = String.split(text, "\n")
 
     Minga.Log.debug(
@@ -98,11 +76,6 @@ defmodule MingaEditor.Agent.BufferSync do
     # This prevents a render frame from seeing new content with zero decorations.
     agent_theme = Keyword.get(opts, :agent_theme, default_agent_theme())
     last_line = max(length(text_lines) - 1, 0)
-
-    display_messages =
-      if hidden_count > 0,
-        do: [{:system, "── #{hidden_count} earlier messages hidden ──", :info}] ++ visible_messages,
-        else: visible_messages
 
     try do
       Buffer.replace_content_with_decorations(
@@ -307,6 +280,43 @@ defmodule MingaEditor.Agent.BufferSync do
       {_idx, start, _count} -> start
       nil -> nil
     end
+  end
+
+  @spec extract_pinned_messages([term()], [{pos_integer(), term()}], MapSet.t(), non_neg_integer()) ::
+          [term()]
+  defp extract_pinned_messages(_messages, _pairs, pinned_ids, _hidden_count)
+       when map_size(pinned_ids) == 0,
+       do: []
+
+  defp extract_pinned_messages(_messages, pairs, pinned_ids, hidden_count) do
+    pairs
+    |> Enum.with_index()
+    |> Enum.filter(fn {{id, _msg}, idx} ->
+      MapSet.member?(pinned_ids, id) and idx < hidden_count
+    end)
+    |> Enum.map(fn {{_id, msg}, _idx} -> msg end)
+  end
+
+  @spec build_display_text([term()], [term()], non_neg_integer()) ::
+          {String.t(), [ChatDecorations.line_offset()], [term()]}
+  defp build_display_text(visible_messages, pinned_messages, hidden_count) do
+    prefix_messages =
+      if pinned_messages != [] do
+        pinned_messages ++ [{:system, "── pinned ──", :info}]
+      else
+        []
+      end
+
+    separator_messages =
+      if hidden_count > 0 do
+        [{:system, "── #{hidden_count} earlier messages hidden ──", :info}]
+      else
+        []
+      end
+
+    display_messages = prefix_messages ++ separator_messages ++ visible_messages
+    {text, offsets} = messages_to_markdown_with_offsets(display_messages)
+    {text, offsets, display_messages}
   end
 
   defp default_agent_theme do

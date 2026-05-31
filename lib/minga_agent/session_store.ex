@@ -167,6 +167,8 @@ defmodule MingaAgent.SessionStore do
       "model_name" => data.model_name,
       "provider_name" => Map.get(data, :provider_name, "unknown"),
       "messages" => Enum.map(messages, &serialize_message/1),
+      "message_ids" => Map.get(data, :message_ids, []),
+      "pinned_ids" => serialize_pinned_ids(Map.get(data, :pinned_ids)),
       "usage" => serialize_usage(data.usage),
       "branches" => Enum.map(Map.get(data, :branches, []), &serialize_branch/1),
       "memory" => Map.get(data, :memory)
@@ -207,6 +209,11 @@ defmodule MingaAgent.SessionStore do
   defp serialize_message({:usage, %MingaAgent.TurnUsage{} = usage}),
     do: %{"type" => "usage", "data" => serialize_usage(usage)}
 
+  @spec serialize_pinned_ids(MapSet.t() | list() | nil) :: [pos_integer()]
+  defp serialize_pinned_ids(%MapSet{} = set), do: set |> MapSet.to_list() |> Enum.sort()
+  defp serialize_pinned_ids(list) when is_list(list), do: Enum.sort(list)
+  defp serialize_pinned_ids(_), do: []
+
   @spec serialize_usage(MingaAgent.TurnUsage.t()) :: map()
   defp serialize_usage(%MingaAgent.TurnUsage{} = usage) do
     %{
@@ -223,6 +230,17 @@ defmodule MingaAgent.SessionStore do
     messages = Enum.map(data["messages"] || [], &deserialize_message/1)
     timestamp = data["timestamp"] || ""
 
+    message_ids =
+      case data["message_ids"] do
+        ids when is_list(ids) and ids != [] -> ids
+        _ -> Enum.to_list(1..max(length(messages), 1))
+      end
+
+    pinned_ids =
+      data
+      |> Map.get("pinned_ids", [])
+      |> MapSet.new()
+
     session = %{
       id: data["id"],
       timestamp: timestamp,
@@ -231,6 +249,8 @@ defmodule MingaAgent.SessionStore do
       model_name: data["model_name"] || "unknown",
       provider_name: data["provider_name"] || "unknown",
       messages: messages,
+      message_ids: message_ids,
+      pinned_ids: pinned_ids,
       usage: deserialize_turn_usage(data["usage"] || %{}),
       branches: Enum.map(data["branches"] || [], &deserialize_branch/1)
     }

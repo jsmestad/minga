@@ -131,6 +131,8 @@ defmodule MingaEditor.AgentLifecycle do
         do: Keyword.put(sync_opts, :display_start_index, panel.display_start_index),
         else: sync_opts
 
+    sync_opts = maybe_add_pin_opts(sync_opts, AgentAccess.session(state))
+
     line_index = AgentBufferSync.sync(buffer, messages, sync_opts)
 
     # Compute styled runs for GUI rendering. Use tree-sitter highlights
@@ -347,4 +349,22 @@ defmodule MingaEditor.AgentLifecycle do
       {msg_idx, byte_offset}
     end)
   end
+
+  @spec maybe_add_pin_opts(keyword(), pid() | nil) :: keyword()
+  defp maybe_add_pin_opts(opts, session) when is_pid(session) do
+    pinned = AgentSession.pinned_ids(session)
+    ids = AgentSession.messages_with_ids(session)
+
+    if MapSet.size(pinned) > 0 do
+      opts
+      |> Keyword.put(:pinned_ids, pinned)
+      |> Keyword.put(:message_ids, ids)
+    else
+      opts
+    end
+  catch
+    :exit, _ -> opts
+  end
+
+  defp maybe_add_pin_opts(opts, _session), do: opts
 end

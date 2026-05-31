@@ -105,6 +105,55 @@ defmodule MingaAgent.Markdown do
   end
 
   @doc """
+  Infers the target file path for a code block from surrounding markdown text.
+
+  Scans the text preceding the nth code block (0-indexed) for backtick-wrapped
+  file paths. Returns the last match (closest to the code block), or nil.
+
+  ## Examples
+
+      iex> MingaAgent.Markdown.infer_target_path("Update `lib/foo.ex`:\\n```elixir\\ncode\\n```", 0)
+      "lib/foo.ex"
+
+      iex> MingaAgent.Markdown.infer_target_path("No file mentioned\\n```elixir\\ncode\\n```", 0)
+      nil
+  """
+  @spec infer_target_path(String.t(), non_neg_integer()) :: String.t() | nil
+  def infer_target_path(text, code_block_index) when is_binary(text) do
+    lines = String.split(text, "\n")
+    text_before = text_before_nth_code_block(lines, code_block_index)
+    extract_last_file_path(text_before)
+  end
+
+  @spec text_before_nth_code_block([String.t()], non_neg_integer()) :: String.t()
+  defp text_before_nth_code_block(lines, target_index) do
+    {before_lines, _} =
+      Enum.reduce_while(lines, {[], 0}, fn line, {acc, fence_count} ->
+        if String.starts_with?(String.trim_leading(line), "```") do
+          if fence_count == target_index * 2 do
+            {:halt, {acc, fence_count}}
+          else
+            {:cont, {[line | acc], fence_count + 1}}
+          end
+        else
+          {:cont, {[line | acc], fence_count}}
+        end
+      end)
+
+    before_lines |> Enum.reverse() |> Enum.join("\n")
+  end
+
+  @file_path_pattern ~r/`([a-zA-Z0-9_\-\.\/]+\.[a-zA-Z0-9]+)`/
+
+  @spec extract_last_file_path(String.t()) :: String.t() | nil
+  defp extract_last_file_path(text) do
+    case Regex.scan(@file_path_pattern, text) do
+      [] -> nil
+      matches -> matches |> List.last() |> Enum.at(1)
+    end
+  end
+
+  @doc """
   Parses markdown text into styled line segments.
 
   Returns a list of `{segments, line_type}` tuples, one per output line.

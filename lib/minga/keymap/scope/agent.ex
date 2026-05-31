@@ -91,6 +91,8 @@ defmodule Minga.Keymap.Scope.Agent do
     # g-prefix: domain + vim standard commands
     |> Bindings.bind(~k(g g), :move_to_document_start, "Go to top")
     |> Bindings.bind(~k(g f), :agent_open_code_block, "Open code block in editor")
+    |> Bindings.bind(~k(g a), :agent_apply_code_block, "Apply code block to file")
+    |> Bindings.bind(~k(g p), :agent_pin_message, "Pin/unpin message")
     |> Bindings.bind(~k(g d), :goto_definition, "Go to definition")
     # z-prefix: domain fold/collapse commands
     |> Bindings.bind(~k(z a), :agent_toggle_collapse, "Toggle collapse at cursor")

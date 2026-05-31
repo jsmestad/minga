@@ -177,6 +177,18 @@ defmodule MingaAgent.Session do
     GenServer.call(session, :messages_with_ids)
   end
 
+  @doc "Returns the set of pinned message IDs."
+  @spec pinned_ids(GenServer.server()) :: MapSet.t(pos_integer())
+  def pinned_ids(session) do
+    GenServer.call(session, :pinned_ids)
+  end
+
+  @doc "Toggles the pinned state of a message by its stable ID."
+  @spec toggle_pin(GenServer.server(), pos_integer()) :: :ok
+  def toggle_pin(session, message_id) when is_integer(message_id) do
+    GenServer.call(session, {:toggle_pin, message_id})
+  end
+
   @doc "Returns accumulated token usage."
   @spec usage(GenServer.server()) :: Event.token_usage()
   def usage(session) do
@@ -603,10 +615,7 @@ defmodule MingaAgent.Session do
       follow_up_queue: [],
       touched_files: %{},
       boundaries: %{},
-      # Whether any usable provider credential exists. Computed once when the
-      # provider starts (the Ollama probe can block briefly) and refreshed when
-      # the user runs /auth or /login. Gates send_prompt and drives the UI's
-      # "not configured" state so we never advertise a model we can't call.
+      pinned_ids: MapSet.new(),
       credentials_configured: true
     }
 
@@ -892,6 +901,21 @@ defmodule MingaAgent.Session do
 
   def handle_call(:usage, _from, state) do
     {:reply, state.total_usage, state}
+  end
+
+  def handle_call(:pinned_ids, _from, state) do
+    {:reply, state.pinned_ids, state}
+  end
+
+  def handle_call({:toggle_pin, message_id}, _from, state) do
+    pinned =
+      if MapSet.member?(state.pinned_ids, message_id),
+        do: MapSet.delete(state.pinned_ids, message_id),
+        else: MapSet.put(state.pinned_ids, message_id)
+
+    state = %{state | pinned_ids: pinned}
+    broadcast(state, :messages_changed)
+    {:reply, :ok, state}
   end
 
   def handle_call(:get_provider, _from, state) do
@@ -2050,6 +2074,8 @@ defmodule MingaAgent.Session do
       model_name: state.model_name,
       provider_name: state.provider_name,
       messages: state.messages,
+      message_ids: state.message_ids,
+      pinned_ids: state.pinned_ids,
       usage: state.total_usage,
       branches: state.branches,
       memory: Memory.read(state.session_store_dir)
@@ -2080,6 +2106,7 @@ defmodule MingaAgent.Session do
             created_at: loaded_at,
             last_message_at: loaded_at,
             branches: Map.get(data, :branches, []),
+            pinned_ids: Map.get(data, :pinned_ids, MapSet.new()),
             steering_queue: [],
             follow_up_queue: [],
             touched_files: %{},
@@ -2101,7 +2128,15 @@ defmodule MingaAgent.Session do
   defp finish_loaded_session_restore(state, data) do
     case restore_memory_snapshot_if_recorded(state, data) do
       :ok ->
-        state = reset_messages(state, data.messages)
+        state =
+          case Map.get(data, :message_ids) do
+            ids when is_list(ids) and ids != [] ->
+              count = length(data.messages)
+              %{state | messages: data.messages, message_ids: Enum.take(ids, count), next_message_id: Enum.max(ids, fn -> 0 end) + 1}
+
+            _ ->
+              reset_messages(state, data.messages)
+          end
 
         broadcast(state, {:status_changed, :idle})
         broadcast(state, :messages_changed)

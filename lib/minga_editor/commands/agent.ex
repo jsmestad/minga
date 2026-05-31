@@ -1079,6 +1079,129 @@ defmodule MingaEditor.Commands.Agent do
     end
   end
 
+  # ── Apply code block ───────────────────────────────────────────────────────
+
+  @doc "Applies the code block at the cursor to the inferred target file with diff preview."
+  @spec scope_apply_code_block(state()) :: state()
+  def scope_apply_code_block(state) do
+    case scroll_context(state) do
+      nil ->
+        state
+
+      {_idx, msg, :code} ->
+        text = Message.text(msg)
+        blocks = Markdown.extract_code_blocks(text)
+        block_index = code_block_index_for_scroll(state, blocks)
+        block = Enum.at(blocks, block_index)
+
+        if block do
+          apply_code_block(state, text, block, block_index)
+        else
+          state
+        end
+
+      {_idx, _msg, _other_type} ->
+        state
+    end
+  end
+
+  @spec apply_code_block(state(), String.t(), Markdown.code_block(), non_neg_integer()) :: state()
+  defp apply_code_block(state, message_text, block, block_index) do
+    case Markdown.infer_target_path(message_text, block_index) do
+      nil ->
+        EditorState.set_status(state, "No file path found near code block. Copy with `yy` instead.")
+
+      path ->
+        full_path = resolve_apply_path(path)
+        apply_code_block_to_path(state, full_path, block.content, path)
+    end
+  end
+
+  @spec resolve_apply_path(String.t()) :: String.t()
+  defp resolve_apply_path(path) do
+    if Path.type(path) == :absolute do
+      path
+    else
+      Path.join(project_root(), path)
+    end
+  end
+
+  @spec apply_code_block_to_path(state(), String.t(), String.t(), String.t()) :: state()
+  defp apply_code_block_to_path(state, full_path, content, display_path) do
+    case File.read(full_path) do
+      {:ok, before_content} ->
+        review = DiffReview.new(full_path, before_content, content)
+
+        if review do
+          state = update_preview(state, &Preview.set_diff(&1, review))
+          state = update_agent_ui(state, &UIState.set_focus(&1, :file_viewer))
+
+          if AgentAccess.session(state) do
+            Session.add_system_message(
+              AgentAccess.session(state),
+              "Applying code block to #{display_path}"
+            )
+          end
+
+          EditorState.set_status(state, "Diff preview for #{display_path}. Accept/reject hunks.")
+        else
+          EditorState.set_status(state, "No changes detected for #{display_path}")
+        end
+
+      {:error, :enoent} ->
+        case File.mkdir_p(Path.dirname(full_path)) do
+          :ok ->
+            File.write!(full_path, content)
+
+            if AgentAccess.session(state) do
+              Session.add_system_message(
+                AgentAccess.session(state),
+                "Created #{display_path}"
+              )
+            end
+
+            EditorState.set_status(state, "Created #{display_path}")
+
+          {:error, reason} ->
+            EditorState.set_status(state, "Failed to create #{display_path}: #{inspect(reason)}")
+        end
+
+      {:error, reason} ->
+        EditorState.set_status(state, "Cannot read #{display_path}: #{inspect(reason)}")
+    end
+  end
+
+  # ── Pin message ────────────────────────────────────────────────────────────
+
+  @doc "Toggles the pinned state of the message at the cursor."
+  @spec scope_pin_message(state()) :: state()
+  def scope_pin_message(state) do
+    session = AgentAccess.session(state)
+
+    if is_nil(session) do
+      state
+    else
+      case scroll_context(state) do
+        nil ->
+          state
+
+        {msg_idx, _msg, _line_type} ->
+          pairs = Session.messages_with_ids(session)
+
+          case Enum.at(pairs, msg_idx) do
+            {id, _msg} ->
+              Session.toggle_pin(session, id)
+              state
+
+            nil ->
+              state
+          end
+      end
+    end
+  catch
+    :exit, _ -> state
+  end
+
   # ── Input focus ────────────────────────────────────────────────────────────
 
   @doc "Focuses the input field and transitions to insert mode."
@@ -1649,6 +1772,8 @@ defmodule MingaEditor.Commands.Agent do
     {:agent_copy_code_block, "Copy code block", :scope_copy_code_block},
     {:agent_copy_message, "Copy message", :scope_copy_message},
     {:agent_open_code_block, "Open code block", :scope_open_code_block},
+    {:agent_apply_code_block, "Apply code block to file", :scope_apply_code_block},
+    {:agent_pin_message, "Pin/unpin message at cursor", :scope_pin_message},
     {:agent_focus_input, "Focus agent input", :scope_focus_input},
     {:agent_focus_or_submit, "Focus input or submit", :scope_focus_or_submit},
     {:agent_unfocus_input, "Unfocus agent input", :scope_unfocus_input},
