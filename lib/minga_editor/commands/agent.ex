@@ -897,15 +897,7 @@ defmodule MingaEditor.Commands.Agent do
     else
       case Session.cycle_model(AgentAccess.session(state)) do
         {:ok, %{"model" => model, "index" => index, "total" => total} = result} ->
-          provider = AgentConfig.extract_provider_prefix(model)
-
-          state =
-            update_agent_ui(state, fn ui ->
-              ui
-              |> UIState.set_model_name(model)
-              |> UIState.set_provider_name(provider)
-            end)
-
+          state = apply_model_and_provider(state, model)
           state = maybe_update_thinking_level(state, Map.get(result, "thinking_level"))
 
           Session.add_system_message(
@@ -925,6 +917,15 @@ defmodule MingaEditor.Commands.Agent do
   end
 
   @spec maybe_update_thinking_level(state(), term()) :: state()
+  @spec apply_model_and_provider(state(), String.t()) :: state()
+  defp apply_model_and_provider(state, model) do
+    provider = AgentConfig.extract_provider_prefix(model)
+
+    state
+    |> update_agent_ui(&UIState.set_model_name(&1, model))
+    |> update_agent_ui(&UIState.set_provider_name(&1, provider))
+  end
+
   defp maybe_update_thinking_level(state, level) when is_binary(level) do
     update_agent_ui(state, &UIState.set_thinking_level(&1, level))
   end
@@ -934,14 +935,7 @@ defmodule MingaEditor.Commands.Agent do
   @doc "Sets the agent model without resetting conversation context."
   @spec set_model(state(), String.t()) :: state()
   def set_model(state, model) do
-    provider = AgentConfig.extract_provider_prefix(model)
-
-    state =
-      update_agent_ui(state, fn ui ->
-        ui
-        |> UIState.set_model_name(model)
-        |> UIState.set_provider_name(provider)
-      end)
+    state = apply_model_and_provider(state, model)
 
     if AgentAccess.session(state) do
       Session.set_model(AgentAccess.session(state), model)
@@ -1133,42 +1127,47 @@ defmodule MingaEditor.Commands.Agent do
   defp apply_code_block_to_path(state, full_path, content, display_path) do
     case File.read(full_path) do
       {:ok, before_content} ->
-        review = DiffReview.new(full_path, before_content, content)
-
-        if review do
-          state = update_preview(state, &Preview.set_diff(&1, review))
-          state = update_agent_ui(state, &UIState.set_focus(&1, :file_viewer))
-
-          if AgentAccess.session(state) do
-            Session.add_system_message(
-              AgentAccess.session(state),
-              "Applying code block to #{display_path}"
-            )
-          end
-
-          EditorState.set_status(state, "Diff preview for #{display_path}. Accept/reject hunks.")
-        else
-          EditorState.set_status(state, "No changes detected for #{display_path}")
-        end
+        apply_code_block_diff(state, full_path, before_content, content, display_path)
 
       {:error, :enoent} ->
-        with :ok <- File.mkdir_p(Path.dirname(full_path)),
-             :ok <- File.write(full_path, content) do
-          if AgentAccess.session(state) do
-            Session.add_system_message(
-              AgentAccess.session(state),
-              "Created #{display_path}"
-            )
-          end
-
-          EditorState.set_status(state, "Created #{display_path}")
-        else
-          {:error, reason} ->
-            EditorState.set_status(state, "Failed to create #{display_path}: #{inspect(reason)}")
-        end
+        create_file_from_code_block(state, full_path, content, display_path)
 
       {:error, reason} ->
         EditorState.set_status(state, "Cannot read #{display_path}: #{inspect(reason)}")
+    end
+  end
+
+  @spec apply_code_block_diff(state(), String.t(), String.t(), String.t(), String.t()) :: state()
+  defp apply_code_block_diff(state, path, before_content, content, display_path) do
+    case DiffReview.new(path, before_content, content) do
+      nil ->
+        EditorState.set_status(state, "No changes detected for #{display_path}")
+
+      review ->
+        state = update_preview(state, &Preview.set_diff(&1, review))
+        state = update_agent_ui(state, &UIState.set_focus(&1, :file_viewer))
+        log_system_message(state, "Applying code block to #{display_path}")
+        EditorState.set_status(state, "Diff preview for #{display_path}. Accept/reject hunks.")
+    end
+  end
+
+  @spec create_file_from_code_block(state(), String.t(), String.t(), String.t()) :: state()
+  defp create_file_from_code_block(state, full_path, content, display_path) do
+    with :ok <- File.mkdir_p(Path.dirname(full_path)),
+         :ok <- File.write(full_path, content) do
+      log_system_message(state, "Created #{display_path}")
+      EditorState.set_status(state, "Created #{display_path}")
+    else
+      {:error, reason} ->
+        EditorState.set_status(state, "Failed to create #{display_path}: #{inspect(reason)}")
+    end
+  end
+
+  @spec log_system_message(state(), String.t()) :: :ok
+  defp log_system_message(state, text) do
+    case AgentAccess.session(state) do
+      pid when is_pid(pid) -> Session.add_system_message(pid, text)
+      _ -> :ok
     end
   end
 
@@ -1177,28 +1176,14 @@ defmodule MingaEditor.Commands.Agent do
   @doc "Toggles the pinned state of the message at the cursor."
   @spec scope_pin_message(state()) :: state()
   def scope_pin_message(state) do
-    session = AgentAccess.session(state)
-
-    if is_nil(session) do
-      state
-    else
-      case scroll_context(state) do
-        nil ->
-          state
-
-        {msg_idx, _msg, _line_type} ->
-          pairs = Session.messages_with_ids(session)
-
-          case Enum.at(pairs, msg_idx) do
-            {id, _msg} ->
-              Session.toggle_pin(session, id)
-              state
-
-            nil ->
-              state
-          end
-      end
+    with session when is_pid(session) <- AgentAccess.session(state),
+         {msg_idx, _msg, _line_type} <- scroll_context(state),
+         pairs = Session.messages_with_ids(session),
+         {id, _msg} <- Enum.at(pairs, msg_idx) do
+      Session.toggle_pin(session, id)
     end
+
+    state
   catch
     :exit, _ -> state
   end

@@ -37,6 +37,8 @@ defmodule MingaAgent.SessionStore do
           optional(:title) => String.t(),
           optional(:provider_name) => String.t(),
           optional(:branches) => [MingaAgent.Branch.t()],
+          optional(:message_ids) => [pos_integer()],
+          optional(:pinned_ids) => MapSet.t(pos_integer()),
           optional(:memory) => String.t() | nil
         }
 
@@ -230,17 +232,6 @@ defmodule MingaAgent.SessionStore do
     messages = Enum.map(data["messages"] || [], &deserialize_message/1)
     timestamp = data["timestamp"] || ""
 
-    message_ids =
-      case data["message_ids"] do
-        ids when is_list(ids) and ids != [] -> ids
-        _ -> Enum.to_list(1..max(length(messages), 1))
-      end
-
-    pinned_ids =
-      data
-      |> Map.get("pinned_ids", [])
-      |> MapSet.new()
-
     session = %{
       id: data["id"],
       timestamp: timestamp,
@@ -249,18 +240,22 @@ defmodule MingaAgent.SessionStore do
       model_name: data["model_name"] || "unknown",
       provider_name: data["provider_name"] || "unknown",
       messages: messages,
-      message_ids: message_ids,
-      pinned_ids: pinned_ids,
+      message_ids: deserialize_message_ids(data["message_ids"], length(messages)),
+      pinned_ids: deserialize_pinned_ids(data["pinned_ids"]),
       usage: deserialize_turn_usage(data["usage"] || %{}),
       branches: Enum.map(data["branches"] || [], &deserialize_branch/1)
     }
 
-    if Map.has_key?(data, "memory") do
-      Map.put(session, :memory, data["memory"])
-    else
-      session
-    end
+    if Map.has_key?(data, "memory"), do: Map.put(session, :memory, data["memory"]), else: session
   end
+
+  @spec deserialize_message_ids(term(), non_neg_integer()) :: [pos_integer()]
+  defp deserialize_message_ids(ids, _msg_count) when is_list(ids) and ids != [], do: ids
+  defp deserialize_message_ids(_, msg_count), do: Enum.to_list(1..max(msg_count, 1))
+
+  @spec deserialize_pinned_ids(term()) :: MapSet.t()
+  defp deserialize_pinned_ids(ids) when is_list(ids), do: MapSet.new(ids)
+  defp deserialize_pinned_ids(_), do: MapSet.new()
 
   @spec deserialize_message(map()) :: MingaAgent.Message.t()
   defp deserialize_message(%{"type" => "user", "text" => text, "attachments" => attachments})

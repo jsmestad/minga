@@ -127,21 +127,28 @@ defmodule MingaAgent.Markdown do
 
   @spec text_before_nth_code_block([String.t()], non_neg_integer()) :: String.t()
   defp text_before_nth_code_block(lines, target_index) do
+    target_fence = target_index * 2
+
     {before_lines, _} =
       Enum.reduce_while(lines, {[], 0}, fn line, {acc, fence_count} ->
-        if String.starts_with?(String.trim_leading(line), "```") do
-          if fence_count == target_index * 2 do
-            {:halt, {acc, fence_count}}
-          else
-            {:cont, {[line | acc], fence_count + 1}}
-          end
-        else
-          {:cont, {[line | acc], fence_count}}
-        end
+        is_fence = String.starts_with?(String.trim_leading(line), "```")
+        accumulate_before_fence(is_fence, line, acc, fence_count, target_fence)
       end)
 
     before_lines |> Enum.reverse() |> Enum.join("\n")
   end
+
+  @spec accumulate_before_fence(boolean(), String.t(), [String.t()], non_neg_integer(), non_neg_integer()) ::
+          {:cont | :halt, {[String.t()], non_neg_integer()}}
+  defp accumulate_before_fence(true, _line, acc, fence_count, target_fence)
+       when fence_count == target_fence,
+       do: {:halt, {acc, fence_count}}
+
+  defp accumulate_before_fence(true, line, acc, fence_count, _target_fence),
+    do: {:cont, {[line | acc], fence_count + 1}}
+
+  defp accumulate_before_fence(false, line, acc, fence_count, _target_fence),
+    do: {:cont, {[line | acc], fence_count}}
 
   @file_path_pattern ~r/`([a-zA-Z0-9_\-\.\/]+\.[a-zA-Z0-9]+)`/
 

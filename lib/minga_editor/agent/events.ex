@@ -738,24 +738,13 @@ defmodule MingaEditor.Agent.Events do
 
   @spec maybe_rename_workspace_from_assistant(EditorState.t()) :: EditorState.t()
   defp maybe_rename_workspace_from_assistant(state) do
-    session = AgentAccess.session(state)
-    tb = EditorState.tab_bar(state)
-
-    with pid when is_pid(pid) <- session,
-         %Workspace{custom_name: nil} = ws <- TabBar.find_workspace_by_session(tb, pid) do
-      messages = safe_messages(pid)
-
-      case first_assistant_opening(messages) do
-        nil ->
-          state
-
-        text ->
-          candidate = text |> String.slice(0, 30) |> String.trim()
-
-          if candidate != "" and candidate != ws.label,
-            do: maybe_apply_auto_name(state, ws, text),
-            else: state
-      end
+    with pid when is_pid(pid) <- AgentAccess.session(state),
+         %Workspace{custom_name: nil} = ws <-
+           TabBar.find_workspace_by_session(EditorState.tab_bar(state), pid),
+         text when is_binary(text) <- first_assistant_opening(safe_messages(pid)),
+         candidate = String.slice(text, 0, 30) |> String.trim(),
+         true <- candidate != "" and candidate != ws.label do
+      maybe_apply_auto_name(state, ws, text)
     else
       _ -> state
     end
@@ -803,43 +792,55 @@ defmodule MingaEditor.Agent.Events do
       {state, []}
     else
       fill_pct = min(round(estimated_tokens / context_limit * 100), 100)
-      auto_pct = compact_auto_threshold()
-      warn_pct = compact_warn_threshold()
-
-      cond do
-        auto_pct > 0 and fill_pct >= auto_pct and not view.compact_triggered ->
-          session = AgentAccess.session(state)
-
-          if is_pid(session) do
-            state =
-              AgentAccess.update_view(state, fn v ->
-                %{v | compact_triggered: true, compaction_in_progress: true}
-              end)
-
-            {state, [{:compact_session, session}]}
-          else
-            {state, []}
-          end
-
-        warn_pct > 0 and fill_pct >= warn_pct and not view.compact_warned ->
-          state =
-            AgentAccess.update_view(state, fn v -> %{v | compact_warned: true} end)
-
-          state =
-            AgentAccess.update_agent_ui(state, fn ui ->
-              UIState.push_toast(
-                ui,
-                "Context at #{fill_pct}%. Run /compact to free space.",
-                :warning
-              )
-            end)
-
-          {state, []}
-
-        true ->
-          {state, []}
-      end
+      apply_compact_threshold(state, view, fill_pct)
     end
+  end
+
+  @spec apply_compact_threshold(EditorState.t(), term(), non_neg_integer()) ::
+          {EditorState.t(), [effect()]}
+  defp apply_compact_threshold(state, view, fill_pct) do
+    auto_pct = compact_auto_threshold()
+    warn_pct = compact_warn_threshold()
+
+    cond do
+      auto_pct > 0 and fill_pct >= auto_pct and not view.compact_triggered ->
+        trigger_auto_compact(state)
+
+      warn_pct > 0 and fill_pct >= warn_pct and not view.compact_warned ->
+        warn_context_pressure(state, fill_pct)
+
+      true ->
+        {state, []}
+    end
+  end
+
+  @spec trigger_auto_compact(EditorState.t()) :: {EditorState.t(), [effect()]}
+  defp trigger_auto_compact(state) do
+    session = AgentAccess.session(state)
+
+    if is_pid(session) do
+      state =
+        AgentAccess.update_view(state, fn v ->
+          %{v | compact_triggered: true, compaction_in_progress: true}
+        end)
+
+      {state, [{:compact_session, session}]}
+    else
+      {state, []}
+    end
+  end
+
+  @spec warn_context_pressure(EditorState.t(), non_neg_integer()) ::
+          {EditorState.t(), [effect()]}
+  defp warn_context_pressure(state, fill_pct) do
+    state = AgentAccess.update_view(state, fn v -> %{v | compact_warned: true} end)
+
+    state =
+      AgentAccess.update_agent_ui(state, fn ui ->
+        UIState.push_toast(ui, "Context at #{fill_pct}%. Run /compact to free space.", :warning)
+      end)
+
+    {state, []}
   end
 
   @spec compact_warn_threshold() :: non_neg_integer()
