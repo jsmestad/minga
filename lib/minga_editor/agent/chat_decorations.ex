@@ -166,13 +166,22 @@ defmodule MingaEditor.Agent.ChatDecorations do
         priority: 10
       )
 
-    # Spinner as EOL virtual text when streaming (updates on each sync call)
+    last_line = line + line_count - 1
+
+    # Streaming indicator: spinner on last line + subtle highlight
     decs =
       if streaming do
         {_id, decs} =
-          add_vtext(decs, {line, 0},
-            segments: [{spinner_frame(), Face.new(fg: theme.status_thinking, italic: true)}],
+          add_vtext(decs, {last_line, 0},
+            segments: [{" " <> spinner_frame(), Face.new(fg: theme.status_thinking)}],
             placement: :eol
+          )
+
+        {_id, decs} =
+          add_highlight(decs, {last_line, 0}, {last_line + 1, 0},
+            style: Face.new(bg: theme.code_bg),
+            priority: -15,
+            group: :chat_streaming
           )
 
         decs
@@ -182,9 +191,6 @@ defmodule MingaEditor.Agent.ChatDecorations do
 
     decs = add_tool_border_virtual_text(decs, line, line_count, theme.assistant_border)
     decs = add_readable_body_highlight(decs, line, line_count, theme.text_fg)
-
-    # Bottom border
-    last_line = line + line_count - 1
 
     {_id, decs} =
       add_block(decs, last_line,

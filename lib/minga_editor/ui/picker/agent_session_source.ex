@@ -86,7 +86,8 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
         %Item{
           id: {meta.id, {:tab, tab.id}},
           label: format_label(meta, is_active),
-          description: format_desc(meta)
+          description: format_desc(meta),
+          search_text: meta.first_prompt || ""
         }
 
       :error ->
@@ -152,7 +153,8 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
         id: {meta.id, :disk},
         label: meta.title,
         description: disk_description(meta),
-        annotation: format_turn_count(meta.turn_count)
+        annotation: format_turn_count(meta.turn_count),
+        search_text: "#{meta.preview} #{meta.recent_messages}"
       }
     end)
   end
@@ -194,7 +196,15 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
     time = Calendar.strftime(meta.last_message_at, "%H:%M")
     cost = Float.round(meta.cost, 4)
 
-    "#{meta.provider_name}/#{meta.model_name} · #{format_turn_count(meta.turn_count)} · #{meta.message_count} msgs · $#{cost} · #{time}"
+    parts = [
+      "#{meta.provider_name}/#{meta.model_name}",
+      format_turn_count(meta.turn_count),
+      "#{meta.message_count} msgs",
+      "$#{cost}",
+      time
+    ]
+
+    Enum.join(parts, " · ")
   end
 
   @spec format_disk_timestamp(String.t()) :: String.t()

@@ -120,12 +120,16 @@ defmodule MingaEditor.AgentLifecycle do
   defp sync_buffer_content(state, _buffer, []), do: state
 
   defp sync_buffer_content(state, buffer, messages) do
-    # Pass pending_approval to the sync pipeline so ChatDecorations can
-    # render an approval prompt on the matching tool call.
     agent = AgentAccess.agent(state)
+    panel = AgentAccess.panel(state)
 
     sync_opts =
       if agent.pending_approval, do: [pending_approval: agent.pending_approval], else: []
+
+    sync_opts =
+      if panel.display_start_index > 0,
+        do: Keyword.put(sync_opts, :display_start_index, panel.display_start_index),
+        else: sync_opts
 
     line_index = AgentBufferSync.sync(buffer, messages, sync_opts)
 

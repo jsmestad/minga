@@ -54,16 +54,39 @@ defmodule MingaEditor.Agent.BufferSync do
   """
   @spec sync(pid(), [term()], keyword()) :: [{non_neg_integer(), line_type()}]
   def sync(pid, messages, opts \\ []) do
+    display_start = Keyword.get(opts, :display_start_index, 0)
+    hidden_count = min(display_start, length(messages))
+    visible_messages = Enum.drop(messages, hidden_count)
+
     msg_types =
-      Enum.map(messages, fn
+      Enum.map(visible_messages, fn
         {type, _} -> type
         {type, _, _} -> type
         other -> other
       end)
 
-    Minga.Log.debug(:agent, "[buffer_sync] sync #{length(messages)} msgs: #{inspect(msg_types)}")
+    Minga.Log.debug(:agent, "[buffer_sync] sync #{length(visible_messages)} msgs: #{inspect(msg_types)}")
 
-    {text, line_offsets} = messages_to_markdown_with_offsets(messages)
+    {text, line_offsets} =
+      if hidden_count > 0 do
+        separator = "── #{hidden_count} earlier messages hidden ──"
+        {sep_text, sep_offsets} = messages_to_markdown_with_offsets([{:system, separator, :info}])
+        {msg_text, msg_offsets} = messages_to_markdown_with_offsets(visible_messages)
+
+        if msg_text == "" do
+          {sep_text, sep_offsets}
+        else
+          combined_text = sep_text <> "\n\n" <> msg_text
+
+          {_sep_idx, sep_start, sep_count} = hd(sep_offsets)
+          sep_end = sep_start + sep_count
+          shifted = Enum.map(msg_offsets, fn {idx, start, count} -> {idx + 1, start + sep_end + 1, count} end)
+
+          {combined_text, sep_offsets ++ shifted}
+        end
+      else
+        messages_to_markdown_with_offsets(visible_messages)
+      end
     text_lines = String.split(text, "\n")
 
     Minga.Log.debug(
@@ -76,12 +99,17 @@ defmodule MingaEditor.Agent.BufferSync do
     agent_theme = Keyword.get(opts, :agent_theme, default_agent_theme())
     last_line = max(length(text_lines) - 1, 0)
 
+    display_messages =
+      if hidden_count > 0,
+        do: [{:system, "── #{hidden_count} earlier messages hidden ──", :info}] ++ visible_messages,
+        else: visible_messages
+
     try do
       Buffer.replace_content_with_decorations(
         pid,
         text,
         fn decs ->
-          ChatDecorations.build_decorations(decs, messages, line_offsets, agent_theme, opts)
+          ChatDecorations.build_decorations(decs, display_messages, line_offsets, agent_theme, opts)
         end,
         cursor: {last_line, 0}
       )
@@ -97,7 +125,7 @@ defmodule MingaEditor.Agent.BufferSync do
     end
 
     # Return the line index, reusing the already-computed text and offsets
-    build_line_index(messages, text_lines, line_offsets)
+    build_line_index(display_messages, text_lines, line_offsets)
   end
 
   @doc false

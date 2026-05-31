@@ -199,6 +199,9 @@ defmodule MingaEditor.Agent.Events do
     # Associate the file's tab with the agent's workspace
     state = associate_file_with_agent_workspace(state, path)
 
+    # Add a chat-visible system message so the transcript records what was modified
+    state = add_file_changed_message(state, path, tool_name)
+
     baseline = UIState.get_baseline(AgentAccess.agent_ui(state), path)
     existing_review = existing_diff_for_path(state, path)
 
@@ -469,6 +472,35 @@ defmodule MingaEditor.Agent.Events do
     else
       Buffer.accept_saved_content(pid, after_content)
       {state, [{:log_message, "Agent updated #{Path.basename(path)}"}]}
+    end
+  end
+
+  @spec add_file_changed_message(EditorState.t(), String.t(), String.t()) :: EditorState.t()
+  defp add_file_changed_message(state, path, tool_name) do
+    case AgentAccess.session(state) do
+      pid when is_pid(pid) ->
+        short_path = shorten_to_relative(state, path)
+        verb = file_change_verb(tool_name)
+        Session.add_system_message(pid, "#{verb} #{short_path}")
+        state
+
+      _ ->
+        state
+    end
+  catch
+    :exit, _ -> state
+  end
+
+  @spec file_change_verb(String.t()) :: String.t()
+  defp file_change_verb("write"), do: "Wrote"
+  defp file_change_verb("edit"), do: "Edited"
+  defp file_change_verb(_tool_name), do: "Modified"
+
+  @spec shorten_to_relative(EditorState.t(), String.t()) :: String.t()
+  defp shorten_to_relative(state, path) do
+    case project_root(state) do
+      root when is_binary(root) -> Path.relative_to(path, root)
+      _ -> Path.basename(path)
     end
   end
 
