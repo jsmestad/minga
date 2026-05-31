@@ -1149,19 +1149,17 @@ defmodule MingaEditor.Commands.Agent do
         end
 
       {:error, :enoent} ->
-        case File.mkdir_p(Path.dirname(full_path)) do
-          :ok ->
-            File.write!(full_path, content)
+        with :ok <- File.mkdir_p(Path.dirname(full_path)),
+             :ok <- File.write(full_path, content) do
+          if AgentAccess.session(state) do
+            Session.add_system_message(
+              AgentAccess.session(state),
+              "Created #{display_path}"
+            )
+          end
 
-            if AgentAccess.session(state) do
-              Session.add_system_message(
-                AgentAccess.session(state),
-                "Created #{display_path}"
-              )
-            end
-
-            EditorState.set_status(state, "Created #{display_path}")
-
+          EditorState.set_status(state, "Created #{display_path}")
+        else
           {:error, reason} ->
             EditorState.set_status(state, "Failed to create #{display_path}: #{inspect(reason)}")
         end

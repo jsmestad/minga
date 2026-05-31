@@ -746,8 +746,12 @@ defmodule MingaEditor.Agent.Events do
       messages = safe_messages(pid)
 
       case first_assistant_opening(messages) do
-        nil -> state
-        text -> maybe_apply_auto_name(state, ws, text)
+        nil ->
+          state
+
+        text ->
+          candidate = text |> String.slice(0, 30) |> String.trim()
+          if candidate != "" and candidate != ws.label, do: maybe_apply_auto_name(state, ws, text), else: state
       end
     else
       _ -> state

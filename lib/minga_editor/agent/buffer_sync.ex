@@ -61,7 +61,7 @@ defmodule MingaEditor.Agent.BufferSync do
     hidden_count = min(display_start, length(messages))
     visible_messages = Enum.drop(messages, hidden_count)
 
-    pinned_messages = extract_pinned_messages(messages, message_id_pairs, pinned_ids, hidden_count)
+    pinned_messages = extract_pinned_messages(message_id_pairs, pinned_ids, hidden_count)
 
     {text, line_offsets, display_messages} =
       build_display_text(visible_messages, pinned_messages, hidden_count)
@@ -282,13 +282,13 @@ defmodule MingaEditor.Agent.BufferSync do
     end
   end
 
-  @spec extract_pinned_messages([term()], [{pos_integer(), term()}], MapSet.t(), non_neg_integer()) ::
+  @spec extract_pinned_messages([{pos_integer(), term()}], MapSet.t(), non_neg_integer()) ::
           [term()]
-  defp extract_pinned_messages(_messages, _pairs, pinned_ids, _hidden_count)
+  defp extract_pinned_messages(_pairs, pinned_ids, _hidden_count)
        when map_size(pinned_ids) == 0,
        do: []
 
-  defp extract_pinned_messages(_messages, pairs, pinned_ids, hidden_count) do
+  defp extract_pinned_messages(pairs, pinned_ids, hidden_count) do
     pairs
     |> Enum.with_index()
     |> Enum.filter(fn {{id, _msg}, idx} ->
