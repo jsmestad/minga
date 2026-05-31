@@ -12,6 +12,7 @@ defmodule MingaEditor.Commands.AgentSession do
   alias Minga.Buffer
   alias MingaEditor.AgentLifecycle
   alias MingaEditor.Remote.EventReplay
+  alias MingaEditor.Remote.SessionClient
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
@@ -209,18 +210,7 @@ defmodule MingaEditor.Commands.AgentSession do
   end
 
   def send_prompt_pid(session, prompt) when is_pid(session) do
-    with {:ok, session_id} <- remote_session_id_for_pid(node(session), session),
-         {:ok, token} <- remote_session_token(node(session), session_id) do
-      :erpc.call(
-        node(session),
-        MingaAgent.RemoteAPI,
-        :send_prompt,
-        [session_id, token, self(), prompt],
-        10_000
-      )
-    end
-  catch
-    :exit, reason -> {:error, reason}
+    SessionClient.send_prompt(session, prompt)
   end
 
   @doc "Responds to a tool approval on a local or remote session, enforcing the remote broker boundary."
@@ -237,18 +227,7 @@ defmodule MingaEditor.Commands.AgentSession do
   end
 
   def respond_to_approval_pid(session, approval_id, decision) when is_pid(session) do
-    with {:ok, session_id} <- remote_session_id_for_pid(node(session), session),
-         {:ok, token} <- remote_session_token(node(session), session_id) do
-      :erpc.call(
-        node(session),
-        MingaAgent.RemoteAPI,
-        :approve,
-        [session_id, token, self(), approval_id, decision],
-        10_000
-      )
-    end
-  catch
-    :exit, reason -> {:error, reason}
+    SessionClient.approve(session, approval_id, decision)
   end
 
   @doc "Stops a session pid, routing remote pids to their owning node."
@@ -260,12 +239,7 @@ defmodule MingaEditor.Commands.AgentSession do
   end
 
   def stop_session_pid(session) when is_pid(session) do
-    with {:ok, session_id} <- remote_session_id_for_pid(node(session), session),
-         {:ok, token} <- remote_session_token(node(session), session_id) do
-      :erpc.call(node(session), MingaAgent.RemoteAPI, :stop_session, [session_id, token], 5_000)
-    end
-  catch
-    :exit, reason -> {:error, reason}
+    SessionClient.stop_session_pid(session)
   end
 
   @doc "Detaches from the current remote agent session without stopping it."
@@ -409,24 +383,21 @@ defmodule MingaEditor.Commands.AgentSession do
   @spec remote_start_session(node(), keyword()) ::
           {:ok, String.t(), pid(), String.t()} | {:error, term()}
   defp remote_start_session(remote_node, opts) do
-    case :erpc.call(remote_node, MingaAgent.RemoteAPI, :start_session, [opts], 10_000) do
+    case SessionClient.start_session(remote_node, opts) do
       {:ok, %{session_id: session_id, pid: pid, token: token}} -> {:ok, session_id, pid, token}
       {:error, _reason} = error -> error
-      other -> {:error, other}
     end
-  catch
-    :exit, reason -> {:error, {:remote_unavailable, reason}}
   end
 
   @spec remote_attach(pid(), String.t(), String.t(), non_neg_integer()) ::
           {:ok, [term()], map(), [term()], non_neg_integer()} | {:error, term()}
   defp remote_attach(remote_pid, session_id, token, last_seen_event_id) do
-    case :erpc.call(
+    case SessionClient.attach_driver(
            node(remote_pid),
-           MingaAgent.RemoteAPI,
-           :attach,
-           [session_id, token, self(), [role: :driver, last_seen_event_id: last_seen_event_id]],
-           10_000
+           session_id,
+           token,
+           last_seen_event_id,
+           self()
          ) do
       {:ok,
        %{
@@ -438,17 +409,9 @@ defmodule MingaEditor.Commands.AgentSession do
        }} ->
         {:ok, messages, snapshot, events, latest_event_id}
 
-      {:ok, %{role: :viewer}} ->
-        {:error, :not_driver}
-
       {:error, _reason} = error ->
         error
-
-      other ->
-        {:error, other}
     end
-  catch
-    :exit, reason -> {:error, reason}
   end
 
   @spec create_remote_agent_tab(state(), String.t()) :: {state(), Tab.id(), pid()}
@@ -618,11 +581,7 @@ defmodule MingaEditor.Commands.AgentSession do
 
   @spec detach_remote_session_by_id(node(), String.t()) :: :ok | {:error, term()}
   defp detach_remote_session_by_id(remote_node, session_id) do
-    with {:ok, token} <- remote_session_token(remote_node, session_id) do
-      :erpc.call(remote_node, MingaAgent.RemoteAPI, :detach, [session_id, token, self()], 5_000)
-    end
-  catch
-    :exit, reason -> {:error, reason}
+    SessionClient.detach(remote_node, session_id)
   end
 
   @spec mark_remote_session_disconnected(state(), String.t()) :: state()
@@ -670,45 +629,9 @@ defmodule MingaEditor.Commands.AgentSession do
 
   defp stop_remote_session(state, _session), do: state
 
-  @spec remote_session_id_for_pid(node(), pid()) :: {:ok, String.t()} | {:error, term()}
-  defp remote_session_id_for_pid(remote_node, remote_pid) do
-    case :erpc.call(remote_node, MingaAgent.RemoteAPI, :list_sessions, [], 5_000) do
-      sessions when is_list(sessions) ->
-        Enum.find_value(sessions, {:error, :not_found}, fn
-          %{session_id: session_id, pid: ^remote_pid} -> {:ok, session_id}
-          _session -> nil
-        end)
-
-      other ->
-        {:error, other}
-    end
-  catch
-    :exit, reason -> {:error, reason}
-  end
-
   @spec stop_remote_session_by_id(node(), String.t()) :: :ok | {:error, term()}
   defp stop_remote_session_by_id(remote_node, session_id) do
-    with {:ok, token} <- remote_session_token(remote_node, session_id) do
-      :erpc.call(remote_node, MingaAgent.RemoteAPI, :stop_session, [session_id, token], 5_000)
-    end
-  catch
-    :exit, reason -> {:error, reason}
-  end
-
-  @spec remote_session_token(node(), String.t()) :: {:ok, String.t()} | {:error, term()}
-  defp remote_session_token(remote_node, session_id) do
-    case :erpc.call(remote_node, MingaAgent.RemoteAPI, :list_sessions, [], 5_000) do
-      sessions when is_list(sessions) ->
-        Enum.find_value(sessions, {:error, :not_found}, fn
-          %{session_id: ^session_id, token: token} -> {:ok, token}
-          _session -> nil
-        end)
-
-      other ->
-        {:error, other}
-    end
-  catch
-    :exit, reason -> {:error, reason}
+    SessionClient.stop_session(remote_node, session_id)
   end
 
   @spec buffer_name_for_language(String.t()) :: String.t()

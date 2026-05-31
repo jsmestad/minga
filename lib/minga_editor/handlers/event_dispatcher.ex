@@ -19,6 +19,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   alias MingaEditor.Handlers.ToolHandler
   alias MingaEditor.MessageLog
   alias MingaEditor.Remote.EventReplay
+  alias MingaEditor.Remote.SessionClient
   alias MingaEditor.Renderer
   alias MingaEditor.Startup
   alias MingaEditor.State, as: EditorState
@@ -32,7 +33,6 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   alias MingaEditor.State.TabBar
   alias MingaEditor.UI.Face
   alias MingaEditor.UI.Theme.Loader, as: ThemeLoader
-  alias MingaAgent.RemoteAPI
   alias MingaAgent.Session, as: AgentSession
   alias MingaAgent.SessionManager
   alias MingaAgent.Subagent
@@ -321,19 +321,20 @@ defmodule MingaEditor.Handlers.EventDispatcher do
 
   @spec discover_remote_sessions(node(), String.t()) :: [Remote.remote_session_entry()]
   defp discover_remote_sessions(remote_node, server_name) do
-    remote_node
-    |> remote_api_list_sessions()
-    |> Enum.map(fn %{session_id: session_id, pid: pid, metadata: metadata} ->
-      {session_id, pid, metadata}
-    end)
-  catch
-    :exit, reason ->
-      Minga.Log.warning(
-        :distribution,
-        "Failed to discover sessions on #{server_name}: #{inspect(reason)}"
-      )
+    case SessionClient.list_sessions(remote_node) do
+      {:ok, sessions} ->
+        Enum.map(sessions, fn %{session_id: session_id, pid: pid, metadata: metadata} ->
+          {session_id, pid, metadata}
+        end)
 
-      []
+      {:error, reason} ->
+        Minga.Log.warning(
+          :distribution,
+          "Failed to discover sessions on #{server_name}: #{inspect(reason)}"
+        )
+
+        []
+    end
   end
 
   @spec remote_connected_status(String.t(), non_neg_integer()) :: String.t()
@@ -380,47 +381,13 @@ defmodule MingaEditor.Handlers.EventDispatcher do
 
   @spec remote_session_pid(node(), String.t()) :: {:ok, pid()} | {:error, term()}
   defp remote_session_pid(remote_node, session_id) do
-    remote_node
-    |> remote_api_list_sessions()
-    |> Enum.find_value({:error, :not_found}, fn
-      %{session_id: ^session_id, pid: pid} -> {:ok, pid}
-      _session -> nil
-    end)
-  catch
-    :exit, reason -> {:error, {:remote_unavailable, reason}}
-  end
-
-  @spec remote_api_list_sessions(node()) :: [MingaAgent.RemoteAPI.session_info()]
-  defp remote_api_list_sessions(remote_node) do
-    :erpc.call(remote_node, MingaAgent.RemoteAPI, :list_sessions, [], 5_000)
+    SessionClient.session_pid(remote_node, session_id)
   end
 
   @spec remote_api_attach(node(), String.t(), non_neg_integer()) ::
           {:ok, MingaAgent.RemoteAPI.attach_result()} | {:error, term()}
   defp remote_api_attach(remote_node, session_id, last_seen_event_id) do
-    with {:ok, token} <- remote_session_token(remote_node, session_id) do
-      :erpc.call(
-        remote_node,
-        MingaAgent.RemoteAPI,
-        :attach,
-        [session_id, token, self(), [role: :driver, last_seen_event_id: last_seen_event_id]],
-        10_000
-      )
-    end
-  catch
-    :exit, reason -> {:error, {:remote_unavailable, reason}}
-  end
-
-  @spec remote_session_token(node(), String.t()) :: {:ok, String.t()} | {:error, term()}
-  defp remote_session_token(remote_node, session_id) do
-    remote_node
-    |> remote_api_list_sessions()
-    |> Enum.find_value({:error, :not_found}, fn
-      %{session_id: ^session_id, token: token} -> {:ok, token}
-      _session -> nil
-    end)
-  catch
-    :exit, reason -> {:error, {:remote_unavailable, reason}}
+    SessionClient.attach_driver(remote_node, session_id, last_seen_event_id)
   end
 
   @spec restore_remote_session_from_store(EditorState.t(), Workspace.t(), node(), String.t()) ::
@@ -435,18 +402,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   @spec remote_session_data(node(), String.t()) ::
           {:ok, MingaAgent.SessionStore.session_data()} | {:error, term()}
   defp remote_session_data(remote_node, session_id) do
-    case remote_session_token(remote_node, session_id) do
-      {:ok, token} ->
-        :erpc.call(remote_node, RemoteAPI, :session_data, [session_id, token], 5_000)
-
-      {:error, :not_found} ->
-        :erpc.call(remote_node, RemoteAPI, :session_data, [session_id], 5_000)
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  catch
-    :exit, reason -> {:error, {:remote_unavailable, reason}}
+    SessionClient.session_data(remote_node, session_id)
   end
 
   @spec restore_ended_remote_workspace(EditorState.t(), Workspace.t(), [term()]) ::

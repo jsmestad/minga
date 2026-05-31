@@ -15,6 +15,7 @@ defmodule MingaEditor.Agent.SlashCommand do
   alias MingaAgent.SessionExport
   alias MingaAgent.Skills
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.Remote.SessionClient
   alias Minga.Config
   alias MingaEditor.Commands.Agent, as: AgentCommands
   alias MingaEditor.PickerUI
@@ -669,17 +670,10 @@ defmodule MingaEditor.Agent.SlashCommand do
           {:ok, String.t(), String.t()} | {:error, term()}
   defp begin_manual_oauth_for_session(session, client_pid)
        when is_pid(session) and node(session) != node() do
-    with {:ok, session_id, token} <- remote_session_credentials(session) do
-      :erpc.call(
-        node(session),
-        MingaAgent.RemoteAPI,
-        :begin_oauth,
-        [session_id, token, client_pid],
-        10_000
-      )
+    case SessionClient.begin_oauth(session, client_pid) do
+      {:error, reason} -> {:error, "Remote OAuth flow failed to start: #{inspect(reason)}"}
+      result -> result
     end
-  catch
-    :exit, reason -> {:error, "Remote OAuth flow failed to start: #{inspect(reason)}"}
   end
 
   defp begin_manual_oauth_for_session(_session, _client_pid),
@@ -689,17 +683,10 @@ defmodule MingaEditor.Agent.SlashCommand do
           {:ok, :openai} | {:error, term()}
   defp complete_manual_oauth_for_session(session, client_pid, ref, pasted)
        when is_pid(session) and node(session) != node() do
-    with {:ok, session_id, token} <- remote_session_credentials(session) do
-      :erpc.call(
-        node(session),
-        MingaAgent.RemoteAPI,
-        :complete_oauth,
-        [session_id, token, client_pid, ref, pasted],
-        15_000
-      )
+    case SessionClient.complete_oauth(session, ref, pasted, client_pid) do
+      {:error, reason} -> {:error, "Remote OAuth flow failed to complete: #{inspect(reason)}"}
+      result -> result
     end
-  catch
-    :exit, reason -> {:error, "Remote OAuth flow failed to complete: #{inspect(reason)}"}
   end
 
   defp complete_manual_oauth_for_session(session, _client_pid, ref, pasted) do
@@ -716,19 +703,8 @@ defmodule MingaEditor.Agent.SlashCommand do
   @spec deliver_oauth_system_message(pid() | nil, pid(), String.t(), :info | :error) :: :ok
   defp deliver_oauth_system_message(session, client_pid, message, level)
        when is_pid(session) and node(session) != node() do
-    with {:ok, session_id, token} <- remote_session_credentials(session) do
-      :erpc.call(
-        node(session),
-        MingaAgent.RemoteAPI,
-        :add_system_message,
-        [session_id, token, client_pid, message, level],
-        5_000
-      )
-    end
-
+    _ = SessionClient.add_system_message(session, message, level, client_pid)
     :ok
-  catch
-    :exit, _reason -> :ok
   end
 
   defp deliver_oauth_system_message(session, _client_pid, message, level) when is_pid(session) do
@@ -736,25 +712,6 @@ defmodule MingaEditor.Agent.SlashCommand do
   end
 
   defp deliver_oauth_system_message(_session, _client_pid, _message, _level), do: :ok
-
-  @spec remote_session_credentials(pid()) :: {:ok, String.t(), String.t()} | {:error, term()}
-  defp remote_session_credentials(session) when is_pid(session) do
-    case :erpc.call(node(session), MingaAgent.RemoteAPI, :list_sessions, [], 5_000) do
-      sessions when is_list(sessions) -> remote_session_credentials_from_list(sessions, session)
-      other -> {:error, other}
-    end
-  catch
-    :exit, reason -> {:error, reason}
-  end
-
-  @spec remote_session_credentials_from_list([map()], pid()) ::
-          {:ok, String.t(), String.t()} | {:error, :not_found}
-  defp remote_session_credentials_from_list(sessions, session) do
-    Enum.find_value(sessions, {:error, :not_found}, fn
-      %{session_id: session_id, token: token, pid: ^session} -> {:ok, session_id, token}
-      _session -> nil
-    end)
-  end
 
   @spec refresh_local_session_credentials(pid() | nil) :: :ok
   defp refresh_local_session_credentials(session) when is_pid(session),
