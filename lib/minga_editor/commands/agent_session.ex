@@ -17,6 +17,7 @@ defmodule MingaEditor.Commands.AgentSession do
   alias MingaEditor.State.Workspace
   alias MingaEditor.State.Workspace.RemoteSession
   alias MingaEditor.State.Tab
+  alias MingaEditor.Agent.Events
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
@@ -138,11 +139,27 @@ defmodule MingaEditor.Commands.AgentSession do
   end
 
   @doc "Connects the local GUI to an existing remote agent session."
-  @spec connect_remote_session(state(), String.t(), String.t(), pid()) :: state()
-  def connect_remote_session(state, server_name, session_id, remote_pid)
-      when is_binary(server_name) and is_binary(session_id) and is_pid(remote_pid) do
-    case subscribe_and_snapshot(remote_pid) do
-      {:ok, messages, snapshot} ->
+  @spec connect_remote_session(
+          state(),
+          String.t(),
+          String.t(),
+          pid(),
+          String.t(),
+          non_neg_integer()
+        ) ::
+          state()
+  def connect_remote_session(
+        state,
+        server_name,
+        session_id,
+        remote_pid,
+        token,
+        last_seen_event_id \\ 0
+      )
+      when is_binary(server_name) and is_binary(session_id) and is_pid(remote_pid) and
+             is_binary(token) and is_integer(last_seen_event_id) and last_seen_event_id >= 0 do
+    case remote_attach(remote_pid, session_id, token, last_seen_event_id) do
+      {:ok, messages, snapshot, events, latest_event_id} ->
         {state, tab_id, buffer} = create_remote_agent_tab(state, server_name)
         AgentBufferSync.sync(buffer, messages)
 
@@ -152,7 +169,8 @@ defmodule MingaEditor.Commands.AgentSession do
         |> rebuild_agent_from_tab(tab_id)
         |> apply_remote_snapshot(snapshot)
         |> ensure_agent_workspace(remote_pid, nil)
-        |> set_remote_workspace(server_name, session_id, remote_pid, :connected)
+        |> replay_catchup_events(events)
+        |> set_remote_workspace(server_name, session_id, remote_pid, :connected, latest_event_id)
         |> EditorState.set_status("Connected to #{server_name} session #{session_id}")
 
       {:error, reason} ->
@@ -175,6 +193,54 @@ defmodule MingaEditor.Commands.AgentSession do
     end
   end
 
+  @doc "Sends a prompt to a local or remote session, enforcing the remote broker boundary."
+  @spec send_prompt_pid(pid(), String.t() | [ReqLLM.Message.ContentPart.t()]) ::
+          :ok | {:queued, :steering} | {:error, term()}
+  def send_prompt_pid(session, prompt) when is_pid(session) and node(session) == node() do
+    Session.send_prompt(session, prompt)
+  end
+
+  def send_prompt_pid(session, prompt) when is_pid(session) do
+    with {:ok, session_id, token} <- remote_session_info_for_pid(node(session), session) do
+      :erpc.call(
+        node(session),
+        MingaAgent.RemoteAPI,
+        :send_prompt,
+        [session_id, token, self(), prompt],
+        10_000
+      )
+    end
+  catch
+    :exit, reason -> {:error, reason}
+  end
+
+  @doc "Responds to a tool approval on a local or remote session, enforcing the remote broker boundary."
+  @spec respond_to_approval_pid(pid(), Session.approval_decision()) :: :ok | {:error, term()}
+  def respond_to_approval_pid(session, decision),
+    do: respond_to_approval_pid(session, nil, decision)
+
+  @doc "Responds to a stable tool approval id on a local or remote session."
+  @spec respond_to_approval_pid(pid(), String.t() | nil, Session.approval_decision()) ::
+          :ok | {:error, term()}
+  def respond_to_approval_pid(session, approval_id, decision)
+      when is_pid(session) and node(session) == node() do
+    Session.respond_to_approval_as(session, self(), approval_id, decision)
+  end
+
+  def respond_to_approval_pid(session, approval_id, decision) when is_pid(session) do
+    with {:ok, session_id, token} <- remote_session_info_for_pid(node(session), session) do
+      :erpc.call(
+        node(session),
+        MingaAgent.RemoteAPI,
+        :approve,
+        [session_id, token, self(), approval_id, decision],
+        10_000
+      )
+    end
+  catch
+    :exit, reason -> {:error, reason}
+  end
+
   @doc "Stops a session pid, routing remote pids to their owning node."
   @spec stop_session_pid(pid()) :: :ok | {:error, term()}
   def stop_session_pid(session) when is_pid(session) and node(session) == node() do
@@ -184,16 +250,8 @@ defmodule MingaEditor.Commands.AgentSession do
   end
 
   def stop_session_pid(session) when is_pid(session) do
-    case :erpc.call(
-           node(session),
-           MingaAgent.SessionManager,
-           :stop_session_by_pid,
-           [session],
-           5_000
-         ) do
-      :ok -> :ok
-      {:error, _reason} = error -> error
-      other -> {:error, other}
+    with {:ok, session_id, token} <- remote_session_info_for_pid(node(session), session) do
+      :erpc.call(node(session), MingaAgent.RemoteAPI, :stop_session, [session_id, token], 5_000)
     end
   catch
     :exit, reason -> {:error, reason}
@@ -308,8 +366,8 @@ defmodule MingaEditor.Commands.AgentSession do
   @spec start_remote_session_on_node(state(), String.t(), node()) :: state()
   defp start_remote_session_on_node(state, server_name, remote_node) do
     case remote_start_session(remote_node, remote_session_opts(state)) do
-      {:ok, session_id, remote_pid} ->
-        connect_remote_session(state, server_name, session_id, remote_pid)
+      {:ok, session_id, remote_pid, token} ->
+        connect_remote_session(state, server_name, session_id, remote_pid, token)
 
       {:error, reason} ->
         EditorState.set_status(state, "Failed to start remote session: #{inspect(reason)}")
@@ -322,19 +380,47 @@ defmodule MingaEditor.Commands.AgentSession do
     [thinking_level: panel.thinking_level]
   end
 
-  @spec remote_start_session(node(), keyword()) :: {:ok, String.t(), pid()} | {:error, term()}
+  @spec remote_start_session(node(), keyword()) ::
+          {:ok, String.t(), pid(), String.t()} | {:error, term()}
   defp remote_start_session(remote_node, opts) do
-    :erpc.call(remote_node, MingaAgent.SessionManager, :start_session, [opts], 10_000)
+    case :erpc.call(remote_node, MingaAgent.RemoteAPI, :start_session, [opts], 10_000) do
+      {:ok, %{session_id: session_id, pid: pid, token: token}} -> {:ok, session_id, pid, token}
+      {:error, _reason} = error -> error
+      other -> {:error, other}
+    end
   catch
     :exit, reason -> {:error, {:remote_unavailable, reason}}
   end
 
-  @spec subscribe_and_snapshot(pid()) :: {:ok, [term()], map()} | {:error, term()}
-  defp subscribe_and_snapshot(remote_pid) do
-    Session.subscribe(remote_pid, self())
-    messages = Session.messages(remote_pid)
-    snapshot = Session.editor_snapshot(remote_pid)
-    {:ok, messages, snapshot}
+  @spec remote_attach(pid(), String.t(), String.t(), non_neg_integer()) ::
+          {:ok, [term()], map(), [term()], non_neg_integer()} | {:error, term()}
+  defp remote_attach(remote_pid, session_id, token, last_seen_event_id) do
+    case :erpc.call(
+           node(remote_pid),
+           MingaAgent.RemoteAPI,
+           :attach,
+           [session_id, token, self(), [role: :driver, last_seen_event_id: last_seen_event_id]],
+           10_000
+         ) do
+      {:ok,
+       %{
+         role: :driver,
+         messages: messages,
+         snapshot: snapshot,
+         events: events,
+         latest_event_id: latest_event_id
+       }} ->
+        {:ok, messages, snapshot, events, latest_event_id}
+
+      {:ok, %{role: :viewer}} ->
+        {:error, :not_driver}
+
+      {:error, _reason} = error ->
+        error
+
+      other ->
+        {:error, other}
+    end
   catch
     :exit, reason -> {:error, reason}
   end
@@ -413,14 +499,16 @@ defmodule MingaEditor.Commands.AgentSession do
           String.t(),
           String.t(),
           pid(),
-          RemoteSession.connection_status()
+          RemoteSession.connection_status(),
+          non_neg_integer()
         ) :: state()
   defp set_remote_workspace(
          %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
          server_name,
          session_id,
          remote_pid,
-         status
+         status,
+         latest_event_id
        ) do
     case TabBar.find_workspace_by_session(tb, remote_pid) do
       %Workspace{id: workspace_id} ->
@@ -429,7 +517,7 @@ defmodule MingaEditor.Commands.AgentSession do
           |> TabBar.update_workspace(workspace_id, fn workspace ->
             workspace
             |> Workspace.set_session(remote_pid)
-            |> Workspace.put_remote_session(server_name, session_id, status)
+            |> Workspace.put_remote_session(server_name, session_id, status, latest_event_id)
           end)
           |> TabBar.sync_workspace_agent_tab_projection(workspace_id)
 
@@ -440,7 +528,15 @@ defmodule MingaEditor.Commands.AgentSession do
     end
   end
 
-  defp set_remote_workspace(state, _server_name, _session_id, _remote_pid, _status), do: state
+  defp set_remote_workspace(
+         state,
+         _server_name,
+         _session_id,
+         _remote_pid,
+         _status,
+         _latest_event_id
+       ),
+       do: state
 
   @spec rebuild_agent_from_tab(state(), Tab.id()) :: state()
   defp rebuild_agent_from_tab(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, tab_id) do
@@ -472,17 +568,15 @@ defmodule MingaEditor.Commands.AgentSession do
     end)
   end
 
+  @doc false
+  @spec replay_catchup_events(state(), [MingaAgent.EventLog.EventRecord.t()]) :: state()
+  def replay_catchup_events(state, events), do: Events.replay_catchup(state, events)
+
   @spec stop_remote_session(state(), pid()) :: state()
   defp stop_remote_session(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, session) do
     case TabBar.find_by_session(tb, session) do
       %Tab{remote_session_id: session_id} when is_binary(session_id) ->
-        case :erpc.call(
-               node(session),
-               MingaAgent.SessionManager,
-               :stop_session,
-               [session_id],
-               5_000
-             ) do
+        case stop_remote_session_by_id(node(session), session_id) do
           :ok ->
             state
 
@@ -499,6 +593,51 @@ defmodule MingaEditor.Commands.AgentSession do
   end
 
   defp stop_remote_session(state, _session), do: state
+
+  @spec remote_session_info_for_pid(node(), pid()) ::
+          {:ok, String.t(), String.t()} | {:error, term()}
+  defp remote_session_info_for_pid(remote_node, remote_pid) do
+    case :erpc.call(remote_node, MingaAgent.RemoteAPI, :list_sessions, [], 5_000) do
+      sessions when is_list(sessions) ->
+        Enum.find_value(sessions, {:error, :not_found}, fn
+          %{session_id: session_id, pid: ^remote_pid, token: token} ->
+            {:ok, session_id, token}
+
+          _session ->
+            nil
+        end)
+
+      other ->
+        {:error, other}
+    end
+  catch
+    :exit, reason -> {:error, reason}
+  end
+
+  @spec stop_remote_session_by_id(node(), String.t()) :: :ok | {:error, term()}
+  defp stop_remote_session_by_id(remote_node, session_id) do
+    case :erpc.call(remote_node, MingaAgent.RemoteAPI, :list_sessions, [], 5_000) do
+      sessions when is_list(sessions) ->
+        case Enum.find(sessions, &(&1.session_id == session_id)) do
+          %{token: token} ->
+            :erpc.call(
+              remote_node,
+              MingaAgent.RemoteAPI,
+              :stop_session,
+              [session_id, token],
+              5_000
+            )
+
+          nil ->
+            {:error, :not_found}
+        end
+
+      other ->
+        {:error, other}
+    end
+  catch
+    :exit, reason -> {:error, reason}
+  end
 
   @spec buffer_name_for_language(String.t()) :: String.t()
   defp buffer_name_for_language(""), do: "*Agent: text*"

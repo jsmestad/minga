@@ -12,18 +12,32 @@ defmodule MingaEditor.State.Workspace.RemoteSession do
   @type t :: %__MODULE__{
           server_name: String.t(),
           session_id: String.t(),
-          connection_status: connection_status()
+          connection_status: connection_status(),
+          last_seen_event_id: non_neg_integer()
         }
 
   @enforce_keys [:server_name, :session_id, :connection_status]
-  defstruct [:server_name, :session_id, :connection_status]
+  defstruct [:server_name, :session_id, :connection_status, last_seen_event_id: 0]
 
   @doc "Creates durable remote metadata."
-  @spec new(String.t(), String.t(), connection_status()) :: t()
-  def new(server_name, session_id, status \\ :connected)
+  @spec new(String.t(), String.t(), connection_status(), non_neg_integer()) :: t()
+  def new(server_name, session_id, status \\ :connected, last_seen_event_id \\ 0)
       when is_binary(server_name) and is_binary(session_id) and
-             status in [:connected, :disconnected, :ended, :unavailable] do
-    %__MODULE__{server_name: server_name, session_id: session_id, connection_status: status}
+             status in [:connected, :disconnected, :ended, :unavailable] and
+             is_integer(last_seen_event_id) and last_seen_event_id >= 0 do
+    %__MODULE__{
+      server_name: server_name,
+      session_id: session_id,
+      connection_status: status,
+      last_seen_event_id: last_seen_event_id
+    }
+  end
+
+  @doc "Updates the last seen event id."
+  @spec set_last_seen_event_id(t(), non_neg_integer()) :: t()
+  def set_last_seen_event_id(%__MODULE__{} = remote_session, event_id)
+      when is_integer(event_id) and event_id >= 0 do
+    %{remote_session | last_seen_event_id: event_id}
   end
 
   @doc "Updates the connection status."

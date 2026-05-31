@@ -18,8 +18,10 @@ defmodule Minga.Distribution.RemoteSessionE2ETest do
 
       mix test --include distributed test/minga/distribution/remote_session_e2e_test.exs
   """
+  # Boots real peer nodes and uses epmd, both global OS/distribution resources.
   use Minga.Test.DistributedCase, async: false
 
+  alias MingaAgent.RemoteAPI
   alias MingaAgent.Session
   alias MingaAgent.SessionManager
 
@@ -124,6 +126,43 @@ defmodule Minga.Distribution.RemoteSessionE2ETest do
     # ...and is still enumerable for a reconnecting GUI to find.
     sessions = :erpc.call(server, SessionManager, :list_sessions, [])
     assert Enum.any?(sessions, fn {id, pid, _meta} -> id == session_id and pid == remote_pid end)
+  end
+
+  test "brokered attach enforces one driver while viewers still receive events", %{server: server} do
+    {:ok, %{session_id: session_id, pid: remote_pid, token: token}} =
+      :erpc.call(server, RemoteAPI, :start_session, [[provider: @stub]])
+
+    assert {:ok, %{role: :driver}} =
+             :erpc.call(server, RemoteAPI, :attach, [session_id, token, self(), [role: :driver]])
+
+    test_pid = self()
+
+    viewer =
+      spawn(fn ->
+        :erpc.call(server, RemoteAPI, :attach, [session_id, token, self(), [role: :driver]])
+        send(test_pid, :viewer_attached)
+
+        receive do
+          {:agent_event, ^remote_pid, event} -> send(test_pid, {:viewer_event, event})
+          :stop -> :ok
+        end
+      end)
+
+    assert_receive :viewer_attached, 1_000
+
+    assert {:error, :not_driver} =
+             :erpc.call(server, RemoteAPI, :send_prompt, [
+               session_id,
+               token,
+               viewer,
+               "viewer prompt"
+             ])
+
+    Session.add_system_message(remote_pid, "event visible to all clients")
+    assert_receive {:agent_event, ^remote_pid, :messages_changed}, 2_000
+    assert_receive {:viewer_event, :messages_changed}, 2_000
+
+    Process.exit(viewer, :kill)
   end
 
   test "reattach after disconnect sees preserved state (AC4)", %{server: server} do

@@ -351,6 +351,36 @@ defmodule MingaAgent.SessionTest do
     %{session: session}
   end
 
+  @spec idle_process() :: pid()
+  defp idle_process do
+    spawn(fn ->
+      receive do
+        :stop -> :ok
+      end
+    end)
+  end
+
+  @spec wait_until_subscriber_role(
+          GenServer.server(),
+          pid(),
+          Session.attachment_role() | nil,
+          non_neg_integer()
+        ) :: :ok
+  defp wait_until_subscriber_role(session, pid, expected_role, attempts \\ 20)
+
+  defp wait_until_subscriber_role(session, pid, expected_role, attempts) when attempts > 0 do
+    case Session.subscriber_role(session, pid) do
+      ^expected_role ->
+        :ok
+
+      _other ->
+        :sys.get_state(session)
+        wait_until_subscriber_role(session, pid, expected_role, attempts - 1)
+    end
+  end
+
+  defp wait_until_subscriber_role(_session, _pid, _expected_role, 0), do: :ok
+
   describe "initial state" do
     test "starts idle with a system message and zero usage", %{session: session} do
       assert Session.status(session) == :idle
@@ -361,6 +391,47 @@ defmodule MingaAgent.SessionTest do
       assert usage.input == 0
       assert usage.output == 0
       assert usage.cost == 0.0
+    end
+  end
+
+  describe "remote attachment roles" do
+    test "first subscriber is driver and later subscribers are viewers", %{session: session} do
+      viewer = idle_process()
+      on_exit(fn -> Process.exit(viewer, :kill) end)
+
+      assert Session.subscriber_role(session, self()) == :driver
+      assert :ok = Session.subscribe(session, viewer)
+      assert Session.subscriber_role(session, viewer) == :viewer
+    end
+
+    test "viewer cannot send prompts while driver can", %{session: session} do
+      viewer = idle_process()
+      on_exit(fn -> Process.exit(viewer, :kill) end)
+
+      assert :ok = Session.subscribe(session, viewer, role: :viewer)
+      assert {:error, :not_driver} = Session.send_prompt_as(session, viewer, "nope")
+    end
+
+    test "driver role is vacated when the driver process dies" do
+      {:ok, session} = Session.start_link(provider: MockProvider, provider_opts: [])
+      driver = idle_process()
+      viewer = idle_process()
+
+      on_exit(fn ->
+        Process.exit(driver, :kill)
+        Process.exit(viewer, :kill)
+      end)
+
+      assert :ok = Session.subscribe(session, driver, role: :driver)
+      assert :ok = Session.subscribe(session, viewer, role: :viewer)
+
+      ref = Process.monitor(driver)
+      Process.exit(driver, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^driver, :killed}, @event_timeout
+      wait_until_subscriber_role(session, driver, nil)
+
+      assert :ok = Session.claim_driver(session, viewer)
+      assert Session.subscriber_role(session, viewer) == :driver
     end
   end
 
@@ -961,6 +1032,20 @@ defmodule MingaAgent.SessionTest do
           assert Enum.any?(messages, &match?({:system, "Denied shell" <> _, :info}, &1))
         end
       end
+    end
+
+    test "remote driver can resolve a pending approval by stable id" do
+      session = start_subscribed_session()
+      driver = self()
+      assert :ok = Session.subscribe(session, driver, role: :driver)
+      send_approval(session)
+
+      assert {:error, :approval_not_found} =
+               Session.respond_to_approval_as(session, driver, "other-tc", :approve)
+
+      assert :ok = Session.respond_to_approval_as(session, driver, "tc1", :approve)
+      assert_receive {:tool_approval_response, "tc1", :approve}, @event_timeout
+      assert_receive {:agent_event, _, {:approval_resolved, :approve}}, @event_timeout
     end
 
     test "approve_session and approve_turn set the matching tool trust scope" do
