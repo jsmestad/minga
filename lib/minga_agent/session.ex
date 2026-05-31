@@ -2216,7 +2216,7 @@ defmodule MingaAgent.Session do
   defp maybe_show_auth_onboarding(state) do
     if state.provider_module == MingaAgent.Providers.Native and not state.credentials_configured do
       msg = onboarding_message()
-      state = append_msg(state, Message.system(msg))
+      state = append_system_message(state, msg, :info)
       broadcast(state, {:system_message, msg, :info})
       state
     else
