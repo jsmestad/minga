@@ -670,4 +670,37 @@ defmodule MingaEditor.Agent.Events do
   catch
     :exit, _ -> nil
   end
+
+  @doc false
+  @spec replay_catchup(EditorState.t(), [MingaAgent.EventLog.EventRecord.t()]) :: EditorState.t()
+  def replay_catchup(state, events) do
+    events
+    |> Enum.map(&event_record_to_editor_event/1)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.reduce(state, &replay_one_catchup_event/2)
+  end
+
+  @spec replay_one_catchup_event(term(), EditorState.t()) :: EditorState.t()
+  defp replay_one_catchup_event({:file_changed, path, _, _, tool_call_id, _} = event, state) do
+    if catchup_already_applied?(state, path, tool_call_id),
+      do: state,
+      else: elem(handle(state, event), 0)
+  end
+
+  @spec catchup_already_applied?(EditorState.t(), String.t(), String.t()) :: boolean()
+  defp catchup_already_applied?(state, path, tool_call_id) do
+    state
+    |> AgentAccess.view()
+    |> Map.get(:edit_timeline)
+    |> EditTimeline.entries_for(path)
+    |> Enum.any?(&(&1.tool_call_id == tool_call_id))
+  end
+
+  @spec event_record_to_editor_event(MingaAgent.EventLog.EventRecord.t()) :: term() | nil
+  defp event_record_to_editor_event(%{event_type: :file_edit_proposed, payload: payload}) do
+    {:file_changed, payload["path"], payload["before_content"], payload["after_content"],
+     payload["tool_call_id"], payload["tool_name"]}
+  end
+
+  defp event_record_to_editor_event(_event), do: nil
 end

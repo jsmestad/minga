@@ -49,7 +49,8 @@ defmodule MingaEditor.State.Workspace do
           agent_ui: UIState.t() | nil,
           project_view: ProjectView.t() | nil,
           review: WorkspaceReview.t(),
-          project_root: String.t() | nil
+          project_root: String.t() | nil,
+          pending_catchup_events: [MingaAgent.EventLog.EventRecord.t()]
         }
 
   @enforce_keys [:id, :kind]
@@ -67,7 +68,8 @@ defmodule MingaEditor.State.Workspace do
             agent_ui: nil,
             project_view: nil,
             review: WorkspaceReview.new(),
-            project_root: nil
+            project_root: nil,
+            pending_catchup_events: []
 
   @doc "Creates the manual project workspace."
   @spec new_manual(String.t() | nil) :: t()
@@ -155,9 +157,19 @@ defmodule MingaEditor.State.Workspace do
   end
 
   @doc "Sets durable remote metadata from its fields."
-  @spec put_remote_session(t(), String.t(), String.t(), connection_status()) :: t()
-  def put_remote_session(%__MODULE__{} = workspace, server_name, session_id, status \\ :connected) do
-    set_remote_session(workspace, RemoteSession.new(server_name, session_id, status))
+  @spec put_remote_session(t(), String.t(), String.t(), connection_status(), non_neg_integer()) ::
+          t()
+  def put_remote_session(
+        %__MODULE__{} = workspace,
+        server_name,
+        session_id,
+        status \\ :connected,
+        last_seen_event_id \\ 0
+      ) do
+    set_remote_session(
+      workspace,
+      RemoteSession.new(server_name, session_id, status, last_seen_event_id)
+    )
   end
 
   @doc "Updates durable remote connection status when the workspace has remote metadata."

@@ -13,9 +13,11 @@ defmodule MingaAgent.EventLog.EventRecord do
           | :tool_call_started
           | :tool_call_updated
           | :tool_call_finished
+          | :tool_call_interrupted
           | :file_edit_proposed
           | :approval_requested
           | :approval_resolved
+          | :approval_interrupted
           | :system_message
           | :status_changed
           | :waiting_for_input
