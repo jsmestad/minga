@@ -64,8 +64,8 @@ defmodule MingaAgent.RemoteAPI do
 
     with :ok <- authorize(session_id, token),
          {:ok, pid} <- SessionManager.get_session(session_id),
-         {:ok, events, latest_event_id} <- event_catchup(session_id, last_seen_event_id),
-         :ok <- Session.subscribe(pid, subscriber_pid, role: role) do
+         :ok <- Session.subscribe(pid, subscriber_pid, role: role),
+         {:ok, events, latest_event_id} <- event_catchup(session_id, last_seen_event_id) do
       info = session_info(session_id, pid, token)
       role = Session.subscriber_role(pid, subscriber_pid) || :viewer
 

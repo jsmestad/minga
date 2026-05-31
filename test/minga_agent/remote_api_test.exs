@@ -49,22 +49,24 @@ defmodule MingaAgent.RemoteAPITest do
     Session.add_system_message(pid, "missed while away", :info)
     :sys.get_state(pid)
     :sys.get_state(EventLog)
-    events = wait_for_events(session_id, 0, 1)
-    latest = List.last(events).id
+    wait_for_events(session_id, 0, 1)
 
     driver = idle_process()
     on_exit(fn -> Process.exit(driver, :kill) end)
 
-    assert {:ok, %{events: catchup, latest_event_id: ^latest}} =
+    assert {:ok, %{events: catchup, latest_event_id: attach_latest}} =
              RemoteAPI.attach(session_id, token, driver, role: :driver, last_seen_event_id: 0)
 
-    assert Enum.any?(catchup, &(&1.event_type == :message_changed))
+    assert Enum.any?(catchup, &(&1.event_type == :system_message))
 
-    assert {:ok, %{events: [], latest_event_id: ^latest}} =
+    assert {:ok, %{events: reattach_events, latest_event_id: reattach_latest}} =
              RemoteAPI.attach(session_id, token, driver,
                role: :driver,
-               last_seen_event_id: latest
+               last_seen_event_id: attach_latest
              )
+
+    assert reattach_latest >= attach_latest
+    assert Enum.all?(reattach_events, &(&1.id > attach_latest))
   end
 
   test "start_or_get_for_workdir reuses the deterministic session" do
