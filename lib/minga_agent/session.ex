@@ -698,7 +698,7 @@ defmodule MingaAgent.Session do
     # Start provider asynchronously so init doesn't block
     send(self(), :start_provider)
 
-    {:ok, state}
+    {:ok, maybe_schedule_idle_gc(state)}
   end
 
   @impl GenServer
@@ -2082,7 +2082,16 @@ defmodule MingaAgent.Session do
       MingaAgent.EventLog.Store.close(db)
       record_interrupted_work(state, events)
     else
-      _ -> :ok
+      {:error, :database_not_found} ->
+        :ok
+
+      {:error, reason} ->
+        Minga.Log.warning(
+          :agent,
+          "[Session] mark_interrupted_work failed for #{state.session_id}: #{inspect(reason)}"
+        )
+
+        :ok
     end
   end
 

@@ -48,9 +48,11 @@ defmodule MingaAgent.RemoteAPI do
   @spec list_sessions() :: [session_info()]
   def list_sessions do
     SessionManager.list_sessions()
-    |> Enum.map(fn {session_id, pid, _metadata} ->
-      {:ok, token} = SessionManager.session_token(session_id)
-      session_info(session_id, pid, token)
+    |> Enum.flat_map(fn {session_id, pid, _metadata} ->
+      case SessionManager.session_token(session_id) do
+        {:ok, token} -> [session_info(session_id, pid, token)]
+        {:error, _reason} -> []
+      end
     end)
   end
 
