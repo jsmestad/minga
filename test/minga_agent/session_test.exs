@@ -1166,7 +1166,7 @@ defmodule MingaAgent.SessionTest do
   end
 
   describe "thinking block collapse" do
-    test "thinking blocks auto-collapse when text delta arrives", %{session: session} do
+    test "thinking blocks stay expanded during streaming and collapse on AgentEnd", %{session: session} do
       send(session, {:agent_provider_event, %Event.AgentStart{}})
       send(session, {:agent_provider_event, %Event.ThinkingDelta{delta: "Let me think..."}})
 
@@ -1181,8 +1181,21 @@ defmodule MingaAgent.SessionTest do
 
       assert {:thinking, _, false} = thinking
 
-      # TextDelta arrives (thinking is done, response starting) → auto-collapse
+      # TextDelta arrives: thinking should remain expanded during the turn
       send(session, {:agent_provider_event, %Event.TextDelta{delta: "Here is my answer"}})
+
+      messages = Session.messages(session)
+
+      thinking =
+        Enum.find(messages, fn
+          {:thinking, _, _} -> true
+          _ -> false
+        end)
+
+      assert {:thinking, _, false} = thinking
+
+      # AgentEnd: thinking collapses now that the turn is complete
+      send(session, {:agent_provider_event, %Event.AgentEnd{usage: nil}})
 
       messages = Session.messages(session)
 
@@ -1196,6 +1209,7 @@ defmodule MingaAgent.SessionTest do
     end
 
     test "toggle_all_tool_collapses also toggles thinking blocks", %{session: session} do
+      send(session, {:agent_provider_event, %Event.AgentStart{}})
       send(session, {:agent_provider_event, %Event.ThinkingDelta{delta: "hmm"}})
       send(session, {:agent_provider_event, %Event.TextDelta{delta: "answer"}})
 
@@ -1208,6 +1222,9 @@ defmodule MingaAgent.SessionTest do
         session,
         {:agent_provider_event, %Event.ToolEnd{tool_call_id: "tc1", name: "bash", result: "ok"}}
       )
+
+      # End the turn so thinking blocks collapse
+      send(session, {:agent_provider_event, %Event.AgentEnd{usage: nil}})
 
       # Both should be collapsed
       messages = Session.messages(session)

@@ -46,7 +46,7 @@ defmodule MingaEditor.Agent.UIState.Panel do
             prompt_history: [],
             history_index: -1,
             spinner_frame: 0,
-            provider_name: "anthropic",
+            provider_name: AgentConfig.extract_provider_prefix(AgentConfig.default_model()),
             model_name: AgentConfig.default_model(),
             thinking_level: "medium",
             input_focused: false,

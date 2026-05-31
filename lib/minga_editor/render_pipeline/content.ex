@@ -743,6 +743,8 @@ defmodule MingaEditor.RenderPipeline.Content do
         additional_window_models: additional_window_models
       })
 
+    state = update_agent_scroll_metrics(state, line_count, chat_height)
+
     {frame, final_cursor, state}
   end
 
@@ -770,6 +772,16 @@ defmodule MingaEditor.RenderPipeline.Content do
       Map.get(options, :tab_width, 2),
       Minga.Core.WidthOracle.fingerprint(params.width_oracle)
     }
+  end
+
+  @spec update_agent_scroll_metrics(state(), non_neg_integer(), pos_integer()) :: state()
+  defp update_agent_scroll_metrics(state, total_lines, visible_height) do
+    ws = state.workspace
+    panel = ws.agent_ui.panel
+    updated_scroll = Minga.Editing.Scroll.update_metrics(panel.scroll, total_lines, visible_height)
+    updated_panel = %{panel | scroll: updated_scroll}
+    updated_ui = %{ws.agent_ui | panel: updated_panel}
+    %{state | workspace: %{ws | agent_ui: updated_ui}}
   end
 
   @spec build_visible_line_map(

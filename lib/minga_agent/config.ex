@@ -240,6 +240,27 @@ defmodule MingaAgent.Config do
     end
   end
 
+  @doc """
+  Extracts the provider prefix from a model spec string.
+
+  Returns the provider name, or `""` if no prefix is present.
+
+  ## Examples
+
+      iex> MingaAgent.Config.extract_provider_prefix("openai_codex:gpt-5.3-codex-spark")
+      "openai_codex"
+
+      iex> MingaAgent.Config.extract_provider_prefix("claude-sonnet-4")
+      ""
+  """
+  @spec extract_provider_prefix(String.t()) :: String.t()
+  def extract_provider_prefix(model) when is_binary(model) do
+    case String.split(model, ":", parts: 2) do
+      [provider, _name] -> provider
+      [_name] -> ""
+    end
+  end
+
   @spec non_empty_env(String.t()) :: String.t() | nil
   defp non_empty_env(name) do
     case System.get_env(name) do

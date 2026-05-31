@@ -161,7 +161,7 @@ defmodule MingaEditor.Agent.ChatDecorations do
       add_block(decs, line,
         placement: :above,
         render: fn _w ->
-          [{"▎ Agent", Face.new(fg: theme.assistant_border, bold: true, bg: theme.header_bg)}]
+          [{"┌─ Agent", Face.new(fg: theme.assistant_border, bold: true)}]
         end,
         priority: 10
       )
@@ -180,8 +180,20 @@ defmodule MingaEditor.Agent.ChatDecorations do
         decs
       end
 
-    decs = add_border_virtual_text(decs, line, line_count, theme.assistant_border)
+    decs = add_tool_border_virtual_text(decs, line, line_count, theme.assistant_border)
     decs = add_readable_body_highlight(decs, line, line_count, theme.text_fg)
+
+    # Bottom border
+    last_line = line + line_count - 1
+
+    {_id, decs} =
+      add_block(decs, last_line,
+        placement: :below,
+        render: fn _w ->
+          [{"└─", Face.new(fg: theme.assistant_border)}]
+        end,
+        priority: 5
+      )
 
     # Code block background highlights (lines between ``` fences)
     add_code_block_highlights(decs, text, line, theme.code_bg)
@@ -271,6 +283,16 @@ defmodule MingaEditor.Agent.ChatDecorations do
          _streaming,
          _pending_approval
        ) do
+    # "Done" marker above usage stats
+    {_id, decs} =
+      add_block(decs, line,
+        placement: :above,
+        render: fn _w ->
+          [{"  Done", Face.new(fg: theme.status_idle)}]
+        end,
+        priority: 5
+      )
+
     # Dim the usage stats line
     {_id, decs} =
       add_highlight(decs, {line, 0}, {line + line_count, 0},
@@ -351,56 +373,66 @@ defmodule MingaEditor.Agent.ChatDecorations do
     duration_text = format_tool_duration(tc)
     command_text = format_tool_command(tc)
     trust_text = format_auto_approved_scope(tc)
-    header_text = "┌─ #{status_icon} #{tc.name}#{duration_text}#{trust_text}#{command_text}"
-
-    # Block decoration: tool header (with approval prompt when awaiting)
-    {_id, decs} =
-      add_block(decs, line,
-        placement: :above,
-        render: tool_header_render(header_text, status_fg, theme, awaiting_approval),
-        priority: 5
-      )
-
-    # Fold region for tool output (collapsible with za)
-    fold_placeholder = "└─ #{status_icon} #{tc.name} (#{line_count} lines)"
-
-    decs =
-      if has_result and tc.status != :running do
-        {_id, decs} =
-          add_fold(decs, line, line + line_count - 1,
-            closed: tc.collapsed,
-            placeholder: fn _s, _e, _w ->
-              [{fold_placeholder, Face.new(fg: status_fg, italic: true)}]
-            end
-          )
-
-        decs
-      else
-        decs
-      end
-
-    # Dim tool output text
-    {_id, decs} =
-      add_highlight(decs, {line, 0}, {line + line_count, 0},
-        style: Face.new(fg: theme.text_fg),
-        priority: -10,
-        group: :chat_tool
-      )
-
-    # Left border (│) on each content line
-    decs = add_tool_border_virtual_text(decs, line, line_count, theme.tool_border)
-
-    # Bottom border or pending approval card.
-    last_line = line + line_count - 1
 
     if awaiting_approval do
+      # Approval-pending tool calls keep the full box treatment to draw attention
+      header_text = "┌─ #{status_icon} #{tc.name}#{duration_text}#{trust_text}#{command_text}"
+
+      {_id, decs} =
+        add_block(decs, line,
+          placement: :above,
+          render: tool_approval_header_render(header_text, status_fg, theme),
+          priority: 5
+        )
+
+      # Dim tool output text
+      {_id, decs} =
+        add_highlight(decs, {line, 0}, {line + line_count, 0},
+          style: Face.new(fg: theme.text_fg),
+          priority: -10,
+          group: :chat_tool
+        )
+
+      decs = add_tool_border_virtual_text(decs, line, line_count, theme.tool_border)
+      last_line = line + line_count - 1
       add_approval_card(decs, last_line, tc, approval, theme, status_fg)
     else
+      # Non-approval tool calls: compact single-line status
+      header_text = "  #{status_icon} #{tc.name}#{duration_text}#{trust_text}#{command_text}"
+
       {_id, decs} =
-        add_block(decs, last_line,
-          placement: :below,
-          render: fn _w -> [{"└─", Face.new(fg: status_fg)}] end,
+        add_block(decs, line,
+          placement: :above,
+          render: fn _w ->
+            [{header_text, Face.new(fg: status_fg)}]
+          end,
           priority: 5
+        )
+
+      # Fold region for tool output (collapsible with za)
+      fold_placeholder = "  #{status_icon} #{tc.name}#{duration_text} (#{line_count} lines)"
+
+      decs =
+        if has_result and tc.status != :running do
+          {_id, decs} =
+            add_fold(decs, line, line + line_count - 1,
+              closed: tc.collapsed,
+              placeholder: fn _s, _e, _w ->
+                [{fold_placeholder, Face.new(fg: status_fg, italic: true)}]
+              end
+            )
+
+          decs
+        else
+          decs
+        end
+
+      # Dim tool output text
+      {_id, decs} =
+        add_highlight(decs, {line, 0}, {line + line_count, 0},
+          style: Face.new(fg: theme.text_fg),
+          priority: -10,
+          group: :chat_tool
         )
 
       decs
@@ -497,14 +529,9 @@ defmodule MingaEditor.Agent.ChatDecorations do
   defp preview_label(:target), do: "Target"
   defp preview_label(_kind), do: "Args"
 
-  @spec tool_header_render(
-          String.t(),
-          non_neg_integer(),
-          MingaEditor.UI.Theme.Agent.t(),
-          boolean()
-        ) ::
+  @spec tool_approval_header_render(String.t(), non_neg_integer(), MingaEditor.UI.Theme.Agent.t()) ::
           (non_neg_integer() -> [{String.t(), Face.t()}])
-  defp tool_header_render(header_text, status_fg, theme, true = _awaiting) do
+  defp tool_approval_header_render(header_text, status_fg, theme) do
     fn _w ->
       [
         {header_text, Face.new(fg: status_fg, bold: true)},
@@ -522,12 +549,6 @@ defmodule MingaEditor.Agent.ChatDecorations do
     end
   end
 
-  defp tool_header_render(header_text, status_fg, _theme, false) do
-    fn _w ->
-      [{header_text, Face.new(fg: status_fg, bold: true)}]
-    end
-  end
-
   # Ensures assistant prose stays readable even when markdown syntax colors would otherwise dim it.
   @spec add_readable_body_highlight(
           Decorations.t(),
@@ -541,7 +562,7 @@ defmodule MingaEditor.Agent.ChatDecorations do
     {_id, decs} =
       add_highlight(decs, {line, 0}, {line + line_count, 0},
         style: Face.new(fg: text_fg),
-        priority: -30
+        priority: -5
       )
 
     decs

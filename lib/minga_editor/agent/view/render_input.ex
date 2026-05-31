@@ -21,6 +21,7 @@ defmodule MingaEditor.Agent.View.RenderInput do
     :agent_status,
     :panel,
     :agent_ui,
+    active_tool_name: nil,
     messages: [],
     usage: %MingaAgent.TurnUsage{},
     pending_approval: nil,
@@ -33,6 +34,7 @@ defmodule MingaEditor.Agent.View.RenderInput do
           agent_status: atom() | nil,
           panel: panel_data(),
           agent_ui: agent_ui_data(),
+          active_tool_name: String.t() | nil,
           messages: list(),
           usage: MingaAgent.TurnUsage.t(),
           pending_approval: map() | nil,
@@ -130,6 +132,7 @@ defmodule MingaEditor.Agent.View.RenderInput do
         toast: view.toast,
         context_estimate: view.context_estimate
       },
+      active_tool_name: ctx.active_tool_name,
       messages: messages,
       usage: usage,
       pending_approval: ctx.pending_approval,

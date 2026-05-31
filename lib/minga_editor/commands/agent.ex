@@ -11,6 +11,7 @@ defmodule MingaEditor.Commands.Agent do
 
   alias MingaEditor.Agent.BufferSync, as: AgentBufferSync
   alias MingaEditor.Agent.DiffReview
+  alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.FileMention
   alias MingaAgent.Markdown
   alias MingaAgent.Message
@@ -674,10 +675,18 @@ defmodule MingaEditor.Commands.Agent do
   @spec reset_agent_state_for_new_session(state()) :: state()
   defp reset_agent_state_for_new_session(state) do
     agent_buf = AgentAccess.agent(state).buffer
+    old_panel = AgentAccess.panel(state)
 
     state
     |> AgentAccess.update_agent(fn _a -> %AgentState{buffer: agent_buf} end)
-    |> AgentAccess.update_agent_ui(fn _a -> UIState.new() end)
+    |> AgentAccess.update_agent_ui(fn _a ->
+      ui = UIState.new()
+
+      ui
+      |> UIState.set_model_name(old_panel.model_name)
+      |> UIState.set_provider_name(old_panel.provider_name)
+      |> UIState.set_thinking_level(old_panel.thinking_level)
+    end)
   end
 
   @spec create_active_agent_tab(state()) :: state()
@@ -888,7 +897,15 @@ defmodule MingaEditor.Commands.Agent do
     else
       case Session.cycle_model(AgentAccess.session(state)) do
         {:ok, %{"model" => model, "index" => index, "total" => total} = result} ->
-          state = update_agent_ui(state, &UIState.set_model_name(&1, model))
+          provider = AgentConfig.extract_provider_prefix(model)
+
+          state =
+            update_agent_ui(state, fn ui ->
+              ui
+              |> UIState.set_model_name(model)
+              |> UIState.set_provider_name(provider)
+            end)
+
           state = maybe_update_thinking_level(state, Map.get(result, "thinking_level"))
 
           Session.add_system_message(
@@ -917,7 +934,14 @@ defmodule MingaEditor.Commands.Agent do
   @doc "Sets the agent model without resetting conversation context."
   @spec set_model(state(), String.t()) :: state()
   def set_model(state, model) do
-    state = update_agent_ui(state, &UIState.set_model_name(&1, model))
+    provider = AgentConfig.extract_provider_prefix(model)
+
+    state =
+      update_agent_ui(state, fn ui ->
+        ui
+        |> UIState.set_model_name(model)
+        |> UIState.set_provider_name(provider)
+      end)
 
     if AgentAccess.session(state) do
       Session.set_model(AgentAccess.session(state), model)

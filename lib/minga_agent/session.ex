@@ -1246,6 +1246,9 @@ defmodule MingaAgent.Session do
   defp handle_provider_event(%Event.AgentEnd{usage: usage}, state) do
     notify(state, :complete, completion_notification(state))
 
+    # Collapse thinking blocks now that the turn is complete
+    state = %{state | messages: collapse_thinking_blocks(state.messages)}
+
     state =
       if usage do
         log_turn_usage(usage, state)
@@ -1293,16 +1296,13 @@ defmodule MingaAgent.Session do
   end
 
   defp handle_provider_event(%Event.TextDelta{delta: delta}, state) do
-    # Auto-collapse any expanded thinking blocks (thinking is done)
-    messages = collapse_thinking_blocks(state.messages)
-
     state =
-      case append_to_last_assistant(messages, delta) do
+      case append_to_last_assistant(state.messages, delta) do
         {:updated, updated_messages} ->
           %{state | messages: updated_messages}
 
         {:appended, new_msg} ->
-          %{state | messages: messages} |> append_msg(new_msg)
+          append_msg(state, new_msg)
       end
 
     broadcast(state, {:text_delta, delta})
