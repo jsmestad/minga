@@ -2431,6 +2431,7 @@ defmodule MingaAgent.Session do
     Or sign in with a ChatGPT subscription (OpenAI accounts only):
 
       /login                    Sign in via browser, no key needed
+      /login --manual           Sign in by pasting a browser redirect
 
     Ollama is detected automatically if it's running locally.
     Run /auth to see status for all providers.\
@@ -2447,6 +2448,7 @@ defmodule MingaAgent.Session do
 
       /auth anthropic <key>     add an API key (most common)
       /login                    ChatGPT subscription (OpenAI only)
+      /login --manual           ChatGPT subscription on a headless server
 
     Run /auth to see all providers and options.\
     """

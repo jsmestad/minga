@@ -64,6 +64,29 @@ defmodule MingaAgent.RemoteAPITest do
     assert {:ok, _pid} = SessionManager.get_session(session_id)
   end
 
+  test "broker starts OAuth flows only for the attached driver" do
+    assert {:ok, %{session_id: session_id, token: token}} = RemoteAPI.start_session([])
+    on_exit(fn -> SessionManager.stop_session(session_id) end)
+
+    driver = idle_process()
+    viewer = idle_process()
+    on_exit(fn -> Process.exit(driver, :kill) end)
+    on_exit(fn -> Process.exit(viewer, :kill) end)
+
+    assert {:ok, %{role: :driver}} = RemoteAPI.attach(session_id, token, driver, role: :driver)
+    assert {:ok, %{role: :viewer}} = RemoteAPI.attach(session_id, token, viewer, role: :viewer)
+    assert {:error, :not_driver} = RemoteAPI.begin_oauth(session_id, token, viewer)
+
+    assert {:ok, url, ref} = RemoteAPI.begin_oauth(session_id, token, driver)
+    assert is_binary(url)
+    assert is_binary(ref)
+
+    assert {:error, message} =
+             RemoteAPI.complete_oauth(session_id, token, driver, "missing-ref", "code")
+
+    assert message =~ "Unknown OAuth flow"
+  end
+
   test "attach returns cursor catch-up events" do
     session_id = "remote-api-catchup-#{System.unique_integer([:positive])}"
     assert {:ok, ^session_id, pid} = SessionManager.start_session(session_id: session_id)

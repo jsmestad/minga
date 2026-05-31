@@ -222,6 +222,16 @@ defmodule MingaEditor.Agent.UIState do
 
   def set_prompt_text(%__MODULE__{} = state, _text), do: state
 
+  @doc "Clears the input without saving it to history. Use this for sensitive slash-command values."
+  @spec clear_input_without_history(t()) :: t()
+  def clear_input_without_history(%__MODULE__{} = state) do
+    if is_pid(state.panel.prompt_buffer) do
+      Buffer.replace_content(state.panel.prompt_buffer, "")
+    end
+
+    %{state | panel: %{state.panel | history_index: -1, pasted_blocks: []}}
+  end
+
   @doc "Clears the input (after submission). Saves current text to history first."
   @spec clear_input(t()) :: t()
   def clear_input(%__MODULE__{} = state) do
@@ -467,6 +477,12 @@ defmodule MingaEditor.Agent.UIState do
   @spec clear_input_and_scroll(t()) :: t()
   def clear_input_and_scroll(%__MODULE__{} = state) do
     state |> clear_input() |> scroll_to_bottom()
+  end
+
+  @doc "Clears the input without history and scrolls to the latest agent message."
+  @spec clear_input_without_history_and_scroll(t()) :: t()
+  def clear_input_without_history_and_scroll(%__MODULE__{} = state) do
+    state |> clear_input_without_history() |> scroll_to_bottom()
   end
 
   # ── Model/provider config ──────────────────────────────────────────────────

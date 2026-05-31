@@ -26,6 +26,7 @@ defmodule Mix.Tasks.Minga do
   def run(args) do
     {gui?, remaining_args} = extract_gui_flag(args)
     headless? = Minga.CLI.headless_args?(remaining_args)
+    terminal_command? = Minga.CLI.terminal_command_args?(remaining_args)
     minimal? = Minga.CLI.minimal_args?(remaining_args)
     safe? = Minga.CLI.safe_args?(remaining_args)
 
@@ -35,18 +36,18 @@ defmodule Mix.Tasks.Minga do
       Application.put_env(:minga, :minimal_mode, true)
     end
 
-    unless headless? or Minga.CLI.terminal_command?(remaining_args) do
+    unless headless? or terminal_command? do
       Application.put_env(:minga, :start_editor, true)
     end
 
-    if gui? and not headless? and not Minga.CLI.terminal_command?(remaining_args) do
+    if gui? and not headless? and not terminal_command? do
       Application.put_env(:minga, :backend, :gui)
     end
 
     Mix.Task.run("app.start")
     Minga.CLI.main(remaining_args)
 
-    unless help_args?(args) or Minga.CLI.terminal_command?(remaining_args) do
+    unless help_args?(args) or terminal_command? do
       receive do
       end
     end

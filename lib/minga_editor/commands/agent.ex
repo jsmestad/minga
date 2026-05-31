@@ -356,24 +356,43 @@ defmodule MingaEditor.Commands.Agent do
   @spec submit_prompt(state()) :: state()
   def submit_prompt(state) do
     panel = AgentAccess.panel(state)
+    submit_prompt(state, panel, UIState.input_empty?(panel), AgentAccess.session(state))
+  end
 
-    cond do
-      UIState.input_empty?(panel) ->
-        state
+  @spec submit_prompt(state(), Panel.t(), boolean(), pid() | nil) :: state()
+  defp submit_prompt(state, _panel, true, _session), do: state
 
-      AgentAccess.session(state) == nil ->
-        EditorState.set_status(state, "No agent session, try closing and reopening the panel")
+  defp submit_prompt(state, _panel, false, nil) do
+    EditorState.set_status(state, "No agent session, try closing and reopening the panel")
+  end
 
-      true ->
-        text = UIState.prompt_text(panel)
+  defp submit_prompt(state, panel, false, _session) do
+    text = UIState.prompt_text(panel)
+    submit_prompt_text(state, text, SlashCommand.slash_command?(text))
+  end
 
-        if SlashCommand.slash_command?(text) do
-          state = update_agent_ui(state, &UIState.clear_input_and_scroll/1)
-          execute_slash_command(state, text)
-        else
-          send_prompt_to_llm(state, text)
-        end
-    end
+  @spec submit_prompt_text(state(), String.t(), boolean()) :: state()
+  defp submit_prompt_text(state, text, true) do
+    state = clear_submitted_slash_input(state, text)
+    execute_slash_command(state, text)
+  end
+
+  defp submit_prompt_text(state, text, false) do
+    send_prompt_to_llm(state, text)
+  end
+
+  @spec clear_submitted_slash_input(state(), String.t()) :: state()
+  defp clear_submitted_slash_input(state, text) do
+    clear_submitted_slash_input_for_sensitivity(state, SlashCommand.sensitive_command?(text))
+  end
+
+  @spec clear_submitted_slash_input_for_sensitivity(state(), boolean()) :: state()
+  defp clear_submitted_slash_input_for_sensitivity(state, true) do
+    update_agent_ui(state, &UIState.clear_input_without_history_and_scroll/1)
+  end
+
+  defp clear_submitted_slash_input_for_sensitivity(state, false) do
+    update_agent_ui(state, &UIState.clear_input_and_scroll/1)
   end
 
   @spec execute_slash_command(state(), String.t()) :: state()
@@ -615,7 +634,7 @@ defmodule MingaEditor.Commands.Agent do
         text = UIState.prompt_text(panel)
 
         if SlashCommand.slash_command?(text) do
-          state = update_agent_ui(state, &UIState.clear_input_and_scroll/1)
+          state = clear_submitted_slash_input(state, text)
           execute_slash_command(state, text)
         else
           send_follow_up_to_llm(state, text)

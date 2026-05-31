@@ -76,6 +76,22 @@ defmodule MingaEditor.Agent.SlashCommandTest do
     end
   end
 
+  describe "sensitive_command?/1" do
+    test "detects secret-bearing auth and login completion commands" do
+      assert SlashCommand.sensitive_command?("/auth openai sk-test-secret")
+      assert SlashCommand.sensitive_command?("/auth openai sk-test-secret extra")
+      assert SlashCommand.sensitive_command?("/login --complete ref code")
+      assert SlashCommand.sensitive_command?("/login openai --complete ref code")
+      assert SlashCommand.sensitive_command?("/login openai --COMPLETE ref code")
+      assert SlashCommand.sensitive_command?("/LOGIN --complete ref code")
+      assert SlashCommand.sensitive_command?("/login   --complete ref code")
+      assert SlashCommand.sensitive_command?("/login --complete")
+      refute SlashCommand.sensitive_command?("/auth revoke openai")
+      refute SlashCommand.sensitive_command?("/login --manual")
+      refute SlashCommand.sensitive_command?("/help")
+    end
+  end
+
   describe "commands/0" do
     test "returns a list of command maps" do
       cmds = SlashCommand.commands()
