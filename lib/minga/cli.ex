@@ -21,6 +21,10 @@ defmodule Minga.CLI do
   @typedoc "Parsed CLI result."
   @type parsed ::
           {:open, file :: String.t() | nil, flags()}
+          | {:attach, url :: String.t(), flags()}
+          | {:sessions, url :: String.t(), flags()}
+          | {:detach, flags()}
+          | {:kill_session, url :: String.t(), flags()}
           | {:error, String.t()}
 
   @typedoc "Startup view mode requested by CLI flags."
@@ -71,6 +75,44 @@ defmodule Minga.CLI do
         with :ok <- maybe_start_debug_log(flags),
              :ok <- maybe_start_distribution(flags) do
           launch(flags, file)
+        else
+          {:error, message} -> abort_startup(message)
+        end
+
+      {:attach, url, flags} ->
+        store_startup_flags(flags, nil)
+
+        with :ok <- maybe_start_debug_log(flags),
+             :ok <- maybe_start_remote_distribution(flags),
+             {:ok, _result} <- Minga.Remote.CLI.attach(url) do
+          launch(flags, nil)
+          Minga.Remote.CLI.connect_pending_editor_attach()
+        else
+          {:error, message} -> abort_startup(message)
+        end
+
+      {:sessions, url, flags} ->
+        with :ok <- maybe_start_debug_log(flags),
+             :ok <- maybe_start_remote_distribution(flags),
+             :ok <- Minga.Remote.CLI.sessions(url) do
+          :ok
+        else
+          {:error, message} -> abort_startup(message)
+        end
+
+      {:detach, flags} ->
+        with :ok <- maybe_start_debug_log(flags),
+             :ok <- Minga.Remote.CLI.detach() do
+          :ok
+        else
+          {:error, message} -> abort_startup(message)
+        end
+
+      {:kill_session, url, flags} ->
+        with :ok <- maybe_start_debug_log(flags),
+             :ok <- maybe_start_remote_distribution(flags),
+             :ok <- Minga.Remote.CLI.kill_session(url) do
+          :ok
         else
           {:error, message} -> abort_startup(message)
         end
@@ -200,6 +242,34 @@ defmodule Minga.CLI do
 
   @spec parse_args([String.t()], String.t() | nil, flags()) :: parsed()
   defp parse_args([], file, flags), do: {:open, file, flags}
+
+  defp parse_args(["attach", url | rest], nil, flags) when is_binary(url) do
+    parse_remote_subcommand(rest, {:attach, url, flags})
+  end
+
+  defp parse_args(["attach" | _rest], _file, _flags) do
+    {:error, "attach requires an ssh://host/path URL\n\n#{usage()}"}
+  end
+
+  defp parse_args(["sessions", url | rest], nil, flags) when is_binary(url) do
+    parse_remote_subcommand(rest, {:sessions, url, flags})
+  end
+
+  defp parse_args(["sessions" | _rest], _file, _flags) do
+    {:error, "sessions requires an ssh://host URL\n\n#{usage()}"}
+  end
+
+  defp parse_args(["detach" | rest], nil, flags) do
+    parse_remote_subcommand(rest, {:detach, flags})
+  end
+
+  defp parse_args(["kill-session", url | rest], nil, flags) when is_binary(url) do
+    parse_remote_subcommand(rest, {:kill_session, url, flags})
+  end
+
+  defp parse_args(["kill-session" | _rest], _file, _flags) do
+    {:error, "kill-session requires an ssh://host/path URL\n\n#{usage()}"}
+  end
 
   defp parse_args(["--help" | _], _file, _flags), do: {:error, usage()}
   defp parse_args(["-h" | _], _file, _flags), do: {:error, usage()}
@@ -366,6 +436,12 @@ defmodule Minga.CLI do
     parse_args(rest, file_path, flags)
   end
 
+  @spec parse_remote_subcommand([String.t()], parsed()) :: parsed()
+  defp parse_remote_subcommand([], action), do: action
+
+  defp parse_remote_subcommand([flag | _rest], _action),
+    do: {:error, "unexpected argument for remote subcommand: #{flag}\n\n#{usage()}"}
+
   # ── Launch helpers ──────────────────────────────────────────────────────────
 
   @spec launch(flags(), String.t() | nil) :: :ok
@@ -468,6 +544,17 @@ defmodule Minga.CLI do
     case Minga.Distribution.Config.load() do
       [] -> :ok
       _servers -> ensure_distribution_started(:client, flags)
+    end
+  end
+
+  @spec maybe_start_remote_distribution(flags()) :: :ok | {:error, String.t()}
+  defp maybe_start_remote_distribution(flags) do
+    case ensure_distribution_started(:client, flags) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        {:error, "Failed to start Erlang distribution for remote command: #{reason}"}
     end
   end
 
@@ -823,6 +910,10 @@ defmodule Minga.CLI do
     minga #{Minga.version()} -- BEAM-powered modal text editor
 
     Usage: minga [options] [filename]
+           minga attach ssh://[user@]host[:port]/path
+           minga sessions ssh://[user@]host[:port]
+           minga detach
+           minga kill-session ssh://[user@]host[:port]/path
 
     Options:
       -h, --help             Show this help message
@@ -846,6 +937,9 @@ defmodule Minga.CLI do
       minga README.md                    Open file for editing
       minga .                            Start agentic view with project as context
       minga --editor README.md           Open file in traditional editor
+      minga attach ssh://devbox/work/app  Attach to a remote server-side checkout
+      minga sessions ssh://devbox         List remote sessions without launching the editor
+      minga kill-session ssh://devbox/work/app  Stop the remote session for that checkout
       MINGA_COOKIE=$(openssl rand -base64 32 | tr -d '/+=') minga --headless   Start detachable agent server
       minga --config ~/minimal.exs       Use a custom config profile
       minga --safe                       Start with defaults and no user config

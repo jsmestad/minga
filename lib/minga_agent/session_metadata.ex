@@ -19,7 +19,8 @@ defmodule MingaAgent.SessionMetadata do
           turn_count: non_neg_integer(),
           first_prompt: String.t() | nil,
           cost: float(),
-          status: MingaAgent.Session.status()
+          status: MingaAgent.Session.status(),
+          workdir: String.t() | nil
         }
 
   @enforce_keys [:id, :model_name, :created_at, :last_message_at]
@@ -33,5 +34,6 @@ defmodule MingaAgent.SessionMetadata do
             turn_count: 0,
             first_prompt: nil,
             cost: 0.0,
-            status: :idle
+            status: :idle,
+            workdir: nil
 end

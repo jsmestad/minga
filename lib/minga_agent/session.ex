@@ -74,6 +74,7 @@ defmodule MingaAgent.Session do
   @type state :: %{
           session_id: String.t(),
           remote_token: String.t() | nil,
+          workdir: String.t() | nil,
           event_log_server: GenServer.server(),
           provider: pid() | nil,
           provider_module: module(),
@@ -635,6 +636,7 @@ defmodule MingaAgent.Session do
     state = %{
       session_id: session_id,
       remote_token: Keyword.get(opts, :remote_token),
+      workdir: Keyword.get(opts, :workdir),
       event_log_server: Keyword.get(opts, :event_log_server, EventLog),
       provider: nil,
       provider_module: provider_module,
@@ -981,7 +983,8 @@ defmodule MingaAgent.Session do
       turn_count: count_user_turns(state.messages),
       first_prompt: first_prompt,
       cost: state.total_usage.cost,
-      status: state.status
+      status: state.status,
+      workdir: state.workdir
     }
 
     {:reply, meta, state}

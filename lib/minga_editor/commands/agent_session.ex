@@ -258,6 +258,21 @@ defmodule MingaEditor.Commands.AgentSession do
     :exit, reason -> {:error, reason}
   end
 
+  @doc "Detaches from the current remote agent session without stopping it."
+  @spec detach_current_remote_session(state()) :: state()
+  def detach_current_remote_session(state) do
+    case AgentAccess.session(state) do
+      session when is_pid(session) and node(session) != node() ->
+        detach_remote_session(state, session)
+
+      _other ->
+        EditorState.set_status(state, "No attached remote session")
+    end
+  catch
+    :exit, reason ->
+      EditorState.set_status(state, "Failed to detach remote session: #{inspect(reason)}")
+  end
+
   @doc "Stops the current agent session, routing remote sessions to their remote manager."
   @spec stop_current_session(state()) :: state()
   def stop_current_session(state) do
@@ -568,6 +583,60 @@ defmodule MingaEditor.Commands.AgentSession do
       )
     end)
   end
+
+  @spec detach_remote_session(state(), pid()) :: state()
+  defp detach_remote_session(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, session) do
+    case TabBar.find_by_session(tb, session) do
+      %Tab{remote_session_id: session_id} when is_binary(session_id) ->
+        case detach_remote_session_by_id(node(session), session_id) do
+          :ok ->
+            state
+            |> clear_restart_session(session)
+            |> mark_remote_session_disconnected(session_id)
+            |> EditorState.set_status("Detached remote session #{session_id}")
+
+          {:error, reason} ->
+            EditorState.set_status(state, "Failed to detach remote session: #{inspect(reason)}")
+        end
+
+      _ ->
+        EditorState.set_status(state, "Remote session id is unavailable")
+    end
+  end
+
+  defp detach_remote_session(state, _session), do: state
+
+  @spec detach_remote_session_by_id(node(), String.t()) :: :ok | {:error, term()}
+  defp detach_remote_session_by_id(remote_node, session_id) do
+    with {:ok, token} <- remote_session_token(remote_node, session_id) do
+      :erpc.call(remote_node, MingaAgent.RemoteAPI, :detach, [session_id, token, self()], 5_000)
+    end
+  catch
+    :exit, reason -> {:error, reason}
+  end
+
+  @spec mark_remote_session_disconnected(state(), String.t()) :: state()
+  defp mark_remote_session_disconnected(
+         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
+         session_id
+       ) do
+    tb =
+      Enum.reduce(tb.workspaces, tb, fn
+        %Workspace{id: workspace_id, remote_session: %{session_id: ^session_id}}, acc ->
+          TabBar.update_workspace(
+            acc,
+            workspace_id,
+            &Workspace.set_remote_connection_status(&1, :disconnected)
+          )
+
+        _workspace, acc ->
+          acc
+      end)
+
+    EditorState.set_tab_bar(state, tb)
+  end
+
+  defp mark_remote_session_disconnected(state, _session_id), do: state
 
   @spec stop_remote_session(state(), pid()) :: state()
   defp stop_remote_session(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, session) do

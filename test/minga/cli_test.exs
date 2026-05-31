@@ -48,6 +48,25 @@ defmodule Minga.CLITest do
                CLI.parse_args(["README.md"])
     end
 
+    test "remote attach subcommand returns attach action" do
+      assert {:attach, "ssh://devbox/work/app", %{view_mode: :auto}} =
+               CLI.parse_args(["attach", "ssh://devbox/work/app"])
+    end
+
+    test "remote sessions subcommand returns sessions action" do
+      assert {:sessions, "ssh://devbox", %{view_mode: :auto}} =
+               CLI.parse_args(["sessions", "ssh://devbox"])
+    end
+
+    test "remote detach subcommand returns detach action" do
+      assert {:detach, %{view_mode: :auto}} = CLI.parse_args(["detach"])
+    end
+
+    test "remote kill-session subcommand returns kill action" do
+      assert {:kill_session, "ssh://devbox/work/app", %{view_mode: :auto}} =
+               CLI.parse_args(["kill-session", "ssh://devbox/work/app"])
+    end
+
     test "file argument with extra non-flag args takes the last file" do
       assert {:open, "other.txt", %{view_mode: :auto, no_context: false, config_file: nil}} =
                CLI.parse_args(["file.txt", "other.txt"])

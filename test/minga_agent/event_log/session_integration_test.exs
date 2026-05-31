@@ -17,7 +17,7 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
     def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
 
     @impl MingaAgent.Provider
-    def send_prompt(pid, text), do: GenServer.cast(pid, {:prompt, text})
+    def send_prompt(pid, text), do: GenServer.call(pid, {:prompt, text})
 
     @impl MingaAgent.Provider
     def abort(pid), do: GenServer.cast(pid, :abort)
@@ -37,12 +37,13 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
     end
 
     @impl true
-    def handle_cast({:prompt, text}, state) do
+    def handle_call({:prompt, text}, _from, state) do
       send(state.subscriber, {:agent_provider_event, %Event.AgentStart{}})
       send(state.subscriber, {:agent_provider_event, %Event.TextDelta{delta: text}})
-      {:noreply, state}
+      {:reply, :ok, state}
     end
 
+    @impl true
     def handle_cast(:abort, state), do: {:noreply, state}
     def handle_cast(:new_session, state), do: {:noreply, state}
   end

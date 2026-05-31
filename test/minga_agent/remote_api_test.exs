@@ -51,6 +51,19 @@ defmodule MingaAgent.RemoteAPITest do
     assert {:error, :not_driver} = RemoteAPI.send_prompt(session_id, token, viewer, "not allowed")
   end
 
+  test "detach removes the subscriber without stopping the session" do
+    assert {:ok, %{session_id: session_id, token: token}} = RemoteAPI.start_session([])
+    on_exit(fn -> SessionManager.stop_session(session_id) end)
+
+    client = idle_process()
+    on_exit(fn -> Process.exit(client, :kill) end)
+
+    assert {:ok, %{role: :driver}} = RemoteAPI.attach(session_id, token, client, role: :driver)
+    assert :ok = RemoteAPI.detach(session_id, token, client)
+    assert {:error, :not_driver} = RemoteAPI.send_prompt(session_id, token, client, "not allowed")
+    assert {:ok, _pid} = SessionManager.get_session(session_id)
+  end
+
   test "attach returns cursor catch-up events" do
     session_id = "remote-api-catchup-#{System.unique_integer([:positive])}"
     assert {:ok, ^session_id, pid} = SessionManager.start_session(session_id: session_id)

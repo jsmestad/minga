@@ -36,7 +36,7 @@ defmodule MingaAgent.RemoteAPI do
           {:ok, session_info()} | {:error, term()}
   def start_or_get_for_workdir(workdir, opts \\ []) when is_binary(workdir) do
     session_id = SessionManager.stable_session_id_for_workdir(workdir)
-    opts = Keyword.put(opts, :session_id, session_id)
+    opts = opts |> Keyword.put(:session_id, session_id) |> Keyword.put_new(:workdir, workdir)
 
     with {:ok, ^session_id, pid} <- SessionManager.start_or_get_session(session_id, opts),
          {:ok, token} <- SessionManager.session_token(session_id) do
@@ -74,6 +74,16 @@ defmodule MingaAgent.RemoteAPI do
          events: events,
          latest_event_id: latest_event_id
        )}
+    end
+  end
+
+  @doc "Detaches a client process from a session without stopping the session."
+  @spec detach(String.t(), String.t(), pid()) :: :ok | {:error, term()}
+  def detach(session_id, token, client_pid)
+      when is_binary(session_id) and is_binary(token) and is_pid(client_pid) do
+    with :ok <- authorize(session_id, token),
+         {:ok, pid} <- SessionManager.get_session(session_id) do
+      Session.unsubscribe(pid, client_pid)
     end
   end
 
