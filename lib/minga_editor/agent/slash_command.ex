@@ -151,7 +151,9 @@ defmodule MingaEditor.Agent.SlashCommand do
   @spec sensitive_auth_args?(String.t()) :: boolean()
   defp sensitive_auth_args?(args) do
     case String.split(String.trim(args), " ", parts: 3, trim: true) do
-      ["revoke" | _] -> false
+      ["revoke"] -> false
+      ["revoke", _provider] -> false
+      ["revoke", _provider, _extra] -> true
       [_provider] -> false
       [_provider, _key | _rest] -> true
       [] -> false

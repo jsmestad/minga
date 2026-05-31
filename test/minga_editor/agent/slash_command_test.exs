@@ -86,7 +86,9 @@ defmodule MingaEditor.Agent.SlashCommandTest do
       assert SlashCommand.sensitive_command?("/LOGIN --complete ref code")
       assert SlashCommand.sensitive_command?("/login   --complete ref code")
       assert SlashCommand.sensitive_command?("/login --complete")
+      refute SlashCommand.sensitive_command?("/auth revoke")
       refute SlashCommand.sensitive_command?("/auth revoke openai")
+      assert SlashCommand.sensitive_command?("/auth revoke openai extra-secret")
       refute SlashCommand.sensitive_command?("/login --manual")
       refute SlashCommand.sensitive_command?("/help")
     end
