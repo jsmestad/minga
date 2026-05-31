@@ -68,7 +68,7 @@ defmodule MingaEditor.Agent.BufferSync do
 
     pinned_entries = extract_pinned_message_entries(message_id_pairs, pinned_ids, hidden_count)
 
-    {text, line_offsets, display_messages, display_indices} =
+    {text, line_offsets, display_messages} =
       build_display_text(visible_entries, pinned_entries, hidden_count)
 
     text_lines = String.split(text, "\n")
@@ -109,7 +109,7 @@ defmodule MingaEditor.Agent.BufferSync do
         Buffer.replace_generated_content(pid, text)
     end
 
-    line_index = build_line_index(display_messages, text_lines, line_offsets, display_indices)
+    line_index = build_line_index(display_messages, text_lines, line_offsets)
     {line_index, display_messages}
   end
 
@@ -188,28 +188,13 @@ defmodule MingaEditor.Agent.BufferSync do
     build_line_index(messages, text_lines, line_offsets)
   end
 
-  # Builds the line index from pre-computed text lines and offsets.
-  # Used by both sync/3 (cached path) and line_message_index/1 (fallback).
-  # All classification is O(n) in the total number of buffer lines.
   @spec build_line_index([term()], [String.t()], [ChatDecorations.line_offset()]) ::
           [{non_neg_integer(), line_type()}]
+  defp build_line_index(_messages, [], _line_offsets), do: []
+
   defp build_line_index(messages, text_lines, line_offsets) do
-    display_indices = Enum.to_list(0..(length(messages) - 1)//1)
-    build_line_index(messages, text_lines, line_offsets, display_indices)
-  end
-
-  @spec build_line_index(
-          [term()],
-          [String.t()],
-          [ChatDecorations.line_offset()],
-          [non_neg_integer()]
-        ) :: [{non_neg_integer(), line_type()}]
-  defp build_line_index(_messages, [], _line_offsets, _display_indices), do: []
-
-  defp build_line_index(messages, text_lines, line_offsets, display_indices) do
     total_lines = length(text_lines)
 
-    # Build a lookup: buffer_line -> {msg_idx, start_line, line_count}
     line_to_msg =
       line_offsets
       |> Enum.flat_map(fn {msg_idx, start, count} ->
@@ -217,21 +202,16 @@ defmodule MingaEditor.Agent.BufferSync do
       end)
       |> Map.new()
 
-    # Pre-compute fence state for all assistant message lines in one O(n) pass.
-    # Maps buffer_line_number -> :code | :text for lines in assistant messages.
     fence_map = build_fence_map(messages, text_lines, line_offsets)
 
     for line_num <- 0..(total_lines - 1) do
       case Map.get(line_to_msg, line_num) do
         {msg_idx, _start_line, _count} ->
           msg = Enum.at(messages, msg_idx)
-          original_idx = Enum.at(display_indices, msg_idx, msg_idx)
-          {original_idx, classify_line(msg, line_num, fence_map)}
+          {msg_idx, classify_line(msg, line_num, fence_map)}
 
         nil ->
-          # Separator line between messages ("\n\n" join).
-          display_idx = prev_message_idx(line_offsets, line_num)
-          {Enum.at(display_indices, display_idx, display_idx), :empty}
+          {prev_message_idx(line_offsets, line_num), :empty}
       end
     end
   end
@@ -326,7 +306,7 @@ defmodule MingaEditor.Agent.BufferSync do
           [{non_neg_integer(), term()}],
           [{non_neg_integer(), term()}],
           non_neg_integer()
-        ) :: {String.t(), [ChatDecorations.line_offset()], [term()], [non_neg_integer()]}
+        ) :: {String.t(), [ChatDecorations.line_offset()], [term()]}
   defp build_display_text(visible_entries, pinned_entries, hidden_count) do
     prefix_entries =
       if pinned_entries != [] do
@@ -348,9 +328,8 @@ defmodule MingaEditor.Agent.BufferSync do
 
     display_entries = prefix_entries ++ separator_entries ++ visible_entries
     display_messages = Enum.map(display_entries, fn {_idx, msg} -> msg end)
-    display_indices = Enum.map(display_entries, fn {idx, _msg} -> idx end)
     {text, offsets} = messages_to_markdown_with_offsets(display_messages)
-    {text, offsets, display_messages, display_indices}
+    {text, offsets, display_messages}
   end
 
   @spec separator_index([{non_neg_integer(), term()}], [{non_neg_integer(), term()}]) ::

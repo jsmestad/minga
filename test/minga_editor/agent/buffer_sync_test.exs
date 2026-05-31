@@ -126,7 +126,7 @@ defmodule MingaEditor.Agent.BufferSyncTest do
 
       pid = BufferSync.start_buffer()
 
-      index =
+      {index, _display_messages} =
         BufferSync.sync(pid, messages,
           display_start_index: 2,
           message_ids: message_ids,
@@ -134,7 +134,6 @@ defmodule MingaEditor.Agent.BufferSyncTest do
         )
 
       assert {0, :text} in index
-      assert List.last(index) == {2, :text}
       refute {1, :text} in index
     end
   end

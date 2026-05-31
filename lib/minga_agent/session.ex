@@ -961,7 +961,7 @@ defmodule MingaAgent.Session do
 
     state = %{state | pinned_ids: pinned}
     broadcast(state, :messages_changed)
-    {:reply, :ok, state}
+    {:reply, :ok, schedule_save(state)}
   end
 
   def handle_call(:get_provider, _from, state) do
