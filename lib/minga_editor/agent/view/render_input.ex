@@ -156,11 +156,20 @@ defmodule MingaEditor.Agent.View.RenderInput do
 
   @spec session_title([term()]) :: String.t()
   defp session_title(messages) do
-    case Enum.find(messages, fn msg -> match?({:user, _}, msg) or match?({:user, _, _}, msg) end) do
-      {:user, text} -> truncate_title(text)
-      {:user, text, _attachments} -> truncate_title(text)
-      nil -> "Minga Agent"
-    end
+    assistant_title =
+      Enum.find_value(messages, fn
+        {:assistant, text} when is_binary(text) and text != "" -> truncate_title(text)
+        _ -> nil
+      end)
+
+    user_title =
+      Enum.find_value(messages, fn
+        {:user, text} when is_binary(text) -> truncate_title(text)
+        {:user, text, _} when is_binary(text) -> truncate_title(text)
+        _ -> nil
+      end)
+
+    assistant_title || user_title || "Minga Agent"
   end
 
   @spec truncate_title(String.t()) :: String.t()

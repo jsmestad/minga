@@ -919,10 +919,11 @@ defmodule MingaAgent.Session do
 
   def handle_call(:metadata, _from, state) do
     first_prompt = first_user_prompt(state.messages)
+    title = readable_title(first_assistant_text(state.messages)) || readable_title(first_prompt)
 
     meta = %SessionMetadata{
       id: state.session_id,
-      title: readable_title(first_prompt),
+      title: title,
       model_name: state.model_name,
       provider_name: state.provider_name,
       created_at: state.created_at,
@@ -2045,7 +2046,7 @@ defmodule MingaAgent.Session do
       id: state.session_id,
       timestamp: now,
       last_message_at: last_message_at,
-      title: readable_title(first_user_prompt(state.messages)),
+      title: readable_title(first_assistant_text(state.messages)) || readable_title(first_user_prompt(state.messages)),
       model_name: state.model_name,
       provider_name: state.provider_name,
       messages: state.messages,
@@ -2177,6 +2178,14 @@ defmodule MingaAgent.Session do
       "" -> nil
       title -> title
     end
+  end
+
+  @spec first_assistant_text([Message.t()]) :: String.t() | nil
+  defp first_assistant_text(messages) do
+    Enum.find_value(messages, fn
+      {:assistant, text} when is_binary(text) and text != "" -> text
+      _ -> nil
+    end)
   end
 
   @spec generate_session_id() :: String.t()

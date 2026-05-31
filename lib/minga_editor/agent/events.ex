@@ -97,6 +97,7 @@ defmodule MingaEditor.Agent.Events do
   def handle(state, :messages_changed) do
     state = AgentAccess.update_agent_ui(state, &UIState.maybe_auto_scroll/1)
     state = AgentAccess.update_panel(state, &Panel.bump_message_version/1)
+    state = maybe_rename_workspace_from_assistant(state)
     {state, [{:render, 16}, :sync_agent_buffer, {:update_tab_label, ""}]}
   end
 
@@ -733,6 +734,44 @@ defmodule MingaEditor.Agent.Events do
     else
       _ -> nil
     end
+  end
+
+  @spec maybe_rename_workspace_from_assistant(EditorState.t()) :: EditorState.t()
+  defp maybe_rename_workspace_from_assistant(state) do
+    session = AgentAccess.session(state)
+    tb = EditorState.tab_bar(state)
+
+    with pid when is_pid(pid) <- session,
+         %Workspace{custom_name: nil} = ws <- TabBar.find_workspace_by_session(tb, pid) do
+      messages = safe_messages(pid)
+
+      case first_assistant_opening(messages) do
+        nil -> state
+        text -> maybe_apply_auto_name(state, ws, text)
+      end
+    else
+      _ -> state
+    end
+  rescue
+    _ -> state
+  end
+
+  @spec first_assistant_opening([term()]) :: String.t() | nil
+  defp first_assistant_opening(messages) do
+    Enum.find_value(messages, fn
+      {:assistant, text} when is_binary(text) and text != "" ->
+        text |> String.split("\n") |> hd() |> String.trim()
+
+      _ ->
+        nil
+    end)
+  end
+
+  @spec safe_messages(pid()) :: [term()]
+  defp safe_messages(pid) do
+    Session.messages(pid)
+  catch
+    :exit, _ -> []
   end
 
   @spec reset_compact_state(EditorState.t()) :: EditorState.t()
