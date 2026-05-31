@@ -674,12 +674,26 @@ defmodule MingaEditor.Agent.Events do
   @doc false
   @spec replay_catchup(EditorState.t(), [MingaAgent.EventLog.EventRecord.t()]) :: EditorState.t()
   def replay_catchup(state, events) do
-    Enum.reduce(events, state, fn event, acc ->
-      case event_record_to_editor_event(event) do
-        nil -> acc
-        editor_event -> elem(handle(acc, editor_event), 0)
-      end
-    end)
+    events
+    |> Enum.map(&event_record_to_editor_event/1)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.reduce(state, &replay_one_catchup_event/2)
+  end
+
+  @spec replay_one_catchup_event(term(), EditorState.t()) :: EditorState.t()
+  defp replay_one_catchup_event({:file_changed, path, _, _, tool_call_id, _} = event, state) do
+    if catchup_already_applied?(state, path, tool_call_id),
+      do: state,
+      else: elem(handle(state, event), 0)
+  end
+
+  @spec catchup_already_applied?(EditorState.t(), String.t(), String.t()) :: boolean()
+  defp catchup_already_applied?(state, path, tool_call_id) do
+    state
+    |> AgentAccess.view()
+    |> Map.get(:edit_timeline)
+    |> EditTimeline.entries_for(path)
+    |> Enum.any?(&(&1.tool_call_id == tool_call_id))
   end
 
   @spec event_record_to_editor_event(MingaAgent.EventLog.EventRecord.t()) :: term() | nil

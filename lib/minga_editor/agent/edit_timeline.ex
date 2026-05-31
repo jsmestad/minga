@@ -53,22 +53,17 @@ defmodule MingaEditor.Agent.EditTimeline do
     timeline = maybe_record_baseline(timeline, path, before_content)
 
     existing = Map.get(timeline.entries, path, [])
+    index = length(existing)
 
-    if Enum.any?(existing, &(&1.tool_call_id == tool_call_id)) do
-      timeline
-    else
-      index = length(existing)
+    entry = %Entry{
+      index: index,
+      tool_call_id: tool_call_id,
+      tool_name: tool_name,
+      timestamp: System.monotonic_time(:millisecond),
+      snapshot: DiffSnapshot.from_content(after_content)
+    }
 
-      entry = %Entry{
-        index: index,
-        tool_call_id: tool_call_id,
-        tool_name: tool_name,
-        timestamp: System.monotonic_time(:millisecond),
-        snapshot: DiffSnapshot.from_content(after_content)
-      }
-
-      %{timeline | entries: Map.put(timeline.entries, path, existing ++ [entry])}
-    end
+    %{timeline | entries: Map.put(timeline.entries, path, existing ++ [entry])}
   end
 
   @spec entries_for(t(), String.t()) :: [Entry.t()]
