@@ -26,9 +26,16 @@ defmodule MingaAgent.EventLog.Taxonomy do
     :driver_changed
   ]
 
+  @event_type_map Map.new(@events, fn atom -> {Atom.to_string(atom), atom} end)
+
   @doc "Returns the canonical persisted event names."
   @spec events() :: [t()]
   def events, do: @events
+
+  @doc "Converts a stored event type string to its canonical atom, or `:error` for unknown types."
+  @spec from_string(String.t()) :: {:ok, t()} | :error
+  def from_string(type_string) when is_binary(type_string),
+    do: Map.fetch(@event_type_map, type_string)
 
   @doc "Returns true when an atom is part of the canonical taxonomy."
   @spec known?(atom()) :: boolean()

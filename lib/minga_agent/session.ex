@@ -1963,8 +1963,7 @@ defmodule MingaAgent.Session do
   defp event_log_entry({:approval_pending, approval}),
     do: {:approval_requested, Map.put(approval, :approval_id, approval.tool_call_id)}
 
-  defp event_log_entry({:approval_resolved, decision}),
-    do: {:approval_resolved, %{decision: decision}}
+  defp event_log_entry({:approval_resolved, _decision}), do: nil
 
   defp event_log_entry({:system_message, message, level}),
     do: {:system_message, %{message: message, level: level}}
@@ -1975,7 +1974,7 @@ defmodule MingaAgent.Session do
   defp event_log_entry({:prompt_queued, content, queue}),
     do: {:prompt_queued, %{content: content, queue: queue}}
 
-  defp event_log_entry(:messages_changed), do: {:message_changed, %{changed: true}}
+  defp event_log_entry(:messages_changed), do: nil
   defp event_log_entry({:error, message}), do: {:error, %{message: message}}
 
   defp event_log_entry({:context_usage, estimated_tokens, context_limit}),
