@@ -64,6 +64,12 @@ defmodule MingaEditor.Agent.Events do
           AgentAccess.update_agent(state, &AgentState.stop_spinner_timer/1)
       end
 
+    state =
+      case status do
+        :idle -> reset_compact_state(state)
+        _ -> state
+      end
+
     # Sync the tab's agent_status for tab bar rendering
     state = sync_tab_agent_status(state, status)
 
@@ -267,11 +273,12 @@ defmodule MingaEditor.Agent.Events do
     {state, [{:render, 16}]}
   end
 
-  def handle(state, {:context_usage, estimated_tokens, _context_limit}) do
+  def handle(state, {:context_usage, estimated_tokens, context_limit}) do
     state =
       AgentAccess.update_view(state, fn v -> %{v | context_estimate: estimated_tokens} end)
 
-    {state, [{:render, 16}]}
+    {state, effects} = maybe_auto_compact(state, estimated_tokens, context_limit)
+    {state, [{:render, 16} | effects]}
   end
 
   # A message was queued (steer or follow-up): trigger render so the pending
@@ -287,6 +294,38 @@ defmodule MingaEditor.Agent.Events do
   # clear the pending display.
   def handle(state, :queues_recalled) do
     {state, [{:render, 16}]}
+  end
+
+  def handle(state, {:compact_result, {:ok, summary}}) do
+    state =
+      AgentAccess.update_view(state, fn v -> %{v | compaction_in_progress: false} end)
+
+    case AgentAccess.session(state) do
+      pid when is_pid(pid) ->
+        Session.add_system_message(pid, "Context auto-compacted: #{summary}")
+
+      _ ->
+        :ok
+    end
+
+    state =
+      AgentAccess.update_agent_ui(state, fn ui ->
+        UIState.push_toast(ui, "Context compacted", :info)
+      end)
+
+    {state, [:render, :sync_agent_buffer]}
+  end
+
+  def handle(state, {:compact_result, {:error, reason}}) do
+    state =
+      AgentAccess.update_view(state, fn v -> %{v | compaction_in_progress: false} end)
+
+    state =
+      AgentAccess.update_agent_ui(state, fn ui ->
+        UIState.push_toast(ui, "Auto-compact failed: #{inspect(reason)}", :error)
+      end)
+
+    {state, [:render]}
   end
 
   def handle(state, _unknown) do
@@ -694,6 +733,77 @@ defmodule MingaEditor.Agent.Events do
     else
       _ -> nil
     end
+  end
+
+  @spec reset_compact_state(EditorState.t()) :: EditorState.t()
+  defp reset_compact_state(state) do
+    AgentAccess.update_view(state, fn v ->
+      %{v | compact_warned: false, compact_triggered: false}
+    end)
+  rescue
+    _ -> state
+  end
+
+  @spec maybe_auto_compact(EditorState.t(), non_neg_integer(), non_neg_integer() | nil) ::
+          {EditorState.t(), [effect()]}
+  defp maybe_auto_compact(state, _estimated_tokens, nil), do: {state, []}
+  defp maybe_auto_compact(state, _estimated_tokens, 0), do: {state, []}
+
+  defp maybe_auto_compact(state, estimated_tokens, context_limit) do
+    view = AgentAccess.view(state)
+    agent_status = AgentAccess.agent(state).runtime.status
+
+    if agent_status in [:thinking, :tool_executing] or view.compaction_in_progress do
+      {state, []}
+    else
+      fill_pct = min(round(estimated_tokens / context_limit * 100), 100)
+      auto_pct = compact_auto_threshold()
+      warn_pct = compact_warn_threshold()
+
+      cond do
+        auto_pct > 0 and fill_pct >= auto_pct and not view.compact_triggered ->
+          session = AgentAccess.session(state)
+
+          if is_pid(session) do
+            state =
+              AgentAccess.update_view(state, fn v ->
+                %{v | compact_triggered: true, compaction_in_progress: true}
+              end)
+
+            {state, [{:compact_session, session}]}
+          else
+            {state, []}
+          end
+
+        warn_pct > 0 and fill_pct >= warn_pct and not view.compact_warned ->
+          state =
+            AgentAccess.update_view(state, fn v -> %{v | compact_warned: true} end)
+
+          state =
+            AgentAccess.update_agent_ui(state, fn ui ->
+              UIState.push_toast(ui, "Context at #{fill_pct}%. Run /compact to free space.", :warning)
+            end)
+
+          {state, []}
+
+        true ->
+          {state, []}
+      end
+    end
+  end
+
+  @spec compact_warn_threshold() :: non_neg_integer()
+  defp compact_warn_threshold do
+    case Minga.Config.Options.get(:agent_compaction_threshold, 0.8) do
+      nil -> 0
+      threshold -> round(threshold * 100)
+    end
+  end
+
+  @spec compact_auto_threshold() :: non_neg_integer()
+  defp compact_auto_threshold do
+    warn = compact_warn_threshold()
+    if warn > 0, do: min(warn + 10, 100), else: 0
   end
 
   @spec safe_buffer_path(pid()) :: String.t() | nil

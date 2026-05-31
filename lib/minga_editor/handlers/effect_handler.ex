@@ -90,6 +90,7 @@ defmodule MingaEditor.Handlers.EffectHandler do
           | {:evict_parser_trees_timer}
           | {:refresh_tool_picker}
           | {:save_session_async, term(), keyword()}
+          | {:compact_session, pid()}
           | {:restart_session_timer}
           | {:cancel_session_timer}
           | {:recover_swap_entries, [Session.swap_entry()]}
@@ -244,6 +245,17 @@ defmodule MingaEditor.Handlers.EffectHandler do
         :ok -> :ok
         {:error, reason} -> Minga.Log.warning(:editor, "Session save failed: #{inspect(reason)}")
       end
+    end)
+
+    state
+  end
+
+  defp apply_effect(state, {:compact_session, session_pid}) do
+    editor = self()
+
+    Task.start(fn ->
+      result = MingaAgent.Session.compact(session_pid)
+      send(editor, {:compact_result, result})
     end)
 
     state
