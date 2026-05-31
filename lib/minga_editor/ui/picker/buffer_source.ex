@@ -69,8 +69,8 @@ defmodule MingaEditor.UI.Picker.BufferSource do
   key so `on_select` can distinguish them from list-indexed buffers.
   """
   @spec extra_special_buffers(Buffers.t()) :: [Item.t()]
-  def extra_special_buffers(%Buffers{list: list} = bs) do
-    special_fields = [bs.messages]
+  def extra_special_buffers(%Buffers{list: list}) do
+    special_fields = [Minga.Log.MessagesBuffer.pid()]
 
     special_fields
     |> Enum.reject(fn pid -> is_nil(pid) or Enum.member?(list, pid) end)

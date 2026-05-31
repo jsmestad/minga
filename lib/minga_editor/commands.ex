@@ -240,7 +240,7 @@ defmodule MingaEditor.Commands do
     case Minga.Platform.trash(path) do
       :ok ->
         name = Path.basename(path)
-        MingaEditor.log_to_messages("[file-tree] Moved to trash: #{name}")
+        Minga.Log.info(:editor, "[file-tree] Moved to trash: #{name}")
 
         state
         |> restore_file_tree_scope()
@@ -248,7 +248,7 @@ defmodule MingaEditor.Commands do
 
       {:error, reason} ->
         # Trash failed, offer permanent delete as fallback
-        MingaEditor.log_to_messages("[file-tree] Trash failed: #{reason}")
+        Minga.Log.warning(:editor, "[file-tree] Trash failed: #{reason}")
         ms = state.workspace.editing.mode_state
 
         EditorState.transition_mode(
@@ -263,14 +263,14 @@ defmodule MingaEditor.Commands do
     case Minga.Platform.permanent_delete(path) do
       :ok ->
         name = Path.basename(path)
-        MingaEditor.log_to_messages("[file-tree] Permanently deleted: #{name}")
+        Minga.Log.info(:editor, "[file-tree] Permanently deleted: #{name}")
 
         state
         |> restore_file_tree_scope()
         |> MingaEditor.Commands.FileTree.refresh()
 
       {:error, reason} ->
-        MingaEditor.log_to_messages("[file-tree] Delete failed: #{reason}")
+        Minga.Log.warning(:editor, "[file-tree] Delete failed: #{reason}")
         restore_file_tree_scope(state)
     end
   end
@@ -285,7 +285,7 @@ defmodule MingaEditor.Commands do
     case Git.branch_delete(git_root, name, force) do
       :ok ->
         refresh_branch_delete_repo(git_root)
-        MingaEditor.log_to_messages("[git] Deleted branch: #{name}")
+        Minga.Log.info(:editor, "[git] Deleted branch: #{name}")
 
         state
         |> EditorState.set_status("Deleted branch #{name}")

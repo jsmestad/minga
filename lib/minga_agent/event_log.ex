@@ -146,8 +146,33 @@ defmodule MingaAgent.EventLog do
   @spec open_or_recreate(String.t()) :: {:ok, Store.db()} | {:error, term()}
   defp open_or_recreate(path) do
     case Store.open(path) do
-      {:ok, db} -> {:ok, db}
-      {:error, _reason} -> recreate_database(path)
+      {:ok, db} ->
+        {:ok, db}
+
+      {:error, reason} ->
+        if File.exists?(path) and corrupt?(path) do
+          Minga.Log.warning(
+            :agent,
+            "[AgentEventLog] corrupt database, recreating: #{inspect(reason)}"
+          )
+
+          recreate_database(path)
+        else
+          {:error, reason}
+        end
+    end
+  end
+
+  @spec corrupt?(String.t()) :: boolean()
+  defp corrupt?(path) do
+    case Exqlite.Sqlite3.open(path) do
+      {:ok, db} ->
+        result = Store.integrity_check(db, :quick)
+        Store.close(db)
+        match?({:error, _}, result)
+
+      {:error, _} ->
+        false
     end
   end
 

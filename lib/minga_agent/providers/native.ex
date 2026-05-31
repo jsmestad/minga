@@ -322,43 +322,14 @@ defmodule MingaAgent.Providers.Native do
     max_turns = Keyword.get(opts, :max_turns, config.max_turns)
     read_only? = Keyword.get(opts, :read_only?, false)
     config = disable_hooks_for_read_only(config, read_only?)
+    {config, ext_mcp_servers} = merge_extension_components(config, read_only?)
     max_cost = Keyword.get(opts, :max_cost, config.max_cost)
     llm_client = Keyword.get(opts, :llm_client, &ReqLLM.stream_text/3)
     hook_runner = Keyword.get(opts, :hook_runner, &CommandRunner.run_pre_tool_use/2)
     provider_pid = self()
 
     {fork_store, changeset} =
-      case project_view do
-        %ProjectView{} ->
-          {nil, nil}
-
-        _ ->
-          # Start a fork store for in-memory buffer isolation. Forks are created
-          # lazily when agent tools write to files that have open buffers.
-          # Not linked: fork store crash degrades gracefully (tools fall through
-          # to changeset or direct I/O) rather than killing the provider.
-          {:ok, fork_store} = GenServer.start(MingaAgent.BufferForkStore, :ok)
-          Process.monitor(fork_store)
-
-          changeset =
-            if Keyword.get(opts, :changeset, false) do
-              case MingaAgent.Changeset.create(project_root) do
-                {:ok, cs} ->
-                  Process.monitor(cs)
-                  cs
-
-                {:error, reason} ->
-                  Minga.Log.warning(
-                    :agent,
-                    "[Agent.Native] changeset creation failed: #{inspect(reason)}"
-                  )
-
-                  nil
-              end
-            end
-
-          {fork_store, changeset}
-      end
+      init_fork_store_and_changeset(project_view, project_root, opts)
 
     base_tools =
       Keyword.get(opts, :tools) ||
@@ -375,7 +346,13 @@ defmodule MingaAgent.Providers.Native do
     custom_tools? = Keyword.has_key?(opts, :tools)
     active_skills = load_active_skills(project_root, Keyword.get(opts, :active_skill_names, []))
     internal_tools = if read_only?, do: [], else: build_internal_tools(provider_pid)
-    mcp_configs = configured_mcp_servers(opts, config, subscriber, read_only?)
+
+    mcp_configs =
+      configured_mcp_servers(opts, config, subscriber, read_only?) ++
+        filter_ext_mcp_servers(ext_mcp_servers, opts, read_only?)
+
+    mcp_configs = deduplicate_mcp_configs(mcp_configs)
+
     mcp_client_opts = mcp_client_opts(opts)
     mcp_enabled_override = Keyword.get(opts, :mcp_enabled?, nil)
     mcp_registry = mcp_registry_for(mcp_configs)
@@ -443,6 +420,74 @@ defmodule MingaAgent.Providers.Native do
     do: AgentConfig.without_hooks(config)
 
   defp disable_hooks_for_read_only(%AgentConfig{} = config, false), do: config
+
+  @spec merge_extension_components(AgentConfig.t(), boolean()) ::
+          {AgentConfig.t(), [MCPServerConfig.t()]}
+  defp merge_extension_components(config, true), do: {config, []}
+
+  defp merge_extension_components(config, false) do
+    ext = collect_extension_agent_components()
+    config = %{config | agent_hooks: config.agent_hooks ++ ext.hooks}
+    {config, ext.mcp_servers}
+  end
+
+  @spec filter_ext_mcp_servers([MCPServerConfig.t()], keyword(), boolean()) ::
+          [MCPServerConfig.t()]
+  defp filter_ext_mcp_servers(_servers, _opts, true), do: []
+  defp filter_ext_mcp_servers([], _opts, _read_only?), do: []
+
+  defp filter_ext_mcp_servers(servers, opts, false) do
+    if mcp_extension_enabled?(opts), do: servers, else: []
+  end
+
+  @spec deduplicate_mcp_configs([MCPServerConfig.t()]) :: [MCPServerConfig.t()]
+  defp deduplicate_mcp_configs(configs) do
+    {deduped, _seen} =
+      Enum.reduce(configs, {[], MapSet.new()}, fn config, {acc, seen} ->
+        if MapSet.member?(seen, config.name) do
+          Minga.Log.warning(
+            :agent,
+            "[Agent.Native] duplicate MCP server name ignored: #{config.name}"
+          )
+
+          {acc, seen}
+        else
+          {[config | acc], MapSet.put(seen, config.name)}
+        end
+      end)
+
+    Enum.reverse(deduped)
+  end
+
+  @spec init_fork_store_and_changeset(ProjectView.t() | nil, String.t(), keyword()) ::
+          {pid() | nil, pid() | nil}
+  defp init_fork_store_and_changeset(%ProjectView{}, _project_root, _opts), do: {nil, nil}
+
+  defp init_fork_store_and_changeset(_project_view, project_root, opts) do
+    {:ok, fork_store} = GenServer.start(MingaAgent.BufferForkStore, :ok)
+    Process.monitor(fork_store)
+    changeset = maybe_create_changeset(project_root, opts)
+    {fork_store, changeset}
+  end
+
+  @spec maybe_create_changeset(String.t(), keyword()) :: pid() | nil
+  defp maybe_create_changeset(project_root, opts) do
+    if Keyword.get(opts, :changeset, false) do
+      case MingaAgent.Changeset.create(project_root) do
+        {:ok, cs} ->
+          Process.monitor(cs)
+          cs
+
+        {:error, reason} ->
+          Minga.Log.warning(
+            :agent,
+            "[Agent.Native] changeset creation failed: #{inspect(reason)}"
+          )
+
+          nil
+      end
+    end
+  end
 
   @spec filter_base_tools_for_read_only([ReqLLM.Tool.t()], boolean()) :: [ReqLLM.Tool.t()]
   defp filter_base_tools_for_read_only(base_tools, true),
@@ -1045,6 +1090,72 @@ defmodule MingaAgent.Providers.Native do
       {false, {:ok, _pid}} -> :running
       {false, :error} -> :not_started
     end
+  end
+
+  # ── Extension agent components ─────────────────────────────────────────────
+
+  @spec extension_manifests() :: [Minga.Extension.Manifest.t()]
+  defp extension_manifests do
+    case Process.whereis(Minga.Extension.Registry) do
+      nil ->
+        []
+
+      _pid ->
+        Minga.Extension.Registry.all()
+        |> Enum.filter(fn {_name, entry} -> entry.status == :running end)
+        |> Enum.map(fn {_name, entry} -> entry.manifest end)
+        |> Enum.reject(&is_nil/1)
+    end
+  end
+
+  @spec collect_extension_agent_components() :: %{
+          hooks: [MingaAgent.Hooks.Hook.t()],
+          mcp_servers: [MCPServerConfig.t()]
+        }
+  defp collect_extension_agent_components do
+    manifests = extension_manifests()
+
+    hooks =
+      manifests
+      |> Enum.flat_map(& &1.hooks)
+      |> Enum.reduce([], fn {event, opts}, acc ->
+        case MingaAgent.Hooks.Hook.normalize(Keyword.put(opts, :event, event)) do
+          {:ok, hook} ->
+            [hook | acc]
+
+          {:error, reason} ->
+            Minga.Log.warning(
+              :agent,
+              "[Agent.Native] extension hook normalization failed: #{reason}"
+            )
+
+            acc
+        end
+      end)
+      |> Enum.reverse()
+
+    mcp_servers =
+      manifests
+      |> Enum.flat_map(& &1.mcp_servers)
+      |> Enum.reduce([], fn {name, opts}, acc ->
+        server_map = opts |> Keyword.put(:name, Atom.to_string(name)) |> Map.new()
+
+        case MCPServerConfig.normalize(server_map) do
+          {:ok, config} ->
+            [config | acc]
+
+          {:error, reason} ->
+            Minga.Log.warning(
+              :agent,
+              "[Agent.Native] extension MCP server normalization failed: #{reason}"
+            )
+
+            acc
+        end
+      end)
+      |> Enum.reverse()
+
+    %{hooks: hooks, mcp_servers: mcp_servers}
   end
 
   @spec mcp_client_opts(keyword()) :: keyword()

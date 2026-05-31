@@ -11,6 +11,7 @@ defmodule MingaEditor.Commands.AgentSubStates do
   alias MingaEditor.Agent.DiffReview
   alias MingaAgent.FileMention
   alias MingaAgent.Session
+  alias MingaEditor.Agent.SlashCommand
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.View.Preview
@@ -108,7 +109,7 @@ defmodule MingaEditor.Commands.AgentSubStates do
     end
   end
 
-  def handle_mention_key(state, 13, _mods), do: accept_mention_completion(state)
+  def handle_mention_key(state, 13, _mods), do: accept_completion(state)
 
   def handle_mention_key(state, 27, _mods) do
     update_panel(state, fn p -> %{p | mention_completion: nil} end)
@@ -117,22 +118,22 @@ defmodule MingaEditor.Commands.AgentSubStates do
   def handle_mention_key(state, 127, _mods) do
     comp = AgentAccess.panel(state).mention_completion
 
-    if comp.prefix == "" do
-      state = AgentCommands.input_backspace(state)
-      update_panel(state, fn p -> %{p | mention_completion: nil} end)
+    if slash_completion?(comp) do
+      slash_backspace(state, comp)
     else
-      state = AgentCommands.input_backspace(state)
-      new_prefix = String.slice(comp.prefix, 0..-2//1)
-
-      update_panel(state, fn p ->
-        %{p | mention_completion: FileMention.update_prefix(comp, new_prefix)}
-      end)
+      mention_backspace(state, comp)
     end
   end
 
   def handle_mention_key(state, cp, mods)
       when cp >= 32 and band(mods, 0x02) == 0 and band(mods, 0x04) == 0 do
-    mention_insert_char(state, <<cp::utf8>>)
+    comp = AgentAccess.panel(state).mention_completion
+
+    if slash_completion?(comp) do
+      slash_insert_char(state, comp, <<cp::utf8>>)
+    else
+      mention_insert_char(state, <<cp::utf8>>)
+    end
   end
 
   def handle_mention_key(state, _cp, _mods), do: state
@@ -151,28 +152,8 @@ defmodule MingaEditor.Commands.AgentSubStates do
   @doc "Triggers /slash command completion when / is typed at position (0, 0)."
   @spec trigger_slash_completion(state()) :: state()
   def trigger_slash_completion(state) do
-    commands = MingaEditor.Agent.SlashCommand.completions("")
-
-    candidates =
-      Enum.map(commands, fn cmd ->
-        {cmd.name, cmd.description}
-      end)
-
-    if candidates != [] do
-      comp = %{
-        prefix: "",
-        all_files: [],
-        candidates: Enum.map(candidates, fn {name, _} -> name end),
-        selected: 0,
-        anchor_line: 0,
-        anchor_col: 0,
-        slash_candidates: candidates
-      }
-
-      update_panel(state, fn p -> %{p | mention_completion: comp} end)
-    else
-      state
-    end
+    slash_completion_state(state, "")
+    |> update_slash_completion(state)
   end
 
   # ── Diff review commands ───────────────────────────────────────────────────
@@ -288,6 +269,137 @@ defmodule MingaEditor.Commands.AgentSubStates do
   end
 
   # ── Private helpers ────────────────────────────────────────────────────────
+
+  @spec slash_completion?(map() | nil) :: boolean()
+  defp slash_completion?(comp), do: is_map(comp) and Map.has_key?(comp, :slash_candidates)
+
+  @spec accept_completion(state()) :: state()
+  defp accept_completion(state) do
+    comp = AgentAccess.panel(state).mention_completion
+
+    if slash_completion?(comp) do
+      accept_slash_completion(state, comp)
+    else
+      accept_mention_completion(state)
+    end
+  end
+
+  @spec mention_backspace(state(), map()) :: state()
+  defp mention_backspace(state, comp) do
+    if comp.prefix == "" do
+      state = AgentCommands.input_backspace(state)
+      update_panel(state, fn p -> %{p | mention_completion: nil} end)
+    else
+      state = AgentCommands.input_backspace(state)
+      new_prefix = String.slice(comp.prefix, 0..-2//1)
+
+      update_panel(state, fn p ->
+        %{p | mention_completion: FileMention.update_prefix(comp, new_prefix)}
+      end)
+    end
+  end
+
+  @spec slash_backspace(state(), map()) :: state()
+  defp slash_backspace(state, %{prefix: ""}) do
+    state = AgentCommands.input_backspace(state)
+    update_panel(state, fn p -> %{p | mention_completion: nil} end)
+  end
+
+  defp slash_backspace(state, comp) do
+    state = AgentCommands.input_backspace(state)
+    new_input = trim_last_grapheme(comp.prefix)
+
+    slash_completion_state(state, new_input)
+    |> update_slash_completion(state)
+  end
+
+  @spec slash_insert_char(state(), map(), String.t()) :: state()
+  defp slash_insert_char(state, comp, char) do
+    state = AgentCommands.input_char(state, char)
+    new_input = comp.prefix <> char
+
+    slash_completion_state(state, new_input)
+    |> update_slash_completion(state)
+  end
+
+  @spec trim_last_grapheme(String.t()) :: String.t()
+  defp trim_last_grapheme(""), do: ""
+
+  defp trim_last_grapheme(text) do
+    text
+    |> String.graphemes()
+    |> Enum.drop(-1)
+    |> Enum.join()
+  end
+
+  @spec slash_completion_state(state(), String.t()) :: map() | nil
+  defp slash_completion_state(state, input) do
+    candidates = SlashCommand.completion_candidates(state, input)
+
+    if candidates == [] do
+      nil
+    else
+      labels = Enum.map(candidates, & &1.label)
+
+      %{
+        prefix: input,
+        all_files: [],
+        candidates: labels,
+        selected: 0,
+        anchor_line: 0,
+        anchor_col: 0,
+        slash_candidates: Enum.map(candidates, &{&1.label, &1.description}),
+        slash_insertions: Map.new(candidates, &{&1.label, &1.insert})
+      }
+    end
+  end
+
+  @spec update_slash_completion(map() | nil, state()) :: state()
+  defp update_slash_completion(nil, state) do
+    update_panel(state, fn p -> %{p | mention_completion: nil} end)
+  end
+
+  defp update_slash_completion(comp, state) do
+    update_panel(state, fn p -> %{p | mention_completion: comp} end)
+  end
+
+  @spec accept_slash_completion(state(), map()) :: state()
+  defp accept_slash_completion(state, comp) do
+    case Enum.at(comp.candidates, comp.selected) do
+      nil ->
+        update_panel(state, fn p -> %{p | mention_completion: nil} end)
+
+      label ->
+        insert = Map.get(Map.get(comp, :slash_insertions, %{}), label, label)
+        replace_slash_input(state, comp, insert)
+    end
+  end
+
+  @spec replace_slash_input(state(), map(), String.t()) :: state()
+  defp replace_slash_input(state, comp, insert) do
+    panel = AgentAccess.panel(state)
+    {line, _col} = UIState.input_cursor(panel)
+    lines = UIState.input_lines(panel)
+    current = Enum.at(lines, line, "")
+    anchor_col = comp.anchor_col
+
+    before = String.slice(current, 0, anchor_col)
+
+    after_prefix =
+      String.slice(
+        current,
+        anchor_col + 1 + String.length(comp.prefix),
+        String.length(current)
+      )
+
+    new_line = before <> "/" <> insert <> " " <> after_prefix
+    new_col = anchor_col + 1 + String.length(insert) + 1
+    new_lines = List.replace_at(lines, line, new_line)
+    new_content = Enum.join(new_lines, "\n")
+
+    state = sync_mention_to_buffer(state, new_content, line, new_col)
+    update_panel(state, fn p -> %{p | mention_completion: nil} end)
+  end
 
   @spec mention_insert_char(state(), String.t()) :: state()
   defp mention_insert_char(state, " ") do

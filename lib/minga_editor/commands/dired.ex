@@ -209,8 +209,14 @@ defmodule MingaEditor.Commands.Dired do
     state = close_dired(state)
 
     case Commands.start_buffer(file_path, EditorState.options_server(state)) do
-      {:ok, pid} -> Commands.add_buffer(state, pid)
-      {:error, _} -> EditorState.set_status(state, "Cannot open: #{file_path}")
+      {:ok, pid} ->
+        Commands.add_buffer(state, pid)
+
+      {:error, :binary_file} ->
+        EditorState.set_status(state, "Cannot open binary file: #{Path.basename(file_path)}")
+
+      {:error, _} ->
+        EditorState.set_status(state, "Cannot open: #{file_path}")
     end
   end
 

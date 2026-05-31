@@ -1,7 +1,7 @@
 defmodule Minga.Extensions.ThemePacks.Doom do
   @moduledoc "Bundled Doom theme pack: Doom One."
 
-  use Minga.Extension
+  use Minga.Extension.Editor
 
   @impl true
   @spec name() :: atom()

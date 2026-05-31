@@ -15,7 +15,7 @@ defmodule MingaEditor.Handlers.EffectHandler do
   alias MingaEditor.HighlightEvents
   alias MingaEditor.HighlightSync
   alias MingaEditor.LspActions
-  alias MingaEditor.MessageLog
+
   alias MingaEditor.Renderer
   alias MingaEditor.SemanticTokenSync
 
@@ -142,12 +142,13 @@ defmodule MingaEditor.Handlers.EffectHandler do
   defp apply_effect(state, {:render, delay_ms}) when is_integer(delay_ms),
     do: MingaEditor.schedule_render(state, delay_ms)
 
-  defp apply_effect(state, {:log_message, msg}) when is_binary(msg),
-    do: MingaEditor.log_message(state, msg)
+  defp apply_effect(state, {:log_message, msg}) when is_binary(msg) do
+    Minga.Log.info(:editor, msg)
+    state
+  end
 
   defp apply_effect(state, {:log_warning, msg}) when is_binary(msg) do
     Minga.Log.warning(:editor, msg)
-    state = MessageLog.log(state, msg, :warning)
     MingaEditor.maybe_schedule_warning_popup(state)
   end
 

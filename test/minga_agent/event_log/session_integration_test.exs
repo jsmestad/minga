@@ -290,7 +290,7 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
 
     {:ok, db} = EventLog.open_read_connection(db_dir: tmp_dir)
     assert {:ok, events} = EventLog.events_after(db, "crash-session", 0, 50)
-    assert Enum.any?(events, &(&1.event_type == :message_changed))
+    assert Enum.any?(events, &(&1.event_type == :session_started))
     :ok = Store.close(db)
   end
 

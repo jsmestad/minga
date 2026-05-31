@@ -99,7 +99,14 @@ defmodule MingaEditor.Handlers.EventDispatcher do
         %Events.LogMessageEvent{text: text, level: level},
         _msg
       ) do
-    MessageLog.append_to_store(state, text, level)
+    state = MessageLog.append_to_store(state, text, level)
+    state = MingaEditor.schedule_render(state, 16)
+
+    if level in [:warning, :error] do
+      MingaEditor.maybe_schedule_warning_popup(state)
+    else
+      state
+    end
   end
 
   def dispatch(
@@ -444,22 +451,28 @@ defmodule MingaEditor.Handlers.EventDispatcher do
     case remote_api_attach(remote_node, session_id, last_seen) do
       {:ok,
        %{
+         role: :driver,
          messages: messages,
          snapshot: snapshot,
          events: events,
          latest_event_id: latest_event_id
        }} ->
-        tb = set_workspace_remote_state(tb, workspace, pid, :connected, latest_event_id)
-        state = EditorState.set_tab_bar(state, tb)
-
         if active_workspace?(tb, workspace_id) do
+          tb = set_workspace_remote_state(tb, workspace, pid, :connected, latest_event_id)
+          state = EditorState.set_tab_bar(state, tb)
+
           state
           |> maybe_rebuild_agent_from_workspace(workspace_id)
           |> sync_reconnected_buffer(messages)
           |> EventReplay.replay_active(events)
           |> apply_reconnected_snapshot(snapshot)
         else
-          state
+          tb =
+            tb
+            |> set_workspace_remote_state(workspace, pid, :connected, latest_event_id)
+            |> TabBar.update_workspace(workspace_id, &%{&1 | pending_catchup_events: events})
+
+          EditorState.set_tab_bar(state, tb)
         end
 
       {:error, _reason} ->

@@ -113,63 +113,83 @@ pub const VaxisSurface = struct {
         syncScreenAfterScroll(self.vx, top, bottom, delta);
     }
 
-    /// Shifts cells in both `screen` (desired state) and `screen_last`
-    /// (terminal tracking) to match what the terminal did with the scroll
-    /// region sequences. Newly revealed rows are blanked so that
-    /// libvaxis's diff repaints only those rows.
+    /// Shifts terminal tracking state to match the terminal's scroll and then
+    /// rebuilds the desired screen from that owned tracking state.
+    ///
+    /// `vx.screen` cells often point into the renderer's per-frame arena. That
+    /// arena is reset after `batch_end`, so copying `vx.screen` cells across a
+    /// later scroll can preserve stale grapheme pointers. `screen_last` owns its
+    /// character bytes in its own arena, so it is the safe source of truth after
+    /// the terminal has performed the scroll.
     fn syncScreenAfterScroll(vx: *vaxis.Vaxis, top: u16, bottom: u16, delta: i16) void {
         const w: usize = @intCast(vx.screen.width);
         if (w == 0) return;
 
         const abs_delta: usize = @intCast(if (delta < 0) -delta else delta);
         const region_height: usize = @as(usize, bottom) - @as(usize, top) + 1;
-        if (abs_delta >= region_height) return;
 
-        // Shift screen.buf (Cell structs, no owned data, safe to memcpy).
-        shiftScreenBuf(vx.screen.buf, w, top, bottom, delta, abs_delta);
+        if (abs_delta >= region_height) {
+            blankInternalRegion(&vx.screen_last, w, top, bottom);
+            syncScreenFromLast(&vx.screen, &vx.screen_last, top, bottom);
+            return;
+        }
 
-        // Shift screen_last.buf (InternalCell with owned char data).
         shiftScreenLastBuf(&vx.screen_last, w, top, bottom, delta, abs_delta);
+        syncScreenFromLast(&vx.screen, &vx.screen_last, top, bottom);
     }
 
-    /// Shifts Cell structs in the Screen buffer (desired state).
-    /// Cell.grapheme is a slice pointer (not owned); struct copy is safe.
-    fn shiftScreenBuf(buf: []vaxis.Cell, w: usize, top: u16, bottom: u16, delta: i16, abs_delta: usize) void {
-        const t: usize = @intCast(top);
-        const b: usize = @intCast(bottom);
+    /// Copies the scroll region in the desired screen from screen_last's owned
+    /// storage. This keeps the next render diff synchronized without retaining
+    /// renderer arena pointers from a previous frame.
+    fn syncScreenFromLast(screen: *vaxis.Screen, screen_last: *vaxis.AllocatingScreen, top: u16, bottom: u16) void {
+        if (screen.width != screen_last.width or screen.height != screen_last.height) return;
 
-        if (delta > 0) {
-            // Scroll up: shift rows [top+delta..bottom] to [top..bottom-delta]
-            var r: usize = t;
-            while (r <= b - abs_delta) : (r += 1) {
-                const dst_start = r * w;
-                const src_start = (r + abs_delta) * w;
-                @memcpy(buf[dst_start .. dst_start + w], buf[src_start .. src_start + w]);
+        const w: usize = @intCast(screen.width);
+        if (w == 0 or screen.height == 0) return;
+
+        var row: usize = @intCast(top);
+        const end_row: usize = @intCast(@min(bottom, screen.height - 1));
+
+        while (row <= end_row) : (row += 1) {
+            const start = row * w;
+            for (0..w) |col| {
+                const i = start + col;
+                screen.buf[i] = internalCellToScreenCell(&screen_last.buf[i]);
             }
-            // Blank newly revealed rows at bottom
-            while (r <= b) : (r += 1) {
-                const start = r * w;
-                for (buf[start .. start + w]) |*cell| {
-                    cell.* = .{};
-                }
-            }
-        } else {
-            // Scroll down: shift rows [top..bottom-delta] to [top+delta..bottom]
-            var r: usize = b;
-            while (r >= t + abs_delta) : (r -= 1) {
-                const dst_start = r * w;
-                const src_start = (r - abs_delta) * w;
-                @memcpy(buf[dst_start .. dst_start + w], buf[src_start .. src_start + w]);
-                if (r == t + abs_delta) break;
-            }
-            // Blank newly revealed rows at top
-            r = t;
-            while (r < t + abs_delta) : (r += 1) {
-                const start = r * w;
-                for (buf[start .. start + w]) |*cell| {
-                    cell.* = .{};
-                }
-            }
+        }
+    }
+
+    /// Builds a desired-screen cell that borrows grapheme storage from
+    /// screen_last. The borrowed bytes live in screen_last's arena, not the
+    /// renderer frame arena, so they remain valid across scroll frames.
+    fn internalCellToScreenCell(cell: *const vaxis.AllocatingScreen.InternalCell) vaxis.Cell {
+        const cell_width = vaxis.gwidth.gwidth(cell.char.items, .wcwidth);
+
+        return .{
+            .char = .{
+                .grapheme = cell.char.items,
+                .width = @intCast(if (cell_width == 0) 1 else cell_width),
+            },
+            .style = cell.style,
+            .link = .{
+                .uri = cell.uri.items,
+                .params = cell.uri_id.items,
+            },
+            .default = cell.default,
+            .scale = cell.scale,
+        };
+    }
+
+    /// Blanks every row in a terminal scroll region.
+    fn blankInternalRegion(screen_last: *vaxis.AllocatingScreen, w: usize, top: u16, bottom: u16) void {
+        if (w == 0 or screen_last.height == 0) return;
+
+        var row: usize = @intCast(top);
+        const end_row: usize = @intCast(@min(bottom, screen_last.height - 1));
+        const alloc = screen_last.arena.allocator();
+
+        while (row <= end_row) : (row += 1) {
+            blankInternalRow(screen_last.buf, row, w, alloc);
         }
     }
 
@@ -218,9 +238,15 @@ pub const VaxisSurface = struct {
 
             dst.char.clearRetainingCapacity();
             dst.char.appendSlice(alloc, src.char.items) catch {};
+            dst.uri.clearRetainingCapacity();
+            dst.uri.appendSlice(alloc, src.uri.items) catch {};
+            dst.uri_id.clearRetainingCapacity();
+            dst.uri_id.appendSlice(alloc, src.uri_id.items) catch {};
             dst.style = src.style;
             dst.skipped = src.skipped;
             dst.default = src.default;
+            dst.skip = src.skip;
+            dst.scale = src.scale;
         }
     }
 
@@ -232,9 +258,13 @@ pub const VaxisSurface = struct {
             const cell = &buf[start + c];
             cell.char.clearRetainingCapacity();
             cell.char.appendSlice(alloc, " ") catch {};
+            cell.uri.clearRetainingCapacity();
+            cell.uri_id.clearRetainingCapacity();
             cell.style = .{};
             cell.skipped = false;
             cell.default = true;
+            cell.skip = false;
+            cell.scale = .{};
         }
     }
 
@@ -917,6 +947,118 @@ pub fn readExact(fd: std.posix.fd_t, buf: []u8) !bool {
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
+
+fn putInternalCell(screen_last: *vaxis.AllocatingScreen, row: usize, col: usize, text: []const u8) !void {
+    const width: usize = @intCast(screen_last.width);
+    const i = row * width + col;
+    const cell = &screen_last.buf[i];
+    cell.char.clearRetainingCapacity();
+    try cell.char.appendSlice(screen_last.arena.allocator(), text);
+    cell.default = false;
+}
+
+test "scroll sync rebuilds desired screen from owned tracking storage" {
+    const alloc = std.testing.allocator;
+    const width: usize = 3;
+    const height: usize = 4;
+
+    const screen_buf = try alloc.alloc(vaxis.Cell, width * height);
+    defer alloc.free(screen_buf);
+    @memset(screen_buf, .{});
+
+    var screen = vaxis.Screen{
+        .width = @intCast(width),
+        .height = @intCast(height),
+        .buf = screen_buf,
+    };
+
+    var screen_last = try vaxis.AllocatingScreen.init(alloc, @intCast(width), @intCast(height));
+    defer screen_last.deinit(alloc);
+
+    try putInternalCell(&screen_last, 0, 0, "A");
+    try putInternalCell(&screen_last, 1, 0, "界");
+    try putInternalCell(&screen_last, 2, 0, "C");
+    try putInternalCell(&screen_last, 3, 0, "D");
+
+    const stale_grapheme = "stale-frame";
+    screen.buf[0] = .{ .char = .{ .grapheme = stale_grapheme, .width = 1 } };
+
+    VaxisSurface.shiftScreenLastBuf(&screen_last, width, 0, 3, 1, 1);
+    VaxisSurface.syncScreenFromLast(&screen, &screen_last, 0, 3);
+
+    try std.testing.expectEqualStrings("界", screen.buf[0].char.grapheme);
+    try std.testing.expectEqual(@as(u8, 2), screen.buf[0].char.width);
+    try std.testing.expect(screen.buf[0].char.grapheme.ptr == screen_last.buf[0].char.items.ptr);
+    try std.testing.expect(screen.buf[0].char.grapheme.ptr != stale_grapheme.ptr);
+    try std.testing.expectEqualStrings(" ", screen.buf[9].char.grapheme);
+    try std.testing.expect(screen.buf[9].char.grapheme.ptr == screen_last.buf[9].char.items.ptr);
+}
+
+test "scroll sync handles scroll down from owned tracking storage" {
+    const alloc = std.testing.allocator;
+    const width: usize = 3;
+    const height: usize = 4;
+
+    const screen_buf = try alloc.alloc(vaxis.Cell, width * height);
+    defer alloc.free(screen_buf);
+    @memset(screen_buf, .{});
+
+    var screen = vaxis.Screen{
+        .width = @intCast(width),
+        .height = @intCast(height),
+        .buf = screen_buf,
+    };
+
+    var screen_last = try vaxis.AllocatingScreen.init(alloc, @intCast(width), @intCast(height));
+    defer screen_last.deinit(alloc);
+
+    try putInternalCell(&screen_last, 0, 0, "A");
+    try putInternalCell(&screen_last, 1, 0, "B");
+    try putInternalCell(&screen_last, 2, 0, "C");
+    try putInternalCell(&screen_last, 3, 0, "D");
+
+    const stale_grapheme = "stale-frame";
+    screen.buf[9] = .{ .char = .{ .grapheme = stale_grapheme, .width = 1 } };
+
+    VaxisSurface.shiftScreenLastBuf(&screen_last, width, 0, 3, -1, 1);
+    VaxisSurface.syncScreenFromLast(&screen, &screen_last, 0, 3);
+
+    try std.testing.expectEqualStrings(" ", screen.buf[0].char.grapheme);
+    try std.testing.expect(screen.buf[0].char.grapheme.ptr == screen_last.buf[0].char.items.ptr);
+    try std.testing.expectEqualStrings("C", screen.buf[9].char.grapheme);
+    try std.testing.expect(screen.buf[9].char.grapheme.ptr == screen_last.buf[9].char.items.ptr);
+    try std.testing.expect(screen.buf[9].char.grapheme.ptr != stale_grapheme.ptr);
+}
+
+test "scroll sync blanks full-region deltas" {
+    const alloc = std.testing.allocator;
+    const width: usize = 2;
+    const height: usize = 2;
+
+    const screen_buf = try alloc.alloc(vaxis.Cell, width * height);
+    defer alloc.free(screen_buf);
+    @memset(screen_buf, .{});
+
+    var screen = vaxis.Screen{
+        .width = @intCast(width),
+        .height = @intCast(height),
+        .buf = screen_buf,
+    };
+
+    var screen_last = try vaxis.AllocatingScreen.init(alloc, @intCast(width), @intCast(height));
+    defer screen_last.deinit(alloc);
+
+    try putInternalCell(&screen_last, 0, 0, "A");
+    try putInternalCell(&screen_last, 1, 0, "B");
+
+    VaxisSurface.blankInternalRegion(&screen_last, width, 0, 1);
+    VaxisSurface.syncScreenFromLast(&screen, &screen_last, 0, 1);
+
+    for (screen.buf, 0..) |cell, i| {
+        try std.testing.expectEqualStrings(" ", cell.char.grapheme);
+        try std.testing.expect(cell.char.grapheme.ptr == screen_last.buf[i].char.items.ptr);
+    }
+}
 
 test "cellToStyle with no attrs" {
     const style = cellToStyle(.{ .fg = 0xFFFFFF, .bg = 0x000000 });

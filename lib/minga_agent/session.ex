@@ -610,6 +610,7 @@ defmodule MingaAgent.Session do
 
   @impl GenServer
   @dialyzer {:no_contracts, init: 1}
+  @dialyzer {:no_opaque, init: 1}
   @spec init(keyword()) :: {:ok, state()}
   def init(opts) do
     provider_module = resolve_provider_module(opts)
@@ -700,7 +701,7 @@ defmodule MingaAgent.Session do
     # Start provider asynchronously so init doesn't block
     send(self(), :start_provider)
 
-    {:ok, state}
+    {:ok, maybe_schedule_idle_gc(state)}
   end
 
   @impl GenServer
@@ -857,6 +858,13 @@ defmodule MingaAgent.Session do
       state.provider_module.new_session(state.provider)
     end
 
+    EventLog.record(
+      state.session_id,
+      :session_stopped,
+      %{reason: "new_session", status: state.status},
+      state.event_log_server
+    )
+
     now = DateTime.utc_now()
     timestamp = Calendar.strftime(now, "%H:%M:%S UTC")
 
@@ -882,6 +890,17 @@ defmodule MingaAgent.Session do
     }
 
     state = reset_messages(state, [Message.system("Session cleared · #{timestamp}")])
+
+    EventLog.record(
+      state.session_id,
+      :session_started,
+      %{
+        model: state.model_name,
+        provider: state.provider_name,
+        background_subagent: state.background_subagent
+      },
+      state.event_log_server
+    )
 
     broadcast(state, {:status_changed, :idle})
     state = notify_messages_changed(state)
@@ -1713,6 +1732,13 @@ defmodule MingaAgent.Session do
 
   @spec append_system_message(state(), String.t(), Message.system_level()) :: state()
   defp append_system_message(state, text, level) do
+    EventLog.record(
+      state.session_id,
+      :system_message,
+      %{message: text, level: level},
+      state.event_log_server
+    )
+
     msg = Message.system(text, level)
     append_msg(state, msg)
   end
@@ -2063,16 +2089,30 @@ defmodule MingaAgent.Session do
       {:ok, db} ->
         try do
           case all_event_log_events(db, state.session_id) do
-            {:ok, events} -> record_interrupted_work(state, events)
-            {:error, _reason} -> :ok
+            {:ok, events} ->
+              record_interrupted_work(state, events)
+
+            {:error, reason} ->
+              log_interrupted_work_failure(state.session_id, reason)
           end
         after
           MingaAgent.EventLog.Store.close(db)
         end
 
-      {:error, _reason} ->
+      {:error, :database_not_found} ->
         :ok
+
+      {:error, reason} ->
+        log_interrupted_work_failure(state.session_id, reason)
     end
+  end
+
+  @spec log_interrupted_work_failure(String.t(), term()) :: :ok
+  defp log_interrupted_work_failure(session_id, reason) do
+    Minga.Log.warning(
+      :agent,
+      "[Session] mark_interrupted_work failed for #{session_id}: #{inspect(reason)}"
+    )
   end
 
   @spec all_event_log_events(EventLog.Store.db(), String.t(), non_neg_integer(), [
@@ -2187,11 +2227,9 @@ defmodule MingaAgent.Session do
   defp event_log_entry({:approval_pending, approval}),
     do: {:approval_requested, Map.put(approval, :approval_id, approval.tool_call_id)}
 
-  defp event_log_entry({:approval_resolved, decision}),
-    do: {:approval_resolved, %{decision: decision}}
+  defp event_log_entry({:approval_resolved, _decision}), do: nil
 
-  defp event_log_entry({:system_message, message, level}),
-    do: {:system_message, %{message: message, level: level}}
+  defp event_log_entry({:system_message, _message, _level}), do: nil
 
   defp event_log_entry({:status_changed, :idle}), do: {:waiting_for_input, %{status: :idle}}
   defp event_log_entry({:status_changed, status}), do: {:status_changed, %{status: status}}
@@ -2199,7 +2237,7 @@ defmodule MingaAgent.Session do
   defp event_log_entry({:prompt_queued, content, queue}),
     do: {:prompt_queued, %{content: content, queue: queue}}
 
-  defp event_log_entry(:messages_changed), do: {:message_changed, %{changed: true}}
+  defp event_log_entry(:messages_changed), do: nil
   defp event_log_entry({:error, message}), do: {:error, %{message: message}}
 
   defp event_log_entry({:context_usage, estimated_tokens, context_limit}),
@@ -2417,7 +2455,7 @@ defmodule MingaAgent.Session do
   defp maybe_show_auth_onboarding(state) do
     if state.provider_module == MingaAgent.Providers.Native and not state.credentials_configured do
       msg = onboarding_message()
-      state = append_msg(state, Message.system(msg))
+      state = append_system_message(state, msg, :info)
       broadcast(state, {:system_message, msg, :info})
       state
     else
@@ -2471,62 +2509,64 @@ defmodule MingaAgent.Session do
   # vetoes, turn/cost limits) are passed through unchanged.
   @spec humanize_error(String.t()) :: String.t()
   defp humanize_error(message) when is_binary(message) do
-    humanize_error(
-      message,
-      provider_rejected_key?(message),
-      rate_limited?(message),
-      auth_failed?(message),
-      provider_unreachable?(message),
-      raw_struct_dump?(message)
-    )
+    humanize_error_kind(classify_error(message), message)
   end
 
   defp humanize_error(message), do: humanize_error(inspect(message))
 
-  @spec humanize_error(String.t(), boolean(), boolean(), boolean(), boolean(), boolean()) ::
-          String.t()
-  defp humanize_error(_message, true, _rate_limited?, _auth_failed?, _unreachable?, _raw_dump?) do
-    "The provider rejected your API key. Update it with /auth <provider> <key>, then try again."
+  @type error_kind ::
+          :rejected_key | :rate_limited | :auth_failed | :unreachable | :raw_dump | :passthrough
+
+  @spec classify_error(String.t()) :: error_kind()
+  defp classify_error(message) do
+    classify_error_checks([
+      {:rejected_key,
+       String.match?(message, ~r/\b401\b/) or
+         String.contains?(message, ["unauthorized", "Unauthorized", "invalid_api_key"])},
+      {:rate_limited,
+       String.match?(message, ~r/\b429\b/) or String.contains?(message, "rate limit")},
+      {:auth_failed,
+       String.contains?(message, [
+         "api_key",
+         "API_KEY",
+         "provider_build_failed",
+         "Failed to build"
+       ])},
+      {:unreachable,
+       String.contains?(message, [
+         "http_streaming_failed",
+         "econnrefused",
+         "nxdomain",
+         "timed out"
+       ])},
+      {:raw_dump, raw_struct_dump?(message)}
+    ])
   end
 
-  defp humanize_error(_message, false, true, _auth_failed?, _unreachable?, _raw_dump?) do
-    "Rate limited by the provider. Wait a moment and try again."
-  end
+  @spec classify_error_checks([{error_kind(), boolean()}]) :: error_kind()
+  defp classify_error_checks([{kind, true} | _rest]), do: kind
+  defp classify_error_checks([{_kind, false} | rest]), do: classify_error_checks(rest)
+  defp classify_error_checks([]), do: :passthrough
 
-  defp humanize_error(_message, false, false, true, _unreachable?, _raw_dump?) do
-    "Couldn't authenticate with the model provider. Check your API key with /auth, then try again."
-  end
+  @spec humanize_error_kind(error_kind(), String.t()) :: String.t()
+  defp humanize_error_kind(:rejected_key, _message),
+    do:
+      "The provider rejected your API key. Update it with /auth <provider> <key>, then try again."
 
-  defp humanize_error(_message, false, false, false, true, _raw_dump?) do
-    "Couldn't reach the model provider. Check your network connection and try again."
-  end
+  defp humanize_error_kind(:rate_limited, _message),
+    do: "Rate limited by the provider. Wait a moment and try again."
 
-  defp humanize_error(_message, false, false, false, false, true) do
-    "Something went wrong talking to the model provider. Open the Messages panel for details."
-  end
+  defp humanize_error_kind(:auth_failed, _message),
+    do:
+      "Couldn't authenticate with the model provider. Check your API key with /auth, then try again."
 
-  defp humanize_error(message, false, false, false, false, false), do: message
+  defp humanize_error_kind(:unreachable, _message),
+    do: "Couldn't reach the model provider. Check your network connection and try again."
 
-  @spec provider_rejected_key?(String.t()) :: boolean()
-  defp provider_rejected_key?(message) do
-    String.match?(message, ~r/\b401\b/) or
-      String.contains?(message, ["unauthorized", "Unauthorized", "invalid_api_key"])
-  end
+  defp humanize_error_kind(:raw_dump, _message),
+    do: "Something went wrong talking to the model provider. Open the Messages panel for details."
 
-  @spec rate_limited?(String.t()) :: boolean()
-  defp rate_limited?(message) do
-    String.match?(message, ~r/\b429\b/) or String.contains?(message, "rate limit")
-  end
-
-  @spec auth_failed?(String.t()) :: boolean()
-  defp auth_failed?(message) do
-    String.contains?(message, ["api_key", "API_KEY", "provider_build_failed", "Failed to build"])
-  end
-
-  @spec provider_unreachable?(String.t()) :: boolean()
-  defp provider_unreachable?(message) do
-    String.contains?(message, ["http_streaming_failed", "econnrefused", "nxdomain", "timed out"])
-  end
+  defp humanize_error_kind(:passthrough, message), do: message
 
   # Detects an inspected Elixir struct/exception leaking into the message, so
   # we never show a raw `%ReqLLM.Error{...}`-style dump in the transcript.

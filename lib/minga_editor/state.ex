@@ -2433,7 +2433,8 @@ defmodule MingaEditor.State do
 
     agent_ui = maybe_activate_synced_agent_ui(state, agent_ui)
 
-    update_workspace(state, &SessionState.set_agent_ui(&1, agent_ui))
+    state = update_workspace(state, &SessionState.set_agent_ui(&1, agent_ui))
+    drain_pending_catchup_events(state, tab_bar)
   end
 
   def sync_agent_ui_from_active_workspace(state), do: state
@@ -2448,6 +2449,26 @@ defmodule MingaEditor.State do
 
   defp maybe_activate_synced_agent_ui(%__MODULE__{}, agent_ui) do
     agent_ui
+  end
+
+  @spec drain_pending_catchup_events(t(), TabBar.t()) :: t()
+  defp drain_pending_catchup_events(state, tab_bar) do
+    case TabBar.active_workspace(tab_bar) do
+      %WorkspaceModel{id: workspace_id, pending_catchup_events: [_ | _] = events} ->
+        state = MingaEditor.Remote.EventReplay.replay_active(state, events)
+
+        tb =
+          TabBar.update_workspace(
+            tab_bar(state),
+            workspace_id,
+            &%{&1 | pending_catchup_events: []}
+          )
+
+        set_tab_bar(state, tb)
+
+      _ ->
+        state
+    end
   end
 
   @spec active_tab(t()) :: Tab.t() | nil

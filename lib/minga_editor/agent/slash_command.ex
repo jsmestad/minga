@@ -11,6 +11,7 @@ defmodule MingaEditor.Agent.SlashCommand do
   alias MingaAgent.Credentials
   alias MingaAgent.Instructions
   alias MingaAgent.Memory
+  alias MingaAgent.ModelCatalog
   alias MingaAgent.Session
   alias MingaAgent.SessionExport
   alias MingaAgent.Skills
@@ -29,6 +30,13 @@ defmodule MingaEditor.Agent.SlashCommand do
 
   @typedoc "A registered slash command."
   @type command :: Command.t()
+
+  @typedoc "A completion candidate for agent slash input."
+  @type completion_candidate :: %{
+          label: String.t(),
+          insert: String.t(),
+          description: String.t()
+        }
 
   @commands [
     %Command{name: "clear", description: "Start a fresh session"},
@@ -97,15 +105,29 @@ defmodule MingaEditor.Agent.SlashCommand do
     }
   ]
 
-  @doc "Returns the list of all registered slash commands."
+  @doc "Returns the list of all registered slash commands (static and dynamic)."
   @spec commands() :: [command()]
-  def commands, do: @commands
+  def commands, do: @commands ++ dynamic_commands()
 
   @doc "Returns commands whose names start with the given prefix."
   @spec completions(String.t()) :: [command()]
   def completions(prefix) when is_binary(prefix) do
     clean = String.trim_leading(prefix, "/")
-    Enum.filter(@commands, fn cmd -> String.starts_with?(cmd.name, clean) end)
+    Enum.filter(commands(), fn cmd -> String.starts_with?(cmd.name, clean) end)
+  end
+
+  @doc "Returns completion candidates for the current slash input, without the leading slash."
+  @spec completion_candidates(state(), String.t()) :: [completion_candidate()]
+  def completion_candidates(state, input) when is_binary(input) do
+    if model_argument_input?(input) do
+      input
+      |> model_argument_prefix()
+      |> model_completion_candidates(state)
+    else
+      input
+      |> completions()
+      |> Enum.map(&command_completion_candidate/1)
+    end
   end
 
   @doc """
@@ -121,6 +143,153 @@ defmodule MingaEditor.Agent.SlashCommand do
   end
 
   def execute(_state, _text), do: {:error, "Not a slash command"}
+
+  @spec command_completion_candidate(command()) :: completion_candidate()
+  defp command_completion_candidate(%Command{name: name, description: description}) do
+    %{label: name, insert: name, description: description}
+  end
+
+  @spec model_argument_input?(String.t()) :: boolean()
+  defp model_argument_input?(input), do: String.match?(input, ~r/^model\s+/)
+
+  @spec model_argument_prefix(String.t()) :: String.t()
+  defp model_argument_prefix(input) do
+    input
+    |> String.replace_prefix("model", "")
+    |> String.trim_leading()
+  end
+
+  @spec model_completion_candidates(String.t(), state()) :: [completion_candidate()]
+  defp model_completion_candidates(prefix, state) do
+    state
+    |> available_model_entries()
+    |> filter_model_entries(prefix)
+    |> Enum.map(&model_completion_candidate/1)
+  end
+
+  @spec available_model_entries(state()) :: [map()]
+  defp available_model_entries(state) do
+    current_model = current_model(state)
+
+    session_models =
+      case AgentAccess.session(state) do
+        session when is_pid(session) -> safe_session_models(session)
+        _ -> []
+      end
+
+    configured_model_entries()
+    |> Kernel.++(session_models)
+    |> Kernel.++(ModelCatalog.available_models(current_model))
+    |> uniq_model_entries()
+  end
+
+  @spec safe_session_models(pid()) :: [map()]
+  defp safe_session_models(session) do
+    case Session.get_available_models(session) do
+      {:ok, models} when is_list(models) -> models
+      _ -> []
+    end
+  catch
+    :exit, _ -> []
+  end
+
+  @spec configured_model_entries() :: [map()]
+  defp configured_model_entries do
+    :agent_models
+    |> Config.get()
+    |> List.wrap()
+    |> Enum.filter(&is_binary/1)
+    |> Enum.map(&configured_model_entry/1)
+  end
+
+  @spec configured_model_entry(String.t()) :: map()
+  defp configured_model_entry(entry) do
+    model = entry |> String.split("|", parts: 2) |> hd() |> String.trim()
+
+    %{
+      "id" => model,
+      "name" => model,
+      "provider" => provider_label(model),
+      "context_window" => nil,
+      "cost" => nil
+    }
+  end
+
+  @spec current_model(state()) :: String.t()
+  defp current_model(state) do
+    AgentAccess.panel(state).model_name
+  end
+
+  @spec provider_label(String.t()) :: String.t()
+  defp provider_label(model) do
+    case String.split(model, ":", parts: 2) do
+      [provider, _] -> provider
+      [_] -> "custom"
+    end
+  end
+
+  @spec uniq_model_entries([map()]) :: [map()]
+  defp uniq_model_entries(entries) do
+    entries
+    |> Enum.reject(&(model_id(&1) == ""))
+    |> Enum.uniq_by(&model_id/1)
+  end
+
+  @spec filter_model_entries([map()], String.t()) :: [map()]
+  defp filter_model_entries(entries, ""), do: entries
+
+  defp filter_model_entries(entries, prefix) do
+    lower = String.downcase(prefix)
+
+    entries
+    |> Enum.filter(fn model ->
+      [model_id(model), model_name(model), model_provider(model)]
+      |> Enum.any?(&String.contains?(String.downcase(&1), lower))
+    end)
+    |> Enum.sort_by(fn model ->
+      id = model_id(model) |> String.downcase()
+      name = model_name(model) |> String.downcase()
+
+      case {String.starts_with?(id, lower), String.starts_with?(name, lower)} do
+        {true, _} -> {0, id}
+        {_, true} -> {1, id}
+        _ -> {2, id}
+      end
+    end)
+  end
+
+  @spec model_completion_candidate(map()) :: completion_candidate()
+  defp model_completion_candidate(model) do
+    id = model_id(model)
+
+    %{
+      label: id,
+      insert: "model #{id}",
+      description: model_description(model)
+    }
+  end
+
+  @spec model_description(map()) :: String.t()
+  defp model_description(model) do
+    [model_name(model), model_provider(model), model_context(model)]
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join("  ")
+  end
+
+  @spec model_id(map()) :: String.t()
+  defp model_id(model), do: model |> Map.get("id", "") |> to_string()
+
+  @spec model_name(map()) :: String.t()
+  defp model_name(model), do: model |> Map.get("name", model_id(model)) |> to_string()
+
+  @spec model_provider(map()) :: String.t()
+  defp model_provider(model), do: model |> Map.get("provider", "") |> to_string()
+
+  @spec model_context(map()) :: String.t()
+  defp model_context(%{"context_window" => ctx}) when is_integer(ctx) and ctx >= 1000,
+    do: "#{div(ctx, 1000)}k ctx"
+
+  defp model_context(_model), do: ""
 
   @doc """
   Returns true if the given text is a slash command (starts with /).
@@ -198,12 +367,12 @@ defmodule MingaEditor.Agent.SlashCommand do
   defp dispatch(state, "switch", args), do: do_switch_branch(state, args)
   defp dispatch(state, "login", args), do: {:ok, do_login(state, args)}
 
-  # /skill:name activates, /skill:off:name deactivates
-  defp dispatch(state, cmd, _args) when is_binary(cmd) do
+  # /skill:name activates, /skill:off:name deactivates, otherwise check dynamic commands
+  defp dispatch(state, cmd, args) when is_binary(cmd) do
     case parse_skill_command(cmd) do
       {:activate, name} -> do_activate_skill(state, name)
       {:deactivate, name} -> do_deactivate_skill(state, name)
-      :not_skill -> {:error, "Unknown command: /#{cmd}"}
+      :not_skill -> dispatch_dynamic(state, cmd, args)
     end
   end
 
@@ -243,7 +412,9 @@ defmodule MingaEditor.Agent.SlashCommand do
   end
 
   @spec do_model(state(), String.t()) :: {:ok, state()} | {:error, String.t()}
-  defp do_model(_state, ""), do: {:error, "Usage: /model <name>"}
+  defp do_model(state, "") do
+    {:ok, PickerUI.open(state, MingaEditor.UI.Picker.AgentModelSource)}
+  end
 
   defp do_model(state, model) do
     model = String.trim(model)
@@ -372,7 +543,7 @@ defmodule MingaEditor.Agent.SlashCommand do
   @spec do_help(state()) :: state()
   defp do_help(state) do
     help_text =
-      @commands
+      commands()
       |> Enum.map_join("\n", fn cmd -> "  /#{cmd.name} — #{cmd.description}" end)
 
     if AgentAccess.session(state) do
@@ -1071,6 +1242,71 @@ defmodule MingaEditor.Agent.SlashCommand do
     # The full message is visible in the *Agent* chat buffer via add_system_message.
     first_line = message |> String.split("\n", parts: 2) |> hd() |> String.trim()
     MingaEditor.State.set_status(state, String.slice(first_line, 0, 80))
+  end
+
+  # ── Dynamic commands from extensions ────────────────────────────────────────
+
+  @doc "Returns slash commands contributed by loaded extensions."
+  @spec dynamic_commands() :: [Command.t()]
+  def dynamic_commands do
+    extension_manifests()
+    |> Enum.flat_map(fn manifest -> manifest.slash_commands end)
+    |> Enum.map(&build_extension_command/1)
+  end
+
+  @spec extension_manifests() :: [Minga.Extension.Manifest.t()]
+  defp extension_manifests do
+    case Process.whereis(Minga.Extension.Registry) do
+      nil ->
+        []
+
+      _pid ->
+        Minga.Extension.Registry.all()
+        |> Enum.filter(fn {_name, entry} -> entry.status == :running end)
+        |> Enum.map(fn {_name, entry} -> entry.manifest end)
+        |> Enum.reject(&is_nil/1)
+    end
+  rescue
+    _ -> []
+  catch
+    :exit, _ -> []
+  end
+
+  @spec build_extension_command({atom(), String.t(), keyword()}) :: Command.t()
+  defp build_extension_command({cmd_name, description, opts}) do
+    %Command{
+      name: Atom.to_string(cmd_name),
+      description: description,
+      execute: Keyword.get(opts, :command)
+    }
+  end
+
+  # ── Dynamic command dispatch ───────────────────────────────────────────────
+
+  @spec dispatch_dynamic(state(), String.t(), String.t()) :: {:ok, state()} | {:error, String.t()}
+  defp dispatch_dynamic(state, cmd_name, args) do
+    case Enum.find(dynamic_commands(), fn c -> c.name == cmd_name end) do
+      nil -> {:error, "Unknown command: /#{cmd_name}"}
+      cmd -> execute_dynamic_command(state, cmd, args)
+    end
+  end
+
+  @spec execute_dynamic_command(state(), Command.t(), String.t()) ::
+          {:ok, state()} | {:error, String.t()}
+  defp execute_dynamic_command(state, cmd, args) do
+    command_path = cmd.execute
+    trimmed_args = String.trim(args)
+    cmd_args = if trimmed_args == "", do: [], else: [trimmed_args]
+
+    case System.cmd(command_path, cmd_args, stderr_to_stdout: true) do
+      {output, 0} ->
+        {:ok, emit_system_message(state, String.trim(output))}
+
+      {output, _code} ->
+        {:error, "Command /#{cmd.name} failed: #{String.trim(output)}"}
+    end
+  rescue
+    e -> {:error, "Command /#{cmd.name} error: #{Exception.message(e)}"}
   end
 
   # ── Helpers ─────────────────────────────────────────────────────────────────

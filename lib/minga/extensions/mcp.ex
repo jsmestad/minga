@@ -5,7 +5,7 @@ defmodule Minga.Extensions.MCP do
   MCP support is intentionally opt-in. User config enables this extension with `extension Minga.Extensions.MCP`, then declares stdio servers with `mcp_server/2`. The native agent provider only exposes the lightweight MCP meta-tools while this extension is running, so users who do not enable MCP get no extra tools, no extra prompt text, and no server processes.
   """
 
-  use Minga.Extension
+  use Minga.Extension.Editor
 
   @impl true
   @spec name() :: atom()

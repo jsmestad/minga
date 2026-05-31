@@ -5,7 +5,7 @@ defmodule Minga.Extensions.LanguagePacks.Bundled do
   The language definitions still live in `Minga.Language.*` modules. This pack owns how those modules reach the runtime registry, which lets reload and disable paths remove the whole catalog without leaving stale filetype, shebang, devicon, grammar, or LSP data behind.
   """
 
-  use Minga.Extension
+  use Minga.Extension.Editor
 
   @language_modules [
     Minga.Language.Bash,

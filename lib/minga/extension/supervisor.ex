@@ -18,6 +18,7 @@ defmodule Minga.Extension.Supervisor do
   alias Minga.Extension.CompileCache
   alias Minga.Extension.Git, as: ExtGit
   alias Minga.Extension.Hex, as: ExtHex
+  alias Minga.Extension.Lazy
   alias Minga.Extension.Manifest
   alias Minga.Extension.Registry, as: ExtRegistry
 
@@ -66,9 +67,9 @@ defmodule Minga.Extension.Supervisor do
     git_failures = resolve_git_extensions(registry)
     failed_git_names = MapSet.new(Enum.map(git_failures, & &1.extension))
 
-    failures =
+    {failures, deferred_entries} =
       ExtRegistry.all(registry)
-      |> Enum.reduce([], fn {name, entry}, failures ->
+      |> Enum.reduce({[], []}, fn {name, entry}, acc ->
         maybe_start_registered_extension(
           supervisor,
           registry,
@@ -76,18 +77,25 @@ defmodule Minga.Extension.Supervisor do
           entry,
           failed_git_names,
           hex_install_failure,
-          failures,
+          acc,
           opts
         )
       end)
+
+    failures =
+      failures
       |> prepend_failure(hex_install_failure)
       |> Kernel.++(git_failures)
+
+    Lazy.schedule_deferred_loads(supervisor, registry, deferred_entries, opts)
 
     case failures do
       [] -> :ok
       failures -> {:error, failures}
     end
   end
+
+  @typep start_acc :: {[start_failure()], [{atom(), ExtRegistry.entry()}]}
 
   @spec maybe_start_registered_extension(
           GenServer.server(),
@@ -96,9 +104,9 @@ defmodule Minga.Extension.Supervisor do
           ExtRegistry.entry(),
           MapSet.t(atom()),
           start_failure() | nil,
-          [start_failure()],
+          start_acc(),
           start_opts()
-        ) :: [start_failure()]
+        ) :: start_acc()
   defp maybe_start_registered_extension(
          _supervisor,
          _registry,
@@ -106,13 +114,13 @@ defmodule Minga.Extension.Supervisor do
          %{source_type: :git, path: nil},
          failed_git_names,
          _hex_install_failure,
-         failures,
+         {failures, deferred},
          _opts
        ) do
     if MapSet.member?(failed_git_names, name) do
-      failures
+      {failures, deferred}
     else
-      failures ++ [%{extension: name, reason: :clone_failed}]
+      {failures ++ [%{extension: name, reason: :clone_failed}], deferred}
     end
   end
 
@@ -123,11 +131,11 @@ defmodule Minga.Extension.Supervisor do
          %{source_type: :hex},
          _failed_git_names,
          hex_install_failure,
-         failures,
+         acc,
          _opts
        )
        when is_map(hex_install_failure) do
-    failures
+    acc
   end
 
   defp maybe_start_registered_extension(
@@ -137,15 +145,129 @@ defmodule Minga.Extension.Supervisor do
          entry,
          _failed_git_names,
          _hex_install_failure,
-         failures,
+         {failures, deferred},
          opts
        ) do
-    case start_extension(supervisor, registry, name, entry, opts) do
-      {:ok, _pid} ->
-        failures
+    case resolve_load_policy(entry) do
+      :eager ->
+        start_eager(supervisor, registry, name, entry, opts, failures, deferred)
+
+      :deferred ->
+        case validate_deferred_extension(name, entry) do
+          :ok -> {failures, [{name, entry} | deferred]}
+          {:error, reason} -> {failures ++ [%{extension: name, reason: reason}], deferred}
+        end
+
+      {:on_command, _} ->
+        register_lazy_or_fail(supervisor, registry, name, entry, opts, failures, deferred)
+
+      {:on_filetype, _} ->
+        log_reserved_trigger(name, :on_filetype)
+        register_lazy_or_fail(supervisor, registry, name, entry, opts, failures, deferred)
+
+      {:on_key, _} ->
+        log_reserved_trigger(name, :on_key)
+        register_lazy_or_fail(supervisor, registry, name, entry, opts, failures, deferred)
+    end
+  end
+
+  @spec resolve_load_policy(ExtRegistry.entry()) :: Minga.Extension.load_policy()
+  defp resolve_load_policy(%{load_policy: nil} = entry) do
+    case Lazy.discover_load_policy(entry) do
+      {:ok, policy, _module} -> validate_load_policy(policy)
+      {:error, _reason} -> :eager
+    end
+  end
+
+  defp resolve_load_policy(%{load_policy: policy}), do: validate_load_policy(policy)
+
+  @valid_policy_atoms [:eager, :deferred]
+  @valid_trigger_tags [:on_command, :on_filetype, :on_key]
+
+  @spec validate_load_policy(term()) :: Minga.Extension.load_policy()
+  defp validate_load_policy(policy) when policy in @valid_policy_atoms, do: policy
+
+  defp validate_load_policy({tag, _} = policy) when tag in @valid_trigger_tags, do: policy
+
+  defp validate_load_policy(invalid) do
+    Minga.Log.warning(
+      :config,
+      "Invalid load_policy #{inspect(invalid)}, falling back to :eager"
+    )
+
+    :eager
+  end
+
+  @spec log_reserved_trigger(atom(), atom()) :: :ok
+  defp log_reserved_trigger(name, trigger) do
+    Minga.Log.warning(
+      :config,
+      "Extension #{name}: #{trigger} trigger is reserved; stub commands autoload on invocation but the event hook is not yet wired"
+    )
+  end
+
+  @spec register_lazy_or_fail(
+          GenServer.server(),
+          GenServer.server(),
+          atom(),
+          ExtRegistry.entry(),
+          start_opts(),
+          [start_failure()],
+          [{atom(), ExtRegistry.entry()}]
+        ) :: start_acc()
+  defp register_lazy_or_fail(supervisor, registry, name, entry, opts, failures, deferred) do
+    case register_lazy_stubs(supervisor, registry, name, entry, opts) do
+      :ok -> {failures, deferred}
+      {:error, reason} -> {failures ++ [%{extension: name, reason: reason}], deferred}
+    end
+  end
+
+  @spec validate_deferred_extension(atom(), ExtRegistry.entry()) :: :ok | {:error, term()}
+  defp validate_deferred_extension(name, entry) do
+    case Lazy.discover_load_policy(entry) do
+      {:ok, _policy, module} ->
+        with :ok <- validate_behaviour(module, name) do
+          register_and_validate_options(name, module, entry.config)
+        end
 
       {:error, reason} ->
-        failures ++ [%{extension: name, reason: reason}]
+        Minga.Log.warning(
+          :config,
+          "Extension #{name} deferred validation failed: #{inspect(reason)}"
+        )
+
+        {:error, reason}
+    end
+  end
+
+  @spec register_lazy_stubs(
+          GenServer.server(),
+          GenServer.server(),
+          atom(),
+          ExtRegistry.entry(),
+          start_opts()
+        ) :: :ok | {:error, term()}
+  defp register_lazy_stubs(supervisor, registry, name, %{source_type: :module} = entry, opts) do
+    Lazy.register_module_stubs(supervisor, registry, name, entry, opts)
+  end
+
+  defp register_lazy_stubs(supervisor, registry, name, entry, opts) do
+    Lazy.register_stubs(supervisor, registry, name, entry, opts)
+  end
+
+  @spec start_eager(
+          GenServer.server(),
+          GenServer.server(),
+          atom(),
+          ExtRegistry.entry(),
+          start_opts(),
+          [start_failure()],
+          [{atom(), ExtRegistry.entry()}]
+        ) :: {[start_failure()], [{atom(), ExtRegistry.entry()}]}
+  defp start_eager(supervisor, registry, name, entry, opts, failures, deferred) do
+    case start_extension(supervisor, registry, name, entry, opts) do
+      {:ok, _pid} -> {failures, deferred}
+      {:error, reason} -> {failures ++ [%{extension: name, reason: reason}], deferred}
     end
   end
 
@@ -1406,7 +1528,7 @@ defmodule Minga.Extension.Supervisor do
 
     case files do
       [] ->
-        {:error, "no .ex files found in #{expanded}"}
+        compile_extension_files_fallback(expanded)
 
       _ ->
         # The compile cache loads precompiled beams on a hit and recompiles
@@ -1420,6 +1542,17 @@ defmodule Minga.Extension.Supervisor do
           {:error, reason} ->
             {:error, reason}
         end
+    end
+  end
+
+  @spec compile_extension_files_fallback(String.t()) :: {:ok, module()} | {:error, String.t()}
+  defp compile_extension_files_fallback(expanded) do
+    json_path = Path.join(expanded, "plugin.json")
+
+    if File.exists?(json_path) do
+      Minga.Extension.JsonLoader.load(expanded)
+    else
+      {:error, "no .ex files found in #{expanded}"}
     end
   end
 
@@ -1465,8 +1598,9 @@ defmodule Minga.Extension.Supervisor do
   defp format_position(line) when is_integer(line), do: "#{line}"
   defp format_position(_), do: "?"
 
+  @doc false
   @spec implements_extension?(module()) :: boolean()
-  defp implements_extension?(module) do
+  def implements_extension?(module) do
     Code.ensure_loaded?(module) &&
       function_exported?(module, :name, 0) &&
       function_exported?(module, :description, 0) &&
@@ -1474,8 +1608,9 @@ defmodule Minga.Extension.Supervisor do
       function_exported?(module, :init, 1)
   end
 
+  @doc false
   @spec validate_behaviour(module(), atom()) :: :ok | {:error, String.t()}
-  defp validate_behaviour(module, name) do
+  def validate_behaviour(module, name) do
     missing =
       [:name, :description, :version, :init]
       |> Enum.reject(fn
@@ -1489,6 +1624,7 @@ defmodule Minga.Extension.Supervisor do
     end
   end
 
+  @doc false
   @spec cleanup_extension_contributions(
           atom(),
           GenServer.server(),
@@ -1496,7 +1632,7 @@ defmodule Minga.Extension.Supervisor do
           start_opts()
         ) ::
           :ok | {:error, [map()]}
-  defp cleanup_extension_contributions(name, cmd_registry, keymap, opts) do
+  def cleanup_extension_contributions(name, cmd_registry, keymap, opts) do
     source = {:extension, name}
 
     cleanup_opts =
@@ -1802,9 +1938,10 @@ defmodule Minga.Extension.Supervisor do
     end
   end
 
+  @doc false
   @spec register_and_validate_options(atom(), module(), keyword()) ::
           :ok | {:error, String.t()}
-  defp register_and_validate_options(name, module, config) do
+  def register_and_validate_options(name, module, config) do
     if function_exported?(module, :__option_schema__, 0) do
       schema = module.__option_schema__()
       Minga.Config.register_extension_schema(name, schema, config)

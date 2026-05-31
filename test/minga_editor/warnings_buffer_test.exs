@@ -18,12 +18,12 @@ defmodule MingaEditor.WarningsBufferTest do
       ctx = start_editor("hello")
       set_gui_capabilities(ctx)
 
-      MingaEditor.log_to_warnings("first warning", ctx.editor)
+      broadcast_warning(ctx, "first warning")
       flush_warning_popup(ctx)
       assert %{visible: true, filter: :warnings} = bottom_panel(ctx)
 
       dismiss_bottom_panel(ctx)
-      MingaEditor.log_to_warnings("second warning", ctx.editor)
+      broadcast_warning(ctx, "second warning")
       flush_warning_popup(ctx)
       refute bottom_panel(ctx).visible
     end
@@ -33,7 +33,7 @@ defmodule MingaEditor.WarningsBufferTest do
     test "warnings are stored and SPC b W opens the Messages buffer fallback" do
       ctx = start_editor("hello")
 
-      MingaEditor.log_to_warnings("something broke", ctx.editor)
+      broadcast_warning(ctx, "something broke")
       editor_state(ctx)
 
       warning_entries = Enum.filter(message_store_entries(ctx), &(&1.level == :warning))
@@ -46,6 +46,14 @@ defmodule MingaEditor.WarningsBufferTest do
 
       assert Enum.join(screen_text(ctx), "\n") =~ "*Messages*"
     end
+  end
+
+  defp broadcast_warning(ctx, text) do
+    Minga.Events.broadcast(
+      :log_message,
+      %Minga.Events.LogMessageEvent{text: text, level: :warning},
+      ctx.events_registry
+    )
   end
 
   defp set_gui_capabilities(ctx) do

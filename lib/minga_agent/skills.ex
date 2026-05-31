@@ -39,7 +39,7 @@ defmodule MingaAgent.Skills do
           activates_on: [String.t()],
           instructions: String.t(),
           path: String.t(),
-          source: :global | :project
+          source: :global | :project | :extension
         }
 
   @global_skills_dir "~/.config/minga/skills"
@@ -55,20 +55,18 @@ defmodule MingaAgent.Skills do
   @spec discover(String.t() | nil) :: [skill()]
   def discover(project_root \\ nil) do
     global = discover_in(expand_global_dir(), :global)
+    extension = discover_extension_skills()
 
     project =
       if project_root,
         do: discover_in(Path.join(project_root, @project_skills_dir), :project),
         else: []
 
-    # Project skills override global skills with the same name
-    merged =
-      (global ++ project)
-      |> Enum.group_by(& &1.name)
-      |> Enum.map(fn {_name, skills} -> List.last(skills) end)
-      |> Enum.sort_by(& &1.name)
-
-    merged
+    # Later sources override earlier: global < extension < project
+    (global ++ extension ++ project)
+    |> Enum.group_by(& &1.name)
+    |> Enum.map(fn {_name, skills} -> List.last(skills) end)
+    |> Enum.sort_by(& &1.name)
   end
 
   @doc """
@@ -177,7 +175,77 @@ defmodule MingaAgent.Skills do
 
   # ── Private ─────────────────────────────────────────────────────────────────
 
-  @spec discover_in(String.t(), :global | :project) :: [skill()]
+  @spec load_extension_skill_path(String.t()) :: [skill()]
+  defp load_extension_skill_path(path) do
+    skill_file = Path.join(path, "SKILL.md")
+
+    if File.regular?(skill_file) do
+      try_load_skill(Path.dirname(path), Path.basename(path), :extension)
+    else
+      discover_in(path, :extension)
+    end
+  end
+
+  @spec discover_extension_skills() :: [skill()]
+  defp discover_extension_skills do
+    extension_skill_paths()
+    |> Enum.flat_map(&load_extension_skill_path/1)
+  end
+
+  @spec extension_skill_paths() :: [String.t()]
+  defp extension_skill_paths do
+    case Process.whereis(Minga.Extension.Registry) do
+      nil ->
+        []
+
+      _pid ->
+        Minga.Extension.Registry.all()
+        |> Enum.filter(fn {_name, entry} -> entry.status == :running end)
+        |> Enum.flat_map(&extract_manifest_skills/1)
+    end
+  rescue
+    _ -> []
+  catch
+    :exit, _ -> []
+  end
+
+  @spec extract_manifest_skills({atom(), map()}) :: [String.t()]
+  defp extract_manifest_skills({_name, %{manifest: %{skills: paths}} = entry}) when paths != [] do
+    case extension_root(entry) do
+      nil -> Enum.filter(paths, &(Path.type(&1) == :absolute))
+      root -> Enum.map(paths, &resolve_skill_path(&1, root))
+    end
+  end
+
+  defp extract_manifest_skills(_entry), do: []
+
+  defp resolve_skill_path(skill_path, root) do
+    if Path.type(skill_path) == :absolute, do: skill_path, else: Path.join(root, skill_path)
+  end
+
+  @spec extension_root(map()) :: String.t() | nil
+  defp extension_root(%{path: path}) when is_binary(path), do: path
+
+  defp extension_root(%{module: mod}) when is_atom(mod) and not is_nil(mod) do
+    case :code.which(mod) do
+      path when is_list(path) ->
+        path |> List.to_string() |> Path.dirname() |> Path.dirname()
+
+      _ ->
+        nil
+    end
+  end
+
+  defp extension_root(%{hex: %{app: app}}) when is_atom(app) do
+    case :code.lib_dir(app) do
+      path when is_list(path) -> List.to_string(path)
+      _ -> nil
+    end
+  end
+
+  defp extension_root(_entry), do: nil
+
+  @spec discover_in(String.t(), :global | :project | :extension) :: [skill()]
   defp discover_in(dir, source) do
     if File.dir?(dir) do
       dir
@@ -188,7 +256,7 @@ defmodule MingaAgent.Skills do
     end
   end
 
-  @spec try_load_skill(String.t(), String.t(), :global | :project) :: [skill()]
+  @spec try_load_skill(String.t(), String.t(), :global | :project | :extension) :: [skill()]
   defp try_load_skill(dir, entry, source) do
     skill_file = Path.join([dir, entry, "SKILL.md"])
 

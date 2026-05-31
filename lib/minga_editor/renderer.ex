@@ -151,7 +151,6 @@ defmodule MingaEditor.Renderer do
       msg = Exception.message(e)
       trace = Exception.format_stacktrace(__STACKTRACE__) |> String.slice(0, 500)
       Minga.Log.warning(:render, "Render pipeline crashed: #{msg}\n#{trace}")
-      MingaEditor.log_to_messages("[render] frame dropped: #{msg}")
       state
   end
 end

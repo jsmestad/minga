@@ -22,7 +22,12 @@ defmodule Minga.Extension.Manifest do
     commands: [],
     keybindings: [],
     modeline_segments: [],
-    capabilities: []
+    capabilities: [],
+    load_policy: :eager,
+    hooks: [],
+    skills: [],
+    mcp_servers: [],
+    slash_commands: []
   ]
 
   @type t :: %__MODULE__{
@@ -33,7 +38,12 @@ defmodule Minga.Extension.Manifest do
           commands: [Extension.command_spec()],
           keybindings: [Extension.keybind_spec()],
           modeline_segments: [Extension.modeline_segment_spec()],
-          capabilities: capabilities()
+          capabilities: capabilities(),
+          load_policy: Extension.load_policy(),
+          hooks: [{atom(), keyword()}],
+          skills: [String.t()],
+          mcp_servers: [{atom(), keyword()}],
+          slash_commands: [{atom(), String.t(), keyword()}]
         }
 
   @doc """
@@ -54,7 +64,12 @@ defmodule Minga.Extension.Manifest do
       commands: safe_schema(module, :__command_schema__),
       keybindings: safe_schema(module, :__keybind_schema__),
       modeline_segments: safe_schema(module, :__modeline_segment_schema__),
-      capabilities: safe_capabilities(module)
+      capabilities: safe_capabilities(module),
+      load_policy: safe_load_policy(module),
+      hooks: safe_schema(module, :__hook_schema__),
+      skills: safe_schema(module, :__skill_schema__),
+      mcp_servers: safe_schema(module, :__mcp_server_schema__),
+      slash_commands: safe_schema(module, :__slash_command_schema__)
     }
   end
 
@@ -73,5 +88,12 @@ defmodule Minga.Extension.Manifest do
     if function_exported?(module, :__capability_schema__, 0),
       do: module.__capability_schema__(),
       else: []
+  end
+
+  @spec safe_load_policy(module()) :: Extension.load_policy()
+  defp safe_load_policy(module) do
+    if function_exported?(module, :__load_policy__, 0),
+      do: module.__load_policy__(),
+      else: :eager
   end
 end

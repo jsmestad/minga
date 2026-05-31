@@ -124,6 +124,8 @@ defmodule Minga.Config.Options do
           | :log_level_distribution
           | :parser_tree_ttl
           | :event_retention_days
+          | :event_persist_all
+          | :event_size_cap_mb
           | :default_shell
           | :file_find_excludes
           | :picker_backdrop
@@ -375,6 +377,10 @@ defmodule Minga.Config.Options do
     {:parser_tree_ttl, :integer, 300, "Seconds to keep cached parser trees alive."},
     {:event_retention_days, :pos_integer, 90,
      "Number of days to keep persisted event log entries."},
+    {:event_persist_all, :boolean, false,
+     "Whether all event types are persisted, including high-volume buffer and mode changes."},
+    {:event_size_cap_mb, :pos_integer, 128,
+     "Hard size cap in MiB for the event database including WAL and shared-memory files."},
     {:default_shell, {:enum, [:traditional, :board]}, :traditional,
      "Shell implementation opened by default."},
     {:file_find_excludes, :string_list,

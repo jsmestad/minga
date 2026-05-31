@@ -69,7 +69,7 @@ defmodule Minga.Session.EventRecorderTest do
       assert event.payload["path"] == "/tmp/opened.ex"
     end
 
-    test "records mode_changed events with old/new in payload", %{
+    test "does not persist mode_changed events by default", %{
       recorder: recorder,
       db_dir: db_dir
     } do
@@ -81,14 +81,13 @@ defmodule Minga.Session.EventRecorderTest do
       wait_for_processing(recorder)
 
       db = open_db(db_dir)
-      {:ok, [event]} = Store.events_by_type(db, :mode_changed)
+      {:ok, events} = Store.events_by_type(db, :mode_changed)
       Store.close(db)
 
-      assert event.payload["old"] == "normal"
-      assert event.payload["new"] == "insert"
+      assert events == []
     end
 
-    test "records buffer_changed events with source identity", %{
+    test "does not persist buffer_changed events by default", %{
       recorder: recorder,
       db_dir: db_dir
     } do
@@ -101,10 +100,10 @@ defmodule Minga.Session.EventRecorderTest do
       wait_for_processing(recorder)
 
       db = open_db(db_dir)
-      {:ok, [event]} = Store.events_by_type(db, :buffer_changed)
+      {:ok, events} = Store.events_by_type(db, :buffer_changed)
       Store.close(db)
 
-      assert event.source == "user"
+      assert events == []
     end
 
     test "records command_done events with command and exit code", %{
@@ -152,7 +151,7 @@ defmodule Minga.Session.EventRecorderTest do
       assert event.payload["branch"] == "main"
     end
 
-    test "records multiple events in chronological order", %{
+    test "records multiple whitelisted events in chronological order", %{
       recorder: recorder,
       db_dir: db_dir
     } do
@@ -163,7 +162,7 @@ defmodule Minga.Session.EventRecorderTest do
 
       send(
         recorder,
-        {:minga_event, :mode_changed, %Events.ModeEvent{old: :normal, new: :insert}}
+        {:minga_event, :buffer_opened, %Events.BufferEvent{buffer: self(), path: "/tmp/b.ex"}}
       )
 
       send(
@@ -372,6 +371,174 @@ defmodule Minga.Session.EventRecorderTest do
       paths = Enum.map(events, & &1.payload["path"])
       assert "/tmp/before.ex" in paths
       assert "/tmp/after.ex" in paths
+    end
+  end
+
+  describe "persist_all opt-in" do
+    test "persists buffer_changed when persist_all is true" do
+      tmp_dir =
+        Path.join(System.tmp_dir!(), "minga_persist_all_#{:erlang.unique_integer([:positive])}")
+
+      File.mkdir_p!(tmp_dir)
+      on_exit(fn -> File.rm_rf!(tmp_dir) end)
+
+      unique = :erlang.unique_integer([:positive])
+
+      recorder =
+        start_supervised!(
+          Supervisor.child_spec(
+            {EventRecorder,
+             name: :"recorder_persist_#{unique}",
+             db_dir: tmp_dir,
+             subscribe: false,
+             persist_all: true},
+            id: :"recorder_persist_#{unique}"
+          )
+        )
+
+      send(
+        recorder,
+        {:minga_event, :buffer_changed,
+         %Events.BufferChangedEvent{buffer: self(), source: Minga.Buffer.EditSource.user()}}
+      )
+
+      wait_for_processing(recorder)
+
+      db = open_db(tmp_dir)
+      {:ok, [event]} = Store.events_by_type(db, :buffer_changed)
+      Store.close(db)
+
+      assert event.source == "user"
+    end
+
+    test "persists mode_changed when persist_all is true" do
+      tmp_dir =
+        Path.join(System.tmp_dir!(), "minga_persist_mode_#{:erlang.unique_integer([:positive])}")
+
+      File.mkdir_p!(tmp_dir)
+      on_exit(fn -> File.rm_rf!(tmp_dir) end)
+
+      unique = :erlang.unique_integer([:positive])
+
+      recorder =
+        start_supervised!(
+          Supervisor.child_spec(
+            {EventRecorder,
+             name: :"recorder_mode_#{unique}",
+             db_dir: tmp_dir,
+             subscribe: false,
+             persist_all: true},
+            id: :"recorder_mode_#{unique}"
+          )
+        )
+
+      send(
+        recorder,
+        {:minga_event, :mode_changed, %Events.ModeEvent{old: :normal, new: :insert}}
+      )
+
+      wait_for_processing(recorder)
+
+      db = open_db(tmp_dir)
+      {:ok, [event]} = Store.events_by_type(db, :mode_changed)
+      Store.close(db)
+
+      assert event.payload["old"] == "normal"
+      assert event.payload["new"] == "insert"
+    end
+  end
+
+  describe "size cap enforcement" do
+    test "does not prune when database is under the configured cap" do
+      tmp_dir =
+        Path.join(System.tmp_dir!(), "minga_cap_#{:erlang.unique_integer([:positive])}")
+
+      File.mkdir_p!(tmp_dir)
+      on_exit(fn -> File.rm_rf!(tmp_dir) end)
+
+      unique = :erlang.unique_integer([:positive])
+
+      recorder =
+        start_supervised!(
+          Supervisor.child_spec(
+            {EventRecorder,
+             name: :"recorder_cap_#{unique}",
+             db_dir: tmp_dir,
+             subscribe: false,
+             retention_days: 90,
+             size_cap_mb: 128,
+             initial_sweep_delay_ms: :timer.hours(1)},
+            id: :"recorder_cap_#{unique}"
+          )
+        )
+
+      for i <- 1..200 do
+        send(
+          recorder,
+          {:minga_event, :buffer_saved,
+           %Events.BufferEvent{buffer: self(), path: "/tmp/file_#{i}.ex"}}
+        )
+      end
+
+      wait_for_processing(recorder)
+
+      db = open_db(tmp_dir)
+      {:ok, count_before} = Store.count(db)
+      Store.close(db)
+
+      assert count_before == 200
+
+      send(recorder, :retention_sweep)
+      wait_for_processing(recorder)
+
+      db2 = open_db(tmp_dir)
+      {:ok, count_after} = Store.count(db2)
+      Store.close(db2)
+
+      assert count_after == 200
+    end
+
+    test "prunes oldest events and vacuums when over cap" do
+      tmp_dir =
+        Path.join(System.tmp_dir!(), "minga_capforce_#{:erlang.unique_integer([:positive])}")
+
+      File.mkdir_p!(tmp_dir)
+      on_exit(fn -> File.rm_rf!(tmp_dir) end)
+
+      db_path = EventRecorder.db_path(db_dir: tmp_dir)
+      {:ok, db} = Store.open(db_path)
+
+      for i <- 1..500 do
+        record = %Minga.Session.EventRecorder.EventRecord{
+          timestamp: i,
+          wall_clock: DateTime.add(~U[2025-01-01 00:00:00Z], i, :second),
+          source: "user",
+          scope: :global,
+          event_type: :buffer_saved,
+          payload: %{"path" => "/tmp/file_#{i}.ex", "data" => String.duplicate("x", 200)}
+        }
+
+        :ok = Store.insert(db, record)
+      end
+
+      Store.close(db)
+
+      total_before = Store.total_file_size(db_path)
+
+      {:ok, db2} = Store.open(db_path)
+      {:ok, 500} = Store.count(db2)
+
+      {:ok, deleted} = Store.delete_oldest(db2, 100)
+      assert deleted == 400
+
+      {:ok, remaining} = Store.count(db2)
+      assert remaining == 100
+
+      :ok = Store.vacuum(db2)
+      Store.close(db2)
+
+      total_after = Store.total_file_size(db_path)
+      assert total_after < total_before
     end
   end
 

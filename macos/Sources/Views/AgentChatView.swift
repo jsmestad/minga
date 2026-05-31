@@ -991,10 +991,9 @@ struct AgentChatView: View {
     @ViewBuilder
     private func promptCompletionPopup(_ completion: Wire.PromptCompletion) -> some View {
         let isSlash = completion.type == 1
-        let maxVisible = min(completion.candidates.count, 10)
 
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(completion.candidates.prefix(10).enumerated()), id: \.offset) { index, candidate in
+            ForEach(Array(completion.candidates.enumerated()), id: \.offset) { index, candidate in
                 HStack(spacing: 6) {
                     Image(systemName: isSlash ? "command" : "doc")
                         .font(.system(size: 10))
@@ -1021,7 +1020,7 @@ struct AgentChatView: View {
             }
         }
         .frame(maxWidth: 400)
-        .frame(maxHeight: CGFloat(maxVisible) * 24)
+        .frame(maxHeight: CGFloat(completion.candidates.count) * 24)
         .background(
             RoundedRectangle(cornerRadius: 6)
                 .fill(theme.agentCodeBg)

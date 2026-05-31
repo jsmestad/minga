@@ -6,8 +6,8 @@ defmodule MingaEditor.UI.Panel.MessageStore do
   text, and optional file path. The GUI protocol encoder reads from this store
   to send incremental entries to the frontend.
 
-  The TUI continues to use the `*Messages*` gap buffer. Both are fed from
-  the same `MessageLog.log/2` call site (dual-write).
+  The TUI uses the `*Messages*` gap buffer, written by `MessagesBuffer`.
+  Both are fed from `:log_message` event broadcasts via `Minga.Log`.
   """
 
   alias __MODULE__.Entry

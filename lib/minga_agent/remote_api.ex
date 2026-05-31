@@ -66,16 +66,8 @@ defmodule MingaAgent.RemoteAPI do
 
     with :ok <- authorize(session_id, token),
          {:ok, pid} <- SessionManager.get_session(session_id),
-         :ok <- Session.subscribe(pid, subscriber_pid, role: role),
-         {:ok, events, latest_event_id} <- event_catchup(session_id, last_seen_event_id) do
-      info = session_info(session_id, pid, token)
-      role = Session.subscriber_role(pid, subscriber_pid) || :viewer
-
-      {:ok,
-       AttachResult.new(info, role, Session.messages(pid), Session.editor_snapshot(pid),
-         events: events,
-         latest_event_id: latest_event_id
-       )}
+         :ok <- Session.subscribe(pid, subscriber_pid, role: role) do
+      attach_after_subscribe(pid, session_id, token, subscriber_pid, last_seen_event_id)
     end
   end
 
@@ -198,6 +190,26 @@ defmodule MingaAgent.RemoteAPI do
       {:ok, ^token} -> :ok
       {:ok, _other} -> {:error, :unauthorized}
       {:error, :not_found} -> {:error, :not_found}
+    end
+  end
+
+  @spec attach_after_subscribe(pid(), String.t(), String.t(), pid(), non_neg_integer()) ::
+          {:ok, attach_result()} | {:error, term()}
+  defp attach_after_subscribe(pid, session_id, token, subscriber_pid, last_seen_event_id) do
+    case event_catchup(session_id, last_seen_event_id) do
+      {:ok, events, latest_event_id} ->
+        info = session_info(session_id, pid, token)
+        role = Session.subscriber_role(pid, subscriber_pid) || :viewer
+
+        {:ok,
+         AttachResult.new(info, role, Session.messages(pid), Session.editor_snapshot(pid),
+           events: events,
+           latest_event_id: latest_event_id
+         )}
+
+      {:error, _reason} = error ->
+        Session.unsubscribe(pid, subscriber_pid)
+        error
     end
   end
 

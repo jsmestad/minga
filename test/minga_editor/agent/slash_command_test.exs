@@ -39,6 +39,33 @@ defmodule MingaEditor.Agent.SlashCommandTest do
     @impl MingaAgent.Provider
     def get_state(_pid), do: {:ok, %{model: nil, is_streaming: false, token_usage: nil}}
 
+    @impl MingaAgent.Provider
+    def get_available_models(_pid) do
+      {:ok,
+       [
+         %{
+           "id" => "anthropic:claude-sonnet-4",
+           "name" => "Claude Sonnet 4",
+           "provider" => "anthropic",
+           "context_window" => 200_000,
+           "cost" => nil
+         },
+         %{
+           "id" => "openai:gpt-4o",
+           "name" => "GPT-4o",
+           "provider" => "openai",
+           "context_window" => 128_000,
+           "cost" => nil
+         }
+       ]}
+    end
+
+    @impl MingaAgent.Provider
+    def cycle_model(_pid), do: {:ok, %{"model" => "openai:gpt-4o", "index" => 1, "total" => 1}}
+
+    @impl MingaAgent.Provider
+    def set_model(_pid, _model), do: :ok
+
     @impl GenServer
     def init(_opts), do: {:ok, %{}}
   end
@@ -142,6 +169,48 @@ defmodule MingaEditor.Agent.SlashCommandTest do
     end
   end
 
+  describe "completion_candidates/2" do
+    test "returns slash command candidates before an argument" do
+      labels = SlashCommand.completion_candidates(mock_state(), "mo") |> Enum.map(& &1.label)
+      assert "model" in labels
+      refute "help" in labels
+    end
+
+    test "returns configured model candidates after model and a space" do
+      Minga.Config.set_option(:agent_models, ["anthropic:claude-sonnet-4", "openai:gpt-4o"])
+
+      try do
+        candidates = SlashCommand.completion_candidates(mock_state(), "model gpt")
+        assert [%{label: "openai:gpt-4o", insert: "model openai:gpt-4o"}] = candidates
+      after
+        Minga.Config.set_option(:agent_models, [])
+      end
+    end
+
+    test "renders all configured model entries when many are available" do
+      models =
+        1..25
+        |> Enum.map(fn index ->
+          index
+          |> Integer.to_string()
+          |> String.pad_leading(2, "0")
+          |> then(&"zz-#{&1}")
+        end)
+
+      Minga.Config.set_option(:agent_models, models)
+
+      try do
+        labels =
+          SlashCommand.completion_candidates(mock_state(), "model zz") |> Enum.map(& &1.label)
+
+        assert length(labels) == 25
+        assert MapSet.new(labels) == MapSet.new(models)
+      after
+        Minga.Config.set_option(:agent_models, [])
+      end
+    end
+  end
+
   describe "execute/2" do
     # Build a minimal state that the slash commands can work with
     defp mock_state(opts \\ []) do
@@ -218,8 +287,10 @@ defmodule MingaEditor.Agent.SlashCommandTest do
       assert state.shell_state.status_msg == "No agent session"
     end
 
-    test "/model without name returns error" do
-      assert {:error, "Usage: /model <name>"} = SlashCommand.execute(mock_state(), "/model")
+    test "/model without name opens the model picker" do
+      {:ok, state} = SlashCommand.execute(mock_state(session: start_session()), "/model")
+      assert {:picker, %{picker_ui: picker_ui}} = state.shell_state.modal
+      assert picker_ui.source == MingaEditor.UI.Picker.AgentModelSource
     end
 
     test "/model with name sets model (triggers restart)" do
@@ -363,6 +434,110 @@ defmodule MingaEditor.Agent.SlashCommandTest do
 
     test "/plan without an active session returns a clear error" do
       assert {:error, "No active agent session"} = SlashCommand.execute(mock_state(), "/plan")
+    end
+  end
+
+  describe "dynamic commands from extension registry" do
+    alias Minga.Extension.Manifest
+    alias Minga.Extension.Registry, as: ExtRegistry
+
+    setup do
+      # Register test extensions with slash_commands in their manifests.
+      # The Registry is already started by the application.
+      :ok = ExtRegistry.register(:test_ext_dynamic, "/tmp/test_ext", [])
+
+      ExtRegistry.update(:test_ext_dynamic,
+        manifest: %Manifest{
+          name: :test_ext_dynamic,
+          version: "0.1.0",
+          source: :path,
+          slash_commands: [
+            {:greet, "Say hello", command: "/usr/bin/echo"},
+            {:farewell, "Say goodbye", command: "/usr/bin/echo"}
+          ]
+        },
+        status: :running
+      )
+
+      on_exit(fn ->
+        ExtRegistry.unregister(:test_ext_dynamic)
+        ExtRegistry.unregister(:test_ext_other)
+      end)
+
+      :ok
+    end
+
+    test "dynamic_commands/0 returns commands from extension manifests" do
+      dynamic = SlashCommand.dynamic_commands()
+      names = Enum.map(dynamic, & &1.name)
+      assert "greet" in names
+      assert "farewell" in names
+    end
+
+    test "dynamic commands appear in commands/0" do
+      names = SlashCommand.commands() |> Enum.map(& &1.name)
+      assert "greet" in names
+
+      # Core commands are still present
+      assert "help" in names
+      assert "clear" in names
+    end
+
+    test "dynamic commands appear in completions/1" do
+      matches = SlashCommand.completions("gre")
+      names = Enum.map(matches, & &1.name)
+      assert "greet" in names
+    end
+
+    test "completions/1 filters dynamic commands by prefix" do
+      matches = SlashCommand.completions("fare")
+      names = Enum.map(matches, & &1.name)
+      assert "farewell" in names
+      refute "greet" in names
+    end
+
+    test "dynamic commands from multiple extensions are combined" do
+      :ok = ExtRegistry.register(:test_ext_other, "/tmp/test_ext_other", [])
+
+      ExtRegistry.update(:test_ext_other,
+        manifest: %Manifest{
+          name: :test_ext_other,
+          version: "0.1.0",
+          source: :path,
+          slash_commands: [{:ext_b_cmd, "From ext B", command: "/usr/bin/echo"}]
+        },
+        status: :running
+      )
+
+      dynamic = SlashCommand.dynamic_commands()
+      names = Enum.map(dynamic, & &1.name)
+      assert "greet" in names
+      assert "ext_b_cmd" in names
+    end
+
+    test "extensions without manifests are excluded" do
+      :ok = ExtRegistry.register(:test_ext_other, "/tmp/test_ext_other", [])
+      # No manifest set, so it stays nil
+
+      dynamic = SlashCommand.dynamic_commands()
+      names = Enum.map(dynamic, & &1.name)
+      # Only commands from test_ext_dynamic should appear
+      assert "greet" in names
+    end
+
+    test "dispatch routes unknown command to dynamic commands" do
+      # An unknown command returns an error when no dynamic command matches
+      assert {:error, "Unknown command: /nonexistent"} =
+               SlashCommand.execute(mock_state(), "/nonexistent")
+    end
+
+    test "dynamic_commands/0 returns empty list when no extensions are registered" do
+      # Remove our test extension
+      ExtRegistry.unregister(:test_ext_dynamic)
+
+      dynamic = SlashCommand.dynamic_commands()
+      # Should return empty (no extensions with slash commands)
+      refute Enum.any?(dynamic, &(&1.name == "greet"))
     end
   end
 end

@@ -899,25 +899,29 @@ defmodule Minga.Buffer.Process do
   @spec handle_call(term(), GenServer.from(), state()) :: {:reply, term(), state()}
   def handle_call({:open, file_path}, _from, state) do
     case Persistence.read_content(state, file_path) do
-      {:ok, text} ->
-        first_line = text |> String.split("\n", parts: 2) |> List.first("")
-        filetype = Language.detect_filetype_from_content(file_path, first_line)
+      {:ok, text} when is_binary(text) ->
+        if String.valid?(text) do
+          first_line = text |> String.split("\n", parts: 2) |> List.first("")
+          filetype = Language.detect_filetype_from_content(file_path, first_line)
 
-        {mtime, size} = Persistence.file_metadata(state, file_path)
+          {mtime, size} = Persistence.file_metadata(state, file_path)
 
-        new_state = %{
-          BufState.load_saved_content(state, file_path, {mtime, size}, text)
-          | document: Document.new(text),
-            file_path: file_path,
-            filetype: filetype,
-            options: reseed_options(state, filetype),
-            decorations: Decorations.new(),
-            undo_history: UndoHistory.clear(state.undo_history)
-        }
+          new_state = %{
+            BufState.load_saved_content(state, file_path, {mtime, size}, text)
+            | document: Document.new(text),
+              file_path: file_path,
+              filetype: filetype,
+              options: reseed_options(state, filetype),
+              decorations: Decorations.new(),
+              undo_history: UndoHistory.clear(state.undo_history)
+          }
 
-        unregister_path(state.file_path)
-        register_path(file_path)
-        {:reply, :ok, new_state}
+          unregister_path(state.file_path)
+          register_path(file_path)
+          {:reply, :ok, new_state}
+        else
+          {:reply, {:error, :binary_file}, state}
+        end
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}

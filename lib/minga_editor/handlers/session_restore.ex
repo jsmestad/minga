@@ -23,7 +23,7 @@ defmodule MingaEditor.Handlers.SessionRestore do
   def restore_session(state) do
     case Session.load(EditorSessionState.session_opts(state.session)) do
       {:ok, session} ->
-        state = MingaEditor.log_message(state, "Restored from previous session")
+        Minga.Log.info(:editor, "Restored from previous session")
         Enum.reduce(session.buffers, state, &restore_session_buffer/2)
 
       {:error, _} ->
@@ -36,11 +36,10 @@ defmodule MingaEditor.Handlers.SessionRestore do
   def recover_swap_entries(state, entries) do
     count = length(entries)
 
-    state =
-      MingaEditor.log_message(
-        state,
-        "Found #{count} file(s) with unsaved changes from a previous session"
-      )
+    Minga.Log.info(
+      :editor,
+      "Found #{count} file(s) with unsaved changes from a previous session"
+    )
 
     Enum.reduce(entries, state, &recover_swap_entry/2)
   end
@@ -77,14 +76,16 @@ defmodule MingaEditor.Handlers.SessionRestore do
   defp recover_swap_entry(entry, state) do
     case Minga.Session.recover_swap_file(entry.swap_path) do
       {:ok, file_path, content} ->
-        state = MingaEditor.log_message(state, "Recovered: #{Path.basename(file_path)}")
+        Minga.Log.info(:editor, "Recovered: #{Path.basename(file_path)}")
         recover_buffer(state, file_path, content)
 
       {:error, reason} ->
-        MingaEditor.log_message(
-          state,
+        Minga.Log.info(
+          :editor,
           "Failed to recover #{Path.basename(entry.path)}: #{inspect(reason)}"
         )
+
+        state
     end
   end
 
@@ -101,17 +102,21 @@ defmodule MingaEditor.Handlers.SessionRestore do
             BufferRegistry.register_buffer(state, pid, file_path)
 
           {:error, :read_only} ->
-            MingaEditor.log_message(
-              state,
+            Minga.Log.info(
+              :editor,
               "Cannot recover #{Path.basename(file_path)}: read-only"
             )
+
+            state
         end
 
       {:error, reason} ->
-        MingaEditor.log_message(
-          state,
+        Minga.Log.info(
+          :editor,
           "Could not open buffer for #{Path.basename(file_path)}: #{inspect(reason)}"
         )
+
+        state
     end
   end
 end
