@@ -168,8 +168,8 @@ defmodule MingaEditor.Commands.AgentSession do
         |> AgentAccess.update_agent(&AgentState.set_buffer(&1, buffer))
         |> rebuild_agent_from_tab(tab_id)
         |> apply_remote_snapshot(snapshot)
-        |> replay_catchup_events(events)
         |> ensure_agent_workspace(remote_pid, nil)
+        |> replay_catchup_events(events)
         |> set_remote_workspace(server_name, session_id, remote_pid, :connected, latest_event_id)
         |> EditorState.set_status("Connected to #{server_name} session #{session_id}")
 
