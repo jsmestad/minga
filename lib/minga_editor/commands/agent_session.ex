@@ -615,8 +615,11 @@ defmodule MingaEditor.Commands.AgentSession do
     case :erpc.call(remote_node, MingaAgent.RemoteAPI, :list_sessions, [], 5_000) do
       sessions when is_list(sessions) ->
         Enum.find_value(sessions, {:error, :not_found}, fn
-          %{session_id: session_id, pid: ^remote_pid, token: token} -> {:ok, session_id, token}
-          _session -> nil
+          %{session_id: session_id, pid: ^remote_pid, token: token} ->
+            {:ok, session_id, token}
+
+          _session ->
+            nil
         end)
 
       other ->
