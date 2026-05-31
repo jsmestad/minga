@@ -2,6 +2,7 @@ defmodule Minga.Remote.CLI do
   @moduledoc "CLI handlers for remote agent session subcommands."
 
   alias Minga.Remote.Bootstrap
+  alias Minga.Remote.ControlEndpoint
   alias Minga.Remote.SessionURL
 
   @type attach_result :: Bootstrap.attach_result()
@@ -44,18 +45,38 @@ defmodule Minga.Remote.CLI do
   @doc "Detaches the local frontend from the current remote session."
   @spec detach() :: :ok | {:error, String.t()}
   def detach do
-    Application.delete_env(:minga, :pending_remote_attach)
     detach_running_editor(Process.whereis(MingaEditor))
   end
 
   @spec detach_running_editor(pid() | nil) :: :ok | {:error, String.t()}
   defp detach_running_editor(nil) do
-    IO.puts("No running local frontend found; remote sessions keep running on the server.")
-    :ok
+    case ControlEndpoint.read_node() do
+      {:ok, node} ->
+        case connect_control_node(node) do
+          :ok ->
+            :ok = :erpc.call(node, Minga.API, :execute, [:detach_remote_session], 10_000)
+            Application.delete_env(:minga, :pending_remote_attach)
+            IO.puts("Detached local frontend; remote session keeps running.")
+            :ok
+
+          {:error, reason} ->
+            {:error, "failed to connect to local frontend: #{inspect(reason)}"}
+        end
+
+      {:error, :not_found} ->
+        {:error,
+         "no local frontend control endpoint available; remote sessions keep running on the server"}
+
+      {:error, reason} ->
+        {:error, "failed to read local frontend control endpoint: #{inspect(reason)}"}
+    end
+  catch
+    :exit, reason -> {:error, "failed to detach local frontend: #{inspect(reason)}"}
   end
 
   defp detach_running_editor(_editor) do
-    Minga.API.execute(:detach_remote_session)
+    :ok = Minga.API.execute(:detach_remote_session)
+    Application.delete_env(:minga, :pending_remote_attach)
     IO.puts("Detached local frontend; remote session keeps running.")
     :ok
   catch
@@ -66,8 +87,18 @@ defmodule Minga.Remote.CLI do
   @spec connect_pending_editor_attach() :: :ok | {:error, term()} | :none
   def connect_pending_editor_attach do
     case Application.get_env(:minga, :pending_remote_attach) do
-      %Bootstrap{} = result -> connect_editor(result)
-      _other -> :none
+      %Bootstrap{} = result ->
+        case connect_editor(result) do
+          :ok ->
+            Application.delete_env(:minga, :pending_remote_attach)
+            :ok
+
+          {:error, _} = error ->
+            error
+        end
+
+      _other ->
+        :none
     end
   end
 
@@ -97,7 +128,16 @@ defmodule Minga.Remote.CLI do
         )
 
       :timeout ->
-        {:error, :editor_not_started}
+        {:error, "editor did not start for remote attach"}
+    end
+  end
+
+  @spec connect_control_node(node()) :: :ok | {:error, term()}
+  defp connect_control_node(node) when is_atom(node) do
+    case Node.connect(node) do
+      true -> :ok
+      false -> {:error, {:node_connect_failed, node}}
+      :ignored -> {:error, :distribution_not_started}
     end
   end
 

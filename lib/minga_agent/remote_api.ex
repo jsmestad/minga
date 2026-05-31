@@ -12,6 +12,7 @@ defmodule MingaAgent.RemoteAPI do
   alias MingaAgent.RemoteAPI.SessionInfo
   alias MingaAgent.Session
   alias MingaAgent.SessionManager
+  alias MingaAgent.SessionStore
 
   @typedoc "Remote attachment role."
   @type role :: :driver | :viewer
@@ -35,8 +36,11 @@ defmodule MingaAgent.RemoteAPI do
   @spec start_or_get_for_workdir(String.t(), keyword()) ::
           {:ok, session_info()} | {:error, term()}
   def start_or_get_for_workdir(workdir, opts \\ []) when is_binary(workdir) do
-    session_id = SessionManager.stable_session_id_for_workdir(workdir)
-    opts = opts |> Keyword.put(:session_id, session_id) |> Keyword.put_new(:workdir, workdir)
+    normalized_workdir = normalize_workdir(workdir)
+    session_id = SessionManager.stable_session_id_for_workdir(normalized_workdir)
+
+    opts =
+      opts |> Keyword.put(:session_id, session_id) |> Keyword.put(:workdir, normalized_workdir)
 
     with {:ok, ^session_id, pid} <- SessionManager.start_or_get_session(session_id, opts),
          {:ok, token} <- SessionManager.session_token(session_id) do
@@ -48,10 +52,7 @@ defmodule MingaAgent.RemoteAPI do
   @spec list_sessions() :: [session_info()]
   def list_sessions do
     SessionManager.list_sessions()
-    |> Enum.map(fn {session_id, pid, _metadata} ->
-      {:ok, token} = SessionManager.session_token(session_id)
-      session_info(session_id, pid, token)
-    end)
+    |> Enum.flat_map(&session_info_if_live/1)
   end
 
   @doc "Attaches a client process to a session as driver or viewer."
@@ -129,6 +130,32 @@ defmodule MingaAgent.RemoteAPI do
     end
   end
 
+  @doc "Stops the existing stable session for a workdir through the broker."
+  @spec stop_workdir_session(String.t()) :: :ok | {:error, term()}
+  def stop_workdir_session(workdir) when is_binary(workdir) do
+    session_id = workdir |> normalize_workdir() |> SessionManager.stable_session_id_for_workdir()
+
+    case SessionManager.session_token(session_id) do
+      {:ok, token} -> stop_session(session_id, token)
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc "Loads persisted session data through the broker for an ended session."
+  @spec session_data(String.t()) :: {:ok, SessionStore.session_data()} | {:error, term()}
+  def session_data(session_id) when is_binary(session_id) do
+    SessionStore.load(session_id)
+  end
+
+  @doc "Loads persisted session data through the broker for a live token-authorized session."
+  @spec session_data(String.t(), String.t()) ::
+          {:ok, SessionStore.session_data()} | {:error, term()}
+  def session_data(session_id, token) when is_binary(session_id) and is_binary(token) do
+    with :ok <- authorize(session_id, token) do
+      SessionStore.load(session_id)
+    end
+  end
+
   @doc "Authorizes a broker call with the per-session token."
   @spec authorize(String.t(), String.t()) :: :ok | {:error, :unauthorized | :not_found}
   def authorize(session_id, token) when is_binary(session_id) and is_binary(token) do
@@ -170,6 +197,19 @@ defmodule MingaAgent.RemoteAPI do
   defp safe_latest_event_id(events, latest_event_id) do
     delivered_latest_id = events |> List.last() |> Map.fetch!(:id)
     min(delivered_latest_id, latest_event_id)
+  end
+
+  @spec normalize_workdir(String.t()) :: String.t()
+  defp normalize_workdir(workdir) when is_binary(workdir), do: Path.expand(workdir)
+
+  @spec session_info_if_live({String.t(), pid(), term()}) :: [session_info()]
+  defp session_info_if_live({session_id, pid, _metadata}) do
+    case SessionManager.session_token(session_id) do
+      {:ok, token} -> [session_info(session_id, pid, token)]
+      {:error, :not_found} -> []
+    end
+  catch
+    :exit, _reason -> []
   end
 
   @spec session_info(String.t(), pid(), String.t()) :: session_info()

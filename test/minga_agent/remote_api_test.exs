@@ -101,16 +101,32 @@ defmodule MingaAgent.RemoteAPITest do
     assert {:error, :not_found} = SessionManager.get_session(session_id)
   end
 
-  test "start_or_get_for_workdir reuses the deterministic session" do
-    workdir = Path.join(System.tmp_dir!(), "remote-api-workdir")
+  test "start_or_get_for_workdir reuses the deterministic normalized session" do
+    parent = Path.join(System.tmp_dir!(), "remote-api-workdir")
+    workdir = Path.join(parent, "app")
+    equivalent_workdir = Path.join([parent, "app", "..", "app"])
 
-    assert {:ok, %{session_id: session_id, pid: pid}} =
-             RemoteAPI.start_or_get_for_workdir(workdir)
+    assert {:ok, %{session_id: session_id, pid: pid, metadata: metadata}} =
+             RemoteAPI.start_or_get_for_workdir(equivalent_workdir)
 
     on_exit(fn -> SessionManager.stop_session(session_id) end)
 
+    assert metadata.workdir == Path.expand(workdir)
+
     assert {:ok, %{session_id: ^session_id, pid: ^pid}} =
              RemoteAPI.start_or_get_for_workdir(workdir)
+  end
+
+  test "stop_workdir_session stops the normalized workdir session" do
+    parent = Path.join(System.tmp_dir!(), "remote-api-stop-workdir")
+    workdir = Path.join(parent, "app")
+    equivalent_workdir = Path.join([parent, "app", "..", "app"])
+
+    assert {:ok, %{session_id: session_id}} =
+             RemoteAPI.start_or_get_for_workdir(equivalent_workdir)
+
+    assert :ok = RemoteAPI.stop_workdir_session(workdir)
+    assert {:error, :not_found} = SessionManager.get_session(session_id)
   end
 
   @spec wait_for_events(String.t(), non_neg_integer(), pos_integer(), non_neg_integer()) :: [

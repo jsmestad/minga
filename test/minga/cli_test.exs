@@ -67,6 +67,18 @@ defmodule Minga.CLITest do
                CLI.parse_args(["kill-session", "ssh://devbox/work/app"])
     end
 
+    test "terminal_command?/1 detects terminal-only remote commands" do
+      assert CLI.terminal_command?(["sessions", "ssh://devbox"])
+      assert CLI.terminal_command?(["detach"])
+      assert CLI.terminal_command?(["kill-session", "ssh://devbox/work/app"])
+      assert CLI.terminal_command?(["--cookie", "abc", "sessions"])
+      assert CLI.terminal_command?(["sessions"])
+      assert CLI.terminal_command?(["kill-session"])
+      assert CLI.terminal_command?(["detach", "unexpected"])
+      refute CLI.terminal_command?(["attach", "ssh://devbox/work/app"])
+      refute CLI.terminal_command?(["README.md"])
+    end
+
     test "file argument with extra non-flag args takes the last file" do
       assert {:open, "other.txt", %{view_mode: :auto, no_context: false, config_file: nil}} =
                CLI.parse_args(["file.txt", "other.txt"])

@@ -54,11 +54,9 @@ defmodule Minga.Remote.Bootstrap do
   @doc "Stops the stable session for an SSH URL's server-side working directory."
   @spec kill_session(SessionURL.t()) :: :ok | {:error, term()}
   def kill_session(%SessionURL{} = url) do
-    with {:ok, result} <- attach(url) do
-      erpc_result(result.remote_node, MingaAgent.RemoteAPI, :stop_session, [
-        result.session_id,
-        result.token
-      ])
+    with :ok <- ensure_daemon(url),
+         {:ok, remote_node} <- connect_remote_node(url) do
+      erpc_result(remote_node, MingaAgent.RemoteAPI, :stop_workdir_session, [url.path])
     end
   end
 
@@ -84,27 +82,34 @@ defmodule Minga.Remote.Bootstrap do
   @spec connect_remote_node(SessionURL.t()) :: {:ok, node()} | {:error, term()}
   def connect_remote_node(%SessionURL{host: host}) do
     node_name = Application.get_env(:minga, :remote_node_name, "minga_server@#{host}")
-    remote_node = String.to_atom(node_name)
 
-    case Node.connect(remote_node) do
-      true -> {:ok, remote_node}
-      false -> {:error, {:node_connect_failed, remote_node}}
-      :ignored -> {:error, :distribution_not_started}
+    with {:ok, remote_node} <- distribution_atom(node_name) do
+      case Node.connect(remote_node) do
+        true -> {:ok, remote_node}
+        false -> {:error, {:node_connect_failed, remote_node}}
+        :ignored -> {:error, :distribution_not_started}
+      end
     end
   end
 
   @spec erpc(node(), module(), atom(), [term()]) :: {:ok, term()} | {:error, term()}
   defp erpc(remote_node, module, function, args) do
-    {:ok, :erpc.call(remote_node, module, function, args, 10_000)}
+    remote_node
+    |> :erpc.call(module, function, args, 10_000)
+    |> normalize_erpc_result()
   catch
     :exit, reason -> {:error, reason}
   end
+
+  @spec normalize_erpc_result(term()) :: {:ok, term()} | {:error, term()}
+  defp normalize_erpc_result({:ok, value}), do: {:ok, value}
+  defp normalize_erpc_result({:error, reason}), do: {:error, reason}
+  defp normalize_erpc_result(value), do: {:ok, value}
 
   @spec erpc_result(node(), module(), atom(), [term()]) :: :ok | {:error, term()}
   defp erpc_result(remote_node, module, function, args) do
     case erpc(remote_node, module, function, args) do
       {:ok, :ok} -> :ok
-      {:ok, {:error, reason}} -> {:error, reason}
       {:ok, other} -> {:error, {:unexpected_result, other}}
       {:error, reason} -> {:error, reason}
     end
@@ -131,5 +136,19 @@ defmodule Minga.Remote.Bootstrap do
       status: Map.get(meta, :status, :unknown),
       recent: Map.get(meta, :first_prompt)
     }
+  end
+
+  @spec distribution_atom(String.t()) :: {:ok, node()} | {:error, :invalid_node_name}
+  defp distribution_atom(node_name) when is_binary(node_name) do
+    if valid_node_name?(node_name) do
+      {:ok, :erlang.binary_to_atom(node_name, :utf8)}
+    else
+      {:error, :invalid_node_name}
+    end
+  end
+
+  @spec valid_node_name?(String.t()) :: boolean()
+  defp valid_node_name?(node_name) do
+    byte_size(node_name) <= 255 and Regex.match?(~r/^[A-Za-z0-9_.@-]+$/, node_name)
   end
 end

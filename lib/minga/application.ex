@@ -159,6 +159,7 @@ defmodule Minga.Application do
     # Uses the default session dir (same as Editor.Supervisor). Application.stop
     # has no access to the Editor's runtime state, so it can't use an injected path.
     Minga.Session.mark_clean_shutdown()
+    Minga.Remote.ControlEndpoint.clear_current_node()
 
     # Clean shutdown: restore the default console logger and stderr device.
     # This only runs when the application is stopping gracefully, not on
@@ -207,7 +208,8 @@ defmodule Minga.Application do
   @spec start_editor?() :: boolean()
   defp start_editor? do
     Application.get_env(:minga, :start_editor, false) or
-      (Burrito.Util.running_standalone?() and not standalone_headless?())
+      (Burrito.Util.running_standalone?() and not standalone_headless?() and
+         not standalone_terminal_command?())
   end
 
   @spec minimal_mode?() :: boolean()
@@ -229,6 +231,15 @@ defmodule Minga.Application do
   @spec standalone_headless?() :: boolean()
   defp standalone_headless? do
     Minga.CLI.headless_args?(Burrito.Util.Args.argv())
+  rescue
+    error ->
+      Minga.Log.debug(:editor, "Could not inspect standalone CLI args: #{inspect(error)}")
+      false
+  end
+
+  @spec standalone_terminal_command?() :: boolean()
+  defp standalone_terminal_command? do
+    Minga.CLI.terminal_command?(Burrito.Util.Args.argv())
   rescue
     error ->
       Minga.Log.debug(:editor, "Could not inspect standalone CLI args: #{inspect(error)}")

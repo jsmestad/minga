@@ -31,6 +31,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   alias MingaEditor.State.TabBar
   alias MingaEditor.UI.Face
   alias MingaEditor.UI.Theme.Loader, as: ThemeLoader
+  alias MingaAgent.RemoteAPI
   alias MingaAgent.Session, as: AgentSession
   alias MingaAgent.SessionManager
   alias MingaAgent.Subagent
@@ -433,7 +434,16 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   @spec remote_session_data(node(), String.t()) ::
           {:ok, MingaAgent.SessionStore.session_data()} | {:error, term()}
   defp remote_session_data(remote_node, session_id) do
-    :erpc.call(remote_node, MingaAgent.SessionStore, :load, [session_id], 5_000)
+    case remote_session_token(remote_node, session_id) do
+      {:ok, token} ->
+        :erpc.call(remote_node, RemoteAPI, :session_data, [session_id, token], 5_000)
+
+      {:error, :not_found} ->
+        :erpc.call(remote_node, RemoteAPI, :session_data, [session_id], 5_000)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
   catch
     :exit, reason -> {:error, {:remote_unavailable, reason}}
   end

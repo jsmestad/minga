@@ -17,6 +17,7 @@ defmodule Minga.CLI do
 
   alias Burrito.Util.Args
   alias Minga.Distribution.Cookie
+  alias Minga.Remote.ControlEndpoint
 
   @typedoc "Parsed CLI result."
   @type parsed ::
@@ -86,33 +87,34 @@ defmodule Minga.CLI do
              :ok <- maybe_start_remote_distribution(flags),
              {:ok, _result} <- Minga.Remote.CLI.attach(url) do
           launch(flags, nil)
-          Minga.Remote.CLI.connect_pending_editor_attach()
+          finish_remote_attach()
         else
           {:error, message} -> abort_startup(message)
         end
 
       {:sessions, url, flags} ->
         with :ok <- maybe_start_debug_log(flags),
-             :ok <- maybe_start_remote_distribution(flags),
+             :ok <- maybe_start_terminal_distribution(flags),
              :ok <- Minga.Remote.CLI.sessions(url) do
-          :ok
+          System.stop(0)
         else
           {:error, message} -> abort_startup(message)
         end
 
       {:detach, flags} ->
         with :ok <- maybe_start_debug_log(flags),
+             :ok <- maybe_start_terminal_distribution(flags),
              :ok <- Minga.Remote.CLI.detach() do
-          :ok
+          System.stop(0)
         else
           {:error, message} -> abort_startup(message)
         end
 
       {:kill_session, url, flags} ->
         with :ok <- maybe_start_debug_log(flags),
-             :ok <- maybe_start_remote_distribution(flags),
+             :ok <- maybe_start_terminal_distribution(flags),
              :ok <- Minga.Remote.CLI.kill_session(url) do
-          :ok
+          System.stop(0)
         else
           {:error, message} -> abort_startup(message)
         end
@@ -155,6 +157,43 @@ defmodule Minga.CLI do
   def safe_args?(args) do
     Enum.member?(args, "--safe") or Enum.member?(args, "-Q")
   end
+
+  @doc "Returns true when args request a terminal-only remote command."
+  @spec terminal_command?([String.t()]) :: boolean()
+  def terminal_command?(args) do
+    args
+    |> first_command_token()
+    |> terminal_command_token?()
+  end
+
+  @spec first_command_token([String.t()]) :: String.t() | nil
+  defp first_command_token([]), do: nil
+
+  defp first_command_token([flag, _value | rest])
+       when flag in [
+              "--config",
+              "--debug-log",
+              "-D",
+              "--name",
+              "--sname",
+              "--cookie",
+              "--cookie-file",
+              "--host",
+              "--port"
+            ],
+       do: first_command_token(rest)
+
+  defp first_command_token([flag | rest])
+       when flag in ["--editor", "--no-context", "--headless", "--minimal", "--safe", "-Q"],
+       do: first_command_token(rest)
+
+  defp first_command_token([token | _rest]), do: token
+
+  @spec terminal_command_token?(String.t() | nil) :: boolean()
+  defp terminal_command_token?("sessions"), do: true
+  defp terminal_command_token?("detach"), do: true
+  defp terminal_command_token?("kill-session"), do: true
+  defp terminal_command_token?(_token), do: false
 
   @doc """
   Returns the output for info-only flags (`--version`/`-v`, `--help`/`-h`).
@@ -457,8 +496,14 @@ defmodule Minga.CLI do
   end
 
   defp launch(%{headless: false}, file) do
-    log_startup(file)
-    open_startup_target(file)
+    case publish_local_control_endpoint() do
+      :ok ->
+        log_startup(file)
+        open_startup_target(file)
+
+      {:error, message} ->
+        abort_startup(message)
+    end
   end
 
   @spec log_startup(String.t() | nil) :: :ok
@@ -554,11 +599,23 @@ defmodule Minga.CLI do
         :ok
 
       {:error, reason} ->
-        {:error, "Failed to start Erlang distribution for remote command: #{reason}"}
+        {:error, "Failed to start Erlang distribution for remote attach: #{reason}"}
     end
   end
 
-  @spec ensure_distribution_started(:server | :client, flags()) :: :ok | {:error, String.t()}
+  @spec maybe_start_terminal_distribution(flags()) :: :ok | {:error, String.t()}
+  defp maybe_start_terminal_distribution(flags) do
+    case ensure_distribution_started(:control, flags) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        {:error, "Failed to start Erlang distribution for terminal command: #{reason}"}
+    end
+  end
+
+  @spec ensure_distribution_started(:server | :client | :control, flags()) ::
+          :ok | {:error, String.t()}
   defp ensure_distribution_started(role, flags) do
     name = distribution_node_name(role, flags)
     mode = if flags.short_name, do: :shortnames, else: :longnames
@@ -584,13 +641,19 @@ defmodule Minga.CLI do
     if Node.alive?(), do: :ok, else: Node.start(name, name_domain: mode)
   end
 
-  @spec distribution_node_name(:server | :client, flags()) :: atom()
+  @spec distribution_node_name(:server | :client | :control, flags()) :: atom()
   defp distribution_node_name(_role, %{node_name: name}) when is_binary(name) do
     distribution_atom(name)
   end
 
   defp distribution_node_name(role, flags) do
-    prefix = if role == :server, do: "minga_server", else: "minga_client"
+    prefix =
+      case role do
+        :server -> "minga_server"
+        :client -> "minga_client"
+        :control -> "minga_control"
+      end
+
     hostname = hostname(flags.short_name)
     distribution_atom("#{prefix}@#{hostname}")
   end
@@ -731,6 +794,26 @@ defmodule Minga.CLI do
 
       {:error, message} ->
         {:error, message}
+    end
+  end
+
+  @spec publish_local_control_endpoint() :: :ok | {:error, String.t()}
+  defp publish_local_control_endpoint do
+    case ControlEndpoint.publish_current_node() do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        {:error, "Failed to publish local control endpoint: #{inspect(reason)}"}
+    end
+  end
+
+  @spec finish_remote_attach() :: :ok | no_return()
+  defp finish_remote_attach do
+    case Minga.Remote.CLI.connect_pending_editor_attach() do
+      :ok -> :ok
+      :none -> :ok
+      {:error, message} -> abort_startup(message)
     end
   end
 

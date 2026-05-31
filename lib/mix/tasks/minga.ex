@@ -35,18 +35,18 @@ defmodule Mix.Tasks.Minga do
       Application.put_env(:minga, :minimal_mode, true)
     end
 
-    unless headless? do
+    unless headless? or Minga.CLI.terminal_command?(remaining_args) do
       Application.put_env(:minga, :start_editor, true)
     end
 
-    if gui? and not headless? do
+    if gui? and not headless? and not Minga.CLI.terminal_command?(remaining_args) do
       Application.put_env(:minga, :backend, :gui)
     end
 
     Mix.Task.run("app.start")
     Minga.CLI.main(remaining_args)
 
-    unless help_args?(args) do
+    unless help_args?(args) or Minga.CLI.terminal_command?(remaining_args) do
       receive do
       end
     end
