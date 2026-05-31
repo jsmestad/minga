@@ -1109,7 +1109,10 @@ defmodule MingaEditor.Commands.Agent do
   defp apply_code_block(state, message_text, block, block_index) do
     case Markdown.infer_target_path(message_text, block_index) do
       nil ->
-        EditorState.set_status(state, "No file path found near code block. Copy with `yy` instead.")
+        EditorState.set_status(
+          state,
+          "No file path found near code block. Copy with `yy` instead."
+        )
 
       path ->
         full_path = resolve_apply_path(path)

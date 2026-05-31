@@ -1166,7 +1166,9 @@ defmodule MingaAgent.SessionTest do
   end
 
   describe "thinking block collapse" do
-    test "thinking blocks stay expanded during streaming and collapse on AgentEnd", %{session: session} do
+    test "thinking blocks stay expanded during streaming and collapse on AgentEnd", %{
+      session: session
+    } do
       send(session, {:agent_provider_event, %Event.AgentStart{}})
       send(session, {:agent_provider_event, %Event.ThinkingDelta{delta: "Let me think..."}})
 

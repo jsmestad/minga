@@ -65,6 +65,7 @@ defmodule MingaEditor.Agent.BufferSync do
 
     {text, line_offsets, display_messages} =
       build_display_text(visible_messages, pinned_messages, hidden_count)
+
     text_lines = String.split(text, "\n")
 
     Minga.Log.debug(
@@ -82,7 +83,13 @@ defmodule MingaEditor.Agent.BufferSync do
         pid,
         text,
         fn decs ->
-          ChatDecorations.build_decorations(decs, display_messages, line_offsets, agent_theme, opts)
+          ChatDecorations.build_decorations(
+            decs,
+            display_messages,
+            line_offsets,
+            agent_theme,
+            opts
+          )
         end,
         cursor: {last_line, 0}
       )

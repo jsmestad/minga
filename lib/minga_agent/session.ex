@@ -2070,7 +2070,9 @@ defmodule MingaAgent.Session do
       id: state.session_id,
       timestamp: now,
       last_message_at: last_message_at,
-      title: readable_title(first_assistant_text(state.messages)) || readable_title(first_user_prompt(state.messages)),
+      title:
+        readable_title(first_assistant_text(state.messages)) ||
+          readable_title(first_user_prompt(state.messages)),
       model_name: state.model_name,
       provider_name: state.provider_name,
       messages: state.messages,
@@ -2132,7 +2134,13 @@ defmodule MingaAgent.Session do
           case Map.get(data, :message_ids) do
             ids when is_list(ids) and ids != [] ->
               count = length(data.messages)
-              %{state | messages: data.messages, message_ids: Enum.take(ids, count), next_message_id: Enum.max(ids, fn -> 0 end) + 1}
+
+              %{
+                state
+                | messages: data.messages,
+                  message_ids: Enum.take(ids, count),
+                  next_message_id: Enum.max(ids, fn -> 0 end) + 1
+              }
 
             _ ->
               reset_messages(state, data.messages)

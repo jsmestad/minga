@@ -751,7 +751,10 @@ defmodule MingaEditor.Agent.Events do
 
         text ->
           candidate = text |> String.slice(0, 30) |> String.trim()
-          if candidate != "" and candidate != ws.label, do: maybe_apply_auto_name(state, ws, text), else: state
+
+          if candidate != "" and candidate != ws.label,
+            do: maybe_apply_auto_name(state, ws, text),
+            else: state
       end
     else
       _ -> state
@@ -824,7 +827,11 @@ defmodule MingaEditor.Agent.Events do
 
           state =
             AgentAccess.update_agent_ui(state, fn ui ->
-              UIState.push_toast(ui, "Context at #{fill_pct}%. Run /compact to free space.", :warning)
+              UIState.push_toast(
+                ui,
+                "Context at #{fill_pct}%. Run /compact to free space.",
+                :warning
+              )
             end)
 
           {state, []}
@@ -837,9 +844,10 @@ defmodule MingaEditor.Agent.Events do
 
   @spec compact_warn_threshold() :: non_neg_integer()
   defp compact_warn_threshold do
-    case Minga.Config.Options.get(:agent_compaction_threshold, 0.8) do
+    case Minga.Config.Options.get(:agent_compaction_threshold) do
       nil -> 0
-      threshold -> round(threshold * 100)
+      threshold when is_number(threshold) -> round(threshold * 100)
+      _ -> 80
     end
   end
 
