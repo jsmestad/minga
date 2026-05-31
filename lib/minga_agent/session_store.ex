@@ -63,12 +63,13 @@ defmodule MingaAgent.SessionStore do
     tmp_path = path <> ".tmp"
     json = JSON.encode!(serialize(data))
 
-    with :ok <- File.mkdir_p(dir),
-         :ok <- File.write(tmp_path, json),
+    with :ok <- ensure_private_dir(dir),
+         :ok <- write_private_file(tmp_path, json),
          :ok <- File.rename(tmp_path, path) do
       :ok
     else
       {:error, reason} ->
+        File.rm(tmp_path)
         Minga.Log.warning(:agent, "[SessionStore] failed to save #{id}: #{reason}")
         {:error, reason}
     end
@@ -109,6 +110,26 @@ defmodule MingaAgent.SessionStore do
 
       {:error, _} ->
         []
+    end
+  end
+
+  @spec ensure_private_dir(String.t()) :: :ok | {:error, term()}
+  defp ensure_private_dir(dir) do
+    case File.mkdir_p(dir) do
+      :ok -> File.chmod(dir, 0o700)
+      {:error, _reason} = error -> error
+    end
+  end
+
+  @spec write_private_file(String.t(), String.t()) :: :ok | {:error, term()}
+  defp write_private_file(path, contents) do
+    with :ok <- File.write(path, contents),
+         :ok <- File.chmod(path, 0o600) do
+      :ok
+    else
+      {:error, _reason} = error ->
+        File.rm(path)
+        error
     end
   end
 

@@ -73,7 +73,6 @@ defmodule Minga.CLITest do
       assert CLI.terminal_command?(["kill-session", "ssh://devbox/work/app"])
       assert CLI.terminal_command?(["login"])
       assert CLI.terminal_command?(["login", "--manual"])
-      assert CLI.terminal_command?(["--cookie", "abc", "sessions"])
       assert CLI.terminal_command?(["sessions"])
       assert CLI.terminal_command?(["kill-session"])
       assert CLI.terminal_command?(["detach", "unexpected"])
@@ -264,13 +263,10 @@ defmodule Minga.CLITest do
                CLI.parse_args(["--minimal", "COMMIT_EDITMSG"])
     end
 
-    test "--name, --cookie, --host, and --port set distribution flags" do
-      cookie = "abcdefghijklmnopqrstuvwxyz123456"
-
+    test "--name, --host, and --port set distribution flags" do
       assert {:open, nil,
               %{
                 node_name: "minga@host",
-                cookie: ^cookie,
                 gateway_host: "127.0.0.1",
                 gateway_port: 4900
               }} =
@@ -278,13 +274,17 @@ defmodule Minga.CLITest do
                  "--headless",
                  "--name",
                  "minga@host",
-                 "--cookie",
-                 cookie,
                  "--host",
                  "127.0.0.1",
                  "--port",
                  "4900"
                ])
+    end
+
+    test "--cookie is rejected because command-line secrets are unsafe" do
+      assert {:error, message} = CLI.parse_args(["--cookie", "abcdefghijklmnopqrstuvwxyz123456"])
+      assert message =~ "--cookie is unsafe"
+      assert message =~ "--cookie-file"
     end
 
     test "--cookie-file sets expanded cookie file path" do

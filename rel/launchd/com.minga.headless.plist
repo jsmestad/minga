@@ -16,7 +16,7 @@
     <key>MIX_ENV</key>
     <string>prod</string>
     <key>MINGA_COOKIE</key>
-    <string>replace-with-a-long-random-cookie</string>
+    <string>__CHANGE_ME__</string>
   </dict>
   <key>KeepAlive</key>
   <true/>

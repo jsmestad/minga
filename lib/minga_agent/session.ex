@@ -1951,6 +1951,10 @@ defmodule MingaAgent.Session do
     }
   end
 
+  defp set_driver(%{driver: pid} = state, pid) do
+    %{state | subscriber_roles: Map.put(state.subscriber_roles, pid, :driver)}
+  end
+
   defp set_driver(state, pid) do
     state = %{
       state
@@ -2055,12 +2059,19 @@ defmodule MingaAgent.Session do
 
   @spec mark_interrupted_work(state()) :: :ok
   defp mark_interrupted_work(state) do
-    with {:ok, db} <- EventLog.open_read_connection(),
-         {:ok, events} <- all_event_log_events(db, state.session_id) do
-      MingaAgent.EventLog.Store.close(db)
-      record_interrupted_work(state, events)
-    else
-      _ -> :ok
+    case EventLog.open_read_connection() do
+      {:ok, db} ->
+        try do
+          case all_event_log_events(db, state.session_id) do
+            {:ok, events} -> record_interrupted_work(state, events)
+            {:error, _reason} -> :ok
+          end
+        after
+          MingaAgent.EventLog.Store.close(db)
+        end
+
+      {:error, _reason} ->
+        :ok
     end
   end
 

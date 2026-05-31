@@ -18,6 +18,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   alias MingaEditor.Handlers.Notifications
   alias MingaEditor.Handlers.ToolHandler
   alias MingaEditor.MessageLog
+  alias MingaEditor.Remote.EventReplay
   alias MingaEditor.Renderer
   alias MingaEditor.Startup
   alias MingaEditor.State, as: EditorState
@@ -485,7 +486,13 @@ defmodule MingaEditor.Handlers.EventDispatcher do
          pid
        ) do
     case remote_api_attach(remote_node, session_id, last_seen) do
-      {:ok, %{messages: messages, snapshot: snapshot, latest_event_id: latest_event_id}} ->
+      {:ok,
+       %{
+         messages: messages,
+         snapshot: snapshot,
+         events: events,
+         latest_event_id: latest_event_id
+       }} ->
         tb = set_workspace_remote_state(tb, workspace, pid, :connected, latest_event_id)
         state = EditorState.set_tab_bar(state, tb)
 
@@ -493,6 +500,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
           state
           |> maybe_rebuild_agent_from_workspace(workspace_id)
           |> sync_reconnected_buffer(messages)
+          |> EventReplay.replay_active(events)
           |> apply_reconnected_snapshot(snapshot)
         else
           state

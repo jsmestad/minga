@@ -12,6 +12,22 @@ defmodule Minga.Remote.CLITest do
     :ok
   end
 
+  defmodule StubEditor do
+    use GenServer
+
+    @spec start_link(pid()) :: GenServer.on_start()
+    def start_link(parent), do: GenServer.start_link(__MODULE__, parent, name: MingaEditor)
+
+    @impl GenServer
+    def init(parent), do: {:ok, parent}
+
+    @impl GenServer
+    def handle_call({:api_execute_command, command}, _from, parent) do
+      send(parent, {:api_execute_command, command})
+      {:reply, :ok, parent}
+    end
+  end
+
   defmodule StubBootstrap do
     @spec attach(Minga.Remote.SessionURL.t()) :: {:ok, Bootstrap.attach_result()}
     def attach(url) do
@@ -66,6 +82,35 @@ defmodule Minga.Remote.CLITest do
     assert output =~ "session-work"
     assert output =~ "/work/app"
     assert output =~ "idle"
+  end
+
+  test "connect_pending_editor_attach sends the exact editor command and clears pending metadata" do
+    start_supervised!({StubEditor, self()})
+
+    result = %Bootstrap{
+      server_name: "devbox",
+      remote_node: :minga_server@devbox,
+      session_id: "session-work",
+      pid: self(),
+      token: "token",
+      workdir: "/work/app"
+    }
+
+    Application.put_env(:minga, :pending_remote_attach, result)
+
+    assert :ok = CLI.connect_pending_editor_attach()
+
+    assert_receive {:api_execute_command,
+                    {:connect_remote_session,
+                     %{
+                       server_name: "devbox",
+                       session_id: "session-work",
+                       pid: pid,
+                       token: "token"
+                     }}}
+
+    assert pid == self()
+    refute Application.get_env(:minga, :pending_remote_attach)
   end
 
   test "detach uses the local control endpoint to reach the running editor node" do

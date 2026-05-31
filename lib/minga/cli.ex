@@ -43,7 +43,6 @@ defmodule Minga.CLI do
           safe_mode: boolean(),
           node_name: String.t() | nil,
           short_name: boolean(),
-          cookie: String.t() | nil,
           cookie_file: String.t() | nil,
           gateway_port: pos_integer() | nil,
           gateway_host: String.t() | nil
@@ -59,7 +58,6 @@ defmodule Minga.CLI do
     safe_mode: false,
     node_name: nil,
     short_name: false,
-    cookie: nil,
     cookie_file: nil,
     gateway_port: nil,
     gateway_host: nil
@@ -192,7 +190,6 @@ defmodule Minga.CLI do
               "-D",
               "--name",
               "--sname",
-              "--cookie",
               "--cookie-file",
               "--host",
               "--port"
@@ -376,17 +373,9 @@ defmodule Minga.CLI do
     {:error, "--name requires a node name argument\n\n#{usage()}"}
   end
 
-  defp parse_args(["--cookie", <<"--", _::binary>> | _], _file, _flags) do
-    {:error, "--cookie requires a cookie argument, not a flag\n\n#{usage()}"}
-  end
-
-  defp parse_args(["--cookie", cookie | rest], file, flags)
-       when is_binary(cookie) and cookie != "" do
-    parse_args(rest, file, %{flags | cookie: cookie})
-  end
-
-  defp parse_args(["--cookie"], _file, _flags) do
-    {:error, "--cookie requires a cookie argument\n\n#{usage()}"}
+  defp parse_args(["--cookie" | _rest], _file, _flags) do
+    {:error,
+     "--cookie is unsafe because command-line arguments can leak through shell history and process listings. Use --cookie-file <path> or MINGA_COOKIE instead.\n\n#{usage()}"}
   end
 
   defp parse_args(["--cookie-file", <<"--", _::binary>> | _], _file, _flags) do
@@ -699,7 +688,6 @@ defmodule Minga.CLI do
   @doc false
   @spec distribution_cookie(flags()) :: {:ok, String.t() | nil} | {:error, String.t()}
   def distribution_cookie(%{cookie_file: path}) when is_binary(path), do: read_cookie_file(path)
-  def distribution_cookie(%{cookie: cookie}) when is_binary(cookie), do: {:ok, cookie}
   def distribution_cookie(_flags), do: {:ok, System.get_env("MINGA_COOKIE")}
 
   @spec set_cookie_if_present(String.t() | nil) :: :ok | {:error, String.t()}
@@ -1037,7 +1025,6 @@ defmodule Minga.CLI do
       --name <name@host>     Distributed Erlang long node name
       --sname <name>         Distributed Erlang short node name
       --cookie-file <path>   Read distributed Erlang cookie from a 0600 file
-      --cookie <cookie>      Distributed Erlang cookie (prefer --cookie-file or MINGA_COOKIE)
       --host <ip>            Gateway bind IP for headless mode (default: 127.0.0.1)
       --port <port>          Gateway port for headless mode (default: 4820)
 

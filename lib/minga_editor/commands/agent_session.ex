@@ -11,6 +11,7 @@ defmodule MingaEditor.Commands.AgentSession do
   alias MingaAgent.Session
   alias Minga.Buffer
   alias MingaEditor.AgentLifecycle
+  alias MingaEditor.Remote.EventReplay
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
@@ -158,18 +159,27 @@ defmodule MingaEditor.Commands.AgentSession do
       when is_binary(server_name) and is_binary(session_id) and is_pid(remote_pid) and
              is_binary(token) and is_integer(last_seen_event_id) and last_seen_event_id >= 0 do
     case remote_attach(remote_pid, session_id, token, last_seen_event_id) do
-      {:ok, messages, snapshot, _events, latest_event_id} ->
+      {:ok, messages, snapshot, events, latest_event_id} ->
         {state, tab_id, buffer} = create_remote_agent_tab(state, server_name)
         AgentBufferSync.sync(buffer, messages)
 
-        state
-        |> set_remote_tab(tab_id, server_name, session_id, remote_pid)
-        |> AgentAccess.update_agent(&AgentState.set_buffer(&1, buffer))
-        |> rebuild_agent_from_tab(tab_id)
-        |> apply_remote_snapshot(snapshot)
-        |> ensure_agent_workspace(remote_pid, nil)
-        |> set_remote_workspace(server_name, session_id, remote_pid, :connected, latest_event_id)
-        |> EditorState.set_status("Connected to #{server_name} session #{session_id}")
+        state =
+          state
+          |> set_remote_tab(tab_id, server_name, session_id, remote_pid)
+          |> AgentAccess.update_agent(&AgentState.set_buffer(&1, buffer))
+          |> rebuild_agent_from_tab(tab_id)
+          |> ensure_agent_workspace(remote_pid, nil)
+          |> set_remote_workspace(
+            server_name,
+            session_id,
+            remote_pid,
+            :connected,
+            latest_event_id
+          )
+          |> EventReplay.replay_active(events)
+          |> apply_remote_snapshot(snapshot)
+
+        EditorState.set_status(state, "Connected to #{server_name} session #{session_id}")
 
       {:error, reason} ->
         EditorState.set_status(state, "Remote session unavailable: #{inspect(reason)}")

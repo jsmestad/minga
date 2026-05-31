@@ -151,6 +151,44 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
     :ok = Store.close(db)
   end
 
+  test "event log recursively redacts secrets and process identifiers", %{tmp_dir: tmp_dir} do
+    log_name = unique_name("redaction-log")
+
+    log_pid =
+      start_supervised!(
+        {EventLog, name: log_name, db_dir: tmp_dir, retention_sweep?: false, health_check: :none}
+      )
+
+    EventLog.record(
+      "redaction-session",
+      :system_message,
+      %{
+        remote_token: "remote-secret",
+        nested: %{
+          access_token: "access-secret",
+          refresh_token: "refresh-secret",
+          authorization: "Bearer secret",
+          owner_pid: self(),
+          owner_ref: make_ref()
+        }
+      },
+      log_name
+    )
+
+    :sys.get_state(log_pid)
+
+    {:ok, db} = EventLog.open_read_connection(db_dir: tmp_dir)
+    {:ok, [event]} = EventLog.events_after(db, "redaction-session", 0, 10)
+    :ok = Store.close(db)
+
+    assert event.payload["remote_token"] == "[REDACTED]"
+    assert event.payload["nested"]["access_token"] == "[REDACTED]"
+    assert event.payload["nested"]["refresh_token"] == "[REDACTED]"
+    assert event.payload["nested"]["authorization"] == "[REDACTED]"
+    assert event.payload["nested"]["owner_pid"] == "[PID]"
+    assert event.payload["nested"]["owner_ref"] == "[REFERENCE]"
+  end
+
   test "subscriber disconnects are durably recorded", %{tmp_dir: tmp_dir} do
     log_name = unique_name("disconnect-log")
 
