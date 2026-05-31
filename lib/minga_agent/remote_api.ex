@@ -64,16 +64,22 @@ defmodule MingaAgent.RemoteAPI do
 
     with :ok <- authorize(session_id, token),
          {:ok, pid} <- SessionManager.get_session(session_id),
-         :ok <- Session.subscribe(pid, subscriber_pid, role: role),
-         {:ok, events, latest_event_id} <- event_catchup(session_id, last_seen_event_id) do
-      info = session_info(session_id, pid, token)
-      role = Session.subscriber_role(pid, subscriber_pid) || :viewer
+         :ok <- Session.subscribe(pid, subscriber_pid, role: role) do
+      case event_catchup(session_id, last_seen_event_id) do
+        {:ok, events, latest_event_id} ->
+          info = session_info(session_id, pid, token)
+          role = Session.subscriber_role(pid, subscriber_pid) || :viewer
 
-      {:ok,
-       AttachResult.new(info, role, Session.messages(pid), Session.editor_snapshot(pid),
-         events: events,
-         latest_event_id: latest_event_id
-       )}
+          {:ok,
+           AttachResult.new(info, role, Session.messages(pid), Session.editor_snapshot(pid),
+             events: events,
+             latest_event_id: latest_event_id
+           )}
+
+        {:error, _reason} = error ->
+          GenServer.call(pid, {:unsubscribe, subscriber_pid})
+          error
+      end
     end
   end
 
