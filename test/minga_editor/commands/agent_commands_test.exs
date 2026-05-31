@@ -12,6 +12,9 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
   use ExUnit.Case, async: true
 
+  alias MingaAgent.Session
+  alias Minga.Editing.Scroll
+  alias MingaEditor.Agent.BufferSync
   alias MingaEditor.Agent.UIState
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Project.FileRef
@@ -183,6 +186,52 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       # Scroll offset should change (exact value depends on panel height)
       assert AgentAccess.panel(new_state).scroll != AgentAccess.panel(state).scroll
+    end
+  end
+
+  # ── pin message ─────────────────────────────────────────────────────────
+
+  describe "scope_pin_message/1" do
+    test "pins the displayed stable id when earlier messages are hidden" do
+      pinned_message = {:assistant, "pinned context"}
+      hidden_message = {:user, "hidden context"}
+      visible_message = {:assistant, "visible target"}
+      messages = [pinned_message, hidden_message, visible_message]
+      message_ids = [{101, pinned_message}, {102, hidden_message}, {103, visible_message}]
+
+      {:ok, session} =
+        StubServer.start_link(
+          messages: messages,
+          message_ids: message_ids,
+          pinned_ids: MapSet.new([101])
+        )
+
+      agent_buffer = BufferSync.start_buffer()
+
+      {line_index, display_messages, display_pairs} =
+        BufferSync.sync(agent_buffer, messages,
+          display_start_index: 2,
+          message_ids: message_ids,
+          pinned_ids: MapSet.new([101])
+        )
+
+      state =
+        base_state(session: session, agent_buffer: agent_buffer)
+        |> AgentAccess.update_agent_ui(fn ui ->
+          panel = %{
+            ui.panel
+            | cached_line_index: line_index,
+              cached_display_messages: display_messages,
+              cached_display_message_pairs: display_pairs,
+              scroll: Scroll.new(6)
+          }
+
+          %{ui | panel: panel}
+        end)
+
+      AgentCommands.scope_pin_message(state)
+
+      assert Session.pinned_ids(session) == MapSet.new([101, 103])
     end
   end
 

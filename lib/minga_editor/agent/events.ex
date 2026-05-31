@@ -37,6 +37,7 @@ defmodule MingaEditor.Agent.Events do
           | {:log_warning, String.t()}
           | :sync_agent_buffer
           | {:update_tab_label, String.t()}
+          | {:compact_session, pid()}
 
   @spec handle(EditorState.t(), term()) :: {EditorState.t(), [effect()]}
 
@@ -64,11 +65,19 @@ defmodule MingaEditor.Agent.Events do
           AgentAccess.update_agent(state, &AgentState.stop_spinner_timer/1)
       end
 
+    state =
+      case status do
+        :idle -> reset_compact_state(state)
+        _ -> state
+      end
+
     # Sync the tab's agent_status for tab bar rendering
     state = sync_tab_agent_status(state, status)
 
     # Let the active shell mirror foreground agent status if it owns an agent surface.
     state = sync_active_shell_agent_status(state, status)
+
+    {state, effects} = maybe_apply_pending_auto_compact(state, status, effects)
 
     {state, [:render | effects]}
   end
@@ -91,6 +100,7 @@ defmodule MingaEditor.Agent.Events do
   def handle(state, :messages_changed) do
     state = AgentAccess.update_agent_ui(state, &UIState.maybe_auto_scroll/1)
     state = AgentAccess.update_panel(state, &Panel.bump_message_version/1)
+    state = maybe_rename_workspace_from_assistant(state)
     {state, [{:render, 16}, :sync_agent_buffer, {:update_tab_label, ""}]}
   end
 
@@ -199,6 +209,9 @@ defmodule MingaEditor.Agent.Events do
     # Associate the file's tab with the agent's workspace
     state = associate_file_with_agent_workspace(state, path)
 
+    # Add a chat-visible system message so the transcript records what was modified
+    state = add_file_changed_message(state, path, tool_name)
+
     baseline = UIState.get_baseline(AgentAccess.agent_ui(state), path)
     existing_review = existing_diff_for_path(state, path)
 
@@ -264,11 +277,12 @@ defmodule MingaEditor.Agent.Events do
     {state, [{:render, 16}]}
   end
 
-  def handle(state, {:context_usage, estimated_tokens, _context_limit}) do
+  def handle(state, {:context_usage, estimated_tokens, context_limit}) do
     state =
       AgentAccess.update_view(state, fn v -> %{v | context_estimate: estimated_tokens} end)
 
-    {state, [{:render, 16}]}
+    {state, effects} = maybe_auto_compact(state, estimated_tokens, context_limit)
+    {state, [{:render, 16} | effects]}
   end
 
   # A message was queued (steer or follow-up): trigger render so the pending
@@ -284,6 +298,38 @@ defmodule MingaEditor.Agent.Events do
   # clear the pending display.
   def handle(state, :queues_recalled) do
     {state, [{:render, 16}]}
+  end
+
+  def handle(state, {:compact_result, {:ok, summary}}) do
+    state =
+      AgentAccess.update_view(state, fn v -> %{v | compaction_in_progress: false} end)
+
+    case AgentAccess.session(state) do
+      pid when is_pid(pid) ->
+        Session.add_system_message(pid, "Context auto-compacted: #{summary}")
+
+      _ ->
+        :ok
+    end
+
+    state =
+      AgentAccess.update_agent_ui(state, fn ui ->
+        UIState.push_toast(ui, "Context compacted", :info)
+      end)
+
+    {state, [:render, :sync_agent_buffer]}
+  end
+
+  def handle(state, {:compact_result, {:error, reason}}) do
+    state =
+      AgentAccess.update_view(state, fn v -> %{v | compaction_in_progress: false} end)
+
+    state =
+      AgentAccess.update_agent_ui(state, fn ui ->
+        UIState.push_toast(ui, "Auto-compact failed: #{inspect(reason)}", :error)
+      end)
+
+    {state, [:render]}
   end
 
   def handle(state, _unknown) do
@@ -469,6 +515,35 @@ defmodule MingaEditor.Agent.Events do
     else
       Buffer.accept_saved_content(pid, after_content)
       {state, [{:log_message, "Agent updated #{Path.basename(path)}"}]}
+    end
+  end
+
+  @spec add_file_changed_message(EditorState.t(), String.t(), String.t()) :: EditorState.t()
+  defp add_file_changed_message(state, path, tool_name) do
+    case AgentAccess.session(state) do
+      pid when is_pid(pid) ->
+        short_path = shorten_to_relative(state, path)
+        verb = file_change_verb(tool_name)
+        Session.add_system_message(pid, "#{verb} #{short_path}")
+        state
+
+      _ ->
+        state
+    end
+  catch
+    :exit, _ -> state
+  end
+
+  @spec file_change_verb(String.t()) :: String.t()
+  defp file_change_verb("write"), do: "Wrote"
+  defp file_change_verb("edit"), do: "Edited"
+  defp file_change_verb(_tool_name), do: "Modified"
+
+  @spec shorten_to_relative(EditorState.t(), String.t()) :: String.t()
+  defp shorten_to_relative(state, path) do
+    case project_root(state) do
+      root when is_binary(root) -> Path.relative_to(path, root)
+      _ -> Path.basename(path)
     end
   end
 
@@ -662,6 +737,168 @@ defmodule MingaEditor.Agent.Events do
     else
       _ -> nil
     end
+  end
+
+  @spec maybe_rename_workspace_from_assistant(EditorState.t()) :: EditorState.t()
+  defp maybe_rename_workspace_from_assistant(state) do
+    with pid when is_pid(pid) <- AgentAccess.session(state),
+         %Workspace{custom_name: nil} = ws <-
+           TabBar.find_workspace_by_session(EditorState.tab_bar(state), pid),
+         text when is_binary(text) <- first_assistant_opening(safe_messages(pid)),
+         candidate = String.slice(text, 0, 30) |> String.trim(),
+         true <- candidate != "" and candidate != ws.label do
+      maybe_apply_auto_name(state, ws, text)
+    else
+      _ -> state
+    end
+  rescue
+    _ -> state
+  end
+
+  @spec first_assistant_opening([term()]) :: String.t() | nil
+  defp first_assistant_opening(messages) do
+    Enum.find_value(messages, fn
+      {:assistant, text} when is_binary(text) and text != "" ->
+        text |> String.split("\n") |> hd() |> String.trim()
+
+      _ ->
+        nil
+    end)
+  end
+
+  @spec safe_messages(pid()) :: [term()]
+  defp safe_messages(pid) do
+    Session.messages(pid)
+  catch
+    :exit, _ -> []
+  end
+
+  @spec reset_compact_state(EditorState.t()) :: EditorState.t()
+  defp reset_compact_state(state) do
+    AgentAccess.update_view(state, fn v ->
+      %{v | compact_warned: false, compact_triggered: false}
+    end)
+  rescue
+    _ -> state
+  end
+
+  @spec maybe_auto_compact(EditorState.t(), non_neg_integer(), non_neg_integer() | nil) ::
+          {EditorState.t(), [effect()]}
+  defp maybe_auto_compact(state, _estimated_tokens, nil), do: {state, []}
+  defp maybe_auto_compact(state, _estimated_tokens, 0), do: {state, []}
+
+  defp maybe_auto_compact(state, estimated_tokens, context_limit) do
+    fill_pct = min(round(estimated_tokens / context_limit * 100), 100)
+    view = AgentAccess.view(state)
+    agent_status = AgentAccess.agent(state).runtime.status
+    compact_when_ready(state, view, agent_status, fill_pct)
+  end
+
+  @spec compact_when_ready(EditorState.t(), term(), AgentState.status(), non_neg_integer()) ::
+          {EditorState.t(), [effect()]}
+  defp compact_when_ready(state, _view, status, fill_pct)
+       when status in [:thinking, :tool_executing] do
+    state = AgentAccess.update_view(state, &%{&1 | compact_pending_fill_pct: fill_pct})
+    {state, []}
+  end
+
+  defp compact_when_ready(state, %{compaction_in_progress: true}, _status, _fill_pct),
+    do: {state, []}
+
+  defp compact_when_ready(state, view, _status, fill_pct),
+    do: apply_compact_threshold(state, view, fill_pct)
+
+  @spec maybe_apply_pending_auto_compact(EditorState.t(), term(), [effect()]) ::
+          {EditorState.t(), [effect()]}
+  defp maybe_apply_pending_auto_compact(state, :idle, effects) do
+    case AgentAccess.view(state).compact_pending_fill_pct do
+      nil ->
+        {state, effects}
+
+      fill_pct ->
+        state = AgentAccess.update_view(state, &%{&1 | compact_pending_fill_pct: nil})
+
+        {state, compact_effects} =
+          apply_compact_threshold(state, AgentAccess.view(state), fill_pct)
+
+        {state, effects ++ compact_effects}
+    end
+  end
+
+  defp maybe_apply_pending_auto_compact(state, _status, effects), do: {state, effects}
+
+  @spec apply_compact_threshold(EditorState.t(), term(), non_neg_integer()) ::
+          {EditorState.t(), [effect()]}
+  defp apply_compact_threshold(state, view, fill_pct) do
+    compact_threshold_result(
+      state,
+      view,
+      fill_pct,
+      compact_auto_threshold(),
+      compact_warn_threshold()
+    )
+  end
+
+  @spec compact_threshold_result(
+          EditorState.t(),
+          term(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) ::
+          {EditorState.t(), [effect()]}
+  defp compact_threshold_result(state, %{compact_triggered: false}, fill_pct, auto_pct, _warn_pct)
+       when auto_pct > 0 and fill_pct >= auto_pct,
+       do: trigger_auto_compact(state)
+
+  defp compact_threshold_result(state, %{compact_warned: false}, fill_pct, _auto_pct, warn_pct)
+       when warn_pct > 0 and fill_pct >= warn_pct,
+       do: warn_context_pressure(state, fill_pct)
+
+  defp compact_threshold_result(state, _view, _fill_pct, _auto_pct, _warn_pct), do: {state, []}
+
+  @spec trigger_auto_compact(EditorState.t()) :: {EditorState.t(), [effect()]}
+  defp trigger_auto_compact(state) do
+    session = AgentAccess.session(state)
+
+    if is_pid(session) do
+      state =
+        AgentAccess.update_view(state, fn v ->
+          %{v | compact_triggered: true, compaction_in_progress: true}
+        end)
+
+      {state, [{:compact_session, session}]}
+    else
+      {state, []}
+    end
+  end
+
+  @spec warn_context_pressure(EditorState.t(), non_neg_integer()) ::
+          {EditorState.t(), [effect()]}
+  defp warn_context_pressure(state, fill_pct) do
+    state = AgentAccess.update_view(state, fn v -> %{v | compact_warned: true} end)
+
+    state =
+      AgentAccess.update_agent_ui(state, fn ui ->
+        UIState.push_toast(ui, "Context at #{fill_pct}%. Run /compact to free space.", :warning)
+      end)
+
+    {state, []}
+  end
+
+  @spec compact_warn_threshold() :: non_neg_integer()
+  defp compact_warn_threshold do
+    case Minga.Config.Options.get(:agent_compaction_threshold) do
+      nil -> 0
+      threshold when is_number(threshold) -> round(threshold * 100)
+      _ -> 80
+    end
+  end
+
+  @spec compact_auto_threshold() :: non_neg_integer()
+  defp compact_auto_threshold do
+    warn = compact_warn_threshold()
+    if warn > 0, do: min(warn + 10, 100), else: 0
   end
 
   @spec safe_buffer_path(pid()) :: String.t() | nil

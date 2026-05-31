@@ -686,6 +686,11 @@ defmodule MingaEditor do
     {:noreply, state}
   end
 
+  def handle_info({:compact_result, result}, state) do
+    state = dispatch_agent_event(state, {:compact_result, result})
+    {:noreply, Renderer.render_or_async(state)}
+  end
+
   # Process died. Check buffer monitors and git remote tasks.
   # Agent session deaths are handled via :agent_session_stopped events from SessionManager.
   def handle_info({:DOWN, ref, :process, pid, reason}, state) do

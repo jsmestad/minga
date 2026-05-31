@@ -483,6 +483,12 @@ defmodule MingaEditor.Agent.UIState do
     %{state | panel: %{panel | model_name: model}}
   end
 
+  @doc "Sets the provider name."
+  @spec set_provider_name(t(), String.t()) :: t()
+  def set_provider_name(%__MODULE__{panel: panel} = state, provider) do
+    %{state | panel: %{panel | provider_name: provider}}
+  end
+
   @doc "Sets the scroll offset to an absolute value. Unpins from bottom."
   @spec set_scroll(t(), non_neg_integer()) :: t()
   def set_scroll(%__MODULE__{panel: panel} = state, offset)

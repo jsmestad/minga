@@ -24,6 +24,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
+  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Tab
@@ -241,6 +242,34 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       {state, effects} = Events.handle(state, {:status_changed, :idle})
       assert AgentState.active_tool_name(state.agent) == nil
       assert effects == [:render]
+    end
+
+    test "context usage while busy defers auto-compaction until idle" do
+      session = fake_session_pid()
+      agent = %AgentState{} |> AgentState.set_status(:thinking)
+
+      {tab_bar, workspace} =
+        TabBar.add_workspace(TabBar.new(Tab.new_agent(1, "Agent")), "Agent", session)
+
+      tab_bar = TabBar.move_tab_to_workspace(tab_bar, 1, workspace.id)
+
+      state = %EditorState{
+        port_manager: self(),
+        shell: Traditional,
+        workspace: %SessionState{viewport: Viewport.new(24, 80), agent_ui: UIState.new()},
+        shell_state: %TraditionalState{agent: agent, tab_bar: tab_bar}
+      }
+
+      {state, effects} = Events.handle(state, {:context_usage, 95, 100})
+      assert effects == [{:render, 16}]
+      assert AgentAccess.view(state).compact_pending_fill_pct == 95
+      refute AgentAccess.view(state).compaction_in_progress
+
+      {state, effects} = Events.handle(state, {:status_changed, :idle})
+      assert :render in effects
+      assert {:compact_session, session} in effects
+      assert AgentAccess.view(state).compact_pending_fill_pct == nil
+      assert AgentAccess.view(state).compaction_in_progress
     end
   end
 

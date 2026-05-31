@@ -21,6 +21,7 @@ defmodule MingaEditor.Agent.View.RenderInput do
     :agent_status,
     :panel,
     :agent_ui,
+    active_tool_name: nil,
     messages: [],
     usage: %MingaAgent.TurnUsage{},
     pending_approval: nil,
@@ -33,6 +34,7 @@ defmodule MingaEditor.Agent.View.RenderInput do
           agent_status: atom() | nil,
           panel: panel_data(),
           agent_ui: agent_ui_data(),
+          active_tool_name: String.t() | nil,
           messages: list(),
           usage: MingaAgent.TurnUsage.t(),
           pending_approval: map() | nil,
@@ -130,6 +132,7 @@ defmodule MingaEditor.Agent.View.RenderInput do
         toast: view.toast,
         context_estimate: view.context_estimate
       },
+      active_tool_name: ctx.active_tool_name,
       messages: messages,
       usage: usage,
       pending_approval: ctx.pending_approval,
@@ -153,11 +156,20 @@ defmodule MingaEditor.Agent.View.RenderInput do
 
   @spec session_title([term()]) :: String.t()
   defp session_title(messages) do
-    case Enum.find(messages, fn msg -> match?({:user, _}, msg) or match?({:user, _, _}, msg) end) do
-      {:user, text} -> truncate_title(text)
-      {:user, text, _attachments} -> truncate_title(text)
-      nil -> "Minga Agent"
-    end
+    assistant_title =
+      Enum.find_value(messages, fn
+        {:assistant, text} when is_binary(text) and text != "" -> truncate_title(text)
+        _ -> nil
+      end)
+
+    user_title =
+      Enum.find_value(messages, fn
+        {:user, text} when is_binary(text) -> truncate_title(text)
+        {:user, text, _} when is_binary(text) -> truncate_title(text)
+        _ -> nil
+      end)
+
+    assistant_title || user_title || "Minga Agent"
   end
 
   @spec truncate_title(String.t()) :: String.t()

@@ -108,6 +108,7 @@ defmodule MingaAgent.Session do
           follow_up_queue: [String.t() | [ReqLLM.Message.ContentPart.t()]],
           touched_files: %{String.t() => file_touch()},
           boundaries: %{String.t() => EditBoundary.t()},
+          pinned_ids: MapSet.t(pos_integer()),
           credentials_configured: boolean()
         }
 
@@ -183,6 +184,18 @@ defmodule MingaAgent.Session do
   @spec messages_with_ids(GenServer.server()) :: [{pos_integer(), Message.t()}]
   def messages_with_ids(session) do
     GenServer.call(session, :messages_with_ids)
+  end
+
+  @doc "Returns the set of pinned message IDs."
+  @spec pinned_ids(GenServer.server()) :: MapSet.t(pos_integer())
+  def pinned_ids(session) do
+    GenServer.call(session, :pinned_ids)
+  end
+
+  @doc "Toggles the pinned state of a message by its stable ID."
+  @spec toggle_pin(GenServer.server(), pos_integer()) :: :ok
+  def toggle_pin(session, message_id) when is_integer(message_id) do
+    GenServer.call(session, {:toggle_pin, message_id})
   end
 
   @doc "Returns accumulated token usage."
@@ -652,10 +665,7 @@ defmodule MingaAgent.Session do
       follow_up_queue: [],
       touched_files: %{},
       boundaries: %{},
-      # Whether any usable provider credential exists. Computed once when the
-      # provider starts (the Ollama probe can block briefly) and refreshed when
-      # the user runs /auth or /login. Gates send_prompt and drives the UI's
-      # "not configured" state so we never advertise a model we can't call.
+      pinned_ids: MapSet.new(),
       credentials_configured: true
     }
 
@@ -939,6 +949,21 @@ defmodule MingaAgent.Session do
     {:reply, state.total_usage, state}
   end
 
+  def handle_call(:pinned_ids, _from, state) do
+    {:reply, state.pinned_ids, state}
+  end
+
+  def handle_call({:toggle_pin, message_id}, _from, state) do
+    pinned =
+      if MapSet.member?(state.pinned_ids, message_id),
+        do: MapSet.delete(state.pinned_ids, message_id),
+        else: MapSet.put(state.pinned_ids, message_id)
+
+    state = %{state | pinned_ids: pinned}
+    broadcast(state, :messages_changed)
+    {:reply, :ok, schedule_save(state)}
+  end
+
   def handle_call(:get_provider, _from, state) do
     {:reply, state.provider, state}
   end
@@ -964,10 +989,11 @@ defmodule MingaAgent.Session do
 
   def handle_call(:metadata, _from, state) do
     first_prompt = first_user_prompt(state.messages)
+    title = readable_title(first_assistant_text(state.messages)) || readable_title(first_prompt)
 
     meta = %SessionMetadata{
       id: state.session_id,
-      title: readable_title(first_prompt),
+      title: title,
       model_name: state.model_name,
       provider_name: state.provider_name,
       created_at: state.created_at,
@@ -1392,16 +1418,20 @@ defmodule MingaAgent.Session do
   defp handle_provider_event(%Event.AgentEnd{usage: usage}, state) do
     notify(state, :complete, completion_notification(state))
 
+    # Collapse thinking blocks now that the turn is complete.
+    state = %{state | messages: collapse_thinking_blocks(state.messages)}
+
     state =
       if usage do
         log_turn_usage(usage, state)
 
         state = %{state | total_usage: TurnUsage.add(state.total_usage, usage)}
 
-        state = append_msg(state, Message.usage(usage))
-        notify_messages_changed(state)
-      else
         state
+        |> append_msg(Message.usage(usage))
+        |> notify_messages_changed()
+      else
+        notify_messages_changed(state)
       end
 
     dispatch_stop(state)
@@ -1440,16 +1470,13 @@ defmodule MingaAgent.Session do
   end
 
   defp handle_provider_event(%Event.TextDelta{delta: delta}, state) do
-    # Auto-collapse any expanded thinking blocks (thinking is done)
-    messages = collapse_thinking_blocks(state.messages)
-
     state =
-      case append_to_last_assistant(messages, delta) do
+      case append_to_last_assistant(state.messages, delta) do
         {:updated, updated_messages} ->
           %{state | messages: updated_messages}
 
         {:appended, new_msg} ->
-          %{state | messages: messages} |> append_msg(new_msg)
+          append_msg(state, new_msg)
       end
 
     broadcast(state, {:text_delta, delta})
@@ -2504,10 +2531,14 @@ defmodule MingaAgent.Session do
       remote_token: state.remote_token,
       timestamp: now,
       last_message_at: last_message_at,
-      title: readable_title(first_user_prompt(state.messages)),
+      title:
+        readable_title(first_assistant_text(state.messages)) ||
+          readable_title(first_user_prompt(state.messages)),
       model_name: state.model_name,
       provider_name: state.provider_name,
       messages: state.messages,
+      message_ids: state.message_ids,
+      pinned_ids: state.pinned_ids,
       usage: state.total_usage,
       branches: state.branches,
       memory: Memory.read(state.session_store_dir)
@@ -2539,6 +2570,7 @@ defmodule MingaAgent.Session do
             created_at: loaded_at,
             last_message_at: loaded_at,
             branches: Map.get(data, :branches, []),
+            pinned_ids: Map.get(data, :pinned_ids, MapSet.new()),
             steering_queue: [],
             follow_up_queue: [],
             touched_files: %{},
@@ -2560,7 +2592,21 @@ defmodule MingaAgent.Session do
   defp finish_loaded_session_restore(state, data) do
     case restore_memory_snapshot_if_recorded(state, data) do
       :ok ->
-        state = reset_messages(state, data.messages)
+        state =
+          case Map.get(data, :message_ids) do
+            ids when is_list(ids) and ids != [] ->
+              count = length(data.messages)
+
+              %{
+                state
+                | messages: data.messages,
+                  message_ids: Enum.take(ids, count),
+                  next_message_id: Enum.max(ids, fn -> 0 end) + 1
+              }
+
+            _ ->
+              reset_messages(state, data.messages)
+          end
 
         broadcast(state, {:status_changed, :idle})
         broadcast(state, :messages_changed)
@@ -2637,6 +2683,14 @@ defmodule MingaAgent.Session do
       "" -> nil
       title -> title
     end
+  end
+
+  @spec first_assistant_text([Message.t()]) :: String.t() | nil
+  defp first_assistant_text(messages) do
+    Enum.find_value(messages, fn
+      {:assistant, text} when is_binary(text) and text != "" -> text
+      _ -> nil
+    end)
   end
 
   @spec generate_session_id() :: String.t()
