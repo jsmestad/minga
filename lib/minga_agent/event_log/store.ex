@@ -232,18 +232,10 @@ defmodule MingaAgent.EventLog.Store do
   defp query_events(db, sql, params) do
     case Exqlite.Sqlite3.prepare(db, sql) do
       {:ok, stmt} ->
-        result =
-          case Exqlite.Sqlite3.bind(stmt, params) do
-            :ok -> {:ok, collect_rows(db, stmt)}
-            {:error, reason} -> {:error, reason}
-          end
-
+        :ok = Exqlite.Sqlite3.bind(stmt, params)
+        rows = collect_rows(db, stmt)
         Exqlite.Sqlite3.release(db, stmt)
-
-        case result do
-          {:ok, rows} -> {:ok, rows |> Enum.map(&row_to_record/1) |> Enum.reject(&is_nil/1)}
-          {:error, reason} -> {:error, reason}
-        end
+        {:ok, rows |> Enum.map(&row_to_record/1) |> Enum.reject(&is_nil/1)}
 
       {:error, reason} ->
         {:error, reason}
