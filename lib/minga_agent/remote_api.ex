@@ -8,6 +8,7 @@ defmodule MingaAgent.RemoteAPI do
   """
 
   alias MingaAgent.EventLog
+  alias MingaAgent.OAuth.Flow, as: OAuthFlow
   alias MingaAgent.RemoteAPI.AttachResult
   alias MingaAgent.RemoteAPI.SessionInfo
   alias MingaAgent.Session
@@ -85,6 +86,40 @@ defmodule MingaAgent.RemoteAPI do
     with :ok <- authorize(session_id, token),
          {:ok, pid} <- SessionManager.get_session(session_id) do
       Session.unsubscribe(pid, client_pid)
+    end
+  end
+
+  @doc "Begins a server-side manual OAuth flow through the broker."
+  @spec begin_oauth(String.t(), String.t(), pid()) ::
+          {:ok, String.t(), String.t()} | {:error, term()}
+  def begin_oauth(session_id, token, client_pid)
+      when is_binary(session_id) and is_binary(token) and is_pid(client_pid) do
+    with :ok <- authorize_driver(session_id, token, client_pid) do
+      OAuthFlow.begin_manual(session_id: session_id, client_pid: client_pid)
+    end
+  end
+
+  @doc "Completes a server-side manual OAuth flow through the broker."
+  @spec complete_oauth(String.t(), String.t(), pid(), String.t(), String.t()) ::
+          {:ok, :openai} | {:error, term()}
+  def complete_oauth(session_id, token, client_pid, ref, pasted)
+      when is_binary(session_id) and is_binary(token) and is_pid(client_pid) and is_binary(ref) and
+             is_binary(pasted) do
+    with :ok <- authorize_driver(session_id, token, client_pid) do
+      complete_authorized_oauth(session_id, client_pid, ref, pasted)
+    end
+  end
+
+  @doc "Adds a system message to a session through the broker."
+  @spec add_system_message(String.t(), String.t(), pid(), String.t(), :info | :error) ::
+          :ok | {:error, term()}
+  def add_system_message(session_id, token, client_pid, message, level \\ :info)
+      when is_binary(session_id) and is_binary(token) and is_pid(client_pid) and
+             is_binary(message) and
+             level in [:info, :error] do
+    with :ok <- authorize_driver(session_id, token, client_pid),
+         {:ok, pid} <- SessionManager.get_session(session_id) do
+      Session.add_system_message(pid, message, level)
     end
   end
 
@@ -166,6 +201,33 @@ defmodule MingaAgent.RemoteAPI do
     end
   end
 
+  @spec authorize_driver(String.t(), String.t(), pid()) ::
+          :ok | {:error, :unauthorized | :not_found | :not_driver}
+  defp authorize_driver(session_id, token, client_pid) do
+    with :ok <- authorize(session_id, token),
+         {:ok, pid} <- SessionManager.get_session(session_id),
+         :driver <- Session.subscriber_role(pid, client_pid) do
+      :ok
+    else
+      nil -> {:error, :not_driver}
+      :viewer -> {:error, :not_driver}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  @spec complete_authorized_oauth(String.t(), pid(), String.t(), String.t()) ::
+          {:ok, :openai} | {:error, String.t()}
+  defp complete_authorized_oauth(session_id, client_pid, ref, pasted) do
+    case OAuthFlow.complete_manual(ref, pasted, session_id: session_id, client_pid: client_pid) do
+      {:ok, :openai} ->
+        refresh_all_session_credentials()
+        {:ok, :openai}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
   @spec event_catchup(String.t(), non_neg_integer()) ::
           {:ok, [EventLog.EventRecord.t()], non_neg_integer()} | {:error, term()}
   defp event_catchup(session_id, last_seen_event_id)
@@ -206,10 +268,16 @@ defmodule MingaAgent.RemoteAPI do
   defp session_info_if_live({session_id, pid, _metadata}) do
     case SessionManager.session_token(session_id) do
       {:ok, token} -> [session_info(session_id, pid, token)]
-      {:error, :not_found} -> []
+      {:error, _reason} -> []
     end
   catch
     :exit, _reason -> []
+  end
+
+  @spec refresh_all_session_credentials() :: :ok
+  defp refresh_all_session_credentials do
+    SessionManager.list_sessions()
+    |> Enum.each(fn {_session_id, pid, _metadata} -> Session.refresh_credentials(pid) end)
   end
 
   @spec session_info(String.t(), pid(), String.t()) :: session_info()

@@ -26,6 +26,7 @@ defmodule Minga.CLI do
           | {:sessions, url :: String.t(), flags()}
           | {:detach, flags()}
           | {:kill_session, url :: String.t(), flags()}
+          | {:login, flags()}
           | {:error, String.t()}
 
   @typedoc "Startup view mode requested by CLI flags."
@@ -119,6 +120,15 @@ defmodule Minga.CLI do
           {:error, message} -> abort_startup(message)
         end
 
+      {:login, flags} ->
+        with :ok <- maybe_start_debug_log(flags),
+             :ok <- MingaAgent.OAuth.ManualCLI.run() do
+          System.stop(0)
+          :ok
+        else
+          {:error, message} -> abort_startup(message)
+        end
+
       {:error, message} ->
         IO.puts(:stderr, message)
         System.stop(1)
@@ -166,6 +176,12 @@ defmodule Minga.CLI do
     |> terminal_command_token?()
   end
 
+  @doc "Returns true when args request a terminal-only remote command after parsing flags."
+  @spec terminal_command_args?([String.t()]) :: boolean()
+  def terminal_command_args?(args) do
+    terminal_command?(args)
+  end
+
   @spec first_command_token([String.t()]) :: String.t() | nil
   defp first_command_token([]), do: nil
 
@@ -193,6 +209,7 @@ defmodule Minga.CLI do
   defp terminal_command_token?("sessions"), do: true
   defp terminal_command_token?("detach"), do: true
   defp terminal_command_token?("kill-session"), do: true
+  defp terminal_command_token?("login"), do: true
   defp terminal_command_token?(_token), do: false
 
   @doc """
@@ -308,6 +325,14 @@ defmodule Minga.CLI do
 
   defp parse_args(["kill-session" | _rest], _file, _flags) do
     {:error, "kill-session requires an ssh://host/path URL\n\n#{usage()}"}
+  end
+
+  defp parse_args(["login", "--manual" | rest], nil, flags) do
+    parse_remote_subcommand(rest, {:login, flags})
+  end
+
+  defp parse_args(["login" | _rest], _file, _flags) do
+    {:error, "login currently requires --manual outside the editor\n\n#{usage()}"}
   end
 
   defp parse_args(["--help" | _], _file, _flags), do: {:error, usage()}
@@ -997,6 +1022,7 @@ defmodule Minga.CLI do
            minga sessions ssh://[user@]host[:port]
            minga detach
            minga kill-session ssh://[user@]host[:port]/path
+           minga login --manual
 
     Options:
       -h, --help             Show this help message
@@ -1023,6 +1049,7 @@ defmodule Minga.CLI do
       minga attach ssh://devbox/work/app  Attach to a remote server-side checkout
       minga sessions ssh://devbox         List remote sessions without launching the editor
       minga kill-session ssh://devbox/work/app  Stop the remote session for that checkout
+      minga login --manual             Sign in on a headless server by pasting the browser redirect
       MINGA_COOKIE=$(openssl rand -base64 32 | tr -d '/+=') minga --headless   Start detachable agent server
       minga --config ~/minimal.exs       Use a custom config profile
       minga --safe                       Start with defaults and no user config

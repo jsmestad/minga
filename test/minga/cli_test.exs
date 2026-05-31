@@ -71,12 +71,36 @@ defmodule Minga.CLITest do
       assert CLI.terminal_command?(["sessions", "ssh://devbox"])
       assert CLI.terminal_command?(["detach"])
       assert CLI.terminal_command?(["kill-session", "ssh://devbox/work/app"])
+      assert CLI.terminal_command?(["login"])
+      assert CLI.terminal_command?(["login", "--manual"])
       assert CLI.terminal_command?(["--cookie", "abc", "sessions"])
       assert CLI.terminal_command?(["sessions"])
       assert CLI.terminal_command?(["kill-session"])
       assert CLI.terminal_command?(["detach", "unexpected"])
       refute CLI.terminal_command?(["attach", "ssh://devbox/work/app"])
       refute CLI.terminal_command?(["README.md"])
+    end
+
+    test "manual login subcommand returns login action" do
+      assert {:login, %{view_mode: :auto}} = CLI.parse_args(["login", "--manual"])
+    end
+
+    test "login without manual flag returns usage error" do
+      assert {:error, message} = CLI.parse_args(["login"])
+      assert message =~ "login currently requires --manual"
+    end
+
+    test "manual login appears in help output" do
+      assert {:error, message} = CLI.parse_args(["--help"])
+      assert message =~ "minga login --manual"
+    end
+
+    test "terminal-only commands do not request editor startup" do
+      assert CLI.terminal_command_args?(["login", "--manual"])
+      assert CLI.terminal_command_args?(["sessions", "ssh://devbox"])
+      assert CLI.terminal_command_args?(["login"])
+      refute CLI.terminal_command_args?(["attach", "ssh://devbox/work/app"])
+      refute CLI.terminal_command_args?(["README.md"])
     end
 
     test "file argument with extra non-flag args takes the last file" do

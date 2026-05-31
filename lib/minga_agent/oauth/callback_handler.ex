@@ -46,20 +46,24 @@ defmodule MingaAgent.OAuth.CallbackHandler do
     end
   end
 
-  defp callback_event(%{"code" => code, "state" => state}) when is_binary(code) and code != "" do
+  @doc false
+  @spec callback_event(map()) ::
+          {:oauth_callback, String.t(), String.t() | nil}
+          | {:oauth_callback_error, {:provider_error, String.t()} | :missing_code}
+  def callback_event(%{"code" => code, "state" => state}) when is_binary(code) and code != "" do
     {:oauth_callback, code, state}
   end
 
-  defp callback_event(%{"code" => code}) when is_binary(code) and code != "" do
+  def callback_event(%{"code" => code}) when is_binary(code) and code != "" do
     {:oauth_callback, code, nil}
   end
 
-  defp callback_event(%{"error" => error} = params) when is_binary(error) and error != "" do
+  def callback_event(%{"error" => error} = params) when is_binary(error) and error != "" do
     description = Map.get(params, "error_description")
     {:oauth_callback_error, {:provider_error, provider_error_message(error, description)}}
   end
 
-  defp callback_event(_params), do: {:oauth_callback_error, :missing_code}
+  def callback_event(_params), do: {:oauth_callback_error, :missing_code}
 
   defp notify_flow(event) do
     case Process.whereis(:minga_oauth_flow) do

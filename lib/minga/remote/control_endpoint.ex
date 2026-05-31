@@ -103,9 +103,9 @@ defmodule Minga.Remote.ControlEndpoint do
 
   @spec current_uid() :: non_neg_integer() | nil
   defp current_uid do
-    case System.get_env("UID") do
-      nil -> nil
-      uid -> String.to_integer(uid)
+    case System.cmd("id", ["-u"], stderr_to_stdout: true) do
+      {uid, 0} -> uid |> String.trim() |> String.to_integer()
+      _other -> nil
     end
   rescue
     _error -> nil

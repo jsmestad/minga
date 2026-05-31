@@ -45,6 +45,7 @@ defmodule Minga.Services.Independent do
       Minga.Diagnostics,
       Minga.Session.EventRecorder,
       MingaAgent.EventLog,
+      MingaAgent.OAuth.PendingFlow,
       Minga.Tool.Manager
     ]
 

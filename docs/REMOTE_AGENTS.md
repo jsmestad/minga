@@ -40,6 +40,12 @@ Bind the server on a private network such as Tailscale or a locked-down LAN. Do 
 
 Provider credentials live on the server. For a quick local setup you can put keys in the systemd `Environment=` lines or the launchd `EnvironmentVariables` dictionary, but prefer a `0600` systemd `EnvironmentFile`, systemd credentials, macOS Keychain, or another local secret manager on shared machines. Attaching clients do not push provider credentials or config into the daemon.
 
+## Sign in on a headless server
+
+Use `minga login --manual` on the server when OAuth needs a browser but the daemon host has none. Minga prints an authorize URL, waits for one pasted value, and writes the resulting tokens to the server's `oauth.json`. Open the URL on your laptop, approve the request, then paste either the full failed redirect URL, the bare authorization code, or the `code#state` value back into the terminal.
+
+From an attached GUI, use `/login --manual`. The server creates the PKCE verifier and returns only the authorize URL and flow ref through `MingaAgent.RemoteAPI`. After approval, paste the redirect back with `/login --complete <ref> <redirect-url-or-code>`. The PKCE verifier never leaves the server.
+
 ## Attach, list, detach, and end
 
 Use `minga attach ssh://devbox/work/app` to connect to the agent session anchored to `/work/app` on `devbox`. The path is a server-side checkout or worktree. Minga does not copy source code to the client.
