@@ -138,7 +138,13 @@ defmodule MingaAgent.Markdown do
     before_lines |> Enum.reverse() |> Enum.join("\n")
   end
 
-  @spec accumulate_before_fence(boolean(), String.t(), [String.t()], non_neg_integer(), non_neg_integer()) ::
+  @spec accumulate_before_fence(
+          boolean(),
+          String.t(),
+          [String.t()],
+          non_neg_integer(),
+          non_neg_integer()
+        ) ::
           {:cont | :halt, {[String.t()], non_neg_integer()}}
   defp accumulate_before_fence(true, _line, acc, fence_count, target_fence)
        when fence_count == target_fence,
