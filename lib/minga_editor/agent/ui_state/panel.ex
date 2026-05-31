@@ -35,6 +35,7 @@ defmodule MingaEditor.Agent.UIState.Panel do
           mention_completion: MingaAgent.FileMention.completion() | nil,
           pasted_blocks: [paste_block()],
           cached_line_index: [{non_neg_integer(), MingaEditor.Agent.BufferSync.line_type()}],
+          cached_display_messages: [term()],
           cached_styled_messages: [MingaEditor.Agent.MarkdownHighlight.styled_lines()] | nil,
           message_version: non_neg_integer(),
           credentials_configured: boolean()
@@ -54,6 +55,7 @@ defmodule MingaEditor.Agent.UIState.Panel do
             mention_completion: nil,
             pasted_blocks: [],
             cached_line_index: [],
+            cached_display_messages: [],
             cached_styled_messages: nil,
             message_version: 0,
             # Assume configured until the session reports otherwise, so the

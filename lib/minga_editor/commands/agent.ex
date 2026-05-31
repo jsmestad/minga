@@ -1571,18 +1571,19 @@ defmodule MingaEditor.Commands.Agent do
 
     if session do
       messages = safe_messages(session)
-
-      # Use the cached line index from sync, falling back to recompute
       line_map = cached_or_compute_line_index(panel, messages)
 
-      # panel.scroll.offset is synced to the buffer cursor line by
-      # AgentNav.sync_scroll_to_cursor, so it maps directly to
-      # buffer line numbers.
+      display_msgs =
+        case panel.cached_display_messages do
+          [] -> messages
+          cached -> cached
+        end
+
       total = length(line_map)
       target = Minga.Editing.resolve_scroll(panel.scroll, total, 1)
 
       case Enum.at(line_map, target) do
-        {msg_idx, line_type} -> {msg_idx, Enum.at(messages, msg_idx), line_type}
+        {msg_idx, line_type} -> {msg_idx, Enum.at(display_msgs, msg_idx), line_type}
         nil -> nil
       end
     else

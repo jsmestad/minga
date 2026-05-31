@@ -133,7 +133,7 @@ defmodule MingaEditor.AgentLifecycle do
 
     sync_opts = maybe_add_pin_opts(sync_opts, AgentAccess.session(state))
 
-    line_index = AgentBufferSync.sync(buffer, messages, sync_opts)
+    {line_index, display_messages} = AgentBufferSync.sync(buffer, messages, sync_opts)
 
     # Compute styled runs for GUI rendering. Use tree-sitter highlights
     # if available, otherwise fall back to regex-based markdown parser.
@@ -157,7 +157,12 @@ defmodule MingaEditor.AgentLifecycle do
     # callers can read them without recomputing.
     state =
       AgentAccess.update_panel(state, fn p ->
-        %{p | cached_line_index: line_index, cached_styled_messages: styled}
+        %{
+          p
+          | cached_line_index: line_index,
+            cached_display_messages: display_messages,
+            cached_styled_messages: styled
+        }
       end)
 
     # Trigger tree-sitter reparse for markdown highlighting.

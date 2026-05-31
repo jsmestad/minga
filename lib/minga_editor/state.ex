@@ -2668,8 +2668,12 @@ defmodule MingaEditor.State do
 
       _ ->
         sync_opts = if pending_approval, do: [pending_approval: pending_approval], else: []
-        line_index = AgentBufferSync.sync(buffer, messages, sync_opts)
-        AgentAccess.update_panel(state, &%{&1 | cached_line_index: line_index})
+        {line_index, display_messages} = AgentBufferSync.sync(buffer, messages, sync_opts)
+
+        AgentAccess.update_panel(
+          state,
+          &%{&1 | cached_line_index: line_index, cached_display_messages: display_messages}
+        )
     end
   end
 

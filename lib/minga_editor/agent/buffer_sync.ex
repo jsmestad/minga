@@ -109,10 +109,8 @@ defmodule MingaEditor.Agent.BufferSync do
         Buffer.replace_generated_content(pid, text)
     end
 
-    # Return the line index, reusing the already-computed text and offsets.
-    # The visible list may include pinned or separator rows, so the cached index
-    # maps display rows back to original transcript indexes.
-    build_line_index(display_messages, text_lines, line_offsets, display_indices)
+    line_index = build_line_index(display_messages, text_lines, line_offsets, display_indices)
+    {line_index, display_messages}
   end
 
   @doc false
