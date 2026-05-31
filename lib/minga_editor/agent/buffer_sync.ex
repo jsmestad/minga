@@ -59,12 +59,17 @@ defmodule MingaEditor.Agent.BufferSync do
     message_id_pairs = Keyword.get(opts, :message_ids, [])
 
     hidden_count = min(display_start, length(messages))
-    visible_messages = Enum.drop(messages, hidden_count)
 
-    pinned_messages = extract_pinned_messages(message_id_pairs, pinned_ids, hidden_count)
+    visible_entries =
+      messages
+      |> Enum.with_index()
+      |> Enum.drop(hidden_count)
+      |> Enum.map(fn {msg, idx} -> {idx, msg} end)
 
-    {text, line_offsets, display_messages} =
-      build_display_text(visible_messages, pinned_messages, hidden_count)
+    pinned_entries = extract_pinned_message_entries(message_id_pairs, pinned_ids, hidden_count)
+
+    {text, line_offsets, display_messages, display_indices} =
+      build_display_text(visible_entries, pinned_entries, hidden_count)
 
     text_lines = String.split(text, "\n")
 
@@ -104,8 +109,10 @@ defmodule MingaEditor.Agent.BufferSync do
         Buffer.replace_generated_content(pid, text)
     end
 
-    # Return the line index, reusing the already-computed text and offsets
-    build_line_index(display_messages, text_lines, line_offsets)
+    # Return the line index, reusing the already-computed text and offsets.
+    # The visible list may include pinned or separator rows, so the cached index
+    # maps display rows back to original transcript indexes.
+    build_line_index(display_messages, text_lines, line_offsets, display_indices)
   end
 
   @doc false
@@ -188,9 +195,20 @@ defmodule MingaEditor.Agent.BufferSync do
   # All classification is O(n) in the total number of buffer lines.
   @spec build_line_index([term()], [String.t()], [ChatDecorations.line_offset()]) ::
           [{non_neg_integer(), line_type()}]
-  defp build_line_index(_messages, [], _line_offsets), do: []
-
   defp build_line_index(messages, text_lines, line_offsets) do
+    display_indices = Enum.to_list(0..(length(messages) - 1)//1)
+    build_line_index(messages, text_lines, line_offsets, display_indices)
+  end
+
+  @spec build_line_index(
+          [term()],
+          [String.t()],
+          [ChatDecorations.line_offset()],
+          [non_neg_integer()]
+        ) :: [{non_neg_integer(), line_type()}]
+  defp build_line_index(_messages, [], _line_offsets, _display_indices), do: []
+
+  defp build_line_index(messages, text_lines, line_offsets, display_indices) do
     total_lines = length(text_lines)
 
     # Build a lookup: buffer_line -> {msg_idx, start_line, line_count}
@@ -209,11 +227,13 @@ defmodule MingaEditor.Agent.BufferSync do
       case Map.get(line_to_msg, line_num) do
         {msg_idx, _start_line, _count} ->
           msg = Enum.at(messages, msg_idx)
-          {msg_idx, classify_line(msg, line_num, fence_map)}
+          original_idx = Enum.at(display_indices, msg_idx, msg_idx)
+          {original_idx, classify_line(msg, line_num, fence_map)}
 
         nil ->
           # Separator line between messages ("\n\n" join).
-          {prev_message_idx(line_offsets, line_num), :empty}
+          display_idx = prev_message_idx(line_offsets, line_num)
+          {Enum.at(display_indices, display_idx, display_idx), :empty}
       end
     end
   end
@@ -289,42 +309,57 @@ defmodule MingaEditor.Agent.BufferSync do
     end
   end
 
-  @spec extract_pinned_messages([{pos_integer(), term()}], MapSet.t(), non_neg_integer()) ::
-          [term()]
-  defp extract_pinned_messages(_pairs, pinned_ids, _hidden_count)
+  @spec extract_pinned_message_entries([{pos_integer(), term()}], MapSet.t(), non_neg_integer()) ::
+          [{non_neg_integer(), term()}]
+  defp extract_pinned_message_entries(_pairs, pinned_ids, _hidden_count)
        when map_size(pinned_ids) == 0,
        do: []
 
-  defp extract_pinned_messages(pairs, pinned_ids, hidden_count) do
+  defp extract_pinned_message_entries(pairs, pinned_ids, hidden_count) do
     pairs
     |> Enum.with_index()
     |> Enum.filter(fn {{id, _msg}, idx} ->
       MapSet.member?(pinned_ids, id) and idx < hidden_count
     end)
-    |> Enum.map(fn {{_id, msg}, _idx} -> msg end)
+    |> Enum.map(fn {{_id, msg}, idx} -> {idx, msg} end)
   end
 
-  @spec build_display_text([term()], [term()], non_neg_integer()) ::
-          {String.t(), [ChatDecorations.line_offset()], [term()]}
-  defp build_display_text(visible_messages, pinned_messages, hidden_count) do
-    prefix_messages =
-      if pinned_messages != [] do
-        pinned_messages ++ [{:system, "── pinned ──", :info}]
+  @spec build_display_text(
+          [{non_neg_integer(), term()}],
+          [{non_neg_integer(), term()}],
+          non_neg_integer()
+        ) :: {String.t(), [ChatDecorations.line_offset()], [term()], [non_neg_integer()]}
+  defp build_display_text(visible_entries, pinned_entries, hidden_count) do
+    prefix_entries =
+      if pinned_entries != [] do
+        pinned_entries ++
+          [{separator_index(pinned_entries, visible_entries), {:system, "── pinned ──", :info}}]
       else
         []
       end
 
-    separator_messages =
+    separator_entries =
       if hidden_count > 0 do
-        [{:system, "── #{hidden_count} earlier messages hidden ──", :info}]
+        [
+          {separator_index(visible_entries, pinned_entries),
+           {:system, "── #{hidden_count} earlier messages hidden ──", :info}}
+        ]
       else
         []
       end
 
-    display_messages = prefix_messages ++ separator_messages ++ visible_messages
+    display_entries = prefix_entries ++ separator_entries ++ visible_entries
+    display_messages = Enum.map(display_entries, fn {_idx, msg} -> msg end)
+    display_indices = Enum.map(display_entries, fn {idx, _msg} -> idx end)
     {text, offsets} = messages_to_markdown_with_offsets(display_messages)
-    {text, offsets, display_messages}
+    {text, offsets, display_messages, display_indices}
   end
+
+  @spec separator_index([{non_neg_integer(), term()}], [{non_neg_integer(), term()}]) ::
+          non_neg_integer()
+  defp separator_index([{idx, _msg} | _rest], _fallback_entries), do: idx
+  defp separator_index([], [{idx, _msg} | _rest]), do: idx
+  defp separator_index([], []), do: 0
 
   defp default_agent_theme do
     theme = MingaEditor.UI.Theme.get!(MingaEditor.UI.Theme.default())

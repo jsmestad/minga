@@ -108,6 +108,7 @@ defmodule MingaAgent.Session do
           follow_up_queue: [String.t() | [ReqLLM.Message.ContentPart.t()]],
           touched_files: %{String.t() => file_touch()},
           boundaries: %{String.t() => EditBoundary.t()},
+          pinned_ids: MapSet.t(pos_integer()),
           credentials_configured: boolean()
         }
 
@@ -1417,7 +1418,7 @@ defmodule MingaAgent.Session do
   defp handle_provider_event(%Event.AgentEnd{usage: usage}, state) do
     notify(state, :complete, completion_notification(state))
 
-    # Collapse thinking blocks now that the turn is complete
+    # Collapse thinking blocks now that the turn is complete.
     state = %{state | messages: collapse_thinking_blocks(state.messages)}
 
     state =
@@ -1426,10 +1427,11 @@ defmodule MingaAgent.Session do
 
         state = %{state | total_usage: TurnUsage.add(state.total_usage, usage)}
 
-        state = append_msg(state, Message.usage(usage))
-        notify_messages_changed(state)
-      else
         state
+        |> append_msg(Message.usage(usage))
+        |> notify_messages_changed()
+      else
+        notify_messages_changed(state)
       end
 
     dispatch_stop(state)

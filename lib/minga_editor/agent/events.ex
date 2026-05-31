@@ -799,20 +799,32 @@ defmodule MingaEditor.Agent.Events do
   @spec apply_compact_threshold(EditorState.t(), term(), non_neg_integer()) ::
           {EditorState.t(), [effect()]}
   defp apply_compact_threshold(state, view, fill_pct) do
-    auto_pct = compact_auto_threshold()
-    warn_pct = compact_warn_threshold()
-
-    cond do
-      auto_pct > 0 and fill_pct >= auto_pct and not view.compact_triggered ->
-        trigger_auto_compact(state)
-
-      warn_pct > 0 and fill_pct >= warn_pct and not view.compact_warned ->
-        warn_context_pressure(state, fill_pct)
-
-      true ->
-        {state, []}
-    end
+    compact_threshold_result(
+      state,
+      view,
+      fill_pct,
+      compact_auto_threshold(),
+      compact_warn_threshold()
+    )
   end
+
+  @spec compact_threshold_result(
+          EditorState.t(),
+          term(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) ::
+          {EditorState.t(), [effect()]}
+  defp compact_threshold_result(state, %{compact_triggered: false}, fill_pct, auto_pct, _warn_pct)
+       when auto_pct > 0 and fill_pct >= auto_pct,
+       do: trigger_auto_compact(state)
+
+  defp compact_threshold_result(state, %{compact_warned: false}, fill_pct, _auto_pct, warn_pct)
+       when warn_pct > 0 and fill_pct >= warn_pct,
+       do: warn_context_pressure(state, fill_pct)
+
+  defp compact_threshold_result(state, _view, _fill_pct, _auto_pct, _warn_pct), do: {state, []}
 
   @spec trigger_auto_compact(EditorState.t()) :: {EditorState.t(), [effect()]}
   defp trigger_auto_compact(state) do

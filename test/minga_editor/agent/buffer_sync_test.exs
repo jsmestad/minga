@@ -116,6 +116,29 @@ defmodule MingaEditor.Agent.BufferSyncTest do
     end
   end
 
+  describe "sync/3" do
+    test "cached index maps displayed pinned and visible rows to original transcript indexes" do
+      old_message = {:assistant, "old pinned"}
+      hidden_message = {:user, "hidden"}
+      visible_message = {:assistant, "visible"}
+      messages = [old_message, hidden_message, visible_message]
+      message_ids = [{101, old_message}, {102, hidden_message}, {103, visible_message}]
+
+      pid = BufferSync.start_buffer()
+
+      index =
+        BufferSync.sync(pid, messages,
+          display_start_index: 2,
+          message_ids: message_ids,
+          pinned_ids: MapSet.new([101])
+        )
+
+      assert {0, :text} in index
+      assert List.last(index) == {2, :text}
+      refute {1, :text} in index
+    end
+  end
+
   describe "messages_to_markdown_with_offsets/1" do
     test "system messages produce their text content" do
       messages = [{:system, "API key status:\n  ✗ Anthropic", :info}]

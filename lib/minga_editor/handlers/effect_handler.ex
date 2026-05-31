@@ -116,6 +116,13 @@ defmodule MingaEditor.Handlers.EffectHandler do
     apply_effects(state, rest)
   end
 
+  @spec compact_session_safely(pid()) :: {:ok, String.t()} | {:error, term()}
+  defp compact_session_safely(session_pid) do
+    MingaAgent.Session.compact(session_pid)
+  catch
+    :exit, reason -> {:error, {:compact_exit, reason}}
+  end
+
   @spec apply_effect(EditorState.t(), effect()) :: EditorState.t()
   defp apply_effect(state, :render), do: MingaEditor.schedule_render(state, 16)
 
@@ -254,7 +261,7 @@ defmodule MingaEditor.Handlers.EffectHandler do
     editor = self()
 
     Task.start(fn ->
-      result = MingaAgent.Session.compact(session_pid)
+      result = compact_session_safely(session_pid)
       send(editor, {:compact_result, result})
     end)
 
