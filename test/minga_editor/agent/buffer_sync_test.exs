@@ -117,7 +117,19 @@ defmodule MingaEditor.Agent.BufferSyncTest do
   end
 
   describe "sync/3" do
-    test "cached index maps displayed pinned and visible rows to original transcript indexes" do
+    test "cached message pairs preserve supplied stable ids without pins" do
+      first_message = {:user, "first"}
+      second_message = {:assistant, "second"}
+      message_ids = [{41, first_message}, {42, second_message}]
+      pid = BufferSync.start_buffer()
+
+      {_index, _display_messages, display_pairs} =
+        BufferSync.sync(pid, [first_message, second_message], message_ids: message_ids)
+
+      assert [{41, ^first_message}, {42, ^second_message}] = display_pairs
+    end
+
+    test "cached index and message pairs use the same display order" do
       old_message = {:assistant, "old pinned"}
       hidden_message = {:user, "hidden"}
       visible_message = {:assistant, "visible"}
@@ -126,15 +138,36 @@ defmodule MingaEditor.Agent.BufferSyncTest do
 
       pid = BufferSync.start_buffer()
 
-      {index, _display_messages} =
+      {index, display_messages, display_pairs} =
         BufferSync.sync(pid, messages,
           display_start_index: 2,
           message_ids: message_ids,
           pinned_ids: MapSet.new([101])
         )
 
-      assert {0, :text} in index
-      refute {1, :text} in index
+      assert [
+               {0, :text},
+               {0, :empty},
+               {1, :system},
+               {1, :empty},
+               {2, :system},
+               {2, :empty},
+               {3, :text}
+             ] = index
+
+      assert [
+               ^old_message,
+               {:system, "── pinned ──", :info},
+               {:system, "── 2 earlier messages hidden ──", :info},
+               ^visible_message
+             ] = display_messages
+
+      assert [
+               {101, ^old_message},
+               {_, {:system, "── pinned ──", :info}},
+               {_, {:system, "── 2 earlier messages hidden ──", :info}},
+               {103, ^visible_message}
+             ] = display_pairs
     end
   end
 

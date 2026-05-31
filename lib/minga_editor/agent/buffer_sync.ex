@@ -52,7 +52,8 @@ defmodule MingaEditor.Agent.BufferSync do
   so the caller can cache it in state for later lookups without
   recomputing.
   """
-  @spec sync(pid(), [term()], keyword()) :: [{non_neg_integer(), line_type()}]
+  @spec sync(pid(), [term()], keyword()) ::
+          {[{non_neg_integer(), line_type()}], [term()], [{pos_integer(), term()}]}
   def sync(pid, messages, opts \\ []) do
     display_start = Keyword.get(opts, :display_start_index, 0)
     pinned_ids = Keyword.get(opts, :pinned_ids, MapSet.new())
@@ -68,8 +69,8 @@ defmodule MingaEditor.Agent.BufferSync do
 
     pinned_entries = extract_pinned_message_entries(message_id_pairs, pinned_ids, hidden_count)
 
-    {text, line_offsets, display_messages} =
-      build_display_text(visible_entries, pinned_entries, hidden_count)
+    {text, line_offsets, display_messages, display_message_pairs} =
+      build_display_text(visible_entries, pinned_entries, hidden_count, message_id_pairs)
 
     text_lines = String.split(text, "\n")
 
@@ -110,7 +111,7 @@ defmodule MingaEditor.Agent.BufferSync do
     end
 
     line_index = build_line_index(display_messages, text_lines, line_offsets)
-    {line_index, display_messages}
+    {line_index, display_messages, display_message_pairs}
   end
 
   @doc false
@@ -302,12 +303,16 @@ defmodule MingaEditor.Agent.BufferSync do
     |> Enum.map(fn {{_id, msg}, idx} -> {idx, msg} end)
   end
 
+  @pinned_separator_id 4_000_000_001
+  @hidden_separator_id 4_000_000_002
+
   @spec build_display_text(
           [{non_neg_integer(), term()}],
           [{non_neg_integer(), term()}],
-          non_neg_integer()
-        ) :: {String.t(), [ChatDecorations.line_offset()], [term()]}
-  defp build_display_text(visible_entries, pinned_entries, hidden_count) do
+          non_neg_integer(),
+          [{pos_integer(), term()}]
+        ) :: {String.t(), [ChatDecorations.line_offset()], [term()], [{pos_integer(), term()}]}
+  defp build_display_text(visible_entries, pinned_entries, hidden_count, message_id_pairs) do
     prefix_entries =
       if pinned_entries != [] do
         pinned_entries ++
@@ -328,9 +333,33 @@ defmodule MingaEditor.Agent.BufferSync do
 
     display_entries = prefix_entries ++ separator_entries ++ visible_entries
     display_messages = Enum.map(display_entries, fn {_idx, msg} -> msg end)
+    display_message_pairs = display_message_pairs(display_entries, message_id_pairs)
     {text, offsets} = messages_to_markdown_with_offsets(display_messages)
-    {text, offsets, display_messages}
+    {text, offsets, display_messages, display_message_pairs}
   end
+
+  @spec display_message_pairs([{non_neg_integer(), term()}], [{pos_integer(), term()}]) ::
+          [{pos_integer(), term()}]
+  defp display_message_pairs(display_entries, message_id_pairs) do
+    id_by_index =
+      message_id_pairs
+      |> Enum.with_index()
+      |> Map.new(fn {{id, _msg}, idx} -> {idx, id} end)
+
+    Enum.map(display_entries, fn {idx, msg} ->
+      {display_message_id(idx, msg, id_by_index), msg}
+    end)
+  end
+
+  @spec display_message_id(non_neg_integer(), term(), %{non_neg_integer() => pos_integer()}) ::
+          pos_integer()
+  defp display_message_id(_idx, {:system, "── pinned ──", :info}, _id_by_index),
+    do: @pinned_separator_id
+
+  defp display_message_id(_idx, {:system, "── " <> _rest, :info}, _id_by_index),
+    do: @hidden_separator_id
+
+  defp display_message_id(idx, _msg, id_by_index), do: Map.get(id_by_index, idx, idx + 1)
 
   @spec separator_index([{non_neg_integer(), term()}], [{non_neg_integer(), term()}]) ::
           non_neg_integer()

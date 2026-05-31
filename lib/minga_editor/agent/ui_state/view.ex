@@ -63,6 +63,7 @@ defmodule MingaEditor.Agent.UIState.View do
           context_estimate: non_neg_integer(),
           compact_warned: boolean(),
           compact_triggered: boolean(),
+          compact_pending_fill_pct: non_neg_integer() | nil,
           compaction_in_progress: boolean()
         }
 
@@ -85,6 +86,7 @@ defmodule MingaEditor.Agent.UIState.View do
             context_estimate: 0,
             compact_warned: false,
             compact_triggered: false,
+            compact_pending_fill_pct: nil,
             compaction_in_progress: false,
             diff_baselines: %{},
             edit_timeline: EditTimeline.new()

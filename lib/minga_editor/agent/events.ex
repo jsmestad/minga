@@ -37,6 +37,7 @@ defmodule MingaEditor.Agent.Events do
           | {:log_warning, String.t()}
           | :sync_agent_buffer
           | {:update_tab_label, String.t()}
+          | {:compact_session, pid()}
 
   @spec handle(EditorState.t(), term()) :: {EditorState.t(), [effect()]}
 
@@ -75,6 +76,8 @@ defmodule MingaEditor.Agent.Events do
 
     # Let the active shell mirror foreground agent status if it owns an agent surface.
     state = sync_active_shell_agent_status(state, status)
+
+    {state, effects} = maybe_apply_pending_auto_compact(state, status, effects)
 
     {state, [:render | effects]}
   end
@@ -785,16 +788,44 @@ defmodule MingaEditor.Agent.Events do
   defp maybe_auto_compact(state, _estimated_tokens, 0), do: {state, []}
 
   defp maybe_auto_compact(state, estimated_tokens, context_limit) do
+    fill_pct = min(round(estimated_tokens / context_limit * 100), 100)
     view = AgentAccess.view(state)
     agent_status = AgentAccess.agent(state).runtime.status
+    compact_when_ready(state, view, agent_status, fill_pct)
+  end
 
-    if agent_status in [:thinking, :tool_executing] or view.compaction_in_progress do
-      {state, []}
-    else
-      fill_pct = min(round(estimated_tokens / context_limit * 100), 100)
-      apply_compact_threshold(state, view, fill_pct)
+  @spec compact_when_ready(EditorState.t(), term(), AgentState.status(), non_neg_integer()) ::
+          {EditorState.t(), [effect()]}
+  defp compact_when_ready(state, _view, status, fill_pct)
+       when status in [:thinking, :tool_executing] do
+    state = AgentAccess.update_view(state, &%{&1 | compact_pending_fill_pct: fill_pct})
+    {state, []}
+  end
+
+  defp compact_when_ready(state, %{compaction_in_progress: true}, _status, _fill_pct),
+    do: {state, []}
+
+  defp compact_when_ready(state, view, _status, fill_pct),
+    do: apply_compact_threshold(state, view, fill_pct)
+
+  @spec maybe_apply_pending_auto_compact(EditorState.t(), term(), [effect()]) ::
+          {EditorState.t(), [effect()]}
+  defp maybe_apply_pending_auto_compact(state, :idle, effects) do
+    case AgentAccess.view(state).compact_pending_fill_pct do
+      nil ->
+        {state, effects}
+
+      fill_pct ->
+        state = AgentAccess.update_view(state, &%{&1 | compact_pending_fill_pct: nil})
+
+        {state, compact_effects} =
+          apply_compact_threshold(state, AgentAccess.view(state), fill_pct)
+
+        {state, effects ++ compact_effects}
     end
   end
+
+  defp maybe_apply_pending_auto_compact(state, _status, effects), do: {state, effects}
 
   @spec apply_compact_threshold(EditorState.t(), term(), non_neg_integer()) ::
           {EditorState.t(), [effect()]}

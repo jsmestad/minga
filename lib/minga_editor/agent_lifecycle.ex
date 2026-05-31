@@ -131,16 +131,15 @@ defmodule MingaEditor.AgentLifecycle do
         do: Keyword.put(sync_opts, :display_start_index, panel.display_start_index),
         else: sync_opts
 
-    sync_opts = maybe_add_pin_opts(sync_opts, AgentAccess.session(state))
+    sync_opts = add_session_display_opts(sync_opts, AgentAccess.session(state))
 
-    {line_index, display_messages} = AgentBufferSync.sync(buffer, messages, sync_opts)
+    {line_index, display_messages, display_message_pairs} =
+      AgentBufferSync.sync(buffer, messages, sync_opts)
 
-    # Compute styled runs for GUI rendering. Use tree-sitter highlights
-    # if available, otherwise fall back to regex-based markdown parser.
-    # Tree-sitter highlights arrive async, so the first call typically
-    # uses the fallback. When highlights land, update_styled_cache/1
-    # re-caches with full tree-sitter quality.
-    styled = compute_styled_messages(state, buffer, messages)
+    # Compute styled runs for GUI rendering against the displayed transcript.
+    # The agent buffer also contains this filtered display list, so tree-sitter
+    # offsets line up for both TUI and GUI rendering.
+    styled = compute_styled_messages(state, buffer, display_messages)
 
     styled_assistant_count =
       Enum.count(styled, fn
@@ -161,6 +160,7 @@ defmodule MingaEditor.AgentLifecycle do
           p
           | cached_line_index: line_index,
             cached_display_messages: display_messages,
+            cached_display_message_pairs: display_message_pairs,
             cached_styled_messages: styled
         }
       end)
@@ -283,7 +283,7 @@ defmodule MingaEditor.AgentLifecycle do
     session = AgentAccess.session(state)
 
     with true <- is_pid(agent.buffer) and is_pid(session),
-         messages when messages != [] <- safe_messages(session) do
+         messages when messages != [] <- displayed_messages_for_styling(state, session) do
       styled = compute_styled_messages(state, agent.buffer, messages)
 
       AgentAccess.update_panel(state, fn p ->
@@ -299,6 +299,14 @@ defmodule MingaEditor.AgentLifecycle do
     AgentSession.messages(session)
   catch
     :exit, _ -> []
+  end
+
+  @spec displayed_messages_for_styling(state(), pid()) :: [term()]
+  defp displayed_messages_for_styling(state, session) do
+    case AgentAccess.panel(state).cached_display_messages do
+      [] -> safe_messages(session)
+      messages -> messages
+    end
   end
 
   # Computes styled runs for each message. Assistant messages and tool call
@@ -355,21 +363,26 @@ defmodule MingaEditor.AgentLifecycle do
     end)
   end
 
-  @spec maybe_add_pin_opts(keyword(), pid() | nil) :: keyword()
-  defp maybe_add_pin_opts(opts, session) when is_pid(session) do
+  @spec add_session_display_opts(keyword(), pid() | nil) :: keyword()
+  defp add_session_display_opts(opts, session) when is_pid(session) do
     pinned = AgentSession.pinned_ids(session)
     ids = AgentSession.messages_with_ids(session)
 
-    if MapSet.size(pinned) > 0 do
-      opts
-      |> Keyword.put(:pinned_ids, pinned)
-      |> Keyword.put(:message_ids, ids)
-    else
-      opts
-    end
+    opts
+    |> Keyword.put(:message_ids, ids)
+    |> maybe_put_pinned_ids(pinned)
   catch
     :exit, _ -> opts
   end
 
-  defp maybe_add_pin_opts(opts, _session), do: opts
+  defp add_session_display_opts(opts, _session), do: opts
+
+  @spec maybe_put_pinned_ids(keyword(), MapSet.t(pos_integer())) :: keyword()
+  defp maybe_put_pinned_ids(opts, pinned) do
+    if MapSet.size(pinned) > 0 do
+      Keyword.put(opts, :pinned_ids, pinned)
+    else
+      opts
+    end
+  end
 end

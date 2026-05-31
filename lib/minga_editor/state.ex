@@ -2668,11 +2668,19 @@ defmodule MingaEditor.State do
 
       _ ->
         sync_opts = if pending_approval, do: [pending_approval: pending_approval], else: []
-        {line_index, display_messages} = AgentBufferSync.sync(buffer, messages, sync_opts)
+        sync_opts = put_session_message_ids(sync_opts, session)
+
+        {line_index, display_messages, display_message_pairs} =
+          AgentBufferSync.sync(buffer, messages, sync_opts)
 
         AgentAccess.update_panel(
           state,
-          &%{&1 | cached_line_index: line_index, cached_display_messages: display_messages}
+          &%{
+            &1
+            | cached_line_index: line_index,
+              cached_display_messages: display_messages,
+              cached_display_message_pairs: display_message_pairs
+          }
         )
     end
   end
@@ -2682,5 +2690,12 @@ defmodule MingaEditor.State do
     AgentSession.messages(session)
   catch
     :exit, _ -> []
+  end
+
+  @spec put_session_message_ids(keyword(), pid()) :: keyword()
+  defp put_session_message_ids(opts, session) do
+    Keyword.put(opts, :message_ids, AgentSession.messages_with_ids(session))
+  catch
+    :exit, _ -> opts
   end
 end

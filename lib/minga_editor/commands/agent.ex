@@ -1178,8 +1178,8 @@ defmodule MingaEditor.Commands.Agent do
   def scope_pin_message(state) do
     with session when is_pid(session) <- AgentAccess.session(state),
          {msg_idx, _msg, _line_type} <- scroll_context(state),
-         pairs = Session.messages_with_ids(session),
-         {id, _msg} <- Enum.at(pairs, msg_idx) do
+         {id, msg} <- display_pair_at(state, session, msg_idx),
+         false <- synthetic_display_message?(msg) do
       Session.toggle_pin(session, id)
     end
 
@@ -1187,6 +1187,22 @@ defmodule MingaEditor.Commands.Agent do
   catch
     :exit, _ -> state
   end
+
+  @spec display_pair_at(state(), pid(), non_neg_integer()) :: {pos_integer(), Message.t()} | nil
+  defp display_pair_at(state, session, msg_idx) do
+    pairs =
+      case AgentAccess.panel(state).cached_display_message_pairs do
+        [] -> Session.messages_with_ids(session)
+        cached -> cached
+      end
+
+    Enum.at(pairs, msg_idx)
+  end
+
+  @spec synthetic_display_message?(term()) :: boolean()
+  defp synthetic_display_message?({:system, "── pinned ──", :info}), do: true
+  defp synthetic_display_message?({:system, "── " <> _rest, :info}), do: true
+  defp synthetic_display_message?(_msg), do: false
 
   # ── Input focus ────────────────────────────────────────────────────────────
 

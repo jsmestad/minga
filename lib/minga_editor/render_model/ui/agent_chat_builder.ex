@@ -38,7 +38,8 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
         {:erlang.phash2(
            {:visible, ctx.shell_state.agent.runtime.status,
             ctx.shell_state.agent.pending_approval, styled_len, panel.model_name,
-            panel.thinking_level, text, panel.message_version, view.help_visible, view.focus,
+            panel.thinking_level, text, panel.message_version,
+            length(panel.cached_display_message_pairs), view.help_visible, view.focus,
             ctx.editing.mode, prompt_cursor, prompt_line_count, visible_rows,
             panel.mention_completion}
          ), text}
@@ -120,14 +121,10 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
       end
 
     if is_agent_chat && session do
-      messages_with_ids =
-        try do
-          AgentSession.messages_with_ids(session)
-        catch
-          :exit, _ -> []
-        end
+      panel = ctx.agent_ui.panel
+      messages_with_ids = displayed_message_pairs(panel, session)
 
-      styled_cache = ctx.agent_ui.panel.cached_styled_messages
+      styled_cache = panel.cached_styled_messages
       pending_approval = ctx.shell_state.agent.pending_approval
       gui_messages = build_gui_messages(messages_with_ids, styled_cache, pending_approval)
 
@@ -141,7 +138,6 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
           []
         end
 
-      panel = ctx.agent_ui.panel
       {cursor_line, cursor_col} = UIState.input_cursor(panel)
       vim_mode = ctx.editing.mode
       inner_width = max(ctx.viewport.cols - 10, 20)
@@ -168,6 +164,19 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     else
       %{visible: false}
     end
+  end
+
+  @spec displayed_message_pairs(MingaEditor.Agent.UIState.Panel.t(), pid()) :: [
+          {pos_integer(), term()}
+        ]
+  defp displayed_message_pairs(%{cached_display_message_pairs: pairs}, _session)
+       when is_list(pairs) and pairs != [],
+       do: pairs
+
+  defp displayed_message_pairs(_panel, session) do
+    AgentSession.messages_with_ids(session)
+  catch
+    :exit, _ -> []
   end
 
   @spec build_gui_messages([{pos_integer(), term()}], [term()] | nil, map() | nil) :: [
