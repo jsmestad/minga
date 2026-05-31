@@ -482,7 +482,13 @@ defmodule MingaEditor.Handlers.EventDispatcher do
          pid
        ) do
     case remote_api_attach(remote_node, session_id, last_seen) do
-      {:ok, %{messages: messages, snapshot: snapshot, latest_event_id: latest_event_id}} ->
+      {:ok,
+       %{
+         messages: messages,
+         snapshot: snapshot,
+         events: events,
+         latest_event_id: latest_event_id
+       }} ->
         tb = set_workspace_remote_state(tb, workspace, pid, :connected, latest_event_id)
         state = EditorState.set_tab_bar(state, tb)
 
@@ -491,6 +497,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
           |> maybe_rebuild_agent_from_workspace(workspace_id)
           |> sync_reconnected_buffer(messages)
           |> apply_reconnected_snapshot(snapshot)
+          |> Commands.AgentSession.replay_catchup_events(events)
         else
           state
         end

@@ -17,6 +17,7 @@ defmodule MingaEditor.Commands.AgentSession do
   alias MingaEditor.State.Workspace
   alias MingaEditor.State.Workspace.RemoteSession
   alias MingaEditor.State.Tab
+  alias MingaEditor.Agent.Events
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
@@ -158,7 +159,7 @@ defmodule MingaEditor.Commands.AgentSession do
       when is_binary(server_name) and is_binary(session_id) and is_pid(remote_pid) and
              is_binary(token) and is_integer(last_seen_event_id) and last_seen_event_id >= 0 do
     case remote_attach(remote_pid, session_id, token, last_seen_event_id) do
-      {:ok, messages, snapshot, _events, latest_event_id} ->
+      {:ok, messages, snapshot, events, latest_event_id} ->
         {state, tab_id, buffer} = create_remote_agent_tab(state, server_name)
         AgentBufferSync.sync(buffer, messages)
 
@@ -167,6 +168,7 @@ defmodule MingaEditor.Commands.AgentSession do
         |> AgentAccess.update_agent(&AgentState.set_buffer(&1, buffer))
         |> rebuild_agent_from_tab(tab_id)
         |> apply_remote_snapshot(snapshot)
+        |> replay_catchup_events(events)
         |> ensure_agent_workspace(remote_pid, nil)
         |> set_remote_workspace(server_name, session_id, remote_pid, :connected, latest_event_id)
         |> EditorState.set_status("Connected to #{server_name} session #{session_id}")
@@ -565,6 +567,25 @@ defmodule MingaEditor.Commands.AgentSession do
       )
     end)
   end
+
+  @doc false
+  @spec replay_catchup_events(state(), [MingaAgent.EventLog.EventRecord.t()]) :: state()
+  def replay_catchup_events(state, events) do
+    Enum.reduce(events, state, fn event, acc ->
+      case event_record_to_editor_event(event) do
+        nil -> acc
+        editor_event -> elem(Events.handle(acc, editor_event), 0)
+      end
+    end)
+  end
+
+  @spec event_record_to_editor_event(MingaAgent.EventLog.EventRecord.t()) :: term() | nil
+  defp event_record_to_editor_event(%{event_type: :file_edit_proposed, payload: payload}) do
+    {:file_changed, payload["path"], payload["before_content"], payload["after_content"],
+     payload["tool_call_id"], payload["tool_name"]}
+  end
+
+  defp event_record_to_editor_event(_event), do: nil
 
   @spec stop_remote_session(state(), pid()) :: state()
   defp stop_remote_session(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, session) do
