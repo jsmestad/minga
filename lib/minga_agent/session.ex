@@ -821,6 +821,13 @@ defmodule MingaAgent.Session do
       state.provider_module.new_session(state.provider)
     end
 
+    EventLog.record(
+      state.session_id,
+      :session_stopped,
+      %{reason: "new_session", status: state.status},
+      state.event_log_server
+    )
+
     now = DateTime.utc_now()
     timestamp = Calendar.strftime(now, "%H:%M:%S UTC")
 
@@ -846,6 +853,17 @@ defmodule MingaAgent.Session do
     }
 
     state = reset_messages(state, [Message.system("Session cleared · #{timestamp}")])
+
+    EventLog.record(
+      state.session_id,
+      :session_started,
+      %{
+        model: state.model_name,
+        provider: state.provider_name,
+        background_subagent: state.background_subagent
+      },
+      state.event_log_server
+    )
 
     broadcast(state, {:status_changed, :idle})
     state = notify_messages_changed(state)
@@ -1646,6 +1664,13 @@ defmodule MingaAgent.Session do
 
   @spec append_system_message(state(), String.t(), Message.system_level()) :: state()
   defp append_system_message(state, text, level) do
+    EventLog.record(
+      state.session_id,
+      :system_message,
+      %{message: text, level: level},
+      state.event_log_server
+    )
+
     msg = Message.system(text, level)
     append_msg(state, msg)
   end
@@ -1965,8 +1990,7 @@ defmodule MingaAgent.Session do
 
   defp event_log_entry({:approval_resolved, _decision}), do: nil
 
-  defp event_log_entry({:system_message, message, level}),
-    do: {:system_message, %{message: message, level: level}}
+  defp event_log_entry({:system_message, _message, _level}), do: nil
 
   defp event_log_entry({:status_changed, :idle}), do: {:waiting_for_input, %{status: :idle}}
   defp event_log_entry({:status_changed, status}), do: {:status_changed, %{status: status}}
