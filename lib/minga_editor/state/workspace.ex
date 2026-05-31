@@ -49,7 +49,8 @@ defmodule MingaEditor.State.Workspace do
           agent_ui: UIState.t() | nil,
           project_view: ProjectView.t() | nil,
           review: WorkspaceReview.t(),
-          project_root: String.t() | nil
+          project_root: String.t() | nil,
+          pending_catchup_events: [MingaAgent.EventLog.EventRecord.t()]
         }
 
   @enforce_keys [:id, :kind]
@@ -67,7 +68,8 @@ defmodule MingaEditor.State.Workspace do
             agent_ui: nil,
             project_view: nil,
             review: WorkspaceReview.new(),
-            project_root: nil
+            project_root: nil,
+            pending_catchup_events: []
 
   @doc "Creates the manual project workspace."
   @spec new_manual(String.t() | nil) :: t()

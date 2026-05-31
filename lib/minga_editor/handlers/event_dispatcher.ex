@@ -500,7 +500,11 @@ defmodule MingaEditor.Handlers.EventDispatcher do
           |> apply_reconnected_snapshot(snapshot)
           |> Commands.AgentSession.replay_catchup_events(events)
         else
-          tb = set_workspace_remote_state(tb, workspace, pid, :connected)
+          tb =
+            tb
+            |> set_workspace_remote_state(workspace, pid, :connected, latest_event_id)
+            |> TabBar.update_workspace(workspace_id, &%{&1 | pending_catchup_events: events})
+
           EditorState.set_tab_bar(state, tb)
         end
 

@@ -570,22 +570,7 @@ defmodule MingaEditor.Commands.AgentSession do
 
   @doc false
   @spec replay_catchup_events(state(), [MingaAgent.EventLog.EventRecord.t()]) :: state()
-  def replay_catchup_events(state, events) do
-    Enum.reduce(events, state, fn event, acc ->
-      case event_record_to_editor_event(event) do
-        nil -> acc
-        editor_event -> elem(Events.handle(acc, editor_event), 0)
-      end
-    end)
-  end
-
-  @spec event_record_to_editor_event(MingaAgent.EventLog.EventRecord.t()) :: term() | nil
-  defp event_record_to_editor_event(%{event_type: :file_edit_proposed, payload: payload}) do
-    {:file_changed, payload["path"], payload["before_content"], payload["after_content"],
-     payload["tool_call_id"], payload["tool_name"]}
-  end
-
-  defp event_record_to_editor_event(_event), do: nil
+  def replay_catchup_events(state, events), do: Events.replay_catchup(state, events)
 
   @spec stop_remote_session(state(), pid()) :: state()
   defp stop_remote_session(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, session) do

@@ -670,4 +670,23 @@ defmodule MingaEditor.Agent.Events do
   catch
     :exit, _ -> nil
   end
+
+  @doc false
+  @spec replay_catchup(EditorState.t(), [MingaAgent.EventLog.EventRecord.t()]) :: EditorState.t()
+  def replay_catchup(state, events) do
+    Enum.reduce(events, state, fn event, acc ->
+      case event_record_to_editor_event(event) do
+        nil -> acc
+        editor_event -> elem(handle(acc, editor_event), 0)
+      end
+    end)
+  end
+
+  @spec event_record_to_editor_event(MingaAgent.EventLog.EventRecord.t()) :: term() | nil
+  defp event_record_to_editor_event(%{event_type: :file_edit_proposed, payload: payload}) do
+    {:file_changed, payload["path"], payload["before_content"], payload["after_content"],
+     payload["tool_call_id"], payload["tool_name"]}
+  end
+
+  defp event_record_to_editor_event(_event), do: nil
 end
