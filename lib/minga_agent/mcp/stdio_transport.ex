@@ -10,6 +10,7 @@ defmodule MingaAgent.MCP.StdioTransport do
   @behaviour MingaAgent.MCP.Transport
 
   alias MingaAgent.MCP.ServerConfig
+  alias MingaAgent.Redaction
 
   @enforce_keys [:port]
   defstruct [:port]
@@ -35,7 +36,7 @@ defmodule MingaAgent.MCP.StdioTransport do
       {:ok, %__MODULE__{port: Port.open({:spawn_executable, executable}, port_opts)}}
     end
   rescue
-    error -> {:error, Exception.message(error)}
+    error -> {:error, Redaction.format_error(Exception.message(error))}
   end
 
   @impl MingaAgent.MCP.Transport

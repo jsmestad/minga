@@ -56,6 +56,7 @@ defmodule MingaAgent.Providers.Native do
   alias MingaAgent.ModelLimits
   alias MingaAgent.ProjectView
   alias MingaAgent.Providers.Native.ReqLLMAdapter
+  alias MingaAgent.Redaction
   alias MingaAgent.ToolRouter
   alias MingaAgent.Retry
   alias MingaAgent.Session
@@ -328,7 +329,7 @@ defmodule MingaAgent.Providers.Native do
     max_turns = Keyword.get(opts, :max_turns, config.max_turns)
     read_only? = Keyword.get(opts, :read_only?, false)
     config = disable_hooks_for_read_only(config, read_only?)
-    {config, ext_mcp_servers} = merge_extension_components(config, read_only?)
+    {config, registry_mcp_servers} = merge_extension_components(config, read_only?)
     max_cost = Keyword.get(opts, :max_cost, config.max_cost)
     llm_client = Keyword.get(opts, :llm_client, ReqLLMAdapter.default_client())
     hook_runner = Keyword.get(opts, :hook_runner, &CommandRunner.run_pre_tool_use/2)
@@ -351,11 +352,12 @@ defmodule MingaAgent.Providers.Native do
     internal_tools = if read_only?, do: [], else: build_internal_tools(provider_pid)
 
     configured_mcp_configs = configured_mcp_servers(opts, config, subscriber, read_only?)
+    config = %{config | mcp_servers: configured_mcp_configs}
 
     mcp_configs =
-      configured_mcp_configs ++ filter_ext_mcp_servers(ext_mcp_servers, opts, read_only?)
-
-    mcp_configs = deduplicate_mcp_configs(mcp_configs)
+      MCPServerRegistry.resolve_configs(configured_mcp_configs,
+        registry_configs: filter_registry_mcp_servers(registry_mcp_servers, opts, read_only?)
+      )
 
     mcp_client_opts = mcp_client_opts(opts)
     mcp_enabled_override = Keyword.get(opts, :mcp_enabled?, nil)
@@ -494,28 +496,31 @@ defmodule MingaAgent.Providers.Native do
      hook.extension_source, hook.extension_module}
   end
 
-  @spec filter_ext_mcp_servers([MCPServerConfig.t()], keyword(), boolean()) ::
+  @spec filter_registry_mcp_servers([MCPServerConfig.t()], keyword(), boolean()) ::
           [MCPServerConfig.t()]
-  defp filter_ext_mcp_servers(_servers, _opts, true), do: []
-  defp filter_ext_mcp_servers([], _opts, _read_only?), do: []
+  defp filter_registry_mcp_servers(_servers, _opts, true), do: []
+  defp filter_registry_mcp_servers([], _opts, _read_only?), do: []
 
-  defp filter_ext_mcp_servers(servers, opts, false) do
+  defp filter_registry_mcp_servers(servers, opts, false) do
     if mcp_extension_enabled?(opts), do: servers, else: []
   end
 
-  @spec refresh_mcp_contributions(map()) :: map()
-  defp refresh_mcp_contributions(%{read_only?: true} = state), do: state
+  @spec refresh_mcp_contributions(map(), map()) :: map()
+  defp refresh_mcp_contributions(state, payload)
+  defp refresh_mcp_contributions(%{read_only?: true} = state, _payload), do: state
 
-  defp refresh_mcp_contributions(state) do
+  defp refresh_mcp_contributions(state, payload) do
     configs =
       state
       |> configured_mcp_servers_from_state()
-      |> Kernel.++(extension_mcp_servers_from_state(state))
-      |> deduplicate_mcp_configs()
+      |> MCPServerRegistry.resolve_configs(
+        registry_configs: registry_mcp_servers_from_state(state)
+      )
 
     if configs == state.mcp_configs do
       state
     else
+      maybe_notify_mcp_source_removed(state, configs, payload)
       cleanup_mcp(state.mcp_registry)
 
       mcp_registry = mcp_registry_for(configs)
@@ -534,8 +539,26 @@ defmodule MingaAgent.Providers.Native do
     end
   end
 
-  @spec extension_mcp_servers_from_state(map()) :: [MCPServerConfig.t()]
-  defp extension_mcp_servers_from_state(state) do
+  @spec maybe_notify_mcp_source_removed(map(), [MCPServerConfig.t()], map()) :: :ok
+  defp maybe_notify_mcp_source_removed(state, configs, %{source: source}) do
+    had_source? = Enum.any?(state.mcp_configs, &(&1.source == source))
+    has_source? = Enum.any?(configs, &(&1.source == source))
+
+    if had_source? and not has_source? do
+      message =
+        "MCP source #{format_mcp_source(source)} unloaded; stopped its clients and refreshed MCP tools."
+
+      Minga.Log.info(:agent, "[Agent.Native] #{message}")
+      notify(state.subscriber, %Event.SystemMessage{message: message, level: :info})
+    end
+
+    :ok
+  end
+
+  defp maybe_notify_mcp_source_removed(_state, _configs, _payload), do: :ok
+
+  @spec registry_mcp_servers_from_state(map()) :: [MCPServerConfig.t()]
+  defp registry_mcp_servers_from_state(state) do
     if state.read_only? do
       []
     else
@@ -549,25 +572,6 @@ defmodule MingaAgent.Providers.Native do
 
   @spec configured_mcp_servers_from_state(map()) :: [MCPServerConfig.t()]
   defp configured_mcp_servers_from_state(state), do: state.configured_mcp_configs
-
-  @spec deduplicate_mcp_configs([MCPServerConfig.t()]) :: [MCPServerConfig.t()]
-  defp deduplicate_mcp_configs(configs) do
-    {deduped, _seen} =
-      Enum.reduce(configs, {[], MapSet.new()}, fn config, {acc, seen} ->
-        if MapSet.member?(seen, config.name) do
-          Minga.Log.warning(
-            :agent,
-            "[Agent.Native] duplicate MCP server name ignored: #{config.name}"
-          )
-
-          {acc, seen}
-        else
-          {[config | acc], MapSet.put(seen, config.name)}
-        end
-      end)
-
-    Enum.reverse(deduped)
-  end
 
   @spec init_fork_store_and_changeset(ProjectView.t() | nil, String.t(), keyword()) ::
           {pid() | nil, pid() | nil}
@@ -1009,8 +1013,8 @@ defmodule MingaAgent.Providers.Native do
   end
 
   @impl GenServer
-  def handle_info({:minga_event, :agent_mcp_servers_changed, _payload}, state) do
-    {:noreply, refresh_mcp_contributions(state)}
+  def handle_info({:minga_event, :agent_mcp_servers_changed, payload}, state) do
+    {:noreply, refresh_mcp_contributions(state, payload)}
   end
 
   def handle_info({:minga_event, :agent_tools_changed, _payload}, state) do
@@ -1118,7 +1122,7 @@ defmodule MingaAgent.Providers.Native do
     case MCPRegistry.server_for_pid(state.mcp_registry, pid) do
       ^server_name ->
         message =
-          "MCP server #{server_name} stopped: #{inspect(reason)}. Built-in tools remain available."
+          "MCP server #{server_name} stopped: #{format_error(reason)}. Built-in tools remain available."
 
         Minga.Log.warning(:agent, "[Agent.Native] #{message}")
         notify(state.subscriber, %Event.Error{message: message})
@@ -1133,7 +1137,7 @@ defmodule MingaAgent.Providers.Native do
     case MCPRegistry.server_for_pid(state.mcp_registry, pid) do
       server_name when is_binary(server_name) ->
         message =
-          "MCP server #{server_name} crashed: #{inspect(reason)}. Built-in tools remain available."
+          "MCP server #{server_name} crashed: #{format_error(reason)}. Built-in tools remain available."
 
         Minga.Log.warning(:agent, "[Agent.Native] #{message}")
         notify(state.subscriber, %Event.Error{message: message})
@@ -1216,6 +1220,7 @@ defmodule MingaAgent.Providers.Native do
   defp format_mcp_source(%MCPServerConfig{source: source}), do: format_mcp_source(source)
   defp format_mcp_source(:config), do: "config"
   defp format_mcp_source(:builtin), do: "builtin"
+  defp format_mcp_source({:bundle, name}), do: "bundle:#{name}"
   defp format_mcp_source({:extension, name}), do: "extension:#{name}"
 
   @spec mcp_server_status(map(), String.t()) :: :not_started | :running | :errored
@@ -1347,7 +1352,8 @@ defmodule MingaAgent.Providers.Native do
           %{
             "server" => server_name,
             "name" => tool.name,
-            "description" => String.split(tool.description, "\n") |> List.first() || ""
+            "description" =>
+              tool.description |> String.split("\n") |> List.first() |> redacted_mcp_description()
           }
         end)
 
@@ -1356,13 +1362,23 @@ defmodule MingaAgent.Providers.Native do
     end
   end
 
+  @spec redacted_mcp_description(String.t() | nil) :: String.t()
+  defp redacted_mcp_description(nil), do: ""
+  defp redacted_mcp_description(description), do: Redaction.redact_string(description)
+
+  @spec redact_mcp_tool_reply({:ok, term()} | {:error, term()}) ::
+          {:ok, term()} | {:error, term()}
+  defp redact_mcp_tool_reply({:ok, result}), do: {:ok, Redaction.redact_term(result)}
+  defp redact_mcp_tool_reply({:error, reason}), do: {:error, Redaction.format_error(reason)}
+
   @spec call_mcp_tool_for_agent(map(), term(), term(), term()) ::
           {{:ok, term()} | {:error, term()}, map()}
   defp call_mcp_tool_for_agent(state, server_name, tool_name, args)
        when is_binary(server_name) and is_binary(tool_name) and is_map(args) do
     case ensure_mcp_server(state, server_name) do
       {{:ok, client}, state} ->
-        {MingaAgent.MCP.Client.call_tool(client, tool_name, args), state}
+        {client |> MingaAgent.MCP.Client.call_tool(tool_name, args) |> redact_mcp_tool_reply(),
+         state}
 
       {{:error, reason}, state} ->
         {{:error, reason}, state}
@@ -3259,16 +3275,16 @@ defmodule MingaAgent.Providers.Native do
   defp format_tool_result(result), do: inspect(result)
 
   @spec format_error(term()) :: String.t()
-  defp format_error(reason) when is_binary(reason), do: reason
-  defp format_error(%{message: msg}) when is_binary(msg), do: msg
-  defp format_error(%{"message" => msg}) when is_binary(msg), do: msg
+  defp format_error(reason) when is_binary(reason), do: Redaction.format_error(reason)
+  defp format_error(%{message: msg}) when is_binary(msg), do: Redaction.format_error(msg)
+  defp format_error(%{"message" => msg}) when is_binary(msg), do: Redaction.format_error(msg)
 
   defp format_error(:invalid_format) do
     ~s|Invalid model format. Expected "provider:model" (e.g., "anthropic:claude-sonnet-4"), | <>
       "got a bare model name without a provider prefix."
   end
 
-  defp format_error(reason), do: inspect(reason)
+  defp format_error(reason), do: Redaction.format_error(reason)
 
   @spec notify(pid(), Event.t()) :: Event.t()
   defp notify(subscriber, event) do

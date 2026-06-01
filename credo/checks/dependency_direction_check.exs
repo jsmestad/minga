@@ -205,6 +205,7 @@ defmodule Minga.Credo.DependencyDirectionCheck do
     "MingaAgent.ModelLimits",
     "MingaAgent.OAuth.PendingFlow.Entry",
     "MingaAgent.Provider",
+    "MingaAgent.Redaction",
     "MingaAgent.RuntimeState",
     "MingaAgent.Subagent.Handle",
     "MingaAgent.TodoItem",

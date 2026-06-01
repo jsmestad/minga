@@ -43,6 +43,95 @@ defmodule MingaAgent.MCP.ServerConfigTest do
     assert reason =~ "string values"
   end
 
+  test "env validation errors redact secret values" do
+    assert {:error, reason} =
+             ServerConfig.normalize(%{
+               name: "local-tools",
+               command: "node",
+               env: %{"GITHUB_TOKEN" => "ghp_supersecret123", "BAD" => 1}
+             })
+
+    refute reason =~ "ghp_supersecret123"
+    assert reason =~ "GITHUB_TOKEN"
+    assert reason =~ "[REDACTED]"
+  end
+
+  test "env validation errors redact malformed keyword-list secrets" do
+    assert {:error, reason} =
+             ServerConfig.normalize(%{
+               name: "local-tools",
+               command: "node",
+               env: [API_TOKEN: "plain-secret"]
+             })
+
+    refute reason =~ "plain-secret"
+    assert reason =~ "API_TOKEN"
+    assert reason =~ "[REDACTED]"
+  end
+
+  test "env validation errors handle malformed non-stringable keys" do
+    assert {:error, reason} =
+             ServerConfig.normalize(%{
+               name: "local-tools",
+               command: "node",
+               env: %{{:bad, :key} => "plain-secret"}
+             })
+
+    refute reason =~ "plain-secret"
+    assert reason =~ "[REDACTED]"
+  end
+
+  test "env validation errors redact secret-key tuples of any arity" do
+    assert {:error, reason} =
+             ServerConfig.normalize(%{
+               name: "local-tools",
+               command: "node",
+               env: {:API_TOKEN, "plain-secret", :metadata}
+             })
+
+    refute reason =~ "plain-secret"
+    assert reason =~ "API_TOKEN"
+    assert reason =~ "[REDACTED]"
+  end
+
+  test "inspect redacts env values" do
+    config = %ServerConfig{
+      name: "local-tools",
+      command: "node",
+      env: %{"GITHUB_TOKEN" => "ghp_supersecret123", "MODE" => "test"}
+    }
+
+    inspected = inspect(config)
+    refute inspected =~ "ghp_supersecret123"
+    refute inspected =~ "test"
+    assert inspected =~ "GITHUB_TOKEN"
+    assert inspected =~ "[REDACTED]"
+  end
+
+  test "inspect redacts credential-like args" do
+    config = %ServerConfig{
+      name: "local-tools",
+      command: "node",
+      args: [
+        "--api-key",
+        "plain-secret",
+        "--client-secret",
+        "compound-secret",
+        "--token=inline-secret",
+        "--refresh-token=refresh-secret",
+        "API_TOKEN=env-secret"
+      ]
+    }
+
+    inspected = inspect(config)
+    refute inspected =~ "plain-secret"
+    refute inspected =~ "compound-secret"
+    refute inspected =~ "inline-secret"
+    refute inspected =~ "refresh-secret"
+    refute inspected =~ "env-secret"
+    assert inspected =~ "[REDACTED]"
+  end
+
   test "rejects missing command" do
     assert {:error, reason} = ServerConfig.normalize(%{name: "local"})
     assert reason =~ "command is required"

@@ -7,6 +7,8 @@ defmodule MingaAgent.MCP.ServerConfig do
   pass raw config maps across module boundaries.
   """
 
+  alias MingaAgent.Redaction
+
   @enforce_keys [:name, :command]
   defstruct [:name, :command, args: [], env: %{}, enabled: true, source: :config]
 
@@ -50,7 +52,7 @@ defmodule MingaAgent.MCP.ServerConfig do
   end
 
   def normalize(other),
-    do: {:error, "MCP server config must be a map or nil, got: #{inspect(other)}"}
+    do: {:error, "MCP server config must be a map or nil, got: #{safe_inspect(other)}"}
 
   @doc "Normalizes one or more MCP server configs, filters disabled entries, and rejects duplicate enabled server names."
   @spec normalize_list(nil | map() | t() | [map() | t()]) :: {:ok, [t()]} | {:error, String.t()}
@@ -69,7 +71,8 @@ defmodule MingaAgent.MCP.ServerConfig do
 
   def normalize_list(other),
     do:
-      {:error, "MCP servers config must be a list of maps, a map, or nil, got: #{inspect(other)}"}
+      {:error,
+       "MCP servers config must be a list of maps, a map, or nil, got: #{safe_inspect(other)}"}
 
   @spec normalize_list_entry(term(), {:ok, [t()]}) ::
           {:cont, {:ok, [t()]}} | {:halt, {:error, String.t()}}
@@ -113,7 +116,7 @@ defmodule MingaAgent.MCP.ServerConfig do
       value when is_binary(value) and value != "" -> {:ok, value}
       value when is_binary(value) -> {:error, "MCP server #{key} cannot be empty"}
       nil -> {:error, "MCP server #{key} is required"}
-      value -> {:error, "MCP server #{key} must be a string, got: #{inspect(value)}"}
+      value -> {:error, "MCP server #{key} must be a string, got: #{safe_inspect(value)}"}
     end
   end
 
@@ -122,7 +125,7 @@ defmodule MingaAgent.MCP.ServerConfig do
     case fetch(config, :args) do
       nil -> {:ok, []}
       args when is_list(args) -> normalize_string_list(args, :args)
-      other -> {:error, "MCP server args must be a list of strings, got: #{inspect(other)}"}
+      other -> {:error, "MCP server args must be a list of strings, got: #{safe_inspect(other)}"}
     end
   end
 
@@ -137,7 +140,7 @@ defmodule MingaAgent.MCP.ServerConfig do
 
       other ->
         {:error,
-         "MCP server env must be a map of string or atom keys and string values, got: #{inspect(other)}"}
+         "MCP server env must be a map of string or atom keys and string values, got: #{safe_inspect(other)}"}
     end
   end
 
@@ -146,7 +149,7 @@ defmodule MingaAgent.MCP.ServerConfig do
     case fetch(config, :enabled) do
       nil -> {:ok, true}
       enabled when is_boolean(enabled) -> {:ok, enabled}
-      other -> {:error, "MCP server enabled must be a boolean, got: #{inspect(other)}"}
+      other -> {:error, "MCP server enabled must be a boolean, got: #{safe_inspect(other)}"}
     end
   end
 
@@ -157,8 +160,9 @@ defmodule MingaAgent.MCP.ServerConfig do
       nil -> {:ok, :config}
       :builtin -> {:ok, :builtin}
       :config -> {:ok, :config}
+      {:bundle, name} when is_atom(name) -> {:ok, {:bundle, name}}
       {:extension, name} when is_atom(name) -> {:ok, {:extension, name}}
-      other -> {:error, "MCP server source is invalid: #{inspect(other)}"}
+      other -> {:error, "MCP server source is invalid: #{safe_inspect(other)}"}
     end
   end
 
@@ -167,7 +171,7 @@ defmodule MingaAgent.MCP.ServerConfig do
     if Enum.all?(values, &is_binary/1) do
       {:ok, values}
     else
-      {:error, "MCP server #{key} must contain only strings, got: #{inspect(values)}"}
+      {:error, "MCP server #{key} must contain only strings, got: #{safe_inspect(values)}"}
     end
   end
 
@@ -179,13 +183,16 @@ defmodule MingaAgent.MCP.ServerConfig do
       {:ok, Map.new(pairs)}
     else
       {:error,
-       "MCP server env must contain string or atom keys and string values, got: #{inspect(env)}"}
+       "MCP server env must contain string or atom keys and string values, got: #{inspect(Redaction.redact_env(env))}"}
     end
   end
 
   @spec to_env_key(term()) :: term()
   defp to_env_key(key) when is_atom(key), do: Atom.to_string(key)
   defp to_env_key(key), do: key
+
+  @spec safe_inspect(term()) :: String.t()
+  defp safe_inspect(term), do: term |> Redaction.redact_term() |> inspect()
 
   @spec fetch(map(), atom()) :: term()
   defp fetch(config, key) do

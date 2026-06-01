@@ -3,11 +3,14 @@ defmodule MingaAgent.Providers.NativeMCPRegistryTest do
   use ExUnit.Case, async: false
 
   alias MingaAgent.Config, as: AgentConfig
+  alias MingaAgent.Event
+  alias MingaAgent.MCP.FakeTransport
   alias MingaAgent.MCP.ServerRegistry
   alias MingaAgent.Providers.Native
 
   @source {:extension, :native_mcp_registry_test}
   @moduletag :tmp_dir
+  @receive_timeout 5_000
 
   setup do
     ensure_registry_started()
@@ -85,7 +88,7 @@ defmodule MingaAgent.Providers.NativeMCPRegistryTest do
     assert Native.tools(provider) == []
   end
 
-  test "active native providers remove stale MCP contributions when their source unloads", %{
+  test "active native providers stop clients and notify when their MCP source unloads", %{
     tmp_dir: dir
   } do
     assert :ok = ServerRegistry.register_many(@source, [{:ext_tools, command: "ignored"}])
@@ -98,6 +101,8 @@ defmodule MingaAgent.Providers.NativeMCPRegistryTest do
         tools: [],
         config: %AgentConfig{mcp_servers: [], tool_approval: :none},
         mcp_enabled?: true,
+        mcp_transport: FakeTransport,
+        mcp_transport_opts: [tools: [mcp_tool_def()], test_pid: self()],
         skip_api_key_env: true
       )
 
@@ -110,12 +115,26 @@ defmodule MingaAgent.Providers.NativeMCPRegistryTest do
              Native.get_state(provider)
 
     assert Enum.any?(Native.tools(provider), &(&1.name == "list_mcp_tools"))
+    assert {:ok, [_tool]} = GenServer.call(provider, :list_mcp_tools, :infinity)
+    assert_receive {:mcp_transport_started, "ext_tools", transport}, @receive_timeout
 
     assert :ok = ServerRegistry.unregister_source(@source)
     :sys.get_state(provider)
 
+    assert_receive {:mcp_transport_stopped, "ext_tools", ^transport}, @receive_timeout
+    assert_receive {:agent_provider_event, %Event.SystemMessage{message: message, level: :info}}
+    assert message =~ "MCP source extension:native_mcp_registry_test unloaded"
+
     assert {:ok, %{mcp_status: []}} = Native.get_state(provider)
     refute Enum.any?(Native.tools(provider), &(&1.name == "list_mcp_tools"))
+  end
+
+  defp mcp_tool_def do
+    %{
+      "name" => "echo-text",
+      "description" => "MCP tool echo-text",
+      "inputSchema" => %{"type" => "object", "properties" => %{}}
+    }
   end
 
   defp ensure_registry_started do

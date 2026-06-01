@@ -10,6 +10,7 @@ defmodule MingaAgent.MCP.Registry do
   alias MingaAgent.Event
   alias MingaAgent.MCP.Client, as: MCPClient
   alias MingaAgent.MCP.ServerConfig
+  alias MingaAgent.Redaction
   alias ReqLLM.Tool
 
   @enforce_keys [:clients]
@@ -257,13 +258,12 @@ defmodule MingaAgent.MCP.Registry do
     :exit, reason ->
       Minga.Log.warning(
         :agent,
-        "MCP server #{server_name || inspect(pid)} stop failed: #{inspect(reason)}"
+        "MCP server #{server_name || inspect(pid)} stop failed: #{Redaction.format_error(reason)}"
       )
 
       :ok
   end
 
   @spec format_error(term()) :: String.t()
-  defp format_error(reason) when is_binary(reason), do: reason
-  defp format_error(reason), do: inspect(reason)
+  defp format_error(reason), do: Redaction.format_error(reason)
 end
