@@ -222,6 +222,7 @@ defmodule MingaEditor do
     Minga.Events.subscribe(:log_message, events_registry)
     Minga.Events.subscribe(:face_overrides_changed, events_registry)
     Minga.Events.subscribe(:agent_session_stopped, events_registry)
+    Minga.Events.subscribe(:agent_session_restarted, events_registry)
     Minga.Events.subscribe(:background_subagent_started, events_registry)
     Minga.Events.subscribe(:node_connected, events_registry)
     Minga.Events.subscribe(:node_disconnected, events_registry)

@@ -43,6 +43,7 @@ defmodule MingaEditor.Shell.Traditional do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
+  alias MingaAgent.Subagent.Handle
   alias MingaEditor.State.Windows
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
@@ -402,6 +403,100 @@ defmodule MingaEditor.Shell.Traditional do
   def on_agent_event(shell_state, workspace, _session_pid, _event) do
     {shell_state, workspace, []}
   end
+
+  @impl true
+  @spec handle_agent_session_restarted(ShellState.t(), pid(), pid(), term()) ::
+          {ShellState.t(), boolean()}
+  def handle_agent_session_restarted(
+        %ShellState{tab_bar: nil} = shell_state,
+        _old_pid,
+        _new_pid,
+        _reason
+      ) do
+    {shell_state, false}
+  end
+
+  def handle_agent_session_restarted(
+        %ShellState{tab_bar: %TabBar{} = tb} = shell_state,
+        old_pid,
+        new_pid,
+        _reason
+      ) do
+    status = restarted_session_status(new_pid)
+    updated_tb = update_restarted_session_tab_bar(tb, old_pid, new_pid, status)
+    {ShellState.set_tab_bar(shell_state, updated_tb), updated_tb != tb}
+  end
+
+  @spec update_restarted_session_tab_bar(TabBar.t(), pid(), pid(), Tab.agent_status()) ::
+          TabBar.t()
+  defp update_restarted_session_tab_bar(%TabBar{} = tb, old_pid, new_pid, status) do
+    tb
+    |> update_restarted_session_tabs(old_pid, new_pid, status)
+    |> update_restarted_session_workspaces(old_pid, new_pid, status)
+  end
+
+  @spec update_restarted_session_tabs(TabBar.t(), pid(), pid(), Tab.agent_status()) :: TabBar.t()
+  defp update_restarted_session_tabs(%TabBar{} = tb, old_pid, new_pid, status) do
+    Enum.reduce(tb.tabs, tb, fn
+      %Tab{id: id, session: ^old_pid}, acc ->
+        TabBar.update_tab(acc, id, fn tab ->
+          tab
+          |> Tab.refresh_session_pid(old_pid, new_pid)
+          |> maybe_set_tab_agent_status(status)
+        end)
+
+      %Tab{id: id, background_subagent: %Handle{pid: ^old_pid}}, acc ->
+        TabBar.update_tab(acc, id, fn tab ->
+          tab
+          |> Tab.refresh_session_pid(old_pid, new_pid)
+          |> maybe_set_tab_agent_status(status)
+        end)
+
+      %Tab{id: id, background_subagent: %Handle{parent_pid: ^old_pid}}, acc ->
+        TabBar.update_tab(acc, id, fn tab ->
+          tab
+          |> Tab.refresh_session_pid(old_pid, new_pid)
+          |> maybe_set_tab_agent_status(status)
+        end)
+
+      _tab, acc ->
+        acc
+    end)
+  end
+
+  @spec update_restarted_session_workspaces(TabBar.t(), pid(), pid(), Tab.agent_status()) ::
+          TabBar.t()
+  defp update_restarted_session_workspaces(%TabBar{} = tb, old_pid, new_pid, status) do
+    Enum.reduce(tb.workspaces, tb, fn
+      %Workspace{id: id, session: ^old_pid}, acc ->
+        TabBar.update_workspace(acc, id, fn workspace ->
+          workspace
+          |> Workspace.refresh_session_pid(old_pid, new_pid)
+          |> maybe_set_workspace_agent_status(status)
+        end)
+
+      _workspace, acc ->
+        acc
+    end)
+  end
+
+  @spec restarted_session_status(pid()) :: Tab.agent_status()
+  defp restarted_session_status(new_pid) do
+    %{status: status} = MingaAgent.Session.editor_snapshot(new_pid)
+    status
+  catch
+    :exit, _reason -> nil
+  end
+
+  @spec maybe_set_tab_agent_status(Tab.t(), Tab.agent_status()) :: Tab.t()
+  defp maybe_set_tab_agent_status(tab, nil), do: tab
+  defp maybe_set_tab_agent_status(tab, status), do: Tab.set_agent_status(tab, status)
+
+  @spec maybe_set_workspace_agent_status(Workspace.t(), Tab.agent_status()) :: Workspace.t()
+  defp maybe_set_workspace_agent_status(workspace, nil), do: workspace
+
+  defp maybe_set_workspace_agent_status(workspace, status),
+    do: Workspace.set_agent_status(workspace, status)
 
   # -------------------------------------------------------------------
   # Tab query/mutation delegates

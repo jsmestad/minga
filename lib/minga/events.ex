@@ -41,6 +41,7 @@ defmodule Minga.Events do
   | `:log_message`     | `LogMessageEvent`     | `text: String.t(), level: :info \| :warning \| :error` |
   | `:agent_hook`      | `AgentHookEvent`        | `event, phase, tool_name, tool_call_id, tool_pattern` |
   | `:face_overrides_changed` | `FaceOverridesChangedEvent` | `buffer: pid(), overrides: map()` |
+  | `:agent_session_restarted` | `MingaAgent.SessionManager.SessionRestartedEvent` | `session_id, old_pid, new_pid, reason` |
   | `:background_subagent_started` | `MingaAgent.Subagent.Handle` | `session_id: String.t(), pid: pid(), task: String.t()` |
   | `:node_connected` | `Minga.Distribution.Events.NodeConnectedEvent` | `server_name, node, connected_at` |
   | `:node_disconnected` | `Minga.Distribution.Events.NodeDisconnectedEvent` | `server_name, node, reason, disconnected_at` |
@@ -297,6 +298,7 @@ defmodule Minga.Events do
           | :log_message
           | :face_overrides_changed
           | :agent_session_stopped
+          | :agent_session_restarted
           | :agent_hook
           | :background_subagent_started
           | :node_connected
@@ -452,6 +454,8 @@ defmodule Minga.Events do
   @spec broadcast(:power_thermal_state_changed, PowerThermalStateEvent.t()) :: :ok
   @spec broadcast(:face_overrides_changed, FaceOverridesChangedEvent.t()) :: :ok
   @spec broadcast(:agent_session_stopped, MingaAgent.SessionManager.SessionStoppedEvent.t()) ::
+          :ok
+  @spec broadcast(:agent_session_restarted, MingaAgent.SessionManager.SessionRestartedEvent.t()) ::
           :ok
   @spec broadcast(:background_subagent_started, MingaAgent.Subagent.Handle.t()) :: :ok
   @spec broadcast(:node_connected, Minga.Distribution.Events.NodeConnectedEvent.t()) :: :ok

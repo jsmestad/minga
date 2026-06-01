@@ -56,6 +56,19 @@ defmodule MingaAgent.Subagent.Handle do
     end
   end
 
+  @doc "Returns a copy of the handle with a different pid."
+  @spec with_pid(t(), pid()) :: t()
+  def with_pid(%__MODULE__{} = handle, pid) when is_pid(pid) do
+    %{handle | pid: pid}
+  end
+
+  @doc "Returns a copy of the handle with a different parent pid."
+  @spec with_parent_pid(t(), pid() | nil) :: t()
+  def with_parent_pid(%__MODULE__{} = handle, parent_pid)
+      when is_pid(parent_pid) or is_nil(parent_pid) do
+    %{handle | parent_pid: parent_pid}
+  end
+
   @spec truncate(String.t(), pos_integer()) :: String.t()
   defp truncate(text, max_len) do
     if String.length(text) > max_len do

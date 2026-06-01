@@ -223,6 +223,18 @@ defmodule MingaEditor.Handlers.EventDispatcher do
 
   def dispatch(
         state,
+        :agent_session_restarted,
+        %SessionManager.SessionRestartedEvent{} = event,
+        _msg
+      ) do
+    case handle_agent_session_restarted(state, event) do
+      {:ok, state} -> MingaEditor.schedule_render(state, 16)
+      {:stale, state} -> state
+    end
+  end
+
+  def dispatch(
+        state,
         :agent_session_stopped,
         %SessionManager.SessionStoppedEvent{pid: pid, reason: reason},
         _msg
@@ -268,6 +280,69 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   end
 
   def dispatch(state, _event, _payload, _msg), do: state
+
+  @spec handle_agent_session_restarted(
+          EditorState.t(),
+          SessionManager.SessionRestartedEvent.t()
+        ) :: {:ok, EditorState.t()} | {:stale, EditorState.t()}
+  defp handle_agent_session_restarted(state, %SessionManager.SessionRestartedEvent{} = event) do
+    new_pid = event.new_pid
+
+    with {:ok, ^new_pid} <- safe_session_lookup(event.session_id),
+         true <- Commands.BufferManagement.agent_session_restart_owned?(state, event.old_pid),
+         :ok <- subscribe_to_restarted_session(event) do
+      {:ok,
+       Commands.BufferManagement.handle_agent_session_restarted(
+         state,
+         event.session_id,
+         event.old_pid,
+         new_pid,
+         event.reason
+       )}
+    else
+      {:ok, current_pid} ->
+        log_stale_agent_session_restart(event, {:current_pid, current_pid})
+        {:stale, state}
+
+      false ->
+        log_stale_agent_session_restart(event, :unowned_old_pid)
+        {:stale, state}
+
+      {:error, reason} ->
+        log_stale_agent_session_restart(event, reason)
+        {:stale, state}
+
+      :stale ->
+        {:stale, state}
+    end
+  end
+
+  @spec safe_session_lookup(String.t()) :: {:ok, pid()} | {:error, term()}
+  defp safe_session_lookup(session_id) do
+    SessionManager.get_session(session_id)
+  catch
+    :exit, reason -> {:error, {:exit, reason}}
+  end
+
+  @spec subscribe_to_restarted_session(SessionManager.SessionRestartedEvent.t()) :: :ok | :stale
+  defp subscribe_to_restarted_session(%SessionManager.SessionRestartedEvent{} = event) do
+    AgentSession.subscribe(event.new_pid, self())
+    :ok
+  catch
+    :exit, reason ->
+      log_stale_agent_session_restart(event, {:subscribe_failed, reason})
+      :stale
+  end
+
+  @spec log_stale_agent_session_restart(SessionManager.SessionRestartedEvent.t(), term()) :: :ok
+  defp log_stale_agent_session_restart(%SessionManager.SessionRestartedEvent{} = event, reason) do
+    Minga.Log.warning(
+      :agent,
+      "[Agent] Ignored restart for session #{event.session_id} (#{inspect(event.old_pid)} -> #{inspect(event.new_pid)}) after #{inspect(event.reason)}: #{inspect(reason)}"
+    )
+
+    :ok
+  end
 
   # ── Private helpers ──────────────────────────────────────────────────────────
 

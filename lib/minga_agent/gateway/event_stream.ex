@@ -13,6 +13,7 @@ defmodule MingaAgent.Gateway.EventStream do
 
   @topics [
     :agent_session_stopped,
+    :agent_session_restarted,
     :buffer_saved,
     :buffer_changed,
     :log_message
@@ -50,6 +51,15 @@ defmodule MingaAgent.Gateway.EventStream do
   defp encode_event(:agent_session_stopped, payload) do
     %{
       session_id: Map.get(payload, :session_id),
+      reason: inspect(Map.get(payload, :reason))
+    }
+  end
+
+  defp encode_event(:agent_session_restarted, payload) do
+    %{
+      session_id: Map.get(payload, :session_id),
+      old_pid: inspect(Map.get(payload, :old_pid)),
+      new_pid: inspect(Map.get(payload, :new_pid)),
       reason: inspect(Map.get(payload, :reason))
     }
   end

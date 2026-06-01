@@ -28,6 +28,7 @@ defmodule MingaBoard.Shell do
   @behaviour MingaEditor.Shell.TabQueries
 
   alias Minga.RenderModel.UI
+  alias MingaAgent.Session, as: AgentSession
   alias MingaAgent.Subagent.Handle
   alias MingaEditor.DisplayList
   alias MingaEditor.DisplayList.{Cursor, Frame}
@@ -43,6 +44,7 @@ defmodule MingaBoard.Shell do
   alias MingaBoard.Shell.Card
   alias MingaBoard.Shell.SessionLifecycle
   alias MingaBoard.Shell.State, as: BoardState
+  alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.Session.State, as: SessionState
 
   @impl true
@@ -622,6 +624,36 @@ defmodule MingaBoard.Shell do
     end
   end
 
+  @doc "Refreshes a card after SessionManager restarts its agent session."
+  @spec handle_agent_session_restarted(BoardState.t(), pid(), pid(), term()) ::
+          {BoardState.t(), boolean()}
+  def handle_agent_session_restarted(%BoardState{} = shell_state, old_pid, new_pid, reason) do
+    active_session = active_session(shell_state)
+    snapshot_result = safe_agent_snapshot(new_pid)
+
+    case Enum.find(shell_state.cards, fn {_id, card} -> card.session == old_pid end) do
+      {card_id, _card} ->
+        board =
+          BoardState.update_card(
+            shell_state,
+            card_id,
+            &refresh_restarted_card(&1, old_pid, new_pid, snapshot_result)
+          )
+
+        board =
+          if active_session == old_pid do
+            refresh_restarted_agent_cache(board, snapshot_result, new_pid, old_pid, reason)
+          else
+            board
+          end
+
+        {board, true}
+
+      nil ->
+        {shell_state, false}
+    end
+  end
+
   @doc "Marks a card's remote agent connection as disconnected."
   @spec handle_remote_session_disconnected(BoardState.t(), pid()) :: {BoardState.t(), boolean()}
   def handle_remote_session_disconnected(%BoardState{} = shell_state, session_pid) do
@@ -756,6 +788,67 @@ defmodule MingaBoard.Shell do
       nil ->
         shell_state
     end
+  end
+
+  @spec refresh_restarted_card(Card.t(), pid(), pid(), {:ok, map()} | {:error, term()}) ::
+          Card.t()
+  defp refresh_restarted_card(card, old_pid, new_pid, {:ok, snapshot}) do
+    card
+    |> Card.refresh_session_pid(old_pid, new_pid)
+    |> Card.set_status(Card.from_agent_status(snapshot.status))
+  end
+
+  defp refresh_restarted_card(card, old_pid, new_pid, {:error, _reason}) do
+    card
+    |> Card.refresh_session_pid(old_pid, new_pid)
+    |> Card.set_status(:errored)
+  end
+
+  @spec refresh_restarted_agent_cache(
+          BoardState.t(),
+          {:ok, map()} | {:error, term()},
+          pid(),
+          pid(),
+          term()
+        ) :: BoardState.t()
+  defp refresh_restarted_agent_cache(shell_state, {:ok, snapshot}, _new_pid, _old_pid, _reason) do
+    BoardState.set_agent(shell_state, apply_agent_snapshot(shell_state.agent, snapshot))
+  end
+
+  defp refresh_restarted_agent_cache(
+         shell_state,
+         {:error, snapshot_reason},
+         new_pid,
+         old_pid,
+         reason
+       ) do
+    Minga.Log.warning(
+      :agent,
+      "Board: failed to refresh restarted session #{inspect(old_pid)} -> #{inspect(new_pid)} (#{inspect(reason)}): #{inspect(snapshot_reason)}"
+    )
+
+    BoardState.set_agent(
+      shell_state,
+      AgentState.set_error(shell_state.agent, "Agent session unavailable")
+    )
+  end
+
+  @spec safe_agent_snapshot(pid()) :: {:ok, map()} | {:error, term()}
+  defp safe_agent_snapshot(session_pid) do
+    {:ok, AgentSession.editor_snapshot(session_pid)}
+  catch
+    :exit, reason -> {:error, {:exit, reason}}
+  end
+
+  @spec apply_agent_snapshot(MingaEditor.State.Agent.t(), map()) :: MingaEditor.State.Agent.t()
+  defp apply_agent_snapshot(agent, snapshot) do
+    AgentState.apply_session_snapshot(
+      agent,
+      snapshot.status,
+      snapshot.pending_approval,
+      snapshot.error,
+      Map.get(snapshot, :active_tool_name)
+    )
   end
 
   # Zoom out from a card: store the live workspace on the card, restore the grid workspace.
