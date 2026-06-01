@@ -38,7 +38,6 @@ defmodule MingaAgent.Providers.Native do
   alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.ContextArtifact
   alias MingaAgent.CostCalculator
-  alias MingaAgent.Credentials
   alias MingaAgent.Event
   alias MingaAgent.Hooks.CommandRunner
   alias MingaAgent.Hooks.Dispatcher, as: HookDispatcher
@@ -56,6 +55,7 @@ defmodule MingaAgent.Providers.Native do
   alias MingaAgent.ModelCatalog
   alias MingaAgent.ModelLimits
   alias MingaAgent.ProjectView
+  alias MingaAgent.Providers.Native.ReqLLMAdapter
   alias MingaAgent.ToolRouter
   alias MingaAgent.Retry
   alias MingaAgent.Session
@@ -72,8 +72,6 @@ defmodule MingaAgent.Providers.Native do
   alias MingaAgent.Tools.Todo
   alias Minga.Config
   alias ReqLLM.Context
-  alias ReqLLM.StreamResponse
-  alias ReqLLM.ToolCall
 
   # Thinking levels and cycle order (not config-driven; mode-specific constants).
 
@@ -150,7 +148,7 @@ defmodule MingaAgent.Providers.Native do
 
   @typedoc "Function that performs the LLM streaming call."
   @type llm_client :: (String.t(), [ReqLLM.Message.t()], keyword() ->
-                         {:ok, StreamResponse.t()} | {:error, term()})
+                         {:ok, ReqLLM.StreamResponse.t()} | {:error, term()})
 
   @typedoc "Function that executes a matching hook."
   @type hook_runner :: (MingaAgent.Hooks.Hook.t(), PreToolUsePayload.t() -> HookResult.t())
@@ -332,7 +330,7 @@ defmodule MingaAgent.Providers.Native do
     config = disable_hooks_for_read_only(config, read_only?)
     {config, ext_mcp_servers} = merge_extension_components(config, read_only?)
     max_cost = Keyword.get(opts, :max_cost, config.max_cost)
-    llm_client = Keyword.get(opts, :llm_client, &ReqLLM.stream_text/3)
+    llm_client = Keyword.get(opts, :llm_client, ReqLLMAdapter.default_client())
     hook_runner = Keyword.get(opts, :hook_runner, &CommandRunner.run_pre_tool_use/2)
     provider_pid = self()
 
@@ -377,8 +375,8 @@ defmodule MingaAgent.Providers.Native do
     # If found in the file but not in the env, set the env var so ReqLLM
     # picks it up automatically. Tests can disable this to avoid mutating
     # process-wide environment state.
-    unless Keyword.get(opts, :skip_api_key_env, false) or openai_codex_model?(model) do
-      ensure_api_key_in_env(model)
+    unless Keyword.get(opts, :skip_api_key_env, false) or ReqLLMAdapter.openai_codex_model?(model) do
+      ReqLLMAdapter.ensure_api_key_in_env(model)
     end
 
     state = %{
@@ -1551,18 +1549,9 @@ defmodule MingaAgent.Providers.Native do
 
   @spec do_agent_loop(loop_ctx(), Context.t()) :: :ok | {:error, term()}
   defp do_agent_loop(lctx, context) do
-    # Validate model format before making the API call. A bare model name
-    # like "claude-sonnet-4" will fail with :invalid_format deep in LLMDB.
-    # Return early with a clear error instead of letting it fail cryptically.
-    if not String.contains?(lctx.model, ":") and not String.contains?(lctx.model, "@") do
-      message =
-        ~s|Model "#{lctx.model}" is missing a provider prefix. | <>
-          ~s|Expected "provider:model" (e.g., "anthropic:#{lctx.model}"). | <>
-          "Check :agent_model in your config."
-
-      reported_error(lctx.provider_pid, message, :invalid_format)
-    else
-      do_agent_loop_validated(lctx, context)
+    case ReqLLMAdapter.validate_model(lctx.model) do
+      :ok -> do_agent_loop_validated(lctx, context)
+      {:error, message, reason} -> reported_error(lctx.provider_pid, message, reason)
     end
   end
 
@@ -1572,7 +1561,13 @@ defmodule MingaAgent.Providers.Native do
     context = maybe_compact_context(lctx, context)
 
     stream_opts =
-      build_stream_opts(lctx.model, lctx.tools, lctx.thinking_level, lctx.max_tokens, lctx.config)
+      ReqLLMAdapter.stream_opts(
+        lctx.model,
+        lctx.tools,
+        lctx.thinking_level,
+        lctx.max_tokens,
+        lctx.config
+      )
 
     # Emit pre-send token estimate so the context bar updates before the API call
     emit_context_usage(lctx, context)
@@ -1592,7 +1587,9 @@ defmodule MingaAgent.Providers.Native do
 
     result =
       Retry.with_retry(
-        fn -> lctx.llm_client.(lctx.model, context.messages, stream_opts) end,
+        fn ->
+          ReqLLMAdapter.stream(lctx.llm_client, lctx.model, context.messages, stream_opts)
+        end,
         max_retries: lctx.max_retries,
         on_retry: on_retry
       )
@@ -1615,48 +1612,34 @@ defmodule MingaAgent.Providers.Native do
   end
 
   # Processes a stream response and decides whether to continue (tool calls) or finish.
-  @spec process_and_continue(loop_ctx(), Context.t(), StreamResponse.t()) ::
+  @spec process_and_continue(loop_ctx(), Context.t(), ReqLLM.StreamResponse.t()) ::
           :ok | {:error, term()}
   defp process_and_continue(lctx, context, stream_response) do
-    # Track partial text as it streams in. If the stream drops, we still
-    # have what was received so far. Using an Agent (the OTP kind, not the
-    # AI kind) for thread-safe accumulation from the callback closures.
-    {:ok, accumulator} = Agent.start_link(fn -> "" end)
+    callbacks = [
+      on_text: fn text ->
+        send(lctx.provider_pid, {:agent_event, %Event.TextDelta{delta: text}})
+      end,
+      on_thinking: fn text ->
+        send(lctx.provider_pid, {:agent_event, %Event.ThinkingDelta{delta: text}})
+      end,
+      on_tool_call: fn chunk ->
+        send(
+          lctx.provider_pid,
+          {:agent_event,
+           %Event.ToolStart{
+             tool_call_id: chunk.id,
+             name: chunk.name,
+             args: chunk.arguments
+           }}
+        )
+      end
+    ]
 
-    result =
-      StreamResponse.process_stream(stream_response,
-        on_result: fn text ->
-          Agent.update(accumulator, fn acc -> acc <> text end)
-          send(lctx.provider_pid, {:agent_event, %Event.TextDelta{delta: text}})
-        end,
-        on_thinking: fn text ->
-          send(lctx.provider_pid, {:agent_event, %Event.ThinkingDelta{delta: text}})
-        end,
-        on_tool_call: fn chunk ->
-          send(
-            lctx.provider_pid,
-            {:agent_event,
-             %Event.ToolStart{
-               tool_call_id:
-                 Map.get(chunk.metadata, :id, "tool_#{:erlang.unique_integer([:positive])}"),
-               name: chunk.name || "unknown",
-               args: chunk.arguments || %{}
-             }}
-          )
-        end
-      )
-
-    partial_text = Agent.get(accumulator, & &1)
-    Agent.stop(accumulator)
-
-    case result do
-      {:ok, response} ->
-        tool_calls = extract_tool_calls(response)
-        text = extract_text(response)
-        usage = extract_usage(response)
+    case ReqLLMAdapter.process_stream(stream_response, callbacks) do
+      {:ok, %{tool_calls: tool_calls, text: text, usage: usage}} ->
         dispatch_result(lctx, context, tool_calls, text, usage)
 
-      {:error, reason} ->
+      {:error, reason, partial_text} ->
         handle_stream_error(lctx, context, partial_text, reason)
     end
   end
@@ -1716,7 +1699,7 @@ defmodule MingaAgent.Providers.Native do
     # Has tool calls: execute tools and continue the loop
     reqllm_tool_calls =
       Enum.map(tool_calls, fn tc ->
-        ToolCall.new(tc.id, tc.name, JSON.encode!(tc.arguments))
+        ReqLLMAdapter.assistant_tool_call(tc.id, tc.name, tc.arguments)
       end)
 
     assistant_msg = Context.assistant(text, tool_calls: reqllm_tool_calls)
@@ -2822,133 +2805,13 @@ defmodule MingaAgent.Providers.Native do
   end
 
   defp call_llm_sync(llm_client, model, messages, opts, config) do
-    stream_opts =
-      opts
-      |> Keyword.take([:max_tokens])
-      |> maybe_add_base_url(model, config)
-
-    with {:ok, stream_response} <- llm_client.(model, messages, stream_opts),
-         {:ok, response} <- StreamResponse.process_stream(stream_response) do
-      {:ok, ReqLLM.Response.text(response) || ""}
-    end
+    ReqLLMAdapter.call_sync(llm_client, model, messages, opts, config)
   end
 
   @spec summary_client(llm_client(), AgentConfig.t()) :: Compaction.summary_fn()
   defp summary_client(llm_client, config) do
-    fn model, messages, opts ->
-      opts = maybe_add_base_url(opts, model, config)
-
-      with {:ok, stream_response} <- llm_client.(model, messages, opts),
-           {:ok, response} <- StreamResponse.process_stream(stream_response) do
-        {:ok, ReqLLM.Response.text(response) || ""}
-      end
-    end
+    ReqLLMAdapter.summary_client(llm_client, config)
   end
-
-  @spec build_stream_opts(
-          String.t(),
-          [ReqLLM.Tool.t()],
-          String.t(),
-          pos_integer(),
-          AgentConfig.t()
-        ) ::
-          keyword()
-  defp build_stream_opts(model, tools, thinking_level, max_tokens, config) do
-    opts = [tools: tools, max_tokens: max_tokens]
-
-    # Inject custom base URL if configured (for API gateways, load balancers, etc.)
-    opts = maybe_add_base_url(opts, model, config)
-
-    # Enable Anthropic prompt caching when the model is Anthropic
-    opts =
-      if anthropic_model?(model) and prompt_cache_enabled?(config) do
-        Keyword.put(opts, :provider_options, anthropic_prompt_cache: true)
-      else
-        opts
-      end
-
-    # Inject OAuth auth_mode for openai_codex models (ChatGPT subscription)
-    opts =
-      if openai_codex_model?(model) do
-        provider_options =
-          Keyword.get(opts, :provider_options, [])
-          |> Keyword.put(:auth_mode, :oauth)
-          |> Keyword.put(:oauth_file, Credentials.oauth_path())
-          |> Keyword.put(:codex_originator, "minga")
-
-        Keyword.put(opts, :provider_options, provider_options)
-      else
-        opts
-      end
-
-    maybe_add_reasoning_effort(opts, thinking_level)
-  end
-
-  @spec maybe_add_reasoning_effort(keyword(), String.t()) :: keyword()
-  defp maybe_add_reasoning_effort(opts, thinking_level) do
-    case Map.get(@thinking_levels, thinking_level) do
-      effort when effort in [:low, :medium, :high] ->
-        Keyword.put(opts, :reasoning_effort, effort)
-
-      nil ->
-        opts
-    end
-  end
-
-  @spec anthropic_model?(String.t()) :: boolean()
-  defp anthropic_model?(model) do
-    String.starts_with?(model, "anthropic:") or
-      not String.contains?(model, ":")
-  end
-
-  @spec openai_codex_model?(String.t()) :: boolean()
-  defp openai_codex_model?(model), do: String.starts_with?(model, "openai_codex:")
-
-  @spec prompt_cache_enabled?(AgentConfig.t()) :: boolean()
-  defp prompt_cache_enabled?(config), do: config.prompt_cache
-
-  # Resolves the API base URL for the current request. Precedence:
-  #
-  # 1. MINGA_API_BASE_URL captured in AgentConfig.resolve/0 (global override for all providers)
-  # 2. Per-provider endpoint from :agent_api_endpoints map
-  # 3. Global :agent_api_base_url config
-  # 4. No override (use provider default)
-  @spec maybe_add_base_url(keyword(), String.t(), AgentConfig.t()) :: keyword()
-  defp maybe_add_base_url(opts, model, config) do
-    url =
-      non_empty(config.api_base_url_override) ||
-        per_provider_url(model, config) ||
-        non_empty(config.api_base_url)
-
-    if url do
-      Keyword.put(opts, :base_url, url)
-    else
-      opts
-    end
-  end
-
-  @spec per_provider_url(String.t(), AgentConfig.t()) :: String.t() | nil
-  defp per_provider_url(model, config) do
-    provider = strip_provider_prefix_to_provider(model)
-
-    case config.api_endpoints do
-      endpoints when is_map(endpoints) -> non_empty(Map.get(endpoints, provider))
-      _ -> nil
-    end
-  end
-
-  @spec strip_provider_prefix_to_provider(String.t()) :: String.t()
-  defp strip_provider_prefix_to_provider(model) do
-    case String.split(model, ":", parts: 2) do
-      [provider, _name] -> provider
-      [_bare] -> "anthropic"
-    end
-  end
-
-  @spec non_empty(String.t() | nil) :: String.t() | nil
-  defp non_empty(nil), do: nil
-  defp non_empty(""), do: nil
-  defp non_empty(str) when is_binary(str), do: str
 
   @spec refresh_base_tools(state(), ProjectView.t() | nil) :: [ReqLLM.Tool.t()]
   defp refresh_base_tools(%{custom_tools?: true, base_tools: base_tools}, _project_view) do
@@ -3194,40 +3057,6 @@ defmodule MingaAgent.Providers.Native do
     end
   end
 
-  # Sets the provider's API key env var if it's stored in the credentials
-  # file but not yet in the environment. This lets ReqLLM find the key
-  # without us having to thread it through every call.
-  @spec ensure_api_key_in_env(String.t()) :: :ok
-  defp ensure_api_key_in_env(model) do
-    provider = Credentials.provider_from_model(model)
-
-    case Credentials.resolve(provider) do
-      {:ok, key, :file} ->
-        # Key is in the credentials file but not in env; set it
-        case Credentials.env_var_for(provider) do
-          nil -> :ok
-          var_name -> System.put_env(var_name, key)
-        end
-
-        :ok
-
-      {:ok, _key, :env} ->
-        # Already in env, nothing to do
-        :ok
-
-      :error ->
-        # No key anywhere. The provider will fail on the first API call
-        # with a clear error from the API (e.g. "authentication_error").
-        Minga.Log.warning(
-          :agent,
-          "[Agent.Native] No API key found for #{provider}. " <>
-            "Use /auth to configure one, or set #{Credentials.env_var_for(provider) || "the provider's env var"}."
-        )
-
-        :ok
-    end
-  end
-
   @spec config_model_list(AgentConfig.t()) :: [String.t()]
   defp config_model_list(%AgentConfig{models: models}) when is_list(models), do: models
   defp config_model_list(_config), do: []
@@ -3359,28 +3188,6 @@ defmodule MingaAgent.Providers.Native do
     emit_error_and_end(provider_pid, message)
     {:error, {:reported, reason}}
   end
-
-  @spec extract_tool_calls(ReqLLM.Response.t()) :: [map()]
-  defp extract_tool_calls(%{message: %{tool_calls: nil}}), do: []
-
-  defp extract_tool_calls(%{message: %{tool_calls: tool_calls}}) when is_list(tool_calls) do
-    Enum.map(tool_calls, &ToolCall.to_map/1)
-  end
-
-  defp extract_tool_calls(_), do: []
-
-  @spec extract_text(ReqLLM.Response.t()) :: String.t()
-  defp extract_text(%{message: %{content: content}}) when is_list(content) do
-    content
-    |> Enum.filter(fn part -> Map.get(part, :type, :text) == :text end)
-    |> Enum.map_join("", fn part -> Map.get(part, :text, "") end)
-  end
-
-  defp extract_text(_), do: ""
-
-  @spec extract_usage(ReqLLM.Response.t()) :: map() | nil
-  defp extract_usage(%{usage: usage}) when is_map(usage), do: usage
-  defp extract_usage(_), do: nil
 
   @spec normalize_usage(map() | nil, String.t()) :: Event.token_usage() | nil
   defp normalize_usage(nil, _model), do: nil
