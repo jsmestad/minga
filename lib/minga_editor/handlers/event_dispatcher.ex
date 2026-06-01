@@ -206,19 +206,28 @@ defmodule MingaEditor.Handlers.EventDispatcher do
         %Subagent.Handle{} = handle,
         _msg
       ) do
-    AgentSession.subscribe(handle.pid, self())
+    case subscribe_to_session(handle.pid) do
+      :ok ->
+        state = EditorState.ensure_shell_available(state)
 
-    state = EditorState.ensure_shell_available(state)
+        {shell_state, workspace} =
+          EditorState.active_shell_module(state).handle_event(
+            state.shell_state,
+            state.workspace,
+            {:background_subagent_started, handle}
+          )
 
-    {shell_state, workspace} =
-      EditorState.active_shell_module(state).handle_event(
-        state.shell_state,
-        state.workspace,
-        {:background_subagent_started, handle}
-      )
+        state = %{state | shell_state: shell_state, workspace: workspace}
+        MingaEditor.schedule_render(state, 16)
 
-    state = %{state | shell_state: shell_state, workspace: workspace}
-    MingaEditor.schedule_render(state, 16)
+      {:error, reason} ->
+        Minga.Log.warning(
+          :agent,
+          "[Agent] Ignored background sub-agent #{handle.session_id} (#{inspect(handle.pid)}): #{inspect(reason)}"
+        )
+
+        state
+    end
   end
 
   def dispatch(
@@ -326,12 +335,21 @@ defmodule MingaEditor.Handlers.EventDispatcher do
 
   @spec subscribe_to_restarted_session(SessionManager.SessionRestartedEvent.t()) :: :ok | :stale
   defp subscribe_to_restarted_session(%SessionManager.SessionRestartedEvent{} = event) do
-    AgentSession.subscribe(event.new_pid, self())
-    :ok
+    case subscribe_to_session(event.new_pid) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        log_stale_agent_session_restart(event, {:subscribe_failed, reason})
+        :stale
+    end
+  end
+
+  @spec subscribe_to_session(pid()) :: :ok | {:error, term()}
+  defp subscribe_to_session(pid) do
+    AgentSession.subscribe(pid, self())
   catch
-    :exit, reason ->
-      log_stale_agent_session_restart(event, {:subscribe_failed, reason})
-      :stale
+    :exit, reason -> {:error, reason}
   end
 
   @spec log_stale_agent_session_restart(SessionManager.SessionRestartedEvent.t(), term()) :: :ok
