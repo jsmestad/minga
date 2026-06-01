@@ -70,8 +70,11 @@ defmodule Minga.Credo.DependencyDirectionCheck do
     "Minga.Core",
     "Minga.Mode",
     "Minga.RenderModel",
+    "Minga.Diagnostics.Diagnostic",
+    "Minga.Language.Highlight.InjectionRange",
     "Minga.Command.Parser",
     "Minga.Keymap.Bindings",
+    "Minga.Keymap.SharedGroups",
     "Minga.Keymap.KeyParser",
     "Minga.Keymap.NormalPrefixes",
     "Minga.Keymap.Sigil",
@@ -127,7 +130,11 @@ defmodule Minga.Credo.DependencyDirectionCheck do
     # The command modules own execution, while the registry only indexes providers.
     "Minga.Command.Registry" => ["MingaEditor.Commands"],
     # Runtime supervisors assemble the editor process tree at the OTP boundary.
-    "Minga.Runtime.Supervisor" => ["MingaEditor.Supervisor", "MingaEditor.Watchdog"],
+    "Minga.Runtime.Supervisor" => [
+      "MingaEditor.Supervisor",
+      "MingaEditor.Watchdog",
+      "MingaEditor.Frontend.Manager"
+    ],
     # Services.Supervisor starts extension contribution registries and built-in extension surfaces.
     "Minga.Services.Supervisor" => ["MingaEditor.Extension.Sidebar"],
     # SystemObserver displays the editor supervisor tree as process topology data.
@@ -135,7 +142,21 @@ defmodule Minga.Credo.DependencyDirectionCheck do
     # Built-in theme packs register concrete presentation theme modules as data.
     "Minga.Extensions.ThemePacks.Catppuccin" => ["MingaEditor.UI.Theme"],
     "Minga.Extensions.ThemePacks.Doom" => ["MingaEditor.UI.Theme"],
-    "Minga.Extensions.ThemePacks.One" => ["MingaEditor.UI.Theme"]
+    "Minga.Extensions.ThemePacks.One" => ["MingaEditor.UI.Theme"],
+    # Editing operators call the Buffer facade for existing edit operations; Buffer.Process remains separately blocked.
+    "Minga.Editing.Operator" => ["Minga.Buffer"],
+    # Mode exposes recipe labels through the existing recipe registry bridge.
+    "Minga.Mode" => ["Minga.Tool.Recipe.Registry"],
+    # Editing facade preserves existing macro-recorder helpers until that UI state moves behind a lower-level query.
+    "Minga.Editing" => ["MingaEditor.MacroRecorder"],
+    # Application supervisor starts shell registry at the OTP boundary.
+    "Minga.Application" => ["MingaEditor.Shell.Registry"],
+    # Session persistence currently references the editor state snapshot type.
+    "Minga.Session" => ["MingaEditor.State"],
+    # Diagnostics decoration maps severities to presentation gutter faces.
+    "Minga.Diagnostics.Decorations" => ["MingaEditor.UI.Theme.Gutter"],
+    # Buffer state uses typed config option aliases while the option registry remains stateful.
+    "Minga.Buffer.State" => ["Minga.Config.Options"]
     # All pre-existing cross-layer violations from #1368 have been resolved
     # in Wave 6 Track B. Modules were moved to their correct layers:
     # - Devicon → Minga.Language.Devicon
@@ -234,7 +255,10 @@ defmodule Minga.Credo.DependencyDirectionCheck do
        when source_layer != nil and function != :{} do
     if Enum.all?(ref_parts, &is_atom/1) do
       ref_name = Enum.map_join(ref_parts, ".", &Atom.to_string/1)
-      issues = check_agent_ref_violations(ast, issues, source_module, ref_name, meta, issue_meta)
+
+      issues =
+        check_ref_violations(ast, issues, source_layer, source_module, ref_name, meta, issue_meta)
+
       {ast, issues}
     else
       {ast, issues}
@@ -263,7 +287,10 @@ defmodule Minga.Credo.DependencyDirectionCheck do
        when source_layer != nil do
     if Enum.all?(ref_parts, &is_atom/1) do
       ref_name = Enum.map_join(ref_parts, ".", &Atom.to_string/1)
-      issues = check_agent_ref_violations(ast, issues, source_module, ref_name, meta, issue_meta)
+
+      issues =
+        check_ref_violations(ast, issues, source_layer, source_module, ref_name, meta, issue_meta)
+
       {ast, issues}
     else
       {ast, issues}
@@ -376,30 +403,6 @@ defmodule Minga.Credo.DependencyDirectionCheck do
 
   defp direct_alias_refs(list) when is_list(list), do: Enum.flat_map(list, &direct_alias_refs/1)
   defp direct_alias_refs(_), do: []
-
-  defp check_agent_ref_violations(_ast, issues, source_module, ref_name, meta, issue_meta) do
-    if cross_cutting?(ref_name) || not minga_module?(ref_name) do
-      issues
-    else
-      source_agent_level = agent_level_for_module(source_module)
-      target_agent_level = agent_level_for_module(ref_name)
-
-      case agent_level_violation(source_agent_level, target_agent_level, ref_name) do
-        {:violation, message} ->
-          issue =
-            format_issue(issue_meta,
-              message: message,
-              trigger: ref_name,
-              line_no: meta[:line]
-            )
-
-          [issue | issues]
-
-        :ok ->
-          issues
-      end
-    end
-  end
 
   defp check_ref_violations(ast, issues, source_layer, source_module, ref_name, meta, issue_meta) do
     if cross_cutting?(ref_name) || not minga_module?(ref_name) do

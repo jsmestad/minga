@@ -108,6 +108,38 @@ defmodule Minga.Credo.DependencyDirectionCheckTest do
       end)
     end
 
+    test "flags direct remote calls that cross top-level layers" do
+      """
+      defmodule Minga.Buffer.Document do
+        def render(state) do
+          MingaEditor.State.render(state)
+        end
+      end
+      """
+      |> check("lib/minga/buffer/document.ex")
+      |> assert_issue(fn issue ->
+        assert issue.message =~ "Layer 0"
+        assert issue.message =~ "Layer 2"
+        assert issue.trigger == "MingaEditor.State"
+      end)
+    end
+
+    test "flags struct literals that cross top-level layers" do
+      """
+      defmodule Minga.Buffer.Document do
+        def new_state do
+          %MingaEditor.State{}
+        end
+      end
+      """
+      |> check("lib/minga/buffer/document.ex")
+      |> assert_issue(fn issue ->
+        assert issue.message =~ "Layer 0"
+        assert issue.message =~ "Layer 2"
+        assert issue.trigger == "MingaEditor.State"
+      end)
+    end
+
     test "flags Git module depending on Input handler" do
       """
       defmodule Minga.Git.Tracker do
