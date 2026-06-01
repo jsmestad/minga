@@ -57,6 +57,10 @@ defmodule MingaEditor.Frontend do
   @spec gui?(MingaEditor.Frontend.Capabilities.t()) :: boolean()
   defdelegate gui?(caps), to: MingaEditor.Frontend.Capabilities
 
+  @doc "Returns true if the frontend supports semantic render-model opcodes."
+  @spec semantic_ui?(MingaEditor.Frontend.Capabilities.t()) :: boolean()
+  defdelegate semantic_ui?(caps), to: MingaEditor.Frontend.Capabilities
+
   @doc "Returns the default capabilities struct."
   @spec default_capabilities() :: MingaEditor.Frontend.Capabilities.t()
   defdelegate default_capabilities, to: MingaEditor.Frontend.Capabilities, as: :default

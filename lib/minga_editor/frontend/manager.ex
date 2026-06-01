@@ -32,6 +32,7 @@ defmodule MingaEditor.Frontend.Manager do
 
   @typedoc "Renderer backend."
   @type backend :: :tui | :gui
+  @type tui_impl :: :zig | :rust
 
   @typedoc "Options for starting the port manager."
   @type start_opt ::
@@ -337,7 +338,10 @@ defmodule MingaEditor.Frontend.Manager do
   defp dev_fallback_path(:gui), do: find_xcode_build_product("Minga")
 
   defp dev_fallback_path(:tui) do
-    Path.join([File.cwd!(), "zig", "zig-out", "bin", "minga-renderer"])
+    case tui_impl() do
+      :rust -> Path.join([File.cwd!(), "rust", "tui", "target", "release", "minga-renderer-rs"])
+      :zig -> Path.join([File.cwd!(), "zig", "zig-out", "bin", "minga-renderer"])
+    end
   end
 
   # When running from a BEAM release embedded inside a .app bundle,
@@ -405,8 +409,23 @@ defmodule MingaEditor.Frontend.Manager do
   end
 
   @spec renderer_binary_name(backend()) :: String.t()
-  defp renderer_binary_name(:tui), do: "minga-renderer"
+  defp renderer_binary_name(:tui) do
+    case tui_impl() do
+      :rust -> "minga-renderer-rs"
+      :zig -> "minga-renderer"
+    end
+  end
+
   defp renderer_binary_name(:gui), do: "Minga"
+
+  @spec tui_impl() :: tui_impl()
+  defp tui_impl do
+    case System.get_env("MINGA_TUI_IMPL") || Application.get_env(:minga, :tui_impl, "zig") do
+      "rust" -> :rust
+      :rust -> :rust
+      _other -> :zig
+    end
+  end
 
   # Find the Xcode build product in DerivedData.
   # Uses `xcodebuild -showBuildSettings` to get the exact path.

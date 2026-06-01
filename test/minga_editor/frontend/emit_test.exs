@@ -11,9 +11,13 @@ defmodule MingaEditor.Frontend.EmitTest do
   alias MingaEditor.DisplayList
   alias MingaEditor.DisplayList.{Cursor, Frame}
   alias MingaEditor.Layout
+  alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Frontend.Emit
   alias MingaEditor.Frontend.Emit.Context
   alias Minga.Core.Face
+  alias Minga.RenderModel.Window, as: RenderWindow
+  alias Minga.RenderModel.Window.Row, as: RenderRow
+  alias Minga.RenderModel.Window.Span, as: RenderSpan
   alias MingaEditor.Renderer.Caches
   alias MingaEditor.UI.FontRegistry
 
@@ -47,6 +51,47 @@ defmodule MingaEditor.Frontend.EmitTest do
       assert_receive {:"$gen_cast", {:send_commands, commands}}
       assert is_list(commands)
       assert Enum.all?(commands, &is_binary/1)
+    end
+
+    test "semantic TUI path emits semantic window commands instead of cell-grid clear" do
+      frame = build_frame_with_window(base_state(), viewport_top: 0)
+      [window_frame] = frame.windows
+
+      row = %RenderRow{
+        row_id: RenderRow.stable_id(:normal, 0),
+        row_type: :normal,
+        buf_line: 0,
+        text: "semantic",
+        spans: [%RenderSpan{start_col: 0, end_col: 8, fg: 0xBBC2CF, bg: 0x282C34, attrs: 0}]
+      }
+
+      window_model = %RenderWindow{
+        window_id: 1,
+        content_kind: :buffer,
+        rect: {0, 0, 80, 20},
+        rows: [row],
+        cursor_row: 0,
+        cursor_col: 0,
+        cursor_shape: :block
+      }
+
+      frame = %{frame | windows: [%{window_frame | window_model: window_model}]}
+
+      state = %{
+        base_state()
+        | capabilities: %Capabilities{frontend_type: :tui, semantic_ui: true}
+      }
+
+      ctx = Context.from_editor_state(state)
+      Emit.emit(frame, ctx)
+
+      assert_receive {:"$gen_cast", {:send_commands, commands}}
+      refute match?([<<0x12>> | _], commands)
+
+      assert Enum.any?(commands, fn
+               <<0x80, _::binary>> -> true
+               _ -> false
+             end)
     end
   end
 

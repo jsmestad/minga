@@ -33,6 +33,11 @@ defmodule MingaEditor.Frontend.CapabilitiesTest do
       assert Capabilities.proportional_text?(%Capabilities{text_rendering: :proportional})
     end
 
+    test "semantic_ui?/1" do
+      refute Capabilities.semantic_ui?(%Capabilities{})
+      assert Capabilities.semantic_ui?(%Capabilities{semantic_ui: true})
+    end
+
     test "width_oracle/1 returns the safe production oracle" do
       assert %Minga.Core.WidthOracle.Monospace{} =
                Capabilities.width_oracle(%Capabilities{text_rendering: :monospace})
@@ -61,6 +66,16 @@ defmodule MingaEditor.Frontend.CapabilitiesTest do
       assert caps.image_support == :kitty
       assert caps.float_support == :native
       assert caps.text_rendering == :proportional
+      refute caps.semantic_ui
+    end
+
+    test "decodes 7-byte capability payload with semantic UI flag" do
+      binary = <<0, 2, 1, 0, 0, 0, 1>>
+      caps = Capabilities.from_binary(binary)
+      assert caps.frontend_type == :tui
+      assert caps.color_depth == :rgb
+      assert caps.unicode_width == :unicode_15
+      assert caps.semantic_ui
     end
 
     test "returns defaults for invalid binary" do
