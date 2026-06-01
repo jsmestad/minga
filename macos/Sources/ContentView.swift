@@ -472,6 +472,8 @@ struct ContentView: View {
                         )
                     }
                 }
+
+                extensionRightPanels
             }
             .animation(
                 NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
@@ -508,6 +510,9 @@ struct ContentView: View {
                     availableHeight: rightPaneHeight
                 )
             }
+
+            // Extension-registered bottom panels (gui_extension_panel, 0x9D, position 0)
+            extensionBottomPanels
 
             // Native minibuffer (appears above status bar when active)
             if appState.gui.minibufferState.visible {
@@ -631,6 +636,106 @@ struct ContentView: View {
                     encoder: appState.encoder
                 )
             }
+
+            // Extension-registered overlays (positioned per window on the editor surface)
+            extensionOverlayLayer
+        }
+    }
+
+    /// Editor-surface overlays contributed by extensions (gui_extension_overlay, 0x9C).
+    /// Positioned by cell (row, col) relative to the editor surface origin. Multi-pane
+    /// content origins resolve to the surface top-left until per-window pane geometry
+    /// lands; the common single-window case is correct.
+    @ViewBuilder
+    private var extensionOverlayLayer: some View {
+        if !appState.gui.extensionOverlayState.entries.isEmpty {
+            let cw = CGFloat(appState.editorNSView?.cellWidth ?? 8)
+            let ch = CGFloat(appState.editorNSView?.cellHeight ?? 16)
+
+            ForEach(appState.gui.extensionOverlayState.windowIDs, id: \.self) { wid in
+                ExtensionOverlayView(
+                    overlayState: appState.gui.extensionOverlayState,
+                    windowID: wid,
+                    cellWidth: cw,
+                    cellHeight: ch,
+                    contentOrigin: .zero
+                )
+            }
+        }
+    }
+
+    // MARK: - Extension Panels (gui_extension_panel, 0x9D)
+
+    /// One extension panel rendered as a themed card.
+    @ViewBuilder
+    private func extensionPanelCard(_ panel: Wire.ExtensionPanelEntry) -> some View {
+        ExtensionPanelView(panel: panel)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(theme.treeBg)
+    }
+
+    /// Right-docked extension panels (position 1), shown as a sidebar column.
+    @ViewBuilder
+    private var extensionRightPanels: some View {
+        let panels = appState.gui.extensionPanelState.panels(forPosition: 1)
+        if !panels.isEmpty {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(panels) { panel in
+                        extensionPanelCard(panel)
+                        Divider()
+                    }
+                }
+            }
+            .frame(width: 280)
+            .background(theme.treeBg)
+            .overlay(alignment: .leading) {
+                Rectangle()
+                    .fill(theme.treeSeparatorFg.opacity(0.4))
+                    .frame(width: 1)
+            }
+        }
+    }
+
+    /// Bottom-docked extension panels (position 0), shown above the status bar.
+    @ViewBuilder
+    private var extensionBottomPanels: some View {
+        let panels = appState.gui.extensionPanelState.panels(forPosition: 0)
+        if !panels.isEmpty {
+            ScrollView {
+                VStack(spacing: 0) {
+                    ForEach(panels) { panel in
+                        extensionPanelCard(panel)
+                    }
+                }
+            }
+            .frame(maxHeight: rightPaneHeight * 0.4)
+            .background(theme.treeBg)
+            .overlay(alignment: .top) {
+                Rectangle()
+                    .fill(theme.treeSeparatorFg.opacity(0.4))
+                    .frame(height: 1)
+            }
+        }
+    }
+
+    /// Floating extension panels (position 2), centered over the workspace.
+    @ViewBuilder
+    private var extensionFloatPanels: some View {
+        let panels = appState.gui.extensionPanelState.panels(forPosition: 2)
+        if !panels.isEmpty {
+            VStack(spacing: 12) {
+                ForEach(panels) { panel in
+                    extensionPanelCard(panel)
+                        .frame(maxWidth: 500)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(theme.treeSeparatorFg.opacity(0.4))
+                        )
+                        .shadow(radius: 12)
+                }
+            }
         }
     }
 
@@ -692,6 +797,9 @@ struct ContentView: View {
                 cellHeight: ch
             )
         }
+
+        // Extension-registered floating panels (gui_extension_panel, 0x9D, position 2)
+        extensionFloatPanels
 
         // Notification stack (bottom-right, above regular workspace content).
         NotificationCenterView(

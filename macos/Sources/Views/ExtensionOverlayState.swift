@@ -57,4 +57,10 @@ final class ExtensionOverlayState {
     func entries(forWindow windowID: UInt16) -> [OverlayEntry] {
         entries.filter { $0.windowID == windowID }
     }
+
+    /// Distinct window IDs that currently have overlay entries, in first-seen order.
+    var windowIDs: [UInt16] {
+        var seen = Set<UInt16>()
+        return entries.compactMap { seen.insert($0.windowID).inserted ? $0.windowID : nil }
+    }
 }
