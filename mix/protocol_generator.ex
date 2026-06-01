@@ -2,7 +2,7 @@ defmodule Minga.Mix.ProtocolGenerator do
   @moduledoc """
   Generates protocol opcode artifacts from `docs/protocol_schema.toml`.
 
-  The schema is the source of truth. Generated protocol artifacts are written under `.generated/protocol/` for Elixir, `macos/.generated/protocol/` for Swift, and `zig/src/generated/` for Zig. The generated Zig public export block in `zig/src/protocol.zig` is also refreshed from the schema.
+  The schema is the source of truth. Generated protocol artifacts are written under `.generated/protocol/` for Elixir, `macos/.generated/protocol/` for Swift, `zig/src/generated/` for Zig, and `rust/tui/src/generated/` for the Rust TUI. The generated Zig public export block in `zig/src/protocol.zig` is also refreshed from the schema.
   """
 
   @schema_path "docs/protocol_schema.toml"
@@ -11,6 +11,7 @@ defmodule Minga.Mix.ProtocolGenerator do
   @generated_swift_path "macos/.generated/protocol/ProtocolOpcodes.generated.swift"
   @generated_zig_opcodes_path "zig/src/generated/protocol_opcodes.zig"
   @generated_zig_schema_test_path "zig/src/generated/protocol_schema_test.zig"
+  @generated_rust_opcodes_path "rust/tui/src/generated/opcodes.rs"
   @protocol_zig_path "zig/src/protocol.zig"
   @allowed_opcode_categories [
     "input",
@@ -84,7 +85,8 @@ defmodule Minga.Mix.ProtocolGenerator do
       {@generated_elixir_path, elixir_file(schema)},
       {@generated_swift_path, swift_file(schema)},
       {@generated_zig_opcodes_path, zig_opcodes_file(schema)},
-      {@generated_zig_schema_test_path, zig_schema_test_file(schema)}
+      {@generated_zig_schema_test_path, zig_schema_test_file(schema)},
+      {@generated_rust_opcodes_path, rust_opcodes_file(schema)}
     ]
   end
 
@@ -331,6 +333,41 @@ defmodule Minga.Mix.ProtocolGenerator do
 
   @spec zig_gui_action_line(gui_action()) :: String.t()
   defp zig_gui_action_line(%{"name" => name, "value" => value}) do
+    "pub const GUI_ACTION_#{constant_name(name)}: u8 = #{hex(value)};\n"
+  end
+
+  @spec rust_opcodes_file(schema()) :: String.t()
+  defp rust_opcodes_file(schema) do
+    opcodes = Map.fetch!(schema, "opcodes")
+    actions = Map.fetch!(schema, "gui_actions")
+
+    [
+      "// Generated protocol opcode constants.\n",
+      "//\n",
+      "// Generated from `docs/protocol_schema.toml` by `mix protocol.gen`. Do not edit by hand.\n\n",
+      rust_opcodes(opcodes),
+      "// GUI action sub-opcodes.\n\n",
+      Enum.map(actions, &rust_gui_action_line/1)
+    ]
+    |> IO.iodata_to_binary()
+  end
+
+  @spec rust_opcodes([opcode()]) :: iodata()
+  defp rust_opcodes(opcodes) do
+    opcodes
+    |> group_by_category()
+    |> Enum.map(fn {category, entries} ->
+      ["// ", category_title(category), "\n\n", Enum.map(entries, &rust_opcode_line/1), "\n"]
+    end)
+  end
+
+  @spec rust_opcode_line(opcode()) :: String.t()
+  defp rust_opcode_line(%{"name" => name, "value" => value}) do
+    "pub const OP_#{constant_name(name)}: u8 = #{hex(value)};\n"
+  end
+
+  @spec rust_gui_action_line(gui_action()) :: String.t()
+  defp rust_gui_action_line(%{"name" => name, "value" => value}) do
     "pub const GUI_ACTION_#{constant_name(name)}: u8 = #{hex(value)};\n"
   end
 

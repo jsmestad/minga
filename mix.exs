@@ -2,6 +2,7 @@ Code.require_file("mix/protocol_generator.ex", __DIR__)
 Code.require_file("mix/compilers/protocol_gen.ex", __DIR__)
 Code.require_file("mix/compilers/minga_bundled_extensions.ex", __DIR__)
 Code.require_file("mix/tasks/protocol.gen.ex", __DIR__)
+Code.require_file("mix/compilers/minga_rust_tui.ex", __DIR__)
 
 defmodule Minga.MixProject do
   use Mix.Project
@@ -18,7 +19,9 @@ defmodule Minga.MixProject do
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       aliases: aliases(),
-      compilers: [:protocol_gen, :minga_bundled_extensions] ++ Mix.compilers() ++ [:minga_zig],
+      compilers:
+        [:protocol_gen, :minga_bundled_extensions] ++
+          Mix.compilers() ++ [:minga_zig, :minga_rust_tui],
       dialyzer: [
         plt_add_deps: :apps_direct,
         # Keep the PLT lean for dev/agent loops: include only direct runtime deps by default, then add transitive apps that Minga source references directly.
