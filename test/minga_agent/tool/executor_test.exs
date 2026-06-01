@@ -4,6 +4,7 @@ defmodule MingaAgent.Tool.ExecutorTest do
   alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.Hooks.Hook
   alias MingaAgent.Hooks.Result
+  alias MingaAgent.Tool.BundledSources
   alias MingaAgent.Tool.Context
   alias MingaAgent.Tool.Executor
   alias MingaAgent.Tool.Registry
@@ -46,8 +47,16 @@ defmodule MingaAgent.Tool.ExecutorTest do
   end
 
   defp source_for_test_tool(name) do
-    if name in MingaAgent.Tools.builtin_names(), do: :builtin, else: :config
+    source_for_test_tool(
+      name,
+      name in MingaAgent.Tools.builtin_names(),
+      name in BundledSources.reserved_names()
+    )
   end
+
+  defp source_for_test_tool(_name, true, _bundled?), do: :builtin
+  defp source_for_test_tool(_name, false, true), do: BundledSources.read_only_source()
+  defp source_for_test_tool(_name, false, false), do: :config
 
   describe "execute/3" do
     test "executes auto-approved tool and returns result", %{table: table} do

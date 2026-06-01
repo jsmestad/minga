@@ -141,6 +141,19 @@ defmodule Minga.Credo.DependencyDirectionCheckTest do
       end)
     end
 
+    test "flags Agent Level 1 runtime services depending on bundled tool packs" do
+      """
+      defmodule MingaAgent.Tool.Registry do
+        alias MingaAgent.ToolPacks.ReadOnly
+      end
+      """
+      |> check("lib/minga_agent/tool/registry.ex")
+      |> assert_issue(fn issue ->
+        assert issue.message =~ "Agent Level 1"
+        assert issue.message =~ "Agent Level 2"
+      end)
+    end
+
     test "uses declared acronym module names for source classification" do
       """
       defmodule MingaAgent.MCP.Tool do
