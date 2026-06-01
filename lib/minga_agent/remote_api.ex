@@ -8,10 +8,12 @@ defmodule MingaAgent.RemoteAPI do
   """
 
   alias MingaAgent.EventLog
+  alias MingaAgent.OAuth.Flow, as: OAuthFlow
   alias MingaAgent.RemoteAPI.AttachResult
   alias MingaAgent.RemoteAPI.SessionInfo
   alias MingaAgent.Session
   alias MingaAgent.SessionManager
+  alias MingaAgent.SessionStore
 
   @typedoc "Remote attachment role."
   @type role :: :driver | :viewer
@@ -35,8 +37,11 @@ defmodule MingaAgent.RemoteAPI do
   @spec start_or_get_for_workdir(String.t(), keyword()) ::
           {:ok, session_info()} | {:error, term()}
   def start_or_get_for_workdir(workdir, opts \\ []) when is_binary(workdir) do
-    session_id = SessionManager.stable_session_id_for_workdir(workdir)
-    opts = Keyword.put(opts, :session_id, session_id)
+    normalized_workdir = normalize_workdir(workdir)
+    session_id = SessionManager.stable_session_id_for_workdir(normalized_workdir)
+
+    opts =
+      opts |> Keyword.put(:session_id, session_id) |> Keyword.put(:workdir, normalized_workdir)
 
     with {:ok, ^session_id, pid} <- SessionManager.start_or_get_session(session_id, opts),
          {:ok, token} <- SessionManager.session_token(session_id) do
@@ -48,12 +53,7 @@ defmodule MingaAgent.RemoteAPI do
   @spec list_sessions() :: [session_info()]
   def list_sessions do
     SessionManager.list_sessions()
-    |> Enum.flat_map(fn {session_id, pid, _metadata} ->
-      case SessionManager.session_token(session_id) do
-        {:ok, token} -> [session_info(session_id, pid, token)]
-        {:error, _reason} -> []
-      end
-    end)
+    |> Enum.flat_map(&session_info_if_live/1)
   end
 
   @doc "Attaches a client process to a session as driver or viewer."
@@ -64,24 +64,59 @@ defmodule MingaAgent.RemoteAPI do
     role = Keyword.get(opts, :role, :viewer)
     last_seen_event_id = Keyword.get(opts, :last_seen_event_id, 0)
 
-    with :ok <- authorize(session_id, token),
+    with :ok <- validate_attach_role(role),
+         :ok <- authorize(session_id, token),
          {:ok, pid} <- SessionManager.get_session(session_id),
          :ok <- Session.subscribe(pid, subscriber_pid, role: role) do
-      case event_catchup(session_id, last_seen_event_id) do
-        {:ok, events, latest_event_id} ->
-          info = session_info(session_id, pid, token)
-          role = Session.subscriber_role(pid, subscriber_pid) || :viewer
+      attach_after_subscribe(pid, session_id, token, subscriber_pid, last_seen_event_id)
+    end
+  end
 
-          {:ok,
-           AttachResult.new(info, role, Session.messages(pid), Session.editor_snapshot(pid),
-             events: events,
-             latest_event_id: latest_event_id
-           )}
+  @spec validate_attach_role(term()) :: :ok | {:error, :invalid_role}
+  defp validate_attach_role(role) when role in [:driver, :viewer], do: :ok
+  defp validate_attach_role(_role), do: {:error, :invalid_role}
 
-        {:error, _reason} = error ->
-          GenServer.call(pid, {:unsubscribe, subscriber_pid})
-          error
-      end
+  @doc "Detaches a client process from a session without stopping the session."
+  @spec detach(String.t(), String.t(), pid()) :: :ok | {:error, term()}
+  def detach(session_id, token, client_pid)
+      when is_binary(session_id) and is_binary(token) and is_pid(client_pid) do
+    with :ok <- authorize(session_id, token),
+         {:ok, pid} <- SessionManager.get_session(session_id) do
+      Session.unsubscribe(pid, client_pid)
+    end
+  end
+
+  @doc "Begins a server-side manual OAuth flow through the broker."
+  @spec begin_oauth(String.t(), String.t(), pid()) ::
+          {:ok, String.t(), String.t()} | {:error, term()}
+  def begin_oauth(session_id, token, client_pid)
+      when is_binary(session_id) and is_binary(token) and is_pid(client_pid) do
+    with :ok <- authorize_driver(session_id, token, client_pid) do
+      OAuthFlow.begin_manual(session_id: session_id, client_pid: client_pid)
+    end
+  end
+
+  @doc "Completes a server-side manual OAuth flow through the broker."
+  @spec complete_oauth(String.t(), String.t(), pid(), String.t(), String.t()) ::
+          {:ok, :openai} | {:error, term()}
+  def complete_oauth(session_id, token, client_pid, ref, pasted)
+      when is_binary(session_id) and is_binary(token) and is_pid(client_pid) and is_binary(ref) and
+             is_binary(pasted) do
+    with :ok <- authorize_driver(session_id, token, client_pid) do
+      complete_authorized_oauth(session_id, client_pid, ref, pasted)
+    end
+  end
+
+  @doc "Adds a system message to a session through the broker."
+  @spec add_system_message(String.t(), String.t(), pid(), String.t(), :info | :error) ::
+          :ok | {:error, term()}
+  def add_system_message(session_id, token, client_pid, message, level \\ :info)
+      when is_binary(session_id) and is_binary(token) and is_pid(client_pid) and
+             is_binary(message) and
+             level in [:info, :error] do
+    with :ok <- authorize_driver(session_id, token, client_pid),
+         {:ok, pid} <- SessionManager.get_session(session_id) do
+      Session.add_system_message(pid, message, level)
     end
   end
 
@@ -127,6 +162,32 @@ defmodule MingaAgent.RemoteAPI do
     end
   end
 
+  @doc "Stops the existing stable session for a workdir through the broker."
+  @spec stop_workdir_session(String.t()) :: :ok | {:error, term()}
+  def stop_workdir_session(workdir) when is_binary(workdir) do
+    session_id = workdir |> normalize_workdir() |> SessionManager.stable_session_id_for_workdir()
+
+    case SessionManager.session_token(session_id) do
+      {:ok, token} -> stop_session(session_id, token)
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc "Loads persisted session data through the broker for an ended session."
+  @spec session_data(String.t()) :: {:ok, SessionStore.session_data()} | {:error, term()}
+  def session_data(session_id) when is_binary(session_id) do
+    SessionStore.load(session_id)
+  end
+
+  @doc "Loads persisted session data through the broker for a live token-authorized session."
+  @spec session_data(String.t(), String.t()) ::
+          {:ok, SessionStore.session_data()} | {:error, term()}
+  def session_data(session_id, token) when is_binary(session_id) and is_binary(token) do
+    with :ok <- authorize(session_id, token) do
+      SessionStore.load(session_id)
+    end
+  end
+
   @doc "Authorizes a broker call with the per-session token."
   @spec authorize(String.t(), String.t()) :: :ok | {:error, :unauthorized | :not_found}
   def authorize(session_id, token) when is_binary(session_id) and is_binary(token) do
@@ -134,6 +195,53 @@ defmodule MingaAgent.RemoteAPI do
       {:ok, ^token} -> :ok
       {:ok, _other} -> {:error, :unauthorized}
       {:error, :not_found} -> {:error, :not_found}
+    end
+  end
+
+  @spec attach_after_subscribe(pid(), String.t(), String.t(), pid(), non_neg_integer()) ::
+          {:ok, attach_result()} | {:error, term()}
+  defp attach_after_subscribe(pid, session_id, token, subscriber_pid, last_seen_event_id) do
+    case event_catchup(session_id, last_seen_event_id) do
+      {:ok, events, latest_event_id} ->
+        info = session_info(session_id, pid, token)
+        role = Session.subscriber_role(pid, subscriber_pid) || :viewer
+
+        {:ok,
+         AttachResult.new(info, role, Session.messages(pid), Session.editor_snapshot(pid),
+           events: events,
+           latest_event_id: latest_event_id
+         )}
+
+      {:error, _reason} = error ->
+        Session.unsubscribe(pid, subscriber_pid)
+        error
+    end
+  end
+
+  @spec authorize_driver(String.t(), String.t(), pid()) ::
+          :ok | {:error, :unauthorized | :not_found | :not_driver}
+  defp authorize_driver(session_id, token, client_pid) do
+    with :ok <- authorize(session_id, token),
+         {:ok, pid} <- SessionManager.get_session(session_id),
+         :driver <- Session.subscriber_role(pid, client_pid) do
+      :ok
+    else
+      nil -> {:error, :not_driver}
+      :viewer -> {:error, :not_driver}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  @spec complete_authorized_oauth(String.t(), pid(), String.t(), String.t()) ::
+          {:ok, :openai} | {:error, String.t()}
+  defp complete_authorized_oauth(session_id, client_pid, ref, pasted) do
+    case OAuthFlow.complete_manual(ref, pasted, session_id: session_id, client_pid: client_pid) do
+      {:ok, :openai} ->
+        refresh_all_session_credentials()
+        {:ok, :openai}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -168,6 +276,25 @@ defmodule MingaAgent.RemoteAPI do
   defp safe_latest_event_id(events, latest_event_id) do
     delivered_latest_id = events |> List.last() |> Map.fetch!(:id)
     min(delivered_latest_id, latest_event_id)
+  end
+
+  @spec normalize_workdir(String.t()) :: String.t()
+  defp normalize_workdir(workdir) when is_binary(workdir), do: Path.expand(workdir)
+
+  @spec session_info_if_live({String.t(), pid(), term()}) :: [session_info()]
+  defp session_info_if_live({session_id, pid, _metadata}) do
+    case SessionManager.session_token(session_id) do
+      {:ok, token} -> [session_info(session_id, pid, token)]
+      {:error, _reason} -> []
+    end
+  catch
+    :exit, _reason -> []
+  end
+
+  @spec refresh_all_session_credentials() :: :ok
+  defp refresh_all_session_credentials do
+    SessionManager.list_sessions()
+    |> Enum.each(fn {_session_id, pid, _metadata} -> Session.refresh_credentials(pid) end)
   end
 
   @spec session_info(String.t(), pid(), String.t()) :: session_info()

@@ -74,6 +74,7 @@ defmodule MingaAgent.Session do
   @type state :: %{
           session_id: String.t(),
           remote_token: String.t() | nil,
+          workdir: String.t() | nil,
           event_log_server: GenServer.server(),
           provider: pid() | nil,
           provider_module: module(),
@@ -87,6 +88,7 @@ defmodule MingaAgent.Session do
           driver: pid() | nil,
           idle_gc_timeout_ms: non_neg_integer(),
           idle_gc_timer: {timer_ref :: reference(), token :: reference()} | nil,
+          idle_gc_token_fn: (-> reference()),
           total_usage: Event.token_usage(),
           error_message: String.t() | nil,
           pending_thinking_level: String.t() | nil,
@@ -297,13 +299,13 @@ defmodule MingaAgent.Session do
   end
 
   @doc "Subscribes the calling process to session events."
-  @spec subscribe(GenServer.server()) :: :ok
+  @spec subscribe(GenServer.server()) :: :ok | {:error, :invalid_role}
   def subscribe(session) do
     subscribe(session, self())
   end
 
   @doc "Subscribes the given process to session events."
-  @spec subscribe(GenServer.server(), pid(), keyword()) :: :ok
+  @spec subscribe(GenServer.server(), pid(), keyword()) :: :ok | {:error, :invalid_role}
   def subscribe(session, pid, opts \\ []) when is_pid(pid) do
     GenServer.call(session, {:subscribe, pid, opts})
   end
@@ -624,6 +626,7 @@ defmodule MingaAgent.Session do
 
   @impl GenServer
   @dialyzer {:no_contracts, init: 1}
+  @dialyzer {:no_opaque, init: 1}
   @spec init(keyword()) :: {:ok, state()}
   def init(opts) do
     provider_module = resolve_provider_module(opts)
@@ -650,6 +653,7 @@ defmodule MingaAgent.Session do
     state = %{
       session_id: session_id,
       remote_token: Keyword.get(opts, :remote_token),
+      workdir: Keyword.get(opts, :workdir),
       event_log_server: Keyword.get(opts, :event_log_server, EventLog),
       provider: nil,
       provider_module: provider_module,
@@ -665,6 +669,7 @@ defmodule MingaAgent.Session do
       driver: nil,
       idle_gc_timeout_ms: Keyword.get_lazy(opts, :idle_gc_timeout_ms, &idle_gc_timeout_ms/0),
       idle_gc_timer: nil,
+      idle_gc_token_fn: Keyword.get(opts, :idle_gc_token_fn, &make_ref/0),
       total_usage: TurnUsage.new(),
       error_message: nil,
       pending_thinking_level: initial_thinking_level,
@@ -1030,7 +1035,8 @@ defmodule MingaAgent.Session do
       turn_count: count_user_turns(state.messages),
       first_prompt: first_prompt,
       cost: state.total_usage.cost,
-      status: state.status
+      status: state.status,
+      workdir: state.workdir
     }
 
     {:reply, meta, state}
@@ -1064,10 +1070,17 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call({:subscribe, pid, opts}, _from, state) do
-    Process.monitor(pid)
     role = Keyword.get(opts, :role, default_subscriber_role(state))
-    state = state |> cancel_idle_gc_timer() |> put_subscriber(pid, role)
-    {:reply, :ok, state}
+
+    case valid_subscriber_role?(role) do
+      true ->
+        Process.monitor(pid)
+        state = state |> cancel_idle_gc_timer() |> put_subscriber(pid, role)
+        {:reply, :ok, state}
+
+      false ->
+        {:reply, {:error, :invalid_role}, state}
+    end
   end
 
   def handle_call({:subscriber_role, pid}, _from, state) do
@@ -2014,6 +2027,9 @@ defmodule MingaAgent.Session do
   defp default_subscriber_role(%{driver: nil}), do: :driver
   defp default_subscriber_role(_state), do: :viewer
 
+  @spec valid_subscriber_role?(term()) :: boolean()
+  defp valid_subscriber_role?(role), do: role in [:driver, :viewer]
+
   @spec put_subscriber(state(), pid(), attachment_role()) :: state()
   defp put_subscriber(state, pid, :driver) do
     state = %{state | subscribers: MapSet.put(state.subscribers, pid)}
@@ -2054,6 +2070,10 @@ defmodule MingaAgent.Session do
       | driver: pid,
         subscriber_roles: Map.put(state.subscriber_roles, pid, :driver)
     }
+  end
+
+  defp set_driver(%{driver: pid} = state, pid) do
+    %{state | subscriber_roles: Map.put(state.subscriber_roles, pid, :driver)}
   end
 
   defp set_driver(state, pid) do
@@ -2114,7 +2134,7 @@ defmodule MingaAgent.Session do
           non_neg_integer()
         ) :: map()
   defp schedule_idle_gc(state, true, nil, timeout_ms) when timeout_ms > 0 do
-    token = make_ref()
+    token = state.idle_gc_token_fn.()
     timer_ref = Process.send_after(self(), {:idle_gc_timeout, token}, timeout_ms)
     %{state | idle_gc_timer: {timer_ref, token}}
   end
@@ -2169,12 +2189,7 @@ defmodule MingaAgent.Session do
               record_interrupted_work(state, events)
 
             {:error, reason} ->
-              Minga.Log.warning(
-                :agent,
-                "[Session] mark_interrupted_work failed for #{state.session_id}: #{inspect(reason)}"
-              )
-
-              :ok
+              log_interrupted_work_failure(state.session_id, reason)
           end
         after
           MingaAgent.EventLog.Store.close(db)
@@ -2184,13 +2199,16 @@ defmodule MingaAgent.Session do
         :ok
 
       {:error, reason} ->
-        Minga.Log.warning(
-          :agent,
-          "[Session] mark_interrupted_work failed for #{state.session_id}: #{inspect(reason)}"
-        )
-
-        :ok
+        log_interrupted_work_failure(state.session_id, reason)
     end
+  end
+
+  @spec log_interrupted_work_failure(String.t(), term()) :: :ok
+  defp log_interrupted_work_failure(session_id, reason) do
+    Minga.Log.warning(
+      :agent,
+      "[Session] mark_interrupted_work failed for #{session_id}: #{inspect(reason)}"
+    )
   end
 
   @spec all_event_log_events(EventLog.Store.db(), String.t(), non_neg_integer(), [
@@ -2558,6 +2576,7 @@ defmodule MingaAgent.Session do
     Or sign in with a ChatGPT subscription (OpenAI accounts only):
 
       /login                    Sign in via browser, no key needed
+      /login --manual           Sign in by pasting a browser redirect
 
     Ollama is detected automatically if it's running locally.
     Run /auth to see status for all providers.\
@@ -2574,6 +2593,7 @@ defmodule MingaAgent.Session do
 
       /auth anthropic <key>     add an API key (most common)
       /login                    ChatGPT subscription (OpenAI only)
+      /login --manual           ChatGPT subscription on a headless server
 
     Run /auth to see all providers and options.\
     """

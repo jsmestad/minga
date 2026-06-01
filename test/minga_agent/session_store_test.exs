@@ -168,6 +168,17 @@ defmodule MingaAgent.SessionStoreTest do
       assert loaded.memory =~ "Use concise answers"
     end
 
+    test "writes session directory and files with private permissions", %{tmp_dir: dir} do
+      data = Map.put(sample_data("private-session"), :remote_token, "remote-token")
+      assert :ok = SessionStore.save(data, dir)
+
+      sessions_dir = SessionStore.sessions_dir(dir)
+      session_path = Path.join(sessions_dir, "private-session.json")
+
+      assert private_mode?(File.stat!(sessions_dir).mode, 0o077)
+      assert private_mode?(File.stat!(session_path).mode, 0o077)
+    end
+
     test "returns error for nonexistent session" do
       assert {:error, _} = SessionStore.load("nonexistent-id")
     end
@@ -330,5 +341,10 @@ defmodule MingaAgent.SessionStoreTest do
       assert pruned == 0
       assert {:ok, _} = SessionStore.load("recent-session")
     end
+  end
+
+  @spec private_mode?(non_neg_integer(), non_neg_integer()) :: boolean()
+  defp private_mode?(mode, mask) do
+    Bitwise.band(mode, mask) == 0
   end
 end

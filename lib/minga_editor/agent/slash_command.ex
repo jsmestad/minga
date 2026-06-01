@@ -16,6 +16,7 @@ defmodule MingaEditor.Agent.SlashCommand do
   alias MingaAgent.SessionExport
   alias MingaAgent.Skills
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.Remote.SessionClient
   alias Minga.Config
   alias MingaEditor.Commands.Agent, as: AgentCommands
   alias MingaEditor.PickerUI
@@ -103,7 +104,8 @@ defmodule MingaEditor.Agent.SlashCommand do
     %Command{name: "switch", description: "Switch to a branch: /switch <branch_number>"},
     %Command{
       name: "login",
-      description: "Sign in with ChatGPT (OpenAI) via browser"
+      description:
+        "Sign in with ChatGPT (OpenAI): /login, /login --manual, /login --complete <ref> <value>"
     }
   ]
 
@@ -299,6 +301,38 @@ defmodule MingaEditor.Agent.SlashCommand do
   @spec slash_command?(String.t()) :: boolean()
   def slash_command?("/" <> _), do: true
   def slash_command?(_), do: false
+
+  @doc "Returns true when a slash command may contain secrets and must not enter prompt history."
+  @spec sensitive_command?(String.t()) :: boolean()
+  def sensitive_command?("/" <> rest) do
+    {cmd, args} = parse_command(rest)
+    sensitive_parsed_command?(cmd, args)
+  end
+
+  def sensitive_command?(_text), do: false
+
+  @spec sensitive_parsed_command?(String.t(), String.t()) :: boolean()
+  defp sensitive_parsed_command?("login", args) do
+    String.contains?(String.downcase(args), "--complete")
+  end
+
+  defp sensitive_parsed_command?("auth", args) do
+    sensitive_auth_args?(args)
+  end
+
+  defp sensitive_parsed_command?(_cmd, _args), do: false
+
+  @spec sensitive_auth_args?(String.t()) :: boolean()
+  defp sensitive_auth_args?(args) do
+    case String.split(String.trim(args), " ", parts: 3, trim: true) do
+      ["revoke"] -> false
+      ["revoke", _provider] -> false
+      ["revoke", _provider, _extra] -> true
+      [_provider] -> false
+      [_provider, _key | _rest] -> true
+      [] -> false
+    end
+  end
 
   # ── Command dispatch ────────────────────────────────────────────────────────
 
@@ -706,16 +740,35 @@ defmodule MingaEditor.Agent.SlashCommand do
 
   @spec do_login(state(), String.t()) :: state()
   defp do_login(state, args) do
-    provider = String.trim(args)
+    args
+    |> login_args()
+    |> do_login_args(state)
+  end
 
-    if provider == "" or provider == "openai" do
-      start_oauth_flow(state)
-    else
-      emit_system_message(
-        state,
-        "Only OpenAI is supported for /login. Other providers use /auth <provider> <key>."
-      )
-    end
+  @spec login_args(String.t()) :: [String.t()]
+  defp login_args(args) do
+    args
+    |> String.trim()
+    |> String.split(" ", parts: 4, trim: true)
+  end
+
+  @spec do_login_args([String.t()], state()) :: state()
+  defp do_login_args([], state), do: start_oauth_flow(state)
+  defp do_login_args(["openai"], state), do: start_oauth_flow(state)
+  defp do_login_args(["--manual"], state), do: start_manual_oauth_flow(state)
+  defp do_login_args(["openai", "--manual"], state), do: start_manual_oauth_flow(state)
+
+  defp do_login_args(["--complete", ref, pasted], state),
+    do: complete_manual_oauth_flow(state, ref, pasted)
+
+  defp do_login_args(["openai", "--complete", ref, pasted], state),
+    do: complete_manual_oauth_flow(state, ref, pasted)
+
+  defp do_login_args(_args, state) do
+    emit_system_message(
+      state,
+      "Usage: /login, /login --manual, or /login --complete <ref> <redirect-url-or-code>. Only OpenAI is supported."
+    )
   end
 
   @spec start_oauth_flow(state()) :: state()
@@ -732,10 +785,10 @@ defmodule MingaEditor.Agent.SlashCommand do
           Session.refresh_credentials(session)
           Session.add_system_message(session, "ChatGPT subscription connected.")
 
-        {:browser_failed, url} ->
+        {:manual_required, url, ref} ->
           Session.add_system_message(
             session,
-            "Could not open browser. Open this URL to sign in:\n#{url}"
+            manual_login_message(url, ref)
           )
 
         {:error, reason} ->
@@ -744,6 +797,107 @@ defmodule MingaEditor.Agent.SlashCommand do
     end)
 
     state
+  end
+
+  @spec start_manual_oauth_flow(state()) :: state()
+  defp start_manual_oauth_flow(state) do
+    state = MingaEditor.State.set_status(state, "Starting manual ChatGPT sign-in...")
+    session = AgentAccess.session(state)
+    client_pid = self()
+
+    Task.Supervisor.start_child(Minga.Eval.TaskSupervisor, fn ->
+      case begin_manual_oauth_for_session(session, client_pid) do
+        {:ok, url, ref} ->
+          deliver_oauth_system_message(session, client_pid, manual_login_message(url, ref), :info)
+
+        {:error, reason} ->
+          deliver_oauth_system_message(session, client_pid, "Login failed: #{reason}", :error)
+      end
+    end)
+
+    state
+  end
+
+  @spec complete_manual_oauth_flow(state(), String.t(), String.t()) :: state()
+  defp complete_manual_oauth_flow(state, ref, pasted) do
+    state = MingaEditor.State.set_status(state, "Completing manual ChatGPT sign-in...")
+    session = AgentAccess.session(state)
+    client_pid = self()
+
+    Task.Supervisor.start_child(Minga.Eval.TaskSupervisor, fn ->
+      case complete_manual_oauth_for_session(session, client_pid, ref, pasted) do
+        {:ok, :openai} ->
+          deliver_oauth_system_message(
+            session,
+            client_pid,
+            "ChatGPT subscription connected.",
+            :info
+          )
+
+        {:error, reason} ->
+          deliver_oauth_system_message(session, client_pid, "Login failed: #{reason}", :error)
+      end
+    end)
+
+    state
+  end
+
+  @spec begin_manual_oauth_for_session(pid() | nil, pid()) ::
+          {:ok, String.t(), String.t()} | {:error, term()}
+  defp begin_manual_oauth_for_session(session, client_pid)
+       when is_pid(session) and node(session) != node() do
+    case SessionClient.begin_oauth(session, client_pid) do
+      {:error, reason} -> {:error, "Remote OAuth flow failed to start: #{inspect(reason)}"}
+      result -> result
+    end
+  end
+
+  defp begin_manual_oauth_for_session(_session, _client_pid),
+    do: MingaAgent.OAuth.Flow.begin_manual()
+
+  @spec complete_manual_oauth_for_session(pid() | nil, pid(), String.t(), String.t()) ::
+          {:ok, :openai} | {:error, term()}
+  defp complete_manual_oauth_for_session(session, client_pid, ref, pasted)
+       when is_pid(session) and node(session) != node() do
+    case SessionClient.complete_oauth(session, ref, pasted, client_pid) do
+      {:error, reason} -> {:error, "Remote OAuth flow failed to complete: #{inspect(reason)}"}
+      result -> result
+    end
+  end
+
+  defp complete_manual_oauth_for_session(session, _client_pid, ref, pasted) do
+    case MingaAgent.OAuth.Flow.complete_manual(ref, pasted) do
+      {:ok, :openai} ->
+        refresh_local_session_credentials(session)
+        {:ok, :openai}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @spec deliver_oauth_system_message(pid() | nil, pid(), String.t(), :info | :error) :: :ok
+  defp deliver_oauth_system_message(session, client_pid, message, level)
+       when is_pid(session) and node(session) != node() do
+    _ = SessionClient.add_system_message(session, message, level, client_pid)
+    :ok
+  end
+
+  defp deliver_oauth_system_message(session, _client_pid, message, level) when is_pid(session) do
+    Session.add_system_message(session, message, level)
+  end
+
+  defp deliver_oauth_system_message(_session, _client_pid, _message, _level), do: :ok
+
+  @spec refresh_local_session_credentials(pid() | nil) :: :ok
+  defp refresh_local_session_credentials(session) when is_pid(session),
+    do: Session.refresh_credentials(session)
+
+  defp refresh_local_session_credentials(_session), do: :ok
+
+  @spec manual_login_message(String.t(), String.t()) :: String.t()
+  defp manual_login_message(url, ref) do
+    "Open this URL to sign in:\n#{url}\n\nAfter approving, paste the redirect back with:\n/login --complete #{ref} <redirect-url-or-code>"
   end
 
   @spec do_instructions(state()) :: state()

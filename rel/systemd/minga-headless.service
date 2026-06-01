@@ -10,8 +10,8 @@ WorkingDirectory=%h
 Restart=on-failure
 RestartSec=5
 Environment=MIX_ENV=prod
-# Set a stable cookie shared only with trusted clients.
-Environment=MINGA_COOKIE=replace-with-a-long-random-cookie
+# Set a stable cookie shared only with trusted clients. This placeholder is intentionally invalid so copied templates fail until you replace it.
+Environment=MINGA_COOKIE=__CHANGE_ME__
 # Optional provider credentials live on the server, not on attaching clients.
 # Environment=ANTHROPIC_API_KEY=...
 # Environment=OPENAI_API_KEY=...

@@ -192,6 +192,18 @@ defmodule MingaEditor.State.Workspace do
 
   def set_remote_connection_status(%__MODULE__{} = workspace, _status), do: workspace
 
+  @doc "Sets queued remote catch-up events waiting for the workspace to become active."
+  @spec set_pending_catchup_events(t(), [MingaAgent.EventLog.EventRecord.t()]) :: t()
+  def set_pending_catchup_events(%__MODULE__{} = workspace, events) when is_list(events) do
+    %{workspace | pending_catchup_events: events}
+  end
+
+  @doc "Clears queued remote catch-up events after they have been replayed."
+  @spec clear_pending_catchup_events(t()) :: t()
+  def clear_pending_catchup_events(%__MODULE__{} = workspace) do
+    set_pending_catchup_events(workspace, [])
+  end
+
   @doc "Clears durable remote metadata. Use only when the workspace no longer represents a remote session."
   @spec clear_remote_session(t()) :: t()
   def clear_remote_session(%__MODULE__{} = workspace) do

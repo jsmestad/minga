@@ -105,32 +105,39 @@ defmodule MingaAgent.SessionTest do
 
     @doc false
     @spec release_start(GenServer.server()) :: :ok
-    def release_start(pid), do: GenServer.cast(pid, :release_start)
+    def release_start(pid), do: GenServer.call(pid, :release_start)
 
     @doc false
     @spec release_end(GenServer.server()) :: :ok
-    def release_end(pid), do: GenServer.cast(pid, :release_end)
+    def release_end(pid), do: GenServer.call(pid, :release_end)
 
     @impl GenServer
     def init(opts) do
       subscriber = Keyword.fetch!(opts, :subscriber)
-      {:ok, %{subscriber: subscriber, pending_prompt: nil, started?: false}}
+      test_pid = Keyword.get(opts, :test_pid)
+      {:ok, %{subscriber: subscriber, test_pid: test_pid, pending_prompt: nil, started?: false}}
     end
 
     @impl GenServer
     def handle_cast({:prompt, text}, state) do
+      notify_test(state.test_pid, {:deferred_provider_prompt_received, self(), text})
       {:noreply, %{state | pending_prompt: text}}
     end
 
-    def handle_cast(:release_start, %{pending_prompt: text, started?: false} = state)
+    def handle_cast(:abort, state), do: {:noreply, state}
+    def handle_cast(:new_session, state), do: {:noreply, state}
+
+    @impl GenServer
+    def handle_call(:release_start, _from, %{pending_prompt: text, started?: false} = state)
         when is_binary(text) do
       send(state.subscriber, {:agent_provider_event, %Event.AgentStart{}})
-      {:noreply, %{state | started?: true}}
+      :thinking = Session.status(state.subscriber)
+      {:reply, :ok, %{state | started?: true}}
     end
 
-    def handle_cast(:release_start, state), do: {:noreply, state}
+    def handle_call(:release_start, _from, state), do: {:reply, :ok, state}
 
-    def handle_cast(:release_end, %{started?: true} = state) do
+    def handle_call(:release_end, _from, %{started?: true} = state) do
       usage = %MingaAgent.TurnUsage{
         input: 10,
         output: 5,
@@ -140,12 +147,15 @@ defmodule MingaAgent.SessionTest do
       }
 
       send(state.subscriber, {:agent_provider_event, %Event.AgentEnd{usage: usage}})
-      {:noreply, state}
+      :idle = Session.status(state.subscriber)
+      {:reply, :ok, state}
     end
 
-    def handle_cast(:release_end, state), do: {:noreply, state}
-    def handle_cast(:abort, state), do: {:noreply, state}
-    def handle_cast(:new_session, state), do: {:noreply, state}
+    def handle_call(:release_end, _from, state), do: {:reply, :ok, state}
+
+    @spec notify_test(pid() | nil, term()) :: :ok
+    defp notify_test(nil, _message), do: :ok
+    defp notify_test(pid, message) when is_pid(pid), do: send(pid, message)
   end
 
   defmodule MockProvider do
@@ -331,6 +341,18 @@ defmodule MingaAgent.SessionTest do
     :ok
   end
 
+  @spec idle_gc_token_fn([reference()]) :: (-> reference())
+  defp idle_gc_token_fn(tokens) do
+    token_source = start_supervised!({Agent, fn -> tokens end})
+
+    fn ->
+      Agent.get_and_update(token_source, fn
+        [token | rest] -> {token, rest}
+        [] -> raise "idle_gc_token_fn called more times than expected"
+      end)
+    end
+  end
+
   defp start_subscribed_session(provider \\ MockProvider, provider_opts \\ []) do
     {:ok, session} = Session.start_link(provider: provider, provider_opts: provider_opts)
     Session.subscribe(session)
@@ -514,33 +536,14 @@ defmodule MingaAgent.SessionTest do
     end
 
     test "idle detached sessions are reclaimed after the configured timeout" do
-      {:ok, session} =
-        Session.start_link(provider: MockProvider, provider_opts: [], idle_gc_timeout_ms: 1)
-
-      client = idle_process()
-
-      on_exit(fn -> Process.exit(client, :kill) end)
-
-      assert :ok = Session.subscribe(session, client)
-
-      ref = Process.monitor(session)
-      assert :ok = Session.unsubscribe(session, client)
-      assert_receive {:DOWN, ^ref, :process, ^session, :normal}, @event_timeout
-    end
-
-    test "idle detached sessions with persist?: false exit normally without writing", %{
-      tmp_dir: dir
-    } do
-      bad_store_dir = Path.join(dir, "blocked-store")
-      File.write!(bad_store_dir, "not a directory")
+      idle_gc_token = make_ref()
 
       {:ok, session} =
         Session.start_link(
           provider: MockProvider,
           provider_opts: [],
-          persist?: false,
-          session_store_dir: bad_store_dir,
-          idle_gc_timeout_ms: 1
+          idle_gc_timeout_ms: 60_000,
+          idle_gc_token_fn: fn -> idle_gc_token end
         )
 
       client = idle_process()
@@ -551,7 +554,38 @@ defmodule MingaAgent.SessionTest do
 
       ref = Process.monitor(session)
       assert :ok = Session.unsubscribe(session, client)
+      send(session, {:idle_gc_timeout, idle_gc_token})
       assert_receive {:DOWN, ^ref, :process, ^session, :normal}, @event_timeout
+    end
+
+    test "idle detached sessions with persist?: false exit normally without writing", %{
+      tmp_dir: dir
+    } do
+      bad_store_dir = Path.join(dir, "blocked-store")
+      File.write!(bad_store_dir, "not a directory")
+      idle_gc_token = make_ref()
+
+      {:ok, session} =
+        Session.start_link(
+          provider: MockProvider,
+          provider_opts: [],
+          persist?: false,
+          session_store_dir: bad_store_dir,
+          idle_gc_timeout_ms: 60_000,
+          idle_gc_token_fn: fn -> idle_gc_token end
+        )
+
+      client = idle_process()
+
+      on_exit(fn -> Process.exit(client, :kill) end)
+
+      assert :ok = Session.subscribe(session, client)
+
+      ref = Process.monitor(session)
+      assert :ok = Session.unsubscribe(session, client)
+      send(session, {:idle_gc_timeout, idle_gc_token})
+      assert_receive {:DOWN, ^ref, :process, ^session, :normal}, @event_timeout
+      assert File.read!(bad_store_dir) == "not a directory"
     end
 
     test "sending a prompt while the idle timer is pending keeps the session alive", %{
@@ -559,12 +593,15 @@ defmodule MingaAgent.SessionTest do
     } do
       session_store_dir = Path.join(dir, "idle-race")
 
+      idle_gc_token = make_ref()
+
       {:ok, session} =
         Session.start_link(
           provider: DeferredMockProvider,
-          provider_opts: [],
+          provider_opts: [test_pid: self()],
           session_store_dir: session_store_dir,
-          idle_gc_timeout_ms: 60_000
+          idle_gc_timeout_ms: 60_000,
+          idle_gc_token_fn: fn -> idle_gc_token end
         )
 
       client = idle_process()
@@ -576,55 +613,55 @@ defmodule MingaAgent.SessionTest do
 
       assert :ok = Session.subscribe(session, client)
       assert :ok = Session.unsubscribe(session, client)
-      {_timer_ref, token} = :sys.get_state(session).idle_gc_timer
       ref = Process.monitor(session)
 
       assert :ok = Session.send_prompt(session, "keep working")
-      :sys.get_state(Session.get_provider(session))
-      send(session, {:idle_gc_timeout, token})
-      :sys.get_state(session)
+      provider = Session.get_provider(session)
 
+      assert_receive {:deferred_provider_prompt_received, ^provider, "keep working"},
+                     @event_timeout
+
+      send(session, {:idle_gc_timeout, idle_gc_token})
       assert Session.status(session) == :idle
-      assert Process.alive?(session)
+      refute_receive {:DOWN, ^ref, :process, ^session, :normal}, 50
 
-      DeferredMockProvider.release_start(Session.get_provider(session))
-      :sys.get_state(session)
+      assert :ok = DeferredMockProvider.release_start(provider)
       assert Session.status(session) == :thinking
 
-      DeferredMockProvider.release_end(Session.get_provider(session))
-      :sys.get_state(session)
-
+      assert :ok = DeferredMockProvider.release_end(provider)
       assert Session.status(session) == :idle
       refute_receive {:DOWN, ^ref, :process, ^session, :normal}, 50
     end
 
-    test "active plan-mode turns reschedule idle GC after finishing", %{
-      tmp_dir: dir
-    } do
-      session_store_dir = Path.join(dir, "plan-race")
+    test "active plan-mode turns reschedule idle GC after finishing" do
+      initial_token = make_ref()
+      finished_token = make_ref()
 
       {:ok, session} =
         Session.start_link(
           provider: Minga.Test.StubProvider,
           provider_opts: [],
-          session_store_dir: session_store_dir,
-          idle_gc_timeout_ms: 1
+          persist?: false,
+          idle_gc_timeout_ms: 60_000,
+          idle_gc_token_fn: idle_gc_token_fn([initial_token, finished_token])
         )
 
       on_exit(fn -> Process.exit(session, :kill) end)
 
+      ref = Process.monitor(session)
+
       assert :ok = Session.enter_plan(session)
-      send(session, {:agent_provider_event, %Event.AgentStart{}})
-      :sys.get_state(session)
+      send_provider_event(session, %Event.AgentStart{})
 
-      {_timer_ref, _token} = :sys.get_state(session).idle_gc_timer
-      _ref = Process.monitor(session)
+      send(session, {:idle_gc_timeout, initial_token})
+      assert Session.status(session) == :plan
+      refute_receive {:DOWN, ^ref, :process, ^session, :normal}, 50
 
-      send(session, {:agent_provider_event, %Event.AgentEnd{usage: nil}})
-      :sys.get_state(session)
+      send_provider_event(session, %Event.AgentEnd{usage: nil})
 
       assert Session.status(session) == :plan
-      assert :sys.get_state(session).idle_gc_timer != nil
+      send(session, {:idle_gc_timeout, finished_token})
+      assert_receive {:DOWN, ^ref, :process, ^session, :normal}, @event_timeout
     end
 
     test "active detached sessions are not reclaimed" do

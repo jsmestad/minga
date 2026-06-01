@@ -17,7 +17,7 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
     def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
 
     @impl MingaAgent.Provider
-    def send_prompt(pid, text), do: GenServer.cast(pid, {:prompt, text})
+    def send_prompt(pid, text), do: GenServer.call(pid, {:prompt, text})
 
     @impl MingaAgent.Provider
     def abort(pid), do: GenServer.cast(pid, :abort)
@@ -41,13 +41,14 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
     end
 
     @impl true
-    def handle_cast({:prompt, text}, state) do
+    def handle_call({:prompt, text}, _from, state) do
       send(state.subscriber, {:agent_provider_event, %Event.AgentStart{}})
       send(state.subscriber, {:agent_provider_event, %Event.TextDelta{delta: text}})
       notify_prompt_observer(state.prompt_observer, text)
-      {:noreply, state}
+      {:reply, :ok, state}
     end
 
+    @impl true
     def handle_cast(:abort, state), do: {:noreply, state}
     def handle_cast(:new_session, state), do: {:noreply, state}
 
@@ -156,6 +157,44 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
     tool_end = Enum.find(events, &(&1.event_type == :tool_call_finished))
     assert tool_end.payload["tool_call_id"] == "tool-1"
     :ok = Store.close(db)
+  end
+
+  test "event log recursively redacts secrets and process identifiers", %{tmp_dir: tmp_dir} do
+    log_name = unique_name("redaction-log")
+
+    log_pid =
+      start_supervised!(
+        {EventLog, name: log_name, db_dir: tmp_dir, retention_sweep?: false, health_check: :none}
+      )
+
+    EventLog.record(
+      "redaction-session",
+      :system_message,
+      %{
+        remote_token: "remote-secret",
+        nested: %{
+          access_token: "access-secret",
+          refresh_token: "refresh-secret",
+          authorization: "Bearer secret",
+          owner_pid: self(),
+          owner_ref: make_ref()
+        }
+      },
+      log_name
+    )
+
+    :sys.get_state(log_pid)
+
+    {:ok, db} = EventLog.open_read_connection(db_dir: tmp_dir)
+    {:ok, [event]} = EventLog.events_after(db, "redaction-session", 0, 10)
+    :ok = Store.close(db)
+
+    assert event.payload["remote_token"] == "[REDACTED]"
+    assert event.payload["nested"]["access_token"] == "[REDACTED]"
+    assert event.payload["nested"]["refresh_token"] == "[REDACTED]"
+    assert event.payload["nested"]["authorization"] == "[REDACTED]"
+    assert event.payload["nested"]["owner_pid"] == "[PID]"
+    assert event.payload["nested"]["owner_ref"] == "[REFERENCE]"
   end
 
   test "subscriber disconnects are durably recorded", %{tmp_dir: tmp_dir} do

@@ -39,6 +39,56 @@ defmodule MingaAgent.RemoteAPITest do
     assert {:error, :not_driver} = RemoteAPI.send_prompt(session_id, token, viewer, "not allowed")
   end
 
+  test "attach rejects invalid roles without crashing the session" do
+    assert {:ok, %{session_id: session_id, pid: pid, token: token}} = RemoteAPI.start_session([])
+    on_exit(fn -> SessionManager.stop_session(session_id) end)
+
+    client = idle_process()
+    on_exit(fn -> Process.exit(client, :kill) end)
+
+    assert {:error, :invalid_role} = RemoteAPI.attach(session_id, token, client, role: :admin)
+    assert {:ok, ^pid} = SessionManager.get_session(session_id)
+    assert %{id: ^session_id} = Session.metadata(pid)
+    assert {:error, :invalid_role} = Session.subscribe(pid, client, role: :admin)
+    assert %{id: ^session_id} = Session.metadata(pid)
+  end
+
+  test "detach removes the subscriber without stopping the session" do
+    assert {:ok, %{session_id: session_id, token: token}} = RemoteAPI.start_session([])
+    on_exit(fn -> SessionManager.stop_session(session_id) end)
+
+    client = idle_process()
+    on_exit(fn -> Process.exit(client, :kill) end)
+
+    assert {:ok, %{role: :driver}} = RemoteAPI.attach(session_id, token, client, role: :driver)
+    assert :ok = RemoteAPI.detach(session_id, token, client)
+    assert {:error, :not_driver} = RemoteAPI.send_prompt(session_id, token, client, "not allowed")
+    assert {:ok, _pid} = SessionManager.get_session(session_id)
+  end
+
+  test "broker starts OAuth flows only for the attached driver" do
+    assert {:ok, %{session_id: session_id, token: token}} = RemoteAPI.start_session([])
+    on_exit(fn -> SessionManager.stop_session(session_id) end)
+
+    driver = idle_process()
+    viewer = idle_process()
+    on_exit(fn -> Process.exit(driver, :kill) end)
+    on_exit(fn -> Process.exit(viewer, :kill) end)
+
+    assert {:ok, %{role: :driver}} = RemoteAPI.attach(session_id, token, driver, role: :driver)
+    assert {:ok, %{role: :viewer}} = RemoteAPI.attach(session_id, token, viewer, role: :viewer)
+    assert {:error, :not_driver} = RemoteAPI.begin_oauth(session_id, token, viewer)
+
+    assert {:ok, url, ref} = RemoteAPI.begin_oauth(session_id, token, driver)
+    assert is_binary(url)
+    assert is_binary(ref)
+
+    assert {:error, message} =
+             RemoteAPI.complete_oauth(session_id, token, driver, "missing-ref", "code")
+
+    assert message =~ "Unknown OAuth flow"
+  end
+
   test "attach returns cursor catch-up events" do
     session_id = "remote-api-catchup-#{System.unique_integer([:positive])}"
     assert {:ok, ^session_id, pid} = SessionManager.start_session(session_id: session_id)
@@ -57,7 +107,7 @@ defmodule MingaAgent.RemoteAPITest do
     assert {:ok, %{events: catchup, latest_event_id: attach_latest}} =
              RemoteAPI.attach(session_id, token, driver, role: :driver, last_seen_event_id: 0)
 
-    assert Enum.any?(catchup, &(&1.event_type == :system_message))
+    assert Enum.any?(catchup, &(&1.event_type in [:system_message, :message_changed]))
 
     assert {:ok, %{events: reattach_events, latest_event_id: reattach_latest}} =
              RemoteAPI.attach(session_id, token, driver,
@@ -78,16 +128,32 @@ defmodule MingaAgent.RemoteAPITest do
     assert {:error, :not_found} = SessionManager.get_session(session_id)
   end
 
-  test "start_or_get_for_workdir reuses the deterministic session" do
-    workdir = Path.join(System.tmp_dir!(), "remote-api-workdir")
+  test "start_or_get_for_workdir reuses the deterministic normalized session" do
+    parent = Path.join(System.tmp_dir!(), "remote-api-workdir")
+    workdir = Path.join(parent, "app")
+    equivalent_workdir = Path.join([parent, "app", "..", "app"])
 
-    assert {:ok, %{session_id: session_id, pid: pid}} =
-             RemoteAPI.start_or_get_for_workdir(workdir)
+    assert {:ok, %{session_id: session_id, pid: pid, metadata: metadata}} =
+             RemoteAPI.start_or_get_for_workdir(equivalent_workdir)
 
     on_exit(fn -> SessionManager.stop_session(session_id) end)
 
+    assert metadata.workdir == Path.expand(workdir)
+
     assert {:ok, %{session_id: ^session_id, pid: ^pid}} =
              RemoteAPI.start_or_get_for_workdir(workdir)
+  end
+
+  test "stop_workdir_session stops the normalized workdir session" do
+    parent = Path.join(System.tmp_dir!(), "remote-api-stop-workdir")
+    workdir = Path.join(parent, "app")
+    equivalent_workdir = Path.join([parent, "app", "..", "app"])
+
+    assert {:ok, %{session_id: session_id}} =
+             RemoteAPI.start_or_get_for_workdir(equivalent_workdir)
+
+    assert :ok = RemoteAPI.stop_workdir_session(workdir)
+    assert {:error, :not_found} = SessionManager.get_session(session_id)
   end
 
   @spec wait_for_events(String.t(), non_neg_integer(), pos_integer(), non_neg_integer()) :: [

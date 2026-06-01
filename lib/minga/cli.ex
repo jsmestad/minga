@@ -17,10 +17,16 @@ defmodule Minga.CLI do
 
   alias Burrito.Util.Args
   alias Minga.Distribution.Cookie
+  alias Minga.Remote.ControlEndpoint
 
   @typedoc "Parsed CLI result."
   @type parsed ::
           {:open, file :: String.t() | nil, flags()}
+          | {:attach, url :: String.t(), flags()}
+          | {:sessions, url :: String.t(), flags()}
+          | {:detach, flags()}
+          | {:kill_session, url :: String.t(), flags()}
+          | {:login, flags()}
           | {:error, String.t()}
 
   @typedoc "Startup view mode requested by CLI flags."
@@ -37,7 +43,6 @@ defmodule Minga.CLI do
           safe_mode: boolean(),
           node_name: String.t() | nil,
           short_name: boolean(),
-          cookie: String.t() | nil,
           cookie_file: String.t() | nil,
           gateway_port: pos_integer() | nil,
           gateway_host: String.t() | nil
@@ -53,7 +58,6 @@ defmodule Minga.CLI do
     safe_mode: false,
     node_name: nil,
     short_name: false,
-    cookie: nil,
     cookie_file: nil,
     gateway_port: nil,
     gateway_host: nil
@@ -71,6 +75,54 @@ defmodule Minga.CLI do
         with :ok <- maybe_start_debug_log(flags),
              :ok <- maybe_start_distribution(flags) do
           launch(flags, file)
+        else
+          {:error, message} -> abort_startup(message)
+        end
+
+      {:attach, url, flags} ->
+        store_startup_flags(flags, nil)
+
+        with :ok <- maybe_start_debug_log(flags),
+             :ok <- maybe_start_remote_distribution(flags),
+             {:ok, _result} <- Minga.Remote.CLI.attach(url) do
+          launch(flags, nil)
+          finish_remote_attach()
+        else
+          {:error, message} -> abort_startup(message)
+        end
+
+      {:sessions, url, flags} ->
+        with :ok <- maybe_start_debug_log(flags),
+             :ok <- maybe_start_terminal_distribution(flags),
+             :ok <- Minga.Remote.CLI.sessions(url) do
+          System.stop(0)
+        else
+          {:error, message} -> abort_startup(message)
+        end
+
+      {:detach, flags} ->
+        with :ok <- maybe_start_debug_log(flags),
+             :ok <- maybe_start_terminal_distribution(flags),
+             :ok <- Minga.Remote.CLI.detach() do
+          System.stop(0)
+        else
+          {:error, message} -> abort_startup(message)
+        end
+
+      {:kill_session, url, flags} ->
+        with :ok <- maybe_start_debug_log(flags),
+             :ok <- maybe_start_terminal_distribution(flags),
+             :ok <- Minga.Remote.CLI.kill_session(url) do
+          System.stop(0)
+        else
+          {:error, message} -> abort_startup(message)
+        end
+
+      {:login, flags} ->
+        with :ok <- maybe_start_debug_log(flags),
+             :ok <- MingaAgent.OAuth.ManualCLI.run() do
+          System.stop(0)
+          :ok
         else
           {:error, message} -> abort_startup(message)
         end
@@ -113,6 +165,49 @@ defmodule Minga.CLI do
   def safe_args?(args) do
     Enum.member?(args, "--safe") or Enum.member?(args, "-Q")
   end
+
+  @doc "Returns true when args request a terminal-only remote command."
+  @spec terminal_command?([String.t()]) :: boolean()
+  def terminal_command?(args) do
+    args
+    |> first_command_token()
+    |> terminal_command_token?()
+  end
+
+  @doc "Returns true when args request a terminal-only remote command after parsing flags."
+  @spec terminal_command_args?([String.t()]) :: boolean()
+  def terminal_command_args?(args) do
+    terminal_command?(args)
+  end
+
+  @spec first_command_token([String.t()]) :: String.t() | nil
+  defp first_command_token([]), do: nil
+
+  defp first_command_token([flag, _value | rest])
+       when flag in [
+              "--config",
+              "--debug-log",
+              "-D",
+              "--name",
+              "--sname",
+              "--cookie-file",
+              "--host",
+              "--port"
+            ],
+       do: first_command_token(rest)
+
+  defp first_command_token([flag | rest])
+       when flag in ["--editor", "--no-context", "--headless", "--minimal", "--safe", "-Q"],
+       do: first_command_token(rest)
+
+  defp first_command_token([token | _rest]), do: token
+
+  @spec terminal_command_token?(String.t() | nil) :: boolean()
+  defp terminal_command_token?("sessions"), do: true
+  defp terminal_command_token?("detach"), do: true
+  defp terminal_command_token?("kill-session"), do: true
+  defp terminal_command_token?("login"), do: true
+  defp terminal_command_token?(_token), do: false
 
   @doc """
   Returns the output for info-only flags (`--version`/`-v`, `--help`/`-h`).
@@ -201,6 +296,42 @@ defmodule Minga.CLI do
   @spec parse_args([String.t()], String.t() | nil, flags()) :: parsed()
   defp parse_args([], file, flags), do: {:open, file, flags}
 
+  defp parse_args(["attach", url | rest], nil, flags) when is_binary(url) do
+    parse_remote_subcommand(rest, {:attach, url, flags})
+  end
+
+  defp parse_args(["attach" | _rest], _file, _flags) do
+    {:error, "attach requires an ssh://host/path URL\n\n#{usage()}"}
+  end
+
+  defp parse_args(["sessions", url | rest], nil, flags) when is_binary(url) do
+    parse_remote_subcommand(rest, {:sessions, url, flags})
+  end
+
+  defp parse_args(["sessions" | _rest], _file, _flags) do
+    {:error, "sessions requires an ssh://host URL\n\n#{usage()}"}
+  end
+
+  defp parse_args(["detach" | rest], nil, flags) do
+    parse_remote_subcommand(rest, {:detach, flags})
+  end
+
+  defp parse_args(["kill-session", url | rest], nil, flags) when is_binary(url) do
+    parse_remote_subcommand(rest, {:kill_session, url, flags})
+  end
+
+  defp parse_args(["kill-session" | _rest], _file, _flags) do
+    {:error, "kill-session requires an ssh://host/path URL\n\n#{usage()}"}
+  end
+
+  defp parse_args(["login", "--manual" | rest], nil, flags) do
+    parse_remote_subcommand(rest, {:login, flags})
+  end
+
+  defp parse_args(["login" | _rest], _file, _flags) do
+    {:error, "login currently requires --manual outside the editor\n\n#{usage()}"}
+  end
+
   defp parse_args(["--help" | _], _file, _flags), do: {:error, usage()}
   defp parse_args(["-h" | _], _file, _flags), do: {:error, usage()}
   defp parse_args(["--version" | _], _file, _flags), do: {:error, "minga #{Minga.version()}"}
@@ -242,17 +373,9 @@ defmodule Minga.CLI do
     {:error, "--name requires a node name argument\n\n#{usage()}"}
   end
 
-  defp parse_args(["--cookie", <<"--", _::binary>> | _], _file, _flags) do
-    {:error, "--cookie requires a cookie argument, not a flag\n\n#{usage()}"}
-  end
-
-  defp parse_args(["--cookie", cookie | rest], file, flags)
-       when is_binary(cookie) and cookie != "" do
-    parse_args(rest, file, %{flags | cookie: cookie})
-  end
-
-  defp parse_args(["--cookie"], _file, _flags) do
-    {:error, "--cookie requires a cookie argument\n\n#{usage()}"}
+  defp parse_args(["--cookie" | _rest], _file, _flags) do
+    {:error,
+     "--cookie is unsafe because command-line arguments can leak through shell history and process listings. Use --cookie-file <path> or MINGA_COOKIE instead.\n\n#{usage()}"}
   end
 
   defp parse_args(["--cookie-file", <<"--", _::binary>> | _], _file, _flags) do
@@ -366,6 +489,12 @@ defmodule Minga.CLI do
     parse_args(rest, file_path, flags)
   end
 
+  @spec parse_remote_subcommand([String.t()], parsed()) :: parsed()
+  defp parse_remote_subcommand([], action), do: action
+
+  defp parse_remote_subcommand([flag | _rest], _action),
+    do: {:error, "unexpected argument for remote subcommand: #{flag}\n\n#{usage()}"}
+
   # ── Launch helpers ──────────────────────────────────────────────────────────
 
   @spec launch(flags(), String.t() | nil) :: :ok
@@ -381,8 +510,14 @@ defmodule Minga.CLI do
   end
 
   defp launch(%{headless: false}, file) do
-    log_startup(file)
-    open_startup_target(file)
+    case publish_local_control_endpoint() do
+      :ok ->
+        log_startup(file)
+        open_startup_target(file)
+
+      {:error, message} ->
+        abort_startup(message)
+    end
   end
 
   @spec log_startup(String.t() | nil) :: :ok
@@ -471,7 +606,30 @@ defmodule Minga.CLI do
     end
   end
 
-  @spec ensure_distribution_started(:server | :client, flags()) :: :ok | {:error, String.t()}
+  @spec maybe_start_remote_distribution(flags()) :: :ok | {:error, String.t()}
+  defp maybe_start_remote_distribution(flags) do
+    case ensure_distribution_started(:client, flags) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        {:error, "Failed to start Erlang distribution for remote attach: #{reason}"}
+    end
+  end
+
+  @spec maybe_start_terminal_distribution(flags()) :: :ok | {:error, String.t()}
+  defp maybe_start_terminal_distribution(flags) do
+    case ensure_distribution_started(:control, flags) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        {:error, "Failed to start Erlang distribution for terminal command: #{reason}"}
+    end
+  end
+
+  @spec ensure_distribution_started(:server | :client | :control, flags()) ::
+          :ok | {:error, String.t()}
   defp ensure_distribution_started(role, flags) do
     name = distribution_node_name(role, flags)
     mode = if flags.short_name, do: :shortnames, else: :longnames
@@ -497,13 +655,19 @@ defmodule Minga.CLI do
     if Node.alive?(), do: :ok, else: Node.start(name, name_domain: mode)
   end
 
-  @spec distribution_node_name(:server | :client, flags()) :: atom()
+  @spec distribution_node_name(:server | :client | :control, flags()) :: atom()
   defp distribution_node_name(_role, %{node_name: name}) when is_binary(name) do
     distribution_atom(name)
   end
 
   defp distribution_node_name(role, flags) do
-    prefix = if role == :server, do: "minga_server", else: "minga_client"
+    prefix =
+      case role do
+        :server -> "minga_server"
+        :client -> "minga_client"
+        :control -> "minga_control"
+      end
+
     hostname = hostname(flags.short_name)
     distribution_atom("#{prefix}@#{hostname}")
   end
@@ -524,7 +688,6 @@ defmodule Minga.CLI do
   @doc false
   @spec distribution_cookie(flags()) :: {:ok, String.t() | nil} | {:error, String.t()}
   def distribution_cookie(%{cookie_file: path}) when is_binary(path), do: read_cookie_file(path)
-  def distribution_cookie(%{cookie: cookie}) when is_binary(cookie), do: {:ok, cookie}
   def distribution_cookie(_flags), do: {:ok, System.get_env("MINGA_COOKIE")}
 
   @spec set_cookie_if_present(String.t() | nil) :: :ok | {:error, String.t()}
@@ -644,6 +807,26 @@ defmodule Minga.CLI do
 
       {:error, message} ->
         {:error, message}
+    end
+  end
+
+  @spec publish_local_control_endpoint() :: :ok | {:error, String.t()}
+  defp publish_local_control_endpoint do
+    case ControlEndpoint.publish_current_node() do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        {:error, "Failed to publish local control endpoint: #{inspect(reason)}"}
+    end
+  end
+
+  @spec finish_remote_attach() :: :ok | no_return()
+  defp finish_remote_attach do
+    case Minga.Remote.CLI.connect_pending_editor_attach() do
+      :ok -> :ok
+      :none -> :ok
+      {:error, message} -> abort_startup(message)
     end
   end
 
@@ -823,6 +1006,11 @@ defmodule Minga.CLI do
     minga #{Minga.version()} -- BEAM-powered modal text editor
 
     Usage: minga [options] [filename]
+           minga attach ssh://[user@]host[:port]/path
+           minga sessions ssh://[user@]host[:port]
+           minga detach
+           minga kill-session ssh://[user@]host[:port]/path
+           minga login --manual
 
     Options:
       -h, --help             Show this help message
@@ -837,7 +1025,6 @@ defmodule Minga.CLI do
       --name <name@host>     Distributed Erlang long node name
       --sname <name>         Distributed Erlang short node name
       --cookie-file <path>   Read distributed Erlang cookie from a 0600 file
-      --cookie <cookie>      Distributed Erlang cookie (prefer --cookie-file or MINGA_COOKIE)
       --host <ip>            Gateway bind IP for headless mode (default: 127.0.0.1)
       --port <port>          Gateway port for headless mode (default: 4820)
 
@@ -846,6 +1033,10 @@ defmodule Minga.CLI do
       minga README.md                    Open file for editing
       minga .                            Start agentic view with project as context
       minga --editor README.md           Open file in traditional editor
+      minga attach ssh://devbox/work/app  Attach to a remote server-side checkout
+      minga sessions ssh://devbox         List remote sessions without launching the editor
+      minga kill-session ssh://devbox/work/app  Stop the remote session for that checkout
+      minga login --manual             Sign in on a headless server by pasting the browser redirect
       MINGA_COOKIE=$(openssl rand -base64 32 | tr -d '/+=') minga --headless   Start detachable agent server
       minga --config ~/minimal.exs       Use a custom config profile
       minga --safe                       Start with defaults and no user config

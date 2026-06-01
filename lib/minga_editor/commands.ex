@@ -537,6 +537,24 @@ defmodule MingaEditor.Commands do
     end
   end
 
+  def execute(state, :detach_remote_session) do
+    MingaEditor.Commands.AgentSession.detach_current_remote_session(state)
+  end
+
+  def execute(
+        state,
+        {:connect_remote_session,
+         %{server_name: server_name, session_id: session_id, pid: remote_pid, token: token}}
+      ) do
+    MingaEditor.Commands.Agent.connect_remote_session(
+      state,
+      server_name,
+      session_id,
+      remote_pid,
+      token
+    )
+  end
+
   def execute(state, {:execute_command_candidate, input, candidate_index}) do
     execute_command_candidate(state, input, candidate_index)
   end

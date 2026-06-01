@@ -48,6 +48,60 @@ defmodule Minga.CLITest do
                CLI.parse_args(["README.md"])
     end
 
+    test "remote attach subcommand returns attach action" do
+      assert {:attach, "ssh://devbox/work/app", %{view_mode: :auto}} =
+               CLI.parse_args(["attach", "ssh://devbox/work/app"])
+    end
+
+    test "remote sessions subcommand returns sessions action" do
+      assert {:sessions, "ssh://devbox", %{view_mode: :auto}} =
+               CLI.parse_args(["sessions", "ssh://devbox"])
+    end
+
+    test "remote detach subcommand returns detach action" do
+      assert {:detach, %{view_mode: :auto}} = CLI.parse_args(["detach"])
+    end
+
+    test "remote kill-session subcommand returns kill action" do
+      assert {:kill_session, "ssh://devbox/work/app", %{view_mode: :auto}} =
+               CLI.parse_args(["kill-session", "ssh://devbox/work/app"])
+    end
+
+    test "terminal_command?/1 detects terminal-only remote commands" do
+      assert CLI.terminal_command?(["sessions", "ssh://devbox"])
+      assert CLI.terminal_command?(["detach"])
+      assert CLI.terminal_command?(["kill-session", "ssh://devbox/work/app"])
+      assert CLI.terminal_command?(["login"])
+      assert CLI.terminal_command?(["login", "--manual"])
+      assert CLI.terminal_command?(["sessions"])
+      assert CLI.terminal_command?(["kill-session"])
+      assert CLI.terminal_command?(["detach", "unexpected"])
+      refute CLI.terminal_command?(["attach", "ssh://devbox/work/app"])
+      refute CLI.terminal_command?(["README.md"])
+    end
+
+    test "manual login subcommand returns login action" do
+      assert {:login, %{view_mode: :auto}} = CLI.parse_args(["login", "--manual"])
+    end
+
+    test "login without manual flag returns usage error" do
+      assert {:error, message} = CLI.parse_args(["login"])
+      assert message =~ "login currently requires --manual"
+    end
+
+    test "manual login appears in help output" do
+      assert {:error, message} = CLI.parse_args(["--help"])
+      assert message =~ "minga login --manual"
+    end
+
+    test "terminal-only commands do not request editor startup" do
+      assert CLI.terminal_command_args?(["login", "--manual"])
+      assert CLI.terminal_command_args?(["sessions", "ssh://devbox"])
+      assert CLI.terminal_command_args?(["login"])
+      refute CLI.terminal_command_args?(["attach", "ssh://devbox/work/app"])
+      refute CLI.terminal_command_args?(["README.md"])
+    end
+
     test "file argument with extra non-flag args takes the last file" do
       assert {:open, "other.txt", %{view_mode: :auto, no_context: false, config_file: nil}} =
                CLI.parse_args(["file.txt", "other.txt"])
@@ -209,13 +263,10 @@ defmodule Minga.CLITest do
                CLI.parse_args(["--minimal", "COMMIT_EDITMSG"])
     end
 
-    test "--name, --cookie, --host, and --port set distribution flags" do
-      cookie = "abcdefghijklmnopqrstuvwxyz123456"
-
+    test "--name, --host, and --port set distribution flags" do
       assert {:open, nil,
               %{
                 node_name: "minga@host",
-                cookie: ^cookie,
                 gateway_host: "127.0.0.1",
                 gateway_port: 4900
               }} =
@@ -223,13 +274,17 @@ defmodule Minga.CLITest do
                  "--headless",
                  "--name",
                  "minga@host",
-                 "--cookie",
-                 cookie,
                  "--host",
                  "127.0.0.1",
                  "--port",
                  "4900"
                ])
+    end
+
+    test "--cookie is rejected because command-line secrets are unsafe" do
+      assert {:error, message} = CLI.parse_args(["--cookie", "abcdefghijklmnopqrstuvwxyz123456"])
+      assert message =~ "--cookie is unsafe"
+      assert message =~ "--cookie-file"
     end
 
     test "--cookie-file sets expanded cookie file path" do

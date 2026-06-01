@@ -34,15 +34,27 @@ Use `launchctl bootout gui/$(id -u)/com.minga.headless` to stop the agent.
 
 Remote control uses Erlang distribution. Set a long random `MINGA_COOKIE` on the daemon and every trusted client that needs to connect. Treat the cookie like a password: any node with the cookie can reach the trusted broker API.
 
+The attach command uses SSH as the bootstrap channel. It asks the remote host to start the user daemon with `systemctl --user start minga-headless.service`, falling back to the launchd agent command on macOS, then connects to the conventional distributed node `minga_server@host`. If bootstrap fails, the CLI prints the SSH command failure so you can install the service file, enable linger, or fix the cookie/node setup.
+
 Bind the server on a private network such as Tailscale or a locked-down LAN. Do not expose Erlang distribution ports directly to the public internet.
 
-Provider credentials live on the server. Put keys in the systemd `Environment=` lines, the launchd `EnvironmentVariables` dictionary, or the server user's normal secret-management setup. Attaching clients do not push provider credentials or config into the daemon.
+Provider credentials live on the server. For a quick local setup you can put keys in the systemd `Environment=` lines or the launchd `EnvironmentVariables` dictionary, but prefer a `0600` systemd `EnvironmentFile`, systemd credentials, macOS Keychain, or another local secret manager on shared machines. Attaching clients do not push provider credentials or config into the daemon.
 
-## Detach, reconnect, and end
+## Sign in on a headless server
 
-Detaching only removes the client subscriber. It records a `user_disconnected` event in the durable event log and leaves the agent turn running. If the laptop closes while a tool is running, the server keeps the session alive and the next attach catches up from the client's last seen event id.
+Use `minga login --manual` on the server when OAuth needs a browser but the daemon host has none. Minga prints an authorize URL, waits for one pasted value, and writes the resulting tokens to the server's `oauth.json`. Open the URL on your laptop, approve the request, then paste either the full failed redirect URL, the bare authorization code, or the `code#state` value back into the terminal.
 
-Use the brokered remote API to end a session deliberately. `MingaAgent.RemoteAPI.stop_session/2` validates the session token and stops that session on the server. The CLI attach UX will expose this as a user-facing command in the attach slice.
+From an attached GUI, use `/login --manual`. The server creates the PKCE verifier and returns only the authorize URL and flow ref through `MingaAgent.RemoteAPI`. After approval, paste the redirect back with `/login --complete <ref> <redirect-url-or-code>`. The PKCE verifier never leaves the server.
+
+## Attach, list, detach, and end
+
+Use `minga attach ssh://devbox/work/app` to connect to the agent session anchored to `/work/app` on `devbox`. The path is a server-side checkout or worktree. Minga does not copy source code to the client.
+
+Use `minga sessions ssh://devbox` to print live sessions without launching the editor. The output includes the session id, status, working directory, and recent prompt text when available.
+
+Use `minga detach` to disconnect the local frontend. Detaching only removes the client subscriber. It records a `user_disconnected` event in the durable event log and leaves the agent turn running. If the laptop closes while a tool is running, the server keeps the session alive and the next attach catches up from the client's last seen event id.
+
+Use `minga kill-session ssh://devbox/work/app` to end the session for that server-side working directory. Under the hood this calls the brokered `MingaAgent.RemoteAPI.stop_session/2`, which validates the session token and stops that session on the server.
 
 ## Idle reclamation policy
 

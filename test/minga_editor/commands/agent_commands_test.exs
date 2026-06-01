@@ -21,6 +21,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
   alias MingaEditor.Commands.Agent, as: AgentCommands
   alias MingaEditor.Commands.AgentSession
   alias MingaEditor.State, as: EditorState
+  alias MingaAgent.RuntimeState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Buffers
@@ -161,6 +162,17 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       assert AgentCommands.submit_prompt(state) == state
     end
 
+    test "sensitive slash commands do not enter history" do
+      state =
+        base_state()
+        |> AgentAccess.update_agent_ui(&UIState.set_prompt_text(&1, "/login --COMPLETE ref code"))
+
+      new_state = AgentCommands.submit_prompt(state)
+
+      assert AgentAccess.panel(new_state).prompt_history == []
+      assert UIState.prompt_text(AgentAccess.panel(new_state)) == ""
+    end
+
     test "sets error status when no session exists" do
       state = base_state(session: nil)
 
@@ -174,6 +186,29 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       new_state = AgentCommands.submit_prompt(state)
 
       assert new_state.shell_state.status_msg =~ "No agent session"
+    end
+  end
+
+  describe "scope_queue_follow_up/1" do
+    test "sensitive slash commands do not enter history when queued as follow-up" do
+      state = base_state()
+
+      state =
+        %{
+          state
+          | shell_state: %{
+              state.shell_state
+              | agent: %{state.shell_state.agent | runtime: %RuntimeState{status: :thinking}}
+            }
+        }
+        |> AgentAccess.update_agent_ui(
+          &UIState.set_prompt_text(&1, "/login openai --complete ref code")
+        )
+
+      new_state = AgentCommands.scope_queue_follow_up(state)
+
+      assert AgentAccess.panel(new_state).prompt_history == []
+      assert UIState.prompt_text(AgentAccess.panel(new_state)) == ""
     end
   end
 

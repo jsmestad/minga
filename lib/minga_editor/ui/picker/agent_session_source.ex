@@ -8,6 +8,7 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
   @behaviour MingaEditor.UI.Picker.Source
 
   alias Minga.Distribution.ConnectionManager
+  alias MingaEditor.Remote.SessionClient
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Item
 
@@ -114,17 +115,18 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
 
   @spec remote_sessions_for_node({String.t(), node(), atom()}) :: [Item.t()]
   defp remote_sessions_for_node({server_name, remote_node, _status}) do
-    case :erpc.call(remote_node, MingaAgent.RemoteAPI, :list_sessions, [], 5_000) do
-      sessions -> Enum.map(sessions, &remote_session_item(server_name, &1))
-    end
-  catch
-    :exit, reason ->
-      Minga.Log.warning(
-        :distribution,
-        "Failed to list sessions on #{server_name}: #{inspect(reason)}"
-      )
+    case SessionClient.list_sessions(remote_node) do
+      {:ok, sessions} ->
+        Enum.map(sessions, &remote_session_item(server_name, &1))
 
-      []
+      {:error, reason} ->
+        Minga.Log.warning(
+          :distribution,
+          "Failed to list sessions on #{server_name}: #{inspect(reason)}"
+        )
+
+        []
+    end
   end
 
   @spec remote_session_item(String.t(), MingaAgent.RemoteAPI.session_info()) :: Item.t()

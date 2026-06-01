@@ -2455,13 +2455,13 @@ defmodule MingaEditor.State do
   defp drain_pending_catchup_events(state, tab_bar) do
     case TabBar.active_workspace(tab_bar) do
       %WorkspaceModel{id: workspace_id, pending_catchup_events: [_ | _] = events} ->
-        state = MingaEditor.Agent.Events.replay_catchup(state, events)
+        state = MingaEditor.Remote.EventReplay.replay_active(state, events)
 
         tb =
           TabBar.update_workspace(
             tab_bar(state),
             workspace_id,
-            &%{&1 | pending_catchup_events: []}
+            &WorkspaceModel.clear_pending_catchup_events/1
           )
 
         set_tab_bar(state, tb)
