@@ -1,135 +1,204 @@
 defmodule MingaAgent.Tool.Spec do
   @moduledoc """
-  Specification for an agent tool.
+  Source-owned declaration for an agent tool.
 
-  Wraps the metadata needed to register, discover, and execute a tool in
-  the `MingaAgent.Tool.Registry`. Unlike `ReqLLM.Tool` (which is
-  provider-facing and tied to the LLM request lifecycle), `Spec` is the
-  internal, registry-facing representation that adds category, approval
-  level, and extensibility metadata.
-
-  ## Fields
-
-  | Field              | Type               | Description                                    |
-  |--------------------|--------------------|------------------------------------------------|
-  | `name`             | `String.t()`       | Unique tool identifier (e.g., `"read_file"`)   |
-  | `description`      | `String.t()`       | Human-readable description for the LLM         |
-  | `parameter_schema` | `map()`            | JSON Schema for the tool's parameters          |
-  | `callback`         | `(map() -> term())` | Function that executes the tool                |
-  | `category`         | `atom()`           | Grouping: `:filesystem`, `:git`, `:lsp`, etc.  |
-  | `approval_level`   | `atom()`           | `:auto`, `:ask`, or `:deny`                    |
-  | `metadata`         | `map()`            | Extensible bag for future fields               |
+  A spec describes a tool and how to build its executable callback for a session. It does not own session state, credentials, approval decisions, events, or cleanup. Context-sensitive tools declare their requirements and receive a core-built `MingaAgent.Tool.Context` only when the executor has one.
   """
+
+  @typedoc "Source that contributed this tool."
+  @type source :: :builtin | :config | {:extension, atom()}
 
   @typedoc "Approval level for tool execution."
   @type approval_level :: :auto | :ask | :deny
 
   @typedoc "Tool category for grouping and filtering."
-  @type category :: :filesystem | :git | :lsp | :shell | :memory | :agent | :custom
+  @type category :: :filesystem | :git | :lsp | :shell | :memory | :agent | :network | :custom
+
+  @typedoc "Capability advertised by a tool declaration."
+  @type capability ::
+          :read_project
+          | :mutate_project
+          | :run_shell
+          | :network
+          | :git_read
+          | :git_mutate
+          | :lsp_read
+          | :lsp_mutate
+          | :memory_write
+          | :spawn_agent
+          | atom()
+
+  @typedoc "Runtime context required before a tool can be built."
+  @type context_requirement :: :tool_context | :router | :project_root | :parent_session | atom()
+
+  @typedoc "Executable provider-facing callback."
+  @type callback :: (map() -> term())
+
+  @typedoc "Builds an executable callback from a runtime context."
+  @type build_fun :: (term() -> callback())
 
   @typedoc "A tool specification."
   @type t :: %__MODULE__{
+          source: source(),
           name: String.t(),
           description: String.t(),
           parameter_schema: map(),
-          callback: (map() -> term()),
+          callback: callback() | nil,
+          build: build_fun(),
           category: category(),
           approval_level: approval_level(),
+          capabilities: [capability()],
+          context_requirements: [context_requirement()],
           metadata: map()
         }
 
-  @enforce_keys [:name, :description, :parameter_schema, :callback]
-  defstruct name: nil,
+  @mutating_capabilities [
+    :mutate_project,
+    :run_shell,
+    :git_mutate,
+    :lsp_mutate,
+    :memory_write,
+    :spawn_agent
+  ]
+
+  @enforce_keys [:source, :name, :description, :parameter_schema, :build]
+  defstruct source: :config,
+            name: nil,
             description: nil,
             parameter_schema: %{},
             callback: nil,
+            build: nil,
             category: :custom,
             approval_level: :auto,
+            capabilities: [],
+            context_requirements: [],
             metadata: %{}
 
-  @doc """
-  Creates a new tool spec from a keyword list.
+  @doc "Creates a new tool spec from a keyword list or map."
+  @spec new(keyword() | map()) :: {:ok, t()} | {:error, term()}
+  def new(attrs) when is_list(attrs), do: attrs |> Map.new() |> new()
 
-  Required keys: `:name`, `:description`, `:parameter_schema`, `:callback`.
-  Optional keys: `:category` (default `:custom`), `:approval_level`
-  (default `:auto`), `:metadata` (default `%{}`).
-  """
-  @spec new(keyword()) :: {:ok, t()} | {:error, String.t()}
-  def new(attrs) when is_list(attrs) do
-    name = Keyword.get(attrs, :name)
-    description = Keyword.get(attrs, :description)
-    parameter_schema = Keyword.get(attrs, :parameter_schema, %{})
-    callback = Keyword.get(attrs, :callback)
-    category = Keyword.get(attrs, :category, :custom)
-    approval_level = Keyword.get(attrs, :approval_level, :auto)
-    metadata = Keyword.get(attrs, :metadata, %{})
+  def new(attrs) when is_map(attrs) do
+    source = Map.get(attrs, :source, :config)
+    name = Map.get(attrs, :name)
+    description = Map.get(attrs, :description)
+    parameter_schema = Map.get(attrs, :parameter_schema, %{})
+    callback = Map.get(attrs, :callback)
+    build = Map.get(attrs, :build) || build_from_callback(callback)
+    category = Map.get(attrs, :category, :custom)
+    approval_level = Map.get(attrs, :approval_level, :auto)
+    capabilities = Map.get(attrs, :capabilities, [])
+    context_requirements = Map.get(attrs, :context_requirements, [])
+    metadata = Map.get(attrs, :metadata, %{})
 
-    validate_and_build(
-      name,
-      description,
-      parameter_schema,
-      callback,
-      category,
-      approval_level,
-      metadata
-    )
-  end
-
-  @doc """
-  Creates a new tool spec, raising on validation failure.
-  """
-  @spec new!(keyword()) :: t()
-  def new!(attrs) when is_list(attrs) do
-    case new(attrs) do
-      {:ok, spec} -> spec
-      {:error, reason} -> raise ArgumentError, reason
+    with :ok <- validate_source(source),
+         :ok <- validate_name(name),
+         :ok <- validate_description(description),
+         :ok <- validate_schema(parameter_schema),
+         :ok <- validate_callback(callback),
+         :ok <- validate_build(build),
+         :ok <- validate_category(category),
+         :ok <- validate_approval_level(approval_level),
+         :ok <- validate_atom_list(:capabilities, capabilities),
+         :ok <- validate_atom_list(:context_requirements, context_requirements),
+         :ok <- validate_metadata(metadata),
+         :ok <- validate_context_requirements(category, capabilities, context_requirements) do
+      {:ok,
+       %__MODULE__{
+         source: source,
+         name: name,
+         description: description,
+         parameter_schema: parameter_schema,
+         callback: callback,
+         build: build,
+         category: category,
+         approval_level: approval_level,
+         capabilities: capabilities,
+         context_requirements: context_requirements,
+         metadata: metadata
+       }}
     end
   end
 
-  @spec validate_and_build(
-          term(),
-          term(),
-          term(),
-          term(),
-          term(),
-          term(),
-          term()
-        ) :: {:ok, t()} | {:error, String.t()}
-  defp validate_and_build(nil, _desc, _schema, _cb, _cat, _al, _meta),
-    do: {:error, ":name is required"}
+  @doc "Creates a new tool spec, raising on validation failure."
+  @spec new!(keyword() | map()) :: t()
+  def new!(attrs) do
+    case new(attrs) do
+      {:ok, spec} -> spec
+      {:error, reason} -> raise ArgumentError, inspect(reason)
+    end
+  end
 
-  defp validate_and_build(_name, nil, _schema, _cb, _cat, _al, _meta),
-    do: {:error, ":description is required"}
+  @doc "Builds an executable callback for the given runtime context."
+  @spec build_callback(t(), term()) :: callback()
+  def build_callback(%__MODULE__{build: build}, context), do: build.(context)
 
-  defp validate_and_build(_name, _desc, _schema, nil, _cat, _al, _meta),
-    do: {:error, ":callback is required"}
+  @spec build_from_callback(term()) :: build_fun() | nil
+  defp build_from_callback(callback) when is_function(callback, 1),
+    do: fn _context -> callback end
 
-  defp validate_and_build(name, _desc, _schema, _cb, _cat, _al, _meta)
-       when not is_binary(name),
-       do: {:error, ":name must be a string"}
+  defp build_from_callback(_callback), do: nil
 
-  defp validate_and_build(_name, desc, _schema, _cb, _cat, _al, _meta)
-       when not is_binary(desc),
-       do: {:error, ":description must be a string"}
+  @spec validate_source(term()) :: :ok | {:error, term()}
+  defp validate_source(:builtin), do: :ok
+  defp validate_source(:config), do: :ok
+  defp validate_source({:extension, name}) when is_atom(name), do: :ok
+  defp validate_source(source), do: {:error, {:invalid_source, source}}
 
-  defp validate_and_build(_name, _desc, _schema, cb, _cat, _al, _meta)
-       when not is_function(cb, 1),
-       do: {:error, ":callback must be a 1-arity function"}
+  @spec validate_name(term()) :: :ok | {:error, term()}
+  defp validate_name(name) when is_binary(name) do
+    if String.trim(name) == "", do: {:error, {:invalid_name, name}}, else: :ok
+  end
 
-  defp validate_and_build(_name, _desc, _schema, _cb, _cat, al, _meta)
-       when al not in [:auto, :ask, :deny],
-       do: {:error, ":approval_level must be :auto, :ask, or :deny"}
+  defp validate_name(name), do: {:error, {:invalid_name, name}}
 
-  defp validate_and_build(name, desc, schema, cb, cat, al, meta) do
-    {:ok,
-     %__MODULE__{
-       name: name,
-       description: desc,
-       parameter_schema: schema,
-       callback: cb,
-       category: cat,
-       approval_level: al,
-       metadata: meta
-     }}
+  @spec validate_description(term()) :: :ok | {:error, term()}
+  defp validate_description(description) when is_binary(description), do: :ok
+  defp validate_description(description), do: {:error, {:invalid_description, description}}
+
+  @spec validate_schema(term()) :: :ok | {:error, term()}
+  defp validate_schema(schema) when is_map(schema), do: :ok
+  defp validate_schema(schema), do: {:error, {:invalid_parameter_schema, schema}}
+
+  @spec validate_callback(term()) :: :ok | {:error, term()}
+  defp validate_callback(nil), do: :ok
+  defp validate_callback(callback) when is_function(callback, 1), do: :ok
+  defp validate_callback(callback), do: {:error, {:invalid_callback, callback}}
+
+  @spec validate_build(term()) :: :ok | {:error, term()}
+  defp validate_build(build) when is_function(build, 1), do: :ok
+  defp validate_build(build), do: {:error, {:invalid_build, build}}
+
+  @spec validate_category(term()) :: :ok | {:error, term()}
+  defp validate_category(category)
+       when category in [:filesystem, :git, :lsp, :shell, :memory, :agent, :network, :custom],
+       do: :ok
+
+  defp validate_category(category), do: {:error, {:invalid_category, category}}
+
+  @spec validate_approval_level(term()) :: :ok | {:error, term()}
+  defp validate_approval_level(level) when level in [:auto, :ask, :deny], do: :ok
+  defp validate_approval_level(level), do: {:error, {:invalid_approval_level, level}}
+
+  @spec validate_atom_list(atom(), term()) :: :ok | {:error, term()}
+  defp validate_atom_list(_field, values) when is_list(values) do
+    if Enum.all?(values, &is_atom/1), do: :ok, else: {:error, {:invalid_atom_list, values}}
+  end
+
+  defp validate_atom_list(field, values), do: {:error, {field, values}}
+
+  @spec validate_metadata(term()) :: :ok | {:error, term()}
+  defp validate_metadata(metadata) when is_map(metadata), do: :ok
+  defp validate_metadata(metadata), do: {:error, {:invalid_metadata, metadata}}
+
+  @spec validate_context_requirements(category(), [capability()], [context_requirement()]) ::
+          :ok | {:error, term()}
+  defp validate_context_requirements(_category, capabilities, requirements) do
+    if Enum.any?(capabilities, &(&1 in @mutating_capabilities)) and
+         :tool_context not in requirements do
+      {:error, {:missing_context_requirement, :tool_context}}
+    else
+      :ok
+    end
   end
 end
