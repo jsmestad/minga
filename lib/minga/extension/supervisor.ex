@@ -680,6 +680,7 @@ defmodule Minga.Extension.Supervisor do
           pid
         )
 
+        broadcast_agent_contributions_started(registry, name)
         Minga.Log.info(:config, "Extension #{name} started (#{module})")
         {:ok, pid}
 
@@ -699,6 +700,41 @@ defmodule Minga.Extension.Supervisor do
         {:error, reason}
     end
   end
+
+  @spec broadcast_agent_contributions_started(GenServer.server(), atom()) :: :ok
+  defp broadcast_agent_contributions_started(registry, name) do
+    case ExtRegistry.get(registry, name) do
+      {:ok, %{manifest: %Manifest{} = manifest} = entry} ->
+        Minga.Events.broadcast(:extension_agent_contributions_started, %{
+          source: {:extension, name},
+          module: entry.module,
+          manifest: manifest,
+          root: extension_root(entry)
+        })
+
+      _other ->
+        :ok
+    end
+  end
+
+  @spec extension_root(ExtRegistry.entry()) :: String.t() | nil
+  defp extension_root(%{path: path}) when is_binary(path), do: Path.expand(path)
+
+  defp extension_root(%{hex: %{app: app}}) when is_atom(app) do
+    case :code.lib_dir(app) do
+      path when is_list(path) -> List.to_string(path)
+      _ -> nil
+    end
+  end
+
+  defp extension_root(%{module: module}) when is_atom(module) and not is_nil(module) do
+    case :code.which(module) do
+      path when is_list(path) -> path |> List.to_string() |> Path.dirname() |> Path.dirname()
+      _ -> nil
+    end
+  end
+
+  defp extension_root(_entry), do: nil
 
   @doc """
   Stops a single extension, terminates its process, and purges the module.
@@ -1605,7 +1641,7 @@ defmodule Minga.Extension.Supervisor do
 
     case files do
       [] ->
-        compile_extension_files_fallback(expanded)
+        compile_extension_files_fallback(name, expanded)
 
       _ ->
         # The compile cache loads precompiled beams on a hit and recompiles
@@ -1625,12 +1661,13 @@ defmodule Minga.Extension.Supervisor do
     end
   end
 
-  @spec compile_extension_files_fallback(String.t()) :: {:ok, module()} | {:error, String.t()}
-  defp compile_extension_files_fallback(expanded) do
+  @spec compile_extension_files_fallback(atom(), String.t()) ::
+          {:ok, module()} | {:error, String.t()}
+  defp compile_extension_files_fallback(name, expanded) do
     json_path = Path.join(expanded, "plugin.json")
 
     if File.exists?(json_path) do
-      Minga.Extension.JsonLoader.load(expanded)
+      Minga.Extension.JsonLoader.load(expanded, name)
     else
       {:error, "no .ex files found in #{expanded}"}
     end

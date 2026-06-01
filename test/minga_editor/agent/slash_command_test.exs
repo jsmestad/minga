@@ -438,30 +438,22 @@ defmodule MingaEditor.Agent.SlashCommandTest do
   end
 
   describe "dynamic commands from extension registry" do
-    alias Minga.Extension.Manifest
-    alias Minga.Extension.Registry, as: ExtRegistry
+    alias MingaEditor.Agent.SlashCommand.Registry, as: SlashRegistry
 
     setup do
-      # Register test extensions with slash_commands in their manifests.
-      # The Registry is already started by the application.
-      :ok = ExtRegistry.register(:test_ext_dynamic, "/tmp/test_ext", [])
+      if Process.whereis(SlashRegistry) == nil do
+        start_supervised!(SlashRegistry)
+      end
 
-      ExtRegistry.update(:test_ext_dynamic,
-        manifest: %Manifest{
-          name: :test_ext_dynamic,
-          version: "0.1.0",
-          source: :path,
-          slash_commands: [
-            {:greet, "Say hello", command: "/usr/bin/echo"},
-            {:farewell, "Say goodbye", command: "/usr/bin/echo"}
-          ]
-        },
-        status: :running
-      )
+      :ok =
+        SlashRegistry.register_many({:extension, :test_ext_dynamic}, [
+          {:greet, "Say hello", command: "/usr/bin/echo"},
+          {:farewell, "Say goodbye", command: "/usr/bin/echo"}
+        ])
 
       on_exit(fn ->
-        ExtRegistry.unregister(:test_ext_dynamic)
-        ExtRegistry.unregister(:test_ext_other)
+        SlashRegistry.unregister_source({:extension, :test_ext_dynamic})
+        SlashRegistry.unregister_source({:extension, :test_ext_other})
       end)
 
       :ok
@@ -497,17 +489,10 @@ defmodule MingaEditor.Agent.SlashCommandTest do
     end
 
     test "dynamic commands from multiple extensions are combined" do
-      :ok = ExtRegistry.register(:test_ext_other, "/tmp/test_ext_other", [])
-
-      ExtRegistry.update(:test_ext_other,
-        manifest: %Manifest{
-          name: :test_ext_other,
-          version: "0.1.0",
-          source: :path,
-          slash_commands: [{:ext_b_cmd, "From ext B", command: "/usr/bin/echo"}]
-        },
-        status: :running
-      )
+      :ok =
+        SlashRegistry.register_many({:extension, :test_ext_other}, [
+          {:ext_b_cmd, "From ext B", command: "/usr/bin/echo"}
+        ])
 
       dynamic = SlashCommand.dynamic_commands()
       names = Enum.map(dynamic, & &1.name)
@@ -516,8 +501,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
     end
 
     test "extensions without manifests are excluded" do
-      :ok = ExtRegistry.register(:test_ext_other, "/tmp/test_ext_other", [])
-      # No manifest set, so it stays nil
+      :ok = SlashRegistry.unregister_source({:extension, :test_ext_other})
 
       dynamic = SlashCommand.dynamic_commands()
       names = Enum.map(dynamic, & &1.name)
@@ -533,7 +517,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
 
     test "dynamic_commands/0 returns empty list when no extensions are registered" do
       # Remove our test extension
-      ExtRegistry.unregister(:test_ext_dynamic)
+      SlashRegistry.unregister_source({:extension, :test_ext_dynamic})
 
       dynamic = SlashCommand.dynamic_commands()
       # Should return empty (no extensions with slash commands)
