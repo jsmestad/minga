@@ -19,14 +19,15 @@ defmodule Minga.Extension.JsonLoader do
   Returns `{:ok, module}` on success or `{:error, reason}` on failure.
   """
   @spec load(String.t()) :: {:ok, module()} | {:error, String.t()}
-  def load(plugin_dir) do
+  @spec load(String.t(), atom() | nil) :: {:ok, module()} | {:error, String.t()}
+  def load(plugin_dir, extension_name \\ nil) do
     json_path = Path.join(plugin_dir, "plugin.json")
 
     with {:ok, raw} <- read_file(json_path),
          {:ok, parsed} <- decode_json(raw),
          manifest = substitute_root(parsed, plugin_dir),
-         {:ok, module_name} <- build_module_name(manifest, plugin_dir),
-         {:ok, _module} <- create_module(module_name, manifest, plugin_dir) do
+         {:ok, module_name} <- build_module_name(manifest, plugin_dir, extension_name),
+         {:ok, _module} <- create_module(module_name, manifest, plugin_dir, extension_name) do
       {:ok, module_name}
     end
   end
@@ -48,8 +49,21 @@ defmodule Minga.Extension.JsonLoader do
     end
   end
 
-  @spec build_module_name(map(), String.t()) :: {:ok, module()} | {:error, String.t()}
-  defp build_module_name(manifest, plugin_dir) do
+  @spec build_module_name(map(), String.t(), atom() | nil) ::
+          {:ok, module()} | {:error, String.t()}
+  defp build_module_name(_manifest, _plugin_dir, extension_name)
+       when is_atom(extension_name) and not is_nil(extension_name) do
+    module =
+      extension_name
+      |> Atom.to_string()
+      |> String.replace("-", "_")
+      |> Macro.camelize()
+      |> then(&Module.concat(Minga.Extension.Plugin, &1))
+
+    {:ok, module}
+  end
+
+  defp build_module_name(manifest, plugin_dir, nil) do
     plugin_name = manifest["name"] || Path.basename(plugin_dir)
     # Macro.camelize treats underscores as word separators but not hyphens,
     # so normalize hyphens first to get "hello-world" -> "HelloWorld".
@@ -73,13 +87,14 @@ defmodule Minga.Extension.JsonLoader do
 
   defp substitute_root(value, _plugin_dir), do: value
 
-  @spec create_module(module(), map(), String.t()) :: {:ok, module()} | {:error, String.t()}
-  defp create_module(module_name, manifest, plugin_dir) do
+  @spec create_module(module(), map(), String.t(), atom() | nil) ::
+          {:ok, module()} | {:error, String.t()}
+  defp create_module(module_name, manifest, plugin_dir, extension_name) do
     with {:ok, hooks} <- build_hook_declarations(manifest),
          {:ok, skills} <- build_skill_declarations(manifest),
          {:ok, mcp_servers} <- build_mcp_server_declarations(manifest),
          {:ok, slash_commands} <- build_slash_command_declarations(manifest) do
-      name = String.to_atom(manifest["name"] || Path.basename(plugin_dir))
+      name = extension_name || module_name
       description = manifest["description"] || "Plugin from #{Path.basename(plugin_dir)}"
       version = manifest["version"] || "0.1.0"
 
@@ -190,9 +205,8 @@ defmodule Minga.Extension.JsonLoader do
 
   @spec build_single_mcp_server(map()) :: Macro.t()
   defp build_single_mcp_server(%{"name" => name_str} = server) do
-    name = String.to_atom(name_str)
     opts = mcp_server_opts_from_map(server)
-    quote(do: mcp_server(unquote(name), unquote(opts)))
+    quote(do: mcp_server(unquote(name_str), unquote(opts)))
   end
 
   @spec mcp_server_opts_from_map(map()) :: keyword()
@@ -215,9 +229,8 @@ defmodule Minga.Extension.JsonLoader do
 
   @spec build_single_slash_command(map()) :: Macro.t()
   defp build_single_slash_command(%{"name" => name_str, "description" => desc} = cmd) do
-    name = String.to_atom(name_str)
     opts = slash_command_opts_from_map(cmd)
-    quote(do: slash_command(unquote(name), unquote(desc), unquote(opts)))
+    quote(do: slash_command(unquote(name_str), unquote(desc), unquote(opts)))
   end
 
   @spec slash_command_opts_from_map(map()) :: keyword()

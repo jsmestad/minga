@@ -132,7 +132,7 @@ defmodule MingaAgent.Skills do
 
   @spec format_skill_line(skill()) :: String.t()
   defp format_skill_line(skill) do
-    source_tag = if skill.source == :project, do: " [project]", else: " [global]"
+    source_tag = skill_source_tag(skill.source)
 
     auto =
       if skill.activates_on != [],
@@ -141,6 +141,11 @@ defmodule MingaAgent.Skills do
 
     "  /skill:#{skill.name} — #{skill.description}#{source_tag}#{auto}"
   end
+
+  @spec skill_source_tag(:global | :project | :extension) :: String.t()
+  defp skill_source_tag(:project), do: " [project]"
+  defp skill_source_tag(:extension), do: " [extension]"
+  defp skill_source_tag(:global), do: " [global]"
 
   # ── Parsing ─────────────────────────────────────────────────────────────────
 
@@ -188,62 +193,9 @@ defmodule MingaAgent.Skills do
 
   @spec discover_extension_skills() :: [skill()]
   defp discover_extension_skills do
-    extension_skill_paths()
+    MingaAgent.Skills.Registry.paths()
     |> Enum.flat_map(&load_extension_skill_path/1)
   end
-
-  @spec extension_skill_paths() :: [String.t()]
-  defp extension_skill_paths do
-    case Process.whereis(Minga.Extension.Registry) do
-      nil ->
-        []
-
-      _pid ->
-        Minga.Extension.Registry.all()
-        |> Enum.filter(fn {_name, entry} -> entry.status == :running end)
-        |> Enum.flat_map(&extract_manifest_skills/1)
-    end
-  rescue
-    _ -> []
-  catch
-    :exit, _ -> []
-  end
-
-  @spec extract_manifest_skills({atom(), map()}) :: [String.t()]
-  defp extract_manifest_skills({_name, %{manifest: %{skills: paths}} = entry}) when paths != [] do
-    case extension_root(entry) do
-      nil -> Enum.filter(paths, &(Path.type(&1) == :absolute))
-      root -> Enum.map(paths, &resolve_skill_path(&1, root))
-    end
-  end
-
-  defp extract_manifest_skills(_entry), do: []
-
-  defp resolve_skill_path(skill_path, root) do
-    if Path.type(skill_path) == :absolute, do: skill_path, else: Path.join(root, skill_path)
-  end
-
-  @spec extension_root(map()) :: String.t() | nil
-  defp extension_root(%{path: path}) when is_binary(path), do: path
-
-  defp extension_root(%{module: mod}) when is_atom(mod) and not is_nil(mod) do
-    case :code.which(mod) do
-      path when is_list(path) ->
-        path |> List.to_string() |> Path.dirname() |> Path.dirname()
-
-      _ ->
-        nil
-    end
-  end
-
-  defp extension_root(%{hex: %{app: app}}) when is_atom(app) do
-    case :code.lib_dir(app) do
-      path when is_list(path) -> List.to_string(path)
-      _ -> nil
-    end
-  end
-
-  defp extension_root(_entry), do: nil
 
   @spec discover_in(String.t(), :global | :project | :extension) :: [skill()]
   defp discover_in(dir, source) do

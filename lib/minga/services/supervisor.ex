@@ -28,6 +28,10 @@ defmodule Minga.Services.Supervisor do
       ├── MingaEditor.Extension.Sidebar      Source-owned editor sidebar registry
       ├── Minga.Extension.CodeLease          Process-owned leases for extension callback modules
       ├── MingaAgent.ProviderRegistry        Source-owned provider declarations
+      ├── MingaAgent.Hooks.Registry          Source-owned agent hook declarations
+      ├── MingaAgent.MCP.ServerRegistry      Source-owned MCP server declarations
+      ├── MingaAgent.Skills.Registry         Source-owned extension skill paths
+      ├── MingaEditor.Agent.SlashCommand.Registry Source-owned agent slash commands
       ├── Minga.Extension.Supervisor         DynamicSupervisor for extension processes
       ├── Minga.Config.Loader                Evaluates user config on init
       ├── Minga.Config.Writer                Debounced GUI settings overlay writer
@@ -41,7 +45,7 @@ defmodule Minga.Services.Supervisor do
 
   Project is placed after LSP.SyncServer to match the dependency direction:
   SyncServer uses RootDetector which may consult Project. A Project crash
-  cascades only to SessionManager. ProviderRegistry starts before extension supervision and config loading so provider contributions can register during boot and cleanup callbacks exist before extension reloads.
+  cascades only to SessionManager. Provider and agent contribution registries start before extension supervision and config loading so extension contributions can register during boot and cleanup callbacks exist before extension reloads.
   """
 
   use Supervisor
@@ -65,6 +69,10 @@ defmodule Minga.Services.Supervisor do
       MingaEditor.Extension.Sidebar,
       Minga.Extension.CodeLease,
       MingaAgent.ProviderRegistry,
+      MingaAgent.Hooks.Registry,
+      MingaAgent.MCP.ServerRegistry,
+      MingaAgent.Skills.Registry,
+      MingaEditor.Agent.SlashCommand.Registry,
       Minga.Extension.Supervisor,
       Minga.Config.Loader,
       Minga.Config.Writer,

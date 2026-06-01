@@ -27,6 +27,7 @@ defmodule MingaEditor.Agent.SlashCommand do
   @type state :: map()
 
   alias MingaEditor.Agent.SlashCommand.Command
+  alias MingaEditor.Agent.SlashCommand.Registry, as: SlashCommandRegistry
 
   @typedoc "A registered slash command."
   @type command :: Command.t()
@@ -437,12 +438,19 @@ defmodule MingaEditor.Agent.SlashCommand do
     enabled = Minga.Extensions.MCP.enabled?()
 
     case MingaAgent.MCP.ServerConfig.normalize_list(Config.get(:agent_mcp_servers)) do
-      {:ok, []} ->
-        "MCP extension: #{mcp_enabled_label(enabled)}\nNo MCP servers configured."
-
       {:ok, servers} ->
-        lines = Enum.map(mcp_live_or_configured_status(state, servers), &mcp_server_status_line/1)
-        "MCP extension: #{mcp_enabled_label(enabled)}\n" <> Enum.join(lines, "\n")
+        servers = servers ++ MingaAgent.MCP.ServerRegistry.configs()
+
+        case servers do
+          [] ->
+            "MCP extension: #{mcp_enabled_label(enabled)}\nNo MCP servers configured."
+
+          _servers ->
+            lines =
+              Enum.map(mcp_live_or_configured_status(state, servers), &mcp_server_status_line/1)
+
+            "MCP extension: #{mcp_enabled_label(enabled)}\n" <> Enum.join(lines, "\n")
+        end
 
       {:error, reason} ->
         "MCP extension: #{mcp_enabled_label(enabled)}\nConfig error: #{reason}"
@@ -470,7 +478,15 @@ defmodule MingaEditor.Agent.SlashCommand do
         statuses
 
       :error ->
-        Enum.map(servers, &%{"name" => &1.name, "status" => "not_started", "error" => nil})
+        Enum.map(
+          servers,
+          &%{
+            "name" => &1.name,
+            "source" => mcp_source_label(&1),
+            "status" => "not_started",
+            "error" => nil
+          }
+        )
     end
   end
 
@@ -488,13 +504,33 @@ defmodule MingaEditor.Agent.SlashCommand do
   end
 
   @spec mcp_server_status_line(map()) :: String.t()
+  defp mcp_server_status_line(%{
+         "name" => name,
+         "source" => source,
+         "status" => "errored",
+         "error" => error
+       }) do
+    "- #{name} [#{source}]: errored#{mcp_error_suffix(error)}"
+  end
+
   defp mcp_server_status_line(%{"name" => name, "status" => "errored", "error" => error}) do
     "- #{name}: errored#{mcp_error_suffix(error)}"
+  end
+
+  defp mcp_server_status_line(%{"name" => name, "source" => source, "status" => status}) do
+    "- #{name} [#{source}]: #{status}"
   end
 
   defp mcp_server_status_line(%{"name" => name, "status" => status}) do
     "- #{name}: #{status}"
   end
+
+  @spec mcp_source_label(MingaAgent.MCP.ServerConfig.t()) :: String.t()
+  defp mcp_source_label(%MingaAgent.MCP.ServerConfig{source: :config}), do: "config"
+  defp mcp_source_label(%MingaAgent.MCP.ServerConfig{source: :builtin}), do: "builtin"
+
+  defp mcp_source_label(%MingaAgent.MCP.ServerConfig{source: {:extension, name}}),
+    do: "extension:#{name}"
 
   @spec mcp_error_suffix(String.t() | nil) :: String.t()
   defp mcp_error_suffix(nil), do: ""
@@ -1254,36 +1290,10 @@ defmodule MingaEditor.Agent.SlashCommand do
   @doc "Returns slash commands contributed by loaded extensions."
   @spec dynamic_commands() :: [Command.t()]
   def dynamic_commands do
-    extension_manifests()
-    |> Enum.flat_map(fn manifest -> manifest.slash_commands end)
-    |> Enum.map(&build_extension_command/1)
-  end
+    built_in_names = MapSet.new(Enum.map(@commands, & &1.name))
 
-  @spec extension_manifests() :: [Minga.Extension.Manifest.t()]
-  defp extension_manifests do
-    case Process.whereis(Minga.Extension.Registry) do
-      nil ->
-        []
-
-      _pid ->
-        Minga.Extension.Registry.all()
-        |> Enum.filter(fn {_name, entry} -> entry.status == :running end)
-        |> Enum.map(fn {_name, entry} -> entry.manifest end)
-        |> Enum.reject(&is_nil/1)
-    end
-  rescue
-    _ -> []
-  catch
-    :exit, _ -> []
-  end
-
-  @spec build_extension_command({atom(), String.t(), keyword()}) :: Command.t()
-  defp build_extension_command({cmd_name, description, opts}) do
-    %Command{
-      name: Atom.to_string(cmd_name),
-      description: description,
-      execute: Keyword.get(opts, :command)
-    }
+    SlashCommandRegistry.commands()
+    |> Enum.reject(&MapSet.member?(built_in_names, &1.name))
   end
 
   # ── Dynamic command dispatch ───────────────────────────────────────────────

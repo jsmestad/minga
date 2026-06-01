@@ -27,7 +27,8 @@ defmodule Minga.Extension.Manifest do
     hooks: [],
     skills: [],
     mcp_servers: [],
-    slash_commands: []
+    slash_commands: [],
+    agent_ui_metadata: []
   ]
 
   @type t :: %__MODULE__{
@@ -42,8 +43,9 @@ defmodule Minga.Extension.Manifest do
           load_policy: Extension.load_policy(),
           hooks: [{atom(), keyword()}],
           skills: [String.t()],
-          mcp_servers: [{atom(), keyword()}],
-          slash_commands: [{atom(), String.t(), keyword()}]
+          mcp_servers: [{atom() | String.t(), keyword()}],
+          slash_commands: [{atom() | String.t(), String.t(), keyword()}],
+          agent_ui_metadata: [map()]
         }
 
   @doc """

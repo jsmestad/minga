@@ -19,6 +19,7 @@ defmodule MingaAgent.Config do
   """
 
   alias MingaAgent.Hooks.Hook
+  alias MingaAgent.Hooks.Registry, as: HookRegistry
 
   @default_model "anthropic:claude-sonnet-4"
 
@@ -151,7 +152,7 @@ defmodule MingaAgent.Config do
           ~w(write_file edit_file multi_edit_file apply_diff delete_file shell git_stage git_commit rename)
         ),
       tool_permissions: get(:agent_tool_permissions, nil),
-      agent_hooks: normalize_hooks(get(:agent_hooks, [])),
+      agent_hooks: merged_agent_hooks(get(:agent_hooks, [])),
       system_prompt: get(:agent_system_prompt, ""),
       append_system_prompt: get(:agent_append_system_prompt, ""),
       api_base_url: get(:agent_api_base_url, ""),
@@ -180,6 +181,20 @@ defmodule MingaAgent.Config do
   @doc "Returns a config with agent hooks disabled."
   @spec without_hooks(t()) :: t()
   def without_hooks(%__MODULE__{} = config), do: %{config | agent_hooks: []}
+
+  @spec merged_agent_hooks(term()) :: [Hook.t()]
+  defp merged_agent_hooks(raw_hooks) do
+    raw_hooks
+    |> normalize_hooks()
+    |> Kernel.++(HookRegistry.all())
+    |> Enum.uniq_by(&hook_key/1)
+  end
+
+  @spec hook_key(Hook.t()) :: term()
+  defp hook_key(hook) do
+    {hook.event, hook.type, hook.tool_pattern, hook.command, hook.module, hook.function,
+     hook.extension_source, hook.extension_module}
+  end
 
   @doc "Normalizes raw `:agent_hooks` config declarations into hook structs."
   @spec normalize_hooks(term()) :: [Hook.t()]

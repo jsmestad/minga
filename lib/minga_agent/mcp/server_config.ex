@@ -8,7 +8,7 @@ defmodule MingaAgent.MCP.ServerConfig do
   """
 
   @enforce_keys [:name, :command]
-  defstruct [:name, :command, args: [], env: %{}, enabled: true]
+  defstruct [:name, :command, args: [], env: %{}, enabled: true, source: :config]
 
   @typedoc "One MCP stdio server declaration."
   @type t :: %__MODULE__{
@@ -16,7 +16,8 @@ defmodule MingaAgent.MCP.ServerConfig do
           command: String.t(),
           args: [String.t()],
           env: %{String.t() => String.t()},
-          enabled: boolean()
+          enabled: boolean(),
+          source: Minga.Extension.ContributionCleanup.contribution_source()
         }
 
   @doc "Normalizes a user config map into a `ServerConfig` struct."
@@ -34,8 +35,17 @@ defmodule MingaAgent.MCP.ServerConfig do
          {:ok, command} <- fetch_string(config, :command),
          {:ok, args} <- fetch_args(config),
          {:ok, env} <- fetch_env(config),
-         {:ok, enabled} <- fetch_enabled(config) do
-      {:ok, %__MODULE__{name: name, command: command, args: args, env: env, enabled: enabled}}
+         {:ok, enabled} <- fetch_enabled(config),
+         {:ok, source} <- fetch_source(config) do
+      {:ok,
+       %__MODULE__{
+         name: name,
+         command: command,
+         args: args,
+         env: env,
+         enabled: enabled,
+         source: source
+       }}
     end
   end
 
@@ -137,6 +147,18 @@ defmodule MingaAgent.MCP.ServerConfig do
       nil -> {:ok, true}
       enabled when is_boolean(enabled) -> {:ok, enabled}
       other -> {:error, "MCP server enabled must be a boolean, got: #{inspect(other)}"}
+    end
+  end
+
+  @spec fetch_source(map()) ::
+          {:ok, Minga.Extension.ContributionCleanup.contribution_source()} | {:error, String.t()}
+  defp fetch_source(config) do
+    case fetch(config, :source) do
+      nil -> {:ok, :config}
+      :builtin -> {:ok, :builtin}
+      :config -> {:ok, :config}
+      {:extension, name} when is_atom(name) -> {:ok, {:extension, name}}
+      other -> {:error, "MCP server source is invalid: #{inspect(other)}"}
     end
   end
 
