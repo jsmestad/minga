@@ -69,8 +69,8 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     %AgentChat{
       visible?: true,
       status: ctx.shell_state.agent.runtime.status || :idle,
-      model_name: panel.model_name || "",
-      thinking_level: panel.thinking_level || "",
+      model_name: panel.model_name,
+      thinking_level: panel.thinking_level,
       prompt: prompt_text,
       prompt_line_count: UIState.input_line_count(panel),
       prompt_cursor_line: cursor_line,

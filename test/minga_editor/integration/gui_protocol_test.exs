@@ -12,6 +12,7 @@ defmodule Minga.Integration.GUIProtocolTest do
 
   alias Minga.Frontend.Adapter.GUI.WindowEncoder
   alias Minga.Protocol.Opcodes
+  alias Minga.RenderModel.UI.AgentChat.ToolCallView
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
   alias MingaEditor.UI.Picker
 
@@ -303,8 +304,7 @@ defmodule Minga.Integration.GUIProtocolTest do
     end
 
     test "gui_agent_chat with styled_tool_call round-trips", %{port: port} do
-      tc = %MingaAgent.ToolCall{
-        id: "tc-styled",
+      tc = %ToolCallView{
         name: "bash",
         status: :complete,
         is_error: false,
@@ -356,8 +356,7 @@ defmodule Minga.Integration.GUIProtocolTest do
     end
 
     test "gui_agent_chat with regular tool_call round-trips", %{port: port} do
-      tc = %MingaAgent.ToolCall{
-        id: "tc-regular",
+      tc = %ToolCallView{
         name: "read_file",
         status: :running,
         is_error: false,
