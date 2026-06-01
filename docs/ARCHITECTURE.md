@@ -719,6 +719,28 @@ This isn't just organization for readability. A credo check (`Minga.Credo.Depend
 
 The practical benefit: `Minga.Runtime.start/1` boots Layers 0 and 1 without any frontend. Agent sessions run, tools execute, buffers exist, all without a single pixel rendered. External clients connect through the API gateway and interact with a fully functional runtime.
 
+## MingaAgent Internal Levels
+
+Epic [#2075](https://github.com/jsmestad/minga/issues/2075) adds a second dependency map inside the agent platform. The top-level namespace rule still applies: `MingaAgent.*` must not depend on `MingaEditor.*`. The internal rule answers a more specific question: when provider, tool, MCP, and UI integrations become optional packs, which agent modules are safe to import from which other agent modules?
+
+Dependencies flow downward only:
+
+```
+Agent Level 0: contracts, value types, and safety interfaces
+Agent Level 1: runtime services, registries, and core safety execution
+Agent Level 2: bundled integrations, adapters, and agent presentation surfaces
+```
+
+**Agent Level 0** contains pure contracts and payloads. These modules define shapes and safety interfaces but do not start processes, look up extension contributions, read credentials, execute tools, or render UI. Current examples: `MingaAgent.Provider`, `MingaAgent.Tool.Spec`, `MingaAgent.Event`, `MingaAgent.Message`, `MingaAgent.ToolCall`, `MingaAgent.TurnUsage`, `MingaAgent.Hooks.*Payload`, `MingaAgent.MCP.ServerConfig`, `MingaAgent.MCP.Tool`, `MingaAgent.RuntimeState`, `MingaAgent.Subagent.Handle`, `MingaAgent.ToolApproval.Preview`, `MingaEditor.Agent.SlashCommand.Command`, and the compile-time declaration DSL in `Minga.Extension.Agent`.
+
+**Agent Level 1** contains core runtime services and source-owned safety boundaries. These modules may depend on Level 0, but they must not depend on bundled packs or presentation modules. Current examples: `MingaAgent.Session`, `MingaAgent.SessionManager`, `MingaAgent.SessionMetadata`, `MingaAgent.SubagentContext`, `MingaAgent.Supervisor`, `MingaAgent.Runtime`, `MingaAgent.Config`, `MingaAgent.ContextArtifact`, `MingaAgent.Retry`, `MingaAgent.Tool.Registry`, `MingaAgent.Tool.Executor`, `MingaAgent.ToolRouter`, `MingaAgent.ProjectView`, `MingaAgent.Changeset`, `MingaAgent.Credentials`, `MingaAgent.Hooks.Dispatcher`, `MingaAgent.MCP.Registry`, `MingaAgent.EventLog`, `MingaAgent.Gateway.*`, `MingaAgent.RemoteAPI`, and the extension-facing runtime facade `Minga.Extension.AgentAPI`.
+
+**Agent Level 2** contains code that adapts the core runtime into a concrete integration or user-facing agent surface. Current presentation examples live under `MingaEditor.Agent.*`, including `MingaEditor.Agent.UIState`, `MingaEditor.Agent.Events`, `MingaEditor.Agent.View.*`, `MingaEditor.Agent.DiffReview`, `MingaEditor.Agent.DiffRenderer`, and `MingaEditor.Agent.SlashCommand`. Provider adapters, read-only tool packs, LSP/Git/MCP packs, and semantic agent UI packs are target Level 2 modules as they are extracted by later #2075 child tickets. Today, several native providers and built-in tools remain Level 1 because the registry and context-bound execution boundaries they need have not landed yet.
+
+The custom Credo check `Minga.Credo.DependencyDirectionCheck` enforces both maps. It flags Agent Level 0 references to Level 1 or 2 and Agent Level 1 references to Level 2. The check intentionally uses prefix lists so later extraction tickets can move a module group from Level 1 to Level 2 without rewriting the check.
+
+Safety-critical ownership does not move to optional packs. Credentials, approval, plan-mode refusal, retry, cost, compaction, session orchestration, event and message types, `MingaAgent.ToolRouter`, changesets, buffer forks, and edit boundaries stay in Level 0 or Level 1.
+
 ---
 
 ## State Scope: Daemon-Singleton vs Per-Editor

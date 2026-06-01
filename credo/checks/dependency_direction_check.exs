@@ -43,11 +43,16 @@ defmodule Minga.Credo.DependencyDirectionCheck do
   # Individual modules from mixed directories (buffer/, editing/) are listed explicitly.
   @layer_0_prefixes [
     "Minga.Buffer.ChangeLog",
+    "Minga.Buffer.Cursor",
     "Minga.Buffer.Document",
     "Minga.Buffer.EditDelta",
     "Minga.Buffer.EditSource",
+    "Minga.Buffer.Lines",
+    "Minga.Buffer.Position",
     "Minga.Buffer.RenderSnapshot",
     "Minga.Buffer.SaveState",
+    "Minga.Buffer.Selection",
+    "Minga.Buffer.Span",
     "Minga.Buffer.State",
     "Minga.Buffer.UndoHistory",
     "Minga.Buffer.UndoPatch",
@@ -65,8 +70,11 @@ defmodule Minga.Credo.DependencyDirectionCheck do
     "Minga.Core",
     "Minga.Mode",
     "Minga.RenderModel",
+    "Minga.Diagnostics.Diagnostic",
+    "Minga.Language.Highlight.InjectionRange",
     "Minga.Command.Parser",
     "Minga.Keymap.Bindings",
+    "Minga.Keymap.SharedGroups",
     "Minga.Keymap.KeyParser",
     "Minga.Keymap.NormalPrefixes",
     "Minga.Keymap.Sigil",
@@ -117,7 +125,41 @@ defmodule Minga.Credo.DependencyDirectionCheck do
     "MingaEditor.Frontend.Protocol" => ["MingaEditor.Frontend.Protocol.GUI"],
     # Frontend facade calls Protocol.GUI for GUI-specific config encoding
     # (line spacing, etc.). Same structural dispatch pattern.
-    "MingaEditor.Frontend" => ["MingaEditor.Frontend.Protocol.GUI"]
+    "MingaEditor.Frontend" => ["MingaEditor.Frontend.Protocol.GUI"],
+    # Command.Registry keeps the compile-time command provider module list.
+    # The command modules own execution, while the registry only indexes providers.
+    "Minga.Command.Registry" => ["MingaEditor.Commands"],
+    # Runtime supervisors assemble the editor process tree at the OTP boundary.
+    "Minga.Runtime.Supervisor" => [
+      "MingaEditor.Supervisor",
+      "MingaEditor.Watchdog",
+      "MingaEditor.Frontend.Manager"
+    ],
+    # Services.Supervisor starts extension contribution registries and built-in extension surfaces.
+    "Minga.Services.Supervisor" => ["MingaEditor.Extension.Sidebar"],
+    # SystemObserver displays the editor supervisor tree as process topology data.
+    "Minga.SystemObserver" => ["MingaEditor.Supervisor"],
+    # Built-in theme packs register concrete presentation theme modules as data.
+    "Minga.Extensions.ThemePacks.Catppuccin" => ["MingaEditor.UI.Theme"],
+    "Minga.Extensions.ThemePacks.Doom" => ["MingaEditor.UI.Theme"],
+    "Minga.Extensions.ThemePacks.One" => ["MingaEditor.UI.Theme"],
+    # Editing operators call the Buffer facade for existing edit operations; Buffer.Process remains separately blocked.
+    "Minga.Editing.Operator" => ["Minga.Buffer"],
+    # Mode exposes recipe labels through the existing recipe registry bridge.
+    "Minga.Mode" => ["Minga.Tool.Recipe.Registry"],
+    # Editing facade preserves existing macro-recorder helpers until that UI state moves behind a lower-level query.
+    "Minga.Editing" => ["MingaEditor.MacroRecorder"],
+    # Application supervisor starts shell registry at the OTP boundary.
+    "Minga.Application" => ["MingaEditor.Shell.Registry"],
+    # Session persistence currently references the editor state snapshot type.
+    "Minga.Session" => ["MingaEditor.State"],
+    # Diagnostics decoration maps severities to presentation gutter faces.
+    "Minga.Diagnostics.Decorations" => ["MingaEditor.UI.Theme.Gutter"],
+    # Buffer state uses typed config option aliases while the option registry remains stateful.
+    "Minga.Buffer.State" => ["Minga.Config.Options"],
+    # CLI/API are public entry-point bridges that call the running editor process.
+    "Minga.CLI" => ["MingaEditor"],
+    "Minga.API" => ["MingaEditor"]
     # All pre-existing cross-layer violations from #1368 have been resolved
     # in Wave 6 Track B. Modules were moved to their correct layers:
     # - Devicon → Minga.Language.Devicon
@@ -126,6 +168,59 @@ defmodule Minga.Credo.DependencyDirectionCheck do
     # - Parser protocol → Minga.Parser.Protocol
     # - Theme loading → Events broadcast
   }
+
+  # MingaAgent internal levels. These are intentionally separate from the
+  # top-level Minga/MingaAgent/MingaEditor layers above. The broad Level 1
+  # fallback reflects the current codebase; later extraction tickets can move
+  # specific bundled integrations to Level 2 as registry boundaries land.
+  @agent_level_0_prefixes [
+    "Minga.Extension.Agent",
+    "MingaAgent.Branch",
+    "MingaAgent.Changeset.BudgetExhaustedEvent",
+    "MingaAgent.Changeset.MergedEvent",
+    "MingaAgent.CostCalculator",
+    "MingaAgent.EditBoundary",
+    "MingaAgent.Event",
+    "MingaAgent.EventLog.EventRecord",
+    "MingaAgent.EventLog.Taxonomy",
+    "MingaAgent.Hooks.Hook",
+    "MingaAgent.Hooks.NotificationPayload",
+    "MingaAgent.Hooks.PostToolUsePayload",
+    "MingaAgent.Hooks.PreCompactPayload",
+    "MingaAgent.Hooks.PreToolUsePayload",
+    "MingaAgent.Hooks.Result",
+    "MingaAgent.Hooks.SessionEndPayload",
+    "MingaAgent.Hooks.SessionStartPayload",
+    "MingaAgent.Hooks.StopPayload",
+    "MingaAgent.Hooks.UserPromptSubmitPayload",
+    "MingaAgent.Instruction",
+    "MingaAgent.InternalState",
+    "MingaAgent.MCP.ServerConfig",
+    "MingaAgent.MCP.Tool",
+    "MingaAgent.MCP.Transport",
+    "MingaAgent.Message",
+    "MingaAgent.ModelLimits",
+    "MingaAgent.OAuth.PendingFlow.Entry",
+    "MingaAgent.Provider",
+    "MingaAgent.RuntimeState",
+    "MingaAgent.Subagent.Handle",
+    "MingaAgent.TodoItem",
+    "MingaAgent.TokenEstimator",
+    "MingaAgent.Tool.Spec",
+    "MingaAgent.ToolApproval.Preview",
+    "MingaAgent.ToolCall",
+    "MingaAgent.TurnUsage",
+    "MingaEditor.Agent.SlashCommand.Command"
+  ]
+
+  @agent_level_1_prefixes [
+    "Minga.Extension.AgentAPI",
+    "MingaAgent"
+  ]
+
+  @agent_level_2_prefixes [
+    "MingaEditor"
+  ]
 
   # Cross-cutting modules allowed everywhere.
   @cross_cutting [
@@ -136,6 +231,7 @@ defmodule Minga.Credo.DependencyDirectionCheck do
   ]
 
   @impl true
+  @spec run(SourceFile.t(), keyword()) :: [Credo.Issue.t()]
   def run(%SourceFile{} = source_file, params) do
     issue_meta = IssueMeta.for(source_file, params)
     filename = source_file.filename
@@ -144,11 +240,112 @@ defmodule Minga.Credo.DependencyDirectionCheck do
       []
     else
       source_layer = layer_for_file(filename)
-      source_module = file_to_module_name(filename)
+      source_module = source_file_to_module_name(source_file)
 
       source_file
       |> Credo.Code.prewalk(&find_violations(&1, &2, source_layer, source_module, issue_meta))
       |> Enum.filter(&is_map/1)
+    end
+  end
+
+  defp find_violations(
+         {{:., meta, [{:__aliases__, _, ref_parts}, function]}, _, _args} = ast,
+         issues,
+         source_layer,
+         source_module,
+         issue_meta
+       )
+       when source_layer != nil and function != :{} do
+    if Enum.all?(ref_parts, &is_atom/1) do
+      ref_name = Enum.map_join(ref_parts, ".", &Atom.to_string/1)
+
+      issues =
+        check_ref_violations(ast, issues, source_layer, source_module, ref_name, meta, issue_meta)
+
+      {ast, issues}
+    else
+      {ast, issues}
+    end
+  end
+
+  defp find_violations(
+         {form, meta, _args} = ast,
+         issues,
+         source_layer,
+         source_module,
+         issue_meta
+       )
+       when source_layer != nil and form in [:def, :defp, :defmacro, :defmacrop, :defdelegate] do
+    issues = check_direct_alias_refs(ast, issues, source_layer, source_module, meta, issue_meta)
+    {ast, issues}
+  end
+
+  defp find_violations(
+         {:%, meta, [{:__aliases__, _, ref_parts} | _]} = ast,
+         issues,
+         source_layer,
+         source_module,
+         issue_meta
+       )
+       when source_layer != nil do
+    if Enum.all?(ref_parts, &is_atom/1) do
+      ref_name = Enum.map_join(ref_parts, ".", &Atom.to_string/1)
+
+      issues =
+        check_ref_violations(ast, issues, source_layer, source_module, ref_name, meta, issue_meta)
+
+      {ast, issues}
+    else
+      {ast, issues}
+    end
+  end
+
+  defp find_violations(
+         {form, meta, _args} = ast,
+         issues,
+         source_layer,
+         source_module,
+         issue_meta
+       )
+       when source_layer != nil and form in [:@, :defstruct] do
+    issues = check_direct_alias_refs(ast, issues, source_layer, source_module, meta, issue_meta)
+    {ast, issues}
+  end
+
+  defp find_violations(
+         {form, meta,
+          [
+            {{:., _, [{:__aliases__, _, base_parts}, :{}]}, _, grouped_refs}
+          ]} = ast,
+         issues,
+         source_layer,
+         source_module,
+         issue_meta
+       )
+       when form in @reference_forms and source_layer != nil do
+    if Enum.all?(base_parts, &is_atom/1) do
+      issues =
+        Enum.reduce(grouped_refs, issues, fn
+          {:__aliases__, _, ref_parts}, acc when is_list(ref_parts) ->
+            ref_name = Enum.map_join(base_parts ++ ref_parts, ".", &Atom.to_string/1)
+
+            check_ref_violations(
+              ast,
+              acc,
+              source_layer,
+              source_module,
+              ref_name,
+              meta,
+              issue_meta
+            )
+
+          _grouped_ref, acc ->
+            acc
+        end)
+
+      {ast, issues}
+    else
+      {ast, issues}
     end
   end
 
@@ -163,11 +360,60 @@ defmodule Minga.Credo.DependencyDirectionCheck do
     if Enum.all?(ref_parts, &is_atom/1) do
       ref_name = Enum.map_join(ref_parts, ".", &Atom.to_string/1)
 
-      if cross_cutting?(ref_name) || not minga_module?(ref_name) do
-        {ast, issues}
-      else
-        target_layer = layer_for_module(ref_name)
+      issues =
+        check_ref_violations(ast, issues, source_layer, source_module, ref_name, meta, issue_meta)
 
+      {ast, issues}
+    else
+      {ast, issues}
+    end
+  end
+
+  defp find_violations(ast, issues, _source_layer, _source_module, _issue_meta),
+    do: {ast, issues}
+
+  defp check_direct_alias_refs(ast, issues, source_layer, source_module, meta, issue_meta) do
+    ast
+    |> direct_alias_refs()
+    |> Enum.reduce(issues, fn {ref_parts, ref_meta}, acc ->
+      ref_name = Enum.map_join(ref_parts, ".", &Atom.to_string/1)
+
+      check_ref_violations(
+        ast,
+        acc,
+        source_layer,
+        source_module,
+        ref_name,
+        ref_meta || meta,
+        issue_meta
+      )
+    end)
+  end
+
+  defp direct_alias_refs(
+         {{:., _meta, [{:__aliases__, _alias_meta, _ref_parts}, _function]}, _call_meta, _args}
+       ),
+       do: []
+
+  defp direct_alias_refs({:%, _meta, [{:__aliases__, _alias_meta, _ref_parts} | _args]}), do: []
+
+  defp direct_alias_refs({:__aliases__, meta, ref_parts}) when length(ref_parts) >= 1 do
+    if Enum.all?(ref_parts, &is_atom/1), do: [{ref_parts, meta}], else: []
+  end
+
+  defp direct_alias_refs(tuple) when is_tuple(tuple),
+    do: tuple |> Tuple.to_list() |> direct_alias_refs()
+
+  defp direct_alias_refs(list) when is_list(list), do: Enum.flat_map(list, &direct_alias_refs/1)
+  defp direct_alias_refs(_), do: []
+
+  defp check_ref_violations(ast, issues, source_layer, source_module, ref_name, meta, issue_meta) do
+    if cross_cutting?(ref_name) || not minga_module?(ref_name) do
+      issues
+    else
+      target_layer = layer_for_module(ref_name)
+
+      {_ast, issues} =
         check_violation(
           ast,
           issues,
@@ -178,14 +424,10 @@ defmodule Minga.Credo.DependencyDirectionCheck do
           meta,
           issue_meta
         )
-      end
-    else
-      {ast, issues}
+
+      issues
     end
   end
-
-  defp find_violations(ast, issues, _source_layer, _source_module, _issue_meta),
-    do: {ast, issues}
 
   defp check_violation(
          ast,
@@ -197,42 +439,122 @@ defmodule Minga.Credo.DependencyDirectionCheck do
          meta,
          issue_meta
        ) do
-    cond do
-      target_layer == nil ->
-        # Unknown module, skip
-        {ast, issues}
+    source_agent_level = agent_level_for_module(source_module)
+    target_agent_level = agent_level_for_module(ref_name)
 
-      allowed_reference?(source_module, ref_name) ->
-        {ast, issues}
-
-      source_layer == 0 and target_layer > 0 ->
+    case agent_level_violation(source_agent_level, target_agent_level, ref_name) do
+      {:violation, message} ->
         issue =
           format_issue(issue_meta,
-            message:
-              "Layer violation: Layer 0 module references Layer #{target_layer} module #{ref_name}. " <>
-                "Layer 0 (pure) modules must not depend on stateful services or orchestration.",
+            message: message,
             trigger: ref_name,
             line_no: meta[:line]
           )
 
         {ast, [issue | issues]}
 
-      source_layer == 1 and target_layer == 2 ->
-        issue =
-          format_issue(issue_meta,
-            message:
-              "Layer violation: Layer 1 module references Layer 2 module #{ref_name}. " <>
-                "Services must not depend on orchestration/presentation. Pass data as arguments instead.",
-            trigger: ref_name,
-            line_no: meta[:line]
-          )
-
-        {ast, [issue | issues]}
-
-      true ->
-        {ast, issues}
+      :ok ->
+        check_top_level_violation(
+          ast,
+          issues,
+          source_layer,
+          source_module,
+          target_layer,
+          ref_name,
+          meta,
+          issue_meta
+        )
     end
   end
+
+  defp check_top_level_violation(
+         ast,
+         issues,
+         _source_layer,
+         _source_module,
+         nil,
+         _ref_name,
+         _meta,
+         _issue_meta
+       ),
+       do: {ast, issues}
+
+  defp check_top_level_violation(
+         ast,
+         issues,
+         source_layer,
+         source_module,
+         target_layer,
+         ref_name,
+         meta,
+         issue_meta
+       ) do
+    if allowed_reference?(source_module, ref_name) do
+      {ast, issues}
+    else
+      check_top_level_direction(
+        ast,
+        issues,
+        source_layer,
+        target_layer,
+        ref_name,
+        meta,
+        issue_meta
+      )
+    end
+  end
+
+  defp check_top_level_direction(ast, issues, 0, target_layer, ref_name, meta, issue_meta)
+       when target_layer > 0 do
+    issue =
+      format_issue(issue_meta,
+        message:
+          "Layer violation: Layer 0 module references Layer #{target_layer} module #{ref_name}. " <>
+            "Layer 0 (pure) modules must not depend on stateful services or orchestration.",
+        trigger: ref_name,
+        line_no: meta[:line]
+      )
+
+    {ast, [issue | issues]}
+  end
+
+  defp check_top_level_direction(ast, issues, 1, 2, ref_name, meta, issue_meta) do
+    issue =
+      format_issue(issue_meta,
+        message:
+          "Layer violation: Layer 1 module references Layer 2 module #{ref_name}. " <>
+            "Services must not depend on orchestration/presentation. Pass data as arguments instead.",
+        trigger: ref_name,
+        line_no: meta[:line]
+      )
+
+    {ast, [issue | issues]}
+  end
+
+  defp check_top_level_direction(
+         ast,
+         issues,
+         _source_layer,
+         _target_layer,
+         _ref_name,
+         _meta,
+         _issue_meta
+       ),
+       do: {ast, issues}
+
+  defp agent_level_violation(0, target_level, ref_name) when target_level in [1, 2] do
+    {:violation,
+     "Agent level violation: Agent Level 0 module references Agent Level #{target_level} module #{ref_name}. " <>
+       "Agent Level 0 modules are pure contracts, value types, and safety interfaces; pass data in instead of depending on runtime services or UI integrations."}
+  end
+
+  defp agent_level_violation(1, 2, ref_name) do
+    {:violation,
+     "Agent level violation: Agent Level 1 module references Agent Level 2 module #{ref_name}. " <>
+       "Agent runtime services and registries must not depend on bundled integrations or presentation modules."}
+  end
+
+  defp agent_level_violation(_source_level, _target_level, _ref_name), do: :ok
 
   defp test_file?(filename) do
     String.contains?(Path.expand(filename), "/test/")
@@ -240,14 +562,29 @@ defmodule Minga.Credo.DependencyDirectionCheck do
 
   @spec layer_for_file(String.t()) :: 0 | 1 | 2 | nil
   defp layer_for_file(filename) do
-    expanded = Path.expand(filename)
+    filename
+    |> Path.expand()
+    |> layer_for_expanded_file()
+  end
 
-    cond do
-      layer_0_file?(expanded) -> 0
-      layer_2_file?(expanded) -> 2
-      String.contains?(expanded, "/minga_agent/") -> 1
-      String.contains?(expanded, "/minga/") -> 1
-      true -> nil
+  defp layer_for_expanded_file(path) do
+    case layer_0_file?(path) do
+      true -> 0
+      false -> layer_for_non_layer_0_file(path)
+    end
+  end
+
+  defp layer_for_non_layer_0_file(path) do
+    case layer_2_file?(path) do
+      true -> 2
+      false -> layer_for_service_file(path)
+    end
+  end
+
+  defp layer_for_service_file(path) do
+    case String.contains?(path, "/minga_agent/") or String.contains?(path, "/minga/") do
+      true -> 1
+      false -> nil
     end
   end
 
@@ -268,12 +605,24 @@ defmodule Minga.Credo.DependencyDirectionCheck do
 
   @spec layer_for_module(String.t()) :: 0 | 1 | 2 | nil
   defp layer_for_module(ref_name) do
-    cond do
-      layer_0_module?(ref_name) -> 0
-      layer_2_module?(ref_name) -> 2
-      String.starts_with?(ref_name, "MingaAgent.") -> 1
-      String.starts_with?(ref_name, "Minga.") -> 1
-      true -> nil
+    case layer_0_module?(ref_name) do
+      true -> 0
+      false -> layer_for_non_layer_0_module(ref_name)
+    end
+  end
+
+  defp layer_for_non_layer_0_module(ref_name) do
+    case layer_2_module?(ref_name) do
+      true -> 2
+      false -> layer_for_service_module(ref_name)
+    end
+  end
+
+  defp layer_for_service_module(ref_name) do
+    case ref_name in ["Minga", "MingaAgent"] or String.starts_with?(ref_name, "MingaAgent.") or
+           String.starts_with?(ref_name, "Minga.") do
+      true -> 1
+      false -> nil
     end
   end
 
@@ -289,6 +638,36 @@ defmodule Minga.Credo.DependencyDirectionCheck do
     end)
   end
 
+  @spec agent_level_for_module(String.t() | nil) :: 0 | 1 | 2 | nil
+  defp agent_level_for_module(nil), do: nil
+
+  defp agent_level_for_module(ref_name) do
+    case agent_level_prefix_match(ref_name, @agent_level_0_prefixes) do
+      true -> 0
+      false -> agent_level_1_or_2_for_module(ref_name)
+    end
+  end
+
+  defp agent_level_1_or_2_for_module(ref_name) do
+    case agent_level_prefix_match(ref_name, @agent_level_2_prefixes) do
+      true -> 2
+      false -> agent_level_1_for_module(ref_name)
+    end
+  end
+
+  defp agent_level_1_for_module(ref_name) do
+    case agent_level_prefix_match(ref_name, @agent_level_1_prefixes) do
+      true -> 1
+      false -> nil
+    end
+  end
+
+  defp agent_level_prefix_match(ref_name, prefixes) do
+    Enum.any?(prefixes, fn prefix ->
+      ref_name == prefix || String.starts_with?(ref_name, prefix <> ".")
+    end)
+  end
+
   defp cross_cutting?(ref_name) do
     Enum.any?(@cross_cutting, fn prefix ->
       ref_name == prefix || String.starts_with?(ref_name, prefix <> ".")
@@ -296,7 +675,8 @@ defmodule Minga.Credo.DependencyDirectionCheck do
   end
 
   defp minga_module?(ref_name) do
-    String.starts_with?(ref_name, "Minga.") ||
+    ref_name in ["Minga", "MingaEditor", "MingaAgent"] ||
+      String.starts_with?(ref_name, "Minga.") ||
       String.starts_with?(ref_name, "MingaEditor.") ||
       String.starts_with?(ref_name, "MingaAgent.")
   end
@@ -317,8 +697,33 @@ defmodule Minga.Credo.DependencyDirectionCheck do
     end
   end
 
+  # Prefer the declared module over path reconstruction so acronym modules like
+  # RemoteAPI, MCP, and OAuth keep their exact casing for classification.
+  defp source_file_to_module_name(%SourceFile{} = source_file) do
+    source_file
+    |> SourceFile.ast()
+    |> ast_to_module_name()
+    |> case do
+      nil -> file_to_module_name(source_file.filename)
+      module_name -> module_name
+    end
+  end
+
+  defp ast_to_module_name(ast) do
+    {_ast, module_name} =
+      Macro.prewalk(ast, nil, fn
+        {:defmodule, _meta, [{:__aliases__, _, parts} | _]} = node, nil ->
+          {node, Enum.map_join(parts, ".", &Atom.to_string/1)}
+
+        node, module_name ->
+          {node, module_name}
+      end)
+
+    module_name
+  end
+
   # Convert a file path like "lib/minga/frontend/protocol.ex" to a module
-  # name like "MingaEditor.Frontend.Protocol". Used for @allowed_references lookup.
+  # name like "MingaEditor.Frontend.Protocol". Used only as a fallback.
   defp file_to_module_name(filename) do
     filename
     |> Path.expand()
