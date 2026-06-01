@@ -105,4 +105,99 @@ func TestDecodeTabBarChromeSummary(t *testing.T) {
 	if command.Chrome.Summary != "** main" {
 		t.Fatalf("summary = %q, want active tab label", command.Chrome.Summary)
 	}
+	if len(command.Chrome.Tabs.Tabs) != 1 {
+		t.Fatalf("tab count = %d, want 1", len(command.Chrome.Tabs.Tabs))
+	}
+	if got := command.Chrome.Tabs.Tabs[0]; !got.Active || got.ID != 9 || got.Label != "main" {
+		t.Fatalf("tab decoded incorrectly: %+v", got)
+	}
+}
+
+func TestDecodeMinibufferChrome(t *testing.T) {
+	packet := append([]byte{generated.OPGuiMinibuffer, 1, 2, 0, 3, 1, ':'}, string16("w")...)
+	packet = append(packet, string16("write file")...)
+	packet = append(packet, 0, 0, 0, 0, 0, 0)
+
+	command, err := DecodeCommand(packet)
+	if err != nil {
+		t.Fatalf("DecodeCommand returned error: %v", err)
+	}
+	mini := command.Chrome.Mini
+	if !mini.Visible || mini.Prompt != ":" || mini.Input != "w" || mini.Context != "write file" {
+		t.Fatalf("minibuffer decoded incorrectly: %+v", mini)
+	}
+	if command.Chrome.Summary != ":w write file" {
+		t.Fatalf("summary = %q, want prompt/input/context", command.Chrome.Summary)
+	}
+}
+
+func TestDecodeFileTreeChromeRows(t *testing.T) {
+	row := []byte{
+		0, 0, 0, 1,
+		0, 0x05,
+		1,
+		0,
+		0, 0,
+		0, 0,
+		0, 0,
+		0, 0,
+		0,
+	}
+	row = append(row, string16("/repo/lib")...)
+	row = append(row, string16("/repo/lib")...)
+	row = append(row, string16("lib")...)
+	row = append(row, string16("lib")...)
+	row = append(row, 1, 'd', 0xFF)
+	row = append(row, 0, 0)
+	body := []byte{2, 1, 3}
+	body = append(body, string16("/repo/lib")...)
+	body = append(body, string16("/repo")...)
+	body = append(body, 0, 30, 0, 1)
+	body = append(body, 0, 0)
+	body = append(body, row...)
+	packet := append([]byte{generated.OPGuiFileTree, 0, 0, 0, byte(len(body))}, body...)
+
+	command, err := DecodeCommand(packet)
+	if err != nil {
+		t.Fatalf("DecodeCommand returned error: %v", err)
+	}
+	tree := command.Chrome.Tree
+	if !tree.Visible || tree.Status != 3 || tree.Root != "/repo" || len(tree.Rows) != 1 {
+		t.Fatalf("file tree decoded incorrectly: %+v", tree)
+	}
+	if got := tree.Rows[0]; !got.Directory || !got.Selected || got.Name != "lib" || got.Depth != 1 {
+		t.Fatalf("file tree row decoded incorrectly: %+v", got)
+	}
+}
+
+func TestDecodeStatusChrome(t *testing.T) {
+	identity := section(0x01, []byte{0, 2, 0})
+	cursor := section(0x02, []byte{0, 0, 0, 12, 0, 0, 0, 8, 0, 0, 0, 90})
+	file := append([]byte{1, '*', 0xAA, 0xBB, 0xCC}, string16("main.ex")...)
+	file = append(file, 6, 'e', 'l', 'i', 'x', 'i', 'r')
+	message := section(0x07, string16("saved"))
+	packet := []byte{generated.OPGuiStatusBar, 4}
+	packet = append(packet, identity...)
+	packet = append(packet, cursor...)
+	packet = append(packet, section(0x06, file)...)
+	packet = append(packet, message...)
+
+	command, err := DecodeCommand(packet)
+	if err != nil {
+		t.Fatalf("DecodeCommand returned error: %v", err)
+	}
+	status := command.Chrome.Status
+	if status.Filename != "main.ex" || status.Filetype != "elixir" || status.Line != 12 || status.Column != 8 || status.Message != "saved" {
+		t.Fatalf("status decoded incorrectly: %+v", status)
+	}
+}
+
+func section(id byte, payload []byte) []byte {
+	out := []byte{id, byte(len(payload) >> 8), byte(len(payload))}
+	return append(out, payload...)
+}
+
+func string16(value string) []byte {
+	out := []byte{byte(len(value) >> 8), byte(len(value))}
+	return append(out, []byte(value)...)
 }

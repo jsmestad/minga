@@ -52,6 +52,81 @@ type ChromePayload struct {
 	Name    string
 	Summary string
 	Bytes   int
+	Tabs    TabBar
+	Mini    Minibuffer
+	Tree    FileTree
+	Status  StatusBar
+}
+
+type TabBar struct {
+	ActiveIndex byte
+	Tabs        []Tab
+}
+
+type Tab struct {
+	Flags       byte
+	ID          uint32
+	GroupID     uint16
+	Icon        string
+	Label       string
+	Tint        uint32
+	Active      bool
+	Dirty       bool
+	Agent       bool
+	Attention   bool
+	Pinned      bool
+	AgentStatus byte
+}
+
+type Minibuffer struct {
+	Visible       bool
+	Mode          byte
+	CursorPos     uint16
+	Prompt        string
+	Input         string
+	Context       string
+	SelectedIndex uint16
+	Candidates    uint16
+	Total         uint16
+}
+
+type FileTree struct {
+	Visible  bool
+	Focused  bool
+	Status   byte
+	Selected string
+	Root     string
+	Width    uint16
+	Error    string
+	Rows     []FileTreeRow
+}
+
+type FileTreeRow struct {
+	ID        string
+	Path      string
+	Name      string
+	Icon      string
+	Depth     byte
+	Flags     uint16
+	Directory bool
+	Expanded  bool
+	Selected  bool
+	Focused   bool
+	Active    bool
+	Dirty     bool
+}
+
+type StatusBar struct {
+	ContentKind byte
+	Mode        byte
+	Flags       byte
+	Line        uint32
+	Column      uint32
+	LineCount   uint32
+	Icon        string
+	Filename    string
+	Filetype    string
+	Message     string
 }
 
 type WindowContent struct {
@@ -352,13 +427,13 @@ func decodeChrome(payload []byte) ChromePayload {
 
 	switch opcode {
 	case generated.OPGuiTabBar:
-		chrome.Summary, chrome.Bytes = decodeTabBarSummary(payload)
+		chrome.Tabs, chrome.Summary, chrome.Bytes = decodeTabBar(payload)
 	case generated.OPGuiMinibuffer:
-		chrome.Summary, chrome.Bytes = decodeMinibufferSummary(payload)
+		chrome.Mini, chrome.Summary, chrome.Bytes = decodeMinibuffer(payload)
 	case generated.OPGuiFileTree:
-		chrome.Summary, chrome.Bytes = decodeFileTreeSummary(payload)
+		chrome.Tree, chrome.Summary, chrome.Bytes = decodeFileTree(payload)
 	case generated.OPGuiStatusBar:
-		chrome.Summary, chrome.Bytes = decodeStatusSummary(payload)
+		chrome.Status, chrome.Summary, chrome.Bytes = decodeStatus(payload)
 	default:
 		if size := sectionedSize(payload); size > 0 {
 			chrome.Bytes = size
@@ -368,18 +443,21 @@ func decodeChrome(payload []byte) ChromePayload {
 	return chrome
 }
 
-func decodeTabBarSummary(payload []byte) (string, int) {
+func decodeTabBar(payload []byte) (TabBar, string, int) {
 	if len(payload) < 3 {
-		return "", len(payload)
+		return TabBar{}, "", len(payload)
 	}
 
-	active := int(payload[1])
+	tabBar := TabBar{ActiveIndex: payload[1]}
 	count := int(payload[2])
 	offset := 3
 	labels := make([]string, 0, count)
+	tabBar.Tabs = make([]Tab, 0, count)
 
 	for i := 0; i < count && len(payload) >= offset+8; i++ {
 		flags := payload[offset]
+		id := u32(payload, offset+1)
+		groupID := u16(payload, offset+5)
 		offset += 1 + 4 + 2
 		icon, next, ok := readString8(payload, offset)
 		if !ok {
@@ -390,76 +468,169 @@ func decodeTabBarSummary(payload []byte) (string, int) {
 		if !ok || len(payload) < next+4 {
 			break
 		}
+		tint := u32(payload, next)
 		offset = next + 4
+		tab := Tab{
+			Flags:       flags,
+			ID:          id,
+			GroupID:     groupID,
+			Icon:        icon,
+			Label:       label,
+			Tint:        tint,
+			Active:      flags&0x01 != 0,
+			Dirty:       flags&0x02 != 0,
+			Agent:       flags&0x04 != 0,
+			Attention:   flags&0x08 != 0,
+			AgentStatus: (flags >> 4) & 0x07,
+			Pinned:      flags&0x80 != 0,
+		}
+		tabBar.Tabs = append(tabBar.Tabs, tab)
 		prefix := " "
-		if i == active || flags&0x01 != 0 {
+		if byte(i) == tabBar.ActiveIndex || tab.Active {
 			prefix = "*"
 		}
 		labels = append(labels, prefix+icon+" "+label)
 	}
 
-	return stringsJoin(labels, "  "), offset
+	return tabBar, stringsJoin(labels, "  "), offset
 }
 
-func decodeMinibufferSummary(payload []byte) (string, int) {
+func decodeMinibuffer(payload []byte) (Minibuffer, string, int) {
 	if len(payload) < 2 || payload[1] == 0 {
-		return "", min(len(payload), 2)
+		return Minibuffer{}, "", min(len(payload), 2)
+	}
+	if len(payload) < 6 {
+		return Minibuffer{Visible: true}, "", len(payload)
 	}
 
-	offset := 6
+	mini := Minibuffer{
+		Visible:   true,
+		Mode:      payload[2],
+		CursorPos: u16(payload, 3),
+	}
+	offset := 5
 	prompt, next, ok := readString8(payload, offset)
 	if !ok {
-		return "", len(payload)
+		return mini, "", len(payload)
 	}
+	mini.Prompt = prompt
 	input, next, ok := readString16(payload, next)
 	if !ok {
-		return "", len(payload)
+		return mini, "", len(payload)
 	}
+	mini.Input = input
 	context, next, ok := readString16(payload, next)
 	if !ok || len(payload) < next+6 {
-		return "", len(payload)
+		return mini, "", len(payload)
 	}
-	return prompt + input + " " + context, len(payload)
+	mini.Context = context
+	mini.SelectedIndex = u16(payload, next)
+	mini.Candidates = u16(payload, next+2)
+	mini.Total = u16(payload, next+4)
+	return mini, strings.TrimSpace(prompt + input + " " + context), len(payload)
 }
 
-func decodeFileTreeSummary(payload []byte) (string, int) {
+func decodeFileTree(payload []byte) (FileTree, string, int) {
 	if len(payload) < 5 {
-		return "", len(payload)
+		return FileTree{}, "", len(payload)
 	}
 
 	size := 5 + int(u32(payload, 1))
 	if len(payload) < size {
-		return "", len(payload)
+		return FileTree{}, "", len(payload)
 	}
 	body := payload[5:size]
 	if len(body) < 3 {
-		return "", size
+		return FileTree{}, "", size
 	}
 
+	flags := body[1]
 	status := body[2]
+	tree := FileTree{Visible: flags&0x01 != 0, Focused: flags&0x02 != 0, Status: status}
 	offset := 3
 	selected, next, ok := readString16(body, offset)
 	if !ok {
-		return "", size
+		return tree, "", size
 	}
+	tree.Selected = selected
 	root, next, ok := readString16(body, next)
 	if !ok || len(body) < next+4 {
-		return "", size
+		return tree, "", size
 	}
-	rowCount := u16(body, next+2)
+	tree.Root = root
+	tree.Width = u16(body, next)
+	rowCount := int(u16(body, next+2))
+	next += 4
+	errorReason, next, ok := readString16(body, next)
+	if ok {
+		tree.Error = errorReason
+		tree.Rows = decodeFileTreeRows(body, next, rowCount)
+	}
 	statusText := map[byte]string{0: "hidden", 1: "loading", 2: "empty", 3: "ready", 4: "error"}[status]
 	if selected != "" {
-		return fmt.Sprintf("%s %s (%d)", statusText, selected, rowCount), size
+		return tree, fmt.Sprintf("%s %s (%d)", statusText, selected, rowCount), size
 	}
-	return fmt.Sprintf("%s %s (%d)", statusText, root, rowCount), size
+	return tree, fmt.Sprintf("%s %s (%d)", statusText, root, rowCount), size
 }
 
-func decodeStatusSummary(payload []byte) (string, int) {
+func decodeFileTreeRows(body []byte, offset int, count int) []FileTreeRow {
+	rows := make([]FileTreeRow, 0, count)
+	for i := 0; i < count && len(body) >= offset+17; i++ {
+		flags := u16(body, offset+4)
+		row := FileTreeRow{
+			Flags:     flags,
+			Depth:     body[offset+6],
+			Directory: flags&0x01 != 0,
+			Expanded:  flags&0x02 != 0,
+			Selected:  flags&0x04 != 0,
+			Focused:   flags&0x08 != 0,
+			Active:    flags&0x10 != 0,
+			Dirty:     flags&0x20 != 0,
+		}
+		offset += 17
+		if len(body) < offset {
+			break
+		}
+		guideCount := int(body[offset-1])
+		offset += guideCount
+		var ok bool
+		row.ID, offset, ok = readString16(body, offset)
+		if !ok {
+			break
+		}
+		row.Path, offset, ok = readString16(body, offset)
+		if !ok {
+			break
+		}
+		_, offset, ok = readString16(body, offset)
+		if !ok {
+			break
+		}
+		row.Name, offset, ok = readString16(body, offset)
+		if !ok {
+			break
+		}
+		row.Icon, offset, ok = readString8(body, offset)
+		if !ok || len(body) < offset+1 {
+			break
+		}
+		offset++
+		_, offset, ok = readString16(body, offset)
+		if !ok {
+			break
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+func decodeStatus(payload []byte) (StatusBar, string, int) {
 	size := sectionedSize(payload)
 	if size == 0 {
-		return "", len(payload)
+		return StatusBar{}, "", len(payload)
 	}
 
+	status := StatusBar{}
 	parts := make([]string, 0, 4)
 	offset := 2
 	for i := 0; i < int(payload[1]); i++ {
@@ -470,31 +641,53 @@ func decodeStatusSummary(payload []byte) (string, int) {
 		offset += sectionLen
 
 		switch sectionID {
+		case 0x01:
+			if len(section) >= 3 {
+				status.ContentKind = section[0]
+				status.Mode = section[1]
+				status.Flags = section[2]
+			}
 		case 0x02:
 			if len(section) >= 12 {
-				parts = append(parts, fmt.Sprintf("%d:%d", u32(section, 0), u32(section, 4)))
+				status.Line = u32(section, 0)
+				status.Column = u32(section, 4)
+				status.LineCount = u32(section, 8)
+				parts = append(parts, fmt.Sprintf("%d:%d", status.Line, status.Column))
 			}
 		case 0x06:
-			if filename, ok := statusFilename(section); ok {
+			icon, filename, filetype, ok := statusFile(section)
+			if ok {
+				status.Icon = icon
+				status.Filename = filename
+				status.Filetype = filetype
 				parts = append(parts, filename)
 			}
 		case 0x07:
 			if message, _, ok := readString16(section, 0); ok && message != "" {
+				status.Message = message
 				parts = append(parts, message)
 			}
 		}
 	}
 
-	return stringsJoin(parts, "  "), size
+	return status, stringsJoin(parts, "  "), size
 }
 
-func statusFilename(section []byte) (string, bool) {
+func statusFile(section []byte) (string, string, string, bool) {
 	if len(section) < 1 {
-		return "", false
+		return "", "", "", false
 	}
-	offset := 1 + int(section[0]) + 3
-	filename, _, ok := readString16(section, offset)
-	return filename, ok
+	icon, offset, ok := readString8(section, 0)
+	if !ok || len(section) < offset+3 {
+		return "", "", "", false
+	}
+	offset += 3
+	filename, offset, ok := readString16(section, offset)
+	if !ok {
+		return "", "", "", false
+	}
+	filetype, _, ok := readString8(section, offset)
+	return icon, filename, filetype, ok
 }
 
 func fixedNoop(payload []byte, size int, name string) (Command, error) {

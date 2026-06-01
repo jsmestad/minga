@@ -71,7 +71,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.viewport.Width = msg.Width
-		m.viewport.Height = max(msg.Height-3, 1)
+		m.viewport.Height = m.bodyHeight()
 		m.send(protocol.EncodeResize(uint16(max(msg.Width, 1)), uint16(max(msg.Height, 1))))
 	case tea.KeyMsg:
 		if packet, ok := keyPacket(msg); ok {
@@ -85,15 +85,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lastError = msg.Err.Error()
 	}
 
+	m.viewport.Width = max(m.width, 1)
+	m.viewport.Height = m.bodyHeight()
 	m.viewport.SetContent(m.content())
 	return m, nil
 }
 
 func (m Model) View() string {
 	body := m.viewport.View()
-	header := m.header()
-	footer := m.footer()
-	return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
+	parts := append(m.headerLines(), body)
+	parts = append(parts, m.footerLines()...)
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
 func (m *Model) applyCommands(commands []protocol.Command) {
@@ -157,12 +159,12 @@ func (m *Model) applyWindowDelta(delta protocol.WindowContent) {
 
 func (m Model) content() string {
 	if len(m.windows) > 0 {
-		return m.semanticContent()
+		return strings.Join(m.withFileTree(m.semanticLines()), "\n")
 	}
-	return m.cellContent()
+	return strings.Join(m.withFileTree(m.cellLines()), "\n")
 }
 
-func (m Model) semanticContent() string {
+func (m Model) semanticLines() []string {
 	lines := make([]string, 0, m.height)
 	for _, id := range m.windowOrder {
 		window := m.windows[id]
@@ -171,9 +173,9 @@ func (m Model) semanticContent() string {
 		}
 	}
 	if len(lines) == 0 {
-		return ""
+		return nil
 	}
-	return strings.Join(lines, "\n")
+	return lines
 }
 
 func (m Model) renderRow(row protocol.WindowRow) string {
@@ -191,7 +193,7 @@ func (m Model) renderRow(row protocol.WindowRow) string {
 	return builder.String()
 }
 
-func (m Model) cellContent() string {
+func (m Model) cellLines() []string {
 	rows := make([][]string, max(m.height-2, 1))
 	for i := range rows {
 		rows[i] = make([]string, max(m.width, 1))
@@ -210,35 +212,164 @@ func (m Model) cellContent() string {
 	for i, row := range rows {
 		rendered[i] = strings.Join(row, "")
 	}
-	return strings.Join(rendered, "\n")
+	return rendered
 }
 
-func (m Model) header() string {
+func (m Model) withFileTree(mainLines []string) []string {
+	tree, ok := m.fileTree()
+	if !ok || !tree.Visible || len(tree.Rows) == 0 || m.width < 50 {
+		return mainLines
+	}
+
+	sidebarWidth := min(max(int(tree.Width), 24), max(m.width/3, 24))
+	sidebar := renderFileTree(tree, sidebarWidth, max(len(mainLines), m.bodyHeight()))
+	lines := make([]string, max(len(mainLines), len(sidebar)))
+	for i := range lines {
+		left := ""
+		right := ""
+		if i < len(sidebar) {
+			left = sidebar[i]
+		}
+		if i < len(mainLines) {
+			right = mainLines[i]
+		}
+		lines[i] = lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+	}
+	return lines
+}
+
+func renderFileTree(tree protocol.FileTree, width int, height int) []string {
+	style := lipgloss.NewStyle().Foreground(lipgloss.Color("#AEB7C2")).Background(lipgloss.Color("#151820")).Width(width)
+	selectedStyle := style.Foreground(lipgloss.Color("#E6EDF3")).Background(lipgloss.Color("#2D3A4D")).Bold(true)
+	header := style.Bold(true).Foreground(lipgloss.Color("#C7D1FF")).Render(fit("Files  "+tree.Root, width))
+	lines := []string{header}
+	for _, row := range tree.Rows {
+		prefix := strings.Repeat("  ", int(row.Depth))
+		marker := " "
+		if row.Directory && row.Expanded {
+			marker = "v"
+		} else if row.Directory {
+			marker = ">"
+		}
+		dirty := ""
+		if row.Dirty {
+			dirty = " *"
+		}
+		text := fit(fmt.Sprintf("%s%s %s %s%s", prefix, marker, row.Icon, row.Name, dirty), width)
+		if row.Selected {
+			lines = append(lines, selectedStyle.Render(text))
+		} else {
+			lines = append(lines, style.Render(text))
+		}
+		if len(lines) >= height {
+			return lines
+		}
+	}
+	for len(lines) < height {
+		lines = append(lines, style.Render(strings.Repeat(" ", width)))
+	}
+	return lines
+}
+
+func (m Model) headerLines() []string {
 	title := m.title
 	if title == "" {
 		title = "Minga"
 	}
-	chrome := make([]string, 0, len(m.chrome))
-	for _, payload := range m.chrome {
-		if payload.Summary != "" {
-			chrome = append(chrome, payload.Name+": "+payload.Summary)
-		} else {
-			chrome = append(chrome, payload.Name)
-		}
+
+	lines := []string{
+		lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#C7D1FF")).Background(lipgloss.Color("#20242C")).Width(m.width).Render(title),
 	}
-	sort.Strings(chrome)
-	if len(chrome) > 0 {
-		title = fmt.Sprintf("%s  %s", title, strings.Join(chrome, "  "))
+	if tabBar, ok := m.tabBar(); ok && len(tabBar.Tabs) > 0 {
+		lines = append(lines, m.renderTabs(tabBar))
 	}
-	return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#C7D1FF")).Background(lipgloss.Color("#20242C")).Width(m.width).Render(title)
+	return lines
 }
 
-func (m Model) footer() string {
+func (m Model) renderTabs(tabBar protocol.TabBar) string {
+	activeStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(lipgloss.Color("#35415A")).Padding(0, 1)
+	inactiveStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#AEB7C2")).Background(lipgloss.Color("#20242C")).Padding(0, 1)
+	dirtyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#EBCB8B"))
+	rendered := make([]string, 0, len(tabBar.Tabs))
+	for _, tab := range tabBar.Tabs {
+		label := strings.TrimSpace(tab.Icon + " " + tab.Label)
+		if tab.Dirty {
+			label += dirtyStyle.Render(" *")
+		}
+		if tab.Attention {
+			label += " !"
+		}
+		style := inactiveStyle
+		if tab.Active {
+			style = activeStyle
+		}
+		rendered = append(rendered, style.Render(label))
+	}
+	return lipgloss.NewStyle().Background(lipgloss.Color("#20242C")).Width(m.width).Render(strings.Join(rendered, ""))
+}
+
+func (m Model) footerLines() []string {
 	status := fmt.Sprintf("row %d col %d", m.cursorRow+1, m.cursorCol+1)
+	if chromeStatus, ok := m.statusBar(); ok && chromeStatus.Filename != "" {
+		status = fmt.Sprintf("%s  %d:%d", chromeStatus.Filename, chromeStatus.Line, chromeStatus.Column)
+		if chromeStatus.Message != "" {
+			status += "  " + chromeStatus.Message
+		}
+	}
 	if m.lastError != "" {
 		status = m.lastError
 	}
-	return lipgloss.NewStyle().Foreground(lipgloss.Color("#9AA4B2")).Background(lipgloss.Color("#16181D")).Width(m.width).Render(status)
+	lines := []string{
+		lipgloss.NewStyle().Foreground(lipgloss.Color("#9AA4B2")).Background(lipgloss.Color("#16181D")).Width(m.width).Render(status),
+	}
+	if mini, ok := m.minibuffer(); ok && mini.Visible {
+		value := strings.TrimSpace(mini.Prompt + mini.Input)
+		if mini.Context != "" {
+			value += "  " + mini.Context
+		}
+		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#D8DEE9")).Background(lipgloss.Color("#101318")).Width(m.width).Render(value))
+	}
+	return lines
+}
+
+func (m Model) bodyHeight() int {
+	return max(m.height-len(m.headerLines())-len(m.footerLines()), 1)
+}
+
+func (m Model) tabBar() (protocol.TabBar, bool) {
+	for _, payload := range m.chrome {
+		if len(payload.Tabs.Tabs) > 0 {
+			return payload.Tabs, true
+		}
+	}
+	return protocol.TabBar{}, false
+}
+
+func (m Model) minibuffer() (protocol.Minibuffer, bool) {
+	for _, payload := range m.chrome {
+		if payload.Mini.Visible {
+			return payload.Mini, true
+		}
+	}
+	return protocol.Minibuffer{}, false
+}
+
+func (m Model) fileTree() (protocol.FileTree, bool) {
+	for _, payload := range m.chrome {
+		if payload.Tree.Visible || len(payload.Tree.Rows) > 0 {
+			return payload.Tree, true
+		}
+	}
+	return protocol.FileTree{}, false
+}
+
+func (m Model) statusBar() (protocol.StatusBar, bool) {
+	for _, payload := range m.chrome {
+		if payload.Status.Filename != "" || payload.Status.Message != "" || payload.Status.Line != 0 {
+			return payload.Status, true
+		}
+	}
+	return protocol.StatusBar{}, false
 }
 
 func (m Model) send(payload []byte) {
@@ -355,4 +486,25 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func fit(value string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if displayWidth(value) <= width {
+		return value + strings.Repeat(" ", width-displayWidth(value))
+	}
+	runes := []rune(value)
+	if len(runes) <= width {
+		return value
+	}
+	return string(runes[:width])
 }
