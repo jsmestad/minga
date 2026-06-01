@@ -524,33 +524,14 @@ defmodule MingaAgent.SessionTest do
     end
 
     test "idle detached sessions are reclaimed after the configured timeout" do
-      {:ok, session} =
-        Session.start_link(provider: MockProvider, provider_opts: [], idle_gc_timeout_ms: 1)
-
-      client = idle_process()
-
-      on_exit(fn -> Process.exit(client, :kill) end)
-
-      assert :ok = Session.subscribe(session, client)
-
-      ref = Process.monitor(session)
-      assert :ok = Session.unsubscribe(session, client)
-      assert_receive {:DOWN, ^ref, :process, ^session, :normal}, @event_timeout
-    end
-
-    test "idle detached sessions with persist?: false exit normally without writing", %{
-      tmp_dir: dir
-    } do
-      bad_store_dir = Path.join(dir, "blocked-store")
-      File.write!(bad_store_dir, "not a directory")
+      idle_gc_token = make_ref()
 
       {:ok, session} =
         Session.start_link(
           provider: MockProvider,
           provider_opts: [],
-          persist?: false,
-          session_store_dir: bad_store_dir,
-          idle_gc_timeout_ms: 1
+          idle_gc_timeout_ms: 60_000,
+          idle_gc_token_fn: fn -> idle_gc_token end
         )
 
       client = idle_process()
@@ -561,7 +542,38 @@ defmodule MingaAgent.SessionTest do
 
       ref = Process.monitor(session)
       assert :ok = Session.unsubscribe(session, client)
+      send(session, {:idle_gc_timeout, idle_gc_token})
       assert_receive {:DOWN, ^ref, :process, ^session, :normal}, @event_timeout
+    end
+
+    test "idle detached sessions with persist?: false exit normally without writing", %{
+      tmp_dir: dir
+    } do
+      bad_store_dir = Path.join(dir, "blocked-store")
+      File.write!(bad_store_dir, "not a directory")
+      idle_gc_token = make_ref()
+
+      {:ok, session} =
+        Session.start_link(
+          provider: MockProvider,
+          provider_opts: [],
+          persist?: false,
+          session_store_dir: bad_store_dir,
+          idle_gc_timeout_ms: 60_000,
+          idle_gc_token_fn: fn -> idle_gc_token end
+        )
+
+      client = idle_process()
+
+      on_exit(fn -> Process.exit(client, :kill) end)
+
+      assert :ok = Session.subscribe(session, client)
+
+      ref = Process.monitor(session)
+      assert :ok = Session.unsubscribe(session, client)
+      send(session, {:idle_gc_timeout, idle_gc_token})
+      assert_receive {:DOWN, ^ref, :process, ^session, :normal}, @event_timeout
+      assert File.read!(bad_store_dir) == "not a directory"
     end
 
     test "sending a prompt while the idle timer is pending keeps the session alive", %{
