@@ -18,18 +18,45 @@ defmodule Mix.Tasks.Compile.MingaGoTui do
   def run(_opts) do
     Mix.Task.run("protocol.gen", [])
 
-    if File.dir?(@module_dir) do
-      output = Path.join(@priv_dir, @binary_name)
-
-      if needs_rebuild?(output) do
-        compile()
-      else
+    cond do
+      not File.dir?(@module_dir) ->
         {:ok, []}
-      end
+
+      go_executable() == nil ->
+        maybe_skip_missing_go()
+
+      true ->
+        output = Path.join(@priv_dir, @binary_name)
+
+        if needs_rebuild?(output) do
+          compile()
+        else
+          {:ok, []}
+        end
+    end
+  end
+
+  @spec maybe_skip_missing_go() :: {:ok, []} | {:error, []}
+  defp maybe_skip_missing_go do
+    if go_required?() do
+      Mix.shell().error(
+        "Go TUI renderer requested, but the `go` executable was not found in PATH"
+      )
+
+      {:error, []}
     else
+      Mix.shell().info("Skipping Go TUI renderer: `go` executable not found")
       {:ok, []}
     end
   end
+
+  @spec go_required?() :: boolean()
+  defp go_required? do
+    System.get_env("MINGA_TUI_IMPL") == "go" or System.get_env("MINGA_GO_TUI_REQUIRED") == "1"
+  end
+
+  @spec go_executable() :: String.t() | nil
+  defp go_executable, do: System.find_executable("go")
 
   @spec needs_rebuild?(String.t()) :: boolean()
   defp needs_rebuild?(output) do
@@ -96,11 +123,11 @@ defmodule Mix.Tasks.Compile.MingaGoTui do
   @impl true
   @spec clean() :: :ok
   def clean do
-    if File.dir?(@module_dir) do
+    if File.dir?(@module_dir) and go_executable() != nil do
       System.cmd("go", ["clean"], cd: @module_dir, stderr_to_stdout: true)
-      File.rm_rf!(Path.join(@module_dir, @build_dir))
     end
 
+    File.rm_rf!(Path.join(@module_dir, @build_dir))
     :ok
   end
 end
