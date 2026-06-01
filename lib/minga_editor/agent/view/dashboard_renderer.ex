@@ -135,21 +135,34 @@ defmodule MingaEditor.Agent.View.DashboardRenderer do
 
     context_lines =
       if display_tokens > 0 do
+        fill_pct = context_fill_pct(usage, bare_model, estimate)
+        pct_color = context_threshold_color(fill_pct, at)
+
         pct_text =
           if limit,
-            do: " (#{context_fill_pct(usage, bare_model, estimate) || 0}% used)",
+            do: " (#{fill_pct || 0}% used)",
             else: ""
 
         cost_text = if usage.cost > 0, do: "$#{Float.round(usage.cost, 4)}", else: "$0.00"
         cache_read = Map.get(usage, :cache_read, 0)
 
+        bar_line =
+          if fill_pct do
+            [context_bar(fill_pct, width, pct_color, at)]
+          else
+            []
+          end
+
         context_lines ++
           [
             dashboard_text(
-              "  #{format_tokens(total_tokens)} tokens#{pct_text}",
+              "  #{format_tokens(display_tokens)} tokens#{pct_text}",
               width,
-              Face.new(fg: at.text_fg, bg: at.panel_bg)
-            ),
+              Face.new(fg: pct_color, bg: at.panel_bg)
+            )
+          ] ++
+          bar_line ++
+          [
             dashboard_text(
               "  ↑ #{format_tokens(Map.get(usage, :input, 0))} in  ↓ #{format_tokens(Map.get(usage, :output, 0))} out",
               width,
@@ -244,6 +257,26 @@ defmodule MingaEditor.Agent.View.DashboardRenderer do
       end)
 
     header ++ server_lines ++ [dashboard_blank(width, at)]
+  end
+
+  @spec context_threshold_color(non_neg_integer() | nil, Theme.Agent.t()) :: Theme.color()
+  defp context_threshold_color(nil, at), do: at.text_fg
+  defp context_threshold_color(pct, at) when pct >= 90, do: at.context_high
+  defp context_threshold_color(pct, at) when pct >= 70, do: at.context_mid
+  defp context_threshold_color(_pct, at), do: at.context_low
+
+  @spec context_bar(non_neg_integer(), pos_integer(), Theme.color(), Theme.Agent.t()) ::
+          (non_neg_integer(), non_neg_integer() -> DisplayList.draw())
+  defp context_bar(pct, width, fill_color, at) do
+    bar_width = max(width - 4, 4)
+    filled = round(pct / 100 * bar_width)
+    empty = bar_width - filled
+    bar = "  " <> String.duplicate("█", filled) <> String.duplicate("░", empty)
+    padded = String.pad_trailing(bar, width)
+
+    fn row, col ->
+      DisplayList.draw(row, col, padded, Face.new(fg: fill_color, bg: at.panel_bg))
+    end
   end
 
   @spec dashboard_text(String.t(), pos_integer(), Face.t()) ::

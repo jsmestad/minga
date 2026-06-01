@@ -29,6 +29,7 @@ defmodule MingaEditor.Agent.ViewContext do
     :editing,
     :buffers,
     :agent_status,
+    :active_tool_name,
     :pending_approval
   ]
 
@@ -42,6 +43,7 @@ defmodule MingaEditor.Agent.ViewContext do
           editing: VimState.t(),
           buffers: MingaEditor.State.Buffers.t(),
           agent_status: atom() | nil,
+          active_tool_name: String.t() | nil,
           pending_approval: map() | nil
         }
 
@@ -76,6 +78,7 @@ defmodule MingaEditor.Agent.ViewContext do
       editing: state.workspace.editing,
       buffers: state.workspace.buffers,
       agent_status: agent.runtime.status,
+      active_tool_name: agent.runtime.active_tool_name,
       pending_approval: agent.pending_approval
     }
   end

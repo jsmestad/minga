@@ -253,8 +253,16 @@ defmodule MingaEditor.Agent.View.PromptRenderer do
 
   @spec model_info_text(RenderInput.t()) :: String.t()
   defp model_info_text(%{panel: %{credentials_configured: false}}) do
-    # No usable provider: don't advertise a model we can't call.
     "Not configured · /auth or /login"
+  end
+
+  defp model_info_text(%{agent_status: :tool_executing, active_tool_name: name})
+       when is_binary(name) and name != "" do
+    "⟳ #{name}"
+  end
+
+  defp model_info_text(%{agent_status: :thinking}) do
+    "⟳ thinking..."
   end
 
   defp model_info_text(input) do

@@ -40,9 +40,9 @@ defmodule MingaEditor.Agent.ChatDecorationsTest do
       readable_highlights =
         result
         |> Decorations.highlights_for_line(0)
-        |> Enum.filter(fn hl -> hl.priority == -30 and hl.style.fg == theme.text_fg end)
+        |> Enum.filter(fn hl -> hl.priority == -5 and hl.style.fg == theme.text_fg end)
 
-      assert [%{style: %{fg: fg}, priority: -30}] = readable_highlights
+      assert [%{style: %{fg: fg}, priority: -5}] = readable_highlights
       assert fg == theme.text_fg
     end
 
@@ -262,16 +262,16 @@ defmodule MingaEditor.Agent.ChatDecorationsTest do
       assert length(above3) == 1
     end
 
-    test "usage messages get a dim highlight" do
+    test "usage messages get a dim highlight and Done marker" do
       decs = Decorations.new()
       messages = [{:usage, %MingaAgent.TurnUsage{input: 100, output: 50, cost: 0.001}}]
       offsets = [{0, 0, 1}]
 
       result = ChatDecorations.build_decorations(decs, messages, offsets, test_theme())
 
-      # Usage gets a highlight decoration for dim styling, but no block decorations
+      # Usage gets a highlight decoration for dim styling and a "Done" block above
       {above, below} = Decorations.blocks_for_line(result, 0)
-      assert above == []
+      assert length(above) == 1
       assert below == []
       refute Decorations.empty?(result)
     end

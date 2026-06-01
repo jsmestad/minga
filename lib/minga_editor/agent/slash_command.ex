@@ -74,6 +74,10 @@ defmodule MingaEditor.Agent.SlashCommand do
       name: "compact",
       description: "Compact conversation context (summarize older turns)"
     },
+    %Command{
+      name: "clear-chat",
+      description: "Hide older messages from the chat display"
+    },
     %Command{name: "continue", description: "Continue from an interrupted stream response"},
     %Command{
       name: "export",
@@ -320,6 +324,7 @@ defmodule MingaEditor.Agent.SlashCommand do
   defp dispatch(state, "system-prompt", _args), do: {:ok, do_system_prompt(state)}
   defp dispatch(state, "budget", args), do: do_budget(state, args)
   defp dispatch(state, "compact", _args), do: do_compact(state)
+  defp dispatch(state, "clear-chat", _args), do: {:ok, AgentCommands.clear_chat_display(state)}
   defp dispatch(state, "continue", _args), do: do_continue(state)
   defp dispatch(state, "export", "html"), do: do_export(state, :html)
   defp dispatch(state, "export", _args), do: do_export(state, :markdown)
