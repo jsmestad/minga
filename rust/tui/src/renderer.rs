@@ -163,24 +163,31 @@ impl Renderer {
     fn handle_semantic(&mut self, command: semantic::Command) {
         match command {
             semantic::Command::WindowContent(window, _) => self.draw_semantic_window(window),
+            semantic::Command::StatusBar(status, _) => self.draw_status_bar(status),
+            semantic::Command::TabBar(tab_bar, _) => self.draw_tab_bar(tab_bar),
             semantic::Command::Unsupported { .. } => {}
         }
     }
 
     fn draw_semantic_window(&mut self, window: semantic::WindowContent) {
         self.clear();
-        self.cursor = (window.cursor_col, window.cursor_row);
+        self.cursor = (
+            window.origin_col.saturating_add(window.cursor_col),
+            window.origin_row.saturating_add(window.cursor_row),
+        );
         self.cursor_shape = window.cursor_shape;
 
         for (row, content) in window.rows.into_iter().enumerate() {
-            let row = row.min(u16::MAX as usize) as u16;
-            self.draw_semantic_row(row, content);
+            let row = window
+                .origin_row
+                .saturating_add(row.min(u16::MAX as usize) as u16);
+            self.draw_semantic_row(row, window.origin_col, content);
         }
     }
 
-    fn draw_semantic_row(&mut self, row: u16, content: semantic::Row) {
+    fn draw_semantic_row(&mut self, row: u16, origin_col: u16, content: semantic::Row) {
         if content.spans.is_empty() {
-            self.write_run(row, 0, &content.text, CellStyle::default());
+            self.write_run(row, origin_col, &content.text, CellStyle::default());
             return;
         }
 
@@ -192,7 +199,7 @@ impl Renderer {
 
             self.write_run(
                 row,
-                span.start_col,
+                origin_col.saturating_add(span.start_col),
                 &segment,
                 CellStyle {
                     fg: span.fg,
@@ -202,6 +209,82 @@ impl Renderer {
                     blend: 100,
                 },
             );
+        }
+    }
+
+    fn draw_status_bar(&mut self, status: semantic::StatusBar) {
+        if self.height == 0 {
+            return;
+        }
+
+        let row = self.height - 1;
+        self.clear_row(row);
+
+        let left = if status.left_segments.is_empty() {
+            fallback_status_left(&status)
+        } else {
+            join_status_segments(&status.left_segments)
+        };
+
+        let right = if status.right_segments.is_empty() {
+            fallback_status_right(&status)
+        } else {
+            join_status_segments(&status.right_segments)
+        };
+
+        let style = CellStyle {
+            fg: 0xD8DEE9,
+            bg: 0x2E3440,
+            attrs: protocol::ATTR_BOLD,
+            ul_color: 0,
+            blend: 100,
+        };
+
+        self.write_run(row, 0, &pad_to_width(&left, self.width), style);
+
+        let right_width = text_width(&right);
+        if right_width < self.width {
+            self.write_run(row, self.width - right_width, &right, style);
+        }
+    }
+
+    fn draw_tab_bar(&mut self, tab_bar: semantic::TabBar) {
+        if self.height == 0 {
+            return;
+        }
+
+        self.clear_row(0);
+        let mut col = 0;
+
+        for tab in tab_bar.tabs {
+            if col >= self.width {
+                break;
+            }
+
+            let label = if tab.dirty {
+                format!(" {} * ", tab.label)
+            } else {
+                format!(" {} ", tab.label)
+            };
+            let bg = if tab.active { 0x3B4252 } else { 0x242933 };
+            let fg = if tab.tint == 0 {
+                0xD8DEE9
+            } else {
+                tab.tint & 0x00FF_FFFF
+            };
+            self.write_run(
+                0,
+                col,
+                &label,
+                CellStyle {
+                    fg,
+                    bg,
+                    attrs: if tab.active { protocol::ATTR_BOLD } else { 0 },
+                    ul_color: 0,
+                    blend: 100,
+                },
+            );
+            col = col.saturating_add(text_width(&label));
         }
     }
 
@@ -360,6 +443,65 @@ fn char_width(ch: char) -> u16 {
     1
 }
 
+fn join_status_segments(segments: &[semantic::StatusSegment]) -> String {
+    segments
+        .iter()
+        .filter(|segment| !segment.text.is_empty())
+        .map(|segment| segment.text.as_str())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn fallback_status_left(status: &semantic::StatusBar) -> String {
+    let mode = match status.mode {
+        1 => "INSERT",
+        2 => "VISUAL",
+        3 => "COMMAND",
+        4 => "OP",
+        5 => "SEARCH",
+        6 => "REPLACE",
+        _ => "NORMAL",
+    };
+    let dirty = if status.flags & 0x04 != 0 { " +" } else { "" };
+
+    if status.filename.is_empty() {
+        format!("{mode}{dirty}")
+    } else {
+        format!("{mode} {}{dirty}", status.filename)
+    }
+}
+
+fn fallback_status_right(status: &semantic::StatusBar) -> String {
+    let mut parts = Vec::new();
+
+    if !status.branch.is_empty() {
+        parts.push(format!("git:{}", status.branch));
+    }
+    if !status.filetype.is_empty() {
+        parts.push(status.filetype.clone());
+    }
+    if status.line_count > 0 {
+        parts.push(format!(
+            "{}:{} / {}",
+            status.line, status.col, status.line_count
+        ));
+    }
+    if !status.message.is_empty() {
+        parts.push(status.message.clone());
+    }
+
+    parts.join(" ")
+}
+
+fn pad_to_width(text: &str, width: u16) -> String {
+    let current = text_width(text);
+    if current >= width {
+        return slice_chars(text, 0, width);
+    }
+
+    format!("{text}{}", " ".repeat((width - current) as usize))
+}
+
 fn slice_chars(text: &str, start_col: u16, end_col: u16) -> String {
     let start = start_col as usize;
     let len = end_col.saturating_sub(start_col) as usize;
@@ -434,5 +576,60 @@ mod tests {
         assert_eq!(renderer.cells.len(), 12);
         assert!(renderer.regions.is_empty());
         assert!(renderer.active_region.is_none());
+    }
+
+    #[test]
+    fn semantic_window_uses_geometry_origin() {
+        let mut renderer = Renderer::new(12, 5);
+
+        renderer.draw_semantic_window(semantic::WindowContent {
+            origin_row: 1,
+            origin_col: 2,
+            cursor_row: 0,
+            cursor_col: 1,
+            cursor_shape: 2,
+            rows: vec![semantic::Row {
+                text: "hello".to_owned(),
+                spans: vec![semantic::Span {
+                    start_col: 0,
+                    end_col: 5,
+                    fg: 0xAABBCC,
+                    bg: 0,
+                    attrs: 0,
+                }],
+            }],
+        });
+
+        assert_eq!(renderer.cursor, (3, 1));
+        let index = renderer.index(2, 1).unwrap();
+        assert_eq!(renderer.cells[index].text, "h");
+        assert_eq!(renderer.cells[index].style.fg, 0xAABBCC);
+    }
+
+    #[test]
+    fn semantic_chrome_draws_tabs_and_status() {
+        let mut renderer = Renderer::new(30, 4);
+
+        renderer.draw_tab_bar(semantic::TabBar {
+            active_index: 0,
+            tabs: vec![semantic::Tab {
+                active: true,
+                dirty: true,
+                label: "main.ex".to_owned(),
+                tint: 0,
+            }],
+        });
+        renderer.draw_status_bar(semantic::StatusBar {
+            mode: 1,
+            filename: "main.ex".to_owned(),
+            filetype: "elixir".to_owned(),
+            line: 12,
+            col: 4,
+            line_count: 99,
+            ..semantic::StatusBar::default()
+        });
+
+        assert_eq!(renderer.cells[renderer.index(1, 0).unwrap()].text, "m");
+        assert_eq!(renderer.cells[renderer.index(0, 3).unwrap()].text, "I");
     }
 }
