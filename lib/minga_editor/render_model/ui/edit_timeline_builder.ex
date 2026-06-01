@@ -5,7 +5,6 @@ defmodule MingaEditor.RenderModel.UI.EditTimelineBuilder do
   alias Minga.RenderModel.UI.EditTimeline
   alias MingaEditor.Agent.EditTimeline, as: EditTimelineState
   alias MingaEditor.Frontend.Emit.Context
-  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
 
   @spec build(Context.t()) :: EditTimeline.t()
   def build(ctx) do
@@ -30,26 +29,21 @@ defmodule MingaEditor.RenderModel.UI.EditTimelineBuilder do
         _ -> 0
       end
 
-    wire_entries =
+    timeline_entries =
       Enum.map(entries, fn entry ->
-        %{
+        %EditTimeline.Entry{
           index: entry.index,
           tool_name: entry.tool_name,
           timestamp_delta: abs(entry.timestamp - first_ts)
         }
       end)
 
-    fp = :erlang.phash2({path, length(entries), viewing, Enum.map(entries, & &1.tool_name)})
-    encoded = ProtocolGUI.encode_gui_edit_timeline(true, viewing, wire_entries)
-
-    %EditTimeline{encoded: encoded, fingerprint: fp}
+    %EditTimeline{visible?: true, viewing_index: viewing, entries: timeline_entries}
   end
 
   @spec build_hidden() :: EditTimeline.t()
   defp build_hidden do
-    encoded = ProtocolGUI.encode_gui_edit_timeline(false, nil, [])
-
-    %EditTimeline{encoded: encoded, fingerprint: :hidden}
+    %EditTimeline{visible?: false}
   end
 
   @spec get_timeline(Context.t()) :: EditTimelineState.t() | nil

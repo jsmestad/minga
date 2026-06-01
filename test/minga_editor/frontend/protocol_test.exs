@@ -43,6 +43,41 @@ defmodule MingaEditor.Frontend.ProtocolTest do
     unwrap_message_frames(rest, remaining - 1, [message | acc])
   end
 
+  # Encodes an agent chat through the core semantic encoder, accepting the legacy
+  # data-map shape these tests were written against.
+  defp encode_gui_agent_chat(data) do
+    alias Minga.Frontend.Adapter.GUI.AgentChatEncoder
+    alias Minga.Frontend.Adapter.GUI.Caches
+    alias Minga.RenderModel.UI.AgentChat
+
+    model =
+      case data do
+        %{visible: false} ->
+          %AgentChat{visible?: false}
+
+        %{visible: true} = d ->
+          %AgentChat{
+            visible?: true,
+            status: Map.get(d, :status, :idle),
+            model_name: Map.get(d, :model, ""),
+            thinking_level: Map.get(d, :thinking_level, ""),
+            prompt: Map.get(d, :prompt, ""),
+            messages: Map.get(d, :messages, []),
+            pending_approval: agent_chat_pending(Map.get(d, :pending_approval))
+          }
+      end
+
+    {binary, _caches} = AgentChatEncoder.encode(model, Caches.new())
+    binary
+  end
+
+  defp agent_chat_pending(nil), do: nil
+
+  defp agent_chat_pending(%{name: name, args: args}) do
+    alias Minga.RenderModel.UI.AgentChat.PendingApproval
+    %PendingApproval{name: name, args: args}
+  end
+
   defp take_string16(<<len::16, value::binary-size(len), rest::binary>>), do: {value, rest}
   defp take_string8(<<len::8, value::binary-size(len), rest::binary>>), do: {value, rest}
 
@@ -1474,7 +1509,7 @@ defmodule MingaEditor.Frontend.ProtocolTest do
         pending_approval: %{name: "shell", args: %{"command" => "ls -la"}}
       }
 
-      encoded = ProtocolGUI.encode_gui_agent_chat(data)
+      encoded = encode_gui_agent_chat(data)
       # Sectioned: opcode + section_count + sections
       assert <<0x78, 8, _sections::binary>> = encoded
       # Verify the pending section (0x04) contains the tool name and summary
@@ -1492,7 +1527,7 @@ defmodule MingaEditor.Frontend.ProtocolTest do
         pending_approval: nil
       }
 
-      encoded = ProtocolGUI.encode_gui_agent_chat(data)
+      encoded = encode_gui_agent_chat(data)
       # Sectioned: opcode + section_count + sections
       assert <<0x78, 8, _sections::binary>> = encoded
       # Verify model is present
@@ -1510,36 +1545,36 @@ defmodule MingaEditor.Frontend.ProtocolTest do
         pending_approval: nil
       }
 
-      encoded = ProtocolGUI.encode_gui_agent_chat(data)
+      encoded = encode_gui_agent_chat(data)
       assert <<0x78, 8, sections::binary>> = encoded
       assert <<4::16, "high">> = gui_agent_chat_section!(sections, 0x08)
     end
 
     test "encodes gui_agent_chat hidden" do
-      encoded = ProtocolGUI.encode_gui_agent_chat(%{visible: false})
+      encoded = encode_gui_agent_chat(%{visible: false})
       # gui_agent_chat hidden
       assert <<0x78, 0::8>> = encoded
     end
 
     test "encodes inline approval tool call message" do
-      tc = MingaAgent.ToolCall.new("tc_1", "write_file", %{"path" => "demo.ex"})
-
-      approval = %{
+      approval = %Minga.RenderModel.UI.AgentChat.ApprovalView{
+        name: "write_file",
         tool_call_id: "tc_1",
-        preview:
-          MingaAgent.ToolApproval.Preview.new(:target, "demo.ex", ["file: demo.ex", "1 edit(s)"])
+        summary: "demo.ex",
+        preview_kind: :target,
+        preview_lines: ["file: demo.ex", "1 edit(s)"]
       }
 
       data = %{
         visible: true,
-        messages: [{:approval_tool_call, tc, approval}],
+        messages: [{:approval_tool_call, approval}],
         status: :thinking,
         model: "claude",
         prompt: "",
         pending_approval: nil
       }
 
-      encoded = ProtocolGUI.encode_gui_agent_chat(data)
+      encoded = encode_gui_agent_chat(data)
 
       assert <<0x78, 8, sections::binary>> = encoded
       messages_payload = gui_agent_chat_section!(sections, 0x06)
@@ -1575,7 +1610,7 @@ defmodule MingaEditor.Frontend.ProtocolTest do
         pending_approval: nil
       }
 
-      encoded = ProtocolGUI.encode_gui_agent_chat(data)
+      encoded = encode_gui_agent_chat(data)
       # Sectioned: opcode + section_count
       assert <<0x78, 8, _sections::binary>> = encoded
 

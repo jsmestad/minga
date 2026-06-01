@@ -12,6 +12,7 @@ defmodule Minga.Integration.GUIProtocolTest do
 
   alias Minga.Frontend.Adapter.GUI.WindowEncoder
   alias Minga.Protocol.Opcodes
+  alias Minga.RenderModel.UI.AgentChat.ToolCallView
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
   alias MingaEditor.UI.Picker
 
@@ -43,6 +44,35 @@ defmodule Minga.Integration.GUIProtocolTest do
     Port.command(port, command)
     assert_receive {^port, {:data, json}}, 5_000
     JSON.decode!(json)
+  end
+
+  # Encodes an agent chat through the core semantic encoder, accepting the legacy
+  # data-map shape these round-trip tests were written against.
+  defp encode_gui_agent_chat(data) do
+    alias Minga.Frontend.Adapter.GUI.AgentChatEncoder
+    alias Minga.Frontend.Adapter.GUI.Caches
+    alias Minga.RenderModel.UI.AgentChat
+
+    model =
+      case data do
+        %{visible: false} ->
+          %AgentChat{visible?: false}
+
+        %{visible: true} = d ->
+          %AgentChat{
+            visible?: true,
+            status: Map.get(d, :status, :idle),
+            model_name: Map.get(d, :model, ""),
+            thinking_level: Map.get(d, :thinking_level, ""),
+            prompt: Map.get(d, :prompt, ""),
+            messages: Map.get(d, :messages, []),
+            help_visible?: Map.get(d, :help_visible, false),
+            help_groups: Map.get(d, :help_groups, [])
+          }
+      end
+
+    {binary, _caches} = AgentChatEncoder.encode(model, Caches.new())
+    binary
   end
 
   describe "GUI chrome opcode round-trip" do
@@ -255,7 +285,7 @@ defmodule Minga.Integration.GUIProtocolTest do
         pending_approval: nil
       }
 
-      cmd = ProtocolGUI.encode_gui_agent_chat(data)
+      cmd = encode_gui_agent_chat(data)
       Port.command(port, cmd)
       assert_receive {^port, {:data, json}}, 5_000
       decoded = JSON.decode!(json)
@@ -274,8 +304,7 @@ defmodule Minga.Integration.GUIProtocolTest do
     end
 
     test "gui_agent_chat with styled_tool_call round-trips", %{port: port} do
-      tc = %MingaAgent.ToolCall{
-        id: "tc-styled",
+      tc = %ToolCallView{
         name: "bash",
         status: :complete,
         is_error: false,
@@ -299,7 +328,7 @@ defmodule Minga.Integration.GUIProtocolTest do
         pending_approval: nil
       }
 
-      cmd = ProtocolGUI.encode_gui_agent_chat(data)
+      cmd = encode_gui_agent_chat(data)
       Port.command(port, cmd)
       assert_receive {^port, {:data, json}}, 5_000
       decoded = JSON.decode!(json)
@@ -327,8 +356,7 @@ defmodule Minga.Integration.GUIProtocolTest do
     end
 
     test "gui_agent_chat with regular tool_call round-trips", %{port: port} do
-      tc = %MingaAgent.ToolCall{
-        id: "tc-regular",
+      tc = %ToolCallView{
         name: "read_file",
         status: :running,
         is_error: false,
@@ -347,7 +375,7 @@ defmodule Minga.Integration.GUIProtocolTest do
         pending_approval: nil
       }
 
-      cmd = ProtocolGUI.encode_gui_agent_chat(data)
+      cmd = encode_gui_agent_chat(data)
       Port.command(port, cmd)
       assert_receive {^port, {:data, json}}, 5_000
       decoded = JSON.decode!(json)
@@ -378,7 +406,7 @@ defmodule Minga.Integration.GUIProtocolTest do
         ]
       }
 
-      cmd = ProtocolGUI.encode_gui_agent_chat(data)
+      cmd = encode_gui_agent_chat(data)
       Port.command(port, cmd)
       assert_receive {^port, {:data, json}}, 5_000
       decoded = JSON.decode!(json)
@@ -412,7 +440,7 @@ defmodule Minga.Integration.GUIProtocolTest do
         pending_approval: nil
       }
 
-      cmd = ProtocolGUI.encode_gui_agent_chat(data)
+      cmd = encode_gui_agent_chat(data)
       Port.command(port, cmd)
       assert_receive {^port, {:data, json}}, 5_000
       decoded = JSON.decode!(json)
@@ -478,13 +506,15 @@ defmodule Minga.Integration.GUIProtocolTest do
 
   describe "hidden GUI chrome commands" do
     test "round-trip visible false for hidden overlays", %{port: port} do
-      alias MingaEditor.UI.Panel.MessageStore
+      alias Minga.Frontend.Adapter.GUI.BottomPanelEncoder
+      alias Minga.Frontend.Adapter.GUI.Caches
+      alias Minga.RenderModel.UI.BottomPanel
 
-      {bottom_panel_cmd, _store} =
-        ProtocolGUI.encode_gui_bottom_panel(%{visible: false}, %MessageStore{})
+      {bottom_panel_cmd, _caches} =
+        BottomPanelEncoder.encode(%BottomPanel{visible?: false}, Caches.new())
 
       cases = [
-        {"gui_agent_chat", ProtocolGUI.encode_gui_agent_chat(%{visible: false})},
+        {"gui_agent_chat", encode_gui_agent_chat(%{visible: false})},
         {"gui_completion", ProtocolGUI.encode_gui_completion(nil, 0, 0)},
         {"gui_which_key", ProtocolGUI.encode_gui_which_key(%{show: false})},
         {"gui_picker", ProtocolGUI.encode_gui_picker(nil)},

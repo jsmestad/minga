@@ -3,36 +3,25 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
 
   alias MingaEditor.RenderModel.UI.AgentContextBuilder
   alias Minga.RenderModel.UI.AgentContext
-  alias MingaEditor.Frontend.Protocol.GUI.BoardPayload
-  alias MingaEditor.Frontend.Protocol.GUI.BoardCardPayload
+  alias Minga.RenderModel.UI.Board
 
   describe "build/1" do
     test "returns hidden when payload is nil" do
-      model = AgentContextBuilder.build(nil)
-
-      assert %AgentContext{visible: false} = model
+      assert %AgentContext{visible: false} = AgentContextBuilder.build(nil)
     end
 
     test "returns hidden when payload is unsupported" do
-      model = AgentContextBuilder.build({:unknown, %{}})
-
-      assert %AgentContext{visible: false} = model
+      assert %AgentContext{visible: false} = AgentContextBuilder.build({:unknown, %{}})
     end
 
     test "returns hidden when board has no zoomed card" do
-      board = %BoardPayload{
-        visible?: true,
-        cards: [],
-        zoomed_card_id: nil
-      }
+      board = %Board{visible?: true, cards: [], zoomed_card_id: nil}
 
-      model = AgentContextBuilder.build({:board, board})
-
-      assert %AgentContext{visible: false} = model
+      assert %AgentContext{visible: false} = AgentContextBuilder.build({:board, board})
     end
 
     test "returns hidden when zoomed card is a you card" do
-      card = %BoardCardPayload{
+      card = %Board.Card{
         id: 1,
         status: :idle,
         kind: :you,
@@ -41,21 +30,15 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
         created_at: DateTime.utc_now()
       }
 
-      board = %BoardPayload{
-        visible?: true,
-        cards: [card],
-        zoomed_card_id: 1
-      }
+      board = %Board{visible?: true, cards: [card], zoomed_card_id: 1}
 
-      model = AgentContextBuilder.build({:board, board})
-
-      assert %AgentContext{visible: false} = model
+      assert %AgentContext{visible: false} = AgentContextBuilder.build({:board, board})
     end
 
     test "returns visible context for agent card" do
       ts = ~U[2024-01-15 10:30:00Z]
 
-      card = %BoardCardPayload{
+      card = %Board.Card{
         id: 42,
         status: :working,
         kind: :agent,
@@ -64,11 +47,7 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
         created_at: ts
       }
 
-      board = %BoardPayload{
-        visible?: true,
-        cards: [card],
-        zoomed_card_id: 42
-      }
+      board = %Board{visible?: true, cards: [card], zoomed_card_id: 42}
 
       model = AgentContextBuilder.build({:board, board})
 
@@ -80,7 +59,7 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
     end
 
     test "sets can_approve for needs_you status" do
-      card = %BoardCardPayload{
+      card = %Board.Card{
         id: 42,
         status: :needs_you,
         kind: :agent,
@@ -89,19 +68,13 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
         created_at: DateTime.utc_now()
       }
 
-      board = %BoardPayload{
-        visible?: true,
-        cards: [card],
-        zoomed_card_id: 42
-      }
+      board = %Board{visible?: true, cards: [card], zoomed_card_id: 42}
 
-      model = AgentContextBuilder.build({:board, board})
-
-      assert model.can_approve == true
+      assert AgentContextBuilder.build({:board, board}).can_approve == true
     end
 
     test "sets can_approve for done status" do
-      card = %BoardCardPayload{
+      card = %Board.Card{
         id: 42,
         status: :done,
         kind: :agent,
@@ -110,19 +83,13 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
         created_at: DateTime.utc_now()
       }
 
-      board = %BoardPayload{
-        visible?: true,
-        cards: [card],
-        zoomed_card_id: 42
-      }
+      board = %Board{visible?: true, cards: [card], zoomed_card_id: 42}
 
-      model = AgentContextBuilder.build({:board, board})
-
-      assert model.can_approve == true
+      assert AgentContextBuilder.build({:board, board}).can_approve == true
     end
 
     test "does not set can_approve for working status" do
-      card = %BoardCardPayload{
+      card = %Board.Card{
         id: 42,
         status: :working,
         kind: :agent,
@@ -131,15 +98,9 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
         created_at: DateTime.utc_now()
       }
 
-      board = %BoardPayload{
-        visible?: true,
-        cards: [card],
-        zoomed_card_id: 42
-      }
+      board = %Board{visible?: true, cards: [card], zoomed_card_id: 42}
 
-      model = AgentContextBuilder.build({:board, board})
-
-      assert model.can_approve == false
+      assert AgentContextBuilder.build({:board, board}).can_approve == false
     end
   end
 end

@@ -5,22 +5,9 @@ defmodule Minga.RenderModel.GuardrailsTest do
   @ui_model_root Path.join(@repo_root, "lib/minga/render_model/ui")
   @editor_render_model_root Path.join(@repo_root, "lib/minga_editor/render_model")
 
-  @legacy_preencoded_ui_models MapSet.new([
-                                 "agent_chat",
-                                 "board",
-                                 "bottom_panel",
-                                 "change_summary",
-                                 "edit_timeline"
-                               ])
+  @legacy_preencoded_ui_models MapSet.new([])
 
-  @legacy_protocol_gui_builder_files MapSet.new([
-                                       "lib/minga_editor/render_model/ui/agent_chat_builder.ex",
-                                       "lib/minga_editor/render_model/ui/agent_context_builder.ex",
-                                       "lib/minga_editor/render_model/ui/board_builder.ex",
-                                       "lib/minga_editor/render_model/ui/bottom_panel_builder.ex",
-                                       "lib/minga_editor/render_model/ui/change_summary_builder.ex",
-                                       "lib/minga_editor/render_model/ui/edit_timeline_builder.ex"
-                                     ])
+  @legacy_protocol_gui_builder_files MapSet.new([])
 
   test "only tracked legacy UI render models carry protocol payload fields" do
     violations = payload_field_violations()

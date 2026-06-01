@@ -119,7 +119,7 @@ defmodule MingaEditor.Frontend.Emit.Context do
   @spec compute_title(map()) :: String.t()
   defp compute_title(%{shell: shell} = state) do
     case shell.gui_payload(state) do
-      {:board, %MingaEditor.Frontend.Protocol.GUI.BoardPayload{} = board} ->
+      {:board, %Minga.RenderModel.UI.Board{} = board} ->
         compute_board_title(board)
 
       nil ->
@@ -137,9 +137,9 @@ defmodule MingaEditor.Frontend.Emit.Context do
 
   defp compute_title(state), do: compute_standard_title(state)
 
-  @spec compute_board_title(MingaEditor.Frontend.Protocol.GUI.BoardPayload.t()) :: String.t()
+  @spec compute_board_title(Minga.RenderModel.UI.Board.t()) :: String.t()
   defp compute_board_title(%{zoomed_card_id: card_id} = board) when card_id != nil do
-    card = MingaEditor.Frontend.Protocol.GUI.BoardPayload.zoomed_card(board)
+    card = Minga.RenderModel.UI.Board.zoomed_card(board)
     card_name = if card, do: card.task, else: "Board"
     "#{card_name} \u2014 Minga"
   end

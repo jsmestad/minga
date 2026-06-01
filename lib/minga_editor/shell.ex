@@ -39,7 +39,7 @@ defmodule MingaEditor.Shell do
 
   @typedoc "Structured GUI payload returned by a shell and encoded centrally by frontend protocol modules. Unknown tags are treated as unsupported extension payloads and logged by the GUI emitter."
   @type gui_payload ::
-          {:board, MingaEditor.Frontend.Protocol.GUI.BoardPayload.t()} | {atom(), term()} | nil
+          {:board, Minga.RenderModel.UI.Board.t()} | {atom(), term()} | nil
 
   @typedoc """
   Why a buffer was added — re-exported here from `Shell.BufferLifecycle`
