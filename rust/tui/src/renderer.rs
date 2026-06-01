@@ -1,7 +1,7 @@
 use crate::protocol::{self, Command, DrawStyledText, DrawText, Region};
 use crate::terminal::{CellStyle, Terminal};
 use std::collections::HashMap;
-use std::io;
+use std::io::{self, Write};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Cell {
@@ -46,7 +46,12 @@ impl Renderer {
         }
     }
 
-    pub fn handle(&mut self, command: Command, terminal: &mut Terminal) -> io::Result<()> {
+    pub fn handle(
+        &mut self,
+        command: Command,
+        terminal: &mut Terminal,
+        output: &mut impl Write,
+    ) -> io::Result<()> {
         match command {
             Command::Clear => self.clear(),
             Command::BatchEnd => self.render(terminal)?,
@@ -78,15 +83,28 @@ impl Renderer {
             }
             Command::MeasureText { request_id, text } => {
                 let width = text_width(&text);
-                protocol::write_packet(
-                    &mut std::io::stdout().lock(),
-                    &protocol::encode_text_width(request_id, width),
-                )?;
+                protocol::write_packet(output, &protocol::encode_text_width(request_id, width))?;
             }
             Command::Noop(_) => {}
         }
 
         Ok(())
+    }
+
+    pub fn resize(&mut self, width: u16, height: u16) {
+        self.width = width;
+        self.height = height;
+        self.cells = vec![Cell::default(); width as usize * height as usize];
+        self.previous = vec![
+            Cell {
+                text: "\0".to_owned(),
+                style: CellStyle::default()
+            };
+            width as usize * height as usize
+        ];
+        self.cursor = (0, 0);
+        self.regions.clear();
+        self.active_region = None;
     }
 
     fn clear(&mut self) {
@@ -315,10 +333,15 @@ mod tests {
                     z_order: 0,
                 }),
                 &mut Terminal::memory(10, 5),
+                &mut Vec::new(),
             )
             .unwrap();
         renderer
-            .handle(Command::SetActiveRegion(1), &mut Terminal::memory(10, 5))
+            .handle(
+                Command::SetActiveRegion(1),
+                &mut Terminal::memory(10, 5),
+                &mut Vec::new(),
+            )
             .unwrap();
         renderer.draw_text(DrawText {
             row: 0,
@@ -331,5 +354,32 @@ mod tests {
 
         let index = renderer.index(3, 2).unwrap();
         assert_eq!(renderer.cells[index].text, "x");
+    }
+
+    #[test]
+    fn resize_rebuilds_grid_and_clears_regions() {
+        let mut renderer = Renderer::new(10, 5);
+        renderer.regions.insert(
+            1,
+            Region {
+                id: 1,
+                parent_id: 0,
+                role: 0,
+                row: 0,
+                col: 0,
+                width: 2,
+                height: 2,
+                z_order: 0,
+            },
+        );
+        renderer.active_region = renderer.regions.get(&1).copied();
+
+        renderer.resize(4, 3);
+
+        assert_eq!(renderer.width, 4);
+        assert_eq!(renderer.height, 3);
+        assert_eq!(renderer.cells.len(), 12);
+        assert!(renderer.regions.is_empty());
+        assert!(renderer.active_region.is_none());
     }
 }

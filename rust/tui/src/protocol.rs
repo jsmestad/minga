@@ -229,6 +229,37 @@ pub fn encode_text_width(request_id: u32, width: u16) -> [u8; 7] {
     ]
 }
 
+pub fn encode_key_press(codepoint: u32, modifiers: u8) -> [u8; 6] {
+    let codepoint = codepoint.to_be_bytes();
+    [
+        opcodes::OP_KEY_PRESS,
+        codepoint[0],
+        codepoint[1],
+        codepoint[2],
+        codepoint[3],
+        modifiers,
+    ]
+}
+
+pub fn encode_resize(width: u16, height: u16) -> [u8; 5] {
+    [
+        opcodes::OP_RESIZE,
+        (width >> 8) as u8,
+        width as u8,
+        (height >> 8) as u8,
+        height as u8,
+    ]
+}
+
+pub fn encode_paste_event(text: &[u8]) -> Vec<u8> {
+    let len = text.len().min(u16::MAX as usize);
+    let mut payload = Vec::with_capacity(3 + len);
+    payload.push(opcodes::OP_PASTE_EVENT);
+    payload.extend_from_slice(&(len as u16).to_be_bytes());
+    payload.extend_from_slice(&text[..len]);
+    payload
+}
+
 fn decode_draw_text(bytes: &[u8]) -> Result<Command, DecodeError> {
     require_len(bytes, 14, "draw_text header")?;
     let len = read_u16(bytes, 12) as usize;
@@ -441,5 +472,18 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn encodes_input_events() {
+        assert_eq!(
+            encode_key_press(57_352, MOD_CTRL),
+            [opcodes::OP_KEY_PRESS, 0, 0, 224, 8, 2]
+        );
+        assert_eq!(encode_resize(120, 40), [opcodes::OP_RESIZE, 0, 120, 0, 40]);
+        assert_eq!(
+            encode_paste_event(b"hello"),
+            vec![opcodes::OP_PASTE_EVENT, 0, 5, b'h', b'e', b'l', b'l', b'o']
+        );
     }
 }
