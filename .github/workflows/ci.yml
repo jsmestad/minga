@@ -147,6 +147,31 @@ jobs:
       - name: Run Zig tests
         run: cd zig && zig build test
 
+  test-go-tui:
+    name: Test (Go TUI)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go/tui/go.mod
+          cache-dependency-path: go/tui/go.sum
+
+      - name: Check Go formatting
+        run: |
+          cd go/tui
+          test -z "$(gofmt -l .)"
+
+      - name: Check Go module files
+        run: |
+          cd go/tui
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+      - name: Run Go tests
+        run: cd go/tui && go test ./...
+
   swift:
     name: Swift (macOS GUI)
     runs-on: macos-15
