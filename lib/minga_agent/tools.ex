@@ -180,7 +180,7 @@ defmodule MingaAgent.Tools do
   @spec builtin_specs() :: [Spec.t()]
   def builtin_specs do
     all(project_root: ".")
-    |> Enum.reject(&(&1.name in BundledSources.read_only_tool_names()))
+    |> Enum.reject(&(&1.name in BundledSources.reserved_names()))
     |> Enum.map(&builtin_spec_from_tool/1)
   end
 

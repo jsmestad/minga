@@ -470,6 +470,7 @@ defmodule Minga.Events do
   @spec broadcast(:extension_updates_available, Minga.Extension.UpdatesAvailableEvent.t()) :: :ok
   @spec broadcast(:extension_agent_contributions_started, map()) :: :ok
   @spec broadcast(:agent_mcp_servers_changed, map()) :: :ok
+  @spec broadcast(:agent_tools_changed, map()) :: :ok
   def broadcast(topic, payload) when is_atom(topic) and is_map(payload) do
     broadcast(topic, payload, default_registry())
   end
