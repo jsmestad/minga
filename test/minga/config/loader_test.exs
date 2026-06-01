@@ -1216,6 +1216,7 @@ defmodule Minga.Config.LoaderTest do
 
       on_exit(fn ->
         File.rm_rf!(ext_dir)
+        if Process.whereis(ExtRegistry), do: ExtRegistry.unregister(:loader_start_all_failure)
         :code.purge(ext_module)
         :code.delete(ext_module)
       end)

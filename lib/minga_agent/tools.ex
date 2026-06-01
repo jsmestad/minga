@@ -43,6 +43,8 @@ defmodule MingaAgent.Tools do
   alias Minga.Buffer.Document
   alias Minga.Buffer.Replace
   alias MingaAgent.ProjectView
+  alias MingaAgent.Tool.Context, as: ToolContext
+  alias MingaAgent.Tool.Spec
   alias MingaAgent.ToolRouter
   alias MingaAgent.Tools.DeleteFile
   alias MingaAgent.Tools.ApplyDiff
@@ -171,6 +173,55 @@ defmodule MingaAgent.Tools do
     ]
   end
 
+  @doc "Returns source-owned built-in tool declarations."
+  @spec builtin_specs() :: [Spec.t()]
+  def builtin_specs do
+    Enum.map(all(project_root: "."), &builtin_spec_from_tool/1)
+  end
+
+  @doc "Returns all built-in tool names."
+  @spec builtin_names() :: [String.t()]
+  def builtin_names do
+    builtin_specs()
+    |> Enum.map(& &1.name)
+  end
+
+  @spec builtin_spec_from_tool(Tool.t()) :: Spec.t()
+  defp builtin_spec_from_tool(%Tool{} = tool) do
+    name = tool.name
+
+    Spec.new!(
+      source: :builtin,
+      name: name,
+      description: tool.description || "",
+      parameter_schema: tool.parameter_schema || %{},
+      category: category_for(name),
+      approval_level: approval_for(name),
+      capabilities: capabilities_for(name),
+      context_requirements: context_requirements_for(name),
+      build: fn context -> built_in_callback(name, context) end
+    )
+  end
+
+  @spec built_in_callback(String.t(), ToolContext.t() | nil) :: Spec.callback()
+  defp built_in_callback(name, nil) do
+    callback_from_tools(name, all(project_root: "."))
+  end
+
+  defp built_in_callback(name, %ToolContext{} = context) do
+    callback_from_tools(name, all(ToolContext.tools_opts(context)))
+  end
+
+  @spec callback_from_tools(String.t(), [Tool.t()]) :: Spec.callback()
+  defp callback_from_tools(name, tools) do
+    tools
+    |> Enum.find(&(&1.name == name))
+    |> case do
+      %Tool{callback: callback} -> callback
+      nil -> fn _args -> {:error, {:tool_not_found, name}} end
+    end
+  end
+
   @doc "Returns the read-only tool subset for ephemeral inline ask sessions."
   @spec read_only(tools_opts()) :: [Tool.t()]
   def read_only(opts \\ []) do
@@ -196,6 +247,86 @@ defmodule MingaAgent.Tools do
   @spec read_only_name?(Tool.t() | String.t()) :: boolean()
   def read_only_name?(%Tool{name: name}), do: read_only_name?(name)
   def read_only_name?(name) when is_binary(name), do: name in @read_only_tools
+
+  @spec category_for(String.t()) :: Spec.category()
+  defp category_for("read_file"), do: :filesystem
+  defp category_for("write_file"), do: :filesystem
+  defp category_for("edit_file"), do: :filesystem
+  defp category_for("multi_edit_file"), do: :filesystem
+  defp category_for("apply_diff"), do: :filesystem
+  defp category_for("delete_file"), do: :filesystem
+  defp category_for("list_directory"), do: :filesystem
+  defp category_for("find"), do: :filesystem
+  defp category_for("grep"), do: :filesystem
+  defp category_for("shell"), do: :shell
+  defp category_for("fetch_url"), do: :network
+  defp category_for("subagent"), do: :agent
+  defp category_for("describe_runtime"), do: :agent
+  defp category_for("describe_tools"), do: :agent
+  defp category_for("git_status"), do: :git
+  defp category_for("git_diff"), do: :git
+  defp category_for("git_log"), do: :git
+  defp category_for("git_stage"), do: :git
+  defp category_for("git_commit"), do: :git
+  defp category_for("memory_write"), do: :memory
+  defp category_for("diagnostics"), do: :lsp
+  defp category_for("definition"), do: :lsp
+  defp category_for("references"), do: :lsp
+  defp category_for("hover"), do: :lsp
+  defp category_for("document_symbols"), do: :lsp
+  defp category_for("workspace_symbols"), do: :lsp
+  defp category_for("rename"), do: :lsp
+  defp category_for("code_actions"), do: :lsp
+  defp category_for(_name), do: :custom
+
+  @spec approval_for(String.t()) :: Spec.approval_level()
+  defp approval_for(name) do
+    if destructive?(name), do: :ask, else: :auto
+  end
+
+  @spec capabilities_for(String.t()) :: [Spec.capability()]
+  defp capabilities_for(name)
+       when name in ["write_file", "edit_file", "multi_edit_file", "apply_diff", "delete_file"],
+       do: [:mutate_project]
+
+  defp capabilities_for(name) when name in ["read_file", "list_directory", "find", "grep"],
+    do: [:read_project]
+
+  defp capabilities_for("shell"), do: [:run_shell]
+  defp capabilities_for(name) when name in ["git_stage", "git_commit"], do: [:git_mutate]
+  defp capabilities_for(name) when name in ["git_status", "git_diff", "git_log"], do: [:git_read]
+  defp capabilities_for("fetch_url"), do: [:network]
+  defp capabilities_for("memory_write"), do: [:memory_write]
+  defp capabilities_for("subagent"), do: [:spawn_agent]
+  defp capabilities_for(name) when name in ["rename", "code_actions"], do: [:lsp_mutate]
+
+  defp capabilities_for(name)
+       when name in [
+              "diagnostics",
+              "definition",
+              "references",
+              "hover",
+              "document_symbols",
+              "workspace_symbols"
+            ],
+       do: [:lsp_read]
+
+  defp capabilities_for(_name), do: []
+
+  @spec context_requirements_for(String.t()) :: [Spec.context_requirement()]
+  defp context_requirements_for(name) when name in @read_only_tools,
+    do: context_requirements_for_read_only(name)
+
+  defp context_requirements_for("fetch_url"), do: []
+  defp context_requirements_for("describe_runtime"), do: []
+  defp context_requirements_for("describe_tools"), do: []
+  defp context_requirements_for(_name), do: [:tool_context]
+
+  @spec context_requirements_for_read_only(String.t()) :: [Spec.context_requirement()]
+  defp context_requirements_for_read_only("fetch_url"), do: []
+  defp context_requirements_for_read_only("describe_runtime"), do: []
+  defp context_requirements_for_read_only("describe_tools"), do: []
+  defp context_requirements_for_read_only(_name), do: [:tool_context]
 
   # ── Tool definitions ────────────────────────────────────────────────────────
 

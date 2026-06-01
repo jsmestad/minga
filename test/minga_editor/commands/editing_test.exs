@@ -3,7 +3,8 @@ defmodule MingaEditor.Commands.EditingTest do
   Boundary-focused coverage for editing commands.
   """
 
-  use ExUnit.Case, async: true
+  # async: false because the editor smoke test dispatches through global command and advice registries.
+  use ExUnit.Case, async: false
 
   import MingaEditor.CommandStateHelpers
 
@@ -448,6 +449,8 @@ defmodule MingaEditor.Commands.EditingTest do
         keymap_server: keymap_server,
         options_server: options_server
       )
+
+    {:ok, ^buffer} = GenServer.call(editor, :api_active_buffer)
 
     {editor, buffer}
   end

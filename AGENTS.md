@@ -240,7 +240,7 @@ The practical rule: **prefer the entry-point module when one exists**, because i
 
 Minga uses three namespaces that enforce dependency direction: `Minga.*` (Layer 0), `MingaAgent.*` (Layer 1), `MingaEditor.*` (Layer 2). Dependencies flow downward only. A credo check enforces this at compile time. See `docs/ARCHITECTURE.md` for the full rationale.
 
-MingaAgent also has internal Agent Level 0/1/2 rules from epic #2075. Agent Level 0 contains pure contracts, value types, provider specs, and safety interfaces; Agent Level 1 contains runtime services, source-owned registries such as `MingaAgent.ProviderRegistry`, credentials, approval, `ToolRouter`, changesets, buffer forks, edit boundaries, and extension callback code leases; Agent Level 2 contains bundled integrations, adapters, and agent presentation surfaces. `Minga.Credo.DependencyDirectionCheck` enforces that Agent Level 0 cannot depend on Levels 1 or 2 and Agent Level 1 cannot depend on Level 2. See `docs/ARCHITECTURE.md#mingaagent-internal-levels` for the current module classification.
+MingaAgent also has internal Agent Level 0/1/2 rules from epic #2075. Agent Level 0 contains pure contracts, value types, provider specs, tool specs, and safety interfaces; Agent Level 1 contains runtime services, source-owned registries such as `MingaAgent.ProviderRegistry`, `MingaAgent.Tool.Context`, credentials, approval, `ToolRouter`, changesets, buffer forks, edit boundaries, and extension callback code leases; Agent Level 2 contains bundled integrations, adapters, and agent presentation surfaces. `Minga.Credo.DependencyDirectionCheck` enforces that Agent Level 0 cannot depend on Levels 1 or 2 and Agent Level 1 cannot depend on Level 2. See `docs/ARCHITECTURE.md#mingaagent-internal-levels` for the current module classification.
 
 #### Layer 0: `lib/minga/` (Minga.*)
 
@@ -269,7 +269,7 @@ MingaAgent also has internal Agent Level 0/1/2 rules from epic #2075. Agent Leve
 | (root) | `MingaAgent.Runtime` | Public API facade for external clients |
 | `session*.ex` | `MingaAgent.SessionManager` | Agent session lifecycle, metadata |
 | `provider_registry.ex` | `MingaAgent.ProviderRegistry` | Source-owned provider declarations, duplicate checks, enable/disable state |
-| `tool/` | `MingaAgent.Tool.Registry` | Tool specs, ETS registry, executor with advice integration |
+| `tool/` | `MingaAgent.Tool.Registry` | Source-owned tool specs, `Tool.Context`, executor with advice integration |
 | `tools/` | (none) | Individual tool implementations (read_file, write_file, shell, etc.) |
 | `gateway/` | `MingaAgent.Gateway.Server` | WebSocket + JSON-RPC API gateway (Bandit/WebSock) |
 | `introspection.ex` | `MingaAgent.Introspection` | Runtime self-description for external clients |
