@@ -478,10 +478,12 @@ defmodule Minga.Integration.GUIProtocolTest do
 
   describe "hidden GUI chrome commands" do
     test "round-trip visible false for hidden overlays", %{port: port} do
-      alias MingaEditor.UI.Panel.MessageStore
+      alias Minga.Frontend.Adapter.GUI.BottomPanelEncoder
+      alias Minga.Frontend.Adapter.GUI.Caches
+      alias Minga.RenderModel.UI.BottomPanel
 
-      {bottom_panel_cmd, _store} =
-        ProtocolGUI.encode_gui_bottom_panel(%{visible: false}, %MessageStore{})
+      {bottom_panel_cmd, _caches} =
+        BottomPanelEncoder.encode(%BottomPanel{visible?: false}, Caches.new())
 
       cases = [
         {"gui_agent_chat", ProtocolGUI.encode_gui_agent_chat(%{visible: false})},

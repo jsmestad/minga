@@ -1,22 +1,55 @@
 defmodule Minga.RenderModel.UI.BottomPanel do
   @moduledoc """
-  Pre-encoded bottom panel model.
+  Semantic bottom panel model.
 
-  The bottom panel wire format includes tab definitions, active tab index,
-  height percent, filter state, and message entries with timestamps. Rather
-  than duplicating that encoding in core, the builder pre-encodes the binary
-  and stores it here along with a fingerprint for change detection.
+  Describes the bottom panel as domain data: visibility, the active tab index,
+  height, filter, the tab definitions (pre-resolved type byte + name), and the
+  resolved message entries to send this frame. The GUI adapter
+  (`Minga.Frontend.Adapter.GUI.BottomPanelEncoder`) owns the wire encoding.
 
-  The bottom panel has a side effect: encoding may advance the message_store
-  cursor. The builder captures this by returning both the model and the
-  updated message_store, which the orchestrator must apply back to ctx.
+  The message-store cursor advance is a builder concern, not an encoder concern:
+  the builder resolves which entries are new, advances the store, and places the
+  resolved entries here. The encoder is a pure function of this model.
   """
 
+  alias __MODULE__.MessageEntry
+
+  @typedoc "A tab definition: its wire type byte and display name."
+  @type tab :: {type_byte :: non_neg_integer(), name :: String.t()}
+
   @type t :: %__MODULE__{
-          encoded: binary(),
-          fingerprint: integer()
+          visible?: boolean(),
+          active_tab_index: non_neg_integer(),
+          height_percent: non_neg_integer(),
+          filter_byte: non_neg_integer(),
+          tabs: [tab()],
+          messages: [MessageEntry.t()]
         }
 
-  @enforce_keys [:encoded, :fingerprint]
-  defstruct [:encoded, :fingerprint]
+  defstruct visible?: false,
+            active_tab_index: 0,
+            height_percent: 0,
+            filter_byte: 0,
+            tabs: [],
+            messages: []
+
+  defmodule MessageEntry do
+    @moduledoc """
+    One resolved message-log entry to render. Level and subsystem are
+    pre-resolved to their wire bytes by the builder so the encoder stays free of
+    editor-defined level/subsystem semantics.
+    """
+
+    @type t :: %__MODULE__{
+            id: non_neg_integer(),
+            level_byte: non_neg_integer(),
+            subsystem_byte: non_neg_integer(),
+            ts_secs: non_neg_integer(),
+            file_path: String.t() | nil,
+            text: String.t()
+          }
+
+    @enforce_keys [:id, :level_byte, :subsystem_byte, :ts_secs, :text]
+    defstruct [:id, :level_byte, :subsystem_byte, :ts_secs, :text, file_path: nil]
+  end
 end

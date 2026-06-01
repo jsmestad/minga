@@ -148,7 +148,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @op_gui_status_bar Opcodes.gui_status_bar()
   @op_gui_picker Opcodes.gui_picker()
   @op_gui_agent_chat Opcodes.gui_agent_chat()
-  @op_gui_bottom_panel Opcodes.gui_bottom_panel()
   @op_gui_picker_preview Opcodes.gui_picker_preview()
   @op_gui_tool_manager Opcodes.gui_tool_manager()
   @op_gui_minibuffer Opcodes.gui_minibuffer()
@@ -450,89 +449,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   # ═══════════════════════════════════════════════════════════════════════════
   # Encoding (BEAM → Frontend)
   # ═══════════════════════════════════════════════════════════════════════════
-
-  # ── Bottom panel ──
-
-  @doc """
-  Encodes a gui_bottom_panel command from a `BottomPanel.t()`.
-
-  Wire format:
-    When visible:
-      opcode(1) + visible=1(1) + active_tab_index(1) + height_percent(1)
-      + filter_preset(1) + tab_count(1) + tab_defs... + content_payload
-    Per tab_def:
-      tab_type(1) + name_len(1) + name(name_len)
-    Messages content_payload (when active tab is :messages):
-      entry_count(2) + entries...
-    Per entry:
-      id(4) + level(1) + subsystem(1) + timestamp_secs(4)
-      + path_len(2) + path(path_len) + text_len(2) + text(text_len)
-    When hidden:
-      opcode(1) + visible=0(1)
-  """
-  @spec encode_gui_bottom_panel(
-          MingaEditor.BottomPanel.t(),
-          MingaEditor.UI.Panel.MessageStore.t()
-        ) :: {binary(), MingaEditor.UI.Panel.MessageStore.t()}
-  def encode_gui_bottom_panel(%{visible: false}, store) do
-    {<<@op_gui_bottom_panel, 0>>, store}
-  end
-
-  def encode_gui_bottom_panel(%{visible: true} = panel, store) do
-    alias MingaEditor.BottomPanel
-    alias MingaEditor.UI.Panel.MessageStore
-
-    active_index =
-      Enum.find_index(panel.tabs, &(&1 == panel.active_tab)) || 0
-
-    tab_defs =
-      for tab <- panel.tabs, into: <<>> do
-        name = BottomPanel.tab_name(tab)
-        name_bytes = byte_size(name)
-        <<BottomPanel.tab_type_byte(tab)::8, name_bytes::8, name::binary>>
-      end
-
-    header =
-      <<@op_gui_bottom_panel, 1, active_index::8, panel.height_percent::8,
-        BottomPanel.filter_byte(panel.filter)::8, length(panel.tabs)::8, tab_defs::binary>>
-
-    # Append content payload for the active tab
-    case panel.active_tab do
-      :messages ->
-        new_entries = MessageStore.entries_since(store, store.last_sent_id)
-        content = encode_message_entries(new_entries)
-        last_id = if new_entries == [], do: store.last_sent_id, else: List.last(new_entries).id
-        {header <> content, MessageStore.mark_sent(store, last_id)}
-
-      _ ->
-        # No content for other tabs yet
-        {header <> <<0::16>>, store}
-    end
-  end
-
-  @spec encode_message_entries([MingaEditor.UI.Panel.MessageStore.Entry.t()]) :: binary()
-  defp encode_message_entries(entries) do
-    alias MingaEditor.UI.Panel.MessageStore
-
-    count = length(entries)
-
-    entry_data =
-      for entry <- entries, into: <<>> do
-        path_bytes = entry.file_path || ""
-        path_len = byte_size(path_bytes)
-        text_bytes = entry.text
-        text_len = byte_size(text_bytes)
-        # Seconds since midnight for compact timestamp
-        ts_secs =
-          NaiveDateTime.to_time(entry.timestamp) |> Time.to_seconds_after_midnight() |> elem(0)
-
-        <<entry.id::32, MessageStore.level_byte(entry.level)::8,
-          MessageStore.subsystem_byte(entry.subsystem)::8, ts_secs::32, path_len::16,
-          path_bytes::binary, text_len::16, text_bytes::binary>>
-      end
-
-    <<count::16, entry_data::binary>>
-  end
 
   # ── Theme ──
 
