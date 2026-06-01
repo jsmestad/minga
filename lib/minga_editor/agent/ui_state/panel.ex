@@ -35,6 +35,8 @@ defmodule MingaEditor.Agent.UIState.Panel do
           mention_completion: MingaAgent.FileMention.completion() | nil,
           pasted_blocks: [paste_block()],
           cached_line_index: [{non_neg_integer(), MingaEditor.Agent.BufferSync.line_type()}],
+          cached_display_messages: [term()],
+          cached_display_message_pairs: [{pos_integer(), term()}],
           cached_styled_messages: [MingaEditor.Agent.MarkdownHighlight.styled_lines()] | nil,
           message_version: non_neg_integer(),
           credentials_configured: boolean()
@@ -46,7 +48,7 @@ defmodule MingaEditor.Agent.UIState.Panel do
             prompt_history: [],
             history_index: -1,
             spinner_frame: 0,
-            provider_name: "anthropic",
+            provider_name: AgentConfig.extract_provider_prefix(AgentConfig.default_model()),
             model_name: AgentConfig.default_model(),
             thinking_level: "medium",
             input_focused: false,
@@ -54,6 +56,8 @@ defmodule MingaEditor.Agent.UIState.Panel do
             mention_completion: nil,
             pasted_blocks: [],
             cached_line_index: [],
+            cached_display_messages: [],
+            cached_display_message_pairs: [],
             cached_styled_messages: nil,
             message_version: 0,
             # Assume configured until the session reports otherwise, so the

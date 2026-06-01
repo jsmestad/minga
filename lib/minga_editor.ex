@@ -222,6 +222,7 @@ defmodule MingaEditor do
     Minga.Events.subscribe(:log_message, events_registry)
     Minga.Events.subscribe(:face_overrides_changed, events_registry)
     Minga.Events.subscribe(:agent_session_stopped, events_registry)
+    Minga.Events.subscribe(:agent_session_restarted, events_registry)
     Minga.Events.subscribe(:background_subagent_started, events_registry)
     Minga.Events.subscribe(:node_connected, events_registry)
     Minga.Events.subscribe(:node_disconnected, events_registry)
@@ -684,6 +685,11 @@ defmodule MingaEditor do
   def handle_info(:agent_spinner_tick, state) do
     state = dispatch_agent_event(state, :spinner_tick)
     {:noreply, state}
+  end
+
+  def handle_info({:compact_result, result}, state) do
+    state = dispatch_agent_event(state, {:compact_result, result})
+    {:noreply, Renderer.render_or_async(state)}
   end
 
   # Process died. Check buffer monitors and git remote tasks.

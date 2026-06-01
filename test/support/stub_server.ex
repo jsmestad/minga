@@ -22,6 +22,21 @@ defmodule Minga.Test.StubServer do
   @impl GenServer
   def handle_call(:messages, _from, state), do: {:reply, Map.get(state, :messages, []), state}
 
+  def handle_call(:messages_with_ids, _from, state) do
+    messages = Map.get(state, :messages, [])
+    pairs = Map.get_lazy(state, :message_ids, fn -> default_message_ids(messages) end)
+    {:reply, pairs, state}
+  end
+
+  def handle_call(:pinned_ids, _from, state),
+    do: {:reply, Map.get(state, :pinned_ids, MapSet.new()), state}
+
+  def handle_call({:toggle_pin, id}, _from, state) do
+    pinned_ids = Map.get(state, :pinned_ids, MapSet.new())
+    pinned_ids = toggle_pinned_id(pinned_ids, id)
+    {:reply, :ok, Map.put(state, :pinned_ids, pinned_ids)}
+  end
+
   def handle_call(:usage, _from, state),
     do: {:reply, %{input: 0, output: 0, cache_read: 0, cache_write: 0, cost: 0.0}, state}
 
@@ -45,6 +60,22 @@ defmodule Minga.Test.StubServer do
   end
 
   def handle_call(_msg, _from, state), do: {:reply, :ok, state}
+
+  @spec toggle_pinned_id(MapSet.t(pos_integer()), pos_integer()) :: MapSet.t(pos_integer())
+  defp toggle_pinned_id(pinned_ids, id) do
+    if MapSet.member?(pinned_ids, id) do
+      MapSet.delete(pinned_ids, id)
+    else
+      MapSet.put(pinned_ids, id)
+    end
+  end
+
+  @spec default_message_ids([term()]) :: [{pos_integer(), term()}]
+  defp default_message_ids(messages) do
+    messages
+    |> Enum.with_index(1)
+    |> Enum.map(fn {msg, id} -> {id, msg} end)
+  end
 
   @impl GenServer
   def handle_cast(_msg, state), do: {:noreply, state}

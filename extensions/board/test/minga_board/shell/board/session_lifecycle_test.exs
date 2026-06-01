@@ -4,8 +4,11 @@ defmodule MingaBoard.Shell.SessionLifecycleTest do
 
   import ExUnit.CaptureLog
 
+  alias Minga.Test.StubProvider
+  alias MingaAgent.Session
   alias MingaAgent.SessionManager
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.Viewport
   alias MingaBoard.Shell
   alias MingaBoard.Shell.Input, as: BoardInput
@@ -169,6 +172,81 @@ defmodule MingaBoard.Shell.SessionLifecycleTest do
       updated_card = new_board.cards[card.id]
       assert updated_card.session == nil
       assert updated_card.status == :errored
+    end
+  end
+
+  describe "handle_agent_session_restarted/4" do
+    test "refreshes the active card session pid and agent cache" do
+      old_pid =
+        spawn(fn ->
+          receive do
+            :stop -> :ok
+          end
+        end)
+
+      on_exit(fn -> Process.exit(old_pid, :kill) end)
+
+      new_pid =
+        start_supervised!(
+          {Session,
+           [
+             provider: StubProvider,
+             provider_opts: [],
+             session_id: "board-restart-test-#{System.unique_integer([:positive])}"
+           ]}
+        )
+
+      board = %{BoardState.new() | agent: AgentState.set_error(%AgentState{}, "stale cache")}
+
+      {board, card} =
+        BoardState.create_card(board, task: "Fix bug", session: old_pid, status: :working)
+
+      board = %{board | zoomed_into: card.id}
+
+      {updated_board, handled?} =
+        Shell.handle_agent_session_restarted(board, old_pid, new_pid, :killed)
+
+      assert handled?
+      assert updated_board.cards[card.id].session == new_pid
+      assert updated_board.cards[card.id].status == :done
+      assert AgentState.status(updated_board.agent) == Session.status(new_pid)
+      assert updated_board.agent.error == nil
+    end
+
+    test "refreshes a background card without touching the active agent cache" do
+      old_pid =
+        spawn(fn ->
+          receive do
+            :stop -> :ok
+          end
+        end)
+
+      on_exit(fn -> Process.exit(old_pid, :kill) end)
+
+      new_pid =
+        start_supervised!(
+          {Session,
+           [
+             provider: StubProvider,
+             provider_opts: [],
+             session_id: "board-bg-restart-test-#{System.unique_integer([:positive])}"
+           ]}
+        )
+
+      stale_agent = AgentState.set_error(%AgentState{}, "stale cache")
+      board = %{BoardState.new() | agent: stale_agent}
+
+      {board, card} =
+        BoardState.create_card(board, task: "Background bug", session: old_pid, status: :working)
+
+      {updated_board, handled?} =
+        Shell.handle_agent_session_restarted(board, old_pid, new_pid, :killed)
+
+      assert handled?
+      assert updated_board.cards[card.id].session == new_pid
+      assert updated_board.cards[card.id].status == :done
+      assert updated_board.agent == stale_agent
+      refute updated_board.zoomed_into == card.id
     end
   end
 end

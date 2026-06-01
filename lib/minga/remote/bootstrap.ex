@@ -84,13 +84,64 @@ defmodule Minga.Remote.Bootstrap do
     node_name = Application.get_env(:minga, :remote_node_name, "minga_server@#{host}")
 
     with {:ok, remote_node} <- distribution_atom(node_name) do
-      case Node.connect(remote_node) do
-        true -> {:ok, remote_node}
-        false -> {:error, {:node_connect_failed, remote_node}}
-        :ignored -> {:error, :distribution_not_started}
-      end
+      connect_remote_node(remote_node, node_connect_attempts(), node_connect_retry_interval_ms())
     end
   end
+
+  @spec connect_remote_node(node(), pos_integer(), non_neg_integer()) ::
+          {:ok, node()} | {:error, term()}
+  defp connect_remote_node(remote_node, attempts_left, interval_ms) do
+    case Node.connect(remote_node) do
+      true ->
+        {:ok, remote_node}
+
+      false when attempts_left > 1 ->
+        wait_for_retry(interval_ms)
+        connect_remote_node(remote_node, attempts_left - 1, interval_ms)
+
+      false ->
+        {:error, {:node_connect_failed, remote_node}}
+
+      :ignored ->
+        {:error, :distribution_not_started}
+    end
+  end
+
+  @spec wait_for_retry(non_neg_integer()) :: :ok
+  defp wait_for_retry(0), do: :ok
+
+  defp wait_for_retry(interval_ms) do
+    receive do
+    after
+      interval_ms -> :ok
+    end
+  end
+
+  @spec node_connect_attempts() :: pos_integer()
+  defp node_connect_attempts do
+    :minga
+    |> Application.get_env(:remote_node_connect_attempts, 20)
+    |> positive_integer_or_default(20)
+  end
+
+  @spec node_connect_retry_interval_ms() :: non_neg_integer()
+  defp node_connect_retry_interval_ms do
+    :minga
+    |> Application.get_env(:remote_node_connect_retry_interval_ms, 100)
+    |> non_negative_integer_or_default(100)
+  end
+
+  @spec positive_integer_or_default(term(), pos_integer()) :: pos_integer()
+  defp positive_integer_or_default(value, _default) when is_integer(value) and value > 0,
+    do: value
+
+  defp positive_integer_or_default(_value, default), do: default
+
+  @spec non_negative_integer_or_default(term(), non_neg_integer()) :: non_neg_integer()
+  defp non_negative_integer_or_default(value, _default) when is_integer(value) and value >= 0,
+    do: value
+
+  defp non_negative_integer_or_default(_value, default), do: default
 
   @spec erpc(node(), module(), atom(), [term()]) :: {:ok, term()} | {:error, term()}
   defp erpc(remote_node, module, function, args) do

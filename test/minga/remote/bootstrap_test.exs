@@ -17,6 +17,8 @@ defmodule Minga.Remote.BootstrapTest do
   setup do
     old_skip = Application.get_env(:minga, :remote_skip_ssh_bootstrap)
     old_node = Application.get_env(:minga, :remote_node_name)
+    old_attempts = Application.get_env(:minga, :remote_node_connect_attempts)
+    old_interval = Application.get_env(:minga, :remote_node_connect_retry_interval_ms)
 
     Application.put_env(:minga, :remote_skip_ssh_bootstrap, true)
 
@@ -32,6 +34,18 @@ defmodule Minga.Remote.BootstrapTest do
       else
         Application.put_env(:minga, :remote_node_name, old_node)
       end
+
+      if old_attempts == nil do
+        Application.delete_env(:minga, :remote_node_connect_attempts)
+      else
+        Application.put_env(:minga, :remote_node_connect_attempts, old_attempts)
+      end
+
+      if old_interval == nil do
+        Application.delete_env(:minga, :remote_node_connect_retry_interval_ms)
+      else
+        Application.put_env(:minga, :remote_node_connect_retry_interval_ms, old_interval)
+      end
     end)
 
     :ok
@@ -43,6 +57,15 @@ defmodule Minga.Remote.BootstrapTest do
 
     Application.put_env(:minga, :remote_node_name, String.duplicate("a", 256))
     assert {:error, :invalid_node_name} = Bootstrap.connect_remote_node(url())
+  end
+
+  test "connect_remote_node reports failure after bounded retries" do
+    node = :"missing_minga_bootstrap_#{System.unique_integer([:positive])}@127.0.0.1"
+    Application.put_env(:minga, :remote_node_name, Atom.to_string(node))
+    Application.put_env(:minga, :remote_node_connect_attempts, 1)
+    Application.put_env(:minga, :remote_node_connect_retry_interval_ms, 0)
+
+    assert {:error, {:node_connect_failed, ^node}} = Bootstrap.connect_remote_node(url())
   end
 
   test "attach unwraps broker start result and returns session metadata" do

@@ -87,6 +87,11 @@ defmodule MingaEditor.Test.FakeShellAlt do
   def on_agent_event(shell_state, workspace, _session, _event), do: {shell_state, workspace, []}
 
   @impl true
+  @spec handle_agent_session_restarted(map(), pid(), pid(), term()) :: {map(), boolean()}
+  def handle_agent_session_restarted(shell_state, _old_pid, _new_pid, _reason),
+    do: {shell_state, false}
+
+  @impl true
   @spec active_tab(map()) :: nil
   def active_tab(_shell_state), do: nil
 

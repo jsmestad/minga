@@ -18,6 +18,32 @@ defmodule MingaAgent.Gateway.EventStreamTest do
       refute Map.has_key?(decoded, "id")
     end
 
+    test "formats agent_session_restarted event" do
+      old_pid = self()
+
+      new_pid =
+        spawn(fn ->
+          receive do
+            :stop -> :ok
+          end
+        end)
+
+      on_exit(fn -> Process.exit(new_pid, :kill) end)
+
+      event =
+        {:minga_event, :agent_session_restarted,
+         %{session_id: "session-1", old_pid: old_pid, new_pid: new_pid, reason: :killed}}
+
+      {:ok, json} = EventStream.format_notification(event)
+      decoded = JSON.decode!(json)
+
+      assert decoded["method"] == "event.agent_session_restarted"
+      assert decoded["params"]["session_id"] == "session-1"
+      assert decoded["params"]["old_pid"] == inspect(old_pid)
+      assert decoded["params"]["new_pid"] == inspect(new_pid)
+      assert decoded["params"]["reason"] == ":killed"
+    end
+
     test "formats log_message event" do
       event =
         {:minga_event, :log_message, %{text: "LSP connected", level: :info}}

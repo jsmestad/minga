@@ -138,6 +138,15 @@ defmodule MingaEditor.State.Workspace do
     %{workspace | session: session}
   end
 
+  @doc "Refreshes the workspace session pid after a managed restart."
+  @spec refresh_session_pid(t(), pid(), pid()) :: t()
+  def refresh_session_pid(%__MODULE__{session: session} = workspace, old_pid, new_pid)
+      when session == old_pid and is_pid(new_pid) do
+    %{workspace | session: new_pid}
+  end
+
+  def refresh_session_pid(%__MODULE__{} = workspace, _old_pid, _new_pid), do: workspace
+
   @doc "Clears the live agent session pid and returns the workspace to idle lifecycle status. Durable remote identity is preserved."
   @spec clear_session(t()) :: t()
   def clear_session(%__MODULE__{} = workspace) do

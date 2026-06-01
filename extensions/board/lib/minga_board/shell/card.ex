@@ -140,6 +140,15 @@ defmodule MingaBoard.Shell.Card do
     %{card | session: nil}
   end
 
+  @doc "Refreshes the attached session PID after a managed restart."
+  @spec refresh_session_pid(t(), pid(), pid()) :: t()
+  def refresh_session_pid(%__MODULE__{session: session} = card, old_pid, new_pid)
+      when session == old_pid and is_pid(new_pid) do
+    %{card | session: new_pid}
+  end
+
+  def refresh_session_pid(%__MODULE__{} = card, _old_pid, _new_pid), do: card
+
   @doc "Stores a workspace snapshot on the card."
   @spec store_workspace(t(), workspace_snapshot() | TabContext.legacy()) :: t()
   def store_workspace(%__MODULE__{} = card, workspace) when is_map(workspace) do

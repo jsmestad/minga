@@ -11,6 +11,7 @@ defmodule MingaEditor.Commands.Agent do
 
   alias MingaEditor.Agent.BufferSync, as: AgentBufferSync
   alias MingaEditor.Agent.DiffReview
+  alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.FileMention
   alias MingaAgent.Markdown
   alias MingaAgent.Message
@@ -693,10 +694,18 @@ defmodule MingaEditor.Commands.Agent do
   @spec reset_agent_state_for_new_session(state()) :: state()
   defp reset_agent_state_for_new_session(state) do
     agent_buf = AgentAccess.agent(state).buffer
+    old_panel = AgentAccess.panel(state)
 
     state
     |> AgentAccess.update_agent(fn _a -> %AgentState{buffer: agent_buf} end)
-    |> AgentAccess.update_agent_ui(fn _a -> UIState.new() end)
+    |> AgentAccess.update_agent_ui(fn _a ->
+      ui = UIState.new()
+
+      ui
+      |> UIState.set_model_name(old_panel.model_name)
+      |> UIState.set_provider_name(old_panel.provider_name)
+      |> UIState.set_thinking_level(old_panel.thinking_level)
+    end)
   end
 
   @spec create_active_agent_tab(state()) :: state()
@@ -907,7 +916,7 @@ defmodule MingaEditor.Commands.Agent do
     else
       case Session.cycle_model(AgentAccess.session(state)) do
         {:ok, %{"model" => model, "index" => index, "total" => total} = result} ->
-          state = update_agent_ui(state, &UIState.set_model_name(&1, model))
+          state = apply_model_and_provider(state, model)
           state = maybe_update_thinking_level(state, Map.get(result, "thinking_level"))
 
           Session.add_system_message(
@@ -927,6 +936,15 @@ defmodule MingaEditor.Commands.Agent do
   end
 
   @spec maybe_update_thinking_level(state(), term()) :: state()
+  @spec apply_model_and_provider(state(), String.t()) :: state()
+  defp apply_model_and_provider(state, model) do
+    provider = AgentConfig.extract_provider_prefix(model)
+
+    state
+    |> update_agent_ui(&UIState.set_model_name(&1, model))
+    |> update_agent_ui(&UIState.set_provider_name(&1, provider))
+  end
+
   defp maybe_update_thinking_level(state, level) when is_binary(level) do
     update_agent_ui(state, &UIState.set_thinking_level(&1, level))
   end
@@ -936,7 +954,7 @@ defmodule MingaEditor.Commands.Agent do
   @doc "Sets the agent model without resetting conversation context."
   @spec set_model(state(), String.t()) :: state()
   def set_model(state, model) do
-    state = update_agent_ui(state, &UIState.set_model_name(&1, model))
+    state = apply_model_and_provider(state, model)
 
     if AgentAccess.session(state) do
       Session.set_model(AgentAccess.session(state), model)
@@ -1073,6 +1091,137 @@ defmodule MingaEditor.Commands.Agent do
         state
     end
   end
+
+  # ── Apply code block ───────────────────────────────────────────────────────
+
+  @doc "Applies the code block at the cursor to the inferred target file with diff preview."
+  @spec scope_apply_code_block(state()) :: state()
+  def scope_apply_code_block(state) do
+    case scroll_context(state) do
+      nil ->
+        state
+
+      {_idx, msg, :code} ->
+        text = Message.text(msg)
+        blocks = Markdown.extract_code_blocks(text)
+        block_index = code_block_index_for_scroll(state, blocks)
+        block = Enum.at(blocks, block_index)
+
+        if block do
+          apply_code_block(state, text, block, block_index)
+        else
+          state
+        end
+
+      {_idx, _msg, _other_type} ->
+        state
+    end
+  end
+
+  @spec apply_code_block(state(), String.t(), Markdown.code_block(), non_neg_integer()) :: state()
+  defp apply_code_block(state, message_text, block, block_index) do
+    case Markdown.infer_target_path(message_text, block_index) do
+      nil ->
+        EditorState.set_status(
+          state,
+          "No file path found near code block. Copy with `yy` instead."
+        )
+
+      path ->
+        full_path = resolve_apply_path(path)
+        apply_code_block_to_path(state, full_path, block.content, path)
+    end
+  end
+
+  @spec resolve_apply_path(String.t()) :: String.t()
+  defp resolve_apply_path(path) do
+    if Path.type(path) == :absolute do
+      path
+    else
+      Path.join(project_root(), path)
+    end
+  end
+
+  @spec apply_code_block_to_path(state(), String.t(), String.t(), String.t()) :: state()
+  defp apply_code_block_to_path(state, full_path, content, display_path) do
+    case File.read(full_path) do
+      {:ok, before_content} ->
+        apply_code_block_diff(state, full_path, before_content, content, display_path)
+
+      {:error, :enoent} ->
+        create_file_from_code_block(state, full_path, content, display_path)
+
+      {:error, reason} ->
+        EditorState.set_status(state, "Cannot read #{display_path}: #{inspect(reason)}")
+    end
+  end
+
+  @spec apply_code_block_diff(state(), String.t(), String.t(), String.t(), String.t()) :: state()
+  defp apply_code_block_diff(state, path, before_content, content, display_path) do
+    case DiffReview.new(path, before_content, content) do
+      nil ->
+        EditorState.set_status(state, "No changes detected for #{display_path}")
+
+      review ->
+        state = update_preview(state, &Preview.set_diff(&1, review))
+        state = update_agent_ui(state, &UIState.set_focus(&1, :file_viewer))
+        log_system_message(state, "Applying code block to #{display_path}")
+        EditorState.set_status(state, "Diff preview for #{display_path}. Accept/reject hunks.")
+    end
+  end
+
+  @spec create_file_from_code_block(state(), String.t(), String.t(), String.t()) :: state()
+  defp create_file_from_code_block(state, full_path, content, display_path) do
+    with :ok <- File.mkdir_p(Path.dirname(full_path)),
+         :ok <- File.write(full_path, content) do
+      log_system_message(state, "Created #{display_path}")
+      EditorState.set_status(state, "Created #{display_path}")
+    else
+      {:error, reason} ->
+        EditorState.set_status(state, "Failed to create #{display_path}: #{inspect(reason)}")
+    end
+  end
+
+  @spec log_system_message(state(), String.t()) :: :ok
+  defp log_system_message(state, text) do
+    case AgentAccess.session(state) do
+      pid when is_pid(pid) -> Session.add_system_message(pid, text)
+      _ -> :ok
+    end
+  end
+
+  # ── Pin message ────────────────────────────────────────────────────────────
+
+  @doc "Toggles the pinned state of the message at the cursor."
+  @spec scope_pin_message(state()) :: state()
+  def scope_pin_message(state) do
+    with session when is_pid(session) <- AgentAccess.session(state),
+         {msg_idx, _msg, _line_type} <- scroll_context(state),
+         {id, msg} <- display_pair_at(state, session, msg_idx),
+         false <- synthetic_display_message?(msg) do
+      Session.toggle_pin(session, id)
+    end
+
+    state
+  catch
+    :exit, _ -> state
+  end
+
+  @spec display_pair_at(state(), pid(), non_neg_integer()) :: {pos_integer(), Message.t()} | nil
+  defp display_pair_at(state, session, msg_idx) do
+    pairs =
+      case AgentAccess.panel(state).cached_display_message_pairs do
+        [] -> Session.messages_with_ids(session)
+        cached -> cached
+      end
+
+    Enum.at(pairs, msg_idx)
+  end
+
+  @spec synthetic_display_message?(term()) :: boolean()
+  defp synthetic_display_message?({:system, "── pinned ──", :info}), do: true
+  defp synthetic_display_message?({:system, "── " <> _rest, :info}), do: true
+  defp synthetic_display_message?(_msg), do: false
 
   # ── Input focus ────────────────────────────────────────────────────────────
 
@@ -1457,18 +1606,19 @@ defmodule MingaEditor.Commands.Agent do
 
     if session do
       messages = safe_messages(session)
-
-      # Use the cached line index from sync, falling back to recompute
       line_map = cached_or_compute_line_index(panel, messages)
 
-      # panel.scroll.offset is synced to the buffer cursor line by
-      # AgentNav.sync_scroll_to_cursor, so it maps directly to
-      # buffer line numbers.
+      display_msgs =
+        case panel.cached_display_messages do
+          [] -> messages
+          cached -> cached
+        end
+
       total = length(line_map)
       target = Minga.Editing.resolve_scroll(panel.scroll, total, 1)
 
       case Enum.at(line_map, target) do
-        {msg_idx, line_type} -> {msg_idx, Enum.at(messages, msg_idx), line_type}
+        {msg_idx, line_type} -> {msg_idx, Enum.at(display_msgs, msg_idx), line_type}
         nil -> nil
       end
     else
@@ -1644,6 +1794,8 @@ defmodule MingaEditor.Commands.Agent do
     {:agent_copy_code_block, "Copy code block", :scope_copy_code_block},
     {:agent_copy_message, "Copy message", :scope_copy_message},
     {:agent_open_code_block, "Open code block", :scope_open_code_block},
+    {:agent_apply_code_block, "Apply code block to file", :scope_apply_code_block},
+    {:agent_pin_message, "Pin/unpin message at cursor", :scope_pin_message},
     {:agent_focus_input, "Focus agent input", :scope_focus_input},
     {:agent_focus_or_submit, "Focus input or submit", :scope_focus_or_submit},
     {:agent_unfocus_input, "Unfocus agent input", :scope_unfocus_input},

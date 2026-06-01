@@ -38,6 +38,8 @@ defmodule MingaAgent.SessionStore do
           optional(:remote_token) => String.t() | nil,
           optional(:provider_name) => String.t(),
           optional(:branches) => [MingaAgent.Branch.t()],
+          optional(:message_ids) => [pos_integer()],
+          optional(:pinned_ids) => MapSet.t(pos_integer()),
           optional(:memory) => String.t() | nil
         }
 
@@ -190,6 +192,8 @@ defmodule MingaAgent.SessionStore do
       "model_name" => data.model_name,
       "provider_name" => Map.get(data, :provider_name, "unknown"),
       "messages" => Enum.map(messages, &serialize_message/1),
+      "message_ids" => Map.get(data, :message_ids, []),
+      "pinned_ids" => serialize_pinned_ids(Map.get(data, :pinned_ids)),
       "usage" => serialize_usage(data.usage),
       "branches" => Enum.map(Map.get(data, :branches, []), &serialize_branch/1),
       "memory" => Map.get(data, :memory)
@@ -230,6 +234,11 @@ defmodule MingaAgent.SessionStore do
   defp serialize_message({:usage, %MingaAgent.TurnUsage{} = usage}),
     do: %{"type" => "usage", "data" => serialize_usage(usage)}
 
+  @spec serialize_pinned_ids(MapSet.t() | list() | nil) :: [pos_integer()]
+  defp serialize_pinned_ids(%MapSet{} = set), do: set |> MapSet.to_list() |> Enum.sort()
+  defp serialize_pinned_ids(list) when is_list(list), do: Enum.sort(list)
+  defp serialize_pinned_ids(_), do: []
+
   @spec serialize_usage(MingaAgent.TurnUsage.t()) :: map()
   defp serialize_usage(%MingaAgent.TurnUsage{} = usage) do
     %{
@@ -255,16 +264,22 @@ defmodule MingaAgent.SessionStore do
       model_name: data["model_name"] || "unknown",
       provider_name: data["provider_name"] || "unknown",
       messages: messages,
+      message_ids: deserialize_message_ids(data["message_ids"], length(messages)),
+      pinned_ids: deserialize_pinned_ids(data["pinned_ids"]),
       usage: deserialize_turn_usage(data["usage"] || %{}),
       branches: Enum.map(data["branches"] || [], &deserialize_branch/1)
     }
 
-    if Map.has_key?(data, "memory") do
-      Map.put(session, :memory, data["memory"])
-    else
-      session
-    end
+    if Map.has_key?(data, "memory"), do: Map.put(session, :memory, data["memory"]), else: session
   end
+
+  @spec deserialize_message_ids(term(), non_neg_integer()) :: [pos_integer()]
+  defp deserialize_message_ids(ids, _msg_count) when is_list(ids) and ids != [], do: ids
+  defp deserialize_message_ids(_, msg_count), do: Enum.to_list(1..max(msg_count, 1))
+
+  @spec deserialize_pinned_ids(term()) :: MapSet.t()
+  defp deserialize_pinned_ids(ids) when is_list(ids), do: MapSet.new(ids)
+  defp deserialize_pinned_ids(_), do: MapSet.new()
 
   @spec deserialize_message(map()) :: MingaAgent.Message.t()
   defp deserialize_message(%{"type" => "user", "text" => text, "attachments" => attachments})

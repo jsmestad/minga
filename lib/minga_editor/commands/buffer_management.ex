@@ -1076,6 +1076,53 @@ defmodule MingaEditor.Commands.BufferManagement do
     end
   end
 
+  @doc false
+  @spec agent_session_restart_owned?(state(), pid()) :: boolean()
+  def agent_session_restart_owned?(state, old_pid) when is_pid(old_pid) do
+    shell_owned? = shell_state_restart_owned?(state.shell_state, old_pid)
+    stash_owned? = stashed_shell_restart_owned?(state.shell_state_stash, old_pid)
+    shell_owned? or stash_owned?
+  end
+
+  @doc "Refreshes editor state after SessionManager restarts a managed session."
+  @spec handle_agent_session_restarted(state(), String.t(), pid(), pid(), term()) :: state()
+  def handle_agent_session_restarted(state, session_id, old_pid, new_pid, reason) do
+    state = update_active_shell_session_restarted(state, session_id, old_pid, new_pid, reason)
+    state = update_stashed_shell_session_restarted(state, session_id, old_pid, new_pid, reason)
+    maybe_rebuild_active_agent_after_restart(state, new_pid)
+  end
+
+  @spec shell_state_restart_owned?(term(), pid()) :: boolean()
+  defp shell_state_restart_owned?(%{cards: cards} = shell_state, old_pid) when is_map(cards) do
+    card_owned? = Enum.any?(cards, fn {_card_id, card} -> Map.get(card, :session) == old_pid end)
+
+    tab_owned? =
+      case Map.get(shell_state, :tab_bar) do
+        %TabBar{} = tb ->
+          not is_nil(TabBar.find_by_session(tb, old_pid)) or
+            not is_nil(TabBar.find_workspace_by_session(tb, old_pid))
+
+        _ ->
+          false
+      end
+
+    card_owned? or tab_owned?
+  end
+
+  defp shell_state_restart_owned?(%{tab_bar: %TabBar{} = tb}, old_pid) do
+    not is_nil(TabBar.find_by_session(tb, old_pid)) or
+      not is_nil(TabBar.find_workspace_by_session(tb, old_pid))
+  end
+
+  defp shell_state_restart_owned?(_shell_state, _old_pid), do: false
+
+  @spec stashed_shell_restart_owned?(EditorState.shell_state_stash(), pid()) :: boolean()
+  defp stashed_shell_restart_owned?(stash, old_pid) do
+    Enum.any?(stash, fn {_shell_id, %StateStash{state: shell_state}} ->
+      shell_state_restart_owned?(shell_state, old_pid)
+    end)
+  end
+
   @spec update_active_shell_session_down(state(), pid(), term()) :: {state(), boolean()}
   defp update_active_shell_session_down(state, session_pid, reason) do
     shell = EditorState.active_shell_module(state)
@@ -1088,6 +1135,48 @@ defmodule MingaEditor.Commands.BufferManagement do
       {EditorState.update_shell_state(state, fn _ -> shell_state end), owned?}
     else
       {state, false}
+    end
+  end
+
+  @spec update_active_shell_session_restarted(state(), String.t(), pid(), pid(), term()) ::
+          state()
+  defp update_active_shell_session_restarted(state, _session_id, old_pid, new_pid, reason) do
+    shell = EditorState.active_shell_module(state)
+
+    if function_exported?(shell, :handle_agent_session_restarted, 4) do
+      {shell_state, handled?} =
+        shell.handle_agent_session_restarted(state.shell_state, old_pid, new_pid, reason)
+
+      shell_state = maybe_persist_owned_shell_state(shell, shell_state, handled?)
+      EditorState.update_shell_state(state, fn _ -> shell_state end)
+    else
+      state
+    end
+  end
+
+  @spec update_stashed_shell_session_restarted(state(), String.t(), pid(), pid(), term()) ::
+          state()
+  defp update_stashed_shell_session_restarted(state, _session_id, old_pid, new_pid, reason) do
+    {state, _handled?} =
+      update_stashed_shell_for_session(state, :handle_agent_session_restarted, [
+        old_pid,
+        new_pid,
+        reason
+      ])
+
+    state
+  end
+
+  @spec maybe_rebuild_active_agent_after_restart(state(), pid()) :: state()
+  defp maybe_rebuild_active_agent_after_restart(state, new_pid) do
+    shell = EditorState.active_shell_module(state)
+
+    case function_exported?(shell, :active_tab, 1) && shell.active_tab(state.shell_state) do
+      %Tab{kind: :agent, session: ^new_pid} = tab ->
+        EditorState.rebuild_agent_from_session(state, tab)
+
+      _ ->
+        state
     end
   end
 

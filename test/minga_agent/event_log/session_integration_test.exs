@@ -33,19 +33,27 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
 
     @impl true
     def init(opts) do
-      {:ok, %{subscriber: Keyword.fetch!(opts, :subscriber)}}
+      {:ok,
+       %{
+         subscriber: Keyword.fetch!(opts, :subscriber),
+         prompt_observer: Keyword.get(opts, :prompt_observer)
+       }}
     end
 
     @impl true
     def handle_call({:prompt, text}, _from, state) do
       send(state.subscriber, {:agent_provider_event, %Event.AgentStart{}})
       send(state.subscriber, {:agent_provider_event, %Event.TextDelta{delta: text}})
+      notify_prompt_observer(state.prompt_observer, text)
       {:reply, :ok, state}
     end
 
     @impl true
     def handle_cast(:abort, state), do: {:noreply, state}
     def handle_cast(:new_session, state), do: {:noreply, state}
+
+    defp notify_prompt_observer(nil, _text), do: :ok
+    defp notify_prompt_observer(pid, text), do: send(pid, {:steering_provider_prompt, text})
   end
 
   defmodule ReplayProvider do
@@ -245,11 +253,13 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
          provider: SteeringProvider,
          event_log_server: log_name,
          persist?: false,
-         hooks_enabled?: false}
+         hooks_enabled?: false,
+         provider_opts: [prompt_observer: self()]}
       )
 
     :sys.get_state(session)
     assert :ok = Session.send_prompt(session, "first")
+    assert_receive {:steering_provider_prompt, "first"}
     wait_for_status(session, :thinking)
     assert {:queued, :steering} = Session.send_prompt(session, "while busy")
     assert ["while busy"] = Session.dequeue_steering(session)
