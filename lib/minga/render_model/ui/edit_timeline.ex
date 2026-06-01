@@ -1,20 +1,33 @@
 defmodule Minga.RenderModel.UI.EditTimeline do
   @moduledoc """
-  Pre-encoded edit timeline model.
+  Semantic edit timeline model.
 
-  The edit timeline wire format includes visibility, viewing index, and
-  wire entries with tool names and timestamp deltas. Rather than duplicating
-  that encoding in core, the builder pre-encodes the binary and stores it
-  here along with a fingerprint for change detection.
-
-  Uses a `:hidden` sentinel fingerprint when no timeline is visible.
+  Describes the per-buffer edit timeline: whether it is visible, which entry is
+  currently being viewed (nil when live at the latest), and the timeline entries
+  (tool name and a timestamp delta from the first entry). The GUI adapter
+  (`Minga.Frontend.Adapter.GUI.EditTimelineEncoder`) owns the wire encoding.
   """
 
+  alias __MODULE__.Entry
+
   @type t :: %__MODULE__{
-          encoded: binary(),
-          fingerprint: integer() | :hidden
+          visible?: boolean(),
+          viewing_index: non_neg_integer() | nil,
+          entries: [Entry.t()]
         }
 
-  @enforce_keys [:encoded, :fingerprint]
-  defstruct [:encoded, :fingerprint]
+  defstruct visible?: false, viewing_index: nil, entries: []
+
+  defmodule Entry do
+    @moduledoc "One edit-timeline entry: its index, the tool that made the edit, and a delta from the first entry's timestamp."
+
+    @type t :: %__MODULE__{
+            index: non_neg_integer(),
+            tool_name: String.t(),
+            timestamp_delta: non_neg_integer()
+          }
+
+    @enforce_keys [:index, :tool_name, :timestamp_delta]
+    defstruct [:index, :tool_name, :timestamp_delta]
+  end
 end

@@ -4,55 +4,78 @@ defmodule Minga.Frontend.Adapter.GUI.EditTimelineEncoderTest do
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Frontend.Adapter.GUI.EditTimelineEncoder
   alias Minga.RenderModel.UI.EditTimeline
+  alias Minga.RenderModel.UI.EditTimeline.Entry
 
   @op_gui_edit_timeline Minga.Protocol.Opcodes.gui_edit_timeline()
 
-  describe "encode/2" do
-    test "encodes hidden edit timeline" do
-      model = %EditTimeline{
-        encoded: <<@op_gui_edit_timeline, 0::8>>,
-        fingerprint: :hidden
-      }
+  defp encode(model) do
+    {binary, _caches} = EditTimelineEncoder.encode(model, Caches.new())
+    binary
+  end
 
-      caches = Caches.new()
+  describe "encode/2 wire format" do
+    test "encodes a hidden timeline (viewing index 0xFFFF, no entries)" do
+      <<opcode, _len::16, visible, viewing::16, count>> = encode(%EditTimeline{})
 
-      {cmd, _caches} = EditTimelineEncoder.encode(model, caches)
-
-      assert cmd == model.encoded
+      assert opcode == @op_gui_edit_timeline
+      assert visible == 0
+      assert viewing == 0xFFFF
+      assert count == 0
     end
 
-    test "returns nil on second call with same fingerprint" do
+    test "encodes a visible timeline with entries" do
       model = %EditTimeline{
-        encoded: <<@op_gui_edit_timeline, 0::8>>,
-        fingerprint: :hidden
+        visible?: true,
+        viewing_index: 1,
+        entries: [
+          %Entry{index: 0, tool_name: "edit_file", timestamp_delta: 0},
+          %Entry{index: 1, tool_name: "write_file", timestamp_delta: 500}
+        ]
       }
 
-      caches = Caches.new()
+      <<_opcode, payload_len::16, payload::binary-size(payload_len)>> = encode(model)
+      <<visible, viewing::16, count, rest::binary>> = payload
 
-      {cmd1, caches} = EditTimelineEncoder.encode(model, caches)
+      assert visible == 1
+      assert viewing == 1
+      assert count == 2
+      assert <<0, 9, "edit_file", 0::32, 1, 10, "write_file", 500::32>> = rest
+    end
+
+    test "encodes a nil viewing index as 0xFFFF when visible" do
+      <<_opcode, _len::16, _visible, viewing::16, _count>> =
+        encode(%EditTimeline{visible?: true, viewing_index: nil, entries: []})
+
+      assert viewing == 0xFFFF
+    end
+  end
+
+  describe "encode/2 cache skipping" do
+    test "returns nil on the second call with an unchanged model" do
+      model = %EditTimeline{
+        visible?: true,
+        viewing_index: 0,
+        entries: [%Entry{index: 0, tool_name: "t", timestamp_delta: 0}]
+      }
+
+      {cmd1, caches} = EditTimelineEncoder.encode(model, Caches.new())
       assert cmd1 != nil
 
       {cmd2, _caches} = EditTimelineEncoder.encode(model, caches)
       assert cmd2 == nil
     end
 
-    test "re-encodes when fingerprint changes" do
-      model1 = %EditTimeline{
-        encoded: <<@op_gui_edit_timeline, 0::8>>,
-        fingerprint: :hidden
+    test "re-encodes when the model changes" do
+      {_cmd, caches} = EditTimelineEncoder.encode(%EditTimeline{}, Caches.new())
+
+      changed = %EditTimeline{
+        visible?: true,
+        viewing_index: 0,
+        entries: [%Entry{index: 0, tool_name: "t", timestamp_delta: 0}]
       }
 
-      model2 = %EditTimeline{
-        encoded: <<@op_gui_edit_timeline, 1::8, "data">>,
-        fingerprint: 99_999
-      }
-
-      caches = Caches.new()
-      {_, caches} = EditTimelineEncoder.encode(model1, caches)
-      {cmd2, _caches} = EditTimelineEncoder.encode(model2, caches)
-
+      {cmd2, _caches} = EditTimelineEncoder.encode(changed, caches)
       assert cmd2 != nil
-      assert cmd2 == model2.encoded
     end
   end
 end

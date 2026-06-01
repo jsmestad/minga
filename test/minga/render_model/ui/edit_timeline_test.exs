@@ -2,25 +2,29 @@ defmodule Minga.RenderModel.UI.EditTimelineTest do
   use ExUnit.Case, async: true
 
   alias Minga.RenderModel.UI.EditTimeline
+  alias Minga.RenderModel.UI.EditTimeline.Entry
 
   describe "%EditTimeline{}" do
-    test "requires encoded and fingerprint" do
-      model = %EditTimeline{encoded: <<>>, fingerprint: :hidden}
+    test "defaults to a hidden timeline" do
+      timeline = %EditTimeline{}
 
-      assert model.encoded == <<>>
-      assert model.fingerprint == :hidden
+      refute timeline.visible?
+      assert timeline.viewing_index == nil
+      assert timeline.entries == []
     end
 
-    test "raises when required fields are missing" do
-      assert_raise ArgumentError, fn ->
-        struct!(EditTimeline, %{})
-      end
+    test "carries viewing index and entries" do
+      entry = %Entry{index: 0, tool_name: "edit_file", timestamp_delta: 0}
+      timeline = %EditTimeline{visible?: true, viewing_index: 1, entries: [entry]}
+
+      assert timeline.viewing_index == 1
+      assert [%Entry{tool_name: "edit_file"}] = timeline.entries
     end
+  end
 
-    test "accepts visible state with integer fingerprint" do
-      model = %EditTimeline{encoded: <<0x9B, 1>>, fingerprint: 42}
-
-      assert model.fingerprint == 42
+  describe "%EditTimeline.Entry{}" do
+    test "requires index, tool_name, and timestamp_delta" do
+      assert_raise ArgumentError, fn -> struct!(Entry, %{index: 0}) end
     end
   end
 end

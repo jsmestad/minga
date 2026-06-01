@@ -256,7 +256,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_search_dismiss Opcodes.gui_action_search_dismiss()
   @gui_action_sidebar_action Opcodes.gui_action_sidebar_action()
 
-  @op_gui_edit_timeline Opcodes.gui_edit_timeline()
   @op_gui_search_state Opcodes.gui_search_state()
   @op_gui_sidebars Opcodes.gui_sidebars()
 
@@ -1030,38 +1029,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   def encode_gui_cursor_animation(enabled) when is_boolean(enabled) do
     enabled_byte = if enabled, do: 1, else: 0
     <<@op_gui_cursor_animation, 1::16, enabled_byte::8>>
-  end
-
-  # ── Edit Timeline (forward-compatible, 0x9B) ──
-
-  @doc """
-  Encodes the edit timeline state for the active file.
-
-  Uses the forward-compatible 0x90+ format: opcode(1) + payload_length(2) + payload.
-  Payload: visible(1) + viewing_index(2, 0xFFFF=live) + entry_count(1)
-  Per entry: index(1) + tool_name_len(1) + tool_name(N) + timestamp_delta(4)
-  """
-  @spec encode_gui_edit_timeline(boolean(), non_neg_integer() | nil, [map()]) :: binary()
-  def encode_gui_edit_timeline(visible, viewing_index, entries) do
-    visible_byte = if visible, do: 1, else: 0
-    viewing_u16 = if viewing_index == nil, do: 0xFFFF, else: min(viewing_index, 0xFFFE)
-    count = min(length(entries), @max_u8)
-
-    entry_binaries =
-      entries
-      |> Enum.take(@max_u8)
-      |> Enum.map(fn entry ->
-        tool_name_bytes = :erlang.iolist_to_binary([entry.tool_name])
-        tool_name_len = min(byte_size(tool_name_bytes), @max_u8)
-        truncated_name = binary_part(tool_name_bytes, 0, tool_name_len)
-
-        <<entry.index::8, tool_name_len::8, truncated_name::binary, entry.timestamp_delta::32>>
-      end)
-
-    payload =
-      IO.iodata_to_binary([<<visible_byte::8, viewing_u16::16, count::8>> | entry_binaries])
-
-    <<@op_gui_edit_timeline, byte_size(payload)::16, payload::binary>>
   end
 
   @doc """
