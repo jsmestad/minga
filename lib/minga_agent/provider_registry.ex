@@ -106,11 +106,11 @@ defmodule MingaAgent.ProviderRegistry do
     :exit, {:noproc, _} -> :ok
   end
 
-  @doc "Returns the built-in native provider spec."
+  @doc "Returns the bundled native provider spec."
   @spec native_spec() :: Spec.t()
   def native_spec do
     Spec.new!(
-      source: :builtin,
+      source: {:bundle, :native_provider},
       id: "native",
       module: MingaAgent.Providers.Native,
       display_name: "native",

@@ -2,6 +2,7 @@ defmodule MingaAgent.ProviderResolverTest do
   # Mutates the global :minga Application env to exercise provider resolution without the test override.
   use ExUnit.Case, async: false
 
+  alias MingaAgent.ProviderPacks.Native, as: NativeProviderPack
   alias MingaAgent.ProviderRegistry
   alias MingaAgent.ProviderResolver
   alias MingaAgent.Providers.Native
@@ -10,7 +11,7 @@ defmodule MingaAgent.ProviderResolverTest do
     test "returns Native for :native preference" do
       result = ProviderResolver.resolve(:native)
       assert result.id == "native"
-      assert result.source == :builtin
+      assert result.source == NativeProviderPack.source()
       assert result.module == Native
       assert result.name == "native"
     end
@@ -18,7 +19,7 @@ defmodule MingaAgent.ProviderResolverTest do
     test "returns Native for :auto preference" do
       result = ProviderResolver.resolve(:auto)
       assert result.id == "native"
-      assert result.source == :builtin
+      assert result.source == NativeProviderPack.source()
       assert result.module == Native
       assert result.name == "native (auto)"
     end
@@ -59,6 +60,16 @@ defmodule MingaAgent.ProviderResolverTest do
         ProviderResolver.resolve("demo", registry: registry)
       end
     end
+
+    test "rejects bundled native provider after its source is cleaned up" do
+      registry = start_registry!()
+
+      assert :ok = ProviderRegistry.unregister_source(registry, NativeProviderPack.source())
+
+      assert_raise ArgumentError, ~r/not available: :not_found/, fn ->
+        ProviderResolver.resolve(:native, registry: registry)
+      end
+    end
   end
 
   describe "resolve/0" do
@@ -82,7 +93,7 @@ defmodule MingaAgent.ProviderResolverTest do
       try do
         result = ProviderResolver.resolve()
         assert result.id == "native"
-        assert result.source == :builtin
+        assert result.source == NativeProviderPack.source()
         assert result.module == Native
         assert result.name == "native (auto)"
       after

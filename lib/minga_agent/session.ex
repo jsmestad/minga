@@ -38,6 +38,7 @@ defmodule MingaAgent.Session do
   alias MingaAgent.Memory
   alias MingaAgent.Message
   alias MingaAgent.Notifier
+  alias MingaAgent.ProviderRegistry
   alias MingaAgent.ProviderResolver
   alias MingaAgent.SessionMetadata
   alias MingaAgent.SessionStore
@@ -635,7 +636,9 @@ defmodule MingaAgent.Session do
   def init(opts) do
     provider_resolution = resolve_provider(opts)
     provider_module = provider_resolution.module
-    provider_lease = acquire_provider_lease!(provider_resolution.source, provider_module)
+
+    provider_lease =
+      acquire_provider_lease!(provider_resolution.source, provider_module, provider_resolution.id)
 
     provider_opts =
       Keyword.merge(
@@ -2463,20 +2466,34 @@ defmodule MingaAgent.Session do
 
   @spec acquire_provider_lease!(
           Minga.Extension.ContributionCleanup.contribution_source(),
-          module()
+          module(),
+          String.t()
         ) ::
           CodeLease.t() | nil
-  defp acquire_provider_lease!({:extension, _name} = source, module) do
-    case ensure_provider_lease(source, module, nil) do
-      {:ok, lease} ->
-        lease
-
-      {:error, reason} ->
-        raise "failed to lease extension provider #{inspect(module)}: #{inspect(reason)}"
-    end
+  defp acquire_provider_lease!({:bundle, _name} = source, module, provider_id) do
+    acquire_source_provider_lease!(source, module, provider_id)
   end
 
-  defp acquire_provider_lease!(_source, _module), do: nil
+  defp acquire_provider_lease!({:extension, _name} = source, module, provider_id) do
+    acquire_source_provider_lease!(source, module, provider_id)
+  end
+
+  defp acquire_provider_lease!(_source, _module, _provider_id), do: nil
+
+  @spec acquire_source_provider_lease!(
+          Minga.Extension.ContributionCleanup.contribution_source(),
+          module(),
+          String.t()
+        ) :: CodeLease.t()
+  defp acquire_source_provider_lease!(source, module, provider_id) do
+    with :ok <- validate_source_owned_provider(source, module, provider_id),
+         {:ok, lease} <- ensure_provider_lease(source, module, nil) do
+      lease
+    else
+      {:error, reason} ->
+        raise "failed to lease source-owned provider #{inspect(module)}: #{inspect(reason)}"
+    end
+  end
 
   @spec ensure_provider_lease(
           Minga.Extension.ContributionCleanup.contribution_source(),
@@ -2485,16 +2502,21 @@ defmodule MingaAgent.Session do
         ) :: {:ok, CodeLease.t()} | {:error, term()}
   defp ensure_provider_lease(_source, _module, %CodeLease{} = lease), do: {:ok, lease}
 
+  defp ensure_provider_lease({:bundle, _name} = source, module, nil) do
+    CodeLease.lease(source, module, :provider, owner: self())
+  end
+
   defp ensure_provider_lease({:extension, _name} = source, module, nil) do
     CodeLease.lease(source, module, :provider, owner: self())
   end
 
   @spec start_provider(state()) :: {:ok, pid(), CodeLease.t() | nil} | {:error, term()}
+  defp start_provider(%{provider_source: {:bundle, _name}} = state) do
+    start_source_owned_provider(state)
+  end
+
   defp start_provider(%{provider_source: {:extension, _name}} = state) do
-    case ensure_provider_lease(state.provider_source, state.provider_module, state.provider_lease) do
-      {:ok, lease} -> start_provider_with_lease(state, lease)
-      {:error, reason} -> {:error, {:provider_lease_unavailable, reason}}
-    end
+    start_source_owned_provider(state)
   end
 
   defp start_provider(state) do
@@ -2502,6 +2524,64 @@ defmodule MingaAgent.Session do
       {:ok, pid} -> {:ok, pid, nil}
       {:error, _reason} = error -> error
     end
+  end
+
+  @spec start_source_owned_provider(state()) :: {:ok, pid(), CodeLease.t()} | {:error, term()}
+  defp start_source_owned_provider(state) do
+    with :ok <-
+           validate_source_owned_provider(
+             state.provider_source,
+             state.provider_module,
+             state.provider_id
+           ),
+         {:ok, lease} <-
+           ensure_provider_lease(
+             state.provider_source,
+             state.provider_module,
+             state.provider_lease
+           ) do
+      start_provider_with_lease(state, lease)
+    else
+      {:error, {:provider_lease_unavailable, _reason}} = error -> error
+      {:error, reason} -> {:error, {:provider_unavailable, reason}}
+    end
+  end
+
+  @spec validate_source_owned_provider(
+          Minga.Extension.ContributionCleanup.contribution_source(),
+          module(),
+          String.t() | nil
+        ) :: :ok | {:error, term()}
+  defp validate_source_owned_provider(source, module, provider_id) do
+    id = provider_id || "native"
+
+    with {:ok, entry} <- ProviderRegistry.lookup(id),
+         :ok <- validate_provider_registry_entry(entry.spec, source, module) do
+      :ok
+    else
+      {:error, reason} -> {:error, {:provider_registry_unavailable, id, reason}}
+    end
+  catch
+    :exit, reason -> {:error, {:provider_registry_unavailable, provider_id || "native", reason}}
+  end
+
+  @spec validate_provider_registry_entry(
+          MingaAgent.Provider.Spec.t(),
+          Minga.Extension.ContributionCleanup.contribution_source(),
+          module()
+        ) :: :ok | {:error, term()}
+  defp validate_provider_registry_entry(%{source: source, module: module}, source, module),
+    do: :ok
+
+  defp validate_provider_registry_entry(spec, source, module) do
+    {:error,
+     {:provider_registry_mismatch,
+      %{
+        expected_source: source,
+        expected_module: module,
+        source: spec.source,
+        module: spec.module
+      }}}
   end
 
   @spec start_provider_with_lease(state(), CodeLease.t()) ::

@@ -4,6 +4,7 @@ defmodule MingaAgent.Tools.SubagentTest do
 
   alias Minga.Events
   alias MingaAgent.Event
+  alias MingaAgent.ProviderPacks.Native, as: NativeProviderPack
   alias MingaAgent.ProviderRegistry
   alias MingaAgent.Session
   alias MingaAgent.SessionManager
@@ -297,6 +298,76 @@ defmodule MingaAgent.Tools.SubagentTest do
     assert_receive {:provider_prompt, provider_pid, "registered provider task"}, 1_000
     assert :ok = GatedProvider.proceed(provider_pid, "registered done")
     assert {:ok, "registered done"} = Task.await(task)
+  end
+
+  test "native provider atom override is rejected when the bundled source is disabled" do
+    assert :ok = ProviderRegistry.disable("native")
+    on_exit(fn -> ProviderRegistry.enable("native") end)
+
+    assert {:error, message} = Subagent.execute("blocked native", provider: :native)
+    assert message =~ "Failed to resolve subagent provider"
+    assert message =~ ":disabled"
+  end
+
+  test "native provider string override is rejected when the bundled source is disabled" do
+    assert :ok = ProviderRegistry.disable("native")
+    on_exit(fn -> ProviderRegistry.enable("native") end)
+
+    assert {:error, message} = Subagent.execute("blocked native", provider: "native")
+    assert message =~ "Failed to resolve subagent provider"
+    assert message =~ ":disabled"
+  end
+
+  test "default native provider is rejected after bundled source cleanup" do
+    assert :ok = ProviderRegistry.unregister_source(NativeProviderPack.source())
+    on_exit(fn -> NativeProviderPack.register() end)
+
+    assert {:error, message} = Subagent.execute("blocked native")
+    assert message =~ "Failed to resolve subagent provider"
+    assert message =~ ":not_found"
+  end
+
+  test "inherited source-owned providers are rechecked for child sessions", %{tmp_dir: dir} do
+    source = {:bundle, :recording_subagent_provider}
+    provider_id = "recording-subagent-provider"
+    ref = make_ref()
+
+    assert :ok =
+             ProviderRegistry.register(
+               id: provider_id,
+               source: source,
+               module: RecordingProvider,
+               display_name: "Recording Subagent Provider"
+             )
+
+    {:ok, parent} =
+      MingaAgent.Supervisor.start_session(
+        provider: RecordingProvider,
+        provider_id: provider_id,
+        provider_source: source,
+        model_name: "parent-model",
+        provider_opts: [
+          provider: "recording",
+          model: "parent-model",
+          project_root: dir,
+          test_pid: self(),
+          test_ref: ref
+        ]
+      )
+
+    assert_receive {^ref, {:provider_started, _provider_pid, _opts}}, 1_000
+    assert :ok = ProviderRegistry.unregister_source(source)
+
+    on_exit(fn ->
+      MingaAgent.Supervisor.stop_session(parent)
+      ProviderRegistry.unregister_source(source)
+    end)
+
+    assert {:error, message} =
+             Subagent.execute("blocked inherited", parent_session: parent, project_root: dir)
+
+    assert message =~ "Failed to resolve subagent provider"
+    assert message =~ ":not_found"
   end
 
   test "background subagent returns a stable handle before the child finishes", %{

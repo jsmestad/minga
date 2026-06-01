@@ -1,6 +1,7 @@
 defmodule MingaAgent.ProviderRegistryTest do
   use ExUnit.Case, async: true
 
+  alias MingaAgent.ProviderPacks.Native, as: NativeProviderPack
   alias MingaAgent.ProviderRegistry
   alias MingaAgent.Provider.Spec
   alias MingaAgent.Providers.Native
@@ -80,7 +81,7 @@ defmodule MingaAgent.ProviderRegistryTest do
     assert {:ok, _entry} = ProviderRegistry.lookup(registry, "other")
   end
 
-  test "seeds the native built-in provider when requested" do
+  test "seeds the bundled native provider when requested" do
     name = Module.concat(__MODULE__, "Seeded#{System.unique_integer([:positive])}")
 
     start_supervised!(%{
@@ -89,7 +90,7 @@ defmodule MingaAgent.ProviderRegistryTest do
     })
 
     assert {:ok, entry} = ProviderRegistry.lookup(name, "native")
-    assert entry.spec.source == :builtin
+    assert entry.spec.source == NativeProviderPack.source()
     assert entry.spec.module == Native
   end
 
