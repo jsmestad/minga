@@ -164,7 +164,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @op_gui_workspaces Opcodes.gui_workspaces()
   @op_gui_board Opcodes.gui_board()
   @op_gui_agent_context Opcodes.gui_agent_context()
-  @op_gui_change_summary Opcodes.gui_change_summary()
   @op_gui_hover_action Opcodes.gui_hover_action()
   @op_gui_config_state Opcodes.gui_config_state()
   @op_gui_notifications Opcodes.gui_notifications()
@@ -1030,46 +1029,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   end
 
   # ── Change Summary ──
-
-  @doc """
-  Encodes a gui_change_summary command (0x89).
-
-  Sends the list of changed files with diff stats when zoomed into an agent card.
-  The Swift frontend renders this as a resizable sidebar on the left.
-
-  Wire format:
-    opcode(1) + visible(1) + selected_index(2) + entry_count(2) + entries...
-
-  Each entry:
-    path_len(2) + path + action(1) + lines_added(4) + lines_removed(4)
-
-  Action: 0=modified, 1=added, 2=deleted, 3=renamed
-  """
-  @spec encode_gui_change_summary([map()], non_neg_integer()) :: binary()
-  def encode_gui_change_summary(entries, selected_index \\ 0) when is_list(entries) do
-    visible = if entries == [], do: 0, else: 1
-
-    entry_binaries =
-      Enum.map(entries, fn entry ->
-        path_bytes = :erlang.iolist_to_binary([entry.path])
-        action_byte = file_action_byte(entry.action)
-
-        <<byte_size(path_bytes)::16, path_bytes::binary, action_byte::8, entry.lines_added::32,
-          entry.lines_removed::32>>
-      end)
-
-    IO.iodata_to_binary([
-      <<@op_gui_change_summary, visible::8, selected_index::16, length(entries)::16>>
-      | entry_binaries
-    ])
-  end
-
-  @spec file_action_byte(:modified | :added | :deleted | :renamed) :: non_neg_integer()
-  defp file_action_byte(:modified), do: 0
-  defp file_action_byte(:added), do: 1
-  defp file_action_byte(:deleted), do: 2
-  defp file_action_byte(:renamed), do: 3
-  defp file_action_byte(_), do: 0
 
   # ── Extension Overlays (forward-compatible, 0x9C) ──
 

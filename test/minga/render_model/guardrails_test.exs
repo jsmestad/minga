@@ -9,7 +9,6 @@ defmodule Minga.RenderModel.GuardrailsTest do
                                  "agent_chat",
                                  "board",
                                  "bottom_panel",
-                                 "change_summary",
                                  "edit_timeline"
                                ])
 
@@ -18,7 +17,6 @@ defmodule Minga.RenderModel.GuardrailsTest do
                                        "lib/minga_editor/render_model/ui/agent_context_builder.ex",
                                        "lib/minga_editor/render_model/ui/board_builder.ex",
                                        "lib/minga_editor/render_model/ui/bottom_panel_builder.ex",
-                                       "lib/minga_editor/render_model/ui/change_summary_builder.ex",
                                        "lib/minga_editor/render_model/ui/edit_timeline_builder.ex"
                                      ])
 

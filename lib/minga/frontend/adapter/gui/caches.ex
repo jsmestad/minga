@@ -23,7 +23,7 @@ defmodule Minga.Frontend.Adapter.GUI.Caches do
           last_signature_help_fp: fingerprint() | nil,
           last_agent_chat_fp: integer() | :not_visible | nil,
           last_bottom_panel_fp: integer() | nil,
-          last_change_summary_fp: integer() | :hidden | nil,
+          last_change_summary_fp: integer() | nil,
           last_edit_timeline_fp: integer() | :hidden | nil,
           last_extension_overlay_fp: fingerprint() | nil,
           last_extension_panel_fp: fingerprint() | nil,

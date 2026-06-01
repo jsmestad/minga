@@ -1,20 +1,40 @@
 defmodule Minga.RenderModel.UI.ChangeSummary do
   @moduledoc """
-  Pre-encoded change summary model.
+  Semantic change summary model.
 
-  The change summary wire format includes diff stat entries with file paths,
-  additions/deletions counts, and selected index. Rather than duplicating
-  that encoding in core, the builder pre-encodes the binary and stores it
-  here along with a fingerprint for change detection.
+  Describes the diff-stat entries shown for a zoomed board card: per-file path,
+  change action, and added/removed line counts, plus the currently selected
+  entry index. An empty `entries` list means the surface is hidden.
 
-  Uses a `:hidden` sentinel fingerprint when no card is zoomed.
+  This is pure data with domain fields. The GUI adapter
+  (`Minga.Frontend.Adapter.GUI.ChangeSummaryEncoder`) owns the wire encoding.
   """
 
+  alias __MODULE__.Entry
+
   @type t :: %__MODULE__{
-          encoded: binary(),
-          fingerprint: integer() | :hidden
+          entries: [Entry.t()],
+          selected_index: non_neg_integer()
         }
 
-  @enforce_keys [:encoded, :fingerprint]
-  defstruct [:encoded, :fingerprint]
+  defstruct entries: [], selected_index: 0
+
+  defmodule Entry do
+    @moduledoc """
+    One diff-stat row in a change summary: a file path, its change action, and
+    the number of lines added and removed.
+    """
+
+    @type action :: :modified | :added | :deleted | :renamed
+
+    @type t :: %__MODULE__{
+            path: String.t(),
+            action: action(),
+            lines_added: non_neg_integer(),
+            lines_removed: non_neg_integer()
+          }
+
+    @enforce_keys [:path]
+    defstruct [:path, action: :modified, lines_added: 0, lines_removed: 0]
+  end
 end
