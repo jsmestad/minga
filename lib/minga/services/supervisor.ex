@@ -27,6 +27,7 @@ defmodule Minga.Services.Supervisor do
       ├── Minga.Extension.Registry           Extension metadata (Agent)
       ├── MingaEditor.Extension.Sidebar      Source-owned editor sidebar registry
       ├── Minga.Extension.CodeLease          Process-owned leases for extension callback modules
+      ├── MingaAgent.ProviderRegistry        Source-owned provider declarations
       ├── Minga.Extension.Supervisor         DynamicSupervisor for extension processes
       ├── Minga.Config.Loader                Evaluates user config on init
       ├── Minga.Config.Writer                Debounced GUI settings overlay writer
@@ -40,7 +41,7 @@ defmodule Minga.Services.Supervisor do
 
   Project is placed after LSP.SyncServer to match the dependency direction:
   SyncServer uses RootDetector which may consult Project. A Project crash
-  cascades only to SessionManager.
+  cascades only to SessionManager. ProviderRegistry starts before extension supervision and config loading so provider contributions can register during boot and cleanup callbacks exist before extension reloads.
   """
 
   use Supervisor
@@ -59,10 +60,11 @@ defmodule Minga.Services.Supervisor do
       # restarts only that service, not its siblings or the chains below.
       Minga.Services.Independent,
 
-      # Extension chain: Registry → editor contribution registries → CodeLease → Supervisor → Loader
+      # Extension chain: Registry → editor contribution registries → CodeLease → provider registry → Supervisor → Loader
       Minga.Extension.Registry,
       MingaEditor.Extension.Sidebar,
       Minga.Extension.CodeLease,
+      MingaAgent.ProviderRegistry,
       Minga.Extension.Supervisor,
       Minga.Config.Loader,
       Minga.Config.Writer,
@@ -71,7 +73,7 @@ defmodule Minga.Services.Supervisor do
       Minga.LSP.Supervisor,
       Minga.LSP.SyncServer,
 
-      # Project and session manager (end of chain, minimal cascade)
+      # Project and session registry (end of chain, minimal cascade)
       Minga.Project,
       MingaAgent.SessionManager
     ]

@@ -9,6 +9,8 @@ defmodule MingaAgent.SubagentContext do
   @type t :: %__MODULE__{
           provider_module: module(),
           provider_name: String.t(),
+          provider_id: String.t(),
+          provider_source: Minga.Extension.ContributionCleanup.contribution_source(),
           model: String.t() | nil,
           thinking_level: String.t() | nil,
           active_skill_names: [String.t()],
@@ -19,9 +21,11 @@ defmodule MingaAgent.SubagentContext do
   defstruct [
     :provider_module,
     :provider_name,
-    :model,
     :thinking_level,
     :project_root,
+    provider_id: "native",
+    provider_source: :builtin,
+    model: nil,
     active_skill_names: []
   ]
 
@@ -37,6 +41,8 @@ defmodule MingaAgent.SubagentContext do
     new(
       provider_module: MingaAgent.Providers.Native,
       provider_name: "native",
+      provider_id: "native",
+      provider_source: :builtin,
       model: nil,
       thinking_level: nil,
       active_skill_names: [],

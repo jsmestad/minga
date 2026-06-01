@@ -23,6 +23,7 @@ defmodule MingaAgent.Session do
 
   alias Minga.Config.Options
   alias MingaAgent.Branch
+  alias Minga.Extension.CodeLease
   alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.Credentials
   alias MingaAgent.Event
@@ -78,6 +79,9 @@ defmodule MingaAgent.Session do
           event_log_server: GenServer.server(),
           provider: pid() | nil,
           provider_module: module(),
+          provider_id: String.t(),
+          provider_source: Minga.Extension.ContributionCleanup.contribution_source(),
+          provider_lease: CodeLease.t() | nil,
           provider_opts: keyword(),
           status: status(),
           messages: [Message.t()],
@@ -629,7 +633,9 @@ defmodule MingaAgent.Session do
   @dialyzer {:no_opaque, init: 1}
   @spec init(keyword()) :: {:ok, state()}
   def init(opts) do
-    provider_module = resolve_provider_module(opts)
+    provider_resolution = resolve_provider(opts)
+    provider_module = provider_resolution.module
+    provider_lease = acquire_provider_lease!(provider_resolution.source, provider_module)
 
     provider_opts =
       Keyword.merge(
@@ -657,6 +663,9 @@ defmodule MingaAgent.Session do
       event_log_server: Keyword.get(opts, :event_log_server, EventLog),
       provider: nil,
       provider_module: provider_module,
+      provider_id: provider_resolution.id,
+      provider_source: provider_resolution.source,
+      provider_lease: provider_lease,
       provider_opts: provider_opts,
       status: :idle,
       messages: [
@@ -1302,9 +1311,9 @@ defmodule MingaAgent.Session do
   @impl GenServer
   def handle_info(:start_provider, state) do
     case start_provider(state) do
-      {:ok, pid} ->
+      {:ok, pid, lease} ->
         Process.monitor(pid)
-        state = %{state | provider: pid}
+        state = %{state | provider: pid, provider_lease: lease}
         state = seed_provider_messages(state, state.messages)
         state = apply_pending_thinking_level(state)
         state = refresh_credentials_state(state)
@@ -1314,7 +1323,8 @@ defmodule MingaAgent.Session do
 
       {:error, reason} ->
         Minga.Log.error(:agent, "[Agent.Session] failed to start provider: #{inspect(reason)}")
-        state = %{state | error_message: format_error(reason)}
+        release_provider_lease(state.provider_lease)
+        state = %{state | provider_lease: nil, error_message: format_error(reason)}
         state = set_error_status(state)
         broadcast(state, {:error, state.error_message})
         {:noreply, state}
@@ -1328,7 +1338,16 @@ defmodule MingaAgent.Session do
 
   def handle_info({:DOWN, _ref, :process, pid, reason}, %{provider: pid} = state) do
     Minga.Log.warning(:agent, "[Agent.Session] provider process died: #{inspect(reason)}")
-    state = %{state | provider: nil, error_message: "Agent provider crashed", turn_active?: false}
+    release_provider_lease(state.provider_lease)
+
+    state = %{
+      state
+      | provider: nil,
+        provider_lease: nil,
+        error_message: "Agent provider crashed",
+        turn_active?: false
+    }
+
     state = set_error_status(state)
     broadcast(state, {:error, state.error_message})
 
@@ -2442,9 +2461,74 @@ defmodule MingaAgent.Session do
 
   # ── Provider startup ────────────────────────────────────────────────────────
 
-  @spec start_provider(state()) :: {:ok, pid()} | {:error, term()}
+  @spec acquire_provider_lease!(
+          Minga.Extension.ContributionCleanup.contribution_source(),
+          module()
+        ) ::
+          CodeLease.t() | nil
+  defp acquire_provider_lease!({:extension, _name} = source, module) do
+    case ensure_provider_lease(source, module, nil) do
+      {:ok, lease} ->
+        lease
+
+      {:error, reason} ->
+        raise "failed to lease extension provider #{inspect(module)}: #{inspect(reason)}"
+    end
+  end
+
+  defp acquire_provider_lease!(_source, _module), do: nil
+
+  @spec ensure_provider_lease(
+          Minga.Extension.ContributionCleanup.contribution_source(),
+          module(),
+          CodeLease.t() | nil
+        ) :: {:ok, CodeLease.t()} | {:error, term()}
+  defp ensure_provider_lease(_source, _module, %CodeLease{} = lease), do: {:ok, lease}
+
+  defp ensure_provider_lease({:extension, _name} = source, module, nil) do
+    CodeLease.lease(source, module, :provider, owner: self())
+  end
+
+  @spec start_provider(state()) :: {:ok, pid(), CodeLease.t() | nil} | {:error, term()}
+  defp start_provider(%{provider_source: {:extension, _name}} = state) do
+    case ensure_provider_lease(state.provider_source, state.provider_module, state.provider_lease) do
+      {:ok, lease} -> start_provider_with_lease(state, lease)
+      {:error, reason} -> {:error, {:provider_lease_unavailable, reason}}
+    end
+  end
+
   defp start_provider(state) do
-    state.provider_module.start_link(state.provider_opts)
+    case state.provider_module.start_link(state.provider_opts) do
+      {:ok, pid} -> {:ok, pid, nil}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  @spec start_provider_with_lease(state(), CodeLease.t()) ::
+          {:ok, pid(), CodeLease.t()} | {:error, term()}
+  defp start_provider_with_lease(state, lease) do
+    case state.provider_module.start_link(state.provider_opts) do
+      {:ok, pid} -> {:ok, pid, lease}
+      {:error, reason} -> release_provider_lease(lease, reason)
+    end
+  catch
+    kind, reason ->
+      _ = release_provider_lease(lease, {kind, reason})
+      :erlang.raise(kind, reason, __STACKTRACE__)
+  end
+
+  @spec release_provider_lease(CodeLease.t() | nil) :: :ok
+  defp release_provider_lease(nil), do: :ok
+
+  defp release_provider_lease(lease) do
+    CodeLease.release(lease)
+    :ok
+  end
+
+  @spec release_provider_lease(CodeLease.t() | nil, term()) :: {:error, term()}
+  defp release_provider_lease(lease, reason) do
+    release_provider_lease(lease)
+    {:error, reason}
   end
 
   @spec initial_system_message(String.t(), String.t() | nil) :: String.t()
@@ -2458,6 +2542,8 @@ defmodule MingaAgent.Session do
     SubagentContext.new(
       provider_module: state.provider_module,
       provider_name: provider_name(provider_state, state),
+      provider_id: state.provider_id,
+      provider_source: state.provider_source,
       model: provider_model(provider_state, state),
       thinking_level: provider_thinking_level(provider_state),
       active_skill_names: provider_active_skill_names(provider_state),
@@ -2696,13 +2782,23 @@ defmodule MingaAgent.Session do
   end
 
   # Determines which provider module to use. If an explicit `:provider` option is
-  # passed (common in tests and from the existing code), use that. Otherwise, delegate
-  # to the ProviderResolver which checks config.
-  @spec resolve_provider_module(keyword()) :: module()
-  defp resolve_provider_module(opts) do
+  # passed (common in tests and from existing code), use that as a config-owned provider. Otherwise, delegate
+  # to the ProviderResolver which checks config and the provider registry.
+  @spec resolve_provider(keyword()) :: ProviderResolver.resolved()
+  defp resolve_provider(opts) do
     case Keyword.fetch(opts, :provider) do
-      {:ok, module} when is_atom(module) -> module
-      _ -> ProviderResolver.resolve().module
+      {:ok, module} when is_atom(module) ->
+        %ProviderResolver.Resolved{
+          id: Keyword.get(opts, :provider_id, "explicit"),
+          source: Keyword.get(opts, :provider_source, :config),
+          module: module,
+          name: "explicit",
+          display_name: "explicit",
+          spec: nil
+        }
+
+      _ ->
+        ProviderResolver.resolve()
     end
   end
 
@@ -3003,6 +3099,7 @@ defmodule MingaAgent.Session do
     )
 
     dispatch_session_end(state, reason)
+    release_provider_lease(state.provider_lease)
 
     case reason do
       :normal ->
