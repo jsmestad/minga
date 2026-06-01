@@ -7,6 +7,7 @@ defmodule MingaAgent.Tool.Registry do
 
   use GenServer
 
+  alias MingaAgent.Tool.BundledSources
   alias MingaAgent.Tool.Spec
 
   @table __MODULE__
@@ -202,14 +203,11 @@ defmodule MingaAgent.Tool.Registry do
       {:ok, %Spec{source: existing_source}} when existing_source == attempted_source ->
         :ok
 
-      {:ok, %Spec{source: :builtin}} ->
-        {:error, {:reserved_builtin_tool, name, attempted_source}}
-
       {:ok, %Spec{source: existing_source}} ->
-        {:error, {:duplicate_tool_name, name, existing_source, attempted_source}}
+        existing_source_registration(existing_source, name, attempted_source)
 
       :error ->
-        if built_in_name?(name) and attempted_source != :builtin do
+        if reserved_name?(name) and not protected_source?(attempted_source) do
           {:error, {:reserved_builtin_tool, name, attempted_source}}
         else
           :ok
@@ -234,8 +232,24 @@ defmodule MingaAgent.Tool.Registry do
 
   defp maybe_register_cleanup_callback(_table), do: :ok
 
-  @spec built_in_name?(String.t()) :: boolean()
-  defp built_in_name?(name), do: name in MingaAgent.Tools.builtin_names()
+  @spec existing_source_registration(source(), String.t(), source()) ::
+          :ok | {:error, register_error()}
+  defp existing_source_registration(existing_source, name, attempted_source) do
+    if protected_source?(existing_source) do
+      {:error, {:reserved_builtin_tool, name, attempted_source}}
+    else
+      {:error, {:duplicate_tool_name, name, existing_source, attempted_source}}
+    end
+  end
+
+  @spec protected_source?(source()) :: boolean()
+  defp protected_source?(:builtin), do: true
+  defp protected_source?({:bundle, _name}), do: true
+  defp protected_source?(_source), do: false
+
+  @spec reserved_name?(String.t()) :: boolean()
+  defp reserved_name?(name),
+    do: name in MingaAgent.Tools.builtin_names() or name in BundledSources.reserved_names()
 
   @spec categorize(String.t()) :: Spec.category()
   defp categorize("read_file"), do: :filesystem

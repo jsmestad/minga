@@ -68,6 +68,7 @@ defmodule MingaAgent.Tools do
   alias MingaAgent.Tools.ReadFile
   alias MingaAgent.Tools.Shell
   alias MingaAgent.Tools.Subagent
+  alias MingaAgent.Tool.BundledSources
   alias MingaAgent.Tools.WriteFile
   alias Minga.Config
   alias ReqLLM.Tool
@@ -178,10 +179,12 @@ defmodule MingaAgent.Tools do
   @doc "Returns source-owned built-in tool declarations."
   @spec builtin_specs() :: [Spec.t()]
   def builtin_specs do
-    Enum.map(all(project_root: "."), &builtin_spec_from_tool/1)
+    all(project_root: ".")
+    |> Enum.reject(&(&1.name in BundledSources.read_only_tool_names()))
+    |> Enum.map(&builtin_spec_from_tool/1)
   end
 
-  @doc "Returns all built-in tool names."
+  @doc "Returns all core built-in tool names."
   @spec builtin_names() :: [String.t()]
   def builtin_names do
     builtin_specs()
