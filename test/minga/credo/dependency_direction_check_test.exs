@@ -140,6 +140,34 @@ defmodule Minga.Credo.DependencyDirectionCheckTest do
       end)
     end
 
+    test "flags root module literals that cross top-level layers" do
+      """
+      defmodule Minga.Buffer.Document do
+        @editor MingaEditor
+      end
+      """
+      |> check("lib/minga/buffer/document.ex")
+      |> assert_issue(fn issue ->
+        assert issue.message =~ "Layer 0"
+        assert issue.message =~ "Layer 2"
+        assert issue.trigger == "MingaEditor"
+      end)
+    end
+
+    test "flags root module defdelegate targets that cross top-level layers" do
+      """
+      defmodule Minga.Buffer.Document do
+        defdelegate start_link(opts), to: MingaEditor
+      end
+      """
+      |> check("lib/minga/buffer/document.ex")
+      |> assert_issue(fn issue ->
+        assert issue.message =~ "Layer 0"
+        assert issue.message =~ "Layer 2"
+        assert issue.trigger == "MingaEditor"
+      end)
+    end
+
     test "flags Git module depending on Input handler" do
       """
       defmodule Minga.Git.Tracker do

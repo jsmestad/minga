@@ -156,7 +156,10 @@ defmodule Minga.Credo.DependencyDirectionCheck do
     # Diagnostics decoration maps severities to presentation gutter faces.
     "Minga.Diagnostics.Decorations" => ["MingaEditor.UI.Theme.Gutter"],
     # Buffer state uses typed config option aliases while the option registry remains stateful.
-    "Minga.Buffer.State" => ["Minga.Config.Options"]
+    "Minga.Buffer.State" => ["Minga.Config.Options"],
+    # CLI/API are public entry-point bridges that call the running editor process.
+    "Minga.CLI" => ["MingaEditor"],
+    "Minga.API" => ["MingaEditor"]
     # All pre-existing cross-layer violations from #1368 have been resolved
     # in Wave 6 Track B. Modules were moved to their correct layers:
     # - Devicon → Minga.Language.Devicon
@@ -394,7 +397,7 @@ defmodule Minga.Credo.DependencyDirectionCheck do
 
   defp direct_alias_refs({:%, _meta, [{:__aliases__, _alias_meta, _ref_parts} | _args]}), do: []
 
-  defp direct_alias_refs({:__aliases__, meta, ref_parts}) when length(ref_parts) >= 2 do
+  defp direct_alias_refs({:__aliases__, meta, ref_parts}) when length(ref_parts) >= 1 do
     if Enum.all?(ref_parts, &is_atom/1), do: [{ref_parts, meta}], else: []
   end
 
@@ -616,7 +619,8 @@ defmodule Minga.Credo.DependencyDirectionCheck do
   end
 
   defp layer_for_service_module(ref_name) do
-    case String.starts_with?(ref_name, "MingaAgent.") or String.starts_with?(ref_name, "Minga.") do
+    case ref_name in ["Minga", "MingaAgent"] or String.starts_with?(ref_name, "MingaAgent.") or
+           String.starts_with?(ref_name, "Minga.") do
       true -> 1
       false -> nil
     end
@@ -671,7 +675,8 @@ defmodule Minga.Credo.DependencyDirectionCheck do
   end
 
   defp minga_module?(ref_name) do
-    String.starts_with?(ref_name, "Minga.") ||
+    ref_name in ["Minga", "MingaEditor", "MingaAgent"] ||
+      String.starts_with?(ref_name, "Minga.") ||
       String.starts_with?(ref_name, "MingaEditor.") ||
       String.starts_with?(ref_name, "MingaAgent.")
   end
