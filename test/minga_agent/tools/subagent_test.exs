@@ -4,6 +4,7 @@ defmodule MingaAgent.Tools.SubagentTest do
 
   alias Minga.Events
   alias MingaAgent.Event
+  alias MingaAgent.ProviderRegistry
   alias MingaAgent.Session
   alias MingaAgent.SessionManager
   alias MingaAgent.Subagent.Handle
@@ -271,6 +272,32 @@ defmodule MingaAgent.Tools.SubagentTest do
   end
 
   # ── Background subagent tests ──────────────────────────────────────────────
+
+  test "foreground subagent resolves registered string provider ids" do
+    test_pid = self()
+
+    assert :ok =
+             ProviderRegistry.register(
+               id: "gated-test",
+               source: :config,
+               module: GatedProvider,
+               display_name: "Gated Test"
+             )
+
+    on_exit(fn -> ProviderRegistry.unregister_source(:config) end)
+
+    task =
+      Task.async(fn ->
+        Subagent.execute("registered provider task",
+          provider: "gated-test",
+          provider_opts: [test_pid: test_pid]
+        )
+      end)
+
+    assert_receive {:provider_prompt, provider_pid, "registered provider task"}, 1_000
+    assert :ok = GatedProvider.proceed(provider_pid, "registered done")
+    assert {:ok, "registered done"} = Task.await(task)
+  end
 
   test "background subagent returns a stable handle before the child finishes", %{
     manager: manager

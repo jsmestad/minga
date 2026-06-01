@@ -1,6 +1,7 @@
 defmodule MingaAgent.SessionTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Extension.CodeLease
   alias MingaAgent.Branch
   alias MingaAgent.Event
   alias MingaAgent.MCP.FakeTransport
@@ -442,6 +443,31 @@ defmodule MingaAgent.SessionTest do
     Session.subscribe(session)
 
     %{session: session}
+  end
+
+  describe "extension provider leases" do
+    test "active sessions keep extension provider modules leased" do
+      source = {:extension, :lease_provider_test}
+
+      {:ok, session} =
+        Session.start_link(
+          provider: SlowMockProvider,
+          provider_id: "leased",
+          provider_source: source,
+          provider_opts: []
+        )
+
+      :sys.get_state(session)
+
+      assert [lease] = CodeLease.active_leases(source: source, module: SlowMockProvider)
+      assert lease.reason == :provider
+
+      assert {:error, {:leased_modules, [_summary]}} =
+               CodeLease.ensure_purge_allowed(source, SlowMockProvider)
+
+      GenServer.stop(session)
+      assert [] = CodeLease.active_leases(source: source, module: SlowMockProvider)
+    end
   end
 
   @spec idle_process() :: pid()
