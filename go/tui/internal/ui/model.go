@@ -151,10 +151,32 @@ func (m *Model) applyWindowDelta(delta protocol.WindowContent) {
 	window.CursorCol = delta.CursorCol
 	window.CursorShape = delta.CursorShape
 	window.ContentEpoch = delta.ContentEpoch
+	window.ScrollLeft = delta.ScrollLeft
+	if len(delta.Rows) > 0 {
+		window.Rows = resolveWindowRows(window.Rows, delta.Rows)
+	}
 	m.windows[delta.ID] = window
 	m.cursorRow = delta.CursorRow
 	m.cursorCol = delta.CursorCol
 	m.cursorShape = delta.CursorShape
+}
+
+func resolveWindowRows(previous []protocol.WindowRow, delta []protocol.WindowRow) []protocol.WindowRow {
+	byID := make(map[uint64]protocol.WindowRow, len(previous))
+	for _, row := range previous {
+		byID[row.ID] = row
+	}
+	rows := make([]protocol.WindowRow, 0, len(delta))
+	for _, row := range delta {
+		if row.Ref {
+			if existing, ok := byID[row.ID]; ok && existing.ContentHash == row.ContentHash {
+				rows = append(rows, existing)
+			}
+			continue
+		}
+		rows = append(rows, row)
+	}
+	return rows
 }
 
 func (m Model) content() string {

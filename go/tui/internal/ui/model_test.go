@@ -55,3 +55,32 @@ func TestPickerPreviewRendersWithPicker(t *testing.T) {
 		t.Fatalf("footer should render picker preview: %q", footer)
 	}
 }
+
+func TestApplyWindowDeltaResolvesRefsAndReplacesRowSnapshot(t *testing.T) {
+	model := New(80, 24, nil)
+	model.putWindow(protocol.WindowContent{
+		ID: 7,
+		Rows: []protocol.WindowRow{
+			{ID: 1, ContentHash: 11, Text: "old one"},
+			{ID: 2, ContentHash: 22, Text: "old two"},
+			{ID: 3, ContentHash: 33, Text: "removed"},
+		},
+	})
+
+	model.applyWindowDelta(protocol.WindowContent{
+		ID:           7,
+		ContentEpoch: 2,
+		Rows: []protocol.WindowRow{
+			{Ref: true, ID: 1, ContentHash: 11},
+			{ID: 2, ContentHash: 44, Text: "new two"},
+		},
+	})
+
+	rows := model.windows[7].Rows
+	if len(rows) != 2 {
+		t.Fatalf("row count = %d, want 2: %+v", len(rows), rows)
+	}
+	if rows[0].Text != "old one" || rows[1].Text != "new two" {
+		t.Fatalf("delta rows resolved incorrectly: %+v", rows)
+	}
+}

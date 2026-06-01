@@ -255,6 +255,7 @@ type WindowContent struct {
 }
 
 type WindowRow struct {
+	Ref         bool
 	Kind        byte
 	ID          uint64
 	BufferLine  uint32
@@ -413,7 +414,11 @@ func decodeWindowContent(payload []byte) (Command, error) {
 		}
 	}
 
-	return Command{Kind: CommandWindowContent, Size: offset, Window: window}, nil
+	kind := CommandWindowContent
+	if opcode != generated.OPGuiWindowContent {
+		kind = CommandWindowDelta
+	}
+	return Command{Kind: kind, Size: offset, Window: window}, nil
 }
 
 func decodeOverlayDelta(payload []byte) (Command, error) {
@@ -470,6 +475,11 @@ func decodeRows(section []byte, window *WindowContent, delta bool) {
 
 	for i := 0; i < count && offset < len(section); i++ {
 		if delta && section[offset] == 0 && len(section) >= offset+13 {
+			rows = append(rows, WindowRow{
+				Ref:         true,
+				ID:          binary.BigEndian.Uint64(section[offset+1 : offset+9]),
+				ContentHash: u32(section, offset+9),
+			})
 			offset += 13
 			continue
 		}

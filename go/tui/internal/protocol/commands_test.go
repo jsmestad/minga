@@ -62,6 +62,33 @@ func TestDecodeWindowContentRows(t *testing.T) {
 	}
 }
 
+func TestDecodeWindowRowsDeltaIncludesRowRefs(t *testing.T) {
+	ref := []byte{
+		0,
+		0, 0, 0, 0, 0, 0, 0, 9,
+		0, 0, 0, 5,
+	}
+	rowsPayload := append([]byte{0, 1}, ref...)
+	headerPayload := []byte{0, 7, 0, 0, 0, 12, 1, 0, 3, 0, 4, 1, 0, 0, 0}
+	packet := append([]byte{generated.OPGuiWindowRowsDelta, 2, 0x01, 0, byte(len(headerPayload))}, headerPayload...)
+	packet = append(packet, 0x02, byte(len(rowsPayload)>>8), byte(len(rowsPayload)))
+	packet = append(packet, rowsPayload...)
+
+	command, err := DecodeCommand(packet)
+	if err != nil {
+		t.Fatalf("DecodeCommand returned error: %v", err)
+	}
+	if command.Kind != CommandWindowDelta {
+		t.Fatalf("kind = %v, want window delta", command.Kind)
+	}
+	if len(command.Window.Rows) != 1 || !command.Window.Rows[0].Ref {
+		t.Fatalf("row ref decoded incorrectly: %+v", command.Window.Rows)
+	}
+	if command.Window.Rows[0].ID != 9 || command.Window.Rows[0].ContentHash != 5 {
+		t.Fatalf("row ref identity decoded incorrectly: %+v", command.Window.Rows[0])
+	}
+}
+
 func TestDecodeSkipsFontCommandsWithoutDroppingFollowingCommands(t *testing.T) {
 	registerFont := []byte{generated.OPRegisterFont, 1, 0, 4, 'F', 'i', 'r', 'a'}
 	batchEnd := []byte{generated.OPBatchEnd}
