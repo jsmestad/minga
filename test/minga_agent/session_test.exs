@@ -278,6 +278,7 @@ defmodule MingaAgent.SessionTest do
 
       spec =
         Spec.new!(
+          source: :builtin,
           name: "write_file",
           description: "test write",
           parameter_schema: %{},
@@ -287,7 +288,7 @@ defmodule MingaAgent.SessionTest do
           end
         )
 
-      Registry.register(registry, spec)
+      :ok = Registry.register(registry, spec)
       {:ok, %{subscriber: subscriber, parent: parent, registry: registry}}
     end
 
