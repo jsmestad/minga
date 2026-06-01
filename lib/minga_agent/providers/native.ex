@@ -1094,8 +1094,8 @@ defmodule MingaAgent.Providers.Native do
 
   # ── Extension agent components ─────────────────────────────────────────────
 
-  @spec extension_manifests() :: [Minga.Extension.Manifest.t()]
-  defp extension_manifests do
+  @spec extension_agent_entries() :: [{atom(), module() | nil, Minga.Extension.Manifest.t()}]
+  defp extension_agent_entries do
     case Process.whereis(Minga.Extension.Registry) do
       nil ->
         []
@@ -1103,23 +1103,35 @@ defmodule MingaAgent.Providers.Native do
       _pid ->
         Minga.Extension.Registry.all()
         |> Enum.filter(fn {_name, entry} -> entry.status == :running end)
-        |> Enum.map(fn {_name, entry} -> entry.manifest end)
-        |> Enum.reject(&is_nil/1)
+        |> Enum.flat_map(&extension_agent_entry/1)
     end
   end
+
+  @spec extension_agent_entry({atom(), Minga.Extension.Registry.entry()}) ::
+          [{atom(), module() | nil, Minga.Extension.Manifest.t()}]
+  defp extension_agent_entry({_name, %{manifest: nil}}), do: []
+  defp extension_agent_entry({name, entry}), do: [{name, entry.module, entry.manifest}]
 
   @spec collect_extension_agent_components() :: %{
           hooks: [MingaAgent.Hooks.Hook.t()],
           mcp_servers: [MCPServerConfig.t()]
         }
   defp collect_extension_agent_components do
-    manifests = extension_manifests()
+    entries = extension_agent_entries()
 
     hooks =
-      manifests
-      |> Enum.flat_map(& &1.hooks)
-      |> Enum.reduce([], fn {event, opts}, acc ->
-        case MingaAgent.Hooks.Hook.normalize(Keyword.put(opts, :event, event)) do
+      entries
+      |> Enum.flat_map(fn {name, module, manifest} ->
+        Enum.map(manifest.hooks, fn {event, opts} -> {name, module, event, opts} end)
+      end)
+      |> Enum.reduce([], fn {name, module, event, opts}, acc ->
+        hook_opts =
+          opts
+          |> Keyword.put(:event, event)
+          |> Keyword.put(:extension_source, name)
+          |> Keyword.put(:extension_module, module)
+
+        case MingaAgent.Hooks.Hook.normalize(hook_opts) do
           {:ok, hook} ->
             [hook | acc]
 
@@ -1135,8 +1147,8 @@ defmodule MingaAgent.Providers.Native do
       |> Enum.reverse()
 
     mcp_servers =
-      manifests
-      |> Enum.flat_map(& &1.mcp_servers)
+      entries
+      |> Enum.flat_map(fn {_name, _module, manifest} -> manifest.mcp_servers end)
       |> Enum.reduce([], fn {name, opts}, acc ->
         server_map = opts |> Keyword.put(:name, Atom.to_string(name)) |> Map.new()
 

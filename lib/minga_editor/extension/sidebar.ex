@@ -7,6 +7,7 @@ defmodule MingaEditor.Extension.Sidebar do
 
   use GenServer
 
+  alias Minga.Extension.CodeLease
   alias Minga.Extension.ContributionCleanup
   alias MingaEditor.Extension.Sidebar.Entry
   alias MingaEditor.Extension.Sidebar.Snapshot
@@ -191,11 +192,17 @@ defmodule MingaEditor.Extension.Sidebar do
 
   def dispatch_action(table, state, sidebar_id, action, context) do
     case get(table, sidebar_id) do
-      %{action_handler: nil} ->
-        run_action_handler(nil, state, action, Map.put(context, :sidebar_id, sidebar_id))
+      %{source: source, action_handler: nil} ->
+        run_action_handler(nil, source, state, action, Map.put(context, :sidebar_id, sidebar_id))
 
-      %{action_handler: handler} ->
-        run_action_handler(handler, state, action, Map.put(context, :sidebar_id, sidebar_id))
+      %{source: source, action_handler: handler} ->
+        run_action_handler(
+          handler,
+          source,
+          state,
+          action,
+          Map.put(context, :sidebar_id, sidebar_id)
+        )
 
       nil ->
         state
@@ -462,9 +469,9 @@ defmodule MingaEditor.Extension.Sidebar do
     end
   end
 
-  @spec run_action_handler(action_handler(), MingaEditor.State.t(), String.t(), map()) ::
+  @spec run_action_handler(action_handler(), source(), MingaEditor.State.t(), String.t(), map()) ::
           MingaEditor.State.t()
-  defp run_action_handler(nil, state, action, context) do
+  defp run_action_handler(nil, _source, state, action, context) do
     sidebar_id = Map.get(context, :sidebar_id, "unknown")
 
     Minga.Log.warning(
@@ -475,14 +482,35 @@ defmodule MingaEditor.Extension.Sidebar do
     EditorState.set_status(state, "Sidebar #{sidebar_id} has no action handler")
   end
 
-  defp run_action_handler(fun, state, action, context) when is_function(fun, 3),
+  defp run_action_handler(fun, _source, state, action, context) when is_function(fun, 3),
     do: fun.(state, action, context)
 
-  defp run_action_handler({module, function}, state, action, context),
-    do: apply(module, function, [state, action, context])
+  defp run_action_handler({module, function}, source, state, action, context) do
+    with_action_lease(source, module, fn -> apply(module, function, [state, action, context]) end)
+  end
 
-  defp run_action_handler({module, function, extra}, state, action, context),
-    do: apply(module, function, [state, action, context | extra])
+  defp run_action_handler({module, function, extra}, source, state, action, context) do
+    with_action_lease(source, module, fn ->
+      apply(module, function, [state, action, context | extra])
+    end)
+  end
+
+  @spec with_action_lease(source(), module(), (-> MingaEditor.State.t())) :: MingaEditor.State.t()
+  defp with_action_lease({:extension, ext_name}, module, fun) do
+    case CodeLease.lease({:extension, ext_name}, module, :ui_action) do
+      {:ok, lease} ->
+        try do
+          fun.()
+        after
+          CodeLease.release(lease)
+        end
+
+      {:error, reason} ->
+        raise "extension #{ext_name} sidebar action module #{inspect(module)} unavailable: #{inspect(reason)}"
+    end
+  end
+
+  defp with_action_lease(_source, _module, fun), do: fun.()
 
   @spec call_table(table(), term()) :: term()
   defp call_table(table, message) do
