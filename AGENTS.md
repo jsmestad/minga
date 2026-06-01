@@ -240,6 +240,8 @@ The practical rule: **prefer the entry-point module when one exists**, because i
 
 Minga uses three namespaces that enforce dependency direction: `Minga.*` (Layer 0), `MingaAgent.*` (Layer 1), `MingaEditor.*` (Layer 2). Dependencies flow downward only. A credo check enforces this at compile time. See `docs/ARCHITECTURE.md` for the full rationale.
 
+MingaAgent also has internal Agent Level 0/1/2 rules from epic #2075. Agent Level 0 contains pure contracts, value types, and safety interfaces; Agent Level 1 contains runtime services, source-owned registries, credentials, approval, `ToolRouter`, changesets, buffer forks, and edit boundaries; Agent Level 2 contains bundled integrations, adapters, and agent presentation surfaces. `Minga.Credo.DependencyDirectionCheck` enforces that Agent Level 0 cannot depend on Levels 1 or 2 and Agent Level 1 cannot depend on Level 2. See `docs/ARCHITECTURE.md#mingaagent-internal-levels` for the current module classification.
+
 #### Layer 0: `lib/minga/` (Minga.*)
 
 | Directory | Entry point | What lives here |

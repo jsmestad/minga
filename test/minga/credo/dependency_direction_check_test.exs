@@ -101,6 +101,196 @@ defmodule Minga.Credo.DependencyDirectionCheckTest do
     end
   end
 
+  describe "MingaAgent internal level violations" do
+    test "flags Agent Level 0 contracts depending on Agent Level 1 runtime services" do
+      """
+      defmodule MingaAgent.Tool.Spec do
+        alias MingaAgent.Tool.Registry
+      end
+      """
+      |> check("lib/minga_agent/tool/spec.ex")
+      |> assert_issue(fn issue ->
+        assert issue.message =~ "Agent Level 0"
+        assert issue.message =~ "Agent Level 1"
+      end)
+    end
+
+    test "flags Agent Level 0 extension payloads depending on Agent Level 2 presentation" do
+      """
+      defmodule MingaEditor.Agent.SlashCommand.Command do
+        alias MingaEditor.Agent.UIState
+      end
+      """
+      |> check("lib/minga_editor/agent/slash_command/command.ex")
+      |> assert_issue(fn issue ->
+        assert issue.message =~ "Agent Level 0"
+        assert issue.message =~ "Agent Level 2"
+      end)
+    end
+
+    test "flags Agent Level 1 runtime services depending on Agent Level 2 presentation" do
+      """
+      defmodule MingaAgent.Session do
+        alias MingaEditor.Agent.UIState
+      end
+      """
+      |> check("lib/minga_agent/session.ex")
+      |> assert_issue(fn issue ->
+        assert issue.message =~ "Agent Level 1"
+        assert issue.message =~ "Agent Level 2"
+      end)
+    end
+
+    test "uses declared acronym module names for source classification" do
+      """
+      defmodule MingaAgent.MCP.Tool do
+        alias MingaAgent.MCP.Registry
+      end
+      """
+      |> check("lib/minga_agent/mcp/tool.ex")
+      |> assert_issue(fn issue ->
+        assert issue.message =~ "Agent Level 0"
+        assert issue.message =~ "Agent Level 1"
+      end)
+    end
+
+    test "flags grouped aliases that cross Agent levels" do
+      """
+      defmodule MingaAgent.Tool.Spec do
+        alias MingaAgent.Tool.{Registry, Spec}
+      end
+      """
+      |> check("lib/minga_agent/tool/spec.ex")
+      |> assert_issue(fn issue ->
+        assert issue.message =~ "Agent Level 0"
+        assert issue.message =~ "Agent Level 1"
+      end)
+    end
+
+    test "flags direct remote calls that cross Agent levels" do
+      """
+      defmodule MingaAgent.Event do
+        @type t :: %{status: MingaAgent.Session.status()}
+      end
+      """
+      |> check("lib/minga_agent/event.ex")
+      |> assert_issue(fn issue ->
+        assert issue.message =~ "Agent Level 0"
+        assert issue.message =~ "Agent Level 1"
+      end)
+    end
+
+    test "flags direct module literals that cross Agent levels" do
+      """
+      defmodule MingaAgent.Event do
+        @default_provider MingaAgent.Providers.Native
+      end
+      """
+      |> check("lib/minga_agent/event.ex")
+      |> assert_issue(fn issue ->
+        assert issue.message =~ "Agent Level 0"
+        assert issue.message =~ "Agent Level 1"
+      end)
+    end
+
+    test "flags two-segment direct module literals that cross Agent levels" do
+      """
+      defmodule MingaAgent.Event do
+        @config MingaAgent.Config
+      end
+      """
+      |> check("lib/minga_agent/event.ex")
+      |> assert_issue(fn issue ->
+        assert issue.message =~ "Agent Level 0"
+        assert issue.message =~ "Agent Level 1"
+      end)
+    end
+
+    test "flags direct struct literals that cross Agent levels" do
+      """
+      defmodule MingaAgent.Event do
+        def new_config, do: %MingaAgent.Config{}
+      end
+      """
+      |> check("lib/minga_agent/event.ex")
+      |> assert_issue(fn issue ->
+        assert issue.message =~ "Agent Level 0"
+        assert issue.message =~ "Agent Level 1"
+      end)
+    end
+
+    test "flags bare module literals in function bodies that cross Agent levels" do
+      """
+      defmodule MingaAgent.Event do
+        def default_provider, do: MingaAgent.Providers.Native
+      end
+      """
+      |> check("lib/minga_agent/event.ex")
+      |> assert_issue(fn issue ->
+        assert issue.message =~ "Agent Level 0"
+        assert issue.message =~ "Agent Level 1"
+      end)
+    end
+
+    test "reports struct types in attributes only once" do
+      """
+      defmodule MingaAgent.Event do
+        @type t :: %MingaAgent.Config{}
+      end
+      """
+      |> check("lib/minga_agent/event.ex")
+      |> assert_issue(fn issue ->
+        assert issue.message =~ "Agent Level 0"
+        assert issue.message =~ "Agent Level 1"
+      end)
+    end
+
+    test "flags Level 0 editor payloads depending on non-agent editor presentation" do
+      """
+      defmodule MingaEditor.Agent.SlashCommand.Command do
+        alias MingaEditor.State
+      end
+      """
+      |> check("lib/minga_editor/agent/slash_command/command.ex")
+      |> assert_issue(fn issue ->
+        assert issue.message =~ "Agent Level 0"
+        assert issue.message =~ "Agent Level 2"
+      end)
+    end
+  end
+
+  describe "MingaAgent valid internal dependencies" do
+    test "Agent Level 1 runtime services may depend on Agent Level 0 contracts" do
+      """
+      defmodule MingaAgent.Tool.Registry do
+        alias MingaAgent.Tool.Spec
+      end
+      """
+      |> check("lib/minga_agent/tool/registry.ex")
+      |> refute_issues()
+    end
+
+    test "Agent Level 2 presentation may depend on Agent Level 1 runtime services" do
+      """
+      defmodule MingaEditor.Agent.Events do
+        alias MingaAgent.Session
+      end
+      """
+      |> check("lib/minga_editor/agent/events.ex")
+      |> refute_issues()
+    end
+
+    test "Agent Level 0 contracts may depend on Agent Level 0 value types" do
+      """
+      defmodule MingaAgent.Event do
+        alias MingaAgent.TurnUsage
+      end
+      """
+      |> check("lib/minga_agent/event.ex")
+      |> refute_issues()
+    end
+  end
+
   describe "valid downward dependencies" do
     test "Layer 2 may depend on Layer 1" do
       """
