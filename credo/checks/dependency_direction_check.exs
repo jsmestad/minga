@@ -178,6 +178,7 @@ defmodule Minga.Credo.DependencyDirectionCheck do
 
   @agent_level_1_prefixes [
     "Minga.Extension.AgentAPI",
+    "Minga.Extension.CodeLease",
     "MingaAgent"
   ]
 

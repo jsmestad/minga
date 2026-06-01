@@ -7,6 +7,8 @@ defmodule Minga.Extension.JsonLoader do
   The generated module name is deterministic: `Minga.Extension.Plugin.<CamelizedName>` where the name comes from the JSON's `"name"` field (or the directory basename as fallback).
   """
 
+  alias Minga.Extension.CodeLease
+
   @placeholder "${MINGA_PLUGIN_ROOT}"
 
   @doc """
@@ -103,22 +105,26 @@ defmodule Minga.Extension.JsonLoader do
           def init(_config), do: {:ok, %{}}
         end
 
-      # Purge any previous version so reloads work cleanly
-      purge_if_loaded(module_name)
-
-      Module.create(module_name, contents, Macro.Env.location(__ENV__))
-      {:ok, module_name}
+      with :ok <- purge_if_loaded(module_name) do
+        Module.create(module_name, contents, Macro.Env.location(__ENV__))
+        {:ok, module_name}
+      end
     end
   end
 
-  @spec purge_if_loaded(module()) :: :ok
+  @spec purge_if_loaded(module()) :: :ok | {:error, String.t()}
   defp purge_if_loaded(module) do
     if :code.is_loaded(module) do
-      :code.purge(module)
-      :code.delete(module)
-    end
+      case CodeLease.purge_module(nil, module) do
+        :ok ->
+          :ok
 
-    :ok
+        {:error, reason} ->
+          {:error, "plugin module #{inspect(module)} is leased: #{inspect(reason)}"}
+      end
+    else
+      :ok
+    end
   end
 
   # --- Hook declarations ---
