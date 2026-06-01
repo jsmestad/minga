@@ -58,6 +58,7 @@ type ChromePayload struct {
 	Complete Completion
 	Which    WhichKey
 	Picker   Picker
+	Preview  PickerPreview
 	Tree     FileTree
 	Status   StatusBar
 }
@@ -187,6 +188,21 @@ type PickerItem struct {
 	Annotation  string
 	TwoLine     bool
 	Marked      bool
+}
+
+type PickerPreview struct {
+	Visible bool
+	Lines   []PreviewLine
+}
+
+type PreviewLine struct {
+	Segments []PreviewSegment
+}
+
+type PreviewSegment struct {
+	FG   uint32
+	Bold bool
+	Text string
 }
 
 type FileTree struct {
@@ -537,6 +553,8 @@ func decodeChrome(payload []byte) ChromePayload {
 		chrome.Which, chrome.Summary, chrome.Bytes = decodeWhichKey(payload)
 	case generated.OPGuiPicker:
 		chrome.Picker, chrome.Summary, chrome.Bytes = decodePicker(payload)
+	case generated.OPGuiPickerPreview:
+		chrome.Preview, chrome.Summary, chrome.Bytes = decodePickerPreview(payload)
 	case generated.OPGuiFileTree:
 		chrome.Tree, chrome.Summary, chrome.Bytes = decodeFileTree(payload)
 	case generated.OPGuiStatusBar:
@@ -940,6 +958,43 @@ func decodePickerLoadStatus(section []byte, picker *Picker) {
 	}
 }
 
+func decodePickerPreview(payload []byte) (PickerPreview, string, int) {
+	if len(payload) < 2 || payload[1] == 0 {
+		return PickerPreview{}, "", min(len(payload), 2)
+	}
+	if len(payload) < 4 {
+		return PickerPreview{Visible: true}, "", len(payload)
+	}
+	count := int(u16(payload, 2))
+	offset := 4
+	preview := PickerPreview{Visible: true, Lines: make([]PreviewLine, 0, count)}
+	summary := make([]string, 0, count)
+	for i := 0; i < count && len(payload) >= offset+1; i++ {
+		segmentCount := int(payload[offset])
+		offset++
+		line := PreviewLine{Segments: make([]PreviewSegment, 0, segmentCount)}
+		var text strings.Builder
+		for j := 0; j < segmentCount && len(payload) >= offset+6; j++ {
+			segment := PreviewSegment{
+				FG:   u24(payload, offset),
+				Bold: payload[offset+3]&0x01 != 0,
+			}
+			offset += 4
+			value, next, ok := readString16(payload, offset)
+			if !ok {
+				return preview, stringsJoin(summary, "  "), len(payload)
+			}
+			segment.Text = value
+			offset = next
+			line.Segments = append(line.Segments, segment)
+			text.WriteString(value)
+		}
+		preview.Lines = append(preview.Lines, line)
+		summary = append(summary, text.String())
+	}
+	return preview, stringsJoin(summary, "  "), offset
+}
+
 func decodeFileTree(payload []byte) (FileTree, string, int) {
 	if len(payload) < 5 {
 		return FileTree{}, "", len(payload)
@@ -1164,6 +1219,8 @@ func opcodeName(opcode byte) string {
 		return "file tree"
 	case generated.OPGuiPicker:
 		return "picker"
+	case generated.OPGuiPickerPreview:
+		return "picker preview"
 	case generated.OPGuiMinibuffer:
 		return "minibuffer"
 	case generated.OPGuiCompletion:

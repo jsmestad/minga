@@ -311,6 +311,38 @@ func TestDecodePickerChromeDoesNotSwallowFollowingCommands(t *testing.T) {
 	}
 }
 
+func TestDecodePickerPreviewChromeDoesNotSwallowFollowingCommands(t *testing.T) {
+	segment := []byte{0xCC, 0xDD, 0xEE, 1}
+	segment = append(segment, string16("def main")...)
+	packet := []byte{generated.OPGuiPickerPreview, 1, 0, 1, 1}
+	packet = append(packet, segment...)
+	packet = append(packet, generated.OPBatchEnd)
+
+	first, err := DecodeCommand(packet)
+	if err != nil {
+		t.Fatalf("DecodeCommand returned error: %v", err)
+	}
+	if first.Size != len(packet)-1 {
+		t.Fatalf("picker preview size = %d, want %d", first.Size, len(packet)-1)
+	}
+	preview := first.Chrome.Preview
+	if !preview.Visible || len(preview.Lines) != 1 || len(preview.Lines[0].Segments) != 1 {
+		t.Fatalf("preview decoded incorrectly: %+v", preview)
+	}
+	got := preview.Lines[0].Segments[0]
+	if got.Text != "def main" || got.FG != 0xCCDDEE || !got.Bold {
+		t.Fatalf("preview segment decoded incorrectly: %+v", got)
+	}
+
+	second, err := DecodeCommand(packet[first.Size:])
+	if err != nil {
+		t.Fatalf("DecodeCommand batch returned error: %v", err)
+	}
+	if second.Kind != CommandBatchEnd {
+		t.Fatalf("second kind = %v, want batch end", second.Kind)
+	}
+}
+
 func TestDecodeFileTreeChromeRows(t *testing.T) {
 	row := []byte{
 		0, 0, 0, 1,

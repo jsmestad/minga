@@ -356,23 +356,35 @@ func (m Model) footerLines() []string {
 	lines := []string{
 		lipgloss.NewStyle().Foreground(lipgloss.Color("#9AA4B2")).Background(lipgloss.Color("#16181D")).Width(m.width).Render(status),
 	}
-	if mini, ok := m.minibuffer(); ok && mini.Visible {
-		value := strings.TrimSpace(mini.Prompt + mini.Input)
-		if mini.Context != "" {
-			value += "  " + mini.Context
-		}
-		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#D8DEE9")).Background(lipgloss.Color("#101318")).Width(m.width).Render(value))
-	}
-	if completion, ok := m.completion(); ok && completion.Visible && len(completion.Items) > 0 {
-		lines = append(lines, m.renderCompletion(completion)...)
-	}
-	if which, ok := m.whichKey(); ok && which.Visible && len(which.Bindings) > 0 {
-		lines = append(lines, m.renderWhichKey(which)...)
-	}
-	if picker, ok := m.picker(); ok && picker.Visible {
-		lines = append(lines, m.renderPicker(picker)...)
+	overlay := m.overlayLines()
+	if len(overlay) > 0 {
+		lines = append(lines, overlay...)
+	} else if mini, ok := m.minibuffer(); ok && mini.Visible {
+		lines = append(lines, m.renderMinibuffer(mini))
 	}
 	return lines
+}
+
+func (m Model) overlayLines() []string {
+	if picker, ok := m.picker(); ok && picker.Visible {
+		preview, _ := m.pickerPreview()
+		return m.renderPicker(picker, preview)
+	}
+	if completion, ok := m.completion(); ok && completion.Visible && len(completion.Items) > 0 {
+		return m.renderCompletion(completion)
+	}
+	if which, ok := m.whichKey(); ok && which.Visible && len(which.Bindings) > 0 {
+		return m.renderWhichKey(which)
+	}
+	return nil
+}
+
+func (m Model) renderMinibuffer(mini protocol.Minibuffer) string {
+	value := strings.TrimSpace(mini.Prompt + mini.Input)
+	if mini.Context != "" {
+		value += "  " + mini.Context
+	}
+	return lipgloss.NewStyle().Foreground(lipgloss.Color("#D8DEE9")).Background(lipgloss.Color("#101318")).Width(m.width).Render(value)
 }
 
 func (m Model) renderCompletion(completion protocol.Completion) []string {
@@ -414,7 +426,7 @@ func (m Model) renderWhichKey(which protocol.WhichKey) []string {
 	return lines
 }
 
-func (m Model) renderPicker(picker protocol.Picker) []string {
+func (m Model) renderPicker(picker protocol.Picker, preview protocol.PickerPreview) []string {
 	style := lipgloss.NewStyle().Foreground(lipgloss.Color("#D8DEE9")).Background(lipgloss.Color("#101318")).Width(m.width)
 	selectedStyle := style.Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(lipgloss.Color("#30445C"))
 	title := picker.Title
@@ -452,6 +464,30 @@ func (m Model) renderPicker(picker protocol.Picker) []string {
 	}
 	if picker.ActionVisible && len(picker.Actions) > 0 {
 		lines = append(lines, style.Foreground(lipgloss.Color("#AEB7C2")).Render(fit(strings.Join(picker.Actions, "  "), m.width)))
+	}
+	if preview.Visible && len(preview.Lines) > 0 {
+		lines = append(lines, m.renderPickerPreview(preview)...)
+	}
+	return lines
+}
+
+func (m Model) renderPickerPreview(preview protocol.PickerPreview) []string {
+	style := lipgloss.NewStyle().Foreground(lipgloss.Color("#AEB7C2")).Background(lipgloss.Color("#111720")).Width(m.width)
+	limit := min(len(preview.Lines), 8)
+	lines := []string{style.Bold(true).Foreground(lipgloss.Color("#C7D1FF")).Render(fit("Preview", m.width))}
+	for _, line := range preview.Lines[:limit] {
+		var builder strings.Builder
+		for _, segment := range line.Segments {
+			segmentStyle := lipgloss.NewStyle()
+			if segment.FG != 0 {
+				segmentStyle = segmentStyle.Foreground(lipgloss.Color(fmt.Sprintf("#%06X", segment.FG)))
+			}
+			if segment.Bold {
+				segmentStyle = segmentStyle.Bold(true)
+			}
+			builder.WriteString(segmentStyle.Render(segment.Text))
+		}
+		lines = append(lines, style.Render(fit(builder.String(), m.width)))
 	}
 	return lines
 }
@@ -512,6 +548,15 @@ func (m Model) picker() (protocol.Picker, bool) {
 		}
 	}
 	return protocol.Picker{}, false
+}
+
+func (m Model) pickerPreview() (protocol.PickerPreview, bool) {
+	for _, payload := range m.chrome {
+		if payload.Preview.Visible {
+			return payload.Preview, true
+		}
+	}
+	return protocol.PickerPreview{}, false
 }
 
 func (m Model) fileTree() (protocol.FileTree, bool) {
