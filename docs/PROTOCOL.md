@@ -2,6 +2,8 @@
 
 The BEAM editor core and rendering frontends communicate over a binary protocol on stdin/stdout of each frontend process. All frontends (Swift/Metal on macOS, GTK4 on Linux, Zig/libvaxis TUI) speak the same base protocol. GUI frontends additionally receive structured chrome opcodes documented in [GUI_PROTOCOL.md](GUI_PROTOCOL.md). This document is the authoritative reference for implementing a Minga frontend. You should be able to build a working frontend by reading only this file (plus GUI_PROTOCOL.md for native GUIs).
 
+**Shared chrome is delivered as Semantic UI, not cells.** The structured chrome opcodes (GUI_PROTOCOL.md) are the canonical contract for shared visible chrome (tab bar, status bar, file tree, picker, popups, agent surfaces, and so on). Each frontend decodes these structured opcodes and renders them with its own native strategy. The cell-grid `draw_text`/`clear`/region commands below are **not** the extension point for shared chrome; they exist for the zig/libvaxis cell-grid TUI and for editor buffer-window content. New shared chrome must be modeled as a `Minga.RenderModel.UI.*` semantic model and encoded by `Minga.Frontend.Adapter.GUI`, never added as ad-hoc cell draws.
+
 ## Transport
 
 The frontend runs as a child process of the BEAM. Communication uses stdin (BEAM → Frontend) and stdout (Frontend → BEAM).
