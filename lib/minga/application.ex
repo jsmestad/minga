@@ -32,6 +32,11 @@ defmodule Minga.Application do
       │   │   ├── Minga.Editing.Fold.Registry
       │   │   └── Minga.Diagnostics
       │   ├── Minga.Extension.Registry
+      │   ├── MingaAgent.ProviderRegistry
+      │   ├── MingaAgent.Hooks.Registry
+      │   ├── MingaAgent.MCP.ServerRegistry
+      │   ├── MingaAgent.Skills.Registry
+      │   ├── MingaEditor.Agent.SlashCommand.Registry
       │   ├── Minga.Extension.Supervisor
       │   ├── Minga.Config.Loader
       │   ├── Minga.LSP.Supervisor

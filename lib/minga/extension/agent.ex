@@ -14,9 +14,9 @@ defmodule Minga.Extension.Agent do
 
   Skill specs are path strings pointing to a skill directory on disk.
 
-  MCP server specs are `{name, opts}` tuples where `name` is an atom identifier and `opts` is a keyword list with keys like `:command` and `:args`.
+  MCP server specs are `{name, opts}` tuples where `name` is an atom or string identifier and `opts` is a keyword list with keys like `:command` and `:args`.
 
-  Slash command specs are `{name, description, opts}` tuples where `name` is an atom, `description` is a human-readable string, and `opts` is a keyword list with keys like `:command`.
+  Slash command specs are `{name, description, opts}` tuples where `name` is an atom or string, `description` is a human-readable string, and `opts` is a keyword list with keys like `:command`.
 
   ## Usage
 
@@ -215,11 +215,11 @@ defmodule Minga.Extension.Agent do
       def __skill_schema__, do: unquote(Macro.escape(skills))
 
       @doc false
-      @spec __mcp_server_schema__() :: [{atom(), keyword()}]
+      @spec __mcp_server_schema__() :: [{atom() | String.t(), keyword()}]
       def __mcp_server_schema__, do: unquote(Macro.escape(mcp_servers))
 
       @doc false
-      @spec __slash_command_schema__() :: [{atom(), String.t(), keyword()}]
+      @spec __slash_command_schema__() :: [{atom() | String.t(), String.t(), keyword()}]
       def __slash_command_schema__, do: unquote(Macro.escape(slash_commands))
     end
   end

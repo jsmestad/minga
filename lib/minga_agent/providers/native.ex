@@ -46,10 +46,12 @@ defmodule MingaAgent.Providers.Native do
   alias MingaAgent.Hooks.PreCompactPayload
   alias MingaAgent.Hooks.PreToolUsePayload
   alias MingaAgent.Hooks.Result, as: HookResult
+  alias MingaAgent.Hooks.Registry, as: HookRegistry
   alias MingaAgent.Instructions
   alias MingaAgent.InternalState
   alias MingaAgent.MCP.Registry, as: MCPRegistry
   alias MingaAgent.MCP.ServerConfig, as: MCPServerConfig
+  alias MingaAgent.MCP.ServerRegistry, as: MCPServerRegistry
   alias MingaAgent.Memory
   alias MingaAgent.ModelCatalog
   alias MingaAgent.ModelLimits
@@ -182,12 +184,14 @@ defmodule MingaAgent.Providers.Native do
           mcp_tools: [term()],
           internal_tools: [term()],
           custom_tools?: boolean(),
+          configured_mcp_configs: [MCPServerConfig.t()],
           mcp_configs: [MCPServerConfig.t()],
           mcp_client_opts: keyword(),
           mcp_enabled_override: boolean() | nil,
           mcp_errors: %{String.t() => String.t()},
           mcp_registry: MCPRegistry.t() | nil,
           read_only?: boolean(),
+          tool_allowlist: :all | [String.t()],
           tool_workers: %{reference() => pid()}
         }
 
@@ -348,9 +352,10 @@ defmodule MingaAgent.Providers.Native do
     active_skills = load_active_skills(project_root, Keyword.get(opts, :active_skill_names, []))
     internal_tools = if read_only?, do: [], else: build_internal_tools(provider_pid)
 
+    configured_mcp_configs = configured_mcp_servers(opts, config, subscriber, read_only?)
+
     mcp_configs =
-      configured_mcp_servers(opts, config, subscriber, read_only?) ++
-        filter_ext_mcp_servers(ext_mcp_servers, opts, read_only?)
+      configured_mcp_configs ++ filter_ext_mcp_servers(ext_mcp_servers, opts, read_only?)
 
     mcp_configs = deduplicate_mcp_configs(mcp_configs)
 
@@ -359,9 +364,11 @@ defmodule MingaAgent.Providers.Native do
     mcp_registry = mcp_registry_for(mcp_configs)
     mcp_tools = mcp_meta_tools_for(mcp_configs, provider_pid)
 
+    tool_allowlist = Keyword.get(opts, :tool_allowlist, :all)
+
     tools =
       (base_tools ++ mcp_tools ++ internal_tools)
-      |> filter_tool_allowlist(Keyword.get(opts, :tool_allowlist, :all))
+      |> filter_tool_allowlist(tool_allowlist)
 
     system_prompt = build_system_prompt(project_root, active_skills)
     context = Context.new([Context.system(system_prompt)])
@@ -402,15 +409,18 @@ defmodule MingaAgent.Providers.Native do
       mcp_tools: mcp_tools,
       internal_tools: internal_tools,
       custom_tools?: custom_tools?,
+      configured_mcp_configs: configured_mcp_configs,
       mcp_configs: mcp_configs,
       mcp_client_opts: mcp_client_opts,
       mcp_enabled_override: mcp_enabled_override,
       mcp_errors: %{},
       mcp_registry: mcp_registry,
       read_only?: read_only?,
+      tool_allowlist: tool_allowlist,
       tool_workers: %{}
     }
 
+    Minga.Events.subscribe(:agent_mcp_servers_changed)
     Minga.Log.info(:agent, "[Agent.Native] started with model=#{model} root=#{project_root}")
 
     {:ok, state}
@@ -468,9 +478,21 @@ defmodule MingaAgent.Providers.Native do
   defp merge_extension_components(config, true), do: {config, []}
 
   defp merge_extension_components(config, false) do
-    ext = collect_extension_agent_components()
-    config = %{config | agent_hooks: config.agent_hooks ++ ext.hooks}
-    {config, ext.mcp_servers}
+    config = %{config | agent_hooks: merge_agent_hooks(config.agent_hooks, HookRegistry.all())}
+    {config, MCPServerRegistry.configs()}
+  end
+
+  @spec merge_agent_hooks([MingaAgent.Hooks.Hook.t()], [MingaAgent.Hooks.Hook.t()]) ::
+          [MingaAgent.Hooks.Hook.t()]
+  defp merge_agent_hooks(config_hooks, registry_hooks) do
+    (config_hooks ++ registry_hooks)
+    |> Enum.uniq_by(&hook_key/1)
+  end
+
+  @spec hook_key(MingaAgent.Hooks.Hook.t()) :: term()
+  defp hook_key(hook) do
+    {hook.event, hook.type, hook.tool_pattern, hook.command, hook.module, hook.function,
+     hook.extension_source, hook.extension_module}
   end
 
   @spec filter_ext_mcp_servers([MCPServerConfig.t()], keyword(), boolean()) ::
@@ -481,6 +503,53 @@ defmodule MingaAgent.Providers.Native do
   defp filter_ext_mcp_servers(servers, opts, false) do
     if mcp_extension_enabled?(opts), do: servers, else: []
   end
+
+  @spec refresh_mcp_contributions(map()) :: map()
+  defp refresh_mcp_contributions(%{read_only?: true} = state), do: state
+
+  defp refresh_mcp_contributions(state) do
+    configs =
+      state
+      |> configured_mcp_servers_from_state()
+      |> Kernel.++(extension_mcp_servers_from_state(state))
+      |> deduplicate_mcp_configs()
+
+    if configs == state.mcp_configs do
+      state
+    else
+      cleanup_mcp(state.mcp_registry)
+
+      mcp_registry = mcp_registry_for(configs)
+      mcp_tools = mcp_meta_tools_for(configs, self())
+
+      %{
+        state
+        | mcp_configs: configs,
+          mcp_registry: mcp_registry,
+          mcp_tools: mcp_tools,
+          mcp_errors: %{},
+          tools:
+            (state.base_tools ++ mcp_tools ++ state.internal_tools)
+            |> filter_tool_allowlist(state.tool_allowlist)
+      }
+    end
+  end
+
+  @spec extension_mcp_servers_from_state(map()) :: [MCPServerConfig.t()]
+  defp extension_mcp_servers_from_state(state) do
+    if state.read_only? do
+      []
+    else
+      case state.mcp_enabled_override do
+        false -> []
+        true -> MCPServerRegistry.configs()
+        nil -> if Minga.Extensions.MCP.enabled?(), do: MCPServerRegistry.configs(), else: []
+      end
+    end
+  end
+
+  @spec configured_mcp_servers_from_state(map()) :: [MCPServerConfig.t()]
+  defp configured_mcp_servers_from_state(state), do: state.configured_mcp_configs
 
   @spec deduplicate_mcp_configs([MCPServerConfig.t()]) :: [MCPServerConfig.t()]
   defp deduplicate_mcp_configs(configs) do
@@ -934,6 +1003,10 @@ defmodule MingaAgent.Providers.Native do
   end
 
   @impl GenServer
+  def handle_info({:minga_event, :agent_mcp_servers_changed, _payload}, state) do
+    {:noreply, refresh_mcp_contributions(state)}
+  end
+
   def handle_info({:agent_event, event}, state) do
     # Forwarded from the task
     notify(state.subscriber, event)
@@ -1118,11 +1191,22 @@ defmodule MingaAgent.Providers.Native do
 
       %{
         "name" => config.name,
+        "source" => format_mcp_source(config.source),
         "status" => Atom.to_string(status),
         "error" => Map.get(state.mcp_errors, config.name)
       }
     end)
   end
+
+  @spec format_mcp_source(
+          MCPServerConfig.t()
+          | Minga.Extension.ContributionCleanup.contribution_source()
+        ) ::
+          String.t()
+  defp format_mcp_source(%MCPServerConfig{source: source}), do: format_mcp_source(source)
+  defp format_mcp_source(:config), do: "config"
+  defp format_mcp_source(:builtin), do: "builtin"
+  defp format_mcp_source({:extension, name}), do: "extension:#{name}"
 
   @spec mcp_server_status(map(), String.t()) :: :not_started | :running | :errored
   defp mcp_server_status(state, server_name) do
@@ -1132,84 +1216,6 @@ defmodule MingaAgent.Providers.Native do
       {false, {:ok, _pid}} -> :running
       {false, :error} -> :not_started
     end
-  end
-
-  # ── Extension agent components ─────────────────────────────────────────────
-
-  @spec extension_agent_entries() :: [{atom(), module() | nil, Minga.Extension.Manifest.t()}]
-  defp extension_agent_entries do
-    case Process.whereis(Minga.Extension.Registry) do
-      nil ->
-        []
-
-      _pid ->
-        Minga.Extension.Registry.all()
-        |> Enum.filter(fn {_name, entry} -> entry.status == :running end)
-        |> Enum.flat_map(&extension_agent_entry/1)
-    end
-  end
-
-  @spec extension_agent_entry({atom(), Minga.Extension.Registry.entry()}) ::
-          [{atom(), module() | nil, Minga.Extension.Manifest.t()}]
-  defp extension_agent_entry({_name, %{manifest: nil}}), do: []
-  defp extension_agent_entry({name, entry}), do: [{name, entry.module, entry.manifest}]
-
-  @spec collect_extension_agent_components() :: %{
-          hooks: [MingaAgent.Hooks.Hook.t()],
-          mcp_servers: [MCPServerConfig.t()]
-        }
-  defp collect_extension_agent_components do
-    entries = extension_agent_entries()
-
-    hooks =
-      entries
-      |> Enum.flat_map(fn {name, module, manifest} ->
-        Enum.map(manifest.hooks, fn {event, opts} -> {name, module, event, opts} end)
-      end)
-      |> Enum.reduce([], fn {name, module, event, opts}, acc ->
-        hook_opts =
-          opts
-          |> Keyword.put(:event, event)
-          |> Keyword.put(:extension_source, name)
-          |> Keyword.put(:extension_module, module)
-
-        case MingaAgent.Hooks.Hook.normalize(hook_opts) do
-          {:ok, hook} ->
-            [hook | acc]
-
-          {:error, reason} ->
-            Minga.Log.warning(
-              :agent,
-              "[Agent.Native] extension hook normalization failed: #{reason}"
-            )
-
-            acc
-        end
-      end)
-      |> Enum.reverse()
-
-    mcp_servers =
-      entries
-      |> Enum.flat_map(fn {_name, _module, manifest} -> manifest.mcp_servers end)
-      |> Enum.reduce([], fn {name, opts}, acc ->
-        server_map = opts |> Keyword.put(:name, Atom.to_string(name)) |> Map.new()
-
-        case MCPServerConfig.normalize(server_map) do
-          {:ok, config} ->
-            [config | acc]
-
-          {:error, reason} ->
-            Minga.Log.warning(
-              :agent,
-              "[Agent.Native] extension MCP server normalization failed: #{reason}"
-            )
-
-            acc
-        end
-      end)
-      |> Enum.reverse()
-
-    %{hooks: hooks, mcp_servers: mcp_servers}
   end
 
   @spec mcp_client_opts(keyword()) :: keyword()
