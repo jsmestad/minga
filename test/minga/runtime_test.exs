@@ -7,8 +7,10 @@ defmodule Minga.RuntimeTest do
   Must be async: false because it starts globally-named processes.
   """
 
+  # async: false because this test uses globally named runtime supervisors and registries.
   use ExUnit.Case, async: false
 
+  alias MingaAgent.Tool.Context
   alias MingaAgent.Tool.Executor
   alias MingaAgent.Tool.Registry
 
@@ -41,7 +43,7 @@ defmodule Minga.RuntimeTest do
       assert {:ok, spec} = Registry.lookup("list_directory")
       assert spec.name == "list_directory"
       assert spec.category == :filesystem
-      assert is_function(spec.callback, 1)
+      assert is_function(spec.build, 1)
     end
 
     test "lookup returns :error for an unknown tool" do
@@ -57,7 +59,10 @@ defmodule Minga.RuntimeTest do
   describe "tool execution" do
     test "executes list_directory through the Executor" do
       # list_directory with "." is read-only and always succeeds
-      result = Executor.execute("list_directory", %{"path" => "."})
+      result =
+        Executor.execute("list_directory", %{"path" => "."}, MingaAgent.Tool.Registry, :exec,
+          tool_context: tool_context()
+        )
 
       assert {:ok, output} = result
       assert is_binary(output)
@@ -66,7 +71,10 @@ defmodule Minga.RuntimeTest do
     end
 
     test "executes read_file through the Executor" do
-      result = Executor.execute("read_file", %{"path" => "mix.exs"})
+      result =
+        Executor.execute("read_file", %{"path" => "mix.exs"}, MingaAgent.Tool.Registry, :exec,
+          tool_context: tool_context()
+        )
 
       assert {:ok, content} = result
       assert is_binary(content)
@@ -79,8 +87,23 @@ defmodule Minga.RuntimeTest do
     end
 
     test "destructive tools require approval" do
-      result = Executor.execute("write_file", %{"path" => "test.txt", "content" => "x"})
+      result =
+        Executor.execute(
+          "write_file",
+          %{"path" => "test.txt", "content" => "x"},
+          MingaAgent.Tool.Registry,
+          :exec,
+          tool_context: tool_context()
+        )
+
       assert {:needs_approval, _spec, _args} = result
     end
+  end
+
+  defp tool_context do
+    Context.new(
+      project_root: File.cwd!(),
+      router_context: MingaAgent.ToolRouter.context(nil, nil)
+    )
   end
 end
