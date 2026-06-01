@@ -341,6 +341,18 @@ defmodule MingaAgent.SessionTest do
     :ok
   end
 
+  @spec idle_gc_token_fn([reference()]) :: (-> reference())
+  defp idle_gc_token_fn(tokens) do
+    token_source = start_supervised!({Agent, fn -> tokens end})
+
+    fn ->
+      Agent.get_and_update(token_source, fn
+        [token | rest] -> {token, rest}
+        [] -> raise "idle_gc_token_fn called more times than expected"
+      end)
+    end
+  end
+
   defp start_subscribed_session(provider \\ MockProvider, provider_opts \\ []) do
     {:ok, session} = Session.start_link(provider: provider, provider_opts: provider_opts)
     Session.subscribe(session)
@@ -621,33 +633,35 @@ defmodule MingaAgent.SessionTest do
       refute_receive {:DOWN, ^ref, :process, ^session, :normal}, 50
     end
 
-    test "active plan-mode turns reschedule idle GC after finishing", %{
-      tmp_dir: dir
-    } do
-      session_store_dir = Path.join(dir, "plan-race")
+    test "active plan-mode turns reschedule idle GC after finishing" do
+      initial_token = make_ref()
+      finished_token = make_ref()
 
       {:ok, session} =
         Session.start_link(
           provider: Minga.Test.StubProvider,
           provider_opts: [],
-          session_store_dir: session_store_dir,
-          idle_gc_timeout_ms: 1
+          persist?: false,
+          idle_gc_timeout_ms: 60_000,
+          idle_gc_token_fn: idle_gc_token_fn([initial_token, finished_token])
         )
 
       on_exit(fn -> Process.exit(session, :kill) end)
 
+      ref = Process.monitor(session)
+
       assert :ok = Session.enter_plan(session)
-      send(session, {:agent_provider_event, %Event.AgentStart{}})
-      :sys.get_state(session)
+      send_provider_event(session, %Event.AgentStart{})
 
-      {_timer_ref, _token} = :sys.get_state(session).idle_gc_timer
-      _ref = Process.monitor(session)
+      send(session, {:idle_gc_timeout, initial_token})
+      assert Session.status(session) == :plan
+      refute_receive {:DOWN, ^ref, :process, ^session, :normal}, 50
 
-      send(session, {:agent_provider_event, %Event.AgentEnd{usage: nil}})
-      :sys.get_state(session)
+      send_provider_event(session, %Event.AgentEnd{usage: nil})
 
       assert Session.status(session) == :plan
-      assert :sys.get_state(session).idle_gc_timer != nil
+      send(session, {:idle_gc_timeout, finished_token})
+      assert_receive {:DOWN, ^ref, :process, ^session, :normal}, @event_timeout
     end
 
     test "active detached sessions are not reclaimed" do
