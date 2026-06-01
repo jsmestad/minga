@@ -5,6 +5,8 @@ pub enum Command {
     WindowContent(WindowContent, usize),
     StatusBar(StatusBar, usize),
     TabBar(TabBar, usize),
+    FileTree(FileTree, usize),
+    FileTreeSelection(FileTreeSelection, usize),
     Unsupported { opcode: u8, size: usize },
 }
 
@@ -14,6 +16,8 @@ impl Command {
             Self::WindowContent(_, size) => *size,
             Self::StatusBar(_, size) => *size,
             Self::TabBar(_, size) => *size,
+            Self::FileTree(_, size) => *size,
+            Self::FileTreeSelection(_, size) => *size,
             Self::Unsupported { size, .. } => *size,
         }
     }
@@ -81,6 +85,36 @@ pub struct Tab {
     pub tint: u32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileTree {
+    pub visible: bool,
+    pub focused: bool,
+    pub status: u8,
+    pub selected_id: String,
+    pub root_path: String,
+    pub width: u16,
+    pub error: String,
+    pub rows: Vec<FileTreeRow>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileTreeRow {
+    pub id: String,
+    pub name: String,
+    pub icon: String,
+    pub depth: u8,
+    pub flags: u16,
+    pub git_status: u8,
+    pub diagnostics: (u16, u16, u16, u16),
+    pub editing_text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileTreeSelection {
+    pub focused: bool,
+    pub selected_id: String,
+}
+
 pub fn decode(bytes: &[u8]) -> Result<Command, DecodeError> {
     let opcode = *bytes.first().ok_or(DecodeError::Empty)?;
 
@@ -88,6 +122,8 @@ pub fn decode(bytes: &[u8]) -> Result<Command, DecodeError> {
         opcodes::OP_GUI_WINDOW_CONTENT => decode_window_content(bytes),
         opcodes::OP_GUI_STATUS_BAR => decode_status_bar(bytes),
         opcodes::OP_GUI_TAB_BAR => decode_tab_bar(bytes),
+        opcodes::OP_GUI_FILE_TREE => decode_file_tree(bytes),
+        opcodes::OP_GUI_FILE_TREE_SELECTION => decode_file_tree_selection(bytes),
         opcodes::OP_GUI_WINDOW_VIEWPORT_DELTA | opcodes::OP_GUI_WINDOW_ROWS_DELTA => {
             sectioned_size(bytes, "semantic row delta")
                 .map(|size| Command::Unsupported { opcode, size })
@@ -100,7 +136,6 @@ pub fn decode(bytes: &[u8]) -> Result<Command, DecodeError> {
                 .map(|size| Command::Unsupported { opcode, size })
         }
         opcodes::OP_GUI_INDENT_GUIDES
-        | opcodes::OP_GUI_FILE_TREE_SELECTION
         | opcodes::OP_GUI_HOVER_ACTION
         | opcodes::OP_GUI_WORKSPACES
         | opcodes::OP_GUI_NOTIFICATIONS
@@ -109,7 +144,7 @@ pub fn decode(bytes: &[u8]) -> Result<Command, DecodeError> {
         | opcodes::OP_GUI_EXTENSION_PANEL
         | opcodes::OP_GUI_SEARCH_STATE => len16_size(bytes, "semantic length16 command")
             .map(|size| Command::Unsupported { opcode, size }),
-        opcodes::OP_GUI_FILE_TREE | opcodes::OP_GUI_OBSERVATORY | opcodes::OP_GUI_SIDEBARS => {
+        opcodes::OP_GUI_OBSERVATORY | opcodes::OP_GUI_SIDEBARS => {
             len32_size(bytes, "semantic length32 command")
                 .map(|size| Command::Unsupported { opcode, size })
         }
@@ -313,6 +348,97 @@ fn decode_tab_bar(bytes: &[u8]) -> Result<Command, DecodeError> {
     Ok(Command::TabBar(TabBar { active_index, tabs }, size))
 }
 
+fn decode_file_tree(bytes: &[u8]) -> Result<Command, DecodeError> {
+    let size = len32_size(bytes, "file tree")?;
+    let payload = &bytes[5..size];
+    require_len(payload, 3, "file tree header")?;
+    let flags = payload[1];
+    let status = payload[2];
+    let mut offset = 3;
+    let selected_id = read_string16(payload, &mut offset)?;
+    let root_path = read_string16(payload, &mut offset)?;
+    require_len(payload, offset + 4, "file tree dimensions")?;
+    let width = read_u16(payload, offset);
+    let row_count = read_u16(payload, offset + 2) as usize;
+    offset += 4;
+    let error = read_string16(payload, &mut offset)?;
+    let mut rows = Vec::with_capacity(row_count);
+
+    for _ in 0..row_count {
+        let (row, used) = decode_file_tree_row(&payload[offset..])?;
+        offset += used;
+        rows.push(row);
+    }
+
+    Ok(Command::FileTree(
+        FileTree {
+            visible: flags & 0x01 != 0,
+            focused: flags & 0x02 != 0,
+            status,
+            selected_id,
+            root_path,
+            width,
+            error,
+            rows,
+        },
+        size,
+    ))
+}
+
+fn decode_file_tree_selection(bytes: &[u8]) -> Result<Command, DecodeError> {
+    let size = len16_size(bytes, "file tree selection")?;
+    let payload = &bytes[3..size];
+    require_len(payload, 1, "file tree selection flags")?;
+    let mut offset = 1;
+    let selected_id = read_string16(payload, &mut offset)?;
+
+    Ok(Command::FileTreeSelection(
+        FileTreeSelection {
+            focused: payload[0] & 0x01 != 0,
+            selected_id,
+        },
+        size,
+    ))
+}
+
+fn decode_file_tree_row(bytes: &[u8]) -> Result<(FileTreeRow, usize), DecodeError> {
+    require_len(bytes, 17, "file tree row header")?;
+    let flags = read_u16(bytes, 4);
+    let depth = bytes[6];
+    let git_status = bytes[7];
+    let diagnostics = (
+        read_u16(bytes, 8),
+        read_u16(bytes, 10),
+        read_u16(bytes, 12),
+        read_u16(bytes, 14),
+    );
+    let guide_count = bytes[16] as usize;
+    let mut offset = 17 + guide_count;
+    require_len(bytes, offset, "file tree guides")?;
+    let id = read_string16(bytes, &mut offset)?;
+    let _path = read_string16(bytes, &mut offset)?;
+    let _relative = read_string16(bytes, &mut offset)?;
+    let name = read_string16(bytes, &mut offset)?;
+    let icon = read_string8(bytes, &mut offset)?;
+    require_len(bytes, offset + 1, "file tree editing type")?;
+    offset += 1;
+    let editing_text = read_string16(bytes, &mut offset)?;
+
+    Ok((
+        FileTreeRow {
+            id,
+            name,
+            icon,
+            depth,
+            flags,
+            git_status,
+            diagnostics,
+            editing_text,
+        },
+        offset,
+    ))
+}
+
 fn decode_rows(bytes: &[u8]) -> Result<Vec<Row>, DecodeError> {
     require_len(bytes, 2, "row count")?;
     let count = read_u16(bytes, 0) as usize;
@@ -496,6 +622,24 @@ fn read_string(bytes: &[u8], offset: usize, len: usize) -> Result<String, Decode
         .map_err(|_| DecodeError::Utf8)
 }
 
+fn read_string8(bytes: &[u8], offset: &mut usize) -> Result<String, DecodeError> {
+    require_len(bytes, *offset + 1, "string8 header")?;
+    let len = bytes[*offset] as usize;
+    *offset += 1;
+    let value = read_string(bytes, *offset, len)?;
+    *offset += len;
+    Ok(value)
+}
+
+fn read_string16(bytes: &[u8], offset: &mut usize) -> Result<String, DecodeError> {
+    require_len(bytes, *offset + 2, "string16 header")?;
+    let len = read_u16(bytes, *offset) as usize;
+    *offset += 2;
+    let value = read_string(bytes, *offset, len)?;
+    *offset += len;
+    Ok(value)
+}
+
 fn read_u16(bytes: &[u8], offset: usize) -> u16 {
     u16::from_be_bytes([bytes[offset], bytes[offset + 1]])
 }
@@ -606,6 +750,52 @@ mod tests {
     }
 
     #[test]
+    fn decodes_file_tree_and_selection() {
+        let row = [
+            vec![0, 0, 0, 1, 0, 0x15, 1, 3, 0, 1, 0, 2, 0, 0, 0, 0, 0],
+            string16("id-1"),
+            string16("/tmp/main.ex"),
+            string16("main.ex"),
+            string16("main.ex"),
+            string8("rs"),
+            vec![0xFF],
+            string16(""),
+        ]
+        .concat();
+        let payload = [
+            vec![2, 0x03, 3],
+            string16("id-1"),
+            string16("/tmp"),
+            vec![0, 24, 0, 1],
+            string16(""),
+            row,
+        ]
+        .concat();
+        let mut packet = vec![opcodes::OP_GUI_FILE_TREE];
+        packet.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+        packet.extend_from_slice(&payload);
+
+        let command = decode(&packet).unwrap();
+
+        assert!(matches!(
+            command,
+            Command::FileTree(FileTree { visible: true, focused: true, width: 24, selected_id, rows, .. }, _)
+                if selected_id == "id-1" && rows[0].name == "main.ex" && rows[0].flags == 0x15
+        ));
+
+        let selection_payload = [vec![1], string16("id-2")].concat();
+        let mut selection = vec![opcodes::OP_GUI_FILE_TREE_SELECTION];
+        selection.extend_from_slice(&(selection_payload.len() as u16).to_be_bytes());
+        selection.extend_from_slice(&selection_payload);
+
+        assert!(matches!(
+            decode(&selection).unwrap(),
+            Command::FileTreeSelection(FileTreeSelection { focused: true, selected_id }, _)
+                if selected_id == "id-2"
+        ));
+    }
+
+    #[test]
     fn skips_length_wrapped_semantic_commands() {
         let command = decode(&[opcodes::OP_GUI_NOTIFICATIONS, 0, 3, 1, 2, 3]).unwrap();
 
@@ -634,6 +824,19 @@ mod tests {
         out.extend_from_slice(&(text.len() as u16).to_be_bytes());
         out.extend_from_slice(text.as_bytes());
         out.extend_from_slice(&[0, 0]);
+        out
+    }
+
+    fn string8(text: &str) -> Vec<u8> {
+        let mut out = vec![text.len() as u8];
+        out.extend_from_slice(text.as_bytes());
+        out
+    }
+
+    fn string16(text: &str) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(&(text.len() as u16).to_be_bytes());
+        out.extend_from_slice(text.as_bytes());
         out
     }
 }

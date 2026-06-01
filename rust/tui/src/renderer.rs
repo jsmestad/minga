@@ -29,6 +29,7 @@ pub struct Renderer {
     default_bg: u32,
     regions: HashMap<u16, Region>,
     active_region: Option<Region>,
+    file_tree: Option<semantic::FileTree>,
 }
 
 impl Renderer {
@@ -44,6 +45,7 @@ impl Renderer {
             default_bg: 0,
             regions: HashMap::new(),
             active_region: None,
+            file_tree: None,
         }
     }
 
@@ -107,6 +109,7 @@ impl Renderer {
         self.cursor = (0, 0);
         self.regions.clear();
         self.active_region = None;
+        self.file_tree = None;
     }
 
     fn clear(&mut self) {
@@ -165,6 +168,10 @@ impl Renderer {
             semantic::Command::WindowContent(window, _) => self.draw_semantic_window(window),
             semantic::Command::StatusBar(status, _) => self.draw_status_bar(status),
             semantic::Command::TabBar(tab_bar, _) => self.draw_tab_bar(tab_bar),
+            semantic::Command::FileTree(tree, _) => self.draw_file_tree(tree),
+            semantic::Command::FileTreeSelection(selection, _) => {
+                self.update_file_tree_selection(selection)
+            }
             semantic::Command::Unsupported { .. } => {}
         }
     }
@@ -286,6 +293,98 @@ impl Renderer {
             );
             col = col.saturating_add(text_width(&label));
         }
+    }
+
+    fn draw_file_tree(&mut self, tree: semantic::FileTree) {
+        self.file_tree = Some(tree);
+        self.render_file_tree();
+    }
+
+    fn update_file_tree_selection(&mut self, selection: semantic::FileTreeSelection) {
+        if let Some(tree) = &mut self.file_tree {
+            tree.focused = selection.focused;
+            tree.selected_id = selection.selected_id;
+        }
+        self.render_file_tree();
+    }
+
+    fn render_file_tree(&mut self) {
+        let Some(tree) = self.file_tree.clone() else {
+            return;
+        };
+        if !tree.visible || tree.width == 0 || self.height <= 2 {
+            return;
+        }
+
+        let width = tree.width.min(self.width);
+        for row in 1..self.height - 1 {
+            self.write_run(
+                row,
+                0,
+                &" ".repeat(width as usize),
+                file_tree_style(false, tree.focused),
+            );
+        }
+
+        match tree.status {
+            1 => self.write_run(1, 0, " Loading...", file_tree_style(false, tree.focused)),
+            2 => self.write_run(1, 0, " Empty", file_tree_style(false, tree.focused)),
+            4 => {
+                let message = if tree.error.is_empty() {
+                    " File tree error".to_owned()
+                } else {
+                    format!(" {}", tree.error)
+                };
+                self.write_run(1, 0, &message, file_tree_style(false, tree.focused));
+            }
+            _ => {
+                let visible_rows = self.height.saturating_sub(2) as usize;
+                for (index, row) in tree.rows.iter().take(visible_rows).enumerate() {
+                    self.render_file_tree_row(
+                        index as u16 + 1,
+                        width,
+                        tree.focused,
+                        row,
+                        &tree.selected_id,
+                    );
+                }
+            }
+        }
+    }
+
+    fn render_file_tree_row(
+        &mut self,
+        screen_row: u16,
+        width: u16,
+        focused: bool,
+        row: &semantic::FileTreeRow,
+        selected_id: &str,
+    ) {
+        let selected = row.id == selected_id;
+        let indent = "  ".repeat(row.depth as usize);
+        let marker = if row.flags & 0x01 != 0 {
+            if row.flags & 0x02 != 0 { "v " } else { "> " }
+        } else {
+            "  "
+        };
+        let dirty = if row.flags & 0x20 != 0 { " *" } else { "" };
+        let git = git_marker(row.git_status);
+        let diag = diagnostic_marker(row.diagnostics);
+        let label = if row.editing_text.is_empty() {
+            format!(
+                " {indent}{marker}{} {}{dirty}{git}{diag}",
+                row.icon, row.name
+            )
+        } else {
+            format!(" {indent}{marker}{} {}", row.icon, row.editing_text)
+        };
+
+        self.write_run(
+            screen_row,
+            0,
+            &pad_to_width(&label, width),
+            file_tree_style(selected, focused),
+        );
     }
 
     fn write_run(&mut self, row: u16, col: u16, text: &str, mut style: CellStyle) {
@@ -441,6 +540,46 @@ fn text_width(text: &str) -> u16 {
 fn char_width(ch: char) -> u16 {
     let _ = ch;
     1
+}
+
+fn file_tree_style(selected: bool, focused: bool) -> CellStyle {
+    CellStyle {
+        fg: if selected { 0xECEFF4 } else { 0xC7CED9 },
+        bg: match (selected, focused) {
+            (true, true) => 0x4C566A,
+            (true, false) => 0x3B4252,
+            (false, _) => 0x20242D,
+        },
+        attrs: if selected { protocol::ATTR_BOLD } else { 0 },
+        ul_color: 0,
+        blend: 100,
+    }
+}
+
+fn git_marker(status: u8) -> &'static str {
+    match status {
+        1 => " M",
+        2 => " S",
+        3 => " ?",
+        4 => " !",
+        5 => " R",
+        6 => " D",
+        _ => "",
+    }
+}
+
+fn diagnostic_marker((errors, warnings, info, hints): (u16, u16, u16, u16)) -> &'static str {
+    if errors > 0 {
+        " E"
+    } else if warnings > 0 {
+        " W"
+    } else if info > 0 {
+        " I"
+    } else if hints > 0 {
+        " H"
+    } else {
+        ""
+    }
 }
 
 fn join_status_segments(segments: &[semantic::StatusSegment]) -> String {
@@ -631,5 +770,56 @@ mod tests {
 
         assert_eq!(renderer.cells[renderer.index(1, 0).unwrap()].text, "m");
         assert_eq!(renderer.cells[renderer.index(0, 3).unwrap()].text, "I");
+    }
+
+    #[test]
+    fn semantic_file_tree_draws_rows_and_selection_updates() {
+        let mut renderer = Renderer::new(24, 6);
+
+        renderer.draw_file_tree(semantic::FileTree {
+            visible: true,
+            focused: true,
+            status: 3,
+            selected_id: "a".to_owned(),
+            root_path: "/tmp".to_owned(),
+            width: 12,
+            error: String::new(),
+            rows: vec![
+                semantic::FileTreeRow {
+                    id: "a".to_owned(),
+                    name: "src".to_owned(),
+                    icon: "D".to_owned(),
+                    depth: 0,
+                    flags: 0x17,
+                    git_status: 0,
+                    diagnostics: (0, 0, 0, 0),
+                    editing_text: String::new(),
+                },
+                semantic::FileTreeRow {
+                    id: "b".to_owned(),
+                    name: "main.rs".to_owned(),
+                    icon: "R".to_owned(),
+                    depth: 1,
+                    flags: 0,
+                    git_status: 1,
+                    diagnostics: (0, 1, 0, 0),
+                    editing_text: String::new(),
+                },
+            ],
+        });
+
+        assert_eq!(renderer.cells[renderer.index(1, 1).unwrap()].text, "v");
+        let selected_bg = renderer.cells[renderer.index(0, 1).unwrap()].style.bg;
+
+        renderer.update_file_tree_selection(semantic::FileTreeSelection {
+            focused: false,
+            selected_id: "b".to_owned(),
+        });
+
+        assert_ne!(
+            renderer.cells[renderer.index(0, 1).unwrap()].style.bg,
+            selected_bg
+        );
+        assert_eq!(renderer.cells[renderer.index(5, 2).unwrap()].text, "R");
     }
 }
