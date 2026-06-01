@@ -353,6 +353,7 @@ impl Renderer {
         }
 
         self.capture_minibuffer_snapshot();
+        self.restore_minibuffer_cells();
 
         let row = self.height.saturating_sub(2);
         let prompt = format!("{}{}", minibuffer.prompt, minibuffer.input);
@@ -362,10 +363,14 @@ impl Renderer {
             &pad_to_width(&prompt, self.width),
             self.theme.minibuffer_style(false),
         );
-        self.cursor = (
-            text_width(&minibuffer.prompt).saturating_add(minibuffer.cursor_pos),
-            row,
-        );
+        if minibuffer.cursor_pos != u16::MAX {
+            self.cursor = (
+                text_width(&minibuffer.prompt)
+                    .saturating_add(minibuffer.cursor_pos)
+                    .min(self.width.saturating_sub(1)),
+                row,
+            );
+        }
 
         if !minibuffer.context.is_empty() && row > 0 {
             self.write_run(
@@ -502,6 +507,12 @@ impl Renderer {
 
     fn restore_minibuffer_snapshot(&mut self) {
         if let Some(snapshot) = self.minibuffer_snapshot.take() {
+            self.restore_snapshot(snapshot);
+        }
+    }
+
+    fn restore_minibuffer_cells(&mut self) {
+        if let Some(snapshot) = self.minibuffer_snapshot.clone() {
             self.restore_snapshot(snapshot);
         }
     }
@@ -1560,6 +1571,66 @@ mod tests {
         assert_eq!(candidate.text, "c");
         assert_eq!(candidate.style.fg, 0x333333);
         assert_eq!(candidate.style.bg, 0x444444);
+    }
+
+    #[test]
+    fn semantic_minibuffer_visible_update_clears_stale_candidates() {
+        let mut renderer = Renderer::new(40, 10);
+
+        renderer.draw_minibuffer(semantic::Minibuffer {
+            visible: true,
+            mode: 0,
+            cursor_pos: 1,
+            prompt: ":".to_owned(),
+            input: "w".to_owned(),
+            context: String::new(),
+            selected_index: 0,
+            total_candidates: 1,
+            candidates: vec![semantic::MinibufferCandidate {
+                label: "write".to_owned(),
+                description: "Save file".to_owned(),
+                annotation: ":w".to_owned(),
+            }],
+        });
+        assert_eq!(renderer.cells[renderer.index(0, 7).unwrap()].text, ">");
+
+        renderer.draw_minibuffer(semantic::Minibuffer {
+            visible: true,
+            mode: 0,
+            cursor_pos: 2,
+            prompt: ":".to_owned(),
+            input: "zz".to_owned(),
+            context: String::new(),
+            selected_index: 0,
+            total_candidates: 0,
+            candidates: vec![],
+        });
+
+        assert_eq!(renderer.cells[renderer.index(0, 7).unwrap()].text, " ");
+        assert_eq!(renderer.cells[renderer.index(2, 7).unwrap()].text, " ");
+        assert_eq!(renderer.cells[renderer.index(0, 8).unwrap()].text, ":");
+        assert_eq!(renderer.cells[renderer.index(1, 8).unwrap()].text, "z");
+    }
+
+    #[test]
+    fn semantic_minibuffer_no_cursor_sentinel_preserves_existing_cursor() {
+        let mut renderer = Renderer::new(40, 10);
+        renderer.cursor = (12, 3);
+
+        renderer.draw_minibuffer(semantic::Minibuffer {
+            visible: true,
+            mode: 0,
+            cursor_pos: u16::MAX,
+            prompt: "Confirm?".to_owned(),
+            input: String::new(),
+            context: String::new(),
+            selected_index: 0,
+            total_candidates: 0,
+            candidates: vec![],
+        });
+
+        assert_eq!(renderer.cursor, (12, 3));
+        assert_eq!(renderer.cells[renderer.index(0, 8).unwrap()].text, "C");
     }
 
     #[test]
