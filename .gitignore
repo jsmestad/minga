@@ -14,6 +14,7 @@ zig/zig-pkg/
 zig/src/generated/
 rust/tui/src/generated/
 rust/tui/target/
+go/tui/bin/
 
 # Swift / Xcode
 macos/.build/
@@ -27,6 +28,7 @@ macos/Minga.xcodeproj/project.xcworkspace/xcuserdata/
 erl_crash.dump
 /priv/minga-renderer
 /priv/minga-renderer-rs
+/priv/minga-renderer-go
 /priv/minga-parser
 /priv/minga-hook-runner
 /priv/minga-test-harness
