@@ -80,6 +80,34 @@ defmodule Minga.Credo.DependencyDirectionCheckTest do
       end)
     end
 
+    test "flags pure Layer 0 modules delegating to Layer 1 process modules" do
+      """
+      defmodule Minga.Buffer.Document do
+        defdelegate start_link(opts), to: Minga.Buffer.Process
+      end
+      """
+      |> check("lib/minga/buffer/document.ex")
+      |> assert_issue(fn issue ->
+        assert issue.message =~ "Layer 0"
+        assert issue.message =~ "Layer 1"
+        assert issue.trigger == "Minga.Buffer.Process"
+      end)
+    end
+
+    test "flags direct module literals that cross top-level layers" do
+      """
+      defmodule Minga.Buffer.Document do
+        @default_state MingaEditor.State
+      end
+      """
+      |> check("lib/minga/buffer/document.ex")
+      |> assert_issue(fn issue ->
+        assert issue.message =~ "Layer 0"
+        assert issue.message =~ "Layer 2"
+        assert issue.trigger == "MingaEditor.State"
+      end)
+    end
+
     test "flags Git module depending on Input handler" do
       """
       defmodule Minga.Git.Tracker do

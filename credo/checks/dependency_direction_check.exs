@@ -122,7 +122,20 @@ defmodule Minga.Credo.DependencyDirectionCheck do
     "MingaEditor.Frontend.Protocol" => ["MingaEditor.Frontend.Protocol.GUI"],
     # Frontend facade calls Protocol.GUI for GUI-specific config encoding
     # (line spacing, etc.). Same structural dispatch pattern.
-    "MingaEditor.Frontend" => ["MingaEditor.Frontend.Protocol.GUI"]
+    "MingaEditor.Frontend" => ["MingaEditor.Frontend.Protocol.GUI"],
+    # Command.Registry keeps the compile-time command provider module list.
+    # The command modules own execution, while the registry only indexes providers.
+    "Minga.Command.Registry" => ["MingaEditor.Commands"],
+    # Runtime supervisors assemble the editor process tree at the OTP boundary.
+    "Minga.Runtime.Supervisor" => ["MingaEditor.Supervisor", "MingaEditor.Watchdog"],
+    # Services.Supervisor starts extension contribution registries and built-in extension surfaces.
+    "Minga.Services.Supervisor" => ["MingaEditor.Extension.Sidebar"],
+    # SystemObserver displays the editor supervisor tree as process topology data.
+    "Minga.SystemObserver" => ["MingaEditor.Supervisor"],
+    # Built-in theme packs register concrete presentation theme modules as data.
+    "Minga.Extensions.ThemePacks.Catppuccin" => ["MingaEditor.UI.Theme"],
+    "Minga.Extensions.ThemePacks.Doom" => ["MingaEditor.UI.Theme"],
+    "Minga.Extensions.ThemePacks.One" => ["MingaEditor.UI.Theme"]
     # All pre-existing cross-layer violations from #1368 have been resolved
     # in Wave 6 Track B. Modules were moved to their correct layers:
     # - Devicon → Minga.Language.Devicon
@@ -329,12 +342,21 @@ defmodule Minga.Credo.DependencyDirectionCheck do
   defp find_violations(ast, issues, _source_layer, _source_module, _issue_meta),
     do: {ast, issues}
 
-  defp check_direct_alias_refs(ast, issues, _source_layer, source_module, meta, issue_meta) do
+  defp check_direct_alias_refs(ast, issues, source_layer, source_module, meta, issue_meta) do
     ast
     |> direct_alias_refs()
     |> Enum.reduce(issues, fn {ref_parts, ref_meta}, acc ->
       ref_name = Enum.map_join(ref_parts, ".", &Atom.to_string/1)
-      check_agent_ref_violations(ast, acc, source_module, ref_name, ref_meta || meta, issue_meta)
+
+      check_ref_violations(
+        ast,
+        acc,
+        source_layer,
+        source_module,
+        ref_name,
+        ref_meta || meta,
+        issue_meta
+      )
     end)
   end
 
@@ -448,7 +470,8 @@ defmodule Minga.Credo.DependencyDirectionCheck do
          _ref_name,
          _meta,
          _issue_meta
-       ), do: {ast, issues}
+       ),
+       do: {ast, issues}
 
   defp check_top_level_violation(
          ast,
@@ -510,7 +533,8 @@ defmodule Minga.Credo.DependencyDirectionCheck do
          _ref_name,
          _meta,
          _issue_meta
-       ), do: {ast, issues}
+       ),
+       do: {ast, issues}
 
   defp agent_level_violation(0, target_level, ref_name) when target_level in [1, 2] do
     {:violation,
