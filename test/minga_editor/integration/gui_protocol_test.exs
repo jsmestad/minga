@@ -45,6 +45,35 @@ defmodule Minga.Integration.GUIProtocolTest do
     JSON.decode!(json)
   end
 
+  # Encodes an agent chat through the core semantic encoder, accepting the legacy
+  # data-map shape these round-trip tests were written against.
+  defp encode_gui_agent_chat(data) do
+    alias Minga.Frontend.Adapter.GUI.AgentChatEncoder
+    alias Minga.Frontend.Adapter.GUI.Caches
+    alias Minga.RenderModel.UI.AgentChat
+
+    model =
+      case data do
+        %{visible: false} ->
+          %AgentChat{visible?: false}
+
+        %{visible: true} = d ->
+          %AgentChat{
+            visible?: true,
+            status: Map.get(d, :status, :idle),
+            model_name: Map.get(d, :model, ""),
+            thinking_level: Map.get(d, :thinking_level, ""),
+            prompt: Map.get(d, :prompt, ""),
+            messages: Map.get(d, :messages, []),
+            help_visible?: Map.get(d, :help_visible, false),
+            help_groups: Map.get(d, :help_groups, [])
+          }
+      end
+
+    {binary, _caches} = AgentChatEncoder.encode(model, Caches.new())
+    binary
+  end
+
   describe "GUI chrome opcode round-trip" do
     test "gui_theme encodes and decodes correctly", %{port: port} do
       theme = MingaEditor.UI.Theme.get!(:doom_one)
@@ -255,7 +284,7 @@ defmodule Minga.Integration.GUIProtocolTest do
         pending_approval: nil
       }
 
-      cmd = ProtocolGUI.encode_gui_agent_chat(data)
+      cmd = encode_gui_agent_chat(data)
       Port.command(port, cmd)
       assert_receive {^port, {:data, json}}, 5_000
       decoded = JSON.decode!(json)
@@ -299,7 +328,7 @@ defmodule Minga.Integration.GUIProtocolTest do
         pending_approval: nil
       }
 
-      cmd = ProtocolGUI.encode_gui_agent_chat(data)
+      cmd = encode_gui_agent_chat(data)
       Port.command(port, cmd)
       assert_receive {^port, {:data, json}}, 5_000
       decoded = JSON.decode!(json)
@@ -347,7 +376,7 @@ defmodule Minga.Integration.GUIProtocolTest do
         pending_approval: nil
       }
 
-      cmd = ProtocolGUI.encode_gui_agent_chat(data)
+      cmd = encode_gui_agent_chat(data)
       Port.command(port, cmd)
       assert_receive {^port, {:data, json}}, 5_000
       decoded = JSON.decode!(json)
@@ -378,7 +407,7 @@ defmodule Minga.Integration.GUIProtocolTest do
         ]
       }
 
-      cmd = ProtocolGUI.encode_gui_agent_chat(data)
+      cmd = encode_gui_agent_chat(data)
       Port.command(port, cmd)
       assert_receive {^port, {:data, json}}, 5_000
       decoded = JSON.decode!(json)
@@ -412,7 +441,7 @@ defmodule Minga.Integration.GUIProtocolTest do
         pending_approval: nil
       }
 
-      cmd = ProtocolGUI.encode_gui_agent_chat(data)
+      cmd = encode_gui_agent_chat(data)
       Port.command(port, cmd)
       assert_receive {^port, {:data, json}}, 5_000
       decoded = JSON.decode!(json)
@@ -486,7 +515,7 @@ defmodule Minga.Integration.GUIProtocolTest do
         BottomPanelEncoder.encode(%BottomPanel{visible?: false}, Caches.new())
 
       cases = [
-        {"gui_agent_chat", ProtocolGUI.encode_gui_agent_chat(%{visible: false})},
+        {"gui_agent_chat", encode_gui_agent_chat(%{visible: false})},
         {"gui_completion", ProtocolGUI.encode_gui_completion(nil, 0, 0)},
         {"gui_which_key", ProtocolGUI.encode_gui_which_key(%{show: false})},
         {"gui_picker", ProtocolGUI.encode_gui_picker(nil)},

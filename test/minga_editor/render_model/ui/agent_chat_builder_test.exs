@@ -41,7 +41,9 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
       context(buffer, session, panel)
       |> AgentChatBuilder.build()
 
-    summaries = decode_message_summaries(model.encoded)
+    assert model.visible?
+
+    summaries = Enum.map(model.messages, &message_summary/1)
 
     assert [
              {101, :assistant, "old pinned"},
@@ -52,6 +54,11 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
 
     refute {:user, "hidden"} in Enum.map(summaries, fn {_id, type, text} -> {type, text} end)
   end
+
+  defp message_summary({id, {:assistant, text}}), do: {id, :assistant, text}
+  defp message_summary({id, {:system, text, _level}}), do: {id, :system, text}
+  defp message_summary({id, {:user, text}}), do: {id, :user, text}
+  defp message_summary({id, {kind, _, _}}), do: {id, kind, nil}
 
   defp context(buffer, session, panel) do
     tab = Tab.new_agent(1, "Agent") |> Tab.set_session(session)
@@ -85,41 +92,4 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
     on_exit(fn -> send(pid, :stop) end)
     pid
   end
-
-  defp decode_message_summaries(<<0x78, _section_count::8, sections::binary>>) do
-    sections
-    |> gui_agent_chat_section!(0x06)
-    |> unwrap_messages()
-    |> Enum.map(&decode_message_summary/1)
-  end
-
-  defp gui_agent_chat_section!(
-         <<target_id::8, len::16, payload::binary-size(len), _rest::binary>>,
-         target_id
-       ),
-       do: payload
-
-  defp gui_agent_chat_section!(
-         <<_id::8, len::16, _payload::binary-size(len), rest::binary>>,
-         target_id
-       ),
-       do: gui_agent_chat_section!(rest, target_id)
-
-  defp unwrap_messages(<<0xFF::8, 1::8, count::16, frames::binary>>),
-    do: unwrap_message_frames(frames, count, [])
-
-  defp unwrap_message_frames(<<>>, 0, acc), do: Enum.reverse(acc)
-
-  defp unwrap_message_frames(
-         <<message_len::32, message::binary-size(message_len), rest::binary>>,
-         remaining,
-         acc
-       ),
-       do: unwrap_message_frames(rest, remaining - 1, [message | acc])
-
-  defp decode_message_summary(<<id::32, 0x02::8, len::32, text::binary-size(len)>>),
-    do: {id, :assistant, text}
-
-  defp decode_message_summary(<<id::32, 0x05::8, _level::8, len::32, text::binary-size(len)>>),
-    do: {id, :system, text}
 end

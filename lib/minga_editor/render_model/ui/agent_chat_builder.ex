@@ -2,60 +2,87 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   @moduledoc false
 
   alias MingaAgent.Session, as: AgentSession
+  alias MingaAgent.ToolApproval
+  alias MingaAgent.ToolCall
+  alias MingaAgent.TurnUsage
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.View.PromptRenderWindow
   alias Minga.Buffer
   alias Minga.RenderModel.UI.AgentChat
+  alias Minga.RenderModel.UI.AgentChat.ApprovalView
+  alias Minga.RenderModel.UI.AgentChat.PromptCompletion
+  alias Minga.RenderModel.UI.AgentChat.ToolCallView
+  alias Minga.RenderModel.UI.AgentChat.Usage
   alias MingaEditor.Frontend.Emit.Context
-  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
   alias MingaEditor.Window.Content
 
   @spec build(Context.t()) :: AgentChat.t()
   def build(ctx) do
     active_window = Map.get(ctx.windows.map, ctx.windows.active)
     is_agent_chat = active_window != nil && Content.agent_chat?(active_window.content)
+    session = active_session(ctx)
 
-    session =
-      try do
-        ctx.shell.active_session(ctx.shell_state)
-      rescue
-        _ -> nil
-      catch
-        :exit, _ -> nil
-      end
-
-    {fp, prompt_text} =
-      if is_agent_chat && session do
-        panel = ctx.agent_ui.panel
-        view = ctx.agent_ui.view
-        styled_len = length(panel.cached_styled_messages || [])
-        text = safe_prompt_content(panel.prompt_buffer)
-        prompt_cursor = UIState.input_cursor(panel)
-        prompt_line_count = UIState.input_line_count(panel)
-        inner_width = max(ctx.viewport.cols - 10, 20)
-        visible_rows = PromptRenderWindow.visible_rows(panel, inner_width)
-
-        {:erlang.phash2(
-           {:visible, ctx.shell_state.agent.runtime.status,
-            ctx.shell_state.agent.pending_approval, styled_len, panel.model_name,
-            panel.thinking_level, text, panel.message_version,
-            length(panel.cached_display_message_pairs), view.help_visible, view.focus,
-            ctx.editing.mode, prompt_cursor, prompt_line_count, visible_rows,
-            panel.mention_completion}
-         ), text}
-      else
-        {:not_visible, ""}
-      end
-
-    data = build_agent_chat_data(ctx, prompt_text)
-
-    if data.visible do
-      log_agent_chat_message_stats(data.messages)
+    if is_agent_chat && session do
+      build_visible(ctx)
+    else
+      %AgentChat{visible?: false}
     end
+  end
 
-    encoded = ProtocolGUI.encode_gui_agent_chat(data)
+  @spec active_session(Context.t()) :: pid() | nil
+  defp active_session(ctx) do
+    ctx.shell.active_session(ctx.shell_state)
+  rescue
+    _ -> nil
+  catch
+    :exit, _ -> nil
+  end
 
-    %AgentChat{encoded: encoded, fingerprint: fp}
+  @spec build_visible(Context.t()) :: AgentChat.t()
+  defp build_visible(ctx) do
+    panel = ctx.agent_ui.panel
+    view = ctx.agent_ui.view
+    session = active_session(ctx)
+
+    prompt_text = safe_prompt_content(panel.prompt_buffer)
+    {cursor_line, cursor_col} = UIState.input_cursor(panel)
+    inner_width = max(ctx.viewport.cols - 10, 20)
+    visible_rows = PromptRenderWindow.visible_rows(panel, inner_width)
+
+    messages_with_ids = displayed_message_pairs(panel, session)
+    pending_approval = ctx.shell_state.agent.pending_approval
+
+    gui_messages =
+      build_gui_messages(messages_with_ids, panel.cached_styled_messages, pending_approval)
+
+    help_visible = view.help_visible
+
+    help_groups =
+      if help_visible do
+        Minga.Keymap.Scope.Agent.help_groups(view.focus)
+      else
+        []
+      end
+
+    log_agent_chat_message_stats(gui_messages)
+
+    %AgentChat{
+      visible?: true,
+      status: ctx.shell_state.agent.runtime.status || :idle,
+      model_name: panel.model_name || "",
+      thinking_level: panel.thinking_level || "",
+      prompt: prompt_text,
+      prompt_line_count: UIState.input_line_count(panel),
+      prompt_cursor_line: cursor_line,
+      prompt_cursor_col: cursor_col,
+      prompt_vim_mode: ctx.editing.mode,
+      prompt_visible_rows: visible_rows,
+      prompt_completion: build_prompt_completion(panel),
+      pending_approval: nil,
+      help_visible?: help_visible,
+      help_groups: help_groups,
+      messages: gui_messages
+    }
   end
 
   @spec log_agent_chat_message_stats([{pos_integer(), term()}]) :: :ok
@@ -74,7 +101,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     )
   end
 
-  @spec build_prompt_completion(MingaEditor.Agent.UIState.Panel.t()) :: map() | nil
+  @spec build_prompt_completion(MingaEditor.Agent.UIState.Panel.t()) :: PromptCompletion.t() | nil
   defp build_prompt_completion(%{mention_completion: %{candidates: candidates} = comp})
        when is_list(candidates) and candidates != [] do
     {type, formatted_candidates} =
@@ -86,7 +113,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
           {:mention, candidates}
       end
 
-    %{
+    %PromptCompletion{
       type: type,
       candidates: formatted_candidates,
       selected: comp.selected,
@@ -106,66 +133,6 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     :exit, _ -> ""
   end
 
-  @spec build_agent_chat_data(Context.t(), String.t()) :: map()
-  defp build_agent_chat_data(ctx, prompt_text) do
-    active_window = Map.get(ctx.windows.map, ctx.windows.active)
-    is_agent_chat = active_window != nil && Content.agent_chat?(active_window.content)
-
-    session =
-      try do
-        ctx.shell.active_session(ctx.shell_state)
-      rescue
-        _ -> nil
-      catch
-        :exit, _ -> nil
-      end
-
-    if is_agent_chat && session do
-      panel = ctx.agent_ui.panel
-      messages_with_ids = displayed_message_pairs(panel, session)
-
-      styled_cache = panel.cached_styled_messages
-      pending_approval = ctx.shell_state.agent.pending_approval
-      gui_messages = build_gui_messages(messages_with_ids, styled_cache, pending_approval)
-
-      view = ctx.agent_ui.view
-      help_visible = view.help_visible
-
-      help_groups =
-        if help_visible do
-          Minga.Keymap.Scope.Agent.help_groups(view.focus)
-        else
-          []
-        end
-
-      {cursor_line, cursor_col} = UIState.input_cursor(panel)
-      vim_mode = ctx.editing.mode
-      inner_width = max(ctx.viewport.cols - 10, 20)
-      visible_rows = PromptRenderWindow.visible_rows(panel, inner_width)
-      prompt_completion = build_prompt_completion(panel)
-
-      %{
-        visible: true,
-        messages: gui_messages,
-        status: ctx.shell_state.agent.runtime.status || :idle,
-        model: ctx.agent_ui.panel.model_name,
-        thinking_level: panel.thinking_level,
-        prompt: prompt_text,
-        pending_approval: nil,
-        help_visible: help_visible,
-        help_groups: help_groups,
-        prompt_line_count: UIState.input_line_count(panel),
-        prompt_cursor_line: cursor_line,
-        prompt_cursor_col: cursor_col,
-        prompt_vim_mode: vim_mode,
-        prompt_visible_rows: visible_rows,
-        prompt_completion: prompt_completion
-      }
-    else
-      %{visible: false}
-    end
-  end
-
   @spec displayed_message_pairs(MingaEditor.Agent.UIState.Panel.t(), pid()) :: [
           {pos_integer(), term()}
         ]
@@ -183,7 +150,9 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
           {pos_integer(), term()}
         ]
   defp build_gui_messages(messages_with_ids, nil, pending_approval) do
-    Enum.map(messages_with_ids, &maybe_inline_approval(&1, pending_approval))
+    messages_with_ids
+    |> Enum.map(&maybe_inline_approval(&1, pending_approval))
+    |> Enum.map(&to_core_message/1)
   end
 
   defp build_gui_messages(messages_with_ids, styled_cache, pending_approval)
@@ -192,6 +161,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
 
     Enum.zip(messages_with_ids, padded)
     |> Enum.map(&maybe_style_message(&1, pending_approval))
+    |> Enum.map(&to_core_message/1)
   end
 
   @spec maybe_style_message({{pos_integer(), term()}, term()}, map() | nil) ::
@@ -228,4 +198,97 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   @spec pad_cache([term()], non_neg_integer()) :: [term()]
   defp pad_cache(cache, target_len) when length(cache) >= target_len, do: cache
   defp pad_cache(cache, target_len), do: cache ++ List.duplicate(nil, target_len - length(cache))
+
+  # ── Agent-struct → core-view conversion ──
+  #
+  # Layer 1 reads MingaAgent and resolves every agent struct into the core
+  # views the encoder serializes. After this pass the GUI encoder never sees a
+  # MingaAgent struct.
+
+  @spec to_core_message({pos_integer(), term()}) :: {pos_integer(), term()}
+  defp to_core_message({id, body}), do: {id, to_core_body(body)}
+  defp to_core_message(body), do: to_core_body(body)
+
+  @spec to_core_body(term()) :: term()
+  defp to_core_body({:tool_call, %ToolCall{} = tc}), do: {:tool_call, tool_call_view(tc)}
+
+  defp to_core_body({:styled_tool_call, %ToolCall{} = tc, styled_lines}),
+    do: {:styled_tool_call, tool_call_view(tc), styled_lines}
+
+  defp to_core_body({:approval_tool_call, %ToolCall{} = tc, approval}),
+    do: {:approval_tool_call, approval_view(tc, approval)}
+
+  defp to_core_body({:usage, %TurnUsage{} = usage}), do: {:usage, usage_view(usage)}
+
+  defp to_core_body(body), do: body
+
+  @spec tool_call_view(ToolCall.t()) :: ToolCallView.t()
+  defp tool_call_view(%ToolCall{} = tc) do
+    %ToolCallView{
+      name: tc.name,
+      summary: tool_call_summary(tc),
+      result: tc.result,
+      status: tc.status,
+      is_error: tc.is_error,
+      collapsed: tc.collapsed,
+      duration_ms: tc.duration_ms,
+      auto_approved_scope: tc.auto_approved_scope
+    }
+  end
+
+  @spec approval_view(ToolCall.t(), map()) :: ApprovalView.t()
+  defp approval_view(%ToolCall{} = tc, approval) do
+    preview = Map.get(approval, :preview) || ToolApproval.build_preview(tc.name, tc.args)
+
+    %ApprovalView{
+      name: tc.name,
+      tool_call_id: Map.get(approval, :tool_call_id, tc.id),
+      summary: Map.get(preview, :summary) || tool_call_summary(tc),
+      preview_kind: Map.get(preview, :kind, :args),
+      preview_lines: Map.get(preview, :lines, [])
+    }
+  end
+
+  @spec usage_view(TurnUsage.t()) :: Usage.t()
+  defp usage_view(%TurnUsage{} = usage) do
+    %Usage{
+      input: usage.input,
+      output: usage.output,
+      cache_read: usage.cache_read,
+      cache_write: usage.cache_write,
+      cost: usage.cost
+    }
+  end
+
+  @spec tool_call_summary(ToolCall.t()) :: String.t()
+  defp tool_call_summary(%ToolCall{name: name, args: args}) when is_map(args),
+    do: summarize_tool_args(name, args)
+
+  defp tool_call_summary(%ToolCall{name: name} = tc) do
+    args = Map.get(tc, :args) || %{}
+    summarize_tool_args(name, args)
+  end
+
+  @spec summarize_tool_args(String.t(), map()) :: String.t()
+  defp summarize_tool_args("shell", %{"command" => cmd}), do: cmd
+  defp summarize_tool_args("shell", %{command: cmd}), do: cmd
+  defp summarize_tool_args("write_file", %{"path" => path}), do: path
+  defp summarize_tool_args("write_file", %{path: path}), do: path
+  defp summarize_tool_args("edit_file", %{"path" => path}), do: path
+  defp summarize_tool_args("edit_file", %{path: path}), do: path
+  defp summarize_tool_args("multi_edit_file", %{"path" => path}), do: path
+  defp summarize_tool_args("multi_edit_file", %{path: path}), do: path
+  defp summarize_tool_args("apply_diff", %{"path" => path}), do: path
+  defp summarize_tool_args("apply_diff", %{path: path}), do: path
+
+  defp summarize_tool_args("git_stage", %{"paths" => paths}) when is_list(paths),
+    do: Enum.join(paths, ", ")
+
+  defp summarize_tool_args("git_stage", %{paths: paths}) when is_list(paths),
+    do: Enum.join(paths, ", ")
+
+  defp summarize_tool_args("git_commit", %{"message" => msg}), do: msg
+  defp summarize_tool_args("git_commit", %{message: msg}), do: msg
+  defp summarize_tool_args(_name, args) when map_size(args) == 0, do: ""
+  defp summarize_tool_args(_name, args), do: inspect(args, limit: 80)
 end
