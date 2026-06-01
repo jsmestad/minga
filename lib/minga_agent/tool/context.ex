@@ -49,7 +49,8 @@ defmodule MingaAgent.Tool.Context do
       project_view: context.router_context.project_view,
       fork_store: context.router_context.fork_store,
       changeset: context.router_context.changeset,
-      parent_session: nil
+      parent_session: Map.get(context.metadata, :parent_session),
+      shell_output_callback: Map.get(context.metadata, :shell_output_callback)
     ]
   end
 

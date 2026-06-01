@@ -78,7 +78,8 @@ defmodule MingaAgent.Tools do
           project_view: ProjectView.t() | nil,
           changeset: pid() | nil,
           fork_store: pid() | nil,
-          parent_session: GenServer.server() | nil
+          parent_session: GenServer.server() | nil,
+          shell_output_callback: (String.t() -> :ok) | nil
         ]
 
   @default_destructive_tools ~w(write_file edit_file multi_edit_file apply_diff delete_file shell git_stage git_commit rename)
@@ -139,6 +140,7 @@ defmodule MingaAgent.Tools do
     cs = Keyword.get(opts, :changeset)
     fs = Keyword.get(opts, :fork_store)
     parent_session = Keyword.get(opts, :parent_session)
+    shell_output_callback = Keyword.get(opts, :shell_output_callback)
     router_ctx = ToolRouter.context(project_view, fs, cs)
 
     [
@@ -152,7 +154,7 @@ defmodule MingaAgent.Tools do
       find(root, router_ctx),
       grep(root, router_ctx),
       fetch_url(),
-      shell(root, router_ctx),
+      shell(root, router_ctx, shell_output_callback),
       subagent(root, parent_session),
       git_status(root),
       git_diff(root),
@@ -786,8 +788,8 @@ defmodule MingaAgent.Tools do
     )
   end
 
-  @spec shell(String.t(), MingaAgent.ToolRouter.context()) :: Tool.t()
-  defp shell(root, router_ctx) do
+  @spec shell(String.t(), MingaAgent.ToolRouter.context(), (String.t() -> :ok) | nil) :: Tool.t()
+  defp shell(root, router_ctx, shell_output_callback) do
     Tool.new!(
       name: "shell",
       description: """
@@ -823,7 +825,10 @@ defmodule MingaAgent.Tools do
 
           routed_result(
             router_ctx,
-            Shell.execute(args["command"], shell_root, timeout_secs, env: env)
+            Shell.execute(args["command"], shell_root, timeout_secs,
+              env: env,
+              on_output: shell_output_callback
+            )
           )
         else
           {:error, reason} -> {:error, inspect(reason)}
