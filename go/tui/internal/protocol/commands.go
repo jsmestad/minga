@@ -53,6 +53,7 @@ type ChromePayload struct {
 	Summary string
 	Bytes   int
 	Tabs    TabBar
+	Spaces  WorkspaceBar
 	Mini    Minibuffer
 	Tree    FileTree
 	Status  StatusBar
@@ -76,6 +77,44 @@ type Tab struct {
 	Attention   bool
 	Pinned      bool
 	AgentStatus byte
+}
+
+type WorkspaceBar struct {
+	Version  byte
+	ActiveID uint16
+	Mode     byte
+	Flags    byte
+	Spaces   []Workspace
+	Tabs     []WorkspaceTab
+}
+
+type Workspace struct {
+	ID              uint16
+	Kind            byte
+	Status          byte
+	Flags           uint16
+	Color           uint32
+	TabCount        uint16
+	DraftCount      uint16
+	ConflictCount   uint16
+	BackgroundCount uint16
+	Label           string
+	Icon            string
+	Active          bool
+	Attention       bool
+	Closeable       bool
+}
+
+type WorkspaceTab struct {
+	ID          uint32
+	WorkspaceID uint16
+	Kind        byte
+	Flags       uint16
+	PathHash    uint32
+	Icon        string
+	Label       string
+	Path        string
+	Tint        uint32
 }
 
 type Minibuffer struct {
@@ -428,6 +467,8 @@ func decodeChrome(payload []byte) ChromePayload {
 	switch opcode {
 	case generated.OPGuiTabBar:
 		chrome.Tabs, chrome.Summary, chrome.Bytes = decodeTabBar(payload)
+	case generated.OPGuiWorkspaces:
+		chrome.Spaces, chrome.Summary, chrome.Bytes = decodeWorkspaces(payload)
 	case generated.OPGuiMinibuffer:
 		chrome.Mini, chrome.Summary, chrome.Bytes = decodeMinibuffer(payload)
 	case generated.OPGuiFileTree:
@@ -493,6 +534,98 @@ func decodeTabBar(payload []byte) (TabBar, string, int) {
 	}
 
 	return tabBar, stringsJoin(labels, "  "), offset
+}
+
+func decodeWorkspaces(payload []byte) (WorkspaceBar, string, int) {
+	if len(payload) < 3 {
+		return WorkspaceBar{}, "", len(payload)
+	}
+	size := 3 + int(u16(payload, 1))
+	if len(payload) < size {
+		return WorkspaceBar{}, "", len(payload)
+	}
+	body := payload[3:size]
+	if len(body) < 6 {
+		return WorkspaceBar{}, "", size
+	}
+
+	bar := WorkspaceBar{
+		Version:  body[0],
+		ActiveID: u16(body, 1),
+		Mode:     body[3],
+		Flags:    body[4],
+	}
+	offset := 6
+	count := int(body[5])
+	labels := make([]string, 0, count)
+	bar.Spaces = make([]Workspace, 0, count)
+	for i := 0; i < count && len(body) >= offset+19; i++ {
+		space := Workspace{
+			ID:              u16(body, offset),
+			Kind:            body[offset+2],
+			Status:          body[offset+3],
+			Flags:           u16(body, offset+4),
+			Color:           u24(body, offset+6),
+			TabCount:        u16(body, offset+9),
+			DraftCount:      u16(body, offset+11),
+			ConflictCount:   u16(body, offset+13),
+			BackgroundCount: u16(body, offset+15),
+		}
+		offset += 17
+		label, next, ok := readString8(body, offset)
+		if !ok {
+			break
+		}
+		space.Label = label
+		icon, next, ok := readString8(body, next)
+		if !ok {
+			break
+		}
+		offset = next
+		space.Icon = icon
+		space.Active = space.ID == bar.ActiveID
+		space.Attention = space.Flags&0x01 != 0
+		space.Closeable = space.Flags&0x02 != 0
+		bar.Spaces = append(bar.Spaces, space)
+		prefix := " "
+		if space.Active {
+			prefix = "*"
+		}
+		labels = append(labels, fmt.Sprintf("%s%s %s", prefix, space.Icon, space.Label))
+	}
+	if len(body) < offset+2 {
+		return bar, stringsJoin(labels, "  "), size
+	}
+	tabCount := int(u16(body, offset))
+	offset += 2
+	bar.Tabs = make([]WorkspaceTab, 0, tabCount)
+	for i := 0; i < tabCount && len(body) >= offset+18; i++ {
+		tab := WorkspaceTab{
+			ID:          u32(body, offset),
+			WorkspaceID: u16(body, offset+4),
+			Kind:        body[offset+6],
+			Flags:       u16(body, offset+7),
+			PathHash:    u32(body, offset+9),
+		}
+		offset += 13
+		var ok bool
+		tab.Icon, offset, ok = readString8(body, offset)
+		if !ok {
+			break
+		}
+		tab.Label, offset, ok = readString16(body, offset)
+		if !ok {
+			break
+		}
+		tab.Path, offset, ok = readString16(body, offset)
+		if !ok || len(body) < offset+4 {
+			break
+		}
+		tab.Tint = u32(body, offset)
+		offset += 4
+		bar.Tabs = append(bar.Tabs, tab)
+	}
+	return bar, stringsJoin(labels, "  "), size
 }
 
 func decodeMinibuffer(payload []byte) (Minibuffer, string, int) {

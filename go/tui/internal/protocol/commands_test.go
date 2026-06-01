@@ -131,6 +131,69 @@ func TestDecodeMinibufferChrome(t *testing.T) {
 	}
 }
 
+func TestDecodeWorkspacesChromeDoesNotSwallowFollowingCommands(t *testing.T) {
+	workspace := []byte{
+		0, 7,
+		1,
+		2,
+		0, 3,
+		0x44, 0x55, 0x66,
+		0, 4,
+		0, 1,
+		0, 2,
+		0, 3,
+	}
+	workspace = append(workspace, string8("Agent")...)
+	workspace = append(workspace, string8("A")...)
+	tab := []byte{
+		0, 0, 0, 9,
+		0, 7,
+		0,
+		0, 0x21,
+		0, 0, 0, 5,
+	}
+	tab = append(tab, string8("*")...)
+	tab = append(tab, string16("main.ex")...)
+	tab = append(tab, string16("/repo/main.ex")...)
+	tab = append(tab, 0, 0, 0, 0)
+	body := []byte{2, 0, 7, 1, 1, 1}
+	body = append(body, workspace...)
+	body = append(body, 0, 1)
+	body = append(body, tab...)
+	packet := []byte{generated.OPGuiWorkspaces, byte(len(body) >> 8), byte(len(body))}
+	packet = append(packet, body...)
+	packet = append(packet, generated.OPBatchEnd)
+
+	first, err := DecodeCommand(packet)
+	if err != nil {
+		t.Fatalf("DecodeCommand returned error: %v", err)
+	}
+	if first.Kind != CommandChrome {
+		t.Fatalf("kind = %v, want chrome", first.Kind)
+	}
+	if first.Size != len(packet)-1 {
+		t.Fatalf("workspace size = %d, want %d", first.Size, len(packet)-1)
+	}
+	spaces := first.Chrome.Spaces
+	if spaces.ActiveID != 7 || len(spaces.Spaces) != 1 || len(spaces.Tabs) != 1 {
+		t.Fatalf("workspaces decoded incorrectly: %+v", spaces)
+	}
+	if got := spaces.Spaces[0]; !got.Active || !got.Attention || !got.Closeable || got.Label != "Agent" || got.TabCount != 4 {
+		t.Fatalf("workspace decoded incorrectly: %+v", got)
+	}
+	if got := spaces.Tabs[0]; got.Label != "main.ex" || got.Path != "/repo/main.ex" || got.WorkspaceID != 7 {
+		t.Fatalf("workspace tab decoded incorrectly: %+v", got)
+	}
+
+	second, err := DecodeCommand(packet[first.Size:])
+	if err != nil {
+		t.Fatalf("DecodeCommand batch returned error: %v", err)
+	}
+	if second.Kind != CommandBatchEnd {
+		t.Fatalf("second kind = %v, want batch end", second.Kind)
+	}
+}
+
 func TestDecodeFileTreeChromeRows(t *testing.T) {
 	row := []byte{
 		0, 0, 0, 1,
@@ -199,5 +262,10 @@ func section(id byte, payload []byte) []byte {
 
 func string16(value string) []byte {
 	out := []byte{byte(len(value) >> 8), byte(len(value))}
+	return append(out, []byte(value)...)
+}
+
+func string8(value string) []byte {
+	out := []byte{byte(len(value))}
 	return append(out, []byte(value)...)
 }

@@ -280,10 +280,44 @@ func (m Model) headerLines() []string {
 	lines := []string{
 		lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#C7D1FF")).Background(lipgloss.Color("#20242C")).Width(m.width).Render(title),
 	}
+	if spaces, ok := m.workspaceBar(); ok && len(spaces.Spaces) > 0 {
+		lines = append(lines, m.renderWorkspaces(spaces))
+	}
 	if tabBar, ok := m.tabBar(); ok && len(tabBar.Tabs) > 0 {
 		lines = append(lines, m.renderTabs(tabBar))
 	}
 	return lines
+}
+
+func (m Model) renderWorkspaces(spaces protocol.WorkspaceBar) string {
+	activeStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(lipgloss.Color("#2F4052")).Padding(0, 1)
+	inactiveStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#AEB7C2")).Background(lipgloss.Color("#171B22")).Padding(0, 1)
+	alertStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#EBCB8B"))
+	rendered := make([]string, 0, len(spaces.Spaces))
+	for _, space := range spaces.Spaces {
+		label := strings.TrimSpace(space.Icon + " " + space.Label)
+		if space.TabCount > 0 {
+			label += fmt.Sprintf(" %d", space.TabCount)
+		}
+		if space.DraftCount > 0 {
+			label += alertStyle.Render(fmt.Sprintf(" D%d", space.DraftCount))
+		}
+		if space.ConflictCount > 0 {
+			label += alertStyle.Render(fmt.Sprintf(" C%d", space.ConflictCount))
+		}
+		if space.BackgroundCount > 0 {
+			label += alertStyle.Render(fmt.Sprintf(" B%d", space.BackgroundCount))
+		}
+		if space.Attention {
+			label += alertStyle.Render(" !")
+		}
+		style := inactiveStyle
+		if space.Active {
+			style = activeStyle
+		}
+		rendered = append(rendered, style.Render(label))
+	}
+	return lipgloss.NewStyle().Background(lipgloss.Color("#171B22")).Width(m.width).Render(strings.Join(rendered, ""))
 }
 
 func (m Model) renderTabs(tabBar protocol.TabBar) string {
@@ -334,6 +368,15 @@ func (m Model) footerLines() []string {
 
 func (m Model) bodyHeight() int {
 	return max(m.height-len(m.headerLines())-len(m.footerLines()), 1)
+}
+
+func (m Model) workspaceBar() (protocol.WorkspaceBar, bool) {
+	for _, payload := range m.chrome {
+		if len(payload.Spaces.Spaces) > 0 {
+			return payload.Spaces, true
+		}
+	}
+	return protocol.WorkspaceBar{}, false
 }
 
 func (m Model) tabBar() (protocol.TabBar, bool) {
