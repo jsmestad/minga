@@ -15,6 +15,7 @@ defmodule Minga.Extension.Supervisor do
 
   use DynamicSupervisor
 
+  alias Minga.Extension.CodeLease
   alias Minga.Extension.CompileCache
   alias Minga.Extension.Git, as: ExtGit
   alias Minga.Extension.Hex, as: ExtHex
@@ -319,11 +320,14 @@ defmodule Minga.Extension.Supervisor do
     with (default: `Minga.Keymap.Active`)
   * `:callbacks` — cleanup callbacks map, injected for test isolation
     (default: reads from `ContributionCleanup` persistent_term)
+  * `:code_lease` — the `Minga.Extension.CodeLease` server to consult before purging
+    extension callback modules (default: `Minga.Extension.CodeLease`)
   """
   @type start_opts :: [
           command_registry: GenServer.server(),
           keymap: GenServer.server(),
           callbacks: %{atom() => Minga.Extension.ContributionCleanup.cleanup_fun()},
+          code_lease: GenServer.server(),
           slow_lifecycle_threshold_ms: non_neg_integer(),
           test_hooks: map()
         ]
@@ -451,10 +455,12 @@ defmodule Minga.Extension.Supervisor do
     cmd_registry = Keyword.get(opts, :command_registry, Minga.Command.Registry)
     keymap = Keyword.get(opts, :keymap, Minga.Keymap.Active)
     mark_start_attempt(registry, name)
-    purge_recompilable_module(entry)
 
-    with {:ok, module} <-
-           run_lifecycle_phase(name, :load, opts, fn -> compile_extension(entry.path) end),
+    with :ok <- purge_recompilable_module(name, entry, opts),
+         {:ok, module} <-
+           run_lifecycle_phase(name, :load, opts, fn ->
+             compile_extension(name, entry.path, opts)
+           end),
          :ok <- validate_behaviour(module, name),
          :ok <- record_extension_manifest(registry, name, module, entry.source_type),
          :ok <- register_and_validate_options(name, module, entry.config),
@@ -506,7 +512,7 @@ defmodule Minga.Extension.Supervisor do
          keymap,
          opts
        ) do
-    case register_extension_modeline_segments(module, name) do
+    case register_extension_modeline_segments(module, name, opts) do
       :ok ->
         start_child_then_register_dsl(
           supervisor,
@@ -546,7 +552,7 @@ defmodule Minga.Extension.Supervisor do
        ) do
     case start_child(supervisor, registry, name, module, config, cmd_registry, keymap, opts) do
       {:ok, pid} ->
-        register_dsl_for_started_child(supervisor, pid, module, name, cmd_registry, keymap)
+        register_dsl_for_started_child(supervisor, pid, module, name, cmd_registry, keymap, opts)
 
       {:error, reason} ->
         {:error, reason}
@@ -559,10 +565,11 @@ defmodule Minga.Extension.Supervisor do
           module(),
           atom(),
           GenServer.server(),
-          GenServer.server()
+          GenServer.server(),
+          start_opts()
         ) :: {:ok, pid()} | {:error, term()}
-  defp register_dsl_for_started_child(supervisor, pid, module, name, cmd_registry, keymap) do
-    with :ok <- register_extension_commands(module, name, cmd_registry),
+  defp register_dsl_for_started_child(supervisor, pid, module, name, cmd_registry, keymap, opts) do
+    with :ok <- register_extension_commands(module, name, cmd_registry, opts),
          :ok <- register_extension_keybinds(module, name, keymap) do
       {:ok, pid}
     else
@@ -731,16 +738,48 @@ defmodule Minga.Extension.Supervisor do
     cmd_registry = Keyword.get(opts, :command_registry, Minga.Command.Registry)
     keymap = Keyword.get(opts, :keymap, Minga.Keymap.Active)
 
-    ExtRegistry.update(registry, name, lifecycle_ref: nil)
+    with :ok <- ensure_extension_unload_allowed(name, entry, opts) do
+      ExtRegistry.update(registry, name, lifecycle_ref: nil)
 
-    termination_result =
-      run_lifecycle_phase(name, :stop, opts, fn ->
-        terminate_extension_process(supervisor, entry)
-      end)
+      termination_result =
+        run_lifecycle_phase(name, :stop, opts, fn ->
+          terminate_extension_process(supervisor, entry)
+        end)
 
-    cleanup_result = cleanup_extension_contributions(name, cmd_registry, keymap, opts)
-    finalize_explicit_stop_result(termination_result, cleanup_result, registry, name, entry)
+      cleanup_result = cleanup_extension_contributions(name, cmd_registry, keymap, opts)
+
+      finalize_explicit_stop_result(
+        termination_result,
+        cleanup_result,
+        registry,
+        name,
+        entry,
+        opts
+      )
+    end
   end
+
+  @spec ensure_extension_unload_allowed(atom(), ExtRegistry.entry(), start_opts()) ::
+          :ok | {:error, term()}
+  defp ensure_extension_unload_allowed(name, %{source_type: source_type, module: module}, opts)
+       when source_type != :module and is_atom(module) and module != nil do
+    case CodeLease.ensure_purge_allowed({:extension, name}, module,
+           server: code_lease_server(opts)
+         ) do
+      :ok ->
+        :ok
+
+      {:error, reason} = error ->
+        Minga.Log.warning(
+          :config,
+          "Extension #{name} unload rejected because callback module #{inspect(module)} is still leased: #{inspect(reason)}"
+        )
+
+        error
+    end
+  end
+
+  defp ensure_extension_unload_allowed(_name, _entry, _opts), do: :ok
 
   @doc """
   Returns a summary of all extensions: `[{name, version, status}]`.
@@ -787,6 +826,26 @@ defmodule Minga.Extension.Supervisor do
   @spec mark_start_attempt(GenServer.server(), atom()) :: :ok
   defp mark_start_attempt(registry, name) do
     ExtRegistry.update(registry, name, manifest: nil)
+  end
+
+  @spec code_lease_server(start_opts()) :: GenServer.server()
+  defp code_lease_server(opts), do: Keyword.get(opts, :code_lease, CodeLease)
+
+  @spec leased_callback(atom(), module(), CodeLease.reason(), GenServer.server(), (-> result)) ::
+          result
+        when result: var
+  defp leased_callback(ext_name, module, reason, code_lease, fun) when is_function(fun, 0) do
+    case CodeLease.lease({:extension, ext_name}, module, reason, server: code_lease) do
+      {:ok, lease} ->
+        try do
+          fun.()
+        after
+          CodeLease.release(lease)
+        end
+
+      {:error, reason} ->
+        raise "extension #{ext_name} callback module #{inspect(module)} unavailable: #{inspect(reason)}"
+    end
   end
 
   @spec mark_start_load_error(GenServer.server(), atom()) :: :ok
@@ -1337,7 +1396,8 @@ defmodule Minga.Extension.Supervisor do
             registry,
             name,
             lifecycle_ref,
-            entry
+            entry,
+            opts
           )
 
         :error ->
@@ -1353,11 +1413,12 @@ defmodule Minga.Extension.Supervisor do
           GenServer.server(),
           atom(),
           reference(),
-          ExtRegistry.entry()
+          ExtRegistry.entry(),
+          start_opts()
         ) :: :ok
-  defp finalize_terminal_cleanup_result(:ok, registry, name, lifecycle_ref, entry) do
+  defp finalize_terminal_cleanup_result(:ok, registry, name, lifecycle_ref, entry, opts) do
     if lifecycle_monitor_active?(registry, name, lifecycle_ref) do
-      finalize_stopped_extension(registry, name, entry)
+      _result = finalize_stopped_extension(registry, name, entry, opts)
     end
 
     :ok
@@ -1368,7 +1429,8 @@ defmodule Minga.Extension.Supervisor do
          registry,
          name,
          lifecycle_ref,
-         _entry
+         _entry,
+         _opts
        ) do
     if lifecycle_monitor_active?(registry, name, lifecycle_ref) do
       ExtRegistry.update(registry, name, status: :load_error, pid: nil, lifecycle_ref: nil)
@@ -1497,29 +1559,44 @@ defmodule Minga.Extension.Supervisor do
     end
   end
 
-  @spec purge_recompilable_module(ExtRegistry.entry()) :: :ok
-  defp purge_recompilable_module(%{source_type: source_type, module: module})
+  @spec purge_recompilable_module(atom(), ExtRegistry.entry(), start_opts()) ::
+          :ok | {:error, term()}
+  defp purge_recompilable_module(name, %{source_type: source_type, module: module}, opts)
        when source_type in [:path, :git] and is_atom(module) and module != nil do
-    :code.purge(module)
-    :code.delete(module)
-    :ok
+    purge_extension_module(name, module, opts)
   end
 
-  defp purge_recompilable_module(_entry), do: :ok
+  defp purge_recompilable_module(_name, _entry, _opts), do: :ok
 
-  @spec compile_extension(String.t()) :: {:ok, module()} | {:error, String.t()}
-  defp compile_extension(path) do
+  @spec purge_extension_module(atom(), module(), start_opts()) :: :ok | {:error, term()}
+  defp purge_extension_module(name, module, opts) do
+    CodeLease.purge_module({:extension, name}, module, server: code_lease_server(opts))
+  end
+
+  @spec purge_stopped_extension_module(atom(), ExtRegistry.entry(), start_opts()) ::
+          :ok | {:error, term()}
+  defp purge_stopped_extension_module(name, %{source_type: source_type, module: module}, opts)
+       when source_type != :module and is_atom(module) and module != nil do
+    purge_extension_module(name, module, opts)
+  end
+
+  defp purge_stopped_extension_module(_name, _entry, _opts), do: :ok
+
+  @spec compile_extension(atom(), String.t(), start_opts()) ::
+          {:ok, module()} | {:error, String.t()}
+  defp compile_extension(name, path, opts) do
     expanded = Path.expand(path)
 
     if File.dir?(expanded) do
-      compile_extension_files(expanded)
+      compile_extension_files(name, expanded, opts)
     else
       {:error, "extension path does not exist: #{expanded}"}
     end
   end
 
-  @spec compile_extension_files(String.t()) :: {:ok, module()} | {:error, String.t()}
-  defp compile_extension_files(expanded) do
+  @spec compile_extension_files(atom(), String.t(), start_opts()) ::
+          {:ok, module()} | {:error, String.t()}
+  defp compile_extension_files(name, expanded, opts) do
     files =
       expanded
       |> Path.join("**/*.ex")
@@ -1534,7 +1611,10 @@ defmodule Minga.Extension.Supervisor do
         # The compile cache loads precompiled beams on a hit and recompiles
         # (writing fresh beams) on a miss, so editing extension source still
         # hot-reloads via a changed content hash.
-        case CompileCache.load_or_compile(expanded, files) do
+        case CompileCache.load_or_compile(expanded, files,
+               source: {:extension, name},
+               code_lease: code_lease_server(opts)
+             ) do
           {:ok, %{modules: modules, diagnostics: diagnostics}} ->
             log_diagnostics(diagnostics)
             find_extension_in_compiled(modules)
@@ -1669,46 +1749,71 @@ defmodule Minga.Extension.Supervisor do
           :ok | {:error, [map()]},
           GenServer.server(),
           atom(),
-          ExtRegistry.entry()
+          ExtRegistry.entry(),
+          start_opts()
         ) :: :ok | {:error, term()}
-  defp finalize_explicit_stop_result(:ok, :ok, registry, name, entry) do
-    finalize_stopped_extension(registry, name, entry)
+  defp finalize_explicit_stop_result(:ok, :ok, registry, name, entry, opts) do
+    finalize_stopped_extension(registry, name, entry, opts)
   end
 
-  defp finalize_explicit_stop_result(:ok, {:error, failures}, registry, name, _entry) do
+  defp finalize_explicit_stop_result(:ok, {:error, failures}, registry, name, _entry, _opts) do
     ExtRegistry.update(registry, name, status: :load_error, pid: nil, lifecycle_ref: nil)
     {:error, {:cleanup_failed, failures}}
   end
 
-  defp finalize_explicit_stop_result({:error, reason}, :ok, registry, name, entry) do
-    finalize_stopped_extension(registry, name, entry)
-    {:error, reason}
+  defp finalize_explicit_stop_result({:error, reason}, :ok, registry, name, entry, opts) do
+    case finalize_stopped_extension(registry, name, entry, opts) do
+      :ok -> {:error, reason}
+      {:error, purge_reason} -> {:error, {:stop_failed_and_purge_blocked, reason, purge_reason}}
+    end
   end
 
-  defp finalize_explicit_stop_result({:error, reason}, {:error, failures}, registry, name, _entry) do
+  defp finalize_explicit_stop_result(
+         {:error, reason},
+         {:error, failures},
+         registry,
+         name,
+         _entry,
+         _opts
+       ) do
     ExtRegistry.update(registry, name, status: :load_error, lifecycle_ref: nil)
     {:error, {:cleanup_failed, reason, failures}}
   end
 
-  @spec finalize_stopped_extension(GenServer.server(), atom(), ExtRegistry.entry()) :: :ok
-  defp finalize_stopped_extension(registry, name, entry) do
-    if entry.source_type != :module and entry.module do
-      :code.purge(entry.module)
-      :code.delete(entry.module)
+  @spec finalize_stopped_extension(GenServer.server(), atom(), ExtRegistry.entry(), start_opts()) ::
+          :ok | {:error, term()}
+  defp finalize_stopped_extension(registry, name, entry, opts) do
+    purge_result = purge_stopped_extension_module(name, entry, opts)
+
+    if match?({:error, _reason}, purge_result) do
+      {:error, reason} = purge_result
+
+      Minga.Log.warning(
+        :config,
+        "Extension #{name} module purge skipped: #{inspect(reason)}"
+      )
     end
 
-    update_fields = [status: :stopped, pid: nil, lifecycle_ref: nil]
-
-    update_fields =
-      if entry.source_type == :module do
-        update_fields
-      else
-        [{:module, nil} | update_fields]
-      end
-
+    update_fields = stopped_update_fields(entry, purge_result)
     ExtRegistry.update(registry, name, update_fields)
 
-    :ok
+    case purge_result do
+      :ok -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @spec stopped_update_fields(ExtRegistry.entry(), :ok | {:error, term()}) :: keyword()
+  defp stopped_update_fields(%{source_type: :module}, _purge_result) do
+    [status: :stopped, pid: nil, lifecycle_ref: nil]
+  end
+
+  defp stopped_update_fields(_entry, :ok) do
+    [module: nil, status: :stopped, pid: nil, lifecycle_ref: nil]
+  end
+
+  defp stopped_update_fields(_entry, {:error, _reason}) do
+    [status: :load_error, pid: nil, lifecycle_ref: nil]
   end
 
   @spec mark_hex_entries_load_error(GenServer.server()) :: :ok
@@ -1750,12 +1855,12 @@ defmodule Minga.Extension.Supervisor do
     "#{inspect(family)} source=#{inspect(source)} reason=#{inspect(reason)}"
   end
 
-  @spec register_extension_commands(module(), atom(), GenServer.server()) ::
+  @spec register_extension_commands(module(), atom(), GenServer.server(), start_opts()) ::
           :ok | {:error, term()}
-  defp register_extension_commands(module, ext_name, cmd_registry) do
+  defp register_extension_commands(module, ext_name, cmd_registry, opts) do
     schema = command_schema(module)
 
-    case register_extension_command_schema(schema, ext_name, cmd_registry) do
+    case register_extension_command_schema(schema, ext_name, cmd_registry, opts) do
       :ok ->
         log_registered_commands(ext_name, schema)
         :ok
@@ -1776,11 +1881,12 @@ defmodule Minga.Extension.Supervisor do
   @spec register_extension_command_schema(
           [Minga.Extension.command_spec()],
           atom(),
-          GenServer.server()
+          GenServer.server(),
+          start_opts()
         ) :: :ok | {:error, term()}
-  defp register_extension_command_schema(schema, ext_name, cmd_registry) do
+  defp register_extension_command_schema(schema, ext_name, cmd_registry, opts) do
     Enum.reduce_while(schema, :ok, fn spec, :ok ->
-      case register_extension_command_spec(spec, ext_name, cmd_registry) do
+      case register_extension_command_spec(spec, ext_name, cmd_registry, opts) do
         :ok -> {:cont, :ok}
         {:error, reason} -> {:halt, {:error, reason}}
       end
@@ -1798,13 +1904,14 @@ defmodule Minga.Extension.Supervisor do
   @spec register_extension_command_spec(
           Minga.Extension.command_spec(),
           atom(),
-          GenServer.server()
+          GenServer.server(),
+          start_opts()
         ) :: :ok | {:error, term()}
-  defp register_extension_command_spec(spec, ext_name, cmd_registry) do
+  defp register_extension_command_spec(spec, ext_name, cmd_registry, opts) do
     case Minga.Command.Registry.register_command(
            cmd_registry,
            {:extension, ext_name},
-           build_command_from_spec(spec)
+           build_command_from_spec(spec, ext_name, opts)
          ) do
       :ok ->
         :ok
@@ -1822,24 +1929,33 @@ defmodule Minga.Extension.Supervisor do
     Minga.Log.debug(:config, "Extension #{ext_name}: registered #{length(schema)} commands")
   end
 
-  @spec build_command_from_spec(Minga.Extension.command_spec()) :: Minga.Command.t()
-  defp build_command_from_spec({name, description, opts}) do
-    {mod, fun} = Keyword.fetch!(opts, :execute)
-    requires_buffer = Keyword.get(opts, :requires_buffer, false)
+  @spec build_command_from_spec(Minga.Extension.command_spec(), atom(), start_opts()) ::
+          Minga.Command.t()
+  defp build_command_from_spec({name, description, command_opts}, ext_name, opts) do
+    {mod, fun} = Keyword.fetch!(command_opts, :execute)
+    requires_buffer = Keyword.get(command_opts, :requires_buffer, false)
+    code_lease = code_lease_server(opts)
 
     %Minga.Command{
       name: name,
       description: description,
-      execute: fn state -> apply(mod, fun, [state]) end,
+      execute: fn state ->
+        leased_callback(ext_name, mod, :ui_action, code_lease, fn -> apply(mod, fun, [state]) end)
+      end,
       requires_buffer: requires_buffer
     }
   end
 
-  @spec register_extension_modeline_segments(module(), atom()) :: :ok | {:error, term()}
-  defp register_extension_modeline_segments(module, ext_name) do
+  @spec register_extension_modeline_segments(module(), atom(), start_opts()) ::
+          :ok | {:error, term()}
+  defp register_extension_modeline_segments(module, ext_name, opts) do
     case function_exported?(module, :__modeline_segment_schema__, 0) do
       true ->
-        register_extension_modeline_segment_schema(module.__modeline_segment_schema__(), ext_name)
+        register_extension_modeline_segment_schema(
+          module.__modeline_segment_schema__(),
+          ext_name,
+          opts
+        )
 
       false ->
         :ok
@@ -1858,24 +1974,30 @@ defmodule Minga.Extension.Supervisor do
 
   @spec register_extension_modeline_segment_schema(
           [Minga.Extension.modeline_segment_spec()],
-          atom()
+          atom(),
+          start_opts()
         ) :: :ok | {:error, term()}
-  defp register_extension_modeline_segment_schema(schema, ext_name) do
+  defp register_extension_modeline_segment_schema(schema, ext_name, opts) do
     Enum.reduce_while(schema, :ok, fn spec, :ok ->
-      case register_extension_modeline_segment(spec, ext_name) do
+      case register_extension_modeline_segment(spec, ext_name, opts) do
         :ok -> {:cont, :ok}
         {:error, reason} -> {:halt, {:error, reason}}
       end
     end)
   end
 
-  @spec register_extension_modeline_segment(Minga.Extension.modeline_segment_spec(), atom()) ::
-          :ok | {:error, term()}
-  defp register_extension_modeline_segment({name, opts, {mod, fun}}, ext_name) do
+  @spec register_extension_modeline_segment(
+          Minga.Extension.modeline_segment_spec(),
+          atom(),
+          start_opts()
+        ) :: :ok | {:error, term()}
+  defp register_extension_modeline_segment({name, segment_opts, {mod, fun}}, ext_name, opts) do
+    code_lease = code_lease_server(opts)
+
     case Minga.Config.ModelineSegments.register(
            name,
-           opts,
-           fn ctx -> apply(mod, fun, [ctx]) end,
+           segment_opts,
+           modeline_segment_callback(ext_name, mod, fun, code_lease),
            {:extension, ext_name}
          ) do
       :ok ->
@@ -1885,6 +2007,14 @@ defmodule Minga.Extension.Supervisor do
         msg = Minga.Config.ModelineSegments.register_error_message(name, reason)
         Minga.Log.warning(:config, "Extension #{ext_name} modeline segment rejected: #{msg}")
         {:error, {:modeline_segment_rejected, name, reason}}
+    end
+  end
+
+  @spec modeline_segment_callback(atom(), module(), atom(), GenServer.server()) ::
+          (map() -> term())
+  defp modeline_segment_callback(ext_name, mod, fun, code_lease) do
+    fn ctx ->
+      leased_callback(ext_name, mod, :ui_action, code_lease, fn -> apply(mod, fun, [ctx]) end)
     end
   end
 

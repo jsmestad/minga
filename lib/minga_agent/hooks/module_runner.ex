@@ -7,6 +7,7 @@ defmodule MingaAgent.Hooks.ModuleRunner do
   (not linked) so crashes don't propagate to the caller.
   """
 
+  alias Minga.Extension.CodeLease
   alias MingaAgent.Hooks.Hook
   alias MingaAgent.Hooks.Result
 
@@ -19,7 +20,7 @@ defmodule MingaAgent.Hooks.ModuleRunner do
 
     {pid, ref} =
       spawn_monitor(fn ->
-        result = apply(mod, fun, [payload_map])
+        result = run_leased_module_hook(hook, mod, fun, payload_map)
         send(caller, {tag, result})
       end)
 
@@ -72,6 +73,26 @@ defmodule MingaAgent.Hooks.ModuleRunner do
         "module hook raised: #{Exception.message(e)}",
         {:failed_to_start, e}
       )
+  end
+
+  @spec run_leased_module_hook(Hook.t(), module(), atom(), map()) :: term()
+  defp run_leased_module_hook(%Hook{extension_source: nil}, mod, fun, payload_map) do
+    apply(mod, fun, [payload_map])
+  end
+
+  defp run_leased_module_hook(%Hook{extension_source: source}, mod, fun, payload_map)
+       when is_atom(source) do
+    case CodeLease.lease({:extension, source}, mod, :hook) do
+      {:ok, lease} ->
+        try do
+          apply(mod, fun, [payload_map])
+        after
+          CodeLease.release(lease)
+        end
+
+      {:error, reason} ->
+        raise "extension #{source} hook module #{inspect(mod)} unavailable: #{inspect(reason)}"
+    end
   end
 
   @spec flush_down(reference()) :: :ok

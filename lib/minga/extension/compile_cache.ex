@@ -31,6 +31,8 @@ defmodule Minga.Extension.CompileCache do
   hermeticity.
   """
 
+  alias Minga.Extension.CodeLease
+
   @type result ::
           {:ok, %{modules: [module()], diagnostics: [map()], source: :cache | :compiled}}
           | {:error, String.t()}
@@ -61,18 +63,24 @@ defmodule Minga.Extension.CompileCache do
       cache_root = Keyword.get(opts, :cache_dir, default_cache_dir())
       ext_dir = Path.join(cache_root, ext_id(root))
       dir = Path.join(ext_dir, key)
+      source = Keyword.get(opts, :source)
+      code_lease = Keyword.get(opts, :code_lease, CodeLease)
 
-      case load_from_cache(dir) do
+      case load_from_cache(dir, source, code_lease) do
         {:ok, modules} -> {:ok, %{modules: modules, diagnostics: [], source: :cache}}
-        :miss -> compile_and_cache(files, ext_dir, dir)
+        :miss -> compile_and_cache(files, ext_dir, dir, source, code_lease)
       end
     end
   end
 
   # ── Cache hit ─────────────────────────────────────────────────────────
 
-  @spec load_from_cache(String.t()) :: {:ok, [module()]} | :miss
-  defp load_from_cache(dir) do
+  @spec load_from_cache(
+          String.t(),
+          Minga.Extension.ContributionCleanup.contribution_source() | nil,
+          GenServer.server()
+        ) :: {:ok, [module()]} | :miss
+  defp load_from_cache(dir, source, code_lease) do
     beams = Path.wildcard(Path.join(dir, "*.beam"))
 
     case beams do
@@ -80,31 +88,41 @@ defmodule Minga.Extension.CompileCache do
         :miss
 
       _ ->
-        load_beams(beams)
+        load_beams(beams, source, code_lease)
     end
   end
 
-  @spec load_beams([String.t()]) :: {:ok, [module()]} | :miss
-  defp load_beams(beams) do
+  @spec load_beams(
+          [String.t()],
+          Minga.Extension.ContributionCleanup.contribution_source() | nil,
+          GenServer.server()
+        ) :: {:ok, [module()]} | :miss
+  defp load_beams(beams, source, code_lease) do
     Enum.reduce_while(beams, {:ok, []}, fn beam, {:ok, acc} ->
       # Purge any already-loaded version first so the on-disk beam becomes the
       # current code (matters for dev hot-reload, where an older version may
       # still be loaded). load_abs takes the path without the .beam extension.
       module = beam |> Path.basename() |> Path.rootname() |> String.to_atom()
-      :code.purge(module)
-      :code.delete(module)
 
-      case :code.load_abs(String.to_charlist(Path.rootname(beam))) do
-        {:module, loaded} -> {:cont, {:ok, [loaded | acc]}}
-        {:error, _reason} -> {:halt, :miss}
+      with :ok <- CodeLease.purge_module(source, module, server: code_lease),
+           {:module, loaded} <- :code.load_abs(String.to_charlist(Path.rootname(beam))) do
+        {:cont, {:ok, [loaded | acc]}}
+      else
+        _error -> {:halt, :miss}
       end
     end)
   end
 
   # ── Cache miss: compile and persist ─────────────────────────────────────
 
-  @spec compile_and_cache([String.t()], String.t(), String.t()) :: result()
-  defp compile_and_cache(files, ext_dir, dir) do
+  @spec compile_and_cache(
+          [String.t()],
+          String.t(),
+          String.t(),
+          Minga.Extension.ContributionCleanup.contribution_source() | nil,
+          GenServer.server()
+        ) :: result()
+  defp compile_and_cache(files, ext_dir, dir, source, code_lease) do
     File.mkdir_p!(dir)
 
     {outcome, diagnostics} =
@@ -119,7 +137,7 @@ defmodule Minga.Extension.CompileCache do
         # Load from the freshly written beams so the on-disk version is the
         # one in memory. compile_to_path writes the beams but does not reload
         # a module that was already loaded (e.g. a prior dev-reload version).
-        case load_from_cache(dir) do
+        case load_from_cache(dir, source, code_lease) do
           {:ok, modules} ->
             {:ok, %{modules: modules, diagnostics: diagnostics, source: :compiled}}
 

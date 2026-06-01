@@ -77,13 +77,17 @@ defmodule Minga.EventsTest do
 
     test "subscribing to the same topic twice delivers only one event per broadcast" do
       buf = fake_buffer()
+      path = "/tmp/test-#{System.unique_integer([:positive])}.ex"
       Events.subscribe(:buffer_saved)
       Events.subscribe(:buffer_saved)
 
-      Events.broadcast(:buffer_saved, %Events.BufferEvent{buffer: buf, path: "/tmp/test.ex"})
+      Events.broadcast(:buffer_saved, %Events.BufferEvent{buffer: buf, path: path})
 
-      assert_receive {:minga_event, :buffer_saved, _}
-      refute_receive {:minga_event, :buffer_saved, _}, 50
+      assert_receive {:minga_event, :buffer_saved, %Events.BufferEvent{buffer: ^buf, path: ^path}}
+
+      refute_receive {:minga_event, :buffer_saved,
+                      %Events.BufferEvent{buffer: ^buf, path: ^path}},
+                     50
     end
 
     test "subscribing to different topics only receives matching events" do
