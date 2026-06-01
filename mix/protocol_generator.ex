@@ -383,8 +383,7 @@ defmodule Minga.Mix.ProtocolGenerator do
       "package generated\n\n",
       "const (\n",
       go_opcodes(opcodes),
-      "\n",
-      Enum.map(actions, &go_gui_action_line/1),
+      go_gui_actions(actions),
       ")\n"
     ]
     |> IO.iodata_to_binary()
@@ -395,18 +394,50 @@ defmodule Minga.Mix.ProtocolGenerator do
     opcodes
     |> group_by_category()
     |> Enum.map(fn {category, entries} ->
-      ["\t// ", category_title(category), "\n", Enum.map(entries, &go_opcode_line/1), "\n"]
+      width = go_const_width(entries, &go_opcode_const_name/1)
+
+      [
+        "\t// ",
+        category_title(category),
+        "\n",
+        Enum.map(entries, &go_opcode_line(&1, width)),
+        "\n"
+      ]
     end)
   end
 
-  @spec go_opcode_line(opcode()) :: String.t()
-  defp go_opcode_line(%{"name" => name, "value" => value}) do
-    "\tOP#{go_constant_name(name)} byte = #{hex(value)}\n"
+  @spec go_opcode_line(opcode(), non_neg_integer()) :: String.t()
+  defp go_opcode_line(%{"value" => value} = opcode, width) do
+    "\t#{String.pad_trailing(go_opcode_const_name(opcode), width)} byte = #{hex(value)}\n"
   end
 
-  @spec go_gui_action_line(gui_action()) :: String.t()
-  defp go_gui_action_line(%{"name" => name, "value" => value}) do
-    "\tGUIAction#{go_constant_name(name)} byte = #{hex(value)}\n"
+  @spec go_gui_actions([gui_action()]) :: iodata()
+  defp go_gui_actions(actions) do
+    width = go_const_width(actions, &go_gui_action_const_name/1)
+    Enum.map(actions, &go_gui_action_line(&1, width))
+  end
+
+  @spec go_gui_action_line(gui_action(), non_neg_integer()) :: String.t()
+  defp go_gui_action_line(%{"value" => value} = action, width) do
+    "\t#{String.pad_trailing(go_gui_action_const_name(action), width)} byte = #{hex(value)}\n"
+  end
+
+  @spec go_opcode_const_name(opcode()) :: String.t()
+  defp go_opcode_const_name(%{"name" => name}) do
+    "OP#{go_constant_name(name)}"
+  end
+
+  @spec go_gui_action_const_name(gui_action()) :: String.t()
+  defp go_gui_action_const_name(%{"name" => name}) do
+    "GUIAction#{go_constant_name(name)}"
+  end
+
+  @spec go_const_width([map()], (map() -> String.t())) :: non_neg_integer()
+  defp go_const_width(entries, name_fun) do
+    entries
+    |> Enum.map(name_fun)
+    |> Enum.map(&String.length/1)
+    |> Enum.max(fn -> 0 end)
   end
 
   @spec zig_schema_test_file(schema()) :: String.t()
