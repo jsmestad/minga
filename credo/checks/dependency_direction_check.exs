@@ -183,6 +183,7 @@ defmodule Minga.Credo.DependencyDirectionCheck do
   ]
 
   @agent_level_2_prefixes [
+    "MingaAgent.ToolPacks",
     "MingaEditor"
   ]
 
@@ -449,7 +450,8 @@ defmodule Minga.Credo.DependencyDirectionCheck do
          _ref_name,
          _meta,
          _issue_meta
-       ), do: {ast, issues}
+       ),
+       do: {ast, issues}
 
   defp check_top_level_violation(
          ast,
@@ -511,7 +513,8 @@ defmodule Minga.Credo.DependencyDirectionCheck do
          _ref_name,
          _meta,
          _issue_meta
-       ), do: {ast, issues}
+       ),
+       do: {ast, issues}
 
   defp agent_level_violation(0, target_level, ref_name) when target_level in [1, 2] do
     {:violation,

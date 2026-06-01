@@ -6,7 +6,7 @@ defmodule MingaAgent.Tool.Spec do
   """
 
   @typedoc "Source that contributed this tool."
-  @type source :: :builtin | :config | {:extension, atom()}
+  @type source :: :builtin | :config | {:bundle, atom()} | {:extension, atom()}
 
   @typedoc "Approval level for tool execution."
   @type approval_level :: :auto | :ask | :deny
@@ -142,6 +142,7 @@ defmodule MingaAgent.Tool.Spec do
   @spec validate_source(term()) :: :ok | {:error, term()}
   defp validate_source(:builtin), do: :ok
   defp validate_source(:config), do: :ok
+  defp validate_source({:bundle, name}) when is_atom(name), do: :ok
   defp validate_source({:extension, name}) when is_atom(name), do: :ok
   defp validate_source(source), do: {:error, {:invalid_source, source}}
 

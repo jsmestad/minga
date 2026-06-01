@@ -44,6 +44,23 @@ defmodule MingaAgent.IntrospectionTest do
       assert "describe_runtime" in names
       assert "describe_tools" in names
     end
+
+    test "exposes bundled read-only tools with stable runtime metadata" do
+      tools = Introspection.describe_tools()
+      grouped = Enum.group_by(tools, & &1.name)
+
+      for name <- ~w(find grep list_directory fetch_url) do
+        assert [%{} = tool] = Map.fetch!(grouped, name)
+        assert tool.approval_level == :auto
+        assert is_binary(tool.description)
+        assert is_map(tool.parameter_schema)
+      end
+
+      assert hd(grouped["find"]).category == :filesystem
+      assert hd(grouped["grep"]).category == :filesystem
+      assert hd(grouped["list_directory"]).category == :filesystem
+      assert hd(grouped["fetch_url"]).category == :network
+    end
   end
 
   describe "describe_sessions/0" do
