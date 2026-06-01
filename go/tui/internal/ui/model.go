@@ -412,7 +412,7 @@ func (m Model) renderMinibuffer(mini protocol.Minibuffer) string {
 func (m Model) renderCompletion(completion protocol.Completion) []string {
 	style := lipgloss.NewStyle().Foreground(lipgloss.Color("#D8DEE9")).Background(lipgloss.Color("#101318")).Width(m.width)
 	selectedStyle := style.Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(lipgloss.Color("#30445C"))
-	limit := min(len(completion.Items), 6)
+	limit := min(len(completion.Items), m.maxOverlayHeight())
 	lines := make([]string, 0, limit)
 	for i, item := range completion.Items[:limit] {
 		detail := item.Detail
@@ -439,7 +439,7 @@ func (m Model) renderWhichKey(which protocol.WhichKey) []string {
 	}
 	style := lipgloss.NewStyle().Foreground(lipgloss.Color("#B8C0CC")).Background(lipgloss.Color("#111720")).Width(m.width)
 	lines := []string{style.Bold(true).Foreground(lipgloss.Color("#C7D1FF")).Render(fit(title, m.width))}
-	limit := min(len(which.Bindings), 8)
+	limit := min(len(which.Bindings), max(m.maxOverlayHeight()-1, 0))
 	for _, binding := range which.Bindings[:limit] {
 		label := strings.TrimSpace(binding.Icon + " " + binding.Description)
 		text := fit(binding.Key+"  "+label, m.width)
@@ -463,8 +463,13 @@ func (m Model) renderPicker(picker protocol.Picker, preview protocol.PickerPrevi
 	} else if picker.LoadStatus == 2 && picker.LoadError != "" {
 		title += "  " + picker.LoadError
 	}
+
 	lines := []string{style.Bold(true).Foreground(lipgloss.Color("#C7D1FF")).Render(fit(title, m.width))}
-	limit := min(len(picker.Items), 8)
+	itemBudget := max(m.maxOverlayHeight()-1, 1)
+	if preview.Visible && len(preview.Lines) > 0 && m.width < 100 {
+		itemBudget = max(itemBudget/2, 1)
+	}
+	limit := min(len(picker.Items), itemBudget)
 	for i, item := range picker.Items[:limit] {
 		marker := " "
 		if item.Marked {
@@ -488,15 +493,39 @@ func (m Model) renderPicker(picker protocol.Picker, preview protocol.PickerPrevi
 		lines = append(lines, style.Foreground(lipgloss.Color("#AEB7C2")).Render(fit(strings.Join(picker.Actions, "  "), m.width)))
 	}
 	if preview.Visible && len(preview.Lines) > 0 {
-		lines = append(lines, m.renderPickerPreview(preview)...)
+		if m.width >= 100 {
+			return m.renderPickerWithSidePreview(lines, preview)
+		}
+		lines = append(lines, m.renderPickerPreview(preview, max(m.maxOverlayHeight()-len(lines), 1), m.width)...)
+	}
+	return takeLines(lines, m.maxOverlayHeight())
+}
+
+func (m Model) renderPickerWithSidePreview(left []string, preview protocol.PickerPreview) []string {
+	leftWidth := max(m.width*45/100, 36)
+	rightWidth := max(m.width-leftWidth, 20)
+	leftStyle := lipgloss.NewStyle().Width(leftWidth)
+	right := m.renderPickerPreview(preview, max(m.maxOverlayHeight(), len(left)), rightWidth)
+	height := min(max(len(left), len(right)), m.maxOverlayHeight())
+	lines := make([]string, 0, height)
+	for i := 0; i < height; i++ {
+		leftLine := ""
+		if i < len(left) {
+			leftLine = left[i]
+		}
+		rightLine := ""
+		if i < len(right) {
+			rightLine = right[i]
+		}
+		lines = append(lines, lipgloss.JoinHorizontal(lipgloss.Top, leftStyle.Render(leftLine), rightLine))
 	}
 	return lines
 }
 
-func (m Model) renderPickerPreview(preview protocol.PickerPreview) []string {
-	style := lipgloss.NewStyle().Foreground(lipgloss.Color("#AEB7C2")).Background(lipgloss.Color("#111720")).Width(m.width)
-	limit := min(len(preview.Lines), 8)
-	lines := []string{style.Bold(true).Foreground(lipgloss.Color("#C7D1FF")).Render(fit("Preview", m.width))}
+func (m Model) renderPickerPreview(preview protocol.PickerPreview, height int, width int) []string {
+	style := lipgloss.NewStyle().Foreground(lipgloss.Color("#AEB7C2")).Background(lipgloss.Color("#111720")).Width(width)
+	limit := min(len(preview.Lines), max(height-1, 0))
+	lines := []string{style.Bold(true).Foreground(lipgloss.Color("#C7D1FF")).Render(fit("Preview", width))}
 	for _, line := range preview.Lines[:limit] {
 		var builder strings.Builder
 		for _, segment := range line.Segments {
@@ -509,13 +538,17 @@ func (m Model) renderPickerPreview(preview protocol.PickerPreview) []string {
 			}
 			builder.WriteString(segmentStyle.Render(segment.Text))
 		}
-		lines = append(lines, style.Render(fit(builder.String(), m.width)))
+		lines = append(lines, style.Render(fit(builder.String(), width)))
 	}
 	return lines
 }
 
 func (m Model) bodyHeight() int {
 	return max(m.height-len(m.headerLines())-len(m.footerLines()), 1)
+}
+
+func (m Model) maxOverlayHeight() int {
+	return min(max(m.height/3, 4), 12)
 }
 
 func (m Model) workspaceBar() (protocol.WorkspaceBar, bool) {
@@ -734,4 +767,11 @@ func fit(value string, width int) string {
 		return value
 	}
 	return string(runes[:width])
+}
+
+func takeLines(lines []string, limit int) []string {
+	if len(lines) <= limit {
+		return lines
+	}
+	return lines[:limit]
 }

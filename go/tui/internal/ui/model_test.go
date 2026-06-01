@@ -56,6 +56,38 @@ func TestPickerPreviewRendersWithPicker(t *testing.T) {
 	}
 }
 
+func TestPickerOverlayIsBounded(t *testing.T) {
+	model := New(100, 24, nil)
+	items := make([]protocol.PickerItem, 20)
+	lines := make([]protocol.PreviewLine, 20)
+	for i := range items {
+		items[i] = protocol.PickerItem{Label: "item"}
+		lines[i] = protocol.PreviewLine{Segments: []protocol.PreviewSegment{{Text: "preview"}}}
+	}
+	rendered := model.renderPicker(
+		protocol.Picker{Visible: true, Title: "Files", Items: items},
+		protocol.PickerPreview{Visible: true, Lines: lines},
+	)
+	if len(rendered) > model.maxOverlayHeight() {
+		t.Fatalf("picker overlay height = %d, want <= %d", len(rendered), model.maxOverlayHeight())
+	}
+}
+
+func TestWidePickerPreviewRendersBesideList(t *testing.T) {
+	model := New(120, 30, nil)
+	rendered := model.renderPicker(
+		protocol.Picker{Visible: true, Title: "Files", Items: []protocol.PickerItem{{Label: "main.ex"}}},
+		protocol.PickerPreview{Visible: true, Lines: []protocol.PreviewLine{{Segments: []protocol.PreviewSegment{{Text: "def main"}}}}},
+	)
+	joined := strings.Join(rendered, "\n")
+	if !strings.Contains(joined, "main.ex") || !strings.Contains(joined, "def main") {
+		t.Fatalf("wide picker should render list and preview together: %q", joined)
+	}
+	if len(rendered) > model.maxOverlayHeight() {
+		t.Fatalf("wide picker overlay height = %d, want <= %d", len(rendered), model.maxOverlayHeight())
+	}
+}
+
 func TestApplyWindowDeltaResolvesRefsAndReplacesRowSnapshot(t *testing.T) {
 	model := New(80, 24, nil)
 	model.putWindow(protocol.WindowContent{
