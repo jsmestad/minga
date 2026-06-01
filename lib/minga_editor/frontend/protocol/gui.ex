@@ -162,8 +162,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @op_gui_float_popup Opcodes.gui_float_popup()
   @op_gui_git_status Opcodes.gui_git_status()
   @op_gui_workspaces Opcodes.gui_workspaces()
-  @op_gui_board Opcodes.gui_board()
-  @op_gui_agent_context Opcodes.gui_agent_context()
   @op_gui_hover_action Opcodes.gui_hover_action()
   @op_gui_config_state Opcodes.gui_config_state()
   @op_gui_notifications Opcodes.gui_notifications()
@@ -872,164 +870,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   defp path_hash(nil), do: 0
   defp path_hash(path) when is_binary(path), do: :erlang.phash2(path, @max_u32)
 
-  # ── Board ──
-
-  @doc """
-  Encodes a gui_board command with the card grid state.
-
-  Wire format:
-    opcode(0x87) + visible(1) + focused_card_id(4) + card_count(2) + cards...
-
-  Per card:
-    card_id(4) + status(1) + flags(1)
-    + task_len(2) + task(task_len)
-    + model_len(1) + model(model_len)
-    + elapsed_seconds(4)
-    + recent_file_count(1) + recent_files...
-
-  Per recent_file:
-    path_len(2) + path(path_len)
-
-  Status bytes: 0=idle, 1=working, 2=iterating, 3=needs_you, 4=done, 5=errored
-  Flags: bit 0 = is_you_card, bit 1 = is_focused
-  """
-  @spec encode_gui_board(MingaEditor.Frontend.Protocol.GUI.BoardPayload.t()) :: binary()
-  def encode_gui_board(%MingaEditor.Frontend.Protocol.GUI.BoardPayload{} = board) do
-    :ok = validate_board_payload!(board)
-    cards = board.cards
-    visible = if board.visible?, do: 1, else: 0
-    focused_id = board.focused_card_id || 0
-
-    card_entries =
-      Enum.map(cards, fn card ->
-        encode_board_card(card, board.focused_card_id)
-      end)
-
-    filter_mode = if board.filter_mode?, do: 1, else: 0
-    filter_bytes = :erlang.iolist_to_binary([board.filter_text])
-
-    IO.iodata_to_binary([
-      @op_gui_board,
-      <<visible::8, focused_id::32, length(cards)::16, filter_mode::8,
-        byte_size(filter_bytes)::16, filter_bytes::binary>>
-      | card_entries
-    ])
-  end
-
-  @spec validate_board_payload!(MingaEditor.Frontend.Protocol.GUI.BoardPayload.t()) :: :ok
-  defp validate_board_payload!(%MingaEditor.Frontend.Protocol.GUI.BoardPayload{cards: cards}) do
-    Enum.each(cards, &validate_board_card!/1)
-  end
-
-  @spec validate_board_card!(MingaEditor.Frontend.Protocol.GUI.BoardCardPayload.t()) :: :ok
-  defp validate_board_card!(%MingaEditor.Frontend.Protocol.GUI.BoardCardPayload{} = card) do
-    with true <- is_integer(card.id) and card.id > 0,
-         true <- card.status in [:idle, :working, :iterating, :needs_you, :done, :errored],
-         true <- card.kind in [:you, :agent],
-         true <- is_binary(card.task),
-         true <- is_binary(card.display_task),
-         true <- is_nil(card.model) or is_binary(card.model),
-         true <- match?(%DateTime{}, card.created_at),
-         true <- is_list(card.recent_files) and Enum.all?(card.recent_files, &is_binary/1),
-         true <- is_list(card.sparkline) and Enum.all?(card.sparkline, &is_number/1) do
-      :ok
-    else
-      false -> raise ArgumentError, "invalid Board card payload: #{inspect(card)}"
-    end
-  end
-
-  @spec encode_board_card(
-          MingaEditor.Frontend.Protocol.GUI.BoardCardPayload.t(),
-          pos_integer() | nil
-        ) :: binary()
-  defp encode_board_card(card, focused_id) do
-    status_byte = board_status_byte(card.status)
-
-    is_you = if MingaEditor.Frontend.Protocol.GUI.BoardCardPayload.you_card?(card), do: 1, else: 0
-    is_focused = if card.id == focused_id, do: 1, else: 0
-    flags = Bitwise.bor(is_you, Bitwise.bsl(is_focused, 1))
-
-    task_bytes = :erlang.iolist_to_binary([card.display_task])
-    model_bytes = :erlang.iolist_to_binary([card.model || ""])
-
-    # Send Unix timestamp so Swift can compute elapsed time locally
-    dispatch_timestamp = DateTime.to_unix(card.created_at)
-
-    recent_files = card.recent_files
-
-    file_entries =
-      Enum.map(recent_files, fn path ->
-        path_bytes = :erlang.iolist_to_binary([path])
-        <<byte_size(path_bytes)::16, path_bytes::binary>>
-      end)
-
-    # Encode sparkline data as half-precision floats (Float16)
-    sparkline = card.sparkline
-    sparkline_count = length(sparkline)
-
-    sparkline_bytes =
-      sparkline
-      |> Enum.map(&encode_float16/1)
-      |> IO.iodata_to_binary()
-
-    IO.iodata_to_binary([
-      <<card.id::32, status_byte::8, flags::8, byte_size(task_bytes)::16, task_bytes::binary,
-        byte_size(model_bytes)::8, model_bytes::binary, dispatch_timestamp::32,
-        length(recent_files)::8>>,
-      file_entries,
-      <<sparkline_count::8, sparkline_bytes::binary>>
-    ])
-  end
-
-  # Encode a float as Float16 (half-precision, 16 bits)
-  # Simple approximation: clamp to [0.0, 1.0], scale to [0, 65535]
-  @spec encode_float16(float()) :: binary()
-  defp encode_float16(value) do
-    clamped = max(0.0, min(1.0, value))
-    scaled = round(clamped * 65_535.0)
-    <<scaled::16>>
-  end
-
-  @spec board_status_byte(MingaEditor.Frontend.Protocol.GUI.BoardCardPayload.status()) ::
-          non_neg_integer()
-  defp board_status_byte(:idle), do: 0
-  defp board_status_byte(:working), do: 1
-  defp board_status_byte(:iterating), do: 2
-  defp board_status_byte(:needs_you), do: 3
-  defp board_status_byte(:done), do: 4
-  defp board_status_byte(:errored), do: 5
-
-  # ── Agent context bar (0x88) ──
-
-  @doc """
-  Encodes the agent context bar state when zoomed into an agent card.
-
-  Layout:
-    - visible(1): 1 if zoomed into a non-You agent card, 0 otherwise
-    - task_len(2): length of task string
-    - task(N): task description
-    - dispatch_timestamp(8): Unix timestamp when the task was dispatched
-    - status(1): current card status (0-5)
-    - can_approve(1): 1 if the user can approve the agent's work, 0 otherwise
-  """
-  @spec encode_gui_agent_context(boolean(), String.t(), DateTime.t(), atom(), boolean()) ::
-          binary()
-  def encode_gui_agent_context(visible, task, dispatch_timestamp, status, can_approve) do
-    visible_byte = if visible, do: 1, else: 0
-    task_bytes = :erlang.iolist_to_binary([task])
-    timestamp_seconds = DateTime.to_unix(dispatch_timestamp)
-    status_byte = board_status_byte(status)
-    can_approve_byte = if can_approve, do: 1, else: 0
-
-    IO.iodata_to_binary([
-      @op_gui_agent_context,
-      <<visible_byte::8, byte_size(task_bytes)::16, task_bytes::binary, timestamp_seconds::64,
-        status_byte::8, can_approve_byte::8>>
-    ])
-  end
-
-  # ── Change Summary ──
-
   # ── Extension Overlays (forward-compatible, 0x9C) ──
 
   @typedoc "Extension overlay entry for encoding."
@@ -1486,6 +1326,14 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
     <<byte_size(pid_bytes)::8, pid_bytes::binary, length(values)::8,
       IO.iodata_to_binary(sample_bytes)::binary>>
+  end
+
+  # Encode a float as half-precision: clamp to [0.0, 1.0], scale to [0, 65535].
+  @spec encode_float16(number()) :: binary()
+  defp encode_float16(value) do
+    clamped = max(0.0, min(1.0, value))
+    scaled = round(clamped * 65_535.0)
+    <<scaled::16>>
   end
 
   @spec observatory_sample_value(Minga.SystemObserver.process_tree_snapshot(), pid()) :: float()

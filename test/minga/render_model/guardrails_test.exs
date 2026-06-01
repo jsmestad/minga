@@ -7,15 +7,12 @@ defmodule Minga.RenderModel.GuardrailsTest do
 
   @legacy_preencoded_ui_models MapSet.new([
                                  "agent_chat",
-                                 "board",
                                  "bottom_panel",
                                  "edit_timeline"
                                ])
 
   @legacy_protocol_gui_builder_files MapSet.new([
                                        "lib/minga_editor/render_model/ui/agent_chat_builder.ex",
-                                       "lib/minga_editor/render_model/ui/agent_context_builder.ex",
-                                       "lib/minga_editor/render_model/ui/board_builder.ex",
                                        "lib/minga_editor/render_model/ui/bottom_panel_builder.ex",
                                        "lib/minga_editor/render_model/ui/edit_timeline_builder.ex"
                                      ])

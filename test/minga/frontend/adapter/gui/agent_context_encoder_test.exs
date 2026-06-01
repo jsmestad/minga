@@ -4,7 +4,6 @@ defmodule Minga.Frontend.Adapter.GUI.AgentContextEncoderTest do
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Frontend.Adapter.GUI.AgentContextEncoder
   alias Minga.RenderModel.UI.AgentContext
-  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
 
   @op_gui_agent_context Minga.Protocol.Opcodes.gui_agent_context()
 
@@ -87,117 +86,6 @@ defmodule Minga.Frontend.Adapter.GUI.AgentContextEncoderTest do
       {cmd2, _caches} = AgentContextEncoder.encode(model2, caches)
 
       assert cmd2 != nil
-    end
-
-    test "produces byte-identical output to legacy ProtocolGUI for visible agent context" do
-      ts = ~U[2024-01-15 10:30:00Z]
-      task = "Fix the broken tests"
-      status = :working
-      can_approve = false
-
-      legacy_binary = ProtocolGUI.encode_gui_agent_context(true, task, ts, status, can_approve)
-
-      model = %AgentContext{
-        visible: true,
-        task: task,
-        dispatch_timestamp: ts,
-        status: status,
-        can_approve: can_approve
-      }
-
-      caches = Caches.new()
-      {new_binary, _caches} = AgentContextEncoder.encode(model, caches)
-
-      assert new_binary == legacy_binary,
-             "Visible agent context: new encoder output does not match legacy output"
-    end
-
-    test "produces byte-identical output to legacy for needs_you with can_approve" do
-      ts = ~U[2024-06-01 12:00:00Z]
-      task = "Review my changes"
-      status = :needs_you
-      can_approve = true
-
-      legacy_binary = ProtocolGUI.encode_gui_agent_context(true, task, ts, status, can_approve)
-
-      model = %AgentContext{
-        visible: true,
-        task: task,
-        dispatch_timestamp: ts,
-        status: status,
-        can_approve: can_approve
-      }
-
-      caches = Caches.new()
-      {new_binary, _caches} = AgentContextEncoder.encode(model, caches)
-
-      assert new_binary == legacy_binary,
-             "needs_you agent context: new encoder output does not match legacy output"
-    end
-
-    test "produces byte-identical output to legacy for done with can_approve" do
-      ts = ~U[2024-03-20 08:15:00Z]
-      task = "Completed task"
-      status = :done
-      can_approve = true
-
-      legacy_binary = ProtocolGUI.encode_gui_agent_context(true, task, ts, status, can_approve)
-
-      model = %AgentContext{
-        visible: true,
-        task: task,
-        dispatch_timestamp: ts,
-        status: status,
-        can_approve: can_approve
-      }
-
-      caches = Caches.new()
-      {new_binary, _caches} = AgentContextEncoder.encode(model, caches)
-
-      assert new_binary == legacy_binary
-    end
-
-    test "produces byte-identical output to legacy for all status types" do
-      ts = ~U[2024-01-01 00:00:00Z]
-
-      for status <- [:idle, :working, :iterating, :needs_you, :done, :errored] do
-        can_approve = status in [:needs_you, :done]
-
-        legacy_binary =
-          ProtocolGUI.encode_gui_agent_context(true, "task", ts, status, can_approve)
-
-        model = %AgentContext{
-          visible: true,
-          task: "task",
-          dispatch_timestamp: ts,
-          status: status,
-          can_approve: can_approve
-        }
-
-        caches = Caches.new()
-        {new_binary, _caches} = AgentContextEncoder.encode(model, caches)
-
-        assert new_binary == legacy_binary,
-               "Status #{status}: new encoder output does not match legacy output"
-      end
-    end
-
-    test "produces byte-identical output to legacy for empty task string" do
-      ts = ~U[2024-01-01 00:00:00Z]
-      legacy_binary = ProtocolGUI.encode_gui_agent_context(true, "", ts, :idle, false)
-
-      model = %AgentContext{
-        visible: true,
-        task: "",
-        dispatch_timestamp: ts,
-        status: :idle,
-        can_approve: false
-      }
-
-      caches = Caches.new()
-      {new_binary, _caches} = AgentContextEncoder.encode(model, caches)
-
-      assert new_binary == legacy_binary
     end
   end
 end

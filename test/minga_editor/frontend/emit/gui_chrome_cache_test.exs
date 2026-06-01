@@ -11,8 +11,7 @@ defmodule MingaEditor.Frontend.Emit.AdapterGUIChromeCacheTest do
   alias Minga.Frontend.Adapter.GUI, as: AdapterGUI
   alias Minga.Frontend.Adapter.GUI.Caches, as: AdapterCaches
   alias MingaEditor.Frontend.Emit.Context
-  alias MingaEditor.Frontend.Protocol.GUI.BoardCardPayload
-  alias MingaEditor.Frontend.Protocol.GUI.BoardPayload
+  alias Minga.RenderModel.UI.Board
   alias MingaEditor.RenderModel.UI.Builder
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
@@ -25,8 +24,7 @@ defmodule MingaEditor.Frontend.Emit.AdapterGUIChromeCacheTest do
   defmodule BoardPayloadShell do
     @moduledoc false
 
-    alias MingaEditor.Frontend.Protocol.GUI.BoardCardPayload
-    alias MingaEditor.Frontend.Protocol.GUI.BoardPayload
+    alias Minga.RenderModel.UI.Board
 
     @spec compute_layout(map()) :: MingaEditor.Layout.t()
     def compute_layout(state), do: MingaEditor.Shell.Traditional.compute_layout(state)
@@ -34,15 +32,15 @@ defmodule MingaEditor.Frontend.Emit.AdapterGUIChromeCacheTest do
     @spec active_session(term()) :: nil
     def active_session(_shell_state), do: nil
 
-    @spec gui_payload(term()) :: {:board, BoardPayload.t()}
+    @spec gui_payload(term()) :: {:board, Board.t()}
     def gui_payload(_state) do
       {:board,
-       %BoardPayload{
+       %Board{
          visible?: true,
          focused_card_id: 1,
          zoomed_card_id: 1,
          cards: [
-           %BoardCardPayload{
+           %Board.Card{
              id: 1,
              status: :idle,
              kind: :agent,
