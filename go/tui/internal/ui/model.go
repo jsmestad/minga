@@ -369,6 +369,9 @@ func (m Model) footerLines() []string {
 	if which, ok := m.whichKey(); ok && which.Visible && len(which.Bindings) > 0 {
 		lines = append(lines, m.renderWhichKey(which)...)
 	}
+	if picker, ok := m.picker(); ok && picker.Visible {
+		lines = append(lines, m.renderPicker(picker)...)
+	}
 	return lines
 }
 
@@ -407,6 +410,48 @@ func (m Model) renderWhichKey(which protocol.WhichKey) []string {
 		label := strings.TrimSpace(binding.Icon + " " + binding.Description)
 		text := fit(binding.Key+"  "+label, m.width)
 		lines = append(lines, style.Render(text))
+	}
+	return lines
+}
+
+func (m Model) renderPicker(picker protocol.Picker) []string {
+	style := lipgloss.NewStyle().Foreground(lipgloss.Color("#D8DEE9")).Background(lipgloss.Color("#101318")).Width(m.width)
+	selectedStyle := style.Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(lipgloss.Color("#30445C"))
+	title := picker.Title
+	if picker.Query != "" {
+		title += "  " + picker.Query
+	}
+	if picker.Marked > 0 {
+		title += fmt.Sprintf("  marked %d", picker.Marked)
+	}
+	if picker.LoadStatus == 1 {
+		title += "  loading"
+	} else if picker.LoadStatus == 2 && picker.LoadError != "" {
+		title += "  " + picker.LoadError
+	}
+	lines := []string{style.Bold(true).Foreground(lipgloss.Color("#C7D1FF")).Render(fit(title, m.width))}
+	limit := min(len(picker.Items), 8)
+	for i, item := range picker.Items[:limit] {
+		marker := " "
+		if item.Marked {
+			marker = "*"
+		}
+		detail := item.Description
+		if detail == "" {
+			detail = item.Annotation
+		}
+		if detail != "" {
+			detail = "  " + detail
+		}
+		text := fit(marker+" "+item.Label+detail, m.width)
+		if uint16(i) == picker.Selected {
+			lines = append(lines, selectedStyle.Render(text))
+		} else {
+			lines = append(lines, style.Render(text))
+		}
+	}
+	if picker.ActionVisible && len(picker.Actions) > 0 {
+		lines = append(lines, style.Foreground(lipgloss.Color("#AEB7C2")).Render(fit(strings.Join(picker.Actions, "  "), m.width)))
 	}
 	return lines
 }
@@ -458,6 +503,15 @@ func (m Model) whichKey() (protocol.WhichKey, bool) {
 		}
 	}
 	return protocol.WhichKey{}, false
+}
+
+func (m Model) picker() (protocol.Picker, bool) {
+	for _, payload := range m.chrome {
+		if payload.Picker.Visible {
+			return payload.Picker, true
+		}
+	}
+	return protocol.Picker{}, false
 }
 
 func (m Model) fileTree() (protocol.FileTree, bool) {

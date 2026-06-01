@@ -57,6 +57,7 @@ type ChromePayload struct {
 	Mini     Minibuffer
 	Complete Completion
 	Which    WhichKey
+	Picker   Picker
 	Tree     FileTree
 	Status   StatusBar
 }
@@ -158,6 +159,34 @@ type WhichKeyBinding struct {
 	Key         string
 	Description string
 	Icon        string
+}
+
+type Picker struct {
+	Visible       bool
+	Selected      uint16
+	Filtered      uint16
+	Total         uint16
+	Marked        uint16
+	HasPreview    bool
+	Title         string
+	Query         string
+	ModePrefix    string
+	LoadStatus    byte
+	LoadError     string
+	Actions       []string
+	ActionIndex   byte
+	ActionVisible bool
+	Items         []PickerItem
+}
+
+type PickerItem struct {
+	IconColor   uint32
+	Flags       byte
+	Label       string
+	Description string
+	Annotation  string
+	TwoLine     bool
+	Marked      bool
 }
 
 type FileTree struct {
@@ -506,6 +535,8 @@ func decodeChrome(payload []byte) ChromePayload {
 		chrome.Complete, chrome.Summary, chrome.Bytes = decodeCompletion(payload)
 	case generated.OPGuiWhichKey:
 		chrome.Which, chrome.Summary, chrome.Bytes = decodeWhichKey(payload)
+	case generated.OPGuiPicker:
+		chrome.Picker, chrome.Summary, chrome.Bytes = decodePicker(payload)
 	case generated.OPGuiFileTree:
 		chrome.Tree, chrome.Summary, chrome.Bytes = decodeFileTree(payload)
 	case generated.OPGuiStatusBar:
@@ -774,6 +805,139 @@ func decodeWhichKey(payload []byte) (WhichKey, string, int) {
 		summary = append(summary, binding.Key+" "+binding.Description)
 	}
 	return which, stringsJoin(summary, "  "), offset
+}
+
+func decodePicker(payload []byte) (Picker, string, int) {
+	if len(payload) < 2 || payload[1] == 0 {
+		return Picker{}, "", min(len(payload), 2)
+	}
+	size := sectionedSize(payload)
+	if size == 0 {
+		return Picker{Visible: true}, "", len(payload)
+	}
+	picker := Picker{}
+	offset := 2
+	for i := 0; i < int(payload[1]); i++ {
+		sectionID := payload[offset]
+		sectionLen := int(u16(payload, offset+1))
+		offset += 3
+		section := payload[offset : offset+sectionLen]
+		offset += sectionLen
+		switch sectionID {
+		case 0x01:
+			decodePickerHeader(section, &picker)
+		case 0x02:
+			if query, _, ok := readString16(section, 0); ok {
+				picker.Query = query
+			}
+		case 0x03:
+			picker.Items = decodePickerItems(section)
+		case 0x04:
+			decodePickerActions(section, &picker)
+		case 0x05:
+			if modePrefix, _, ok := readString16(section, 0); ok {
+				picker.ModePrefix = modePrefix
+			}
+		case 0x06:
+			decodePickerLoadStatus(section, &picker)
+		}
+	}
+	summary := picker.Title
+	if picker.Query != "" {
+		summary = strings.TrimSpace(summary + " " + picker.Query)
+	}
+	return picker, summary, size
+}
+
+func decodePickerHeader(section []byte, picker *Picker) {
+	if len(section) < 10 {
+		return
+	}
+	picker.Visible = section[0] != 0
+	picker.Selected = u16(section, 1)
+	picker.Filtered = u16(section, 3)
+	picker.Total = u16(section, 5)
+	picker.HasPreview = section[7] != 0
+	title, offset, ok := readString16(section, 8)
+	if !ok {
+		return
+	}
+	picker.Title = title
+	if len(section) >= offset+2 {
+		picker.Marked = u16(section, offset)
+	}
+}
+
+func decodePickerItems(section []byte) []PickerItem {
+	if len(section) < 2 {
+		return nil
+	}
+	count := int(u16(section, 0))
+	offset := 2
+	items := make([]PickerItem, 0, count)
+	for i := 0; i < count && len(section) >= offset+8; i++ {
+		item := PickerItem{
+			IconColor: u24(section, offset),
+			Flags:     section[offset+3],
+		}
+		item.TwoLine = item.Flags&0x01 != 0
+		item.Marked = item.Flags&0x02 != 0
+		offset += 4
+		var ok bool
+		item.Label, offset, ok = readString16(section, offset)
+		if !ok {
+			break
+		}
+		item.Description, offset, ok = readString16(section, offset)
+		if !ok {
+			break
+		}
+		item.Annotation, offset, ok = readString16(section, offset)
+		if !ok || len(section) < offset+1 {
+			break
+		}
+		matchCount := int(section[offset])
+		offset += 1 + matchCount*2
+		if len(section) < offset {
+			break
+		}
+		items = append(items, item)
+	}
+	return items
+}
+
+func decodePickerActions(section []byte, picker *Picker) {
+	if len(section) < 1 {
+		return
+	}
+	picker.ActionVisible = section[0] != 0
+	if !picker.ActionVisible || len(section) < 3 {
+		return
+	}
+	picker.ActionIndex = section[1]
+	count := int(section[2])
+	offset := 3
+	picker.Actions = make([]string, 0, count)
+	for i := 0; i < count; i++ {
+		action, next, ok := readString16(section, offset)
+		if !ok {
+			break
+		}
+		picker.Actions = append(picker.Actions, action)
+		offset = next
+	}
+}
+
+func decodePickerLoadStatus(section []byte, picker *Picker) {
+	if len(section) < 1 {
+		return
+	}
+	picker.LoadStatus = section[0]
+	if picker.LoadStatus == 2 {
+		if err, _, ok := readString16(section, 1); ok {
+			picker.LoadError = err
+		}
+	}
 }
 
 func decodeFileTree(payload []byte) (FileTree, string, int) {

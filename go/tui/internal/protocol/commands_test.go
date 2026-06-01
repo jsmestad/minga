@@ -260,6 +260,57 @@ func TestDecodeWhichKeyChromeDoesNotSwallowFollowingCommands(t *testing.T) {
 	}
 }
 
+func TestDecodePickerChromeDoesNotSwallowFollowingCommands(t *testing.T) {
+	header := []byte{1, 0, 0, 0, 2, 0, 4, 1}
+	header = append(header, string16("Files")...)
+	header = append(header, 0, 1)
+	query := string16("main")
+	item := []byte{0xAA, 0xBB, 0xCC, 0x02}
+	item = append(item, string16("main.ex")...)
+	item = append(item, string16("lib/main.ex")...)
+	item = append(item, string16("modified")...)
+	item = append(item, 0)
+	items := []byte{0, 1}
+	items = append(items, item...)
+	actions := []byte{1, 0, 1}
+	actions = append(actions, string16("open")...)
+	body := section(0x01, header)
+	body = append(body, section(0x02, query)...)
+	body = append(body, section(0x03, items)...)
+	body = append(body, section(0x04, actions)...)
+	body = append(body, section(0x05, string16("find"))...)
+	body = append(body, section(0x06, []byte{0})...)
+	packet := []byte{generated.OPGuiPicker, 6}
+	packet = append(packet, body...)
+	packet = append(packet, generated.OPBatchEnd)
+
+	first, err := DecodeCommand(packet)
+	if err != nil {
+		t.Fatalf("DecodeCommand returned error: %v", err)
+	}
+	if first.Size != len(packet)-1 {
+		t.Fatalf("picker size = %d, want %d", first.Size, len(packet)-1)
+	}
+	picker := first.Chrome.Picker
+	if !picker.Visible || picker.Title != "Files" || picker.Query != "main" || picker.Marked != 1 || len(picker.Items) != 1 {
+		t.Fatalf("picker decoded incorrectly: %+v", picker)
+	}
+	if got := picker.Items[0]; !got.Marked || got.Label != "main.ex" || got.Description != "lib/main.ex" || got.Annotation != "modified" {
+		t.Fatalf("picker item decoded incorrectly: %+v", got)
+	}
+	if len(picker.Actions) != 1 || picker.Actions[0] != "open" || picker.ModePrefix != "find" {
+		t.Fatalf("picker extras decoded incorrectly: %+v", picker)
+	}
+
+	second, err := DecodeCommand(packet[first.Size:])
+	if err != nil {
+		t.Fatalf("DecodeCommand batch returned error: %v", err)
+	}
+	if second.Kind != CommandBatchEnd {
+		t.Fatalf("second kind = %v, want batch end", second.Kind)
+	}
+}
+
 func TestDecodeFileTreeChromeRows(t *testing.T) {
 	row := []byte{
 		0, 0, 0, 1,
