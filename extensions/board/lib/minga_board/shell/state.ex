@@ -112,6 +112,12 @@ defmodule MingaBoard.Shell.State do
     %{ss | modal: modal}
   end
 
+  @doc "Replaces the cached agent UI state."
+  @spec set_agent(t(), MingaEditor.State.Agent.t()) :: t()
+  def set_agent(%__MODULE__{} = ss, agent) do
+    %{ss | agent: agent}
+  end
+
   @doc """
   Creates a new card and adds it to the board.
 

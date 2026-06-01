@@ -40,6 +40,7 @@ That's it. Save the file and restart Minga. Your options take effect immediately
 | `:agent_tool_approval` | `:destructive`, `:all`, `:none` | `:destructive` | When to prompt before executing agent tools |
 | `:agent_destructive_tools` | list of strings | `["write_file", "edit_file", "multi_edit_file", "apply_diff", "delete_file", "shell", "git_stage", "git_commit", "rename"]` | Which tools are classified as destructive |
 | `:agent_session_retention_days` | positive integer | `30` | Days to keep saved agent sessions before auto-pruning |
+| `:agent_session_idle_timeout_ms` | non-negative integer | `14_400_000` | Milliseconds before an idle detached remote agent session is reclaimed; `0` disables idle reclamation |
 | `:startup_view` | `:agent` or `:editor` | `:agent` | Which view to show on startup (see [Startup view](#startup-view) below) |
 | `:agent_auto_context` | boolean | `true` | Load CLI file as agent preview context on startup |
 | `:agent_mcp_servers` | list of maps | `[]` | MCP servers to launch for native agent sessions (see [MCP servers](MCP.md)) |

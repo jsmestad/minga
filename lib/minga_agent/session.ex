@@ -21,6 +21,7 @@ defmodule MingaAgent.Session do
 
   use GenServer
 
+  alias Minga.Config.Options
   alias MingaAgent.Branch
   alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.Credentials
@@ -84,12 +85,15 @@ defmodule MingaAgent.Session do
           subscribers: MapSet.t(pid()),
           subscriber_roles: %{pid() => attachment_role()},
           driver: pid() | nil,
+          idle_gc_timeout_ms: non_neg_integer(),
+          idle_gc_timer: {timer_ref :: reference(), token :: reference()} | nil,
           total_usage: Event.token_usage(),
           error_message: String.t() | nil,
           pending_thinking_level: String.t() | nil,
           pending_approval: pending_approval() | nil,
           active_tool_calls: [active_tool_call()],
           active_tool_name: String.t() | nil,
+          turn_active?: boolean(),
           trust_levels: %{String.t() => trust_scope()},
           pending_auto_approvals: %{String.t() => trust_scope()},
           model_name: String.t(),
@@ -100,6 +104,7 @@ defmodule MingaAgent.Session do
           hooks_enabled?: boolean(),
           session_start_hook_enabled?: boolean(),
           save_timer: reference() | nil,
+          save_retry_count: non_neg_integer(),
           session_store_dir: String.t() | nil,
           created_at: DateTime.t(),
           last_message_at: DateTime.t(),
@@ -113,6 +118,18 @@ defmodule MingaAgent.Session do
         }
 
   # ── Public API ──────────────────────────────────────────────────────────────
+
+  @doc false
+  @spec child_spec(keyword()) :: Supervisor.child_spec()
+  def child_spec(opts) do
+    %{
+      id: Keyword.get(opts, :id, __MODULE__),
+      start: {__MODULE__, :start_link, [opts]},
+      restart: :temporary,
+      shutdown: 5_000,
+      type: :worker
+    }
+  end
 
   @doc "Starts a new agent session."
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -331,7 +348,13 @@ defmodule MingaAgent.Session do
   @doc "Unsubscribes the calling process from session events."
   @spec unsubscribe(GenServer.server()) :: :ok
   def unsubscribe(session) do
-    GenServer.call(session, {:unsubscribe, self()})
+    unsubscribe(session, self())
+  end
+
+  @doc "Unsubscribes the given process from session events."
+  @spec unsubscribe(GenServer.server(), pid()) :: :ok
+  def unsubscribe(session, pid) when is_pid(pid) do
+    GenServer.call(session, {:unsubscribe, pid})
   end
 
   @doc "Manually triggers context compaction on the provider."
@@ -640,12 +663,15 @@ defmodule MingaAgent.Session do
       subscribers: MapSet.new(),
       subscriber_roles: %{},
       driver: nil,
+      idle_gc_timeout_ms: Keyword.get_lazy(opts, :idle_gc_timeout_ms, &idle_gc_timeout_ms/0),
+      idle_gc_timer: nil,
       total_usage: TurnUsage.new(),
       error_message: nil,
       pending_thinking_level: initial_thinking_level,
       pending_approval: nil,
       active_tool_calls: [],
       active_tool_name: nil,
+      turn_active?: false,
       trust_levels: %{},
       pending_auto_approvals: %{},
       model_name: model_name,
@@ -657,6 +683,7 @@ defmodule MingaAgent.Session do
       session_start_hook_enabled?:
         Keyword.get(opts, :session_start_hook_enabled?, Keyword.get(opts, :hooks_enabled?, true)),
       save_timer: nil,
+      save_retry_count: 0,
       session_store_dir: Keyword.get(opts, :session_store_dir),
       created_at: now,
       last_message_at: now,
@@ -685,7 +712,7 @@ defmodule MingaAgent.Session do
     # Start provider asynchronously so init doesn't block
     send(self(), :start_provider)
 
-    {:ok, state}
+    {:ok, schedule_idle_gc(state, state.idle_gc_timeout_ms > 0, nil, state.idle_gc_timeout_ms)}
   end
 
   @impl GenServer
@@ -863,6 +890,7 @@ defmodule MingaAgent.Session do
         pending_approval: nil,
         active_tool_calls: [],
         active_tool_name: nil,
+        turn_active?: false,
         created_at: now,
         last_message_at: now,
         steering_queue: [],
@@ -1038,7 +1066,7 @@ defmodule MingaAgent.Session do
   def handle_call({:subscribe, pid, opts}, _from, state) do
     Process.monitor(pid)
     role = Keyword.get(opts, :role, default_subscriber_role(state))
-    state = put_subscriber(state, pid, role)
+    state = state |> cancel_idle_gc_timer() |> put_subscriber(pid, role)
     {:reply, :ok, state}
   end
 
@@ -1054,7 +1082,7 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call({:unsubscribe, pid}, _from, state) do
-    {:reply, :ok, remove_subscriber(state, pid)}
+    {:reply, :ok, remove_subscriber(state, pid, :detached)}
   end
 
   def handle_call(:compact, _from, %{provider: nil} = state) do
@@ -1287,7 +1315,7 @@ defmodule MingaAgent.Session do
 
   def handle_info({:DOWN, _ref, :process, pid, reason}, %{provider: pid} = state) do
     Minga.Log.warning(:agent, "[Agent.Session] provider process died: #{inspect(reason)}")
-    state = %{state | provider: nil, error_message: "Agent provider crashed"}
+    state = %{state | provider: nil, error_message: "Agent provider crashed", turn_active?: false}
     state = set_error_status(state)
     broadcast(state, {:error, state.error_message})
 
@@ -1296,15 +1324,56 @@ defmodule MingaAgent.Session do
     {:noreply, state}
   end
 
-  def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do
+  def handle_info({:DOWN, _ref, :process, pid, reason}, state) do
     # A subscriber died, remove it and vacate the driver role if needed.
-    {:noreply, remove_subscriber(state, pid)}
+    {:noreply, remove_subscriber(state, pid, reason)}
+  end
+
+  def handle_info({:idle_gc_timeout, token}, %{idle_gc_timer: {_timer_ref, token}} = state) do
+    case idle_gc_reclaimable?(state) do
+      true ->
+        Minga.Log.info(
+          :agent,
+          "[Agent.Session] reclaiming idle detached session #{state.session_id}"
+        )
+
+        case save_to_disk(state) do
+          :ok ->
+            {:stop, :normal, %{state | idle_gc_timer: nil}}
+
+          {:error, reason} ->
+            Minga.Log.error(
+              :agent,
+              "[Agent.Session] failed to reclaim idle detached session #{state.session_id}: #{inspect(reason)}"
+            )
+
+            {:noreply, maybe_schedule_idle_gc(%{state | idle_gc_timer: nil})}
+        end
+
+      false ->
+        {:noreply, maybe_schedule_idle_gc(%{state | idle_gc_timer: nil})}
+    end
+  end
+
+  def handle_info({:idle_gc_timeout, _token}, state) do
+    {:noreply, state}
   end
 
   def handle_info(:save_session, state) do
     state = %{state | save_timer: nil}
-    save_to_disk(state)
-    {:noreply, state}
+
+    case save_to_disk(state) do
+      :ok ->
+        {:noreply, %{state | save_retry_count: 0}}
+
+      {:error, reason} ->
+        Minga.Log.error(
+          :agent,
+          "[Agent.Session] failed to save session #{state.session_id} to disk: #{inspect(reason)}"
+        )
+
+        {:noreply, schedule_save_retry(state)}
+    end
   end
 
   def handle_info(_msg, state) do
@@ -1393,12 +1462,19 @@ defmodule MingaAgent.Session do
         state = append_msg(state, user_msg)
         record_user_message(state, user_msg)
         state = notify_messages_changed(state)
+        state = %{state | turn_active?: true}
 
         case state.provider_module.send_prompt(state.provider, send_content) do
           :ok ->
             {:reply, :ok, state}
 
           {:error, _} = err ->
+            state =
+              state
+              |> cancel_idle_gc_timer()
+              |> Map.put(:turn_active?, false)
+              |> maybe_schedule_idle_gc()
+
             {:reply, err, state}
         end
 
@@ -1411,11 +1487,12 @@ defmodule MingaAgent.Session do
 
   @spec handle_provider_event(Event.t(), state()) :: state()
   defp handle_provider_event(%Event.AgentStart{}, state) do
-    state = %{state | pending_approval: nil}
+    state = %{state | pending_approval: nil, turn_active?: true}
     set_working_status(state, :thinking)
   end
 
   defp handle_provider_event(%Event.AgentEnd{usage: usage}, state) do
+    state = %{state | turn_active?: false}
     notify(state, :complete, completion_notification(state))
 
     # Collapse thinking blocks now that the turn is complete.
@@ -1696,6 +1773,24 @@ defmodule MingaAgent.Session do
     }
   end
 
+  @spec restore_messages_with_ids(state(), SessionStore.session_data()) :: state()
+  defp restore_messages_with_ids(state, data) do
+    case Map.get(data, :message_ids) do
+      ids when is_list(ids) and ids != [] ->
+        count = length(data.messages)
+
+        %{
+          state
+          | messages: data.messages,
+            message_ids: Enum.take(ids, count),
+            next_message_id: Enum.max(ids, fn -> 0 end) + 1
+        }
+
+      _ ->
+        reset_messages(state, data.messages)
+    end
+  end
+
   # Replaces all messages and resets IDs (used by new_session, load_session, switch_branch).
   @spec reset_messages(state(), [Message.t()]) :: state()
   defp reset_messages(state, msgs) do
@@ -1823,7 +1918,7 @@ defmodule MingaAgent.Session do
 
     state = clear_turn_trust_for_status(state, new_status)
     broadcast(state, {:status_changed, new_status})
-    state
+    maybe_schedule_idle_gc(state)
   end
 
   @spec clear_turn_trust_for_status(state(), status()) :: state()
@@ -1848,12 +1943,16 @@ defmodule MingaAgent.Session do
   defp set_working_status(state, new_status), do: set_status(state, new_status)
 
   @spec set_idle_or_plan(state()) :: state()
-  defp set_idle_or_plan(%{status: :plan} = state), do: state
-  defp set_idle_or_plan(state), do: set_status(state, :idle)
+  defp set_idle_or_plan(%{status: :plan} = state),
+    do: maybe_schedule_idle_gc(%{state | turn_active?: false})
+
+  defp set_idle_or_plan(state), do: set_status(%{state | turn_active?: false}, :idle)
 
   @spec set_error_status(state()) :: state()
-  defp set_error_status(%{status: :plan} = state), do: state
-  defp set_error_status(state), do: set_status(state, :error)
+  defp set_error_status(%{status: :plan} = state),
+    do: maybe_schedule_idle_gc(%{state | turn_active?: false})
+
+  defp set_error_status(state), do: set_status(%{state | turn_active?: false}, :error)
 
   @spec track_active_tool_start(state(), String.t(), String.t()) :: state()
   defp track_active_tool_start(state, tool_call_id, name) do
@@ -1968,16 +2067,80 @@ defmodule MingaAgent.Session do
     state
   end
 
-  @spec remove_subscriber(state(), pid()) :: state()
-  defp remove_subscriber(state, pid) do
+  @spec remove_subscriber(state(), pid(), term()) :: state()
+  defp remove_subscriber(state, pid, reason) do
+    was_subscribed? = MapSet.member?(state.subscribers, pid)
+    role = Map.get(state.subscriber_roles, pid)
     driver = if state.driver == pid, do: nil, else: state.driver
 
-    %{
+    state = %{
       state
       | subscribers: MapSet.delete(state.subscribers, pid),
         subscriber_roles: Map.delete(state.subscriber_roles, pid),
         driver: driver
     }
+
+    if was_subscribed? do
+      record_user_disconnected(state, pid, role, reason)
+    end
+
+    maybe_schedule_idle_gc(state)
+  end
+
+  @spec record_user_disconnected(state(), pid(), attachment_role() | nil, term()) :: :ok
+  defp record_user_disconnected(state, pid, role, reason) do
+    EventLog.record(
+      state.session_id,
+      :user_disconnected,
+      %{pid: inspect(pid), role: role, reason: inspect(reason)},
+      state.event_log_server
+    )
+  end
+
+  @spec maybe_schedule_idle_gc(map()) :: map()
+  defp maybe_schedule_idle_gc(state) do
+    schedule_idle_gc(
+      state,
+      idle_gc_reclaimable?(state),
+      state.idle_gc_timer,
+      state.idle_gc_timeout_ms
+    )
+  end
+
+  @spec schedule_idle_gc(
+          map(),
+          boolean(),
+          {timer_ref :: reference(), token :: reference()} | nil,
+          non_neg_integer()
+        ) :: map()
+  defp schedule_idle_gc(state, true, nil, timeout_ms) when timeout_ms > 0 do
+    token = make_ref()
+    timer_ref = Process.send_after(self(), {:idle_gc_timeout, token}, timeout_ms)
+    %{state | idle_gc_timer: {timer_ref, token}}
+  end
+
+  defp schedule_idle_gc(state, true, _timer, _timeout_ms), do: state
+  defp schedule_idle_gc(state, false, _timer, _timeout_ms), do: cancel_idle_gc_timer(state)
+
+  @spec cancel_idle_gc_timer(map()) :: map()
+  defp cancel_idle_gc_timer(%{idle_gc_timer: nil} = state), do: state
+
+  defp cancel_idle_gc_timer(state) do
+    {timer_ref, _token} = state.idle_gc_timer
+    Process.cancel_timer(timer_ref)
+    %{state | idle_gc_timer: nil}
+  end
+
+  @spec idle_gc_reclaimable?(map()) :: boolean()
+  defp idle_gc_reclaimable?(state) do
+    MapSet.size(state.subscribers) == 0 and state.status in [:idle, :plan, :error] and
+      state.pending_approval == nil and state.active_tool_calls == [] and not state.turn_active? and
+      state.steering_queue == [] and state.follow_up_queue == []
+  end
+
+  @spec idle_gc_timeout_ms() :: non_neg_integer()
+  defp idle_gc_timeout_ms do
+    Options.get(:agent_session_idle_timeout_ms)
   end
 
   @spec driver_allowed?(state(), pid()) :: boolean()
@@ -1998,12 +2161,35 @@ defmodule MingaAgent.Session do
 
   @spec mark_interrupted_work(state()) :: :ok
   defp mark_interrupted_work(state) do
-    with {:ok, db} <- EventLog.open_read_connection(),
-         {:ok, events} <- all_event_log_events(db, state.session_id) do
-      MingaAgent.EventLog.Store.close(db)
-      record_interrupted_work(state, events)
-    else
-      _ -> :ok
+    case EventLog.open_read_connection() do
+      {:ok, db} ->
+        try do
+          case all_event_log_events(db, state.session_id) do
+            {:ok, events} ->
+              record_interrupted_work(state, events)
+
+            {:error, reason} ->
+              Minga.Log.warning(
+                :agent,
+                "[Session] mark_interrupted_work failed for #{state.session_id}: #{inspect(reason)}"
+              )
+
+              :ok
+          end
+        after
+          MingaAgent.EventLog.Store.close(db)
+        end
+
+      {:error, :database_not_found} ->
+        :ok
+
+      {:error, reason} ->
+        Minga.Log.warning(
+          :agent,
+          "[Session] mark_interrupted_work failed for #{state.session_id}: #{inspect(reason)}"
+        )
+
+        :ok
     end
   end
 
@@ -2510,7 +2696,7 @@ defmodule MingaAgent.Session do
   defp schedule_save(state) do
     state = cancel_save_timer(state)
     ref = Process.send_after(self(), :save_session, @save_debounce_ms)
-    %{state | save_timer: ref}
+    %{state | save_timer: ref, save_retry_count: 0}
   end
 
   @spec cancel_save_timer(state()) :: state()
@@ -2521,7 +2707,12 @@ defmodule MingaAgent.Session do
     %{state | save_timer: nil}
   end
 
+  @save_retry_base_ms 5_000
+  @save_retry_max_ms 60_000
+
   @spec save_to_disk(state()) :: :ok | {:error, term()}
+  defp save_to_disk(%{persist?: false}), do: :ok
+
   defp save_to_disk(state) do
     now = DateTime.to_iso8601(DateTime.utc_now())
     last_message_at = DateTime.to_iso8601(state.last_message_at)
@@ -2545,6 +2736,22 @@ defmodule MingaAgent.Session do
     }
 
     SessionStore.save(data, state.session_store_dir)
+  end
+
+  @spec schedule_save_retry(state()) :: state()
+  defp schedule_save_retry(state) do
+    retry_count = state.save_retry_count + 1
+    delay_ms = retry_delay_ms(retry_count)
+    ref = Process.send_after(self(), :save_session, delay_ms)
+    %{state | save_timer: ref, save_retry_count: retry_count}
+  end
+
+  @spec retry_delay_ms(non_neg_integer()) :: non_neg_integer()
+  defp retry_delay_ms(retry_count) when retry_count <= 1, do: @save_retry_base_ms
+
+  defp retry_delay_ms(retry_count) do
+    exponential = @save_retry_base_ms * round(:math.pow(2, retry_count - 1))
+    min(exponential, @save_retry_max_ms)
   end
 
   @spec restore_loaded_session(state(), SessionStore.session_data()) ::
@@ -2593,20 +2800,9 @@ defmodule MingaAgent.Session do
     case restore_memory_snapshot_if_recorded(state, data) do
       :ok ->
         state =
-          case Map.get(data, :message_ids) do
-            ids when is_list(ids) and ids != [] ->
-              count = length(data.messages)
-
-              %{
-                state
-                | messages: data.messages,
-                  message_ids: Enum.take(ids, count),
-                  next_message_id: Enum.max(ids, fn -> 0 end) + 1
-              }
-
-            _ ->
-              reset_messages(state, data.messages)
-          end
+          state
+          |> restore_messages_with_ids(data)
+          |> seed_provider_messages(data.messages)
 
         broadcast(state, {:status_changed, :idle})
         broadcast(state, :messages_changed)

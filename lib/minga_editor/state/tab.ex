@@ -16,6 +16,7 @@ defmodule MingaEditor.State.Tab do
   alias MingaEditor.FeatureState
   alias MingaEditor.State.Tab.Context
   alias MingaEditor.State.Workspace.RemoteSession
+  alias MingaAgent.Subagent.Handle
 
   @typedoc "Unique tab identifier."
   @type id :: pos_integer()
@@ -131,6 +132,56 @@ defmodule MingaEditor.State.Tab do
   def set_session(%__MODULE__{} = tab, pid) do
     %{tab | session: pid}
   end
+
+  @doc "Refreshes any session pid references after a managed restart."
+  @spec refresh_session_pid(t(), pid(), pid()) :: t()
+  def refresh_session_pid(%__MODULE__{} = tab, old_pid, new_pid)
+      when is_pid(old_pid) and is_pid(new_pid) do
+    tab
+    |> refresh_tab_session(old_pid, new_pid)
+    |> refresh_background_subagent(old_pid, new_pid)
+  end
+
+  @spec refresh_tab_session(t(), pid(), pid()) :: t()
+  defp refresh_tab_session(%__MODULE__{session: session} = tab, old_pid, new_pid)
+       when session == old_pid do
+    %{tab | session: new_pid}
+  end
+
+  defp refresh_tab_session(%__MODULE__{} = tab, _old_pid, _new_pid), do: tab
+
+  @spec refresh_background_subagent(t(), pid(), pid()) :: t()
+  defp refresh_background_subagent(
+         %__MODULE__{background_subagent: %Handle{} = handle} = tab,
+         old_pid,
+         new_pid
+       ) do
+    handle = refresh_background_subagent_pid(handle, old_pid, new_pid)
+    handle = refresh_background_subagent_parent_pid(handle, old_pid, new_pid)
+    %{tab | background_subagent: handle}
+  end
+
+  defp refresh_background_subagent(%__MODULE__{} = tab, _old_pid, _new_pid), do: tab
+
+  @spec refresh_background_subagent_pid(Handle.t(), pid(), pid()) :: Handle.t()
+  defp refresh_background_subagent_pid(%Handle{pid: pid} = handle, old_pid, new_pid)
+       when pid == old_pid do
+    Handle.with_pid(handle, new_pid)
+  end
+
+  defp refresh_background_subagent_pid(%Handle{} = handle, _old_pid, _new_pid), do: handle
+
+  @spec refresh_background_subagent_parent_pid(Handle.t(), pid(), pid()) :: Handle.t()
+  defp refresh_background_subagent_parent_pid(
+         %Handle{parent_pid: parent_pid} = handle,
+         old_pid,
+         new_pid
+       )
+       when parent_pid == old_pid do
+    Handle.with_parent_pid(handle, new_pid)
+  end
+
+  defp refresh_background_subagent_parent_pid(%Handle{} = handle, _old_pid, _new_pid), do: handle
 
   @doc "Marks the tab as backed by a remote agent session."
   @spec set_remote_session(t(), String.t(), String.t(), pid()) :: t()

@@ -25,18 +25,11 @@ defmodule MingaAgent.Providers.RecordingProvider do
 
   @impl MingaAgent.Provider
   @spec seed_messages(GenServer.server(), [MingaAgent.Message.t()]) :: :ok | {:error, term()}
-  def seed_messages(_pid, _messages), do: :ok
+  def seed_messages(pid, messages), do: GenServer.call(pid, {:seed_messages, messages})
 
   @impl MingaAgent.Provider
   @spec get_state(GenServer.server()) :: {:ok, map()} | {:error, term()}
-  def get_state(_pid) do
-    {:ok,
-     %{
-       model: %{id: "test-model", name: "Test Model", provider: "test"},
-       is_streaming: false,
-       token_usage: nil
-     }}
-  end
+  def get_state(pid), do: GenServer.call(pid, :get_state)
 
   @impl MingaAgent.Provider
   @spec get_available_models(GenServer.server()) :: {:ok, [map()]} | {:error, term()}
@@ -69,13 +62,28 @@ defmodule MingaAgent.Providers.RecordingProvider do
     subscriber = Keyword.get(opts, :subscriber)
 
     if is_pid(subscriber), do: Process.monitor(subscriber)
-    {:ok, %{test_pid: test_pid, project_root: project_root, refreshes: []}}
+    {:ok, %{test_pid: test_pid, project_root: project_root, refreshes: [], seeded_messages: []}}
   end
 
   @impl GenServer
   def handle_call({:refresh_project_view, project_view}, _from, state) do
     if is_pid(state.test_pid), do: send(state.test_pid, {:provider_refresh, project_view})
     {:reply, :ok, %{state | refreshes: [project_view | state.refreshes]}}
+  end
+
+  def handle_call({:seed_messages, messages}, _from, state) do
+    {:reply, :ok, %{state | seeded_messages: messages}}
+  end
+
+  def handle_call(:get_state, _from, state) do
+    {:reply,
+     {:ok,
+      %{
+        model: %{id: "test-model", name: "Test Model", provider: "test"},
+        is_streaming: false,
+        token_usage: nil,
+        seeded_messages: state.seeded_messages
+      }}, state}
   end
 
   def handle_call(_msg, _from, state), do: {:reply, :ok, state}

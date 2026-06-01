@@ -206,19 +206,40 @@ defmodule MingaEditor.Handlers.EventDispatcher do
         %Subagent.Handle{} = handle,
         _msg
       ) do
-    AgentSession.subscribe(handle.pid, self())
+    case subscribe_to_session(handle.pid) do
+      :ok ->
+        state = EditorState.ensure_shell_available(state)
 
-    state = EditorState.ensure_shell_available(state)
+        {shell_state, workspace} =
+          EditorState.active_shell_module(state).handle_event(
+            state.shell_state,
+            state.workspace,
+            {:background_subagent_started, handle}
+          )
 
-    {shell_state, workspace} =
-      EditorState.active_shell_module(state).handle_event(
-        state.shell_state,
-        state.workspace,
-        {:background_subagent_started, handle}
-      )
+        state = %{state | shell_state: shell_state, workspace: workspace}
+        MingaEditor.schedule_render(state, 16)
 
-    state = %{state | shell_state: shell_state, workspace: workspace}
-    MingaEditor.schedule_render(state, 16)
+      {:error, reason} ->
+        Minga.Log.warning(
+          :agent,
+          "[Agent] Ignored background sub-agent #{handle.session_id} (#{inspect(handle.pid)}): #{inspect(reason)}"
+        )
+
+        state
+    end
+  end
+
+  def dispatch(
+        state,
+        :agent_session_restarted,
+        %SessionManager.SessionRestartedEvent{} = event,
+        _msg
+      ) do
+    case handle_agent_session_restarted(state, event) do
+      {:ok, state} -> MingaEditor.schedule_render(state, 16)
+      {:stale, state} -> state
+    end
   end
 
   def dispatch(
@@ -268,6 +289,78 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   end
 
   def dispatch(state, _event, _payload, _msg), do: state
+
+  @spec handle_agent_session_restarted(
+          EditorState.t(),
+          SessionManager.SessionRestartedEvent.t()
+        ) :: {:ok, EditorState.t()} | {:stale, EditorState.t()}
+  defp handle_agent_session_restarted(state, %SessionManager.SessionRestartedEvent{} = event) do
+    new_pid = event.new_pid
+
+    with {:ok, ^new_pid} <- safe_session_lookup(event.session_id),
+         true <- Commands.BufferManagement.agent_session_restart_owned?(state, event.old_pid),
+         :ok <- subscribe_to_restarted_session(event) do
+      {:ok,
+       Commands.BufferManagement.handle_agent_session_restarted(
+         state,
+         event.session_id,
+         event.old_pid,
+         new_pid,
+         event.reason
+       )}
+    else
+      {:ok, current_pid} ->
+        log_stale_agent_session_restart(event, {:current_pid, current_pid})
+        {:stale, state}
+
+      false ->
+        log_stale_agent_session_restart(event, :unowned_old_pid)
+        {:stale, state}
+
+      {:error, reason} ->
+        log_stale_agent_session_restart(event, reason)
+        {:stale, state}
+
+      :stale ->
+        {:stale, state}
+    end
+  end
+
+  @spec safe_session_lookup(String.t()) :: {:ok, pid()} | {:error, term()}
+  defp safe_session_lookup(session_id) do
+    SessionManager.get_session(session_id)
+  catch
+    :exit, reason -> {:error, {:exit, reason}}
+  end
+
+  @spec subscribe_to_restarted_session(SessionManager.SessionRestartedEvent.t()) :: :ok | :stale
+  defp subscribe_to_restarted_session(%SessionManager.SessionRestartedEvent{} = event) do
+    case subscribe_to_session(event.new_pid) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        log_stale_agent_session_restart(event, {:subscribe_failed, reason})
+        :stale
+    end
+  end
+
+  @spec subscribe_to_session(pid()) :: :ok | {:error, term()}
+  defp subscribe_to_session(pid) do
+    AgentSession.subscribe(pid, self())
+  catch
+    :exit, reason -> {:error, reason}
+  end
+
+  @spec log_stale_agent_session_restart(SessionManager.SessionRestartedEvent.t(), term()) :: :ok
+  defp log_stale_agent_session_restart(%SessionManager.SessionRestartedEvent{} = event, reason) do
+    Minga.Log.warning(
+      :agent,
+      "[Agent] Ignored restart for session #{event.session_id} (#{inspect(event.old_pid)} -> #{inspect(event.new_pid)}) after #{inspect(event.reason)}: #{inspect(reason)}"
+    )
+
+    :ok
+  end
 
   # ── Private helpers ──────────────────────────────────────────────────────────
 

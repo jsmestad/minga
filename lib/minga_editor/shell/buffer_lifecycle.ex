@@ -50,4 +50,12 @@ defmodule MingaEditor.Shell.BufferLifecycle do
               session_pid :: pid(),
               event :: term()
             ) :: {shell_state(), workspace(), [MingaEditor.effect()]}
+
+  @doc "A managed agent session restarted and the shell should refresh pid references."
+  @callback handle_agent_session_restarted(
+              shell_state(),
+              old_session_pid :: pid(),
+              new_session_pid :: pid(),
+              reason :: term()
+            ) :: {shell_state(), boolean()}
 end

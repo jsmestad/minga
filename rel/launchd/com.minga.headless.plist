@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.minga.headless</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/YOUR_USER/.local/bin/minga</string>
+    <string>--headless</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/YOUR_USER</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>MIX_ENV</key>
+    <string>prod</string>
+    <key>MINGA_COOKIE</key>
+    <string>replace-with-a-long-random-cookie</string>
+  </dict>
+  <key>KeepAlive</key>
+  <true/>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/tmp/minga-headless.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/minga-headless.err.log</string>
+</dict>
+</plist>
