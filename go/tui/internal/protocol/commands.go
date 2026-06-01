@@ -48,15 +48,17 @@ type DrawText struct {
 }
 
 type ChromePayload struct {
-	Opcode  byte
-	Name    string
-	Summary string
-	Bytes   int
-	Tabs    TabBar
-	Spaces  WorkspaceBar
-	Mini    Minibuffer
-	Tree    FileTree
-	Status  StatusBar
+	Opcode   byte
+	Name     string
+	Summary  string
+	Bytes    int
+	Tabs     TabBar
+	Spaces   WorkspaceBar
+	Mini     Minibuffer
+	Complete Completion
+	Which    WhichKey
+	Tree     FileTree
+	Status   StatusBar
 }
 
 type TabBar struct {
@@ -127,6 +129,35 @@ type Minibuffer struct {
 	SelectedIndex uint16
 	Candidates    uint16
 	Total         uint16
+}
+
+type Completion struct {
+	Visible  bool
+	Row      uint16
+	Col      uint16
+	Selected uint16
+	Items    []CompletionItem
+}
+
+type CompletionItem struct {
+	Kind   byte
+	Label  string
+	Detail string
+}
+
+type WhichKey struct {
+	Visible   bool
+	Prefix    string
+	Page      byte
+	PageCount byte
+	Bindings  []WhichKeyBinding
+}
+
+type WhichKeyBinding struct {
+	Kind        byte
+	Key         string
+	Description string
+	Icon        string
 }
 
 type FileTree struct {
@@ -471,6 +502,10 @@ func decodeChrome(payload []byte) ChromePayload {
 		chrome.Spaces, chrome.Summary, chrome.Bytes = decodeWorkspaces(payload)
 	case generated.OPGuiMinibuffer:
 		chrome.Mini, chrome.Summary, chrome.Bytes = decodeMinibuffer(payload)
+	case generated.OPGuiCompletion:
+		chrome.Complete, chrome.Summary, chrome.Bytes = decodeCompletion(payload)
+	case generated.OPGuiWhichKey:
+		chrome.Which, chrome.Summary, chrome.Bytes = decodeWhichKey(payload)
 	case generated.OPGuiFileTree:
 		chrome.Tree, chrome.Summary, chrome.Bytes = decodeFileTree(payload)
 	case generated.OPGuiStatusBar:
@@ -661,6 +696,84 @@ func decodeMinibuffer(payload []byte) (Minibuffer, string, int) {
 	mini.Candidates = u16(payload, next+2)
 	mini.Total = u16(payload, next+4)
 	return mini, strings.TrimSpace(prompt + input + " " + context), len(payload)
+}
+
+func decodeCompletion(payload []byte) (Completion, string, int) {
+	if len(payload) < 2 || payload[1] == 0 {
+		return Completion{}, "", min(len(payload), 2)
+	}
+	if len(payload) < 10 {
+		return Completion{Visible: true}, "", len(payload)
+	}
+	completion := Completion{
+		Visible:  true,
+		Row:      u16(payload, 2),
+		Col:      u16(payload, 4),
+		Selected: u16(payload, 6),
+	}
+	count := int(u16(payload, 8))
+	completion.Items = make([]CompletionItem, 0, count)
+	offset := 10
+	labels := make([]string, 0, count)
+	for i := 0; i < count && len(payload) >= offset+5; i++ {
+		item := CompletionItem{Kind: payload[offset]}
+		offset++
+		var ok bool
+		item.Label, offset, ok = readString16(payload, offset)
+		if !ok {
+			break
+		}
+		item.Detail, offset, ok = readString16(payload, offset)
+		if !ok {
+			break
+		}
+		completion.Items = append(completion.Items, item)
+		labels = append(labels, item.Label)
+	}
+	return completion, stringsJoin(labels, "  "), offset
+}
+
+func decodeWhichKey(payload []byte) (WhichKey, string, int) {
+	if len(payload) < 2 || payload[1] == 0 {
+		return WhichKey{}, "", min(len(payload), 2)
+	}
+	if len(payload) < 8 {
+		return WhichKey{Visible: true}, "", len(payload)
+	}
+	prefix, offset, ok := readString16(payload, 2)
+	if !ok || len(payload) < offset+4 {
+		return WhichKey{Visible: true}, "", len(payload)
+	}
+	which := WhichKey{
+		Visible:   true,
+		Prefix:    prefix,
+		Page:      payload[offset],
+		PageCount: payload[offset+1],
+	}
+	count := int(u16(payload, offset+2))
+	offset += 4
+	which.Bindings = make([]WhichKeyBinding, 0, count)
+	summary := make([]string, 0, count)
+	for i := 0; i < count && len(payload) >= offset+6; i++ {
+		binding := WhichKeyBinding{Kind: payload[offset]}
+		offset++
+		var ok bool
+		binding.Key, offset, ok = readString8(payload, offset)
+		if !ok {
+			break
+		}
+		binding.Description, offset, ok = readString16(payload, offset)
+		if !ok {
+			break
+		}
+		binding.Icon, offset, ok = readString8(payload, offset)
+		if !ok {
+			break
+		}
+		which.Bindings = append(which.Bindings, binding)
+		summary = append(summary, binding.Key+" "+binding.Description)
+	}
+	return which, stringsJoin(summary, "  "), offset
 }
 
 func decodeFileTree(payload []byte) (FileTree, string, int) {

@@ -363,6 +363,51 @@ func (m Model) footerLines() []string {
 		}
 		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#D8DEE9")).Background(lipgloss.Color("#101318")).Width(m.width).Render(value))
 	}
+	if completion, ok := m.completion(); ok && completion.Visible && len(completion.Items) > 0 {
+		lines = append(lines, m.renderCompletion(completion)...)
+	}
+	if which, ok := m.whichKey(); ok && which.Visible && len(which.Bindings) > 0 {
+		lines = append(lines, m.renderWhichKey(which)...)
+	}
+	return lines
+}
+
+func (m Model) renderCompletion(completion protocol.Completion) []string {
+	style := lipgloss.NewStyle().Foreground(lipgloss.Color("#D8DEE9")).Background(lipgloss.Color("#101318")).Width(m.width)
+	selectedStyle := style.Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(lipgloss.Color("#30445C"))
+	limit := min(len(completion.Items), 6)
+	lines := make([]string, 0, limit)
+	for i, item := range completion.Items[:limit] {
+		detail := item.Detail
+		if detail != "" {
+			detail = "  " + detail
+		}
+		text := fit(item.Label+detail, m.width)
+		if uint16(i) == completion.Selected {
+			lines = append(lines, selectedStyle.Render(text))
+		} else {
+			lines = append(lines, style.Render(text))
+		}
+	}
+	return lines
+}
+
+func (m Model) renderWhichKey(which protocol.WhichKey) []string {
+	title := "Keys"
+	if which.Prefix != "" {
+		title += " " + which.Prefix
+	}
+	if which.PageCount > 1 {
+		title += fmt.Sprintf("  %d/%d", which.Page+1, which.PageCount)
+	}
+	style := lipgloss.NewStyle().Foreground(lipgloss.Color("#B8C0CC")).Background(lipgloss.Color("#111720")).Width(m.width)
+	lines := []string{style.Bold(true).Foreground(lipgloss.Color("#C7D1FF")).Render(fit(title, m.width))}
+	limit := min(len(which.Bindings), 8)
+	for _, binding := range which.Bindings[:limit] {
+		label := strings.TrimSpace(binding.Icon + " " + binding.Description)
+		text := fit(binding.Key+"  "+label, m.width)
+		lines = append(lines, style.Render(text))
+	}
 	return lines
 }
 
@@ -395,6 +440,24 @@ func (m Model) minibuffer() (protocol.Minibuffer, bool) {
 		}
 	}
 	return protocol.Minibuffer{}, false
+}
+
+func (m Model) completion() (protocol.Completion, bool) {
+	for _, payload := range m.chrome {
+		if payload.Complete.Visible {
+			return payload.Complete, true
+		}
+	}
+	return protocol.Completion{}, false
+}
+
+func (m Model) whichKey() (protocol.WhichKey, bool) {
+	for _, payload := range m.chrome {
+		if payload.Which.Visible {
+			return payload.Which, true
+		}
+	}
+	return protocol.WhichKey{}, false
 }
 
 func (m Model) fileTree() (protocol.FileTree, bool) {

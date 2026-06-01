@@ -194,6 +194,72 @@ func TestDecodeWorkspacesChromeDoesNotSwallowFollowingCommands(t *testing.T) {
 	}
 }
 
+func TestDecodeCompletionChromeDoesNotSwallowFollowingCommands(t *testing.T) {
+	item := append([]byte{1}, string16("map")...)
+	item = append(item, string16("Enum.map/2")...)
+	packet := []byte{generated.OPGuiCompletion, 1, 0, 9, 0, 4, 0, 0, 0, 1}
+	packet = append(packet, item...)
+	packet = append(packet, generated.OPBatchEnd)
+
+	first, err := DecodeCommand(packet)
+	if err != nil {
+		t.Fatalf("DecodeCommand returned error: %v", err)
+	}
+	if first.Size != len(packet)-1 {
+		t.Fatalf("completion size = %d, want %d", first.Size, len(packet)-1)
+	}
+	completion := first.Chrome.Complete
+	if !completion.Visible || completion.Row != 9 || completion.Col != 4 || len(completion.Items) != 1 {
+		t.Fatalf("completion decoded incorrectly: %+v", completion)
+	}
+	if got := completion.Items[0]; got.Kind != 1 || got.Label != "map" || got.Detail != "Enum.map/2" {
+		t.Fatalf("completion item decoded incorrectly: %+v", got)
+	}
+
+	second, err := DecodeCommand(packet[first.Size:])
+	if err != nil {
+		t.Fatalf("DecodeCommand batch returned error: %v", err)
+	}
+	if second.Kind != CommandBatchEnd {
+		t.Fatalf("second kind = %v, want batch end", second.Kind)
+	}
+}
+
+func TestDecodeWhichKeyChromeDoesNotSwallowFollowingCommands(t *testing.T) {
+	binding := []byte{1}
+	binding = append(binding, string8("f")...)
+	binding = append(binding, string16("file")...)
+	binding = append(binding, string8("*")...)
+	packet := []byte{generated.OPGuiWhichKey, 1}
+	packet = append(packet, string16("SPC")...)
+	packet = append(packet, 0, 2, 0, 1)
+	packet = append(packet, binding...)
+	packet = append(packet, generated.OPBatchEnd)
+
+	first, err := DecodeCommand(packet)
+	if err != nil {
+		t.Fatalf("DecodeCommand returned error: %v", err)
+	}
+	if first.Size != len(packet)-1 {
+		t.Fatalf("which-key size = %d, want %d", first.Size, len(packet)-1)
+	}
+	which := first.Chrome.Which
+	if !which.Visible || which.Prefix != "SPC" || which.PageCount != 2 || len(which.Bindings) != 1 {
+		t.Fatalf("which-key decoded incorrectly: %+v", which)
+	}
+	if got := which.Bindings[0]; got.Key != "f" || got.Description != "file" || got.Icon != "*" {
+		t.Fatalf("which-key binding decoded incorrectly: %+v", got)
+	}
+
+	second, err := DecodeCommand(packet[first.Size:])
+	if err != nil {
+		t.Fatalf("DecodeCommand batch returned error: %v", err)
+	}
+	if second.Kind != CommandBatchEnd {
+		t.Fatalf("second kind = %v, want batch end", second.Kind)
+	}
+}
+
 func TestDecodeFileTreeChromeRows(t *testing.T) {
 	row := []byte{
 		0, 0, 0, 1,
