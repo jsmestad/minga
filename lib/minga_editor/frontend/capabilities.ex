@@ -20,7 +20,8 @@ defmodule MingaEditor.Frontend.Capabilities do
             unicode_width: :wcwidth,
             image_support: :none,
             float_support: :emulated,
-            text_rendering: :monospace
+            text_rendering: :monospace,
+            semantic_ui: false
 
   @type frontend_type :: :tui | :native_gui | :web
   @type color_depth :: :mono | :color_256 | :rgb
@@ -35,7 +36,8 @@ defmodule MingaEditor.Frontend.Capabilities do
           unicode_width: unicode_width(),
           image_support: image_support(),
           float_support: float_support(),
-          text_rendering: text_rendering()
+          text_rendering: text_rendering(),
+          semantic_ui: boolean()
         }
 
   @doc "Returns the default capabilities (TUI with full RGB, monospace)."
@@ -46,19 +48,64 @@ defmodule MingaEditor.Frontend.Capabilities do
   @spec from_binary(binary()) :: t()
   def from_binary(
         <<frontend_type::8, color_depth::8, unicode_width::8, image_support::8, float_support::8,
+          text_rendering::8, semantic_ui::8>>
+      ) do
+    from_fields(
+      frontend_type,
+      color_depth,
+      unicode_width,
+      image_support,
+      float_support,
+      text_rendering,
+      semantic_ui
+    )
+  end
+
+  def from_binary(
+        <<frontend_type::8, color_depth::8, unicode_width::8, image_support::8, float_support::8,
           text_rendering::8>>
       ) do
+    from_fields(
+      frontend_type,
+      color_depth,
+      unicode_width,
+      image_support,
+      float_support,
+      text_rendering,
+      0
+    )
+  end
+
+  def from_binary(_), do: default()
+
+  @spec from_fields(
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: t()
+  defp from_fields(
+         frontend_type,
+         color_depth,
+         unicode_width,
+         image_support,
+         float_support,
+         text_rendering,
+         semantic_ui
+       ) do
     %__MODULE__{
       frontend_type: decode_frontend_type(frontend_type),
       color_depth: decode_color_depth(color_depth),
       unicode_width: decode_unicode_width(unicode_width),
       image_support: decode_image_support(image_support),
       float_support: decode_float_support(float_support),
-      text_rendering: decode_text_rendering(text_rendering)
+      text_rendering: decode_text_rendering(text_rendering),
+      semantic_ui: semantic_ui != 0
     }
   end
-
-  def from_binary(_), do: default()
 
   # ── Query helpers ──
 
@@ -86,6 +133,11 @@ defmodule MingaEditor.Frontend.Capabilities do
   @spec proportional_text?(t()) :: boolean()
   def proportional_text?(%__MODULE__{text_rendering: :proportional}), do: true
   def proportional_text?(%__MODULE__{}), do: false
+
+  @doc "Returns true if the frontend can consume semantic render-model protocol commands."
+  @spec semantic_ui?(t()) :: boolean()
+  def semantic_ui?(%__MODULE__{semantic_ui: true}), do: true
+  def semantic_ui?(%__MODULE__{}), do: false
 
   @doc "Returns the safe production width oracle, monospace for now."
   @spec width_oracle(t()) :: WidthOracle.t()

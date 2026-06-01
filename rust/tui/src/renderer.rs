@@ -1,4 +1,5 @@
 use crate::protocol::{self, Command, DrawStyledText, DrawText, Region};
+use crate::semantic;
 use crate::terminal::{CellStyle, Terminal};
 use std::collections::HashMap;
 use std::io::{self, Write};
@@ -85,6 +86,7 @@ impl Renderer {
                 let width = text_width(&text);
                 protocol::write_packet(output, &protocol::encode_text_width(request_id, width))?;
             }
+            Command::Semantic(command) => self.handle_semantic(command),
             Command::Noop(_) => {}
         }
 
@@ -156,6 +158,51 @@ impl Renderer {
                 blend: draw.blend,
             },
         );
+    }
+
+    fn handle_semantic(&mut self, command: semantic::Command) {
+        match command {
+            semantic::Command::WindowContent(window, _) => self.draw_semantic_window(window),
+            semantic::Command::Unsupported { .. } => {}
+        }
+    }
+
+    fn draw_semantic_window(&mut self, window: semantic::WindowContent) {
+        self.clear();
+        self.cursor = (window.cursor_col, window.cursor_row);
+        self.cursor_shape = window.cursor_shape;
+
+        for (row, content) in window.rows.into_iter().enumerate() {
+            let row = row.min(u16::MAX as usize) as u16;
+            self.draw_semantic_row(row, content);
+        }
+    }
+
+    fn draw_semantic_row(&mut self, row: u16, content: semantic::Row) {
+        if content.spans.is_empty() {
+            self.write_run(row, 0, &content.text, CellStyle::default());
+            return;
+        }
+
+        for span in content.spans {
+            let segment = slice_chars(&content.text, span.start_col, span.end_col);
+            if segment.is_empty() {
+                continue;
+            }
+
+            self.write_run(
+                row,
+                span.start_col,
+                &segment,
+                CellStyle {
+                    fg: span.fg,
+                    bg: span.bg,
+                    attrs: span.attrs,
+                    ul_color: 0,
+                    blend: 100,
+                },
+            );
+        }
     }
 
     fn write_run(&mut self, row: u16, col: u16, text: &str, mut style: CellStyle) {
@@ -311,6 +358,12 @@ fn text_width(text: &str) -> u16 {
 fn char_width(ch: char) -> u16 {
     let _ = ch;
     1
+}
+
+fn slice_chars(text: &str, start_col: u16, end_col: u16) -> String {
+    let start = start_col as usize;
+    let len = end_col.saturating_sub(start_col) as usize;
+    text.chars().skip(start).take(len).collect()
 }
 
 #[cfg(test)]

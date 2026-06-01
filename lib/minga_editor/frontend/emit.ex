@@ -38,12 +38,13 @@ defmodule MingaEditor.Frontend.Emit do
   def emit(frame, ctx, chrome \\ nil, caches \\ %Caches{}) do
     FontRegistry.with_process_registry(ctx.font_registry, fn ->
       gui? = MingaEditor.Frontend.gui?(ctx.capabilities)
+      semantic_tui? = not gui? and MingaEditor.Frontend.semantic_ui?(ctx.capabilities)
 
       caches =
-        if gui? do
-          emit_gui(frame, ctx, chrome, caches)
-        else
-          emit_tui(frame, ctx, chrome, caches)
+        case {gui?, semantic_tui?} do
+          {true, _} -> emit_gui(frame, ctx, chrome, caches)
+          {false, true} -> emit_semantic_tui(frame, ctx, chrome, caches)
+          {false, false} -> emit_tui(frame, ctx, chrome, caches)
         end
 
       {caches, FontRegistry.current_process_registry(ctx.font_registry)}
@@ -109,6 +110,37 @@ defmodule MingaEditor.Frontend.Emit do
 
     commands = EmitTUI.build_commands(render_model, ctx, caches)
     commands = flush_font_registration_commands() ++ commands
+    caches = update_tracking(ctx, caches)
+    byte_count = IO.iodata_length(commands)
+
+    Telemetry.span([:minga, :render, :emit_prepare], %{byte_count: byte_count}, fn ->
+      MingaEditor.Frontend.send_commands(ctx.port_manager, commands)
+      caches = send_title(render_model, caches)
+      caches = send_window_bg(render_model, caches)
+      caches
+    end)
+  end
+
+  @spec emit_semantic_tui(Frame.t(), ctx(), Chrome.t() | nil, Caches.t()) :: Caches.t()
+  defp emit_semantic_tui(frame, ctx, chrome, caches) do
+    {render_model, ctx} =
+      Telemetry.span([:minga, :render, :ui_model_build], %{}, fn ->
+        RenderModelBuilder.build(frame, ctx, chrome)
+      end)
+
+    encoded_frame =
+      Telemetry.span_with_stop_metadata([:minga, :render, :adapter_encode], %{}, fn ->
+        encoded_frame = Minga.Frontend.Adapter.GUI.encode(render_model, caches.adapter_gui_caches)
+        {encoded_frame, adapter_encode_metadata(encoded_frame.metrics, [])}
+      end)
+
+    caches = %{caches | adapter_gui_caches: encoded_frame.caches}
+
+    commands =
+      flush_font_registration_commands() ++
+        encoded_frame.metal_commands ++
+        encoded_frame.chrome_commands ++ [Protocol.encode_batch_end()]
+
     caches = update_tracking(ctx, caches)
     byte_count = IO.iodata_length(commands)
 

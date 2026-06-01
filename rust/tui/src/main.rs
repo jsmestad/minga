@@ -1,6 +1,7 @@
 mod input;
 mod protocol;
 mod renderer;
+mod semantic;
 mod terminal;
 
 use std::io::{self, Read, Write};

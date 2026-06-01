@@ -7,6 +7,7 @@ pub mod opcodes {
     ));
 }
 
+use crate::semantic;
 use std::fmt;
 use std::io::{self, Write};
 
@@ -42,6 +43,7 @@ pub enum Command {
     SetActiveRegion(u16),
     ScrollRegion { top: u16, bottom: u16, delta: i16 },
     MeasureText { request_id: u32, text: String },
+    Semantic(semantic::Command),
     Noop(usize),
 }
 
@@ -59,6 +61,7 @@ impl Command {
             Self::ClearRegion(_) | Self::DestroyRegion(_) | Self::SetActiveRegion(_) => 3,
             Self::ScrollRegion { .. } => 7,
             Self::MeasureText { text, .. } => 7 + text.len(),
+            Self::Semantic(command) => command.size(),
             Self::Noop(size) => *size,
         }
     }
@@ -188,6 +191,7 @@ pub fn decode_command(bytes: &[u8]) -> Result<Command, DecodeError> {
         opcodes::OP_SET_FONT => skip_len_at(bytes, 5),
         opcodes::OP_SET_FONT_FALLBACK => skip_font_fallback(bytes),
         opcodes::OP_REGISTER_FONT => skip_len_at(bytes, 2),
+        _ if opcode >= 0x70 => semantic::decode(bytes).map(Command::Semantic),
         _ => Err(DecodeError::UnknownOpcode(opcode)),
     }
 }
@@ -198,7 +202,7 @@ pub fn write_packet(writer: &mut impl Write, payload: &[u8]) -> io::Result<()> {
     writer.flush()
 }
 
-pub fn encode_ready_with_caps(width: u16, height: u16) -> [u8; 13] {
+pub fn encode_ready_with_caps(width: u16, height: u16) -> [u8; 14] {
     [
         opcodes::OP_READY,
         (width >> 8) as u8,
@@ -206,13 +210,14 @@ pub fn encode_ready_with_caps(width: u16, height: u16) -> [u8; 13] {
         (height >> 8) as u8,
         height as u8,
         1,
-        6,
+        7,
         0,
         2,
         0,
         0,
         0,
         0,
+        1,
     ]
 }
 
@@ -398,7 +403,7 @@ mod tests {
     fn encodes_extended_ready() {
         assert_eq!(
             encode_ready_with_caps(80, 24),
-            [opcodes::OP_READY, 0, 80, 0, 24, 1, 6, 0, 2, 0, 0, 0, 0]
+            [opcodes::OP_READY, 0, 80, 0, 24, 1, 7, 0, 2, 0, 0, 0, 0, 1]
         );
     }
 
