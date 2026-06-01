@@ -15,6 +15,15 @@ struct ThemePalette {
     slots: HashMap<u8, u32>,
 }
 
+#[derive(Debug, Clone)]
+struct CellSnapshot {
+    row: u16,
+    col: u16,
+    width: u16,
+    height: u16,
+    cells: Vec<Cell>,
+}
+
 impl Default for Cell {
     fn default() -> Self {
         Self {
@@ -37,6 +46,8 @@ pub struct Renderer {
     file_tree: Option<semantic::FileTree>,
     picker: Option<semantic::Picker>,
     picker_preview: Option<semantic::PickerPreview>,
+    picker_snapshot: Option<CellSnapshot>,
+    minibuffer_snapshot: Option<CellSnapshot>,
     theme: ThemePalette,
 }
 
@@ -56,6 +67,8 @@ impl Renderer {
             file_tree: None,
             picker: None,
             picker_preview: None,
+            picker_snapshot: None,
+            minibuffer_snapshot: None,
             theme: ThemePalette::default(),
         }
     }
@@ -123,6 +136,8 @@ impl Renderer {
         self.file_tree = None;
         self.picker = None;
         self.picker_preview = None;
+        self.picker_snapshot = None;
+        self.minibuffer_snapshot = None;
     }
 
     fn clear(&mut self) {
@@ -313,6 +328,7 @@ impl Renderer {
             self.picker = Some(picker);
             self.render_picker();
         } else {
+            self.restore_picker_snapshot();
             self.picker = None;
             self.picker_preview = None;
         }
@@ -328,9 +344,15 @@ impl Renderer {
     }
 
     fn draw_minibuffer(&mut self, minibuffer: semantic::Minibuffer) {
-        if !minibuffer.visible || self.height < 2 || self.width == 0 {
+        if !minibuffer.visible {
+            self.restore_minibuffer_snapshot();
             return;
         }
+        if self.height < 2 || self.width == 0 {
+            return;
+        }
+
+        self.capture_minibuffer_snapshot();
 
         let row = self.height.saturating_sub(2);
         let prompt = format!("{}{}", minibuffer.prompt, minibuffer.input);
@@ -398,6 +420,9 @@ impl Renderer {
 
         let preview = self.picker_preview.clone();
         let (row, col, width, height) = picker_geometry(self.width, self.height);
+        if self.picker_snapshot.is_none() {
+            self.picker_snapshot = Some(self.capture_rect(row, col, width, height));
+        }
         self.fill_rect(row, col, width, height, self.theme.picker_style(false));
 
         let title = if picker.mode_prefix.is_empty() {
@@ -455,6 +480,29 @@ impl Renderer {
                 body_height,
                 preview.as_ref().unwrap(),
             );
+        }
+    }
+
+    fn restore_picker_snapshot(&mut self) {
+        if let Some(snapshot) = self.picker_snapshot.take() {
+            self.restore_snapshot(snapshot);
+        }
+    }
+
+    fn capture_minibuffer_snapshot(&mut self) {
+        if self.minibuffer_snapshot.is_some() || self.height < 2 || self.width == 0 {
+            return;
+        }
+
+        let prompt_row = self.height.saturating_sub(2);
+        let first_row = prompt_row.saturating_sub(5);
+        let height = prompt_row.saturating_sub(first_row).saturating_add(1);
+        self.minibuffer_snapshot = Some(self.capture_rect(first_row, 0, self.width, height));
+    }
+
+    fn restore_minibuffer_snapshot(&mut self) {
+        if let Some(snapshot) = self.minibuffer_snapshot.take() {
+            self.restore_snapshot(snapshot);
         }
     }
 
@@ -788,6 +836,49 @@ impl Renderer {
         let line = " ".repeat(width as usize);
         for y in row..row.saturating_add(height).min(self.height) {
             self.write_run(y, col, &line, style);
+        }
+    }
+
+    fn capture_rect(&self, row: u16, col: u16, width: u16, height: u16) -> CellSnapshot {
+        let max_row = row.saturating_add(height).min(self.height);
+        let max_col = col.saturating_add(width).min(self.width);
+        let mut cells = Vec::with_capacity(
+            max_row.saturating_sub(row) as usize * max_col.saturating_sub(col) as usize,
+        );
+
+        for y in row..max_row {
+            for x in col..max_col {
+                if let Some(index) = self.index(x, y) {
+                    cells.push(self.cells[index].clone());
+                }
+            }
+        }
+
+        CellSnapshot {
+            row,
+            col,
+            width: max_col.saturating_sub(col),
+            height: max_row.saturating_sub(row),
+            cells,
+        }
+    }
+
+    fn restore_snapshot(&mut self, snapshot: CellSnapshot) {
+        let mut snapshot_index = 0;
+        for y in snapshot.row
+            ..snapshot
+                .row
+                .saturating_add(snapshot.height)
+                .min(self.height)
+        {
+            for x in snapshot.col..snapshot.col.saturating_add(snapshot.width).min(self.width) {
+                if let Some(index) = self.index(x, y)
+                    && let Some(cell) = snapshot.cells.get(snapshot_index)
+                {
+                    self.cells[index] = cell.clone();
+                }
+                snapshot_index += 1;
+            }
         }
     }
 
@@ -1341,6 +1432,48 @@ mod tests {
     }
 
     #[test]
+    fn semantic_picker_hide_restores_underlying_cells() {
+        let mut renderer = Renderer::new(80, 20);
+        renderer.draw_text(DrawText {
+            row: 4,
+            col: 4,
+            fg: 0x111111,
+            bg: 0x222222,
+            attrs: 0,
+            text: "under".to_owned(),
+        });
+
+        renderer.draw_picker(semantic::Picker {
+            visible: true,
+            selected_index: 0,
+            filtered_count: 1,
+            total_count: 1,
+            marked_count: 0,
+            has_preview: false,
+            title: "Files".to_owned(),
+            query: String::new(),
+            mode_prefix: String::new(),
+            load_status: 0,
+            load_error: String::new(),
+            items: vec![semantic::PickerItem {
+                label: "main.ex".to_owned(),
+                description: String::new(),
+                annotation: String::new(),
+                icon_color: 0,
+                marked: false,
+            }],
+        });
+        assert_ne!(renderer.cells[renderer.index(4, 4).unwrap()].text, "u");
+
+        renderer.draw_picker(semantic::Picker::default());
+
+        let restored = &renderer.cells[renderer.index(4, 4).unwrap()];
+        assert_eq!(restored.text, "u");
+        assert_eq!(restored.style.fg, 0x111111);
+        assert_eq!(restored.style.bg, 0x222222);
+    }
+
+    #[test]
     fn semantic_minibuffer_draws_prompt_candidates_and_cursor() {
         let mut renderer = Renderer::new(40, 10);
 
@@ -1376,6 +1509,57 @@ mod tests {
             renderer.cells[renderer.index(0, 7).unwrap()].style.bg,
             0x4C566A
         );
+    }
+
+    #[test]
+    fn semantic_minibuffer_hide_restores_owned_rows() {
+        let mut renderer = Renderer::new(40, 10);
+        renderer.draw_text(DrawText {
+            row: 8,
+            col: 0,
+            fg: 0x111111,
+            bg: 0x222222,
+            attrs: 0,
+            text: "status".to_owned(),
+        });
+        renderer.draw_text(DrawText {
+            row: 7,
+            col: 0,
+            fg: 0x333333,
+            bg: 0x444444,
+            attrs: 0,
+            text: "candidate".to_owned(),
+        });
+
+        renderer.draw_minibuffer(semantic::Minibuffer {
+            visible: true,
+            mode: 0,
+            cursor_pos: 1,
+            prompt: ":".to_owned(),
+            input: "w".to_owned(),
+            context: String::new(),
+            selected_index: 0,
+            total_candidates: 1,
+            candidates: vec![semantic::MinibufferCandidate {
+                label: "write".to_owned(),
+                description: "Save file".to_owned(),
+                annotation: ":w".to_owned(),
+            }],
+        });
+        assert_eq!(renderer.cells[renderer.index(0, 8).unwrap()].text, ":");
+        assert_eq!(renderer.cells[renderer.index(0, 7).unwrap()].text, ">");
+
+        renderer.draw_minibuffer(semantic::Minibuffer::default());
+
+        let prompt = &renderer.cells[renderer.index(0, 8).unwrap()];
+        assert_eq!(prompt.text, "s");
+        assert_eq!(prompt.style.fg, 0x111111);
+        assert_eq!(prompt.style.bg, 0x222222);
+
+        let candidate = &renderer.cells[renderer.index(0, 7).unwrap()];
+        assert_eq!(candidate.text, "c");
+        assert_eq!(candidate.style.fg, 0x333333);
+        assert_eq!(candidate.style.bg, 0x444444);
     }
 
     #[test]
