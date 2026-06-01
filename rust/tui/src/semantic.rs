@@ -223,7 +223,8 @@ pub fn decode(bytes: &[u8]) -> Result<Command, DecodeError> {
         | opcodes::OP_GUI_EDIT_TIMELINE
         | opcodes::OP_GUI_EXTENSION_OVERLAY
         | opcodes::OP_GUI_EXTENSION_PANEL
-        | opcodes::OP_GUI_SEARCH_STATE => len16_size(bytes, "semantic length16 command")
+        | opcodes::OP_GUI_SEARCH_STATE
+        | opcodes::OP_GUI_CONFIG_STATE => len16_size(bytes, "semantic length16 command")
             .map(|size| Command::Unsupported { opcode, size }),
         opcodes::OP_GUI_OBSERVATORY | opcodes::OP_GUI_SIDEBARS => {
             len32_size(bytes, "semantic length32 command")
@@ -245,8 +246,7 @@ pub fn decode(bytes: &[u8]) -> Result<Command, DecodeError> {
         | opcodes::OP_GUI_BOARD
         | opcodes::OP_GUI_AGENT_CHAT
         | opcodes::OP_GUI_BOTTOM_PANEL
-        | opcodes::OP_GUI_TOOL_MANAGER
-        | opcodes::OP_GUI_CONFIG_STATE => {
+        | opcodes::OP_GUI_TOOL_MANAGER => {
             legacy_visible_size(bytes).map(|size| Command::Unsupported { opcode, size })
         }
         _ => Err(DecodeError::UnknownOpcode(opcode)),
@@ -883,12 +883,249 @@ fn split_separators_size(bytes: &[u8]) -> Result<usize, DecodeError> {
 
 fn legacy_visible_size(bytes: &[u8]) -> Result<usize, DecodeError> {
     require_len(bytes, 2, "legacy semantic visibility")?;
-    match bytes[1] {
-        0 => Ok(2),
+
+    if bytes[1] == 0 {
+        return Ok(2);
+    }
+
+    match bytes[0] {
+        opcodes::OP_GUI_BREADCRUMB => breadcrumb_size(bytes),
+        opcodes::OP_GUI_COMPLETION => completion_size(bytes),
+        opcodes::OP_GUI_SIGNATURE_HELP => signature_help_size(bytes),
+        opcodes::OP_GUI_FLOAT_POPUP => float_popup_size(bytes),
+        opcodes::OP_GUI_HOVER_POPUP => hover_popup_size(bytes),
+        opcodes::OP_GUI_AGENT_CONTEXT => agent_context_size(bytes),
+        opcodes::OP_GUI_GIT_STATUS => git_status_size(bytes),
+        opcodes::OP_GUI_CHANGE_SUMMARY => change_summary_size(bytes),
+        opcodes::OP_GUI_BOARD => board_size(bytes),
+        opcodes::OP_GUI_AGENT_CHAT => sectioned_size(bytes, "agent chat"),
+        opcodes::OP_GUI_BOTTOM_PANEL => bottom_panel_size(bytes),
+        opcodes::OP_GUI_TOOL_MANAGER => tool_manager_size(bytes),
         _ => Err(DecodeError::Malformed(
             "unsupported legacy semantic command",
         )),
     }
+}
+
+fn breadcrumb_size(bytes: &[u8]) -> Result<usize, DecodeError> {
+    require_len(bytes, 2, "breadcrumb")?;
+    let count = bytes[1] as usize;
+    let mut offset = 2;
+    for _ in 0..count {
+        skip_string16(bytes, &mut offset)?;
+    }
+    Ok(offset)
+}
+
+fn completion_size(bytes: &[u8]) -> Result<usize, DecodeError> {
+    require_len(bytes, 10, "completion")?;
+    let count = read_u16(bytes, 8) as usize;
+    let mut offset = 10;
+    for _ in 0..count {
+        require_len(bytes, offset + 1, "completion item kind")?;
+        offset += 1;
+        skip_string16(bytes, &mut offset)?;
+        skip_string16(bytes, &mut offset)?;
+    }
+    Ok(offset)
+}
+
+fn signature_help_size(bytes: &[u8]) -> Result<usize, DecodeError> {
+    require_len(bytes, 9, "signature help")?;
+    let count = bytes[8] as usize;
+    let mut offset = 9;
+    for _ in 0..count {
+        skip_string16(bytes, &mut offset)?;
+        skip_string16(bytes, &mut offset)?;
+        require_len(bytes, offset + 1, "signature parameter count")?;
+        let parameter_count = bytes[offset] as usize;
+        offset += 1;
+        for _ in 0..parameter_count {
+            skip_string16(bytes, &mut offset)?;
+            skip_string16(bytes, &mut offset)?;
+        }
+    }
+    Ok(offset)
+}
+
+fn float_popup_size(bytes: &[u8]) -> Result<usize, DecodeError> {
+    require_len(bytes, 8, "float popup")?;
+    let mut offset = 6;
+    skip_string16(bytes, &mut offset)?;
+    require_len(bytes, offset + 2, "float popup line count")?;
+    let line_count = read_u16(bytes, offset) as usize;
+    offset += 2;
+    for _ in 0..line_count {
+        skip_string16(bytes, &mut offset)?;
+    }
+    Ok(offset)
+}
+
+fn hover_popup_size(bytes: &[u8]) -> Result<usize, DecodeError> {
+    require_len(bytes, 11, "hover popup")?;
+    let line_count = read_u16(bytes, 9) as usize;
+    let mut offset = 11;
+    for _ in 0..line_count {
+        require_len(bytes, offset + 3, "hover line")?;
+        let segment_count = read_u16(bytes, offset + 1) as usize;
+        offset += 3;
+        for _ in 0..segment_count {
+            require_len(bytes, offset + 1, "hover segment style")?;
+            if bytes[offset] == 13 {
+                require_len(bytes, offset + 7, "hover syntax segment")?;
+                let len = read_u16(bytes, offset + 5) as usize;
+                offset += 7;
+                require_len(bytes, offset + len, "hover syntax segment text")?;
+                offset += len;
+            } else {
+                offset += 1;
+                skip_string16(bytes, &mut offset)?;
+            }
+        }
+    }
+    Ok(offset)
+}
+
+fn agent_context_size(bytes: &[u8]) -> Result<usize, DecodeError> {
+    require_len(bytes, 4, "agent context")?;
+    let len = read_u16(bytes, 2) as usize;
+    let offset = 4 + len;
+    require_len(bytes, offset + 10, "agent context body")?;
+    Ok(offset + 10)
+}
+
+fn git_status_size(bytes: &[u8]) -> Result<usize, DecodeError> {
+    require_len(bytes, 9, "git status")?;
+    let mut offset = 7;
+    skip_string16(bytes, &mut offset)?;
+    require_len(bytes, offset + 2, "git entry count")?;
+    let entry_count = read_u16(bytes, offset) as usize;
+    offset += 2;
+    for _ in 0..entry_count {
+        require_len(bytes, offset + 6, "git entry")?;
+        offset += 6;
+        skip_string16(bytes, &mut offset)?;
+    }
+    require_len(bytes, offset + 1, "git toast visibility")?;
+    match bytes[offset] {
+        0 => offset += 1,
+        _ => {
+            require_len(bytes, offset + 5, "git toast")?;
+            let len = read_u16(bytes, offset + 3) as usize;
+            offset += 5;
+            require_len(bytes, offset + len, "git toast message")?;
+            offset += len;
+        }
+    }
+    skip_string16(bytes, &mut offset)?;
+    skip_string16(bytes, &mut offset)?;
+    require_len(bytes, offset + 2, "git stash count")?;
+    Ok(offset + 2)
+}
+
+fn change_summary_size(bytes: &[u8]) -> Result<usize, DecodeError> {
+    require_len(bytes, 5, "change summary")?;
+    let count = read_u16(bytes, 3) as usize;
+    let mut offset = 5;
+    for _ in 0..count {
+        skip_string16(bytes, &mut offset)?;
+        require_len(bytes, offset + 9, "change summary entry")?;
+        offset += 9;
+    }
+    Ok(offset)
+}
+
+fn board_size(bytes: &[u8]) -> Result<usize, DecodeError> {
+    require_len(bytes, 11, "board")?;
+    let card_count = read_u16(bytes, 6) as usize;
+    let mut offset = 9;
+    skip_string16(bytes, &mut offset)?;
+    for _ in 0..card_count {
+        require_len(bytes, offset + 6, "board card")?;
+        offset += 6;
+        skip_string16(bytes, &mut offset)?;
+        skip_string8(bytes, &mut offset)?;
+        require_len(bytes, offset + 5, "board card timestamp and recent files")?;
+        offset += 4;
+        let recent_count = bytes[offset] as usize;
+        offset += 1;
+        for _ in 0..recent_count {
+            skip_string16(bytes, &mut offset)?;
+        }
+        require_len(bytes, offset + 1, "board sparkline count")?;
+        let sparkline_count = bytes[offset] as usize;
+        offset += 1;
+        require_len(bytes, offset + sparkline_count * 2, "board sparkline")?;
+        offset += sparkline_count * 2;
+    }
+    Ok(offset)
+}
+
+fn bottom_panel_size(bytes: &[u8]) -> Result<usize, DecodeError> {
+    require_len(bytes, 6, "bottom panel")?;
+    let tab_count = bytes[5] as usize;
+    let mut offset = 6;
+    for _ in 0..tab_count {
+        require_len(bytes, offset + 2, "bottom panel tab")?;
+        offset += 1;
+        skip_string8(bytes, &mut offset)?;
+    }
+    require_len(bytes, offset + 2, "bottom panel entry count")?;
+    let entry_count = read_u16(bytes, offset) as usize;
+    offset += 2;
+    for _ in 0..entry_count {
+        require_len(bytes, offset + 10, "bottom panel entry")?;
+        offset += 10;
+        skip_string16(bytes, &mut offset)?;
+        skip_string16(bytes, &mut offset)?;
+    }
+    Ok(offset)
+}
+
+fn tool_manager_size(bytes: &[u8]) -> Result<usize, DecodeError> {
+    require_len(bytes, 7, "tool manager")?;
+    let count = read_u16(bytes, 5) as usize;
+    let mut offset = 7;
+    for _ in 0..count {
+        skip_string8(bytes, &mut offset)?;
+        skip_string8(bytes, &mut offset)?;
+        skip_string16(bytes, &mut offset)?;
+        require_len(bytes, offset + 4, "tool metadata")?;
+        offset += 3;
+        let language_count = bytes[offset] as usize;
+        offset += 1;
+        for _ in 0..language_count {
+            skip_string8(bytes, &mut offset)?;
+        }
+        skip_string8(bytes, &mut offset)?;
+        skip_string16(bytes, &mut offset)?;
+        require_len(bytes, offset + 1, "tool provides count")?;
+        let provides_count = bytes[offset] as usize;
+        offset += 1;
+        for _ in 0..provides_count {
+            skip_string8(bytes, &mut offset)?;
+        }
+        skip_string16(bytes, &mut offset)?;
+    }
+    Ok(offset)
+}
+
+fn skip_string8(bytes: &[u8], offset: &mut usize) -> Result<(), DecodeError> {
+    require_len(bytes, *offset + 1, "string8 header")?;
+    let len = bytes[*offset] as usize;
+    *offset += 1;
+    require_len(bytes, *offset + len, "string8 body")?;
+    *offset += len;
+    Ok(())
+}
+
+fn skip_string16(bytes: &[u8], offset: &mut usize) -> Result<(), DecodeError> {
+    require_len(bytes, *offset + 2, "string16 header")?;
+    let len = read_u16(bytes, *offset) as usize;
+    *offset += 2;
+    require_len(bytes, *offset + len, "string16 body")?;
+    *offset += len;
+    Ok(())
 }
 
 fn require_len(bytes: &[u8], needed: usize, message: &'static str) -> Result<(), DecodeError> {
@@ -1184,6 +1421,35 @@ mod tests {
                 if slots[0] == ThemeSlot { id: 0x20, rgb: 0x112233 }
                     && slots[1] == ThemeSlot { id: 0x23, rgb: 0xAABBCC }
         ));
+    }
+
+    #[test]
+    fn skips_visible_completion_without_consuming_following_commands() {
+        let packet = [
+            vec![opcodes::OP_GUI_COMPLETION, 1, 0, 4, 0, 12, 0, 1, 0, 1, 2],
+            string16("write"),
+            string16("Save file"),
+            vec![opcodes::OP_BATCH_END],
+        ]
+        .concat();
+
+        let command = decode(&packet).unwrap();
+
+        assert_eq!(command.size(), packet.len() - 1);
+        assert!(matches!(
+            command,
+            Command::Unsupported {
+                opcode,
+                size
+            } if opcode == opcodes::OP_GUI_COMPLETION && size == packet.len() - 1
+        ));
+    }
+
+    #[test]
+    fn skips_length_prefixed_config_state() {
+        let command = decode(&[opcodes::OP_GUI_CONFIG_STATE, 0, 3, 1, 2, 3]).unwrap();
+
+        assert_eq!(command.size(), 6);
     }
 
     #[test]

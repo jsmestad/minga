@@ -46,6 +46,7 @@ pub struct Renderer {
     file_tree: Option<semantic::FileTree>,
     picker: Option<semantic::Picker>,
     picker_preview: Option<semantic::PickerPreview>,
+    minibuffer: Option<semantic::Minibuffer>,
     picker_snapshot: Option<CellSnapshot>,
     minibuffer_snapshot: Option<CellSnapshot>,
     theme: ThemePalette,
@@ -67,6 +68,7 @@ impl Renderer {
             file_tree: None,
             picker: None,
             picker_preview: None,
+            minibuffer: None,
             picker_snapshot: None,
             minibuffer_snapshot: None,
             theme: ThemePalette::default(),
@@ -136,6 +138,7 @@ impl Renderer {
         self.file_tree = None;
         self.picker = None;
         self.picker_preview = None;
+        self.minibuffer = None;
         self.picker_snapshot = None;
         self.minibuffer_snapshot = None;
     }
@@ -222,6 +225,8 @@ impl Renderer {
                 .saturating_add(row.min(u16::MAX as usize) as u16);
             self.draw_semantic_row(row, window.origin_col, content);
         }
+
+        self.redraw_retained_chrome();
     }
 
     fn draw_semantic_row(&mut self, row: u16, origin_col: u16, content: semantic::Row) {
@@ -346,12 +351,18 @@ impl Renderer {
     fn draw_minibuffer(&mut self, minibuffer: semantic::Minibuffer) {
         if !minibuffer.visible {
             self.restore_minibuffer_snapshot();
+            self.minibuffer = None;
             return;
         }
         if self.height < 2 || self.width == 0 {
             return;
         }
 
+        self.minibuffer = Some(minibuffer.clone());
+        self.render_minibuffer(&minibuffer);
+    }
+
+    fn render_minibuffer(&mut self, minibuffer: &semantic::Minibuffer) {
         self.capture_minibuffer_snapshot();
         self.restore_minibuffer_cells();
 
@@ -412,6 +423,17 @@ impl Renderer {
                 &pad_to_width(&text, self.width),
                 self.theme.minibuffer_style(selected),
             );
+        }
+    }
+
+    fn redraw_retained_chrome(&mut self) {
+        self.render_file_tree();
+        self.picker_snapshot = None;
+        self.render_picker();
+
+        if let Some(minibuffer) = self.minibuffer.clone() {
+            self.minibuffer_snapshot = None;
+            self.render_minibuffer(&minibuffer);
         }
     }
 
@@ -1485,6 +1507,61 @@ mod tests {
     }
 
     #[test]
+    fn semantic_window_redraw_replays_retained_picker() {
+        let mut renderer = Renderer::new(80, 20);
+
+        renderer.draw_semantic_window(semantic::WindowContent {
+            origin_row: 4,
+            origin_col: 4,
+            cursor_row: 0,
+            cursor_col: 0,
+            cursor_shape: 0,
+            rows: vec![semantic::Row {
+                text: "old".to_owned(),
+                spans: vec![],
+            }],
+        });
+        renderer.draw_picker(semantic::Picker {
+            visible: true,
+            selected_index: 0,
+            filtered_count: 1,
+            total_count: 1,
+            marked_count: 0,
+            has_preview: false,
+            title: "Files".to_owned(),
+            query: String::new(),
+            mode_prefix: String::new(),
+            load_status: 0,
+            load_error: String::new(),
+            items: vec![semantic::PickerItem {
+                label: "main.ex".to_owned(),
+                description: String::new(),
+                annotation: String::new(),
+                icon_color: 0,
+                marked: false,
+            }],
+        });
+
+        renderer.draw_semantic_window(semantic::WindowContent {
+            origin_row: 4,
+            origin_col: 4,
+            cursor_row: 0,
+            cursor_col: 0,
+            cursor_shape: 0,
+            rows: vec![semantic::Row {
+                text: "new".to_owned(),
+                spans: vec![],
+            }],
+        });
+
+        assert_ne!(renderer.cells[renderer.index(4, 4).unwrap()].text, "n");
+
+        renderer.draw_picker(semantic::Picker::default());
+
+        assert_eq!(renderer.cells[renderer.index(4, 4).unwrap()].text, "n");
+    }
+
+    #[test]
     fn semantic_minibuffer_draws_prompt_candidates_and_cursor() {
         let mut renderer = Renderer::new(40, 10);
 
@@ -1631,6 +1708,41 @@ mod tests {
 
         assert_eq!(renderer.cursor, (12, 3));
         assert_eq!(renderer.cells[renderer.index(0, 8).unwrap()].text, "C");
+    }
+
+    #[test]
+    fn semantic_window_redraw_replays_retained_minibuffer() {
+        let mut renderer = Renderer::new(40, 10);
+
+        renderer.draw_minibuffer(semantic::Minibuffer {
+            visible: true,
+            mode: 0,
+            cursor_pos: 1,
+            prompt: ":".to_owned(),
+            input: "w".to_owned(),
+            context: String::new(),
+            selected_index: 0,
+            total_candidates: 0,
+            candidates: vec![],
+        });
+
+        renderer.draw_semantic_window(semantic::WindowContent {
+            origin_row: 8,
+            origin_col: 0,
+            cursor_row: 0,
+            cursor_col: 0,
+            cursor_shape: 0,
+            rows: vec![semantic::Row {
+                text: "under".to_owned(),
+                spans: vec![],
+            }],
+        });
+
+        assert_eq!(renderer.cells[renderer.index(0, 8).unwrap()].text, ":");
+
+        renderer.draw_minibuffer(semantic::Minibuffer::default());
+
+        assert_eq!(renderer.cells[renderer.index(0, 8).unwrap()].text, "u");
     }
 
     #[test]
