@@ -2461,7 +2461,7 @@ defmodule MingaEditor.State do
           TabBar.update_workspace(
             tab_bar(state),
             workspace_id,
-            &%{&1 | pending_catchup_events: []}
+            &WorkspaceModel.clear_pending_catchup_events/1
           )
 
         set_tab_bar(state, tb)

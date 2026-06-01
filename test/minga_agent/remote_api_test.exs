@@ -39,6 +39,20 @@ defmodule MingaAgent.RemoteAPITest do
     assert {:error, :not_driver} = RemoteAPI.send_prompt(session_id, token, viewer, "not allowed")
   end
 
+  test "attach rejects invalid roles without crashing the session" do
+    assert {:ok, %{session_id: session_id, pid: pid, token: token}} = RemoteAPI.start_session([])
+    on_exit(fn -> SessionManager.stop_session(session_id) end)
+
+    client = idle_process()
+    on_exit(fn -> Process.exit(client, :kill) end)
+
+    assert {:error, :invalid_role} = RemoteAPI.attach(session_id, token, client, role: :admin)
+    assert {:ok, ^pid} = SessionManager.get_session(session_id)
+    assert %{id: ^session_id} = Session.metadata(pid)
+    assert {:error, :invalid_role} = Session.subscribe(pid, client, role: :admin)
+    assert %{id: ^session_id} = Session.metadata(pid)
+  end
+
   test "detach removes the subscriber without stopping the session" do
     assert {:ok, %{session_id: session_id, token: token}} = RemoteAPI.start_session([])
     on_exit(fn -> SessionManager.stop_session(session_id) end)

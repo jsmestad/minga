@@ -283,13 +283,13 @@ defmodule MingaAgent.Session do
   end
 
   @doc "Subscribes the calling process to session events."
-  @spec subscribe(GenServer.server()) :: :ok
+  @spec subscribe(GenServer.server()) :: :ok | {:error, :invalid_role}
   def subscribe(session) do
     subscribe(session, self())
   end
 
   @doc "Subscribes the given process to session events."
-  @spec subscribe(GenServer.server(), pid(), keyword()) :: :ok
+  @spec subscribe(GenServer.server(), pid(), keyword()) :: :ok | {:error, :invalid_role}
   def subscribe(session, pid, opts \\ []) when is_pid(pid) do
     GenServer.call(session, {:subscribe, pid, opts})
   end
@@ -1037,10 +1037,17 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call({:subscribe, pid, opts}, _from, state) do
-    Process.monitor(pid)
     role = Keyword.get(opts, :role, default_subscriber_role(state))
-    state = state |> cancel_idle_gc_timer() |> put_subscriber(pid, role)
-    {:reply, :ok, state}
+
+    case valid_subscriber_role?(role) do
+      true ->
+        Process.monitor(pid)
+        state = state |> cancel_idle_gc_timer() |> put_subscriber(pid, role)
+        {:reply, :ok, state}
+
+      false ->
+        {:reply, {:error, :invalid_role}, state}
+    end
   end
 
   def handle_call({:subscriber_role, pid}, _from, state) do
@@ -1934,6 +1941,9 @@ defmodule MingaAgent.Session do
   @spec default_subscriber_role(state()) :: attachment_role()
   defp default_subscriber_role(%{driver: nil}), do: :driver
   defp default_subscriber_role(_state), do: :viewer
+
+  @spec valid_subscriber_role?(term()) :: boolean()
+  defp valid_subscriber_role?(role), do: role in [:driver, :viewer]
 
   @spec put_subscriber(state(), pid(), attachment_role()) :: state()
   defp put_subscriber(state, pid, :driver) do

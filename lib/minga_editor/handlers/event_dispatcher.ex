@@ -470,7 +470,10 @@ defmodule MingaEditor.Handlers.EventDispatcher do
           tb =
             tb
             |> set_workspace_remote_state(workspace, pid, :connected, latest_event_id)
-            |> TabBar.update_workspace(workspace_id, &%{&1 | pending_catchup_events: events})
+            |> TabBar.update_workspace(
+              workspace_id,
+              &Workspace.set_pending_catchup_events(&1, events)
+            )
 
           EditorState.set_tab_bar(state, tb)
         end

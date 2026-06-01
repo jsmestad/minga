@@ -64,12 +64,17 @@ defmodule MingaAgent.RemoteAPI do
     role = Keyword.get(opts, :role, :viewer)
     last_seen_event_id = Keyword.get(opts, :last_seen_event_id, 0)
 
-    with :ok <- authorize(session_id, token),
+    with :ok <- validate_attach_role(role),
+         :ok <- authorize(session_id, token),
          {:ok, pid} <- SessionManager.get_session(session_id),
          :ok <- Session.subscribe(pid, subscriber_pid, role: role) do
       attach_after_subscribe(pid, session_id, token, subscriber_pid, last_seen_event_id)
     end
   end
+
+  @spec validate_attach_role(term()) :: :ok | {:error, :invalid_role}
+  defp validate_attach_role(role) when role in [:driver, :viewer], do: :ok
+  defp validate_attach_role(_role), do: {:error, :invalid_role}
 
   @doc "Detaches a client process from a session without stopping the session."
   @spec detach(String.t(), String.t(), pid()) :: :ok | {:error, term()}

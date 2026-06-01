@@ -11,11 +11,11 @@ defmodule MingaAgent.EventLog.Store do
   @doc "Opens or creates the agent event database."
   @spec open(String.t()) :: {:ok, db()} | {:error, term()}
   def open(db_path) do
-    File.mkdir_p!(Path.dirname(db_path))
-
-    case Exqlite.Sqlite3.open(db_path) do
-      {:ok, db} -> setup_opened(db)
-      {:error, reason} -> {:error, reason}
+    with :ok <- ensure_database_directory(db_path) do
+      case Exqlite.Sqlite3.open(db_path) do
+        {:ok, db} -> setup_opened(db, db_path)
+        {:error, reason} -> {:error, reason}
+      end
     end
   end
 
@@ -59,7 +59,7 @@ defmodule MingaAgent.EventLog.Store do
         Exqlite.Sqlite3.release(db, stmt)
 
         case result do
-          :ok -> last_insert_rowid(db)
+          :ok -> private_last_insert_rowid(db)
           {:error, reason} -> {:error, reason}
         end
 
@@ -160,11 +160,21 @@ defmodule MingaAgent.EventLog.Store do
     end
   end
 
-  @spec setup_opened(db()) :: {:ok, db()} | {:error, term()}
-  defp setup_opened(db) do
-    case setup(db) do
-      :ok -> {:ok, db}
-      {:error, reason} -> {:error, reason}
+  @spec setup_opened(db(), String.t() | nil) :: {:ok, db()} | {:error, term()}
+  defp setup_opened(db, db_path \\ nil) do
+    result =
+      case setup(db) do
+        :ok -> ensure_private_database_files(db_path)
+        {:error, _reason} = error -> error
+      end
+
+    case result do
+      :ok ->
+        {:ok, db}
+
+      {:error, _reason} = error ->
+        _ = close(db)
+        error
     end
   end
 
@@ -231,6 +241,101 @@ defmodule MingaAgent.EventLog.Store do
 
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  @spec ensure_database_directory(String.t()) :: :ok | {:error, term()}
+  defp ensure_database_directory(db_path) do
+    db_path
+    |> Path.dirname()
+    |> ensure_private_created_directory()
+  end
+
+  @spec ensure_private_created_directory(String.t()) :: :ok | {:error, term()}
+  defp ensure_private_created_directory(dir) do
+    expanded_dir = Path.expand(dir)
+    ensure_private_created_directory(expanded_dir, File.cwd!(), File.stat(expanded_dir))
+  end
+
+  @spec ensure_private_created_directory(
+          String.t(),
+          String.t(),
+          {:ok, File.Stat.t()} | {:error, term()}
+        ) ::
+          :ok | {:error, term()}
+  defp ensure_private_created_directory(dir, dir, _stat), do: :ok
+
+  defp ensure_private_created_directory(_dir, _cwd, {:ok, %File.Stat{type: :directory}}), do: :ok
+
+  defp ensure_private_created_directory(_dir, _cwd, {:ok, %File.Stat{}}), do: {:error, :enotdir}
+
+  defp ensure_private_created_directory(dir, _cwd, {:error, :enoent}) do
+    with :ok <- File.mkdir_p(dir) do
+      File.chmod(dir, 0o700)
+    end
+  end
+
+  defp ensure_private_created_directory(_dir, _cwd, {:error, reason}), do: {:error, reason}
+
+  @spec private_last_insert_rowid(db()) :: {:ok, pos_integer()} | {:error, term()}
+  defp private_last_insert_rowid(db) do
+    with {:ok, id} <- last_insert_rowid(db),
+         :ok <- ensure_private_open_database_files(db) do
+      {:ok, id}
+    end
+  end
+
+  @spec ensure_private_open_database_files(db()) :: :ok | {:error, term()}
+  defp ensure_private_open_database_files(db) do
+    case database_path(db) do
+      {:ok, path} -> ensure_private_database_files(path)
+      {:error, _reason} = error -> error
+    end
+  end
+
+  @spec database_path(db()) :: {:ok, String.t() | nil} | {:error, term()}
+  defp database_path(db) do
+    case Exqlite.Sqlite3.prepare(db, "PRAGMA database_list") do
+      {:ok, stmt} ->
+        result = Exqlite.Sqlite3.step(db, stmt)
+        Exqlite.Sqlite3.release(db, stmt)
+
+        case result do
+          {:row, [_seq, "main", ""]} -> {:ok, nil}
+          {:row, [_seq, "main", path]} when is_binary(path) -> {:ok, path}
+          {:error, reason} -> {:error, reason}
+          other -> {:error, {:unexpected_result, other}}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @spec ensure_private_database_files(String.t() | nil) :: :ok | {:error, term()}
+  defp ensure_private_database_files(nil), do: :ok
+
+  defp ensure_private_database_files(path) do
+    path
+    |> database_file_paths()
+    |> Enum.reduce_while(:ok, fn file_path, :ok -> chmod_existing_file(file_path, 0o600) end)
+  end
+
+  @spec database_file_paths(String.t()) :: [String.t()]
+  defp database_file_paths(path), do: [path, path <> "-wal", path <> "-shm"]
+
+  @spec chmod_existing_file(String.t(), non_neg_integer()) ::
+          {:cont, :ok} | {:halt, {:error, term()}}
+  defp chmod_existing_file(path, mode) do
+    case File.exists?(path) do
+      true ->
+        case File.chmod(path, mode) do
+          :ok -> {:cont, :ok}
+          {:error, reason} -> {:halt, {:error, reason}}
+        end
+
+      false ->
+        {:cont, :ok}
     end
   end
 

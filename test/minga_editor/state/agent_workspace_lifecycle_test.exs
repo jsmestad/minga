@@ -7,6 +7,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Project.FileRef
+  alias MingaAgent.EventLog.EventRecord
   alias MingaAgent.SessionManager
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Commands.AgentSession
@@ -73,6 +74,43 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
 
     assert TabBar.active_workspace_id(state.shell_state.tab_bar) == 0
     assert prompt_text(state.workspace.agent_ui) == ""
+  end
+
+  test "switching to inactive remote workspace drains queued catch-up once" do
+    state = state_with_agent_workspace_tabs()
+    initial_tab_id = TabBar.active(state.shell_state.tab_bar).id
+    catchup = [EventRecord.new("remote-session", :message_changed, %{})]
+
+    {tab_bar, agent_tab} = TabBar.add(state.shell_state.tab_bar, :agent, "Remote Agent")
+    {tab_bar, remote_workspace} = TabBar.add_workspace(tab_bar, "Remote Agent")
+
+    tab_bar =
+      tab_bar
+      |> TabBar.move_tab_to_workspace(agent_tab.id, remote_workspace.id)
+      |> TabBar.update_workspace(remote_workspace.id, fn workspace ->
+        workspace
+        |> Workspace.set_agent_ui(UIState.new())
+        |> Workspace.set_pending_catchup_events(catchup)
+      end)
+      |> TabBar.switch_to(initial_tab_id)
+
+    state = EditorState.set_tab_bar(state, tab_bar)
+    initial_version = panel_message_version(state)
+
+    {state, _effects} = EditorState.switch_tab_pure(state, agent_tab.id)
+    drained_workspace = TabBar.get_workspace(state.shell_state.tab_bar, remote_workspace.id)
+    first_version = panel_message_version(state)
+
+    assert first_version == initial_version + 1
+    assert drained_workspace.pending_catchup_events == []
+
+    {state, _effects} = EditorState.switch_tab_pure(state, initial_tab_id)
+    {state, _effects} = EditorState.switch_tab_pure(state, agent_tab.id)
+
+    assert panel_message_version(state) == first_version
+
+    assert TabBar.get_workspace(state.shell_state.tab_bar, remote_workspace.id).pending_catchup_events ==
+             []
   end
 
   test "switching workspaces restores that workspace's agent UI and session" do
@@ -440,6 +478,8 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
   defp show_panel(%UIState{} = ui) do
     %{ui | panel: %{ui.panel | visible: true}}
   end
+
+  defp panel_message_version(state), do: state.workspace.agent_ui.panel.message_version
 
   defp stop_session(pid) when is_pid(pid) do
     AgentSession.stop_session_pid(pid)
