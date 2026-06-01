@@ -235,7 +235,7 @@ defmodule Minga.Credo.DependencyDirectionCheck do
          source_module,
          issue_meta
        )
-       when source_layer != nil and form in [:def, :defp, :defmacro, :defmacrop] do
+       when source_layer != nil and form in [:def, :defp, :defmacro, :defmacrop, :defdelegate] do
     issues = check_direct_alias_refs(ast, issues, source_layer, source_module, meta, issue_meta)
     {ast, issues}
   end

@@ -167,6 +167,34 @@ defmodule Minga.Credo.DependencyDirectionCheckTest do
       end)
     end
 
+    test "flags defdelegate targets that cross Agent Level 0 to Level 1" do
+      """
+      defmodule MingaAgent.Event do
+        defdelegate start_session(opts), to: MingaAgent.Session
+      end
+      """
+      |> check("lib/minga_agent/event.ex")
+      |> assert_issue(fn issue ->
+        assert issue.message =~ "Agent Level 0"
+        assert issue.message =~ "Agent Level 1"
+        assert issue.trigger == "MingaAgent.Session"
+      end)
+    end
+
+    test "flags defdelegate targets that cross Agent Level 1 to Level 2" do
+      """
+      defmodule MingaAgent.Session do
+        defdelegate render(state), to: MingaEditor.Agent.UIState
+      end
+      """
+      |> check("lib/minga_agent/session.ex")
+      |> assert_issue(fn issue ->
+        assert issue.message =~ "Agent Level 1"
+        assert issue.message =~ "Agent Level 2"
+        assert issue.trigger == "MingaEditor.Agent.UIState"
+      end)
+    end
+
     test "flags direct remote calls that cross Agent levels" do
       """
       defmodule MingaAgent.Event do
