@@ -16,6 +16,9 @@ pub enum Command {
     SignatureHelp(SignatureHelp, usize),
     FloatPopup(FloatPopup, usize),
     HoverPopup(HoverPopup, usize),
+    BottomPanel(BottomPanel, usize),
+    ChangeSummary(ChangeSummary, usize),
+    GitStatus(GitStatus, usize),
     Theme(Theme, usize),
     Unsupported { opcode: u8, size: usize },
 }
@@ -37,6 +40,9 @@ impl Command {
             Self::SignatureHelp(_, size) => *size,
             Self::FloatPopup(_, size) => *size,
             Self::HoverPopup(_, size) => *size,
+            Self::BottomPanel(_, size) => *size,
+            Self::ChangeSummary(_, size) => *size,
+            Self::GitStatus(_, size) => *size,
             Self::Theme(_, size) => *size,
             Self::Unsupported { size, .. } => *size,
         }
@@ -287,6 +293,76 @@ pub struct HoverSegment {
     pub text: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct BottomPanel {
+    pub visible: bool,
+    pub active_tab_index: u8,
+    pub height_percent: u8,
+    pub filter: u8,
+    pub tabs: Vec<BottomPanelTab>,
+    pub entries: Vec<BottomPanelEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BottomPanelTab {
+    pub tab_type: u8,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BottomPanelEntry {
+    pub id: u32,
+    pub level: u8,
+    pub subsystem: u8,
+    pub timestamp_secs: u32,
+    pub file_path: String,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ChangeSummary {
+    pub visible: bool,
+    pub selected_index: u16,
+    pub entries: Vec<ChangeSummaryEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChangeSummaryEntry {
+    pub path: String,
+    pub action: u8,
+    pub lines_added: u32,
+    pub lines_removed: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct GitStatus {
+    pub repo_state: u8,
+    pub syncing: bool,
+    pub ahead: u16,
+    pub behind: u16,
+    pub branch: String,
+    pub entries: Vec<GitStatusEntry>,
+    pub toast: Option<GitToast>,
+    pub entry_base_path: String,
+    pub last_commit_message: String,
+    pub stash_count: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitStatusEntry {
+    pub path_hash: u32,
+    pub section: u8,
+    pub status: u8,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitToast {
+    pub level: u8,
+    pub action: u8,
+    pub message: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Theme {
     pub slots: Vec<ThemeSlot>,
@@ -316,6 +392,9 @@ pub fn decode(bytes: &[u8]) -> Result<Command, DecodeError> {
         opcodes::OP_GUI_SIGNATURE_HELP => decode_signature_help(bytes),
         opcodes::OP_GUI_FLOAT_POPUP => decode_float_popup(bytes),
         opcodes::OP_GUI_HOVER_POPUP => decode_hover_popup(bytes),
+        opcodes::OP_GUI_BOTTOM_PANEL => decode_bottom_panel(bytes),
+        opcodes::OP_GUI_CHANGE_SUMMARY => decode_change_summary(bytes),
+        opcodes::OP_GUI_GIT_STATUS => decode_git_status(bytes),
         opcodes::OP_GUI_THEME => decode_theme(bytes),
         opcodes::OP_GUI_WINDOW_VIEWPORT_DELTA | opcodes::OP_GUI_WINDOW_ROWS_DELTA => {
             sectioned_size(bytes, "semantic row delta")
@@ -346,11 +425,8 @@ pub fn decode(bytes: &[u8]) -> Result<Command, DecodeError> {
             split_separators_size(bytes).map(|size| Command::Unsupported { opcode, size })
         }
         opcodes::OP_GUI_AGENT_CONTEXT
-        | opcodes::OP_GUI_GIT_STATUS
-        | opcodes::OP_GUI_CHANGE_SUMMARY
         | opcodes::OP_GUI_BOARD
         | opcodes::OP_GUI_AGENT_CHAT
-        | opcodes::OP_GUI_BOTTOM_PANEL
         | opcodes::OP_GUI_TOOL_MANAGER => {
             legacy_visible_size(bytes).map(|size| Command::Unsupported { opcode, size })
         }
@@ -1016,6 +1092,170 @@ fn decode_hover_popup(bytes: &[u8]) -> Result<Command, DecodeError> {
     ))
 }
 
+fn decode_bottom_panel(bytes: &[u8]) -> Result<Command, DecodeError> {
+    require_len(bytes, 2, "bottom panel header")?;
+    if bytes[1] == 0 {
+        return Ok(Command::BottomPanel(BottomPanel::default(), 2));
+    }
+
+    let size = bottom_panel_size(bytes)?;
+    require_len(bytes, 6, "bottom panel visible header")?;
+    let active_tab_index = bytes[2];
+    let height_percent = bytes[3];
+    let filter = bytes[4];
+    let tab_count = bytes[5] as usize;
+    let mut offset = 6;
+    let mut tabs = Vec::with_capacity(tab_count);
+
+    for _ in 0..tab_count {
+        require_len(bytes, offset + 1, "bottom panel tab type")?;
+        let tab_type = bytes[offset];
+        offset += 1;
+        let name = read_string8(bytes, &mut offset)?;
+        tabs.push(BottomPanelTab { tab_type, name });
+    }
+
+    require_len(bytes, offset + 2, "bottom panel entry count")?;
+    let entry_count = read_u16(bytes, offset) as usize;
+    offset += 2;
+    let mut entries = Vec::with_capacity(entry_count);
+
+    for _ in 0..entry_count {
+        require_len(bytes, offset + 10, "bottom panel entry")?;
+        let id = read_u32(bytes, offset);
+        let level = bytes[offset + 4];
+        let subsystem = bytes[offset + 5];
+        let timestamp_secs = read_u32(bytes, offset + 6);
+        offset += 10;
+        let file_path = read_string16(bytes, &mut offset)?;
+        let text = read_string16(bytes, &mut offset)?;
+        entries.push(BottomPanelEntry {
+            id,
+            level,
+            subsystem,
+            timestamp_secs,
+            file_path,
+            text,
+        });
+    }
+
+    Ok(Command::BottomPanel(
+        BottomPanel {
+            visible: true,
+            active_tab_index,
+            height_percent,
+            filter,
+            tabs,
+            entries,
+        },
+        size,
+    ))
+}
+
+fn decode_change_summary(bytes: &[u8]) -> Result<Command, DecodeError> {
+    let size = change_summary_size(bytes)?;
+    require_len(bytes, 5, "change summary header")?;
+    let visible = bytes[1] != 0;
+    let selected_index = read_u16(bytes, 2);
+    let count = read_u16(bytes, 4) as usize;
+    let mut offset = 6;
+    let mut entries = Vec::with_capacity(count);
+
+    for _ in 0..count {
+        let path = read_string16(bytes, &mut offset)?;
+        require_len(bytes, offset + 9, "change summary entry")?;
+        let action = bytes[offset];
+        let lines_added = read_u32(bytes, offset + 1);
+        let lines_removed = read_u32(bytes, offset + 5);
+        offset += 9;
+        entries.push(ChangeSummaryEntry {
+            path,
+            action,
+            lines_added,
+            lines_removed,
+        });
+    }
+
+    Ok(Command::ChangeSummary(
+        ChangeSummary {
+            visible,
+            selected_index,
+            entries,
+        },
+        size,
+    ))
+}
+
+fn decode_git_status(bytes: &[u8]) -> Result<Command, DecodeError> {
+    let size = git_status_size(bytes)?;
+    require_len(bytes, 9, "git status header")?;
+    let repo_state = bytes[1];
+    let syncing = bytes[2] != 0;
+    let ahead = read_u16(bytes, 3);
+    let behind = read_u16(bytes, 5);
+    let mut offset = 7;
+    let branch = read_string16(bytes, &mut offset)?;
+    require_len(bytes, offset + 2, "git status entry count")?;
+    let count = read_u16(bytes, offset) as usize;
+    offset += 2;
+    let mut entries = Vec::with_capacity(count);
+
+    for _ in 0..count {
+        require_len(bytes, offset + 6, "git status entry")?;
+        let path_hash = read_u32(bytes, offset);
+        let section = bytes[offset + 4];
+        let status = bytes[offset + 5];
+        offset += 6;
+        let path = read_string16(bytes, &mut offset)?;
+        entries.push(GitStatusEntry {
+            path_hash,
+            section,
+            status,
+            path,
+        });
+    }
+
+    require_len(bytes, offset + 1, "git toast visibility")?;
+    let toast = if bytes[offset] == 0 {
+        offset += 1;
+        None
+    } else {
+        require_len(bytes, offset + 5, "git toast")?;
+        let level = bytes[offset + 1];
+        let action = bytes[offset + 2];
+        let len = read_u16(bytes, offset + 3) as usize;
+        offset += 5;
+        let message = read_string(bytes, offset, len)?;
+        offset += len;
+        Some(GitToast {
+            level,
+            action,
+            message,
+        })
+    };
+
+    let entry_base_path = read_string16(bytes, &mut offset)?;
+    let last_commit_message = read_string16(bytes, &mut offset)?;
+    require_len(bytes, offset + 2, "git stash count")?;
+    let stash_count = read_u16(bytes, offset);
+
+    Ok(Command::GitStatus(
+        GitStatus {
+            repo_state,
+            syncing,
+            ahead,
+            behind,
+            branch,
+            entries,
+            toast,
+            entry_base_path,
+            last_commit_message,
+            stash_count,
+        },
+        size,
+    ))
+}
+
 fn decode_theme(bytes: &[u8]) -> Result<Command, DecodeError> {
     let size = theme_size(bytes)?;
     let count = bytes[1] as usize;
@@ -1393,9 +1633,9 @@ fn git_status_size(bytes: &[u8]) -> Result<usize, DecodeError> {
 }
 
 fn change_summary_size(bytes: &[u8]) -> Result<usize, DecodeError> {
-    require_len(bytes, 5, "change summary")?;
-    let count = read_u16(bytes, 3) as usize;
-    let mut offset = 5;
+    require_len(bytes, 6, "change summary")?;
+    let count = read_u16(bytes, 4) as usize;
+    let mut offset = 6;
     for _ in 0..count {
         skip_string16(bytes, &mut offset)?;
         require_len(bytes, offset + 9, "change summary entry")?;
@@ -1913,6 +2153,92 @@ mod tests {
     }
 
     #[test]
+    fn decodes_bottom_panel_without_consuming_following_commands() {
+        let packet = [
+            vec![opcodes::OP_GUI_BOTTOM_PANEL, 1, 1, 30, 2, 2],
+            vec![0],
+            string8("Logs"),
+            vec![1],
+            string8("Tasks"),
+            vec![0, 1],
+            vec![0, 0, 0, 7, 4, 2, 0, 0, 0, 42],
+            string16("lib/minga.ex"),
+            string16("failed to compile"),
+            vec![opcodes::OP_BATCH_END],
+        ]
+        .concat();
+
+        let command = decode(&packet).unwrap();
+
+        assert_eq!(command.size(), packet.len() - 1);
+        assert!(matches!(
+            command,
+            Command::BottomPanel(BottomPanel { visible: true, active_tab_index: 1, height_percent: 30, filter: 2, tabs, entries }, _)
+                if tabs[0].name == "Logs"
+                    && tabs[1].tab_type == 1
+                    && entries[0].id == 7
+                    && entries[0].text == "failed to compile"
+        ));
+    }
+
+    #[test]
+    fn decodes_change_summary_without_consuming_following_commands() {
+        let packet = [
+            vec![opcodes::OP_GUI_CHANGE_SUMMARY, 1, 0, 1, 0, 2],
+            string16("lib/a.ex"),
+            vec![0, 0, 0, 0, 12, 0, 0, 0, 3],
+            string16("lib/b.ex"),
+            vec![1, 0, 0, 0, 5, 0, 0, 0, 0],
+            vec![opcodes::OP_BATCH_END],
+        ]
+        .concat();
+
+        let command = decode(&packet).unwrap();
+
+        assert_eq!(command.size(), packet.len() - 1);
+        assert!(matches!(
+            command,
+            Command::ChangeSummary(ChangeSummary { visible: true, selected_index: 1, entries }, _)
+                if entries[0].path == "lib/a.ex"
+                    && entries[0].lines_added == 12
+                    && entries[1].action == 1
+        ));
+    }
+
+    #[test]
+    fn decodes_git_status_without_consuming_following_commands() {
+        let packet = [
+            vec![opcodes::OP_GUI_GIT_STATUS, 0, 1, 0, 2, 0, 1],
+            string16("main"),
+            vec![0, 1],
+            vec![0x12, 0x34, 0x56, 0x78, 1, 1],
+            string16("lib/minga.ex"),
+            vec![1, 0, 0],
+            string16("Pulled"),
+            string16("lib"),
+            string16("Initial commit"),
+            vec![0, 3],
+            vec![opcodes::OP_BATCH_END],
+        ]
+        .concat();
+
+        let command = decode(&packet).unwrap();
+
+        assert_eq!(command.size(), packet.len() - 1);
+        assert!(matches!(
+            command,
+            Command::GitStatus(GitStatus { repo_state: 0, syncing: true, ahead: 2, behind: 1, branch, entries, toast: Some(toast), entry_base_path, last_commit_message, stash_count }, _)
+                if branch == "main"
+                    && entries[0].path_hash == 0x12345678
+                    && entries[0].path == "lib/minga.ex"
+                    && toast.message == "Pulled"
+                    && entry_base_path == "lib"
+                    && last_commit_message == "Initial commit"
+                    && stash_count == 3
+        ));
+    }
+
+    #[test]
     fn decodes_theme_slots() {
         let packet = vec![
             opcodes::OP_GUI_THEME,
@@ -1958,43 +2284,12 @@ mod tests {
                 ],
             ),
             (
-                opcodes::OP_GUI_GIT_STATUS,
-                vec![
-                    opcodes::OP_GUI_GIT_STATUS,
-                    1,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                ],
-            ),
-            (
-                opcodes::OP_GUI_CHANGE_SUMMARY,
-                vec![opcodes::OP_GUI_CHANGE_SUMMARY, 1, 0, 0, 0],
-            ),
-            (
                 opcodes::OP_GUI_BOARD,
                 vec![opcodes::OP_GUI_BOARD, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
             ),
             (
                 opcodes::OP_GUI_AGENT_CHAT,
                 vec![opcodes::OP_GUI_AGENT_CHAT, 1, 1, 0, 0],
-            ),
-            (
-                opcodes::OP_GUI_BOTTOM_PANEL,
-                vec![opcodes::OP_GUI_BOTTOM_PANEL, 1, 0, 0, 0, 0, 0, 0],
             ),
             (
                 opcodes::OP_GUI_TOOL_MANAGER,

@@ -60,6 +60,9 @@ pub struct Renderer {
     signature_help: Option<semantic::SignatureHelp>,
     float_popup: Option<semantic::FloatPopup>,
     hover_popup: Option<semantic::HoverPopup>,
+    bottom_panel: Option<semantic::BottomPanel>,
+    change_summary: Option<semantic::ChangeSummary>,
+    git_status: Option<semantic::GitStatus>,
     picker_snapshot: Option<CellSnapshot>,
     minibuffer_snapshot: Option<CellSnapshot>,
     completion_snapshot: Option<CellSnapshot>,
@@ -67,6 +70,9 @@ pub struct Renderer {
     signature_help_snapshot: Option<CellSnapshot>,
     float_popup_snapshot: Option<CellSnapshot>,
     hover_popup_snapshot: Option<CellSnapshot>,
+    bottom_panel_snapshot: Option<CellSnapshot>,
+    change_summary_snapshot: Option<CellSnapshot>,
+    git_status_snapshot: Option<CellSnapshot>,
     theme: ThemePalette,
 }
 
@@ -93,6 +99,9 @@ impl Renderer {
             signature_help: None,
             float_popup: None,
             hover_popup: None,
+            bottom_panel: None,
+            change_summary: None,
+            git_status: None,
             picker_snapshot: None,
             minibuffer_snapshot: None,
             completion_snapshot: None,
@@ -100,6 +109,9 @@ impl Renderer {
             signature_help_snapshot: None,
             float_popup_snapshot: None,
             hover_popup_snapshot: None,
+            bottom_panel_snapshot: None,
+            change_summary_snapshot: None,
+            git_status_snapshot: None,
             theme: ThemePalette::default(),
         }
     }
@@ -174,6 +186,9 @@ impl Renderer {
         self.signature_help = None;
         self.float_popup = None;
         self.hover_popup = None;
+        self.bottom_panel = None;
+        self.change_summary = None;
+        self.git_status = None;
         self.picker_snapshot = None;
         self.minibuffer_snapshot = None;
         self.completion_snapshot = None;
@@ -181,6 +196,9 @@ impl Renderer {
         self.signature_help_snapshot = None;
         self.float_popup_snapshot = None;
         self.hover_popup_snapshot = None;
+        self.bottom_panel_snapshot = None;
+        self.change_summary_snapshot = None;
+        self.git_status_snapshot = None;
     }
 
     fn clear(&mut self) {
@@ -254,6 +272,11 @@ impl Renderer {
             }
             semantic::Command::FloatPopup(float_popup, _) => self.draw_float_popup(float_popup),
             semantic::Command::HoverPopup(hover_popup, _) => self.draw_hover_popup(hover_popup),
+            semantic::Command::BottomPanel(bottom_panel, _) => self.draw_bottom_panel(bottom_panel),
+            semantic::Command::ChangeSummary(change_summary, _) => {
+                self.draw_change_summary(change_summary)
+            }
+            semantic::Command::GitStatus(git_status, _) => self.draw_git_status(git_status),
             semantic::Command::Theme(theme, _) => self.apply_theme(theme),
             semantic::Command::Unsupported { .. } => {}
         }
@@ -482,6 +505,36 @@ impl Renderer {
         }
     }
 
+    fn draw_bottom_panel(&mut self, bottom_panel: semantic::BottomPanel) {
+        if bottom_panel.visible {
+            self.bottom_panel = Some(bottom_panel.clone());
+            self.render_bottom_panel(&bottom_panel);
+        } else {
+            self.restore_bottom_panel_snapshot();
+            self.bottom_panel = None;
+        }
+    }
+
+    fn draw_change_summary(&mut self, change_summary: semantic::ChangeSummary) {
+        if change_summary.visible && !change_summary.entries.is_empty() {
+            self.change_summary = Some(change_summary.clone());
+            self.render_change_summary(&change_summary);
+        } else {
+            self.restore_change_summary_snapshot();
+            self.change_summary = None;
+        }
+    }
+
+    fn draw_git_status(&mut self, git_status: semantic::GitStatus) {
+        if git_status.repo_state == 1 {
+            self.restore_git_status_snapshot();
+            self.git_status = None;
+        } else {
+            self.git_status = Some(git_status.clone());
+            self.render_git_status(&git_status);
+        }
+    }
+
     fn render_minibuffer(&mut self, minibuffer: &semantic::Minibuffer) {
         self.capture_minibuffer_snapshot();
         self.restore_minibuffer_cells();
@@ -581,6 +634,18 @@ impl Renderer {
         if let Some(hover_popup) = self.hover_popup.clone() {
             self.hover_popup_snapshot = None;
             self.render_hover_popup(&hover_popup);
+        }
+        if let Some(bottom_panel) = self.bottom_panel.clone() {
+            self.bottom_panel_snapshot = None;
+            self.render_bottom_panel(&bottom_panel);
+        }
+        if let Some(change_summary) = self.change_summary.clone() {
+            self.change_summary_snapshot = None;
+            self.render_change_summary(&change_summary);
+        }
+        if let Some(git_status) = self.git_status.clone() {
+            self.git_status_snapshot = None;
+            self.render_git_status(&git_status);
         }
 
         if let Some(minibuffer) = self.minibuffer.clone() {
@@ -966,6 +1031,163 @@ impl Renderer {
 
     fn restore_hover_popup_cells(&mut self) {
         if let Some(snapshot) = self.hover_popup_snapshot.clone() {
+            self.restore_snapshot(snapshot);
+        }
+    }
+
+    fn render_bottom_panel(&mut self, bottom_panel: &semantic::BottomPanel) {
+        self.restore_bottom_panel_cells();
+        if self.width < 20 || self.height < 6 {
+            return;
+        }
+
+        let percent = bottom_panel.height_percent.clamp(10, 80) as u32;
+        let height = ((self.height as u32 * percent).div_ceil(100) as u16)
+            .clamp(3, self.height.saturating_sub(1));
+        let row = self.height.saturating_sub(height);
+        if self.bottom_panel_snapshot.is_none() {
+            self.bottom_panel_snapshot = Some(self.capture_rect(row, 0, self.width, height));
+        }
+
+        let title = bottom_panel_title(bottom_panel);
+        let body = if bottom_panel.entries.is_empty() {
+            "No messages".to_owned()
+        } else {
+            bottom_panel
+                .entries
+                .iter()
+                .rev()
+                .take(height.saturating_sub(2) as usize)
+                .map(bottom_panel_entry_text)
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        self.render_popup_panel(row, 0, self.width, height, &title, body);
+    }
+
+    fn restore_bottom_panel_snapshot(&mut self) {
+        if let Some(snapshot) = self.bottom_panel_snapshot.take() {
+            self.restore_snapshot(snapshot);
+        }
+    }
+
+    fn restore_bottom_panel_cells(&mut self) {
+        if let Some(snapshot) = self.bottom_panel_snapshot.clone() {
+            self.restore_snapshot(snapshot);
+        }
+    }
+
+    fn render_change_summary(&mut self, change_summary: &semantic::ChangeSummary) {
+        self.restore_change_summary_cells();
+        if self.width < 28 || self.height < 8 {
+            return;
+        }
+
+        let width = self.width.saturating_sub(4).clamp(28, 56);
+        let height = change_summary.entries.len().min(10).saturating_add(2) as u16;
+        let height = height.min(self.height.saturating_sub(2)).max(3);
+        let row = 2;
+        let col = self.width.saturating_sub(width);
+        if self.change_summary_snapshot.is_none() {
+            self.change_summary_snapshot = Some(self.capture_rect(row, col, width, height));
+        }
+
+        let selected = change_summary.selected_index as usize;
+        let visible_rows = height.saturating_sub(2) as usize;
+        let start = selected
+            .saturating_add(1)
+            .saturating_sub(visible_rows)
+            .min(change_summary.entries.len().saturating_sub(visible_rows));
+        let body = change_summary
+            .entries
+            .iter()
+            .skip(start)
+            .take(visible_rows)
+            .enumerate()
+            .map(|(index, entry)| {
+                let absolute = start + index;
+                let marker = if absolute == selected { ">" } else { " " };
+                format!(
+                    "{marker} {} +{} -{} {}",
+                    change_action_marker(entry.action),
+                    entry.lines_added,
+                    entry.lines_removed,
+                    entry.path
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        self.render_popup_panel(row, col, width, height, " Changes ", body);
+    }
+
+    fn restore_change_summary_snapshot(&mut self) {
+        if let Some(snapshot) = self.change_summary_snapshot.take() {
+            self.restore_snapshot(snapshot);
+        }
+    }
+
+    fn restore_change_summary_cells(&mut self) {
+        if let Some(snapshot) = self.change_summary_snapshot.clone() {
+            self.restore_snapshot(snapshot);
+        }
+    }
+
+    fn render_git_status(&mut self, git_status: &semantic::GitStatus) {
+        self.restore_git_status_cells();
+        if self.width < 28 || self.height < 8 {
+            return;
+        }
+
+        let width = self.width.saturating_sub(4).clamp(28, 52);
+        let height = git_status.entries.len().min(8).saturating_add(4) as u16;
+        let height = height.min(self.height.saturating_sub(2)).max(4);
+        let row = 2;
+        let col = 0;
+        if self.git_status_snapshot.is_none() {
+            self.git_status_snapshot = Some(self.capture_rect(row, col, width, height));
+        }
+
+        let mut lines = Vec::new();
+        let sync = if git_status.syncing { " syncing" } else { "" };
+        lines.push(format!(
+            "{}{} +{} -{} stash:{}",
+            git_status.branch, sync, git_status.ahead, git_status.behind, git_status.stash_count
+        ));
+        if !git_status.last_commit_message.is_empty() {
+            lines.push(format!("last: {}", git_status.last_commit_message));
+        }
+        if let Some(toast) = &git_status.toast {
+            lines.push(format!(
+                "{}: {}",
+                git_toast_level(toast.level),
+                toast.message
+            ));
+        }
+        lines.extend(
+            git_status
+                .entries
+                .iter()
+                .take(height.saturating_sub(3) as usize)
+                .map(|entry| {
+                    format!(
+                        "{} {} {}",
+                        git_section_marker(entry.section),
+                        git_status_marker(entry.status),
+                        entry.path
+                    )
+                }),
+        );
+        self.render_popup_panel(row, col, width, height, " Git ", lines.join("\n"));
+    }
+
+    fn restore_git_status_snapshot(&mut self) {
+        if let Some(snapshot) = self.git_status_snapshot.take() {
+            self.restore_snapshot(snapshot);
+        }
+    }
+
+    fn restore_git_status_cells(&mut self) {
+        if let Some(snapshot) = self.git_status_snapshot.clone() {
             self.restore_snapshot(snapshot);
         }
     }
@@ -1501,6 +1723,89 @@ fn highlight_signature_label(signature: &semantic::Signature, active_parameter: 
         signature
             .label
             .replace(&parameter.label, &format!("[{}]", parameter.label))
+    }
+}
+
+fn bottom_panel_title(panel: &semantic::BottomPanel) -> String {
+    let tabs = panel
+        .tabs
+        .iter()
+        .enumerate()
+        .map(|(index, tab)| {
+            if index == panel.active_tab_index as usize {
+                format!("[{}]", tab.name)
+            } else {
+                tab.name.clone()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    if tabs.is_empty() {
+        " Messages ".to_owned()
+    } else {
+        format!(" {tabs} ")
+    }
+}
+
+fn bottom_panel_entry_text(entry: &semantic::BottomPanelEntry) -> String {
+    let path = if entry.file_path.is_empty() {
+        String::new()
+    } else {
+        format!(" {}", entry.file_path)
+    };
+    format!(
+        "{} {}{}",
+        bottom_panel_level_marker(entry.level),
+        entry.text,
+        path
+    )
+}
+
+fn bottom_panel_level_marker(level: u8) -> &'static str {
+    match level {
+        1 => "debug",
+        2 => "info",
+        3 => "warn",
+        4 => "error",
+        _ => "msg",
+    }
+}
+
+fn change_action_marker(action: u8) -> &'static str {
+    match action {
+        1 => "A",
+        2 => "D",
+        3 => "R",
+        _ => "M",
+    }
+}
+
+fn git_section_marker(section: u8) -> &'static str {
+    match section {
+        0 => "staged",
+        2 => "new",
+        3 => "conflict",
+        _ => "work",
+    }
+}
+
+fn git_status_marker(status: u8) -> &'static str {
+    match status {
+        1 => "M",
+        2 => "A",
+        3 => "D",
+        4 => "R",
+        5 => "C",
+        6 => "?",
+        7 => "!",
+        _ => "-",
+    }
+}
+
+fn git_toast_level(level: u8) -> &'static str {
+    match level {
+        1 => "error",
+        _ => "ok",
     }
 }
 
@@ -2414,6 +2719,95 @@ mod tests {
             }],
         });
         assert_eq!(renderer.cells[renderer.index(9, 3).unwrap()].text, "h");
+    }
+
+    #[test]
+    fn semantic_bottom_panel_and_change_summary_render_with_ratatui() {
+        let mut renderer = Renderer::new(70, 20);
+
+        renderer.draw_bottom_panel(semantic::BottomPanel {
+            visible: true,
+            active_tab_index: 0,
+            height_percent: 25,
+            filter: 0,
+            tabs: vec![semantic::BottomPanelTab {
+                tab_type: 0,
+                name: "Logs".to_owned(),
+            }],
+            entries: vec![semantic::BottomPanelEntry {
+                id: 1,
+                level: 4,
+                subsystem: 2,
+                timestamp_secs: 42,
+                file_path: "lib/minga.ex".to_owned(),
+                text: "failed to compile".to_owned(),
+            }],
+        });
+
+        assert_eq!(renderer.cells[renderer.index(1, 16).unwrap()].text, "e");
+
+        renderer.draw_change_summary(semantic::ChangeSummary {
+            visible: true,
+            selected_index: 1,
+            entries: vec![
+                semantic::ChangeSummaryEntry {
+                    path: "lib/a.ex".to_owned(),
+                    action: 0,
+                    lines_added: 12,
+                    lines_removed: 3,
+                },
+                semantic::ChangeSummaryEntry {
+                    path: "lib/b.ex".to_owned(),
+                    action: 1,
+                    lines_added: 5,
+                    lines_removed: 0,
+                },
+            ],
+        });
+
+        assert_eq!(renderer.cells[renderer.index(15, 4).unwrap()].text, ">");
+        assert_eq!(renderer.cells[renderer.index(17, 4).unwrap()].text, "A");
+
+        renderer.draw_change_summary(semantic::ChangeSummary::default());
+
+        assert_eq!(renderer.cells[renderer.index(15, 4).unwrap()].text, " ");
+    }
+
+    #[test]
+    fn semantic_git_status_renders_with_ratatui() {
+        let mut renderer = Renderer::new(70, 20);
+
+        renderer.draw_git_status(semantic::GitStatus {
+            repo_state: 0,
+            syncing: true,
+            ahead: 2,
+            behind: 1,
+            branch: "main".to_owned(),
+            entries: vec![semantic::GitStatusEntry {
+                path_hash: 0x12345678,
+                section: 1,
+                status: 1,
+                path: "lib/minga.ex".to_owned(),
+            }],
+            toast: Some(semantic::GitToast {
+                level: 0,
+                action: 0,
+                message: "Pulled".to_owned(),
+            }),
+            entry_base_path: "lib".to_owned(),
+            last_commit_message: "Initial commit".to_owned(),
+            stash_count: 3,
+        });
+
+        assert_eq!(renderer.cells[renderer.index(1, 3).unwrap()].text, "m");
+        assert_eq!(renderer.cells[renderer.index(1, 5).unwrap()].text, "o");
+
+        renderer.draw_git_status(semantic::GitStatus {
+            repo_state: 1,
+            ..semantic::GitStatus::default()
+        });
+
+        assert_eq!(renderer.cells[renderer.index(1, 3).unwrap()].text, " ");
     }
 
     #[test]
