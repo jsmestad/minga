@@ -431,6 +431,255 @@ func TestDecodeStatusChrome(t *testing.T) {
 	}
 }
 
+func TestDecodeThemeAndEverydayChrome(t *testing.T) {
+	packet := []byte{generated.OPGuiTheme, 2, 0x40, 0x11, 0x22, 0x33, 0x30, 0x44, 0x55, 0x66, generated.OPBatchEnd}
+	first, err := DecodeCommand(packet)
+	if err != nil {
+		t.Fatalf("DecodeCommand theme returned error: %v", err)
+	}
+	if first.Size != len(packet)-1 || first.Chrome.Theme.Colors[0x40] != 0x112233 {
+		t.Fatalf("theme decoded incorrectly: size=%d theme=%+v", first.Size, first.Chrome.Theme)
+	}
+
+	breadcrumb := []byte{generated.OPGuiBreadcrumb, 2}
+	breadcrumb = append(breadcrumb, string16("lib")...)
+	breadcrumb = append(breadcrumb, string16("main.ex")...)
+	command, err := DecodeCommand(breadcrumb)
+	if err != nil {
+		t.Fatalf("DecodeCommand breadcrumb returned error: %v", err)
+	}
+	if command.Chrome.Summary != "lib / main.ex" {
+		t.Fatalf("breadcrumb summary = %q", command.Chrome.Summary)
+	}
+
+	git := []byte{generated.OPGuiGitStatus, 1, 0, 0, 2, 0, 1}
+	git = append(git, string16("main")...)
+	git = append(git, 0, 1, 0, 0, 0, 7, 1, 2)
+	git = append(git, string16("lib/main.ex")...)
+	git = append(git, 0)
+	git = append(git, string16("/repo")...)
+	git = append(git, string16("last commit")...)
+	git = append(git, 0, 3, generated.OPBatchEnd)
+	command, err = DecodeCommand(git)
+	if err != nil {
+		t.Fatalf("DecodeCommand git returned error: %v", err)
+	}
+	if command.Size != len(git)-1 || command.Chrome.Git.Branch != "main" || command.Chrome.Git.Ahead != 2 || len(command.Chrome.Git.Entries) != 1 || command.Chrome.Git.StashCount != 3 {
+		t.Fatalf("git decoded incorrectly: size=%d git=%+v", command.Size, command.Chrome.Git)
+	}
+
+	searchPayload := []byte{1, 0, 9, 0, 12, 0x03}
+	search := append([]byte{generated.OPGuiSearchState, 0, byte(len(searchPayload))}, searchPayload...)
+	command, err = DecodeCommand(search)
+	if err != nil {
+		t.Fatalf("DecodeCommand search returned error: %v", err)
+	}
+	if !command.Chrome.Search.Active || command.Chrome.Search.Count != 9 || command.Chrome.Search.CurrentIndex != 12 {
+		t.Fatalf("search decoded incorrectly: %+v", command.Chrome.Search)
+	}
+
+	change := []byte{generated.OPGuiChangeSummary, 1, 0, 0, 0, 1}
+	change = append(change, string16("README.md")...)
+	change = append(change, 1, 0, 0, 0, 5, 0, 0, 0, 1)
+	command, err = DecodeCommand(change)
+	if err != nil {
+		t.Fatalf("DecodeCommand change returned error: %v", err)
+	}
+	if !command.Chrome.Change.Visible || len(command.Chrome.Change.Entries) != 1 || command.Chrome.Change.Entries[0].LinesAdded != 5 {
+		t.Fatalf("change decoded incorrectly: %+v", command.Chrome.Change)
+	}
+}
+
+func TestDecodeTransientOverlayChrome(t *testing.T) {
+	segment := append([]byte{1}, string16("hover text")...)
+	line := append([]byte{0, 0, 1}, segment...)
+	hover := []byte{generated.OPGuiHoverPopup, 1, 0, 4, 0, 8, 1, 0, 0, 0, 1}
+	hover = append(hover, line...)
+	command, err := DecodeCommand(hover)
+	if err != nil {
+		t.Fatalf("DecodeCommand hover returned error: %v", err)
+	}
+	if !command.Chrome.Hover.Visible || command.Chrome.Hover.AnchorRow != 4 || len(command.Chrome.Hover.Lines) != 1 {
+		t.Fatalf("hover decoded incorrectly: %+v", command.Chrome.Hover)
+	}
+
+	actionPayload := append([]byte{1}, string16("Open docs")...)
+	action := append([]byte{generated.OPGuiHoverAction, 0, byte(len(actionPayload))}, actionPayload...)
+	command, err = DecodeCommand(action)
+	if err != nil {
+		t.Fatalf("DecodeCommand hover action returned error: %v", err)
+	}
+	if !command.Chrome.HoverAction.Visible || command.Chrome.HoverAction.Name != "Open docs" {
+		t.Fatalf("hover action decoded incorrectly: %+v", command.Chrome.HoverAction)
+	}
+
+	param := append(string16("arg"), string16("argument docs")...)
+	sig := append(string16("fun(arg)"), string16("signature docs")...)
+	sig = append(sig, 1)
+	sig = append(sig, param...)
+	signature := []byte{generated.OPGuiSignatureHelp, 1, 0, 2, 0, 3, 0, 0, 1}
+	signature = append(signature, sig...)
+	command, err = DecodeCommand(signature)
+	if err != nil {
+		t.Fatalf("DecodeCommand signature returned error: %v", err)
+	}
+	if !command.Chrome.Signature.Visible || len(command.Chrome.Signature.Signatures) != 1 || command.Chrome.Signature.Signatures[0].Label != "fun(arg)" {
+		t.Fatalf("signature decoded incorrectly: %+v", command.Chrome.Signature)
+	}
+
+	float := []byte{generated.OPGuiFloatPopup, 1, 0, 20, 0, 5}
+	float = append(float, string16("Menu")...)
+	float = append(float, 0, 1)
+	float = append(float, string16("one line")...)
+	command, err = DecodeCommand(float)
+	if err != nil {
+		t.Fatalf("DecodeCommand float returned error: %v", err)
+	}
+	if !command.Chrome.Float.Visible || command.Chrome.Float.Title != "Menu" || len(command.Chrome.Float.Lines) != 1 {
+		t.Fatalf("float decoded incorrectly: %+v", command.Chrome.Float)
+	}
+}
+
+func TestDecodePanelAndSidebarChrome(t *testing.T) {
+	note := string16("n1")
+	note = append(note, 0, 1)
+	note = append(note, make([]byte, 8)...)
+	note = append(note, make([]byte, 8)...)
+	note = append(note, 0, 0, 0, 10)
+	note = append(note, string16("Build passed")...)
+	note = append(note, string16("all checks green")...)
+	note = append(note, string16("ci")...)
+	note = append(note, 0)
+	notesPayload := []byte{1, 0, 1}
+	notesPayload = append(notesPayload, note...)
+	packet := append([]byte{generated.OPGuiNotifications, byte(len(notesPayload) >> 8), byte(len(notesPayload))}, notesPayload...)
+	command, err := DecodeCommand(packet)
+	if err != nil {
+		t.Fatalf("DecodeCommand notifications returned error: %v", err)
+	}
+	if !command.Chrome.Notifications.Visible || len(command.Chrome.Notifications.Items) != 1 || command.Chrome.Notifications.Items[0].Title != "Build passed" {
+		t.Fatalf("notifications decoded incorrectly: %+v", command.Chrome.Notifications)
+	}
+
+	bottom := []byte{generated.OPGuiBottomPanel, 1, 0, 30, 0, 1, 2}
+	bottom = append(bottom, string8("Messages")...)
+	bottom = append(bottom, 0, 1, 0, 0, 0, 5, 1, 2, 0, 0, 0, 9)
+	bottom = append(bottom, string16("lib/main.ex")...)
+	bottom = append(bottom, string16("warning")...)
+	command, err = DecodeCommand(bottom)
+	if err != nil {
+		t.Fatalf("DecodeCommand bottom panel returned error: %v", err)
+	}
+	if !command.Chrome.Bottom.Visible || len(command.Chrome.Bottom.Tabs) != 1 || len(command.Chrome.Bottom.Messages) != 1 {
+		t.Fatalf("bottom panel decoded incorrectly: %+v", command.Chrome.Bottom)
+	}
+
+	sidebarEntry := string16("files")
+	sidebarEntry = append(sidebarEntry, string16("Files")...)
+	sidebarEntry = append(sidebarEntry, string16("file_tree")...)
+	sidebarEntry = append(sidebarEntry, string16("*")...)
+	sidebarEntry = append(sidebarEntry, 0, 1, 0x03, 0, 32, 0, 2)
+	sidebarsPayload := []byte{1, 0, 1}
+	sidebarsPayload = append(sidebarsPayload, string16("files")...)
+	sidebarsPayload = append(sidebarsPayload, sidebarEntry...)
+	sidebars := append([]byte{generated.OPGuiSidebars, 0, 0, 0, byte(len(sidebarsPayload))}, sidebarsPayload...)
+	command, err = DecodeCommand(sidebars)
+	if err != nil {
+		t.Fatalf("DecodeCommand sidebars returned error: %v", err)
+	}
+	if command.Chrome.Name != "sidebars" || len(command.Chrome.Sidebars.Items) != 1 || !command.Chrome.Sidebars.Items[0].Focused {
+		t.Fatalf("sidebars decoded incorrectly: name=%q sidebars=%+v", command.Chrome.Name, command.Chrome.Sidebars)
+	}
+
+	overlayEntry := string8("gitlens")
+	overlayEntry = append(overlayEntry, string8("cursor")...)
+	overlayEntry = append(overlayEntry, 0, 7, 0, 2, 0, 4, 2, 0xAA, 0xBB, 0xCC, 200)
+	overlayEntry = append(overlayEntry, string16("branch")...)
+	overlayPayload := append([]byte{1}, overlayEntry...)
+	overlay := append([]byte{generated.OPGuiExtensionOverlay, byte(len(overlayPayload) >> 8), byte(len(overlayPayload))}, overlayPayload...)
+	command, err = DecodeCommand(overlay)
+	if err != nil {
+		t.Fatalf("DecodeCommand extension overlay returned error: %v", err)
+	}
+	if len(command.Chrome.Overlay.Entries) != 1 || command.Chrome.Overlay.Entries[0].Content != "branch" {
+		t.Fatalf("extension overlay decoded incorrectly: %+v", command.Chrome.Overlay)
+	}
+
+	panelEntry := string8("ext")
+	panelEntry = append(panelEntry, string8("panel")...)
+	panelEntry = append(panelEntry, string8("Panel")...)
+	panelEntry = append(panelEntry, 0, 1, 12, 1, 1, 0)
+	panelEntry = append(panelEntry, string16("hello")...)
+	extPayload := append([]byte{1}, panelEntry...)
+	extPanel := append([]byte{generated.OPGuiExtensionPanel, byte(len(extPayload) >> 8), byte(len(extPayload))}, extPayload...)
+	command, err = DecodeCommand(extPanel)
+	if err != nil {
+		t.Fatalf("DecodeCommand extension panel returned error: %v", err)
+	}
+	if len(command.Chrome.Extensions.Panels) != 1 || command.Chrome.Extensions.Panels[0].Title != "Panel" || len(command.Chrome.Extensions.Panels[0].Blocks) != 1 {
+		t.Fatalf("extension panel decoded incorrectly: %+v", command.Chrome.Extensions)
+	}
+
+	node := string8("<0.1.0>")
+	node = append(node, string8("")...)
+	node = append(node, string16("Editor")...)
+	node = append(node, 4, 0, 0, 0, 0, 100, 0, 2, 0, 0, 0, 50)
+	obsPayload := section(0x01, []byte{1, 0, 1})
+	obsPayload = append(obsPayload, section(0x02, node)...)
+	obs := append([]byte{generated.OPGuiObservatory, 0, 0, 0, byte(len(obsPayload))}, obsPayload...)
+	command, err = DecodeCommand(obs)
+	if err != nil {
+		t.Fatalf("DecodeCommand observatory returned error: %v", err)
+	}
+	if !command.Chrome.Observatory.Visible || len(command.Chrome.Observatory.Nodes) != 1 || command.Chrome.Observatory.Nodes[0].Name != "Editor" {
+		t.Fatalf("observatory decoded incorrectly: %+v", command.Chrome.Observatory)
+	}
+}
+
+func TestDecodeAgentBoardTimelineChrome(t *testing.T) {
+	messageBody := []byte{0, 0, 0, 42, 0x02}
+	messageBody = append(messageBody, 0, 0, 0, 5, 'h', 'e', 'l', 'l', 'o')
+	messages := []byte{0xFF, 1, 0, 1, byte(len(messageBody) >> 24), byte(len(messageBody) >> 16), byte(len(messageBody) >> 8), byte(len(messageBody))}
+	messages = append(messages, messageBody...)
+	chat := []byte{generated.OPGuiAgentChat, 3}
+	chat = append(chat, section(0x01, []byte{1, 1})...)
+	chat = append(chat, section(0x02, string16("gpt"))...)
+	chat = append(chat, section(0x06, messages)...)
+	command, err := DecodeCommand(chat)
+	if err != nil {
+		t.Fatalf("DecodeCommand chat returned error: %v", err)
+	}
+	if !command.Chrome.AgentChat.Visible || command.Chrome.AgentChat.ModelName != "gpt" || len(command.Chrome.AgentChat.Messages) != 1 || command.Chrome.AgentChat.Messages[0].Text != "hello" {
+		t.Fatalf("agent chat decoded incorrectly: %+v", command.Chrome.AgentChat)
+	}
+
+	board := []byte{generated.OPGuiBoard, 1, 0, 0, 0, 7, 0, 1, 0}
+	board = append(board, string16("")...)
+	board = append(board, 0, 0, 0, 7, 1, 0x02)
+	board = append(board, string16("Fix CI")...)
+	board = append(board, string8("gpt")...)
+	board = append(board, 0, 0, 0, 9, 0, 0)
+	command, err = DecodeCommand(board)
+	if err != nil {
+		t.Fatalf("DecodeCommand board returned error: %v", err)
+	}
+	if !command.Chrome.Board.Visible || len(command.Chrome.Board.Cards) != 1 || command.Chrome.Board.Cards[0].Task != "Fix CI" {
+		t.Fatalf("board decoded incorrectly: %+v", command.Chrome.Board)
+	}
+
+	timelinePayload := []byte{1, 0xFF, 0xFF, 1, 3}
+	timelinePayload = append(timelinePayload, string8("apply_patch")...)
+	timelinePayload = append(timelinePayload, 0, 0, 0, 4)
+	timeline := append([]byte{generated.OPGuiEditTimeline, byte(len(timelinePayload) >> 8), byte(len(timelinePayload))}, timelinePayload...)
+	command, err = DecodeCommand(timeline)
+	if err != nil {
+		t.Fatalf("DecodeCommand timeline returned error: %v", err)
+	}
+	if !command.Chrome.Timeline.Visible || len(command.Chrome.Timeline.Entries) != 1 || command.Chrome.Timeline.Entries[0].ToolName != "apply_patch" {
+		t.Fatalf("timeline decoded incorrectly: %+v", command.Chrome.Timeline)
+	}
+}
+
 func section(id byte, payload []byte) []byte {
 	out := []byte{id, byte(len(payload) >> 8), byte(len(payload))}
 	return append(out, payload...)

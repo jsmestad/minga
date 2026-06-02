@@ -1,0 +1,482 @@
+package protocol
+
+type TabBar struct {
+	ActiveIndex byte
+	Tabs        []Tab
+}
+
+type Tab struct {
+	Flags       byte
+	ID          uint32
+	GroupID     uint16
+	Icon        string
+	Label       string
+	Tint        uint32
+	Active      bool
+	Dirty       bool
+	Agent       bool
+	Attention   bool
+	Pinned      bool
+	AgentStatus byte
+}
+
+type WorkspaceBar struct {
+	Version  byte
+	ActiveID uint16
+	Mode     byte
+	Flags    byte
+	Spaces   []Workspace
+	Tabs     []WorkspaceTab
+}
+
+type Workspace struct {
+	ID              uint16
+	Kind            byte
+	Status          byte
+	Flags           uint16
+	Color           uint32
+	TabCount        uint16
+	DraftCount      uint16
+	ConflictCount   uint16
+	BackgroundCount uint16
+	Label           string
+	Icon            string
+	Active          bool
+	Attention       bool
+	Closeable       bool
+}
+
+type WorkspaceTab struct {
+	ID          uint32
+	WorkspaceID uint16
+	Kind        byte
+	Flags       uint16
+	PathHash    uint32
+	Icon        string
+	Label       string
+	Path        string
+	Tint        uint32
+}
+
+type Minibuffer struct {
+	Visible       bool
+	Mode          byte
+	CursorPos     uint16
+	Prompt        string
+	Input         string
+	Context       string
+	SelectedIndex uint16
+	Candidates    uint16
+	Total         uint16
+}
+
+type Completion struct {
+	Visible  bool
+	Row      uint16
+	Col      uint16
+	Selected uint16
+	Items    []CompletionItem
+}
+
+type CompletionItem struct {
+	Kind   byte
+	Label  string
+	Detail string
+}
+
+type WhichKey struct {
+	Visible   bool
+	Prefix    string
+	Page      byte
+	PageCount byte
+	Bindings  []WhichKeyBinding
+}
+
+type WhichKeyBinding struct {
+	Kind        byte
+	Key         string
+	Description string
+	Icon        string
+}
+
+type Picker struct {
+	Visible       bool
+	Selected      uint16
+	Filtered      uint16
+	Total         uint16
+	Marked        uint16
+	HasPreview    bool
+	Title         string
+	Query         string
+	ModePrefix    string
+	LoadStatus    byte
+	LoadError     string
+	Actions       []string
+	ActionIndex   byte
+	ActionVisible bool
+	Items         []PickerItem
+}
+
+type PickerItem struct {
+	IconColor   uint32
+	Flags       byte
+	Label       string
+	Description string
+	Annotation  string
+	TwoLine     bool
+	Marked      bool
+}
+
+type PickerPreview struct {
+	Visible bool
+	Lines   []PreviewLine
+}
+
+type PreviewLine struct {
+	Segments []PreviewSegment
+}
+
+type PreviewSegment struct {
+	FG   uint32
+	Bold bool
+	Text string
+}
+
+type FileTree struct {
+	Visible  bool
+	Focused  bool
+	Status   byte
+	Selected string
+	Root     string
+	Width    uint16
+	Error    string
+	Rows     []FileTreeRow
+}
+
+type FileTreeRow struct {
+	ID        string
+	Path      string
+	Name      string
+	Icon      string
+	Depth     byte
+	Flags     uint16
+	Directory bool
+	Expanded  bool
+	Selected  bool
+	Focused   bool
+	Active    bool
+	Dirty     bool
+}
+
+type StatusBar struct {
+	ContentKind byte
+	Mode        byte
+	Flags       byte
+	Line        uint32
+	Column      uint32
+	LineCount   uint32
+	Icon        string
+	Filename    string
+	Filetype    string
+	Message     string
+}
+
+type Theme struct {
+	Colors map[byte]uint32
+}
+
+type Breadcrumb struct {
+	Segments []string
+}
+
+type GitStatus struct {
+	RepoState         byte
+	Syncing           bool
+	Ahead             uint16
+	Behind            uint16
+	Branch            string
+	Entries           []GitStatusEntry
+	Toast             GitToast
+	EntryBasePath     string
+	LastCommitMessage string
+	StashCount        uint16
+}
+
+type GitStatusEntry struct {
+	PathHash uint32
+	Section  byte
+	Status   byte
+	Path     string
+}
+
+type GitToast struct {
+	Visible bool
+	Level   byte
+	Action  byte
+	Message string
+}
+
+type SearchState struct {
+	Active       bool
+	Count        uint16
+	CurrentIndex uint16
+	Flags        byte
+}
+
+type ChangeSummary struct {
+	Visible       bool
+	SelectedIndex uint16
+	Entries       []ChangeEntry
+}
+
+type ChangeEntry struct {
+	Path         string
+	Action       byte
+	LinesAdded   uint32
+	LinesRemoved uint32
+}
+
+type HoverPopup struct {
+	Visible      bool
+	AnchorRow    uint16
+	AnchorCol    uint16
+	Focused      bool
+	ScrollOffset uint16
+	Lines        []RichLine
+}
+
+type HoverAction struct {
+	Visible bool
+	Name    string
+}
+
+type SignatureHelp struct {
+	Visible         bool
+	AnchorRow       uint16
+	AnchorCol       uint16
+	ActiveSignature byte
+	ActiveParameter byte
+	Signatures      []Signature
+}
+
+type Signature struct {
+	Label      string
+	Doc        string
+	Parameters []SignatureParameter
+}
+
+type SignatureParameter struct {
+	Label string
+	Doc   string
+}
+
+type FloatPopup struct {
+	Visible bool
+	Width   uint16
+	Height  uint16
+	Title   string
+	Lines   []string
+}
+
+type ExtensionOverlay struct {
+	Entries []ExtensionOverlayEntry
+}
+
+type ExtensionOverlayEntry struct {
+	Extension string
+	ID        string
+	WindowID  uint16
+	Row       uint16
+	Col       uint16
+	Shape     byte
+	FG        uint32
+	Opacity   byte
+	Content   string
+}
+
+type Notifications struct {
+	Visible bool
+	Items   []Notification
+}
+
+type Notification struct {
+	ID            string
+	Level         byte
+	Dismissable   bool
+	CreatedAt     uint64
+	UpdatedAt     uint64
+	AutoDismissMS uint32
+	Title         string
+	Body          string
+	Source        string
+	Actions       []NotificationAction
+}
+
+type NotificationAction struct {
+	ID    string
+	Label string
+}
+
+type BottomPanel struct {
+	Visible       bool
+	ActiveTab     byte
+	HeightPercent byte
+	Filter        byte
+	Tabs          []PanelTab
+	Messages      []PanelMessage
+}
+
+type PanelTab struct {
+	Type byte
+	Name string
+}
+
+type PanelMessage struct {
+	ID        uint32
+	Level     byte
+	Subsystem byte
+	Timestamp uint32
+	Path      string
+	Text      string
+}
+
+type ExtensionPanel struct {
+	Panels []ExtensionPanelEntry
+}
+
+type ExtensionPanelEntry struct {
+	Extension string
+	ID        string
+	Title     string
+	Position  byte
+	SizeType  byte
+	SizeValue byte
+	Visible   bool
+	Blocks    []string
+}
+
+type Sidebars struct {
+	Visible  bool
+	ActiveID string
+	Items    []Sidebar
+}
+
+type Sidebar struct {
+	ID             string
+	DisplayName    string
+	SemanticKind   string
+	Icon           string
+	Order          uint16
+	Flags          byte
+	PreferredWidth uint16
+	BadgeCount     uint16
+	Visible        bool
+	Focused        bool
+}
+
+type Observatory struct {
+	Visible bool
+	Count   uint16
+	Nodes   []ObservatoryNode
+}
+
+type ObservatoryNode struct {
+	PID             string
+	ParentPID       string
+	Name            string
+	ProcessClass    byte
+	Depth           byte
+	Memory          uint32
+	MessageQueueLen uint16
+	Reductions      uint32
+}
+
+type AgentContext struct {
+	Visible    bool
+	Task       string
+	Timestamp  uint64
+	Status     byte
+	CanApprove bool
+}
+
+type AgentChat struct {
+	Visible       bool
+	Status        byte
+	ModelName     string
+	Prompt        string
+	ThinkingLevel string
+	Messages      []AgentChatMessage
+	Pending       string
+	Completion    []string
+}
+
+type AgentChatMessage struct {
+	ID   uint32
+	Kind byte
+	Text string
+}
+
+type Board struct {
+	Visible       bool
+	FocusedCardID uint32
+	FilterMode    bool
+	FilterText    string
+	Cards         []BoardCard
+}
+
+type BoardCard struct {
+	ID          uint32
+	Status      byte
+	Flags       byte
+	Task        string
+	Model       string
+	Timestamp   uint32
+	RecentFiles []string
+}
+
+type EditTimeline struct {
+	Visible      bool
+	ViewingIndex uint16
+	Entries      []TimelineEntry
+}
+
+type TimelineEntry struct {
+	Index          byte
+	ToolName       string
+	TimestampDelta uint32
+}
+
+type GutterSeparator struct {
+	Col   uint16
+	Color uint32
+}
+
+type SplitSeparators struct {
+	Color       uint32
+	Verticals   []VerticalSeparator
+	Horizontals []HorizontalSeparator
+}
+
+type VerticalSeparator struct {
+	Col      uint16
+	StartRow uint16
+	EndRow   uint16
+}
+
+type HorizontalSeparator struct {
+	Row      uint16
+	Col      uint16
+	Width    uint16
+	Filename string
+}
+
+type RichLine struct {
+	Segments []RichSegment
+}
+
+type RichSegment struct {
+	Style byte
+	FG    uint32
+	Flags byte
+	Text  string
+}
