@@ -1489,6 +1489,15 @@ impl Renderer {
                 };
             }
 
+            for continuation_col in col.saturating_add(1)..col.saturating_add(width) {
+                if let Some(index) = self.index(continuation_col, row) {
+                    self.cells[index] = Cell {
+                        text: String::new(),
+                        style,
+                    };
+                }
+            }
+
             col = col.saturating_add(width);
         }
     }
@@ -1703,6 +1712,11 @@ impl Renderer {
                 let Some(index) = self.index(col, row) else {
                     continue;
                 };
+
+                if self.cells[index].text.is_empty() {
+                    self.previous[index] = self.cells[index].clone();
+                    continue;
+                }
 
                 if self.cells[index] != self.previous[index] {
                     terminal.write_cell(
@@ -2089,7 +2103,12 @@ fn fallback_status_right(status: &semantic::StatusBar) -> String {
 fn pad_to_width(text: &str, width: u16) -> String {
     let current = text_width(text);
     if current >= width {
-        return slice_chars(text, 0, width);
+        let sliced = slice_chars(text, 0, width);
+        let sliced_width = text_width(&sliced);
+        return format!(
+            "{sliced}{}",
+            " ".repeat(width.saturating_sub(sliced_width) as usize)
+        );
     }
 
     format!("{text}{}", " ".repeat((width - current) as usize))
@@ -3217,6 +3236,7 @@ mod tests {
         assert_eq!(text_width("e\u{301}x"), 2);
 
         assert_eq!(pad_to_width("界x", 2), "界");
+        assert_eq!(pad_to_width("a界", 2), "a ");
         assert_eq!(pad_to_width("e\u{301}x", 1), "e\u{301}");
         assert_eq!(slice_chars("界x", 0, 2), "界");
         assert_eq!(slice_chars("界x", 0, 3), "界x");
@@ -3229,7 +3249,7 @@ mod tests {
 
         renderer.write_run(0, 0, "界x", CellStyle::default());
         assert_eq!(renderer.cells[renderer.index(0, 0).unwrap()].text, "界");
-        assert_eq!(renderer.cells[renderer.index(1, 0).unwrap()].text, " ");
+        assert_eq!(renderer.cells[renderer.index(1, 0).unwrap()].text, "");
         assert_eq!(renderer.cells[renderer.index(2, 0).unwrap()].text, "x");
 
         renderer.write_run(1, 0, "e\u{301}x", CellStyle::default());
@@ -3238,5 +3258,20 @@ mod tests {
             "e\u{301}"
         );
         assert_eq!(renderer.cells[renderer.index(1, 1).unwrap()].text, "x");
+    }
+
+    #[test]
+    fn render_skips_wide_grapheme_continuation_cells() {
+        let mut renderer = Renderer::new(4, 1);
+        let mut terminal = Terminal::memory(4, 1);
+
+        renderer.write_run(0, 0, "ab", CellStyle::default());
+        renderer.render(&mut terminal).unwrap();
+        renderer.clear();
+        renderer.write_run(0, 0, "界", CellStyle::default());
+        renderer.render(&mut terminal).unwrap();
+
+        assert_eq!(renderer.previous[renderer.index(0, 0).unwrap()].text, "界");
+        assert_eq!(renderer.previous[renderer.index(1, 0).unwrap()].text, "");
     }
 }
