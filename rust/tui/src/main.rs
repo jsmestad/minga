@@ -33,6 +33,8 @@ fn run() -> io::Result<()> {
         &protocol::encode_ready_with_caps(cols, rows, image_support.capability_code()),
     )?;
 
+    log_info(&mut stdout, &format!("started size={cols}x{rows}"));
+
     let mut renderer = renderer::Renderer::new(cols, rows);
     let mut stdin = io::stdin().lock();
     let mut input = input::Parser::default();
@@ -186,10 +188,7 @@ fn handle_packet(
         let command = match protocol::decode_command(&packet[offset..]) {
             Ok(command) => command,
             Err(error) => {
-                let _ = writeln!(
-                    io::stderr(),
-                    "[RUST_TUI/warn] protocol decode error at {offset}: {error}"
-                );
+                log_warn(output, &format!("protocol decode error at {offset}: {error}"));
                 break;
             }
         };
@@ -197,11 +196,19 @@ fn handle_packet(
         offset += command.size();
 
         if let Err(error) = renderer.handle(command, terminal, output) {
-            let _ = writeln!(io::stderr(), "[RUST_TUI/warn] render error: {error}");
+            log_warn(output, &format!("render error: {error}"));
         }
     }
 
     Ok(())
+}
+
+fn log_info(output: &mut impl Write, msg: &str) {
+    let _ = protocol::write_packet(output, &protocol::encode_log_message(protocol::LOG_LEVEL_INFO, msg));
+}
+
+fn log_warn(output: &mut impl Write, msg: &str) {
+    let _ = protocol::write_packet(output, &protocol::encode_log_message(protocol::LOG_LEVEL_WARN, msg));
 }
 
 fn write_input_event(event: input::Event, output: &mut impl Write) -> io::Result<()> {

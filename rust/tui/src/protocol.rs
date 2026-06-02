@@ -273,6 +273,21 @@ pub fn encode_resize(width: u16, height: u16) -> [u8; 5] {
     ]
 }
 
+#[allow(dead_code)]
+pub const LOG_LEVEL_ERR: u8 = 0;
+pub const LOG_LEVEL_WARN: u8 = 1;
+pub const LOG_LEVEL_INFO: u8 = 2;
+
+pub fn encode_log_message(level: u8, msg: &str) -> Vec<u8> {
+    let len = msg.len().min(u16::MAX as usize);
+    let mut payload = Vec::with_capacity(4 + len);
+    payload.push(opcodes::OP_LOG_MESSAGE);
+    payload.push(level);
+    payload.extend_from_slice(&(len as u16).to_be_bytes());
+    payload.extend_from_slice(&msg.as_bytes()[..len]);
+    payload
+}
+
 pub fn encode_paste_event(text: &[u8]) -> Vec<u8> {
     let len = text.len().min(u16::MAX as usize);
     let mut payload = Vec::with_capacity(3 + len);

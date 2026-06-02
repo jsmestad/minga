@@ -44,7 +44,6 @@ impl Terminal {
         let fd = tty.as_raw_fd();
         let original_termios = make_raw(fd)?;
         let (width, height) = query_terminal_size(fd).unwrap_or_else(|_| env_size());
-        let _ = writeln!(io::stderr(), "[RUST_TUI/info] size={width}x{height}");
         let mut terminal = Self {
             writer: Box::new(tty),
             reader: Some(reader),
