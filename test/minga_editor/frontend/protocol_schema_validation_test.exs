@@ -396,7 +396,7 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
       buf_line: 1,
       text: "hello",
       spans: [span],
-      content_hash: 12345
+      content_hash: 12_345
     }
 
     geometry = %PaneGeometry{

@@ -1173,19 +1173,28 @@ defmodule Minga.Mix.ProtocolGenerator do
     opcode_names = schema |> Map.fetch!("opcodes") |> MapSet.new(& &1["name"])
     smap = structures_map(schema)
 
-    # All section opcodes must reference existing opcodes
-    bad_opcodes =
+    validate_section_opcodes!(sections, opcode_names)
+    validate_section_ids!(sections)
+    validate_section_element_refs!(sections, smap)
+    validate_section_field_refs!(sections, smap)
+  end
+
+  @spec validate_section_opcodes!([section()], MapSet.t()) :: :ok
+  defp validate_section_opcodes!(sections, opcode_names) do
+    bad =
       sections
       |> Enum.reject(&MapSet.member?(opcode_names, &1["opcode"]))
       |> Enum.map_join(", ", fn s -> "#{s["opcode"]}/#{s["name"]}" end)
 
-    case bad_opcodes do
+    case bad do
       "" -> :ok
-      _ -> Mix.raise("Sections reference unknown opcodes in #{@schema_path}: #{bad_opcodes}")
+      _ -> Mix.raise("Sections reference unknown opcodes in #{@schema_path}: #{bad}")
     end
+  end
 
-    # Section IDs must be unique per opcode
-    bad_ids =
+  @spec validate_section_ids!([section()]) :: :ok
+  defp validate_section_ids!(sections) do
+    bad =
       sections
       |> Enum.group_by(& &1["opcode"])
       |> Enum.flat_map(fn {opcode, secs} ->
@@ -1196,25 +1205,29 @@ defmodule Minga.Mix.ProtocolGenerator do
       end)
       |> Enum.join(", ")
 
-    case bad_ids do
+    case bad do
       "" -> :ok
-      _ -> Mix.raise("Duplicate section IDs in #{@schema_path}: #{bad_ids}")
+      _ -> Mix.raise("Duplicate section IDs in #{@schema_path}: #{bad}")
     end
+  end
 
-    # Validate counted_array element references in sections
-    bad_refs =
+  @spec validate_section_element_refs!([section()], %{String.t() => structure()}) :: :ok
+  defp validate_section_element_refs!(sections, smap) do
+    bad =
       sections
       |> Enum.filter(fn s -> s["layout"] == "counted_array" and is_binary(s["element"]) end)
       |> Enum.reject(fn s -> Map.has_key?(smap, s["element"]) end)
       |> Enum.map_join(", ", fn s -> "#{s["opcode"]}/#{s["name"]} -> #{s["element"]}" end)
 
-    case bad_refs do
+    case bad do
       "" -> :ok
-      _ -> Mix.raise("Sections reference unknown structures in #{@schema_path}: #{bad_refs}")
+      _ -> Mix.raise("Sections reference unknown structures in #{@schema_path}: #{bad}")
     end
+  end
 
-    # Validate struct field references within section inline fields
-    bad_field_refs =
+  @spec validate_section_field_refs!([section()], %{String.t() => structure()}) :: :ok
+  defp validate_section_field_refs!(sections, smap) do
+    bad =
       sections
       |> Enum.filter(&Map.has_key?(&1, "fields"))
       |> Enum.flat_map(fn s -> Enum.map(s["fields"] || [], &{s, &1}) end)
@@ -1226,14 +1239,9 @@ defmodule Minga.Mix.ProtocolGenerator do
         "#{s["opcode"]}/#{s["name"]}.#{field["name"]} -> #{field["element"]}"
       end)
 
-    case bad_field_refs do
-      "" ->
-        :ok
-
-      _ ->
-        Mix.raise(
-          "Section fields reference unknown structures in #{@schema_path}: #{bad_field_refs}"
-        )
+    case bad do
+      "" -> :ok
+      _ -> Mix.raise("Section fields reference unknown structures in #{@schema_path}: #{bad}")
     end
   end
 
@@ -1354,8 +1362,8 @@ defmodule Minga.Mix.ProtocolGenerator do
 
       derive =
         if has_variable,
-          do: "#[derive(Debug, Clone, PartialEq, Eq)]\n",
-          else: "#[derive(Debug, Clone, Copy, PartialEq, Eq)]\n"
+          do: "#[derive(Debug, Clone, Default, PartialEq, Eq)]\n",
+          else: "#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]\n"
 
       [
         derive,
@@ -1394,8 +1402,8 @@ defmodule Minga.Mix.ProtocolGenerator do
 
       derive =
         if has_variable,
-          do: "#[derive(Debug, Clone, PartialEq, Eq)]\n",
-          else: "#[derive(Debug, Clone, Copy, PartialEq, Eq)]\n"
+          do: "#[derive(Debug, Clone, Default, PartialEq, Eq)]\n",
+          else: "#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]\n"
 
       [
         derive,

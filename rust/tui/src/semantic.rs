@@ -84,33 +84,6 @@ pub type Row = semantic_types::Row;
 #[allow(dead_code)]
 pub type Span = semantic_types::Span;
 
-impl Default for semantic_types::Row {
-    fn default() -> Self {
-        Self {
-            row_type: 0,
-            row_id: 0,
-            buf_line: 0,
-            content_hash: 0,
-            text: String::new(),
-            spans: Vec::new(),
-        }
-    }
-}
-
-impl Default for semantic_types::Span {
-    fn default() -> Self {
-        Self {
-            start_col: 0,
-            end_col: 0,
-            fg: 0,
-            bg: 0,
-            attrs: 0,
-            font_weight: 0,
-            font_id: 0,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct StatusBar {
     pub mode: u8,
