@@ -383,15 +383,16 @@ struct ProtocolDecoderTests {
 
     @Test("Skip highlight opcodes without error")
     func skipHighlightOpcodes() throws {
-        // set_language with name "elixir"
+        // set_language with buffer_id=1 and name "elixir"
         var data = Data()
         data.append(OP_SET_LANGUAGE)
+        data.append(contentsOf: [0x00, 0x00, 0x00, 0x01]) // buffer_id=1
         data.append(contentsOf: [0x00, 0x06]) // name_len=6
         data.append(contentsOf: "elixir".utf8)
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(cmd == nil) // Skipped
-        #expect(size == 9) // 1 + 2 + 6
+        #expect(size == 13) // 1 + 4 + 2 + 6
     }
 }
 

@@ -282,6 +282,10 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
     let opcode = data[offset]
     let rest = offset + 1
 
+    if let parserCommandSize = try parserCommandSkipSize(opcode: opcode, data: data, offset: offset, rest: rest) {
+        return (nil, parserCommandSize)
+    }
+
     switch opcode {
     case OP_CLEAR:
         return (.clear, 1)
@@ -425,51 +429,6 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         guard data.count >= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
         let notifications = try decodeNotifications(data: data, start: payloadStart, end: payloadStart + payloadLen)
         return (.guiNotifications(notifications), 1 + 2 + payloadLen)
-
-    // Highlight and parser opcodes: skip them (variable length).
-    case OP_SET_LANGUAGE:
-        guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
-        let nameLen = Int(readU16(data, rest))
-        return (nil, 1 + 2 + nameLen)
-
-    case OP_PARSE_BUFFER:
-        guard data.count >= rest + 8 else { throw ProtocolDecodeError.malformed }
-        let sourceLen = Int(readU32(data, rest + 4))
-        return (nil, 1 + 8 + sourceLen)
-
-    case OP_SET_HIGHLIGHT_QUERY, OP_SET_INJECTION_QUERY:
-        guard data.count >= rest + 4 else { throw ProtocolDecodeError.malformed }
-        let queryLen = Int(readU32(data, rest))
-        return (nil, 1 + 4 + queryLen)
-
-    case OP_LOAD_GRAMMAR:
-        guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
-        let nameLen = Int(readU16(data, rest))
-        guard data.count >= rest + 2 + nameLen + 2 else { throw ProtocolDecodeError.malformed }
-        let pathLen = Int(readU16(data, rest + 2 + nameLen))
-        return (nil, 1 + 2 + nameLen + 2 + pathLen)
-
-    case OP_QUERY_LANGUAGE_AT:
-        return (nil, 9) // opcode + request_id:4 + byte_offset:4
-
-    case OP_EDIT_BUFFER:
-        // Variable length; we need to skip the whole thing.
-        // version:4, edit_count:2, then each edit is variable.
-        // For safety, skip based on remaining payload (the BEAM batches one command per edit_buffer).
-        guard data.count >= rest + 6 else { throw ProtocolDecodeError.malformed }
-        let editCount = Int(readU16(data, rest + 4))
-        var pos = rest + 6
-        for _ in 0..<editCount {
-            guard data.count >= pos + 12 else { throw ProtocolDecodeError.malformed }
-            let textLen = Int(readU32(data, pos + 8))
-            pos += 12 + textLen
-        }
-        return (nil, pos - offset)
-
-    case OP_MEASURE_TEXT:
-        guard data.count >= rest + 6 else { throw ProtocolDecodeError.malformed }
-        let textLen = Int(readU16(data, rest + 4))
-        return (nil, 1 + 6 + textLen)
 
     // GUI chrome commands.
     case OP_GUI_FILE_TREE:
@@ -3511,6 +3470,83 @@ private func decodePaneGeometry(data: Data, start: Int, end: Int) throws -> GUIP
         gutterMetrics: metrics,
         hitRegions: hitRegions
     )
+}
+
+private func parserCommandSkipSize(opcode: UInt8, data: Data, offset: Int, rest: Int) throws -> Int? {
+    switch opcode {
+    case 0x20: // set_language: buffer_id:4, name_len:2, name
+        guard data.count >= rest + 6 else { throw ProtocolDecodeError.malformed }
+        let nameLen = Int(readU16(data, rest + 4))
+        guard data.count >= rest + 6 + nameLen else { throw ProtocolDecodeError.malformed }
+        return 1 + 6 + nameLen
+
+    case 0x21: // parse_buffer: buffer_id:4, version:4, source_len:4, source
+        guard data.count >= rest + 12 else { throw ProtocolDecodeError.malformed }
+        let sourceLen = Int(readU32(data, rest + 8))
+        guard data.count >= rest + 12 + sourceLen else { throw ProtocolDecodeError.malformed }
+        return 1 + 12 + sourceLen
+
+    case 0x22, 0x24, 0x28, 0x29, 0x2B, 0x40: // query commands: buffer_id:4, query_len:4, query
+        guard data.count >= rest + 8 else { throw ProtocolDecodeError.malformed }
+        let queryLen = Int(readU32(data, rest + 4))
+        guard data.count >= rest + 8 + queryLen else { throw ProtocolDecodeError.malformed }
+        return 1 + 8 + queryLen
+
+    case 0x23: // load_grammar: name_len:2, name, path_len:2, path
+        guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
+        let nameLen = Int(readU16(data, rest))
+        guard data.count >= rest + 2 + nameLen + 2 else { throw ProtocolDecodeError.malformed }
+        let pathLen = Int(readU16(data, rest + 2 + nameLen))
+        guard data.count >= rest + 2 + nameLen + 2 + pathLen else { throw ProtocolDecodeError.malformed }
+        return 1 + 2 + nameLen + 2 + pathLen
+
+    case 0x25: // query_language_at: buffer_id:4, request_id:4, byte_offset:4
+        guard data.count >= rest + 12 else { throw ProtocolDecodeError.malformed }
+        return 13
+
+    case 0x26: // edit_buffer: buffer_id:4, version:4, edit_count:2, edits
+        guard data.count >= rest + 10 else { throw ProtocolDecodeError.malformed }
+        let editCount = Int(readU16(data, rest + 8))
+        var pos = rest + 10
+        for _ in 0..<editCount {
+            guard data.count >= pos + 40 else { throw ProtocolDecodeError.malformed }
+            let textLen = Int(readU32(data, pos + 36))
+            guard data.count >= pos + 40 + textLen else { throw ProtocolDecodeError.malformed }
+            pos += 40 + textLen
+        }
+        return pos - offset
+
+    case 0x27: // measure_text: request_id:4, text_len:2, text
+        guard data.count >= rest + 6 else { throw ProtocolDecodeError.malformed }
+        let textLen = Int(readU16(data, rest + 4))
+        guard data.count >= rest + 6 + textLen else { throw ProtocolDecodeError.malformed }
+        return 1 + 6 + textLen
+
+    case 0x2A: // request_indent: buffer_id:4, request_id:4, line:4
+        guard data.count >= rest + 12 else { throw ProtocolDecodeError.malformed }
+        return 13
+
+    case 0x2C: // request_textobject: buffer_id:4, request_id:4, row:4, col:4, name_len:2, name
+        guard data.count >= rest + 18 else { throw ProtocolDecodeError.malformed }
+        let nameLen = Int(readU16(data, rest + 16))
+        guard data.count >= rest + 18 + nameLen else { throw ProtocolDecodeError.malformed }
+        return 1 + 18 + nameLen
+
+    case 0x2D: // close_buffer: buffer_id:4
+        guard data.count >= rest + 4 else { throw ProtocolDecodeError.malformed }
+        return 5
+
+    case 0x2E: // request_match_item: buffer_id:4, request_id:4, row:4, col:4
+        guard data.count >= rest + 16 else { throw ProtocolDecodeError.malformed }
+        return 17
+
+    case 0x2F: // request_structural_nav: buffer_id:4, request_id:4, row:4, col:4, action:1
+        guard data.count >= rest + 17 else { throw ProtocolDecodeError.malformed }
+        return 18
+
+    default:
+        return nil
+    }
 }
 
 private func readCellRect(_ data: Data, _ offset: Int, _ end: Int) throws -> GUICellRect {
