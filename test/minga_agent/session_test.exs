@@ -693,16 +693,22 @@ defmodule MingaAgent.SessionTest do
 
     test "active detached sessions are not reclaimed" do
       {:ok, session} =
-        Session.start_link(provider: SlowMockProvider, provider_opts: [], idle_gc_timeout_ms: 1)
+        Session.start_link(
+          provider: SlowMockProvider,
+          provider_opts: [],
+          idle_gc_timeout_ms: 60_000
+        )
 
       on_exit(fn -> Process.exit(session, :kill) end)
+
+      {_timer_ref, stale_token} = :sys.get_state(session).idle_gc_timer
 
       assert :ok = Session.subscribe(session)
       assert :ok = Session.send_prompt(session, "keep working")
       assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
       assert :ok = Session.unsubscribe(session)
 
-      send(session, {:idle_gc_timeout, make_ref()})
+      send(session, {:idle_gc_timeout, stale_token})
       assert Session.status(session) == :thinking
     end
 

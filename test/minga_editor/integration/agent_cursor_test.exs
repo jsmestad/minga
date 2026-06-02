@@ -38,7 +38,7 @@ defmodule Minga.Integration.AgentCursorTest do
 
     {:ok, port} = HeadlessPort.start_link(width: width, height: height)
 
-    agent_buf = AgentBufferSync.start_buffer()
+    agent_buf = AgentBufferSync.start_buffer(options_server)
     assert is_pid(agent_buf), "Failed to start agent buffer"
 
     {:ok, file_buf} =
@@ -116,7 +116,8 @@ defmodule Minga.Integration.AgentCursorTest do
     test "cursor starts and stays on the input content row" do
       ctx = start_agent_editor()
 
-      send_keys_sync(ctx, "i")
+      sync_screen(ctx)
+      send_key(ctx, ?i)
 
       rows = screen_text(ctx)
       {cursor_row, _cursor_col} = screen_cursor(ctx)
@@ -143,7 +144,8 @@ defmodule Minga.Integration.AgentCursorTest do
       for {width, height} <- [{80, 24}, {120, 40}, {60, 20}] do
         ctx = start_agent_editor(width: width, height: height)
 
-        send_keys_sync(ctx, "i")
+        sync_screen(ctx)
+        send_key(ctx, ?i)
 
         rows = screen_text(ctx)
         {cursor_row, _cursor_col} = screen_cursor(ctx)

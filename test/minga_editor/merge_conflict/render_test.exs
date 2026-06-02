@@ -2,6 +2,7 @@ defmodule MingaEditor.MergeConflict.RenderTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Config.Options
   alias Minga.Core.Decorations
   alias MingaEditor.BufferDecorations
   alias MingaEditor.Layout
@@ -16,8 +17,25 @@ defmodule MingaEditor.MergeConflict.RenderTest do
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
 
-  test "composes highlight and action block decorations for conflict markers" do
-    buffer = start_supervised!({BufferProcess, [content: conflict_content()]})
+  setup do
+    id = :erlang.unique_integer([:positive])
+    events_registry = :"#{__MODULE__}.Events.#{id}"
+
+    start_supervised!({Minga.Events, name: events_registry}, id: {:events, id})
+
+    options_server =
+      start_supervised!({Options, name: nil, events_registry: events_registry},
+        id: {:options, id}
+      )
+
+    %{events_registry: events_registry, options_server: options_server}
+  end
+
+  test "composes highlight and action block decorations for conflict markers", %{
+    events_registry: events_registry,
+    options_server: options_server
+  } do
+    buffer = start_conflict_buffer(events_registry, options_server)
 
     decorations = BufferDecorations.compose(%{}, buffer)
 
@@ -56,8 +74,11 @@ defmodule MingaEditor.MergeConflict.RenderTest do
     assert :ok = block.on_click.(0, trailing.start)
   end
 
-  test "hit-testing conflict action blocks returns the accept command" do
-    buffer = start_supervised!({BufferProcess, [content: conflict_content()]})
+  test "hit-testing conflict action blocks returns the accept command", %{
+    events_registry: events_registry,
+    options_server: options_server
+  } do
+    buffer = start_conflict_buffer(events_registry, options_server)
     state = state_with_buffer(buffer)
 
     %{content: {row, col, _width, _height}} =
@@ -69,8 +90,11 @@ defmodule MingaEditor.MergeConflict.RenderTest do
              HitTest.resolve_buffer(state, row, col + gutter_width + 1)
   end
 
-  test "mouse click on action block is a no-op when Git porcelain is disabled" do
-    buffer = start_supervised!({BufferProcess, [content: conflict_content()]})
+  test "mouse click on action block is a no-op when Git porcelain is disabled", %{
+    events_registry: events_registry,
+    options_server: options_server
+  } do
+    buffer = start_conflict_buffer(events_registry, options_server)
     state = state_with_buffer(buffer)
 
     %{content: {row, col, _width, _height}} =
@@ -85,8 +109,11 @@ defmodule MingaEditor.MergeConflict.RenderTest do
     assert state.shell_state.status_msg == nil
   end
 
-  test "mouse click on action block separators is a no-op" do
-    buffer = start_supervised!({BufferProcess, [content: conflict_content()]})
+  test "mouse click on action block separators is a no-op", %{
+    events_registry: events_registry,
+    options_server: options_server
+  } do
+    buffer = start_conflict_buffer(events_registry, options_server)
     state = state_with_buffer(buffer)
     before_content = BufferProcess.content(buffer)
     before_cursor = BufferProcess.cursor(buffer)
@@ -111,17 +138,15 @@ defmodule MingaEditor.MergeConflict.RenderTest do
     assert state.shell_state.status_msg == nil
   end
 
-  test "hit-testing action blocks uses visible columns when horizontally scrolled" do
-    buffer = start_supervised!({BufferProcess, [content: conflict_content()]})
-    state = state_with_buffer(buffer, viewport_left: 20)
-
-    %{content: {row, col, _width, _height}} =
-      Layout.active_window_layout(Layout.get(state), state)
-
-    gutter_width = HitTest.buffer_gutter_width(buffer, BufferProcess.line_count(buffer))
-
-    assert {:command, {:git_accept_conflict, :current, 0}} =
-             HitTest.resolve_buffer(state, row, col + gutter_width + 1)
+  defp start_conflict_buffer(events_registry, options_server) do
+    start_supervised!(
+      {BufferProcess,
+       [
+         content: conflict_content(),
+         events_registry: events_registry,
+         options_server: options_server
+       ]}
+    )
   end
 
   defp state_with_buffer(buffer, opts \\ []) do

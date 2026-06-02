@@ -6,6 +6,8 @@ defmodule MingaEditor.Mouse.HitTestTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Core.Decorations
+  alias Minga.Core.Face
   alias Minga.Editing.Fold.Range, as: FoldRange
   alias MingaEditor.Commands.Movement
   alias MingaEditor.Extension.Sidebar
@@ -77,6 +79,39 @@ defmodule MingaEditor.Mouse.HitTestTest do
       assert BufferTarget.position(target) == {0, 8}
       assert target.local_col == 3
       assert target.viewport.left == 5
+    end
+
+    test "block action hit-testing uses visible columns when horizontally scrolled" do
+      {state, buffer} = start_mouse_state("line")
+
+      :ok =
+        BufferProcess.batch_decorations(buffer, fn decorations ->
+          {_id, decorations} =
+            Decorations.add_block_decoration(decorations, 0,
+              placement: :above,
+              render: fn _width -> [{" block ", Face.new()}] end,
+              on_click: fn
+                0, 1 -> {:command, {:clicked, :visible_col}}
+                0, 21 -> {:command, {:clicked, :display_col}}
+                _, _ -> :ok
+              end
+            )
+
+          decorations
+        end)
+
+      state =
+        EditorState.update_window(
+          state,
+          state.workspace.windows.active,
+          &Window.scroll_horizontal(&1, 20)
+        )
+
+      %{content: {row, col, _width, _height}} = active_window_layout(state)
+      gutter_width = HitTest.buffer_gutter_width(buffer, BufferProcess.line_count(buffer))
+
+      assert {:command, {:clicked, :visible_col}} =
+               HitTest.resolve_buffer(state, row, col + gutter_width + 1)
     end
 
     test "maps folded scrolled viewport rows back to buffer lines" do

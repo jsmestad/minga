@@ -7,6 +7,7 @@ defmodule MingaAgent.Tool.Registry do
 
   use GenServer
 
+  alias MingaAgent.Tool.BundledSources
   alias MingaAgent.Tool.Spec
 
   @table __MODULE__
@@ -16,7 +17,8 @@ defmodule MingaAgent.Tool.Registry do
 
   @typedoc "Registration failure reason."
   @type register_error ::
-          {:reserved_builtin_tool, String.t(), source()}
+          {:reserved_tool_name, String.t(), owner_source :: source(),
+           attempted_source :: source()}
           | {:duplicate_tool_name, String.t(), existing_source :: source(),
              attempted_source :: source()}
           | {:invalid_spec, term()}
@@ -202,17 +204,19 @@ defmodule MingaAgent.Tool.Registry do
       {:ok, %Spec{source: existing_source}} when existing_source == attempted_source ->
         :ok
 
-      {:ok, %Spec{source: :builtin}} ->
-        {:error, {:reserved_builtin_tool, name, attempted_source}}
-
       {:ok, %Spec{source: existing_source}} ->
-        {:error, {:duplicate_tool_name, name, existing_source, attempted_source}}
+        existing_source_registration(existing_source, name, attempted_source)
 
       :error ->
-        if built_in_name?(name) and attempted_source != :builtin do
-          {:error, {:reserved_builtin_tool, name, attempted_source}}
-        else
-          :ok
+        case reserved_owner_for(name) do
+          {:ok, ^attempted_source} ->
+            :ok
+
+          {:ok, owner_source} ->
+            {:error, {:reserved_tool_name, name, owner_source, attempted_source}}
+
+          :error ->
+            :ok
         end
     end
   end
@@ -234,8 +238,29 @@ defmodule MingaAgent.Tool.Registry do
 
   defp maybe_register_cleanup_callback(_table), do: :ok
 
-  @spec built_in_name?(String.t()) :: boolean()
-  defp built_in_name?(name), do: name in MingaAgent.Tools.builtin_names()
+  @spec existing_source_registration(source(), String.t(), source()) ::
+          :ok | {:error, register_error()}
+  defp existing_source_registration(existing_source, name, attempted_source) do
+    if protected_source?(existing_source) do
+      {:error, {:reserved_tool_name, name, existing_source, attempted_source}}
+    else
+      {:error, {:duplicate_tool_name, name, existing_source, attempted_source}}
+    end
+  end
+
+  @spec protected_source?(source()) :: boolean()
+  defp protected_source?(:builtin), do: true
+  defp protected_source?({:bundle, _name} = source), do: BundledSources.known_source?(source)
+  defp protected_source?(_source), do: false
+
+  @spec reserved_owner_for(String.t()) :: {:ok, source()} | :error
+  defp reserved_owner_for(name) do
+    if name in MingaAgent.Tools.builtin_names() do
+      {:ok, :builtin}
+    else
+      BundledSources.reserved_source_for(name)
+    end
+  end
 
   @spec categorize(String.t()) :: Spec.category()
   defp categorize("read_file"), do: :filesystem

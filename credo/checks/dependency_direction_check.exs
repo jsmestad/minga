@@ -223,6 +223,7 @@ defmodule Minga.Credo.DependencyDirectionCheck do
   ]
 
   @agent_level_2_prefixes [
+    "MingaAgent.ToolPacks",
     "MingaEditor"
   ]
 

@@ -1170,18 +1170,16 @@ defmodule Minga.Config.LoaderTest do
       on_exit(cleanup)
 
       previous_load_extensions = Application.get_env(:minga, :load_extensions)
+      previous_load_board = Application.get_env(:minga, :load_board_extension)
       Application.put_env(:minga, :load_extensions, true)
+      Application.put_env(:minga, :load_board_extension, false)
 
       on_exit(fn ->
-        case previous_load_extensions do
-          nil -> Application.delete_env(:minga, :load_extensions)
-          value -> Application.put_env(:minga, :load_extensions, value)
-        end
+        restore_application_env(:load_extensions, previous_load_extensions)
+        restore_application_env(:load_board_extension, previous_load_board)
       end)
 
-      if Process.whereis(Minga.Extension.Supervisor) == nil do
-        start_supervised!({Minga.Extension.Supervisor, name: Minga.Extension.Supervisor})
-      end
+      ensure_extension_runtime()
 
       ext_dir =
         Path.join(

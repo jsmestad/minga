@@ -26,9 +26,10 @@ defmodule Minga.Foundation.Supervisor do
       ├── Minga.Extension.Panel          Extension panel registry (ETS)
       ├── Minga.Extension.Badge          Extension badge registry (ETS)
       ├── MingaAgent.Tool.Registry       Agent tool specs (ETS)
+      ├── MingaAgent.ToolPacks.ReadOnly  Bundled read-only agent tools
       └── Minga.Language.Filetype.Registry Filetype detection
 
-  Language.Registry is first because it owns the ETS table. Bundled packs (language, theme, recipe) start next so consumers see the default catalogs before services, LSP, syntax highlighting, or filetype detection query them. Recipe.Registry precedes RecipePacks so the ETS tables exist before packs register into them. Events follows so everything after it re-subscribes on Events restart.
+  Language.Registry is first because it owns the ETS table. Bundled packs (language, theme, recipe) start next so consumers see the default catalogs before services, LSP, syntax highlighting, or filetype detection query them. Recipe.Registry precedes RecipePacks and Tool.Registry precedes ToolPacks.ReadOnly so the ETS tables exist before packs register into them. Events follows so everything after it re-subscribes on Events restart.
   """
 
   use Supervisor
@@ -58,6 +59,7 @@ defmodule Minga.Foundation.Supervisor do
       Minga.Extension.Panel,
       Minga.Extension.Badge,
       MingaAgent.Tool.Registry,
+      MingaAgent.ToolPacks.ReadOnly,
       Minga.Language.Filetype.Registry
     ]
 

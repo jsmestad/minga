@@ -95,7 +95,21 @@ defmodule MingaAgent.Tool.RegistryTest do
           callback: fn _ -> :ok end
         )
 
-      assert {:error, {:reserved_builtin_tool, "read_file", {:extension, :demo}}} =
+      assert {:error, {:reserved_tool_name, "read_file", :builtin, {:extension, :demo}}} =
+               Registry.register(table, spec)
+    end
+
+    test "bundled sources can only claim their own reserved names", %{table: table} do
+      spec =
+        Spec.new!(
+          source: {:bundle, :read_only_tools},
+          name: "read_file",
+          description: "Read",
+          parameter_schema: %{},
+          callback: fn _ -> :ok end
+        )
+
+      assert {:error, {:reserved_tool_name, "read_file", :builtin, {:bundle, :read_only_tools}}} =
                Registry.register(table, spec)
     end
 
@@ -223,12 +237,12 @@ defmodule MingaAgent.Tool.RegistryTest do
                1
     end
 
-    test "init registers exactly the builtin tools" do
+    test "init registers exactly the core builtin tools" do
       table = :"registry_init_#{:erlang.unique_integer([:positive])}"
       start_supervised!({Registry, name: table, project_root: "."})
 
       expected_names =
-        MingaAgent.Tools.all(project_root: ".") |> Enum.map(& &1.name) |> MapSet.new()
+        MingaAgent.Tools.builtin_specs() |> Enum.map(& &1.name) |> MapSet.new()
 
       registered_names = Registry.all(table) |> Enum.map(& &1.name) |> MapSet.new()
 
