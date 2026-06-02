@@ -317,9 +317,9 @@ defmodule MingaEditor.Frontend.Manager do
   end
 
   @spec log_renderer_message(String.t(), String.t()) :: :ok
-  defp log_renderer_message("ERR", text), do: Minga.Log.error(:tui, text)
-  defp log_renderer_message("WARN", text), do: Minga.Log.warning(:tui, text)
-  defp log_renderer_message(_level, text), do: Minga.Log.info(:tui, text)
+  defp log_renderer_message("ERR", text), do: Minga.Log.error(:port, text)
+  defp log_renderer_message("WARN", text), do: Minga.Log.warning(:port, text)
+  defp log_renderer_message(_level, text), do: Minga.Log.info(:port, text)
 
   @spec broadcast([pid()], term()) :: :ok
   defp broadcast(subscribers, message) do
