@@ -8,8 +8,7 @@ defmodule Minga.Integration.AgentCursorTest do
   area, but the visible cursor is one row too high.
   """
 
-  # Not async: manual agent chat buffers trip global render state under full-suite concurrency.
-  use Minga.Test.EditorCase, async: false
+  use Minga.Test.EditorCase, async: true
 
   alias MingaEditor.Agent.BufferSync, as: AgentBufferSync
   alias Minga.Buffer.Process, as: BufferProcess
@@ -39,7 +38,7 @@ defmodule Minga.Integration.AgentCursorTest do
 
     {:ok, port} = HeadlessPort.start_link(width: width, height: height)
 
-    agent_buf = AgentBufferSync.start_buffer()
+    agent_buf = AgentBufferSync.start_buffer(options_server)
     assert is_pid(agent_buf), "Failed to start agent buffer"
 
     {:ok, file_buf} =
