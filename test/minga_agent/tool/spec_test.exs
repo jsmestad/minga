@@ -44,6 +44,17 @@ defmodule MingaAgent.Tool.SpecTest do
              )
   end
 
+  test "rejects unknown bundle sources" do
+    assert {:error, {:invalid_source, {:bundle, :fake}}} =
+             Spec.new(
+               source: {:bundle, :fake},
+               name: "fake_bundle_tool",
+               description: "Fake",
+               parameter_schema: %{},
+               callback: fn _args -> :ok end
+             )
+  end
+
   test "mutating filesystem specs must require tool context" do
     assert {:error, {:missing_context_requirement, :tool_context}} =
              Spec.new(

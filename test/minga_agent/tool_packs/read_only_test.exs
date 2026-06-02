@@ -72,7 +72,8 @@ defmodule MingaAgent.ToolPacks.ReadOnlyTest do
         callback: fn _args -> {:ok, "override"} end
       )
 
-    assert {:error, {:reserved_builtin_tool, "find", {:extension, :demo}}} =
+    assert {:error,
+            {:reserved_tool_name, "find", {:bundle, :read_only_tools}, {:extension, :demo}}} =
              Registry.register(table, collision)
   end
 
@@ -188,7 +189,29 @@ defmodule MingaAgent.ToolPacks.ReadOnlyTest do
         callback: fn _args -> {:ok, "override"} end
       )
 
-    assert {:error, {:reserved_builtin_tool, "find", {:extension, :demo}}} =
+    assert {:error,
+            {:reserved_tool_name, "find", {:bundle, :read_only_tools}, {:extension, :demo}}} =
              Registry.register(table, collision)
+  end
+
+  test "registration restores prior pack-name state when a later tool fails", %{table: table} do
+    grep_owner =
+      Spec.new!(
+        source: :builtin,
+        name: "grep",
+        description: "Existing protected grep",
+        parameter_schema: %{},
+        callback: fn _args -> {:ok, "existing"} end
+      )
+
+    :ets.insert(table, {"grep", grep_owner})
+
+    assert {:error, {:reserved_tool_name, "grep", :builtin, {:bundle, :read_only_tools}}} =
+             ReadOnly.register(table)
+
+    assert :error = Registry.lookup(table, "find")
+    assert {:ok, ^grep_owner} = Registry.lookup(table, "grep")
+    assert :error = Registry.lookup(table, "list_directory")
+    assert :error = Registry.lookup(table, "fetch_url")
   end
 end

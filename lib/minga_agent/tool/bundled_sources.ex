@@ -8,8 +8,8 @@ defmodule MingaAgent.Tool.BundledSources do
   @read_only_source {:bundle, :read_only_tools}
   @read_only_tool_names ~w(find grep list_directory fetch_url)
 
-  @typedoc "Bundled tool-pack source identifier."
-  @type source :: {:bundle, atom()}
+  @typedoc "Known bundled tool-pack source identifier."
+  @type source :: {:bundle, :read_only_tools}
 
   @doc "Returns the bundled read-only tool pack source."
   @spec read_only_source() :: {:bundle, :read_only_tools}
@@ -22,4 +22,14 @@ defmodule MingaAgent.Tool.BundledSources do
   @doc "Returns all bundled tool names that remain reserved even if their pack is disabled."
   @spec reserved_names() :: [String.t()]
   def reserved_names, do: @read_only_tool_names
+
+  @doc "Returns true when the source is a known bundled tool-pack source."
+  @spec known_source?(term()) :: boolean()
+  def known_source?(@read_only_source), do: true
+  def known_source?(_source), do: false
+
+  @doc "Returns the bundled source that owns a reserved tool name."
+  @spec reserved_source_for(String.t()) :: {:ok, source()} | :error
+  def reserved_source_for(name) when name in @read_only_tool_names, do: {:ok, @read_only_source}
+  def reserved_source_for(_name), do: :error
 end
