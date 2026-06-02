@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -50,8 +51,8 @@ func (m Model) renderRow(row protocol.WindowRow) string {
 
 func (m Model) cellLines() []string {
 	buffer := cellbuf.NewBuffer(max(m.width, 1), max(m.height-2, 1))
-	for pos, cell := range m.cells {
-		writeCellText(buffer, int(pos.col), int(pos.row), cell)
+	for _, draw := range m.orderedCells() {
+		writeCellText(buffer, int(draw.pos.col), int(draw.pos.row), draw.cell)
 	}
 
 	rendered := make([]string, buffer.Height())
@@ -60,6 +61,25 @@ func (m Model) cellLines() []string {
 		rendered[i] = m.editorStyle().Render(fitStyled(line, m.width))
 	}
 	return rendered
+}
+
+type orderedCell struct {
+	pos  position
+	cell cell
+}
+
+// orderedCells returns the fallback draws sorted by draw-command order. Go map
+// iteration is randomized, so replaying m.cells directly lets a later wide draw
+// (for example a full-row space clear) blank earlier content depending on
+// iteration order. Sorting by seq replays draws in the order they arrived, which
+// keeps overlaps deterministic.
+func (m Model) orderedCells() []orderedCell {
+	draws := make([]orderedCell, 0, len(m.cells))
+	for pos, c := range m.cells {
+		draws = append(draws, orderedCell{pos: pos, cell: c})
+	}
+	sort.Slice(draws, func(i, j int) bool { return draws[i].cell.seq < draws[j].cell.seq })
+	return draws
 }
 
 func writeCellText(buffer *cellbuf.Buffer, col int, row int, fallback cell) {

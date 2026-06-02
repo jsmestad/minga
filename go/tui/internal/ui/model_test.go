@@ -147,6 +147,25 @@ func TestCellLinesAdvanceByGraphemeWidth(t *testing.T) {
 	}
 }
 
+func TestCellLinesPreserveDrawOrderForOverlappingClearThenContent(t *testing.T) {
+	// The scroll-redraw path sends a full-row space clear and then the
+	// replacement content for that row. The clear must render before the
+	// content, otherwise it blanks the freshly drawn row. Because m.cells is a
+	// Go map, replaying it in iteration order is nondeterministic, so this drives
+	// the real applyDraw path (which records draw order) and asserts the content
+	// survives. Run repeatedly to defeat any accidental iteration-order reliance.
+	for attempt := 0; attempt < 50; attempt++ {
+		model := New(20, 5, nil)
+		model.applyDraw(protocol.DrawText{Row: 0, Col: 0, Text: strings.Repeat(" ", 20)})
+		model.applyDraw(protocol.DrawText{Row: 0, Col: 2, Text: "HELLO"})
+
+		stripped := ansi.Strip(model.cellLines()[0])
+		if !strings.Contains(stripped, "HELLO") {
+			t.Fatalf("attempt %d: clear blanked redrawn content: %q", attempt, stripped)
+		}
+	}
+}
+
 func TestCellbufStyleMapsProtocolAttrs(t *testing.T) {
 	style := cellbufStyle(cell{fg: 0x112233, bg: 0x445566, attrs: 0x01 | 0x02 | 0x04 | 0x08 | 0x10})
 

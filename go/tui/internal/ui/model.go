@@ -27,6 +27,7 @@ type Model struct {
 	windowOrder []uint16
 	chrome      map[byte]protocol.ChromePayload
 	cells       map[position]cell
+	drawSeq     uint64
 	cursorRow   uint16
 	cursorCol   uint16
 	cursorShape byte
@@ -45,6 +46,9 @@ type cell struct {
 	fg    uint32
 	bg    uint32
 	attrs uint16
+	// seq records the draw-command order so overlapping cells replay
+	// deterministically, instead of in Go's randomized map order.
+	seq uint64
 }
 
 func New(width, height uint16, out chan<- []byte) Model {
@@ -116,6 +120,7 @@ func (m *Model) applyCommands(commands []protocol.Command) tea.Cmd {
 			m.windows = map[uint16]protocol.WindowContent{}
 			m.windowOrder = nil
 			m.cells = map[position]cell{}
+			m.drawSeq = 0
 		case protocol.CommandDrawText:
 			m.applyDraw(command.Draw)
 		case protocol.CommandSetCursor:
@@ -140,7 +145,8 @@ func (m *Model) applyCommands(commands []protocol.Command) tea.Cmd {
 }
 
 func (m *Model) applyDraw(draw protocol.DrawText) {
-	m.cells[position{row: draw.Row, col: draw.Col}] = cell{text: draw.Text, fg: draw.FG, bg: draw.BG, attrs: draw.Attrs}
+	m.drawSeq++
+	m.cells[position{row: draw.Row, col: draw.Col}] = cell{text: draw.Text, fg: draw.FG, bg: draw.BG, attrs: draw.Attrs, seq: m.drawSeq}
 }
 
 func (m *Model) putWindow(window protocol.WindowContent) {
