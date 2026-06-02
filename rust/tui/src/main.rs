@@ -185,6 +185,14 @@ fn handle_packet(
     let mut offset = 0;
 
     while offset < packet.len() {
+        let command_size = match protocol::command_byte_size(&packet[offset..]) {
+            Ok(size) => size,
+            Err(error) => {
+                log_warn(output, &format!("protocol size error at {offset}: {error}"));
+                break;
+            }
+        };
+
         let command = match protocol::decode_command(&packet[offset..]) {
             Ok(command) => command,
             Err(error) => {
@@ -196,7 +204,7 @@ fn handle_packet(
             }
         };
 
-        offset += command.size();
+        offset += command_size;
 
         if let Err(error) = renderer.handle(command, terminal, output) {
             log_warn(output, &format!("render error: {error}"));

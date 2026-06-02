@@ -1,4 +1,8 @@
-use crate::protocol::{DecodeError, opcodes};
+use crate::protocol::{
+    DecodeError,
+    command_size::{self, CommandSize},
+    opcodes,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
@@ -24,7 +28,7 @@ pub enum Command {
 }
 
 impl Command {
-    pub fn size(&self) -> usize {
+    pub fn custom_size(&self) -> usize {
         match self {
             Self::WindowContent(_, size) => *size,
             Self::StatusBar(_, size) => *size,
@@ -396,23 +400,15 @@ pub fn decode(bytes: &[u8]) -> Result<Command, DecodeError> {
         opcodes::OP_GUI_CHANGE_SUMMARY => decode_change_summary(bytes),
         opcodes::OP_GUI_GIT_STATUS => decode_git_status(bytes),
         opcodes::OP_GUI_THEME => decode_theme(bytes),
-        opcodes::OP_GUI_WINDOW_VIEWPORT_DELTA | opcodes::OP_GUI_WINDOW_ROWS_DELTA => {
-            sectioned_size(bytes, "semantic row delta")
-                .map(|size| Command::Unsupported { opcode, size })
-        }
-        opcodes::OP_GUI_WINDOW_OVERLAY_DELTA => {
-            overlay_delta_size(bytes).map(|size| Command::Unsupported { opcode, size })
-        }
-        opcodes::OP_GUI_GUTTER => sectioned_size(bytes, "semantic sectioned command")
-            .map(|size| Command::Unsupported { opcode, size }),
-        opcodes::OP_GUI_CURSORLINE => {
-            fixed_size(bytes, 6, "cursorline").map(|size| Command::Unsupported { opcode, size })
-        }
-        opcodes::OP_CLIPBOARD_WRITE
+        opcodes::OP_GUI_WINDOW_VIEWPORT_DELTA
+        | opcodes::OP_GUI_WINDOW_ROWS_DELTA
+        | opcodes::OP_GUI_WINDOW_OVERLAY_DELTA
+        | opcodes::OP_GUI_GUTTER
+        | opcodes::OP_GUI_CURSORLINE
+        | opcodes::OP_CLIPBOARD_WRITE
         | opcodes::OP_GUI_LINE_SPACING
-        | opcodes::OP_GUI_CURSOR_ANIMATION => len16_size(bytes, "forward-compatible gui command")
-            .map(|size| Command::Unsupported { opcode, size }),
-        opcodes::OP_GUI_INDENT_GUIDES
+        | opcodes::OP_GUI_CURSOR_ANIMATION
+        | opcodes::OP_GUI_INDENT_GUIDES
         | opcodes::OP_GUI_HOVER_ACTION
         | opcodes::OP_GUI_WORKSPACES
         | opcodes::OP_GUI_NOTIFICATIONS
@@ -420,29 +416,35 @@ pub fn decode(bytes: &[u8]) -> Result<Command, DecodeError> {
         | opcodes::OP_GUI_EXTENSION_OVERLAY
         | opcodes::OP_GUI_EXTENSION_PANEL
         | opcodes::OP_GUI_SEARCH_STATE
-        | opcodes::OP_GUI_CONFIG_STATE => len16_size(bytes, "semantic length16 command")
-            .map(|size| Command::Unsupported { opcode, size }),
-        opcodes::OP_GUI_OBSERVATORY | opcodes::OP_GUI_SIDEBARS => {
-            len32_size(bytes, "semantic length32 command")
-                .map(|size| Command::Unsupported { opcode, size })
-        }
-        opcodes::OP_GUI_GUTTER_SEP => fixed_size(bytes, 6, "gutter separator")
-            .map(|size| Command::Unsupported { opcode, size }),
-        opcodes::OP_GUI_SPLIT_SEPARATORS => {
-            split_separators_size(bytes).map(|size| Command::Unsupported { opcode, size })
-        }
-        opcodes::OP_GUI_AGENT_CONTEXT
+        | opcodes::OP_GUI_CONFIG_STATE
+        | opcodes::OP_GUI_OBSERVATORY
+        | opcodes::OP_GUI_SIDEBARS
+        | opcodes::OP_GUI_GUTTER_SEP
+        | opcodes::OP_GUI_SPLIT_SEPARATORS
+        | opcodes::OP_GUI_AGENT_CONTEXT
         | opcodes::OP_GUI_BOARD
         | opcodes::OP_GUI_AGENT_CHAT
         | opcodes::OP_GUI_TOOL_MANAGER => {
-            legacy_visible_size(bytes).map(|size| Command::Unsupported { opcode, size })
+            semantic_size(bytes).map(|size| Command::Unsupported { opcode, size })
         }
         _ => Err(DecodeError::UnknownOpcode(opcode)),
     }
 }
 
+fn semantic_size(bytes: &[u8]) -> Result<usize, DecodeError> {
+    match command_size::command_size(bytes) {
+        CommandSize::Sized(size) => Ok(size),
+        CommandSize::Custom => custom_semantic_size(bytes),
+        CommandSize::Incomplete => Err(DecodeError::Malformed("incomplete semantic command")),
+        CommandSize::Unknown => match bytes.first() {
+            Some(opcode) => Err(DecodeError::UnknownOpcode(*opcode)),
+            None => Err(DecodeError::Empty),
+        },
+    }
+}
+
 fn decode_window_content(bytes: &[u8]) -> Result<Command, DecodeError> {
-    let size = sectioned_size(bytes, "window content")?;
+    let size = semantic_size(bytes)?;
     let sections = sections(&bytes[..size])?;
     let mut cursor_row = 0;
     let mut cursor_col = 0;
@@ -482,7 +484,7 @@ fn decode_window_content(bytes: &[u8]) -> Result<Command, DecodeError> {
 }
 
 fn decode_status_bar(bytes: &[u8]) -> Result<Command, DecodeError> {
-    let size = sectioned_size(bytes, "status bar")?;
+    let size = semantic_size(bytes)?;
     let sections = sections(&bytes[..size])?;
     let mut status = StatusBar::default();
 
@@ -584,7 +586,7 @@ fn decode_status_segment(bytes: &[u8]) -> Result<(StatusSegment, usize), DecodeE
 }
 
 fn decode_tab_bar(bytes: &[u8]) -> Result<Command, DecodeError> {
-    let size = tab_bar_size(bytes)?;
+    let size = semantic_size(bytes)?;
     require_len(bytes, 3, "tab bar header")?;
     let active_index = bytes[1];
     let count = bytes[2] as usize;
@@ -613,7 +615,7 @@ fn decode_tab_bar(bytes: &[u8]) -> Result<Command, DecodeError> {
 }
 
 fn decode_file_tree(bytes: &[u8]) -> Result<Command, DecodeError> {
-    let size = len32_size(bytes, "file tree")?;
+    let size = semantic_size(bytes)?;
     let payload = &bytes[5..size];
     require_len(payload, 3, "file tree header")?;
     let flags = payload[1];
@@ -650,7 +652,7 @@ fn decode_file_tree(bytes: &[u8]) -> Result<Command, DecodeError> {
 }
 
 fn decode_file_tree_selection(bytes: &[u8]) -> Result<Command, DecodeError> {
-    let size = len16_size(bytes, "file tree selection")?;
+    let size = semantic_size(bytes)?;
     let payload = &bytes[3..size];
     require_len(payload, 1, "file tree selection flags")?;
     let mut offset = 1;
@@ -671,7 +673,7 @@ fn decode_picker(bytes: &[u8]) -> Result<Command, DecodeError> {
         return Ok(Command::Picker(Picker::default(), 2));
     }
 
-    let size = sectioned_size(bytes, "picker")?;
+    let size = semantic_size(bytes)?;
     let sections = sections(&bytes[..size])?;
     let mut picker = Picker {
         visible: true,
@@ -857,7 +859,7 @@ fn decode_minibuffer_candidate(bytes: &[u8]) -> Result<(MinibufferCandidate, usi
 }
 
 fn decode_breadcrumb(bytes: &[u8]) -> Result<Command, DecodeError> {
-    let size = breadcrumb_size(bytes)?;
+    let size = semantic_size(bytes)?;
     let count = bytes[1] as usize;
     let mut offset = 2;
     let mut segments = Vec::with_capacity(count);
@@ -875,7 +877,7 @@ fn decode_completion(bytes: &[u8]) -> Result<Command, DecodeError> {
         return Ok(Command::Completion(Completion::default(), 2));
     }
 
-    let size = completion_size(bytes)?;
+    let size = semantic_size(bytes)?;
     let anchor_row = read_u16(bytes, 2);
     let anchor_col = read_u16(bytes, 4);
     let selected_index = read_u16(bytes, 6);
@@ -914,7 +916,7 @@ fn decode_which_key(bytes: &[u8]) -> Result<Command, DecodeError> {
         return Ok(Command::WhichKey(WhichKey::default(), 2));
     }
 
-    let size = which_key_size(bytes)?;
+    let size = semantic_size(bytes)?;
     let mut offset = 2;
     let prefix = read_string16(bytes, &mut offset)?;
     require_len(bytes, offset + 4, "which-key metadata")?;
@@ -957,7 +959,7 @@ fn decode_signature_help(bytes: &[u8]) -> Result<Command, DecodeError> {
         return Ok(Command::SignatureHelp(SignatureHelp::default(), 2));
     }
 
-    let size = signature_help_size(bytes)?;
+    let size = semantic_size(bytes)?;
     let anchor_row = read_u16(bytes, 2);
     let anchor_col = read_u16(bytes, 4);
     let active_signature = bytes[6];
@@ -1005,7 +1007,7 @@ fn decode_float_popup(bytes: &[u8]) -> Result<Command, DecodeError> {
         return Ok(Command::FloatPopup(FloatPopup::default(), 2));
     }
 
-    let size = float_popup_size(bytes)?;
+    let size = semantic_size(bytes)?;
     let width = read_u16(bytes, 2);
     let height = read_u16(bytes, 4);
     let mut offset = 6;
@@ -1037,7 +1039,7 @@ fn decode_hover_popup(bytes: &[u8]) -> Result<Command, DecodeError> {
         return Ok(Command::HoverPopup(HoverPopup::default(), 2));
     }
 
-    let size = hover_popup_size(bytes)?;
+    let size = semantic_size(bytes)?;
     let anchor_row = read_u16(bytes, 2);
     let anchor_col = read_u16(bytes, 4);
     let focused = bytes[6] != 0;
@@ -1105,7 +1107,7 @@ fn decode_bottom_panel(bytes: &[u8]) -> Result<Command, DecodeError> {
         return Ok(Command::BottomPanel(BottomPanel::default(), 2));
     }
 
-    let size = bottom_panel_size(bytes)?;
+    let size = semantic_size(bytes)?;
     require_len(bytes, 6, "bottom panel visible header")?;
     let active_tab_index = bytes[2];
     let height_percent = bytes[3];
@@ -1160,7 +1162,7 @@ fn decode_bottom_panel(bytes: &[u8]) -> Result<Command, DecodeError> {
 }
 
 fn decode_change_summary(bytes: &[u8]) -> Result<Command, DecodeError> {
-    let size = change_summary_size(bytes)?;
+    let size = semantic_size(bytes)?;
     require_len(bytes, 5, "change summary header")?;
     let visible = bytes[1] != 0;
     let selected_index = read_u16(bytes, 2);
@@ -1194,7 +1196,7 @@ fn decode_change_summary(bytes: &[u8]) -> Result<Command, DecodeError> {
 }
 
 fn decode_git_status(bytes: &[u8]) -> Result<Command, DecodeError> {
-    let size = git_status_size(bytes)?;
+    let size = semantic_size(bytes)?;
     require_len(bytes, 9, "git status header")?;
     let repo_state = bytes[1];
     let syncing = bytes[2] != 0;
@@ -1264,7 +1266,7 @@ fn decode_git_status(bytes: &[u8]) -> Result<Command, DecodeError> {
 }
 
 fn decode_theme(bytes: &[u8]) -> Result<Command, DecodeError> {
-    let size = theme_size(bytes)?;
+    let size = semantic_size(bytes)?;
     let count = bytes[1] as usize;
     let mut slots = Vec::with_capacity(count);
     let mut offset = 2;
@@ -1380,6 +1382,51 @@ fn sections(bytes: &[u8]) -> Result<Vec<(u8, &[u8])>, DecodeError> {
     Ok(sections)
 }
 
+fn custom_semantic_size(bytes: &[u8]) -> Result<usize, DecodeError> {
+    let opcode = *bytes.first().ok_or(DecodeError::Empty)?;
+
+    match opcode {
+        opcodes::OP_GUI_TAB_BAR => tab_bar_size(bytes),
+        opcodes::OP_GUI_WHICH_KEY => which_key_size(bytes),
+        opcodes::OP_GUI_COMPLETION => completion_size(bytes),
+        opcodes::OP_GUI_THEME => theme_size(bytes),
+        opcodes::OP_GUI_BREADCRUMB => breadcrumb_size(bytes),
+        opcodes::OP_GUI_PICKER => sectioned_size(bytes, "picker"),
+        opcodes::OP_GUI_AGENT_CHAT => sectioned_size(bytes, "agent chat"),
+        opcodes::OP_GUI_BOTTOM_PANEL => bottom_panel_size(bytes),
+        opcodes::OP_GUI_PICKER_PREVIEW => sectioned_size(bytes, "picker preview"),
+        opcodes::OP_GUI_MINIBUFFER => sectioned_size(bytes, "minibuffer"),
+        opcodes::OP_GUI_HOVER_POPUP => hover_popup_size(bytes),
+        opcodes::OP_GUI_SIGNATURE_HELP => signature_help_size(bytes),
+        opcodes::OP_GUI_FLOAT_POPUP => float_popup_size(bytes),
+        opcodes::OP_GUI_SPLIT_SEPARATORS => split_separators_size(bytes),
+        opcodes::OP_GUI_GIT_STATUS => git_status_size(bytes),
+        opcodes::OP_GUI_BOARD => hidden_or_visible_size(bytes, "board", board_size),
+        opcodes::OP_GUI_AGENT_CONTEXT => {
+            hidden_or_visible_size(bytes, "agent context", agent_context_size)
+        }
+        opcodes::OP_GUI_CHANGE_SUMMARY => change_summary_size(bytes),
+        opcodes::OP_GUI_TOOL_MANAGER => {
+            hidden_or_visible_size(bytes, "tool manager", tool_manager_size)
+        }
+        opcodes::OP_GUI_WINDOW_OVERLAY_DELTA => overlay_delta_size(bytes),
+        _ => Err(DecodeError::UnknownOpcode(opcode)),
+    }
+}
+
+fn hidden_or_visible_size(
+    bytes: &[u8],
+    name: &'static str,
+    visible_size: fn(&[u8]) -> Result<usize, DecodeError>,
+) -> Result<usize, DecodeError> {
+    require_len(bytes, 2, name)?;
+    if bytes[1] == 0 {
+        Ok(2)
+    } else {
+        visible_size(bytes)
+    }
+}
+
 fn sectioned_size(bytes: &[u8], name: &'static str) -> Result<usize, DecodeError> {
     require_len(bytes, 2, name)?;
     let count = bytes[1] as usize;
@@ -1407,20 +1454,6 @@ fn overlay_delta_size(bytes: &[u8]) -> Result<usize, DecodeError> {
     }
 
     Ok(offset)
-}
-
-fn len16_size(bytes: &[u8], name: &'static str) -> Result<usize, DecodeError> {
-    require_len(bytes, 3, name)?;
-    let len = read_u16(bytes, 1) as usize;
-    require_len(bytes, 3 + len, name)?;
-    Ok(3 + len)
-}
-
-fn len32_size(bytes: &[u8], name: &'static str) -> Result<usize, DecodeError> {
-    require_len(bytes, 5, name)?;
-    let len = read_u32(bytes, 1) as usize;
-    require_len(bytes, 5 + len, name)?;
-    Ok(5 + len)
 }
 
 fn fixed_size(bytes: &[u8], size: usize, name: &'static str) -> Result<usize, DecodeError> {
@@ -1471,32 +1504,6 @@ fn split_separators_size(bytes: &[u8]) -> Result<usize, DecodeError> {
     }
 
     Ok(offset)
-}
-
-fn legacy_visible_size(bytes: &[u8]) -> Result<usize, DecodeError> {
-    require_len(bytes, 2, "legacy semantic visibility")?;
-
-    if bytes[1] == 0 {
-        return Ok(2);
-    }
-
-    match bytes[0] {
-        opcodes::OP_GUI_BREADCRUMB => breadcrumb_size(bytes),
-        opcodes::OP_GUI_COMPLETION => completion_size(bytes),
-        opcodes::OP_GUI_SIGNATURE_HELP => signature_help_size(bytes),
-        opcodes::OP_GUI_FLOAT_POPUP => float_popup_size(bytes),
-        opcodes::OP_GUI_HOVER_POPUP => hover_popup_size(bytes),
-        opcodes::OP_GUI_AGENT_CONTEXT => agent_context_size(bytes),
-        opcodes::OP_GUI_GIT_STATUS => git_status_size(bytes),
-        opcodes::OP_GUI_CHANGE_SUMMARY => change_summary_size(bytes),
-        opcodes::OP_GUI_BOARD => board_size(bytes),
-        opcodes::OP_GUI_AGENT_CHAT => sectioned_size(bytes, "agent chat"),
-        opcodes::OP_GUI_BOTTOM_PANEL => bottom_panel_size(bytes),
-        opcodes::OP_GUI_TOOL_MANAGER => tool_manager_size(bytes),
-        _ => Err(DecodeError::Malformed(
-            "unsupported legacy semantic command",
-        )),
-    }
 }
 
 fn breadcrumb_size(bytes: &[u8]) -> Result<usize, DecodeError> {
@@ -1811,7 +1818,7 @@ mod tests {
 
         let command = decode(&payload).unwrap();
 
-        assert_eq!(command.size(), payload.len());
+        assert_eq!(semantic_size(&payload).unwrap(), payload.len());
         assert!(matches!(
             command,
             Command::WindowContent(WindowContent {
@@ -2026,7 +2033,7 @@ mod tests {
 
         let command = decode(&packet).unwrap();
 
-        assert_eq!(command.size(), packet.len() - 1);
+        assert_eq!(semantic_size(&packet).unwrap(), packet.len() - 1);
         assert!(matches!(
             command,
             Command::Breadcrumb(Breadcrumb { segments }, _) if segments == vec!["lib", "minga", "editor.ex"]
@@ -2049,7 +2056,7 @@ mod tests {
 
         let command = decode(&packet).unwrap();
 
-        assert_eq!(command.size(), packet.len() - 1);
+        assert_eq!(semantic_size(&packet).unwrap(), packet.len() - 1);
         assert!(matches!(
             command,
             Command::Completion(Completion { visible: true, anchor_row: 4, anchor_col: 12, selected_index: 1, items }, _)
@@ -2076,7 +2083,7 @@ mod tests {
 
         let command = decode(&packet).unwrap();
 
-        assert_eq!(command.size(), packet.len() - 1);
+        assert_eq!(semantic_size(&packet).unwrap(), packet.len() - 1);
         assert!(matches!(
             command,
             Command::WhichKey(WhichKey { visible: true, prefix, page: 0, page_count: 2, bindings }, _)
@@ -2101,7 +2108,7 @@ mod tests {
 
         let command = decode(&packet).unwrap();
 
-        assert_eq!(command.size(), packet.len() - 1);
+        assert_eq!(semantic_size(&packet).unwrap(), packet.len() - 1);
         assert!(matches!(
             command,
             Command::SignatureHelp(SignatureHelp { visible: true, anchor_row: 8, anchor_col: 12, active_parameter: 1, signatures, .. }, _)
@@ -2123,7 +2130,7 @@ mod tests {
 
         let command = decode(&packet).unwrap();
 
-        assert_eq!(command.size(), packet.len() - 1);
+        assert_eq!(semantic_size(&packet).unwrap(), packet.len() - 1);
         assert!(matches!(
             command,
             Command::FloatPopup(FloatPopup { visible: true, width: 24, height: 5, title, lines }, _)
@@ -2146,7 +2153,7 @@ mod tests {
 
         let command = decode(&packet).unwrap();
 
-        assert_eq!(command.size(), packet.len() - 1);
+        assert_eq!(semantic_size(&packet).unwrap(), packet.len() - 1);
         assert!(matches!(
             command,
             Command::HoverPopup(HoverPopup { visible: true, anchor_row: 3, anchor_col: 9, focused: true, scroll_offset: 2, lines }, _)
@@ -2174,7 +2181,7 @@ mod tests {
 
         let command = decode(&packet).unwrap();
 
-        assert_eq!(command.size(), packet.len() - 1);
+        assert_eq!(semantic_size(&packet).unwrap(), packet.len() - 1);
         assert!(matches!(
             command,
             Command::BottomPanel(BottomPanel { visible: true, active_tab_index: 1, height_percent: 30, filter: 2, tabs, entries }, _)
@@ -2199,7 +2206,7 @@ mod tests {
 
         let command = decode(&packet).unwrap();
 
-        assert_eq!(command.size(), packet.len() - 1);
+        assert_eq!(semantic_size(&packet).unwrap(), packet.len() - 1);
         assert!(matches!(
             command,
             Command::ChangeSummary(ChangeSummary { visible: true, selected_index: 1, entries }, _)
@@ -2228,7 +2235,7 @@ mod tests {
 
         let command = decode(&packet).unwrap();
 
-        assert_eq!(command.size(), packet.len() - 1);
+        assert_eq!(semantic_size(&packet).unwrap(), packet.len() - 1);
         assert!(matches!(
             command,
             Command::GitStatus(GitStatus { repo_state: 0, syncing: true, ahead: 2, behind: 1, branch, entries, toast: Some(toast), entry_base_path, last_commit_message, stash_count }, _)
@@ -2305,7 +2312,7 @@ mod tests {
             let packet = [payload.clone(), vec![opcodes::OP_BATCH_END]].concat();
             let command = decode(&packet).unwrap();
 
-            assert_eq!(command.size(), packet.len() - 1);
+            assert_eq!(semantic_size(&packet).unwrap(), packet.len() - 1);
             assert!(matches!(
                 command,
                 Command::Unsupported {
@@ -2317,17 +2324,43 @@ mod tests {
     }
 
     #[test]
-    fn skips_length_prefixed_config_state() {
-        let command = decode(&[opcodes::OP_GUI_CONFIG_STATE, 0, 3, 1, 2, 3]).unwrap();
+    fn skips_hidden_tool_manager_without_consuming_following_commands() {
+        let packet = [
+            vec![opcodes::OP_GUI_TOOL_MANAGER, 0],
+            vec![opcodes::OP_GUI_THEME, 0],
+        ]
+        .concat();
+        let command = decode(&packet).unwrap();
+        let size = semantic_size(&packet).unwrap();
 
-        assert_eq!(command.size(), 6);
+        assert_eq!(size, 2);
+        assert!(matches!(
+            command,
+            Command::Unsupported {
+                opcode: opcodes::OP_GUI_TOOL_MANAGER,
+                size: 2
+            }
+        ));
+        assert!(matches!(
+            decode(&packet[size..]).unwrap(),
+            Command::Theme(Theme { slots }, _) if slots.is_empty()
+        ));
+    }
+
+    #[test]
+    fn skips_length_prefixed_config_state() {
+        let bytes = [opcodes::OP_GUI_CONFIG_STATE, 0, 3, 1, 2, 3];
+        let _command = decode(&bytes).unwrap();
+
+        assert_eq!(semantic_size(&bytes).unwrap(), 6);
     }
 
     #[test]
     fn skips_length_wrapped_semantic_commands() {
-        let command = decode(&[opcodes::OP_GUI_NOTIFICATIONS, 0, 3, 1, 2, 3]).unwrap();
+        let bytes = [opcodes::OP_GUI_NOTIFICATIONS, 0, 3, 1, 2, 3];
+        let _command = decode(&bytes).unwrap();
 
-        assert_eq!(command.size(), 6);
+        assert_eq!(semantic_size(&bytes).unwrap(), 6);
     }
 
     #[test]
@@ -2355,7 +2388,7 @@ mod tests {
             let packet = [payload.clone(), vec![opcodes::OP_BATCH_END]].concat();
             let command = decode(&packet).unwrap();
 
-            assert_eq!(command.size(), packet.len() - 1);
+            assert_eq!(semantic_size(&packet).unwrap(), packet.len() - 1);
             assert!(matches!(
                 command,
                 Command::Unsupported {
@@ -2422,9 +2455,9 @@ mod tests {
             1,
         ];
 
-        let command = decode(&bytes).unwrap();
+        let _command = decode(&bytes).unwrap();
 
-        assert_eq!(command.size(), 13);
+        assert_eq!(semantic_size(&bytes).unwrap(), 13);
     }
 
     #[test]
@@ -2454,11 +2487,11 @@ mod tests {
         ]
         .concat();
 
-        let command = decode(&packet).unwrap();
+        let _command = decode(&packet).unwrap();
 
-        assert_eq!(command.size(), 18);
+        assert_eq!(semantic_size(&packet).unwrap(), 18);
         assert!(matches!(
-            decode(&packet[command.size()..]).unwrap(),
+            decode(&packet[semantic_size(&packet).unwrap()..]).unwrap(),
             Command::Theme(Theme { slots }, _) if slots.is_empty()
         ));
     }

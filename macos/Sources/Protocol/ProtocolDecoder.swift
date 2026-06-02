@@ -256,6 +256,29 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         throw ProtocolDecodeError.insufficientData
     }
 
+    let payload = Array(data[offset...])
+    switch commandSize(payload) {
+    case .sized(let size):
+        do {
+            let (command, _) = try decodeCommandForRendering(data: data, offset: offset)
+            return (command, size)
+        } catch ProtocolDecodeError.unknownOpcode(_) {
+            return (nil, size)
+        }
+    case .custom:
+        return try decodeCommandForRendering(data: data, offset: offset)
+    case .incomplete:
+        throw ProtocolDecodeError.insufficientData
+    case .unknown:
+        throw ProtocolDecodeError.unknownOpcode(data[offset])
+    }
+}
+
+private func decodeCommandForRendering(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
+    guard offset < data.count else {
+        throw ProtocolDecodeError.insufficientData
+    }
+
     let opcode = data[offset]
     let rest = offset + 1
 
