@@ -59,7 +59,11 @@ defmodule MingaAgent.Providers.Native do
   alias MingaAgent.Session
   alias MingaAgent.Skills
   alias MingaAgent.TokenEstimator
+  alias MingaAgent.Tool.Context, as: ToolContext
+  alias MingaAgent.Tool.Executor, as: ToolExecutor
   alias MingaAgent.Tool.PlanMode
+  alias MingaAgent.Tool.Registry, as: ToolRegistry
+  alias MingaAgent.Tool.Spec, as: ToolSpec
   alias MingaAgent.Tools
   alias MingaAgent.Tools.Notebook
   alias MingaAgent.Tools.Shell
@@ -331,15 +335,12 @@ defmodule MingaAgent.Providers.Native do
     {fork_store, changeset} =
       init_fork_store_and_changeset(project_view, project_root, opts)
 
+    tool_context =
+      native_tool_context(project_root, project_view, fork_store, changeset, subscriber)
+
     base_tools =
       Keyword.get(opts, :tools) ||
-        Tools.all(
-          project_root: project_root,
-          project_view: project_view,
-          fork_store: fork_store,
-          changeset: changeset,
-          parent_session: subscriber
-        )
+        registry_tools(tool_context, config, hook_runner)
 
     base_tools = filter_base_tools_for_read_only(base_tools, read_only?)
 
@@ -413,6 +414,47 @@ defmodule MingaAgent.Providers.Native do
     Minga.Log.info(:agent, "[Agent.Native] started with model=#{model} root=#{project_root}")
 
     {:ok, state}
+  end
+
+  @spec native_tool_context(
+          String.t(),
+          ProjectView.t() | nil,
+          pid() | nil,
+          pid() | nil,
+          pid() | nil
+        ) :: ToolContext.t()
+  defp native_tool_context(project_root, project_view, fork_store, changeset, parent_session) do
+    ToolContext.new(
+      project_root: project_root,
+      project_view: project_view,
+      fork_store: fork_store,
+      changeset: changeset,
+      metadata: %{parent_session: parent_session}
+    )
+  end
+
+  @spec registry_tools(ToolContext.t(), AgentConfig.t(), hook_runner()) :: [ReqLLM.Tool.t()]
+  defp registry_tools(%ToolContext{} = tool_context, %AgentConfig{} = config, hook_runner) do
+    ToolRegistry.all()
+    |> Enum.map(&registry_tool(&1, tool_context, config, hook_runner))
+  end
+
+  @spec registry_tool(ToolSpec.t(), ToolContext.t(), AgentConfig.t(), hook_runner()) ::
+          ReqLLM.Tool.t()
+  defp registry_tool(%ToolSpec{} = spec, %ToolContext{} = tool_context, config, hook_runner) do
+    ReqLLM.Tool.new!(
+      name: spec.name,
+      description: spec.description,
+      parameter_schema: spec.parameter_schema,
+      provider_options: %{minga_registry_tool: true, source: inspect(spec.source)},
+      callback: fn args ->
+        ToolExecutor.execute_approved(spec, args || %{}, :exec,
+          config: config,
+          hook_runner: hook_runner,
+          tool_context: tool_context
+        )
+      end
+    )
   end
 
   @spec disable_hooks_for_read_only(AgentConfig.t(), boolean()) :: AgentConfig.t()
@@ -1366,13 +1408,14 @@ defmodule MingaAgent.Providers.Native do
   @spec rebuild_tools(map()) :: map()
   defp rebuild_tools(state) do
     base_tools =
-      Tools.all(
-        project_root: state.project_root,
-        project_view: state.project_view,
-        fork_store: state.fork_store,
-        changeset: state.changeset,
-        parent_session: state.subscriber
+      state.project_root
+      |> native_tool_context(
+        state.project_view,
+        state.fork_store,
+        state.changeset,
+        state.subscriber
       )
+      |> registry_tools(state.config, state.hook_runner)
 
     base_tool_names = MapSet.new(Enum.map(base_tools, & &1.name))
     internal_tools = build_internal_tools(self())
@@ -1948,7 +1991,16 @@ defmodule MingaAgent.Providers.Native do
           approval_mode()
         ) :: tool_execution_result()
   defp execute_tool_call(lctx, tool_call, before_content, available_tools, approval_mode) do
-    {result_text, is_error, _new_mode} =
+    tool_context =
+      native_tool_context(
+        lctx.project_root,
+        lctx.project_view,
+        lctx.fork_store,
+        lctx.changeset,
+        lctx.session_pid
+      )
+
+    {result_text, is_error, _new_mode, post_dispatched?} =
       execute_with_approval(
         lctx.provider_pid,
         lctx.session_pid,
@@ -1956,11 +2008,15 @@ defmodule MingaAgent.Providers.Native do
         available_tools,
         approval_mode,
         lctx.config,
-        lctx.hook_runner
+        lctx.hook_runner,
+        tool_context
       )
 
     emit_tool_end(lctx.provider_pid, tool_call, result_text, is_error)
-    dispatch_post_tool_use(tool_call, result_text, is_error, lctx.config)
+
+    unless post_dispatched? do
+      dispatch_post_tool_use(tool_call, result_text, is_error, lctx.config)
+    end
 
     maybe_emit_file_changed(lctx, tool_call, before_content, is_error)
 
@@ -2006,9 +2062,10 @@ defmodule MingaAgent.Providers.Native do
           [ReqLLM.Tool.t()],
           approval_mode(),
           AgentConfig.t(),
-          hook_runner()
+          hook_runner(),
+          ToolContext.t()
         ) ::
-          {String.t(), boolean(), approval_mode()}
+          {String.t(), boolean(), approval_mode(), boolean()}
   defp execute_with_approval(
          provider_pid,
          session_pid,
@@ -2016,32 +2073,34 @@ defmodule MingaAgent.Providers.Native do
          available_tools,
          mode,
          config,
-         hook_runner
+         hook_runner,
+         tool_context
        ) do
     args = tool_call.arguments || %{}
 
     if plan_mode_blocks_tool?(session_pid, tool_call.name, args) do
       message = PlanMode.refusal_message(tool_call.name)
       emit_plan_mode_refusal(session_pid, message)
-      {message, true, mode}
+      {message, true, mode, false}
     else
       # Per-tool permissions override the global approval mode.
       case tool_permission(tool_call.name, config) do
         :allow ->
-          {result, is_error} =
+          {result, is_error, post_dispatched?} =
             run_single_tool(
               tool_call,
               available_tools,
               provider_pid,
               session_pid,
               config,
-              hook_runner
+              hook_runner,
+              tool_context
             )
 
-          {result, is_error, mode}
+          {result, is_error, mode, post_dispatched?}
 
         :deny ->
-          {"Tool '#{tool_call.name}' is denied by per-tool permissions", true, mode}
+          {"Tool '#{tool_call.name}' is denied by per-tool permissions", true, mode, false}
 
         :ask ->
           request_approval(
@@ -2051,20 +2110,28 @@ defmodule MingaAgent.Providers.Native do
             available_tools,
             mode,
             config,
-            hook_runner
+            hook_runner,
+            tool_context
           )
 
         nil ->
-          # No per-tool override; fall through to global approval mode.
-          execute_with_global_mode(
-            provider_pid,
-            session_pid,
-            tool_call,
-            available_tools,
-            mode,
-            config,
-            hook_runner
-          )
+          # No per-tool override; fall through to registry/default policy and global approval mode.
+          case registered_tool_approval(tool_call.name) do
+            :deny ->
+              {"Tool '#{tool_call.name}' is denied by registry policy", true, mode, false}
+
+            _approval ->
+              execute_with_global_mode(
+                provider_pid,
+                session_pid,
+                tool_call,
+                available_tools,
+                mode,
+                config,
+                hook_runner,
+                tool_context
+              )
+          end
       end
     end
   end
@@ -2076,9 +2143,10 @@ defmodule MingaAgent.Providers.Native do
           [ReqLLM.Tool.t()],
           approval_mode(),
           AgentConfig.t(),
-          hook_runner()
+          hook_runner(),
+          ToolContext.t()
         ) ::
-          {String.t(), boolean(), approval_mode()}
+          {String.t(), boolean(), approval_mode(), boolean()}
   defp execute_with_global_mode(
          provider_pid,
          session_pid,
@@ -2086,12 +2154,21 @@ defmodule MingaAgent.Providers.Native do
          available_tools,
          :none,
          config,
-         hook_runner
+         hook_runner,
+         tool_context
        ) do
-    {result, is_error} =
-      run_single_tool(tool_call, available_tools, provider_pid, session_pid, config, hook_runner)
+    {result, is_error, post_dispatched?} =
+      run_single_tool(
+        tool_call,
+        available_tools,
+        provider_pid,
+        session_pid,
+        config,
+        hook_runner,
+        tool_context
+      )
 
-    {result, is_error, :none}
+    {result, is_error, :none, post_dispatched?}
   end
 
   defp execute_with_global_mode(
@@ -2101,7 +2178,8 @@ defmodule MingaAgent.Providers.Native do
          available_tools,
          :ask_all,
          config,
-         hook_runner
+         hook_runner,
+         tool_context
        ) do
     request_approval(
       provider_pid,
@@ -2110,7 +2188,8 @@ defmodule MingaAgent.Providers.Native do
       available_tools,
       :ask_all,
       config,
-      hook_runner
+      hook_runner,
+      tool_context
     )
   end
 
@@ -2121,9 +2200,10 @@ defmodule MingaAgent.Providers.Native do
          available_tools,
          :ask,
          config,
-         hook_runner
+         hook_runner,
+         tool_context
        ) do
-    if Tools.destructive?(tool_call.name, tool_call.arguments || %{}) do
+    if global_mode_requires_approval?(tool_call, :ask) do
       request_approval(
         provider_pid,
         session_pid,
@@ -2131,20 +2211,22 @@ defmodule MingaAgent.Providers.Native do
         available_tools,
         :ask,
         config,
-        hook_runner
+        hook_runner,
+        tool_context
       )
     else
-      {result, is_error} =
+      {result, is_error, post_dispatched?} =
         run_single_tool(
           tool_call,
           available_tools,
           provider_pid,
           session_pid,
           config,
-          hook_runner
+          hook_runner,
+          tool_context
         )
 
-      {result, is_error, :ask}
+      {result, is_error, :ask, post_dispatched?}
     end
   end
 
@@ -2163,7 +2245,16 @@ defmodule MingaAgent.Providers.Native do
   defp global_mode_requires_approval?(_tool_call, :ask_all), do: true
 
   defp global_mode_requires_approval?(tool_call, :ask) do
-    Tools.destructive?(tool_call.name, tool_call.arguments || %{})
+    registered_tool_approval(tool_call.name) == :ask or
+      Tools.destructive?(tool_call.name, tool_call.arguments || %{})
+  end
+
+  @spec registered_tool_approval(String.t()) :: ToolSpec.approval_level() | nil
+  defp registered_tool_approval(tool_name) do
+    case ToolRegistry.lookup(tool_name) do
+      {:ok, %ToolSpec{approval_level: approval}} -> approval
+      :error -> nil
+    end
   end
 
   # Looks up per-tool permission from config. Returns :allow, :deny, :ask, or nil
@@ -2203,9 +2294,10 @@ defmodule MingaAgent.Providers.Native do
           [ReqLLM.Tool.t()],
           approval_mode(),
           AgentConfig.t(),
-          hook_runner()
+          hook_runner(),
+          ToolContext.t()
         ) ::
-          {String.t(), boolean(), approval_mode()}
+          {String.t(), boolean(), approval_mode(), boolean()}
   defp request_approval(
          provider_pid,
          session_pid,
@@ -2213,7 +2305,8 @@ defmodule MingaAgent.Providers.Native do
          available_tools,
          mode,
          config,
-         hook_runner
+         hook_runner,
+         tool_context
        ) do
     # Send approval request through the event pipeline (Task → Provider → Session)
     send(
@@ -2230,23 +2323,24 @@ defmodule MingaAgent.Providers.Native do
     # Block until the user responds (or timeout after 5 minutes)
     receive do
       {:tool_approval_response, _tool_call_id, :approve} ->
-        {result, is_error} =
+        {result, is_error, post_dispatched?} =
           run_single_tool(
             tool_call,
             available_tools,
             provider_pid,
             session_pid,
             config,
-            hook_runner
+            hook_runner,
+            tool_context
           )
 
-        {result, is_error, mode}
+        {result, is_error, mode, post_dispatched?}
 
       {:tool_approval_response, _tool_call_id, :reject} ->
-        {"Tool rejected by user", true, mode}
+        {"Tool rejected by user", true, mode, false}
     after
       config.approval_timeout_ms ->
-        {"Tool approval timed out", true, mode}
+        {"Tool approval timed out", true, mode, false}
     end
   end
 
@@ -2403,35 +2497,132 @@ defmodule MingaAgent.Providers.Native do
           pid(),
           pid() | nil,
           AgentConfig.t(),
-          hook_runner()
+          hook_runner(),
+          ToolContext.t()
         ) ::
-          {String.t(), boolean()}
-  defp run_single_tool(tool_call, available_tools, provider_pid, session_pid, config, hook_runner) do
+          {String.t(), boolean(), boolean()}
+  defp run_single_tool(
+         tool_call,
+         available_tools,
+         provider_pid,
+         session_pid,
+         config,
+         hook_runner,
+         tool_context
+       ) do
     args = tool_call.arguments || %{}
 
     if plan_mode_blocks_tool?(session_pid, tool_call.name, args) do
       message = PlanMode.refusal_message(tool_call.name)
       emit_plan_mode_refusal(session_pid, message)
-      {message, true}
+      {message, true, false}
     else
-      run_single_tool_unchecked(tool_call, available_tools, provider_pid, config, hook_runner)
+      run_single_tool_unchecked(
+        tool_call,
+        available_tools,
+        provider_pid,
+        config,
+        hook_runner,
+        tool_context
+      )
     end
   end
 
-  @spec run_single_tool_unchecked(map(), [ReqLLM.Tool.t()], pid(), AgentConfig.t(), hook_runner()) ::
-          {String.t(), boolean()}
-  defp run_single_tool_unchecked(tool_call, available_tools, provider_pid, config, hook_runner) do
+  @spec run_single_tool_unchecked(
+          map(),
+          [ReqLLM.Tool.t()],
+          pid(),
+          AgentConfig.t(),
+          hook_runner(),
+          ToolContext.t()
+        ) :: {String.t(), boolean(), boolean()}
+  defp run_single_tool_unchecked(
+         tool_call,
+         available_tools,
+         provider_pid,
+         config,
+         hook_runner,
+         tool_context
+       ) do
     case Enum.find(available_tools, fn t -> t.name == tool_call.name end) do
       nil ->
-        {"Tool '#{tool_call.name}' not found", true}
+        {"Tool '#{tool_call.name}' not found", true, false}
 
       tool ->
-        case dispatch_pre_tool_use(tool_call, config, hook_runner, provider_pid) do
-          :ok -> execute_found_tool(tool, tool_call, provider_pid)
-          {:error, %HookResult{} = result} -> {HookResult.message(result), true}
+        if registry_tool?(tool) do
+          execute_registry_tool(tool_call, provider_pid, config, hook_runner, tool_context)
+        else
+          case dispatch_pre_tool_use(tool_call, config, hook_runner, provider_pid) do
+            :ok -> tuple_with_post_flag(execute_found_tool(tool, tool_call, provider_pid), false)
+            {:error, %HookResult{} = result} -> {HookResult.message(result), true, false}
+          end
         end
     end
   end
+
+  @spec registry_tool?(ReqLLM.Tool.t()) :: boolean()
+  defp registry_tool?(%ReqLLM.Tool{provider_options: %{minga_registry_tool: true}}), do: true
+  defp registry_tool?(_tool), do: false
+
+  @spec execute_registry_tool(map(), pid(), AgentConfig.t(), hook_runner(), ToolContext.t()) ::
+          {String.t(), boolean(), boolean()}
+  defp execute_registry_tool(tool_call, provider_pid, config, hook_runner, tool_context) do
+    args = tool_call.arguments || %{}
+    tool_context = tool_context_with_call_metadata(tool_context, tool_call, provider_pid)
+
+    case ToolRegistry.lookup(tool_call.name) do
+      {:ok, spec} ->
+        spec
+        |> ToolExecutor.execute_approved(args, :exec,
+          config: config,
+          hook_runner: hook_runner,
+          tool_context: tool_context
+        )
+        |> format_executor_result()
+
+      :error ->
+        {"Tool '#{tool_call.name}' not found", true, true}
+    end
+  end
+
+  @spec tool_context_with_call_metadata(ToolContext.t(), map(), pid()) :: ToolContext.t()
+  defp tool_context_with_call_metadata(
+         %ToolContext{} = context,
+         %{name: "shell"} = tool_call,
+         provider_pid
+       ) do
+    shell_output_callback = fn chunk ->
+      send(
+        provider_pid,
+        {:agent_event,
+         %Event.ToolUpdate{
+           tool_call_id: tool_call.id,
+           name: "shell",
+           partial_result: chunk
+         }}
+      )
+
+      :ok
+    end
+
+    %{
+      context
+      | metadata: Map.put(context.metadata, :shell_output_callback, shell_output_callback)
+    }
+  end
+
+  defp tool_context_with_call_metadata(%ToolContext{} = context, _tool_call, _provider_pid),
+    do: context
+
+  @spec format_executor_result({:ok, term()} | {:error, term()}) ::
+          {String.t(), boolean(), boolean()}
+  defp format_executor_result({:ok, result}), do: {format_tool_result(result), false, true}
+  defp format_executor_result({:error, reason}), do: {format_error(reason), true, true}
+
+  @spec tuple_with_post_flag({String.t(), boolean()}, boolean()) ::
+          {String.t(), boolean(), boolean()}
+  defp tuple_with_post_flag({result, is_error}, post_dispatched?),
+    do: {result, is_error, post_dispatched?}
 
   @spec dispatch_pre_tool_use(map(), AgentConfig.t(), hook_runner(), pid()) ::
           :ok | {:error, HookResult.t()}
@@ -2763,17 +2954,15 @@ defmodule MingaAgent.Providers.Native do
            project_root: project_root,
            fork_store: fork_store,
            changeset: changeset,
-           subscriber: subscriber
+           subscriber: subscriber,
+           config: config,
+           hook_runner: hook_runner
          },
          project_view
        ) do
-    Tools.all(
-      project_root: project_root,
-      project_view: project_view,
-      fork_store: fork_store,
-      changeset: changeset,
-      parent_session: subscriber
-    )
+    project_root
+    |> native_tool_context(project_view, fork_store, changeset, subscriber)
+    |> registry_tools(config, hook_runner)
   end
 
   # Builds tools that interact with the provider's internal state (todo, notebook).
