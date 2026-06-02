@@ -10,6 +10,20 @@ struct Cell {
     style: CellStyle,
 }
 
+#[derive(Debug, Clone, Default)]
+struct ThemePalette {
+    slots: HashMap<u8, u32>,
+}
+
+#[derive(Debug, Clone)]
+struct CellSnapshot {
+    row: u16,
+    col: u16,
+    width: u16,
+    height: u16,
+    cells: Vec<Cell>,
+}
+
 impl Default for Cell {
     fn default() -> Self {
         Self {
@@ -30,6 +44,12 @@ pub struct Renderer {
     regions: HashMap<u16, Region>,
     active_region: Option<Region>,
     file_tree: Option<semantic::FileTree>,
+    picker: Option<semantic::Picker>,
+    picker_preview: Option<semantic::PickerPreview>,
+    minibuffer: Option<semantic::Minibuffer>,
+    picker_snapshot: Option<CellSnapshot>,
+    minibuffer_snapshot: Option<CellSnapshot>,
+    theme: ThemePalette,
 }
 
 impl Renderer {
@@ -46,6 +66,12 @@ impl Renderer {
             regions: HashMap::new(),
             active_region: None,
             file_tree: None,
+            picker: None,
+            picker_preview: None,
+            minibuffer: None,
+            picker_snapshot: None,
+            minibuffer_snapshot: None,
+            theme: ThemePalette::default(),
         }
     }
 
@@ -110,6 +136,11 @@ impl Renderer {
         self.regions.clear();
         self.active_region = None;
         self.file_tree = None;
+        self.picker = None;
+        self.picker_preview = None;
+        self.minibuffer = None;
+        self.picker_snapshot = None;
+        self.minibuffer_snapshot = None;
     }
 
     fn clear(&mut self) {
@@ -172,6 +203,10 @@ impl Renderer {
             semantic::Command::FileTreeSelection(selection, _) => {
                 self.update_file_tree_selection(selection)
             }
+            semantic::Command::Picker(picker, _) => self.draw_picker(picker),
+            semantic::Command::PickerPreview(preview, _) => self.draw_picker_preview(preview),
+            semantic::Command::Minibuffer(minibuffer, _) => self.draw_minibuffer(minibuffer),
+            semantic::Command::Theme(theme, _) => self.apply_theme(theme),
             semantic::Command::Unsupported { .. } => {}
         }
     }
@@ -190,6 +225,8 @@ impl Renderer {
                 .saturating_add(row.min(u16::MAX as usize) as u16);
             self.draw_semantic_row(row, window.origin_col, content);
         }
+
+        self.redraw_retained_chrome();
     }
 
     fn draw_semantic_row(&mut self, row: u16, origin_col: u16, content: semantic::Row) {
@@ -219,6 +256,12 @@ impl Renderer {
         }
     }
 
+    fn apply_theme(&mut self, theme: semantic::Theme) {
+        self.theme = ThemePalette::from_theme(theme);
+        self.default_bg = self.theme.color(SLOT_EDITOR_BG, self.default_bg);
+        self.fill_bg(self.default_bg);
+    }
+
     fn draw_status_bar(&mut self, status: semantic::StatusBar) {
         if self.height == 0 {
             return;
@@ -239,13 +282,7 @@ impl Renderer {
             join_status_segments(&status.right_segments)
         };
 
-        let style = CellStyle {
-            fg: 0xD8DEE9,
-            bg: 0x2E3440,
-            attrs: protocol::ATTR_BOLD,
-            ul_color: 0,
-            blend: 100,
-        };
+        let style = self.theme.status_bar_style();
 
         self.write_run(row, 0, &pad_to_width(&left, self.width), style);
 
@@ -273,24 +310,7 @@ impl Renderer {
             } else {
                 format!(" {} ", tab.label)
             };
-            let bg = if tab.active { 0x3B4252 } else { 0x242933 };
-            let fg = if tab.tint == 0 {
-                0xD8DEE9
-            } else {
-                tab.tint & 0x00FF_FFFF
-            };
-            self.write_run(
-                0,
-                col,
-                &label,
-                CellStyle {
-                    fg,
-                    bg,
-                    attrs: if tab.active { protocol::ATTR_BOLD } else { 0 },
-                    ul_color: 0,
-                    blend: 100,
-                },
-            );
+            self.write_run(0, col, &label, self.theme.tab_style(tab.active, tab.tint));
             col = col.saturating_add(text_width(&label));
         }
     }
@@ -308,6 +328,345 @@ impl Renderer {
         self.render_file_tree();
     }
 
+    fn draw_picker(&mut self, picker: semantic::Picker) {
+        if picker.visible {
+            self.picker = Some(picker);
+            self.render_picker();
+        } else {
+            self.restore_picker_snapshot();
+            self.picker = None;
+            self.picker_preview = None;
+        }
+    }
+
+    fn draw_picker_preview(&mut self, preview: semantic::PickerPreview) {
+        if preview.visible {
+            self.picker_preview = Some(preview);
+        } else {
+            self.picker_preview = None;
+        }
+        self.render_picker();
+    }
+
+    fn draw_minibuffer(&mut self, minibuffer: semantic::Minibuffer) {
+        if !minibuffer.visible {
+            self.restore_minibuffer_snapshot();
+            self.minibuffer = None;
+            return;
+        }
+        if self.height < 2 || self.width == 0 {
+            return;
+        }
+
+        self.minibuffer = Some(minibuffer.clone());
+        self.render_minibuffer(&minibuffer);
+    }
+
+    fn render_minibuffer(&mut self, minibuffer: &semantic::Minibuffer) {
+        self.capture_minibuffer_snapshot();
+        self.restore_minibuffer_cells();
+
+        let row = self.height.saturating_sub(2);
+        let prompt = format!("{}{}", minibuffer.prompt, minibuffer.input);
+        self.write_run(
+            row,
+            0,
+            &pad_to_width(&prompt, self.width),
+            self.theme.minibuffer_style(false),
+        );
+        if minibuffer.cursor_pos != u16::MAX {
+            self.cursor = (
+                text_width(&minibuffer.prompt)
+                    .saturating_add(minibuffer.cursor_pos)
+                    .min(self.width.saturating_sub(1)),
+                row,
+            );
+        }
+
+        if !minibuffer.context.is_empty() && row > 0 {
+            self.write_run(
+                row - 1,
+                0,
+                &pad_to_width(&format!(" {}", minibuffer.context), self.width),
+                self.theme.minibuffer_context_style(),
+            );
+        }
+
+        let candidate_count = minibuffer.candidates.len().min(5);
+        if candidate_count == 0 || row == 0 {
+            return;
+        }
+
+        let first_row = row.saturating_sub(candidate_count as u16);
+        let selected_index = minibuffer.selected_index as usize;
+        let start_index = selected_index
+            .saturating_add(1)
+            .saturating_sub(candidate_count)
+            .min(minibuffer.candidates.len().saturating_sub(candidate_count));
+        for (index, candidate) in minibuffer
+            .candidates
+            .iter()
+            .skip(start_index)
+            .take(candidate_count)
+            .enumerate()
+        {
+            let candidate_index = start_index + index;
+            let selected = candidate_index == selected_index;
+            let annotation = if candidate.annotation.is_empty() {
+                String::new()
+            } else {
+                format!("  {}", candidate.annotation)
+            };
+            let description = if candidate.description.is_empty() {
+                String::new()
+            } else {
+                format!(" - {}", candidate.description)
+            };
+            let marker = if selected { ">" } else { " " };
+            let text = format!("{marker} {}{}{}", candidate.label, annotation, description);
+            self.write_run(
+                first_row + index as u16,
+                0,
+                &pad_to_width(&text, self.width),
+                self.theme.minibuffer_style(selected),
+            );
+        }
+    }
+
+    fn redraw_retained_chrome(&mut self) {
+        self.render_file_tree();
+        self.picker_snapshot = None;
+        self.render_picker();
+
+        if let Some(minibuffer) = self.minibuffer.clone() {
+            self.minibuffer_snapshot = None;
+            self.render_minibuffer(&minibuffer);
+        }
+    }
+
+    fn render_picker(&mut self) {
+        let Some(picker) = self.picker.clone() else {
+            return;
+        };
+        if !picker.visible || self.width < 24 || self.height < 8 {
+            return;
+        }
+
+        let preview = self.picker_preview.clone();
+        let (row, col, width, height) = picker_geometry(self.width, self.height);
+        if self.picker_snapshot.is_none() {
+            self.picker_snapshot = Some(self.capture_rect(row, col, width, height));
+        }
+        self.fill_rect(row, col, width, height, self.theme.picker_style(false));
+
+        let title = if picker.mode_prefix.is_empty() {
+            picker.title.clone()
+        } else {
+            format!("{} {}", picker.mode_prefix, picker.title)
+        };
+        self.write_run(
+            row,
+            col,
+            &pad_to_width(&title, width),
+            self.theme.picker_header_style(),
+        );
+
+        let count = if picker.total_count == 0 {
+            String::new()
+        } else {
+            format!("{} / {}", picker.filtered_count, picker.total_count)
+        };
+        let count_width = text_width(&count);
+        if count_width > 0 && count_width < width {
+            self.write_run(
+                row,
+                col + width - count_width - 1,
+                &count,
+                self.theme.picker_header_style(),
+            );
+        }
+
+        let query = if picker.query.is_empty() {
+            "> ".to_owned()
+        } else {
+            format!("> {}", picker.query)
+        };
+        self.write_run(
+            row + 1,
+            col,
+            &pad_to_width(&query, width),
+            self.theme.picker_query_style(),
+        );
+
+        let body_row = row + 2;
+        let body_height = height.saturating_sub(2);
+        let wants_preview = picker.has_preview && preview.as_ref().is_some_and(|p| p.visible);
+        let preview_width = if wants_preview { width / 2 } else { 0 };
+        let item_width = width.saturating_sub(preview_width);
+
+        self.render_picker_items(body_row, col, item_width, body_height, &picker);
+
+        if wants_preview && preview_width > 8 {
+            self.render_picker_preview(
+                body_row,
+                col + item_width,
+                preview_width,
+                body_height,
+                preview.as_ref().unwrap(),
+            );
+        }
+    }
+
+    fn restore_picker_snapshot(&mut self) {
+        if let Some(snapshot) = self.picker_snapshot.take() {
+            self.restore_snapshot(snapshot);
+        }
+    }
+
+    fn capture_minibuffer_snapshot(&mut self) {
+        if self.minibuffer_snapshot.is_some() || self.height < 2 || self.width == 0 {
+            return;
+        }
+
+        let prompt_row = self.height.saturating_sub(2);
+        let first_row = prompt_row.saturating_sub(5);
+        let height = prompt_row.saturating_sub(first_row).saturating_add(1);
+        self.minibuffer_snapshot = Some(self.capture_rect(first_row, 0, self.width, height));
+    }
+
+    fn restore_minibuffer_snapshot(&mut self) {
+        if let Some(snapshot) = self.minibuffer_snapshot.take() {
+            self.restore_snapshot(snapshot);
+        }
+    }
+
+    fn restore_minibuffer_cells(&mut self) {
+        if let Some(snapshot) = self.minibuffer_snapshot.clone() {
+            self.restore_snapshot(snapshot);
+        }
+    }
+
+    fn render_picker_items(
+        &mut self,
+        row: u16,
+        col: u16,
+        width: u16,
+        height: u16,
+        picker: &semantic::Picker,
+    ) {
+        if width == 0 || height == 0 {
+            return;
+        }
+
+        if picker.load_status == 1 {
+            self.write_run(
+                row,
+                col,
+                &pad_to_width(" Loading...", width),
+                self.theme.picker_style(false),
+            );
+            return;
+        }
+        if picker.load_status == 2 {
+            let message = if picker.load_error.is_empty() {
+                " Picker failed".to_owned()
+            } else {
+                format!(" {}", picker.load_error)
+            };
+            self.write_run(
+                row,
+                col,
+                &pad_to_width(&message, width),
+                self.theme.picker_style(false),
+            );
+            return;
+        }
+
+        if picker.items.is_empty() {
+            self.write_run(
+                row,
+                col,
+                &pad_to_width(" No matches", width),
+                self.theme.picker_style(false),
+            );
+            return;
+        }
+
+        let visible_rows = height as usize;
+        let selected = picker.selected_index as usize;
+        let start = selected.saturating_sub(visible_rows.saturating_sub(1));
+        for (screen_index, item) in picker
+            .items
+            .iter()
+            .skip(start)
+            .take(visible_rows)
+            .enumerate()
+        {
+            let item_index = start + screen_index;
+            let selected = item_index == selected;
+            let marker = if item.marked {
+                "*"
+            } else if selected {
+                ">"
+            } else {
+                " "
+            };
+            let annotation = if item.annotation.is_empty() {
+                String::new()
+            } else {
+                format!(" {}", item.annotation)
+            };
+            let description = if item.description.is_empty() {
+                String::new()
+            } else {
+                format!("  {}", item.description)
+            };
+            let line = format!("{marker} {}{}{}", item.label, annotation, description);
+            self.write_run(
+                row + screen_index as u16,
+                col,
+                &pad_to_width(&line, width),
+                self.theme.picker_style(selected),
+            );
+        }
+    }
+
+    fn render_picker_preview(
+        &mut self,
+        row: u16,
+        col: u16,
+        width: u16,
+        height: u16,
+        preview: &semantic::PickerPreview,
+    ) {
+        self.fill_rect(
+            row,
+            col,
+            width,
+            height,
+            self.theme.picker_preview_style(false, 0),
+        );
+
+        for (line_index, segments) in preview.lines.iter().take(height as usize).enumerate() {
+            let mut current_col = col.saturating_add(1);
+            for segment in segments {
+                if current_col >= col.saturating_add(width) {
+                    break;
+                }
+                let remaining = col.saturating_add(width).saturating_sub(current_col);
+                let text = slice_chars(&segment.text, 0, remaining);
+                let segment_width = text_width(&text);
+                self.write_run(
+                    row + line_index as u16,
+                    current_col,
+                    &text,
+                    self.theme.picker_preview_style(segment.bold, segment.fg),
+                );
+                current_col = current_col.saturating_add(segment_width);
+            }
+        }
+    }
+
     fn render_file_tree(&mut self) {
         let Some(tree) = self.file_tree.clone() else {
             return;
@@ -322,20 +681,35 @@ impl Renderer {
                 row,
                 0,
                 &" ".repeat(width as usize),
-                file_tree_style(false, tree.focused),
+                self.theme.file_tree_style(false, tree.focused),
             );
         }
 
         match tree.status {
-            1 => self.write_run(1, 0, " Loading...", file_tree_style(false, tree.focused)),
-            2 => self.write_run(1, 0, " Empty", file_tree_style(false, tree.focused)),
+            1 => self.write_run(
+                1,
+                0,
+                " Loading...",
+                self.theme.file_tree_style(false, tree.focused),
+            ),
+            2 => self.write_run(
+                1,
+                0,
+                " Empty",
+                self.theme.file_tree_style(false, tree.focused),
+            ),
             4 => {
                 let message = if tree.error.is_empty() {
                     " File tree error".to_owned()
                 } else {
                     format!(" {}", tree.error)
                 };
-                self.write_run(1, 0, &message, file_tree_style(false, tree.focused));
+                self.write_run(
+                    1,
+                    0,
+                    &message,
+                    self.theme.file_tree_style(false, tree.focused),
+                );
             }
             _ => {
                 let visible_rows = self.height.saturating_sub(2) as usize;
@@ -383,7 +757,7 @@ impl Renderer {
             screen_row,
             0,
             &pad_to_width(&label, width),
-            file_tree_style(selected, focused),
+            self.theme.file_tree_style(selected, focused),
         );
     }
 
@@ -498,6 +872,56 @@ impl Renderer {
         }
     }
 
+    fn fill_rect(&mut self, row: u16, col: u16, width: u16, height: u16, style: CellStyle) {
+        let line = " ".repeat(width as usize);
+        for y in row..row.saturating_add(height).min(self.height) {
+            self.write_run(y, col, &line, style);
+        }
+    }
+
+    fn capture_rect(&self, row: u16, col: u16, width: u16, height: u16) -> CellSnapshot {
+        let max_row = row.saturating_add(height).min(self.height);
+        let max_col = col.saturating_add(width).min(self.width);
+        let mut cells = Vec::with_capacity(
+            max_row.saturating_sub(row) as usize * max_col.saturating_sub(col) as usize,
+        );
+
+        for y in row..max_row {
+            for x in col..max_col {
+                if let Some(index) = self.index(x, y) {
+                    cells.push(self.cells[index].clone());
+                }
+            }
+        }
+
+        CellSnapshot {
+            row,
+            col,
+            width: max_col.saturating_sub(col),
+            height: max_row.saturating_sub(row),
+            cells,
+        }
+    }
+
+    fn restore_snapshot(&mut self, snapshot: CellSnapshot) {
+        let mut snapshot_index = 0;
+        for y in snapshot.row
+            ..snapshot
+                .row
+                .saturating_add(snapshot.height)
+                .min(self.height)
+        {
+            for x in snapshot.col..snapshot.col.saturating_add(snapshot.width).min(self.width) {
+                if let Some(index) = self.index(x, y)
+                    && let Some(cell) = snapshot.cells.get(snapshot_index)
+                {
+                    self.cells[index] = cell.clone();
+                }
+                snapshot_index += 1;
+            }
+        }
+    }
+
     fn render(&mut self, terminal: &mut Terminal) -> io::Result<()> {
         for row in 0..self.height {
             for col in 0..self.width {
@@ -542,17 +966,185 @@ fn char_width(ch: char) -> u16 {
     1
 }
 
-fn file_tree_style(selected: bool, focused: bool) -> CellStyle {
-    CellStyle {
-        fg: if selected { 0xECEFF4 } else { 0xC7CED9 },
-        bg: match (selected, focused) {
-            (true, true) => 0x4C566A,
-            (true, false) => 0x3B4252,
-            (false, _) => 0x20242D,
-        },
-        attrs: if selected { protocol::ATTR_BOLD } else { 0 },
-        ul_color: 0,
-        blend: 100,
+fn picker_geometry(width: u16, height: u16) -> (u16, u16, u16, u16) {
+    let overlay_width = width.saturating_sub(4).clamp(24, 96);
+    let overlay_height = height.saturating_sub(4).clamp(8, 18);
+    let row = if height > overlay_height {
+        (height - overlay_height) / 3 + 1
+    } else {
+        0
+    };
+    let col = width.saturating_sub(overlay_width) / 2;
+    (
+        row,
+        col,
+        overlay_width.min(width),
+        overlay_height.min(height),
+    )
+}
+
+const SLOT_EDITOR_BG: u8 = 0x01;
+const SLOT_EDITOR_FG: u8 = 0x02;
+const SLOT_TREE_BG: u8 = 0x03;
+const SLOT_TREE_FG: u8 = 0x04;
+const SLOT_TREE_SELECTION_BG: u8 = 0x05;
+const SLOT_TREE_ACTIVE_FG: u8 = 0x07;
+const SLOT_TAB_BG: u8 = 0x10;
+const SLOT_TAB_ACTIVE_BG: u8 = 0x11;
+const SLOT_TAB_ACTIVE_FG: u8 = 0x12;
+const SLOT_TAB_INACTIVE_FG: u8 = 0x13;
+const SLOT_POPUP_BG: u8 = 0x20;
+const SLOT_POPUP_FG: u8 = 0x21;
+const SLOT_POPUP_BORDER: u8 = 0x22;
+const SLOT_POPUP_SEL_BG: u8 = 0x23;
+const SLOT_POPUP_DESC_FG: u8 = 0x26;
+const SLOT_POPUP_SEL_FG: u8 = 0x2A;
+const SLOT_MODELINE_BAR_BG: u8 = 0x30;
+const SLOT_MODELINE_BAR_FG: u8 = 0x31;
+
+impl ThemePalette {
+    fn from_theme(theme: semantic::Theme) -> Self {
+        let slots = theme
+            .slots
+            .into_iter()
+            .map(|slot| (slot.id, slot.rgb))
+            .collect();
+        Self { slots }
+    }
+
+    fn color(&self, slot: u8, fallback: u32) -> u32 {
+        self.slots.get(&slot).copied().unwrap_or(fallback)
+    }
+
+    fn status_bar_style(&self) -> CellStyle {
+        CellStyle {
+            fg: self.color(SLOT_MODELINE_BAR_FG, 0xD8DEE9),
+            bg: self.color(SLOT_MODELINE_BAR_BG, 0x2E3440),
+            attrs: protocol::ATTR_BOLD,
+            ul_color: 0,
+            blend: 100,
+        }
+    }
+
+    fn tab_style(&self, active: bool, tint: u32) -> CellStyle {
+        CellStyle {
+            fg: if tint != 0 {
+                tint & 0x00FF_FFFF
+            } else if active {
+                self.color(SLOT_TAB_ACTIVE_FG, 0xD8DEE9)
+            } else {
+                self.color(SLOT_TAB_INACTIVE_FG, 0xC7CED9)
+            },
+            bg: if active {
+                self.color(SLOT_TAB_ACTIVE_BG, 0x3B4252)
+            } else {
+                self.color(SLOT_TAB_BG, 0x242933)
+            },
+            attrs: if active { protocol::ATTR_BOLD } else { 0 },
+            ul_color: 0,
+            blend: 100,
+        }
+    }
+
+    fn file_tree_style(&self, selected: bool, focused: bool) -> CellStyle {
+        CellStyle {
+            fg: if selected {
+                self.color(SLOT_TREE_ACTIVE_FG, 0xECEFF4)
+            } else {
+                self.color(SLOT_TREE_FG, 0xC7CED9)
+            },
+            bg: if selected {
+                self.color(
+                    SLOT_TREE_SELECTION_BG,
+                    if focused { 0x4C566A } else { 0x3B4252 },
+                )
+            } else {
+                self.color(SLOT_TREE_BG, 0x20242D)
+            },
+            attrs: if selected { protocol::ATTR_BOLD } else { 0 },
+            ul_color: 0,
+            blend: 100,
+        }
+    }
+
+    fn picker_style(&self, selected: bool) -> CellStyle {
+        CellStyle {
+            fg: if selected {
+                self.color(SLOT_POPUP_SEL_FG, 0xECEFF4)
+            } else {
+                self.color(SLOT_POPUP_FG, 0xD8DEE9)
+            },
+            bg: if selected {
+                self.color(SLOT_POPUP_SEL_BG, 0x3B4252)
+            } else {
+                self.color(SLOT_POPUP_BG, 0x151A21)
+            },
+            attrs: if selected { protocol::ATTR_BOLD } else { 0 },
+            ul_color: 0,
+            blend: 100,
+        }
+    }
+
+    fn picker_header_style(&self) -> CellStyle {
+        CellStyle {
+            fg: self.color(SLOT_POPUP_BORDER, 0xF8FAFC),
+            bg: self.color(SLOT_POPUP_BG, 0x273142),
+            attrs: protocol::ATTR_BOLD,
+            ul_color: 0,
+            blend: 100,
+        }
+    }
+
+    fn picker_query_style(&self) -> CellStyle {
+        CellStyle {
+            fg: self.color(SLOT_POPUP_DESC_FG, 0xB7C7E3),
+            bg: self.color(SLOT_POPUP_BG, 0x1F2632),
+            attrs: 0,
+            ul_color: 0,
+            blend: 100,
+        }
+    }
+
+    fn picker_preview_style(&self, bold: bool, fg: u32) -> CellStyle {
+        CellStyle {
+            fg: if fg == 0 {
+                self.color(SLOT_POPUP_FG, 0xCAD3DF)
+            } else {
+                fg
+            },
+            bg: self.color(SLOT_EDITOR_BG, 0x11161D),
+            attrs: if bold { protocol::ATTR_BOLD } else { 0 },
+            ul_color: 0,
+            blend: 100,
+        }
+    }
+
+    fn minibuffer_style(&self, selected: bool) -> CellStyle {
+        CellStyle {
+            fg: if selected {
+                self.color(SLOT_POPUP_SEL_FG, 0xF8FAFC)
+            } else {
+                self.color(SLOT_EDITOR_FG, 0xD8DEE9)
+            },
+            bg: if selected {
+                self.color(SLOT_POPUP_SEL_BG, 0x4C566A)
+            } else {
+                self.color(SLOT_MODELINE_BAR_BG, 0x20242D)
+            },
+            attrs: if selected { protocol::ATTR_BOLD } else { 0 },
+            ul_color: 0,
+            blend: 100,
+        }
+    }
+
+    fn minibuffer_context_style(&self) -> CellStyle {
+        CellStyle {
+            fg: self.color(SLOT_POPUP_DESC_FG, 0x9AA7B5),
+            bg: self.color(SLOT_MODELINE_BAR_BG, 0x1A1F28),
+            attrs: 0,
+            ul_color: 0,
+            blend: 100,
+        }
     }
 }
 
@@ -821,5 +1413,456 @@ mod tests {
             selected_bg
         );
         assert_eq!(renderer.cells[renderer.index(5, 2).unwrap()].text, "R");
+    }
+
+    #[test]
+    fn semantic_picker_draws_split_overlay() {
+        let mut renderer = Renderer::new(80, 20);
+
+        renderer.draw_picker(semantic::Picker {
+            visible: true,
+            selected_index: 1,
+            filtered_count: 2,
+            total_count: 9,
+            marked_count: 0,
+            has_preview: true,
+            title: "Files".to_owned(),
+            query: "lib".to_owned(),
+            mode_prefix: ">".to_owned(),
+            load_status: 0,
+            load_error: String::new(),
+            items: vec![
+                semantic::PickerItem {
+                    label: "mix.exs".to_owned(),
+                    description: ".".to_owned(),
+                    annotation: "root".to_owned(),
+                    icon_color: 0,
+                    marked: false,
+                },
+                semantic::PickerItem {
+                    label: "lib.ex".to_owned(),
+                    description: "lib/minga".to_owned(),
+                    annotation: "modified".to_owned(),
+                    icon_color: 0,
+                    marked: false,
+                },
+            ],
+        });
+        renderer.draw_picker_preview(semantic::PickerPreview {
+            visible: true,
+            lines: vec![vec![semantic::PreviewSegment {
+                text: "defmodule Minga".to_owned(),
+                fg: 0xAABBCC,
+                bold: true,
+            }]],
+        });
+
+        assert_eq!(renderer.cells[renderer.index(2, 2).unwrap()].text, ">");
+        assert_eq!(renderer.cells[renderer.index(4, 3).unwrap()].text, "l");
+        assert_eq!(renderer.cells[renderer.index(4, 5).unwrap()].text, "l");
+        assert_eq!(
+            renderer.cells[renderer.index(4, 5).unwrap()].style.bg,
+            0x3B4252
+        );
+        assert_eq!(renderer.cells[renderer.index(41, 4).unwrap()].text, "d");
+        assert_eq!(
+            renderer.cells[renderer.index(41, 4).unwrap()].style.fg,
+            0xAABBCC
+        );
+    }
+
+    #[test]
+    fn semantic_picker_hide_restores_underlying_cells() {
+        let mut renderer = Renderer::new(80, 20);
+        renderer.draw_text(DrawText {
+            row: 4,
+            col: 4,
+            fg: 0x111111,
+            bg: 0x222222,
+            attrs: 0,
+            text: "under".to_owned(),
+        });
+
+        renderer.draw_picker(semantic::Picker {
+            visible: true,
+            selected_index: 0,
+            filtered_count: 1,
+            total_count: 1,
+            marked_count: 0,
+            has_preview: false,
+            title: "Files".to_owned(),
+            query: String::new(),
+            mode_prefix: String::new(),
+            load_status: 0,
+            load_error: String::new(),
+            items: vec![semantic::PickerItem {
+                label: "main.ex".to_owned(),
+                description: String::new(),
+                annotation: String::new(),
+                icon_color: 0,
+                marked: false,
+            }],
+        });
+        assert_ne!(renderer.cells[renderer.index(4, 4).unwrap()].text, "u");
+
+        renderer.draw_picker(semantic::Picker::default());
+
+        let restored = &renderer.cells[renderer.index(4, 4).unwrap()];
+        assert_eq!(restored.text, "u");
+        assert_eq!(restored.style.fg, 0x111111);
+        assert_eq!(restored.style.bg, 0x222222);
+    }
+
+    #[test]
+    fn semantic_window_redraw_replays_retained_picker() {
+        let mut renderer = Renderer::new(80, 20);
+
+        renderer.draw_semantic_window(semantic::WindowContent {
+            origin_row: 4,
+            origin_col: 4,
+            cursor_row: 0,
+            cursor_col: 0,
+            cursor_shape: 0,
+            rows: vec![semantic::Row {
+                text: "old".to_owned(),
+                spans: vec![],
+            }],
+        });
+        renderer.draw_picker(semantic::Picker {
+            visible: true,
+            selected_index: 0,
+            filtered_count: 1,
+            total_count: 1,
+            marked_count: 0,
+            has_preview: false,
+            title: "Files".to_owned(),
+            query: String::new(),
+            mode_prefix: String::new(),
+            load_status: 0,
+            load_error: String::new(),
+            items: vec![semantic::PickerItem {
+                label: "main.ex".to_owned(),
+                description: String::new(),
+                annotation: String::new(),
+                icon_color: 0,
+                marked: false,
+            }],
+        });
+
+        renderer.draw_semantic_window(semantic::WindowContent {
+            origin_row: 4,
+            origin_col: 4,
+            cursor_row: 0,
+            cursor_col: 0,
+            cursor_shape: 0,
+            rows: vec![semantic::Row {
+                text: "new".to_owned(),
+                spans: vec![],
+            }],
+        });
+
+        assert_ne!(renderer.cells[renderer.index(4, 4).unwrap()].text, "n");
+
+        renderer.draw_picker(semantic::Picker::default());
+
+        assert_eq!(renderer.cells[renderer.index(4, 4).unwrap()].text, "n");
+    }
+
+    #[test]
+    fn semantic_minibuffer_draws_prompt_candidates_and_cursor() {
+        let mut renderer = Renderer::new(40, 10);
+
+        renderer.draw_minibuffer(semantic::Minibuffer {
+            visible: true,
+            mode: 0,
+            cursor_pos: 1,
+            prompt: ":".to_owned(),
+            input: "w".to_owned(),
+            context: String::new(),
+            selected_index: 1,
+            total_candidates: 2,
+            candidates: vec![
+                semantic::MinibufferCandidate {
+                    label: "write".to_owned(),
+                    description: "Save file".to_owned(),
+                    annotation: ":w".to_owned(),
+                },
+                semantic::MinibufferCandidate {
+                    label: "write-quit".to_owned(),
+                    description: "Save and quit".to_owned(),
+                    annotation: ":wq".to_owned(),
+                },
+            ],
+        });
+
+        assert_eq!(renderer.cells[renderer.index(0, 8).unwrap()].text, ":");
+        assert_eq!(renderer.cells[renderer.index(1, 8).unwrap()].text, "w");
+        assert_eq!(renderer.cursor, (2, 8));
+        assert_eq!(renderer.cells[renderer.index(0, 7).unwrap()].text, ">");
+        assert_eq!(renderer.cells[renderer.index(2, 7).unwrap()].text, "w");
+        assert_eq!(
+            renderer.cells[renderer.index(0, 7).unwrap()].style.bg,
+            0x4C566A
+        );
+    }
+
+    #[test]
+    fn semantic_minibuffer_scrolls_candidates_to_selection() {
+        let mut renderer = Renderer::new(40, 10);
+
+        renderer.draw_minibuffer(semantic::Minibuffer {
+            visible: true,
+            mode: 0,
+            cursor_pos: 1,
+            prompt: ":".to_owned(),
+            input: "b".to_owned(),
+            context: String::new(),
+            selected_index: 5,
+            total_candidates: 6,
+            candidates: (0..6)
+                .map(|index| semantic::MinibufferCandidate {
+                    label: format!("command-{index}"),
+                    description: String::new(),
+                    annotation: String::new(),
+                })
+                .collect(),
+        });
+
+        assert_eq!(renderer.cells[renderer.index(2, 3).unwrap()].text, "c");
+        assert_eq!(renderer.cells[renderer.index(10, 3).unwrap()].text, "1");
+        assert_eq!(renderer.cells[renderer.index(0, 7).unwrap()].text, ">");
+        assert_eq!(renderer.cells[renderer.index(10, 7).unwrap()].text, "5");
+        assert_eq!(
+            renderer.cells[renderer.index(0, 7).unwrap()].style.bg,
+            0x4C566A
+        );
+    }
+
+    #[test]
+    fn semantic_minibuffer_hide_restores_owned_rows() {
+        let mut renderer = Renderer::new(40, 10);
+        renderer.draw_text(DrawText {
+            row: 8,
+            col: 0,
+            fg: 0x111111,
+            bg: 0x222222,
+            attrs: 0,
+            text: "status".to_owned(),
+        });
+        renderer.draw_text(DrawText {
+            row: 7,
+            col: 0,
+            fg: 0x333333,
+            bg: 0x444444,
+            attrs: 0,
+            text: "candidate".to_owned(),
+        });
+
+        renderer.draw_minibuffer(semantic::Minibuffer {
+            visible: true,
+            mode: 0,
+            cursor_pos: 1,
+            prompt: ":".to_owned(),
+            input: "w".to_owned(),
+            context: String::new(),
+            selected_index: 0,
+            total_candidates: 1,
+            candidates: vec![semantic::MinibufferCandidate {
+                label: "write".to_owned(),
+                description: "Save file".to_owned(),
+                annotation: ":w".to_owned(),
+            }],
+        });
+        assert_eq!(renderer.cells[renderer.index(0, 8).unwrap()].text, ":");
+        assert_eq!(renderer.cells[renderer.index(0, 7).unwrap()].text, ">");
+
+        renderer.draw_minibuffer(semantic::Minibuffer::default());
+
+        let prompt = &renderer.cells[renderer.index(0, 8).unwrap()];
+        assert_eq!(prompt.text, "s");
+        assert_eq!(prompt.style.fg, 0x111111);
+        assert_eq!(prompt.style.bg, 0x222222);
+
+        let candidate = &renderer.cells[renderer.index(0, 7).unwrap()];
+        assert_eq!(candidate.text, "c");
+        assert_eq!(candidate.style.fg, 0x333333);
+        assert_eq!(candidate.style.bg, 0x444444);
+    }
+
+    #[test]
+    fn semantic_minibuffer_visible_update_clears_stale_candidates() {
+        let mut renderer = Renderer::new(40, 10);
+
+        renderer.draw_minibuffer(semantic::Minibuffer {
+            visible: true,
+            mode: 0,
+            cursor_pos: 1,
+            prompt: ":".to_owned(),
+            input: "w".to_owned(),
+            context: String::new(),
+            selected_index: 0,
+            total_candidates: 1,
+            candidates: vec![semantic::MinibufferCandidate {
+                label: "write".to_owned(),
+                description: "Save file".to_owned(),
+                annotation: ":w".to_owned(),
+            }],
+        });
+        assert_eq!(renderer.cells[renderer.index(0, 7).unwrap()].text, ">");
+
+        renderer.draw_minibuffer(semantic::Minibuffer {
+            visible: true,
+            mode: 0,
+            cursor_pos: 2,
+            prompt: ":".to_owned(),
+            input: "zz".to_owned(),
+            context: String::new(),
+            selected_index: 0,
+            total_candidates: 0,
+            candidates: vec![],
+        });
+
+        assert_eq!(renderer.cells[renderer.index(0, 7).unwrap()].text, " ");
+        assert_eq!(renderer.cells[renderer.index(2, 7).unwrap()].text, " ");
+        assert_eq!(renderer.cells[renderer.index(0, 8).unwrap()].text, ":");
+        assert_eq!(renderer.cells[renderer.index(1, 8).unwrap()].text, "z");
+    }
+
+    #[test]
+    fn semantic_minibuffer_no_cursor_sentinel_preserves_existing_cursor() {
+        let mut renderer = Renderer::new(40, 10);
+        renderer.cursor = (12, 3);
+
+        renderer.draw_minibuffer(semantic::Minibuffer {
+            visible: true,
+            mode: 0,
+            cursor_pos: u16::MAX,
+            prompt: "Confirm?".to_owned(),
+            input: String::new(),
+            context: String::new(),
+            selected_index: 0,
+            total_candidates: 0,
+            candidates: vec![],
+        });
+
+        assert_eq!(renderer.cursor, (12, 3));
+        assert_eq!(renderer.cells[renderer.index(0, 8).unwrap()].text, "C");
+    }
+
+    #[test]
+    fn semantic_window_redraw_replays_retained_minibuffer() {
+        let mut renderer = Renderer::new(40, 10);
+
+        renderer.draw_minibuffer(semantic::Minibuffer {
+            visible: true,
+            mode: 0,
+            cursor_pos: 1,
+            prompt: ":".to_owned(),
+            input: "w".to_owned(),
+            context: String::new(),
+            selected_index: 0,
+            total_candidates: 0,
+            candidates: vec![],
+        });
+
+        renderer.draw_semantic_window(semantic::WindowContent {
+            origin_row: 8,
+            origin_col: 0,
+            cursor_row: 0,
+            cursor_col: 0,
+            cursor_shape: 0,
+            rows: vec![semantic::Row {
+                text: "under".to_owned(),
+                spans: vec![],
+            }],
+        });
+
+        assert_eq!(renderer.cells[renderer.index(0, 8).unwrap()].text, ":");
+
+        renderer.draw_minibuffer(semantic::Minibuffer::default());
+
+        assert_eq!(renderer.cells[renderer.index(0, 8).unwrap()].text, "u");
+    }
+
+    #[test]
+    fn semantic_theme_drives_picker_and_minibuffer_colors() {
+        let mut renderer = Renderer::new(40, 12);
+
+        renderer.apply_theme(semantic::Theme {
+            slots: vec![
+                semantic::ThemeSlot {
+                    id: SLOT_POPUP_BG,
+                    rgb: 0x010203,
+                },
+                semantic::ThemeSlot {
+                    id: SLOT_POPUP_SEL_BG,
+                    rgb: 0x040506,
+                },
+                semantic::ThemeSlot {
+                    id: SLOT_POPUP_FG,
+                    rgb: 0x070809,
+                },
+                semantic::ThemeSlot {
+                    id: SLOT_POPUP_SEL_FG,
+                    rgb: 0x0A0B0C,
+                },
+                semantic::ThemeSlot {
+                    id: SLOT_MODELINE_BAR_BG,
+                    rgb: 0x0D0E0F,
+                },
+            ],
+        });
+        renderer.draw_picker(semantic::Picker {
+            visible: true,
+            selected_index: 0,
+            filtered_count: 1,
+            total_count: 1,
+            marked_count: 0,
+            has_preview: false,
+            title: "Files".to_owned(),
+            query: String::new(),
+            mode_prefix: String::new(),
+            load_status: 0,
+            load_error: String::new(),
+            items: vec![semantic::PickerItem {
+                label: "main.ex".to_owned(),
+                description: String::new(),
+                annotation: String::new(),
+                icon_color: 0,
+                marked: false,
+            }],
+        });
+        renderer.draw_minibuffer(semantic::Minibuffer {
+            visible: true,
+            mode: 0,
+            cursor_pos: 0,
+            prompt: ":".to_owned(),
+            input: String::new(),
+            context: String::new(),
+            selected_index: 0,
+            total_candidates: 1,
+            candidates: vec![semantic::MinibufferCandidate {
+                label: "write".to_owned(),
+                description: String::new(),
+                annotation: String::new(),
+            }],
+        });
+
+        assert_eq!(
+            renderer.cells[renderer.index(2, 4).unwrap()].style.bg,
+            0x040506
+        );
+        assert_eq!(
+            renderer.cells[renderer.index(2, 4).unwrap()].style.fg,
+            0x0A0B0C
+        );
+        assert_eq!(
+            renderer.cells[renderer.index(0, 10).unwrap()].style.bg,
+            0x0D0E0F
+        );
+        assert_eq!(
+            renderer.cells[renderer.index(0, 9).unwrap()].style.bg,
+            0x040506
+        );
     }
 }

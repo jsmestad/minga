@@ -7,6 +7,10 @@ pub enum Command {
     TabBar(TabBar, usize),
     FileTree(FileTree, usize),
     FileTreeSelection(FileTreeSelection, usize),
+    Picker(Picker, usize),
+    PickerPreview(PickerPreview, usize),
+    Minibuffer(Minibuffer, usize),
+    Theme(Theme, usize),
     Unsupported { opcode: u8, size: usize },
 }
 
@@ -18,6 +22,10 @@ impl Command {
             Self::TabBar(_, size) => *size,
             Self::FileTree(_, size) => *size,
             Self::FileTreeSelection(_, size) => *size,
+            Self::Picker(_, size) => *size,
+            Self::PickerPreview(_, size) => *size,
+            Self::Minibuffer(_, size) => *size,
+            Self::Theme(_, size) => *size,
             Self::Unsupported { size, .. } => *size,
         }
     }
@@ -115,6 +123,75 @@ pub struct FileTreeSelection {
     pub selected_id: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Picker {
+    pub visible: bool,
+    pub selected_index: u16,
+    pub filtered_count: u16,
+    pub total_count: u16,
+    pub marked_count: u16,
+    pub has_preview: bool,
+    pub title: String,
+    pub query: String,
+    pub mode_prefix: String,
+    pub load_status: u8,
+    pub load_error: String,
+    pub items: Vec<PickerItem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PickerItem {
+    pub label: String,
+    pub description: String,
+    pub annotation: String,
+    pub icon_color: u32,
+    pub marked: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PickerPreview {
+    pub visible: bool,
+    pub lines: Vec<Vec<PreviewSegment>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreviewSegment {
+    pub text: String,
+    pub fg: u32,
+    pub bold: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Minibuffer {
+    pub visible: bool,
+    pub mode: u8,
+    pub cursor_pos: u16,
+    pub prompt: String,
+    pub input: String,
+    pub context: String,
+    pub selected_index: u16,
+    pub total_candidates: u16,
+    pub candidates: Vec<MinibufferCandidate>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MinibufferCandidate {
+    pub label: String,
+    pub description: String,
+    pub annotation: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Theme {
+    pub slots: Vec<ThemeSlot>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ThemeSlot {
+    pub id: u8,
+    pub rgb: u32,
+}
+
 pub fn decode(bytes: &[u8]) -> Result<Command, DecodeError> {
     let opcode = *bytes.first().ok_or(DecodeError::Empty)?;
 
@@ -124,6 +201,10 @@ pub fn decode(bytes: &[u8]) -> Result<Command, DecodeError> {
         opcodes::OP_GUI_TAB_BAR => decode_tab_bar(bytes),
         opcodes::OP_GUI_FILE_TREE => decode_file_tree(bytes),
         opcodes::OP_GUI_FILE_TREE_SELECTION => decode_file_tree_selection(bytes),
+        opcodes::OP_GUI_PICKER => decode_picker(bytes),
+        opcodes::OP_GUI_PICKER_PREVIEW => decode_picker_preview(bytes),
+        opcodes::OP_GUI_MINIBUFFER => decode_minibuffer(bytes),
+        opcodes::OP_GUI_THEME => decode_theme(bytes),
         opcodes::OP_GUI_WINDOW_VIEWPORT_DELTA | opcodes::OP_GUI_WINDOW_ROWS_DELTA => {
             sectioned_size(bytes, "semantic row delta")
                 .map(|size| Command::Unsupported { opcode, size })
@@ -131,7 +212,7 @@ pub fn decode(bytes: &[u8]) -> Result<Command, DecodeError> {
         opcodes::OP_GUI_WINDOW_OVERLAY_DELTA => {
             overlay_delta_size(bytes).map(|size| Command::Unsupported { opcode, size })
         }
-        opcodes::OP_GUI_GUTTER | opcodes::OP_GUI_PICKER | opcodes::OP_GUI_WHICH_KEY => {
+        opcodes::OP_GUI_GUTTER | opcodes::OP_GUI_WHICH_KEY => {
             sectioned_size(bytes, "semantic sectioned command")
                 .map(|size| Command::Unsupported { opcode, size })
         }
@@ -142,7 +223,8 @@ pub fn decode(bytes: &[u8]) -> Result<Command, DecodeError> {
         | opcodes::OP_GUI_EDIT_TIMELINE
         | opcodes::OP_GUI_EXTENSION_OVERLAY
         | opcodes::OP_GUI_EXTENSION_PANEL
-        | opcodes::OP_GUI_SEARCH_STATE => len16_size(bytes, "semantic length16 command")
+        | opcodes::OP_GUI_SEARCH_STATE
+        | opcodes::OP_GUI_CONFIG_STATE => len16_size(bytes, "semantic length16 command")
             .map(|size| Command::Unsupported { opcode, size }),
         opcodes::OP_GUI_OBSERVATORY | opcodes::OP_GUI_SIDEBARS => {
             len32_size(bytes, "semantic length32 command")
@@ -153,14 +235,10 @@ pub fn decode(bytes: &[u8]) -> Result<Command, DecodeError> {
         opcodes::OP_GUI_SPLIT_SEPARATORS => {
             split_separators_size(bytes).map(|size| Command::Unsupported { opcode, size })
         }
-        opcodes::OP_GUI_THEME => {
-            theme_size(bytes).map(|size| Command::Unsupported { opcode, size })
-        }
         opcodes::OP_GUI_BREADCRUMB
         | opcodes::OP_GUI_COMPLETION
         | opcodes::OP_GUI_SIGNATURE_HELP
         | opcodes::OP_GUI_FLOAT_POPUP
-        | opcodes::OP_GUI_MINIBUFFER
         | opcodes::OP_GUI_HOVER_POPUP
         | opcodes::OP_GUI_AGENT_CONTEXT
         | opcodes::OP_GUI_GIT_STATUS
@@ -168,9 +246,7 @@ pub fn decode(bytes: &[u8]) -> Result<Command, DecodeError> {
         | opcodes::OP_GUI_BOARD
         | opcodes::OP_GUI_AGENT_CHAT
         | opcodes::OP_GUI_BOTTOM_PANEL
-        | opcodes::OP_GUI_PICKER_PREVIEW
-        | opcodes::OP_GUI_TOOL_MANAGER
-        | opcodes::OP_GUI_CONFIG_STATE => {
+        | opcodes::OP_GUI_TOOL_MANAGER => {
             legacy_visible_size(bytes).map(|size| Command::Unsupported { opcode, size })
         }
         _ => Err(DecodeError::UnknownOpcode(opcode)),
@@ -401,6 +477,214 @@ fn decode_file_tree_selection(bytes: &[u8]) -> Result<Command, DecodeError> {
     ))
 }
 
+fn decode_picker(bytes: &[u8]) -> Result<Command, DecodeError> {
+    require_len(bytes, 2, "picker header")?;
+    if bytes[1] == 0 {
+        return Ok(Command::Picker(Picker::default(), 2));
+    }
+
+    let size = sectioned_size(bytes, "picker")?;
+    let sections = sections(&bytes[..size])?;
+    let mut picker = Picker {
+        visible: true,
+        ..Picker::default()
+    };
+
+    for (section_id, payload) in sections {
+        match section_id {
+            0x01 => decode_picker_header(payload, &mut picker)?,
+            0x02 => {
+                let mut offset = 0;
+                picker.query = read_string16(payload, &mut offset)?;
+            }
+            0x03 => picker.items = decode_picker_items(payload)?,
+            0x05 => {
+                let mut offset = 0;
+                picker.mode_prefix = read_string16(payload, &mut offset)?;
+            }
+            0x06 => decode_picker_load_status(payload, &mut picker)?,
+            _ => {}
+        }
+    }
+
+    Ok(Command::Picker(picker, size))
+}
+
+fn decode_picker_header(payload: &[u8], picker: &mut Picker) -> Result<(), DecodeError> {
+    require_len(payload, 10, "picker header section")?;
+    picker.selected_index = read_u16(payload, 1);
+    picker.filtered_count = read_u16(payload, 3);
+    picker.total_count = read_u16(payload, 5);
+    picker.has_preview = payload[7] != 0;
+    let title_len = read_u16(payload, 8) as usize;
+    picker.title = read_string(payload, 10, title_len)?;
+    require_len(payload, 10 + title_len + 2, "picker marked count")?;
+    picker.marked_count = read_u16(payload, 10 + title_len);
+    Ok(())
+}
+
+fn decode_picker_items(payload: &[u8]) -> Result<Vec<PickerItem>, DecodeError> {
+    require_len(payload, 2, "picker item count")?;
+    let count = read_u16(payload, 0) as usize;
+    let mut offset = 2;
+    let mut items = Vec::with_capacity(count);
+
+    for _ in 0..count {
+        require_len(payload, offset + 4, "picker item header")?;
+        let icon_color = read_u24(payload, offset);
+        let flags = payload[offset + 3];
+        offset += 4;
+        let label = read_string16(payload, &mut offset)?;
+        let description = read_string16(payload, &mut offset)?;
+        let annotation = read_string16(payload, &mut offset)?;
+        require_len(payload, offset + 1, "picker match count")?;
+        let match_count = payload[offset] as usize;
+        offset += 1 + match_count * 2;
+        require_len(payload, offset, "picker match positions")?;
+        items.push(PickerItem {
+            label,
+            description,
+            annotation,
+            icon_color,
+            marked: flags & 0x02 != 0,
+        });
+    }
+
+    Ok(items)
+}
+
+fn decode_picker_load_status(payload: &[u8], picker: &mut Picker) -> Result<(), DecodeError> {
+    require_len(payload, 1, "picker load status")?;
+    picker.load_status = payload[0];
+    if payload[0] == 2 {
+        let mut offset = 1;
+        picker.load_error = read_string16(payload, &mut offset)?;
+    }
+    Ok(())
+}
+
+fn decode_picker_preview(bytes: &[u8]) -> Result<Command, DecodeError> {
+    require_len(bytes, 2, "picker preview header")?;
+    if bytes[1] == 0 {
+        return Ok(Command::PickerPreview(PickerPreview::default(), 2));
+    }
+
+    require_len(bytes, 4, "picker preview visible header")?;
+    let line_count = read_u16(bytes, 2) as usize;
+    let mut offset = 4;
+    let mut lines = Vec::with_capacity(line_count);
+
+    for _ in 0..line_count {
+        require_len(bytes, offset + 1, "picker preview segment count")?;
+        let segment_count = bytes[offset] as usize;
+        offset += 1;
+        let mut segments = Vec::with_capacity(segment_count);
+
+        for _ in 0..segment_count {
+            require_len(bytes, offset + 6, "picker preview segment")?;
+            let fg = read_u24(bytes, offset);
+            let bold = bytes[offset + 3] & 0x01 != 0;
+            let len = read_u16(bytes, offset + 4) as usize;
+            offset += 6;
+            let text = read_string(bytes, offset, len)?;
+            offset += len;
+            segments.push(PreviewSegment { text, fg, bold });
+        }
+
+        lines.push(segments);
+    }
+
+    Ok(Command::PickerPreview(
+        PickerPreview {
+            visible: true,
+            lines,
+        },
+        offset,
+    ))
+}
+
+fn decode_minibuffer(bytes: &[u8]) -> Result<Command, DecodeError> {
+    require_len(bytes, 2, "minibuffer header")?;
+    if bytes[1] == 0 {
+        return Ok(Command::Minibuffer(Minibuffer::default(), 2));
+    }
+
+    require_len(bytes, 8, "minibuffer visible header")?;
+    let mut offset = 2;
+    let mode = bytes[offset];
+    offset += 1;
+    let cursor_pos = read_u16(bytes, offset);
+    offset += 2;
+    let prompt = read_string8(bytes, &mut offset)?;
+    let input = read_string16(bytes, &mut offset)?;
+    let context = read_string16(bytes, &mut offset)?;
+    require_len(bytes, offset + 6, "minibuffer candidate header")?;
+    let selected_index = read_u16(bytes, offset);
+    let candidate_count = read_u16(bytes, offset + 2) as usize;
+    let total_candidates = read_u16(bytes, offset + 4);
+    offset += 6;
+    let mut candidates = Vec::with_capacity(candidate_count);
+
+    for _ in 0..candidate_count {
+        let (candidate, used) = decode_minibuffer_candidate(&bytes[offset..])?;
+        offset += used;
+        candidates.push(candidate);
+    }
+
+    Ok(Command::Minibuffer(
+        Minibuffer {
+            visible: true,
+            mode,
+            cursor_pos,
+            prompt,
+            input,
+            context,
+            selected_index,
+            total_candidates,
+            candidates,
+        },
+        offset,
+    ))
+}
+
+fn decode_minibuffer_candidate(bytes: &[u8]) -> Result<(MinibufferCandidate, usize), DecodeError> {
+    require_len(bytes, 1, "minibuffer candidate score")?;
+    let mut offset = 1;
+    let label = read_string16(bytes, &mut offset)?;
+    let description = read_string16(bytes, &mut offset)?;
+    let annotation = read_string16(bytes, &mut offset)?;
+    require_len(bytes, offset + 1, "minibuffer candidate match count")?;
+    let match_count = bytes[offset] as usize;
+    offset += 1 + match_count * 2;
+    require_len(bytes, offset, "minibuffer candidate matches")?;
+
+    Ok((
+        MinibufferCandidate {
+            label,
+            description,
+            annotation,
+        },
+        offset,
+    ))
+}
+
+fn decode_theme(bytes: &[u8]) -> Result<Command, DecodeError> {
+    let size = theme_size(bytes)?;
+    let count = bytes[1] as usize;
+    let mut slots = Vec::with_capacity(count);
+    let mut offset = 2;
+
+    for _ in 0..count {
+        slots.push(ThemeSlot {
+            id: bytes[offset],
+            rgb: read_u24(bytes, offset + 1),
+        });
+        offset += 4;
+    }
+
+    Ok(Command::Theme(Theme { slots }, size))
+}
+
 fn decode_file_tree_row(bytes: &[u8]) -> Result<(FileTreeRow, usize), DecodeError> {
     require_len(bytes, 17, "file tree row header")?;
     let flags = read_u16(bytes, 4);
@@ -599,12 +883,249 @@ fn split_separators_size(bytes: &[u8]) -> Result<usize, DecodeError> {
 
 fn legacy_visible_size(bytes: &[u8]) -> Result<usize, DecodeError> {
     require_len(bytes, 2, "legacy semantic visibility")?;
-    match bytes[1] {
-        0 => Ok(2),
+
+    if bytes[1] == 0 {
+        return Ok(2);
+    }
+
+    match bytes[0] {
+        opcodes::OP_GUI_BREADCRUMB => breadcrumb_size(bytes),
+        opcodes::OP_GUI_COMPLETION => completion_size(bytes),
+        opcodes::OP_GUI_SIGNATURE_HELP => signature_help_size(bytes),
+        opcodes::OP_GUI_FLOAT_POPUP => float_popup_size(bytes),
+        opcodes::OP_GUI_HOVER_POPUP => hover_popup_size(bytes),
+        opcodes::OP_GUI_AGENT_CONTEXT => agent_context_size(bytes),
+        opcodes::OP_GUI_GIT_STATUS => git_status_size(bytes),
+        opcodes::OP_GUI_CHANGE_SUMMARY => change_summary_size(bytes),
+        opcodes::OP_GUI_BOARD => board_size(bytes),
+        opcodes::OP_GUI_AGENT_CHAT => sectioned_size(bytes, "agent chat"),
+        opcodes::OP_GUI_BOTTOM_PANEL => bottom_panel_size(bytes),
+        opcodes::OP_GUI_TOOL_MANAGER => tool_manager_size(bytes),
         _ => Err(DecodeError::Malformed(
             "unsupported legacy semantic command",
         )),
     }
+}
+
+fn breadcrumb_size(bytes: &[u8]) -> Result<usize, DecodeError> {
+    require_len(bytes, 2, "breadcrumb")?;
+    let count = bytes[1] as usize;
+    let mut offset = 2;
+    for _ in 0..count {
+        skip_string16(bytes, &mut offset)?;
+    }
+    Ok(offset)
+}
+
+fn completion_size(bytes: &[u8]) -> Result<usize, DecodeError> {
+    require_len(bytes, 10, "completion")?;
+    let count = read_u16(bytes, 8) as usize;
+    let mut offset = 10;
+    for _ in 0..count {
+        require_len(bytes, offset + 1, "completion item kind")?;
+        offset += 1;
+        skip_string16(bytes, &mut offset)?;
+        skip_string16(bytes, &mut offset)?;
+    }
+    Ok(offset)
+}
+
+fn signature_help_size(bytes: &[u8]) -> Result<usize, DecodeError> {
+    require_len(bytes, 9, "signature help")?;
+    let count = bytes[8] as usize;
+    let mut offset = 9;
+    for _ in 0..count {
+        skip_string16(bytes, &mut offset)?;
+        skip_string16(bytes, &mut offset)?;
+        require_len(bytes, offset + 1, "signature parameter count")?;
+        let parameter_count = bytes[offset] as usize;
+        offset += 1;
+        for _ in 0..parameter_count {
+            skip_string16(bytes, &mut offset)?;
+            skip_string16(bytes, &mut offset)?;
+        }
+    }
+    Ok(offset)
+}
+
+fn float_popup_size(bytes: &[u8]) -> Result<usize, DecodeError> {
+    require_len(bytes, 8, "float popup")?;
+    let mut offset = 6;
+    skip_string16(bytes, &mut offset)?;
+    require_len(bytes, offset + 2, "float popup line count")?;
+    let line_count = read_u16(bytes, offset) as usize;
+    offset += 2;
+    for _ in 0..line_count {
+        skip_string16(bytes, &mut offset)?;
+    }
+    Ok(offset)
+}
+
+fn hover_popup_size(bytes: &[u8]) -> Result<usize, DecodeError> {
+    require_len(bytes, 11, "hover popup")?;
+    let line_count = read_u16(bytes, 9) as usize;
+    let mut offset = 11;
+    for _ in 0..line_count {
+        require_len(bytes, offset + 3, "hover line")?;
+        let segment_count = read_u16(bytes, offset + 1) as usize;
+        offset += 3;
+        for _ in 0..segment_count {
+            require_len(bytes, offset + 1, "hover segment style")?;
+            if bytes[offset] == 13 {
+                require_len(bytes, offset + 7, "hover syntax segment")?;
+                let len = read_u16(bytes, offset + 5) as usize;
+                offset += 7;
+                require_len(bytes, offset + len, "hover syntax segment text")?;
+                offset += len;
+            } else {
+                offset += 1;
+                skip_string16(bytes, &mut offset)?;
+            }
+        }
+    }
+    Ok(offset)
+}
+
+fn agent_context_size(bytes: &[u8]) -> Result<usize, DecodeError> {
+    require_len(bytes, 4, "agent context")?;
+    let len = read_u16(bytes, 2) as usize;
+    let offset = 4 + len;
+    require_len(bytes, offset + 10, "agent context body")?;
+    Ok(offset + 10)
+}
+
+fn git_status_size(bytes: &[u8]) -> Result<usize, DecodeError> {
+    require_len(bytes, 9, "git status")?;
+    let mut offset = 7;
+    skip_string16(bytes, &mut offset)?;
+    require_len(bytes, offset + 2, "git entry count")?;
+    let entry_count = read_u16(bytes, offset) as usize;
+    offset += 2;
+    for _ in 0..entry_count {
+        require_len(bytes, offset + 6, "git entry")?;
+        offset += 6;
+        skip_string16(bytes, &mut offset)?;
+    }
+    require_len(bytes, offset + 1, "git toast visibility")?;
+    match bytes[offset] {
+        0 => offset += 1,
+        _ => {
+            require_len(bytes, offset + 5, "git toast")?;
+            let len = read_u16(bytes, offset + 3) as usize;
+            offset += 5;
+            require_len(bytes, offset + len, "git toast message")?;
+            offset += len;
+        }
+    }
+    skip_string16(bytes, &mut offset)?;
+    skip_string16(bytes, &mut offset)?;
+    require_len(bytes, offset + 2, "git stash count")?;
+    Ok(offset + 2)
+}
+
+fn change_summary_size(bytes: &[u8]) -> Result<usize, DecodeError> {
+    require_len(bytes, 5, "change summary")?;
+    let count = read_u16(bytes, 3) as usize;
+    let mut offset = 5;
+    for _ in 0..count {
+        skip_string16(bytes, &mut offset)?;
+        require_len(bytes, offset + 9, "change summary entry")?;
+        offset += 9;
+    }
+    Ok(offset)
+}
+
+fn board_size(bytes: &[u8]) -> Result<usize, DecodeError> {
+    require_len(bytes, 11, "board")?;
+    let card_count = read_u16(bytes, 6) as usize;
+    let mut offset = 9;
+    skip_string16(bytes, &mut offset)?;
+    for _ in 0..card_count {
+        require_len(bytes, offset + 6, "board card")?;
+        offset += 6;
+        skip_string16(bytes, &mut offset)?;
+        skip_string8(bytes, &mut offset)?;
+        require_len(bytes, offset + 5, "board card timestamp and recent files")?;
+        offset += 4;
+        let recent_count = bytes[offset] as usize;
+        offset += 1;
+        for _ in 0..recent_count {
+            skip_string16(bytes, &mut offset)?;
+        }
+        require_len(bytes, offset + 1, "board sparkline count")?;
+        let sparkline_count = bytes[offset] as usize;
+        offset += 1;
+        require_len(bytes, offset + sparkline_count * 2, "board sparkline")?;
+        offset += sparkline_count * 2;
+    }
+    Ok(offset)
+}
+
+fn bottom_panel_size(bytes: &[u8]) -> Result<usize, DecodeError> {
+    require_len(bytes, 6, "bottom panel")?;
+    let tab_count = bytes[5] as usize;
+    let mut offset = 6;
+    for _ in 0..tab_count {
+        require_len(bytes, offset + 2, "bottom panel tab")?;
+        offset += 1;
+        skip_string8(bytes, &mut offset)?;
+    }
+    require_len(bytes, offset + 2, "bottom panel entry count")?;
+    let entry_count = read_u16(bytes, offset) as usize;
+    offset += 2;
+    for _ in 0..entry_count {
+        require_len(bytes, offset + 10, "bottom panel entry")?;
+        offset += 10;
+        skip_string16(bytes, &mut offset)?;
+        skip_string16(bytes, &mut offset)?;
+    }
+    Ok(offset)
+}
+
+fn tool_manager_size(bytes: &[u8]) -> Result<usize, DecodeError> {
+    require_len(bytes, 7, "tool manager")?;
+    let count = read_u16(bytes, 5) as usize;
+    let mut offset = 7;
+    for _ in 0..count {
+        skip_string8(bytes, &mut offset)?;
+        skip_string8(bytes, &mut offset)?;
+        skip_string16(bytes, &mut offset)?;
+        require_len(bytes, offset + 4, "tool metadata")?;
+        offset += 3;
+        let language_count = bytes[offset] as usize;
+        offset += 1;
+        for _ in 0..language_count {
+            skip_string8(bytes, &mut offset)?;
+        }
+        skip_string8(bytes, &mut offset)?;
+        skip_string16(bytes, &mut offset)?;
+        require_len(bytes, offset + 1, "tool provides count")?;
+        let provides_count = bytes[offset] as usize;
+        offset += 1;
+        for _ in 0..provides_count {
+            skip_string8(bytes, &mut offset)?;
+        }
+        skip_string16(bytes, &mut offset)?;
+    }
+    Ok(offset)
+}
+
+fn skip_string8(bytes: &[u8], offset: &mut usize) -> Result<(), DecodeError> {
+    require_len(bytes, *offset + 1, "string8 header")?;
+    let len = bytes[*offset] as usize;
+    *offset += 1;
+    require_len(bytes, *offset + len, "string8 body")?;
+    *offset += len;
+    Ok(())
+}
+
+fn skip_string16(bytes: &[u8], offset: &mut usize) -> Result<(), DecodeError> {
+    require_len(bytes, *offset + 2, "string16 header")?;
+    let len = read_u16(bytes, *offset) as usize;
+    *offset += 2;
+    require_len(bytes, *offset + len, "string16 body")?;
+    *offset += len;
+    Ok(())
 }
 
 fn require_len(bytes: &[u8], needed: usize, message: &'static str) -> Result<(), DecodeError> {
@@ -793,6 +1314,142 @@ mod tests {
             Command::FileTreeSelection(FileTreeSelection { focused: true, selected_id }, _)
                 if selected_id == "id-2"
         ));
+    }
+
+    #[test]
+    fn decodes_picker_and_preview() {
+        let header = section(
+            0x01,
+            &[vec![1, 0, 1, 0, 4, 0, 9, 1], string16("Files"), vec![0, 2]].concat(),
+        );
+        let query = section(0x02, &string16("src"));
+        let item = [
+            vec![0xAA, 0xBB, 0xCC, 0x02],
+            string16("main.ex"),
+            string16("lib/minga"),
+            string16("modified"),
+            vec![0],
+        ]
+        .concat();
+        let items = section(0x03, &[vec![0, 1], item].concat());
+        let mode_prefix = section(0x05, &string16(">"));
+        let load = section(0x06, &[0]);
+        let packet = [
+            vec![opcodes::OP_GUI_PICKER, 5],
+            header,
+            query,
+            items,
+            mode_prefix,
+            load,
+        ]
+        .concat();
+
+        assert!(matches!(
+            decode(&packet).unwrap(),
+            Command::Picker(Picker { visible: true, selected_index: 1, title, query, marked_count: 2, items, .. }, _)
+                if title == "Files" && query == "src" && items[0].marked
+        ));
+
+        let preview = [
+            vec![
+                opcodes::OP_GUI_PICKER_PREVIEW,
+                1,
+                0,
+                1,
+                1,
+                0x11,
+                0x22,
+                0x33,
+                1,
+            ],
+            string16("preview"),
+        ]
+        .concat();
+
+        assert!(matches!(
+            decode(&preview).unwrap(),
+            Command::PickerPreview(PickerPreview { visible: true, lines }, _)
+                if lines[0][0].text == "preview" && lines[0][0].bold
+        ));
+    }
+
+    #[test]
+    fn decodes_minibuffer() {
+        let candidate = [
+            vec![42],
+            string16("write"),
+            string16("Save file"),
+            string16(":w"),
+            vec![0],
+        ]
+        .concat();
+        let packet = [
+            vec![opcodes::OP_GUI_MINIBUFFER, 1, 0, 0, 2],
+            string8(":"),
+            string16("w"),
+            string16("command"),
+            vec![0, 0, 0, 1, 0, 4],
+            candidate,
+        ]
+        .concat();
+
+        assert!(matches!(
+            decode(&packet).unwrap(),
+            Command::Minibuffer(Minibuffer { visible: true, prompt, input, candidates, total_candidates: 4, .. }, _)
+                if prompt == ":" && input == "w" && candidates[0].label == "write"
+        ));
+    }
+
+    #[test]
+    fn decodes_theme_slots() {
+        let packet = vec![
+            opcodes::OP_GUI_THEME,
+            2,
+            0x20,
+            0x11,
+            0x22,
+            0x33,
+            0x23,
+            0xAA,
+            0xBB,
+            0xCC,
+        ];
+
+        assert!(matches!(
+            decode(&packet).unwrap(),
+            Command::Theme(Theme { slots }, 10)
+                if slots[0] == ThemeSlot { id: 0x20, rgb: 0x112233 }
+                    && slots[1] == ThemeSlot { id: 0x23, rgb: 0xAABBCC }
+        ));
+    }
+
+    #[test]
+    fn skips_visible_completion_without_consuming_following_commands() {
+        let packet = [
+            vec![opcodes::OP_GUI_COMPLETION, 1, 0, 4, 0, 12, 0, 1, 0, 1, 2],
+            string16("write"),
+            string16("Save file"),
+            vec![opcodes::OP_BATCH_END],
+        ]
+        .concat();
+
+        let command = decode(&packet).unwrap();
+
+        assert_eq!(command.size(), packet.len() - 1);
+        assert!(matches!(
+            command,
+            Command::Unsupported {
+                opcode,
+                size
+            } if opcode == opcodes::OP_GUI_COMPLETION && size == packet.len() - 1
+        ));
+    }
+
+    #[test]
+    fn skips_length_prefixed_config_state() {
+        let command = decode(&[opcodes::OP_GUI_CONFIG_STATE, 0, 3, 1, 2, 3]).unwrap();
+
+        assert_eq!(command.size(), 6);
     }
 
     #[test]
