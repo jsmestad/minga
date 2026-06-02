@@ -1,7 +1,7 @@
 use crate::protocol::{
     DecodeError,
     command_size::{self, CommandSize},
-    opcodes,
+    opcodes, semantic_decode, semantic_types,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,6 +70,8 @@ pub struct WindowContent {
     pub window_id: u16,
     pub origin_row: u16,
     pub origin_col: u16,
+    pub text_width: u16,
+    pub text_height: u16,
     pub cursor_row: u16,
     pub cursor_col: u16,
     pub cursor_shape: u8,
@@ -78,20 +80,9 @@ pub struct WindowContent {
     pub cursorline: Option<Cursorline>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Row {
-    pub text: String,
-    pub spans: Vec<Span>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Span {
-    pub start_col: u16,
-    pub end_col: u16,
-    pub fg: u32,
-    pub bg: u32,
-    pub attrs: u16,
-}
+pub type Row = semantic_types::Row;
+#[allow(dead_code)]
+pub type Span = semantic_types::Span;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct StatusBar {
@@ -546,6 +537,8 @@ fn decode_window_content(bytes: &[u8]) -> Result<Command, DecodeError> {
     let mut cursor_shape = 0;
     let mut origin_row = 0;
     let mut origin_col = 0;
+    let mut text_width = 0;
+    let mut text_height = 0;
     let mut content_epoch = 0;
     let mut rows = Vec::new();
     let mut cursorline = None;
@@ -553,19 +546,29 @@ fn decode_window_content(bytes: &[u8]) -> Result<Command, DecodeError> {
     for (section_id, payload) in sections {
         match section_id {
             0x01 => {
-                require_len(payload, 14, "window content header")?;
-                window_id = read_u16(payload, 0);
-                cursor_row = read_u16(payload, 3);
-                cursor_col = read_u16(payload, 5);
-                cursor_shape = payload[7];
-                content_epoch = read_u32(payload, 10);
+                let (header, _) = semantic_decode::decode_gui_window_content_header(payload, 0)?;
+                window_id = header.window_id;
+                cursor_row = header.cursor_row;
+                cursor_col = header.cursor_col;
+                cursor_shape = header.cursor_shape;
+                content_epoch = header.content_epoch;
             }
             0x02 => rows = decode_rows(payload)?,
-            0x08 if payload.len() >= 26 => {
-                origin_row = read_u16(payload, 18);
-                origin_col = read_u16(payload, 20);
+            0x08 => {
+                let (geometry, _) =
+                    semantic_decode::decode_gui_window_content_geometry(payload, 0)?;
+                origin_row = geometry.text_rect.row;
+                origin_col = geometry.text_rect.col;
+                text_width = geometry.text_rect.width;
+                text_height = geometry.text_rect.height;
             }
-            0x09 => cursorline = Some(decode_cursorline_payload(payload)?),
+            0x09 => {
+                let (cl, _) = semantic_decode::decode_gui_window_content_cursorline(payload, 0)?;
+                cursorline = Some(Cursorline {
+                    row: cl.row,
+                    bg: cl.bg,
+                });
+            }
             _ => {}
         }
     }
@@ -575,6 +578,8 @@ fn decode_window_content(bytes: &[u8]) -> Result<Command, DecodeError> {
             window_id,
             origin_row,
             origin_col,
+            text_width,
+            text_height,
             cursor_row,
             cursor_col,
             cursor_shape,
@@ -597,27 +602,28 @@ fn decode_status_bar(bytes: &[u8]) -> Result<Command, DecodeError> {
     for (section_id, payload) in sections {
         match section_id {
             0x01 => {
-                require_len(payload, 3, "status identity")?;
-                status.mode = payload[1];
-                status.flags = payload[2];
+                let (identity, _) = semantic_decode::decode_gui_status_bar_identity(payload, 0)?;
+                status.mode = identity.mode;
+                status.flags = identity.flags;
             }
             0x02 => {
-                require_len(payload, 12, "status cursor")?;
-                status.line = read_u32(payload, 0);
-                status.col = read_u32(payload, 4);
-                status.line_count = read_u32(payload, 8);
+                let (cursor, _) = semantic_decode::decode_gui_status_bar_cursor(payload, 0)?;
+                status.line = cursor.line;
+                status.col = cursor.col;
+                status.line_count = cursor.line_count;
             }
             0x05 => {
-                require_len(payload, 1, "status git")?;
-                let len = payload[0] as usize;
-                require_len(payload, 1 + len, "status git branch")?;
-                status.branch = read_string(payload, 1, len)?;
+                let (git, _) = semantic_decode::decode_gui_status_bar_git(payload, 0)?;
+                status.branch = git.branch;
             }
-            0x06 => status_file(payload, &mut status)?,
+            0x06 => {
+                let (file, _) = semantic_decode::decode_gui_status_bar_file(payload, 0)?;
+                status.filename = file.filename;
+                status.filetype = file.filetype;
+            }
             0x07 => {
-                require_len(payload, 2, "status message")?;
-                let len = read_u16(payload, 0) as usize;
-                status.message = read_string(payload, 2, len)?;
+                let (message, _) = semantic_decode::decode_gui_status_bar_message(payload, 0)?;
+                status.message = message.text;
             }
             0x0B => status_segments(payload, &mut status)?,
             _ => {}
@@ -625,21 +631,6 @@ fn decode_status_bar(bytes: &[u8]) -> Result<Command, DecodeError> {
     }
 
     Ok(Command::StatusBar(status, size))
-}
-
-fn status_file(payload: &[u8], status: &mut StatusBar) -> Result<(), DecodeError> {
-    require_len(payload, 1, "status file icon")?;
-    let icon_len = payload[0] as usize;
-    let mut offset = 1 + icon_len + 3;
-    require_len(payload, offset + 2, "status file name header")?;
-    let filename_len = read_u16(payload, offset) as usize;
-    offset += 2;
-    status.filename = read_string(payload, offset, filename_len)?;
-    offset += filename_len;
-    require_len(payload, offset + 1, "status filetype header")?;
-    let filetype_len = payload[offset] as usize;
-    status.filetype = read_string(payload, offset + 1, filetype_len)?;
-    Ok(())
 }
 
 fn status_segments(payload: &[u8], status: &mut StatusBar) -> Result<(), DecodeError> {
@@ -1396,20 +1387,20 @@ fn decode_gutter(bytes: &[u8]) -> Result<Command, DecodeError> {
     for (section_id, payload) in sections {
         match section_id {
             0x01 => {
-                require_len(payload, 11, "gutter window")?;
-                gutter.window_id = read_u16(payload, 0);
-                gutter.content_row = read_u16(payload, 2);
-                gutter.content_col = read_u16(payload, 4);
-                gutter.content_height = read_u16(payload, 6);
-                gutter.is_active = payload[8] != 0;
-                gutter.content_width = read_u16(payload, 9);
+                let (window, _) = semantic_decode::decode_gui_gutter_window(payload, 0)?;
+                gutter.window_id = window.window_id;
+                gutter.content_row = window.content_row;
+                gutter.content_col = window.content_col;
+                gutter.content_height = window.content_height;
+                gutter.is_active = window.is_active != 0;
+                gutter.content_width = window.content_width;
             }
             0x02 => {
-                require_len(payload, 7, "gutter config")?;
-                gutter.cursor_line = read_u32(payload, 0);
-                gutter.line_number_style = payload[4];
-                gutter.line_number_width = payload[5];
-                gutter.sign_col_width = payload[6];
+                let (config, _) = semantic_decode::decode_gui_gutter_config(payload, 0)?;
+                gutter.cursor_line = config.cursor_line;
+                gutter.line_number_style = config.line_number_style;
+                gutter.line_number_width = config.line_number_width;
+                gutter.sign_col_width = config.sign_col_width;
             }
             0x03 => gutter.entries = decode_gutter_entries(payload)?,
             _ => {}
@@ -1649,46 +1640,8 @@ fn decode_file_tree_row(bytes: &[u8]) -> Result<(FileTreeRow, usize), DecodeErro
 }
 
 fn decode_rows(bytes: &[u8]) -> Result<Vec<Row>, DecodeError> {
-    require_len(bytes, 2, "row count")?;
-    let count = read_u16(bytes, 0) as usize;
-    let mut offset = 2;
-    let mut rows = Vec::with_capacity(count);
-
-    for _ in 0..count {
-        let (row, used) = decode_row(&bytes[offset..])?;
-        offset += used;
-        rows.push(row);
-    }
-
+    let (rows, _consumed) = semantic_decode::decode_gui_window_content_rows(bytes, 0)?;
     Ok(rows)
-}
-
-fn decode_row(bytes: &[u8]) -> Result<(Row, usize), DecodeError> {
-    require_len(bytes, 21, "row header")?;
-    let text_len = read_u32(bytes, 17) as usize;
-    require_len(bytes, 21 + text_len + 2, "row text")?;
-    let text_start = 21;
-    let span_count_offset = text_start + text_len;
-    let text = std::str::from_utf8(&bytes[text_start..span_count_offset])
-        .map(str::to_owned)
-        .map_err(|_| DecodeError::Utf8)?;
-    let span_count = read_u16(bytes, span_count_offset) as usize;
-    let mut offset = span_count_offset + 2;
-    let mut spans = Vec::with_capacity(span_count);
-
-    for _ in 0..span_count {
-        require_len(bytes, offset + 11, "row span")?;
-        spans.push(Span {
-            start_col: read_u16(bytes, offset),
-            end_col: read_u16(bytes, offset + 2),
-            fg: read_u24(bytes, offset + 4),
-            bg: read_u24(bytes, offset + 7),
-            attrs: bytes[offset + 10] as u16,
-        });
-        offset += 11;
-    }
-
-    Ok((Row { text, spans }, offset))
 }
 
 fn sections(bytes: &[u8]) -> Result<Vec<(u8, &[u8])>, DecodeError> {
@@ -2138,7 +2091,7 @@ mod tests {
                 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 9, 0, 0, 0x12, 0, 0, 0, 2,
             ],
             b"hi".to_vec(),
-            vec![0, 1, 0, 0, 0, 2, 0xAA, 0xBB, 0xCC, 0, 0, 0, 1],
+            vec![0, 1, 0, 0, 0, 2, 0xAA, 0xBB, 0xCC, 0, 0, 0, 1, 0, 0],
         ]
         .concat();
         let rows = section(0x02, &[vec![0, 1], row].concat());
@@ -2161,6 +2114,27 @@ mod tests {
                 ..
             }, _) if rows[0].text == "hi" && rows[0].spans[0].fg == 0xAABBCC
         ));
+    }
+
+    #[test]
+    fn rejects_window_content_geometry_without_hit_region_bytes() {
+        let header = section(0x01, &[0, 1, 0x03, 0, 4, 0, 5, 2, 0, 0, 0, 0, 0, 7]);
+        let rows = section(0x02, &[0, 0]);
+        let mut geometry_payload = vec![0; 67];
+        geometry_payload[1] = 7;
+        geometry_payload[63] = 3;
+        geometry_payload[65] = 2;
+        geometry_payload[66] = 1;
+        let geometry = section(0x08, &geometry_payload);
+        let payload = [
+            vec![opcodes::OP_GUI_WINDOW_CONTENT, 3],
+            header,
+            rows,
+            geometry,
+        ]
+        .concat();
+
+        assert!(decode(&payload).is_err());
     }
 
     #[test]

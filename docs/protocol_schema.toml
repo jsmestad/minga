@@ -1020,3 +1020,395 @@ value = 0x56
 [[gui_actions]]
 name = "sidebar_action"
 value = 0x57
+
+# ── Shared wire structures ────────────────────────────────────────────────
+#
+# Reusable fixed-size and variable-length sub-structures referenced by name
+# in opcode section definitions. The generator computes byte sizes for
+# fixed-size structures and emits struct definitions + decode functions in
+# each target language.
+#
+# Type primitives:
+#   u8, u16, u24, u32, u64        — unsigned integers (big-endian)
+#   string8, string16, string32    — length-prefixed UTF-8 (u8/u16/u32 len + bytes)
+#   rgb                            — 3-byte color (r:u8, g:u8, b:u8)
+#   counted_array                  — count prefix + repeated elements
+#   struct                         — reference to another [[structures]] entry
+
+[[structures]]
+name = "rect"
+fields = [
+  {name = "row", type = "u16"},
+  {name = "col", type = "u16"},
+  {name = "width", type = "u16"},
+  {name = "height", type = "u16"},
+]
+
+[[structures]]
+name = "span"
+fields = [
+  {name = "start_col", type = "u16"},
+  {name = "end_col", type = "u16"},
+  {name = "fg", type = "rgb"},
+  {name = "bg", type = "rgb"},
+  {name = "attrs", type = "u8"},
+  {name = "font_weight", type = "u8"},
+  {name = "font_id", type = "u8"},
+]
+
+[[structures]]
+name = "row"
+fields = [
+  {name = "row_type", type = "u8"},
+  {name = "row_id", type = "u64"},
+  {name = "buf_line", type = "u32"},
+  {name = "content_hash", type = "u32"},
+  {name = "text", type = "string32"},
+  {name = "spans", type = "counted_array", count_type = "u16", element = "span"},
+]
+
+[[structures]]
+name = "search_match"
+fields = [
+  {name = "row", type = "u16"},
+  {name = "start_col", type = "u16"},
+  {name = "end_col", type = "u16"},
+  {name = "is_current", type = "u8"},
+]
+
+[[structures]]
+name = "diagnostic_range"
+fields = [
+  {name = "start_row", type = "u16"},
+  {name = "start_col", type = "u16"},
+  {name = "end_row", type = "u16"},
+  {name = "end_col", type = "u16"},
+  {name = "severity", type = "u8"},
+]
+
+[[structures]]
+name = "document_highlight"
+fields = [
+  {name = "start_row", type = "u16"},
+  {name = "start_col", type = "u16"},
+  {name = "end_row", type = "u16"},
+  {name = "end_col", type = "u16"},
+  {name = "kind", type = "u8"},
+]
+
+[[structures]]
+name = "annotation"
+fields = [
+  {name = "row", type = "u16"},
+  {name = "kind", type = "u8"},
+  {name = "fg", type = "rgb"},
+  {name = "bg", type = "rgb"},
+  {name = "text", type = "string16"},
+]
+
+[[structures]]
+name = "hit_region"
+fields = [
+  {name = "kind", type = "u8"},
+  {name = "rect", type = "struct", element = "rect"},
+  {name = "id", type = "u16"},
+]
+
+[[structures]]
+name = "gutter_entry"
+fields = [
+  {name = "buf_line", type = "u32"},
+  {name = "display_type", type = "u8"},
+  {name = "sign_type", type = "u8"},
+  {name = "fold_end_line", type = "u32"},
+]
+conditional_tail = {guard = "sign_type == 8", fields = [
+  {name = "sign_fg", type = "rgb"},
+  {name = "sign_text", type = "string8"},
+]}
+
+[[structures]]
+name = "modeline_segment"
+fields = [
+  {name = "name", type = "string8"},
+  {name = "fg", type = "rgb"},
+  {name = "bg", type = "rgb"},
+  {name = "attrs", type = "u8"},
+  {name = "text", type = "string16"},
+  {name = "target", type = "string16"},
+]
+
+# ── Section layouts for sectioned commands ────────────────────────────────
+#
+# Each [[sections]] entry describes one section within a sectioned opcode.
+# The opcode field links it to the parent [[opcodes]] entry by name.
+# The generator uses these to emit section-dispatch decode functions.
+
+# gui_window_content (0x80) sections
+
+[[sections]]
+opcode = "gui_window_content"
+id = 0x01
+name = "header"
+fields = [
+  {name = "window_id", type = "u16"},
+  {name = "flags", type = "u8"},
+  {name = "cursor_row", type = "u16"},
+  {name = "cursor_col", type = "u16"},
+  {name = "cursor_shape", type = "u8"},
+  {name = "scroll_left", type = "u16"},
+  {name = "content_epoch", type = "u32"},
+]
+
+[[sections]]
+opcode = "gui_window_content"
+id = 0x02
+name = "rows"
+layout = "counted_array"
+count_type = "u16"
+element = "row"
+
+[[sections]]
+opcode = "gui_window_content"
+id = 0x03
+name = "selection"
+fields = [
+  {name = "type", type = "u8"},
+]
+# When type != 0, followed by: start_row:u16, start_col:u16, end_row:u16, end_col:u16
+conditional_tail = {guard = "type != 0", fields = [
+  {name = "start_row", type = "u16"},
+  {name = "start_col", type = "u16"},
+  {name = "end_row", type = "u16"},
+  {name = "end_col", type = "u16"},
+]}
+
+[[sections]]
+opcode = "gui_window_content"
+id = 0x04
+name = "search_matches"
+layout = "counted_array"
+count_type = "u16"
+element = "search_match"
+
+[[sections]]
+opcode = "gui_window_content"
+id = 0x05
+name = "diagnostic_ranges"
+layout = "counted_array"
+count_type = "u16"
+element = "diagnostic_range"
+
+[[sections]]
+opcode = "gui_window_content"
+id = 0x06
+name = "document_highlights"
+layout = "counted_array"
+count_type = "u16"
+element = "document_highlight"
+
+[[sections]]
+opcode = "gui_window_content"
+id = 0x07
+name = "annotations"
+layout = "counted_array"
+count_type = "u16"
+element = "annotation"
+
+[[sections]]
+opcode = "gui_window_content"
+id = 0x08
+name = "geometry"
+fields = [
+  {name = "window_id", type = "u16"},
+  {name = "total_rect", type = "struct", element = "rect"},
+  {name = "content_rect", type = "struct", element = "rect"},
+  {name = "text_rect", type = "struct", element = "rect"},
+  {name = "gutter_rect", type = "struct", element = "rect"},
+  {name = "clip_rect", type = "struct", element = "rect"},
+  {name = "viewport_top", type = "u32"},
+  {name = "viewport_left", type = "u16"},
+  {name = "viewport_rows", type = "u16"},
+  {name = "viewport_cols", type = "u16"},
+  {name = "viewport_total_lines", type = "u32"},
+  {name = "viewport_visual_row_offset", type = "u16"},
+  {name = "viewport_total_visual_rows", type = "u32"},
+  {name = "line_number_width", type = "u16"},
+  {name = "sign_col_width", type = "u16"},
+  {name = "hit_regions", type = "counted_array", count_type = "u8", element = "hit_region"},
+]
+
+[[sections]]
+opcode = "gui_window_content"
+id = 0x09
+name = "cursorline"
+fields = [
+  {name = "row", type = "u16"},
+  {name = "bg", type = "rgb"},
+]
+
+# gui_status_bar (0x76) sections
+
+[[sections]]
+opcode = "gui_status_bar"
+id = 0x01
+name = "identity"
+fields = [
+  {name = "content_kind", type = "u8"},
+  {name = "mode", type = "u8"},
+  {name = "flags", type = "u8"},
+]
+
+[[sections]]
+opcode = "gui_status_bar"
+id = 0x02
+name = "cursor"
+fields = [
+  {name = "line", type = "u32"},
+  {name = "col", type = "u32"},
+  {name = "line_count", type = "u32"},
+]
+
+[[sections]]
+opcode = "gui_status_bar"
+id = 0x03
+name = "diagnostics"
+fields = [
+  {name = "errors", type = "u16"},
+  {name = "warnings", type = "u16"},
+  {name = "info", type = "u16"},
+  {name = "hints", type = "u16"},
+  {name = "hint_text", type = "string16"},
+]
+
+[[sections]]
+opcode = "gui_status_bar"
+id = 0x04
+name = "language"
+fields = [
+  {name = "lsp_status", type = "u8"},
+  {name = "parser_status", type = "u8"},
+]
+
+[[sections]]
+opcode = "gui_status_bar"
+id = 0x05
+name = "git"
+fields = [
+  {name = "branch", type = "string8"},
+  {name = "added", type = "u16"},
+  {name = "modified", type = "u16"},
+  {name = "deleted", type = "u16"},
+]
+
+[[sections]]
+opcode = "gui_status_bar"
+id = 0x06
+name = "file"
+fields = [
+  {name = "icon", type = "string8"},
+  {name = "icon_color", type = "rgb"},
+  {name = "filename", type = "string16"},
+  {name = "filetype", type = "string8"},
+]
+
+[[sections]]
+opcode = "gui_status_bar"
+id = 0x07
+name = "message"
+fields = [
+  {name = "text", type = "string16"},
+]
+
+[[sections]]
+opcode = "gui_status_bar"
+id = 0x08
+name = "recording"
+fields = [
+  {name = "macro_register", type = "u8"},
+]
+
+[[sections]]
+opcode = "gui_status_bar"
+id = 0x09
+name = "agent"
+layout = "custom"
+
+[[sections]]
+opcode = "gui_status_bar"
+id = 0x0A
+name = "indent"
+fields = [
+  {name = "indent_type", type = "u8"},
+  {name = "indent_size", type = "u8"},
+]
+
+[[sections]]
+opcode = "gui_status_bar"
+id = 0x0B
+name = "modeline"
+fields = [
+  {name = "format", type = "u8"},
+  {name = "left_segments", type = "counted_array", count_type = "u16", element = "modeline_segment"},
+  {name = "right_segments", type = "counted_array", count_type = "u16", element = "modeline_segment"},
+]
+
+[[sections]]
+opcode = "gui_status_bar"
+id = 0x0C
+name = "selection"
+fields = [
+  {name = "selection_mode", type = "u8"},
+  {name = "selection_size", type = "u32"},
+]
+
+[[sections]]
+opcode = "gui_status_bar"
+id = 0x0D
+name = "workspace"
+fields = [
+  {name = "workspace_id", type = "u16"},
+  {name = "kind", type = "u8"},
+  {name = "status", type = "u8"},
+  {name = "flags", type = "u16"},
+  {name = "draft_count", type = "u16"},
+  {name = "conflict_count", type = "u16"},
+  {name = "running_background_count", type = "u16"},
+  {name = "attention_count", type = "u16"},
+  {name = "label", type = "string8"},
+  {name = "icon", type = "string8"},
+]
+
+# gui_gutter (0x7B) sections
+
+[[sections]]
+opcode = "gui_gutter"
+id = 0x01
+name = "window"
+fields = [
+  {name = "window_id", type = "u16"},
+  {name = "content_row", type = "u16"},
+  {name = "content_col", type = "u16"},
+  {name = "content_height", type = "u16"},
+  {name = "is_active", type = "u8"},
+  {name = "content_width", type = "u16"},
+]
+
+[[sections]]
+opcode = "gui_gutter"
+id = 0x02
+name = "config"
+fields = [
+  {name = "cursor_line", type = "u32"},
+  {name = "line_number_style", type = "u8"},
+  {name = "line_number_width", type = "u8"},
+  {name = "sign_col_width", type = "u8"},
+]
+
+[[sections]]
+opcode = "gui_gutter"
+id = 0x03
+name = "entries"
+layout = "counted_array"
+count_type = "u16"
+element = "gutter_entry"
