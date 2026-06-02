@@ -405,6 +405,13 @@ pub fn decode(bytes: &[u8]) -> Result<Command, DecodeError> {
         }
         opcodes::OP_GUI_GUTTER => sectioned_size(bytes, "semantic sectioned command")
             .map(|size| Command::Unsupported { opcode, size }),
+        opcodes::OP_GUI_CURSORLINE => {
+            fixed_size(bytes, 6, "cursorline").map(|size| Command::Unsupported { opcode, size })
+        }
+        opcodes::OP_CLIPBOARD_WRITE
+        | opcodes::OP_GUI_LINE_SPACING
+        | opcodes::OP_GUI_CURSOR_ANIMATION => len16_size(bytes, "forward-compatible gui command")
+            .map(|size| Command::Unsupported { opcode, size }),
         opcodes::OP_GUI_INDENT_GUIDES
         | opcodes::OP_GUI_HOVER_ACTION
         | opcodes::OP_GUI_WORKSPACES
@@ -2324,6 +2331,42 @@ mod tests {
         let command = decode(&[opcodes::OP_GUI_NOTIFICATIONS, 0, 3, 1, 2, 3]).unwrap();
 
         assert_eq!(command.size(), 6);
+    }
+
+    #[test]
+    fn skips_forward_compatible_gui_commands_without_consuming_following_commands() {
+        let cases = [
+            (
+                opcodes::OP_CLIPBOARD_WRITE,
+                vec![opcodes::OP_CLIPBOARD_WRITE, 0, 4, 0, 0, 1, b'x'],
+            ),
+            (
+                opcodes::OP_GUI_LINE_SPACING,
+                vec![opcodes::OP_GUI_LINE_SPACING, 0, 2, 0, 120],
+            ),
+            (
+                opcodes::OP_GUI_CURSOR_ANIMATION,
+                vec![opcodes::OP_GUI_CURSOR_ANIMATION, 0, 1, 1],
+            ),
+            (
+                opcodes::OP_GUI_CURSORLINE,
+                vec![opcodes::OP_GUI_CURSORLINE, 0, 9, 0x11, 0x22, 0x33],
+            ),
+        ];
+
+        for (opcode, payload) in cases {
+            let packet = [payload.clone(), vec![opcodes::OP_BATCH_END]].concat();
+            let command = decode(&packet).unwrap();
+
+            assert_eq!(command.size(), packet.len() - 1);
+            assert!(matches!(
+                command,
+                Command::Unsupported {
+                    opcode: decoded,
+                    size
+                } if decoded == opcode && size == packet.len() - 1
+            ));
+        }
     }
 
     fn section(id: u8, payload: &[u8]) -> Vec<u8> {
