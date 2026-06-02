@@ -686,7 +686,7 @@ struct ContentView: View {
     /// to points. `sizeType` 0 = percent of `basis`; 1 = lines/columns (× `cellExtent`).
     /// Clamped to `[minimum, basis * 0.8]` so a panel can neither vanish nor crowd out
     /// the editor.
-    static func panelCrossSize(
+    nonisolated static func panelCrossSize(
         sizeType: UInt8,
         sizeValue: UInt8,
         cellExtent: CGFloat,
