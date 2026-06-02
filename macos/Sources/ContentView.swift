@@ -642,31 +642,57 @@ struct ContentView: View {
         }
     }
 
+    /// Origin (in points) of a window's text rect on the editor surface, matching the
+    /// Metal renderer's per-window text origin: `textCol * cellW + gutterPad - scrollLeft *
+    /// cellW` horizontally and `textRow * cellH` vertically. Overlay row/col are
+    /// window-local text coordinates, so an entry then lands at `origin + col*cellW`.
+    nonisolated static func overlayContentOrigin(
+        textCol: UInt16,
+        textRow: UInt16,
+        scrollLeft: UInt16,
+        cellWidth: CGFloat,
+        cellHeight: CGFloat,
+        gutterPad: CGFloat
+    ) -> CGPoint {
+        CGPoint(
+            x: CGFloat(textCol) * cellWidth + gutterPad - CGFloat(scrollLeft) * cellWidth,
+            y: CGFloat(textRow) * cellHeight
+        )
+    }
+
     /// Editor-surface overlays contributed by extensions (gui_extension_overlay, 0x9C).
-    /// Overlay row/col are window-local text coordinates, so the origin is offset past the
-    /// gutter (line numbers/signs) to the text rect's left edge, matching the Metal
-    /// renderer's text origin for the active window (`gutterCol * cellW + gutter margins`).
-    /// Horizontal/vertical scroll and split panes still resolve against the active window's
-    /// gutter only, pending per-window pane geometry in the SwiftUI overlay layer; the
-    /// existing completion/hover overlays share this limitation.
+    /// Overlay row/col are window-local text coordinates, so each window's origin is derived
+    /// from that window's retained pane geometry (`textRect`) and horizontal scroll
+    /// (`scrollLeft`), which is how the Metal renderer positions the window's text. This
+    /// keeps overlays aligned in split panes and under horizontal scroll. Falls back to the
+    /// active window's gutter column when pane geometry has not been retained yet.
     @ViewBuilder
     private var extensionOverlayLayer: some View {
         if !appState.gui.extensionOverlayState.entries.isEmpty {
             let cw = CGFloat(appState.editorNSView?.cellWidth ?? 8)
             let ch = CGFloat(appState.editorNSView?.cellHeight ?? 16)
-            let gutterCols = CGFloat(appState.editorNSView?.dispatcher.frameState.gutterCol ?? 0)
-            let gutterPad: CGFloat = gutterCols > 0
+            let frameGutterCols = appState.editorNSView?.dispatcher.frameState.gutterCol ?? 0
+            let gutterPad: CGFloat = frameGutterCols > 0
                 ? CoreTextMetalRenderer.gutterLeftMarginPt + CoreTextMetalRenderer.gutterRightGapPt
                 : 0
-            let textOrigin = CGPoint(x: gutterCols * cw + gutterPad, y: 0)
 
             ForEach(appState.gui.extensionOverlayState.windowIDs, id: \.self) { wid in
+                let geometry = appState.gui.windowContents[wid]?.paneGeometry
+                let origin = Self.overlayContentOrigin(
+                    textCol: geometry?.textRect.col ?? frameGutterCols,
+                    textRow: geometry?.textRect.row ?? 0,
+                    scrollLeft: appState.gui.windowContents[wid]?.scrollLeft ?? 0,
+                    cellWidth: cw,
+                    cellHeight: ch,
+                    gutterPad: gutterPad
+                )
+
                 ExtensionOverlayView(
                     overlayState: appState.gui.extensionOverlayState,
                     windowID: wid,
                     cellWidth: cw,
                     cellHeight: ch,
-                    contentOrigin: textOrigin
+                    contentOrigin: origin
                 )
             }
         }

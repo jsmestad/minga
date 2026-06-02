@@ -160,6 +160,42 @@ struct ExtensionOverlayViewTests {
     }
 }
 
+// MARK: - Overlay origin resolution
+
+@Suite("ContentView.overlayContentOrigin")
+struct OverlayContentOriginTests {
+    @Test("origin offsets past the gutter text column")
+    func gutterOffset() {
+        let origin = ContentView.overlayContentOrigin(
+            textCol: 5, textRow: 0, scrollLeft: 0,
+            cellWidth: 8, cellHeight: 16, gutterPad: 14
+        )
+        // 5 * 8 + 14 = 54
+        #expect(origin.x == 54)
+        #expect(origin.y == 0)
+    }
+
+    @Test("split pane uses the pane's text rect row/col")
+    func splitPaneOffset() {
+        let origin = ContentView.overlayContentOrigin(
+            textCol: 40, textRow: 20, scrollLeft: 0,
+            cellWidth: 8, cellHeight: 16, gutterPad: 0
+        )
+        #expect(origin.x == 320)
+        #expect(origin.y == 320)
+    }
+
+    @Test("horizontal scroll shifts the origin left")
+    func horizontalScroll() {
+        let origin = ContentView.overlayContentOrigin(
+            textCol: 5, textRow: 0, scrollLeft: 3,
+            cellWidth: 8, cellHeight: 16, gutterPad: 14
+        )
+        // 5*8 + 14 - 3*8 = 30
+        #expect(origin.x == 30)
+    }
+}
+
 // MARK: - Panel size resolution
 
 @Suite("ContentView.panelCrossSize")
