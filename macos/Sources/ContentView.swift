@@ -677,11 +677,13 @@ struct ContentView: View {
                 : 0
 
             ForEach(appState.gui.extensionOverlayState.windowIDs, id: \.self) { wid in
-                let geometry = appState.gui.windowContents[wid]?.paneGeometry
+                let content = appState.gui.windowContents[wid]
+                let geometry = content?.paneGeometry
+                let scrollLeft = content?.scrollLeft ?? 0
                 let origin = Self.overlayContentOrigin(
                     textCol: geometry?.textRect.col ?? frameGutterCols,
                     textRow: geometry?.textRect.row ?? 0,
-                    scrollLeft: appState.gui.windowContents[wid]?.scrollLeft ?? 0,
+                    scrollLeft: scrollLeft,
                     cellWidth: cw,
                     cellHeight: ch,
                     gutterPad: gutterPad
@@ -692,7 +694,10 @@ struct ContentView: View {
                     windowID: wid,
                     cellWidth: cw,
                     cellHeight: ch,
-                    contentOrigin: origin
+                    contentOrigin: origin,
+                    firstColumn: scrollLeft,
+                    columnCount: geometry?.textRect.width ?? 0,
+                    rowCount: geometry?.textRect.height ?? 0
                 )
             }
         }

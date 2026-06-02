@@ -120,6 +120,55 @@ struct ExtensionPanelStateTests {
     }
 }
 
+// MARK: - Overlay viewport visibility
+
+@Suite("ExtensionOverlayState.isVisible")
+@MainActor
+struct OverlayVisibilityTests {
+    private func entry(col: UInt16, row: UInt16) -> ExtensionOverlayState.OverlayEntry {
+        ExtensionOverlayState.OverlayEntry(
+            extensionName: "ext", overlayID: "o", windowID: 1,
+            row: row, col: col, shape: 2,
+            colorR: 0, colorG: 0, colorB: 0, opacity: 255, content: "x"
+        )
+    }
+
+    @Test("entry inside the viewport is visible")
+    func insideViewport() {
+        #expect(ExtensionOverlayState.isVisible(
+            entry(col: 12, row: 3), firstColumn: 10, columnCount: 40, rowCount: 20
+        ))
+    }
+
+    @Test("entry scrolled left of the viewport is suppressed")
+    func leftOfViewport() {
+        #expect(!ExtensionOverlayState.isVisible(
+            entry(col: 4, row: 3), firstColumn: 10, columnCount: 40, rowCount: 20
+        ))
+    }
+
+    @Test("entry right of the viewport is suppressed")
+    func rightOfViewport() {
+        #expect(!ExtensionOverlayState.isVisible(
+            entry(col: 60, row: 3), firstColumn: 10, columnCount: 40, rowCount: 20
+        ))
+    }
+
+    @Test("entry below the pane is suppressed")
+    func belowPane() {
+        #expect(!ExtensionOverlayState.isVisible(
+            entry(col: 12, row: 25), firstColumn: 10, columnCount: 40, rowCount: 20
+        ))
+    }
+
+    @Test("unknown viewport size suppresses nothing")
+    func unknownViewport() {
+        #expect(ExtensionOverlayState.isVisible(
+            entry(col: 999, row: 999), firstColumn: 0, columnCount: 0, rowCount: 0
+        ))
+    }
+}
+
 // MARK: - ExtensionOverlayView
 
 @Suite("ExtensionOverlayView Structure")

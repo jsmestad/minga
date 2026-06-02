@@ -11,9 +11,22 @@ struct ExtensionOverlayView: View {
     let cellWidth: CGFloat
     let cellHeight: CGFloat
     let contentOrigin: CGPoint
+    /// Visible text viewport for the window, in cells. Entries outside it are suppressed so
+    /// scrolled-out overlays do not draw over the gutter or an adjacent pane. Defaults
+    /// (0) mean "viewport unknown, do not suppress".
+    var firstColumn: UInt16 = 0
+    var columnCount: UInt16 = 0
+    var rowCount: UInt16 = 0
 
     var body: some View {
-        let entries = overlayState.entries(forWindow: windowID)
+        let entries = overlayState.entries(forWindow: windowID).filter {
+            ExtensionOverlayState.isVisible(
+                $0,
+                firstColumn: firstColumn,
+                columnCount: columnCount,
+                rowCount: rowCount
+            )
+        }
 
         ZStack(alignment: .topLeading) {
             ForEach(entries) { entry in
