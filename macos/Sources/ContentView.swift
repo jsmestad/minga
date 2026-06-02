@@ -12,6 +12,17 @@ private struct PaneHeightKey: PreferenceKey {
     }
 }
 
+/// Preference key for measuring the editor column's total width.
+/// Used as a stable basis for percent-sized extension panels: the panels live
+/// inside this column, so its width does not shrink when a panel mounts (unlike
+/// the editor NSView, which is the surface left over after the panel takes space).
+private struct PaneWidthKey: PreferenceKey {
+    static let defaultValue: CGFloat = 800
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 /// Transparent AppKit hit region that preserves standard title-bar interactions for the custom toolbar.
 private struct TitleBarDragRegion: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
@@ -125,6 +136,7 @@ struct StartupOverlay: View {
 struct ContentView: View {
     var appState: AppState
     @State private var rightPaneHeight: CGFloat = 600
+    @State private var workspaceWidth: CGFloat = 800
     @State private var sidebarWidth: CGFloat = SidebarSizing.defaultWidth
     @State private var changeSummaryWidth: CGFloat = 280
 
@@ -532,14 +544,16 @@ struct ContentView: View {
         }
         .background(
             GeometryReader { geo in
-                Color.clear.preference(
-                    key: PaneHeightKey.self,
-                    value: geo.size.height
-                )
+                Color.clear
+                    .preference(key: PaneHeightKey.self, value: geo.size.height)
+                    .preference(key: PaneWidthKey.self, value: geo.size.width)
             }
         )
         .onPreferenceChange(PaneHeightKey.self) { height in
             rightPaneHeight = height
+        }
+        .onPreferenceChange(PaneWidthKey.self) { width in
+            workspaceWidth = width
         }
     }
 
@@ -752,7 +766,10 @@ struct ContentView: View {
         let panels = appState.gui.extensionPanelState.panels(forPosition: 1)
         if !panels.isEmpty {
             let cw = CGFloat(appState.editorNSView?.cellWidth ?? 8)
-            let basis = CGFloat(appState.editorNSView?.bounds.width ?? 800)
+            // Percent panels size against the stable editor-column width, not the editor
+            // NSView (which is the surface left over after the panel takes space, causing
+            // a 30% request to converge to ~23% and oscillate as layout settles).
+            let basis = workspaceWidth
             let width = panels
                 .map { panelCrossSize($0, cellExtent: cw, basis: basis, minimum: 160) }
                 .max() ?? 280
