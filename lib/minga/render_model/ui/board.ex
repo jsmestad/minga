@@ -33,6 +33,12 @@ defmodule Minga.RenderModel.UI.Board do
   @spec hidden() :: t()
   def hidden, do: %__MODULE__{visible?: false, cards: []}
 
+  @doc "Appends cards while preserving the board's existing state."
+  @spec append_cards(t(), [Card.t()]) :: t()
+  def append_cards(%__MODULE__{} = board, cards) when is_list(cards) do
+    %{board | cards: board.cards ++ cards}
+  end
+
   @doc "Returns the card currently zoomed in, if any."
   @spec zoomed_card(t()) :: Card.t() | nil
   def zoomed_card(%__MODULE__{zoomed_card_id: nil}), do: nil

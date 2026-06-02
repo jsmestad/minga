@@ -138,7 +138,8 @@ defmodule Minga.Credo.DependencyDirectionCheck do
     # Services.Supervisor starts extension contribution registries and built-in extension surfaces.
     "Minga.Services.Supervisor" => [
       "MingaEditor.Extension.Sidebar",
-      "MingaEditor.Agent.SlashCommand.Registry"
+      "MingaEditor.Agent.SlashCommand.Registry",
+      "MingaEditor.Agent.SemanticUI.Registry"
     ],
     # SystemObserver displays the editor supervisor tree as process topology data.
     "Minga.SystemObserver" => ["MingaEditor.Supervisor"],
