@@ -179,7 +179,7 @@ defmodule MingaGitPorcelain.Input.GitStatus do
 
             {:error, reason} ->
               msg = "Discard failed: #{reason}"
-              MingaEditor.log_to_messages(msg)
+              Log.warning(:ext, msg)
               msg
           end
 
@@ -340,7 +340,7 @@ defmodule MingaGitPorcelain.Input.GitStatus do
 
       {:error, reason} ->
         error_msg = "#{error_prefix}: #{reason}"
-        MingaEditor.log_to_messages(error_msg)
+        Log.warning(:ext, error_msg)
         EditorState.set_status(state, error_msg)
     end
   end

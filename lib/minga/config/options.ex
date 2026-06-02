@@ -122,6 +122,7 @@ defmodule Minga.Config.Options do
           | :log_level_config
           | :log_level_port
           | :log_level_distribution
+          | :log_level_ext
           | :parser_tree_ttl
           | :event_retention_days
           | :event_persist_all
@@ -375,6 +376,8 @@ defmodule Minga.Config.Options do
      "Port protocol subsystem log verbosity override."},
     {:log_level_distribution, {:enum, [:default, :debug, :info, :warning, :error, :none]},
      :default, "Distribution subsystem log verbosity override."},
+    {:log_level_ext, {:enum, [:default, :debug, :info, :warning, :error, :none]}, :default,
+     "Extension subsystem log verbosity override."},
     {:parser_tree_ttl, :integer, 300, "Seconds to keep cached parser trees alive."},
     {:event_retention_days, :pos_integer, 90,
      "Number of days to keep persisted event log entries."},
