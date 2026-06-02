@@ -1,15 +1,21 @@
 mod theme;
 
+use crate::animation;
 use crate::protocol::{self, Command, DrawStyledText, DrawText, Region};
 use crate::semantic;
 use crate::terminal::{CellStyle, Terminal};
 use ratatui::buffer::Buffer as RatatuiBuffer;
 use ratatui::layout::Rect as RatatuiRect;
 use ratatui::style::{Color as RatatuiColor, Modifier, Style as RatatuiStyle};
-use ratatui::widgets::{Block, Borders, Paragraph, Widget, Wrap};
+use ratatui::text::{Line as RatatuiLine, Span as RatatuiSpan};
+use ratatui::widgets::{
+    Block, Borders, List, ListItem, ListState, Paragraph, StatefulWidget, Widget, Wrap,
+};
 use std::collections::HashMap;
 use std::io::{self, Write};
 use theme::{SLOT_EDITOR_BG, ThemePalette};
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 #[cfg(test)]
 use theme::{
@@ -360,13 +366,32 @@ impl Renderer {
         };
 
         let style = self.theme.status_bar_style();
-
-        self.write_run(row, 0, &pad_to_width(&left, self.width), style);
-
+        let left_width = text_width(&left).min(self.width);
         let right_width = text_width(&right);
+        let spacer_width = if right_width < self.width {
+            self.width
+                .saturating_sub(left_width)
+                .saturating_sub(right_width)
+        } else {
+            self.width.saturating_sub(left_width)
+        };
+        let mut spans = vec![
+            RatatuiSpan::styled(
+                slice_chars(&left, 0, self.width),
+                ratatui_style_from_cell(style),
+            ),
+            RatatuiSpan::styled(
+                " ".repeat(spacer_width as usize),
+                ratatui_style_from_cell(style),
+            ),
+        ];
         if right_width < self.width {
-            self.write_run(row, self.width - right_width, &right, style);
+            spans.push(RatatuiSpan::styled(right, ratatui_style_from_cell(style)));
         }
+
+        let paragraph =
+            Paragraph::new(RatatuiLine::from(spans)).style(ratatui_style_from_cell(style));
+        self.render_ratatui_widget(row, 0, self.width, 1, paragraph);
     }
 
     fn draw_tab_bar(&mut self, tab_bar: semantic::TabBar) {
@@ -374,22 +399,24 @@ impl Renderer {
             return;
         }
 
-        self.clear_row(0);
-        let mut col = 0;
+        let spans = tab_bar
+            .tabs
+            .iter()
+            .map(|tab| {
+                let label = if tab.dirty {
+                    format!(" {} * ", tab.label)
+                } else {
+                    format!(" {} ", tab.label)
+                };
+                RatatuiSpan::styled(
+                    label,
+                    ratatui_style_from_cell(self.theme.tab_style(tab.active, tab.tint)),
+                )
+            })
+            .collect::<Vec<_>>();
 
-        for tab in tab_bar.tabs {
-            if col >= self.width {
-                break;
-            }
-
-            let label = if tab.dirty {
-                format!(" {} * ", tab.label)
-            } else {
-                format!(" {} ", tab.label)
-            };
-            self.write_run(0, col, &label, self.theme.tab_style(tab.active, tab.tint));
-            col = col.saturating_add(text_width(&label));
-        }
+        let paragraph = Paragraph::new(RatatuiLine::from(spans));
+        self.render_ratatui_widget(0, 0, self.width, 1, paragraph);
     }
 
     fn draw_file_tree(&mut self, tree: semantic::FileTree) {
@@ -452,19 +479,17 @@ impl Renderer {
         }
 
         if breadcrumb.segments.is_empty() {
-            self.write_run(row, col, &" ".repeat(width as usize), CellStyle::default());
+            let paragraph = Paragraph::new(" ".repeat(width as usize));
+            self.render_ratatui_widget(row, col, width, 1, paragraph);
             self.breadcrumb = None;
             return;
         }
 
         self.breadcrumb = Some(breadcrumb.clone());
         let text = format!(" {}", breadcrumb.segments.join(" / "));
-        self.write_run(
-            row,
-            col,
-            &pad_to_width(&text, width),
-            self.theme.breadcrumb_style(),
-        );
+        let paragraph = Paragraph::new(pad_to_width(&text, width))
+            .style(ratatui_style_from_cell(self.theme.breadcrumb_style()));
+        self.render_ratatui_widget(row, col, width, 1, paragraph);
     }
 
     fn draw_completion(&mut self, completion: semantic::Completion) {
@@ -588,34 +613,35 @@ impl Renderer {
             .saturating_add(1)
             .saturating_sub(candidate_count)
             .min(minibuffer.candidates.len().saturating_sub(candidate_count));
-        for (index, candidate) in minibuffer
+        let items = minibuffer
             .candidates
             .iter()
             .skip(start_index)
             .take(candidate_count)
             .enumerate()
-        {
-            let candidate_index = start_index + index;
-            let selected = candidate_index == selected_index;
-            let annotation = if candidate.annotation.is_empty() {
-                String::new()
-            } else {
-                format!("  {}", candidate.annotation)
-            };
-            let description = if candidate.description.is_empty() {
-                String::new()
-            } else {
-                format!(" - {}", candidate.description)
-            };
-            let marker = if selected { ">" } else { " " };
-            let text = format!("{marker} {}{}{}", candidate.label, annotation, description);
-            self.write_run(
-                first_row + index as u16,
-                0,
-                &pad_to_width(&text, self.width),
-                self.theme.minibuffer_style(selected),
-            );
-        }
+            .map(|(index, candidate)| {
+                let candidate_index = start_index + index;
+                let selected = candidate_index == selected_index;
+                let annotation = if candidate.annotation.is_empty() {
+                    String::new()
+                } else {
+                    format!("  {}", candidate.annotation)
+                };
+                let description = if candidate.description.is_empty() {
+                    String::new()
+                } else {
+                    format!(" - {}", candidate.description)
+                };
+                let marker = if selected { ">" } else { " " };
+                let text = format!("{marker} {}{}{}", candidate.label, annotation, description);
+                ListItem::new(pad_to_width(&text, self.width)).style(ratatui_style_from_cell(
+                    self.theme.minibuffer_style(selected),
+                ))
+            })
+            .collect::<Vec<_>>();
+        let list =
+            List::new(items).style(ratatui_style_from_cell(self.theme.minibuffer_style(false)));
+        self.render_ratatui_widget(first_row, 0, self.width, candidate_count as u16, list);
     }
 
     fn redraw_retained_chrome(&mut self) {
@@ -686,38 +712,55 @@ impl Renderer {
         } else {
             format!("{} {}", picker.mode_prefix, picker.title)
         };
-        self.write_run(
-            row,
-            col,
-            &pad_to_width(&title, width),
-            self.theme.picker_header_style(),
-        );
-
         let count = if picker.total_count == 0 {
             String::new()
         } else {
             format!("{} / {}", picker.filtered_count, picker.total_count)
         };
+        let title_width = text_width(&title).min(width);
         let count_width = text_width(&count);
-        if count_width > 0 && count_width < width {
-            self.write_run(
-                row,
-                col + width - count_width - 1,
-                &count,
-                self.theme.picker_header_style(),
-            );
+        let header_style = ratatui_style_from_cell(self.theme.picker_header_style());
+        let mut header_spans = vec![RatatuiSpan::styled(
+            slice_chars(&title, 0, width),
+            header_style,
+        )];
+        if count_width > 0 && count_width < width && title_width.saturating_add(count_width) < width
+        {
+            let spacer = width
+                .saturating_sub(title_width)
+                .saturating_sub(count_width)
+                .saturating_sub(1);
+            header_spans.push(RatatuiSpan::styled(
+                " ".repeat(spacer as usize),
+                header_style,
+            ));
+            header_spans.push(RatatuiSpan::styled(count, header_style));
+        } else if title_width < width {
+            header_spans.push(RatatuiSpan::styled(
+                " ".repeat(width.saturating_sub(title_width) as usize),
+                header_style,
+            ));
         }
+        self.render_ratatui_widget(
+            row,
+            col,
+            width,
+            1,
+            Paragraph::new(RatatuiLine::from(header_spans)).style(header_style),
+        );
 
         let query = if picker.query.is_empty() {
             "> ".to_owned()
         } else {
             format!("> {}", picker.query)
         };
-        self.write_run(
+        let query_style = ratatui_style_from_cell(self.theme.picker_query_style());
+        self.render_ratatui_widget(
             row + 1,
             col,
-            &pad_to_width(&query, width),
-            self.theme.picker_query_style(),
+            width,
+            1,
+            Paragraph::new(pad_to_width(&query, width)).style(query_style),
         );
 
         let body_row = row + 2;
@@ -795,41 +838,41 @@ impl Renderer {
             self.completion_snapshot = Some(self.capture_rect(row, col, width, height));
         }
 
-        self.fill_rect(row, col, width, height, self.theme.completion_style(false));
-
         let selected_index = completion.selected_index as usize;
         let visible_rows = height as usize;
         let start = selected_index
             .saturating_add(1)
             .saturating_sub(visible_rows)
             .min(completion.items.len().saturating_sub(visible_rows));
-        for (screen_index, item) in completion
+        let items = completion
             .items
             .iter()
             .skip(start)
             .take(visible_rows)
-            .enumerate()
-        {
-            let item_index = start + screen_index;
-            let selected = item_index == selected_index;
-            let detail = if item.detail.is_empty() {
-                String::new()
-            } else {
-                format!("  {}", item.detail)
-            };
-            let line = format!(
-                "{} {}{}",
-                completion_kind_marker(item.kind),
-                item.label,
-                detail
-            );
-            self.write_run(
-                row + screen_index as u16,
-                col,
-                &pad_to_width(&line, width),
-                self.theme.completion_style(selected),
-            );
-        }
+            .map(|item| {
+                let detail = if item.detail.is_empty() {
+                    String::new()
+                } else {
+                    format!("  {}", item.detail)
+                };
+                let line = format!(
+                    "{} {}{}",
+                    completion_kind_marker(item.kind),
+                    item.label,
+                    detail
+                );
+                ListItem::new(pad_to_width(&line, width))
+                    .style(ratatui_style_from_cell(self.theme.completion_style(false)))
+            })
+            .collect::<Vec<_>>();
+        let mut state =
+            ListState::default().with_selected(Some(selected_index.saturating_sub(start)));
+        let list = List::new(items)
+            .style(ratatui_style_from_cell(self.theme.completion_style(false)))
+            .highlight_style(ratatui_style_from_cell(self.theme.completion_style(true)));
+
+        let _timer = animation::POPUP_REVEAL.timer();
+        self.render_ratatui_stateful_widget(row, col, width, height, list, &mut state);
     }
 
     fn restore_completion_snapshot(&mut self) {
@@ -860,7 +903,6 @@ impl Renderer {
             self.which_key_snapshot = Some(self.capture_rect(row, col, width, height));
         }
 
-        self.fill_rect(row, col, width, height, self.theme.which_key_style(false));
         let page = if which_key.page_count > 1 {
             format!(
                 "  {}/{}",
@@ -878,25 +920,27 @@ impl Renderer {
             self.theme.which_key_header_style(),
         );
 
-        for (index, binding) in which_key
+        let items = which_key
             .bindings
             .iter()
             .take(height.saturating_sub(1) as usize)
-            .enumerate()
-        {
-            let icon = if binding.icon.is_empty() {
-                if binding.kind == 1 { ">" } else { " " }
-            } else {
-                binding.icon.as_str()
-            };
-            let text = format!(" {icon} {:<8} {}", binding.key, binding.description);
-            self.write_run(
-                row + 1 + index as u16,
-                col,
-                &pad_to_width(&text, width),
-                self.theme.which_key_style(binding.kind == 1),
-            );
-        }
+            .map(|binding| {
+                let icon = if binding.icon.is_empty() {
+                    if binding.kind == 1 { ">" } else { " " }
+                } else {
+                    binding.icon.as_str()
+                };
+                let text = format!(" {icon} {:<8} {}", binding.key, binding.description);
+                ListItem::new(pad_to_width(&text, width)).style(ratatui_style_from_cell(
+                    self.theme.which_key_style(binding.kind == 1),
+                ))
+            })
+            .collect::<Vec<_>>();
+        let list =
+            List::new(items).style(ratatui_style_from_cell(self.theme.which_key_style(false)));
+
+        let _timer = animation::POPUP_REVEAL.timer();
+        self.render_ratatui_widget(row + 1, col, width, height.saturating_sub(1), list);
     }
 
     fn restore_which_key_snapshot(&mut self) {
@@ -1251,12 +1295,9 @@ impl Renderer {
         }
 
         if picker.load_status == 1 {
-            self.write_run(
-                row,
-                col,
-                &pad_to_width(" Loading...", width),
-                self.theme.picker_style(false),
-            );
+            let paragraph = Paragraph::new(" Loading...")
+                .style(ratatui_style_from_cell(self.theme.picker_style(false)));
+            self.render_ratatui_widget(row, col, width, height, paragraph);
             return;
         }
         if picker.load_status == 2 {
@@ -1265,62 +1306,55 @@ impl Renderer {
             } else {
                 format!(" {}", picker.load_error)
             };
-            self.write_run(
-                row,
-                col,
-                &pad_to_width(&message, width),
-                self.theme.picker_style(false),
-            );
+            let paragraph = Paragraph::new(message)
+                .style(ratatui_style_from_cell(self.theme.picker_style(false)));
+            self.render_ratatui_widget(row, col, width, height, paragraph);
             return;
         }
 
         if picker.items.is_empty() {
-            self.write_run(
-                row,
-                col,
-                &pad_to_width(" No matches", width),
-                self.theme.picker_style(false),
-            );
+            let paragraph = Paragraph::new(" No matches")
+                .style(ratatui_style_from_cell(self.theme.picker_style(false)));
+            self.render_ratatui_widget(row, col, width, height, paragraph);
             return;
         }
 
         let visible_rows = height as usize;
-        let selected = picker.selected_index as usize;
-        let start = selected.saturating_sub(visible_rows.saturating_sub(1));
-        for (screen_index, item) in picker
+        let selected_index = picker.selected_index as usize;
+        let start = selected_index.saturating_sub(visible_rows.saturating_sub(1));
+        let items = picker
             .items
             .iter()
             .skip(start)
             .take(visible_rows)
             .enumerate()
-        {
-            let item_index = start + screen_index;
-            let selected = item_index == selected;
-            let marker = if item.marked {
-                "*"
-            } else if selected {
-                ">"
-            } else {
-                " "
-            };
-            let annotation = if item.annotation.is_empty() {
-                String::new()
-            } else {
-                format!(" {}", item.annotation)
-            };
-            let description = if item.description.is_empty() {
-                String::new()
-            } else {
-                format!("  {}", item.description)
-            };
-            let line = format!("{marker} {}{}{}", item.label, annotation, description);
-            self.write_run(
-                row + screen_index as u16,
-                col,
-                &pad_to_width(&line, width),
-                self.theme.picker_style(selected),
-            );
-        }
+            .map(|(screen_index, item)| {
+                let item_index = start + screen_index;
+                let selected = item_index == selected_index;
+                let marker = if item.marked {
+                    "*"
+                } else if selected {
+                    ">"
+                } else {
+                    " "
+                };
+                let annotation = if item.annotation.is_empty() {
+                    String::new()
+                } else {
+                    format!(" {}", item.annotation)
+                };
+                let description = if item.description.is_empty() {
+                    String::new()
+                } else {
+                    format!("  {}", item.description)
+                };
+                let line = format!("{marker} {}{}{}", item.label, annotation, description);
+                ListItem::new(pad_to_width(&line, width))
+                    .style(ratatui_style_from_cell(self.theme.picker_style(selected)))
+            })
+            .collect::<Vec<_>>();
+        let list = List::new(items).style(ratatui_style_from_cell(self.theme.picker_style(false)));
+        self.render_ratatui_widget(row, col, width, height, list);
     }
 
     fn render_picker_preview(
@@ -1331,32 +1365,36 @@ impl Renderer {
         height: u16,
         preview: &semantic::PickerPreview,
     ) {
-        self.fill_rect(
-            row,
-            col,
-            width,
-            height,
-            self.theme.picker_preview_style(false, 0),
-        );
-
-        for (line_index, segments) in preview.lines.iter().take(height as usize).enumerate() {
-            let mut current_col = col.saturating_add(1);
-            for segment in segments {
-                if current_col >= col.saturating_add(width) {
-                    break;
+        let lines = preview
+            .lines
+            .iter()
+            .take(height as usize)
+            .map(|segments| {
+                let mut spans = Vec::new();
+                let mut used_width = 1_u16;
+                spans.push(RatatuiSpan::raw(" "));
+                for segment in segments {
+                    if used_width >= width {
+                        break;
+                    }
+                    let remaining = width.saturating_sub(used_width);
+                    let text = slice_chars(&segment.text, 0, remaining);
+                    let segment_width = text_width(&text);
+                    spans.push(RatatuiSpan::styled(
+                        text,
+                        ratatui_style_from_cell(
+                            self.theme.picker_preview_style(segment.bold, segment.fg),
+                        ),
+                    ));
+                    used_width = used_width.saturating_add(segment_width);
                 }
-                let remaining = col.saturating_add(width).saturating_sub(current_col);
-                let text = slice_chars(&segment.text, 0, remaining);
-                let segment_width = text_width(&text);
-                self.write_run(
-                    row + line_index as u16,
-                    current_col,
-                    &text,
-                    self.theme.picker_preview_style(segment.bold, segment.fg),
-                );
-                current_col = current_col.saturating_add(segment_width);
-            }
-        }
+                RatatuiLine::from(spans)
+            })
+            .collect::<Vec<_>>();
+        let paragraph = Paragraph::new(lines).style(ratatui_style_from_cell(
+            self.theme.picker_preview_style(false, 0),
+        ));
+        self.render_ratatui_widget(row, col, width, height, paragraph);
     }
 
     fn render_file_tree(&mut self) {
@@ -1368,89 +1406,103 @@ impl Renderer {
         }
 
         let width = tree.width.min(self.width);
-        for row in 1..self.height - 1 {
-            self.write_run(
-                row,
-                0,
-                &" ".repeat(width as usize),
-                self.theme.file_tree_style(false, tree.focused),
-            );
-        }
+        let row = 1;
+        let height = self.height.saturating_sub(2);
 
         match tree.status {
-            1 => self.write_run(
-                1,
-                0,
-                " Loading...",
-                self.theme.file_tree_style(false, tree.focused),
-            ),
-            2 => self.write_run(
-                1,
-                0,
-                " Empty",
-                self.theme.file_tree_style(false, tree.focused),
-            ),
+            1 => {
+                let paragraph = Paragraph::new(" Loading...").style(ratatui_style_from_cell(
+                    self.theme.file_tree_style(false, tree.focused),
+                ));
+                self.render_ratatui_widget(row, 0, width, height, paragraph);
+            }
+            2 => {
+                let paragraph = Paragraph::new(" Empty").style(ratatui_style_from_cell(
+                    self.theme.file_tree_style(false, tree.focused),
+                ));
+                self.render_ratatui_widget(row, 0, width, height, paragraph);
+            }
             4 => {
                 let message = if tree.error.is_empty() {
                     " File tree error".to_owned()
                 } else {
                     format!(" {}", tree.error)
                 };
-                self.write_run(
-                    1,
-                    0,
-                    &message,
+                let paragraph = Paragraph::new(message).style(ratatui_style_from_cell(
                     self.theme.file_tree_style(false, tree.focused),
-                );
+                ));
+                self.render_ratatui_widget(row, 0, width, height, paragraph);
             }
             _ => {
-                let visible_rows = self.height.saturating_sub(2) as usize;
-                for (index, row) in tree.rows.iter().take(visible_rows).enumerate() {
-                    self.render_file_tree_row(
-                        index as u16 + 1,
-                        width,
-                        tree.focused,
-                        row,
-                        &tree.selected_id,
-                    );
-                }
+                self.render_file_tree_rows(
+                    row,
+                    width,
+                    height,
+                    tree.focused,
+                    &tree.rows,
+                    &tree.selected_id,
+                );
             }
         }
     }
 
-    fn render_file_tree_row(
+    fn render_file_tree_rows(
         &mut self,
-        screen_row: u16,
+        row: u16,
         width: u16,
+        height: u16,
         focused: bool,
-        row: &semantic::FileTreeRow,
+        rows: &[semantic::FileTreeRow],
         selected_id: &str,
     ) {
-        let selected = row.id == selected_id;
-        let indent = "  ".repeat(row.depth as usize);
-        let marker = if row.flags & 0x01 != 0 {
-            if row.flags & 0x02 != 0 { "v " } else { "> " }
-        } else {
-            "  "
-        };
-        let dirty = if row.flags & 0x20 != 0 { " *" } else { "" };
-        let git = git_marker(row.git_status);
-        let diag = diagnostic_marker(row.diagnostics);
-        let label = if row.editing_text.is_empty() {
-            format!(
-                " {indent}{marker}{} {}{dirty}{git}{diag}",
-                row.icon, row.name
-            )
-        } else {
-            format!(" {indent}{marker}{} {}", row.icon, row.editing_text)
-        };
+        if width == 0 || height == 0 {
+            return;
+        }
 
-        self.write_run(
-            screen_row,
-            0,
-            &pad_to_width(&label, width),
-            self.theme.file_tree_style(selected, focused),
-        );
+        let visible_rows = height as usize;
+        let selected_index = rows
+            .iter()
+            .position(|row| row.id == selected_id)
+            .unwrap_or(0);
+        let start = selected_index.saturating_sub(visible_rows.saturating_sub(1));
+        let items = rows
+            .iter()
+            .skip(start)
+            .take(visible_rows)
+            .map(|row| {
+                let indent = "  ".repeat(row.depth as usize);
+                let marker = if row.flags & 0x01 != 0 {
+                    if row.flags & 0x02 != 0 { "v " } else { "> " }
+                } else {
+                    "  "
+                };
+                let dirty = if row.flags & 0x20 != 0 { " *" } else { "" };
+                let git = git_marker(row.git_status);
+                let diag = diagnostic_marker(row.diagnostics);
+                let label = if row.editing_text.is_empty() {
+                    format!(
+                        " {indent}{marker}{} {}{dirty}{git}{diag}",
+                        row.icon, row.name
+                    )
+                } else {
+                    format!(" {indent}{marker}{} {}", row.icon, row.editing_text)
+                };
+
+                ListItem::new(pad_to_width(&label, width)).style(ratatui_style_from_cell(
+                    self.theme.file_tree_style(false, focused),
+                ))
+            })
+            .collect::<Vec<_>>();
+        let mut state =
+            ListState::default().with_selected(Some(selected_index.saturating_sub(start)));
+        let list = List::new(items)
+            .style(ratatui_style_from_cell(
+                self.theme.file_tree_style(false, focused),
+            ))
+            .highlight_style(ratatui_style_from_cell(
+                self.theme.file_tree_style(true, focused),
+            ));
+        self.render_ratatui_stateful_widget(row, 0, width, height, list, &mut state);
     }
 
     fn write_run(&mut self, row: u16, col: u16, text: &str, mut style: CellStyle) {
@@ -1463,19 +1515,36 @@ impl Renderer {
             style.bg = self.default_bg;
         }
 
-        for ch in text.chars() {
+        for grapheme in text.graphemes(true) {
             if col >= max_col {
+                break;
+            }
+
+            let width = grapheme_width(grapheme);
+            if width == 0 {
+                continue;
+            }
+            if col.saturating_add(width) > max_col {
                 break;
             }
 
             if let Some(index) = self.index(col, row) {
                 self.cells[index] = Cell {
-                    text: ch.to_string(),
+                    text: grapheme.to_owned(),
                     style,
                 };
             }
 
-            col = col.saturating_add(char_width(ch));
+            for continuation_col in col.saturating_add(1)..col.saturating_add(width) {
+                if let Some(index) = self.index(continuation_col, row) {
+                    self.cells[index] = Cell {
+                        text: String::new(),
+                        style,
+                    };
+                }
+            }
+
+            col = col.saturating_add(width);
         }
     }
 
@@ -1587,7 +1656,39 @@ impl Renderer {
         let mut buffer = RatatuiBuffer::empty(area);
         widget.render(area, &mut buffer);
 
+        self.copy_ratatui_buffer(row, col, width, height, &buffer);
+    }
+
+    fn render_ratatui_stateful_widget<W: StatefulWidget>(
+        &mut self,
+        row: u16,
+        col: u16,
+        width: u16,
+        height: u16,
+        widget: W,
+        state: &mut W::State,
+    ) {
+        if width == 0 || height == 0 {
+            return;
+        }
+
+        let area = RatatuiRect::new(0, 0, width, height);
+        let mut buffer = RatatuiBuffer::empty(area);
+        widget.render(area, &mut buffer, state);
+
+        self.copy_ratatui_buffer(row, col, width, height, &buffer);
+    }
+
+    fn copy_ratatui_buffer(
+        &mut self,
+        row: u16,
+        col: u16,
+        width: u16,
+        height: u16,
+        buffer: &RatatuiBuffer,
+    ) {
         for y in 0..height {
+            let mut pending_continuations = 0_u16;
             for x in 0..width {
                 let target_row = row.saturating_add(y);
                 let target_col = col.saturating_add(x);
@@ -1597,8 +1698,21 @@ impl Renderer {
                 let Some(source) = buffer.cell((x, y)) else {
                     continue;
                 };
+
+                if pending_continuations > 0 && source.symbol() == " " {
+                    self.cells[target_index] = Cell {
+                        text: String::new(),
+                        style: cell_style_from_ratatui(source),
+                    };
+                    pending_continuations = pending_continuations.saturating_sub(1);
+                    continue;
+                }
+
+                let symbol = source.symbol().to_owned();
+                let symbol_width = text_width(&symbol);
+                pending_continuations = symbol_width.saturating_sub(1);
                 self.cells[target_index] = Cell {
-                    text: source.symbol().to_owned(),
+                    text: symbol,
                     style: cell_style_from_ratatui(source),
                 };
             }
@@ -1655,6 +1769,11 @@ impl Renderer {
                     continue;
                 };
 
+                if self.cells[index].text.is_empty() {
+                    self.previous[index] = self.cells[index].clone();
+                    continue;
+                }
+
                 if self.cells[index] != self.previous[index] {
                     terminal.write_cell(
                         col,
@@ -1682,14 +1801,11 @@ impl Renderer {
 }
 
 fn text_width(text: &str) -> u16 {
-    text.chars()
-        .map(char_width)
-        .fold(0_u16, u16::saturating_add)
+    UnicodeWidthStr::width(text).min(u16::MAX as usize) as u16
 }
 
-fn char_width(ch: char) -> u16 {
-    let _ = ch;
-    1
+fn grapheme_width(grapheme: &str) -> u16 {
+    UnicodeWidthStr::width(grapheme).min(u16::MAX as usize) as u16
 }
 
 fn picker_geometry(width: u16, height: u16) -> (u16, u16, u16, u16) {
@@ -2043,16 +2159,44 @@ fn fallback_status_right(status: &semantic::StatusBar) -> String {
 fn pad_to_width(text: &str, width: u16) -> String {
     let current = text_width(text);
     if current >= width {
-        return slice_chars(text, 0, width);
+        let sliced = slice_chars(text, 0, width);
+        let sliced_width = text_width(&sliced);
+        return format!(
+            "{sliced}{}",
+            " ".repeat(width.saturating_sub(sliced_width) as usize)
+        );
     }
 
     format!("{text}{}", " ".repeat((width - current) as usize))
 }
 
 fn slice_chars(text: &str, start_col: u16, end_col: u16) -> String {
-    let start = start_col as usize;
-    let len = end_col.saturating_sub(start_col) as usize;
-    text.chars().skip(start).take(len).collect()
+    let mut out = String::new();
+    let mut col = 0_u16;
+
+    for grapheme in text.graphemes(true) {
+        let width = grapheme_width(grapheme);
+        if width == 0 {
+            continue;
+        }
+
+        let next_col = col.saturating_add(width);
+        if next_col <= start_col {
+            col = next_col;
+            continue;
+        }
+        if col >= end_col {
+            break;
+        }
+        if col >= start_col && next_col <= end_col {
+            out.push_str(grapheme);
+        } else {
+            break;
+        }
+        col = next_col;
+    }
+
+    out
 }
 
 #[cfg(test)]
@@ -3139,5 +3283,63 @@ mod tests {
             renderer.cells[renderer.index(0, 9).unwrap()].style.bg,
             0x040506
         );
+    }
+
+    #[test]
+    fn text_helpers_use_display_width_and_grapheme_boundaries() {
+        assert_eq!(text_width("abc"), 3);
+        assert_eq!(text_width("界x"), 3);
+        assert_eq!(text_width("e\u{301}x"), 2);
+
+        assert_eq!(pad_to_width("界x", 2), "界");
+        assert_eq!(pad_to_width("a界", 2), "a ");
+        assert_eq!(pad_to_width("e\u{301}x", 1), "e\u{301}");
+        assert_eq!(slice_chars("界x", 0, 2), "界");
+        assert_eq!(slice_chars("界x", 0, 3), "界x");
+        assert_eq!(slice_chars("e\u{301}x", 0, 1), "e\u{301}");
+    }
+
+    #[test]
+    fn write_run_advances_by_grapheme_display_width() {
+        let mut renderer = Renderer::new(8, 2);
+
+        renderer.write_run(0, 0, "界x", CellStyle::default());
+        assert_eq!(renderer.cells[renderer.index(0, 0).unwrap()].text, "界");
+        assert_eq!(renderer.cells[renderer.index(1, 0).unwrap()].text, "");
+        assert_eq!(renderer.cells[renderer.index(2, 0).unwrap()].text, "x");
+
+        renderer.write_run(1, 0, "e\u{301}x", CellStyle::default());
+        assert_eq!(
+            renderer.cells[renderer.index(0, 1).unwrap()].text,
+            "e\u{301}"
+        );
+        assert_eq!(renderer.cells[renderer.index(1, 1).unwrap()].text, "x");
+    }
+
+    #[test]
+    fn render_skips_wide_grapheme_continuation_cells() {
+        let mut renderer = Renderer::new(4, 1);
+        let mut terminal = Terminal::memory(4, 1);
+
+        renderer.write_run(0, 0, "ab", CellStyle::default());
+        renderer.render(&mut terminal).unwrap();
+        renderer.clear();
+        renderer.write_run(0, 0, "界", CellStyle::default());
+        renderer.render(&mut terminal).unwrap();
+
+        assert_eq!(renderer.previous[renderer.index(0, 0).unwrap()].text, "界");
+        assert_eq!(renderer.previous[renderer.index(1, 0).unwrap()].text, "");
+    }
+
+    #[test]
+    fn ratatui_widget_copy_preserves_wide_grapheme_continuation_cells() {
+        let mut renderer = Renderer::new(4, 1);
+        let paragraph = Paragraph::new("界x");
+
+        renderer.render_ratatui_widget(0, 0, 4, 1, paragraph);
+
+        assert_eq!(renderer.cells[renderer.index(0, 0).unwrap()].text, "界");
+        assert_eq!(renderer.cells[renderer.index(1, 0).unwrap()].text, "");
+        assert_eq!(renderer.cells[renderer.index(2, 0).unwrap()].text, "x");
     }
 }

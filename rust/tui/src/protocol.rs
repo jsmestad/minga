@@ -188,6 +188,23 @@ pub fn decode_command(bytes: &[u8]) -> Result<Command, DecodeError> {
             let text = read_string(bytes, 7, len)?;
             Ok(Command::MeasureText { request_id, text })
         }
+        opcodes::OP_SET_LANGUAGE => skip_len_at(bytes, 5),
+        opcodes::OP_PARSE_BUFFER => skip_len32_at(bytes, 9),
+        opcodes::OP_SET_HIGHLIGHT_QUERY
+        | opcodes::OP_SET_INJECTION_QUERY
+        | opcodes::OP_SET_FOLD_QUERY
+        | opcodes::OP_SET_INDENT_QUERY
+        | opcodes::OP_SET_TEXTOBJECT_QUERY
+        | opcodes::OP_SET_TAGS_QUERY => skip_len32_at(bytes, 5),
+        opcodes::OP_LOAD_GRAMMAR => skip_load_grammar(bytes),
+        opcodes::OP_QUERY_LANGUAGE_AT | opcodes::OP_REQUEST_INDENT => {
+            fixed_noop(bytes, 13, "fixed parser request")
+        }
+        opcodes::OP_REQUEST_TEXTOBJECT => skip_len_at(bytes, 17),
+        opcodes::OP_CLOSE_BUFFER => fixed_noop(bytes, 5, "close_buffer"),
+        opcodes::OP_REQUEST_MATCH_ITEM => fixed_noop(bytes, 17, "request_match_item"),
+        opcodes::OP_REQUEST_STRUCTURAL_NAV => fixed_noop(bytes, 18, "request_structural_nav"),
+        opcodes::OP_EDIT_BUFFER => skip_edit_buffer(bytes),
         opcodes::OP_SET_FONT => skip_len_at(bytes, 5),
         opcodes::OP_SET_FONT_FALLBACK => skip_font_fallback(bytes),
         opcodes::OP_REGISTER_FONT => skip_len_at(bytes, 2),
@@ -202,7 +219,7 @@ pub fn write_packet(writer: &mut impl Write, payload: &[u8]) -> io::Result<()> {
     writer.flush()
 }
 
-pub fn encode_ready_with_caps(width: u16, height: u16) -> [u8; 14] {
+pub fn encode_ready_with_caps(width: u16, height: u16, image_support: u8) -> [u8; 14] {
     [
         opcodes::OP_READY,
         (width >> 8) as u8,
@@ -214,7 +231,7 @@ pub fn encode_ready_with_caps(width: u16, height: u16) -> [u8; 14] {
         0,
         2,
         0,
-        0,
+        image_support,
         0,
         0,
         1,
@@ -307,6 +324,22 @@ fn skip_len_at(bytes: &[u8], len_offset: usize) -> Result<Command, DecodeError> 
     Ok(Command::Noop(len_offset + 2 + len))
 }
 
+fn skip_len32_at(bytes: &[u8], len_offset: usize) -> Result<Command, DecodeError> {
+    require_len(bytes, len_offset + 4, "length32-prefixed command header")?;
+    let len = read_u32(bytes, len_offset) as usize;
+    require_len(
+        bytes,
+        len_offset + 4 + len,
+        "length32-prefixed command body",
+    )?;
+    Ok(Command::Noop(len_offset + 4 + len))
+}
+
+fn fixed_noop(bytes: &[u8], size: usize, name: &'static str) -> Result<Command, DecodeError> {
+    require_len(bytes, size, name)?;
+    Ok(Command::Noop(size))
+}
+
 fn skip_font_fallback(bytes: &[u8]) -> Result<Command, DecodeError> {
     require_len(bytes, 2, "font fallback header")?;
     let count = bytes[1] as usize;
@@ -318,6 +351,33 @@ fn skip_font_fallback(bytes: &[u8]) -> Result<Command, DecodeError> {
         offset += 2;
         require_len(bytes, offset + len, "font fallback entry body")?;
         offset += len;
+    }
+
+    Ok(Command::Noop(offset))
+}
+
+fn skip_load_grammar(bytes: &[u8]) -> Result<Command, DecodeError> {
+    require_len(bytes, 3, "load_grammar name header")?;
+    let name_len = read_u16(bytes, 1) as usize;
+    let mut offset = 3 + name_len;
+    require_len(bytes, offset + 2, "load_grammar path header")?;
+    let path_len = read_u16(bytes, offset) as usize;
+    offset += 2;
+    require_len(bytes, offset + path_len, "load_grammar path body")?;
+    Ok(Command::Noop(offset + path_len))
+}
+
+fn skip_edit_buffer(bytes: &[u8]) -> Result<Command, DecodeError> {
+    require_len(bytes, 11, "edit_buffer header")?;
+    let edit_count = read_u16(bytes, 9) as usize;
+    let mut offset = 11;
+
+    for _ in 0..edit_count {
+        require_len(bytes, offset + 40, "edit_buffer edit header")?;
+        let text_len = read_u32(bytes, offset + 36) as usize;
+        offset += 40;
+        require_len(bytes, offset + text_len, "edit_buffer edit text")?;
+        offset += text_len;
     }
 
     Ok(Command::Noop(offset))
@@ -402,7 +462,7 @@ mod tests {
     #[test]
     fn encodes_extended_ready() {
         assert_eq!(
-            encode_ready_with_caps(80, 24),
+            encode_ready_with_caps(80, 24, 0),
             [opcodes::OP_READY, 0, 80, 0, 24, 1, 7, 0, 2, 0, 0, 0, 0, 1]
         );
     }
@@ -489,6 +549,44 @@ mod tests {
         assert_eq!(
             encode_paste_event(b"hello"),
             vec![opcodes::OP_PASTE_EVENT, 0, 5, b'h', b'e', b'l', b'l', b'o']
+        );
+    }
+
+    #[test]
+    fn skips_parser_commands_without_consuming_following_commands() {
+        let packet = [
+            vec![opcodes::OP_SET_LANGUAGE, 0, 0, 0, 7, 0, 6],
+            b"elixir".to_vec(),
+            vec![opcodes::OP_BATCH_END],
+        ]
+        .concat();
+        let command = decode_command(&packet).unwrap();
+
+        assert_eq!(command.size(), packet.len() - 1);
+        assert!(matches!(command, Command::Noop(_)));
+        assert_eq!(
+            decode_command(&packet[command.size()..]).unwrap(),
+            Command::BatchEnd
+        );
+    }
+
+    #[test]
+    fn skips_edit_buffer_without_consuming_following_commands() {
+        let packet = [
+            vec![opcodes::OP_EDIT_BUFFER, 0, 0, 0, 7, 0, 0, 0, 9, 0, 1],
+            vec![0; 36],
+            vec![0, 0, 0, 3],
+            b"abc".to_vec(),
+            vec![opcodes::OP_BATCH_END],
+        ]
+        .concat();
+        let command = decode_command(&packet).unwrap();
+
+        assert_eq!(command.size(), packet.len() - 1);
+        assert!(matches!(command, Command::Noop(_)));
+        assert_eq!(
+            decode_command(&packet[command.size()..]).unwrap(),
+            Command::BatchEnd
         );
     }
 }
