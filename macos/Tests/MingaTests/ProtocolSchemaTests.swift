@@ -42,12 +42,19 @@ private func parseSchema(_ text: String) throws -> ProtocolSchema {
     for rawLine in text.split(separator: "\n", omittingEmptySubsequences: false) {
         let line = rawLine.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)[0].trimmingCharacters(in: .whitespaces)
         if line.isEmpty { continue }
-        if line == "[[opcodes]]" || line == "[[gui_actions]]" {
+        if line.hasPrefix("[[") && line.hasSuffix("]]") {
             try flush()
-            currentTable = line == "[[opcodes]]" ? "opcodes" : "gui_actions"
+            if line == "[[opcodes]]" {
+                currentTable = "opcodes"
+            } else if line == "[[gui_actions]]" {
+                currentTable = "gui_actions"
+            } else {
+                currentTable = nil
+            }
             current = [:]
             continue
         }
+        if currentTable == nil { continue }
         guard let equals = line.firstIndex(of: "=") else { continue }
         let key = line[..<equals].trimmingCharacters(in: .whitespaces)
         let rawValue = line[line.index(after: equals)...].trimmingCharacters(in: .whitespaces)

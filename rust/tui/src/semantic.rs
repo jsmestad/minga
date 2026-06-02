@@ -1,9 +1,6 @@
 use crate::protocol::{
-    DecodeError,
     command_size::{self, CommandSize},
-    opcodes,
-    semantic_decode,
-    semantic_types,
+    opcodes, semantic_decode, semantic_types, DecodeError,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -575,8 +572,7 @@ fn decode_window_content(bytes: &[u8]) -> Result<Command, DecodeError> {
     for (section_id, payload) in sections {
         match section_id {
             0x01 => {
-                let (header, _) =
-                    semantic_decode::decode_gui_window_content_header(payload, 0)?;
+                let (header, _) = semantic_decode::decode_gui_window_content_header(payload, 0)?;
                 window_id = header.window_id;
                 cursor_row = header.cursor_row;
                 cursor_col = header.cursor_col;
@@ -595,9 +591,11 @@ fn decode_window_content(bytes: &[u8]) -> Result<Command, DecodeError> {
                 }
             }
             0x09 => {
-                let (cl, _) =
-                    semantic_decode::decode_gui_window_content_cursorline(payload, 0)?;
-                cursorline = Some(Cursorline { row: cl.row, bg: cl.bg });
+                let (cl, _) = semantic_decode::decode_gui_window_content_cursorline(payload, 0)?;
+                cursorline = Some(Cursorline {
+                    row: cl.row,
+                    bg: cl.bg,
+                });
             }
             _ => {}
         }

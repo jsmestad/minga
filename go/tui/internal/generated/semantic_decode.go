@@ -92,9 +92,9 @@ func DecodeRect(data []byte, offset int) (Rect, int, error) {
 	height := decodeU16(data, pos)
 	pos += 2
 	return Rect{
-		Row: row,
-		Col: col,
-		Width: width,
+		Row:    row,
+		Col:    col,
+		Width:  width,
 		Height: height,
 	}, pos, nil
 }
@@ -137,13 +137,13 @@ func DecodeSpan(data []byte, offset int) (Span, int, error) {
 	fontID := data[pos]
 	pos++
 	return Span{
-		StartCol: startCol,
-		EndCol: endCol,
-		FG: fg,
-		BG: bg,
-		Attrs: attrs,
+		StartCol:   startCol,
+		EndCol:     endCol,
+		FG:         fg,
+		BG:         bg,
+		Attrs:      attrs,
 		FontWeight: fontWeight,
-		FontID: fontID,
+		FontID:     fontID,
 	}, pos, nil
 }
 
@@ -191,12 +191,12 @@ func DecodeRow(data []byte, offset int) (Row, int, error) {
 		spans = append(spans, item)
 	}
 	return Row{
-		RowType: rowType,
-		RowID: rowID,
-		BufLine: bufLine,
+		RowType:     rowType,
+		RowID:       rowID,
+		BufLine:     bufLine,
 		ContentHash: contentHash,
-		Text: text,
-		Spans: spans,
+		Text:        text,
+		Spans:       spans,
 	}, pos, nil
 }
 
@@ -223,9 +223,9 @@ func DecodeSearchMatch(data []byte, offset int) (SearchMatch, int, error) {
 	isCurrent := data[pos]
 	pos++
 	return SearchMatch{
-		Row: row,
-		StartCol: startCol,
-		EndCol: endCol,
+		Row:       row,
+		StartCol:  startCol,
+		EndCol:    endCol,
 		IsCurrent: isCurrent,
 	}, pos, nil
 }
@@ -260,8 +260,8 @@ func DecodeDiagnosticRange(data []byte, offset int) (DiagnosticRange, int, error
 	return DiagnosticRange{
 		StartRow: startRow,
 		StartCol: startCol,
-		EndRow: endRow,
-		EndCol: endCol,
+		EndRow:   endRow,
+		EndCol:   endCol,
 		Severity: severity,
 	}, pos, nil
 }
@@ -296,9 +296,9 @@ func DecodeDocumentHighlight(data []byte, offset int) (DocumentHighlight, int, e
 	return DocumentHighlight{
 		StartRow: startRow,
 		StartCol: startCol,
-		EndRow: endRow,
-		EndCol: endCol,
-		Kind: kind,
+		EndRow:   endRow,
+		EndCol:   endCol,
+		Kind:     kind,
 	}, pos, nil
 }
 
@@ -329,10 +329,10 @@ func DecodeAnnotation(data []byte, offset int) (Annotation, int, error) {
 		return Annotation{}, offset, err
 	}
 	return Annotation{
-		Row: row,
+		Row:  row,
 		Kind: kind,
-		FG: fg,
-		BG: bg,
+		FG:   fg,
+		BG:   bg,
 		Text: text,
 	}, pos, nil
 }
@@ -356,7 +356,7 @@ func DecodeHitRegion(data []byte, offset int) (HitRegion, int, error) {
 	return HitRegion{
 		Kind: kind,
 		Rect: rect,
-		ID: id,
+		ID:   id,
 	}, pos, nil
 }
 
@@ -383,9 +383,9 @@ func DecodeGutterEntry(data []byte, offset int) (GutterEntry, int, error) {
 	foldEndLine := decodeU32(data, pos)
 	pos += 4
 	return GutterEntry{
-		BufLine: bufLine,
+		BufLine:     bufLine,
 		DisplayType: displayType,
-		SignType: signType,
+		SignType:    signType,
 		FoldEndLine: foldEndLine,
 	}, pos, nil
 }
@@ -412,13 +412,12 @@ func DecodeModelineSegment(data []byte, offset int) (ModelineSegment, int, error
 	attrs := data[pos]
 	pos++
 	return ModelineSegment{
-		Text: text,
-		FG: fg,
-		BG: bg,
+		Text:  text,
+		FG:    fg,
+		BG:    bg,
 		Attrs: attrs,
 	}, pos, nil
 }
-
 
 // Section decoders for gui_gutter
 
@@ -455,12 +454,12 @@ func DecodeGuiGutterWindow(data []byte, offset int) (GuiGutterWindow, int, error
 	contentWidth := decodeU16(data, pos)
 	pos += 2
 	return GuiGutterWindow{
-		WindowID: windowID,
-		ContentRow: contentRow,
-		ContentCol: contentCol,
+		WindowID:      windowID,
+		ContentRow:    contentRow,
+		ContentCol:    contentCol,
 		ContentHeight: contentHeight,
-		IsActive: isActive,
-		ContentWidth: contentWidth,
+		IsActive:      isActive,
+		ContentWidth:  contentWidth,
 	}, pos, nil
 }
 
@@ -487,10 +486,10 @@ func DecodeGuiGutterConfig(data []byte, offset int) (GuiGutterConfig, int, error
 	signColWidth := data[pos]
 	pos++
 	return GuiGutterConfig{
-		CursorLine: cursorLine,
+		CursorLine:      cursorLine,
 		LineNumberStyle: lineNumberStyle,
 		LineNumberWidth: lineNumberWidth,
-		SignColWidth: signColWidth,
+		SignColWidth:    signColWidth,
 	}, pos, nil
 }
 
@@ -537,8 +536,8 @@ func DecodeGuiStatusBarIdentity(data []byte, offset int) (GuiStatusBarIdentity, 
 	pos++
 	return GuiStatusBarIdentity{
 		ContentKind: contentKind,
-		Mode: mode,
-		Flags: flags,
+		Mode:        mode,
+		Flags:       flags,
 	}, pos, nil
 }
 
@@ -560,8 +559,8 @@ func DecodeGuiStatusBarCursor(data []byte, offset int) (GuiStatusBarCursor, int,
 	lineCount := decodeU32(data, pos)
 	pos += 4
 	return GuiStatusBarCursor{
-		Line: line,
-		Col: col,
+		Line:      line,
+		Col:       col,
 		LineCount: lineCount,
 	}, pos, nil
 }
@@ -593,10 +592,10 @@ func DecodeGuiStatusBarDiagnostics(data []byte, offset int) (GuiStatusBarDiagnos
 		return GuiStatusBarDiagnostics{}, offset, err
 	}
 	return GuiStatusBarDiagnostics{
-		Errors: errors,
+		Errors:   errors,
 		Warnings: warnings,
-		Info: info,
-		Hints: hints,
+		Info:     info,
+		Hints:    hints,
 		HintText: hintText,
 	}, pos, nil
 }
@@ -614,7 +613,7 @@ func DecodeGuiStatusBarLanguage(data []byte, offset int) (GuiStatusBarLanguage, 
 	parserStatus := data[pos]
 	pos++
 	return GuiStatusBarLanguage{
-		LSPStatus: lspStatus,
+		LSPStatus:    lspStatus,
 		ParserStatus: parserStatus,
 	}, pos, nil
 }
@@ -641,10 +640,10 @@ func DecodeGuiStatusBarGit(data []byte, offset int) (GuiStatusBarGit, int, error
 	deleted := decodeU16(data, pos)
 	pos += 2
 	return GuiStatusBarGit{
-		Branch: branch,
-		Added: added,
+		Branch:   branch,
+		Added:    added,
 		Modified: modified,
-		Deleted: deleted,
+		Deleted:  deleted,
 	}, pos, nil
 }
 
@@ -668,10 +667,10 @@ func DecodeGuiStatusBarFile(data []byte, offset int) (GuiStatusBarFile, int, err
 		return GuiStatusBarFile{}, offset, err
 	}
 	return GuiStatusBarFile{
-		Icon: icon,
+		Icon:      icon,
 		IconColor: iconColor,
-		Filename: filename,
-		Filetype: filetype,
+		Filename:  filename,
+		Filetype:  filetype,
 	}, pos, nil
 }
 
@@ -752,8 +751,8 @@ func DecodeGuiStatusBarModeline(data []byte, offset int) (GuiStatusBarModeline, 
 		rightSegments = append(rightSegments, item)
 	}
 	return GuiStatusBarModeline{
-		Format: format,
-		LeftSegments: leftSegments,
+		Format:        format,
+		LeftSegments:  leftSegments,
 		RightSegments: rightSegments,
 	}, pos, nil
 }
@@ -827,16 +826,16 @@ func DecodeGuiStatusBarWorkspace(data []byte, offset int) (GuiStatusBarWorkspace
 		return GuiStatusBarWorkspace{}, offset, err
 	}
 	return GuiStatusBarWorkspace{
-		WorkspaceID: workspaceID,
-		Kind: kind,
-		Status: status,
-		Flags: flags,
-		DraftCount: draftCount,
-		ConflictCount: conflictCount,
+		WorkspaceID:            workspaceID,
+		Kind:                   kind,
+		Status:                 status,
+		Flags:                  flags,
+		DraftCount:             draftCount,
+		ConflictCount:          conflictCount,
 		RunningBackgroundCount: runningBackgroundCount,
-		AttentionCount: attentionCount,
-		Label: label,
-		Icon: icon,
+		AttentionCount:         attentionCount,
+		Label:                  label,
+		Icon:                   icon,
 	}, pos, nil
 }
 
@@ -880,12 +879,12 @@ func DecodeGuiWindowContentHeader(data []byte, offset int) (GuiWindowContentHead
 	contentEpoch := decodeU32(data, pos)
 	pos += 4
 	return GuiWindowContentHeader{
-		WindowID: windowID,
-		Flags: flags,
-		CursorRow: cursorRow,
-		CursorCol: cursorCol,
-		CursorShape: cursorShape,
-		ScrollLeft: scrollLeft,
+		WindowID:     windowID,
+		Flags:        flags,
+		CursorRow:    cursorRow,
+		CursorCol:    cursorCol,
+		CursorShape:  cursorShape,
+		ScrollLeft:   scrollLeft,
 		ContentEpoch: contentEpoch,
 	}, pos, nil
 }
@@ -1096,22 +1095,22 @@ func DecodeGuiWindowContentGeometry(data []byte, offset int) (GuiWindowContentGe
 		hitRegions = append(hitRegions, item)
 	}
 	return GuiWindowContentGeometry{
-		WindowID: windowID,
-		TotalRect: totalRect,
-		ContentRect: contentRect,
-		TextRect: textRect,
-		GutterRect: gutterRect,
-		ClipRect: clipRect,
-		ViewportTop: viewportTop,
-		ViewportLeft: viewportLeft,
-		ViewportRows: viewportRows,
-		ViewportCols: viewportCols,
-		ViewportTotalLines: viewportTotalLines,
+		WindowID:                windowID,
+		TotalRect:               totalRect,
+		ContentRect:             contentRect,
+		TextRect:                textRect,
+		GutterRect:              gutterRect,
+		ClipRect:                clipRect,
+		ViewportTop:             viewportTop,
+		ViewportLeft:            viewportLeft,
+		ViewportRows:            viewportRows,
+		ViewportCols:            viewportCols,
+		ViewportTotalLines:      viewportTotalLines,
 		ViewportVisualRowOffset: viewportVisualRowOffset,
 		ViewportTotalVisualRows: viewportTotalVisualRows,
-		LineNumberWidth: lineNumberWidth,
-		SignColWidth: signColWidth,
-		HitRegions: hitRegions,
+		LineNumberWidth:         lineNumberWidth,
+		SignColWidth:            signColWidth,
+		HitRegions:              hitRegions,
 	}, pos, nil
 }
 
@@ -1129,7 +1128,6 @@ func DecodeGuiWindowContentCursorline(data []byte, offset int) (GuiWindowContent
 	pos += 3
 	return GuiWindowContentCursorline{
 		Row: row,
-		BG: bg,
+		BG:  bg,
 	}, pos, nil
 }
-
