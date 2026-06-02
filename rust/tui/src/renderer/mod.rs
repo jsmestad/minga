@@ -10,6 +10,8 @@ use ratatui::widgets::{Block, Borders, Paragraph, Widget, Wrap};
 use std::collections::HashMap;
 use std::io::{self, Write};
 use theme::{SLOT_EDITOR_BG, ThemePalette};
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 #[cfg(test)]
 use theme::{
@@ -1463,19 +1465,27 @@ impl Renderer {
             style.bg = self.default_bg;
         }
 
-        for ch in text.chars() {
+        for grapheme in text.graphemes(true) {
             if col >= max_col {
+                break;
+            }
+
+            let width = grapheme_width(grapheme);
+            if width == 0 {
+                continue;
+            }
+            if col.saturating_add(width) > max_col {
                 break;
             }
 
             if let Some(index) = self.index(col, row) {
                 self.cells[index] = Cell {
-                    text: ch.to_string(),
+                    text: grapheme.to_owned(),
                     style,
                 };
             }
 
-            col = col.saturating_add(char_width(ch));
+            col = col.saturating_add(width);
         }
     }
 
@@ -1682,14 +1692,11 @@ impl Renderer {
 }
 
 fn text_width(text: &str) -> u16 {
-    text.chars()
-        .map(char_width)
-        .fold(0_u16, u16::saturating_add)
+    UnicodeWidthStr::width(text).min(u16::MAX as usize) as u16
 }
 
-fn char_width(ch: char) -> u16 {
-    let _ = ch;
-    1
+fn grapheme_width(grapheme: &str) -> u16 {
+    UnicodeWidthStr::width(grapheme).min(u16::MAX as usize) as u16
 }
 
 fn picker_geometry(width: u16, height: u16) -> (u16, u16, u16, u16) {
@@ -2050,9 +2057,32 @@ fn pad_to_width(text: &str, width: u16) -> String {
 }
 
 fn slice_chars(text: &str, start_col: u16, end_col: u16) -> String {
-    let start = start_col as usize;
-    let len = end_col.saturating_sub(start_col) as usize;
-    text.chars().skip(start).take(len).collect()
+    let mut out = String::new();
+    let mut col = 0_u16;
+
+    for grapheme in text.graphemes(true) {
+        let width = grapheme_width(grapheme);
+        if width == 0 {
+            continue;
+        }
+
+        let next_col = col.saturating_add(width);
+        if next_col <= start_col {
+            col = next_col;
+            continue;
+        }
+        if col >= end_col {
+            break;
+        }
+        if col >= start_col && next_col <= end_col {
+            out.push_str(grapheme);
+        } else {
+            break;
+        }
+        col = next_col;
+    }
+
+    out
 }
 
 #[cfg(test)]
@@ -3139,5 +3169,35 @@ mod tests {
             renderer.cells[renderer.index(0, 9).unwrap()].style.bg,
             0x040506
         );
+    }
+
+    #[test]
+    fn text_helpers_use_display_width_and_grapheme_boundaries() {
+        assert_eq!(text_width("abc"), 3);
+        assert_eq!(text_width("界x"), 3);
+        assert_eq!(text_width("e\u{301}x"), 2);
+
+        assert_eq!(pad_to_width("界x", 2), "界");
+        assert_eq!(pad_to_width("e\u{301}x", 1), "e\u{301}");
+        assert_eq!(slice_chars("界x", 0, 2), "界");
+        assert_eq!(slice_chars("界x", 0, 3), "界x");
+        assert_eq!(slice_chars("e\u{301}x", 0, 1), "e\u{301}");
+    }
+
+    #[test]
+    fn write_run_advances_by_grapheme_display_width() {
+        let mut renderer = Renderer::new(8, 2);
+
+        renderer.write_run(0, 0, "界x", CellStyle::default());
+        assert_eq!(renderer.cells[renderer.index(0, 0).unwrap()].text, "界");
+        assert_eq!(renderer.cells[renderer.index(1, 0).unwrap()].text, " ");
+        assert_eq!(renderer.cells[renderer.index(2, 0).unwrap()].text, "x");
+
+        renderer.write_run(1, 0, "e\u{301}x", CellStyle::default());
+        assert_eq!(
+            renderer.cells[renderer.index(0, 1).unwrap()].text,
+            "e\u{301}"
+        );
+        assert_eq!(renderer.cells[renderer.index(1, 1).unwrap()].text, "x");
     }
 }

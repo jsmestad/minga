@@ -204,6 +204,8 @@ version = "0.1.0"
 dependencies = [
  "libc",
  "ratatui",
+ "unicode-segmentation",
+ "unicode-width",
 ]
 
 [[package]]
