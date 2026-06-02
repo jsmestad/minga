@@ -40,6 +40,7 @@ defmodule Minga.Events do
   | `:command_done`    | `CommandDoneEvent`    | `name: String.t(), exit_code: non_neg_integer()` |
   | `:log_message`     | `LogMessageEvent`     | `text: String.t(), level: :info \| :warning \| :error` |
   | `:agent_hook`      | `AgentHookEvent`        | `event, phase, tool_name, tool_call_id, tool_pattern` |
+  | `:agent_tools_changed` | `AgentToolsChangedEvent` | `source: term()` |
   | `:face_overrides_changed` | `FaceOverridesChangedEvent` | `buffer: pid(), overrides: map()` |
   | `:agent_session_restarted` | `MingaAgent.SessionManager.SessionRestartedEvent` | `session_id, old_pid, new_pid, reason` |
   | `:background_subagent_started` | `MingaAgent.Subagent.Handle` | `session_id: String.t(), pid: pid(), task: String.t()` |
@@ -264,6 +265,14 @@ defmodule Minga.Events do
     @type t :: %__MODULE__{source: GenServer.server(), name: atom(), value: term()}
   end
 
+  defmodule AgentToolsChangedEvent do
+    @moduledoc "Payload for `:agent_tools_changed` events. Published when a source-owned agent tool registry changes."
+    @enforce_keys [:source]
+    defstruct [:source]
+
+    @type t :: %__MODULE__{source: term()}
+  end
+
   defmodule PowerThermalStateEvent do
     @moduledoc "Payload for `:power_thermal_state_changed` events. Published by the native GUI when macOS low power mode or thermal pressure changes."
     @enforce_keys [:low_power?, :thermal_state]
@@ -300,6 +309,7 @@ defmodule Minga.Events do
           | :agent_session_stopped
           | :agent_session_restarted
           | :agent_hook
+          | :agent_tools_changed
           | :background_subagent_started
           | :node_connected
           | :node_disconnected
@@ -332,6 +342,7 @@ defmodule Minga.Events do
           | FaceOverridesChangedEvent.t()
           | LoadUserThemesEvent.t()
           | OptionChangedEvent.t()
+          | AgentToolsChangedEvent.t()
           | PowerThermalStateEvent.t()
           | MingaAgent.SessionManager.SessionStoppedEvent.t()
           | MingaAgent.Subagent.Handle.t()
@@ -470,7 +481,7 @@ defmodule Minga.Events do
   @spec broadcast(:extension_updates_available, Minga.Extension.UpdatesAvailableEvent.t()) :: :ok
   @spec broadcast(:extension_agent_contributions_started, map()) :: :ok
   @spec broadcast(:agent_mcp_servers_changed, map()) :: :ok
-  @spec broadcast(:agent_tools_changed, map()) :: :ok
+  @spec broadcast(:agent_tools_changed, AgentToolsChangedEvent.t()) :: :ok
   def broadcast(topic, payload) when is_atom(topic) and is_map(payload) do
     broadcast(topic, payload, default_registry())
   end

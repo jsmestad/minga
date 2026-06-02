@@ -239,12 +239,9 @@ defmodule MingaAgent.Tool.Registry do
 
   @spec emit_change(atom(), source()) :: :ok
   defp emit_change(@table, source) do
-    Minga.Events.broadcast(:agent_tools_changed, %{source: source})
-    :ok
-  rescue
-    _ -> :ok
-  catch
-    _, _ -> :ok
+    Minga.Events.broadcast(:agent_tools_changed, %Minga.Events.AgentToolsChangedEvent{
+      source: source
+    })
   end
 
   defp emit_change(_table, _source), do: :ok

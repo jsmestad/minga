@@ -48,15 +48,14 @@ defmodule MingaAgent.Tool.ExecutorTest do
 
   defp source_for_test_tool(name) do
     source_for_test_tool(
-      name,
       name in MingaAgent.Tools.builtin_names(),
-      name in BundledSources.reserved_names()
+      BundledSources.reserved_source_for(name)
     )
   end
 
-  defp source_for_test_tool(_name, true, _bundled?), do: :builtin
-  defp source_for_test_tool(_name, false, true), do: BundledSources.read_only_source()
-  defp source_for_test_tool(_name, false, false), do: :config
+  defp source_for_test_tool(true, _reserved), do: :builtin
+  defp source_for_test_tool(false, {:ok, source}), do: source
+  defp source_for_test_tool(false, :error), do: :config
 
   describe "execute/3" do
     test "executes auto-approved tool and returns result", %{table: table} do

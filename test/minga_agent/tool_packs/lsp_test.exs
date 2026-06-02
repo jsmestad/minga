@@ -128,6 +128,39 @@ defmodule MingaAgent.ToolPacks.LSPTest do
     end
   end
 
+  test "registration failure rolls back partially registered LSP specs", %{table: table} do
+    existing_definition = conflicting_definition_spec()
+    :ets.insert(table, {"definition", existing_definition})
+
+    assert {:error, {:duplicate_tool_name, "definition", :config, {:bundle, :lsp_tools}}} =
+             LSP.register(table)
+
+    assert {:ok, ^existing_definition} = Registry.lookup(table, "definition")
+    assert :error = Registry.lookup(table, "diagnostics")
+    assert :error = Registry.lookup(table, "references")
+  end
+
+  test "startup failure reports the LSP pack registration reason", %{table: table} do
+    existing_definition = conflicting_definition_spec()
+    :ets.insert(table, {"definition", existing_definition})
+
+    name = :"#{table}_failing_lsp_pack"
+
+    previous_trap_exit = Process.flag(:trap_exit, true)
+
+    try do
+      assert {:error,
+              {:lsp_tool_pack_registration_failed, ^table,
+               {:duplicate_tool_name, "definition", :config, {:bundle, :lsp_tools}}}} =
+               LSP.start_link(name: name, registry: table)
+    after
+      Process.flag(:trap_exit, previous_trap_exit)
+    end
+
+    assert {:ok, ^existing_definition} = Registry.lookup(table, "definition")
+    assert :error = Registry.lookup(table, "diagnostics")
+  end
+
   test "read-only LSP tools execute automatically through pack specs", %{table: table} do
     root = Path.join(System.tmp_dir!(), "minga-lsp-pack-#{System.unique_integer([:positive])}")
     File.rm_rf!(root)
@@ -236,9 +269,49 @@ defmodule MingaAgent.ToolPacks.LSPTest do
     refute "code_actions" in names
   end
 
+  test "read-only filtering is preserved after LSP source reload" do
+    LSP.register()
+
+    {:ok, provider} =
+      Native.start_link(
+        subscriber: self(),
+        model: "anthropic:claude-sonnet-4-20250514",
+        project_root: System.tmp_dir!(),
+        config: %AgentConfig{},
+        read_only?: true,
+        skip_api_key_env: true
+      )
+
+    assert_provider_tool(provider, "definition")
+    refute_provider_tool(provider, "rename")
+    refute_provider_tool(provider, "code_actions")
+
+    assert :ok = Registry.unregister_source(LSP.source())
+    :sys.get_state(provider)
+    refute_provider_tool(provider, "definition")
+    refute_provider_tool(provider, "rename")
+    refute_provider_tool(provider, "code_actions")
+
+    assert :ok = LSP.register()
+    :sys.get_state(provider)
+    assert_provider_tool(provider, "definition")
+    refute_provider_tool(provider, "rename")
+    refute_provider_tool(provider, "code_actions")
+  end
+
   defp lsp_position_args("document_symbols"), do: %{"path" => "lib/foo.ex"}
 
   defp lsp_position_args(_name), do: %{"path" => "lib/foo.ex", "line" => 0, "column" => 0}
+
+  defp conflicting_definition_spec do
+    Spec.new!(
+      source: :config,
+      name: "definition",
+      description: "Pre-existing definition",
+      parameter_schema: %{},
+      callback: fn _args -> {:ok, "existing"} end
+    )
+  end
 
   defp provider_tool_names(provider) do
     provider

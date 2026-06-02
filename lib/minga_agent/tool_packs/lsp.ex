@@ -45,11 +45,14 @@ defmodule MingaAgent.ToolPacks.LSP do
   end
 
   @impl true
-  @spec init(keyword()) :: {:ok, atom()}
+  @spec init(keyword()) :: {:ok, atom()} | {:stop, term()}
   def init(opts) do
     registry = Keyword.get(opts, :registry, Registry)
-    :ok = register(registry)
-    {:ok, registry}
+
+    case register(registry) do
+      :ok -> {:ok, registry}
+      {:error, reason} -> {:stop, {:lsp_tool_pack_registration_failed, registry, reason}}
+    end
   end
 
   @doc "Returns source-owned specs for every bundled LSP tool."
@@ -62,12 +65,60 @@ defmodule MingaAgent.ToolPacks.LSP do
   @doc "Registers all bundled LSP specs into a registry table or service."
   @spec register(atom()) :: :ok | {:error, term()}
   def register(table \\ Registry) when is_atom(table) do
-    Enum.reduce_while(specs(), :ok, fn spec, :ok ->
+    previous_specs = current_pack_name_specs(table)
+
+    case register_specs(table, specs()) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        restore_pack_name_specs(table, previous_specs)
+        {:error, reason}
+    end
+  end
+
+  @spec register_specs(atom(), [Spec.t()]) :: :ok | {:error, term()}
+  defp register_specs(table, specs) do
+    Enum.reduce_while(specs, :ok, fn spec, :ok ->
       case Registry.register(table, spec) do
         :ok -> {:cont, :ok}
         {:error, reason} -> {:halt, {:error, reason}}
       end
     end)
+  end
+
+  @spec current_pack_name_specs(atom()) :: [Spec.t()]
+  defp current_pack_name_specs(table) do
+    tool_names()
+    |> Enum.flat_map(fn name ->
+      case Registry.lookup(table, name) do
+        {:ok, spec} -> [spec]
+        :error -> []
+      end
+    end)
+  end
+
+  @spec restore_pack_name_specs(atom(), [Spec.t()]) :: :ok
+  defp restore_pack_name_specs(table, previous_specs) do
+    Registry.unregister_source(table, source())
+    Enum.each(previous_specs, fn spec -> restore_previous_spec(table, spec) end)
+    :ok
+  end
+
+  @spec restore_previous_spec(atom(), Spec.t()) :: :ok
+  defp restore_previous_spec(table, spec) do
+    case Registry.register(table, spec) do
+      :ok -> :ok
+      {:error, _reason} -> restore_previous_spec_direct(table, spec)
+    end
+  end
+
+  @spec restore_previous_spec_direct(atom(), Spec.t()) :: :ok
+  defp restore_previous_spec_direct(table, spec) do
+    :ets.insert(table, {spec.name, spec})
+    :ok
+  rescue
+    ArgumentError -> :ok
   end
 
   @spec spec_for!(String.t()) :: Spec.t()
