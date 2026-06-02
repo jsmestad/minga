@@ -271,7 +271,8 @@ defmodule Minga.Config.Options do
     {:linebreak, :boolean, true, "Whether wrapped lines break at word boundaries when possible."},
     {:breakindent, :boolean, true,
      "Whether wrapped line continuations align with the original indentation."},
-    {:agent_provider, {:enum, [:auto, :native]}, :auto, "Agent provider backend selection."},
+    {:agent_provider, {:enum, [:auto, :native]}, :auto,
+     "Agent provider backend selection. Accepts :auto, :native, or a registered provider id string."},
     {:agent_model, :string_or_nil, nil, "Default model used by new agent sessions."},
     {:agent_tool_approval, {:enum, [:destructive, :all, :none]}, :destructive,
      "When agent tool calls require user approval."},
@@ -985,6 +986,14 @@ defmodule Minga.Config.Options do
 
   defp validate_type({:enum, _allowed}, :agent_provider, :pi_rpc) do
     {:error, "agent_provider no longer supports :pi_rpc. Use :native instead."}
+  end
+
+  defp validate_type({:enum, _allowed}, :agent_provider, value) when is_binary(value) do
+    if String.trim(value) == "" do
+      {:error, "agent_provider provider id must be a non-empty string"}
+    else
+      :ok
+    end
   end
 
   defp validate_type({:enum, allowed}, name, value) when is_atom(value) do

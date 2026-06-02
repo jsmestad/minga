@@ -240,7 +240,7 @@ The practical rule: **prefer the entry-point module when one exists**, because i
 
 Minga uses three namespaces that enforce dependency direction: `Minga.*` (Layer 0), `MingaAgent.*` (Layer 1), `MingaEditor.*` (Layer 2). Dependencies flow downward only. A credo check enforces this at compile time. See `docs/ARCHITECTURE.md` for the full rationale.
 
-MingaAgent also has internal Agent Level 0/1/2 rules from epic #2075. Agent Level 0 contains pure contracts, value types, and safety interfaces; Agent Level 1 contains runtime services, source-owned registries, credentials, approval, `ToolRouter`, changesets, buffer forks, and edit boundaries; Agent Level 2 contains bundled integrations, adapters, and agent presentation surfaces. `Minga.Credo.DependencyDirectionCheck` enforces that Agent Level 0 cannot depend on Levels 1 or 2 and Agent Level 1 cannot depend on Level 2. See `docs/ARCHITECTURE.md#mingaagent-internal-levels` for the current module classification.
+MingaAgent also has internal Agent Level 0/1/2 rules from epic #2075. Agent Level 0 contains pure contracts, value types, provider specs, tool specs, and safety interfaces; Agent Level 1 contains runtime services, source-owned registries such as `MingaAgent.ProviderRegistry`, `MingaAgent.Tool.Context`, credentials, approval, `ToolRouter`, changesets, buffer forks, edit boundaries, and extension callback code leases; Agent Level 2 contains bundled integrations, adapters, and agent presentation surfaces. `Minga.Credo.DependencyDirectionCheck` enforces that Agent Level 0 cannot depend on Levels 1 or 2 and Agent Level 1 cannot depend on Level 2. See `docs/ARCHITECTURE.md#mingaagent-internal-levels` for the current module classification.
 
 #### Layer 0: `lib/minga/` (Minga.*)
 
@@ -268,7 +268,8 @@ MingaAgent also has internal Agent Level 0/1/2 rules from epic #2075. Agent Leve
 |-----------|------------|------------------|
 | (root) | `MingaAgent.Runtime` | Public API facade for external clients |
 | `session*.ex` | `MingaAgent.SessionManager` | Agent session lifecycle, metadata |
-| `tool/` | `MingaAgent.Tool.Registry` | Tool specs, ETS registry, executor with advice integration |
+| `provider_registry.ex` | `MingaAgent.ProviderRegistry` | Source-owned provider declarations, duplicate checks, enable/disable state |
+| `tool/` | `MingaAgent.Tool.Registry` | Source-owned tool specs, `Tool.Context`, executor with advice integration |
 | `tools/` | (none) | Individual tool implementations (read_file, write_file, shell, etc.) |
 | `gateway/` | `MingaAgent.Gateway.Server` | WebSocket + JSON-RPC API gateway (Bandit/WebSock) |
 | `introspection.ex` | `MingaAgent.Introspection` | Runtime self-description for external clients |
@@ -848,8 +849,12 @@ If a doc reads like a dry API reference with no narrative, it needs a rewrite. T
 3. Verify the new module sits in the correct layer (Rule 1): pure logic in Layer 0, stateful services in Layer 1, presentation in Layer 2
 4. Verify struct mutations follow Rule 2: updates go through the owning module
 
-### Dual-surface rule for status/chrome features
-Any new modeline data (diagnostic counts, indent info, selection size, etc.) must appear in **both** the cell-painted TUI modeline (`Chrome.TUI`) and the GUI status bar (`ProtocolGUI.encode_gui_status_bar/1`). The GUI status bar opcode (0x76) uses structured data with explicit fields, so adding new data means extending the wire format in `docs/PROTOCOL.md` and updating `gui_protocol_test.exs`. Design the GUI status bar fields first, then map them into TUI modeline cells. Forgetting to update one surface is a common mistake.
+### Semantic UI first for shared visible chrome
+Shared visible chrome (status bar, tab bar, file tree, picker, popups, agent surfaces, panels, and similar) is delivered as a **Semantic UI** model, not as pre-encoded protocol binaries or cell draws. The canonical path is: build a `Minga.RenderModel.UI.*` semantic struct in a builder under `lib/minga_editor/render_model/ui/`, then encode it with a `Minga.Frontend.Adapter.GUI` encoder under `lib/minga/frontend/adapter/gui/`. The guardrail in `test/minga/render_model/guardrails_test.exs` enforces this: a `Minga.RenderModel.UI.*` struct must not carry a protocol-binary payload field (`:encoded`, `:cmd`, `*_encoded`, `*_cmd`, etc.), and a builder under `lib/minga_editor/render_model/` must not reference `MingaEditor.Frontend.Protocol.GUI`. Both allowlists are empty; keep them empty.
+
+Do **not** add new shared chrome through `ProtocolGUI.encode_gui_*`, `Minga.RenderModel.UI.CellLayer`, `DisplayList`, or another compatibility layer. The remaining `ProtocolGUI.encode_gui_*` functions exist only as byte-for-byte parity oracles for protocol tests; `CellLayer`/`DisplayList` feed only the legacy zig cell-grid TUI and are slated for removal on zig retirement.
+
+When adding chrome data (diagnostic counts, indent info, selection size, etc.), design the semantic model fields first, extend the wire format in `docs/PROTOCOL.md` / `docs/GUI_PROTOCOL.md`, update the adapter encoder and `gui_protocol_test.exs`, then ensure each frontend that should display it decodes and renders the new fields. The cell-painted zig TUI modeline (`Chrome.TUI`) consumes the same model through the TUI adapter. Cross-frontend coverage (macOS SwiftUI, Rust TUI, Charm/Go TUI) is tracked in the Semantic UI inventory (#2113); forgetting to update a frontend is a common mistake.
 
 ### New command
 1. Add the command to the appropriate `Commands.*` sub-module's `__commands__/0` (implements `Minga.Command.Provider` behaviour). Include name, description, `requires_buffer` flag, and execute function. If no existing sub-module fits, create a new one and add it to the `@command_modules` list in `Minga.Command.Registry`.

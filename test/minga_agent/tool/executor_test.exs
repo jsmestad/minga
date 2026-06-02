@@ -4,6 +4,7 @@ defmodule MingaAgent.Tool.ExecutorTest do
   alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.Hooks.Hook
   alias MingaAgent.Hooks.Result
+  alias MingaAgent.Tool.Context
   alias MingaAgent.Tool.Executor
   alias MingaAgent.Tool.Registry
   alias MingaAgent.Tool.Spec
@@ -28,9 +29,11 @@ defmodule MingaAgent.Tool.ExecutorTest do
   defp register_tool(table, name, opts) do
     callback = Keyword.get(opts, :callback, fn _args -> {:ok, "success"} end)
     approval = Keyword.get(opts, :approval_level, :auto)
+    source = Keyword.get(opts, :source, source_for_test_tool(name))
 
     spec =
       Spec.new!(
+        source: source,
         name: name,
         description: "Test tool: #{name}",
         parameter_schema: %{},
@@ -38,8 +41,12 @@ defmodule MingaAgent.Tool.ExecutorTest do
         approval_level: approval
       )
 
-    Registry.register(table, spec)
+    assert :ok = Registry.register(table, spec)
     spec
+  end
+
+  defp source_for_test_tool(name) do
+    if name in MingaAgent.Tools.builtin_names(), do: :builtin, else: :config
   end
 
   describe "execute/3" do
@@ -145,6 +152,96 @@ defmodule MingaAgent.Tool.ExecutorTest do
 
       assert message =~ "blocked by policy"
       refute_received :callback_ran
+    end
+  end
+
+  describe "context-bound execution" do
+    test "context-free built-in specs execute without ToolContext", %{table: table} do
+      spec = Enum.find(MingaAgent.Tools.builtin_specs(), &(&1.name == "describe_runtime"))
+      assert spec.context_requirements == []
+      assert :ok = Registry.register(table, spec)
+
+      assert {:ok, result} = Executor.execute("describe_runtime", %{}, table)
+      assert result =~ "Minga Runtime"
+    end
+
+    test "mutating context-bound tools refuse without ToolContext before build runs", %{
+      table: table
+    } do
+      parent = self()
+
+      spec =
+        Spec.new!(
+          source: :config,
+          name: "context_write",
+          description: "Context write",
+          parameter_schema: %{},
+          category: :filesystem,
+          approval_level: :auto,
+          capabilities: [:mutate_project],
+          context_requirements: [:tool_context],
+          build: fn context ->
+            send(parent, {:built, context})
+            fn _args -> {:ok, "wrote"} end
+          end
+        )
+
+      assert :ok = Registry.register(table, spec)
+
+      assert {:error, {:missing_tool_context, "context_write", [:tool_context]}} =
+               Executor.execute("context_write", %{}, table)
+
+      refute_receive {:built, _}
+    end
+
+    test "approved mutating tools still require ToolContext", %{table: table} do
+      spec =
+        Spec.new!(
+          source: :config,
+          name: "approved_context_write",
+          description: "Context write",
+          parameter_schema: %{},
+          category: :filesystem,
+          approval_level: :ask,
+          capabilities: [:mutate_project],
+          context_requirements: [:tool_context],
+          build: fn _context -> fn _args -> {:ok, "wrote"} end end
+        )
+
+      assert :ok = Registry.register(table, spec)
+
+      assert {:error, {:missing_tool_context, "approved_context_write", [:tool_context]}} =
+               Executor.execute_approved(spec, %{})
+    end
+
+    test "context-bound build receives ToolContext and executes with args", %{table: table} do
+      parent = self()
+
+      spec =
+        Spec.new!(
+          source: :config,
+          name: "context_echo",
+          description: "Context echo",
+          parameter_schema: %{},
+          context_requirements: [:tool_context],
+          build: fn context ->
+            send(parent, {:built, context})
+            fn args -> {:ok, {context.project_root, args}} end
+          end
+        )
+
+      assert :ok = Registry.register(table, spec)
+
+      context =
+        Context.new(
+          project_root: "/tmp/context-root",
+          router_context: MingaAgent.ToolRouter.context(nil, nil)
+        )
+
+      assert {:ok, {"/tmp/context-root", %{"x" => 1}}} =
+               Executor.execute("context_echo", %{"x" => 1}, table, :exec, tool_context: context)
+
+      assert_received {:built, ^context}
     end
   end
 

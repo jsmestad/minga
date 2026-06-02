@@ -222,8 +222,4 @@ defmodule MingaEditor.Frontend do
   def clipboard_write(port, text, pasteboard \\ :general) do
     send_commands(port, [ProtocolGUI.encode_clipboard_write(text, pasteboard)])
   end
-
-  @doc "Encodes a GUI minibuffer command from minibuffer data."
-  @spec encode_gui_minibuffer(map()) :: binary()
-  defdelegate encode_gui_minibuffer(data), to: ProtocolGUI
 end

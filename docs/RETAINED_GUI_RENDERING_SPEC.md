@@ -6,9 +6,17 @@ The rendering pipeline has too many parts, too many lines of code, and is unnece
 
 The rendering simplification now has three completed foundations and one active cleanup track. First, GUI buffer windows use `Minga.RenderModel.Window` with BEAM-authored row IDs, content epochs, and Swift atlas reuse keyed by stable row identity instead of display row. Second, production TUI command building routes through `Minga.RenderModel`: buffer windows use the shared TUI window adapter, and remaining cell-grid chrome is narrowed into `Minga.RenderModel.UI.CellLayer` compatibility data instead of being read from `DisplayList.Frame` during emit. Third, retained GUI deltas are implemented for overlays, viewport snapshots, and row snapshots with `window_id + content_epoch` guards and full-frame recovery after an un-applied delta.
 
-The active cleanup track is semantic GUI chrome. The first waves are complete: status bar, tab bar, workspaces, sidebars, file tree, picker, minibuffer, completion, signature help, hover popup, float popup, extension overlay, extension panel, and observatory now use core semantic render models, and `Minga.Frontend.Adapter.GUI.*` owns their wire encoding. Byte-for-byte parity tests keep the native GUI protocol stable while the legacy `ProtocolGUI.encode_gui_*` wrappers remain as temporary compatibility debt. The remaining semantic-model debt is now concentrated in agent-heavy surfaces, board, and final `ProtocolGUI` cleanup.
+The BEAM-side semantic GUI chrome migration is complete. All shared visible chrome, including the agent-heavy surfaces (`agent_chat`, `bottom_panel`, `change_summary`, `edit_timeline`, `board`) and `agent_context`, now builds a semantic core render model and is encoded by `Minga.Frontend.Adapter.GUI.*`. The executable guardrail in `test/minga/render_model/guardrails_test.exs` now enforces this with **empty** allowlists that pass: no `Minga.RenderModel.UI.*` struct carries a protocol-binary payload field, and no builder under `lib/minga_editor/render_model/` references `MingaEditor.Frontend.Protocol.GUI`. The remaining `ProtocolGUI.encode_gui_*` functions persist only as byte-for-byte parity oracles for protocol tests and are not on any production render path.
 
-The remediation plan below is the source of truth for completing the remaining simplification work and keeping retained GUI deltas aligned with the semantic model boundary.
+The remaining work is **not** BEAM-side. It is per-frontend semantic coverage, tracked by the cross-frontend inventory in #2113:
+
+- **macOS SwiftUI/Metal** decodes and renders all shared chrome semantically (two views, `ExtensionOverlayView` and `ExtensionPanelView`, decode but are not yet mounted).
+- **Charm/Go TUI** is an early spike that renders ~9 of the shared-chrome components; the rest are tracked by #2100.
+- **Rust TUI** renders status bar, tab bar, and file tree semantically; the rest are unimplemented and tracked by a dedicated Rust parity epic.
+
+The **zig/libvaxis TUI** remains the default terminal frontend and is a cell-grid renderer. `Minga.RenderModel.UI.CellLayer` and `DisplayList` exist to feed that cell-grid path; they are a zig-TUI adapter detail, not steady-state shared-chrome compatibility, and are slated for removal once a semantic TUI (Rust or Charm) becomes the default and zig is retired. The GUI render path never builds a `CellLayer`.
+
+The remediation plan below records the original simplification work. Treat the status summary above as the current source of truth where the two disagree.
 
 ## Remediation plan
 
@@ -115,7 +123,7 @@ Already semantic or mostly semantic:
 - `notifications`
 - `search_state`
 - `git_status`
-- `agent_context` (semantic model, but `agent_context_builder` still has a tracked legacy `MingaEditor.Frontend.Protocol.GUI` type dependency)
+- `agent_context` (semantic model; the former `agent_context_builder` dependency on `MingaEditor.Frontend.Protocol.GUI` has been removed)
 - `status_bar`
 - `tab_bar`
 - `workspaces`
@@ -133,7 +141,7 @@ Already semantic or mostly semantic:
 - `gutter_separator`
 - `split_separators`
 
-Still pre-encoded and must be replaced:
+Migrated since this plan was written (now semantic, encoded by `Minga.Frontend.Adapter.GUI.*`, verified by the empty guardrail allowlists in `test/minga/render_model/guardrails_test.exs`):
 
 - `agent_chat`
 - `bottom_panel`
@@ -549,7 +557,8 @@ The old phase labels are now historical. They helped sequence the first implemen
 - **Top-level frame model:** GUI adaptation works from `%Minga.RenderModel{}` rather than independently threading windows, UI, cursor, title, and background as separate render truths.
 - **GUI window model:** Buffer windows use `Minga.RenderModel.Window` rows, spans, overlays, gutters, cursorline, selections, search matches, diagnostics, highlights, annotations, row IDs, and content epochs.
 - **Stable row identity:** Full-frame GUI content carries BEAM-authored `row_id` values. Swift keys retained row resources by `window_id + row_id`, with `content_epoch + content_hash` as the invalidation hash.
-- **TUI render-model closure:** Production TUI emit builds commands from `Minga.RenderModel`. Buffer windows use the shared TUI window adapter, and remaining cell-grid chrome is isolated in `Minga.RenderModel.UI.CellLayer` compatibility data.
+- **TUI render-model closure:** Production TUI emit builds commands from `Minga.RenderModel`. Buffer windows use the shared TUI window adapter. The remaining cell-grid chrome is isolated in `Minga.RenderModel.UI.CellLayer`, which feeds only the default zig/libvaxis cell-grid renderer; it is a zig-TUI adapter detail bound for removal on zig retirement, not a shared-chrome compatibility layer. The semantic TUIs (Rust, Charm) decode the semantic chrome opcodes directly.
+- **Semantic non-agent chrome:** see the consolidated status at the top of this document; the BEAM-side migration is complete for all chrome, agent surfaces included.
 - **Retained GUI deltas:** `gui_window_overlay_delta` (0xA0), `gui_window_viewport_delta` (0xA1), and `gui_window_rows_delta` (0xA2) carry `window_id + content_epoch`. Swift ignores stale deltas, drops retained state when referenced rows are missing, and BEAM follows failed row or viewport deltas with full 0x80 recovery frames.
 - **Semantic non-agent chrome:** Status bar, tab bar, workspaces, sidebars, file tree, picker, minibuffer, completion, signature help, hover popup, float popup, extension overlay, extension panel, and observatory now use semantic core render models. `Minga.Frontend.Adapter.GUI.*` owns their wire encoding, with byte-for-byte parity tests against the legacy protocol helpers.
 
@@ -573,7 +582,7 @@ Already semantic or mostly semantic:
 - `notifications`
 - `search_state`
 - `git_status`
-- `agent_context` (semantic model, but `agent_context_builder` still has a tracked legacy `MingaEditor.Frontend.Protocol.GUI` type dependency)
+- `agent_context` (semantic model; the former `agent_context_builder` dependency on `MingaEditor.Frontend.Protocol.GUI` has been removed)
 - `status_bar`
 - `tab_bar`
 - `workspaces`
@@ -591,7 +600,7 @@ Already semantic or mostly semantic:
 - `gutter_separator`
 - `split_separators`
 
-Still pre-encoded and must be replaced:
+Migrated since this plan was written (now semantic, encoded by `Minga.Frontend.Adapter.GUI.*`, verified by the empty guardrail allowlists in `test/minga/render_model/guardrails_test.exs`):
 
 - `agent_chat`
 - `bottom_panel`

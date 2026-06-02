@@ -108,6 +108,7 @@ defmodule Minga.Config.OptionsTest do
 
       assert {:ok, :auto} = Options.set(s, :agent_provider, :auto)
       assert {:ok, :native} = Options.set(s, :agent_provider, :native)
+      assert {:ok, "demo"} = Options.set(s, :agent_provider, "demo")
       assert {:ok, :editor} = Options.set(s, :startup_view, :editor)
       assert {:ok, :agent} = Options.set(s, :startup_view, :agent)
       assert {:ok, false} = Options.set(s, :agent_auto_context, false)
@@ -118,6 +119,11 @@ defmodule Minga.Config.OptionsTest do
       assert {:error, msg} = Options.set(s, :agent_provider, :pi_rpc)
       assert msg =~ "agent_provider no longer supports :pi_rpc"
       assert msg =~ "Use :native instead"
+    end
+
+    test "agent_provider rejects blank provider ids", %{server: s} do
+      assert {:error, msg} = Options.set(s, :agent_provider, "")
+      assert msg =~ "non-empty string"
     end
   end
 

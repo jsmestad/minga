@@ -34,7 +34,9 @@ defmodule MingaAgent.Hooks.Hook do
           command: String.t() | nil,
           module: module() | nil,
           function: atom() | nil,
-          timeout_ms: pos_integer()
+          timeout_ms: pos_integer(),
+          extension_source: atom() | nil,
+          extension_module: module() | nil
         }
 
   @enforce_keys [:event]
@@ -44,6 +46,8 @@ defmodule MingaAgent.Hooks.Hook do
     :command,
     :module,
     :function,
+    :extension_source,
+    :extension_module,
     type: :shell,
     timeout_ms: @default_timeout_ms
   ]
@@ -66,7 +70,9 @@ defmodule MingaAgent.Hooks.Hook do
          {:ok, type} <- normalize_type(raw),
          {:ok, tool_pattern} <- normalize_tool_pattern(raw, event),
          {:ok, command, mod, fun} <- normalize_type_fields(raw, type),
-         {:ok, timeout_ms} <- normalize_timeout(fetch(raw, :timeout_ms)) do
+         {:ok, timeout_ms} <- normalize_timeout(fetch(raw, :timeout_ms)),
+         {:ok, extension_source} <- normalize_optional_atom(fetch(raw, :extension_source)),
+         {:ok, extension_module} <- normalize_optional_atom(fetch(raw, :extension_module)) do
       {:ok,
        %__MODULE__{
          event: event,
@@ -75,7 +81,9 @@ defmodule MingaAgent.Hooks.Hook do
          command: command,
          module: mod,
          function: fun,
-         timeout_ms: timeout_ms
+         timeout_ms: timeout_ms,
+         extension_source: extension_source,
+         extension_module: extension_module
        }}
     end
   end
@@ -243,6 +251,13 @@ defmodule MingaAgent.Hooks.Hook do
 
   defp normalize_timeout(value),
     do: {:error, "agent hook timeout_ms must be a positive integer, got: #{inspect(value)}"}
+
+  @spec normalize_optional_atom(term()) :: {:ok, atom() | nil} | {:error, String.t()}
+  defp normalize_optional_atom(nil), do: {:ok, nil}
+  defp normalize_optional_atom(value) when is_atom(value), do: {:ok, value}
+
+  defp normalize_optional_atom(value),
+    do: {:error, "agent hook extension metadata must be an atom, got: #{inspect(value)}"}
 
   @spec normalize_non_empty_string(term(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
   defp normalize_non_empty_string(value, error) when is_binary(value) do

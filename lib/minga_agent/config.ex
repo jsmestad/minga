@@ -89,7 +89,7 @@ defmodule MingaAgent.Config do
   ]
 
   @type t :: %__MODULE__{
-          provider: :auto | :native,
+          provider: :auto | :native | String.t(),
           model: String.t(),
           models: [String.t()],
           max_tokens: pos_integer(),
@@ -214,7 +214,7 @@ defmodule MingaAgent.Config do
 
   Safe to call before Config is running (catches exits).
   """
-  @spec resolve_provider() :: :auto | :native
+  @spec resolve_provider() :: :auto | :native | String.t()
   def resolve_provider do
     get(:agent_provider, :auto)
   end

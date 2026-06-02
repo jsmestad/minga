@@ -5,6 +5,7 @@ defmodule MingaAgent.Tools.Subagent do
   Foreground sub-agents keep the historical blocking behavior: the tool call waits for the child to finish and returns the final assistant text. Background sub-agents are registered with `MingaAgent.SessionManager`, return a stable session handle immediately, and keep the child chat alive for later inspection.
   """
 
+  alias MingaAgent.ProviderResolver
   alias MingaAgent.Session
   alias MingaAgent.SessionManager
   alias MingaAgent.Subagent.Handle
@@ -18,7 +19,12 @@ defmodule MingaAgent.Tools.Subagent do
   @type parent_context :: SubagentContext.t()
 
   @typedoc "Resolved provider for a child session."
-  @type resolved_provider :: %{module: module(), name: String.t()}
+  @type resolved_provider :: %{
+          module: module(),
+          name: String.t(),
+          id: String.t(),
+          source: Minga.Extension.ContributionCleanup.contribution_source()
+        }
 
   @typedoc "Options for subagent execution."
   @type opts :: [
@@ -56,12 +62,16 @@ defmodule MingaAgent.Tools.Subagent do
     parent_session = Keyword.get(opts, :parent_session)
     model = Keyword.get(opts, :model)
 
-    case SessionManager.start_background_subagent(manager, parent_session, task,
-           session_opts: session_opts(opts),
-           model: model
-         ) do
-      {:ok, %Handle{} = handle} ->
-        {:ok, background_result(handle)}
+    with {:ok, session_opts} <- session_opts(opts),
+         {:ok, %Handle{} = handle} <-
+           SessionManager.start_background_subagent(manager, parent_session, task,
+             session_opts: session_opts,
+             model: model
+           ) do
+      {:ok, background_result(handle)}
+    else
+      {:error, {:provider_resolution_failed, reason}} ->
+        {:error, "Failed to resolve subagent provider: #{reason}"}
 
       {:error, reason} ->
         {:error, "Failed to start background subagent: #{inspect(reason)}"}
@@ -70,9 +80,12 @@ defmodule MingaAgent.Tools.Subagent do
 
   @spec start_foreground(String.t(), opts()) :: {:ok, String.t()} | {:error, String.t()}
   defp start_foreground(task, opts) do
-    case AgentSupervisor.start_session(session_opts(opts)) do
-      {:ok, session_pid} ->
-        run_subagent(session_pid, task)
+    with {:ok, session_opts} <- session_opts(opts),
+         {:ok, session_pid} <- AgentSupervisor.start_session(session_opts) do
+      run_subagent(session_pid, task)
+    else
+      {:error, {:provider_resolution_failed, reason}} ->
+        {:error, "Failed to resolve subagent provider: #{reason}"}
 
       {:error, reason} ->
         {:error, "Failed to start subagent: #{inspect(reason)}"}
@@ -159,7 +172,8 @@ defmodule MingaAgent.Tools.Subagent do
 
   # ── Session opts (shared by foreground and background) ─────────────────────
 
-  @spec session_opts(opts()) :: keyword()
+  @spec session_opts(opts()) ::
+          {:ok, keyword()} | {:error, {:provider_resolution_failed, String.t()}}
   defp session_opts(opts) do
     parent_ctx = parent_context(opts)
 
@@ -174,34 +188,36 @@ defmodule MingaAgent.Tools.Subagent do
         active_skill_names = parent_ctx.active_skill_names
         extra_provider_opts = Keyword.get(opts, :provider_opts, [])
 
-        [
-          provider: resolved_provider.module,
-          model_name: model || "unknown",
-          startup_notice:
-            startup_notice(
-              Keyword.get(opts, :provider),
-              Keyword.get(opts, :model),
-              resolved_provider,
-              model
-            ),
-          provider_opts:
-            build_provider_opts(
-              project_root,
-              resolved_provider.name,
-              model,
-              thinking_level,
-              active_skill_names,
-              extra_provider_opts
-            )
-        ]
-        |> maybe_put_thinking_level(thinking_level)
-        |> maybe_put_notifier(opts)
+        session_opts =
+          [
+            provider: resolved_provider.module,
+            provider_id: resolved_provider.id,
+            provider_source: resolved_provider.source,
+            model_name: model || "unknown",
+            startup_notice:
+              startup_notice(
+                Keyword.get(opts, :provider),
+                Keyword.get(opts, :model),
+                resolved_provider,
+                model
+              ),
+            provider_opts:
+              build_provider_opts(
+                project_root,
+                resolved_provider.name,
+                model,
+                thinking_level,
+                active_skill_names,
+                extra_provider_opts
+              )
+          ]
+          |> maybe_put_thinking_level(thinking_level)
+          |> maybe_put_notifier(opts)
+
+        {:ok, session_opts}
 
       {:error, reason} ->
-        # Fall back to a minimal opts that will produce a clear error at session start.
-        # This path is unlikely since resolve_provider only fails for unknown string overrides.
-        Minga.Log.warning(:agent, "[Subagent] provider resolution failed: #{reason}")
-        [provider: MingaAgent.Providers.Native, model_name: "unknown", provider_opts: []]
+        {:error, {:provider_resolution_failed, reason}}
     end
   end
 
@@ -257,23 +273,43 @@ defmodule MingaAgent.Tools.Subagent do
   @spec resolve_provider(provider_override(), parent_context()) ::
           {:ok, resolved_provider()} | {:error, String.t()}
   defp resolve_provider(nil, parent_context) do
-    {:ok, %{module: parent_context.provider_module, name: parent_context.provider_name}}
+    {:ok,
+     %{
+       module: parent_context.provider_module,
+       name: parent_context.provider_name,
+       id: parent_context.provider_id,
+       source: parent_context.provider_source
+     }}
   end
 
   defp resolve_provider(:native, _parent_context) do
-    {:ok, %{module: MingaAgent.Providers.Native, name: "native"}}
+    {:ok, %{module: MingaAgent.Providers.Native, name: "native", id: "native", source: :builtin}}
   end
 
   defp resolve_provider(:pi_rpc, _parent_context) do
-    {:ok, %{module: MingaAgent.Providers.PiRpc, name: "pi_rpc"}}
+    {:ok, %{module: MingaAgent.Providers.PiRpc, name: "pi_rpc", id: "pi_rpc", source: :config}}
   end
 
   defp resolve_provider(provider, _parent_context) when is_atom(provider) do
-    {:ok, %{module: provider, name: inspect(provider)}}
+    {:ok, %{module: provider, name: inspect(provider), id: inspect(provider), source: :config}}
   end
 
   defp resolve_provider("native", parent_context), do: resolve_provider(:native, parent_context)
   defp resolve_provider("pi_rpc", parent_context), do: resolve_provider(:pi_rpc, parent_context)
+
+  defp resolve_provider(provider, _parent_context) when is_binary(provider) do
+    resolved = ProviderResolver.resolve(provider)
+
+    {:ok,
+     %{
+       module: resolved.module,
+       name: resolved.name,
+       id: resolved.id,
+       source: resolved.source
+     }}
+  rescue
+    e -> {:error, Exception.message(e)}
+  end
 
   defp resolve_provider(provider, _parent_context) do
     {:error, "Unknown subagent provider override: #{inspect(provider)}"}
