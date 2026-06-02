@@ -1,14 +1,18 @@
 package ui
 
 import (
+	"bytes"
+	"runtime"
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/cellbuf"
 	"github.com/jsmestad/minga/go/tui/internal/generated"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
+	zone "github.com/lrstanley/bubblezone"
 )
 
 func TestFooterOverlayPrioritizesPickerOverCompletionWhichKeyAndMinibuffer(t *testing.T) {
@@ -94,7 +98,8 @@ func TestWidePickerPreviewRendersBesideList(t *testing.T) {
 func TestApplyWindowDeltaResolvesRefsAndReplacesRowSnapshot(t *testing.T) {
 	model := New(80, 24, nil)
 	model.putWindow(protocol.WindowContent{
-		ID: 7,
+		ID:           7,
+		ContentEpoch: 2,
 		Rows: []protocol.WindowRow{
 			{ID: 1, ContentHash: 11, Text: "old one"},
 			{ID: 2, ContentHash: 22, Text: "old two"},
@@ -120,6 +125,36 @@ func TestApplyWindowDeltaResolvesRefsAndReplacesRowSnapshot(t *testing.T) {
 	}
 }
 
+func TestApplyWindowDeltaInvalidatesMissingRetainedRowRef(t *testing.T) {
+	model := New(80, 24, nil)
+	model.putWindow(protocol.WindowContent{ID: 7, ContentEpoch: 2, Rows: []protocol.WindowRow{{ID: 1, ContentHash: 11, Text: "old one"}}})
+	model.putWindow(protocol.WindowContent{ID: 8, ContentEpoch: 3, Rows: []protocol.WindowRow{{Text: "other"}}})
+
+	model.applyWindowDelta(protocol.WindowContent{ID: 7, ContentEpoch: 2, Rows: []protocol.WindowRow{{Ref: true, ID: 99, ContentHash: 99}}})
+
+	if _, ok := model.windows[7]; ok {
+		t.Fatalf("window with missing retained row ref should be invalidated: %+v", model.windows[7])
+	}
+	if len(model.windowOrder) != 1 || model.windowOrder[0] != 8 {
+		t.Fatalf("window order should drop invalidated window: %+v", model.windowOrder)
+	}
+}
+
+func TestApplyWindowDeltaInvalidatesHashMismatchedRetainedRowRef(t *testing.T) {
+	model := New(80, 24, nil)
+	model.putWindow(protocol.WindowContent{ID: 7, ContentEpoch: 2, Rows: []protocol.WindowRow{{ID: 1, ContentHash: 11, Text: "old one"}}})
+	model.putWindow(protocol.WindowContent{ID: 8, ContentEpoch: 3, Rows: []protocol.WindowRow{{Text: "other"}}})
+
+	model.applyWindowDelta(protocol.WindowContent{ID: 7, ContentEpoch: 2, Rows: []protocol.WindowRow{{Ref: true, ID: 1, ContentHash: 99}}})
+
+	if _, ok := model.windows[7]; ok {
+		t.Fatalf("window with hash-mismatched retained row ref should be invalidated: %+v", model.windows[7])
+	}
+	if len(model.windowOrder) != 1 || model.windowOrder[0] != 8 {
+		t.Fatalf("window order should drop invalidated window: %+v", model.windowOrder)
+	}
+}
+
 func TestCursorShapeSequenceTracksProtocolShape(t *testing.T) {
 	model := New(80, 24, nil)
 	model.cursorShape = 1
@@ -134,23 +169,35 @@ func TestCursorShapeSequenceTracksProtocolShape(t *testing.T) {
 
 func TestThemeCommandUpdatesModelPalette(t *testing.T) {
 	model := New(20, 4, nil)
-	_ = model.applyCommands([]protocol.Command{{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiTheme, Theme: protocol.Theme{Colors: map[byte]uint32{themeEditorBG: 0x010203, themePopupSelBG: 0x112233}}}}})
+	_ = model.applyCommands([]protocol.Command{{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiTheme, Theme: protocol.Theme{Colors: map[byte]uint32{themeEditorBG: 0x010203, themeSelectionBG: 0x112233}}}}})
 
 	if got := model.activePalette.colors[themeEditorBG]; got != 0x010203 {
 		t.Fatalf("editor background slot = 0x%06X, want 0x010203", got)
 	}
-	if got := model.activePalette.colors[themePopupSelBG]; got != 0x112233 {
+	if got := model.activePalette.colors[themeSelectionBG]; got != 0x112233 {
 		t.Fatalf("selection slot = 0x%06X, want 0x112233", got)
 	}
 }
 
 func TestSemanticWindowUsesThemeForSelectionOverlay(t *testing.T) {
 	model := New(20, 4, nil)
-	model.activePalette = paletteFromTheme(protocol.Theme{Colors: map[byte]uint32{themePopupSelBG: 0x112233}})
+	model.activePalette = paletteFromTheme(protocol.Theme{Colors: map[byte]uint32{themeSelectionBG: 0x112233}})
 	style := model.applyWindowOverlays(lipgloss.NewStyle(), protocol.WindowContent{Selection: protocol.Selection{Type: 1, StartRow: 0, StartCol: 1, EndRow: 0, EndCol: 3}}, 0, 1)
 
 	if style.GetBackground() != model.palette().Selection() {
 		t.Fatalf("selection overlay should use theme selection color")
+	}
+}
+
+func TestSemanticWindowUsesKindSpecificDocumentHighlightTheme(t *testing.T) {
+	model := New(20, 4, nil)
+	model.activePalette = paletteFromTheme(protocol.Theme{Colors: map[byte]uint32{themeHighlightReadBG: 0x223344, themeHighlightWriteBG: 0x334455, themeSelectionBG: 0x445566}})
+	readStyle := model.applyWindowOverlays(lipgloss.NewStyle(), protocol.WindowContent{Highlights: []protocol.DocumentHighlight{{Kind: 2, StartRow: 0, StartCol: 0, EndRow: 0, EndCol: 1}}}, 0, 0)
+	writeStyle := model.applyWindowOverlays(lipgloss.NewStyle(), protocol.WindowContent{Highlights: []protocol.DocumentHighlight{{Kind: 3, StartRow: 0, StartCol: 0, EndRow: 0, EndCol: 1}}}, 0, 0)
+	textStyle := model.applyWindowOverlays(lipgloss.NewStyle(), protocol.WindowContent{Highlights: []protocol.DocumentHighlight{{Kind: 1, StartRow: 0, StartCol: 0, EndRow: 0, EndCol: 1}}}, 0, 0)
+
+	if readStyle.GetBackground() != lipgloss.Color("#223344") || writeStyle.GetBackground() != lipgloss.Color("#334455") || textStyle.GetBackground() != lipgloss.Color("#445566") {
+		t.Fatalf("document highlight colors should be kind-specific: read=%v write=%v text=%v", readStyle.GetBackground(), writeStyle.GetBackground(), textStyle.GetBackground())
 	}
 }
 
@@ -211,15 +258,110 @@ func TestOverlayLinesRenderRemainingSemanticSurfaces(t *testing.T) {
 
 func TestSplitSeparatorsRenderOnContent(t *testing.T) {
 	model := New(24, 6, nil)
-	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiSplitSeparators: {Splits: protocol.SplitSeparators{Verticals: []protocol.VerticalSeparator{{Col: 2, StartRow: 0, EndRow: 1}}, Horizontals: []protocol.HorizontalSeparator{{Row: 1, Col: 0, Width: 16, Filename: "main.ex"}}}}}
-	styled := "\x1b[1mabcd\x1b[0m"
-	lines := model.withSplitSeparators([]string{styled, "efghijklmnop"})
-	joined := ansi.Strip(strings.Join(lines, "\n"))
-	if !strings.Contains(joined, "│") || !strings.Contains(joined, "main.ex") {
-		t.Fatalf("split separators not rendered: %q", joined)
+	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiSplitSeparators: {Splits: protocol.SplitSeparators{Verticals: []protocol.VerticalSeparator{{Col: 2, StartRow: 1, EndRow: 1}}}}}
+	lines := model.withSplitSeparators([]string{"\x1b[1mabcd\x1b[0m", "efgh"})
+	if !strings.Contains(lines[0], "│") {
+		t.Fatalf("vertical replacement should render on visible content: %q", lines[0])
 	}
-	if !strings.Contains(lines[0], "\x1b[") || !strings.Contains(lines[0], "\x1b[1md") {
-		t.Fatalf("vertical replacement should preserve and resume existing ANSI styling: %q", lines[0])
+	if !strings.Contains(lines[0], "\x1b[1md") {
+		t.Fatalf("vertical replacement should resume existing ANSI styling after separator: %q", lines[0])
+	}
+}
+
+func TestSplitSeparatorsRenderOnBlankRow(t *testing.T) {
+	model := New(24, 6, nil)
+	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiSplitSeparators: {Splits: protocol.SplitSeparators{Horizontals: []protocol.HorizontalSeparator{{Row: 1, Col: 0, Width: 16, Filename: "main.ex"}}}}}
+	lines := model.withSplitSeparators([]string{"", ""})
+	if !strings.Contains(ansi.Strip(lines[0]), "main.ex") || !strings.Contains(ansi.Strip(lines[0]), "─") {
+		t.Fatalf("horizontal separator should render on blank row: %q", lines[0])
+	}
+}
+
+func TestSplitSeparatorsNormalizeAgainstHeaderAndFileTree(t *testing.T) {
+	model := New(80, 6, nil)
+	model.title = "Header"
+	model.chrome = map[byte]protocol.ChromePayload{
+		generated.OPGuiFileTree: {Tree: protocol.FileTree{Visible: true, Width: 24, Rows: []protocol.FileTreeRow{{ID: "row-0", Name: "row-0"}}}},
+		generated.OPGuiSplitSeparators: {Splits: protocol.SplitSeparators{
+			Verticals:   []protocol.VerticalSeparator{{Col: 24, StartRow: 1, EndRow: 2}},
+			Horizontals: []protocol.HorizontalSeparator{{Row: 2, Col: 24, Width: 2}},
+		}},
+	}
+	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "body-0"}, {Text: "body-1"}, {Text: "body-2"}}})
+	model.viewport.SetContent(model.content())
+
+	lines := strings.Split(ansi.Strip(model.View()), "\n")
+	if len(lines) < 3 {
+		t.Fatalf("unexpected view lines: %+v", lines)
+	}
+	if got := strings.Index(lines[1], "│"); got != 24 {
+		t.Fatalf("vertical separator should land at visible column 24 after normalization, got %d in %q", got, lines[1])
+	}
+	if got := strings.Index(lines[2], "─"); got != 24 {
+		t.Fatalf("horizontal separator should land at visible column 24 after normalization, got %d in %q", got, lines[2])
+	}
+}
+
+func TestFileTreeWidthRespectsProtocolGeometryAndSafetyClamp(t *testing.T) {
+	if got := fileTreeWidth(80, protocol.FileTree{Width: 18}); got != 18 {
+		t.Fatalf("file tree width = %d, want narrow protocol width 18", got)
+	}
+	if got := fileTreeWidth(80, protocol.FileTree{Width: 36}); got != 36 {
+		t.Fatalf("file tree width = %d, want protocol width 36", got)
+	}
+	if got := fileTreeWidth(80, protocol.FileTree{Width: 120}); got != 79 {
+		t.Fatalf("file tree width = %d, want terminal clamp 79", got)
+	}
+}
+
+func TestFileTreeReservesVisibleEmptyState(t *testing.T) {
+	model := New(80, 6, nil)
+	model.title = "Header"
+	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: protocol.FileTree{Visible: true, Status: 2, Width: 18, Root: "/repo"}}}
+	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "pane"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 1, Col: 18, Width: 8, Height: 1}}})
+	model.viewport.SetContent(model.content())
+
+	lines := strings.Split(ansi.Strip(model.View()), "\n")
+	if len(lines) < 3 {
+		t.Fatalf("visible empty file tree should render reserved sidebar: %+v", lines)
+	}
+	if !strings.Contains(lines[2], "No files") {
+		t.Fatalf("empty file tree should render status row: %q", lines[2])
+	}
+	if got := strings.Index(lines[1], "pane"); got != 18 {
+		t.Fatalf("empty file tree should reserve protocol width, got pane at %d in %q", got, lines[1])
+	}
+}
+
+func TestSemanticWindowsRespectProtocolFileTreeWidth(t *testing.T) {
+	model := New(80, 6, nil)
+	model.title = "Header"
+	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: protocol.FileTree{Visible: true, Width: 36, Rows: []protocol.FileTreeRow{{ID: "row-0", Name: "row-0"}}}}}
+	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "pane"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 1, Col: 36, Width: 8, Height: 1}}})
+	model.viewport.SetContent(model.content())
+
+	lines := strings.Split(ansi.Strip(model.View()), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("semantic window should render with file tree width alignment: %+v", lines)
+	}
+	if got := strings.Index(lines[1], "pane"); got != 36 {
+		t.Fatalf("file tree width should follow protocol geometry without a gap, got %d in %q", got, lines[1])
+	}
+}
+
+func TestApplyWindowDeltaAppliesScrollLeftSetAndCropsRendering(t *testing.T) {
+	model := New(20, 6, nil)
+	model.putWindow(protocol.WindowContent{ID: 7, ContentEpoch: 9, ScrollLeft: 0, Rows: []protocol.WindowRow{{Text: "abcdef"}}})
+
+	model.applyWindowDelta(protocol.WindowContent{ID: 7, ContentEpoch: 9, ScrollLeftSet: true, ScrollLeft: 2})
+
+	window := model.windows[7]
+	if window.ScrollLeft != 2 {
+		t.Fatalf("scroll left should update from matching-epoch delta, got %d", window.ScrollLeft)
+	}
+	rendered := ansi.Strip(model.renderSemanticContentRow(window, 0, 4))
+	if !strings.HasPrefix(rendered, "cdef") {
+		t.Fatalf("cropped rendering should start at the updated scroll offset, got %q", rendered)
 	}
 }
 
@@ -330,4 +472,180 @@ func TestCellbufStyleMapsProtocolAttrs(t *testing.T) {
 	if style.UlStyle != cellbuf.SingleUnderline {
 		t.Fatalf("underline style = %v, want single underline", style.UlStyle)
 	}
+}
+
+func TestSemanticWindowsUsePaneGeometryRects(t *testing.T) {
+	model := New(24, 6, nil)
+	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "left"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 1, Col: 0, Width: 10, Height: 1}}})
+	model.putWindow(protocol.WindowContent{ID: 2, Rows: []protocol.WindowRow{{Text: "right"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 1, Col: 12, Width: 10, Height: 1}}})
+
+	lines := ansi.Strip(strings.Join(model.semanticLines(), "\n"))
+	first := strings.Split(lines, "\n")[0]
+	if !strings.Contains(first, "left") || !strings.Contains(first, "right") {
+		t.Fatalf("semantic windows should compose into a body canvas: %q", first)
+	}
+	if got := strings.Index(first, "right"); got != 12 {
+		t.Fatalf("right window should start at column 12, got %d in %q", got, first)
+	}
+}
+
+func TestSemanticWindowsRespectHeaderRowOffset(t *testing.T) {
+	model := New(24, 6, nil)
+	model.title = "Header"
+	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "pane"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 1, Col: 0, Width: 8, Height: 1}}})
+	model.viewport.SetContent(model.content())
+
+	lines := strings.Split(ansi.Strip(model.View()), "\n")
+	if len(lines) < 2 || !strings.Contains(lines[1], "pane") {
+		t.Fatalf("semantic window should render on first body row after header: %+v", lines)
+	}
+}
+
+func TestSemanticWindowsRespectFileTreeOffset(t *testing.T) {
+	model := New(80, 6, nil)
+	model.title = "Header"
+	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: protocol.FileTree{Visible: true, Width: 24, Rows: []protocol.FileTreeRow{{ID: "row-0", Name: "row-0"}}}}}
+	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "pane"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 1, Col: 24, Width: 8, Height: 1}}})
+	model.viewport.SetContent(model.content())
+
+	lines := strings.Split(ansi.Strip(model.View()), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("semantic window should render with file tree offset: %+v", lines)
+	}
+	if got := strings.Index(lines[1], "pane"); got != 24 {
+		t.Fatalf("file tree offset should leave pane at column 24, got %d in %q", got, lines[1])
+	}
+}
+
+func TestSemanticWindowsRespectSidebarOffset(t *testing.T) {
+	model := New(80, 6, nil)
+	model.title = "Header"
+	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiSidebars: {Sidebars: protocol.Sidebars{Visible: true, Items: []protocol.Sidebar{{ID: "files", DisplayName: "Files", SemanticKind: "file_tree", PreferredWidth: 18, Visible: true}}}}}
+	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "pane"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 1, Col: 18, Width: 8, Height: 1}}})
+	model.viewport.SetContent(model.content())
+
+	lines := strings.Split(ansi.Strip(model.View()), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("semantic window should render with sidebar offset: %+v", lines)
+	}
+	if got := strings.Index(lines[1], "pane"); got != 18 {
+		t.Fatalf("sidebar offset should leave pane at column 18, got %d in %q", got, lines[1])
+	}
+}
+
+func TestSemanticRowsRespectScrollLeftAndIndentGuides(t *testing.T) {
+	model := New(12, 6, nil)
+	model.indentGuides[7] = protocol.IndentGuides{WindowID: 7, TabWidth: 2, GuideCols: []uint16{2}}
+	window := protocol.WindowContent{ID: 7, ScrollLeft: 2, Rows: []protocol.WindowRow{{Text: "    x"}}}
+
+	rendered := ansi.Strip(model.renderSemanticContentRow(window, 0, 8))
+	if !strings.HasPrefix(rendered, "│ ") || !strings.Contains(rendered, "x") {
+		t.Fatalf("scroll-left rendering should keep display-column guides aligned: %q", rendered)
+	}
+}
+
+func TestOverlayDeltaPreservesExistingScrollLeft(t *testing.T) {
+	model := New(20, 6, nil)
+	model.putWindow(protocol.WindowContent{ID: 7, ContentEpoch: 9, ScrollLeft: 4, Rows: []protocol.WindowRow{{Text: "hello"}}})
+
+	model.applyWindowDelta(protocol.WindowContent{ID: 7, ContentEpoch: 9, CursorRow: 1, CursorCol: 2, CursorShape: 1, Cursorline: protocol.Cursorline{Visible: true, Row: 0, BG: 0x123456}})
+
+	window := model.windows[7]
+	if window.ScrollLeft != 4 {
+		t.Fatalf("overlay delta should preserve scroll left, got %d", window.ScrollLeft)
+	}
+}
+
+func TestDeltaForMissingWindowIsIgnored(t *testing.T) {
+	model := New(20, 6, nil)
+	model.applyWindowDelta(protocol.WindowContent{ID: 99, ContentEpoch: 1, CursorRow: 1, CursorCol: 2, CursorShape: 1})
+
+	if len(model.windows) != 0 {
+		t.Fatalf("missing window delta should be ignored, got %+v", model.windows)
+	}
+}
+
+func TestStaleContentEpochDeltaIsIgnored(t *testing.T) {
+	model := New(20, 6, nil)
+	model.putWindow(protocol.WindowContent{ID: 7, ContentEpoch: 9, ScrollLeft: 4, CursorRow: 3, CursorCol: 4, CursorShape: 1, Rows: []protocol.WindowRow{{Text: "hello"}}})
+
+	model.applyWindowDelta(protocol.WindowContent{ID: 7, ContentEpoch: 8, CursorRow: 1, CursorCol: 2, CursorShape: 2, ScrollLeft: 0, Rows: []protocol.WindowRow{{Text: "changed"}}})
+
+	window := model.windows[7]
+	if window.ContentEpoch != 9 || window.CursorRow != 3 || window.CursorCol != 4 || window.CursorShape != 1 || window.ScrollLeft != 4 || window.Rows[0].Text != "hello" {
+		t.Fatalf("stale delta should be ignored, got %+v", window)
+	}
+}
+
+func TestSemanticDeltaClearsStaleOverlaysAndCursorline(t *testing.T) {
+	model := New(20, 6, nil)
+	model.putWindow(protocol.WindowContent{
+		ID:             7,
+		ContentEpoch:   4,
+		Cursorline:     protocol.Cursorline{Visible: true, Row: 0, BG: 0x123456},
+		Selection:      protocol.Selection{Type: 1, StartRow: 0, StartCol: 0, EndRow: 0, EndCol: 1},
+		SearchSet:      true,
+		SearchMatches:  []protocol.SearchMatch{{Row: 0, StartCol: 0, EndCol: 1, Current: true}},
+		DiagnosticsSet: true,
+		Diagnostics:    []protocol.DiagnosticRange{{StartRow: 0, StartCol: 0, EndRow: 0, EndCol: 1, Severity: 0}},
+		HighlightsSet:  true,
+		Highlights:     []protocol.DocumentHighlight{{StartRow: 0, StartCol: 0, EndRow: 0, EndCol: 1, Kind: 2}},
+		AnnotationsSet: true,
+		Annotations:    []protocol.LineAnnotation{{Row: 0, Kind: 1, Text: "note"}},
+		Rows:           []protocol.WindowRow{{Text: "hello"}},
+	})
+
+	before := model.applyWindowOverlays(lipgloss.NewStyle(), model.windows[7], 0, 0)
+	model.applyWindowDelta(protocol.WindowContent{ID: 7, ContentEpoch: 4, Cursorline: protocol.Cursorline{}, SelectionSet: true, Selection: protocol.Selection{}, SearchSet: true, SearchMatches: []protocol.SearchMatch{}, DiagnosticsSet: true, Diagnostics: []protocol.DiagnosticRange{}, HighlightsSet: true, Highlights: []protocol.DocumentHighlight{}, AnnotationsSet: true, Annotations: []protocol.LineAnnotation{}})
+	window := model.windows[7]
+	if window.Cursorline.Visible || window.Selection.Type != 0 || len(window.SearchMatches) != 0 || len(window.Diagnostics) != 0 || len(window.Highlights) != 0 || len(window.Annotations) != 0 {
+		t.Fatalf("stale overlay state should be cleared by empty deltas: %+v", window)
+	}
+	if got := strings.TrimSpace(model.renderRowAnnotations(window, 0)); got != "" {
+		t.Fatalf("annotations should no longer render after clear: %q", got)
+	}
+	after := model.applyWindowOverlays(lipgloss.NewStyle(), window, 0, 0)
+	if before.GetBackground() == after.GetBackground() {
+		t.Fatalf("selection/highlight overlays should stop affecting rendering after clear: before=%v after=%v", before.GetBackground(), after.GetBackground())
+	}
+}
+
+func TestSemanticMouseRoutesModelineAndFileTreeZones(t *testing.T) {
+	model := New(60, 12, nil)
+	model.chrome = map[byte]protocol.ChromePayload{
+		generated.OPGuiStatusBar: {Status: protocol.StatusBar{Left: []protocol.StatusSegment{{Text: " save ", Command: "save"}}, Right: []protocol.StatusSegment{{Text: " quit", Command: "quit"}}}},
+		generated.OPGuiFileTree:  {Tree: protocol.FileTree{Visible: true, Width: 24, Rows: []protocol.FileTreeRow{{ID: "row-0", Name: "row-0"}, {ID: "row-1", Name: "row-1"}}}},
+	}
+	model.viewport.SetContent(model.content())
+	_ = model.View()
+
+	saveZone := waitForZone(t, model, zoneIDModelineCommand("save"))
+	cmd, ok := model.semanticMousePacket(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: saveZone.StartX + 1, Y: saveZone.StartY})
+	if !ok || !bytes.Equal(cmd, protocol.EncodeGUIExecuteCommand("save")) {
+		t.Fatalf("modeline click should route execute command, ok=%v packet=%v", ok, cmd)
+	}
+	if _, ok := model.semanticMousePacket(tea.MouseMsg{Button: tea.MouseButtonRight, Action: tea.MouseActionPress, X: saveZone.StartX + 1, Y: saveZone.StartY}); ok {
+		t.Fatalf("non-left clicks should fall back")
+	}
+
+	rowZone := waitForZone(t, model, zoneIDFileTreeRow(0))
+	cmd, ok = model.semanticMousePacket(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: rowZone.StartX + 1, Y: rowZone.StartY})
+	if !ok || !bytes.Equal(cmd, protocol.EncodeGUIFileTreeClick(0)) {
+		t.Fatalf("file-tree click should route file-tree packet, ok=%v packet=%v", ok, cmd)
+	}
+	if _, ok := model.semanticMousePacket(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: rowZone.EndX + 10, Y: rowZone.EndY + 10}); ok {
+		t.Fatalf("out-of-bounds clicks should fall back")
+	}
+}
+
+func waitForZone(t *testing.T, model Model, id string) *zone.ZoneInfo {
+	t.Helper()
+	for i := 0; i < 1000; i++ {
+		if info := model.zones.Get(id); info != nil {
+			return info
+		}
+		runtime.Gosched()
+	}
+	t.Fatalf("zone %q was not registered", id)
+	return nil
 }

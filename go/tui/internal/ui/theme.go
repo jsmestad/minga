@@ -8,34 +8,37 @@ import (
 )
 
 const (
-	themeEditorBG        byte = 0x01
-	themeEditorFG        byte = 0x02
-	themeTreeBG          byte = 0x03
-	themeTreeFG          byte = 0x04
-	themeTreeSelectBG    byte = 0x05
-	themeTreeHeaderBG    byte = 0x08
-	themeTreeHeaderFG    byte = 0x09
-	themeTabBG           byte = 0x10
-	themeTabActiveBG     byte = 0x11
-	themeTabActiveFG     byte = 0x12
-	themeTabInactiveFG   byte = 0x13
-	themeTabModifiedFG   byte = 0x14
-	themeTabAttentionFG  byte = 0x17
-	themePopupBG         byte = 0x20
-	themePopupFG         byte = 0x21
-	themePopupBorder     byte = 0x22
-	themePopupSelBG      byte = 0x23
-	themePopupSelFG      byte = 0x2A
-	themeBreadcrumbBG    byte = 0x27
-	themeModelineBG      byte = 0x30
-	themeModelineFG      byte = 0x31
-	themeAccent          byte = 0x40
-	themeGutterFG        byte = 0x50
-	themeGutterCurrentFG byte = 0x51
-	themeDiagnosticError byte = 0x52
-	themeWarningFG       byte = 0x53
-	themeDiagnosticInfo  byte = 0x54
-	themeDiagnosticHint  byte = 0x55
+	themeEditorBG         byte = 0x01
+	themeEditorFG         byte = 0x02
+	themeTreeBG           byte = 0x03
+	themeTreeFG           byte = 0x04
+	themeTreeSelectBG     byte = 0x05
+	themeTreeHeaderBG     byte = 0x08
+	themeTreeHeaderFG     byte = 0x09
+	themeTabBG            byte = 0x10
+	themeTabActiveBG      byte = 0x11
+	themeTabActiveFG      byte = 0x12
+	themeTabInactiveFG    byte = 0x13
+	themeTabModifiedFG    byte = 0x14
+	themeTabAttentionFG   byte = 0x17
+	themePopupBG          byte = 0x20
+	themePopupFG          byte = 0x21
+	themePopupBorder      byte = 0x22
+	themePopupSelBG       byte = 0x23
+	themePopupSelFG       byte = 0x2A
+	themeBreadcrumbBG     byte = 0x27
+	themeHighlightReadBG  byte = 0x59
+	themeHighlightWriteBG byte = 0x5A
+	themeSelectionBG      byte = 0x5B
+	themeModelineBG       byte = 0x30
+	themeModelineFG       byte = 0x31
+	themeAccent           byte = 0x40
+	themeGutterFG         byte = 0x50
+	themeGutterCurrentFG  byte = 0x51
+	themeDiagnosticError  byte = 0x52
+	themeWarningFG        byte = 0x53
+	themeDiagnosticInfo   byte = 0x54
+	themeDiagnosticHint   byte = 0x55
 )
 
 type palette struct {
@@ -44,34 +47,37 @@ type palette struct {
 
 func defaultPalette() palette {
 	return palette{colors: map[byte]uint32{
-		themeEditorBG:        0x282C34,
-		themeEditorFG:        0xBBC2CF,
-		themeTreeBG:          0x21242B,
-		themeTreeFG:          0xBBC2CF,
-		themeTreeSelectBG:    0x3E4451,
-		themeTreeHeaderBG:    0x282C34,
-		themeTreeHeaderFG:    0xBBC2CF,
-		themeTabBG:           0x282C34,
-		themeTabActiveBG:     0x3E4451,
-		themeTabActiveFG:     0xFFFFFF,
-		themeTabInactiveFG:   0x5B6268,
-		themeTabModifiedFG:   0xFF6C6B,
-		themeTabAttentionFG:  0xECBE7B,
-		themePopupBG:         0x21242B,
-		themePopupFG:         0xBBC2CF,
-		themePopupBorder:     0x5B6268,
-		themePopupSelBG:      0x3E4451,
-		themePopupSelFG:      0xFFFFFF,
-		themeBreadcrumbBG:    0x21242B,
-		themeModelineBG:      0x22252D,
-		themeModelineFG:      0xBBC2CF,
-		themeAccent:          0x51AFEF,
-		themeGutterFG:        0x5B6268,
-		themeGutterCurrentFG: 0xBBC2CF,
-		themeDiagnosticError: 0xFF6C6B,
-		themeWarningFG:       0xECBE7B,
-		themeDiagnosticInfo:  0x51AFEF,
-		themeDiagnosticHint:  0x98BE65,
+		themeEditorBG:         0x282C34,
+		themeEditorFG:         0xBBC2CF,
+		themeTreeBG:           0x21242B,
+		themeTreeFG:           0xBBC2CF,
+		themeTreeSelectBG:     0x3E4451,
+		themeTreeHeaderBG:     0x282C34,
+		themeTreeHeaderFG:     0xBBC2CF,
+		themeTabBG:            0x282C34,
+		themeTabActiveBG:      0x3E4451,
+		themeTabActiveFG:      0xFFFFFF,
+		themeTabInactiveFG:    0x5B6268,
+		themeTabModifiedFG:    0xFF6C6B,
+		themeTabAttentionFG:   0xECBE7B,
+		themePopupBG:          0x21242B,
+		themePopupFG:          0xBBC2CF,
+		themePopupBorder:      0x5B6268,
+		themePopupSelBG:       0x3E4451,
+		themePopupSelFG:       0xFFFFFF,
+		themeBreadcrumbBG:     0x21242B,
+		themeModelineBG:       0x22252D,
+		themeModelineFG:       0xBBC2CF,
+		themeAccent:           0x51AFEF,
+		themeGutterFG:         0x5B6268,
+		themeGutterCurrentFG:  0xBBC2CF,
+		themeDiagnosticError:  0xFF6C6B,
+		themeWarningFG:        0xECBE7B,
+		themeDiagnosticInfo:   0x51AFEF,
+		themeDiagnosticHint:   0x98BE65,
+		themeHighlightReadBG:  0x3A3F4B,
+		themeHighlightWriteBG: 0x4A3F2B,
+		themeSelectionBG:      0x264F78,
 	}}
 }
 
@@ -112,7 +118,7 @@ func (p palette) Accent() lipgloss.TerminalColor {
 }
 
 func (p palette) Selection() lipgloss.TerminalColor {
-	return p.slot(themePopupSelBG)
+	return p.slot(themeSelectionBG)
 }
 
 func (p palette) SelectionText() lipgloss.TerminalColor {
@@ -126,8 +132,15 @@ func (p palette) SearchMatch(current bool) lipgloss.TerminalColor {
 	return p.slot(themeBreadcrumbBG)
 }
 
-func (p palette) DocumentHighlight() lipgloss.TerminalColor {
-	return p.slot(themePopupBorder)
+func (p palette) DocumentHighlight(kind byte) lipgloss.TerminalColor {
+	switch kind {
+	case 3:
+		return p.slot(themeHighlightWriteBG)
+	case 2:
+		return p.slot(themeHighlightReadBG)
+	default:
+		return p.slot(themeSelectionBG)
+	}
 }
 
 func (p palette) Diagnostic(severity byte) lipgloss.TerminalColor {

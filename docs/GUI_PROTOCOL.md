@@ -1153,6 +1153,9 @@ Mode color slots fall back to `modeline.bar_fg` / `modeline.bar_bg` when a mode 
 | 0x56 | git_added_fg | `git.added_fg` | Git added sign color |
 | 0x57 | git_modified_fg | `git.modified_fg` | Git modified sign color |
 | 0x58 | git_deleted_fg | `git.deleted_fg` | Git deleted sign color |
+| 0x59 | highlight_read_bg | `editor.highlight_read_bg` | Document highlight background for read references |
+| 0x5A | highlight_write_bg | `editor.highlight_write_bg` | Document highlight background for write references |
+| 0x5B | selection_bg | `editor.selection_bg` | Selection background and text highlight fallback |
 | 0x62 | gutter_fold_fg | `gutter.fold_fg` | Fold indicator color |
 
 ## Forward-Compatibility: Skip-Length for Unknown Opcodes

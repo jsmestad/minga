@@ -97,6 +97,7 @@ type WindowContent struct {
 	CursorCol      uint16
 	CursorShape    byte
 	ScrollLeft     uint16
+	ScrollLeftSet  bool
 	ContentEpoch   uint32
 	Cursorline     Cursorline
 	Selection      Selection
@@ -345,11 +346,12 @@ func decodeWindowHeader(opcode byte, section []byte, window *WindowContent) {
 		window.CursorCol = u16(section, 5)
 		window.CursorShape = section[7]
 		window.ScrollLeft = u16(section, 8)
+		window.ScrollLeftSet = true
 		window.ContentEpoch = u32(section, 10)
 		return
 	}
 
-	if len(section) < 15 {
+	if len(section) < 14 {
 		return
 	}
 	window.ID = u16(section, 0)
@@ -358,6 +360,7 @@ func decodeWindowHeader(opcode byte, section []byte, window *WindowContent) {
 	window.CursorCol = u16(section, 9)
 	window.CursorShape = section[11]
 	window.ScrollLeft = u16(section, 12)
+	window.ScrollLeftSet = true
 }
 
 func decodeCursorline(section []byte, window *WindowContent) {

@@ -3,8 +3,6 @@ package ui
 import (
 	"fmt"
 	"net/url"
-	"strconv"
-	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
@@ -41,7 +39,10 @@ func (m Model) modelineMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	if !ok {
 		return nil, false
 	}
-	for _, segment := range append(status.Left, status.Right...) {
+	segments := make([]protocol.StatusSegment, 0, len(status.Left)+len(status.Right))
+	segments = append(segments, status.Left...)
+	segments = append(segments, status.Right...)
+	for _, segment := range segments {
 		if segment.Command == "" {
 			continue
 		}
@@ -65,13 +66,4 @@ func (m Model) fileTreeMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 		}
 	}
 	return nil, false
-}
-
-func parseFileTreeZoneID(id string) (int, bool) {
-	value, ok := strings.CutPrefix(id, zonePrefixFileTreeRow)
-	if !ok {
-		return 0, false
-	}
-	index, err := strconv.Atoi(value)
-	return index, err == nil
 }

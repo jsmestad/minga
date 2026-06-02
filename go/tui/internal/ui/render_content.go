@@ -20,6 +20,12 @@ func (m Model) content() string {
 }
 
 func (m Model) semanticLines() []string {
+	if lines, ok := m.composedSemanticLines(); ok {
+		if len(lines) == 0 {
+			return nil
+		}
+		return lines
+	}
 	lines := make([]string, 0, m.bodyHeight())
 	for _, id := range m.windowOrder {
 		window := m.windows[id]
@@ -31,10 +37,149 @@ func (m Model) semanticLines() []string {
 	return lines
 }
 
+func (m Model) composedSemanticLines() ([]string, bool) {
+	segmentsByRow := map[int][]semanticLineSegment{}
+	fallback := make([]string, 0, len(m.windowOrder))
+	maxRow := 0
+	hasGeometry := false
+	for _, id := range m.windowOrder {
+		window := m.windows[id]
+		placement, ok := m.semanticWindowPlacement(window)
+		if !ok {
+			fallback = append(fallback, m.renderWindowRows(window)...)
+			continue
+		}
+		hasGeometry = true
+		rendered := m.renderWindowRows(window)
+		for rowOffset, line := range rendered {
+			row := placement.row + rowOffset
+			if row < 0 {
+				continue
+			}
+			segmentsByRow[row] = append(segmentsByRow[row], semanticLineSegment{col: placement.col, text: line})
+			maxRow = max(maxRow, row+1)
+		}
+	}
+	if !hasGeometry {
+		return fallback, false
+	}
+	headHeight := max(maxRow, m.bodyHeight())
+	lines := make([]string, headHeight)
+	for row, segments := range segmentsByRow {
+		sort.SliceStable(segments, func(i, j int) bool { return segments[i].col < segments[j].col })
+		lines[row] = composeSemanticLine(segments)
+	}
+	if len(fallback) > 0 {
+		lines = append(lines, fallback...)
+	}
+	return lines, true
+}
+
+type semanticLineSegment struct {
+	col  int
+	text string
+}
+
+type semanticWindowPlacement struct {
+	row    int
+	col    int
+	width  int
+	height int
+}
+
+func composeSemanticLine(segments []semanticLineSegment) string {
+	var builder strings.Builder
+	visibleCol := 0
+	for _, segment := range segments {
+		if segment.col > visibleCol {
+			builder.WriteString(strings.Repeat(" ", segment.col-visibleCol))
+			visibleCol = segment.col
+		}
+		builder.WriteString(segment.text)
+		visibleCol += displayWidth(xansi.Strip(segment.text))
+	}
+	return builder.String()
+}
+
+func (m Model) semanticWindowPlacement(window protocol.WindowContent) (semanticWindowPlacement, bool) {
+	if !window.GeometrySet {
+		return semanticWindowPlacement{}, false
+	}
+	rect := window.Geometry.ContentRect
+	if rect == (protocol.Rect{}) {
+		rect = window.Geometry.TotalRect
+	}
+	if rect == (protocol.Rect{}) {
+		return semanticWindowPlacement{}, false
+	}
+	row, col := m.normalizeSemanticGeometry(int(rect.Row), int(rect.Col))
+	return semanticWindowPlacement{
+		row:    row,
+		col:    col,
+		width:  int(rect.Width),
+		height: int(rect.Height),
+	}, true
+}
+
+// Protocol geometry is absolute screen geometry, while Bubble Tea renders the body after header and left chrome are already consumed.
+func (m Model) normalizeSemanticGeometry(row int, col int) (int, int) {
+	rowOffset, colOffset := m.semanticContentOffsets()
+	return row - rowOffset, col - colOffset
+}
+
+func (m Model) semanticContentOffsets() (int, int) {
+	return len(m.headerLines()), m.leftChromeWidth()
+}
+
+func (m Model) leftChromeWidth() int {
+	if tree, ok := m.fileTree(); ok && tree.Visible && tree.Width > 0 && m.width >= 50 {
+		return fileTreeWidth(m.width, tree)
+	}
+	if sidebars, ok := m.sidebars(); ok && len(sidebars.Items) > 0 && m.width >= 60 {
+		return semanticSidebarWidth(m.width, sidebars)
+	}
+	return 0
+}
+
+func fileTreeWidth(totalWidth int, tree protocol.FileTree) int {
+	desired := 24
+	if tree.Width > 0 {
+		desired = int(tree.Width)
+	}
+	maxWidth := max(totalWidth-1, 1)
+	return min(max(desired, 1), maxWidth)
+}
+
+func semanticSidebarWidth(totalWidth int, sidebars protocol.Sidebars) int {
+	visible := visibleSidebars(sidebars)
+	if len(visible) == 0 {
+		return 0
+	}
+	return min(max(int(visible[0].PreferredWidth), 18), max(totalWidth/4, 18))
+}
+
+func visibleSidebars(sidebars protocol.Sidebars) []protocol.Sidebar {
+	visible := make([]protocol.Sidebar, 0, len(sidebars.Items))
+	for _, item := range sidebars.Items {
+		if item.Visible {
+			visible = append(visible, item)
+		}
+	}
+	return visible
+}
+
 func (m Model) renderWindowRows(window protocol.WindowContent) []string {
 	gutter, hasGutter := m.windowGutter(window.ID)
 	height := len(window.Rows)
-	if window.GeometrySet && window.Geometry.ViewportRows > 0 {
+	width := m.width
+	if placement, ok := m.semanticWindowPlacement(window); ok {
+		if placement.width > 0 {
+			width = placement.width
+		}
+		if placement.height > 0 {
+			height = placement.height
+		}
+	} else if window.GeometrySet && window.Geometry.ViewportRows > 0 {
 		height = int(window.Geometry.ViewportRows)
 	} else if hasGutter && gutter.ContentHeight > 0 {
 		height = int(gutter.ContentHeight)
@@ -43,11 +188,11 @@ func (m Model) renderWindowRows(window protocol.WindowContent) []string {
 	}
 	lines := make([]string, 0, height)
 	for rowIndex := 0; rowIndex < height; rowIndex++ {
-		contentWidth := m.width
+		contentWidth := width
 		gutterText := ""
 		if hasGutter {
 			gutterText = m.renderGutterEntry(gutter, rowIndex)
-			contentWidth = max(m.width-lipgloss.Width(gutterText), 1)
+			contentWidth = max(width-lipgloss.Width(gutterText), 1)
 		}
 
 		content := m.renderSemanticContentRow(window, rowIndex, contentWidth)
@@ -79,10 +224,16 @@ func (m Model) renderRow(window protocol.WindowContent, row protocol.WindowRow, 
 	}
 
 	var builder strings.Builder
+	scrollLeft := int(window.ScrollLeft)
 	col := 0
 	for graphemes := uniseg.NewGraphemes(row.Text); graphemes.Next(); {
 		text := graphemes.Str()
 		span := spanAt(row.Spans, uint16(col))
+		spanWidth := max(displayWidth(text), 1)
+		if col+spanWidth <= scrollLeft {
+			col += spanWidth
+			continue
+		}
 		style := m.styleForEditorSpan(span)
 		if cursorline && span.BG == 0 && cursorlineBG != 0 {
 			style = style.Background(lipgloss.Color(fmt.Sprintf("#%06X", cursorlineBG)))
@@ -90,7 +241,7 @@ func (m Model) renderRow(window protocol.WindowContent, row protocol.WindowRow, 
 		style = m.applyWindowOverlays(style, window, rowIndex, col)
 		style, text = m.applyIndentGuide(window, style, rowIndex, col, text)
 		builder.WriteString(style.Render(text))
-		col += max(displayWidth(text), 1)
+		col += spanWidth
 	}
 	if annotation := m.renderRowAnnotations(window, rowIndex); annotation != "" {
 		builder.WriteString(annotation)
@@ -106,7 +257,7 @@ func (m Model) applyWindowOverlays(style lipgloss.Style, window protocol.WindowC
 	}
 	for _, highlight := range window.Highlights {
 		if rangeContains(highlight.StartRow, highlight.StartCol, highlight.EndRow, highlight.EndCol, row, column) {
-			style = style.Background(m.palette().DocumentHighlight())
+			style = style.Background(m.palette().DocumentHighlight(highlight.Kind))
 			break
 		}
 	}
@@ -277,21 +428,39 @@ func (m Model) withSplitSeparators(lines []string) []string {
 		style = style.Foreground(lipgloss.Color(fmt.Sprintf("#%06X", splits.Color)))
 	}
 	for _, vertical := range splits.Verticals {
-		for row := int(vertical.StartRow); row <= int(vertical.EndRow) && row < len(out); row++ {
-			out[row] = replaceVisibleCell(out[row], int(vertical.Col), style.Render("│"))
+		startRow, col := m.normalizeSemanticGeometry(int(vertical.StartRow), int(vertical.Col))
+		endRow, _ := m.normalizeSemanticGeometry(int(vertical.EndRow), int(vertical.Col))
+		if col < 0 || endRow < 0 {
+			continue
+		}
+		for row := max(startRow, 0); row <= endRow && row < len(out); row++ {
+			out[row] = extendVisibleWidth(out[row], col+1)
+			out[row] = replaceVisibleCell(out[row], col, style.Render("│"))
 		}
 	}
 	for _, horizontal := range splits.Horizontals {
-		row := int(horizontal.Row)
+		row, col := m.normalizeSemanticGeometry(int(horizontal.Row), int(horizontal.Col))
 		if row < 0 || row >= len(out) {
 			continue
 		}
 		text := horizontalSeparatorText(int(horizontal.Width), horizontal.Filename)
 		for offset, part := range splitGraphemes(text) {
-			out[row] = replaceVisibleCell(out[row], int(horizontal.Col)+offset, style.Render(part))
+			partWidth := max(displayWidth(part), 1)
+			out[row] = extendVisibleWidth(out[row], col+offset+partWidth)
+			out[row] = replaceVisibleCell(out[row], col+offset, style.Render(part))
 		}
 	}
 	return out
+}
+
+func extendVisibleWidth(line string, width int) string {
+	if width <= 0 {
+		return line
+	}
+	if displayWidth(xansi.Strip(line)) >= width {
+		return line
+	}
+	return fitStyled(line, width)
 }
 
 func replaceVisibleCell(line string, col int, replacement string) string {
@@ -399,11 +568,11 @@ func splitGraphemes(value string) []string {
 
 func (m Model) withFileTree(mainLines []string) []string {
 	tree, ok := m.fileTree()
-	if !ok || !tree.Visible || len(tree.Rows) == 0 || m.width < 50 {
+	if !ok || !tree.Visible || tree.Width == 0 || m.width < 50 {
 		return m.withSemanticSidebars(mainLines)
 	}
 
-	sidebarWidth := min(max(int(tree.Width), 24), max(m.width/3, 24))
+	sidebarWidth := fileTreeWidth(m.width, tree)
 	sidebar := m.renderFileTree(tree, sidebarWidth, max(len(mainLines), m.bodyHeight()))
 	lines := make([]string, max(len(mainLines), len(sidebar)))
 	for i := range lines {
@@ -425,16 +594,11 @@ func (m Model) withSemanticSidebars(mainLines []string) []string {
 	if !ok || len(sidebars.Items) == 0 || m.width < 60 {
 		return mainLines
 	}
-	visible := make([]protocol.Sidebar, 0, len(sidebars.Items))
-	for _, item := range sidebars.Items {
-		if item.Visible {
-			visible = append(visible, item)
-		}
-	}
+	visible := visibleSidebars(sidebars)
 	if len(visible) == 0 {
 		return mainLines
 	}
-	width := min(max(int(visible[0].PreferredWidth), 18), max(m.width/4, 18))
+	width := semanticSidebarWidth(m.width, sidebars)
 	theme := m.palette()
 	style := lipgloss.NewStyle().Foreground(theme.Muted()).Background(theme.Surface()).Width(width)
 	activeStyle := style.Bold(true).Foreground(theme.Text()).Background(theme.Selection())
@@ -516,6 +680,11 @@ func (m Model) renderFileTree(tree protocol.FileTree, width int, height int) []s
 	selectedStyle := style.Foreground(theme.Text()).Background(theme.TreeSelection()).Bold(true)
 	header := style.Bold(true).Foreground(theme.TreeHeaderText()).Background(theme.TreeHeader()).Render(fit("Files  "+tree.Root, width))
 	lines := []string{header}
+	if len(tree.Rows) == 0 {
+		if status := fileTreeStatusText(tree); status != "" && len(lines) < height {
+			lines = append(lines, style.Render(fit(status, width)))
+		}
+	}
 	for rowIndex, row := range tree.Rows {
 		prefix := strings.Repeat("  ", int(row.Depth))
 		marker := " "
@@ -542,6 +711,22 @@ func (m Model) renderFileTree(tree protocol.FileTree, width int, height int) []s
 		lines = append(lines, style.Render(strings.Repeat(" ", width)))
 	}
 	return lines
+}
+
+func fileTreeStatusText(tree protocol.FileTree) string {
+	switch tree.Status {
+	case 1:
+		return "Loading files..."
+	case 2:
+		return "No files"
+	case 4:
+		if strings.TrimSpace(tree.Error) != "" {
+			return tree.Error
+		}
+		return "File tree error"
+	default:
+		return ""
+	}
 }
 
 func spanAt(spans []protocol.Span, col uint16) protocol.Span {

@@ -62,30 +62,63 @@ func TestDecodeWindowContentRows(t *testing.T) {
 	}
 }
 
-func TestDecodeWindowRowsDeltaIncludesRowRefs(t *testing.T) {
+func TestDecodeWindowRowsAndViewportDeltasIncludeRowRefs(t *testing.T) {
 	ref := []byte{
 		0,
 		0, 0, 0, 0, 0, 0, 0, 9,
 		0, 0, 0, 5,
 	}
 	rowsPayload := append([]byte{0, 1}, ref...)
-	headerPayload := []byte{0, 7, 0, 0, 0, 12, 1, 0, 3, 0, 4, 1, 0, 0, 0}
-	packet := append([]byte{generated.OPGuiWindowRowsDelta, 2, 0x01, 0, byte(len(headerPayload))}, headerPayload...)
-	packet = append(packet, 0x02, byte(len(rowsPayload)>>8), byte(len(rowsPayload)))
-	packet = append(packet, rowsPayload...)
+	tests := []struct {
+		name       string
+		opcode     byte
+		header     []byte
+		wantID     uint16
+		wantEpoch  uint32
+		wantRow    uint16
+		wantCol    uint16
+		wantShape  byte
+		wantScroll uint16
+	}{
+		{name: "rows", opcode: generated.OPGuiWindowRowsDelta, header: []byte{0, 7, 0x12, 0x34, 0x56, 0x78, 0xAA, 0, 9, 0, 11, 2, 0, 13}, wantID: 7, wantEpoch: 0x12345678, wantRow: 9, wantCol: 11, wantShape: 2, wantScroll: 13},
+		{name: "viewport", opcode: generated.OPGuiWindowViewportDelta, header: []byte{0, 8, 0x22, 0x33, 0x44, 0x55, 0xBB, 0, 10, 0, 12, 3, 0, 14}, wantID: 8, wantEpoch: 0x22334455, wantRow: 10, wantCol: 12, wantShape: 3, wantScroll: 14},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			packet := append([]byte{tt.opcode, 2, 0x01, 0, byte(len(tt.header))}, tt.header...)
+			packet = append(packet, 0x02, byte(len(rowsPayload)>>8), byte(len(rowsPayload)))
+			packet = append(packet, rowsPayload...)
+			packet = append(packet, generated.OPBatchEnd)
 
-	command, err := DecodeCommand(packet)
-	if err != nil {
-		t.Fatalf("DecodeCommand returned error: %v", err)
-	}
-	if command.Kind != CommandWindowDelta {
-		t.Fatalf("kind = %v, want window delta", command.Kind)
-	}
-	if len(command.Window.Rows) != 1 || !command.Window.Rows[0].Ref {
-		t.Fatalf("row ref decoded incorrectly: %+v", command.Window.Rows)
-	}
-	if command.Window.Rows[0].ID != 9 || command.Window.Rows[0].ContentHash != 5 {
-		t.Fatalf("row ref identity decoded incorrectly: %+v", command.Window.Rows[0])
+			command, err := DecodeCommand(packet)
+			if err != nil {
+				t.Fatalf("DecodeCommand returned error: %v", err)
+			}
+			if command.Kind != CommandWindowDelta {
+				t.Fatalf("kind = %v, want window delta", command.Kind)
+			}
+			window := command.Window
+			if !window.ScrollLeftSet {
+				t.Fatalf("scroll left should be marked present in delta header: %+v", window)
+			}
+			if window.ID != tt.wantID || window.ContentEpoch != tt.wantEpoch || window.CursorRow != tt.wantRow || window.CursorCol != tt.wantCol || window.CursorShape != tt.wantShape || window.ScrollLeft != tt.wantScroll {
+				t.Fatalf("header decoded incorrectly: %+v", window)
+			}
+			if len(window.Rows) != 1 || !window.Rows[0].Ref {
+				t.Fatalf("row ref decoded incorrectly: %+v", window.Rows)
+			}
+			if window.Rows[0].ID != 9 || window.Rows[0].ContentHash != 5 {
+				t.Fatalf("row ref identity decoded incorrectly: %+v", window.Rows[0])
+			}
+
+			second, err := DecodeCommand(packet[command.Size:])
+			if err != nil {
+				t.Fatalf("DecodeCommand batch returned error: %v", err)
+			}
+			if second.Kind != CommandBatchEnd {
+				t.Fatalf("second kind = %v, want batch end", second.Kind)
+			}
+		})
 	}
 }
 
@@ -787,6 +820,34 @@ func TestDecodePanelAndSidebarChrome(t *testing.T) {
 	}
 	if len(command.Chrome.Extensions.Panels) != 1 || command.Chrome.Extensions.Panels[0].Title != "Panel" || len(command.Chrome.Extensions.Panels[0].Blocks) != 1 {
 		t.Fatalf("extension panel decoded incorrectly: %+v", command.Chrome.Extensions)
+	}
+
+	tool := []byte{generated.OPGuiToolManager, 1, 0, 0, 0, 0, 1}
+	tool = append(tool, string8("elixir-ls")...)
+	tool = append(tool, string8("Elixir LS")...)
+	tool = append(tool, string16("Language server")...)
+	tool = append(tool, 0, 1, 0, 0)
+	tool = append(tool, string8("")...)
+	tool = append(tool, string16("")...)
+	tool = append(tool, 0)
+	tool = append(tool, string16("")...)
+	tool = append(tool, generated.OPBatchEnd)
+	command, err = DecodeCommand(tool)
+	if err != nil {
+		t.Fatalf("DecodeCommand tool manager returned error: %v", err)
+	}
+	if !command.Chrome.ToolManager.Visible || len(command.Chrome.ToolManager.Tools) != 1 || command.Chrome.ToolManager.Tools[0].Label != "Elixir LS" {
+		t.Fatalf("tool manager decoded incorrectly: %+v", command.Chrome.ToolManager)
+	}
+	if command.Size != len(tool)-1 {
+		t.Fatalf("tool manager size = %d, want %d", command.Size, len(tool)-1)
+	}
+	second, err := DecodeCommand(tool[command.Size:])
+	if err != nil {
+		t.Fatalf("DecodeCommand batch returned error: %v", err)
+	}
+	if second.Kind != CommandBatchEnd {
+		t.Fatalf("second kind = %v, want batch end", second.Kind)
 	}
 
 	node := string8("<0.1.0>")

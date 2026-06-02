@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"sort"
 
 	"github.com/charmbracelet/bubbles/viewport"
@@ -162,19 +163,16 @@ func (m *Model) applyCommands(commands []protocol.Command) tea.Cmd {
 			m.applyWindowDelta(command.Window)
 		case protocol.CommandChrome:
 			m.chrome[command.Chrome.Opcode] = command.Chrome
-			if command.Chrome.Opcode == generated.OPGuiTheme {
+			switch command.Chrome.Opcode {
+			case generated.OPGuiTheme:
 				m.activePalette = paletteFromTheme(command.Chrome.Theme)
-			}
-			if command.Chrome.Opcode == generated.OPGuiCursorline {
+			case generated.OPGuiCursorline:
 				m.cursorlineChrome = command.Chrome.CursorlineChrome
-			}
-			if command.Chrome.Opcode == generated.OPGuiGutter {
+			case generated.OPGuiGutter:
 				m.gutters[command.Chrome.WindowGutter.WindowID] = command.Chrome.WindowGutter
-			}
-			if command.Chrome.Opcode == generated.OPGuiIndentGuides {
+			case generated.OPGuiIndentGuides:
 				m.indentGuides[command.Chrome.IndentGuides.WindowID] = command.Chrome.IndentGuides
-			}
-			if command.Chrome.Opcode == generated.OPGuiFileTreeSelection {
+			case generated.OPGuiFileTreeSelection:
 				m.applyFileTreeSelection(command.Chrome.FileTreeSelection)
 			}
 		}
@@ -200,18 +198,17 @@ func (m *Model) putWindow(window protocol.WindowContent) {
 
 func (m *Model) applyWindowDelta(delta protocol.WindowContent) {
 	window, ok := m.windows[delta.ID]
-	if !ok {
-		m.putWindow(delta)
+	if !ok || window.ContentEpoch != delta.ContentEpoch {
 		return
 	}
 	window.CursorRow = delta.CursorRow
 	window.CursorCol = delta.CursorCol
 	window.CursorShape = delta.CursorShape
 	window.ContentEpoch = delta.ContentEpoch
-	window.ScrollLeft = delta.ScrollLeft
-	if delta.Cursorline.Visible {
-		window.Cursorline = delta.Cursorline
+	if delta.ScrollLeftSet {
+		window.ScrollLeft = delta.ScrollLeft
 	}
+	window.Cursorline = delta.Cursorline
 	if delta.SelectionSet {
 		window.Selection = delta.Selection
 		window.SelectionSet = true
@@ -237,7 +234,12 @@ func (m *Model) applyWindowDelta(delta protocol.WindowContent) {
 		window.GeometrySet = true
 	}
 	if len(delta.Rows) > 0 {
-		window.Rows = resolveWindowRows(window.Rows, delta.Rows)
+		rows, err := resolveWindowRows(window.Rows, delta.Rows)
+		if err != nil {
+			m.removeWindow(delta.ID)
+			return
+		}
+		window.Rows = rows
 	}
 	m.windows[delta.ID] = window
 	m.cursorRow = delta.CursorRow
@@ -245,7 +247,7 @@ func (m *Model) applyWindowDelta(delta protocol.WindowContent) {
 	m.cursorShape = delta.CursorShape
 }
 
-func resolveWindowRows(previous []protocol.WindowRow, delta []protocol.WindowRow) []protocol.WindowRow {
+func resolveWindowRows(previous []protocol.WindowRow, delta []protocol.WindowRow) ([]protocol.WindowRow, error) {
 	byID := make(map[uint64]protocol.WindowRow, len(previous))
 	for _, row := range previous {
 		byID[row.ID] = row
@@ -253,14 +255,29 @@ func resolveWindowRows(previous []protocol.WindowRow, delta []protocol.WindowRow
 	rows := make([]protocol.WindowRow, 0, len(delta))
 	for _, row := range delta {
 		if row.Ref {
-			if existing, ok := byID[row.ID]; ok && existing.ContentHash == row.ContentHash {
-				rows = append(rows, existing)
+			existing, ok := byID[row.ID]
+			if !ok {
+				return nil, fmt.Errorf("missing retained row ref %d", row.ID)
 			}
+			if existing.ContentHash != row.ContentHash {
+				return nil, fmt.Errorf("retained row ref %d hash mismatch", row.ID)
+			}
+			rows = append(rows, existing)
 			continue
 		}
 		rows = append(rows, row)
 	}
-	return rows
+	return rows, nil
+}
+
+func (m *Model) removeWindow(id uint16) {
+	delete(m.windows, id)
+	for index, windowID := range m.windowOrder {
+		if windowID == id {
+			m.windowOrder = append(m.windowOrder[:index], m.windowOrder[index+1:]...)
+			return
+		}
+	}
 }
 
 func (m Model) bodyHeight() int {
