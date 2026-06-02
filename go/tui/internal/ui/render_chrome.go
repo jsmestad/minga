@@ -152,7 +152,11 @@ func (m Model) renderSegmentList(segments []protocol.StatusSegment) string {
 		if segment.Attrs&0x04 != 0 {
 			style = style.Italic(true)
 		}
-		parts = append(parts, style.Render(text))
+		rendered := style.Render(text)
+		if segment.Command != "" {
+			rendered = m.zones.Mark(zoneIDModelineCommand(segment.Command), rendered)
+		}
+		parts = append(parts, rendered)
 	}
 	return strings.Join(parts, "")
 }

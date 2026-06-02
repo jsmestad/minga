@@ -32,20 +32,55 @@ const (
 	themeAccent          byte = 0x40
 	themeGutterFG        byte = 0x50
 	themeGutterCurrentFG byte = 0x51
+	themeDiagnosticError byte = 0x52
 	themeWarningFG       byte = 0x53
+	themeDiagnosticInfo  byte = 0x54
+	themeDiagnosticHint  byte = 0x55
 )
 
 type palette struct {
 	colors map[byte]uint32
 }
 
-func paletteFrom(chrome map[byte]protocol.ChromePayload) palette {
-	for _, payload := range chrome {
-		if payload.Theme.Colors != nil {
-			return palette{colors: payload.Theme.Colors}
-		}
+func defaultPalette() palette {
+	return palette{colors: map[byte]uint32{
+		themeEditorBG:        0x282C34,
+		themeEditorFG:        0xBBC2CF,
+		themeTreeBG:          0x21242B,
+		themeTreeFG:          0xBBC2CF,
+		themeTreeSelectBG:    0x3E4451,
+		themeTreeHeaderBG:    0x282C34,
+		themeTreeHeaderFG:    0xBBC2CF,
+		themeTabBG:           0x282C34,
+		themeTabActiveBG:     0x3E4451,
+		themeTabActiveFG:     0xFFFFFF,
+		themeTabInactiveFG:   0x5B6268,
+		themeTabModifiedFG:   0xFF6C6B,
+		themeTabAttentionFG:  0xECBE7B,
+		themePopupBG:         0x21242B,
+		themePopupFG:         0xBBC2CF,
+		themePopupBorder:     0x5B6268,
+		themePopupSelBG:      0x3E4451,
+		themePopupSelFG:      0xFFFFFF,
+		themeBreadcrumbBG:    0x21242B,
+		themeModelineBG:      0x22252D,
+		themeModelineFG:      0xBBC2CF,
+		themeAccent:          0x51AFEF,
+		themeGutterFG:        0x5B6268,
+		themeGutterCurrentFG: 0xBBC2CF,
+		themeDiagnosticError: 0xFF6C6B,
+		themeWarningFG:       0xECBE7B,
+		themeDiagnosticInfo:  0x51AFEF,
+		themeDiagnosticHint:  0x98BE65,
+	}}
+}
+
+func paletteFromTheme(theme protocol.Theme) palette {
+	base := defaultPalette()
+	for slot, rgb := range theme.Colors {
+		base.colors[slot] = rgb
 	}
-	return palette{}
+	return base
 }
 
 func (p palette) Base() lipgloss.TerminalColor {
@@ -82,6 +117,32 @@ func (p palette) Selection() lipgloss.TerminalColor {
 
 func (p palette) SelectionText() lipgloss.TerminalColor {
 	return p.slot(themePopupSelFG)
+}
+
+func (p palette) SearchMatch(current bool) lipgloss.TerminalColor {
+	if current {
+		return p.slot(themeTreeSelectBG)
+	}
+	return p.slot(themeBreadcrumbBG)
+}
+
+func (p palette) DocumentHighlight() lipgloss.TerminalColor {
+	return p.slot(themePopupBorder)
+}
+
+func (p palette) Diagnostic(severity byte) lipgloss.TerminalColor {
+	switch severity {
+	case 0:
+		return p.slot(themeDiagnosticError)
+	case 1:
+		return p.slot(themeWarningFG)
+	case 2:
+		return p.slot(themeDiagnosticInfo)
+	case 3:
+		return p.slot(themeDiagnosticHint)
+	default:
+		return p.slot(themeWarningFG)
+	}
 }
 
 func (p palette) Warning() lipgloss.TerminalColor {
@@ -149,16 +210,14 @@ func (p palette) PopupBorder() lipgloss.TerminalColor {
 }
 
 func (p palette) slot(slot byte) lipgloss.TerminalColor {
-	if p.colors != nil {
-		if rgb, ok := p.colors[slot]; ok {
-			return lipgloss.Color(fmt.Sprintf("#%06X", rgb))
-		}
+	if rgb, ok := p.colors[slot]; ok {
+		return lipgloss.Color(fmt.Sprintf("#%06X", rgb))
 	}
 	return lipgloss.NoColor{}
 }
 
 func (m Model) palette() palette {
-	return paletteFrom(m.chrome)
+	return m.activePalette
 }
 
 func (m Model) editorBackground() lipgloss.TerminalColor {

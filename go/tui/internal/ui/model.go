@@ -10,6 +10,7 @@ import (
 	"github.com/jsmestad/minga/go/tui/internal/generated"
 	"github.com/jsmestad/minga/go/tui/internal/port"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
+	zone "github.com/lrstanley/bubblezone"
 )
 
 const (
@@ -20,22 +21,25 @@ const (
 )
 
 type Model struct {
-	width       int
-	height      int
-	out         chan<- []byte
-	viewport    viewport.Model
-	windows     map[uint16]protocol.WindowContent
-	windowOrder []uint16
-	chrome      map[byte]protocol.ChromePayload
-	gutters     map[uint16]protocol.Gutter
-	cells       map[position]cell
-	drawSeq     uint64
-	cursorRow   uint16
-	cursorCol   uint16
-	cursorShape byte
-	title       string
-	bg          uint32
-	lastError   string
+	width         int
+	height        int
+	out           chan<- []byte
+	viewport      viewport.Model
+	zones         *zone.Manager
+	windows       map[uint16]protocol.WindowContent
+	windowOrder   []uint16
+	chrome        map[byte]protocol.ChromePayload
+	activePalette palette
+	gutters       map[uint16]protocol.Gutter
+	indentGuides  map[uint16]protocol.IndentGuides
+	cells         map[position]cell
+	drawSeq       uint64
+	cursorRow     uint16
+	cursorCol     uint16
+	cursorShape   byte
+	title         string
+	bg            uint32
+	lastError     string
 }
 
 type position struct {
@@ -56,14 +60,17 @@ type cell struct {
 func New(width, height uint16, out chan<- []byte) Model {
 	vp := viewport.New(int(width), max(int(height)-3, 1))
 	return Model{
-		width:    int(width),
-		height:   int(height),
-		out:      out,
-		viewport: vp,
-		windows:  map[uint16]protocol.WindowContent{},
-		chrome:   map[byte]protocol.ChromePayload{},
-		gutters:  map[uint16]protocol.Gutter{},
-		cells:    map[position]cell{},
+		width:         int(width),
+		height:        int(height),
+		out:           out,
+		viewport:      vp,
+		zones:         zone.New(),
+		windows:       map[uint16]protocol.WindowContent{},
+		chrome:        map[byte]protocol.ChromePayload{},
+		activePalette: defaultPalette(),
+		gutters:       map[uint16]protocol.Gutter{},
+		indentGuides:  map[uint16]protocol.IndentGuides{},
+		cells:         map[position]cell{},
 	}
 }
 
@@ -84,7 +91,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.send(packet)
 		}
 	case tea.MouseMsg:
-		m.send(mousePacket(msg))
+		if packet, ok := m.semanticMousePacket(msg); ok {
+			m.send(packet)
+		} else {
+			m.send(mousePacket(msg))
+		}
 	case port.PacketMsg:
 		return m, m.applyCommands(msg.Commands)
 	case port.LogMsg:
@@ -105,7 +116,7 @@ func (m Model) View() string {
 	body := m.viewport.View()
 	parts := append(m.headerLines(), body)
 	parts = append(parts, m.footerLines()...)
-	return m.cursorStyleSequence() + lipgloss.JoinVertical(lipgloss.Left, parts...)
+	return m.cursorStyleSequence() + m.zones.Scan(lipgloss.JoinVertical(lipgloss.Left, parts...))
 }
 
 func (m Model) cursorStyleSequence() string {
@@ -128,6 +139,7 @@ func (m *Model) applyCommands(commands []protocol.Command) tea.Cmd {
 			m.windowOrder = nil
 			m.chrome = map[byte]protocol.ChromePayload{}
 			m.gutters = map[uint16]protocol.Gutter{}
+			m.indentGuides = map[uint16]protocol.IndentGuides{}
 			m.cells = map[position]cell{}
 			m.drawSeq = 0
 		case protocol.CommandDrawText:
@@ -148,8 +160,17 @@ func (m *Model) applyCommands(commands []protocol.Command) tea.Cmd {
 			m.applyWindowDelta(command.Window)
 		case protocol.CommandChrome:
 			m.chrome[command.Chrome.Opcode] = command.Chrome
+			if command.Chrome.Opcode == generated.OPGuiTheme {
+				m.activePalette = paletteFromTheme(command.Chrome.Theme)
+			}
 			if command.Chrome.Opcode == generated.OPGuiGutter {
 				m.gutters[command.Chrome.WindowGutter.WindowID] = command.Chrome.WindowGutter
+			}
+			if command.Chrome.Opcode == generated.OPGuiIndentGuides {
+				m.indentGuides[command.Chrome.IndentGuides.WindowID] = command.Chrome.IndentGuides
+			}
+			if command.Chrome.Opcode == generated.OPGuiFileTreeSelection {
+				m.applyFileTreeSelection(command.Chrome.FileTreeSelection)
 			}
 		}
 	}
@@ -185,6 +206,30 @@ func (m *Model) applyWindowDelta(delta protocol.WindowContent) {
 	window.ScrollLeft = delta.ScrollLeft
 	if delta.Cursorline.Visible {
 		window.Cursorline = delta.Cursorline
+	}
+	if delta.SelectionSet {
+		window.Selection = delta.Selection
+		window.SelectionSet = true
+	}
+	if delta.SearchSet {
+		window.SearchMatches = delta.SearchMatches
+		window.SearchSet = true
+	}
+	if delta.DiagnosticsSet {
+		window.Diagnostics = delta.Diagnostics
+		window.DiagnosticsSet = true
+	}
+	if delta.HighlightsSet {
+		window.Highlights = delta.Highlights
+		window.HighlightsSet = true
+	}
+	if delta.AnnotationsSet {
+		window.Annotations = delta.Annotations
+		window.AnnotationsSet = true
+	}
+	if delta.GeometrySet {
+		window.Geometry = delta.Geometry
+		window.GeometrySet = true
 	}
 	if len(delta.Rows) > 0 {
 		window.Rows = resolveWindowRows(window.Rows, delta.Rows)

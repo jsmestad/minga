@@ -47,52 +47,71 @@ type DrawText struct {
 }
 
 type ChromePayload struct {
-	Opcode        byte
-	Name          string
-	Summary       string
-	Bytes         int
-	Tabs          TabBar
-	Spaces        WorkspaceBar
-	Mini          Minibuffer
-	Complete      Completion
-	Which         WhichKey
-	Picker        Picker
-	Preview       PickerPreview
-	Tree          FileTree
-	Status        StatusBar
-	Theme         Theme
-	Breadcrumb    Breadcrumb
-	Git           GitStatus
-	Search        SearchState
-	Change        ChangeSummary
-	Hover         HoverPopup
-	HoverAction   HoverAction
-	Signature     SignatureHelp
-	Float         FloatPopup
-	Overlay       ExtensionOverlay
-	Notifications Notifications
-	Bottom        BottomPanel
-	Extensions    ExtensionPanel
-	Sidebars      Sidebars
-	Observatory   Observatory
-	AgentContext  AgentContext
-	AgentChat     AgentChat
-	Board         Board
-	Timeline      EditTimeline
-	Gutter        GutterSeparator
-	WindowGutter  Gutter
-	Splits        SplitSeparators
+	Opcode            byte
+	Name              string
+	Summary           string
+	Bytes             int
+	Tabs              TabBar
+	Spaces            WorkspaceBar
+	Mini              Minibuffer
+	Complete          Completion
+	Which             WhichKey
+	Picker            Picker
+	Preview           PickerPreview
+	Tree              FileTree
+	Status            StatusBar
+	Theme             Theme
+	Breadcrumb        Breadcrumb
+	Git               GitStatus
+	Search            SearchState
+	Change            ChangeSummary
+	Hover             HoverPopup
+	HoverAction       HoverAction
+	Signature         SignatureHelp
+	Float             FloatPopup
+	Overlay           ExtensionOverlay
+	Notifications     Notifications
+	Bottom            BottomPanel
+	Extensions        ExtensionPanel
+	Sidebars          Sidebars
+	Observatory       Observatory
+	AgentContext      AgentContext
+	AgentChat         AgentChat
+	Board             Board
+	Timeline          EditTimeline
+	Gutter            GutterSeparator
+	CursorlineChrome  CursorlineChrome
+	WindowGutter      Gutter
+	IndentGuides      IndentGuides
+	LineSpacing       LineSpacing
+	FileTreeSelection FileTreeSelection
+	CursorAnimation   CursorAnimation
+	ConfigState       ConfigState
+	ToolManager       ToolManager
+	Splits            SplitSeparators
 }
 
 type WindowContent struct {
-	ID           uint16
-	CursorRow    uint16
-	CursorCol    uint16
-	CursorShape  byte
-	ScrollLeft   uint16
-	ContentEpoch uint32
-	Cursorline   Cursorline
-	Rows         []WindowRow
+	ID             uint16
+	CursorRow      uint16
+	CursorCol      uint16
+	CursorShape    byte
+	ScrollLeft     uint16
+	ContentEpoch   uint32
+	Cursorline     Cursorline
+	Selection      Selection
+	SearchMatches  []SearchMatch
+	Diagnostics    []DiagnosticRange
+	Highlights     []DocumentHighlight
+	Annotations    []LineAnnotation
+	Geometry       PaneGeometry
+	Rows           []WindowRow
+	SelectionSet   bool
+	SearchSet      bool
+	DiagnosticsSet bool
+	HighlightsSet  bool
+	AnnotationsSet bool
+	GeometrySet    bool
 }
 
 type Cursorline struct {
@@ -258,6 +277,18 @@ func decodeWindowContent(payload []byte) (Command, error) {
 			decodeWindowHeader(opcode, section, &window)
 		case 0x02:
 			decodeRows(section, &window, opcode != generated.OPGuiWindowContent)
+		case 0x03:
+			decodeSelection(section, &window)
+		case 0x04:
+			decodeSearchMatches(section, &window)
+		case 0x05:
+			decodeDiagnosticRanges(section, &window)
+		case 0x06:
+			decodeDocumentHighlights(section, &window)
+		case 0x07:
+			decodeLineAnnotations(section, &window)
+		case 0x08:
+			decodePaneGeometry(section, &window)
 		case 0x09:
 			decodeCursorline(section, &window)
 		}

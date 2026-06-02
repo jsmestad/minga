@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/cellbuf"
 	"github.com/jsmestad/minga/go/tui/internal/generated"
@@ -131,6 +132,28 @@ func TestCursorShapeSequenceTracksProtocolShape(t *testing.T) {
 	}
 }
 
+func TestThemeCommandUpdatesModelPalette(t *testing.T) {
+	model := New(20, 4, nil)
+	_ = model.applyCommands([]protocol.Command{{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiTheme, Theme: protocol.Theme{Colors: map[byte]uint32{themeEditorBG: 0x010203, themePopupSelBG: 0x112233}}}}})
+
+	if got := model.activePalette.colors[themeEditorBG]; got != 0x010203 {
+		t.Fatalf("editor background slot = 0x%06X, want 0x010203", got)
+	}
+	if got := model.activePalette.colors[themePopupSelBG]; got != 0x112233 {
+		t.Fatalf("selection slot = 0x%06X, want 0x112233", got)
+	}
+}
+
+func TestSemanticWindowUsesThemeForSelectionOverlay(t *testing.T) {
+	model := New(20, 4, nil)
+	model.activePalette = paletteFromTheme(protocol.Theme{Colors: map[byte]uint32{themePopupSelBG: 0x112233}})
+	style := model.applyWindowOverlays(lipgloss.NewStyle(), protocol.WindowContent{Selection: protocol.Selection{Type: 1, StartRow: 0, StartCol: 1, EndRow: 0, EndCol: 3}}, 0, 1)
+
+	if style.GetBackground() != model.palette().Selection() {
+		t.Fatalf("selection overlay should use theme selection color")
+	}
+}
+
 func TestSemanticWindowRendersGutterCursorlineTildesAndModeline(t *testing.T) {
 	model := New(30, 6, nil)
 	model.gutters = map[uint16]protocol.Gutter{
@@ -170,6 +193,27 @@ func TestSemanticWindowRendersGutterCursorlineTildesAndModeline(t *testing.T) {
 	}
 	if !strings.Contains(view, " NORMAL ") || !strings.Contains(view, "1:1 Top") {
 		t.Fatalf("semantic view should render modeline segments: %q", view)
+	}
+}
+
+func TestApplyCommandsStoresIndentGuidesByWindow(t *testing.T) {
+	model := New(30, 6, nil)
+	_ = model.applyCommands([]protocol.Command{{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiIndentGuides, IndentGuides: protocol.IndentGuides{WindowID: 7, TabWidth: 2, GuideCols: []uint16{2}, IndentLevels: []byte{2}}}}})
+
+	guides, ok := model.indentGuides[7]
+	if !ok || len(guides.GuideCols) != 1 || guides.GuideCols[0] != 2 {
+		t.Fatalf("indent guides should be retained per window: %+v", model.indentGuides)
+	}
+}
+
+func TestFileTreeSelectionUpdatesExistingTree(t *testing.T) {
+	model := New(30, 6, nil)
+	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: protocol.FileTree{Visible: true, Rows: []protocol.FileTreeRow{{ID: "a", Name: "a"}, {ID: "b", Name: "b"}}}}}
+	model.applyFileTreeSelection(protocol.FileTreeSelection{Focused: true, SelectedID: "b"})
+
+	tree := model.chrome[generated.OPGuiFileTree].Tree
+	if tree.Selected != "b" || !tree.Focused || tree.Rows[0].Selected || !tree.Rows[1].Selected || !tree.Rows[1].Focused {
+		t.Fatalf("file tree selection not applied: %+v", tree)
 	}
 }
 

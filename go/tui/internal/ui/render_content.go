@@ -34,7 +34,9 @@ func (m Model) semanticLines() []string {
 func (m Model) renderWindowRows(window protocol.WindowContent) []string {
 	gutter, hasGutter := m.windowGutter(window.ID)
 	height := len(window.Rows)
-	if hasGutter && gutter.ContentHeight > 0 {
+	if window.GeometrySet && window.Geometry.ViewportRows > 0 {
+		height = int(window.Geometry.ViewportRows)
+	} else if hasGutter && gutter.ContentHeight > 0 {
 		height = int(gutter.ContentHeight)
 	} else if len(m.windowOrder) <= 1 {
 		height = max(height, m.bodyHeight())
@@ -59,7 +61,7 @@ func (m Model) renderSemanticContentRow(window protocol.WindowContent, rowIndex 
 	if rowIndex >= len(window.Rows) {
 		return m.renderTildeRow(width, cursorline, window.Cursorline.BG)
 	}
-	return m.renderRow(window.Rows[rowIndex], width, cursorline, window.Cursorline.BG)
+	return m.renderRow(window, window.Rows[rowIndex], rowIndex, width, cursorline, window.Cursorline.BG)
 }
 
 func (m Model) renderTildeRow(width int, cursorline bool, cursorlineBG uint32) string {
@@ -70,27 +72,88 @@ func (m Model) renderTildeRow(width int, cursorline bool, cursorlineBG uint32) s
 	return style.Render(fit("~", width))
 }
 
-func (m Model) renderRow(row protocol.WindowRow, width int, cursorline bool, cursorlineBG uint32) string {
+func (m Model) renderRow(window protocol.WindowContent, row protocol.WindowRow, rowIndex int, width int, cursorline bool, cursorlineBG uint32) string {
 	base := m.editorStyle().Width(width)
 	if cursorline && cursorlineBG != 0 {
 		base = base.Background(lipgloss.Color(fmt.Sprintf("#%06X", cursorlineBG)))
 	}
-	if len(row.Spans) == 0 {
-		return base.Render(fit(row.Text, width))
-	}
 
 	var builder strings.Builder
 	col := 0
-	for _, r := range row.Text {
+	for graphemes := uniseg.NewGraphemes(row.Text); graphemes.Next(); {
+		text := graphemes.Str()
 		span := spanAt(row.Spans, uint16(col))
 		style := m.styleForEditorSpan(span)
 		if cursorline && span.BG == 0 && cursorlineBG != 0 {
 			style = style.Background(lipgloss.Color(fmt.Sprintf("#%06X", cursorlineBG)))
 		}
-		builder.WriteString(style.Render(string(r)))
-		col++
+		style = m.applyWindowOverlays(style, window, rowIndex, col)
+		style, text = m.applyIndentGuide(window, style, rowIndex, col, text)
+		builder.WriteString(style.Render(text))
+		col += max(displayWidth(text), 1)
+	}
+	if annotation := m.renderRowAnnotations(window, rowIndex); annotation != "" {
+		builder.WriteString(annotation)
 	}
 	return base.Render(fitStyled(builder.String(), width))
+}
+
+func (m Model) applyWindowOverlays(style lipgloss.Style, window protocol.WindowContent, rowIndex int, col int) lipgloss.Style {
+	row := uint16(rowIndex)
+	column := uint16(col)
+	if window.Selection.Type != 0 && rangeContains(window.Selection.StartRow, window.Selection.StartCol, window.Selection.EndRow, window.Selection.EndCol, row, column) {
+		style = style.Background(m.palette().Selection())
+	}
+	for _, highlight := range window.Highlights {
+		if rangeContains(highlight.StartRow, highlight.StartCol, highlight.EndRow, highlight.EndCol, row, column) {
+			style = style.Background(m.palette().DocumentHighlight())
+			break
+		}
+	}
+	for _, match := range window.SearchMatches {
+		if match.Row == row && column >= match.StartCol && column < match.EndCol {
+			style = style.Background(m.palette().SearchMatch(match.Current))
+			break
+		}
+	}
+	for _, diagnostic := range window.Diagnostics {
+		if rangeContains(diagnostic.StartRow, diagnostic.StartCol, diagnostic.EndRow, diagnostic.EndCol, row, column) {
+			style = style.Underline(true).Foreground(m.palette().Diagnostic(diagnostic.Severity))
+			break
+		}
+	}
+	return style
+}
+
+func (m Model) renderRowAnnotations(window protocol.WindowContent, rowIndex int) string {
+	parts := make([]string, 0, 1)
+	for _, annotation := range window.Annotations {
+		if annotation.Row != uint16(rowIndex) || annotation.Text == "" || annotation.Kind == 2 {
+			continue
+		}
+		style := lipgloss.NewStyle().Foreground(m.palette().Accent()).Background(m.editorBackground())
+		if annotation.FG != 0 {
+			style = style.Foreground(lipgloss.Color(fmt.Sprintf("#%06X", annotation.FG)))
+		}
+		if annotation.BG != 0 {
+			style = style.Background(lipgloss.Color(fmt.Sprintf("#%06X", annotation.BG)))
+		}
+		parts = append(parts, style.Render(" "+annotation.Text))
+	}
+	return strings.Join(parts, "")
+}
+
+func rangeContains(startRow uint16, startCol uint16, endRow uint16, endCol uint16, row uint16, col uint16) bool {
+	if row < startRow || row > endRow {
+		return false
+	}
+	if row == startRow && col < startCol {
+		return false
+	}
+	if row == endRow && col >= endCol {
+		return false
+	}
+	return true
 }
 
 func (m Model) cellLines() []string {
@@ -308,7 +371,7 @@ func (m Model) renderFileTree(tree protocol.FileTree, width int, height int) []s
 	selectedStyle := style.Foreground(theme.Text()).Background(theme.TreeSelection()).Bold(true)
 	header := style.Bold(true).Foreground(theme.TreeHeaderText()).Background(theme.TreeHeader()).Render(fit("Files  "+tree.Root, width))
 	lines := []string{header}
-	for _, row := range tree.Rows {
+	for rowIndex, row := range tree.Rows {
 		prefix := strings.Repeat("  ", int(row.Depth))
 		marker := " "
 		if row.Directory && row.Expanded {
@@ -321,11 +384,11 @@ func (m Model) renderFileTree(tree protocol.FileTree, width int, height int) []s
 			dirty = " *"
 		}
 		text := fit(fmt.Sprintf("%s%s %s %s%s", prefix, marker, row.Icon, row.Name, dirty), width)
+		rendered := style.Render(text)
 		if row.Selected {
-			lines = append(lines, selectedStyle.Render(text))
-		} else {
-			lines = append(lines, style.Render(text))
+			rendered = selectedStyle.Render(text)
 		}
+		lines = append(lines, m.zones.Mark(zoneIDFileTreeRow(rowIndex), rendered))
 		if len(lines) >= height {
 			return lines
 		}
