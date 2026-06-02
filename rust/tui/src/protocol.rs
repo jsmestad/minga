@@ -664,7 +664,7 @@ mod command_size_conformance {
             (vec![opcodes::OP_SET_CURSOR, 0, 0, 0, 0], 5),
             (vec![opcodes::OP_GUI_GUTTER_SEP, 0, 0, 0, 0, 0], 6),
             (
-                vec![opcodes::OP_GUI_INDENT_GUIDES, 0x00, 0x06, 1, 2, 3, 4, 5, 6],
+                vec![opcodes::OP_GUI_INDENT_GUIDES, 0x00, 0x06, 1, 2, 3, 4, 5, 0],
                 9,
             ),
             (
