@@ -1585,13 +1585,15 @@ defmodule Minga.Extension.LifecycleContractTest do
       assert {:ok, pid} =
                ExtSupervisor.start_extension(ctx.supervisor, ctx.registry, ext_name, entry)
 
+      monitor_ref = Process.monitor(pid)
       send(pid, {:stop, exit_reason})
+      assert_receive {:DOWN, ^monitor_ref, :process, ^pid, _reason}
 
       refute_receive {:telemetry, [:minga, :extension, :lifecycle, :crash_restart_count],
                       %{count: 1}, %{extension: ^ext_name, phase: :crash_restart_count}},
                      150
 
-      stopped_entry = wait_for_entry_status(ctx.registry, ext_name, :stopped, 40)
+      stopped_entry = wait_for_entry_status(ctx.registry, ext_name, :stopped, 100)
       assert stopped_entry.pid == nil
       assert stopped_entry.status == :stopped
     end

@@ -8,7 +8,8 @@ defmodule Minga.Integration.AgentCursorTest do
   area, but the visible cursor is one row too high.
   """
 
-  use Minga.Test.EditorCase, async: true
+  # Not async: manual agent chat buffers trip global render state under full-suite concurrency.
+  use Minga.Test.EditorCase, async: false
 
   alias MingaEditor.Agent.BufferSync, as: AgentBufferSync
   alias Minga.Buffer.Process, as: BufferProcess
@@ -116,7 +117,8 @@ defmodule Minga.Integration.AgentCursorTest do
     test "cursor starts and stays on the input content row" do
       ctx = start_agent_editor()
 
-      send_keys_sync(ctx, "i")
+      sync_screen(ctx)
+      send_key(ctx, ?i)
 
       rows = screen_text(ctx)
       {cursor_row, _cursor_col} = screen_cursor(ctx)
@@ -143,7 +145,8 @@ defmodule Minga.Integration.AgentCursorTest do
       for {width, height} <- [{80, 24}, {120, 40}, {60, 20}] do
         ctx = start_agent_editor(width: width, height: height)
 
-        send_keys_sync(ctx, "i")
+        sync_screen(ctx)
+        send_key(ctx, ?i)
 
         rows = screen_text(ctx)
         {cursor_row, _cursor_col} = screen_cursor(ctx)
