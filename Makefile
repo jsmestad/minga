@@ -1,5 +1,29 @@
-.PHONY: lint lint.format lint.credo lint.compile lint.dialyzer lint.fix test test.llm \
+.PHONY: help lint lint.format lint.credo lint.compile lint.dialyzer lint.fix test test.llm \
        release release-tui release-mac install install-tui install-mac uninstall
+
+.DEFAULT_GOAL := help
+
+help:
+	@printf "\n\033[1;35m╭────────────────────────────────────────────╮\033[0m\n"
+	@printf "\033[1;35m│\033[0m  \033[1mMinga developer commands\033[0m                 \033[1;35m│\033[0m\n"
+	@printf "\033[1;35m╰────────────────────────────────────────────╯\033[0m\n\n"
+	@printf "\033[1;36mRun the editor\033[0m\n"
+	@printf "  \033[1mbin/minga\033[0m          Launch the default Zig TUI\n"
+	@printf "  \033[1mbin/minga-go\033[0m       Launch the Go/Charm TUI\n"
+	@printf "  \033[1mbin/minga-rust\033[0m     Launch the Rust TUI\n"
+	@printf "  \033[1mbin/minga +gui\033[0m     Launch the native macOS GUI\n\n"
+	@printf "\033[1;36mQuality checks\033[0m\n"
+	@printf "  \033[1mmake lint\033[0m          Format, credo, compile, and dialyzer\n"
+	@printf "  \033[1mmake lint.fix\033[0m      Run format and strict credo\n"
+	@printf "  \033[1mmake test\033[0m          Run the full ExUnit suite\n"
+	@printf "  \033[1mmake test.llm\033[0m      Run the LLM-friendly test output\n\n"
+	@printf "\033[1;36mBuild and install\033[0m\n"
+	@printf "  \033[1mmake release\033[0m       Build release artifacts for this platform\n"
+	@printf "  \033[1mmake release-tui\033[0m   Build the TUI release\n"
+	@printf "  \033[1mmake release-mac\033[0m   Build the macOS GUI app\n"
+	@printf "  \033[1mmake install\033[0m       Install available local artifacts\n"
+	@printf "  \033[1mmake uninstall\033[0m     Remove installed local artifacts\n\n"
+	@printf "\033[2mTip: pass a file to a launcher, for example \033[0m\033[1mbin/minga-go README.md\033[0m\n\n"
 
 # ── Platform detection ──────────────────────────────────────────────────
 OS       := $(shell uname -s)
