@@ -48,19 +48,40 @@ type DrawText struct {
 }
 
 type ChromePayload struct {
-	Opcode   byte
-	Name     string
-	Summary  string
-	Bytes    int
-	Tabs     TabBar
-	Spaces   WorkspaceBar
-	Mini     Minibuffer
-	Complete Completion
-	Which    WhichKey
-	Picker   Picker
-	Preview  PickerPreview
-	Tree     FileTree
-	Status   StatusBar
+	Opcode        byte
+	Name          string
+	Summary       string
+	Bytes         int
+	Tabs          TabBar
+	Spaces        WorkspaceBar
+	Mini          Minibuffer
+	Complete      Completion
+	Which         WhichKey
+	Picker        Picker
+	Preview       PickerPreview
+	Tree          FileTree
+	Status        StatusBar
+	Theme         Theme
+	Breadcrumb    Breadcrumb
+	Git           GitStatus
+	Search        SearchState
+	Change        ChangeSummary
+	Hover         HoverPopup
+	HoverAction   HoverAction
+	Signature     SignatureHelp
+	Float         FloatPopup
+	Overlay       ExtensionOverlay
+	Notifications Notifications
+	Bottom        BottomPanel
+	Extensions    ExtensionPanel
+	Sidebars      Sidebars
+	Observatory   Observatory
+	AgentContext  AgentContext
+	AgentChat     AgentChat
+	Board         Board
+	Timeline      EditTimeline
+	Gutter        GutterSeparator
+	Splits        SplitSeparators
 }
 
 type TabBar struct {
@@ -242,6 +263,306 @@ type StatusBar struct {
 	Filename    string
 	Filetype    string
 	Message     string
+}
+
+type Theme struct {
+	Colors map[byte]uint32
+}
+
+type Breadcrumb struct {
+	Segments []string
+}
+
+type GitStatus struct {
+	RepoState         byte
+	Syncing           bool
+	Ahead             uint16
+	Behind            uint16
+	Branch            string
+	Entries           []GitStatusEntry
+	Toast             GitToast
+	EntryBasePath     string
+	LastCommitMessage string
+	StashCount        uint16
+}
+
+type GitStatusEntry struct {
+	PathHash uint32
+	Section  byte
+	Status   byte
+	Path     string
+}
+
+type GitToast struct {
+	Visible bool
+	Level   byte
+	Action  byte
+	Message string
+}
+
+type SearchState struct {
+	Active       bool
+	Count        uint16
+	CurrentIndex uint16
+	Flags        byte
+}
+
+type ChangeSummary struct {
+	Visible       bool
+	SelectedIndex uint16
+	Entries       []ChangeEntry
+}
+
+type ChangeEntry struct {
+	Path         string
+	Action       byte
+	LinesAdded   uint32
+	LinesRemoved uint32
+}
+
+type HoverPopup struct {
+	Visible      bool
+	AnchorRow    uint16
+	AnchorCol    uint16
+	Focused      bool
+	ScrollOffset uint16
+	Lines        []RichLine
+}
+
+type HoverAction struct {
+	Visible bool
+	Name    string
+}
+
+type SignatureHelp struct {
+	Visible         bool
+	AnchorRow       uint16
+	AnchorCol       uint16
+	ActiveSignature byte
+	ActiveParameter byte
+	Signatures      []Signature
+}
+
+type Signature struct {
+	Label      string
+	Doc        string
+	Parameters []SignatureParameter
+}
+
+type SignatureParameter struct {
+	Label string
+	Doc   string
+}
+
+type FloatPopup struct {
+	Visible bool
+	Width   uint16
+	Height  uint16
+	Title   string
+	Lines   []string
+}
+
+type ExtensionOverlay struct {
+	Entries []ExtensionOverlayEntry
+}
+
+type ExtensionOverlayEntry struct {
+	Extension string
+	ID        string
+	WindowID  uint16
+	Row       uint16
+	Col       uint16
+	Shape     byte
+	FG        uint32
+	Opacity   byte
+	Content   string
+}
+
+type Notifications struct {
+	Visible bool
+	Items   []Notification
+}
+
+type Notification struct {
+	ID            string
+	Level         byte
+	Dismissable   bool
+	CreatedAt     uint64
+	UpdatedAt     uint64
+	AutoDismissMS uint32
+	Title         string
+	Body          string
+	Source        string
+	Actions       []NotificationAction
+}
+
+type NotificationAction struct {
+	ID    string
+	Label string
+}
+
+type BottomPanel struct {
+	Visible       bool
+	ActiveTab     byte
+	HeightPercent byte
+	Filter        byte
+	Tabs          []PanelTab
+	Messages      []PanelMessage
+}
+
+type PanelTab struct {
+	Type byte
+	Name string
+}
+
+type PanelMessage struct {
+	ID        uint32
+	Level     byte
+	Subsystem byte
+	Timestamp uint32
+	Path      string
+	Text      string
+}
+
+type ExtensionPanel struct {
+	Panels []ExtensionPanelEntry
+}
+
+type ExtensionPanelEntry struct {
+	Extension string
+	ID        string
+	Title     string
+	Position  byte
+	SizeType  byte
+	SizeValue byte
+	Visible   bool
+	Blocks    []string
+}
+
+type Sidebars struct {
+	Visible  bool
+	ActiveID string
+	Items    []Sidebar
+}
+
+type Sidebar struct {
+	ID             string
+	DisplayName    string
+	SemanticKind   string
+	Icon           string
+	Order          uint16
+	Flags          byte
+	PreferredWidth uint16
+	BadgeCount     uint16
+	Visible        bool
+	Focused        bool
+}
+
+type Observatory struct {
+	Visible bool
+	Count   uint16
+	Nodes   []ObservatoryNode
+}
+
+type ObservatoryNode struct {
+	PID             string
+	ParentPID       string
+	Name            string
+	ProcessClass    byte
+	Depth           byte
+	Memory          uint32
+	MessageQueueLen uint16
+	Reductions      uint32
+}
+
+type AgentContext struct {
+	Visible    bool
+	Task       string
+	Timestamp  uint64
+	Status     byte
+	CanApprove bool
+}
+
+type AgentChat struct {
+	Visible       bool
+	Status        byte
+	ModelName     string
+	Prompt        string
+	ThinkingLevel string
+	Messages      []AgentChatMessage
+	Pending       string
+	Completion    []string
+}
+
+type AgentChatMessage struct {
+	ID   uint32
+	Kind byte
+	Text string
+}
+
+type Board struct {
+	Visible       bool
+	FocusedCardID uint32
+	FilterMode    bool
+	FilterText    string
+	Cards         []BoardCard
+}
+
+type BoardCard struct {
+	ID          uint32
+	Status      byte
+	Flags       byte
+	Task        string
+	Model       string
+	Timestamp   uint32
+	RecentFiles []string
+}
+
+type EditTimeline struct {
+	Visible      bool
+	ViewingIndex uint16
+	Entries      []TimelineEntry
+}
+
+type TimelineEntry struct {
+	Index          byte
+	ToolName       string
+	TimestampDelta uint32
+}
+
+type GutterSeparator struct {
+	Col   uint16
+	Color uint32
+}
+
+type SplitSeparators struct {
+	Color       uint32
+	Verticals   []VerticalSeparator
+	Horizontals []HorizontalSeparator
+}
+
+type VerticalSeparator struct {
+	Col      uint16
+	StartRow uint16
+	EndRow   uint16
+}
+
+type HorizontalSeparator struct {
+	Row      uint16
+	Col      uint16
+	Width    uint16
+	Filename string
+}
+
+type RichLine struct {
+	Segments []RichSegment
+}
+
+type RichSegment struct {
+	Style byte
+	FG    uint32
+	Flags byte
+	Text  string
 }
 
 type WindowContent struct {
@@ -569,6 +890,48 @@ func decodeChrome(payload []byte) ChromePayload {
 		chrome.Tree, chrome.Summary, chrome.Bytes = decodeFileTree(payload)
 	case generated.OPGuiStatusBar:
 		chrome.Status, chrome.Summary, chrome.Bytes = decodeStatus(payload)
+	case generated.OPGuiTheme:
+		chrome.Theme, chrome.Summary, chrome.Bytes = decodeTheme(payload)
+	case generated.OPGuiBreadcrumb:
+		chrome.Breadcrumb, chrome.Summary, chrome.Bytes = decodeBreadcrumb(payload)
+	case generated.OPGuiGitStatus:
+		chrome.Git, chrome.Summary, chrome.Bytes = decodeGitStatus(payload)
+	case generated.OPGuiSearchState:
+		chrome.Search, chrome.Summary, chrome.Bytes = decodeSearchState(payload)
+	case generated.OPGuiChangeSummary:
+		chrome.Change, chrome.Summary, chrome.Bytes = decodeChangeSummary(payload)
+	case generated.OPGuiHoverPopup:
+		chrome.Hover, chrome.Summary, chrome.Bytes = decodeHoverPopup(payload)
+	case generated.OPGuiHoverAction:
+		chrome.HoverAction, chrome.Summary, chrome.Bytes = decodeHoverAction(payload)
+	case generated.OPGuiSignatureHelp:
+		chrome.Signature, chrome.Summary, chrome.Bytes = decodeSignatureHelp(payload)
+	case generated.OPGuiFloatPopup:
+		chrome.Float, chrome.Summary, chrome.Bytes = decodeFloatPopup(payload)
+	case generated.OPGuiExtensionOverlay:
+		chrome.Overlay, chrome.Summary, chrome.Bytes = decodeExtensionOverlay(payload)
+	case generated.OPGuiNotifications:
+		chrome.Notifications, chrome.Summary, chrome.Bytes = decodeNotifications(payload)
+	case generated.OPGuiBottomPanel:
+		chrome.Bottom, chrome.Summary, chrome.Bytes = decodeBottomPanel(payload)
+	case generated.OPGuiExtensionPanel:
+		chrome.Extensions, chrome.Summary, chrome.Bytes = decodeExtensionPanel(payload)
+	case generated.OPGuiSidebars:
+		chrome.Sidebars, chrome.Summary, chrome.Bytes = decodeSidebars(payload)
+	case generated.OPGuiObservatory:
+		chrome.Observatory, chrome.Summary, chrome.Bytes = decodeObservatory(payload)
+	case generated.OPGuiAgentContext:
+		chrome.AgentContext, chrome.Summary, chrome.Bytes = decodeAgentContext(payload)
+	case generated.OPGuiAgentChat:
+		chrome.AgentChat, chrome.Summary, chrome.Bytes = decodeAgentChat(payload)
+	case generated.OPGuiBoard:
+		chrome.Board, chrome.Summary, chrome.Bytes = decodeBoard(payload)
+	case generated.OPGuiEditTimeline:
+		chrome.Timeline, chrome.Summary, chrome.Bytes = decodeEditTimeline(payload)
+	case generated.OPGuiGutterSep:
+		chrome.Gutter, chrome.Summary, chrome.Bytes = decodeGutterSeparator(payload)
+	case generated.OPGuiSplitSeparators:
+		chrome.Splits, chrome.Summary, chrome.Bytes = decodeSplitSeparators(payload)
 	default:
 		if size := sectionedSize(payload); size > 0 {
 			chrome.Bytes = size
@@ -1165,6 +1528,1102 @@ func statusFile(section []byte) (string, string, string, bool) {
 	return icon, filename, filetype, ok
 }
 
+func decodeTheme(payload []byte) (Theme, string, int) {
+	if len(payload) < 2 {
+		return Theme{}, "", len(payload)
+	}
+	count := int(payload[1])
+	offset := 2
+	theme := Theme{Colors: map[byte]uint32{}}
+	for i := 0; i < count && len(payload) >= offset+4; i++ {
+		theme.Colors[payload[offset]] = u24(payload, offset+1)
+		offset += 4
+	}
+	return theme, fmt.Sprintf("%d colors", len(theme.Colors)), offset
+}
+
+func decodeBreadcrumb(payload []byte) (Breadcrumb, string, int) {
+	if len(payload) < 2 {
+		return Breadcrumb{}, "", len(payload)
+	}
+	count := int(payload[1])
+	offset := 2
+	crumb := Breadcrumb{Segments: make([]string, 0, count)}
+	for i := 0; i < count; i++ {
+		segment, next, ok := readString16(payload, offset)
+		if !ok {
+			break
+		}
+		crumb.Segments = append(crumb.Segments, segment)
+		offset = next
+	}
+	return crumb, stringsJoin(crumb.Segments, " / "), offset
+}
+
+func decodeGitStatus(payload []byte) (GitStatus, string, int) {
+	if len(payload) < 13 {
+		return GitStatus{}, "", len(payload)
+	}
+	git := GitStatus{
+		RepoState: payload[1],
+		Syncing:   payload[2] != 0,
+		Ahead:     u16(payload, 3),
+		Behind:    u16(payload, 5),
+	}
+	offset := 7
+	branch, next, ok := readString16(payload, offset)
+	if !ok || len(payload) < next+2 {
+		return git, "", len(payload)
+	}
+	git.Branch = branch
+	count := int(u16(payload, next))
+	offset = next + 2
+	git.Entries = make([]GitStatusEntry, 0, count)
+	for i := 0; i < count && len(payload) >= offset+9; i++ {
+		entry := GitStatusEntry{PathHash: u32(payload, offset), Section: payload[offset+4], Status: payload[offset+5]}
+		offset += 6
+		entry.Path, offset, ok = readString16(payload, offset)
+		if !ok {
+			break
+		}
+		git.Entries = append(git.Entries, entry)
+	}
+	if len(payload) < offset+1 {
+		return git, gitSummary(git), offset
+	}
+	if payload[offset] != 0 && len(payload) >= offset+5 {
+		git.Toast.Visible = true
+		git.Toast.Level = payload[offset+1]
+		git.Toast.Action = payload[offset+2]
+		git.Toast.Message, offset, ok = readString16(payload, offset+3)
+		if !ok {
+			return git, gitSummary(git), len(payload)
+		}
+	} else {
+		offset++
+	}
+	if git.EntryBasePath, offset, ok = readString16(payload, offset); !ok {
+		return git, gitSummary(git), len(payload)
+	}
+	if git.LastCommitMessage, offset, ok = readString16(payload, offset); !ok || len(payload) < offset+2 {
+		return git, gitSummary(git), len(payload)
+	}
+	git.StashCount = u16(payload, offset)
+	offset += 2
+	return git, gitSummary(git), offset
+}
+
+func gitSummary(git GitStatus) string {
+	parts := []string{git.Branch}
+	if git.Ahead > 0 {
+		parts = append(parts, fmt.Sprintf("ahead %d", git.Ahead))
+	}
+	if git.Behind > 0 {
+		parts = append(parts, fmt.Sprintf("behind %d", git.Behind))
+	}
+	if len(git.Entries) > 0 {
+		parts = append(parts, fmt.Sprintf("%d changes", len(git.Entries)))
+	}
+	if git.StashCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d stashes", git.StashCount))
+	}
+	return stringsJoin(parts, "  ")
+}
+
+func decodeSearchState(payload []byte) (SearchState, string, int) {
+	if len(payload) < 4 {
+		return SearchState{}, "", len(payload)
+	}
+	size := 3 + int(u16(payload, 1))
+	if len(payload) < size || size < 9 {
+		return SearchState{}, "", len(payload)
+	}
+	search := SearchState{Active: payload[3] != 0, Count: u16(payload, 4), CurrentIndex: u16(payload, 6), Flags: payload[8]}
+	summary := ""
+	if search.Active {
+		summary = fmt.Sprintf("%d/%d", search.CurrentIndex, search.Count)
+	}
+	return search, summary, size
+}
+
+func decodeChangeSummary(payload []byte) (ChangeSummary, string, int) {
+	if len(payload) < 6 {
+		return ChangeSummary{}, "", len(payload)
+	}
+	change := ChangeSummary{Visible: payload[1] != 0, SelectedIndex: u16(payload, 2)}
+	count := int(u16(payload, 4))
+	offset := 6
+	change.Entries = make([]ChangeEntry, 0, count)
+	for i := 0; i < count && len(payload) >= offset+11; i++ {
+		entry := ChangeEntry{}
+		var ok bool
+		entry.Path, offset, ok = readString16(payload, offset)
+		if !ok || len(payload) < offset+9 {
+			break
+		}
+		entry.Action = payload[offset]
+		entry.LinesAdded = u32(payload, offset+1)
+		entry.LinesRemoved = u32(payload, offset+5)
+		offset += 9
+		change.Entries = append(change.Entries, entry)
+	}
+	return change, fmt.Sprintf("%d changes", len(change.Entries)), offset
+}
+
+func decodeHoverPopup(payload []byte) (HoverPopup, string, int) {
+	if len(payload) < 2 || payload[1] == 0 {
+		return HoverPopup{}, "", min(len(payload), 2)
+	}
+	if len(payload) < 11 {
+		return HoverPopup{Visible: true}, "", len(payload)
+	}
+	hover := HoverPopup{
+		Visible:      true,
+		AnchorRow:    u16(payload, 2),
+		AnchorCol:    u16(payload, 4),
+		Focused:      payload[6] != 0,
+		ScrollOffset: u16(payload, 7),
+	}
+	count := int(u16(payload, 9))
+	offset := 11
+	hover.Lines = make([]RichLine, 0, count)
+	summary := make([]string, 0, count)
+	for i := 0; i < count && len(payload) >= offset+3; i++ {
+		offset++
+		segmentCount := int(u16(payload, offset))
+		offset += 2
+		line, next, ok := decodeRichLine(payload, offset, segmentCount)
+		if !ok {
+			break
+		}
+		hover.Lines = append(hover.Lines, line)
+		summary = append(summary, richLineText(line))
+		offset = next
+	}
+	return hover, stringsJoin(summary, "  "), offset
+}
+
+func decodeHoverAction(payload []byte) (HoverAction, string, int) {
+	if len(payload) < 4 {
+		return HoverAction{}, "", len(payload)
+	}
+	size := 3 + int(u16(payload, 1))
+	if len(payload) < size || payload[3] == 0 {
+		return HoverAction{}, "", min(len(payload), size)
+	}
+	name, _, ok := readString16(payload, 4)
+	if !ok {
+		return HoverAction{Visible: true}, "", size
+	}
+	return HoverAction{Visible: true, Name: name}, name, size
+}
+
+func decodeSignatureHelp(payload []byte) (SignatureHelp, string, int) {
+	if len(payload) < 2 || payload[1] == 0 {
+		return SignatureHelp{}, "", min(len(payload), 2)
+	}
+	if len(payload) < 10 {
+		return SignatureHelp{Visible: true}, "", len(payload)
+	}
+	help := SignatureHelp{
+		Visible:         true,
+		AnchorRow:       u16(payload, 2),
+		AnchorCol:       u16(payload, 4),
+		ActiveSignature: payload[6],
+		ActiveParameter: payload[7],
+	}
+	count := int(payload[8])
+	offset := 9
+	help.Signatures = make([]Signature, 0, count)
+	for i := 0; i < count; i++ {
+		sig, next, ok := decodeSignature(payload, offset)
+		if !ok {
+			break
+		}
+		help.Signatures = append(help.Signatures, sig)
+		offset = next
+	}
+	summary := ""
+	if len(help.Signatures) > 0 {
+		summary = help.Signatures[min(int(help.ActiveSignature), len(help.Signatures)-1)].Label
+	}
+	return help, summary, offset
+}
+
+func decodeSignature(payload []byte, offset int) (Signature, int, bool) {
+	var ok bool
+	sig := Signature{}
+	sig.Label, offset, ok = readString16(payload, offset)
+	if !ok {
+		return sig, offset, false
+	}
+	sig.Doc, offset, ok = readString16(payload, offset)
+	if !ok || len(payload) < offset+1 {
+		return sig, offset, false
+	}
+	count := int(payload[offset])
+	offset++
+	sig.Parameters = make([]SignatureParameter, 0, count)
+	for i := 0; i < count; i++ {
+		param := SignatureParameter{}
+		param.Label, offset, ok = readString16(payload, offset)
+		if !ok {
+			return sig, offset, false
+		}
+		param.Doc, offset, ok = readString16(payload, offset)
+		if !ok {
+			return sig, offset, false
+		}
+		sig.Parameters = append(sig.Parameters, param)
+	}
+	return sig, offset, true
+}
+
+func decodeFloatPopup(payload []byte) (FloatPopup, string, int) {
+	if len(payload) < 2 || payload[1] == 0 {
+		return FloatPopup{}, "", min(len(payload), 2)
+	}
+	if len(payload) < 8 {
+		return FloatPopup{Visible: true}, "", len(payload)
+	}
+	float := FloatPopup{Visible: true, Width: u16(payload, 2), Height: u16(payload, 4)}
+	offset := 6
+	var ok bool
+	float.Title, offset, ok = readString16(payload, offset)
+	if !ok || len(payload) < offset+2 {
+		return float, float.Title, len(payload)
+	}
+	count := int(u16(payload, offset))
+	offset += 2
+	float.Lines = make([]string, 0, count)
+	for i := 0; i < count; i++ {
+		line, next, ok := readString16(payload, offset)
+		if !ok {
+			break
+		}
+		float.Lines = append(float.Lines, line)
+		offset = next
+	}
+	return float, strings.TrimSpace(float.Title + " " + stringsJoin(float.Lines, " ")), offset
+}
+
+func decodeExtensionOverlay(payload []byte) (ExtensionOverlay, string, int) {
+	size := payloadLen16Size(payload)
+	if size == 0 {
+		return ExtensionOverlay{}, "", len(payload)
+	}
+	body := payload[3:size]
+	if len(body) < 1 {
+		return ExtensionOverlay{}, "", size
+	}
+	count := int(body[0])
+	offset := 1
+	overlay := ExtensionOverlay{Entries: make([]ExtensionOverlayEntry, 0, count)}
+	for i := 0; i < count && len(body) >= offset+16; i++ {
+		entry := ExtensionOverlayEntry{}
+		var ok bool
+		entry.Extension, offset, ok = readString8(body, offset)
+		if !ok {
+			break
+		}
+		entry.ID, offset, ok = readString8(body, offset)
+		if !ok || len(body) < offset+12 {
+			break
+		}
+		entry.WindowID = u16(body, offset)
+		entry.Row = u16(body, offset+2)
+		entry.Col = u16(body, offset+4)
+		entry.Shape = body[offset+6]
+		entry.FG = u24(body, offset+7)
+		entry.Opacity = body[offset+10]
+		offset += 11
+		entry.Content, offset, ok = readString16(body, offset)
+		if !ok {
+			break
+		}
+		overlay.Entries = append(overlay.Entries, entry)
+	}
+	return overlay, fmt.Sprintf("%d overlays", len(overlay.Entries)), size
+}
+
+func decodeNotifications(payload []byte) (Notifications, string, int) {
+	size := payloadLen16Size(payload)
+	if size == 0 {
+		return Notifications{}, "", len(payload)
+	}
+	body := payload[3:size]
+	if len(body) < 3 {
+		return Notifications{}, "", size
+	}
+	notes := Notifications{Visible: body[0] != 0}
+	count := int(u16(body, 1))
+	offset := 3
+	notes.Items = make([]Notification, 0, count)
+	for i := 0; i < count; i++ {
+		note, next, ok := decodeNotification(body, offset)
+		if !ok {
+			break
+		}
+		notes.Items = append(notes.Items, note)
+		offset = next
+	}
+	return notes, fmt.Sprintf("%d notifications", len(notes.Items)), size
+}
+
+func decodeNotification(payload []byte, offset int) (Notification, int, bool) {
+	note := Notification{}
+	var ok bool
+	note.ID, offset, ok = readString16(payload, offset)
+	if !ok || len(payload) < offset+22 {
+		return note, offset, false
+	}
+	note.Level = payload[offset]
+	note.Dismissable = payload[offset+1]&0x01 != 0
+	note.CreatedAt = binary.BigEndian.Uint64(payload[offset+2 : offset+10])
+	note.UpdatedAt = binary.BigEndian.Uint64(payload[offset+10 : offset+18])
+	note.AutoDismissMS = u32(payload, offset+18)
+	offset += 22
+	note.Title, offset, ok = readString16(payload, offset)
+	if !ok {
+		return note, offset, false
+	}
+	note.Body, offset, ok = readString16(payload, offset)
+	if !ok {
+		return note, offset, false
+	}
+	note.Source, offset, ok = readString16(payload, offset)
+	if !ok || len(payload) < offset+1 {
+		return note, offset, false
+	}
+	count := int(payload[offset])
+	offset++
+	note.Actions = make([]NotificationAction, 0, count)
+	for i := 0; i < count; i++ {
+		action := NotificationAction{}
+		action.ID, offset, ok = readString16(payload, offset)
+		if !ok {
+			return note, offset, false
+		}
+		action.Label, offset, ok = readString16(payload, offset)
+		if !ok {
+			return note, offset, false
+		}
+		note.Actions = append(note.Actions, action)
+	}
+	return note, offset, true
+}
+
+func decodeBottomPanel(payload []byte) (BottomPanel, string, int) {
+	if len(payload) < 2 || payload[1] == 0 {
+		return BottomPanel{}, "", min(len(payload), 2)
+	}
+	if len(payload) < 7 {
+		return BottomPanel{Visible: true}, "", len(payload)
+	}
+	panel := BottomPanel{Visible: true, ActiveTab: payload[2], HeightPercent: payload[3], Filter: payload[4]}
+	count := int(payload[5])
+	offset := 6
+	panel.Tabs = make([]PanelTab, 0, count)
+	for i := 0; i < count && len(payload) >= offset+2; i++ {
+		tab := PanelTab{Type: payload[offset]}
+		offset++
+		var ok bool
+		tab.Name, offset, ok = readString8(payload, offset)
+		if !ok {
+			break
+		}
+		panel.Tabs = append(panel.Tabs, tab)
+	}
+	if len(payload) < offset+2 {
+		return panel, bottomPanelSummary(panel), offset
+	}
+	msgCount := int(u16(payload, offset))
+	offset += 2
+	panel.Messages = make([]PanelMessage, 0, msgCount)
+	for i := 0; i < msgCount && len(payload) >= offset+14; i++ {
+		msg := PanelMessage{ID: u32(payload, offset), Level: payload[offset+4], Subsystem: payload[offset+5], Timestamp: u32(payload, offset+6)}
+		offset += 10
+		var ok bool
+		msg.Path, offset, ok = readString16(payload, offset)
+		if !ok {
+			break
+		}
+		msg.Text, offset, ok = readString16(payload, offset)
+		if !ok {
+			break
+		}
+		panel.Messages = append(panel.Messages, msg)
+	}
+	return panel, bottomPanelSummary(panel), offset
+}
+
+func bottomPanelSummary(panel BottomPanel) string {
+	tab := ""
+	if len(panel.Tabs) > int(panel.ActiveTab) {
+		tab = panel.Tabs[panel.ActiveTab].Name
+	}
+	return strings.TrimSpace(fmt.Sprintf("%s %d messages", tab, len(panel.Messages)))
+}
+
+func decodeExtensionPanel(payload []byte) (ExtensionPanel, string, int) {
+	size := payloadLen16Size(payload)
+	if size == 0 {
+		return ExtensionPanel{}, "", len(payload)
+	}
+	body := payload[3:size]
+	if len(body) < 1 {
+		return ExtensionPanel{}, "", size
+	}
+	count := int(body[0])
+	offset := 1
+	panel := ExtensionPanel{Panels: make([]ExtensionPanelEntry, 0, count)}
+	for i := 0; i < count; i++ {
+		entry, next, ok := decodeExtensionPanelEntry(body, offset)
+		if !ok {
+			break
+		}
+		panel.Panels = append(panel.Panels, entry)
+		offset = next
+	}
+	return panel, fmt.Sprintf("%d extension panels", len(panel.Panels)), size
+}
+
+func decodeExtensionPanelEntry(body []byte, offset int) (ExtensionPanelEntry, int, bool) {
+	entry := ExtensionPanelEntry{}
+	var ok bool
+	entry.Extension, offset, ok = readString8(body, offset)
+	if !ok {
+		return entry, offset, false
+	}
+	entry.ID, offset, ok = readString8(body, offset)
+	if !ok {
+		return entry, offset, false
+	}
+	entry.Title, offset, ok = readString8(body, offset)
+	if !ok || len(body) < offset+5 {
+		return entry, offset, false
+	}
+	entry.Position = body[offset]
+	entry.SizeType = body[offset+1]
+	entry.SizeValue = body[offset+2]
+	entry.Visible = body[offset+3] != 0
+	count := int(body[offset+4])
+	offset += 5
+	entry.Blocks = make([]string, 0, count)
+	for i := 0; i < count && offset < len(body); i++ {
+		text, next, ok := decodePanelBlock(body, offset)
+		if !ok {
+			break
+		}
+		if text != "" {
+			entry.Blocks = append(entry.Blocks, text)
+		}
+		offset = next
+	}
+	return entry, offset, true
+}
+
+func decodePanelBlock(body []byte, offset int) (string, int, bool) {
+	if len(body) < offset+1 {
+		return "", offset, false
+	}
+	kind := body[offset]
+	offset++
+	switch kind {
+	case 0:
+		return readString16(body, offset)
+	case 1:
+		if len(body) < offset+1 {
+			return "", offset, false
+		}
+		count := int(body[offset])
+		offset++
+		parts := make([]string, 0, count)
+		for i := 0; i < count; i++ {
+			text, next, ok := readString16(body, offset)
+			if !ok || len(body) < next+5 {
+				return stringsJoin(parts, ""), offset, false
+			}
+			parts = append(parts, text)
+			offset = next + 5
+		}
+		return stringsJoin(parts, ""), offset, true
+	case 2:
+		if len(body) < offset+5 {
+			return "table", offset, false
+		}
+		cols := int(body[offset])
+		rows := int(u16(body, offset+1))
+		offset += 5
+		headers := make([]string, 0, cols)
+		var ok bool
+		for i := 0; i < cols; i++ {
+			var header string
+			header, offset, ok = readString16(body, offset)
+			if !ok {
+				return "table", offset, false
+			}
+			headers = append(headers, header)
+		}
+		for i := 0; i < rows*cols; i++ {
+			_, offset, ok = readString16(body, offset)
+			if !ok {
+				return stringsJoin(headers, "  "), offset, false
+			}
+		}
+		return stringsJoin(headers, "  "), offset, true
+	case 3:
+		if len(body) < offset+1 {
+			return "", offset, false
+		}
+		count := int(body[offset])
+		offset++
+		pairs := make([]string, 0, count)
+		for i := 0; i < count; i++ {
+			key, next, ok := readString16(body, offset)
+			if !ok {
+				return stringsJoin(pairs, "  "), offset, false
+			}
+			value, next, ok := readString16(body, next)
+			if !ok {
+				return stringsJoin(pairs, "  "), offset, false
+			}
+			pairs = append(pairs, key+": "+value)
+			offset = next
+		}
+		return stringsJoin(pairs, "  "), offset, true
+	case 4:
+		return "-----", offset, true
+	case 5:
+		label, next, ok := readString16(body, offset)
+		if !ok || len(body) < next+2 {
+			return label, next, ok
+		}
+		return fmt.Sprintf("%s %d%%", label, u16(body, next)), next + 2, true
+	case 6:
+		if len(body) < offset+2 {
+			return "tree", offset, false
+		}
+		size := int(u16(body, offset))
+		offset += 2
+		if len(body) < offset+size {
+			return "tree", offset, false
+		}
+		return "tree", offset + size, true
+	case 255:
+		return "", offset, true
+	default:
+		return "", offset, true
+	}
+}
+
+func decodeSidebars(payload []byte) (Sidebars, string, int) {
+	size := payloadLen32Size(payload)
+	if size == 0 {
+		return Sidebars{}, "", len(payload)
+	}
+	body := payload[5:size]
+	if len(body) < 3 {
+		return Sidebars{}, "", size
+	}
+	sidebars := Sidebars{Visible: body[0] != 0}
+	count := int(u16(body, 1))
+	offset := 3
+	var ok bool
+	sidebars.ActiveID, offset, ok = readString16(body, offset)
+	if !ok {
+		return sidebars, "", size
+	}
+	sidebars.Items = make([]Sidebar, 0, count)
+	for i := 0; i < count; i++ {
+		sidebar := Sidebar{}
+		sidebar.ID, offset, ok = readString16(body, offset)
+		if !ok {
+			break
+		}
+		sidebar.DisplayName, offset, ok = readString16(body, offset)
+		if !ok {
+			break
+		}
+		sidebar.SemanticKind, offset, ok = readString16(body, offset)
+		if !ok {
+			break
+		}
+		sidebar.Icon, offset, ok = readString16(body, offset)
+		if !ok || len(body) < offset+7 {
+			break
+		}
+		sidebar.Order = u16(body, offset)
+		sidebar.Flags = body[offset+2]
+		sidebar.PreferredWidth = u16(body, offset+3)
+		sidebar.BadgeCount = u16(body, offset+5)
+		sidebar.Visible = sidebar.Flags&0x01 != 0
+		sidebar.Focused = sidebar.Flags&0x02 != 0
+		offset += 7
+		sidebars.Items = append(sidebars.Items, sidebar)
+	}
+	return sidebars, fmt.Sprintf("%d sidebars", len(sidebars.Items)), size
+}
+
+func decodeObservatory(payload []byte) (Observatory, string, int) {
+	size := payloadLen32Size(payload)
+	if size == 0 {
+		return Observatory{}, "", len(payload)
+	}
+	body := payload[5:size]
+	obs := Observatory{}
+	offset := 0
+	for offset+3 <= len(body) {
+		sectionID := body[offset]
+		sectionLen := int(u16(body, offset+1))
+		offset += 3
+		if len(body) < offset+sectionLen {
+			return obs, observatorySummary(obs), size
+		}
+		section := body[offset : offset+sectionLen]
+		offset += sectionLen
+		switch sectionID {
+		case 0x01:
+			if len(section) >= 3 {
+				obs.Visible = section[0] != 0
+				obs.Count = u16(section, 1)
+			}
+		case 0x02:
+			obs.Nodes = append(obs.Nodes, decodeObservatoryNodes(section)...)
+		}
+	}
+	return obs, observatorySummary(obs), size
+}
+
+func decodeObservatoryNodes(section []byte) []ObservatoryNode {
+	nodes := []ObservatoryNode{}
+	offset := 0
+	for offset < len(section) {
+		node := ObservatoryNode{}
+		var ok bool
+		node.PID, offset, ok = readString8(section, offset)
+		if !ok {
+			break
+		}
+		node.ParentPID, offset, ok = readString8(section, offset)
+		if !ok {
+			break
+		}
+		node.Name, offset, ok = readString16(section, offset)
+		if !ok || len(section) < offset+12 {
+			break
+		}
+		node.ProcessClass = section[offset]
+		node.Depth = section[offset+1]
+		node.Memory = u32(section, offset+2)
+		node.MessageQueueLen = u16(section, offset+6)
+		node.Reductions = u32(section, offset+8)
+		offset += 12
+		nodes = append(nodes, node)
+	}
+	return nodes
+}
+
+func observatorySummary(obs Observatory) string {
+	count := int(obs.Count)
+	if count == 0 {
+		count = len(obs.Nodes)
+	}
+	return fmt.Sprintf("%d processes", count)
+}
+
+func decodeAgentContext(payload []byte) (AgentContext, string, int) {
+	if len(payload) < 12 {
+		return AgentContext{}, "", len(payload)
+	}
+	ctx := AgentContext{Visible: payload[1] != 0}
+	task, offset, ok := readString16(payload, 2)
+	if !ok || len(payload) < offset+10 {
+		return ctx, "", len(payload)
+	}
+	ctx.Task = task
+	ctx.Timestamp = binary.BigEndian.Uint64(payload[offset : offset+8])
+	ctx.Status = payload[offset+8]
+	ctx.CanApprove = payload[offset+9] != 0
+	offset += 10
+	return ctx, task, offset
+}
+
+func decodeAgentChat(payload []byte) (AgentChat, string, int) {
+	if len(payload) < 2 || payload[1] == 0 {
+		return AgentChat{}, "", min(len(payload), 2)
+	}
+	size := sectionedSize(payload)
+	if size == 0 {
+		return AgentChat{Visible: true}, "", len(payload)
+	}
+	chat := AgentChat{}
+	offset := 2
+	for i := 0; i < int(payload[1]); i++ {
+		sectionID := payload[offset]
+		sectionLen := int(u16(payload, offset+1))
+		offset += 3
+		section := payload[offset : offset+sectionLen]
+		offset += sectionLen
+		switch sectionID {
+		case 0x01:
+			if len(section) >= 2 {
+				chat.Visible = section[0] != 0
+				chat.Status = section[1]
+			}
+		case 0x02:
+			if value, _, ok := readString16(section, 0); ok {
+				chat.ModelName = value
+			}
+		case 0x03:
+			if value, _, ok := readString16(section, 0); ok {
+				chat.Prompt = value
+			}
+		case 0x04:
+			chat.Pending = decodeAgentPending(section)
+		case 0x07:
+			chat.Completion = decodeAgentCompletion(section)
+		case 0x08:
+			if value, _, ok := readString16(section, 0); ok {
+				chat.ThinkingLevel = value
+			}
+		case 0x06:
+			chat.Messages = decodeAgentMessages(section)
+		}
+	}
+	return chat, fmt.Sprintf("%s %d messages", chat.ModelName, len(chat.Messages)), size
+}
+
+func decodeAgentPending(section []byte) string {
+	if len(section) < 1 || section[0] == 0 {
+		return ""
+	}
+	name, offset, ok := readString16(section, 1)
+	if !ok {
+		return ""
+	}
+	summary, _, ok := readString16(section, offset)
+	if !ok {
+		return name
+	}
+	return strings.TrimSpace(name + " " + summary)
+}
+
+func decodeAgentCompletion(section []byte) []string {
+	if len(section) < 8 || section[0] == 0 {
+		return nil
+	}
+	count := int(section[7])
+	offset := 8
+	items := make([]string, 0, count)
+	for i := 0; i < count; i++ {
+		name, next, ok := readString16(section, offset)
+		if !ok {
+			break
+		}
+		desc, next, ok := readString16(section, next)
+		if !ok {
+			break
+		}
+		items = append(items, strings.TrimSpace(name+" "+desc))
+		offset = next
+	}
+	return items
+}
+
+func decodeAgentMessages(section []byte) []AgentChatMessage {
+	if len(section) < 4 || section[0] != 0xFF {
+		return nil
+	}
+	count := int(u16(section, 2))
+	offset := 4
+	messages := make([]AgentChatMessage, 0, count)
+	for i := 0; i < count && len(section) >= offset+4; i++ {
+		size := int(u32(section, offset))
+		offset += 4
+		if len(section) < offset+size {
+			break
+		}
+		if msg, ok := decodeAgentMessage(section[offset : offset+size]); ok {
+			messages = append(messages, msg)
+		}
+		offset += size
+	}
+	return messages
+}
+
+func decodeAgentMessage(body []byte) (AgentChatMessage, bool) {
+	if len(body) < 5 {
+		return AgentChatMessage{}, false
+	}
+	msg := AgentChatMessage{ID: u32(body, 0), Kind: body[4]}
+	offset := 5
+	switch msg.Kind {
+	case 0x01, 0x02:
+		if len(body) < offset+4 {
+			return msg, true
+		}
+		size := int(u32(body, offset))
+		offset += 4
+		if len(body) >= offset+size {
+			msg.Text = string(body[offset : offset+size])
+		}
+	case 0x03:
+		if len(body) < offset+5 {
+			return msg, true
+		}
+		size := int(u32(body, offset+1))
+		offset += 5
+		if len(body) >= offset+size {
+			msg.Text = string(body[offset : offset+size])
+		}
+	case 0x04:
+		if len(body) < offset+7 {
+			return msg, true
+		}
+		offset += 7
+		name, next, ok := readString16(body, offset)
+		if !ok {
+			return msg, true
+		}
+		summary, _, ok := readString16(body, next)
+		if ok {
+			msg.Text = strings.TrimSpace(name + " " + summary)
+		} else {
+			msg.Text = name
+		}
+	case 0x05:
+		if len(body) < offset+5 {
+			return msg, true
+		}
+		size := int(u32(body, offset+1))
+		offset += 5
+		if len(body) >= offset+size {
+			msg.Text = string(body[offset : offset+size])
+		}
+	case 0x06:
+		if len(body) >= offset+20 {
+			msg.Text = fmt.Sprintf("usage in:%d out:%d", u32(body, offset), u32(body, offset+4))
+		}
+	case 0x07:
+		msg.Text = decodeStyledLines(body[offset:])
+	case 0x08:
+		if len(body) < offset+7 {
+			return msg, true
+		}
+		offset += 7
+		name, next, ok := readString16(body, offset)
+		if !ok {
+			return msg, true
+		}
+		summary, _, ok := readString16(body, next)
+		if ok {
+			msg.Text = strings.TrimSpace(name + " " + summary)
+		} else {
+			msg.Text = name
+		}
+	case 0x09:
+		if len(body) < offset+1 {
+			return msg, true
+		}
+		name, next, ok := readString16(body, offset+1)
+		if !ok {
+			return msg, true
+		}
+		summary, _, ok := readString16(body, next)
+		if ok {
+			msg.Text = strings.TrimSpace(name + " " + summary)
+		} else {
+			msg.Text = name
+		}
+	}
+	return msg, true
+}
+
+func decodeStyledLines(body []byte) string {
+	if len(body) < 2 {
+		return ""
+	}
+	count := int(u16(body, 0))
+	offset := 2
+	lines := make([]string, 0, count)
+	for i := 0; i < count && len(body) >= offset+2; i++ {
+		runCount := int(u16(body, offset))
+		offset += 2
+		parts := make([]string, 0, runCount)
+		for j := 0; j < runCount; j++ {
+			text, next, ok := readString16(body, offset)
+			if !ok || len(body) < next+7 {
+				return stringsJoin(lines, " ")
+			}
+			flags := body[next+6]
+			offset = next + 7
+			if flags&0x08 != 0 {
+				_, next, ok = readString16(body, offset)
+				if !ok {
+					return stringsJoin(lines, " ")
+				}
+				offset = next
+			}
+			parts = append(parts, text)
+		}
+		lines = append(lines, stringsJoin(parts, ""))
+	}
+	return stringsJoin(lines, " ")
+}
+
+func decodeBoard(payload []byte) (Board, string, int) {
+	if len(payload) < 10 {
+		return Board{}, "", len(payload)
+	}
+	board := Board{Visible: payload[1] != 0, FocusedCardID: u32(payload, 2), FilterMode: payload[8] != 0}
+	count := int(u16(payload, 6))
+	offset := 9
+	var ok bool
+	board.FilterText, offset, ok = readString16(payload, offset)
+	if !ok {
+		return board, "", len(payload)
+	}
+	board.Cards = make([]BoardCard, 0, count)
+	for i := 0; i < count && len(payload) >= offset+16; i++ {
+		card := BoardCard{ID: u32(payload, offset), Status: payload[offset+4], Flags: payload[offset+5]}
+		offset += 6
+		card.Task, offset, ok = readString16(payload, offset)
+		if !ok {
+			break
+		}
+		card.Model, offset, ok = readString8(payload, offset)
+		if !ok || len(payload) < offset+5 {
+			break
+		}
+		card.Timestamp = u32(payload, offset)
+		fileCount := int(payload[offset+4])
+		offset += 5
+		card.RecentFiles = make([]string, 0, fileCount)
+		for j := 0; j < fileCount; j++ {
+			file, next, ok := readString16(payload, offset)
+			if !ok {
+				break
+			}
+			card.RecentFiles = append(card.RecentFiles, file)
+			offset = next
+		}
+		if len(payload) < offset+1 {
+			break
+		}
+		sparkCount := int(payload[offset])
+		offset += 1 + sparkCount*2
+		if len(payload) < offset {
+			break
+		}
+		board.Cards = append(board.Cards, card)
+	}
+	return board, fmt.Sprintf("%d cards", len(board.Cards)), offset
+}
+
+func decodeEditTimeline(payload []byte) (EditTimeline, string, int) {
+	size := payloadLen16Size(payload)
+	if size == 0 {
+		return EditTimeline{}, "", len(payload)
+	}
+	body := payload[3:size]
+	if len(body) < 4 {
+		return EditTimeline{}, "", size
+	}
+	timeline := EditTimeline{Visible: body[0] != 0, ViewingIndex: u16(body, 1)}
+	count := int(body[3])
+	offset := 4
+	timeline.Entries = make([]TimelineEntry, 0, count)
+	for i := 0; i < count && len(body) >= offset+6; i++ {
+		entry := TimelineEntry{Index: body[offset]}
+		offset++
+		var ok bool
+		entry.ToolName, offset, ok = readString8(body, offset)
+		if !ok || len(body) < offset+4 {
+			break
+		}
+		entry.TimestampDelta = u32(body, offset)
+		offset += 4
+		timeline.Entries = append(timeline.Entries, entry)
+	}
+	return timeline, fmt.Sprintf("%d edits", len(timeline.Entries)), size
+}
+
+func decodeGutterSeparator(payload []byte) (GutterSeparator, string, int) {
+	if len(payload) < 6 {
+		return GutterSeparator{}, "", len(payload)
+	}
+	gutter := GutterSeparator{Col: u16(payload, 1), Color: u24(payload, 3)}
+	return gutter, fmt.Sprintf("col %d", gutter.Col), 6
+}
+
+func decodeSplitSeparators(payload []byte) (SplitSeparators, string, int) {
+	if len(payload) < 5 {
+		return SplitSeparators{}, "", len(payload)
+	}
+	splits := SplitSeparators{Color: u24(payload, 1)}
+	count := int(payload[4])
+	offset := 5
+	splits.Verticals = make([]VerticalSeparator, 0, count)
+	for i := 0; i < count && len(payload) >= offset+6; i++ {
+		splits.Verticals = append(splits.Verticals, VerticalSeparator{Col: u16(payload, offset), StartRow: u16(payload, offset+2), EndRow: u16(payload, offset+4)})
+		offset += 6
+	}
+	if len(payload) < offset+1 {
+		return splits, splitSummary(splits), offset
+	}
+	hCount := int(payload[offset])
+	offset++
+	splits.Horizontals = make([]HorizontalSeparator, 0, hCount)
+	for i := 0; i < hCount && len(payload) >= offset+8; i++ {
+		sep := HorizontalSeparator{Row: u16(payload, offset), Col: u16(payload, offset+2), Width: u16(payload, offset+4)}
+		offset += 6
+		var ok bool
+		sep.Filename, offset, ok = readString16(payload, offset)
+		if !ok {
+			break
+		}
+		splits.Horizontals = append(splits.Horizontals, sep)
+	}
+	return splits, splitSummary(splits), offset
+}
+
+func splitSummary(splits SplitSeparators) string {
+	return fmt.Sprintf("%d vertical %d horizontal", len(splits.Verticals), len(splits.Horizontals))
+}
+
+func decodeRichLine(payload []byte, offset int, count int) (RichLine, int, bool) {
+	line := RichLine{Segments: make([]RichSegment, 0, count)}
+	for i := 0; i < count && offset < len(payload); i++ {
+		segment := RichSegment{Style: payload[offset]}
+		offset++
+		if segment.Style == 13 {
+			if len(payload) < offset+6 {
+				return line, offset, false
+			}
+			segment.FG = u24(payload, offset)
+			segment.Flags = payload[offset+3]
+			offset += 4
+		}
+		text, next, ok := readString16(payload, offset)
+		if !ok {
+			return line, offset, false
+		}
+		segment.Text = text
+		offset = next
+		line.Segments = append(line.Segments, segment)
+	}
+	return line, offset, true
+}
+
+func richLineText(line RichLine) string {
+	parts := make([]string, 0, len(line.Segments))
+	for _, segment := range line.Segments {
+		parts = append(parts, segment.Text)
+	}
+	return stringsJoin(parts, "")
+}
+
 func fixedNoop(payload []byte, size int, name string) (Command, error) {
 	if len(payload) < size {
 		return Command{}, fmt.Errorf("short %s", name)
@@ -1219,13 +2678,37 @@ func sectionedSize(payload []byte) int {
 	return offset
 }
 
+func payloadLen16Size(payload []byte) int {
+	if len(payload) < 3 {
+		return 0
+	}
+	size := 3 + int(u16(payload, 1))
+	if len(payload) < size {
+		return 0
+	}
+	return size
+}
+
+func payloadLen32Size(payload []byte) int {
+	if len(payload) < 5 {
+		return 0
+	}
+	size := 5 + int(u32(payload, 1))
+	if len(payload) < size {
+		return 0
+	}
+	return size
+}
+
 func opcodeName(opcode byte) string {
 	switch opcode {
 	case generated.OPGuiTabBar:
 		return "tabs"
 	case generated.OPGuiWorkspaces:
 		return "workspaces"
-	case generated.OPGuiSidebars, generated.OPGuiFileTree:
+	case generated.OPGuiSidebars:
+		return "sidebars"
+	case generated.OPGuiFileTree:
 		return "file tree"
 	case generated.OPGuiPicker:
 		return "picker"
@@ -1245,6 +2728,40 @@ func opcodeName(opcode byte) string {
 		return "extension"
 	case generated.OPGuiNotifications:
 		return "notifications"
+	case generated.OPGuiTheme:
+		return "theme"
+	case generated.OPGuiBreadcrumb:
+		return "breadcrumb"
+	case generated.OPGuiGitStatus:
+		return "git"
+	case generated.OPGuiSearchState:
+		return "search"
+	case generated.OPGuiChangeSummary:
+		return "changes"
+	case generated.OPGuiHoverPopup:
+		return "hover"
+	case generated.OPGuiHoverAction:
+		return "hover action"
+	case generated.OPGuiSignatureHelp:
+		return "signature"
+	case generated.OPGuiFloatPopup:
+		return "float"
+	case generated.OPGuiExtensionOverlay:
+		return "extension overlay"
+	case generated.OPGuiObservatory:
+		return "observatory"
+	case generated.OPGuiAgentContext:
+		return "agent context"
+	case generated.OPGuiAgentChat:
+		return "agent chat"
+	case generated.OPGuiBoard:
+		return "board"
+	case generated.OPGuiEditTimeline:
+		return "edit timeline"
+	case generated.OPGuiGutterSep:
+		return "gutter separator"
+	case generated.OPGuiSplitSeparators:
+		return "split separators"
 	default:
 		return fmt.Sprintf("0x%02X", opcode)
 	}

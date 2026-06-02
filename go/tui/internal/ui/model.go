@@ -19,6 +19,27 @@ const (
 	arrowDown  rune = 57353
 )
 
+const (
+	themeEditorFG       byte = 0x02
+	themeTreeBG         byte = 0x03
+	themeTreeFG         byte = 0x04
+	themeTreeSelectBG   byte = 0x05
+	themeTreeHeaderBG   byte = 0x08
+	themeTreeHeaderFG   byte = 0x09
+	themeTabBG          byte = 0x10
+	themeTabActiveBG    byte = 0x11
+	themeTabActiveFG    byte = 0x12
+	themeTabInactiveFG  byte = 0x13
+	themeTabModifiedFG  byte = 0x14
+	themeTabAttentionFG byte = 0x17
+	themePopupSelBG     byte = 0x23
+	themeBreadcrumbBG   byte = 0x27
+	themeModelineBG     byte = 0x30
+	themeModelineFG     byte = 0x31
+	themeAccent         byte = 0x40
+	themeWarningFG      byte = 0x53
+)
+
 type Model struct {
 	width       int
 	height      int
@@ -240,11 +261,11 @@ func (m Model) cellLines() []string {
 func (m Model) withFileTree(mainLines []string) []string {
 	tree, ok := m.fileTree()
 	if !ok || !tree.Visible || len(tree.Rows) == 0 || m.width < 50 {
-		return mainLines
+		return m.withSemanticSidebars(mainLines)
 	}
 
 	sidebarWidth := min(max(int(tree.Width), 24), max(m.width/3, 24))
-	sidebar := renderFileTree(tree, sidebarWidth, max(len(mainLines), m.bodyHeight()))
+	sidebar := m.renderFileTree(tree, sidebarWidth, max(len(mainLines), m.bodyHeight()))
 	lines := make([]string, max(len(mainLines), len(sidebar)))
 	for i := range lines {
 		left := ""
@@ -260,10 +281,46 @@ func (m Model) withFileTree(mainLines []string) []string {
 	return lines
 }
 
-func renderFileTree(tree protocol.FileTree, width int, height int) []string {
-	style := lipgloss.NewStyle().Foreground(lipgloss.Color("#AEB7C2")).Background(lipgloss.Color("#151820")).Width(width)
-	selectedStyle := style.Foreground(lipgloss.Color("#E6EDF3")).Background(lipgloss.Color("#2D3A4D")).Bold(true)
-	header := style.Bold(true).Foreground(lipgloss.Color("#C7D1FF")).Render(fit("Files  "+tree.Root, width))
+func (m Model) withSemanticSidebars(mainLines []string) []string {
+	sidebars, ok := m.sidebars()
+	if !ok || len(sidebars.Items) == 0 || m.width < 60 {
+		return mainLines
+	}
+	visible := make([]protocol.Sidebar, 0, len(sidebars.Items))
+	for _, item := range sidebars.Items {
+		if item.Visible {
+			visible = append(visible, item)
+		}
+	}
+	if len(visible) == 0 {
+		return mainLines
+	}
+	width := min(max(int(visible[0].PreferredWidth), 18), max(m.width/4, 18))
+	style := lipgloss.NewStyle().Foreground(m.color("muted", "#AEB7C2")).Background(m.color("surface", "#151820")).Width(width)
+	activeStyle := style.Bold(true).Foreground(m.color("text", "#FFFFFF")).Background(m.color("selection", "#2D3A4D"))
+	lines := make([]string, max(len(mainLines), len(visible)+1))
+	lines[0] = lipgloss.JoinHorizontal(lipgloss.Top, style.Bold(true).Render(fit("Sidebars", width)), lineAt(mainLines, 0))
+	for i, item := range visible {
+		label := strings.TrimSpace(item.Icon + " " + item.DisplayName)
+		if item.BadgeCount != 0xFFFF && item.BadgeCount > 0 {
+			label += fmt.Sprintf(" %d", item.BadgeCount)
+		}
+		leftStyle := style
+		if item.ID == sidebars.ActiveID || item.Focused {
+			leftStyle = activeStyle
+		}
+		lines[i+1] = lipgloss.JoinHorizontal(lipgloss.Top, leftStyle.Render(fit(label, width)), lineAt(mainLines, i+1))
+	}
+	for i := len(visible) + 1; i < len(lines); i++ {
+		lines[i] = lipgloss.JoinHorizontal(lipgloss.Top, style.Render(strings.Repeat(" ", width)), lineAt(mainLines, i))
+	}
+	return lines
+}
+
+func (m Model) renderFileTree(tree protocol.FileTree, width int, height int) []string {
+	style := lipgloss.NewStyle().Foreground(m.color("treeText", "#AEB7C2")).Background(m.color("treeSurface", "#151820")).Width(width)
+	selectedStyle := style.Foreground(m.color("text", "#E6EDF3")).Background(m.color("treeSelection", "#2D3A4D")).Bold(true)
+	header := style.Bold(true).Foreground(m.color("treeHeaderText", "#C7D1FF")).Background(m.color("treeHeader", "#151820")).Render(fit("Files  "+tree.Root, width))
 	lines := []string{header}
 	for _, row := range tree.Rows {
 		prefix := strings.Repeat("  ", int(row.Depth))
@@ -298,9 +355,12 @@ func (m Model) headerLines() []string {
 	if title == "" {
 		title = "Minga"
 	}
+	if crumb, ok := m.breadcrumb(); ok && len(crumb.Segments) > 0 {
+		title += "  " + strings.Join(crumb.Segments, " / ")
+	}
 
 	lines := []string{
-		lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#C7D1FF")).Background(lipgloss.Color("#20242C")).Width(m.width).Render(title),
+		lipgloss.NewStyle().Bold(true).Foreground(m.color("accent", "#C7D1FF")).Background(m.color("surface", "#20242C")).Width(m.width).Render(title),
 	}
 	if spaces, ok := m.workspaceBar(); ok && len(spaces.Spaces) > 0 {
 		lines = append(lines, m.renderWorkspaces(spaces))
@@ -308,13 +368,16 @@ func (m Model) headerLines() []string {
 	if tabBar, ok := m.tabBar(); ok && len(tabBar.Tabs) > 0 {
 		lines = append(lines, m.renderTabs(tabBar))
 	}
+	if git, ok := m.gitStatus(); ok && git.Branch != "" {
+		lines = append(lines, m.renderGitStatus(git))
+	}
 	return lines
 }
 
 func (m Model) renderWorkspaces(spaces protocol.WorkspaceBar) string {
-	activeStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(lipgloss.Color("#2F4052")).Padding(0, 1)
-	inactiveStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#AEB7C2")).Background(lipgloss.Color("#171B22")).Padding(0, 1)
-	alertStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#EBCB8B"))
+	activeStyle := lipgloss.NewStyle().Bold(true).Foreground(m.color("tabActiveText", "#FFFFFF")).Background(m.color("selection", "#2F4052")).Padding(0, 1)
+	inactiveStyle := lipgloss.NewStyle().Foreground(m.color("tabInactiveText", "#AEB7C2")).Background(m.color("surfaceAlt", "#171B22")).Padding(0, 1)
+	alertStyle := lipgloss.NewStyle().Foreground(m.color("warning", "#EBCB8B"))
 	rendered := make([]string, 0, len(spaces.Spaces))
 	for _, space := range spaces.Spaces {
 		label := strings.TrimSpace(space.Icon + " " + space.Label)
@@ -339,13 +402,13 @@ func (m Model) renderWorkspaces(spaces protocol.WorkspaceBar) string {
 		}
 		rendered = append(rendered, style.Render(label))
 	}
-	return lipgloss.NewStyle().Background(lipgloss.Color("#171B22")).Width(m.width).Render(strings.Join(rendered, ""))
+	return lipgloss.NewStyle().Background(m.color("surfaceAlt", "#171B22")).Width(m.width).Render(strings.Join(rendered, ""))
 }
 
 func (m Model) renderTabs(tabBar protocol.TabBar) string {
-	activeStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(lipgloss.Color("#35415A")).Padding(0, 1)
-	inactiveStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#AEB7C2")).Background(lipgloss.Color("#20242C")).Padding(0, 1)
-	dirtyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#EBCB8B"))
+	activeStyle := lipgloss.NewStyle().Bold(true).Foreground(m.color("tabActiveText", "#FFFFFF")).Background(m.color("tabActive", "#35415A")).Padding(0, 1)
+	inactiveStyle := lipgloss.NewStyle().Foreground(m.color("tabInactiveText", "#AEB7C2")).Background(m.color("surface", "#20242C")).Padding(0, 1)
+	dirtyStyle := lipgloss.NewStyle().Foreground(m.color("tabDirty", "#EBCB8B"))
 	rendered := make([]string, 0, len(tabBar.Tabs))
 	for _, tab := range tabBar.Tabs {
 		label := strings.TrimSpace(tab.Icon + " " + tab.Label)
@@ -353,7 +416,7 @@ func (m Model) renderTabs(tabBar protocol.TabBar) string {
 			label += dirtyStyle.Render(" *")
 		}
 		if tab.Attention {
-			label += " !"
+			label += lipgloss.NewStyle().Foreground(m.color("tabAttention", "#EBCB8B")).Render(" !")
 		}
 		style := inactiveStyle
 		if tab.Active {
@@ -361,7 +424,7 @@ func (m Model) renderTabs(tabBar protocol.TabBar) string {
 		}
 		rendered = append(rendered, style.Render(label))
 	}
-	return lipgloss.NewStyle().Background(lipgloss.Color("#20242C")).Width(m.width).Render(strings.Join(rendered, ""))
+	return lipgloss.NewStyle().Background(m.color("surface", "#20242C")).Width(m.width).Render(strings.Join(rendered, ""))
 }
 
 func (m Model) footerLines() []string {
@@ -375,8 +438,14 @@ func (m Model) footerLines() []string {
 	if m.lastError != "" {
 		status = m.lastError
 	}
+	if search, ok := m.searchState(); ok && search.Active {
+		status += fmt.Sprintf("  search %d/%d", search.CurrentIndex, search.Count)
+	}
+	if changes, ok := m.changeSummary(); ok && changes.Visible && len(changes.Entries) > 0 {
+		status += fmt.Sprintf("  changes %d", len(changes.Entries))
+	}
 	lines := []string{
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#9AA4B2")).Background(lipgloss.Color("#16181D")).Width(m.width).Render(status),
+		lipgloss.NewStyle().Foreground(m.color("muted", "#9AA4B2")).Background(m.color("base", "#16181D")).Width(m.width).Render(status),
 	}
 	overlay := m.overlayLines()
 	if len(overlay) > 0 {
@@ -398,7 +467,211 @@ func (m Model) overlayLines() []string {
 	if which, ok := m.whichKey(); ok && which.Visible && len(which.Bindings) > 0 {
 		return m.renderWhichKey(which)
 	}
+	if hover, ok := m.hoverPopup(); ok && hover.Visible && len(hover.Lines) > 0 {
+		return m.renderHover(hover)
+	}
+	if sig, ok := m.signatureHelp(); ok && sig.Visible && len(sig.Signatures) > 0 {
+		return m.renderSignature(sig)
+	}
+	if float, ok := m.floatPopup(); ok && float.Visible {
+		return m.renderFloat(float)
+	}
+	if chat, ok := m.agentChat(); ok && chat.Visible {
+		return m.renderAgentChat(chat)
+	}
+	if board, ok := m.board(); ok && board.Visible {
+		return m.renderBoard(board)
+	}
+	if bottom, ok := m.bottomPanel(); ok && bottom.Visible {
+		return m.renderBottomPanel(bottom)
+	}
+	if ext, ok := m.extensionPanel(); ok && len(ext.Panels) > 0 {
+		return m.renderExtensionPanels(ext)
+	}
+	if obs, ok := m.observatory(); ok && obs.Visible {
+		return m.renderObservatory(obs)
+	}
+	if timeline, ok := m.editTimeline(); ok && timeline.Visible {
+		return m.renderEditTimeline(timeline)
+	}
+	if notes, ok := m.notifications(); ok && notes.Visible && len(notes.Items) > 0 {
+		return m.renderNotifications(notes)
+	}
+	if overlay, ok := m.extensionOverlay(); ok && len(overlay.Entries) > 0 {
+		return m.renderExtensionOverlay(overlay)
+	}
 	return nil
+}
+
+func (m Model) renderGitStatus(git protocol.GitStatus) string {
+	parts := []string{"git " + git.Branch}
+	if git.Syncing {
+		parts = append(parts, "syncing")
+	}
+	if git.Ahead > 0 {
+		parts = append(parts, fmt.Sprintf("ahead %d", git.Ahead))
+	}
+	if git.Behind > 0 {
+		parts = append(parts, fmt.Sprintf("behind %d", git.Behind))
+	}
+	if len(git.Entries) > 0 {
+		parts = append(parts, fmt.Sprintf("%d files", len(git.Entries)))
+	}
+	if git.Toast.Visible && git.Toast.Message != "" {
+		parts = append(parts, git.Toast.Message)
+	}
+	return lipgloss.NewStyle().Foreground(m.color("muted", "#AEB7C2")).Background(m.color("surfaceAlt", "#171B22")).Width(m.width).Render(fit(strings.Join(parts, "  "), m.width))
+}
+
+func (m Model) renderHover(hover protocol.HoverPopup) []string {
+	style := m.panelStyle()
+	title := fmt.Sprintf("Hover %d:%d", hover.AnchorRow+1, hover.AnchorCol+1)
+	lines := []string{style.Bold(true).Foreground(m.color("accent", "#C7D1FF")).Render(fit(title, m.width))}
+	for _, line := range hover.Lines[:min(len(hover.Lines), max(m.maxOverlayHeight()-1, 0))] {
+		lines = append(lines, style.Render(fit(renderRichLine(line), m.width)))
+	}
+	if action, ok := m.hoverAction(); ok && action.Visible {
+		lines = append(lines, style.Foreground(m.color("accent", "#C7D1FF")).Render(fit(action.Name, m.width)))
+	}
+	return takeLines(lines, m.maxOverlayHeight())
+}
+
+func (m Model) renderSignature(sig protocol.SignatureHelp) []string {
+	style := m.panelStyle()
+	active := sig.Signatures[min(int(sig.ActiveSignature), len(sig.Signatures)-1)]
+	lines := []string{style.Bold(true).Foreground(m.color("accent", "#C7D1FF")).Render(fit(active.Label, m.width))}
+	if active.Doc != "" {
+		lines = append(lines, style.Render(fit(active.Doc, m.width)))
+	}
+	for i, param := range active.Parameters {
+		label := param.Label
+		if byte(i) == sig.ActiveParameter {
+			label = "> " + label
+		}
+		lines = append(lines, style.Render(fit(label+"  "+param.Doc, m.width)))
+	}
+	return takeLines(lines, m.maxOverlayHeight())
+}
+
+func (m Model) renderFloat(float protocol.FloatPopup) []string {
+	style := m.panelStyle()
+	title := float.Title
+	if title == "" {
+		title = "Popup"
+	}
+	lines := []string{style.Bold(true).Foreground(m.color("accent", "#C7D1FF")).Render(fit(title, m.width))}
+	for _, line := range float.Lines[:min(len(float.Lines), max(m.maxOverlayHeight()-1, 0))] {
+		lines = append(lines, style.Render(fit(line, m.width)))
+	}
+	return lines
+}
+
+func (m Model) renderAgentChat(chat protocol.AgentChat) []string {
+	style := m.panelStyle()
+	title := "Agent"
+	if chat.ModelName != "" {
+		title += "  " + chat.ModelName
+	}
+	lines := []string{style.Bold(true).Foreground(m.color("accent", "#C7D1FF")).Render(fit(title, m.width))}
+	if chat.ThinkingLevel != "" {
+		lines = append(lines, style.Render(fit("thinking "+chat.ThinkingLevel, m.width)))
+	}
+	if chat.Pending != "" {
+		lines = append(lines, style.Foreground(m.color("warning", "#EBCB8B")).Render(fit("approval "+chat.Pending, m.width)))
+	}
+	start := max(len(chat.Messages)-max(m.maxOverlayHeight()+1, 1), 0)
+	for _, msg := range chat.Messages[start:] {
+		prefix := agentMessagePrefix(msg.Kind)
+		lines = append(lines, style.Render(fit(prefix+" "+msg.Text, m.width)))
+	}
+	if chat.Prompt != "" {
+		lines = append(lines, style.Foreground(m.color("muted", "#AEB7C2")).Render(fit("> "+chat.Prompt, m.width)))
+	}
+	return takeLines(lines, m.maxOverlayHeight())
+}
+
+func (m Model) renderBoard(board protocol.Board) []string {
+	style := m.panelStyle()
+	lines := []string{style.Bold(true).Foreground(m.color("accent", "#C7D1FF")).Render(fit(fmt.Sprintf("Board  %d cards", len(board.Cards)), m.width))}
+	for _, card := range board.Cards[:min(len(board.Cards), max(m.maxOverlayHeight()-1, 0))] {
+		marker := " "
+		if card.ID == board.FocusedCardID || card.Flags&0x02 != 0 {
+			marker = ">"
+		}
+		lines = append(lines, style.Render(fit(fmt.Sprintf("%s %s  %s", marker, statusName(card.Status), card.Task), m.width)))
+	}
+	return lines
+}
+
+func (m Model) renderBottomPanel(panel protocol.BottomPanel) []string {
+	style := m.panelStyle()
+	title := "Panel"
+	if len(panel.Tabs) > int(panel.ActiveTab) {
+		title = panel.Tabs[panel.ActiveTab].Name
+	}
+	lines := []string{style.Bold(true).Foreground(m.color("accent", "#C7D1FF")).Render(fit(title, m.width))}
+	for _, msg := range panel.Messages[:min(len(panel.Messages), max(m.maxOverlayHeight()-1, 0))] {
+		lines = append(lines, style.Render(fit(strings.TrimSpace(msg.Path+"  "+msg.Text), m.width)))
+	}
+	return lines
+}
+
+func (m Model) renderExtensionPanels(ext protocol.ExtensionPanel) []string {
+	style := m.panelStyle()
+	lines := []string{style.Bold(true).Foreground(m.color("accent", "#C7D1FF")).Render(fit("Extensions", m.width))}
+	for _, panel := range ext.Panels {
+		if !panel.Visible {
+			continue
+		}
+		lines = append(lines, style.Render(fit(panel.Title, m.width)))
+		for _, block := range panel.Blocks[:min(len(panel.Blocks), 2)] {
+			lines = append(lines, style.Foreground(m.color("muted", "#AEB7C2")).Render(fit(block, m.width)))
+		}
+		if len(lines) >= m.maxOverlayHeight() {
+			break
+		}
+	}
+	return takeLines(lines, m.maxOverlayHeight())
+}
+
+func (m Model) renderObservatory(obs protocol.Observatory) []string {
+	style := m.panelStyle()
+	lines := []string{style.Bold(true).Foreground(m.color("accent", "#C7D1FF")).Render(fit(fmt.Sprintf("Observatory  %d processes", max(int(obs.Count), len(obs.Nodes))), m.width))}
+	for _, node := range obs.Nodes[:min(len(obs.Nodes), max(m.maxOverlayHeight()-1, 0))] {
+		lines = append(lines, style.Render(fit(strings.Repeat("  ", int(node.Depth))+node.Name, m.width)))
+	}
+	return lines
+}
+
+func (m Model) renderEditTimeline(timeline protocol.EditTimeline) []string {
+	style := m.panelStyle()
+	lines := []string{style.Bold(true).Foreground(m.color("accent", "#C7D1FF")).Render(fit("Edit timeline", m.width))}
+	for _, entry := range timeline.Entries[:min(len(timeline.Entries), max(m.maxOverlayHeight()-1, 0))] {
+		lines = append(lines, style.Render(fit(fmt.Sprintf("%d  %s", entry.Index, entry.ToolName), m.width)))
+	}
+	return lines
+}
+
+func (m Model) renderNotifications(notes protocol.Notifications) []string {
+	style := m.panelStyle()
+	lines := []string{style.Bold(true).Foreground(m.color("accent", "#C7D1FF")).Render(fit("Notifications", m.width))}
+	for _, note := range notes.Items[:min(len(notes.Items), max(m.maxOverlayHeight()-1, 0))] {
+		text := note.Title
+		if note.Body != "" {
+			text += "  " + note.Body
+		}
+		lines = append(lines, style.Render(fit(text, m.width)))
+	}
+	return lines
+}
+
+func (m Model) renderExtensionOverlay(overlay protocol.ExtensionOverlay) []string {
+	style := m.panelStyle()
+	lines := []string{style.Bold(true).Foreground(m.color("accent", "#C7D1FF")).Render(fit("Extension overlays", m.width))}
+	for _, entry := range overlay.Entries[:min(len(overlay.Entries), max(m.maxOverlayHeight()-1, 0))] {
+		lines = append(lines, style.Render(fit(fmt.Sprintf("%s %d:%d %s", entry.Extension, entry.Row+1, entry.Col+1, entry.Content), m.width)))
+	}
+	return lines
 }
 
 func (m Model) renderMinibuffer(mini protocol.Minibuffer) string {
@@ -632,6 +905,159 @@ func (m Model) statusBar() (protocol.StatusBar, bool) {
 	return protocol.StatusBar{}, false
 }
 
+func (m Model) breadcrumb() (protocol.Breadcrumb, bool) {
+	for _, payload := range m.chrome {
+		if len(payload.Breadcrumb.Segments) > 0 {
+			return payload.Breadcrumb, true
+		}
+	}
+	return protocol.Breadcrumb{}, false
+}
+
+func (m Model) gitStatus() (protocol.GitStatus, bool) {
+	for _, payload := range m.chrome {
+		if payload.Git.Branch != "" || len(payload.Git.Entries) > 0 {
+			return payload.Git, true
+		}
+	}
+	return protocol.GitStatus{}, false
+}
+
+func (m Model) searchState() (protocol.SearchState, bool) {
+	for _, payload := range m.chrome {
+		if payload.Search.Active {
+			return payload.Search, true
+		}
+	}
+	return protocol.SearchState{}, false
+}
+
+func (m Model) changeSummary() (protocol.ChangeSummary, bool) {
+	for _, payload := range m.chrome {
+		if payload.Change.Visible || len(payload.Change.Entries) > 0 {
+			return payload.Change, true
+		}
+	}
+	return protocol.ChangeSummary{}, false
+}
+
+func (m Model) hoverPopup() (protocol.HoverPopup, bool) {
+	for _, payload := range m.chrome {
+		if payload.Hover.Visible {
+			return payload.Hover, true
+		}
+	}
+	return protocol.HoverPopup{}, false
+}
+
+func (m Model) hoverAction() (protocol.HoverAction, bool) {
+	for _, payload := range m.chrome {
+		if payload.HoverAction.Visible {
+			return payload.HoverAction, true
+		}
+	}
+	return protocol.HoverAction{}, false
+}
+
+func (m Model) signatureHelp() (protocol.SignatureHelp, bool) {
+	for _, payload := range m.chrome {
+		if payload.Signature.Visible {
+			return payload.Signature, true
+		}
+	}
+	return protocol.SignatureHelp{}, false
+}
+
+func (m Model) floatPopup() (protocol.FloatPopup, bool) {
+	for _, payload := range m.chrome {
+		if payload.Float.Visible {
+			return payload.Float, true
+		}
+	}
+	return protocol.FloatPopup{}, false
+}
+
+func (m Model) extensionOverlay() (protocol.ExtensionOverlay, bool) {
+	for _, payload := range m.chrome {
+		if len(payload.Overlay.Entries) > 0 {
+			return payload.Overlay, true
+		}
+	}
+	return protocol.ExtensionOverlay{}, false
+}
+
+func (m Model) notifications() (protocol.Notifications, bool) {
+	for _, payload := range m.chrome {
+		if payload.Notifications.Visible || len(payload.Notifications.Items) > 0 {
+			return payload.Notifications, true
+		}
+	}
+	return protocol.Notifications{}, false
+}
+
+func (m Model) bottomPanel() (protocol.BottomPanel, bool) {
+	for _, payload := range m.chrome {
+		if payload.Bottom.Visible {
+			return payload.Bottom, true
+		}
+	}
+	return protocol.BottomPanel{}, false
+}
+
+func (m Model) extensionPanel() (protocol.ExtensionPanel, bool) {
+	for _, payload := range m.chrome {
+		if len(payload.Extensions.Panels) > 0 {
+			return payload.Extensions, true
+		}
+	}
+	return protocol.ExtensionPanel{}, false
+}
+
+func (m Model) sidebars() (protocol.Sidebars, bool) {
+	for _, payload := range m.chrome {
+		if payload.Sidebars.Visible || len(payload.Sidebars.Items) > 0 {
+			return payload.Sidebars, true
+		}
+	}
+	return protocol.Sidebars{}, false
+}
+
+func (m Model) observatory() (protocol.Observatory, bool) {
+	for _, payload := range m.chrome {
+		if payload.Observatory.Visible || len(payload.Observatory.Nodes) > 0 {
+			return payload.Observatory, true
+		}
+	}
+	return protocol.Observatory{}, false
+}
+
+func (m Model) agentChat() (protocol.AgentChat, bool) {
+	for _, payload := range m.chrome {
+		if payload.AgentChat.Visible {
+			return payload.AgentChat, true
+		}
+	}
+	return protocol.AgentChat{}, false
+}
+
+func (m Model) board() (protocol.Board, bool) {
+	for _, payload := range m.chrome {
+		if payload.Board.Visible {
+			return payload.Board, true
+		}
+	}
+	return protocol.Board{}, false
+}
+
+func (m Model) editTimeline() (protocol.EditTimeline, bool) {
+	for _, payload := range m.chrome {
+		if payload.Timeline.Visible {
+			return payload.Timeline, true
+		}
+	}
+	return protocol.EditTimeline{}, false
+}
+
 func (m Model) send(payload []byte) {
 	if m.out != nil {
 		m.out <- payload
@@ -731,6 +1157,96 @@ func styleFor(span protocol.Span) lipgloss.Style {
 		style = style.Reverse(true)
 	}
 	return style
+}
+
+func (m Model) color(name string, fallback string) lipgloss.Color {
+	slot := map[string]byte{
+		"base":            themeModelineBG,
+		"surface":         themeTabBG,
+		"surfaceAlt":      themeBreadcrumbBG,
+		"text":            themeEditorFG,
+		"treeSurface":     themeTreeBG,
+		"treeText":        themeTreeFG,
+		"treeSelection":   themeTreeSelectBG,
+		"treeHeader":      themeTreeHeaderBG,
+		"treeHeaderText":  themeTreeHeaderFG,
+		"muted":           themeModelineFG,
+		"accent":          themeAccent,
+		"selection":       themePopupSelBG,
+		"warning":         themeWarningFG,
+		"tabActive":       themeTabActiveBG,
+		"tabActiveText":   themeTabActiveFG,
+		"tabInactiveText": themeTabInactiveFG,
+		"tabDirty":        themeTabModifiedFG,
+		"tabAttention":    themeTabAttentionFG,
+	}[name]
+	for _, payload := range m.chrome {
+		if payload.Theme.Colors != nil {
+			if rgb, ok := payload.Theme.Colors[slot]; ok {
+				return lipgloss.Color(fmt.Sprintf("#%06X", rgb))
+			}
+		}
+	}
+	return lipgloss.Color(fallback)
+}
+
+func (m Model) panelStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(m.color("text", "#D8DEE9")).Background(m.color("base", "#101318")).Width(m.width)
+}
+
+func lineAt(lines []string, index int) string {
+	if index >= 0 && index < len(lines) {
+		return lines[index]
+	}
+	return ""
+}
+
+func renderRichLine(line protocol.RichLine) string {
+	parts := make([]string, 0, len(line.Segments))
+	for _, segment := range line.Segments {
+		parts = append(parts, segment.Text)
+	}
+	return strings.Join(parts, "")
+}
+
+func agentMessagePrefix(kind byte) string {
+	switch kind {
+	case 0x01:
+		return "you"
+	case 0x02, 0x07:
+		return "assistant"
+	case 0x03:
+		return "thinking"
+	case 0x04, 0x08:
+		return "tool"
+	case 0x05:
+		return "system"
+	case 0x06:
+		return "usage"
+	case 0x09:
+		return "approval"
+	default:
+		return "message"
+	}
+}
+
+func statusName(status byte) string {
+	switch status {
+	case 0:
+		return "idle"
+	case 1:
+		return "working"
+	case 2:
+		return "iterating"
+	case 3:
+		return "needs you"
+	case 4:
+		return "done"
+	case 5:
+		return "error"
+	default:
+		return "unknown"
+	}
 }
 
 func displayWidth(value string) int {
