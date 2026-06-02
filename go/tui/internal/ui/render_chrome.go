@@ -137,31 +137,23 @@ func (m Model) renderGitStatus(git protocol.GitStatus) string {
 }
 
 func (m Model) renderMinibuffer(mini protocol.Minibuffer) string {
-	value := strings.TrimSpace(mini.Prompt + mini.Input)
+	prompt := mini.Prompt
+	if prompt == "" {
+		prompt = "> "
+	}
+	value := mini.Input
 	if mini.Context != "" {
 		value += "  " + mini.Context
 	}
-	return lipgloss.NewStyle().Foreground(lipgloss.Color("#D8DEE9")).Background(lipgloss.Color("#101318")).Width(m.width).Render(value)
+	return m.charmInput(prompt, value, mini.CursorPos)
 }
 
 func (m Model) renderCompletion(completion protocol.Completion) []string {
-	style := lipgloss.NewStyle().Foreground(lipgloss.Color("#D8DEE9")).Background(lipgloss.Color("#101318")).Width(m.width)
-	selectedStyle := style.Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(lipgloss.Color("#30445C"))
-	limit := min(len(completion.Items), m.maxOverlayHeight())
-	lines := make([]string, 0, limit)
-	for i, item := range completion.Items[:limit] {
-		detail := item.Detail
-		if detail != "" {
-			detail = "  " + detail
-		}
-		text := fit(item.Label+detail, m.width)
-		if uint16(i) == completion.Selected {
-			lines = append(lines, selectedStyle.Render(text))
-		} else {
-			lines = append(lines, style.Render(text))
-		}
+	items := make([]componentItem, 0, len(completion.Items))
+	for _, item := range completion.Items {
+		items = append(items, componentItem{title: item.Label, description: item.Detail})
 	}
-	return lines
+	return takeLines(m.charmList("Completion", items, int(completion.Selected), m.maxOverlayHeight(), true), m.maxOverlayHeight())
 }
 
 func (m Model) renderWhichKey(which protocol.WhichKey) []string {
@@ -172,20 +164,15 @@ func (m Model) renderWhichKey(which protocol.WhichKey) []string {
 	if which.PageCount > 1 {
 		title += fmt.Sprintf("  %d/%d", which.Page+1, which.PageCount)
 	}
-	style := lipgloss.NewStyle().Foreground(lipgloss.Color("#B8C0CC")).Background(lipgloss.Color("#111720")).Width(m.width)
-	lines := []string{style.Bold(true).Foreground(lipgloss.Color("#C7D1FF")).Render(fit(title, m.width))}
-	limit := min(len(which.Bindings), max(m.maxOverlayHeight()-1, 0))
-	for _, binding := range which.Bindings[:limit] {
+	items := make([]componentItem, 0, len(which.Bindings))
+	for _, binding := range which.Bindings {
 		label := strings.TrimSpace(binding.Icon + " " + binding.Description)
-		text := fit(binding.Key+"  "+label, m.width)
-		lines = append(lines, style.Render(text))
+		items = append(items, componentItem{title: binding.Key, description: label})
 	}
-	return lines
+	return takeLines(m.charmList(title, items, 0, m.maxOverlayHeight(), true), m.maxOverlayHeight())
 }
 
 func (m Model) renderPicker(picker protocol.Picker, preview protocol.PickerPreview) []string {
-	style := lipgloss.NewStyle().Foreground(lipgloss.Color("#D8DEE9")).Background(lipgloss.Color("#101318")).Width(m.width)
-	selectedStyle := style.Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(lipgloss.Color("#30445C"))
 	title := picker.Title
 	if picker.Query != "" {
 		title += "  " + picker.Query
@@ -199,13 +186,12 @@ func (m Model) renderPicker(picker protocol.Picker, preview protocol.PickerPrevi
 		title += "  " + picker.LoadError
 	}
 
-	lines := []string{style.Bold(true).Foreground(lipgloss.Color("#C7D1FF")).Render(fit(title, m.width))}
 	itemBudget := max(m.maxOverlayHeight()-1, 1)
 	if preview.Visible && len(preview.Lines) > 0 && m.width < 100 {
 		itemBudget = max(itemBudget/2, 1)
 	}
-	limit := min(len(picker.Items), itemBudget)
-	for i, item := range picker.Items[:limit] {
+	items := make([]componentItem, 0, len(picker.Items))
+	for _, item := range picker.Items {
 		marker := " "
 		if item.Marked {
 			marker = "*"
@@ -215,17 +201,13 @@ func (m Model) renderPicker(picker protocol.Picker, preview protocol.PickerPrevi
 			detail = item.Annotation
 		}
 		if detail != "" {
-			detail = "  " + detail
+			detail = strings.TrimSpace(detail)
 		}
-		text := fit(marker+" "+item.Label+detail, m.width)
-		if uint16(i) == picker.Selected {
-			lines = append(lines, selectedStyle.Render(text))
-		} else {
-			lines = append(lines, style.Render(text))
-		}
+		items = append(items, componentItem{title: marker + " " + item.Label, description: detail})
 	}
+	lines := takeLines(m.charmList(title, items, int(picker.Selected), itemBudget+1, true), itemBudget+1)
 	if picker.ActionVisible && len(picker.Actions) > 0 {
-		lines = append(lines, style.Foreground(lipgloss.Color("#AEB7C2")).Render(fit(strings.Join(picker.Actions, "  "), m.width)))
+		lines = append(lines, lipgloss.NewStyle().Foreground(m.palette().Muted()).Render(fit(strings.Join(picker.Actions, "  "), m.width)))
 	}
 	if preview.Visible && len(preview.Lines) > 0 {
 		if m.width >= 100 {

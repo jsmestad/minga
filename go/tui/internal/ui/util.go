@@ -61,6 +61,21 @@ func statusName(status byte) string {
 	}
 }
 
+func levelName(level byte) string {
+	switch level {
+	case 1:
+		return "warn"
+	case 2:
+		return "error"
+	case 3:
+		return "ok"
+	case 4:
+		return "progress"
+	default:
+		return "info"
+	}
+}
+
 func displayWidth(value string) int {
 	width := 0
 	for range value {

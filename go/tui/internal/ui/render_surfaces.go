@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/table"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 )
 
@@ -103,48 +104,55 @@ func (m Model) renderAgentChat(chat protocol.AgentChat) []string {
 	if chat.ModelName != "" {
 		title += "  " + chat.ModelName
 	}
-	lines := []string{style.Bold(true).Foreground(m.palette().Accent()).Render(fit(title, m.width))}
+	items := make([]componentItem, 0, len(chat.Messages)+2)
 	if chat.ThinkingLevel != "" {
-		lines = append(lines, style.Render(fit("thinking "+chat.ThinkingLevel, m.width)))
+		items = append(items, componentItem{title: "thinking", description: chat.ThinkingLevel})
 	}
 	if chat.Pending != "" {
-		lines = append(lines, style.Foreground(m.palette().Warning()).Render(fit("approval "+chat.Pending, m.width)))
+		items = append(items, componentItem{title: "approval", description: chat.Pending})
 	}
 	start := max(len(chat.Messages)-max(m.maxOverlayHeight()+1, 1), 0)
 	for _, msg := range chat.Messages[start:] {
-		prefix := agentMessagePrefix(msg.Kind)
-		lines = append(lines, style.Render(fit(prefix+" "+msg.Text, m.width)))
+		items = append(items, componentItem{title: agentMessagePrefix(msg.Kind), description: msg.Text})
 	}
 	if chat.Prompt != "" {
-		lines = append(lines, style.Foreground(m.palette().Muted()).Render(fit("> "+chat.Prompt, m.width)))
+		items = append(items, componentItem{title: "prompt", description: chat.Prompt})
 	}
-	return takeLines(lines, m.maxOverlayHeight())
+	if len(items) == 0 {
+		return []string{style.Bold(true).Foreground(m.palette().Accent()).Render(fit(title, m.width))}
+	}
+	return takeLines(m.charmList(title, items, len(items)-1, m.maxOverlayHeight(), true), m.maxOverlayHeight())
 }
 
 func (m Model) renderBoard(board protocol.Board) []string {
-	style := m.panelStyle()
-	lines := []string{style.Bold(true).Foreground(m.palette().Accent()).Render(fit(fmt.Sprintf("Board  %d cards", len(board.Cards)), m.width))}
-	for _, card := range board.Cards[:min(len(board.Cards), max(m.maxOverlayHeight()-1, 0))] {
+	items := make([]componentItem, 0, len(board.Cards))
+	selected := 0
+	for i, card := range board.Cards {
 		marker := " "
 		if card.ID == board.FocusedCardID || card.Flags&0x02 != 0 {
 			marker = ">"
+			selected = i
 		}
-		lines = append(lines, style.Render(fit(fmt.Sprintf("%s %s  %s", marker, statusName(card.Status), card.Task), m.width)))
+		items = append(items, componentItem{title: fmt.Sprintf("%s %s", marker, statusName(card.Status)), description: card.Task})
 	}
-	return lines
+	return takeLines(m.charmList(fmt.Sprintf("Board  %d cards", len(board.Cards)), items, selected, m.maxOverlayHeight(), true), m.maxOverlayHeight())
 }
 
 func (m Model) renderBottomPanel(panel protocol.BottomPanel) []string {
-	style := m.panelStyle()
 	title := "Panel"
 	if len(panel.Tabs) > int(panel.ActiveTab) {
 		title = panel.Tabs[panel.ActiveTab].Name
 	}
-	lines := []string{style.Bold(true).Foreground(m.palette().Accent()).Render(fit(title, m.width))}
-	for _, msg := range panel.Messages[:min(len(panel.Messages), max(m.maxOverlayHeight()-1, 0))] {
-		lines = append(lines, style.Render(fit(strings.TrimSpace(msg.Path+"  "+msg.Text), m.width)))
+	rows := make([]table.Row, 0, len(panel.Messages))
+	for _, msg := range panel.Messages {
+		rows = append(rows, table.Row{levelName(msg.Level), msg.Path, msg.Text})
 	}
-	return lines
+	columns := []table.Column{
+		{Title: title, Width: 10},
+		{Title: "Path", Width: max(m.width/4, 12)},
+		{Title: "Message", Width: max(m.width-max(m.width/4, 12)-14, 20)},
+	}
+	return takeLines(m.charmTable(columns, rows, 0, m.maxOverlayHeight()), m.maxOverlayHeight())
 }
 
 func (m Model) renderExtensionPanels(ext protocol.ExtensionPanel) []string {
@@ -166,34 +174,41 @@ func (m Model) renderExtensionPanels(ext protocol.ExtensionPanel) []string {
 }
 
 func (m Model) renderObservatory(obs protocol.Observatory) []string {
-	style := m.panelStyle()
-	lines := []string{style.Bold(true).Foreground(m.palette().Accent()).Render(fit(fmt.Sprintf("Observatory  %d processes", max(int(obs.Count), len(obs.Nodes))), m.width))}
-	for _, node := range obs.Nodes[:min(len(obs.Nodes), max(m.maxOverlayHeight()-1, 0))] {
-		lines = append(lines, style.Render(fit(strings.Repeat("  ", int(node.Depth))+node.Name, m.width)))
+	rows := make([]table.Row, 0, len(obs.Nodes))
+	for _, node := range obs.Nodes {
+		rows = append(rows, table.Row{node.PID, strings.Repeat("  ", int(node.Depth)) + node.Name, fmt.Sprintf("%d", node.MessageQueueLen)})
 	}
-	return lines
+	columns := []table.Column{
+		{Title: fmt.Sprintf("Observatory %d", max(int(obs.Count), len(obs.Nodes))), Width: 12},
+		{Title: "Process", Width: max(m.width-24, 20)},
+		{Title: "Q", Width: 6},
+	}
+	return takeLines(m.charmTable(columns, rows, 0, m.maxOverlayHeight()), m.maxOverlayHeight())
 }
 
 func (m Model) renderEditTimeline(timeline protocol.EditTimeline) []string {
-	style := m.panelStyle()
-	lines := []string{style.Bold(true).Foreground(m.palette().Accent()).Render(fit("Edit timeline", m.width))}
-	for _, entry := range timeline.Entries[:min(len(timeline.Entries), max(m.maxOverlayHeight()-1, 0))] {
-		lines = append(lines, style.Render(fit(fmt.Sprintf("%d  %s", entry.Index, entry.ToolName), m.width)))
+	rows := make([]table.Row, 0, len(timeline.Entries))
+	selected := 0
+	for i, entry := range timeline.Entries {
+		if uint16(entry.Index) == timeline.ViewingIndex {
+			selected = i
+		}
+		rows = append(rows, table.Row{fmt.Sprintf("%d", entry.Index), entry.ToolName, fmt.Sprintf("%d", entry.TimestampDelta)})
 	}
-	return lines
+	columns := []table.Column{
+		{Title: "#", Width: 4},
+		{Title: "Tool", Width: max(m.width-18, 18)},
+		{Title: "Age", Width: 8},
+	}
+	return takeLines(m.charmTable(columns, rows, selected, m.maxOverlayHeight()), m.maxOverlayHeight())
 }
 
 func (m Model) renderNotifications(notes protocol.Notifications) []string {
-	style := m.panelStyle()
-	lines := []string{style.Bold(true).Foreground(m.palette().Accent()).Render(fit("Notifications", m.width))}
-	for _, note := range notes.Items[:min(len(notes.Items), max(m.maxOverlayHeight()-1, 0))] {
-		text := note.Title
-		if note.Body != "" {
-			text += "  " + note.Body
-		}
-		lines = append(lines, style.Render(fit(text, m.width)))
+	items := make([]componentItem, 0, len(notes.Items))
+	for _, note := range notes.Items {
+		items = append(items, componentItem{title: note.Title, description: strings.TrimSpace(note.Source + " " + note.Body)})
 	}
-	return lines
+	return takeLines(m.charmList("Notifications", items, 0, m.maxOverlayHeight(), true), m.maxOverlayHeight())
 }
 
 func (m Model) renderExtensionOverlay(overlay protocol.ExtensionOverlay) []string {
