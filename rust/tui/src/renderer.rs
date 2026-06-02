@@ -398,13 +398,20 @@ impl Renderer {
         }
 
         let first_row = row.saturating_sub(candidate_count as u16);
+        let selected_index = minibuffer.selected_index as usize;
+        let start_index = selected_index
+            .saturating_add(1)
+            .saturating_sub(candidate_count)
+            .min(minibuffer.candidates.len().saturating_sub(candidate_count));
         for (index, candidate) in minibuffer
             .candidates
             .iter()
+            .skip(start_index)
             .take(candidate_count)
             .enumerate()
         {
-            let selected = index as u16 == minibuffer.selected_index;
+            let candidate_index = start_index + index;
+            let selected = candidate_index == selected_index;
             let annotation = if candidate.annotation.is_empty() {
                 String::new()
             } else {
@@ -1593,6 +1600,38 @@ mod tests {
         assert_eq!(renderer.cursor, (2, 8));
         assert_eq!(renderer.cells[renderer.index(0, 7).unwrap()].text, ">");
         assert_eq!(renderer.cells[renderer.index(2, 7).unwrap()].text, "w");
+        assert_eq!(
+            renderer.cells[renderer.index(0, 7).unwrap()].style.bg,
+            0x4C566A
+        );
+    }
+
+    #[test]
+    fn semantic_minibuffer_scrolls_candidates_to_selection() {
+        let mut renderer = Renderer::new(40, 10);
+
+        renderer.draw_minibuffer(semantic::Minibuffer {
+            visible: true,
+            mode: 0,
+            cursor_pos: 1,
+            prompt: ":".to_owned(),
+            input: "b".to_owned(),
+            context: String::new(),
+            selected_index: 5,
+            total_candidates: 6,
+            candidates: (0..6)
+                .map(|index| semantic::MinibufferCandidate {
+                    label: format!("command-{index}"),
+                    description: String::new(),
+                    annotation: String::new(),
+                })
+                .collect(),
+        });
+
+        assert_eq!(renderer.cells[renderer.index(2, 3).unwrap()].text, "c");
+        assert_eq!(renderer.cells[renderer.index(10, 3).unwrap()].text, "1");
+        assert_eq!(renderer.cells[renderer.index(0, 7).unwrap()].text, ">");
+        assert_eq!(renderer.cells[renderer.index(10, 7).unwrap()].text, "5");
         assert_eq!(
             renderer.cells[renderer.index(0, 7).unwrap()].style.bg,
             0x4C566A
