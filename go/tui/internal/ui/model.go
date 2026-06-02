@@ -41,6 +41,7 @@ type Model struct {
 	title            string
 	bg               uint32
 	cursorlineChrome protocol.CursorlineChrome
+	pendingClipboard string
 	lastError        string
 }
 
@@ -81,6 +82,8 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	m.pendingClipboard = ""
+	var cmd tea.Cmd
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -99,9 +102,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.send(mousePacket(msg))
 		}
 	case port.PacketMsg:
-		return m, m.applyCommands(msg.Commands)
+		cmd = m.applyCommands(msg.Commands)
 	case port.LogMsg:
-		// Forward renderer diagnostics to the BEAM so they land in *Messages*.
 		m.send(protocol.EncodeLogMessage(msg.Level, msg.Text))
 	case port.ErrorMsg:
 		m.lastError = msg.Err.Error()
@@ -111,14 +113,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.viewport.Width = max(m.width, 1)
 	m.viewport.Height = m.bodyHeight()
 	m.viewport.SetContent(m.content())
-	return m, nil
+	return m, cmd
 }
 
 func (m Model) View() string {
 	body := m.viewport.View()
 	parts := append(m.headerLines(), body)
 	parts = append(parts, m.footerLines()...)
-	return m.cursorStyleSequence() + m.zones.Scan(lipgloss.JoinVertical(lipgloss.Left, parts...))
+	out := m.cursorStyleSequence() + m.zones.Scan(lipgloss.JoinVertical(lipgloss.Left, parts...)) + m.cursorPositionSequence()
+	if m.pendingClipboard != "" {
+		out += ansi.SetClipboard(ansi.SystemClipboard, m.pendingClipboard)
+	}
+	return out
+}
+
+func (m Model) cursorPositionSequence() string {
+	return ansi.CursorPosition(int(m.cursorCol)+1, int(m.cursorRow)+1)
 }
 
 func (m Model) cursorStyleSequence() string {
@@ -161,6 +171,8 @@ func (m *Model) applyCommands(commands []protocol.Command) tea.Cmd {
 			m.putWindow(command.Window)
 		case protocol.CommandWindowDelta:
 			m.applyWindowDelta(command.Window)
+		case protocol.CommandClipboardWrite:
+			m.pendingClipboard = command.ClipboardText
 		case protocol.CommandChrome:
 			m.chrome[command.Chrome.Opcode] = command.Chrome
 			switch command.Chrome.Opcode {

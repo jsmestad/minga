@@ -1,6 +1,8 @@
 package protocol
 
-import "unicode/utf8"
+import (
+	"github.com/jsmestad/minga/go/tui/internal/generated"
+)
 
 type Selection struct {
 	Type     byte
@@ -41,12 +43,8 @@ type LineAnnotation struct {
 	Text string
 }
 
-type Rect struct {
-	Row    uint16
-	Col    uint16
-	Width  uint16
-	Height uint16
-}
+// Rect is a type alias for the generated rect structure.
+type Rect = generated.Rect
 
 type PaneGeometry struct {
 	WindowID        uint16
@@ -67,11 +65,8 @@ type PaneGeometry struct {
 	HitRegions      []HitRegion
 }
 
-type HitRegion struct {
-	Kind     byte
-	Rect     Rect
-	WindowID uint16
-}
+// HitRegion is a type alias for the generated hit region structure.
+type HitRegion = generated.HitRegion
 
 func decodeSelection(section []byte, window *WindowContent) {
 	window.SelectionSet = true
@@ -87,123 +82,82 @@ func decodeSelection(section []byte, window *WindowContent) {
 
 func decodeSearchMatches(section []byte, window *WindowContent) {
 	window.SearchSet = true
-	if len(section) < 2 {
+	genMatches, _, err := generated.DecodeGuiWindowContentSearchMatches(section, 0)
+	if err != nil {
 		window.SearchMatches = nil
 		return
 	}
-	count := int(u16(section, 0))
-	offset := 2
-	matches := make([]SearchMatch, 0, count)
-	for i := 0; i < count && len(section) >= offset+7; i++ {
-		matches = append(matches, SearchMatch{Row: u16(section, offset), StartCol: u16(section, offset+2), EndCol: u16(section, offset+4), Current: section[offset+6] != 0})
-		offset += 7
+	matches := make([]SearchMatch, 0, len(genMatches))
+	for _, gm := range genMatches {
+		matches = append(matches, SearchMatch{Row: gm.Row, StartCol: gm.StartCol, EndCol: gm.EndCol, Current: gm.IsCurrent != 0})
 	}
 	window.SearchMatches = matches
 }
 
 func decodeDiagnosticRanges(section []byte, window *WindowContent) {
 	window.DiagnosticsSet = true
-	if len(section) < 2 {
+	genRanges, _, err := generated.DecodeGuiWindowContentDiagnosticRanges(section, 0)
+	if err != nil {
 		window.Diagnostics = nil
 		return
 	}
-	count := int(u16(section, 0))
-	offset := 2
-	ranges := make([]DiagnosticRange, 0, count)
-	for i := 0; i < count && len(section) >= offset+9; i++ {
-		ranges = append(ranges, DiagnosticRange{StartRow: u16(section, offset), StartCol: u16(section, offset+2), EndRow: u16(section, offset+4), EndCol: u16(section, offset+6), Severity: section[offset+8]})
-		offset += 9
+	ranges := make([]DiagnosticRange, 0, len(genRanges))
+	for _, gr := range genRanges {
+		ranges = append(ranges, DiagnosticRange{StartRow: gr.StartRow, StartCol: gr.StartCol, EndRow: gr.EndRow, EndCol: gr.EndCol, Severity: gr.Severity})
 	}
 	window.Diagnostics = ranges
 }
 
 func decodeDocumentHighlights(section []byte, window *WindowContent) {
 	window.HighlightsSet = true
-	if len(section) < 2 {
+	genHighlights, _, err := generated.DecodeGuiWindowContentDocumentHighlights(section, 0)
+	if err != nil {
 		window.Highlights = nil
 		return
 	}
-	count := int(u16(section, 0))
-	offset := 2
-	highlights := make([]DocumentHighlight, 0, count)
-	for i := 0; i < count && len(section) >= offset+9; i++ {
-		highlights = append(highlights, DocumentHighlight{StartRow: u16(section, offset), StartCol: u16(section, offset+2), EndRow: u16(section, offset+4), EndCol: u16(section, offset+6), Kind: section[offset+8]})
-		offset += 9
+	highlights := make([]DocumentHighlight, 0, len(genHighlights))
+	for _, gh := range genHighlights {
+		highlights = append(highlights, DocumentHighlight{StartRow: gh.StartRow, StartCol: gh.StartCol, EndRow: gh.EndRow, EndCol: gh.EndCol, Kind: gh.Kind})
 	}
 	window.Highlights = highlights
 }
 
 func decodeLineAnnotations(section []byte, window *WindowContent) {
 	window.AnnotationsSet = true
-	if len(section) < 2 {
+	genAnnotations, _, err := generated.DecodeGuiWindowContentAnnotations(section, 0)
+	if err != nil {
 		window.Annotations = nil
 		return
 	}
-	count := int(u16(section, 0))
-	offset := 2
-	annotations := make([]LineAnnotation, 0, count)
-	for i := 0; i < count && len(section) >= offset+11; i++ {
-		annotation := LineAnnotation{Row: u16(section, offset), Kind: section[offset+2], FG: u24(section, offset+3), BG: u24(section, offset+6)}
-		textLen := int(u16(section, offset+9))
-		offset += 11
-		if len(section) < offset+textLen || !utf8.Valid(section[offset:offset+textLen]) {
-			break
-		}
-		annotation.Text = string(section[offset : offset+textLen])
-		offset += textLen
-		annotations = append(annotations, annotation)
+	annotations := make([]LineAnnotation, 0, len(genAnnotations))
+	for _, ga := range genAnnotations {
+		annotations = append(annotations, LineAnnotation{Row: ga.Row, Kind: ga.Kind, FG: ga.FG, BG: ga.BG, Text: ga.Text})
 	}
 	window.Annotations = annotations
 }
 
 func decodePaneGeometry(section []byte, window *WindowContent) {
 	window.GeometrySet = true
-	const fixed = 67
-	if len(section) < fixed {
+	gen, _, err := generated.DecodeGuiWindowContentGeometry(section, 0)
+	if err != nil {
 		return
 	}
-	offset := 0
-	geometry := PaneGeometry{WindowID: u16(section, offset)}
-	offset += 2
-	geometry.TotalRect = decodeRect(section, offset)
-	offset += 8
-	geometry.ContentRect = decodeRect(section, offset)
-	offset += 8
-	geometry.TextRect = decodeRect(section, offset)
-	offset += 8
-	geometry.GutterRect = decodeRect(section, offset)
-	offset += 8
-	geometry.ClipRect = decodeRect(section, offset)
-	offset += 8
-	geometry.ViewportTop = u32(section, offset)
-	offset += 4
-	geometry.ViewportLeft = u16(section, offset)
-	offset += 2
-	geometry.ViewportRows = u16(section, offset)
-	offset += 2
-	geometry.ViewportCols = u16(section, offset)
-	offset += 2
-	geometry.TotalLines = u32(section, offset)
-	offset += 4
-	geometry.VisualRowOffset = u16(section, offset)
-	offset += 2
-	geometry.TotalVisualRows = u32(section, offset)
-	offset += 4
-	geometry.LineNumberWidth = u16(section, offset)
-	offset += 2
-	geometry.SignColWidth = u16(section, offset)
-	offset += 2
-	count := int(section[offset])
-	offset++
-	regions := make([]HitRegion, 0, count)
-	for i := 0; i < count && len(section) >= offset+11; i++ {
-		regions = append(regions, HitRegion{Kind: section[offset], Rect: decodeRect(section, offset+1), WindowID: u16(section, offset+9)})
-		offset += 11
+	window.Geometry = PaneGeometry{
+		WindowID:        gen.WindowID,
+		TotalRect:       gen.TotalRect,
+		ContentRect:     gen.ContentRect,
+		TextRect:        gen.TextRect,
+		GutterRect:      gen.GutterRect,
+		ClipRect:        gen.ClipRect,
+		ViewportTop:     gen.ViewportTop,
+		ViewportLeft:    gen.ViewportLeft,
+		ViewportRows:    gen.ViewportRows,
+		ViewportCols:    gen.ViewportCols,
+		TotalLines:      gen.ViewportTotalLines,
+		VisualRowOffset: gen.ViewportVisualRowOffset,
+		TotalVisualRows: gen.ViewportTotalVisualRows,
+		LineNumberWidth: gen.LineNumberWidth,
+		SignColWidth:    gen.SignColWidth,
+		HitRegions:      gen.HitRegions,
 	}
-	geometry.HitRegions = regions
-	window.Geometry = geometry
-}
-
-func decodeRect(section []byte, offset int) Rect {
-	return Rect{Row: u16(section, offset), Col: u16(section, offset+2), Width: u16(section, offset+4), Height: u16(section, offset+6)}
 }

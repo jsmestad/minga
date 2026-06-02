@@ -16,6 +16,24 @@ pub mod command_size {
     ));
 }
 
+pub mod semantic_types {
+    #![allow(dead_code)]
+
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/generated/semantic_types.rs"
+    ));
+}
+
+pub mod semantic_decode {
+    #![allow(dead_code)]
+
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/generated/semantic_decode.rs"
+    ));
+}
+
 use crate::semantic;
 use command_size::CommandSize;
 use std::fmt;

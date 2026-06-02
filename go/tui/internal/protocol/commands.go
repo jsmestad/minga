@@ -3,7 +3,6 @@ package protocol
 import (
 	"encoding/binary"
 	"fmt"
-	"unicode/utf8"
 
 	"github.com/jsmestad/minga/go/tui/internal/generated"
 )
@@ -22,19 +21,21 @@ const (
 	CommandWindowContent
 	CommandWindowDelta
 	CommandChrome
+	CommandClipboardWrite
 )
 
 type Command struct {
-	Kind        CommandKind
-	Size        int
-	Draw        DrawText
-	CursorRow   uint16
-	CursorCol   uint16
-	CursorShape byte
-	Title       string
-	WindowBg    uint32
-	Window      WindowContent
-	Chrome      ChromePayload
+	Kind          CommandKind
+	Size          int
+	Draw          DrawText
+	CursorRow     uint16
+	CursorCol     uint16
+	CursorShape   byte
+	Title         string
+	WindowBg      uint32
+	Window        WindowContent
+	Chrome        ChromePayload
+	ClipboardText string
 }
 
 type DrawText struct {
@@ -128,18 +129,11 @@ type WindowRow struct {
 	BufferLine  uint32
 	ContentHash uint32
 	Text        string
-	Spans       []Span
+	Spans       []generated.Span
 }
 
-type Span struct {
-	StartCol   uint16
-	EndCol     uint16
-	FG         uint32
-	BG         uint32
-	Attrs      byte
-	FontWeight byte
-	FontID     byte
-}
+// Span is a type alias for the generated span structure.
+type Span = generated.Span
 
 func DecodeCommand(payload []byte) (Command, error) {
 	if len(payload) == 0 {
@@ -193,6 +187,8 @@ func DecodeCommand(payload []byte) (Command, error) {
 		return skipFontFallback(payload)
 	case generated.OPMeasureText:
 		return skipString16(payload, 5, "measure_text")
+	case generated.OPClipboardWrite:
+		return decodeClipboardWrite(payload)
 	case generated.OPGuiWindowContent, generated.OPGuiWindowViewportDelta, generated.OPGuiWindowRowsDelta:
 		return decodeWindowContent(payload)
 	case generated.OPGuiWindowOverlayDelta:
@@ -338,19 +334,21 @@ func decodeOverlayDelta(payload []byte) (Command, error) {
 
 func decodeWindowHeader(opcode byte, section []byte, window *WindowContent) {
 	if opcode == generated.OPGuiWindowContent {
-		if len(section) < 14 {
+		hdr, _, err := generated.DecodeGuiWindowContentHeader(section, 0)
+		if err != nil {
 			return
 		}
-		window.ID = u16(section, 0)
-		window.CursorRow = u16(section, 3)
-		window.CursorCol = u16(section, 5)
-		window.CursorShape = section[7]
-		window.ScrollLeft = u16(section, 8)
+		window.ID = hdr.WindowID
+		window.CursorRow = hdr.CursorRow
+		window.CursorCol = hdr.CursorCol
+		window.CursorShape = hdr.CursorShape
+		window.ScrollLeft = hdr.ScrollLeft
 		window.ScrollLeftSet = true
-		window.ContentEpoch = u32(section, 10)
+		window.ContentEpoch = hdr.ContentEpoch
 		return
 	}
 
+	// Delta header has a different wire layout from the full header.
 	if len(section) < 14 {
 		return
 	}
@@ -364,10 +362,11 @@ func decodeWindowHeader(opcode byte, section []byte, window *WindowContent) {
 }
 
 func decodeCursorline(section []byte, window *WindowContent) {
-	if len(section) < 5 {
+	cl, _, err := generated.DecodeGuiWindowContentCursorline(section, 0)
+	if err != nil {
 		return
 	}
-	window.Cursorline = Cursorline{Visible: true, Row: u16(section, 0), BG: u24(section, 2)}
+	window.Cursorline = Cursorline{Visible: true, Row: cl.Row, BG: cl.BG}
 }
 
 func decodeRows(section []byte, window *WindowContent, delta bool) {
@@ -405,41 +404,35 @@ func decodeRows(section []byte, window *WindowContent, delta bool) {
 }
 
 func decodeRow(section []byte, offset int) (WindowRow, int, bool) {
-	if len(section) < offset+21 {
+	genRow, nextOffset, err := generated.DecodeRow(section, offset)
+	if err != nil {
 		return WindowRow{}, offset, false
 	}
+	return WindowRow{
+		Kind:        genRow.RowType,
+		ID:          genRow.RowID,
+		BufferLine:  genRow.BufLine,
+		ContentHash: genRow.ContentHash,
+		Text:        genRow.Text,
+		Spans:       genRow.Spans,
+	}, nextOffset, true
+}
 
-	row := WindowRow{
-		Kind:        section[offset],
-		ID:          binary.BigEndian.Uint64(section[offset+1 : offset+9]),
-		BufferLine:  u32(section, offset+9),
-		ContentHash: u32(section, offset+13),
+func decodeClipboardWrite(payload []byte) (Command, error) {
+	if len(payload) < 6 {
+		return Command{}, fmt.Errorf("short clipboard_write")
 	}
-	textLen := int(u32(section, offset+17))
-	offset += 21
-	if len(section) < offset+textLen+2 || !utf8.Valid(section[offset:offset+textLen]) {
-		return WindowRow{}, offset, false
+	payloadLen := int(u16(payload, 1))
+	size := 3 + payloadLen
+	if len(payload) < size || payloadLen < 3 {
+		return Command{}, fmt.Errorf("short clipboard_write payload")
 	}
-	row.Text = string(section[offset : offset+textLen])
-	offset += textLen
-
-	spanCount := int(u16(section, offset))
-	offset += 2
-	row.Spans = make([]Span, 0, spanCount)
-	for i := 0; i < spanCount && len(section) >= offset+13; i++ {
-		row.Spans = append(row.Spans, Span{
-			StartCol:   u16(section, offset),
-			EndCol:     u16(section, offset+2),
-			FG:         u24(section, offset+4),
-			BG:         u24(section, offset+7),
-			Attrs:      section[offset+10],
-			FontWeight: section[offset+11],
-			FontID:     section[offset+12],
-		})
-		offset += 13
+	textLen := int(u16(payload, 4))
+	if 3+textLen > payloadLen {
+		return Command{}, fmt.Errorf("short clipboard_write text")
 	}
-
-	return row, offset, true
+	text := string(payload[6 : 6+textLen])
+	return Command{Kind: CommandClipboardWrite, Size: size, ClipboardText: text}, nil
 }
 
 func decodeSkipOrChrome(payload []byte) (Command, error) {

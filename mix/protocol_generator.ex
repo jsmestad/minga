@@ -17,6 +17,10 @@ defmodule Minga.Mix.ProtocolGenerator do
   @generated_rust_command_size_path "rust/tui/src/generated/command_size.rs"
   @generated_zig_command_size_path "zig/src/generated/protocol_command_size.zig"
   @generated_swift_command_size_path "macos/.generated/protocol/ProtocolCommandSize.generated.swift"
+  @generated_rust_semantic_types_path "rust/tui/src/generated/semantic_types.rs"
+  @generated_rust_semantic_decode_path "rust/tui/src/generated/semantic_decode.rs"
+  @generated_go_semantic_types_path "go/tui/internal/generated/semantic_types.go"
+  @generated_go_semantic_decode_path "go/tui/internal/generated/semantic_decode.go"
   @protocol_zig_path "zig/src/protocol.zig"
   @allowed_opcode_categories [
     "input",
@@ -82,6 +86,8 @@ defmodule Minga.Mix.ProtocolGenerator do
     validate_duplicate_values!(Map.fetch!(schema, "gui_actions"), "GUI action")
     validate_gui_action_canonicals!(Map.fetch!(schema, "gui_actions"))
     validate_framing!(schema)
+    validate_structures!(schema)
+    validate_sections!(schema)
     schema
   end
 
@@ -97,7 +103,11 @@ defmodule Minga.Mix.ProtocolGenerator do
       {@generated_go_command_size_path, go_command_size_file(schema)},
       {@generated_rust_command_size_path, rust_command_size_file(schema)},
       {@generated_zig_command_size_path, zig_command_size_file(schema)},
-      {@generated_swift_command_size_path, swift_command_size_file(schema)}
+      {@generated_swift_command_size_path, swift_command_size_file(schema)},
+      {@generated_rust_semantic_types_path, rust_semantic_types_file(schema)},
+      {@generated_rust_semantic_decode_path, rust_semantic_decode_file(schema)},
+      {@generated_go_semantic_types_path, go_semantic_types_file(schema)},
+      {@generated_go_semantic_decode_path, go_semantic_decode_file(schema)}
     ]
   end
 
@@ -234,6 +244,7 @@ defmodule Minga.Mix.ProtocolGenerator do
   defp swift_file(schema) do
     opcodes = Map.fetch!(schema, "opcodes")
     actions = Map.fetch!(schema, "gui_actions")
+    structures = Map.get(schema, "structures", [])
 
     [
       "/// Generated protocol opcode constants.\n",
@@ -241,9 +252,31 @@ defmodule Minga.Mix.ProtocolGenerator do
       "/// Generated from `docs/protocol_schema.toml` by `mix protocol.gen`. Do not edit by hand.\n\n",
       swift_opcodes(opcodes),
       "\n// MARK: - GUI action sub-opcodes\n\n",
-      Enum.map(actions, &swift_gui_action_line/1)
+      Enum.map(actions, &swift_gui_action_line/1),
+      swift_structure_sizes(structures)
     ]
     |> IO.iodata_to_binary()
+  end
+
+  @spec swift_structure_sizes([map()]) :: iodata()
+  defp swift_structure_sizes([]), do: []
+
+  defp swift_structure_sizes(structures) do
+    structs_map = Map.new(structures, fn s -> {s["name"], s} end)
+
+    size_lines =
+      structures
+      |> Enum.filter(fn s -> fixed_structure_size(s["name"], structs_map) != nil end)
+      |> Enum.map(fn s ->
+        size = fixed_structure_size(s["name"], structs_map)
+        name = constant_name(s["name"])
+        "let WIRE_#{name}_SIZE: Int = #{size}\n"
+      end)
+
+    case size_lines do
+      [] -> []
+      lines -> ["\n// MARK: - Wire structure sizes (from schema)\n\n" | lines]
+    end
   end
 
   @spec swift_opcodes([opcode()]) :: iodata()
@@ -1078,6 +1111,1093 @@ defmodule Minga.Mix.ProtocolGenerator do
         return .sized(offset)
     }
     """
+  end
+
+  # ── Structures & Sections: validation ──────────────────────────────────
+
+  @type structure :: %{String.t() => term()}
+  @type section :: %{String.t() => term()}
+
+  @spec structures_map(schema()) :: %{String.t() => structure()}
+  defp structures_map(schema) do
+    schema
+    |> Map.get("structures", [])
+    |> Map.new(fn s -> {s["name"], s} end)
+  end
+
+  @spec sections_list(schema()) :: [section()]
+  defp sections_list(schema), do: Map.get(schema, "sections", [])
+
+  @spec validate_structures!(schema()) :: :ok
+  defp validate_structures!(schema) do
+    structures = Map.get(schema, "structures", [])
+    names = Enum.map(structures, & &1["name"])
+    dupes = names -- Enum.uniq(names)
+
+    case dupes do
+      [] -> :ok
+      _ -> Mix.raise("Duplicate structure names in #{@schema_path}: #{Enum.join(Enum.uniq(dupes), ", ")}")
+    end
+
+    smap = Map.new(structures, fn s -> {s["name"], s} end)
+    validate_struct_references!(structures, smap)
+  end
+
+  @spec validate_struct_references!([structure()], %{String.t() => structure()}) :: :ok
+  defp validate_struct_references!(structures, smap) do
+    bad =
+      structures
+      |> Enum.flat_map(fn s -> Enum.map(s["fields"] || [], &{s["name"], &1}) end)
+      |> Enum.filter(fn {_parent, field} ->
+        (field["type"] == "struct" or field["type"] == "counted_array") and
+          is_binary(field["element"]) and not Map.has_key?(smap, field["element"])
+      end)
+      |> Enum.map_join(", ", fn {parent, field} ->
+        "#{parent}.#{field["name"]} -> #{field["element"]}"
+      end)
+
+    case bad do
+      "" -> :ok
+      _ -> Mix.raise("Unresolved struct references in #{@schema_path}: #{bad}")
+    end
+  end
+
+  @spec validate_sections!(schema()) :: :ok
+  defp validate_sections!(schema) do
+    sections = sections_list(schema)
+    opcode_names = schema |> Map.fetch!("opcodes") |> MapSet.new(& &1["name"])
+    smap = structures_map(schema)
+
+    # All section opcodes must reference existing opcodes
+    bad_opcodes =
+      sections
+      |> Enum.reject(&MapSet.member?(opcode_names, &1["opcode"]))
+      |> Enum.map_join(", ", fn s -> "#{s["opcode"]}/#{s["name"]}" end)
+
+    case bad_opcodes do
+      "" -> :ok
+      _ -> Mix.raise("Sections reference unknown opcodes in #{@schema_path}: #{bad_opcodes}")
+    end
+
+    # Section IDs must be unique per opcode
+    bad_ids =
+      sections
+      |> Enum.group_by(& &1["opcode"])
+      |> Enum.flat_map(fn {opcode, secs} ->
+        secs
+        |> Enum.group_by(& &1["id"])
+        |> Enum.filter(fn {_id, grouped} -> length(grouped) > 1 end)
+        |> Enum.map(fn {id, _grouped} -> "#{opcode}:#{hex(id)}" end)
+      end)
+      |> Enum.join(", ")
+
+    case bad_ids do
+      "" -> :ok
+      _ -> Mix.raise("Duplicate section IDs in #{@schema_path}: #{bad_ids}")
+    end
+
+    # Validate counted_array element references in sections
+    bad_refs =
+      sections
+      |> Enum.filter(fn s -> s["layout"] == "counted_array" and is_binary(s["element"]) end)
+      |> Enum.reject(fn s -> Map.has_key?(smap, s["element"]) end)
+      |> Enum.map_join(", ", fn s -> "#{s["opcode"]}/#{s["name"]} -> #{s["element"]}" end)
+
+    case bad_refs do
+      "" -> :ok
+      _ -> Mix.raise("Sections reference unknown structures in #{@schema_path}: #{bad_refs}")
+    end
+
+    # Validate struct field references within section inline fields
+    bad_field_refs =
+      sections
+      |> Enum.filter(&Map.has_key?(&1, "fields"))
+      |> Enum.flat_map(fn s -> Enum.map(s["fields"] || [], &{s, &1}) end)
+      |> Enum.filter(fn {_s, field} ->
+        (field["type"] == "struct" or field["type"] == "counted_array") and
+          is_binary(field["element"]) and not Map.has_key?(smap, field["element"])
+      end)
+      |> Enum.map_join(", ", fn {s, field} ->
+        "#{s["opcode"]}/#{s["name"]}.#{field["name"]} -> #{field["element"]}"
+      end)
+
+    case bad_field_refs do
+      "" -> :ok
+      _ -> Mix.raise("Section fields reference unknown structures in #{@schema_path}: #{bad_field_refs}")
+    end
+  end
+
+  # ── Type model helpers ───────────────────────────────────────────────────
+
+  @primitive_sizes %{
+    "u8" => 1,
+    "u16" => 2,
+    "u24" => 3,
+    "u32" => 4,
+    "u64" => 8,
+    "rgb" => 3
+  }
+
+  @spec fixed_type_size(String.t(), %{String.t() => structure()}) :: non_neg_integer() | nil
+  defp fixed_type_size(type_name, _smap) when is_map_key(@primitive_sizes, type_name) do
+    Map.fetch!(@primitive_sizes, type_name)
+  end
+
+  defp fixed_type_size("string8", _smap), do: nil
+  defp fixed_type_size("string16", _smap), do: nil
+  defp fixed_type_size("string32", _smap), do: nil
+  defp fixed_type_size("counted_array", _smap), do: nil
+
+  defp fixed_type_size("struct", smap) when is_map(smap) do
+    # This shouldn't be called directly; use fixed_field_size for struct fields
+    nil
+  end
+
+  defp fixed_type_size(_other, _smap), do: nil
+
+  @spec fixed_field_size(map(), %{String.t() => structure()}) :: non_neg_integer() | nil
+  defp fixed_field_size(%{"type" => "struct", "element" => element}, smap) do
+    fixed_structure_size(element, smap)
+  end
+
+  defp fixed_field_size(%{"type" => "counted_array"}, _smap), do: nil
+  defp fixed_field_size(%{"type" => type_name}, smap), do: fixed_type_size(type_name, smap)
+
+  @spec fixed_structure_size(String.t(), %{String.t() => structure()}) :: non_neg_integer() | nil
+  defp fixed_structure_size(name, smap) do
+    case Map.get(smap, name) do
+      nil -> nil
+      structure -> fixed_fields_size(structure["fields"] || [], smap)
+    end
+  end
+
+  @spec fixed_fields_size([map()], %{String.t() => structure()}) :: non_neg_integer() | nil
+  defp fixed_fields_size(fields, smap) do
+    Enum.reduce_while(fields, 0, fn field, acc ->
+      case fixed_field_size(field, smap) do
+        nil -> {:halt, nil}
+        size -> {:cont, acc + size}
+      end
+    end)
+  end
+
+  # ── Rust type mapping helpers ────────────────────────────────────────────
+
+  @spec rust_type(map(), %{String.t() => structure()}) :: String.t()
+  defp rust_type(%{"type" => "u8"}, _smap), do: "u8"
+  defp rust_type(%{"type" => "u16"}, _smap), do: "u16"
+  defp rust_type(%{"type" => "u24"}, _smap), do: "u32"
+  defp rust_type(%{"type" => "u32"}, _smap), do: "u32"
+  defp rust_type(%{"type" => "u64"}, _smap), do: "u64"
+  defp rust_type(%{"type" => "rgb"}, _smap), do: "u32"
+  defp rust_type(%{"type" => "string8"}, _smap), do: "String"
+  defp rust_type(%{"type" => "string16"}, _smap), do: "String"
+  defp rust_type(%{"type" => "string32"}, _smap), do: "String"
+
+  defp rust_type(%{"type" => "struct", "element" => element}, _smap) do
+    rust_struct_name(element)
+  end
+
+  defp rust_type(%{"type" => "counted_array", "element" => element}, _smap) do
+    "Vec<#{rust_struct_name(element)}>"
+  end
+
+  @spec rust_struct_name(String.t()) :: String.t()
+  defp rust_struct_name(name) do
+    name
+    |> String.split("_")
+    |> Enum.map_join("", &String.capitalize/1)
+  end
+
+  @rust_keywords ~w(type self super crate mod fn struct enum impl trait pub use let mut const static ref match return if else for while loop break continue where as in move box dyn async await try macro yield)
+  @spec rust_field_name(String.t()) :: String.t()
+  defp rust_field_name(name) when name in @rust_keywords, do: "r##{name}"
+  defp rust_field_name(name), do: name
+
+  # ── Rust: semantic_types.rs ──────────────────────────────────────────────
+
+  @spec rust_semantic_types_file(schema()) :: String.t()
+  defp rust_semantic_types_file(schema) do
+    structures = Map.get(schema, "structures", [])
+    sections = sections_list(schema)
+    smap = structures_map(schema)
+
+    [
+      "// Generated semantic wire types.\n",
+      "//\n",
+      "// Generated from `docs/protocol_schema.toml` by `mix protocol.gen`. Do not edit by hand.\n\n",
+      rust_structure_definitions(structures, smap),
+      "\n",
+      rust_size_constants(structures, smap),
+      "\n",
+      rust_section_struct_definitions(sections, smap)
+    ]
+    |> IO.iodata_to_binary()
+  end
+
+  @spec rust_structure_definitions([structure()], %{String.t() => structure()}) :: iodata()
+  defp rust_structure_definitions(structures, smap) do
+    Enum.map(structures, fn s ->
+      name = rust_struct_name(s["name"])
+      fields = s["fields"] || []
+      has_variable = Enum.any?(fields, fn f -> fixed_field_size(f, smap) == nil end)
+      derive = if has_variable, do: "#[derive(Debug, Clone, PartialEq, Eq)]\n", else: "#[derive(Debug, Clone, Copy, PartialEq, Eq)]\n"
+
+      [
+        derive,
+        "pub struct #{name} {\n",
+        Enum.map(fields, fn field ->
+          "    pub #{rust_field_name(field["name"])}: #{rust_type(field, smap)},\n"
+        end),
+        "}\n\n"
+      ]
+    end)
+  end
+
+  @spec rust_size_constants([structure()], %{String.t() => structure()}) :: iodata()
+  defp rust_size_constants(structures, smap) do
+    structures
+    |> Enum.flat_map(fn s ->
+      case fixed_structure_size(s["name"], smap) do
+        nil -> []
+        size -> [{s["name"], size}]
+      end
+    end)
+    |> Enum.map(fn {name, size} ->
+      "pub const #{constant_name(name)}_SIZE: usize = #{size};\n"
+    end)
+  end
+
+  @spec rust_section_struct_definitions([section()], %{String.t() => structure()}) :: iodata()
+  defp rust_section_struct_definitions(sections, smap) do
+    # Only generate structs for sections with inline fields (not counted_array layout)
+    sections
+    |> Enum.filter(&Map.has_key?(&1, "fields"))
+    |> Enum.map(fn s ->
+      name = rust_section_struct_name(s)
+      fields = s["fields"] || []
+      has_variable = Enum.any?(fields, fn f -> fixed_field_size(f, smap) == nil end)
+      derive = if has_variable, do: "#[derive(Debug, Clone, PartialEq, Eq)]\n", else: "#[derive(Debug, Clone, Copy, PartialEq, Eq)]\n"
+
+      [
+        derive,
+        "pub struct #{name} {\n",
+        Enum.map(fields, fn field ->
+          "    pub #{rust_field_name(field["name"])}: #{rust_type(field, smap)},\n"
+        end),
+        "}\n\n"
+      ]
+    end)
+  end
+
+  @spec rust_section_struct_name(section()) :: String.t()
+  defp rust_section_struct_name(section) do
+    opcode_part = rust_struct_name(section["opcode"])
+    section_part = rust_struct_name(section["name"])
+    "#{opcode_part}#{section_part}"
+  end
+
+  # ── Rust: semantic_decode.rs ─────────────────────────────────────────────
+
+  @spec rust_semantic_decode_file(schema()) :: String.t()
+  defp rust_semantic_decode_file(schema) do
+    structures = Map.get(schema, "structures", [])
+    sections = sections_list(schema)
+    smap = structures_map(schema)
+
+    [
+      "// Generated semantic decode functions.\n",
+      "//\n",
+      "// Generated from `docs/protocol_schema.toml` by `mix protocol.gen`. Do not edit by hand.\n\n",
+      "use crate::protocol::DecodeError;\n",
+      "use super::semantic_types::*;\n\n",
+      rust_decode_helpers(),
+      "\n",
+      Enum.map(structures, &rust_decode_structure(&1, smap)),
+      "\n",
+      rust_decode_section_functions(sections, smap)
+    ]
+    |> IO.iodata_to_binary()
+  end
+
+  @spec rust_decode_helpers() :: iodata()
+  defp rust_decode_helpers do
+    """
+    fn require_len(bytes: &[u8], needed: usize, label: &'static str) -> Result<(), DecodeError> {
+        if bytes.len() < needed {
+            Err(DecodeError::Malformed(label))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn read_u16(bytes: &[u8], offset: usize) -> u16 {
+        u16::from_be_bytes([bytes[offset], bytes[offset + 1]])
+    }
+
+    fn read_u24(bytes: &[u8], offset: usize) -> u32 {
+        ((bytes[offset] as u32) << 16) | ((bytes[offset + 1] as u32) << 8) | bytes[offset + 2] as u32
+    }
+
+    fn read_u32(bytes: &[u8], offset: usize) -> u32 {
+        u32::from_be_bytes([bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]])
+    }
+
+    fn read_u64(bytes: &[u8], offset: usize) -> u64 {
+        u64::from_be_bytes([
+            bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3],
+            bytes[offset + 4], bytes[offset + 5], bytes[offset + 6], bytes[offset + 7],
+        ])
+    }
+
+    fn read_string(bytes: &[u8], offset: usize, len: usize) -> Result<String, DecodeError> {
+        require_len(bytes, offset + len, "string body")?;
+        std::str::from_utf8(&bytes[offset..offset + len])
+            .map(str::to_owned)
+            .map_err(|_| DecodeError::Utf8)
+    }
+
+    fn read_string8(bytes: &[u8], offset: &mut usize) -> Result<String, DecodeError> {
+        require_len(bytes, *offset + 1, "string8 header")?;
+        let len = bytes[*offset] as usize;
+        *offset += 1;
+        let value = read_string(bytes, *offset, len)?;
+        *offset += len;
+        Ok(value)
+    }
+
+    fn read_string16(bytes: &[u8], offset: &mut usize) -> Result<String, DecodeError> {
+        require_len(bytes, *offset + 2, "string16 header")?;
+        let len = read_u16(bytes, *offset) as usize;
+        *offset += 2;
+        let value = read_string(bytes, *offset, len)?;
+        *offset += len;
+        Ok(value)
+    }
+
+    fn read_string32(bytes: &[u8], offset: &mut usize) -> Result<String, DecodeError> {
+        require_len(bytes, *offset + 4, "string32 header")?;
+        let len = read_u32(bytes, *offset) as usize;
+        *offset += 4;
+        let value = read_string(bytes, *offset, len)?;
+        *offset += len;
+        Ok(value)
+    }
+    """
+  end
+
+  @spec rust_decode_structure(structure(), %{String.t() => structure()}) :: iodata()
+  defp rust_decode_structure(structure, smap) do
+    name = structure["name"]
+    struct_name = rust_struct_name(name)
+    fn_name = "decode_#{name}"
+    fields = structure["fields"] || []
+
+    [
+      "pub fn #{fn_name}(bytes: &[u8], offset: usize) -> Result<(#{struct_name}, usize), DecodeError> {\n",
+      "    let mut pos = offset;\n",
+      Enum.map(fields, &rust_decode_field_statement(&1, smap)),
+      "    Ok((#{struct_name} {\n",
+      Enum.map(fields, fn field -> "        #{rust_field_name(field["name"])},\n" end),
+      "    }, pos - offset))\n",
+      "}\n\n"
+    ]
+  end
+
+  @spec rust_decode_field_statement(map(), %{String.t() => structure()}) :: iodata()
+  defp rust_decode_field_statement(%{"name" => name, "type" => "u8"}, _smap) do
+    rname = rust_field_name(name)
+    [
+      "    require_len(bytes, pos + 1, \"#{name}\")?;\n",
+      "    let #{rname} = bytes[pos];\n",
+      "    pos += 1;\n"
+    ]
+  end
+
+  defp rust_decode_field_statement(%{"name" => name, "type" => "u16"}, _smap) do
+    rname = rust_field_name(name)
+    [
+      "    require_len(bytes, pos + 2, \"#{name}\")?;\n",
+      "    let #{rname} = read_u16(bytes, pos);\n",
+      "    pos += 2;\n"
+    ]
+  end
+
+  defp rust_decode_field_statement(%{"name" => name, "type" => "u24"}, _smap) do
+    rname = rust_field_name(name)
+    [
+      "    require_len(bytes, pos + 3, \"#{name}\")?;\n",
+      "    let #{rname} = read_u24(bytes, pos);\n",
+      "    pos += 3;\n"
+    ]
+  end
+
+  defp rust_decode_field_statement(%{"name" => name, "type" => "u32"}, _smap) do
+    rname = rust_field_name(name)
+    [
+      "    require_len(bytes, pos + 4, \"#{name}\")?;\n",
+      "    let #{rname} = read_u32(bytes, pos);\n",
+      "    pos += 4;\n"
+    ]
+  end
+
+  defp rust_decode_field_statement(%{"name" => name, "type" => "u64"}, _smap) do
+    rname = rust_field_name(name)
+    [
+      "    require_len(bytes, pos + 8, \"#{name}\")?;\n",
+      "    let #{rname} = read_u64(bytes, pos);\n",
+      "    pos += 8;\n"
+    ]
+  end
+
+  defp rust_decode_field_statement(%{"name" => name, "type" => "rgb"}, _smap) do
+    rname = rust_field_name(name)
+    [
+      "    require_len(bytes, pos + 3, \"#{name}\")?;\n",
+      "    let #{rname} = read_u24(bytes, pos);\n",
+      "    pos += 3;\n"
+    ]
+  end
+
+  defp rust_decode_field_statement(%{"name" => name, "type" => "string8"}, _smap) do
+    rname = rust_field_name(name)
+    ["    let #{rname} = read_string8(bytes, &mut pos)?;\n"]
+  end
+
+  defp rust_decode_field_statement(%{"name" => name, "type" => "string16"}, _smap) do
+    rname = rust_field_name(name)
+    ["    let #{rname} = read_string16(bytes, &mut pos)?;\n"]
+  end
+
+  defp rust_decode_field_statement(%{"name" => name, "type" => "string32"}, _smap) do
+    rname = rust_field_name(name)
+    ["    let #{rname} = read_string32(bytes, &mut pos)?;\n"]
+  end
+
+  defp rust_decode_field_statement(%{"name" => name, "type" => "struct", "element" => element}, _smap) do
+    rname = rust_field_name(name)
+    [
+      "    let (#{rname}, consumed) = decode_#{element}(bytes, pos)?;\n",
+      "    pos += consumed;\n"
+    ]
+  end
+
+  defp rust_decode_field_statement(%{"name" => name, "type" => "counted_array", "count_type" => count_type, "element" => element}, smap) do
+    rname = rust_field_name(name)
+    {count_read, count_size} = rust_count_read(count_type)
+    element_fixed_size = fixed_structure_size(element, smap)
+
+    count_lines = [
+      "    require_len(bytes, pos + #{count_size}, \"#{name} count\")?;\n",
+      "    let #{rname}_count = #{count_read};\n",
+      "    pos += #{count_size};\n"
+    ]
+
+    decode_lines = case element_fixed_size do
+      nil ->
+        # Variable-size elements: decode one by one
+        [
+          "    let mut #{rname} = Vec::with_capacity(#{rname}_count);\n",
+          "    for _ in 0..#{rname}_count {\n",
+          "        let (item, consumed) = decode_#{element}(bytes, pos)?;\n",
+          "        pos += consumed;\n",
+          "        #{rname}.push(item);\n",
+          "    }\n"
+        ]
+      stride ->
+        # Fixed-size elements: can validate upfront, still decode individually
+        [
+          "    require_len(bytes, pos + #{rname}_count * #{stride}, \"#{name}\")?;\n",
+          "    let mut #{rname} = Vec::with_capacity(#{rname}_count);\n",
+          "    for _ in 0..#{rname}_count {\n",
+          "        let (item, consumed) = decode_#{element}(bytes, pos)?;\n",
+          "        pos += consumed;\n",
+          "        #{rname}.push(item);\n",
+          "    }\n"
+        ]
+    end
+
+    count_lines ++ decode_lines
+  end
+
+  @spec rust_count_read(String.t()) :: {String.t(), non_neg_integer()}
+  defp rust_count_read("u8"), do: {"bytes[pos] as usize", 1}
+  defp rust_count_read("u16"), do: {"read_u16(bytes, pos) as usize", 2}
+  defp rust_count_read("u32"), do: {"read_u32(bytes, pos) as usize", 4}
+
+  @spec rust_decode_section_functions([section()], %{String.t() => structure()}) :: iodata()
+  defp rust_decode_section_functions(sections, smap) do
+    sections
+    |> Enum.group_by(& &1["opcode"])
+    |> Enum.sort_by(fn {opcode, _} -> opcode end)
+    |> Enum.map(fn {opcode, secs} ->
+      rust_decode_opcode_sections(opcode, Enum.sort_by(secs, & &1["id"]), smap)
+    end)
+  end
+
+  @spec rust_decode_opcode_sections(String.t(), [section()], %{String.t() => structure()}) :: iodata()
+  defp rust_decode_opcode_sections(opcode, secs, smap) do
+    [
+      "// Section decoders for #{opcode}\n\n",
+      Enum.map(secs, fn sec ->
+        case sec["layout"] do
+          "counted_array" -> rust_decode_counted_array_section(opcode, sec, smap)
+          _ -> rust_decode_inline_section(opcode, sec, smap)
+        end
+      end)
+    ]
+  end
+
+  @spec rust_decode_inline_section(String.t(), section(), %{String.t() => structure()}) :: iodata()
+  defp rust_decode_inline_section(_opcode, section, smap) do
+    struct_name = rust_section_struct_name(section)
+    fn_name = "decode_#{section["opcode"]}_#{section["name"]}"
+    fields = section["fields"] || []
+
+    [
+      "pub fn #{fn_name}(bytes: &[u8], offset: usize) -> Result<(#{struct_name}, usize), DecodeError> {\n",
+      "    let mut pos = offset;\n",
+      Enum.map(fields, &rust_decode_field_statement(&1, smap)),
+      "    Ok((#{struct_name} {\n",
+      Enum.map(fields, fn field -> "        #{rust_field_name(field["name"])},\n" end),
+      "    }, pos - offset))\n",
+      "}\n\n"
+    ]
+  end
+
+  @spec rust_decode_counted_array_section(String.t(), section(), %{String.t() => structure()}) :: iodata()
+  defp rust_decode_counted_array_section(_opcode, section, smap) do
+    element = section["element"]
+    element_struct = rust_struct_name(element)
+    fn_name = "decode_#{section["opcode"]}_#{section["name"]}"
+    count_type = section["count_type"] || "u16"
+    {count_read, count_size} = rust_count_read(count_type)
+    element_fixed_size = fixed_structure_size(element, smap)
+
+    decode_loop = case element_fixed_size do
+      nil ->
+        [
+          "    let mut items = Vec::with_capacity(count);\n",
+          "    for _ in 0..count {\n",
+          "        let (item, consumed) = decode_#{element}(bytes, pos)?;\n",
+          "        pos += consumed;\n",
+          "        items.push(item);\n",
+          "    }\n"
+        ]
+      stride ->
+        [
+          "    require_len(bytes, pos + count * #{stride}, \"#{section["name"]}\")?;\n",
+          "    let mut items = Vec::with_capacity(count);\n",
+          "    for _ in 0..count {\n",
+          "        let (item, consumed) = decode_#{element}(bytes, pos)?;\n",
+          "        pos += consumed;\n",
+          "        items.push(item);\n",
+          "    }\n"
+        ]
+    end
+
+    [
+      "pub fn #{fn_name}(bytes: &[u8], offset: usize) -> Result<(Vec<#{element_struct}>, usize), DecodeError> {\n",
+      "    let mut pos = offset;\n",
+      "    require_len(bytes, pos + #{count_size}, \"#{section["name"]} count\")?;\n",
+      "    let count = #{count_read};\n",
+      "    pos += #{count_size};\n",
+      decode_loop,
+      "    Ok((items, pos - offset))\n",
+      "}\n\n"
+    ]
+  end
+
+  # ── Go type mapping helpers ───────────────────────────────────────────────
+
+  @spec go_type(map(), %{String.t() => structure()}) :: String.t()
+  defp go_type(%{"type" => "u8"}, _smap), do: "uint8"
+  defp go_type(%{"type" => "u16"}, _smap), do: "uint16"
+  defp go_type(%{"type" => "u24"}, _smap), do: "uint32"
+  defp go_type(%{"type" => "u32"}, _smap), do: "uint32"
+  defp go_type(%{"type" => "u64"}, _smap), do: "uint64"
+  defp go_type(%{"type" => "rgb"}, _smap), do: "uint32"
+  defp go_type(%{"type" => "string8"}, _smap), do: "string"
+  defp go_type(%{"type" => "string16"}, _smap), do: "string"
+  defp go_type(%{"type" => "string32"}, _smap), do: "string"
+
+  defp go_type(%{"type" => "struct", "element" => element}, _smap) do
+    go_struct_name(element)
+  end
+
+  defp go_type(%{"type" => "counted_array", "element" => element}, _smap) do
+    "[]#{go_struct_name(element)}"
+  end
+
+  @spec go_struct_name(String.t()) :: String.t()
+  defp go_struct_name(name) do
+    name
+    |> String.split("_")
+    |> Enum.map_join("", &String.capitalize/1)
+  end
+
+  # Go convention: common acronyms are fully uppercased (ID, FG, BG, URL, etc.)
+  @go_acronyms %{
+    "id" => "ID",
+    "fg" => "FG",
+    "bg" => "BG",
+    "url" => "URL",
+    "ip" => "IP",
+    "lsp" => "LSP"
+  }
+
+  @spec go_field_name(String.t()) :: String.t()
+  defp go_field_name(name) do
+    name
+    |> String.split("_")
+    |> Enum.map_join("", fn part ->
+      Map.get(@go_acronyms, part, String.capitalize(part))
+    end)
+  end
+
+  @go_keywords ~w(type break default func interface select case defer go map struct chan else goto package switch const fallthrough if range var continue for import return)
+  @spec go_local_name(String.t()) :: String.t()
+  defp go_local_name(name) do
+    camel = go_camel_case(name)
+    if camel in @go_keywords, do: camel <> "Val", else: camel
+  end
+
+  @spec go_camel_case(String.t()) :: String.t()
+  defp go_camel_case(name) do
+    case String.split(name, "_") do
+      [first | rest] ->
+        first <> Enum.map_join(rest, "", fn part ->
+          Map.get(@go_acronyms, part, String.capitalize(part))
+        end)
+      _ -> name
+    end
+  end
+
+  @spec go_section_struct_name(section()) :: String.t()
+  defp go_section_struct_name(section) do
+    opcode_part = go_struct_name(section["opcode"])
+    section_part = go_struct_name(section["name"])
+    "#{opcode_part}#{section_part}"
+  end
+
+  # ── Go: semantic_types.go ───────────────────────────────────────────────
+
+  @spec go_semantic_types_file(schema()) :: String.t()
+  defp go_semantic_types_file(schema) do
+    structures = Map.get(schema, "structures", [])
+    sections = sections_list(schema)
+    smap = structures_map(schema)
+
+    [
+      "// Code generated by mix protocol.gen. DO NOT EDIT.\n\n",
+      "package generated\n\n",
+      go_structure_definitions(structures, smap),
+      go_size_constants(structures, smap),
+      go_section_struct_definitions(sections, smap)
+    ]
+    |> IO.iodata_to_binary()
+  end
+
+  @spec go_structure_definitions([structure()], %{String.t() => structure()}) :: iodata()
+  defp go_structure_definitions(structures, smap) do
+    Enum.map(structures, fn s ->
+      name = go_struct_name(s["name"])
+      fields = s["fields"] || []
+
+      [
+        "type #{name} struct {\n",
+        Enum.map(fields, fn field ->
+          "\t#{go_field_name(field["name"])} #{go_type(field, smap)}\n"
+        end),
+        "}\n\n"
+      ]
+    end)
+  end
+
+  @spec go_size_constants([structure()], %{String.t() => structure()}) :: iodata()
+  defp go_size_constants(structures, smap) do
+    constants =
+      structures
+      |> Enum.flat_map(fn s ->
+        case fixed_structure_size(s["name"], smap) do
+          nil -> []
+          size -> [{s["name"], size}]
+        end
+      end)
+
+    case constants do
+      [] -> []
+      _ ->
+        [
+          "const (\n",
+          Enum.map(constants, fn {name, size} ->
+            "\t#{go_struct_name(name)}Size = #{size}\n"
+          end),
+          ")\n\n"
+        ]
+    end
+  end
+
+  @spec go_section_struct_definitions([section()], %{String.t() => structure()}) :: iodata()
+  defp go_section_struct_definitions(sections, smap) do
+    sections
+    |> Enum.filter(&Map.has_key?(&1, "fields"))
+    |> Enum.map(fn s ->
+      name = go_section_struct_name(s)
+      fields = s["fields"] || []
+
+      [
+        "type #{name} struct {\n",
+        Enum.map(fields, fn field ->
+          "\t#{go_field_name(field["name"])} #{go_type(field, smap)}\n"
+        end),
+        "}\n\n"
+      ]
+    end)
+  end
+
+  # ── Go: semantic_decode.go ──────────────────────────────────────────────
+
+  @spec go_semantic_decode_file(schema()) :: String.t()
+  defp go_semantic_decode_file(schema) do
+    structures = Map.get(schema, "structures", [])
+    sections = sections_list(schema)
+    smap = structures_map(schema)
+
+    [
+      "// Code generated by mix protocol.gen. DO NOT EDIT.\n\n",
+      "package generated\n\n",
+      "import (\n\t\"encoding/binary\"\n\t\"fmt\"\n)\n\n",
+      go_decode_helpers(),
+      "\n",
+      Enum.map(structures, &go_decode_structure(&1, smap)),
+      "\n",
+      go_decode_section_functions(sections, smap)
+    ]
+    |> IO.iodata_to_binary()
+  end
+
+  @spec go_decode_helpers() :: String.t()
+  defp go_decode_helpers do
+    """
+    func decodeRequireLen(data []byte, needed int, label string) error {
+    \tif len(data) < needed {
+    \t\treturn fmt.Errorf("short %s", label)
+    \t}
+    \treturn nil
+    }
+
+    func decodeU16(data []byte, offset int) uint16 {
+    \treturn binary.BigEndian.Uint16(data[offset : offset+2])
+    }
+
+    func decodeU24(data []byte, offset int) uint32 {
+    \treturn uint32(data[offset])<<16 | uint32(data[offset+1])<<8 | uint32(data[offset+2])
+    }
+
+    func decodeU32(data []byte, offset int) uint32 {
+    \treturn binary.BigEndian.Uint32(data[offset : offset+4])
+    }
+
+    func decodeU64(data []byte, offset int) uint64 {
+    \treturn binary.BigEndian.Uint64(data[offset : offset+8])
+    }
+
+    func decodeString8(data []byte, offset int) (string, int, error) {
+    \tif err := decodeRequireLen(data, offset+1, "string8 header"); err != nil {
+    \t\treturn "", offset, err
+    \t}
+    \tl := int(data[offset])
+    \toffset++
+    \tif err := decodeRequireLen(data, offset+l, "string8 body"); err != nil {
+    \t\treturn "", offset, err
+    \t}
+    \ts := string(data[offset : offset+l])
+    \treturn s, offset + l, nil
+    }
+
+    func decodeString16(data []byte, offset int) (string, int, error) {
+    \tif err := decodeRequireLen(data, offset+2, "string16 header"); err != nil {
+    \t\treturn "", offset, err
+    \t}
+    \tl := int(decodeU16(data, offset))
+    \toffset += 2
+    \tif err := decodeRequireLen(data, offset+l, "string16 body"); err != nil {
+    \t\treturn "", offset, err
+    \t}
+    \ts := string(data[offset : offset+l])
+    \treturn s, offset + l, nil
+    }
+
+    func decodeString32(data []byte, offset int) (string, int, error) {
+    \tif err := decodeRequireLen(data, offset+4, "string32 header"); err != nil {
+    \t\treturn "", offset, err
+    \t}
+    \tl := int(decodeU32(data, offset))
+    \toffset += 4
+    \tif err := decodeRequireLen(data, offset+l, "string32 body"); err != nil {
+    \t\treturn "", offset, err
+    \t}
+    \ts := string(data[offset : offset+l])
+    \treturn s, offset + l, nil
+    }
+    """
+  end
+
+  @spec go_decode_structure(structure(), %{String.t() => structure()}) :: iodata()
+  defp go_decode_structure(structure, smap) do
+    name = structure["name"]
+    struct_name = go_struct_name(name)
+    fn_name = "Decode#{struct_name}"
+    fields = structure["fields"] || []
+    zero = "#{struct_name}{}"
+
+    [
+      "func #{fn_name}(data []byte, offset int) (#{struct_name}, int, error) {\n",
+      "\tpos := offset\n",
+      Enum.map(fields, &go_decode_field_statement(&1, smap, zero)),
+      "\treturn #{struct_name}{\n",
+      Enum.map(fields, fn field ->
+        "\t\t#{go_field_name(field["name"])}: #{go_local_name(field["name"])},\n"
+      end),
+      "\t}, pos, nil\n",
+      "}\n\n"
+    ]
+  end
+
+  @spec go_decode_field_statement(map(), %{String.t() => structure()}, String.t()) :: iodata()
+  defp go_decode_field_statement(%{"name" => name, "type" => "u8"}, _smap, zero) do
+    local = go_local_name(name)
+    [
+      "\tif err := decodeRequireLen(data, pos+1, \"#{name}\"); err != nil {\n",
+      "\t\treturn #{zero}, offset, err\n",
+      "\t}\n",
+      "\t#{local} := data[pos]\n",
+      "\tpos++\n"
+    ]
+  end
+
+  defp go_decode_field_statement(%{"name" => name, "type" => "u16"}, _smap, zero) do
+    local = go_local_name(name)
+    [
+      "\tif err := decodeRequireLen(data, pos+2, \"#{name}\"); err != nil {\n",
+      "\t\treturn #{zero}, offset, err\n",
+      "\t}\n",
+      "\t#{local} := decodeU16(data, pos)\n",
+      "\tpos += 2\n"
+    ]
+  end
+
+  defp go_decode_field_statement(%{"name" => name, "type" => "u24"}, _smap, zero) do
+    local = go_local_name(name)
+    [
+      "\tif err := decodeRequireLen(data, pos+3, \"#{name}\"); err != nil {\n",
+      "\t\treturn #{zero}, offset, err\n",
+      "\t}\n",
+      "\t#{local} := decodeU24(data, pos)\n",
+      "\tpos += 3\n"
+    ]
+  end
+
+  defp go_decode_field_statement(%{"name" => name, "type" => "u32"}, _smap, zero) do
+    local = go_local_name(name)
+    [
+      "\tif err := decodeRequireLen(data, pos+4, \"#{name}\"); err != nil {\n",
+      "\t\treturn #{zero}, offset, err\n",
+      "\t}\n",
+      "\t#{local} := decodeU32(data, pos)\n",
+      "\tpos += 4\n"
+    ]
+  end
+
+  defp go_decode_field_statement(%{"name" => name, "type" => "u64"}, _smap, zero) do
+    local = go_local_name(name)
+    [
+      "\tif err := decodeRequireLen(data, pos+8, \"#{name}\"); err != nil {\n",
+      "\t\treturn #{zero}, offset, err\n",
+      "\t}\n",
+      "\t#{local} := decodeU64(data, pos)\n",
+      "\tpos += 8\n"
+    ]
+  end
+
+  defp go_decode_field_statement(%{"name" => name, "type" => "rgb"}, _smap, zero) do
+    local = go_local_name(name)
+    [
+      "\tif err := decodeRequireLen(data, pos+3, \"#{name}\"); err != nil {\n",
+      "\t\treturn #{zero}, offset, err\n",
+      "\t}\n",
+      "\t#{local} := decodeU24(data, pos)\n",
+      "\tpos += 3\n"
+    ]
+  end
+
+  defp go_decode_field_statement(%{"name" => name, "type" => "string8"}, _smap, zero) do
+    local = go_local_name(name)
+    [
+      "\t#{local}, pos, err := decodeString8(data, pos)\n",
+      "\tif err != nil {\n",
+      "\t\treturn #{zero}, offset, err\n",
+      "\t}\n"
+    ]
+  end
+
+  defp go_decode_field_statement(%{"name" => name, "type" => "string16"}, _smap, zero) do
+    local = go_local_name(name)
+    [
+      "\t#{local}, pos, err := decodeString16(data, pos)\n",
+      "\tif err != nil {\n",
+      "\t\treturn #{zero}, offset, err\n",
+      "\t}\n"
+    ]
+  end
+
+  defp go_decode_field_statement(%{"name" => name, "type" => "string32"}, _smap, zero) do
+    local = go_local_name(name)
+    [
+      "\t#{local}, pos, err := decodeString32(data, pos)\n",
+      "\tif err != nil {\n",
+      "\t\treturn #{zero}, offset, err\n",
+      "\t}\n"
+    ]
+  end
+
+  defp go_decode_field_statement(%{"name" => name, "type" => "struct", "element" => element}, _smap, zero) do
+    local = go_local_name(name)
+    [
+      "\t#{local}, pos, err := Decode#{go_struct_name(element)}(data, pos)\n",
+      "\tif err != nil {\n",
+      "\t\treturn #{zero}, offset, err\n",
+      "\t}\n"
+    ]
+  end
+
+  defp go_decode_field_statement(%{"name" => name, "type" => "counted_array", "count_type" => count_type, "element" => element}, smap, zero) do
+    local = go_local_name(name)
+    {count_read, count_size} = go_count_read(count_type)
+    element_fixed_size = fixed_structure_size(element, smap)
+
+    count_lines = [
+      "\tif err := decodeRequireLen(data, pos+#{count_size}, \"#{name} count\"); err != nil {\n",
+      "\t\treturn #{zero}, offset, err\n",
+      "\t}\n",
+      "\t#{local}Count := int(#{count_read})\n",
+      "\tpos += #{count_size}\n"
+    ]
+
+    stride_check = case element_fixed_size do
+      nil -> []
+      stride ->
+        [
+          "\tif err := decodeRequireLen(data, pos+#{local}Count*#{stride}, \"#{name}\"); err != nil {\n",
+          "\t\treturn #{zero}, offset, err\n",
+          "\t}\n"
+        ]
+    end
+
+    decode_lines = [
+      "\t#{local} := make([]#{go_struct_name(element)}, 0, #{local}Count)\n",
+      "\tfor i := 0; i < #{local}Count; i++ {\n",
+      "\t\titem, nextPos, err := Decode#{go_struct_name(element)}(data, pos)\n",
+      "\t\tif err != nil {\n",
+      "\t\t\treturn #{zero}, offset, err\n",
+      "\t\t}\n",
+      "\t\tpos = nextPos\n",
+      "\t\t#{local} = append(#{local}, item)\n",
+      "\t}\n"
+    ]
+
+    count_lines ++ stride_check ++ decode_lines
+  end
+
+  @spec go_count_read(String.t()) :: {String.t(), non_neg_integer()}
+  defp go_count_read("u8"), do: {"data[pos]", 1}
+  defp go_count_read("u16"), do: {"decodeU16(data, pos)", 2}
+  defp go_count_read("u32"), do: {"decodeU32(data, pos)", 4}
+
+  @spec go_decode_section_functions([section()], %{String.t() => structure()}) :: iodata()
+  defp go_decode_section_functions(sections, smap) do
+    sections
+    |> Enum.group_by(& &1["opcode"])
+    |> Enum.sort_by(fn {opcode, _} -> opcode end)
+    |> Enum.map(fn {opcode, secs} ->
+      go_decode_opcode_sections(opcode, Enum.sort_by(secs, & &1["id"]), smap)
+    end)
+  end
+
+  @spec go_decode_opcode_sections(String.t(), [section()], %{String.t() => structure()}) :: iodata()
+  defp go_decode_opcode_sections(opcode, secs, smap) do
+    [
+      "// Section decoders for #{opcode}\n\n",
+      Enum.map(secs, fn sec ->
+        case sec["layout"] do
+          "counted_array" -> go_decode_counted_array_section(opcode, sec, smap)
+          _ -> go_decode_inline_section(opcode, sec, smap)
+        end
+      end)
+    ]
+  end
+
+  @spec go_decode_inline_section(String.t(), section(), %{String.t() => structure()}) :: iodata()
+  defp go_decode_inline_section(_opcode, section, smap) do
+    struct_name = go_section_struct_name(section)
+    fn_name = "Decode#{go_struct_name(section["opcode"])}#{go_struct_name(section["name"])}"
+    fields = section["fields"] || []
+    zero = "#{struct_name}{}"
+
+    [
+      "func #{fn_name}(data []byte, offset int) (#{struct_name}, int, error) {\n",
+      "\tpos := offset\n",
+      Enum.map(fields, &go_decode_field_statement(&1, smap, zero)),
+      "\treturn #{struct_name}{\n",
+      Enum.map(fields, fn field ->
+        "\t\t#{go_field_name(field["name"])}: #{go_local_name(field["name"])},\n"
+      end),
+      "\t}, pos, nil\n",
+      "}\n\n"
+    ]
+  end
+
+  @spec go_decode_counted_array_section(String.t(), section(), %{String.t() => structure()}) :: iodata()
+  defp go_decode_counted_array_section(_opcode, section, smap) do
+    element = section["element"]
+    element_struct = go_struct_name(element)
+    fn_name = "Decode#{go_struct_name(section["opcode"])}#{go_struct_name(section["name"])}"
+    count_type = section["count_type"] || "u16"
+    {count_read, count_size} = go_count_read(count_type)
+    element_fixed_size = fixed_structure_size(element, smap)
+
+    stride_check = case element_fixed_size do
+      nil -> []
+      stride ->
+        [
+          "\tif err := decodeRequireLen(data, pos+count*#{stride}, \"#{section["name"]}\"); err != nil {\n",
+          "\t\treturn nil, offset, err\n",
+          "\t}\n"
+        ]
+    end
+
+    [
+      "func #{fn_name}(data []byte, offset int) ([]#{element_struct}, int, error) {\n",
+      "\tpos := offset\n",
+      "\tif err := decodeRequireLen(data, pos+#{count_size}, \"#{section["name"]} count\"); err != nil {\n",
+      "\t\treturn nil, offset, err\n",
+      "\t}\n",
+      "\tcount := int(#{count_read})\n",
+      "\tpos += #{count_size}\n",
+      stride_check,
+      "\titems := make([]#{element_struct}, 0, count)\n",
+      "\tfor i := 0; i < count; i++ {\n",
+      "\t\titem, nextPos, err := Decode#{element_struct}(data, pos)\n",
+      "\t\tif err != nil {\n",
+      "\t\t\treturn nil, offset, err\n",
+      "\t\t}\n",
+      "\t\tpos = nextPos\n",
+      "\t\titems = append(items, item)\n",
+      "\t}\n",
+      "\treturn items, pos, nil\n",
+      "}\n\n"
+    ]
   end
 
   @spec constant_name(String.t()) :: String.t()

@@ -332,12 +332,17 @@ impl Renderer {
 
     fn draw_semantic_window(&mut self, window: semantic::WindowContent) {
         let row_texts: Vec<String> = window.rows.iter().map(|row| row.text.clone()).collect();
-        let width = row_texts
-            .iter()
-            .map(|text| text_width(text))
-            .max()
-            .unwrap_or(0);
-        let height = row_texts.len().min(u16::MAX as usize) as u16;
+        let row_count = row_texts.len().min(u16::MAX as usize) as u16;
+        let width = if window.text_width > 0 {
+            window.text_width
+        } else {
+            row_texts.iter().map(|text| text_width(text)).max().unwrap_or(0)
+        };
+        let height = if window.text_height > 0 {
+            window.text_height
+        } else {
+            row_count
+        };
         let previous = self.semantic_windows.insert(
             window.window_id,
             SemanticWindowState {
@@ -399,7 +404,7 @@ impl Renderer {
                 CellStyle {
                     fg: span.fg,
                     bg: span.bg,
-                    attrs: span.attrs,
+                    attrs: span.attrs as u16,
                     ul_color: 0,
                     blend: 100,
                 },
@@ -2715,6 +2720,8 @@ mod tests {
 
         renderer.draw_semantic_window(semantic::WindowContent {
             window_id: 1,
+            text_width: 0,
+            text_height: 0,
             origin_row: 1,
             origin_col: 2,
             cursor_row: 0,
@@ -2729,7 +2736,9 @@ mod tests {
                     fg: 0xAABBCC,
                     bg: 0,
                     attrs: 0,
+                    ..Default::default()
                 }],
+                ..Default::default()
             }],
             cursorline: None,
         });
@@ -2746,6 +2755,8 @@ mod tests {
 
         renderer.draw_semantic_window(semantic::WindowContent {
             window_id: 1,
+            text_width: 0,
+            text_height: 0,
             origin_row: 0,
             origin_col: 0,
             cursor_row: 0,
@@ -2756,16 +2767,20 @@ mod tests {
                 semantic::Row {
                     text: "abcdef".to_owned(),
                     spans: vec![],
+                    ..Default::default()
                 },
                 semantic::Row {
                     text: "gh".to_owned(),
                     spans: vec![],
+                    ..Default::default()
                 },
             ],
             cursorline: None,
         });
         renderer.draw_semantic_window(semantic::WindowContent {
             window_id: 1,
+            text_width: 0,
+            text_height: 0,
             origin_row: 0,
             origin_col: 0,
             cursor_row: 0,
@@ -2775,6 +2790,7 @@ mod tests {
             rows: vec![semantic::Row {
                 text: "a".to_owned(),
                 spans: vec![],
+                ..Default::default()
             }],
             cursorline: None,
         });
@@ -2790,6 +2806,8 @@ mod tests {
 
         renderer.draw_semantic_window(semantic::WindowContent {
             window_id: 1,
+            text_width: 0,
+            text_height: 0,
             origin_row: 0,
             origin_col: 0,
             cursor_row: 0,
@@ -2799,6 +2817,7 @@ mod tests {
             rows: vec![semantic::Row {
                 text: "left".to_owned(),
                 spans: vec![],
+                ..Default::default()
             }],
             cursorline: Some(semantic::Cursorline {
                 row: 0,
@@ -2807,6 +2826,8 @@ mod tests {
         });
         renderer.draw_semantic_window(semantic::WindowContent {
             window_id: 2,
+            text_width: 0,
+            text_height: 0,
             origin_row: 0,
             origin_col: 8,
             cursor_row: 0,
@@ -2816,6 +2837,7 @@ mod tests {
             rows: vec![semantic::Row {
                 text: "right".to_owned(),
                 spans: vec![],
+                ..Default::default()
             }],
             cursorline: None,
         });
@@ -2845,6 +2867,8 @@ mod tests {
 
         renderer.draw_semantic_window(semantic::WindowContent {
             window_id: 1,
+            text_width: 0,
+            text_height: 0,
             origin_row: 0,
             origin_col: 0,
             cursor_row: 0,
@@ -2855,10 +2879,12 @@ mod tests {
                 semantic::Row {
                     text: "one".to_owned(),
                     spans: vec![],
+                    ..Default::default()
                 },
                 semantic::Row {
                     text: "two".to_owned(),
                     spans: vec![],
+                    ..Default::default()
                 },
             ],
             cursorline: Some(semantic::Cursorline {
@@ -2868,6 +2894,8 @@ mod tests {
         });
         renderer.draw_semantic_window(semantic::WindowContent {
             window_id: 2,
+            text_width: 0,
+            text_height: 0,
             origin_row: 3,
             origin_col: 8,
             cursor_row: 0,
@@ -2877,6 +2905,7 @@ mod tests {
             rows: vec![semantic::Row {
                 text: "pane".to_owned(),
                 spans: vec![],
+                ..Default::default()
             }],
             cursorline: None,
         });
@@ -2911,6 +2940,8 @@ mod tests {
 
         renderer.draw_semantic_window(semantic::WindowContent {
             window_id: 1,
+            text_width: 0,
+            text_height: 0,
             origin_row: 0,
             origin_col: 0,
             cursor_row: 0,
@@ -2921,10 +2952,12 @@ mod tests {
                 semantic::Row {
                     text: "      foo".to_owned(),
                     spans: vec![],
+                    ..Default::default()
                 },
                 semantic::Row {
                     text: "      ".to_owned(),
                     spans: vec![],
+                    ..Default::default()
                 },
             ],
             cursorline: None,
@@ -2953,6 +2986,8 @@ mod tests {
 
         renderer.draw_semantic_window(semantic::WindowContent {
             window_id: 1,
+            text_width: 0,
+            text_height: 0,
             origin_row: 0,
             origin_col: 0,
             cursor_row: 0,
@@ -2962,11 +2997,14 @@ mod tests {
             rows: vec![semantic::Row {
                 text: "left".to_owned(),
                 spans: vec![],
+                ..Default::default()
             }],
             cursorline: None,
         });
         renderer.draw_semantic_window(semantic::WindowContent {
             window_id: 2,
+            text_width: 0,
+            text_height: 0,
             origin_row: 0,
             origin_col: 10,
             cursor_row: 0,
@@ -2976,6 +3014,7 @@ mod tests {
             rows: vec![semantic::Row {
                 text: "right".to_owned(),
                 spans: vec![],
+                ..Default::default()
             }],
             cursorline: None,
         });
@@ -2990,6 +3029,8 @@ mod tests {
 
         renderer.draw_semantic_window(semantic::WindowContent {
             window_id: 1,
+            text_width: 0,
+            text_height: 0,
             origin_row: 1,
             origin_col: 5,
             cursor_row: 1,
@@ -3000,10 +3041,12 @@ mod tests {
                 semantic::Row {
                     text: "  alpha".to_owned(),
                     spans: vec![],
+                    ..Default::default()
                 },
                 semantic::Row {
                     text: "    beta".to_owned(),
                     spans: vec![],
+                    ..Default::default()
                 },
             ],
             cursorline: Some(semantic::Cursorline {
@@ -3077,6 +3120,8 @@ mod tests {
         let mut renderer = Renderer::new(20, 6);
         renderer.draw_semantic_window(semantic::WindowContent {
             window_id: 1,
+            text_width: 0,
+            text_height: 0,
             origin_row: 2,
             origin_col: 3,
             cursor_row: 0,
@@ -3086,6 +3131,7 @@ mod tests {
             rows: vec![semantic::Row {
                 text: "hello".to_owned(),
                 spans: vec![],
+                ..Default::default()
             }],
             cursorline: None,
         });
@@ -3116,6 +3162,8 @@ mod tests {
         let mut renderer = Renderer::new(20, 6);
         renderer.draw_semantic_window(semantic::WindowContent {
             window_id: 1,
+            text_width: 0,
+            text_height: 0,
             origin_row: 1,
             origin_col: 2,
             cursor_row: 0,
@@ -3130,7 +3178,9 @@ mod tests {
                     fg: 0xAABBCC,
                     bg: 0x112233,
                     attrs: 0,
+                    ..Default::default()
                 }],
+                ..Default::default()
             }],
             cursorline: None,
         });
@@ -3174,6 +3224,8 @@ mod tests {
         let mut renderer = Renderer::new(20, 6);
         renderer.draw_semantic_window(semantic::WindowContent {
             window_id: 1,
+            text_width: 0,
+            text_height: 0,
             origin_row: 2,
             origin_col: 3,
             cursor_row: 0,
@@ -3183,6 +3235,7 @@ mod tests {
             rows: vec![semantic::Row {
                 text: "hello".to_owned(),
                 spans: vec![],
+                ..Default::default()
             }],
             cursorline: None,
         });
@@ -3430,6 +3483,8 @@ mod tests {
         let mut renderer = Renderer::new(24, 8);
         renderer.draw_semantic_window(semantic::WindowContent {
             window_id: 1,
+            text_width: 0,
+            text_height: 0,
             origin_row: 1,
             origin_col: 2,
             cursor_row: 0,
@@ -3439,11 +3494,14 @@ mod tests {
             rows: vec![semantic::Row {
                 text: "one".to_owned(),
                 spans: vec![],
+                ..Default::default()
             }],
             cursorline: None,
         });
         renderer.draw_semantic_window(semantic::WindowContent {
             window_id: 2,
+            text_width: 0,
+            text_height: 0,
             origin_row: 4,
             origin_col: 10,
             cursor_row: 0,
@@ -3453,6 +3511,7 @@ mod tests {
             rows: vec![semantic::Row {
                 text: "two".to_owned(),
                 spans: vec![],
+                ..Default::default()
             }],
             cursorline: None,
         });
@@ -3695,6 +3754,8 @@ mod tests {
 
         renderer.draw_semantic_window(semantic::WindowContent {
             window_id: 1,
+            text_width: 0,
+            text_height: 0,
             origin_row: 4,
             origin_col: 4,
             cursor_row: 0,
@@ -3704,6 +3765,7 @@ mod tests {
             rows: vec![semantic::Row {
                 text: "old".to_owned(),
                 spans: vec![],
+                ..Default::default()
             }],
             cursorline: None,
         });
@@ -3730,6 +3792,8 @@ mod tests {
 
         renderer.draw_semantic_window(semantic::WindowContent {
             window_id: 1,
+            text_width: 0,
+            text_height: 0,
             origin_row: 4,
             origin_col: 4,
             cursor_row: 0,
@@ -3739,6 +3803,7 @@ mod tests {
             rows: vec![semantic::Row {
                 text: "new".to_owned(),
                 spans: vec![],
+                ..Default::default()
             }],
             cursorline: None,
         });
@@ -3949,6 +4014,8 @@ mod tests {
 
         renderer.draw_semantic_window(semantic::WindowContent {
             window_id: 1,
+            text_width: 0,
+            text_height: 0,
             origin_row: 8,
             origin_col: 0,
             cursor_row: 0,
@@ -3958,6 +4025,7 @@ mod tests {
             rows: vec![semantic::Row {
                 text: "under".to_owned(),
                 spans: vec![],
+                ..Default::default()
             }],
             cursorline: None,
         });
@@ -4104,6 +4172,8 @@ mod tests {
 
         renderer.draw_semantic_window(semantic::WindowContent {
             window_id: 1,
+            text_width: 0,
+            text_height: 0,
             origin_row: 5,
             origin_col: 4,
             cursor_row: 0,
@@ -4113,6 +4183,7 @@ mod tests {
             rows: vec![semantic::Row {
                 text: "under completion".to_owned(),
                 spans: vec![],
+                ..Default::default()
             }],
             cursorline: None,
         });
