@@ -7,6 +7,15 @@ pub mod opcodes {
     ));
 }
 
+pub mod command_size {
+    #![allow(dead_code)]
+
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/generated/command_size.rs"
+    ));
+}
+
 use crate::semantic;
 use std::fmt;
 use std::io::{self, Write};
@@ -587,6 +596,70 @@ mod tests {
         assert_eq!(
             decode_command(&packet[command.size()..]).unwrap(),
             Command::BatchEnd
+        );
+    }
+}
+
+#[cfg(test)]
+mod command_size_conformance {
+    use super::command_size::{CommandSize, command_size};
+    use super::{decode_command, opcodes};
+
+    // Each case is a fully framed command. We assert the schema-generated
+    // command_size agrees with the hand-written decoder's consumed size, so the
+    // generated sizer can never drift from the real wire format. The
+    // indent_guides (0x91) case is the regression that desynced the Go reader.
+    #[test]
+    fn generated_size_matches_decoder() {
+        let cases: &[(Vec<u8>, usize)] = &[
+            (vec![opcodes::OP_CLEAR], 1),
+            (vec![opcodes::OP_SET_CURSOR, 0, 0, 0, 0], 5),
+            (vec![opcodes::OP_GUI_GUTTER_SEP, 0, 0, 0, 0, 0], 6),
+            (
+                vec![opcodes::OP_GUI_INDENT_GUIDES, 0x00, 0x06, 1, 2, 3, 4, 5, 6],
+                9,
+            ),
+            (
+                {
+                    let mut v = vec![opcodes::OP_SET_TITLE, 0x00, 0x03];
+                    v.extend_from_slice(b"abc");
+                    v
+                },
+                6,
+            ),
+        ];
+
+        for (bytes, expected) in cases {
+            assert_eq!(
+                command_size(bytes),
+                CommandSize::Sized(*expected),
+                "command_size mismatch for opcode 0x{:02X}",
+                bytes[0]
+            );
+            let decoded = decode_command(bytes).expect("decoder accepts framed command");
+            assert_eq!(
+                decoded.size(),
+                *expected,
+                "decoder size disagrees with command_size for opcode 0x{:02X}",
+                bytes[0]
+            );
+        }
+    }
+
+    #[test]
+    fn custom_opcodes_defer_to_decoder() {
+        assert_eq!(
+            command_size(&[opcodes::OP_GUI_GIT_STATUS, 0, 0, 0, 0]),
+            CommandSize::Custom
+        );
+    }
+
+    #[test]
+    fn unknown_high_opcode_is_forward_compatible_len16() {
+        // A future 0x90+ opcode must still be skippable as len16.
+        assert_eq!(
+            command_size(&[0xB7, 0x00, 0x02, 0xAA, 0xBB]),
+            CommandSize::Sized(5)
         );
     }
 }

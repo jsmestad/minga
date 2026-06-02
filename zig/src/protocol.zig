@@ -2866,3 +2866,27 @@ test "tab GUI action re-exports stay wired to generated opcodes" {
 test {
     _ = @import("generated/protocol_schema_test.zig");
 }
+
+// Conformance: the schema-generated commandSize must agree with this module's
+// mature, hand-written commandSize. The corpus is limited to opcodes the Zig
+// renderer actually receives and sizes (render/config plus the 0x90+ forward-
+// compatible range); chrome opcodes 0x71-0x8F never reach the legacy Zig path,
+// so it deliberately skips them. The indent_guides (0x91) case is the
+// regression that desynced the Go reader.
+test "generated commandSize matches protocol.commandSize" {
+    const generated_size = @import("generated/protocol_command_size.zig");
+
+    const cases = [_][]const u8{
+        &[_]u8{OP_CLEAR},
+        &[_]u8{ OP_SET_CURSOR, 0, 0, 0, 0 },
+        &[_]u8{ OP_SET_TITLE, 0x00, 0x03, 'a', 'b', 'c' },
+        &[_]u8{ opcodes.OP_GUI_INDENT_GUIDES, 0x00, 0x06, 1, 2, 3, 4, 5, 6 },
+        &[_]u8{ opcodes.OP_GUI_FILE_TREE, 0, 0, 0, 2, 0xAA, 0xBB },
+    };
+
+    for (cases) |payload| {
+        const result = generated_size.commandSize(payload);
+        try std.testing.expectEqual(generated_size.Status.sized, result.status);
+        try std.testing.expectEqual(commandSize(payload), result.size);
+    }
+}

@@ -65,78 +65,91 @@ category = "render"
 name = "draw_text"
 value = 0x10
 direction = "beam_to_frontend"
+framing = "custom"
 
 [[opcodes]]
 category = "render"
 name = "set_cursor"
 value = 0x11
 direction = "beam_to_frontend"
+framing = "fixed:5"
 
 [[opcodes]]
 category = "render"
 name = "clear"
 value = 0x12
 direction = "beam_to_frontend"
+framing = "fixed:1"
 
 [[opcodes]]
 category = "render"
 name = "batch_end"
 value = 0x13
 direction = "beam_to_frontend"
+framing = "fixed:1"
 
 [[opcodes]]
 category = "render"
 name = "define_region"
 value = 0x14
 direction = "beam_to_frontend"
+framing = "fixed:15"
 
 [[opcodes]]
 category = "render"
 name = "set_cursor_shape"
 value = 0x15
 direction = "beam_to_frontend"
+framing = "fixed:2"
 
 [[opcodes]]
 category = "render"
 name = "set_title"
 value = 0x16
 direction = "beam_to_frontend"
+framing = "len16"
 
 [[opcodes]]
 category = "render"
 name = "set_window_bg"
 value = 0x17
 direction = "beam_to_frontend"
+framing = "fixed:4"
 
 [[opcodes]]
 category = "render"
 name = "clear_region"
 value = 0x18
 direction = "beam_to_frontend"
+framing = "fixed:3"
 
 [[opcodes]]
 category = "render"
 name = "destroy_region"
 value = 0x19
 direction = "beam_to_frontend"
+framing = "fixed:3"
 
 [[opcodes]]
 category = "render"
 name = "set_active_region"
 value = 0x1A
 direction = "beam_to_frontend"
+framing = "fixed:3"
 
 [[opcodes]]
 category = "render"
 name = "scroll_region"
 value = 0x1B
 direction = "beam_to_frontend"
+framing = "fixed:7"
 
 [[opcodes]]
 category = "render"
 name = "draw_styled_text"
 value = 0x1C
 direction = "beam_to_frontend"
+framing = "custom"
 
 # Frontend configuration commands.
 [[opcodes]]
@@ -144,18 +157,21 @@ category = "config"
 name = "set_font"
 value = 0x50
 direction = "beam_to_frontend"
+framing = "custom"
 
 [[opcodes]]
 category = "config"
 name = "set_font_fallback"
 value = 0x51
 direction = "beam_to_frontend"
+framing = "custom"
 
 [[opcodes]]
 category = "config"
 name = "register_font"
 value = 0x52
 direction = "beam_to_frontend"
+framing = "custom"
 
 # Parser commands.
 [[opcodes]]
@@ -357,126 +373,147 @@ category = "gui_chrome"
 name = "gui_tab_bar"
 value = 0x71
 direction = "beam_to_frontend"
+framing = "custom"
 
 [[opcodes]]
 category = "gui_chrome"
 name = "gui_which_key"
 value = 0x72
 direction = "beam_to_frontend"
+framing = "custom"
 
 [[opcodes]]
 category = "gui_chrome"
 name = "gui_completion"
 value = 0x73
 direction = "beam_to_frontend"
+framing = "custom"
 
 [[opcodes]]
 category = "gui_chrome"
 name = "gui_theme"
 value = 0x74
 direction = "beam_to_frontend"
+framing = "custom"
 
 [[opcodes]]
 category = "gui_chrome"
 name = "gui_breadcrumb"
 value = 0x75
 direction = "beam_to_frontend"
+framing = "custom"
 
 [[opcodes]]
 category = "gui_chrome"
 name = "gui_status_bar"
 value = 0x76
 direction = "beam_to_frontend"
+framing = "sectioned"
 
 [[opcodes]]
 category = "gui_chrome"
 name = "gui_picker"
 value = 0x77
 direction = "beam_to_frontend"
+framing = "custom"
 
 [[opcodes]]
 category = "gui_chrome"
 name = "gui_agent_chat"
 value = 0x78
 direction = "beam_to_frontend"
+framing = "custom"
 
 [[opcodes]]
 category = "gui_chrome"
 name = "gui_gutter_sep"
 value = 0x79
 direction = "beam_to_frontend"
+framing = "fixed:6"
 
 [[opcodes]]
 category = "gui_chrome"
 name = "gui_cursorline"
 value = 0x7A
 direction = "beam_to_frontend"
+framing = "fixed:6"
 
 [[opcodes]]
 category = "gui_chrome"
 name = "gui_gutter"
 value = 0x7B
 direction = "beam_to_frontend"
+framing = "sectioned"
 
 [[opcodes]]
 category = "gui_chrome"
 name = "gui_bottom_panel"
 value = 0x7C
 direction = "beam_to_frontend"
+framing = "custom"
 
 [[opcodes]]
 category = "gui_chrome"
 name = "gui_picker_preview"
 value = 0x7D
 direction = "beam_to_frontend"
+framing = "custom"
 
 [[opcodes]]
 category = "gui_chrome"
 name = "gui_tool_manager"
 value = 0x7E
 direction = "beam_to_frontend"
+framing = "custom"
 
 [[opcodes]]
 category = "gui_chrome"
 name = "gui_minibuffer"
 value = 0x7F
 direction = "beam_to_frontend"
+framing = "custom"
 
 [[opcodes]]
 category = "gui_chrome"
 name = "clipboard_write"
 value = 0x90
 direction = "beam_to_frontend"
+framing = "len16"
 
 [[opcodes]]
 category = "gui_chrome"
 name = "gui_indent_guides"
 value = 0x91
 direction = "beam_to_frontend"
+framing = "len16"
 
 [[opcodes]]
 category = "gui_chrome"
 name = "gui_line_spacing"
 value = 0x92
 direction = "beam_to_frontend"
+framing = "len16"
 
 [[opcodes]]
 category = "gui_chrome"
 name = "gui_file_tree"
 value = 0x93
 direction = "beam_to_frontend"
+framing = "len32"
 
 [[opcodes]]
 category = "gui_chrome"
 name = "gui_file_tree_selection"
 value = 0x94
 direction = "beam_to_frontend"
+framing = "len16"
 
 [[opcodes]]
 category = "gui_chrome"
 name = "gui_cursor_animation"
 value = 0x95
 direction = "beam_to_frontend"
+framing = "len16"
 
 # Native GUI semantic rendering and overlays.
 [[opcodes]]
@@ -484,132 +521,154 @@ category = "gui_semantic"
 name = "gui_window_content"
 value = 0x80
 direction = "beam_to_frontend"
+framing = "sectioned"
 
 [[opcodes]]
 category = "gui_semantic"
 name = "gui_hover_popup"
 value = 0x81
 direction = "beam_to_frontend"
+framing = "custom"
 
 [[opcodes]]
 category = "gui_semantic"
 name = "gui_signature_help"
 value = 0x82
 direction = "beam_to_frontend"
+framing = "custom"
 
 [[opcodes]]
 category = "gui_semantic"
 name = "gui_float_popup"
 value = 0x83
 direction = "beam_to_frontend"
+framing = "custom"
 
 [[opcodes]]
 category = "gui_semantic"
 name = "gui_split_separators"
 value = 0x84
 direction = "beam_to_frontend"
+framing = "custom"
 
 [[opcodes]]
 category = "gui_semantic"
 name = "gui_git_status"
 value = 0x85
 direction = "beam_to_frontend"
+framing = "custom"
 
 [[opcodes]]
 category = "gui_semantic"
 name = "gui_board"
 value = 0x87
 direction = "beam_to_frontend"
+framing = "custom"
 
 [[opcodes]]
 category = "gui_semantic"
 name = "gui_agent_context"
 value = 0x88
 direction = "beam_to_frontend"
+framing = "custom"
 
 [[opcodes]]
 category = "gui_semantic"
 name = "gui_change_summary"
 value = 0x89
 direction = "beam_to_frontend"
+framing = "custom"
 
 [[opcodes]]
 category = "gui_semantic"
 name = "gui_hover_action"
 value = 0x96
 direction = "beam_to_frontend"
+framing = "len16"
 
 [[opcodes]]
 category = "gui_semantic"
 name = "gui_config_state"
 value = 0x97
 direction = "beam_to_frontend"
+framing = "len16"
 
 [[opcodes]]
 category = "gui_semantic"
 name = "gui_workspaces"
 value = 0x98
 direction = "beam_to_frontend"
+framing = "len16"
 
 [[opcodes]]
 category = "gui_semantic"
 name = "gui_notifications"
 value = 0x99
 direction = "beam_to_frontend"
+framing = "len16"
 
 [[opcodes]]
 category = "gui_semantic"
 name = "gui_observatory"
 value = 0x9A
 direction = "beam_to_frontend"
+framing = "len32"
 
 [[opcodes]]
 category = "gui_semantic"
 name = "gui_edit_timeline"
 value = 0x9B
 direction = "beam_to_frontend"
+framing = "len16"
 
 [[opcodes]]
 category = "gui_semantic"
 name = "gui_extension_overlay"
 value = 0x9C
 direction = "beam_to_frontend"
+framing = "len16"
 
 [[opcodes]]
 category = "gui_semantic"
 name = "gui_extension_panel"
 value = 0x9D
 direction = "beam_to_frontend"
+framing = "len16"
 
 [[opcodes]]
 category = "gui_semantic"
 name = "gui_search_state"
 value = 0x9E
 direction = "beam_to_frontend"
+framing = "len16"
 
 [[opcodes]]
 category = "gui_semantic"
 name = "gui_sidebars"
 value = 0x9F
 direction = "beam_to_frontend"
+framing = "len32"
 
 [[opcodes]]
 category = "gui_semantic"
 name = "gui_window_overlay_delta"
 value = 0xA0
 direction = "beam_to_frontend"
+framing = "custom"
 
 [[opcodes]]
 category = "gui_semantic"
 name = "gui_window_viewport_delta"
 value = 0xA1
 direction = "beam_to_frontend"
+framing = "sectioned"
 
 [[opcodes]]
 category = "gui_semantic"
 name = "gui_window_rows_delta"
 value = 0xA2
 direction = "beam_to_frontend"
+framing = "sectioned"
 
 # Sub-opcodes inside gui_action (0x07).
 [[gui_actions]]

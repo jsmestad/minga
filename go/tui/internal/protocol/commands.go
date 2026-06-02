@@ -382,5 +382,10 @@ func decodeSkipOrChrome(payload []byte) (Command, error) {
 		return Command{Kind: CommandChrome, Size: chrome.Bytes, Chrome: chrome}, nil
 	}
 
-	return Command{Kind: CommandNoop, Size: len(payload)}, nil
+	// Unhandled low opcode: size it through the schema authority rather than
+	// swallowing the rest of the batch.
+	if size, status := generated.CommandSize(payload); status == generated.CommandSizeOK {
+		return Command{Kind: CommandNoop, Size: size}, nil
+	}
+	return Command{}, fmt.Errorf("cannot size opcode 0x%02X", opcode)
 }

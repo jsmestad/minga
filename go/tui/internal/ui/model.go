@@ -80,8 +80,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.send(mousePacket(msg))
 	case port.PacketMsg:
 		return m, m.applyCommands(msg.Commands)
+	case port.LogMsg:
+		// Forward renderer diagnostics to the BEAM so they land in *Messages*.
+		m.send(protocol.EncodeLogMessage(msg.Level, msg.Text))
 	case port.ErrorMsg:
 		m.lastError = msg.Err.Error()
+		m.send(protocol.EncodeLogMessage(protocol.LogLevelErr, msg.Err.Error()))
 	}
 
 	m.viewport.Width = max(m.width, 1)

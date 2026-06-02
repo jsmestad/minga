@@ -27,6 +27,23 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
     end
   end
 
+  test "every beam_to_frontend opcode declares a valid framing", %{schema: schema} do
+    # Framing is what lets a frontend size each command and advance through a
+    # batch. A missing or invalid framing is the bug class that blanked the Go
+    # renderer (gui_indent_guides was sized by guesswork), so the schema must
+    # classify every command the BEAM can send to a frontend.
+    valid? = fn
+      framing when framing in ["len16", "len32", "sectioned", "custom"] -> true
+      "fixed:" <> n -> match?({_int, ""}, Integer.parse(n))
+      _other -> false
+    end
+
+    for entry <- schema["opcodes"], entry["direction"] == "beam_to_frontend" do
+      assert valid?.(entry["framing"]),
+             "opcode #{entry["name"]} has missing/invalid framing: #{inspect(entry["framing"])}"
+    end
+  end
+
   test "input opcodes match schema", %{schema: schema} do
     assert_opcodes(schema, "input",
       key_press: 0x01,

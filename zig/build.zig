@@ -7,6 +7,7 @@ const BackendOption = enum {
 const generated_protocol_files = [_][]const u8{
     "src/generated/protocol_opcodes.zig",
     "src/generated/protocol_schema_test.zig",
+    "src/generated/protocol_command_size.zig",
 };
 
 fn ensureGeneratedProtocolArtifacts(b: *std.Build) void {

@@ -9,6 +9,27 @@ const (
 	ModSuper byte = 0x08
 )
 
+// Log levels for EncodeLogMessage, matching the BEAM's decode_log_level.
+const (
+	LogLevelErr   byte = 0
+	LogLevelWarn  byte = 1
+	LogLevelInfo  byte = 2
+	LogLevelDebug byte = 3
+)
+
+// EncodeLogMessage encodes a log_message event so the BEAM routes renderer
+// diagnostics into Minga's *Messages* buffer, matching the Zig renderer.
+// Wire format: <0x60, level:u8, msg_len:u16, msg>. The message is truncated to
+// the u16 length ceiling.
+func EncodeLogMessage(level byte, msg string) []byte {
+	if len(msg) > 0xFFFF {
+		msg = msg[:0xFFFF]
+	}
+	out := make([]byte, 0, 4+len(msg))
+	out = append(out, generated.OPLogMessage, level, byte(len(msg)>>8), byte(len(msg)))
+	return append(out, msg...)
+}
+
 func EncodeReady(width, height uint16) []byte {
 	return []byte{
 		generated.OPReady,
