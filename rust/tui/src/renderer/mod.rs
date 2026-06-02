@@ -40,6 +40,12 @@ impl Default for Cell {
     }
 }
 
+impl CellSnapshot {
+    fn matches_rect(&self, row: u16, col: u16, width: u16, height: u16) -> bool {
+        self.row == row && self.col == col && self.width == width && self.height == height
+    }
+}
+
 pub struct Renderer {
     width: u16,
     height: u16,
@@ -439,8 +445,14 @@ impl Renderer {
         }
 
         let row = 1;
+        let col = self.visible_file_tree_width();
+        let width = self.width.saturating_sub(col);
+        if width == 0 {
+            return;
+        }
+
         if breadcrumb.segments.is_empty() {
-            self.clear_row(row);
+            self.write_run(row, col, &" ".repeat(width as usize), CellStyle::default());
             self.breadcrumb = None;
             return;
         }
@@ -449,8 +461,8 @@ impl Renderer {
         let text = format!(" {}", breadcrumb.segments.join(" / "));
         self.write_run(
             row,
-            0,
-            &pad_to_width(&text, self.width),
+            col,
+            &pad_to_width(&text, width),
             self.theme.breadcrumb_style(),
         );
     }
@@ -756,6 +768,14 @@ impl Renderer {
         }
     }
 
+    fn visible_file_tree_width(&self) -> u16 {
+        self.file_tree
+            .as_ref()
+            .filter(|tree| tree.visible)
+            .map(|tree| tree.width.min(self.width))
+            .unwrap_or(0)
+    }
+
     fn render_completion(&mut self, completion: &semantic::Completion) {
         self.restore_completion_cells();
         if completion.items.is_empty() || self.width == 0 || self.height == 0 {
@@ -770,7 +790,8 @@ impl Renderer {
             .min(self.height.saturating_sub(height));
         let col = completion.anchor_col.min(self.width.saturating_sub(width));
 
-        if self.completion_snapshot.is_none() {
+        if !snapshot_matches(&self.completion_snapshot, row, col, width, height) {
+            self.restore_completion_snapshot();
             self.completion_snapshot = Some(self.capture_rect(row, col, width, height));
         }
 
@@ -834,7 +855,8 @@ impl Renderer {
         let row = self.height.saturating_sub(height + 1);
         let col = self.width.saturating_sub(width) / 2;
 
-        if self.which_key_snapshot.is_none() {
+        if !snapshot_matches(&self.which_key_snapshot, row, col, width, height) {
+            self.restore_which_key_snapshot();
             self.which_key_snapshot = Some(self.capture_rect(row, col, width, height));
         }
 
@@ -922,7 +944,8 @@ impl Renderer {
             lines.iter().map(String::as_str),
             "Signature",
         );
-        if self.signature_help_snapshot.is_none() {
+        if !snapshot_matches(&self.signature_help_snapshot, row, col, width, height) {
+            self.restore_signature_help_snapshot();
             self.signature_help_snapshot = Some(self.capture_rect(row, col, width, height));
         }
         self.render_popup_panel(row, col, width, height, " Signature ", lines.join("\n"));
@@ -1713,6 +1736,18 @@ fn anchored_popup_geometry<'a>(
     (row, col, width, height)
 }
 
+fn snapshot_matches(
+    snapshot: &Option<CellSnapshot>,
+    row: u16,
+    col: u16,
+    width: u16,
+    height: u16,
+) -> bool {
+    snapshot
+        .as_ref()
+        .is_some_and(|snapshot| snapshot.matches_rect(row, col, width, height))
+}
+
 fn highlight_signature_label(signature: &semantic::Signature, active_parameter: usize) -> String {
     let Some(parameter) = signature.parameters.get(active_parameter) else {
         return signature.label.clone();
@@ -2197,6 +2232,38 @@ mod tests {
     }
 
     #[test]
+    fn semantic_breadcrumb_preserves_visible_file_tree_rows() {
+        let mut renderer = Renderer::new(32, 6);
+
+        renderer.draw_file_tree(semantic::FileTree {
+            visible: true,
+            focused: true,
+            status: 3,
+            selected_id: "a".to_owned(),
+            root_path: "/tmp".to_owned(),
+            width: 12,
+            error: String::new(),
+            rows: vec![semantic::FileTreeRow {
+                id: "a".to_owned(),
+                name: "src".to_owned(),
+                icon: "D".to_owned(),
+                depth: 0,
+                flags: 0x17,
+                git_status: 0,
+                diagnostics: (0, 0, 0, 0),
+                editing_text: String::new(),
+            }],
+        });
+
+        renderer.draw_breadcrumb(semantic::Breadcrumb {
+            segments: vec!["lib".to_owned(), "minga".to_owned()],
+        });
+
+        assert_eq!(renderer.cells[renderer.index(1, 1).unwrap()].text, "v");
+        assert_eq!(renderer.cells[renderer.index(13, 1).unwrap()].text, "l");
+    }
+
+    #[test]
     fn semantic_picker_draws_split_overlay() {
         let mut renderer = Renderer::new(80, 20);
 
@@ -2612,6 +2679,65 @@ mod tests {
     }
 
     #[test]
+    fn semantic_completion_recaptures_snapshot_when_geometry_changes() {
+        let mut renderer = Renderer::new(60, 16);
+        renderer.draw_text(DrawText {
+            row: 4,
+            col: 5,
+            fg: 0x111111,
+            bg: 0x222222,
+            attrs: 0,
+            text: "old-under".to_owned(),
+        });
+        renderer.draw_text(DrawText {
+            row: 10,
+            col: 20,
+            fg: 0x333333,
+            bg: 0x444444,
+            attrs: 0,
+            text: "new-under".to_owned(),
+        });
+
+        renderer.draw_completion(semantic::Completion {
+            visible: true,
+            anchor_row: 3,
+            anchor_col: 5,
+            selected_index: 0,
+            items: vec![semantic::CompletionItem {
+                kind: 1,
+                label: "write".to_owned(),
+                detail: String::new(),
+            }],
+        });
+        renderer.draw_completion(semantic::Completion {
+            visible: true,
+            anchor_row: 9,
+            anchor_col: 20,
+            selected_index: 0,
+            items: vec![semantic::CompletionItem {
+                kind: 1,
+                label: "read".to_owned(),
+                detail: "second".to_owned(),
+            }],
+        });
+
+        assert_eq!(renderer.cells[renderer.index(5, 4).unwrap()].text, "o");
+        assert_eq!(renderer.cells[renderer.index(20, 10).unwrap()].text, "f");
+
+        renderer.draw_completion(semantic::Completion::default());
+
+        let old_cell = &renderer.cells[renderer.index(5, 4).unwrap()];
+        assert_eq!(old_cell.text, "o");
+        assert_eq!(old_cell.style.fg, 0x111111);
+        assert_eq!(old_cell.style.bg, 0x222222);
+
+        let new_cell = &renderer.cells[renderer.index(20, 10).unwrap()];
+        assert_eq!(new_cell.text, "n");
+        assert_eq!(new_cell.style.fg, 0x333333);
+        assert_eq!(new_cell.style.bg, 0x444444);
+    }
+
+    #[test]
     fn semantic_window_redraw_replays_retained_completion_and_which_key() {
         let mut renderer = Renderer::new(60, 16);
 
@@ -2654,6 +2780,68 @@ mod tests {
         assert_eq!(renderer.cells[renderer.index(4, 5).unwrap()].text, "f");
         assert_eq!(renderer.cells[renderer.index(3, 13).unwrap()].text, "S");
         assert_eq!(renderer.cells[renderer.index(5, 14).unwrap()].text, "f");
+    }
+
+    #[test]
+    fn semantic_which_key_recaptures_snapshot_when_height_changes() {
+        let mut renderer = Renderer::new(60, 16);
+        renderer.draw_text(DrawText {
+            row: 13,
+            col: 3,
+            fg: 0x111111,
+            bg: 0x222222,
+            attrs: 0,
+            text: "old-row".to_owned(),
+        });
+        renderer.draw_text(DrawText {
+            row: 10,
+            col: 3,
+            fg: 0x333333,
+            bg: 0x444444,
+            attrs: 0,
+            text: "new-row".to_owned(),
+        });
+
+        renderer.draw_which_key(semantic::WhichKey {
+            visible: true,
+            prefix: "SPC".to_owned(),
+            page: 0,
+            page_count: 1,
+            bindings: vec![semantic::WhichKeyBinding {
+                kind: 0,
+                key: "f".to_owned(),
+                description: "Find file".to_owned(),
+                icon: String::new(),
+            }],
+        });
+        renderer.draw_which_key(semantic::WhichKey {
+            visible: true,
+            prefix: "SPC".to_owned(),
+            page: 0,
+            page_count: 1,
+            bindings: (0..4)
+                .map(|index| semantic::WhichKeyBinding {
+                    kind: 0,
+                    key: format!("k{index}"),
+                    description: format!("Binding {index}"),
+                    icon: String::new(),
+                })
+                .collect(),
+        });
+
+        assert_eq!(renderer.cells[renderer.index(3, 10).unwrap()].text, "S");
+
+        renderer.draw_which_key(semantic::WhichKey::default());
+
+        let old_cell = &renderer.cells[renderer.index(3, 13).unwrap()];
+        assert_eq!(old_cell.text, "o");
+        assert_eq!(old_cell.style.fg, 0x111111);
+        assert_eq!(old_cell.style.bg, 0x222222);
+
+        let new_cell = &renderer.cells[renderer.index(3, 10).unwrap()];
+        assert_eq!(new_cell.text, "n");
+        assert_eq!(new_cell.style.fg, 0x333333);
+        assert_eq!(new_cell.style.bg, 0x444444);
     }
 
     #[test]
@@ -2719,6 +2907,67 @@ mod tests {
             }],
         });
         assert_eq!(renderer.cells[renderer.index(9, 3).unwrap()].text, "h");
+    }
+
+    #[test]
+    fn semantic_signature_help_recaptures_snapshot_when_geometry_changes() {
+        let mut renderer = Renderer::new(60, 16);
+        renderer.draw_text(DrawText {
+            row: 4,
+            col: 5,
+            fg: 0x111111,
+            bg: 0x222222,
+            attrs: 0,
+            text: "old-under".to_owned(),
+        });
+        renderer.draw_text(DrawText {
+            row: 10,
+            col: 20,
+            fg: 0x333333,
+            bg: 0x444444,
+            attrs: 0,
+            text: "new-under".to_owned(),
+        });
+
+        let signature = semantic::Signature {
+            label: "open(path)".to_owned(),
+            documentation: "Open file".to_owned(),
+            parameters: vec![semantic::SignatureParameter {
+                label: "path".to_owned(),
+                documentation: "File path".to_owned(),
+            }],
+        };
+        renderer.draw_signature_help(semantic::SignatureHelp {
+            visible: true,
+            anchor_row: 2,
+            anchor_col: 4,
+            active_signature: 0,
+            active_parameter: 0,
+            signatures: vec![signature.clone()],
+        });
+        renderer.draw_signature_help(semantic::SignatureHelp {
+            visible: true,
+            anchor_row: 8,
+            anchor_col: 19,
+            active_signature: 0,
+            active_parameter: 0,
+            signatures: vec![signature],
+        });
+
+        assert_eq!(renderer.cells[renderer.index(5, 4).unwrap()].text, "o");
+        assert_eq!(renderer.cells[renderer.index(20, 10).unwrap()].text, "o");
+
+        renderer.draw_signature_help(semantic::SignatureHelp::default());
+
+        let old_cell = &renderer.cells[renderer.index(5, 4).unwrap()];
+        assert_eq!(old_cell.text, "o");
+        assert_eq!(old_cell.style.fg, 0x111111);
+        assert_eq!(old_cell.style.bg, 0x222222);
+
+        let new_cell = &renderer.cells[renderer.index(20, 10).unwrap()];
+        assert_eq!(new_cell.text, "n");
+        assert_eq!(new_cell.style.fg, 0x333333);
+        assert_eq!(new_cell.style.bg, 0x444444);
     }
 
     #[test]
