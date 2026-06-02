@@ -87,12 +87,9 @@ defmodule Minga.Extension.CompileCache do
   @spec load_beams([String.t()]) :: {:ok, [module()]} | :miss
   defp load_beams(beams) do
     Enum.reduce_while(beams, {:ok, []}, fn beam, {:ok, acc} ->
-      # Purge any already-loaded version first so the on-disk beam becomes the
-      # current code (matters for dev hot-reload, where an older version may
-      # still be loaded). load_abs takes the path without the .beam extension.
+      # Unload any already-loaded version so the on-disk beam becomes the current code.
       module = beam |> Path.basename() |> Path.rootname() |> String.to_atom()
-      :code.purge(module)
-      :code.delete(module)
+      unload_module(module)
 
       case :code.load_abs(String.to_charlist(Path.rootname(beam))) do
         {:module, loaded} -> {:cont, {:ok, [loaded | acc]}}
@@ -105,32 +102,40 @@ defmodule Minga.Extension.CompileCache do
 
   @spec compile_and_cache([String.t()], String.t(), String.t()) :: result()
   defp compile_and_cache(files, ext_dir, dir) do
-    File.mkdir_p!(dir)
+    with :ok <- validate_sources(files) do
+      File.mkdir_p!(dir)
+      purge_cached_modules(ext_dir)
 
-    {outcome, diagnostics} =
-      Code.with_diagnostics(fn ->
-        Kernel.ParallelCompiler.compile_to_path(files, dir, return_diagnostics: true)
-      end)
+      {outcome, diagnostics} =
+        Code.with_diagnostics(fn ->
+          compile_ignoring_module_conflicts(fn ->
+            Kernel.ParallelCompiler.compile_to_path(files, dir, return_diagnostics: true)
+          end)
+        end)
 
-    case outcome do
-      {:ok, _modules, _diag} ->
-        prune_stale_keys(ext_dir, dir)
+      case outcome do
+        {:ok, _modules, _diag} ->
+          prune_stale_keys(ext_dir, dir)
 
-        # Load from the freshly written beams so the on-disk version is the
-        # one in memory. compile_to_path writes the beams but does not reload
-        # a module that was already loaded (e.g. a prior dev-reload version).
-        case load_from_cache(dir) do
-          {:ok, modules} ->
-            {:ok, %{modules: modules, diagnostics: diagnostics, source: :compiled}}
+          # Load from the freshly written beams so the on-disk version is the
+          # one in memory. compile_to_path writes the beams but does not reload
+          # a module that was already loaded (e.g. a prior dev-reload version).
+          case load_from_cache(dir) do
+            {:ok, modules} ->
+              {:ok, %{modules: modules, diagnostics: diagnostics, source: :compiled}}
 
-          :miss ->
-            File.rm_rf(dir)
-            {:error, "compiled beams could not be loaded"}
-        end
+            :miss ->
+              File.rm_rf(dir)
+              {:error, "compiled beams could not be loaded"}
+          end
 
-      {:error, _errors, _diag} ->
-        File.rm_rf(dir)
-        {:error, "extension compilation failed (see *Messages*)"}
+        {:error, _errors, _diag} ->
+          File.rm_rf(dir)
+          {:error, "extension compilation failed (see *Messages*)"}
+      end
+    else
+      {:error, message} ->
+        {:error, message}
     end
   rescue
     e in [SyntaxError, TokenMissingError, CompileError] ->
@@ -144,6 +149,62 @@ defmodule Minga.Extension.CompileCache do
     kind, reason ->
       File.rm_rf(dir)
       {:error, "error: #{inspect(kind)} #{inspect(reason)}"}
+  end
+
+  @spec purge_cached_modules(String.t()) :: :ok
+  defp purge_cached_modules(ext_dir) do
+    ext_dir
+    |> Path.join("**/*.beam")
+    |> Path.wildcard()
+    |> Enum.each(fn beam ->
+      module = beam |> Path.basename() |> Path.rootname() |> String.to_atom()
+      unload_module(module)
+    end)
+
+    :ok
+  end
+
+  @spec unload_module(module()) :: :ok
+  defp unload_module(module) do
+    :code.delete(module)
+    :code.purge(module)
+    :code.delete(module)
+    :ok
+  end
+
+  @spec validate_sources([String.t()]) :: :ok | {:error, String.t()}
+  defp validate_sources(files) do
+    Enum.reduce_while(files, :ok, fn file, :ok ->
+      case File.read(file) do
+        {:ok, content} ->
+          case Code.string_to_quoted(content, file: file) do
+            {:ok, _quoted} -> {:cont, :ok}
+            {:error, reason} -> {:halt, {:error, quoted_error_message(file, reason)}}
+          end
+
+        {:error, reason} ->
+          {:halt, {:error, "could not read #{file}: #{:file.format_error(reason)}"}}
+      end
+    end)
+  end
+
+  @spec quoted_error_message(String.t(), term()) :: String.t()
+  defp quoted_error_message(file, {meta, message, token}) when is_list(meta) do
+    location =
+      case {Keyword.get(meta, :line), Keyword.get(meta, :column)} do
+        {line, column} when is_integer(line) and is_integer(column) -> "#{file}:#{line}:#{column}"
+        {line, _column} when is_integer(line) -> "#{file}:#{line}"
+        _ -> file
+      end
+
+    case token do
+      "" -> "compile error: #{location}: #{message}"
+      token -> "compile error: #{location}: #{message} #{token}"
+    end
+  end
+
+  defp quoted_error_message(file, reason) do
+    "compile error: #{file}: #{inspect(reason)}"
   end
 
   # Keep only the just-built key for this extension; remove older versions.
@@ -168,17 +229,24 @@ defmodule Minga.Extension.CompileCache do
 
   @spec compile_in_memory([String.t()]) :: result()
   defp compile_in_memory(files) do
-    {outcome, diagnostics} =
-      Code.with_diagnostics(fn ->
-        Kernel.ParallelCompiler.compile(files, return_diagnostics: true)
-      end)
+    with :ok <- validate_sources(files) do
+      {outcome, diagnostics} =
+        Code.with_diagnostics(fn ->
+          compile_ignoring_module_conflicts(fn ->
+            Kernel.ParallelCompiler.compile(files, return_diagnostics: true)
+          end)
+        end)
 
-    case outcome do
-      {:ok, modules, _diag} ->
-        {:ok, %{modules: modules, diagnostics: diagnostics, source: :compiled}}
+      case outcome do
+        {:ok, modules, _diag} ->
+          {:ok, %{modules: modules, diagnostics: diagnostics, source: :compiled}}
 
-      {:error, _errors, _diag} ->
-        {:error, "extension compilation failed (see *Messages*)"}
+        {:error, _errors, _diag} ->
+          {:error, "extension compilation failed (see *Messages*)"}
+      end
+    else
+      {:error, message} ->
+        {:error, message}
     end
   rescue
     e in [SyntaxError, TokenMissingError, CompileError] ->
@@ -189,6 +257,18 @@ defmodule Minga.Extension.CompileCache do
   catch
     kind, reason ->
       {:error, "error: #{inspect(kind)} #{inspect(reason)}"}
+  end
+
+  @spec compile_ignoring_module_conflicts((-> term())) :: term()
+  defp compile_ignoring_module_conflicts(fun) do
+    previous = Code.get_compiler_option(:ignore_module_conflict)
+    Code.put_compiler_option(:ignore_module_conflict, true)
+
+    try do
+      fun.()
+    after
+      Code.put_compiler_option(:ignore_module_conflict, previous)
+    end
   end
 
   # ── Keys and paths ──────────────────────────────────────────────────────
