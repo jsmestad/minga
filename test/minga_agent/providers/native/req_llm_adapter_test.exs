@@ -83,11 +83,26 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterTest do
 
     assert_received {:text, "hello"}
     assert_received {:thinking, "thinking"}
-    assert_received {:tool, %{id: "tc_1", name: "grep", arguments: %{"pattern" => "needle"}}}
-    assert result.text == "hello"
-    assert [%{id: "tc_1", name: "grep", arguments: %{"pattern" => "needle"}}] = result.tool_calls
-    assert result.usage.input_tokens == 10
-    assert result.usage.output_tokens == 5
+
+    assert_received {:tool,
+                     %ReqLLMAdapter.ToolCall{
+                       id: "tc_1",
+                       name: "grep",
+                       arguments: %{"pattern" => "needle"}
+                     }}
+
+    assert %ReqLLMAdapter.TurnResult{text: "hello", tool_calls: tool_calls, usage: usage} = result
+
+    assert [
+             %ReqLLMAdapter.ToolCall{
+               id: "tc_1",
+               name: "grep",
+               arguments: %{"pattern" => "needle"}
+             }
+           ] = tool_calls
+
+    assert usage.input_tokens == 10
+    assert usage.output_tokens == 5
   end
 
   test "stops the stream accumulator when a callback raises" do
@@ -111,7 +126,8 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterTest do
              )
 
     assert_received {:new_links, [accumulator]}
-    refute Process.alive?(accumulator)
+    ref = Process.monitor(accumulator)
+    assert_receive {:DOWN, ^ref, :process, ^accumulator, _reason}
   end
 
   test "call_sync wraps the streaming client and returns text" do

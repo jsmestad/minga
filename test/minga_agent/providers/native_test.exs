@@ -1961,7 +1961,7 @@ defmodule MingaAgent.Providers.NativeTest do
       assert error_events != []
 
       error = hd(error_events)
-      assert error.message =~ "missing a provider prefix"
+      assert error.message =~ "is invalid"
       assert error.message =~ "provider:model"
     end
   end

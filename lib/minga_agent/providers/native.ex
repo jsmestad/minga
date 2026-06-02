@@ -1636,7 +1636,7 @@ defmodule MingaAgent.Providers.Native do
     ]
 
     case ReqLLMAdapter.process_stream(stream_response, callbacks) do
-      {:ok, %{tool_calls: tool_calls, text: text, usage: usage}} ->
+      {:ok, %ReqLLMAdapter.TurnResult{tool_calls: tool_calls, text: text, usage: usage}} ->
         dispatch_result(lctx, context, tool_calls, text, usage)
 
       {:error, reason, partial_text} ->
@@ -1759,7 +1759,8 @@ defmodule MingaAgent.Providers.Native do
     end
   end
 
-  @spec execute_tools(loop_ctx(), Context.t(), [map()], [ReqLLM.Tool.t()]) :: Context.t()
+  @spec execute_tools(loop_ctx(), Context.t(), [ReqLLMAdapter.ToolCall.t()], [ReqLLM.Tool.t()]) ::
+          Context.t()
   defp execute_tools(lctx, context, tool_calls, available_tools) do
     initial_mode = approval_mode(lctx.config)
 
@@ -1803,7 +1804,7 @@ defmodule MingaAgent.Providers.Native do
            required(:is_error) => boolean()
          }
 
-  @spec capture_tool_baselines([map()], loop_ctx()) :: [tool_baseline()]
+  @spec capture_tool_baselines([ReqLLMAdapter.ToolCall.t()], loop_ctx()) :: [tool_baseline()]
   defp capture_tool_baselines(tool_calls, lctx) do
     tool_calls
     |> Enum.with_index()

@@ -7,21 +7,19 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
 
   alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.Credentials
+  alias MingaAgent.Providers.Native.ReqLLMAdapter.ToolCall
+  alias MingaAgent.Providers.Native.ReqLLMAdapter.TurnResult
   alias ReqLLM.Response
   alias ReqLLM.StreamResponse
   alias ReqLLM.Tool
-  alias ReqLLM.ToolCall
+  alias ReqLLM.ToolCall, as: ReqLLMToolCall
 
   @typedoc "Streaming LLM client compatible with ReqLLM.stream_text/3."
   @type llm_client :: (String.t(), [ReqLLM.Message.t()], keyword() ->
                          {:ok, StreamResponse.t()} | {:error, term()})
 
   @typedoc "Neutralized tool-call payload emitted by ReqLLM streaming."
-  @type tool_call :: %{
-          required(:id) => String.t(),
-          required(:name) => String.t(),
-          required(:arguments) => map()
-        }
+  @type tool_call :: ToolCall.t()
 
   @typedoc "Raw ReqLLM usage payload before Native normalizes it into TurnUsage."
   @type raw_usage :: %{
@@ -44,11 +42,7 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
         ]
 
   @typedoc "Decoded result from one provider response."
-  @type turn_result :: %{
-          required(:text) => String.t(),
-          required(:tool_calls) => [tool_call()],
-          required(:usage) => raw_usage() | nil
-        }
+  @type turn_result :: TurnResult.t()
 
   @thinking_efforts %{
     "low" => :low,
@@ -163,9 +157,9 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
   end
 
   @doc "Creates a ReqLLM tool-call value for assistant messages."
-  @spec assistant_tool_call(String.t(), String.t(), map()) :: ToolCall.t()
+  @spec assistant_tool_call(String.t(), String.t(), map()) :: ReqLLMToolCall.t()
   def assistant_tool_call(id, name, arguments) do
-    ToolCall.new(id, name, JSON.encode!(arguments))
+    ReqLLMToolCall.new(id, name, JSON.encode!(arguments))
   end
 
   @doc "Returns true for Anthropic-compatible models."
@@ -189,18 +183,14 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
 
   @spec response_to_turn_result(Response.t()) :: turn_result()
   defp response_to_turn_result(response) do
-    %{
-      tool_calls: extract_tool_calls(response),
-      text: extract_text(response),
-      usage: extract_usage(response)
-    }
+    TurnResult.new(extract_text(response), extract_tool_calls(response), extract_usage(response))
   end
 
   @spec extract_tool_calls(Response.t()) :: [tool_call()]
   defp extract_tool_calls(%{message: %{tool_calls: nil}}), do: []
 
   defp extract_tool_calls(%{message: %{tool_calls: tool_calls}}) when is_list(tool_calls) do
-    Enum.map(tool_calls, &ToolCall.to_map/1)
+    Enum.map(tool_calls, &req_llm_tool_call_to_adapter_tool_call/1)
   end
 
   defp extract_tool_calls(_response), do: []
@@ -218,13 +208,19 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
   defp extract_usage(%{usage: usage}) when is_map(usage), do: usage
   defp extract_usage(_response), do: nil
 
+  @spec req_llm_tool_call_to_adapter_tool_call(ReqLLMToolCall.t()) :: tool_call()
+  defp req_llm_tool_call_to_adapter_tool_call(tool_call) do
+    %{id: id, name: name, arguments: arguments} = ReqLLMToolCall.to_map(tool_call)
+    ToolCall.new(id, name, arguments)
+  end
+
   @spec tool_call_chunk_to_map(term()) :: tool_call()
   defp tool_call_chunk_to_map(chunk) do
-    %{
-      id: Map.get(chunk.metadata, :id, "tool_#{:erlang.unique_integer([:positive])}"),
-      name: chunk.name || "unknown",
-      arguments: chunk.arguments || %{}
-    }
+    ToolCall.new(
+      Map.get(chunk.metadata, :id, "tool_#{:erlang.unique_integer([:positive])}"),
+      chunk.name || "unknown",
+      chunk.arguments || %{}
+    )
   end
 
   @spec run_callback(stream_callbacks(), atom(), term()) :: :ok
