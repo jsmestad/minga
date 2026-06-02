@@ -35,8 +35,8 @@ defmodule MingaBoard.Shell do
   alias MingaEditor.RenderModel.UI.BoardBuilder
   alias MingaEditor.RenderPipeline.Chrome
   alias MingaEditor.Renderer.Regions
-  alias MingaEditor.Frontend.Protocol.GUI.BoardCardPayload
-  alias MingaEditor.Frontend.Protocol.GUI.BoardPayload
+  alias Minga.RenderModel.UI.Board, as: BoardPayload
+  alias Minga.RenderModel.UI.Board.Card, as: BoardCardPayload
   alias MingaBoard.AgentActivation
   alias MingaBoard.Shell.AgentDeactivation
   alias MingaEditor.State, as: EditorState
