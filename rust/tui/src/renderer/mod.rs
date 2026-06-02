@@ -366,13 +366,32 @@ impl Renderer {
         };
 
         let style = self.theme.status_bar_style();
-
-        self.write_run(row, 0, &pad_to_width(&left, self.width), style);
-
+        let left_width = text_width(&left).min(self.width);
         let right_width = text_width(&right);
+        let spacer_width = if right_width < self.width {
+            self.width
+                .saturating_sub(left_width)
+                .saturating_sub(right_width)
+        } else {
+            self.width.saturating_sub(left_width)
+        };
+        let mut spans = vec![
+            RatatuiSpan::styled(
+                slice_chars(&left, 0, self.width),
+                ratatui_style_from_cell(style),
+            ),
+            RatatuiSpan::styled(
+                " ".repeat(spacer_width as usize),
+                ratatui_style_from_cell(style),
+            ),
+        ];
         if right_width < self.width {
-            self.write_run(row, self.width - right_width, &right, style);
+            spans.push(RatatuiSpan::styled(right, ratatui_style_from_cell(style)));
         }
+
+        let paragraph =
+            Paragraph::new(RatatuiLine::from(spans)).style(ratatui_style_from_cell(style));
+        self.render_ratatui_widget(row, 0, self.width, 1, paragraph);
     }
 
     fn draw_tab_bar(&mut self, tab_bar: semantic::TabBar) {
@@ -460,19 +479,17 @@ impl Renderer {
         }
 
         if breadcrumb.segments.is_empty() {
-            self.write_run(row, col, &" ".repeat(width as usize), CellStyle::default());
+            let paragraph = Paragraph::new(" ".repeat(width as usize));
+            self.render_ratatui_widget(row, col, width, 1, paragraph);
             self.breadcrumb = None;
             return;
         }
 
         self.breadcrumb = Some(breadcrumb.clone());
         let text = format!(" {}", breadcrumb.segments.join(" / "));
-        self.write_run(
-            row,
-            col,
-            &pad_to_width(&text, width),
-            self.theme.breadcrumb_style(),
-        );
+        let paragraph = Paragraph::new(pad_to_width(&text, width))
+            .style(ratatui_style_from_cell(self.theme.breadcrumb_style()));
+        self.render_ratatui_widget(row, col, width, 1, paragraph);
     }
 
     fn draw_completion(&mut self, completion: semantic::Completion) {
@@ -695,38 +712,55 @@ impl Renderer {
         } else {
             format!("{} {}", picker.mode_prefix, picker.title)
         };
-        self.write_run(
-            row,
-            col,
-            &pad_to_width(&title, width),
-            self.theme.picker_header_style(),
-        );
-
         let count = if picker.total_count == 0 {
             String::new()
         } else {
             format!("{} / {}", picker.filtered_count, picker.total_count)
         };
+        let title_width = text_width(&title).min(width);
         let count_width = text_width(&count);
-        if count_width > 0 && count_width < width {
-            self.write_run(
-                row,
-                col + width - count_width - 1,
-                &count,
-                self.theme.picker_header_style(),
-            );
+        let header_style = ratatui_style_from_cell(self.theme.picker_header_style());
+        let mut header_spans = vec![RatatuiSpan::styled(
+            slice_chars(&title, 0, width),
+            header_style,
+        )];
+        if count_width > 0 && count_width < width && title_width.saturating_add(count_width) < width
+        {
+            let spacer = width
+                .saturating_sub(title_width)
+                .saturating_sub(count_width)
+                .saturating_sub(1);
+            header_spans.push(RatatuiSpan::styled(
+                " ".repeat(spacer as usize),
+                header_style,
+            ));
+            header_spans.push(RatatuiSpan::styled(count, header_style));
+        } else if title_width < width {
+            header_spans.push(RatatuiSpan::styled(
+                " ".repeat(width.saturating_sub(title_width) as usize),
+                header_style,
+            ));
         }
+        self.render_ratatui_widget(
+            row,
+            col,
+            width,
+            1,
+            Paragraph::new(RatatuiLine::from(header_spans)).style(header_style),
+        );
 
         let query = if picker.query.is_empty() {
             "> ".to_owned()
         } else {
             format!("> {}", picker.query)
         };
-        self.write_run(
+        let query_style = ratatui_style_from_cell(self.theme.picker_query_style());
+        self.render_ratatui_widget(
             row + 1,
             col,
-            &pad_to_width(&query, width),
-            self.theme.picker_query_style(),
+            width,
+            1,
+            Paragraph::new(pad_to_width(&query, width)).style(query_style),
         );
 
         let body_row = row + 2;
