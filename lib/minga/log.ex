@@ -37,7 +37,7 @@ defmodule Minga.Log do
 
   require Logger
 
-  @type subsystem :: :render | :lsp | :agent | :editor | :config | :port | :distribution
+  @type subsystem :: :render | :lsp | :agent | :editor | :config | :port | :distribution | :ext
 
   @type level :: :debug | :info | :warning | :error
 
@@ -63,7 +63,8 @@ defmodule Minga.Log do
     editor: :log_level_editor,
     config: :log_level_config,
     port: :log_level_port,
-    distribution: :log_level_distribution
+    distribution: :log_level_distribution,
+    ext: :log_level_ext
   }
 
   @doc "Returns the pid of the BEAM-wide singleton `*Messages*` buffer."
