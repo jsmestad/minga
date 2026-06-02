@@ -1677,8 +1677,13 @@ defmodule MingaAgent.Providers.Native do
     end
   end
 
-  @spec dispatch_result(loop_ctx(), Context.t(), [map()], String.t(), map() | nil) ::
-          :ok | {:error, term()}
+  @spec dispatch_result(
+          loop_ctx(),
+          Context.t(),
+          [ReqLLMAdapter.tool_call()],
+          String.t(),
+          ReqLLMAdapter.raw_usage() | nil
+        ) :: :ok | {:error, term()}
   defp dispatch_result(lctx, context, [] = _tool_calls, text, usage) do
     # No tool calls: final answer
     updated_context = Context.append(context, Context.assistant(text))

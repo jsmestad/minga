@@ -17,13 +17,22 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterTest do
     }
   end
 
-  test "validates bare models before ReqLLM handles them" do
+  test "validates malformed models before ReqLLM handles them" do
     assert :ok = ReqLLMAdapter.validate_model("anthropic:claude-sonnet-4")
-    assert :ok = ReqLLMAdapter.validate_model("ollama@local/llama3")
+    assert :ok = ReqLLMAdapter.validate_model("local/llama3@ollama")
 
-    assert {:error, message, :invalid_format} = ReqLLMAdapter.validate_model("claude-sonnet-4")
-    assert message =~ "missing a provider prefix"
-    assert message =~ "Check :agent_model"
+    for invalid <- [
+          "claude-sonnet-4",
+          "anthropic:",
+          ":claude",
+          "claude@",
+          "@ollama",
+          "anthropic:claude@openai"
+        ] do
+      assert {:error, message, :invalid_format} = ReqLLMAdapter.validate_model(invalid)
+      assert message =~ "Expected"
+      assert message =~ "Check :agent_model"
+    end
   end
 
   test "builds request options for endpoints, prompt cache, codex oauth, and thinking" do
@@ -81,9 +90,35 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterTest do
     assert result.usage.output_tokens == 5
   end
 
+  test "stops the stream accumulator when a callback raises" do
+    parent = self()
+
+    stream_response =
+      build_stream_response([
+        ReqLLM.StreamChunk.text("boom"),
+        ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
+      ])
+
+    {:links, links_before} = Process.info(self(), :links)
+
+    assert {:error, %RuntimeError{message: "callback failed"}, "boom"} =
+             ReqLLMAdapter.process_stream(stream_response,
+               on_text: fn _text ->
+                 {:links, links_during} = Process.info(self(), :links)
+                 send(parent, {:new_links, links_during -- links_before})
+                 raise "callback failed"
+               end
+             )
+
+    assert_received {:new_links, [accumulator]}
+    refute Process.alive?(accumulator)
+  end
+
   test "call_sync wraps the streaming client and returns text" do
+    parent = self()
+
     client = fn _model, _messages, opts ->
-      send(self(), {:sync_opts, opts})
+      send(parent, {:sync_opts, opts})
       {:ok, build_stream_response([ReqLLM.StreamChunk.text("summary")])}
     end
 
@@ -95,6 +130,23 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterTest do
     assert_received {:sync_opts, opts}
     assert opts[:max_tokens] == 1234
     assert opts[:base_url] == "https://global.example/v1"
+  end
+
+  test "summary_client preserves request options and returns text" do
+    parent = self()
+
+    client = fn model, messages, opts ->
+      send(parent, {:summary_request, model, messages, opts})
+      {:ok, build_stream_response([ReqLLM.StreamChunk.text("compacted")])}
+    end
+
+    config = %AgentConfig{api_endpoints: %{"anthropic" => "https://anthropic.example/v1"}}
+    summary_client = ReqLLMAdapter.summary_client(client, config)
+
+    assert {:ok, "compacted"} = summary_client.("anthropic:claude", [:message], max_tokens: 500)
+    assert_received {:summary_request, "anthropic:claude", [:message], opts}
+    assert opts[:max_tokens] == 500
+    assert opts[:base_url] == "https://anthropic.example/v1"
   end
 
   test "assistant_tool_call keeps ReqLLM message compatibility" do

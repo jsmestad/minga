@@ -16,18 +16,38 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
   @type llm_client :: (String.t(), [ReqLLM.Message.t()], keyword() ->
                          {:ok, StreamResponse.t()} | {:error, term()})
 
+  @typedoc "Neutralized tool-call payload emitted by ReqLLM streaming."
+  @type tool_call :: %{
+          required(:id) => String.t(),
+          required(:name) => String.t(),
+          required(:arguments) => map()
+        }
+
+  @typedoc "Raw ReqLLM usage payload before Native normalizes it into TurnUsage."
+  @type raw_usage :: %{
+          optional(:input_tokens) => non_neg_integer(),
+          optional(:output_tokens) => non_neg_integer(),
+          optional(:input) => non_neg_integer(),
+          optional(:output) => non_neg_integer(),
+          optional(:cache_read_input_tokens) => non_neg_integer(),
+          optional(:cache_creation_input_tokens) => non_neg_integer(),
+          optional(:cache_read) => non_neg_integer(),
+          optional(:cache_write) => non_neg_integer(),
+          optional(:total_cost) => number()
+        }
+
   @typedoc "Callbacks used while streaming a provider response."
   @type stream_callbacks :: [
           on_text: (String.t() -> term()),
           on_thinking: (String.t() -> term()),
-          on_tool_call: (map() -> term())
+          on_tool_call: (tool_call() -> term())
         ]
 
   @typedoc "Decoded result from one provider response."
   @type turn_result :: %{
-          text: String.t(),
-          tool_calls: [map()],
-          usage: map() | nil
+          required(:text) => String.t(),
+          required(:tool_calls) => [tool_call()],
+          required(:usage) => raw_usage() | nil
         }
 
   @thinking_efforts %{
@@ -46,15 +66,17 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
   @doc "Validates the model string before ReqLLM sees it."
   @spec validate_model(String.t()) :: :ok | {:error, String.t(), :invalid_format}
   def validate_model(model) when is_binary(model) do
-    if String.contains?(model, ":") or String.contains?(model, "@") do
-      :ok
-    else
-      message =
-        ~s|Model "#{model}" is missing a provider prefix. | <>
-          ~s|Expected "provider:model" (e.g., "anthropic:#{model}"). | <>
-          "Check :agent_model in your config."
+    case parse_provider(model) do
+      {:ok, _provider} ->
+        :ok
 
-      {:error, message, :invalid_format}
+      :error ->
+        message =
+          ~s|Model "#{model}" is invalid. | <>
+            ~s|Expected "provider:model" (e.g., "anthropic:claude") or "model@provider". | <>
+            "Check :agent_model in your config."
+
+        {:error, message, :invalid_format}
     end
   end
 
@@ -84,26 +106,31 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
   def process_stream(%StreamResponse{} = stream_response, callbacks \\ []) do
     {:ok, accumulator} = Agent.start_link(fn -> "" end)
 
-    result =
-      StreamResponse.process_stream(stream_response,
-        on_result: fn text ->
-          Agent.update(accumulator, fn acc -> acc <> text end)
-          run_callback(callbacks, :on_text, text)
-        end,
-        on_thinking: fn text ->
-          run_callback(callbacks, :on_thinking, text)
-        end,
-        on_tool_call: fn chunk ->
-          run_callback(callbacks, :on_tool_call, tool_call_chunk_to_map(chunk))
-        end
-      )
+    try do
+      result =
+        StreamResponse.process_stream(stream_response,
+          on_result: fn text ->
+            Agent.update(accumulator, fn acc -> acc <> text end)
+            run_callback(callbacks, :on_text, text)
+          end,
+          on_thinking: fn text ->
+            run_callback(callbacks, :on_thinking, text)
+          end,
+          on_tool_call: fn chunk ->
+            run_callback(callbacks, :on_tool_call, tool_call_chunk_to_map(chunk))
+          end
+        )
 
-    partial_text = Agent.get(accumulator, & &1)
-    Agent.stop(accumulator)
+      partial_text = Agent.get(accumulator, & &1)
 
-    case result do
-      {:ok, response} -> {:ok, response_to_turn_result(response)}
-      {:error, reason} -> {:error, reason, partial_text}
+      case result do
+        {:ok, response} -> {:ok, response_to_turn_result(response)}
+        {:error, reason} -> {:error, reason, partial_text}
+      end
+    after
+      if Process.alive?(accumulator) do
+        Agent.stop(accumulator)
+      end
     end
   end
 
@@ -154,26 +181,9 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
   @doc "Sets the provider API key env var when credentials are file-backed."
   @spec ensure_api_key_in_env(String.t()) :: :ok
   def ensure_api_key_in_env(model) do
-    provider = provider_from_model(model)
-
-    case Credentials.resolve(provider) do
-      {:ok, key, :file} ->
-        case Credentials.env_var_for(provider) do
-          nil -> :ok
-          var_name -> System.put_env(var_name, key)
-        end
-
-      {:ok, _key, :env} ->
-        :ok
-
-      :error ->
-        Minga.Log.debug(
-          :agent,
-          "[Agent.Native] No API key found for #{provider}. " <>
-            "Use /auth to configure one, or set #{Credentials.env_var_for(provider) || "the provider's env var"}."
-        )
-
-        :ok
+    case parse_provider(model) do
+      {:ok, provider} -> ensure_provider_api_key_in_env(provider)
+      :error -> :ok
     end
   end
 
@@ -186,7 +196,7 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
     }
   end
 
-  @spec extract_tool_calls(Response.t()) :: [map()]
+  @spec extract_tool_calls(Response.t()) :: [tool_call()]
   defp extract_tool_calls(%{message: %{tool_calls: nil}}), do: []
 
   defp extract_tool_calls(%{message: %{tool_calls: tool_calls}}) when is_list(tool_calls) do
@@ -204,11 +214,11 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
 
   defp extract_text(_response), do: ""
 
-  @spec extract_usage(Response.t()) :: map() | nil
+  @spec extract_usage(Response.t()) :: raw_usage() | nil
   defp extract_usage(%{usage: usage}) when is_map(usage), do: usage
   defp extract_usage(_response), do: nil
 
-  @spec tool_call_chunk_to_map(term()) :: map()
+  @spec tool_call_chunk_to_map(term()) :: tool_call()
   defp tool_call_chunk_to_map(chunk) do
     %{
       id: Map.get(chunk.metadata, :id, "tool_#{:erlang.unique_integer([:positive])}"),
@@ -279,27 +289,78 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
     end
   end
 
-  @spec provider_from_model(String.t()) :: String.t()
+  @spec ensure_provider_api_key_in_env(String.t()) :: :ok
+  defp ensure_provider_api_key_in_env(provider) do
+    case Credentials.resolve(provider) do
+      {:ok, key, :file} -> put_file_backed_key_in_env(provider, key)
+      {:ok, _key, :env} -> :ok
+      :error -> warn_missing_credentials(provider)
+    end
+  end
+
+  @spec put_file_backed_key_in_env(String.t(), String.t()) :: :ok
+  defp put_file_backed_key_in_env(provider, key) do
+    case Credentials.env_var_for(provider) do
+      nil -> :ok
+      var_name -> System.put_env(var_name, key)
+    end
+  end
+
+  @spec warn_missing_credentials(String.t()) :: :ok
+  defp warn_missing_credentials(provider) do
+    case Credentials.env_var_for(provider) do
+      nil ->
+        :ok
+
+      var_name ->
+        Minga.Log.warning(
+          :agent,
+          "[Agent.Native] No API key found for #{provider}. " <>
+            "Use /auth to configure one, or set #{var_name}."
+        )
+    end
+  end
+
+  @spec provider_from_model(String.t()) :: String.t() | nil
   defp provider_from_model(model) do
-    provider_from_model(model, String.contains?(model, "@"), String.contains?(model, ":"))
+    case parse_provider(model) do
+      {:ok, provider} -> provider
+      :error -> nil
+    end
   end
 
-  @spec provider_from_model(String.t(), boolean(), boolean()) :: String.t()
-  defp provider_from_model(model, true, _colon?) do
-    model
-    |> String.split("@", parts: 2)
-    |> List.last()
-    |> String.downcase()
+  @spec parse_provider(String.t()) :: {:ok, String.t()} | :error
+  defp parse_provider(model) do
+    parse_provider(model, String.contains?(model, "@"), String.contains?(model, ":"))
   end
 
-  defp provider_from_model(model, false, true) do
-    model
-    |> String.split(":", parts: 2)
-    |> hd()
-    |> String.downcase()
+  @spec parse_provider(String.t(), boolean(), boolean()) :: {:ok, String.t()} | :error
+  defp parse_provider(model, true, false) do
+    with {:ok, _model_name, provider} <- split_once(model, "@") do
+      {:ok, String.downcase(provider)}
+    end
   end
 
-  defp provider_from_model(_model, false, false), do: "anthropic"
+  defp parse_provider(model, false, true) do
+    with {:ok, provider, _model_name} <- split_once(model, ":") do
+      {:ok, String.downcase(provider)}
+    end
+  end
+
+  defp parse_provider(_model, _at?, _colon?), do: :error
+
+  @spec split_once(String.t(), String.t()) :: {:ok, String.t(), String.t()} | :error
+  defp split_once(value, separator) do
+    case String.split(value, separator) do
+      [left, right] -> non_empty_pair(left, right)
+      _other -> :error
+    end
+  end
+
+  @spec non_empty_pair(String.t(), String.t()) :: {:ok, String.t(), String.t()} | :error
+  defp non_empty_pair("", _right), do: :error
+  defp non_empty_pair(_left, ""), do: :error
+  defp non_empty_pair(left, right), do: {:ok, left, right}
 
   @spec non_empty(String.t() | nil) :: String.t() | nil
   defp non_empty(nil), do: nil
