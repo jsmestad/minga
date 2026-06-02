@@ -529,6 +529,9 @@ defmodule MingaEditor.Agent.SlashCommand do
   defp mcp_source_label(%MingaAgent.MCP.ServerConfig{source: :config}), do: "config"
   defp mcp_source_label(%MingaAgent.MCP.ServerConfig{source: :builtin}), do: "builtin"
 
+  defp mcp_source_label(%MingaAgent.MCP.ServerConfig{source: {:bundle, name}}),
+    do: "bundle:#{name}"
+
   defp mcp_source_label(%MingaAgent.MCP.ServerConfig{source: {:extension, name}}),
     do: "extension:#{name}"
 

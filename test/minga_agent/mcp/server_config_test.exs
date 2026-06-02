@@ -108,6 +108,20 @@ defmodule MingaAgent.MCP.ServerConfigTest do
     assert inspected =~ "[REDACTED]"
   end
 
+  test "inspect tolerates malformed direct struct fields" do
+    config = %ServerConfig{
+      name: "local-tools",
+      command: "node",
+      args: {:API_TOKEN, "plain-secret"},
+      env: {:GITHUB_TOKEN, "ghp_supersecret123"}
+    }
+
+    inspected = inspect(config)
+    refute inspected =~ "plain-secret"
+    refute inspected =~ "ghp_supersecret123"
+    assert inspected =~ "[REDACTED]"
+  end
+
   test "inspect redacts credential-like args" do
     config = %ServerConfig{
       name: "local-tools",

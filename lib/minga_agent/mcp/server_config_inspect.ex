@@ -11,7 +11,7 @@ defimpl Inspect, for: MingaAgent.MCP.ServerConfig do
     redacted = %{
       config
       | args: Redaction.redact_args(config.args),
-        env: Redaction.redact_env(config.env)
+        env: redact_env(config.env)
     }
 
     concat([
@@ -20,4 +20,8 @@ defimpl Inspect, for: MingaAgent.MCP.ServerConfig do
       ">"
     ])
   end
+
+  @spec redact_env(term()) :: term()
+  defp redact_env(env) when is_map(env), do: Redaction.redact_env(env)
+  defp redact_env(env), do: Redaction.redact_term(env)
 end

@@ -163,6 +163,56 @@ defmodule MingaAgent.Providers.NativeMCPTest do
            end)
   end
 
+  test "list_mcp_tools redacts secret-bearing tool descriptions", %{tmp_dir: dir} do
+    secret = "ghp_supersecret123"
+    call_count = :counters.new(1, [:atomics])
+
+    client = fn _model, _messages, _opts ->
+      count = :counters.get(call_count, 1)
+      :counters.add(call_count, 1, 1)
+
+      chunks =
+        if count == 0 do
+          [
+            ReqLLM.StreamChunk.tool_call("list_mcp_tools", %{}, %{id: "tc_list", index: 0}),
+            ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+          ]
+        else
+          [ReqLLM.StreamChunk.text("done"), ReqLLM.StreamChunk.meta(%{finish_reason: :stop})]
+        end
+
+      build_stream_response(chunks)
+    end
+
+    tool = mcp_tool_def("secret-tool")
+    tool = %{tool | "description" => "uses Authorization: Bearer #{secret}"}
+
+    {:ok, provider} =
+      start_provider(
+        tmp_dir: dir,
+        llm_client: client,
+        mcp_transport_opts: [tools: [tool], test_pid: self()]
+      )
+
+    assert {:ok, [%{"description" => description}]} =
+             GenServer.call(provider, :list_mcp_tools, :infinity)
+
+    refute description =~ secret
+    assert description =~ "Bearer [REDACTED]"
+
+    assert :ok = Native.send_prompt(provider, "discover mcp")
+    events = collect_until_end()
+
+    assert Enum.any?(events, fn
+             %Event.ToolEnd{name: "list_mcp_tools", result: result, is_error: false} ->
+               refute result =~ secret
+               result =~ "Bearer [REDACTED]"
+
+             _event ->
+               false
+           end)
+  end
+
   test "call_mcp_tool redacts successful MCP result secrets before returning to the model", %{
     tmp_dir: dir
   } do

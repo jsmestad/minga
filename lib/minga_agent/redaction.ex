@@ -34,7 +34,9 @@ defmodule MingaAgent.Redaction do
      "\\1#{@redacted}"},
     {~r/\b([A-Z0-9_]*(?:API[_-]?KEY|AUTH|CREDENTIAL|PASSWORD|SECRET|TOKEN)[A-Z0-9_]*\s*=\s*)[^\s,;]+/i,
      "\\1#{@redacted}"},
-    {~r/\b((?:api[_-]?key|auth|credential|password|secret|token)\s*:\s*)[^\s,;]+/i,
+    {~r/((?:"|')?[A-Za-z0-9_-]*(?:api[_-]?key|auth|credential|password|secret|token)[A-Za-z0-9_-]*(?:"|')?\s*(?::|=>)\s*)(?!Bearer\s)((?:"|')?)[^"'\s,;}\]]+((?:"|')?)/i,
+     "\\1\\2#{@redacted}\\3"},
+    {~r/\b((?:api[_-]?key|auth|credential|password|secret|token)\s*:\s*)(?!Bearer\s)[^\s,;]+/i,
      "\\1#{@redacted}"},
     {~r/(--?[A-Za-z0-9_-]*(?:api[-_]?key|auth|credential|password|private[-_]?key|secret|token)[A-Za-z0-9_-]*=)[^\s,;]+/i,
      "\\1#{@redacted}"},
@@ -51,6 +53,14 @@ defmodule MingaAgent.Redaction do
 
   @doc "Redacts an arbitrary term while preserving safe shape for diagnostics."
   @spec redact_term(term()) :: term()
+  def redact_term(%{__struct__: MingaAgent.MCP.ServerConfig} = config) do
+    config
+    |> Map.from_struct()
+    |> Map.update(:args, [], &redact_args/1)
+    |> Map.update(:env, %{}, &redact_server_config_env/1)
+    |> redact_map()
+  end
+
   def redact_term(%_struct{} = struct) do
     struct
     |> Map.from_struct()
@@ -58,7 +68,14 @@ defmodule MingaAgent.Redaction do
   end
 
   def redact_term(map) when is_map(map), do: redact_map(map)
-  def redact_term(list) when is_list(list), do: Enum.map(list, &redact_term/1)
+
+  def redact_term(list) when is_list(list) do
+    if List.ascii_printable?(list) do
+      list |> to_string() |> redact_string()
+    else
+      Enum.map(list, &redact_term/1)
+    end
+  end
 
   def redact_term(tuple) when is_tuple(tuple) do
     tuple
@@ -132,6 +149,10 @@ defmodule MingaAgent.Redaction do
   defp split_flag_without_value?([flag]), do: secret_key?(flag)
   defp split_flag_without_value?([_flag, _value]), do: false
   defp split_flag_without_value?(_parts), do: false
+
+  @spec redact_server_config_env(term()) :: term()
+  defp redact_server_config_env(env) when is_map(env), do: redact_env(env)
+  defp redact_server_config_env(env), do: redact_term(env)
 
   @spec redact_tuple_elements([term()]) :: [term()]
   defp redact_tuple_elements([key | values]) when is_atom(key) or is_binary(key) do
