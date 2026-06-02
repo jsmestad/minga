@@ -302,13 +302,19 @@ defmodule MingaAgent.SessionManagerTest do
 
   test "idle GC shutdown stops a managed session without restart", %{manager: manager} do
     Minga.Events.subscribe(:agent_session_stopped)
+    idle_gc_token = make_ref()
 
-    {:ok, session_id, pid} = SessionManager.start_session(manager, idle_gc_timeout_ms: 1)
+    {:ok, session_id, pid} =
+      SessionManager.start_session(manager,
+        idle_gc_timeout_ms: 60_000,
+        idle_gc_token_fn: fn -> idle_gc_token end
+      )
 
     assert :ok = MingaAgent.Session.subscribe(pid)
 
     ref = Process.monitor(pid)
     assert :ok = MingaAgent.Session.unsubscribe(pid)
+    send(pid, {:idle_gc_timeout, idle_gc_token})
     assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 1000
 
     assert_receive {

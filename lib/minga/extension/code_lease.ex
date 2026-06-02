@@ -151,8 +151,7 @@ defmodule Minga.Extension.CodeLease do
   def handle_call({:purge_module, _source, module}, _from, state) do
     case purge_allowed_reply(state, module) do
       :ok ->
-        :code.purge(module)
-        :code.delete(module)
+        unload_module(module)
         {:reply, :ok, state}
 
       {:error, _reason} = error ->
@@ -169,6 +168,14 @@ defmodule Minga.Extension.CodeLease do
   end
 
   def handle_info(_message, state), do: {:noreply, state}
+
+  @spec unload_module(module()) :: :ok
+  defp unload_module(module) do
+    :code.delete(module)
+    :code.purge(module)
+    :code.delete(module)
+    :ok
+  end
 
   @spec put_lease(state(), t()) :: state()
   defp put_lease(state, %__MODULE__{id: id, owner: owner} = lease) do
