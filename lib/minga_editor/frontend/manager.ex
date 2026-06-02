@@ -186,6 +186,10 @@ defmodule MingaEditor.Frontend.Manager do
         broadcast(new_state.subscribers, {:minga_input, {:resize, width, height}})
         {:noreply, new_state}
 
+      {:ok, {:log_message, level, text}} ->
+        log_renderer_message(level, text)
+        {:noreply, state}
+
       {:ok, event} ->
         broadcast(state.subscribers, {:minga_input, event})
         {:noreply, state}
@@ -311,6 +315,11 @@ defmodule MingaEditor.Frontend.Manager do
       "/dev/tty#{tty_name}"
     end
   end
+
+  @spec log_renderer_message(String.t(), String.t()) :: :ok
+  defp log_renderer_message("ERR", text), do: Minga.Log.error(:port, text)
+  defp log_renderer_message("WARN", text), do: Minga.Log.warning(:port, text)
+  defp log_renderer_message(_level, text), do: Minga.Log.info(:port, text)
 
   @spec broadcast([pid()], term()) :: :ok
   defp broadcast(subscribers, message) do

@@ -1402,11 +1402,8 @@ fn overlay_delta_size(bytes: &[u8]) -> Result<usize, DecodeError> {
     let mut offset = 13;
 
     if flags & 0x02 != 0 {
-        require_len(bytes, offset + 3, "cursorline section")?;
-        let len = read_u16(bytes, offset + 1) as usize;
-        offset += 3;
-        require_len(bytes, offset + len, "cursorline payload")?;
-        offset += len;
+        require_len(bytes, offset + 5, "cursorline data")?;
+        offset += 5;
     }
 
     Ok(offset)
@@ -2405,5 +2402,64 @@ mod tests {
         out.extend_from_slice(&(text.len() as u16).to_be_bytes());
         out.extend_from_slice(text.as_bytes());
         out
+    }
+
+    #[test]
+    fn overlay_delta_without_cursorline() {
+        let bytes = [
+            opcodes::OP_GUI_WINDOW_OVERLAY_DELTA,
+            0,
+            1,
+            0,
+            0,
+            0,
+            2,
+            0x00,
+            0,
+            5,
+            0,
+            3,
+            1,
+        ];
+
+        let command = decode(&bytes).unwrap();
+
+        assert_eq!(command.size(), 13);
+    }
+
+    #[test]
+    fn overlay_delta_with_cursorline_does_not_consume_following_commands() {
+        let packet = [
+            vec![
+                opcodes::OP_GUI_WINDOW_OVERLAY_DELTA,
+                0,
+                1,
+                0,
+                0,
+                0,
+                2,
+                0x02,
+                0,
+                5,
+                0,
+                3,
+                1,
+                0,
+                4,
+                0x2d,
+                0x2d,
+                0x3f,
+            ],
+            vec![opcodes::OP_GUI_THEME, 0],
+        ]
+        .concat();
+
+        let command = decode(&packet).unwrap();
+
+        assert_eq!(command.size(), 18);
+        assert!(matches!(
+            decode(&packet[command.size()..]).unwrap(),
+            Command::Theme(Theme { slots }, _) if slots.is_empty()
+        ));
     }
 }
