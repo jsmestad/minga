@@ -1,4 +1,5 @@
 .PHONY: help lint lint.format lint.credo lint.compile lint.dialyzer lint.fix test test.llm \
+       native.support native.tui native.rust-tui native.go-tui \
        release release-tui release-mac install install-tui install-mac uninstall
 
 .DEFAULT_GOAL := help
@@ -15,8 +16,13 @@ help:
 	@printf "\033[1;36mQuality checks\033[0m\n"
 	@printf "  \033[1mmake lint\033[0m          Format, credo, compile, and dialyzer\n"
 	@printf "  \033[1mmake lint.fix\033[0m      Run format and strict credo\n"
-	@printf "  \033[1mmake test\033[0m          Run the full ExUnit suite\n"
-	@printf "  \033[1mmake test.llm\033[0m      Run the LLM-friendly test output\n\n"
+	@printf "  \033[1mmake test\033[0m          Build parser support and run the full ExUnit suite\n"
+	@printf "  \033[1mmake test.llm\033[0m      Build parser support and run LLM-friendly tests\n\n"
+	@printf "\033[1;36mNative builds\033[0m\n"
+	@printf "  \033[1mmake native.support\033[0m Build parser and hook-runner support binaries\n"
+	@printf "  \033[1mmake native.tui\033[0m     Build the default Zig TUI binaries\n"
+	@printf "  \033[1mmake native.rust-tui\033[0m Build the experimental Rust TUI renderer\n"
+	@printf "  \033[1mmake native.go-tui\033[0m  Build the experimental Go TUI renderer\n\n"
 	@printf "\033[1;36mBuild and install\033[0m\n"
 	@printf "  \033[1mmake release\033[0m       Build release artifacts for this platform\n"
 	@printf "  \033[1mmake release-tui\033[0m   Build the TUI release\n"
@@ -93,17 +99,32 @@ lint.fix:
 
 # ── Test ────────────────────────────────────────────────────────────────
 
-test:
+test: native.support
 	mix test
 
-test.llm:
+test.llm: native.support
 	mix test.llm
+
+# ── Native builds ───────────────────────────────────────────────────────
+
+native.support:
+	mix native.build.support
+
+native.tui:
+	mix native.build.tui
+
+native.rust-tui:
+	mix native.build.rust_tui
+
+native.go-tui:
+	mix native.build.go_tui
 
 # ── Release (build without installing) ─────────────────────────────────
 
 release-tui:
 	@echo "Building TUI release for $(BURRITO_TARGET)..."
 	MIX_ENV=prod mix deps.get --only prod
+	MIX_ENV=prod mix native.build.tui
 	MIX_ENV=prod mix release minga --overwrite
 	@scripts/check-release-contents _build/prod/rel/minga
 	@echo "\033[32mTUI binary: burrito_out/$(BURRITO_TARGET)\033[0m"

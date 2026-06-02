@@ -10,7 +10,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+(cd "$PROJECT_DIR" && mix native.build.support && mix native.build.rust_tui)
 
 export MINGA_TUI_IMPL=rust
+export MINGA_SKIP_NATIVE_LAUNCH_BUILD=1
 
 exec "$SCRIPT_DIR/minga" "$@"

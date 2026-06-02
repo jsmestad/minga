@@ -1,10 +1,8 @@
 defmodule Mix.Tasks.Compile.MingaZig do
   @moduledoc """
-  Custom Mix compiler that builds the Zig renderer binary.
+  Opt-in Mix task that builds Zig support binaries and the default TUI renderer.
 
-  Registered as `:minga_zig` in the project's compiler list.
-  Runs `zig build` in the `zig/` directory when Zig source files
-  are present.
+  This task is intentionally not registered in the project's compiler list. Native binaries are built by explicit Makefile and CI steps, not by every `mix compile`.
   """
 
   use Mix.Task.Compiler
@@ -18,16 +16,19 @@ defmodule Mix.Tasks.Compile.MingaZig do
   # File extensions that should trigger a Zig rebuild when modified.
   @zig_source_extensions ~w(.zig .zon .c .h .scm)
 
+  @typep build_profile :: :full | :support
+
   @impl true
   @spec run(keyword()) :: {:ok, []} | {:error, []}
-  def run(_opts) do
+  def run(opts) do
     Mix.Task.run("protocol.gen", [])
 
     if File.dir?(@zig_dir) do
-      outputs = required_outputs()
+      profile = build_profile(opts)
+      outputs = required_outputs(profile)
 
       if needs_rebuild?(outputs) do
-        compile_zig_backend("tui")
+        compile_zig_backend(profile)
       else
         {:ok, []}
       end
@@ -36,9 +37,18 @@ defmodule Mix.Tasks.Compile.MingaZig do
     end
   end
 
-  @spec required_outputs() :: [String.t()]
-  defp required_outputs do
+  @spec build_profile(keyword()) :: build_profile()
+  defp build_profile(opts) do
+    Keyword.get(opts, :profile, :full)
+  end
+
+  @spec required_outputs(build_profile()) :: [String.t()]
+  defp required_outputs(:full) do
     Enum.map([@renderer_name, @parser_name, @hook_runner_name], &Path.join(@priv_dir, &1))
+  end
+
+  defp required_outputs(:support) do
+    Enum.map([@parser_name, @hook_runner_name], &Path.join(@priv_dir, &1))
   end
 
   @spec needs_rebuild?([String.t()]) :: boolean()
@@ -82,24 +92,30 @@ defmodule Mix.Tasks.Compile.MingaZig do
     end)
   end
 
-  @spec compile_zig_backend(String.t()) :: {:ok, []} | {:error, []}
-  defp compile_zig_backend(backend) do
-    Mix.shell().info("Compiling Zig binaries (#{backend})...")
+  @spec compile_zig_backend(build_profile()) :: {:ok, []} | {:error, []}
+  defp compile_zig_backend(:full) do
+    compile_zig_backend("tui", [], [@renderer_name, @parser_name, @hook_runner_name])
+  end
 
-    args =
-      ["build"] ++
-        zig_target_args() ++ if(backend != "tui", do: ["-Dbackend=#{backend}"], else: [])
+  defp compile_zig_backend(:support) do
+    Mix.shell().info("Building Zig support binaries without the TUI renderer")
+    compile_zig_backend("support", ["-Drenderer=false"], [@parser_name, @hook_runner_name])
+  end
+
+  @spec compile_zig_backend(String.t(), [String.t()], [String.t()]) :: {:ok, []} | {:error, []}
+  defp compile_zig_backend(label, extra_args, outputs) do
+    Mix.shell().info("Compiling Zig binaries (#{label})...")
+
+    args = ["build"] ++ zig_target_args() ++ extra_args
 
     case System.cmd("zig", args, cd: @zig_dir, stderr_to_stdout: true) do
       {_output, 0} ->
-        Mix.shell().info("Zig binaries (#{backend}) compiled successfully")
-        copy_to_priv(@renderer_name)
-        copy_to_priv(@parser_name)
-        copy_to_priv(@hook_runner_name)
+        Mix.shell().info("Zig binaries (#{label}) compiled successfully")
+        Enum.each(outputs, &copy_to_priv/1)
         {:ok, []}
 
       {output, _code} ->
-        Mix.shell().error("Zig compilation (#{backend}) failed:\n#{output}")
+        Mix.shell().error("Zig compilation (#{label}) failed:\n#{output}")
         {:error, []}
     end
   end
