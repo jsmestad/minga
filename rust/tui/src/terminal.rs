@@ -44,6 +44,7 @@ impl Terminal {
         let fd = tty.as_raw_fd();
         let original_termios = make_raw(fd)?;
         let (width, height) = query_terminal_size(fd).unwrap_or_else(|_| env_size());
+        let _ = writeln!(io::stderr(), "[RUST_TUI/info] size={width}x{height}");
         let mut terminal = Self {
             writer: Box::new(tty),
             reader: Some(reader),
@@ -230,6 +231,7 @@ fn tty_file() -> io::Result<File> {
     let path = env::var_os("MINGA_TTY")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/dev/tty"));
+    let _ = writeln!(io::stderr(), "[RUST_TUI/info] tty={path:?}");
     OpenOptions::new().read(true).write(true).open(path)
 }
 
