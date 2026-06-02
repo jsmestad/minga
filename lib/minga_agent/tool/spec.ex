@@ -5,10 +5,8 @@ defmodule MingaAgent.Tool.Spec do
   A spec describes a tool and how to build its executable callback for a session. It does not own session state, credentials, approval decisions, events, or cleanup. Context-sensitive tools declare their requirements and receive a core-built `MingaAgent.Tool.Context` only when the executor has one.
   """
 
-  alias MingaAgent.Tool.BundledSources
-
   @typedoc "Source that contributed this tool."
-  @type source :: :builtin | :config | BundledSources.source() | {:extension, atom()}
+  @type source :: :builtin | :config | {:bundle, :read_only_tools} | {:extension, atom()}
 
   @typedoc "Approval level for tool execution."
   @type approval_level :: :auto | :ask | :deny
@@ -144,11 +142,8 @@ defmodule MingaAgent.Tool.Spec do
   @spec validate_source(term()) :: :ok | {:error, term()}
   defp validate_source(:builtin), do: :ok
   defp validate_source(:config), do: :ok
-
-  defp validate_source({:bundle, _name} = source) do
-    if BundledSources.known_source?(source), do: :ok, else: {:error, {:invalid_source, source}}
-  end
-
+  defp validate_source({:bundle, :read_only_tools}), do: :ok
+  defp validate_source({:bundle, _name} = source), do: {:error, {:invalid_source, source}}
   defp validate_source({:extension, name}) when is_atom(name), do: :ok
   defp validate_source(source), do: {:error, {:invalid_source, source}}
 
