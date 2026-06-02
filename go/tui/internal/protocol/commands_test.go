@@ -431,6 +431,69 @@ func TestDecodeStatusChrome(t *testing.T) {
 	}
 }
 
+func TestDecodeStatusModelineSegments(t *testing.T) {
+	left := []byte{2, 0, 1, 0, 1}
+	left = append(left, string8("mode")...)
+	left = append(left, 0xAA, 0xBB, 0xCC, 0x11, 0x22, 0x33, 1)
+	left = append(left, string16(" NORMAL ")...)
+	left = append(left, string16("set_mode")...)
+	right := []byte{}
+	right = append(right, string8("position")...)
+	right = append(right, 0, 0, 0, 0, 0, 0, 0)
+	right = append(right, string16("1:1 Top")...)
+	right = append(right, string16("")...)
+	packet := []byte{generated.OPGuiStatusBar, 1}
+	packet = append(packet, section(0x0B, append(left, right...))...)
+
+	command, err := DecodeCommand(packet)
+	if err != nil {
+		t.Fatalf("DecodeCommand returned error: %v", err)
+	}
+	status := command.Chrome.Status
+	if len(status.Left) != 1 || len(status.Right) != 1 || status.Left[0].Name != "mode" || status.Left[0].Text != " NORMAL " || status.Left[0].Command != "set_mode" || status.Right[0].Text != "1:1 Top" {
+		t.Fatalf("modeline segments decoded incorrectly: %+v", status)
+	}
+}
+
+func TestDecodeGutterChrome(t *testing.T) {
+	window := section(0x01, []byte{0, 7, 0, 1, 0, 2, 0, 3, 1, 0, 80})
+	config := section(0x02, []byte{0, 0, 0, 4, 0, 4, 2})
+	entriesPayload := []byte{0, 2}
+	entriesPayload = append(entriesPayload, 0, 0, 0, 4, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF)
+	entriesPayload = append(entriesPayload, 0, 0, 0, 5, 3, 0, 0xFF, 0xFF, 0xFF, 0xFF)
+	packet := []byte{generated.OPGuiGutter, 3}
+	packet = append(packet, window...)
+	packet = append(packet, config...)
+	packet = append(packet, section(0x03, entriesPayload)...)
+
+	command, err := DecodeCommand(packet)
+	if err != nil {
+		t.Fatalf("DecodeCommand returned error: %v", err)
+	}
+	gutter := command.Chrome.WindowGutter
+	if gutter.WindowID != 7 || gutter.ContentRow != 1 || gutter.ContentCol != 2 || gutter.CursorLine != 4 || gutter.LineNumberWidth != 4 || len(gutter.Entries) != 2 || gutter.Entries[1].DisplayType != 3 {
+		t.Fatalf("gutter decoded incorrectly: %+v", gutter)
+	}
+}
+
+func TestDecodeWindowCursorlineSection(t *testing.T) {
+	header := section(0x01, []byte{0, 7, 3, 0, 1, 0, 2, 0, 0, 0, 0, 0, 0, 9})
+	rows := section(0x02, []byte{0, 0})
+	cursorline := section(0x09, []byte{0, 1, 0x11, 0x22, 0x33})
+	packet := []byte{generated.OPGuiWindowContent, 3}
+	packet = append(packet, header...)
+	packet = append(packet, rows...)
+	packet = append(packet, cursorline...)
+
+	command, err := DecodeCommand(packet)
+	if err != nil {
+		t.Fatalf("DecodeCommand returned error: %v", err)
+	}
+	if !command.Window.Cursorline.Visible || command.Window.Cursorline.Row != 1 || command.Window.Cursorline.BG != 0x112233 {
+		t.Fatalf("cursorline decoded incorrectly: %+v", command.Window.Cursorline)
+	}
+}
+
 func TestDecodeThemeAndEverydayChrome(t *testing.T) {
 	packet := []byte{generated.OPGuiTheme, 2, 0x40, 0x11, 0x22, 0x33, 0x30, 0x44, 0x55, 0x66, generated.OPBatchEnd}
 	first, err := DecodeCommand(packet)

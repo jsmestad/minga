@@ -131,6 +131,78 @@ func TestCursorShapeSequenceTracksProtocolShape(t *testing.T) {
 	}
 }
 
+func TestSemanticWindowRendersGutterCursorlineTildesAndModeline(t *testing.T) {
+	model := New(30, 6, nil)
+	model.gutters = map[uint16]protocol.Gutter{
+		7: {
+			WindowID:        7,
+			ContentHeight:   3,
+			CursorLine:      0,
+			LineNumberStyle: 0,
+			LineNumberWidth: 3,
+			SignColWidth:    2,
+			Entries: []protocol.GutterEntry{
+				{BufferLine: 0},
+				{BufferLine: 1},
+				{BufferLine: 2, DisplayType: 5},
+			},
+		},
+	}
+	model.chrome = map[byte]protocol.ChromePayload{
+		generated.OPGuiStatusBar: {
+			Status: protocol.StatusBar{
+				Left:  []protocol.StatusSegment{{Text: " NORMAL "}},
+				Right: []protocol.StatusSegment{{Text: "1:1 Top"}},
+			},
+		},
+	}
+	model.putWindow(protocol.WindowContent{
+		ID:         7,
+		Cursorline: protocol.Cursorline{Visible: true, Row: 0, BG: 0x333333},
+		Rows:       []protocol.WindowRow{{BufferLine: 0, Text: "hello"}},
+	})
+	model.viewport.SetContent(model.content())
+
+	view := ansi.Strip(model.View())
+
+	if !strings.Contains(view, "1 hello") || !strings.Contains(view, "~") {
+		t.Fatalf("semantic view should include gutter line number, content, and tilde filler: %q", view)
+	}
+	if !strings.Contains(view, " NORMAL ") || !strings.Contains(view, "1:1 Top") {
+		t.Fatalf("semantic view should render modeline segments: %q", view)
+	}
+}
+
+func TestApplyCommandsStoresSemanticGuttersByWindow(t *testing.T) {
+	model := New(30, 6, nil)
+	_ = model.applyCommands([]protocol.Command{
+		{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiGutter, WindowGutter: protocol.Gutter{WindowID: 1, LineNumberWidth: 3, Entries: []protocol.GutterEntry{{BufferLine: 0}}}}},
+		{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiGutter, WindowGutter: protocol.Gutter{WindowID: 2, LineNumberWidth: 3, Entries: []protocol.GutterEntry{{BufferLine: 9}}}}},
+	})
+
+	first, firstOK := model.windowGutter(1)
+	second, secondOK := model.windowGutter(2)
+	if !firstOK || !secondOK || first.Entries[0].BufferLine != 0 || second.Entries[0].BufferLine != 9 {
+		t.Fatalf("gutters should be retained per window: first=%+v second=%+v", first, second)
+	}
+}
+
+func TestSemanticWindowsUsePerWindowHeights(t *testing.T) {
+	model := New(40, 8, nil)
+	model.gutters = map[uint16]protocol.Gutter{
+		1: {WindowID: 1, ContentHeight: 1, LineNumberWidth: 3, Entries: []protocol.GutterEntry{{BufferLine: 0}}},
+		2: {WindowID: 2, ContentHeight: 1, LineNumberWidth: 3, Entries: []protocol.GutterEntry{{BufferLine: 10}}},
+	}
+	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "first"}}})
+	model.putWindow(protocol.WindowContent{ID: 2, Rows: []protocol.WindowRow{{Text: "second"}}})
+
+	lines := model.semanticLines()
+	joined := ansi.Strip(strings.Join(lines, "\n"))
+	if len(lines) != 2 || !strings.Contains(joined, "first") || !strings.Contains(joined, "second") {
+		t.Fatalf("semantic windows should not pad the first window over later windows: lines=%d %q", len(lines), joined)
+	}
+}
+
 func TestCellLinesAdvanceByGraphemeWidth(t *testing.T) {
 	model := New(8, 5, nil)
 	model.cells[position{row: 0, col: 0}] = cell{text: "👍🏼x"}

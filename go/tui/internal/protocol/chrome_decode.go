@@ -65,6 +65,8 @@ func decodeChrome(payload []byte) ChromePayload {
 		chrome.Timeline, chrome.Summary, chrome.Bytes = decodeEditTimeline(payload)
 	case generated.OPGuiGutterSep:
 		chrome.Gutter, chrome.Summary, chrome.Bytes = decodeGutterSeparator(payload)
+	case generated.OPGuiGutter:
+		chrome.WindowGutter, chrome.Summary, chrome.Bytes = decodeGutter(payload)
 	case generated.OPGuiSplitSeparators:
 		chrome.Splits, chrome.Summary, chrome.Bytes = decodeSplitSeparators(payload)
 	default:

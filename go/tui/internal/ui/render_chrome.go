@@ -9,17 +9,7 @@ import (
 )
 
 func (m Model) headerLines() []string {
-	title := m.title
-	if title == "" {
-		title = "Minga"
-	}
-	if crumb, ok := m.breadcrumb(); ok && len(crumb.Segments) > 0 {
-		title += "  " + strings.Join(crumb.Segments, " / ")
-	}
-
-	lines := []string{
-		lipgloss.NewStyle().Bold(true).Foreground(m.palette().Accent()).Background(m.palette().Surface()).Width(m.width).Render(title),
-	}
+	lines := []string{}
 	if spaces, ok := m.workspaceBar(); ok && len(spaces.Spaces) > 0 {
 		lines = append(lines, m.renderWorkspaces(spaces))
 	}
@@ -28,6 +18,16 @@ func (m Model) headerLines() []string {
 	}
 	if git, ok := m.gitStatus(); ok && git.Branch != "" {
 		lines = append(lines, m.renderGitStatus(git))
+	}
+	if len(lines) == 0 {
+		title := m.title
+		if title == "" {
+			title = "Minga"
+		}
+		if crumb, ok := m.breadcrumb(); ok && len(crumb.Segments) > 0 {
+			title += "  " + strings.Join(crumb.Segments, " / ")
+		}
+		lines = append(lines, lipgloss.NewStyle().Bold(true).Foreground(m.palette().Accent()).Background(m.palette().Surface()).Width(m.width).Render(title))
 	}
 	return lines
 }
@@ -89,10 +89,14 @@ func (m Model) renderTabs(tabBar protocol.TabBar) string {
 
 func (m Model) footerLines() []string {
 	status := fmt.Sprintf("row %d col %d", m.cursorRow+1, m.cursorCol+1)
-	if chromeStatus, ok := m.statusBar(); ok && chromeStatus.Filename != "" {
-		status = fmt.Sprintf("%s  %d:%d", chromeStatus.Filename, chromeStatus.Line, chromeStatus.Column)
-		if chromeStatus.Message != "" {
-			status += "  " + chromeStatus.Message
+	if chromeStatus, ok := m.statusBar(); ok {
+		if len(chromeStatus.Left) > 0 || len(chromeStatus.Right) > 0 {
+			status = m.renderStatusSegments(chromeStatus)
+		} else if chromeStatus.Filename != "" {
+			status = fmt.Sprintf("%s  %d:%d", chromeStatus.Filename, chromeStatus.Line, chromeStatus.Column)
+			if chromeStatus.Message != "" {
+				status += "  " + chromeStatus.Message
+			}
 		}
 	}
 	if m.lastError != "" {
@@ -105,7 +109,7 @@ func (m Model) footerLines() []string {
 		status += fmt.Sprintf("  changes %d", len(changes.Entries))
 	}
 	lines := []string{
-		lipgloss.NewStyle().Foreground(m.palette().Muted()).Background(m.palette().Base()).Width(m.width).Render(status),
+		lipgloss.NewStyle().Foreground(m.palette().Muted()).Background(m.palette().Base()).Width(m.width).Render(fitStyled(status, m.width)),
 	}
 	overlay := m.overlayLines()
 	if len(overlay) > 0 {
@@ -114,6 +118,43 @@ func (m Model) footerLines() []string {
 		lines = append(lines, m.renderMinibuffer(mini))
 	}
 	return lines
+}
+
+func (m Model) renderStatusSegments(status protocol.StatusBar) string {
+	left := m.renderSegmentList(status.Left)
+	right := m.renderSegmentList(status.Right)
+	leftWidth := lipgloss.Width(left)
+	rightWidth := lipgloss.Width(right)
+	spacer := strings.Repeat(" ", max(m.width-leftWidth-rightWidth, 1))
+	return left + lipgloss.NewStyle().Background(m.palette().Base()).Render(spacer) + right
+}
+
+func (m Model) renderSegmentList(segments []protocol.StatusSegment) string {
+	parts := make([]string, 0, len(segments))
+	for _, segment := range segments {
+		text := segment.Text
+		if text == "" {
+			continue
+		}
+		style := lipgloss.NewStyle().Foreground(m.palette().Muted()).Background(m.palette().Base())
+		if segment.FG != 0 {
+			style = style.Foreground(lipgloss.Color(fmt.Sprintf("#%06X", segment.FG)))
+		}
+		if segment.BG != 0 {
+			style = style.Background(lipgloss.Color(fmt.Sprintf("#%06X", segment.BG)))
+		}
+		if segment.Attrs&0x01 != 0 {
+			style = style.Bold(true)
+		}
+		if segment.Attrs&0x02 != 0 {
+			style = style.Underline(true)
+		}
+		if segment.Attrs&0x04 != 0 {
+			style = style.Italic(true)
+		}
+		parts = append(parts, style.Render(text))
+	}
+	return strings.Join(parts, "")
 }
 
 func (m Model) renderGitStatus(git protocol.GitStatus) string {

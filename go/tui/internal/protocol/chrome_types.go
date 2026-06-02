@@ -179,6 +179,17 @@ type StatusBar struct {
 	Filename    string
 	Filetype    string
 	Message     string
+	Left        []StatusSegment
+	Right       []StatusSegment
+}
+
+type StatusSegment struct {
+	Name    string
+	FG      uint32
+	BG      uint32
+	Attrs   byte
+	Text    string
+	Command string
 }
 
 type Theme struct {
@@ -449,6 +460,29 @@ type TimelineEntry struct {
 type GutterSeparator struct {
 	Col   uint16
 	Color uint32
+}
+
+type Gutter struct {
+	WindowID        uint16
+	ContentRow      uint16
+	ContentCol      uint16
+	ContentHeight   uint16
+	Active          bool
+	ContentWidth    uint16
+	CursorLine      uint32
+	LineNumberStyle byte
+	LineNumberWidth byte
+	SignColWidth    byte
+	Entries         []GutterEntry
+}
+
+type GutterEntry struct {
+	BufferLine  uint32
+	DisplayType byte
+	SignType    byte
+	FoldEndLine uint32
+	SignFG      uint32
+	SignText    string
 }
 
 type SplitSeparators struct {

@@ -76,11 +76,19 @@ func (m Model) fileTree() (protocol.FileTree, bool) {
 
 func (m Model) statusBar() (protocol.StatusBar, bool) {
 	for _, payload := range m.chrome {
-		if payload.Status.Filename != "" || payload.Status.Message != "" || payload.Status.Line != 0 {
+		if payload.Status.Filename != "" || payload.Status.Message != "" || payload.Status.Line != 0 || len(payload.Status.Left) > 0 || len(payload.Status.Right) > 0 {
 			return payload.Status, true
 		}
 	}
 	return protocol.StatusBar{}, false
+}
+
+func (m Model) windowGutter(windowID uint16) (protocol.Gutter, bool) {
+	gutter, ok := m.gutters[windowID]
+	if ok && (len(gutter.Entries) > 0 || gutter.LineNumberWidth > 0 || gutter.SignColWidth > 0) {
+		return gutter, true
+	}
+	return protocol.Gutter{}, false
 }
 
 func (m Model) breadcrumb() (protocol.Breadcrumb, bool) {

@@ -95,6 +95,13 @@ func min(a, b int) int {
 	return b
 }
 
+func abs(value int) int {
+	if value < 0 {
+		return -value
+	}
+	return value
+}
+
 func fit(value string, width int) string {
 	if width <= 0 {
 		return ""

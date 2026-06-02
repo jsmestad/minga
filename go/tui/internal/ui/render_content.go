@@ -23,9 +23,7 @@ func (m Model) semanticLines() []string {
 	lines := make([]string, 0, m.bodyHeight())
 	for _, id := range m.windowOrder {
 		window := m.windows[id]
-		for _, row := range window.Rows {
-			lines = append(lines, m.renderRow(row))
-		}
+		lines = append(lines, m.renderWindowRows(window)...)
 	}
 	if len(lines) == 0 {
 		return nil
@@ -33,9 +31,52 @@ func (m Model) semanticLines() []string {
 	return lines
 }
 
-func (m Model) renderRow(row protocol.WindowRow) string {
+func (m Model) renderWindowRows(window protocol.WindowContent) []string {
+	gutter, hasGutter := m.windowGutter(window.ID)
+	height := len(window.Rows)
+	if hasGutter && gutter.ContentHeight > 0 {
+		height = int(gutter.ContentHeight)
+	} else if len(m.windowOrder) <= 1 {
+		height = max(height, m.bodyHeight())
+	}
+	lines := make([]string, 0, height)
+	for rowIndex := 0; rowIndex < height; rowIndex++ {
+		contentWidth := m.width
+		gutterText := ""
+		if hasGutter {
+			gutterText = m.renderGutterEntry(gutter, rowIndex)
+			contentWidth = max(m.width-lipgloss.Width(gutterText), 1)
+		}
+
+		content := m.renderSemanticContentRow(window, rowIndex, contentWidth)
+		lines = append(lines, lipgloss.JoinHorizontal(lipgloss.Top, gutterText, content))
+	}
+	return lines
+}
+
+func (m Model) renderSemanticContentRow(window protocol.WindowContent, rowIndex int, width int) string {
+	cursorline := window.Cursorline.Visible && rowIndex == int(window.Cursorline.Row)
+	if rowIndex >= len(window.Rows) {
+		return m.renderTildeRow(width, cursorline, window.Cursorline.BG)
+	}
+	return m.renderRow(window.Rows[rowIndex], width, cursorline, window.Cursorline.BG)
+}
+
+func (m Model) renderTildeRow(width int, cursorline bool, cursorlineBG uint32) string {
+	style := m.editorStyle().Width(width).Foreground(m.palette().Muted())
+	if cursorline && cursorlineBG != 0 {
+		style = style.Background(lipgloss.Color(fmt.Sprintf("#%06X", cursorlineBG)))
+	}
+	return style.Render(fit("~", width))
+}
+
+func (m Model) renderRow(row protocol.WindowRow, width int, cursorline bool, cursorlineBG uint32) string {
+	base := m.editorStyle().Width(width)
+	if cursorline && cursorlineBG != 0 {
+		base = base.Background(lipgloss.Color(fmt.Sprintf("#%06X", cursorlineBG)))
+	}
 	if len(row.Spans) == 0 {
-		return m.editorStyle().Render(fit(row.Text, m.width))
+		return base.Render(fit(row.Text, width))
 	}
 
 	var builder strings.Builder
@@ -43,10 +84,13 @@ func (m Model) renderRow(row protocol.WindowRow) string {
 	for _, r := range row.Text {
 		span := spanAt(row.Spans, uint16(col))
 		style := m.styleForEditorSpan(span)
+		if cursorline && span.BG == 0 && cursorlineBG != 0 {
+			style = style.Background(lipgloss.Color(fmt.Sprintf("#%06X", cursorlineBG)))
+		}
 		builder.WriteString(style.Render(string(r)))
 		col++
 	}
-	return m.editorStyle().Render(fitStyled(builder.String(), m.width))
+	return base.Render(fitStyled(builder.String(), width))
 }
 
 func (m Model) cellLines() []string {
@@ -205,6 +249,59 @@ func (m Model) withSemanticSidebars(mainLines []string) []string {
 	return lines
 }
 
+func (m Model) renderGutterEntry(gutter protocol.Gutter, rowIndex int) string {
+	width := int(gutter.SignColWidth) + max(int(gutter.LineNumberWidth)-1, 0) + 1
+	if width <= 1 {
+		return ""
+	}
+	style := lipgloss.NewStyle().Foreground(m.palette().GutterText()).Background(m.editorBackground()).Width(width)
+	if rowIndex >= len(gutter.Entries) {
+		return style.Render(strings.Repeat(" ", width))
+	}
+	entry := gutter.Entries[rowIndex]
+	if entry.BufferLine == gutter.CursorLine && gutter.LineNumberStyle != 2 {
+		style = style.Foreground(m.palette().GutterCurrentText()).Bold(true)
+	}
+	sign := m.gutterSign(entry)
+	number := m.gutterLineNumber(gutter, entry)
+	return style.Render(fit(sign+number+" ", width))
+}
+
+func (m Model) gutterLineNumber(gutter protocol.Gutter, entry protocol.GutterEntry) string {
+	width := max(int(gutter.LineNumberWidth)-1, 0)
+	if width == 0 || gutter.LineNumberStyle == 3 || entry.DisplayType == 3 || entry.DisplayType == 5 {
+		return strings.Repeat(" ", width)
+	}
+	value := int(entry.BufferLine) + 1
+	if gutter.LineNumberStyle == 2 || (gutter.LineNumberStyle == 0 && entry.BufferLine != gutter.CursorLine) {
+		value = abs(int(entry.BufferLine) - int(gutter.CursorLine))
+	}
+	text := fmt.Sprintf("%d", value)
+	if len(text) > width {
+		return text[len(text)-width:]
+	}
+	return strings.Repeat(" ", width-len(text)) + text
+}
+
+func (m Model) gutterSign(entry protocol.GutterEntry) string {
+	if entry.SignType == 8 && entry.SignText != "" {
+		return fit(entry.SignText, 2)
+	}
+	if entry.SignType == 9 {
+		return "- "
+	}
+	if entry.SignType != 0 {
+		return "│ "
+	}
+	if entry.DisplayType == 1 {
+		return "▸ "
+	}
+	if entry.DisplayType == 4 {
+		return "▾ "
+	}
+	return "  "
+}
+
 func (m Model) renderFileTree(tree protocol.FileTree, width int, height int) []string {
 	theme := m.palette()
 	style := lipgloss.NewStyle().Foreground(theme.TreeText()).Background(theme.TreeSurface()).Width(width)
@@ -260,15 +357,12 @@ func (m Model) styleForEditorSpan(span protocol.Span) lipgloss.Style {
 		style = style.Bold(true)
 	}
 	if span.Attrs&0x02 != 0 {
-		style = style.Underline(true)
-	}
-	if span.Attrs&0x04 != 0 {
 		style = style.Italic(true)
 	}
-	if span.Attrs&0x08 != 0 {
-		style = style.Reverse(true)
+	if span.Attrs&0x04 != 0 {
+		style = style.Underline(true)
 	}
-	if span.Attrs&0x10 != 0 {
+	if span.Attrs&0x08 != 0 {
 		style = style.Strikethrough(true)
 	}
 	return style

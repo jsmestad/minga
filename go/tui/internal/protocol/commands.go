@@ -80,6 +80,7 @@ type ChromePayload struct {
 	Board         Board
 	Timeline      EditTimeline
 	Gutter        GutterSeparator
+	WindowGutter  Gutter
 	Splits        SplitSeparators
 }
 
@@ -90,7 +91,14 @@ type WindowContent struct {
 	CursorShape  byte
 	ScrollLeft   uint16
 	ContentEpoch uint32
+	Cursorline   Cursorline
 	Rows         []WindowRow
+}
+
+type Cursorline struct {
+	Visible bool
+	Row     uint16
+	BG      uint32
 }
 
 type WindowRow struct {
@@ -250,6 +258,8 @@ func decodeWindowContent(payload []byte) (Command, error) {
 			decodeWindowHeader(opcode, section, &window)
 		case 0x02:
 			decodeRows(section, &window, opcode != generated.OPGuiWindowContent)
+		case 0x09:
+			decodeCursorline(section, &window)
 		}
 	}
 
@@ -288,6 +298,7 @@ func decodeOverlayDelta(payload []byte) (Command, error) {
 		if len(payload) < size {
 			return Command{}, fmt.Errorf("short overlay delta cursorline")
 		}
+		window.Cursorline = Cursorline{Visible: true, Row: u16(payload, base), BG: u24(payload, base+2)}
 	}
 
 	return Command{Kind: CommandWindowDelta, Size: size, Window: window}, nil
@@ -316,6 +327,13 @@ func decodeWindowHeader(opcode byte, section []byte, window *WindowContent) {
 	window.CursorCol = u16(section, 9)
 	window.CursorShape = section[11]
 	window.ScrollLeft = u16(section, 12)
+}
+
+func decodeCursorline(section []byte, window *WindowContent) {
+	if len(section) < 5 {
+		return
+	}
+	window.Cursorline = Cursorline{Visible: true, Row: u16(section, 0), BG: u24(section, 2)}
 }
 
 func decodeRows(section []byte, window *WindowContent, delta bool) {

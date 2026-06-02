@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/jsmestad/minga/go/tui/internal/generated"
 	"github.com/jsmestad/minga/go/tui/internal/port"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 )
@@ -26,6 +27,7 @@ type Model struct {
 	windows     map[uint16]protocol.WindowContent
 	windowOrder []uint16
 	chrome      map[byte]protocol.ChromePayload
+	gutters     map[uint16]protocol.Gutter
 	cells       map[position]cell
 	drawSeq     uint64
 	cursorRow   uint16
@@ -60,6 +62,7 @@ func New(width, height uint16, out chan<- []byte) Model {
 		viewport: vp,
 		windows:  map[uint16]protocol.WindowContent{},
 		chrome:   map[byte]protocol.ChromePayload{},
+		gutters:  map[uint16]protocol.Gutter{},
 		cells:    map[position]cell{},
 	}
 }
@@ -123,6 +126,8 @@ func (m *Model) applyCommands(commands []protocol.Command) tea.Cmd {
 		case protocol.CommandClear:
 			m.windows = map[uint16]protocol.WindowContent{}
 			m.windowOrder = nil
+			m.chrome = map[byte]protocol.ChromePayload{}
+			m.gutters = map[uint16]protocol.Gutter{}
 			m.cells = map[position]cell{}
 			m.drawSeq = 0
 		case protocol.CommandDrawText:
@@ -143,6 +148,9 @@ func (m *Model) applyCommands(commands []protocol.Command) tea.Cmd {
 			m.applyWindowDelta(command.Window)
 		case protocol.CommandChrome:
 			m.chrome[command.Chrome.Opcode] = command.Chrome
+			if command.Chrome.Opcode == generated.OPGuiGutter {
+				m.gutters[command.Chrome.WindowGutter.WindowID] = command.Chrome.WindowGutter
+			}
 		}
 	}
 	return tea.Batch(cmds...)
@@ -175,6 +183,9 @@ func (m *Model) applyWindowDelta(delta protocol.WindowContent) {
 	window.CursorShape = delta.CursorShape
 	window.ContentEpoch = delta.ContentEpoch
 	window.ScrollLeft = delta.ScrollLeft
+	if delta.Cursorline.Visible {
+		window.Cursorline = delta.Cursorline
+	}
 	if len(delta.Rows) > 0 {
 		window.Rows = resolveWindowRows(window.Rows, delta.Rows)
 	}

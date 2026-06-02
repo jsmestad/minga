@@ -8,29 +8,31 @@ import (
 )
 
 const (
-	themeEditorBG       byte = 0x01
-	themeEditorFG       byte = 0x02
-	themeTreeBG         byte = 0x03
-	themeTreeFG         byte = 0x04
-	themeTreeSelectBG   byte = 0x05
-	themeTreeHeaderBG   byte = 0x08
-	themeTreeHeaderFG   byte = 0x09
-	themeTabBG          byte = 0x10
-	themeTabActiveBG    byte = 0x11
-	themeTabActiveFG    byte = 0x12
-	themeTabInactiveFG  byte = 0x13
-	themeTabModifiedFG  byte = 0x14
-	themeTabAttentionFG byte = 0x17
-	themePopupBG        byte = 0x20
-	themePopupFG        byte = 0x21
-	themePopupBorder    byte = 0x22
-	themePopupSelBG     byte = 0x23
-	themePopupSelFG     byte = 0x2A
-	themeBreadcrumbBG   byte = 0x27
-	themeModelineBG     byte = 0x30
-	themeModelineFG     byte = 0x31
-	themeAccent         byte = 0x40
-	themeWarningFG      byte = 0x53
+	themeEditorBG        byte = 0x01
+	themeEditorFG        byte = 0x02
+	themeTreeBG          byte = 0x03
+	themeTreeFG          byte = 0x04
+	themeTreeSelectBG    byte = 0x05
+	themeTreeHeaderBG    byte = 0x08
+	themeTreeHeaderFG    byte = 0x09
+	themeTabBG           byte = 0x10
+	themeTabActiveBG     byte = 0x11
+	themeTabActiveFG     byte = 0x12
+	themeTabInactiveFG   byte = 0x13
+	themeTabModifiedFG   byte = 0x14
+	themeTabAttentionFG  byte = 0x17
+	themePopupBG         byte = 0x20
+	themePopupFG         byte = 0x21
+	themePopupBorder     byte = 0x22
+	themePopupSelBG      byte = 0x23
+	themePopupSelFG      byte = 0x2A
+	themeBreadcrumbBG    byte = 0x27
+	themeModelineBG      byte = 0x30
+	themeModelineFG      byte = 0x31
+	themeAccent          byte = 0x40
+	themeGutterFG        byte = 0x50
+	themeGutterCurrentFG byte = 0x51
+	themeWarningFG       byte = 0x53
 )
 
 type palette struct {
@@ -84,6 +86,14 @@ func (p palette) SelectionText() lipgloss.TerminalColor {
 
 func (p palette) Warning() lipgloss.TerminalColor {
 	return p.slot(themeWarningFG)
+}
+
+func (p palette) GutterText() lipgloss.TerminalColor {
+	return p.slot(themeGutterFG)
+}
+
+func (p palette) GutterCurrentText() lipgloss.TerminalColor {
+	return p.slot(themeGutterCurrentFG)
 }
 
 func (p palette) TreeSurface() lipgloss.TerminalColor {

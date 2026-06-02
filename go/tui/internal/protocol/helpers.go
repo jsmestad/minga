@@ -144,6 +144,8 @@ func opcodeName(opcode byte) string {
 		return "edit timeline"
 	case generated.OPGuiGutterSep:
 		return "gutter separator"
+	case generated.OPGuiGutter:
+		return "gutter"
 	case generated.OPGuiSplitSeparators:
 		return "split separators"
 	default:
