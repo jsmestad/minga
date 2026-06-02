@@ -144,6 +144,22 @@ func opcodeName(opcode byte) string {
 		return "edit timeline"
 	case generated.OPGuiGutterSep:
 		return "gutter separator"
+	case generated.OPGuiCursorline:
+		return "cursorline"
+	case generated.OPGuiGutter:
+		return "gutter"
+	case generated.OPGuiToolManager:
+		return "tool manager"
+	case generated.OPGuiIndentGuides:
+		return "indent guides"
+	case generated.OPGuiLineSpacing:
+		return "line spacing"
+	case generated.OPGuiFileTreeSelection:
+		return "file tree selection"
+	case generated.OPGuiCursorAnimation:
+		return "cursor animation"
+	case generated.OPGuiConfigState:
+		return "config state"
 	case generated.OPGuiSplitSeparators:
 		return "split separators"
 	default:

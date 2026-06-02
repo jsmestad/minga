@@ -62,30 +62,63 @@ func TestDecodeWindowContentRows(t *testing.T) {
 	}
 }
 
-func TestDecodeWindowRowsDeltaIncludesRowRefs(t *testing.T) {
+func TestDecodeWindowRowsAndViewportDeltasIncludeRowRefs(t *testing.T) {
 	ref := []byte{
 		0,
 		0, 0, 0, 0, 0, 0, 0, 9,
 		0, 0, 0, 5,
 	}
 	rowsPayload := append([]byte{0, 1}, ref...)
-	headerPayload := []byte{0, 7, 0, 0, 0, 12, 1, 0, 3, 0, 4, 1, 0, 0, 0}
-	packet := append([]byte{generated.OPGuiWindowRowsDelta, 2, 0x01, 0, byte(len(headerPayload))}, headerPayload...)
-	packet = append(packet, 0x02, byte(len(rowsPayload)>>8), byte(len(rowsPayload)))
-	packet = append(packet, rowsPayload...)
+	tests := []struct {
+		name       string
+		opcode     byte
+		header     []byte
+		wantID     uint16
+		wantEpoch  uint32
+		wantRow    uint16
+		wantCol    uint16
+		wantShape  byte
+		wantScroll uint16
+	}{
+		{name: "rows", opcode: generated.OPGuiWindowRowsDelta, header: []byte{0, 7, 0x12, 0x34, 0x56, 0x78, 0xAA, 0, 9, 0, 11, 2, 0, 13}, wantID: 7, wantEpoch: 0x12345678, wantRow: 9, wantCol: 11, wantShape: 2, wantScroll: 13},
+		{name: "viewport", opcode: generated.OPGuiWindowViewportDelta, header: []byte{0, 8, 0x22, 0x33, 0x44, 0x55, 0xBB, 0, 10, 0, 12, 3, 0, 14}, wantID: 8, wantEpoch: 0x22334455, wantRow: 10, wantCol: 12, wantShape: 3, wantScroll: 14},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			packet := append([]byte{tt.opcode, 2, 0x01, 0, byte(len(tt.header))}, tt.header...)
+			packet = append(packet, 0x02, byte(len(rowsPayload)>>8), byte(len(rowsPayload)))
+			packet = append(packet, rowsPayload...)
+			packet = append(packet, generated.OPBatchEnd)
 
-	command, err := DecodeCommand(packet)
-	if err != nil {
-		t.Fatalf("DecodeCommand returned error: %v", err)
-	}
-	if command.Kind != CommandWindowDelta {
-		t.Fatalf("kind = %v, want window delta", command.Kind)
-	}
-	if len(command.Window.Rows) != 1 || !command.Window.Rows[0].Ref {
-		t.Fatalf("row ref decoded incorrectly: %+v", command.Window.Rows)
-	}
-	if command.Window.Rows[0].ID != 9 || command.Window.Rows[0].ContentHash != 5 {
-		t.Fatalf("row ref identity decoded incorrectly: %+v", command.Window.Rows[0])
+			command, err := DecodeCommand(packet)
+			if err != nil {
+				t.Fatalf("DecodeCommand returned error: %v", err)
+			}
+			if command.Kind != CommandWindowDelta {
+				t.Fatalf("kind = %v, want window delta", command.Kind)
+			}
+			window := command.Window
+			if !window.ScrollLeftSet {
+				t.Fatalf("scroll left should be marked present in delta header: %+v", window)
+			}
+			if window.ID != tt.wantID || window.ContentEpoch != tt.wantEpoch || window.CursorRow != tt.wantRow || window.CursorCol != tt.wantCol || window.CursorShape != tt.wantShape || window.ScrollLeft != tt.wantScroll {
+				t.Fatalf("header decoded incorrectly: %+v", window)
+			}
+			if len(window.Rows) != 1 || !window.Rows[0].Ref {
+				t.Fatalf("row ref decoded incorrectly: %+v", window.Rows)
+			}
+			if window.Rows[0].ID != 9 || window.Rows[0].ContentHash != 5 {
+				t.Fatalf("row ref identity decoded incorrectly: %+v", window.Rows[0])
+			}
+
+			second, err := DecodeCommand(packet[command.Size:])
+			if err != nil {
+				t.Fatalf("DecodeCommand batch returned error: %v", err)
+			}
+			if second.Kind != CommandBatchEnd {
+				t.Fatalf("second kind = %v, want batch end", second.Kind)
+			}
+		})
 	}
 }
 
@@ -431,6 +464,175 @@ func TestDecodeStatusChrome(t *testing.T) {
 	}
 }
 
+func TestDecodeStatusModelineSegments(t *testing.T) {
+	left := []byte{2, 0, 1, 0, 1}
+	left = append(left, string8("mode")...)
+	left = append(left, 0xAA, 0xBB, 0xCC, 0x11, 0x22, 0x33, 1)
+	left = append(left, string16(" NORMAL ")...)
+	left = append(left, string16("set_mode")...)
+	right := []byte{}
+	right = append(right, string8("position")...)
+	right = append(right, 0, 0, 0, 0, 0, 0, 0)
+	right = append(right, string16("1:1 Top")...)
+	right = append(right, string16("")...)
+	packet := []byte{generated.OPGuiStatusBar, 1}
+	packet = append(packet, section(0x0B, append(left, right...))...)
+
+	command, err := DecodeCommand(packet)
+	if err != nil {
+		t.Fatalf("DecodeCommand returned error: %v", err)
+	}
+	status := command.Chrome.Status
+	if len(status.Left) != 1 || len(status.Right) != 1 || status.Left[0].Name != "mode" || status.Left[0].Text != " NORMAL " || status.Left[0].Command != "set_mode" || status.Right[0].Text != "1:1 Top" {
+		t.Fatalf("modeline segments decoded incorrectly: %+v", status)
+	}
+}
+
+func TestDecodeGutterChrome(t *testing.T) {
+	window := section(0x01, []byte{0, 7, 0, 1, 0, 2, 0, 3, 1, 0, 80})
+	config := section(0x02, []byte{0, 0, 0, 4, 0, 4, 2})
+	entriesPayload := []byte{0, 2}
+	entriesPayload = append(entriesPayload, 0, 0, 0, 4, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF)
+	entriesPayload = append(entriesPayload, 0, 0, 0, 5, 3, 0, 0xFF, 0xFF, 0xFF, 0xFF)
+	packet := []byte{generated.OPGuiGutter, 3}
+	packet = append(packet, window...)
+	packet = append(packet, config...)
+	packet = append(packet, section(0x03, entriesPayload)...)
+
+	command, err := DecodeCommand(packet)
+	if err != nil {
+		t.Fatalf("DecodeCommand returned error: %v", err)
+	}
+	gutter := command.Chrome.WindowGutter
+	if gutter.WindowID != 7 || gutter.ContentRow != 1 || gutter.ContentCol != 2 || gutter.CursorLine != 4 || gutter.LineNumberWidth != 4 || len(gutter.Entries) != 2 || gutter.Entries[1].DisplayType != 3 {
+		t.Fatalf("gutter decoded incorrectly: %+v", gutter)
+	}
+}
+
+func TestDecodeWindowOverlaySections(t *testing.T) {
+	header := section(0x01, []byte{0, 7, 3, 0, 1, 0, 2, 0, 0, 0, 0, 0, 0, 9})
+	rows := section(0x02, []byte{0, 0})
+	selection := section(0x03, []byte{1, 0, 0, 0, 1, 0, 0, 0, 4})
+	search := section(0x04, []byte{0, 1, 0, 0, 0, 2, 0, 5, 1})
+	diagnostics := section(0x05, []byte{0, 1, 0, 0, 0, 2, 0, 0, 0, 5, 0})
+	highlights := section(0x06, []byte{0, 1, 0, 0, 0, 3, 0, 0, 0, 6, 2})
+	annotationPayload := []byte{0, 1, 0, 0, 1, 0xAA, 0xBB, 0xCC, 0x11, 0x22, 0x33}
+	annotationPayload = append(annotationPayload, string16("note")...)
+	annotations := section(0x07, annotationPayload)
+	geometryPayload := make([]byte, 67)
+	geometryPayload[1] = 7
+	geometryPayload[63] = 3
+	geometryPayload[65] = 2
+	geometry := section(0x08, geometryPayload)
+	packet := []byte{generated.OPGuiWindowContent, 8}
+	packet = append(packet, header...)
+	packet = append(packet, rows...)
+	packet = append(packet, selection...)
+	packet = append(packet, search...)
+	packet = append(packet, diagnostics...)
+	packet = append(packet, highlights...)
+	packet = append(packet, annotations...)
+	packet = append(packet, geometry...)
+
+	command, err := DecodeCommand(packet)
+	if err != nil {
+		t.Fatalf("DecodeCommand returned error: %v", err)
+	}
+	window := command.Window
+	if window.Selection.Type != 1 || len(window.SearchMatches) != 1 || len(window.Diagnostics) != 1 || len(window.Highlights) != 1 || len(window.Annotations) != 1 || !window.GeometrySet {
+		t.Fatalf("overlay sections decoded incorrectly: %+v", window)
+	}
+	if window.Annotations[0].Text != "note" || window.Geometry.WindowID != 7 || window.Geometry.LineNumberWidth != 3 || window.Geometry.SignColWidth != 2 {
+		t.Fatalf("annotation/geometry decoded incorrectly: %+v", window)
+	}
+}
+
+func TestDecodeWindowCursorlineSection(t *testing.T) {
+	header := section(0x01, []byte{0, 7, 3, 0, 1, 0, 2, 0, 0, 0, 0, 0, 0, 9})
+	rows := section(0x02, []byte{0, 0})
+	cursorline := section(0x09, []byte{0, 1, 0x11, 0x22, 0x33})
+	packet := []byte{generated.OPGuiWindowContent, 3}
+	packet = append(packet, header...)
+	packet = append(packet, rows...)
+	packet = append(packet, cursorline...)
+
+	command, err := DecodeCommand(packet)
+	if err != nil {
+		t.Fatalf("DecodeCommand returned error: %v", err)
+	}
+	if !command.Window.Cursorline.Visible || command.Window.Cursorline.Row != 1 || command.Window.Cursorline.BG != 0x112233 {
+		t.Fatalf("cursorline decoded incorrectly: %+v", command.Window.Cursorline)
+	}
+}
+
+func TestDecodeRemainingSemanticChrome(t *testing.T) {
+	cursorline := []byte{generated.OPGuiCursorline, 0, 4, 0x11, 0x22, 0x33}
+	command, err := DecodeCommand(cursorline)
+	if err != nil {
+		t.Fatalf("DecodeCommand cursorline returned error: %v", err)
+	}
+	if !command.Chrome.CursorlineChrome.Visible || command.Chrome.CursorlineChrome.Row != 4 || command.Chrome.CursorlineChrome.BG != 0x112233 {
+		t.Fatalf("cursorline decoded incorrectly: %+v", command.Chrome.CursorlineChrome)
+	}
+
+	indentPayload := []byte{0, 7, 2, 0xFF, 0xFF, 2, 0, 2, 0, 4, 0, 2, 1, 2}
+	indent := append([]byte{generated.OPGuiIndentGuides, 0, byte(len(indentPayload))}, indentPayload...)
+	command, err = DecodeCommand(indent)
+	if err != nil {
+		t.Fatalf("DecodeCommand indent guides returned error: %v", err)
+	}
+	if command.Chrome.IndentGuides.WindowID != 7 || len(command.Chrome.IndentGuides.GuideCols) != 2 || len(command.Chrome.IndentGuides.IndentLevels) != 2 {
+		t.Fatalf("indent guides decoded incorrectly: %+v", command.Chrome.IndentGuides)
+	}
+
+	emptyIndentPayload := []byte{0, 7, 2, 0xFF, 0xFF, 0}
+	emptyIndent := append([]byte{generated.OPGuiIndentGuides, 0, byte(len(emptyIndentPayload))}, emptyIndentPayload...)
+	command, err = DecodeCommand(emptyIndent)
+	if err != nil {
+		t.Fatalf("DecodeCommand empty indent guides returned error: %v", err)
+	}
+	if command.Chrome.IndentGuides.WindowID != 7 || len(command.Chrome.IndentGuides.GuideCols) != 0 {
+		t.Fatalf("empty indent guides decoded incorrectly: %+v", command.Chrome.IndentGuides)
+	}
+
+	selectionPayload := append([]byte{1}, string16("row-1")...)
+	selection := append([]byte{generated.OPGuiFileTreeSelection, 0, byte(len(selectionPayload))}, selectionPayload...)
+	command, err = DecodeCommand(selection)
+	if err != nil {
+		t.Fatalf("DecodeCommand file tree selection returned error: %v", err)
+	}
+	if !command.Chrome.FileTreeSelection.Focused || command.Chrome.FileTreeSelection.SelectedID != "row-1" {
+		t.Fatalf("file tree selection decoded incorrectly: %+v", command.Chrome.FileTreeSelection)
+	}
+
+	lineSpacing := []byte{generated.OPGuiLineSpacing, 0, 2, 0, 120}
+	command, err = DecodeCommand(lineSpacing)
+	if err != nil {
+		t.Fatalf("DecodeCommand line spacing returned error: %v", err)
+	}
+	if command.Chrome.LineSpacing.SpacingX100 != 120 {
+		t.Fatalf("line spacing decoded incorrectly: %+v", command.Chrome.LineSpacing)
+	}
+
+	cursorAnimation := []byte{generated.OPGuiCursorAnimation, 0, 1, 1}
+	command, err = DecodeCommand(cursorAnimation)
+	if err != nil {
+		t.Fatalf("DecodeCommand cursor animation returned error: %v", err)
+	}
+	if !command.Chrome.CursorAnimation.Enabled {
+		t.Fatalf("cursor animation decoded incorrectly: %+v", command.Chrome.CursorAnimation)
+	}
+
+	configState := []byte{generated.OPGuiConfigState, 0, 0}
+	command, err = DecodeCommand(configState)
+	if err != nil {
+		t.Fatalf("DecodeCommand config state returned error: %v", err)
+	}
+	if !command.Chrome.ConfigState.Present {
+		t.Fatalf("config state decoded incorrectly: %+v", command.Chrome.ConfigState)
+	}
+}
+
 func TestDecodeThemeAndEverydayChrome(t *testing.T) {
 	packet := []byte{generated.OPGuiTheme, 2, 0x40, 0x11, 0x22, 0x33, 0x30, 0x44, 0x55, 0x66, generated.OPBatchEnd}
 	first, err := DecodeCommand(packet)
@@ -618,6 +820,34 @@ func TestDecodePanelAndSidebarChrome(t *testing.T) {
 	}
 	if len(command.Chrome.Extensions.Panels) != 1 || command.Chrome.Extensions.Panels[0].Title != "Panel" || len(command.Chrome.Extensions.Panels[0].Blocks) != 1 {
 		t.Fatalf("extension panel decoded incorrectly: %+v", command.Chrome.Extensions)
+	}
+
+	tool := []byte{generated.OPGuiToolManager, 1, 0, 0, 0, 0, 1}
+	tool = append(tool, string8("elixir-ls")...)
+	tool = append(tool, string8("Elixir LS")...)
+	tool = append(tool, string16("Language server")...)
+	tool = append(tool, 0, 1, 0, 0)
+	tool = append(tool, string8("")...)
+	tool = append(tool, string16("")...)
+	tool = append(tool, 0)
+	tool = append(tool, string16("")...)
+	tool = append(tool, generated.OPBatchEnd)
+	command, err = DecodeCommand(tool)
+	if err != nil {
+		t.Fatalf("DecodeCommand tool manager returned error: %v", err)
+	}
+	if !command.Chrome.ToolManager.Visible || len(command.Chrome.ToolManager.Tools) != 1 || command.Chrome.ToolManager.Tools[0].Label != "Elixir LS" {
+		t.Fatalf("tool manager decoded incorrectly: %+v", command.Chrome.ToolManager)
+	}
+	if command.Size != len(tool)-1 {
+		t.Fatalf("tool manager size = %d, want %d", command.Size, len(tool)-1)
+	}
+	second, err := DecodeCommand(tool[command.Size:])
+	if err != nil {
+		t.Fatalf("DecodeCommand batch returned error: %v", err)
+	}
+	if second.Kind != CommandBatchEnd {
+		t.Fatalf("second kind = %v, want batch end", second.Kind)
 	}
 
 	node := string8("<0.1.0>")

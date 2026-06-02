@@ -321,10 +321,54 @@ func decodeStatus(payload []byte) (StatusBar, string, int) {
 				status.Message = message
 				parts = append(parts, message)
 			}
+		case 0x0B:
+			status.Left, status.Right = decodeStatusSegments(section)
 		}
 	}
 
 	return status, stringsJoin(parts, "  "), size
+}
+
+func decodeStatusSegments(section []byte) ([]StatusSegment, []StatusSegment) {
+	if len(section) < 5 {
+		return nil, nil
+	}
+	offset := 1
+	leftCount := int(u16(section, offset))
+	offset += 2
+	rightCount := int(u16(section, offset))
+	offset += 2
+	left, offset := decodeStatusSegmentList(section, offset, leftCount)
+	right, _ := decodeStatusSegmentList(section, offset, rightCount)
+	return left, right
+}
+
+func decodeStatusSegmentList(section []byte, offset int, count int) ([]StatusSegment, int) {
+	segments := make([]StatusSegment, 0, count)
+	for i := 0; i < count; i++ {
+		segment, next, ok := decodeStatusSegment(section, offset)
+		if !ok {
+			break
+		}
+		segments = append(segments, segment)
+		offset = next
+	}
+	return segments, offset
+}
+
+func decodeStatusSegment(section []byte, offset int) (StatusSegment, int, bool) {
+	name, offset, ok := readString8(section, offset)
+	if !ok || len(section) < offset+7 {
+		return StatusSegment{}, offset, false
+	}
+	segment := StatusSegment{Name: name, FG: u24(section, offset), BG: u24(section, offset+3), Attrs: section[offset+6]}
+	offset += 7
+	segment.Text, offset, ok = readString16(section, offset)
+	if !ok {
+		return StatusSegment{}, offset, false
+	}
+	segment.Command, offset, ok = readString16(section, offset)
+	return segment, offset, ok
 }
 
 func statusFile(section []byte) (string, string, string, bool) {

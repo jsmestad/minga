@@ -68,6 +68,19 @@ func EncodeMouseEvent(row, col int16, button, mods, eventType, clickCount byte) 
 	}
 }
 
+func EncodeGUIFileTreeClick(index uint16) []byte {
+	return []byte{generated.OPGuiAction, generated.GUIActionFileTreeClick, byte(index >> 8), byte(index)}
+}
+
+func EncodeGUIExecuteCommand(command string) []byte {
+	payload := []byte(command)
+	if len(payload) > 65535 {
+		payload = payload[:65535]
+	}
+	out := []byte{generated.OPGuiAction, generated.GUIActionExecuteCommand, byte(len(payload) >> 8), byte(len(payload))}
+	return append(out, payload...)
+}
+
 func EncodePaste(text string) []byte {
 	payload := []byte(text)
 	if len(payload) > 65535 {

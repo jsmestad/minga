@@ -47,50 +47,78 @@ type DrawText struct {
 }
 
 type ChromePayload struct {
-	Opcode        byte
-	Name          string
-	Summary       string
-	Bytes         int
-	Tabs          TabBar
-	Spaces        WorkspaceBar
-	Mini          Minibuffer
-	Complete      Completion
-	Which         WhichKey
-	Picker        Picker
-	Preview       PickerPreview
-	Tree          FileTree
-	Status        StatusBar
-	Theme         Theme
-	Breadcrumb    Breadcrumb
-	Git           GitStatus
-	Search        SearchState
-	Change        ChangeSummary
-	Hover         HoverPopup
-	HoverAction   HoverAction
-	Signature     SignatureHelp
-	Float         FloatPopup
-	Overlay       ExtensionOverlay
-	Notifications Notifications
-	Bottom        BottomPanel
-	Extensions    ExtensionPanel
-	Sidebars      Sidebars
-	Observatory   Observatory
-	AgentContext  AgentContext
-	AgentChat     AgentChat
-	Board         Board
-	Timeline      EditTimeline
-	Gutter        GutterSeparator
-	Splits        SplitSeparators
+	Opcode            byte
+	Name              string
+	Summary           string
+	Bytes             int
+	Tabs              TabBar
+	Spaces            WorkspaceBar
+	Mini              Minibuffer
+	Complete          Completion
+	Which             WhichKey
+	Picker            Picker
+	Preview           PickerPreview
+	Tree              FileTree
+	Status            StatusBar
+	Theme             Theme
+	Breadcrumb        Breadcrumb
+	Git               GitStatus
+	Search            SearchState
+	Change            ChangeSummary
+	Hover             HoverPopup
+	HoverAction       HoverAction
+	Signature         SignatureHelp
+	Float             FloatPopup
+	Overlay           ExtensionOverlay
+	Notifications     Notifications
+	Bottom            BottomPanel
+	Extensions        ExtensionPanel
+	Sidebars          Sidebars
+	Observatory       Observatory
+	AgentContext      AgentContext
+	AgentChat         AgentChat
+	Board             Board
+	Timeline          EditTimeline
+	Gutter            GutterSeparator
+	CursorlineChrome  CursorlineChrome
+	WindowGutter      Gutter
+	IndentGuides      IndentGuides
+	LineSpacing       LineSpacing
+	FileTreeSelection FileTreeSelection
+	CursorAnimation   CursorAnimation
+	ConfigState       ConfigState
+	ToolManager       ToolManager
+	Splits            SplitSeparators
 }
 
 type WindowContent struct {
-	ID           uint16
-	CursorRow    uint16
-	CursorCol    uint16
-	CursorShape  byte
-	ScrollLeft   uint16
-	ContentEpoch uint32
-	Rows         []WindowRow
+	ID             uint16
+	CursorRow      uint16
+	CursorCol      uint16
+	CursorShape    byte
+	ScrollLeft     uint16
+	ScrollLeftSet  bool
+	ContentEpoch   uint32
+	Cursorline     Cursorline
+	Selection      Selection
+	SearchMatches  []SearchMatch
+	Diagnostics    []DiagnosticRange
+	Highlights     []DocumentHighlight
+	Annotations    []LineAnnotation
+	Geometry       PaneGeometry
+	Rows           []WindowRow
+	SelectionSet   bool
+	SearchSet      bool
+	DiagnosticsSet bool
+	HighlightsSet  bool
+	AnnotationsSet bool
+	GeometrySet    bool
+}
+
+type Cursorline struct {
+	Visible bool
+	Row     uint16
+	BG      uint32
 }
 
 type WindowRow struct {
@@ -250,6 +278,20 @@ func decodeWindowContent(payload []byte) (Command, error) {
 			decodeWindowHeader(opcode, section, &window)
 		case 0x02:
 			decodeRows(section, &window, opcode != generated.OPGuiWindowContent)
+		case 0x03:
+			decodeSelection(section, &window)
+		case 0x04:
+			decodeSearchMatches(section, &window)
+		case 0x05:
+			decodeDiagnosticRanges(section, &window)
+		case 0x06:
+			decodeDocumentHighlights(section, &window)
+		case 0x07:
+			decodeLineAnnotations(section, &window)
+		case 0x08:
+			decodePaneGeometry(section, &window)
+		case 0x09:
+			decodeCursorline(section, &window)
 		}
 	}
 
@@ -288,6 +330,7 @@ func decodeOverlayDelta(payload []byte) (Command, error) {
 		if len(payload) < size {
 			return Command{}, fmt.Errorf("short overlay delta cursorline")
 		}
+		window.Cursorline = Cursorline{Visible: true, Row: u16(payload, base), BG: u24(payload, base+2)}
 	}
 
 	return Command{Kind: CommandWindowDelta, Size: size, Window: window}, nil
@@ -303,11 +346,12 @@ func decodeWindowHeader(opcode byte, section []byte, window *WindowContent) {
 		window.CursorCol = u16(section, 5)
 		window.CursorShape = section[7]
 		window.ScrollLeft = u16(section, 8)
+		window.ScrollLeftSet = true
 		window.ContentEpoch = u32(section, 10)
 		return
 	}
 
-	if len(section) < 15 {
+	if len(section) < 14 {
 		return
 	}
 	window.ID = u16(section, 0)
@@ -316,6 +360,14 @@ func decodeWindowHeader(opcode byte, section []byte, window *WindowContent) {
 	window.CursorCol = u16(section, 9)
 	window.CursorShape = section[11]
 	window.ScrollLeft = u16(section, 12)
+	window.ScrollLeftSet = true
+}
+
+func decodeCursorline(section []byte, window *WindowContent) {
+	if len(section) < 5 {
+		return
+	}
+	window.Cursorline = Cursorline{Visible: true, Row: u16(section, 0), BG: u24(section, 2)}
 }
 
 func decodeRows(section []byte, window *WindowContent, delta bool) {

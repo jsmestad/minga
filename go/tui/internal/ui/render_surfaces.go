@@ -28,8 +28,14 @@ func (m Model) overlayLines() []string {
 	if float, ok := m.floatPopup(); ok && float.Visible {
 		return m.renderFloat(float)
 	}
+	if context, ok := m.agentContext(); ok && context.Visible {
+		return m.renderAgentContext(context)
+	}
 	if chat, ok := m.agentChat(); ok && chat.Visible {
 		return m.renderAgentChat(chat)
+	}
+	if tools, ok := m.toolManager(); ok && tools.Visible {
+		return m.renderToolManager(tools)
 	}
 	if board, ok := m.board(); ok && board.Visible {
 		return m.renderBoard(board)
@@ -98,6 +104,14 @@ func (m Model) renderFloat(float protocol.FloatPopup) []string {
 	return lines
 }
 
+func (m Model) renderAgentContext(context protocol.AgentContext) []string {
+	items := []componentItem{{title: statusName(context.Status), description: context.Task}}
+	if context.CanApprove {
+		items = append(items, componentItem{title: "approval", description: "approve or request changes"})
+	}
+	return takeLines(m.charmList("Agent context", items, 0, m.maxOverlayHeight(), true), m.maxOverlayHeight())
+}
+
 func (m Model) renderAgentChat(chat protocol.AgentChat) []string {
 	style := m.panelStyle()
 	title := "Agent"
@@ -122,6 +136,33 @@ func (m Model) renderAgentChat(chat protocol.AgentChat) []string {
 		return []string{style.Bold(true).Foreground(m.palette().Accent()).Render(fit(title, m.width))}
 	}
 	return takeLines(m.charmList(title, items, len(items)-1, m.maxOverlayHeight(), true), m.maxOverlayHeight())
+}
+
+func (m Model) renderToolManager(tools protocol.ToolManager) []string {
+	items := make([]componentItem, 0, len(tools.Tools))
+	selected := min(int(tools.Selected), max(len(tools.Tools)-1, 0))
+	for _, tool := range tools.Tools {
+		items = append(items, componentItem{title: tool.Label, description: strings.TrimSpace(tool.Name + " " + toolStatusName(tool.Status))})
+	}
+	if len(items) == 0 {
+		items = append(items, componentItem{title: "No tools", description: "No matching tools"})
+	}
+	return takeLines(m.charmList("Tool manager", items, selected, m.maxOverlayHeight(), true), m.maxOverlayHeight())
+}
+
+func toolStatusName(status byte) string {
+	switch status {
+	case 1:
+		return "installed"
+	case 2:
+		return "installing"
+	case 3:
+		return "update available"
+	case 4:
+		return "failed"
+	default:
+		return "not installed"
+	}
 }
 
 func (m Model) renderBoard(board protocol.Board) []string {

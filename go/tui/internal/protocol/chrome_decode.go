@@ -65,6 +65,22 @@ func decodeChrome(payload []byte) ChromePayload {
 		chrome.Timeline, chrome.Summary, chrome.Bytes = decodeEditTimeline(payload)
 	case generated.OPGuiGutterSep:
 		chrome.Gutter, chrome.Summary, chrome.Bytes = decodeGutterSeparator(payload)
+	case generated.OPGuiCursorline:
+		chrome.CursorlineChrome, chrome.Summary, chrome.Bytes = decodeCursorlineChrome(payload)
+	case generated.OPGuiGutter:
+		chrome.WindowGutter, chrome.Summary, chrome.Bytes = decodeGutter(payload)
+	case generated.OPGuiToolManager:
+		chrome.ToolManager, chrome.Summary, chrome.Bytes = decodeToolManager(payload)
+	case generated.OPGuiIndentGuides:
+		chrome.IndentGuides, chrome.Summary, chrome.Bytes = decodeIndentGuides(payload)
+	case generated.OPGuiLineSpacing:
+		chrome.LineSpacing, chrome.Summary, chrome.Bytes = decodeLineSpacing(payload)
+	case generated.OPGuiFileTreeSelection:
+		chrome.FileTreeSelection, chrome.Summary, chrome.Bytes = decodeFileTreeSelection(payload)
+	case generated.OPGuiCursorAnimation:
+		chrome.CursorAnimation, chrome.Summary, chrome.Bytes = decodeCursorAnimation(payload)
+	case generated.OPGuiConfigState:
+		chrome.ConfigState, chrome.Summary, chrome.Bytes = decodeConfigState(payload)
 	case generated.OPGuiSplitSeparators:
 		chrome.Splits, chrome.Summary, chrome.Bytes = decodeSplitSeparators(payload)
 	default:

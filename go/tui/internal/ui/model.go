@@ -1,14 +1,17 @@
 package ui
 
 import (
+	"fmt"
 	"sort"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/jsmestad/minga/go/tui/internal/generated"
 	"github.com/jsmestad/minga/go/tui/internal/port"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
+	zone "github.com/lrstanley/bubblezone"
 )
 
 const (
@@ -19,21 +22,26 @@ const (
 )
 
 type Model struct {
-	width       int
-	height      int
-	out         chan<- []byte
-	viewport    viewport.Model
-	windows     map[uint16]protocol.WindowContent
-	windowOrder []uint16
-	chrome      map[byte]protocol.ChromePayload
-	cells       map[position]cell
-	drawSeq     uint64
-	cursorRow   uint16
-	cursorCol   uint16
-	cursorShape byte
-	title       string
-	bg          uint32
-	lastError   string
+	width            int
+	height           int
+	out              chan<- []byte
+	viewport         viewport.Model
+	zones            *zone.Manager
+	windows          map[uint16]protocol.WindowContent
+	windowOrder      []uint16
+	chrome           map[byte]protocol.ChromePayload
+	activePalette    palette
+	gutters          map[uint16]protocol.Gutter
+	indentGuides     map[uint16]protocol.IndentGuides
+	cells            map[position]cell
+	drawSeq          uint64
+	cursorRow        uint16
+	cursorCol        uint16
+	cursorShape      byte
+	title            string
+	bg               uint32
+	cursorlineChrome protocol.CursorlineChrome
+	lastError        string
 }
 
 type position struct {
@@ -54,13 +62,17 @@ type cell struct {
 func New(width, height uint16, out chan<- []byte) Model {
 	vp := viewport.New(int(width), max(int(height)-3, 1))
 	return Model{
-		width:    int(width),
-		height:   int(height),
-		out:      out,
-		viewport: vp,
-		windows:  map[uint16]protocol.WindowContent{},
-		chrome:   map[byte]protocol.ChromePayload{},
-		cells:    map[position]cell{},
+		width:         int(width),
+		height:        int(height),
+		out:           out,
+		viewport:      vp,
+		zones:         zone.New(),
+		windows:       map[uint16]protocol.WindowContent{},
+		chrome:        map[byte]protocol.ChromePayload{},
+		activePalette: defaultPalette(),
+		gutters:       map[uint16]protocol.Gutter{},
+		indentGuides:  map[uint16]protocol.IndentGuides{},
+		cells:         map[position]cell{},
 	}
 }
 
@@ -81,7 +93,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.send(packet)
 		}
 	case tea.MouseMsg:
-		m.send(mousePacket(msg))
+		if packet, ok := m.semanticMousePacket(msg); ok {
+			m.send(packet)
+		} else {
+			m.send(mousePacket(msg))
+		}
 	case port.PacketMsg:
 		return m, m.applyCommands(msg.Commands)
 	case port.LogMsg:
@@ -102,7 +118,7 @@ func (m Model) View() string {
 	body := m.viewport.View()
 	parts := append(m.headerLines(), body)
 	parts = append(parts, m.footerLines()...)
-	return m.cursorStyleSequence() + lipgloss.JoinVertical(lipgloss.Left, parts...)
+	return m.cursorStyleSequence() + m.zones.Scan(lipgloss.JoinVertical(lipgloss.Left, parts...))
 }
 
 func (m Model) cursorStyleSequence() string {
@@ -123,6 +139,10 @@ func (m *Model) applyCommands(commands []protocol.Command) tea.Cmd {
 		case protocol.CommandClear:
 			m.windows = map[uint16]protocol.WindowContent{}
 			m.windowOrder = nil
+			m.chrome = map[byte]protocol.ChromePayload{}
+			m.gutters = map[uint16]protocol.Gutter{}
+			m.indentGuides = map[uint16]protocol.IndentGuides{}
+			m.cursorlineChrome = protocol.CursorlineChrome{}
 			m.cells = map[position]cell{}
 			m.drawSeq = 0
 		case protocol.CommandDrawText:
@@ -143,6 +163,18 @@ func (m *Model) applyCommands(commands []protocol.Command) tea.Cmd {
 			m.applyWindowDelta(command.Window)
 		case protocol.CommandChrome:
 			m.chrome[command.Chrome.Opcode] = command.Chrome
+			switch command.Chrome.Opcode {
+			case generated.OPGuiTheme:
+				m.activePalette = paletteFromTheme(command.Chrome.Theme)
+			case generated.OPGuiCursorline:
+				m.cursorlineChrome = command.Chrome.CursorlineChrome
+			case generated.OPGuiGutter:
+				m.gutters[command.Chrome.WindowGutter.WindowID] = command.Chrome.WindowGutter
+			case generated.OPGuiIndentGuides:
+				m.indentGuides[command.Chrome.IndentGuides.WindowID] = command.Chrome.IndentGuides
+			case generated.OPGuiFileTreeSelection:
+				m.applyFileTreeSelection(command.Chrome.FileTreeSelection)
+			}
 		}
 	}
 	return tea.Batch(cmds...)
@@ -166,17 +198,48 @@ func (m *Model) putWindow(window protocol.WindowContent) {
 
 func (m *Model) applyWindowDelta(delta protocol.WindowContent) {
 	window, ok := m.windows[delta.ID]
-	if !ok {
-		m.putWindow(delta)
+	if !ok || window.ContentEpoch != delta.ContentEpoch {
 		return
 	}
 	window.CursorRow = delta.CursorRow
 	window.CursorCol = delta.CursorCol
 	window.CursorShape = delta.CursorShape
 	window.ContentEpoch = delta.ContentEpoch
-	window.ScrollLeft = delta.ScrollLeft
+	if delta.ScrollLeftSet {
+		window.ScrollLeft = delta.ScrollLeft
+	}
+	window.Cursorline = delta.Cursorline
+	if delta.SelectionSet {
+		window.Selection = delta.Selection
+		window.SelectionSet = true
+	}
+	if delta.SearchSet {
+		window.SearchMatches = delta.SearchMatches
+		window.SearchSet = true
+	}
+	if delta.DiagnosticsSet {
+		window.Diagnostics = delta.Diagnostics
+		window.DiagnosticsSet = true
+	}
+	if delta.HighlightsSet {
+		window.Highlights = delta.Highlights
+		window.HighlightsSet = true
+	}
+	if delta.AnnotationsSet {
+		window.Annotations = delta.Annotations
+		window.AnnotationsSet = true
+	}
+	if delta.GeometrySet {
+		window.Geometry = delta.Geometry
+		window.GeometrySet = true
+	}
 	if len(delta.Rows) > 0 {
-		window.Rows = resolveWindowRows(window.Rows, delta.Rows)
+		rows, err := resolveWindowRows(window.Rows, delta.Rows)
+		if err != nil {
+			m.removeWindow(delta.ID)
+			return
+		}
+		window.Rows = rows
 	}
 	m.windows[delta.ID] = window
 	m.cursorRow = delta.CursorRow
@@ -184,7 +247,7 @@ func (m *Model) applyWindowDelta(delta protocol.WindowContent) {
 	m.cursorShape = delta.CursorShape
 }
 
-func resolveWindowRows(previous []protocol.WindowRow, delta []protocol.WindowRow) []protocol.WindowRow {
+func resolveWindowRows(previous []protocol.WindowRow, delta []protocol.WindowRow) ([]protocol.WindowRow, error) {
 	byID := make(map[uint64]protocol.WindowRow, len(previous))
 	for _, row := range previous {
 		byID[row.ID] = row
@@ -192,14 +255,29 @@ func resolveWindowRows(previous []protocol.WindowRow, delta []protocol.WindowRow
 	rows := make([]protocol.WindowRow, 0, len(delta))
 	for _, row := range delta {
 		if row.Ref {
-			if existing, ok := byID[row.ID]; ok && existing.ContentHash == row.ContentHash {
-				rows = append(rows, existing)
+			existing, ok := byID[row.ID]
+			if !ok {
+				return nil, fmt.Errorf("missing retained row ref %d", row.ID)
 			}
+			if existing.ContentHash != row.ContentHash {
+				return nil, fmt.Errorf("retained row ref %d hash mismatch", row.ID)
+			}
+			rows = append(rows, existing)
 			continue
 		}
 		rows = append(rows, row)
 	}
-	return rows
+	return rows, nil
+}
+
+func (m *Model) removeWindow(id uint16) {
+	delete(m.windows, id)
+	for index, windowID := range m.windowOrder {
+		if windowID == id {
+			m.windowOrder = append(m.windowOrder[:index], m.windowOrder[index+1:]...)
+			return
+		}
+	}
 }
 
 func (m Model) bodyHeight() int {
