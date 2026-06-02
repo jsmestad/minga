@@ -5,7 +5,8 @@ defmodule MingaEditor.Commands.MinibufferTest do
   Most coverage exercises command-mode state transitions directly. One editor-level smoke test remains to verify that Tab is routed to the command handler from command mode.
   """
 
-  use ExUnit.Case, async: true
+  # async: false because full-editor key dispatch uses global command/keymap registries.
+  use ExUnit.Case, async: false
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Config.Options

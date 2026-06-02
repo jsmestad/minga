@@ -55,10 +55,17 @@ defmodule Minga.Extension.JsonLoaderTest do
       assert {:ok, module} = JsonLoader.load(dir)
       assert module == Minga.Extension.Plugin.HelloWorld
 
-      assert module.name() == :"hello-world"
+      assert module.name() == module
       assert module.description() == "A simple greeting plugin"
       assert module.version() == "0.1.0"
       assert module.init([]) == {:ok, %{}}
+    end
+
+    test "uses trusted extension registry name when provided", %{dir: dir} do
+      write_manifest(dir, @valid_manifest)
+
+      assert {:ok, module} = JsonLoader.load(dir, :trusted_plugin)
+      assert module.name() == :trusted_plugin
     end
 
     test "generates correct hook schema", %{dir: dir} do
@@ -88,7 +95,7 @@ defmodule Minga.Extension.JsonLoaderTest do
 
       servers = module.__mcp_server_schema__()
       assert length(servers) == 1
-      assert {:my_mcp, opts} = hd(servers)
+      assert {"my_mcp", opts} = hd(servers)
       assert Keyword.get(opts, :command) == Path.join(dir, "servers/my-mcp")
       assert Keyword.get(opts, :args) == ["--port", "3000"]
     end
@@ -100,7 +107,7 @@ defmodule Minga.Extension.JsonLoaderTest do
 
       commands = module.__slash_command_schema__()
       assert length(commands) == 1
-      assert {:greet, "Say hello", opts} = hd(commands)
+      assert {"greet", "Say hello", opts} = hd(commands)
       assert Keyword.get(opts, :command) == Path.join(dir, "commands/greet.sh")
     end
   end
@@ -216,8 +223,8 @@ defmodule Minga.Extension.JsonLoaderTest do
       expected_module = Module.concat(Minga.Extension.Plugin, Macro.camelize(basename))
       assert module == expected_module
 
-      # name callback returns the directory basename as an atom
-      assert module.name() == String.to_atom(basename)
+      # name callback returns the generated module atom when no trusted registry name is provided.
+      assert module.name() == expected_module
       assert module.description() == "Nameless plugin"
       assert module.version() == "0.2.0"
     end
@@ -294,7 +301,7 @@ defmodule Minga.Extension.JsonLoaderTest do
       assert {:ok, module} = JsonLoader.load(dir)
 
       manifest = Minga.Extension.Manifest.from_module(module, :path)
-      assert manifest.name == :"hello-world"
+      assert manifest.name == module
       assert manifest.description == "A simple greeting plugin"
       assert manifest.version == "0.1.0"
       assert length(manifest.hooks) == 1
