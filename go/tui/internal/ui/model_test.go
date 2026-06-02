@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/cellbuf"
 	"github.com/jsmestad/minga/go/tui/internal/generated"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 )
@@ -126,5 +128,35 @@ func TestCursorShapeSequenceTracksProtocolShape(t *testing.T) {
 	model.cursorShape = 2
 	if got := model.cursorStyleSequence(); got != "\x1b[4 q" {
 		t.Fatalf("underline cursor sequence = %q", got)
+	}
+}
+
+func TestCellLinesAdvanceByGraphemeWidth(t *testing.T) {
+	model := New(8, 5, nil)
+	model.cells[position{row: 0, col: 0}] = cell{text: "👍🏼x"}
+	model.cells[position{row: 0, col: 3}] = cell{text: "z"}
+
+	rendered := model.cellLines()
+	stripped := ansi.Strip(rendered[0])
+
+	if !strings.HasPrefix(stripped, "👍🏼xz") {
+		t.Fatalf("cell line = %q, want grapheme-width placement prefix %q", stripped, "👍🏼xz")
+	}
+	if width := ansi.StringWidthWc(stripped); width != 8 {
+		t.Fatalf("cell line width = %d, want 8 for %q", width, stripped)
+	}
+}
+
+func TestCellbufStyleMapsProtocolAttrs(t *testing.T) {
+	style := cellbufStyle(cell{fg: 0x112233, bg: 0x445566, attrs: 0x01 | 0x02 | 0x04 | 0x08 | 0x10})
+
+	if style.Fg == nil || style.Bg == nil {
+		t.Fatalf("style should carry foreground and background: %+v", style)
+	}
+	if !style.Attrs.Contains(cellbuf.BoldAttr) || !style.Attrs.Contains(cellbuf.ItalicAttr) || !style.Attrs.Contains(cellbuf.ReverseAttr) || !style.Attrs.Contains(cellbuf.StrikethroughAttr) {
+		t.Fatalf("style attrs not mapped: %+v", style.Attrs)
+	}
+	if style.UlStyle != cellbuf.SingleUnderline {
+		t.Fatalf("underline style = %v, want single underline", style.UlStyle)
 	}
 }

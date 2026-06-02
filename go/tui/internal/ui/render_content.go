@@ -5,7 +5,10 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	xansi "github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/cellbuf"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
+	"github.com/rivo/uniseg"
 )
 
 func (m Model) content() string {
@@ -46,25 +49,56 @@ func (m Model) renderRow(row protocol.WindowRow) string {
 }
 
 func (m Model) cellLines() []string {
-	rows := make([][]string, max(m.height-2, 1))
-	for i := range rows {
-		rows[i] = make([]string, max(m.width, 1))
-		for j := range rows[i] {
-			rows[i][j] = " "
-		}
-	}
-
+	buffer := cellbuf.NewBuffer(max(m.width, 1), max(m.height-2, 1))
 	for pos, cell := range m.cells {
-		if int(pos.row) < len(rows) && int(pos.col) < len(rows[pos.row]) {
-			rows[pos.row][pos.col] = m.styleForEditorSpan(protocol.Span{FG: cell.fg, BG: cell.bg, Attrs: byte(cell.attrs)}).Render(cell.text)
-		}
+		writeCellText(buffer, int(pos.col), int(pos.row), cell)
 	}
 
-	rendered := make([]string, len(rows))
-	for i, row := range rows {
-		rendered[i] = m.editorStyle().Render(fitStyled(strings.Join(row, ""), m.width))
+	rendered := make([]string, buffer.Height())
+	for i := range rendered {
+		_, line := cellbuf.RenderLine(buffer, i)
+		rendered[i] = m.editorStyle().Render(fitStyled(line, m.width))
 	}
 	return rendered
+}
+
+func writeCellText(buffer *cellbuf.Buffer, col int, row int, fallback cell) {
+	style := cellbufStyle(fallback)
+	graphemes := uniseg.NewGraphemes(fallback.text)
+	for graphemes.Next() {
+		c := cellbuf.NewGraphemeCell(graphemes.Str())
+		c.Style = style
+		if !buffer.SetCell(col, row, c) {
+			return
+		}
+		col += max(c.Width, 1)
+	}
+}
+
+func cellbufStyle(fallback cell) cellbuf.Style {
+	style := cellbuf.Style{}
+	if fallback.fg != 0 {
+		style.Fg = xansi.TrueColor(fallback.fg)
+	}
+	if fallback.bg != 0 {
+		style.Bg = xansi.TrueColor(fallback.bg)
+	}
+	if fallback.attrs&0x01 != 0 {
+		style.Attrs |= cellbuf.BoldAttr
+	}
+	if fallback.attrs&0x02 != 0 {
+		style.UlStyle = cellbuf.SingleUnderline
+	}
+	if fallback.attrs&0x04 != 0 {
+		style.Attrs |= cellbuf.ItalicAttr
+	}
+	if fallback.attrs&0x08 != 0 {
+		style.Attrs |= cellbuf.ReverseAttr
+	}
+	if fallback.attrs&0x10 != 0 {
+		style.Attrs |= cellbuf.StrikethroughAttr
+	}
+	return style
 }
 
 func (m Model) fillBody(lines []string) []string {
