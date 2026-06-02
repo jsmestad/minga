@@ -219,7 +219,7 @@ pub fn write_packet(writer: &mut impl Write, payload: &[u8]) -> io::Result<()> {
     writer.flush()
 }
 
-pub fn encode_ready_with_caps(width: u16, height: u16) -> [u8; 14] {
+pub fn encode_ready_with_caps(width: u16, height: u16, image_support: u8) -> [u8; 14] {
     [
         opcodes::OP_READY,
         (width >> 8) as u8,
@@ -231,7 +231,7 @@ pub fn encode_ready_with_caps(width: u16, height: u16) -> [u8; 14] {
         0,
         2,
         0,
-        0,
+        image_support,
         0,
         0,
         1,
@@ -462,7 +462,7 @@ mod tests {
     #[test]
     fn encodes_extended_ready() {
         assert_eq!(
-            encode_ready_with_caps(80, 24),
+            encode_ready_with_caps(80, 24, 0),
             [opcodes::OP_READY, 0, 80, 0, 24, 1, 7, 0, 2, 0, 0, 0, 0, 1]
         );
     }

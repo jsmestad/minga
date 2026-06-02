@@ -10,6 +10,11 @@ path = "src/main.rs"
 
 [dependencies]
 libc = "0.2.184"
+mio = { version = "1.0.4", features = ["os-ext", "os-poll"] }
 ratatui = { version = "0.30.0", default-features = false }
+ratatui-image = { version = "11.0.2", default-features = false }
+signal-hook = "0.3.18"
+tachyonfx = { version = "0.25.0", default-features = false }
+termwiz = "0.23.3"
 unicode-segmentation = "1.13.0"
-unicode-width = "0.2.2"
+unicode-width = "0.2.0"

@@ -1,12 +1,15 @@
 mod theme;
 
+use crate::animation;
 use crate::protocol::{self, Command, DrawStyledText, DrawText, Region};
 use crate::semantic;
 use crate::terminal::{CellStyle, Terminal};
 use ratatui::buffer::Buffer as RatatuiBuffer;
 use ratatui::layout::Rect as RatatuiRect;
 use ratatui::style::{Color as RatatuiColor, Modifier, Style as RatatuiStyle};
-use ratatui::widgets::{Block, Borders, Paragraph, Widget, Wrap};
+use ratatui::widgets::{
+    Block, Borders, List, ListItem, ListState, Paragraph, StatefulWidget, Widget, Wrap,
+};
 use std::collections::HashMap;
 use std::io::{self, Write};
 use theme::{SLOT_EDITOR_BG, ThemePalette};
@@ -797,41 +800,41 @@ impl Renderer {
             self.completion_snapshot = Some(self.capture_rect(row, col, width, height));
         }
 
-        self.fill_rect(row, col, width, height, self.theme.completion_style(false));
-
         let selected_index = completion.selected_index as usize;
         let visible_rows = height as usize;
         let start = selected_index
             .saturating_add(1)
             .saturating_sub(visible_rows)
             .min(completion.items.len().saturating_sub(visible_rows));
-        for (screen_index, item) in completion
+        let items = completion
             .items
             .iter()
             .skip(start)
             .take(visible_rows)
-            .enumerate()
-        {
-            let item_index = start + screen_index;
-            let selected = item_index == selected_index;
-            let detail = if item.detail.is_empty() {
-                String::new()
-            } else {
-                format!("  {}", item.detail)
-            };
-            let line = format!(
-                "{} {}{}",
-                completion_kind_marker(item.kind),
-                item.label,
-                detail
-            );
-            self.write_run(
-                row + screen_index as u16,
-                col,
-                &pad_to_width(&line, width),
-                self.theme.completion_style(selected),
-            );
-        }
+            .map(|item| {
+                let detail = if item.detail.is_empty() {
+                    String::new()
+                } else {
+                    format!("  {}", item.detail)
+                };
+                let line = format!(
+                    "{} {}{}",
+                    completion_kind_marker(item.kind),
+                    item.label,
+                    detail
+                );
+                ListItem::new(pad_to_width(&line, width))
+                    .style(ratatui_style_from_cell(self.theme.completion_style(false)))
+            })
+            .collect::<Vec<_>>();
+        let mut state =
+            ListState::default().with_selected(Some(selected_index.saturating_sub(start)));
+        let list = List::new(items)
+            .style(ratatui_style_from_cell(self.theme.completion_style(false)))
+            .highlight_style(ratatui_style_from_cell(self.theme.completion_style(true)));
+
+        let _timer = animation::POPUP_REVEAL.timer();
+        self.render_ratatui_stateful_widget(row, col, width, height, list, &mut state);
     }
 
     fn restore_completion_snapshot(&mut self) {
@@ -862,7 +865,6 @@ impl Renderer {
             self.which_key_snapshot = Some(self.capture_rect(row, col, width, height));
         }
 
-        self.fill_rect(row, col, width, height, self.theme.which_key_style(false));
         let page = if which_key.page_count > 1 {
             format!(
                 "  {}/{}",
@@ -880,25 +882,27 @@ impl Renderer {
             self.theme.which_key_header_style(),
         );
 
-        for (index, binding) in which_key
+        let items = which_key
             .bindings
             .iter()
             .take(height.saturating_sub(1) as usize)
-            .enumerate()
-        {
-            let icon = if binding.icon.is_empty() {
-                if binding.kind == 1 { ">" } else { " " }
-            } else {
-                binding.icon.as_str()
-            };
-            let text = format!(" {icon} {:<8} {}", binding.key, binding.description);
-            self.write_run(
-                row + 1 + index as u16,
-                col,
-                &pad_to_width(&text, width),
-                self.theme.which_key_style(binding.kind == 1),
-            );
-        }
+            .map(|binding| {
+                let icon = if binding.icon.is_empty() {
+                    if binding.kind == 1 { ">" } else { " " }
+                } else {
+                    binding.icon.as_str()
+                };
+                let text = format!(" {icon} {:<8} {}", binding.key, binding.description);
+                ListItem::new(pad_to_width(&text, width)).style(ratatui_style_from_cell(
+                    self.theme.which_key_style(binding.kind == 1),
+                ))
+            })
+            .collect::<Vec<_>>();
+        let list =
+            List::new(items).style(ratatui_style_from_cell(self.theme.which_key_style(false)));
+
+        let _timer = animation::POPUP_REVEAL.timer();
+        self.render_ratatui_widget(row + 1, col, width, height.saturating_sub(1), list);
     }
 
     fn restore_which_key_snapshot(&mut self) {
@@ -1596,6 +1600,41 @@ impl Renderer {
         let area = RatatuiRect::new(0, 0, width, height);
         let mut buffer = RatatuiBuffer::empty(area);
         widget.render(area, &mut buffer);
+
+        for y in 0..height {
+            for x in 0..width {
+                let target_row = row.saturating_add(y);
+                let target_col = col.saturating_add(x);
+                let Some(target_index) = self.index(target_col, target_row) else {
+                    continue;
+                };
+                let Some(source) = buffer.cell((x, y)) else {
+                    continue;
+                };
+                self.cells[target_index] = Cell {
+                    text: source.symbol().to_owned(),
+                    style: cell_style_from_ratatui(source),
+                };
+            }
+        }
+    }
+
+    fn render_ratatui_stateful_widget<W: StatefulWidget>(
+        &mut self,
+        row: u16,
+        col: u16,
+        width: u16,
+        height: u16,
+        widget: W,
+        state: &mut W::State,
+    ) {
+        if width == 0 || height == 0 {
+            return;
+        }
+
+        let area = RatatuiRect::new(0, 0, width, height);
+        let mut buffer = RatatuiBuffer::empty(area);
+        widget.render(area, &mut buffer, state);
 
         for y in 0..height {
             for x in 0..width {

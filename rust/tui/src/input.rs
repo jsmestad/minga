@@ -1,9 +1,7 @@
 use crate::protocol;
+use termwiz::input::{InputEvent as TermwizInputEvent, InputParser, KeyCode, KeyEvent, Modifiers};
 
 const ESC: u8 = 0x1B;
-const PASTE_START: &[u8] = b"\x1b[200~";
-const PASTE_END: &[u8] = b"\x1b[201~";
-
 const ARROW_LEFT: u32 = 57_350;
 const ARROW_RIGHT: u32 = 57_351;
 const ARROW_UP: u32 = 57_352;
@@ -17,239 +15,71 @@ pub enum Event {
 
 #[derive(Debug, Default)]
 pub struct Parser {
-    pending: Vec<u8>,
-    paste: Vec<u8>,
-    in_paste: bool,
+    inner: InputParser,
 }
 
 impl Parser {
     pub fn push(&mut self, bytes: &[u8]) -> Vec<Event> {
-        self.pending.extend_from_slice(bytes);
-        self.drain(false)
+        self.inner
+            .parse_as_vec(bytes, true)
+            .into_iter()
+            .filter_map(map_termwiz_event)
+            .collect()
     }
 
     pub fn flush_escape(&mut self) -> Vec<Event> {
-        self.drain(true)
-    }
-
-    fn drain(&mut self, flush_escape: bool) -> Vec<Event> {
-        let mut events = Vec::new();
-
-        loop {
-            if self.in_paste {
-                match find_bytes(&self.pending, PASTE_END) {
-                    Some(pos) => {
-                        self.paste.extend_from_slice(&self.pending[..pos]);
-                        self.pending.drain(..pos + PASTE_END.len());
-                        if !self.paste.is_empty() {
-                            events.push(Event::Paste(std::mem::take(&mut self.paste)));
-                        }
-                        self.in_paste = false;
-                    }
-                    None => {
-                        let keep = paste_end_prefix_suffix(&self.pending);
-                        let paste_len = self.pending.len().saturating_sub(keep);
-                        self.paste.extend_from_slice(&self.pending[..paste_len]);
-                        self.pending.drain(..paste_len);
-                        break;
-                    }
-                }
-                continue;
-            }
-
-            if self.pending.is_empty() {
-                break;
-            }
-
-            if self.pending.starts_with(PASTE_START) {
-                self.pending.drain(..PASTE_START.len());
-                self.paste.clear();
-                self.in_paste = true;
-                continue;
-            }
-
-            if self.pending[0] == ESC {
-                match parse_escape(&self.pending, flush_escape) {
-                    ParseResult::Event(event, used) => {
-                        self.pending.drain(..used);
-                        events.push(event);
-                    }
-                    ParseResult::NeedMore => break,
-                    ParseResult::Ignore(used) => {
-                        self.pending.drain(..used);
-                    }
-                }
-                continue;
-            }
-
-            let byte = self.pending[0];
-            match std::str::from_utf8(&self.pending) {
-                Ok(text) => {
-                    if let Some(ch) = text.chars().next() {
-                        let len = ch.len_utf8();
-                        self.pending.drain(..len);
-                        events.push(Event::Key {
-                            codepoint: ch as u32,
-                            modifiers: 0,
-                        });
-                    } else {
-                        break;
-                    }
-                }
-                Err(error) if error.valid_up_to() > 0 => {
-                    let valid = error.valid_up_to();
-                    let first = std::str::from_utf8(&self.pending[..valid])
-                        .ok()
-                        .and_then(|text| text.chars().next());
-                    if let Some(ch) = first {
-                        let len = ch.len_utf8();
-                        self.pending.drain(..len);
-                        events.push(Event::Key {
-                            codepoint: ch as u32,
-                            modifiers: 0,
-                        });
-                    } else {
-                        self.pending.drain(..valid);
-                    }
-                }
-                Err(error) if error.error_len().is_none() => break,
-                Err(_) => {
-                    self.pending.drain(..1);
-                    events.push(Event::Key {
-                        codepoint: byte as u32,
-                        modifiers: 0,
-                    });
-                }
-            }
-        }
-
-        events
+        self.inner
+            .parse_as_vec(&[], false)
+            .into_iter()
+            .filter_map(map_termwiz_event)
+            .collect()
     }
 }
 
-enum ParseResult {
-    Event(Event, usize),
-    NeedMore,
-    Ignore(usize),
-}
-
-fn parse_escape(bytes: &[u8], flush_escape: bool) -> ParseResult {
-    if bytes.len() == 1 {
-        if flush_escape {
-            return ParseResult::Event(
-                Event::Key {
-                    codepoint: ESC as u32,
-                    modifiers: 0,
-                },
-                1,
-            );
-        }
-        return ParseResult::NeedMore;
-    }
-
-    match bytes[1] {
-        b'[' => parse_csi(bytes),
-        b'O' => parse_ss3(bytes),
-        _ => ParseResult::Event(
-            Event::Key {
-                codepoint: bytes[1] as u32,
-                modifiers: protocol::MOD_ALT,
-            },
-            2,
-        ),
+fn map_termwiz_event(event: TermwizInputEvent) -> Option<Event> {
+    match event {
+        TermwizInputEvent::Key(key) => map_key_event(key),
+        TermwizInputEvent::Paste(text) => Some(Event::Paste(text.into_bytes())),
+        _ => None,
     }
 }
 
-fn parse_csi(bytes: &[u8]) -> ParseResult {
-    let Some(relative_end) = bytes[2..]
-        .iter()
-        .position(|byte| (0x40..=0x7E).contains(byte))
-    else {
-        return ParseResult::NeedMore;
-    };
-    let end = relative_end + 2;
-    let final_byte = bytes[end];
-    let params = std::str::from_utf8(&bytes[2..end]).unwrap_or("");
-    let modifiers = csi_modifiers(params);
-
-    let codepoint = match final_byte {
-        b'A' => ARROW_UP,
-        b'B' => ARROW_DOWN,
-        b'C' => ARROW_RIGHT,
-        b'D' => ARROW_LEFT,
-        b'~' => match params.split(';').next().unwrap_or("") {
-            "1" | "7" => ARROW_UP,
-            "4" | "8" => ARROW_DOWN,
-            _ => return ParseResult::Ignore(end + 1),
-        },
-        _ => return ParseResult::Ignore(end + 1),
+fn map_key_event(event: KeyEvent) -> Option<Event> {
+    let codepoint = match event.key {
+        KeyCode::Char(ch) => ch as u32,
+        KeyCode::Escape => ESC as u32,
+        KeyCode::Backspace => 127,
+        KeyCode::Enter => 13,
+        KeyCode::Tab => 9,
+        KeyCode::LeftArrow | KeyCode::ApplicationLeftArrow => ARROW_LEFT,
+        KeyCode::RightArrow | KeyCode::ApplicationRightArrow => ARROW_RIGHT,
+        KeyCode::UpArrow | KeyCode::ApplicationUpArrow => ARROW_UP,
+        KeyCode::DownArrow | KeyCode::ApplicationDownArrow => ARROW_DOWN,
+        KeyCode::Home => ARROW_UP,
+        KeyCode::End => ARROW_DOWN,
+        _ => return None,
     };
 
-    ParseResult::Event(
-        Event::Key {
-            codepoint,
-            modifiers,
-        },
-        end + 1,
-    )
+    Some(Event::Key {
+        codepoint,
+        modifiers: map_modifiers(event.modifiers),
+    })
 }
 
-fn parse_ss3(bytes: &[u8]) -> ParseResult {
-    if bytes.len() < 3 {
-        return ParseResult::NeedMore;
-    }
-
-    let codepoint = match bytes[2] {
-        b'A' => ARROW_UP,
-        b'B' => ARROW_DOWN,
-        b'C' => ARROW_RIGHT,
-        b'D' => ARROW_LEFT,
-        _ => return ParseResult::Ignore(3),
-    };
-
-    ParseResult::Event(
-        Event::Key {
-            codepoint,
-            modifiers: 0,
-        },
-        3,
-    )
-}
-
-fn csi_modifiers(params: &str) -> u8 {
-    let raw = params
-        .split(';')
-        .filter_map(|part| part.parse::<u8>().ok())
-        .next_back()
-        .unwrap_or(1);
-    let bits = raw.saturating_sub(1);
+fn map_modifiers(termwiz: Modifiers) -> u8 {
     let mut modifiers = 0;
 
-    if bits & 0x01 != 0 {
+    if termwiz.contains(Modifiers::SHIFT) {
         modifiers |= protocol::MOD_SHIFT;
     }
-    if bits & 0x02 != 0 {
+    if termwiz.contains(Modifiers::ALT) {
         modifiers |= protocol::MOD_ALT;
     }
-    if bits & 0x04 != 0 {
+    if termwiz.contains(Modifiers::CTRL) {
         modifiers |= protocol::MOD_CTRL;
     }
 
     modifiers
-}
-
-fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack
-        .windows(needle.len())
-        .position(|window| window == needle)
-}
-
-fn paste_end_prefix_suffix(bytes: &[u8]) -> usize {
-    let max = bytes.len().min(PASTE_END.len().saturating_sub(1));
-    (1..=max)
-        .rev()
-        .find(|len| bytes[bytes.len() - len..] == PASTE_END[..*len])
-        .unwrap_or(0)
 }
 
 #[cfg(test)]
