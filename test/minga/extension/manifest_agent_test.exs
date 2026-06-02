@@ -18,6 +18,8 @@ defmodule Minga.Extension.ManifestAgentTest do
       slash_command(:deploy, "Deploy current branch", command: "commands/deploy.sh")
       slash_command(:rollback, "Rollback last deploy", command: "commands/rollback.sh")
 
+      agent_ui(id: "note", surface: :transcript_enrichment, payload: {:system, "Ready", :info})
+
       @impl true
       def name, do: :manifest_agent_only
 
@@ -31,7 +33,7 @@ defmodule Minga.Extension.ManifestAgentTest do
       def init(_config), do: {:ok, %{}}
     end
 
-    test "populates all four agent fields" do
+    test "populates all five agent fields" do
       manifest = Manifest.from_module(AgentOnlyExt, :path)
 
       assert manifest.name == :manifest_agent_only
@@ -43,6 +45,7 @@ defmodule Minga.Extension.ManifestAgentTest do
       assert length(manifest.skills) == 2
       assert length(manifest.mcp_servers) == 1
       assert length(manifest.slash_commands) == 2
+      assert length(manifest.agent_ui_metadata) == 1
     end
 
     test "hooks are in declaration order" do
@@ -80,6 +83,14 @@ defmodule Minga.Extension.ManifestAgentTest do
       assert Keyword.get(opts1, :command) == "commands/deploy.sh"
       assert name2 == :rollback
       assert desc2 == "Rollback last deploy"
+    end
+
+    test "agent_ui_metadata includes semantic render-model payloads" do
+      manifest = Manifest.from_module(AgentOnlyExt, :path)
+      assert [metadata] = manifest.agent_ui_metadata
+      assert Keyword.get(metadata, :id) == "note"
+      assert Keyword.get(metadata, :surface) == :transcript_enrichment
+      assert Keyword.get(metadata, :payload) == {:system, "Ready", :info}
     end
 
     test "editor fields are empty for agent-only extension" do
@@ -138,6 +149,7 @@ defmodule Minga.Extension.ManifestAgentTest do
       assert manifest.skills == []
       assert manifest.mcp_servers == []
       assert manifest.slash_commands == []
+      assert manifest.agent_ui_metadata == []
     end
   end
 
@@ -164,6 +176,7 @@ defmodule Minga.Extension.ManifestAgentTest do
       assert manifest.skills == []
       assert manifest.mcp_servers == []
       assert manifest.slash_commands == []
+      assert manifest.agent_ui_metadata == []
     end
 
     test "required fields are still populated" do
@@ -218,6 +231,12 @@ defmodule Minga.Extension.ManifestAgentTest do
       mcp_server(:paired_mcp, command: "servers/paired-mcp")
       slash_command(:paired_slash, "Paired slash", command: "commands/paired.sh")
 
+      agent_ui(
+        id: "paired-note",
+        surface: :transcript_enrichment,
+        payload: {:system, "Paired", :info}
+      )
+
       @impl true
       def name, do: :manifest_paired_agent
 
@@ -243,6 +262,7 @@ defmodule Minga.Extension.ManifestAgentTest do
       assert manifest.skills == []
       assert manifest.mcp_servers == []
       assert manifest.slash_commands == []
+      assert manifest.agent_ui_metadata == []
     end
 
     test "agent manifest has agent fields but no editor fields" do
@@ -252,6 +272,7 @@ defmodule Minga.Extension.ManifestAgentTest do
       assert length(manifest.skills) == 1
       assert length(manifest.mcp_servers) == 1
       assert length(manifest.slash_commands) == 1
+      assert length(manifest.agent_ui_metadata) == 1
 
       assert manifest.commands == []
       assert manifest.keybindings == []
@@ -264,6 +285,7 @@ defmodule Minga.Extension.ManifestAgentTest do
       refute function_exported?(PairedEditorSurface, :__skill_schema__, 0)
       refute function_exported?(PairedEditorSurface, :__mcp_server_schema__, 0)
       refute function_exported?(PairedEditorSurface, :__slash_command_schema__, 0)
+      refute function_exported?(PairedEditorSurface, :__agent_ui_schema__, 0)
     end
 
     test "agent module lacks editor schema functions entirely" do
@@ -331,12 +353,13 @@ defmodule Minga.Extension.ManifestAgentTest do
       assert function_exported?(BareEditorForCompile, :__capability_schema__, 0)
     end
 
-    test "Agent @before_compile generates all five agent schema functions" do
+    test "Agent @before_compile generates all six agent schema functions" do
       assert function_exported?(BareAgentForCompile, :__option_schema__, 0)
       assert function_exported?(BareAgentForCompile, :__hook_schema__, 0)
       assert function_exported?(BareAgentForCompile, :__skill_schema__, 0)
       assert function_exported?(BareAgentForCompile, :__mcp_server_schema__, 0)
       assert function_exported?(BareAgentForCompile, :__slash_command_schema__, 0)
+      assert function_exported?(BareAgentForCompile, :__agent_ui_schema__, 0)
     end
 
     test "Editor @before_compile does not generate agent-specific functions" do
@@ -344,6 +367,7 @@ defmodule Minga.Extension.ManifestAgentTest do
       refute function_exported?(BareEditorForCompile, :__skill_schema__, 0)
       refute function_exported?(BareEditorForCompile, :__mcp_server_schema__, 0)
       refute function_exported?(BareEditorForCompile, :__slash_command_schema__, 0)
+      refute function_exported?(BareEditorForCompile, :__agent_ui_schema__, 0)
     end
 
     test "Agent @before_compile does not generate editor-specific functions" do
@@ -367,6 +391,7 @@ defmodule Minga.Extension.ManifestAgentTest do
       assert BareAgentForCompile.__skill_schema__() == []
       assert BareAgentForCompile.__mcp_server_schema__() == []
       assert BareAgentForCompile.__slash_command_schema__() == []
+      assert BareAgentForCompile.__agent_ui_schema__() == []
     end
   end
 

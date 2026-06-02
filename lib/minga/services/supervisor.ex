@@ -33,6 +33,7 @@ defmodule Minga.Services.Supervisor do
       ├── MingaAgent.MCP.ServerRegistry      Source-owned MCP server declarations
       ├── MingaAgent.Skills.Registry         Source-owned extension skill paths
       ├── MingaEditor.Agent.SlashCommand.Registry Source-owned agent slash commands
+      ├── MingaEditor.Agent.SemanticUI.Registry Source-owned semantic agent UI contributions
       ├── Minga.Extension.Supervisor         DynamicSupervisor for extension processes
       ├── Minga.Config.Loader                Evaluates user config on init
       ├── Minga.Config.Writer                Debounced GUI settings overlay writer
@@ -75,6 +76,7 @@ defmodule Minga.Services.Supervisor do
       MingaAgent.MCP.ServerRegistry,
       MingaAgent.Skills.Registry,
       MingaEditor.Agent.SlashCommand.Registry,
+      MingaEditor.Agent.SemanticUI.Registry,
       Minga.Extension.Supervisor,
       Minga.Config.Loader,
       Minga.Config.Writer,

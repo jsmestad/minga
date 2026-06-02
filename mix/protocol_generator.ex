@@ -673,6 +673,14 @@ defmodule Minga.Mix.ProtocolGenerator do
     |> Enum.sort_by(& &1["value"])
   end
 
+  @spec parser_command_opcodes(schema()) :: [opcode()]
+  defp parser_command_opcodes(schema) do
+    schema
+    |> Map.fetch!("opcodes")
+    |> Enum.filter(&(Map.get(&1, "direction") == "beam_to_parser"))
+    |> Enum.sort_by(& &1["value"])
+  end
+
   @spec opcodes_of_kind([opcode()], term()) :: [opcode()]
   defp opcodes_of_kind(opcodes, kind), do: Enum.filter(opcodes, &(framing_kind(&1) == kind))
 
@@ -987,6 +995,7 @@ defmodule Minga.Mix.ProtocolGenerator do
   @spec swift_command_size_file(schema()) :: String.t()
   defp swift_command_size_file(schema) do
     ops = framing_opcodes(schema)
+    swift_custom_ops = opcodes_of_kind(ops, :custom) ++ parser_command_opcodes(schema)
     cn = &rust_swift_zig_const_name/1
 
     fixed_cases =
@@ -998,6 +1007,11 @@ defmodule Minga.Mix.ProtocolGenerator do
     swift_case = fn kind, call ->
       names = ops |> opcodes_of_kind(kind) |> Enum.map_join(", ", cn)
       "    case #{names}:\n        return #{call}\n"
+    end
+
+    swift_custom_case = fn ->
+      names = Enum.map_join(swift_custom_ops, ", ", cn)
+      "    case #{names}:\n        return .custom\n"
     end
 
     "// Generated protocol command sizing.\n" <>
@@ -1024,7 +1038,7 @@ defmodule Minga.Mix.ProtocolGenerator do
       swift_case.(:len16, "len16CommandSize(payload)") <>
       swift_case.(:len32, "len32CommandSize(payload)") <>
       swift_case.(:sectioned, "sectionedCommandSize(payload)") <>
-      swift_case.(:custom, ".custom") <>
+      swift_custom_case.() <>
       "    default:\n" <>
       "        // Forward-compatibility: opcodes >= 0x90 carry a u16 length prefix.\n" <>
       "        if opcode >= 0x90 { return len16CommandSize(payload) }\n" <>

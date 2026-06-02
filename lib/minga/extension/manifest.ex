@@ -10,6 +10,9 @@ defmodule Minga.Extension.Manifest do
   @typedoc "Declared runtime/UI capabilities in declaration order. Duplicate entries are preserved."
   @type capabilities :: [Extension.capability_spec()]
 
+  @typedoc "Semantic agent UI declaration metadata consumed by the editor-layer registry."
+  @type agent_ui_metadata :: map() | keyword()
+
   @typedoc "How the extension source code is obtained."
   @type source_type :: :path | :git | :hex | :module
 
@@ -45,7 +48,7 @@ defmodule Minga.Extension.Manifest do
           skills: [String.t()],
           mcp_servers: [{atom() | String.t(), keyword()}],
           slash_commands: [{atom() | String.t(), String.t(), keyword()}],
-          agent_ui_metadata: [map()]
+          agent_ui_metadata: [agent_ui_metadata()]
         }
 
   @doc """
@@ -71,7 +74,8 @@ defmodule Minga.Extension.Manifest do
       hooks: safe_schema(module, :__hook_schema__),
       skills: safe_schema(module, :__skill_schema__),
       mcp_servers: safe_schema(module, :__mcp_server_schema__),
-      slash_commands: safe_schema(module, :__slash_command_schema__)
+      slash_commands: safe_schema(module, :__slash_command_schema__),
+      agent_ui_metadata: safe_schema(module, :__agent_ui_schema__)
     }
   end
 

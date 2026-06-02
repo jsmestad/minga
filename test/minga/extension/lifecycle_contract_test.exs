@@ -1910,7 +1910,7 @@ defmodule Minga.Extension.LifecycleContractTest do
 
     Process.exit(pid_a, :kill)
 
-    assert_receive {:stale_monitor_terminal_exit_blocked, monitor_pid}
+    assert_receive {:stale_monitor_terminal_exit_blocked, monitor_pid}, 1_000
 
     restart_log =
       capture_log(fn ->
@@ -1925,14 +1925,14 @@ defmodule Minga.Extension.LifecycleContractTest do
         send(test_pid, {:stale_monitor_restart_result, result})
       end)
 
-    assert_receive {:stale_monitor_restart_result, {:ok, pid_b}}
+    assert_receive {:stale_monitor_restart_result, {:ok, pid_b}}, 1_000
     refute restart_log =~ "redefining module Minga.TestExtensions.StaleMonitorRace"
 
     assert_receive {:telemetry, [:minga, :extension, :lifecycle, :crash_restart_count],
                     %{count: 0}, %{extension: :stale_monitor_race, phase: :crash_restart_count}}
 
     send(monitor_pid, :release_stale_monitor_terminal_exit)
-    assert_receive {:stale_monitor_terminal_exit_released, ^monitor_pid}
+    assert_receive {:stale_monitor_terminal_exit_released, ^monitor_pid}, 1_000
 
     refute_receive {:telemetry, [:minga, :extension, :lifecycle, :crash_restart_count],
                     %{count: 1}, %{extension: :stale_monitor_race, phase: :crash_restart_count}},

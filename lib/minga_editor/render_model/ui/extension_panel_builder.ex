@@ -14,11 +14,17 @@ defmodule MingaEditor.RenderModel.UI.ExtensionPanelBuilder do
   alias Minga.RenderModel.UI.ExtensionPanel.Content.TreeNode
   alias Minga.RenderModel.UI.ExtensionPanel.Content.Unknown
   alias Minga.RenderModel.UI.ExtensionPanel.Panel
+  alias MingaEditor.Agent.SemanticUI.Registry, as: SemanticUIRegistry
 
   @spec build() :: ExtensionPanel.t()
-  def build do
+  def build, do: build(SemanticUIRegistry.default_table())
+
+  @spec build(SemanticUIRegistry.table()) :: ExtensionPanel.t()
+  def build(agent_ui_registry) do
     panels = Minga.Extension.Panel.visible()
-    %ExtensionPanel{panels: Enum.map(panels, &panel_model/1)}
+    extension_panels = Enum.map(panels, &panel_model/1)
+    semantic_panels = SemanticUIRegistry.panels(agent_ui_registry)
+    %ExtensionPanel{panels: extension_panels ++ semantic_panels}
   end
 
   @spec panel_model(Minga.Extension.Panel.entry()) :: Panel.t()

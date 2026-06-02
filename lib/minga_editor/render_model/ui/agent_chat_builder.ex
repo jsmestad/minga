@@ -5,6 +5,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   alias MingaAgent.ToolApproval
   alias MingaAgent.ToolCall
   alias MingaAgent.TurnUsage
+  alias MingaEditor.Agent.SemanticUI.Registry, as: SemanticUIRegistry
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.View.PromptRenderWindow
   alias Minga.Buffer
@@ -53,7 +54,9 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     pending_approval = ctx.shell_state.agent.pending_approval
 
     gui_messages =
-      build_gui_messages(messages_with_ids, panel.cached_styled_messages, pending_approval)
+      messages_with_ids
+      |> build_gui_messages(panel.cached_styled_messages, pending_approval)
+      |> append_transcript_enrichments(SemanticUIRegistry.default_table())
 
     help_visible = view.help_visible
 
@@ -144,6 +147,13 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     AgentSession.messages_with_ids(session)
   catch
     :exit, _ -> []
+  end
+
+  @spec append_transcript_enrichments([{pos_integer(), term()}], SemanticUIRegistry.table()) :: [
+          {pos_integer(), term()}
+        ]
+  defp append_transcript_enrichments(messages, agent_ui_registry) do
+    messages ++ SemanticUIRegistry.transcript_enrichments(agent_ui_registry)
   end
 
   @spec build_gui_messages([{pos_integer(), term()}], [term()] | nil, map() | nil) :: [
