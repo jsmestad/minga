@@ -1656,22 +1656,7 @@ impl Renderer {
         let mut buffer = RatatuiBuffer::empty(area);
         widget.render(area, &mut buffer);
 
-        for y in 0..height {
-            for x in 0..width {
-                let target_row = row.saturating_add(y);
-                let target_col = col.saturating_add(x);
-                let Some(target_index) = self.index(target_col, target_row) else {
-                    continue;
-                };
-                let Some(source) = buffer.cell((x, y)) else {
-                    continue;
-                };
-                self.cells[target_index] = Cell {
-                    text: source.symbol().to_owned(),
-                    style: cell_style_from_ratatui(source),
-                };
-            }
-        }
+        self.copy_ratatui_buffer(row, col, width, height, &buffer);
     }
 
     fn render_ratatui_stateful_widget<W: StatefulWidget>(
@@ -1691,7 +1676,19 @@ impl Renderer {
         let mut buffer = RatatuiBuffer::empty(area);
         widget.render(area, &mut buffer, state);
 
+        self.copy_ratatui_buffer(row, col, width, height, &buffer);
+    }
+
+    fn copy_ratatui_buffer(
+        &mut self,
+        row: u16,
+        col: u16,
+        width: u16,
+        height: u16,
+        buffer: &RatatuiBuffer,
+    ) {
         for y in 0..height {
+            let mut pending_continuations = 0_u16;
             for x in 0..width {
                 let target_row = row.saturating_add(y);
                 let target_col = col.saturating_add(x);
@@ -1701,8 +1698,21 @@ impl Renderer {
                 let Some(source) = buffer.cell((x, y)) else {
                     continue;
                 };
+
+                if pending_continuations > 0 && source.symbol() == " " {
+                    self.cells[target_index] = Cell {
+                        text: String::new(),
+                        style: cell_style_from_ratatui(source),
+                    };
+                    pending_continuations = pending_continuations.saturating_sub(1);
+                    continue;
+                }
+
+                let symbol = source.symbol().to_owned();
+                let symbol_width = text_width(&symbol);
+                pending_continuations = symbol_width.saturating_sub(1);
                 self.cells[target_index] = Cell {
-                    text: source.symbol().to_owned(),
+                    text: symbol,
                     style: cell_style_from_ratatui(source),
                 };
             }
@@ -3319,5 +3329,17 @@ mod tests {
 
         assert_eq!(renderer.previous[renderer.index(0, 0).unwrap()].text, "界");
         assert_eq!(renderer.previous[renderer.index(1, 0).unwrap()].text, "");
+    }
+
+    #[test]
+    fn ratatui_widget_copy_preserves_wide_grapheme_continuation_cells() {
+        let mut renderer = Renderer::new(4, 1);
+        let paragraph = Paragraph::new("界x");
+
+        renderer.render_ratatui_widget(0, 0, 4, 1, paragraph);
+
+        assert_eq!(renderer.cells[renderer.index(0, 0).unwrap()].text, "界");
+        assert_eq!(renderer.cells[renderer.index(1, 0).unwrap()].text, "");
+        assert_eq!(renderer.cells[renderer.index(2, 0).unwrap()].text, "x");
     }
 }
