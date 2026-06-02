@@ -27,7 +27,7 @@ func run() error {
 	}
 	defer tty.Close()
 
-	width, height := terminal.Size()
+	width, height := terminal.Size(tty)
 	if err := protocol.WritePacket(os.Stdout, protocol.EncodeReady(width, height)); err != nil {
 		return err
 	}

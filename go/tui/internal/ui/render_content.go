@@ -2,10 +2,14 @@ package ui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	xansi "github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/cellbuf"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
+	"github.com/rivo/uniseg"
 )
 
 func (m Model) content() string {
@@ -46,25 +50,75 @@ func (m Model) renderRow(row protocol.WindowRow) string {
 }
 
 func (m Model) cellLines() []string {
-	rows := make([][]string, max(m.height-2, 1))
-	for i := range rows {
-		rows[i] = make([]string, max(m.width, 1))
-		for j := range rows[i] {
-			rows[i][j] = " "
-		}
+	buffer := cellbuf.NewBuffer(max(m.width, 1), max(m.height-2, 1))
+	for _, draw := range m.orderedCells() {
+		writeCellText(buffer, int(draw.pos.col), int(draw.pos.row), draw.cell)
 	}
 
-	for pos, cell := range m.cells {
-		if int(pos.row) < len(rows) && int(pos.col) < len(rows[pos.row]) {
-			rows[pos.row][pos.col] = m.styleForEditorSpan(protocol.Span{FG: cell.fg, BG: cell.bg, Attrs: byte(cell.attrs)}).Render(cell.text)
-		}
-	}
-
-	rendered := make([]string, len(rows))
-	for i, row := range rows {
-		rendered[i] = m.editorStyle().Render(fitStyled(strings.Join(row, ""), m.width))
+	rendered := make([]string, buffer.Height())
+	for i := range rendered {
+		_, line := cellbuf.RenderLine(buffer, i)
+		rendered[i] = m.editorStyle().Render(fitStyled(line, m.width))
 	}
 	return rendered
+}
+
+type orderedCell struct {
+	pos  position
+	cell cell
+}
+
+// orderedCells returns the fallback draws sorted by draw-command order. Go map
+// iteration is randomized, so replaying m.cells directly lets a later wide draw
+// (for example a full-row space clear) blank earlier content depending on
+// iteration order. Sorting by seq replays draws in the order they arrived, which
+// keeps overlaps deterministic.
+func (m Model) orderedCells() []orderedCell {
+	draws := make([]orderedCell, 0, len(m.cells))
+	for pos, c := range m.cells {
+		draws = append(draws, orderedCell{pos: pos, cell: c})
+	}
+	sort.Slice(draws, func(i, j int) bool { return draws[i].cell.seq < draws[j].cell.seq })
+	return draws
+}
+
+func writeCellText(buffer *cellbuf.Buffer, col int, row int, fallback cell) {
+	style := cellbufStyle(fallback)
+	graphemes := uniseg.NewGraphemes(fallback.text)
+	for graphemes.Next() {
+		c := cellbuf.NewGraphemeCell(graphemes.Str())
+		c.Style = style
+		if !buffer.SetCell(col, row, c) {
+			return
+		}
+		col += max(c.Width, 1)
+	}
+}
+
+func cellbufStyle(fallback cell) cellbuf.Style {
+	style := cellbuf.Style{}
+	if fallback.fg != 0 {
+		style.Fg = xansi.TrueColor(fallback.fg)
+	}
+	if fallback.bg != 0 {
+		style.Bg = xansi.TrueColor(fallback.bg)
+	}
+	if fallback.attrs&0x01 != 0 {
+		style.Attrs |= cellbuf.BoldAttr
+	}
+	if fallback.attrs&0x02 != 0 {
+		style.UlStyle = cellbuf.SingleUnderline
+	}
+	if fallback.attrs&0x04 != 0 {
+		style.Attrs |= cellbuf.ItalicAttr
+	}
+	if fallback.attrs&0x08 != 0 {
+		style.Attrs |= cellbuf.ReverseAttr
+	}
+	if fallback.attrs&0x10 != 0 {
+		style.Attrs |= cellbuf.StrikethroughAttr
+	}
+	return style
 }
 
 func (m Model) fillBody(lines []string) []string {
