@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Development launcher for Minga with the Rust TUI renderer.
+#
+# Usage:
+#   bin/minga-rust [filename]
+#
+# Equivalent to:
+#   MINGA_TUI_IMPL=rust bin/minga [filename]
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+export MINGA_TUI_IMPL=rust
+
+exec "$SCRIPT_DIR/minga" "$@"

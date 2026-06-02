@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Development launcher for Minga with the Go/Charm TUI renderer.
+#
+# Usage:
+#   bin/minga-go [filename]
+#
+# Equivalent to:
+#   MINGA_TUI_IMPL=go bin/minga [filename]
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+export MINGA_TUI_IMPL=go
+
+exec "$SCRIPT_DIR/minga" "$@"
