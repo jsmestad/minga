@@ -230,7 +230,6 @@ fn tty_file() -> io::Result<File> {
     let path = env::var_os("MINGA_TTY")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/dev/tty"));
-    let _ = writeln!(io::stderr(), "[RUST_TUI/info] tty={path:?}");
     OpenOptions::new().read(true).write(true).open(path)
 }
 
