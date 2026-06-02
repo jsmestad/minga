@@ -10,13 +10,13 @@ import (
 
 func (m Model) content() string {
 	if len(m.windows) > 0 {
-		return strings.Join(m.withFileTree(m.semanticLines()), "\n")
+		return strings.Join(m.fillBody(m.withFileTree(m.semanticLines())), "\n")
 	}
-	return strings.Join(m.withFileTree(m.cellLines()), "\n")
+	return strings.Join(m.fillBody(m.withFileTree(m.cellLines())), "\n")
 }
 
 func (m Model) semanticLines() []string {
-	lines := make([]string, 0, m.height)
+	lines := make([]string, 0, m.bodyHeight())
 	for _, id := range m.windowOrder {
 		window := m.windows[id]
 		for _, row := range window.Rows {
@@ -31,17 +31,18 @@ func (m Model) semanticLines() []string {
 
 func (m Model) renderRow(row protocol.WindowRow) string {
 	if len(row.Spans) == 0 {
-		return row.Text
+		return m.editorStyle().Render(fit(row.Text, m.width))
 	}
 
 	var builder strings.Builder
+	col := 0
 	for _, r := range row.Text {
-		col := displayWidth(builder.String())
 		span := spanAt(row.Spans, uint16(col))
-		style := styleFor(span)
+		style := m.styleForEditorSpan(span)
 		builder.WriteString(style.Render(string(r)))
+		col++
 	}
-	return builder.String()
+	return m.editorStyle().Render(fitStyled(builder.String(), m.width))
 }
 
 func (m Model) cellLines() []string {
@@ -55,15 +56,39 @@ func (m Model) cellLines() []string {
 
 	for pos, cell := range m.cells {
 		if int(pos.row) < len(rows) && int(pos.col) < len(rows[pos.row]) {
-			rows[pos.row][pos.col] = styleFor(protocol.Span{FG: cell.fg, BG: cell.bg, Attrs: byte(cell.attrs)}).Render(cell.text)
+			rows[pos.row][pos.col] = m.styleForEditorSpan(protocol.Span{FG: cell.fg, BG: cell.bg, Attrs: byte(cell.attrs)}).Render(cell.text)
 		}
 	}
 
 	rendered := make([]string, len(rows))
 	for i, row := range rows {
-		rendered[i] = strings.Join(row, "")
+		rendered[i] = m.editorStyle().Render(fitStyled(strings.Join(row, ""), m.width))
 	}
 	return rendered
+}
+
+func (m Model) fillBody(lines []string) []string {
+	height := m.bodyHeight()
+	filled := make([]string, 0, height)
+	for _, line := range lines[:min(len(lines), height)] {
+		filled = append(filled, m.editorStyle().Render(fitStyled(line, m.width)))
+	}
+	for len(filled) < height {
+		filled = append(filled, m.editorStyle().Render(strings.Repeat(" ", max(m.width, 1))))
+	}
+	return filled
+}
+
+func fitStyled(value string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	value = lipgloss.NewStyle().Inline(true).MaxWidth(width).Render(value)
+	visible := lipgloss.Width(value)
+	if visible >= width {
+		return value
+	}
+	return value + strings.Repeat(" ", width-visible)
 }
 
 func (m Model) withFileTree(mainLines []string) []string {
@@ -166,7 +191,30 @@ func spanAt(spans []protocol.Span, col uint16) protocol.Span {
 			return span
 		}
 	}
-	return protocol.Span{FG: 0xFFFFFF}
+	return protocol.Span{}
+}
+
+func (m Model) styleForEditorSpan(span protocol.Span) lipgloss.Style {
+	style := lipgloss.NewStyle().Foreground(m.palette().Text()).Background(m.editorBackground())
+	if span.FG != 0 {
+		style = style.Foreground(lipgloss.Color(fmt.Sprintf("#%06X", span.FG)))
+	}
+	if span.BG != 0 {
+		style = style.Background(lipgloss.Color(fmt.Sprintf("#%06X", span.BG)))
+	}
+	if span.Attrs&0x01 != 0 {
+		style = style.Bold(true)
+	}
+	if span.Attrs&0x02 != 0 {
+		style = style.Italic(true)
+	}
+	if span.Attrs&0x04 != 0 {
+		style = style.Underline(true)
+	}
+	if span.Attrs&0x08 != 0 {
+		style = style.Reverse(true)
+	}
+	return style
 }
 
 func styleFor(span protocol.Span) lipgloss.Style {

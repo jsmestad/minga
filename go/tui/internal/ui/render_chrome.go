@@ -240,9 +240,10 @@ func (m Model) renderPickerWithSidePreview(left []string, preview protocol.Picke
 }
 
 func (m Model) renderPickerPreview(preview protocol.PickerPreview, height int, width int) []string {
-	style := lipgloss.NewStyle().Foreground(lipgloss.Color("#AEB7C2")).Background(lipgloss.Color("#111720")).Width(width)
+	theme := m.palette()
+	style := lipgloss.NewStyle().Foreground(theme.PopupText()).Background(theme.PopupSurface()).Width(width)
 	limit := min(len(preview.Lines), max(height-1, 0))
-	lines := []string{style.Bold(true).Foreground(lipgloss.Color("#C7D1FF")).Render(fit("Preview", width))}
+	lines := []string{style.Bold(true).Foreground(theme.Accent()).Render(fit("Preview", width))}
 	for _, line := range preview.Lines[:limit] {
 		var builder strings.Builder
 		for _, segment := range line.Segments {

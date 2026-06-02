@@ -8,6 +8,7 @@ import (
 )
 
 const (
+	themeEditorBG       byte = 0x01
 	themeEditorFG       byte = 0x02
 	themeTreeBG         byte = 0x03
 	themeTreeFG         byte = 0x04
@@ -20,7 +21,11 @@ const (
 	themeTabInactiveFG  byte = 0x13
 	themeTabModifiedFG  byte = 0x14
 	themeTabAttentionFG byte = 0x17
+	themePopupBG        byte = 0x20
+	themePopupFG        byte = 0x21
+	themePopupBorder    byte = 0x22
 	themePopupSelBG     byte = 0x23
+	themePopupSelFG     byte = 0x2A
 	themeBreadcrumbBG   byte = 0x27
 	themeModelineBG     byte = 0x30
 	themeModelineFG     byte = 0x31
@@ -41,89 +46,120 @@ func paletteFrom(chrome map[byte]protocol.ChromePayload) palette {
 	return palette{}
 }
 
-func (p palette) Base() lipgloss.Color {
-	return p.slot(themeModelineBG, "#16181D")
+func (p palette) Base() lipgloss.TerminalColor {
+	return p.slot(themeModelineBG)
 }
 
-func (p palette) Surface() lipgloss.Color {
-	return p.slot(themeTabBG, "#20242C")
+func (p palette) EditorSurface() lipgloss.TerminalColor {
+	return p.slot(themeEditorBG)
 }
 
-func (p palette) SurfaceAlt() lipgloss.Color {
-	return p.slot(themeBreadcrumbBG, "#171B22")
+func (p palette) Surface() lipgloss.TerminalColor {
+	return p.slot(themeTabBG)
 }
 
-func (p palette) Text() lipgloss.Color {
-	return p.slot(themeEditorFG, "#D8DEE9")
+func (p palette) SurfaceAlt() lipgloss.TerminalColor {
+	return p.slot(themeBreadcrumbBG)
 }
 
-func (p palette) Muted() lipgloss.Color {
-	return p.slot(themeModelineFG, "#9AA4B2")
+func (p palette) Text() lipgloss.TerminalColor {
+	return p.slot(themeEditorFG)
 }
 
-func (p palette) Accent() lipgloss.Color {
-	return p.slot(themeAccent, "#C7D1FF")
+func (p palette) Muted() lipgloss.TerminalColor {
+	return p.slot(themeModelineFG)
 }
 
-func (p palette) Selection() lipgloss.Color {
-	return p.slot(themePopupSelBG, "#2D3A4D")
+func (p palette) Accent() lipgloss.TerminalColor {
+	return p.slot(themeAccent)
 }
 
-func (p palette) Warning() lipgloss.Color {
-	return p.slot(themeWarningFG, "#EBCB8B")
+func (p palette) Selection() lipgloss.TerminalColor {
+	return p.slot(themePopupSelBG)
 }
 
-func (p palette) TreeSurface() lipgloss.Color {
-	return p.slot(themeTreeBG, "#151820")
+func (p palette) SelectionText() lipgloss.TerminalColor {
+	return p.slot(themePopupSelFG)
 }
 
-func (p palette) TreeText() lipgloss.Color {
-	return p.slot(themeTreeFG, "#AEB7C2")
+func (p palette) Warning() lipgloss.TerminalColor {
+	return p.slot(themeWarningFG)
 }
 
-func (p palette) TreeSelection() lipgloss.Color {
-	return p.slot(themeTreeSelectBG, "#2D3A4D")
+func (p palette) TreeSurface() lipgloss.TerminalColor {
+	return p.slot(themeTreeBG)
 }
 
-func (p palette) TreeHeader() lipgloss.Color {
-	return p.slot(themeTreeHeaderBG, "#151820")
+func (p palette) TreeText() lipgloss.TerminalColor {
+	return p.slot(themeTreeFG)
 }
 
-func (p palette) TreeHeaderText() lipgloss.Color {
-	return p.slot(themeTreeHeaderFG, "#C7D1FF")
+func (p palette) TreeSelection() lipgloss.TerminalColor {
+	return p.slot(themeTreeSelectBG)
 }
 
-func (p palette) TabActive() lipgloss.Color {
-	return p.slot(themeTabActiveBG, "#35415A")
+func (p palette) TreeHeader() lipgloss.TerminalColor {
+	return p.slot(themeTreeHeaderBG)
 }
 
-func (p palette) TabActiveText() lipgloss.Color {
-	return p.slot(themeTabActiveFG, "#FFFFFF")
+func (p palette) TreeHeaderText() lipgloss.TerminalColor {
+	return p.slot(themeTreeHeaderFG)
 }
 
-func (p palette) TabInactiveText() lipgloss.Color {
-	return p.slot(themeTabInactiveFG, "#AEB7C2")
+func (p palette) TabActive() lipgloss.TerminalColor {
+	return p.slot(themeTabActiveBG)
 }
 
-func (p palette) TabDirty() lipgloss.Color {
-	return p.slot(themeTabModifiedFG, "#EBCB8B")
+func (p palette) TabActiveText() lipgloss.TerminalColor {
+	return p.slot(themeTabActiveFG)
 }
 
-func (p palette) TabAttention() lipgloss.Color {
-	return p.slot(themeTabAttentionFG, "#EBCB8B")
+func (p palette) TabInactiveText() lipgloss.TerminalColor {
+	return p.slot(themeTabInactiveFG)
 }
 
-func (p palette) slot(slot byte, fallback string) lipgloss.Color {
+func (p palette) TabDirty() lipgloss.TerminalColor {
+	return p.slot(themeTabModifiedFG)
+}
+
+func (p palette) TabAttention() lipgloss.TerminalColor {
+	return p.slot(themeTabAttentionFG)
+}
+
+func (p palette) PopupSurface() lipgloss.TerminalColor {
+	return p.slot(themePopupBG)
+}
+
+func (p palette) PopupText() lipgloss.TerminalColor {
+	return p.slot(themePopupFG)
+}
+
+func (p palette) PopupBorder() lipgloss.TerminalColor {
+	return p.slot(themePopupBorder)
+}
+
+func (p palette) slot(slot byte) lipgloss.TerminalColor {
 	if p.colors != nil {
 		if rgb, ok := p.colors[slot]; ok {
 			return lipgloss.Color(fmt.Sprintf("#%06X", rgb))
 		}
 	}
-	return lipgloss.Color(fallback)
+	return lipgloss.NoColor{}
 }
 
 func (m Model) palette() palette {
 	return paletteFrom(m.chrome)
+}
+
+func (m Model) editorBackground() lipgloss.TerminalColor {
+	if m.bg != 0 {
+		return lipgloss.Color(fmt.Sprintf("#%06X", m.bg))
+	}
+	return m.palette().EditorSurface()
+}
+
+func (m Model) editorStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(m.palette().Text()).Background(m.editorBackground()).Width(m.width)
 }
 
 func (m Model) panelStyle() lipgloss.Style {
