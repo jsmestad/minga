@@ -419,6 +419,7 @@ defmodule MingaAgent.Providers.Native do
     }
 
     Minga.Events.subscribe(:agent_mcp_servers_changed)
+    Minga.Events.subscribe(:agent_tools_changed)
     Minga.Log.info(:agent, "[Agent.Native] started with model=#{model} root=#{project_root}")
 
     {:ok, state}
@@ -957,8 +958,15 @@ defmodule MingaAgent.Providers.Native do
   end
 
   def handle_call({:refresh_project_view, project_view}, _from, state) do
-    base_tools = refresh_base_tools(state, project_view)
-    tools = base_tools ++ state.mcp_tools ++ state.internal_tools
+    base_tools =
+      state
+      |> refresh_base_tools(project_view)
+      |> filter_base_tools_for_read_only(state.read_only?)
+
+    tools =
+      (base_tools ++ state.mcp_tools ++ state.internal_tools)
+      |> filter_tool_allowlist(state.tool_allowlist)
+
     {:reply, :ok, %{state | project_view: project_view, base_tools: base_tools, tools: tools}}
   end
 
@@ -1003,6 +1011,10 @@ defmodule MingaAgent.Providers.Native do
   @impl GenServer
   def handle_info({:minga_event, :agent_mcp_servers_changed, _payload}, state) do
     {:noreply, refresh_mcp_contributions(state)}
+  end
+
+  def handle_info({:minga_event, :agent_tools_changed, _payload}, state) do
+    {:noreply, refresh_tool_registry_contributions(state)}
   end
 
   def handle_info({:agent_event, event}, state) do
@@ -2817,6 +2829,22 @@ defmodule MingaAgent.Providers.Native do
   @spec summary_client(llm_client(), AgentConfig.t()) :: Compaction.summary_fn()
   defp summary_client(llm_client, config) do
     ReqLLMAdapter.summary_client(llm_client, config)
+  end
+
+  @spec refresh_tool_registry_contributions(state()) :: state()
+  defp refresh_tool_registry_contributions(%{custom_tools?: true} = state), do: state
+
+  defp refresh_tool_registry_contributions(state) do
+    base_tools =
+      state
+      |> refresh_base_tools(state.project_view)
+      |> filter_base_tools_for_read_only(state.read_only?)
+
+    tools =
+      (base_tools ++ state.mcp_tools ++ state.internal_tools)
+      |> filter_tool_allowlist(state.tool_allowlist)
+
+    %{state | base_tools: base_tools, tools: tools}
   end
 
   @spec refresh_base_tools(state(), ProjectView.t() | nil) :: [ReqLLM.Tool.t()]

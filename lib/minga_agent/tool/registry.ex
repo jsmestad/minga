@@ -63,7 +63,9 @@ defmodule MingaAgent.Tool.Registry do
     if registry_process?(table) do
       GenServer.call(table, {:unregister_source, source})
     else
-      unregister_source_direct(table, source)
+      result = unregister_source_direct(table, source)
+      emit_direct_change(table, source)
+      result
     end
   catch
     :exit, {:noproc, _} -> :ok
@@ -129,7 +131,9 @@ defmodule MingaAgent.Tool.Registry do
   end
 
   def handle_call({:unregister_source, source}, _from, table) do
-    {:reply, unregister_source_direct(table, source), table}
+    result = unregister_source_direct(table, source)
+    emit_change(table, source)
+    {:reply, result, table}
   end
 
   @doc "Converts a `ReqLLM.Tool` struct to a config-owned `MingaAgent.Tool.Spec`."
@@ -191,6 +195,7 @@ defmodule MingaAgent.Tool.Registry do
     case registration_allowed?(table, spec) do
       :ok ->
         :ets.insert(table, {spec.name, spec})
+        emit_direct_change(table, spec.source)
         :ok
 
       {:error, _reason} = error ->
@@ -227,6 +232,19 @@ defmodule MingaAgent.Tool.Registry do
       :ok = register(table, spec)
     end)
   end
+
+  @spec emit_direct_change(atom(), source()) :: :ok
+  defp emit_direct_change(@table, source), do: emit_change(@table, source)
+  defp emit_direct_change(_table, _source), do: :ok
+
+  @spec emit_change(atom(), source()) :: :ok
+  defp emit_change(@table, source) do
+    Minga.Events.broadcast(:agent_tools_changed, %Minga.Events.AgentToolsChangedEvent{
+      source: source
+    })
+  end
+
+  defp emit_change(_table, _source), do: :ok
 
   @spec maybe_register_cleanup_callback(atom()) :: :ok
   defp maybe_register_cleanup_callback(@table) do
