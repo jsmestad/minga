@@ -2408,7 +2408,18 @@ mod tests {
     fn overlay_delta_without_cursorline() {
         let bytes = [
             opcodes::OP_GUI_WINDOW_OVERLAY_DELTA,
-            0, 1, 0, 0, 0, 2, 0x00, 0, 5, 0, 3, 1,
+            0,
+            1,
+            0,
+            0,
+            0,
+            2,
+            0x00,
+            0,
+            5,
+            0,
+            3,
+            1,
         ];
 
         let command = decode(&bytes).unwrap();
@@ -2421,8 +2432,23 @@ mod tests {
         let packet = [
             vec![
                 opcodes::OP_GUI_WINDOW_OVERLAY_DELTA,
-                0, 1, 0, 0, 0, 2, 0x02, 0, 5, 0, 3, 1,
-                0, 4, 0x2d, 0x2d, 0x3f,
+                0,
+                1,
+                0,
+                0,
+                0,
+                2,
+                0x02,
+                0,
+                5,
+                0,
+                3,
+                1,
+                0,
+                4,
+                0x2d,
+                0x2d,
+                0x3f,
             ],
             vec![opcodes::OP_GUI_THEME, 0],
         ]

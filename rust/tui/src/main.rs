@@ -188,7 +188,10 @@ fn handle_packet(
         let command = match protocol::decode_command(&packet[offset..]) {
             Ok(command) => command,
             Err(error) => {
-                log_warn(output, &format!("protocol decode error at {offset}: {error}"));
+                log_warn(
+                    output,
+                    &format!("protocol decode error at {offset}: {error}"),
+                );
                 break;
             }
         };
@@ -204,11 +207,17 @@ fn handle_packet(
 }
 
 fn log_info(output: &mut impl Write, msg: &str) {
-    let _ = protocol::write_packet(output, &protocol::encode_log_message(protocol::LOG_LEVEL_INFO, msg));
+    let _ = protocol::write_packet(
+        output,
+        &protocol::encode_log_message(protocol::LOG_LEVEL_INFO, msg),
+    );
 }
 
 fn log_warn(output: &mut impl Write, msg: &str) {
-    let _ = protocol::write_packet(output, &protocol::encode_log_message(protocol::LOG_LEVEL_WARN, msg));
+    let _ = protocol::write_packet(
+        output,
+        &protocol::encode_log_message(protocol::LOG_LEVEL_WARN, msg),
+    );
 }
 
 fn write_input_event(event: input::Event, output: &mut impl Write) -> io::Result<()> {
