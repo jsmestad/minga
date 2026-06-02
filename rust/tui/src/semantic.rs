@@ -24,6 +24,12 @@ pub enum Command {
     ChangeSummary(ChangeSummary, usize),
     GitStatus(GitStatus, usize),
     Theme(Theme, usize),
+    Gutter(Gutter, usize),
+    Cursorline(Cursorline, usize),
+    GutterSeparator(GutterSeparator, usize),
+    SplitSeparators(SplitSeparators, usize),
+    IndentGuides(IndentGuides, usize),
+    WindowOverlayDelta(WindowOverlayDelta, usize),
     Unsupported { opcode: u8, size: usize },
 }
 
@@ -48,6 +54,12 @@ impl Command {
             Self::ChangeSummary(_, size) => *size,
             Self::GitStatus(_, size) => *size,
             Self::Theme(_, size) => *size,
+            Self::Gutter(_, size) => *size,
+            Self::Cursorline(_, size) => *size,
+            Self::GutterSeparator(_, size) => *size,
+            Self::SplitSeparators(_, size) => *size,
+            Self::IndentGuides(_, size) => *size,
+            Self::WindowOverlayDelta(_, size) => *size,
             Self::Unsupported { size, .. } => *size,
         }
     }
@@ -55,12 +67,15 @@ impl Command {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WindowContent {
+    pub window_id: u16,
     pub origin_row: u16,
     pub origin_col: u16,
     pub cursor_row: u16,
     pub cursor_col: u16,
     pub cursor_shape: u8,
+    pub content_epoch: u32,
     pub rows: Vec<Row>,
+    pub cursorline: Option<Cursorline>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -378,6 +393,85 @@ pub struct ThemeSlot {
     pub rgb: u32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Gutter {
+    pub window_id: u16,
+    pub content_row: u16,
+    pub content_col: u16,
+    pub content_height: u16,
+    pub is_active: bool,
+    pub content_width: u16,
+    pub cursor_line: u32,
+    pub line_number_style: u8,
+    pub line_number_width: u8,
+    pub sign_col_width: u8,
+    pub entries: Vec<GutterEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GutterEntry {
+    pub buf_line: u32,
+    pub display_type: u8,
+    pub sign_type: u8,
+    pub fold_end_line: u32,
+    pub sign_fg: u32,
+    pub sign_text: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Cursorline {
+    pub row: u16,
+    pub bg: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GutterSeparator {
+    pub col: u16,
+    pub color: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SplitSeparators {
+    pub color: u32,
+    pub verticals: Vec<VerticalSeparator>,
+    pub horizontals: Vec<HorizontalSeparator>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VerticalSeparator {
+    pub col: u16,
+    pub start_row: u16,
+    pub end_row: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HorizontalSeparator {
+    pub row: u16,
+    pub col: u16,
+    pub width: u16,
+    pub filename: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct IndentGuides {
+    pub window_id: u16,
+    pub tab_width: u8,
+    pub active_guide_col: u16,
+    pub guide_cols: Vec<u16>,
+    pub line_indent_levels: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WindowOverlayDelta {
+    pub window_id: u16,
+    pub content_epoch: u32,
+    pub cursor_visible: bool,
+    pub cursor_row: u16,
+    pub cursor_col: u16,
+    pub cursor_shape: u8,
+    pub cursorline: Option<Cursorline>,
+}
+
 pub fn decode(bytes: &[u8]) -> Result<Command, DecodeError> {
     let opcode = *bytes.first().ok_or(DecodeError::Empty)?;
 
@@ -400,15 +494,17 @@ pub fn decode(bytes: &[u8]) -> Result<Command, DecodeError> {
         opcodes::OP_GUI_CHANGE_SUMMARY => decode_change_summary(bytes),
         opcodes::OP_GUI_GIT_STATUS => decode_git_status(bytes),
         opcodes::OP_GUI_THEME => decode_theme(bytes),
+        opcodes::OP_GUI_GUTTER => decode_gutter(bytes),
+        opcodes::OP_GUI_CURSORLINE => decode_cursorline(bytes),
+        opcodes::OP_GUI_GUTTER_SEP => decode_gutter_separator(bytes),
+        opcodes::OP_GUI_SPLIT_SEPARATORS => decode_split_separators(bytes),
+        opcodes::OP_GUI_INDENT_GUIDES => decode_indent_guides(bytes),
+        opcodes::OP_GUI_WINDOW_OVERLAY_DELTA => decode_window_overlay_delta(bytes),
         opcodes::OP_GUI_WINDOW_VIEWPORT_DELTA
         | opcodes::OP_GUI_WINDOW_ROWS_DELTA
-        | opcodes::OP_GUI_WINDOW_OVERLAY_DELTA
-        | opcodes::OP_GUI_GUTTER
-        | opcodes::OP_GUI_CURSORLINE
         | opcodes::OP_CLIPBOARD_WRITE
         | opcodes::OP_GUI_LINE_SPACING
         | opcodes::OP_GUI_CURSOR_ANIMATION
-        | opcodes::OP_GUI_INDENT_GUIDES
         | opcodes::OP_GUI_HOVER_ACTION
         | opcodes::OP_GUI_WORKSPACES
         | opcodes::OP_GUI_NOTIFICATIONS
@@ -419,8 +515,6 @@ pub fn decode(bytes: &[u8]) -> Result<Command, DecodeError> {
         | opcodes::OP_GUI_CONFIG_STATE
         | opcodes::OP_GUI_OBSERVATORY
         | opcodes::OP_GUI_SIDEBARS
-        | opcodes::OP_GUI_GUTTER_SEP
-        | opcodes::OP_GUI_SPLIT_SEPARATORS
         | opcodes::OP_GUI_AGENT_CONTEXT
         | opcodes::OP_GUI_BOARD
         | opcodes::OP_GUI_AGENT_CHAT
@@ -446,38 +540,50 @@ fn semantic_size(bytes: &[u8]) -> Result<usize, DecodeError> {
 fn decode_window_content(bytes: &[u8]) -> Result<Command, DecodeError> {
     let size = semantic_size(bytes)?;
     let sections = sections(&bytes[..size])?;
+    let mut window_id = 0;
     let mut cursor_row = 0;
     let mut cursor_col = 0;
     let mut cursor_shape = 0;
     let mut origin_row = 0;
     let mut origin_col = 0;
+    let mut content_epoch = 0;
     let mut rows = Vec::new();
+    let mut cursorline = None;
 
     for (section_id, payload) in sections {
         match section_id {
             0x01 => {
                 require_len(payload, 14, "window content header")?;
+                window_id = read_u16(payload, 0);
                 cursor_row = read_u16(payload, 3);
                 cursor_col = read_u16(payload, 5);
                 cursor_shape = payload[7];
+                content_epoch = read_u32(payload, 10);
             }
             0x02 => rows = decode_rows(payload)?,
             0x08 if payload.len() >= 26 => {
                 origin_row = read_u16(payload, 18);
                 origin_col = read_u16(payload, 20);
             }
+            0x09 => cursorline = Some(decode_cursorline_payload(payload)?),
             _ => {}
         }
     }
 
     Ok(Command::WindowContent(
         WindowContent {
+            window_id,
             origin_row,
             origin_col,
             cursor_row,
             cursor_col,
             cursor_shape,
+            content_epoch,
             rows,
+            cursorline: cursorline.map(|line| Cursorline {
+                row: origin_row.saturating_add(line.row),
+                bg: line.bg,
+            }),
         },
         size,
     ))
@@ -1282,6 +1388,228 @@ fn decode_theme(bytes: &[u8]) -> Result<Command, DecodeError> {
     Ok(Command::Theme(Theme { slots }, size))
 }
 
+fn decode_gutter(bytes: &[u8]) -> Result<Command, DecodeError> {
+    let size = semantic_size(bytes)?;
+    let sections = sections(&bytes[..size])?;
+    let mut gutter = Gutter::default();
+
+    for (section_id, payload) in sections {
+        match section_id {
+            0x01 => {
+                require_len(payload, 11, "gutter window")?;
+                gutter.window_id = read_u16(payload, 0);
+                gutter.content_row = read_u16(payload, 2);
+                gutter.content_col = read_u16(payload, 4);
+                gutter.content_height = read_u16(payload, 6);
+                gutter.is_active = payload[8] != 0;
+                gutter.content_width = read_u16(payload, 9);
+            }
+            0x02 => {
+                require_len(payload, 7, "gutter config")?;
+                gutter.cursor_line = read_u32(payload, 0);
+                gutter.line_number_style = payload[4];
+                gutter.line_number_width = payload[5];
+                gutter.sign_col_width = payload[6];
+            }
+            0x03 => gutter.entries = decode_gutter_entries(payload)?,
+            _ => {}
+        }
+    }
+
+    Ok(Command::Gutter(gutter, size))
+}
+
+fn decode_gutter_entries(bytes: &[u8]) -> Result<Vec<GutterEntry>, DecodeError> {
+    require_len(bytes, 2, "gutter entry count")?;
+    let count = read_u16(bytes, 0) as usize;
+    let mut offset = 2;
+    let mut entries = Vec::with_capacity(count);
+
+    for _ in 0..count {
+        require_len(bytes, offset + 10, "gutter entry")?;
+        let buf_line = read_u32(bytes, offset);
+        let display_type = bytes[offset + 4];
+        let sign_type = bytes[offset + 5];
+        let fold_end_line = read_u32(bytes, offset + 6);
+        offset += 10;
+        let (sign_fg, sign_text) = if sign_type == 8 {
+            require_len(bytes, offset + 4, "gutter annotation")?;
+            let fg = read_u24(bytes, offset);
+            let len = bytes[offset + 3] as usize;
+            offset += 4;
+            let text = read_string(bytes, offset, len)?;
+            offset += len;
+            (fg, text)
+        } else {
+            (0, String::new())
+        };
+
+        entries.push(GutterEntry {
+            buf_line,
+            display_type,
+            sign_type,
+            fold_end_line,
+            sign_fg,
+            sign_text,
+        });
+    }
+
+    Ok(entries)
+}
+
+fn decode_cursorline(bytes: &[u8]) -> Result<Command, DecodeError> {
+    let size = semantic_size(bytes)?;
+    require_len(bytes, 6, "cursorline")?;
+    Ok(Command::Cursorline(
+        Cursorline {
+            row: read_u16(bytes, 1),
+            bg: read_u24(bytes, 3),
+        },
+        size,
+    ))
+}
+
+fn decode_cursorline_payload(payload: &[u8]) -> Result<Cursorline, DecodeError> {
+    require_len(payload, 5, "cursorline payload")?;
+    Ok(Cursorline {
+        row: read_u16(payload, 0),
+        bg: read_u24(payload, 2),
+    })
+}
+
+fn decode_gutter_separator(bytes: &[u8]) -> Result<Command, DecodeError> {
+    let size = semantic_size(bytes)?;
+    require_len(bytes, 6, "gutter separator")?;
+    Ok(Command::GutterSeparator(
+        GutterSeparator {
+            col: read_u16(bytes, 1),
+            color: read_u24(bytes, 3),
+        },
+        size,
+    ))
+}
+
+fn decode_split_separators(bytes: &[u8]) -> Result<Command, DecodeError> {
+    let size = semantic_size(bytes)?;
+    require_len(bytes, 5, "split separators")?;
+    let color = read_u24(bytes, 1);
+    let vertical_count = bytes[4] as usize;
+    let mut offset = 5;
+    let mut verticals = Vec::with_capacity(vertical_count);
+
+    for _ in 0..vertical_count {
+        require_len(bytes, offset + 6, "split vertical")?;
+        verticals.push(VerticalSeparator {
+            col: read_u16(bytes, offset),
+            start_row: read_u16(bytes, offset + 2),
+            end_row: read_u16(bytes, offset + 4),
+        });
+        offset += 6;
+    }
+
+    require_len(bytes, offset + 1, "split horizontal count")?;
+    let horizontal_count = bytes[offset] as usize;
+    offset += 1;
+    let mut horizontals = Vec::with_capacity(horizontal_count);
+
+    for _ in 0..horizontal_count {
+        require_len(bytes, offset + 8, "split horizontal")?;
+        let row = read_u16(bytes, offset);
+        let col = read_u16(bytes, offset + 2);
+        let width = read_u16(bytes, offset + 4);
+        let len = read_u16(bytes, offset + 6) as usize;
+        offset += 8;
+        let filename = read_string(bytes, offset, len)?;
+        offset += len;
+        horizontals.push(HorizontalSeparator {
+            row,
+            col,
+            width,
+            filename,
+        });
+    }
+
+    Ok(Command::SplitSeparators(
+        SplitSeparators {
+            color,
+            verticals,
+            horizontals,
+        },
+        size,
+    ))
+}
+
+fn decode_indent_guides(bytes: &[u8]) -> Result<Command, DecodeError> {
+    let size = semantic_size(bytes)?;
+    require_len(bytes, 8, "indent guides")?;
+    let payload_len = read_u16(bytes, 1) as usize;
+    require_len(bytes, 3 + payload_len, "indent guides payload")?;
+    let mut offset = 3;
+    let window_id = read_u16(bytes, offset);
+    let tab_width = bytes[offset + 2];
+    let active_guide_col = read_u16(bytes, offset + 3);
+    let guide_count = bytes[offset + 5] as usize;
+    offset += 6;
+    if guide_count == 0 && payload_len == 6 {
+        return Ok(Command::IndentGuides(
+            IndentGuides {
+                window_id,
+                tab_width,
+                active_guide_col,
+                guide_cols: Vec::new(),
+                line_indent_levels: Vec::new(),
+            },
+            size,
+        ));
+    }
+
+    require_len(bytes, offset + guide_count * 2 + 2, "indent guide columns")?;
+    let mut guide_cols = Vec::with_capacity(guide_count);
+    for _ in 0..guide_count {
+        guide_cols.push(read_u16(bytes, offset));
+        offset += 2;
+    }
+    let line_count = read_u16(bytes, offset) as usize;
+    offset += 2;
+    require_len(bytes, offset + line_count, "indent guide line levels")?;
+    let line_indent_levels = bytes[offset..offset + line_count].to_vec();
+
+    Ok(Command::IndentGuides(
+        IndentGuides {
+            window_id,
+            tab_width,
+            active_guide_col,
+            guide_cols,
+            line_indent_levels,
+        },
+        size,
+    ))
+}
+
+fn decode_window_overlay_delta(bytes: &[u8]) -> Result<Command, DecodeError> {
+    let size = semantic_size(bytes)?;
+    require_len(bytes, 13, "window overlay delta")?;
+    let flags = bytes[7];
+    let cursorline = if flags & 0x02 != 0 {
+        Some(decode_cursorline_payload(&bytes[13..size])?)
+    } else {
+        None
+    };
+
+    Ok(Command::WindowOverlayDelta(
+        WindowOverlayDelta {
+            window_id: read_u16(bytes, 1),
+            content_epoch: read_u32(bytes, 3),
+            cursor_visible: flags & 0x01 != 0,
+            cursor_row: read_u16(bytes, 8),
+            cursor_col: read_u16(bytes, 10),
+            cursor_shape: bytes[12],
+            cursorline,
+        },
+        size,
+    ))
+}
+
 fn decode_file_tree_row(bytes: &[u8]) -> Result<(FileTreeRow, usize), DecodeError> {
     require_len(bytes, 17, "file tree row header")?;
     let flags = read_u16(bytes, 4);
@@ -1822,12 +2150,15 @@ mod tests {
         assert!(matches!(
             command,
             Command::WindowContent(WindowContent {
+                window_id: 1,
                 origin_row: 0,
                 origin_col: 0,
                 cursor_row: 4,
                 cursor_col: 5,
                 cursor_shape: 2,
+                content_epoch: 7,
                 rows,
+                ..
             }, _) if rows[0].text == "hi" && rows[0].spans[0].fg == 0xAABBCC
         ));
     }
@@ -2324,6 +2655,239 @@ mod tests {
     }
 
     #[test]
+    fn decodes_editor_chrome_without_consuming_following_commands() {
+        fn assert_theme_tail(packet: &[u8], size: usize) {
+            assert_eq!(size, packet.len() - 2);
+            assert!(matches!(
+                decode(&packet[size..]).unwrap(),
+                Command::Theme(Theme { slots }, _) if slots.is_empty()
+            ));
+        }
+
+        let gutter = [
+            vec![opcodes::OP_GUI_GUTTER, 3],
+            section(0x01, &[0, 1, 0, 2, 0, 3, 0, 4, 1, 0, 5]),
+            section(0x02, &[0, 0, 0, 12, 0, 3, 1]),
+            section(
+                0x03,
+                &[
+                    0, 1, 0, 0, 0, 12, 0, 8, 0, 0, 0, 0, 0x11, 0x22, 0x33, 1, b'!',
+                ],
+            ),
+        ]
+        .concat();
+        let packet = [gutter, vec![opcodes::OP_GUI_THEME, 0]].concat();
+        let size = semantic_size(&packet).unwrap();
+        match decode(&packet).unwrap() {
+            Command::Gutter(
+                Gutter {
+                    window_id,
+                    content_row,
+                    content_col,
+                    content_height,
+                    is_active,
+                    content_width,
+                    cursor_line,
+                    line_number_style,
+                    line_number_width,
+                    sign_col_width,
+                    entries,
+                },
+                _,
+            ) => {
+                assert_eq!(window_id, 1);
+                assert_eq!(content_row, 2);
+                assert_eq!(content_col, 3);
+                assert_eq!(content_height, 4);
+                assert!(is_active);
+                assert_eq!(content_width, 5);
+                assert_eq!(cursor_line, 12);
+                assert_eq!(line_number_style, 0);
+                assert_eq!(line_number_width, 3);
+                assert_eq!(sign_col_width, 1);
+                assert_eq!(entries.len(), 1);
+                assert_eq!(entries[0].buf_line, 12);
+                assert_eq!(entries[0].sign_type, 8);
+                assert_eq!(entries[0].sign_fg, 0x112233);
+                assert_eq!(entries[0].sign_text, "!");
+            }
+            other => panic!("expected gutter command, got {other:?}"),
+        }
+        assert_theme_tail(&packet, size);
+
+        let packet = [
+            vec![opcodes::OP_GUI_CURSORLINE, 0, 9, 0x11, 0x22, 0x33],
+            vec![opcodes::OP_GUI_THEME, 0],
+        ]
+        .concat();
+        let size = semantic_size(&packet).unwrap();
+        match decode(&packet).unwrap() {
+            Command::Cursorline(Cursorline { row, bg }, _) => {
+                assert_eq!(row, 9);
+                assert_eq!(bg, 0x112233);
+            }
+            other => panic!("expected cursorline command, got {other:?}"),
+        }
+        assert_theme_tail(&packet, size);
+
+        let packet = [
+            vec![opcodes::OP_GUI_GUTTER_SEP, 0, 6, 0x44, 0x55, 0x66],
+            vec![opcodes::OP_GUI_THEME, 0],
+        ]
+        .concat();
+        let size = semantic_size(&packet).unwrap();
+        match decode(&packet).unwrap() {
+            Command::GutterSeparator(GutterSeparator { col, color }, _) => {
+                assert_eq!(col, 6);
+                assert_eq!(color, 0x445566);
+            }
+            other => panic!("expected gutter separator command, got {other:?}"),
+        }
+        assert_theme_tail(&packet, size);
+
+        let packet = [
+            vec![opcodes::OP_GUI_SPLIT_SEPARATORS, 0x11, 0x22, 0x33, 1],
+            vec![0, 2, 0, 1, 0, 3],
+            vec![1, 0, 4, 0, 2, 0, 6, 0, 3],
+            b"tab".to_vec(),
+            vec![opcodes::OP_GUI_THEME, 0],
+        ]
+        .concat();
+        let size = semantic_size(&packet).unwrap();
+        match decode(&packet).unwrap() {
+            Command::SplitSeparators(
+                SplitSeparators {
+                    color,
+                    verticals,
+                    horizontals,
+                },
+                _,
+            ) => {
+                assert_eq!(color, 0x112233);
+                assert_eq!(
+                    verticals,
+                    vec![VerticalSeparator {
+                        col: 2,
+                        start_row: 1,
+                        end_row: 3
+                    }]
+                );
+                assert_eq!(
+                    horizontals,
+                    vec![HorizontalSeparator {
+                        row: 4,
+                        col: 2,
+                        width: 6,
+                        filename: "tab".to_owned(),
+                    }]
+                );
+            }
+            other => panic!("expected split separators command, got {other:?}"),
+        }
+        assert_theme_tail(&packet, size);
+
+        let packet = [
+            vec![
+                opcodes::OP_GUI_INDENT_GUIDES,
+                0,
+                14,
+                0,
+                1,
+                2,
+                0,
+                2,
+                2,
+                0,
+                2,
+                0,
+                4,
+                0,
+                2,
+                1,
+                2,
+            ],
+            vec![opcodes::OP_GUI_THEME, 0],
+        ]
+        .concat();
+        let size = semantic_size(&packet).unwrap();
+        match decode(&packet).unwrap() {
+            Command::IndentGuides(
+                IndentGuides {
+                    window_id,
+                    tab_width,
+                    active_guide_col,
+                    guide_cols,
+                    line_indent_levels,
+                },
+                _,
+            ) => {
+                assert_eq!(window_id, 1);
+                assert_eq!(tab_width, 2);
+                assert_eq!(active_guide_col, 2);
+                assert_eq!(guide_cols, vec![2, 4]);
+                assert_eq!(line_indent_levels, vec![1, 2]);
+            }
+            other => panic!("expected indent guides command, got {other:?}"),
+        }
+        assert_theme_tail(&packet, size);
+
+        let packet = [
+            vec![
+                opcodes::OP_GUI_WINDOW_OVERLAY_DELTA,
+                0,
+                1,
+                0,
+                0,
+                0,
+                7,
+                3,
+                0,
+                2,
+                0,
+                5,
+                1,
+                0,
+                2,
+                0xAA,
+                0xBB,
+                0xCC,
+            ],
+            vec![opcodes::OP_GUI_THEME, 0],
+        ]
+        .concat();
+        let size = semantic_size(&packet).unwrap();
+        match decode(&packet).unwrap() {
+            Command::WindowOverlayDelta(
+                WindowOverlayDelta {
+                    window_id,
+                    content_epoch,
+                    cursor_visible,
+                    cursor_row,
+                    cursor_col,
+                    cursor_shape,
+                    cursorline,
+                },
+                _,
+            ) => {
+                assert_eq!(window_id, 1);
+                assert_eq!(content_epoch, 7);
+                assert!(cursor_visible);
+                assert_eq!(cursor_row, 2);
+                assert_eq!(cursor_col, 5);
+                assert_eq!(cursor_shape, 1);
+                assert_eq!(
+                    cursorline,
+                    Some(Cursorline {
+                        row: 2,
+                        bg: 0xAABBCC
+                    })
+                );
+            }
+            other => panic!("expected overlay delta command, got {other:?}"),
+        }
+        assert_theme_tail(&packet, size);
+    }
+    #[test]
     fn skips_hidden_tool_manager_without_consuming_following_commands() {
         let packet = [
             vec![opcodes::OP_GUI_TOOL_MANAGER, 0],
@@ -2377,10 +2941,6 @@ mod tests {
             (
                 opcodes::OP_GUI_CURSOR_ANIMATION,
                 vec![opcodes::OP_GUI_CURSOR_ANIMATION, 0, 1, 1],
-            ),
-            (
-                opcodes::OP_GUI_CURSORLINE,
-                vec![opcodes::OP_GUI_CURSORLINE, 0, 9, 0x11, 0x22, 0x33],
             ),
         ];
 
@@ -2455,9 +3015,30 @@ mod tests {
             1,
         ];
 
-        let _command = decode(&bytes).unwrap();
-
-        assert_eq!(semantic_size(&bytes).unwrap(), 13);
+        match decode(&bytes).unwrap() {
+            Command::WindowOverlayDelta(
+                WindowOverlayDelta {
+                    window_id,
+                    content_epoch,
+                    cursor_visible,
+                    cursor_row,
+                    cursor_col,
+                    cursor_shape,
+                    cursorline,
+                },
+                size,
+            ) => {
+                assert_eq!(size, 13);
+                assert_eq!(window_id, 1);
+                assert_eq!(content_epoch, 2);
+                assert!(!cursor_visible);
+                assert_eq!(cursor_row, 5);
+                assert_eq!(cursor_col, 3);
+                assert_eq!(cursor_shape, 1);
+                assert_eq!(cursorline, None);
+            }
+            other => panic!("expected window overlay delta, got {other:?}"),
+        }
     }
 
     #[test]

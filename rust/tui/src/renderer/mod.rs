@@ -37,6 +37,16 @@ struct CellSnapshot {
     cells: Vec<Cell>,
 }
 
+#[derive(Debug, Clone)]
+struct SemanticWindowState {
+    origin_row: u16,
+    origin_col: u16,
+    width: u16,
+    height: u16,
+    row_texts: Vec<String>,
+    content_epoch: u32,
+}
+
 impl Default for Cell {
     fn default() -> Self {
         Self {
@@ -75,6 +85,10 @@ pub struct Renderer {
     bottom_panel: Option<semantic::BottomPanel>,
     change_summary: Option<semantic::ChangeSummary>,
     git_status: Option<semantic::GitStatus>,
+    cursorline: Option<semantic::Cursorline>,
+    cursorline_snapshot: Option<(u16, Vec<Cell>)>,
+    semantic_windows: HashMap<u16, SemanticWindowState>,
+    semantic_cursorline_snapshots: HashMap<u16, CellSnapshot>,
     picker_snapshot: Option<CellSnapshot>,
     minibuffer_snapshot: Option<CellSnapshot>,
     completion_snapshot: Option<CellSnapshot>,
@@ -114,6 +128,10 @@ impl Renderer {
             bottom_panel: None,
             change_summary: None,
             git_status: None,
+            cursorline: None,
+            cursorline_snapshot: None,
+            semantic_windows: HashMap::new(),
+            semantic_cursorline_snapshots: HashMap::new(),
             picker_snapshot: None,
             minibuffer_snapshot: None,
             completion_snapshot: None,
@@ -211,6 +229,8 @@ impl Renderer {
         self.bottom_panel_snapshot = None;
         self.change_summary_snapshot = None;
         self.git_status_snapshot = None;
+        self.semantic_windows.clear();
+        self.semantic_cursorline_snapshots.clear();
     }
 
     fn clear(&mut self) {
@@ -223,6 +243,10 @@ impl Renderer {
                 ..Cell::default()
             };
         }
+        self.cursorline = None;
+        self.cursorline_snapshot = None;
+        self.semantic_windows.clear();
+        self.semantic_cursorline_snapshots.clear();
     }
 
     fn fill_bg(&mut self, bg: u32) {
@@ -290,12 +314,52 @@ impl Renderer {
             }
             semantic::Command::GitStatus(git_status, _) => self.draw_git_status(git_status),
             semantic::Command::Theme(theme, _) => self.apply_theme(theme),
+            semantic::Command::Gutter(gutter, _) => self.draw_gutter(gutter),
+            semantic::Command::Cursorline(cursorline, _) => self.draw_cursorline(cursorline),
+            semantic::Command::GutterSeparator(separator, _) => {
+                self.draw_gutter_separator(separator)
+            }
+            semantic::Command::SplitSeparators(separators, _) => {
+                self.draw_split_separators(separators)
+            }
+            semantic::Command::IndentGuides(guides, _) => self.draw_indent_guides(guides),
+            semantic::Command::WindowOverlayDelta(delta, _) => {
+                self.apply_window_overlay_delta(delta)
+            }
             semantic::Command::Unsupported { .. } => {}
         }
     }
 
     fn draw_semantic_window(&mut self, window: semantic::WindowContent) {
-        self.clear();
+        let row_texts: Vec<String> = window.rows.iter().map(|row| row.text.clone()).collect();
+        let width = row_texts
+            .iter()
+            .map(|text| text_width(text))
+            .max()
+            .unwrap_or(0);
+        let height = row_texts.len().min(u16::MAX as usize) as u16;
+        let previous = self.semantic_windows.insert(
+            window.window_id,
+            SemanticWindowState {
+                origin_row: window.origin_row,
+                origin_col: window.origin_col,
+                width,
+                height,
+                row_texts,
+                content_epoch: window.content_epoch,
+            },
+        );
+
+        if let Some(previous) = previous {
+            self.semantic_cursorline_snapshots.remove(&window.window_id);
+            self.clear_rect(
+                previous.origin_row,
+                previous.origin_col,
+                previous.width,
+                previous.height,
+            );
+        }
+
         self.cursor = (
             window.origin_col.saturating_add(window.cursor_col),
             window.origin_row.saturating_add(window.cursor_row),
@@ -307,6 +371,10 @@ impl Renderer {
                 .origin_row
                 .saturating_add(row.min(u16::MAX as usize) as u16);
             self.draw_semantic_row(row, window.origin_col, content);
+        }
+
+        if let Some(cursorline) = window.cursorline {
+            self.draw_semantic_cursorline(window.window_id, cursorline);
         }
 
         self.redraw_retained_chrome();
@@ -339,10 +407,311 @@ impl Renderer {
         }
     }
 
+    fn clear_rect(&mut self, row: u16, col: u16, width: u16, height: u16) {
+        if width == 0 || height == 0 {
+            return;
+        }
+
+        for y in row..row.saturating_add(height).min(self.height) {
+            for x in col..col.saturating_add(width).min(self.width) {
+                if let Some(index) = self.index(x, y) {
+                    self.cells[index] = Cell {
+                        style: CellStyle {
+                            bg: self.default_bg,
+                            ..CellStyle::default()
+                        },
+                        ..Cell::default()
+                    };
+                }
+            }
+        }
+    }
+
+    fn semantic_leading_width(text: &str, tab_width: u16) -> u16 {
+        let tab_width = tab_width.max(1);
+        let mut leading_width = 0u16;
+
+        for grapheme in text.graphemes(true) {
+            if !grapheme.chars().all(char::is_whitespace) {
+                break;
+            }
+
+            if grapheme == "\t" {
+                let tab_stop = tab_width - (leading_width % tab_width);
+                leading_width = leading_width.saturating_add(tab_stop);
+            } else {
+                leading_width = leading_width.saturating_add(grapheme_width(grapheme));
+            }
+        }
+
+        leading_width
+    }
+
+    fn draw_semantic_cursorline(&mut self, window_id: u16, cursorline: semantic::Cursorline) {
+        if cursorline.row >= self.height || cursorline.bg == 0 {
+            return;
+        }
+
+        let Some(window) = self.semantic_windows.get(&window_id).cloned() else {
+            return;
+        };
+        if window.width == 0 {
+            return;
+        }
+
+        if let Some(snapshot) = self.semantic_cursorline_snapshots.remove(&window_id) {
+            if snapshot.row != cursorline.row {
+                self.restore_snapshot(snapshot);
+            } else {
+                self.semantic_cursorline_snapshots
+                    .insert(window_id, snapshot);
+            }
+        }
+
+        if !self.semantic_cursorline_snapshots.contains_key(&window_id) {
+            self.semantic_cursorline_snapshots.insert(
+                window_id,
+                self.capture_rect(cursorline.row, window.origin_col, window.width, 1),
+            );
+        }
+
+        self.paint_row_range_bg(
+            cursorline.row,
+            window.origin_col,
+            window.width,
+            cursorline.bg,
+        );
+    }
+
+    fn clear_semantic_cursorline(&mut self, window_id: u16) {
+        let Some(snapshot) = self.semantic_cursorline_snapshots.remove(&window_id) else {
+            return;
+        };
+
+        self.restore_snapshot(snapshot);
+    }
+
     fn apply_theme(&mut self, theme: semantic::Theme) {
         self.theme = ThemePalette::from_theme(theme);
         self.default_bg = self.theme.color(SLOT_EDITOR_BG, self.default_bg);
         self.fill_bg(self.default_bg);
+    }
+
+    fn draw_gutter(&mut self, gutter: semantic::Gutter) {
+        if gutter.content_width == 0 || gutter.content_height == 0 {
+            return;
+        }
+
+        let style = CellStyle {
+            fg: 0x6B7280,
+            bg: self.default_bg,
+            attrs: 0,
+            ul_color: 0,
+            blend: 100,
+        };
+        let active_style = CellStyle {
+            fg: 0xD8DEE9,
+            bg: self.default_bg,
+            attrs: protocol::ATTR_BOLD,
+            ul_color: 0,
+            blend: 100,
+        };
+        let blank = " ".repeat(gutter.content_width as usize);
+
+        for row_offset in 0..gutter.content_height {
+            let row = gutter.content_row.saturating_add(row_offset);
+            self.write_run(row, gutter.content_col, &blank, style);
+        }
+
+        for (index, entry) in gutter.entries.iter().enumerate() {
+            let row_offset = index.min(u16::MAX as usize) as u16;
+            if row_offset >= gutter.content_height {
+                break;
+            }
+            let row = gutter.content_row.saturating_add(row_offset);
+            let number = gutter_line_number(&gutter, entry);
+            let sign = gutter_sign(entry);
+            let text = format!(
+                "{sign:<sign_width$}{number:>number_width$}",
+                sign_width = gutter.sign_col_width as usize,
+                number_width = gutter.line_number_width as usize
+            );
+            let line_style = if entry.buf_line == gutter.cursor_line && gutter.is_active {
+                active_style
+            } else if entry.sign_type == 8 && entry.sign_fg != 0 {
+                CellStyle {
+                    fg: entry.sign_fg,
+                    ..style
+                }
+            } else {
+                style
+            };
+            self.write_run(
+                row,
+                gutter.content_col,
+                &slice_chars(&text, 0, gutter.content_width),
+                line_style,
+            );
+        }
+    }
+
+    fn draw_cursorline(&mut self, cursorline: semantic::Cursorline) {
+        if cursorline.row >= self.height || cursorline.bg == 0 {
+            return;
+        }
+
+        if let Some((snapshot_row, snapshot_cells)) = self.cursorline_snapshot.take() {
+            if snapshot_row < self.height && snapshot_row != cursorline.row {
+                self.restore_row(snapshot_row, snapshot_cells);
+            } else {
+                self.cursorline_snapshot = Some((snapshot_row, snapshot_cells));
+            }
+        }
+
+        if self.cursorline_snapshot.is_none() {
+            self.cursorline_snapshot = Some((cursorline.row, self.row_cells(cursorline.row)));
+        }
+
+        self.paint_row_bg(cursorline.row, cursorline.bg);
+        self.cursorline = Some(cursorline);
+    }
+
+    fn draw_gutter_separator(&mut self, separator: semantic::GutterSeparator) {
+        if separator.col >= self.width || separator.color == 0 {
+            return;
+        }
+
+        let style = CellStyle {
+            fg: separator.color,
+            bg: self.default_bg,
+            attrs: 0,
+            ul_color: 0,
+            blend: 100,
+        };
+        for row in 0..self.height {
+            self.write_run(row, separator.col, "│", style);
+        }
+    }
+
+    fn draw_split_separators(&mut self, separators: semantic::SplitSeparators) {
+        let style = CellStyle {
+            fg: separators.color,
+            bg: self.default_bg,
+            attrs: 0,
+            ul_color: 0,
+            blend: 100,
+        };
+
+        for vertical in separators.verticals {
+            let end = vertical.end_row.min(self.height.saturating_sub(1));
+            for row in vertical.start_row..=end {
+                self.write_run(row, vertical.col, "│", style);
+            }
+        }
+
+        for horizontal in separators.horizontals {
+            if horizontal.row >= self.height || horizontal.width == 0 {
+                continue;
+            }
+            let rule = "─".repeat(horizontal.width as usize);
+            self.write_run(horizontal.row, horizontal.col, &rule, style);
+            if !horizontal.filename.is_empty() && horizontal.width > 2 {
+                let label = format!(" {} ", horizontal.filename);
+                self.write_run(
+                    horizontal.row,
+                    horizontal.col.saturating_add(1),
+                    &slice_chars(&label, 0, horizontal.width.saturating_sub(1)),
+                    style,
+                );
+            }
+        }
+    }
+
+    fn draw_indent_guides(&mut self, guides: semantic::IndentGuides) {
+        if guides.guide_cols.is_empty() {
+            return;
+        }
+
+        let Some(window) = self.semantic_windows.get(&guides.window_id) else {
+            return;
+        };
+        let origin_row = window.origin_row;
+        let origin_col = window.origin_col;
+        let height = window.height;
+        let row_texts = window.row_texts.clone();
+        let tab_width = u16::from(guides.tab_width.max(1));
+
+        for (row_offset, line_level) in guides.line_indent_levels.into_iter().enumerate() {
+            let row = origin_row.saturating_add(row_offset.min(u16::MAX as usize) as u16);
+            if row >= self.height || row_offset >= height as usize {
+                break;
+            }
+
+            let Some(row_text) = row_texts.get(row_offset) else {
+                break;
+            };
+            let leading_width = Self::semantic_leading_width(row_text, tab_width);
+            let blank = row_text.chars().all(char::is_whitespace);
+
+            for col in guides.guide_cols.iter() {
+                if col / tab_width > u16::from(line_level) {
+                    continue;
+                }
+                if !blank && *col >= leading_width {
+                    continue;
+                }
+
+                let screen_col = origin_col.saturating_add(*col);
+                let bg = self
+                    .index(screen_col, row)
+                    .map(|index| self.cells[index].style.bg)
+                    .unwrap_or(self.default_bg);
+                let guide_style = CellStyle {
+                    fg: if *col == guides.active_guide_col {
+                        0x6B7280
+                    } else {
+                        0x3F444A
+                    },
+                    bg,
+                    attrs: if *col == guides.active_guide_col {
+                        protocol::ATTR_BOLD
+                    } else {
+                        0
+                    },
+                    ul_color: 0,
+                    blend: 100,
+                };
+                self.write_run(row, screen_col, "│", guide_style);
+            }
+        }
+    }
+
+    fn apply_window_overlay_delta(&mut self, delta: semantic::WindowOverlayDelta) {
+        let Some(window) = self.semantic_windows.get(&delta.window_id).cloned() else {
+            return;
+        };
+        if window.content_epoch != delta.content_epoch {
+            return;
+        }
+
+        if delta.cursor_visible {
+            self.cursor = (
+                window.origin_col.saturating_add(delta.cursor_col),
+                window.origin_row.saturating_add(delta.cursor_row),
+            );
+            self.cursor_shape = delta.cursor_shape;
+        }
+        if let Some(cursorline) = delta.cursorline {
+            self.draw_semantic_cursorline(
+                delta.window_id,
+                semantic::Cursorline {
+                    row: window.origin_row.saturating_add(cursorline.row),
+                    bg: cursorline.bg,
+                },
+            );
+        } else {
+            self.clear_semantic_cursorline(delta.window_id);
+        }
     }
 
     fn draw_status_bar(&mut self, status: semantic::StatusBar) {
@@ -1505,6 +1874,44 @@ impl Renderer {
         self.render_ratatui_stateful_widget(row, 0, width, height, list, &mut state);
     }
 
+    fn paint_row_bg(&mut self, row: u16, bg: u32) {
+        self.paint_row_range_bg(row, 0, self.width, bg);
+    }
+
+    fn paint_row_range_bg(&mut self, row: u16, col: u16, width: u16, bg: u32) {
+        if row >= self.height || width == 0 {
+            return;
+        }
+
+        for col in col..col.saturating_add(width).min(self.width) {
+            if let Some(index) = self.index(col, row) {
+                self.cells[index].style.bg = bg;
+            }
+        }
+    }
+
+    fn row_cells(&self, row: u16) -> Vec<Cell> {
+        if row >= self.height {
+            return Vec::new();
+        }
+
+        (0..self.width)
+            .filter_map(|col| self.index(col, row).map(|index| self.cells[index].clone()))
+            .collect()
+    }
+
+    fn restore_row(&mut self, row: u16, snapshot: Vec<Cell>) {
+        if row >= self.height {
+            return;
+        }
+
+        for (col, cell) in snapshot.into_iter().enumerate().take(self.width as usize) {
+            if let Some(index) = self.index(col as u16, row) {
+                self.cells[index] = cell;
+            }
+        }
+    }
+
     fn write_run(&mut self, row: u16, col: u16, text: &str, mut style: CellStyle) {
         let (row, mut col, max_col) = match self.resolve_region(row, col) {
             Some(bounds) => bounds,
@@ -2106,6 +2513,39 @@ fn diagnostic_marker((errors, warnings, info, hints): (u16, u16, u16, u16)) -> &
     }
 }
 
+fn gutter_line_number(gutter: &semantic::Gutter, entry: &semantic::GutterEntry) -> String {
+    if entry.display_type == 5 || gutter.line_number_style == 3 {
+        return String::new();
+    }
+
+    match gutter.line_number_style {
+        0 => {
+            if entry.buf_line == gutter.cursor_line {
+                (entry.buf_line + 1).to_string()
+            } else {
+                entry.buf_line.abs_diff(gutter.cursor_line).to_string()
+            }
+        }
+        1 => (entry.buf_line + 1).to_string(),
+        2 => entry.buf_line.abs_diff(gutter.cursor_line).to_string(),
+        _ => String::new(),
+    }
+}
+
+fn gutter_sign(entry: &semantic::GutterEntry) -> &str {
+    match entry.sign_type {
+        1 => "+",
+        2 => "~",
+        3 | 9 => "-",
+        4 => "!",
+        5 => "?",
+        6 => "i",
+        7 => ".",
+        8 => entry.sign_text.as_str(),
+        _ => "",
+    }
+}
+
 fn join_status_segments(segments: &[semantic::StatusSegment]) -> String {
     segments
         .iter()
@@ -2274,11 +2714,13 @@ mod tests {
         let mut renderer = Renderer::new(12, 5);
 
         renderer.draw_semantic_window(semantic::WindowContent {
+            window_id: 1,
             origin_row: 1,
             origin_col: 2,
             cursor_row: 0,
             cursor_col: 1,
             cursor_shape: 2,
+            content_epoch: 0,
             rows: vec![semantic::Row {
                 text: "hello".to_owned(),
                 spans: vec![semantic::Span {
@@ -2289,12 +2731,754 @@ mod tests {
                     attrs: 0,
                 }],
             }],
+            cursorline: None,
         });
 
         assert_eq!(renderer.cursor, (3, 1));
         let index = renderer.index(2, 1).unwrap();
         assert_eq!(renderer.cells[index].text, "h");
         assert_eq!(renderer.cells[index].style.fg, 0xAABBCC);
+    }
+
+    #[test]
+    fn semantic_window_redraw_clears_stale_cells_for_same_window() {
+        let mut renderer = Renderer::new(12, 4);
+
+        renderer.draw_semantic_window(semantic::WindowContent {
+            window_id: 1,
+            origin_row: 0,
+            origin_col: 0,
+            cursor_row: 0,
+            cursor_col: 0,
+            cursor_shape: 0,
+            content_epoch: 1,
+            rows: vec![
+                semantic::Row {
+                    text: "abcdef".to_owned(),
+                    spans: vec![],
+                },
+                semantic::Row {
+                    text: "gh".to_owned(),
+                    spans: vec![],
+                },
+            ],
+            cursorline: None,
+        });
+        renderer.draw_semantic_window(semantic::WindowContent {
+            window_id: 1,
+            origin_row: 0,
+            origin_col: 0,
+            cursor_row: 0,
+            cursor_col: 0,
+            cursor_shape: 0,
+            content_epoch: 2,
+            rows: vec![semantic::Row {
+                text: "a".to_owned(),
+                spans: vec![],
+            }],
+            cursorline: None,
+        });
+
+        assert_eq!(renderer.cells[renderer.index(0, 0).unwrap()].text, "a");
+        assert_eq!(renderer.cells[renderer.index(1, 0).unwrap()].text, " ");
+        assert_eq!(renderer.cells[renderer.index(0, 1).unwrap()].text, " ");
+    }
+
+    #[test]
+    fn semantic_cursorline_is_bounded_to_window_content() {
+        let mut renderer = Renderer::new(16, 4);
+
+        renderer.draw_semantic_window(semantic::WindowContent {
+            window_id: 1,
+            origin_row: 0,
+            origin_col: 0,
+            cursor_row: 0,
+            cursor_col: 0,
+            cursor_shape: 0,
+            content_epoch: 1,
+            rows: vec![semantic::Row {
+                text: "left".to_owned(),
+                spans: vec![],
+            }],
+            cursorline: Some(semantic::Cursorline {
+                row: 0,
+                bg: 0x111111,
+            }),
+        });
+        renderer.draw_semantic_window(semantic::WindowContent {
+            window_id: 2,
+            origin_row: 0,
+            origin_col: 8,
+            cursor_row: 0,
+            cursor_col: 0,
+            cursor_shape: 0,
+            content_epoch: 1,
+            rows: vec![semantic::Row {
+                text: "right".to_owned(),
+                spans: vec![],
+            }],
+            cursorline: None,
+        });
+
+        assert_eq!(
+            renderer.cells[renderer.index(0, 0).unwrap()].style.bg,
+            0x111111
+        );
+        assert_eq!(
+            renderer.cells[renderer.index(3, 0).unwrap()].style.bg,
+            0x111111
+        );
+        assert_eq!(
+            renderer.cells[renderer.index(4, 0).unwrap()].style.bg,
+            renderer.default_bg
+        );
+        assert_eq!(renderer.cells[renderer.index(8, 0).unwrap()].text, "r");
+        assert_eq!(
+            renderer.cells[renderer.index(8, 0).unwrap()].style.bg,
+            renderer.default_bg
+        );
+    }
+
+    #[test]
+    fn semantic_window_cursorline_snapshot_survives_other_window_draws() {
+        let mut renderer = Renderer::new(16, 6);
+
+        renderer.draw_semantic_window(semantic::WindowContent {
+            window_id: 1,
+            origin_row: 0,
+            origin_col: 0,
+            cursor_row: 0,
+            cursor_col: 0,
+            cursor_shape: 0,
+            content_epoch: 1,
+            rows: vec![
+                semantic::Row {
+                    text: "one".to_owned(),
+                    spans: vec![],
+                },
+                semantic::Row {
+                    text: "two".to_owned(),
+                    spans: vec![],
+                },
+            ],
+            cursorline: Some(semantic::Cursorline {
+                row: 0,
+                bg: 0x111111,
+            }),
+        });
+        renderer.draw_semantic_window(semantic::WindowContent {
+            window_id: 2,
+            origin_row: 3,
+            origin_col: 8,
+            cursor_row: 0,
+            cursor_col: 0,
+            cursor_shape: 0,
+            content_epoch: 1,
+            rows: vec![semantic::Row {
+                text: "pane".to_owned(),
+                spans: vec![],
+            }],
+            cursorline: None,
+        });
+        renderer.apply_window_overlay_delta(semantic::WindowOverlayDelta {
+            window_id: 1,
+            content_epoch: 1,
+            cursor_visible: true,
+            cursor_row: 1,
+            cursor_col: 0,
+            cursor_shape: 0,
+            cursorline: Some(semantic::Cursorline {
+                row: 1,
+                bg: 0x222222,
+            }),
+        });
+
+        assert_eq!(renderer.cells[renderer.index(0, 0).unwrap()].text, "o");
+        assert_eq!(
+            renderer.cells[renderer.index(0, 0).unwrap()].style.bg,
+            renderer.default_bg
+        );
+        assert_eq!(renderer.cells[renderer.index(0, 1).unwrap()].text, "t");
+        assert_eq!(
+            renderer.cells[renderer.index(0, 1).unwrap()].style.bg,
+            0x222222
+        );
+    }
+
+    #[test]
+    fn semantic_indent_guides_use_retained_window_text_across_metadata_updates() {
+        let mut renderer = Renderer::new(12, 4);
+
+        renderer.draw_semantic_window(semantic::WindowContent {
+            window_id: 1,
+            origin_row: 0,
+            origin_col: 0,
+            cursor_row: 0,
+            cursor_col: 0,
+            cursor_shape: 0,
+            content_epoch: 1,
+            rows: vec![
+                semantic::Row {
+                    text: "      foo".to_owned(),
+                    spans: vec![],
+                },
+                semantic::Row {
+                    text: "      ".to_owned(),
+                    spans: vec![],
+                },
+            ],
+            cursorline: None,
+        });
+
+        let guides = semantic::IndentGuides {
+            window_id: 1,
+            tab_width: 2,
+            active_guide_col: 2,
+            guide_cols: vec![2, 4],
+            line_indent_levels: vec![2, 2],
+        };
+
+        renderer.draw_indent_guides(guides.clone());
+        renderer.draw_indent_guides(guides);
+
+        assert_eq!(renderer.cells[renderer.index(2, 0).unwrap()].text, "│");
+        assert_eq!(renderer.cells[renderer.index(4, 0).unwrap()].text, "│");
+        assert_eq!(renderer.cells[renderer.index(2, 1).unwrap()].text, "│");
+        assert_eq!(renderer.cells[renderer.index(4, 1).unwrap()].text, "│");
+    }
+
+    #[test]
+    fn semantic_windows_remain_visible_after_drawing_multiple_panes() {
+        let mut renderer = Renderer::new(20, 5);
+
+        renderer.draw_semantic_window(semantic::WindowContent {
+            window_id: 1,
+            origin_row: 0,
+            origin_col: 0,
+            cursor_row: 0,
+            cursor_col: 0,
+            cursor_shape: 0,
+            content_epoch: 1,
+            rows: vec![semantic::Row {
+                text: "left".to_owned(),
+                spans: vec![],
+            }],
+            cursorline: None,
+        });
+        renderer.draw_semantic_window(semantic::WindowContent {
+            window_id: 2,
+            origin_row: 0,
+            origin_col: 10,
+            cursor_row: 0,
+            cursor_col: 0,
+            cursor_shape: 0,
+            content_epoch: 2,
+            rows: vec![semantic::Row {
+                text: "right".to_owned(),
+                spans: vec![],
+            }],
+            cursorline: None,
+        });
+
+        assert_eq!(renderer.cells[renderer.index(0, 0).unwrap()].text, "l");
+        assert_eq!(renderer.cells[renderer.index(10, 0).unwrap()].text, "r");
+    }
+
+    #[test]
+    fn semantic_editor_chrome_draws_gutter_cursorline_and_separators() {
+        let mut renderer = Renderer::new(20, 6);
+
+        renderer.draw_semantic_window(semantic::WindowContent {
+            window_id: 1,
+            origin_row: 1,
+            origin_col: 5,
+            cursor_row: 1,
+            cursor_col: 2,
+            cursor_shape: 1,
+            content_epoch: 0,
+            rows: vec![
+                semantic::Row {
+                    text: "  alpha".to_owned(),
+                    spans: vec![],
+                },
+                semantic::Row {
+                    text: "    beta".to_owned(),
+                    spans: vec![],
+                },
+            ],
+            cursorline: Some(semantic::Cursorline {
+                row: 1,
+                bg: 0x112233,
+            }),
+        });
+        renderer.draw_gutter(semantic::Gutter {
+            window_id: 1,
+            content_row: 1,
+            content_col: 0,
+            content_height: 2,
+            is_active: false,
+            content_width: 4,
+            cursor_line: 12,
+            line_number_style: 0,
+            line_number_width: 3,
+            sign_col_width: 1,
+            entries: vec![semantic::GutterEntry {
+                buf_line: 12,
+                display_type: 0,
+                sign_type: 4,
+                fold_end_line: 0,
+                sign_fg: 0,
+                sign_text: String::new(),
+            }],
+        });
+        renderer.draw_gutter_separator(semantic::GutterSeparator {
+            col: 4,
+            color: 0x445566,
+        });
+        renderer.draw_split_separators(semantic::SplitSeparators {
+            color: 0x778899,
+            verticals: vec![semantic::VerticalSeparator {
+                col: 10,
+                start_row: 1,
+                end_row: 3,
+            }],
+            horizontals: vec![semantic::HorizontalSeparator {
+                row: 4,
+                col: 0,
+                width: 8,
+                filename: "a.ex".to_owned(),
+            }],
+        });
+        renderer.draw_indent_guides(semantic::IndentGuides {
+            window_id: 1,
+            tab_width: 2,
+            active_guide_col: 2,
+            guide_cols: vec![2, 4],
+            line_indent_levels: vec![2, 1],
+        });
+
+        assert_eq!(renderer.cells[renderer.index(0, 1).unwrap()].text, "!");
+        assert_eq!(renderer.cells[renderer.index(3, 1).unwrap()].text, "3");
+        assert_eq!(renderer.cells[renderer.index(4, 1).unwrap()].text, "│");
+        assert_eq!(renderer.cells[renderer.index(10, 2).unwrap()].text, "│");
+        assert_eq!(renderer.cells[renderer.index(1, 4).unwrap()].text, " ");
+        assert_eq!(renderer.cells[renderer.index(2, 4).unwrap()].text, "a");
+        assert_eq!(
+            renderer.cells[renderer.index(7, 1).unwrap()].style.bg,
+            0x112233
+        );
+        assert_eq!(renderer.cells[renderer.index(7, 1).unwrap()].text, "a");
+        assert_eq!(renderer.cells[renderer.index(7, 2).unwrap()].text, "│");
+        assert_eq!(renderer.cells[renderer.index(9, 2).unwrap()].text, "b");
+    }
+
+    #[test]
+    fn semantic_window_overlay_delta_moves_cursorline_from_window_origin() {
+        let mut renderer = Renderer::new(20, 6);
+        renderer.draw_semantic_window(semantic::WindowContent {
+            window_id: 1,
+            origin_row: 2,
+            origin_col: 3,
+            cursor_row: 0,
+            cursor_col: 0,
+            cursor_shape: 0,
+            content_epoch: 7,
+            rows: vec![semantic::Row {
+                text: "hello".to_owned(),
+                spans: vec![],
+            }],
+            cursorline: None,
+        });
+
+        renderer.apply_window_overlay_delta(semantic::WindowOverlayDelta {
+            window_id: 1,
+            content_epoch: 7,
+            cursor_visible: true,
+            cursor_row: 0,
+            cursor_col: 2,
+            cursor_shape: 2,
+            cursorline: Some(semantic::Cursorline {
+                row: 0,
+                bg: 0x334455,
+            }),
+        });
+
+        assert_eq!(renderer.cursor, (5, 2));
+        assert_eq!(renderer.cursor_shape, 2);
+        assert_eq!(
+            renderer.cells[renderer.index(3, 2).unwrap()].style.bg,
+            0x334455
+        );
+    }
+
+    #[test]
+    fn semantic_window_overlay_delta_clears_retained_cursorline_when_absent() {
+        let mut renderer = Renderer::new(20, 6);
+        renderer.draw_semantic_window(semantic::WindowContent {
+            window_id: 1,
+            origin_row: 1,
+            origin_col: 2,
+            cursor_row: 0,
+            cursor_col: 0,
+            cursor_shape: 0,
+            content_epoch: 7,
+            rows: vec![semantic::Row {
+                text: "hello".to_owned(),
+                spans: vec![semantic::Span {
+                    start_col: 0,
+                    end_col: 5,
+                    fg: 0xAABBCC,
+                    bg: 0x112233,
+                    attrs: 0,
+                }],
+            }],
+            cursorline: None,
+        });
+
+        renderer.apply_window_overlay_delta(semantic::WindowOverlayDelta {
+            window_id: 1,
+            content_epoch: 7,
+            cursor_visible: true,
+            cursor_row: 0,
+            cursor_col: 0,
+            cursor_shape: 1,
+            cursorline: Some(semantic::Cursorline {
+                row: 0,
+                bg: 0x334455,
+            }),
+        });
+        assert_eq!(renderer.cursor, (2, 1));
+        assert_eq!(
+            renderer.cells[renderer.index(2, 1).unwrap()].style.bg,
+            0x334455
+        );
+
+        renderer.apply_window_overlay_delta(semantic::WindowOverlayDelta {
+            window_id: 1,
+            content_epoch: 7,
+            cursor_visible: false,
+            cursor_row: 0,
+            cursor_col: 0,
+            cursor_shape: 0,
+            cursorline: None,
+        });
+
+        let cell = &renderer.cells[renderer.index(2, 1).unwrap()];
+        assert_eq!(cell.text, "h");
+        assert_eq!(cell.style.fg, 0xAABBCC);
+        assert_eq!(cell.style.bg, 0x112233);
+    }
+
+    #[test]
+    fn semantic_window_overlay_delta_ignores_unknown_or_stale_windows() {
+        let mut renderer = Renderer::new(20, 6);
+        renderer.draw_semantic_window(semantic::WindowContent {
+            window_id: 1,
+            origin_row: 2,
+            origin_col: 3,
+            cursor_row: 0,
+            cursor_col: 0,
+            cursor_shape: 0,
+            content_epoch: 7,
+            rows: vec![semantic::Row {
+                text: "hello".to_owned(),
+                spans: vec![],
+            }],
+            cursorline: None,
+        });
+
+        let cursor_before = renderer.cursor;
+        let shape_before = renderer.cursor_shape;
+
+        renderer.apply_window_overlay_delta(semantic::WindowOverlayDelta {
+            window_id: 1,
+            content_epoch: 6,
+            cursor_visible: true,
+            cursor_row: 0,
+            cursor_col: 2,
+            cursor_shape: 2,
+            cursorline: Some(semantic::Cursorline {
+                row: 0,
+                bg: 0x334455,
+            }),
+        });
+        assert_eq!(renderer.cursor, cursor_before);
+        assert_eq!(renderer.cursor_shape, shape_before);
+
+        renderer.apply_window_overlay_delta(semantic::WindowOverlayDelta {
+            window_id: 2,
+            content_epoch: 7,
+            cursor_visible: true,
+            cursor_row: 0,
+            cursor_col: 4,
+            cursor_shape: 1,
+            cursorline: Some(semantic::Cursorline {
+                row: 0,
+                bg: 0x556677,
+            }),
+        });
+
+        assert_eq!(renderer.cursor, cursor_before);
+        assert_eq!(renderer.cursor_shape, shape_before);
+        assert_ne!(
+            renderer.cells[renderer.index(3, 2).unwrap()].style.bg,
+            0x556677
+        );
+    }
+
+    #[test]
+    fn disabled_gutter_separator_does_not_draw_column_zero() {
+        let mut renderer = Renderer::new(8, 3);
+        renderer.draw_text(DrawText {
+            row: 0,
+            col: 0,
+            fg: 0x111111,
+            bg: 0x222222,
+            attrs: 0,
+            text: "x".to_owned(),
+        });
+
+        renderer.draw_gutter_separator(semantic::GutterSeparator { col: 0, color: 0 });
+
+        assert_eq!(renderer.cells[renderer.index(0, 0).unwrap()].text, "x");
+        assert_eq!(
+            renderer.cells[renderer.index(0, 0).unwrap()].style.bg,
+            0x222222
+        );
+    }
+
+    #[test]
+    fn gutter_line_numbers_are_one_based_for_absolute_and_current_line() {
+        let mut renderer = Renderer::new(8, 3);
+        renderer.draw_gutter(semantic::Gutter {
+            window_id: 1,
+            content_row: 0,
+            content_col: 0,
+            content_height: 3,
+            is_active: true,
+            content_width: 4,
+            cursor_line: 0,
+            line_number_style: 1,
+            line_number_width: 3,
+            sign_col_width: 1,
+            entries: vec![
+                semantic::GutterEntry {
+                    buf_line: 0,
+                    display_type: 0,
+                    sign_type: 0,
+                    fold_end_line: 0,
+                    sign_fg: 0,
+                    sign_text: String::new(),
+                },
+                semantic::GutterEntry {
+                    buf_line: 1,
+                    display_type: 0,
+                    sign_type: 0,
+                    fold_end_line: 0,
+                    sign_fg: 0,
+                    sign_text: String::new(),
+                },
+            ],
+        });
+
+        assert_eq!(renderer.cells[renderer.index(3, 0).unwrap()].text, "1");
+        assert_eq!(
+            renderer.cells[renderer.index(3, 0).unwrap()].style.fg,
+            0xD8DEE9
+        );
+        assert_eq!(renderer.cells[renderer.index(3, 1).unwrap()].text, "2");
+        assert_eq!(
+            renderer.cells[renderer.index(3, 1).unwrap()].style.fg,
+            0x6B7280
+        );
+    }
+
+    #[test]
+    fn gutter_relative_and_none_styles_match_the_tui_adapter() {
+        let mut renderer = Renderer::new(8, 3);
+        renderer.draw_gutter(semantic::Gutter {
+            window_id: 1,
+            content_row: 0,
+            content_col: 0,
+            content_height: 3,
+            is_active: true,
+            content_width: 4,
+            cursor_line: 1,
+            line_number_style: 2,
+            line_number_width: 3,
+            sign_col_width: 1,
+            entries: vec![
+                semantic::GutterEntry {
+                    buf_line: 0,
+                    display_type: 0,
+                    sign_type: 0,
+                    fold_end_line: 0,
+                    sign_fg: 0,
+                    sign_text: String::new(),
+                },
+                semantic::GutterEntry {
+                    buf_line: 1,
+                    display_type: 0,
+                    sign_type: 0,
+                    fold_end_line: 0,
+                    sign_fg: 0,
+                    sign_text: String::new(),
+                },
+                semantic::GutterEntry {
+                    buf_line: 2,
+                    display_type: 0,
+                    sign_type: 0,
+                    fold_end_line: 0,
+                    sign_fg: 0,
+                    sign_text: String::new(),
+                },
+            ],
+        });
+
+        assert_eq!(renderer.cells[renderer.index(3, 0).unwrap()].text, "1");
+        assert_eq!(renderer.cells[renderer.index(3, 1).unwrap()].text, "0");
+        assert_eq!(renderer.cells[renderer.index(3, 2).unwrap()].text, "1");
+
+        renderer.draw_gutter(semantic::Gutter {
+            window_id: 1,
+            content_row: 0,
+            content_col: 0,
+            content_height: 3,
+            is_active: true,
+            content_width: 4,
+            cursor_line: 1,
+            line_number_style: 3,
+            line_number_width: 3,
+            sign_col_width: 1,
+            entries: vec![semantic::GutterEntry {
+                buf_line: 0,
+                display_type: 0,
+                sign_type: 0,
+                fold_end_line: 0,
+                sign_fg: 0,
+                sign_text: String::new(),
+            }],
+        });
+
+        assert_eq!(renderer.cells[renderer.index(3, 0).unwrap()].text, " ");
+    }
+
+    #[test]
+    fn gutter_annotation_sign_text_and_color_are_preserved() {
+        let mut renderer = Renderer::new(8, 3);
+        renderer.draw_gutter(semantic::Gutter {
+            window_id: 1,
+            content_row: 0,
+            content_col: 0,
+            content_height: 1,
+            is_active: false,
+            content_width: 4,
+            cursor_line: 0,
+            line_number_style: 1,
+            line_number_width: 3,
+            sign_col_width: 1,
+            entries: vec![semantic::GutterEntry {
+                buf_line: 0,
+                display_type: 0,
+                sign_type: 8,
+                fold_end_line: 0,
+                sign_fg: 0x112233,
+                sign_text: "!".to_owned(),
+            }],
+        });
+
+        assert_eq!(renderer.cells[renderer.index(0, 0).unwrap()].text, "!");
+        assert_eq!(
+            renderer.cells[renderer.index(0, 0).unwrap()].style.fg,
+            0x112233
+        );
+    }
+
+    #[test]
+    fn moving_cursorline_restores_previous_row_cells() {
+        let mut renderer = Renderer::new(8, 3);
+        renderer.draw_text(DrawText {
+            row: 0,
+            col: 0,
+            fg: 0x111111,
+            bg: 0x222222,
+            attrs: 0,
+            text: "old".to_owned(),
+        });
+        renderer.draw_cursorline(semantic::Cursorline {
+            row: 0,
+            bg: 0x333333,
+        });
+        renderer.draw_cursorline(semantic::Cursorline {
+            row: 1,
+            bg: 0x444444,
+        });
+
+        assert_eq!(renderer.cells[renderer.index(0, 0).unwrap()].text, "o");
+        assert_eq!(
+            renderer.cells[renderer.index(0, 0).unwrap()].style.bg,
+            0x222222
+        );
+        assert_eq!(
+            renderer.cells[renderer.index(0, 1).unwrap()].style.bg,
+            0x444444
+        );
+    }
+
+    #[test]
+    fn overlay_delta_uses_matching_window_origin() {
+        let mut renderer = Renderer::new(24, 8);
+        renderer.draw_semantic_window(semantic::WindowContent {
+            window_id: 1,
+            origin_row: 1,
+            origin_col: 2,
+            cursor_row: 0,
+            cursor_col: 0,
+            cursor_shape: 0,
+            content_epoch: 1,
+            rows: vec![semantic::Row {
+                text: "one".to_owned(),
+                spans: vec![],
+            }],
+            cursorline: None,
+        });
+        renderer.draw_semantic_window(semantic::WindowContent {
+            window_id: 2,
+            origin_row: 4,
+            origin_col: 10,
+            cursor_row: 0,
+            cursor_col: 0,
+            cursor_shape: 0,
+            content_epoch: 0,
+            rows: vec![semantic::Row {
+                text: "two".to_owned(),
+                spans: vec![],
+            }],
+            cursorline: None,
+        });
+
+        renderer.apply_window_overlay_delta(semantic::WindowOverlayDelta {
+            window_id: 1,
+            content_epoch: 1,
+            cursor_visible: true,
+            cursor_row: 0,
+            cursor_col: 1,
+            cursor_shape: 2,
+            cursorline: Some(semantic::Cursorline {
+                row: 0,
+                bg: 0xABCDEF,
+            }),
+        });
+
+        assert_eq!(renderer.cursor, (3, 1));
+        assert_eq!(
+            renderer.cells[renderer.index(2, 1).unwrap()].style.bg,
+            0xABCDEF
+        );
+        assert_ne!(
+            renderer.cells[renderer.index(10, 4).unwrap()].style.bg,
+            0xABCDEF
+        );
     }
 
     #[test]
@@ -2510,15 +3694,18 @@ mod tests {
         let mut renderer = Renderer::new(80, 20);
 
         renderer.draw_semantic_window(semantic::WindowContent {
+            window_id: 1,
             origin_row: 4,
             origin_col: 4,
             cursor_row: 0,
             cursor_col: 0,
             cursor_shape: 0,
+            content_epoch: 0,
             rows: vec![semantic::Row {
                 text: "old".to_owned(),
                 spans: vec![],
             }],
+            cursorline: None,
         });
         renderer.draw_picker(semantic::Picker {
             visible: true,
@@ -2542,15 +3729,18 @@ mod tests {
         });
 
         renderer.draw_semantic_window(semantic::WindowContent {
+            window_id: 1,
             origin_row: 4,
             origin_col: 4,
             cursor_row: 0,
             cursor_col: 0,
             cursor_shape: 0,
+            content_epoch: 0,
             rows: vec![semantic::Row {
                 text: "new".to_owned(),
                 spans: vec![],
             }],
+            cursorline: None,
         });
 
         assert_ne!(renderer.cells[renderer.index(4, 4).unwrap()].text, "n");
@@ -2758,15 +3948,18 @@ mod tests {
         });
 
         renderer.draw_semantic_window(semantic::WindowContent {
+            window_id: 1,
             origin_row: 8,
             origin_col: 0,
             cursor_row: 0,
             cursor_col: 0,
             cursor_shape: 0,
+            content_epoch: 0,
             rows: vec![semantic::Row {
                 text: "under".to_owned(),
                 spans: vec![],
             }],
+            cursorline: None,
         });
 
         assert_eq!(renderer.cells[renderer.index(0, 8).unwrap()].text, ":");
@@ -2910,15 +4103,18 @@ mod tests {
         });
 
         renderer.draw_semantic_window(semantic::WindowContent {
+            window_id: 1,
             origin_row: 5,
             origin_col: 4,
             cursor_row: 0,
             cursor_col: 0,
             cursor_shape: 0,
+            content_epoch: 0,
             rows: vec![semantic::Row {
                 text: "under completion".to_owned(),
                 spans: vec![],
             }],
+            cursorline: None,
         });
 
         assert_eq!(renderer.cells[renderer.index(4, 5).unwrap()].text, "f");
