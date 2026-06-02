@@ -11,6 +11,16 @@ defmodule MingaEditor.Agent.SemanticUI.Entry do
   alias Minga.RenderModel.UI.Board
   alias Minga.RenderModel.UI.ExtensionPanel
   alias Minga.RenderModel.UI.ExtensionPanel.Content
+  alias Minga.RenderModel.UI.ExtensionPanel.Content.KeyValue
+  alias Minga.RenderModel.UI.ExtensionPanel.Content.Progress
+  alias Minga.RenderModel.UI.ExtensionPanel.Content.Separator
+  alias Minga.RenderModel.UI.ExtensionPanel.Content.StyledRun
+  alias Minga.RenderModel.UI.ExtensionPanel.Content.StyledText
+  alias Minga.RenderModel.UI.ExtensionPanel.Content.Table
+  alias Minga.RenderModel.UI.ExtensionPanel.Content.Text
+  alias Minga.RenderModel.UI.ExtensionPanel.Content.Tree
+  alias Minga.RenderModel.UI.ExtensionPanel.Content.TreeNode
+  alias Minga.RenderModel.UI.ExtensionPanel.Content.Unknown
 
   @typedoc "Source that owns the contribution."
   @type source :: ContributionCleanup.contribution_source()
@@ -46,9 +56,7 @@ defmodule MingaEditor.Agent.SemanticUI.Entry do
   def new(source, %__MODULE__{source: source} = entry), do: validate(entry)
   def new(source, %__MODULE__{} = entry), do: validate(%{entry | source: source})
 
-  def new(source, attrs) when is_map(attrs) or is_list(attrs) do
-    attrs = Map.new(attrs)
-
+  def new(source, attrs) when is_map(attrs) do
     with {:ok, id} <- required_string(attrs, :id),
          {:ok, surface} <- surface(Map.get(attrs, :surface)),
          {:ok, payload} <- payload(surface, Map.get(attrs, :payload)),
@@ -65,6 +73,17 @@ defmodule MingaEditor.Agent.SemanticUI.Entry do
       })
     end
   end
+
+  def new(source, attrs) when is_list(attrs) do
+    if Keyword.keyword?(attrs) do
+      source
+      |> new(Map.new(attrs))
+    else
+      {:error, {:invalid, :entry, attrs}}
+    end
+  end
+
+  def new(_source, attrs), do: {:error, {:invalid, :entry, attrs}}
 
   @doc "Updates the cached render-model payload and optional render-model action metadata."
   @spec publish(t(), payload(), [Action.t() | map() | keyword()] | nil) ::
@@ -133,8 +152,8 @@ defmodule MingaEditor.Agent.SemanticUI.Entry do
   end
 
   @spec payload(surface(), term()) :: {:ok, payload()} | {:error, term()}
-  defp payload(:status_card, %Board.Card{} = card), do: {:ok, card}
-  defp payload(:panel, %ExtensionPanel.Panel{} = panel), do: {:ok, panel}
+  defp payload(:status_card, %Board.Card{} = card), do: board_card(card)
+  defp payload(:panel, %ExtensionPanel.Panel{} = panel), do: panel(panel)
   defp payload(:dashboard_section, blocks) when is_list(blocks), do: dashboard_content(blocks, [])
   defp payload(:transcript_enrichment, body), do: transcript_body(body)
   defp payload(surface, _payload), do: {:error, {:invalid_payload, surface}}
@@ -151,7 +170,7 @@ defmodule MingaEditor.Agent.SemanticUI.Entry do
   @spec dashboard_content_module(module(), struct(), [term()], [Content.t()]) ::
           {:ok, [Content.t()]} | {:error, term()}
   defp dashboard_content_module(module, block, rest, acc) do
-    if extension_panel_content_module?(module) do
+    if extension_panel_content_module?(module) and content_block_valid?(block) do
       dashboard_content(rest, [block | acc])
     else
       {:error, {:invalid_payload, :dashboard_section}}
@@ -171,6 +190,97 @@ defmodule MingaEditor.Agent.SemanticUI.Entry do
       Minga.RenderModel.UI.ExtensionPanel.Content.Unknown
     ]
   end
+
+  @spec board_card(Board.Card.t()) :: {:ok, Board.Card.t()} | {:error, term()}
+  defp board_card(%Board.Card{} = card) do
+    with true <- is_integer(card.id) and card.id > 0,
+         true <- card.status in [:idle, :working, :iterating, :needs_you, :done, :errored],
+         true <- card.kind in [:you, :agent],
+         true <- is_binary(card.task),
+         true <- is_binary(card.display_task),
+         true <- is_nil(card.model) or is_binary(card.model),
+         true <- match?(%DateTime{}, card.created_at),
+         true <- string_list?(card.recent_files),
+         true <- is_list(card.sparkline) and Enum.all?(card.sparkline, &is_number/1) do
+      {:ok, card}
+    else
+      false -> {:error, {:invalid_payload, :status_card}}
+    end
+  end
+
+  @spec panel(ExtensionPanel.Panel.t()) :: {:ok, ExtensionPanel.Panel.t()} | {:error, term()}
+  defp panel(%ExtensionPanel.Panel{} = panel) do
+    with true <- is_binary(panel.extension),
+         true <- is_binary(panel.panel_id),
+         true <- is_binary(panel.title),
+         true <- panel.position in [:bottom, :right, :float],
+         true <- valid_panel_size?(panel.size),
+         true <- is_boolean(panel.visible?),
+         true <- is_list(panel.content) and Enum.all?(panel.content, &content_block_valid?/1) do
+      {:ok, panel}
+    else
+      false -> {:error, {:invalid_payload, :panel}}
+    end
+  end
+
+  @spec valid_panel_size?(term()) :: boolean()
+  defp valid_panel_size?({:percent, value}) when is_integer(value),
+    do: value >= 1 and value <= 100
+
+  defp valid_panel_size?({:lines, value}) when is_integer(value), do: value > 0
+  defp valid_panel_size?(_size), do: false
+
+  @spec content_block_valid?(term()) :: boolean()
+  defp content_block_valid?(%Text{text: text}), do: is_binary(text)
+
+  defp content_block_valid?(%StyledText{runs: runs}),
+    do: is_list(runs) and Enum.all?(runs, &styled_run_valid?/1)
+
+  defp content_block_valid?(%Table{columns: columns, rows: rows, selected: selected}) do
+    string_list?(columns) and is_list(rows) and Enum.all?(rows, &string_list?/1) and
+      (is_nil(selected) or (is_integer(selected) and selected >= 0))
+  end
+
+  defp content_block_valid?(%KeyValue{pairs: pairs}) do
+    is_list(pairs) and Enum.all?(pairs, &string_pair?/1)
+  end
+
+  defp content_block_valid?(%Separator{}), do: true
+
+  defp content_block_valid?(%Progress{label: label, percent: percent}),
+    do: is_binary(label) and is_number(percent)
+
+  defp content_block_valid?(%Tree{nodes: nodes}),
+    do: is_list(nodes) and Enum.all?(nodes, &tree_node_valid?/1)
+
+  defp content_block_valid?(%Unknown{}), do: true
+  defp content_block_valid?(_block), do: false
+
+  @spec styled_run_valid?(term()) :: boolean()
+  defp styled_run_valid?(%StyledRun{text: text, fg: fg, attrs: attrs}) do
+    is_binary(text) and is_integer(fg) and fg >= 0 and is_map(attrs) and
+      Enum.all?(attrs, fn
+        {key, value} when key in [:bold?, :italic?] -> is_boolean(value)
+        _other -> false
+      end)
+  end
+
+  defp styled_run_valid?(_run), do: false
+
+  @spec tree_node_valid?(term()) :: boolean()
+  defp tree_node_valid?(%TreeNode{label: label, expanded?: expanded?, children: children}) do
+    is_binary(label) and is_boolean(expanded?) and is_list(children) and
+      Enum.all?(children, &tree_node_valid?/1)
+  end
+
+  defp tree_node_valid?(_node), do: false
+
+  @spec string_list?(term()) :: boolean()
+  defp string_list?(values), do: is_list(values) and Enum.all?(values, &is_binary/1)
+
+  @spec string_pair?(term()) :: boolean()
+  defp string_pair?({key, value}), do: is_binary(key) and is_binary(value)
+  defp string_pair?(_pair), do: false
 
   @spec transcript_body(term()) :: {:ok, AgentChat.message_body()} | {:error, term()}
   defp transcript_body({:user, text} = body) when is_binary(text), do: {:ok, body}

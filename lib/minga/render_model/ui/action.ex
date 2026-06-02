@@ -36,27 +36,38 @@ defmodule Minga.RenderModel.UI.Action do
   @spec new(t() | map() | keyword()) :: {:ok, t()} | {:error, term()}
   def new(%__MODULE__{} = action), do: validate(action)
 
-  def new(attrs) when is_map(attrs) or is_list(attrs) do
-    attrs = Map.new(attrs)
-
+  def new(attrs) when is_map(attrs) do
     with :ok <- reject_callback_handler(attrs),
          {:ok, id} <- required_string(attrs, :id),
          {:ok, label} <- required_string(attrs, :label),
          {:ok, kind} <- kind(Map.get(attrs, :kind, :secondary)),
+         {:ok, icon} <- optional_string(Map.get(attrs, :icon), :icon),
+         {:ok, enabled?} <- boolean(Map.get(attrs, :enabled?, true), :enabled?),
+         {:ok, confirm} <- optional_string(Map.get(attrs, :confirm), :confirm),
          {:ok, payload} <- payload(Map.get(attrs, :payload, %{})),
          {:ok, editor_action} <- editor_action(Map.get(attrs, :editor_action)) do
       validate(%__MODULE__{
         id: id,
         label: label,
         kind: kind,
-        icon: optional_string(Map.get(attrs, :icon)),
-        enabled?: Map.get(attrs, :enabled?, true) == true,
-        confirm: optional_string(Map.get(attrs, :confirm)),
+        icon: icon,
+        enabled?: enabled?,
+        confirm: confirm,
         payload: payload,
         editor_action: editor_action
       })
     end
   end
+
+  def new(attrs) when is_list(attrs) do
+    if Keyword.keyword?(attrs) do
+      attrs |> Map.new() |> new()
+    else
+      {:error, {:invalid, :attrs, attrs}}
+    end
+  end
+
+  def new(attrs), do: {:error, {:invalid, :attrs, attrs}}
 
   @doc "Returns true when the action can be dispatched."
   @spec enabled?(t()) :: boolean()
@@ -68,6 +79,9 @@ defmodule Minga.RenderModel.UI.Action do
            id: id,
            label: label,
            kind: kind,
+           icon: icon,
+           enabled?: enabled?,
+           confirm: confirm,
            payload: payload,
            editor_action: editor_action
          } = action
@@ -75,6 +89,9 @@ defmodule Minga.RenderModel.UI.Action do
     with {:ok, _id} <- required_binary_value(id, :id),
          {:ok, _label} <- required_binary_value(label, :label),
          {:ok, _kind} <- kind(kind),
+         {:ok, _icon} <- optional_string(icon, :icon),
+         {:ok, _enabled?} <- boolean(enabled?, :enabled?),
+         {:ok, _confirm} <- optional_string(confirm, :confirm),
          {:ok, _payload} <- payload(payload),
          {:ok, _editor_action} <- editor_action(editor_action) do
       {:ok, action}
@@ -92,9 +109,15 @@ defmodule Minga.RenderModel.UI.Action do
   defp required_binary_value(value, _key) when is_binary(value) and value != "", do: {:ok, value}
   defp required_binary_value(_value, key), do: {:error, {:invalid, key}}
 
-  @spec optional_string(term()) :: String.t() | nil
-  defp optional_string(value) when is_binary(value) and value != "", do: value
-  defp optional_string(_value), do: nil
+  @spec optional_string(term(), atom()) :: {:ok, String.t() | nil} | {:error, term()}
+  defp optional_string(nil, _key), do: {:ok, nil}
+  defp optional_string("", _key), do: {:ok, nil}
+  defp optional_string(value, _key) when is_binary(value), do: {:ok, value}
+  defp optional_string(value, key), do: {:error, {:invalid, key, value}}
+
+  @spec boolean(term(), atom()) :: {:ok, boolean()} | {:error, term()}
+  defp boolean(value, _key) when is_boolean(value), do: {:ok, value}
+  defp boolean(value, key), do: {:error, {:invalid, key, value}}
 
   @spec kind(term()) :: {:ok, kind()} | {:error, term()}
   defp kind(kind) when kind in [:primary, :secondary, :destructive, :link, :toggle],

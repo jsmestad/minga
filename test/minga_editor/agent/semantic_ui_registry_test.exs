@@ -68,6 +68,115 @@ defmodule MingaEditor.Agent.SemanticUI.RegistryTest do
            ]
   end
 
+  test "rejects malformed entry and action metadata without crashing", %{table: table} do
+    assert {:error, {:invalid, :entry, :bad}} =
+             Registry.register(table, {:extension, :alpha}, :bad)
+
+    assert {:error, {:invalid, :entry, ["bad"]}} =
+             Registry.register(table, {:extension, :alpha}, ["bad"])
+
+    assert {:error, {:invalid, :attrs, :bad}} =
+             Registry.register(table, {:extension, :alpha}, %{
+               id: "status",
+               surface: :status_card,
+               payload: board_card(1, :idle),
+               actions: [:bad]
+             })
+
+    assert Registry.all(table) == []
+  end
+
+  test "rejects invalid optional action metadata", %{table: table} do
+    assert {:error, {:invalid, :enabled?, "false"}} =
+             Registry.register(table, {:extension, :alpha}, %{
+               id: "status",
+               surface: :status_card,
+               payload: board_card(1, :idle),
+               actions: [%{id: "open", label: "Open", enabled?: "false"}]
+             })
+
+    assert {:error, {:invalid, :icon, :bad}} =
+             Registry.register(table, {:extension, :alpha}, %{
+               id: "status",
+               surface: :status_card,
+               payload: board_card(1, :idle),
+               actions: [%{id: "open", label: "Open", icon: :bad}]
+             })
+  end
+
+  test "rejects invalid render-model payloads before builders encode them", %{table: table} do
+    invalid_card = %{board_card(1, :idle) | status: :unknown}
+    invalid_panel = %{panel("agent-panel", [%Text{text: "cached"}]) | position: :left}
+    invalid_dashboard = [%Text{text: :not_text}]
+
+    assert {:error, {:invalid_payload, :status_card}} =
+             Registry.register(table, {:extension, :alpha}, %{
+               id: "bad-card",
+               surface: :status_card,
+               payload: invalid_card
+             })
+
+    assert {:error, {:invalid_payload, :panel}} =
+             Registry.register(table, {:extension, :alpha}, %{
+               id: "bad-panel",
+               surface: :panel,
+               payload: invalid_panel
+             })
+
+    assert {:error, {:invalid_payload, :dashboard_section}} =
+             Registry.register(table, {:extension, :alpha}, %{
+               id: "bad-dashboard",
+               surface: :dashboard_section,
+               payload: invalid_dashboard
+             })
+  end
+
+  test "rejects duplicate ids inside one source batch", %{table: table} do
+    assert {:error, {:duplicate_agent_ui_id, "status", :same_batch}} =
+             Registry.register_many(table, {:extension, :alpha}, [
+               %{id: "status", surface: :status_card, payload: board_card(1, :idle)},
+               %{id: "status", surface: :status_card, payload: board_card(2, :done)}
+             ])
+
+    assert Registry.all(table) == []
+  end
+
+  test "same-source batches replace all prior entries from that source", %{table: table} do
+    assert :ok =
+             Registry.register_many(table, {:extension, :alpha}, [
+               %{id: "a", surface: :status_card, payload: board_card(1, :idle)},
+               %{id: "b", surface: :status_card, payload: board_card(2, :working)}
+             ])
+
+    assert :ok =
+             Registry.register_many(table, {:extension, :alpha}, [
+               %{id: "b", surface: :status_card, payload: board_card(3, :done)}
+             ])
+
+    assert Registry.get(table, "a") == nil
+    assert %Entry{payload: %Board.Card{id: 3, status: :done}} = Registry.get(table, "b")
+    assert Enum.map(Registry.status_cards(table), & &1.id) == [3]
+  end
+
+  test "malformed manifest semantic UI metadata logs and leaves registry alive", %{table: table} do
+    manifest = %Manifest{
+      name: :bad_semantic_ui_extension,
+      version: "1.0.0",
+      source: :module,
+      agent_ui_metadata: [:bad]
+    }
+
+    send(
+      Process.whereis(table),
+      {:minga_event, :extension_agent_contributions_started,
+       %{source: {:extension, :alpha}, manifest: manifest}}
+    )
+
+    :sys.get_state(table)
+
+    assert Registry.all(table) == []
+  end
+
   test "rejects duplicate entry ids from another source", %{table: table} do
     assert :ok =
              Registry.register(table, {:extension, :alpha}, %{

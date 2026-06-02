@@ -77,7 +77,7 @@ defmodule MingaEditor.Agent.SemanticUI.Registry do
     call_table(table, {:register, source, attrs})
   end
 
-  @doc "Registers a source-owned batch. Same-source entries replace prior entries with the same IDs."
+  @doc "Registers a source-owned batch, replacing all prior entries owned by the same source."
   @spec register_many(source(), [register_attrs() | Entry.t() | keyword()]) ::
           :ok | {:error, term()}
   @spec register_many(table(), source(), [register_attrs() | Entry.t() | keyword()]) ::
@@ -280,9 +280,18 @@ defmodule MingaEditor.Agent.SemanticUI.Registry do
 
     :ok
   rescue
-    _ -> :ok
+    exception ->
+      log_seed_error(table, {:exception, exception})
   catch
-    :exit, _ -> :ok
+    :exit, reason -> log_seed_error(table, {:exit, reason})
+  end
+
+  @spec log_seed_error(table(), term()) :: :ok
+  defp log_seed_error(table, reason) do
+    Minga.Log.warning(
+      :agent,
+      "Semantic agent UI registry #{inspect(table)} could not seed running extension contributions: #{inspect(reason)}"
+    )
   end
 
   @spec register_manifest_entries(table(), source(), [term()]) :: :ok
@@ -354,9 +363,23 @@ defmodule MingaEditor.Agent.SemanticUI.Registry do
 
   @spec insert_many(table(), source(), [Entry.t()]) :: :ok | {:error, term()}
   defp insert_many(table, source, entries) do
-    case foreign_duplicate(table, source, entries) do
-      nil -> replace_source_entries(table, source, entries)
-      {id, other} -> {:error, {:duplicate_agent_ui_id, id, other}}
+    with :ok <- reject_batch_duplicate_ids(entries) do
+      case foreign_duplicate(table, source, entries) do
+        nil -> replace_source_entries(table, source, entries)
+        {id, other} -> {:error, {:duplicate_agent_ui_id, id, other}}
+      end
+    end
+  end
+
+  @spec reject_batch_duplicate_ids([Entry.t()]) :: :ok | {:error, term()}
+  defp reject_batch_duplicate_ids(entries) do
+    entries
+    |> Enum.map(& &1.id)
+    |> Enum.frequencies()
+    |> Enum.find(fn {_id, count} -> count > 1 end)
+    |> case do
+      nil -> :ok
+      {id, _count} -> {:error, {:duplicate_agent_ui_id, id, :same_batch}}
     end
   end
 
