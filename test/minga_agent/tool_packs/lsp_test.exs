@@ -123,7 +123,7 @@ defmodule MingaAgent.ToolPacks.LSPTest do
           callback: fn _args -> {:ok, "override"} end
         )
 
-      assert {:error, {:reserved_builtin_tool, ^name, {:extension, :demo}}} =
+      assert {:error, {:reserved_tool_name, ^name, {:bundle, :lsp_tools}, {:extension, :demo}}} =
                Registry.register(table, collision)
     end
   end
