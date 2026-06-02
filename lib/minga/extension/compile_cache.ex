@@ -285,14 +285,16 @@ defmodule Minga.Extension.CompileCache do
 
   @spec compile_ignoring_module_conflicts((-> term())) :: term()
   defp compile_ignoring_module_conflicts(fun) do
-    previous = Code.get_compiler_option(:ignore_module_conflict)
-    Code.put_compiler_option(:ignore_module_conflict, true)
+    :global.trans({__MODULE__, :compiler_options}, fn ->
+      previous = Code.get_compiler_option(:ignore_module_conflict)
+      Code.put_compiler_option(:ignore_module_conflict, true)
 
-    try do
-      fun.()
-    after
-      Code.put_compiler_option(:ignore_module_conflict, previous)
-    end
+      try do
+        fun.()
+      after
+        Code.put_compiler_option(:ignore_module_conflict, previous)
+      end
+    end)
   end
 
   # ── Keys and paths ──────────────────────────────────────────────────────
