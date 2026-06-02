@@ -2535,7 +2535,7 @@ defmodule MingaAgent.Session do
              state.provider_id
            ),
          {:ok, lease} <-
-           ensure_provider_lease(
+           ensure_source_provider_lease(
              state.provider_source,
              state.provider_module,
              state.provider_lease
@@ -2547,22 +2547,54 @@ defmodule MingaAgent.Session do
     end
   end
 
+  @spec ensure_source_provider_lease(
+          Minga.Extension.ContributionCleanup.contribution_source(),
+          module(),
+          CodeLease.t() | nil
+        ) :: {:ok, CodeLease.t()} | {:error, {:provider_lease_unavailable, term()}}
+  defp ensure_source_provider_lease(source, module, lease) do
+    case ensure_provider_lease(source, module, lease) do
+      {:ok, lease} -> {:ok, lease}
+      {:error, reason} -> {:error, {:provider_lease_unavailable, reason}}
+    end
+  end
+
   @spec validate_source_owned_provider(
           Minga.Extension.ContributionCleanup.contribution_source(),
           module(),
           String.t() | nil
         ) :: :ok | {:error, term()}
   defp validate_source_owned_provider(source, module, provider_id) do
-    id = provider_id || "native"
-
-    with {:ok, entry} <- ProviderRegistry.lookup(id),
+    with {:ok, id} <- validate_provider_id(provider_id),
+         {:ok, entry} <- lookup_provider_registry_entry(id),
          :ok <- validate_provider_registry_entry(entry.spec, source, module) do
       :ok
     else
-      {:error, reason} -> {:error, {:provider_registry_unavailable, id, reason}}
+      {:error, reason} -> {:error, reason}
     end
   catch
-    :exit, reason -> {:error, {:provider_registry_unavailable, provider_id || "native", reason}}
+    :exit, reason -> {:error, {:provider_registry_unavailable, provider_id, reason}}
+  end
+
+  @spec validate_provider_id(String.t() | nil) :: {:ok, String.t()} | {:error, term()}
+  defp validate_provider_id(provider_id) when is_binary(provider_id) do
+    if String.trim(provider_id) == "" do
+      {:error, {:missing_provider_id, provider_id}}
+    else
+      {:ok, provider_id}
+    end
+  end
+
+  defp validate_provider_id(_provider_id), do: {:error, :missing_provider_id}
+
+  @spec lookup_provider_registry_entry(String.t()) ::
+          {:ok, MingaAgent.ProviderRegistry.Entry.t()} | {:error, term()}
+  defp lookup_provider_registry_entry(id) do
+    case ProviderRegistry.lookup(id) do
+      {:ok, entry} -> {:ok, entry}
+      {:error, :disabled} -> {:error, {:provider_disabled, id}}
+      {:error, :not_found} -> {:error, {:provider_not_found, id}}
+    end
   end
 
   @spec validate_provider_registry_entry(

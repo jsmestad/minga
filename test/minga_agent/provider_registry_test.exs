@@ -11,7 +11,7 @@ defmodule MingaAgent.ProviderRegistryTest do
 
     start_supervised!(%{
       id: name,
-      start: {ProviderRegistry, :start_link, [[name: name, seed_builtin?: false]]}
+      start: {ProviderRegistry, :start_link, [[name: name]]}
     })
 
     {:ok, registry: name}
@@ -48,6 +48,17 @@ defmodule MingaAgent.ProviderRegistryTest do
              )
   end
 
+  test "rejects legacy builtin provider sources", %{registry: registry} do
+    assert {:error, {:invalid_spec, {:invalid_source, :builtin}}} =
+             ProviderRegistry.register(
+               registry,
+               source: :builtin,
+               id: "builtin",
+               module: Native,
+               display_name: "Builtin"
+             )
+  end
+
   test "direct spec structs are validated before registration", %{registry: registry} do
     invalid = %Spec{source: :config, id: "", module: Native, display_name: "Invalid"}
 
@@ -81,14 +92,16 @@ defmodule MingaAgent.ProviderRegistryTest do
     assert {:ok, _entry} = ProviderRegistry.lookup(registry, "other")
   end
 
-  test "seeds the bundled native provider when requested" do
-    name = Module.concat(__MODULE__, "Seeded#{System.unique_integer([:positive])}")
+  test "starts empty until the bundled native pack registers" do
+    name = Module.concat(__MODULE__, "PackOwned#{System.unique_integer([:positive])}")
 
     start_supervised!(%{
       id: name,
-      start: {ProviderRegistry, :start_link, [[name: name, seed_builtin?: true]]}
+      start: {ProviderRegistry, :start_link, [[name: name]]}
     })
 
+    assert {:error, :not_found} = ProviderRegistry.lookup(name, "native")
+    assert :ok = NativeProviderPack.register(name)
     assert {:ok, entry} = ProviderRegistry.lookup(name, "native")
     assert entry.spec.source == NativeProviderPack.source()
     assert entry.spec.module == Native

@@ -46,6 +46,17 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterCredentialsTest do
     assert System.get_env("ANTHROPIC_API_KEY") == "file-key"
   end
 
+  test "file-backed non-anthropic provider keys populate the matching env var", %{
+    config_home: config_home
+  } do
+    write_credentials(config_home, %{"groq" => "groq-file-key"})
+
+    assert :ok = ReqLLMAdapter.ensure_api_key_in_env("groq:llama-3.3")
+    assert System.get_env("GROQ_API_KEY") == "groq-file-key"
+    assert System.get_env("ANTHROPIC_API_KEY") == nil
+    assert System.get_env("OPENAI_API_KEY") == nil
+  end
+
   test "file-backed provider keys flow through the credential accessor at call time" do
     secret = "sk-ant-fake-bundled-provider"
     assert :ok = Credentials.store("anthropic", secret)

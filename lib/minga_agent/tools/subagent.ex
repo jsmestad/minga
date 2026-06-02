@@ -332,7 +332,16 @@ defmodule MingaAgent.Tools.Subagent do
        source: resolved.source
      }}
   rescue
-    e -> {:error, Exception.message(e)}
+    e in ArgumentError ->
+      {:error, Exception.message(e)}
+
+    e ->
+      Minga.Log.error(
+        :agent,
+        "Unexpected subagent provider resolution failure: #{Exception.format(:error, e, __STACKTRACE__)}"
+      )
+
+      {:error, "Unexpected subagent provider resolution failure"}
   end
 
   @spec build_provider_opts(

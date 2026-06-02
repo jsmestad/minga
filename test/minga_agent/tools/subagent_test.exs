@@ -327,6 +327,64 @@ defmodule MingaAgent.Tools.SubagentTest do
     assert message =~ ":not_found"
   end
 
+  test "inherited source-owned providers resolve for child sessions while registered", %{
+    tmp_dir: dir
+  } do
+    source = {:bundle, :recording_subagent_provider_positive}
+    provider_id = "recording-subagent-provider-positive"
+    ref = make_ref()
+
+    assert :ok =
+             ProviderRegistry.register(
+               id: provider_id,
+               source: source,
+               module: RecordingProvider,
+               display_name: "Recording Subagent Provider"
+             )
+
+    {:ok, parent} =
+      MingaAgent.Supervisor.start_session(
+        provider: RecordingProvider,
+        provider_id: provider_id,
+        provider_source: source,
+        model_name: "parent-model",
+        provider_opts: [
+          provider: "recording",
+          model: "parent-model",
+          thinking_level: "high",
+          active_skill_names: ["elixir"],
+          project_root: dir,
+          test_pid: self(),
+          test_ref: ref
+        ]
+      )
+
+    assert_receive {^ref, {:provider_started, _provider_pid, _opts}}, 1_000
+
+    on_exit(fn ->
+      MingaAgent.Supervisor.stop_session(parent)
+      ProviderRegistry.unregister_source(source)
+    end)
+
+    assert {:ok, "child response"} =
+             Subagent.execute("allowed inherited",
+               parent_session: parent,
+               project_root: dir,
+               provider_opts: [test_pid: self(), test_ref: ref]
+             )
+
+    assert_receive {^ref, {:provider_started, _child_provider, child_opts}}, 1_000
+    assert Keyword.fetch!(child_opts, :project_root) == dir
+    assert Keyword.fetch!(child_opts, :provider) == provider_id
+    assert Keyword.fetch!(child_opts, :model) == "parent-model"
+    assert Keyword.fetch!(child_opts, :thinking_level) == "high"
+    assert Keyword.fetch!(child_opts, :active_skill_names) == ["elixir"]
+    assert Keyword.fetch!(child_opts, :test_ref) == ref
+
+    assert_receive {^ref, {:prompt_received, _provider_pid, _subscriber, "allowed inherited"}},
+                   1_000
+  end
+
   test "inherited source-owned providers are rechecked for child sessions", %{tmp_dir: dir} do
     source = {:bundle, :recording_subagent_provider}
     provider_id = "recording-subagent-provider"

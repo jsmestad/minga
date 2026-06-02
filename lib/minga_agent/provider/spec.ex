@@ -6,7 +6,7 @@ defmodule MingaAgent.Provider.Spec do
   """
 
   @typedoc "Source that contributed this provider."
-  @type source :: Minga.Extension.ContributionCleanup.contribution_source()
+  @type source :: :config | {:bundle, atom()} | {:extension, atom()}
 
   @typedoc "Provider capability advertised to the resolver and UI."
   @type capability :: atom()
@@ -71,7 +71,6 @@ defmodule MingaAgent.Provider.Spec do
   end
 
   @spec validate_source(term()) :: :ok | {:error, term()}
-  defp validate_source(:builtin), do: :ok
   defp validate_source(:config), do: :ok
   defp validate_source({:bundle, name}) when is_atom(name), do: :ok
   defp validate_source({:extension, name}) when is_atom(name), do: :ok

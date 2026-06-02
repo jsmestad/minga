@@ -108,9 +108,10 @@ defmodule MingaAgent.ProviderResolverTest do
 
     start_supervised!(%{
       id: name,
-      start: {ProviderRegistry, :start_link, [[name: name, seed_builtin?: true]]}
+      start: {ProviderRegistry, :start_link, [[name: name]]}
     })
 
+    assert :ok = NativeProviderPack.register(name)
     name
   end
 end

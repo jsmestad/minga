@@ -10,7 +10,7 @@ defmodule MingaAgent.ProviderPacks.NativeTest do
 
     start_supervised!(%{
       id: registry,
-      start: {ProviderRegistry, :start_link, [[name: registry, seed_builtin?: false]]}
+      start: {ProviderRegistry, :start_link, [[name: registry]]}
     })
 
     {:ok, registry: registry}
