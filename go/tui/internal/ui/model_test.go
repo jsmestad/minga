@@ -196,6 +196,42 @@ func TestSemanticWindowRendersGutterCursorlineTildesAndModeline(t *testing.T) {
 	}
 }
 
+func TestOverlayLinesRenderRemainingSemanticSurfaces(t *testing.T) {
+	model := New(60, 12, nil)
+	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiAgentContext: {AgentContext: protocol.AgentContext{Visible: true, Task: "Review diff", Status: 1, CanApprove: true}}}
+	if got := strings.Join(model.overlayLines(), "\n"); !strings.Contains(got, "Review diff") {
+		t.Fatalf("agent context overlay missing content: %q", got)
+	}
+
+	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiToolManager: {ToolManager: protocol.ToolManager{Visible: true, Tools: []protocol.ToolSummary{{Name: "elixir-ls", Label: "Elixir LS", Status: 1}}}}}
+	if got := strings.Join(model.overlayLines(), "\n"); !strings.Contains(got, "Elixir LS") || !strings.Contains(got, "installed") {
+		t.Fatalf("tool manager overlay missing content: %q", got)
+	}
+}
+
+func TestSplitSeparatorsRenderOnContent(t *testing.T) {
+	model := New(24, 6, nil)
+	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiSplitSeparators: {Splits: protocol.SplitSeparators{Verticals: []protocol.VerticalSeparator{{Col: 2, StartRow: 0, EndRow: 1}}, Horizontals: []protocol.HorizontalSeparator{{Row: 1, Col: 0, Width: 16, Filename: "main.ex"}}}}}
+	styled := "\x1b[1mabcd\x1b[0m"
+	lines := model.withSplitSeparators([]string{styled, "efghijklmnop"})
+	joined := ansi.Strip(strings.Join(lines, "\n"))
+	if !strings.Contains(joined, "│") || !strings.Contains(joined, "main.ex") {
+		t.Fatalf("split separators not rendered: %q", joined)
+	}
+	if !strings.Contains(lines[0], "\x1b[") || !strings.Contains(lines[0], "\x1b[1md") {
+		t.Fatalf("vertical replacement should preserve and resume existing ANSI styling: %q", lines[0])
+	}
+}
+
+func TestLegacyCursorlineAppliesToCellFallback(t *testing.T) {
+	model := New(10, 4, nil)
+	model.cursorlineChrome = protocol.CursorlineChrome{Visible: true, Row: 0, BG: 0x112233}
+	lines := model.withLegacyCursorline([]string{"hello     "})
+	if len(lines) != 1 || ansi.Strip(lines[0]) == "" {
+		t.Fatalf("legacy cursorline should preserve row content: %+v", lines)
+	}
+}
+
 func TestApplyCommandsStoresIndentGuidesByWindow(t *testing.T) {
 	model := New(30, 6, nil)
 	_ = model.applyCommands([]protocol.Command{{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiIndentGuides, IndentGuides: protocol.IndentGuides{WindowID: 7, TabWidth: 2, GuideCols: []uint16{2}, IndentLevels: []byte{2}}}}})

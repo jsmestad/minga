@@ -14,9 +14,9 @@ import (
 
 func (m Model) content() string {
 	if len(m.windows) > 0 {
-		return strings.Join(m.fillBody(m.withFileTree(m.semanticLines())), "\n")
+		return strings.Join(m.fillBody(m.withFileTree(m.withSplitSeparators(m.semanticLines()))), "\n")
 	}
-	return strings.Join(m.fillBody(m.withFileTree(m.cellLines())), "\n")
+	return strings.Join(m.fillBody(m.withFileTree(m.withSplitSeparators(m.withLegacyCursorline(m.cellLines())))), "\n")
 }
 
 func (m Model) semanticLines() []string {
@@ -250,6 +250,151 @@ func fitStyled(value string, width int) string {
 		return value
 	}
 	return value + strings.Repeat(" ", width-visible)
+}
+
+func (m Model) withLegacyCursorline(lines []string) []string {
+	if !m.cursorlineChrome.Visible || int(m.cursorlineChrome.Row) >= len(lines) {
+		return lines
+	}
+	out := append([]string(nil), lines...)
+	style := m.editorStyle()
+	if m.cursorlineChrome.BG != 0 {
+		style = style.Background(lipgloss.Color(fmt.Sprintf("#%06X", m.cursorlineChrome.BG)))
+	}
+	row := int(m.cursorlineChrome.Row)
+	out[row] = style.Render(fitStyled(out[row], m.width))
+	return out
+}
+
+func (m Model) withSplitSeparators(lines []string) []string {
+	splits, ok := m.splitSeparators()
+	if !ok || len(lines) == 0 {
+		return lines
+	}
+	out := append([]string(nil), lines...)
+	style := lipgloss.NewStyle().Foreground(m.palette().PopupBorder()).Background(m.editorBackground())
+	if splits.Color != 0 {
+		style = style.Foreground(lipgloss.Color(fmt.Sprintf("#%06X", splits.Color)))
+	}
+	for _, vertical := range splits.Verticals {
+		for row := int(vertical.StartRow); row <= int(vertical.EndRow) && row < len(out); row++ {
+			out[row] = replaceVisibleCell(out[row], int(vertical.Col), style.Render("│"))
+		}
+	}
+	for _, horizontal := range splits.Horizontals {
+		row := int(horizontal.Row)
+		if row < 0 || row >= len(out) {
+			continue
+		}
+		text := horizontalSeparatorText(int(horizontal.Width), horizontal.Filename)
+		for offset, part := range splitGraphemes(text) {
+			out[row] = replaceVisibleCell(out[row], int(horizontal.Col)+offset, style.Render(part))
+		}
+	}
+	return out
+}
+
+func replaceVisibleCell(line string, col int, replacement string) string {
+	if col < 0 || col >= displayWidth(xansi.Strip(line)) {
+		return line
+	}
+	var builder strings.Builder
+	activeSGR := ""
+	visibleCol := 0
+	for index := 0; index < len(line); {
+		if line[index] == '\x1b' {
+			next := ansiSequenceEnd(line, index)
+			sequence := line[index:next]
+			activeSGR = updateActiveSGR(activeSGR, sequence)
+			builder.WriteString(sequence)
+			index = next
+			continue
+		}
+		graphemes := uniseg.NewGraphemes(line[index:])
+		if !graphemes.Next() {
+			break
+		}
+		text := graphemes.Str()
+		width := max(displayWidth(text), 1)
+		if visibleCol == col {
+			builder.WriteString(replacement)
+			builder.WriteString(activeSGR)
+		} else {
+			builder.WriteString(text)
+		}
+		visibleCol += width
+		index += len(text)
+	}
+	return builder.String()
+}
+
+func updateActiveSGR(active string, sequence string) string {
+	if !strings.HasSuffix(sequence, "m") {
+		return active
+	}
+	if strings.Contains(sequence, "[0m") || strings.Contains(sequence, "[m") {
+		return ""
+	}
+	return sequence
+}
+
+func ansiSequenceEnd(value string, start int) int {
+	if start+1 >= len(value) {
+		return len(value)
+	}
+	if value[start+1] == '[' {
+		for index := start + 2; index < len(value); index++ {
+			if value[index] >= 0x40 && value[index] <= 0x7E {
+				return index + 1
+			}
+		}
+		return len(value)
+	}
+	if value[start+1] == ']' {
+		for index := start + 2; index < len(value); index++ {
+			if value[index] == '\a' {
+				return index + 1
+			}
+			if value[index] == '\x1b' && index+1 < len(value) && value[index+1] == '\\' {
+				return index + 2
+			}
+		}
+		return len(value)
+	}
+	return min(start+2, len(value))
+}
+
+func horizontalSeparatorText(width int, filename string) string {
+	if width <= 0 {
+		return ""
+	}
+	line := strings.Repeat("─", width)
+	label := strings.TrimSpace(filename)
+	if label == "" || width < 4 {
+		return line
+	}
+	label = " " + label + " "
+	if displayWidth(label) > width {
+		label = fit(label, width)
+	}
+	start := max((width-displayWidth(label))/2, 0)
+	parts := splitGraphemes(line)
+	for offset, part := range splitGraphemes(label) {
+		if start+offset >= len(parts) {
+			break
+		}
+		parts[start+offset] = part
+	}
+	return strings.Join(parts, "")
+}
+
+func splitGraphemes(value string) []string {
+	parts := []string{}
+	graphemes := uniseg.NewGraphemes(value)
+	for graphemes.Next() {
+		parts = append(parts, graphemes.Str())
+	}
+	return parts
 }
 
 func (m Model) withFileTree(mainLines []string) []string {

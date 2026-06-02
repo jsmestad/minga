@@ -7,6 +7,50 @@ import (
 )
 
 func TestSemanticFrontendOpcodesAreAccountedFor(t *testing.T) {
+	classifications := map[byte]string{
+		generated.OPGuiTabBar:              "rendered header",
+		generated.OPGuiWhichKey:            "rendered overlay",
+		generated.OPGuiCompletion:          "rendered overlay",
+		generated.OPGuiTheme:               "stateful renderer theme",
+		generated.OPGuiBreadcrumb:          "rendered fallback header",
+		generated.OPGuiStatusBar:           "rendered footer/modeline",
+		generated.OPGuiPicker:              "rendered overlay",
+		generated.OPGuiAgentChat:           "rendered overlay",
+		generated.OPGuiGutterSep:           "decoded compatibility chrome",
+		generated.OPGuiCursorline:          "rendered fallback cursorline",
+		generated.OPGuiGutter:              "rendered window gutter",
+		generated.OPGuiBottomPanel:         "rendered overlay",
+		generated.OPGuiPickerPreview:       "rendered picker sidecar",
+		generated.OPGuiToolManager:         "rendered overlay",
+		generated.OPGuiMinibuffer:          "rendered footer overlay",
+		generated.OPGuiWindowContent:       "rendered window content",
+		generated.OPGuiHoverPopup:          "rendered overlay",
+		generated.OPGuiSignatureHelp:       "rendered overlay",
+		generated.OPGuiFloatPopup:          "rendered overlay",
+		generated.OPGuiSplitSeparators:     "rendered content separators",
+		generated.OPGuiGitStatus:           "rendered header/status",
+		generated.OPGuiBoard:               "rendered overlay",
+		generated.OPGuiAgentContext:        "rendered overlay",
+		generated.OPGuiChangeSummary:       "rendered footer/overlay",
+		generated.OPGuiHoverAction:         "rendered hover sidecar",
+		generated.OPGuiConfigState:         "intentional TUI no-op state",
+		generated.OPGuiWorkspaces:          "rendered header",
+		generated.OPGuiNotifications:       "rendered overlay",
+		generated.OPGuiObservatory:         "rendered overlay",
+		generated.OPGuiEditTimeline:        "rendered overlay",
+		generated.OPGuiExtensionOverlay:    "rendered overlay",
+		generated.OPGuiExtensionPanel:      "rendered overlay",
+		generated.OPGuiSearchState:         "rendered footer status",
+		generated.OPGuiSidebars:            "rendered content sidebars",
+		generated.OPGuiWindowOverlayDelta:  "stateful window delta",
+		generated.OPGuiWindowViewportDelta: "stateful window delta",
+		generated.OPGuiWindowRowsDelta:     "stateful window delta",
+		generated.OPGuiIndentGuides:        "rendered window indent guides",
+		generated.OPGuiLineSpacing:         "intentional TUI no-op state",
+		generated.OPGuiFileTree:            "rendered content sidebar",
+		generated.OPGuiFileTreeSelection:   "stateful file tree selection",
+		generated.OPGuiCursorAnimation:     "intentional TUI no-op state",
+	}
 	payloads := map[byte][]byte{
 		generated.OPGuiTabBar:              {generated.OPGuiTabBar, 0, 0},
 		generated.OPGuiWhichKey:            {generated.OPGuiWhichKey, 0},
@@ -28,6 +72,7 @@ func TestSemanticFrontendOpcodesAreAccountedFor(t *testing.T) {
 		generated.OPGuiSignatureHelp:       {generated.OPGuiSignatureHelp, 0},
 		generated.OPGuiFloatPopup:          {generated.OPGuiFloatPopup, 0},
 		generated.OPGuiSplitSeparators:     {generated.OPGuiSplitSeparators, 0, 0, 0, 0},
+		generated.OPGuiGitStatus:           {generated.OPGuiGitStatus, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 		generated.OPGuiBoard:               append([]byte{generated.OPGuiBoard, 0, 1}, []byte{0}...),
 		generated.OPGuiAgentContext:        {generated.OPGuiAgentContext, 0, 0},
 		generated.OPGuiChangeSummary:       {generated.OPGuiChangeSummary, 0},
@@ -49,6 +94,20 @@ func TestSemanticFrontendOpcodesAreAccountedFor(t *testing.T) {
 		generated.OPGuiFileTree:            {generated.OPGuiFileTree, 0, 0, 0, 0},
 		generated.OPGuiFileTreeSelection:   {generated.OPGuiFileTreeSelection, 0, 1, 0},
 		generated.OPGuiCursorAnimation:     {generated.OPGuiCursorAnimation, 0, 1, 0},
+	}
+
+	for opcode := range payloads {
+		if classifications[opcode] == "" {
+			t.Fatalf("opcode 0x%02X has payload coverage but no semantic parity classification", opcode)
+		}
+	}
+	for opcode, classification := range classifications {
+		if classification == "" {
+			t.Fatalf("opcode 0x%02X has empty semantic parity classification", opcode)
+		}
+		if _, ok := payloads[opcode]; !ok {
+			t.Fatalf("opcode 0x%02X has semantic parity classification but no decode payload", opcode)
+		}
 	}
 
 	for opcode, payload := range payloads {

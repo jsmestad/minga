@@ -21,25 +21,26 @@ const (
 )
 
 type Model struct {
-	width         int
-	height        int
-	out           chan<- []byte
-	viewport      viewport.Model
-	zones         *zone.Manager
-	windows       map[uint16]protocol.WindowContent
-	windowOrder   []uint16
-	chrome        map[byte]protocol.ChromePayload
-	activePalette palette
-	gutters       map[uint16]protocol.Gutter
-	indentGuides  map[uint16]protocol.IndentGuides
-	cells         map[position]cell
-	drawSeq       uint64
-	cursorRow     uint16
-	cursorCol     uint16
-	cursorShape   byte
-	title         string
-	bg            uint32
-	lastError     string
+	width            int
+	height           int
+	out              chan<- []byte
+	viewport         viewport.Model
+	zones            *zone.Manager
+	windows          map[uint16]protocol.WindowContent
+	windowOrder      []uint16
+	chrome           map[byte]protocol.ChromePayload
+	activePalette    palette
+	gutters          map[uint16]protocol.Gutter
+	indentGuides     map[uint16]protocol.IndentGuides
+	cells            map[position]cell
+	drawSeq          uint64
+	cursorRow        uint16
+	cursorCol        uint16
+	cursorShape      byte
+	title            string
+	bg               uint32
+	cursorlineChrome protocol.CursorlineChrome
+	lastError        string
 }
 
 type position struct {
@@ -140,6 +141,7 @@ func (m *Model) applyCommands(commands []protocol.Command) tea.Cmd {
 			m.chrome = map[byte]protocol.ChromePayload{}
 			m.gutters = map[uint16]protocol.Gutter{}
 			m.indentGuides = map[uint16]protocol.IndentGuides{}
+			m.cursorlineChrome = protocol.CursorlineChrome{}
 			m.cells = map[position]cell{}
 			m.drawSeq = 0
 		case protocol.CommandDrawText:
@@ -162,6 +164,9 @@ func (m *Model) applyCommands(commands []protocol.Command) tea.Cmd {
 			m.chrome[command.Chrome.Opcode] = command.Chrome
 			if command.Chrome.Opcode == generated.OPGuiTheme {
 				m.activePalette = paletteFromTheme(command.Chrome.Theme)
+			}
+			if command.Chrome.Opcode == generated.OPGuiCursorline {
+				m.cursorlineChrome = command.Chrome.CursorlineChrome
 			}
 			if command.Chrome.Opcode == generated.OPGuiGutter {
 				m.gutters[command.Chrome.WindowGutter.WindowID] = command.Chrome.WindowGutter

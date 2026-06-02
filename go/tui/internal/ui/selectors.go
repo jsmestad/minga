@@ -217,6 +217,15 @@ func (m Model) observatory() (protocol.Observatory, bool) {
 	return protocol.Observatory{}, false
 }
 
+func (m Model) agentContext() (protocol.AgentContext, bool) {
+	for _, payload := range m.chrome {
+		if payload.AgentContext.Visible || payload.AgentContext.Task != "" {
+			return payload.AgentContext, true
+		}
+	}
+	return protocol.AgentContext{}, false
+}
+
 func (m Model) agentChat() (protocol.AgentChat, bool) {
 	for _, payload := range m.chrome {
 		if payload.AgentChat.Visible {
@@ -242,4 +251,22 @@ func (m Model) editTimeline() (protocol.EditTimeline, bool) {
 		}
 	}
 	return protocol.EditTimeline{}, false
+}
+
+func (m Model) toolManager() (protocol.ToolManager, bool) {
+	for _, payload := range m.chrome {
+		if payload.ToolManager.Visible {
+			return payload.ToolManager, true
+		}
+	}
+	return protocol.ToolManager{}, false
+}
+
+func (m Model) splitSeparators() (protocol.SplitSeparators, bool) {
+	for _, payload := range m.chrome {
+		if len(payload.Splits.Verticals) > 0 || len(payload.Splits.Horizontals) > 0 {
+			return payload.Splits, true
+		}
+	}
+	return protocol.SplitSeparators{}, false
 }
