@@ -6,6 +6,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/jsmestad/minga/go/tui/internal/port"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 )
@@ -78,7 +79,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMsg:
 		m.send(mousePacket(msg))
 	case port.PacketMsg:
-		m.applyCommands(msg.Commands)
+		return m, m.applyCommands(msg.Commands)
 	case port.ErrorMsg:
 		m.lastError = msg.Err.Error()
 	}
@@ -93,10 +94,22 @@ func (m Model) View() string {
 	body := m.viewport.View()
 	parts := append(m.headerLines(), body)
 	parts = append(parts, m.footerLines()...)
-	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+	return m.cursorStyleSequence() + lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
-func (m *Model) applyCommands(commands []protocol.Command) {
+func (m Model) cursorStyleSequence() string {
+	switch m.cursorShape {
+	case 1:
+		return ansi.SetCursorStyle(6)
+	case 2:
+		return ansi.SetCursorStyle(4)
+	default:
+		return ansi.SetCursorStyle(2)
+	}
+}
+
+func (m *Model) applyCommands(commands []protocol.Command) tea.Cmd {
+	cmds := make([]tea.Cmd, 0, 1)
 	for _, command := range commands {
 		switch command.Kind {
 		case protocol.CommandClear:
@@ -112,6 +125,7 @@ func (m *Model) applyCommands(commands []protocol.Command) {
 			m.cursorShape = command.CursorShape
 		case protocol.CommandSetTitle:
 			m.title = command.Title
+			cmds = append(cmds, tea.SetWindowTitle(command.Title))
 		case protocol.CommandSetWindowBg:
 			m.bg = command.WindowBg
 		case protocol.CommandWindowContent:
@@ -122,6 +136,7 @@ func (m *Model) applyCommands(commands []protocol.Command) {
 			m.chrome[command.Chrome.Opcode] = command.Chrome
 		}
 	}
+	return tea.Batch(cmds...)
 }
 
 func (m *Model) applyDraw(draw protocol.DrawText) {

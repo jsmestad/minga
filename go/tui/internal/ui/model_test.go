@@ -116,3 +116,15 @@ func TestApplyWindowDeltaResolvesRefsAndReplacesRowSnapshot(t *testing.T) {
 		t.Fatalf("delta rows resolved incorrectly: %+v", rows)
 	}
 }
+
+func TestCursorShapeSequenceTracksProtocolShape(t *testing.T) {
+	model := New(80, 24, nil)
+	model.cursorShape = 1
+	if got := model.cursorStyleSequence(); got != "\x1b[6 q" {
+		t.Fatalf("beam cursor sequence = %q", got)
+	}
+	model.cursorShape = 2
+	if got := model.cursorStyleSequence(); got != "\x1b[4 q" {
+		t.Fatalf("underline cursor sequence = %q", got)
+	}
+}

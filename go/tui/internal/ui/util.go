@@ -3,6 +3,7 @@ package ui
 import (
 	"strings"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 )
 
@@ -77,11 +78,7 @@ func levelName(level byte) string {
 }
 
 func displayWidth(value string) int {
-	width := 0
-	for range value {
-		width++
-	}
-	return width
+	return ansi.StringWidthWc(value)
 }
 
 func max(a, b int) int {
@@ -105,11 +102,7 @@ func fit(value string, width int) string {
 	if displayWidth(value) <= width {
 		return value + strings.Repeat(" ", width-displayWidth(value))
 	}
-	runes := []rune(value)
-	if len(runes) <= width {
-		return value
-	}
-	return string(runes[:width])
+	return ansi.TruncateWc(value, width, "")
 }
 
 func takeLines(lines []string, limit int) []string {

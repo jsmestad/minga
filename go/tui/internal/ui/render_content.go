@@ -206,13 +206,16 @@ func (m Model) styleForEditorSpan(span protocol.Span) lipgloss.Style {
 		style = style.Bold(true)
 	}
 	if span.Attrs&0x02 != 0 {
-		style = style.Italic(true)
+		style = style.Underline(true)
 	}
 	if span.Attrs&0x04 != 0 {
-		style = style.Underline(true)
+		style = style.Italic(true)
 	}
 	if span.Attrs&0x08 != 0 {
 		style = style.Reverse(true)
+	}
+	if span.Attrs&0x10 != 0 {
+		style = style.Strikethrough(true)
 	}
 	return style
 }
@@ -229,13 +232,16 @@ func styleFor(span protocol.Span) lipgloss.Style {
 		style = style.Bold(true)
 	}
 	if span.Attrs&0x02 != 0 {
-		style = style.Italic(true)
+		style = style.Underline(true)
 	}
 	if span.Attrs&0x04 != 0 {
-		style = style.Underline(true)
+		style = style.Italic(true)
 	}
 	if span.Attrs&0x08 != 0 {
 		style = style.Reverse(true)
+	}
+	if span.Attrs&0x10 != 0 {
+		style = style.Strikethrough(true)
 	}
 	return style
 }
