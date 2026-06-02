@@ -1,18 +1,21 @@
+mod theme;
+
 use crate::protocol::{self, Command, DrawStyledText, DrawText, Region};
 use crate::semantic;
 use crate::terminal::{CellStyle, Terminal};
 use std::collections::HashMap;
 use std::io::{self, Write};
+use theme::{SLOT_EDITOR_BG, ThemePalette};
+
+#[cfg(test)]
+use theme::{
+    SLOT_MODELINE_BAR_BG, SLOT_POPUP_BG, SLOT_POPUP_FG, SLOT_POPUP_SEL_BG, SLOT_POPUP_SEL_FG,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Cell {
     text: String,
     style: CellStyle,
-}
-
-#[derive(Debug, Clone, Default)]
-struct ThemePalette {
-    slots: HashMap<u8, u32>,
 }
 
 #[derive(Debug, Clone)]
@@ -44,11 +47,16 @@ pub struct Renderer {
     regions: HashMap<u16, Region>,
     active_region: Option<Region>,
     file_tree: Option<semantic::FileTree>,
+    breadcrumb: Option<semantic::Breadcrumb>,
     picker: Option<semantic::Picker>,
     picker_preview: Option<semantic::PickerPreview>,
     minibuffer: Option<semantic::Minibuffer>,
+    completion: Option<semantic::Completion>,
+    which_key: Option<semantic::WhichKey>,
     picker_snapshot: Option<CellSnapshot>,
     minibuffer_snapshot: Option<CellSnapshot>,
+    completion_snapshot: Option<CellSnapshot>,
+    which_key_snapshot: Option<CellSnapshot>,
     theme: ThemePalette,
 }
 
@@ -66,11 +74,16 @@ impl Renderer {
             regions: HashMap::new(),
             active_region: None,
             file_tree: None,
+            breadcrumb: None,
             picker: None,
             picker_preview: None,
             minibuffer: None,
+            completion: None,
+            which_key: None,
             picker_snapshot: None,
             minibuffer_snapshot: None,
+            completion_snapshot: None,
+            which_key_snapshot: None,
             theme: ThemePalette::default(),
         }
     }
@@ -136,11 +149,16 @@ impl Renderer {
         self.regions.clear();
         self.active_region = None;
         self.file_tree = None;
+        self.breadcrumb = None;
         self.picker = None;
         self.picker_preview = None;
         self.minibuffer = None;
+        self.completion = None;
+        self.which_key = None;
         self.picker_snapshot = None;
         self.minibuffer_snapshot = None;
+        self.completion_snapshot = None;
+        self.which_key_snapshot = None;
     }
 
     fn clear(&mut self) {
@@ -206,6 +224,9 @@ impl Renderer {
             semantic::Command::Picker(picker, _) => self.draw_picker(picker),
             semantic::Command::PickerPreview(preview, _) => self.draw_picker_preview(preview),
             semantic::Command::Minibuffer(minibuffer, _) => self.draw_minibuffer(minibuffer),
+            semantic::Command::Breadcrumb(breadcrumb, _) => self.draw_breadcrumb(breadcrumb),
+            semantic::Command::Completion(completion, _) => self.draw_completion(completion),
+            semantic::Command::WhichKey(which_key, _) => self.draw_which_key(which_key),
             semantic::Command::Theme(theme, _) => self.apply_theme(theme),
             semantic::Command::Unsupported { .. } => {}
         }
@@ -362,6 +383,48 @@ impl Renderer {
         self.render_minibuffer(&minibuffer);
     }
 
+    fn draw_breadcrumb(&mut self, breadcrumb: semantic::Breadcrumb) {
+        if self.width == 0 || self.height < 3 {
+            return;
+        }
+
+        let row = 1;
+        if breadcrumb.segments.is_empty() {
+            self.clear_row(row);
+            self.breadcrumb = None;
+            return;
+        }
+
+        self.breadcrumb = Some(breadcrumb.clone());
+        let text = format!(" {}", breadcrumb.segments.join(" / "));
+        self.write_run(
+            row,
+            0,
+            &pad_to_width(&text, self.width),
+            self.theme.breadcrumb_style(),
+        );
+    }
+
+    fn draw_completion(&mut self, completion: semantic::Completion) {
+        if completion.visible {
+            self.completion = Some(completion.clone());
+            self.render_completion(&completion);
+        } else {
+            self.restore_completion_snapshot();
+            self.completion = None;
+        }
+    }
+
+    fn draw_which_key(&mut self, which_key: semantic::WhichKey) {
+        if which_key.visible {
+            self.which_key = Some(which_key.clone());
+            self.render_which_key(&which_key);
+        } else {
+            self.restore_which_key_snapshot();
+            self.which_key = None;
+        }
+    }
+
     fn render_minibuffer(&mut self, minibuffer: &semantic::Minibuffer) {
         self.capture_minibuffer_snapshot();
         self.restore_minibuffer_cells();
@@ -435,8 +498,20 @@ impl Renderer {
 
     fn redraw_retained_chrome(&mut self) {
         self.render_file_tree();
+        if let Some(breadcrumb) = self.breadcrumb.clone() {
+            self.draw_breadcrumb(breadcrumb);
+        }
+        if let Some(completion) = self.completion.clone() {
+            self.completion_snapshot = None;
+            self.render_completion(&completion);
+        }
         self.picker_snapshot = None;
         self.render_picker();
+
+        if let Some(which_key) = self.which_key.clone() {
+            self.which_key_snapshot = None;
+            self.render_which_key(&which_key);
+        }
 
         if let Some(minibuffer) = self.minibuffer.clone() {
             self.minibuffer_snapshot = None;
@@ -542,6 +617,139 @@ impl Renderer {
 
     fn restore_minibuffer_cells(&mut self) {
         if let Some(snapshot) = self.minibuffer_snapshot.clone() {
+            self.restore_snapshot(snapshot);
+        }
+    }
+
+    fn render_completion(&mut self, completion: &semantic::Completion) {
+        self.restore_completion_cells();
+        if completion.items.is_empty() || self.width == 0 || self.height == 0 {
+            return;
+        }
+
+        let height = completion.items.len().min(8) as u16;
+        let width = completion_width(completion).min(self.width).max(18);
+        let row = completion
+            .anchor_row
+            .saturating_add(1)
+            .min(self.height.saturating_sub(height));
+        let col = completion.anchor_col.min(self.width.saturating_sub(width));
+
+        if self.completion_snapshot.is_none() {
+            self.completion_snapshot = Some(self.capture_rect(row, col, width, height));
+        }
+
+        self.fill_rect(row, col, width, height, self.theme.completion_style(false));
+
+        let selected_index = completion.selected_index as usize;
+        let visible_rows = height as usize;
+        let start = selected_index
+            .saturating_add(1)
+            .saturating_sub(visible_rows)
+            .min(completion.items.len().saturating_sub(visible_rows));
+        for (screen_index, item) in completion
+            .items
+            .iter()
+            .skip(start)
+            .take(visible_rows)
+            .enumerate()
+        {
+            let item_index = start + screen_index;
+            let selected = item_index == selected_index;
+            let detail = if item.detail.is_empty() {
+                String::new()
+            } else {
+                format!("  {}", item.detail)
+            };
+            let line = format!(
+                "{} {}{}",
+                completion_kind_marker(item.kind),
+                item.label,
+                detail
+            );
+            self.write_run(
+                row + screen_index as u16,
+                col,
+                &pad_to_width(&line, width),
+                self.theme.completion_style(selected),
+            );
+        }
+    }
+
+    fn restore_completion_snapshot(&mut self) {
+        if let Some(snapshot) = self.completion_snapshot.take() {
+            self.restore_snapshot(snapshot);
+        }
+    }
+
+    fn restore_completion_cells(&mut self) {
+        if let Some(snapshot) = self.completion_snapshot.clone() {
+            self.restore_snapshot(snapshot);
+        }
+    }
+
+    fn render_which_key(&mut self, which_key: &semantic::WhichKey) {
+        self.restore_which_key_cells();
+        if which_key.bindings.is_empty() || self.width < 24 || self.height < 4 {
+            return;
+        }
+
+        let width = self.width.saturating_sub(4).clamp(24, 92);
+        let height = which_key.bindings.len().min(8) as u16 + 1;
+        let row = self.height.saturating_sub(height + 1);
+        let col = self.width.saturating_sub(width) / 2;
+
+        if self.which_key_snapshot.is_none() {
+            self.which_key_snapshot = Some(self.capture_rect(row, col, width, height));
+        }
+
+        self.fill_rect(row, col, width, height, self.theme.which_key_style(false));
+        let page = if which_key.page_count > 1 {
+            format!(
+                "  {}/{}",
+                which_key.page.saturating_add(1),
+                which_key.page_count
+            )
+        } else {
+            String::new()
+        };
+        let title = format!(" {}{}", which_key.prefix, page);
+        self.write_run(
+            row,
+            col,
+            &pad_to_width(&title, width),
+            self.theme.which_key_header_style(),
+        );
+
+        for (index, binding) in which_key
+            .bindings
+            .iter()
+            .take(height.saturating_sub(1) as usize)
+            .enumerate()
+        {
+            let icon = if binding.icon.is_empty() {
+                if binding.kind == 1 { ">" } else { " " }
+            } else {
+                binding.icon.as_str()
+            };
+            let text = format!(" {icon} {:<8} {}", binding.key, binding.description);
+            self.write_run(
+                row + 1 + index as u16,
+                col,
+                &pad_to_width(&text, width),
+                self.theme.which_key_style(binding.kind == 1),
+            );
+        }
+    }
+
+    fn restore_which_key_snapshot(&mut self) {
+        if let Some(snapshot) = self.which_key_snapshot.take() {
+            self.restore_snapshot(snapshot);
+        }
+    }
+
+    fn restore_which_key_cells(&mut self) {
+        if let Some(snapshot) = self.which_key_snapshot.clone() {
             self.restore_snapshot(snapshot);
         }
     }
@@ -983,168 +1191,36 @@ fn picker_geometry(width: u16, height: u16) -> (u16, u16, u16, u16) {
     )
 }
 
-const SLOT_EDITOR_BG: u8 = 0x01;
-const SLOT_EDITOR_FG: u8 = 0x02;
-const SLOT_TREE_BG: u8 = 0x03;
-const SLOT_TREE_FG: u8 = 0x04;
-const SLOT_TREE_SELECTION_BG: u8 = 0x05;
-const SLOT_TREE_ACTIVE_FG: u8 = 0x07;
-const SLOT_TAB_BG: u8 = 0x10;
-const SLOT_TAB_ACTIVE_BG: u8 = 0x11;
-const SLOT_TAB_ACTIVE_FG: u8 = 0x12;
-const SLOT_TAB_INACTIVE_FG: u8 = 0x13;
-const SLOT_POPUP_BG: u8 = 0x20;
-const SLOT_POPUP_FG: u8 = 0x21;
-const SLOT_POPUP_BORDER: u8 = 0x22;
-const SLOT_POPUP_SEL_BG: u8 = 0x23;
-const SLOT_POPUP_DESC_FG: u8 = 0x26;
-const SLOT_POPUP_SEL_FG: u8 = 0x2A;
-const SLOT_MODELINE_BAR_BG: u8 = 0x30;
-const SLOT_MODELINE_BAR_FG: u8 = 0x31;
+fn completion_width(completion: &semantic::Completion) -> u16 {
+    completion
+        .items
+        .iter()
+        .map(|item| {
+            text_width(&format!(
+                "{} {}  {}",
+                completion_kind_marker(item.kind),
+                item.label,
+                item.detail
+            ))
+        })
+        .max()
+        .unwrap_or(18)
+        .saturating_add(2)
+}
 
-impl ThemePalette {
-    fn from_theme(theme: semantic::Theme) -> Self {
-        let slots = theme
-            .slots
-            .into_iter()
-            .map(|slot| (slot.id, slot.rgb))
-            .collect();
-        Self { slots }
-    }
-
-    fn color(&self, slot: u8, fallback: u32) -> u32 {
-        self.slots.get(&slot).copied().unwrap_or(fallback)
-    }
-
-    fn status_bar_style(&self) -> CellStyle {
-        CellStyle {
-            fg: self.color(SLOT_MODELINE_BAR_FG, 0xD8DEE9),
-            bg: self.color(SLOT_MODELINE_BAR_BG, 0x2E3440),
-            attrs: protocol::ATTR_BOLD,
-            ul_color: 0,
-            blend: 100,
-        }
-    }
-
-    fn tab_style(&self, active: bool, tint: u32) -> CellStyle {
-        CellStyle {
-            fg: if tint != 0 {
-                tint & 0x00FF_FFFF
-            } else if active {
-                self.color(SLOT_TAB_ACTIVE_FG, 0xD8DEE9)
-            } else {
-                self.color(SLOT_TAB_INACTIVE_FG, 0xC7CED9)
-            },
-            bg: if active {
-                self.color(SLOT_TAB_ACTIVE_BG, 0x3B4252)
-            } else {
-                self.color(SLOT_TAB_BG, 0x242933)
-            },
-            attrs: if active { protocol::ATTR_BOLD } else { 0 },
-            ul_color: 0,
-            blend: 100,
-        }
-    }
-
-    fn file_tree_style(&self, selected: bool, focused: bool) -> CellStyle {
-        CellStyle {
-            fg: if selected {
-                self.color(SLOT_TREE_ACTIVE_FG, 0xECEFF4)
-            } else {
-                self.color(SLOT_TREE_FG, 0xC7CED9)
-            },
-            bg: if selected {
-                self.color(
-                    SLOT_TREE_SELECTION_BG,
-                    if focused { 0x4C566A } else { 0x3B4252 },
-                )
-            } else {
-                self.color(SLOT_TREE_BG, 0x20242D)
-            },
-            attrs: if selected { protocol::ATTR_BOLD } else { 0 },
-            ul_color: 0,
-            blend: 100,
-        }
-    }
-
-    fn picker_style(&self, selected: bool) -> CellStyle {
-        CellStyle {
-            fg: if selected {
-                self.color(SLOT_POPUP_SEL_FG, 0xECEFF4)
-            } else {
-                self.color(SLOT_POPUP_FG, 0xD8DEE9)
-            },
-            bg: if selected {
-                self.color(SLOT_POPUP_SEL_BG, 0x3B4252)
-            } else {
-                self.color(SLOT_POPUP_BG, 0x151A21)
-            },
-            attrs: if selected { protocol::ATTR_BOLD } else { 0 },
-            ul_color: 0,
-            blend: 100,
-        }
-    }
-
-    fn picker_header_style(&self) -> CellStyle {
-        CellStyle {
-            fg: self.color(SLOT_POPUP_BORDER, 0xF8FAFC),
-            bg: self.color(SLOT_POPUP_BG, 0x273142),
-            attrs: protocol::ATTR_BOLD,
-            ul_color: 0,
-            blend: 100,
-        }
-    }
-
-    fn picker_query_style(&self) -> CellStyle {
-        CellStyle {
-            fg: self.color(SLOT_POPUP_DESC_FG, 0xB7C7E3),
-            bg: self.color(SLOT_POPUP_BG, 0x1F2632),
-            attrs: 0,
-            ul_color: 0,
-            blend: 100,
-        }
-    }
-
-    fn picker_preview_style(&self, bold: bool, fg: u32) -> CellStyle {
-        CellStyle {
-            fg: if fg == 0 {
-                self.color(SLOT_POPUP_FG, 0xCAD3DF)
-            } else {
-                fg
-            },
-            bg: self.color(SLOT_EDITOR_BG, 0x11161D),
-            attrs: if bold { protocol::ATTR_BOLD } else { 0 },
-            ul_color: 0,
-            blend: 100,
-        }
-    }
-
-    fn minibuffer_style(&self, selected: bool) -> CellStyle {
-        CellStyle {
-            fg: if selected {
-                self.color(SLOT_POPUP_SEL_FG, 0xF8FAFC)
-            } else {
-                self.color(SLOT_EDITOR_FG, 0xD8DEE9)
-            },
-            bg: if selected {
-                self.color(SLOT_POPUP_SEL_BG, 0x4C566A)
-            } else {
-                self.color(SLOT_MODELINE_BAR_BG, 0x20242D)
-            },
-            attrs: if selected { protocol::ATTR_BOLD } else { 0 },
-            ul_color: 0,
-            blend: 100,
-        }
-    }
-
-    fn minibuffer_context_style(&self) -> CellStyle {
-        CellStyle {
-            fg: self.color(SLOT_POPUP_DESC_FG, 0x9AA7B5),
-            bg: self.color(SLOT_MODELINE_BAR_BG, 0x1A1F28),
-            attrs: 0,
-            ul_color: 0,
-            blend: 100,
-        }
+fn completion_kind_marker(kind: u8) -> &'static str {
+    match kind {
+        1 => "fn",
+        2 => "me",
+        3 => "var",
+        4 => "fld",
+        5 => "mod",
+        7 => "kw",
+        8 => "sn",
+        9 => "cn",
+        11 => "st",
+        12 => "en",
+        _ => "tx",
     }
 }
 
@@ -1782,6 +1858,97 @@ mod tests {
         renderer.draw_minibuffer(semantic::Minibuffer::default());
 
         assert_eq!(renderer.cells[renderer.index(0, 8).unwrap()].text, "u");
+    }
+
+    #[test]
+    fn semantic_completion_draws_and_restores_overlay() {
+        let mut renderer = Renderer::new(40, 10);
+        renderer.draw_text(DrawText {
+            row: 4,
+            col: 5,
+            fg: 0x111111,
+            bg: 0x222222,
+            attrs: 0,
+            text: "under".to_owned(),
+        });
+
+        renderer.draw_completion(semantic::Completion {
+            visible: true,
+            anchor_row: 3,
+            anchor_col: 5,
+            selected_index: 1,
+            items: vec![
+                semantic::CompletionItem {
+                    kind: 1,
+                    label: "write".to_owned(),
+                    detail: "Save file".to_owned(),
+                },
+                semantic::CompletionItem {
+                    kind: 5,
+                    label: "Minga".to_owned(),
+                    detail: "module".to_owned(),
+                },
+            ],
+        });
+
+        assert_eq!(renderer.cells[renderer.index(5, 4).unwrap()].text, "f");
+        assert_eq!(renderer.cells[renderer.index(9, 5).unwrap()].text, "M");
+        assert_eq!(
+            renderer.cells[renderer.index(5, 5).unwrap()].style.bg,
+            0x3B4252
+        );
+
+        renderer.draw_completion(semantic::Completion::default());
+
+        let restored = &renderer.cells[renderer.index(5, 4).unwrap()];
+        assert_eq!(restored.text, "u");
+        assert_eq!(restored.style.fg, 0x111111);
+        assert_eq!(restored.style.bg, 0x222222);
+    }
+
+    #[test]
+    fn semantic_window_redraw_replays_retained_completion_and_which_key() {
+        let mut renderer = Renderer::new(60, 16);
+
+        renderer.draw_completion(semantic::Completion {
+            visible: true,
+            anchor_row: 4,
+            anchor_col: 4,
+            selected_index: 0,
+            items: vec![semantic::CompletionItem {
+                kind: 1,
+                label: "write".to_owned(),
+                detail: String::new(),
+            }],
+        });
+        renderer.draw_which_key(semantic::WhichKey {
+            visible: true,
+            prefix: "SPC".to_owned(),
+            page: 0,
+            page_count: 1,
+            bindings: vec![semantic::WhichKeyBinding {
+                kind: 0,
+                key: "f".to_owned(),
+                description: "Find file".to_owned(),
+                icon: String::new(),
+            }],
+        });
+
+        renderer.draw_semantic_window(semantic::WindowContent {
+            origin_row: 5,
+            origin_col: 4,
+            cursor_row: 0,
+            cursor_col: 0,
+            cursor_shape: 0,
+            rows: vec![semantic::Row {
+                text: "under completion".to_owned(),
+                spans: vec![],
+            }],
+        });
+
+        assert_eq!(renderer.cells[renderer.index(4, 5).unwrap()].text, "f");
+        assert_eq!(renderer.cells[renderer.index(3, 13).unwrap()].text, "S");
+        assert_eq!(renderer.cells[renderer.index(5, 14).unwrap()].text, "f");
     }
 
     #[test]

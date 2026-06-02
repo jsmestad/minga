@@ -10,6 +10,9 @@ pub enum Command {
     Picker(Picker, usize),
     PickerPreview(PickerPreview, usize),
     Minibuffer(Minibuffer, usize),
+    Breadcrumb(Breadcrumb, usize),
+    Completion(Completion, usize),
+    WhichKey(WhichKey, usize),
     Theme(Theme, usize),
     Unsupported { opcode: u8, size: usize },
 }
@@ -25,6 +28,9 @@ impl Command {
             Self::Picker(_, size) => *size,
             Self::PickerPreview(_, size) => *size,
             Self::Minibuffer(_, size) => *size,
+            Self::Breadcrumb(_, size) => *size,
+            Self::Completion(_, size) => *size,
+            Self::WhichKey(_, size) => *size,
             Self::Theme(_, size) => *size,
             Self::Unsupported { size, .. } => *size,
         }
@@ -181,6 +187,44 @@ pub struct MinibufferCandidate {
     pub annotation: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Breadcrumb {
+    pub segments: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Completion {
+    pub visible: bool,
+    pub anchor_row: u16,
+    pub anchor_col: u16,
+    pub selected_index: u16,
+    pub items: Vec<CompletionItem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompletionItem {
+    pub kind: u8,
+    pub label: String,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct WhichKey {
+    pub visible: bool,
+    pub prefix: String,
+    pub page: u8,
+    pub page_count: u8,
+    pub bindings: Vec<WhichKeyBinding>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WhichKeyBinding {
+    pub kind: u8,
+    pub key: String,
+    pub description: String,
+    pub icon: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Theme {
     pub slots: Vec<ThemeSlot>,
@@ -204,6 +248,9 @@ pub fn decode(bytes: &[u8]) -> Result<Command, DecodeError> {
         opcodes::OP_GUI_PICKER => decode_picker(bytes),
         opcodes::OP_GUI_PICKER_PREVIEW => decode_picker_preview(bytes),
         opcodes::OP_GUI_MINIBUFFER => decode_minibuffer(bytes),
+        opcodes::OP_GUI_BREADCRUMB => decode_breadcrumb(bytes),
+        opcodes::OP_GUI_COMPLETION => decode_completion(bytes),
+        opcodes::OP_GUI_WHICH_KEY => decode_which_key(bytes),
         opcodes::OP_GUI_THEME => decode_theme(bytes),
         opcodes::OP_GUI_WINDOW_VIEWPORT_DELTA | opcodes::OP_GUI_WINDOW_ROWS_DELTA => {
             sectioned_size(bytes, "semantic row delta")
@@ -212,10 +259,8 @@ pub fn decode(bytes: &[u8]) -> Result<Command, DecodeError> {
         opcodes::OP_GUI_WINDOW_OVERLAY_DELTA => {
             overlay_delta_size(bytes).map(|size| Command::Unsupported { opcode, size })
         }
-        opcodes::OP_GUI_GUTTER | opcodes::OP_GUI_WHICH_KEY => {
-            sectioned_size(bytes, "semantic sectioned command")
-                .map(|size| Command::Unsupported { opcode, size })
-        }
+        opcodes::OP_GUI_GUTTER => sectioned_size(bytes, "semantic sectioned command")
+            .map(|size| Command::Unsupported { opcode, size }),
         opcodes::OP_GUI_INDENT_GUIDES
         | opcodes::OP_GUI_HOVER_ACTION
         | opcodes::OP_GUI_WORKSPACES
@@ -235,9 +280,7 @@ pub fn decode(bytes: &[u8]) -> Result<Command, DecodeError> {
         opcodes::OP_GUI_SPLIT_SEPARATORS => {
             split_separators_size(bytes).map(|size| Command::Unsupported { opcode, size })
         }
-        opcodes::OP_GUI_BREADCRUMB
-        | opcodes::OP_GUI_COMPLETION
-        | opcodes::OP_GUI_SIGNATURE_HELP
+        opcodes::OP_GUI_SIGNATURE_HELP
         | opcodes::OP_GUI_FLOAT_POPUP
         | opcodes::OP_GUI_HOVER_POPUP
         | opcodes::OP_GUI_AGENT_CONTEXT
@@ -668,6 +711,101 @@ fn decode_minibuffer_candidate(bytes: &[u8]) -> Result<(MinibufferCandidate, usi
     ))
 }
 
+fn decode_breadcrumb(bytes: &[u8]) -> Result<Command, DecodeError> {
+    let size = breadcrumb_size(bytes)?;
+    let count = bytes[1] as usize;
+    let mut offset = 2;
+    let mut segments = Vec::with_capacity(count);
+
+    for _ in 0..count {
+        segments.push(read_string16(bytes, &mut offset)?);
+    }
+
+    Ok(Command::Breadcrumb(Breadcrumb { segments }, size))
+}
+
+fn decode_completion(bytes: &[u8]) -> Result<Command, DecodeError> {
+    require_len(bytes, 2, "completion header")?;
+    if bytes[1] == 0 {
+        return Ok(Command::Completion(Completion::default(), 2));
+    }
+
+    let size = completion_size(bytes)?;
+    let anchor_row = read_u16(bytes, 2);
+    let anchor_col = read_u16(bytes, 4);
+    let selected_index = read_u16(bytes, 6);
+    let count = read_u16(bytes, 8) as usize;
+    let mut offset = 10;
+    let mut items = Vec::with_capacity(count);
+
+    for _ in 0..count {
+        require_len(bytes, offset + 1, "completion item kind")?;
+        let kind = bytes[offset];
+        offset += 1;
+        let label = read_string16(bytes, &mut offset)?;
+        let detail = read_string16(bytes, &mut offset)?;
+        items.push(CompletionItem {
+            kind,
+            label,
+            detail,
+        });
+    }
+
+    Ok(Command::Completion(
+        Completion {
+            visible: true,
+            anchor_row,
+            anchor_col,
+            selected_index,
+            items,
+        },
+        size,
+    ))
+}
+
+fn decode_which_key(bytes: &[u8]) -> Result<Command, DecodeError> {
+    require_len(bytes, 2, "which-key header")?;
+    if bytes[1] == 0 {
+        return Ok(Command::WhichKey(WhichKey::default(), 2));
+    }
+
+    let size = which_key_size(bytes)?;
+    let mut offset = 2;
+    let prefix = read_string16(bytes, &mut offset)?;
+    require_len(bytes, offset + 4, "which-key metadata")?;
+    let page = bytes[offset];
+    let page_count = bytes[offset + 1];
+    let count = read_u16(bytes, offset + 2) as usize;
+    offset += 4;
+    let mut bindings = Vec::with_capacity(count);
+
+    for _ in 0..count {
+        require_len(bytes, offset + 2, "which-key binding header")?;
+        let kind = bytes[offset];
+        offset += 1;
+        let key = read_string8(bytes, &mut offset)?;
+        let description = read_string16(bytes, &mut offset)?;
+        let icon = read_string8(bytes, &mut offset)?;
+        bindings.push(WhichKeyBinding {
+            kind,
+            key,
+            description,
+            icon,
+        });
+    }
+
+    Ok(Command::WhichKey(
+        WhichKey {
+            visible: true,
+            prefix,
+            page,
+            page_count,
+            bindings,
+        },
+        size,
+    ))
+}
+
 fn decode_theme(bytes: &[u8]) -> Result<Command, DecodeError> {
     let size = theme_size(bytes)?;
     let count = bytes[1] as usize;
@@ -913,6 +1051,27 @@ fn breadcrumb_size(bytes: &[u8]) -> Result<usize, DecodeError> {
     let mut offset = 2;
     for _ in 0..count {
         skip_string16(bytes, &mut offset)?;
+    }
+    Ok(offset)
+}
+
+fn which_key_size(bytes: &[u8]) -> Result<usize, DecodeError> {
+    require_len(bytes, 2, "which-key")?;
+    if bytes[1] == 0 {
+        return Ok(2);
+    }
+
+    let mut offset = 2;
+    skip_string16(bytes, &mut offset)?;
+    require_len(bytes, offset + 4, "which-key metadata")?;
+    let count = read_u16(bytes, offset + 2) as usize;
+    offset += 4;
+    for _ in 0..count {
+        require_len(bytes, offset + 1, "which-key binding kind")?;
+        offset += 1;
+        skip_string8(bytes, &mut offset)?;
+        skip_string16(bytes, &mut offset)?;
+        skip_string8(bytes, &mut offset)?;
     }
     Ok(offset)
 }
@@ -1401,6 +1560,77 @@ mod tests {
     }
 
     #[test]
+    fn decodes_breadcrumb_without_consuming_following_commands() {
+        let packet = [
+            vec![opcodes::OP_GUI_BREADCRUMB, 3],
+            string16("lib"),
+            string16("minga"),
+            string16("editor.ex"),
+            vec![opcodes::OP_BATCH_END],
+        ]
+        .concat();
+
+        let command = decode(&packet).unwrap();
+
+        assert_eq!(command.size(), packet.len() - 1);
+        assert!(matches!(
+            command,
+            Command::Breadcrumb(Breadcrumb { segments }, _) if segments == vec!["lib", "minga", "editor.ex"]
+        ));
+    }
+
+    #[test]
+    fn decodes_completion_without_consuming_following_commands() {
+        let packet = [
+            vec![opcodes::OP_GUI_COMPLETION, 1, 0, 4, 0, 12, 0, 1, 0, 2],
+            vec![1],
+            string16("write"),
+            string16("Save file"),
+            vec![5],
+            string16("Minga"),
+            string16("module"),
+            vec![opcodes::OP_BATCH_END],
+        ]
+        .concat();
+
+        let command = decode(&packet).unwrap();
+
+        assert_eq!(command.size(), packet.len() - 1);
+        assert!(matches!(
+            command,
+            Command::Completion(Completion { visible: true, anchor_row: 4, anchor_col: 12, selected_index: 1, items }, _)
+                if items[0].kind == 1 && items[0].label == "write" && items[1].detail == "module"
+        ));
+    }
+
+    #[test]
+    fn decodes_which_key_without_consuming_following_commands() {
+        let packet = [
+            vec![opcodes::OP_GUI_WHICH_KEY, 1],
+            string16("SPC"),
+            vec![0, 2, 0, 2, 0],
+            string8("f"),
+            string16("Find file"),
+            string8(""),
+            vec![1],
+            string8("b"),
+            string16("Buffers"),
+            string8(">"),
+            vec![opcodes::OP_BATCH_END],
+        ]
+        .concat();
+
+        let command = decode(&packet).unwrap();
+
+        assert_eq!(command.size(), packet.len() - 1);
+        assert!(matches!(
+            command,
+            Command::WhichKey(WhichKey { visible: true, prefix, page: 0, page_count: 2, bindings }, _)
+                if prefix == "SPC" && bindings[0].key == "f" && bindings[1].kind == 1
+        ));
+    }
+
+    #[test]
     fn decodes_theme_slots() {
         let packet = vec![
             opcodes::OP_GUI_THEME,
@@ -1424,25 +1654,97 @@ mod tests {
     }
 
     #[test]
-    fn skips_visible_completion_without_consuming_following_commands() {
-        let packet = [
-            vec![opcodes::OP_GUI_COMPLETION, 1, 0, 4, 0, 12, 0, 1, 0, 1, 2],
-            string16("write"),
-            string16("Save file"),
-            vec![opcodes::OP_BATCH_END],
-        ]
-        .concat();
+    fn skips_remaining_visible_legacy_commands_without_consuming_following_commands() {
+        let cases = [
+            (
+                opcodes::OP_GUI_SIGNATURE_HELP,
+                vec![opcodes::OP_GUI_SIGNATURE_HELP, 1, 0, 0, 0, 0, 0, 0, 0],
+            ),
+            (
+                opcodes::OP_GUI_FLOAT_POPUP,
+                vec![opcodes::OP_GUI_FLOAT_POPUP, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+            ),
+            (
+                opcodes::OP_GUI_HOVER_POPUP,
+                vec![opcodes::OP_GUI_HOVER_POPUP, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            ),
+            (
+                opcodes::OP_GUI_AGENT_CONTEXT,
+                vec![
+                    opcodes::OP_GUI_AGENT_CONTEXT,
+                    1,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                ],
+            ),
+            (
+                opcodes::OP_GUI_GIT_STATUS,
+                vec![
+                    opcodes::OP_GUI_GIT_STATUS,
+                    1,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                ],
+            ),
+            (
+                opcodes::OP_GUI_CHANGE_SUMMARY,
+                vec![opcodes::OP_GUI_CHANGE_SUMMARY, 1, 0, 0, 0],
+            ),
+            (
+                opcodes::OP_GUI_BOARD,
+                vec![opcodes::OP_GUI_BOARD, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            ),
+            (
+                opcodes::OP_GUI_AGENT_CHAT,
+                vec![opcodes::OP_GUI_AGENT_CHAT, 1, 1, 0, 0],
+            ),
+            (
+                opcodes::OP_GUI_BOTTOM_PANEL,
+                vec![opcodes::OP_GUI_BOTTOM_PANEL, 1, 0, 0, 0, 0, 0, 0],
+            ),
+            (
+                opcodes::OP_GUI_TOOL_MANAGER,
+                vec![opcodes::OP_GUI_TOOL_MANAGER, 1, 0, 0, 0, 0, 0],
+            ),
+        ];
 
-        let command = decode(&packet).unwrap();
+        for (opcode, payload) in cases {
+            let packet = [payload.clone(), vec![opcodes::OP_BATCH_END]].concat();
+            let command = decode(&packet).unwrap();
 
-        assert_eq!(command.size(), packet.len() - 1);
-        assert!(matches!(
-            command,
-            Command::Unsupported {
-                opcode,
-                size
-            } if opcode == opcodes::OP_GUI_COMPLETION && size == packet.len() - 1
-        ));
+            assert_eq!(command.size(), packet.len() - 1);
+            assert!(matches!(
+                command,
+                Command::Unsupported {
+                    opcode: decoded,
+                    size
+                } if decoded == opcode && size == packet.len() - 1
+            ));
+        }
     }
 
     #[test]
