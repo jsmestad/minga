@@ -189,10 +189,10 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
       assert gutter_binary != nil, "no gui_gutter (0x7B) command found in encode output"
 
       # Parse the sectioned gutter binary: opcode(1) + section_count(1) + sections.
-      <<0x7B, gutter_section_count::8, gutter_sections::binary>> = gutter_binary
+      <<0x7B, gutter_section_count::8, sections_binary::binary>> = gutter_binary
 
       # Extract the entries section (section ID 0x03).
-      entries_payload = extract_section_payload(gutter_sections, gutter_section_count, 0x03)
+      entries_payload = extract_section_payload(sections_binary, gutter_section_count, 0x03)
 
       # entries_payload starts with count(u16), then entries.
       <<1::16, entry_binary::binary>> = entries_payload
@@ -200,6 +200,43 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
 
       assert actual_entry_size == schema_size,
              "encoder produces #{actual_entry_size}-byte gutter entries, schema declares #{schema_size}-byte entries"
+    end
+
+    test "annotation gutter entry includes sign tail bytes", _context do
+      entry = %GutterEntry{
+        buf_line: 42,
+        display_type: :normal,
+        sign_type: :annotation,
+        sign_fg: 0xAABBCC,
+        sign_text: "note"
+      }
+
+      gutter = %Gutter{
+        window_id: 1,
+        content_row: 0,
+        content_col: 0,
+        content_height: 10,
+        is_active: true,
+        content_width: 4,
+        cursor_line: 1,
+        line_number_style: :hybrid,
+        line_number_width: 4,
+        sign_col_width: 2,
+        entries: [entry]
+      }
+
+      window = minimal_render_window(gutter: gutter)
+      [_content_binary | rest] = WindowEncoder.encode(window)
+
+      gutter_binary = Enum.find(rest, fn <<opcode, _::binary>> -> opcode == 0x7B end)
+      assert gutter_binary != nil, "no gui_gutter (0x7B) command found in encode output"
+
+      <<0x7B, gutter_section_count::8, sections_binary::binary>> = gutter_binary
+      entries_payload = extract_section_payload(sections_binary, gutter_section_count, 0x03)
+      <<1::16, entry_binary::binary>> = entries_payload
+
+      assert entry_binary ==
+               <<42::32, 0::8, 8::8, 0xFFFF_FFFF::32, 0xAA, 0xBB, 0xCC, 4::8, "note">>
     end
   end
 
@@ -223,6 +260,46 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
                "schema declares gui_window_content section 0x#{Integer.to_string(id, 16)} (#{name}) " <>
                  "but encoder did not emit it. Actual IDs: #{inspect(Enum.map(actual_ids, &hex/1))}"
       end
+    end
+  end
+
+  describe "gui_window_content selection encoding" do
+    test "active selection includes range tail", _context do
+      window = full_render_window()
+      binary = WindowEncoder.encode_window_content(window)
+
+      <<0x80, section_count::8, sections_binary::binary>> = binary
+      payload = extract_section_payload(sections_binary, section_count, 0x03)
+
+      assert payload == <<1::8, 0::16, 0::16, 0::16, 5::16>>
+    end
+  end
+
+  describe "gui_window_content geometry encoding" do
+    test "hit regions encode a 16-bit window_id tail", _context do
+      window = full_render_window()
+      binary = WindowEncoder.encode_window_content(window)
+
+      <<0x80, section_count::8, sections_binary::binary>> = binary
+      payload = extract_section_payload(sections_binary, section_count, 0x08)
+
+      assert <<_prefix::binary-size(67), hit_region::binary-size(11)>> = payload
+      assert hit_region == <<1, 0, 1, 0, 4, 0, 76, 0, 22, 0, 1>>
+    end
+  end
+
+  describe "gui_status_bar modeline encoding" do
+    test "v2 segments include names, text, and click targets", _context do
+      model = full_status_bar_model()
+      binary = StatusBarEncoder.encode_command(model)
+
+      <<0x76, section_count::8, sections_binary::binary>> = binary
+      payload = extract_section_payload(sections_binary, section_count, 0x0B)
+
+      assert payload ==
+               <<2::8, 1::16, 1::16, 4::8, "mode", 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x01::8,
+                 6::16, "NORMAL", 0::16, 4::8, "file", 0xCC, 0xCC, 0xCC, 0x00, 0x00, 0x00, 0::8,
+                 7::16, "test.ex", 0::16>>
     end
   end
 

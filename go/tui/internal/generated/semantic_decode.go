@@ -348,11 +348,11 @@ func DecodeHitRegion(data []byte, offset int) (HitRegion, int, error) {
 	if err != nil {
 		return HitRegion{}, offset, err
 	}
-	if err := decodeRequireLen(data, pos+4, "id"); err != nil {
+	if err := decodeRequireLen(data, pos+2, "id"); err != nil {
 		return HitRegion{}, offset, err
 	}
-	id := decodeU32(data, pos)
-	pos += 4
+	id := decodeU16(data, pos)
+	pos += 2
 	return HitRegion{
 		Kind: kind,
 		Rect: rect,
@@ -382,17 +382,33 @@ func DecodeGutterEntry(data []byte, offset int) (GutterEntry, int, error) {
 	}
 	foldEndLine := decodeU32(data, pos)
 	pos += 4
+	var signFG uint32
+	var signText string
+	if signType == 8 {
+		var err error
+		if err := decodeRequireLen(data, pos+3, "sign_fg"); err != nil {
+			return GutterEntry{}, offset, err
+		}
+		signFG = decodeU24(data, pos)
+		pos += 3
+		signText, pos, err = decodeString8(data, pos)
+		if err != nil {
+			return GutterEntry{}, offset, err
+		}
+	}
 	return GutterEntry{
 		BufLine:     bufLine,
 		DisplayType: displayType,
 		SignType:    signType,
 		FoldEndLine: foldEndLine,
+		SignFG:      signFG,
+		SignText:    signText,
 	}, pos, nil
 }
 
 func DecodeModelineSegment(data []byte, offset int) (ModelineSegment, int, error) {
 	pos := offset
-	text, pos, err := decodeString16(data, pos)
+	name, pos, err := decodeString8(data, pos)
 	if err != nil {
 		return ModelineSegment{}, offset, err
 	}
@@ -411,11 +427,21 @@ func DecodeModelineSegment(data []byte, offset int) (ModelineSegment, int, error
 	}
 	attrs := data[pos]
 	pos++
+	text, pos, err := decodeString16(data, pos)
+	if err != nil {
+		return ModelineSegment{}, offset, err
+	}
+	target, pos, err := decodeString16(data, pos)
+	if err != nil {
+		return ModelineSegment{}, offset, err
+	}
 	return ModelineSegment{
-		Text:  text,
-		FG:    fg,
-		BG:    bg,
-		Attrs: attrs,
+		Name:   name,
+		FG:     fg,
+		BG:     bg,
+		Attrs:  attrs,
+		Text:   text,
+		Target: target,
 	}, pos, nil
 }
 
@@ -500,9 +526,6 @@ func DecodeGuiGutterEntries(data []byte, offset int) ([]GutterEntry, int, error)
 	}
 	count := int(decodeU16(data, pos))
 	pos += 2
-	if err := decodeRequireLen(data, pos+count*10, "entries"); err != nil {
-		return nil, offset, err
-	}
 	items := make([]GutterEntry, 0, count)
 	for i := 0; i < count; i++ {
 		item, nextPos, err := DecodeGutterEntry(data, pos)
@@ -915,8 +938,38 @@ func DecodeGuiWindowContentSelection(data []byte, offset int) (GuiWindowContentS
 	}
 	typeVal := data[pos]
 	pos++
+	var startRow uint16
+	var startCol uint16
+	var endRow uint16
+	var endCol uint16
+	if typeVal != 0 {
+		if err := decodeRequireLen(data, pos+2, "start_row"); err != nil {
+			return GuiWindowContentSelection{}, offset, err
+		}
+		startRow = decodeU16(data, pos)
+		pos += 2
+		if err := decodeRequireLen(data, pos+2, "start_col"); err != nil {
+			return GuiWindowContentSelection{}, offset, err
+		}
+		startCol = decodeU16(data, pos)
+		pos += 2
+		if err := decodeRequireLen(data, pos+2, "end_row"); err != nil {
+			return GuiWindowContentSelection{}, offset, err
+		}
+		endRow = decodeU16(data, pos)
+		pos += 2
+		if err := decodeRequireLen(data, pos+2, "end_col"); err != nil {
+			return GuiWindowContentSelection{}, offset, err
+		}
+		endCol = decodeU16(data, pos)
+		pos += 2
+	}
 	return GuiWindowContentSelection{
-		Type: typeVal,
+		Type:     typeVal,
+		StartRow: startRow,
+		StartCol: startCol,
+		EndRow:   endRow,
+		EndCol:   endCol,
 	}, pos, nil
 }
 
@@ -1082,7 +1135,7 @@ func DecodeGuiWindowContentGeometry(data []byte, offset int) (GuiWindowContentGe
 	}
 	hitRegionsCount := int(data[pos])
 	pos += 1
-	if err := decodeRequireLen(data, pos+hitRegionsCount*13, "hit_regions"); err != nil {
+	if err := decodeRequireLen(data, pos+hitRegionsCount*11, "hit_regions"); err != nil {
 		return GuiWindowContentGeometry{}, offset, err
 	}
 	hitRegions := make([]HitRegion, 0, hitRegionsCount)

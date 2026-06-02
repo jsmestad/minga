@@ -1111,7 +1111,7 @@ name = "hit_region"
 fields = [
   {name = "kind", type = "u8"},
   {name = "rect", type = "struct", element = "rect"},
-  {name = "id", type = "u32"},
+  {name = "id", type = "u16"},
 ]
 
 [[structures]]
@@ -1122,14 +1122,20 @@ fields = [
   {name = "sign_type", type = "u8"},
   {name = "fold_end_line", type = "u32"},
 ]
+conditional_tail = {guard = "sign_type == 8", fields = [
+  {name = "sign_fg", type = "rgb"},
+  {name = "sign_text", type = "string8"},
+]}
 
 [[structures]]
 name = "modeline_segment"
 fields = [
-  {name = "text", type = "string16"},
+  {name = "name", type = "string8"},
   {name = "fg", type = "rgb"},
   {name = "bg", type = "rgb"},
   {name = "attrs", type = "u8"},
+  {name = "text", type = "string16"},
+  {name = "target", type = "string16"},
 ]
 
 # ── Section layouts for sectioned commands ────────────────────────────────
@@ -1321,6 +1327,12 @@ name = "recording"
 fields = [
   {name = "macro_register", type = "u8"},
 ]
+
+[[sections]]
+opcode = "gui_status_bar"
+id = 0x09
+name = "agent"
+layout = "custom"
 
 [[sections]]
 opcode = "gui_status_bar"

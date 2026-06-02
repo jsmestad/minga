@@ -70,23 +70,27 @@ pub struct Annotation {
 pub struct HitRegion {
     pub kind: u8,
     pub rect: Rect,
-    pub id: u32,
+    pub id: u16,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GutterEntry {
     pub buf_line: u32,
     pub display_type: u8,
     pub sign_type: u8,
     pub fold_end_line: u32,
+    pub sign_fg: u32,
+    pub sign_text: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ModelineSegment {
-    pub text: String,
+    pub name: String,
     pub fg: u32,
     pub bg: u32,
     pub attrs: u8,
+    pub text: String,
+    pub target: String,
 }
 
 
@@ -95,8 +99,7 @@ pub const SPAN_SIZE: usize = 13;
 pub const SEARCH_MATCH_SIZE: usize = 7;
 pub const DIAGNOSTIC_RANGE_SIZE: usize = 9;
 pub const DOCUMENT_HIGHLIGHT_SIZE: usize = 9;
-pub const HIT_REGION_SIZE: usize = 13;
-pub const GUTTER_ENTRY_SIZE: usize = 10;
+pub const HIT_REGION_SIZE: usize = 11;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct GuiWindowContentHeader {
@@ -112,6 +115,10 @@ pub struct GuiWindowContentHeader {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct GuiWindowContentSelection {
     pub r#type: u8,
+    pub start_row: u16,
+    pub start_col: u16,
+    pub end_row: u16,
+    pub end_col: u16,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

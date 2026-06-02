@@ -262,9 +262,9 @@ pub fn decode_hit_region(bytes: &[u8], offset: usize) -> Result<(HitRegion, usiz
     pos += 1;
     let (rect, consumed) = decode_rect(bytes, pos)?;
     pos += consumed;
-    require_len(bytes, pos + 4, "id")?;
-    let id = read_u32(bytes, pos);
-    pos += 4;
+    require_len(bytes, pos + 2, "id")?;
+    let id = read_u16(bytes, pos);
+    pos += 2;
     Ok((HitRegion {
         kind,
         rect,
@@ -286,17 +286,27 @@ pub fn decode_gutter_entry(bytes: &[u8], offset: usize) -> Result<(GutterEntry, 
     require_len(bytes, pos + 4, "fold_end_line")?;
     let fold_end_line = read_u32(bytes, pos);
     pos += 4;
+    let mut sign_fg = 0;
+    let mut sign_text = String::new();
+    if sign_type == 8 {
+        require_len(bytes, pos + 3, "sign_fg")?;
+        sign_fg = read_u24(bytes, pos);
+        pos += 3;
+        sign_text = read_string8(bytes, &mut pos)?;
+    }
     Ok((GutterEntry {
         buf_line,
         display_type,
         sign_type,
         fold_end_line,
+        sign_fg,
+        sign_text,
     }, pos - offset))
 }
 
 pub fn decode_modeline_segment(bytes: &[u8], offset: usize) -> Result<(ModelineSegment, usize), DecodeError> {
     let mut pos = offset;
-    let text = read_string16(bytes, &mut pos)?;
+    let name = read_string8(bytes, &mut pos)?;
     require_len(bytes, pos + 3, "fg")?;
     let fg = read_u24(bytes, pos);
     pos += 3;
@@ -306,11 +316,15 @@ pub fn decode_modeline_segment(bytes: &[u8], offset: usize) -> Result<(ModelineS
     require_len(bytes, pos + 1, "attrs")?;
     let attrs = bytes[pos];
     pos += 1;
+    let text = read_string16(bytes, &mut pos)?;
+    let target = read_string16(bytes, &mut pos)?;
     Ok((ModelineSegment {
-        text,
+        name,
         fg,
         bg,
         attrs,
+        text,
+        target,
     }, pos - offset))
 }
 
@@ -374,7 +388,6 @@ pub fn decode_gui_gutter_entries(bytes: &[u8], offset: usize) -> Result<(Vec<Gut
     require_len(bytes, pos + 2, "entries count")?;
     let count = read_u16(bytes, pos) as usize;
     pos += 2;
-    require_len(bytes, pos + count * 10, "entries")?;
     let mut items = Vec::with_capacity(count);
     for _ in 0..count {
         let (item, consumed) = decode_gutter_entry(bytes, pos)?;
@@ -669,8 +682,30 @@ pub fn decode_gui_window_content_selection(bytes: &[u8], offset: usize) -> Resul
     require_len(bytes, pos + 1, "type")?;
     let r#type = bytes[pos];
     pos += 1;
+    let mut start_row = 0;
+    let mut start_col = 0;
+    let mut end_row = 0;
+    let mut end_col = 0;
+    if r#type != 0 {
+        require_len(bytes, pos + 2, "start_row")?;
+        start_row = read_u16(bytes, pos);
+        pos += 2;
+        require_len(bytes, pos + 2, "start_col")?;
+        start_col = read_u16(bytes, pos);
+        pos += 2;
+        require_len(bytes, pos + 2, "end_row")?;
+        end_row = read_u16(bytes, pos);
+        pos += 2;
+        require_len(bytes, pos + 2, "end_col")?;
+        end_col = read_u16(bytes, pos);
+        pos += 2;
+    }
     Ok((GuiWindowContentSelection {
         r#type,
+        start_row,
+        start_col,
+        end_row,
+        end_col,
     }, pos - offset))
 }
 
@@ -778,7 +813,7 @@ pub fn decode_gui_window_content_geometry(bytes: &[u8], offset: usize) -> Result
     require_len(bytes, pos + 1, "hit_regions count")?;
     let hit_regions_count = bytes[pos] as usize;
     pos += 1;
-    require_len(bytes, pos + hit_regions_count * 13, "hit_regions")?;
+    require_len(bytes, pos + hit_regions_count * 11, "hit_regions")?;
     let mut hit_regions = Vec::with_capacity(hit_regions_count);
     for _ in 0..hit_regions_count {
         let (item, consumed) = decode_hit_region(bytes, pos)?;

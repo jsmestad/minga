@@ -137,7 +137,6 @@ func decodeLineAnnotations(section []byte, window *WindowContent) {
 }
 
 func decodePaneGeometry(section []byte, window *WindowContent) {
-	window.GeometrySet = true
 	gen, _, err := generated.DecodeGuiWindowContentGeometry(section, 0)
 	if err != nil {
 		return
@@ -160,4 +159,5 @@ func decodePaneGeometry(section []byte, window *WindowContent) {
 		SignColWidth:    gen.SignColWidth,
 		HitRegions:      gen.HitRegions,
 	}
+	window.GeometrySet = true
 }

@@ -547,6 +547,29 @@ func TestDecodeWindowOverlaySections(t *testing.T) {
 	}
 }
 
+func TestDecodeWindowOverlayGeometryFailureLeavesGeometryUnset(t *testing.T) {
+	header := section(0x01, []byte{0, 7, 3, 0, 1, 0, 2, 0, 0, 0, 0, 0, 0, 9})
+	rows := section(0x02, []byte{0, 0})
+	geometryPayload := make([]byte, 67)
+	geometryPayload[1] = 7
+	geometryPayload[63] = 3
+	geometryPayload[65] = 2
+	geometryPayload[66] = 1
+	geometry := section(0x08, geometryPayload)
+	packet := []byte{generated.OPGuiWindowContent, 3}
+	packet = append(packet, header...)
+	packet = append(packet, rows...)
+	packet = append(packet, geometry...)
+
+	command, err := DecodeCommand(packet)
+	if err != nil {
+		t.Fatalf("DecodeCommand returned error: %v", err)
+	}
+	if command.Window.GeometrySet {
+		t.Fatalf("malformed geometry should leave GeometrySet unset: %+v", command.Window)
+	}
+}
+
 func TestDecodeWindowCursorlineSection(t *testing.T) {
 	header := section(0x01, []byte{0, 7, 3, 0, 1, 0, 2, 0, 0, 0, 0, 0, 0, 9})
 	rows := section(0x02, []byte{0, 0})

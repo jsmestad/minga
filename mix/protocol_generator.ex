@@ -127,6 +127,19 @@ defmodule Minga.Mix.ProtocolGenerator do
     end
   end
 
+  @spec format_generated_go_file(String.t()) :: String.t()
+  defp format_generated_go_file(binary) do
+    path = Path.join(System.tmp_dir!(), "minga_protocol_#{System.unique_integer([:positive])}.go")
+    File.write!(path, binary)
+
+    try do
+      {_, 0} = System.cmd("gofmt", ["-w", path])
+      File.read!(path)
+    after
+      File.rm(path)
+    end
+  end
+
   @spec check_files!([generated_file()]) :: :ok
   defp check_files!(files) do
     stale =
@@ -429,6 +442,7 @@ defmodule Minga.Mix.ProtocolGenerator do
       ")\n"
     ]
     |> IO.iodata_to_binary()
+    |> format_generated_go_file()
   end
 
   @spec go_opcodes([opcode()]) :: iodata()
@@ -776,6 +790,7 @@ defmodule Minga.Mix.ProtocolGenerator do
       "\t\treturn 0, CommandSizeUnknown\n" <>
       "\t}\n}\n\n" <>
       go_command_size_helpers()
+    |> format_generated_go_file()
   end
 
   @spec go_command_size_helpers() :: String.t()
@@ -1128,6 +1143,38 @@ defmodule Minga.Mix.ProtocolGenerator do
   @spec sections_list(schema()) :: [section()]
   defp sections_list(schema), do: Map.get(schema, "sections", [])
 
+  @spec entry_fields(map()) :: [map()]
+  defp entry_fields(entry) do
+    fields = Map.get(entry, "fields", [])
+
+    case Map.get(entry, "conditional_tail") do
+      %{"fields" => tail_fields} -> fields ++ tail_fields
+      _ -> fields
+    end
+  end
+
+  @spec entry_conditional_tail(map()) :: map() | nil
+  defp entry_conditional_tail(entry), do: Map.get(entry, "conditional_tail")
+
+  @spec entry_custom_layout?(map()) :: boolean()
+  defp entry_custom_layout?(entry), do: Map.get(entry, "layout") == "custom"
+
+  @spec conditional_tail_fields(map()) :: [map()]
+  defp conditional_tail_fields(entry) do
+    case entry_conditional_tail(entry) do
+      %{"fields" => fields} -> fields
+      _ -> []
+    end
+  end
+
+  @spec conditional_tail_guard(map()) :: String.t() | nil
+  defp conditional_tail_guard(entry) do
+    case entry_conditional_tail(entry) do
+      %{"guard" => guard} when is_binary(guard) -> guard
+      _ -> nil
+    end
+  end
+
   @spec validate_structures!(schema()) :: :ok
   defp validate_structures!(schema) do
     structures = Map.get(schema, "structures", [])
@@ -1152,7 +1199,7 @@ defmodule Minga.Mix.ProtocolGenerator do
   defp validate_struct_references!(structures, smap) do
     bad =
       structures
-      |> Enum.flat_map(fn s -> Enum.map(s["fields"] || [], &{s["name"], &1}) end)
+      |> Enum.flat_map(fn s -> Enum.map(entry_fields(s), &{s["name"], &1}) end)
       |> Enum.filter(fn {_parent, field} ->
         (field["type"] == "struct" or field["type"] == "counted_array") and
           is_binary(field["element"]) and not Map.has_key?(smap, field["element"])
@@ -1229,8 +1276,8 @@ defmodule Minga.Mix.ProtocolGenerator do
   defp validate_section_field_refs!(sections, smap) do
     bad =
       sections
-      |> Enum.filter(&Map.has_key?(&1, "fields"))
-      |> Enum.flat_map(fn s -> Enum.map(s["fields"] || [], &{s, &1}) end)
+      |> Enum.reject(&entry_custom_layout?/1)
+      |> Enum.flat_map(fn s -> Enum.map(entry_fields(s), &{s, &1}) end)
       |> Enum.filter(fn {_s, field} ->
         (field["type"] == "struct" or field["type"] == "counted_array") and
           is_binary(field["element"]) and not Map.has_key?(smap, field["element"])
@@ -1285,7 +1332,12 @@ defmodule Minga.Mix.ProtocolGenerator do
   defp fixed_structure_size(name, smap) do
     case Map.get(smap, name) do
       nil -> nil
-      structure -> fixed_fields_size(structure["fields"] || [], smap)
+      structure ->
+        if Map.has_key?(structure, "conditional_tail") do
+          nil
+        else
+          fixed_fields_size(structure["fields"] || [], smap)
+        end
     end
   end
 
@@ -1297,6 +1349,345 @@ defmodule Minga.Mix.ProtocolGenerator do
         size -> {:cont, acc + size}
       end
     end)
+  end
+
+  @spec translate_guard(String.t(), [{String.t(), String.t()}]) :: String.t()
+  defp translate_guard(guard, replacements) do
+    Enum.reduce(replacements, guard, fn {from, to}, acc ->
+      Regex.replace(~r/\b#{Regex.escape(from)}\b/, acc, to)
+    end)
+  end
+
+  @spec go_guard_expression(map()) :: String.t()
+  defp go_guard_expression(entry) do
+    guard = conditional_tail_guard(entry) || "true"
+
+    translate_guard(
+      guard,
+      Enum.map(Map.get(entry, "fields", []), fn field ->
+        {field["name"], go_local_name(field["name"])}
+      end)
+    )
+  end
+
+  @spec rust_guard_expression(map()) :: String.t()
+  defp rust_guard_expression(entry) do
+    guard = conditional_tail_guard(entry) || "true"
+
+    translate_guard(
+      guard,
+      Enum.map(Map.get(entry, "fields", []), fn field ->
+        {field["name"], rust_field_name(field["name"])}
+      end)
+    )
+  end
+
+  @spec go_field_needs_error?(map()) :: boolean()
+  defp go_field_needs_error?(%{"type" => type}) when type in ["string8", "string16", "string32", "struct", "counted_array"], do: true
+  defp go_field_needs_error?(_field), do: false
+
+  @spec go_decode_conditional_tail_block(map(), %{String.t() => structure()}, String.t()) :: iodata()
+  defp go_decode_conditional_tail_block(entry, smap, zero) do
+    tail_fields = conditional_tail_fields(entry)
+
+    case tail_fields do
+      [] -> []
+      _ ->
+        needs_err = Enum.any?(tail_fields, &go_field_needs_error?/1)
+
+        [
+          Enum.map(tail_fields, fn field ->
+            "\tvar #{go_local_name(field["name"])} #{go_type(field, smap)}\n"
+          end),
+          "\tif #{go_guard_expression(entry)} {\n",
+          if(needs_err, do: "\t\tvar err error\n", else: ""),
+          Enum.map(tail_fields, fn field ->
+            go_decode_field_assignment_statement(field, smap, zero)
+          end),
+          "\t}\n"
+        ]
+    end
+  end
+
+  @spec go_decode_field_assignment_statement(map(), %{String.t() => structure()}, String.t()) :: iodata()
+  defp go_decode_field_assignment_statement(%{"name" => name, "type" => "u8"}, _smap, zero) do
+    local = go_local_name(name)
+    [
+      "\t\tif err := decodeRequireLen(data, pos+1, \"#{name}\"); err != nil {\n",
+      "\t\t\treturn #{zero}, offset, err\n",
+      "\t\t}\n",
+      "\t\t#{local} = data[pos]\n",
+      "\t\tpos++\n"
+    ]
+  end
+
+  defp go_decode_field_assignment_statement(%{"name" => name, "type" => "u16"}, _smap, zero) do
+    local = go_local_name(name)
+    [
+      "\t\tif err := decodeRequireLen(data, pos+2, \"#{name}\"); err != nil {\n",
+      "\t\t\treturn #{zero}, offset, err\n",
+      "\t\t}\n",
+      "\t\t#{local} = decodeU16(data, pos)\n",
+      "\t\tpos += 2\n"
+    ]
+  end
+
+  defp go_decode_field_assignment_statement(%{"name" => name, "type" => "u24"}, _smap, zero) do
+    local = go_local_name(name)
+    [
+      "\t\tif err := decodeRequireLen(data, pos+3, \"#{name}\"); err != nil {\n",
+      "\t\t\treturn #{zero}, offset, err\n",
+      "\t\t}\n",
+      "\t\t#{local} = decodeU24(data, pos)\n",
+      "\t\tpos += 3\n"
+    ]
+  end
+
+  defp go_decode_field_assignment_statement(%{"name" => name, "type" => "u32"}, _smap, zero) do
+    local = go_local_name(name)
+    [
+      "\t\tif err := decodeRequireLen(data, pos+4, \"#{name}\"); err != nil {\n",
+      "\t\t\treturn #{zero}, offset, err\n",
+      "\t\t}\n",
+      "\t\t#{local} = decodeU32(data, pos)\n",
+      "\t\tpos += 4\n"
+    ]
+  end
+
+  defp go_decode_field_assignment_statement(%{"name" => name, "type" => "u64"}, _smap, zero) do
+    local = go_local_name(name)
+    [
+      "\t\tif err := decodeRequireLen(data, pos+8, \"#{name}\"); err != nil {\n",
+      "\t\t\treturn #{zero}, offset, err\n",
+      "\t\t}\n",
+      "\t\t#{local} = decodeU64(data, pos)\n",
+      "\t\tpos += 8\n"
+    ]
+  end
+
+  defp go_decode_field_assignment_statement(%{"name" => name, "type" => "rgb"}, _smap, zero) do
+    local = go_local_name(name)
+    [
+      "\t\tif err := decodeRequireLen(data, pos+3, \"#{name}\"); err != nil {\n",
+      "\t\t\treturn #{zero}, offset, err\n",
+      "\t\t}\n",
+      "\t\t#{local} = decodeU24(data, pos)\n",
+      "\t\tpos += 3\n"
+    ]
+  end
+
+  defp go_decode_field_assignment_statement(%{"name" => name, "type" => "string8"}, _smap, zero) do
+    local = go_local_name(name)
+    [
+      "\t\t#{local}, pos, err = decodeString8(data, pos)\n",
+      "\t\tif err != nil {\n",
+      "\t\t\treturn #{zero}, offset, err\n",
+      "\t\t}\n"
+    ]
+  end
+
+  defp go_decode_field_assignment_statement(%{"name" => name, "type" => "string16"}, _smap, zero) do
+    local = go_local_name(name)
+    [
+      "\t\t#{local}, pos, err = decodeString16(data, pos)\n",
+      "\t\tif err != nil {\n",
+      "\t\t\treturn #{zero}, offset, err\n",
+      "\t\t}\n"
+    ]
+  end
+
+  defp go_decode_field_assignment_statement(%{"name" => name, "type" => "string32"}, _smap, zero) do
+    local = go_local_name(name)
+    [
+      "\t\t#{local}, pos, err = decodeString32(data, pos)\n",
+      "\t\tif err != nil {\n",
+      "\t\t\treturn #{zero}, offset, err\n",
+      "\t\t}\n"
+    ]
+  end
+
+  defp go_decode_field_assignment_statement(%{"name" => name, "type" => "struct", "element" => element}, _smap, zero) do
+    local = go_local_name(name)
+    [
+      "\t\t#{local}, pos, err = Decode#{go_struct_name(element)}(data, pos)\n",
+      "\t\tif err != nil {\n",
+      "\t\t\treturn #{zero}, offset, err\n",
+      "\t\t}\n"
+    ]
+  end
+
+  defp go_decode_field_assignment_statement(%{"name" => name, "type" => "counted_array", "count_type" => count_type, "element" => element}, smap, zero) do
+    local = go_local_name(name)
+    {count_read, count_size} = go_count_read(count_type)
+    element_fixed_size = fixed_structure_size(element, smap)
+
+    stride_check = case element_fixed_size do
+      nil -> []
+      stride ->
+        [
+          "\t\tif err := decodeRequireLen(data, pos+#{local}Count*#{stride}, \"#{name}\"); err != nil {\n",
+          "\t\t\treturn #{zero}, offset, err\n",
+          "\t\t}\n"
+        ]
+    end
+
+    [
+      "\t\tif err := decodeRequireLen(data, pos+#{count_size}, \"#{name} count\"); err != nil {\n",
+      "\t\t\treturn #{zero}, offset, err\n",
+      "\t\t}\n",
+      "\t\t#{local}Count := int(#{count_read})\n",
+      "\t\tpos += #{count_size}\n",
+      stride_check,
+      "\t\t#{local} = make([]#{go_struct_name(element)}, 0, #{local}Count)\n",
+      "\t\tfor i := 0; i < #{local}Count; i++ {\n",
+      "\t\t\titem, nextPos, err := Decode#{go_struct_name(element)}(data, pos)\n",
+      "\t\t\tif err != nil {\n",
+      "\t\t\t\treturn #{zero}, offset, err\n",
+      "\t\t\t}\n",
+      "\t\t\tpos = nextPos\n",
+      "\t\t\t#{local} = append(#{local}, item)\n",
+      "\t\t}\n"
+    ]
+  end
+
+  @spec rust_zero_value(map(), %{String.t() => structure()}) :: String.t()
+  defp rust_zero_value(%{"type" => type}, _smap) when type in ["u8", "u16", "u24", "u32", "u64", "rgb"], do: "0"
+  defp rust_zero_value(%{"type" => type}, _smap) when type in ["string8", "string16", "string32"], do: "String::new()"
+  defp rust_zero_value(%{"type" => "struct", "element" => element}, _smap), do: "#{rust_struct_name(element)}::default()"
+  defp rust_zero_value(%{"type" => "counted_array", "element" => element}, _smap), do: "Vec::<#{rust_struct_name(element)}>::new()"
+  defp rust_zero_value(_field, _smap), do: "Default::default()"
+
+  @spec rust_decode_conditional_tail_block(map(), %{String.t() => structure()}) :: iodata()
+  defp rust_decode_conditional_tail_block(entry, smap) do
+    tail_fields = conditional_tail_fields(entry)
+
+    case tail_fields do
+      [] -> []
+      _ ->
+        [
+          Enum.map(tail_fields, fn field ->
+            "    let mut #{rust_field_name(field["name"])} = #{rust_zero_value(field, smap)};\n"
+          end),
+          "    if #{rust_guard_expression(entry)} {\n",
+          Enum.map(tail_fields, fn field ->
+            rust_decode_field_assignment_statement(field, smap)
+          end),
+          "    }\n"
+        ]
+    end
+  end
+
+  @spec rust_decode_field_assignment_statement(map(), %{String.t() => structure()}) :: iodata()
+  defp rust_decode_field_assignment_statement(%{"name" => name, "type" => "u8"}, _smap) do
+    local = rust_field_name(name)
+    [
+      "        require_len(bytes, pos + 1, \"#{name}\")?;\n",
+      "        #{local} = bytes[pos];\n",
+      "        pos += 1;\n"
+    ]
+  end
+
+  defp rust_decode_field_assignment_statement(%{"name" => name, "type" => "u16"}, _smap) do
+    local = rust_field_name(name)
+    [
+      "        require_len(bytes, pos + 2, \"#{name}\")?;\n",
+      "        #{local} = read_u16(bytes, pos);\n",
+      "        pos += 2;\n"
+    ]
+  end
+
+  defp rust_decode_field_assignment_statement(%{"name" => name, "type" => "u24"}, _smap) do
+    local = rust_field_name(name)
+    [
+      "        require_len(bytes, pos + 3, \"#{name}\")?;\n",
+      "        #{local} = read_u24(bytes, pos);\n",
+      "        pos += 3;\n"
+    ]
+  end
+
+  defp rust_decode_field_assignment_statement(%{"name" => name, "type" => "u32"}, _smap) do
+    local = rust_field_name(name)
+    [
+      "        require_len(bytes, pos + 4, \"#{name}\")?;\n",
+      "        #{local} = read_u32(bytes, pos);\n",
+      "        pos += 4;\n"
+    ]
+  end
+
+  defp rust_decode_field_assignment_statement(%{"name" => name, "type" => "u64"}, _smap) do
+    local = rust_field_name(name)
+    [
+      "        require_len(bytes, pos + 8, \"#{name}\")?;\n",
+      "        #{local} = read_u64(bytes, pos);\n",
+      "        pos += 8;\n"
+    ]
+  end
+
+  defp rust_decode_field_assignment_statement(%{"name" => name, "type" => "rgb"}, _smap) do
+    local = rust_field_name(name)
+    [
+      "        require_len(bytes, pos + 3, \"#{name}\")?;\n",
+      "        #{local} = read_u24(bytes, pos);\n",
+      "        pos += 3;\n"
+    ]
+  end
+
+  defp rust_decode_field_assignment_statement(%{"name" => name, "type" => "string8"}, _smap) do
+    local = rust_field_name(name)
+    [
+      "        #{local} = read_string8(bytes, &mut pos)?;\n"
+    ]
+  end
+
+  defp rust_decode_field_assignment_statement(%{"name" => name, "type" => "string16"}, _smap) do
+    local = rust_field_name(name)
+    [
+      "        #{local} = read_string16(bytes, &mut pos)?;\n"
+    ]
+  end
+
+  defp rust_decode_field_assignment_statement(%{"name" => name, "type" => "string32"}, _smap) do
+    local = rust_field_name(name)
+    [
+      "        #{local} = read_string32(bytes, &mut pos)?;\n"
+    ]
+  end
+
+  defp rust_decode_field_assignment_statement(%{"name" => name, "type" => "struct", "element" => element}, _smap) do
+    local = rust_field_name(name)
+    [
+      "        let (#{local}_value, consumed) = decode_#{element}(bytes, pos)?;\n",
+      "        #{local} = #{local}_value;\n",
+      "        pos += consumed;\n"
+    ]
+  end
+
+  defp rust_decode_field_assignment_statement(%{"name" => name, "type" => "counted_array", "count_type" => count_type, "element" => element}, smap) do
+    local = rust_field_name(name)
+    {count_read, count_size} = rust_count_read(count_type)
+    element_fixed_size = fixed_structure_size(element, smap)
+
+    stride_check = case element_fixed_size do
+      nil -> []
+      stride ->
+        [
+          "        require_len(bytes, pos + #{local}_count * #{stride}, \"#{name}\")?;\n"
+        ]
+    end
+
+    [
+      "        require_len(bytes, pos + #{count_size}, \"#{name} count\")?;\n",
+      "        let #{local}_count = #{count_read};\n",
+      "        pos += #{count_size};\n",
+      stride_check,
+      "        let mut #{local}_value = Vec::with_capacity(#{local}_count);\n",
+      "        for _ in 0..#{local}_count {\n",
+      "            let (item, consumed) = decode_#{element}(bytes, pos)?;\n",
+      "            pos += consumed;\n",
+      "            #{local}_value.push(item);\n",
+      "        }\n",
+      "        #{local} = #{local}_value;\n"
+    ]
   end
 
   # ── Rust type mapping helpers ────────────────────────────────────────────
@@ -1357,8 +1748,10 @@ defmodule Minga.Mix.ProtocolGenerator do
   defp rust_structure_definitions(structures, smap) do
     Enum.map(structures, fn s ->
       name = rust_struct_name(s["name"])
-      fields = s["fields"] || []
-      has_variable = Enum.any?(fields, fn f -> fixed_field_size(f, smap) == nil end)
+      fields = entry_fields(s)
+
+      has_variable =
+        Map.has_key?(s, "conditional_tail") or Enum.any?(fields, fn f -> fixed_field_size(f, smap) == nil end)
 
       derive =
         if has_variable,
@@ -1392,12 +1785,13 @@ defmodule Minga.Mix.ProtocolGenerator do
 
   @spec rust_section_struct_definitions([section()], %{String.t() => structure()}) :: iodata()
   defp rust_section_struct_definitions(sections, smap) do
-    # Only generate structs for sections with inline fields (not counted_array layout)
+    # Only generate structs for sections with inline fields (not counted_array layout or custom sections)
     sections
-    |> Enum.filter(&Map.has_key?(&1, "fields"))
+    |> Enum.reject(&entry_custom_layout?/1)
+    |> Enum.filter(&Map.has_key?(&1, "fields") or Map.has_key?(&1, "conditional_tail"))
     |> Enum.map(fn s ->
       name = rust_section_struct_name(s)
-      fields = s["fields"] || []
+      fields = entry_fields(s)
       has_variable = Enum.any?(fields, fn f -> fixed_field_size(f, smap) == nil end)
 
       derive =
@@ -1523,8 +1917,9 @@ defmodule Minga.Mix.ProtocolGenerator do
       "pub fn #{fn_name}(bytes: &[u8], offset: usize) -> Result<(#{struct_name}, usize), DecodeError> {\n",
       "    let mut pos = offset;\n",
       Enum.map(fields, &rust_decode_field_statement(&1, smap)),
+      rust_decode_conditional_tail_block(structure, smap),
       "    Ok((#{struct_name} {\n",
-      Enum.map(fields, fn field -> "        #{rust_field_name(field["name"])},\n" end),
+      Enum.map(entry_fields(structure), fn field -> "        #{rust_field_name(field["name"])},\n" end),
       "    }, pos - offset))\n",
       "}\n\n"
     ]
@@ -1687,9 +2082,10 @@ defmodule Minga.Mix.ProtocolGenerator do
     [
       "// Section decoders for #{opcode}\n\n",
       Enum.map(secs, fn sec ->
-        case sec["layout"] do
-          "counted_array" -> rust_decode_counted_array_section(opcode, sec, smap)
-          _ -> rust_decode_inline_section(opcode, sec, smap)
+        cond do
+          entry_custom_layout?(sec) -> []
+          sec["layout"] == "counted_array" -> rust_decode_counted_array_section(opcode, sec, smap)
+          true -> rust_decode_inline_section(opcode, sec, smap)
         end
       end)
     ]
@@ -1706,8 +2102,9 @@ defmodule Minga.Mix.ProtocolGenerator do
       "pub fn #{fn_name}(bytes: &[u8], offset: usize) -> Result<(#{struct_name}, usize), DecodeError> {\n",
       "    let mut pos = offset;\n",
       Enum.map(fields, &rust_decode_field_statement(&1, smap)),
+      rust_decode_conditional_tail_block(section, smap),
       "    Ok((#{struct_name} {\n",
-      Enum.map(fields, fn field -> "        #{rust_field_name(field["name"])},\n" end),
+      Enum.map(entry_fields(section), fn field -> "        #{rust_field_name(field["name"])},\n" end),
       "    }, pos - offset))\n",
       "}\n\n"
     ]
@@ -1850,14 +2247,14 @@ defmodule Minga.Mix.ProtocolGenerator do
       go_section_struct_definitions(sections, smap)
     ]
     |> IO.iodata_to_binary()
-    |> gofmt()
+    |> format_generated_go_file()
   end
 
   @spec go_structure_definitions([structure()], %{String.t() => structure()}) :: iodata()
   defp go_structure_definitions(structures, smap) do
     Enum.map(structures, fn s ->
       name = go_struct_name(s["name"])
-      fields = s["fields"] || []
+      fields = entry_fields(s)
       go_struct_block(name, fields, smap)
     end)
   end
@@ -1915,10 +2312,11 @@ defmodule Minga.Mix.ProtocolGenerator do
   @spec go_section_struct_definitions([section()], %{String.t() => structure()}) :: iodata()
   defp go_section_struct_definitions(sections, smap) do
     sections
-    |> Enum.filter(&Map.has_key?(&1, "fields"))
+    |> Enum.reject(&entry_custom_layout?/1)
+    |> Enum.filter(&Map.has_key?(&1, "fields") or Map.has_key?(&1, "conditional_tail"))
     |> Enum.map(fn s ->
       name = go_section_struct_name(s)
-      fields = s["fields"] || []
+      fields = entry_fields(s)
       go_struct_block(name, fields, smap)
     end)
   end
@@ -1942,29 +2340,7 @@ defmodule Minga.Mix.ProtocolGenerator do
       go_decode_section_functions(sections, smap)
     ]
     |> IO.iodata_to_binary()
-    |> gofmt()
-  end
-
-  @spec gofmt(String.t()) :: String.t()
-  defp gofmt(source) do
-    case System.find_executable("gofmt") do
-      nil ->
-        source
-
-      _path ->
-        tmp = Path.join(System.tmp_dir!(), "protocol_gen_#{:erlang.phash2(source)}.go")
-        File.write!(tmp, source)
-
-        case System.cmd("gofmt", [tmp], stderr_to_stdout: true) do
-          {formatted, 0} ->
-            File.rm(tmp)
-            formatted
-
-          {_error, _code} ->
-            File.rm(tmp)
-            source
-        end
-    end
+    |> format_generated_go_file()
   end
 
   @spec go_decode_helpers() :: String.t()
@@ -2046,8 +2422,9 @@ defmodule Minga.Mix.ProtocolGenerator do
       "func #{fn_name}(data []byte, offset int) (#{struct_name}, int, error) {\n",
       "\tpos := offset\n",
       Enum.map(fields, &go_decode_field_statement(&1, smap, zero)),
+      go_decode_conditional_tail_block(structure, smap, zero),
       "\treturn #{struct_name}{\n",
-      Enum.map(fields, fn field ->
+      Enum.map(entry_fields(structure), fn field ->
         "\t\t#{go_field_name(field["name"])}: #{go_local_name(field["name"])},\n"
       end),
       "\t}, pos, nil\n",
@@ -2247,9 +2624,10 @@ defmodule Minga.Mix.ProtocolGenerator do
     [
       "// Section decoders for #{opcode}\n\n",
       Enum.map(secs, fn sec ->
-        case sec["layout"] do
-          "counted_array" -> go_decode_counted_array_section(opcode, sec, smap)
-          _ -> go_decode_inline_section(opcode, sec, smap)
+        cond do
+          entry_custom_layout?(sec) -> []
+          sec["layout"] == "counted_array" -> go_decode_counted_array_section(opcode, sec, smap)
+          true -> go_decode_inline_section(opcode, sec, smap)
         end
       end)
     ]
@@ -2266,8 +2644,9 @@ defmodule Minga.Mix.ProtocolGenerator do
       "func #{fn_name}(data []byte, offset int) (#{struct_name}, int, error) {\n",
       "\tpos := offset\n",
       Enum.map(fields, &go_decode_field_statement(&1, smap, zero)),
+      go_decode_conditional_tail_block(section, smap, zero),
       "\treturn #{struct_name}{\n",
-      Enum.map(fields, fn field ->
+      Enum.map(entry_fields(section), fn field ->
         "\t\t#{go_field_name(field["name"])}: #{go_local_name(field["name"])},\n"
       end),
       "\t}, pos, nil\n",

@@ -62,7 +62,7 @@ type Annotation struct {
 type HitRegion struct {
 	Kind uint8
 	Rect Rect
-	ID   uint32
+	ID   uint16
 }
 
 type GutterEntry struct {
@@ -70,13 +70,17 @@ type GutterEntry struct {
 	DisplayType uint8
 	SignType    uint8
 	FoldEndLine uint32
+	SignFG      uint32
+	SignText    string
 }
 
 type ModelineSegment struct {
-	Text  string
-	FG    uint32
-	BG    uint32
-	Attrs uint8
+	Name   string
+	FG     uint32
+	BG     uint32
+	Attrs  uint8
+	Text   string
+	Target string
 }
 
 const (
@@ -85,8 +89,7 @@ const (
 	SearchMatchSize       = 7
 	DiagnosticRangeSize   = 9
 	DocumentHighlightSize = 9
-	HitRegionSize         = 13
-	GutterEntrySize       = 10
+	HitRegionSize         = 11
 )
 
 type GuiWindowContentHeader struct {
@@ -100,7 +103,11 @@ type GuiWindowContentHeader struct {
 }
 
 type GuiWindowContentSelection struct {
-	Type uint8
+	Type     uint8
+	StartRow uint16
+	StartCol uint16
+	EndRow   uint16
+	EndCol   uint16
 }
 
 type GuiWindowContentGeometry struct {

@@ -555,14 +555,12 @@ fn decode_window_content(bytes: &[u8]) -> Result<Command, DecodeError> {
             }
             0x02 => rows = decode_rows(payload)?,
             0x08 => {
-                if let Ok((geometry, _)) =
-                    semantic_decode::decode_gui_window_content_geometry(payload, 0)
-                {
-                    origin_row = geometry.text_rect.row;
-                    origin_col = geometry.text_rect.col;
-                    text_width = geometry.text_rect.width;
-                    text_height = geometry.text_rect.height;
-                }
+                let (geometry, _) =
+                    semantic_decode::decode_gui_window_content_geometry(payload, 0)?;
+                origin_row = geometry.text_rect.row;
+                origin_col = geometry.text_rect.col;
+                text_width = geometry.text_rect.width;
+                text_height = geometry.text_rect.height;
             }
             0x09 => {
                 let (cl, _) = semantic_decode::decode_gui_window_content_cursorline(payload, 0)?;
@@ -2116,6 +2114,27 @@ mod tests {
                 ..
             }, _) if rows[0].text == "hi" && rows[0].spans[0].fg == 0xAABBCC
         ));
+    }
+
+    #[test]
+    fn rejects_window_content_geometry_without_hit_region_bytes() {
+        let header = section(0x01, &[0, 1, 0x03, 0, 4, 0, 5, 2, 0, 0, 0, 0, 0, 7]);
+        let rows = section(0x02, &[0, 0]);
+        let mut geometry_payload = vec![0; 67];
+        geometry_payload[1] = 7;
+        geometry_payload[63] = 3;
+        geometry_payload[65] = 2;
+        geometry_payload[66] = 1;
+        let geometry = section(0x08, &geometry_payload);
+        let payload = [
+            vec![opcodes::OP_GUI_WINDOW_CONTENT, 3],
+            header,
+            rows,
+            geometry,
+        ]
+        .concat();
+
+        assert!(decode(&payload).is_err());
     }
 
     #[test]
