@@ -273,17 +273,11 @@ defmodule MingaAgent.Tools.Subagent do
   @spec resolve_provider(provider_override(), parent_context()) ::
           {:ok, resolved_provider()} | {:error, String.t()}
   defp resolve_provider(nil, parent_context) do
-    {:ok,
-     %{
-       module: parent_context.provider_module,
-       name: parent_context.provider_name,
-       id: parent_context.provider_id,
-       source: parent_context.provider_source
-     }}
+    resolve_inherited_provider(parent_context)
   end
 
   defp resolve_provider(:native, _parent_context) do
-    {:ok, %{module: MingaAgent.Providers.Native, name: "native", id: "native", source: :builtin}}
+    resolve_registered_provider(:native)
   end
 
   defp resolve_provider(:pi_rpc, _parent_context) do
@@ -294,10 +288,40 @@ defmodule MingaAgent.Tools.Subagent do
     {:ok, %{module: provider, name: inspect(provider), id: inspect(provider), source: :config}}
   end
 
-  defp resolve_provider("native", parent_context), do: resolve_provider(:native, parent_context)
+  defp resolve_provider("native", _parent_context), do: resolve_registered_provider(:native)
   defp resolve_provider("pi_rpc", parent_context), do: resolve_provider(:pi_rpc, parent_context)
 
   defp resolve_provider(provider, _parent_context) when is_binary(provider) do
+    resolve_registered_provider(provider)
+  end
+
+  defp resolve_provider(provider, _parent_context) do
+    {:error, "Unknown subagent provider override: #{inspect(provider)}"}
+  end
+
+  @spec resolve_inherited_provider(parent_context()) ::
+          {:ok, resolved_provider()} | {:error, String.t()}
+  defp resolve_inherited_provider(%{provider_source: {:bundle, _name}, provider_id: id}) do
+    resolve_registered_provider(id)
+  end
+
+  defp resolve_inherited_provider(%{provider_source: {:extension, _name}, provider_id: id}) do
+    resolve_registered_provider(id)
+  end
+
+  defp resolve_inherited_provider(parent_context) do
+    {:ok,
+     %{
+       module: parent_context.provider_module,
+       name: parent_context.provider_name,
+       id: parent_context.provider_id,
+       source: parent_context.provider_source
+     }}
+  end
+
+  @spec resolve_registered_provider(ProviderResolver.preference()) ::
+          {:ok, resolved_provider()} | {:error, String.t()}
+  defp resolve_registered_provider(provider) do
     resolved = ProviderResolver.resolve(provider)
 
     {:ok,
@@ -308,11 +332,16 @@ defmodule MingaAgent.Tools.Subagent do
        source: resolved.source
      }}
   rescue
-    e -> {:error, Exception.message(e)}
-  end
+    e in ArgumentError ->
+      {:error, Exception.message(e)}
 
-  defp resolve_provider(provider, _parent_context) do
-    {:error, "Unknown subagent provider override: #{inspect(provider)}"}
+    e ->
+      Minga.Log.error(
+        :agent,
+        "Unexpected subagent provider resolution failure: #{Exception.format(:error, e, __STACKTRACE__)}"
+      )
+
+      {:error, "Unexpected subagent provider resolution failure"}
   end
 
   @spec build_provider_opts(

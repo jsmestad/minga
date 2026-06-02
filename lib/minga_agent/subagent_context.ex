@@ -17,14 +17,14 @@ defmodule MingaAgent.SubagentContext do
           project_root: String.t() | nil
         }
 
-  @enforce_keys [:provider_module, :provider_name]
+  @enforce_keys [:provider_module, :provider_name, :provider_id, :provider_source]
   defstruct [
     :provider_module,
     :provider_name,
+    :provider_id,
+    :provider_source,
     :thinking_level,
     :project_root,
-    provider_id: "native",
-    provider_source: :builtin,
     model: nil,
     active_skill_names: []
   ]
@@ -42,7 +42,7 @@ defmodule MingaAgent.SubagentContext do
       provider_module: MingaAgent.Providers.Native,
       provider_name: "native",
       provider_id: "native",
-      provider_source: :builtin,
+      provider_source: {:bundle, :native_provider},
       model: nil,
       thinking_level: nil,
       active_skill_names: [],

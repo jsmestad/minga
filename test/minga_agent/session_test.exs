@@ -6,6 +6,7 @@ defmodule MingaAgent.SessionTest do
   alias MingaAgent.Event
   alias MingaAgent.MCP.FakeTransport
   alias MingaAgent.MCP.ServerConfig
+  alias MingaAgent.ProviderRegistry
   alias MingaAgent.Providers.Native
   alias MingaAgent.Session
   alias MingaAgent.SessionStore
@@ -446,29 +447,50 @@ defmodule MingaAgent.SessionTest do
     %{session: session}
   end
 
-  describe "extension provider leases" do
+  describe "source-owned provider leases" do
     test "active sessions keep extension provider modules leased" do
-      source = {:extension, :lease_provider_test}
-
-      {:ok, session} =
-        Session.start_link(
-          provider: SlowMockProvider,
-          provider_id: "leased",
-          provider_source: source,
-          provider_opts: []
-        )
-
-      :sys.get_state(session)
-
-      assert [lease] = CodeLease.active_leases(source: source, module: SlowMockProvider)
-      assert lease.reason == :provider
-
-      assert {:error, {:leased_modules, [_summary]}} =
-               CodeLease.ensure_purge_allowed(source, SlowMockProvider)
-
-      GenServer.stop(session)
-      assert [] = CodeLease.active_leases(source: source, module: SlowMockProvider)
+      assert_provider_source_leased({:extension, :lease_provider_test})
     end
+
+    test "active sessions keep bundled provider modules leased" do
+      assert_provider_source_leased({:bundle, :lease_provider_test})
+    end
+  end
+
+  @spec assert_provider_source_leased(Minga.Extension.ContributionCleanup.contribution_source()) ::
+          :ok
+  defp assert_provider_source_leased(source) do
+    provider_id = "leased-#{System.unique_integer([:positive])}"
+
+    assert :ok =
+             ProviderRegistry.register(
+               id: provider_id,
+               source: source,
+               module: SlowMockProvider,
+               display_name: "Leased Provider"
+             )
+
+    on_exit(fn -> ProviderRegistry.unregister_source(source) end)
+
+    {:ok, session} =
+      Session.start_link(
+        provider: SlowMockProvider,
+        provider_id: provider_id,
+        provider_source: source,
+        provider_opts: []
+      )
+
+    :sys.get_state(session)
+
+    assert [lease] = CodeLease.active_leases(source: source, module: SlowMockProvider)
+    assert lease.reason == :provider
+
+    assert {:error, {:leased_modules, [_summary]}} =
+             CodeLease.ensure_purge_allowed(source, SlowMockProvider)
+
+    GenServer.stop(session)
+    assert [] = CodeLease.active_leases(source: source, module: SlowMockProvider)
+    :ok
   end
 
   @spec idle_process() :: pid()

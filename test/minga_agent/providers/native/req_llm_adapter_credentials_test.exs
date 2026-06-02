@@ -4,11 +4,20 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterCredentialsTest do
 
   import ExUnit.CaptureLog
 
+  alias MingaAgent.Credentials
   alias MingaAgent.Providers.Native.ReqLLMAdapter
 
+  @provider_env_vars ~w(ANTHROPIC_API_KEY OPENAI_API_KEY GOOGLE_API_KEY OPENROUTER_API_KEY GROQ_API_KEY MISTRAL_API_KEY DEEPSEEK_API_KEY)
+
   setup do
+    saved_env =
+      for var <- @provider_env_vars, into: %{} do
+        {var, System.get_env(var)}
+      end
+
     previous_xdg = System.get_env("XDG_CONFIG_HOME")
-    previous_anthropic = System.get_env("ANTHROPIC_API_KEY")
+
+    for var <- @provider_env_vars, do: System.delete_env(var)
 
     config_home =
       Path.join(
@@ -17,11 +26,13 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterCredentialsTest do
       )
 
     System.put_env("XDG_CONFIG_HOME", config_home)
-    System.delete_env("ANTHROPIC_API_KEY")
 
     on_exit(fn ->
+      for {var, value} <- saved_env do
+        restore_env(var, value)
+      end
+
       restore_env("XDG_CONFIG_HOME", previous_xdg)
-      restore_env("ANTHROPIC_API_KEY", previous_anthropic)
       File.rm_rf!(config_home)
     end)
 
@@ -33,6 +44,27 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterCredentialsTest do
 
     assert :ok = ReqLLMAdapter.ensure_api_key_in_env("anthropic:claude")
     assert System.get_env("ANTHROPIC_API_KEY") == "file-key"
+  end
+
+  test "file-backed non-anthropic provider keys populate the matching env var", %{
+    config_home: config_home
+  } do
+    write_credentials(config_home, %{"groq" => "groq-file-key"})
+
+    assert :ok = ReqLLMAdapter.ensure_api_key_in_env("groq:llama-3.3")
+    assert System.get_env("GROQ_API_KEY") == "groq-file-key"
+    assert System.get_env("ANTHROPIC_API_KEY") == nil
+    assert System.get_env("OPENAI_API_KEY") == nil
+  end
+
+  test "file-backed provider keys flow through the credential accessor at call time" do
+    secret = "sk-ant-fake-bundled-provider"
+    assert :ok = Credentials.store("anthropic", secret)
+    refute System.get_env("ANTHROPIC_API_KEY") == secret
+
+    assert :ok = ReqLLMAdapter.ensure_api_key_in_env("anthropic:claude-sonnet-4")
+
+    assert System.get_env("ANTHROPIC_API_KEY") == secret
   end
 
   test "env-backed credentials keep the existing provider env var", %{config_home: config_home} do

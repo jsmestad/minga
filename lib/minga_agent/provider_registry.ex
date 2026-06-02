@@ -7,7 +7,6 @@ defmodule MingaAgent.ProviderRegistry do
 
   use GenServer
 
-  alias Minga.Extension.ContributionCleanup
   alias MingaAgent.Provider.Spec
 
   defmodule Entry do
@@ -22,7 +21,7 @@ defmodule MingaAgent.ProviderRegistry do
   @type server :: GenServer.server()
 
   @typedoc "Source that owns provider declarations."
-  @type source :: ContributionCleanup.contribution_source()
+  @type source :: Spec.source()
 
   @typedoc "Registration failure reason."
   @type register_error ::
@@ -36,8 +35,7 @@ defmodule MingaAgent.ProviderRegistry do
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
     name = Keyword.get(opts, :name, __MODULE__)
-    seed_builtin? = Keyword.get(opts, :seed_builtin?, name == __MODULE__)
-    GenServer.start_link(__MODULE__, [name: name, seed_builtin?: seed_builtin?], name: name)
+    GenServer.start_link(__MODULE__, [name: name], name: name)
   end
 
   @doc "Registers or replaces a provider spec."
@@ -106,34 +104,11 @@ defmodule MingaAgent.ProviderRegistry do
     :exit, {:noproc, _} -> :ok
   end
 
-  @doc "Returns the built-in native provider spec."
-  @spec native_spec() :: Spec.t()
-  def native_spec do
-    Spec.new!(
-      source: :builtin,
-      id: "native",
-      module: MingaAgent.Providers.Native,
-      display_name: "native",
-      model_prefixes: ["anthropic:", "openai:", "ollama:", "groq:", "bedrock:"],
-      capabilities: [:streaming, :tools, :mcp, :thinking, :model_switching],
-      credential_requirements: [:llm]
-    )
-  end
-
   @impl true
   @spec init(keyword()) :: {:ok, state()}
   def init(opts) do
     maybe_register_cleanup_callback(Keyword.get(opts, :name, __MODULE__))
-    state = %{}
-
-    state =
-      if Keyword.get(opts, :seed_builtin?, false) do
-        put_entry(state, native_spec())
-      else
-        state
-      end
-
-    {:ok, state}
+    {:ok, %{}}
   end
 
   @impl true
