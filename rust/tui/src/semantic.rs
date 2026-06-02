@@ -13,6 +13,9 @@ pub enum Command {
     Breadcrumb(Breadcrumb, usize),
     Completion(Completion, usize),
     WhichKey(WhichKey, usize),
+    SignatureHelp(SignatureHelp, usize),
+    FloatPopup(FloatPopup, usize),
+    HoverPopup(HoverPopup, usize),
     Theme(Theme, usize),
     Unsupported { opcode: u8, size: usize },
 }
@@ -31,6 +34,9 @@ impl Command {
             Self::Breadcrumb(_, size) => *size,
             Self::Completion(_, size) => *size,
             Self::WhichKey(_, size) => *size,
+            Self::SignatureHelp(_, size) => *size,
+            Self::FloatPopup(_, size) => *size,
+            Self::HoverPopup(_, size) => *size,
             Self::Theme(_, size) => *size,
             Self::Unsupported { size, .. } => *size,
         }
@@ -225,6 +231,62 @@ pub struct WhichKeyBinding {
     pub icon: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SignatureHelp {
+    pub visible: bool,
+    pub anchor_row: u16,
+    pub anchor_col: u16,
+    pub active_signature: u8,
+    pub active_parameter: u8,
+    pub signatures: Vec<Signature>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Signature {
+    pub label: String,
+    pub documentation: String,
+    pub parameters: Vec<SignatureParameter>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignatureParameter {
+    pub label: String,
+    pub documentation: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct FloatPopup {
+    pub visible: bool,
+    pub width: u16,
+    pub height: u16,
+    pub title: String,
+    pub lines: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct HoverPopup {
+    pub visible: bool,
+    pub anchor_row: u16,
+    pub anchor_col: u16,
+    pub focused: bool,
+    pub scroll_offset: u16,
+    pub lines: Vec<HoverLine>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HoverLine {
+    pub line_type: u8,
+    pub segments: Vec<HoverSegment>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HoverSegment {
+    pub style: u8,
+    pub fg: u32,
+    pub flags: u8,
+    pub text: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Theme {
     pub slots: Vec<ThemeSlot>,
@@ -251,6 +313,9 @@ pub fn decode(bytes: &[u8]) -> Result<Command, DecodeError> {
         opcodes::OP_GUI_BREADCRUMB => decode_breadcrumb(bytes),
         opcodes::OP_GUI_COMPLETION => decode_completion(bytes),
         opcodes::OP_GUI_WHICH_KEY => decode_which_key(bytes),
+        opcodes::OP_GUI_SIGNATURE_HELP => decode_signature_help(bytes),
+        opcodes::OP_GUI_FLOAT_POPUP => decode_float_popup(bytes),
+        opcodes::OP_GUI_HOVER_POPUP => decode_hover_popup(bytes),
         opcodes::OP_GUI_THEME => decode_theme(bytes),
         opcodes::OP_GUI_WINDOW_VIEWPORT_DELTA | opcodes::OP_GUI_WINDOW_ROWS_DELTA => {
             sectioned_size(bytes, "semantic row delta")
@@ -280,10 +345,7 @@ pub fn decode(bytes: &[u8]) -> Result<Command, DecodeError> {
         opcodes::OP_GUI_SPLIT_SEPARATORS => {
             split_separators_size(bytes).map(|size| Command::Unsupported { opcode, size })
         }
-        opcodes::OP_GUI_SIGNATURE_HELP
-        | opcodes::OP_GUI_FLOAT_POPUP
-        | opcodes::OP_GUI_HOVER_POPUP
-        | opcodes::OP_GUI_AGENT_CONTEXT
+        opcodes::OP_GUI_AGENT_CONTEXT
         | opcodes::OP_GUI_GIT_STATUS
         | opcodes::OP_GUI_CHANGE_SUMMARY
         | opcodes::OP_GUI_BOARD
@@ -801,6 +863,154 @@ fn decode_which_key(bytes: &[u8]) -> Result<Command, DecodeError> {
             page,
             page_count,
             bindings,
+        },
+        size,
+    ))
+}
+
+fn decode_signature_help(bytes: &[u8]) -> Result<Command, DecodeError> {
+    require_len(bytes, 2, "signature help header")?;
+    if bytes[1] == 0 {
+        return Ok(Command::SignatureHelp(SignatureHelp::default(), 2));
+    }
+
+    let size = signature_help_size(bytes)?;
+    let anchor_row = read_u16(bytes, 2);
+    let anchor_col = read_u16(bytes, 4);
+    let active_signature = bytes[6];
+    let active_parameter = bytes[7];
+    let count = bytes[8] as usize;
+    let mut offset = 9;
+    let mut signatures = Vec::with_capacity(count);
+
+    for _ in 0..count {
+        let label = read_string16(bytes, &mut offset)?;
+        let documentation = read_string16(bytes, &mut offset)?;
+        require_len(bytes, offset + 1, "signature parameter count")?;
+        let parameter_count = bytes[offset] as usize;
+        offset += 1;
+        let mut parameters = Vec::with_capacity(parameter_count);
+        for _ in 0..parameter_count {
+            parameters.push(SignatureParameter {
+                label: read_string16(bytes, &mut offset)?,
+                documentation: read_string16(bytes, &mut offset)?,
+            });
+        }
+        signatures.push(Signature {
+            label,
+            documentation,
+            parameters,
+        });
+    }
+
+    Ok(Command::SignatureHelp(
+        SignatureHelp {
+            visible: true,
+            anchor_row,
+            anchor_col,
+            active_signature,
+            active_parameter,
+            signatures,
+        },
+        size,
+    ))
+}
+
+fn decode_float_popup(bytes: &[u8]) -> Result<Command, DecodeError> {
+    require_len(bytes, 2, "float popup header")?;
+    if bytes[1] == 0 {
+        return Ok(Command::FloatPopup(FloatPopup::default(), 2));
+    }
+
+    let size = float_popup_size(bytes)?;
+    let width = read_u16(bytes, 2);
+    let height = read_u16(bytes, 4);
+    let mut offset = 6;
+    let title = read_string16(bytes, &mut offset)?;
+    require_len(bytes, offset + 2, "float popup line count")?;
+    let count = read_u16(bytes, offset) as usize;
+    offset += 2;
+    let mut lines = Vec::with_capacity(count);
+
+    for _ in 0..count {
+        lines.push(read_string16(bytes, &mut offset)?);
+    }
+
+    Ok(Command::FloatPopup(
+        FloatPopup {
+            visible: true,
+            width,
+            height,
+            title,
+            lines,
+        },
+        size,
+    ))
+}
+
+fn decode_hover_popup(bytes: &[u8]) -> Result<Command, DecodeError> {
+    require_len(bytes, 2, "hover popup header")?;
+    if bytes[1] == 0 {
+        return Ok(Command::HoverPopup(HoverPopup::default(), 2));
+    }
+
+    let size = hover_popup_size(bytes)?;
+    let anchor_row = read_u16(bytes, 2);
+    let anchor_col = read_u16(bytes, 4);
+    let focused = bytes[6] != 0;
+    let scroll_offset = read_u16(bytes, 7);
+    let count = read_u16(bytes, 9) as usize;
+    let mut offset = 11;
+    let mut lines = Vec::with_capacity(count);
+
+    for _ in 0..count {
+        require_len(bytes, offset + 3, "hover line")?;
+        let line_type = bytes[offset];
+        let segment_count = read_u16(bytes, offset + 1) as usize;
+        offset += 3;
+        let mut segments = Vec::with_capacity(segment_count);
+        for _ in 0..segment_count {
+            require_len(bytes, offset + 1, "hover segment style")?;
+            let style = bytes[offset];
+            offset += 1;
+            let (fg, flags, text) = if style == 13 {
+                require_len(bytes, offset + 6, "hover syntax segment")?;
+                let fg = read_u24(bytes, offset);
+                let flags = bytes[offset + 3];
+                let len = read_u16(bytes, offset + 4) as usize;
+                offset += 6;
+                let text = read_string(bytes, offset, len)?;
+                offset += len;
+                (fg, flags, text)
+            } else {
+                require_len(bytes, offset + 2, "hover segment")?;
+                let len = read_u16(bytes, offset) as usize;
+                offset += 2;
+                let text = read_string(bytes, offset, len)?;
+                offset += len;
+                (0, 0, text)
+            };
+            segments.push(HoverSegment {
+                style,
+                fg,
+                flags,
+                text,
+            });
+        }
+        lines.push(HoverLine {
+            line_type,
+            segments,
+        });
+    }
+
+    Ok(Command::HoverPopup(
+        HoverPopup {
+            visible: true,
+            anchor_row,
+            anchor_col,
+            focused,
+            scroll_offset,
+            lines,
         },
         size,
     ))
@@ -1631,6 +1841,78 @@ mod tests {
     }
 
     #[test]
+    fn decodes_signature_help_without_consuming_following_commands() {
+        let packet = [
+            vec![opcodes::OP_GUI_SIGNATURE_HELP, 1, 0, 8, 0, 12, 0, 1, 1],
+            string16("open(path, opts)"),
+            string16("Open a file"),
+            vec![2],
+            string16("path"),
+            string16("File path"),
+            string16("opts"),
+            string16("Options"),
+            vec![opcodes::OP_BATCH_END],
+        ]
+        .concat();
+
+        let command = decode(&packet).unwrap();
+
+        assert_eq!(command.size(), packet.len() - 1);
+        assert!(matches!(
+            command,
+            Command::SignatureHelp(SignatureHelp { visible: true, anchor_row: 8, anchor_col: 12, active_parameter: 1, signatures, .. }, _)
+                if signatures[0].label == "open(path, opts)" && signatures[0].parameters[1].label == "opts"
+        ));
+    }
+
+    #[test]
+    fn decodes_float_popup_without_consuming_following_commands() {
+        let packet = [
+            vec![opcodes::OP_GUI_FLOAT_POPUP, 1, 0, 24, 0, 5],
+            string16("Docs"),
+            vec![0, 2],
+            string16("line one"),
+            string16("line two"),
+            vec![opcodes::OP_BATCH_END],
+        ]
+        .concat();
+
+        let command = decode(&packet).unwrap();
+
+        assert_eq!(command.size(), packet.len() - 1);
+        assert!(matches!(
+            command,
+            Command::FloatPopup(FloatPopup { visible: true, width: 24, height: 5, title, lines }, _)
+                if title == "Docs" && lines == vec!["line one", "line two"]
+        ));
+    }
+
+    #[test]
+    fn decodes_hover_popup_without_consuming_following_commands() {
+        let packet = [
+            vec![opcodes::OP_GUI_HOVER_POPUP, 1, 0, 3, 0, 9, 1, 0, 2, 0, 1],
+            vec![0, 0, 2],
+            vec![0],
+            string16("plain"),
+            vec![13, 0xAA, 0xBB, 0xCC, 0x05],
+            string16("syntax"),
+            vec![opcodes::OP_BATCH_END],
+        ]
+        .concat();
+
+        let command = decode(&packet).unwrap();
+
+        assert_eq!(command.size(), packet.len() - 1);
+        assert!(matches!(
+            command,
+            Command::HoverPopup(HoverPopup { visible: true, anchor_row: 3, anchor_col: 9, focused: true, scroll_offset: 2, lines }, _)
+                if lines[0].segments[0].text == "plain"
+                    && lines[0].segments[1].fg == 0xAABBCC
+                    && lines[0].segments[1].flags == 0x05
+        ));
+    }
+
+    #[test]
     fn decodes_theme_slots() {
         let packet = vec![
             opcodes::OP_GUI_THEME,
@@ -1656,18 +1938,6 @@ mod tests {
     #[test]
     fn skips_remaining_visible_legacy_commands_without_consuming_following_commands() {
         let cases = [
-            (
-                opcodes::OP_GUI_SIGNATURE_HELP,
-                vec![opcodes::OP_GUI_SIGNATURE_HELP, 1, 0, 0, 0, 0, 0, 0, 0],
-            ),
-            (
-                opcodes::OP_GUI_FLOAT_POPUP,
-                vec![opcodes::OP_GUI_FLOAT_POPUP, 1, 0, 0, 0, 0, 0, 0, 0, 0],
-            ),
-            (
-                opcodes::OP_GUI_HOVER_POPUP,
-                vec![opcodes::OP_GUI_HOVER_POPUP, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            ),
             (
                 opcodes::OP_GUI_AGENT_CONTEXT,
                 vec![
