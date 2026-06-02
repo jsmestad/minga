@@ -82,6 +82,13 @@ defmodule MingaAgent.MCP.ServerRegistry do
     :exit, _ -> []
   end
 
+  @doc "Resolves config-owned and registry-owned MCP configs with deterministic first-owner collision handling."
+  @spec resolve_configs([ServerConfig.t()], keyword()) :: [ServerConfig.t()]
+  def resolve_configs(config_configs, opts \\ []) when is_list(config_configs) do
+    registry_configs = Keyword.get_lazy(opts, :registry_configs, &configs/0)
+    deduplicate_configs(config_configs ++ registry_configs)
+  end
+
   @impl true
   @spec init(keyword()) :: {:ok, state()}
   def init(_opts) do
@@ -189,6 +196,21 @@ defmodule MingaAgent.MCP.ServerRegistry do
     else
       {[entry | entries], MapSet.put(seen, name)}
     end
+  end
+
+  @spec deduplicate_configs([ServerConfig.t()]) :: [ServerConfig.t()]
+  defp deduplicate_configs(configs) do
+    {deduped, _seen} =
+      Enum.reduce(configs, {[], MapSet.new()}, fn %ServerConfig{} = config, {acc, seen} ->
+        if MapSet.member?(seen, config.name) do
+          Minga.Log.warning(:agent, "Duplicate MCP server name ignored: #{config.name}")
+          {acc, seen}
+        else
+          {[config | acc], MapSet.put(seen, config.name)}
+        end
+      end)
+
+    Enum.reverse(deduped)
   end
 
   @spec server_id(atom() | String.t()) :: String.t()

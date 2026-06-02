@@ -163,6 +163,87 @@ defmodule MingaAgent.Providers.NativeMCPTest do
            end)
   end
 
+  test "list_mcp_tools redacts secret-bearing tool descriptions", %{tmp_dir: dir} do
+    secret = "ghp_supersecret123"
+    call_count = :counters.new(1, [:atomics])
+
+    client = fn _model, _messages, _opts ->
+      count = :counters.get(call_count, 1)
+      :counters.add(call_count, 1, 1)
+
+      chunks =
+        if count == 0 do
+          [
+            ReqLLM.StreamChunk.tool_call("list_mcp_tools", %{}, %{id: "tc_list", index: 0}),
+            ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+          ]
+        else
+          [ReqLLM.StreamChunk.text("done"), ReqLLM.StreamChunk.meta(%{finish_reason: :stop})]
+        end
+
+      build_stream_response(chunks)
+    end
+
+    tool = mcp_tool_def("secret-tool")
+    tool = %{tool | "description" => "uses Authorization: Bearer #{secret}"}
+
+    {:ok, provider} =
+      start_provider(
+        tmp_dir: dir,
+        llm_client: client,
+        mcp_transport_opts: [tools: [tool], test_pid: self()]
+      )
+
+    assert {:ok, [%{"description" => description}]} =
+             GenServer.call(provider, :list_mcp_tools, :infinity)
+
+    refute description =~ secret
+    assert description =~ "Bearer [REDACTED]"
+
+    assert :ok = Native.send_prompt(provider, "discover mcp")
+    events = collect_until_end()
+
+    assert Enum.any?(events, fn
+             %Event.ToolEnd{name: "list_mcp_tools", result: result, is_error: false} ->
+               refute result =~ secret
+               result =~ "Bearer [REDACTED]"
+
+             _event ->
+               false
+           end)
+  end
+
+  test "call_mcp_tool redacts successful MCP result secrets before returning to the model", %{
+    tmp_dir: dir
+  } do
+    secret = "ghp_supersecret123"
+
+    {:ok, provider} =
+      start_provider(
+        tmp_dir: dir,
+        mcp_transport_opts: [
+          tools: [mcp_tool_def()],
+          call_results: %{
+            "echo-text" => %{
+              "content" => [%{"type" => "text", "text" => "API_TOKEN=#{secret}"}],
+              "token" => secret
+            }
+          },
+          test_pid: self()
+        ]
+      )
+
+    assert {:ok, result} =
+             GenServer.call(
+               provider,
+               {:call_mcp_tool, "Local Tools", "echo-text", %{}},
+               :infinity
+             )
+
+    refute inspect(result) =~ secret
+    assert inspect(result) =~ "[REDACTED]"
+  end
+
   test "call_mcp_tool starts the selected server lazily and round-trips", %{tmp_dir: dir} do
     call_count = :counters.new(1, [:atomics])
 
@@ -252,6 +333,98 @@ defmodule MingaAgent.Providers.NativeMCPTest do
              _event ->
                false
            end)
+  end
+
+  test "native provider state inspection redacts configured MCP env", %{tmp_dir: dir} do
+    secret = "ghp_supersecret123"
+
+    {:ok, provider} =
+      start_provider(
+        tmp_dir: dir,
+        config: %AgentConfig{
+          mcp_servers: [
+            %{
+              "name" => "Secret Tools",
+              "command" => "ignored",
+              "env" => %{"GITHUB_TOKEN" => secret}
+            }
+          ],
+          tool_approval: :none
+        }
+      )
+
+    inspected = inspect(:sys.get_state(provider))
+    refute inspected =~ secret
+    assert inspected =~ "GITHUB_TOKEN"
+    assert inspected =~ "[REDACTED]"
+  end
+
+  test "MCP startup errors redact secrets in events status and tool results", %{tmp_dir: dir} do
+    secret = "ghp_supersecret123"
+    call_count = :counters.new(1, [:atomics])
+
+    client = fn _model, _messages, _opts ->
+      count = :counters.get(call_count, 1)
+      :counters.add(call_count, 1, 1)
+
+      chunks =
+        if count == 0 do
+          [
+            ReqLLM.StreamChunk.tool_call("list_mcp_tools", %{}, %{id: "tc_list", index: 0}),
+            ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+          ]
+        else
+          [ReqLLM.StreamChunk.text("done"), ReqLLM.StreamChunk.meta(%{finish_reason: :stop})]
+        end
+
+      build_stream_response(chunks)
+    end
+
+    {:ok, provider} =
+      start_provider(
+        tmp_dir: dir,
+        llm_client: client,
+        config:
+          agent_config([
+            %ServerConfig{name: "Broken", command: "ignored", env: %{"GITHUB_TOKEN" => secret}}
+          ]),
+        mcp_transport_opts: [
+          request_errors_by_server: %{
+            "Broken" => %{
+              "tools/list" => %{
+                "message" => "bad token #{secret}",
+                "data" => %{"GITHUB_TOKEN" => secret}
+              }
+            }
+          },
+          test_pid: self()
+        ]
+      )
+
+    assert :ok = Native.send_prompt(provider, "discover mcp")
+    events = collect_until_end()
+
+    assert Enum.any?(events, fn
+             %Event.Error{message: message} ->
+               refute message =~ secret
+               message =~ "[REDACTED]"
+
+             _event ->
+               false
+           end)
+
+    assert Enum.any?(events, fn
+             %Event.ToolEnd{name: "list_mcp_tools", result: result, is_error: true} ->
+               refute result =~ secret
+               result =~ "[REDACTED]"
+
+             _event ->
+               false
+           end)
+
+    assert {:ok, %{mcp_status: [%{"error" => error}]}} = Native.get_state(provider)
+    refute error =~ secret
+    assert error =~ "[REDACTED]"
   end
 
   test "list_mcp_tools returns a tool error when every configured server fails", %{tmp_dir: dir} do

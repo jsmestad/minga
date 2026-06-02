@@ -6,7 +6,7 @@ defmodule Minga.Extension.ContributionCleanup do
   """
 
   @typedoc "Source that contributed registry entries."
-  @type contribution_source :: :builtin | :config | {:extension, atom()}
+  @type contribution_source :: :builtin | :config | {:bundle, atom()} | {:extension, atom()}
 
   @typedoc "Cleanup callback invoked with a source identifier."
   @type cleanup_fun :: (contribution_source() -> :ok | {:error, term()})

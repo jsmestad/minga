@@ -1238,7 +1238,7 @@ defmodule Minga.Extension.LifecycleContractTest do
 
       assert :ok = Agent.stop(pid, reason)
 
-      stopped_entry = wait_for_entry_status(ctx.registry, extension_name, :stopped)
+      stopped_entry = wait_for_entry_status(ctx.registry, extension_name, :stopped, 100)
 
       assert_receive {:telemetry, [:minga, :extension, :lifecycle, :stop], %{duration: _},
                       %{extension: ^extension_name, phase: :cleanup}}
