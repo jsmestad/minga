@@ -13,6 +13,10 @@ defmodule Minga.Mix.ProtocolGenerator do
   @generated_zig_schema_test_path "zig/src/generated/protocol_schema_test.zig"
   @generated_rust_opcodes_path "rust/tui/src/generated/opcodes.rs"
   @generated_go_opcodes_path "go/tui/internal/generated/opcodes.go"
+  @generated_go_command_size_path "go/tui/internal/generated/command_size.go"
+  @generated_rust_command_size_path "rust/tui/src/generated/command_size.rs"
+  @generated_zig_command_size_path "zig/src/generated/protocol_command_size.zig"
+  @generated_swift_command_size_path "macos/.generated/protocol/ProtocolCommandSize.generated.swift"
   @protocol_zig_path "zig/src/protocol.zig"
   @allowed_opcode_categories [
     "input",
@@ -77,6 +81,7 @@ defmodule Minga.Mix.ProtocolGenerator do
     validate_duplicate_values!(Map.fetch!(schema, "opcodes"), "opcode")
     validate_duplicate_values!(Map.fetch!(schema, "gui_actions"), "GUI action")
     validate_gui_action_canonicals!(Map.fetch!(schema, "gui_actions"))
+    validate_framing!(schema)
     schema
   end
 
@@ -88,7 +93,11 @@ defmodule Minga.Mix.ProtocolGenerator do
       {@generated_zig_opcodes_path, zig_opcodes_file(schema)},
       {@generated_zig_schema_test_path, zig_schema_test_file(schema)},
       {@generated_rust_opcodes_path, rust_opcodes_file(schema)},
-      {@generated_go_opcodes_path, go_opcodes_file(schema)}
+      {@generated_go_opcodes_path, go_opcodes_file(schema)},
+      {@generated_go_command_size_path, go_command_size_file(schema)},
+      {@generated_rust_command_size_path, rust_command_size_file(schema)},
+      {@generated_zig_command_size_path, zig_command_size_file(schema)},
+      {@generated_swift_command_size_path, swift_command_size_file(schema)}
     ]
   end
 
@@ -607,6 +616,454 @@ defmodule Minga.Mix.ProtocolGenerator do
     |> String.replace("_", " ")
     |> String.split(" ")
     |> Enum.map_join(" ", &String.capitalize/1)
+  end
+
+  # ── Framing (command_size) ────────────────────────────────────────────────
+  #
+  # Every `beam_to_frontend` opcode declares a `framing` describing how a
+  # frontend computes the on-wire byte length of one command so it can advance
+  # through a batch. Kinds:
+  #
+  #   fixed:N    exactly N bytes
+  #   len16      opcode(1) + payload_len(u16) + payload   => 3 + len
+  #   len32      opcode(1) + payload_len(u32) + payload   => 5 + len
+  #   sectioned  opcode(1) + section_count(u8) + sections => 2 + sum(3 + section_len)
+  #   custom     bespoke layout; the frontend's decoder owns sizing
+  #
+  # The generated `command_size` functions size every generic framing and report
+  # `custom` for the rest. New opcodes at 0x90+ are also handled by the
+  # forward-compatible len16 fallback even before a frontend learns to size them.
+
+  @allowed_simple_framings ~w(len16 len32 sectioned custom)
+
+  @spec validate_framing!(schema()) :: :ok
+  defp validate_framing!(schema) do
+    invalid =
+      schema
+      |> Map.fetch!("opcodes")
+      |> Enum.filter(&(Map.get(&1, "direction") == "beam_to_frontend"))
+      |> Enum.reject(&valid_framing?(Map.get(&1, "framing")))
+      |> Enum.map_join(", ", fn entry -> "#{entry["name"]}(#{inspect(entry["framing"])})" end)
+
+    case invalid do
+      "" ->
+        :ok
+
+      _ ->
+        Mix.raise(
+          "Missing/invalid framing for beam_to_frontend opcodes in #{@schema_path}: #{invalid}"
+        )
+    end
+  end
+
+  @spec valid_framing?(term()) :: boolean()
+  defp valid_framing?(framing) when framing in @allowed_simple_framings, do: true
+  defp valid_framing?("fixed:" <> rest), do: match?({_int, ""}, Integer.parse(rest))
+  defp valid_framing?(_framing), do: false
+
+  @spec framing_kind(opcode()) :: {:fixed, pos_integer()} | :len16 | :len32 | :sectioned | :custom
+  defp framing_kind(%{"framing" => "fixed:" <> rest}), do: {:fixed, String.to_integer(rest)}
+  defp framing_kind(%{"framing" => framing}), do: String.to_atom(framing)
+
+  @spec framing_opcodes(schema()) :: [opcode()]
+  defp framing_opcodes(schema) do
+    schema
+    |> Map.fetch!("opcodes")
+    |> Enum.filter(&(Map.get(&1, "direction") == "beam_to_frontend"))
+    |> Enum.sort_by(& &1["value"])
+  end
+
+  @spec opcodes_of_kind([opcode()], term()) :: [opcode()]
+  defp opcodes_of_kind(opcodes, kind), do: Enum.filter(opcodes, &(framing_kind(&1) == kind))
+
+  @spec fixed_sizes([opcode()]) :: [pos_integer()]
+  defp fixed_sizes(opcodes) do
+    opcodes
+    |> Enum.map(&framing_kind/1)
+    |> Enum.flat_map(fn
+      {:fixed, n} -> [n]
+      _other -> []
+    end)
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
+
+  @spec rust_swift_zig_const_name(opcode()) :: String.t()
+  defp rust_swift_zig_const_name(%{"name" => name}), do: "OP_#{constant_name(name)}"
+
+  # ── Go: command_size.go ───────────────────────────────────────────────────
+
+  @spec go_command_size_file(schema()) :: String.t()
+  defp go_command_size_file(schema) do
+    ops = framing_opcodes(schema)
+    cn = &go_opcode_const_name/1
+
+    fixed_cases =
+      Enum.map(fixed_sizes(ops), fn n ->
+        names = ops |> opcodes_of_kind({:fixed, n}) |> Enum.map_join(", ", cn)
+        "\tcase #{names}:\n\t\treturn fixedCommandSize(payload, #{n})\n"
+      end)
+
+    "// Code generated by mix protocol.gen. DO NOT EDIT.\n\n" <>
+      "package generated\n\n" <>
+      "// CommandSizeStatus classifies the result of CommandSize.\n" <>
+      "type CommandSizeStatus int\n\n" <>
+      "const (\n" <>
+      "\t// CommandSizeOK means the returned size is authoritative.\n" <>
+      "\tCommandSizeOK CommandSizeStatus = iota\n" <>
+      "\t// CommandSizeCustom means the opcode uses bespoke framing; size it with a decoder.\n" <>
+      "\tCommandSizeCustom\n" <>
+      "\t// CommandSizeIncomplete means payload is truncated; read more bytes.\n" <>
+      "\tCommandSizeIncomplete\n" <>
+      "\t// CommandSizeUnknown means the opcode is unknown and cannot be sized.\n" <>
+      "\tCommandSizeUnknown\n" <>
+      ")\n\n" <>
+      "// CommandSize returns the on-wire byte length of the first command in\n" <>
+      "// payload, derived from each opcode's schema framing. It is the single\n" <>
+      "// authority a batch reader uses to advance between concatenated commands.\n" <>
+      "func CommandSize(payload []byte) (int, CommandSizeStatus) {\n" <>
+      "\tif len(payload) == 0 {\n\t\treturn 0, CommandSizeIncomplete\n\t}\n" <>
+      "\tswitch payload[0] {\n" <>
+      IO.iodata_to_binary(fixed_cases) <>
+      "\tcase #{ops |> opcodes_of_kind(:len16) |> Enum.map_join(", ", cn)}:\n\t\treturn len16CommandSize(payload)\n" <>
+      "\tcase #{ops |> opcodes_of_kind(:len32) |> Enum.map_join(", ", cn)}:\n\t\treturn len32CommandSize(payload)\n" <>
+      "\tcase #{ops |> opcodes_of_kind(:sectioned) |> Enum.map_join(", ", cn)}:\n\t\treturn sectionedCommandSize(payload)\n" <>
+      "\tcase #{ops |> opcodes_of_kind(:custom) |> Enum.map_join(", ", cn)}:\n\t\treturn 0, CommandSizeCustom\n" <>
+      "\tdefault:\n" <>
+      "\t\t// Forward-compatibility: opcodes >= 0x90 carry a u16 length prefix.\n" <>
+      "\t\tif payload[0] >= 0x90 {\n\t\t\treturn len16CommandSize(payload)\n\t\t}\n" <>
+      "\t\treturn 0, CommandSizeUnknown\n" <>
+      "\t}\n}\n\n" <>
+      go_command_size_helpers()
+  end
+
+  @spec go_command_size_helpers() :: String.t()
+  defp go_command_size_helpers do
+    """
+    func fixedCommandSize(payload []byte, size int) (int, CommandSizeStatus) {
+    \tif len(payload) < size {
+    \t\treturn 0, CommandSizeIncomplete
+    \t}
+    \treturn size, CommandSizeOK
+    }
+
+    func len16CommandSize(payload []byte) (int, CommandSizeStatus) {
+    \tif len(payload) < 3 {
+    \t\treturn 0, CommandSizeIncomplete
+    \t}
+    \tsize := 3 + int(payload[1])<<8 + int(payload[2])
+    \tif len(payload) < size {
+    \t\treturn 0, CommandSizeIncomplete
+    \t}
+    \treturn size, CommandSizeOK
+    }
+
+    func len32CommandSize(payload []byte) (int, CommandSizeStatus) {
+    \tif len(payload) < 5 {
+    \t\treturn 0, CommandSizeIncomplete
+    \t}
+    \tsize := 5 + int(payload[1])<<24 + int(payload[2])<<16 + int(payload[3])<<8 + int(payload[4])
+    \tif len(payload) < size {
+    \t\treturn 0, CommandSizeIncomplete
+    \t}
+    \treturn size, CommandSizeOK
+    }
+
+    func sectionedCommandSize(payload []byte) (int, CommandSizeStatus) {
+    \tif len(payload) < 2 {
+    \t\treturn 0, CommandSizeIncomplete
+    \t}
+    \toffset := 2
+    \tcount := int(payload[1])
+    \tfor i := 0; i < count; i++ {
+    \t\tif len(payload) < offset+3 {
+    \t\t\treturn 0, CommandSizeIncomplete
+    \t\t}
+    \t\toffset += 3 + int(payload[offset+1])<<8 + int(payload[offset+2])
+    \t\tif len(payload) < offset {
+    \t\t\treturn 0, CommandSizeIncomplete
+    \t\t}
+    \t}
+    \treturn offset, CommandSizeOK
+    }
+    """
+  end
+
+  # ── Rust: command_size.rs ─────────────────────────────────────────────────
+
+  @spec rust_command_size_file(schema()) :: String.t()
+  defp rust_command_size_file(schema) do
+    ops = framing_opcodes(schema)
+    cn = &rust_swift_zig_const_name/1
+
+    fixed_arms =
+      Enum.map(fixed_sizes(ops), fn n ->
+        names =
+          ops
+          |> opcodes_of_kind({:fixed, n})
+          |> Enum.map_join("\n        | ", &"opcodes::#{cn.(&1)}")
+
+        "        #{names} => fixed(payload, #{n}),\n"
+      end)
+
+    rust_arm = fn kind, call ->
+      names =
+        ops |> opcodes_of_kind(kind) |> Enum.map_join("\n        | ", &"opcodes::#{cn.(&1)}")
+
+      "        #{names} => #{call},\n"
+    end
+
+    "// Generated protocol command sizing.\n" <>
+      "//\n" <>
+      "// Generated from `docs/protocol_schema.toml` by `mix protocol.gen`. Do not edit by hand.\n\n" <>
+      "use crate::protocol::opcodes;\n\n" <>
+      "/// Outcome of [`command_size`].\n" <>
+      "#[derive(Debug, Clone, Copy, PartialEq, Eq)]\n" <>
+      "pub enum CommandSize {\n" <>
+      "    /// Authoritative on-wire byte length of the command.\n" <>
+      "    Sized(usize),\n" <>
+      "    /// Opcode uses bespoke framing; its decoder owns sizing.\n" <>
+      "    Custom,\n" <>
+      "    /// Payload is truncated; read more bytes.\n" <>
+      "    Incomplete,\n" <>
+      "    /// Opcode is unknown and cannot be sized.\n" <>
+      "    Unknown,\n" <>
+      "}\n\n" <>
+      "/// Returns the on-wire byte length of the first command in `payload`,\n" <>
+      "/// derived from each opcode's schema framing.\n" <>
+      "pub fn command_size(payload: &[u8]) -> CommandSize {\n" <>
+      "    let opcode = match payload.first() {\n" <>
+      "        Some(byte) => *byte,\n" <>
+      "        None => return CommandSize::Incomplete,\n" <>
+      "    };\n" <>
+      "    match opcode {\n" <>
+      IO.iodata_to_binary(fixed_arms) <>
+      rust_arm.(:len16, "len16(payload)") <>
+      rust_arm.(:len32, "len32(payload)") <>
+      rust_arm.(:sectioned, "sectioned(payload)") <>
+      rust_arm.(:custom, "CommandSize::Custom") <>
+      "        // Forward-compatibility: opcodes >= 0x90 carry a u16 length prefix.\n" <>
+      "        _ if opcode >= 0x90 => len16(payload),\n" <>
+      "        _ => CommandSize::Unknown,\n" <>
+      "    }\n}\n\n" <>
+      rust_command_size_helpers()
+  end
+
+  @spec rust_command_size_helpers() :: String.t()
+  defp rust_command_size_helpers do
+    """
+    fn fixed(payload: &[u8], size: usize) -> CommandSize {
+        if payload.len() < size {
+            return CommandSize::Incomplete;
+        }
+        CommandSize::Sized(size)
+    }
+
+    fn len16(payload: &[u8]) -> CommandSize {
+        if payload.len() < 3 {
+            return CommandSize::Incomplete;
+        }
+        let size = 3 + ((payload[1] as usize) << 8 | payload[2] as usize);
+        if payload.len() < size {
+            return CommandSize::Incomplete;
+        }
+        CommandSize::Sized(size)
+    }
+
+    fn len32(payload: &[u8]) -> CommandSize {
+        if payload.len() < 5 {
+            return CommandSize::Incomplete;
+        }
+        let size = 5
+            + ((payload[1] as usize) << 24
+                | (payload[2] as usize) << 16
+                | (payload[3] as usize) << 8
+                | payload[4] as usize);
+        if payload.len() < size {
+            return CommandSize::Incomplete;
+        }
+        CommandSize::Sized(size)
+    }
+
+    fn sectioned(payload: &[u8]) -> CommandSize {
+        if payload.len() < 2 {
+            return CommandSize::Incomplete;
+        }
+        let mut offset = 2;
+        let count = payload[1] as usize;
+        for _ in 0..count {
+            if payload.len() < offset + 3 {
+                return CommandSize::Incomplete;
+            }
+            offset += 3 + ((payload[offset + 1] as usize) << 8 | payload[offset + 2] as usize);
+            if payload.len() < offset {
+                return CommandSize::Incomplete;
+            }
+        }
+        CommandSize::Sized(offset)
+    }
+    """
+  end
+
+  # ── Zig: protocol_command_size.zig ────────────────────────────────────────
+
+  @spec zig_command_size_file(schema()) :: String.t()
+  defp zig_command_size_file(schema) do
+    ops = framing_opcodes(schema)
+    cn = &rust_swift_zig_const_name/1
+
+    fixed_arms =
+      Enum.map(fixed_sizes(ops), fn n ->
+        names = ops |> opcodes_of_kind({:fixed, n}) |> Enum.map_join(", ", &"opcodes.#{cn.(&1)}")
+        "        #{names} => fixed(payload, #{n}),\n"
+      end)
+
+    zig_arm = fn kind, call ->
+      names = ops |> opcodes_of_kind(kind) |> Enum.map_join(", ", &"opcodes.#{cn.(&1)}")
+      "        #{names} => #{call},\n"
+    end
+
+    "//! Generated protocol command sizing.\n" <>
+      "//!\n" <>
+      "//! Generated from `docs/protocol_schema.toml` by `mix protocol.gen`. Do not edit by hand.\n\n" <>
+      "const opcodes = @import(\"protocol_opcodes.zig\");\n\n" <>
+      "pub const Status = enum { sized, custom, incomplete, unknown };\n\n" <>
+      "pub const Result = struct { status: Status, size: usize = 0 };\n\n" <>
+      "/// Returns the on-wire byte length of the first command in `payload`,\n" <>
+      "/// derived from each opcode's schema framing.\n" <>
+      "pub fn commandSize(payload: []const u8) Result {\n" <>
+      "    if (payload.len == 0) return .{ .status = .incomplete };\n" <>
+      "    return switch (payload[0]) {\n" <>
+      IO.iodata_to_binary(fixed_arms) <>
+      zig_arm.(:len16, "len16(payload)") <>
+      zig_arm.(:len32, "len32(payload)") <>
+      zig_arm.(:sectioned, "sectioned(payload)") <>
+      zig_arm.(:custom, ".{ .status = .custom }") <>
+      "        // Forward-compatibility: opcodes >= 0x90 carry a u16 length prefix.\n" <>
+      "        else => if (payload[0] >= 0x90) len16(payload) else .{ .status = .unknown },\n" <>
+      "    };\n}\n\n" <>
+      zig_command_size_helpers()
+  end
+
+  @spec zig_command_size_helpers() :: String.t()
+  defp zig_command_size_helpers do
+    """
+    fn fixed(payload: []const u8, size: usize) Result {
+        if (payload.len < size) return .{ .status = .incomplete };
+        return .{ .status = .sized, .size = size };
+    }
+
+    fn len16(payload: []const u8) Result {
+        if (payload.len < 3) return .{ .status = .incomplete };
+        const size: usize = 3 + (@as(usize, payload[1]) << 8 | @as(usize, payload[2]));
+        if (payload.len < size) return .{ .status = .incomplete };
+        return .{ .status = .sized, .size = size };
+    }
+
+    fn len32(payload: []const u8) Result {
+        if (payload.len < 5) return .{ .status = .incomplete };
+        const size: usize = 5 + (@as(usize, payload[1]) << 24 | @as(usize, payload[2]) << 16 | @as(usize, payload[3]) << 8 | @as(usize, payload[4]));
+        if (payload.len < size) return .{ .status = .incomplete };
+        return .{ .status = .sized, .size = size };
+    }
+
+    fn sectioned(payload: []const u8) Result {
+        if (payload.len < 2) return .{ .status = .incomplete };
+        var offset: usize = 2;
+        const count: usize = payload[1];
+        var i: usize = 0;
+        while (i < count) : (i += 1) {
+            if (payload.len < offset + 3) return .{ .status = .incomplete };
+            offset += 3 + (@as(usize, payload[offset + 1]) << 8 | @as(usize, payload[offset + 2]));
+            if (payload.len < offset) return .{ .status = .incomplete };
+        }
+        return .{ .status = .sized, .size = offset };
+    }
+    """
+  end
+
+  # ── Swift: ProtocolCommandSize.generated.swift ────────────────────────────
+
+  @spec swift_command_size_file(schema()) :: String.t()
+  defp swift_command_size_file(schema) do
+    ops = framing_opcodes(schema)
+    cn = &rust_swift_zig_const_name/1
+
+    fixed_cases =
+      Enum.map(fixed_sizes(ops), fn n ->
+        names = ops |> opcodes_of_kind({:fixed, n}) |> Enum.map_join(", ", cn)
+        "    case #{names}:\n        return fixedCommandSize(payload, #{n})\n"
+      end)
+
+    swift_case = fn kind, call ->
+      names = ops |> opcodes_of_kind(kind) |> Enum.map_join(", ", cn)
+      "    case #{names}:\n        return #{call}\n"
+    end
+
+    "// Generated protocol command sizing.\n" <>
+      "//\n" <>
+      "// Generated from `docs/protocol_schema.toml` by `mix protocol.gen`. Do not edit by hand.\n\n" <>
+      "import Foundation\n\n" <>
+      "/// Outcome of `commandSize(_:)`.\n" <>
+      "public enum CommandSizeResult: Equatable {\n" <>
+      "    /// Authoritative on-wire byte length of the command.\n" <>
+      "    case sized(Int)\n" <>
+      "    /// Opcode uses bespoke framing; its decoder owns sizing.\n" <>
+      "    case custom\n" <>
+      "    /// Payload is truncated; read more bytes.\n" <>
+      "    case incomplete\n" <>
+      "    /// Opcode is unknown and cannot be sized.\n" <>
+      "    case unknown\n" <>
+      "}\n\n" <>
+      "/// Returns the on-wire byte length of the first command in `payload`,\n" <>
+      "/// derived from each opcode's schema framing.\n" <>
+      "public func commandSize(_ payload: [UInt8]) -> CommandSizeResult {\n" <>
+      "    guard let opcode = payload.first else { return .incomplete }\n" <>
+      "    switch opcode {\n" <>
+      IO.iodata_to_binary(fixed_cases) <>
+      swift_case.(:len16, "len16CommandSize(payload)") <>
+      swift_case.(:len32, "len32CommandSize(payload)") <>
+      swift_case.(:sectioned, "sectionedCommandSize(payload)") <>
+      swift_case.(:custom, ".custom") <>
+      "    default:\n" <>
+      "        // Forward-compatibility: opcodes >= 0x90 carry a u16 length prefix.\n" <>
+      "        if opcode >= 0x90 { return len16CommandSize(payload) }\n" <>
+      "        return .unknown\n" <>
+      "    }\n}\n\n" <>
+      swift_command_size_helpers()
+  end
+
+  @spec swift_command_size_helpers() :: String.t()
+  defp swift_command_size_helpers do
+    """
+    private func fixedCommandSize(_ payload: [UInt8], _ size: Int) -> CommandSizeResult {
+        payload.count < size ? .incomplete : .sized(size)
+    }
+
+    private func len16CommandSize(_ payload: [UInt8]) -> CommandSizeResult {
+        if payload.count < 3 { return .incomplete }
+        let size = 3 + (Int(payload[1]) << 8 | Int(payload[2]))
+        return payload.count < size ? .incomplete : .sized(size)
+    }
+
+    private func len32CommandSize(_ payload: [UInt8]) -> CommandSizeResult {
+        if payload.count < 5 { return .incomplete }
+        let size = 5 + (Int(payload[1]) << 24 | Int(payload[2]) << 16 | Int(payload[3]) << 8 | Int(payload[4]))
+        return payload.count < size ? .incomplete : .sized(size)
+    }
+
+    private func sectionedCommandSize(_ payload: [UInt8]) -> CommandSizeResult {
+        if payload.count < 2 { return .incomplete }
+        var offset = 2
+        let count = Int(payload[1])
+        for _ in 0..<count {
+            if payload.count < offset + 3 { return .incomplete }
+            offset += 3 + (Int(payload[offset + 1]) << 8 | Int(payload[offset + 2]))
+            if payload.count < offset { return .incomplete }
+        }
+        return .sized(offset)
+    }
+    """
   end
 
   @spec constant_name(String.t()) :: String.t()

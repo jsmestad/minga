@@ -260,8 +260,17 @@ func decodeWindowContent(payload []byte) (Command, error) {
 	return Command{Kind: kind, Size: offset, Window: window}, nil
 }
 
+// overlayDeltaCursorlineFlag marks a trailing cursorline section in an overlay
+// delta (see WindowEncoder.encode_overlay_delta/1).
+const overlayDeltaCursorlineFlag = 0x02
+
 func decodeOverlayDelta(payload []byte) (Command, error) {
-	if len(payload) < 12 {
+	// opcode(1) + window_id(2) + content_epoch(4) + flags(1) + cursor_row(2) +
+	// cursor_col(2) + cursor_shape(1) = 13 bytes, plus a flat 5-byte cursorline
+	// (row:2, r, g, b) when the flags cursorline bit is set. The size must be
+	// bounded: returning len(payload) here would swallow the rest of the batch.
+	const base = 13
+	if len(payload) < base {
 		return Command{}, fmt.Errorf("short overlay delta")
 	}
 
@@ -270,12 +279,18 @@ func decodeOverlayDelta(payload []byte) (Command, error) {
 		ContentEpoch: u32(payload, 3),
 		CursorRow:    u16(payload, 8),
 		CursorCol:    u16(payload, 10),
-	}
-	if len(payload) >= 13 {
-		window.CursorShape = payload[12]
+		CursorShape:  payload[12],
 	}
 
-	return Command{Kind: CommandWindowDelta, Size: len(payload), Window: window}, nil
+	size := base
+	if payload[7]&overlayDeltaCursorlineFlag != 0 {
+		size += 5
+		if len(payload) < size {
+			return Command{}, fmt.Errorf("short overlay delta cursorline")
+		}
+	}
+
+	return Command{Kind: CommandWindowDelta, Size: size, Window: window}, nil
 }
 
 func decodeWindowHeader(opcode byte, section []byte, window *WindowContent) {
@@ -382,5 +397,10 @@ func decodeSkipOrChrome(payload []byte) (Command, error) {
 		return Command{Kind: CommandChrome, Size: chrome.Bytes, Chrome: chrome}, nil
 	}
 
-	return Command{Kind: CommandNoop, Size: len(payload)}, nil
+	// Unhandled low opcode: size it through the schema authority rather than
+	// swallowing the rest of the batch.
+	if size, status := generated.CommandSize(payload); status == generated.CommandSizeOK {
+		return Command{Kind: CommandNoop, Size: size}, nil
+	}
+	return Command{}, fmt.Errorf("cannot size opcode 0x%02X", opcode)
 }
