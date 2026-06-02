@@ -13,6 +13,8 @@ set -e
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 XCODEPROJ="$PROJECT_DIR/macos/Minga.xcodeproj"
 
+(cd "$PROJECT_DIR" && mix native.build.support)
+
 # Build the macOS renderer if needed.
 ARCH=$(uname -m)
 echo "Building Minga.app..."

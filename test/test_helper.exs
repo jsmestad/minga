@@ -28,15 +28,9 @@ unless System.get_env("XDG_CONFIG_HOME") do
   System.put_env("XDG_CONFIG_HOME", test_config_home)
 end
 
-# Auto-build the Swift test harness on macOS if swiftc is available.
-# On Linux (CI), the harness tests are excluded automatically.
+# Swift protocol coverage runs through the dedicated `mix swift.harness` job.
+# Ordinary ExUnit starts should never build GUI artifacts as a side effect.
 harness_path = Path.join(:code.priv_dir(:minga), "minga-test-harness")
-
-case System.find_executable("swiftc") do
-  nil -> :noop
-  _swiftc -> Mix.Task.run("swift.harness")
-end
-
 swift_exclude = if File.exists?(harness_path), do: [], else: [:swift_harness]
 
 # `:distributed` tests boot a real peer node (Erlang distribution / epmd) and

@@ -40,6 +40,7 @@ pub fn build(b: *std.Build) void {
     ensureGeneratedProtocolArtifacts(b);
 
     const backend = b.option(BackendOption, "backend", "Rendering backend (default: tui)") orelse .tui;
+    const renderer = b.option(bool, "renderer", "Build the TUI renderer frontend binary") orelse true;
     const snapshot = b.option(bool, "snapshot", "Build minga-snapshot and snapshot tests (requires host font libraries)") orelse false;
 
     const vaxis = b.dependency("vaxis", .{
@@ -138,21 +139,49 @@ pub fn build(b: *std.Build) void {
         grammar_libs[i] = addGrammar(b, target, c_optimize, g.name, g.has_scanner, g.scanner_extra_flags);
     }
 
-    // Main executable
-    const exe = b.addExecutable(.{
-        .name = "minga-renderer",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/main.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-    exe.root_module.addImport("vaxis", vaxis.module("vaxis"));
-    exe.root_module.addImport("build_options", build_options.createModule());
-    exe.root_module.link_libc = true;
-    // Note: tree-sitter and grammars are linked only to minga-parser, not the renderer.
+    const test_step = b.step("test", "Run unit tests");
 
-    b.installArtifact(exe);
+    if (renderer) {
+        // Main executable
+        const exe = b.addExecutable(.{
+            .name = "minga-renderer",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/main.zig"),
+                .target = target,
+                .optimize = optimize,
+            }),
+        });
+        exe.root_module.addImport("vaxis", vaxis.module("vaxis"));
+        exe.root_module.addImport("build_options", build_options.createModule());
+        exe.root_module.link_libc = true;
+        // Note: tree-sitter and grammars are linked only to minga-parser, not the renderer.
+
+        b.installArtifact(exe);
+
+        // Run step
+        const run_cmd = b.addRunArtifact(exe);
+        run_cmd.step.dependOn(b.getInstallStep());
+        if (b.args) |args| {
+            run_cmd.addArgs(args);
+        }
+        const run_step = b.step("run", "Run the renderer");
+        run_step.dependOn(&run_cmd.step);
+
+        // Renderer tests
+        const tests = b.addTest(.{
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/main.zig"),
+                .target = target,
+                .optimize = optimize,
+            }),
+        });
+        tests.root_module.addImport("vaxis", vaxis.module("vaxis"));
+        tests.root_module.addImport("build_options", build_options.createModule());
+        tests.root_module.link_libc = true;
+
+        const run_tests = b.addRunArtifact(tests);
+        test_step.dependOn(&run_tests.step);
+    }
 
     // ── Parser executable (tree-sitter only, no renderer/libvaxis) ────────
     const parser_exe = b.addExecutable(.{
@@ -199,31 +228,6 @@ pub fn build(b: *std.Build) void {
     });
     hook_runner_exe.root_module.link_libc = true;
     b.installArtifact(hook_runner_exe);
-
-    // Run step
-    const run_cmd = b.addRunArtifact(exe);
-    run_cmd.step.dependOn(b.getInstallStep());
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
-    }
-    const run_step = b.step("run", "Run the renderer");
-    run_step.dependOn(&run_cmd.step);
-
-    // Tests
-    const tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/main.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-    tests.root_module.addImport("vaxis", vaxis.module("vaxis"));
-    tests.root_module.addImport("build_options", build_options.createModule());
-    tests.root_module.link_libc = true;
-
-    const run_tests = b.addRunArtifact(tests);
-    const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&run_tests.step);
 
     // Parser tests (highlighter, predicates, posix_regex)
     const parser_tests = b.addTest(.{

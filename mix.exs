@@ -1,9 +1,15 @@
 Code.require_file("mix/protocol_generator.ex", __DIR__)
 Code.require_file("mix/compilers/protocol_gen.ex", __DIR__)
 Code.require_file("mix/compilers/minga_bundled_extensions.ex", __DIR__)
-Code.require_file("mix/tasks/protocol.gen.ex", __DIR__)
+Code.require_file("mix/compilers/minga_zig.ex", __DIR__)
 Code.require_file("mix/compilers/minga_rust_tui.ex", __DIR__)
 Code.require_file("mix/compilers/minga_go_tui.ex", __DIR__)
+Code.require_file("mix/tasks/protocol.gen.ex", __DIR__)
+Code.require_file("mix/tasks/native_build/result.ex", __DIR__)
+Code.require_file("mix/tasks/native_build_support.ex", __DIR__)
+Code.require_file("mix/tasks/native_build_tui.ex", __DIR__)
+Code.require_file("mix/tasks/native_build_rust_tui.ex", __DIR__)
+Code.require_file("mix/tasks/native_build_go_tui.ex", __DIR__)
 
 defmodule Minga.MixProject do
   use Mix.Project
@@ -20,9 +26,7 @@ defmodule Minga.MixProject do
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       aliases: aliases(),
-      compilers:
-        [:protocol_gen, :minga_bundled_extensions] ++
-          Mix.compilers() ++ [:minga_zig, :minga_rust_tui, :minga_go_tui],
+      compilers: [:protocol_gen, :minga_bundled_extensions] ++ Mix.compilers(),
       dialyzer: [
         plt_add_deps: :apps_direct,
         # Keep the PLT lean for dev/agent loops: include only direct runtime deps by default, then add transitive apps that Minga source references directly.
@@ -247,7 +251,7 @@ defmodule Minga.MixProject do
     [
       # TUI release: Burrito-wrapped standalone binary (macOS + Linux)
       minga: [
-        steps: [:assemble, &Burrito.wrap/1],
+        steps: [:assemble, &ensure_tui_release_artifacts/1, &Burrito.wrap/1],
         burrito: [
           targets: burrito_targets(),
           debug: Mix.env() != :prod,
@@ -260,11 +264,50 @@ defmodule Minga.MixProject do
       minga_macos: [
         include_erts: true,
         cookie: "minga_app_cookie",
-        steps: [:assemble],
+        steps: [:assemble, &ensure_support_release_artifacts/1],
         rel_templates_path: "rel",
         strip_beams: Mix.env() == :prod
       ]
     ]
+  end
+
+  @spec ensure_tui_release_artifacts(Mix.Release.t()) :: Mix.Release.t()
+  defp ensure_tui_release_artifacts(release) do
+    ensure_release_artifacts!(
+      release,
+      ["minga-renderer", "minga-parser", "minga-hook-runner"],
+      "Run `MIX_ENV=prod mix native.build.tui` before `mix release minga`."
+    )
+  end
+
+  @spec ensure_support_release_artifacts(Mix.Release.t()) :: Mix.Release.t()
+  defp ensure_support_release_artifacts(release) do
+    ensure_release_artifacts!(
+      release,
+      ["minga-parser", "minga-hook-runner"],
+      "Run `MIX_ENV=prod mix native.build.support` before `mix release minga_macos`."
+    )
+  end
+
+  @spec ensure_release_artifacts!(Mix.Release.t(), [String.t()], String.t()) :: Mix.Release.t()
+  defp ensure_release_artifacts!(release, artifact_names, instruction) do
+    priv_dirs = Path.wildcard(Path.join([release.path, "lib", "minga-*", "priv"]))
+    missing = missing_release_artifacts(priv_dirs, artifact_names)
+
+    if missing == [] do
+      release
+    else
+      Mix.raise("Missing native release artifacts: #{Enum.join(missing, ", ")}\n#{instruction}")
+    end
+  end
+
+  @spec missing_release_artifacts([String.t()], [String.t()]) :: [String.t()]
+  defp missing_release_artifacts([], artifact_names), do: artifact_names
+
+  defp missing_release_artifacts(priv_dirs, artifact_names) do
+    Enum.reject(artifact_names, fn artifact_name ->
+      Enum.any?(priv_dirs, fn priv_dir -> File.exists?(Path.join(priv_dir, artifact_name)) end)
+    end)
   end
 
   defp burrito_targets do
