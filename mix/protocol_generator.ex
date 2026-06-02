@@ -1939,17 +1939,23 @@ defmodule Minga.Mix.ProtocolGenerator do
 
   @spec gofmt(String.t()) :: String.t()
   defp gofmt(source) do
-    tmp = Path.join(System.tmp_dir!(), "protocol_gen_#{:erlang.phash2(source)}.go")
-    File.write!(tmp, source)
-
-    case System.cmd("gofmt", [tmp], stderr_to_stdout: true) do
-      {formatted, 0} ->
-        File.rm(tmp)
-        formatted
-
-      {_error, _code} ->
-        File.rm(tmp)
+    case System.find_executable("gofmt") do
+      nil ->
         source
+
+      _path ->
+        tmp = Path.join(System.tmp_dir!(), "protocol_gen_#{:erlang.phash2(source)}.go")
+        File.write!(tmp, source)
+
+        case System.cmd("gofmt", [tmp], stderr_to_stdout: true) do
+          {formatted, 0} ->
+            File.rm(tmp)
+            formatted
+
+          {_error, _code} ->
+            File.rm(tmp)
+            source
+        end
     end
   end
 

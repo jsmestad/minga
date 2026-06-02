@@ -336,7 +336,11 @@ impl Renderer {
         let width = if window.text_width > 0 {
             window.text_width
         } else {
-            row_texts.iter().map(|text| text_width(text)).max().unwrap_or(0)
+            row_texts
+                .iter()
+                .map(|text| text_width(text))
+                .max()
+                .unwrap_or(0)
         };
         let height = if window.text_height > 0 {
             window.text_height

@@ -1,6 +1,7 @@
 use crate::protocol::{
+    DecodeError,
     command_size::{self, CommandSize},
-    opcodes, semantic_decode, semantic_types, DecodeError,
+    opcodes, semantic_decode, semantic_types,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]

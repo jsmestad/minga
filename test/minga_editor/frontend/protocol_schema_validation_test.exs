@@ -78,7 +78,15 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
       schema_span_size = compute_fixed_size(structures["span"]["fields"], structures)
 
       # Build a row with exactly one span and extract the span bytes.
-      span = %Span{start_col: 10, end_col: 20, fg: 0xFF8800, bg: 0x112233, attrs: 5, font_weight: 2, font_id: 1}
+      span = %Span{
+        start_col: 10,
+        end_col: 20,
+        fg: 0xFF8800,
+        bg: 0x112233,
+        attrs: 5,
+        font_weight: 2,
+        font_id: 1
+      }
 
       row = %Row{
         row_id: 1,
@@ -116,8 +124,25 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
     end
 
     test "span field values round-trip correctly through encoding" do
-      span = %Span{start_col: 0x0102, end_col: 0x0304, fg: 0xAA_BB_CC, bg: 0x11_22_33, attrs: 0x07, font_weight: 3, font_id: 2}
-      row = %Row{row_id: 1, row_type: :normal, buf_line: 0, text: "", spans: [span], content_hash: 0}
+      span = %Span{
+        start_col: 0x0102,
+        end_col: 0x0304,
+        fg: 0xAA_BB_CC,
+        bg: 0x11_22_33,
+        attrs: 0x07,
+        font_weight: 3,
+        font_id: 2
+      }
+
+      row = %Row{
+        row_id: 1,
+        row_type: :normal,
+        buf_line: 0,
+        text: "",
+        spans: [span],
+        content_hash: 0
+      }
+
       window = minimal_render_window(rows: [row])
       binary = WindowEncoder.encode_window_content(window)
 
@@ -355,8 +380,24 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
     alias Minga.RenderModel.Window.Selection
     alias Minga.RenderModel.Window.Viewport
 
-    span = %Span{start_col: 0, end_col: 5, fg: 0xFFFFFF, bg: 0x000000, attrs: 0, font_weight: 2, font_id: 0}
-    row = %Row{row_id: Row.stable_id(:normal, 1), row_type: :normal, buf_line: 1, text: "hello", spans: [span], content_hash: 12345}
+    span = %Span{
+      start_col: 0,
+      end_col: 5,
+      fg: 0xFFFFFF,
+      bg: 0x000000,
+      attrs: 0,
+      font_weight: 2,
+      font_id: 0
+    }
+
+    row = %Row{
+      row_id: Row.stable_id(:normal, 1),
+      row_type: :normal,
+      buf_line: 1,
+      text: "hello",
+      spans: [span],
+      content_hash: 12345
+    }
 
     geometry = %PaneGeometry{
       window_id: 1,
@@ -365,8 +406,19 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
       text_rect: {1, 4, 76, 22},
       gutter_rect: {1, 0, 4, 22},
       clip_rect: {0, 0, 80, 24},
-      viewport: %Viewport{top: 0, left: 0, rows: 22, cols: 76, total_lines: 100, visual_row_offset: 0, total_visual_rows: 100},
-      gutter_metrics: %Minga.RenderModel.Window.GutterMetrics{line_number_width: 4, sign_col_width: 2},
+      viewport: %Viewport{
+        top: 0,
+        left: 0,
+        rows: 22,
+        cols: 76,
+        total_lines: 100,
+        visual_row_offset: 0,
+        total_visual_rows: 100
+      },
+      gutter_metrics: %Minga.RenderModel.Window.GutterMetrics{
+        line_number_width: 4,
+        sign_col_width: 2
+      },
       hit_regions: [%HitRegion{kind: :text, rect: {1, 4, 76, 22}, window_id: 1}]
     }
 
@@ -374,9 +426,15 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
       rows: [row],
       selection: %Selection{type: :char, start_row: 0, start_col: 0, end_row: 0, end_col: 5},
       search_matches: [%SearchMatch{row: 0, start_col: 0, end_col: 5, is_current: true}],
-      diagnostic_ranges: [%DiagnosticRange{start_row: 0, start_col: 0, end_row: 0, end_col: 5, severity: :error}],
-      document_highlights: [%DocumentHighlight{start_row: 0, start_col: 0, end_row: 0, end_col: 5, kind: :text}],
-      annotations: [%Annotation{row: 0, kind: :inline_pill, fg: 0xFFFFFF, bg: 0x000000, text: "ann"}],
+      diagnostic_ranges: [
+        %DiagnosticRange{start_row: 0, start_col: 0, end_row: 0, end_col: 5, severity: :error}
+      ],
+      document_highlights: [
+        %DocumentHighlight{start_row: 0, start_col: 0, end_row: 0, end_col: 5, kind: :text}
+      ],
+      annotations: [
+        %Annotation{row: 0, kind: :inline_pill, fg: 0xFFFFFF, bg: 0x000000, text: "ann"}
+      ],
       geometry: geometry,
       cursorline: %Cursorline{row: 0, bg_rgb: 0x1A1A2E}
     )
