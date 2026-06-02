@@ -21,6 +21,7 @@
 const std = @import("std");
 
 const opcodes = @import("generated/protocol_opcodes.zig");
+const generated_command_size = @import("generated/protocol_command_size.zig");
 
 // BEGIN GENERATED OPCODE EXPORTS. Regenerate with `mix protocol.gen`. Do not edit by hand.
 // Input
@@ -1173,20 +1174,10 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
             // TUI ignores font fallback.
             return .noop;
         },
-        else => {
-            if (data[0] == OP_GUI_FILE_TREE or data[0] == OP_GUI_OBSERVATORY or data[0] == OP_GUI_SIDEBARS) {
-                if (rest.len < 4) return error.Malformed;
-                const payload_len: usize = std.mem.readInt(u32, rest[0..4], .big);
-                if (rest.len < 4 + payload_len) return error.Malformed;
-                return .noop;
-            }
-            if (data[0] >= 0x90 and data[0] <= 0x9F) {
-                if (rest.len < 2) return error.Malformed;
-                const payload_len: usize = std.mem.readInt(u16, rest[0..2], .big);
-                if (rest.len < 2 + payload_len) return error.Malformed;
-                return .noop;
-            }
-            return error.UnknownOpcode;
+        else => switch (generated_command_size.commandSize(data).status) {
+            .sized => return .noop,
+            .incomplete => return error.Malformed,
+            .unknown, .custom => return error.UnknownOpcode,
         },
     }
 }
@@ -1215,17 +1206,63 @@ fn decodeStructuralNavAction(action: u8) !StructuralNavAction {
 ///   0x10 draw_text:       14 bytes + text_len
 pub fn commandSize(payload: []const u8) usize {
     if (payload.len == 0) return 0;
+
+    const generated = generated_command_size.commandSize(payload);
+    return switch (generated.status) {
+        .sized => generated.size,
+        .custom => customCommandSize(payload),
+        .incomplete => payload.len,
+        .unknown => parserCommandSize(payload) orelse 1,
+    };
+}
+
+fn customCommandSize(payload: []const u8) usize {
+    if (payload.len == 0) return 0;
     const decoded_size = switch (payload[0]) {
-        OP_CLEAR => 1,
-        OP_BATCH_END => 1,
-        OP_SET_CURSOR => 5,
-        OP_SET_CURSOR_SHAPE => 2,
         OP_DRAW_TEXT => blk: {
             // opcode(1) + row(2) + col(2) + fg(3) + bg(3) + attrs(1) + text_len(2) = 14 fixed bytes
             if (payload.len < 14) break :blk payload.len;
             const text_len: usize = std.mem.readInt(u16, payload[12..14], .big);
             break :blk 14 + text_len;
         },
+        OP_DRAW_STYLED_TEXT => blk: {
+            if (payload.len < 21) break :blk payload.len;
+            const text_len: usize = std.mem.readInt(u16, payload[19..21], .big);
+            break :blk 21 + text_len;
+        },
+        OP_SET_FONT => blk: {
+            // opcode(1) + size(2) + weight(1) + ligatures(1) + name_len(2) + name
+            if (payload.len < 7) break :blk payload.len;
+            const name_len: usize = std.mem.readInt(u16, payload[5..7], .big);
+            break :blk 7 + name_len;
+        },
+        OP_REGISTER_FONT => blk: {
+            // opcode(1) + font_id(1) + name_len(2) + name
+            if (payload.len < 4) break :blk payload.len;
+            const name_len: usize = std.mem.readInt(u16, payload[2..4], .big);
+            break :blk 4 + name_len;
+        },
+        OP_SET_FONT_FALLBACK => blk: {
+            // opcode(1) + count(1), then count * (name_len:2, name:bytes)
+            if (payload.len < 2) break :blk payload.len;
+            const count = payload[1];
+            var offset: usize = 2;
+            var i: u8 = 0;
+            while (i < count) : (i += 1) {
+                if (payload.len < offset + 2) break :blk payload.len;
+                const name_len: usize = std.mem.readInt(u16, payload[offset..][0..2], .big);
+                offset += 2 + name_len;
+            }
+            break :blk offset;
+        },
+        else => parserCommandSize(payload) orelse 1,
+    };
+    return @min(decoded_size, payload.len);
+}
+
+fn parserCommandSize(payload: []const u8) ?usize {
+    if (payload.len == 0) return 0;
+    const decoded_size = switch (payload[0]) {
         OP_SET_LANGUAGE => blk: {
             // opcode(1) + buffer_id(4) + name_len(2) + name
             if (payload.len < 7) break :blk payload.len;
@@ -1251,11 +1288,6 @@ pub fn commandSize(payload: []const u8) usize {
             if (payload.len < path_off + 2) break :blk payload.len;
             const path_len: usize = std.mem.readInt(u16, payload[path_off..][0..2], .big);
             break :blk path_off + 2 + path_len;
-        },
-        OP_SET_TITLE => blk: {
-            if (payload.len < 3) break :blk payload.len;
-            const title_len: usize = std.mem.readInt(u16, payload[1..3], .big);
-            break :blk 3 + title_len;
         },
         OP_QUERY_LANGUAGE_AT => 13, // opcode(1) + buffer_id(4) + request_id(4) + byte_offset(4)
         OP_REQUEST_INDENT => 13, // opcode(1) + buffer_id(4) + request_id(4) + line(4)
@@ -1286,52 +1318,7 @@ pub fn commandSize(payload: []const u8) usize {
             const text_len: usize = std.mem.readInt(u16, payload[5..7], .big);
             break :blk 7 + text_len;
         },
-        OP_SET_WINDOW_BG => 4, // opcode(1) + r(1) + g(1) + b(1)
-        OP_DEFINE_REGION => 15, // opcode(1) + id(2) + parent_id(2) + role(1) + row(2) + col(2) + width(2) + height(2) + z_order(1)
-        OP_CLEAR_REGION => 3, // opcode(1) + id(2)
-        OP_DESTROY_REGION => 3, // opcode(1) + id(2)
-        OP_SET_ACTIVE_REGION => 3, // opcode(1) + id(2)
-        OP_SCROLL_REGION => 7, // opcode(1) + top_row(2) + bottom_row(2) + delta(2)
-        OP_SET_FONT => blk: {
-            // opcode(1) + size(2) + weight(1) + ligatures(1) + name_len(2) + name
-            if (payload.len < 7) break :blk payload.len;
-            const name_len: usize = std.mem.readInt(u16, payload[5..7], .big);
-            break :blk 7 + name_len;
-        },
-        OP_REGISTER_FONT => blk: {
-            // opcode(1) + font_id(1) + name_len(2) + name
-            if (payload.len < 4) break :blk payload.len;
-            const name_len: usize = std.mem.readInt(u16, payload[2..4], .big);
-            break :blk 4 + name_len;
-        },
-        OP_SET_FONT_FALLBACK => blk: {
-            // opcode(1) + count(1), then count * (name_len:2, name:bytes)
-            if (payload.len < 2) break :blk payload.len;
-            const count = payload[1];
-            var offset: usize = 2;
-            var i: u8 = 0;
-            while (i < count) : (i += 1) {
-                if (payload.len < offset + 2) break :blk payload.len;
-                const name_len: usize = std.mem.readInt(u16, payload[offset..][0..2], .big);
-                offset += 2 + name_len;
-            }
-            break :blk offset;
-        },
-        OP_GUI_FILE_TREE, OP_GUI_OBSERVATORY, OP_GUI_SIDEBARS => blk: {
-            if (payload.len < 5) break :blk payload.len;
-            const payload_len: usize = std.mem.readInt(u32, payload[1..5], .big);
-            break :blk 5 + payload_len;
-        },
-        // Forward-compatible GUI opcodes use opcode(1) + payload_len(2) + payload, except large-payload opcodes handled above.
-        else => blk: {
-            if (payload[0] >= 0x90 and payload[0] <= 0x9F) {
-                if (payload.len < 3) break :blk payload.len;
-                const payload_len: usize = std.mem.readInt(u16, payload[1..3], .big);
-                break :blk 3 + payload_len;
-            }
-            // Unknown legacy opcode: skip 1 byte so the loop always makes progress.
-            break :blk 1;
-        },
+        else => return null,
     };
     return @min(decoded_size, payload.len);
 }
@@ -1737,7 +1724,7 @@ test "decode truncated gui_sidebars returns malformed" {
 }
 
 test "decode unknown opcode returns error" {
-    const data = [_]u8{0xFF};
+    const data = [_]u8{0x6F};
     const result = decodeCommand(&data);
     try std.testing.expectError(error.UnknownOpcode, result);
 }
@@ -2867,12 +2854,7 @@ test {
     _ = @import("generated/protocol_schema_test.zig");
 }
 
-// Conformance: the schema-generated commandSize must agree with this module's
-// mature, hand-written commandSize. The corpus is limited to opcodes the Zig
-// renderer actually receives and sizes (render/config plus the 0x90+ forward-
-// compatible range); chrome opcodes 0x71-0x8F never reach the legacy Zig path,
-// so it deliberately skips them. The indent_guides (0x91) case is the
-// regression that desynced the Go reader.
+// Conformance: schema-framed commands are sized by the generated commandSize authority. The corpus includes the indent_guides (0x91) regression that desynced the Go reader.
 test "generated commandSize matches protocol.commandSize" {
     const generated_size = @import("generated/protocol_command_size.zig");
 
@@ -2888,5 +2870,23 @@ test "generated commandSize matches protocol.commandSize" {
         const result = generated_size.commandSize(payload);
         try std.testing.expectEqual(generated_size.Status.sized, result.status);
         try std.testing.expectEqual(commandSize(payload), result.size);
+    }
+}
+
+test "generated-sized unrendered opcode does not consume following command" {
+    const cases = [_][]const u8{
+        &[_]u8{ opcodes.OP_GUI_INDENT_GUIDES, 0x00, 0x06, 1, 2, 3, 4, 5, 6, OP_BATCH_END },
+        &[_]u8{ 0xB7, 0x00, 0x02, 0xAA, 0xBB, OP_BATCH_END },
+    };
+
+    for (cases) |packet| {
+        var offset: usize = 0;
+
+        const first = try decodeCommand(packet[offset..]);
+        try std.testing.expect(first == .noop);
+        offset += commandSize(packet[offset..]);
+
+        const second = try decodeCommand(packet[offset..]);
+        try std.testing.expect(second == .batch_end);
     }
 }

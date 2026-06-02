@@ -5,6 +5,7 @@
 /// the regression that desynced the Go renderer when an opcode was sized by
 /// guesswork instead of its declared framing.
 
+import Foundation
 import Testing
 
 struct ProtocolCommandSizeTests {
@@ -30,5 +31,16 @@ struct ProtocolCommandSizeTests {
     @Test func reportsTruncatedPayload() {
         #expect(commandSize([OP_GUI_INDENT_GUIDES, 0x00]) == .incomplete)
         #expect(commandSize([]) == .incomplete)
+    }
+
+    @Test func decodeCommandsSkipsGeneratedSizedUnrenderedOpcode() throws {
+        let payload = Data([0xB7, 0x00, 0x02, 0xAA, 0xBB, OP_BATCH_END])
+        var commands: [RenderCommand] = []
+
+        try decodeCommands(from: payload) { command in
+            commands.append(command)
+        }
+
+        #expect(commands == [.batchEnd])
     }
 }

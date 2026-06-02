@@ -17,6 +17,7 @@ pub mod command_size {
 }
 
 use crate::semantic;
+use command_size::CommandSize;
 use std::fmt;
 use std::io::{self, Write};
 
@@ -57,22 +58,41 @@ pub enum Command {
 }
 
 impl Command {
-    pub fn size(&self) -> usize {
+    pub fn custom_size(&self) -> usize {
         match self {
-            Self::Clear | Self::BatchEnd => 1,
             Self::DrawText(draw) => 14 + draw.text.len(),
             Self::DrawStyledText(draw) => 21 + draw.text.len(),
-            Self::SetCursor { .. } => 5,
-            Self::SetCursorShape(_) => 2,
-            Self::SetTitle(title) => 3 + title.len(),
-            Self::SetWindowBg(_) => 4,
-            Self::DefineRegion(_) => 15,
-            Self::ClearRegion(_) | Self::DestroyRegion(_) | Self::SetActiveRegion(_) => 3,
-            Self::ScrollRegion { .. } => 7,
             Self::MeasureText { text, .. } => 7 + text.len(),
-            Self::Semantic(command) => command.size(),
+            Self::Semantic(command) => command.custom_size(),
             Self::Noop(size) => *size,
+            Self::Clear
+            | Self::BatchEnd
+            | Self::SetCursor { .. }
+            | Self::SetCursorShape(_)
+            | Self::SetTitle(_)
+            | Self::SetWindowBg(_)
+            | Self::DefineRegion(_)
+            | Self::ClearRegion(_)
+            | Self::DestroyRegion(_)
+            | Self::SetActiveRegion(_)
+            | Self::ScrollRegion { .. } => 0,
         }
+    }
+}
+
+pub fn command_byte_size(bytes: &[u8]) -> Result<usize, DecodeError> {
+    match generated_command_byte_size(bytes)? {
+        Some(size) => Ok(size),
+        None => decode_command(bytes).map(|command| command.custom_size()),
+    }
+}
+
+fn generated_command_byte_size(bytes: &[u8]) -> Result<Option<usize>, DecodeError> {
+    match command_size::command_size(bytes) {
+        CommandSize::Sized(size) => Ok(Some(size)),
+        CommandSize::Custom => Ok(None),
+        CommandSize::Incomplete => Err(DecodeError::Malformed("incomplete command")),
+        CommandSize::Unknown => Ok(None),
     }
 }
 
@@ -217,7 +237,14 @@ pub fn decode_command(bytes: &[u8]) -> Result<Command, DecodeError> {
         opcodes::OP_SET_FONT => skip_len_at(bytes, 5),
         opcodes::OP_SET_FONT_FALLBACK => skip_font_fallback(bytes),
         opcodes::OP_REGISTER_FONT => skip_len_at(bytes, 2),
-        _ if opcode >= 0x70 => semantic::decode(bytes).map(Command::Semantic),
+        _ if opcode >= 0x70 => match semantic::decode(bytes) {
+            Ok(command) => Ok(Command::Semantic(command)),
+            Err(DecodeError::UnknownOpcode(_)) => match generated_command_byte_size(bytes)? {
+                Some(size) => Ok(Command::Noop(size)),
+                None => Err(DecodeError::UnknownOpcode(opcode)),
+            },
+            Err(error) => Err(error),
+        },
         _ => Err(DecodeError::UnknownOpcode(opcode)),
     }
 }
@@ -480,7 +507,7 @@ mod tests {
                 text: "hi".to_owned(),
             })
         );
-        assert_eq!(command.size(), bytes.len());
+        assert_eq!(command_byte_size(&bytes).unwrap(), bytes.len());
     }
 
     #[test]
@@ -520,7 +547,7 @@ mod tests {
         ];
         let command = decode_command(&bytes).unwrap();
 
-        assert_eq!(command.size(), bytes.len());
+        assert_eq!(command_byte_size(&bytes).unwrap(), bytes.len());
         assert!(
             matches!(command, Command::DrawStyledText(DrawStyledText { font_id: 7, text, .. }) if text == "hi")
         );
@@ -547,7 +574,7 @@ mod tests {
         ];
         let command = decode_command(&bytes).unwrap();
 
-        assert_eq!(command.size(), bytes.len());
+        assert_eq!(command_byte_size(&bytes).unwrap(), bytes.len());
         assert!(matches!(
             command,
             Command::DefineRegion(Region {
@@ -586,12 +613,10 @@ mod tests {
         .concat();
         let command = decode_command(&packet).unwrap();
 
-        assert_eq!(command.size(), packet.len() - 1);
+        let size = command_byte_size(&packet).unwrap();
+        assert_eq!(size, packet.len() - 1);
         assert!(matches!(command, Command::Noop(_)));
-        assert_eq!(
-            decode_command(&packet[command.size()..]).unwrap(),
-            Command::BatchEnd
-        );
+        assert_eq!(decode_command(&packet[size..]).unwrap(), Command::BatchEnd);
     }
 
     #[test]
@@ -606,24 +631,32 @@ mod tests {
         .concat();
         let command = decode_command(&packet).unwrap();
 
-        assert_eq!(command.size(), packet.len() - 1);
+        let size = command_byte_size(&packet).unwrap();
+        assert_eq!(size, packet.len() - 1);
         assert!(matches!(command, Command::Noop(_)));
-        assert_eq!(
-            decode_command(&packet[command.size()..]).unwrap(),
-            Command::BatchEnd
-        );
+        assert_eq!(decode_command(&packet[size..]).unwrap(), Command::BatchEnd);
+    }
+
+    #[test]
+    fn skips_generated_sized_unrendered_opcode_without_consuming_following_commands() {
+        let packet = [vec![0xB7, 0, 2, 0xAA, 0xBB], vec![opcodes::OP_BATCH_END]].concat();
+        let command = decode_command(&packet).unwrap();
+
+        let size = command_byte_size(&packet).unwrap();
+        assert_eq!(size, packet.len() - 1);
+        assert!(matches!(command, Command::Noop(_)));
+        assert_eq!(decode_command(&packet[size..]).unwrap(), Command::BatchEnd);
     }
 }
 
 #[cfg(test)]
 mod command_size_conformance {
     use super::command_size::{CommandSize, command_size};
-    use super::{decode_command, opcodes};
+    use super::{command_byte_size, decode_command, opcodes};
 
-    // Each case is a fully framed command. We assert the schema-generated
-    // command_size agrees with the hand-written decoder's consumed size, so the
-    // generated sizer can never drift from the real wire format. The
-    // indent_guides (0x91) case is the regression that desynced the Go reader.
+    // Each case is a fully framed command. The generated command_size is the
+    // reader's authority for schema-framed opcodes. The indent_guides (0x91)
+    // case is the regression that desynced the Go reader.
     #[test]
     fn generated_size_matches_decoder() {
         let cases: &[(Vec<u8>, usize)] = &[
@@ -651,11 +684,11 @@ mod command_size_conformance {
                 "command_size mismatch for opcode 0x{:02X}",
                 bytes[0]
             );
-            let decoded = decode_command(bytes).expect("decoder accepts framed command");
+            let _decoded = decode_command(bytes).expect("decoder accepts framed command");
             assert_eq!(
-                decoded.size(),
+                command_byte_size(bytes).unwrap(),
                 *expected,
-                "decoder size disagrees with command_size for opcode 0x{:02X}",
+                "reader size disagrees with command_size for opcode 0x{:02X}",
                 bytes[0]
             );
         }
