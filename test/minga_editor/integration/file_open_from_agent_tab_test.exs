@@ -26,11 +26,28 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
     height = Keyword.get(opts, :height, 24)
     id = :erlang.unique_integer([:positive])
 
+    # Isolate the event and sidebar registries per test. Without this the agent
+    # editor falls back to the global default registry (subscribing to ~25 event
+    # types) and shares sidebar state with every other async test. Under load,
+    # concurrent broadcasts (renders, buffer/option events) are delivered to this
+    # editor and interleave with the keystrokes below, intermittently dropping
+    # the edit. This mirrors the isolation the standard `start_editor` helper does.
+    events_registry = :"minga_events_agent_#{id}"
+    start_supervised!({Minga.Events, name: events_registry})
+
+    sidebar_registry = :"minga_sidebars_agent_#{id}"
+    start_supervised!({MingaEditor.Extension.Sidebar, name: sidebar_registry, notify: false})
+
     {:ok, port} = HeadlessPort.start_link(width: width, height: height)
     agent_buf = AgentBufferSync.start_buffer()
     assert is_pid(agent_buf), "Failed to start agent buffer"
 
-    {:ok, file_buf} = BufferProcess.start_link(content: "", buffer_name: "unnamed")
+    {:ok, file_buf} =
+      BufferProcess.start_link(
+        content: "",
+        buffer_name: "unnamed",
+        events_registry: events_registry
+      )
 
     {:ok, editor} =
       MingaEditor.start_link(
@@ -39,7 +56,9 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
         buffer: file_buf,
         width: width,
         height: height,
-        editing_model: :vim
+        editing_model: :vim,
+        events_registry: events_registry,
+        sidebar_registry: sidebar_registry
       )
 
     {:ok, fake_session} = StubServer.start_link()
