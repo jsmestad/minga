@@ -643,14 +643,22 @@ struct ContentView: View {
     }
 
     /// Editor-surface overlays contributed by extensions (gui_extension_overlay, 0x9C).
-    /// Positioned by cell (row, col) relative to the editor surface origin. Multi-pane
-    /// content origins resolve to the surface top-left until per-window pane geometry
-    /// lands; the common single-window case is correct.
+    /// Overlay row/col are window-local text coordinates, so the origin is offset past the
+    /// gutter (line numbers/signs) to the text rect's left edge, matching the Metal
+    /// renderer's text origin for the active window (`gutterCol * cellW + gutter margins`).
+    /// Horizontal/vertical scroll and split panes still resolve against the active window's
+    /// gutter only, pending per-window pane geometry in the SwiftUI overlay layer; the
+    /// existing completion/hover overlays share this limitation.
     @ViewBuilder
     private var extensionOverlayLayer: some View {
         if !appState.gui.extensionOverlayState.entries.isEmpty {
             let cw = CGFloat(appState.editorNSView?.cellWidth ?? 8)
             let ch = CGFloat(appState.editorNSView?.cellHeight ?? 16)
+            let gutterCols = CGFloat(appState.editorNSView?.dispatcher.frameState.gutterCol ?? 0)
+            let gutterPad: CGFloat = gutterCols > 0
+                ? CoreTextMetalRenderer.gutterLeftMarginPt + CoreTextMetalRenderer.gutterRightGapPt
+                : 0
+            let textOrigin = CGPoint(x: gutterCols * cw + gutterPad, y: 0)
 
             ForEach(appState.gui.extensionOverlayState.windowIDs, id: \.self) { wid in
                 ExtensionOverlayView(
@@ -658,7 +666,7 @@ struct ContentView: View {
                     windowID: wid,
                     cellWidth: cw,
                     cellHeight: ch,
-                    contentOrigin: .zero
+                    contentOrigin: textOrigin
                 )
             }
         }
@@ -674,11 +682,50 @@ struct ContentView: View {
             .background(theme.treeBg)
     }
 
-    /// Right-docked extension panels (position 1), shown as a sidebar column.
+    /// Resolves an extension panel's requested cross-axis size (`sizeType`/`sizeValue`)
+    /// to points. `sizeType` 0 = percent of `basis`; 1 = lines/columns (× `cellExtent`).
+    /// Clamped to `[minimum, basis * 0.8]` so a panel can neither vanish nor crowd out
+    /// the editor.
+    static func panelCrossSize(
+        sizeType: UInt8,
+        sizeValue: UInt8,
+        cellExtent: CGFloat,
+        basis: CGFloat,
+        minimum: CGFloat
+    ) -> CGFloat {
+        let requested: CGFloat = sizeType == 0
+            ? basis * CGFloat(sizeValue) / 100
+            : CGFloat(sizeValue) * cellExtent
+        return min(max(requested, minimum), basis * 0.8)
+    }
+
+    private func panelCrossSize(
+        _ panel: Wire.ExtensionPanelEntry,
+        cellExtent: CGFloat,
+        basis: CGFloat,
+        minimum: CGFloat
+    ) -> CGFloat {
+        Self.panelCrossSize(
+            sizeType: panel.sizeType,
+            sizeValue: panel.sizeValue,
+            cellExtent: cellExtent,
+            basis: basis,
+            minimum: minimum
+        )
+    }
+
+    /// Right-docked extension panels (position 1), shown as a sidebar column sized to
+    /// the widest panel's requested size.
     @ViewBuilder
     private var extensionRightPanels: some View {
         let panels = appState.gui.extensionPanelState.panels(forPosition: 1)
         if !panels.isEmpty {
+            let cw = CGFloat(appState.editorNSView?.cellWidth ?? 8)
+            let basis = CGFloat(appState.editorNSView?.bounds.width ?? 800)
+            let width = panels
+                .map { panelCrossSize($0, cellExtent: cw, basis: basis, minimum: 160) }
+                .max() ?? 280
+
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(panels) { panel in
@@ -687,7 +734,7 @@ struct ContentView: View {
                     }
                 }
             }
-            .frame(width: 280)
+            .frame(width: width)
             .background(theme.treeBg)
             .overlay(alignment: .leading) {
                 Rectangle()
@@ -697,11 +744,17 @@ struct ContentView: View {
         }
     }
 
-    /// Bottom-docked extension panels (position 0), shown above the status bar.
+    /// Bottom-docked extension panels (position 0), shown above the status bar, sized to
+    /// the tallest panel's requested size.
     @ViewBuilder
     private var extensionBottomPanels: some View {
         let panels = appState.gui.extensionPanelState.panels(forPosition: 0)
         if !panels.isEmpty {
+            let ch = CGFloat(appState.editorNSView?.cellHeight ?? 16)
+            let height = panels
+                .map { panelCrossSize($0, cellExtent: ch, basis: rightPaneHeight, minimum: 80) }
+                .max() ?? (rightPaneHeight * 0.4)
+
             ScrollView {
                 VStack(spacing: 0) {
                     ForEach(panels) { panel in
@@ -709,7 +762,7 @@ struct ContentView: View {
                     }
                 }
             }
-            .frame(maxHeight: rightPaneHeight * 0.4)
+            .frame(maxHeight: height)
             .background(theme.treeBg)
             .overlay(alignment: .top) {
                 Rectangle()

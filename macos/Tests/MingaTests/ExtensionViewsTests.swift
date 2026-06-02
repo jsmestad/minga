@@ -160,6 +160,43 @@ struct ExtensionOverlayViewTests {
     }
 }
 
+// MARK: - Panel size resolution
+
+@Suite("ContentView.panelCrossSize")
+struct PanelCrossSizeTests {
+    @Test("percent resolves against the basis")
+    func percentOfBasis() {
+        let size = ContentView.panelCrossSize(
+            sizeType: 0, sizeValue: 30, cellExtent: 8, basis: 1000, minimum: 160
+        )
+        #expect(size == 300)
+    }
+
+    @Test("lines resolves against the cell extent")
+    func linesByCellExtent() {
+        let size = ContentView.panelCrossSize(
+            sizeType: 1, sizeValue: 20, cellExtent: 8, basis: 1000, minimum: 160
+        )
+        #expect(size == 160)
+    }
+
+    @Test("tiny requests clamp up to the minimum")
+    func clampsToMinimum() {
+        let size = ContentView.panelCrossSize(
+            sizeType: 0, sizeValue: 1, cellExtent: 8, basis: 1000, minimum: 160
+        )
+        #expect(size == 160)
+    }
+
+    @Test("oversized requests clamp to 80% of the basis")
+    func clampsToBasisFraction() {
+        let size = ContentView.panelCrossSize(
+            sizeType: 0, sizeValue: 95, cellExtent: 8, basis: 1000, minimum: 160
+        )
+        #expect(size == 800)
+    }
+}
+
 // MARK: - ExtensionPanelView
 
 @Suite("ExtensionPanelView Structure")
