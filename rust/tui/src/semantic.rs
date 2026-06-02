@@ -424,8 +424,9 @@ pub fn decode(bytes: &[u8]) -> Result<Command, DecodeError> {
         | opcodes::OP_GUI_AGENT_CONTEXT
         | opcodes::OP_GUI_BOARD
         | opcodes::OP_GUI_AGENT_CHAT
-        | opcodes::OP_GUI_TOOL_MANAGER => semantic_size(bytes)
-            .map(|size| Command::Unsupported { opcode, size }),
+        | opcodes::OP_GUI_TOOL_MANAGER => {
+            semantic_size(bytes).map(|size| Command::Unsupported { opcode, size })
+        }
         _ => Err(DecodeError::UnknownOpcode(opcode)),
     }
 }
@@ -1401,9 +1402,13 @@ fn custom_semantic_size(bytes: &[u8]) -> Result<usize, DecodeError> {
         opcodes::OP_GUI_SPLIT_SEPARATORS => split_separators_size(bytes),
         opcodes::OP_GUI_GIT_STATUS => git_status_size(bytes),
         opcodes::OP_GUI_BOARD => hidden_or_visible_size(bytes, "board", board_size),
-        opcodes::OP_GUI_AGENT_CONTEXT => hidden_or_visible_size(bytes, "agent context", agent_context_size),
+        opcodes::OP_GUI_AGENT_CONTEXT => {
+            hidden_or_visible_size(bytes, "agent context", agent_context_size)
+        }
         opcodes::OP_GUI_CHANGE_SUMMARY => change_summary_size(bytes),
-        opcodes::OP_GUI_TOOL_MANAGER => hidden_or_visible_size(bytes, "tool manager", tool_manager_size),
+        opcodes::OP_GUI_TOOL_MANAGER => {
+            hidden_or_visible_size(bytes, "tool manager", tool_manager_size)
+        }
         opcodes::OP_GUI_WINDOW_OVERLAY_DELTA => overlay_delta_size(bytes),
         _ => Err(DecodeError::UnknownOpcode(opcode)),
     }
@@ -2320,7 +2325,11 @@ mod tests {
 
     #[test]
     fn skips_hidden_tool_manager_without_consuming_following_commands() {
-        let packet = [vec![opcodes::OP_GUI_TOOL_MANAGER, 0], vec![opcodes::OP_GUI_THEME, 0]].concat();
+        let packet = [
+            vec![opcodes::OP_GUI_TOOL_MANAGER, 0],
+            vec![opcodes::OP_GUI_THEME, 0],
+        ]
+        .concat();
         let command = decode(&packet).unwrap();
         let size = semantic_size(&packet).unwrap();
 

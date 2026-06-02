@@ -22,6 +22,7 @@ defmodule Mix.Tasks.Swift.Harness do
 
     sources = [
       "macos/.generated/protocol/ProtocolOpcodes.generated.swift",
+      "macos/.generated/protocol/ProtocolCommandSize.generated.swift",
       "macos/Sources/Protocol/ProtocolConstants.swift",
       "macos/Sources/Protocol/ProtocolTypes.swift",
       "macos/Sources/Protocol/ProtocolDecoder.swift",

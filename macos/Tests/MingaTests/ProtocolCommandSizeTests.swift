@@ -41,6 +41,10 @@ struct ProtocolCommandSizeTests {
             commands.append(command)
         }
 
-        #expect(commands == [.batchEnd])
+        #expect(commands.count == 1)
+        guard case .batchEnd = commands.first else {
+            Issue.record("Expected .batchEnd but got \(String(describing: commands.first))")
+            return
+        }
     }
 }

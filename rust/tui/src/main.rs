@@ -188,10 +188,7 @@ fn handle_packet(
         let command_size = match protocol::command_byte_size(&packet[offset..]) {
             Ok(size) => size,
             Err(error) => {
-                log_warn(
-                    output,
-                    &format!("protocol size error at {offset}: {error}"),
-                );
+                log_warn(output, &format!("protocol size error at {offset}: {error}"));
                 break;
             }
         };
