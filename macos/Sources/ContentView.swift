@@ -12,6 +12,17 @@ private struct PaneHeightKey: PreferenceKey {
     }
 }
 
+/// Preference key for measuring the editor column's total width.
+/// Used as a stable basis for percent-sized extension panels: the panels live
+/// inside this column, so its width does not shrink when a panel mounts (unlike
+/// the editor NSView, which is the surface left over after the panel takes space).
+private struct PaneWidthKey: PreferenceKey {
+    static let defaultValue: CGFloat = 800
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 /// Transparent AppKit hit region that preserves standard title-bar interactions for the custom toolbar.
 private struct TitleBarDragRegion: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
@@ -125,6 +136,7 @@ struct StartupOverlay: View {
 struct ContentView: View {
     var appState: AppState
     @State private var rightPaneHeight: CGFloat = 600
+    @State private var workspaceWidth: CGFloat = 800
     @State private var sidebarWidth: CGFloat = SidebarSizing.defaultWidth
     @State private var changeSummaryWidth: CGFloat = 280
 
@@ -472,6 +484,8 @@ struct ContentView: View {
                         )
                     }
                 }
+
+                extensionRightPanels
             }
             .animation(
                 NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
@@ -509,6 +523,9 @@ struct ContentView: View {
                 )
             }
 
+            // Extension-registered bottom panels (gui_extension_panel, 0x9D, position 0)
+            extensionBottomPanels
+
             // Native minibuffer (appears above status bar when active)
             if appState.gui.minibufferState.visible {
                 MinibufferView(
@@ -527,14 +544,16 @@ struct ContentView: View {
         }
         .background(
             GeometryReader { geo in
-                Color.clear.preference(
-                    key: PaneHeightKey.self,
-                    value: geo.size.height
-                )
+                Color.clear
+                    .preference(key: PaneHeightKey.self, value: geo.size.height)
+                    .preference(key: PaneWidthKey.self, value: geo.size.width)
             }
         )
         .onPreferenceChange(PaneHeightKey.self) { height in
             rightPaneHeight = height
+        }
+        .onPreferenceChange(PaneWidthKey.self) { width in
+            workspaceWidth = width
         }
     }
 
@@ -631,6 +650,193 @@ struct ContentView: View {
                     encoder: appState.encoder
                 )
             }
+
+            // Extension-registered overlays (positioned per window on the editor surface)
+            extensionOverlayLayer
+        }
+    }
+
+    /// Origin (in points) of a window's text rect on the editor surface, matching the
+    /// Metal renderer's per-window text origin: `textCol * cellW + gutterPad - scrollLeft *
+    /// cellW` horizontally and `textRow * cellH` vertically. Overlay row/col are
+    /// window-local text coordinates, so an entry then lands at `origin + col*cellW`.
+    nonisolated static func overlayContentOrigin(
+        textCol: UInt16,
+        textRow: UInt16,
+        scrollLeft: UInt16,
+        cellWidth: CGFloat,
+        cellHeight: CGFloat,
+        gutterPad: CGFloat
+    ) -> CGPoint {
+        CGPoint(
+            x: CGFloat(textCol) * cellWidth + gutterPad - CGFloat(scrollLeft) * cellWidth,
+            y: CGFloat(textRow) * cellHeight
+        )
+    }
+
+    /// Editor-surface overlays contributed by extensions (gui_extension_overlay, 0x9C).
+    /// Overlay row/col are window-local text coordinates, so each window's origin is derived
+    /// from that window's retained pane geometry (`textRect`) and horizontal scroll
+    /// (`scrollLeft`), which is how the Metal renderer positions the window's text. This
+    /// keeps overlays aligned in split panes and under horizontal scroll. Falls back to the
+    /// active window's gutter column when pane geometry has not been retained yet.
+    @ViewBuilder
+    private var extensionOverlayLayer: some View {
+        if !appState.gui.extensionOverlayState.entries.isEmpty {
+            let cw = CGFloat(appState.editorNSView?.cellWidth ?? 8)
+            let ch = CGFloat(appState.editorNSView?.cellHeight ?? 16)
+            let frameGutterCols = appState.editorNSView?.dispatcher.frameState.gutterCol ?? 0
+            let gutterPad: CGFloat = frameGutterCols > 0
+                ? CoreTextMetalRenderer.gutterLeftMarginPt + CoreTextMetalRenderer.gutterRightGapPt
+                : 0
+
+            ForEach(appState.gui.extensionOverlayState.windowIDs, id: \.self) { wid in
+                let content = appState.gui.windowContents[wid]
+                let geometry = content?.paneGeometry
+                let scrollLeft = content?.scrollLeft ?? 0
+                let origin = Self.overlayContentOrigin(
+                    textCol: geometry?.textRect.col ?? frameGutterCols,
+                    textRow: geometry?.textRect.row ?? 0,
+                    scrollLeft: scrollLeft,
+                    cellWidth: cw,
+                    cellHeight: ch,
+                    gutterPad: gutterPad
+                )
+
+                ExtensionOverlayView(
+                    overlayState: appState.gui.extensionOverlayState,
+                    windowID: wid,
+                    cellWidth: cw,
+                    cellHeight: ch,
+                    contentOrigin: origin,
+                    firstColumn: scrollLeft,
+                    columnCount: geometry?.textRect.width ?? 0,
+                    rowCount: geometry?.textRect.height ?? 0
+                )
+            }
+        }
+    }
+
+    // MARK: - Extension Panels (gui_extension_panel, 0x9D)
+
+    /// One extension panel rendered as a themed card.
+    @ViewBuilder
+    private func extensionPanelCard(_ panel: Wire.ExtensionPanelEntry) -> some View {
+        ExtensionPanelView(panel: panel)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(theme.treeBg)
+    }
+
+    /// Resolves an extension panel's requested cross-axis size (`sizeType`/`sizeValue`)
+    /// to points. `sizeType` 0 = percent of `basis`; 1 = lines/columns (× `cellExtent`).
+    /// Clamped to `[minimum, basis * 0.8]` so a panel can neither vanish nor crowd out
+    /// the editor.
+    nonisolated static func panelCrossSize(
+        sizeType: UInt8,
+        sizeValue: UInt8,
+        cellExtent: CGFloat,
+        basis: CGFloat,
+        minimum: CGFloat
+    ) -> CGFloat {
+        let requested: CGFloat = sizeType == 0
+            ? basis * CGFloat(sizeValue) / 100
+            : CGFloat(sizeValue) * cellExtent
+        return min(max(requested, minimum), basis * 0.8)
+    }
+
+    private func panelCrossSize(
+        _ panel: Wire.ExtensionPanelEntry,
+        cellExtent: CGFloat,
+        basis: CGFloat,
+        minimum: CGFloat
+    ) -> CGFloat {
+        Self.panelCrossSize(
+            sizeType: panel.sizeType,
+            sizeValue: panel.sizeValue,
+            cellExtent: cellExtent,
+            basis: basis,
+            minimum: minimum
+        )
+    }
+
+    /// Right-docked extension panels (position 1), shown as a sidebar column sized to
+    /// the widest panel's requested size.
+    @ViewBuilder
+    private var extensionRightPanels: some View {
+        let panels = appState.gui.extensionPanelState.panels(forPosition: 1)
+        if !panels.isEmpty {
+            let cw = CGFloat(appState.editorNSView?.cellWidth ?? 8)
+            // Percent panels size against the stable editor-column width, not the editor
+            // NSView (which is the surface left over after the panel takes space, causing
+            // a 30% request to converge to ~23% and oscillate as layout settles).
+            let basis = workspaceWidth
+            let width = panels
+                .map { panelCrossSize($0, cellExtent: cw, basis: basis, minimum: 160) }
+                .max() ?? 280
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(panels) { panel in
+                        extensionPanelCard(panel)
+                        Divider()
+                    }
+                }
+            }
+            .frame(width: width)
+            .background(theme.treeBg)
+            .overlay(alignment: .leading) {
+                Rectangle()
+                    .fill(theme.treeSeparatorFg.opacity(0.4))
+                    .frame(width: 1)
+            }
+        }
+    }
+
+    /// Bottom-docked extension panels (position 0), shown above the status bar, sized to
+    /// the tallest panel's requested size.
+    @ViewBuilder
+    private var extensionBottomPanels: some View {
+        let panels = appState.gui.extensionPanelState.panels(forPosition: 0)
+        if !panels.isEmpty {
+            let ch = CGFloat(appState.editorNSView?.cellHeight ?? 16)
+            let height = panels
+                .map { panelCrossSize($0, cellExtent: ch, basis: rightPaneHeight, minimum: 80) }
+                .max() ?? (rightPaneHeight * 0.4)
+
+            ScrollView {
+                VStack(spacing: 0) {
+                    ForEach(panels) { panel in
+                        extensionPanelCard(panel)
+                    }
+                }
+            }
+            .frame(maxHeight: height)
+            .background(theme.treeBg)
+            .overlay(alignment: .top) {
+                Rectangle()
+                    .fill(theme.treeSeparatorFg.opacity(0.4))
+                    .frame(height: 1)
+            }
+        }
+    }
+
+    /// Floating extension panels (position 2), centered over the workspace.
+    @ViewBuilder
+    private var extensionFloatPanels: some View {
+        let panels = appState.gui.extensionPanelState.panels(forPosition: 2)
+        if !panels.isEmpty {
+            VStack(spacing: 12) {
+                ForEach(panels) { panel in
+                    extensionPanelCard(panel)
+                        .frame(maxWidth: 500)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(theme.treeSeparatorFg.opacity(0.4))
+                        )
+                        .shadow(radius: 12)
+                }
+            }
         }
     }
 
@@ -692,6 +898,9 @@ struct ContentView: View {
                 cellHeight: ch
             )
         }
+
+        // Extension-registered floating panels (gui_extension_panel, 0x9D, position 2)
+        extensionFloatPanels
 
         // Notification stack (bottom-right, above regular workspace content).
         NotificationCenterView(

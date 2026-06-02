@@ -57,4 +57,29 @@ final class ExtensionOverlayState {
     func entries(forWindow windowID: UInt16) -> [OverlayEntry] {
         entries.filter { $0.windowID == windowID }
     }
+
+    /// Distinct window IDs that currently have overlay entries, in first-seen order.
+    var windowIDs: [UInt16] {
+        var seen = Set<UInt16>()
+        return entries.compactMap { seen.insert($0.windowID).inserted ? $0.windowID : nil }
+    }
+
+    /// Whether an overlay entry falls inside a window's visible text viewport.
+    ///
+    /// `firstColumn` is the leftmost visible text column (the window's `scrollLeft`),
+    /// `columnCount`/`rowCount` are the visible text rect size in cells. Entries scrolled
+    /// out of the viewport would otherwise draw over the gutter or an adjacent split pane,
+    /// since (unlike the Metal text path) SwiftUI does not clip them. When the viewport
+    /// size is unknown (no retained pane geometry) nothing is suppressed.
+    nonisolated static func isVisible(
+        _ entry: OverlayEntry,
+        firstColumn: UInt16,
+        columnCount: UInt16,
+        rowCount: UInt16
+    ) -> Bool {
+        guard columnCount > 0, rowCount > 0 else { return true }
+        return entry.col >= firstColumn
+            && entry.col < firstColumn &+ columnCount
+            && entry.row < rowCount
+    }
 }

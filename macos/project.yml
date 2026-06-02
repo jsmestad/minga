@@ -81,6 +81,10 @@ targets:
     sources:
       - path: Tests
         type: group
+        excludes:
+          # Snapshot test outputs are gitignored local artifacts; never bundle
+          # them as test resources or the checked-in project fails on missing inputs.
+          - "Snapshots/**"
       - path: Sources
         type: group
         excludes:
