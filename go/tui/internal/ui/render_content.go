@@ -13,6 +13,9 @@ import (
 )
 
 func (m Model) content() string {
+	if chat, ok := m.agentChat(); ok && chat.Visible {
+		return strings.Join(m.renderAgentChatBody(chat), "\n")
+	}
 	if len(m.windows) > 0 {
 		return strings.Join(m.fillBody(m.withFileTree(m.withSplitSeparators(m.semanticLines()))), "\n")
 	}

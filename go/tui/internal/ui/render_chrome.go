@@ -145,7 +145,7 @@ func (m Model) footerLines() []string {
 	lines := []string{
 		lipgloss.NewStyle().Foreground(m.palette().Muted()).Background(m.palette().Base()).Width(m.width).Render(fitStyled(status, m.width)),
 	}
-	if !m.pickerVisible() && !m.whichKeyVisible() {
+	if !m.pickerVisible() && !m.whichKeyVisible() && !m.agentChatVisible() {
 		overlay := m.overlayLines()
 		if len(overlay) > 0 {
 			lines = append(lines, overlay...)

@@ -360,6 +360,34 @@ func TestAgentChatPanelRendersStructuredTranscript(t *testing.T) {
 	}
 }
 
+func TestAgentChatVisibleRendersAsMainBody(t *testing.T) {
+	model := New(120, 24, nil)
+	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiAgentChat: {AgentChat: protocol.AgentChat{
+		Visible:       true,
+		Status:        0,
+		ModelName:     "anthropic:claude-sonnet-4",
+		ThinkingLevel: "medium",
+		Prompt:        "",
+		Messages: []protocol.AgentChatMessage{
+			{Kind: 0x05, Text: "Session started · 14:57:49 UTC"},
+		},
+	}}}
+	model.putWindow(protocol.WindowContent{ID: 7, Rows: []protocol.WindowRow{{Text: ""}}})
+	model.viewport.SetContent(model.content())
+
+	body := ansi.Strip(model.content())
+	if !strings.Contains(body, "◇ Agent") || !strings.Contains(body, "Details") || !strings.Contains(body, "Ask Minga") {
+		t.Fatalf("agent chat should render in main body: %q", body)
+	}
+	if strings.Contains(body, "~") {
+		t.Fatalf("agent chat body should not show editor tilde filler: %q", body)
+	}
+	footer := ansi.Strip(strings.Join(model.footerLines(), "\n"))
+	if strings.Contains(footer, "◇ Agent") || strings.Contains(footer, "Ask Minga") {
+		t.Fatalf("agent chat should not be duplicated in footer overlay: %q", footer)
+	}
+}
+
 func TestOverlayLinesRenderRemainingSemanticSurfaces(t *testing.T) {
 	model := New(60, 12, nil)
 	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiAgentContext: {AgentContext: protocol.AgentContext{Visible: true, Task: "Review diff", Status: 1, CanApprove: true}}}

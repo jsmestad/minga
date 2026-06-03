@@ -22,8 +22,22 @@ const (
 )
 
 func (m Model) renderAgentChatPanel(chat protocol.AgentChat) []string {
+	return m.renderAgentChatPanelWithLimit(chat, max(m.width, 1), m.agentPanelHeight())
+}
+
+func (m Model) renderAgentChatBody(chat protocol.AgentChat) []string {
 	width := max(m.width, 1)
-	limit := m.agentPanelHeight()
+	limit := m.bodyHeight()
+	lines := m.renderAgentChatPanelWithLimit(chat, width, limit)
+	blank := lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(strings.Repeat(" ", width))
+	for len(lines) < limit {
+		lines = append(lines, blank)
+	}
+	return takeLines(lines, limit)
+}
+
+func (m Model) renderAgentChatPanelWithLimit(chat protocol.AgentChat, width int, limit int) []string {
+	limit = max(limit, 1)
 	empty := chat.Pending == "" && strings.TrimSpace(chat.Prompt) == "" && len(chat.Messages) == 0
 	lines := []string{m.renderAgentHeader(chat, width)}
 

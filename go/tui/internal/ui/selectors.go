@@ -235,6 +235,11 @@ func (m Model) agentChat() (protocol.AgentChat, bool) {
 	return protocol.AgentChat{}, false
 }
 
+func (m Model) agentChatVisible() bool {
+	chat, ok := m.agentChat()
+	return ok && chat.Visible
+}
+
 func (m Model) board() (protocol.Board, bool) {
 	for _, payload := range m.chrome {
 		if payload.Board.Visible {
