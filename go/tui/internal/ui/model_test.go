@@ -372,7 +372,7 @@ func TestAgentChatPanelRendersStructuredTranscript(t *testing.T) {
 	}
 
 	view := ansi.Strip(strings.Join(model.renderAgentChatPanelWithLimit(chat, 120, 28), "\n"))
-	for _, want := range []string{"◇ Agent", "anthropic", "claude-sonnet-4", "thinking medium", "Read read_file", "path:", "Approval edit_file", "Usage", "Composer", "fix the renderer", "◇ Session", "Provider", "Model", "Context", "Hints", "╰"} {
+	for _, want := range []string{"◇ Agent", "anthropic", "claude-sonnet-4", "thinking medium", "Read read_file", "path:", "Approval edit_file", "Usage", "NORMAL", "fix the renderer", "◇ Session", "Provider", "Model", "Context", "Hints", "╰"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("agent chat panel missing %q in %q", want, view)
 		}
@@ -421,7 +421,7 @@ func TestAgentChatVisibleRendersAsMainBody(t *testing.T) {
 		t.Fatalf("agent details labels and values should not be smashed together: %q", body)
 	}
 	bottomComposer := strings.Join(bodyLines[max(len(bodyLines)-3, 0):], "\n")
-	if !strings.Contains(bottomComposer, "Composer") || !strings.Contains(bottomComposer, "Ask Minga") {
+	if !strings.Contains(bottomComposer, "NORMAL") || !strings.Contains(bottomComposer, "Ask Minga") {
 		t.Fatalf("agent composer should be pinned to bottom body rows: %+v", bodyLines)
 	}
 	footer := ansi.Strip(strings.Join(model.footerLines(), "\n"))
