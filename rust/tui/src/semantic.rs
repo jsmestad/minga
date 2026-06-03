@@ -1907,7 +1907,7 @@ fn decode_observatory(bytes: &[u8]) -> Result<Command, DecodeError> {
     let size = len32_size(bytes)?;
     require_len(bytes, size, "observatory payload")?;
     let payload = bytes[5..size].to_vec();
-    let visible = payload.first().map_or(false, |&b| b != 0);
+    let visible = payload.first().is_some_and(|&b| b != 0);
     Ok(Command::Observatory(Observatory { visible, payload }, size))
 }
 
@@ -1947,14 +1947,11 @@ fn decode_agent_chat(bytes: &[u8]) -> Result<Command, DecodeError> {
     };
 
     for (section_id, payload) in secs {
-        match section_id {
-            0x01 => {
-                let (header, _) = semantic_decode::decode_gui_agent_chat_header(payload, 0)?;
-                chat.visible = header.visible;
-                chat.flags = header.flags;
-                chat.message_count = header.message_count;
-            }
-            _ => {}
+        if section_id == 0x01 {
+            let (header, _) = semantic_decode::decode_gui_agent_chat_header(payload, 0)?;
+            chat.visible = header.visible;
+            chat.flags = header.flags;
+            chat.message_count = header.message_count;
         }
     }
 

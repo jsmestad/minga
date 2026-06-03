@@ -864,20 +864,14 @@ impl Renderer {
                 timeline.viewing_index, timeline.entry_count
             ));
         }
-        if let Some(ws) = &self.workspaces {
-            if ws.workspace_count > 1 {
-                indicators.push(format!("WS {}", ws.workspace_count));
-            }
+        if let Some(ws) = &self.workspaces && ws.workspace_count > 1 {
+            indicators.push(format!("WS {}", ws.workspace_count));
         }
-        if let Some(sb) = &self.sidebars {
-            if sb.sidebar_count > 0 {
-                indicators.push(format!("SB {}", sb.sidebar_count));
-            }
+        if let Some(sb) = &self.sidebars && sb.sidebar_count > 0 {
+            indicators.push(format!("SB {}", sb.sidebar_count));
         }
-        if let Some(ext) = &self.extension_panel {
-            if ext.panel_count > 0 {
-                indicators.push(format!("Ext {}", ext.panel_count));
-            }
+        if let Some(ext) = &self.extension_panel && ext.panel_count > 0 {
+            indicators.push(format!("Ext {}", ext.panel_count));
         }
         if !indicators.is_empty() {
             let suffix = format!(" [{}]", indicators.join(" | "));
@@ -2151,7 +2145,7 @@ impl Renderer {
         }
 
         let width = self.width.saturating_sub(4).clamp(24, 72);
-        let card_lines = (board.card_count as u16).saturating_mul(2).max(1);
+        let card_lines = board.card_count.saturating_mul(2).max(1);
         let height = card_lines
             .saturating_add(2)
             .min(self.height.saturating_sub(4))
@@ -2221,7 +2215,7 @@ impl Renderer {
         }
 
         let width = self.width.saturating_sub(4).clamp(28, 80);
-        let height = self.height.saturating_sub(4).min(20).max(1);
+        let height = self.height.saturating_sub(4).clamp(1, 20);
         let row = self.height.saturating_sub(height).saturating_div(2);
         let col = self.width.saturating_sub(width).saturating_div(2);
 
@@ -2872,7 +2866,7 @@ impl Renderer {
 
 fn base64_encode(data: &[u8]) -> String {
     const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {
         let b0 = chunk[0] as u32;
         let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
