@@ -335,6 +335,31 @@ func TestSemanticWindowRendersGutterCursorlineTildesAndModeline(t *testing.T) {
 	}
 }
 
+func TestAgentChatPanelRendersStructuredTranscript(t *testing.T) {
+	model := New(80, 24, nil)
+	chat := protocol.AgentChat{
+		Visible:       true,
+		Status:        2,
+		ModelName:     "anthropic:claude-sonnet-4",
+		ThinkingLevel: "medium",
+		Prompt:        "fix the renderer",
+		Messages: []protocol.AgentChatMessage{
+			{Kind: 0x01, Text: "please fix the agent view"},
+			{Kind: 0x02, Text: "I will make the agent surface semantic."},
+			{Kind: 0x04, Name: "read_file", Summary: "go/tui/internal/ui/render_surfaces.go", Status: 1, DurationMS: 25, Collapsed: true},
+			{Kind: 0x09, Name: "edit_file", Summary: "Update agent renderer", PreviewLines: []string{"+ semantic panel"}},
+			{Kind: 0x06, Usage: protocol.AgentUsage{Input: 1200, Output: 300, CostMicros: 12500}},
+		},
+	}
+
+	view := ansi.Strip(strings.Join(model.renderAgentChatPanel(chat), "\n"))
+	for _, want := range []string{"◇ Agent", "anthropic:claude-sonnet-4", "thinking medium", "Tool read_file", "Approval edit_file", "Usage", "::: fix the renderer"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("agent chat panel missing %q in %q", want, view)
+		}
+	}
+}
+
 func TestOverlayLinesRenderRemainingSemanticSurfaces(t *testing.T) {
 	model := New(60, 12, nil)
 	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiAgentContext: {AgentContext: protocol.AgentContext{Visible: true, Task: "Review diff", Status: 1, CanApprove: true}}}

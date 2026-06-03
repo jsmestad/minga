@@ -422,9 +422,39 @@ type AgentChat struct {
 }
 
 type AgentChatMessage struct {
-	ID   uint32
-	Kind byte
-	Text string
+	ID                uint32
+	Kind              byte
+	Text              string
+	Name              string
+	Summary           string
+	Result            string
+	Status            byte
+	IsError           bool
+	Collapsed         bool
+	DurationMS        uint32
+	AutoApprovedScope byte
+	StyledLines       []AgentStyledLine
+	Usage             AgentUsage
+	PreviewKind       byte
+	PreviewLines      []string
+}
+
+type AgentStyledLine []AgentStyledRun
+
+type AgentStyledRun struct {
+	Text  string
+	FG    uint32
+	BG    uint32
+	Flags byte
+	URL   string
+}
+
+type AgentUsage struct {
+	Input      uint32
+	Output     uint32
+	CacheRead  uint32
+	CacheWrite uint32
+	CostMicros uint32
 }
 
 type Board struct {

@@ -106,29 +106,7 @@ func (m Model) renderAgentContext(context protocol.AgentContext) []string {
 }
 
 func (m Model) renderAgentChat(chat protocol.AgentChat) []string {
-	style := m.panelStyle()
-	title := "Agent"
-	if chat.ModelName != "" {
-		title += "  " + chat.ModelName
-	}
-	items := make([]componentItem, 0, len(chat.Messages)+2)
-	if chat.ThinkingLevel != "" {
-		items = append(items, componentItem{title: "thinking", description: chat.ThinkingLevel})
-	}
-	if chat.Pending != "" {
-		items = append(items, componentItem{title: "approval", description: chat.Pending})
-	}
-	start := max(len(chat.Messages)-max(m.maxOverlayHeight()+1, 1), 0)
-	for _, msg := range chat.Messages[start:] {
-		items = append(items, componentItem{title: agentMessagePrefix(msg.Kind), description: msg.Text})
-	}
-	if chat.Prompt != "" {
-		items = append(items, componentItem{title: "prompt", description: chat.Prompt})
-	}
-	if len(items) == 0 {
-		return []string{style.Bold(true).Foreground(m.palette().Accent()).Render(fit(title, m.width))}
-	}
-	return takeLines(m.charmList(title, items, len(items)-1, m.maxOverlayHeight(), true), m.maxOverlayHeight())
+	return m.renderAgentChatPanel(chat)
 }
 
 func (m Model) renderToolManager(tools protocol.ToolManager) []string {
