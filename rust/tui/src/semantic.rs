@@ -630,8 +630,9 @@ pub fn decode(bytes: &[u8]) -> Result<Command, DecodeError> {
         opcodes::OP_GUI_SPLIT_SEPARATORS => decode_split_separators(bytes),
         opcodes::OP_GUI_INDENT_GUIDES => decode_indent_guides(bytes),
         opcodes::OP_GUI_WINDOW_OVERLAY_DELTA => decode_window_overlay_delta(bytes),
-        opcodes::OP_GUI_WINDOW_VIEWPORT_DELTA
-        | opcodes::OP_GUI_WINDOW_ROWS_DELTA => decode_window_content(bytes),
+        opcodes::OP_GUI_WINDOW_VIEWPORT_DELTA | opcodes::OP_GUI_WINDOW_ROWS_DELTA => {
+            decode_window_content(bytes)
+        }
         opcodes::OP_CLIPBOARD_WRITE => decode_clipboard_write(bytes),
         opcodes::OP_GUI_LINE_SPACING => decode_line_spacing(bytes),
         opcodes::OP_GUI_CURSOR_ANIMATION => decode_cursor_animation(bytes),
@@ -1755,7 +1756,10 @@ fn decode_clipboard_write(bytes: &[u8]) -> Result<Command, DecodeError> {
     let text_len = read_u16(bytes, 4) as usize;
     require_len(bytes, 6 + text_len, "clipboard write text")?;
     let text = read_string(bytes, 6, text_len)?;
-    Ok(Command::ClipboardWrite(ClipboardWrite { target, text }, size))
+    Ok(Command::ClipboardWrite(
+        ClipboardWrite { target, text },
+        size,
+    ))
 }
 
 fn decode_line_spacing(bytes: &[u8]) -> Result<Command, DecodeError> {
@@ -1961,9 +1965,7 @@ fn decode_tool_manager(bytes: &[u8]) -> Result<Command, DecodeError> {
     let size = tool_manager_size(bytes)?;
     require_len(bytes, 2, "tool manager visible")?;
     Ok(Command::ToolManager(
-        ToolManager {
-            visible: bytes[1],
-        },
+        ToolManager { visible: bytes[1] },
         size,
     ))
 }
@@ -2952,26 +2954,45 @@ mod tests {
         let packet = [agent_context, vec![opcodes::OP_BATCH_END]].concat();
         let command = decode(&packet).unwrap();
         assert_eq!(semantic_size(&packet).unwrap(), packet.len() - 1);
-        assert!(matches!(command, Command::AgentContext(AgentContext { visible: 1, .. }, _)));
+        assert!(matches!(
+            command,
+            Command::AgentContext(AgentContext { visible: 1, .. }, _)
+        ));
 
         let board = vec![opcodes::OP_GUI_BOARD, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         let packet = [board, vec![opcodes::OP_BATCH_END]].concat();
         let command = decode(&packet).unwrap();
         assert_eq!(semantic_size(&packet).unwrap(), packet.len() - 1);
-        assert!(matches!(command, Command::Board(Board { visible: 1, .. }, _)));
+        assert!(matches!(
+            command,
+            Command::Board(Board { visible: 1, .. }, _)
+        ));
 
         // Agent chat: 1 section (0x01 header), payload: visible=1, flags=0, message_count=0
         let agent_chat = vec![opcodes::OP_GUI_AGENT_CHAT, 1, 0x01, 0, 4, 1, 0, 0, 0];
         let packet = [agent_chat, vec![opcodes::OP_BATCH_END]].concat();
         let command = decode(&packet).unwrap();
         assert_eq!(semantic_size(&packet).unwrap(), packet.len() - 1);
-        assert!(matches!(command, Command::AgentChat(AgentChat { visible: 1, flags: 0, message_count: 0 }, _)));
+        assert!(matches!(
+            command,
+            Command::AgentChat(
+                AgentChat {
+                    visible: 1,
+                    flags: 0,
+                    message_count: 0
+                },
+                _
+            )
+        ));
 
         let tool_manager = vec![opcodes::OP_GUI_TOOL_MANAGER, 1, 0, 0, 0, 0, 0];
         let packet = [tool_manager, vec![opcodes::OP_BATCH_END]].concat();
         let command = decode(&packet).unwrap();
         assert_eq!(semantic_size(&packet).unwrap(), packet.len() - 1);
-        assert!(matches!(command, Command::ToolManager(ToolManager { visible: 1 }, _)));
+        assert!(matches!(
+            command,
+            Command::ToolManager(ToolManager { visible: 1 }, _)
+        ));
     }
 
     #[test]
@@ -3246,7 +3267,13 @@ mod tests {
         assert_eq!(semantic_size(&bytes).unwrap(), 6);
         assert!(matches!(
             command,
-            Command::Notifications(Notifications { visible: 1, notification_count: 5 }, 6)
+            Command::Notifications(
+                Notifications {
+                    visible: 1,
+                    notification_count: 5
+                },
+                6
+            )
         ));
     }
 
@@ -3408,7 +3435,22 @@ mod tests {
     #[test]
     fn agent_context_size_visible_zero_regression() {
         // AgentContext hidden: opcode(1) + visible=0(1) + task_len=0(2) + timestamp(8) + status(1) + can_approve(1) = 14 bytes
-        let bytes = [opcodes::OP_GUI_AGENT_CONTEXT, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let bytes = [
+            opcodes::OP_GUI_AGENT_CONTEXT,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        ];
         assert_eq!(decode(&bytes).unwrap().custom_size(), 14);
     }
 
@@ -3468,9 +3510,22 @@ mod tests {
     fn decode_agent_context_visible_field_check() {
         // opcode(1) + visible=1(1) + task_len=2(2) + task="hi"(2) + timestamp(8) + status=3(1) + can_approve=1(1) = 16
         let bytes = [
-            opcodes::OP_GUI_AGENT_CONTEXT, 1, 0, 2, b'h', b'i',
-            0, 0, 0, 0, 0, 0, 0, 100, // timestamp = 100
-            3, 1, // status=3 (needs_you), can_approve=1
+            opcodes::OP_GUI_AGENT_CONTEXT,
+            1,
+            0,
+            2,
+            b'h',
+            b'i',
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            100, // timestamp = 100
+            3,
+            1, // status=3 (needs_you), can_approve=1
         ];
         match decode(&bytes).unwrap() {
             Command::AgentContext(a, 16) => {

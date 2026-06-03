@@ -399,9 +399,7 @@ impl Renderer {
             semantic::Command::Workspaces(ws, _) => self.draw_workspaces(ws),
             semantic::Command::Notifications(notifs, _) => self.draw_notifications(notifs),
             semantic::Command::EditTimeline(timeline, _) => self.draw_edit_timeline(timeline),
-            semantic::Command::ExtensionOverlay(overlay, _) => {
-                self.draw_extension_overlay(overlay)
-            }
+            semantic::Command::ExtensionOverlay(overlay, _) => self.draw_extension_overlay(overlay),
             semantic::Command::ExtensionPanel(panel, _) => self.draw_extension_panel(panel),
             semantic::Command::Observatory(obs, _) => self.draw_observatory(obs),
             semantic::Command::Sidebars(sb, _) => self.draw_sidebars(sb),
@@ -2231,11 +2229,7 @@ impl Renderer {
             self.agent_chat_snapshot = Some(self.capture_rect(row, col, width, height));
         }
 
-        let flags_desc = if chat.flags & 0x01 != 0 {
-            " help"
-        } else {
-            ""
-        };
+        let flags_desc = if chat.flags & 0x01 != 0 { " help" } else { "" };
         let status = if chat.message_count == 0 {
             format!(" No messages{flags_desc}")
         } else if chat.message_count == 1 {
@@ -2319,7 +2313,6 @@ impl Renderer {
             self.restore_snapshot(snapshot);
         }
     }
-
 
     fn render_picker_items(
         &mut self,
@@ -5312,14 +5305,8 @@ mod tests {
         });
 
         let row = renderer.height.saturating_sub(2);
-        assert_eq!(
-            renderer.cells[renderer.index(1, row).unwrap()].text,
-            "A"
-        );
-        assert_eq!(
-            renderer.cells[renderer.index(2, row).unwrap()].text,
-            "g"
-        );
+        assert_eq!(renderer.cells[renderer.index(1, row).unwrap()].text, "A");
+        assert_eq!(renderer.cells[renderer.index(2, row).unwrap()].text, "g");
         assert!(renderer.agent_context.is_some());
         assert!(renderer.agent_context_snapshot.is_some());
 
@@ -5859,7 +5846,10 @@ mod tests {
 fn board_geometry(width: u16, height: u16, card_count: u16) -> (u16, u16, u16, u16) {
     let w = width.saturating_sub(4).clamp(24, 72);
     let card_lines = card_count.saturating_mul(2).max(1);
-    let h = card_lines.saturating_add(2).min(height.saturating_sub(4)).max(1);
+    let h = card_lines
+        .saturating_add(2)
+        .min(height.saturating_sub(4))
+        .max(1);
     let row = 2;
     let col = width.saturating_sub(w).saturating_div(2);
     (row, col, w, h)
