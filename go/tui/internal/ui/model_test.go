@@ -336,7 +336,7 @@ func TestSemanticWindowRendersGutterCursorlineTildesAndModeline(t *testing.T) {
 }
 
 func TestAgentChatPanelRendersStructuredTranscript(t *testing.T) {
-	model := New(80, 24, nil)
+	model := New(120, 24, nil)
 	chat := protocol.AgentChat{
 		Visible:       true,
 		Status:        2,
@@ -353,7 +353,7 @@ func TestAgentChatPanelRendersStructuredTranscript(t *testing.T) {
 	}
 
 	view := ansi.Strip(strings.Join(model.renderAgentChatPanel(chat), "\n"))
-	for _, want := range []string{"◇ Agent", "anthropic:claude-sonnet-4", "thinking medium", "Tool read_file", "Approval edit_file", "Usage", "::: fix the renderer"} {
+	for _, want := range []string{"◇ Agent", "anthropic:claude-sonnet-4", "thinking medium", "Read read_file", "path:", "Approval edit_file", "Usage", "::: fix the renderer", "Details", "Messages", "Context", "Hints"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("agent chat panel missing %q in %q", want, view)
 		}
