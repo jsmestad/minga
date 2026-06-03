@@ -326,7 +326,8 @@ impl Renderer {
             semantic::Command::WindowOverlayDelta(delta, _) => {
                 self.apply_window_overlay_delta(delta)
             }
-            semantic::Command::ClipboardWrite(..)
+            semantic::Command::WindowDelta(..)
+            | semantic::Command::ClipboardWrite(..)
             | semantic::Command::LineSpacing(..)
             | semantic::Command::CursorAnimation(..)
             | semantic::Command::ConfigState(..)

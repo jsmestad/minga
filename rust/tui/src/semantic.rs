@@ -30,6 +30,7 @@ pub enum Command {
     SplitSeparators(SplitSeparators, usize),
     IndentGuides(IndentGuides, usize),
     WindowOverlayDelta(WindowOverlayDelta, usize),
+    WindowDelta(WindowDelta, usize),
     ClipboardWrite(ClipboardWrite, usize),
     LineSpacing(LineSpacing, usize),
     CursorAnimation(CursorAnimation, usize),
@@ -76,6 +77,7 @@ impl Command {
             Self::SplitSeparators(_, size) => *size,
             Self::IndentGuides(_, size) => *size,
             Self::WindowOverlayDelta(_, size) => *size,
+            Self::WindowDelta(_, size) => *size,
             Self::ClipboardWrite(_, size) => *size,
             Self::LineSpacing(_, size) => *size,
             Self::CursorAnimation(_, size) => *size,
@@ -495,6 +497,12 @@ pub struct WindowOverlayDelta {
     pub cursorline: Option<Cursorline>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WindowDelta {
+    pub window_id: u16,
+    pub content_epoch: u32,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClipboardWrite {
     pub target: u8,
@@ -631,7 +639,7 @@ pub fn decode(bytes: &[u8]) -> Result<Command, DecodeError> {
         opcodes::OP_GUI_INDENT_GUIDES => decode_indent_guides(bytes),
         opcodes::OP_GUI_WINDOW_OVERLAY_DELTA => decode_window_overlay_delta(bytes),
         opcodes::OP_GUI_WINDOW_VIEWPORT_DELTA | opcodes::OP_GUI_WINDOW_ROWS_DELTA => {
-            decode_window_content(bytes)
+            decode_window_delta(bytes)
         }
         opcodes::OP_CLIPBOARD_WRITE => decode_clipboard_write(bytes),
         opcodes::OP_GUI_LINE_SPACING => decode_line_spacing(bytes),
@@ -1710,6 +1718,29 @@ fn decode_indent_guides(bytes: &[u8]) -> Result<Command, DecodeError> {
             active_guide_col,
             guide_cols,
             line_indent_levels,
+        },
+        size,
+    ))
+}
+
+fn decode_window_delta(bytes: &[u8]) -> Result<Command, DecodeError> {
+    let size = semantic_size(bytes)?;
+    let sections = sections(&bytes[..size])?;
+    let mut window_id = 0;
+    let mut content_epoch = 0;
+
+    for (section_id, payload) in sections {
+        if section_id == 0x01 {
+            require_len(payload, 6, "window delta header")?;
+            window_id = read_u16(payload, 0);
+            content_epoch = read_u32(payload, 2);
+        }
+    }
+
+    Ok(Command::WindowDelta(
+        WindowDelta {
+            window_id,
+            content_epoch,
         },
         size,
     ))
