@@ -170,6 +170,14 @@ impl Terminal {
             Backend::Test(_) => Ok(()),
         }
     }
+
+    #[cfg(test)]
+    pub fn buffer_text(&self) -> String {
+        match &self.backend {
+            Backend::Real(_) => String::new(),
+            Backend::Test(terminal) => terminal.backend().to_string(),
+        }
+    }
 }
 
 impl Drop for Terminal {
