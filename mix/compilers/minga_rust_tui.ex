@@ -80,8 +80,23 @@ defmodule Mix.Tasks.Compile.MingaRustTui do
     File.mkdir_p!(@priv_dir)
     File.cp!(src, dest)
     File.chmod!(dest, 0o755)
+    codesign_if_macos(dest)
     Mix.shell().info("Copied #{@binary_name} to #{dest}")
     :ok
+  end
+
+  @spec codesign_if_macos(String.t()) :: :ok
+  defp codesign_if_macos(path) do
+    case :os.type() do
+      {:unix, :darwin} ->
+        case System.cmd("codesign", ["--force", "--sign", "-", path], stderr_to_stdout: true) do
+          {_output, 0} -> :ok
+          {output, _code} -> Mix.shell().error("codesign failed: #{output}")
+        end
+
+      _ ->
+        :ok
+    end
   end
 
   @impl true
