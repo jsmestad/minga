@@ -112,6 +112,12 @@ pub struct Renderer {
     extension_panel: Option<semantic::ExtensionPanel>,
     observatory: Option<semantic::Observatory>,
     observatory_snapshot: Option<CellSnapshot>,
+    board: Option<semantic::Board>,
+    board_snapshot: Option<CellSnapshot>,
+    agent_chat: Option<semantic::AgentChat>,
+    agent_chat_snapshot: Option<CellSnapshot>,
+    tool_manager: Option<semantic::ToolManager>,
+    tool_manager_snapshot: Option<CellSnapshot>,
     theme: ThemePalette,
 }
 
@@ -168,6 +174,12 @@ impl Renderer {
             extension_panel: None,
             observatory: None,
             observatory_snapshot: None,
+            board: None,
+            board_snapshot: None,
+            agent_chat: None,
+            agent_chat_snapshot: None,
+            tool_manager: None,
+            tool_manager_snapshot: None,
             theme: ThemePalette::default(),
         }
     }
@@ -271,6 +283,12 @@ impl Renderer {
         self.extension_panel = None;
         self.observatory = None;
         self.observatory_snapshot = None;
+        self.board = None;
+        self.board_snapshot = None;
+        self.agent_chat = None;
+        self.agent_chat_snapshot = None;
+        self.tool_manager = None;
+        self.tool_manager_snapshot = None;
         self.semantic_windows.clear();
         self.semantic_cursorline_snapshots.clear();
     }
@@ -384,9 +402,9 @@ impl Renderer {
             semantic::Command::ExtensionPanel(panel, _) => self.draw_extension_panel(panel),
             semantic::Command::Observatory(obs, _) => self.draw_observatory(obs),
             semantic::Command::Sidebars(sb, _) => self.draw_sidebars(sb),
-            semantic::Command::Board(_, _) => {}
-            semantic::Command::AgentChat(_, _) => {}
-            semantic::Command::ToolManager(_, _) => {}
+            semantic::Command::Board(board, _) => self.draw_board(board),
+            semantic::Command::AgentChat(chat, _) => self.draw_agent_chat(chat),
+            semantic::Command::ToolManager(tm, _) => self.draw_tool_manager(tm),
         }
     }
 
@@ -1200,6 +1218,18 @@ impl Renderer {
             self.observatory_snapshot = None;
             self.render_observatory(&obs);
         }
+        if let Some(board) = self.board {
+            self.board_snapshot = None;
+            self.render_board(&board);
+        }
+        if let Some(chat) = self.agent_chat {
+            self.agent_chat_snapshot = None;
+            self.render_agent_chat(&chat);
+        }
+        if let Some(tm) = self.tool_manager {
+            self.tool_manager_snapshot = None;
+            self.render_tool_manager(&tm);
+        }
 
         if let Some(minibuffer) = self.minibuffer.clone() {
             self.minibuffer_snapshot = None;
@@ -1999,6 +2029,161 @@ impl Renderer {
 
     fn restore_observatory_cells(&mut self) {
         if let Some(snapshot) = self.observatory_snapshot.clone() {
+            self.restore_snapshot(snapshot);
+        }
+    }
+
+    fn draw_board(&mut self, board: semantic::Board) {
+        if board.visible == 0 {
+            self.restore_board_snapshot();
+            self.board = None;
+            return;
+        }
+        self.board = Some(board);
+        self.render_board(&board);
+    }
+
+    fn render_board(&mut self, board: &semantic::Board) {
+        self.restore_board_cells();
+        if self.width < 24 || self.height < 6 {
+            return;
+        }
+
+        let width = self.width.saturating_sub(4).clamp(24, 72);
+        let card_lines = (board.card_count as u16).saturating_mul(2).max(1);
+        let height = card_lines.saturating_add(2).clamp(4, self.height.saturating_sub(4));
+        let row = 2;
+        let col = self.width.saturating_sub(width).saturating_div(2);
+
+        if self.board_snapshot.is_none() {
+            self.board_snapshot = Some(self.capture_rect(row, col, width, height));
+        }
+
+        let filter = match board.filter_mode {
+            1 => " [filter: active]",
+            2 => " [filter: mine]",
+            _ => "",
+        };
+        let status = if board.card_count == 0 {
+            format!(" No cards{filter}")
+        } else if board.card_count == 1 {
+            format!(" 1 card  focused:{}{filter}", board.focused_card_id)
+        } else {
+            format!(
+                " {} cards  focused:{}{}",
+                board.card_count, board.focused_card_id, filter
+            )
+        };
+        self.render_popup_panel(row, col, width, height, " Board ", status);
+    }
+
+    fn restore_board_snapshot(&mut self) {
+        if let Some(snapshot) = self.board_snapshot.take() {
+            self.restore_snapshot(snapshot);
+        }
+    }
+
+    fn restore_board_cells(&mut self) {
+        if let Some(snapshot) = self.board_snapshot.clone() {
+            self.restore_snapshot(snapshot);
+        }
+    }
+
+    fn draw_agent_chat(&mut self, chat: semantic::AgentChat) {
+        if chat.visible == 0 {
+            self.restore_agent_chat_snapshot();
+            self.agent_chat = None;
+            return;
+        }
+        self.agent_chat = Some(chat);
+        self.render_agent_chat(&chat);
+    }
+
+    fn render_agent_chat(&mut self, chat: &semantic::AgentChat) {
+        self.restore_agent_chat_cells();
+        if self.width < 28 || self.height < 8 {
+            return;
+        }
+
+        let width = self.width.saturating_sub(4).clamp(28, 80);
+        let height = self.height.saturating_sub(4).clamp(6, 20);
+        let row = self.height.saturating_sub(height).saturating_div(2);
+        let col = self.width.saturating_sub(width).saturating_div(2);
+
+        if self.agent_chat_snapshot.is_none() {
+            self.agent_chat_snapshot = Some(self.capture_rect(row, col, width, height));
+        }
+
+        let flags_desc = if chat.flags & 0x01 != 0 {
+            " help"
+        } else {
+            ""
+        };
+        let status = if chat.message_count == 0 {
+            format!(" No messages{flags_desc}")
+        } else if chat.message_count == 1 {
+            format!(" 1 message{flags_desc}")
+        } else {
+            format!(" {} messages{flags_desc}", chat.message_count)
+        };
+        self.render_popup_panel(row, col, width, height, " Agent Chat ", status);
+    }
+
+    fn restore_agent_chat_snapshot(&mut self) {
+        if let Some(snapshot) = self.agent_chat_snapshot.take() {
+            self.restore_snapshot(snapshot);
+        }
+    }
+
+    fn restore_agent_chat_cells(&mut self) {
+        if let Some(snapshot) = self.agent_chat_snapshot.clone() {
+            self.restore_snapshot(snapshot);
+        }
+    }
+
+    fn draw_tool_manager(&mut self, tm: semantic::ToolManager) {
+        if tm.visible == 0 {
+            self.restore_tool_manager_snapshot();
+            self.tool_manager = None;
+            return;
+        }
+        self.tool_manager = Some(tm);
+        self.render_tool_manager(&tm);
+    }
+
+    fn render_tool_manager(&mut self, _tm: &semantic::ToolManager) {
+        self.restore_tool_manager_cells();
+        if self.width < 24 || self.height < 6 {
+            return;
+        }
+
+        let width = self.width.saturating_sub(4).clamp(24, 60);
+        let height = 6_u16.min(self.height.saturating_sub(4));
+        let row = self.height.saturating_sub(height).saturating_div(2);
+        let col = self.width.saturating_sub(width).saturating_div(2);
+
+        if self.tool_manager_snapshot.is_none() {
+            self.tool_manager_snapshot = Some(self.capture_rect(row, col, width, height));
+        }
+
+        self.render_popup_panel(
+            row,
+            col,
+            width,
+            height,
+            " Tool Manager ",
+            " Tools loaded ".to_owned(),
+        );
+    }
+
+    fn restore_tool_manager_snapshot(&mut self) {
+        if let Some(snapshot) = self.tool_manager_snapshot.take() {
+            self.restore_snapshot(snapshot);
+        }
+    }
+
+    fn restore_tool_manager_cells(&mut self) {
+        if let Some(snapshot) = self.tool_manager_snapshot.clone() {
             self.restore_snapshot(snapshot);
         }
     }
@@ -5294,4 +5479,245 @@ mod tests {
             "agent context bar should survive window redraw via retained chrome"
         );
     }
+
+    #[test]
+    fn board_renders_popup_and_restores_on_hide() {
+        let mut renderer = Renderer::new(80, 24);
+        renderer.draw_text(DrawText {
+            row: 4,
+            col: 20,
+            fg: 0x111111,
+            bg: 0x222222,
+            attrs: 0,
+            text: "under".to_owned(),
+        });
+
+        renderer.draw_board(semantic::Board {
+            visible: 1,
+            focused_card_id: 42,
+            card_count: 3,
+            filter_mode: 0,
+        });
+
+        assert!(renderer.board.is_some());
+        assert!(renderer.board_snapshot.is_some());
+        let board = renderer.board.as_ref().unwrap();
+        assert_eq!(board.card_count, 3);
+        assert_eq!(board.focused_card_id, 42);
+
+        renderer.draw_board(semantic::Board {
+            visible: 0,
+            focused_card_id: 0,
+            card_count: 0,
+            filter_mode: 0,
+        });
+
+        assert!(renderer.board.is_none());
+        assert!(renderer.board_snapshot.is_none());
+
+        let restored = &renderer.cells[renderer.index(20, 4).unwrap()];
+        assert_eq!(restored.text, "u");
+        assert_eq!(restored.style.fg, 0x111111);
+        assert_eq!(restored.style.bg, 0x222222);
+    }
+
+    #[test]
+    fn board_renders_card_count_and_filter_in_body() {
+        let mut renderer = Renderer::new(80, 24);
+
+        renderer.draw_board(semantic::Board {
+            visible: 1,
+            focused_card_id: 7,
+            card_count: 5,
+            filter_mode: 1,
+        });
+
+        assert!(renderer.board.is_some());
+        assert!(renderer.board_snapshot.is_some());
+
+        let (row, col, width, _height) = board_geometry(renderer.width, renderer.height, 5);
+        let mut title_text = String::new();
+        for c in col..col.saturating_add(width).min(renderer.width) {
+            let cell = &renderer.cells[renderer.index(c, row).unwrap()];
+            title_text.push_str(&cell.text);
+        }
+        assert!(
+            title_text.contains("Board"),
+            "board panel should show title, got: {title_text}"
+        );
+    }
+
+    #[test]
+    fn agent_chat_renders_popup_and_restores_on_hide() {
+        let mut renderer = Renderer::new(80, 24);
+        renderer.draw_text(DrawText {
+            row: 10,
+            col: 30,
+            fg: 0x111111,
+            bg: 0x222222,
+            attrs: 0,
+            text: "under".to_owned(),
+        });
+
+        renderer.draw_agent_chat(semantic::AgentChat {
+            visible: 1,
+            flags: 0x01,
+            message_count: 12,
+        });
+
+        assert!(renderer.agent_chat.is_some());
+        assert!(renderer.agent_chat_snapshot.is_some());
+        let chat = renderer.agent_chat.as_ref().unwrap();
+        assert_eq!(chat.message_count, 12);
+        assert_eq!(chat.flags, 0x01);
+
+        renderer.draw_agent_chat(semantic::AgentChat {
+            visible: 0,
+            flags: 0,
+            message_count: 0,
+        });
+
+        assert!(renderer.agent_chat.is_none());
+        assert!(renderer.agent_chat_snapshot.is_none());
+
+        let restored = &renderer.cells[renderer.index(30, 10).unwrap()];
+        assert_eq!(restored.text, "u");
+        assert_eq!(restored.style.fg, 0x111111);
+        assert_eq!(restored.style.bg, 0x222222);
+    }
+
+    #[test]
+    fn agent_chat_renders_message_count_in_body() {
+        let mut renderer = Renderer::new(80, 24);
+
+        renderer.draw_agent_chat(semantic::AgentChat {
+            visible: 1,
+            flags: 0,
+            message_count: 7,
+        });
+
+        assert!(renderer.agent_chat.is_some());
+        assert!(renderer.agent_chat_snapshot.is_some());
+
+        let width = renderer.width.saturating_sub(4).clamp(28, 80);
+        let height = renderer.height.saturating_sub(4).clamp(6, 20);
+        let row = renderer.height.saturating_sub(height).saturating_div(2);
+        let col = renderer.width.saturating_sub(width).saturating_div(2);
+
+        let mut top_text = String::new();
+        for c in col..col.saturating_add(width).min(renderer.width) {
+            let cell = &renderer.cells[renderer.index(c, row).unwrap()];
+            top_text.push_str(&cell.text);
+        }
+        assert!(
+            top_text.contains("Agent Chat"),
+            "agent chat panel should show title, got: {top_text}"
+        );
+    }
+
+    #[test]
+    fn tool_manager_renders_popup_and_restores_on_hide() {
+        let mut renderer = Renderer::new(80, 24);
+        renderer.draw_text(DrawText {
+            row: 10,
+            col: 30,
+            fg: 0x111111,
+            bg: 0x222222,
+            attrs: 0,
+            text: "under".to_owned(),
+        });
+
+        renderer.draw_tool_manager(semantic::ToolManager { visible: 1 });
+
+        assert!(renderer.tool_manager.is_some());
+        assert!(renderer.tool_manager_snapshot.is_some());
+
+        renderer.draw_tool_manager(semantic::ToolManager { visible: 0 });
+
+        assert!(renderer.tool_manager.is_none());
+        assert!(renderer.tool_manager_snapshot.is_none());
+
+        let restored = &renderer.cells[renderer.index(30, 10).unwrap()];
+        assert_eq!(restored.text, "u");
+        assert_eq!(restored.style.fg, 0x111111);
+        assert_eq!(restored.style.bg, 0x222222);
+    }
+
+    #[test]
+    fn tool_manager_renders_title_in_panel() {
+        let mut renderer = Renderer::new(80, 24);
+
+        renderer.draw_tool_manager(semantic::ToolManager { visible: 1 });
+
+        assert!(renderer.tool_manager.is_some());
+        assert!(renderer.tool_manager_snapshot.is_some());
+
+        let width = renderer.width.saturating_sub(4).clamp(24, 60);
+        let height = 6_u16.min(renderer.height.saturating_sub(4));
+        let row = renderer.height.saturating_sub(height).saturating_div(2);
+        let col = renderer.width.saturating_sub(width).saturating_div(2);
+
+        let mut top_text = String::new();
+        for c in col..col.saturating_add(width).min(renderer.width) {
+            let cell = &renderer.cells[renderer.index(c, row).unwrap()];
+            top_text.push_str(&cell.text);
+        }
+        assert!(
+            top_text.contains("Tool Manager"),
+            "tool manager panel should show title, got: {top_text}"
+        );
+    }
+
+    #[test]
+    fn board_retained_chrome_survives_window_redraw() {
+        let mut renderer = Renderer::new(80, 24);
+
+        renderer.draw_board(semantic::Board {
+            visible: 1,
+            focused_card_id: 1,
+            card_count: 2,
+            filter_mode: 0,
+        });
+
+        let (row, col, _, _) = board_geometry(renderer.width, renderer.height, 2);
+        let cell_before = renderer.cells[renderer.index(col.saturating_add(1), row).unwrap()]
+            .text
+            .clone();
+
+        renderer.draw_semantic_window(semantic::WindowContent {
+            window_id: 1,
+            text_width: 0,
+            text_height: 0,
+            origin_row: 0,
+            origin_col: 0,
+            cursor_row: 0,
+            cursor_col: 0,
+            cursor_shape: 0,
+            content_epoch: 1,
+            rows: vec![semantic::Row {
+                text: "content".to_owned(),
+                spans: vec![],
+                ..Default::default()
+            }],
+            cursorline: None,
+        });
+
+        let cell_after = renderer.cells[renderer.index(col.saturating_add(1), row).unwrap()]
+            .text
+            .clone();
+        assert_eq!(
+            cell_after, cell_before,
+            "board panel should survive window redraw via retained chrome"
+        );
+    }
+}
+
+#[cfg(test)]
+fn board_geometry(width: u16, height: u16, card_count: u16) -> (u16, u16, u16, u16) {
+    let w = width.saturating_sub(4).clamp(24, 72);
+    let card_lines = card_count.saturating_mul(2).max(1);
+    let h = card_lines.saturating_add(2).clamp(4, height.saturating_sub(4));
+    let row = 2;
+    let col = width.saturating_sub(w).saturating_div(2);
+    (row, col, w, h)
 }

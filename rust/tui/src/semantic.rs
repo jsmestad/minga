@@ -581,7 +581,7 @@ pub struct Sidebars {
     pub sidebar_count: u16,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Board {
     pub visible: u8,
     pub focused_card_id: u32,
@@ -589,7 +589,7 @@ pub struct Board {
     pub filter_mode: u8,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AgentChat {
     pub visible: u8,
     pub flags: u8,
