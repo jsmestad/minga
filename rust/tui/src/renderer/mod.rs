@@ -99,6 +99,19 @@ pub struct Renderer {
     bottom_panel_snapshot: Option<CellSnapshot>,
     change_summary_snapshot: Option<CellSnapshot>,
     git_status_snapshot: Option<CellSnapshot>,
+    agent_context: Option<semantic::AgentContext>,
+    agent_context_snapshot: Option<CellSnapshot>,
+    search_state: Option<semantic::SearchState>,
+    notifications: Option<semantic::Notifications>,
+    notifications_snapshot: Option<CellSnapshot>,
+    edit_timeline: Option<semantic::EditTimeline>,
+    workspaces: Option<semantic::Workspaces>,
+    sidebars: Option<semantic::Sidebars>,
+    extension_overlay: Option<semantic::ExtensionOverlay>,
+    extension_overlay_snapshot: Option<CellSnapshot>,
+    extension_panel: Option<semantic::ExtensionPanel>,
+    observatory: Option<semantic::Observatory>,
+    observatory_snapshot: Option<CellSnapshot>,
     theme: ThemePalette,
 }
 
@@ -142,6 +155,19 @@ impl Renderer {
             bottom_panel_snapshot: None,
             change_summary_snapshot: None,
             git_status_snapshot: None,
+            agent_context: None,
+            agent_context_snapshot: None,
+            search_state: None,
+            notifications: None,
+            notifications_snapshot: None,
+            edit_timeline: None,
+            workspaces: None,
+            sidebars: None,
+            extension_overlay: None,
+            extension_overlay_snapshot: None,
+            extension_panel: None,
+            observatory: None,
+            observatory_snapshot: None,
             theme: ThemePalette::default(),
         }
     }
@@ -232,6 +258,19 @@ impl Renderer {
         self.bottom_panel_snapshot = None;
         self.change_summary_snapshot = None;
         self.git_status_snapshot = None;
+        self.agent_context = None;
+        self.agent_context_snapshot = None;
+        self.search_state = None;
+        self.notifications = None;
+        self.notifications_snapshot = None;
+        self.edit_timeline = None;
+        self.workspaces = None;
+        self.sidebars = None;
+        self.extension_overlay = None;
+        self.extension_overlay_snapshot = None;
+        self.extension_panel = None;
+        self.observatory = None;
+        self.observatory_snapshot = None;
         self.semantic_windows.clear();
         self.semantic_cursorline_snapshots.clear();
     }
@@ -333,16 +372,18 @@ impl Renderer {
             semantic::Command::LineSpacing(_, _) => {}
             semantic::Command::CursorAnimation(_, _) => {}
             semantic::Command::ConfigState(_, _) => {}
-            semantic::Command::AgentContext(_, _) => {}
+            semantic::Command::AgentContext(ctx, _) => self.draw_agent_context(ctx),
             semantic::Command::HoverAction(_, _) => {}
-            semantic::Command::SearchState(_, _) => {}
-            semantic::Command::Workspaces(_, _) => {}
-            semantic::Command::Notifications(_, _) => {}
-            semantic::Command::EditTimeline(_, _) => {}
-            semantic::Command::ExtensionOverlay(_, _) => {}
-            semantic::Command::ExtensionPanel(_, _) => {}
-            semantic::Command::Observatory(_, _) => {}
-            semantic::Command::Sidebars(_, _) => {}
+            semantic::Command::SearchState(state, _) => self.draw_search_state(state),
+            semantic::Command::Workspaces(ws, _) => self.draw_workspaces(ws),
+            semantic::Command::Notifications(notifs, _) => self.draw_notifications(notifs),
+            semantic::Command::EditTimeline(timeline, _) => self.draw_edit_timeline(timeline),
+            semantic::Command::ExtensionOverlay(overlay, _) => {
+                self.draw_extension_overlay(overlay)
+            }
+            semantic::Command::ExtensionPanel(panel, _) => self.draw_extension_panel(panel),
+            semantic::Command::Observatory(obs, _) => self.draw_observatory(obs),
+            semantic::Command::Sidebars(sb, _) => self.draw_sidebars(sb),
             semantic::Command::Board(_, _) => {}
             semantic::Command::AgentChat(_, _) => {}
             semantic::Command::ToolManager(_, _) => {}
@@ -779,11 +820,49 @@ impl Renderer {
             join_status_segments(&status.left_segments)
         };
 
-        let right = if status.right_segments.is_empty() {
+        let mut right = if status.right_segments.is_empty() {
             fallback_status_right(&status)
         } else {
             join_status_segments(&status.right_segments)
         };
+
+        let mut indicators = Vec::new();
+        if let Some(search) = &self.search_state {
+            if search.match_count > 0 {
+                indicators.push(format!(
+                    "Match {}/{}",
+                    search.current_index.saturating_add(1),
+                    search.match_count
+                ));
+            } else {
+                indicators.push("No matches".to_owned());
+            }
+        }
+        if let Some(timeline) = &self.edit_timeline {
+            indicators.push(format!(
+                "Undo {}/{}",
+                timeline.viewing_index, timeline.entry_count
+            ));
+        }
+        if let Some(ws) = &self.workspaces {
+            if ws.workspace_count > 1 {
+                indicators.push(format!("WS {}", ws.workspace_count));
+            }
+        }
+        if let Some(sb) = &self.sidebars {
+            if sb.sidebar_count > 0 {
+                indicators.push(format!("SB {}", sb.sidebar_count));
+            }
+        }
+        if let Some(ext) = &self.extension_panel {
+            if ext.panel_count > 0 {
+                indicators.push(format!("Ext {}", ext.panel_count));
+            }
+        }
+        if !indicators.is_empty() {
+            let suffix = format!(" [{}]", indicators.join(" | "));
+            right = format!("{}{}", right, suffix);
+        }
 
         let style = self.theme.status_bar_style();
         let left_width = text_width(&left).min(self.width);
@@ -1104,6 +1183,22 @@ impl Renderer {
         if let Some(git_status) = self.git_status.clone() {
             self.git_status_snapshot = None;
             self.render_git_status(&git_status);
+        }
+        if let Some(ctx) = self.agent_context.clone() {
+            self.agent_context_snapshot = None;
+            self.render_agent_context(&ctx);
+        }
+        if let Some(notifs) = self.notifications {
+            self.notifications_snapshot = None;
+            self.render_notifications(&notifs);
+        }
+        if let Some(overlay) = self.extension_overlay {
+            self.extension_overlay_snapshot = None;
+            self.render_extension_overlay(&overlay);
+        }
+        if let Some(obs) = self.observatory.clone() {
+            self.observatory_snapshot = None;
+            self.render_observatory(&obs);
         }
 
         if let Some(minibuffer) = self.minibuffer.clone() {
@@ -1675,6 +1770,235 @@ impl Renderer {
 
     fn restore_git_status_cells(&mut self) {
         if let Some(snapshot) = self.git_status_snapshot.clone() {
+            self.restore_snapshot(snapshot);
+        }
+    }
+
+    fn draw_agent_context(&mut self, ctx: semantic::AgentContext) {
+        if ctx.visible == 0 {
+            self.restore_agent_context_snapshot();
+            self.agent_context = None;
+            return;
+        }
+        self.agent_context = Some(ctx.clone());
+        self.render_agent_context(&ctx);
+    }
+
+    fn render_agent_context(&mut self, ctx: &semantic::AgentContext) {
+        self.restore_agent_context_cells();
+        if self.height < 3 || self.width < 20 {
+            return;
+        }
+
+        let row = self.height.saturating_sub(2);
+        let status_label = match ctx.status {
+            0 => "idle",
+            1 => "working",
+            2 => "iterating",
+            3 => "needs_you",
+            4 => "done",
+            5 => "errored",
+            _ => "unknown",
+        };
+        let task_display = if ctx.task.is_empty() {
+            String::new()
+        } else {
+            format!(" {}", ctx.task)
+        };
+        let elapsed = if ctx.timestamp > 0 {
+            let now_secs = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let delta = now_secs.saturating_sub(ctx.timestamp);
+            let mins = delta / 60;
+            let secs = delta % 60;
+            format!(" {}m{}s", mins, secs)
+        } else {
+            String::new()
+        };
+        let text = format!(" Agent: [{}]{}{} ", status_label, task_display, elapsed);
+        let style = self.theme.status_bar_style();
+
+        if self.agent_context_snapshot.is_none() {
+            self.agent_context_snapshot = Some(self.capture_rect(row, 0, self.width, 1));
+        }
+        self.write_run(row, 0, &pad_to_width(&text, self.width), style);
+    }
+
+    fn restore_agent_context_snapshot(&mut self) {
+        if let Some(snapshot) = self.agent_context_snapshot.take() {
+            self.restore_snapshot(snapshot);
+        }
+    }
+
+    fn restore_agent_context_cells(&mut self) {
+        if let Some(snapshot) = self.agent_context_snapshot.clone() {
+            self.restore_snapshot(snapshot);
+        }
+    }
+
+    fn draw_search_state(&mut self, state: semantic::SearchState) {
+        if state.active == 0 {
+            self.search_state = None;
+            return;
+        }
+        self.search_state = Some(state);
+    }
+
+    fn draw_notifications(&mut self, notifs: semantic::Notifications) {
+        if notifs.visible == 0 || notifs.notification_count == 0 {
+            self.restore_notifications_snapshot();
+            self.notifications = None;
+            return;
+        }
+        self.notifications = Some(notifs);
+        self.render_notifications(&notifs);
+    }
+
+    fn render_notifications(&mut self, notifs: &semantic::Notifications) {
+        self.restore_notifications_cells();
+        if self.width < 20 || self.height < 3 {
+            return;
+        }
+
+        let text = if notifs.notification_count == 1 {
+            " 1 notification ".to_owned()
+        } else {
+            format!(" {} notifications ", notifs.notification_count)
+        };
+        let width = text_width(&text).saturating_add(4).min(self.width);
+        let col = self.width.saturating_sub(width);
+        let row = 1_u16;
+        let height = 3_u16.min(self.height.saturating_sub(row));
+
+        if self.notifications_snapshot.is_none() {
+            self.notifications_snapshot = Some(self.capture_rect(row, col, width, height));
+        }
+        self.render_popup_panel(row, col, width, height, " Notifications ", text);
+    }
+
+    fn restore_notifications_snapshot(&mut self) {
+        if let Some(snapshot) = self.notifications_snapshot.take() {
+            self.restore_snapshot(snapshot);
+        }
+    }
+
+    fn restore_notifications_cells(&mut self) {
+        if let Some(snapshot) = self.notifications_snapshot.clone() {
+            self.restore_snapshot(snapshot);
+        }
+    }
+
+    fn draw_edit_timeline(&mut self, timeline: semantic::EditTimeline) {
+        if timeline.visible == 0 {
+            self.edit_timeline = None;
+            return;
+        }
+        self.edit_timeline = Some(timeline);
+    }
+
+    fn draw_workspaces(&mut self, ws: semantic::Workspaces) {
+        if ws.visible == 0 {
+            self.workspaces = None;
+            return;
+        }
+        self.workspaces = Some(ws);
+    }
+
+    fn draw_sidebars(&mut self, sb: semantic::Sidebars) {
+        if sb.visible == 0 {
+            self.sidebars = None;
+            return;
+        }
+        self.sidebars = Some(sb);
+    }
+
+    fn draw_extension_overlay(&mut self, overlay: semantic::ExtensionOverlay) {
+        if overlay.entry_count == 0 {
+            self.restore_extension_overlay_snapshot();
+            self.extension_overlay = None;
+            return;
+        }
+        self.extension_overlay = Some(overlay);
+        self.render_extension_overlay(&overlay);
+    }
+
+    fn render_extension_overlay(&mut self, overlay: &semantic::ExtensionOverlay) {
+        self.restore_extension_overlay_cells();
+        if self.width < 20 || self.height < 4 {
+            return;
+        }
+
+        let text = format!(" {} extension entries ", overlay.entry_count);
+        let width = text_width(&text).saturating_add(4).min(self.width);
+        let col = self.width.saturating_sub(width).saturating_div(2);
+        let row = self.height.saturating_div(3);
+        let height = 3_u16.min(self.height.saturating_sub(row));
+
+        if self.extension_overlay_snapshot.is_none() {
+            self.extension_overlay_snapshot = Some(self.capture_rect(row, col, width, height));
+        }
+        self.render_popup_panel(row, col, width, height, " Extension ", text);
+    }
+
+    fn restore_extension_overlay_snapshot(&mut self) {
+        if let Some(snapshot) = self.extension_overlay_snapshot.take() {
+            self.restore_snapshot(snapshot);
+        }
+    }
+
+    fn restore_extension_overlay_cells(&mut self) {
+        if let Some(snapshot) = self.extension_overlay_snapshot.clone() {
+            self.restore_snapshot(snapshot);
+        }
+    }
+
+    fn draw_extension_panel(&mut self, panel: semantic::ExtensionPanel) {
+        if panel.panel_count == 0 {
+            self.extension_panel = None;
+            return;
+        }
+        self.extension_panel = Some(panel);
+    }
+
+    fn draw_observatory(&mut self, obs: semantic::Observatory) {
+        if obs.payload.is_empty() {
+            self.restore_observatory_snapshot();
+            self.observatory = None;
+            return;
+        }
+        self.observatory = Some(obs.clone());
+        self.render_observatory(&obs);
+    }
+
+    fn render_observatory(&mut self, obs: &semantic::Observatory) {
+        self.restore_observatory_cells();
+        if self.width < 30 || self.height < 8 {
+            return;
+        }
+
+        let width = self.width.saturating_sub(4).clamp(30, 60);
+        let height = 6_u16.min(self.height.saturating_sub(4));
+        let row = 2;
+        let col = self.width.saturating_sub(width).saturating_div(2);
+
+        if self.observatory_snapshot.is_none() {
+            self.observatory_snapshot = Some(self.capture_rect(row, col, width, height));
+        }
+
+        let text = format!(" Process tree ({} bytes payload) ", obs.payload.len());
+        self.render_popup_panel(row, col, width, height, " Observatory ", text);
+    }
+
+    fn restore_observatory_snapshot(&mut self) {
+        if let Some(snapshot) = self.observatory_snapshot.take() {
+            self.restore_snapshot(snapshot);
+        }
+    }
+
+    fn restore_observatory_cells(&mut self) {
+        if let Some(snapshot) = self.observatory_snapshot.clone() {
             self.restore_snapshot(snapshot);
         }
     }
@@ -4678,5 +5002,296 @@ mod tests {
         assert_eq!(renderer.cells[renderer.index(0, 0).unwrap()].text, "界");
         assert_eq!(renderer.cells[renderer.index(1, 0).unwrap()].text, "");
         assert_eq!(renderer.cells[renderer.index(2, 0).unwrap()].text, "x");
+    }
+
+    #[test]
+    fn agent_context_renders_status_bar_and_restores_on_hide() {
+        let mut renderer = Renderer::new(80, 24);
+
+        renderer.draw_agent_context(semantic::AgentContext {
+            visible: 1,
+            task: "Fix bug".to_owned(),
+            timestamp: 0,
+            status: 1,
+            can_approve: 0,
+        });
+
+        let row = renderer.height.saturating_sub(2);
+        assert_eq!(
+            renderer.cells[renderer.index(1, row).unwrap()].text,
+            "A"
+        );
+        assert_eq!(
+            renderer.cells[renderer.index(2, row).unwrap()].text,
+            "g"
+        );
+        assert!(renderer.agent_context.is_some());
+        assert!(renderer.agent_context_snapshot.is_some());
+
+        renderer.draw_agent_context(semantic::AgentContext {
+            visible: 0,
+            task: String::new(),
+            timestamp: 0,
+            status: 0,
+            can_approve: 0,
+        });
+
+        assert!(renderer.agent_context.is_none());
+        assert!(renderer.agent_context_snapshot.is_none());
+    }
+
+    #[test]
+    fn search_state_active_stores_state_and_inactive_clears() {
+        let mut renderer = Renderer::new(80, 24);
+
+        renderer.draw_search_state(semantic::SearchState {
+            active: 1,
+            match_count: 42,
+            current_index: 2,
+            flags: 0,
+        });
+
+        assert!(renderer.search_state.is_some());
+        let state = renderer.search_state.as_ref().unwrap();
+        assert_eq!(state.match_count, 42);
+        assert_eq!(state.current_index, 2);
+
+        renderer.draw_search_state(semantic::SearchState {
+            active: 0,
+            match_count: 0,
+            current_index: 0,
+            flags: 0,
+        });
+
+        assert!(renderer.search_state.is_none());
+    }
+
+    #[test]
+    fn notifications_renders_popup_and_restores_on_hide() {
+        let mut renderer = Renderer::new(70, 20);
+
+        renderer.draw_notifications(semantic::Notifications {
+            visible: 1,
+            notification_count: 3,
+        });
+
+        assert!(renderer.notifications.is_some());
+        assert!(renderer.notifications_snapshot.is_some());
+
+        renderer.draw_notifications(semantic::Notifications {
+            visible: 0,
+            notification_count: 0,
+        });
+
+        assert!(renderer.notifications.is_none());
+        assert!(renderer.notifications_snapshot.is_none());
+    }
+
+    #[test]
+    fn edit_timeline_stores_state_and_clears_on_hide() {
+        let mut renderer = Renderer::new(80, 24);
+
+        renderer.draw_edit_timeline(semantic::EditTimeline {
+            visible: 1,
+            viewing_index: 3,
+            entry_count: 10,
+        });
+
+        assert!(renderer.edit_timeline.is_some());
+        let timeline = renderer.edit_timeline.as_ref().unwrap();
+        assert_eq!(timeline.viewing_index, 3);
+        assert_eq!(timeline.entry_count, 10);
+
+        renderer.draw_edit_timeline(semantic::EditTimeline {
+            visible: 0,
+            viewing_index: 0,
+            entry_count: 0,
+        });
+
+        assert!(renderer.edit_timeline.is_none());
+    }
+
+    #[test]
+    fn workspaces_stores_state_and_clears_on_hide() {
+        let mut renderer = Renderer::new(80, 24);
+
+        renderer.draw_workspaces(semantic::Workspaces {
+            visible: 1,
+            active_workspace_id: 2,
+            mode: 0,
+            flags: 0,
+            workspace_count: 3,
+        });
+
+        assert!(renderer.workspaces.is_some());
+        assert_eq!(renderer.workspaces.as_ref().unwrap().workspace_count, 3);
+
+        renderer.draw_workspaces(semantic::Workspaces {
+            visible: 0,
+            active_workspace_id: 0,
+            mode: 0,
+            flags: 0,
+            workspace_count: 0,
+        });
+
+        assert!(renderer.workspaces.is_none());
+    }
+
+    #[test]
+    fn sidebars_stores_state_and_clears_on_hide() {
+        let mut renderer = Renderer::new(80, 24);
+
+        renderer.draw_sidebars(semantic::Sidebars {
+            visible: 1,
+            sidebar_count: 2,
+        });
+
+        assert!(renderer.sidebars.is_some());
+        assert_eq!(renderer.sidebars.as_ref().unwrap().sidebar_count, 2);
+
+        renderer.draw_sidebars(semantic::Sidebars {
+            visible: 0,
+            sidebar_count: 0,
+        });
+
+        assert!(renderer.sidebars.is_none());
+    }
+
+    #[test]
+    fn extension_overlay_renders_popup_and_restores_on_clear() {
+        let mut renderer = Renderer::new(70, 20);
+
+        renderer.draw_extension_overlay(semantic::ExtensionOverlay { entry_count: 5 });
+
+        assert!(renderer.extension_overlay.is_some());
+        assert!(renderer.extension_overlay_snapshot.is_some());
+
+        renderer.draw_extension_overlay(semantic::ExtensionOverlay { entry_count: 0 });
+
+        assert!(renderer.extension_overlay.is_none());
+        assert!(renderer.extension_overlay_snapshot.is_none());
+    }
+
+    #[test]
+    fn extension_panel_stores_state_and_clears_on_zero() {
+        let mut renderer = Renderer::new(80, 24);
+
+        renderer.draw_extension_panel(semantic::ExtensionPanel { panel_count: 2 });
+
+        assert!(renderer.extension_panel.is_some());
+        assert_eq!(renderer.extension_panel.as_ref().unwrap().panel_count, 2);
+
+        renderer.draw_extension_panel(semantic::ExtensionPanel { panel_count: 0 });
+
+        assert!(renderer.extension_panel.is_none());
+    }
+
+    #[test]
+    fn observatory_renders_popup_and_restores_on_clear() {
+        let mut renderer = Renderer::new(70, 20);
+
+        renderer.draw_observatory(semantic::Observatory {
+            payload: vec![1, 2, 3, 4, 5],
+        });
+
+        assert!(renderer.observatory.is_some());
+        assert!(renderer.observatory_snapshot.is_some());
+
+        renderer.draw_observatory(semantic::Observatory {
+            payload: vec![],
+        });
+
+        assert!(renderer.observatory.is_none());
+        assert!(renderer.observatory_snapshot.is_none());
+    }
+
+    #[test]
+    fn status_bar_includes_search_and_timeline_indicators() {
+        let mut renderer = Renderer::new(120, 24);
+
+        renderer.draw_search_state(semantic::SearchState {
+            active: 1,
+            match_count: 42,
+            current_index: 2,
+            flags: 0,
+        });
+        renderer.draw_edit_timeline(semantic::EditTimeline {
+            visible: 1,
+            viewing_index: 3,
+            entry_count: 10,
+        });
+
+        renderer.draw_status_bar(semantic::StatusBar {
+            mode: 1,
+            flags: 0,
+            line: 1,
+            col: 1,
+            line_count: 100,
+            filename: "test.rs".to_owned(),
+            filetype: "rust".to_owned(),
+            branch: "main".to_owned(),
+            message: String::new(),
+            left_segments: vec![],
+            right_segments: vec![],
+        });
+
+        let row = renderer.height - 1;
+        let mut full_text = String::new();
+        for col in 0..renderer.width {
+            let cell = &renderer.cells[renderer.index(col, row).unwrap()];
+            full_text.push_str(&cell.text);
+        }
+
+        assert!(
+            full_text.contains("Match 3/42"),
+            "status bar should contain search indicator, got: {}",
+            full_text
+        );
+        assert!(
+            full_text.contains("Undo 3/10"),
+            "status bar should contain timeline indicator, got: {}",
+            full_text
+        );
+    }
+
+    #[test]
+    fn agent_context_retained_chrome_survives_window_redraw() {
+        let mut renderer = Renderer::new(80, 24);
+
+        renderer.draw_agent_context(semantic::AgentContext {
+            visible: 1,
+            task: "Build".to_owned(),
+            timestamp: 0,
+            status: 1,
+            can_approve: 0,
+        });
+
+        let row = renderer.height.saturating_sub(2);
+        let cell_before = renderer.cells[renderer.index(1, row).unwrap()].text.clone();
+        assert_eq!(cell_before, "A");
+
+        renderer.draw_semantic_window(semantic::WindowContent {
+            window_id: 1,
+            text_width: 0,
+            text_height: 0,
+            origin_row: 0,
+            origin_col: 0,
+            cursor_row: 0,
+            cursor_col: 0,
+            cursor_shape: 0,
+            content_epoch: 1,
+            rows: vec![semantic::Row {
+                text: "content".to_owned(),
+                spans: vec![],
+                ..Default::default()
+            }],
+            cursorline: None,
+        });
+
+        let cell_after = renderer.cells[renderer.index(1, row).unwrap()].text.clone();
+        assert_eq!(
+            cell_after, "A",
+            "agent context bar should survive window redraw via retained chrome"
+        );
     }
 }
