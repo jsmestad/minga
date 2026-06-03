@@ -355,7 +355,7 @@ func TestSemanticWindowRendersGutterCursorlineTildesAndModeline(t *testing.T) {
 }
 
 func TestAgentChatPanelRendersStructuredTranscript(t *testing.T) {
-	model := New(120, 24, nil)
+	model := New(120, 34, nil)
 	chat := protocol.AgentChat{
 		Visible:       true,
 		Status:        2,
@@ -376,6 +376,21 @@ func TestAgentChatPanelRendersStructuredTranscript(t *testing.T) {
 		if !strings.Contains(view, want) {
 			t.Fatalf("agent chat panel missing %q in %q", want, view)
 		}
+	}
+}
+
+func TestAgentAnimationCueChangesAcrossFrames(t *testing.T) {
+	model := New(80, 24, nil)
+	model.agentAnimationFrame = 0
+	first := ansi.Strip(model.renderAgentStatusBadge(1))
+	model.agentAnimationFrame = 1
+	second := ansi.Strip(model.renderAgentStatusBadge(1))
+	if first == second {
+		t.Fatalf("thinking status badge should animate across frames: %q", first)
+	}
+	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiAgentChat: {AgentChat: protocol.AgentChat{Visible: true, Status: 1}}}
+	if !model.agentAnimating() {
+		t.Fatalf("visible thinking agent should animate")
 	}
 }
 

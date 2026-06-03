@@ -271,11 +271,17 @@ func (m Model) renderAgentStatusBadge(status byte) string {
 	style := lipgloss.NewStyle().Bold(true).Foreground(p.SelectionText()).Background(p.Selection()).Padding(0, 1)
 	switch status {
 	case 1, 2:
+		label = m.agentSpinner() + " " + label
 		style = style.Background(p.Accent())
 	case 3:
 		style = style.Background(p.Diagnostic(0))
 	}
 	return style.Render(label)
+}
+
+func (m Model) agentSpinner() string {
+	frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+	return frames[int(m.agentAnimationFrame)%len(frames)]
 }
 
 func agentChatStatusLabel(status byte) string {
@@ -322,6 +328,9 @@ func (m Model) renderAgentTranscriptTail(chat protocol.AgentChat, budget int, wi
 	lines := make([]string, 0, budget)
 	for i := len(blocks) - 1; i >= 0; i-- {
 		lines = append(lines, blocks[i]...)
+		if i > 0 && len(lines) < budget {
+			lines = append(lines, m.renderAgentBlankLine(width))
+		}
 	}
 	if len(lines) > budget {
 		return lines[:budget]
@@ -403,7 +412,11 @@ func (m Model) renderAgentThinkingMessage(msg protocol.AgentChatMessage, width i
 	if text == "" {
 		text = "working through the request"
 	}
-	return m.renderAgentCard(agentCardSpec{Label: label, Meta: meta, Rail: "⋯", RailColor: p.Muted(), Lines: compactTextLines(text, max(width-16, 8), 2), Width: width, Surface: p.SurfaceAlt()})
+	rail := "⋯"
+	if !msg.Collapsed {
+		rail = m.agentSpinner()
+	}
+	return m.renderAgentCard(agentCardSpec{Label: label, Meta: meta, Rail: rail, RailColor: p.Muted(), Lines: compactTextLines(text, max(width-16, 8), 2), Width: width, Surface: p.SurfaceAlt()})
 }
 
 func (m Model) renderAgentToolMessage(msg protocol.AgentChatMessage, width int) []string {
@@ -474,7 +487,7 @@ func (m Model) agentToolStatus(msg protocol.AgentChatMessage) (string, color.Col
 	if msg.Status == 1 {
 		return "✓", p.Diagnostic(3)
 	}
-	return "●", p.Warning()
+	return m.agentSpinner(), p.Warning()
 }
 
 func agentToolMeta(msg protocol.AgentChatMessage) string {
@@ -540,7 +553,13 @@ func (m Model) renderAgentUsageMessage(msg protocol.AgentChatMessage, width int)
 func (m Model) renderAgentComposer(chat protocol.AgentChat, width int) []string {
 	p := m.palette()
 	innerWidth := max(width-2, 1)
-	border := lipgloss.NewStyle().Foreground(p.Accent()).Background(m.editorBackground())
+	borderColor := p.Accent()
+	if chat.Status == 1 || chat.Status == 2 {
+		if m.agentAnimationFrame%2 == 1 {
+			borderColor = p.Warning()
+		}
+	}
+	border := lipgloss.NewStyle().Foreground(borderColor).Background(m.editorBackground())
 	lineStyle := lipgloss.NewStyle().Foreground(p.Text()).Background(p.Base())
 	topTitle := border.Render("╭─ Composer ")
 	topRule := border.Render(strings.Repeat("─", max(width-lipgloss.Width(topTitle)-1, 0)) + "╮")
