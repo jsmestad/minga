@@ -168,7 +168,9 @@ func (m Model) renderAgentLandingState(width int) []string {
 
 func (m Model) renderAgentSuggestionPill(label string) string {
 	p := m.palette()
-	return lipgloss.NewStyle().Foreground(p.Text()).Background(p.SurfaceAlt()).Padding(0, 1).Render(label)
+	marker := lipgloss.NewStyle().Foreground(p.Accent()).Background(m.editorBackground()).Bold(true).Render("›")
+	text := lipgloss.NewStyle().Foreground(p.Text()).Background(m.editorBackground()).Render(label)
+	return marker + " " + text
 }
 
 func (m Model) renderAgentHeader(chat protocol.AgentChat, width int) string {
