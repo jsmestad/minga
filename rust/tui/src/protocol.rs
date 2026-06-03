@@ -735,7 +735,9 @@ mod generated_decode_tests {
     //! Round-trip coverage for the schema-generated decoders. The byte fixtures
     //! here are exactly what the Elixir encoders produce (the matching
     //! assertions live in protocol_schema_validation_test.exs), so together they
-    //! pin encoder and generated decoder to the same wire format.
+    //! pin encoder and generated decoder to the same wire format. Keep these in
+    //! sync with the Go twins in
+    //! go/tui/internal/protocol/generated_decode_test.go.
     use super::semantic_decode::*;
 
     #[test]
@@ -831,11 +833,39 @@ mod generated_decode_tests {
     }
 
     #[test]
-    fn truncated_picker_item_is_rejected_not_panicking() {
-        // count claims 2 match positions but only 1 u16 follows.
+    fn truncated_picker_item_elements_rejected() {
+        // count claims 2 match positions but only 1 u16 follows (count*stride guard).
         let bytes = [
             0xAA, 0xBB, 0xCC, 0, 0, 1, b'x', 0, 0, 0, 0, 2, 0, 1,
         ];
         assert!(decode_picker_item(&bytes, 0).is_err());
+    }
+
+    #[test]
+    fn truncated_picker_item_count_byte_rejected() {
+        // Buffer ends exactly before the match_positions count byte: the
+        // count-prefix require_len (a distinct bounds path) must reject it.
+        let bytes = [0xAA, 0xBB, 0xCC, 0, 0, 1, b'x', 0, 0, 0, 0];
+        assert!(decode_picker_item(&bytes, 0).is_err());
+    }
+
+    #[test]
+    fn decodes_picker_item_empty_match_positions() {
+        // match_positions present but count==0.
+        let bytes = [0, 0, 0, 0, 0, 1, b'x', 0, 0, 0, 0, 0];
+        let (item, consumed) = decode_picker_item(&bytes, 0).unwrap();
+        assert_eq!(consumed, bytes.len());
+        assert_eq!(item.label, "x");
+        assert!(item.match_positions.is_empty());
+    }
+
+    #[test]
+    fn decodes_action_menu_empty_actions() {
+        // visible with zero actions: the Vec<String> tail is present but empty.
+        let (m, consumed) = decode_gui_picker_action_menu(&[1, 5, 0], 0).unwrap();
+        assert_eq!(consumed, 3);
+        assert_eq!(m.visible, 1);
+        assert_eq!(m.selected_index, 5);
+        assert!(m.actions.is_empty());
     }
 }

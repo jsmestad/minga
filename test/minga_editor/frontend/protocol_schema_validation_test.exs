@@ -6,6 +6,12 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
   This is the safety net that catches encoder/schema drift in CI. If someone
   adds a field to an encoder without updating the schema (or vice versa),
   these tests fail.
+
+  The exact byte layouts asserted here for picker/completion are decoded back by
+  the generated Rust/Go decoders in `rust/tui/src/protocol.rs` and
+  `go/tui/internal/protocol/generated_decode_test.go`. Those three fixtures must
+  stay in lockstep: a wire-format change has to be reflected in all three, or one
+  side silently tests a stale format.
   """
 
   use ExUnit.Case, async: true

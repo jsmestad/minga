@@ -548,7 +548,7 @@ pub fn decode_gui_gutter_entries(bytes: &[u8], offset: usize) -> Result<(Vec<Gut
     require_len(bytes, pos + 2, "entries count")?;
     let count = read_u16(bytes, pos) as usize;
     pos += 2;
-    let mut items = Vec::with_capacity(count.min(1024));
+    let mut items = Vec::with_capacity(count.min(bytes.len() - pos));
     for _ in 0..count {
         let (item, consumed) = decode_gutter_entry(bytes, pos)?;
         pos += consumed;
@@ -604,7 +604,7 @@ pub fn decode_gui_picker_items(bytes: &[u8], offset: usize) -> Result<(Vec<Picke
     require_len(bytes, pos + 2, "items count")?;
     let count = read_u16(bytes, pos) as usize;
     pos += 2;
-    let mut items = Vec::with_capacity(count.min(1024));
+    let mut items = Vec::with_capacity(count.min(bytes.len() - pos));
     for _ in 0..count {
         let (item, consumed) = decode_picker_item(bytes, pos)?;
         pos += consumed;
@@ -627,7 +627,7 @@ pub fn decode_gui_picker_action_menu(bytes: &[u8], offset: usize) -> Result<(Gui
         require_len(bytes, pos + 1, "actions count")?;
         let actions_count = bytes[pos] as usize;
         pos += 1;
-        let mut actions_value = Vec::with_capacity(actions_count.min(1024));
+        let mut actions_value = Vec::with_capacity(actions_count.min(bytes.len() - pos));
         for _ in 0..actions_count {
             actions_value.push(read_string16(bytes, &mut pos)?);
         }
@@ -833,7 +833,7 @@ pub fn decode_gui_status_bar_modeline(bytes: &[u8], offset: usize) -> Result<(Gu
     require_len(bytes, pos + 2, "left_segments count")?;
     let left_segments_count = read_u16(bytes, pos) as usize;
     pos += 2;
-    let mut left_segments = Vec::with_capacity(left_segments_count.min(1024));
+    let mut left_segments = Vec::with_capacity(left_segments_count.min(bytes.len() - pos));
     for _ in 0..left_segments_count {
         let (item, consumed) = decode_modeline_segment(bytes, pos)?;
         pos += consumed;
@@ -842,7 +842,7 @@ pub fn decode_gui_status_bar_modeline(bytes: &[u8], offset: usize) -> Result<(Gu
     require_len(bytes, pos + 2, "right_segments count")?;
     let right_segments_count = read_u16(bytes, pos) as usize;
     pos += 2;
-    let mut right_segments = Vec::with_capacity(right_segments_count.min(1024));
+    let mut right_segments = Vec::with_capacity(right_segments_count.min(bytes.len() - pos));
     for _ in 0..right_segments_count {
         let (item, consumed) = decode_modeline_segment(bytes, pos)?;
         pos += consumed;
@@ -952,7 +952,7 @@ pub fn decode_gui_window_content_rows(bytes: &[u8], offset: usize) -> Result<(Ve
     require_len(bytes, pos + 2, "rows count")?;
     let count = read_u16(bytes, pos) as usize;
     pos += 2;
-    let mut items = Vec::with_capacity(count.min(1024));
+    let mut items = Vec::with_capacity(count.min(bytes.len() - pos));
     for _ in 0..count {
         let (item, consumed) = decode_row(bytes, pos)?;
         pos += consumed;
@@ -1043,7 +1043,7 @@ pub fn decode_gui_window_content_annotations(bytes: &[u8], offset: usize) -> Res
     require_len(bytes, pos + 2, "annotations count")?;
     let count = read_u16(bytes, pos) as usize;
     pos += 2;
-    let mut items = Vec::with_capacity(count.min(1024));
+    let mut items = Vec::with_capacity(count.min(bytes.len() - pos));
     for _ in 0..count {
         let (item, consumed) = decode_annotation(bytes, pos)?;
         pos += consumed;
@@ -1179,7 +1179,7 @@ pub fn decode_gui_window_rows_delta_rows(bytes: &[u8], offset: usize) -> Result<
     require_len(bytes, pos + 2, "rows count")?;
     let count = read_u16(bytes, pos) as usize;
     pos += 2;
-    let mut items = Vec::with_capacity(count.min(1024));
+    let mut items = Vec::with_capacity(count.min(bytes.len() - pos));
     for _ in 0..count {
         let (item, consumed) = decode_row(bytes, pos)?;
         pos += consumed;
@@ -1229,7 +1229,7 @@ pub fn decode_gui_window_viewport_delta_rows(bytes: &[u8], offset: usize) -> Res
     require_len(bytes, pos + 2, "rows count")?;
     let count = read_u16(bytes, pos) as usize;
     pos += 2;
-    let mut items = Vec::with_capacity(count.min(1024));
+    let mut items = Vec::with_capacity(count.min(bytes.len() - pos));
     for _ in 0..count {
         let (item, consumed) = decode_row(bytes, pos)?;
         pos += consumed;
@@ -1302,7 +1302,7 @@ pub fn decode_gui_completion_fields(bytes: &[u8], offset: usize) -> Result<(GuiC
         require_len(bytes, pos + 2, "items count")?;
         let items_count = read_u16(bytes, pos) as usize;
         pos += 2;
-        let mut items_value = Vec::with_capacity(items_count.min(1024));
+        let mut items_value = Vec::with_capacity(items_count.min(bytes.len() - pos));
         for _ in 0..items_count {
             let (item, consumed) = decode_completion_item(bytes, pos)?;
             pos += consumed;

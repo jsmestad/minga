@@ -94,10 +94,15 @@ defmodule Minga.Mix.ProtocolGenerator do
   end
 
   # A conditional_tail guard is decoded by substituting base-field names with
-  # their decoded locals (rust_guard_expression / go_guard_expression). An
-  # identifier that is not a base field would be emitted verbatim and fail to
-  # compile (or, worse, resolve to an unrelated tail local), so reject it here
-  # with a clear message instead.
+  # their decoded locals (rust_guard_expression / go_guard_expression). It must
+  # render identically in Rust, Go, and Elixir after substitution, so the legal
+  # grammar is the cross-language-common subset: base-field identifiers, integer
+  # literals, the boolean literals `true`/`false`, comparison operators
+  # (== != < > <= >=), and the connectives && / ||. Any other identifier (named
+  # constant, helper call, a language keyword like Go's `in`) is emitted verbatim
+  # and would not compile, so it is rejected here with a clear message instead.
+  @guard_literals ~w(true false)
+
   @spec validate_conditional_tail_guards!(schema()) :: :ok
   defp validate_conditional_tail_guards!(schema) do
     entries =
@@ -114,7 +119,7 @@ defmodule Minga.Mix.ProtocolGenerator do
 
         (conditional_tail_guard(entry) || "")
         |> guard_identifiers()
-        |> Enum.reject(&MapSet.member?(base, &1))
+        |> Enum.reject(&(MapSet.member?(base, &1) or &1 in @guard_literals))
         |> Enum.map(fn id -> "#{label} -> #{id}" end)
       end)
 
@@ -130,6 +135,7 @@ defmodule Minga.Mix.ProtocolGenerator do
     end
   end
 
+  @spec guard_identifiers(String.t()) :: [String.t()]
   @spec guard_identifiers(String.t()) :: [String.t()]
   defp guard_identifiers(guard) do
     ~r/[A-Za-z_][A-Za-z0-9_]*/
@@ -1408,6 +1414,40 @@ defmodule Minga.Mix.ProtocolGenerator do
     "rgb" => 3
   }
 
+  # Single source of truth for how each primitive wire type is read, shared by
+  # the scalar-field, conditional-tail, and counted_array-element decoders in
+  # both languages. Byte sizes come from @primitive_sizes so a width lives in
+  # exactly one place.
+  @rust_primitive_reads %{
+    "u8" => "bytes[pos]",
+    "u16" => "read_u16(bytes, pos)",
+    "u24" => "read_u24(bytes, pos)",
+    "rgb" => "read_u24(bytes, pos)",
+    "u32" => "read_u32(bytes, pos)",
+    "u64" => "read_u64(bytes, pos)"
+  }
+
+  @go_primitive_reads %{
+    "u8" => "data[pos]",
+    "u16" => "decodeU16(data, pos)",
+    "u24" => "decodeU24(data, pos)",
+    "rgb" => "decodeU24(data, pos)",
+    "u32" => "decodeU32(data, pos)",
+    "u64" => "decodeU64(data, pos)"
+  }
+
+  @rust_string_readers %{
+    "string8" => "read_string8",
+    "string16" => "read_string16",
+    "string32" => "read_string32"
+  }
+
+  @go_string_decoders %{
+    "string8" => "decodeString8",
+    "string16" => "decodeString16",
+    "string32" => "decodeString32"
+  }
+
   @spec fixed_type_size(String.t(), %{String.t() => structure()}) :: non_neg_integer() | nil
   defp fixed_type_size(type_name, _smap) when is_map_key(@primitive_sizes, type_name) do
     Map.fetch!(@primitive_sizes, type_name)
@@ -1527,77 +1567,25 @@ defmodule Minga.Mix.ProtocolGenerator do
     end
   end
 
+  # Go advances the cursor with `pos++` for a single byte and `pos += N`
+  # otherwise; preserved so single-byte reads regenerate byte-for-byte.
+  @spec go_pos_advance(non_neg_integer(), String.t()) :: String.t()
+  defp go_pos_advance(1, indent), do: "#{indent}pos++\n"
+  defp go_pos_advance(size, indent), do: "#{indent}pos += #{size}\n"
+
   @spec go_decode_field_assignment_statement(map(), %{String.t() => structure()}, String.t()) ::
           iodata()
-  defp go_decode_field_assignment_statement(%{"name" => name, "type" => "u8"}, _smap, zero) do
+  defp go_decode_field_assignment_statement(%{"name" => name, "type" => type}, _smap, zero)
+       when is_map_key(@go_primitive_reads, type) do
     local = go_local_name(name)
+    size = @primitive_sizes[type]
 
     [
-      "\t\tif err := decodeRequireLen(data, pos+1, \"#{name}\"); err != nil {\n",
+      "\t\tif err := decodeRequireLen(data, pos+#{size}, \"#{name}\"); err != nil {\n",
       "\t\t\treturn #{zero}, offset, err\n",
       "\t\t}\n",
-      "\t\t#{local} = data[pos]\n",
-      "\t\tpos++\n"
-    ]
-  end
-
-  defp go_decode_field_assignment_statement(%{"name" => name, "type" => "u16"}, _smap, zero) do
-    local = go_local_name(name)
-
-    [
-      "\t\tif err := decodeRequireLen(data, pos+2, \"#{name}\"); err != nil {\n",
-      "\t\t\treturn #{zero}, offset, err\n",
-      "\t\t}\n",
-      "\t\t#{local} = decodeU16(data, pos)\n",
-      "\t\tpos += 2\n"
-    ]
-  end
-
-  defp go_decode_field_assignment_statement(%{"name" => name, "type" => "u24"}, _smap, zero) do
-    local = go_local_name(name)
-
-    [
-      "\t\tif err := decodeRequireLen(data, pos+3, \"#{name}\"); err != nil {\n",
-      "\t\t\treturn #{zero}, offset, err\n",
-      "\t\t}\n",
-      "\t\t#{local} = decodeU24(data, pos)\n",
-      "\t\tpos += 3\n"
-    ]
-  end
-
-  defp go_decode_field_assignment_statement(%{"name" => name, "type" => "u32"}, _smap, zero) do
-    local = go_local_name(name)
-
-    [
-      "\t\tif err := decodeRequireLen(data, pos+4, \"#{name}\"); err != nil {\n",
-      "\t\t\treturn #{zero}, offset, err\n",
-      "\t\t}\n",
-      "\t\t#{local} = decodeU32(data, pos)\n",
-      "\t\tpos += 4\n"
-    ]
-  end
-
-  defp go_decode_field_assignment_statement(%{"name" => name, "type" => "u64"}, _smap, zero) do
-    local = go_local_name(name)
-
-    [
-      "\t\tif err := decodeRequireLen(data, pos+8, \"#{name}\"); err != nil {\n",
-      "\t\t\treturn #{zero}, offset, err\n",
-      "\t\t}\n",
-      "\t\t#{local} = decodeU64(data, pos)\n",
-      "\t\tpos += 8\n"
-    ]
-  end
-
-  defp go_decode_field_assignment_statement(%{"name" => name, "type" => "rgb"}, _smap, zero) do
-    local = go_local_name(name)
-
-    [
-      "\t\tif err := decodeRequireLen(data, pos+3, \"#{name}\"); err != nil {\n",
-      "\t\t\treturn #{zero}, offset, err\n",
-      "\t\t}\n",
-      "\t\t#{local} = decodeU24(data, pos)\n",
-      "\t\tpos += 3\n"
+      "\t\t#{local} = #{@go_primitive_reads[type]}\n",
+      go_pos_advance(size, "\t\t")
     ]
   end
 
@@ -1727,63 +1715,15 @@ defmodule Minga.Mix.ProtocolGenerator do
   end
 
   @spec rust_decode_field_assignment_statement(map(), %{String.t() => structure()}) :: iodata()
-  defp rust_decode_field_assignment_statement(%{"name" => name, "type" => "u8"}, _smap) do
+  defp rust_decode_field_assignment_statement(%{"name" => name, "type" => type}, _smap)
+       when is_map_key(@rust_primitive_reads, type) do
     local = rust_field_name(name)
+    size = @primitive_sizes[type]
 
     [
-      "        require_len(bytes, pos + 1, \"#{name}\")?;\n",
-      "        #{local} = bytes[pos];\n",
-      "        pos += 1;\n"
-    ]
-  end
-
-  defp rust_decode_field_assignment_statement(%{"name" => name, "type" => "u16"}, _smap) do
-    local = rust_field_name(name)
-
-    [
-      "        require_len(bytes, pos + 2, \"#{name}\")?;\n",
-      "        #{local} = read_u16(bytes, pos);\n",
-      "        pos += 2;\n"
-    ]
-  end
-
-  defp rust_decode_field_assignment_statement(%{"name" => name, "type" => "u24"}, _smap) do
-    local = rust_field_name(name)
-
-    [
-      "        require_len(bytes, pos + 3, \"#{name}\")?;\n",
-      "        #{local} = read_u24(bytes, pos);\n",
-      "        pos += 3;\n"
-    ]
-  end
-
-  defp rust_decode_field_assignment_statement(%{"name" => name, "type" => "u32"}, _smap) do
-    local = rust_field_name(name)
-
-    [
-      "        require_len(bytes, pos + 4, \"#{name}\")?;\n",
-      "        #{local} = read_u32(bytes, pos);\n",
-      "        pos += 4;\n"
-    ]
-  end
-
-  defp rust_decode_field_assignment_statement(%{"name" => name, "type" => "u64"}, _smap) do
-    local = rust_field_name(name)
-
-    [
-      "        require_len(bytes, pos + 8, \"#{name}\")?;\n",
-      "        #{local} = read_u64(bytes, pos);\n",
-      "        pos += 8;\n"
-    ]
-  end
-
-  defp rust_decode_field_assignment_statement(%{"name" => name, "type" => "rgb"}, _smap) do
-    local = rust_field_name(name)
-
-    [
-      "        require_len(bytes, pos + 3, \"#{name}\")?;\n",
-      "        #{local} = read_u24(bytes, pos);\n",
-      "        pos += 3;\n"
+      "        require_len(bytes, pos + #{size}, \"#{name}\")?;\n",
+      "        #{local} = #{@rust_primitive_reads[type]};\n",
+      "        pos += #{size};\n"
     ]
   end
 
@@ -2114,63 +2054,15 @@ defmodule Minga.Mix.ProtocolGenerator do
   end
 
   @spec rust_decode_field_statement(map(), %{String.t() => structure()}) :: iodata()
-  defp rust_decode_field_statement(%{"name" => name, "type" => "u8"}, _smap) do
+  defp rust_decode_field_statement(%{"name" => name, "type" => type}, _smap)
+       when is_map_key(@rust_primitive_reads, type) do
     rname = rust_field_name(name)
+    size = @primitive_sizes[type]
 
     [
-      "    require_len(bytes, pos + 1, \"#{name}\")?;\n",
-      "    let #{rname} = bytes[pos];\n",
-      "    pos += 1;\n"
-    ]
-  end
-
-  defp rust_decode_field_statement(%{"name" => name, "type" => "u16"}, _smap) do
-    rname = rust_field_name(name)
-
-    [
-      "    require_len(bytes, pos + 2, \"#{name}\")?;\n",
-      "    let #{rname} = read_u16(bytes, pos);\n",
-      "    pos += 2;\n"
-    ]
-  end
-
-  defp rust_decode_field_statement(%{"name" => name, "type" => "u24"}, _smap) do
-    rname = rust_field_name(name)
-
-    [
-      "    require_len(bytes, pos + 3, \"#{name}\")?;\n",
-      "    let #{rname} = read_u24(bytes, pos);\n",
-      "    pos += 3;\n"
-    ]
-  end
-
-  defp rust_decode_field_statement(%{"name" => name, "type" => "u32"}, _smap) do
-    rname = rust_field_name(name)
-
-    [
-      "    require_len(bytes, pos + 4, \"#{name}\")?;\n",
-      "    let #{rname} = read_u32(bytes, pos);\n",
-      "    pos += 4;\n"
-    ]
-  end
-
-  defp rust_decode_field_statement(%{"name" => name, "type" => "u64"}, _smap) do
-    rname = rust_field_name(name)
-
-    [
-      "    require_len(bytes, pos + 8, \"#{name}\")?;\n",
-      "    let #{rname} = read_u64(bytes, pos);\n",
-      "    pos += 8;\n"
-    ]
-  end
-
-  defp rust_decode_field_statement(%{"name" => name, "type" => "rgb"}, _smap) do
-    rname = rust_field_name(name)
-
-    [
-      "    require_len(bytes, pos + 3, \"#{name}\")?;\n",
-      "    let #{rname} = read_u24(bytes, pos);\n",
-      "    pos += 3;\n"
+      "    require_len(bytes, pos + #{size}, \"#{name}\")?;\n",
+      "    let #{rname} = #{@rust_primitive_reads[type]};\n",
+      "    pos += #{size};\n"
     ]
   end
 
@@ -2259,13 +2151,14 @@ defmodule Minga.Mix.ProtocolGenerator do
   # Fixed-size element arrays are already bounded by their `count * stride`
   # length check, so only variable-size element arrays (strings / structs with
   # strings) need a clamp to stop a bogus count from forcing a large speculative
-  # allocation before any element bytes are validated.
-  @max_array_prealloc 1024
-
+  # allocation before any element bytes are validated. Every element occupies at
+  # least one byte, so the remaining buffer length is a safe, self-scaling upper
+  # bound: tight for small buffers (DoS-safe) and unbounded for genuinely large
+  # payloads (no needless regrowth).
   @spec rust_prealloc(String.t(), String.t(), %{String.t() => structure()}) :: String.t()
   defp rust_prealloc(count_var, element, smap) do
     case element_fixed_byte_size(element, smap) do
-      nil -> "#{count_var}.min(#{@max_array_prealloc})"
+      nil -> "#{count_var}.min(bytes.len() - pos)"
       _ -> count_var
     end
   end
@@ -2273,19 +2166,10 @@ defmodule Minga.Mix.ProtocolGenerator do
   @spec go_prealloc(String.t(), String.t(), %{String.t() => structure()}) :: String.t()
   defp go_prealloc(count_var, element, smap) do
     case element_fixed_byte_size(element, smap) do
-      nil -> "min(#{count_var}, #{@max_array_prealloc})"
+      nil -> "min(#{count_var}, len(data)-pos)"
       _ -> count_var
     end
   end
-
-  @rust_primitive_reads %{
-    "u8" => {"bytes[pos]", 1},
-    "u16" => {"read_u16(bytes, pos)", 2},
-    "u24" => {"read_u24(bytes, pos)", 3},
-    "rgb" => {"read_u24(bytes, pos)", 3},
-    "u32" => {"read_u32(bytes, pos)", 4},
-    "u64" => {"read_u64(bytes, pos)", 8}
-  }
 
   # Decode one counted_array element at `pos` and push it onto `vec`, advancing
   # `pos`. Struct elements emit the same `(item, consumed)` form as before, so
@@ -2300,18 +2184,14 @@ defmodule Minga.Mix.ProtocolGenerator do
           "#{indent}#{vec}.push(item);\n"
         ]
 
-      %{"type" => "string8"} ->
-        ["#{indent}#{vec}.push(read_string8(bytes, &mut pos)?);\n"]
-
-      %{"type" => "string16"} ->
-        ["#{indent}#{vec}.push(read_string16(bytes, &mut pos)?);\n"]
-
-      %{"type" => "string32"} ->
-        ["#{indent}#{vec}.push(read_string32(bytes, &mut pos)?);\n"]
+      %{"type" => str} when is_map_key(@rust_string_readers, str) ->
+        ["#{indent}#{vec}.push(#{@rust_string_readers[str]}(bytes, &mut pos)?);\n"]
 
       %{"type" => prim} ->
-        {expr, size} = Map.fetch!(@rust_primitive_reads, prim)
-        ["#{indent}#{vec}.push(#{expr});\n", "#{indent}pos += #{size};\n"]
+        [
+          "#{indent}#{vec}.push(#{@rust_primitive_reads[prim]});\n",
+          "#{indent}pos += #{@primitive_sizes[prim]};\n"
+        ]
     end
   end
 
@@ -2675,75 +2555,17 @@ defmodule Minga.Mix.ProtocolGenerator do
   end
 
   @spec go_decode_field_statement(map(), %{String.t() => structure()}, String.t()) :: iodata()
-  defp go_decode_field_statement(%{"name" => name, "type" => "u8"}, _smap, zero) do
+  defp go_decode_field_statement(%{"name" => name, "type" => type}, _smap, zero)
+       when is_map_key(@go_primitive_reads, type) do
     local = go_local_name(name)
+    size = @primitive_sizes[type]
 
     [
-      "\tif err := decodeRequireLen(data, pos+1, \"#{name}\"); err != nil {\n",
+      "\tif err := decodeRequireLen(data, pos+#{size}, \"#{name}\"); err != nil {\n",
       "\t\treturn #{zero}, offset, err\n",
       "\t}\n",
-      "\t#{local} := data[pos]\n",
-      "\tpos++\n"
-    ]
-  end
-
-  defp go_decode_field_statement(%{"name" => name, "type" => "u16"}, _smap, zero) do
-    local = go_local_name(name)
-
-    [
-      "\tif err := decodeRequireLen(data, pos+2, \"#{name}\"); err != nil {\n",
-      "\t\treturn #{zero}, offset, err\n",
-      "\t}\n",
-      "\t#{local} := decodeU16(data, pos)\n",
-      "\tpos += 2\n"
-    ]
-  end
-
-  defp go_decode_field_statement(%{"name" => name, "type" => "u24"}, _smap, zero) do
-    local = go_local_name(name)
-
-    [
-      "\tif err := decodeRequireLen(data, pos+3, \"#{name}\"); err != nil {\n",
-      "\t\treturn #{zero}, offset, err\n",
-      "\t}\n",
-      "\t#{local} := decodeU24(data, pos)\n",
-      "\tpos += 3\n"
-    ]
-  end
-
-  defp go_decode_field_statement(%{"name" => name, "type" => "u32"}, _smap, zero) do
-    local = go_local_name(name)
-
-    [
-      "\tif err := decodeRequireLen(data, pos+4, \"#{name}\"); err != nil {\n",
-      "\t\treturn #{zero}, offset, err\n",
-      "\t}\n",
-      "\t#{local} := decodeU32(data, pos)\n",
-      "\tpos += 4\n"
-    ]
-  end
-
-  defp go_decode_field_statement(%{"name" => name, "type" => "u64"}, _smap, zero) do
-    local = go_local_name(name)
-
-    [
-      "\tif err := decodeRequireLen(data, pos+8, \"#{name}\"); err != nil {\n",
-      "\t\treturn #{zero}, offset, err\n",
-      "\t}\n",
-      "\t#{local} := decodeU64(data, pos)\n",
-      "\tpos += 8\n"
-    ]
-  end
-
-  defp go_decode_field_statement(%{"name" => name, "type" => "rgb"}, _smap, zero) do
-    local = go_local_name(name)
-
-    [
-      "\tif err := decodeRequireLen(data, pos+3, \"#{name}\"); err != nil {\n",
-      "\t\treturn #{zero}, offset, err\n",
-      "\t}\n",
-      "\t#{local} := decodeU24(data, pos)\n",
-      "\tpos += 3\n"
+      "\t#{local} := #{@go_primitive_reads[type]}\n",
+      go_pos_advance(size, "\t")
     ]
   end
 
@@ -2835,21 +2657,6 @@ defmodule Minga.Mix.ProtocolGenerator do
     ]
   end
 
-  @go_primitive_reads %{
-    "u8" => {"data[pos]", 1},
-    "u16" => {"decodeU16(data, pos)", 2},
-    "u24" => {"decodeU24(data, pos)", 3},
-    "rgb" => {"decodeU24(data, pos)", 3},
-    "u32" => {"decodeU32(data, pos)", 4},
-    "u64" => {"decodeU64(data, pos)", 8}
-  }
-
-  @go_string_decoders %{
-    "string8" => "decodeString8",
-    "string16" => "decodeString16",
-    "string32" => "decodeString32"
-  }
-
   # Decode one counted_array element at `pos`, append it onto `vec`, advance
   # `pos`. Struct elements emit the same `(item, nextPos, err)` form as before,
   # so existing struct arrays regenerate byte-for-byte.
@@ -2863,8 +2670,10 @@ defmodule Minga.Mix.ProtocolGenerator do
         go_decode_array_element_via("#{@go_string_decoders[str]}(data, pos)", vec, indent, zero)
 
       %{"type" => prim} ->
-        {expr, size} = Map.fetch!(@go_primitive_reads, prim)
-        ["#{indent}#{vec} = append(#{vec}, #{expr})\n", "#{indent}pos += #{size}\n"]
+        [
+          "#{indent}#{vec} = append(#{vec}, #{@go_primitive_reads[prim]})\n",
+          "#{indent}pos += #{@primitive_sizes[prim]}\n"
+        ]
     end
   end
 
