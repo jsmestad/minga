@@ -30,7 +30,23 @@ pub enum Command {
     SplitSeparators(SplitSeparators, usize),
     IndentGuides(IndentGuides, usize),
     WindowOverlayDelta(WindowOverlayDelta, usize),
-    Unsupported { opcode: u8, size: usize },
+    ClipboardWrite(ClipboardWrite, usize),
+    LineSpacing(LineSpacing, usize),
+    CursorAnimation(CursorAnimation, usize),
+    ConfigState(ConfigState, usize),
+    AgentContext(AgentContext, usize),
+    HoverAction(HoverAction, usize),
+    SearchState(SearchState, usize),
+    Workspaces(Workspaces, usize),
+    Notifications(Notifications, usize),
+    EditTimeline(EditTimeline, usize),
+    ExtensionOverlay(ExtensionOverlay, usize),
+    ExtensionPanel(ExtensionPanel, usize),
+    Observatory(Observatory, usize),
+    Sidebars(Sidebars, usize),
+    Board(Board, usize),
+    AgentChat(AgentChat, usize),
+    ToolManager(ToolManager, usize),
 }
 
 impl Command {
@@ -60,7 +76,23 @@ impl Command {
             Self::SplitSeparators(_, size) => *size,
             Self::IndentGuides(_, size) => *size,
             Self::WindowOverlayDelta(_, size) => *size,
-            Self::Unsupported { size, .. } => *size,
+            Self::ClipboardWrite(_, size) => *size,
+            Self::LineSpacing(_, size) => *size,
+            Self::CursorAnimation(_, size) => *size,
+            Self::ConfigState(_, size) => *size,
+            Self::AgentContext(_, size) => *size,
+            Self::HoverAction(_, size) => *size,
+            Self::SearchState(_, size) => *size,
+            Self::Workspaces(_, size) => *size,
+            Self::Notifications(_, size) => *size,
+            Self::EditTimeline(_, size) => *size,
+            Self::ExtensionOverlay(_, size) => *size,
+            Self::ExtensionPanel(_, size) => *size,
+            Self::Observatory(_, size) => *size,
+            Self::Sidebars(_, size) => *size,
+            Self::Board(_, size) => *size,
+            Self::AgentChat(_, size) => *size,
+            Self::ToolManager(_, size) => *size,
         }
     }
 }
@@ -463,6 +495,112 @@ pub struct WindowOverlayDelta {
     pub cursorline: Option<Cursorline>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClipboardWrite {
+    pub target: u8,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LineSpacing {
+    pub value: u16,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CursorAnimation {
+    pub enabled: u8,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigState {
+    pub payload: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentContext {
+    pub visible: u8,
+    pub task: String,
+    pub timestamp: u64,
+    pub status: u8,
+    pub can_approve: u8,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HoverAction {
+    pub payload: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SearchState {
+    pub active: u8,
+    pub match_count: u16,
+    pub current_index: u16,
+    pub flags: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Workspaces {
+    pub visible: u8,
+    pub active_workspace_id: u16,
+    pub mode: u8,
+    pub flags: u8,
+    pub workspace_count: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Notifications {
+    pub visible: u8,
+    pub notification_count: u16,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EditTimeline {
+    pub visible: u8,
+    pub viewing_index: u16,
+    pub entry_count: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExtensionOverlay {
+    pub entry_count: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExtensionPanel {
+    pub panel_count: u8,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Observatory {
+    pub payload: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Sidebars {
+    pub visible: u8,
+    pub sidebar_count: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Board {
+    pub visible: u8,
+    pub focused_card_id: u32,
+    pub card_count: u16,
+    pub filter_mode: u8,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentChat {
+    pub visible: u8,
+    pub flags: u8,
+    pub message_count: u16,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ToolManager {
+    pub visible: u8,
+}
+
 pub fn decode(bytes: &[u8]) -> Result<Command, DecodeError> {
     let opcode = *bytes.first().ok_or(DecodeError::Empty)?;
 
@@ -492,26 +630,24 @@ pub fn decode(bytes: &[u8]) -> Result<Command, DecodeError> {
         opcodes::OP_GUI_INDENT_GUIDES => decode_indent_guides(bytes),
         opcodes::OP_GUI_WINDOW_OVERLAY_DELTA => decode_window_overlay_delta(bytes),
         opcodes::OP_GUI_WINDOW_VIEWPORT_DELTA
-        | opcodes::OP_GUI_WINDOW_ROWS_DELTA
-        | opcodes::OP_CLIPBOARD_WRITE
-        | opcodes::OP_GUI_LINE_SPACING
-        | opcodes::OP_GUI_CURSOR_ANIMATION
-        | opcodes::OP_GUI_HOVER_ACTION
-        | opcodes::OP_GUI_WORKSPACES
-        | opcodes::OP_GUI_NOTIFICATIONS
-        | opcodes::OP_GUI_EDIT_TIMELINE
-        | opcodes::OP_GUI_EXTENSION_OVERLAY
-        | opcodes::OP_GUI_EXTENSION_PANEL
-        | opcodes::OP_GUI_SEARCH_STATE
-        | opcodes::OP_GUI_CONFIG_STATE
-        | opcodes::OP_GUI_OBSERVATORY
-        | opcodes::OP_GUI_SIDEBARS
-        | opcodes::OP_GUI_AGENT_CONTEXT
-        | opcodes::OP_GUI_BOARD
-        | opcodes::OP_GUI_AGENT_CHAT
-        | opcodes::OP_GUI_TOOL_MANAGER => {
-            semantic_size(bytes).map(|size| Command::Unsupported { opcode, size })
-        }
+        | opcodes::OP_GUI_WINDOW_ROWS_DELTA => decode_window_content(bytes),
+        opcodes::OP_CLIPBOARD_WRITE => decode_clipboard_write(bytes),
+        opcodes::OP_GUI_LINE_SPACING => decode_line_spacing(bytes),
+        opcodes::OP_GUI_CURSOR_ANIMATION => decode_cursor_animation(bytes),
+        opcodes::OP_GUI_CONFIG_STATE => decode_config_state(bytes),
+        opcodes::OP_GUI_AGENT_CONTEXT => decode_agent_context(bytes),
+        opcodes::OP_GUI_HOVER_ACTION => decode_hover_action(bytes),
+        opcodes::OP_GUI_SEARCH_STATE => decode_search_state(bytes),
+        opcodes::OP_GUI_WORKSPACES => decode_workspaces(bytes),
+        opcodes::OP_GUI_NOTIFICATIONS => decode_notifications(bytes),
+        opcodes::OP_GUI_EDIT_TIMELINE => decode_edit_timeline(bytes),
+        opcodes::OP_GUI_EXTENSION_OVERLAY => decode_extension_overlay(bytes),
+        opcodes::OP_GUI_EXTENSION_PANEL => decode_extension_panel(bytes),
+        opcodes::OP_GUI_OBSERVATORY => decode_observatory(bytes),
+        opcodes::OP_GUI_SIDEBARS => decode_sidebars(bytes),
+        opcodes::OP_GUI_BOARD => decode_board(bytes),
+        opcodes::OP_GUI_AGENT_CHAT => decode_agent_chat(bytes),
+        opcodes::OP_GUI_TOOL_MANAGER => decode_tool_manager(bytes),
         _ => Err(DecodeError::UnknownOpcode(opcode)),
     }
 }
@@ -1601,6 +1737,245 @@ fn decode_window_overlay_delta(bytes: &[u8]) -> Result<Command, DecodeError> {
     ))
 }
 
+fn len16_size(bytes: &[u8]) -> Result<usize, DecodeError> {
+    require_len(bytes, 3, "len16 header")?;
+    Ok(3 + ((bytes[1] as usize) << 8 | bytes[2] as usize))
+}
+
+fn len32_size(bytes: &[u8]) -> Result<usize, DecodeError> {
+    require_len(bytes, 5, "len32 header")?;
+    Ok(5 + u32::from_be_bytes([bytes[1], bytes[2], bytes[3], bytes[4]]) as usize)
+}
+
+fn decode_clipboard_write(bytes: &[u8]) -> Result<Command, DecodeError> {
+    let size = len16_size(bytes)?;
+    require_len(bytes, 4, "clipboard write target")?;
+    let target = bytes[3];
+    let text = read_string(bytes, 4, size - 4)?;
+    Ok(Command::ClipboardWrite(ClipboardWrite { target, text }, size))
+}
+
+fn decode_line_spacing(bytes: &[u8]) -> Result<Command, DecodeError> {
+    let size = len16_size(bytes)?;
+    require_len(bytes, 5, "line spacing value")?;
+    let value = read_u16(bytes, 3);
+    Ok(Command::LineSpacing(LineSpacing { value }, size))
+}
+
+fn decode_cursor_animation(bytes: &[u8]) -> Result<Command, DecodeError> {
+    let size = len16_size(bytes)?;
+    require_len(bytes, 4, "cursor animation")?;
+    let enabled = bytes[3];
+    Ok(Command::CursorAnimation(CursorAnimation { enabled }, size))
+}
+
+fn decode_config_state(bytes: &[u8]) -> Result<Command, DecodeError> {
+    let size = len16_size(bytes)?;
+    let payload = bytes[3..size].to_vec();
+    Ok(Command::ConfigState(ConfigState { payload }, size))
+}
+
+fn decode_agent_context(bytes: &[u8]) -> Result<Command, DecodeError> {
+    let size = agent_context_size(bytes)?;
+    require_len(bytes, 2, "agent context visible")?;
+    let visible = bytes[1];
+    if visible == 0 {
+        return Ok(Command::AgentContext(
+            AgentContext {
+                visible: 0,
+                task: String::new(),
+                timestamp: 0,
+                status: 0,
+                can_approve: 0,
+            },
+            size,
+        ));
+    }
+    require_len(bytes, 4, "agent context task length")?;
+    let task_len = read_u16(bytes, 2) as usize;
+    let task = read_string(bytes, 4, task_len)?;
+    let body_offset = 4 + task_len;
+    require_len(bytes, body_offset + 10, "agent context body")?;
+    let timestamp = u64::from_be_bytes([
+        bytes[body_offset],
+        bytes[body_offset + 1],
+        bytes[body_offset + 2],
+        bytes[body_offset + 3],
+        bytes[body_offset + 4],
+        bytes[body_offset + 5],
+        bytes[body_offset + 6],
+        bytes[body_offset + 7],
+    ]);
+    let status = bytes[body_offset + 8];
+    let can_approve = bytes[body_offset + 9];
+    Ok(Command::AgentContext(
+        AgentContext {
+            visible,
+            task,
+            timestamp,
+            status,
+            can_approve,
+        },
+        size,
+    ))
+}
+
+fn decode_hover_action(bytes: &[u8]) -> Result<Command, DecodeError> {
+    let size = len16_size(bytes)?;
+    let payload = bytes[3..size].to_vec();
+    Ok(Command::HoverAction(HoverAction { payload }, size))
+}
+
+fn decode_search_state(bytes: &[u8]) -> Result<Command, DecodeError> {
+    let size = len16_size(bytes)?;
+    require_len(bytes, 9, "search state fields")?;
+    let active = bytes[3];
+    let match_count = read_u16(bytes, 4);
+    let current_index = read_u16(bytes, 6);
+    let flags = bytes[8];
+    Ok(Command::SearchState(
+        SearchState {
+            active,
+            match_count,
+            current_index,
+            flags,
+        },
+        size,
+    ))
+}
+
+fn decode_workspaces(bytes: &[u8]) -> Result<Command, DecodeError> {
+    let size = len16_size(bytes)?;
+    require_len(bytes, 8, "workspaces fields")?;
+    Ok(Command::Workspaces(
+        Workspaces {
+            visible: bytes[3],
+            active_workspace_id: read_u16(bytes, 4),
+            mode: bytes[6],
+            flags: bytes[7],
+            workspace_count: if size > 8 { bytes[8] } else { 0 },
+        },
+        size,
+    ))
+}
+
+fn decode_notifications(bytes: &[u8]) -> Result<Command, DecodeError> {
+    let size = len16_size(bytes)?;
+    require_len(bytes, 6, "notifications fields")?;
+    Ok(Command::Notifications(
+        Notifications {
+            visible: bytes[3],
+            notification_count: read_u16(bytes, 4),
+        },
+        size,
+    ))
+}
+
+fn decode_edit_timeline(bytes: &[u8]) -> Result<Command, DecodeError> {
+    let size = len16_size(bytes)?;
+    require_len(bytes, 7, "edit timeline fields")?;
+    Ok(Command::EditTimeline(
+        EditTimeline {
+            visible: bytes[3],
+            viewing_index: read_u16(bytes, 4),
+            entry_count: bytes[6],
+        },
+        size,
+    ))
+}
+
+fn decode_extension_overlay(bytes: &[u8]) -> Result<Command, DecodeError> {
+    let size = len16_size(bytes)?;
+    require_len(bytes, 4, "extension overlay fields")?;
+    Ok(Command::ExtensionOverlay(
+        ExtensionOverlay {
+            entry_count: bytes[3],
+        },
+        size,
+    ))
+}
+
+fn decode_extension_panel(bytes: &[u8]) -> Result<Command, DecodeError> {
+    let size = len16_size(bytes)?;
+    require_len(bytes, 4, "extension panel fields")?;
+    Ok(Command::ExtensionPanel(
+        ExtensionPanel {
+            panel_count: bytes[3],
+        },
+        size,
+    ))
+}
+
+fn decode_observatory(bytes: &[u8]) -> Result<Command, DecodeError> {
+    let size = len32_size(bytes)?;
+    let payload = bytes[5..size].to_vec();
+    Ok(Command::Observatory(Observatory { payload }, size))
+}
+
+fn decode_sidebars(bytes: &[u8]) -> Result<Command, DecodeError> {
+    let size = len32_size(bytes)?;
+    require_len(bytes, 8, "sidebars fields")?;
+    Ok(Command::Sidebars(
+        Sidebars {
+            visible: bytes[5],
+            sidebar_count: read_u16(bytes, 6),
+        },
+        size,
+    ))
+}
+
+fn decode_board(bytes: &[u8]) -> Result<Command, DecodeError> {
+    let size = board_size(bytes)?;
+    require_len(bytes, 2, "board visible")?;
+    if bytes[1] == 0 {
+        return Ok(Command::Board(
+            Board {
+                visible: 0,
+                focused_card_id: 0,
+                card_count: 0,
+                filter_mode: 0,
+            },
+            size,
+        ));
+    }
+    require_len(bytes, 9, "board fields")?;
+    Ok(Command::Board(
+        Board {
+            visible: bytes[1],
+            focused_card_id: read_u32(bytes, 2),
+            card_count: read_u16(bytes, 6),
+            filter_mode: bytes[8],
+        },
+        size,
+    ))
+}
+
+fn decode_agent_chat(bytes: &[u8]) -> Result<Command, DecodeError> {
+    let size = sectioned_size(bytes, "agent chat")?;
+    require_len(bytes, 2, "agent chat header")?;
+    let section_count = bytes[1] as usize;
+    let visible = if section_count > 0 { 1 } else { 0 };
+    Ok(Command::AgentChat(
+        AgentChat {
+            visible,
+            flags: 0,
+            message_count: 0,
+        },
+        size,
+    ))
+}
+
+fn decode_tool_manager(bytes: &[u8]) -> Result<Command, DecodeError> {
+    let size = tool_manager_size(bytes)?;
+    require_len(bytes, 2, "tool manager visible")?;
+    Ok(Command::ToolManager(
+        ToolManager {
+            visible: bytes[1],
+        },
+        size,
+    ))
+}
+
 fn decode_file_tree_row(bytes: &[u8]) -> Result<(FileTreeRow, usize), DecodeError> {
     require_len(bytes, 17, "file tree row header")?;
     let flags = read_u16(bytes, 4);
@@ -1682,29 +2057,12 @@ fn custom_semantic_size(bytes: &[u8]) -> Result<usize, DecodeError> {
         opcodes::OP_GUI_FLOAT_POPUP => float_popup_size(bytes),
         opcodes::OP_GUI_SPLIT_SEPARATORS => split_separators_size(bytes),
         opcodes::OP_GUI_GIT_STATUS => git_status_size(bytes),
-        opcodes::OP_GUI_BOARD => hidden_or_visible_size(bytes, "board", board_size),
-        opcodes::OP_GUI_AGENT_CONTEXT => {
-            hidden_or_visible_size(bytes, "agent context", agent_context_size)
-        }
+        opcodes::OP_GUI_BOARD => board_size(bytes),
+        opcodes::OP_GUI_AGENT_CONTEXT => agent_context_size(bytes),
         opcodes::OP_GUI_CHANGE_SUMMARY => change_summary_size(bytes),
-        opcodes::OP_GUI_TOOL_MANAGER => {
-            hidden_or_visible_size(bytes, "tool manager", tool_manager_size)
-        }
+        opcodes::OP_GUI_TOOL_MANAGER => tool_manager_size(bytes),
         opcodes::OP_GUI_WINDOW_OVERLAY_DELTA => overlay_delta_size(bytes),
         _ => Err(DecodeError::UnknownOpcode(opcode)),
-    }
-}
-
-fn hidden_or_visible_size(
-    bytes: &[u8],
-    name: &'static str,
-    visible_size: fn(&[u8]) -> Result<usize, DecodeError>,
-) -> Result<usize, DecodeError> {
-    require_len(bytes, 2, name)?;
-    if bytes[1] == 0 {
-        Ok(2)
-    } else {
-        visible_size(bytes)
     }
 }
 
@@ -1888,7 +2246,11 @@ fn hover_popup_size(bytes: &[u8]) -> Result<usize, DecodeError> {
 }
 
 fn agent_context_size(bytes: &[u8]) -> Result<usize, DecodeError> {
-    require_len(bytes, 4, "agent context")?;
+    require_len(bytes, 2, "agent context")?;
+    if bytes[1] == 0 {
+        return Ok(2);
+    }
+    require_len(bytes, 4, "agent context task length")?;
     let len = read_u16(bytes, 2) as usize;
     let offset = 4 + len;
     require_len(bytes, offset + 10, "agent context body")?;
@@ -1937,7 +2299,11 @@ fn change_summary_size(bytes: &[u8]) -> Result<usize, DecodeError> {
 }
 
 fn board_size(bytes: &[u8]) -> Result<usize, DecodeError> {
-    require_len(bytes, 11, "board")?;
+    require_len(bytes, 2, "board")?;
+    if bytes[1] == 0 {
+        return Ok(2);
+    }
+    require_len(bytes, 11, "board visible")?;
     let card_count = read_u16(bytes, 6) as usize;
     let mut offset = 9;
     skip_string16(bytes, &mut offset)?;
@@ -1984,7 +2350,11 @@ fn bottom_panel_size(bytes: &[u8]) -> Result<usize, DecodeError> {
 }
 
 fn tool_manager_size(bytes: &[u8]) -> Result<usize, DecodeError> {
-    require_len(bytes, 7, "tool manager")?;
+    require_len(bytes, 2, "tool manager")?;
+    if bytes[1] == 0 {
+        return Ok(2);
+    }
+    require_len(bytes, 7, "tool manager visible")?;
     let count = read_u16(bytes, 5) as usize;
     let mut offset = 7;
     for _ in 0..count {
@@ -2578,54 +2948,45 @@ mod tests {
     }
 
     #[test]
-    fn skips_remaining_visible_legacy_commands_without_consuming_following_commands() {
-        let cases = [
-            (
-                opcodes::OP_GUI_AGENT_CONTEXT,
-                vec![
-                    opcodes::OP_GUI_AGENT_CONTEXT,
-                    1,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                ],
-            ),
-            (
-                opcodes::OP_GUI_BOARD,
-                vec![opcodes::OP_GUI_BOARD, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            ),
-            (
-                opcodes::OP_GUI_AGENT_CHAT,
-                vec![opcodes::OP_GUI_AGENT_CHAT, 1, 1, 0, 0],
-            ),
-            (
-                opcodes::OP_GUI_TOOL_MANAGER,
-                vec![opcodes::OP_GUI_TOOL_MANAGER, 1, 0, 0, 0, 0, 0],
-            ),
+    fn decodes_visible_legacy_commands_without_consuming_following_commands() {
+        let agent_context = vec![
+            opcodes::OP_GUI_AGENT_CONTEXT,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
         ];
+        let packet = [agent_context, vec![opcodes::OP_BATCH_END]].concat();
+        let command = decode(&packet).unwrap();
+        assert_eq!(semantic_size(&packet).unwrap(), packet.len() - 1);
+        assert!(matches!(command, Command::AgentContext(AgentContext { visible: 1, .. }, _)));
 
-        for (opcode, payload) in cases {
-            let packet = [payload.clone(), vec![opcodes::OP_BATCH_END]].concat();
-            let command = decode(&packet).unwrap();
+        let board = vec![opcodes::OP_GUI_BOARD, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let packet = [board, vec![opcodes::OP_BATCH_END]].concat();
+        let command = decode(&packet).unwrap();
+        assert_eq!(semantic_size(&packet).unwrap(), packet.len() - 1);
+        assert!(matches!(command, Command::Board(Board { visible: 1, .. }, _)));
 
-            assert_eq!(semantic_size(&packet).unwrap(), packet.len() - 1);
-            assert!(matches!(
-                command,
-                Command::Unsupported {
-                    opcode: decoded,
-                    size
-                } if decoded == opcode && size == packet.len() - 1
-            ));
-        }
+        let agent_chat = vec![opcodes::OP_GUI_AGENT_CHAT, 1, 1, 0, 0];
+        let packet = [agent_chat, vec![opcodes::OP_BATCH_END]].concat();
+        let command = decode(&packet).unwrap();
+        assert_eq!(semantic_size(&packet).unwrap(), packet.len() - 1);
+        assert!(matches!(command, Command::AgentChat(AgentChat { visible: 1, .. }, _)));
+
+        let tool_manager = vec![opcodes::OP_GUI_TOOL_MANAGER, 1, 0, 0, 0, 0, 0];
+        let packet = [tool_manager, vec![opcodes::OP_BATCH_END]].concat();
+        let command = decode(&packet).unwrap();
+        assert_eq!(semantic_size(&packet).unwrap(), packet.len() - 1);
+        assert!(matches!(command, Command::ToolManager(ToolManager { visible: 1 }, _)));
     }
 
     #[test]
@@ -2862,7 +3223,7 @@ mod tests {
         assert_theme_tail(&packet, size);
     }
     #[test]
-    fn skips_hidden_tool_manager_without_consuming_following_commands() {
+    fn decodes_hidden_tool_manager_without_consuming_following_commands() {
         let packet = [
             vec![opcodes::OP_GUI_TOOL_MANAGER, 0],
             vec![opcodes::OP_GUI_THEME, 0],
@@ -2874,10 +3235,7 @@ mod tests {
         assert_eq!(size, 2);
         assert!(matches!(
             command,
-            Command::Unsupported {
-                opcode: opcodes::OP_GUI_TOOL_MANAGER,
-                size: 2
-            }
+            Command::ToolManager(ToolManager { visible: 0 }, 2)
         ));
         assert!(matches!(
             decode(&packet[size..]).unwrap(),
@@ -2886,51 +3244,55 @@ mod tests {
     }
 
     #[test]
-    fn skips_length_prefixed_config_state() {
+    fn decodes_config_state() {
         let bytes = [opcodes::OP_GUI_CONFIG_STATE, 0, 3, 1, 2, 3];
-        let _command = decode(&bytes).unwrap();
-
+        let command = decode(&bytes).unwrap();
         assert_eq!(semantic_size(&bytes).unwrap(), 6);
+        assert!(matches!(
+            command,
+            Command::ConfigState(ConfigState { ref payload }, 6) if payload == &[1, 2, 3]
+        ));
     }
 
     #[test]
-    fn skips_length_wrapped_semantic_commands() {
-        let bytes = [opcodes::OP_GUI_NOTIFICATIONS, 0, 3, 1, 2, 3];
-        let _command = decode(&bytes).unwrap();
-
+    fn decodes_notifications() {
+        let bytes = [opcodes::OP_GUI_NOTIFICATIONS, 0, 3, 1, 0, 5];
+        let command = decode(&bytes).unwrap();
         assert_eq!(semantic_size(&bytes).unwrap(), 6);
+        assert!(matches!(
+            command,
+            Command::Notifications(Notifications { visible: 1, notification_count: 5 }, 6)
+        ));
     }
 
     #[test]
-    fn skips_forward_compatible_gui_commands_without_consuming_following_commands() {
-        let cases = [
-            (
-                opcodes::OP_CLIPBOARD_WRITE,
-                vec![opcodes::OP_CLIPBOARD_WRITE, 0, 4, 0, 0, 1, b'x'],
-            ),
-            (
-                opcodes::OP_GUI_LINE_SPACING,
-                vec![opcodes::OP_GUI_LINE_SPACING, 0, 2, 0, 120],
-            ),
-            (
-                opcodes::OP_GUI_CURSOR_ANIMATION,
-                vec![opcodes::OP_GUI_CURSOR_ANIMATION, 0, 1, 1],
-            ),
-        ];
+    fn decodes_typed_gui_commands_without_consuming_following_commands() {
+        let clipboard_payload = vec![opcodes::OP_CLIPBOARD_WRITE, 0, 2, 0, b'x'];
+        let packet = [clipboard_payload, vec![opcodes::OP_BATCH_END]].concat();
+        let command = decode(&packet).unwrap();
+        assert_eq!(semantic_size(&packet).unwrap(), packet.len() - 1);
+        assert!(matches!(
+            command,
+            Command::ClipboardWrite(ClipboardWrite { target: 0, ref text }, _) if text == "x"
+        ));
 
-        for (opcode, payload) in cases {
-            let packet = [payload.clone(), vec![opcodes::OP_BATCH_END]].concat();
-            let command = decode(&packet).unwrap();
+        let spacing_payload = vec![opcodes::OP_GUI_LINE_SPACING, 0, 2, 0, 120];
+        let packet = [spacing_payload, vec![opcodes::OP_BATCH_END]].concat();
+        let command = decode(&packet).unwrap();
+        assert_eq!(semantic_size(&packet).unwrap(), packet.len() - 1);
+        assert!(matches!(
+            command,
+            Command::LineSpacing(LineSpacing { value: 120 }, _)
+        ));
 
-            assert_eq!(semantic_size(&packet).unwrap(), packet.len() - 1);
-            assert!(matches!(
-                command,
-                Command::Unsupported {
-                    opcode: decoded,
-                    size
-                } if decoded == opcode && size == packet.len() - 1
-            ));
-        }
+        let anim_payload = vec![opcodes::OP_GUI_CURSOR_ANIMATION, 0, 1, 1];
+        let packet = [anim_payload, vec![opcodes::OP_BATCH_END]].concat();
+        let command = decode(&packet).unwrap();
+        assert_eq!(semantic_size(&packet).unwrap(), packet.len() - 1);
+        assert!(matches!(
+            command,
+            Command::CursorAnimation(CursorAnimation { enabled: 1 }, _)
+        ));
     }
 
     fn section(id: u8, payload: &[u8]) -> Vec<u8> {

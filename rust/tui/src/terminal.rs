@@ -169,6 +169,10 @@ impl Terminal {
         self.writer.write_all(b"\x1b[0m")
     }
 
+    pub fn write_raw(&mut self, data: &[u8]) -> io::Result<()> {
+        self.writer.write_all(data)
+    }
+
     pub fn flush(&mut self) -> io::Result<()> {
         self.writer.flush()
     }

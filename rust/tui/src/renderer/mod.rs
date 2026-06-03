@@ -185,7 +185,10 @@ impl Renderer {
                 let width = text_width(&text);
                 protocol::write_packet(output, &protocol::encode_text_width(request_id, width))?;
             }
-            Command::Semantic(command) => self.handle_semantic(command),
+            Command::Semantic(command) => {
+                self.handle_semantic_io(&command, terminal, output)?;
+                self.handle_semantic(command);
+            }
             Command::Noop(_) => {}
         }
 
@@ -326,8 +329,47 @@ impl Renderer {
             semantic::Command::WindowOverlayDelta(delta, _) => {
                 self.apply_window_overlay_delta(delta)
             }
-            semantic::Command::Unsupported { .. } => {}
+            semantic::Command::ClipboardWrite(_, _) => {}
+            semantic::Command::LineSpacing(_, _) => {}
+            semantic::Command::CursorAnimation(_, _) => {}
+            semantic::Command::ConfigState(_, _) => {}
+            semantic::Command::AgentContext(_, _) => {}
+            semantic::Command::HoverAction(_, _) => {}
+            semantic::Command::SearchState(_, _) => {}
+            semantic::Command::Workspaces(_, _) => {}
+            semantic::Command::Notifications(_, _) => {}
+            semantic::Command::EditTimeline(_, _) => {}
+            semantic::Command::ExtensionOverlay(_, _) => {}
+            semantic::Command::ExtensionPanel(_, _) => {}
+            semantic::Command::Observatory(_, _) => {}
+            semantic::Command::Sidebars(_, _) => {}
+            semantic::Command::Board(_, _) => {}
+            semantic::Command::AgentChat(_, _) => {}
+            semantic::Command::ToolManager(_, _) => {}
         }
+    }
+
+    fn handle_semantic_io(
+        &self,
+        command: &semantic::Command,
+        terminal: &mut Terminal,
+        _output: &mut impl Write,
+    ) -> io::Result<()> {
+        match command {
+            semantic::Command::ClipboardWrite(clip, _) => {
+                let encoded = base64_encode(clip.text.as_bytes());
+                terminal.write_raw(format!("\x1b]52;c;{}\x07", encoded).as_bytes())?;
+            }
+            semantic::Command::CursorAnimation(anim, _) => {
+                if anim.enabled != 0 {
+                    terminal.write_raw(b"\x1b[1 q")?;
+                } else {
+                    terminal.write_raw(b"\x1b[2 q")?;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
     }
 
     fn draw_semantic_window(&mut self, window: semantic::WindowContent) {
@@ -2214,6 +2256,30 @@ impl Renderer {
             None
         }
     }
+}
+
+fn base64_encode(data: &[u8]) -> String {
+    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
+        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+        out.push(CHARS[((triple >> 18) & 0x3F) as usize] as char);
+        out.push(CHARS[((triple >> 12) & 0x3F) as usize] as char);
+        if chunk.len() > 1 {
+            out.push(CHARS[((triple >> 6) & 0x3F) as usize] as char);
+        } else {
+            out.push('=');
+        }
+        if chunk.len() > 2 {
+            out.push(CHARS[(triple & 0x3F) as usize] as char);
+        } else {
+            out.push('=');
+        }
+    }
+    out
 }
 
 fn text_width(text: &str) -> u16 {
