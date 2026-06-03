@@ -1328,10 +1328,10 @@ defmodule Minga.Mix.ProtocolGenerator do
         Mix.raise("command_fields reference unknown opcodes in #{@schema_path}: #{bad_opcodes}")
     end
 
-    # Validate struct/counted_array field references
+    # Validate struct/counted_array field references (base fields + conditional tail)
     bad_refs =
       command_fields
-      |> Enum.flat_map(fn cf -> Enum.map(cf["fields"] || [], &{cf, &1}) end)
+      |> Enum.flat_map(fn cf -> Enum.map(entry_fields(cf), &{cf, &1}) end)
       |> Enum.filter(fn {_cf, field} ->
         (field["type"] == "struct" or field["type"] == "counted_array") and
           is_binary(field["element"]) and not Map.has_key?(smap, field["element"])
@@ -1441,9 +1441,15 @@ defmodule Minga.Mix.ProtocolGenerator do
     )
   end
 
+  # Only fields whose conditional-tail assignment statement reuses the outer
+  # `err` variable (via `local, pos, err = ...`) need it declared. string/struct
+  # do; counted_array scopes its own `err :=` in the decode loop, and primitives
+  # scope theirs in `if err := decodeRequireLen(...)`. Listing counted_array here
+  # would emit an unused `var err error` for a counted_array-only tail, which is
+  # a Go compile error.
   @spec go_field_needs_error?(map()) :: boolean()
   defp go_field_needs_error?(%{"type" => type})
-       when type in ["string8", "string16", "string32", "struct", "counted_array"], do: true
+       when type in ["string8", "string16", "string32", "struct"], do: true
 
   defp go_field_needs_error?(_field), do: false
 
@@ -2846,7 +2852,7 @@ defmodule Minga.Mix.ProtocolGenerator do
     command_fields
     |> Enum.map(fn cf ->
       name = rust_struct_name(cf["opcode"]) <> "Fields"
-      fields = cf["fields"] || []
+      fields = entry_fields(cf)
       has_variable = Enum.any?(fields, fn f -> fixed_field_size(f, smap) == nil end)
 
       derive =
@@ -2879,8 +2885,9 @@ defmodule Minga.Mix.ProtocolGenerator do
         "pub fn #{fn_name}(bytes: &[u8], offset: usize) -> Result<(#{struct_name}, usize), DecodeError> {\n",
         "    let mut pos = offset;\n",
         Enum.map(fields, &rust_decode_field_statement(&1, smap)),
+        rust_decode_conditional_tail_block(cf, smap),
         "    Ok((#{struct_name} {\n",
-        Enum.map(fields, fn field -> "        #{rust_field_name(field["name"])},\n" end),
+        Enum.map(entry_fields(cf), fn field -> "        #{rust_field_name(field["name"])},\n" end),
         "    }, pos - offset))\n",
         "}\n\n"
       ]
@@ -2895,7 +2902,7 @@ defmodule Minga.Mix.ProtocolGenerator do
     command_fields
     |> Enum.map(fn cf ->
       name = go_struct_name(cf["opcode"]) <> "Fields"
-      fields = cf["fields"] || []
+      fields = entry_fields(cf)
 
       [
         "type #{name} struct {\n",
@@ -2922,8 +2929,9 @@ defmodule Minga.Mix.ProtocolGenerator do
         "func #{fn_name}(data []byte, offset int) (#{struct_name}, int, error) {\n",
         "\tpos := offset\n",
         Enum.map(fields, &go_decode_field_statement(&1, smap, zero)),
+        go_decode_conditional_tail_block(cf, smap, zero),
         "\treturn #{struct_name}{\n",
-        Enum.map(fields, fn field ->
+        Enum.map(entry_fields(cf), fn field ->
           "\t\t#{go_field_name(field["name"])}: #{go_local_name(field["name"])},\n"
         end),
         "\t}, pos, nil\n",

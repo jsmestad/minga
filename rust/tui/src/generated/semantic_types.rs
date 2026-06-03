@@ -116,6 +116,21 @@ pub struct CompletionItem {
     pub detail: String,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct MatchPosition {
+    pub index: u16,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PickerItem {
+    pub icon_color: u32,
+    pub flags: u8,
+    pub label: String,
+    pub description: String,
+    pub annotation: String,
+    pub match_positions: Vec<MatchPosition>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct WhichKeyBinding {
     pub kind: u8,
@@ -148,6 +163,7 @@ pub const DIAGNOSTIC_RANGE_SIZE: usize = 9;
 pub const DOCUMENT_HIGHLIGHT_SIZE: usize = 9;
 pub const HIT_REGION_SIZE: usize = 11;
 pub const THEME_COLOR_SIZE: usize = 4;
+pub const MATCH_POSITION_SIZE: usize = 2;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct GuiWindowContentHeader {
@@ -386,9 +402,13 @@ pub struct GuiBreadcrumbFields {
     pub segment_count: u8,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GuiCompletionFields {
     pub visible: u8,
+    pub cursor_row: u16,
+    pub cursor_col: u16,
+    pub selected_offset: u16,
+    pub items: Vec<CompletionItem>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

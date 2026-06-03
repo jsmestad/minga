@@ -1164,6 +1164,27 @@ fields = [
   {name = "detail", type = "string16"},
 ]
 
+# A single fuzzy-match highlight index inside a picker_item label. Wraps a bare
+# u16 so it can be used as a counted_array element (picker_encoder.ex encode_item/1).
+# The field is named `index` rather than `pos` because the generator reserves
+# `pos`/`offset`/`data`/`bytes`/`err` for decoder-internal locals.
+[[structures]]
+name = "match_position"
+fields = [
+  {name = "index", type = "u16"},
+]
+
+[[structures]]
+name = "picker_item"
+fields = [
+  {name = "icon_color", type = "u24"},
+  {name = "flags", type = "u8"},
+  {name = "label", type = "string16"},
+  {name = "description", type = "string16"},
+  {name = "annotation", type = "string16"},
+  {name = "match_positions", type = "counted_array", count_type = "u8", element = "match_position"},
+]
+
 [[structures]]
 name = "which_key_binding"
 fields = [
@@ -1539,6 +1560,14 @@ fields = [
 
 [[sections]]
 opcode = "gui_picker"
+id = 0x03
+name = "items"
+layout = "counted_array"
+count_type = "u16"
+element = "picker_item"
+
+[[sections]]
+opcode = "gui_picker"
 id = 0x04
 name = "action_menu"
 fields = [
@@ -1620,6 +1649,15 @@ opcode = "gui_completion"
 fields = [
   {name = "visible", type = "u8"},
 ]
+# When visible, the encoder emits the popup placement plus a u16-counted list of
+# items (completion_encoder.ex encode_command/1). When hidden, only the visible
+# byte is present.
+conditional_tail = {guard = "visible == 1", fields = [
+  {name = "cursor_row", type = "u16"},
+  {name = "cursor_col", type = "u16"},
+  {name = "selected_offset", type = "u16"},
+  {name = "items", type = "counted_array", count_type = "u16", element = "completion_item"},
+]}
 
 [[command_fields]]
 opcode = "gui_which_key"

@@ -525,6 +525,69 @@ func DecodeCompletionItem(data []byte, offset int) (CompletionItem, int, error) 
 	}, pos, nil
 }
 
+func DecodeMatchPosition(data []byte, offset int) (MatchPosition, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+2, "index"); err != nil {
+		return MatchPosition{}, offset, err
+	}
+	index := decodeU16(data, pos)
+	pos += 2
+	return MatchPosition{
+		Index: index,
+	}, pos, nil
+}
+
+func DecodePickerItem(data []byte, offset int) (PickerItem, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+3, "icon_color"); err != nil {
+		return PickerItem{}, offset, err
+	}
+	iconColor := decodeU24(data, pos)
+	pos += 3
+	if err := decodeRequireLen(data, pos+1, "flags"); err != nil {
+		return PickerItem{}, offset, err
+	}
+	flags := data[pos]
+	pos++
+	label, pos, err := decodeString16(data, pos)
+	if err != nil {
+		return PickerItem{}, offset, err
+	}
+	description, pos, err := decodeString16(data, pos)
+	if err != nil {
+		return PickerItem{}, offset, err
+	}
+	annotation, pos, err := decodeString16(data, pos)
+	if err != nil {
+		return PickerItem{}, offset, err
+	}
+	if err := decodeRequireLen(data, pos+1, "match_positions count"); err != nil {
+		return PickerItem{}, offset, err
+	}
+	matchPositionsCount := int(data[pos])
+	pos += 1
+	if err := decodeRequireLen(data, pos+matchPositionsCount*2, "match_positions"); err != nil {
+		return PickerItem{}, offset, err
+	}
+	matchPositions := make([]MatchPosition, 0, matchPositionsCount)
+	for i := 0; i < matchPositionsCount; i++ {
+		item, nextPos, err := DecodeMatchPosition(data, pos)
+		if err != nil {
+			return PickerItem{}, offset, err
+		}
+		pos = nextPos
+		matchPositions = append(matchPositions, item)
+	}
+	return PickerItem{
+		IconColor:      iconColor,
+		Flags:          flags,
+		Label:          label,
+		Description:    description,
+		Annotation:     annotation,
+		MatchPositions: matchPositions,
+	}, pos, nil
+}
+
 func DecodeWhichKeyBinding(data []byte, offset int) (WhichKeyBinding, int, error) {
 	pos := offset
 	if err := decodeRequireLen(data, pos+1, "kind"); err != nil {
@@ -782,6 +845,25 @@ func DecodeGuiPickerQuery(data []byte, offset int) (GuiPickerQuery, int, error) 
 		Text:      text,
 		CursorPos: cursorPos,
 	}, pos, nil
+}
+
+func DecodeGuiPickerItems(data []byte, offset int) ([]PickerItem, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+2, "items count"); err != nil {
+		return nil, offset, err
+	}
+	count := int(decodeU16(data, pos))
+	pos += 2
+	items := make([]PickerItem, 0, count)
+	for i := 0; i < count; i++ {
+		item, nextPos, err := DecodePickerItem(data, pos)
+		if err != nil {
+			return nil, offset, err
+		}
+		pos = nextPos
+		items = append(items, item)
+	}
+	return items, pos, nil
 }
 
 func DecodeGuiPickerActionMenu(data []byte, offset int) (GuiPickerActionMenu, int, error) {
@@ -1703,8 +1785,47 @@ func DecodeGuiCompletionFields(data []byte, offset int) (GuiCompletionFields, in
 	}
 	visible := data[pos]
 	pos++
+	var cursorRow uint16
+	var cursorCol uint16
+	var selectedOffset uint16
+	var items []CompletionItem
+	if visible == 1 {
+		if err := decodeRequireLen(data, pos+2, "cursor_row"); err != nil {
+			return GuiCompletionFields{}, offset, err
+		}
+		cursorRow = decodeU16(data, pos)
+		pos += 2
+		if err := decodeRequireLen(data, pos+2, "cursor_col"); err != nil {
+			return GuiCompletionFields{}, offset, err
+		}
+		cursorCol = decodeU16(data, pos)
+		pos += 2
+		if err := decodeRequireLen(data, pos+2, "selected_offset"); err != nil {
+			return GuiCompletionFields{}, offset, err
+		}
+		selectedOffset = decodeU16(data, pos)
+		pos += 2
+		if err := decodeRequireLen(data, pos+2, "items count"); err != nil {
+			return GuiCompletionFields{}, offset, err
+		}
+		itemsCount := int(decodeU16(data, pos))
+		pos += 2
+		items = make([]CompletionItem, 0, itemsCount)
+		for i := 0; i < itemsCount; i++ {
+			item, nextPos, err := DecodeCompletionItem(data, pos)
+			if err != nil {
+				return GuiCompletionFields{}, offset, err
+			}
+			pos = nextPos
+			items = append(items, item)
+		}
+	}
 	return GuiCompletionFields{
-		Visible: visible,
+		Visible:        visible,
+		CursorRow:      cursorRow,
+		CursorCol:      cursorCol,
+		SelectedOffset: selectedOffset,
+		Items:          items,
 	}, pos, nil
 }
 

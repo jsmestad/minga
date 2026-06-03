@@ -103,6 +103,19 @@ type CompletionItem struct {
 	Detail string
 }
 
+type MatchPosition struct {
+	Index uint16
+}
+
+type PickerItem struct {
+	IconColor      uint32
+	Flags          uint8
+	Label          string
+	Description    string
+	Annotation     string
+	MatchPositions []MatchPosition
+}
+
 type WhichKeyBinding struct {
 	Kind uint8
 	Key  string
@@ -132,6 +145,7 @@ const (
 	DocumentHighlightSize = 9
 	HitRegionSize         = 11
 	ThemeColorSize        = 4
+	MatchPositionSize     = 2
 )
 
 type GuiWindowContentHeader struct {
@@ -342,7 +356,11 @@ type GuiBreadcrumbFields struct {
 }
 
 type GuiCompletionFields struct {
-	Visible uint8
+	Visible        uint8
+	CursorRow      uint16
+	CursorCol      uint16
+	SelectedOffset uint16
+	Items          []CompletionItem
 }
 
 type GuiWhichKeyFields struct {

@@ -382,6 +382,47 @@ pub fn decode_completion_item(bytes: &[u8], offset: usize) -> Result<(Completion
     }, pos - offset))
 }
 
+pub fn decode_match_position(bytes: &[u8], offset: usize) -> Result<(MatchPosition, usize), DecodeError> {
+    let mut pos = offset;
+    require_len(bytes, pos + 2, "index")?;
+    let index = read_u16(bytes, pos);
+    pos += 2;
+    Ok((MatchPosition {
+        index,
+    }, pos - offset))
+}
+
+pub fn decode_picker_item(bytes: &[u8], offset: usize) -> Result<(PickerItem, usize), DecodeError> {
+    let mut pos = offset;
+    require_len(bytes, pos + 3, "icon_color")?;
+    let icon_color = read_u24(bytes, pos);
+    pos += 3;
+    require_len(bytes, pos + 1, "flags")?;
+    let flags = bytes[pos];
+    pos += 1;
+    let label = read_string16(bytes, &mut pos)?;
+    let description = read_string16(bytes, &mut pos)?;
+    let annotation = read_string16(bytes, &mut pos)?;
+    require_len(bytes, pos + 1, "match_positions count")?;
+    let match_positions_count = bytes[pos] as usize;
+    pos += 1;
+    require_len(bytes, pos + match_positions_count * 2, "match_positions")?;
+    let mut match_positions = Vec::with_capacity(match_positions_count);
+    for _ in 0..match_positions_count {
+        let (item, consumed) = decode_match_position(bytes, pos)?;
+        pos += consumed;
+        match_positions.push(item);
+    }
+    Ok((PickerItem {
+        icon_color,
+        flags,
+        label,
+        description,
+        annotation,
+        match_positions,
+    }, pos - offset))
+}
+
 pub fn decode_which_key_binding(bytes: &[u8], offset: usize) -> Result<(WhichKeyBinding, usize), DecodeError> {
     let mut pos = offset;
     require_len(bytes, pos + 1, "kind")?;
@@ -565,6 +606,20 @@ pub fn decode_gui_picker_query(bytes: &[u8], offset: usize) -> Result<(GuiPicker
         text,
         cursor_pos,
     }, pos - offset))
+}
+
+pub fn decode_gui_picker_items(bytes: &[u8], offset: usize) -> Result<(Vec<PickerItem>, usize), DecodeError> {
+    let mut pos = offset;
+    require_len(bytes, pos + 2, "items count")?;
+    let count = read_u16(bytes, pos) as usize;
+    pos += 2;
+    let mut items = Vec::with_capacity(count);
+    for _ in 0..count {
+        let (item, consumed) = decode_picker_item(bytes, pos)?;
+        pos += consumed;
+        items.push(item);
+    }
+    Ok((items, pos - offset))
 }
 
 pub fn decode_gui_picker_action_menu(bytes: &[u8], offset: usize) -> Result<(GuiPickerActionMenu, usize), DecodeError> {
@@ -1227,8 +1282,37 @@ pub fn decode_gui_completion_fields(bytes: &[u8], offset: usize) -> Result<(GuiC
     require_len(bytes, pos + 1, "visible")?;
     let visible = bytes[pos];
     pos += 1;
+    let mut cursor_row = 0;
+    let mut cursor_col = 0;
+    let mut selected_offset = 0;
+    let mut items = Vec::<CompletionItem>::new();
+    if visible == 1 {
+        require_len(bytes, pos + 2, "cursor_row")?;
+        cursor_row = read_u16(bytes, pos);
+        pos += 2;
+        require_len(bytes, pos + 2, "cursor_col")?;
+        cursor_col = read_u16(bytes, pos);
+        pos += 2;
+        require_len(bytes, pos + 2, "selected_offset")?;
+        selected_offset = read_u16(bytes, pos);
+        pos += 2;
+        require_len(bytes, pos + 2, "items count")?;
+        let items_count = read_u16(bytes, pos) as usize;
+        pos += 2;
+        let mut items_value = Vec::with_capacity(items_count);
+        for _ in 0..items_count {
+            let (item, consumed) = decode_completion_item(bytes, pos)?;
+            pos += consumed;
+            items_value.push(item);
+        }
+        items = items_value;
+    }
     Ok((GuiCompletionFields {
         visible,
+        cursor_row,
+        cursor_col,
+        selected_offset,
+        items,
     }, pos - offset))
 }
 
