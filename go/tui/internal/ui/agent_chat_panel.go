@@ -148,29 +148,32 @@ func (m Model) renderAgentTranscriptStatus(chat protocol.AgentChat, width int) s
 
 func (m Model) renderAgentLandingState(width int) []string {
 	p := m.palette()
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(p.Accent()).Background(m.editorBackground())
-	pillRow := strings.Join([]string{
-		m.renderAgentSuggestionPill("Explain this file"),
-		m.renderAgentSuggestionPill("Find failing tests"),
-		m.renderAgentSuggestionPill("Review changes"),
-	}, "  ")
-	pillRowTwo := strings.Join([]string{
-		m.renderAgentSuggestionPill("Edit current buffer"),
-		m.renderAgentSuggestionPill("Run a command"),
-		m.renderAgentSuggestionPill("Draft a plan"),
-	}, "  ")
+	title := lipgloss.NewStyle().Bold(true).Foreground(p.Accent()).Background(m.editorBackground()).Render("Minga is ready")
+	subtitle := lipgloss.NewStyle().Foreground(p.Muted()).Background(m.editorBackground()).Render("Ask in plain language, or start with a slash command.")
+	section := lipgloss.NewStyle().Bold(true).Foreground(p.Muted()).Background(m.editorBackground()).Render("Suggested next moves")
 	return []string{
-		lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(fitStyled(titleStyle.Render("Try asking Minga"), width)),
-		lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(fitStyled(pillRow, width)),
-		lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(fitStyled(pillRowTwo, width)),
+		m.renderAgentBlankLine(width),
+		lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(fitStyled("  "+title+"  "+subtitle, width)),
+		m.renderAgentBlankLine(width),
+		lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(fitStyled("  "+section, width)),
+		m.renderAgentSuggestionRow(width, "/explain", "Explain this file", "/tests", "Find failing tests"),
+		m.renderAgentSuggestionRow(width, "/review", "Review changes", "/edit", "Edit current buffer"),
+		m.renderAgentSuggestionRow(width, "/run", "Run a command", "/plan", "Draft a plan"),
 	}
 }
 
-func (m Model) renderAgentSuggestionPill(label string) string {
+func (m Model) renderAgentSuggestionRow(width int, leftCommand string, leftLabel string, rightCommand string, rightLabel string) string {
+	columnWidth := max((width-6)/2, 12)
+	left := m.renderAgentSuggestionAction(leftCommand, leftLabel, columnWidth)
+	right := m.renderAgentSuggestionAction(rightCommand, rightLabel, columnWidth)
+	return lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(fitStyled("  "+left+"  "+right, width))
+}
+
+func (m Model) renderAgentSuggestionAction(command string, label string, width int) string {
 	p := m.palette()
-	marker := lipgloss.NewStyle().Foreground(p.Accent()).Background(m.editorBackground()).Bold(true).Render("›")
-	text := lipgloss.NewStyle().Foreground(p.Text()).Background(m.editorBackground()).Render(label)
-	return marker + " " + text
+	cmd := lipgloss.NewStyle().Bold(true).Foreground(p.Accent()).Background(m.editorBackground()).Render(command)
+	text := lipgloss.NewStyle().Foreground(p.Text()).Background(m.editorBackground()).Render(" " + firstCompactLine(label, max(width-lipgloss.Width(command)-1, 4)))
+	return lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(fitStyled(cmd+text, width))
 }
 
 func (m Model) renderAgentHeader(chat protocol.AgentChat, width int) string {
