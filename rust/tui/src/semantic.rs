@@ -30,7 +30,7 @@ pub enum Command {
     SplitSeparators(SplitSeparators, usize),
     IndentGuides(IndentGuides, usize),
     WindowOverlayDelta(WindowOverlayDelta, usize),
-    WindowDelta(WindowDelta, usize),
+    WindowRowsDelta(WindowRowsDelta, usize),
     ClipboardWrite(ClipboardWrite, usize),
     LineSpacing(LineSpacing, usize),
     CursorAnimation(CursorAnimation, usize),
@@ -77,7 +77,7 @@ impl Command {
             Self::SplitSeparators(_, size) => *size,
             Self::IndentGuides(_, size) => *size,
             Self::WindowOverlayDelta(_, size) => *size,
-            Self::WindowDelta(_, size) => *size,
+            Self::WindowRowsDelta(_, size) => *size,
             Self::ClipboardWrite(_, size) => *size,
             Self::LineSpacing(_, size) => *size,
             Self::CursorAnimation(_, size) => *size,
@@ -497,10 +497,22 @@ pub struct WindowOverlayDelta {
     pub cursorline: Option<Cursorline>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct WindowDelta {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WindowRowsDelta {
     pub window_id: u16,
     pub content_epoch: u32,
+    pub cursor_visible: bool,
+    pub cursor_row: u16,
+    pub cursor_col: u16,
+    pub cursor_shape: u8,
+    pub rows: Vec<WindowDeltaRow>,
+    pub cursorline: Option<Cursorline>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WindowDeltaRow {
+    Ref { row_id: u64, content_hash: u32 },
+    Full(Row),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -639,7 +651,7 @@ pub fn decode(bytes: &[u8]) -> Result<Command, DecodeError> {
         opcodes::OP_GUI_INDENT_GUIDES => decode_indent_guides(bytes),
         opcodes::OP_GUI_WINDOW_OVERLAY_DELTA => decode_window_overlay_delta(bytes),
         opcodes::OP_GUI_WINDOW_VIEWPORT_DELTA | opcodes::OP_GUI_WINDOW_ROWS_DELTA => {
-            decode_window_delta(bytes)
+            decode_window_rows_delta(bytes)
         }
         opcodes::OP_CLIPBOARD_WRITE => decode_clipboard_write(bytes),
         opcodes::OP_GUI_LINE_SPACING => decode_line_spacing(bytes),
@@ -735,6 +747,69 @@ fn decode_window_content(bytes: &[u8]) -> Result<Command, DecodeError> {
                 row: origin_row.saturating_add(line.row),
                 bg: line.bg,
             }),
+        },
+        size,
+    ))
+}
+
+fn decode_window_rows_delta(bytes: &[u8]) -> Result<Command, DecodeError> {
+    let size = semantic_size(bytes)?;
+    let opcode = bytes[0];
+    let sections = sections(&bytes[..size])?;
+    let mut window_id = 0;
+    let mut content_epoch = 0;
+    let mut flags = 0;
+    let mut cursor_row = 0;
+    let mut cursor_col = 0;
+    let mut cursor_shape = 0;
+    let mut rows = Vec::new();
+    let mut cursorline = None;
+
+    for (section_id, payload) in sections {
+        match section_id {
+            0x01 => {
+                if opcode == opcodes::OP_GUI_WINDOW_ROWS_DELTA {
+                    let (header, _) =
+                        semantic_decode::decode_gui_window_rows_delta_header(payload, 0)?;
+                    window_id = header.window_id;
+                    content_epoch = header.content_epoch;
+                    flags = header.flags;
+                    cursor_row = header.cursor_row;
+                    cursor_col = header.cursor_col;
+                    cursor_shape = header.cursor_shape;
+                } else {
+                    let (header, _) =
+                        semantic_decode::decode_gui_window_viewport_delta_header(payload, 0)?;
+                    window_id = header.window_id;
+                    content_epoch = header.content_epoch;
+                    flags = header.flags;
+                    cursor_row = header.cursor_row;
+                    cursor_col = header.cursor_col;
+                    cursor_shape = header.cursor_shape;
+                }
+            }
+            0x02 => rows = decode_delta_rows(payload)?,
+            0x09 => {
+                let (cl, _) = semantic_decode::decode_gui_window_content_cursorline(payload, 0)?;
+                cursorline = Some(Cursorline {
+                    row: cl.row,
+                    bg: cl.bg,
+                });
+            }
+            _ => {}
+        }
+    }
+
+    Ok(Command::WindowRowsDelta(
+        WindowRowsDelta {
+            window_id,
+            content_epoch,
+            cursor_visible: flags & 0x01 != 0,
+            cursor_row,
+            cursor_col,
+            cursor_shape,
+            rows,
+            cursorline,
         },
         size,
     ))
@@ -1723,29 +1798,6 @@ fn decode_indent_guides(bytes: &[u8]) -> Result<Command, DecodeError> {
     ))
 }
 
-fn decode_window_delta(bytes: &[u8]) -> Result<Command, DecodeError> {
-    let size = semantic_size(bytes)?;
-    let sections = sections(&bytes[..size])?;
-    let mut window_id = 0;
-    let mut content_epoch = 0;
-
-    for (section_id, payload) in sections {
-        if section_id == 0x01 {
-            require_len(payload, 6, "window delta header")?;
-            window_id = read_u16(payload, 0);
-            content_epoch = read_u32(payload, 2);
-        }
-    }
-
-    Ok(Command::WindowDelta(
-        WindowDelta {
-            window_id,
-            content_epoch,
-        },
-        size,
-    ))
-}
-
 fn decode_window_overlay_delta(bytes: &[u8]) -> Result<Command, DecodeError> {
     let size = semantic_size(bytes)?;
     require_len(bytes, 13, "window overlay delta")?;
@@ -2041,6 +2093,38 @@ fn decode_rows(bytes: &[u8]) -> Result<Vec<Row>, DecodeError> {
     Ok(rows)
 }
 
+fn decode_delta_rows(bytes: &[u8]) -> Result<Vec<WindowDeltaRow>, DecodeError> {
+    require_len(bytes, 2, "delta rows count")?;
+    let count = read_u16(bytes, 0) as usize;
+    let mut offset = 2;
+    let mut rows = Vec::with_capacity(count);
+
+    for _ in 0..count {
+        require_len(bytes, offset + 1, "delta row entry type")?;
+        let entry_type = bytes[offset];
+        offset += 1;
+
+        match entry_type {
+            0 => {
+                require_len(bytes, offset + 12, "delta row ref")?;
+                rows.push(WindowDeltaRow::Ref {
+                    row_id: read_u64(bytes, offset),
+                    content_hash: read_u32(bytes, offset + 8),
+                });
+                offset += 12;
+            }
+            1 => {
+                let (row, consumed) = semantic_decode::decode_row(bytes, offset)?;
+                rows.push(WindowDeltaRow::Full(row));
+                offset += consumed;
+            }
+            _ => return Err(DecodeError::Malformed("unknown delta row entry type")),
+        }
+    }
+
+    Ok(rows)
+}
+
 fn sections(bytes: &[u8]) -> Result<Vec<(u8, &[u8])>, DecodeError> {
     require_len(bytes, 2, "sectioned command header")?;
     let count = bytes[1] as usize;
@@ -2084,6 +2168,9 @@ fn custom_semantic_size(bytes: &[u8]) -> Result<usize, DecodeError> {
         opcodes::OP_GUI_CHANGE_SUMMARY => change_summary_size(bytes),
         opcodes::OP_GUI_TOOL_MANAGER => tool_manager_size(bytes),
         opcodes::OP_GUI_WINDOW_OVERLAY_DELTA => overlay_delta_size(bytes),
+        opcodes::OP_GUI_WINDOW_VIEWPORT_DELTA | opcodes::OP_GUI_WINDOW_ROWS_DELTA => {
+            sectioned_size(bytes, "window rows delta")
+        }
         _ => Err(DecodeError::UnknownOpcode(opcode)),
     }
 }
@@ -2463,6 +2550,19 @@ fn read_u32(bytes: &[u8], offset: usize) -> u32 {
     ])
 }
 
+fn read_u64(bytes: &[u8], offset: usize) -> u64 {
+    u64::from_be_bytes([
+        bytes[offset],
+        bytes[offset + 1],
+        bytes[offset + 2],
+        bytes[offset + 3],
+        bytes[offset + 4],
+        bytes[offset + 5],
+        bytes[offset + 6],
+        bytes[offset + 7],
+    ])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2497,6 +2597,52 @@ mod tests {
                 rows,
                 ..
             }, _) if rows[0].text == "hi" && rows[0].spans[0].fg == 0xAABBCC
+        ));
+    }
+
+    #[test]
+    fn decodes_window_rows_delta_ref_and_full_entries() {
+        let header = section(0x01, &[0, 1, 0, 0, 0, 7, 1, 0, 3, 0, 4, 2, 0, 0]);
+        let full_row = [
+            vec![
+                0, 0, 0, 0, 0, 0, 0, 0, 22, 0, 0, 0, 9, 0, 0, 0, 0xBB, 0, 0, 0, 2,
+            ],
+            b"ok".to_vec(),
+            vec![0, 0],
+        ]
+        .concat();
+        let rows = section(
+            0x02,
+            &[
+                vec![0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 11, 0, 0, 0, 0xAA, 1],
+                full_row,
+            ]
+            .concat(),
+        );
+        let payload = [vec![opcodes::OP_GUI_WINDOW_ROWS_DELTA, 2], header, rows].concat();
+
+        let command = decode(&payload).unwrap();
+
+        assert_eq!(semantic_size(&payload).unwrap(), payload.len());
+        let Command::WindowRowsDelta(delta, _) = command else {
+            panic!("expected rows delta");
+        };
+        assert_eq!(delta.window_id, 1);
+        assert_eq!(delta.content_epoch, 7);
+        assert!(delta.cursor_visible);
+        assert_eq!(delta.cursor_row, 3);
+        assert_eq!(delta.cursor_col, 4);
+        assert_eq!(delta.cursor_shape, 2);
+        assert_eq!(
+            delta.rows[0],
+            WindowDeltaRow::Ref {
+                row_id: 11,
+                content_hash: 0xAA
+            }
+        );
+        assert!(matches!(
+            &delta.rows[1],
+            WindowDeltaRow::Full(Row { row_id: 22, content_hash: 0xBB, text, .. }) if text == "ok"
         ));
     }
 

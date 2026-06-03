@@ -7,14 +7,11 @@ mod semantic;
 mod signals;
 mod terminal;
 
-use mio::unix::SourceFd;
-use mio::{Events, Interest, Poll, Token};
+use crossterm::event;
 use std::io::{self, Read, Write};
-use std::os::fd::RawFd;
+use std::sync::mpsc::{self, RecvTimeoutError, Sender};
+use std::thread;
 use std::time::Duration;
-
-const STDIN_TOKEN: Token = Token(0);
-const TTY_TOKEN: Token = Token(1);
 
 fn main() {
     if let Err(error) = run() {
@@ -36,131 +33,80 @@ fn run() -> io::Result<()> {
     log_info(&mut stdout, &format!("started size={cols}x{rows}"));
 
     let mut renderer = renderer::Renderer::new(cols, rows);
-    let mut stdin = io::stdin().lock();
-    let mut input = input::Parser::default();
-    let mut tty_read_buf = [0_u8; 4096];
     let resize_signal = signals::ResizeSignal::install().ok();
-    let mut input_poll = match terminal.fd() {
-        Some(tty_fd) => Some(InputPoll::new(libc::STDIN_FILENO, tty_fd)?),
-        None => None,
-    };
+    let (events_tx, events_rx) = mpsc::channel();
+    spawn_packet_reader(events_tx.clone());
+    spawn_input_reader(events_tx);
 
     loop {
-        if terminal.fd().is_none() {
-            match read_packet(&mut stdin)? {
-                Some(packet) => handle_packet(&packet, &mut renderer, &mut terminal, &mut stdout)?,
-                None => break,
-            }
-            continue;
-        };
-
-        let ready = input_poll
-            .as_mut()
-            .expect("terminal fd implies input poll")
-            .poll(Duration::from_millis(100))?;
-
         if resize_signal
             .as_ref()
             .is_some_and(signals::ResizeSignal::take)
         {
             publish_resize(&mut terminal, &mut renderer, &mut stdout)?;
-        } else if let Some((width, height)) = terminal.poll_size()? {
-            renderer.resize(width, height);
-            protocol::write_packet(&mut stdout, &protocol::encode_resize(width, height))?;
         }
 
-        if !ready.any() {
-            for event in input.flush_escape() {
-                write_input_event(event, &mut stdout)?;
+        match events_rx.recv_timeout(Duration::from_millis(100)) {
+            Ok(LoopEvent::Packet(packet)) => {
+                handle_packet(&packet, &mut renderer, &mut terminal, &mut stdout)?;
             }
-            continue;
-        }
-
-        if ready.stdin {
-            match read_packet(&mut stdin)? {
-                Some(packet) => handle_packet(&packet, &mut renderer, &mut terminal, &mut stdout)?,
-                None => break,
+            Ok(LoopEvent::Input(event)) => {
+                handle_input_event(event, &mut terminal, &mut renderer, &mut stdout)?;
             }
-        }
-
-        if ready.tty {
-            let read = terminal.read_input(&mut tty_read_buf)?;
-            if read == 0 {
-                break;
+            Ok(LoopEvent::BackendClosed) => break,
+            Err(RecvTimeoutError::Timeout) => {
+                if let Some((width, height)) = terminal.poll_size()? {
+                    renderer.resize(width, height);
+                    protocol::write_packet(&mut stdout, &protocol::encode_resize(width, height))?;
+                }
             }
-            for event in input.push(&tty_read_buf[..read]) {
-                write_input_event(event, &mut stdout)?;
-            }
-        }
-
-        if ready.disconnected {
-            break;
+            Err(RecvTimeoutError::Disconnected) => break,
         }
     }
 
     terminal.finish()
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-struct InputReady {
-    stdin: bool,
-    tty: bool,
-    disconnected: bool,
+#[derive(Debug)]
+enum LoopEvent {
+    Packet(Vec<u8>),
+    Input(input::Event),
+    BackendClosed,
 }
 
-impl InputReady {
-    fn any(self) -> bool {
-        self.stdin || self.tty || self.disconnected
-    }
-}
-
-struct InputPoll {
-    poll: Poll,
-    events: Events,
-}
-
-impl InputPoll {
-    fn new(stdin_fd: RawFd, tty_fd: RawFd) -> io::Result<Self> {
-        let poll = Poll::new()?;
-        let mut stdin_source = SourceFd(&stdin_fd);
-        let mut tty_source = SourceFd(&tty_fd);
-
-        poll.registry()
-            .register(&mut stdin_source, STDIN_TOKEN, Interest::READABLE)?;
-        poll.registry()
-            .register(&mut tty_source, TTY_TOKEN, Interest::READABLE)?;
-
-        Ok(Self {
-            poll,
-            events: Events::with_capacity(16),
-        })
-    }
-
-    fn poll(&mut self, timeout: Duration) -> io::Result<InputReady> {
+fn spawn_packet_reader(events_tx: Sender<LoopEvent>) {
+    thread::spawn(move || {
+        let mut stdin = io::stdin().lock();
         loop {
-            match self.poll.poll(&mut self.events, Some(timeout)) {
-                Ok(()) => break,
-                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-                Err(error) => return Err(error),
+            match read_packet(&mut stdin) {
+                Ok(Some(packet)) => {
+                    if events_tx.send(LoopEvent::Packet(packet)).is_err() {
+                        break;
+                    }
+                }
+                Ok(None) => {
+                    let _ = events_tx.send(LoopEvent::BackendClosed);
+                    break;
+                }
+                Err(_) => {
+                    let _ = events_tx.send(LoopEvent::BackendClosed);
+                    break;
+                }
             }
         }
+    });
+}
 
-        let mut ready = InputReady::default();
-        for event in self.events.iter() {
-            match event.token() {
-                STDIN_TOKEN => {
-                    ready.stdin |= event.is_readable();
-                    ready.disconnected |= event.is_read_closed() || event.is_error();
-                }
-                TTY_TOKEN => {
-                    ready.tty |= event.is_readable();
-                    ready.disconnected |= event.is_read_closed() || event.is_error();
-                }
-                _ => {}
+fn spawn_input_reader(events_tx: Sender<LoopEvent>) {
+    thread::spawn(move || {
+        while let Ok(event) = event::read() {
+            if let Some(event) = input::map_crossterm_event(event)
+                && events_tx.send(LoopEvent::Input(event)).is_err()
+            {
+                break;
             }
         }
-        Ok(ready)
-    }
+    });
 }
 
 fn publish_resize(
@@ -174,6 +120,25 @@ fn publish_resize(
         protocol::write_packet(output, &protocol::encode_resize(width, height))?;
     }
     Ok(())
+}
+
+fn handle_input_event(
+    event: input::Event,
+    terminal: &mut terminal::Terminal,
+    renderer: &mut renderer::Renderer,
+    output: &mut impl Write,
+) -> io::Result<()> {
+    match event {
+        input::Event::Resize { cols, rows } => {
+            renderer.resize(cols, rows);
+            protocol::write_packet(output, &protocol::encode_resize(cols, rows))?;
+            if let Some((width, height)) = terminal.poll_size()? {
+                renderer.resize(width, height);
+            }
+            Ok(())
+        }
+        input::Event::Key { .. } | input::Event::Paste(_) => write_input_event(event, output),
+    }
 }
 
 fn handle_packet(
@@ -241,6 +206,7 @@ fn write_input_event(event: input::Event, output: &mut impl Write) -> io::Result
                 protocol::write_packet(output, &protocol::encode_paste_event(&text))
             }
         }
+        input::Event::Resize { .. } => Ok(()),
     }
 }
 

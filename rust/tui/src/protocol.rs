@@ -53,6 +53,7 @@ pub const ATTR_UNDERLINE: u16 = 0x02;
 pub const ATTR_ITALIC: u16 = 0x04;
 pub const ATTR_REVERSE: u16 = 0x08;
 pub const ATTR_STRIKETHROUGH: u16 = 0x10;
+#[allow(dead_code)]
 pub const UL_STYLE_SHIFT: u16 = 5;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
