@@ -1138,6 +1138,71 @@ fields = [
   {name = "target", type = "string16"},
 ]
 
+[[structures]]
+name = "tab_entry"
+fields = [
+  {name = "flags", type = "u8"},
+  {name = "id", type = "u32"},
+  {name = "workspace_id", type = "u16"},
+  {name = "icon", type = "string8"},
+  {name = "label", type = "string16"},
+  {name = "tint_color", type = "u32"},
+]
+
+[[structures]]
+name = "theme_color"
+fields = [
+  {name = "slot", type = "u8"},
+  {name = "color", type = "rgb"},
+]
+
+[[structures]]
+name = "completion_item"
+fields = [
+  {name = "kind", type = "u8"},
+  {name = "label", type = "string16"},
+  {name = "detail", type = "string16"},
+]
+
+[[structures]]
+name = "picker_item"
+fields = [
+  {name = "icon_color", type = "u24"},
+  {name = "flags", type = "u8"},
+  {name = "label", type = "string16"},
+  {name = "description", type = "string16"},
+  {name = "annotation", type = "string16"},
+  # u8-counted list of u16 fuzzy-match highlight indices into the label.
+  {name = "match_positions", type = "counted_array", count_type = "u8", element = "u16"},
+]
+
+[[structures]]
+name = "which_key_binding"
+fields = [
+  {name = "kind", type = "u8"},
+  {name = "key", type = "string8"},
+  {name = "desc", type = "string16"},
+  {name = "icon", type = "string8"},
+]
+
+[[structures]]
+name = "change_summary_entry"
+fields = [
+  {name = "path", type = "string16"},
+  {name = "action", type = "u8"},
+  {name = "lines_added", type = "u32"},
+  {name = "lines_removed", type = "u32"},
+]
+
+[[structures]]
+name = "git_status_entry"
+fields = [
+  {name = "path_hash", type = "u32"},
+  {name = "section", type = "u8"},
+  {name = "status", type = "u8"},
+  {name = "path", type = "string16"},
+]
+
 # ── Section layouts for sectioned commands ────────────────────────────────
 #
 # Each [[sections]] entry describes one section within a sectioned opcode.
@@ -1412,3 +1477,344 @@ name = "entries"
 layout = "counted_array"
 count_type = "u16"
 element = "gutter_entry"
+
+# gui_window_viewport_delta (0xA1) sections
+
+[[sections]]
+opcode = "gui_window_viewport_delta"
+id = 0x01
+name = "header"
+fields = [
+  {name = "window_id", type = "u16"},
+  {name = "content_epoch", type = "u32"},
+  {name = "flags", type = "u8"},
+  {name = "cursor_row", type = "u16"},
+  {name = "cursor_col", type = "u16"},
+  {name = "cursor_shape", type = "u8"},
+  {name = "scroll_left", type = "u16"},
+]
+
+[[sections]]
+opcode = "gui_window_viewport_delta"
+id = 0x02
+name = "rows"
+layout = "counted_array"
+count_type = "u16"
+element = "row"
+
+# gui_window_rows_delta (0xA2) sections
+
+[[sections]]
+opcode = "gui_window_rows_delta"
+id = 0x01
+name = "header"
+fields = [
+  {name = "window_id", type = "u16"},
+  {name = "content_epoch", type = "u32"},
+  {name = "flags", type = "u8"},
+  {name = "cursor_row", type = "u16"},
+  {name = "cursor_col", type = "u16"},
+  {name = "cursor_shape", type = "u8"},
+  {name = "scroll_left", type = "u16"},
+]
+
+[[sections]]
+opcode = "gui_window_rows_delta"
+id = 0x02
+name = "rows"
+layout = "counted_array"
+count_type = "u16"
+element = "row"
+
+# gui_picker (0x77) sections
+
+[[sections]]
+opcode = "gui_picker"
+id = 0x01
+name = "header"
+# picker_encoder.ex encode_picker/1: a constant marker byte (1), then the
+# counts, has_preview flag, title, and marked_count. The encoder writes
+# total_count as u16, not u32, and emits the title + marked_count tail.
+fields = [
+  {name = "visible", type = "u8"},
+  {name = "selected_index", type = "u16"},
+  {name = "filtered_count", type = "u16"},
+  {name = "total_count", type = "u16"},
+  {name = "has_preview", type = "u8"},
+  {name = "title", type = "string16"},
+  {name = "marked_count", type = "u16"},
+]
+
+[[sections]]
+opcode = "gui_picker"
+id = 0x02
+name = "query"
+fields = [
+  {name = "text", type = "string16"},
+]
+
+[[sections]]
+opcode = "gui_picker"
+id = 0x03
+name = "items"
+layout = "counted_array"
+count_type = "u16"
+element = "picker_item"
+
+[[sections]]
+opcode = "gui_picker"
+id = 0x04
+name = "action_menu"
+# picker_encoder.ex encode_action_menu/1: hidden menus encode just the visible
+# byte (0); a visible menu adds selected_index plus a u8-counted list of action
+# name strings.
+fields = [
+  {name = "visible", type = "u8"},
+]
+conditional_tail = {guard = "visible == 1", fields = [
+  {name = "selected_index", type = "u8"},
+  {name = "actions", type = "counted_array", count_type = "u8", element = "string16"},
+]}
+
+[[sections]]
+opcode = "gui_picker"
+id = 0x05
+name = "mode_prefix"
+fields = [
+  {name = "text", type = "string16"},
+]
+
+[[sections]]
+opcode = "gui_picker"
+id = 0x06
+name = "load_status"
+# picker_encoder.ex encode_load_status/1: :ready/:loading encode just the status
+# byte (0/1); {:error, reason} adds status 2 plus the message string.
+fields = [
+  {name = "status", type = "u8"},
+]
+conditional_tail = {guard = "status == 2", fields = [
+  {name = "message", type = "string16"},
+]}
+
+# gui_agent_chat (0x78) sections
+
+[[sections]]
+opcode = "gui_agent_chat"
+id = 0x01
+name = "header"
+fields = [
+  {name = "visible", type = "u8"},
+  {name = "flags", type = "u8"},
+  {name = "message_count", type = "u16"},
+]
+
+# gui_picker_preview (0x7D) sections
+
+[[sections]]
+opcode = "gui_picker_preview"
+id = 0x01
+name = "header"
+fields = [
+  {name = "visible", type = "u8"},
+  {name = "kind", type = "u8"},
+  {name = "title", type = "string16"},
+]
+
+# ── Command field layouts for custom-framed commands ───────────────────────
+#
+# Each [[command_fields]] entry describes the fixed/header fields of a
+# custom-framed opcode. The generator emits struct definitions and decode
+# functions that decode up to and including the last fixed-size field.
+# Variable-length tail content (counted arrays of complex items) is left
+# to hand-written decoders.
+
+[[command_fields]]
+opcode = "gui_tab_bar"
+fields = [
+  {name = "active_index", type = "u8"},
+  {name = "tab_count", type = "u8"},
+]
+
+[[command_fields]]
+opcode = "gui_theme"
+fields = [
+  {name = "color_count", type = "u8"},
+]
+
+[[command_fields]]
+opcode = "gui_breadcrumb"
+fields = [
+  {name = "segment_count", type = "u8"},
+]
+
+[[command_fields]]
+opcode = "gui_completion"
+fields = [
+  {name = "visible", type = "u8"},
+]
+# When visible, the encoder emits the popup placement plus a u16-counted list of
+# items (completion_encoder.ex encode_command/1). When hidden, only the visible
+# byte is present.
+conditional_tail = {guard = "visible == 1", fields = [
+  {name = "cursor_row", type = "u16"},
+  {name = "cursor_col", type = "u16"},
+  {name = "selected_offset", type = "u16"},
+  {name = "items", type = "counted_array", count_type = "u16", element = "completion_item"},
+]}
+
+[[command_fields]]
+opcode = "gui_which_key"
+fields = [
+  {name = "visible", type = "u8"},
+]
+
+[[command_fields]]
+opcode = "gui_minibuffer"
+fields = [
+  {name = "visible", type = "u8"},
+]
+
+[[command_fields]]
+opcode = "gui_hover_popup"
+fields = [
+  {name = "visible", type = "u8"},
+]
+
+[[command_fields]]
+opcode = "gui_signature_help"
+fields = [
+  {name = "visible", type = "u8"},
+]
+
+[[command_fields]]
+opcode = "gui_float_popup"
+fields = [
+  {name = "visible", type = "u8"},
+]
+
+[[command_fields]]
+opcode = "gui_split_separators"
+fields = [
+  {name = "bg", type = "rgb"},
+  {name = "vertical_count", type = "u8"},
+]
+
+[[command_fields]]
+opcode = "gui_git_status"
+fields = [
+  {name = "repo_state", type = "u8"},
+  {name = "syncing", type = "u8"},
+  {name = "ahead", type = "u16"},
+  {name = "behind", type = "u16"},
+]
+
+[[command_fields]]
+opcode = "gui_bottom_panel"
+fields = [
+  {name = "visible", type = "u8"},
+]
+
+[[command_fields]]
+opcode = "gui_change_summary"
+fields = [
+  {name = "visible", type = "u8"},
+  {name = "selected_index", type = "u16"},
+  {name = "entry_count", type = "u16"},
+]
+
+[[command_fields]]
+opcode = "gui_board"
+fields = [
+  {name = "visible", type = "u8"},
+  {name = "focused_card_id", type = "u32"},
+  {name = "card_count", type = "u16"},
+  {name = "filter_mode", type = "u8"},
+]
+
+[[command_fields]]
+opcode = "gui_agent_context"
+fields = [
+  {name = "visible", type = "u8"},
+]
+
+[[command_fields]]
+opcode = "gui_gutter_sep"
+fields = [
+  {name = "col", type = "u16"},
+  {name = "bg", type = "rgb"},
+]
+
+[[command_fields]]
+opcode = "gui_cursorline"
+fields = [
+  {name = "col", type = "u16"},
+  {name = "bg", type = "rgb"},
+]
+
+[[command_fields]]
+opcode = "gui_search_state"
+fields = [
+  {name = "active", type = "u8"},
+  {name = "match_count", type = "u16"},
+  {name = "current_index", type = "u16"},
+  {name = "flags", type = "u8"},
+]
+
+[[command_fields]]
+opcode = "gui_edit_timeline"
+fields = [
+  {name = "visible", type = "u8"},
+  {name = "viewing_index", type = "u16"},
+  {name = "entry_count", type = "u8"},
+]
+
+[[command_fields]]
+opcode = "gui_workspaces"
+fields = [
+  {name = "visible", type = "u8"},
+  {name = "active_workspace_id", type = "u16"},
+  {name = "mode", type = "u8"},
+  {name = "flags", type = "u8"},
+  {name = "workspace_count", type = "u8"},
+]
+
+[[command_fields]]
+opcode = "gui_notifications"
+fields = [
+  {name = "visible", type = "u8"},
+  {name = "notification_count", type = "u16"},
+]
+
+[[command_fields]]
+opcode = "gui_sidebars"
+fields = [
+  {name = "visible", type = "u8"},
+  {name = "sidebar_count", type = "u16"},
+]
+
+[[command_fields]]
+opcode = "gui_extension_overlay"
+fields = [
+  {name = "entry_count", type = "u8"},
+]
+
+[[command_fields]]
+opcode = "gui_extension_panel"
+fields = [
+  {name = "panel_count", type = "u8"},
+]
+
+[[command_fields]]
+opcode = "gui_file_tree"
+fields = [
+  {name = "visible", type = "u8"},
+  {name = "flags", type = "u8"},
+  {name = "status", type = "u8"},
+]
+
+[[command_fields]]
+opcode = "gui_tool_manager"
+fields = [
+  {name = "visible", type = "u8"},
+]

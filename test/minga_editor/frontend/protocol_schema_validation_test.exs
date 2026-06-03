@@ -6,12 +6,22 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
   This is the safety net that catches encoder/schema drift in CI. If someone
   adds a field to an encoder without updating the schema (or vice versa),
   these tests fail.
+
+  The exact byte layouts asserted here for picker/completion are decoded back by
+  the generated Rust/Go decoders in `rust/tui/src/protocol.rs` and
+  `go/tui/internal/protocol/generated_decode_test.go`. Those three fixtures must
+  stay in lockstep: a wire-format change has to be reflected in all three, or one
+  side silently tests a stale format.
   """
 
   use ExUnit.Case, async: true
 
+  alias Minga.Frontend.Adapter.GUI.CompletionEncoder
+  alias Minga.Frontend.Adapter.GUI.PickerEncoder
   alias Minga.Frontend.Adapter.GUI.StatusBarEncoder
   alias Minga.Frontend.Adapter.GUI.WindowEncoder
+  alias Minga.RenderModel.UI.Completion
+  alias Minga.RenderModel.UI.Picker
   alias Minga.RenderModel.Window, as: RenderWindow
   alias Minga.RenderModel.Window.DiagnosticRange
   alias Minga.RenderModel.Window.DocumentHighlight
@@ -57,7 +67,11 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
       "search_match" => 7,
       "diagnostic_range" => 9,
       "document_highlight" => 9,
-      "gutter_entry" => 10
+      "gutter_entry" => 10,
+      # hit_region.id is u16 on the wire (kind 1 + rect 8 + id 2). Pinning the
+      # schema-computed size here guards against the field silently widening to
+      # u32, which would desync the geometry section's hit_regions array.
+      "hit_region" => 11
     }
 
     for {name, expected_size} <- @expected_sizes do
@@ -261,6 +275,23 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
                  "but encoder did not emit it. Actual IDs: #{inspect(Enum.map(actual_ids, &hex/1))}"
       end
     end
+
+    test "every encoder-emitted section has a schema entry", %{sections: sections} do
+      schema_ids = sections["gui_window_content"] |> Enum.map(& &1["id"]) |> MapSet.new()
+
+      window = full_render_window()
+      binary = WindowEncoder.encode_window_content(window)
+
+      <<0x80, section_count::8, sections_binary::binary>> = binary
+      actual_ids = extract_section_ids(sections_binary, section_count)
+
+      for id <- actual_ids do
+        assert MapSet.member?(schema_ids, id),
+               "encoder emits gui_window_content section 0x#{Integer.to_string(id, 16)} " <>
+                 "but the schema has no entry for it. Schema IDs: " <>
+                 "#{inspect(schema_ids |> MapSet.to_list() |> Enum.sort() |> Enum.map(&hex/1))}"
+      end
+    end
   end
 
   describe "gui_window_content selection encoding" do
@@ -322,6 +353,19 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
                  "but encoder did not emit it. Actual IDs: #{inspect(Enum.map(actual_ids, &hex/1))}"
       end
     end
+
+    test "every encoder-emitted section has a schema entry", %{sections: sections} do
+      schema_ids = sections["gui_status_bar"] |> Enum.map(& &1["id"]) |> MapSet.new()
+
+      <<0x76, section_count::8, sections_binary::binary>> =
+        StatusBarEncoder.encode_command(full_status_bar_model())
+
+      for id <- extract_section_ids(sections_binary, section_count) do
+        assert MapSet.member?(schema_ids, id),
+               "encoder emits gui_status_bar section 0x#{Integer.to_string(id, 16)} " <>
+                 "but the schema has no entry for it"
+      end
+    end
   end
 
   describe "gui_gutter section IDs" do
@@ -359,6 +403,194 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
                "schema declares gui_gutter section 0x#{Integer.to_string(id, 16)} (#{name}) " <>
                  "but encoder did not emit it. Actual IDs: #{inspect(Enum.map(actual_ids, &hex/1))}"
       end
+    end
+
+    test "every encoder-emitted section has a schema entry", %{sections: sections} do
+      schema_ids = sections["gui_gutter"] |> Enum.map(& &1["id"]) |> MapSet.new()
+
+      gutter = %Gutter{
+        window_id: 1,
+        content_row: 0,
+        content_col: 0,
+        content_height: 10,
+        is_active: true,
+        content_width: 4,
+        cursor_line: 1,
+        line_number_style: :hybrid,
+        line_number_width: 4,
+        sign_col_width: 2,
+        entries: [%GutterEntry{buf_line: 1, display_type: :normal, sign_type: :none}]
+      }
+
+      commands = WindowEncoder.encode(minimal_render_window(gutter: gutter))
+      gutter_binary = Enum.find(commands, fn <<opcode, _::binary>> -> opcode == 0x7B end)
+      <<0x7B, section_count::8, sections_binary::binary>> = gutter_binary
+
+      for id <- extract_section_ids(sections_binary, section_count) do
+        assert MapSet.member?(schema_ids, id),
+               "encoder emits gui_gutter section 0x#{Integer.to_string(id, 16)} " <>
+                 "but the schema has no entry for it"
+      end
+    end
+  end
+
+  describe "gui_completion command fields match schema" do
+    test "visible completion encodes placement header and items per command_fields" do
+      item = %Completion.Item{kind: :function, label: "foo", detail: "bar"}
+
+      model = %Completion{
+        visible?: true,
+        cursor_row: 3,
+        cursor_col: 7,
+        selected_offset: 1,
+        items: [item]
+      }
+
+      # Schema command_fields: visible(u8), then a visible==1 tail of
+      # cursor_row(u16) + cursor_col(u16) + selected_offset(u16) +
+      # items(u16-counted completion_item).
+      <<_opcode, visible::8, cursor_row::16, cursor_col::16, selected_offset::16, item_count::16,
+        items::binary>> = CompletionEncoder.encode_command(model)
+
+      assert {visible, cursor_row, cursor_col, selected_offset, item_count} == {1, 3, 7, 1, 1}
+      # completion_item: kind(u8) + label(string16) + detail(string16). kind :function -> 1.
+      assert items == <<1::8, 3::16, "foo", 3::16, "bar">>
+    end
+
+    test "hidden completion encodes only the visible byte" do
+      assert <<_opcode, 0::8>> = CompletionEncoder.encode_command(%Completion{visible?: false})
+    end
+  end
+
+  describe "gui_picker items section matches schema" do
+    test "items section encodes picker_item fields per schema" do
+      item = %Picker.Item{
+        id: "1",
+        label: "file.ex",
+        description: "desc",
+        annotation: "ann",
+        icon_color: 0xAABBCC,
+        two_line?: false,
+        match_positions: [1, 4],
+        marked?: false
+      }
+
+      <<_opcode, section_count::8, sections_binary::binary>> =
+        PickerEncoder.encode_command(%Picker{visible?: true, items: [item]})
+
+      items_payload = extract_section_payload(sections_binary, section_count, 0x03)
+
+      # count(u16), then one picker_item: icon_color(u24) + flags(u8) +
+      # label(string16) + description(string16) + annotation(string16) +
+      # match_positions(u8-counted u16).
+      assert items_payload ==
+               <<1::16, 0xAA, 0xBB, 0xCC, 0::8, 7::16, "file.ex", 4::16, "desc", 3::16, "ann",
+                 2::8, 1::16, 4::16>>
+    end
+
+    test "picker_item flags pack two_line (bit 0) and marked (bit 1)" do
+      item = %Picker.Item{
+        id: "1",
+        label: "x",
+        two_line?: true,
+        marked?: true,
+        match_positions: []
+      }
+
+      <<_opcode, section_count::8, sections_binary::binary>> =
+        PickerEncoder.encode_command(%Picker{visible?: true, items: [item]})
+
+      items_payload = extract_section_payload(sections_binary, section_count, 0x03)
+
+      # count(1), icon_color(0), flags(0b11 = 3), label "x", empty desc/ann, 0 positions.
+      assert items_payload == <<1::16, 0::24, 3::8, 1::16, "x", 0::16, 0::16, 0::8>>
+    end
+
+    test "schema models every section the picker encoder emits", %{sections: sections} do
+      schema_ids = sections["gui_picker"] |> Enum.map(& &1["id"]) |> MapSet.new()
+
+      <<_opcode, section_count::8, sections_binary::binary>> =
+        PickerEncoder.encode_command(%Picker{
+          visible?: true,
+          items: [%Picker.Item{id: "1", label: "x"}]
+        })
+
+      actual_ids = extract_section_ids(sections_binary, section_count)
+
+      for id <- actual_ids do
+        assert MapSet.member?(schema_ids, id),
+               "encoder emits gui_picker section 0x#{Integer.to_string(id, 16)} " <>
+                 "but the schema has no entry for it"
+      end
+    end
+  end
+
+  describe "gui_picker variable sections match schema" do
+    test "header section encodes the full title/marked_count layout" do
+      model = %Picker{
+        visible?: true,
+        title: "Files",
+        selected_index: 2,
+        filtered_count: 10,
+        total_count: 100,
+        marked_count: 3,
+        has_preview?: true,
+        items: []
+      }
+
+      <<_opcode, section_count::8, sections_binary::binary>> =
+        PickerEncoder.encode_command(model)
+
+      header = extract_section_payload(sections_binary, section_count, 0x01)
+
+      # visible(u8=1), selected_index(u16), filtered_count(u16), total_count(u16),
+      # has_preview(u8), title(string16), marked_count(u16). total_count is u16.
+      assert header == <<1::8, 2::16, 10::16, 100::16, 1::8, 5::16, "Files", 3::16>>
+    end
+
+    test "query section encodes only the text string" do
+      <<_opcode, section_count::8, sections_binary::binary>> =
+        PickerEncoder.encode_command(%Picker{visible?: true, query: "hi", items: []})
+
+      assert extract_section_payload(sections_binary, section_count, 0x02) == <<2::16, "hi">>
+    end
+
+    test "action_menu section encodes the visible conditional tail" do
+      menu = %Picker.ActionMenu{selected_index: 1, actions: ["Open", "Delete"]}
+
+      <<_opcode, section_count::8, sections_binary::binary>> =
+        PickerEncoder.encode_command(%Picker{visible?: true, action_menu: menu, items: []})
+
+      payload = extract_section_payload(sections_binary, section_count, 0x04)
+
+      # visible(u8=1), then selected_index(u8), action count(u8), each action string16.
+      assert payload == <<1::8, 1::8, 2::8, 4::16, "Open", 6::16, "Delete">>
+    end
+
+    test "hidden action_menu encodes only the visible byte" do
+      <<_opcode, section_count::8, sections_binary::binary>> =
+        PickerEncoder.encode_command(%Picker{visible?: true, action_menu: nil, items: []})
+
+      assert extract_section_payload(sections_binary, section_count, 0x04) == <<0::8>>
+    end
+
+    test "load_status error encodes the status==2 message tail" do
+      <<_opcode, section_count::8, sections_binary::binary>> =
+        PickerEncoder.encode_command(%Picker{
+          visible?: true,
+          load_status: {:error, "boom"},
+          items: []
+        })
+
+      assert extract_section_payload(sections_binary, section_count, 0x06) ==
+               <<2::8, 4::16, "boom">>
+    end
+
+    test "load_status ready encodes only the status byte" do
+      <<_opcode, section_count::8, sections_binary::binary>> =
+        PickerEncoder.encode_command(%Picker{visible?: true, load_status: :ready, items: []})
+
+      assert extract_section_payload(sections_binary, section_count, 0x06) == <<0::8>>
     end
   end
 

@@ -445,6 +445,244 @@ func DecodeModelineSegment(data []byte, offset int) (ModelineSegment, int, error
 	}, pos, nil
 }
 
+func DecodeTabEntry(data []byte, offset int) (TabEntry, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+1, "flags"); err != nil {
+		return TabEntry{}, offset, err
+	}
+	flags := data[pos]
+	pos++
+	if err := decodeRequireLen(data, pos+4, "id"); err != nil {
+		return TabEntry{}, offset, err
+	}
+	id := decodeU32(data, pos)
+	pos += 4
+	if err := decodeRequireLen(data, pos+2, "workspace_id"); err != nil {
+		return TabEntry{}, offset, err
+	}
+	workspaceID := decodeU16(data, pos)
+	pos += 2
+	icon, pos, err := decodeString8(data, pos)
+	if err != nil {
+		return TabEntry{}, offset, err
+	}
+	label, pos, err := decodeString16(data, pos)
+	if err != nil {
+		return TabEntry{}, offset, err
+	}
+	if err := decodeRequireLen(data, pos+4, "tint_color"); err != nil {
+		return TabEntry{}, offset, err
+	}
+	tintColor := decodeU32(data, pos)
+	pos += 4
+	return TabEntry{
+		Flags:       flags,
+		ID:          id,
+		WorkspaceID: workspaceID,
+		Icon:        icon,
+		Label:       label,
+		TintColor:   tintColor,
+	}, pos, nil
+}
+
+func DecodeThemeColor(data []byte, offset int) (ThemeColor, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+1, "slot"); err != nil {
+		return ThemeColor{}, offset, err
+	}
+	slot := data[pos]
+	pos++
+	if err := decodeRequireLen(data, pos+3, "color"); err != nil {
+		return ThemeColor{}, offset, err
+	}
+	color := decodeU24(data, pos)
+	pos += 3
+	return ThemeColor{
+		Slot:  slot,
+		Color: color,
+	}, pos, nil
+}
+
+func DecodeCompletionItem(data []byte, offset int) (CompletionItem, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+1, "kind"); err != nil {
+		return CompletionItem{}, offset, err
+	}
+	kind := data[pos]
+	pos++
+	label, pos, err := decodeString16(data, pos)
+	if err != nil {
+		return CompletionItem{}, offset, err
+	}
+	detail, pos, err := decodeString16(data, pos)
+	if err != nil {
+		return CompletionItem{}, offset, err
+	}
+	return CompletionItem{
+		Kind:   kind,
+		Label:  label,
+		Detail: detail,
+	}, pos, nil
+}
+
+func DecodePickerItem(data []byte, offset int) (PickerItem, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+3, "icon_color"); err != nil {
+		return PickerItem{}, offset, err
+	}
+	iconColor := decodeU24(data, pos)
+	pos += 3
+	if err := decodeRequireLen(data, pos+1, "flags"); err != nil {
+		return PickerItem{}, offset, err
+	}
+	flags := data[pos]
+	pos++
+	label, pos, err := decodeString16(data, pos)
+	if err != nil {
+		return PickerItem{}, offset, err
+	}
+	description, pos, err := decodeString16(data, pos)
+	if err != nil {
+		return PickerItem{}, offset, err
+	}
+	annotation, pos, err := decodeString16(data, pos)
+	if err != nil {
+		return PickerItem{}, offset, err
+	}
+	if err := decodeRequireLen(data, pos+1, "match_positions count"); err != nil {
+		return PickerItem{}, offset, err
+	}
+	matchPositionsCount := int(data[pos])
+	pos += 1
+	if err := decodeRequireLen(data, pos+matchPositionsCount*2, "match_positions"); err != nil {
+		return PickerItem{}, offset, err
+	}
+	matchPositions := make([]uint16, 0, matchPositionsCount)
+	for i := 0; i < matchPositionsCount; i++ {
+		matchPositions = append(matchPositions, decodeU16(data, pos))
+		pos += 2
+	}
+	return PickerItem{
+		IconColor:      iconColor,
+		Flags:          flags,
+		Label:          label,
+		Description:    description,
+		Annotation:     annotation,
+		MatchPositions: matchPositions,
+	}, pos, nil
+}
+
+func DecodeWhichKeyBinding(data []byte, offset int) (WhichKeyBinding, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+1, "kind"); err != nil {
+		return WhichKeyBinding{}, offset, err
+	}
+	kind := data[pos]
+	pos++
+	key, pos, err := decodeString8(data, pos)
+	if err != nil {
+		return WhichKeyBinding{}, offset, err
+	}
+	desc, pos, err := decodeString16(data, pos)
+	if err != nil {
+		return WhichKeyBinding{}, offset, err
+	}
+	icon, pos, err := decodeString8(data, pos)
+	if err != nil {
+		return WhichKeyBinding{}, offset, err
+	}
+	return WhichKeyBinding{
+		Kind: kind,
+		Key:  key,
+		Desc: desc,
+		Icon: icon,
+	}, pos, nil
+}
+
+func DecodeChangeSummaryEntry(data []byte, offset int) (ChangeSummaryEntry, int, error) {
+	pos := offset
+	path, pos, err := decodeString16(data, pos)
+	if err != nil {
+		return ChangeSummaryEntry{}, offset, err
+	}
+	if err := decodeRequireLen(data, pos+1, "action"); err != nil {
+		return ChangeSummaryEntry{}, offset, err
+	}
+	action := data[pos]
+	pos++
+	if err := decodeRequireLen(data, pos+4, "lines_added"); err != nil {
+		return ChangeSummaryEntry{}, offset, err
+	}
+	linesAdded := decodeU32(data, pos)
+	pos += 4
+	if err := decodeRequireLen(data, pos+4, "lines_removed"); err != nil {
+		return ChangeSummaryEntry{}, offset, err
+	}
+	linesRemoved := decodeU32(data, pos)
+	pos += 4
+	return ChangeSummaryEntry{
+		Path:         path,
+		Action:       action,
+		LinesAdded:   linesAdded,
+		LinesRemoved: linesRemoved,
+	}, pos, nil
+}
+
+func DecodeGitStatusEntry(data []byte, offset int) (GitStatusEntry, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+4, "path_hash"); err != nil {
+		return GitStatusEntry{}, offset, err
+	}
+	pathHash := decodeU32(data, pos)
+	pos += 4
+	if err := decodeRequireLen(data, pos+1, "section"); err != nil {
+		return GitStatusEntry{}, offset, err
+	}
+	section := data[pos]
+	pos++
+	if err := decodeRequireLen(data, pos+1, "status"); err != nil {
+		return GitStatusEntry{}, offset, err
+	}
+	status := data[pos]
+	pos++
+	path, pos, err := decodeString16(data, pos)
+	if err != nil {
+		return GitStatusEntry{}, offset, err
+	}
+	return GitStatusEntry{
+		PathHash: pathHash,
+		Section:  section,
+		Status:   status,
+		Path:     path,
+	}, pos, nil
+}
+
+// Section decoders for gui_agent_chat
+
+func DecodeGuiAgentChatHeader(data []byte, offset int) (GuiAgentChatHeader, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+1, "visible"); err != nil {
+		return GuiAgentChatHeader{}, offset, err
+	}
+	visible := data[pos]
+	pos++
+	if err := decodeRequireLen(data, pos+1, "flags"); err != nil {
+		return GuiAgentChatHeader{}, offset, err
+	}
+	flags := data[pos]
+	pos++
+	if err := decodeRequireLen(data, pos+2, "message_count"); err != nil {
+		return GuiAgentChatHeader{}, offset, err
+	}
+	messageCount := decodeU16(data, pos)
+	pos += 2
+	return GuiAgentChatHeader{
+		Visible:      visible,
+		Flags:        flags,
+		MessageCount: messageCount,
+	}, pos, nil
+}
+
 // Section decoders for gui_gutter
 
 func DecodeGuiGutterWindow(data []byte, offset int) (GuiGutterWindow, int, error) {
@@ -526,7 +764,7 @@ func DecodeGuiGutterEntries(data []byte, offset int) ([]GutterEntry, int, error)
 	}
 	count := int(decodeU16(data, pos))
 	pos += 2
-	items := make([]GutterEntry, 0, count)
+	items := make([]GutterEntry, 0, min(count, len(data)-pos))
 	for i := 0; i < count; i++ {
 		item, nextPos, err := DecodeGutterEntry(data, pos)
 		if err != nil {
@@ -536,6 +774,179 @@ func DecodeGuiGutterEntries(data []byte, offset int) ([]GutterEntry, int, error)
 		items = append(items, item)
 	}
 	return items, pos, nil
+}
+
+// Section decoders for gui_picker
+
+func DecodeGuiPickerHeader(data []byte, offset int) (GuiPickerHeader, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+1, "visible"); err != nil {
+		return GuiPickerHeader{}, offset, err
+	}
+	visible := data[pos]
+	pos++
+	if err := decodeRequireLen(data, pos+2, "selected_index"); err != nil {
+		return GuiPickerHeader{}, offset, err
+	}
+	selectedIndex := decodeU16(data, pos)
+	pos += 2
+	if err := decodeRequireLen(data, pos+2, "filtered_count"); err != nil {
+		return GuiPickerHeader{}, offset, err
+	}
+	filteredCount := decodeU16(data, pos)
+	pos += 2
+	if err := decodeRequireLen(data, pos+2, "total_count"); err != nil {
+		return GuiPickerHeader{}, offset, err
+	}
+	totalCount := decodeU16(data, pos)
+	pos += 2
+	if err := decodeRequireLen(data, pos+1, "has_preview"); err != nil {
+		return GuiPickerHeader{}, offset, err
+	}
+	hasPreview := data[pos]
+	pos++
+	title, pos, err := decodeString16(data, pos)
+	if err != nil {
+		return GuiPickerHeader{}, offset, err
+	}
+	if err := decodeRequireLen(data, pos+2, "marked_count"); err != nil {
+		return GuiPickerHeader{}, offset, err
+	}
+	markedCount := decodeU16(data, pos)
+	pos += 2
+	return GuiPickerHeader{
+		Visible:       visible,
+		SelectedIndex: selectedIndex,
+		FilteredCount: filteredCount,
+		TotalCount:    totalCount,
+		HasPreview:    hasPreview,
+		Title:         title,
+		MarkedCount:   markedCount,
+	}, pos, nil
+}
+
+func DecodeGuiPickerQuery(data []byte, offset int) (GuiPickerQuery, int, error) {
+	pos := offset
+	text, pos, err := decodeString16(data, pos)
+	if err != nil {
+		return GuiPickerQuery{}, offset, err
+	}
+	return GuiPickerQuery{
+		Text: text,
+	}, pos, nil
+}
+
+func DecodeGuiPickerItems(data []byte, offset int) ([]PickerItem, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+2, "items count"); err != nil {
+		return nil, offset, err
+	}
+	count := int(decodeU16(data, pos))
+	pos += 2
+	items := make([]PickerItem, 0, min(count, len(data)-pos))
+	for i := 0; i < count; i++ {
+		item, nextPos, err := DecodePickerItem(data, pos)
+		if err != nil {
+			return nil, offset, err
+		}
+		pos = nextPos
+		items = append(items, item)
+	}
+	return items, pos, nil
+}
+
+func DecodeGuiPickerActionMenu(data []byte, offset int) (GuiPickerActionMenu, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+1, "visible"); err != nil {
+		return GuiPickerActionMenu{}, offset, err
+	}
+	visible := data[pos]
+	pos++
+	var selectedIndex uint8
+	var actions []string
+	if visible == 1 {
+		if err := decodeRequireLen(data, pos+1, "selected_index"); err != nil {
+			return GuiPickerActionMenu{}, offset, err
+		}
+		selectedIndex = data[pos]
+		pos++
+		if err := decodeRequireLen(data, pos+1, "actions count"); err != nil {
+			return GuiPickerActionMenu{}, offset, err
+		}
+		actionsCount := int(data[pos])
+		pos += 1
+		actions = make([]string, 0, min(actionsCount, len(data)-pos))
+		for i := 0; i < actionsCount; i++ {
+			item, nextPos, err := decodeString16(data, pos)
+			if err != nil {
+				return GuiPickerActionMenu{}, offset, err
+			}
+			pos = nextPos
+			actions = append(actions, item)
+		}
+	}
+	return GuiPickerActionMenu{
+		Visible:       visible,
+		SelectedIndex: selectedIndex,
+		Actions:       actions,
+	}, pos, nil
+}
+
+func DecodeGuiPickerModePrefix(data []byte, offset int) (GuiPickerModePrefix, int, error) {
+	pos := offset
+	text, pos, err := decodeString16(data, pos)
+	if err != nil {
+		return GuiPickerModePrefix{}, offset, err
+	}
+	return GuiPickerModePrefix{
+		Text: text,
+	}, pos, nil
+}
+
+func DecodeGuiPickerLoadStatus(data []byte, offset int) (GuiPickerLoadStatus, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+1, "status"); err != nil {
+		return GuiPickerLoadStatus{}, offset, err
+	}
+	status := data[pos]
+	pos++
+	var message string
+	if status == 2 {
+		var err error
+		message, pos, err = decodeString16(data, pos)
+		if err != nil {
+			return GuiPickerLoadStatus{}, offset, err
+		}
+	}
+	return GuiPickerLoadStatus{
+		Status:  status,
+		Message: message,
+	}, pos, nil
+}
+
+// Section decoders for gui_picker_preview
+
+func DecodeGuiPickerPreviewHeader(data []byte, offset int) (GuiPickerPreviewHeader, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+1, "visible"); err != nil {
+		return GuiPickerPreviewHeader{}, offset, err
+	}
+	visible := data[pos]
+	pos++
+	if err := decodeRequireLen(data, pos+1, "kind"); err != nil {
+		return GuiPickerPreviewHeader{}, offset, err
+	}
+	kind := data[pos]
+	pos++
+	title, pos, err := decodeString16(data, pos)
+	if err != nil {
+		return GuiPickerPreviewHeader{}, offset, err
+	}
+	return GuiPickerPreviewHeader{
+		Visible: visible,
+		Kind:    kind,
+		Title:   title,
+	}, pos, nil
 }
 
 // Section decoders for gui_status_bar
@@ -750,7 +1161,7 @@ func DecodeGuiStatusBarModeline(data []byte, offset int) (GuiStatusBarModeline, 
 	}
 	leftSegmentsCount := int(decodeU16(data, pos))
 	pos += 2
-	leftSegments := make([]ModelineSegment, 0, leftSegmentsCount)
+	leftSegments := make([]ModelineSegment, 0, min(leftSegmentsCount, len(data)-pos))
 	for i := 0; i < leftSegmentsCount; i++ {
 		item, nextPos, err := DecodeModelineSegment(data, pos)
 		if err != nil {
@@ -764,7 +1175,7 @@ func DecodeGuiStatusBarModeline(data []byte, offset int) (GuiStatusBarModeline, 
 	}
 	rightSegmentsCount := int(decodeU16(data, pos))
 	pos += 2
-	rightSegments := make([]ModelineSegment, 0, rightSegmentsCount)
+	rightSegments := make([]ModelineSegment, 0, min(rightSegmentsCount, len(data)-pos))
 	for i := 0; i < rightSegmentsCount; i++ {
 		item, nextPos, err := DecodeModelineSegment(data, pos)
 		if err != nil {
@@ -919,7 +1330,7 @@ func DecodeGuiWindowContentRows(data []byte, offset int) ([]Row, int, error) {
 	}
 	count := int(decodeU16(data, pos))
 	pos += 2
-	items := make([]Row, 0, count)
+	items := make([]Row, 0, min(count, len(data)-pos))
 	for i := 0; i < count; i++ {
 		item, nextPos, err := DecodeRow(data, pos)
 		if err != nil {
@@ -1046,7 +1457,7 @@ func DecodeGuiWindowContentAnnotations(data []byte, offset int) ([]Annotation, i
 	}
 	count := int(decodeU16(data, pos))
 	pos += 2
-	items := make([]Annotation, 0, count)
+	items := make([]Annotation, 0, min(count, len(data)-pos))
 	for i := 0; i < count; i++ {
 		item, nextPos, err := DecodeAnnotation(data, pos)
 		if err != nil {
@@ -1182,5 +1593,696 @@ func DecodeGuiWindowContentCursorline(data []byte, offset int) (GuiWindowContent
 	return GuiWindowContentCursorline{
 		Row: row,
 		BG:  bg,
+	}, pos, nil
+}
+
+// Section decoders for gui_window_rows_delta
+
+func DecodeGuiWindowRowsDeltaHeader(data []byte, offset int) (GuiWindowRowsDeltaHeader, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+2, "window_id"); err != nil {
+		return GuiWindowRowsDeltaHeader{}, offset, err
+	}
+	windowID := decodeU16(data, pos)
+	pos += 2
+	if err := decodeRequireLen(data, pos+4, "content_epoch"); err != nil {
+		return GuiWindowRowsDeltaHeader{}, offset, err
+	}
+	contentEpoch := decodeU32(data, pos)
+	pos += 4
+	if err := decodeRequireLen(data, pos+1, "flags"); err != nil {
+		return GuiWindowRowsDeltaHeader{}, offset, err
+	}
+	flags := data[pos]
+	pos++
+	if err := decodeRequireLen(data, pos+2, "cursor_row"); err != nil {
+		return GuiWindowRowsDeltaHeader{}, offset, err
+	}
+	cursorRow := decodeU16(data, pos)
+	pos += 2
+	if err := decodeRequireLen(data, pos+2, "cursor_col"); err != nil {
+		return GuiWindowRowsDeltaHeader{}, offset, err
+	}
+	cursorCol := decodeU16(data, pos)
+	pos += 2
+	if err := decodeRequireLen(data, pos+1, "cursor_shape"); err != nil {
+		return GuiWindowRowsDeltaHeader{}, offset, err
+	}
+	cursorShape := data[pos]
+	pos++
+	if err := decodeRequireLen(data, pos+2, "scroll_left"); err != nil {
+		return GuiWindowRowsDeltaHeader{}, offset, err
+	}
+	scrollLeft := decodeU16(data, pos)
+	pos += 2
+	return GuiWindowRowsDeltaHeader{
+		WindowID:     windowID,
+		ContentEpoch: contentEpoch,
+		Flags:        flags,
+		CursorRow:    cursorRow,
+		CursorCol:    cursorCol,
+		CursorShape:  cursorShape,
+		ScrollLeft:   scrollLeft,
+	}, pos, nil
+}
+
+func DecodeGuiWindowRowsDeltaRows(data []byte, offset int) ([]Row, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+2, "rows count"); err != nil {
+		return nil, offset, err
+	}
+	count := int(decodeU16(data, pos))
+	pos += 2
+	items := make([]Row, 0, min(count, len(data)-pos))
+	for i := 0; i < count; i++ {
+		item, nextPos, err := DecodeRow(data, pos)
+		if err != nil {
+			return nil, offset, err
+		}
+		pos = nextPos
+		items = append(items, item)
+	}
+	return items, pos, nil
+}
+
+// Section decoders for gui_window_viewport_delta
+
+func DecodeGuiWindowViewportDeltaHeader(data []byte, offset int) (GuiWindowViewportDeltaHeader, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+2, "window_id"); err != nil {
+		return GuiWindowViewportDeltaHeader{}, offset, err
+	}
+	windowID := decodeU16(data, pos)
+	pos += 2
+	if err := decodeRequireLen(data, pos+4, "content_epoch"); err != nil {
+		return GuiWindowViewportDeltaHeader{}, offset, err
+	}
+	contentEpoch := decodeU32(data, pos)
+	pos += 4
+	if err := decodeRequireLen(data, pos+1, "flags"); err != nil {
+		return GuiWindowViewportDeltaHeader{}, offset, err
+	}
+	flags := data[pos]
+	pos++
+	if err := decodeRequireLen(data, pos+2, "cursor_row"); err != nil {
+		return GuiWindowViewportDeltaHeader{}, offset, err
+	}
+	cursorRow := decodeU16(data, pos)
+	pos += 2
+	if err := decodeRequireLen(data, pos+2, "cursor_col"); err != nil {
+		return GuiWindowViewportDeltaHeader{}, offset, err
+	}
+	cursorCol := decodeU16(data, pos)
+	pos += 2
+	if err := decodeRequireLen(data, pos+1, "cursor_shape"); err != nil {
+		return GuiWindowViewportDeltaHeader{}, offset, err
+	}
+	cursorShape := data[pos]
+	pos++
+	if err := decodeRequireLen(data, pos+2, "scroll_left"); err != nil {
+		return GuiWindowViewportDeltaHeader{}, offset, err
+	}
+	scrollLeft := decodeU16(data, pos)
+	pos += 2
+	return GuiWindowViewportDeltaHeader{
+		WindowID:     windowID,
+		ContentEpoch: contentEpoch,
+		Flags:        flags,
+		CursorRow:    cursorRow,
+		CursorCol:    cursorCol,
+		CursorShape:  cursorShape,
+		ScrollLeft:   scrollLeft,
+	}, pos, nil
+}
+
+func DecodeGuiWindowViewportDeltaRows(data []byte, offset int) ([]Row, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+2, "rows count"); err != nil {
+		return nil, offset, err
+	}
+	count := int(decodeU16(data, pos))
+	pos += 2
+	items := make([]Row, 0, min(count, len(data)-pos))
+	for i := 0; i < count; i++ {
+		item, nextPos, err := DecodeRow(data, pos)
+		if err != nil {
+			return nil, offset, err
+		}
+		pos = nextPos
+		items = append(items, item)
+	}
+	return items, pos, nil
+}
+
+// Command field decoder for gui_tab_bar
+
+func DecodeGuiTabBarFields(data []byte, offset int) (GuiTabBarFields, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+1, "active_index"); err != nil {
+		return GuiTabBarFields{}, offset, err
+	}
+	activeIndex := data[pos]
+	pos++
+	if err := decodeRequireLen(data, pos+1, "tab_count"); err != nil {
+		return GuiTabBarFields{}, offset, err
+	}
+	tabCount := data[pos]
+	pos++
+	return GuiTabBarFields{
+		ActiveIndex: activeIndex,
+		TabCount:    tabCount,
+	}, pos, nil
+}
+
+// Command field decoder for gui_theme
+
+func DecodeGuiThemeFields(data []byte, offset int) (GuiThemeFields, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+1, "color_count"); err != nil {
+		return GuiThemeFields{}, offset, err
+	}
+	colorCount := data[pos]
+	pos++
+	return GuiThemeFields{
+		ColorCount: colorCount,
+	}, pos, nil
+}
+
+// Command field decoder for gui_breadcrumb
+
+func DecodeGuiBreadcrumbFields(data []byte, offset int) (GuiBreadcrumbFields, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+1, "segment_count"); err != nil {
+		return GuiBreadcrumbFields{}, offset, err
+	}
+	segmentCount := data[pos]
+	pos++
+	return GuiBreadcrumbFields{
+		SegmentCount: segmentCount,
+	}, pos, nil
+}
+
+// Command field decoder for gui_completion
+
+func DecodeGuiCompletionFields(data []byte, offset int) (GuiCompletionFields, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+1, "visible"); err != nil {
+		return GuiCompletionFields{}, offset, err
+	}
+	visible := data[pos]
+	pos++
+	var cursorRow uint16
+	var cursorCol uint16
+	var selectedOffset uint16
+	var items []CompletionItem
+	if visible == 1 {
+		if err := decodeRequireLen(data, pos+2, "cursor_row"); err != nil {
+			return GuiCompletionFields{}, offset, err
+		}
+		cursorRow = decodeU16(data, pos)
+		pos += 2
+		if err := decodeRequireLen(data, pos+2, "cursor_col"); err != nil {
+			return GuiCompletionFields{}, offset, err
+		}
+		cursorCol = decodeU16(data, pos)
+		pos += 2
+		if err := decodeRequireLen(data, pos+2, "selected_offset"); err != nil {
+			return GuiCompletionFields{}, offset, err
+		}
+		selectedOffset = decodeU16(data, pos)
+		pos += 2
+		if err := decodeRequireLen(data, pos+2, "items count"); err != nil {
+			return GuiCompletionFields{}, offset, err
+		}
+		itemsCount := int(decodeU16(data, pos))
+		pos += 2
+		items = make([]CompletionItem, 0, min(itemsCount, len(data)-pos))
+		for i := 0; i < itemsCount; i++ {
+			item, nextPos, err := DecodeCompletionItem(data, pos)
+			if err != nil {
+				return GuiCompletionFields{}, offset, err
+			}
+			pos = nextPos
+			items = append(items, item)
+		}
+	}
+	return GuiCompletionFields{
+		Visible:        visible,
+		CursorRow:      cursorRow,
+		CursorCol:      cursorCol,
+		SelectedOffset: selectedOffset,
+		Items:          items,
+	}, pos, nil
+}
+
+// Command field decoder for gui_which_key
+
+func DecodeGuiWhichKeyFields(data []byte, offset int) (GuiWhichKeyFields, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+1, "visible"); err != nil {
+		return GuiWhichKeyFields{}, offset, err
+	}
+	visible := data[pos]
+	pos++
+	return GuiWhichKeyFields{
+		Visible: visible,
+	}, pos, nil
+}
+
+// Command field decoder for gui_minibuffer
+
+func DecodeGuiMinibufferFields(data []byte, offset int) (GuiMinibufferFields, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+1, "visible"); err != nil {
+		return GuiMinibufferFields{}, offset, err
+	}
+	visible := data[pos]
+	pos++
+	return GuiMinibufferFields{
+		Visible: visible,
+	}, pos, nil
+}
+
+// Command field decoder for gui_hover_popup
+
+func DecodeGuiHoverPopupFields(data []byte, offset int) (GuiHoverPopupFields, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+1, "visible"); err != nil {
+		return GuiHoverPopupFields{}, offset, err
+	}
+	visible := data[pos]
+	pos++
+	return GuiHoverPopupFields{
+		Visible: visible,
+	}, pos, nil
+}
+
+// Command field decoder for gui_signature_help
+
+func DecodeGuiSignatureHelpFields(data []byte, offset int) (GuiSignatureHelpFields, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+1, "visible"); err != nil {
+		return GuiSignatureHelpFields{}, offset, err
+	}
+	visible := data[pos]
+	pos++
+	return GuiSignatureHelpFields{
+		Visible: visible,
+	}, pos, nil
+}
+
+// Command field decoder for gui_float_popup
+
+func DecodeGuiFloatPopupFields(data []byte, offset int) (GuiFloatPopupFields, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+1, "visible"); err != nil {
+		return GuiFloatPopupFields{}, offset, err
+	}
+	visible := data[pos]
+	pos++
+	return GuiFloatPopupFields{
+		Visible: visible,
+	}, pos, nil
+}
+
+// Command field decoder for gui_split_separators
+
+func DecodeGuiSplitSeparatorsFields(data []byte, offset int) (GuiSplitSeparatorsFields, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+3, "bg"); err != nil {
+		return GuiSplitSeparatorsFields{}, offset, err
+	}
+	bg := decodeU24(data, pos)
+	pos += 3
+	if err := decodeRequireLen(data, pos+1, "vertical_count"); err != nil {
+		return GuiSplitSeparatorsFields{}, offset, err
+	}
+	verticalCount := data[pos]
+	pos++
+	return GuiSplitSeparatorsFields{
+		BG:            bg,
+		VerticalCount: verticalCount,
+	}, pos, nil
+}
+
+// Command field decoder for gui_git_status
+
+func DecodeGuiGitStatusFields(data []byte, offset int) (GuiGitStatusFields, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+1, "repo_state"); err != nil {
+		return GuiGitStatusFields{}, offset, err
+	}
+	repoState := data[pos]
+	pos++
+	if err := decodeRequireLen(data, pos+1, "syncing"); err != nil {
+		return GuiGitStatusFields{}, offset, err
+	}
+	syncing := data[pos]
+	pos++
+	if err := decodeRequireLen(data, pos+2, "ahead"); err != nil {
+		return GuiGitStatusFields{}, offset, err
+	}
+	ahead := decodeU16(data, pos)
+	pos += 2
+	if err := decodeRequireLen(data, pos+2, "behind"); err != nil {
+		return GuiGitStatusFields{}, offset, err
+	}
+	behind := decodeU16(data, pos)
+	pos += 2
+	return GuiGitStatusFields{
+		RepoState: repoState,
+		Syncing:   syncing,
+		Ahead:     ahead,
+		Behind:    behind,
+	}, pos, nil
+}
+
+// Command field decoder for gui_bottom_panel
+
+func DecodeGuiBottomPanelFields(data []byte, offset int) (GuiBottomPanelFields, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+1, "visible"); err != nil {
+		return GuiBottomPanelFields{}, offset, err
+	}
+	visible := data[pos]
+	pos++
+	return GuiBottomPanelFields{
+		Visible: visible,
+	}, pos, nil
+}
+
+// Command field decoder for gui_change_summary
+
+func DecodeGuiChangeSummaryFields(data []byte, offset int) (GuiChangeSummaryFields, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+1, "visible"); err != nil {
+		return GuiChangeSummaryFields{}, offset, err
+	}
+	visible := data[pos]
+	pos++
+	if err := decodeRequireLen(data, pos+2, "selected_index"); err != nil {
+		return GuiChangeSummaryFields{}, offset, err
+	}
+	selectedIndex := decodeU16(data, pos)
+	pos += 2
+	if err := decodeRequireLen(data, pos+2, "entry_count"); err != nil {
+		return GuiChangeSummaryFields{}, offset, err
+	}
+	entryCount := decodeU16(data, pos)
+	pos += 2
+	return GuiChangeSummaryFields{
+		Visible:       visible,
+		SelectedIndex: selectedIndex,
+		EntryCount:    entryCount,
+	}, pos, nil
+}
+
+// Command field decoder for gui_board
+
+func DecodeGuiBoardFields(data []byte, offset int) (GuiBoardFields, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+1, "visible"); err != nil {
+		return GuiBoardFields{}, offset, err
+	}
+	visible := data[pos]
+	pos++
+	if err := decodeRequireLen(data, pos+4, "focused_card_id"); err != nil {
+		return GuiBoardFields{}, offset, err
+	}
+	focusedCardID := decodeU32(data, pos)
+	pos += 4
+	if err := decodeRequireLen(data, pos+2, "card_count"); err != nil {
+		return GuiBoardFields{}, offset, err
+	}
+	cardCount := decodeU16(data, pos)
+	pos += 2
+	if err := decodeRequireLen(data, pos+1, "filter_mode"); err != nil {
+		return GuiBoardFields{}, offset, err
+	}
+	filterMode := data[pos]
+	pos++
+	return GuiBoardFields{
+		Visible:       visible,
+		FocusedCardID: focusedCardID,
+		CardCount:     cardCount,
+		FilterMode:    filterMode,
+	}, pos, nil
+}
+
+// Command field decoder for gui_agent_context
+
+func DecodeGuiAgentContextFields(data []byte, offset int) (GuiAgentContextFields, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+1, "visible"); err != nil {
+		return GuiAgentContextFields{}, offset, err
+	}
+	visible := data[pos]
+	pos++
+	return GuiAgentContextFields{
+		Visible: visible,
+	}, pos, nil
+}
+
+// Command field decoder for gui_gutter_sep
+
+func DecodeGuiGutterSepFields(data []byte, offset int) (GuiGutterSepFields, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+2, "col"); err != nil {
+		return GuiGutterSepFields{}, offset, err
+	}
+	col := decodeU16(data, pos)
+	pos += 2
+	if err := decodeRequireLen(data, pos+3, "bg"); err != nil {
+		return GuiGutterSepFields{}, offset, err
+	}
+	bg := decodeU24(data, pos)
+	pos += 3
+	return GuiGutterSepFields{
+		Col: col,
+		BG:  bg,
+	}, pos, nil
+}
+
+// Command field decoder for gui_cursorline
+
+func DecodeGuiCursorlineFields(data []byte, offset int) (GuiCursorlineFields, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+2, "col"); err != nil {
+		return GuiCursorlineFields{}, offset, err
+	}
+	col := decodeU16(data, pos)
+	pos += 2
+	if err := decodeRequireLen(data, pos+3, "bg"); err != nil {
+		return GuiCursorlineFields{}, offset, err
+	}
+	bg := decodeU24(data, pos)
+	pos += 3
+	return GuiCursorlineFields{
+		Col: col,
+		BG:  bg,
+	}, pos, nil
+}
+
+// Command field decoder for gui_search_state
+
+func DecodeGuiSearchStateFields(data []byte, offset int) (GuiSearchStateFields, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+1, "active"); err != nil {
+		return GuiSearchStateFields{}, offset, err
+	}
+	active := data[pos]
+	pos++
+	if err := decodeRequireLen(data, pos+2, "match_count"); err != nil {
+		return GuiSearchStateFields{}, offset, err
+	}
+	matchCount := decodeU16(data, pos)
+	pos += 2
+	if err := decodeRequireLen(data, pos+2, "current_index"); err != nil {
+		return GuiSearchStateFields{}, offset, err
+	}
+	currentIndex := decodeU16(data, pos)
+	pos += 2
+	if err := decodeRequireLen(data, pos+1, "flags"); err != nil {
+		return GuiSearchStateFields{}, offset, err
+	}
+	flags := data[pos]
+	pos++
+	return GuiSearchStateFields{
+		Active:       active,
+		MatchCount:   matchCount,
+		CurrentIndex: currentIndex,
+		Flags:        flags,
+	}, pos, nil
+}
+
+// Command field decoder for gui_edit_timeline
+
+func DecodeGuiEditTimelineFields(data []byte, offset int) (GuiEditTimelineFields, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+1, "visible"); err != nil {
+		return GuiEditTimelineFields{}, offset, err
+	}
+	visible := data[pos]
+	pos++
+	if err := decodeRequireLen(data, pos+2, "viewing_index"); err != nil {
+		return GuiEditTimelineFields{}, offset, err
+	}
+	viewingIndex := decodeU16(data, pos)
+	pos += 2
+	if err := decodeRequireLen(data, pos+1, "entry_count"); err != nil {
+		return GuiEditTimelineFields{}, offset, err
+	}
+	entryCount := data[pos]
+	pos++
+	return GuiEditTimelineFields{
+		Visible:      visible,
+		ViewingIndex: viewingIndex,
+		EntryCount:   entryCount,
+	}, pos, nil
+}
+
+// Command field decoder for gui_workspaces
+
+func DecodeGuiWorkspacesFields(data []byte, offset int) (GuiWorkspacesFields, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+1, "visible"); err != nil {
+		return GuiWorkspacesFields{}, offset, err
+	}
+	visible := data[pos]
+	pos++
+	if err := decodeRequireLen(data, pos+2, "active_workspace_id"); err != nil {
+		return GuiWorkspacesFields{}, offset, err
+	}
+	activeWorkspaceID := decodeU16(data, pos)
+	pos += 2
+	if err := decodeRequireLen(data, pos+1, "mode"); err != nil {
+		return GuiWorkspacesFields{}, offset, err
+	}
+	mode := data[pos]
+	pos++
+	if err := decodeRequireLen(data, pos+1, "flags"); err != nil {
+		return GuiWorkspacesFields{}, offset, err
+	}
+	flags := data[pos]
+	pos++
+	if err := decodeRequireLen(data, pos+1, "workspace_count"); err != nil {
+		return GuiWorkspacesFields{}, offset, err
+	}
+	workspaceCount := data[pos]
+	pos++
+	return GuiWorkspacesFields{
+		Visible:           visible,
+		ActiveWorkspaceID: activeWorkspaceID,
+		Mode:              mode,
+		Flags:             flags,
+		WorkspaceCount:    workspaceCount,
+	}, pos, nil
+}
+
+// Command field decoder for gui_notifications
+
+func DecodeGuiNotificationsFields(data []byte, offset int) (GuiNotificationsFields, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+1, "visible"); err != nil {
+		return GuiNotificationsFields{}, offset, err
+	}
+	visible := data[pos]
+	pos++
+	if err := decodeRequireLen(data, pos+2, "notification_count"); err != nil {
+		return GuiNotificationsFields{}, offset, err
+	}
+	notificationCount := decodeU16(data, pos)
+	pos += 2
+	return GuiNotificationsFields{
+		Visible:           visible,
+		NotificationCount: notificationCount,
+	}, pos, nil
+}
+
+// Command field decoder for gui_sidebars
+
+func DecodeGuiSidebarsFields(data []byte, offset int) (GuiSidebarsFields, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+1, "visible"); err != nil {
+		return GuiSidebarsFields{}, offset, err
+	}
+	visible := data[pos]
+	pos++
+	if err := decodeRequireLen(data, pos+2, "sidebar_count"); err != nil {
+		return GuiSidebarsFields{}, offset, err
+	}
+	sidebarCount := decodeU16(data, pos)
+	pos += 2
+	return GuiSidebarsFields{
+		Visible:      visible,
+		SidebarCount: sidebarCount,
+	}, pos, nil
+}
+
+// Command field decoder for gui_extension_overlay
+
+func DecodeGuiExtensionOverlayFields(data []byte, offset int) (GuiExtensionOverlayFields, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+1, "entry_count"); err != nil {
+		return GuiExtensionOverlayFields{}, offset, err
+	}
+	entryCount := data[pos]
+	pos++
+	return GuiExtensionOverlayFields{
+		EntryCount: entryCount,
+	}, pos, nil
+}
+
+// Command field decoder for gui_extension_panel
+
+func DecodeGuiExtensionPanelFields(data []byte, offset int) (GuiExtensionPanelFields, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+1, "panel_count"); err != nil {
+		return GuiExtensionPanelFields{}, offset, err
+	}
+	panelCount := data[pos]
+	pos++
+	return GuiExtensionPanelFields{
+		PanelCount: panelCount,
+	}, pos, nil
+}
+
+// Command field decoder for gui_file_tree
+
+func DecodeGuiFileTreeFields(data []byte, offset int) (GuiFileTreeFields, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+1, "visible"); err != nil {
+		return GuiFileTreeFields{}, offset, err
+	}
+	visible := data[pos]
+	pos++
+	if err := decodeRequireLen(data, pos+1, "flags"); err != nil {
+		return GuiFileTreeFields{}, offset, err
+	}
+	flags := data[pos]
+	pos++
+	if err := decodeRequireLen(data, pos+1, "status"); err != nil {
+		return GuiFileTreeFields{}, offset, err
+	}
+	status := data[pos]
+	pos++
+	return GuiFileTreeFields{
+		Visible: visible,
+		Flags:   flags,
+		Status:  status,
+	}, pos, nil
+}
+
+// Command field decoder for gui_tool_manager
+
+func DecodeGuiToolManagerFields(data []byte, offset int) (GuiToolManagerFields, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+1, "visible"); err != nil {
+		return GuiToolManagerFields{}, offset, err
+	}
+	visible := data[pos]
+	pos++
+	return GuiToolManagerFields{
+		Visible: visible,
 	}, pos, nil
 }
