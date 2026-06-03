@@ -93,6 +93,53 @@ pub struct ModelineSegment {
     pub target: String,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TabEntry {
+    pub flags: u8,
+    pub id: u32,
+    pub workspace_id: u16,
+    pub icon: String,
+    pub label: String,
+    pub tint_color: u32,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ThemeColor {
+    pub slot: u8,
+    pub color: u32,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CompletionItem {
+    pub kind: u8,
+    pub label: String,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WhichKeyBinding {
+    pub kind: u8,
+    pub key: String,
+    pub desc: String,
+    pub icon: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ChangeSummaryEntry {
+    pub path: String,
+    pub action: u8,
+    pub lines_added: u32,
+    pub lines_removed: u32,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GitStatusEntry {
+    pub path_hash: u32,
+    pub section: u8,
+    pub status: u8,
+    pub path: String,
+}
+
 
 pub const RECT_SIZE: usize = 8;
 pub const SPAN_SIZE: usize = 13;
@@ -100,6 +147,7 @@ pub const SEARCH_MATCH_SIZE: usize = 7;
 pub const DIAGNOSTIC_RANGE_SIZE: usize = 9;
 pub const DOCUMENT_HIGHLIGHT_SIZE: usize = 9;
 pub const HIT_REGION_SIZE: usize = 11;
+pub const THEME_COLOR_SIZE: usize = 4;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct GuiWindowContentHeader {
@@ -251,5 +299,229 @@ pub struct GuiGutterConfig {
     pub line_number_style: u8,
     pub line_number_width: u8,
     pub sign_col_width: u8,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct GuiWindowViewportDeltaHeader {
+    pub window_id: u16,
+    pub content_epoch: u32,
+    pub flags: u8,
+    pub cursor_row: u16,
+    pub cursor_col: u16,
+    pub cursor_shape: u8,
+    pub scroll_left: u16,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct GuiWindowRowsDeltaHeader {
+    pub window_id: u16,
+    pub content_epoch: u32,
+    pub flags: u8,
+    pub cursor_row: u16,
+    pub cursor_col: u16,
+    pub cursor_shape: u8,
+    pub scroll_left: u16,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct GuiPickerHeader {
+    pub visible: u8,
+    pub selected_index: u16,
+    pub item_count: u16,
+    pub total_count: u32,
+    pub flags: u8,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GuiPickerQuery {
+    pub text: String,
+    pub cursor_pos: u16,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct GuiPickerActionMenu {
+    pub visible: u8,
+    pub selected_index: u8,
+    pub item_count: u8,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GuiPickerModePrefix {
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GuiPickerLoadStatus {
+    pub status: u8,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct GuiAgentChatHeader {
+    pub visible: u8,
+    pub flags: u8,
+    pub message_count: u16,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GuiPickerPreviewHeader {
+    pub visible: u8,
+    pub kind: u8,
+    pub title: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuiTabBarFields {
+    pub active_index: u8,
+    pub tab_count: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuiThemeFields {
+    pub color_count: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuiBreadcrumbFields {
+    pub segment_count: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuiCompletionFields {
+    pub visible: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuiWhichKeyFields {
+    pub visible: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuiMinibufferFields {
+    pub visible: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuiHoverPopupFields {
+    pub visible: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuiSignatureHelpFields {
+    pub visible: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuiFloatPopupFields {
+    pub visible: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuiSplitSeparatorsFields {
+    pub bg: u32,
+    pub vertical_count: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuiGitStatusFields {
+    pub repo_state: u8,
+    pub syncing: u8,
+    pub ahead: u16,
+    pub behind: u16,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuiBottomPanelFields {
+    pub visible: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuiChangeSummaryFields {
+    pub visible: u8,
+    pub selected_index: u16,
+    pub entry_count: u16,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuiBoardFields {
+    pub visible: u8,
+    pub focused_card_id: u32,
+    pub card_count: u16,
+    pub filter_mode: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuiAgentContextFields {
+    pub visible: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuiGutterSepFields {
+    pub col: u16,
+    pub bg: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuiCursorlineFields {
+    pub col: u16,
+    pub bg: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuiSearchStateFields {
+    pub active: u8,
+    pub match_count: u16,
+    pub current_index: u16,
+    pub flags: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuiEditTimelineFields {
+    pub visible: u8,
+    pub viewing_index: u16,
+    pub entry_count: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuiWorkspacesFields {
+    pub visible: u8,
+    pub active_workspace_id: u16,
+    pub mode: u8,
+    pub flags: u8,
+    pub workspace_count: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuiNotificationsFields {
+    pub visible: u8,
+    pub notification_count: u16,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuiSidebarsFields {
+    pub visible: u8,
+    pub sidebar_count: u16,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuiExtensionOverlayFields {
+    pub entry_count: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuiExtensionPanelFields {
+    pub panel_count: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuiFileTreeFields {
+    pub visible: u8,
+    pub flags: u8,
+    pub status: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuiToolManagerFields {
+    pub visible: u8,
 }
 

@@ -83,6 +83,47 @@ type ModelineSegment struct {
 	Target string
 }
 
+type TabEntry struct {
+	Flags       uint8
+	ID          uint32
+	WorkspaceID uint16
+	Icon        string
+	Label       string
+	TintColor   uint32
+}
+
+type ThemeColor struct {
+	Slot  uint8
+	Color uint32
+}
+
+type CompletionItem struct {
+	Kind   uint8
+	Label  string
+	Detail string
+}
+
+type WhichKeyBinding struct {
+	Kind uint8
+	Key  string
+	Desc string
+	Icon string
+}
+
+type ChangeSummaryEntry struct {
+	Path         string
+	Action       uint8
+	LinesAdded   uint32
+	LinesRemoved uint32
+}
+
+type GitStatusEntry struct {
+	PathHash uint32
+	Section  uint8
+	Status   uint8
+	Path     string
+}
+
 const (
 	RectSize              = 8
 	SpanSize              = 13
@@ -90,6 +131,7 @@ const (
 	DiagnosticRangeSize   = 9
 	DocumentHighlightSize = 9
 	HitRegionSize         = 11
+	ThemeColorSize        = 4
 )
 
 type GuiWindowContentHeader struct {
@@ -224,4 +266,193 @@ type GuiGutterConfig struct {
 	LineNumberStyle uint8
 	LineNumberWidth uint8
 	SignColWidth    uint8
+}
+
+type GuiWindowViewportDeltaHeader struct {
+	WindowID     uint16
+	ContentEpoch uint32
+	Flags        uint8
+	CursorRow    uint16
+	CursorCol    uint16
+	CursorShape  uint8
+	ScrollLeft   uint16
+}
+
+type GuiWindowRowsDeltaHeader struct {
+	WindowID     uint16
+	ContentEpoch uint32
+	Flags        uint8
+	CursorRow    uint16
+	CursorCol    uint16
+	CursorShape  uint8
+	ScrollLeft   uint16
+}
+
+type GuiPickerHeader struct {
+	Visible       uint8
+	SelectedIndex uint16
+	ItemCount     uint16
+	TotalCount    uint32
+	Flags         uint8
+}
+
+type GuiPickerQuery struct {
+	Text      string
+	CursorPos uint16
+}
+
+type GuiPickerActionMenu struct {
+	Visible       uint8
+	SelectedIndex uint8
+	ItemCount     uint8
+}
+
+type GuiPickerModePrefix struct {
+	Text string
+}
+
+type GuiPickerLoadStatus struct {
+	Status  uint8
+	Message string
+}
+
+type GuiAgentChatHeader struct {
+	Visible      uint8
+	Flags        uint8
+	MessageCount uint16
+}
+
+type GuiPickerPreviewHeader struct {
+	Visible uint8
+	Kind    uint8
+	Title   string
+}
+
+type GuiTabBarFields struct {
+	ActiveIndex uint8
+	TabCount    uint8
+}
+
+type GuiThemeFields struct {
+	ColorCount uint8
+}
+
+type GuiBreadcrumbFields struct {
+	SegmentCount uint8
+}
+
+type GuiCompletionFields struct {
+	Visible uint8
+}
+
+type GuiWhichKeyFields struct {
+	Visible uint8
+}
+
+type GuiMinibufferFields struct {
+	Visible uint8
+}
+
+type GuiHoverPopupFields struct {
+	Visible uint8
+}
+
+type GuiSignatureHelpFields struct {
+	Visible uint8
+}
+
+type GuiFloatPopupFields struct {
+	Visible uint8
+}
+
+type GuiSplitSeparatorsFields struct {
+	BG            uint32
+	VerticalCount uint8
+}
+
+type GuiGitStatusFields struct {
+	RepoState uint8
+	Syncing   uint8
+	Ahead     uint16
+	Behind    uint16
+}
+
+type GuiBottomPanelFields struct {
+	Visible uint8
+}
+
+type GuiChangeSummaryFields struct {
+	Visible       uint8
+	SelectedIndex uint16
+	EntryCount    uint16
+}
+
+type GuiBoardFields struct {
+	Visible       uint8
+	FocusedCardID uint32
+	CardCount     uint16
+	FilterMode    uint8
+}
+
+type GuiAgentContextFields struct {
+	Visible uint8
+}
+
+type GuiGutterSepFields struct {
+	Col uint16
+	BG  uint32
+}
+
+type GuiCursorlineFields struct {
+	Col uint16
+	BG  uint32
+}
+
+type GuiSearchStateFields struct {
+	Active       uint8
+	MatchCount   uint16
+	CurrentIndex uint16
+	Flags        uint8
+}
+
+type GuiEditTimelineFields struct {
+	Visible      uint8
+	ViewingIndex uint16
+	EntryCount   uint8
+}
+
+type GuiWorkspacesFields struct {
+	Visible           uint8
+	ActiveWorkspaceID uint16
+	Mode              uint8
+	Flags             uint8
+	WorkspaceCount    uint8
+}
+
+type GuiNotificationsFields struct {
+	Visible           uint8
+	NotificationCount uint16
+}
+
+type GuiSidebarsFields struct {
+	Visible      uint8
+	SidebarCount uint16
+}
+
+type GuiExtensionOverlayFields struct {
+	EntryCount uint8
+}
+
+type GuiExtensionPanelFields struct {
+	PanelCount uint8
+}
+
+type GuiFileTreeFields struct {
+	Visible uint8
+	Flags   uint8
+	Status  uint8
+}
+
+type GuiToolManagerFields struct {
+	Visible uint8
 }

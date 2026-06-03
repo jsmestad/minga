@@ -328,6 +328,136 @@ pub fn decode_modeline_segment(bytes: &[u8], offset: usize) -> Result<(ModelineS
     }, pos - offset))
 }
 
+pub fn decode_tab_entry(bytes: &[u8], offset: usize) -> Result<(TabEntry, usize), DecodeError> {
+    let mut pos = offset;
+    require_len(bytes, pos + 1, "flags")?;
+    let flags = bytes[pos];
+    pos += 1;
+    require_len(bytes, pos + 4, "id")?;
+    let id = read_u32(bytes, pos);
+    pos += 4;
+    require_len(bytes, pos + 2, "workspace_id")?;
+    let workspace_id = read_u16(bytes, pos);
+    pos += 2;
+    let icon = read_string8(bytes, &mut pos)?;
+    let label = read_string16(bytes, &mut pos)?;
+    require_len(bytes, pos + 4, "tint_color")?;
+    let tint_color = read_u32(bytes, pos);
+    pos += 4;
+    Ok((TabEntry {
+        flags,
+        id,
+        workspace_id,
+        icon,
+        label,
+        tint_color,
+    }, pos - offset))
+}
+
+pub fn decode_theme_color(bytes: &[u8], offset: usize) -> Result<(ThemeColor, usize), DecodeError> {
+    let mut pos = offset;
+    require_len(bytes, pos + 1, "slot")?;
+    let slot = bytes[pos];
+    pos += 1;
+    require_len(bytes, pos + 3, "color")?;
+    let color = read_u24(bytes, pos);
+    pos += 3;
+    Ok((ThemeColor {
+        slot,
+        color,
+    }, pos - offset))
+}
+
+pub fn decode_completion_item(bytes: &[u8], offset: usize) -> Result<(CompletionItem, usize), DecodeError> {
+    let mut pos = offset;
+    require_len(bytes, pos + 1, "kind")?;
+    let kind = bytes[pos];
+    pos += 1;
+    let label = read_string16(bytes, &mut pos)?;
+    let detail = read_string16(bytes, &mut pos)?;
+    Ok((CompletionItem {
+        kind,
+        label,
+        detail,
+    }, pos - offset))
+}
+
+pub fn decode_which_key_binding(bytes: &[u8], offset: usize) -> Result<(WhichKeyBinding, usize), DecodeError> {
+    let mut pos = offset;
+    require_len(bytes, pos + 1, "kind")?;
+    let kind = bytes[pos];
+    pos += 1;
+    let key = read_string8(bytes, &mut pos)?;
+    let desc = read_string16(bytes, &mut pos)?;
+    let icon = read_string8(bytes, &mut pos)?;
+    Ok((WhichKeyBinding {
+        kind,
+        key,
+        desc,
+        icon,
+    }, pos - offset))
+}
+
+pub fn decode_change_summary_entry(bytes: &[u8], offset: usize) -> Result<(ChangeSummaryEntry, usize), DecodeError> {
+    let mut pos = offset;
+    let path = read_string16(bytes, &mut pos)?;
+    require_len(bytes, pos + 1, "action")?;
+    let action = bytes[pos];
+    pos += 1;
+    require_len(bytes, pos + 4, "lines_added")?;
+    let lines_added = read_u32(bytes, pos);
+    pos += 4;
+    require_len(bytes, pos + 4, "lines_removed")?;
+    let lines_removed = read_u32(bytes, pos);
+    pos += 4;
+    Ok((ChangeSummaryEntry {
+        path,
+        action,
+        lines_added,
+        lines_removed,
+    }, pos - offset))
+}
+
+pub fn decode_git_status_entry(bytes: &[u8], offset: usize) -> Result<(GitStatusEntry, usize), DecodeError> {
+    let mut pos = offset;
+    require_len(bytes, pos + 4, "path_hash")?;
+    let path_hash = read_u32(bytes, pos);
+    pos += 4;
+    require_len(bytes, pos + 1, "section")?;
+    let section = bytes[pos];
+    pos += 1;
+    require_len(bytes, pos + 1, "status")?;
+    let status = bytes[pos];
+    pos += 1;
+    let path = read_string16(bytes, &mut pos)?;
+    Ok((GitStatusEntry {
+        path_hash,
+        section,
+        status,
+        path,
+    }, pos - offset))
+}
+
+
+// Section decoders for gui_agent_chat
+
+pub fn decode_gui_agent_chat_header(bytes: &[u8], offset: usize) -> Result<(GuiAgentChatHeader, usize), DecodeError> {
+    let mut pos = offset;
+    require_len(bytes, pos + 1, "visible")?;
+    let visible = bytes[pos];
+    pos += 1;
+    require_len(bytes, pos + 1, "flags")?;
+    let flags = bytes[pos];
+    pos += 1;
+    require_len(bytes, pos + 2, "message_count")?;
+    let message_count = read_u16(bytes, pos);
+    pos += 2;
+    Ok((GuiAgentChatHeader {
+        visible,
+        flags,
+        message_count,
+    }, pos - offset))
+}
 
 // Section decoders for gui_gutter
 
@@ -395,6 +525,102 @@ pub fn decode_gui_gutter_entries(bytes: &[u8], offset: usize) -> Result<(Vec<Gut
         items.push(item);
     }
     Ok((items, pos - offset))
+}
+
+// Section decoders for gui_picker
+
+pub fn decode_gui_picker_header(bytes: &[u8], offset: usize) -> Result<(GuiPickerHeader, usize), DecodeError> {
+    let mut pos = offset;
+    require_len(bytes, pos + 1, "visible")?;
+    let visible = bytes[pos];
+    pos += 1;
+    require_len(bytes, pos + 2, "selected_index")?;
+    let selected_index = read_u16(bytes, pos);
+    pos += 2;
+    require_len(bytes, pos + 2, "item_count")?;
+    let item_count = read_u16(bytes, pos);
+    pos += 2;
+    require_len(bytes, pos + 4, "total_count")?;
+    let total_count = read_u32(bytes, pos);
+    pos += 4;
+    require_len(bytes, pos + 1, "flags")?;
+    let flags = bytes[pos];
+    pos += 1;
+    Ok((GuiPickerHeader {
+        visible,
+        selected_index,
+        item_count,
+        total_count,
+        flags,
+    }, pos - offset))
+}
+
+pub fn decode_gui_picker_query(bytes: &[u8], offset: usize) -> Result<(GuiPickerQuery, usize), DecodeError> {
+    let mut pos = offset;
+    let text = read_string16(bytes, &mut pos)?;
+    require_len(bytes, pos + 2, "cursor_pos")?;
+    let cursor_pos = read_u16(bytes, pos);
+    pos += 2;
+    Ok((GuiPickerQuery {
+        text,
+        cursor_pos,
+    }, pos - offset))
+}
+
+pub fn decode_gui_picker_action_menu(bytes: &[u8], offset: usize) -> Result<(GuiPickerActionMenu, usize), DecodeError> {
+    let mut pos = offset;
+    require_len(bytes, pos + 1, "visible")?;
+    let visible = bytes[pos];
+    pos += 1;
+    require_len(bytes, pos + 1, "selected_index")?;
+    let selected_index = bytes[pos];
+    pos += 1;
+    require_len(bytes, pos + 1, "item_count")?;
+    let item_count = bytes[pos];
+    pos += 1;
+    Ok((GuiPickerActionMenu {
+        visible,
+        selected_index,
+        item_count,
+    }, pos - offset))
+}
+
+pub fn decode_gui_picker_mode_prefix(bytes: &[u8], offset: usize) -> Result<(GuiPickerModePrefix, usize), DecodeError> {
+    let mut pos = offset;
+    let text = read_string16(bytes, &mut pos)?;
+    Ok((GuiPickerModePrefix {
+        text,
+    }, pos - offset))
+}
+
+pub fn decode_gui_picker_load_status(bytes: &[u8], offset: usize) -> Result<(GuiPickerLoadStatus, usize), DecodeError> {
+    let mut pos = offset;
+    require_len(bytes, pos + 1, "status")?;
+    let status = bytes[pos];
+    pos += 1;
+    let message = read_string16(bytes, &mut pos)?;
+    Ok((GuiPickerLoadStatus {
+        status,
+        message,
+    }, pos - offset))
+}
+
+// Section decoders for gui_picker_preview
+
+pub fn decode_gui_picker_preview_header(bytes: &[u8], offset: usize) -> Result<(GuiPickerPreviewHeader, usize), DecodeError> {
+    let mut pos = offset;
+    require_len(bytes, pos + 1, "visible")?;
+    let visible = bytes[pos];
+    pos += 1;
+    require_len(bytes, pos + 1, "kind")?;
+    let kind = bytes[pos];
+    pos += 1;
+    let title = read_string16(bytes, &mut pos)?;
+    Ok((GuiPickerPreviewHeader {
+        visible,
+        kind,
+        title,
+    }, pos - offset))
 }
 
 // Section decoders for gui_status_bar
@@ -851,6 +1077,518 @@ pub fn decode_gui_window_content_cursorline(bytes: &[u8], offset: usize) -> Resu
     Ok((GuiWindowContentCursorline {
         row,
         bg,
+    }, pos - offset))
+}
+
+// Section decoders for gui_window_rows_delta
+
+pub fn decode_gui_window_rows_delta_header(bytes: &[u8], offset: usize) -> Result<(GuiWindowRowsDeltaHeader, usize), DecodeError> {
+    let mut pos = offset;
+    require_len(bytes, pos + 2, "window_id")?;
+    let window_id = read_u16(bytes, pos);
+    pos += 2;
+    require_len(bytes, pos + 4, "content_epoch")?;
+    let content_epoch = read_u32(bytes, pos);
+    pos += 4;
+    require_len(bytes, pos + 1, "flags")?;
+    let flags = bytes[pos];
+    pos += 1;
+    require_len(bytes, pos + 2, "cursor_row")?;
+    let cursor_row = read_u16(bytes, pos);
+    pos += 2;
+    require_len(bytes, pos + 2, "cursor_col")?;
+    let cursor_col = read_u16(bytes, pos);
+    pos += 2;
+    require_len(bytes, pos + 1, "cursor_shape")?;
+    let cursor_shape = bytes[pos];
+    pos += 1;
+    require_len(bytes, pos + 2, "scroll_left")?;
+    let scroll_left = read_u16(bytes, pos);
+    pos += 2;
+    Ok((GuiWindowRowsDeltaHeader {
+        window_id,
+        content_epoch,
+        flags,
+        cursor_row,
+        cursor_col,
+        cursor_shape,
+        scroll_left,
+    }, pos - offset))
+}
+
+pub fn decode_gui_window_rows_delta_rows(bytes: &[u8], offset: usize) -> Result<(Vec<Row>, usize), DecodeError> {
+    let mut pos = offset;
+    require_len(bytes, pos + 2, "rows count")?;
+    let count = read_u16(bytes, pos) as usize;
+    pos += 2;
+    let mut items = Vec::with_capacity(count);
+    for _ in 0..count {
+        let (item, consumed) = decode_row(bytes, pos)?;
+        pos += consumed;
+        items.push(item);
+    }
+    Ok((items, pos - offset))
+}
+
+// Section decoders for gui_window_viewport_delta
+
+pub fn decode_gui_window_viewport_delta_header(bytes: &[u8], offset: usize) -> Result<(GuiWindowViewportDeltaHeader, usize), DecodeError> {
+    let mut pos = offset;
+    require_len(bytes, pos + 2, "window_id")?;
+    let window_id = read_u16(bytes, pos);
+    pos += 2;
+    require_len(bytes, pos + 4, "content_epoch")?;
+    let content_epoch = read_u32(bytes, pos);
+    pos += 4;
+    require_len(bytes, pos + 1, "flags")?;
+    let flags = bytes[pos];
+    pos += 1;
+    require_len(bytes, pos + 2, "cursor_row")?;
+    let cursor_row = read_u16(bytes, pos);
+    pos += 2;
+    require_len(bytes, pos + 2, "cursor_col")?;
+    let cursor_col = read_u16(bytes, pos);
+    pos += 2;
+    require_len(bytes, pos + 1, "cursor_shape")?;
+    let cursor_shape = bytes[pos];
+    pos += 1;
+    require_len(bytes, pos + 2, "scroll_left")?;
+    let scroll_left = read_u16(bytes, pos);
+    pos += 2;
+    Ok((GuiWindowViewportDeltaHeader {
+        window_id,
+        content_epoch,
+        flags,
+        cursor_row,
+        cursor_col,
+        cursor_shape,
+        scroll_left,
+    }, pos - offset))
+}
+
+pub fn decode_gui_window_viewport_delta_rows(bytes: &[u8], offset: usize) -> Result<(Vec<Row>, usize), DecodeError> {
+    let mut pos = offset;
+    require_len(bytes, pos + 2, "rows count")?;
+    let count = read_u16(bytes, pos) as usize;
+    pos += 2;
+    let mut items = Vec::with_capacity(count);
+    for _ in 0..count {
+        let (item, consumed) = decode_row(bytes, pos)?;
+        pos += consumed;
+        items.push(item);
+    }
+    Ok((items, pos - offset))
+}
+
+// Command field decoder for gui_tab_bar
+
+pub fn decode_gui_tab_bar_fields(bytes: &[u8], offset: usize) -> Result<(GuiTabBarFields, usize), DecodeError> {
+    let mut pos = offset;
+    require_len(bytes, pos + 1, "active_index")?;
+    let active_index = bytes[pos];
+    pos += 1;
+    require_len(bytes, pos + 1, "tab_count")?;
+    let tab_count = bytes[pos];
+    pos += 1;
+    Ok((GuiTabBarFields {
+        active_index,
+        tab_count,
+    }, pos - offset))
+}
+
+// Command field decoder for gui_theme
+
+pub fn decode_gui_theme_fields(bytes: &[u8], offset: usize) -> Result<(GuiThemeFields, usize), DecodeError> {
+    let mut pos = offset;
+    require_len(bytes, pos + 1, "color_count")?;
+    let color_count = bytes[pos];
+    pos += 1;
+    Ok((GuiThemeFields {
+        color_count,
+    }, pos - offset))
+}
+
+// Command field decoder for gui_breadcrumb
+
+pub fn decode_gui_breadcrumb_fields(bytes: &[u8], offset: usize) -> Result<(GuiBreadcrumbFields, usize), DecodeError> {
+    let mut pos = offset;
+    require_len(bytes, pos + 1, "segment_count")?;
+    let segment_count = bytes[pos];
+    pos += 1;
+    Ok((GuiBreadcrumbFields {
+        segment_count,
+    }, pos - offset))
+}
+
+// Command field decoder for gui_completion
+
+pub fn decode_gui_completion_fields(bytes: &[u8], offset: usize) -> Result<(GuiCompletionFields, usize), DecodeError> {
+    let mut pos = offset;
+    require_len(bytes, pos + 1, "visible")?;
+    let visible = bytes[pos];
+    pos += 1;
+    Ok((GuiCompletionFields {
+        visible,
+    }, pos - offset))
+}
+
+// Command field decoder for gui_which_key
+
+pub fn decode_gui_which_key_fields(bytes: &[u8], offset: usize) -> Result<(GuiWhichKeyFields, usize), DecodeError> {
+    let mut pos = offset;
+    require_len(bytes, pos + 1, "visible")?;
+    let visible = bytes[pos];
+    pos += 1;
+    Ok((GuiWhichKeyFields {
+        visible,
+    }, pos - offset))
+}
+
+// Command field decoder for gui_minibuffer
+
+pub fn decode_gui_minibuffer_fields(bytes: &[u8], offset: usize) -> Result<(GuiMinibufferFields, usize), DecodeError> {
+    let mut pos = offset;
+    require_len(bytes, pos + 1, "visible")?;
+    let visible = bytes[pos];
+    pos += 1;
+    Ok((GuiMinibufferFields {
+        visible,
+    }, pos - offset))
+}
+
+// Command field decoder for gui_hover_popup
+
+pub fn decode_gui_hover_popup_fields(bytes: &[u8], offset: usize) -> Result<(GuiHoverPopupFields, usize), DecodeError> {
+    let mut pos = offset;
+    require_len(bytes, pos + 1, "visible")?;
+    let visible = bytes[pos];
+    pos += 1;
+    Ok((GuiHoverPopupFields {
+        visible,
+    }, pos - offset))
+}
+
+// Command field decoder for gui_signature_help
+
+pub fn decode_gui_signature_help_fields(bytes: &[u8], offset: usize) -> Result<(GuiSignatureHelpFields, usize), DecodeError> {
+    let mut pos = offset;
+    require_len(bytes, pos + 1, "visible")?;
+    let visible = bytes[pos];
+    pos += 1;
+    Ok((GuiSignatureHelpFields {
+        visible,
+    }, pos - offset))
+}
+
+// Command field decoder for gui_float_popup
+
+pub fn decode_gui_float_popup_fields(bytes: &[u8], offset: usize) -> Result<(GuiFloatPopupFields, usize), DecodeError> {
+    let mut pos = offset;
+    require_len(bytes, pos + 1, "visible")?;
+    let visible = bytes[pos];
+    pos += 1;
+    Ok((GuiFloatPopupFields {
+        visible,
+    }, pos - offset))
+}
+
+// Command field decoder for gui_split_separators
+
+pub fn decode_gui_split_separators_fields(bytes: &[u8], offset: usize) -> Result<(GuiSplitSeparatorsFields, usize), DecodeError> {
+    let mut pos = offset;
+    require_len(bytes, pos + 3, "bg")?;
+    let bg = read_u24(bytes, pos);
+    pos += 3;
+    require_len(bytes, pos + 1, "vertical_count")?;
+    let vertical_count = bytes[pos];
+    pos += 1;
+    Ok((GuiSplitSeparatorsFields {
+        bg,
+        vertical_count,
+    }, pos - offset))
+}
+
+// Command field decoder for gui_git_status
+
+pub fn decode_gui_git_status_fields(bytes: &[u8], offset: usize) -> Result<(GuiGitStatusFields, usize), DecodeError> {
+    let mut pos = offset;
+    require_len(bytes, pos + 1, "repo_state")?;
+    let repo_state = bytes[pos];
+    pos += 1;
+    require_len(bytes, pos + 1, "syncing")?;
+    let syncing = bytes[pos];
+    pos += 1;
+    require_len(bytes, pos + 2, "ahead")?;
+    let ahead = read_u16(bytes, pos);
+    pos += 2;
+    require_len(bytes, pos + 2, "behind")?;
+    let behind = read_u16(bytes, pos);
+    pos += 2;
+    Ok((GuiGitStatusFields {
+        repo_state,
+        syncing,
+        ahead,
+        behind,
+    }, pos - offset))
+}
+
+// Command field decoder for gui_bottom_panel
+
+pub fn decode_gui_bottom_panel_fields(bytes: &[u8], offset: usize) -> Result<(GuiBottomPanelFields, usize), DecodeError> {
+    let mut pos = offset;
+    require_len(bytes, pos + 1, "visible")?;
+    let visible = bytes[pos];
+    pos += 1;
+    Ok((GuiBottomPanelFields {
+        visible,
+    }, pos - offset))
+}
+
+// Command field decoder for gui_change_summary
+
+pub fn decode_gui_change_summary_fields(bytes: &[u8], offset: usize) -> Result<(GuiChangeSummaryFields, usize), DecodeError> {
+    let mut pos = offset;
+    require_len(bytes, pos + 1, "visible")?;
+    let visible = bytes[pos];
+    pos += 1;
+    require_len(bytes, pos + 2, "selected_index")?;
+    let selected_index = read_u16(bytes, pos);
+    pos += 2;
+    require_len(bytes, pos + 2, "entry_count")?;
+    let entry_count = read_u16(bytes, pos);
+    pos += 2;
+    Ok((GuiChangeSummaryFields {
+        visible,
+        selected_index,
+        entry_count,
+    }, pos - offset))
+}
+
+// Command field decoder for gui_board
+
+pub fn decode_gui_board_fields(bytes: &[u8], offset: usize) -> Result<(GuiBoardFields, usize), DecodeError> {
+    let mut pos = offset;
+    require_len(bytes, pos + 1, "visible")?;
+    let visible = bytes[pos];
+    pos += 1;
+    require_len(bytes, pos + 4, "focused_card_id")?;
+    let focused_card_id = read_u32(bytes, pos);
+    pos += 4;
+    require_len(bytes, pos + 2, "card_count")?;
+    let card_count = read_u16(bytes, pos);
+    pos += 2;
+    require_len(bytes, pos + 1, "filter_mode")?;
+    let filter_mode = bytes[pos];
+    pos += 1;
+    Ok((GuiBoardFields {
+        visible,
+        focused_card_id,
+        card_count,
+        filter_mode,
+    }, pos - offset))
+}
+
+// Command field decoder for gui_agent_context
+
+pub fn decode_gui_agent_context_fields(bytes: &[u8], offset: usize) -> Result<(GuiAgentContextFields, usize), DecodeError> {
+    let mut pos = offset;
+    require_len(bytes, pos + 1, "visible")?;
+    let visible = bytes[pos];
+    pos += 1;
+    Ok((GuiAgentContextFields {
+        visible,
+    }, pos - offset))
+}
+
+// Command field decoder for gui_gutter_sep
+
+pub fn decode_gui_gutter_sep_fields(bytes: &[u8], offset: usize) -> Result<(GuiGutterSepFields, usize), DecodeError> {
+    let mut pos = offset;
+    require_len(bytes, pos + 2, "col")?;
+    let col = read_u16(bytes, pos);
+    pos += 2;
+    require_len(bytes, pos + 3, "bg")?;
+    let bg = read_u24(bytes, pos);
+    pos += 3;
+    Ok((GuiGutterSepFields {
+        col,
+        bg,
+    }, pos - offset))
+}
+
+// Command field decoder for gui_cursorline
+
+pub fn decode_gui_cursorline_fields(bytes: &[u8], offset: usize) -> Result<(GuiCursorlineFields, usize), DecodeError> {
+    let mut pos = offset;
+    require_len(bytes, pos + 2, "col")?;
+    let col = read_u16(bytes, pos);
+    pos += 2;
+    require_len(bytes, pos + 3, "bg")?;
+    let bg = read_u24(bytes, pos);
+    pos += 3;
+    Ok((GuiCursorlineFields {
+        col,
+        bg,
+    }, pos - offset))
+}
+
+// Command field decoder for gui_search_state
+
+pub fn decode_gui_search_state_fields(bytes: &[u8], offset: usize) -> Result<(GuiSearchStateFields, usize), DecodeError> {
+    let mut pos = offset;
+    require_len(bytes, pos + 1, "active")?;
+    let active = bytes[pos];
+    pos += 1;
+    require_len(bytes, pos + 2, "match_count")?;
+    let match_count = read_u16(bytes, pos);
+    pos += 2;
+    require_len(bytes, pos + 2, "current_index")?;
+    let current_index = read_u16(bytes, pos);
+    pos += 2;
+    require_len(bytes, pos + 1, "flags")?;
+    let flags = bytes[pos];
+    pos += 1;
+    Ok((GuiSearchStateFields {
+        active,
+        match_count,
+        current_index,
+        flags,
+    }, pos - offset))
+}
+
+// Command field decoder for gui_edit_timeline
+
+pub fn decode_gui_edit_timeline_fields(bytes: &[u8], offset: usize) -> Result<(GuiEditTimelineFields, usize), DecodeError> {
+    let mut pos = offset;
+    require_len(bytes, pos + 1, "visible")?;
+    let visible = bytes[pos];
+    pos += 1;
+    require_len(bytes, pos + 2, "viewing_index")?;
+    let viewing_index = read_u16(bytes, pos);
+    pos += 2;
+    require_len(bytes, pos + 1, "entry_count")?;
+    let entry_count = bytes[pos];
+    pos += 1;
+    Ok((GuiEditTimelineFields {
+        visible,
+        viewing_index,
+        entry_count,
+    }, pos - offset))
+}
+
+// Command field decoder for gui_workspaces
+
+pub fn decode_gui_workspaces_fields(bytes: &[u8], offset: usize) -> Result<(GuiWorkspacesFields, usize), DecodeError> {
+    let mut pos = offset;
+    require_len(bytes, pos + 1, "visible")?;
+    let visible = bytes[pos];
+    pos += 1;
+    require_len(bytes, pos + 2, "active_workspace_id")?;
+    let active_workspace_id = read_u16(bytes, pos);
+    pos += 2;
+    require_len(bytes, pos + 1, "mode")?;
+    let mode = bytes[pos];
+    pos += 1;
+    require_len(bytes, pos + 1, "flags")?;
+    let flags = bytes[pos];
+    pos += 1;
+    require_len(bytes, pos + 1, "workspace_count")?;
+    let workspace_count = bytes[pos];
+    pos += 1;
+    Ok((GuiWorkspacesFields {
+        visible,
+        active_workspace_id,
+        mode,
+        flags,
+        workspace_count,
+    }, pos - offset))
+}
+
+// Command field decoder for gui_notifications
+
+pub fn decode_gui_notifications_fields(bytes: &[u8], offset: usize) -> Result<(GuiNotificationsFields, usize), DecodeError> {
+    let mut pos = offset;
+    require_len(bytes, pos + 1, "visible")?;
+    let visible = bytes[pos];
+    pos += 1;
+    require_len(bytes, pos + 2, "notification_count")?;
+    let notification_count = read_u16(bytes, pos);
+    pos += 2;
+    Ok((GuiNotificationsFields {
+        visible,
+        notification_count,
+    }, pos - offset))
+}
+
+// Command field decoder for gui_sidebars
+
+pub fn decode_gui_sidebars_fields(bytes: &[u8], offset: usize) -> Result<(GuiSidebarsFields, usize), DecodeError> {
+    let mut pos = offset;
+    require_len(bytes, pos + 1, "visible")?;
+    let visible = bytes[pos];
+    pos += 1;
+    require_len(bytes, pos + 2, "sidebar_count")?;
+    let sidebar_count = read_u16(bytes, pos);
+    pos += 2;
+    Ok((GuiSidebarsFields {
+        visible,
+        sidebar_count,
+    }, pos - offset))
+}
+
+// Command field decoder for gui_extension_overlay
+
+pub fn decode_gui_extension_overlay_fields(bytes: &[u8], offset: usize) -> Result<(GuiExtensionOverlayFields, usize), DecodeError> {
+    let mut pos = offset;
+    require_len(bytes, pos + 1, "entry_count")?;
+    let entry_count = bytes[pos];
+    pos += 1;
+    Ok((GuiExtensionOverlayFields {
+        entry_count,
+    }, pos - offset))
+}
+
+// Command field decoder for gui_extension_panel
+
+pub fn decode_gui_extension_panel_fields(bytes: &[u8], offset: usize) -> Result<(GuiExtensionPanelFields, usize), DecodeError> {
+    let mut pos = offset;
+    require_len(bytes, pos + 1, "panel_count")?;
+    let panel_count = bytes[pos];
+    pos += 1;
+    Ok((GuiExtensionPanelFields {
+        panel_count,
+    }, pos - offset))
+}
+
+// Command field decoder for gui_file_tree
+
+pub fn decode_gui_file_tree_fields(bytes: &[u8], offset: usize) -> Result<(GuiFileTreeFields, usize), DecodeError> {
+    let mut pos = offset;
+    require_len(bytes, pos + 1, "visible")?;
+    let visible = bytes[pos];
+    pos += 1;
+    require_len(bytes, pos + 1, "flags")?;
+    let flags = bytes[pos];
+    pos += 1;
+    require_len(bytes, pos + 1, "status")?;
+    let status = bytes[pos];
+    pos += 1;
+    Ok((GuiFileTreeFields {
+        visible,
+        flags,
+        status,
+    }, pos - offset))
+}
+
+// Command field decoder for gui_tool_manager
+
+pub fn decode_gui_tool_manager_fields(bytes: &[u8], offset: usize) -> Result<(GuiToolManagerFields, usize), DecodeError> {
+    let mut pos = offset;
+    require_len(bytes, pos + 1, "visible")?;
+    let visible = bytes[pos];
+    pos += 1;
+    Ok((GuiToolManagerFields {
+        visible,
     }, pos - offset))
 }
 

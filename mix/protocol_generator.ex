@@ -88,6 +88,7 @@ defmodule Minga.Mix.ProtocolGenerator do
     validate_framing!(schema)
     validate_structures!(schema)
     validate_sections!(schema)
+    validate_command_fields!(schema)
     schema
   end
 
@@ -1185,6 +1186,11 @@ defmodule Minga.Mix.ProtocolGenerator do
     end
   end
 
+  @type command_fields :: %{String.t() => term()}
+
+  @spec command_fields_list(schema()) :: [command_fields()]
+  defp command_fields_list(schema), do: Map.get(schema, "command_fields", [])
+
   @spec validate_structures!(schema()) :: :ok
   defp validate_structures!(schema) do
     structures = Map.get(schema, "structures", [])
@@ -1299,6 +1305,47 @@ defmodule Minga.Mix.ProtocolGenerator do
     case bad do
       "" -> :ok
       _ -> Mix.raise("Section fields reference unknown structures in #{@schema_path}: #{bad}")
+    end
+  end
+
+  @spec validate_command_fields!(schema()) :: :ok
+  defp validate_command_fields!(schema) do
+    command_fields = command_fields_list(schema)
+    opcode_names = schema |> Map.fetch!("opcodes") |> MapSet.new(& &1["name"])
+    smap = structures_map(schema)
+
+    # All command_fields opcodes must reference existing opcodes
+    bad_opcodes =
+      command_fields
+      |> Enum.reject(&MapSet.member?(opcode_names, &1["opcode"]))
+      |> Enum.map_join(", ", & &1["opcode"])
+
+    case bad_opcodes do
+      "" ->
+        :ok
+
+      _ ->
+        Mix.raise("command_fields reference unknown opcodes in #{@schema_path}: #{bad_opcodes}")
+    end
+
+    # Validate struct/counted_array field references
+    bad_refs =
+      command_fields
+      |> Enum.flat_map(fn cf -> Enum.map(cf["fields"] || [], &{cf, &1}) end)
+      |> Enum.filter(fn {_cf, field} ->
+        (field["type"] == "struct" or field["type"] == "counted_array") and
+          is_binary(field["element"]) and not Map.has_key?(smap, field["element"])
+      end)
+      |> Enum.map_join(", ", fn {cf, field} ->
+        "#{cf["opcode"]}.#{field["name"]} -> #{field["element"]}"
+      end)
+
+    case bad_refs do
+      "" ->
+        :ok
+
+      _ ->
+        Mix.raise("command_fields reference unknown structures in #{@schema_path}: #{bad_refs}")
     end
   end
 
@@ -1807,6 +1854,7 @@ defmodule Minga.Mix.ProtocolGenerator do
   defp rust_semantic_types_file(schema) do
     structures = Map.get(schema, "structures", [])
     sections = sections_list(schema)
+    command_fields = command_fields_list(schema)
     smap = structures_map(schema)
 
     [
@@ -1817,7 +1865,8 @@ defmodule Minga.Mix.ProtocolGenerator do
       "\n",
       rust_size_constants(structures, smap),
       "\n",
-      rust_section_struct_definitions(sections, smap)
+      rust_section_struct_definitions(sections, smap),
+      rust_command_fields_struct_definitions(command_fields, smap)
     ]
     |> IO.iodata_to_binary()
   end
@@ -1902,6 +1951,7 @@ defmodule Minga.Mix.ProtocolGenerator do
   defp rust_semantic_decode_file(schema) do
     structures = Map.get(schema, "structures", [])
     sections = sections_list(schema)
+    command_fields = command_fields_list(schema)
     smap = structures_map(schema)
 
     [
@@ -1914,7 +1964,8 @@ defmodule Minga.Mix.ProtocolGenerator do
       "\n",
       Enum.map(structures, &rust_decode_structure(&1, smap)),
       "\n",
-      rust_decode_section_functions(sections, smap)
+      rust_decode_section_functions(sections, smap),
+      rust_decode_command_fields_functions(command_fields, smap)
     ]
     |> IO.iodata_to_binary()
   end
@@ -2320,6 +2371,7 @@ defmodule Minga.Mix.ProtocolGenerator do
   defp go_semantic_types_file(schema) do
     structures = Map.get(schema, "structures", [])
     sections = sections_list(schema)
+    command_fields = command_fields_list(schema)
     smap = structures_map(schema)
 
     [
@@ -2327,7 +2379,8 @@ defmodule Minga.Mix.ProtocolGenerator do
       "package generated\n\n",
       go_structure_definitions(structures, smap),
       go_size_constants(structures, smap),
-      go_section_struct_definitions(sections, smap)
+      go_section_struct_definitions(sections, smap),
+      go_command_fields_struct_definitions(command_fields, smap)
     ]
     |> IO.iodata_to_binary()
     |> format_generated_go_file()
@@ -2410,6 +2463,7 @@ defmodule Minga.Mix.ProtocolGenerator do
   defp go_semantic_decode_file(schema) do
     structures = Map.get(schema, "structures", [])
     sections = sections_list(schema)
+    command_fields = command_fields_list(schema)
     smap = structures_map(schema)
 
     [
@@ -2420,7 +2474,8 @@ defmodule Minga.Mix.ProtocolGenerator do
       "\n",
       Enum.map(structures, &go_decode_structure(&1, smap)),
       "\n",
-      go_decode_section_functions(sections, smap)
+      go_decode_section_functions(sections, smap),
+      go_decode_command_fields_functions(command_fields, smap)
     ]
     |> IO.iodata_to_binary()
     |> format_generated_go_file()
@@ -2781,6 +2836,100 @@ defmodule Minga.Mix.ProtocolGenerator do
       "\treturn items, pos, nil\n",
       "}\n\n"
     ]
+  end
+
+  # ── Rust: command_fields types & decode ────────────────────────────────
+
+  @spec rust_command_fields_struct_definitions([command_fields()], %{String.t() => structure()}) ::
+          iodata()
+  defp rust_command_fields_struct_definitions(command_fields, smap) do
+    command_fields
+    |> Enum.map(fn cf ->
+      name = rust_struct_name(cf["opcode"]) <> "Fields"
+      fields = cf["fields"] || []
+      has_variable = Enum.any?(fields, fn f -> fixed_field_size(f, smap) == nil end)
+
+      derive =
+        if has_variable,
+          do: "#[derive(Debug, Clone, PartialEq, Eq)]\n",
+          else: "#[derive(Debug, Clone, Copy, PartialEq, Eq)]\n"
+
+      [
+        derive,
+        "pub struct #{name} {\n",
+        Enum.map(fields, fn field ->
+          "    pub #{rust_field_name(field["name"])}: #{rust_type(field, smap)},\n"
+        end),
+        "}\n\n"
+      ]
+    end)
+  end
+
+  @spec rust_decode_command_fields_functions([command_fields()], %{String.t() => structure()}) ::
+          iodata()
+  defp rust_decode_command_fields_functions(command_fields, smap) do
+    command_fields
+    |> Enum.map(fn cf ->
+      struct_name = rust_struct_name(cf["opcode"]) <> "Fields"
+      fn_name = "decode_#{cf["opcode"]}_fields"
+      fields = cf["fields"] || []
+
+      [
+        "// Command field decoder for #{cf["opcode"]}\n\n",
+        "pub fn #{fn_name}(bytes: &[u8], offset: usize) -> Result<(#{struct_name}, usize), DecodeError> {\n",
+        "    let mut pos = offset;\n",
+        Enum.map(fields, &rust_decode_field_statement(&1, smap)),
+        "    Ok((#{struct_name} {\n",
+        Enum.map(fields, fn field -> "        #{rust_field_name(field["name"])},\n" end),
+        "    }, pos - offset))\n",
+        "}\n\n"
+      ]
+    end)
+  end
+
+  # ── Go: command_fields types & decode ──────────────────────────────────
+
+  @spec go_command_fields_struct_definitions([command_fields()], %{String.t() => structure()}) ::
+          iodata()
+  defp go_command_fields_struct_definitions(command_fields, smap) do
+    command_fields
+    |> Enum.map(fn cf ->
+      name = go_struct_name(cf["opcode"]) <> "Fields"
+      fields = cf["fields"] || []
+
+      [
+        "type #{name} struct {\n",
+        Enum.map(fields, fn field ->
+          "\t#{go_field_name(field["name"])} #{go_type(field, smap)}\n"
+        end),
+        "}\n\n"
+      ]
+    end)
+  end
+
+  @spec go_decode_command_fields_functions([command_fields()], %{String.t() => structure()}) ::
+          iodata()
+  defp go_decode_command_fields_functions(command_fields, smap) do
+    command_fields
+    |> Enum.map(fn cf ->
+      struct_name = go_struct_name(cf["opcode"]) <> "Fields"
+      fn_name = "Decode#{struct_name}"
+      fields = cf["fields"] || []
+      zero = "#{struct_name}{}"
+
+      [
+        "// Command field decoder for #{cf["opcode"]}\n\n",
+        "func #{fn_name}(data []byte, offset int) (#{struct_name}, int, error) {\n",
+        "\tpos := offset\n",
+        Enum.map(fields, &go_decode_field_statement(&1, smap, zero)),
+        "\treturn #{struct_name}{\n",
+        Enum.map(fields, fn field ->
+          "\t\t#{go_field_name(field["name"])}: #{go_local_name(field["name"])},\n"
+        end),
+        "\t}, pos, nil\n",
+        "}\n\n"
+      ]
+    end)
   end
 
   @spec constant_name(String.t()) :: String.t()
