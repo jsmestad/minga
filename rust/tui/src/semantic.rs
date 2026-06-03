@@ -1771,6 +1771,7 @@ fn decode_cursor_animation(bytes: &[u8]) -> Result<Command, DecodeError> {
 
 fn decode_config_state(bytes: &[u8]) -> Result<Command, DecodeError> {
     let size = len16_size(bytes)?;
+    require_len(bytes, size, "config_state payload")?;
     let payload = bytes[3..size].to_vec();
     Ok(Command::ConfigState(ConfigState { payload }, size))
 }
@@ -1779,18 +1780,6 @@ fn decode_agent_context(bytes: &[u8]) -> Result<Command, DecodeError> {
     let size = agent_context_size(bytes)?;
     require_len(bytes, 2, "agent context visible")?;
     let visible = bytes[1];
-    if visible == 0 {
-        return Ok(Command::AgentContext(
-            AgentContext {
-                visible: 0,
-                task: String::new(),
-                timestamp: 0,
-                status: 0,
-                can_approve: 0,
-            },
-            size,
-        ));
-    }
     require_len(bytes, 4, "agent context task length")?;
     let task_len = read_u16(bytes, 2) as usize;
     let task = read_string(bytes, 4, task_len)?;
@@ -1822,6 +1811,7 @@ fn decode_agent_context(bytes: &[u8]) -> Result<Command, DecodeError> {
 
 fn decode_hover_action(bytes: &[u8]) -> Result<Command, DecodeError> {
     let size = len16_size(bytes)?;
+    require_len(bytes, size, "hover_action payload")?;
     let payload = bytes[3..size].to_vec();
     Ok(Command::HoverAction(HoverAction { payload }, size))
 }
@@ -1908,6 +1898,7 @@ fn decode_extension_panel(bytes: &[u8]) -> Result<Command, DecodeError> {
 
 fn decode_observatory(bytes: &[u8]) -> Result<Command, DecodeError> {
     let size = len32_size(bytes)?;
+    require_len(bytes, size, "observatory payload")?;
     let payload = bytes[5..size].to_vec();
     Ok(Command::Observatory(Observatory { payload }, size))
 }
@@ -1926,18 +1917,6 @@ fn decode_sidebars(bytes: &[u8]) -> Result<Command, DecodeError> {
 
 fn decode_board(bytes: &[u8]) -> Result<Command, DecodeError> {
     let size = board_size(bytes)?;
-    require_len(bytes, 2, "board visible")?;
-    if bytes[1] == 0 {
-        return Ok(Command::Board(
-            Board {
-                visible: 0,
-                focused_card_id: 0,
-                card_count: 0,
-                filter_mode: 0,
-            },
-            size,
-        ));
-    }
     require_len(bytes, 9, "board fields")?;
     Ok(Command::Board(
         Board {
@@ -2246,10 +2225,6 @@ fn hover_popup_size(bytes: &[u8]) -> Result<usize, DecodeError> {
 }
 
 fn agent_context_size(bytes: &[u8]) -> Result<usize, DecodeError> {
-    require_len(bytes, 2, "agent context")?;
-    if bytes[1] == 0 {
-        return Ok(2);
-    }
     require_len(bytes, 4, "agent context task length")?;
     let len = read_u16(bytes, 2) as usize;
     let offset = 4 + len;
@@ -2299,11 +2274,7 @@ fn change_summary_size(bytes: &[u8]) -> Result<usize, DecodeError> {
 }
 
 fn board_size(bytes: &[u8]) -> Result<usize, DecodeError> {
-    require_len(bytes, 2, "board")?;
-    if bytes[1] == 0 {
-        return Ok(2);
-    }
-    require_len(bytes, 11, "board visible")?;
+    require_len(bytes, 11, "board")?;
     let card_count = read_u16(bytes, 6) as usize;
     let mut offset = 9;
     skip_string16(bytes, &mut offset)?;
@@ -3411,5 +3382,91 @@ mod tests {
             decode(&packet[semantic_size(&packet).unwrap()..]).unwrap(),
             Command::Theme(Theme { slots }, _) if slots.is_empty()
         ));
+    }
+
+    #[test]
+    fn board_size_visible_zero_regression() {
+        // Board with visible=0: opcode(1) + visible=0(1) + focused_card_id(4) + card_count=0(2) + filter_mode(1) + filter_text_len=0(2) = 11 bytes
+        let bytes = [opcodes::OP_GUI_BOARD, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        assert_eq!(decode(&bytes).unwrap().custom_size(), 11);
+    }
+
+    #[test]
+    fn agent_context_size_visible_zero_regression() {
+        // AgentContext hidden: opcode(1) + visible=0(1) + task_len=0(2) + timestamp(8) + status(1) + can_approve(1) = 14 bytes
+        let bytes = [opcodes::OP_GUI_AGENT_CONTEXT, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        assert_eq!(decode(&bytes).unwrap().custom_size(), 14);
+    }
+
+    #[test]
+    fn decode_search_state_field_check() {
+        let bytes = [opcodes::OP_GUI_SEARCH_STATE, 0, 6, 1, 0, 5, 0, 3, 0x42];
+        match decode(&bytes).unwrap() {
+            Command::SearchState(s, 9) => {
+                assert_eq!(s.active, 1);
+                assert_eq!(s.match_count, 5);
+                assert_eq!(s.current_index, 3);
+                assert_eq!(s.flags, 0x42);
+            }
+            other => panic!("unexpected: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn decode_edit_timeline_field_check() {
+        // len16: opcode(1) + len_hi(0) + len_lo(4) + visible(1) + viewing_index(2) + entry_count(1) = 7
+        let bytes = [opcodes::OP_GUI_EDIT_TIMELINE, 0, 4, 1, 0, 7, 3];
+        match decode(&bytes).unwrap() {
+            Command::EditTimeline(t, 7) => {
+                assert_eq!(t.visible, 1);
+                assert_eq!(t.viewing_index, 7);
+                assert_eq!(t.entry_count, 3);
+            }
+            other => panic!("unexpected: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn decode_notifications_field_check() {
+        let bytes = [opcodes::OP_GUI_NOTIFICATIONS, 0, 3, 1, 0, 12];
+        match decode(&bytes).unwrap() {
+            Command::Notifications(n, 6) => {
+                assert_eq!(n.visible, 1);
+                assert_eq!(n.notification_count, 12);
+            }
+            other => panic!("unexpected: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn decode_sidebars_field_check() {
+        let bytes = [opcodes::OP_GUI_SIDEBARS, 0, 0, 0, 3, 1, 0, 5];
+        match decode(&bytes).unwrap() {
+            Command::Sidebars(s, 8) => {
+                assert_eq!(s.visible, 1);
+                assert_eq!(s.sidebar_count, 5);
+            }
+            other => panic!("unexpected: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn decode_agent_context_visible_field_check() {
+        // opcode(1) + visible=1(1) + task_len=2(2) + task="hi"(2) + timestamp(8) + status=3(1) + can_approve=1(1) = 16
+        let bytes = [
+            opcodes::OP_GUI_AGENT_CONTEXT, 1, 0, 2, b'h', b'i',
+            0, 0, 0, 0, 0, 0, 0, 100, // timestamp = 100
+            3, 1, // status=3 (needs_you), can_approve=1
+        ];
+        match decode(&bytes).unwrap() {
+            Command::AgentContext(a, 16) => {
+                assert_eq!(a.visible, 1);
+                assert_eq!(a.task, "hi");
+                assert_eq!(a.timestamp, 100);
+                assert_eq!(a.status, 3);
+                assert_eq!(a.can_approve, 1);
+            }
+            other => panic!("unexpected: {:?}", other),
+        }
     }
 }

@@ -2045,13 +2045,16 @@ impl Renderer {
 
     fn render_board(&mut self, board: &semantic::Board) {
         self.restore_board_cells();
-        if self.width < 24 || self.height < 6 {
+        if self.width < 24 || self.height < 8 {
             return;
         }
 
         let width = self.width.saturating_sub(4).clamp(24, 72);
         let card_lines = (board.card_count as u16).saturating_mul(2).max(1);
-        let height = card_lines.saturating_add(2).clamp(4, self.height.saturating_sub(4));
+        let height = card_lines
+            .saturating_add(2)
+            .min(self.height.saturating_sub(4))
+            .max(1);
         let row = 2;
         let col = self.width.saturating_sub(width).saturating_div(2);
 
@@ -2101,12 +2104,12 @@ impl Renderer {
 
     fn render_agent_chat(&mut self, chat: &semantic::AgentChat) {
         self.restore_agent_chat_cells();
-        if self.width < 28 || self.height < 8 {
+        if self.width < 28 || self.height < 10 {
             return;
         }
 
         let width = self.width.saturating_sub(4).clamp(28, 80);
-        let height = self.height.saturating_sub(4).clamp(6, 20);
+        let height = self.height.saturating_sub(4).min(20).max(1);
         let row = self.height.saturating_sub(height).saturating_div(2);
         let col = self.width.saturating_sub(width).saturating_div(2);
 
@@ -5710,13 +5713,44 @@ mod tests {
             "board panel should survive window redraw via retained chrome"
         );
     }
+
+    #[test]
+    fn base64_encode_correctness() {
+        assert_eq!(base64_encode(b""), "");
+        assert_eq!(base64_encode(b"A"), "QQ==");
+        assert_eq!(base64_encode(b"Hi"), "SGk=");
+        assert_eq!(base64_encode(b"Hello"), "SGVsbG8=");
+        assert_eq!(base64_encode(b"Hello, World!"), "SGVsbG8sIFdvcmxkIQ==");
+    }
+
+    #[test]
+    fn notifications_hide_on_zero_count() {
+        let mut renderer = Renderer::new(80, 24);
+
+        renderer.draw_notifications(semantic::Notifications {
+            visible: 1,
+            notification_count: 3,
+        });
+        assert!(renderer.notifications.is_some());
+        assert!(renderer.notifications_snapshot.is_some());
+
+        renderer.draw_notifications(semantic::Notifications {
+            visible: 1,
+            notification_count: 0,
+        });
+        assert!(
+            renderer.notifications.is_none(),
+            "notifications should hide when count drops to zero"
+        );
+        assert!(renderer.notifications_snapshot.is_none());
+    }
 }
 
 #[cfg(test)]
 fn board_geometry(width: u16, height: u16, card_count: u16) -> (u16, u16, u16, u16) {
     let w = width.saturating_sub(4).clamp(24, 72);
     let card_lines = card_count.saturating_mul(2).max(1);
-    let h = card_lines.saturating_add(2).clamp(4, height.saturating_sub(4));
+    let h = card_lines.saturating_add(2).min(height.saturating_sub(4)).max(1);
     let row = 2;
     let col = width.saturating_sub(w).saturating_div(2);
     (row, col, w, h)
