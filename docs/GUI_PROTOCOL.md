@@ -1,18 +1,20 @@
-# GUI Chrome Protocol Specification
+# Semantic UI Protocol Specification
 
-This document specifies the structured data protocol for native GUI frontends (SwiftUI, GTK4, etc.). It covers the wire format for GUI chrome opcodes, the `gui_action` input opcode, theme color slots, and the behavioral contract a GUI frontend must satisfy.
+This document specifies Minga's structured Semantic UI protocol for frontend-visible chrome and editor surfaces. It covers the wire format historically named `GUI` chrome opcodes, the `gui_action` input opcode, theme color slots, and the behavioral contract a semantic frontend must satisfy.
 
-For the cell-grid rendering protocol (draw_text, set_cursor, clear, etc.), see [PROTOCOL.md](PROTOCOL.md). The GUI chrome protocol runs alongside the cell-grid protocol, not instead of it.
+The `GUI_*` opcode and module names are historical wire names from the Swift frontend. They are not a statement that only native GUI clients may consume the contract. GUI, terminal, web, and future clients should consume the same Semantic UI models when their capabilities say they support them.
+
+For the cell-grid rendering protocol (draw_text, set_cursor, clear, etc.), see [PROTOCOL.md](PROTOCOL.md). Cell-grid commands are not the shared UI extension point. They remain only for legacy terminal rendering and explicitly tracked compatibility work. New shared UI must be added as Semantic UI.
 
 ## Architecture Overview
 
-Minga's rendering pipeline produces two types of output:
+Minga's rendering pipeline produces two categories of output:
 
-1. **Cell-grid commands** (opcodes 0x10-0x1B): draw_text, set_cursor, clear, batch_end, etc. These paint the editor content surface (buffer text, gutter, modeline for splits, minibuffer). In a TUI frontend, these go to the terminal. In a GUI frontend, these go to a Metal/OpenGL surface.
+1. **Legacy cell-grid commands** (opcodes 0x10-0x1B): draw_text, set_cursor, clear, batch_end, etc. These paint terminal-shaped content for legacy paths and temporary compatibility boundaries. They must not be used for new shared chrome.
 
-2. **GUI chrome commands** (opcodes 0x70+): structured data for native chrome elements (tab bar, file tree sidebar, status bar, bottom panel, which-key popup, cursorline, gutter, etc.). These are sent only to GUI frontends. A TUI frontend never sees them.
+2. **Semantic UI commands** (opcodes 0x70+): structured data for chrome and editor surfaces (tab bar, file tree sidebar, status bar, bottom panel, which-key popup, cursorline, gutter, buffer window content, agent surfaces, etc.). Semantic-capable frontends render these models using their own surface primitives.
 
-Both types are sent within the same render cycle. The BEAM sends cell-grid commands first (one `{:packet, 4}` message containing clear through batch_end), then GUI chrome commands as separate `{:packet, 4}` messages immediately after. GUI chrome commands are not inside the batch_end-terminated cell-grid frame.
+Both categories may appear within the same render cycle while compatibility remains. New product UI should be represented by Semantic UI. Non-semantic shared UI frontend work is stale scope unless a ticket explicitly deletes old support or narrows a temporary compatibility boundary.
 
 ## Capability Negotiation
 
@@ -23,19 +25,19 @@ ready: opcode(1) + width(2) + height(2) + caps_version(1) + caps_len(1) + caps_d
 caps_data: frontend_type(1) + color_depth(1) + unicode_width(1) + image_support(1) + float_support(1) + text_rendering(1)
 ```
 
-The `frontend_type` byte determines which protocol variant the BEAM uses:
+The `frontend_type` byte describes the rendering surface, not the product implementation:
 
 | Value | Type | Description |
 |-------|------|-------------|
-| 0x00 | TUI | Terminal frontend, cell-grid only |
-| 0x01 | native_gui | Native GUI (SwiftUI, GTK4), receives both cell-grid and GUI chrome |
+| 0x00 | TUI | Terminal frontend |
+| 0x01 | native_gui | Native desktop GUI frontend (SwiftUI, GTK4) |
 | 0x02 | web | Web frontend (future) |
 
-The BEAM checks `Capabilities.gui?` (true when `frontend_type == :native_gui`) to decide whether to send GUI chrome opcodes and whether to skip TUI-only chrome (file tree cell rendering, tab bar cell rendering, picker/which-key/completion cell overlays).
+The `semantic_ui` capability decides whether a non-GUI frontend can consume Semantic UI opcodes. Native GUI frontends are expected to consume Semantic UI. Product behavior should adapt through capability helpers such as semantic UI support, text measurement, color depth, float support, image support, and surface type. It should not branch on Swift, Rust, Go, GTK, or another implementation identity.
 
-## GUI Render Opcodes (BEAM → Frontend)
+## Semantic UI Opcodes (BEAM → Frontend)
 
-GUI chrome opcodes start at 0x70. Older positional commands live in 0x70-0x8F, and newer forward-compatible commands live in 0x90+. GUI content opcodes (semantic buffer rendering, overlays) start at 0x80. Frontends can classify an opcode as GUI by checking `opcode >= 0x70`.
+Semantic UI opcodes start at 0x70. Older positional commands live in 0x70-0x8F, and newer forward-compatible commands live in 0x90+. Semantic buffer rendering and overlay opcodes start at 0x80. Frontends can classify an opcode as Semantic UI by checking `opcode >= 0x70`; existing code may still call this range "GUI" for compatibility.
 
 ### Forward-Compatible Opcodes (0x90+)
 

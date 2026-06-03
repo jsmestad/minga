@@ -283,19 +283,21 @@ The system degrades in pieces rather than failing all at once. The BEAM was desi
 
 The BEAM is excellent at concurrency and isolation. It is terrible at putting pixels on screen. It has no concept of terminal modes, GPU rendering, or native window systems. Minga solves this by running frontends as separate OS processes that communicate with the BEAM over a binary protocol.
 
-### Platform-native rendering (GUI-first)
+### Platform-native rendering and Semantic UI
 
-Minga's primary frontends use platform-native toolkits for the best possible user experience:
+Minga's frontends use the best native toolkit for their rendering surface, but they consume one BEAM-owned Semantic UI contract for shared visible UI:
 
 - **macOS: Swift + Metal.** SwiftUI renders chrome (tab bar, file tree, status bar, popups) as native views. Metal renders the editor text surface with GPU-accelerated glyph rasterization via CoreText. This gives macOS users native scrolling, system fonts, trackpad gestures, and full accessibility support.
 - **Linux: GTK4 (planned).** GTK4 widgets for chrome, Cairo or OpenGL for the text surface. Native Wayland/X11 integration, IME support, system theming.
-- **TUI: Zig + libvaxis.** For terminal users. [libvaxis](https://github.com/rockorager/libvaxis) handles terminal differences, Unicode width calculation, and cell-level diffing.
+- **Terminal: Rust TUI target.** The desired terminal frontend is a semantic Ratatui/Terminal client that renders the same Semantic UI models as native GUI clients.
+- **Terminal bakeoff: Go semantic reference.** The Go/Bubble Tea frontend is a working semantic reference while Rust is rebuilt.
+- **Parser: Zig + tree-sitter.** Zig remains parser infrastructure until that code is replaced.
 
-Each frontend is a "dumb" renderer: it reads binary commands from stdin, draws them, and writes input events back to stdout. All intelligence lives in the BEAM.
+Each frontend is a "dumb" renderer and input source: it reads Semantic UI and protocol commands, draws them using its own surface primitives, and writes input events back to stdout. All editor state and product policy live in the BEAM.
 
-### Why Zig for the TUI and parser?
+### Why keep Zig for the parser?
 
-Zig fills two roles: the TUI terminal renderer and the tree-sitter parser process. It's a good fit for both because:
+Zig currently owns the tree-sitter parser process. It remains a good fit for that code while the parser is still implemented there because:
 
 - **Compiles C natively:** tree-sitter grammars (written in C) compile as part of the Zig build with zero FFI overhead
 - **No hidden allocations:** important for the parser's memory-sensitive hot loop
@@ -313,7 +315,7 @@ A Port is an OS-level process boundary. A frontend can crash completely, and the
 
 BEAM and the frontend communicate via `{:packet, 4}`: each message is prefixed with a 4-byte big-endian length, followed by a 1-byte opcode and opcode-specific binary fields. This is a simple, fast, zero-copy-friendly wire format.
 
-Every render frame follows the pattern: `clear` → N × `draw_text` → `set_cursor` → `set_cursor_shape` → `batch_end`. The frontend double-buffers and only writes changed cells to the terminal (TUI) or triggers a display refresh (GUI).
+Legacy cell-grid render frames follow the pattern: `clear` → N × `draw_text` → `set_cursor` → `set_cursor_shape` → `batch_end`. Semantic UI frontends also receive structured Semantic UI opcodes for shared visible UI. New shared UI must use Semantic UI rather than adding more cell drawing.
 
 The protocol has 20+ opcodes covering rendering, input, syntax highlighting, and diagnostics:
 
@@ -335,16 +337,16 @@ graph LR
         CL["0x12 Clear"]
         BE["0x13 Batch End<br/>(flush frame)"]
         CS["0x15 Cursor Shape<br/>block/beam/underline"]
-        GUI["0x70-0x78 GUI Chrome<br/>tabs, tree, status, popups"]
+        GUI["0x70+ Semantic UI<br/>tabs, tree, status, popups"]
     end
 
     style FrontendToBEAM fill:#1a2e1a,stroke:#1e8449,color:#fff
     style BEAMToFrontend fill:#1a1a2e,stroke:#6c3483,color:#fff
 ```
 
-For the full specification with byte-level field descriptions, sequencing rules, and implementation guidance, see **[docs/PROTOCOL.md](PROTOCOL.md)**. For the GUI chrome opcodes sent only to native frontends (SwiftUI, GTK4), see **[docs/GUI_PROTOCOL.md](GUI_PROTOCOL.md)**.
+For the full specification with byte-level field descriptions, sequencing rules, and implementation guidance, see **[docs/PROTOCOL.md](PROTOCOL.md)**. For the Semantic UI opcodes historically named GUI chrome, see **[docs/GUI_PROTOCOL.md](GUI_PROTOCOL.md)**.
 
-Any process that implements the `Minga.Port.Frontend` behaviour (see `lib/minga/port/frontend.ex`) and speaks this protocol can serve as a Minga rendering backend. The macOS Swift frontend and Zig TUI are the current implementations; a GTK4 Linux frontend is planned.
+Any process that implements the frontend behavior and speaks this protocol can serve as a Minga rendering backend. Frontend identity is opaque to product behavior; capabilities describe the surface and feature support. The macOS Swift frontend is the polish reference, the Go terminal frontend is the semantic reference during the bakeoff, the Rust terminal frontend is the desired long-term terminal target, and GTK4 remains planned for Linux.
 
 ### Display List (Rendering IR)
 
@@ -370,7 +372,7 @@ The display list uses **styled text runs**, not a cell grid. A cell grid is term
 
 Each frontend does the last-mile translation. The macOS GUI converts text runs into CoreText attributed strings drawn on a Metal surface at pixel positions derived from the font metrics. The TUI frontend converts text runs into terminal cells (a run `{5, "hello", green}` becomes five green cells at columns 5-9). The IR doesn't change; only the frontend's interpretation does.
 
-GUI frontends also receive **structured chrome data** (opcodes 0x70-0x78) for native UI elements: tab bars, file trees, status bars, which-key popups, completion menus, and agent chat views. These are rendered as platform-native widgets (SwiftUI views, GTK4 widgets) rather than painted as cells. The status bar uses the same configured modeline segment resolution as the TUI path, then sends styled segment data in the `gui_status_bar` payload so custom and hidden segments stay in sync across frontends. See **[docs/GUI_PROTOCOL.md](GUI_PROTOCOL.md)** for the full specification.
+Semantic-capable frontends also receive **structured Semantic UI data** (opcodes 0x70+) for shared UI elements: tab bars, file trees, status bars, which-key popups, completion menus, agent chat views, and buffer-window semantic content. These are rendered as platform-native widgets, terminal widgets, or web components rather than painted as ad-hoc cells. The status bar uses the same configured modeline segment resolution for every semantic frontend, then sends styled segment data in the historical `gui_status_bar` payload so custom and hidden segments stay in sync across frontends. See **[docs/GUI_PROTOCOL.md](GUI_PROTOCOL.md)** for the full specification.
 
 This design also supports variable-width font rendering in GUI frontends. The IR uses character offsets, not pixel positions. A monospaced frontend multiplies by cell width; a proportional frontend measures the preceding characters to find the pixel X. The `measure_text` / `text_width` protocol opcodes handle the cases where the BEAM needs to query the frontend for precise measurements.
 

@@ -1,8 +1,10 @@
 # Minga Port Protocol Specification
 
-The BEAM editor core and rendering frontends communicate over a binary protocol on stdin/stdout of each frontend process. All frontends (Swift/Metal on macOS, GTK4 on Linux, Zig/libvaxis TUI) speak the same base protocol. GUI frontends additionally receive structured chrome opcodes documented in [GUI_PROTOCOL.md](GUI_PROTOCOL.md). This document is the authoritative reference for implementing a Minga frontend. You should be able to build a working frontend by reading only this file (plus GUI_PROTOCOL.md for native GUIs).
+The BEAM editor core and rendering frontends communicate over a binary protocol on stdin/stdout of each frontend process. All frontends speak the same base transport, input, parser, and diagnostic protocol. Shared visible UI is carried as Semantic UI opcodes documented in [GUI_PROTOCOL.md](GUI_PROTOCOL.md); the `GUI` name is historical wire terminology, not a product split between GUI and terminal clients. This document is the authoritative reference for implementing a Minga frontend. You should be able to build a working frontend by reading this file plus GUI_PROTOCOL.md for Semantic UI surfaces.
 
-**Shared chrome is delivered as Semantic UI, not cells.** The structured chrome opcodes (GUI_PROTOCOL.md) are the canonical contract for shared visible chrome (tab bar, status bar, file tree, picker, popups, agent surfaces, and so on). Each frontend decodes these structured opcodes and renders them with its own native strategy. The cell-grid `draw_text`/`clear`/region commands below are **not** the extension point for shared chrome; they exist for the zig/libvaxis cell-grid TUI and for editor buffer-window content. New shared chrome must be modeled as a `Minga.RenderModel.UI.*` semantic model and encoded by `Minga.Frontend.Adapter.GUI`, never added as ad-hoc cell draws.
+**Shared chrome is delivered as Semantic UI, not cells.** The structured opcodes in GUI_PROTOCOL.md are the canonical contract for shared visible chrome (tab bar, status bar, file tree, picker, popups, agent surfaces, and so on). Each frontend decodes these semantic models and renders them with its own surface strategy: SwiftUI views, terminal widgets, GTK widgets, web components, or another future client. The cell-grid `draw_text`/`clear`/region commands below are **not** the extension point for shared chrome; they remain only for legacy terminal compatibility and explicitly tracked buffer-window compatibility. New shared chrome must be modeled as a `Minga.RenderModel.UI.*` semantic model and encoded by `Minga.Frontend.Adapter.GUI`, never added as ad-hoc cell draws.
+
+Frontend identity is opaque to Minga product behavior. The BEAM may adapt to declared capabilities such as terminal grid versus desktop window, text measurement, color depth, image support, float support, and Semantic UI support, but it must not special-case Swift, Rust, Go, GTK, or another implementation name for product features.
 
 ## Transport
 
@@ -925,11 +927,11 @@ Total size: 7 + (40 + text_len) per edit.
 
 ---
 
-## GUI Chrome Protocol
+## Semantic UI Protocol
 
-Native GUI frontends (SwiftUI, GTK4) receive additional structured data opcodes for chrome elements like tab bars, file trees, status bars, and popups. These opcodes start at 0x70 and are sent only when the frontend reports `frontend_type = native_gui` in its capabilities. The GUI status bar opcode carries structured status fields, including readable agent/tool labels, plus named configured modeline segments so native frontends can keep platform styling while honoring modeline order and visibility.
+Semantic-capable frontends receive additional structured data opcodes for chrome elements like tab bars, file trees, status bars, and popups. These opcodes start at 0x70. Many opcode and module names still use `GUI` because the Swift frontend was the first semantic client; treat that as historical naming. The product contract is Semantic UI for every capable frontend, including terminal clients. Capability negotiation decides whether a frontend receives and renders these models.
 
-See [GUI_PROTOCOL.md](GUI_PROTOCOL.md) for the complete specification of GUI chrome opcodes, gui_action input events, theme color slots, and the behavioral contract for GUI frontends. The sectioned `gui_status_bar` opcode (`0x76`) is specified there, including the identity flags (with safe mode), the indent section (`0x0A`), named modeline segment section (`0x0B`), and selection section (`0x0C`).
+See [GUI_PROTOCOL.md](GUI_PROTOCOL.md) for the complete specification of Semantic UI opcodes, `gui_action` input events, theme color slots, and the behavioral contract for semantic frontends. The sectioned `gui_status_bar` opcode (`0x76`) is specified there, including the identity flags (with safe mode), the indent section (`0x0A`), named modeline segment section (`0x0B`), and selection section (`0x0C`). The opcode names remain stable for compatibility.
 
 ---
 
