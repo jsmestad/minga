@@ -3,13 +3,13 @@ package ui
 import (
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/jsmestad/minga/go/tui/internal/generated"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 )
 
 func TestKeyPacketPreservesCtrlLetter(t *testing.T) {
-	packet, ok := keyPacket(tea.KeyMsg{Type: tea.KeyCtrlC})
+	packet, ok := keyPacket(tea.KeyPressMsg(tea.Key{Code: 'c', Mod: tea.ModCtrl}))
 	if !ok {
 		t.Fatal("ctrl-c should encode a key packet")
 	}
@@ -18,11 +18,34 @@ func TestKeyPacketPreservesCtrlLetter(t *testing.T) {
 	}
 }
 
-func TestKeyPacketEncodesBracketedPasteAsPasteEvent(t *testing.T) {
-	packet, ok := keyPacket(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("hello\nworld"), Paste: true})
+func TestKeyPacketEncodesSpace(t *testing.T) {
+	packet, ok := keyPacket(tea.KeyPressMsg(tea.Key{Code: tea.KeySpace, Text: " "}))
 	if !ok {
-		t.Fatal("paste should encode a paste packet")
+		t.Fatal("space should encode a key packet")
 	}
+	if packet[0] != generated.OPKeyPress || codepoint(packet) != ' ' || packet[5] != 0 {
+		t.Fatalf("space packet = %#v", packet)
+	}
+}
+
+func TestKeyPacketParsesFragmentedSGRMouseTail(t *testing.T) {
+	packet, ok := keyPacket(tea.KeyPressMsg(tea.Key{Code: tea.KeyExtended, Text: "<65;57;23M"}))
+	if !ok {
+		t.Fatal("SGR mouse tail should encode a mouse packet")
+	}
+	if packet[0] != generated.OPMouseEvent {
+		t.Fatalf("opcode = 0x%02X, want mouse", packet[0])
+	}
+	if gotRow, gotCol := int16(packet[1])<<8|int16(packet[2]), int16(packet[3])<<8|int16(packet[4]); gotRow != 22 || gotCol != 56 {
+		t.Fatalf("mouse coordinates = row %d col %d, want row 22 col 56", gotRow, gotCol)
+	}
+	if packet[5] != 0x41 || packet[7] != 0 {
+		t.Fatalf("mouse button/event = button %#x event %#x, want wheel-down press", packet[5], packet[7])
+	}
+}
+
+func TestPastePacketEncodesBracketedPasteAsPasteEvent(t *testing.T) {
+	packet := pastePacket(tea.PasteMsg{Content: "hello\nworld"})
 	if packet[0] != generated.OPPasteEvent {
 		t.Fatalf("opcode = 0x%02X, want paste", packet[0])
 	}
@@ -32,7 +55,7 @@ func TestKeyPacketEncodesBracketedPasteAsPasteEvent(t *testing.T) {
 }
 
 func TestKeyPacketPreservesNavigationModifiers(t *testing.T) {
-	packet, ok := keyPacket(tea.KeyMsg{Type: tea.KeyCtrlShiftRight})
+	packet, ok := keyPacket(tea.KeyPressMsg(tea.Key{Code: tea.KeyRight, Mod: tea.ModCtrl | tea.ModShift}))
 	if !ok {
 		t.Fatal("ctrl-shift-right should encode a key packet")
 	}

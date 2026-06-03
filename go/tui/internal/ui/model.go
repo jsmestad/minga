@@ -4,14 +4,13 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/jsmestad/minga/go/tui/internal/generated"
 	"github.com/jsmestad/minga/go/tui/internal/port"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
-	zone "github.com/lrstanley/bubblezone"
 )
 
 const (
@@ -26,7 +25,7 @@ type Model struct {
 	height           int
 	out              chan<- []byte
 	viewport         viewport.Model
-	zones            *zone.Manager
+	zones            *zoneManager
 	windows          map[uint16]protocol.WindowContent
 	windowOrder      []uint16
 	chrome           map[byte]protocol.ChromePayload
@@ -61,13 +60,13 @@ type cell struct {
 }
 
 func New(width, height uint16, out chan<- []byte) Model {
-	vp := viewport.New(int(width), max(int(height)-3, 1))
+	vp := viewport.New(viewport.WithWidth(int(width)), viewport.WithHeight(max(int(height)-3, 1)))
 	return Model{
 		width:         int(width),
 		height:        int(height),
 		out:           out,
 		viewport:      vp,
-		zones:         zone.New(),
+		zones:         newZoneManager(),
 		windows:       map[uint16]protocol.WindowContent{},
 		chrome:        map[byte]protocol.ChromePayload{},
 		activePalette: defaultPalette(),
@@ -88,13 +87,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.viewport.Width = msg.Width
-		m.viewport.Height = m.bodyHeight()
+		m.viewport.SetWidth(msg.Width)
+		m.viewport.SetHeight(m.bodyHeight())
 		m.send(protocol.EncodeResize(uint16(max(msg.Width, 1)), uint16(max(msg.Height, 1))))
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if packet, ok := keyPacket(msg); ok {
 			m.send(packet)
 		}
+	case tea.PasteMsg:
+		m.send(pastePacket(msg))
 	case tea.MouseMsg:
 		if packet, ok := m.semanticMousePacket(msg); ok {
 			m.send(packet)
@@ -110,21 +111,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.send(protocol.EncodeLogMessage(protocol.LogLevelErr, msg.Err.Error()))
 	}
 
-	m.viewport.Width = max(m.width, 1)
-	m.viewport.Height = m.bodyHeight()
+	m.viewport.SetWidth(max(m.width, 1))
+	m.viewport.SetHeight(m.bodyHeight())
 	m.viewport.SetContent(m.content())
 	return m, cmd
 }
 
-func (m Model) View() string {
+func (m Model) View() tea.View {
 	body := m.viewport.View()
 	parts := append(m.headerLines(), body)
 	parts = append(parts, m.footerLines()...)
-	out := m.cursorStyleSequence() + m.zones.Scan(lipgloss.JoinVertical(lipgloss.Left, parts...)) + m.cursorPositionSequence()
+	content := m.zones.Scan(lipgloss.JoinVertical(lipgloss.Left, parts...))
+	out := m.cursorStyleSequence() + m.composeFrame(content) + m.cursorPositionSequence()
 	if m.pendingClipboard != "" {
 		out += ansi.SetClipboard(ansi.SystemClipboard, m.pendingClipboard)
 	}
-	return out
+	view := tea.NewView(out)
+	view.AltScreen = true
+	view.MouseMode = tea.MouseModeCellMotion
+	view.WindowTitle = m.title
+	view.BackgroundColor = m.editorBackground()
+	view.ForegroundColor = m.palette().Text()
+	return view
 }
 
 func (m Model) cursorPositionSequence() string {
@@ -164,7 +172,6 @@ func (m *Model) applyCommands(commands []protocol.Command) tea.Cmd {
 			m.cursorShape = command.CursorShape
 		case protocol.CommandSetTitle:
 			m.title = command.Title
-			cmds = append(cmds, tea.SetWindowTitle(command.Title))
 		case protocol.CommandSetWindowBg:
 			m.bg = command.WindowBg
 		case protocol.CommandWindowContent:

@@ -134,42 +134,26 @@ func decodeAgentMessage(body []byte) (AgentChatMessage, bool) {
 	offset := 5
 	switch msg.Kind {
 	case 0x01, 0x02:
-		if len(body) < offset+4 {
-			return msg, true
-		}
-		size := int(u32(body, offset))
-		offset += 4
-		if len(body) >= offset+size {
-			msg.Text = string(body[offset : offset+size])
-		}
+		text, ok := decodeAgentTextBody(body, offset)
+		msg.Text = text
+		return msg, ok
 	case 0x03:
 		if len(body) < offset+5 {
 			return msg, true
 		}
+		msg.Collapsed = body[offset] != 0
 		size := int(u32(body, offset+1))
 		offset += 5
 		if len(body) >= offset+size {
 			msg.Text = string(body[offset : offset+size])
 		}
 	case 0x04:
-		if len(body) < offset+7 {
-			return msg, true
-		}
-		offset += 7
-		name, next, ok := readString16(body, offset)
-		if !ok {
-			return msg, true
-		}
-		summary, _, ok := readString16(body, next)
-		if ok {
-			msg.Text = strings.TrimSpace(name + " " + summary)
-		} else {
-			msg.Text = name
-		}
+		msg = decodeToolCallMessage(msg, body, offset, false)
 	case 0x05:
 		if len(body) < offset+5 {
 			return msg, true
 		}
+		msg.Status = body[offset]
 		size := int(u32(body, offset+1))
 		offset += 5
 		if len(body) >= offset+size {
@@ -177,73 +161,172 @@ func decodeAgentMessage(body []byte) (AgentChatMessage, bool) {
 		}
 	case 0x06:
 		if len(body) >= offset+20 {
-			msg.Text = fmt.Sprintf("usage in:%d out:%d", u32(body, offset), u32(body, offset+4))
+			msg.Usage = AgentUsage{Input: u32(body, offset), Output: u32(body, offset+4), CacheRead: u32(body, offset+8), CacheWrite: u32(body, offset+12), CostMicros: u32(body, offset+16)}
+			msg.Text = fmt.Sprintf("usage in:%d out:%d", msg.Usage.Input, msg.Usage.Output)
 		}
 	case 0x07:
-		msg.Text = decodeStyledLines(body[offset:])
+		lines, next, ok := decodeStyledLines(body, offset)
+		msg.StyledLines = lines
+		msg.Text = plainStyledLines(lines)
+		_ = next
+		return msg, ok
 	case 0x08:
-		if len(body) < offset+7 {
-			return msg, true
-		}
-		offset += 7
-		name, next, ok := readString16(body, offset)
-		if !ok {
-			return msg, true
-		}
-		summary, _, ok := readString16(body, next)
-		if ok {
-			msg.Text = strings.TrimSpace(name + " " + summary)
-		} else {
-			msg.Text = name
-		}
+		msg = decodeToolCallMessage(msg, body, offset, true)
 	case 0x09:
-		if len(body) < offset+1 {
-			return msg, true
-		}
-		name, next, ok := readString16(body, offset+1)
-		if !ok {
-			return msg, true
-		}
-		summary, _, ok := readString16(body, next)
-		if ok {
-			msg.Text = strings.TrimSpace(name + " " + summary)
-		} else {
-			msg.Text = name
-		}
+		msg = decodeApprovalMessage(msg, body, offset)
 	}
 	return msg, true
 }
 
-func decodeStyledLines(body []byte) string {
-	if len(body) < 2 {
-		return ""
+func decodeAgentTextBody(body []byte, offset int) (string, bool) {
+	if len(body) < offset+4 {
+		return "", true
 	}
-	count := int(u16(body, 0))
-	offset := 2
-	lines := make([]string, 0, count)
+	size := int(u32(body, offset))
+	offset += 4
+	if len(body) < offset+size {
+		return "", true
+	}
+	return string(body[offset : offset+size]), true
+}
+
+func decodeToolCallMessage(msg AgentChatMessage, body []byte, offset int, styled bool) AgentChatMessage {
+	if len(body) < offset+7 {
+		return msg
+	}
+	msg.Status = body[offset]
+	msg.IsError = body[offset+1] != 0
+	msg.Collapsed = body[offset+2] != 0
+	msg.DurationMS = u32(body, offset+3)
+	offset += 7
+
+	name, next, ok := readString16(body, offset)
+	if !ok {
+		return msg
+	}
+	msg.Name = name
+	summary, next, ok := readString16(body, next)
+	if !ok {
+		msg.Text = name
+		return msg
+	}
+	msg.Summary = summary
+	msg.Text = strings.TrimSpace(name + " " + summary)
+
+	if styled {
+		lines, next, ok := decodeStyledLines(body, next)
+		if ok {
+			msg.StyledLines = lines
+			if text := plainStyledLines(lines); text != "" {
+				msg.Result = text
+			}
+		}
+		if len(body) > next {
+			msg.AutoApprovedScope = body[next]
+		}
+		return msg
+	}
+
+	if len(body) < next+4 {
+		return msg
+	}
+	resultLen := int(u32(body, next))
+	next += 4
+	if len(body) >= next+resultLen {
+		msg.Result = string(body[next : next+resultLen])
+		next += resultLen
+	}
+	if len(body) > next {
+		msg.AutoApprovedScope = body[next]
+	}
+	return msg
+}
+
+func decodeApprovalMessage(msg AgentChatMessage, body []byte, offset int) AgentChatMessage {
+	if len(body) < offset+1 {
+		return msg
+	}
+	msg.Status = body[offset]
+	offset++
+
+	name, next, ok := readString16(body, offset)
+	if !ok {
+		return msg
+	}
+	msg.Name = name
+	summary, next, ok := readString16(body, next)
+	if !ok {
+		msg.Text = name
+		return msg
+	}
+	msg.Summary = summary
+	toolCallID, next, ok := readString16(body, next)
+	if ok && toolCallID != "" {
+		msg.Result = toolCallID
+	}
+	if len(body) < next+3 {
+		msg.Text = strings.TrimSpace(name + " " + summary)
+		return msg
+	}
+	msg.PreviewKind = body[next]
+	lineCount := int(u16(body, next+1))
+	next += 3
+	msg.PreviewLines = make([]string, 0, lineCount)
+	for i := 0; i < lineCount; i++ {
+		line, after, ok := readString16(body, next)
+		if !ok {
+			break
+		}
+		msg.PreviewLines = append(msg.PreviewLines, line)
+		next = after
+	}
+	msg.Text = strings.TrimSpace(name + " " + summary)
+	return msg
+}
+
+func decodeStyledLines(body []byte, offset int) ([]AgentStyledLine, int, bool) {
+	if len(body) < offset+2 {
+		return nil, offset, false
+	}
+	count := int(u16(body, offset))
+	offset += 2
+	lines := make([]AgentStyledLine, 0, count)
 	for i := 0; i < count && len(body) >= offset+2; i++ {
 		runCount := int(u16(body, offset))
 		offset += 2
-		parts := make([]string, 0, runCount)
+		line := make(AgentStyledLine, 0, runCount)
 		for j := 0; j < runCount; j++ {
 			text, next, ok := readString16(body, offset)
 			if !ok || len(body) < next+7 {
-				return stringsJoin(lines, " ")
+				return lines, offset, false
 			}
-			flags := body[next+6]
+			run := AgentStyledRun{Text: text, FG: u24(body, next), BG: u24(body, next+3), Flags: body[next+6]}
 			offset = next + 7
-			if flags&0x08 != 0 {
-				_, next, ok = readString16(body, offset)
+			if run.Flags&0x08 != 0 {
+				url, next, ok := readString16(body, offset)
 				if !ok {
-					return stringsJoin(lines, " ")
+					return lines, offset, false
 				}
+				run.URL = url
 				offset = next
 			}
-			parts = append(parts, text)
+			line = append(line, run)
 		}
-		lines = append(lines, stringsJoin(parts, ""))
+		lines = append(lines, line)
 	}
-	return stringsJoin(lines, " ")
+	return lines, offset, true
+}
+
+func plainStyledLines(lines []AgentStyledLine) string {
+	plainLines := make([]string, 0, len(lines))
+	for _, line := range lines {
+		parts := make([]string, 0, len(line))
+		for _, run := range line {
+			parts = append(parts, run.Text)
+		}
+		plainLines = append(plainLines, stringsJoin(parts, ""))
+	}
+	return stringsJoin(plainLines, " ")
 }
 
 func decodeBoard(payload []byte) (Board, string, int) {

@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"encoding/binary"
 	"testing"
 
 	"github.com/jsmestad/minga/go/tui/internal/generated"
@@ -931,6 +932,65 @@ func TestDecodeAgentBoardTimelineChrome(t *testing.T) {
 	if !command.Chrome.Timeline.Visible || len(command.Chrome.Timeline.Entries) != 1 || command.Chrome.Timeline.Entries[0].ToolName != "apply_patch" {
 		t.Fatalf("timeline decoded incorrectly: %+v", command.Chrome.Timeline)
 	}
+}
+
+func TestDecodeAgentChatPreservesStructuredMessageDetails(t *testing.T) {
+	tool := append(u32Bytes(7), 0x04, 1, 0, 0)
+	tool = append(tool, u32Bytes(42)...)
+	tool = append(tool, string16("read_file")...)
+	tool = append(tool, string16("lib/app.ex")...)
+	tool = append(tool, u32Bytes(2)...)
+	tool = append(tool, 'o', 'k', 1)
+
+	approval := append(u32Bytes(8), 0x09, 0)
+	approval = append(approval, string16("edit_file")...)
+	approval = append(approval, string16("Update lib/app.ex")...)
+	approval = append(approval, string16("tc-1")...)
+	approval = append(approval, 1, 0, 1)
+	approval = append(approval, string16("+hello")...)
+
+	usage := append(u32Bytes(9), 0x06)
+	usage = append(usage, u32Bytes(1200)...)
+	usage = append(usage, u32Bytes(300)...)
+	usage = append(usage, u32Bytes(40)...)
+	usage = append(usage, u32Bytes(20)...)
+	usage = append(usage, u32Bytes(12500)...)
+
+	chat := []byte{generated.OPGuiAgentChat, 2}
+	chat = append(chat, section(0x01, []byte{1, 2})...)
+	chat = append(chat, section(0x06, agentMessages(tool, approval, usage))...)
+	command, err := DecodeCommand(chat)
+	if err != nil {
+		t.Fatalf("DecodeCommand chat returned error: %v", err)
+	}
+	messages := command.Chrome.AgentChat.Messages
+	if len(messages) != 3 {
+		t.Fatalf("message count = %d, want 3: %+v", len(messages), messages)
+	}
+	if got := messages[0]; got.Name != "read_file" || got.Summary != "lib/app.ex" || got.Result != "ok" || got.DurationMS != 42 || got.AutoApprovedScope != 1 {
+		t.Fatalf("tool message decoded incorrectly: %+v", got)
+	}
+	if got := messages[1]; got.Name != "edit_file" || got.PreviewKind != 1 || len(got.PreviewLines) != 1 || got.PreviewLines[0] != "+hello" {
+		t.Fatalf("approval message decoded incorrectly: %+v", got)
+	}
+	if got := messages[2].Usage; got.Input != 1200 || got.Output != 300 || got.CacheRead != 40 || got.CacheWrite != 20 || got.CostMicros != 12500 {
+		t.Fatalf("usage decoded incorrectly: %+v", got)
+	}
+}
+
+func agentMessages(messages ...[]byte) []byte {
+	out := []byte{0xFF, 1, byte(len(messages) >> 8), byte(len(messages))}
+	for _, message := range messages {
+		out = append(out, u32Bytes(uint32(len(message)))...)
+		out = append(out, message...)
+	}
+	return out
+}
+
+func u32Bytes(value uint32) []byte {
+	out := make([]byte, 4)
+	binary.BigEndian.PutUint32(out, value)
+	return out
 }
 
 func section(id byte, payload []byte) []byte {

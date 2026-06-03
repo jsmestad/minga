@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net/url"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 )
 
@@ -22,7 +22,8 @@ func zoneIDModelineCommand(command string) string {
 }
 
 func (m Model) semanticMousePacket(msg tea.MouseMsg) ([]byte, bool) {
-	if msg.Button != tea.MouseButtonLeft || msg.Action != tea.MouseActionPress {
+	click, ok := msg.(tea.MouseClickMsg)
+	if !ok || click.Button != tea.MouseLeft {
 		return nil, false
 	}
 	if packet, ok := m.modelineMousePacket(msg); ok {

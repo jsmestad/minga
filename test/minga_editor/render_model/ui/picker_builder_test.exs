@@ -72,6 +72,17 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
       assert model.has_preview?
       assert model.preview_lines == [[{"alpha", 0xCCCCCC, false}], [{"beta", 0xCCCCCC, false}]]
     end
+
+    test "binary file preview shows a safe placeholder" do
+      path = temp_file!(<<0, 1, 2, "BEAM">>)
+      item = %Item{id: path, label: Path.basename(path)}
+      picker = %PickerState{items: [item], filtered: [item], title: "Files", selected: 0}
+      modal = picker_modal(picker, MingaEditor.UI.Picker.FileSource, nil, "", :ready)
+
+      model = PickerBuilder.build(build_context(modal))
+
+      assert model.preview_lines == [[{"Binary file preview unavailable", 0xCCCCCC, true}]]
+    end
   end
 
   @spec picker_modal(PickerState.t(), module(), term(), String.t(), Picker.load_status()) ::

@@ -5,7 +5,7 @@ import (
 	"log"
 	"os"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/jsmestad/minga/go/tui/internal/port"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 	"github.com/jsmestad/minga/go/tui/internal/terminal"
@@ -36,7 +36,7 @@ func run() error {
 	go writePackets(os.Stdout, out)
 
 	model := ui.New(width, height, out)
-	program := tea.NewProgram(model, tea.WithInput(tty), tea.WithOutput(tty), tea.WithAltScreen(), tea.WithMouseCellMotion())
+	program := tea.NewProgram(model, tea.WithInput(tty), tea.WithOutput(tty))
 	port.StartReader(program, os.Stdin)
 
 	_, err = program.Run()
