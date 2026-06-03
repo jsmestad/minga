@@ -372,7 +372,7 @@ func TestAgentChatPanelRendersStructuredTranscript(t *testing.T) {
 	}
 
 	view := ansi.Strip(strings.Join(model.renderAgentChatPanelWithLimit(chat, 120, 28), "\n"))
-	for _, want := range []string{"◇ Agent", "anthropic", "claude-sonnet-4", "thinking medium", "Read", "read_file", "path:", "Approval edit_file", "Usage", "NORMAL", "fix the renderer", "◇ Session", "Provider", "Model", "Context", "Hints", "╰"} {
+	for _, want := range []string{"󰚩 Agent", "anthropic / claude-sonnet-4", "◌ medium", "Read", "read_file", "path:", "Approval edit_file", "Usage", "NORMAL", "fix the renderer", "◇ Session", "Provider", "Model", "Context", "Hints", "╰"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("agent chat panel missing %q in %q", want, view)
 		}
@@ -411,7 +411,7 @@ func TestAgentChatVisibleRendersAsMainBody(t *testing.T) {
 
 	bodyLines := strings.Split(ansi.Strip(model.content()), "\n")
 	body := strings.Join(bodyLines, "\n")
-	if !strings.Contains(body, "◇ Agent") || !strings.Contains(body, "Session") || !strings.Contains(body, "Ask Minga") || !strings.Contains(body, "Minga is ready") || !strings.Contains(body, "/explain") || !strings.Contains(body, "Explain this file") {
+	if !strings.Contains(body, "󰚩 Agent") || !strings.Contains(body, "Session") || !strings.Contains(body, "Ask Minga") || !strings.Contains(body, "Minga is ready") || !strings.Contains(body, "/explain") || !strings.Contains(body, "Explain this file") {
 		t.Fatalf("agent chat should render in main body: %q", body)
 	}
 	if strings.Contains(body, "~") {

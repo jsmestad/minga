@@ -180,19 +180,36 @@ func (m Model) renderAgentHeader(chat protocol.AgentChat, width int) string {
 	p := m.palette()
 	base := lipgloss.NewStyle().Foreground(p.Text()).Background(m.editorBackground()).Width(width)
 	provider, modelName := splitAgentModelName(chat.ModelName)
-	title := lipgloss.NewStyle().Bold(true).Foreground(p.Accent()).Background(m.editorBackground()).Render("◇ Agent")
-	model := lipgloss.NewStyle().Foreground(p.Text()).Background(m.editorBackground()).Render("[" + nonEmpty(modelName, "no model") + "]")
-	status := m.renderAgentStatusBadge(chat.Status)
-	parts := []string{title}
-	if provider != "" {
-		parts = append(parts, lipgloss.NewStyle().Foreground(p.Muted()).Background(m.editorBackground()).Render(provider))
+	modelName = nonEmpty(modelName, "no model")
+
+	icon := lipgloss.NewStyle().Bold(true).Foreground(p.Accent()).Background(m.editorBackground()).Render(agentHeaderIcon())
+	label := lipgloss.NewStyle().Bold(true).Foreground(p.Accent()).Background(m.editorBackground()).Render(" Agent")
+	model := lipgloss.NewStyle().Foreground(p.Text()).Background(m.editorBackground()).Render(modelName)
+	muted := lipgloss.NewStyle().Foreground(p.Muted()).Background(m.editorBackground())
+
+	title := icon + label
+	identity := model
+	if provider != "" && width >= 52 {
+		identity = muted.Render(provider) + muted.Render(" / ") + model
 	}
-	parts = append(parts, model, status)
-	if chat.ThinkingLevel != "" {
-		parts = append(parts, lipgloss.NewStyle().Foreground(p.Muted()).Background(m.editorBackground()).Render("thinking: "+chat.ThinkingLevel))
+	if width < 34 {
+		title = icon
 	}
-	content := strings.Join(parts, lipgloss.NewStyle().Foreground(p.Muted()).Background(m.editorBackground()).Render("  "))
-	return base.Render(fitStyled(content, width))
+
+	left := title + muted.Render("  ") + identity
+	right := m.renderAgentStatusBadge(chat.Status)
+	if chat.ThinkingLevel != "" && width >= 56 {
+		right += muted.Render("  ◌ " + chat.ThinkingLevel)
+	}
+
+	leftBudget := max(width-lipgloss.Width(right)-1, 1)
+	left = fitStyled(left, leftBudget)
+	spacer := muted.Render(strings.Repeat(" ", max(width-lipgloss.Width(left)-lipgloss.Width(right), 1)))
+	return base.Render(fitStyled(left+spacer+right, width))
+}
+
+func agentHeaderIcon() string {
+	return "󰚩"
 }
 
 func (m Model) joinAgentColumns(left []string, right []string, leftWidth int, rightWidth int, height int) []string {
@@ -361,13 +378,13 @@ func nonEmpty(value string, fallback string) string {
 func (m Model) renderAgentStatusBadge(status byte) string {
 	p := m.palette()
 	label := agentChatStatusLabel(status)
-	style := lipgloss.NewStyle().Bold(true).Foreground(p.SelectionText()).Background(p.Selection()).Padding(0, 1)
+	style := lipgloss.NewStyle().Bold(true).Foreground(p.Muted()).Background(p.SurfaceAlt()).Padding(0, 1)
 	switch status {
 	case 1, 2:
 		label = m.agentSpinner() + " " + label
-		style = style.Background(p.Accent())
+		style = style.Foreground(p.SelectionText()).Background(p.Accent())
 	case 3:
-		style = style.Background(p.Diagnostic(0))
+		style = style.Foreground(p.SelectionText()).Background(p.Diagnostic(0))
 	}
 	return style.Render(label)
 }
