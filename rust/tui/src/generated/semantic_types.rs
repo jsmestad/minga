@@ -132,6 +132,11 @@ pub struct PickerItem {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PickerAction {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct WhichKeyBinding {
     pub kind: u8,
     pub key: String,
@@ -339,26 +344,27 @@ pub struct GuiWindowRowsDeltaHeader {
     pub scroll_left: u16,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GuiPickerHeader {
     pub visible: u8,
     pub selected_index: u16,
-    pub item_count: u16,
-    pub total_count: u32,
-    pub flags: u8,
+    pub filtered_count: u16,
+    pub total_count: u16,
+    pub has_preview: u8,
+    pub title: String,
+    pub marked_count: u16,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GuiPickerQuery {
     pub text: String,
-    pub cursor_pos: u16,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GuiPickerActionMenu {
     pub visible: u8,
     pub selected_index: u8,
-    pub item_count: u8,
+    pub actions: Vec<PickerAction>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

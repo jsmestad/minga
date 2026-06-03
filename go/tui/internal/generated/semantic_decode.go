@@ -588,6 +588,17 @@ func DecodePickerItem(data []byte, offset int) (PickerItem, int, error) {
 	}, pos, nil
 }
 
+func DecodePickerAction(data []byte, offset int) (PickerAction, int, error) {
+	pos := offset
+	name, pos, err := decodeString16(data, pos)
+	if err != nil {
+		return PickerAction{}, offset, err
+	}
+	return PickerAction{
+		Name: name,
+	}, pos, nil
+}
+
 func DecodeWhichKeyBinding(data []byte, offset int) (WhichKeyBinding, int, error) {
 	pos := offset
 	if err := decodeRequireLen(data, pos+1, "kind"); err != nil {
@@ -806,27 +817,38 @@ func DecodeGuiPickerHeader(data []byte, offset int) (GuiPickerHeader, int, error
 	}
 	selectedIndex := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+2, "item_count"); err != nil {
+	if err := decodeRequireLen(data, pos+2, "filtered_count"); err != nil {
 		return GuiPickerHeader{}, offset, err
 	}
-	itemCount := decodeU16(data, pos)
+	filteredCount := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+4, "total_count"); err != nil {
+	if err := decodeRequireLen(data, pos+2, "total_count"); err != nil {
 		return GuiPickerHeader{}, offset, err
 	}
-	totalCount := decodeU32(data, pos)
-	pos += 4
-	if err := decodeRequireLen(data, pos+1, "flags"); err != nil {
+	totalCount := decodeU16(data, pos)
+	pos += 2
+	if err := decodeRequireLen(data, pos+1, "has_preview"); err != nil {
 		return GuiPickerHeader{}, offset, err
 	}
-	flags := data[pos]
+	hasPreview := data[pos]
 	pos++
+	title, pos, err := decodeString16(data, pos)
+	if err != nil {
+		return GuiPickerHeader{}, offset, err
+	}
+	if err := decodeRequireLen(data, pos+2, "marked_count"); err != nil {
+		return GuiPickerHeader{}, offset, err
+	}
+	markedCount := decodeU16(data, pos)
+	pos += 2
 	return GuiPickerHeader{
 		Visible:       visible,
 		SelectedIndex: selectedIndex,
-		ItemCount:     itemCount,
+		FilteredCount: filteredCount,
 		TotalCount:    totalCount,
-		Flags:         flags,
+		HasPreview:    hasPreview,
+		Title:         title,
+		MarkedCount:   markedCount,
 	}, pos, nil
 }
 
@@ -836,14 +858,8 @@ func DecodeGuiPickerQuery(data []byte, offset int) (GuiPickerQuery, int, error) 
 	if err != nil {
 		return GuiPickerQuery{}, offset, err
 	}
-	if err := decodeRequireLen(data, pos+2, "cursor_pos"); err != nil {
-		return GuiPickerQuery{}, offset, err
-	}
-	cursorPos := decodeU16(data, pos)
-	pos += 2
 	return GuiPickerQuery{
-		Text:      text,
-		CursorPos: cursorPos,
+		Text: text,
 	}, pos, nil
 }
 
@@ -873,20 +889,33 @@ func DecodeGuiPickerActionMenu(data []byte, offset int) (GuiPickerActionMenu, in
 	}
 	visible := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+1, "selected_index"); err != nil {
-		return GuiPickerActionMenu{}, offset, err
+	var selectedIndex uint8
+	var actions []PickerAction
+	if visible == 1 {
+		if err := decodeRequireLen(data, pos+1, "selected_index"); err != nil {
+			return GuiPickerActionMenu{}, offset, err
+		}
+		selectedIndex = data[pos]
+		pos++
+		if err := decodeRequireLen(data, pos+1, "actions count"); err != nil {
+			return GuiPickerActionMenu{}, offset, err
+		}
+		actionsCount := int(data[pos])
+		pos += 1
+		actions = make([]PickerAction, 0, actionsCount)
+		for i := 0; i < actionsCount; i++ {
+			item, nextPos, err := DecodePickerAction(data, pos)
+			if err != nil {
+				return GuiPickerActionMenu{}, offset, err
+			}
+			pos = nextPos
+			actions = append(actions, item)
+		}
 	}
-	selectedIndex := data[pos]
-	pos++
-	if err := decodeRequireLen(data, pos+1, "item_count"); err != nil {
-		return GuiPickerActionMenu{}, offset, err
-	}
-	itemCount := data[pos]
-	pos++
 	return GuiPickerActionMenu{
 		Visible:       visible,
 		SelectedIndex: selectedIndex,
-		ItemCount:     itemCount,
+		Actions:       actions,
 	}, pos, nil
 }
 
@@ -908,9 +937,13 @@ func DecodeGuiPickerLoadStatus(data []byte, offset int) (GuiPickerLoadStatus, in
 	}
 	status := data[pos]
 	pos++
-	message, pos, err := decodeString16(data, pos)
-	if err != nil {
-		return GuiPickerLoadStatus{}, offset, err
+	var message string
+	if status == 2 {
+		var err error
+		message, pos, err = decodeString16(data, pos)
+		if err != nil {
+			return GuiPickerLoadStatus{}, offset, err
+		}
 	}
 	return GuiPickerLoadStatus{
 		Status:  status,

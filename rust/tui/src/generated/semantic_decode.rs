@@ -423,6 +423,14 @@ pub fn decode_picker_item(bytes: &[u8], offset: usize) -> Result<(PickerItem, us
     }, pos - offset))
 }
 
+pub fn decode_picker_action(bytes: &[u8], offset: usize) -> Result<(PickerAction, usize), DecodeError> {
+    let mut pos = offset;
+    let name = read_string16(bytes, &mut pos)?;
+    Ok((PickerAction {
+        name,
+    }, pos - offset))
+}
+
 pub fn decode_which_key_binding(bytes: &[u8], offset: usize) -> Result<(WhichKeyBinding, usize), DecodeError> {
     let mut pos = offset;
     require_len(bytes, pos + 1, "kind")?;
@@ -578,33 +586,35 @@ pub fn decode_gui_picker_header(bytes: &[u8], offset: usize) -> Result<(GuiPicke
     require_len(bytes, pos + 2, "selected_index")?;
     let selected_index = read_u16(bytes, pos);
     pos += 2;
-    require_len(bytes, pos + 2, "item_count")?;
-    let item_count = read_u16(bytes, pos);
+    require_len(bytes, pos + 2, "filtered_count")?;
+    let filtered_count = read_u16(bytes, pos);
     pos += 2;
-    require_len(bytes, pos + 4, "total_count")?;
-    let total_count = read_u32(bytes, pos);
-    pos += 4;
-    require_len(bytes, pos + 1, "flags")?;
-    let flags = bytes[pos];
+    require_len(bytes, pos + 2, "total_count")?;
+    let total_count = read_u16(bytes, pos);
+    pos += 2;
+    require_len(bytes, pos + 1, "has_preview")?;
+    let has_preview = bytes[pos];
     pos += 1;
+    let title = read_string16(bytes, &mut pos)?;
+    require_len(bytes, pos + 2, "marked_count")?;
+    let marked_count = read_u16(bytes, pos);
+    pos += 2;
     Ok((GuiPickerHeader {
         visible,
         selected_index,
-        item_count,
+        filtered_count,
         total_count,
-        flags,
+        has_preview,
+        title,
+        marked_count,
     }, pos - offset))
 }
 
 pub fn decode_gui_picker_query(bytes: &[u8], offset: usize) -> Result<(GuiPickerQuery, usize), DecodeError> {
     let mut pos = offset;
     let text = read_string16(bytes, &mut pos)?;
-    require_len(bytes, pos + 2, "cursor_pos")?;
-    let cursor_pos = read_u16(bytes, pos);
-    pos += 2;
     Ok((GuiPickerQuery {
         text,
-        cursor_pos,
     }, pos - offset))
 }
 
@@ -627,16 +637,27 @@ pub fn decode_gui_picker_action_menu(bytes: &[u8], offset: usize) -> Result<(Gui
     require_len(bytes, pos + 1, "visible")?;
     let visible = bytes[pos];
     pos += 1;
-    require_len(bytes, pos + 1, "selected_index")?;
-    let selected_index = bytes[pos];
-    pos += 1;
-    require_len(bytes, pos + 1, "item_count")?;
-    let item_count = bytes[pos];
-    pos += 1;
+    let mut selected_index = 0;
+    let mut actions = Vec::<PickerAction>::new();
+    if visible == 1 {
+        require_len(bytes, pos + 1, "selected_index")?;
+        selected_index = bytes[pos];
+        pos += 1;
+        require_len(bytes, pos + 1, "actions count")?;
+        let actions_count = bytes[pos] as usize;
+        pos += 1;
+        let mut actions_value = Vec::with_capacity(actions_count);
+        for _ in 0..actions_count {
+            let (item, consumed) = decode_picker_action(bytes, pos)?;
+            pos += consumed;
+            actions_value.push(item);
+        }
+        actions = actions_value;
+    }
     Ok((GuiPickerActionMenu {
         visible,
         selected_index,
-        item_count,
+        actions,
     }, pos - offset))
 }
 
@@ -653,7 +674,10 @@ pub fn decode_gui_picker_load_status(bytes: &[u8], offset: usize) -> Result<(Gui
     require_len(bytes, pos + 1, "status")?;
     let status = bytes[pos];
     pos += 1;
-    let message = read_string16(bytes, &mut pos)?;
+    let mut message = String::new();
+    if status == 2 {
+        message = read_string16(bytes, &mut pos)?;
+    }
     Ok((GuiPickerLoadStatus {
         status,
         message,

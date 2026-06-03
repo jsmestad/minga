@@ -1185,6 +1185,14 @@ fields = [
   {name = "match_positions", type = "counted_array", count_type = "u8", element = "match_position"},
 ]
 
+# A single action-menu entry: wraps the action name string so it can be a
+# counted_array element (picker_encoder.ex encode_action_menu/1).
+[[structures]]
+name = "picker_action"
+fields = [
+  {name = "name", type = "string16"},
+]
+
 [[structures]]
 name = "which_key_binding"
 fields = [
@@ -1541,12 +1549,17 @@ element = "row"
 opcode = "gui_picker"
 id = 0x01
 name = "header"
+# picker_encoder.ex encode_picker/1: a constant marker byte (1), then the
+# counts, has_preview flag, title, and marked_count. The encoder writes
+# total_count as u16, not u32, and emits the title + marked_count tail.
 fields = [
   {name = "visible", type = "u8"},
   {name = "selected_index", type = "u16"},
-  {name = "item_count", type = "u16"},
-  {name = "total_count", type = "u32"},
-  {name = "flags", type = "u8"},
+  {name = "filtered_count", type = "u16"},
+  {name = "total_count", type = "u16"},
+  {name = "has_preview", type = "u8"},
+  {name = "title", type = "string16"},
+  {name = "marked_count", type = "u16"},
 ]
 
 [[sections]]
@@ -1555,7 +1568,6 @@ id = 0x02
 name = "query"
 fields = [
   {name = "text", type = "string16"},
-  {name = "cursor_pos", type = "u16"},
 ]
 
 [[sections]]
@@ -1570,11 +1582,16 @@ element = "picker_item"
 opcode = "gui_picker"
 id = 0x04
 name = "action_menu"
+# picker_encoder.ex encode_action_menu/1: hidden menus encode just the visible
+# byte (0); a visible menu adds selected_index plus a u8-counted list of action
+# name strings.
 fields = [
   {name = "visible", type = "u8"},
-  {name = "selected_index", type = "u8"},
-  {name = "item_count", type = "u8"},
 ]
+conditional_tail = {guard = "visible == 1", fields = [
+  {name = "selected_index", type = "u8"},
+  {name = "actions", type = "counted_array", count_type = "u8", element = "picker_action"},
+]}
 
 [[sections]]
 opcode = "gui_picker"
@@ -1588,10 +1605,14 @@ fields = [
 opcode = "gui_picker"
 id = 0x06
 name = "load_status"
+# picker_encoder.ex encode_load_status/1: :ready/:loading encode just the status
+# byte (0/1); {:error, reason} adds status 2 plus the message string.
 fields = [
   {name = "status", type = "u8"},
-  {name = "message", type = "string16"},
 ]
+conditional_tail = {guard = "status == 2", fields = [
+  {name = "message", type = "string16"},
+]}
 
 # gui_agent_chat (0x78) sections
 

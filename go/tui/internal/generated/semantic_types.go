@@ -116,6 +116,10 @@ type PickerItem struct {
 	MatchPositions []MatchPosition
 }
 
+type PickerAction struct {
+	Name string
+}
+
 type WhichKeyBinding struct {
 	Kind uint8
 	Key  string
@@ -305,20 +309,21 @@ type GuiWindowRowsDeltaHeader struct {
 type GuiPickerHeader struct {
 	Visible       uint8
 	SelectedIndex uint16
-	ItemCount     uint16
-	TotalCount    uint32
-	Flags         uint8
+	FilteredCount uint16
+	TotalCount    uint16
+	HasPreview    uint8
+	Title         string
+	MarkedCount   uint16
 }
 
 type GuiPickerQuery struct {
-	Text      string
-	CursorPos uint16
+	Text string
 }
 
 type GuiPickerActionMenu struct {
 	Visible       uint8
 	SelectedIndex uint8
-	ItemCount     uint8
+	Actions       []PickerAction
 }
 
 type GuiPickerModePrefix struct {
