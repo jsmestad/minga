@@ -150,6 +150,25 @@ func TestPickerPreviewRendersWithPicker(t *testing.T) {
 	}
 }
 
+func TestPickerSelectedRowHasVisibleMarker(t *testing.T) {
+	model := New(80, 24, nil)
+	rows := model.renderPickerList("Agent Model", protocol.Picker{
+		Visible:  true,
+		Selected: 1,
+		Items: []protocol.PickerItem{
+			{Label: "GPT-5 Codex", Description: "openai_codex"},
+			{Label: "Claude Sonnet", Description: "anthropic"},
+		},
+	}, 4, 80)
+	stripped := ansi.Strip(strings.Join(rows, "\n"))
+	if !strings.Contains(stripped, "▶") || !strings.Contains(stripped, "Claude Sonnet") {
+		t.Fatalf("selected picker row should include a visible marker: %q", stripped)
+	}
+	if strings.Contains(stripped, "▶ GPT-5 Codex") {
+		t.Fatalf("selection marker should only appear on selected row: %q", stripped)
+	}
+}
+
 func TestPickerOverlayIsBounded(t *testing.T) {
 	model := New(100, 24, nil)
 	items := make([]protocol.PickerItem, 20)
@@ -353,7 +372,7 @@ func TestAgentChatPanelRendersStructuredTranscript(t *testing.T) {
 	}
 
 	view := ansi.Strip(strings.Join(model.renderAgentChatPanel(chat), "\n"))
-	for _, want := range []string{"◇ Agent", "anthropic:claude-sonnet-4", "thinking medium", "Read read_file", "path:", "Approval edit_file", "Usage", "::: fix the renderer", "Details", "Messages", "Context", "Hints"} {
+	for _, want := range []string{"◇ Agent", "anthropic:claude-sonnet-4", "thinking medium", "Read read_file", "path:", "Approval edit_file", "Usage", "Composer", "fix the renderer", "Session", "Provider", "Model", "Context", "Hints"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("agent chat panel missing %q in %q", want, view)
 		}
@@ -375,12 +394,17 @@ func TestAgentChatVisibleRendersAsMainBody(t *testing.T) {
 	model.putWindow(protocol.WindowContent{ID: 7, Rows: []protocol.WindowRow{{Text: ""}}})
 	model.viewport.SetContent(model.content())
 
-	body := ansi.Strip(model.content())
-	if !strings.Contains(body, "◇ Agent") || !strings.Contains(body, "Details") || !strings.Contains(body, "Ask Minga") {
+	bodyLines := strings.Split(ansi.Strip(model.content()), "\n")
+	body := strings.Join(bodyLines, "\n")
+	if !strings.Contains(body, "◇ Agent") || !strings.Contains(body, "Session") || !strings.Contains(body, "Ask Minga") {
 		t.Fatalf("agent chat should render in main body: %q", body)
 	}
 	if strings.Contains(body, "~") {
 		t.Fatalf("agent chat body should not show editor tilde filler: %q", body)
+	}
+	bottomComposer := strings.Join(bodyLines[max(len(bodyLines)-3, 0):], "\n")
+	if !strings.Contains(bottomComposer, "Composer") || !strings.Contains(bottomComposer, "Ask Minga") {
+		t.Fatalf("agent composer should be pinned to bottom body rows: %+v", bodyLines)
 	}
 	footer := ansi.Strip(strings.Join(model.footerLines(), "\n"))
 	if strings.Contains(footer, "◇ Agent") || strings.Contains(footer, "Ask Minga") {

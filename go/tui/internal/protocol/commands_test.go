@@ -956,12 +956,19 @@ func TestDecodeAgentChatPreservesStructuredMessageDetails(t *testing.T) {
 	usage = append(usage, u32Bytes(20)...)
 	usage = append(usage, u32Bytes(12500)...)
 
-	chat := []byte{generated.OPGuiAgentChat, 2}
+	prompt := string16("fix it")
+	prompt = append(prompt, 2, 0, 1, 0, 4, 1, 2)
+
+	chat := []byte{generated.OPGuiAgentChat, 3}
 	chat = append(chat, section(0x01, []byte{1, 2})...)
+	chat = append(chat, section(0x03, prompt)...)
 	chat = append(chat, section(0x06, agentMessages(tool, approval, usage))...)
 	command, err := DecodeCommand(chat)
 	if err != nil {
 		t.Fatalf("DecodeCommand chat returned error: %v", err)
+	}
+	if command.Chrome.AgentChat.Prompt != "fix it" || command.Chrome.AgentChat.PromptLineCount != 2 || command.Chrome.AgentChat.PromptCursorLine != 1 || command.Chrome.AgentChat.PromptCursorCol != 4 || command.Chrome.AgentChat.PromptVimMode != 1 || command.Chrome.AgentChat.PromptVisibleRows != 2 {
+		t.Fatalf("prompt metadata decoded incorrectly: %+v", command.Chrome.AgentChat)
 	}
 	messages := command.Chrome.AgentChat.Messages
 	if len(messages) != 3 {

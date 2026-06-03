@@ -292,7 +292,7 @@ func (m Model) renderPicker(picker protocol.Picker, preview protocol.PickerPrevi
 		return m.renderPickerWithSidePreview(title, picker, preview, height)
 	}
 
-	itemBudget := max(height-1, 1)
+	itemBudget := max(height-2, 1)
 	if preview.Visible && len(preview.Lines) > 0 {
 		itemBudget = max(itemBudget/2, 1)
 	}
@@ -301,8 +301,9 @@ func (m Model) renderPicker(picker protocol.Picker, preview protocol.PickerPrevi
 		lines = append(lines, m.popupLineStyle(m.width).Foreground(m.palette().Muted()).Render(fit(strings.Join(picker.Actions, "  "), m.width)))
 	}
 	if preview.Visible && len(preview.Lines) > 0 {
-		lines = append(lines, m.renderPickerPreview(preview, max(height-len(lines), 1), m.width)...)
+		lines = append(lines, m.renderPickerPreview(preview, max(height-len(lines)-1, 1), m.width)...)
 	}
+	lines = append(lines, m.renderPickerHelp(picker, m.width))
 	return takeLines(m.fillPopupLines(lines, height, m.width), height)
 }
 
@@ -333,26 +334,31 @@ func (m Model) renderPickerItemRow(title string, item protocol.PickerItem, selec
 	if item.Marked {
 		marker = "*"
 	}
+	if selected {
+		marker = "▶"
+	}
 	detail := item.Description
 	if detail == "" {
 		detail = item.Annotation
 	}
 	icon := pickerItemIcon(title, item)
-	iconText := icon.glyph
-	iconBackground := m.palette().PopupSurface()
+	rowBackground := theme.PopupSurface()
+	rowForeground := theme.PopupText()
 	if selected {
-		iconBackground = theme.Selection()
+		rowBackground = theme.Accent()
+		rowForeground = theme.SelectionText()
 	}
-	if icon.color != "" {
-		iconText = lipgloss.NewStyle().Foreground(lipgloss.Color(icon.color)).Background(iconBackground).Render(icon.glyph)
+	iconText := icon.glyph
+	if icon.color != "" && !selected {
+		iconText = lipgloss.NewStyle().Foreground(lipgloss.Color(icon.color)).Background(rowBackground).Render(icon.glyph)
 	}
 	text := strings.TrimSpace(marker + " " + iconText + " " + item.Label)
 	if strings.TrimSpace(detail) != "" {
 		text += "  " + strings.TrimSpace(detail)
 	}
-	style := m.popupLineStyle(width)
+	style := m.popupLineStyle(width).Foreground(rowForeground).Background(rowBackground)
 	if selected {
-		style = style.Bold(true).Foreground(theme.SelectionText()).Background(theme.Selection())
+		style = style.Bold(true)
 	}
 	return style.Render(fit(text, width))
 }
@@ -360,16 +366,32 @@ func (m Model) renderPickerItemRow(title string, item protocol.PickerItem, selec
 func (m Model) renderPickerWithSidePreview(title string, picker protocol.Picker, preview protocol.PickerPreview, height int) []string {
 	leftWidth := min(max(m.width*45/100, 36), max(m.width-20, 1))
 	rightWidth := max(m.width-leftWidth, 1)
-	left := m.renderPickerList(title, picker, height, leftWidth)
-	right := m.renderPickerPreview(preview, height, rightWidth)
-	left = m.fillPopupLines(left, height, leftWidth)
-	right = m.fillPopupLines(right, height, rightWidth)
+	bodyHeight := max(height-1, 1)
+	left := m.renderPickerList(title, picker, bodyHeight, leftWidth)
+	right := m.renderPickerPreview(preview, bodyHeight, rightWidth)
+	left = m.fillPopupLines(left, bodyHeight, leftWidth)
+	right = m.fillPopupLines(right, bodyHeight, rightWidth)
 	lines := make([]string, 0, height)
 	leftStyle := lipgloss.NewStyle().Width(leftWidth).Background(m.palette().PopupSurface())
-	for i := 0; i < height; i++ {
+	for i := 0; i < bodyHeight; i++ {
 		lines = append(lines, lipgloss.JoinHorizontal(lipgloss.Top, leftStyle.Render(left[i]), right[i]))
 	}
+	lines = append(lines, m.renderPickerHelp(picker, m.width))
 	return lines
+}
+
+func (m Model) renderPickerHelp(picker protocol.Picker, width int) string {
+	p := m.palette()
+	selected := 0
+	if len(picker.Items) > 0 {
+		selected = min(max(int(picker.Selected)+1, 1), len(picker.Items))
+	}
+	left := fmt.Sprintf(" %d/%d", selected, len(picker.Items))
+	right := "↑↓ move  Enter choose  Esc close"
+	leftText := lipgloss.NewStyle().Foreground(p.Muted()).Background(p.PopupSurface()).Render(left)
+	rightText := lipgloss.NewStyle().Foreground(p.Muted()).Background(p.PopupSurface()).Render(right)
+	spacer := strings.Repeat(" ", max(width-lipgloss.Width(leftText)-lipgloss.Width(rightText), 0))
+	return lipgloss.NewStyle().Background(p.PopupSurface()).Width(width).Render(fitStyled(leftText+spacer+rightText, width))
 }
 
 func (m Model) renderPickerPreview(preview protocol.PickerPreview, height int, width int) []string {

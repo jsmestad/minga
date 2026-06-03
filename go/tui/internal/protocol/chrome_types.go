@@ -411,14 +411,19 @@ type AgentContext struct {
 }
 
 type AgentChat struct {
-	Visible       bool
-	Status        byte
-	ModelName     string
-	Prompt        string
-	ThinkingLevel string
-	Messages      []AgentChatMessage
-	Pending       string
-	Completion    []string
+	Visible           bool
+	Status            byte
+	ModelName         string
+	Prompt            string
+	PromptLineCount   byte
+	PromptCursorLine  uint16
+	PromptCursorCol   uint16
+	PromptVimMode     byte
+	PromptVisibleRows byte
+	ThinkingLevel     string
+	Messages          []AgentChatMessage
+	Pending           string
+	Completion        []string
 }
 
 type AgentChatMessage struct {
