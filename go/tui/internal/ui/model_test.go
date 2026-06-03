@@ -41,6 +41,23 @@ func TestFloatingPickerRendersOverEditorAndSuppressesFooterOverlays(t *testing.T
 	}
 }
 
+func TestWorkspaceRowRendersAsQuietNavigation(t *testing.T) {
+	model := New(100, 20, nil)
+	row := ansi.Strip(model.renderWorkspaces(protocol.WorkspaceBar{Spaces: []protocol.Workspace{
+		{Label: "Files", Icon: "", TabCount: 1},
+		{Label: "Agent", Icon: "󰚩", TabCount: 1, Active: true},
+	}}))
+
+	for _, want := range []string{"Spaces", " Files (1 tab)", "▎󰚩 Agent (1 tab)"} {
+		if !strings.Contains(row, want) {
+			t.Fatalf("workspace row missing %q in %q", want, row)
+		}
+	}
+	if strings.Contains(row, "workspace") || strings.Contains(row, "Agent 1") || strings.Contains(row, "Files 1") {
+		t.Fatalf("workspace row should avoid implementation labels and bare counts: %q", row)
+	}
+}
+
 func TestViewCarriesFullWindowBackgroundColor(t *testing.T) {
 	model := New(20, 6, nil)
 	view := model.View()

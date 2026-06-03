@@ -31,36 +31,57 @@ func (m Model) headerLines() []string {
 
 func (m Model) renderWorkspaces(spaces protocol.WorkspaceBar) string {
 	theme := m.palette()
-	rowStyle := lipgloss.NewStyle().Background(theme.SurfaceAlt()).Width(m.width)
-	labelStyle := lipgloss.NewStyle().Foreground(theme.Muted()).Background(theme.SurfaceAlt()).Padding(0, 1)
-	activeStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.TabActiveText()).Background(theme.Surface()).Padding(0, 1)
-	inactiveStyle := lipgloss.NewStyle().Foreground(theme.TabInactiveText()).Background(theme.SurfaceAlt()).Padding(0, 1)
-	alertStyle := lipgloss.NewStyle().Foreground(theme.Warning()).Background(theme.SurfaceAlt())
-	rendered := []string{labelStyle.Render("workspace")}
+	rowStyle := lipgloss.NewStyle().Background(theme.EditorSurface()).Width(m.width)
+	labelStyle := lipgloss.NewStyle().Foreground(theme.Muted()).Background(theme.EditorSurface())
+	activeStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.Accent()).Background(theme.EditorSurface())
+	inactiveStyle := lipgloss.NewStyle().Foreground(theme.TabInactiveText()).Background(theme.EditorSurface())
+	metaStyle := lipgloss.NewStyle().Foreground(theme.Muted()).Background(theme.EditorSurface())
+	alertStyle := lipgloss.NewStyle().Foreground(theme.Warning()).Background(theme.EditorSurface())
+	rendered := []string{labelStyle.Render("Spaces")}
+	separator := metaStyle.Render(" · ")
 	for _, space := range spaces.Spaces {
+		primaryStyle := inactiveStyle
+		marker := ""
+		if space.Active {
+			primaryStyle = activeStyle
+			marker = activeStyle.Render("▎")
+		}
 		label := strings.TrimSpace(space.Icon + " " + space.Label)
-		if space.TabCount > 0 {
-			label += fmt.Sprintf(" %d", space.TabCount)
-		}
-		if space.DraftCount > 0 {
-			label += alertStyle.Render(fmt.Sprintf(" D%d", space.DraftCount))
-		}
-		if space.ConflictCount > 0 {
-			label += alertStyle.Render(fmt.Sprintf(" C%d", space.ConflictCount))
-		}
-		if space.BackgroundCount > 0 {
-			label += alertStyle.Render(fmt.Sprintf(" B%d", space.BackgroundCount))
+		item := marker + primaryStyle.Render(label)
+		meta := workspaceSpaceMetadata(space)
+		if meta != "" {
+			item += metaStyle.Render(" (" + meta + ")")
 		}
 		if space.Attention {
-			label += alertStyle.Render(" !")
+			item += alertStyle.Render(" !")
 		}
-		style := inactiveStyle
-		if space.Active {
-			style = activeStyle
-		}
-		rendered = append(rendered, style.Render(label))
+		rendered = append(rendered, item)
 	}
-	return rowStyle.Render(fitStyled(strings.Join(rendered, " "), m.width))
+	return rowStyle.Render(fitStyled(strings.Join(rendered, separator), m.width))
+}
+
+func workspaceSpaceMetadata(space protocol.Workspace) string {
+	parts := make([]string, 0, 4)
+	if space.TabCount > 0 {
+		parts = append(parts, pluralCount(space.TabCount, "tab"))
+	}
+	if space.DraftCount > 0 {
+		parts = append(parts, pluralCount(space.DraftCount, "draft"))
+	}
+	if space.ConflictCount > 0 {
+		parts = append(parts, pluralCount(space.ConflictCount, "conflict"))
+	}
+	if space.BackgroundCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d running", space.BackgroundCount))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func pluralCount(count uint16, label string) string {
+	if count == 1 {
+		return fmt.Sprintf("%d %s", count, label)
+	}
+	return fmt.Sprintf("%d %ss", count, label)
 }
 
 func (m Model) renderTabs(tabBar protocol.TabBar) string {
