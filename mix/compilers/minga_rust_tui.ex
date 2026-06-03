@@ -64,8 +64,10 @@ defmodule Mix.Tasks.Compile.MingaRustTui do
 
     case System.cmd("cargo", ["build", "--release"], cd: @crate_dir, stderr_to_stdout: true) do
       {_output, 0} ->
-        copy_to_priv()
-        {:ok, []}
+        case copy_to_priv() do
+          :ok -> {:ok, []}
+          :error -> {:error, []}
+        end
 
       {output, _code} ->
         Mix.shell().error("Rust TUI compilation failed:\n#{output}")
@@ -73,25 +75,35 @@ defmodule Mix.Tasks.Compile.MingaRustTui do
     end
   end
 
-  @spec copy_to_priv() :: :ok
+  @spec copy_to_priv() :: :ok | :error
   defp copy_to_priv do
     src = Path.join([@crate_dir, "target", "release", @binary_name])
     dest = Path.join(@priv_dir, @binary_name)
     File.mkdir_p!(@priv_dir)
     File.cp!(src, dest)
     File.chmod!(dest, 0o755)
-    codesign_if_macos(dest)
-    Mix.shell().info("Copied #{@binary_name} to #{dest}")
-    :ok
+
+    case codesign_if_macos(dest) do
+      :ok ->
+        Mix.shell().info("Copied #{@binary_name} to #{dest}")
+        :ok
+
+      :error ->
+        :error
+    end
   end
 
-  @spec codesign_if_macos(String.t()) :: :ok
+  @spec codesign_if_macos(String.t()) :: :ok | :error
   defp codesign_if_macos(path) do
     case :os.type() do
       {:unix, :darwin} ->
         case System.cmd("codesign", ["--force", "--sign", "-", path], stderr_to_stdout: true) do
-          {_output, 0} -> :ok
-          {output, _code} -> Mix.shell().error("codesign failed: #{output}")
+          {_output, 0} ->
+            :ok
+
+          {output, _code} ->
+            Mix.shell().error("codesign failed: #{output}")
+            :error
         end
 
       _ ->
