@@ -4,6 +4,10 @@ defmodule Minga.RenderModel.GuardrailsTest do
   @repo_root Path.expand("../../..", __DIR__)
   @ui_model_root Path.join(@repo_root, "lib/minga/render_model/ui")
   @editor_render_model_root Path.join(@repo_root, "lib/minga_editor/render_model")
+  @cell_layer_builder_path Path.join(
+                             @repo_root,
+                             "lib/minga_editor/render_model/ui/cell_layer_builder.ex"
+                           )
 
   @legacy_preencoded_ui_models MapSet.new([])
 
@@ -61,6 +65,34 @@ defmodule Minga.RenderModel.GuardrailsTest do
 
     Remove them from @legacy_protocol_gui_builder_files so the guardrail records the remaining debt accurately:
     #{format_entries(stale)}
+    """
+  end
+
+  test "cell layer builder does not route shared chrome through cell commands" do
+    source = File.read!(@cell_layer_builder_path)
+
+    forbidden_terms = [
+      ".tab_bar",
+      ".file_tree",
+      ".separators",
+      ".status_bar",
+      ".status_bar_draws",
+      ".agent_panel",
+      ".minibuffer",
+      ".overlays",
+      ".splash",
+      ".agentic_view"
+    ]
+
+    violations = Enum.filter(forbidden_terms, &String.contains?(source, &1))
+
+    assert violations == [], """
+    CellLayerBuilder is only a temporary legacy window compatibility boundary.
+
+    Shared chrome must be modeled as Semantic UI and encoded by semantic adapters, not added as cell draws.
+
+    Forbidden shared chrome cell-layer references:
+    #{format_entries(violations)}
     """
   end
 

@@ -2,7 +2,7 @@ defmodule Minga.RenderModel.UI.CellLayer do
   @moduledoc """
   Cell-grid UI layer for the TUI adapter.
 
-  The retained render model is the canonical visible truth. Some TUI chrome still starts life as cell-grid draws because those surfaces have not all been promoted to semantic models yet. This struct narrows that compatibility layer to explicit adapter input instead of letting `DisplayList.Frame` remain the TUI pipeline product.
+  The retained render model is the canonical visible truth. This struct is a temporary compatibility boundary for legacy non-buffer window cells that have not yet moved to semantic window models. Shared chrome must not use this layer; new shared UI belongs in Semantic UI models and semantic frontend adapters.
   """
 
   alias Minga.RenderModel.Cell

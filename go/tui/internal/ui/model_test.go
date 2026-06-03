@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/cellbuf"
 	"github.com/jsmestad/minga/go/tui/internal/generated"
+	"github.com/jsmestad/minga/go/tui/internal/port"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 )
 
@@ -71,6 +72,22 @@ func TestViewCarriesFullWindowBackgroundColor(t *testing.T) {
 	}
 	if lines := strings.Split(ansi.Strip(view.Content), "\n"); len(lines) < model.height {
 		t.Fatalf("view should cover full terminal height, got %d lines for height %d: %+v", len(lines), model.height, lines)
+	}
+}
+
+func TestLegacyCellOnlyFrameRendersDiagnosticInsteadOfFallbackContent(t *testing.T) {
+	model := New(80, 24, nil)
+	updated, _ := model.Update(port.PacketMsg{Commands: []protocol.Command{
+		{Kind: protocol.CommandDrawText, Draw: protocol.DrawText{Row: 0, Col: 0, Text: "legacy status bar"}},
+	}})
+	model = updated.(Model)
+
+	view := ansi.Strip(model.View().Content)
+	if !strings.Contains(view, "Semantic UI required") {
+		t.Fatalf("legacy-only frame should render a semantic diagnostic: %q", view)
+	}
+	if strings.Contains(view, "legacy status bar") {
+		t.Fatalf("legacy-only frame should not silently render cell-grid content: %q", view)
 	}
 }
 
