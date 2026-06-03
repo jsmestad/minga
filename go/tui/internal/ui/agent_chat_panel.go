@@ -28,12 +28,24 @@ func (m Model) renderAgentChatPanel(chat protocol.AgentChat) []string {
 func (m Model) renderAgentChatBody(chat protocol.AgentChat) []string {
 	width := max(m.width, 1)
 	limit := m.bodyHeight()
-	lines := m.renderAgentChatPanelWithLimit(chat, width, limit)
+	contentWidth := max(width-2, 1)
+	lines := m.renderAgentChatPanelWithLimit(chat, contentWidth, limit)
 	blank := lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(strings.Repeat(" ", width))
+	for index, line := range lines {
+		lines[index] = m.insetAgentLine(line, width)
+	}
 	for len(lines) < limit {
 		lines = append(lines, blank)
 	}
 	return takeLines(lines, limit)
+}
+
+func (m Model) insetAgentLine(line string, width int) string {
+	if width <= 1 {
+		return line
+	}
+	inset := lipgloss.NewStyle().Background(m.editorBackground()).Render(" ")
+	return lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(fitStyled(inset+line, width))
 }
 
 func (m Model) renderAgentChatPanelWithLimit(chat protocol.AgentChat, width int, limit int) []string {
@@ -44,7 +56,7 @@ func (m Model) renderAgentChatPanelWithLimit(chat protocol.AgentChat, width int,
 	if agentDetailsVisible(width) && limit > 5 {
 		bodyBudget := limit - 1
 		detailWidth := agentDetailsWidth(width)
-		leftWidth := max(width-detailWidth-1, 40)
+		leftWidth := max(width-detailWidth-agentColumnGap(), 40)
 		left := m.renderAgentMainColumn(chat, leftWidth, bodyBudget, empty)
 		right := m.renderAgentDetailsRail(chat, detailWidth, bodyBudget)
 		lines = append(lines, m.joinAgentColumns(left, right, leftWidth, detailWidth, bodyBudget)...)
@@ -64,7 +76,11 @@ func agentDetailsVisible(width int) bool {
 }
 
 func agentDetailsWidth(width int) int {
-	return min(max(width/4, 28), 36)
+	return min(max(width/5, 24), 30)
+}
+
+func agentColumnGap() int {
+	return 3
 }
 
 func (m Model) renderAgentMainColumn(chat protocol.AgentChat, width int, budget int, empty bool) []string {
@@ -72,23 +88,34 @@ func (m Model) renderAgentMainColumn(chat protocol.AgentChat, width int, budget 
 	composer := m.renderAgentComposer(chat, width)
 	composerHeight := min(len(composer), max(budget, 0))
 	transcriptBudget := max(budget-composerHeight, 0)
-	if chat.Pending != "" && len(lines) < transcriptBudget {
+	statusHeight := 0
+	if transcriptBudget >= 4 {
+		statusHeight = 1
+	}
+	contentBudget := max(transcriptBudget-statusHeight, 0)
+	sparse := len(chat.Messages) <= 1 && chat.Pending == "" && strings.TrimSpace(chat.Prompt) == ""
+	if chat.Pending != "" && len(lines) < contentBudget {
 		lines = append(lines, m.renderAgentNotice("◆ approval", chat.Pending, width))
 	}
 
-	if len(lines) < transcriptBudget {
+	if len(lines) < contentBudget {
 		lines = append(lines, m.renderAgentTranscriptHeader(width))
 	}
 
-	messageLines := m.renderAgentTranscriptTail(chat, max(transcriptBudget-len(lines), 0), width)
+	messageLines := m.renderAgentTranscriptTail(chat, max(contentBudget-len(lines), 0), width)
 	lines = append(lines, messageLines...)
 
-	if empty && len(lines) < transcriptBudget {
-		lines = append(lines, takeLines(m.renderAgentEmptyState(width), max(transcriptBudget-len(lines), 0))...)
+	if empty && len(lines) < contentBudget {
+		lines = append(lines, takeLines(m.renderAgentEmptyState(width), max(contentBudget-len(lines), 0))...)
+	} else if sparse && len(lines) < contentBudget {
+		lines = append(lines, takeLines(m.renderAgentLandingState(width), max(contentBudget-len(lines), 0))...)
 	}
 
-	for len(lines) < transcriptBudget {
+	for len(lines) < contentBudget {
 		lines = append(lines, m.renderAgentBlankLine(width))
+	}
+	if statusHeight > 0 {
+		lines = append(lines, m.renderAgentTranscriptStatus(chat, width))
 	}
 	lines = append(lines, composer[:composerHeight]...)
 	return takeLines(lines, budget)
@@ -105,27 +132,57 @@ func (m Model) renderAgentTranscriptHeader(width int) string {
 	return lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(fitStyled(label+rule, width))
 }
 
+func (m Model) renderAgentTranscriptStatus(chat protocol.AgentChat, width int) string {
+	p := m.palette()
+	messageCount := len(chat.Messages)
+	label := "messages"
+	if messageCount == 1 {
+		label = "message"
+	}
+	status := fmt.Sprintf(" %d %s · %s", messageCount, label, agentChatStatusLabel(chat.Status))
+	if chat.ThinkingLevel != "" {
+		status += " · thinking " + chat.ThinkingLevel
+	}
+	return lipgloss.NewStyle().Foreground(p.Muted()).Background(m.editorBackground()).Width(width).Render(fit(status, width))
+}
+
+func (m Model) renderAgentLandingState(width int) []string {
+	p := m.palette()
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(p.Accent()).Background(m.editorBackground())
+	bodyStyle := lipgloss.NewStyle().Foreground(p.Muted()).Background(m.editorBackground())
+	return []string{
+		lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(fitStyled(titleStyle.Render(" Try asking Minga"), width)),
+		lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(fitStyled(bodyStyle.Render("   • explain this file   • find failing tests   • draft an implementation plan"), width)),
+		lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(fitStyled(bodyStyle.Render("   • edit the current buffer   • run a command   • review recent changes"), width)),
+	}
+}
+
 func (m Model) renderAgentHeader(chat protocol.AgentChat, width int) string {
 	p := m.palette()
-	base := lipgloss.NewStyle().Foreground(p.Text()).Background(p.Base()).Width(width)
-	title := lipgloss.NewStyle().Bold(true).Foreground(p.Accent()).Background(p.Base()).Render("◇ Agent")
-	model := chat.ModelName
-	if model == "" {
-		model = "no model selected"
-	}
-	model = lipgloss.NewStyle().Foreground(p.Text()).Background(p.Base()).Render(model)
+	base := lipgloss.NewStyle().Foreground(p.Text()).Background(m.editorBackground()).Width(width)
+	provider, modelName := splitAgentModelName(chat.ModelName)
+	title := lipgloss.NewStyle().Bold(true).Foreground(p.Accent()).Background(m.editorBackground()).Render("◇ Agent")
+	model := m.agentHeaderBadge(nonEmpty(modelName, "no model"), p.SurfaceAlt(), p.Text())
 	status := m.renderAgentStatusBadge(chat.Status)
-	parts := []string{title, model, status}
-	if chat.ThinkingLevel != "" {
-		parts = append(parts, lipgloss.NewStyle().Foreground(p.Muted()).Background(p.Base()).Render("thinking "+chat.ThinkingLevel))
+	parts := []string{title}
+	if provider != "" {
+		parts = append(parts, lipgloss.NewStyle().Foreground(p.Muted()).Background(m.editorBackground()).Render(provider))
 	}
-	content := strings.Join(parts, lipgloss.NewStyle().Foreground(p.Muted()).Background(p.Base()).Render("  •  "))
+	parts = append(parts, model, status)
+	if chat.ThinkingLevel != "" {
+		parts = append(parts, m.agentHeaderBadge("thinking "+chat.ThinkingLevel, m.editorBackground(), p.Muted()))
+	}
+	content := strings.Join(parts, lipgloss.NewStyle().Foreground(p.Muted()).Background(m.editorBackground()).Render("  "))
 	return base.Render(fitStyled(content, width))
+}
+
+func (m Model) agentHeaderBadge(text string, bg color.Color, fg color.Color) string {
+	return lipgloss.NewStyle().Foreground(fg).Background(bg).Padding(0, 1).Render(text)
 }
 
 func (m Model) joinAgentColumns(left []string, right []string, leftWidth int, rightWidth int, height int) []string {
 	p := m.palette()
-	separator := lipgloss.NewStyle().Foreground(p.Muted()).Background(p.EditorSurface()).Render("│")
+	separator := lipgloss.NewStyle().Background(m.editorBackground()).Render(strings.Repeat(" ", agentColumnGap()))
 	blankLeft := lipgloss.NewStyle().Background(p.EditorSurface()).Width(leftWidth).Render(strings.Repeat(" ", leftWidth))
 	blankRight := lipgloss.NewStyle().Background(m.editorBackground()).Width(rightWidth).Render(strings.Repeat(" ", rightWidth))
 	out := make([]string, 0, height)
@@ -145,7 +202,7 @@ func (m Model) joinAgentColumns(left []string, right []string, leftWidth int, ri
 
 func (m Model) renderAgentDetailsRail(chat protocol.AgentChat, width int, budget int) []string {
 	p := m.palette()
-	head := lipgloss.NewStyle().Bold(true).Foreground(p.Accent()).Background(p.SurfaceAlt()).Width(width).Render(fit(" ◇ Session", width))
+	head := lipgloss.NewStyle().Bold(true).Foreground(p.Accent()).Background(m.editorBackground()).Width(width).Render(fit("◇ Session", width))
 	provider, model := splitAgentModelName(chat.ModelName)
 	lines := []string{head}
 	lines = append(lines, m.renderAgentDetailRow("Provider", nonEmpty(provider, "unknown"), width))
@@ -194,16 +251,17 @@ func (m Model) renderAgentDetailsSection(label string, width int) string {
 
 func (m Model) renderAgentDetailRow(label string, value string, width int) string {
 	p := m.palette()
-	labelStyle := lipgloss.NewStyle().Foreground(p.Muted()).Background(p.SurfaceAlt())
+	labelWidth := min(max(width/3, 8), 10)
+	labelStyle := lipgloss.NewStyle().Foreground(p.Muted()).Background(p.SurfaceAlt()).Width(labelWidth)
 	valueStyle := lipgloss.NewStyle().Foreground(p.Text()).Background(p.SurfaceAlt())
-	prefix := labelStyle.Render(" " + label + " ")
-	body := valueStyle.Render(firstCompactLine(value, max(width-lipgloss.Width(label)-3, 8)))
-	return lipgloss.NewStyle().Background(p.SurfaceAlt()).Width(width).Render(fitStyled(prefix+body, width))
+	prefix := labelStyle.Render(label)
+	body := valueStyle.Render(firstCompactLine(value, max(width-labelWidth-1, 8)))
+	return lipgloss.NewStyle().Background(p.SurfaceAlt()).Width(width).Render(fitStyled(" "+prefix+" "+body, width))
 }
 
 func (m Model) renderAgentDetailHint(key string, action string, width int) string {
 	p := m.palette()
-	keyStyle := lipgloss.NewStyle().Bold(true).Foreground(p.SelectionText()).Background(p.Selection()).Padding(0, 1)
+	keyStyle := lipgloss.NewStyle().Bold(true).Foreground(p.Text()).Background(p.SurfaceAlt()).Padding(0, 1)
 	actionStyle := lipgloss.NewStyle().Foreground(p.Muted()).Background(p.SurfaceAlt())
 	line := " " + keyStyle.Render(key) + actionStyle.Render(" "+action)
 	return lipgloss.NewStyle().Background(p.SurfaceAlt()).Width(width).Render(fitStyled(line, width))

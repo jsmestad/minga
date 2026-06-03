@@ -371,8 +371,8 @@ func TestAgentChatPanelRendersStructuredTranscript(t *testing.T) {
 		},
 	}
 
-	view := ansi.Strip(strings.Join(model.renderAgentChatPanel(chat), "\n"))
-	for _, want := range []string{"◇ Agent", "anthropic:claude-sonnet-4", "thinking medium", "Read read_file", "path:", "Approval edit_file", "Usage", "Composer", "fix the renderer", "Session", "Provider", "Model", "Context", "Hints"} {
+	view := ansi.Strip(strings.Join(model.renderAgentChatPanelWithLimit(chat, 120, 28), "\n"))
+	for _, want := range []string{"◇ Agent", "anthropic", "claude-sonnet-4", "thinking medium", "Read read_file", "path:", "Approval edit_file", "Usage", "Composer", "fix the renderer", "Session", "Provider", "Model", "Context", "Hints"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("agent chat panel missing %q in %q", want, view)
 		}
@@ -411,11 +411,14 @@ func TestAgentChatVisibleRendersAsMainBody(t *testing.T) {
 
 	bodyLines := strings.Split(ansi.Strip(model.content()), "\n")
 	body := strings.Join(bodyLines, "\n")
-	if !strings.Contains(body, "◇ Agent") || !strings.Contains(body, "Session") || !strings.Contains(body, "Ask Minga") {
+	if !strings.Contains(body, "◇ Agent") || !strings.Contains(body, "Session") || !strings.Contains(body, "Ask Minga") || !strings.Contains(body, "Try asking Minga") {
 		t.Fatalf("agent chat should render in main body: %q", body)
 	}
 	if strings.Contains(body, "~") {
 		t.Fatalf("agent chat body should not show editor tilde filler: %q", body)
+	}
+	if strings.Contains(body, "Messages1") || strings.Contains(body, "Provideranthropic") {
+		t.Fatalf("agent details labels and values should not be smashed together: %q", body)
 	}
 	bottomComposer := strings.Join(bodyLines[max(len(bodyLines)-3, 0):], "\n")
 	if !strings.Contains(bottomComposer, "Composer") || !strings.Contains(bottomComposer, "Ask Minga") {
