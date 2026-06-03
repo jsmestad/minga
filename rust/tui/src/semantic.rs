@@ -572,6 +572,7 @@ pub struct ExtensionPanel {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Observatory {
+    pub visible: bool,
     pub payload: Vec<u8>,
 }
 
@@ -1749,9 +1750,11 @@ fn len32_size(bytes: &[u8]) -> Result<usize, DecodeError> {
 
 fn decode_clipboard_write(bytes: &[u8]) -> Result<Command, DecodeError> {
     let size = len16_size(bytes)?;
-    require_len(bytes, 4, "clipboard write target")?;
+    require_len(bytes, 6, "clipboard write")?;
     let target = bytes[3];
-    let text = read_string(bytes, 4, size - 4)?;
+    let text_len = read_u16(bytes, 4) as usize;
+    require_len(bytes, 6 + text_len, "clipboard write text")?;
+    let text = read_string(bytes, 6, text_len)?;
     Ok(Command::ClipboardWrite(ClipboardWrite { target, text }, size))
 }
 
@@ -1900,7 +1903,8 @@ fn decode_observatory(bytes: &[u8]) -> Result<Command, DecodeError> {
     let size = len32_size(bytes)?;
     require_len(bytes, size, "observatory payload")?;
     let payload = bytes[5..size].to_vec();
-    Ok(Command::Observatory(Observatory { payload }, size))
+    let visible = payload.first().map_or(false, |&b| b != 0);
+    Ok(Command::Observatory(Observatory { visible, payload }, size))
 }
 
 fn decode_sidebars(bytes: &[u8]) -> Result<Command, DecodeError> {
@@ -1931,17 +1935,26 @@ fn decode_board(bytes: &[u8]) -> Result<Command, DecodeError> {
 
 fn decode_agent_chat(bytes: &[u8]) -> Result<Command, DecodeError> {
     let size = sectioned_size(bytes, "agent chat")?;
-    require_len(bytes, 2, "agent chat header")?;
-    let section_count = bytes[1] as usize;
-    let visible = if section_count > 0 { 1 } else { 0 };
-    Ok(Command::AgentChat(
-        AgentChat {
-            visible,
-            flags: 0,
-            message_count: 0,
-        },
-        size,
-    ))
+    let secs = sections(&bytes[..size])?;
+    let mut chat = AgentChat {
+        visible: 0,
+        flags: 0,
+        message_count: 0,
+    };
+
+    for (section_id, payload) in secs {
+        match section_id {
+            0x01 => {
+                let (header, _) = semantic_decode::decode_gui_agent_chat_header(payload, 0)?;
+                chat.visible = header.visible;
+                chat.flags = header.flags;
+                chat.message_count = header.message_count;
+            }
+            _ => {}
+        }
+    }
+
+    Ok(Command::AgentChat(chat, size))
 }
 
 fn decode_tool_manager(bytes: &[u8]) -> Result<Command, DecodeError> {
@@ -2947,11 +2960,12 @@ mod tests {
         assert_eq!(semantic_size(&packet).unwrap(), packet.len() - 1);
         assert!(matches!(command, Command::Board(Board { visible: 1, .. }, _)));
 
-        let agent_chat = vec![opcodes::OP_GUI_AGENT_CHAT, 1, 1, 0, 0];
+        // Agent chat: 1 section (0x01 header), payload: visible=1, flags=0, message_count=0
+        let agent_chat = vec![opcodes::OP_GUI_AGENT_CHAT, 1, 0x01, 0, 4, 1, 0, 0, 0];
         let packet = [agent_chat, vec![opcodes::OP_BATCH_END]].concat();
         let command = decode(&packet).unwrap();
         assert_eq!(semantic_size(&packet).unwrap(), packet.len() - 1);
-        assert!(matches!(command, Command::AgentChat(AgentChat { visible: 1, .. }, _)));
+        assert!(matches!(command, Command::AgentChat(AgentChat { visible: 1, flags: 0, message_count: 0 }, _)));
 
         let tool_manager = vec![opcodes::OP_GUI_TOOL_MANAGER, 1, 0, 0, 0, 0, 0];
         let packet = [tool_manager, vec![opcodes::OP_BATCH_END]].concat();
@@ -3238,7 +3252,7 @@ mod tests {
 
     #[test]
     fn decodes_typed_gui_commands_without_consuming_following_commands() {
-        let clipboard_payload = vec![opcodes::OP_CLIPBOARD_WRITE, 0, 2, 0, b'x'];
+        let clipboard_payload = vec![opcodes::OP_CLIPBOARD_WRITE, 0, 4, 0, 0, 1, b'x'];
         let packet = [clipboard_payload, vec![opcodes::OP_BATCH_END]].concat();
         let command = decode(&packet).unwrap();
         assert_eq!(semantic_size(&packet).unwrap(), packet.len() - 1);

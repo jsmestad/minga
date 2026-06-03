@@ -101,6 +101,7 @@ pub struct Renderer {
     git_status_snapshot: Option<CellSnapshot>,
     agent_context: Option<semantic::AgentContext>,
     agent_context_snapshot: Option<CellSnapshot>,
+    last_status_bar: Option<semantic::StatusBar>,
     search_state: Option<semantic::SearchState>,
     notifications: Option<semantic::Notifications>,
     notifications_snapshot: Option<CellSnapshot>,
@@ -163,6 +164,7 @@ impl Renderer {
             git_status_snapshot: None,
             agent_context: None,
             agent_context_snapshot: None,
+            last_status_bar: None,
             search_state: None,
             notifications: None,
             notifications_snapshot: None,
@@ -272,6 +274,7 @@ impl Renderer {
         self.git_status_snapshot = None;
         self.agent_context = None;
         self.agent_context_snapshot = None;
+        self.last_status_bar = None;
         self.search_state = None;
         self.notifications = None;
         self.notifications_snapshot = None;
@@ -829,6 +832,7 @@ impl Renderer {
             return;
         }
 
+        self.last_status_bar = Some(status.clone());
         let row = self.height - 1;
         self.clear_row(row);
 
@@ -909,6 +913,12 @@ impl Renderer {
         let paragraph =
             Paragraph::new(RatatuiLine::from(spans)).style(ratatui_style_from_cell(style));
         self.render_ratatui_widget(row, 0, self.width, 1, paragraph);
+    }
+
+    fn refresh_status_bar_indicators(&mut self) {
+        if let Some(status) = self.last_status_bar.clone() {
+            self.draw_status_bar(status);
+        }
     }
 
     fn draw_tab_bar(&mut self, tab_bar: semantic::TabBar) {
@@ -1926,9 +1936,10 @@ impl Renderer {
     fn draw_search_state(&mut self, state: semantic::SearchState) {
         if state.active == 0 {
             self.search_state = None;
-            return;
+        } else {
+            self.search_state = Some(state);
         }
-        self.search_state = Some(state);
+        self.refresh_status_bar_indicators();
     }
 
     fn draw_notifications(&mut self, notifs: semantic::Notifications) {
@@ -1989,25 +2000,28 @@ impl Renderer {
     fn draw_edit_timeline(&mut self, timeline: semantic::EditTimeline) {
         if timeline.visible == 0 {
             self.edit_timeline = None;
-            return;
+        } else {
+            self.edit_timeline = Some(timeline);
         }
-        self.edit_timeline = Some(timeline);
+        self.refresh_status_bar_indicators();
     }
 
     fn draw_workspaces(&mut self, ws: semantic::Workspaces) {
         if ws.visible == 0 {
             self.workspaces = None;
-            return;
+        } else {
+            self.workspaces = Some(ws);
         }
-        self.workspaces = Some(ws);
+        self.refresh_status_bar_indicators();
     }
 
     fn draw_sidebars(&mut self, sb: semantic::Sidebars) {
         if sb.visible == 0 {
             self.sidebars = None;
-            return;
+        } else {
+            self.sidebars = Some(sb);
         }
-        self.sidebars = Some(sb);
+        self.refresh_status_bar_indicators();
     }
 
     fn draw_extension_overlay(&mut self, overlay: semantic::ExtensionOverlay) {
@@ -2064,13 +2078,14 @@ impl Renderer {
     fn draw_extension_panel(&mut self, panel: semantic::ExtensionPanel) {
         if panel.panel_count == 0 {
             self.extension_panel = None;
-            return;
+        } else {
+            self.extension_panel = Some(panel);
         }
-        self.extension_panel = Some(panel);
+        self.refresh_status_bar_indicators();
     }
 
     fn draw_observatory(&mut self, obs: semantic::Observatory) {
-        if obs.payload.is_empty() {
+        if !obs.visible {
             self.restore_observatory_snapshot();
             self.observatory = None;
             return;
@@ -5471,6 +5486,7 @@ mod tests {
         let mut renderer = Renderer::new(70, 20);
 
         renderer.draw_observatory(semantic::Observatory {
+            visible: true,
             payload: vec![1, 2, 3, 4, 5],
         });
 
@@ -5478,6 +5494,7 @@ mod tests {
         assert!(renderer.observatory_snapshot.is_some());
 
         renderer.draw_observatory(semantic::Observatory {
+            visible: false,
             payload: vec![],
         });
 
