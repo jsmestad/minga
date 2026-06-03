@@ -178,10 +178,10 @@ func TestPickerSelectedRowHasVisibleMarker(t *testing.T) {
 		},
 	}, 4, 80)
 	stripped := ansi.Strip(strings.Join(rows, "\n"))
-	if !strings.Contains(stripped, "▶") || !strings.Contains(stripped, "Claude Sonnet") {
+	if !strings.Contains(stripped, "▌") || !strings.Contains(stripped, "Claude Sonnet") {
 		t.Fatalf("selected picker row should include a visible marker: %q", stripped)
 	}
-	if strings.Contains(stripped, "▶ GPT-5 Codex") {
+	if strings.Contains(stripped, "▌ GPT-5 Codex") {
 		t.Fatalf("selection marker should only appear on selected row: %q", stripped)
 	}
 }
@@ -210,7 +210,7 @@ func TestWidePickerPreviewRendersBesideList(t *testing.T) {
 		protocol.PickerPreview{Visible: true, Lines: []protocol.PreviewLine{{Segments: []protocol.PreviewSegment{{Text: "def main"}}}}},
 	)
 	joined := strings.Join(rendered, "\n")
-	if !strings.Contains(joined, "test-advisor.md  .pi/agents") || !strings.Contains(joined, "def main") {
+	if !strings.Contains(joined, "test-advisor.md") || !strings.Contains(joined, ".pi/agents") || !strings.Contains(joined, "def main") {
 		t.Fatalf("wide picker should render one-row file results and preview together: %q", joined)
 	}
 	for index, line := range rendered {

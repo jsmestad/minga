@@ -29,7 +29,7 @@ func (m Model) floatingPickerLayer() *lipgloss.Layer {
 
 func (m Model) renderFloatingPicker(picker protocol.Picker, preview protocol.PickerPreview) string {
 	popupWidth := m.floatingPickerWidth()
-	contentWidth := max(popupWidth-2, 1)
+	contentWidth := max(popupWidth-4, 1)
 	popupModel := m
 	popupModel.width = contentWidth
 	lines := popupModel.renderPicker(picker, preview)
@@ -37,7 +37,7 @@ func (m Model) renderFloatingPicker(picker protocol.Picker, preview protocol.Pic
 		return ""
 	}
 	content := strings.Join(lines, "\n")
-	return lipgloss.NewStyle().Width(contentWidth).Border(lipgloss.RoundedBorder()).BorderForeground(m.palette().PopupBorder()).Background(m.palette().PopupSurface()).Render(content)
+	return lipgloss.NewStyle().Width(contentWidth).Padding(0, 1).Border(lipgloss.RoundedBorder()).BorderForeground(m.palette().PopupBorder()).Background(m.palette().PopupSurface()).Render(content)
 }
 
 func (m Model) floatingPickerWidth() int {
