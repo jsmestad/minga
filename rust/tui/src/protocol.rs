@@ -749,7 +749,10 @@ mod generated_decode_tests {
         ];
         let (f, consumed) = decode_gui_completion_fields(&bytes, 0).unwrap();
         assert_eq!(consumed, bytes.len());
-        assert_eq!((f.visible, f.cursor_row, f.cursor_col, f.selected_offset), (1, 3, 7, 1));
+        assert_eq!(
+            (f.visible, f.cursor_row, f.cursor_col, f.selected_offset),
+            (1, 3, 7, 1)
+        );
         assert_eq!(f.items.len(), 1);
         assert_eq!(f.items[0].kind, 1);
         assert_eq!(f.items[0].label, "foo");
@@ -783,7 +786,9 @@ mod generated_decode_tests {
 
     #[test]
     fn decodes_picker_header_full_layout() {
-        let bytes = [1, 0, 2, 0, 10, 0, 100, 1, 0, 5, b'F', b'i', b'l', b'e', b's', 0, 3];
+        let bytes = [
+            1, 0, 2, 0, 10, 0, 100, 1, 0, 5, b'F', b'i', b'l', b'e', b's', 0, 3,
+        ];
         let (h, consumed) = decode_gui_picker_header(&bytes, 0).unwrap();
         assert_eq!(consumed, bytes.len());
         assert_eq!(h.selected_index, 2);
@@ -835,9 +840,7 @@ mod generated_decode_tests {
     #[test]
     fn truncated_picker_item_elements_rejected() {
         // count claims 2 match positions but only 1 u16 follows (count*stride guard).
-        let bytes = [
-            0xAA, 0xBB, 0xCC, 0, 0, 1, b'x', 0, 0, 0, 0, 2, 0, 1,
-        ];
+        let bytes = [0xAA, 0xBB, 0xCC, 0, 0, 1, b'x', 0, 0, 0, 0, 2, 0, 1];
         assert!(decode_picker_item(&bytes, 0).is_err());
     }
 
