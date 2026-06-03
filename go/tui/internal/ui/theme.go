@@ -61,10 +61,10 @@ func defaultPalette() palette {
 		themeTabInactiveFG:    0x5B6268,
 		themeTabModifiedFG:    0xFF6C6B,
 		themeTabAttentionFG:   0xECBE7B,
-		themePopupBG:          0x31374A,
+		themePopupBG:          0x252A38,
 		themePopupFG:          0xD7DDF0,
-		themePopupBorder:      0x69738A,
-		themePopupSelBG:       0x3A4258,
+		themePopupBorder:      0x7A849B,
+		themePopupSelBG:       0x2F3650,
 		themePopupSelFG:       0xF2F5FF,
 		themeBreadcrumbBG:     0x21242B,
 		themeModelineBG:       0x22252D,
@@ -232,7 +232,7 @@ func (p palette) PopupSelectionText() color.Color {
 }
 
 func (p palette) PopupChrome() color.Color {
-	return lipgloss.Color("#2B3142")
+	return lipgloss.Color("#202532")
 }
 
 func (p palette) slot(slot byte) color.Color {

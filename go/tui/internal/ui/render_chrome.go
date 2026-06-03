@@ -318,9 +318,6 @@ func (m Model) renderPicker(picker protocol.Picker, preview protocol.PickerPrevi
 		itemBudget = max(itemBudget/2, 1)
 	}
 	lines := m.renderPickerList(title, picker, itemBudget+1, m.width)
-	if picker.ActionVisible && len(picker.Actions) > 0 {
-		lines = append(lines, m.popupLineStyle(m.width).Foreground(m.palette().Muted()).Render(fit(strings.Join(picker.Actions, "  "), m.width)))
-	}
 	if preview.Visible && len(preview.Lines) > 0 {
 		lines = append(lines, m.renderPickerPreview(preview, max(height-len(lines)-1, 1), m.width)...)
 	}
@@ -332,7 +329,7 @@ func (m Model) renderPickerList(title string, picker protocol.Picker, height int
 	theme := m.palette()
 	panelStyle := m.popupLineStyle(width)
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.Accent()).Background(theme.PopupChrome()).Width(width)
-	lines := []string{titleStyle.Render(fit(title, width))}
+	lines := []string{titleStyle.Render(fitStyled(" "+title, width))}
 	rowBudget := max(height-1, 0)
 	selected := min(max(int(picker.Selected), 0), max(len(picker.Items)-1, 0))
 	start := 0
@@ -366,7 +363,6 @@ func (m Model) renderPickerItemRow(title string, item protocol.PickerItem, selec
 	rowBackground := theme.PopupSurface()
 	rowForeground := theme.PopupText()
 	if selected {
-		rowBackground = theme.PopupSelection()
 		rowForeground = theme.PopupSelectionText()
 	}
 	markerText := lipgloss.NewStyle().Foreground(theme.Muted()).Background(rowBackground).Render(marker)
@@ -387,7 +383,7 @@ func (m Model) renderPickerItemRow(title string, item protocol.PickerItem, selec
 	if strings.TrimSpace(detail) != "" {
 		text += lipgloss.NewStyle().Foreground(theme.Muted()).Background(rowBackground).Render("  " + strings.TrimSpace(detail))
 	}
-	return lipgloss.NewStyle().Background(rowBackground).Width(width).Render(fitStyled(text, width))
+	return lipgloss.NewStyle().Background(rowBackground).Width(width).Render(fitStyled(" "+text, width))
 }
 
 func (m Model) renderPickerWithSidePreview(title string, picker protocol.Picker, preview protocol.PickerPreview, height int) []string {
