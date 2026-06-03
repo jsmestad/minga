@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"sort"
+	"time"
 
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
@@ -21,27 +22,29 @@ const (
 )
 
 type Model struct {
-	width            int
-	height           int
-	out              chan<- []byte
-	viewport         viewport.Model
-	zones            *zoneManager
-	windows          map[uint16]protocol.WindowContent
-	windowOrder      []uint16
-	chrome           map[byte]protocol.ChromePayload
-	activePalette    palette
-	gutters          map[uint16]protocol.Gutter
-	indentGuides     map[uint16]protocol.IndentGuides
-	cells            map[position]cell
-	drawSeq          uint64
-	cursorRow        uint16
-	cursorCol        uint16
-	cursorShape      byte
-	title            string
-	bg               uint32
-	cursorlineChrome protocol.CursorlineChrome
-	pendingClipboard string
-	lastError        string
+	width                 int
+	height                int
+	out                   chan<- []byte
+	viewport              viewport.Model
+	zones                 *zoneManager
+	windows               map[uint16]protocol.WindowContent
+	windowOrder           []uint16
+	chrome                map[byte]protocol.ChromePayload
+	activePalette         palette
+	gutters               map[uint16]protocol.Gutter
+	indentGuides          map[uint16]protocol.IndentGuides
+	cells                 map[position]cell
+	drawSeq               uint64
+	cursorRow             uint16
+	cursorCol             uint16
+	cursorShape           byte
+	title                 string
+	bg                    uint32
+	cursorlineChrome      protocol.CursorlineChrome
+	pendingClipboard      string
+	lastError             string
+	agentAnimationFrame   uint64
+	agentAnimationRunning bool
 }
 
 type position struct {
@@ -76,8 +79,16 @@ func New(width, height uint16, out chan<- []byte) Model {
 	}
 }
 
+type agentAnimationTickMsg struct{}
+
 func (m Model) Init() tea.Cmd {
 	return nil
+}
+
+func agentAnimationTick() tea.Cmd {
+	return tea.Tick(180*time.Millisecond, func(time.Time) tea.Msg {
+		return agentAnimationTickMsg{}
+	})
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -102,6 +113,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.send(mousePacket(msg))
 		}
+	case agentAnimationTickMsg:
+		m.agentAnimationFrame++
+		if m.agentAnimating() {
+			cmd = agentAnimationTick()
+		} else {
+			m.agentAnimationRunning = false
+		}
 	case port.PacketMsg:
 		cmd = m.applyCommands(msg.Commands)
 	case port.LogMsg:
@@ -109,6 +127,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case port.ErrorMsg:
 		m.lastError = msg.Err.Error()
 		m.send(protocol.EncodeLogMessage(protocol.LogLevelErr, msg.Err.Error()))
+	}
+
+	if m.agentAnimating() && !m.agentAnimationRunning {
+		m.agentAnimationRunning = true
+		cmd = tea.Batch(cmd, agentAnimationTick())
 	}
 
 	m.viewport.SetWidth(max(m.width, 1))

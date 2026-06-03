@@ -39,7 +39,7 @@ func (m Model) renderFloatingWhichKey(which protocol.WhichKey) string {
 		title += fmt.Sprintf("  %d/%d", which.Page+1, which.PageCount)
 	}
 
-	lines := []string{lipgloss.NewStyle().Bold(true).Foreground(m.palette().Accent()).Background(m.palette().PopupSurface()).Width(inner).Render(fit(title, inner))}
+	lines := []string{lipgloss.NewStyle().Bold(true).Foreground(m.palette().Accent()).Background(m.palette().PopupChrome()).Width(inner).Render(fit(title, inner))}
 	columns := m.whichKeyColumns(inner)
 	rows := (len(which.Bindings) + columns - 1) / columns
 	cellWidth := max(inner/columns, 1)
@@ -61,7 +61,7 @@ func (m Model) renderFloatingWhichKey(which protocol.WhichKey) string {
 }
 
 func (m Model) renderWhichKeyCell(binding protocol.WhichKeyBinding, width int) string {
-	keyStyle := lipgloss.NewStyle().Bold(true).Foreground(m.palette().SelectionText()).Background(m.palette().Selection()).Padding(0, 1)
+	keyStyle := lipgloss.NewStyle().Bold(true).Foreground(m.palette().PopupSelectionText()).Background(m.palette().PopupSelection()).Padding(0, 1)
 	descStyle := lipgloss.NewStyle().Foreground(m.palette().PopupText()).Background(m.palette().PopupSurface())
 	key := strings.TrimSpace(binding.Key)
 	icon := whichKeyIcon(binding)

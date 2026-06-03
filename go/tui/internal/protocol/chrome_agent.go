@@ -50,9 +50,7 @@ func decodeAgentChat(payload []byte) (AgentChat, string, int) {
 				chat.ModelName = value
 			}
 		case 0x03:
-			if value, _, ok := readString16(section, 0); ok {
-				chat.Prompt = value
-			}
+			chat = decodeAgentPrompt(chat, section)
 		case 0x04:
 			chat.Pending = decodeAgentPending(section)
 		case 0x07:
@@ -66,6 +64,22 @@ func decodeAgentChat(payload []byte) (AgentChat, string, int) {
 		}
 	}
 	return chat, fmt.Sprintf("%s %d messages", chat.ModelName, len(chat.Messages)), size
+}
+
+func decodeAgentPrompt(chat AgentChat, section []byte) AgentChat {
+	value, offset, ok := readString16(section, 0)
+	if !ok {
+		return chat
+	}
+	chat.Prompt = value
+	if len(section) >= offset+7 {
+		chat.PromptLineCount = section[offset]
+		chat.PromptCursorLine = u16(section, offset+1)
+		chat.PromptCursorCol = u16(section, offset+3)
+		chat.PromptVimMode = section[offset+5]
+		chat.PromptVisibleRows = section[offset+6]
+	}
+	return chat
 }
 
 func decodeAgentPending(section []byte) string {

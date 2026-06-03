@@ -41,6 +41,23 @@ func TestFloatingPickerRendersOverEditorAndSuppressesFooterOverlays(t *testing.T
 	}
 }
 
+func TestWorkspaceRowRendersAsQuietNavigation(t *testing.T) {
+	model := New(100, 20, nil)
+	row := ansi.Strip(model.renderWorkspaces(protocol.WorkspaceBar{Spaces: []protocol.Workspace{
+		{Label: "Files", Icon: "", TabCount: 1},
+		{Label: "Agent", Icon: "󰚩", TabCount: 1, Active: true},
+	}}))
+
+	for _, want := range []string{"Spaces", " Files (1 tab)", "▎󰚩 Agent (1 tab)"} {
+		if !strings.Contains(row, want) {
+			t.Fatalf("workspace row missing %q in %q", want, row)
+		}
+	}
+	if strings.Contains(row, "workspace") || strings.Contains(row, "Agent 1") || strings.Contains(row, "Files 1") {
+		t.Fatalf("workspace row should avoid implementation labels and bare counts: %q", row)
+	}
+}
+
 func TestViewCarriesFullWindowBackgroundColor(t *testing.T) {
 	model := New(20, 6, nil)
 	view := model.View()
@@ -150,6 +167,25 @@ func TestPickerPreviewRendersWithPicker(t *testing.T) {
 	}
 }
 
+func TestPickerSelectedRowHasVisibleMarker(t *testing.T) {
+	model := New(80, 24, nil)
+	rows := model.renderPickerList("Agent Model", protocol.Picker{
+		Visible:  true,
+		Selected: 1,
+		Items: []protocol.PickerItem{
+			{Label: "GPT-5 Codex", Description: "openai_codex"},
+			{Label: "Claude Sonnet", Description: "anthropic"},
+		},
+	}, 4, 80)
+	stripped := ansi.Strip(strings.Join(rows, "\n"))
+	if !strings.Contains(stripped, "▌") || !strings.Contains(stripped, "Claude Sonnet") {
+		t.Fatalf("selected picker row should include a visible marker: %q", stripped)
+	}
+	if strings.Contains(stripped, "▌ GPT-5 Codex") {
+		t.Fatalf("selection marker should only appear on selected row: %q", stripped)
+	}
+}
+
 func TestPickerOverlayIsBounded(t *testing.T) {
 	model := New(100, 24, nil)
 	items := make([]protocol.PickerItem, 20)
@@ -174,7 +210,7 @@ func TestWidePickerPreviewRendersBesideList(t *testing.T) {
 		protocol.PickerPreview{Visible: true, Lines: []protocol.PreviewLine{{Segments: []protocol.PreviewSegment{{Text: "def main"}}}}},
 	)
 	joined := strings.Join(rendered, "\n")
-	if !strings.Contains(joined, "test-advisor.md  .pi/agents") || !strings.Contains(joined, "def main") {
+	if !strings.Contains(joined, "test-advisor.md") || !strings.Contains(joined, ".pi/agents") || !strings.Contains(joined, "def main") {
 		t.Fatalf("wide picker should render one-row file results and preview together: %q", joined)
 	}
 	for index, line := range rendered {
@@ -336,7 +372,7 @@ func TestSemanticWindowRendersGutterCursorlineTildesAndModeline(t *testing.T) {
 }
 
 func TestAgentChatPanelRendersStructuredTranscript(t *testing.T) {
-	model := New(80, 24, nil)
+	model := New(120, 34, nil)
 	chat := protocol.AgentChat{
 		Visible:       true,
 		Status:        2,
@@ -352,11 +388,62 @@ func TestAgentChatPanelRendersStructuredTranscript(t *testing.T) {
 		},
 	}
 
-	view := ansi.Strip(strings.Join(model.renderAgentChatPanel(chat), "\n"))
-	for _, want := range []string{"◇ Agent", "anthropic:claude-sonnet-4", "thinking medium", "Tool read_file", "Approval edit_file", "Usage", "::: fix the renderer"} {
+	view := ansi.Strip(strings.Join(model.renderAgentChatPanelWithLimit(chat, 120, 28), "\n"))
+	for _, want := range []string{"󰚩 Agent", "anthropic / claude-sonnet-4", "◌ medium", "Read", "read_file", "path:", "Approval edit_file", "Usage", "NORMAL", "fix the renderer", "◇ Session", "Provider", "Model", "Context", "Hints", "╰"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("agent chat panel missing %q in %q", want, view)
 		}
+	}
+}
+
+func TestAgentAnimationCueChangesAcrossFrames(t *testing.T) {
+	model := New(80, 24, nil)
+	model.agentAnimationFrame = 0
+	first := ansi.Strip(model.renderAgentStatusBadge(1))
+	model.agentAnimationFrame = 1
+	second := ansi.Strip(model.renderAgentStatusBadge(1))
+	if first == second {
+		t.Fatalf("thinking status badge should animate across frames: %q", first)
+	}
+	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiAgentChat: {AgentChat: protocol.AgentChat{Visible: true, Status: 1}}}
+	if !model.agentAnimating() {
+		t.Fatalf("visible thinking agent should animate")
+	}
+}
+
+func TestAgentChatVisibleRendersAsMainBody(t *testing.T) {
+	model := New(120, 24, nil)
+	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiAgentChat: {AgentChat: protocol.AgentChat{
+		Visible:       true,
+		Status:        0,
+		ModelName:     "anthropic:claude-sonnet-4",
+		ThinkingLevel: "medium",
+		Prompt:        "",
+		Messages: []protocol.AgentChatMessage{
+			{Kind: 0x05, Text: "Session started · 14:57:49 UTC"},
+		},
+	}}}
+	model.putWindow(protocol.WindowContent{ID: 7, Rows: []protocol.WindowRow{{Text: ""}}})
+	model.viewport.SetContent(model.content())
+
+	bodyLines := strings.Split(ansi.Strip(model.content()), "\n")
+	body := strings.Join(bodyLines, "\n")
+	if !strings.Contains(body, "󰚩 Agent") || !strings.Contains(body, "Session") || !strings.Contains(body, "Ask Minga") || !strings.Contains(body, "Minga is ready") || !strings.Contains(body, "/explain") || !strings.Contains(body, "Explain this file") {
+		t.Fatalf("agent chat should render in main body: %q", body)
+	}
+	if strings.Contains(body, "~") {
+		t.Fatalf("agent chat body should not show editor tilde filler: %q", body)
+	}
+	if strings.Contains(body, "Messages1") || strings.Contains(body, "Provideranthropic") {
+		t.Fatalf("agent details labels and values should not be smashed together: %q", body)
+	}
+	bottomComposer := strings.Join(bodyLines[max(len(bodyLines)-3, 0):], "\n")
+	if !strings.Contains(bottomComposer, "NORMAL") || !strings.Contains(bottomComposer, "Ask Minga") {
+		t.Fatalf("agent composer should be pinned to bottom body rows: %+v", bodyLines)
+	}
+	footer := ansi.Strip(strings.Join(model.footerLines(), "\n"))
+	if strings.Contains(footer, "◇ Agent") || strings.Contains(footer, "Ask Minga") {
+		t.Fatalf("agent chat should not be duplicated in footer overlay: %q", footer)
 	}
 }
 
