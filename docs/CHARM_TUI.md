@@ -1,6 +1,6 @@
 # Charm TUI Renderer
 
-The Charm renderer is an experimental Go/Bubble Tea frontend for Minga's semantic UI protocol. It lives beside the existing Zig and Rust TUI work so we can evaluate Charm's component model without dirtying those worktrees.
+The Charm renderer is an experimental Go/Bubble Tea frontend for Minga's Semantic UI protocol. It is the working semantic terminal reference during the frontend bakeoff while Rust is rebuilt as the desired long-term terminal frontend. Zig remains relevant for parser/tree-sitter infrastructure and legacy terminal rendering until that path is retired.
 
 ## Build
 
@@ -31,7 +31,7 @@ MINGA_TUI_IMPL=go bin/minga path/to/file
 
 ## Current Scope
 
-The Charm renderer currently targets the semantic UI path, not the legacy cell-grid path. It decodes and renders:
+The Charm renderer targets the Semantic UI path, not the legacy cell-grid path. It decodes and renders:
 
 - semantic editor rows and spans
 - tab bar and workspace chrome
