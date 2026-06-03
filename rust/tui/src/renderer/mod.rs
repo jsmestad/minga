@@ -43,7 +43,7 @@ struct SemanticWindowState {
     origin_col: u16,
     width: u16,
     height: u16,
-    row_texts: Vec<String>,
+    rows: Vec<semantic::Row>,
     content_epoch: u32,
 }
 
@@ -66,7 +66,6 @@ pub struct Renderer {
     width: u16,
     height: u16,
     cells: Vec<Cell>,
-    previous: Vec<Cell>,
     cursor: (u16, u16),
     cursor_shape: u8,
     default_bg: u32,
@@ -109,7 +108,6 @@ impl Renderer {
             width,
             height,
             cells: vec![Cell::default(); len],
-            previous: vec![Cell::default(); len],
             cursor: (0, 0),
             cursor_shape: 0,
             default_bg: 0,
@@ -178,7 +176,7 @@ impl Renderer {
             Command::SetActiveRegion(0) => self.active_region = None,
             Command::SetActiveRegion(id) => self.active_region = self.regions.get(&id).copied(),
             Command::ScrollRegion { top, bottom, delta } => {
-                terminal.scroll_region(top, bottom, delta)?;
+                let _ = terminal;
                 self.sync_after_scroll(top, bottom, delta);
             }
             Command::MeasureText { request_id, text } => {
@@ -196,13 +194,6 @@ impl Renderer {
         self.width = width;
         self.height = height;
         self.cells = vec![Cell::default(); width as usize * height as usize];
-        self.previous = vec![
-            Cell {
-                text: "\0".to_owned(),
-                style: CellStyle::default()
-            };
-            width as usize * height as usize
-        ];
         self.cursor = (0, 0);
         self.regions.clear();
         self.active_region = None;
@@ -326,8 +317,8 @@ impl Renderer {
             semantic::Command::WindowOverlayDelta(delta, _) => {
                 self.apply_window_overlay_delta(delta)
             }
-            semantic::Command::WindowDelta(..)
-            | semantic::Command::ClipboardWrite(..)
+            semantic::Command::WindowRowsDelta(delta, _) => self.apply_window_rows_delta(delta),
+            semantic::Command::ClipboardWrite(..)
             | semantic::Command::LineSpacing(..)
             | semantic::Command::CursorAnimation(..)
             | semantic::Command::ConfigState(..)
@@ -371,7 +362,7 @@ impl Renderer {
                 origin_col: window.origin_col,
                 width,
                 height,
-                row_texts,
+                rows: window.rows.clone(),
                 content_epoch: window.content_epoch,
             },
         );
@@ -664,7 +655,7 @@ impl Renderer {
         let origin_row = window.origin_row;
         let origin_col = window.origin_col;
         let height = window.height;
-        let row_texts = window.row_texts.clone();
+        let row_texts: Vec<String> = window.rows.iter().map(|row| row.text.clone()).collect();
         let tab_width = u16::from(guides.tab_width.max(1));
 
         for (row_offset, line_level) in guides.line_indent_levels.into_iter().enumerate() {
@@ -738,6 +729,60 @@ impl Renderer {
         } else {
             self.clear_semantic_cursorline(delta.window_id);
         }
+    }
+
+    fn apply_window_rows_delta(&mut self, delta: semantic::WindowRowsDelta) {
+        let Some(mut window) = self.semantic_windows.get(&delta.window_id).cloned() else {
+            return;
+        };
+        if window.content_epoch != delta.content_epoch {
+            return;
+        }
+
+        self.semantic_cursorline_snapshots.remove(&delta.window_id);
+        self.clear_rect(
+            window.origin_row,
+            window.origin_col,
+            window.width,
+            window.height,
+        );
+
+        let Some(rows) = resolve_delta_rows(&window.rows, delta.rows) else {
+            self.semantic_windows.remove(&delta.window_id);
+            self.redraw_retained_chrome();
+            return;
+        };
+        window.rows = rows;
+
+        for (row, content) in window.rows.clone().into_iter().enumerate() {
+            let row = window
+                .origin_row
+                .saturating_add(row.min(u16::MAX as usize) as u16);
+            self.draw_semantic_row(row, window.origin_col, content);
+        }
+
+        if delta.cursor_visible {
+            self.cursor = (
+                window.origin_col.saturating_add(delta.cursor_col),
+                window.origin_row.saturating_add(delta.cursor_row),
+            );
+            self.cursor_shape = delta.cursor_shape;
+        }
+
+        if let Some(cursorline) = delta.cursorline {
+            self.draw_semantic_cursorline(
+                delta.window_id,
+                semantic::Cursorline {
+                    row: window.origin_row.saturating_add(cursorline.row),
+                    bg: cursorline.bg,
+                },
+            );
+        } else {
+            self.clear_semantic_cursorline(delta.window_id);
+        }
+
+        self.semantic_windows.insert(delta.window_id, window);
+        self.redraw_retained_chrome();
     }
 
     fn draw_status_bar(&mut self, status: semantic::StatusBar) {
@@ -2025,7 +2070,6 @@ impl Renderer {
             for row in top..=bottom {
                 self.clear_row(row);
             }
-            self.previous.clone_from(&self.cells);
             return;
         }
 
@@ -2044,8 +2088,6 @@ impl Renderer {
                 self.clear_row(row);
             }
         }
-
-        self.previous.clone_from(&self.cells);
     }
 
     fn copy_row(&mut self, source: u16, target: u16) {
@@ -2196,31 +2238,32 @@ impl Renderer {
     }
 
     fn render(&mut self, terminal: &mut Terminal) -> io::Result<()> {
-        for row in 0..self.height {
-            for col in 0..self.width {
-                let Some(index) = self.index(col, row) else {
-                    continue;
-                };
-
-                if self.cells[index].text.is_empty() {
-                    self.previous[index] = self.cells[index].clone();
-                    continue;
-                }
-
-                if self.cells[index] != self.previous[index] {
-                    terminal.write_cell(
-                        col,
-                        row,
-                        &self.cells[index].text,
-                        self.cells[index].style,
-                    )?;
-                    self.previous[index] = self.cells[index].clone();
-                }
-            }
-        }
+        let width = self.width;
+        let height = self.height;
+        let cursor = self.cursor;
+        let cells = self.cells.clone();
 
         terminal.set_cursor_shape(self.cursor_shape)?;
-        terminal.show_cursor(self.cursor.0, self.cursor.1)?;
+        terminal.draw(|frame| {
+            let buffer = frame.buffer_mut();
+            for row in 0..height {
+                for col in 0..width {
+                    let index = row as usize * width as usize + col as usize;
+                    let Some(cell) = cells.get(index) else {
+                        continue;
+                    };
+                    let symbol = if cell.text.is_empty() {
+                        " "
+                    } else {
+                        &cell.text
+                    };
+                    buffer[(col, row)]
+                        .set_symbol(symbol)
+                        .set_style(ratatui_style_from_cell(cell.style));
+                }
+            }
+            frame.set_cursor_position((cursor.0, cursor.1));
+        })?;
         terminal.flush()
     }
 
@@ -2231,6 +2274,30 @@ impl Renderer {
             None
         }
     }
+}
+
+fn resolve_delta_rows(
+    retained_rows: &[semantic::Row],
+    delta_rows: Vec<semantic::WindowDeltaRow>,
+) -> Option<Vec<semantic::Row>> {
+    let mut rows = Vec::with_capacity(delta_rows.len());
+
+    for entry in delta_rows {
+        match entry {
+            semantic::WindowDeltaRow::Full(row) => rows.push(row),
+            semantic::WindowDeltaRow::Ref {
+                row_id,
+                content_hash,
+            } => {
+                let row = retained_rows
+                    .iter()
+                    .find(|row| row.row_id == row_id && row.content_hash == content_hash)?;
+                rows.push(row.clone());
+            }
+        }
+    }
+
+    Some(rows)
 }
 
 fn text_width(text: &str) -> u16 {
@@ -2448,6 +2515,9 @@ fn ratatui_style_from_cell(style: CellStyle) -> RatatuiStyle {
     }
     if style.attrs & protocol::ATTR_STRIKETHROUGH != 0 {
         out = out.add_modifier(Modifier::CROSSED_OUT);
+    }
+    if style.blend < 50 {
+        out = out.add_modifier(Modifier::DIM);
     }
     out
 }
@@ -3238,6 +3308,102 @@ mod tests {
         assert_eq!(cell.text, "h");
         assert_eq!(cell.style.fg, 0xAABBCC);
         assert_eq!(cell.style.bg, 0x112233);
+    }
+
+    #[test]
+    fn semantic_window_rows_delta_updates_retained_rows_with_epoch_guard() {
+        let mut renderer = Renderer::new(16, 4);
+
+        renderer.draw_semantic_window(semantic::WindowContent {
+            window_id: 1,
+            text_width: 8,
+            text_height: 2,
+            origin_row: 1,
+            origin_col: 2,
+            cursor_row: 0,
+            cursor_col: 0,
+            cursor_shape: 0,
+            content_epoch: 7,
+            rows: vec![
+                semantic::Row {
+                    row_id: 11,
+                    content_hash: 0xAAAA,
+                    text: "alpha".to_owned(),
+                    spans: vec![],
+                    ..Default::default()
+                },
+                semantic::Row {
+                    row_id: 12,
+                    content_hash: 0xBBBB,
+                    text: "beta".to_owned(),
+                    spans: vec![],
+                    ..Default::default()
+                },
+            ],
+            cursorline: None,
+        });
+
+        renderer.apply_window_rows_delta(semantic::WindowRowsDelta {
+            window_id: 1,
+            content_epoch: 6,
+            cursor_visible: true,
+            cursor_row: 0,
+            cursor_col: 0,
+            cursor_shape: 0,
+            rows: vec![semantic::WindowDeltaRow::Full(semantic::Row {
+                text: "stale".to_owned(),
+                spans: vec![],
+                ..Default::default()
+            })],
+            cursorline: None,
+        });
+        assert_eq!(renderer.cells[renderer.index(2, 1).unwrap()].text, "a");
+
+        renderer.apply_window_rows_delta(semantic::WindowRowsDelta {
+            window_id: 1,
+            content_epoch: 7,
+            cursor_visible: true,
+            cursor_row: 1,
+            cursor_col: 3,
+            cursor_shape: 2,
+            rows: vec![
+                semantic::WindowDeltaRow::Ref {
+                    row_id: 11,
+                    content_hash: 0xAAAA,
+                },
+                semantic::WindowDeltaRow::Full(semantic::Row {
+                    text: "delta".to_owned(),
+                    spans: vec![],
+                    ..Default::default()
+                }),
+            ],
+            cursorline: Some(semantic::Cursorline {
+                row: 1,
+                bg: 0x123456,
+            }),
+        });
+
+        assert_eq!(renderer.cells[renderer.index(2, 1).unwrap()].text, "a");
+        assert_eq!(renderer.cells[renderer.index(2, 2).unwrap()].text, "d");
+        assert_eq!(renderer.cursor, (5, 2));
+        assert_eq!(renderer.cursor_shape, 2);
+        assert_eq!(
+            renderer.cells[renderer.index(2, 2).unwrap()].style.bg,
+            0x123456
+        );
+
+        renderer.apply_window_rows_delta(semantic::WindowRowsDelta {
+            window_id: 1,
+            content_epoch: 7,
+            cursor_visible: false,
+            cursor_row: 0,
+            cursor_col: 0,
+            cursor_shape: 0,
+            rows: vec![],
+            cursorline: None,
+        });
+        assert_eq!(renderer.cells[renderer.index(2, 1).unwrap()].text, " ");
+        assert_eq!(renderer.cells[renderer.index(2, 2).unwrap()].text, " ");
     }
 
     #[test]
@@ -4615,8 +4781,8 @@ mod tests {
         renderer.write_run(0, 0, "界", CellStyle::default());
         renderer.render(&mut terminal).unwrap();
 
-        assert_eq!(renderer.previous[renderer.index(0, 0).unwrap()].text, "界");
-        assert_eq!(renderer.previous[renderer.index(1, 0).unwrap()].text, "");
+        assert_eq!(renderer.cells[renderer.index(0, 0).unwrap()].text, "界");
+        assert_eq!(renderer.cells[renderer.index(1, 0).unwrap()].text, "");
     }
 
     #[test]
