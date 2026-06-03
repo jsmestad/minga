@@ -326,7 +326,24 @@ impl Renderer {
             semantic::Command::WindowOverlayDelta(delta, _) => {
                 self.apply_window_overlay_delta(delta)
             }
-            semantic::Command::Unsupported { .. } => {}
+            semantic::Command::WindowDelta(..)
+            | semantic::Command::ClipboardWrite(..)
+            | semantic::Command::LineSpacing(..)
+            | semantic::Command::CursorAnimation(..)
+            | semantic::Command::ConfigState(..)
+            | semantic::Command::AgentContext(..)
+            | semantic::Command::HoverAction(..)
+            | semantic::Command::SearchState(..)
+            | semantic::Command::Workspaces(..)
+            | semantic::Command::Notifications(..)
+            | semantic::Command::EditTimeline(..)
+            | semantic::Command::ExtensionOverlay(..)
+            | semantic::Command::ExtensionPanel(..)
+            | semantic::Command::Observatory(..)
+            | semantic::Command::Sidebars(..)
+            | semantic::Command::Board(..)
+            | semantic::Command::AgentChat(..)
+            | semantic::Command::ToolManager(..) => {}
         }
     }
 
