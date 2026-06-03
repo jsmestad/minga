@@ -729,3 +729,113 @@ mod command_size_conformance {
         );
     }
 }
+
+#[cfg(test)]
+mod generated_decode_tests {
+    //! Round-trip coverage for the schema-generated decoders. The byte fixtures
+    //! here are exactly what the Elixir encoders produce (the matching
+    //! assertions live in protocol_schema_validation_test.exs), so together they
+    //! pin encoder and generated decoder to the same wire format.
+    use super::semantic_decode::*;
+
+    #[test]
+    fn decodes_completion_fields_with_items() {
+        // visible(1) cursor_row(3) cursor_col(7) selected_offset(1) count(1)
+        // item: kind(1=:function) label("foo") detail("bar")
+        let bytes = [
+            1, 0, 3, 0, 7, 0, 1, 0, 1, 1, 0, 3, b'f', b'o', b'o', 0, 3, b'b', b'a', b'r',
+        ];
+        let (f, consumed) = decode_gui_completion_fields(&bytes, 0).unwrap();
+        assert_eq!(consumed, bytes.len());
+        assert_eq!((f.visible, f.cursor_row, f.cursor_col, f.selected_offset), (1, 3, 7, 1));
+        assert_eq!(f.items.len(), 1);
+        assert_eq!(f.items[0].kind, 1);
+        assert_eq!(f.items[0].label, "foo");
+        assert_eq!(f.items[0].detail, "bar");
+    }
+
+    #[test]
+    fn hidden_completion_skips_the_tail() {
+        let (f, consumed) = decode_gui_completion_fields(&[0], 0).unwrap();
+        assert_eq!(consumed, 1);
+        assert_eq!(f.visible, 0);
+        assert!(f.items.is_empty());
+    }
+
+    #[test]
+    fn decodes_picker_item_with_u16_match_positions() {
+        // icon_color(0xAABBCC) flags(0) label("file.ex") desc("desc") ann("ann")
+        // match_positions: count(2) then u16 1, u16 4
+        let bytes = [
+            0xAA, 0xBB, 0xCC, 0, 0, 7, b'f', b'i', b'l', b'e', b'.', b'e', b'x', 0, 4, b'd', b'e',
+            b's', b'c', 0, 3, b'a', b'n', b'n', 2, 0, 1, 0, 4,
+        ];
+        let (item, consumed) = decode_picker_item(&bytes, 0).unwrap();
+        assert_eq!(consumed, bytes.len());
+        assert_eq!(item.icon_color, 0x00AA_BBCC);
+        assert_eq!(item.label, "file.ex");
+        assert_eq!(item.description, "desc");
+        assert_eq!(item.annotation, "ann");
+        assert_eq!(item.match_positions, vec![1u16, 4u16]);
+    }
+
+    #[test]
+    fn decodes_picker_header_full_layout() {
+        let bytes = [1, 0, 2, 0, 10, 0, 100, 1, 0, 5, b'F', b'i', b'l', b'e', b's', 0, 3];
+        let (h, consumed) = decode_gui_picker_header(&bytes, 0).unwrap();
+        assert_eq!(consumed, bytes.len());
+        assert_eq!(h.selected_index, 2);
+        assert_eq!(h.filtered_count, 10);
+        assert_eq!(h.total_count, 100);
+        assert_eq!(h.has_preview, 1);
+        assert_eq!(h.title, "Files");
+        assert_eq!(h.marked_count, 3);
+    }
+
+    #[test]
+    fn decodes_action_menu_with_string_actions() {
+        // visible(1) selected_index(1) count(2) "Open" "Delete"
+        let bytes = [
+            1, 1, 2, 0, 4, b'O', b'p', b'e', b'n', 0, 6, b'D', b'e', b'l', b'e', b't', b'e',
+        ];
+        let (m, consumed) = decode_gui_picker_action_menu(&bytes, 0).unwrap();
+        assert_eq!(consumed, bytes.len());
+        assert_eq!(m.visible, 1);
+        assert_eq!(m.selected_index, 1);
+        assert_eq!(m.actions, vec!["Open".to_string(), "Delete".to_string()]);
+    }
+
+    #[test]
+    fn hidden_action_menu_skips_the_tail() {
+        let (m, consumed) = decode_gui_picker_action_menu(&[0], 0).unwrap();
+        assert_eq!(consumed, 1);
+        assert_eq!(m.visible, 0);
+        assert!(m.actions.is_empty());
+    }
+
+    #[test]
+    fn decodes_load_status_error_tail() {
+        let bytes = [2, 0, 4, b'b', b'o', b'o', b'm'];
+        let (s, consumed) = decode_gui_picker_load_status(&bytes, 0).unwrap();
+        assert_eq!(consumed, bytes.len());
+        assert_eq!(s.status, 2);
+        assert_eq!(s.message, "boom");
+    }
+
+    #[test]
+    fn ready_load_status_skips_the_tail() {
+        let (s, consumed) = decode_gui_picker_load_status(&[0], 0).unwrap();
+        assert_eq!(consumed, 1);
+        assert_eq!(s.status, 0);
+        assert_eq!(s.message, "");
+    }
+
+    #[test]
+    fn truncated_picker_item_is_rejected_not_panicking() {
+        // count claims 2 match positions but only 1 u16 follows.
+        let bytes = [
+            0xAA, 0xBB, 0xCC, 0, 0, 1, b'x', 0, 0, 0, 0, 2, 0, 1,
+        ];
+        assert!(decode_picker_item(&bytes, 0).is_err());
+    }
+}

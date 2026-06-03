@@ -525,18 +525,6 @@ func DecodeCompletionItem(data []byte, offset int) (CompletionItem, int, error) 
 	}, pos, nil
 }
 
-func DecodeMatchPosition(data []byte, offset int) (MatchPosition, int, error) {
-	pos := offset
-	if err := decodeRequireLen(data, pos+2, "index"); err != nil {
-		return MatchPosition{}, offset, err
-	}
-	index := decodeU16(data, pos)
-	pos += 2
-	return MatchPosition{
-		Index: index,
-	}, pos, nil
-}
-
 func DecodePickerItem(data []byte, offset int) (PickerItem, int, error) {
 	pos := offset
 	if err := decodeRequireLen(data, pos+3, "icon_color"); err != nil {
@@ -569,14 +557,10 @@ func DecodePickerItem(data []byte, offset int) (PickerItem, int, error) {
 	if err := decodeRequireLen(data, pos+matchPositionsCount*2, "match_positions"); err != nil {
 		return PickerItem{}, offset, err
 	}
-	matchPositions := make([]MatchPosition, 0, matchPositionsCount)
+	matchPositions := make([]uint16, 0, matchPositionsCount)
 	for i := 0; i < matchPositionsCount; i++ {
-		item, nextPos, err := DecodeMatchPosition(data, pos)
-		if err != nil {
-			return PickerItem{}, offset, err
-		}
-		pos = nextPos
-		matchPositions = append(matchPositions, item)
+		matchPositions = append(matchPositions, decodeU16(data, pos))
+		pos += 2
 	}
 	return PickerItem{
 		IconColor:      iconColor,
@@ -585,17 +569,6 @@ func DecodePickerItem(data []byte, offset int) (PickerItem, int, error) {
 		Description:    description,
 		Annotation:     annotation,
 		MatchPositions: matchPositions,
-	}, pos, nil
-}
-
-func DecodePickerAction(data []byte, offset int) (PickerAction, int, error) {
-	pos := offset
-	name, pos, err := decodeString16(data, pos)
-	if err != nil {
-		return PickerAction{}, offset, err
-	}
-	return PickerAction{
-		Name: name,
 	}, pos, nil
 }
 
@@ -791,7 +764,7 @@ func DecodeGuiGutterEntries(data []byte, offset int) ([]GutterEntry, int, error)
 	}
 	count := int(decodeU16(data, pos))
 	pos += 2
-	items := make([]GutterEntry, 0, count)
+	items := make([]GutterEntry, 0, min(count, 1024))
 	for i := 0; i < count; i++ {
 		item, nextPos, err := DecodeGutterEntry(data, pos)
 		if err != nil {
@@ -870,7 +843,7 @@ func DecodeGuiPickerItems(data []byte, offset int) ([]PickerItem, int, error) {
 	}
 	count := int(decodeU16(data, pos))
 	pos += 2
-	items := make([]PickerItem, 0, count)
+	items := make([]PickerItem, 0, min(count, 1024))
 	for i := 0; i < count; i++ {
 		item, nextPos, err := DecodePickerItem(data, pos)
 		if err != nil {
@@ -890,7 +863,7 @@ func DecodeGuiPickerActionMenu(data []byte, offset int) (GuiPickerActionMenu, in
 	visible := data[pos]
 	pos++
 	var selectedIndex uint8
-	var actions []PickerAction
+	var actions []string
 	if visible == 1 {
 		if err := decodeRequireLen(data, pos+1, "selected_index"); err != nil {
 			return GuiPickerActionMenu{}, offset, err
@@ -902,9 +875,9 @@ func DecodeGuiPickerActionMenu(data []byte, offset int) (GuiPickerActionMenu, in
 		}
 		actionsCount := int(data[pos])
 		pos += 1
-		actions = make([]PickerAction, 0, actionsCount)
+		actions = make([]string, 0, min(actionsCount, 1024))
 		for i := 0; i < actionsCount; i++ {
-			item, nextPos, err := DecodePickerAction(data, pos)
+			item, nextPos, err := decodeString16(data, pos)
 			if err != nil {
 				return GuiPickerActionMenu{}, offset, err
 			}
@@ -1188,7 +1161,7 @@ func DecodeGuiStatusBarModeline(data []byte, offset int) (GuiStatusBarModeline, 
 	}
 	leftSegmentsCount := int(decodeU16(data, pos))
 	pos += 2
-	leftSegments := make([]ModelineSegment, 0, leftSegmentsCount)
+	leftSegments := make([]ModelineSegment, 0, min(leftSegmentsCount, 1024))
 	for i := 0; i < leftSegmentsCount; i++ {
 		item, nextPos, err := DecodeModelineSegment(data, pos)
 		if err != nil {
@@ -1202,7 +1175,7 @@ func DecodeGuiStatusBarModeline(data []byte, offset int) (GuiStatusBarModeline, 
 	}
 	rightSegmentsCount := int(decodeU16(data, pos))
 	pos += 2
-	rightSegments := make([]ModelineSegment, 0, rightSegmentsCount)
+	rightSegments := make([]ModelineSegment, 0, min(rightSegmentsCount, 1024))
 	for i := 0; i < rightSegmentsCount; i++ {
 		item, nextPos, err := DecodeModelineSegment(data, pos)
 		if err != nil {
@@ -1357,7 +1330,7 @@ func DecodeGuiWindowContentRows(data []byte, offset int) ([]Row, int, error) {
 	}
 	count := int(decodeU16(data, pos))
 	pos += 2
-	items := make([]Row, 0, count)
+	items := make([]Row, 0, min(count, 1024))
 	for i := 0; i < count; i++ {
 		item, nextPos, err := DecodeRow(data, pos)
 		if err != nil {
@@ -1484,7 +1457,7 @@ func DecodeGuiWindowContentAnnotations(data []byte, offset int) ([]Annotation, i
 	}
 	count := int(decodeU16(data, pos))
 	pos += 2
-	items := make([]Annotation, 0, count)
+	items := make([]Annotation, 0, min(count, 1024))
 	for i := 0; i < count; i++ {
 		item, nextPos, err := DecodeAnnotation(data, pos)
 		if err != nil {
@@ -1680,7 +1653,7 @@ func DecodeGuiWindowRowsDeltaRows(data []byte, offset int) ([]Row, int, error) {
 	}
 	count := int(decodeU16(data, pos))
 	pos += 2
-	items := make([]Row, 0, count)
+	items := make([]Row, 0, min(count, 1024))
 	for i := 0; i < count; i++ {
 		item, nextPos, err := DecodeRow(data, pos)
 		if err != nil {
@@ -1749,7 +1722,7 @@ func DecodeGuiWindowViewportDeltaRows(data []byte, offset int) ([]Row, int, erro
 	}
 	count := int(decodeU16(data, pos))
 	pos += 2
-	items := make([]Row, 0, count)
+	items := make([]Row, 0, min(count, 1024))
 	for i := 0; i < count; i++ {
 		item, nextPos, err := DecodeRow(data, pos)
 		if err != nil {
@@ -1843,7 +1816,7 @@ func DecodeGuiCompletionFields(data []byte, offset int) (GuiCompletionFields, in
 		}
 		itemsCount := int(decodeU16(data, pos))
 		pos += 2
-		items = make([]CompletionItem, 0, itemsCount)
+		items = make([]CompletionItem, 0, min(itemsCount, 1024))
 		for i := 0; i < itemsCount; i++ {
 			item, nextPos, err := DecodeCompletionItem(data, pos)
 			if err != nil {

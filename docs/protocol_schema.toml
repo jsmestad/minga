@@ -1164,16 +1164,6 @@ fields = [
   {name = "detail", type = "string16"},
 ]
 
-# A single fuzzy-match highlight index inside a picker_item label. Wraps a bare
-# u16 so it can be used as a counted_array element (picker_encoder.ex encode_item/1).
-# The field is named `index` rather than `pos` because the generator reserves
-# `pos`/`offset`/`data`/`bytes`/`err` for decoder-internal locals.
-[[structures]]
-name = "match_position"
-fields = [
-  {name = "index", type = "u16"},
-]
-
 [[structures]]
 name = "picker_item"
 fields = [
@@ -1182,15 +1172,8 @@ fields = [
   {name = "label", type = "string16"},
   {name = "description", type = "string16"},
   {name = "annotation", type = "string16"},
-  {name = "match_positions", type = "counted_array", count_type = "u8", element = "match_position"},
-]
-
-# A single action-menu entry: wraps the action name string so it can be a
-# counted_array element (picker_encoder.ex encode_action_menu/1).
-[[structures]]
-name = "picker_action"
-fields = [
-  {name = "name", type = "string16"},
+  # u8-counted list of u16 fuzzy-match highlight indices into the label.
+  {name = "match_positions", type = "counted_array", count_type = "u8", element = "u16"},
 ]
 
 [[structures]]
@@ -1590,7 +1573,7 @@ fields = [
 ]
 conditional_tail = {guard = "visible == 1", fields = [
   {name = "selected_index", type = "u8"},
-  {name = "actions", type = "counted_array", count_type = "u8", element = "picker_action"},
+  {name = "actions", type = "counted_array", count_type = "u8", element = "string16"},
 ]}
 
 [[sections]]

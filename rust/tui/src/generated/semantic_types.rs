@@ -116,11 +116,6 @@ pub struct CompletionItem {
     pub detail: String,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct MatchPosition {
-    pub index: u16,
-}
-
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PickerItem {
     pub icon_color: u32,
@@ -128,12 +123,7 @@ pub struct PickerItem {
     pub label: String,
     pub description: String,
     pub annotation: String,
-    pub match_positions: Vec<MatchPosition>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct PickerAction {
-    pub name: String,
+    pub match_positions: Vec<u16>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -168,7 +158,6 @@ pub const DIAGNOSTIC_RANGE_SIZE: usize = 9;
 pub const DOCUMENT_HIGHLIGHT_SIZE: usize = 9;
 pub const HIT_REGION_SIZE: usize = 11;
 pub const THEME_COLOR_SIZE: usize = 4;
-pub const MATCH_POSITION_SIZE: usize = 2;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct GuiWindowContentHeader {
@@ -364,7 +353,7 @@ pub struct GuiPickerQuery {
 pub struct GuiPickerActionMenu {
     pub visible: u8,
     pub selected_index: u8,
-    pub actions: Vec<PickerAction>,
+    pub actions: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

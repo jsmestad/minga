@@ -103,21 +103,13 @@ type CompletionItem struct {
 	Detail string
 }
 
-type MatchPosition struct {
-	Index uint16
-}
-
 type PickerItem struct {
 	IconColor      uint32
 	Flags          uint8
 	Label          string
 	Description    string
 	Annotation     string
-	MatchPositions []MatchPosition
-}
-
-type PickerAction struct {
-	Name string
+	MatchPositions []uint16
 }
 
 type WhichKeyBinding struct {
@@ -149,7 +141,6 @@ const (
 	DocumentHighlightSize = 9
 	HitRegionSize         = 11
 	ThemeColorSize        = 4
-	MatchPositionSize     = 2
 )
 
 type GuiWindowContentHeader struct {
@@ -323,7 +314,7 @@ type GuiPickerQuery struct {
 type GuiPickerActionMenu struct {
 	Visible       uint8
 	SelectedIndex uint8
-	Actions       []PickerAction
+	Actions       []string
 }
 
 type GuiPickerModePrefix struct {

@@ -65,8 +65,7 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
       # hit_region.id is u16 on the wire (kind 1 + rect 8 + id 2). Pinning the
       # schema-computed size here guards against the field silently widening to
       # u32, which would desync the geometry section's hit_regions array.
-      "hit_region" => 11,
-      "match_position" => 2
+      "hit_region" => 11
     }
 
     for {name, expected_size} <- @expected_sizes do
@@ -481,6 +480,24 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
       assert items_payload ==
                <<1::16, 0xAA, 0xBB, 0xCC, 0::8, 7::16, "file.ex", 4::16, "desc", 3::16, "ann",
                  2::8, 1::16, 4::16>>
+    end
+
+    test "picker_item flags pack two_line (bit 0) and marked (bit 1)" do
+      item = %Picker.Item{
+        id: "1",
+        label: "x",
+        two_line?: true,
+        marked?: true,
+        match_positions: []
+      }
+
+      <<_opcode, section_count::8, sections_binary::binary>> =
+        PickerEncoder.encode_command(%Picker{visible?: true, items: [item]})
+
+      items_payload = extract_section_payload(sections_binary, section_count, 0x03)
+
+      # count(1), icon_color(0), flags(0b11 = 3), label "x", empty desc/ann, 0 positions.
+      assert items_payload == <<1::16, 0::24, 3::8, 1::16, "x", 0::16, 0::16, 0::8>>
     end
 
     test "schema models every section the picker encoder emits", %{sections: sections} do

@@ -89,7 +89,52 @@ defmodule Minga.Mix.ProtocolGenerator do
     validate_structures!(schema)
     validate_sections!(schema)
     validate_command_fields!(schema)
+    validate_conditional_tail_guards!(schema)
     schema
+  end
+
+  # A conditional_tail guard is decoded by substituting base-field names with
+  # their decoded locals (rust_guard_expression / go_guard_expression). An
+  # identifier that is not a base field would be emitted verbatim and fail to
+  # compile (or, worse, resolve to an unrelated tail local), so reject it here
+  # with a clear message instead.
+  @spec validate_conditional_tail_guards!(schema()) :: :ok
+  defp validate_conditional_tail_guards!(schema) do
+    entries =
+      Map.get(schema, "structures", []) ++
+        Map.get(schema, "sections", []) ++
+        command_fields_list(schema)
+
+    bad =
+      entries
+      |> Enum.filter(&entry_conditional_tail/1)
+      |> Enum.flat_map(fn entry ->
+        base = Map.get(entry, "fields", []) |> MapSet.new(& &1["name"])
+        label = entry["name"] || entry["opcode"]
+
+        (conditional_tail_guard(entry) || "")
+        |> guard_identifiers()
+        |> Enum.reject(&MapSet.member?(base, &1))
+        |> Enum.map(fn id -> "#{label} -> #{id}" end)
+      end)
+
+    case bad do
+      [] ->
+        :ok
+
+      _ ->
+        Mix.raise(
+          "conditional_tail guards must reference only base fields in #{@schema_path}: " <>
+            Enum.join(bad, ", ")
+        )
+    end
+  end
+
+  @spec guard_identifiers(String.t()) :: [String.t()]
+  defp guard_identifiers(guard) do
+    ~r/[A-Za-z_][A-Za-z0-9_]*/
+    |> Regex.scan(guard)
+    |> List.flatten()
   end
 
   @spec generated_files(schema()) :: [generated_file()]
@@ -1218,7 +1263,8 @@ defmodule Minga.Mix.ProtocolGenerator do
       |> Enum.flat_map(fn s -> Enum.map(entry_fields(s), &{s["name"], &1}) end)
       |> Enum.filter(fn {_parent, field} ->
         (field["type"] == "struct" or field["type"] == "counted_array") and
-          is_binary(field["element"]) and not Map.has_key?(smap, field["element"])
+          is_binary(field["element"]) and
+          not element_resolves?(field["type"], field["element"], smap)
       end)
       |> Enum.map_join(", ", fn {parent, field} ->
         "#{parent}.#{field["name"]} -> #{field["element"]}"
@@ -1279,7 +1325,7 @@ defmodule Minga.Mix.ProtocolGenerator do
     bad =
       sections
       |> Enum.filter(fn s -> s["layout"] == "counted_array" and is_binary(s["element"]) end)
-      |> Enum.reject(fn s -> Map.has_key?(smap, s["element"]) end)
+      |> Enum.reject(fn s -> element_resolves?("counted_array", s["element"], smap) end)
       |> Enum.map_join(", ", fn s -> "#{s["opcode"]}/#{s["name"]} -> #{s["element"]}" end)
 
     case bad do
@@ -1296,7 +1342,8 @@ defmodule Minga.Mix.ProtocolGenerator do
       |> Enum.flat_map(fn s -> Enum.map(entry_fields(s), &{s, &1}) end)
       |> Enum.filter(fn {_s, field} ->
         (field["type"] == "struct" or field["type"] == "counted_array") and
-          is_binary(field["element"]) and not Map.has_key?(smap, field["element"])
+          is_binary(field["element"]) and
+          not element_resolves?(field["type"], field["element"], smap)
       end)
       |> Enum.map_join(", ", fn {s, field} ->
         "#{s["opcode"]}/#{s["name"]}.#{field["name"]} -> #{field["element"]}"
@@ -1334,7 +1381,8 @@ defmodule Minga.Mix.ProtocolGenerator do
       |> Enum.flat_map(fn cf -> Enum.map(entry_fields(cf), &{cf, &1}) end)
       |> Enum.filter(fn {_cf, field} ->
         (field["type"] == "struct" or field["type"] == "counted_array") and
-          is_binary(field["element"]) and not Map.has_key?(smap, field["element"])
+          is_binary(field["element"]) and
+          not element_resolves?(field["type"], field["element"], smap)
       end)
       |> Enum.map_join(", ", fn {cf, field} ->
         "#{cf["opcode"]}.#{field["name"]} -> #{field["element"]}"
@@ -1613,10 +1661,9 @@ defmodule Minga.Mix.ProtocolGenerator do
        ) do
     local = go_local_name(name)
     {count_read, count_size} = go_count_read(count_type)
-    element_fixed_size = fixed_structure_size(element, smap)
 
     stride_check =
-      case element_fixed_size do
+      case element_fixed_byte_size(element, smap) do
         nil ->
           []
 
@@ -1635,14 +1682,9 @@ defmodule Minga.Mix.ProtocolGenerator do
       "\t\t#{local}Count := int(#{count_read})\n",
       "\t\tpos += #{count_size}\n",
       stride_check,
-      "\t\t#{local} = make([]#{go_struct_name(element)}, 0, #{local}Count)\n",
+      "\t\t#{local} = make([]#{go_type(element_field(element), smap)}, 0, #{go_prealloc("#{local}Count", element, smap)})\n",
       "\t\tfor i := 0; i < #{local}Count; i++ {\n",
-      "\t\t\titem, nextPos, err := Decode#{go_struct_name(element)}(data, pos)\n",
-      "\t\t\tif err != nil {\n",
-      "\t\t\t\treturn #{zero}, offset, err\n",
-      "\t\t\t}\n",
-      "\t\t\tpos = nextPos\n",
-      "\t\t\t#{local} = append(#{local}, item)\n",
+      go_decode_array_element(element, local, "\t\t\t", zero),
       "\t\t}\n"
     ]
   end
@@ -1657,8 +1699,8 @@ defmodule Minga.Mix.ProtocolGenerator do
   defp rust_zero_value(%{"type" => "struct", "element" => element}, _smap),
     do: "#{rust_struct_name(element)}::default()"
 
-  defp rust_zero_value(%{"type" => "counted_array", "element" => element}, _smap),
-    do: "Vec::<#{rust_struct_name(element)}>::new()"
+  defp rust_zero_value(%{"type" => "counted_array", "element" => element}, smap),
+    do: "Vec::<#{rust_type(element_field(element), smap)}>::new()"
 
   defp rust_zero_value(_field, _smap), do: "Default::default()"
 
@@ -1793,17 +1835,14 @@ defmodule Minga.Mix.ProtocolGenerator do
        ) do
     local = rust_field_name(name)
     {count_read, count_size} = rust_count_read(count_type)
-    element_fixed_size = fixed_structure_size(element, smap)
 
     stride_check =
-      case element_fixed_size do
+      case element_fixed_byte_size(element, smap) do
         nil ->
           []
 
         stride ->
-          [
-            "        require_len(bytes, pos + #{local}_count * #{stride}, \"#{name}\")?;\n"
-          ]
+          ["        require_len(bytes, pos + #{local}_count * #{stride}, \"#{name}\")?;\n"]
       end
 
     [
@@ -1811,11 +1850,9 @@ defmodule Minga.Mix.ProtocolGenerator do
       "        let #{local}_count = #{count_read};\n",
       "        pos += #{count_size};\n",
       stride_check,
-      "        let mut #{local}_value = Vec::with_capacity(#{local}_count);\n",
+      "        let mut #{local}_value = Vec::with_capacity(#{rust_prealloc("#{local}_count", element, smap)});\n",
       "        for _ in 0..#{local}_count {\n",
-      "            let (item, consumed) = decode_#{element}(bytes, pos)?;\n",
-      "            pos += consumed;\n",
-      "            #{local}_value.push(item);\n",
+      rust_decode_array_element(element, "#{local}_value", "            "),
       "        }\n",
       "        #{local} = #{local}_value;\n"
     ]
@@ -1838,8 +1875,8 @@ defmodule Minga.Mix.ProtocolGenerator do
     rust_struct_name(element)
   end
 
-  defp rust_type(%{"type" => "counted_array", "element" => element}, _smap) do
-    "Vec<#{rust_struct_name(element)}>"
+  defp rust_type(%{"type" => "counted_array", "element" => element}, smap) do
+    "Vec<#{rust_type(element_field(element), smap)}>"
   end
 
   @spec rust_struct_name(String.t()) :: String.t()
@@ -1849,9 +1886,15 @@ defmodule Minga.Mix.ProtocolGenerator do
     |> Enum.map_join("", &String.capitalize/1)
   end
 
+  # Locals the generated decoders introduce themselves. A schema field whose
+  # name matches one of these would shadow the byte cursor, input slice, or loop
+  # temp and silently corrupt decoding (or fail to compile in Go), so field names
+  # that collide are suffixed. Kept in sync with the decode templates below.
+  @reserved_decoder_locals ~w(pos offset data bytes err item consumed next_pos count)
   @rust_keywords ~w(type self super crate mod fn struct enum impl trait pub use let mut const static ref match return if else for while loop break continue where as in move box dyn async await try macro yield)
   @spec rust_field_name(String.t()) :: String.t()
   defp rust_field_name(name) when name in @rust_keywords, do: "r##{name}"
+  defp rust_field_name(name) when name in @reserved_decoder_locals, do: "#{name}_"
   defp rust_field_name(name), do: name
 
   # ── Rust: semantic_types.rs ──────────────────────────────────────────────
@@ -2044,20 +2087,27 @@ defmodule Minga.Mix.ProtocolGenerator do
 
   @spec rust_decode_structure(structure(), %{String.t() => structure()}) :: iodata()
   defp rust_decode_structure(structure, smap) do
-    name = structure["name"]
-    struct_name = rust_struct_name(name)
-    fn_name = "decode_#{name}"
-    fields = structure["fields"] || []
+    rust_record_decoder(
+      "decode_#{structure["name"]}",
+      rust_struct_name(structure["name"]),
+      structure,
+      smap
+    )
+  end
 
+  # Emit a Rust decode function for any record (structure, inline section, or
+  # command_fields): base fields, then the conditional tail, then construct from
+  # the full field list. The three callers differ only in fn/struct name.
+  @spec rust_record_decoder(String.t(), String.t(), map(), %{String.t() => structure()}) ::
+          iodata()
+  defp rust_record_decoder(fn_name, struct_name, entry, smap) do
     [
       "pub fn #{fn_name}(bytes: &[u8], offset: usize) -> Result<(#{struct_name}, usize), DecodeError> {\n",
       "    let mut pos = offset;\n",
-      Enum.map(fields, &rust_decode_field_statement(&1, smap)),
-      rust_decode_conditional_tail_block(structure, smap),
+      Enum.map(entry["fields"] || [], &rust_decode_field_statement(&1, smap)),
+      rust_decode_conditional_tail_block(entry, smap),
       "    Ok((#{struct_name} {\n",
-      Enum.map(entry_fields(structure), fn field ->
-        "        #{rust_field_name(field["name"])},\n"
-      end),
+      Enum.map(entry_fields(entry), fn field -> "        #{rust_field_name(field["name"])},\n" end),
       "    }, pos - offset))\n",
       "}\n\n"
     ]
@@ -2162,41 +2212,107 @@ defmodule Minga.Mix.ProtocolGenerator do
        ) do
     rname = rust_field_name(name)
     {count_read, count_size} = rust_count_read(count_type)
-    element_fixed_size = fixed_structure_size(element, smap)
 
-    count_lines = [
-      "    require_len(bytes, pos + #{count_size}, \"#{name} count\")?;\n",
-      "    let #{rname}_count = #{count_read};\n",
-      "    pos += #{count_size};\n"
-    ]
-
-    decode_lines =
-      case element_fixed_size do
-        nil ->
-          # Variable-size elements: decode one by one
-          [
-            "    let mut #{rname} = Vec::with_capacity(#{rname}_count);\n",
-            "    for _ in 0..#{rname}_count {\n",
-            "        let (item, consumed) = decode_#{element}(bytes, pos)?;\n",
-            "        pos += consumed;\n",
-            "        #{rname}.push(item);\n",
-            "    }\n"
-          ]
-
-        stride ->
-          # Fixed-size elements: can validate upfront, still decode individually
-          [
-            "    require_len(bytes, pos + #{rname}_count * #{stride}, \"#{name}\")?;\n",
-            "    let mut #{rname} = Vec::with_capacity(#{rname}_count);\n",
-            "    for _ in 0..#{rname}_count {\n",
-            "        let (item, consumed) = decode_#{element}(bytes, pos)?;\n",
-            "        pos += consumed;\n",
-            "        #{rname}.push(item);\n",
-            "    }\n"
-          ]
+    stride_check =
+      case element_fixed_byte_size(element, smap) do
+        nil -> []
+        stride -> ["    require_len(bytes, pos + #{rname}_count * #{stride}, \"#{name}\")?;\n"]
       end
 
-    count_lines ++ decode_lines
+    [
+      "    require_len(bytes, pos + #{count_size}, \"#{name} count\")?;\n",
+      "    let #{rname}_count = #{count_read};\n",
+      "    pos += #{count_size};\n",
+      stride_check,
+      "    let mut #{rname} = Vec::with_capacity(#{rust_prealloc("#{rname}_count", element, smap)});\n",
+      "    for _ in 0..#{rname}_count {\n",
+      rust_decode_array_element(element, rname, "        "),
+      "    }\n"
+    ]
+  end
+
+  # A counted_array element is either a named structure or a bare wire type
+  # (primitive or string). This normalizes it to a field-shaped map so the
+  # existing type/size helpers apply, which lets counted_array hold primitives
+  # directly without a single-field wrapper structure.
+  @element_wire_types ~w(u8 u16 u24 u32 u64 rgb string8 string16 string32)
+  @spec element_field(String.t()) :: map()
+  defp element_field(element) when element in @element_wire_types, do: %{"type" => element}
+  defp element_field(element), do: %{"type" => "struct", "element" => element}
+
+  # Fixed byte size of one counted_array element (nil for variable-size:
+  # strings, or structures that contain strings/arrays).
+  @spec element_fixed_byte_size(String.t(), %{String.t() => structure()}) ::
+          non_neg_integer() | nil
+  defp element_fixed_byte_size(element, smap), do: fixed_field_size(element_field(element), smap)
+
+  # Whether a struct/counted_array element reference resolves: counted_array may
+  # name a bare wire type (primitive/string) or a structure; a struct field must
+  # name a defined structure.
+  @spec element_resolves?(String.t(), term(), %{String.t() => structure()}) :: boolean()
+  defp element_resolves?("counted_array", element, smap),
+    do: element in @element_wire_types or Map.has_key?(smap, element)
+
+  defp element_resolves?(_type, element, smap), do: Map.has_key?(smap, element)
+
+  # Upper bound on the capacity we pre-allocate from a wire-supplied count.
+  # Fixed-size element arrays are already bounded by their `count * stride`
+  # length check, so only variable-size element arrays (strings / structs with
+  # strings) need a clamp to stop a bogus count from forcing a large speculative
+  # allocation before any element bytes are validated.
+  @max_array_prealloc 1024
+
+  @spec rust_prealloc(String.t(), String.t(), %{String.t() => structure()}) :: String.t()
+  defp rust_prealloc(count_var, element, smap) do
+    case element_fixed_byte_size(element, smap) do
+      nil -> "#{count_var}.min(#{@max_array_prealloc})"
+      _ -> count_var
+    end
+  end
+
+  @spec go_prealloc(String.t(), String.t(), %{String.t() => structure()}) :: String.t()
+  defp go_prealloc(count_var, element, smap) do
+    case element_fixed_byte_size(element, smap) do
+      nil -> "min(#{count_var}, #{@max_array_prealloc})"
+      _ -> count_var
+    end
+  end
+
+  @rust_primitive_reads %{
+    "u8" => {"bytes[pos]", 1},
+    "u16" => {"read_u16(bytes, pos)", 2},
+    "u24" => {"read_u24(bytes, pos)", 3},
+    "rgb" => {"read_u24(bytes, pos)", 3},
+    "u32" => {"read_u32(bytes, pos)", 4},
+    "u64" => {"read_u64(bytes, pos)", 8}
+  }
+
+  # Decode one counted_array element at `pos` and push it onto `vec`, advancing
+  # `pos`. Struct elements emit the same `(item, consumed)` form as before, so
+  # existing struct arrays regenerate byte-for-byte.
+  @spec rust_decode_array_element(String.t(), String.t(), String.t()) :: iodata()
+  defp rust_decode_array_element(element, vec, indent) do
+    case element_field(element) do
+      %{"type" => "struct", "element" => el} ->
+        [
+          "#{indent}let (item, consumed) = decode_#{el}(bytes, pos)?;\n",
+          "#{indent}pos += consumed;\n",
+          "#{indent}#{vec}.push(item);\n"
+        ]
+
+      %{"type" => "string8"} ->
+        ["#{indent}#{vec}.push(read_string8(bytes, &mut pos)?);\n"]
+
+      %{"type" => "string16"} ->
+        ["#{indent}#{vec}.push(read_string16(bytes, &mut pos)?);\n"]
+
+      %{"type" => "string32"} ->
+        ["#{indent}#{vec}.push(read_string32(bytes, &mut pos)?);\n"]
+
+      %{"type" => prim} ->
+        {expr, size} = Map.fetch!(@rust_primitive_reads, prim)
+        ["#{indent}#{vec}.push(#{expr});\n", "#{indent}pos += #{size};\n"]
+    end
   end
 
   @spec rust_count_read(String.t()) :: {String.t(), non_neg_integer()}
@@ -2232,65 +2348,40 @@ defmodule Minga.Mix.ProtocolGenerator do
   @spec rust_decode_inline_section(String.t(), section(), %{String.t() => structure()}) ::
           iodata()
   defp rust_decode_inline_section(_opcode, section, smap) do
-    struct_name = rust_section_struct_name(section)
-    fn_name = "decode_#{section["opcode"]}_#{section["name"]}"
-    fields = section["fields"] || []
-
-    [
-      "pub fn #{fn_name}(bytes: &[u8], offset: usize) -> Result<(#{struct_name}, usize), DecodeError> {\n",
-      "    let mut pos = offset;\n",
-      Enum.map(fields, &rust_decode_field_statement(&1, smap)),
-      rust_decode_conditional_tail_block(section, smap),
-      "    Ok((#{struct_name} {\n",
-      Enum.map(entry_fields(section), fn field ->
-        "        #{rust_field_name(field["name"])},\n"
-      end),
-      "    }, pos - offset))\n",
-      "}\n\n"
-    ]
+    rust_record_decoder(
+      "decode_#{section["opcode"]}_#{section["name"]}",
+      rust_section_struct_name(section),
+      section,
+      smap
+    )
   end
 
   @spec rust_decode_counted_array_section(String.t(), section(), %{String.t() => structure()}) ::
           iodata()
   defp rust_decode_counted_array_section(_opcode, section, smap) do
     element = section["element"]
-    element_struct = rust_struct_name(element)
+    element_type = rust_type(element_field(element), smap)
     fn_name = "decode_#{section["opcode"]}_#{section["name"]}"
     count_type = section["count_type"] || "u16"
     {count_read, count_size} = rust_count_read(count_type)
-    element_fixed_size = fixed_structure_size(element, smap)
 
-    decode_loop =
-      case element_fixed_size do
-        nil ->
-          [
-            "    let mut items = Vec::with_capacity(count);\n",
-            "    for _ in 0..count {\n",
-            "        let (item, consumed) = decode_#{element}(bytes, pos)?;\n",
-            "        pos += consumed;\n",
-            "        items.push(item);\n",
-            "    }\n"
-          ]
-
-        stride ->
-          [
-            "    require_len(bytes, pos + count * #{stride}, \"#{section["name"]}\")?;\n",
-            "    let mut items = Vec::with_capacity(count);\n",
-            "    for _ in 0..count {\n",
-            "        let (item, consumed) = decode_#{element}(bytes, pos)?;\n",
-            "        pos += consumed;\n",
-            "        items.push(item);\n",
-            "    }\n"
-          ]
+    stride_check =
+      case element_fixed_byte_size(element, smap) do
+        nil -> []
+        stride -> ["    require_len(bytes, pos + count * #{stride}, \"#{section["name"]}\")?;\n"]
       end
 
     [
-      "pub fn #{fn_name}(bytes: &[u8], offset: usize) -> Result<(Vec<#{element_struct}>, usize), DecodeError> {\n",
+      "pub fn #{fn_name}(bytes: &[u8], offset: usize) -> Result<(Vec<#{element_type}>, usize), DecodeError> {\n",
       "    let mut pos = offset;\n",
       "    require_len(bytes, pos + #{count_size}, \"#{section["name"]} count\")?;\n",
       "    let count = #{count_read};\n",
       "    pos += #{count_size};\n",
-      decode_loop,
+      stride_check,
+      "    let mut items = Vec::with_capacity(#{rust_prealloc("count", element, smap)});\n",
+      "    for _ in 0..count {\n",
+      rust_decode_array_element(element, "items", "        "),
+      "    }\n",
       "    Ok((items, pos - offset))\n",
       "}\n\n"
     ]
@@ -2313,8 +2404,8 @@ defmodule Minga.Mix.ProtocolGenerator do
     go_struct_name(element)
   end
 
-  defp go_type(%{"type" => "counted_array", "element" => element}, _smap) do
-    "[]#{go_struct_name(element)}"
+  defp go_type(%{"type" => "counted_array", "element" => element}, smap) do
+    "[]#{go_type(element_field(element), smap)}"
   end
 
   @spec go_struct_name(String.t()) :: String.t()
@@ -2347,7 +2438,10 @@ defmodule Minga.Mix.ProtocolGenerator do
   @spec go_local_name(String.t()) :: String.t()
   defp go_local_name(name) do
     camel = go_camel_case(name)
-    if camel in @go_keywords, do: camel <> "Val", else: camel
+
+    if camel in @go_keywords or name in @reserved_decoder_locals,
+      do: camel <> "Val",
+      else: camel
   end
 
   @spec go_camel_case(String.t()) :: String.t()
@@ -2556,19 +2650,23 @@ defmodule Minga.Mix.ProtocolGenerator do
 
   @spec go_decode_structure(structure(), %{String.t() => structure()}) :: iodata()
   defp go_decode_structure(structure, smap) do
-    name = structure["name"]
-    struct_name = go_struct_name(name)
-    fn_name = "Decode#{struct_name}"
-    fields = structure["fields"] || []
+    struct_name = go_struct_name(structure["name"])
+    go_record_decoder("Decode#{struct_name}", struct_name, structure, smap)
+  end
+
+  # Emit a Go decode function for any record (structure, inline section, or
+  # command_fields). The three callers differ only in fn/struct name.
+  @spec go_record_decoder(String.t(), String.t(), map(), %{String.t() => structure()}) :: iodata()
+  defp go_record_decoder(fn_name, struct_name, entry, smap) do
     zero = "#{struct_name}{}"
 
     [
       "func #{fn_name}(data []byte, offset int) (#{struct_name}, int, error) {\n",
       "\tpos := offset\n",
-      Enum.map(fields, &go_decode_field_statement(&1, smap, zero)),
-      go_decode_conditional_tail_block(structure, smap, zero),
+      Enum.map(entry["fields"] || [], &go_decode_field_statement(&1, smap, zero)),
+      go_decode_conditional_tail_block(entry, smap, zero),
       "\treturn #{struct_name}{\n",
-      Enum.map(entry_fields(structure), fn field ->
+      Enum.map(entry_fields(entry), fn field ->
         "\t\t#{go_field_name(field["name"])}: #{go_local_name(field["name"])},\n"
       end),
       "\t}, pos, nil\n",
@@ -2709,18 +2807,9 @@ defmodule Minga.Mix.ProtocolGenerator do
        ) do
     local = go_local_name(name)
     {count_read, count_size} = go_count_read(count_type)
-    element_fixed_size = fixed_structure_size(element, smap)
-
-    count_lines = [
-      "\tif err := decodeRequireLen(data, pos+#{count_size}, \"#{name} count\"); err != nil {\n",
-      "\t\treturn #{zero}, offset, err\n",
-      "\t}\n",
-      "\t#{local}Count := int(#{count_read})\n",
-      "\tpos += #{count_size}\n"
-    ]
 
     stride_check =
-      case element_fixed_size do
+      case element_fixed_byte_size(element, smap) do
         nil ->
           []
 
@@ -2732,19 +2821,63 @@ defmodule Minga.Mix.ProtocolGenerator do
           ]
       end
 
-    decode_lines = [
-      "\t#{local} := make([]#{go_struct_name(element)}, 0, #{local}Count)\n",
+    [
+      "\tif err := decodeRequireLen(data, pos+#{count_size}, \"#{name} count\"); err != nil {\n",
+      "\t\treturn #{zero}, offset, err\n",
+      "\t}\n",
+      "\t#{local}Count := int(#{count_read})\n",
+      "\tpos += #{count_size}\n",
+      stride_check,
+      "\t#{local} := make([]#{go_type(element_field(element), smap)}, 0, #{go_prealloc("#{local}Count", element, smap)})\n",
       "\tfor i := 0; i < #{local}Count; i++ {\n",
-      "\t\titem, nextPos, err := Decode#{go_struct_name(element)}(data, pos)\n",
-      "\t\tif err != nil {\n",
-      "\t\t\treturn #{zero}, offset, err\n",
-      "\t\t}\n",
-      "\t\tpos = nextPos\n",
-      "\t\t#{local} = append(#{local}, item)\n",
+      go_decode_array_element(element, local, "\t\t", zero),
       "\t}\n"
     ]
+  end
 
-    count_lines ++ stride_check ++ decode_lines
+  @go_primitive_reads %{
+    "u8" => {"data[pos]", 1},
+    "u16" => {"decodeU16(data, pos)", 2},
+    "u24" => {"decodeU24(data, pos)", 3},
+    "rgb" => {"decodeU24(data, pos)", 3},
+    "u32" => {"decodeU32(data, pos)", 4},
+    "u64" => {"decodeU64(data, pos)", 8}
+  }
+
+  @go_string_decoders %{
+    "string8" => "decodeString8",
+    "string16" => "decodeString16",
+    "string32" => "decodeString32"
+  }
+
+  # Decode one counted_array element at `pos`, append it onto `vec`, advance
+  # `pos`. Struct elements emit the same `(item, nextPos, err)` form as before,
+  # so existing struct arrays regenerate byte-for-byte.
+  @spec go_decode_array_element(String.t(), String.t(), String.t(), String.t()) :: iodata()
+  defp go_decode_array_element(element, vec, indent, zero) do
+    case element_field(element) do
+      %{"type" => "struct", "element" => el} ->
+        go_decode_array_element_via("Decode#{go_struct_name(el)}(data, pos)", vec, indent, zero)
+
+      %{"type" => str} when is_map_key(@go_string_decoders, str) ->
+        go_decode_array_element_via("#{@go_string_decoders[str]}(data, pos)", vec, indent, zero)
+
+      %{"type" => prim} ->
+        {expr, size} = Map.fetch!(@go_primitive_reads, prim)
+        ["#{indent}#{vec} = append(#{vec}, #{expr})\n", "#{indent}pos += #{size}\n"]
+    end
+  end
+
+  @spec go_decode_array_element_via(String.t(), String.t(), String.t(), String.t()) :: iodata()
+  defp go_decode_array_element_via(call, vec, indent, zero) do
+    [
+      "#{indent}item, nextPos, err := #{call}\n",
+      "#{indent}if err != nil {\n",
+      "#{indent}\treturn #{zero}, offset, err\n",
+      "#{indent}}\n",
+      "#{indent}pos = nextPos\n",
+      "#{indent}#{vec} = append(#{vec}, item)\n"
+    ]
   end
 
   @spec go_count_read(String.t()) :: {String.t(), non_neg_integer()}
@@ -2779,37 +2912,21 @@ defmodule Minga.Mix.ProtocolGenerator do
 
   @spec go_decode_inline_section(String.t(), section(), %{String.t() => structure()}) :: iodata()
   defp go_decode_inline_section(_opcode, section, smap) do
-    struct_name = go_section_struct_name(section)
     fn_name = "Decode#{go_struct_name(section["opcode"])}#{go_struct_name(section["name"])}"
-    fields = section["fields"] || []
-    zero = "#{struct_name}{}"
-
-    [
-      "func #{fn_name}(data []byte, offset int) (#{struct_name}, int, error) {\n",
-      "\tpos := offset\n",
-      Enum.map(fields, &go_decode_field_statement(&1, smap, zero)),
-      go_decode_conditional_tail_block(section, smap, zero),
-      "\treturn #{struct_name}{\n",
-      Enum.map(entry_fields(section), fn field ->
-        "\t\t#{go_field_name(field["name"])}: #{go_local_name(field["name"])},\n"
-      end),
-      "\t}, pos, nil\n",
-      "}\n\n"
-    ]
+    go_record_decoder(fn_name, go_section_struct_name(section), section, smap)
   end
 
   @spec go_decode_counted_array_section(String.t(), section(), %{String.t() => structure()}) ::
           iodata()
   defp go_decode_counted_array_section(_opcode, section, smap) do
     element = section["element"]
-    element_struct = go_struct_name(element)
+    element_type = go_type(element_field(element), smap)
     fn_name = "Decode#{go_struct_name(section["opcode"])}#{go_struct_name(section["name"])}"
     count_type = section["count_type"] || "u16"
     {count_read, count_size} = go_count_read(count_type)
-    element_fixed_size = fixed_structure_size(element, smap)
 
     stride_check =
-      case element_fixed_size do
+      case element_fixed_byte_size(element, smap) do
         nil ->
           []
 
@@ -2822,7 +2939,7 @@ defmodule Minga.Mix.ProtocolGenerator do
       end
 
     [
-      "func #{fn_name}(data []byte, offset int) ([]#{element_struct}, int, error) {\n",
+      "func #{fn_name}(data []byte, offset int) ([]#{element_type}, int, error) {\n",
       "\tpos := offset\n",
       "\tif err := decodeRequireLen(data, pos+#{count_size}, \"#{section["name"]} count\"); err != nil {\n",
       "\t\treturn nil, offset, err\n",
@@ -2830,14 +2947,9 @@ defmodule Minga.Mix.ProtocolGenerator do
       "\tcount := int(#{count_read})\n",
       "\tpos += #{count_size}\n",
       stride_check,
-      "\titems := make([]#{element_struct}, 0, count)\n",
+      "\titems := make([]#{element_type}, 0, #{go_prealloc("count", element, smap)})\n",
       "\tfor i := 0; i < count; i++ {\n",
-      "\t\titem, nextPos, err := Decode#{element_struct}(data, pos)\n",
-      "\t\tif err != nil {\n",
-      "\t\t\treturn nil, offset, err\n",
-      "\t\t}\n",
-      "\t\tpos = nextPos\n",
-      "\t\titems = append(items, item)\n",
+      go_decode_array_element(element, "items", "\t\t", "nil"),
       "\t}\n",
       "\treturn items, pos, nil\n",
       "}\n\n"
@@ -2877,19 +2989,10 @@ defmodule Minga.Mix.ProtocolGenerator do
     command_fields
     |> Enum.map(fn cf ->
       struct_name = rust_struct_name(cf["opcode"]) <> "Fields"
-      fn_name = "decode_#{cf["opcode"]}_fields"
-      fields = cf["fields"] || []
 
       [
         "// Command field decoder for #{cf["opcode"]}\n\n",
-        "pub fn #{fn_name}(bytes: &[u8], offset: usize) -> Result<(#{struct_name}, usize), DecodeError> {\n",
-        "    let mut pos = offset;\n",
-        Enum.map(fields, &rust_decode_field_statement(&1, smap)),
-        rust_decode_conditional_tail_block(cf, smap),
-        "    Ok((#{struct_name} {\n",
-        Enum.map(entry_fields(cf), fn field -> "        #{rust_field_name(field["name"])},\n" end),
-        "    }, pos - offset))\n",
-        "}\n\n"
+        rust_record_decoder("decode_#{cf["opcode"]}_fields", struct_name, cf, smap)
       ]
     end)
   end
@@ -2920,22 +3023,10 @@ defmodule Minga.Mix.ProtocolGenerator do
     command_fields
     |> Enum.map(fn cf ->
       struct_name = go_struct_name(cf["opcode"]) <> "Fields"
-      fn_name = "Decode#{struct_name}"
-      fields = cf["fields"] || []
-      zero = "#{struct_name}{}"
 
       [
         "// Command field decoder for #{cf["opcode"]}\n\n",
-        "func #{fn_name}(data []byte, offset int) (#{struct_name}, int, error) {\n",
-        "\tpos := offset\n",
-        Enum.map(fields, &go_decode_field_statement(&1, smap, zero)),
-        go_decode_conditional_tail_block(cf, smap, zero),
-        "\treturn #{struct_name}{\n",
-        Enum.map(entry_fields(cf), fn field ->
-          "\t\t#{go_field_name(field["name"])}: #{go_local_name(field["name"])},\n"
-        end),
-        "\t}, pos, nil\n",
-        "}\n\n"
+        go_record_decoder("Decode#{struct_name}", struct_name, cf, smap)
       ]
     end)
   end
