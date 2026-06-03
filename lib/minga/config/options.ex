@@ -395,6 +395,7 @@ defmodule Minga.Config.Options do
        "log",
        "dist",
        ".cache",
+       ".elixir_ls",
        ".expert",
        "node_modules",
        ".venv",

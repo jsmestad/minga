@@ -3,7 +3,7 @@ package ui
 import (
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/jsmestad/minga/go/tui/internal/generated"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 )
@@ -30,7 +30,7 @@ func (m Model) applyIndentGuide(window protocol.WindowContent, style lipgloss.St
 	}
 	guideStyle := style.Foreground(m.palette().GutterText())
 	if uint16(col) == guides.ActiveGuideCol {
-		guideStyle = guideStyle.Foreground(m.palette().Accent()).Bold(true)
+		guideStyle = guideStyle.Foreground(m.palette().GutterCurrentText())
 	}
 	return guideStyle, "│"
 }
@@ -48,7 +48,7 @@ func guideEnabledOnRow(guides protocol.IndentGuides, rowIndex int, col int) bool
 	if len(guides.IndentLevels) == 0 || rowIndex >= len(guides.IndentLevels) || guides.TabWidth == 0 {
 		return true
 	}
-	return int(guides.IndentLevels[rowIndex]) > col/int(guides.TabWidth)
+	return col/int(guides.TabWidth) <= int(guides.IndentLevels[rowIndex])
 }
 
 func isWhitespace(value string) bool {

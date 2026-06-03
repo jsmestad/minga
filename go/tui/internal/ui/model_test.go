@@ -2,20 +2,18 @@ package ui
 
 import (
 	"bytes"
-	"runtime"
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/cellbuf"
 	"github.com/jsmestad/minga/go/tui/internal/generated"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
-	zone "github.com/lrstanley/bubblezone"
 )
 
-func TestFooterOverlayPrioritizesPickerOverCompletionWhichKeyAndMinibuffer(t *testing.T) {
+func TestFloatingPickerRendersOverEditorAndSuppressesFooterOverlays(t *testing.T) {
 	model := New(80, 24, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiMinibuffer: {
@@ -33,11 +31,100 @@ func TestFooterOverlayPrioritizesPickerOverCompletionWhichKeyAndMinibuffer(t *te
 	}
 
 	footer := strings.Join(model.footerLines(), "\n")
-	if !strings.Contains(footer, "Files") || !strings.Contains(footer, "main.ex") {
-		t.Fatalf("footer should render picker: %q", footer)
+	if strings.Contains(footer, "Files") || strings.Contains(footer, "main.ex") || strings.Contains(footer, "Enum.map") || strings.Contains(footer, "SPC") || strings.Contains(footer, ":write") {
+		t.Fatalf("footer should stay a status bar while picker floats: %q", footer)
 	}
-	if strings.Contains(footer, "Enum.map") || strings.Contains(footer, "SPC") || strings.Contains(footer, ":write") {
-		t.Fatalf("footer rendered lower-priority overlays: %q", footer)
+
+	view := ansi.Strip(model.View().Content)
+	if !strings.Contains(view, "Files") || !strings.Contains(view, "main.ex") {
+		t.Fatalf("view should render floating picker: %q", view)
+	}
+}
+
+func TestViewCarriesFullWindowBackgroundColor(t *testing.T) {
+	model := New(20, 6, nil)
+	view := model.View()
+	if view.BackgroundColor == nil {
+		t.Fatal("view should set a background color so Bubble Tea paints transparent cells")
+	}
+	wantR, wantG, wantB, wantA := model.editorBackground().RGBA()
+	gotR, gotG, gotB, gotA := view.BackgroundColor.RGBA()
+	if gotR != wantR || gotG != wantG || gotB != wantB || gotA != wantA {
+		t.Fatalf("view background = rgba(%d,%d,%d,%d), want rgba(%d,%d,%d,%d)", gotR, gotG, gotB, gotA, wantR, wantG, wantB, wantA)
+	}
+	if lines := strings.Split(ansi.Strip(view.Content), "\n"); len(lines) < model.height {
+		t.Fatalf("view should cover full terminal height, got %d lines for height %d: %+v", len(lines), model.height, lines)
+	}
+}
+
+func TestWhichKeyRendersCompactFloatingPopup(t *testing.T) {
+	model := New(80, 24, nil)
+	model.chrome = map[byte]protocol.ChromePayload{
+		generated.OPGuiWhichKey: {
+			Which: protocol.WhichKey{Visible: true, Prefix: "SPC", Page: 0, PageCount: 2, Bindings: []protocol.WhichKeyBinding{{Key: "/", Description: "Search project"}, {Key: "1", Description: "Tab 1"}, {Key: "2", Description: "Tab 2"}}},
+		},
+	}
+
+	footer := strings.Join(model.footerLines(), "\n")
+	if strings.Contains(footer, "Search project") || strings.Contains(footer, "Tab 1") {
+		t.Fatalf("footer should stay a status bar while which-key floats: %q", footer)
+	}
+
+	view := ansi.Strip(model.View().Content)
+	if !strings.Contains(view, "Keys SPC  1/2") || !strings.Contains(view, "/   Search project") || !strings.Contains(view, "1  󰓩 Tab 1") {
+		t.Fatalf("which-key popup should render compact icon/key/description rows: %q", view)
+	}
+}
+
+func TestFooterRendersStatusMessageWithModelineSegments(t *testing.T) {
+	model := New(80, 24, nil)
+	model.chrome = map[byte]protocol.ChromePayload{
+		generated.OPGuiStatusBar: {
+			Status: protocol.StatusBar{
+				Message: "Modified buffers exist. Really quit? (y/n)",
+				Left:    []protocol.StatusSegment{{Text: " NORMAL "}},
+				Right:   []protocol.StatusSegment{{Text: "46:1"}},
+			},
+		},
+	}
+
+	footer := ansi.Strip(strings.Join(model.footerLines(), "\n"))
+	if !strings.Contains(footer, "Modified buffers exist. Really quit? (y/n)") {
+		t.Fatalf("footer should render status message with modeline segments: %q", footer)
+	}
+}
+
+func TestHeaderRendersBreadcrumbWithTabs(t *testing.T) {
+	model := New(120, 24, nil)
+	model.chrome = map[byte]protocol.ChromePayload{
+		generated.OPGuiTabBar: {
+			Tabs: protocol.TabBar{Tabs: []protocol.Tab{{Icon: "󰈙", Label: "main.ex", Active: true}}},
+		},
+		generated.OPGuiBreadcrumb: {
+			Breadcrumb: protocol.Breadcrumb{Segments: []string{"lib", "minga", "main.ex"}},
+		},
+	}
+
+	header := ansi.Strip(strings.Join(model.headerLines(), "\n"))
+	if !strings.Contains(header, "▌ 󰈙 main.ex") || !strings.Contains(header, "lib › minga › main.ex") {
+		t.Fatalf("wide header should render active tab accent and breadcrumbs together: %q", header)
+	}
+}
+
+func TestHeaderHidesBreadcrumbsAtNarrowWidth(t *testing.T) {
+	model := New(80, 24, nil)
+	model.chrome = map[byte]protocol.ChromePayload{
+		generated.OPGuiTabBar: {
+			Tabs: protocol.TabBar{Tabs: []protocol.Tab{{Icon: "󰈙", Label: "main.ex", Active: true}}},
+		},
+		generated.OPGuiBreadcrumb: {
+			Breadcrumb: protocol.Breadcrumb{Segments: []string{"lib", "minga", "main.ex"}},
+		},
+	}
+
+	header := ansi.Strip(strings.Join(model.headerLines(), "\n"))
+	if strings.Contains(header, "lib › minga") {
+		t.Fatalf("narrow header should not spend a row on breadcrumbs: %q", header)
 	}
 }
 
@@ -57,9 +144,9 @@ func TestPickerPreviewRendersWithPicker(t *testing.T) {
 		},
 	}
 
-	footer := strings.Join(model.footerLines(), "\n")
-	if !strings.Contains(footer, "Preview") || !strings.Contains(footer, "def main") {
-		t.Fatalf("footer should render picker preview: %q", footer)
+	view := ansi.Strip(model.View().Content)
+	if !strings.Contains(view, "Preview") || !strings.Contains(view, "def main") {
+		t.Fatalf("floating picker should render picker preview: %q", view)
 	}
 }
 
@@ -83,12 +170,17 @@ func TestPickerOverlayIsBounded(t *testing.T) {
 func TestWidePickerPreviewRendersBesideList(t *testing.T) {
 	model := New(120, 30, nil)
 	rendered := model.renderPicker(
-		protocol.Picker{Visible: true, Title: "Files", Items: []protocol.PickerItem{{Label: "main.ex"}}},
+		protocol.Picker{Visible: true, Title: "Files", Items: []protocol.PickerItem{{Label: "test-advisor.md", Description: ".pi/agents"}, {Label: "minga-parallel.md", Description: ".pi/prompts"}}},
 		protocol.PickerPreview{Visible: true, Lines: []protocol.PreviewLine{{Segments: []protocol.PreviewSegment{{Text: "def main"}}}}},
 	)
 	joined := strings.Join(rendered, "\n")
-	if !strings.Contains(joined, "main.ex") || !strings.Contains(joined, "def main") {
-		t.Fatalf("wide picker should render list and preview together: %q", joined)
+	if !strings.Contains(joined, "test-advisor.md  .pi/agents") || !strings.Contains(joined, "def main") {
+		t.Fatalf("wide picker should render one-row file results and preview together: %q", joined)
+	}
+	for index, line := range rendered {
+		if width := lipgloss.Width(line); width > model.width {
+			t.Fatalf("wide picker row %d width = %d, want <= %d: %q", index, width, model.width, line)
+		}
 	}
 	if len(rendered) > model.maxOverlayHeight() {
 		t.Fatalf("wide picker overlay height = %d, want <= %d", len(rendered), model.maxOverlayHeight())
@@ -233,7 +325,7 @@ func TestSemanticWindowRendersGutterCursorlineTildesAndModeline(t *testing.T) {
 	})
 	model.viewport.SetContent(model.content())
 
-	view := ansi.Strip(model.View())
+	view := ansi.Strip(model.View().Content)
 
 	if !strings.Contains(view, "1 hello") || !strings.Contains(view, "~") {
 		t.Fatalf("semantic view should include gutter line number, content, and tilde filler: %q", view)
@@ -290,14 +382,14 @@ func TestSplitSeparatorsNormalizeAgainstHeaderAndFileTree(t *testing.T) {
 	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "body-0"}, {Text: "body-1"}, {Text: "body-2"}}})
 	model.viewport.SetContent(model.content())
 
-	lines := strings.Split(ansi.Strip(model.View()), "\n")
+	lines := strings.Split(ansi.Strip(model.View().Content), "\n")
 	if len(lines) < 3 {
 		t.Fatalf("unexpected view lines: %+v", lines)
 	}
-	if got := strings.Index(lines[1], "│"); got != 24 {
+	if got := visibleIndex(lines[1], "│"); got != 24 {
 		t.Fatalf("vertical separator should land at visible column 24 after normalization, got %d in %q", got, lines[1])
 	}
-	if got := strings.Index(lines[2], "─"); got != 24 {
+	if got := visibleIndex(lines[2], "─"); got != 24 {
 		t.Fatalf("horizontal separator should land at visible column 24 after normalization, got %d in %q", got, lines[2])
 	}
 }
@@ -321,7 +413,7 @@ func TestFileTreeReservesVisibleEmptyState(t *testing.T) {
 	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "pane"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 1, Col: 18, Width: 8, Height: 1}}})
 	model.viewport.SetContent(model.content())
 
-	lines := strings.Split(ansi.Strip(model.View()), "\n")
+	lines := strings.Split(ansi.Strip(model.View().Content), "\n")
 	if len(lines) < 3 {
 		t.Fatalf("visible empty file tree should render reserved sidebar: %+v", lines)
 	}
@@ -340,7 +432,7 @@ func TestSemanticWindowsRespectProtocolFileTreeWidth(t *testing.T) {
 	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "pane"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 1, Col: 36, Width: 8, Height: 1}}})
 	model.viewport.SetContent(model.content())
 
-	lines := strings.Split(ansi.Strip(model.View()), "\n")
+	lines := strings.Split(ansi.Strip(model.View().Content), "\n")
 	if len(lines) < 2 {
 		t.Fatalf("semantic window should render with file tree width alignment: %+v", lines)
 	}
@@ -495,7 +587,7 @@ func TestSemanticWindowsRespectHeaderRowOffset(t *testing.T) {
 	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "pane"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 1, Col: 0, Width: 8, Height: 1}}})
 	model.viewport.SetContent(model.content())
 
-	lines := strings.Split(ansi.Strip(model.View()), "\n")
+	lines := strings.Split(ansi.Strip(model.View().Content), "\n")
 	if len(lines) < 2 || !strings.Contains(lines[1], "pane") {
 		t.Fatalf("semantic window should render on first body row after header: %+v", lines)
 	}
@@ -508,7 +600,7 @@ func TestSemanticWindowsRespectFileTreeOffset(t *testing.T) {
 	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "pane"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 1, Col: 24, Width: 8, Height: 1}}})
 	model.viewport.SetContent(model.content())
 
-	lines := strings.Split(ansi.Strip(model.View()), "\n")
+	lines := strings.Split(ansi.Strip(model.View().Content), "\n")
 	if len(lines) < 2 {
 		t.Fatalf("semantic window should render with file tree offset: %+v", lines)
 	}
@@ -524,7 +616,7 @@ func TestSemanticWindowsRespectSidebarOffset(t *testing.T) {
 	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "pane"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 1, Col: 18, Width: 8, Height: 1}}})
 	model.viewport.SetContent(model.content())
 
-	lines := strings.Split(ansi.Strip(model.View()), "\n")
+	lines := strings.Split(ansi.Strip(model.View().Content), "\n")
 	if len(lines) < 2 {
 		t.Fatalf("semantic window should render with sidebar offset: %+v", lines)
 	}
@@ -540,7 +632,7 @@ func TestSemanticRowsRespectScrollLeftAndIndentGuides(t *testing.T) {
 
 	rendered := ansi.Strip(model.renderSemanticContentRow(window, 0, 8))
 	if !strings.HasPrefix(rendered, "│ ") || !strings.Contains(rendered, "x") {
-		t.Fatalf("scroll-left rendering should keep display-column guides aligned: %q", rendered)
+		t.Fatalf("scroll-left rendering should keep display-column guides aligned with AstroVim-style guide glyphs: %q", rendered)
 	}
 }
 
@@ -620,32 +712,37 @@ func TestSemanticMouseRoutesModelineAndFileTreeZones(t *testing.T) {
 	_ = model.View()
 
 	saveZone := waitForZone(t, model, zoneIDModelineCommand("save"))
-	cmd, ok := model.semanticMousePacket(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: saveZone.StartX + 1, Y: saveZone.StartY})
+	cmd, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: saveZone.StartX + 1, Y: saveZone.StartY}))
 	if !ok || !bytes.Equal(cmd, protocol.EncodeGUIExecuteCommand("save")) {
 		t.Fatalf("modeline click should route execute command, ok=%v packet=%v", ok, cmd)
 	}
-	if _, ok := model.semanticMousePacket(tea.MouseMsg{Button: tea.MouseButtonRight, Action: tea.MouseActionPress, X: saveZone.StartX + 1, Y: saveZone.StartY}); ok {
+	if _, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseRight, X: saveZone.StartX + 1, Y: saveZone.StartY})); ok {
 		t.Fatalf("non-left clicks should fall back")
 	}
 
 	rowZone := waitForZone(t, model, zoneIDFileTreeRow(0))
-	cmd, ok = model.semanticMousePacket(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: rowZone.StartX + 1, Y: rowZone.StartY})
+	cmd, ok = model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: rowZone.StartX + 1, Y: rowZone.StartY}))
 	if !ok || !bytes.Equal(cmd, protocol.EncodeGUIFileTreeClick(0)) {
 		t.Fatalf("file-tree click should route file-tree packet, ok=%v packet=%v", ok, cmd)
 	}
-	if _, ok := model.semanticMousePacket(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: rowZone.EndX + 10, Y: rowZone.EndY + 10}); ok {
+	if _, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: rowZone.EndX + 10, Y: rowZone.EndY + 10})); ok {
 		t.Fatalf("out-of-bounds clicks should fall back")
 	}
 }
 
-func waitForZone(t *testing.T, model Model, id string) *zone.ZoneInfo {
-	t.Helper()
-	for i := 0; i < 1000; i++ {
-		if info := model.zones.Get(id); info != nil {
-			return info
-		}
-		runtime.Gosched()
+func visibleIndex(value string, needle string) int {
+	index := strings.Index(value, needle)
+	if index < 0 {
+		return -1
 	}
-	t.Fatalf("zone %q was not registered", id)
-	return nil
+	return displayWidth(value[:index])
+}
+
+func waitForZone(t *testing.T, model Model, id string) *zoneInfo {
+	t.Helper()
+	info := model.zones.Get(id)
+	if info == nil {
+		t.Fatalf("zone %q was not registered", id)
+	}
+	return info
 }

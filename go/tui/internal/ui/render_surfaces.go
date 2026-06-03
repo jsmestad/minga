@@ -4,20 +4,13 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/table"
+	"charm.land/bubbles/v2/table"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 )
 
 func (m Model) overlayLines() []string {
-	if picker, ok := m.picker(); ok && picker.Visible {
-		preview, _ := m.pickerPreview()
-		return m.renderPicker(picker, preview)
-	}
 	if completion, ok := m.completion(); ok && completion.Visible && len(completion.Items) > 0 {
 		return m.renderCompletion(completion)
-	}
-	if which, ok := m.whichKey(); ok && which.Visible && len(which.Bindings) > 0 {
-		return m.renderWhichKey(which)
 	}
 	if hover, ok := m.hoverPopup(); ok && hover.Visible && len(hover.Lines) > 0 {
 		return m.renderHover(hover)

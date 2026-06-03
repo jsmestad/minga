@@ -3,10 +3,10 @@ package ui
 import (
 	"strings"
 
-	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/table"
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/table"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/lipgloss/v2"
 )
 
 type componentItem struct {
@@ -85,9 +85,11 @@ func (m Model) charmInput(prompt string, value string, cursor uint16) string {
 	theme := m.palette()
 	input := textinput.New()
 	input.Prompt = prompt
-	input.PromptStyle = lipgloss.NewStyle().Foreground(theme.Accent()).Bold(true)
-	input.TextStyle = lipgloss.NewStyle().Foreground(theme.PopupText()).Background(theme.PopupSurface())
-	input.Cursor.Style = lipgloss.NewStyle().Foreground(theme.Accent())
+	styles := input.Styles()
+	styles.Focused.Prompt = lipgloss.NewStyle().Foreground(theme.Accent()).Bold(true)
+	styles.Focused.Text = lipgloss.NewStyle().Foreground(theme.PopupText()).Background(theme.PopupSurface())
+	styles.Cursor.Color = theme.Accent()
+	input.SetStyles(styles)
 	input.SetValue(value)
 	input.SetCursor(int(cursor))
 	input.Focus()

@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/cellbuf"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
@@ -697,7 +697,16 @@ func (m Model) renderFileTree(tree protocol.FileTree, width int, height int) []s
 		if row.Dirty {
 			dirty = " *"
 		}
-		text := fit(fmt.Sprintf("%s%s %s %s%s", prefix, marker, row.Icon, row.Name, dirty), width)
+		icon := fileTreeIcon(row)
+		iconText := icon.glyph
+		iconBackground := theme.TreeSurface()
+		if row.Selected {
+			iconBackground = theme.TreeSelection()
+		}
+		if icon.color != "" {
+			iconText = lipgloss.NewStyle().Foreground(lipgloss.Color(icon.color)).Background(iconBackground).Render(icon.glyph)
+		}
+		text := fit(fmt.Sprintf("%s%s %s %s%s", prefix, marker, iconText, row.Name, dirty), width)
 		rendered := style.Render(text)
 		if row.Selected {
 			rendered = selectedStyle.Render(text)

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 )
 
@@ -16,16 +16,13 @@ func (m Model) headerLines() []string {
 	if tabBar, ok := m.tabBar(); ok && len(tabBar.Tabs) > 0 {
 		lines = append(lines, m.renderTabs(tabBar))
 	}
-	if git, ok := m.gitStatus(); ok && git.Branch != "" {
-		lines = append(lines, m.renderGitStatus(git))
+	if crumb, ok := m.breadcrumb(); ok && len(crumb.Segments) > 0 && m.width >= 100 {
+		lines = append(lines, m.renderBreadcrumb(crumb))
 	}
 	if len(lines) == 0 {
 		title := m.title
 		if title == "" {
 			title = "Minga"
-		}
-		if crumb, ok := m.breadcrumb(); ok && len(crumb.Segments) > 0 {
-			title += "  " + strings.Join(crumb.Segments, " / ")
 		}
 		lines = append(lines, lipgloss.NewStyle().Bold(true).Foreground(m.palette().Accent()).Background(m.palette().Surface()).Width(m.width).Render(title))
 	}
@@ -34,10 +31,12 @@ func (m Model) headerLines() []string {
 
 func (m Model) renderWorkspaces(spaces protocol.WorkspaceBar) string {
 	theme := m.palette()
-	activeStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.TabActiveText()).Background(theme.Selection()).Padding(0, 1)
+	rowStyle := lipgloss.NewStyle().Background(theme.SurfaceAlt()).Width(m.width)
+	labelStyle := lipgloss.NewStyle().Foreground(theme.Muted()).Background(theme.SurfaceAlt()).Padding(0, 1)
+	activeStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.TabActiveText()).Background(theme.Surface()).Padding(0, 1)
 	inactiveStyle := lipgloss.NewStyle().Foreground(theme.TabInactiveText()).Background(theme.SurfaceAlt()).Padding(0, 1)
-	alertStyle := lipgloss.NewStyle().Foreground(theme.Warning())
-	rendered := make([]string, 0, len(spaces.Spaces))
+	alertStyle := lipgloss.NewStyle().Foreground(theme.Warning()).Background(theme.SurfaceAlt())
+	rendered := []string{labelStyle.Render("workspace")}
 	for _, space := range spaces.Spaces {
 		label := strings.TrimSpace(space.Icon + " " + space.Label)
 		if space.TabCount > 0 {
@@ -61,30 +60,65 @@ func (m Model) renderWorkspaces(spaces protocol.WorkspaceBar) string {
 		}
 		rendered = append(rendered, style.Render(label))
 	}
-	return lipgloss.NewStyle().Background(theme.SurfaceAlt()).Width(m.width).Render(strings.Join(rendered, ""))
+	return rowStyle.Render(fitStyled(strings.Join(rendered, " "), m.width))
 }
 
 func (m Model) renderTabs(tabBar protocol.TabBar) string {
 	theme := m.palette()
+	rowStyle := lipgloss.NewStyle().Background(theme.Surface()).Width(m.width)
 	activeStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.TabActiveText()).Background(theme.TabActive()).Padding(0, 1)
 	inactiveStyle := lipgloss.NewStyle().Foreground(theme.TabInactiveText()).Background(theme.Surface()).Padding(0, 1)
-	dirtyStyle := lipgloss.NewStyle().Foreground(theme.TabDirty())
+	dirtyStyle := lipgloss.NewStyle().Foreground(theme.TabDirty()).Background(theme.TabActive())
 	rendered := make([]string, 0, len(tabBar.Tabs))
 	for _, tab := range tabBar.Tabs {
-		label := strings.TrimSpace(tab.Icon + " " + tab.Label)
+		icon := tabIcon(tab)
+		iconText := icon.glyph
+		iconBackground := theme.Surface()
+		if tab.Active {
+			iconBackground = theme.TabActive()
+		}
+		if icon.color != "" {
+			iconText = lipgloss.NewStyle().Foreground(lipgloss.Color(icon.color)).Background(iconBackground).Render(icon.glyph)
+		}
+		label := strings.TrimSpace(iconText + " " + tab.Label)
+		if tab.Active {
+			label = lipgloss.NewStyle().Foreground(theme.Accent()).Background(theme.TabActive()).Render("▌") + " " + label
+		}
 		if tab.Dirty {
 			label += dirtyStyle.Render(" *")
 		}
 		if tab.Attention {
-			label += lipgloss.NewStyle().Foreground(theme.TabAttention()).Render(" !")
+			label += lipgloss.NewStyle().Foreground(theme.TabAttention()).Background(theme.Surface()).Render(" !")
 		}
 		style := inactiveStyle
 		if tab.Active {
 			style = activeStyle
+		} else if tab.Tint != 0 {
+			style = style.Foreground(lipgloss.Color(fmt.Sprintf("#%06X", tab.Tint&0xFFFFFF)))
 		}
 		rendered = append(rendered, style.Render(label))
 	}
-	return lipgloss.NewStyle().Background(theme.Surface()).Width(m.width).Render(strings.Join(rendered, ""))
+	return rowStyle.Render(fitStyled(strings.Join(rendered, " "), m.width))
+}
+
+func (m Model) renderBreadcrumb(crumb protocol.Breadcrumb) string {
+	segments := make([]string, 0, len(crumb.Segments))
+	for index, segment := range crumb.Segments {
+		style := lipgloss.NewStyle().Foreground(m.palette().Muted()).Background(m.palette().EditorSurface())
+		if index == len(crumb.Segments)-1 {
+			style = style.Foreground(m.palette().Text())
+		}
+		segments = append(segments, style.Render(segment))
+	}
+	separator := lipgloss.NewStyle().Foreground(m.palette().GutterText()).Background(m.palette().EditorSurface()).Render(" › ")
+	text := "  " + strings.Join(segments, separator)
+	if git, ok := m.gitStatus(); ok && git.Branch != "" {
+		gitText := lipgloss.NewStyle().Foreground(m.palette().Muted()).Background(m.palette().EditorSurface()).Render("  ·  " + m.gitSummary(git))
+		if lipgloss.Width(text)+lipgloss.Width(gitText) <= m.width {
+			text += gitText
+		}
+	}
+	return lipgloss.NewStyle().Background(m.palette().EditorSurface()).Width(m.width).Render(fitStyled(text, m.width))
 }
 
 func (m Model) footerLines() []string {
@@ -111,11 +145,13 @@ func (m Model) footerLines() []string {
 	lines := []string{
 		lipgloss.NewStyle().Foreground(m.palette().Muted()).Background(m.palette().Base()).Width(m.width).Render(fitStyled(status, m.width)),
 	}
-	overlay := m.overlayLines()
-	if len(overlay) > 0 {
-		lines = append(lines, overlay...)
-	} else if mini, ok := m.minibuffer(); ok && mini.Visible {
-		lines = append(lines, m.renderMinibuffer(mini))
+	if !m.pickerVisible() && !m.whichKeyVisible() {
+		overlay := m.overlayLines()
+		if len(overlay) > 0 {
+			lines = append(lines, overlay...)
+		} else if mini, ok := m.minibuffer(); ok && mini.Visible {
+			lines = append(lines, m.renderMinibuffer(mini))
+		}
 	}
 	return lines
 }
@@ -123,10 +159,26 @@ func (m Model) footerLines() []string {
 func (m Model) renderStatusSegments(status protocol.StatusBar) string {
 	left := m.renderSegmentList(status.Left)
 	right := m.renderSegmentList(status.Right)
+	message := m.renderStatusMessage(status.Message)
 	leftWidth := lipgloss.Width(left)
 	rightWidth := lipgloss.Width(right)
-	spacer := strings.Repeat(" ", max(m.width-leftWidth-rightWidth, 1))
-	return left + lipgloss.NewStyle().Background(m.palette().Base()).Render(spacer) + right
+	messageWidth := lipgloss.Width(message)
+	available := max(m.width-leftWidth-rightWidth, 1)
+	if messageWidth > available {
+		message = m.renderStatusMessage(fit(status.Message, available))
+		messageWidth = lipgloss.Width(message)
+	}
+	leftSpacer := strings.Repeat(" ", max((available-messageWidth)/2, 0))
+	rightSpacer := strings.Repeat(" ", max(available-messageWidth-lipgloss.Width(leftSpacer), 0))
+	spacerStyle := lipgloss.NewStyle().Background(m.palette().Base())
+	return left + spacerStyle.Render(leftSpacer) + message + spacerStyle.Render(rightSpacer) + right
+}
+
+func (m Model) renderStatusMessage(message string) string {
+	if message == "" {
+		return ""
+	}
+	return lipgloss.NewStyle().Bold(true).Foreground(m.palette().Warning()).Background(m.palette().Base()).Render(message)
 }
 
 func (m Model) renderSegmentList(segments []protocol.StatusSegment) string {
@@ -161,7 +213,7 @@ func (m Model) renderSegmentList(segments []protocol.StatusSegment) string {
 	return strings.Join(parts, "")
 }
 
-func (m Model) renderGitStatus(git protocol.GitStatus) string {
+func (m Model) gitSummary(git protocol.GitStatus) string {
 	parts := []string{"git " + git.Branch}
 	if git.Syncing {
 		parts = append(parts, "syncing")
@@ -178,7 +230,11 @@ func (m Model) renderGitStatus(git protocol.GitStatus) string {
 	if git.Toast.Visible && git.Toast.Message != "" {
 		parts = append(parts, git.Toast.Message)
 	}
-	return lipgloss.NewStyle().Foreground(m.palette().Muted()).Background(m.palette().SurfaceAlt()).Width(m.width).Render(fit(strings.Join(parts, "  "), m.width))
+	return strings.Join(parts, "  ")
+}
+
+func (m Model) renderGitStatus(git protocol.GitStatus) string {
+	return lipgloss.NewStyle().Foreground(m.palette().Muted()).Background(m.palette().SurfaceAlt()).Width(m.width).Render(fit(m.gitSummary(git), m.width))
 }
 
 func (m Model) renderMinibuffer(mini protocol.Minibuffer) string {
@@ -231,68 +287,100 @@ func (m Model) renderPicker(picker protocol.Picker, preview protocol.PickerPrevi
 		title += "  " + picker.LoadError
 	}
 
-	itemBudget := max(m.maxOverlayHeight()-1, 1)
-	if preview.Visible && len(preview.Lines) > 0 && m.width < 100 {
+	height := m.maxOverlayHeight()
+	if preview.Visible && len(preview.Lines) > 0 && m.width >= 100 {
+		return m.renderPickerWithSidePreview(title, picker, preview, height)
+	}
+
+	itemBudget := max(height-1, 1)
+	if preview.Visible && len(preview.Lines) > 0 {
 		itemBudget = max(itemBudget/2, 1)
 	}
-	items := make([]componentItem, 0, len(picker.Items))
-	for _, item := range picker.Items {
-		marker := " "
-		if item.Marked {
-			marker = "*"
-		}
-		detail := item.Description
-		if detail == "" {
-			detail = item.Annotation
-		}
-		if detail != "" {
-			detail = strings.TrimSpace(detail)
-		}
-		items = append(items, componentItem{title: marker + " " + item.Label, description: detail})
-	}
-	lines := takeLines(m.charmList(title, items, int(picker.Selected), itemBudget+1, true), itemBudget+1)
+	lines := m.renderPickerList(title, picker, itemBudget+1, m.width)
 	if picker.ActionVisible && len(picker.Actions) > 0 {
-		lines = append(lines, lipgloss.NewStyle().Foreground(m.palette().Muted()).Render(fit(strings.Join(picker.Actions, "  "), m.width)))
+		lines = append(lines, m.popupLineStyle(m.width).Foreground(m.palette().Muted()).Render(fit(strings.Join(picker.Actions, "  "), m.width)))
 	}
 	if preview.Visible && len(preview.Lines) > 0 {
-		if m.width >= 100 {
-			return m.renderPickerWithSidePreview(lines, preview)
-		}
-		lines = append(lines, m.renderPickerPreview(preview, max(m.maxOverlayHeight()-len(lines), 1), m.width)...)
+		lines = append(lines, m.renderPickerPreview(preview, max(height-len(lines), 1), m.width)...)
 	}
-	return takeLines(lines, m.maxOverlayHeight())
+	return takeLines(m.fillPopupLines(lines, height, m.width), height)
 }
 
-func (m Model) renderPickerWithSidePreview(left []string, preview protocol.PickerPreview) []string {
-	leftWidth := max(m.width*45/100, 36)
-	rightWidth := max(m.width-leftWidth, 20)
-	leftStyle := lipgloss.NewStyle().Width(leftWidth)
-	right := m.renderPickerPreview(preview, max(m.maxOverlayHeight(), len(left)), rightWidth)
-	height := min(max(len(left), len(right)), m.maxOverlayHeight())
+func (m Model) renderPickerList(title string, picker protocol.Picker, height int, width int) []string {
+	theme := m.palette()
+	panelStyle := m.popupLineStyle(width)
+	titleStyle := panelStyle.Bold(true).Foreground(theme.Accent())
+	lines := []string{titleStyle.Render(fit(title, width))}
+	rowBudget := max(height-1, 0)
+	selected := min(max(int(picker.Selected), 0), max(len(picker.Items)-1, 0))
+	start := 0
+	if selected >= rowBudget && rowBudget > 0 {
+		start = selected - rowBudget + 1
+	}
+	end := min(start+rowBudget, len(picker.Items))
+	for index := start; index < end; index++ {
+		lines = append(lines, m.renderPickerItemRow(title, picker.Items[index], index == selected, width))
+	}
+	for len(lines) < height {
+		lines = append(lines, panelStyle.Render(strings.Repeat(" ", max(width, 1))))
+	}
+	return lines
+}
+
+func (m Model) renderPickerItemRow(title string, item protocol.PickerItem, selected bool, width int) string {
+	theme := m.palette()
+	marker := " "
+	if item.Marked {
+		marker = "*"
+	}
+	detail := item.Description
+	if detail == "" {
+		detail = item.Annotation
+	}
+	icon := pickerItemIcon(title, item)
+	iconText := icon.glyph
+	iconBackground := m.palette().PopupSurface()
+	if selected {
+		iconBackground = theme.Selection()
+	}
+	if icon.color != "" {
+		iconText = lipgloss.NewStyle().Foreground(lipgloss.Color(icon.color)).Background(iconBackground).Render(icon.glyph)
+	}
+	text := strings.TrimSpace(marker + " " + iconText + " " + item.Label)
+	if strings.TrimSpace(detail) != "" {
+		text += "  " + strings.TrimSpace(detail)
+	}
+	style := m.popupLineStyle(width)
+	if selected {
+		style = style.Bold(true).Foreground(theme.SelectionText()).Background(theme.Selection())
+	}
+	return style.Render(fit(text, width))
+}
+
+func (m Model) renderPickerWithSidePreview(title string, picker protocol.Picker, preview protocol.PickerPreview, height int) []string {
+	leftWidth := min(max(m.width*45/100, 36), max(m.width-20, 1))
+	rightWidth := max(m.width-leftWidth, 1)
+	left := m.renderPickerList(title, picker, height, leftWidth)
+	right := m.renderPickerPreview(preview, height, rightWidth)
+	left = m.fillPopupLines(left, height, leftWidth)
+	right = m.fillPopupLines(right, height, rightWidth)
 	lines := make([]string, 0, height)
+	leftStyle := lipgloss.NewStyle().Width(leftWidth).Background(m.palette().PopupSurface())
 	for i := 0; i < height; i++ {
-		leftLine := ""
-		if i < len(left) {
-			leftLine = left[i]
-		}
-		rightLine := ""
-		if i < len(right) {
-			rightLine = right[i]
-		}
-		lines = append(lines, lipgloss.JoinHorizontal(lipgloss.Top, leftStyle.Render(leftLine), rightLine))
+		lines = append(lines, lipgloss.JoinHorizontal(lipgloss.Top, leftStyle.Render(left[i]), right[i]))
 	}
 	return lines
 }
 
 func (m Model) renderPickerPreview(preview protocol.PickerPreview, height int, width int) []string {
 	theme := m.palette()
-	style := lipgloss.NewStyle().Foreground(theme.PopupText()).Background(theme.PopupSurface()).Width(width)
+	style := m.popupLineStyle(width)
 	limit := min(len(preview.Lines), max(height-1, 0))
 	lines := []string{style.Bold(true).Foreground(theme.Accent()).Render(fit("Preview", width))}
 	for _, line := range preview.Lines[:limit] {
 		var builder strings.Builder
 		for _, segment := range line.Segments {
-			segmentStyle := lipgloss.NewStyle()
+			segmentStyle := lipgloss.NewStyle().Background(theme.PopupSurface())
 			if segment.FG != 0 {
 				segmentStyle = segmentStyle.Foreground(lipgloss.Color(fmt.Sprintf("#%06X", segment.FG)))
 			}
@@ -301,7 +389,23 @@ func (m Model) renderPickerPreview(preview protocol.PickerPreview, height int, w
 			}
 			builder.WriteString(segmentStyle.Render(segment.Text))
 		}
-		lines = append(lines, style.Render(fit(builder.String(), width)))
+		lines = append(lines, style.Render(fitStyled(builder.String(), width)))
 	}
-	return lines
+	return m.fillPopupLines(lines, height, width)
+}
+
+func (m Model) popupLineStyle(width int) lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(m.palette().PopupText()).Background(m.palette().PopupSurface()).Width(width)
+}
+
+func (m Model) fillPopupLines(lines []string, height int, width int) []string {
+	style := m.popupLineStyle(width)
+	out := make([]string, 0, height)
+	for _, line := range lines[:min(len(lines), height)] {
+		out = append(out, style.Render(fitStyled(line, width)))
+	}
+	for len(out) < height {
+		out = append(out, style.Render(strings.Repeat(" ", max(width, 1))))
+	}
+	return out
 }

@@ -10,6 +10,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
 
   @max_items 100
   @preview_max_lines 50
+  @binary_preview_message "Binary file preview unavailable"
 
   @spec build(Context.t()) :: PickerModel.t()
   def build(ctx) do
@@ -199,14 +200,23 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
       {:ok, content} ->
         fg_color = Map.get(ctx.theme, :fg, 0xCCCCCC)
 
-        content
-        |> String.split("\n")
-        |> Enum.take(@preview_max_lines)
-        |> Enum.map(&[{&1, fg_color, false}])
+        if text_preview?(content) do
+          content
+          |> String.split("\n")
+          |> Enum.take(@preview_max_lines)
+          |> Enum.map(&[{&1, fg_color, false}])
+        else
+          [[{@binary_preview_message, fg_color, true}]]
+        end
 
       {:error, _} ->
         nil
     end
+  end
+
+  @spec text_preview?(binary()) :: boolean()
+  defp text_preview?(content) do
+    String.valid?(content) and not String.contains?(content, <<0>>)
   end
 
   @spec safe_file_path(pid()) :: String.t() | nil
