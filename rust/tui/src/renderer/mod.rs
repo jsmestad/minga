@@ -1537,7 +1537,18 @@ impl Renderer {
             self.restore_signature_help_snapshot();
             self.signature_help_snapshot = Some(self.capture_rect(row, col, width, height));
         }
-        self.render_popup_panel(row, col, width, height, " Signature ", lines.join("\n"));
+        let style = ratatui_style_from_cell(self.theme.picker_style(false));
+        let border_style = ratatui_style_from_cell(self.theme.picker_header_style());
+        let paragraph = Paragraph::new(lines.join("\n"))
+            .style(style)
+            .wrap(Wrap { trim: false })
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(border_style)
+                    .title(" Signature ".to_owned()),
+            );
+        self.render_ratatui_widget(row, col, width, height, paragraph);
     }
 
     fn restore_signature_help_snapshot(&mut self) {
@@ -1571,14 +1582,18 @@ impl Renderer {
         } else {
             format!(" {} ", float_popup.title)
         };
-        self.render_popup_panel(
-            row,
-            col,
-            width,
-            height,
-            &title,
-            float_popup.lines.join("\n"),
-        );
+        let style = ratatui_style_from_cell(self.theme.picker_style(false));
+        let border_style = ratatui_style_from_cell(self.theme.picker_header_style());
+        let paragraph = Paragraph::new(float_popup.lines.join("\n"))
+            .style(style)
+            .wrap(Wrap { trim: false })
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(border_style)
+                    .title(title),
+            );
+        self.render_ratatui_widget(row, col, width, height, paragraph);
     }
 
     fn restore_float_popup_snapshot(&mut self) {
@@ -1632,7 +1647,18 @@ impl Renderer {
         if self.hover_popup_snapshot.is_none() {
             self.hover_popup_snapshot = Some(self.capture_rect(row, col, width, height));
         }
-        self.render_popup_panel(row, col, width, height, title, lines.join("\n"));
+        let style = ratatui_style_from_cell(self.theme.picker_style(false));
+        let border_style = ratatui_style_from_cell(self.theme.picker_header_style());
+        let paragraph = Paragraph::new(lines.join("\n"))
+            .style(style)
+            .wrap(Wrap { trim: false })
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(border_style)
+                    .title(title.to_owned()),
+            );
+        self.render_ratatui_widget(row, col, width, height, paragraph);
     }
 
     fn restore_hover_popup_snapshot(&mut self) {
@@ -1662,19 +1688,27 @@ impl Renderer {
         }
 
         let title = bottom_panel_title(bottom_panel);
-        let body = if bottom_panel.entries.is_empty() {
-            "No messages".to_owned()
+        let style = ratatui_style_from_cell(self.theme.picker_style(false));
+        let border_style = ratatui_style_from_cell(self.theme.picker_header_style());
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(border_style)
+            .title(title);
+
+        if bottom_panel.entries.is_empty() {
+            let paragraph = Paragraph::new("No messages").style(style).block(block);
+            self.render_ratatui_widget(row, 0, self.width, height, paragraph);
         } else {
-            bottom_panel
+            let items: Vec<ListItem> = bottom_panel
                 .entries
                 .iter()
                 .rev()
                 .take(height.saturating_sub(2) as usize)
-                .map(bottom_panel_entry_text)
-                .collect::<Vec<_>>()
-                .join("\n")
-        };
-        self.render_popup_panel(row, 0, self.width, height, &title, body);
+                .map(|entry| ListItem::new(bottom_panel_entry_text(entry)).style(style))
+                .collect();
+            let list = List::new(items).style(style).block(block);
+            self.render_ratatui_widget(row, 0, self.width, height, list);
+        }
     }
 
     fn restore_bottom_panel_snapshot(&mut self) {
@@ -1710,7 +1744,9 @@ impl Renderer {
             .saturating_add(1)
             .saturating_sub(visible_rows)
             .min(change_summary.entries.len().saturating_sub(visible_rows));
-        let body = change_summary
+        let style = ratatui_style_from_cell(self.theme.picker_style(false));
+        let border_style = ratatui_style_from_cell(self.theme.picker_header_style());
+        let items: Vec<ListItem> = change_summary
             .entries
             .iter()
             .skip(start)
@@ -1719,17 +1755,23 @@ impl Renderer {
             .map(|(index, entry)| {
                 let absolute = start + index;
                 let marker = if absolute == selected { ">" } else { " " };
-                format!(
+                let text = format!(
                     "{marker} {} +{} -{} {}",
                     change_action_marker(entry.action),
                     entry.lines_added,
                     entry.lines_removed,
                     entry.path
-                )
+                );
+                ListItem::new(text).style(style)
             })
-            .collect::<Vec<_>>()
-            .join("\n");
-        self.render_popup_panel(row, col, width, height, " Changes ", body);
+            .collect();
+        let list = List::new(items).style(style).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(border_style)
+                .title(" Changes ".to_owned()),
+        );
+        self.render_ratatui_widget(row, col, width, height, list);
     }
 
     fn restore_change_summary_snapshot(&mut self) {
@@ -1789,7 +1831,19 @@ impl Renderer {
                     )
                 }),
         );
-        self.render_popup_panel(row, col, width, height, " Git ", lines.join("\n"));
+        let style = ratatui_style_from_cell(self.theme.picker_style(false));
+        let border_style = ratatui_style_from_cell(self.theme.picker_header_style());
+        let items: Vec<ListItem> = lines
+            .into_iter()
+            .map(|line| ListItem::new(line).style(style))
+            .collect();
+        let list = List::new(items).style(style).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(border_style)
+                .title(" Git ".to_owned()),
+        );
+        self.render_ratatui_widget(row, col, width, height, list);
     }
 
     fn restore_git_status_snapshot(&mut self) {
@@ -1848,12 +1902,13 @@ impl Renderer {
             String::new()
         };
         let text = format!(" Agent: [{}]{}{} ", status_label, task_display, elapsed);
-        let style = self.theme.status_bar_style();
+        let style = ratatui_style_from_cell(self.theme.status_bar_style());
 
         if self.agent_context_snapshot.is_none() {
             self.agent_context_snapshot = Some(self.capture_rect(row, 0, self.width, 1));
         }
-        self.write_run(row, 0, &pad_to_width(&text, self.width), style);
+        let paragraph = Paragraph::new(pad_to_width(&text, self.width)).style(style);
+        self.render_ratatui_widget(row, 0, self.width, 1, paragraph);
     }
 
     fn restore_agent_context_snapshot(&mut self) {
@@ -1905,7 +1960,18 @@ impl Renderer {
         if self.notifications_snapshot.is_none() {
             self.notifications_snapshot = Some(self.capture_rect(row, col, width, height));
         }
-        self.render_popup_panel(row, col, width, height, " Notifications ", text);
+        let style = ratatui_style_from_cell(self.theme.picker_style(false));
+        let border_style = ratatui_style_from_cell(self.theme.picker_header_style());
+        let paragraph = Paragraph::new(text)
+            .style(style)
+            .wrap(Wrap { trim: false })
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(border_style)
+                    .title(" Notifications ".to_owned()),
+            );
+        self.render_ratatui_widget(row, col, width, height, paragraph);
     }
 
     fn restore_notifications_snapshot(&mut self) {
@@ -1969,7 +2035,18 @@ impl Renderer {
         if self.extension_overlay_snapshot.is_none() {
             self.extension_overlay_snapshot = Some(self.capture_rect(row, col, width, height));
         }
-        self.render_popup_panel(row, col, width, height, " Extension ", text);
+        let style = ratatui_style_from_cell(self.theme.picker_style(false));
+        let border_style = ratatui_style_from_cell(self.theme.picker_header_style());
+        let paragraph = Paragraph::new(text)
+            .style(style)
+            .wrap(Wrap { trim: false })
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(border_style)
+                    .title(" Extension ".to_owned()),
+            );
+        self.render_ratatui_widget(row, col, width, height, paragraph);
     }
 
     fn restore_extension_overlay_snapshot(&mut self) {
@@ -2018,7 +2095,18 @@ impl Renderer {
         }
 
         let text = format!(" Process tree ({} bytes payload) ", obs.payload.len());
-        self.render_popup_panel(row, col, width, height, " Observatory ", text);
+        let style = ratatui_style_from_cell(self.theme.picker_style(false));
+        let border_style = ratatui_style_from_cell(self.theme.picker_header_style());
+        let paragraph = Paragraph::new(text)
+            .style(style)
+            .wrap(Wrap { trim: false })
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(border_style)
+                    .title(" Observatory ".to_owned()),
+            );
+        self.render_ratatui_widget(row, col, width, height, paragraph);
     }
 
     fn restore_observatory_snapshot(&mut self) {
@@ -2077,7 +2165,18 @@ impl Renderer {
                 board.card_count, board.focused_card_id, filter
             )
         };
-        self.render_popup_panel(row, col, width, height, " Board ", status);
+        let style = ratatui_style_from_cell(self.theme.picker_style(false));
+        let border_style = ratatui_style_from_cell(self.theme.picker_header_style());
+        let paragraph = Paragraph::new(status)
+            .style(style)
+            .wrap(Wrap { trim: false })
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(border_style)
+                    .title(" Board ".to_owned()),
+            );
+        self.render_ratatui_widget(row, col, width, height, paragraph);
     }
 
     fn restore_board_snapshot(&mut self) {
@@ -2129,7 +2228,18 @@ impl Renderer {
         } else {
             format!(" {} messages{flags_desc}", chat.message_count)
         };
-        self.render_popup_panel(row, col, width, height, " Agent Chat ", status);
+        let style = ratatui_style_from_cell(self.theme.picker_style(false));
+        let border_style = ratatui_style_from_cell(self.theme.picker_header_style());
+        let paragraph = Paragraph::new(status)
+            .style(style)
+            .wrap(Wrap { trim: false })
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(border_style)
+                    .title(" Agent Chat ".to_owned()),
+            );
+        self.render_ratatui_widget(row, col, width, height, paragraph);
     }
 
     fn restore_agent_chat_snapshot(&mut self) {
@@ -2169,14 +2279,18 @@ impl Renderer {
             self.tool_manager_snapshot = Some(self.capture_rect(row, col, width, height));
         }
 
-        self.render_popup_panel(
-            row,
-            col,
-            width,
-            height,
-            " Tool Manager ",
-            " Tools loaded ".to_owned(),
-        );
+        let style = ratatui_style_from_cell(self.theme.picker_style(false));
+        let border_style = ratatui_style_from_cell(self.theme.picker_header_style());
+        let paragraph = Paragraph::new(" Tools loaded ")
+            .style(style)
+            .wrap(Wrap { trim: false })
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(border_style)
+                    .title(" Tool Manager ".to_owned()),
+            );
+        self.render_ratatui_widget(row, col, width, height, paragraph);
     }
 
     fn restore_tool_manager_snapshot(&mut self) {
@@ -2191,28 +2305,6 @@ impl Renderer {
         }
     }
 
-    fn render_popup_panel(
-        &mut self,
-        row: u16,
-        col: u16,
-        width: u16,
-        height: u16,
-        title: &str,
-        body: String,
-    ) {
-        let style = ratatui_style_from_cell(self.theme.picker_style(false));
-        let border_style = ratatui_style_from_cell(self.theme.picker_header_style());
-        let paragraph = Paragraph::new(body)
-            .style(style)
-            .wrap(Wrap { trim: false })
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(border_style)
-                    .title(title.to_owned()),
-            );
-        self.render_ratatui_widget(row, col, width, height, paragraph);
-    }
 
     fn render_picker_items(
         &mut self,
