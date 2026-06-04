@@ -142,6 +142,76 @@ impl SemanticRenderer {
             parts.push(format!("notify {}", notifications.notification_count));
         }
 
+        if let Some(workspaces) = state
+            .workspaces()
+            .filter(|workspaces| workspaces.visible != 0 && workspaces.workspace_count > 0)
+        {
+            parts.push(format!(
+                "ws {}/{}",
+                workspaces.active_workspace_id, workspaces.workspace_count
+            ));
+        }
+
+        if let Some(edit_timeline) = state
+            .edit_timeline()
+            .filter(|edit_timeline| edit_timeline.visible != 0 && edit_timeline.entry_count > 0)
+        {
+            parts.push(format!(
+                "edits {}/{}",
+                edit_timeline.viewing_index.saturating_add(1),
+                edit_timeline.entry_count
+            ));
+        }
+
+        if let Some(sidebars) = state
+            .sidebars()
+            .filter(|sidebars| sidebars.visible != 0 && sidebars.sidebar_count > 0)
+        {
+            parts.push(format!("sidebars {}", sidebars.sidebar_count));
+        }
+
+        if let Some(extension_overlay) = state
+            .extension_overlay()
+            .filter(|extension_overlay| extension_overlay.entry_count > 0)
+        {
+            parts.push(format!("ext overlay {}", extension_overlay.entry_count));
+        }
+
+        if let Some(extension_panel) = state
+            .extension_panel()
+            .filter(|extension_panel| extension_panel.panel_count > 0)
+        {
+            parts.push(format!("ext panels {}", extension_panel.panel_count));
+        }
+
+        if state
+            .observatory()
+            .is_some_and(|observatory| observatory.visible)
+        {
+            parts.push("observatory".to_owned());
+        }
+
+        if let Some(board) = state
+            .board()
+            .filter(|board| board.visible != 0 && board.card_count > 0)
+        {
+            parts.push(format!("board {}", board.card_count));
+        }
+
+        if let Some(agent_chat) = state
+            .agent_chat()
+            .filter(|agent_chat| agent_chat.visible != 0 && agent_chat.message_count > 0)
+        {
+            parts.push(format!("chat {}", agent_chat.message_count));
+        }
+
+        if state
+            .tool_manager()
+            .is_some_and(|tool_manager| tool_manager.visible != 0)
+        {
+            parts.push("tools".to_owned());
+        }
+
         if let Some(agent_context) = state
             .agent_context()
             .filter(|agent_context| agent_context.visible != 0 && !agent_context.task.is_empty())
@@ -295,7 +365,7 @@ mod tests {
 
     #[test]
     fn renders_retained_semantic_window_and_status_bar() {
-        let mut state = SemanticState::new(80, 6);
+        let mut state = SemanticState::new(220, 6);
         state.apply_protocol_command(crate::protocol::Command::Semantic(
             semantic::Command::WindowContent(
                 semantic::WindowContent {
@@ -357,8 +427,78 @@ mod tests {
                 0,
             ),
         ));
+        state.apply_protocol_command(crate::protocol::Command::Semantic(
+            semantic::Command::Workspaces(
+                semantic::Workspaces {
+                    visible: 1,
+                    active_workspace_id: 2,
+                    mode: 0,
+                    flags: 0,
+                    workspace_count: 4,
+                },
+                0,
+            ),
+        ));
+        state.apply_protocol_command(crate::protocol::Command::Semantic(
+            semantic::Command::EditTimeline(
+                semantic::EditTimeline {
+                    visible: 1,
+                    viewing_index: 1,
+                    entry_count: 3,
+                },
+                0,
+            ),
+        ));
+        state.apply_protocol_command(crate::protocol::Command::Semantic(
+            semantic::Command::Sidebars(
+                semantic::Sidebars {
+                    visible: 1,
+                    sidebar_count: 2,
+                },
+                0,
+            ),
+        ));
+        state.apply_protocol_command(crate::protocol::Command::Semantic(
+            semantic::Command::ExtensionOverlay(semantic::ExtensionOverlay { entry_count: 1 }, 0),
+        ));
+        state.apply_protocol_command(crate::protocol::Command::Semantic(
+            semantic::Command::ExtensionPanel(semantic::ExtensionPanel { panel_count: 2 }, 0),
+        ));
+        state.apply_protocol_command(crate::protocol::Command::Semantic(
+            semantic::Command::Observatory(
+                semantic::Observatory {
+                    visible: true,
+                    payload: vec![1],
+                },
+                0,
+            ),
+        ));
+        state.apply_protocol_command(crate::protocol::Command::Semantic(
+            semantic::Command::Board(
+                semantic::Board {
+                    visible: 1,
+                    focused_card_id: 1,
+                    card_count: 3,
+                    filter_mode: 0,
+                },
+                0,
+            ),
+        ));
+        state.apply_protocol_command(crate::protocol::Command::Semantic(
+            semantic::Command::AgentChat(
+                semantic::AgentChat {
+                    visible: 1,
+                    flags: 0,
+                    message_count: 4,
+                },
+                0,
+            ),
+        ));
+        state.apply_protocol_command(crate::protocol::Command::Semantic(
+            semantic::Command::ToolManager(semantic::ToolManager { visible: 1 }, 0),
+        ));
 
-        let mut terminal = Terminal::memory(80, 6);
+        let mut terminal = Terminal::memory(220, 6);
         SemanticRenderer::new()
             .render(&state, &mut terminal)
             .unwrap();
@@ -368,6 +508,15 @@ mod tests {
         assert!(snapshot.contains("main.ex"));
         assert!(snapshot.contains("search 3/5"));
         assert!(snapshot.contains("notify 2"));
+        assert!(snapshot.contains("ws 2/4"));
+        assert!(snapshot.contains("edits 2/3"));
+        assert!(snapshot.contains("sidebars 2"));
+        assert!(snapshot.contains("ext overlay 1"));
+        assert!(snapshot.contains("ext panels 2"));
+        assert!(snapshot.contains("observatory"));
+        assert!(snapshot.contains("board 3"));
+        assert!(snapshot.contains("chat 4"));
+        assert!(snapshot.contains("tools"));
         assert!(snapshot.contains("agent review"));
         assert!(snapshot.contains("12:3"));
     }

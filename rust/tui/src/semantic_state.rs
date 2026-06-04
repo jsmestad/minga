@@ -18,6 +18,15 @@ pub struct SemanticState {
     hover_action: Option<semantic::HoverAction>,
     search_state: Option<semantic::SearchState>,
     notifications: Option<semantic::Notifications>,
+    workspaces: Option<semantic::Workspaces>,
+    edit_timeline: Option<semantic::EditTimeline>,
+    extension_overlay: Option<semantic::ExtensionOverlay>,
+    extension_panel: Option<semantic::ExtensionPanel>,
+    observatory: Option<semantic::Observatory>,
+    sidebars: Option<semantic::Sidebars>,
+    board: Option<semantic::Board>,
+    agent_chat: Option<semantic::AgentChat>,
+    tool_manager: Option<semantic::ToolManager>,
     diagnostic: Option<String>,
     cursor: CursorState,
 }
@@ -53,6 +62,15 @@ impl SemanticState {
             hover_action: None,
             search_state: None,
             notifications: None,
+            workspaces: None,
+            edit_timeline: None,
+            extension_overlay: None,
+            extension_panel: None,
+            observatory: None,
+            sidebars: None,
+            board: None,
+            agent_chat: None,
+            tool_manager: None,
             diagnostic: None,
             cursor: CursorState {
                 row: 0,
@@ -149,6 +167,42 @@ impl SemanticState {
         self.notifications
     }
 
+    pub fn workspaces(&self) -> Option<semantic::Workspaces> {
+        self.workspaces
+    }
+
+    pub fn edit_timeline(&self) -> Option<semantic::EditTimeline> {
+        self.edit_timeline
+    }
+
+    pub fn extension_overlay(&self) -> Option<semantic::ExtensionOverlay> {
+        self.extension_overlay
+    }
+
+    pub fn extension_panel(&self) -> Option<semantic::ExtensionPanel> {
+        self.extension_panel
+    }
+
+    pub fn observatory(&self) -> Option<&semantic::Observatory> {
+        self.observatory.as_ref()
+    }
+
+    pub fn sidebars(&self) -> Option<&semantic::Sidebars> {
+        self.sidebars.as_ref()
+    }
+
+    pub fn board(&self) -> Option<semantic::Board> {
+        self.board
+    }
+
+    pub fn agent_chat(&self) -> Option<semantic::AgentChat> {
+        self.agent_chat
+    }
+
+    pub fn tool_manager(&self) -> Option<semantic::ToolManager> {
+        self.tool_manager
+    }
+
     pub fn diagnostic(&self) -> Option<&str> {
         self.diagnostic.as_deref()
     }
@@ -170,6 +224,15 @@ impl SemanticState {
         self.hover_action = None;
         self.search_state = None;
         self.notifications = None;
+        self.workspaces = None;
+        self.edit_timeline = None;
+        self.extension_overlay = None;
+        self.extension_panel = None;
+        self.observatory = None;
+        self.sidebars = None;
+        self.board = None;
+        self.agent_chat = None;
+        self.tool_manager = None;
         self.diagnostic = None;
         self.cursor = CursorState {
             row: 0,
@@ -243,6 +306,42 @@ impl SemanticState {
                 title: None,
                 clipboard: Some(clipboard),
             },
+            semantic::Command::Workspaces(workspaces, _) => {
+                self.workspaces = Some(workspaces);
+                StateEffect::render()
+            }
+            semantic::Command::EditTimeline(edit_timeline, _) => {
+                self.edit_timeline = Some(edit_timeline);
+                StateEffect::render()
+            }
+            semantic::Command::ExtensionOverlay(extension_overlay, _) => {
+                self.extension_overlay = Some(extension_overlay);
+                StateEffect::render()
+            }
+            semantic::Command::ExtensionPanel(extension_panel, _) => {
+                self.extension_panel = Some(extension_panel);
+                StateEffect::render()
+            }
+            semantic::Command::Observatory(observatory, _) => {
+                self.observatory = Some(observatory);
+                StateEffect::render()
+            }
+            semantic::Command::Sidebars(sidebars, _) => {
+                self.sidebars = Some(sidebars);
+                StateEffect::render()
+            }
+            semantic::Command::Board(board, _) => {
+                self.board = Some(board);
+                StateEffect::render()
+            }
+            semantic::Command::AgentChat(agent_chat, _) => {
+                self.agent_chat = Some(agent_chat);
+                StateEffect::render()
+            }
+            semantic::Command::ToolManager(tool_manager, _) => {
+                self.tool_manager = Some(tool_manager);
+                StateEffect::render()
+            }
             semantic::Command::Picker(..)
             | semantic::Command::PickerPreview(..)
             | semantic::Command::Minibuffer(..)
@@ -260,16 +359,7 @@ impl SemanticState {
             | semantic::Command::GutterSeparator(..)
             | semantic::Command::SplitSeparators(..)
             | semantic::Command::IndentGuides(..)
-            | semantic::Command::WindowOverlayDelta(..)
-            | semantic::Command::Workspaces(..)
-            | semantic::Command::EditTimeline(..)
-            | semantic::Command::ExtensionOverlay(..)
-            | semantic::Command::ExtensionPanel(..)
-            | semantic::Command::Observatory(..)
-            | semantic::Command::Sidebars(..)
-            | semantic::Command::Board(..)
-            | semantic::Command::AgentChat(..)
-            | semantic::Command::ToolManager(..) => StateEffect::render(),
+            | semantic::Command::WindowOverlayDelta(..) => StateEffect::render(),
         }
     }
 
@@ -520,6 +610,65 @@ mod tests {
             },
             0,
         )));
+        state.apply_protocol_command(ProtocolCommand::Semantic(semantic::Command::Workspaces(
+            semantic::Workspaces {
+                visible: 1,
+                active_workspace_id: 7,
+                mode: 0,
+                flags: 0,
+                workspace_count: 3,
+            },
+            0,
+        )));
+        state.apply_protocol_command(ProtocolCommand::Semantic(semantic::Command::EditTimeline(
+            semantic::EditTimeline {
+                visible: 1,
+                viewing_index: 1,
+                entry_count: 4,
+            },
+            0,
+        )));
+        state.apply_protocol_command(ProtocolCommand::Semantic(
+            semantic::Command::ExtensionOverlay(semantic::ExtensionOverlay { entry_count: 5 }, 0),
+        ));
+        state.apply_protocol_command(ProtocolCommand::Semantic(
+            semantic::Command::ExtensionPanel(semantic::ExtensionPanel { panel_count: 6 }, 0),
+        ));
+        state.apply_protocol_command(ProtocolCommand::Semantic(semantic::Command::Observatory(
+            semantic::Observatory {
+                visible: true,
+                payload: vec![6, 7],
+            },
+            0,
+        )));
+        state.apply_protocol_command(ProtocolCommand::Semantic(semantic::Command::Sidebars(
+            semantic::Sidebars {
+                visible: 1,
+                sidebar_count: 8,
+            },
+            0,
+        )));
+        state.apply_protocol_command(ProtocolCommand::Semantic(semantic::Command::Board(
+            semantic::Board {
+                visible: 1,
+                focused_card_id: 9,
+                card_count: 10,
+                filter_mode: 0,
+            },
+            0,
+        )));
+        state.apply_protocol_command(ProtocolCommand::Semantic(semantic::Command::AgentChat(
+            semantic::AgentChat {
+                visible: 1,
+                flags: 0,
+                message_count: 11,
+            },
+            0,
+        )));
+        state.apply_protocol_command(ProtocolCommand::Semantic(semantic::Command::ToolManager(
+            semantic::ToolManager { visible: 1 },
+            0,
+        )));
 
         assert_eq!(state.line_spacing.unwrap().value, 2);
         assert_eq!(state.cursor_animation.unwrap().enabled, 1);
@@ -528,6 +677,15 @@ mod tests {
         assert_eq!(state.hover_action.as_ref().unwrap().payload, vec![4, 5]);
         assert_eq!(state.search_state().unwrap().match_count, 5);
         assert_eq!(state.notifications().unwrap().notification_count, 2);
+        assert_eq!(state.workspaces().unwrap().active_workspace_id, 7);
+        assert_eq!(state.edit_timeline().unwrap().entry_count, 4);
+        assert_eq!(state.extension_overlay().unwrap().entry_count, 5);
+        assert_eq!(state.extension_panel().unwrap().panel_count, 6);
+        assert_eq!(state.observatory().unwrap().payload, vec![6, 7]);
+        assert_eq!(state.sidebars().unwrap().sidebar_count, 8);
+        assert_eq!(state.board().unwrap().card_count, 10);
+        assert_eq!(state.agent_chat().unwrap().message_count, 11);
+        assert_eq!(state.tool_manager().unwrap().visible, 1);
 
         state.apply_protocol_command(ProtocolCommand::Clear);
 
@@ -538,5 +696,14 @@ mod tests {
         assert!(state.hover_action.is_none());
         assert!(state.search_state().is_none());
         assert!(state.notifications().is_none());
+        assert!(state.workspaces().is_none());
+        assert!(state.edit_timeline().is_none());
+        assert!(state.extension_overlay().is_none());
+        assert!(state.extension_panel().is_none());
+        assert!(state.observatory().is_none());
+        assert!(state.sidebars().is_none());
+        assert!(state.board().is_none());
+        assert!(state.agent_chat().is_none());
+        assert!(state.tool_manager().is_none());
     }
 }
