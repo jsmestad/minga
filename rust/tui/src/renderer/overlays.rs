@@ -50,9 +50,9 @@ fn render_completion(state: &SemanticState, area: Rect, buffer: &mut Buffer) {
     Clear.render(rect, buffer);
     let lines = completion.items.iter().enumerate().map(|(index, item)| {
         let style = if index == completion.selected_index as usize {
-            theme::selected(Color::Cyan)
+            theme::selected(state.theme())
         } else {
-            theme::overlay()
+            theme::overlay(state.theme())
         };
         Line::styled(format!("{}  {}", item.label, item.detail), style)
     });
@@ -85,7 +85,7 @@ fn render_signature_help(state: &SemanticState, area: Rect, buffer: &mut Buffer)
         Line::from(signature.documentation.clone()),
     ])
     .block(Block::default().borders(Borders::ALL).title("Signature"))
-    .style(theme::overlay())
+    .style(theme::overlay(state.theme()))
     .wrap(Wrap { trim: true })
     .render(rect, buffer);
 }
@@ -121,7 +121,7 @@ fn render_hover_popup(state: &SemanticState, area: Rect, buffer: &mut Buffer) {
     });
     Paragraph::new(lines.collect::<Vec<_>>())
         .block(Block::default().borders(Borders::ALL).title("Hover"))
-        .style(theme::overlay())
+        .style(theme::overlay(state.theme()))
         .wrap(Wrap { trim: true })
         .render(rect, buffer);
 }
@@ -143,7 +143,7 @@ fn render_float_popup(state: &SemanticState, area: Rect, buffer: &mut Buffer) {
                 .borders(Borders::ALL)
                 .title(popup.title.as_str()),
         )
-        .style(theme::overlay())
+        .style(theme::overlay(state.theme()))
         .wrap(Wrap { trim: false })
         .render(rect, buffer);
 }
@@ -166,9 +166,9 @@ fn render_change_summary(state: &SemanticState, area: Rect, buffer: &mut Buffer)
     Clear.render(rect, buffer);
     let lines = summary.entries.iter().enumerate().map(|(index, entry)| {
         let style = if index == summary.selected_index as usize {
-            theme::selected(Color::Green)
+            theme::selected(state.theme())
         } else {
-            theme::overlay()
+            theme::overlay(state.theme())
         };
         Line::styled(
             format!(
@@ -206,7 +206,10 @@ fn render_which_key(state: &SemanticState, area: Rect, buffer: &mut Buffer) {
         .take(height.saturating_sub(2) as usize)
         .map(|binding| {
             Line::from(vec![
-                Span::styled(format!("{} ", binding.key), theme::binding_key()),
+                Span::styled(
+                    format!("{} ", binding.key),
+                    theme::binding_key(state.theme()),
+                ),
                 Span::raw(binding.description.clone()),
             ])
         });
@@ -217,7 +220,7 @@ fn render_which_key(state: &SemanticState, area: Rect, buffer: &mut Buffer) {
             which_key.page.saturating_add(1),
             which_key.page_count.max(1)
         )))
-        .style(theme::overlay())
+        .style(theme::overlay(state.theme()))
         .render(rect, buffer);
 }
 
@@ -247,15 +250,20 @@ fn render_picker(state: &SemanticState, area: Rect, buffer: &mut Buffer) {
             .constraints([Constraint::Percentage(100)])
             .split(rect)
     };
-    render_picker_list(picker, chunks[0], buffer);
+    render_picker_list(picker, state.theme(), chunks[0], buffer);
     if chunks.len() > 1
         && let Some(preview) = layout::visible_picker_preview(state)
     {
-        render_picker_preview(preview, chunks[1], buffer);
+        render_picker_preview(preview, state.theme(), chunks[1], buffer);
     }
 }
 
-fn render_picker_list(picker: &semantic::Picker, area: Rect, buffer: &mut Buffer) {
+fn render_picker_list(
+    picker: &semantic::Picker,
+    theme_state: Option<&semantic::Theme>,
+    area: Rect,
+    buffer: &mut Buffer,
+) {
     let title = if picker.query.is_empty() {
         format!(
             "{} {}/{}",
@@ -274,9 +282,9 @@ fn render_picker_list(picker: &semantic::Picker, area: Rect, buffer: &mut Buffer
         .take(area.height.saturating_sub(2) as usize)
         .map(|(index, item)| {
             let style = if index == picker.selected_index as usize {
-                theme::selected(Color::Cyan)
+                theme::selected(theme_state)
             } else {
-                theme::overlay()
+                theme::overlay(theme_state)
             };
             let marker = if item.marked { "*" } else { " " };
             Line::styled(
@@ -292,7 +300,12 @@ fn render_picker_list(picker: &semantic::Picker, area: Rect, buffer: &mut Buffer
         .render(area, buffer);
 }
 
-fn render_picker_preview(preview: &semantic::PickerPreview, area: Rect, buffer: &mut Buffer) {
+fn render_picker_preview(
+    preview: &semantic::PickerPreview,
+    theme_state: Option<&semantic::Theme>,
+    area: Rect,
+    buffer: &mut Buffer,
+) {
     let lines = preview
         .lines
         .iter()
@@ -315,7 +328,7 @@ fn render_picker_preview(preview: &semantic::PickerPreview, area: Rect, buffer: 
         });
     Paragraph::new(lines.collect::<Vec<_>>())
         .block(Block::default().borders(Borders::ALL).title("Preview"))
-        .style(theme::overlay())
+        .style(theme::overlay(theme_state))
         .wrap(Wrap { trim: false })
         .render(area, buffer);
 }

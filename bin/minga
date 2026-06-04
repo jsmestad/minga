@@ -12,6 +12,13 @@ set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
+if [ -z "${MINGA_TTY:-}" ] && command -v tty >/dev/null 2>&1; then
+  DETECTED_TTY="$(tty 2>/dev/null || true)"
+  if [ -n "$DETECTED_TTY" ] && [ "$DETECTED_TTY" != "not a tty" ]; then
+    export MINGA_TTY="$DETECTED_TTY"
+  fi
+fi
+
 if [ "${MINGA_SKIP_NATIVE_LAUNCH_BUILD:-}" != "1" ]; then
   if [ "${1:-}" = "+gui" ]; then
     (cd "$PROJECT_DIR" && mix native.build.support)

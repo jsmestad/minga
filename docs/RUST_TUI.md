@@ -1,9 +1,8 @@
 # Rust TUI
 
-The Rust terminal frontend is the semantic TUI target. It supports two launch modes over the same packet-4 frontend protocol, but it has only one active rendering path: Semantic UI retained state rendered through Ratatui.
+The Rust terminal frontend is the semantic TUI target. It has one launch mode: BEAM-owned Port renderer. The BEAM starts first, spawns the Rust renderer, and keeps editor state under BEAM supervision.
 
-- Rust-parent mode: `bin/minga-rust` starts Rust first, Rust owns terminal stdin/stdout, and Rust launches the BEAM editor core as a connected child over private pipes.
-- BEAM-parent mode: `MINGA_TUI_IMPL=rust bin/minga` keeps the existing BEAM-spawned renderer path for compatibility while this migration is in flight.
+`bin/minga-rust` or `MINGA_TUI_IMPL=rust bin/minga` starts Minga normally and spawns the Rust renderer as a Port. Rust opens `MINGA_TTY` or `/dev/tty` for Ratatui/Crossterm terminal I/O, while stdin/stdout remain the packet protocol.
 
 Build it with:
 
@@ -11,24 +10,24 @@ Build it with:
 mix native.build.rust_tui
 ```
 
-Run the Rust-parent path from the repo root with:
+Run the BEAM-owned Rust path from the repo root with:
 
 ```bash
 bin/minga-rust
 ```
 
-Run the compatibility BEAM-parent path with:
+Or select Rust explicitly through the normal launcher:
 
 ```bash
 MINGA_TUI_IMPL=rust bin/minga
 ```
 
-In both modes, the BEAM remains the source of truth for editor state and sends Semantic UI commands. Rust owns frontend concerns only: terminal lifecycle, input capture, resize handling, retained frontend view state, Ratatui rendering, and frontend capability reporting.
+The BEAM remains the source of truth for editor state and sends Semantic UI commands. Rust owns frontend concerns only: terminal lifecycle, input capture, resize handling, retained frontend view state, Ratatui rendering, and frontend capability reporting.
 
 ## Active Architecture
 
 - `app.rs` owns the frontend event loop, BEAM host wiring, input forwarding, resize reporting, side-effect application, and render scheduling.
-- `beam_host.rs` owns the Rust-parent process boundary and the BEAM-parent compatibility transport.
+- `beam_host.rs` owns the BEAM-owned Port packet transport over stdin/stdout.
 - `protocol.rs` owns packet-4 framing and frontend control messages.
 - `semantic.rs` owns the typed Semantic UI command decoder generated from the protocol schema.
 - `semantic_state.rs` owns retained frontend state and maps decoded Semantic UI commands into renderable state plus terminal side effects.
@@ -43,3 +42,16 @@ In both modes, the BEAM remains the source of truth for editor state and sends S
 Legacy cell-grid renderer support is removed from the Rust TUI. If the BEAM sends non-semantic legacy render commands, Rust should surface that as a protocol/state diagnostic instead of preserving another compatibility renderer.
 
 Board-specific UI is not a Rust TUI parity target. Board experiments must live behind generic extension primitives or remain outside default builds; see GitHub issue #2167.
+
+## Go Reference Deletion Gate
+
+The Go TUI remains the semantic terminal reference until Rust proves parity with tests and manual comparison. Do not delete the Go renderer unless a final parity PR shows all of these checks passing:
+
+- `cargo test --manifest-path rust/tui/Cargo.toml`
+- `cargo clippy --manifest-path rust/tui/Cargo.toml -- -D warnings`
+- `mix protocol.gen --check`
+- `mix compile --warnings-as-errors`
+- `cd go/tui && go test ./...`
+- Manual comparison of `bin/minga-rust` against `MINGA_TUI_IMPL=go bin/minga` for editor chrome, file tree, picker and overlays, agent chat, semantic chrome, and mouse routing.
+
+Every frontend-visible Rust behavior change on the path to deletion should have a Rust parity test that names the Go contract it mirrors. Go is reference-only during this work; do not refactor Go as part of Rust parity unless the final deletion PR explicitly scopes it.

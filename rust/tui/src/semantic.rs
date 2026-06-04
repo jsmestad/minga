@@ -154,7 +154,9 @@ pub struct StatusBar {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatusSegment {
+    pub name: String,
     pub text: String,
+    pub command: String,
     pub fg: u32,
     pub bg: u32,
     pub attrs: u16,
@@ -624,7 +626,39 @@ pub struct Observatory {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Sidebars {
     pub visible: u8,
-    pub sidebar_count: u16,
+    pub active_id: String,
+    pub items: Vec<Sidebar>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Sidebar {
+    pub id: String,
+    pub display_name: String,
+    pub semantic_kind: String,
+    pub icon: String,
+    pub order: u16,
+    pub flags: u8,
+    pub preferred_width: u16,
+    pub badge_count: u16,
+    pub visible: bool,
+    pub focused: bool,
+}
+
+impl Sidebars {
+    pub fn visible_items(&self) -> impl Iterator<Item = &Sidebar> {
+        self.items.iter().filter(|sidebar| sidebar.visible)
+    }
+
+    pub fn visible_count(&self) -> usize {
+        self.visible_items().count()
+    }
+
+    pub fn preferred_width(&self) -> u16 {
+        self.visible_items()
+            .next()
+            .map(|sidebar| sidebar.preferred_width.max(18))
+            .unwrap_or(0)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -638,8 +672,7 @@ pub struct Board {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AgentChat {
     pub visible: u8,
-    pub flags: u8,
-    pub message_count: u16,
+    pub status: u8,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -980,6 +1013,7 @@ fn status_segments(payload: &[u8], status: &mut StatusBar) -> Result<(), DecodeE
 fn decode_status_segment(bytes: &[u8]) -> Result<(StatusSegment, usize), DecodeError> {
     require_len(bytes, 1, "status segment name length")?;
     let name_len = bytes[0] as usize;
+    let name = read_string(bytes, 1, name_len)?;
     let mut offset = 1 + name_len;
     require_len(bytes, offset + 8, "status segment colors")?;
     let fg = read_u24(bytes, offset);
@@ -991,12 +1025,16 @@ fn decode_status_segment(bytes: &[u8]) -> Result<(StatusSegment, usize), DecodeE
     offset += text_len;
     require_len(bytes, offset + 2, "status segment target")?;
     let target_len = read_u16(bytes, offset) as usize;
-    offset += 2 + target_len;
+    offset += 2;
+    let command = read_string(bytes, offset, target_len)?;
+    offset += target_len;
     require_len(bytes, offset, "status segment end")?;
 
     Ok((
         StatusSegment {
+            name,
             text,
+            command,
             fg,
             bg,
             attrs,
@@ -2098,11 +2136,45 @@ fn decode_observatory(bytes: &[u8]) -> Result<Command, DecodeError> {
 
 fn decode_sidebars(bytes: &[u8]) -> Result<Command, DecodeError> {
     let size = len32_size(bytes)?;
-    require_len(bytes, 8, "sidebars fields")?;
+    require_len(bytes, size, "sidebars payload")?;
+    let payload = &bytes[5..size];
+    require_len(payload, 3, "sidebars fields")?;
+    let visible = payload[0];
+    let count = read_u16(payload, 1) as usize;
+    let mut offset = 3;
+    let active_id = read_string16(payload, &mut offset)?;
+    let mut items = Vec::with_capacity(count);
+
+    for _ in 0..count {
+        let id = read_string16(payload, &mut offset)?;
+        let display_name = read_string16(payload, &mut offset)?;
+        let semantic_kind = read_string16(payload, &mut offset)?;
+        let icon = read_string16(payload, &mut offset)?;
+        require_len(payload, offset + 7, "sidebar metadata")?;
+        let order = read_u16(payload, offset);
+        let flags = payload[offset + 2];
+        let preferred_width = read_u16(payload, offset + 3);
+        let badge_count = read_u16(payload, offset + 5);
+        offset += 7;
+        items.push(Sidebar {
+            id,
+            display_name,
+            semantic_kind,
+            icon,
+            order,
+            flags,
+            preferred_width,
+            badge_count,
+            visible: flags & 0x01 != 0,
+            focused: flags & 0x02 != 0,
+        });
+    }
+
     Ok(Command::Sidebars(
         Sidebars {
-            visible: bytes[5],
-            sidebar_count: read_u16(bytes, 6),
+            visible,
+            active_id,
+            items,
         },
         size,
     ))
@@ -2127,16 +2199,14 @@ fn decode_agent_chat(bytes: &[u8]) -> Result<Command, DecodeError> {
     let secs = sections(&bytes[..size])?;
     let mut chat = AgentChat {
         visible: 0,
-        flags: 0,
-        message_count: 0,
+        status: 0,
     };
 
     for (section_id, payload) in secs {
         if section_id == 0x01 {
             let (header, _) = semantic_decode::decode_gui_agent_chat_header(payload, 0)?;
             chat.visible = header.visible;
-            chat.flags = header.flags;
-            chat.message_count = header.message_count;
+            chat.status = header.status;
         }
     }
 
@@ -3305,8 +3375,8 @@ mod tests {
             Command::Board(Board { visible: 1, .. }, _)
         ));
 
-        // Agent chat: 1 section (0x01 header), payload: visible=1, flags=0, message_count=0
-        let agent_chat = vec![opcodes::OP_GUI_AGENT_CHAT, 1, 0x01, 0, 4, 1, 0, 0, 0];
+        // Agent chat: 1 section (0x01 header), payload: visible=1, status=2
+        let agent_chat = vec![opcodes::OP_GUI_AGENT_CHAT, 1, 0x01, 0, 2, 1, 2];
         let packet = [agent_chat, vec![opcodes::OP_BATCH_END]].concat();
         let command = decode(&packet).unwrap();
         assert_eq!(semantic_size(&packet).unwrap(), packet.len() - 1);
@@ -3315,8 +3385,7 @@ mod tests {
             Command::AgentChat(
                 AgentChat {
                     visible: 1,
-                    flags: 0,
-                    message_count: 0
+                    status: 2
                 },
                 _
             )
@@ -3833,11 +3902,32 @@ mod tests {
 
     #[test]
     fn decode_sidebars_field_check() {
-        let bytes = [opcodes::OP_GUI_SIDEBARS, 0, 0, 0, 3, 1, 0, 5];
+        let payload = [
+            vec![1, 0, 1],
+            string16("files"),
+            string16("files"),
+            string16("Files"),
+            string16("file_tree"),
+            string16("F"),
+            vec![0, 7, 0x03, 0, 24, 0, 2],
+        ]
+        .concat();
+        let mut bytes = vec![opcodes::OP_GUI_SIDEBARS];
+        bytes.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+        bytes.extend_from_slice(&payload);
         match decode(&bytes).unwrap() {
-            Command::Sidebars(s, 8) => {
+            Command::Sidebars(s, size) => {
+                assert_eq!(size, bytes.len());
                 assert_eq!(s.visible, 1);
-                assert_eq!(s.sidebar_count, 5);
+                assert_eq!(s.active_id, "files");
+                assert_eq!(s.visible_count(), 1);
+                assert_eq!(s.items[0].display_name, "Files");
+                assert_eq!(s.items[0].semantic_kind, "file_tree");
+                assert_eq!(s.items[0].order, 7);
+                assert_eq!(s.items[0].preferred_width, 24);
+                assert_eq!(s.items[0].badge_count, 2);
+                assert!(s.items[0].visible);
+                assert!(s.items[0].focused);
             }
             other => panic!("unexpected: {:?}", other),
         }

@@ -6,10 +6,11 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
+use unicode_width::UnicodeWidthStr;
 
 pub fn render(state: &SemanticState, frame: &layout::FrameLayout, buffer: &mut Buffer) {
     if let Some(tab_bar) = state.tab_bar() {
-        render_tab_bar(tab_bar, frame.tab_bar, buffer);
+        render_tab_bar(tab_bar, state.theme(), frame.tab_bar, buffer);
     }
 
     if let Some(status_bar) = state.status_bar() {
@@ -17,11 +18,16 @@ pub fn render(state: &SemanticState, frame: &layout::FrameLayout, buffer: &mut B
     }
 
     if let Some(minibuffer) = layout::visible_minibuffer(state) {
-        render_minibuffer(minibuffer, frame.minibuffer, buffer);
+        render_minibuffer(minibuffer, state.theme(), frame.minibuffer, buffer);
     }
 }
 
-fn render_tab_bar(tab_bar: &semantic::TabBar, area: Rect, buffer: &mut Buffer) {
+fn render_tab_bar(
+    tab_bar: &semantic::TabBar,
+    theme_state: Option<&semantic::Theme>,
+    area: Rect,
+    buffer: &mut Buffer,
+) {
     let spans: Vec<Span<'_>> = tab_bar
         .tabs
         .iter()
@@ -31,7 +37,7 @@ fn render_tab_bar(tab_bar: &semantic::TabBar, area: Rect, buffer: &mut Buffer) {
             } else {
                 format!(" {} ", tab.label)
             };
-            Span::styled(label, theme::tab(tab.active))
+            Span::styled(label, theme::tab(theme_state, tab.active))
         })
         .collect();
     Paragraph::new(Line::from(spans)).render(area, buffer);
@@ -43,6 +49,33 @@ fn render_status_bar(
     area: Rect,
     buffer: &mut Buffer,
 ) {
+    let left_spans = status_left_spans(state, status_bar);
+    let left_width = line_width(&left_spans);
+    let right_spans = status_right_spans(state, status_bar);
+    let right_width = line_width(&right_spans);
+    let width = area.width as usize;
+    let padding = width.saturating_sub(left_width.saturating_add(right_width));
+    let mut spans = left_spans;
+    spans.push(Span::styled(
+        " ".repeat(padding),
+        theme::status_bar(state.theme()),
+    ));
+    spans.extend(right_spans);
+    Paragraph::new(Line::from(spans)).render(area, buffer);
+}
+
+fn status_left_spans<'a>(
+    state: &SemanticState,
+    status_bar: &'a semantic::StatusBar,
+) -> Vec<Span<'a>> {
+    if !status_bar.left_segments.is_empty() || !status_bar.right_segments.is_empty() {
+        return status_bar
+            .left_segments
+            .iter()
+            .map(status_segment_span)
+            .collect();
+    }
+
     let mut left = if status_bar.filename.is_empty() {
         status_bar.message.clone()
     } else {
@@ -52,13 +85,36 @@ fn render_status_bar(
         left.push_str("  ");
         left.push_str(&status_bar.branch);
     }
-    let right = status_right_text(state, status_bar);
-    let width = area.width as usize;
-    let padding = width.saturating_sub(left.len().saturating_add(right.len()));
-    let text = format!("{left}{}{right}", " ".repeat(padding));
-    Paragraph::new(text)
-        .style(theme::status_bar())
-        .render(area, buffer);
+    vec![Span::styled(left, theme::status_bar(state.theme()))]
+}
+
+fn status_right_spans<'a>(
+    state: &SemanticState,
+    status_bar: &'a semantic::StatusBar,
+) -> Vec<Span<'a>> {
+    if !status_bar.right_segments.is_empty() {
+        return status_bar
+            .right_segments
+            .iter()
+            .map(status_segment_span)
+            .collect();
+    }
+
+    vec![Span::styled(
+        status_right_text(state, status_bar),
+        theme::status_bar(state.theme()),
+    )]
+}
+
+fn status_segment_span(segment: &semantic::StatusSegment) -> Span<'_> {
+    Span::styled(
+        segment.text.clone(),
+        theme::semantic(segment.fg, segment.bg, segment.attrs),
+    )
+}
+
+fn line_width(spans: &[Span<'_>]) -> usize {
+    spans.iter().map(|span| span.content.as_ref().width()).sum()
 }
 
 fn status_right_text(state: &SemanticState, status_bar: &semantic::StatusBar) -> String {
@@ -103,9 +159,9 @@ fn status_right_text(state: &SemanticState, status_bar: &semantic::StatusBar) ->
 
     if let Some(sidebars) = state
         .sidebars()
-        .filter(|sidebars| sidebars.visible != 0 && sidebars.sidebar_count > 0)
+        .filter(|sidebars| sidebars.visible != 0 && sidebars.visible_count() > 0)
     {
-        parts.push(format!("sidebars {}", sidebars.sidebar_count));
+        parts.push(format!("sidebars {}", sidebars.visible_count()));
     }
 
     if let Some(extension_overlay) = state
@@ -131,9 +187,12 @@ fn status_right_text(state: &SemanticState, status_bar: &semantic::StatusBar) ->
 
     if let Some(agent_chat) = state
         .agent_chat()
-        .filter(|agent_chat| agent_chat.visible != 0 && agent_chat.message_count > 0)
+        .filter(|agent_chat| agent_chat.visible != 0)
     {
-        parts.push(format!("chat {}", agent_chat.message_count));
+        parts.push(format!(
+            "chat {}",
+            agent_chat_status_label(agent_chat.status)
+        ));
     }
 
     if state
@@ -166,7 +225,21 @@ fn status_right_text(state: &SemanticState, status_bar: &semantic::StatusBar) ->
     parts.join("  ")
 }
 
-fn render_minibuffer(minibuffer: &semantic::Minibuffer, area: Rect, buffer: &mut Buffer) {
+fn agent_chat_status_label(status: u8) -> &'static str {
+    match status {
+        1 => "thinking",
+        2 => "tools",
+        3 => "error",
+        _ => "idle",
+    }
+}
+
+fn render_minibuffer(
+    minibuffer: &semantic::Minibuffer,
+    theme_state: Option<&semantic::Theme>,
+    area: Rect,
+    buffer: &mut Buffer,
+) {
     let mut text = format!("{}{}", minibuffer.prompt, minibuffer.input);
     if !minibuffer.context.is_empty() {
         text.push_str("  ");
@@ -180,6 +253,6 @@ fn render_minibuffer(minibuffer: &semantic::Minibuffer, area: Rect, buffer: &mut
         ));
     }
     Paragraph::new(text)
-        .style(theme::minibuffer())
+        .style(theme::minibuffer(theme_state))
         .render(area, buffer);
 }

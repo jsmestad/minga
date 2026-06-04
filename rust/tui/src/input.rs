@@ -1,5 +1,9 @@
+use crate::parity::{InputPolicy, PassiveMouseMotionPolicy};
 use crate::protocol;
-use crossterm::event::{Event as CrosstermEvent, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{
+    Event as CrosstermEvent, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent,
+    MouseEventKind,
+};
 
 const ESC: u8 = 0x1B;
 const ARROW_LEFT: u32 = 57_350;
@@ -12,16 +16,34 @@ const END: u32 = 0xF72B;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
-    Key { codepoint: u32, modifiers: u8 },
+    Key {
+        codepoint: u32,
+        modifiers: u8,
+    },
     Paste(Vec<u8>),
-    Resize { cols: u16, rows: u16 },
+    Resize {
+        cols: u16,
+        rows: u16,
+    },
+    Mouse {
+        row: i16,
+        col: i16,
+        button: u8,
+        modifiers: u8,
+        event_type: u8,
+        click_count: u8,
+    },
 }
 
-pub fn map_crossterm_event(event: CrosstermEvent) -> Option<Event> {
+pub fn map_crossterm_event_with_policy(
+    event: CrosstermEvent,
+    policy: InputPolicy,
+) -> Option<Event> {
     match event {
         CrosstermEvent::Key(key) => map_key_event(key),
         CrosstermEvent::Paste(text) => Some(Event::Paste(text.into_bytes())),
         CrosstermEvent::Resize(cols, rows) => Some(Event::Resize { cols, rows }),
+        CrosstermEvent::Mouse(mouse) => map_mouse_event(mouse, policy),
         _ => None,
     }
 }
@@ -45,6 +67,9 @@ fn map_key_event(event: KeyEvent) -> Option<Event> {
     };
 
     let mut modifiers = map_modifiers(event.modifiers);
+    if matches!(event.code, KeyCode::Char(_)) {
+        modifiers &= !protocol::MOD_SHIFT;
+    }
     if matches!(event.code, KeyCode::BackTab) {
         modifiers |= protocol::MOD_SHIFT;
     }
@@ -74,12 +99,58 @@ fn map_modifiers(crossterm: KeyModifiers) -> u8 {
     modifiers
 }
 
+fn map_mouse_event(event: MouseEvent, policy: InputPolicy) -> Option<Event> {
+    let (button, event_type) = match event.kind {
+        MouseEventKind::Down(button) => (map_mouse_button(button), 0),
+        MouseEventKind::Up(button) => (map_mouse_button(button), 1),
+        MouseEventKind::Drag(button) => (map_mouse_button(button), 3),
+        MouseEventKind::Moved => match policy.passive_mouse_motion {
+            PassiveMouseMotionPolicy::Drop => return None,
+        },
+        MouseEventKind::ScrollUp => (0x40, 0),
+        MouseEventKind::ScrollDown => (0x41, 0),
+        MouseEventKind::ScrollLeft => (0x42, 0),
+        MouseEventKind::ScrollRight => (0x43, 0),
+    };
+
+    Some(Event::Mouse {
+        row: event.row as i16,
+        col: event.column as i16,
+        button,
+        modifiers: map_modifiers(event.modifiers),
+        event_type,
+        click_count: 1,
+    })
+}
+
+fn map_mouse_button(button: MouseButton) -> u8 {
+    match button {
+        MouseButton::Left => 0,
+        MouseButton::Middle => 1,
+        MouseButton::Right => 2,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parity::GO_ZIG_PARITY;
+
+    fn map(event: CrosstermEvent) -> Option<Event> {
+        map_crossterm_event_with_policy(event, GO_ZIG_PARITY.input)
+    }
 
     fn key(code: KeyCode, modifiers: KeyModifiers) -> Option<Event> {
-        map_crossterm_event(CrosstermEvent::Key(KeyEvent::new(code, modifiers)))
+        map(CrosstermEvent::Key(KeyEvent::new(code, modifiers)))
+    }
+
+    fn mouse(kind: MouseEventKind, modifiers: KeyModifiers) -> Option<Event> {
+        map(CrosstermEvent::Mouse(MouseEvent {
+            kind,
+            column: 7,
+            row: 5,
+            modifiers,
+        }))
     }
 
     #[test]
@@ -92,12 +163,40 @@ mod tests {
             })
         );
         assert_eq!(
+            key(KeyCode::Char('T'), KeyModifiers::SHIFT),
+            Some(Event::Key {
+                codepoint: 'T' as u32,
+                modifiers: 0
+            })
+        );
+        assert_eq!(
             key(KeyCode::Char('©'), KeyModifiers::empty()),
             Some(Event::Key {
                 codepoint: '©' as u32,
                 modifiers: 0
             })
         );
+    }
+
+    #[test]
+    fn maps_logged_insert_sentence_without_printable_shift_modifiers() {
+        let typed = "This is the thing that we're doing";
+
+        for ch in typed.chars() {
+            let modifiers = if ch.is_ascii_uppercase() {
+                KeyModifiers::SHIFT
+            } else {
+                KeyModifiers::empty()
+            };
+            assert_eq!(
+                key(KeyCode::Char(ch), modifiers),
+                Some(Event::Key {
+                    codepoint: ch as u32,
+                    modifiers: 0
+                }),
+                "typed char {ch:?}"
+            );
+        }
     }
 
     #[test]
@@ -160,8 +259,67 @@ mod tests {
             })
         );
         assert_eq!(
-            map_crossterm_event(CrosstermEvent::Paste("hello".to_owned())),
+            map(CrosstermEvent::Paste("hello".to_owned())),
             Some(Event::Paste(b"hello".to_vec()))
         );
+    }
+
+    #[test]
+    fn maps_mouse_buttons_drag_wheel_and_modifiers() {
+        assert_eq!(
+            mouse(
+                MouseEventKind::Down(MouseButton::Left),
+                KeyModifiers::empty()
+            ),
+            Some(Event::Mouse {
+                row: 5,
+                col: 7,
+                button: 0,
+                modifiers: 0,
+                event_type: 0,
+                click_count: 1
+            })
+        );
+        assert_eq!(
+            mouse(MouseEventKind::Up(MouseButton::Right), KeyModifiers::SHIFT),
+            Some(Event::Mouse {
+                row: 5,
+                col: 7,
+                button: 2,
+                modifiers: protocol::MOD_SHIFT,
+                event_type: 1,
+                click_count: 1
+            })
+        );
+        assert_eq!(
+            mouse(
+                MouseEventKind::Drag(MouseButton::Middle),
+                KeyModifiers::CONTROL
+            ),
+            Some(Event::Mouse {
+                row: 5,
+                col: 7,
+                button: 1,
+                modifiers: protocol::MOD_CTRL,
+                event_type: 3,
+                click_count: 1
+            })
+        );
+        assert_eq!(
+            mouse(MouseEventKind::ScrollDown, KeyModifiers::ALT),
+            Some(Event::Mouse {
+                row: 5,
+                col: 7,
+                button: 0x41,
+                modifiers: protocol::MOD_ALT,
+                event_type: 0,
+                click_count: 1
+            })
+        );
+    }
+
+    #[test]
+    fn drops_passive_mouse_motion() {
+        assert_eq!(mouse(MouseEventKind::Moved, KeyModifiers::empty()), None);
     }
 }

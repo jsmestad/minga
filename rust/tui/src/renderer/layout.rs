@@ -30,22 +30,29 @@ impl FrameLayout {
             ])
             .split(area);
 
+        let (main_body, bottom_row) = bottom_panel_split(state.bottom_panel(), vertical[1]);
+
         let horizontal = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
-                Constraint::Length(file_tree_width(state.file_tree())),
+                Constraint::Length(left_chrome_width(state)),
                 Constraint::Min(1),
             ])
-            .split(vertical[1]);
+            .split(main_body);
 
-        let (editor, bottom_panel) = bottom_panel_split(state.bottom_panel(), horizontal[1]);
+        let bottom_panel = bottom_row.map(|row| Rect {
+            x: horizontal[1].x,
+            y: row.y,
+            width: horizontal[1].width,
+            height: row.height,
+        });
 
         Self {
             area,
             tab_bar: vertical[0],
             body: vertical[1],
             file_tree: horizontal[0],
-            editor,
+            editor: horizontal[1],
             bottom_panel,
             minibuffer: vertical[2],
             status_bar: vertical[3],
@@ -63,10 +70,25 @@ pub fn visible_picker_preview(state: &SemanticState) -> Option<&semantic::Picker
         .filter(|preview| preview.visible && !preview.lines.is_empty())
 }
 
-fn file_tree_width(file_tree: Option<&semantic::FileTree>) -> u16 {
-    file_tree
-        .filter(|tree| tree.visible)
-        .map(|tree| tree.width)
+pub fn visible_file_tree(state: &SemanticState) -> Option<&semantic::FileTree> {
+    state
+        .file_tree()
+        .filter(|tree| tree.visible && tree.width > 0 && state.width() >= 50)
+}
+
+pub fn visible_sidebars(state: &SemanticState) -> Option<&semantic::Sidebars> {
+    state.sidebars().filter(|sidebars| {
+        sidebars.visible != 0 && sidebars.visible_count() > 0 && state.width() >= 60
+    })
+}
+
+fn left_chrome_width(state: &SemanticState) -> u16 {
+    if let Some(tree) = visible_file_tree(state) {
+        return tree.width.min(state.width().saturating_sub(1));
+    }
+
+    visible_sidebars(state)
+        .map(|sidebars| sidebars.preferred_width().min((state.width() / 4).max(18)))
         .unwrap_or(0)
 }
 
@@ -143,6 +165,8 @@ mod tests {
         assert_eq!(layout.status_bar.height, 1);
         assert_eq!(layout.bottom_panel.unwrap().height, 6);
         assert_eq!(layout.editor.height, 21);
+        assert_eq!(layout.file_tree.height, 21);
+        assert_eq!(layout.bottom_panel.unwrap().y, 22);
     }
 
     #[test]

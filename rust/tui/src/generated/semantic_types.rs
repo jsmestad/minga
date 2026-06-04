@@ -370,8 +370,7 @@ pub struct GuiPickerLoadStatus {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct GuiAgentChatHeader {
     pub visible: u8,
-    pub flags: u8,
-    pub message_count: u16,
+    pub status: u8,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

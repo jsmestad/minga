@@ -666,20 +666,14 @@ func DecodeGuiAgentChatHeader(data []byte, offset int) (GuiAgentChatHeader, int,
 	}
 	visible := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+1, "flags"); err != nil {
+	if err := decodeRequireLen(data, pos+1, "status"); err != nil {
 		return GuiAgentChatHeader{}, offset, err
 	}
-	flags := data[pos]
+	status := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+2, "message_count"); err != nil {
-		return GuiAgentChatHeader{}, offset, err
-	}
-	messageCount := decodeU16(data, pos)
-	pos += 2
 	return GuiAgentChatHeader{
-		Visible:      visible,
-		Flags:        flags,
-		MessageCount: messageCount,
+		Visible: visible,
+		Status:  status,
 	}, pos, nil
 }
 

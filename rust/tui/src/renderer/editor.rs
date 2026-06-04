@@ -10,7 +10,19 @@ use ratatui::widgets::{Block, Borders, Paragraph, Widget, Wrap};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-pub fn render_file_tree(file_tree: &semantic::FileTree, area: Rect, buffer: &mut Buffer) {
+#[derive(Clone, Copy)]
+struct RowRenderContext<'a> {
+    gutter: Option<&'a semantic::Gutter>,
+    indent_guides: Option<&'a semantic::IndentGuides>,
+    theme: Option<&'a semantic::Theme>,
+}
+
+pub fn render_file_tree(
+    file_tree: &semantic::FileTree,
+    theme_state: Option<&semantic::Theme>,
+    area: Rect,
+    buffer: &mut Buffer,
+) {
     let lines = file_tree.rows.iter().map(|row| {
         let indent = "  ".repeat(row.depth as usize);
         let marker = if row.id == file_tree.selected_id {
@@ -18,10 +30,52 @@ pub fn render_file_tree(file_tree: &semantic::FileTree, area: Rect, buffer: &mut
         } else {
             " "
         };
-        Line::from(format!("{marker}{indent}{} {}", row.icon, row.name))
+        let style = if row.id == file_tree.selected_id {
+            theme::tree_selected(theme_state)
+        } else if row.flags & 0x01 != 0 {
+            theme::tree_dir(theme_state)
+        } else {
+            theme::tree(theme_state)
+        };
+        Line::styled(format!("{marker}{indent}{} {}", row.icon, row.name), style)
     });
     Paragraph::new(lines.collect::<Vec<_>>())
-        .block(Block::default().borders(Borders::RIGHT))
+        .style(theme::tree(theme_state))
+        .wrap(Wrap { trim: false })
+        .render(area, buffer);
+}
+
+pub fn render_sidebars(
+    sidebars: &semantic::Sidebars,
+    theme_state: Option<&semantic::Theme>,
+    area: Rect,
+    buffer: &mut Buffer,
+) {
+    let lines = std::iter::once(Line::from(Span::styled(
+        "Sidebars",
+        theme::muted(theme_state),
+    )))
+    .chain(sidebars.visible_items().map(|sidebar| {
+        let label = if sidebar.icon.is_empty() {
+            sidebar.display_name.clone()
+        } else {
+            format!("{} {}", sidebar.icon, sidebar.display_name)
+        };
+        let badge = if sidebar.badge_count != u16::MAX && sidebar.badge_count > 0 {
+            format!(" {}", sidebar.badge_count)
+        } else {
+            String::new()
+        };
+        let style = if sidebar.id == sidebars.active_id || sidebar.focused {
+            theme::selected(theme_state)
+        } else {
+            theme::muted(theme_state)
+        };
+        Line::from(Span::styled(format!(" {label}{badge}"), style))
+    }))
+    .collect::<Vec<_>>();
+    Paragraph::new(lines)
+        .style(theme::tree(theme_state))
         .wrap(Wrap { trim: false })
         .render(area, buffer);
 }
@@ -31,10 +85,16 @@ pub fn render_windows(state: &SemanticState, area: Rect, buffer: &mut Buffer) {
         let rect = geometry::window_rect(window, area);
         let gutter = state.gutter(window.window_id);
         let indent_guides = state.indent_guides(window.window_id);
+        let row_context = RowRenderContext {
+            gutter,
+            indent_guides,
+            theme: state.theme(),
+        };
         let lines: Vec<Line<'_>> = (0..rect.height as usize)
-            .map(|row_index| window_line(window, row_index, rect.width, gutter, indent_guides))
+            .map(|row_index| window_line(window, row_index, rect.width, row_context))
             .collect();
         Paragraph::new(lines)
+            .style(theme::canvas(state.theme()))
             .wrap(Wrap { trim: false })
             .render(rect, buffer);
     }
@@ -87,19 +147,6 @@ pub fn render_separators(state: &SemanticState, area: Rect, buffer: &mut Buffer)
     }
 }
 
-pub fn render_breadcrumb(state: &SemanticState, area: Rect, buffer: &mut Buffer) {
-    let Some(breadcrumb) = state
-        .breadcrumb()
-        .filter(|breadcrumb| !breadcrumb.segments.is_empty())
-    else {
-        return;
-    };
-    let text = breadcrumb.segments.join(" / ");
-    Paragraph::new(text)
-        .style(theme::muted())
-        .render(Rect { height: 1, ..area }, buffer);
-}
-
 pub fn render_bottom_panel(state: &SemanticState, area: Rect, buffer: &mut Buffer) {
     let Some(panel) = state
         .bottom_panel()
@@ -120,7 +167,7 @@ pub fn render_bottom_panel(state: &SemanticState, area: Rect, buffer: &mut Buffe
         .collect();
     Paragraph::new(lines)
         .block(Block::default().borders(Borders::ALL).title(active_tab))
-        .style(theme::overlay())
+        .style(theme::overlay(state.theme()))
         .wrap(Wrap { trim: false })
         .render(area, buffer);
 }
@@ -129,17 +176,18 @@ fn window_line(
     window: &semantic::WindowContent,
     row_index: usize,
     width: u16,
-    gutter: Option<&semantic::Gutter>,
-    indent_guides: Option<&semantic::IndentGuides>,
+    context: RowRenderContext<'_>,
 ) -> Line<'static> {
     let cursorline_bg = window
         .cursorline
         .filter(|cursorline| cursorline.row as usize == row_index)
         .and_then(|cursorline| (cursorline.bg != 0).then_some(cursorline.bg));
-    let gutter_span = gutter.map(|gutter| render_gutter(gutter, row_index));
-    let gutter_width = gutter_span
-        .as_ref()
-        .map(|span| span.content.as_ref().width() as u16)
+    let gutter_span = context
+        .gutter
+        .map(|gutter| render_gutter(gutter, row_index, context.theme));
+    let gutter_width = context
+        .gutter
+        .map(|gutter| gutter_cell_width(gutter, row_index))
         .unwrap_or(0);
     let content_width = width.saturating_sub(gutter_width);
     let mut spans = Vec::new();
@@ -149,7 +197,7 @@ fn window_line(
     }
 
     if row_index >= window.rows.len() {
-        spans.extend(tilde_row(content_width, cursorline_bg));
+        spans.extend(tilde_row(content_width, cursorline_bg, context.theme));
     } else {
         spans.extend(row_line(
             window,
@@ -158,14 +206,26 @@ fn window_line(
             window.scroll_left,
             content_width,
             cursorline_bg,
-            indent_guides,
+            context,
         ));
     }
 
     Line::from(spans)
 }
 
-fn render_gutter(gutter: &semantic::Gutter, row_index: usize) -> Span<'static> {
+fn render_gutter(
+    gutter: &semantic::Gutter,
+    row_index: usize,
+    theme_state: Option<&semantic::Theme>,
+) -> Span<'static> {
+    Span::styled(gutter_text(gutter, row_index), theme::gutter(theme_state))
+}
+
+pub(crate) fn gutter_cell_width(gutter: &semantic::Gutter, row_index: usize) -> u16 {
+    gutter_text(gutter, row_index).width() as u16
+}
+
+fn gutter_text(gutter: &semantic::Gutter, row_index: usize) -> String {
     let line_number_width = gutter.line_number_width.max(1) as usize;
     let sign_width = gutter.sign_col_width as usize;
     let entry = gutter.entries.get(row_index);
@@ -179,19 +239,22 @@ fn render_gutter(gutter: &semantic::Gutter, row_index: usize) -> Span<'static> {
     let sign = entry
         .and_then(|entry| (!entry.sign_text.is_empty()).then_some(entry.sign_text.as_str()))
         .unwrap_or("");
-    let text = format!(
+    format!(
         "{sign:<sign_width$}{line_text:>line_number_width$} ",
         sign_width = sign_width,
         line_number_width = line_number_width
-    );
-    Span::styled(text, theme::gutter())
+    )
 }
 
-fn tilde_row(width: u16, cursorline_bg: Option<u32>) -> Vec<Span<'static>> {
+fn tilde_row(
+    width: u16,
+    cursorline_bg: Option<u32>,
+    theme_state: Option<&semantic::Theme>,
+) -> Vec<Span<'static>> {
     if width == 0 {
         return Vec::new();
     }
-    let mut style = theme::muted();
+    let mut style = theme::muted(theme_state);
     if let Some(bg) = cursorline_bg {
         style = style.bg(theme::rgb(bg));
     }
@@ -208,7 +271,7 @@ fn row_line(
     scroll_left: u16,
     width: u16,
     cursorline_bg: Option<u32>,
-    indent_guides: Option<&semantic::IndentGuides>,
+    context: RowRenderContext<'_>,
 ) -> Vec<Span<'static>> {
     let mut spans = Vec::new();
     let mut visible_width = 0;
@@ -225,7 +288,7 @@ fn row_line(
             break;
         }
 
-        let text = guide_text(grapheme, row_index, display_col, indent_guides);
+        let text = guide_text(grapheme, row_index, display_col, context.indent_guides);
         let span = span_at(&row.spans, display_col);
         let mut style = span
             .map(|span| theme::semantic(span.fg, span.bg, span.attrs as u16))
@@ -235,7 +298,7 @@ fn row_line(
         {
             style = style.bg(theme::rgb(bg));
         }
-        style = apply_window_overlays(style, window, row_index as u16, display_col);
+        style = apply_window_overlays(style, window, row_index as u16, display_col, context.theme);
         spans.push(Span::styled(text, style));
         visible_width = visible_width.saturating_add(grapheme_width);
         display_col = next_col;
@@ -270,6 +333,7 @@ fn apply_window_overlays(
     window: &semantic::WindowContent,
     row: u16,
     col: u16,
+    theme_state: Option<&semantic::Theme>,
 ) -> Style {
     if window.selection.selection_type != 0
         && range_contains(
@@ -281,7 +345,7 @@ fn apply_window_overlays(
             col,
         )
     {
-        style = style.bg(Color::DarkGray);
+        style = style.bg(theme::selection_bg(theme_state));
     }
 
     for highlight in &window.document_highlights {
@@ -293,14 +357,17 @@ fn apply_window_overlays(
             row,
             col,
         ) {
-            style = style.bg(document_highlight_color(highlight.kind));
+            style = style.bg(theme::document_highlight_bg(theme_state, highlight.kind));
             break;
         }
     }
 
     for search_match in &window.search_matches {
         if search_match.row == row && col >= search_match.start_col && col < search_match.end_col {
-            style = style.bg(search_match_color(search_match.is_current != 0));
+            style = style.bg(theme::search_match_bg(
+                theme_state,
+                search_match.is_current != 0,
+            ));
             break;
         }
     }
@@ -315,7 +382,7 @@ fn apply_window_overlays(
             col,
         ) {
             style = style
-                .fg(diagnostic_color(diagnostic.severity))
+                .fg(theme::diagnostic_fg(theme_state, diagnostic.severity))
                 .add_modifier(Modifier::UNDERLINED);
             break;
         }
@@ -342,31 +409,6 @@ fn range_contains(
         return false;
     }
     true
-}
-
-fn document_highlight_color(kind: u8) -> Color {
-    match kind {
-        2 => Color::Rgb(49, 65, 88),
-        3 => Color::Rgb(63, 72, 52),
-        _ => Color::Rgb(45, 58, 74),
-    }
-}
-
-fn search_match_color(current: bool) -> Color {
-    if current {
-        Color::Rgb(120, 82, 34)
-    } else {
-        Color::Rgb(78, 64, 38)
-    }
-}
-
-fn diagnostic_color(severity: u8) -> Color {
-    match severity {
-        0 | 1 => Color::Red,
-        2 => Color::Yellow,
-        3 => Color::Blue,
-        _ => Color::Gray,
-    }
 }
 
 fn annotations_for_row(
@@ -446,6 +488,43 @@ fn horizontal_separator_text(width: u16, filename: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::buffer::Buffer;
+
+    #[test]
+    fn file_tree_does_not_draw_an_extra_right_border() {
+        let file_tree = semantic::FileTree {
+            visible: true,
+            focused: true,
+            status: 0,
+            selected_id: "row-1".to_owned(),
+            root_path: String::new(),
+            width: 12,
+            error: String::new(),
+            rows: vec![semantic::FileTreeRow {
+                id: "row-1".to_owned(),
+                name: "main.ex".to_owned(),
+                icon: String::new(),
+                depth: 0,
+                flags: 0,
+                git_status: 0,
+                diagnostics: (0, 0, 0, 0),
+                editing_text: String::new(),
+            }],
+        };
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 12,
+            height: 3,
+        };
+        let mut buffer = Buffer::empty(area);
+
+        render_file_tree(&file_tree, None, area, &mut buffer);
+
+        assert_ne!(buffer.cell((11, 0)).unwrap().symbol(), "│");
+        assert_eq!(buffer.cell((11, 1)).unwrap().symbol(), " ");
+        assert_eq!(buffer.cell((11, 2)).unwrap().symbol(), " ");
+    }
 
     #[test]
     fn applies_window_overlay_styles_by_range_priority() {
@@ -458,8 +537,8 @@ mod tests {
             end_col: 4,
         };
         assert_eq!(
-            apply_window_overlays(Style::default(), &window, 0, 1).bg,
-            Some(Color::DarkGray)
+            apply_window_overlays(Style::default(), &window, 0, 1, None).bg,
+            Some(theme::selection_bg(None))
         );
 
         window.document_highlights = vec![semantic::DocumentHighlight {
@@ -470,8 +549,8 @@ mod tests {
             kind: 2,
         }];
         assert_eq!(
-            apply_window_overlays(Style::default(), &window, 0, 1).bg,
-            Some(document_highlight_color(2))
+            apply_window_overlays(Style::default(), &window, 0, 1, None).bg,
+            Some(theme::document_highlight_bg(None, 2))
         );
 
         window.search_matches = vec![semantic::SearchMatch {
@@ -481,8 +560,8 @@ mod tests {
             is_current: 1,
         }];
         assert_eq!(
-            apply_window_overlays(Style::default(), &window, 0, 1).bg,
-            Some(search_match_color(true))
+            apply_window_overlays(Style::default(), &window, 0, 1, None).bg,
+            Some(theme::search_match_bg(None, true))
         );
 
         window.diagnostic_ranges = vec![semantic::DiagnosticRange {
@@ -492,8 +571,8 @@ mod tests {
             end_col: 2,
             severity: 1,
         }];
-        let style = apply_window_overlays(Style::default(), &window, 0, 1);
-        assert_eq!(style.fg, Some(diagnostic_color(1)));
+        let style = apply_window_overlays(Style::default(), &window, 0, 1, None);
+        assert_eq!(style.fg, Some(theme::diagnostic_fg(None, 1)));
         assert!(style.add_modifier.contains(Modifier::UNDERLINED));
     }
 

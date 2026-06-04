@@ -476,16 +476,12 @@ pub fn decode_gui_agent_chat_header(bytes: &[u8], offset: usize) -> Result<(GuiA
     require_len(bytes, pos + 1, "visible")?;
     let visible = bytes[pos];
     pos += 1;
-    require_len(bytes, pos + 1, "flags")?;
-    let flags = bytes[pos];
+    require_len(bytes, pos + 1, "status")?;
+    let status = bytes[pos];
     pos += 1;
-    require_len(bytes, pos + 2, "message_count")?;
-    let message_count = read_u16(bytes, pos);
-    pos += 2;
     Ok((GuiAgentChatHeader {
         visible,
-        flags,
-        message_count,
+        status,
     }, pos - offset))
 }
 

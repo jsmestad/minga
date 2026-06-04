@@ -15,6 +15,44 @@ defmodule MingaEditor.Frontend.ManagerTest do
       refute Manager.ready?(name)
       assert Manager.terminal_size(name) == nil
     end
+
+    test "spawn mode opens renderer executable with tty env" do
+      name = unique_name()
+
+      renderer_path =
+        Path.join(System.tmp_dir!(), "minga-renderer-rs-#{System.unique_integer([:positive])}")
+
+      File.write!(renderer_path, "")
+      previous_tty = System.get_env("MINGA_TTY")
+      System.put_env("MINGA_TTY", "/dev/tty")
+      parent = self()
+
+      on_exit(fn ->
+        File.rm(renderer_path)
+
+        if previous_tty == nil do
+          System.delete_env("MINGA_TTY")
+        else
+          System.put_env("MINGA_TTY", previous_tty)
+        end
+      end)
+
+      capturing_opener = fn spec, opts ->
+        send(parent, {:port_open_args, spec, opts})
+        Port.open({:spawn, "cat 2>/dev/null"}, [:binary, {:packet, 4}])
+      end
+
+      start_supervised!(
+        {Manager, name: name, renderer_path: renderer_path, port_opener: capturing_opener},
+        id: name
+      )
+
+      assert_receive {:port_open_args, {:spawn_executable, ^renderer_path}, opts}
+      assert :binary in opts
+      assert :use_stdio in opts
+      assert {:packet, 4} in opts
+      assert {:env, [{~c"MINGA_TTY", ~c"/dev/tty"}]} in opts
+    end
   end
 
   describe "send_commands/2" do

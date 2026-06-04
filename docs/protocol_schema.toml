@@ -1605,8 +1605,7 @@ id = 0x01
 name = "header"
 fields = [
   {name = "visible", type = "u8"},
-  {name = "flags", type = "u8"},
-  {name = "message_count", type = "u16"},
+  {name = "status", type = "u8"},
 ]
 
 # gui_picker_preview (0x7D) sections

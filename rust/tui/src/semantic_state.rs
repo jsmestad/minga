@@ -43,8 +43,10 @@ pub struct SemanticState {
     board: Option<semantic::Board>,
     agent_chat: Option<semantic::AgentChat>,
     tool_manager: Option<semantic::ToolManager>,
+    theme: Option<semantic::Theme>,
     diagnostic: Option<String>,
     cursor: CursorState,
+    cursor_window_id: Option<u16>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -103,12 +105,14 @@ impl SemanticState {
             board: None,
             agent_chat: None,
             tool_manager: None,
+            theme: None,
             diagnostic: None,
             cursor: CursorState {
                 row: 0,
                 col: 0,
                 shape: 0,
             },
+            cursor_window_id: None,
         }
     }
 
@@ -127,6 +131,7 @@ impl SemanticState {
             ProtocolCommand::SetCursor { row, col } => {
                 self.cursor.row = row;
                 self.cursor.col = col;
+                self.cursor_window_id = None;
                 StateEffect::render()
             }
             ProtocolCommand::SetCursorShape(shape) => {
@@ -175,6 +180,10 @@ impl SemanticState {
             .filter_map(|window_id| self.windows.get(window_id))
     }
 
+    pub fn window(&self, window_id: u16) -> Option<&semantic::WindowContent> {
+        self.windows.get(&window_id)
+    }
+
     pub fn gutter(&self, window_id: u16) -> Option<&semantic::Gutter> {
         self.gutters.get(&window_id)
     }
@@ -205,10 +214,6 @@ impl SemanticState {
 
     pub fn minibuffer(&self) -> Option<&semantic::Minibuffer> {
         self.minibuffer.as_ref()
-    }
-
-    pub fn breadcrumb(&self) -> Option<&semantic::Breadcrumb> {
-        self.breadcrumb.as_ref()
     }
 
     pub fn completion(&self) -> Option<&semantic::Completion> {
@@ -295,6 +300,10 @@ impl SemanticState {
         self.tool_manager
     }
 
+    pub fn theme(&self) -> Option<&semantic::Theme> {
+        self.theme.as_ref()
+    }
+
     pub fn diagnostic(&self) -> Option<&str> {
         self.diagnostic.as_deref()
     }
@@ -303,9 +312,29 @@ impl SemanticState {
         self.cursor
     }
 
+    pub fn cursor_window_id(&self) -> Option<u16> {
+        self.cursor_window_id
+    }
+
     pub fn cursor_animation_enabled(&self) -> bool {
         self.cursor_animation
             .is_none_or(|cursor_animation| cursor_animation.enabled != 0)
+    }
+
+    pub fn debug_summary(&self) -> String {
+        let row_count: usize = self.windows.values().map(|window| window.rows.len()).sum();
+        format!(
+            "size={}x{} windows={} rows={} status_bar={} tab_bar={} file_tree={} bottom_panel={} diagnostic={}",
+            self.width,
+            self.height,
+            self.windows.len(),
+            row_count,
+            self.status_bar.is_some(),
+            self.tab_bar.is_some(),
+            self.file_tree.is_some(),
+            self.bottom_panel.is_some(),
+            self.diagnostic.is_some()
+        )
     }
 
     fn clear(&mut self) {
@@ -352,6 +381,7 @@ impl SemanticState {
             col: 0,
             shape: 0,
         };
+        self.cursor_window_id = None;
     }
 
     fn apply_semantic_command(&mut self, command: semantic::Command) -> StateEffect {
@@ -524,7 +554,10 @@ impl SemanticState {
                 self.tool_manager = Some(tool_manager);
                 StateEffect::render()
             }
-            semantic::Command::Theme(..) => StateEffect::render(),
+            semantic::Command::Theme(theme, _) => {
+                self.theme = Some(theme);
+                StateEffect::render()
+            }
         }
     }
 
@@ -539,6 +572,7 @@ impl SemanticState {
             col: window.origin_col.saturating_add(window.cursor_col),
             shape: window.cursor_shape,
         };
+        self.cursor_window_id = Some(window.window_id);
         self.windows.insert(window.window_id, window);
     }
 
@@ -597,6 +631,7 @@ impl SemanticState {
                 col: window.origin_col.saturating_add(delta.cursor_col),
                 shape: delta.cursor_shape,
             };
+            self.cursor_window_id = Some(window.window_id);
         }
     }
 
@@ -615,6 +650,7 @@ impl SemanticState {
                 col: window.origin_col.saturating_add(delta.cursor_col),
                 shape: delta.cursor_shape,
             };
+            self.cursor_window_id = Some(window.window_id);
         }
     }
 
@@ -774,6 +810,24 @@ mod tests {
     }
 
     #[test]
+    fn retains_theme_across_clear_frames() {
+        let mut state = SemanticState::new(80, 24);
+
+        state.apply_protocol_command(ProtocolCommand::Semantic(semantic::Command::Theme(
+            semantic::Theme {
+                slots: vec![semantic::ThemeSlot {
+                    id: 0x01,
+                    rgb: 0x112233,
+                }],
+            },
+            0,
+        )));
+        state.apply_protocol_command(ProtocolCommand::Clear);
+
+        assert_eq!(state.theme().unwrap().slots[0].rgb, 0x112233);
+    }
+
+    #[test]
     fn retains_simple_semantic_parity_state() {
         let mut state = SemanticState::new(80, 24);
 
@@ -856,7 +910,19 @@ mod tests {
         state.apply_protocol_command(ProtocolCommand::Semantic(semantic::Command::Sidebars(
             semantic::Sidebars {
                 visible: 1,
-                sidebar_count: 8,
+                active_id: "files".to_owned(),
+                items: vec![semantic::Sidebar {
+                    id: "files".to_owned(),
+                    display_name: "Files".to_owned(),
+                    semantic_kind: "file_tree".to_owned(),
+                    icon: "F".to_owned(),
+                    order: 0,
+                    flags: 0x03,
+                    preferred_width: 20,
+                    badge_count: 8,
+                    visible: true,
+                    focused: true,
+                }],
             },
             0,
         )));
@@ -872,8 +938,7 @@ mod tests {
         state.apply_protocol_command(ProtocolCommand::Semantic(semantic::Command::AgentChat(
             semantic::AgentChat {
                 visible: 1,
-                flags: 0,
-                message_count: 11,
+                status: 1,
             },
             0,
         )));
@@ -895,9 +960,9 @@ mod tests {
         assert_eq!(state.extension_overlay().unwrap().entry_count, 5);
         assert_eq!(state.extension_panel().unwrap().panel_count, 6);
         assert_eq!(state.observatory().unwrap().payload, vec![6, 7]);
-        assert_eq!(state.sidebars().unwrap().sidebar_count, 8);
+        assert_eq!(state.sidebars().unwrap().visible_count(), 1);
         assert_eq!(state.board.unwrap().card_count, 10);
-        assert_eq!(state.agent_chat().unwrap().message_count, 11);
+        assert_eq!(state.agent_chat().unwrap().status, 1);
         assert_eq!(state.tool_manager().unwrap().visible, 1);
 
         state.apply_protocol_command(ProtocolCommand::Clear);
