@@ -46,7 +46,7 @@ impl SemanticRenderer {
         }
 
         if let Some(status_bar) = state.status_bar() {
-            Self::render_status_bar(status_bar, vertical[2], buffer);
+            Self::render_status_bar(state, status_bar, vertical[2], buffer);
         }
 
         if let Some(diagnostic) = state.diagnostic() {
@@ -101,6 +101,7 @@ impl SemanticRenderer {
     }
 
     fn render_status_bar(
+        state: &SemanticState,
         status_bar: &semantic::StatusBar,
         area: Rect,
         buffer: &mut ratatui::buffer::Buffer,
@@ -114,13 +115,42 @@ impl SemanticRenderer {
             left.push_str("  ");
             left.push_str(&status_bar.branch);
         }
-        let right = format!("{}:{}", status_bar.line, status_bar.col);
+        let right = Self::status_right_text(state, status_bar);
         let width = area.width as usize;
         let padding = width.saturating_sub(left.len().saturating_add(right.len()));
         let text = format!("{left}{}{right}", " ".repeat(padding));
         Paragraph::new(text)
             .style(Style::default().fg(Color::White).bg(Color::DarkGray))
             .render(area, buffer);
+    }
+
+    fn status_right_text(state: &SemanticState, status_bar: &semantic::StatusBar) -> String {
+        let mut parts = Vec::new();
+
+        if let Some(search) = state.search_state().filter(|search| search.active != 0) {
+            let current = if search.match_count == 0 {
+                0
+            } else {
+                search.current_index.saturating_add(1)
+            };
+            parts.push(format!("search {current}/{}", search.match_count));
+        }
+
+        if let Some(notifications) = state.notifications().filter(|notifications| {
+            notifications.visible != 0 && notifications.notification_count > 0
+        }) {
+            parts.push(format!("notify {}", notifications.notification_count));
+        }
+
+        if let Some(agent_context) = state
+            .agent_context()
+            .filter(|agent_context| agent_context.visible != 0 && !agent_context.task.is_empty())
+        {
+            parts.push(format!("agent {}", agent_context.task));
+        }
+
+        parts.push(format!("{}:{}", status_bar.line, status_bar.col));
+        parts.join("  ")
     }
 
     fn render_file_tree(
@@ -265,7 +295,7 @@ mod tests {
 
     #[test]
     fn renders_retained_semantic_window_and_status_bar() {
-        let mut state = SemanticState::new(40, 6);
+        let mut state = SemanticState::new(80, 6);
         state.apply_protocol_command(crate::protocol::Command::Semantic(
             semantic::Command::WindowContent(
                 semantic::WindowContent {
@@ -295,8 +325,40 @@ mod tests {
                 0,
             ),
         ));
+        state.apply_protocol_command(crate::protocol::Command::Semantic(
+            semantic::Command::SearchState(
+                semantic::SearchState {
+                    active: 1,
+                    match_count: 5,
+                    current_index: 2,
+                    flags: 0,
+                },
+                0,
+            ),
+        ));
+        state.apply_protocol_command(crate::protocol::Command::Semantic(
+            semantic::Command::Notifications(
+                semantic::Notifications {
+                    visible: 1,
+                    notification_count: 2,
+                },
+                0,
+            ),
+        ));
+        state.apply_protocol_command(crate::protocol::Command::Semantic(
+            semantic::Command::AgentContext(
+                semantic::AgentContext {
+                    visible: 1,
+                    task: "review".to_owned(),
+                    timestamp: 0,
+                    status: 1,
+                    can_approve: 0,
+                },
+                0,
+            ),
+        ));
 
-        let mut terminal = Terminal::memory(40, 6);
+        let mut terminal = Terminal::memory(80, 6);
         SemanticRenderer::new()
             .render(&state, &mut terminal)
             .unwrap();
@@ -304,6 +366,9 @@ mod tests {
         let snapshot = terminal.buffer_text();
         assert!(snapshot.contains("hello semantic tui"));
         assert!(snapshot.contains("main.ex"));
+        assert!(snapshot.contains("search 3/5"));
+        assert!(snapshot.contains("notify 2"));
+        assert!(snapshot.contains("agent review"));
         assert!(snapshot.contains("12:3"));
     }
 }
