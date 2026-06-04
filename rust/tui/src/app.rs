@@ -7,6 +7,7 @@ use crate::semantic_state::SemanticState;
 use crate::signals;
 use crate::terminal::Terminal;
 use crossterm::event;
+use std::env;
 use std::io::{self, Write};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::thread;
@@ -22,11 +23,12 @@ enum LoopEvent {
 pub fn run() -> io::Result<()> {
     let mut terminal = Terminal::open()?;
     let (cols, rows) = terminal.size();
-    let mut stdout = io::stdout().lock();
+    let cli_args = env::args().skip(1).collect::<Vec<_>>();
+    let mut host = beam_host::open(cli_args)?;
     let image_support = images::ImageSupport::default();
 
     beam_host::send_ready(
-        &mut stdout,
+        host.output(),
         FrontendCapabilities {
             width: cols,
             height: rows,
@@ -34,7 +36,7 @@ pub fn run() -> io::Result<()> {
         },
     )?;
     beam_host::log_info(
-        &mut stdout,
+        host.output(),
         &format!("started semantic rust tui size={cols}x{rows}"),
     );
 
@@ -42,15 +44,16 @@ pub fn run() -> io::Result<()> {
     let mut renderer = SemanticRenderer::new();
     let resize_signal = signals::ResizeSignal::install().ok();
     let (events_tx, events_rx) = mpsc::channel();
-    spawn_packet_reader(events_tx.clone());
+    spawn_packet_reader(host.take_reader()?, events_tx.clone());
     spawn_input_reader(events_tx);
+    let mut backend_closed = false;
 
     loop {
         if resize_signal
             .as_ref()
             .is_some_and(signals::ResizeSignal::take)
         {
-            publish_resize(&mut terminal, &mut state, &mut stdout)?;
+            publish_resize(&mut terminal, &mut state, host.output())?;
         }
 
         match events_rx.recv_timeout(Duration::from_millis(100)) {
@@ -60,31 +63,43 @@ pub fn run() -> io::Result<()> {
                     &mut state,
                     &mut renderer,
                     &mut terminal,
-                    &mut stdout,
+                    host.output(),
                 )?;
             }
             Ok(LoopEvent::Input(event)) => {
-                handle_input_event(event, &mut terminal, &mut state, &mut stdout)?;
+                handle_input_event(event, &mut terminal, &mut state, host.output())?;
             }
-            Ok(LoopEvent::BackendClosed) => break,
+            Ok(LoopEvent::BackendClosed) => {
+                backend_closed = true;
+                break;
+            }
             Err(RecvTimeoutError::Timeout) => {
                 if let Some((width, height)) = terminal.poll_size()? {
                     state.resize(width, height);
-                    beam_host::send_resize(&mut stdout, width, height)?;
+                    beam_host::send_resize(host.output(), width, height)?;
                 }
             }
             Err(RecvTimeoutError::Disconnected) => break,
         }
     }
 
-    terminal.finish()
+    terminal.finish()?;
+
+    if backend_closed
+        && let Some(status) = host.finish()
+        && !status.success()
+    {
+        return Err(io::Error::other(format!("BEAM child exited with {status}")));
+    }
+
+    host.shutdown();
+    Ok(())
 }
 
-fn spawn_packet_reader(events_tx: Sender<LoopEvent>) {
+fn spawn_packet_reader(mut reader: Box<dyn beam_host::PacketReader>, events_tx: Sender<LoopEvent>) {
     thread::spawn(move || {
-        let mut stdin = io::stdin().lock();
         loop {
-            match beam_host::read_framed_packet(&mut stdin) {
+            match beam_host::read_framed_packet(&mut reader) {
                 Ok(Some(packet)) => {
                     if events_tx.send(LoopEvent::Packet(packet)).is_err() {
                         break;
@@ -118,7 +133,7 @@ fn spawn_input_reader(events_tx: Sender<LoopEvent>) {
 fn publish_resize(
     terminal: &mut Terminal,
     state: &mut SemanticState,
-    output: &mut impl Write,
+    output: &mut (impl Write + ?Sized),
 ) -> io::Result<()> {
     if let Some((width, height)) = terminal.poll_size()? {
         let _timer = animation::RESIZE_SETTLE.timer();
@@ -132,7 +147,7 @@ fn handle_input_event(
     event: input::Event,
     terminal: &mut Terminal,
     state: &mut SemanticState,
-    output: &mut impl Write,
+    output: &mut (impl Write + ?Sized),
 ) -> io::Result<()> {
     match event {
         input::Event::Resize { cols, rows } => {
@@ -154,7 +169,7 @@ fn handle_packet(
     state: &mut SemanticState,
     renderer: &mut SemanticRenderer,
     terminal: &mut Terminal,
-    output: &mut impl Write,
+    output: &mut (impl Write + ?Sized),
 ) -> io::Result<()> {
     let mut should_render = false;
 
