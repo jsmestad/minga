@@ -149,14 +149,13 @@ impl Terminal {
     }
 
     pub fn set_cursor_shape(&mut self, shape: u8) -> io::Result<()> {
+        self.set_cursor_style(shape, true)
+    }
+
+    pub fn set_cursor_style(&mut self, shape: u8, animated: bool) -> io::Result<()> {
         match &mut self.backend {
             Backend::Real(terminal) => {
-                let style = match shape {
-                    1 => SetCursorStyle::BlinkingBar,
-                    2 => SetCursorStyle::BlinkingUnderScore,
-                    _ => SetCursorStyle::BlinkingBlock,
-                };
-                execute!(terminal.backend_mut(), style)?;
+                execute!(terminal.backend_mut(), cursor_style(shape, animated))?;
             }
             #[cfg(test)]
             Backend::Test(_) => {}
@@ -218,6 +217,17 @@ fn env_u16(name: &str) -> Option<u16> {
     env::var(name).ok()?.parse().ok()
 }
 
+fn cursor_style(shape: u8, animated: bool) -> SetCursorStyle {
+    match (shape, animated) {
+        (1, true) => SetCursorStyle::BlinkingBar,
+        (1, false) => SetCursorStyle::SteadyBar,
+        (2, true) => SetCursorStyle::BlinkingUnderScore,
+        (2, false) => SetCursorStyle::SteadyUnderScore,
+        (_, true) => SetCursorStyle::BlinkingBlock,
+        (_, false) => SetCursorStyle::SteadyBlock,
+    }
+}
+
 fn osc52_clipboard_sequence(text: &str) -> String {
     format!("\x1b]52;c;{}\x07", base64_encode(text.as_bytes()))
 }
@@ -258,5 +268,15 @@ mod tests {
     fn encodes_osc52_clipboard_sequence() {
         assert_eq!(osc52_clipboard_sequence("hello"), "\x1b]52;c;aGVsbG8=\x07");
         assert_eq!(osc52_clipboard_sequence("λ\n"), "\x1b]52;c;zrsK\x07");
+    }
+
+    #[test]
+    fn cursor_style_uses_animation_flag() {
+        assert_eq!(cursor_style(0, true).to_string(), "\x1b[1 q");
+        assert_eq!(cursor_style(0, false).to_string(), "\x1b[2 q");
+        assert_eq!(cursor_style(2, true).to_string(), "\x1b[3 q");
+        assert_eq!(cursor_style(2, false).to_string(), "\x1b[4 q");
+        assert_eq!(cursor_style(1, true).to_string(), "\x1b[5 q");
+        assert_eq!(cursor_style(1, false).to_string(), "\x1b[6 q");
     }
 }
