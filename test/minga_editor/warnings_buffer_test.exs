@@ -3,6 +3,7 @@ defmodule MingaEditor.WarningsBufferTest do
 
   alias MingaEditor.BottomPanel
   alias MingaEditor.Frontend.Capabilities
+  alias Minga.Buffer
 
   describe "warnings in native GUI" do
     test "SPC b W opens the warnings bottom panel" do
@@ -44,7 +45,7 @@ defmodule MingaEditor.WarningsBufferTest do
 
       send_keys_sync(ctx, "<SPC>bW")
 
-      assert Enum.join(screen_text(ctx), "\n") =~ "*Messages*"
+      assert Buffer.buffer_name(active_window_buffer(ctx)) == "*Messages*"
     end
   end
 

@@ -8,7 +8,7 @@ defmodule MingaEditor.RenderModel.UI.CellLayerBuilderTest do
   alias MingaEditor.RenderModel.UI.CellLayerBuilder
   alias MingaEditor.RenderPipeline.Chrome
 
-  test "builds ordered TUI cell layers from chrome and frame compatibility data" do
+  test "does not route shared chrome through the cell compatibility layer" do
     face = Face.new(fg: 0xBBC2CF, bg: 0x282C34)
 
     chrome = %Chrome{
@@ -36,18 +36,10 @@ defmodule MingaEditor.RenderModel.UI.CellLayerBuilderTest do
 
     assert %CellLayer{} = layer = CellLayerBuilder.build(frame, chrome)
 
-    assert Enum.map(layer.pre_window_cells, & &1.text) == ["tabs", "tree", "agentic"]
+    assert layer.pre_window_cells == []
     assert Enum.map(layer.legacy_window_cells, & &1.text) == ["prompt"]
-
-    assert Enum.map(layer.post_window_cells, & &1.text) == [
-             "sep",
-             "status",
-             "agent",
-             "mini",
-             "splash"
-           ]
-
-    assert Enum.map(layer.overlay_cells, & &1.text) == ["hover"]
+    assert layer.post_window_cells == []
+    assert layer.overlay_cells == []
   end
 
   test "excludes semantic buffer windows from legacy compatibility cells" do

@@ -47,6 +47,9 @@ struct SemanticWindowState {
     content_epoch: u32,
 }
 
+const LEGACY_CELL_GRID_DIAGNOSTIC: &str =
+    "Semantic UI required: received legacy cell-grid frame without semantic content.";
+
 impl Default for Cell {
     fn default() -> Self {
         Self {
@@ -99,6 +102,8 @@ pub struct Renderer {
     change_summary_snapshot: Option<CellSnapshot>,
     git_status_snapshot: Option<CellSnapshot>,
     theme: ThemePalette,
+    legacy_cell_draws_in_frame: bool,
+    semantic_commands_in_frame: bool,
 }
 
 impl Renderer {
@@ -141,6 +146,8 @@ impl Renderer {
             change_summary_snapshot: None,
             git_status_snapshot: None,
             theme: ThemePalette::default(),
+            legacy_cell_draws_in_frame: false,
+            semantic_commands_in_frame: false,
         }
     }
 
@@ -225,6 +232,8 @@ impl Renderer {
     }
 
     fn clear(&mut self) {
+        self.legacy_cell_draws_in_frame = false;
+        self.semantic_commands_in_frame = false;
         for cell in &mut self.cells {
             *cell = Cell {
                 style: CellStyle {
@@ -249,6 +258,7 @@ impl Renderer {
     }
 
     fn draw_text(&mut self, draw: DrawText) {
+        self.legacy_cell_draws_in_frame = true;
         self.write_run(
             draw.row,
             draw.col,
@@ -265,6 +275,7 @@ impl Renderer {
 
     fn draw_styled_text(&mut self, draw: DrawStyledText) {
         let _ = (draw.font_weight, draw.font_id);
+        self.legacy_cell_draws_in_frame = true;
         self.write_run(
             draw.row,
             draw.col,
@@ -280,6 +291,7 @@ impl Renderer {
     }
 
     fn handle_semantic(&mut self, command: semantic::Command) {
+        self.semantic_commands_in_frame = true;
         match command {
             semantic::Command::WindowContent(window, _) => self.draw_semantic_window(window),
             semantic::Command::StatusBar(status, _) => self.draw_status_bar(status),
@@ -2238,6 +2250,10 @@ impl Renderer {
     }
 
     fn render(&mut self, terminal: &mut Terminal) -> io::Result<()> {
+        if self.legacy_cell_draws_in_frame && !self.semantic_commands_in_frame {
+            self.render_legacy_cell_grid_diagnostic();
+        }
+
         let width = self.width;
         let height = self.height;
         let cursor = self.cursor;
@@ -2264,7 +2280,34 @@ impl Renderer {
             }
             frame.set_cursor_position((cursor.0, cursor.1));
         })?;
-        terminal.flush()
+        let result = terminal.flush();
+        self.legacy_cell_draws_in_frame = false;
+        self.semantic_commands_in_frame = false;
+        result
+    }
+
+    fn render_legacy_cell_grid_diagnostic(&mut self) {
+        for cell in &mut self.cells {
+            *cell = Cell {
+                style: CellStyle {
+                    bg: self.default_bg,
+                    ..CellStyle::default()
+                },
+                ..Cell::default()
+            };
+        }
+        self.write_run(
+            0,
+            0,
+            LEGACY_CELL_GRID_DIAGNOSTIC,
+            CellStyle {
+                fg: 0xFF6C6B,
+                bg: self.default_bg,
+                attrs: 0x01,
+                ul_color: 0,
+                blend: 100,
+            },
+        );
     }
 
     fn index(&self, col: u16, row: u16) -> Option<usize> {
@@ -2803,6 +2846,47 @@ mod tests {
         assert_eq!(renderer.cells.len(), 12);
         assert!(renderer.regions.is_empty());
         assert!(renderer.active_region.is_none());
+    }
+
+    #[test]
+    fn legacy_cell_only_batch_renders_semantic_required_diagnostic() {
+        let mut renderer = Renderer::new(80, 4);
+        let mut terminal = Terminal::memory(80, 4);
+        let mut output = Vec::new();
+
+        renderer
+            .handle(
+                Command::DrawText(DrawText {
+                    row: 0,
+                    col: 0,
+                    fg: 1,
+                    bg: 2,
+                    attrs: 0,
+                    text: "legacy status bar".to_owned(),
+                }),
+                &mut terminal,
+                &mut output,
+            )
+            .unwrap();
+        renderer
+            .handle(Command::BatchEnd, &mut terminal, &mut output)
+            .unwrap();
+
+        let first_row: String = renderer
+            .cells
+            .iter()
+            .take(renderer.width as usize)
+            .map(|cell| cell.text.as_str())
+            .collect();
+        assert!(first_row.starts_with("Semantic UI required"));
+        assert!(
+            !renderer
+                .cells
+                .iter()
+                .any(|cell| cell.text.contains("legacy status bar"))
+        );
+        assert!(!renderer.legacy_cell_draws_in_frame);
+        assert!(!renderer.semantic_commands_in_frame);
     }
 
     #[test]

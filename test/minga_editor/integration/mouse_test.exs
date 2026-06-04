@@ -43,22 +43,6 @@ defmodule Minga.Integration.MouseTest do
     ctx
   end
 
-  defp file_tree_separator_col(ctx) do
-    wait_until_screen(
-      ctx,
-      fn ->
-        screen_row(ctx, 1)
-        |> String.graphemes()
-        |> Enum.any?(&(&1 == "│"))
-      end,
-      message: "expected file tree separator"
-    )
-
-    screen_row(ctx, 1)
-    |> String.graphemes()
-    |> Enum.find_index(&(&1 == "│"))
-  end
-
   describe "live editor mouse routing" do
     test "left click moves the buffer cursor through the input router" do
       ctx = start_editor("hello world\nsecond line\nthird line")
@@ -73,11 +57,12 @@ defmodule Minga.Integration.MouseTest do
       ctx = start_editor_with_project("hello world")
 
       send_keys_sync(ctx, "<Space>op")
-      tree_sep = file_tree_separator_col(ctx)
+      assert file_tree_open?(ctx)
+      tree_width = EditorState.file_tree_state(editor_state(ctx)).tree_width
 
       send_mouse(ctx, 5, div(ctx.width, 2), :left)
 
-      send_mouse(ctx, 5, max(tree_sep - 2, 0), :left)
+      send_mouse(ctx, 5, max(tree_width - 2, 0), :left)
       state = editor_state(ctx)
 
       assert FileTree.focused?(EditorState.file_tree_state(state)),

@@ -19,7 +19,17 @@ func (m Model) content() string {
 	if len(m.windows) > 0 {
 		return strings.Join(m.fillBody(m.withFileTree(m.withSplitSeparators(m.semanticLines()))), "\n")
 	}
+	if len(m.cells) > 0 {
+		return strings.Join(m.fillBody(m.legacyCellGridDiagnosticLines()), "\n")
+	}
 	return strings.Join(m.fillBody(m.withFileTree(m.withSplitSeparators(m.withLegacyCursorline(m.cellLines())))), "\n")
+}
+
+func (m Model) legacyCellGridDiagnosticLines() []string {
+	return []string{
+		"Semantic UI required: received legacy cell-grid frame without semantic window content.",
+		"Shared chrome must be emitted as Semantic UI, not draw_text cells.",
+	}
 }
 
 func (m Model) semanticLines() []string {
