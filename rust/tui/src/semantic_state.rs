@@ -216,6 +216,10 @@ impl SemanticState {
         self.minibuffer.as_ref()
     }
 
+    pub fn breadcrumb(&self) -> Option<&semantic::Breadcrumb> {
+        self.breadcrumb.as_ref()
+    }
+
     pub fn completion(&self) -> Option<&semantic::Completion> {
         self.completion.as_ref()
     }
@@ -264,16 +268,16 @@ impl SemanticState {
         self.search_state
     }
 
-    pub fn notifications(&self) -> Option<semantic::Notifications> {
-        self.notifications
+    pub fn notifications(&self) -> Option<&semantic::Notifications> {
+        self.notifications.as_ref()
     }
 
     pub fn workspaces(&self) -> Option<&semantic::Workspaces> {
         self.workspaces.as_ref()
     }
 
-    pub fn edit_timeline(&self) -> Option<semantic::EditTimeline> {
-        self.edit_timeline
+    pub fn edit_timeline(&self) -> Option<&semantic::EditTimeline> {
+        self.edit_timeline.as_ref()
     }
 
     pub fn extension_overlay(&self) -> Option<semantic::ExtensionOverlay> {
@@ -292,12 +296,16 @@ impl SemanticState {
         self.sidebars.as_ref()
     }
 
-    pub fn agent_chat(&self) -> Option<semantic::AgentChat> {
-        self.agent_chat
+    pub fn board(&self) -> Option<&semantic::Board> {
+        self.board.as_ref()
     }
 
-    pub fn tool_manager(&self) -> Option<semantic::ToolManager> {
-        self.tool_manager
+    pub fn agent_chat(&self) -> Option<&semantic::AgentChat> {
+        self.agent_chat.as_ref()
+    }
+
+    pub fn tool_manager(&self) -> Option<&semantic::ToolManager> {
+        self.tool_manager.as_ref()
     }
 
     pub fn theme(&self) -> Option<&semantic::Theme> {
@@ -873,6 +881,7 @@ mod tests {
             semantic::Notifications {
                 visible: 1,
                 notification_count: 2,
+                items: Vec::new(),
             },
             0,
         )));
@@ -893,6 +902,7 @@ mod tests {
                 visible: 1,
                 viewing_index: 1,
                 entry_count: 4,
+                entries: Vec::new(),
             },
             0,
         )));
@@ -905,6 +915,8 @@ mod tests {
         state.apply_protocol_command(ProtocolCommand::Semantic(semantic::Command::Observatory(
             semantic::Observatory {
                 visible: true,
+                count: 0,
+                nodes: Vec::new(),
                 payload: vec![6, 7],
             },
             0,
@@ -934,6 +946,7 @@ mod tests {
                 focused_card_id: 9,
                 card_count: 10,
                 filter_mode: 0,
+                cards: Vec::new(),
             },
             0,
         )));
@@ -941,11 +954,20 @@ mod tests {
             semantic::AgentChat {
                 visible: 1,
                 status: 1,
+                model_name: String::new(),
+                prompt: String::new(),
+                pending: String::new(),
+                thinking_level: String::new(),
+                messages: Vec::new(),
             },
             0,
         )));
         state.apply_protocol_command(ProtocolCommand::Semantic(semantic::Command::ToolManager(
-            semantic::ToolManager { visible: 1 },
+            semantic::ToolManager {
+                visible: 1,
+                selected: 0,
+                tools: Vec::new(),
+            },
             0,
         )));
 
@@ -963,7 +985,7 @@ mod tests {
         assert_eq!(state.extension_panel().unwrap().panel_count, 6);
         assert_eq!(state.observatory().unwrap().payload, vec![6, 7]);
         assert_eq!(state.sidebars().unwrap().visible_count(), 1);
-        assert_eq!(state.board.unwrap().card_count, 10);
+        assert_eq!(state.board.as_ref().unwrap().card_count, 10);
         assert_eq!(state.agent_chat().unwrap().status, 1);
         assert_eq!(state.tool_manager().unwrap().visible, 1);
 

@@ -172,6 +172,8 @@ pub struct TabBar {
 pub struct Tab {
     pub active: bool,
     pub dirty: bool,
+    pub attention: bool,
+    pub icon: String,
     pub label: String,
     pub tint: u32,
 }
@@ -624,17 +626,33 @@ pub struct WorkspaceTab {
     pub tint: u32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Notifications {
     pub visible: u8,
     pub notification_count: u16,
+    pub items: Vec<NotificationItem>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotificationItem {
+    pub title: String,
+    pub body: String,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EditTimeline {
     pub visible: u8,
     pub viewing_index: u16,
     pub entry_count: u8,
+    pub entries: Vec<TimelineEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TimelineEntry {
+    pub index: u8,
+    pub tool_name: String,
+    pub timestamp_delta: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -650,7 +668,17 @@ pub struct ExtensionPanel {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Observatory {
     pub visible: bool,
+    pub count: u16,
+    pub nodes: Vec<ObservatoryNode>,
     pub payload: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObservatoryNode {
+    pub pid: String,
+    pub name: String,
+    pub depth: u8,
+    pub message_queue_len: u16,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -691,23 +719,58 @@ impl Sidebars {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Board {
     pub visible: u8,
     pub focused_card_id: u32,
     pub card_count: u16,
     pub filter_mode: u8,
+    pub cards: Vec<BoardCard>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BoardCard {
+    pub id: u32,
+    pub status: u8,
+    pub flags: u8,
+    pub task: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentChat {
     pub visible: u8,
     pub status: u8,
+    pub model_name: String,
+    pub prompt: String,
+    pub pending: String,
+    pub thinking_level: String,
+    pub messages: Vec<AgentChatMessage>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentChatMessage {
+    pub id: u32,
+    pub kind: u8,
+    pub text: String,
+    pub name: String,
+    pub summary: String,
+    pub status: u8,
+    pub is_error: bool,
+    pub collapsed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolManager {
     pub visible: u8,
+    pub selected: u16,
+    pub tools: Vec<ToolSummary>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolSummary {
+    pub name: String,
+    pub label: String,
+    pub status: u8,
 }
 
 pub fn decode(bytes: &[u8]) -> Result<Command, DecodeError> {
@@ -1084,7 +1147,9 @@ fn decode_tab_bar(bytes: &[u8]) -> Result<Command, DecodeError> {
     for _ in 0..count {
         let flags = bytes[offset];
         let icon_len = bytes[offset + 7] as usize;
-        offset += 8 + icon_len;
+        offset += 8;
+        let icon = read_string(bytes, offset, icon_len)?;
+        offset += icon_len;
         let label_len = read_u16(bytes, offset) as usize;
         offset += 2;
         let label = read_string(bytes, offset, label_len)?;
@@ -1094,6 +1159,8 @@ fn decode_tab_bar(bytes: &[u8]) -> Result<Command, DecodeError> {
         tabs.push(Tab {
             active: flags & 0x01 != 0,
             dirty: flags & 0x02 != 0,
+            attention: flags & 0x08 != 0,
+            icon,
             label,
             tint,
         });
@@ -2174,10 +2241,55 @@ fn decode_workspaces(bytes: &[u8]) -> Result<Command, DecodeError> {
 fn decode_notifications(bytes: &[u8]) -> Result<Command, DecodeError> {
     let size = len16_size(bytes)?;
     require_len(bytes, 6, "notifications fields")?;
+    let body = &bytes[3..size];
+    let visible = body[0];
+    let count = read_u16(body, 1) as usize;
+    let mut offset = 3;
+    let mut items = Vec::with_capacity(count);
+    for _ in 0..count {
+        if offset + 22 > body.len() {
+            break;
+        }
+        let id_result = read_string16(body, &mut offset);
+        if id_result.is_err() {
+            break;
+        }
+        if offset + 22 > body.len() {
+            break;
+        }
+        offset += 22;
+        let title = match read_string16(body, &mut offset) {
+            Ok(s) => s,
+            Err(_) => break,
+        };
+        let body_text = match read_string16(body, &mut offset) {
+            Ok(s) => s,
+            Err(_) => break,
+        };
+        let source = match read_string16(body, &mut offset) {
+            Ok(s) => s,
+            Err(_) => break,
+        };
+        if offset >= body.len() {
+            break;
+        }
+        let action_count = body[offset] as usize;
+        offset += 1;
+        for _ in 0..action_count {
+            let _ = read_string16(body, &mut offset);
+            let _ = read_string16(body, &mut offset);
+        }
+        items.push(NotificationItem {
+            title,
+            body: body_text,
+            source,
+        });
+    }
     Ok(Command::Notifications(
         Notifications {
-            visible: bytes[3],
-            notification_count: read_u16(bytes, 4),
+            visible,
+            notification_count: count as u16,
+            items,
         },
         size,
     ))
@@ -2186,11 +2298,39 @@ fn decode_notifications(bytes: &[u8]) -> Result<Command, DecodeError> {
 fn decode_edit_timeline(bytes: &[u8]) -> Result<Command, DecodeError> {
     let size = len16_size(bytes)?;
     require_len(bytes, 7, "edit timeline fields")?;
+    let body = &bytes[3..size];
+    let visible = body[0];
+    let viewing_index = read_u16(body, 1);
+    let count = body[3] as usize;
+    let mut offset = 4;
+    let mut entries = Vec::with_capacity(count);
+    for _ in 0..count {
+        if offset + 1 > body.len() {
+            break;
+        }
+        let index = body[offset];
+        offset += 1;
+        let tool_name = match read_string8(body, &mut offset) {
+            Ok(s) => s,
+            Err(_) => break,
+        };
+        if offset + 4 > body.len() {
+            break;
+        }
+        let timestamp_delta = read_u32(body, offset);
+        offset += 4;
+        entries.push(TimelineEntry {
+            index,
+            tool_name,
+            timestamp_delta,
+        });
+    }
     Ok(Command::EditTimeline(
         EditTimeline {
-            visible: bytes[3],
-            viewing_index: read_u16(bytes, 4),
-            entry_count: bytes[6],
+            visible,
+            viewing_index,
+            entry_count: count as u8,
+            entries,
         },
         size,
     ))
@@ -2221,9 +2361,66 @@ fn decode_extension_panel(bytes: &[u8]) -> Result<Command, DecodeError> {
 fn decode_observatory(bytes: &[u8]) -> Result<Command, DecodeError> {
     let size = len32_size(bytes)?;
     require_len(bytes, size, "observatory payload")?;
-    let payload = bytes[5..size].to_vec();
-    let visible = payload.first().is_some_and(|&b| b != 0);
-    Ok(Command::Observatory(Observatory { visible, payload }, size))
+    let body = &bytes[5..size];
+    let mut visible = false;
+    let mut count = 0u16;
+    let mut nodes = Vec::new();
+    let mut offset = 0;
+    while offset + 3 <= body.len() {
+        let section_id = body[offset];
+        let section_len = read_u16(body, offset + 1) as usize;
+        offset += 3;
+        if body.len() < offset + section_len {
+            break;
+        }
+        let section = &body[offset..offset + section_len];
+        offset += section_len;
+        match section_id {
+            0x01 => {
+                if section.len() >= 3 {
+                    visible = section[0] != 0;
+                    count = read_u16(section, 1);
+                }
+            }
+            0x02 => {
+                let mut pos = 0;
+                while pos < section.len() {
+                    let pid = match read_string8(section, &mut pos) {
+                        Ok(s) => s,
+                        Err(_) => break,
+                    };
+                    let _ = read_string8(section, &mut pos);
+                    let name = match read_string16(section, &mut pos) {
+                        Ok(s) => s,
+                        Err(_) => break,
+                    };
+                    if pos + 12 > section.len() {
+                        break;
+                    }
+                    let depth = section[pos + 1];
+                    let message_queue_len = read_u16(section, pos + 6);
+                    pos += 12;
+                    nodes.push(ObservatoryNode {
+                        pid,
+                        name,
+                        depth,
+                        message_queue_len,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    let payload = body.to_vec();
+    Ok(Command::Observatory(
+        Observatory {
+            visible,
+            count,
+            nodes,
+            payload,
+        },
+        size,
+    ))
 }
 
 fn decode_sidebars(bytes: &[u8]) -> Result<Command, DecodeError> {
@@ -2275,12 +2472,58 @@ fn decode_sidebars(bytes: &[u8]) -> Result<Command, DecodeError> {
 fn decode_board(bytes: &[u8]) -> Result<Command, DecodeError> {
     let size = board_size(bytes)?;
     require_len(bytes, 9, "board fields")?;
+    let visible = bytes[1];
+    let focused_card_id = read_u32(bytes, 2);
+    let count = read_u16(bytes, 6) as usize;
+    let filter_mode = bytes[8];
+    let mut offset = 9;
+    let _ = read_string16(bytes, &mut offset);
+    let mut cards = Vec::with_capacity(count);
+    for _ in 0..count {
+        if offset + 6 > bytes.len().min(size) {
+            break;
+        }
+        let id = read_u32(bytes, offset);
+        let status = bytes[offset + 4];
+        let flags = bytes[offset + 5];
+        offset += 6;
+        let task = match read_string16(bytes, &mut offset) {
+            Ok(s) => s,
+            Err(_) => break,
+        };
+        let _ = read_string8(bytes, &mut offset);
+        if offset + 5 > bytes.len().min(size) {
+            cards.push(BoardCard {
+                id,
+                status,
+                flags,
+                task,
+            });
+            break;
+        }
+        let file_count = bytes[offset + 4] as usize;
+        offset += 5;
+        for _ in 0..file_count {
+            let _ = read_string16(bytes, &mut offset);
+        }
+        if offset < bytes.len().min(size) {
+            let spark_count = bytes[offset] as usize;
+            offset += 1 + spark_count * 2;
+        }
+        cards.push(BoardCard {
+            id,
+            status,
+            flags,
+            task,
+        });
+    }
     Ok(Command::Board(
         Board {
-            visible: bytes[1],
-            focused_card_id: read_u32(bytes, 2),
-            card_count: read_u16(bytes, 6),
-            filter_mode: bytes[8],
+            visible,
+            focused_card_id,
+            card_count: count as u16,
+            filter_mode,
+            cards,
         },
         size,
     ))
@@ -2292,24 +2535,222 @@ fn decode_agent_chat(bytes: &[u8]) -> Result<Command, DecodeError> {
     let mut chat = AgentChat {
         visible: 0,
         status: 0,
+        model_name: String::new(),
+        prompt: String::new(),
+        pending: String::new(),
+        thinking_level: String::new(),
+        messages: Vec::new(),
     };
 
     for (section_id, payload) in secs {
-        if section_id == 0x01 {
-            let (header, _) = semantic_decode::decode_gui_agent_chat_header(payload, 0)?;
-            chat.visible = header.visible;
-            chat.status = header.status;
+        match section_id {
+            0x01 => {
+                let (header, _) = semantic_decode::decode_gui_agent_chat_header(payload, 0)?;
+                chat.visible = header.visible;
+                chat.status = header.status;
+            }
+            0x02 => {
+                let mut off = 0;
+                if let Ok(name) = read_string16(payload, &mut off) {
+                    chat.model_name = name;
+                }
+            }
+            0x03 => {
+                let mut off = 0;
+                if let Ok(prompt) = read_string16(payload, &mut off) {
+                    chat.prompt = prompt;
+                }
+            }
+            0x04 => {
+                if !payload.is_empty() && payload[0] != 0 {
+                    let mut off = 1;
+                    let name = read_string16(payload, &mut off).unwrap_or_default();
+                    let summary = read_string16(payload, &mut off).unwrap_or_default();
+                    chat.pending = format!("{} {}", name, summary).trim().to_owned();
+                }
+            }
+            0x06 => {
+                chat.messages = decode_agent_messages(payload);
+            }
+            0x08 => {
+                let mut off = 0;
+                if let Ok(level) = read_string16(payload, &mut off) {
+                    chat.thinking_level = level;
+                }
+            }
+            _ => {}
         }
     }
 
     Ok(Command::AgentChat(chat, size))
 }
 
+fn decode_agent_messages(section: &[u8]) -> Vec<AgentChatMessage> {
+    if section.len() < 4 || section[0] != 0xFF {
+        return Vec::new();
+    }
+    let count = read_u16(section, 2) as usize;
+    let mut offset = 4;
+    let mut messages = Vec::with_capacity(count);
+    for _ in 0..count {
+        if offset + 4 > section.len() {
+            break;
+        }
+        let msg_size = read_u32(section, offset) as usize;
+        offset += 4;
+        if offset + msg_size > section.len() {
+            break;
+        }
+        if let Some(msg) = decode_agent_message(&section[offset..offset + msg_size]) {
+            messages.push(msg);
+        }
+        offset += msg_size;
+    }
+    messages
+}
+
+fn decode_agent_message(body: &[u8]) -> Option<AgentChatMessage> {
+    if body.len() < 5 {
+        return None;
+    }
+    let id = read_u32(body, 0);
+    let kind = body[4];
+    let mut msg = AgentChatMessage {
+        id,
+        kind,
+        text: String::new(),
+        name: String::new(),
+        summary: String::new(),
+        status: 0,
+        is_error: false,
+        collapsed: false,
+    };
+    let mut offset = 5;
+    match kind {
+        0x01 | 0x02 => {
+            if offset + 4 <= body.len() {
+                let text_size = read_u32(body, offset) as usize;
+                offset += 4;
+                if offset + text_size <= body.len() {
+                    msg.text = String::from_utf8_lossy(&body[offset..offset + text_size]).into_owned();
+                }
+            }
+        }
+        0x03 => {
+            if offset + 5 <= body.len() {
+                msg.collapsed = body[offset] != 0;
+                let text_size = read_u32(body, offset + 1) as usize;
+                offset += 5;
+                if offset + text_size <= body.len() {
+                    msg.text = String::from_utf8_lossy(&body[offset..offset + text_size]).into_owned();
+                }
+            }
+        }
+        0x04 | 0x08 => {
+            if offset + 7 <= body.len() {
+                msg.status = body[offset];
+                msg.is_error = body[offset + 1] != 0;
+                msg.collapsed = body[offset + 2] != 0;
+                offset += 7;
+                msg.name = read_string16(body, &mut offset).unwrap_or_default();
+                msg.summary = read_string16(body, &mut offset).unwrap_or_default();
+                msg.text = format!("{} {}", msg.name, msg.summary).trim().to_owned();
+            }
+        }
+        0x05 => {
+            if offset + 5 <= body.len() {
+                msg.status = body[offset];
+                let text_size = read_u32(body, offset + 1) as usize;
+                offset += 5;
+                if offset + text_size <= body.len() {
+                    msg.text = String::from_utf8_lossy(&body[offset..offset + text_size]).into_owned();
+                }
+            }
+        }
+        0x06 => {
+            if offset + 20 <= body.len() {
+                let input = read_u32(body, offset);
+                let output = read_u32(body, offset + 4);
+                msg.text = format!("usage in:{input} out:{output}");
+            }
+        }
+        0x09 => {
+            msg.status = body.get(offset).copied().unwrap_or(0);
+            offset += 1;
+            msg.name = read_string16(body, &mut offset).unwrap_or_default();
+            msg.summary = read_string16(body, &mut offset).unwrap_or_default();
+            msg.text = format!("{} {}", msg.name, msg.summary).trim().to_owned();
+        }
+        _ => {}
+    }
+    Some(msg)
+}
+
 fn decode_tool_manager(bytes: &[u8]) -> Result<Command, DecodeError> {
     let size = tool_manager_size(bytes)?;
     require_len(bytes, 2, "tool manager visible")?;
+    let visible = bytes[1];
+    if visible == 0 || size < 7 {
+        return Ok(Command::ToolManager(
+            ToolManager {
+                visible,
+                selected: 0,
+                tools: Vec::new(),
+            },
+            size,
+        ));
+    }
+    let selected = read_u16(bytes, 3);
+    let count = read_u16(bytes, 5) as usize;
+    let mut offset = 7;
+    let mut tools = Vec::with_capacity(count);
+    for _ in 0..count {
+        let name = match read_string8(bytes, &mut offset) {
+            Ok(s) => s,
+            Err(_) => break,
+        };
+        let label = match read_string8(bytes, &mut offset) {
+            Ok(s) => s,
+            Err(_) => break,
+        };
+        let _ = read_string16(bytes, &mut offset);
+        if offset + 4 > bytes.len().min(size) {
+            break;
+        }
+        let status = bytes[offset + 1];
+        let lang_count = bytes[offset + 3] as usize;
+        offset += 4;
+        for _ in 0..lang_count {
+            let _ = read_string8(bytes, &mut offset);
+        }
+        let _ = read_string8(bytes, &mut offset);
+        let _ = read_string16(bytes, &mut offset);
+        if offset >= bytes.len().min(size) {
+            tools.push(ToolSummary {
+                name,
+                label,
+                status,
+            });
+            break;
+        }
+        let provides_count = bytes[offset] as usize;
+        offset += 1;
+        for _ in 0..provides_count {
+            let _ = read_string8(bytes, &mut offset);
+        }
+        let _ = read_string16(bytes, &mut offset);
+        tools.push(ToolSummary {
+            name,
+            label,
+            status,
+        });
+    }
     Ok(Command::ToolManager(
-        ToolManager { visible: bytes[1] },
+        ToolManager {
+            visible,
+            selected,
+            tools,
+        },
         size,
     ))
 }
@@ -3539,7 +3980,8 @@ mod tests {
             Command::AgentChat(
                 AgentChat {
                     visible: 1,
-                    status: 2
+                    status: 2,
+                    ..
                 },
                 _
             )
@@ -3551,7 +3993,7 @@ mod tests {
         assert_eq!(semantic_size(&packet).unwrap(), packet.len() - 1);
         assert!(matches!(
             command,
-            Command::ToolManager(ToolManager { visible: 1 }, _)
+            Command::ToolManager(ToolManager { visible: 1, .. }, _)
         ));
     }
 
@@ -3801,7 +4243,7 @@ mod tests {
         assert_eq!(size, 2);
         assert!(matches!(
             command,
-            Command::ToolManager(ToolManager { visible: 0 }, 2)
+            Command::ToolManager(ToolManager { visible: 0, .. }, 2)
         ));
         assert!(matches!(
             decode(&packet[size..]).unwrap(),
@@ -3830,7 +4272,8 @@ mod tests {
             Command::Notifications(
                 Notifications {
                     visible: 1,
-                    notification_count: 5
+                    notification_count: 5,
+                    ..
                 },
                 6
             )

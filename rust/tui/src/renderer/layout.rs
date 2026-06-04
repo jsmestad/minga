@@ -7,6 +7,7 @@ pub struct FrameLayout {
     pub area: Rect,
     pub workspace_bar: Rect,
     pub tab_bar: Rect,
+    pub breadcrumb: Rect,
     pub body: Rect,
     pub file_tree: Rect,
     pub editor: Rect,
@@ -26,6 +27,11 @@ impl FrameLayout {
                     0
                 }),
                 Constraint::Length(if state.tab_bar().is_some() { 1 } else { 0 }),
+                Constraint::Length(if visible_breadcrumb(state).is_some() {
+                    1
+                } else {
+                    0
+                }),
                 Constraint::Min(1),
                 Constraint::Length(if visible_minibuffer(state).is_some() {
                     1
@@ -36,7 +42,7 @@ impl FrameLayout {
             ])
             .split(area);
 
-        let (main_body, bottom_row) = bottom_panel_split(state.bottom_panel(), vertical[2]);
+        let (main_body, bottom_row) = bottom_panel_split(state.bottom_panel(), vertical[3]);
 
         let horizontal = Layout::default()
             .direction(Direction::Horizontal)
@@ -57,12 +63,13 @@ impl FrameLayout {
             area,
             workspace_bar: vertical[0],
             tab_bar: vertical[1],
-            body: vertical[2],
+            breadcrumb: vertical[2],
+            body: vertical[3],
             file_tree: horizontal[0],
             editor: horizontal[1],
             bottom_panel,
-            minibuffer: vertical[3],
-            status_bar: vertical[4],
+            minibuffer: vertical[4],
+            status_bar: vertical[5],
         }
     }
 }
@@ -71,6 +78,12 @@ pub fn visible_workspaces(state: &SemanticState) -> Option<&semantic::Workspaces
     state
         .workspaces()
         .filter(|workspaces| workspaces.visible != 0 && workspaces.workspace_count > 0)
+}
+
+pub fn visible_breadcrumb(state: &SemanticState) -> Option<&semantic::Breadcrumb> {
+    state
+        .breadcrumb()
+        .filter(|breadcrumb| !breadcrumb.segments.is_empty())
 }
 
 pub fn visible_minibuffer(state: &SemanticState) -> Option<&semantic::Minibuffer> {
