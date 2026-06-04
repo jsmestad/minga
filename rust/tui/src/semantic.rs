@@ -113,11 +113,29 @@ pub struct WindowContent {
     pub content_epoch: u32,
     pub rows: Vec<Row>,
     pub cursorline: Option<Cursorline>,
+    pub selection: Selection,
+    pub search_matches: Vec<SearchMatch>,
+    pub diagnostic_ranges: Vec<DiagnosticRange>,
+    pub document_highlights: Vec<DocumentHighlight>,
+    pub annotations: Vec<Annotation>,
 }
 
 pub type Row = semantic_types::Row;
 #[allow(dead_code)]
 pub type Span = semantic_types::Span;
+pub type SearchMatch = semantic_types::SearchMatch;
+pub type DiagnosticRange = semantic_types::DiagnosticRange;
+pub type DocumentHighlight = semantic_types::DocumentHighlight;
+pub type Annotation = semantic_types::Annotation;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Selection {
+    pub selection_type: u8,
+    pub start_row: u16,
+    pub start_col: u16,
+    pub end_row: u16,
+    pub end_col: u16,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct StatusBar {
@@ -509,6 +527,11 @@ pub struct WindowRowsDelta {
     pub cursor_shape: u8,
     pub rows: Vec<WindowDeltaRow>,
     pub cursorline: Option<Cursorline>,
+    pub selection: Option<Selection>,
+    pub search_matches: Option<Vec<SearchMatch>>,
+    pub diagnostic_ranges: Option<Vec<DiagnosticRange>>,
+    pub document_highlights: Option<Vec<DocumentHighlight>>,
+    pub annotations: Option<Vec<Annotation>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -703,6 +726,11 @@ fn decode_window_content(bytes: &[u8]) -> Result<Command, DecodeError> {
     let mut content_epoch = 0;
     let mut rows = Vec::new();
     let mut cursorline = None;
+    let mut selection = Selection::default();
+    let mut search_matches = Vec::new();
+    let mut diagnostic_ranges = Vec::new();
+    let mut document_highlights = Vec::new();
+    let mut annotations = Vec::new();
 
     for (section_id, payload) in sections {
         match section_id {
@@ -716,6 +744,27 @@ fn decode_window_content(bytes: &[u8]) -> Result<Command, DecodeError> {
                 content_epoch = header.content_epoch;
             }
             0x02 => rows = decode_rows(payload)?,
+            0x03 => selection = decode_selection(payload)?,
+            0x04 => {
+                let (matches, _) =
+                    semantic_decode::decode_gui_window_content_search_matches(payload, 0)?;
+                search_matches = matches;
+            }
+            0x05 => {
+                let (ranges, _) =
+                    semantic_decode::decode_gui_window_content_diagnostic_ranges(payload, 0)?;
+                diagnostic_ranges = ranges;
+            }
+            0x06 => {
+                let (highlights, _) =
+                    semantic_decode::decode_gui_window_content_document_highlights(payload, 0)?;
+                document_highlights = highlights;
+            }
+            0x07 => {
+                let (decoded_annotations, _) =
+                    semantic_decode::decode_gui_window_content_annotations(payload, 0)?;
+                annotations = decoded_annotations;
+            }
             0x08 => {
                 let (geometry, _) =
                     semantic_decode::decode_gui_window_content_geometry(payload, 0)?;
@@ -749,6 +798,11 @@ fn decode_window_content(bytes: &[u8]) -> Result<Command, DecodeError> {
             content_epoch,
             rows,
             cursorline,
+            selection,
+            search_matches,
+            diagnostic_ranges,
+            document_highlights,
+            annotations,
         },
         size,
     ))
@@ -767,6 +821,11 @@ fn decode_window_rows_delta(bytes: &[u8]) -> Result<Command, DecodeError> {
     let mut cursor_shape = 0;
     let mut rows = Vec::new();
     let mut cursorline = None;
+    let mut selection = None;
+    let mut search_matches = None;
+    let mut diagnostic_ranges = None;
+    let mut document_highlights = None;
+    let mut annotations = None;
 
     for (section_id, payload) in sections {
         match section_id {
@@ -794,6 +853,27 @@ fn decode_window_rows_delta(bytes: &[u8]) -> Result<Command, DecodeError> {
                 }
             }
             0x02 => rows = decode_delta_rows(payload)?,
+            0x03 => selection = Some(decode_selection(payload)?),
+            0x04 => {
+                let (matches, _) =
+                    semantic_decode::decode_gui_window_content_search_matches(payload, 0)?;
+                search_matches = Some(matches);
+            }
+            0x05 => {
+                let (ranges, _) =
+                    semantic_decode::decode_gui_window_content_diagnostic_ranges(payload, 0)?;
+                diagnostic_ranges = Some(ranges);
+            }
+            0x06 => {
+                let (highlights, _) =
+                    semantic_decode::decode_gui_window_content_document_highlights(payload, 0)?;
+                document_highlights = Some(highlights);
+            }
+            0x07 => {
+                let (decoded_annotations, _) =
+                    semantic_decode::decode_gui_window_content_annotations(payload, 0)?;
+                annotations = Some(decoded_annotations);
+            }
             0x09 => {
                 let (cl, _) = semantic_decode::decode_gui_window_content_cursorline(payload, 0)?;
                 cursorline = Some(Cursorline {
@@ -816,9 +896,25 @@ fn decode_window_rows_delta(bytes: &[u8]) -> Result<Command, DecodeError> {
             cursor_shape,
             rows,
             cursorline,
+            selection,
+            search_matches,
+            diagnostic_ranges,
+            document_highlights,
+            annotations,
         },
         size,
     ))
+}
+
+fn decode_selection(payload: &[u8]) -> Result<Selection, DecodeError> {
+    let (selection, _) = semantic_decode::decode_gui_window_content_selection(payload, 0)?;
+    Ok(Selection {
+        selection_type: selection.r#type,
+        start_row: selection.start_row,
+        start_col: selection.start_col,
+        end_row: selection.end_row,
+        end_col: selection.end_col,
+    })
 }
 
 fn decode_status_bar(bytes: &[u8]) -> Result<Command, DecodeError> {
@@ -2650,6 +2746,67 @@ mod tests {
             &delta.rows[1],
             WindowDeltaRow::Full(Row { row_id: 22, content_hash: 0xBB, text, .. }) if text == "ok"
         ));
+    }
+
+    #[test]
+    fn decodes_window_overlay_sections_and_empty_delta_clears() {
+        let header = section(0x01, &[0, 7, 0, 0, 0, 1, 0, 2, 1, 0, 0, 0, 0, 9]);
+        let rows = section(0x02, &[0, 0]);
+        let selection = section(0x03, &[1, 0, 0, 0, 1, 0, 0, 0, 4]);
+        let search = section(0x04, &[0, 1, 0, 0, 0, 2, 0, 5, 1]);
+        let diagnostics = section(0x05, &[0, 1, 0, 0, 0, 2, 0, 0, 0, 5, 1]);
+        let highlights = section(0x06, &[0, 1, 0, 0, 0, 3, 0, 0, 0, 6, 2]);
+        let mut annotation_payload = vec![0, 1, 0, 0, 1, 0xAA, 0xBB, 0xCC, 0x11, 0x22, 0x33];
+        annotation_payload.extend_from_slice(&string16("note"));
+        let annotations = section(0x07, &annotation_payload);
+        let payload = [
+            vec![opcodes::OP_GUI_WINDOW_CONTENT, 7],
+            header,
+            rows,
+            selection,
+            search,
+            diagnostics,
+            highlights,
+            annotations,
+        ]
+        .concat();
+
+        let Command::WindowContent(window, _) = decode(&payload).unwrap() else {
+            panic!("expected window content");
+        };
+        assert_eq!(window.selection.selection_type, 1);
+        assert_eq!(window.search_matches[0].end_col, 5);
+        assert_eq!(window.diagnostic_ranges[0].severity, 1);
+        assert_eq!(window.document_highlights[0].kind, 2);
+        assert_eq!(window.annotations[0].text, "note");
+
+        let header = section(0x01, &[0, 7, 0, 0, 0, 9, 1, 0, 0, 0, 0, 1, 0, 0]);
+        let rows = section(0x02, &[0, 0]);
+        let selection = section(0x03, &[0]);
+        let search = section(0x04, &[0, 0]);
+        let diagnostics = section(0x05, &[0, 0]);
+        let highlights = section(0x06, &[0, 0]);
+        let annotations = section(0x07, &[0, 0]);
+        let payload = [
+            vec![opcodes::OP_GUI_WINDOW_ROWS_DELTA, 7],
+            header,
+            rows,
+            selection,
+            search,
+            diagnostics,
+            highlights,
+            annotations,
+        ]
+        .concat();
+
+        let Command::WindowRowsDelta(delta, _) = decode(&payload).unwrap() else {
+            panic!("expected rows delta");
+        };
+        assert_eq!(delta.selection.unwrap(), Selection::default());
+        assert!(delta.search_matches.unwrap().is_empty());
+        assert!(delta.diagnostic_ranges.unwrap().is_empty());
+        assert!(delta.document_highlights.unwrap().is_empty());
+        assert!(delta.annotations.unwrap().is_empty());
     }
 
     #[test]

@@ -104,6 +104,11 @@ mod tests {
                     content_epoch: 1,
                     rows: vec![row("hello semantic tui")],
                     cursorline: None,
+                    selection: semantic::Selection::default(),
+                    search_matches: Vec::new(),
+                    diagnostic_ranges: Vec::new(),
+                    document_highlights: Vec::new(),
+                    annotations: Vec::new(),
                 },
                 0,
             ),
@@ -251,6 +256,11 @@ mod tests {
                     content_epoch: 1,
                     rows: vec![row("workspace content")],
                     cursorline: None,
+                    selection: semantic::Selection::default(),
+                    search_matches: Vec::new(),
+                    diagnostic_ranges: Vec::new(),
+                    document_highlights: Vec::new(),
+                    annotations: Vec::new(),
                 },
                 0,
             ),
@@ -395,6 +405,11 @@ mod tests {
                         row: 0,
                         bg: 0x333333,
                     }),
+                    selection: semantic::Selection::default(),
+                    search_matches: Vec::new(),
+                    diagnostic_ranges: Vec::new(),
+                    document_highlights: Vec::new(),
+                    annotations: Vec::new(),
                 },
                 0,
             ),
@@ -471,5 +486,48 @@ mod tests {
         assert!(snapshot.contains("~"));
         assert!(snapshot.contains("│"));
         assert!(snapshot.contains("main.ex"));
+    }
+
+    #[test]
+    fn renders_editor_line_annotations() {
+        let mut state = SemanticState::new(40, 4);
+        state.apply_protocol_command(crate::protocol::Command::Semantic(
+            semantic::Command::WindowContent(
+                semantic::WindowContent {
+                    window_id: 7,
+                    origin_row: 0,
+                    origin_col: 0,
+                    text_width: 40,
+                    text_height: 1,
+                    scroll_left: 0,
+                    cursor_row: 0,
+                    cursor_col: 0,
+                    cursor_shape: 1,
+                    content_epoch: 1,
+                    rows: vec![row("let value = 1")],
+                    cursorline: None,
+                    selection: semantic::Selection::default(),
+                    search_matches: Vec::new(),
+                    diagnostic_ranges: Vec::new(),
+                    document_highlights: Vec::new(),
+                    annotations: vec![semantic::Annotation {
+                        row: 0,
+                        kind: 1,
+                        fg: 0,
+                        bg: 0,
+                        text: "inferred integer".to_owned(),
+                    }],
+                },
+                0,
+            ),
+        ));
+
+        let mut terminal = Terminal::memory(40, 4);
+        SemanticRenderer::new()
+            .render(&state, &mut terminal)
+            .unwrap();
+
+        let snapshot = terminal.buffer_text();
+        assert!(snapshot.contains("let value = 1 inferred integer"));
     }
 }

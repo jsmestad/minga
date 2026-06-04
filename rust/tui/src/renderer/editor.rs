@@ -4,7 +4,7 @@ use crate::semantic;
 use crate::semantic_state::SemanticState;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Widget, Wrap};
 use unicode_segmentation::UnicodeSegmentation;
@@ -152,6 +152,7 @@ fn window_line(
         spans.extend(tilde_row(content_width, cursorline_bg));
     } else {
         spans.extend(row_line(
+            window,
             &window.rows[row_index],
             row_index,
             window.scroll_left,
@@ -201,6 +202,7 @@ fn tilde_row(width: u16, cursorline_bg: Option<u32>) -> Vec<Span<'static>> {
 }
 
 fn row_line(
+    window: &semantic::WindowContent,
     row: &semantic::Row,
     row_index: usize,
     scroll_left: u16,
@@ -233,9 +235,20 @@ fn row_line(
         {
             style = style.bg(theme::rgb(bg));
         }
+        style = apply_window_overlays(style, window, row_index as u16, display_col);
         spans.push(Span::styled(text, style));
         visible_width = visible_width.saturating_add(grapheme_width);
         display_col = next_col;
+    }
+
+    for annotation in annotations_for_row(window, row_index as u16) {
+        let text = format!(" {}", annotation.text);
+        let annotation_width = text.as_str().width() as u16;
+        if annotation_width == 0 || visible_width >= width {
+            continue;
+        }
+        spans.push(Span::styled(text, annotation_style(annotation)));
+        visible_width = visible_width.saturating_add(annotation_width);
     }
 
     if visible_width < width {
@@ -250,6 +263,130 @@ fn row_line(
     }
 
     spans
+}
+
+fn apply_window_overlays(
+    mut style: Style,
+    window: &semantic::WindowContent,
+    row: u16,
+    col: u16,
+) -> Style {
+    if window.selection.selection_type != 0
+        && range_contains(
+            window.selection.start_row,
+            window.selection.start_col,
+            window.selection.end_row,
+            window.selection.end_col,
+            row,
+            col,
+        )
+    {
+        style = style.bg(Color::DarkGray);
+    }
+
+    for highlight in &window.document_highlights {
+        if range_contains(
+            highlight.start_row,
+            highlight.start_col,
+            highlight.end_row,
+            highlight.end_col,
+            row,
+            col,
+        ) {
+            style = style.bg(document_highlight_color(highlight.kind));
+            break;
+        }
+    }
+
+    for search_match in &window.search_matches {
+        if search_match.row == row && col >= search_match.start_col && col < search_match.end_col {
+            style = style.bg(search_match_color(search_match.is_current != 0));
+            break;
+        }
+    }
+
+    for diagnostic in &window.diagnostic_ranges {
+        if range_contains(
+            diagnostic.start_row,
+            diagnostic.start_col,
+            diagnostic.end_row,
+            diagnostic.end_col,
+            row,
+            col,
+        ) {
+            style = style
+                .fg(diagnostic_color(diagnostic.severity))
+                .add_modifier(Modifier::UNDERLINED);
+            break;
+        }
+    }
+
+    style
+}
+
+fn range_contains(
+    start_row: u16,
+    start_col: u16,
+    end_row: u16,
+    end_col: u16,
+    row: u16,
+    col: u16,
+) -> bool {
+    if row < start_row || row > end_row {
+        return false;
+    }
+    if row == start_row && col < start_col {
+        return false;
+    }
+    if row == end_row && col >= end_col {
+        return false;
+    }
+    true
+}
+
+fn document_highlight_color(kind: u8) -> Color {
+    match kind {
+        2 => Color::Rgb(49, 65, 88),
+        3 => Color::Rgb(63, 72, 52),
+        _ => Color::Rgb(45, 58, 74),
+    }
+}
+
+fn search_match_color(current: bool) -> Color {
+    if current {
+        Color::Rgb(120, 82, 34)
+    } else {
+        Color::Rgb(78, 64, 38)
+    }
+}
+
+fn diagnostic_color(severity: u8) -> Color {
+    match severity {
+        0 | 1 => Color::Red,
+        2 => Color::Yellow,
+        3 => Color::Blue,
+        _ => Color::Gray,
+    }
+}
+
+fn annotations_for_row(
+    window: &semantic::WindowContent,
+    row: u16,
+) -> impl Iterator<Item = &semantic::Annotation> {
+    window.annotations.iter().filter(move |annotation| {
+        annotation.row == row && annotation.kind != 2 && !annotation.text.is_empty()
+    })
+}
+
+fn annotation_style(annotation: &semantic::Annotation) -> Style {
+    let mut style = Style::default().fg(Color::Cyan);
+    if annotation.fg != 0 {
+        style = style.fg(theme::rgb(annotation.fg));
+    }
+    if annotation.bg != 0 {
+        style = style.bg(theme::rgb(annotation.bg));
+    }
+    style
 }
 
 fn span_at(spans: &[semantic::Span], col: u16) -> Option<&semantic::Span> {
@@ -304,4 +441,81 @@ fn horizontal_separator_text(width: u16, filename: &str) -> String {
         return "─".repeat(width as usize);
     }
     format!("{label}{}", "─".repeat(width as usize - label_width))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn applies_window_overlay_styles_by_range_priority() {
+        let mut window = window();
+        window.selection = semantic::Selection {
+            selection_type: 1,
+            start_row: 0,
+            start_col: 0,
+            end_row: 0,
+            end_col: 4,
+        };
+        assert_eq!(
+            apply_window_overlays(Style::default(), &window, 0, 1).bg,
+            Some(Color::DarkGray)
+        );
+
+        window.document_highlights = vec![semantic::DocumentHighlight {
+            start_row: 0,
+            start_col: 1,
+            end_row: 0,
+            end_col: 3,
+            kind: 2,
+        }];
+        assert_eq!(
+            apply_window_overlays(Style::default(), &window, 0, 1).bg,
+            Some(document_highlight_color(2))
+        );
+
+        window.search_matches = vec![semantic::SearchMatch {
+            row: 0,
+            start_col: 1,
+            end_col: 2,
+            is_current: 1,
+        }];
+        assert_eq!(
+            apply_window_overlays(Style::default(), &window, 0, 1).bg,
+            Some(search_match_color(true))
+        );
+
+        window.diagnostic_ranges = vec![semantic::DiagnosticRange {
+            start_row: 0,
+            start_col: 1,
+            end_row: 0,
+            end_col: 2,
+            severity: 1,
+        }];
+        let style = apply_window_overlays(Style::default(), &window, 0, 1);
+        assert_eq!(style.fg, Some(diagnostic_color(1)));
+        assert!(style.add_modifier.contains(Modifier::UNDERLINED));
+    }
+
+    fn window() -> semantic::WindowContent {
+        semantic::WindowContent {
+            window_id: 7,
+            origin_row: 0,
+            origin_col: 0,
+            text_width: 20,
+            text_height: 1,
+            scroll_left: 0,
+            cursor_row: 0,
+            cursor_col: 0,
+            cursor_shape: 1,
+            content_epoch: 1,
+            rows: Vec::new(),
+            cursorline: None,
+            selection: semantic::Selection::default(),
+            search_matches: Vec::new(),
+            diagnostic_ranges: Vec::new(),
+            document_highlights: Vec::new(),
+            annotations: Vec::new(),
+        }
+    }
 }

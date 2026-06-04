@@ -576,6 +576,21 @@ impl SemanticState {
         window.rows = rows;
         window.scroll_left = delta.scroll_left;
         window.cursorline = delta.cursorline;
+        if let Some(selection) = delta.selection {
+            window.selection = selection;
+        }
+        if let Some(search_matches) = delta.search_matches {
+            window.search_matches = search_matches;
+        }
+        if let Some(diagnostic_ranges) = delta.diagnostic_ranges {
+            window.diagnostic_ranges = diagnostic_ranges;
+        }
+        if let Some(document_highlights) = delta.document_highlights {
+            window.document_highlights = document_highlights;
+        }
+        if let Some(annotations) = delta.annotations {
+            window.annotations = annotations;
+        }
         if delta.cursor_visible {
             self.cursor = CursorState {
                 row: window.origin_row.saturating_add(delta.cursor_row),
@@ -657,6 +672,11 @@ mod tests {
             content_epoch: 42,
             rows,
             cursorline: None,
+            selection: semantic::Selection::default(),
+            search_matches: Vec::new(),
+            diagnostic_ranges: Vec::new(),
+            document_highlights: Vec::new(),
+            annotations: Vec::new(),
         }
     }
 
@@ -705,6 +725,11 @@ mod tests {
                         semantic::WindowDeltaRow::Full(row(3, 33, "gamma")),
                     ],
                     cursorline: None,
+                    selection: None,
+                    search_matches: None,
+                    diagnostic_ranges: None,
+                    document_highlights: None,
+                    annotations: None,
                 },
                 0,
             ),
@@ -985,5 +1010,80 @@ mod tests {
                 shape: 1
             }
         );
+    }
+
+    #[test]
+    fn rows_delta_replaces_or_clears_window_overlays_when_sections_are_present() {
+        let mut state = SemanticState::new(80, 24);
+        let mut initial = window(vec![row(1, 11, "alpha")]);
+        initial.selection = semantic::Selection {
+            selection_type: 1,
+            start_row: 0,
+            start_col: 0,
+            end_row: 0,
+            end_col: 1,
+        };
+        initial.search_matches = vec![semantic::SearchMatch {
+            row: 0,
+            start_col: 0,
+            end_col: 1,
+            is_current: 1,
+        }];
+        initial.diagnostic_ranges = vec![semantic::DiagnosticRange {
+            start_row: 0,
+            start_col: 0,
+            end_row: 0,
+            end_col: 1,
+            severity: 1,
+        }];
+        initial.document_highlights = vec![semantic::DocumentHighlight {
+            start_row: 0,
+            start_col: 0,
+            end_row: 0,
+            end_col: 1,
+            kind: 2,
+        }];
+        initial.annotations = vec![semantic::Annotation {
+            row: 0,
+            kind: 1,
+            fg: 0,
+            bg: 0,
+            text: "note".to_owned(),
+        }];
+        state.apply_protocol_command(ProtocolCommand::Semantic(semantic::Command::WindowContent(
+            initial, 0,
+        )));
+
+        state.apply_protocol_command(ProtocolCommand::Semantic(
+            semantic::Command::WindowRowsDelta(
+                semantic::WindowRowsDelta {
+                    window_id: 7,
+                    content_epoch: 42,
+                    scroll_left: 0,
+                    cursor_visible: false,
+                    cursor_row: 0,
+                    cursor_col: 0,
+                    cursor_shape: 1,
+                    rows: vec![semantic::WindowDeltaRow::Ref {
+                        row_id: 1,
+                        content_hash: 11,
+                    }],
+                    cursorline: None,
+                    selection: Some(semantic::Selection::default()),
+                    search_matches: Some(Vec::new()),
+                    diagnostic_ranges: Some(Vec::new()),
+                    document_highlights: Some(Vec::new()),
+                    annotations: Some(Vec::new()),
+                },
+                0,
+            ),
+        ));
+
+        let window = state.windows().next().unwrap();
+        assert_eq!(window.selection, semantic::Selection::default());
+        assert!(window.search_matches.is_empty());
+        assert!(window.diagnostic_ranges.is_empty());
+        assert!(window.document_highlights.is_empty());
+        assert!(window.annotations.is_empty());
     }
 }
