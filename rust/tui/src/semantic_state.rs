@@ -268,8 +268,8 @@ impl SemanticState {
         self.notifications
     }
 
-    pub fn workspaces(&self) -> Option<semantic::Workspaces> {
-        self.workspaces
+    pub fn workspaces(&self) -> Option<&semantic::Workspaces> {
+        self.workspaces.as_ref()
     }
 
     pub fn edit_timeline(&self) -> Option<semantic::EditTimeline> {
@@ -883,6 +883,8 @@ mod tests {
                 mode: 0,
                 flags: 0,
                 workspace_count: 3,
+                spaces: Vec::new(),
+                tabs: Vec::new(),
             },
             0,
         )));

@@ -5,6 +5,7 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FrameLayout {
     pub area: Rect,
+    pub workspace_bar: Rect,
     pub tab_bar: Rect,
     pub body: Rect,
     pub file_tree: Rect,
@@ -19,6 +20,11 @@ impl FrameLayout {
         let vertical = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
+                Constraint::Length(if visible_workspaces(state).is_some() {
+                    1
+                } else {
+                    0
+                }),
                 Constraint::Length(if state.tab_bar().is_some() { 1 } else { 0 }),
                 Constraint::Min(1),
                 Constraint::Length(if visible_minibuffer(state).is_some() {
@@ -30,7 +36,7 @@ impl FrameLayout {
             ])
             .split(area);
 
-        let (main_body, bottom_row) = bottom_panel_split(state.bottom_panel(), vertical[1]);
+        let (main_body, bottom_row) = bottom_panel_split(state.bottom_panel(), vertical[2]);
 
         let horizontal = Layout::default()
             .direction(Direction::Horizontal)
@@ -49,15 +55,22 @@ impl FrameLayout {
 
         Self {
             area,
-            tab_bar: vertical[0],
-            body: vertical[1],
+            workspace_bar: vertical[0],
+            tab_bar: vertical[1],
+            body: vertical[2],
             file_tree: horizontal[0],
             editor: horizontal[1],
             bottom_panel,
-            minibuffer: vertical[2],
-            status_bar: vertical[3],
+            minibuffer: vertical[3],
+            status_bar: vertical[4],
         }
     }
+}
+
+pub fn visible_workspaces(state: &SemanticState) -> Option<&semantic::Workspaces> {
+    state
+        .workspaces()
+        .filter(|workspaces| workspaces.visible != 0 && workspaces.workspace_count > 0)
 }
 
 pub fn visible_minibuffer(state: &SemanticState) -> Option<&semantic::Minibuffer> {
@@ -160,6 +173,7 @@ mod tests {
             },
         );
 
+        assert_eq!(layout.workspace_bar.height, 0);
         assert_eq!(layout.tab_bar.height, 1);
         assert_eq!(layout.minibuffer.height, 1);
         assert_eq!(layout.status_bar.height, 1);
@@ -183,6 +197,7 @@ mod tests {
         );
 
         assert_eq!(layout.tab_bar.height, 0);
+        assert_eq!(layout.workspace_bar.height, 0);
         assert_eq!(layout.minibuffer.height, 0);
         assert_eq!(layout.status_bar.height, 0);
         assert!(layout.bottom_panel.is_none());

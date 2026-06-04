@@ -585,13 +585,43 @@ pub struct SearchState {
     pub flags: u8,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Workspaces {
     pub visible: u8,
     pub active_workspace_id: u16,
     pub mode: u8,
     pub flags: u8,
     pub workspace_count: u8,
+    pub spaces: Vec<Workspace>,
+    pub tabs: Vec<WorkspaceTab>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Workspace {
+    pub id: u16,
+    pub kind: u8,
+    pub status: u8,
+    pub flags: u16,
+    pub color: u32,
+    pub tab_count: u16,
+    pub draft_count: u16,
+    pub conflict_count: u16,
+    pub background_count: u16,
+    pub label: String,
+    pub icon: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceTab {
+    pub id: u32,
+    pub workspace_id: u16,
+    pub kind: u8,
+    pub flags: u16,
+    pub path_hash: u32,
+    pub icon: String,
+    pub label: String,
+    pub path: String,
+    pub tint: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2066,14 +2096,76 @@ fn decode_search_state(bytes: &[u8]) -> Result<Command, DecodeError> {
 
 fn decode_workspaces(bytes: &[u8]) -> Result<Command, DecodeError> {
     let size = len16_size(bytes)?;
-    require_len(bytes, 8, "workspaces fields")?;
+    require_len(bytes, 9, "workspaces fields")?;
+    let body = &bytes[3..size];
+    require_len(body, 6, "workspaces header")?;
+    let active_workspace_id = read_u16(body, 1);
+    let workspace_count = body[5];
+    let mut offset = 6;
+    let mut spaces = Vec::with_capacity(workspace_count as usize);
+
+    for _ in 0..workspace_count {
+        require_len(body, offset + 17, "workspace summary")?;
+        let workspace = Workspace {
+            id: read_u16(body, offset),
+            kind: body[offset + 2],
+            status: body[offset + 3],
+            flags: read_u16(body, offset + 4),
+            color: read_u24(body, offset + 6),
+            tab_count: read_u16(body, offset + 9),
+            draft_count: read_u16(body, offset + 11),
+            conflict_count: read_u16(body, offset + 13),
+            background_count: read_u16(body, offset + 15),
+            label: {
+                offset += 17;
+                read_string8(body, &mut offset)?
+            },
+            icon: read_string8(body, &mut offset)?,
+        };
+        spaces.push(workspace);
+    }
+
+    let mut tabs = Vec::new();
+    if offset < body.len() {
+        require_len(body, offset + 2, "workspace visible tab count")?;
+        let tab_count = read_u16(body, offset) as usize;
+        offset += 2;
+        tabs.reserve(tab_count);
+
+        for _ in 0..tab_count {
+            require_len(body, offset + 13, "workspace visible tab")?;
+            let tab = WorkspaceTab {
+                id: read_u32(body, offset),
+                workspace_id: read_u16(body, offset + 4),
+                kind: body[offset + 6],
+                flags: read_u16(body, offset + 7),
+                path_hash: read_u32(body, offset + 9),
+                icon: {
+                    offset += 13;
+                    read_string8(body, &mut offset)?
+                },
+                label: read_string16(body, &mut offset)?,
+                path: read_string16(body, &mut offset)?,
+                tint: {
+                    require_len(body, offset + 4, "workspace visible tab tint")?;
+                    let tint = read_u32(body, offset);
+                    offset += 4;
+                    tint
+                },
+            };
+            tabs.push(tab);
+        }
+    }
+
     Ok(Command::Workspaces(
         Workspaces {
-            visible: bytes[3],
-            active_workspace_id: read_u16(bytes, 4),
-            mode: bytes[6],
-            flags: bytes[7],
-            workspace_count: if size > 8 { bytes[8] } else { 0 },
+            visible: body[0],
+            active_workspace_id,
+            mode: body[3],
+            flags: body[4],
+            workspace_count,
+            spaces,
+            tabs,
         },
         size,
     ))
@@ -2915,6 +3007,68 @@ mod tests {
             command,
             Command::TabBar(TabBar { active_index: 0, tabs }, _) if tabs[0].active && tabs[1].dirty && tabs[1].label == "router.ex"
         ));
+    }
+
+    #[test]
+    fn decodes_workspaces_summary_and_visible_tabs() {
+        let mut workspace = vec![
+            0, 7, // id
+            1, // kind
+            2, // status
+            0, 3, // flags
+            0x44, 0x55, 0x66, // color
+            0, 4, // tab count
+            0, 1, // draft count
+            0, 2, // conflict count
+            0, 3, // background count
+        ];
+        workspace.extend_from_slice(&string8("Agent"));
+        workspace.extend_from_slice(&string8("A"));
+        let mut tab = vec![
+            0, 0, 0, 9, // id
+            0, 7, // workspace id
+            0, // kind
+            0, 0x21, // flags
+            0, 0, 0, 5, // path hash
+        ];
+        tab.extend_from_slice(&string8("*"));
+        tab.extend_from_slice(&string16("main.ex"));
+        tab.extend_from_slice(&string16("/repo/main.ex"));
+        tab.extend_from_slice(&[0, 0, 0, 0]);
+        let mut body = vec![
+            2, // version
+            0, 7, // active workspace id
+            1, // mode
+            1, // flags
+            1, // workspace count
+        ];
+        body.extend_from_slice(&workspace);
+        body.extend_from_slice(&[0, 1]);
+        body.extend_from_slice(&tab);
+        let payload = [
+            vec![opcodes::OP_GUI_WORKSPACES],
+            (body.len() as u16).to_be_bytes().to_vec(),
+            body,
+            vec![opcodes::OP_BATCH_END],
+        ]
+        .concat();
+
+        let command = decode(&payload).unwrap();
+
+        assert_eq!(semantic_size(&payload).unwrap(), payload.len() - 1);
+        let Command::Workspaces(workspaces, _) = command else {
+            panic!("expected workspaces");
+        };
+        assert_eq!(workspaces.active_workspace_id, 7);
+        assert_eq!(workspaces.workspace_count, 1);
+        assert_eq!(workspaces.spaces.len(), 1);
+        assert_eq!(workspaces.tabs.len(), 1);
+        assert_eq!(workspaces.spaces[0].label, "Agent");
+        assert_eq!(workspaces.spaces[0].icon, "A");
+        assert_eq!(workspaces.spaces[0].tab_count, 4);
+        assert_eq!(workspaces.tabs[0].label, "main.ex");
+        assert_eq!(workspaces.tabs[0].path, "/repo/main.ex");
+        assert_eq!(workspaces.tabs[0].workspace_id, 7);
     }
 
     #[test]

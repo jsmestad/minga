@@ -9,6 +9,10 @@ use ratatui::widgets::{Paragraph, Widget};
 use unicode_width::UnicodeWidthStr;
 
 pub fn render(state: &SemanticState, frame: &layout::FrameLayout, buffer: &mut Buffer) {
+    if let Some(workspaces) = layout::visible_workspaces(state) {
+        render_workspace_bar(workspaces, state.theme(), frame.workspace_bar, buffer);
+    }
+
     if let Some(tab_bar) = state.tab_bar() {
         render_tab_bar(tab_bar, state.theme(), frame.tab_bar, buffer);
     }
@@ -19,6 +23,75 @@ pub fn render(state: &SemanticState, frame: &layout::FrameLayout, buffer: &mut B
 
     if let Some(minibuffer) = layout::visible_minibuffer(state) {
         render_minibuffer(minibuffer, state.theme(), frame.minibuffer, buffer);
+    }
+}
+
+fn render_workspace_bar(
+    workspaces: &semantic::Workspaces,
+    theme_state: Option<&semantic::Theme>,
+    area: Rect,
+    buffer: &mut Buffer,
+) {
+    let text = workspace_bar_text(workspaces);
+    Paragraph::new(Line::from(vec![Span::styled(
+        pad_to_width(&text, area.width as usize),
+        theme::canvas(theme_state),
+    )]))
+    .render(area, buffer);
+}
+
+fn workspace_bar_text(workspaces: &semantic::Workspaces) -> String {
+    let Some(active) = workspaces
+        .spaces
+        .iter()
+        .find(|workspace| workspace.id == workspaces.active_workspace_id)
+        .or_else(|| workspaces.spaces.first())
+    else {
+        return format!(
+            "Spaces  {}/{}",
+            workspaces.active_workspace_id, workspaces.workspace_count
+        );
+    };
+
+    let mut label = String::from("Spaces · ");
+    if active.id == workspaces.active_workspace_id {
+        label.push('▎');
+    }
+    if !active.icon.is_empty() {
+        label.push_str(&active.icon);
+        label.push(' ');
+    }
+    label.push_str(active.label.trim());
+
+    let mut metadata = Vec::new();
+    if active.tab_count > 0 {
+        metadata.push(plural_count(active.tab_count, "tab"));
+    }
+    if active.draft_count > 0 {
+        metadata.push(plural_count(active.draft_count, "draft"));
+    }
+    if active.conflict_count > 0 {
+        metadata.push(plural_count(active.conflict_count, "conflict"));
+    }
+    if active.background_count > 0 {
+        metadata.push(format!("{} running", active.background_count));
+    }
+    if !metadata.is_empty() {
+        label.push_str(" (");
+        label.push_str(&metadata.join(", "));
+        label.push(')');
+    }
+    if active.flags & 0x01 != 0 {
+        label.push_str(" !");
+    }
+    label
+}
+
+fn plural_count(count: u16, label: &str) -> String {
+    if count == 1 {
+        format!("1 {label}")
+    } else {
+        format!("{count} {label}s")
     }
 }
 
@@ -115,6 +188,15 @@ fn status_segment_span(segment: &semantic::StatusSegment) -> Span<'_> {
 
 fn line_width(spans: &[Span<'_>]) -> usize {
     spans.iter().map(|span| span.content.as_ref().width()).sum()
+}
+
+fn pad_to_width(text: &str, width: usize) -> String {
+    let text_width = text.width();
+    if text_width >= width {
+        text.to_owned()
+    } else {
+        format!("{}{}", text, " ".repeat(width - text_width))
+    }
 }
 
 fn status_right_text(state: &SemanticState, status_bar: &semantic::StatusBar) -> String {

@@ -511,12 +511,12 @@ mod tests {
 
     #[test]
     fn renders_retained_semantic_window_and_status_bar() {
-        let mut state = SemanticState::new(220, 6);
+        let mut state = SemanticState::new(220, 8);
         state.apply_protocol_command(crate::protocol::Command::Semantic(
             semantic::Command::WindowContent(
                 semantic::WindowContent {
                     window_id: 1,
-                    origin_row: 0,
+                    origin_row: 1,
                     origin_col: 0,
                     text_width: 40,
                     text_height: 4,
@@ -587,6 +587,8 @@ mod tests {
                     mode: 0,
                     flags: 0,
                     workspace_count: 4,
+                    spaces: Vec::new(),
+                    tabs: Vec::new(),
                 },
                 0,
             ),
@@ -664,7 +666,7 @@ mod tests {
             semantic::Command::ToolManager(semantic::ToolManager { visible: 1 }, 0),
         ));
 
-        let mut terminal = Terminal::memory(220, 6);
+        let mut terminal = Terminal::memory(220, 8);
         SemanticRenderer::new()
             .render(&state, &mut terminal)
             .unwrap();
@@ -977,5 +979,60 @@ mod tests {
 
         let snapshot = terminal.buffer_text();
         assert!(snapshot.contains("let value = 1 inferred integer"));
+    }
+
+    #[test]
+    fn renders_go_parity_workspace_header_above_tabs() {
+        let mut state = SemanticState::new(80, 8);
+        state.apply_protocol_command(crate::protocol::Command::Semantic(
+            semantic::Command::Workspaces(
+                semantic::Workspaces {
+                    visible: 1,
+                    active_workspace_id: 2,
+                    mode: 0,
+                    flags: 0,
+                    workspace_count: 4,
+                    spaces: Vec::new(),
+                    tabs: Vec::new(),
+                },
+                0,
+            ),
+        ));
+        state.apply_protocol_command(crate::protocol::Command::Semantic(
+            semantic::Command::TabBar(
+                semantic::TabBar {
+                    active_index: 0,
+                    tabs: vec![semantic::Tab {
+                        active: true,
+                        dirty: false,
+                        label: "RUST_TUI.md".to_owned(),
+                        tint: 0,
+                    }],
+                },
+                0,
+            ),
+        ));
+        state.apply_protocol_command(crate::protocol::Command::Semantic(
+            semantic::Command::StatusBar(
+                semantic::StatusBar {
+                    filename: "RUST_TUI.md".to_owned(),
+                    line: 1,
+                    col: 1,
+                    ..semantic::StatusBar::default()
+                },
+                0,
+            ),
+        ));
+
+        let mut terminal = Terminal::memory(80, 8);
+        SemanticRenderer::new()
+            .render(&state, &mut terminal)
+            .unwrap();
+
+        let lines: Vec<String> = terminal.buffer_text().lines().map(str::to_owned).collect();
+        assert!(lines[0].contains("Spaces"));
+        assert!(lines[0].contains("2/4"));
+        assert!(lines[1].contains("RUST_TUI.md"));
+        assert!(lines[7].contains("RUST_TUI.md"));
     }
 }
