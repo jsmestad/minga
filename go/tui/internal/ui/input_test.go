@@ -28,6 +28,28 @@ func TestKeyPacketEncodesSpace(t *testing.T) {
 	}
 }
 
+func TestKeyPacketEncodesPrintableUppercaseWithoutShiftModifier(t *testing.T) {
+	packet, ok := keyPacket(tea.KeyPressMsg(tea.Key{Code: 'T', Text: "T"}))
+	if !ok {
+		t.Fatal("uppercase printable should encode a key packet")
+	}
+	if packet[0] != generated.OPKeyPress || codepoint(packet) != 'T' || packet[5] != 0 {
+		t.Fatalf("uppercase printable packet = %#v", packet)
+	}
+}
+
+func TestKeyPacketEncodesLoggedInsertSentence(t *testing.T) {
+	for _, ch := range "This is the thing that we're doing" {
+		packet, ok := keyPacket(tea.KeyPressMsg(tea.Key{Code: ch, Text: string(ch)}))
+		if !ok {
+			t.Fatalf("char %q should encode a key packet", ch)
+		}
+		if packet[0] != generated.OPKeyPress || codepoint(packet) != ch || packet[5] != 0 {
+			t.Fatalf("char %q packet = %#v", ch, packet)
+		}
+	}
+}
+
 func TestKeyPacketParsesFragmentedSGRMouseTail(t *testing.T) {
 	packet, ok := keyPacket(tea.KeyPressMsg(tea.Key{Code: tea.KeyExtended, Text: "<65;57;23M"}))
 	if !ok {

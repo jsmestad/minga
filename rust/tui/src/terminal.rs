@@ -3,8 +3,11 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
 use std::path::PathBuf;
 
+use crate::parity::{MouseCapturePolicy, TerminalPolicy};
 use crossterm::cursor::{Hide, SetCursorStyle, Show};
-use crossterm::event::{DisableBracketedPaste, EnableBracketedPaste};
+use crossterm::event::{
+    DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+};
 use crossterm::execute;
 use crossterm::terminal::{
     BeginSynchronizedUpdate, EndSynchronizedUpdate, EnterAlternateScreen, LeaveAlternateScreen,
@@ -27,13 +30,14 @@ pub struct Terminal {
     height: u16,
     real_tty: bool,
     active: bool,
+    policy: TerminalPolicy,
 }
 
 impl Terminal {
-    pub fn open() -> io::Result<Self> {
+    pub fn open(policy: TerminalPolicy) -> io::Result<Self> {
         enable_raw_mode()?;
         let mut tty = tty_file()?;
-        execute!(tty, EnterAlternateScreen, EnableBracketedPaste, Hide)?;
+        apply_enter_policy(&mut tty, policy)?;
         let backend = CrosstermBackend::new(tty);
         let terminal = RatatuiTerminal::new(backend)?;
         let (width, height) = size().unwrap_or_else(|_| env_size());
@@ -44,6 +48,7 @@ impl Terminal {
             height,
             real_tty: true,
             active: true,
+            policy,
         })
     }
 
@@ -57,6 +62,7 @@ impl Terminal {
             height,
             real_tty: false,
             active: false,
+            policy: crate::parity::GO_ZIG_PARITY.terminal,
         }
     }
 
@@ -86,11 +92,26 @@ impl Terminal {
     {
         match &mut self.backend {
             Backend::Real(terminal) => {
-                execute!(terminal.backend_mut(), BeginSynchronizedUpdate)?;
+                if self.policy.hide_cursor_while_rendering {
+                    execute!(terminal.backend_mut(), Hide)?;
+                }
+                if self.policy.synchronized_update {
+                    execute!(terminal.backend_mut(), BeginSynchronizedUpdate)?;
+                }
                 let draw_result = terminal.draw(render_callback).map(|_| ());
-                let end_result = execute!(terminal.backend_mut(), EndSynchronizedUpdate);
+                let end_result = if self.policy.synchronized_update {
+                    execute!(terminal.backend_mut(), EndSynchronizedUpdate)
+                } else {
+                    Ok(())
+                };
+                let show_result = if self.policy.hide_cursor_while_rendering {
+                    execute!(terminal.backend_mut(), Show)
+                } else {
+                    Ok(())
+                };
                 draw_result?;
                 end_result?;
+                show_result?;
             }
             #[cfg(test)]
             Backend::Test(terminal) => {
@@ -104,8 +125,7 @@ impl Terminal {
         if self.real_tty && self.active {
             match &mut self.backend {
                 Backend::Real(terminal) => {
-                    let backend = terminal.backend_mut();
-                    execute!(backend, Show, DisableBracketedPaste, LeaveAlternateScreen)?;
+                    apply_leave_policy(terminal.backend_mut(), self.policy)?;
                 }
                 #[cfg(test)]
                 Backend::Test(_) => {}
@@ -176,6 +196,38 @@ impl Drop for Terminal {
     fn drop(&mut self) {
         let _ = self.finish();
     }
+}
+
+fn apply_enter_policy(tty: &mut File, policy: TerminalPolicy) -> io::Result<()> {
+    if policy.alternate_screen {
+        execute!(tty, EnterAlternateScreen)?;
+    }
+    if policy.bracketed_paste {
+        execute!(tty, EnableBracketedPaste)?;
+    }
+    match policy.mouse_capture {
+        MouseCapturePolicy::CellMotion => execute!(tty, EnableMouseCapture)?,
+    }
+    Ok(())
+}
+
+fn apply_leave_policy(
+    backend: &mut CrosstermBackend<File>,
+    policy: TerminalPolicy,
+) -> io::Result<()> {
+    if policy.hide_cursor_while_rendering {
+        execute!(backend, Show)?;
+    }
+    match policy.mouse_capture {
+        MouseCapturePolicy::CellMotion => execute!(backend, DisableMouseCapture)?,
+    }
+    if policy.bracketed_paste {
+        execute!(backend, DisableBracketedPaste)?;
+    }
+    if policy.alternate_screen {
+        execute!(backend, LeaveAlternateScreen)?;
+    }
+    Ok(())
 }
 
 fn tty_file() -> io::Result<File> {

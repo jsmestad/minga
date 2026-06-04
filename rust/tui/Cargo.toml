@@ -14,5 +14,11 @@ ratatui = { version = "0.30.0", default-features = false, features = ["crossterm
 ratatui-image = { version = "11.0.2", default-features = false }
 signal-hook = "0.3.18"
 tachyonfx = { version = "0.25.0", default-features = false }
+tracing = "0.1.41"
+tracing-appender = "0.2.3"
+tracing-subscriber = { version = "0.3.19", default-features = false, features = ["fmt", "std"] }
 unicode-segmentation = "1.13.0"
 unicode-width = "0.2.0"
+
+[patch.crates-io]
+crossterm = { path = "vendor/crossterm" }

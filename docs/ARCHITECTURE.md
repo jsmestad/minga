@@ -289,7 +289,7 @@ Minga's frontends use the best native toolkit for their rendering surface, but t
 
 - **macOS: Swift + Metal.** SwiftUI renders chrome (tab bar, file tree, status bar, popups) as native views. Metal renders the editor text surface with GPU-accelerated glyph rasterization via CoreText. This gives macOS users native scrolling, system fonts, trackpad gestures, and full accessibility support.
 - **Linux: GTK4 (planned).** GTK4 widgets for chrome, Cairo or OpenGL for the text surface. Native Wayland/X11 integration, IME support, system theming.
-- **Terminal: Rust TUI target.** The desired terminal frontend is a semantic Ratatui/Terminal client that renders the same Semantic UI models as native GUI clients. The preferred launch path starts Rust first so Rust owns terminal stdin/stdout and launches the BEAM editor core as a connected child over private protocol pipes. The older BEAM-parent TUI path remains available until the Rust-parent path fully replaces it.
+- **Terminal: Rust TUI target.** The desired terminal frontend is a semantic Ratatui/Terminal client that renders the same Semantic UI models as native GUI clients. The launch path is BEAM-owned: Minga starts the editor core, spawns the Rust renderer as a Port, and passes `MINGA_TTY` so Rust can use Ratatui/Crossterm on the real terminal while stdin/stdout remain the packet protocol.
 - **Terminal bakeoff: Go semantic reference.** The Go/Bubble Tea frontend is a working semantic reference while Rust is rebuilt.
 - **Parser: Zig + tree-sitter.** Zig remains parser infrastructure until that code is replaced.
 

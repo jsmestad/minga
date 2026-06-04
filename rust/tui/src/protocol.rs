@@ -283,15 +283,15 @@ pub fn encode_ready_with_caps(width: u16, height: u16, image_support: u8) -> [u8
         width as u8,
         (height >> 8) as u8,
         height as u8,
-        1,
-        7,
-        0,
-        2,
-        0,
-        image_support,
-        0,
-        0,
-        1,
+        1,             // capabilities version
+        7,             // capabilities length
+        0,             // frontend_type: tui
+        2,             // color_depth: rgb
+        1,             // unicode_width: unicode_15
+        image_support, // image_support
+        0,             // float_support: emulated
+        0,             // text_rendering: monospace
+        1,             // semantic_ui: true
     ]
 }
 
@@ -328,6 +328,48 @@ pub fn encode_resize(width: u16, height: u16) -> [u8; 5] {
         (height >> 8) as u8,
         height as u8,
     ]
+}
+
+pub fn encode_mouse_event(
+    row: i16,
+    col: i16,
+    button: u8,
+    modifiers: u8,
+    event_type: u8,
+    click_count: u8,
+) -> [u8; 9] {
+    let row = row.to_be_bytes();
+    let col = col.to_be_bytes();
+    [
+        opcodes::OP_MOUSE_EVENT,
+        row[0],
+        row[1],
+        col[0],
+        col[1],
+        button,
+        modifiers,
+        event_type,
+        click_count,
+    ]
+}
+
+pub fn encode_gui_file_tree_click(index: u16) -> [u8; 4] {
+    [
+        opcodes::OP_GUI_ACTION,
+        opcodes::GUI_ACTION_FILE_TREE_CLICK,
+        (index >> 8) as u8,
+        index as u8,
+    ]
+}
+
+pub fn encode_gui_execute_command(command: &str) -> Vec<u8> {
+    let len = command.len().min(u16::MAX as usize);
+    let mut payload = Vec::with_capacity(4 + len);
+    payload.push(opcodes::OP_GUI_ACTION);
+    payload.push(opcodes::GUI_ACTION_EXECUTE_COMMAND);
+    payload.extend_from_slice(&(len as u16).to_be_bytes());
+    payload.extend_from_slice(&command.as_bytes()[..len]);
+    payload
 }
 
 #[allow(dead_code)]
@@ -535,7 +577,7 @@ mod tests {
     fn encodes_extended_ready() {
         assert_eq!(
             encode_ready_with_caps(80, 24, 0),
-            [opcodes::OP_READY, 0, 80, 0, 24, 1, 7, 0, 2, 0, 0, 0, 0, 1]
+            [opcodes::OP_READY, 0, 80, 0, 24, 1, 7, 0, 2, 1, 0, 0, 0, 1]
         );
     }
 
@@ -618,6 +660,36 @@ mod tests {
             [opcodes::OP_KEY_PRESS, 0, 0, 224, 8, 2]
         );
         assert_eq!(encode_resize(120, 40), [opcodes::OP_RESIZE, 0, 120, 0, 40]);
+        assert_eq!(
+            encode_mouse_event(5, 10, 0, MOD_SHIFT, 0, 2),
+            [opcodes::OP_MOUSE_EVENT, 0, 5, 0, 10, 0, MOD_SHIFT, 0, 2]
+        );
+        assert_eq!(
+            encode_mouse_event(-1, -5, 0, 0, 0, 1),
+            [opcodes::OP_MOUSE_EVENT, 0xFF, 0xFF, 0xFF, 0xFB, 0, 0, 0, 1]
+        );
+        assert_eq!(
+            encode_gui_file_tree_click(42),
+            [
+                opcodes::OP_GUI_ACTION,
+                opcodes::GUI_ACTION_FILE_TREE_CLICK,
+                0,
+                42
+            ]
+        );
+        assert_eq!(
+            encode_gui_execute_command("save"),
+            vec![
+                opcodes::OP_GUI_ACTION,
+                opcodes::GUI_ACTION_EXECUTE_COMMAND,
+                0,
+                4,
+                b's',
+                b'a',
+                b'v',
+                b'e'
+            ]
+        );
         assert_eq!(
             encode_paste_event(b"hello"),
             vec![opcodes::OP_PASTE_EVENT, 0, 5, b'h', b'e', b'l', b'l', b'o']

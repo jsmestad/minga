@@ -327,9 +327,8 @@ type GuiPickerLoadStatus struct {
 }
 
 type GuiAgentChatHeader struct {
-	Visible      uint8
-	Flags        uint8
-	MessageCount uint16
+	Visible uint8
+	Status  uint8
 }
 
 type GuiPickerPreviewHeader struct {
