@@ -7,6 +7,7 @@ defmodule Minga.Integration.FileTreeTest do
   # Mutates the global built-in FileTree sidebar registry while rendering through live editors.
   use Minga.Test.EditorCase, async: false
 
+  alias Minga.Project.FileTree
   alias Minga.Test.HeadlessPort
 
   @moduletag :tmp_dir
@@ -29,8 +30,8 @@ defmodule Minga.Integration.FileTreeTest do
 
   defp open_file_tree(ctx) do
     send_keys_sync(ctx, "<Space>op")
-    assert screen_contains?(ctx, "alpha.txt")
-    assert Enum.any?(screen_text(ctx), &String.contains?(&1, "│"))
+    assert file_tree_open?(ctx)
+    assert file_tree_contains?(ctx, "alpha.txt")
     ctx
   end
 
@@ -51,8 +52,7 @@ defmodule Minga.Integration.FileTreeTest do
 
       send_keys_sync(ctx, "<Space>op")
 
-      refute String.contains?(screen_row(ctx, 1), "│"),
-             "separator should be gone after closing tree"
+      refute file_tree_open?(ctx)
     end
 
     test "opening a file from the tree returns to normal editing behavior", %{tmp_dir: dir} do
@@ -91,11 +91,27 @@ defmodule Minga.Integration.FileTreeTest do
 
       send_keys_sync(ctx, "ggl")
 
-      assert screen_contains?(ctx, "gamma.txt"), "expanding subdir should show gamma.txt"
+      assert file_tree_contains?(ctx, "gamma.txt"), "expanding subdir should show gamma.txt"
 
       send_keys_sync(ctx, "h")
 
-      refute screen_contains?(ctx, "gamma.txt"), "collapsing subdir should hide gamma.txt"
+      refute file_tree_contains?(ctx, "gamma.txt"), "collapsing subdir should hide gamma.txt"
+    end
+  end
+
+  defp file_tree_contains?(ctx, name) do
+    ctx
+    |> editor_state()
+    |> MingaEditor.State.file_tree_state()
+    |> Map.get(:tree)
+    |> case do
+      %FileTree{} = tree ->
+        tree
+        |> FileTree.visible_entries()
+        |> Enum.any?(&(Path.basename(&1.path) == name))
+
+      _ ->
+        false
     end
   end
 end
