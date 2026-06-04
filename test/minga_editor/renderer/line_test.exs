@@ -168,7 +168,10 @@ defmodule MingaEditor.Renderer.LineTest do
       # Should show a normal editor with an empty buffer, not a dashboard
       screen = for row <- 0..23, do: HeadlessPort.get_row_text(port, row)
       all_text = Enum.join(screen, "\n")
-      assert String.contains?(all_text, "[new 1]")
+      assert String.contains?(all_text, "1")
+
+      state = :sys.get_state(editor)
+      assert Minga.Buffer.buffer_name(state.workspace.buffers.active) == "[new 1]"
     end
   end
 end

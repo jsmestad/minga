@@ -21,6 +21,7 @@ defmodule Minga.Test.EditorCase do
   alias MingaEditor.MinibufferData
   alias MingaEditor.Shell.Traditional.Modeline
   alias MingaEditor.StatusBar.Data, as: StatusBarData
+  alias MingaEditor.Window.Content
 
   using do
     quote do
@@ -450,7 +451,9 @@ defmodule Minga.Test.EditorCase do
 
     cond do
       minibuffer_data.visible ->
-        [minibuffer_data.prompt, minibuffer_data.input, minibuffer_data.context]
+        prompt_input = minibuffer_data.prompt <> minibuffer_data.input
+
+        [prompt_input, minibuffer_data.context]
         |> Enum.reject(&(&1 == ""))
         |> Enum.join(" ")
 
@@ -535,6 +538,18 @@ defmodule Minga.Test.EditorCase do
   @spec active_buffer(editor_ctx()) :: pid() | nil
   def active_buffer(%{editor: editor}) do
     get_editor_state(editor).workspace.buffers.active
+  end
+
+  @doc "Returns the buffer pid displayed in the active window."
+  @spec active_window_buffer(editor_ctx()) :: pid() | nil
+  def active_window_buffer(%{editor: editor}) do
+    editor
+    |> get_editor_state()
+    |> MingaEditor.State.active_window_struct()
+    |> case do
+      %{content: content} -> Content.pid(content)
+      _ -> nil
+    end
   end
 
   @doc "Returns the content of the active buffer."
