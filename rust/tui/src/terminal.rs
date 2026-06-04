@@ -126,6 +126,7 @@ impl Terminal {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn set_cursor_shape(&mut self, shape: u8) -> io::Result<()> {
         self.set_cursor_style(shape, true)
     }
