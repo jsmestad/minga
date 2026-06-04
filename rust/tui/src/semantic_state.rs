@@ -11,6 +11,13 @@ pub struct SemanticState {
     status_bar: Option<semantic::StatusBar>,
     tab_bar: Option<semantic::TabBar>,
     file_tree: Option<semantic::FileTree>,
+    line_spacing: Option<semantic::LineSpacing>,
+    cursor_animation: Option<semantic::CursorAnimation>,
+    config_state: Option<semantic::ConfigState>,
+    agent_context: Option<semantic::AgentContext>,
+    hover_action: Option<semantic::HoverAction>,
+    search_state: Option<semantic::SearchState>,
+    notifications: Option<semantic::Notifications>,
     diagnostic: Option<String>,
     cursor: CursorState,
 }
@@ -38,6 +45,13 @@ impl SemanticState {
             status_bar: None,
             tab_bar: None,
             file_tree: None,
+            line_spacing: None,
+            cursor_animation: None,
+            config_state: None,
+            agent_context: None,
+            hover_action: None,
+            search_state: None,
+            notifications: None,
             diagnostic: None,
             cursor: CursorState {
                 row: 0,
@@ -123,6 +137,34 @@ impl SemanticState {
         self.file_tree.as_ref()
     }
 
+    pub fn line_spacing(&self) -> Option<semantic::LineSpacing> {
+        self.line_spacing
+    }
+
+    pub fn cursor_animation(&self) -> Option<semantic::CursorAnimation> {
+        self.cursor_animation
+    }
+
+    pub fn config_state(&self) -> Option<&semantic::ConfigState> {
+        self.config_state.as_ref()
+    }
+
+    pub fn agent_context(&self) -> Option<&semantic::AgentContext> {
+        self.agent_context.as_ref()
+    }
+
+    pub fn hover_action(&self) -> Option<&semantic::HoverAction> {
+        self.hover_action.as_ref()
+    }
+
+    pub fn search_state(&self) -> Option<semantic::SearchState> {
+        self.search_state
+    }
+
+    pub fn notifications(&self) -> Option<semantic::Notifications> {
+        self.notifications
+    }
+
     pub fn diagnostic(&self) -> Option<&str> {
         self.diagnostic.as_deref()
     }
@@ -137,6 +179,13 @@ impl SemanticState {
         self.status_bar = None;
         self.tab_bar = None;
         self.file_tree = None;
+        self.line_spacing = None;
+        self.cursor_animation = None;
+        self.config_state = None;
+        self.agent_context = None;
+        self.hover_action = None;
+        self.search_state = None;
+        self.notifications = None;
         self.diagnostic = None;
         self.cursor = CursorState {
             row: 0,
@@ -158,6 +207,27 @@ impl SemanticState {
                 self.apply_file_tree_selection(selection)
             }
             semantic::Command::Cursorline(cursorline, _) => self.apply_cursorline(cursorline),
+            semantic::Command::LineSpacing(line_spacing, _) => {
+                self.line_spacing = Some(line_spacing)
+            }
+            semantic::Command::CursorAnimation(cursor_animation, _) => {
+                self.cursor_animation = Some(cursor_animation)
+            }
+            semantic::Command::ConfigState(config_state, _) => {
+                self.config_state = Some(config_state)
+            }
+            semantic::Command::AgentContext(agent_context, _) => {
+                self.agent_context = Some(agent_context)
+            }
+            semantic::Command::HoverAction(hover_action, _) => {
+                self.hover_action = Some(hover_action)
+            }
+            semantic::Command::SearchState(search_state, _) => {
+                self.search_state = Some(search_state)
+            }
+            semantic::Command::Notifications(notifications, _) => {
+                self.notifications = Some(notifications)
+            }
             semantic::Command::Picker(..)
             | semantic::Command::PickerPreview(..)
             | semantic::Command::Minibuffer(..)
@@ -177,14 +247,7 @@ impl SemanticState {
             | semantic::Command::IndentGuides(..)
             | semantic::Command::WindowOverlayDelta(..)
             | semantic::Command::ClipboardWrite(..)
-            | semantic::Command::LineSpacing(..)
-            | semantic::Command::CursorAnimation(..)
-            | semantic::Command::ConfigState(..)
-            | semantic::Command::AgentContext(..)
-            | semantic::Command::HoverAction(..)
-            | semantic::Command::SearchState(..)
             | semantic::Command::Workspaces(..)
-            | semantic::Command::Notifications(..)
             | semantic::Command::EditTimeline(..)
             | semantic::Command::ExtensionOverlay(..)
             | semantic::Command::ExtensionPanel(..)
@@ -373,5 +436,74 @@ mod tests {
                 shape: 1
             }
         );
+    }
+
+    #[test]
+    fn retains_simple_semantic_parity_state() {
+        let mut state = SemanticState::new(80, 24);
+
+        state.apply_protocol_command(ProtocolCommand::Semantic(semantic::Command::LineSpacing(
+            semantic::LineSpacing { value: 2 },
+            0,
+        )));
+        state.apply_protocol_command(ProtocolCommand::Semantic(
+            semantic::Command::CursorAnimation(semantic::CursorAnimation { enabled: 1 }, 0),
+        ));
+        state.apply_protocol_command(ProtocolCommand::Semantic(semantic::Command::ConfigState(
+            semantic::ConfigState {
+                payload: vec![1, 2, 3],
+            },
+            0,
+        )));
+        state.apply_protocol_command(ProtocolCommand::Semantic(semantic::Command::AgentContext(
+            semantic::AgentContext {
+                visible: 1,
+                task: "review".to_owned(),
+                timestamp: 9,
+                status: 2,
+                can_approve: 1,
+            },
+            0,
+        )));
+        state.apply_protocol_command(ProtocolCommand::Semantic(semantic::Command::HoverAction(
+            semantic::HoverAction {
+                payload: vec![4, 5],
+            },
+            0,
+        )));
+        state.apply_protocol_command(ProtocolCommand::Semantic(semantic::Command::SearchState(
+            semantic::SearchState {
+                active: 1,
+                match_count: 5,
+                current_index: 2,
+                flags: 0,
+            },
+            0,
+        )));
+        state.apply_protocol_command(ProtocolCommand::Semantic(semantic::Command::Notifications(
+            semantic::Notifications {
+                visible: 1,
+                notification_count: 2,
+            },
+            0,
+        )));
+
+        assert_eq!(state.line_spacing().unwrap().value, 2);
+        assert_eq!(state.cursor_animation().unwrap().enabled, 1);
+        assert_eq!(state.config_state().unwrap().payload, vec![1, 2, 3]);
+        assert_eq!(state.agent_context().unwrap().task, "review");
+        assert_eq!(state.hover_action().unwrap().payload, vec![4, 5]);
+        assert_eq!(state.search_state().unwrap().match_count, 5);
+        assert_eq!(state.notifications().unwrap().notification_count, 2);
+
+        state.apply_protocol_command(ProtocolCommand::Clear);
+
+        assert!(state.line_spacing().is_none());
+        assert!(state.cursor_animation().is_none());
+        assert!(state.config_state().is_none());
+        assert!(state.agent_context().is_none());
+        assert!(state.hover_action().is_none());
+        assert!(state.search_state().is_none());
+        assert!(state.notifications().is_none());
     }
 }
