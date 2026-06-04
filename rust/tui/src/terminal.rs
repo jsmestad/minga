@@ -15,6 +15,7 @@ use ratatui::backend::CrosstermBackend;
 #[cfg(test)]
 use ratatui::backend::TestBackend;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CellStyle {
     pub fg: u32,
@@ -168,6 +169,14 @@ impl Terminal {
             Backend::Real(terminal) => terminal.backend_mut().flush(),
             #[cfg(test)]
             Backend::Test(_) => Ok(()),
+        }
+    }
+
+    #[cfg(test)]
+    pub fn buffer_text(&self) -> String {
+        match &self.backend {
+            Backend::Real(_) => String::new(),
+            Backend::Test(terminal) => terminal.backend().to_string(),
         }
     }
 }
