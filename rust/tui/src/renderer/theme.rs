@@ -16,6 +16,10 @@ pub fn muted() -> Style {
     Style::default().fg(Color::Gray)
 }
 
+pub fn gutter() -> Style {
+    Style::default().fg(Color::DarkGray)
+}
+
 pub fn selected(bg: Color) -> Style {
     Style::default().fg(Color::Black).bg(bg)
 }

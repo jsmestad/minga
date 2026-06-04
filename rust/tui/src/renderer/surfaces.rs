@@ -25,5 +25,6 @@ pub fn render_frame(state: &SemanticState, layout: &FrameLayout, buffer: &mut Bu
         editor::render_bottom_panel(state, bottom_panel, buffer);
     }
 
+    editor::render_separators(state, layout.area, buffer);
     overlays::render(state, layout.editor, buffer);
 }

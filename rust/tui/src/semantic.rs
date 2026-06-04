@@ -106,6 +106,7 @@ pub struct WindowContent {
     pub origin_col: u16,
     pub text_width: u16,
     pub text_height: u16,
+    pub scroll_left: u16,
     pub cursor_row: u16,
     pub cursor_col: u16,
     pub cursor_shape: u8,
@@ -501,6 +502,7 @@ pub struct WindowOverlayDelta {
 pub struct WindowRowsDelta {
     pub window_id: u16,
     pub content_epoch: u32,
+    pub scroll_left: u16,
     pub cursor_visible: bool,
     pub cursor_row: u16,
     pub cursor_col: u16,
@@ -697,6 +699,7 @@ fn decode_window_content(bytes: &[u8]) -> Result<Command, DecodeError> {
     let mut origin_col = 0;
     let mut text_width = 0;
     let mut text_height = 0;
+    let mut scroll_left = 0;
     let mut content_epoch = 0;
     let mut rows = Vec::new();
     let mut cursorline = None;
@@ -709,6 +712,7 @@ fn decode_window_content(bytes: &[u8]) -> Result<Command, DecodeError> {
                 cursor_row = header.cursor_row;
                 cursor_col = header.cursor_col;
                 cursor_shape = header.cursor_shape;
+                scroll_left = header.scroll_left;
                 content_epoch = header.content_epoch;
             }
             0x02 => rows = decode_rows(payload)?,
@@ -738,15 +742,13 @@ fn decode_window_content(bytes: &[u8]) -> Result<Command, DecodeError> {
             origin_col,
             text_width,
             text_height,
+            scroll_left,
             cursor_row,
             cursor_col,
             cursor_shape,
             content_epoch,
             rows,
-            cursorline: cursorline.map(|line| Cursorline {
-                row: origin_row.saturating_add(line.row),
-                bg: line.bg,
-            }),
+            cursorline,
         },
         size,
     ))
@@ -759,6 +761,7 @@ fn decode_window_rows_delta(bytes: &[u8]) -> Result<Command, DecodeError> {
     let mut window_id = 0;
     let mut content_epoch = 0;
     let mut flags = 0;
+    let mut scroll_left = 0;
     let mut cursor_row = 0;
     let mut cursor_col = 0;
     let mut cursor_shape = 0;
@@ -777,6 +780,7 @@ fn decode_window_rows_delta(bytes: &[u8]) -> Result<Command, DecodeError> {
                     cursor_row = header.cursor_row;
                     cursor_col = header.cursor_col;
                     cursor_shape = header.cursor_shape;
+                    scroll_left = header.scroll_left;
                 } else {
                     let (header, _) =
                         semantic_decode::decode_gui_window_viewport_delta_header(payload, 0)?;
@@ -786,6 +790,7 @@ fn decode_window_rows_delta(bytes: &[u8]) -> Result<Command, DecodeError> {
                     cursor_row = header.cursor_row;
                     cursor_col = header.cursor_col;
                     cursor_shape = header.cursor_shape;
+                    scroll_left = header.scroll_left;
                 }
             }
             0x02 => rows = decode_delta_rows(payload)?,
@@ -804,6 +809,7 @@ fn decode_window_rows_delta(bytes: &[u8]) -> Result<Command, DecodeError> {
         WindowRowsDelta {
             window_id,
             content_epoch,
+            scroll_left,
             cursor_visible: flags & 0x01 != 0,
             cursor_row,
             cursor_col,

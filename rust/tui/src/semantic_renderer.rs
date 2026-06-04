@@ -97,6 +97,7 @@ mod tests {
                     origin_col: 0,
                     text_width: 40,
                     text_height: 4,
+                    scroll_left: 0,
                     cursor_row: 0,
                     cursor_col: 5,
                     cursor_shape: 1,
@@ -243,6 +244,7 @@ mod tests {
                     origin_col: 0,
                     text_width: 80,
                     text_height: 20,
+                    scroll_left: 0,
                     cursor_row: 0,
                     cursor_col: 4,
                     cursor_shape: 1,
@@ -370,5 +372,104 @@ mod tests {
         assert!(snapshot.contains("find file"));
         assert!(snapshot.contains("Files: minga 1/3"));
         assert!(snapshot.contains("mix.exs"));
+    }
+
+    #[test]
+    fn renders_editor_gutters_scroll_left_indent_guides_and_separators() {
+        let mut state = SemanticState::new(48, 8);
+        state.apply_protocol_command(crate::protocol::Command::Semantic(
+            semantic::Command::WindowContent(
+                semantic::WindowContent {
+                    window_id: 7,
+                    origin_row: 0,
+                    origin_col: 0,
+                    text_width: 24,
+                    text_height: 4,
+                    scroll_left: 2,
+                    cursor_row: 0,
+                    cursor_col: 0,
+                    cursor_shape: 1,
+                    content_epoch: 1,
+                    rows: vec![row("    x")],
+                    cursorline: Some(semantic::Cursorline {
+                        row: 0,
+                        bg: 0x333333,
+                    }),
+                },
+                0,
+            ),
+        ));
+        state.apply_protocol_command(crate::protocol::Command::Semantic(
+            semantic::Command::Gutter(
+                semantic::Gutter {
+                    window_id: 7,
+                    content_height: 4,
+                    line_number_width: 3,
+                    sign_col_width: 1,
+                    entries: vec![
+                        semantic::GutterEntry {
+                            buf_line: 0,
+                            display_type: 0,
+                            sign_type: 0,
+                            fold_end_line: 0,
+                            sign_fg: 0,
+                            sign_text: String::new(),
+                        },
+                        semantic::GutterEntry {
+                            buf_line: 1,
+                            display_type: 5,
+                            sign_type: 0,
+                            fold_end_line: 0,
+                            sign_fg: 0,
+                            sign_text: String::new(),
+                        },
+                    ],
+                    ..semantic::Gutter::default()
+                },
+                0,
+            ),
+        ));
+        state.apply_protocol_command(crate::protocol::Command::Semantic(
+            semantic::Command::IndentGuides(
+                semantic::IndentGuides {
+                    window_id: 7,
+                    tab_width: 2,
+                    active_guide_col: 2,
+                    guide_cols: vec![2],
+                    line_indent_levels: vec![2],
+                },
+                0,
+            ),
+        ));
+        state.apply_protocol_command(crate::protocol::Command::Semantic(
+            semantic::Command::SplitSeparators(
+                semantic::SplitSeparators {
+                    color: 0,
+                    verticals: vec![semantic::VerticalSeparator {
+                        col: 24,
+                        start_row: 0,
+                        end_row: 1,
+                    }],
+                    horizontals: vec![semantic::HorizontalSeparator {
+                        row: 2,
+                        col: 0,
+                        width: 16,
+                        filename: "main.ex".to_owned(),
+                    }],
+                },
+                0,
+            ),
+        ));
+
+        let mut terminal = Terminal::memory(48, 8);
+        SemanticRenderer::new()
+            .render(&state, &mut terminal)
+            .unwrap();
+
+        let snapshot = terminal.buffer_text();
+        assert!(snapshot.contains("1 │ x"));
+        assert!(snapshot.contains("~"));
+        assert!(snapshot.contains("│"));
+        assert!(snapshot.contains("main.ex"));
     }
 }
