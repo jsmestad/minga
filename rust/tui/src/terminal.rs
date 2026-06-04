@@ -164,6 +164,19 @@ impl Terminal {
         Ok(())
     }
 
+    pub fn write_clipboard(&mut self, text: &str) -> io::Result<()> {
+        match &mut self.backend {
+            Backend::Real(terminal) => {
+                terminal
+                    .backend_mut()
+                    .write_all(osc52_clipboard_sequence(text).as_bytes())?;
+            }
+            #[cfg(test)]
+            Backend::Test(_) => {}
+        }
+        Ok(())
+    }
+
     pub fn flush(&mut self) -> io::Result<()> {
         match &mut self.backend {
             Backend::Real(terminal) => terminal.backend_mut().flush(),
@@ -203,4 +216,47 @@ fn env_size() -> (u16, u16) {
 
 fn env_u16(name: &str) -> Option<u16> {
     env::var(name).ok()?.parse().ok()
+}
+
+fn osc52_clipboard_sequence(text: &str) -> String {
+    format!("\x1b]52;c;{}\x07", base64_encode(text.as_bytes()))
+}
+
+fn base64_encode(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut encoded = String::with_capacity(bytes.len().div_ceil(3) * 4);
+
+    for chunk in bytes.chunks(3) {
+        let first = chunk[0];
+        let second = chunk.get(1).copied().unwrap_or(0);
+        let third = chunk.get(2).copied().unwrap_or(0);
+
+        encoded.push(TABLE[(first >> 2) as usize] as char);
+        encoded.push(TABLE[(((first & 0b0000_0011) << 4) | (second >> 4)) as usize] as char);
+
+        if chunk.len() > 1 {
+            encoded.push(TABLE[(((second & 0b0000_1111) << 2) | (third >> 6)) as usize] as char);
+        } else {
+            encoded.push('=');
+        }
+
+        if chunk.len() > 2 {
+            encoded.push(TABLE[(third & 0b0011_1111) as usize] as char);
+        } else {
+            encoded.push('=');
+        }
+    }
+
+    encoded
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn encodes_osc52_clipboard_sequence() {
+        assert_eq!(osc52_clipboard_sequence("hello"), "\x1b]52;c;aGVsbG8=\x07");
+        assert_eq!(osc52_clipboard_sequence("λ\n"), "\x1b]52;c;zrsK\x07");
+    }
 }
