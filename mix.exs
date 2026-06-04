@@ -343,6 +343,7 @@ defmodule Minga.MixProject do
           if gui and not terminal_command, do: Application.put_env(:minga, :backend, :gui)
           Minga.SafeMode.put(Minga.CLI.safe_args?(argv))
           if not terminal_command, do: Application.put_env(:minga, :start_editor, true)
+          if System.get_env(\"MINGA_PORT_MODE\") == \"connected\", do: Minga.LoggerHandler.install()
           Application.ensure_all_started(:minga)
           Minga.CLI.main(argv)
         '"

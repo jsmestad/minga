@@ -106,17 +106,36 @@ pub struct WindowContent {
     pub origin_col: u16,
     pub text_width: u16,
     pub text_height: u16,
+    pub scroll_left: u16,
     pub cursor_row: u16,
     pub cursor_col: u16,
     pub cursor_shape: u8,
     pub content_epoch: u32,
     pub rows: Vec<Row>,
     pub cursorline: Option<Cursorline>,
+    pub selection: Selection,
+    pub search_matches: Vec<SearchMatch>,
+    pub diagnostic_ranges: Vec<DiagnosticRange>,
+    pub document_highlights: Vec<DocumentHighlight>,
+    pub annotations: Vec<Annotation>,
 }
 
 pub type Row = semantic_types::Row;
 #[allow(dead_code)]
 pub type Span = semantic_types::Span;
+pub type SearchMatch = semantic_types::SearchMatch;
+pub type DiagnosticRange = semantic_types::DiagnosticRange;
+pub type DocumentHighlight = semantic_types::DocumentHighlight;
+pub type Annotation = semantic_types::Annotation;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Selection {
+    pub selection_type: u8,
+    pub start_row: u16,
+    pub start_col: u16,
+    pub end_row: u16,
+    pub end_col: u16,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct StatusBar {
@@ -135,7 +154,9 @@ pub struct StatusBar {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatusSegment {
+    pub name: String,
     pub text: String,
+    pub command: String,
     pub fg: u32,
     pub bg: u32,
     pub attrs: u16,
@@ -501,12 +522,18 @@ pub struct WindowOverlayDelta {
 pub struct WindowRowsDelta {
     pub window_id: u16,
     pub content_epoch: u32,
+    pub scroll_left: u16,
     pub cursor_visible: bool,
     pub cursor_row: u16,
     pub cursor_col: u16,
     pub cursor_shape: u8,
     pub rows: Vec<WindowDeltaRow>,
     pub cursorline: Option<Cursorline>,
+    pub selection: Option<Selection>,
+    pub search_matches: Option<Vec<SearchMatch>>,
+    pub diagnostic_ranges: Option<Vec<DiagnosticRange>>,
+    pub document_highlights: Option<Vec<DocumentHighlight>>,
+    pub annotations: Option<Vec<Annotation>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -558,13 +585,43 @@ pub struct SearchState {
     pub flags: u8,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Workspaces {
     pub visible: u8,
     pub active_workspace_id: u16,
     pub mode: u8,
     pub flags: u8,
     pub workspace_count: u8,
+    pub spaces: Vec<Workspace>,
+    pub tabs: Vec<WorkspaceTab>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Workspace {
+    pub id: u16,
+    pub kind: u8,
+    pub status: u8,
+    pub flags: u16,
+    pub color: u32,
+    pub tab_count: u16,
+    pub draft_count: u16,
+    pub conflict_count: u16,
+    pub background_count: u16,
+    pub label: String,
+    pub icon: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceTab {
+    pub id: u32,
+    pub workspace_id: u16,
+    pub kind: u8,
+    pub flags: u16,
+    pub path_hash: u32,
+    pub icon: String,
+    pub label: String,
+    pub path: String,
+    pub tint: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -599,7 +656,39 @@ pub struct Observatory {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Sidebars {
     pub visible: u8,
-    pub sidebar_count: u16,
+    pub active_id: String,
+    pub items: Vec<Sidebar>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Sidebar {
+    pub id: String,
+    pub display_name: String,
+    pub semantic_kind: String,
+    pub icon: String,
+    pub order: u16,
+    pub flags: u8,
+    pub preferred_width: u16,
+    pub badge_count: u16,
+    pub visible: bool,
+    pub focused: bool,
+}
+
+impl Sidebars {
+    pub fn visible_items(&self) -> impl Iterator<Item = &Sidebar> {
+        self.items.iter().filter(|sidebar| sidebar.visible)
+    }
+
+    pub fn visible_count(&self) -> usize {
+        self.visible_items().count()
+    }
+
+    pub fn preferred_width(&self) -> u16 {
+        self.visible_items()
+            .next()
+            .map(|sidebar| sidebar.preferred_width.max(18))
+            .unwrap_or(0)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -613,8 +702,7 @@ pub struct Board {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AgentChat {
     pub visible: u8,
-    pub flags: u8,
-    pub message_count: u16,
+    pub status: u8,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -697,9 +785,15 @@ fn decode_window_content(bytes: &[u8]) -> Result<Command, DecodeError> {
     let mut origin_col = 0;
     let mut text_width = 0;
     let mut text_height = 0;
+    let mut scroll_left = 0;
     let mut content_epoch = 0;
     let mut rows = Vec::new();
     let mut cursorline = None;
+    let mut selection = Selection::default();
+    let mut search_matches = Vec::new();
+    let mut diagnostic_ranges = Vec::new();
+    let mut document_highlights = Vec::new();
+    let mut annotations = Vec::new();
 
     for (section_id, payload) in sections {
         match section_id {
@@ -709,9 +803,31 @@ fn decode_window_content(bytes: &[u8]) -> Result<Command, DecodeError> {
                 cursor_row = header.cursor_row;
                 cursor_col = header.cursor_col;
                 cursor_shape = header.cursor_shape;
+                scroll_left = header.scroll_left;
                 content_epoch = header.content_epoch;
             }
             0x02 => rows = decode_rows(payload)?,
+            0x03 => selection = decode_selection(payload)?,
+            0x04 => {
+                let (matches, _) =
+                    semantic_decode::decode_gui_window_content_search_matches(payload, 0)?;
+                search_matches = matches;
+            }
+            0x05 => {
+                let (ranges, _) =
+                    semantic_decode::decode_gui_window_content_diagnostic_ranges(payload, 0)?;
+                diagnostic_ranges = ranges;
+            }
+            0x06 => {
+                let (highlights, _) =
+                    semantic_decode::decode_gui_window_content_document_highlights(payload, 0)?;
+                document_highlights = highlights;
+            }
+            0x07 => {
+                let (decoded_annotations, _) =
+                    semantic_decode::decode_gui_window_content_annotations(payload, 0)?;
+                annotations = decoded_annotations;
+            }
             0x08 => {
                 let (geometry, _) =
                     semantic_decode::decode_gui_window_content_geometry(payload, 0)?;
@@ -738,15 +854,18 @@ fn decode_window_content(bytes: &[u8]) -> Result<Command, DecodeError> {
             origin_col,
             text_width,
             text_height,
+            scroll_left,
             cursor_row,
             cursor_col,
             cursor_shape,
             content_epoch,
             rows,
-            cursorline: cursorline.map(|line| Cursorline {
-                row: origin_row.saturating_add(line.row),
-                bg: line.bg,
-            }),
+            cursorline,
+            selection,
+            search_matches,
+            diagnostic_ranges,
+            document_highlights,
+            annotations,
         },
         size,
     ))
@@ -759,11 +878,17 @@ fn decode_window_rows_delta(bytes: &[u8]) -> Result<Command, DecodeError> {
     let mut window_id = 0;
     let mut content_epoch = 0;
     let mut flags = 0;
+    let mut scroll_left = 0;
     let mut cursor_row = 0;
     let mut cursor_col = 0;
     let mut cursor_shape = 0;
     let mut rows = Vec::new();
     let mut cursorline = None;
+    let mut selection = None;
+    let mut search_matches = None;
+    let mut diagnostic_ranges = None;
+    let mut document_highlights = None;
+    let mut annotations = None;
 
     for (section_id, payload) in sections {
         match section_id {
@@ -777,6 +902,7 @@ fn decode_window_rows_delta(bytes: &[u8]) -> Result<Command, DecodeError> {
                     cursor_row = header.cursor_row;
                     cursor_col = header.cursor_col;
                     cursor_shape = header.cursor_shape;
+                    scroll_left = header.scroll_left;
                 } else {
                     let (header, _) =
                         semantic_decode::decode_gui_window_viewport_delta_header(payload, 0)?;
@@ -786,9 +912,31 @@ fn decode_window_rows_delta(bytes: &[u8]) -> Result<Command, DecodeError> {
                     cursor_row = header.cursor_row;
                     cursor_col = header.cursor_col;
                     cursor_shape = header.cursor_shape;
+                    scroll_left = header.scroll_left;
                 }
             }
             0x02 => rows = decode_delta_rows(payload)?,
+            0x03 => selection = Some(decode_selection(payload)?),
+            0x04 => {
+                let (matches, _) =
+                    semantic_decode::decode_gui_window_content_search_matches(payload, 0)?;
+                search_matches = Some(matches);
+            }
+            0x05 => {
+                let (ranges, _) =
+                    semantic_decode::decode_gui_window_content_diagnostic_ranges(payload, 0)?;
+                diagnostic_ranges = Some(ranges);
+            }
+            0x06 => {
+                let (highlights, _) =
+                    semantic_decode::decode_gui_window_content_document_highlights(payload, 0)?;
+                document_highlights = Some(highlights);
+            }
+            0x07 => {
+                let (decoded_annotations, _) =
+                    semantic_decode::decode_gui_window_content_annotations(payload, 0)?;
+                annotations = Some(decoded_annotations);
+            }
             0x09 => {
                 let (cl, _) = semantic_decode::decode_gui_window_content_cursorline(payload, 0)?;
                 cursorline = Some(Cursorline {
@@ -804,15 +952,32 @@ fn decode_window_rows_delta(bytes: &[u8]) -> Result<Command, DecodeError> {
         WindowRowsDelta {
             window_id,
             content_epoch,
+            scroll_left,
             cursor_visible: flags & 0x01 != 0,
             cursor_row,
             cursor_col,
             cursor_shape,
             rows,
             cursorline,
+            selection,
+            search_matches,
+            diagnostic_ranges,
+            document_highlights,
+            annotations,
         },
         size,
     ))
+}
+
+fn decode_selection(payload: &[u8]) -> Result<Selection, DecodeError> {
+    let (selection, _) = semantic_decode::decode_gui_window_content_selection(payload, 0)?;
+    Ok(Selection {
+        selection_type: selection.r#type,
+        start_row: selection.start_row,
+        start_col: selection.start_col,
+        end_row: selection.end_row,
+        end_col: selection.end_col,
+    })
 }
 
 fn decode_status_bar(bytes: &[u8]) -> Result<Command, DecodeError> {
@@ -878,6 +1043,7 @@ fn status_segments(payload: &[u8], status: &mut StatusBar) -> Result<(), DecodeE
 fn decode_status_segment(bytes: &[u8]) -> Result<(StatusSegment, usize), DecodeError> {
     require_len(bytes, 1, "status segment name length")?;
     let name_len = bytes[0] as usize;
+    let name = read_string(bytes, 1, name_len)?;
     let mut offset = 1 + name_len;
     require_len(bytes, offset + 8, "status segment colors")?;
     let fg = read_u24(bytes, offset);
@@ -889,12 +1055,16 @@ fn decode_status_segment(bytes: &[u8]) -> Result<(StatusSegment, usize), DecodeE
     offset += text_len;
     require_len(bytes, offset + 2, "status segment target")?;
     let target_len = read_u16(bytes, offset) as usize;
-    offset += 2 + target_len;
+    offset += 2;
+    let command = read_string(bytes, offset, target_len)?;
+    offset += target_len;
     require_len(bytes, offset, "status segment end")?;
 
     Ok((
         StatusSegment {
+            name,
             text,
+            command,
             fg,
             bg,
             attrs,
@@ -1926,14 +2096,76 @@ fn decode_search_state(bytes: &[u8]) -> Result<Command, DecodeError> {
 
 fn decode_workspaces(bytes: &[u8]) -> Result<Command, DecodeError> {
     let size = len16_size(bytes)?;
-    require_len(bytes, 8, "workspaces fields")?;
+    require_len(bytes, 9, "workspaces fields")?;
+    let body = &bytes[3..size];
+    require_len(body, 6, "workspaces header")?;
+    let active_workspace_id = read_u16(body, 1);
+    let workspace_count = body[5];
+    let mut offset = 6;
+    let mut spaces = Vec::with_capacity(workspace_count as usize);
+
+    for _ in 0..workspace_count {
+        require_len(body, offset + 17, "workspace summary")?;
+        let workspace = Workspace {
+            id: read_u16(body, offset),
+            kind: body[offset + 2],
+            status: body[offset + 3],
+            flags: read_u16(body, offset + 4),
+            color: read_u24(body, offset + 6),
+            tab_count: read_u16(body, offset + 9),
+            draft_count: read_u16(body, offset + 11),
+            conflict_count: read_u16(body, offset + 13),
+            background_count: read_u16(body, offset + 15),
+            label: {
+                offset += 17;
+                read_string8(body, &mut offset)?
+            },
+            icon: read_string8(body, &mut offset)?,
+        };
+        spaces.push(workspace);
+    }
+
+    let mut tabs = Vec::new();
+    if offset < body.len() {
+        require_len(body, offset + 2, "workspace visible tab count")?;
+        let tab_count = read_u16(body, offset) as usize;
+        offset += 2;
+        tabs.reserve(tab_count);
+
+        for _ in 0..tab_count {
+            require_len(body, offset + 13, "workspace visible tab")?;
+            let tab = WorkspaceTab {
+                id: read_u32(body, offset),
+                workspace_id: read_u16(body, offset + 4),
+                kind: body[offset + 6],
+                flags: read_u16(body, offset + 7),
+                path_hash: read_u32(body, offset + 9),
+                icon: {
+                    offset += 13;
+                    read_string8(body, &mut offset)?
+                },
+                label: read_string16(body, &mut offset)?,
+                path: read_string16(body, &mut offset)?,
+                tint: {
+                    require_len(body, offset + 4, "workspace visible tab tint")?;
+                    let tint = read_u32(body, offset);
+                    offset += 4;
+                    tint
+                },
+            };
+            tabs.push(tab);
+        }
+    }
+
     Ok(Command::Workspaces(
         Workspaces {
-            visible: bytes[3],
-            active_workspace_id: read_u16(bytes, 4),
-            mode: bytes[6],
-            flags: bytes[7],
-            workspace_count: if size > 8 { bytes[8] } else { 0 },
+            visible: body[0],
+            active_workspace_id,
+            mode: body[3],
+            flags: body[4],
+            workspace_count,
+            spaces,
+            tabs,
         },
         size,
     ))
@@ -1996,11 +2228,45 @@ fn decode_observatory(bytes: &[u8]) -> Result<Command, DecodeError> {
 
 fn decode_sidebars(bytes: &[u8]) -> Result<Command, DecodeError> {
     let size = len32_size(bytes)?;
-    require_len(bytes, 8, "sidebars fields")?;
+    require_len(bytes, size, "sidebars payload")?;
+    let payload = &bytes[5..size];
+    require_len(payload, 3, "sidebars fields")?;
+    let visible = payload[0];
+    let count = read_u16(payload, 1) as usize;
+    let mut offset = 3;
+    let active_id = read_string16(payload, &mut offset)?;
+    let mut items = Vec::with_capacity(count);
+
+    for _ in 0..count {
+        let id = read_string16(payload, &mut offset)?;
+        let display_name = read_string16(payload, &mut offset)?;
+        let semantic_kind = read_string16(payload, &mut offset)?;
+        let icon = read_string16(payload, &mut offset)?;
+        require_len(payload, offset + 7, "sidebar metadata")?;
+        let order = read_u16(payload, offset);
+        let flags = payload[offset + 2];
+        let preferred_width = read_u16(payload, offset + 3);
+        let badge_count = read_u16(payload, offset + 5);
+        offset += 7;
+        items.push(Sidebar {
+            id,
+            display_name,
+            semantic_kind,
+            icon,
+            order,
+            flags,
+            preferred_width,
+            badge_count,
+            visible: flags & 0x01 != 0,
+            focused: flags & 0x02 != 0,
+        });
+    }
+
     Ok(Command::Sidebars(
         Sidebars {
-            visible: bytes[5],
-            sidebar_count: read_u16(bytes, 6),
+            visible,
+            active_id,
+            items,
         },
         size,
     ))
@@ -2025,16 +2291,14 @@ fn decode_agent_chat(bytes: &[u8]) -> Result<Command, DecodeError> {
     let secs = sections(&bytes[..size])?;
     let mut chat = AgentChat {
         visible: 0,
-        flags: 0,
-        message_count: 0,
+        status: 0,
     };
 
     for (section_id, payload) in secs {
         if section_id == 0x01 {
             let (header, _) = semantic_decode::decode_gui_agent_chat_header(payload, 0)?;
             chat.visible = header.visible;
-            chat.flags = header.flags;
-            chat.message_count = header.message_count;
+            chat.status = header.status;
         }
     }
 
@@ -2647,6 +2911,67 @@ mod tests {
     }
 
     #[test]
+    fn decodes_window_overlay_sections_and_empty_delta_clears() {
+        let header = section(0x01, &[0, 7, 0, 0, 0, 1, 0, 2, 1, 0, 0, 0, 0, 9]);
+        let rows = section(0x02, &[0, 0]);
+        let selection = section(0x03, &[1, 0, 0, 0, 1, 0, 0, 0, 4]);
+        let search = section(0x04, &[0, 1, 0, 0, 0, 2, 0, 5, 1]);
+        let diagnostics = section(0x05, &[0, 1, 0, 0, 0, 2, 0, 0, 0, 5, 1]);
+        let highlights = section(0x06, &[0, 1, 0, 0, 0, 3, 0, 0, 0, 6, 2]);
+        let mut annotation_payload = vec![0, 1, 0, 0, 1, 0xAA, 0xBB, 0xCC, 0x11, 0x22, 0x33];
+        annotation_payload.extend_from_slice(&string16("note"));
+        let annotations = section(0x07, &annotation_payload);
+        let payload = [
+            vec![opcodes::OP_GUI_WINDOW_CONTENT, 7],
+            header,
+            rows,
+            selection,
+            search,
+            diagnostics,
+            highlights,
+            annotations,
+        ]
+        .concat();
+
+        let Command::WindowContent(window, _) = decode(&payload).unwrap() else {
+            panic!("expected window content");
+        };
+        assert_eq!(window.selection.selection_type, 1);
+        assert_eq!(window.search_matches[0].end_col, 5);
+        assert_eq!(window.diagnostic_ranges[0].severity, 1);
+        assert_eq!(window.document_highlights[0].kind, 2);
+        assert_eq!(window.annotations[0].text, "note");
+
+        let header = section(0x01, &[0, 7, 0, 0, 0, 9, 1, 0, 0, 0, 0, 1, 0, 0]);
+        let rows = section(0x02, &[0, 0]);
+        let selection = section(0x03, &[0]);
+        let search = section(0x04, &[0, 0]);
+        let diagnostics = section(0x05, &[0, 0]);
+        let highlights = section(0x06, &[0, 0]);
+        let annotations = section(0x07, &[0, 0]);
+        let payload = [
+            vec![opcodes::OP_GUI_WINDOW_ROWS_DELTA, 7],
+            header,
+            rows,
+            selection,
+            search,
+            diagnostics,
+            highlights,
+            annotations,
+        ]
+        .concat();
+
+        let Command::WindowRowsDelta(delta, _) = decode(&payload).unwrap() else {
+            panic!("expected rows delta");
+        };
+        assert_eq!(delta.selection.unwrap(), Selection::default());
+        assert!(delta.search_matches.unwrap().is_empty());
+        assert!(delta.diagnostic_ranges.unwrap().is_empty());
+        assert!(delta.document_highlights.unwrap().is_empty());
+        assert!(delta.annotations.unwrap().is_empty());
+    }
+
+    #[test]
     fn rejects_window_content_geometry_without_hit_region_bytes() {
         let header = section(0x01, &[0, 1, 0x03, 0, 4, 0, 5, 2, 0, 0, 0, 0, 0, 7]);
         let rows = section(0x02, &[0, 0]);
@@ -2682,6 +3007,68 @@ mod tests {
             command,
             Command::TabBar(TabBar { active_index: 0, tabs }, _) if tabs[0].active && tabs[1].dirty && tabs[1].label == "router.ex"
         ));
+    }
+
+    #[test]
+    fn decodes_workspaces_summary_and_visible_tabs() {
+        let mut workspace = vec![
+            0, 7, // id
+            1, // kind
+            2, // status
+            0, 3, // flags
+            0x44, 0x55, 0x66, // color
+            0, 4, // tab count
+            0, 1, // draft count
+            0, 2, // conflict count
+            0, 3, // background count
+        ];
+        workspace.extend_from_slice(&string8("Agent"));
+        workspace.extend_from_slice(&string8("A"));
+        let mut tab = vec![
+            0, 0, 0, 9, // id
+            0, 7, // workspace id
+            0, // kind
+            0, 0x21, // flags
+            0, 0, 0, 5, // path hash
+        ];
+        tab.extend_from_slice(&string8("*"));
+        tab.extend_from_slice(&string16("main.ex"));
+        tab.extend_from_slice(&string16("/repo/main.ex"));
+        tab.extend_from_slice(&[0, 0, 0, 0]);
+        let mut body = vec![
+            2, // version
+            0, 7, // active workspace id
+            1, // mode
+            1, // flags
+            1, // workspace count
+        ];
+        body.extend_from_slice(&workspace);
+        body.extend_from_slice(&[0, 1]);
+        body.extend_from_slice(&tab);
+        let payload = [
+            vec![opcodes::OP_GUI_WORKSPACES],
+            (body.len() as u16).to_be_bytes().to_vec(),
+            body,
+            vec![opcodes::OP_BATCH_END],
+        ]
+        .concat();
+
+        let command = decode(&payload).unwrap();
+
+        assert_eq!(semantic_size(&payload).unwrap(), payload.len() - 1);
+        let Command::Workspaces(workspaces, _) = command else {
+            panic!("expected workspaces");
+        };
+        assert_eq!(workspaces.active_workspace_id, 7);
+        assert_eq!(workspaces.workspace_count, 1);
+        assert_eq!(workspaces.spaces.len(), 1);
+        assert_eq!(workspaces.tabs.len(), 1);
+        assert_eq!(workspaces.spaces[0].label, "Agent");
+        assert_eq!(workspaces.spaces[0].icon, "A");
+        assert_eq!(workspaces.spaces[0].tab_count, 4);
+        assert_eq!(workspaces.tabs[0].label, "main.ex");
+        assert_eq!(workspaces.tabs[0].path, "/repo/main.ex");
+        assert_eq!(workspaces.tabs[0].workspace_id, 7);
     }
 
     #[test]
@@ -3142,8 +3529,8 @@ mod tests {
             Command::Board(Board { visible: 1, .. }, _)
         ));
 
-        // Agent chat: 1 section (0x01 header), payload: visible=1, flags=0, message_count=0
-        let agent_chat = vec![opcodes::OP_GUI_AGENT_CHAT, 1, 0x01, 0, 4, 1, 0, 0, 0];
+        // Agent chat: 1 section (0x01 header), payload: visible=1, status=2
+        let agent_chat = vec![opcodes::OP_GUI_AGENT_CHAT, 1, 0x01, 0, 2, 1, 2];
         let packet = [agent_chat, vec![opcodes::OP_BATCH_END]].concat();
         let command = decode(&packet).unwrap();
         assert_eq!(semantic_size(&packet).unwrap(), packet.len() - 1);
@@ -3152,8 +3539,7 @@ mod tests {
             Command::AgentChat(
                 AgentChat {
                     visible: 1,
-                    flags: 0,
-                    message_count: 0
+                    status: 2
                 },
                 _
             )
@@ -3670,11 +4056,32 @@ mod tests {
 
     #[test]
     fn decode_sidebars_field_check() {
-        let bytes = [opcodes::OP_GUI_SIDEBARS, 0, 0, 0, 3, 1, 0, 5];
+        let payload = [
+            vec![1, 0, 1],
+            string16("files"),
+            string16("files"),
+            string16("Files"),
+            string16("file_tree"),
+            string16("F"),
+            vec![0, 7, 0x03, 0, 24, 0, 2],
+        ]
+        .concat();
+        let mut bytes = vec![opcodes::OP_GUI_SIDEBARS];
+        bytes.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+        bytes.extend_from_slice(&payload);
         match decode(&bytes).unwrap() {
-            Command::Sidebars(s, 8) => {
+            Command::Sidebars(s, size) => {
+                assert_eq!(size, bytes.len());
                 assert_eq!(s.visible, 1);
-                assert_eq!(s.sidebar_count, 5);
+                assert_eq!(s.active_id, "files");
+                assert_eq!(s.visible_count(), 1);
+                assert_eq!(s.items[0].display_name, "Files");
+                assert_eq!(s.items[0].semantic_kind, "file_tree");
+                assert_eq!(s.items[0].order, 7);
+                assert_eq!(s.items[0].preferred_width, 24);
+                assert_eq!(s.items[0].badge_count, 2);
+                assert!(s.items[0].visible);
+                assert!(s.items[0].focused);
             }
             other => panic!("unexpected: {:?}", other),
         }

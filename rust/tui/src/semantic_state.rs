@@ -8,6 +8,8 @@ pub struct SemanticState {
     height: u16,
     windows: HashMap<u16, semantic::WindowContent>,
     window_order: Vec<u16>,
+    gutters: HashMap<u16, semantic::Gutter>,
+    indent_guides: HashMap<u16, semantic::IndentGuides>,
     status_bar: Option<semantic::StatusBar>,
     tab_bar: Option<semantic::TabBar>,
     file_tree: Option<semantic::FileTree>,
@@ -23,6 +25,8 @@ pub struct SemanticState {
     bottom_panel: Option<semantic::BottomPanel>,
     change_summary: Option<semantic::ChangeSummary>,
     git_status: Option<semantic::GitStatus>,
+    gutter_separator: Option<semantic::GutterSeparator>,
+    split_separators: Option<semantic::SplitSeparators>,
     line_spacing: Option<semantic::LineSpacing>,
     cursor_animation: Option<semantic::CursorAnimation>,
     config_state: Option<semantic::ConfigState>,
@@ -39,8 +43,10 @@ pub struct SemanticState {
     board: Option<semantic::Board>,
     agent_chat: Option<semantic::AgentChat>,
     tool_manager: Option<semantic::ToolManager>,
+    theme: Option<semantic::Theme>,
     diagnostic: Option<String>,
     cursor: CursorState,
+    cursor_window_id: Option<u16>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,6 +70,8 @@ impl SemanticState {
             height,
             windows: HashMap::new(),
             window_order: Vec::new(),
+            gutters: HashMap::new(),
+            indent_guides: HashMap::new(),
             status_bar: None,
             tab_bar: None,
             file_tree: None,
@@ -79,6 +87,8 @@ impl SemanticState {
             bottom_panel: None,
             change_summary: None,
             git_status: None,
+            gutter_separator: None,
+            split_separators: None,
             line_spacing: None,
             cursor_animation: None,
             config_state: None,
@@ -95,12 +105,14 @@ impl SemanticState {
             board: None,
             agent_chat: None,
             tool_manager: None,
+            theme: None,
             diagnostic: None,
             cursor: CursorState {
                 row: 0,
                 col: 0,
                 shape: 0,
             },
+            cursor_window_id: None,
         }
     }
 
@@ -119,6 +131,7 @@ impl SemanticState {
             ProtocolCommand::SetCursor { row, col } => {
                 self.cursor.row = row;
                 self.cursor.col = col;
+                self.cursor_window_id = None;
                 StateEffect::render()
             }
             ProtocolCommand::SetCursorShape(shape) => {
@@ -167,6 +180,18 @@ impl SemanticState {
             .filter_map(|window_id| self.windows.get(window_id))
     }
 
+    pub fn window(&self, window_id: u16) -> Option<&semantic::WindowContent> {
+        self.windows.get(&window_id)
+    }
+
+    pub fn gutter(&self, window_id: u16) -> Option<&semantic::Gutter> {
+        self.gutters.get(&window_id)
+    }
+
+    pub fn indent_guides(&self, window_id: u16) -> Option<&semantic::IndentGuides> {
+        self.indent_guides.get(&window_id)
+    }
+
     pub fn status_bar(&self) -> Option<&semantic::StatusBar> {
         self.status_bar.as_ref()
     }
@@ -189,10 +214,6 @@ impl SemanticState {
 
     pub fn minibuffer(&self) -> Option<&semantic::Minibuffer> {
         self.minibuffer.as_ref()
-    }
-
-    pub fn breadcrumb(&self) -> Option<&semantic::Breadcrumb> {
-        self.breadcrumb.as_ref()
     }
 
     pub fn completion(&self) -> Option<&semantic::Completion> {
@@ -227,6 +248,14 @@ impl SemanticState {
         self.git_status.as_ref()
     }
 
+    pub fn gutter_separator(&self) -> Option<semantic::GutterSeparator> {
+        self.gutter_separator
+    }
+
+    pub fn split_separators(&self) -> Option<&semantic::SplitSeparators> {
+        self.split_separators.as_ref()
+    }
+
     pub fn agent_context(&self) -> Option<&semantic::AgentContext> {
         self.agent_context.as_ref()
     }
@@ -239,8 +268,8 @@ impl SemanticState {
         self.notifications
     }
 
-    pub fn workspaces(&self) -> Option<semantic::Workspaces> {
-        self.workspaces
+    pub fn workspaces(&self) -> Option<&semantic::Workspaces> {
+        self.workspaces.as_ref()
     }
 
     pub fn edit_timeline(&self) -> Option<semantic::EditTimeline> {
@@ -271,6 +300,10 @@ impl SemanticState {
         self.tool_manager
     }
 
+    pub fn theme(&self) -> Option<&semantic::Theme> {
+        self.theme.as_ref()
+    }
+
     pub fn diagnostic(&self) -> Option<&str> {
         self.diagnostic.as_deref()
     }
@@ -279,14 +312,36 @@ impl SemanticState {
         self.cursor
     }
 
+    pub fn cursor_window_id(&self) -> Option<u16> {
+        self.cursor_window_id
+    }
+
     pub fn cursor_animation_enabled(&self) -> bool {
         self.cursor_animation
             .is_none_or(|cursor_animation| cursor_animation.enabled != 0)
     }
 
+    pub fn debug_summary(&self) -> String {
+        let row_count: usize = self.windows.values().map(|window| window.rows.len()).sum();
+        format!(
+            "size={}x{} windows={} rows={} status_bar={} tab_bar={} file_tree={} bottom_panel={} diagnostic={}",
+            self.width,
+            self.height,
+            self.windows.len(),
+            row_count,
+            self.status_bar.is_some(),
+            self.tab_bar.is_some(),
+            self.file_tree.is_some(),
+            self.bottom_panel.is_some(),
+            self.diagnostic.is_some()
+        )
+    }
+
     fn clear(&mut self) {
         self.windows.clear();
         self.window_order.clear();
+        self.gutters.clear();
+        self.indent_guides.clear();
         self.status_bar = None;
         self.tab_bar = None;
         self.file_tree = None;
@@ -302,6 +357,8 @@ impl SemanticState {
         self.bottom_panel = None;
         self.change_summary = None;
         self.git_status = None;
+        self.gutter_separator = None;
+        self.split_separators = None;
         self.line_spacing = None;
         self.cursor_animation = None;
         self.config_state = None;
@@ -324,6 +381,7 @@ impl SemanticState {
             col: 0,
             shape: 0,
         };
+        self.cursor_window_id = None;
     }
 
     fn apply_semantic_command(&mut self, command: semantic::Command) -> StateEffect {
@@ -402,6 +460,27 @@ impl SemanticState {
                 self.git_status = Some(git_status);
                 StateEffect::render()
             }
+            semantic::Command::Gutter(gutter, _) => {
+                self.gutters.insert(gutter.window_id, gutter);
+                StateEffect::render()
+            }
+            semantic::Command::GutterSeparator(separator, _) => {
+                self.gutter_separator = Some(separator);
+                StateEffect::render()
+            }
+            semantic::Command::SplitSeparators(split_separators, _) => {
+                self.split_separators = Some(split_separators);
+                StateEffect::render()
+            }
+            semantic::Command::IndentGuides(indent_guides, _) => {
+                self.indent_guides
+                    .insert(indent_guides.window_id, indent_guides);
+                StateEffect::render()
+            }
+            semantic::Command::WindowOverlayDelta(delta, _) => {
+                self.apply_window_overlay_delta(delta);
+                StateEffect::render()
+            }
             semantic::Command::Cursorline(cursorline, _) => {
                 self.apply_cursorline(cursorline);
                 StateEffect::render()
@@ -475,12 +554,10 @@ impl SemanticState {
                 self.tool_manager = Some(tool_manager);
                 StateEffect::render()
             }
-            semantic::Command::Theme(..)
-            | semantic::Command::Gutter(..)
-            | semantic::Command::GutterSeparator(..)
-            | semantic::Command::SplitSeparators(..)
-            | semantic::Command::IndentGuides(..)
-            | semantic::Command::WindowOverlayDelta(..) => StateEffect::render(),
+            semantic::Command::Theme(theme, _) => {
+                self.theme = Some(theme);
+                StateEffect::render()
+            }
         }
     }
 
@@ -495,6 +572,7 @@ impl SemanticState {
             col: window.origin_col.saturating_add(window.cursor_col),
             shape: window.cursor_shape,
         };
+        self.cursor_window_id = Some(window.window_id);
         self.windows.insert(window.window_id, window);
     }
 
@@ -530,6 +608,41 @@ impl SemanticState {
         }
 
         window.rows = rows;
+        window.scroll_left = delta.scroll_left;
+        window.cursorline = delta.cursorline;
+        if let Some(selection) = delta.selection {
+            window.selection = selection;
+        }
+        if let Some(search_matches) = delta.search_matches {
+            window.search_matches = search_matches;
+        }
+        if let Some(diagnostic_ranges) = delta.diagnostic_ranges {
+            window.diagnostic_ranges = diagnostic_ranges;
+        }
+        if let Some(document_highlights) = delta.document_highlights {
+            window.document_highlights = document_highlights;
+        }
+        if let Some(annotations) = delta.annotations {
+            window.annotations = annotations;
+        }
+        if delta.cursor_visible {
+            self.cursor = CursorState {
+                row: window.origin_row.saturating_add(delta.cursor_row),
+                col: window.origin_col.saturating_add(delta.cursor_col),
+                shape: delta.cursor_shape,
+            };
+            self.cursor_window_id = Some(window.window_id);
+        }
+    }
+
+    fn apply_window_overlay_delta(&mut self, delta: semantic::WindowOverlayDelta) {
+        let Some(window) = self.windows.get_mut(&delta.window_id) else {
+            return;
+        };
+        if window.content_epoch != delta.content_epoch {
+            return;
+        }
+
         window.cursorline = delta.cursorline;
         if delta.cursor_visible {
             self.cursor = CursorState {
@@ -537,6 +650,7 @@ impl SemanticState {
                 col: window.origin_col.saturating_add(delta.cursor_col),
                 shape: delta.cursor_shape,
             };
+            self.cursor_window_id = Some(window.window_id);
         }
     }
 
@@ -587,12 +701,18 @@ mod tests {
             origin_col: 2,
             text_width: 20,
             text_height: 5,
+            scroll_left: 0,
             cursor_row: 0,
             cursor_col: 1,
             cursor_shape: 2,
             content_epoch: 42,
             rows,
             cursorline: None,
+            selection: semantic::Selection::default(),
+            search_matches: Vec::new(),
+            diagnostic_ranges: Vec::new(),
+            document_highlights: Vec::new(),
+            annotations: Vec::new(),
         }
     }
 
@@ -629,6 +749,7 @@ mod tests {
                     window_id: 7,
                     content_epoch: 42,
                     cursor_visible: true,
+                    scroll_left: 2,
                     cursor_row: 1,
                     cursor_col: 4,
                     cursor_shape: 1,
@@ -640,6 +761,11 @@ mod tests {
                         semantic::WindowDeltaRow::Full(row(3, 33, "gamma")),
                     ],
                     cursorline: None,
+                    selection: None,
+                    search_matches: None,
+                    diagnostic_ranges: None,
+                    document_highlights: None,
+                    annotations: None,
                 },
                 0,
             ),
@@ -654,6 +780,7 @@ mod tests {
             .map(|row| row.text.as_str())
             .collect();
         assert_eq!(texts, vec!["alpha", "gamma"]);
+        assert_eq!(state.windows().next().unwrap().scroll_left, 2);
         assert_eq!(
             state.cursor(),
             CursorState {
@@ -680,6 +807,24 @@ mod tests {
         assert!(!effect.render);
         assert!(effect.title.is_none());
         assert_eq!(effect.clipboard.unwrap().text, "copied");
+    }
+
+    #[test]
+    fn retains_theme_across_clear_frames() {
+        let mut state = SemanticState::new(80, 24);
+
+        state.apply_protocol_command(ProtocolCommand::Semantic(semantic::Command::Theme(
+            semantic::Theme {
+                slots: vec![semantic::ThemeSlot {
+                    id: 0x01,
+                    rgb: 0x112233,
+                }],
+            },
+            0,
+        )));
+        state.apply_protocol_command(ProtocolCommand::Clear);
+
+        assert_eq!(state.theme().unwrap().slots[0].rgb, 0x112233);
     }
 
     #[test]
@@ -738,6 +883,8 @@ mod tests {
                 mode: 0,
                 flags: 0,
                 workspace_count: 3,
+                spaces: Vec::new(),
+                tabs: Vec::new(),
             },
             0,
         )));
@@ -765,7 +912,19 @@ mod tests {
         state.apply_protocol_command(ProtocolCommand::Semantic(semantic::Command::Sidebars(
             semantic::Sidebars {
                 visible: 1,
-                sidebar_count: 8,
+                active_id: "files".to_owned(),
+                items: vec![semantic::Sidebar {
+                    id: "files".to_owned(),
+                    display_name: "Files".to_owned(),
+                    semantic_kind: "file_tree".to_owned(),
+                    icon: "F".to_owned(),
+                    order: 0,
+                    flags: 0x03,
+                    preferred_width: 20,
+                    badge_count: 8,
+                    visible: true,
+                    focused: true,
+                }],
             },
             0,
         )));
@@ -781,8 +940,7 @@ mod tests {
         state.apply_protocol_command(ProtocolCommand::Semantic(semantic::Command::AgentChat(
             semantic::AgentChat {
                 visible: 1,
-                flags: 0,
-                message_count: 11,
+                status: 1,
             },
             0,
         )));
@@ -804,9 +962,9 @@ mod tests {
         assert_eq!(state.extension_overlay().unwrap().entry_count, 5);
         assert_eq!(state.extension_panel().unwrap().panel_count, 6);
         assert_eq!(state.observatory().unwrap().payload, vec![6, 7]);
-        assert_eq!(state.sidebars().unwrap().sidebar_count, 8);
+        assert_eq!(state.sidebars().unwrap().visible_count(), 1);
         assert_eq!(state.board.unwrap().card_count, 10);
-        assert_eq!(state.agent_chat().unwrap().message_count, 11);
+        assert_eq!(state.agent_chat().unwrap().status, 1);
         assert_eq!(state.tool_manager().unwrap().visible, 1);
 
         state.apply_protocol_command(ProtocolCommand::Clear);
@@ -839,5 +997,160 @@ mod tests {
         ));
 
         assert!(!state.cursor_animation_enabled());
+    }
+
+    #[test]
+    fn retains_editor_chrome_and_overlay_deltas() {
+        let mut state = SemanticState::new(80, 24);
+        state.apply_protocol_command(ProtocolCommand::Semantic(semantic::Command::WindowContent(
+            window(vec![row(1, 11, "alpha")]),
+            0,
+        )));
+
+        state.apply_protocol_command(ProtocolCommand::Semantic(semantic::Command::Gutter(
+            semantic::Gutter {
+                window_id: 7,
+                line_number_width: 3,
+                entries: vec![semantic::GutterEntry {
+                    buf_line: 0,
+                    display_type: 0,
+                    sign_type: 0,
+                    fold_end_line: 0,
+                    sign_fg: 0,
+                    sign_text: String::new(),
+                }],
+                ..semantic::Gutter::default()
+            },
+            0,
+        )));
+        state.apply_protocol_command(ProtocolCommand::Semantic(semantic::Command::IndentGuides(
+            semantic::IndentGuides {
+                window_id: 7,
+                tab_width: 2,
+                active_guide_col: 2,
+                guide_cols: vec![2],
+                line_indent_levels: vec![1],
+            },
+            0,
+        )));
+        state.apply_protocol_command(ProtocolCommand::Semantic(
+            semantic::Command::SplitSeparators(
+                semantic::SplitSeparators {
+                    color: 0,
+                    verticals: vec![semantic::VerticalSeparator {
+                        col: 10,
+                        start_row: 0,
+                        end_row: 1,
+                    }],
+                    horizontals: Vec::new(),
+                },
+                0,
+            ),
+        ));
+        state.apply_protocol_command(ProtocolCommand::Semantic(
+            semantic::Command::WindowOverlayDelta(
+                semantic::WindowOverlayDelta {
+                    window_id: 7,
+                    content_epoch: 42,
+                    cursor_visible: true,
+                    cursor_row: 2,
+                    cursor_col: 3,
+                    cursor_shape: 1,
+                    cursorline: Some(semantic::Cursorline {
+                        row: 2,
+                        bg: 0x112233,
+                    }),
+                },
+                0,
+            ),
+        ));
+
+        assert_eq!(state.gutter(7).unwrap().line_number_width, 3);
+        assert_eq!(state.indent_guides(7).unwrap().guide_cols, vec![2]);
+        assert_eq!(state.split_separators().unwrap().verticals[0].col, 10);
+        assert_eq!(state.windows().next().unwrap().cursorline.unwrap().row, 2);
+        assert_eq!(
+            state.cursor(),
+            CursorState {
+                row: 3,
+                col: 5,
+                shape: 1
+            }
+        );
+    }
+
+    #[test]
+    fn rows_delta_replaces_or_clears_window_overlays_when_sections_are_present() {
+        let mut state = SemanticState::new(80, 24);
+        let mut initial = window(vec![row(1, 11, "alpha")]);
+        initial.selection = semantic::Selection {
+            selection_type: 1,
+            start_row: 0,
+            start_col: 0,
+            end_row: 0,
+            end_col: 1,
+        };
+        initial.search_matches = vec![semantic::SearchMatch {
+            row: 0,
+            start_col: 0,
+            end_col: 1,
+            is_current: 1,
+        }];
+        initial.diagnostic_ranges = vec![semantic::DiagnosticRange {
+            start_row: 0,
+            start_col: 0,
+            end_row: 0,
+            end_col: 1,
+            severity: 1,
+        }];
+        initial.document_highlights = vec![semantic::DocumentHighlight {
+            start_row: 0,
+            start_col: 0,
+            end_row: 0,
+            end_col: 1,
+            kind: 2,
+        }];
+        initial.annotations = vec![semantic::Annotation {
+            row: 0,
+            kind: 1,
+            fg: 0,
+            bg: 0,
+            text: "note".to_owned(),
+        }];
+        state.apply_protocol_command(ProtocolCommand::Semantic(semantic::Command::WindowContent(
+            initial, 0,
+        )));
+
+        state.apply_protocol_command(ProtocolCommand::Semantic(
+            semantic::Command::WindowRowsDelta(
+                semantic::WindowRowsDelta {
+                    window_id: 7,
+                    content_epoch: 42,
+                    scroll_left: 0,
+                    cursor_visible: false,
+                    cursor_row: 0,
+                    cursor_col: 0,
+                    cursor_shape: 1,
+                    rows: vec![semantic::WindowDeltaRow::Ref {
+                        row_id: 1,
+                        content_hash: 11,
+                    }],
+                    cursorline: None,
+                    selection: Some(semantic::Selection::default()),
+                    search_matches: Some(Vec::new()),
+                    diagnostic_ranges: Some(Vec::new()),
+                    document_highlights: Some(Vec::new()),
+                    annotations: Some(Vec::new()),
+                },
+                0,
+            ),
+        ));
+
+        let window = state.windows().next().unwrap();
+        assert_eq!(window.selection, semantic::Selection::default());
+        assert!(window.search_matches.is_empty());
+        assert!(window.diagnostic_ranges.is_empty());
+        assert!(window.document_highlights.is_empty());
+        assert!(window.annotations.is_empty());
     }
 }

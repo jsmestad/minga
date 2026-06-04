@@ -91,6 +91,21 @@ defmodule MingaEditor.MinibufferData do
   """
   @spec from_state(EditorState.t()) :: t()
 
+  def from_state(%{pending_quit: kind, shell_state: shell_state})
+      when kind in [:quit, :quit_all] do
+    %__MODULE__{
+      visible: true,
+      mode: @mode_extension_confirm,
+      cursor_pos: 0xFFFF,
+      prompt: quit_confirmation_prompt(kind, shell_state),
+      input: "",
+      context: "",
+      selected_index: 0,
+      candidates: [],
+      total_candidates: 0
+    }
+  end
+
   def from_state(%{
         shell_state: %{
           modal: {:prompt, %{prompt_ui: %PromptState{handler: handler} = prompt_state}}
@@ -276,6 +291,16 @@ defmodule MingaEditor.MinibufferData do
       count -> "#{Map.get(ms, :current_match, 0) + 1} of #{count}"
     end
   end
+
+  @spec quit_confirmation_prompt(:quit | :quit_all, map()) :: String.t()
+  defp quit_confirmation_prompt(_kind, %{status_msg: status_msg})
+       when is_binary(status_msg) and status_msg != "",
+       do: status_msg
+
+  defp quit_confirmation_prompt(:quit, _shell_state), do: "Quit Minga? (y/n)"
+
+  defp quit_confirmation_prompt(:quit_all, _shell_state),
+    do: "Modified buffers exist. Really quit? (y/n)"
 
   @doc """
   Generates completion candidates for an ex command input string.
