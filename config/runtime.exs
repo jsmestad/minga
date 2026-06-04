@@ -45,5 +45,11 @@ end
 # and the parser. Without this, the BEAM process sits idle and the
 # Swift frontend sees only its default (empty) SwiftUI state.
 if port_mode == :connected do
-  config :minga, start_editor: true, backend: :gui
+  connected_backend =
+    case System.get_env("MINGA_CONNECTED_BACKEND") do
+      "tui" -> :tui
+      _ -> :gui
+    end
+
+  config :minga, start_editor: true, backend: connected_backend
 end

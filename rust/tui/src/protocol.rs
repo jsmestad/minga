@@ -270,7 +270,7 @@ pub fn decode_command(bytes: &[u8]) -> Result<Command, DecodeError> {
     }
 }
 
-pub fn write_packet(writer: &mut impl Write, payload: &[u8]) -> io::Result<()> {
+pub fn write_packet(writer: &mut (impl Write + ?Sized), payload: &[u8]) -> io::Result<()> {
     writer.write_all(&(payload.len() as u32).to_be_bytes())?;
     writer.write_all(payload)?;
     writer.flush()

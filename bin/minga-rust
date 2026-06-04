@@ -4,8 +4,8 @@
 # Usage:
 #   bin/minga-rust [filename]
 #
-# Equivalent to:
-#   MINGA_TUI_IMPL=rust bin/minga [filename]
+# Starts the Rust frontend first. Rust owns terminal stdin/stdout and launches
+# the BEAM editor core as a connected child over private protocol pipes.
 
 set -euo pipefail
 
@@ -15,6 +15,8 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 (cd "$PROJECT_DIR" && mix native.build.support && mix native.build.rust_tui)
 
 export MINGA_TUI_IMPL=rust
+export MINGA_RUST_TUI_HOST=local_child
+export MINGA_PROJECT_DIR="$PROJECT_DIR"
 export MINGA_SKIP_NATIVE_LAUNCH_BUILD=1
 
-exec "$SCRIPT_DIR/minga" "$@"
+exec "$PROJECT_DIR/priv/minga-renderer-rs" "$@"

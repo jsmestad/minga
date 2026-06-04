@@ -1,6 +1,128 @@
 use crate::input;
 use crate::protocol::{self, Command, DecodeError};
+use std::env;
 use std::io::{self, Read, Write};
+use std::path::PathBuf;
+use std::process::{Child, Command as ProcessCommand, ExitStatus, Stdio};
+
+pub trait PacketReader: Read + Send {}
+
+impl<T> PacketReader for T where T: Read + Send {}
+
+pub trait PacketWriter: Write {}
+
+impl<T> PacketWriter for T where T: Write {}
+
+pub enum BeamHost {
+    Stdio {
+        reader: Option<Box<dyn PacketReader>>,
+        writer: Box<dyn PacketWriter>,
+    },
+    LocalChild {
+        child: Child,
+        reader: Option<Box<dyn PacketReader>>,
+        writer: Box<dyn PacketWriter>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HostMode {
+    Stdio,
+    LocalChild,
+}
+
+pub fn open(cli_args: Vec<String>) -> io::Result<BeamHost> {
+    match host_mode(env::var("MINGA_RUST_TUI_HOST").ok().as_deref()) {
+        HostMode::LocalChild => spawn_local_child(cli_args),
+        HostMode::Stdio => Ok(BeamHost::Stdio {
+            reader: Some(Box::new(io::stdin())),
+            writer: Box::new(io::stdout()),
+        }),
+    }
+}
+
+fn host_mode(value: Option<&str>) -> HostMode {
+    match value {
+        Some("local_child") => HostMode::LocalChild,
+        _ => HostMode::Stdio,
+    }
+}
+
+fn spawn_local_child(cli_args: Vec<String>) -> io::Result<BeamHost> {
+    let mut command =
+        ProcessCommand::new(env::var("MINGA_BEAM_EXECUTABLE").unwrap_or_else(|_| "mix".to_owned()));
+    command.arg("minga").args(cli_args);
+
+    if let Some(project_dir) = env::var_os("MINGA_PROJECT_DIR") {
+        command.current_dir(PathBuf::from(project_dir));
+    }
+
+    command
+        .env("MINGA_PORT_MODE", "connected")
+        .env("MINGA_CONNECTED_BACKEND", "tui")
+        .env("MINGA_TUI_IMPL", "rust")
+        .env("MINGA_SKIP_NATIVE_LAUNCH_BUILD", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit());
+
+    let mut child = command.spawn()?;
+    let stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| io::Error::other("BEAM child stdin was not piped"))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| io::Error::other("BEAM child stdout was not piped"))?;
+
+    Ok(BeamHost::LocalChild {
+        child,
+        reader: Some(Box::new(stdout)),
+        writer: Box::new(stdin),
+    })
+}
+
+impl BeamHost {
+    pub fn take_reader(&mut self) -> io::Result<Box<dyn PacketReader>> {
+        let reader = match self {
+            Self::Stdio { reader, .. } | Self::LocalChild { reader, .. } => reader,
+        };
+
+        reader
+            .take()
+            .ok_or_else(|| io::Error::other("BEAM packet reader was already taken"))
+    }
+
+    pub fn output(&mut self) -> &mut dyn PacketWriter {
+        match self {
+            Self::Stdio { writer, .. } | Self::LocalChild { writer, .. } => writer.as_mut(),
+        }
+    }
+
+    pub fn shutdown(&mut self) {
+        if let Self::LocalChild { child, .. } = self {
+            if let Ok(Some(_status)) = child.try_wait() {
+                return;
+            }
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+
+    pub fn finish(&mut self) -> Option<ExitStatus> {
+        match self {
+            Self::Stdio { .. } => None,
+            Self::LocalChild { child, .. } => child.try_wait().ok().flatten(),
+        }
+    }
+}
+
+impl Drop for BeamHost {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FrontendCapabilities {
@@ -9,18 +131,21 @@ pub struct FrontendCapabilities {
     pub image_support: u8,
 }
 
-pub fn send_ready(output: &mut impl Write, caps: FrontendCapabilities) -> io::Result<()> {
+pub fn send_ready(
+    output: &mut (impl Write + ?Sized),
+    caps: FrontendCapabilities,
+) -> io::Result<()> {
     protocol::write_packet(
         output,
         &protocol::encode_ready_with_caps(caps.width, caps.height, caps.image_support),
     )
 }
 
-pub fn send_resize(output: &mut impl Write, width: u16, height: u16) -> io::Result<()> {
+pub fn send_resize(output: &mut (impl Write + ?Sized), width: u16, height: u16) -> io::Result<()> {
     protocol::write_packet(output, &protocol::encode_resize(width, height))
 }
 
-pub fn send_input_event(event: input::Event, output: &mut impl Write) -> io::Result<()> {
+pub fn send_input_event(event: input::Event, output: &mut (impl Write + ?Sized)) -> io::Result<()> {
     match event {
         input::Event::Key {
             codepoint,
@@ -37,14 +162,14 @@ pub fn send_input_event(event: input::Event, output: &mut impl Write) -> io::Res
     }
 }
 
-pub fn log_info(output: &mut impl Write, msg: &str) {
+pub fn log_info(output: &mut (impl Write + ?Sized), msg: &str) {
     let _ = protocol::write_packet(
         output,
         &protocol::encode_log_message(protocol::LOG_LEVEL_INFO, msg),
     );
 }
 
-pub fn log_warn(output: &mut impl Write, msg: &str) {
+pub fn log_warn(output: &mut (impl Write + ?Sized), msg: &str) {
     let _ = protocol::write_packet(
         output,
         &protocol::encode_log_message(protocol::LOG_LEVEL_WARN, msg),
@@ -146,5 +271,12 @@ mod tests {
         let mut input = &[0, 0, 0, 3, 1, 2, 3][..];
         assert_eq!(read_framed_packet(&mut input).unwrap(), Some(vec![1, 2, 3]));
         assert_eq!(read_framed_packet(&mut input).unwrap(), None);
+    }
+
+    #[test]
+    fn host_mode_defaults_to_stdio_unless_local_child_is_requested() {
+        assert_eq!(host_mode(None), HostMode::Stdio);
+        assert_eq!(host_mode(Some("stdio")), HostMode::Stdio);
+        assert_eq!(host_mode(Some("local_child")), HostMode::LocalChild);
     }
 }
