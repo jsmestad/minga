@@ -4,7 +4,6 @@ mod beam_host;
 mod images;
 mod input;
 mod protocol;
-mod renderer;
 mod semantic;
 mod semantic_renderer;
 mod semantic_state;

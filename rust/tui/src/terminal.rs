@@ -15,28 +15,6 @@ use ratatui::backend::CrosstermBackend;
 #[cfg(test)]
 use ratatui::backend::TestBackend;
 
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct CellStyle {
-    pub fg: u32,
-    pub bg: u32,
-    pub attrs: u16,
-    pub ul_color: u32,
-    pub blend: u8,
-}
-
-impl Default for CellStyle {
-    fn default() -> Self {
-        Self {
-            fg: 0,
-            bg: 0,
-            attrs: 0,
-            ul_color: 0,
-            blend: 100,
-        }
-    }
-}
-
 enum Backend {
     Real(RatatuiTerminal<CrosstermBackend<File>>),
     #[cfg(test)]
