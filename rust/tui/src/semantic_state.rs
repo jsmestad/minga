@@ -33,6 +33,7 @@ pub struct CursorState {
 pub struct StateEffect {
     pub render: bool,
     pub title: Option<String>,
+    pub clipboard: Option<semantic::ClipboardWrite>,
 }
 
 impl SemanticState {
@@ -85,11 +86,9 @@ impl SemanticState {
             ProtocolCommand::SetTitle(title) => StateEffect {
                 render: false,
                 title: Some(title),
+                clipboard: None,
             },
-            ProtocolCommand::Semantic(command) => {
-                self.apply_semantic_command(command);
-                StateEffect::render()
-            }
+            ProtocolCommand::Semantic(command) => self.apply_semantic_command(command),
             ProtocolCommand::DrawText(_) | ProtocolCommand::DrawStyledText(_) => {
                 self.diagnostic = Some(
                     "Semantic UI required: received legacy cell-grid command in Rust semantic TUI."
@@ -107,6 +106,7 @@ impl SemanticState {
             | ProtocolCommand::Noop(_) => StateEffect {
                 render: false,
                 title: None,
+                clipboard: None,
             },
         }
     }
@@ -178,40 +178,71 @@ impl SemanticState {
         };
     }
 
-    fn apply_semantic_command(&mut self, command: semantic::Command) {
+    fn apply_semantic_command(&mut self, command: semantic::Command) -> StateEffect {
         self.diagnostic = None;
 
         match command {
-            semantic::Command::WindowContent(window, _) => self.put_window(window),
-            semantic::Command::WindowRowsDelta(delta, _) => self.apply_window_rows_delta(delta),
-            semantic::Command::StatusBar(status_bar, _) => self.status_bar = Some(status_bar),
-            semantic::Command::TabBar(tab_bar, _) => self.tab_bar = Some(tab_bar),
-            semantic::Command::FileTree(file_tree, _) => self.file_tree = Some(file_tree),
-            semantic::Command::FileTreeSelection(selection, _) => {
-                self.apply_file_tree_selection(selection)
+            semantic::Command::WindowContent(window, _) => {
+                self.put_window(window);
+                StateEffect::render()
             }
-            semantic::Command::Cursorline(cursorline, _) => self.apply_cursorline(cursorline),
+            semantic::Command::WindowRowsDelta(delta, _) => {
+                self.apply_window_rows_delta(delta);
+                StateEffect::render()
+            }
+            semantic::Command::StatusBar(status_bar, _) => {
+                self.status_bar = Some(status_bar);
+                StateEffect::render()
+            }
+            semantic::Command::TabBar(tab_bar, _) => {
+                self.tab_bar = Some(tab_bar);
+                StateEffect::render()
+            }
+            semantic::Command::FileTree(file_tree, _) => {
+                self.file_tree = Some(file_tree);
+                StateEffect::render()
+            }
+            semantic::Command::FileTreeSelection(selection, _) => {
+                self.apply_file_tree_selection(selection);
+                StateEffect::render()
+            }
+            semantic::Command::Cursorline(cursorline, _) => {
+                self.apply_cursorline(cursorline);
+                StateEffect::render()
+            }
             semantic::Command::LineSpacing(line_spacing, _) => {
-                self.line_spacing = Some(line_spacing)
+                self.line_spacing = Some(line_spacing);
+                StateEffect::render()
             }
             semantic::Command::CursorAnimation(cursor_animation, _) => {
-                self.cursor_animation = Some(cursor_animation)
+                self.cursor_animation = Some(cursor_animation);
+                StateEffect::render()
             }
             semantic::Command::ConfigState(config_state, _) => {
-                self.config_state = Some(config_state)
+                self.config_state = Some(config_state);
+                StateEffect::render()
             }
             semantic::Command::AgentContext(agent_context, _) => {
-                self.agent_context = Some(agent_context)
+                self.agent_context = Some(agent_context);
+                StateEffect::render()
             }
             semantic::Command::HoverAction(hover_action, _) => {
-                self.hover_action = Some(hover_action)
+                self.hover_action = Some(hover_action);
+                StateEffect::render()
             }
             semantic::Command::SearchState(search_state, _) => {
-                self.search_state = Some(search_state)
+                self.search_state = Some(search_state);
+                StateEffect::render()
             }
             semantic::Command::Notifications(notifications, _) => {
-                self.notifications = Some(notifications)
+                self.notifications = Some(notifications);
+                StateEffect::render()
             }
+            semantic::Command::ClipboardWrite(clipboard, _) => StateEffect {
+                render: false,
+                title: None,
+                clipboard: Some(clipboard),
+            },
             semantic::Command::Picker(..)
             | semantic::Command::PickerPreview(..)
             | semantic::Command::Minibuffer(..)
@@ -230,7 +261,6 @@ impl SemanticState {
             | semantic::Command::SplitSeparators(..)
             | semantic::Command::IndentGuides(..)
             | semantic::Command::WindowOverlayDelta(..)
-            | semantic::Command::ClipboardWrite(..)
             | semantic::Command::Workspaces(..)
             | semantic::Command::EditTimeline(..)
             | semantic::Command::ExtensionOverlay(..)
@@ -239,7 +269,7 @@ impl SemanticState {
             | semantic::Command::Sidebars(..)
             | semantic::Command::Board(..)
             | semantic::Command::AgentChat(..)
-            | semantic::Command::ToolManager(..) => {}
+            | semantic::Command::ToolManager(..) => StateEffect::render(),
         }
     }
 
@@ -319,6 +349,7 @@ impl StateEffect {
         Self {
             render: true,
             title: None,
+            clipboard: None,
         }
     }
 }
@@ -420,6 +451,24 @@ mod tests {
                 shape: 1
             }
         );
+    }
+
+    #[test]
+    fn emits_clipboard_side_effect_without_rendering() {
+        let mut state = SemanticState::new(80, 24);
+        let effect = state.apply_protocol_command(ProtocolCommand::Semantic(
+            semantic::Command::ClipboardWrite(
+                semantic::ClipboardWrite {
+                    target: 0,
+                    text: "copied".to_owned(),
+                },
+                0,
+            ),
+        ));
+
+        assert!(!effect.render);
+        assert!(effect.title.is_none());
+        assert_eq!(effect.clipboard.unwrap().text, "copied");
     }
 
     #[test]

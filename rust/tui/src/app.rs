@@ -189,6 +189,11 @@ fn handle_packet(
         if let Some(title) = effect.title {
             terminal.set_title(&title)?;
         }
+        if let Some(clipboard) = effect.clipboard
+            && clipboard.target == 0
+        {
+            terminal.write_clipboard(&clipboard.text)?;
+        }
         should_render |= effect.render;
     }
 
