@@ -137,24 +137,8 @@ impl SemanticState {
         self.file_tree.as_ref()
     }
 
-    pub fn line_spacing(&self) -> Option<semantic::LineSpacing> {
-        self.line_spacing
-    }
-
-    pub fn cursor_animation(&self) -> Option<semantic::CursorAnimation> {
-        self.cursor_animation
-    }
-
-    pub fn config_state(&self) -> Option<&semantic::ConfigState> {
-        self.config_state.as_ref()
-    }
-
     pub fn agent_context(&self) -> Option<&semantic::AgentContext> {
         self.agent_context.as_ref()
-    }
-
-    pub fn hover_action(&self) -> Option<&semantic::HoverAction> {
-        self.hover_action.as_ref()
     }
 
     pub fn search_state(&self) -> Option<semantic::SearchState> {
@@ -488,21 +472,21 @@ mod tests {
             0,
         )));
 
-        assert_eq!(state.line_spacing().unwrap().value, 2);
-        assert_eq!(state.cursor_animation().unwrap().enabled, 1);
-        assert_eq!(state.config_state().unwrap().payload, vec![1, 2, 3]);
+        assert_eq!(state.line_spacing.unwrap().value, 2);
+        assert_eq!(state.cursor_animation.unwrap().enabled, 1);
+        assert_eq!(state.config_state.as_ref().unwrap().payload, vec![1, 2, 3]);
         assert_eq!(state.agent_context().unwrap().task, "review");
-        assert_eq!(state.hover_action().unwrap().payload, vec![4, 5]);
+        assert_eq!(state.hover_action.as_ref().unwrap().payload, vec![4, 5]);
         assert_eq!(state.search_state().unwrap().match_count, 5);
         assert_eq!(state.notifications().unwrap().notification_count, 2);
 
         state.apply_protocol_command(ProtocolCommand::Clear);
 
-        assert!(state.line_spacing().is_none());
-        assert!(state.cursor_animation().is_none());
-        assert!(state.config_state().is_none());
+        assert!(state.line_spacing.is_none());
+        assert!(state.cursor_animation.is_none());
+        assert!(state.config_state.is_none());
         assert!(state.agent_context().is_none());
-        assert!(state.hover_action().is_none());
+        assert!(state.hover_action.is_none());
         assert!(state.search_state().is_none());
         assert!(state.notifications().is_none());
     }
