@@ -32,7 +32,11 @@ In both modes, the BEAM remains the source of truth for editor state and sends S
 - `protocol.rs` owns packet-4 framing and frontend control messages.
 - `semantic.rs` owns the typed Semantic UI command decoder generated from the protocol schema.
 - `semantic_state.rs` owns retained frontend state and maps decoded Semantic UI commands into renderable state plus terminal side effects.
-- `semantic_renderer.rs` is the only active Ratatui renderer. New terminal UI polish belongs here, not in a parallel cell-grid renderer.
+- `semantic_renderer.rs` is the thin Ratatui renderer facade. It owns `SemanticRenderer::render`, cursor style coordination, terminal frame entry, and content-area clipping.
+- `renderer/layout.rs` computes deterministic terminal-grid regions for chrome, editor body, sidebars, bottom panels, minibuffer, and status surfaces.
+- `renderer/geometry.rs` owns clipping-safe rectangles for anchored popups, centered overlays, bounded dimensions, and semantic window placement.
+- `renderer/theme.rs` centralizes Ratatui styles and Semantic UI color/attribute conversion.
+- `renderer/surfaces.rs` orchestrates draw order. `renderer/chrome.rs`, `renderer/editor.rs`, and `renderer/overlays.rs` render the actual semantic surface groups.
 - `terminal.rs` owns raw mode, alternate screen, synchronized updates, title/clipboard/cursor control sequences, and Ratatui backend access.
 - `input.rs`, `signals.rs`, and `images.rs` stay frontend-local and do not define editor state.
 
