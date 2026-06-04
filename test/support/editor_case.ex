@@ -18,6 +18,9 @@ defmodule Minga.Test.EditorCase do
   alias Minga.Test.HeadlessPort
   alias Minga.Test.Snapshot
   alias MingaEditor.Extension.Sidebar
+  alias MingaEditor.MinibufferData
+  alias MingaEditor.Shell.Traditional.Modeline
+  alias MingaEditor.StatusBar.Data, as: StatusBarData
 
   using do
     quote do
@@ -429,16 +432,34 @@ defmodule Minga.Test.EditorCase do
     end
   end
 
-  @doc "Returns the modeline row text (second to last row)."
+  @doc "Returns the semantic modeline text."
   @spec modeline(editor_ctx()) :: String.t()
-  def modeline(%{height: height} = ctx) do
-    screen_row(ctx, height - 2)
+  def modeline(%{editor: editor, width: width}) do
+    state = get_editor_state(editor)
+    status_data = StatusBarData.from_state(state)
+    modeline_data = StatusBarData.to_modeline_data(status_data)
+    {draws, _click_regions} = Modeline.render(0, width, modeline_data, state.theme)
+    draws_to_text(draws)
   end
 
-  @doc "Returns the minibuffer row text (last row)."
+  @doc "Returns the semantic minibuffer or echo-area text."
   @spec minibuffer(editor_ctx()) :: String.t()
-  def minibuffer(%{height: height} = ctx) do
-    screen_row(ctx, height - 1)
+  def minibuffer(%{editor: editor}) do
+    state = get_editor_state(editor)
+    minibuffer_data = MinibufferData.from_state(state)
+
+    cond do
+      minibuffer_data.visible ->
+        [minibuffer_data.prompt, minibuffer_data.input, minibuffer_data.context]
+        |> Enum.reject(&(&1 == ""))
+        |> Enum.join(" ")
+
+      status = MingaEditor.State.status_msg(state) ->
+        status
+
+      true ->
+        ""
+    end
   end
 
   @doc "Returns the cursor position on screen."
@@ -915,6 +936,13 @@ defmodule Minga.Test.EditorCase do
   def screen_contains?(ctx, text) do
     screen_text(ctx)
     |> Enum.any?(fn row -> String.contains?(row, text) end)
+  end
+
+  @spec draws_to_text([MingaEditor.DisplayList.draw()]) :: String.t()
+  defp draws_to_text(draws) do
+    draws
+    |> Enum.sort_by(fn {row, col, _text, _style} -> {row, col} end)
+    |> Enum.map_join(fn {_row, _col, text, _style} -> text end)
   end
 
   # ── Private helpers ──────────────────────────────────────────────────────────
