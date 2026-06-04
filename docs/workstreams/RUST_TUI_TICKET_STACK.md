@@ -84,7 +84,8 @@ Inspect first:
 - `lib/minga_editor/frontend/protocol/gui.ex`
 - `go/tui/internal/ui/model.go`
 - `go/tui/internal/ui/render_content.go`
-- `rust/tui/src/renderer/mod.rs`
+- `rust/tui/src/semantic_renderer.rs`
+- `rust/tui/src/semantic_state.rs`
 - `rust/tui/src/semantic.rs`
 
 Likely modified:
