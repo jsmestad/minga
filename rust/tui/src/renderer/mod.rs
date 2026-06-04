@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 mod theme;
 
 use crate::animation;

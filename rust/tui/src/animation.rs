@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use tachyonfx::{Duration, EffectTimer, Interpolation};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

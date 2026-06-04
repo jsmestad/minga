@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::protocol;
 use crate::semantic;
 use crate::terminal::CellStyle;

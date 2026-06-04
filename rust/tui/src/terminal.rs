@@ -15,6 +15,7 @@ use ratatui::backend::CrosstermBackend;
 #[cfg(test)]
 use ratatui::backend::TestBackend;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CellStyle {
     pub fg: u32,

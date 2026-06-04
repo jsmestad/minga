@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 pub mod opcodes {
     #![allow(dead_code)]
 

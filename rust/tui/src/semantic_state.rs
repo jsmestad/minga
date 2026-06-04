@@ -262,7 +262,7 @@ impl SemanticState {
 
     fn apply_cursorline(&mut self, cursorline: semantic::Cursorline) {
         for window in self.windows.values_mut() {
-            window.cursorline = Some(cursorline.clone());
+            window.cursorline = Some(cursorline);
         }
     }
 }
