@@ -38,6 +38,24 @@ defmodule MingaEditor.MinibufferDataTest do
   end
 
   describe "from_state/1 prompt modal" do
+    test "returns a visible confirmation prompt while quit is pending" do
+      state = %{
+        pending_quit: :quit,
+        shell_state: %{status_msg: "Quit Minga? (y/n)"},
+        workspace: %{editing: %{mode: :normal, mode_state: %{}}}
+      }
+
+      result = MinibufferData.from_state(state)
+
+      assert result.visible == true
+      assert result.mode == 6
+      assert result.prompt == "Quit Minga? (y/n)"
+      assert result.input == ""
+      assert result.context == ""
+      assert result.cursor_pos == 0xFFFF
+      assert result.candidates == []
+    end
+
     test "returns a visible text prompt for generic PromptUI overlays" do
       state = %{
         shell_state: %{
