@@ -18,13 +18,11 @@ defmodule MingaEditor.MessagesBufferTest do
       ctx = start_editor("hello")
 
       send_keys_sync(ctx, "<SPC>bm")
-      popup_text = screen_text(ctx) |> Enum.join("\n")
-      assert popup_text =~ "*Messages*"
-      assert popup_text =~ "[RO]"
+      assert Buffer.buffer_name(active_window_buffer(ctx)) == "*Messages*"
+      assert Buffer.read_only?(active_window_buffer(ctx))
 
       send_keys_sync(ctx, "<SPC>bm")
-      closed_text = screen_text(ctx) |> Enum.join("\n")
-      refute closed_text =~ "*Messages*"
+      refute Buffer.buffer_name(active_window_buffer(ctx)) == "*Messages*"
     end
 
     test "insert mode is blocked in the read-only messages buffer" do
@@ -33,7 +31,7 @@ defmodule MingaEditor.MessagesBufferTest do
       send_keys_sync(ctx, "i")
 
       assert editor_mode(ctx) == :normal
-      assert screen_text(ctx) |> Enum.join("\n") |> String.contains?("read-only")
+      assert status_msg(ctx) =~ "read-only"
     end
   end
 

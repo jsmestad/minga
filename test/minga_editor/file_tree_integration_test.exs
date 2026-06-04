@@ -44,10 +44,10 @@ defmodule MingaEditor.FileTreeIntegrationTest do
   end
 
   defp assert_tree_visible(ctx) do
-    assert Enum.any?(screen_text(ctx), &String.contains?(&1, "│"))
+    assert file_tree_open?(ctx)
   end
 
   defp refute_tree_visible(ctx) do
-    refute Enum.any?(screen_text(ctx), &String.contains?(&1, "│"))
+    refute file_tree_open?(ctx)
   end
 end

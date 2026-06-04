@@ -104,7 +104,7 @@ defmodule MingaEditor.Frontend.EmitTest do
         splash: [{0, 0, "hello", face}]
       }
 
-      state = base_state()
+      state = gui_state()
       ctx = Context.from_editor_state(state)
 
       {_caches, font_registry} = Emit.emit(frame, ctx, nil, %Caches{})

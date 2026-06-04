@@ -138,13 +138,13 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
       wait_until_screen(
         ctx,
         fn ->
-          screen_contains?(ctx, ".credo.exs") and screen_contains?(ctx, "configs = [:editor]")
+          screen_contains?(ctx, "configs = [:editor]")
         end,
         message: "Expected opened file editing surface to become visible"
       )
 
-      assert screen_contains?(ctx, ".credo.exs")
       assert screen_contains?(ctx, "configs = [:editor]")
+      assert_modeline_contains(ctx, ".credo.exs")
       assert_modeline_contains(ctx, "NORMAL")
       refute String.contains?(modeline(ctx), "Prompt")
 
