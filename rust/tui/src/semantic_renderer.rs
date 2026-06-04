@@ -16,7 +16,7 @@ impl SemanticRenderer {
     }
 
     pub fn render(&mut self, state: &SemanticState, terminal: &mut Terminal) -> io::Result<()> {
-        terminal.set_cursor_shape(state.cursor().shape)?;
+        terminal.set_cursor_style(state.cursor().shape, state.cursor_animation_enabled())?;
         terminal.draw(|frame| {
             let area = frame.area();
             let content_area = Rect {

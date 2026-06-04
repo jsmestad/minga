@@ -211,6 +211,11 @@ impl SemanticState {
         self.cursor
     }
 
+    pub fn cursor_animation_enabled(&self) -> bool {
+        self.cursor_animation
+            .is_none_or(|cursor_animation| cursor_animation.enabled != 0)
+    }
+
     fn clear(&mut self) {
         self.windows.clear();
         self.window_order.clear();
@@ -672,6 +677,7 @@ mod tests {
 
         assert_eq!(state.line_spacing.unwrap().value, 2);
         assert_eq!(state.cursor_animation.unwrap().enabled, 1);
+        assert!(state.cursor_animation_enabled());
         assert_eq!(state.config_state.as_ref().unwrap().payload, vec![1, 2, 3]);
         assert_eq!(state.agent_context().unwrap().task, "review");
         assert_eq!(state.hover_action.as_ref().unwrap().payload, vec![4, 5]);
@@ -691,6 +697,7 @@ mod tests {
 
         assert!(state.line_spacing.is_none());
         assert!(state.cursor_animation.is_none());
+        assert!(state.cursor_animation_enabled());
         assert!(state.config_state.is_none());
         assert!(state.agent_context().is_none());
         assert!(state.hover_action.is_none());
@@ -705,5 +712,16 @@ mod tests {
         assert!(state.board().is_none());
         assert!(state.agent_chat().is_none());
         assert!(state.tool_manager().is_none());
+    }
+
+    #[test]
+    fn cursor_animation_zero_disables_terminal_blinking() {
+        let mut state = SemanticState::new(80, 24);
+
+        state.apply_protocol_command(ProtocolCommand::Semantic(
+            semantic::Command::CursorAnimation(semantic::CursorAnimation { enabled: 0 }, 0),
+        ));
+
+        assert!(!state.cursor_animation_enabled());
     }
 }
