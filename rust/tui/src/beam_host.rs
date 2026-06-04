@@ -1,9 +1,11 @@
 use crate::input;
 use crate::protocol::{self, Command, DecodeError};
 use std::env;
+use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
-use std::process::{Child, Command as ProcessCommand, ExitStatus, Stdio};
+use std::process::{Child, ChildStderr, Command as ProcessCommand, ExitStatus, Stdio};
+use std::thread;
 
 pub trait PacketReader: Read + Send {}
 
@@ -64,7 +66,7 @@ fn spawn_local_child(cli_args: Vec<String>) -> io::Result<BeamHost> {
         .env("MINGA_SKIP_NATIVE_LAUNCH_BUILD", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::inherit());
+        .stderr(Stdio::piped());
 
     let mut child = command.spawn()?;
     let stdin = child
@@ -75,12 +77,46 @@ fn spawn_local_child(cli_args: Vec<String>) -> io::Result<BeamHost> {
         .stdout
         .take()
         .ok_or_else(|| io::Error::other("BEAM child stdout was not piped"))?;
+    if let Some(stderr) = child.stderr.take() {
+        drain_child_stderr(stderr);
+    }
 
     Ok(BeamHost::LocalChild {
         child,
         reader: Some(Box::new(stdout)),
         writer: Box::new(stdin),
     })
+}
+
+fn drain_child_stderr(mut stderr: ChildStderr) {
+    thread::spawn(move || {
+        let mut sink = io::sink();
+        match open_child_stderr_log() {
+            Ok(mut log) => {
+                let _ = io::copy(&mut stderr, &mut log);
+            }
+            Err(_) => {
+                let _ = io::copy(&mut stderr, &mut sink);
+            }
+        }
+    });
+}
+
+fn open_child_stderr_log() -> io::Result<fs::File> {
+    let dir = minga_log_dir();
+    fs::create_dir_all(&dir)?;
+    OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("minga-rust-tui-beam.stderr.log"))
+}
+
+fn minga_log_dir() -> PathBuf {
+    env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share")))
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("minga")
 }
 
 impl BeamHost {
