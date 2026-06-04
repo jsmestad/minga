@@ -11,6 +11,18 @@ pub struct SemanticState {
     status_bar: Option<semantic::StatusBar>,
     tab_bar: Option<semantic::TabBar>,
     file_tree: Option<semantic::FileTree>,
+    picker: Option<semantic::Picker>,
+    picker_preview: Option<semantic::PickerPreview>,
+    minibuffer: Option<semantic::Minibuffer>,
+    breadcrumb: Option<semantic::Breadcrumb>,
+    completion: Option<semantic::Completion>,
+    which_key: Option<semantic::WhichKey>,
+    signature_help: Option<semantic::SignatureHelp>,
+    float_popup: Option<semantic::FloatPopup>,
+    hover_popup: Option<semantic::HoverPopup>,
+    bottom_panel: Option<semantic::BottomPanel>,
+    change_summary: Option<semantic::ChangeSummary>,
+    git_status: Option<semantic::GitStatus>,
     line_spacing: Option<semantic::LineSpacing>,
     cursor_animation: Option<semantic::CursorAnimation>,
     config_state: Option<semantic::ConfigState>,
@@ -55,6 +67,18 @@ impl SemanticState {
             status_bar: None,
             tab_bar: None,
             file_tree: None,
+            picker: None,
+            picker_preview: None,
+            minibuffer: None,
+            breadcrumb: None,
+            completion: None,
+            which_key: None,
+            signature_help: None,
+            float_popup: None,
+            hover_popup: None,
+            bottom_panel: None,
+            change_summary: None,
+            git_status: None,
             line_spacing: None,
             cursor_animation: None,
             config_state: None,
@@ -155,6 +179,54 @@ impl SemanticState {
         self.file_tree.as_ref()
     }
 
+    pub fn picker(&self) -> Option<&semantic::Picker> {
+        self.picker.as_ref()
+    }
+
+    pub fn picker_preview(&self) -> Option<&semantic::PickerPreview> {
+        self.picker_preview.as_ref()
+    }
+
+    pub fn minibuffer(&self) -> Option<&semantic::Minibuffer> {
+        self.minibuffer.as_ref()
+    }
+
+    pub fn breadcrumb(&self) -> Option<&semantic::Breadcrumb> {
+        self.breadcrumb.as_ref()
+    }
+
+    pub fn completion(&self) -> Option<&semantic::Completion> {
+        self.completion.as_ref()
+    }
+
+    pub fn which_key(&self) -> Option<&semantic::WhichKey> {
+        self.which_key.as_ref()
+    }
+
+    pub fn signature_help(&self) -> Option<&semantic::SignatureHelp> {
+        self.signature_help.as_ref()
+    }
+
+    pub fn float_popup(&self) -> Option<&semantic::FloatPopup> {
+        self.float_popup.as_ref()
+    }
+
+    pub fn hover_popup(&self) -> Option<&semantic::HoverPopup> {
+        self.hover_popup.as_ref()
+    }
+
+    pub fn bottom_panel(&self) -> Option<&semantic::BottomPanel> {
+        self.bottom_panel.as_ref()
+    }
+
+    pub fn change_summary(&self) -> Option<&semantic::ChangeSummary> {
+        self.change_summary.as_ref()
+    }
+
+    pub fn git_status(&self) -> Option<&semantic::GitStatus> {
+        self.git_status.as_ref()
+    }
+
     pub fn agent_context(&self) -> Option<&semantic::AgentContext> {
         self.agent_context.as_ref()
     }
@@ -191,10 +263,6 @@ impl SemanticState {
         self.sidebars.as_ref()
     }
 
-    pub fn board(&self) -> Option<semantic::Board> {
-        self.board
-    }
-
     pub fn agent_chat(&self) -> Option<semantic::AgentChat> {
         self.agent_chat
     }
@@ -222,6 +290,18 @@ impl SemanticState {
         self.status_bar = None;
         self.tab_bar = None;
         self.file_tree = None;
+        self.picker = None;
+        self.picker_preview = None;
+        self.minibuffer = None;
+        self.breadcrumb = None;
+        self.completion = None;
+        self.which_key = None;
+        self.signature_help = None;
+        self.float_popup = None;
+        self.hover_popup = None;
+        self.bottom_panel = None;
+        self.change_summary = None;
+        self.git_status = None;
         self.line_spacing = None;
         self.cursor_animation = None;
         self.config_state = None;
@@ -272,6 +352,54 @@ impl SemanticState {
             }
             semantic::Command::FileTreeSelection(selection, _) => {
                 self.apply_file_tree_selection(selection);
+                StateEffect::render()
+            }
+            semantic::Command::Picker(picker, _) => {
+                self.picker = Some(picker);
+                StateEffect::render()
+            }
+            semantic::Command::PickerPreview(preview, _) => {
+                self.picker_preview = Some(preview);
+                StateEffect::render()
+            }
+            semantic::Command::Minibuffer(minibuffer, _) => {
+                self.minibuffer = Some(minibuffer);
+                StateEffect::render()
+            }
+            semantic::Command::Breadcrumb(breadcrumb, _) => {
+                self.breadcrumb = Some(breadcrumb);
+                StateEffect::render()
+            }
+            semantic::Command::Completion(completion, _) => {
+                self.completion = Some(completion);
+                StateEffect::render()
+            }
+            semantic::Command::WhichKey(which_key, _) => {
+                self.which_key = Some(which_key);
+                StateEffect::render()
+            }
+            semantic::Command::SignatureHelp(signature_help, _) => {
+                self.signature_help = Some(signature_help);
+                StateEffect::render()
+            }
+            semantic::Command::FloatPopup(float_popup, _) => {
+                self.float_popup = Some(float_popup);
+                StateEffect::render()
+            }
+            semantic::Command::HoverPopup(hover_popup, _) => {
+                self.hover_popup = Some(hover_popup);
+                StateEffect::render()
+            }
+            semantic::Command::BottomPanel(bottom_panel, _) => {
+                self.bottom_panel = Some(bottom_panel);
+                StateEffect::render()
+            }
+            semantic::Command::ChangeSummary(change_summary, _) => {
+                self.change_summary = Some(change_summary);
+                StateEffect::render()
+            }
+            semantic::Command::GitStatus(git_status, _) => {
+                self.git_status = Some(git_status);
                 StateEffect::render()
             }
             semantic::Command::Cursorline(cursorline, _) => {
@@ -347,19 +475,7 @@ impl SemanticState {
                 self.tool_manager = Some(tool_manager);
                 StateEffect::render()
             }
-            semantic::Command::Picker(..)
-            | semantic::Command::PickerPreview(..)
-            | semantic::Command::Minibuffer(..)
-            | semantic::Command::Breadcrumb(..)
-            | semantic::Command::Completion(..)
-            | semantic::Command::WhichKey(..)
-            | semantic::Command::SignatureHelp(..)
-            | semantic::Command::FloatPopup(..)
-            | semantic::Command::HoverPopup(..)
-            | semantic::Command::BottomPanel(..)
-            | semantic::Command::ChangeSummary(..)
-            | semantic::Command::GitStatus(..)
-            | semantic::Command::Theme(..)
+            semantic::Command::Theme(..)
             | semantic::Command::Gutter(..)
             | semantic::Command::GutterSeparator(..)
             | semantic::Command::SplitSeparators(..)
@@ -689,7 +805,7 @@ mod tests {
         assert_eq!(state.extension_panel().unwrap().panel_count, 6);
         assert_eq!(state.observatory().unwrap().payload, vec![6, 7]);
         assert_eq!(state.sidebars().unwrap().sidebar_count, 8);
-        assert_eq!(state.board().unwrap().card_count, 10);
+        assert_eq!(state.board.unwrap().card_count, 10);
         assert_eq!(state.agent_chat().unwrap().message_count, 11);
         assert_eq!(state.tool_manager().unwrap().visible, 1);
 
@@ -709,7 +825,7 @@ mod tests {
         assert!(state.extension_panel().is_none());
         assert!(state.observatory().is_none());
         assert!(state.sidebars().is_none());
-        assert!(state.board().is_none());
+        assert!(state.board.is_none());
         assert!(state.agent_chat().is_none());
         assert!(state.tool_manager().is_none());
     }
