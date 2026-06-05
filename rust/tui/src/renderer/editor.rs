@@ -78,7 +78,10 @@ pub fn render_file_tree(
             palette.tree()
         };
         let mut spans = vec![Span::styled(
-            format!("{marker}{indent}{expansion}{icon_text}{}{git_marker}", row.name),
+            format!(
+                "{marker}{indent}{expansion}{icon_text}{}{git_marker}",
+                row.name
+            ),
             style,
         )];
         let diag_total = row.diagnostics.0 + row.diagnostics.1;
@@ -308,11 +311,7 @@ fn gutter_text(gutter: &semantic::Gutter, row_index: usize) -> String {
     )
 }
 
-fn tilde_row(
-    width: u16,
-    cursorline_bg: Option<u32>,
-    palette: &Palette<'_>,
-) -> Vec<Span<'static>> {
+fn tilde_row(width: u16, cursorline_bg: Option<u32>, palette: &Palette<'_>) -> Vec<Span<'static>> {
     if width == 0 {
         return Vec::new();
     }

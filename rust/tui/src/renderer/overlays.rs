@@ -210,13 +210,11 @@ fn render_agent_context(state: &SemanticState, area: Rect, buffer: &mut Buffer) 
         3 => "error",
         _ => "idle",
     };
-    let mut lines = vec![
-        components::list_item_line(
-            format!("{}  {}", status_label, context.task),
-            false,
-            &palette,
-        ),
-    ];
+    let mut lines = vec![components::list_item_line(
+        format!("{}  {}", status_label, context.task),
+        false,
+        &palette,
+    )];
     if context.can_approve != 0 {
         lines.push(components::list_item_line(
             "approval  approve or request changes",
@@ -257,7 +255,9 @@ fn render_tool_manager(state: &SemanticState, area: Rect, buffer: &mut Buffer) {
             )
         })
         .collect();
-    let height = (tools.tools.len() as u16).saturating_add(2).min(area.height);
+    let height = (tools.tools.len() as u16)
+        .saturating_add(2)
+        .min(area.height);
     let rect = geometry::centered_rect(area, area.width.min(60), height);
     components::popup_frame("Tool manager", lines, rect, &palette, buffer);
 }
@@ -288,7 +288,9 @@ fn render_board(state: &SemanticState, area: Rect, buffer: &mut Buffer) {
         })
         .collect();
     let title = format!("Board  {} cards", board.cards.len());
-    let height = (board.cards.len() as u16).saturating_add(2).min(area.height);
+    let height = (board.cards.len() as u16)
+        .saturating_add(2)
+        .min(area.height);
     let rect = geometry::centered_rect(area, area.width.min(70), height);
     components::popup_frame(&title, lines, rect, &palette, buffer);
 }
@@ -310,14 +312,12 @@ fn render_notifications(state: &SemanticState, area: Rect, buffer: &mut Buffer) 
             } else {
                 format!("{} {}", note.source, note.body)
             };
-            components::list_item_line(
-                format!("{}  {}", note.title, desc.trim()),
-                false,
-                &palette,
-            )
+            components::list_item_line(format!("{}  {}", note.title, desc.trim()), false, &palette)
         })
         .collect();
-    let height = (notes.items.len() as u16).saturating_add(2).min(area.height);
+    let height = (notes.items.len() as u16)
+        .saturating_add(2)
+        .min(area.height);
     let rect = geometry::centered_rect(area, area.width.min(60), height);
     components::popup_frame("Notifications", lines, rect, &palette, buffer);
 }
@@ -336,13 +336,18 @@ fn render_edit_timeline(state: &SemanticState, area: Rect, buffer: &mut Buffer) 
         .map(|entry| {
             let selected = entry.index as u16 == timeline.viewing_index;
             components::list_item_line(
-                format!("{}  {}  {}s", entry.index, entry.tool_name, entry.timestamp_delta),
+                format!(
+                    "{}  {}  {}s",
+                    entry.index, entry.tool_name, entry.timestamp_delta
+                ),
                 selected,
                 &palette,
             )
         })
         .collect();
-    let height = (timeline.entries.len() as u16).saturating_add(2).min(area.height);
+    let height = (timeline.entries.len() as u16)
+        .saturating_add(2)
+        .min(area.height);
     let rect = geometry::centered_rect(area, area.width.min(50), height);
     components::popup_frame("Edit timeline", lines, rect, &palette, buffer);
 }
@@ -361,23 +366,26 @@ fn render_observatory(state: &SemanticState, area: Rect, buffer: &mut Buffer) {
         .map(|node| {
             let indent = "  ".repeat(node.depth as usize);
             components::list_item_line(
-                format!("{}  {indent}{}  Q:{}", node.pid, node.name, node.message_queue_len),
+                format!(
+                    "{}  {indent}{}  Q:{}",
+                    node.pid, node.name, node.message_queue_len
+                ),
                 false,
                 &palette,
             )
         })
         .collect();
-    let title = format!("Observatory  {} processes", obs.count.max(obs.nodes.len() as u16));
+    let title = format!(
+        "Observatory  {} processes",
+        obs.count.max(obs.nodes.len() as u16)
+    );
     let height = (obs.nodes.len() as u16).saturating_add(2).min(area.height);
     let rect = geometry::centered_rect(area, area.width.min(70), height);
     components::popup_frame(&title, lines, rect, &palette, buffer);
 }
 
 fn render_agent_chat(state: &SemanticState, area: Rect, buffer: &mut Buffer) {
-    let Some(chat) = state
-        .agent_chat()
-        .filter(|c| c.visible != 0)
-    else {
+    let Some(chat) = state.agent_chat().filter(|c| c.visible != 0) else {
         return;
     };
     let palette = Palette::new(state.theme());
@@ -395,12 +403,18 @@ fn render_agent_chat(state: &SemanticState, area: Rect, buffer: &mut Buffer) {
 
     let header = format!(
         "{}  {}",
-        if chat.model_name.is_empty() { "Agent" } else { &chat.model_name },
+        if chat.model_name.is_empty() {
+            "Agent"
+        } else {
+            &chat.model_name
+        },
         status_name(chat.status),
     );
     lines.push(Line::styled(
         header,
-        Style::default().fg(palette.accent()).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(palette.accent())
+            .add_modifier(Modifier::BOLD),
     ));
 
     if !chat.pending.is_empty() {
@@ -410,7 +424,9 @@ fn render_agent_chat(state: &SemanticState, area: Rect, buffer: &mut Buffer) {
         ));
     }
 
-    let msg_budget = inner_height.saturating_sub(lines.len()).saturating_sub(if chat.prompt.is_empty() { 0 } else { 2 });
+    let msg_budget = inner_height
+        .saturating_sub(lines.len())
+        .saturating_sub(if chat.prompt.is_empty() { 0 } else { 2 });
     let visible_messages = if chat.messages.len() > msg_budget {
         &chat.messages[chat.messages.len() - msg_budget..]
     } else {
@@ -486,7 +502,9 @@ fn render_which_key(state: &SemanticState, area: Rect, buffer: &mut Buffer) {
     let popup_width = if area.width <= 24 {
         area.width.max(1)
     } else {
-        (area.width * 2 / 3).max(42).min(area.width.saturating_sub(4))
+        (area.width * 2 / 3)
+            .max(42)
+            .min(area.width.saturating_sub(4))
     };
     let inner_width = popup_width.saturating_sub(2).max(1);
     let columns = match inner_width {
@@ -495,14 +513,14 @@ fn render_which_key(state: &SemanticState, area: Rect, buffer: &mut Buffer) {
         w if w >= 36 => 2,
         _ => 1,
     } as usize;
-    let rows = (which_key.bindings.len() + columns - 1) / columns;
+    let rows = which_key.bindings.len().div_ceil(columns);
     let cell_width = (inner_width as usize / columns).max(1);
-    let height = (rows as u16)
-        .saturating_add(2)
-        .min(area.height.min(14));
+    let height = (rows as u16).saturating_add(2).min(area.height.min(14));
     let rect = Rect {
         x: area.x.saturating_add(2),
-        y: area.y.saturating_add(area.height.saturating_sub(height).saturating_sub(2)),
+        y: area
+            .y
+            .saturating_add(area.height.saturating_sub(height).saturating_sub(2)),
         width: popup_width,
         height,
     };
@@ -525,7 +543,10 @@ fn render_which_key(state: &SemanticState, area: Rect, buffer: &mut Buffer) {
             ));
             let desc_width = cell_width.saturating_sub(key.len() + 4);
             let desc = if binding.description.len() > desc_width {
-                format!(" {}… ", &binding.description[..desc_width.saturating_sub(2)])
+                format!(
+                    " {}… ",
+                    &binding.description[..desc_width.saturating_sub(2)]
+                )
             } else {
                 format!(" {:<width$}", binding.description, width = desc_width)
             };
@@ -630,7 +651,9 @@ fn render_picker_list(
             " "
         };
         let marker_style = if is_selected {
-            Style::default().fg(palette.accent()).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(palette.accent())
+                .add_modifier(Modifier::BOLD)
         } else if item.marked {
             Style::default().fg(palette.warning())
         } else {

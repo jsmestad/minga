@@ -1,6 +1,6 @@
+use super::layout::FrameLayout;
 use super::theme::Palette;
 use super::{chrome, editor, overlays};
-use super::layout::FrameLayout;
 use crate::semantic_state::SemanticState;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
