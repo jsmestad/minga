@@ -1,5 +1,6 @@
 use super::geometry;
 use super::theme;
+use super::theme::Palette;
 use crate::semantic;
 use crate::semantic_state::SemanticState;
 use ratatui::buffer::Buffer;
@@ -14,6 +15,7 @@ use unicode_width::UnicodeWidthStr;
 struct RowRenderContext<'a> {
     gutter: Option<&'a semantic::Gutter>,
     indent_guides: Option<&'a semantic::IndentGuides>,
+    palette: Palette<'a>,
     theme: Option<&'a semantic::Theme>,
 }
 
@@ -23,24 +25,78 @@ pub fn render_file_tree(
     area: Rect,
     buffer: &mut Buffer,
 ) {
+    let palette = Palette::new(theme_state);
+    let is_dir = |row: &semantic::FileTreeRow| row.flags & 0x01 != 0;
+
+    if !file_tree.error.is_empty() {
+        let lines = vec![Line::styled(&file_tree.error, palette.muted())];
+        Paragraph::new(lines)
+            .style(palette.tree())
+            .render(area, buffer);
+        return;
+    }
+
+    if file_tree.rows.is_empty() {
+        let msg = match file_tree.status {
+            1 => "Loading files...",
+            _ => "No files",
+        };
+        Paragraph::new(vec![Line::styled(msg, palette.muted())])
+            .style(palette.tree())
+            .render(area, buffer);
+        return;
+    }
+
     let lines = file_tree.rows.iter().map(|row| {
         let indent = "  ".repeat(row.depth as usize);
-        let marker = if row.id == file_tree.selected_id {
-            ">"
+        let selected = row.id == file_tree.selected_id;
+        let dir = is_dir(row);
+        let expansion = if dir {
+            if row.flags & 0x02 != 0 { "v " } else { "> " }
         } else {
-            " "
+            "  "
         };
-        let style = if row.id == file_tree.selected_id {
-            theme::tree_selected(theme_state)
-        } else if row.flags & 0x01 != 0 {
-            theme::tree_dir(theme_state)
+        let marker = if selected { ">" } else { " " };
+        let icon_text = if row.icon.is_empty() {
+            String::new()
         } else {
-            theme::tree(theme_state)
+            format!("{} ", row.icon)
         };
-        Line::styled(format!("{marker}{indent}{} {}", row.icon, row.name), style)
+        let git_marker = match row.git_status {
+            1 => " M",
+            2 => " A",
+            3 => " D",
+            4 => " R",
+            5 => " ?",
+            _ => "",
+        };
+        let style = if selected {
+            palette.tree_selection()
+        } else if dir {
+            palette.tree_dir()
+        } else {
+            palette.tree()
+        };
+        let mut spans = vec![Span::styled(
+            format!("{marker}{indent}{expansion}{icon_text}{}{git_marker}", row.name),
+            style,
+        )];
+        let diag_total = row.diagnostics.0 + row.diagnostics.1;
+        if diag_total > 0 {
+            let diag_color = if row.diagnostics.0 > 0 {
+                palette.diagnostic_fg(0)
+            } else {
+                palette.diagnostic_fg(1)
+            };
+            spans.push(Span::styled(
+                format!(" {diag_total}"),
+                Style::default().fg(diag_color),
+            ));
+        }
+        Line::from(spans)
     });
     Paragraph::new(lines.collect::<Vec<_>>())
-        .style(theme::tree(theme_state))
+        .style(palette.tree())
         .wrap(Wrap { trim: false })
         .render(area, buffer);
 }
@@ -51,36 +107,35 @@ pub fn render_sidebars(
     area: Rect,
     buffer: &mut Buffer,
 ) {
-    let lines = std::iter::once(Line::from(Span::styled(
-        "Sidebars",
-        theme::muted(theme_state),
-    )))
-    .chain(sidebars.visible_items().map(|sidebar| {
-        let label = if sidebar.icon.is_empty() {
-            sidebar.display_name.clone()
-        } else {
-            format!("{} {}", sidebar.icon, sidebar.display_name)
-        };
-        let badge = if sidebar.badge_count != u16::MAX && sidebar.badge_count > 0 {
-            format!(" {}", sidebar.badge_count)
-        } else {
-            String::new()
-        };
-        let style = if sidebar.id == sidebars.active_id || sidebar.focused {
-            theme::selected(theme_state)
-        } else {
-            theme::muted(theme_state)
-        };
-        Line::from(Span::styled(format!(" {label}{badge}"), style))
-    }))
-    .collect::<Vec<_>>();
+    let palette = Palette::new(theme_state);
+    let lines = std::iter::once(Line::from(Span::styled("Sidebars", palette.muted())))
+        .chain(sidebars.visible_items().map(|sidebar| {
+            let label = if sidebar.icon.is_empty() {
+                sidebar.display_name.clone()
+            } else {
+                format!("{} {}", sidebar.icon, sidebar.display_name)
+            };
+            let badge = if sidebar.badge_count != u16::MAX && sidebar.badge_count > 0 {
+                format!(" {}", sidebar.badge_count)
+            } else {
+                String::new()
+            };
+            let style = if sidebar.id == sidebars.active_id || sidebar.focused {
+                palette.popup_selection()
+            } else {
+                palette.muted()
+            };
+            Line::from(Span::styled(format!(" {label}{badge}"), style))
+        }))
+        .collect::<Vec<_>>();
     Paragraph::new(lines)
-        .style(theme::tree(theme_state))
+        .style(palette.tree())
         .wrap(Wrap { trim: false })
         .render(area, buffer);
 }
 
 pub fn render_windows(state: &SemanticState, area: Rect, buffer: &mut Buffer) {
+    let palette = Palette::new(state.theme());
     for window in state.windows() {
         let rect = geometry::window_rect(window, area);
         let gutter = state.gutter(window.window_id);
@@ -88,13 +143,14 @@ pub fn render_windows(state: &SemanticState, area: Rect, buffer: &mut Buffer) {
         let row_context = RowRenderContext {
             gutter,
             indent_guides,
+            palette,
             theme: state.theme(),
         };
         let lines: Vec<Line<'_>> = (0..rect.height as usize)
             .map(|row_index| window_line(window, row_index, rect.width, row_context))
             .collect();
         Paragraph::new(lines)
-            .style(theme::canvas(state.theme()))
+            .style(palette.editor_surface())
             .wrap(Wrap { trim: false })
             .render(rect, buffer);
     }
@@ -165,9 +221,15 @@ pub fn render_bottom_panel(state: &SemanticState, area: Rect, buffer: &mut Buffe
         .take(area.height.saturating_sub(2) as usize)
         .map(|entry| Line::from(format!("{}  {}", entry.file_path, entry.text)))
         .collect();
+    let palette = Palette::new(state.theme());
     Paragraph::new(lines)
-        .block(Block::default().borders(Borders::ALL).title(active_tab))
-        .style(theme::overlay(state.theme()))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(palette.popup_border()))
+                .title(active_tab),
+        )
+        .style(palette.overlay())
         .wrap(Wrap { trim: false })
         .render(area, buffer);
 }
@@ -184,7 +246,7 @@ fn window_line(
         .and_then(|cursorline| (cursorline.bg != 0).then_some(cursorline.bg));
     let gutter_span = context
         .gutter
-        .map(|gutter| render_gutter(gutter, row_index, context.theme));
+        .map(|gutter| render_gutter(gutter, row_index, &context.palette));
     let gutter_width = context
         .gutter
         .map(|gutter| gutter_cell_width(gutter, row_index))
@@ -197,7 +259,7 @@ fn window_line(
     }
 
     if row_index >= window.rows.len() {
-        spans.extend(tilde_row(content_width, cursorline_bg, context.theme));
+        spans.extend(tilde_row(content_width, cursorline_bg, &context.palette));
     } else {
         spans.extend(row_line(
             window,
@@ -216,9 +278,9 @@ fn window_line(
 fn render_gutter(
     gutter: &semantic::Gutter,
     row_index: usize,
-    theme_state: Option<&semantic::Theme>,
+    palette: &Palette<'_>,
 ) -> Span<'static> {
-    Span::styled(gutter_text(gutter, row_index), theme::gutter(theme_state))
+    Span::styled(gutter_text(gutter, row_index), palette.gutter())
 }
 
 pub(crate) fn gutter_cell_width(gutter: &semantic::Gutter, row_index: usize) -> u16 {
@@ -249,12 +311,12 @@ fn gutter_text(gutter: &semantic::Gutter, row_index: usize) -> String {
 fn tilde_row(
     width: u16,
     cursorline_bg: Option<u32>,
-    theme_state: Option<&semantic::Theme>,
+    palette: &Palette<'_>,
 ) -> Vec<Span<'static>> {
     if width == 0 {
         return Vec::new();
     }
-    let mut style = theme::muted(theme_state);
+    let mut style = palette.muted();
     if let Some(bg) = cursorline_bg {
         style = style.bg(theme::rgb(bg));
     }

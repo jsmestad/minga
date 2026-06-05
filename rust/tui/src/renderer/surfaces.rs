@@ -1,5 +1,6 @@
+use super::theme::Palette;
 use super::{chrome, editor, overlays};
-use super::{layout::FrameLayout, theme};
+use super::layout::FrameLayout;
 use crate::semantic_state::SemanticState;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -24,14 +25,16 @@ pub fn render_frame(
 ) -> SurfaceRenderMetrics {
     let mut metrics = SurfaceRenderMetrics::default();
 
+    let palette = Palette::new(state.theme());
+
     let started = Instant::now();
-    buffer.set_style(layout.area, theme::canvas(state.theme()));
+    buffer.set_style(layout.area, palette.editor_surface());
     metrics.clear_us = started.elapsed().as_micros();
 
     if let Some(diagnostic) = state.diagnostic() {
         let started = Instant::now();
         Paragraph::new(diagnostic.to_owned())
-            .style(theme::diagnostic(state.theme()))
+            .style(palette.diagnostic_style())
             .render(layout.body, buffer);
         metrics.windows_us = started.elapsed().as_micros();
 

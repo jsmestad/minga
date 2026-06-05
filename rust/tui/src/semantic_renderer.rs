@@ -1,5 +1,7 @@
 #[path = "renderer/chrome.rs"]
 mod chrome;
+#[path = "renderer/components.rs"]
+mod components;
 #[path = "renderer/editor.rs"]
 mod editor;
 #[path = "renderer/geometry.rs"]
@@ -563,6 +565,7 @@ mod tests {
                 semantic::Notifications {
                     visible: 1,
                     notification_count: 2,
+                    items: Vec::new(),
                 },
                 0,
             ),
@@ -599,6 +602,7 @@ mod tests {
                     visible: 1,
                     viewing_index: 1,
                     entry_count: 3,
+                    entries: Vec::new(),
                 },
                 0,
             ),
@@ -648,6 +652,8 @@ mod tests {
             semantic::Command::Observatory(
                 semantic::Observatory {
                     visible: true,
+                    count: 0,
+                    nodes: Vec::new(),
                     payload: vec![1],
                 },
                 0,
@@ -658,12 +664,24 @@ mod tests {
                 semantic::AgentChat {
                     visible: 1,
                     status: 1,
+                    model_name: String::new(),
+                    prompt: String::new(),
+                    pending: String::new(),
+                    thinking_level: String::new(),
+                    messages: Vec::new(),
                 },
                 0,
             ),
         ));
         state.apply_protocol_command(crate::protocol::Command::Semantic(
-            semantic::Command::ToolManager(semantic::ToolManager { visible: 1 }, 0),
+            semantic::Command::ToolManager(
+                semantic::ToolManager {
+                    visible: 1,
+                    selected: 0,
+                    tools: Vec::new(),
+                },
+                0,
+            ),
         ));
 
         let mut terminal = Terminal::memory(220, 8);
@@ -828,9 +846,7 @@ mod tests {
         assert!(snapshot.contains(":write  command  1/2"));
         assert!(snapshot.contains("Problems"));
         assert!(snapshot.contains("warning text"));
-        assert!(snapshot.contains("Enum.map"));
-        assert!(snapshot.contains("find file"));
-        assert!(snapshot.contains("Files: minga 1/3"));
+        assert!(snapshot.contains("Files  minga"));
         assert!(snapshot.contains("mix.exs"));
     }
 
@@ -1005,6 +1021,8 @@ mod tests {
                     tabs: vec![semantic::Tab {
                         active: true,
                         dirty: false,
+                        attention: false,
+                        icon: String::new(),
                         label: "RUST_TUI.md".to_owned(),
                         tint: 0,
                     }],
