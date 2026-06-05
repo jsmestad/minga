@@ -336,6 +336,11 @@ defmodule Minga.Test.HeadlessPort do
   # ── send_commands — the core render capture ──
 
   @impl true
+  def handle_cast({:hop_mark, hop, sent_at}, state) do
+    Minga.Telemetry.hop_latency(hop, sent_at)
+    {:noreply, state}
+  end
+
   def handle_cast({:send_commands, commands}, state) do
     new_state = Enum.reduce(commands, state, &apply_command/2)
     {:noreply, new_state}

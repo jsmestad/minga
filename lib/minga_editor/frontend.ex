@@ -33,6 +33,15 @@ defmodule MingaEditor.Frontend do
   defdelegate send_commands(server \\ MingaEditor.Frontend.Manager, commands),
     to: MingaEditor.Frontend.Manager
 
+  @doc """
+  Sends the per-frame render batch and stamps a monotonic send time so the
+  frontend emits a `[:minga, :render, :hop_latency]` (`hop: :send_commands`)
+  sample for the Renderer.Server → Port.Manager scheduling delay.
+  """
+  @spec send_render_commands(GenServer.server(), [binary()]) :: :ok
+  defdelegate send_render_commands(server \\ MingaEditor.Frontend.Manager, commands),
+    to: MingaEditor.Frontend.Manager
+
   @doc "Subscribes the calling process to frontend events."
   @spec subscribe(GenServer.server()) :: :ok
   defdelegate subscribe(server \\ MingaEditor.Frontend.Manager), to: MingaEditor.Frontend.Manager

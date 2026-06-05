@@ -33,6 +33,9 @@ defmodule MingaEditor.Renderer.Server do
   - `[:minga, :render, :pipeline]` span around `RenderPipeline.run/1`.
   - `[:minga, :render, :coalesced]` event when a pending snapshot is dropped.
   - `[:minga, :render, :frame_latency]` measurement (push timestamp → emit complete).
+  - `[:minga, :render, :hop_latency]` (`hop: :cast_snapshot`) measures the
+    Editor → Renderer.Server scheduling delay; (`hop: :render_done`) measures
+    the Renderer.Server → Editor writeback scheduling delay.
 
   ## Determinism in tests
 
@@ -63,7 +66,8 @@ defmodule MingaEditor.Renderer.Server do
           required(:shell_identity) => MingaEditor.Shell.Identity.t() | nil,
           required(:shell_state) => term(),
           required(:windows) => term(),
-          required(:frame_seq) => non_neg_integer()
+          required(:frame_seq) => non_neg_integer(),
+          required(:render_sent_at) => integer()
         }
 
   @typedoc "Editor process reference used for renderer writebacks."
@@ -133,6 +137,8 @@ defmodule MingaEditor.Renderer.Server do
   @impl true
   @spec handle_cast({:render, Input.t(), non_neg_integer(), integer()}, t()) :: {:noreply, t()}
   def handle_cast({:render, snap, seq, pushed_at}, %__MODULE__{rendering?: true} = state) do
+    Telemetry.hop_latency(:cast_snapshot, pushed_at)
+
     # In-flight render is still going. Drop the previous pending and replace
     # with this snapshot. Most-recent-wins.
     if state.pending do
@@ -146,6 +152,7 @@ defmodule MingaEditor.Renderer.Server do
   end
 
   def handle_cast({:render, snap, seq, pushed_at}, %__MODULE__{rendering?: false} = state) do
+    Telemetry.hop_latency(:cast_snapshot, pushed_at)
     send(self(), :do_render)
     {:noreply, %{state | rendering?: true, in_flight: {snap, seq, pushed_at}}}
   end
@@ -223,7 +230,10 @@ defmodule MingaEditor.Renderer.Server do
       shell_identity: output.shell_identity,
       shell_state: output.shell_state,
       windows: output.workspace.windows,
-      frame_seq: seq
+      frame_seq: seq,
+      # Stamped at writeback construction (immediately before send) so the
+      # Editor can measure the Renderer.Server → Editor scheduling delay.
+      render_sent_at: monotonic_now()
     }
   end
 

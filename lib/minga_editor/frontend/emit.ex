@@ -88,7 +88,7 @@ defmodule MingaEditor.Frontend.Emit do
     byte_count = IO.iodata_length(all_metal) + IO.iodata_length(encoded_frame.chrome_commands)
 
     Telemetry.span([:minga, :render, :emit_prepare], %{byte_count: byte_count}, fn ->
-      MingaEditor.Frontend.send_commands(ctx.port_manager, all_metal)
+      MingaEditor.Frontend.send_render_commands(ctx.port_manager, all_metal)
       caches = send_title(render_model, caches)
       caches = send_window_bg(render_model, caches)
 
@@ -114,7 +114,7 @@ defmodule MingaEditor.Frontend.Emit do
     byte_count = IO.iodata_length(commands)
 
     Telemetry.span([:minga, :render, :emit_prepare], %{byte_count: byte_count}, fn ->
-      MingaEditor.Frontend.send_commands(ctx.port_manager, commands)
+      MingaEditor.Frontend.send_render_commands(ctx.port_manager, commands)
       caches = send_title(render_model, caches)
       caches = send_window_bg(render_model, caches)
       caches
@@ -145,7 +145,7 @@ defmodule MingaEditor.Frontend.Emit do
     byte_count = IO.iodata_length(commands)
 
     Telemetry.span([:minga, :render, :emit_prepare], %{byte_count: byte_count}, fn ->
-      MingaEditor.Frontend.send_commands(ctx.port_manager, commands)
+      MingaEditor.Frontend.send_render_commands(ctx.port_manager, commands)
       caches = send_title(render_model, caches)
       caches = send_window_bg(render_model, caches)
       caches

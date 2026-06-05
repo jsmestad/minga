@@ -109,6 +109,11 @@ defmodule Minga.Test.RecordingFrontend do
   end
 
   @impl GenServer
+  def handle_cast({:hop_mark, hop, sent_at}, state) do
+    Minga.Telemetry.hop_latency(hop, sent_at)
+    {:noreply, state}
+  end
+
   def handle_cast({:send_commands, commands}, state) do
     send(state.owner, {:frontend_commands, self(), commands})
     {:noreply, %{state | commands: Enum.reverse(commands) ++ state.commands}}

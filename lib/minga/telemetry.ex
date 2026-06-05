@@ -89,4 +89,26 @@ defmodule Minga.Telemetry do
       when is_list(event) and is_map(measurements) and is_map(metadata) do
     :telemetry.execute(event, measurements, metadata)
   end
+
+  @doc """
+  Emits a `[:minga, :render, :hop_latency]` event measuring the BEAM
+  scheduling delay across a single GenServer hop on the render path.
+
+  The sender stamps `System.monotonic_time(:microsecond)` into the
+  cast/send payload; the receiver calls this at the start of its
+  `handle_cast`/`handle_info` with that timestamp. The delta is the time
+  the message spent queued plus scheduling jitter, in microseconds.
+
+  `hop` identifies which hop produced the sample: `:cast_snapshot`
+  (Editor → Renderer.Server), `:send_commands` (Renderer.Server emit →
+  Port.Manager), or `:render_done` (Renderer.Server → Editor).
+  """
+  @spec hop_latency(atom(), integer()) :: :ok
+  def hop_latency(hop, sent_at) when is_atom(hop) and is_integer(sent_at) do
+    execute(
+      [:minga, :render, :hop_latency],
+      %{microseconds: System.monotonic_time(:microsecond) - sent_at},
+      %{hop: hop}
+    )
+  end
 end

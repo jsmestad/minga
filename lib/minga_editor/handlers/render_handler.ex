@@ -14,6 +14,7 @@ defmodule MingaEditor.Handlers.RenderHandler do
 
   alias Minga.Buffer
   alias Minga.Config
+  alias Minga.Telemetry
 
   alias MingaEditor.BottomPanel
   alias MingaEditor.FlashEffects
@@ -47,8 +48,18 @@ defmodule MingaEditor.Handlers.RenderHandler do
   """
   @spec handle_render_done(state(), map()) :: state()
   def handle_render_done(state, writeback) do
+    emit_render_done_hop(writeback)
     EditorState.apply_renderer_writeback(state, writeback)
   end
+
+  # Measures the Renderer.Server → Editor writeback scheduling delay using the
+  # timestamp the Renderer stamped at send. Synthetic writebacks without the
+  # field (older tests) skip the measurement.
+  @spec emit_render_done_hop(map()) :: :ok
+  defp emit_render_done_hop(%{render_sent_at: sent_at}),
+    do: Telemetry.hop_latency(:render_done, sent_at)
+
+  defp emit_render_done_hop(_writeback), do: :ok
 
   @doc """
   Handles the `:nav_flash_step` timer, advancing the fade or clearing the flash.

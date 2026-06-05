@@ -64,6 +64,21 @@ defmodule MingaEditor.Frontend.Manager do
     GenServer.cast(server, {:send_commands, commands})
   end
 
+  @doc """
+  Like `send_commands/2` but precedes the frame batch with a `{:hop_mark, ...}`
+  probe cast stamped with a monotonic send time. The receiver emits a
+  `[:minga, :render, :hop_latency]` (`hop: :send_commands`) sample measuring
+  the Renderer.Server → Port.Manager scheduling delay. The probe is enqueued
+  immediately before the frame so its delay tracks the frame's delay, without
+  altering the `{:send_commands, commands}` message contract. Used only for the
+  per-frame render batch on the keystroke path.
+  """
+  @spec send_render_commands(GenServer.server(), [binary()]) :: :ok
+  def send_render_commands(server \\ __MODULE__, commands) when is_list(commands) do
+    GenServer.cast(server, {:hop_mark, :send_commands, System.monotonic_time(:microsecond)})
+    GenServer.cast(server, {:send_commands, commands})
+  end
+
   @doc "Subscribes the calling process to receive input events."
   @impl MingaEditor.Frontend.Adapter
   @spec subscribe(GenServer.server()) :: :ok
@@ -149,6 +164,11 @@ defmodule MingaEditor.Frontend.Manager do
   @impl true
   @spec handle_cast(term(), state()) :: {:noreply, state()}
   def handle_cast({:send_commands, _commands}, %{port: nil} = state) do
+    {:noreply, state}
+  end
+
+  def handle_cast({:hop_mark, hop, sent_at}, state) do
+    Telemetry.hop_latency(hop, sent_at)
     {:noreply, state}
   end
 

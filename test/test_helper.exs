@@ -35,7 +35,10 @@ swift_exclude = if File.exists?(harness_path), do: [], else: [:swift_harness]
 
 # `:distributed` tests boot a real peer node (Erlang distribution / epmd) and
 # are excluded by default. Run them with `mix test --include distributed`.
-ExUnit.start(capture_log: true, exclude: [:pi, :distributed | swift_exclude])
+# `:perf` tests drive timing-sensitive render-path benchmarks and print
+# percentile reports. They are excluded by default and run on demand with
+# `mix test --include perf`.
+ExUnit.start(capture_log: true, exclude: [:pi, :distributed, :perf | swift_exclude])
 
 # Disable clipboard sync during tests to avoid race conditions from
 # parallel tests sharing the system clipboard. Tests that specifically
