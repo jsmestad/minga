@@ -26,8 +26,12 @@ use std::io;
 use std::time::Instant;
 use unicode_width::UnicodeWidthStr;
 
+pub const RECONCILIATION_INTERVAL: u32 = 60;
+
 #[derive(Debug, Default)]
-pub struct SemanticRenderer;
+pub struct SemanticRenderer {
+    pub incremental_frame_count: u32,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RenderMetrics {
@@ -40,7 +44,9 @@ pub struct RenderMetrics {
 
 impl SemanticRenderer {
     pub fn new() -> Self {
-        Self
+        Self {
+            incremental_frame_count: 0,
+        }
     }
 
     pub fn render_startup(terminal: &mut Terminal, message: &str) -> io::Result<()> {
@@ -90,6 +96,7 @@ impl SemanticRenderer {
         state: &SemanticState,
         terminal: &mut Terminal,
     ) -> io::Result<RenderMetrics> {
+        self.incremental_frame_count = 0;
         let total_started = Instant::now();
         let cursor_style_started = Instant::now();
         terminal.set_cursor_style(state.cursor().shape, state.cursor_animation_enabled())?;
@@ -112,6 +119,99 @@ impl SemanticRenderer {
             cursor_style_us,
             draw_us,
             flush_us: flush_started.elapsed().as_micros(),
+            total_us: total_started.elapsed().as_micros(),
+            surfaces: surface_metrics,
+        })
+    }
+
+    pub fn render_incremental(
+        &mut self,
+        state: &SemanticState,
+        terminal: &mut Terminal,
+    ) -> io::Result<RenderMetrics> {
+        let total_started = Instant::now();
+
+        let cursor_style_started = Instant::now();
+        terminal.set_cursor_style(state.cursor().shape, state.cursor_animation_enabled())?;
+        let cursor_style_us = cursor_style_started.elapsed().as_micros();
+
+        let draw_started = Instant::now();
+
+        let content_area = content_area(
+            Rect {
+                x: 0,
+                y: 0,
+                width: state.width(),
+                height: state.height(),
+            },
+            state,
+        );
+        let frame_layout = layout::FrameLayout::compute(state, content_area);
+
+        let mut output = Vec::with_capacity(4096);
+        let palette = theme::Palette::new(state.theme());
+
+        crossterm::queue!(
+            output,
+            crossterm::cursor::Hide,
+            crossterm::terminal::BeginSynchronizedUpdate
+        )?;
+
+        let mut surface_metrics = surfaces::SurfaceRenderMetrics::default();
+        let windows_started = Instant::now();
+        for window in state.windows() {
+            let rect = geometry::window_rect(window, frame_layout.area);
+            let gutter = state.gutter(window.window_id);
+            let indent_guides = state.indent_guides(window.window_id);
+            let row_context = editor::RowRenderContext {
+                gutter,
+                indent_guides,
+                palette,
+                theme: state.theme(),
+            };
+            for row_idx in 0..rect.height as usize {
+                let line = editor::window_line(window, row_idx, rect.width, row_context);
+                let y = rect.y + row_idx as u16;
+                write_line_to_output(&mut output, rect.x, y, &line, rect.width)?;
+            }
+        }
+        surface_metrics.windows_us = windows_started.elapsed().as_micros();
+
+        let chrome_started = Instant::now();
+        if let Some(status_bar) = state.status_bar() {
+            let line = chrome::status_bar_line(state, &frame_layout, status_bar);
+            write_line_to_output(
+                &mut output,
+                frame_layout.status_bar.x,
+                frame_layout.status_bar.y,
+                &line,
+                frame_layout.status_bar.width,
+            )?;
+        }
+        surface_metrics.chrome_us = chrome_started.elapsed().as_micros();
+
+        if let Some((col, row)) = rendered_cursor_position(state, &frame_layout) {
+            crossterm::queue!(output, crossterm::cursor::MoveTo(col, row))?;
+        }
+
+        crossterm::queue!(
+            output,
+            crossterm::terminal::EndSynchronizedUpdate,
+            crossterm::cursor::Show
+        )?;
+
+        let draw_us = draw_started.elapsed().as_micros();
+
+        let flush_started = Instant::now();
+        terminal.write_raw(&output)?;
+        let flush_us = flush_started.elapsed().as_micros();
+
+        self.incremental_frame_count += 1;
+
+        Ok(RenderMetrics {
+            cursor_style_us,
+            draw_us,
+            flush_us,
             total_us: total_started.elapsed().as_micros(),
             surfaces: surface_metrics,
         })
@@ -264,6 +364,101 @@ fn rendered_cursor_position(
     }
 
     Some((col, rect.y.saturating_add(window.cursor_row)))
+}
+
+fn write_line_to_output(
+    output: &mut Vec<u8>,
+    x: u16,
+    y: u16,
+    line: &Line<'_>,
+    width: u16,
+) -> io::Result<()> {
+    use crossterm::cursor::MoveTo;
+    use crossterm::style::{
+        Attribute, Print, ResetColor, SetAttribute, SetBackgroundColor,
+        SetForegroundColor,
+    };
+
+    crossterm::queue!(output, MoveTo(x, y))?;
+
+    let mut col = 0u16;
+    for span in &line.spans {
+        if col >= width {
+            break;
+        }
+        let style = span.style;
+        if let Some(fg) = style.fg {
+            crossterm::queue!(output, SetForegroundColor(ratatui_color_to_crossterm(fg)))?;
+        }
+        if let Some(bg) = style.bg {
+            crossterm::queue!(output, SetBackgroundColor(ratatui_color_to_crossterm(bg)))?;
+        }
+        if style.add_modifier.contains(Modifier::BOLD) {
+            crossterm::queue!(output, SetAttribute(Attribute::Bold))?;
+        }
+        if style.add_modifier.contains(Modifier::ITALIC) {
+            crossterm::queue!(output, SetAttribute(Attribute::Italic))?;
+        }
+        if style.add_modifier.contains(Modifier::UNDERLINED) {
+            crossterm::queue!(output, SetAttribute(Attribute::Underlined))?;
+        }
+
+        let text = &span.content;
+        let text_width = UnicodeWidthStr::width(text.as_ref()) as u16;
+        if col + text_width <= width {
+            crossterm::queue!(output, Print(text))?;
+            col += text_width;
+        } else {
+            let remaining = (width - col) as usize;
+            let mut taken_width = 0;
+            let truncated: String = text
+                .chars()
+                .take_while(|c| {
+                    let w = unicode_width::UnicodeWidthChar::width(*c).unwrap_or(0);
+                    if taken_width + w > remaining {
+                        return false;
+                    }
+                    taken_width += w;
+                    true
+                })
+                .collect();
+            crossterm::queue!(output, Print(&truncated))?;
+            col += taken_width as u16;
+        }
+
+        crossterm::queue!(output, ResetColor, SetAttribute(Attribute::Reset))?;
+    }
+
+    if col < width {
+        let padding = " ".repeat((width - col) as usize);
+        crossterm::queue!(output, crossterm::style::Print(&padding))?;
+    }
+
+    Ok(())
+}
+
+fn ratatui_color_to_crossterm(color: ratatui::style::Color) -> crossterm::style::Color {
+    match color {
+        Color::Rgb(r, g, b) => crossterm::style::Color::Rgb { r, g, b },
+        Color::Black => crossterm::style::Color::Black,
+        Color::Red => crossterm::style::Color::DarkRed,
+        Color::Green => crossterm::style::Color::DarkGreen,
+        Color::Yellow => crossterm::style::Color::DarkYellow,
+        Color::Blue => crossterm::style::Color::DarkBlue,
+        Color::Magenta => crossterm::style::Color::DarkMagenta,
+        Color::Cyan => crossterm::style::Color::DarkCyan,
+        Color::Gray => crossterm::style::Color::Grey,
+        Color::DarkGray => crossterm::style::Color::DarkGrey,
+        Color::LightRed => crossterm::style::Color::Red,
+        Color::LightGreen => crossterm::style::Color::Green,
+        Color::LightYellow => crossterm::style::Color::Yellow,
+        Color::LightBlue => crossterm::style::Color::Blue,
+        Color::LightMagenta => crossterm::style::Color::Magenta,
+        Color::LightCyan => crossterm::style::Color::Cyan,
+        Color::White => crossterm::style::Color::White,
+        Color::Indexed(i) => crossterm::style::Color::AnsiValue(i),
+        _ => crossterm::style::Color::Reset,
+    }
 }
 
 fn pad_to_width(text: &str, width: usize) -> String {

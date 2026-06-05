@@ -12,11 +12,11 @@ use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 #[derive(Clone, Copy)]
-struct RowRenderContext<'a> {
-    gutter: Option<&'a semantic::Gutter>,
-    indent_guides: Option<&'a semantic::IndentGuides>,
-    palette: Palette<'a>,
-    theme: Option<&'a semantic::Theme>,
+pub(crate) struct RowRenderContext<'a> {
+    pub(crate) gutter: Option<&'a semantic::Gutter>,
+    pub(crate) indent_guides: Option<&'a semantic::IndentGuides>,
+    pub(crate) palette: Palette<'a>,
+    pub(crate) theme: Option<&'a semantic::Theme>,
 }
 
 pub fn render_file_tree(
@@ -234,7 +234,7 @@ pub fn render_bottom_panel(state: &SemanticState, area: Rect, buffer: &mut Buffe
         .render(area, buffer);
 }
 
-fn window_line(
+pub(crate) fn window_line(
     window: &semantic::WindowContent,
     row_index: usize,
     width: u16,

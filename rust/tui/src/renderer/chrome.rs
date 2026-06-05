@@ -114,6 +114,108 @@ fn render_status_bar(
     }
 }
 
+pub(crate) fn status_bar_line(
+    state: &SemanticState,
+    frame: &layout::FrameLayout,
+    status_bar: &semantic::StatusBar,
+) -> Line<'static> {
+    let palette = Palette::new(state.theme());
+    let width = frame.status_bar.width as usize;
+    if !status_bar.left_segments.is_empty() || !status_bar.right_segments.is_empty() {
+        segmented_status_bar_line(status_bar, &palette, width)
+    } else {
+        fallback_status_bar_line(state, status_bar, &palette, width)
+    }
+}
+
+fn segmented_status_bar_line(
+    status_bar: &semantic::StatusBar,
+    palette: &Palette<'_>,
+    width: usize,
+) -> Line<'static> {
+    let base = palette.status_bar();
+    let left_spans: Vec<Span<'static>> = status_bar
+        .left_segments
+        .iter()
+        .map(|s| status_segment_span_owned(s, palette))
+        .collect();
+    let right_spans: Vec<Span<'static>> = status_bar
+        .right_segments
+        .iter()
+        .map(|s| status_segment_span_owned(s, palette))
+        .collect();
+    let left_width: usize = left_spans.iter().map(|s| s.content.len()).sum();
+    let right_width: usize = right_spans.iter().map(|s| s.content.len()).sum();
+    let available = width.saturating_sub(left_width + right_width);
+
+    let mut spans = left_spans;
+
+    if !status_bar.message.is_empty() {
+        let msg = &status_bar.message;
+        let msg_width = msg.len().min(available);
+        let left_pad = available.saturating_sub(msg_width) / 2;
+        let right_pad = available.saturating_sub(msg_width).saturating_sub(left_pad);
+        spans.push(Span::styled(" ".repeat(left_pad), base));
+        spans.push(Span::styled(
+            msg[..msg_width].to_owned(),
+            base.fg(palette.warning()).add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::styled(" ".repeat(right_pad), base));
+    } else {
+        spans.push(Span::styled(" ".repeat(available), base));
+    }
+
+    spans.extend(right_spans);
+    Line::from(spans)
+}
+
+fn status_segment_span_owned(segment: &semantic::StatusSegment, palette: &Palette<'_>) -> Span<'static> {
+    let mut style = palette.status_bar();
+    if segment.fg != 0 {
+        style = style.fg(theme::rgb(segment.fg));
+    }
+    if segment.bg != 0 {
+        style = style.bg(theme::rgb(segment.bg));
+    }
+    if segment.attrs & 0x01 != 0 {
+        style = style.add_modifier(Modifier::BOLD);
+    }
+    if segment.attrs & 0x02 != 0 {
+        style = style.add_modifier(Modifier::UNDERLINED);
+    }
+    if segment.attrs & 0x04 != 0 {
+        style = style.add_modifier(Modifier::ITALIC);
+    }
+    Span::styled(segment.text.clone(), style)
+}
+
+fn fallback_status_bar_line(
+    state: &SemanticState,
+    status_bar: &semantic::StatusBar,
+    palette: &Palette<'_>,
+    width: usize,
+) -> Line<'static> {
+    let mut left = if status_bar.filename.is_empty() {
+        status_bar.message.clone()
+    } else {
+        status_bar.filename.clone()
+    };
+    if !status_bar.branch.is_empty() {
+        left.push_str("  ");
+        left.push_str(&status_bar.branch);
+    }
+    let right = status_right_text(state, status_bar);
+    let left_width = left.len();
+    let right_width = right.len();
+    let padding = width.saturating_sub(left_width + right_width);
+    let style = palette.status_bar();
+    Line::from(vec![
+        Span::styled(left, style),
+        Span::styled(" ".repeat(padding), style),
+        Span::styled(right, style),
+    ])
+}
+
 fn render_segmented_status_bar(
     status_bar: &semantic::StatusBar,
     palette: &Palette<'_>,

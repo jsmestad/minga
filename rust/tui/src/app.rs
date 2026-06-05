@@ -6,8 +6,8 @@ use crate::parity::{FrontendParityPolicy, GO_ZIG_PARITY};
 use crate::protocol;
 use crate::render_scheduler::{RenderBatch, RenderScheduler};
 use crate::runtime::{DrainDecision, FrameRuntime};
-use crate::semantic_renderer::SemanticRenderer;
-use crate::semantic_state::SemanticState;
+use crate::semantic_renderer::{SemanticRenderer, RECONCILIATION_INTERVAL};
+use crate::semantic_state::{DirtyKind, SemanticState};
 use crate::signals;
 use crate::terminal::Terminal;
 use crossterm::event;
@@ -234,7 +234,7 @@ fn process_loop_event(
                     runtime.startup_started.elapsed().as_millis()
                 ));
             }
-            if handle_packet(
+            match handle_packet(
                 &packet,
                 received_at,
                 runtime.policy,
@@ -242,7 +242,9 @@ fn process_loop_event(
                 terminal,
                 output,
             )? {
-                runtime.render_scheduler.request();
+                Some(DirtyKind::Partial) => runtime.render_scheduler.request_partial(),
+                Some(DirtyKind::Full) => runtime.render_scheduler.request(),
+                None => {}
             }
             Ok(false)
         }
@@ -283,11 +285,56 @@ fn render_now(
     state: &SemanticState,
     terminal: &mut Terminal,
 ) -> io::Result<()> {
+    let use_incremental = batch.dirty == DirtyKind::Partial
+        && terminal.is_real_tty()
+        && renderer.incremental_frame_count < RECONCILIATION_INTERVAL;
+
+    if use_incremental {
+        match renderer.render_incremental(state, terminal) {
+            Ok(metrics) if policy.tracing.render_latency => {
+                let surfaces = metrics.surfaces;
+                beam_host::trace(format!(
+                    "latency render render_mode=incremental requests={} pending_us={} cursor_style_us={} draw_us={} flush_us={} total_us={} windows_us={} chrome_us={} state={}",
+                    batch.request_count,
+                    batch.pending_us,
+                    metrics.cursor_style_us,
+                    metrics.draw_us,
+                    metrics.flush_us,
+                    metrics.total_us,
+                    surfaces.windows_us,
+                    surfaces.chrome_us,
+                    state.debug_summary()
+                ));
+                Ok(())
+            }
+            Ok(_) => Ok(()),
+            Err(error) => {
+                beam_host::trace(format!("render incremental failed error={error}, falling back to full"));
+                // Fall back to full render on incremental failure
+                renderer.incremental_frame_count = 0;
+                render_full(batch, policy, renderer, state, terminal)
+            }
+        }
+    } else {
+        if renderer.incremental_frame_count > 0 {
+            let _ = terminal.clear_for_reconciliation();
+        }
+        render_full(batch, policy, renderer, state, terminal)
+    }
+}
+
+fn render_full(
+    batch: RenderBatch,
+    policy: FrontendParityPolicy,
+    renderer: &mut SemanticRenderer,
+    state: &SemanticState,
+    terminal: &mut Terminal,
+) -> io::Result<()> {
     match renderer.render_with_metrics(state, terminal) {
         Ok(metrics) if policy.tracing.render_latency => {
             let surfaces = metrics.surfaces;
             beam_host::trace(format!(
-                "latency render requests={} pending_us={} cursor_style_us={} draw_us={} flush_us={} total_us={} clear_us={} tree_us={} windows_us={} separators_us={} overlays_us={} bottom_panel_us={} chrome_us={} state={}",
+                "latency render render_mode=full requests={} pending_us={} cursor_style_us={} draw_us={} flush_us={} total_us={} clear_us={} tree_us={} windows_us={} separators_us={} overlays_us={} bottom_panel_us={} chrome_us={} state={}",
                 batch.request_count,
                 batch.pending_us,
                 metrics.cursor_style_us,
@@ -467,9 +514,10 @@ fn handle_packet(
     state: &mut SemanticState,
     terminal: &mut Terminal,
     _output: &mut (impl Write + ?Sized),
-) -> io::Result<bool> {
+) -> io::Result<Option<DirtyKind>> {
     let decode_started = Instant::now();
     let mut should_render = false;
+    let mut packet_dirty = DirtyKind::Partial;
     let mut command_names = Vec::new();
 
     for decoded in beam_host::decode_packet(packet) {
@@ -496,23 +544,31 @@ fn handle_packet(
         {
             terminal.write_clipboard(&clipboard.text)?;
         }
-        should_render |= effect.render;
+        if effect.render {
+            should_render = true;
+            packet_dirty = packet_dirty.merge(effect.dirty);
+        }
     }
 
     let decode_apply_us = decode_started.elapsed().as_micros();
     if policy.tracing.packet_latency {
         beam_host::trace(format!(
-            "latency packet len={} queue_us={} decode_apply_us={} render={} commands=[{}] state={}",
+            "latency packet len={} queue_us={} decode_apply_us={} render={} dirty={:?} commands=[{}] state={}",
             packet.len(),
             received_at.elapsed().as_micros(),
             decode_apply_us,
             should_render,
+            packet_dirty,
             command_names.join(","),
             state.debug_summary()
         ));
     }
 
-    Ok(should_render)
+    Ok(if should_render {
+        Some(packet_dirty)
+    } else {
+        None
+    })
 }
 
 fn packet_head(packet: &[u8]) -> String {

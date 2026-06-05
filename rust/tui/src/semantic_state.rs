@@ -2,6 +2,21 @@ use crate::protocol::Command as ProtocolCommand;
 use crate::semantic;
 use std::collections::HashMap;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DirtyKind {
+    Full,
+    Partial,
+}
+
+impl DirtyKind {
+    pub fn merge(self, other: DirtyKind) -> DirtyKind {
+        match (self, other) {
+            (DirtyKind::Partial, DirtyKind::Partial) => DirtyKind::Partial,
+            _ => DirtyKind::Full,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SemanticState {
     width: u16,
@@ -59,6 +74,7 @@ pub struct CursorState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StateEffect {
     pub render: bool,
+    pub dirty: DirtyKind,
     pub title: Option<String>,
     pub clipboard: Option<semantic::ClipboardWrite>,
 }
@@ -127,7 +143,7 @@ impl SemanticState {
                 self.clear();
                 StateEffect::render()
             }
-            ProtocolCommand::BatchEnd => StateEffect::render(),
+            ProtocolCommand::BatchEnd => StateEffect::render_partial(),
             ProtocolCommand::SetCursor { row, col } => {
                 self.cursor.row = row;
                 self.cursor.col = col;
@@ -140,6 +156,7 @@ impl SemanticState {
             }
             ProtocolCommand::SetTitle(title) => StateEffect {
                 render: false,
+                dirty: DirtyKind::Full,
                 title: Some(title),
                 clipboard: None,
             },
@@ -160,6 +177,7 @@ impl SemanticState {
             | ProtocolCommand::MeasureText { .. }
             | ProtocolCommand::Noop(_) => StateEffect {
                 render: false,
+                dirty: DirtyKind::Full,
                 title: None,
                 clipboard: None,
             },
@@ -402,11 +420,11 @@ impl SemanticState {
             }
             semantic::Command::WindowRowsDelta(delta, _) => {
                 self.apply_window_rows_delta(delta);
-                StateEffect::render()
+                StateEffect::render_partial()
             }
             semantic::Command::StatusBar(status_bar, _) => {
                 self.status_bar = Some(status_bar);
-                StateEffect::render()
+                StateEffect::render_partial()
             }
             semantic::Command::TabBar(tab_bar, _) => {
                 self.tab_bar = Some(tab_bar);
@@ -470,7 +488,7 @@ impl SemanticState {
             }
             semantic::Command::Gutter(gutter, _) => {
                 self.gutters.insert(gutter.window_id, gutter);
-                StateEffect::render()
+                StateEffect::render_partial()
             }
             semantic::Command::GutterSeparator(separator, _) => {
                 self.gutter_separator = Some(separator);
@@ -483,15 +501,15 @@ impl SemanticState {
             semantic::Command::IndentGuides(indent_guides, _) => {
                 self.indent_guides
                     .insert(indent_guides.window_id, indent_guides);
-                StateEffect::render()
+                StateEffect::render_partial()
             }
             semantic::Command::WindowOverlayDelta(delta, _) => {
                 self.apply_window_overlay_delta(delta);
-                StateEffect::render()
+                StateEffect::render_partial()
             }
             semantic::Command::Cursorline(cursorline, _) => {
                 self.apply_cursorline(cursorline);
-                StateEffect::render()
+                StateEffect::render_partial()
             }
             semantic::Command::LineSpacing(line_spacing, _) => {
                 self.line_spacing = Some(line_spacing);
@@ -523,6 +541,7 @@ impl SemanticState {
             }
             semantic::Command::ClipboardWrite(clipboard, _) => StateEffect {
                 render: false,
+                dirty: DirtyKind::Full,
                 title: None,
                 clipboard: Some(clipboard),
             },
@@ -681,6 +700,16 @@ impl StateEffect {
     fn render() -> Self {
         Self {
             render: true,
+            dirty: DirtyKind::Full,
+            title: None,
+            clipboard: None,
+        }
+    }
+
+    fn render_partial() -> Self {
+        Self {
+            render: true,
+            dirty: DirtyKind::Partial,
             title: None,
             clipboard: None,
         }

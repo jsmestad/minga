@@ -183,6 +183,29 @@ impl Terminal {
         }
     }
 
+    pub fn clear_for_reconciliation(&mut self) -> io::Result<()> {
+        match &mut self.backend {
+            Backend::Real(terminal) => terminal.clear().map(|_| ()),
+            #[cfg(test)]
+            Backend::Test(_) => Ok(()),
+        }
+    }
+
+    pub fn write_raw(&mut self, bytes: &[u8]) -> io::Result<()> {
+        match &mut self.backend {
+            Backend::Real(terminal) => {
+                terminal.backend_mut().write_all(bytes)?;
+                terminal.backend_mut().flush()
+            }
+            #[cfg(test)]
+            Backend::Test(_) => Ok(()),
+        }
+    }
+
+    pub fn is_real_tty(&self) -> bool {
+        self.real_tty
+    }
+
     #[cfg(test)]
     pub fn buffer_text(&self) -> String {
         match &self.backend {
