@@ -180,7 +180,10 @@ fn render_fallback_status_bar(
     components::styled_bar(left_spans, right_spans, area, palette.status_bar(), buffer);
 }
 
-fn status_segment_span<'a>(segment: &'a semantic::StatusSegment, palette: &Palette<'_>) -> Span<'a> {
+fn status_segment_span<'a>(
+    segment: &'a semantic::StatusSegment,
+    palette: &Palette<'_>,
+) -> Span<'a> {
     let mut style = palette.status_bar();
     if segment.fg != 0 {
         style = style.fg(theme::rgb(segment.fg));
@@ -324,7 +327,12 @@ fn render_breadcrumb(
     area: Rect,
     buffer: &mut Buffer,
 ) {
-    let separator = Span::styled(" › ", Style::default().fg(palette.gutter_fg()).bg(palette.editor_bg()));
+    let separator = Span::styled(
+        " › ",
+        Style::default()
+            .fg(palette.gutter_fg())
+            .bg(palette.editor_bg()),
+    );
     let mut spans: Vec<Span<'_>> = Vec::new();
     spans.push(Span::styled("  ", palette.editor_surface()));
     for (index, segment) in breadcrumb.segments.iter().enumerate() {
@@ -332,7 +340,9 @@ fn render_breadcrumb(
             spans.push(separator.clone());
         }
         let style = if index == breadcrumb.segments.len() - 1 {
-            Style::default().fg(palette.editor_text()).bg(palette.editor_bg())
+            Style::default()
+                .fg(palette.editor_text())
+                .bg(palette.editor_bg())
         } else {
             palette.muted()
         };

@@ -2376,11 +2376,9 @@ fn decode_observatory(bytes: &[u8]) -> Result<Command, DecodeError> {
         let section = &body[offset..offset + section_len];
         offset += section_len;
         match section_id {
-            0x01 => {
-                if section.len() >= 3 {
-                    visible = section[0] != 0;
-                    count = read_u16(section, 1);
-                }
+            0x01 if section.len() >= 3 => {
+                visible = section[0] != 0;
+                count = read_u16(section, 1);
             }
             0x02 => {
                 let mut pos = 0;
@@ -2561,13 +2559,11 @@ fn decode_agent_chat(bytes: &[u8]) -> Result<Command, DecodeError> {
                     chat.prompt = prompt;
                 }
             }
-            0x04 => {
-                if !payload.is_empty() && payload[0] != 0 {
-                    let mut off = 1;
-                    let name = read_string16(payload, &mut off).unwrap_or_default();
-                    let summary = read_string16(payload, &mut off).unwrap_or_default();
-                    chat.pending = format!("{} {}", name, summary).trim().to_owned();
-                }
+            0x04 if !payload.is_empty() && payload[0] != 0 => {
+                let mut off = 1;
+                let name = read_string16(payload, &mut off).unwrap_or_default();
+                let summary = read_string16(payload, &mut off).unwrap_or_default();
+                chat.pending = format!("{} {}", name, summary).trim().to_owned();
             }
             0x06 => {
                 chat.messages = decode_agent_messages(payload);
@@ -2627,52 +2623,42 @@ fn decode_agent_message(body: &[u8]) -> Option<AgentChatMessage> {
     };
     let mut offset = 5;
     match kind {
-        0x01 | 0x02 => {
-            if offset + 4 <= body.len() {
-                let text_size = read_u32(body, offset) as usize;
-                offset += 4;
-                if offset + text_size <= body.len() {
-                    msg.text = String::from_utf8_lossy(&body[offset..offset + text_size]).into_owned();
-                }
+        0x01 | 0x02 if offset + 4 <= body.len() => {
+            let text_size = read_u32(body, offset) as usize;
+            offset += 4;
+            if offset + text_size <= body.len() {
+                msg.text = String::from_utf8_lossy(&body[offset..offset + text_size]).into_owned();
             }
         }
-        0x03 => {
-            if offset + 5 <= body.len() {
-                msg.collapsed = body[offset] != 0;
-                let text_size = read_u32(body, offset + 1) as usize;
-                offset += 5;
-                if offset + text_size <= body.len() {
-                    msg.text = String::from_utf8_lossy(&body[offset..offset + text_size]).into_owned();
-                }
+        0x03 if offset + 5 <= body.len() => {
+            msg.collapsed = body[offset] != 0;
+            let text_size = read_u32(body, offset + 1) as usize;
+            offset += 5;
+            if offset + text_size <= body.len() {
+                msg.text = String::from_utf8_lossy(&body[offset..offset + text_size]).into_owned();
             }
         }
-        0x04 | 0x08 => {
-            if offset + 7 <= body.len() {
-                msg.status = body[offset];
-                msg.is_error = body[offset + 1] != 0;
-                msg.collapsed = body[offset + 2] != 0;
-                offset += 7;
-                msg.name = read_string16(body, &mut offset).unwrap_or_default();
-                msg.summary = read_string16(body, &mut offset).unwrap_or_default();
-                msg.text = format!("{} {}", msg.name, msg.summary).trim().to_owned();
+        0x04 | 0x08 if offset + 7 <= body.len() => {
+            msg.status = body[offset];
+            msg.is_error = body[offset + 1] != 0;
+            msg.collapsed = body[offset + 2] != 0;
+            offset += 7;
+            msg.name = read_string16(body, &mut offset).unwrap_or_default();
+            msg.summary = read_string16(body, &mut offset).unwrap_or_default();
+            msg.text = format!("{} {}", msg.name, msg.summary).trim().to_owned();
+        }
+        0x05 if offset + 5 <= body.len() => {
+            msg.status = body[offset];
+            let text_size = read_u32(body, offset + 1) as usize;
+            offset += 5;
+            if offset + text_size <= body.len() {
+                msg.text = String::from_utf8_lossy(&body[offset..offset + text_size]).into_owned();
             }
         }
-        0x05 => {
-            if offset + 5 <= body.len() {
-                msg.status = body[offset];
-                let text_size = read_u32(body, offset + 1) as usize;
-                offset += 5;
-                if offset + text_size <= body.len() {
-                    msg.text = String::from_utf8_lossy(&body[offset..offset + text_size]).into_owned();
-                }
-            }
-        }
-        0x06 => {
-            if offset + 20 <= body.len() {
-                let input = read_u32(body, offset);
-                let output = read_u32(body, offset + 4);
-                msg.text = format!("usage in:{input} out:{output}");
-            }
+        0x06 if offset + 20 <= body.len() => {
+            let input = read_u32(body, offset);
+            let output = read_u32(body, offset + 4);
+            msg.text = format!("usage in:{input} out:{output}");
         }
         0x09 => {
             msg.status = body.get(offset).copied().unwrap_or(0);

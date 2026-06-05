@@ -23,6 +23,7 @@ defmodule Minga.Telemetry.DevHandler do
   | `[:minga, :render, :ui_model_build, :stop]` | `:render` | `[render:ui_model] 38µs` |
   | `[:minga, :render, :adapter_encode, :stop]` | `:render` | `[render:adapter_encode] 22µs (rows: 3600B, overlays: 340B, gutter: 120B, ann: 60B, meta: 80B, metal_ui: 40B, chrome: 140B, frame_cmds: 980B)` |
   | `[:minga, :render, :emit_prepare, :stop]` | `:render` | `[render:emit_prepare] 8µs (5360 bytes)` |
+  | `[:minga, :render, :hop_latency]` | `:render` | `[render:hop:cast_snapshot] 42µs` |
   | `[:minga, :port, :write, :stop]` | `:port` | `[port:write] 12µs (5360 bytes)` |
   | `[:minga, :input, :dispatch, :stop]` | `:editor` | `[input:dispatch] 85µs` |
   | `[:minga, :command, :execute, :stop]` | `:editor` | `[command:move_down] 12µs` |
@@ -48,6 +49,7 @@ defmodule Minga.Telemetry.DevHandler do
         [:minga, :render, :ui_model_build, :stop],
         [:minga, :render, :adapter_encode, :stop],
         [:minga, :render, :emit_prepare, :stop],
+        [:minga, :render, :hop_latency],
         [:minga, :port, :write, :stop],
         [:minga, :input, :dispatch, :stop],
         [:minga, :command, :execute, :stop]
@@ -114,6 +116,12 @@ defmodule Minga.Telemetry.DevHandler do
     Minga.Log.debug(:render, fn ->
       "[render:emit_prepare] #{to_microseconds(duration)}µs (#{byte_count} bytes)"
     end)
+  end
+
+  def handle_event([:minga, :render, :hop_latency], measurements, metadata, _config) do
+    hop = Map.get(metadata, :hop, :unknown)
+    microseconds = Map.get(measurements, :microseconds, 0)
+    Minga.Log.debug(:render, fn -> "[render:hop:#{hop}] #{microseconds}µs" end)
   end
 
   def handle_event([:minga, :port, :write, :stop], measurements, metadata, _config) do

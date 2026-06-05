@@ -7,7 +7,11 @@ const TREE_BG: u8 = 0x03;
 const TREE_FG: u8 = 0x04;
 const TREE_SELECTION_BG: u8 = 0x05;
 const TREE_DIR_FG: u8 = 0x06;
+// Reserved protocol color slots whose Palette accessors are defined ahead of
+// the renderer surfaces that will consume them; allowed dead until then.
+#[allow(dead_code)]
 const TREE_HEADER_BG: u8 = 0x08;
+#[allow(dead_code)]
 const TREE_HEADER_FG: u8 = 0x09;
 const TREE_SELECTION_FG: u8 = 0x0E;
 const TAB_BG: u8 = 0x10;
@@ -20,6 +24,7 @@ const POPUP_BG: u8 = 0x20;
 const POPUP_FG: u8 = 0x21;
 const POPUP_BORDER: u8 = 0x22;
 const POPUP_SEL_BG: u8 = 0x23;
+#[allow(dead_code)]
 const POPUP_KEY_FG: u8 = 0x24;
 const POPUP_DESC_FG: u8 = 0x26;
 const BREADCRUMB_BG: u8 = 0x27;
@@ -28,6 +33,7 @@ const MODELINE_BAR_BG: u8 = 0x30;
 const MODELINE_BAR_FG: u8 = 0x31;
 const ACCENT: u8 = 0x40;
 const GUTTER_FG: u8 = 0x50;
+#[allow(dead_code)]
 const GUTTER_CURRENT_FG: u8 = 0x51;
 const GUTTER_ERROR_FG: u8 = 0x52;
 const GUTTER_WARNING_FG: u8 = 0x53;
@@ -61,18 +67,21 @@ impl<'a> Palette<'a> {
         self.slot(EDITOR_BG, 0x282C34)
     }
 
+    #[allow(dead_code)]
     pub fn base(&self) -> Style {
         Style::default()
             .fg(self.slot(MODELINE_BAR_FG, 0xBBC2CF))
             .bg(self.slot(MODELINE_BAR_BG, 0x22252D))
     }
 
+    #[allow(dead_code)]
     pub fn surface(&self) -> Style {
         Style::default()
             .fg(self.slot(EDITOR_FG, 0xBBC2CF))
             .bg(self.slot(TAB_BG, 0x282C34))
     }
 
+    #[allow(dead_code)]
     pub fn surface_alt(&self) -> Style {
         Style::default()
             .fg(self.slot(EDITOR_FG, 0xBBC2CF))
@@ -113,6 +122,7 @@ impl<'a> Palette<'a> {
         self.slot(GUTTER_FG, 0x5B6268)
     }
 
+    #[allow(dead_code)]
     pub fn gutter_current(&self) -> Style {
         Style::default()
             .fg(self.slot(GUTTER_CURRENT_FG, 0xBBC2CF))
@@ -123,6 +133,7 @@ impl<'a> Palette<'a> {
         self.slot(SELECTION_BG, 0x264F78)
     }
 
+    #[allow(dead_code)]
     pub fn selection_text(&self) -> Color {
         self.slot(POPUP_SEL_FG, 0xF2F5FF)
     }
@@ -143,6 +154,7 @@ impl<'a> Palette<'a> {
             .bg(self.slot(POPUP_SEL_BG, 0x2F3650))
     }
 
+    #[allow(dead_code)]
     pub fn popup_key(&self) -> Style {
         Style::default()
             .fg(self.slot(POPUP_KEY_FG, 0x56B6C2))
@@ -165,6 +177,7 @@ impl<'a> Palette<'a> {
             .bg(self.slot(TREE_SELECTION_BG, 0x3E4451))
     }
 
+    #[allow(dead_code)]
     pub fn tree_header(&self) -> Style {
         Style::default()
             .fg(self.slot(TREE_HEADER_FG, 0xBBC2CF))
@@ -231,13 +244,7 @@ impl<'a> Palette<'a> {
 
     fn slot(&self, id: u8, fallback: u32) -> Color {
         self.theme
-            .and_then(|theme| {
-                theme
-                    .slots
-                    .iter()
-                    .find(|s| s.id == id)
-                    .map(|s| rgb(s.rgb))
-            })
+            .and_then(|theme| theme.slots.iter().find(|s| s.id == id).map(|s| rgb(s.rgb)))
             .unwrap_or_else(|| rgb(fallback))
     }
 }
@@ -285,4 +292,3 @@ pub fn rgb(value: u32) -> Color {
         (value & 0xFF) as u8,
     )
 }
-
