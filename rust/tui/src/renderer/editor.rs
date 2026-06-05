@@ -1,12 +1,14 @@
 use super::geometry;
 use super::theme;
 use crate::semantic;
+use crate::semantic_renderer::CachedWindow;
 use crate::semantic_state::SemanticState;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Widget, Wrap};
+use std::collections::HashMap;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
@@ -80,24 +82,56 @@ pub fn render_sidebars(
         .render(area, buffer);
 }
 
-pub fn render_windows(state: &SemanticState, area: Rect, buffer: &mut Buffer) {
+pub fn render_windows(
+    state: &SemanticState,
+    area: Rect,
+    buffer: &mut Buffer,
+    line_cache: &mut HashMap<u16, CachedWindow>,
+) {
     for window in state.windows() {
         let rect = geometry::window_rect(window, area);
-        let gutter = state.gutter(window.window_id);
-        let indent_guides = state.indent_guides(window.window_id);
-        let row_context = RowRenderContext {
-            gutter,
-            indent_guides,
-            theme: state.theme(),
+        let generation = state.window_render_generation(window.window_id);
+
+        let lines = match line_cache.get(&window.window_id) {
+            Some(cached) if cached.generation == generation => cached.lines.clone(),
+            _ => build_and_cache_lines(window, state, rect, generation, line_cache),
         };
-        let lines: Vec<Line<'_>> = (0..rect.height as usize)
-            .map(|row_index| window_line(window, row_index, rect.width, row_context))
-            .collect();
+
         Paragraph::new(lines)
             .style(theme::canvas(state.theme()))
             .wrap(Wrap { trim: false })
             .render(rect, buffer);
     }
+
+    let active_ids: Vec<u16> = state.windows().map(|w| w.window_id).collect();
+    line_cache.retain(|id, _| active_ids.contains(id));
+}
+
+fn build_and_cache_lines(
+    window: &semantic::WindowContent,
+    state: &SemanticState,
+    rect: Rect,
+    generation: u64,
+    line_cache: &mut HashMap<u16, CachedWindow>,
+) -> Vec<Line<'static>> {
+    let gutter = state.gutter(window.window_id);
+    let indent_guides = state.indent_guides(window.window_id);
+    let row_context = RowRenderContext {
+        gutter,
+        indent_guides,
+        theme: state.theme(),
+    };
+    let lines: Vec<Line<'static>> = (0..rect.height as usize)
+        .map(|row_index| window_line(window, row_index, rect.width, row_context))
+        .collect();
+    line_cache.insert(
+        window.window_id,
+        CachedWindow {
+            generation,
+            lines: lines.clone(),
+        },
+    );
+    lines
 }
 
 pub fn render_separators(state: &SemanticState, area: Rect, buffer: &mut Buffer) {

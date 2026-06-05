@@ -20,12 +20,21 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
+use std::collections::HashMap;
 use std::io;
 use std::time::Instant;
 use unicode_width::UnicodeWidthStr;
 
-#[derive(Debug, Default)]
-pub struct SemanticRenderer;
+#[derive(Debug, Clone)]
+pub(crate) struct CachedWindow {
+    pub generation: u64,
+    pub lines: Vec<Line<'static>>,
+}
+
+#[derive(Debug)]
+pub struct SemanticRenderer {
+    line_cache: HashMap<u16, CachedWindow>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RenderMetrics {
@@ -36,9 +45,17 @@ pub struct RenderMetrics {
     pub surfaces: surfaces::SurfaceRenderMetrics,
 }
 
+impl Default for SemanticRenderer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SemanticRenderer {
     pub fn new() -> Self {
-        Self
+        Self {
+            line_cache: HashMap::new(),
+        }
     }
 
     pub fn render_startup(terminal: &mut Terminal, message: &str) -> io::Result<()> {
@@ -95,10 +112,11 @@ impl SemanticRenderer {
 
         let draw_started = Instant::now();
         let mut surface_metrics = surfaces::SurfaceRenderMetrics::default();
+        let line_cache = &mut self.line_cache;
         terminal.draw(|frame| {
             let content_area = content_area(frame.area(), state);
             let layout = layout::FrameLayout::compute(state, content_area);
-            surface_metrics = surfaces::render_frame(state, &layout, frame.buffer_mut());
+            surface_metrics = surfaces::render_frame(state, &layout, frame.buffer_mut(), line_cache);
             if let Some((col, row)) = rendered_cursor_position(state, &layout) {
                 frame.set_cursor_position((col, row));
             }

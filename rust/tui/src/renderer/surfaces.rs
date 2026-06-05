@@ -1,9 +1,11 @@
 use super::{chrome, editor, overlays};
 use super::{layout::FrameLayout, theme};
+use crate::semantic_renderer::CachedWindow;
 use crate::semantic_state::SemanticState;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::widgets::{Paragraph, Widget};
+use std::collections::HashMap;
 use std::time::Instant;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -21,6 +23,7 @@ pub fn render_frame(
     state: &SemanticState,
     layout: &FrameLayout,
     buffer: &mut Buffer,
+    line_cache: &mut HashMap<u16, CachedWindow>,
 ) -> SurfaceRenderMetrics {
     let mut metrics = SurfaceRenderMetrics::default();
 
@@ -50,7 +53,7 @@ pub fn render_frame(
     metrics.tree_us = started.elapsed().as_micros();
 
     let started = Instant::now();
-    editor::render_windows(state, layout.area, buffer);
+    editor::render_windows(state, layout.area, buffer, line_cache);
     metrics.windows_us = started.elapsed().as_micros();
 
     let started = Instant::now();

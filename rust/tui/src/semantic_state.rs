@@ -43,6 +43,8 @@ pub struct SemanticState {
     board: Option<semantic::Board>,
     agent_chat: Option<semantic::AgentChat>,
     tool_manager: Option<semantic::ToolManager>,
+    window_generations: HashMap<u16, u64>,
+    global_generation: u64,
     theme: Option<semantic::Theme>,
     diagnostic: Option<String>,
     cursor: CursorState,
@@ -105,6 +107,8 @@ impl SemanticState {
             board: None,
             agent_chat: None,
             tool_manager: None,
+            window_generations: HashMap::new(),
+            global_generation: 0,
             theme: None,
             diagnostic: None,
             cursor: CursorState {
@@ -119,6 +123,7 @@ impl SemanticState {
     pub fn resize(&mut self, width: u16, height: u16) {
         self.width = width;
         self.height = height;
+        self.bump_global_generation();
     }
 
     pub fn apply_protocol_command(&mut self, command: ProtocolCommand) -> StateEffect {
@@ -321,6 +326,11 @@ impl SemanticState {
             .is_none_or(|cursor_animation| cursor_animation.enabled != 0)
     }
 
+    pub fn window_render_generation(&self, window_id: u16) -> u64 {
+        self.window_generations.get(&window_id).copied().unwrap_or(0)
+            + self.global_generation
+    }
+
     pub fn debug_summary(&self) -> String {
         let row_count: usize = self.windows.values().map(|window| window.rows.len()).sum();
         format!(
@@ -337,11 +347,21 @@ impl SemanticState {
         )
     }
 
+    fn bump_window_generation(&mut self, window_id: u16) {
+        *self.window_generations.entry(window_id).or_insert(0) += 1;
+    }
+
+    fn bump_global_generation(&mut self) {
+        self.global_generation += 1;
+    }
+
     fn clear(&mut self) {
         self.windows.clear();
         self.window_order.clear();
         self.gutters.clear();
         self.indent_guides.clear();
+        self.window_generations.clear();
+        self.bump_global_generation();
         self.status_bar = None;
         self.tab_bar = None;
         self.file_tree = None;
@@ -461,7 +481,9 @@ impl SemanticState {
                 StateEffect::render()
             }
             semantic::Command::Gutter(gutter, _) => {
-                self.gutters.insert(gutter.window_id, gutter);
+                let wid = gutter.window_id;
+                self.gutters.insert(wid, gutter);
+                self.bump_window_generation(wid);
                 StateEffect::render()
             }
             semantic::Command::GutterSeparator(separator, _) => {
@@ -473,8 +495,9 @@ impl SemanticState {
                 StateEffect::render()
             }
             semantic::Command::IndentGuides(indent_guides, _) => {
-                self.indent_guides
-                    .insert(indent_guides.window_id, indent_guides);
+                let wid = indent_guides.window_id;
+                self.indent_guides.insert(wid, indent_guides);
+                self.bump_window_generation(wid);
                 StateEffect::render()
             }
             semantic::Command::WindowOverlayDelta(delta, _) => {
@@ -556,6 +579,7 @@ impl SemanticState {
             }
             semantic::Command::Theme(theme, _) => {
                 self.theme = Some(theme);
+                self.bump_global_generation();
                 StateEffect::render()
             }
         }
@@ -573,7 +597,9 @@ impl SemanticState {
             shape: window.cursor_shape,
         };
         self.cursor_window_id = Some(window.window_id);
-        self.windows.insert(window.window_id, window);
+        let wid = window.window_id;
+        self.windows.insert(wid, window);
+        self.bump_window_generation(wid);
     }
 
     fn apply_window_rows_delta(&mut self, delta: semantic::WindowRowsDelta) {
@@ -633,6 +659,7 @@ impl SemanticState {
             };
             self.cursor_window_id = Some(window.window_id);
         }
+        self.bump_window_generation(delta.window_id);
     }
 
     fn apply_window_overlay_delta(&mut self, delta: semantic::WindowOverlayDelta) {
@@ -652,6 +679,7 @@ impl SemanticState {
             };
             self.cursor_window_id = Some(window.window_id);
         }
+        self.bump_window_generation(delta.window_id);
     }
 
     fn apply_file_tree_selection(&mut self, selection: semantic::FileTreeSelection) {
@@ -665,6 +693,10 @@ impl SemanticState {
     fn apply_cursorline(&mut self, cursorline: semantic::Cursorline) {
         for window in self.windows.values_mut() {
             window.cursorline = Some(cursorline);
+        }
+        let ids: Vec<u16> = self.windows.keys().copied().collect();
+        for id in ids {
+            self.bump_window_generation(id);
         }
     }
 }
