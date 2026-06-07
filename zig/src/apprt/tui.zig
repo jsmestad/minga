@@ -1018,12 +1018,13 @@ fn handleTtyEvent(self: *TuiRuntime, event: vaxis.Event, pw: *port_writer, recov
 }
 
 fn enqueueSemanticHitAction(pw: *port_writer, action: semantic_mod.HitAction) !void {
-    var buf: [8]u8 = undefined;
+    var buf: [512]u8 = undefined;
     const len = switch (action) {
         .no_payload => |action_id| try protocol.encodeGuiAction(&buf, action_id),
         .u16_payload => |payload| try protocol.encodeGuiActionU16(&buf, payload.action, payload.value),
         .u32_payload => |payload| try protocol.encodeGuiActionU32(&buf, payload.action, payload.value),
         .fold_toggle => |payload| try protocol.encodeGuiActionFoldToggle(&buf, payload.window_id, payload.buffer_line),
+        .string_payload => |payload| try protocol.encodeGuiActionString(&buf, payload.action, payload.value),
     };
     try pw.enqueue(buf[0..len]);
 }

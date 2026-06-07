@@ -693,6 +693,18 @@ pub fn encodeGuiActionU32(buf: []u8, action: u8, value: u32) !usize {
     return 6;
 }
 
+/// Encodes a semantic GUI action with a length-prefixed UTF-8 payload.
+pub fn encodeGuiActionString(buf: []u8, action: u8, value: []const u8) !usize {
+    if (value.len > std.math.maxInt(u16)) return error.Malformed;
+    const len = 4 + value.len;
+    if (buf.len < len) return error.Malformed;
+    buf[0] = OP_GUI_ACTION;
+    buf[1] = action;
+    std.mem.writeInt(u16, buf[2..4], @intCast(value.len), .big);
+    @memcpy(buf[4..len], value);
+    return len;
+}
+
 /// Encodes fold_toggle_at_line: window_id:u16, buffer_line:u32.
 pub fn encodeGuiActionFoldToggle(buf: []u8, window_id: u16, buffer_line: u32) !usize {
     if (buf.len < 8) return error.Malformed;
@@ -4103,6 +4115,16 @@ test "decode draw_styled_text with underline style curl" {
 test "decode draw_styled_text truncated returns malformed" {
     const data = [_]u8{ 0x1C, 0x00, 0x03 }; // too short
     try std.testing.expectError(error.Malformed, decodeCommand(&data));
+}
+
+test "encode GUI action string payload" {
+    var buf: [32]u8 = undefined;
+    const len = try encodeGuiActionString(&buf, GUI_ACTION_EXECUTE_COMMAND, "magit-status");
+    try std.testing.expectEqual(@as(usize, 16), len);
+    try std.testing.expectEqual(OP_GUI_ACTION, buf[0]);
+    try std.testing.expectEqual(GUI_ACTION_EXECUTE_COMMAND, buf[1]);
+    try std.testing.expectEqual(@as(u16, 12), std.mem.readInt(u16, buf[2..4], .big));
+    try std.testing.expectEqualStrings("magit-status", buf[4..len]);
 }
 
 test "tab GUI action re-exports stay wired to generated opcodes" {

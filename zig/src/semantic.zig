@@ -14,6 +14,7 @@ const theme_mod = @import("semantic/theme.zig");
 const decode = @import("semantic/decode.zig");
 const zigzag_chrome = @import("zigzag_chrome.zig");
 const zigzag_component_adapters = @import("zigzag_component_adapters.zig");
+const semantic_hitbox = @import("semantic/hitbox.zig");
 
 pub const Error = types.Error;
 pub const StatusSegment = types.StatusSegment;
@@ -104,6 +105,7 @@ const clearRow = charm.clearRow;
 const clearRowRange = charm.clearRowRange;
 const fillRowRangeWith = charm.fillRowRangeWith;
 const textWidth = charm.textWidth;
+const max_tui_gui_action_string_payload = 508;
 const writeAsciiStableText = charm.writeAsciiStableText;
 const writeAsciiText = charm.writeAsciiText;
 const writeText = charm.writeText;
@@ -113,6 +115,7 @@ pub const HitAction = union(enum) {
     u16_payload: struct { action: u8, value: u16 },
     u32_payload: struct { action: u8, value: u32 },
     fold_toggle: struct { window_id: u16, buffer_line: u32 },
+    string_payload: struct { action: u8, value: []const u8 },
 };
 
 const theme_editor_bg = theme_mod.theme_editor_bg;
@@ -945,6 +948,10 @@ pub const State = struct {
             if (hitTabBar(tabs, row, col, width, height, self.workspaces != null)) |action| return action;
         }
 
+        if (self.status_bar) |status| {
+            if (hitStatusBar(status, row, col, width, height, has_minibuffer)) |action| return action;
+        }
+
         return null;
     }
 
@@ -966,7 +973,7 @@ pub const State = struct {
         const action_row = rect.row +| 1 +| @as(u16, @intCast(@min(hover.lines.len, @as(usize, rect.end_row - rect.row - 1))));
         const content_col: u16 = @min(rect.col + 1, rect.end_col);
         const content_end_col: u16 = if (rect.end_col > content_col) rect.end_col - 1 else rect.end_col;
-        if (action_row < rect.end_row and row == action_row and col >= content_col and col < content_end_col) {
+        if (action_row < rect.end_row and semantic_hitbox.rect(action_row, content_col, content_end_col - content_col, 1).contains(row, col)) {
             return .{ .no_payload = protocol.GUI_ACTION_HOVER_OPEN_ACTION };
         }
         return null;
@@ -1317,15 +1324,17 @@ fn fileTreeStatusText(file_tree: FileTree) []const u8 {
 fn hitFileTree(file_tree: FileTree, row: u16, col: u16, width: u16, height: u16, header_rows: u16, has_status_bar: bool) ?HitAction {
     if (!fileTreeVisibleForWidth(file_tree, width) or height == 0) return null;
     const tree_width: u16 = @min(file_tree.width, if (width > 0) width - 1 else 0);
-    if (tree_width == 0 or col >= tree_width) return null;
+    if (tree_width == 0) return null;
 
     const start_row: u16 = @min(header_rows, height - 1);
     const footer_rows: u16 = if (has_status_bar) 1 else 0;
     const end_row: u16 = if (height > footer_rows) height - footer_rows else height;
-    if (row <= start_row or row >= end_row) return null;
+    if (start_row >= end_row) return null;
+    const tree_body = semantic_hitbox.rect(start_row +| 1, 0, tree_width, end_row - start_row - 1);
+    const local = tree_body.local(row, col) orelse return null;
     if (file_tree.status == 4 or file_tree.rows.len == 0) return null;
 
-    const index: usize = row - start_row - 1;
+    const index: usize = local.row;
     if (index >= file_tree.rows.len or index > std.math.maxInt(u16)) return null;
 
     const tree_row = file_tree.rows[index];
@@ -1492,13 +1501,11 @@ fn hitGutter(gutter: Gutter, row: u16, col: u16, width: u16, height: u16) ?HitAc
     if (gutter.content_col >= width or gutter.content_row >= height) return null;
 
     const end_row: u16 = @min(height, gutter.content_row +| gutter.content_height);
-    if (row < gutter.content_row or row >= end_row) return null;
+    const sign_width: u16 = @min(width - gutter.content_col, @as(u16, gutter.sign_col_width));
+    const sign_box = semantic_hitbox.rect(gutter.content_row, gutter.content_col, sign_width, end_row - gutter.content_row);
+    const local = sign_box.local(row, col) orelse return null;
 
-    const sign_start = gutter.content_col;
-    const sign_end: u16 = @min(width, gutter.content_col +| @as(u16, gutter.sign_col_width));
-    if (col < sign_start or col >= sign_end) return null;
-
-    const index: usize = row - gutter.content_row;
+    const index: usize = local.row;
     if (index >= gutter.entries.len) return null;
 
     const entry = gutter.entries[index];
@@ -1851,7 +1858,7 @@ fn hitTabBar(tab_bar: TabBar, row: u16, col: u16, width: u16, height: u16, has_w
         if (tab.attention()) cursor +|= 2;
 
         const end_col = @min(cursor, width);
-        if (col >= start_col and col < end_col) {
+        if (semantic_hitbox.rect(tab_row, start_col, end_col - start_col, 1).contains(row, col)) {
             return .{ .u32_payload = .{ .action = protocol.GUI_ACTION_SELECT_TAB, .value = tab.id } };
         }
     }
@@ -3700,6 +3707,38 @@ fn renderStatusSegments(surface: anytype, row: u16, width: u16, status: StatusBa
     }
 }
 
+fn hitStatusBar(status: StatusBar, row: u16, col: u16, width: u16, height: u16, has_minibuffer: bool) ?HitAction {
+    if (width == 0 or height == 0) return null;
+    const status_row: u16 = if (has_minibuffer and height > 1) height - 2 else height - 1;
+    if (row != status_row) return null;
+
+    var right_width: u16 = 0;
+    for (status.right_segments) |segment| right_width +|= textWidth(segment.text);
+    const right_start: u16 = if (right_width >= width) 0 else width - right_width;
+
+    var cursor: u16 = right_start;
+    if (hitStatusSegmentList(status.right_segments, row, col, status_row, width, &cursor)) |action| return action;
+
+    cursor = 0;
+    if (right_start > 0) {
+        if (hitStatusSegmentList(status.left_segments, row, col, status_row, right_start, &cursor)) |action| return action;
+    }
+
+    return null;
+}
+
+fn hitStatusSegmentList(segments: []const StatusSegment, row: u16, col: u16, status_row: u16, limit_width: u16, cursor: *u16) ?HitAction {
+    for (segments) |segment| {
+        const visible_width: u16 = if (cursor.* >= limit_width) 0 else @min(limit_width - cursor.*, textWidth(segment.text));
+        const command = segment.command;
+        if (command.len > 0 and command.len <= max_tui_gui_action_string_payload and visible_width > 0 and semantic_hitbox.rect(status_row, cursor.*, visible_width, 1).contains(row, col)) {
+            return .{ .string_payload = .{ .action = protocol.GUI_ACTION_EXECUTE_COMMAND, .value = command } };
+        }
+        cursor.* +|= textWidth(segment.text);
+    }
+    return null;
+}
+
 fn renderStatusFallback(surface: anytype, row: u16, width: u16, status: StatusBar, search: ?SearchState, changes: ?ChangeSummary, notifications: ?Notifications, timeline: ?EditTimeline, extension_overlay: ?ExtensionOverlay, extension_panel: ?ExtensionPanel, observatory: ?Observatory, agent_context: ?AgentContext, tool_manager: ?ToolManager, board: ?Board, agent_chat: ?AgentChat, maybe_theme: ?Theme) void {
     var col: u16 = 0;
     if (status.filename.len > 0) {
@@ -5472,6 +5511,77 @@ test "semantic state renders retained file tree sidebar" {
     try std.testing.expect(saw_background);
     try expectMockCellStyled(&surface, 1, "M", 0x313233, 0x212223, protocol.ATTR_BOLD);
     try expectMockCellStyled(&surface, 1, "2", 0x515253, 0x212223, 0);
+}
+
+test "semantic state hit-tests retained modeline command segments" {
+    const alloc = std.testing.allocator;
+    var state = State.init(alloc);
+    defer state.deinit();
+    state.status_bar = .{
+        .left_segments = try alloc.dupe(StatusSegment, &[_]StatusSegment{
+            .{ .text = try alloc.dupe(u8, "Git"), .command = try alloc.dupe(u8, "magit-status") },
+        }),
+        .right_segments = try alloc.dupe(StatusSegment, &[_]StatusSegment{
+            .{ .text = try alloc.dupe(u8, "Ln 1"), .command = try alloc.dupe(u8, "goto-line") },
+        }),
+    };
+
+    const left = state.hitTest(4, 1, 20, 5) orelse return error.TestExpectedEqual;
+    switch (left) {
+        .string_payload => |payload| {
+            try std.testing.expectEqual(protocol.GUI_ACTION_EXECUTE_COMMAND, payload.action);
+            try std.testing.expectEqualStrings("magit-status", payload.value);
+        },
+        else => return error.TestExpectedEqual,
+    }
+
+    const right = state.hitTest(4, 17, 20, 5) orelse return error.TestExpectedEqual;
+    switch (right) {
+        .string_payload => |payload| {
+            try std.testing.expectEqual(protocol.GUI_ACTION_EXECUTE_COMMAND, payload.action);
+            try std.testing.expectEqualStrings("goto-line", payload.value);
+        },
+        else => return error.TestExpectedEqual,
+    }
+}
+
+test "semantic state gives visible right modeline segment priority when segments overlap" {
+    const alloc = std.testing.allocator;
+    var state = State.init(alloc);
+    defer state.deinit();
+    state.status_bar = .{
+        .left_segments = try alloc.dupe(StatusSegment, &[_]StatusSegment{
+            .{ .text = try alloc.dupe(u8, "left-visible-but-covered"), .command = try alloc.dupe(u8, "left-command") },
+        }),
+        .right_segments = try alloc.dupe(StatusSegment, &[_]StatusSegment{
+            .{ .text = try alloc.dupe(u8, "right"), .command = try alloc.dupe(u8, "right-command") },
+        }),
+    };
+
+    const action = state.hitTest(4, 15, 20, 5) orelse return error.TestExpectedEqual;
+    switch (action) {
+        .string_payload => |payload| try std.testing.expectEqualStrings("right-command", payload.value),
+        else => return error.TestExpectedEqual,
+    }
+}
+
+test "semantic state ignores oversized modeline commands so raw fallback remains available" {
+    const alloc = std.testing.allocator;
+    var state = State.init(alloc);
+    defer state.deinit();
+    state.status_bar = .{
+        .left_segments = try alloc.dupe(StatusSegment, &[_]StatusSegment{
+            .{ .text = try alloc.dupe(u8, "Long"), .command = try alloc.dupe(u8, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") },
+        }),
+    };
+
+    try std.testing.expectEqual(@as(?HitAction, null), state.hitTest(4, 1, 20, 5));
+}
+
+test "semantic state misses raw editor body so TUI fallback can encode the original mouse packet" {
+    var state = State.init(std.testing.allocator);
+    defer state.deinit();
+    try std.testing.expectEqual(@as(?HitAction, null), state.hitTest(3, 12, 80, 24));
 }
 
 test "semantic state hit-tests retained file tree rows" {
