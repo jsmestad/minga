@@ -678,21 +678,14 @@ defmodule Minga.Test.HeadlessPort do
       |> Enum.reject(&(&1 in [nil, ""]))
       |> Enum.join(" ")
 
-    # When the minibuffer is present it owns the bottom row, so the status bar
-    # renders one row above it. Matches the Zig `renderStatusBar` placement.
-    row =
-      if minibuffer_visible?(state.minibuffer) and state.height > 1 do
-        state.height - 2
-      else
-        max(state.height - 1, 0)
-      end
+    # The modeline always renders on the second-from-bottom row; the bottom row
+    # is reserved for the message bar / minibuffer. Matches the Zig
+    # `renderStatusBar` placement and the BEAM `Layout.TUI` (status bar at
+    # rows-2, minibuffer at rows-1).
+    row = if state.height > 1, do: state.height - 2, else: 0
 
     draw_text(state, row, 0, text)
   end
-
-  @spec minibuffer_visible?(map() | nil) :: boolean()
-  defp minibuffer_visible?(%{visible?: true}), do: true
-  defp minibuffer_visible?(_), do: false
 
   @spec draw_minibuffer(State.t(), map() | nil) :: State.t()
   defp draw_minibuffer(state, nil), do: state

@@ -865,7 +865,7 @@ pub const State = struct {
         if (self.which_key) |which_key| renderWhichKey(surface, which_key, self.minibuffer != null, self.status_bar != null, self.theme);
         if (self.minibuffer) |minibuffer| renderMinibuffer(surface, minibuffer, self.theme);
         if (self.status_bar) |status| {
-            renderStatusBar(surface, status, self.minibuffer != null, self.search_state, self.change_summary, self.notifications, self.edit_timeline, self.extension_overlay, self.extension_panel, self.observatory, self.agent_context, self.tool_manager, self.board, self.agent_chat, self.theme);
+            renderStatusBar(surface, status, self.search_state, self.change_summary, self.notifications, self.edit_timeline, self.extension_overlay, self.extension_panel, self.observatory, self.agent_context, self.tool_manager, self.board, self.agent_chat, self.theme);
         } else {
             renderStandaloneFooter(surface, self.search_state, self.change_summary, self.notifications, self.edit_timeline, self.extension_overlay, self.extension_panel, self.observatory, self.agent_context, self.tool_manager, self.board, self.agent_chat, self.minibuffer != null, self.theme);
         }
@@ -3398,14 +3398,15 @@ fn bottomPanelTitle(panel: BottomPanel) []const u8 {
     return "Panel";
 }
 
-fn renderStatusBar(surface: anytype, status: StatusBar, has_minibuffer: bool, search: ?SearchState, changes: ?ChangeSummary, notifications: ?Notifications, timeline: ?EditTimeline, extension_overlay: ?ExtensionOverlay, extension_panel: ?ExtensionPanel, observatory: ?Observatory, agent_context: ?AgentContext, tool_manager: ?ToolManager, board: ?Board, agent_chat: ?AgentChat, maybe_theme: ?Theme) void {
+fn renderStatusBar(surface: anytype, status: StatusBar, search: ?SearchState, changes: ?ChangeSummary, notifications: ?Notifications, timeline: ?EditTimeline, extension_overlay: ?ExtensionOverlay, extension_panel: ?ExtensionPanel, observatory: ?Observatory, agent_context: ?AgentContext, tool_manager: ?ToolManager, board: ?Board, agent_chat: ?AgentChat, maybe_theme: ?Theme) void {
     const width = surface.width();
     const height = surface.height();
     if (width == 0 or height == 0) return;
 
-    // The minibuffer owns the bottom row when present, so the status bar sits
-    // one row above it (matching the BEAM TUI layout).
-    const row: u16 = if (has_minibuffer and height > 1) height - 2 else height - 1;
+    // The modeline always sits on the second-from-bottom row; the bottom row is
+    // reserved for the message bar / minibuffer (matching the BEAM `Layout.TUI`,
+    // which places the status bar at rows-2 and the minibuffer at rows-1).
+    const row: u16 = if (height > 1) height - 2 else height - 1;
     clearRow(surface, row, width);
     fillRowRemainder(surface, row, 0, width, modelineBg(maybe_theme));
 
@@ -4885,9 +4886,9 @@ test "semantic state does not render git status as a direct overlay" {
     state.render(MockSurface, &surface);
 
     for (surface.cells.items) |cell| {
-        try std.testing.expect(!(cell.row == 3 and std.mem.eql(u8, cell.text, "g")));
+        try std.testing.expect(!(cell.row == 4 and std.mem.eql(u8, cell.text, "g")));
     }
-    try expectMockCell(&surface, 4, "o", protocol.ATTR_BOLD);
+    try expectMockCell(&surface, 3, "o", protocol.ATTR_BOLD);
 }
 
 test "decodeBottomPanel retains tabs and entries" {
@@ -5008,7 +5009,7 @@ test "semantic state renders retained bottom panel above status bar" {
         if (cell.row == 5 and cell.col == 10 and std.mem.eql(u8, cell.text, "l") and cell.fg == 0x111213 and cell.bg == 0x010203) saw_path = true;
         if (cell.row == 5 and cell.col == 25 and std.mem.eql(u8, cell.text, "b") and cell.fg == 0x111213 and cell.bg == 0x010203) saw_message = true;
         if (cell.row == 4 and cell.col == 59 and std.mem.eql(u8, cell.text, " ") and cell.bg == 0x010203) saw_panel_background = true;
-        if (cell.row == 7 and std.mem.eql(u8, cell.text, "o") and cell.bg == 0x414243) saw_status = true;
+        if (cell.row == 6 and std.mem.eql(u8, cell.text, "o") and cell.bg == 0x414243) saw_status = true;
     }
 
     try std.testing.expect(saw_title);
@@ -5670,8 +5671,8 @@ test "semantic state renders a combined Go-style frame with retained chrome and 
     try expectMockText(&surface, 2, "main.ex");
     try expectMockText(&surface, 3, "const main = 1;");
     try expectMockText(&surface, 4, "pub fn run() void {}");
-    try expectMockText(&surface, 7, "main.ex");
-    try expectMockText(&surface, 7, "search");
+    try expectMockText(&surface, 6, "main.ex");
+    try expectMockText(&surface, 6, "search");
     try std.testing.expectEqual(@as(?u16, 6), surface.cursor_col);
     try std.testing.expectEqual(@as(?u16, 3), surface.cursor_row);
     try std.testing.expectEqual(surface_mod.CursorShape.beam, surface.cursor_shape.?);
@@ -7158,7 +7159,7 @@ test "semantic state renders retained status bar" {
     state.render(MockSurface, &surface);
 
     for (surface.cells.items) |cell| {
-        if (cell.row == 3 and std.mem.eql(u8, cell.text, "N")) {
+        if (cell.row == 2 and std.mem.eql(u8, cell.text, "N")) {
             try std.testing.expectEqual(@as(u24, 0xFFFFFF), cell.fg);
             return;
         }
@@ -7197,9 +7198,9 @@ test "semantic state renders retained status bar with theme colors" {
     var saw_footer = false;
     var saw_background = false;
     for (surface.cells.items) |cell| {
-        if (cell.row == 3 and std.mem.eql(u8, cell.text, "m") and cell.fg == 0x111213 and cell.bg == 0x010203) saw_filename = true;
-        if (cell.row == 3 and std.mem.eql(u8, cell.text, "s") and cell.fg == 0x111213 and cell.bg == 0x010203) saw_footer = true;
-        if (cell.row == 3 and cell.col == 39 and std.mem.eql(u8, cell.text, " ") and cell.bg == 0x010203) saw_background = true;
+        if (cell.row == 2 and std.mem.eql(u8, cell.text, "m") and cell.fg == 0x111213 and cell.bg == 0x010203) saw_filename = true;
+        if (cell.row == 2 and std.mem.eql(u8, cell.text, "s") and cell.fg == 0x111213 and cell.bg == 0x010203) saw_footer = true;
+        if (cell.row == 2 and cell.col == 39 and std.mem.eql(u8, cell.text, " ") and cell.bg == 0x010203) saw_background = true;
     }
 
     try std.testing.expect(saw_filename);
@@ -7915,8 +7916,8 @@ test "semantic state renders search and change footer indicators" {
     defer surface.deinit(alloc);
     state.render(MockSurface, &surface);
 
-    try expectMockCell(&surface, 3, "s", null);
-    try expectMockCell(&surface, 3, "c", null);
+    try expectMockCell(&surface, 2, "s", null);
+    try expectMockCell(&surface, 2, "c", null);
 }
 
 test "semantic state renders edit timeline before notifications overlay" {
