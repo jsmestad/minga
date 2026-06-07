@@ -13,6 +13,7 @@ pub const semantic = @import("semantic.zig");
 pub const surface = @import("surface.zig");
 pub const apprt = @import("apprt.zig");
 pub const zigzag_bridge = @import("zigzag_bridge.zig");
+pub const zigzag_view_data = @import("zigzag_view_data.zig");
 // Note: highlighter.zig is compiled into minga-parser, not the renderer.
 // Font rendering (CoreText, atlas) lives in the macOS Swift app (macos/).
 
@@ -113,4 +114,5 @@ test {
     _ = surface;
     _ = apprt;
     _ = zigzag_bridge;
+    _ = zigzag_view_data;
 }
