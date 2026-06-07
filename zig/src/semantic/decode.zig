@@ -1433,6 +1433,8 @@ fn decodeWindowHeader(payload: []const u8, window: *WindowContent) void {
     if (payload.len < 14) return;
     window.window_id = std.mem.readInt(u16, payload[0..][0..2], .big);
     window.flags = payload[2];
+    // Full content header (0x80): bit 0 = full_refresh, bit 1 = cursor_visible.
+    window.cursor_visible = (payload[2] & 0x02) != 0;
     window.cursor_row = std.mem.readInt(u16, payload[3..][0..2], .big);
     window.cursor_col = std.mem.readInt(u16, payload[5..][0..2], .big);
     window.cursor_shape = payload[7];

@@ -631,14 +631,22 @@ defmodule Minga.Test.HeadlessPort do
 
   @spec put_window_cursor(State.t(), map()) :: State.t()
   defp put_window_cursor(state, window) do
-    {row0, col0} = window_text_origin(window)
-    cursor_shape = Map.get(window, :cursor_shape, :block)
+    # A window whose cursor is hidden (e.g. while a minibuffer input mode owns
+    # the cursor) must not position the terminal cursor. Mirrors the Zig
+    # `windowCursorPosition`, which returns null when `cursor_visible` is false.
+    if Map.get(window, :cursor_visible, true) do
+      {row0, col0} = window_text_origin(window)
+      cursor_shape = Map.get(window, :cursor_shape, :block)
 
-    %{
+      %{
+        state
+        | cursor:
+            {row0 + Map.get(window, :cursor_row, 0), col0 + Map.get(window, :cursor_col, 0)},
+          cursor_shape: cursor_shape
+      }
+    else
       state
-      | cursor: {row0 + Map.get(window, :cursor_row, 0), col0 + Map.get(window, :cursor_col, 0)},
-        cursor_shape: cursor_shape
-    }
+    end
   end
 
   @spec draw_tab_bar(State.t(), map() | nil) :: State.t()
@@ -670,15 +678,64 @@ defmodule Minga.Test.HeadlessPort do
       |> Enum.reject(&(&1 in [nil, ""]))
       |> Enum.join(" ")
 
-    draw_text(state, max(state.height - 1, 0), 0, text)
+    # When the minibuffer is present it owns the bottom row, so the status bar
+    # renders one row above it. Matches the Zig `renderStatusBar` placement.
+    row =
+      if minibuffer_visible?(state.minibuffer) and state.height > 1 do
+        state.height - 2
+      else
+        max(state.height - 1, 0)
+      end
+
+    draw_text(state, row, 0, text)
   end
+
+  @spec minibuffer_visible?(map() | nil) :: boolean()
+  defp minibuffer_visible?(%{visible?: true}), do: true
+  defp minibuffer_visible?(_), do: false
 
   @spec draw_minibuffer(State.t(), map() | nil) :: State.t()
   defp draw_minibuffer(state, nil), do: state
   defp draw_minibuffer(state, %{visible?: false}), do: state
 
-  defp draw_minibuffer(state, minibuffer),
-    do: draw_text(state, max(state.height - 1, 0), 0, minibuffer.prompt <> minibuffer.input)
+  defp draw_minibuffer(state, minibuffer) do
+    row = minibuffer_row(state)
+
+    state
+    |> draw_text(row, 0, minibuffer.prompt <> minibuffer.input)
+    |> put_minibuffer_cursor(minibuffer, row)
+  end
+
+  # The minibuffer owns the bottom row (matches the Zig `renderMinibuffer` and
+  # the BEAM TUI layout). The status bar, when present, sits one row above it.
+  @spec minibuffer_row(State.t()) :: non_neg_integer()
+  defp minibuffer_row(state), do: max(state.height - 1, 0)
+
+  # Mirrors the Zig `minibufferCursorPosition`: an active minibuffer owns the
+  # terminal cursor at prompt display width plus the display width of the input
+  # prefix up to `cursor_pos`. 0xFFFF is the sentinel for "no cursor".
+  @spec put_minibuffer_cursor(State.t(), map(), non_neg_integer()) :: State.t()
+  defp put_minibuffer_cursor(state, minibuffer, row) do
+    case Map.get(minibuffer, :cursor_pos, 0xFFFF) do
+      0xFFFF ->
+        state
+
+      cursor_pos ->
+        prompt = if minibuffer.prompt == "", do: "> ", else: minibuffer.prompt
+        prompt_width = Unicode.display_width(prompt)
+
+        input_prefix =
+          minibuffer.input |> String.graphemes() |> Enum.take(cursor_pos) |> Enum.join()
+
+        col = prompt_width + Unicode.display_width(input_prefix)
+
+        if col < state.width do
+          %{state | cursor: {row, col}, cursor_shape: :beam}
+        else
+          state
+        end
+    end
+  end
 
   @spec draw_agent_chat(State.t(), map() | nil) :: State.t()
   defp draw_agent_chat(state, nil), do: state
@@ -997,8 +1054,14 @@ defmodule Minga.Test.HeadlessPort do
         entry.display_type
       )
 
+    # Mirror the Zig renderer (semantic.zig `gutterText`): the line number is
+    # right-aligned within `line_number_width - 1` columns and the last column of
+    # the field is the separator space before the text. Total gutter width stays
+    # `sign_col_width + line_number_width`, matching `GutterMetrics.total_width`.
+    number_field = max(gutter.line_number_width - 1, 0)
+
     String.pad_trailing(sign, gutter.sign_col_width) <>
-      String.pad_leading(line, gutter.line_number_width)
+      (line |> String.pad_leading(number_field) |> String.pad_trailing(gutter.line_number_width))
   end
 
   defp line_number_text(:none, _cursor_line, _buf_line, _display_type), do: ""
@@ -1108,13 +1171,14 @@ defmodule Minga.Test.HeadlessPort do
   defp decode_status_section(_section_id, _payload, result), do: result
 
   @spec decode_minibuffer(binary()) :: map()
-  defp decode_minibuffer(<<0::8>>), do: %{visible?: false, prompt: "", input: ""}
+  defp decode_minibuffer(<<0::8>>),
+    do: %{visible?: false, prompt: "", input: "", cursor_pos: 0xFFFF}
 
   defp decode_minibuffer(
-         <<1::8, _mode::8, _cursor_pos::16, prompt_len::8, prompt::binary-size(prompt_len),
+         <<1::8, _mode::8, cursor_pos::16, prompt_len::8, prompt::binary-size(prompt_len),
            input_len::16, input::binary-size(input_len), _rest::binary>>
        ),
-       do: %{visible?: true, prompt: prompt, input: input}
+       do: %{visible?: true, prompt: prompt, input: input, cursor_pos: cursor_pos}
 
   @spec decode_agent_chat(binary()) :: map()
   defp decode_agent_chat(<<0::8>>),

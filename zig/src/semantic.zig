@@ -465,6 +465,8 @@ pub const State = struct {
     fn applyWindowOverlayDelta(window: *WindowContent, delta: WindowOverlayDelta) void {
         if (window.content_epoch != delta.content_epoch) return;
         window.flags = delta.flags;
+        // Overlay delta header: bit 0 = cursor_visible, bit 1 = cursorline.
+        window.cursor_visible = (delta.flags & 0x01) != 0;
         window.cursor_row = delta.cursor_row;
         window.cursor_col = delta.cursor_col;
         window.cursor_shape = delta.cursor_shape;
@@ -496,6 +498,8 @@ pub const State = struct {
         self.alloc.free(window.rows);
         window.rows = rows;
         window.flags = delta.flags;
+        // Rows/viewport delta header: bit 0 = cursor_visible.
+        window.cursor_visible = (delta.flags & 0x01) != 0;
         window.cursor_row = delta.cursor_row;
         window.cursor_col = delta.cursor_col;
         window.cursor_shape = delta.cursor_shape;
@@ -859,9 +863,9 @@ pub const State = struct {
         if (self.gutter_separator) |separator| renderGutterSeparator(surface, separator, self.theme);
         if (!picker_visible and !which_key_visible) self.renderGenericOverlay(SurfaceT, surface);
         if (self.which_key) |which_key| renderWhichKey(surface, which_key, self.minibuffer != null, self.status_bar != null, self.theme);
-        if (self.minibuffer) |minibuffer| renderMinibuffer(surface, minibuffer, self.status_bar != null, self.theme);
+        if (self.minibuffer) |minibuffer| renderMinibuffer(surface, minibuffer, self.theme);
         if (self.status_bar) |status| {
-            renderStatusBar(surface, status, self.search_state, self.change_summary, self.notifications, self.edit_timeline, self.extension_overlay, self.extension_panel, self.observatory, self.agent_context, self.tool_manager, self.board, self.agent_chat, self.theme);
+            renderStatusBar(surface, status, self.minibuffer != null, self.search_state, self.change_summary, self.notifications, self.edit_timeline, self.extension_overlay, self.extension_panel, self.observatory, self.agent_context, self.tool_manager, self.board, self.agent_chat, self.theme);
         } else {
             renderStandaloneFooter(surface, self.search_state, self.change_summary, self.notifications, self.edit_timeline, self.extension_overlay, self.extension_panel, self.observatory, self.agent_context, self.tool_manager, self.board, self.agent_chat, self.minibuffer != null, self.theme);
         }
@@ -1018,6 +1022,18 @@ pub const State = struct {
     }
 
     fn renderCursor(self: *State, surface: anytype) void {
+        // An active minibuffer owns the terminal cursor. The BEAM hides the
+        // editor window cursor in this case, so place the cursor on the same
+        // row `renderMinibuffer` draws on, at the prompt width plus the input
+        // cursor offset.
+        if (self.minibuffer) |minibuffer| {
+            if (minibufferCursorPosition(surface, minibuffer)) |cursor| {
+                surface.setCursorShape(cursor.shape);
+                surface.showCursor(cursor.col, cursor.row);
+                return;
+            }
+        }
+
         const cursor_window_id = self.cursor_window_id orelse return;
         for (self.windows) |window| {
             if (window.window_id != cursor_window_id) continue;
@@ -1037,6 +1053,10 @@ const RenderedCursor = struct {
 };
 
 fn windowCursorPosition(surface: anytype, window: WindowContent, maybe_gutter: ?Gutter) ?RenderedCursor {
+    // A window whose cursor is hidden (e.g. while a minibuffer input mode owns
+    // the cursor) must not position the terminal cursor.
+    if (!window.cursor_visible) return null;
+
     const width = surface.width();
     const height = surface.height();
     if (width == 0 or height == 0) return null;
@@ -1060,6 +1080,44 @@ fn windowCursorPosition(surface: anytype, window: WindowContent, maybe_gutter: ?
         .col = col,
         .shape = semanticCursorShape(window.cursor_shape),
     };
+}
+
+fn minibufferCursorPosition(surface: anytype, minibuffer: Minibuffer) ?RenderedCursor {
+    if (!minibuffer.visible) return null;
+    // 0xFFFF is the sentinel for "no minibuffer cursor" (confirmation prompts).
+    if (minibuffer.cursor_pos == 0xFFFF) return null;
+
+    const width = surface.width();
+    const height = surface.height();
+    if (width == 0 or height == 0) return null;
+
+    // Same bottom row `renderMinibuffer` draws the prompt and input on.
+    const row: u16 = height - 1;
+
+    const prompt = if (minibuffer.prompt.len > 0) minibuffer.prompt else "> ";
+    const prompt_width = charm.textWidth(prompt);
+    // `cursor_pos` is a grapheme offset into the input. Advance by the display
+    // width of the input prefix so wide graphemes map to the right column.
+    const input_offset = textPrefixWidth(minibuffer.input, minibuffer.cursor_pos);
+    const col = prompt_width +| input_offset;
+    if (col >= width) return null;
+
+    return .{ .row = row, .col = col, .shape = .beam };
+}
+
+/// Display width of the first `grapheme_count` graphemes of `text`.
+fn textPrefixWidth(text: []const u8, grapheme_count: u16) u16 {
+    var total: u16 = 0;
+    var seen: u16 = 0;
+    var iter = vaxis.unicode.graphemeIterator(text);
+    while (iter.next()) |grapheme| {
+        if (seen >= grapheme_count) break;
+        const raw = grapheme.bytes(text);
+        const w: u16 = vaxis.gwidth.gwidth(raw, .wcwidth);
+        total +|= if (w == 0) 1 else w;
+        seen += 1;
+    }
+    return total;
 }
 
 fn semanticCursorShape(shape: u8) surface_mod.CursorShape {
@@ -1288,7 +1346,10 @@ fn renderGutter(surface: anytype, maybe_gutter: ?Gutter, maybe_theme: ?Theme) vo
 fn gutterWidth(gutter: Gutter) u16 {
     const sign_width: u16 = gutter.sign_col_width;
     const line_width: u16 = if (gutter.line_number_width == 0) 1 else gutter.line_number_width;
-    return sign_width +| line_width +| 1;
+    // The separator before the text is the last column of the line-number field,
+    // so the total width is sign + line_number_width (no extra column). This must
+    // match the BEAM `GutterMetrics.total_width` used to place the window content.
+    return sign_width +| line_width;
 }
 
 fn gutterText(gutter: Gutter, row_index: usize, buf: []u8) []const u8 {
@@ -1309,14 +1370,18 @@ fn gutterText(gutter: Gutter, row_index: usize, buf: []u8) []const u8 {
         var number_buf: [32]u8 = undefined;
         const number_text = if (number == null) "" else std.fmt.bufPrint(&number_buf, "{d}", .{number.?}) catch "";
         const number_width = textWidth(number_text);
-        var pad = if (line_number_width > number_width) line_number_width - number_width else 0;
+        // Reserve the last column of the line-number field as the separator
+        // before the text, so the number is right-aligned within the remaining
+        // `line_number_width - 1` columns and one trailing space is appended.
+        const number_field = if (line_number_width > 0) line_number_width - 1 else 0;
+        var pad = if (number_field > number_width) number_field - number_width else 0;
         while (pad > 0) : (pad -= 1) {
             appendBounded(buf, &offset, " ");
         }
         appendBounded(buf, &offset, number_text);
         appendBounded(buf, &offset, " ");
     } else {
-        var remaining: usize = sign_width + line_number_width + 1;
+        var remaining: usize = sign_width + line_number_width;
         while (remaining > 0) : (remaining -= 1) {
             appendBounded(buf, &offset, " ");
         }
@@ -1785,14 +1850,16 @@ fn gitSummary(buf: []u8, git: GitStatus) []const u8 {
     return buf[0..offset];
 }
 
-fn renderMinibuffer(surface: anytype, minibuffer: Minibuffer, has_status_bar: bool, maybe_theme: ?Theme) void {
+fn renderMinibuffer(surface: anytype, minibuffer: Minibuffer, maybe_theme: ?Theme) void {
     if (!minibuffer.visible) return;
 
     const width = surface.width();
     const height = surface.height();
     if (width == 0 or height == 0) return;
 
-    const row: u16 = if (has_status_bar and height > 1) height - 2 else height - 1;
+    // The TUI layout places the minibuffer on the bottom row; the status bar
+    // (when present) sits one row above it (see `Shell.Traditional.Layout.TUI`).
+    const row: u16 = height - 1;
     clearRow(surface, row, width);
     fillRowRemainder(surface, row, 0, width, popupBg(maybe_theme));
 
@@ -3331,12 +3398,14 @@ fn bottomPanelTitle(panel: BottomPanel) []const u8 {
     return "Panel";
 }
 
-fn renderStatusBar(surface: anytype, status: StatusBar, search: ?SearchState, changes: ?ChangeSummary, notifications: ?Notifications, timeline: ?EditTimeline, extension_overlay: ?ExtensionOverlay, extension_panel: ?ExtensionPanel, observatory: ?Observatory, agent_context: ?AgentContext, tool_manager: ?ToolManager, board: ?Board, agent_chat: ?AgentChat, maybe_theme: ?Theme) void {
+fn renderStatusBar(surface: anytype, status: StatusBar, has_minibuffer: bool, search: ?SearchState, changes: ?ChangeSummary, notifications: ?Notifications, timeline: ?EditTimeline, extension_overlay: ?ExtensionOverlay, extension_panel: ?ExtensionPanel, observatory: ?Observatory, agent_context: ?AgentContext, tool_manager: ?ToolManager, board: ?Board, agent_chat: ?AgentChat, maybe_theme: ?Theme) void {
     const width = surface.width();
     const height = surface.height();
     if (width == 0 or height == 0) return;
 
-    const row = height - 1;
+    // The minibuffer owns the bottom row when present, so the status bar sits
+    // one row above it (matching the BEAM TUI layout).
+    const row: u16 = if (has_minibuffer and height > 1) height - 2 else height - 1;
     clearRow(surface, row, width);
     fillRowRemainder(surface, row, 0, width, modelineBg(maybe_theme));
 
@@ -6170,7 +6239,10 @@ test "semantic state applies retained window cursor position with gutter width" 
     defer surface.deinit(alloc);
     state.render(MockSurface, &surface);
 
-    try std.testing.expectEqual(@as(?u16, 7), surface.cursor_col);
+    // gutter width = sign_col_width(1) + line_number_width(3) = 4 (the separator
+    // is the last column of the line-number field, no extra column), so the
+    // cursor lands at origin_col(2) + gutter_width(4) = 6.
+    try std.testing.expectEqual(@as(?u16, 6), surface.cursor_col);
     try std.testing.expectEqual(@as(?u16, 1), surface.cursor_row);
     try std.testing.expectEqual(@as(?surface_mod.CursorShape, .block), surface.cursor_shape);
 }
@@ -6207,6 +6279,87 @@ test "semantic state does not apply clipped retained window cursor" {
     try std.testing.expectEqual(@as(?u16, null), surface.cursor_col);
     try std.testing.expectEqual(@as(?u16, null), surface.cursor_row);
     try std.testing.expectEqual(@as(?surface_mod.CursorShape, null), surface.cursor_shape);
+}
+
+test "semantic state hides window cursor when cursor_visible is false" {
+    const alloc = std.testing.allocator;
+
+    var state = State.init(alloc);
+    defer state.deinit();
+    state.windows = try alloc.alloc(WindowContent, 1);
+    state.cursor_window_id = 7;
+    state.windows[0] = .{
+        .window_id = 7,
+        .cursor_visible = false,
+        .cursor_row = 0,
+        .cursor_col = 2,
+        .cursor_shape = 0,
+        .origin_row = 1,
+        .origin_col = 2,
+        .text_width = 10,
+        .text_height = 1,
+        .rows = try alloc.alloc(WindowRow, 1),
+    };
+    state.windows[0].rows[0] = .{
+        .row_id = 1,
+        .content_hash = 1,
+        .text = try alloc.dupe(u8, "hello"),
+        .spans = &.{},
+    };
+
+    var surface = MockSurface{ .mock_width = 20, .mock_height = 5 };
+    defer surface.deinit(alloc);
+    state.render(MockSurface, &surface);
+
+    try std.testing.expectEqual(@as(?u16, null), surface.cursor_col);
+    try std.testing.expectEqual(@as(?u16, null), surface.cursor_row);
+}
+
+test "semantic state places terminal cursor in active minibuffer" {
+    const alloc = std.testing.allocator;
+
+    var state = State.init(alloc);
+    defer state.deinit();
+
+    // Window cursor is hidden because the minibuffer owns the cursor.
+    state.windows = try alloc.alloc(WindowContent, 1);
+    state.cursor_window_id = 7;
+    state.windows[0] = .{
+        .window_id = 7,
+        .cursor_visible = false,
+        .cursor_row = 0,
+        .cursor_col = 4,
+        .origin_row = 0,
+        .origin_col = 0,
+        .text_width = 20,
+        .text_height = 1,
+        .rows = try alloc.alloc(WindowRow, 1),
+    };
+    state.windows[0].rows[0] = .{
+        .row_id = 1,
+        .content_hash = 1,
+        .text = try alloc.dupe(u8, "hello"),
+        .spans = &.{},
+    };
+
+    // Command mode: prompt ":", input "q", cursor_pos 1 (after the input).
+    state.minibuffer = .{
+        .visible = true,
+        .mode = 0,
+        .cursor_pos = 1,
+        .prompt = try alloc.dupe(u8, ":"),
+        .input = try alloc.dupe(u8, "q"),
+    };
+
+    var surface = MockSurface{ .mock_width = 24, .mock_height = 24 };
+    defer surface.deinit(alloc);
+    state.render(MockSurface, &surface);
+
+    // No status bar: minibuffer is on the last row. Cursor col = prompt
+    // width(1) + input cursor offset(1) = 2.
+    try std.testing.expectEqual(@as(?u16, 23), surface.cursor_row);
+    try std.testing.expectEqual(@as(?u16, 2), surface.cursor_col);
+    try std.testing.expectEqual(@as(?surface_mod.CursorShape, .beam), surface.cursor_shape);
 }
 
 test "semantic state renders cursor from retained cursor window id" {

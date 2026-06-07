@@ -11,6 +11,7 @@ defmodule MingaEditor.RenderPipelineTest do
   use ExUnit.Case, async: false
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Protocol.Opcodes
   alias Minga.Editing.Completion
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.FocusTree
@@ -49,6 +50,18 @@ defmodule MingaEditor.RenderPipelineTest do
       text_edit: nil,
       raw: nil
     }
+  end
+
+  # Collects the leading opcode byte of each command in a sent frame. Each list
+  # element is a single self-contained command binary (see Emit.emit_semantic/4).
+  @spec frame_opcodes([binary()]) :: [non_neg_integer()]
+  defp frame_opcodes(commands) do
+    commands
+    |> List.flatten()
+    |> Enum.flat_map(fn
+      <<opcode, _rest::binary>> -> [opcode]
+      _ -> []
+    end)
   end
 
   @spec find_focus_node(FocusTree.t() | nil, atom()) :: MingaEditor.FocusTree.Node.t() | nil
@@ -172,6 +185,8 @@ defmodule MingaEditor.RenderPipelineTest do
         assert emit_duration >= 0
         assert byte_count > 0
 
+        # `:frame_cmd_bytes` was removed from `adapter_encode_metadata/1` when the
+        # semantic encoder dropped the cell-grid frame command path.
         for key <- [
               :window_row_bytes,
               :window_overlay_bytes,
@@ -179,8 +194,7 @@ defmodule MingaEditor.RenderPipelineTest do
               :window_annotation_bytes,
               :window_metadata_bytes,
               :metal_ui_bytes,
-              :chrome_bytes,
-              :frame_cmd_bytes
+              :chrome_bytes
             ] do
           assert Map.has_key?(encode_metadata, key)
         end
@@ -350,10 +364,10 @@ defmodule MingaEditor.RenderPipelineTest do
       assert Map.has_key?(window.render_cache.cached_gutter, 0)
     end
 
-    test "cached draws are identical to fresh draws for unchanged lines" do
+    test "unchanged lines emit a viewport delta instead of a full content frame" do
       state = base_state(content: "hello\nworld\nfoo")
 
-      # Frame 1: fresh render
+      # Frame 1: fresh render emits a full window content (0x80) snapshot.
       state = run_pipeline(state)
       assert_receive {:"$gen_cast", {:send_commands, cmds1}}
 
@@ -363,7 +377,14 @@ defmodule MingaEditor.RenderPipelineTest do
       assert cached_content_0 != nil
       assert cached_gutter_0 != nil
 
-      # Frame 2: no changes, should reuse cache and produce identical output
+      opcodes1 = frame_opcodes(cmds1)
+      assert Opcodes.gui_window_content() in opcodes1
+      refute Opcodes.gui_window_viewport_delta() in opcodes1
+
+      # Frame 2: no changes. The semantic encoder reuses the cache and emits a
+      # viewport delta (0xA1) referencing the unchanged rows rather than a fresh
+      # full content frame. This is the meaningful caching behavior: the second
+      # frame is a delta, not a byte-for-byte repeat of the full snapshot.
       state = run_pipeline(state)
       assert_receive {:"$gen_cast", {:send_commands, cmds2}}
 
@@ -371,8 +392,9 @@ defmodule MingaEditor.RenderPipelineTest do
       assert window2.render_cache.cached_content[0] == cached_content_0
       assert window2.render_cache.cached_gutter[0] == cached_gutter_0
 
-      # Commands should be identical since content didn't change
-      assert cmds1 == cmds2
+      opcodes2 = frame_opcodes(cmds2)
+      assert Opcodes.gui_window_viewport_delta() in opcodes2
+      refute Opcodes.gui_window_content() in opcodes2
     end
 
     test "edit marks buffer version changed, triggering full redraw" do

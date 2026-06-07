@@ -11,6 +11,7 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
   alias MingaEditor.DisplayList
   alias MingaEditor.DisplayList.{Cursor, Overlay}
   alias MingaEditor.Layout
+  alias MingaEditor.MinibufferData
   alias MingaEditor.PickerUI
   alias MingaEditor.Renderer.Caps
   alias MingaEditor.Renderer.CommandCompletionUI
@@ -111,9 +112,17 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
         status_bar_bottom
       )
 
+    # Structured minibuffer data drives the semantic `gui_minibuffer` packet
+    # (0x7F), which is how the Zig TUI renders the minibuffer and places its
+    # cursor. This must be recomputed every frame (input/cursor change), so it
+    # lives outside the `stable` cached block. The cell-grid `minibuffer` draws
+    # are retained only for any non-semantic consumers.
+    minibuffer_data = MinibufferData.from_state(state)
+
     %Chrome{
       status_bar_draws: status_bar_draws,
       status_bar_data: status_bar_data,
+      minibuffer_data: minibuffer_data,
       modeline_click_regions: modeline_click_regions,
       tab_bar: stable.tab_bar,
       tab_bar_click_regions: stable.tab_bar_click_regions,

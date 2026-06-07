@@ -1294,6 +1294,10 @@ pub const AgentChatMessage = struct {
 pub const WindowContent = struct {
     window_id: u16 = 0,
     flags: u8 = 0,
+    // Whether this window owns the visible terminal cursor. The BEAM hides the
+    // editor cursor when a minibuffer input mode (command/search/eval) is
+    // active so the minibuffer can own the cursor instead. Defaults to true.
+    cursor_visible: bool = true,
     cursor_row: u16 = 0,
     cursor_col: u16 = 0,
     cursor_shape: u8 = 0,

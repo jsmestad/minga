@@ -8,6 +8,7 @@ defmodule MingaEditor.Frontend.EmitTest do
 
   use ExUnit.Case, async: true
 
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.DisplayList
   alias MingaEditor.DisplayList.{Cursor, Frame}
   alias MingaEditor.Layout
@@ -15,6 +16,7 @@ defmodule MingaEditor.Frontend.EmitTest do
   alias MingaEditor.Frontend.Emit
   alias MingaEditor.Frontend.Emit.Context
   alias Minga.Core.Face
+  alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.Window, as: RenderWindow
   alias Minga.RenderModel.Window.Row, as: RenderRow
   alias Minga.RenderModel.Window.Span, as: RenderSpan
@@ -24,7 +26,7 @@ defmodule MingaEditor.Frontend.EmitTest do
   import MingaEditor.RenderPipeline.TestHelpers
 
   describe "emit/2 dispatching" do
-    test "TUI path produces commands starting with clear" do
+    test "TUI path emits a semantic frame, not a leading cell-grid clear" do
       frame = %Frame{
         cursor: Cursor.new(0, 0, :block),
         splash: [DisplayList.draw(0, 0, "hello")]
@@ -35,7 +37,14 @@ defmodule MingaEditor.Frontend.EmitTest do
       Emit.emit(frame, ctx)
 
       assert_receive {:"$gen_cast", {:send_commands, commands}}
-      assert [<<0x12>> | _] = commands
+
+      # The TUI now renders via the semantic GUI protocol. The frame no longer
+      # starts with a cell-grid clear (0x12); it opens with chrome commands and
+      # closes with batch_end (0x13).
+      refute match?([<<0x12>> | _], commands)
+      assert [<<first_opcode, _::binary>> | _] = commands
+      assert first_opcode >= 0x70
+      assert List.last(commands) == <<Opcodes.batch_end()>>
     end
 
     test "GUI path produces commands (no clear expected for GUI with to_commands)" do
@@ -96,25 +105,32 @@ defmodule MingaEditor.Frontend.EmitTest do
   end
 
   describe "font registry ownership" do
-    test "returns updated font registry after styled draws allocate a font id" do
-      face = %Face{name: "test", fg: 0xFFFFFF, bg: 0x000000, font_family: "Fira Code"}
+    # In the semantic architecture, font ids are allocated during the
+    # render-pipeline content stage (the window builder's `font_id_for_face`,
+    # which fires for styled virtual-text segments). Emit flushes the resulting
+    # pending registrations as `register_font` (0x52) commands. The old splash
+    # cell-grid allocation path no longer exists, so this drives a styled
+    # virtual-text decoration through the full pipeline instead.
+    test "styled virtual text allocates a font id and emits a register_font command" do
+      face = %Face{name: "vt", fg: 0xFFFFFF, bg: 0x000000, font_family: "Fira Code"}
 
-      frame = %Frame{
-        cursor: Cursor.new(0, 0, :block),
-        splash: [{0, 0, "hello", face}]
-      }
+      state = base_state(content: "hello\nworld")
+      buffer = state.workspace.buffers.active
 
-      state = gui_state()
-      ctx = Context.from_editor_state(state)
+      BufferProcess.add_virtual_text(buffer, {0, 0},
+        segments: [{"VT", face}],
+        placement: :above,
+        priority: 0
+      )
 
-      {_caches, font_registry} = Emit.emit(frame, ctx, nil, %Caches{})
+      run_pipeline(state)
       assert_receive {:"$gen_cast", {:send_commands, commands}}
 
-      assert FontRegistry.lookup(font_registry, "Fira Code") == 1
-      assert FontRegistry.pending_registrations(font_registry) == []
-
+      # register_font (0x52) with the first allocated id (1), then the family
+      # length and bytes. The window builder allocated the id during the content
+      # stage and emit flushed it.
       assert Enum.any?(commands, fn
-               <<0x52, 1, _::binary>> -> true
+               <<0x52, 1, _len::16, "Fira Code">> -> true
                _ -> false
              end)
 
