@@ -1,17 +1,14 @@
 defmodule MingaEditor.FullEditorFixtureTest do
   use ExUnit.Case, async: true
 
-  alias MingaEditor.Frontend.Protocol
-
   test "full_editor fixture stays synced and renderable" do
     packets = fixture_packets()
-    decoded_packets = Enum.map(packets, &Protocol.decode_command/1)
+    opcodes = Enum.map(packets, &opcode/1)
 
     assert File.exists?(fixture_path())
     assert first_opcode(packets) == Minga.Protocol.Opcodes.set_window_bg()
-    assert Enum.all?(Enum.drop(decoded_packets, 1), &match?({:ok, _}, &1))
-    assert Enum.any?(Enum.drop(decoded_packets, 1), &meaningful_draw_or_content_command?/1)
-    assert List.last(decoded_packets) == {:ok, :batch_end}
+    assert Enum.any?(opcodes, &meaningful_semantic_command?/1)
+    assert List.last(opcodes) == Minga.Protocol.Opcodes.batch_end()
   end
 
   defp fixture_packets do
@@ -28,11 +25,10 @@ defmodule MingaEditor.FullEditorFixtureTest do
     [packet | split_packets(rest)]
   end
 
-  defp first_opcode([<<opcode::8, _rest::binary>> | _]), do: opcode
+  defp first_opcode([packet | _]), do: opcode(packet)
 
-  defp meaningful_draw_or_content_command?({:ok, {:draw_text, _}}), do: true
-  defp meaningful_draw_or_content_command?({:ok, {:draw_styled_text, _}}), do: true
-  defp meaningful_draw_or_content_command?({:ok, {:gui_window_content, _}}), do: true
-  defp meaningful_draw_or_content_command?({:ok, {:gui_status_bar, _}}), do: true
-  defp meaningful_draw_or_content_command?(_), do: false
+  defp opcode(<<opcode::8, _rest::binary>>), do: opcode
+
+  defp meaningful_semantic_command?(opcode) when opcode in [0x80, 0x76], do: true
+  defp meaningful_semantic_command?(_opcode), do: false
 end

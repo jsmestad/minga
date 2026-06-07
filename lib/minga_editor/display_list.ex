@@ -2,17 +2,11 @@ defmodule MingaEditor.DisplayList do
   @moduledoc """
   BEAM-side display list: a styled text run intermediate representation.
 
-  Sits between editor state and protocol encoding. The renderer produces
-  a `Frame` struct containing all visual content, then `to_commands/1`
-  converts it to protocol command binaries for the TUI frontend. Other
-  frontends (GUI, headless) can consume the frame directly.
+  Sits between editor state and semantic render-model encoding. The renderer produces a `Frame` struct containing visual content that semantic model builders can consume.
 
   ## Coordinate system
 
-  All coordinates within a `WindowFrame` are **window-relative**: row 0,
-  col 0 is the top-left of the window's content rect. The `rect` field
-  carries the absolute screen position; `to_commands/1` adds the rect
-  offset when generating protocol commands.
+  All coordinates within a `WindowFrame` are **window-relative**: row 0, col 0 is the top-left of the window's content rect. The `rect` field carries the absolute screen position for semantic window model construction.
 
   Other frame sections (file_tree, agent_panel, minibuffer, overlays) use
   **absolute screen coordinates** since they're not scoped to a window.
@@ -28,7 +22,6 @@ defmodule MingaEditor.DisplayList do
 
   alias Minga.Core.Face
   alias MingaEditor.Layout
-  alias MingaEditor.Frontend.Protocol
 
   # ── Fundamental types ──────────────────────────────────────────────────────
 
@@ -139,9 +132,7 @@ defmodule MingaEditor.DisplayList do
     @moduledoc """
     Complete display state for one rendered frame.
 
-    Contains all visual content needed to paint the screen. The TUI
-    frontend converts this to protocol commands; a GUI frontend could
-    convert it to native drawing calls.
+    Contains all visual content needed to build the semantic render model.
     """
 
     alias MingaEditor.DisplayList
@@ -158,7 +149,6 @@ defmodule MingaEditor.DisplayList do
               minibuffer: [],
               separators: [],
               overlays: [],
-              regions: [],
               splash: nil,
               title: nil,
               window_bg: nil
@@ -174,7 +164,6 @@ defmodule MingaEditor.DisplayList do
             minibuffer: [DisplayList.draw()],
             separators: [DisplayList.draw()],
             overlays: [Overlay.t()],
-            regions: [binary()],
             splash: [DisplayList.draw()] | nil,
             title: String.t() | nil,
             window_bg: non_neg_integer() | nil
@@ -273,158 +262,6 @@ defmodule MingaEditor.DisplayList do
     b = Bitwise.band(rgb, 0xFF)
     gray = round(r * 0.299 + g * 0.587 + b * 0.114)
     Bitwise.bor(Bitwise.bor(Bitwise.bsl(gray, 16), Bitwise.bsl(gray, 8)), gray)
-  end
-
-  # ── Frame → protocol commands ──────────────────────────────────────────────
-
-  @doc """
-  Converts a frame into a list of protocol command binaries.
-
-  Produces the same output that the old renderer sent to the port:
-  clear, regions, content draws, cursor, batch_end.
-
-  Options:
-  - `batch_end: false` — omit the trailing `batch_end` command. Used by
-    the GUI emit path which appends Metal-critical chrome commands before
-    sending `batch_end` to ensure atomic frame delivery.
-  """
-  @spec to_commands(Frame.t(), keyword()) :: [binary()]
-  def to_commands(%Frame{} = frame, opts \\ []) do
-    splash_draws =
-      case frame.splash do
-        nil -> []
-        draws -> draws
-      end
-
-    before_windows = frame.tab_bar ++ frame.file_tree ++ frame.agentic_view
-
-    after_windows =
-      frame.separators ++
-        frame.status_bar ++ frame.agent_panel ++ frame.minibuffer ++ splash_draws
-
-    overlay_draws = Enum.flat_map(frame.overlays, fn %Overlay{draws: draws} -> draws end)
-
-    tail =
-      if Keyword.get(opts, :batch_end, true) do
-        [
-          Protocol.encode_cursor_shape(frame.cursor.shape),
-          Protocol.encode_cursor(frame.cursor.row, frame.cursor.col),
-          Protocol.encode_batch_end()
-        ]
-      else
-        [
-          Protocol.encode_cursor_shape(frame.cursor.shape),
-          Protocol.encode_cursor(frame.cursor.row, frame.cursor.col)
-        ]
-      end
-
-    [Protocol.encode_clear()] ++
-      frame.regions ++
-      draws_to_commands(before_windows) ++
-      windows_to_commands(frame.windows) ++
-      draws_to_commands(after_windows) ++
-      draws_to_commands(overlay_draws) ++
-      tail
-  end
-
-  @doc """
-  Converts a list of draw tuples to protocol command binaries.
-
-  Uses `encode_draw_smart/4` which automatically selects the compact
-  `draw_text` opcode for simple styles (fg/bg/bold/italic/underline/reverse)
-  or the extended `draw_styled_text` opcode when the style includes
-  strikethrough, underline_style, underline_color, or blend.
-  """
-  @spec draws_to_commands([draw()]) :: [binary()]
-  def draws_to_commands(draws) do
-    draws
-    |> Enum.reduce([], fn {row, col, text, %Face{} = face}, acc ->
-      prepend_draw_commands(acc, row, col, text, face)
-    end)
-    |> Enum.reverse()
-  end
-
-  # Resolves font_family in a style keyword list to a font_id.
-  # Uses the render-local font registry installed by the render pipeline.
-  # Registration commands are emitted centrally by the Emit stage.
-  @spec resolve_font_family(keyword()) :: keyword()
-  defp resolve_font_family(style) do
-    case Keyword.pop(style, :font_family) do
-      {nil, _} ->
-        style
-
-      {family, rest} ->
-        resolve_registered_font_family(
-          family,
-          rest,
-          MingaEditor.UI.FontRegistry.process_registry()
-        )
-    end
-  end
-
-  @spec resolve_registered_font_family(
-          String.t(),
-          keyword(),
-          MingaEditor.UI.FontRegistry.t() | nil
-        ) ::
-          keyword()
-  defp resolve_registered_font_family(_family, rest, nil), do: rest
-
-  defp resolve_registered_font_family(family, rest, registry) do
-    {font_id, updated_registry, _new?} =
-      MingaEditor.UI.FontRegistry.get_or_register(registry, family)
-
-    MingaEditor.UI.FontRegistry.put_process_registry(updated_registry)
-
-    if font_id > 0, do: [{:font_id, font_id} | rest], else: rest
-  end
-
-  @spec windows_to_commands([WindowFrame.t()]) :: [binary()]
-  defp windows_to_commands(windows) do
-    Enum.flat_map(windows, fn wf ->
-      {row_off, col_off, _w, _h} = wf.rect
-
-      layer_to_commands(wf.gutter, row_off, col_off) ++
-        layer_to_commands(wf.lines, row_off, col_off) ++
-        layer_to_commands(wf.tilde_lines, row_off, col_off)
-    end)
-  end
-
-  @spec layer_to_commands(render_layer(), non_neg_integer(), non_neg_integer()) :: [binary()]
-  defp layer_to_commands(layer, row_off, col_off) when is_map(layer) do
-    layer
-    |> Enum.reduce([], fn {row, runs}, acc ->
-      Enum.reduce(runs, acc, fn {col, text, %Face{} = face}, row_acc ->
-        prepend_draw_commands(row_acc, row + row_off, col + col_off, text, face)
-      end)
-    end)
-    |> Enum.reverse()
-  end
-
-  @spec prepend_draw_commands(
-          [binary()],
-          non_neg_integer(),
-          integer(),
-          String.t(),
-          Face.t()
-        ) :: [binary()]
-  defp prepend_draw_commands(acc, _row, col, _text, %Face{}) when col < 0, do: acc
-
-  defp prepend_draw_commands(acc, row, col, text, %Face{} = face) do
-    if simple_draw_face?(face) do
-      [Protocol.encode_draw_face(row, col, text, face) | acc]
-    else
-      style = face |> Face.to_style() |> resolve_font_family()
-      command = Protocol.encode_draw_smart(row, col, text, style)
-      [command | acc]
-    end
-  end
-
-  @spec simple_draw_face?(Face.t()) :: boolean()
-  defp simple_draw_face?(%Face{} = face) do
-    face.strikethrough != true and (face.underline_style == nil or face.underline_style == :line) and
-      face.underline_color == nil and (face.blend == nil or face.blend == 100) and
-      face.font_family == nil and (face.font_weight == nil or face.font_weight == :regular)
   end
 
   # ── Layer ↔ draws ──────────────────────────────────────────────────────────

@@ -9,7 +9,7 @@
 const std = @import("std");
 const build_options = @import("build_options");
 pub const protocol = @import("protocol.zig");
-pub const renderer = @import("renderer.zig");
+pub const semantic = @import("semantic.zig");
 pub const surface = @import("surface.zig");
 pub const apprt = @import("apprt.zig");
 // Note: highlighter.zig is compiled into minga-parser, not the renderer.
@@ -108,7 +108,7 @@ test {
     _ = protocol;
     _ = @import("port_writer.zig");
     _ = @import("recovery.zig");
-    _ = renderer;
+    _ = semantic;
     _ = surface;
     _ = apprt;
 }

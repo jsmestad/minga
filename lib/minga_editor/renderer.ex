@@ -18,12 +18,13 @@ defmodule MingaEditor.Renderer do
   * `Renderer.Minibuffer`      — command/search/status line
   * `Renderer.Caps`            — capability-aware rendering helpers
   * `Renderer.Regions`         — region definition commands
-  * `DisplayList`              — frame assembly and protocol conversion
+  * `DisplayList`              — frame assembly
   """
 
   alias MingaEditor.Dashboard
-  alias MingaEditor.DisplayList
   alias MingaEditor.DisplayList.{Cursor, Frame, Overlay}
+  alias MingaEditor.Frontend.Emit
+  alias MingaEditor.Frontend.Emit.Context, as: EmitContext
   alias MingaEditor.PickerUI
   alias MingaEditor.RenderPipeline
   alias MingaEditor.RenderPipeline.Input
@@ -131,9 +132,11 @@ defmodule MingaEditor.Renderer do
       overlays: overlays
     }
 
-    commands = DisplayList.to_commands(frame)
-    MingaEditor.Frontend.send_commands(state.port_manager, commands)
-    state
+    input = Input.from_editor_state(state)
+    ctx = EmitContext.from_editor_state(input)
+    {caches, _font_registry} = Emit.emit(frame, ctx, nil, state.caches)
+
+    %{state | caches: caches}
   end
 
   @doc """

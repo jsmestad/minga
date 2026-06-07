@@ -41,7 +41,6 @@ pub fn build(b: *std.Build) void {
 
     const backend = b.option(BackendOption, "backend", "Rendering backend (default: tui)") orelse .tui;
     const renderer = b.option(bool, "renderer", "Build the TUI renderer frontend binary") orelse true;
-    const snapshot = b.option(bool, "snapshot", "Build minga-snapshot and snapshot tests (requires host font libraries)") orelse false;
 
     const vaxis = b.dependency("vaxis", .{
         .target = target,
@@ -199,24 +198,6 @@ pub fn build(b: *std.Build) void {
     for (grammar_libs) |gl| parser_exe.root_module.linkLibrary(gl);
     b.installArtifact(parser_exe);
 
-    // ── Snapshot executable (cell-grid rasterizer for Claude Code) ───────
-    // Native only: the font rasterizers link against host system font libraries.
-    const native_snapshot = snapshot and target.query.os_tag == null and (target.result.os.tag == .macos or target.result.os.tag == .linux);
-    if (native_snapshot) {
-        const snapshot_exe = b.addExecutable(.{
-            .name = "minga-snapshot",
-            .root_module = b.createModule(.{
-                .root_source_file = b.path("src/snapshot_main.zig"),
-                .target = target,
-                .optimize = optimize,
-            }),
-        });
-        snapshot_exe.root_module.addImport("vaxis", vaxis.module("vaxis"));
-        snapshot_exe.root_module.link_libc = true;
-        configureSnapshotFonts(snapshot_exe.root_module, target.result.os.tag);
-        b.installArtifact(snapshot_exe);
-    }
-
     // ── Hook runner executable (one-shot POSIX process-group helper) ─────
     const hook_runner_exe = b.addExecutable(.{
         .name = "minga-hook-runner",
@@ -259,23 +240,6 @@ pub fn build(b: *std.Build) void {
     const run_hook_runner_tests = b.addRunArtifact(hook_runner_tests);
     test_step.dependOn(&run_hook_runner_tests.step);
 
-    // Snapshot tests — native only (same system font library constraint as the exe).
-    if (native_snapshot) {
-        const snapshot_tests = b.addTest(.{
-            .root_module = b.createModule(.{
-                .root_source_file = b.path("src/snapshot_main.zig"),
-                .target = target,
-                .optimize = optimize,
-            }),
-        });
-        snapshot_tests.root_module.addImport("vaxis", vaxis.module("vaxis"));
-        snapshot_tests.root_module.link_libc = true;
-        configureSnapshotFonts(snapshot_tests.root_module, target.result.os.tag);
-
-        const run_snapshot_tests = b.addRunArtifact(snapshot_tests);
-        test_step.dependOn(&run_snapshot_tests.step);
-    }
-
     // Tree-sitter highlight benchmark used by autoresearch.
     const highlight_bench = b.addExecutable(.{
         .name = "highlight-bench",
@@ -295,20 +259,6 @@ pub fn build(b: *std.Build) void {
     const run_highlight_bench = b.addRunArtifact(highlight_bench);
     const highlight_bench_step = b.step("highlight-bench", "Run tree-sitter highlight benchmark");
     highlight_bench_step.dependOn(&run_highlight_bench.step);
-}
-
-fn configureSnapshotFonts(module: *std.Build.Module, os_tag: std.Target.Os.Tag) void {
-    switch (os_tag) {
-        .macos => {
-            module.linkFramework("CoreFoundation", .{});
-            module.linkFramework("CoreGraphics", .{});
-            module.linkFramework("CoreText", .{});
-        },
-        .linux => {
-            module.linkSystemLibrary("freetype2", .{ .use_pkg_config = .force });
-        },
-        else => {},
-    }
 }
 
 /// Build a static library for a tree-sitter grammar.

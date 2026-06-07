@@ -256,212 +256,35 @@ defmodule MingaEditor.Frontend.ProtocolTest do
     end
   end
 
-  # ── Render command encoding ──
-
-  describe "encode_draw/4" do
-    test "encodes draw_text with default style" do
-      encoded = Protocol.encode_draw(5, 10, "hello")
-
-      assert {:ok,
-              {:draw_text,
-               %{row: 5, col: 10, fg: 0xFFFFFF, bg: 0x000000, attrs: [], text: "hello"}}} =
-               Protocol.decode_command(encoded)
-    end
-
-    test "encodes draw_text with custom colors" do
-      encoded = Protocol.encode_draw(0, 0, "hi", fg: 0xFF0000, bg: 0x00FF00)
-
-      assert {:ok, {:draw_text, %{fg: 0xFF0000, bg: 0x00FF00, text: "hi"}}} =
-               Protocol.decode_command(encoded)
-    end
-
-    test "encodes draw_text with style attributes" do
-      encoded = Protocol.encode_draw(0, 0, "bold", bold: true, italic: true)
-
-      assert {:ok, {:draw_text, %{attrs: [:bold, :italic], text: "bold"}}} =
-               Protocol.decode_command(encoded)
-    end
-
-    test "encodes draw_text with all attributes" do
-      encoded =
-        Protocol.encode_draw(0, 0, "all",
-          bold: true,
-          underline: true,
-          italic: true,
-          reverse: true
-        )
-
-      assert {:ok, {:draw_text, %{attrs: [:bold, :underline, :italic, :reverse]}}} =
-               Protocol.decode_command(encoded)
-    end
-
-    test "encodes unicode text" do
-      encoded = Protocol.encode_draw(0, 0, "🥨 München")
-
-      assert {:ok, {:draw_text, %{text: "🥨 München"}}} =
-               Protocol.decode_command(encoded)
-    end
-
-    test "encodes empty text" do
-      encoded = Protocol.encode_draw(0, 0, "")
-      assert {:ok, {:draw_text, %{text: ""}}} = Protocol.decode_command(encoded)
-    end
-  end
-
-  describe "encode_draw_styled/4" do
-    test "round-trips with strikethrough" do
-      encoded = Protocol.encode_draw_styled(1, 2, "deprecated", strikethrough: true)
-
-      assert {:ok, {:draw_styled_text, %{row: 1, col: 2, text: "deprecated", attrs: attrs}}} =
-               Protocol.decode_command(encoded)
-
-      assert {:strikethrough, true} in attrs
-    end
-
-    test "round-trips with underline style" do
-      encoded =
-        Protocol.encode_draw_styled(0, 0, "error",
-          underline: true,
-          underline_style: :curl,
-          underline_color: 0xFF0000
-        )
-
-      assert {:ok, {:draw_styled_text, %{text: "error", attrs: attrs}}} =
-               Protocol.decode_command(encoded)
-
-      assert :underline in attrs
-      assert {:underline_style, :curl} in attrs
-      assert {:underline_color, 0xFF0000} in attrs
-    end
-
-    test "round-trips all underline styles" do
-      for style <- [:line, :curl, :dashed, :dotted, :double] do
-        encoded =
-          Protocol.encode_draw_styled(0, 0, "test", underline: true, underline_style: style)
-
-        assert {:ok, {:draw_styled_text, %{attrs: attrs}}} = Protocol.decode_command(encoded)
-
-        if style == :line do
-          # :line is the default, not explicitly included
-          refute Keyword.has_key?(attrs, :underline_style)
-        else
-          assert {:underline_style, ^style} = List.keyfind(attrs, :underline_style, 0)
-        end
-      end
-    end
-
-    test "round-trips blend" do
-      encoded = Protocol.encode_draw_styled(0, 0, "ghost", blend: 30)
-
-      assert {:ok, {:draw_styled_text, %{attrs: attrs}}} = Protocol.decode_command(encoded)
-      assert {:blend, 30} in attrs
-    end
-
-    test "blend 100 is omitted from attrs" do
-      encoded = Protocol.encode_draw_styled(0, 0, "opaque", blend: 100)
-
-      assert {:ok, {:draw_styled_text, %{attrs: attrs}}} = Protocol.decode_command(encoded)
-      refute Keyword.has_key?(attrs, :blend)
-    end
-
-    test "round-trips all extended attributes together" do
-      style = [
-        fg: 0xFF6C6B,
-        bg: 0x282C34,
-        bold: true,
-        italic: true,
-        underline: true,
-        strikethrough: true,
-        underline_style: :curl,
-        underline_color: 0x00FF00,
-        blend: 50
-      ]
-
-      encoded = Protocol.encode_draw_styled(3, 7, "all", style)
-
-      assert {:ok,
-              {:draw_styled_text,
-               %{row: 3, col: 7, fg: 0xFF6C6B, bg: 0x282C34, text: "all", attrs: attrs}}} =
-               Protocol.decode_command(encoded)
-
-      assert :bold in attrs
-      assert :italic in attrs
-      assert :underline in attrs
-      assert {:strikethrough, true} in attrs
-      assert {:underline_style, :curl} in attrs
-      assert {:underline_color, 0x00FF00} in attrs
-      assert {:blend, 50} in attrs
-    end
-  end
-
-  describe "encode_draw_smart/4" do
-    test "uses draw_text for simple styles" do
-      encoded = Protocol.encode_draw_smart(0, 0, "simple", fg: 0xFF0000, bold: true)
-      assert {:ok, {:draw_text, _}} = Protocol.decode_command(encoded)
-    end
-
-    test "uses draw_styled_text when extended attrs present" do
-      encoded = Protocol.encode_draw_smart(0, 0, "fancy", strikethrough: true)
-      assert {:ok, {:draw_styled_text, _}} = Protocol.decode_command(encoded)
-    end
-
-    test "uses draw_styled_text for underline_style" do
-      encoded = Protocol.encode_draw_smart(0, 0, "wavy", underline: true, underline_style: :curl)
-      assert {:ok, {:draw_styled_text, _}} = Protocol.decode_command(encoded)
-    end
-
-    test "uses draw_styled_text for blend" do
-      encoded = Protocol.encode_draw_smart(0, 0, "dim", blend: 50)
-      assert {:ok, {:draw_styled_text, _}} = Protocol.decode_command(encoded)
-    end
-  end
-
   describe "encode_cursor/2" do
     test "encodes set_cursor" do
       encoded = Protocol.encode_cursor(10, 25)
-      assert {:ok, {:set_cursor, 10, 25}} = Protocol.decode_command(encoded)
+      assert <<0x11, 10::16, 25::16>> = encoded
     end
 
     test "encodes cursor at origin" do
       encoded = Protocol.encode_cursor(0, 0)
-      assert {:ok, {:set_cursor, 0, 0}} = Protocol.decode_command(encoded)
+      assert <<0x11, 0::16, 0::16>> = encoded
     end
   end
 
   describe "encode_clear/0" do
     test "encodes clear" do
       encoded = Protocol.encode_clear()
-      assert {:ok, :clear} = Protocol.decode_command(encoded)
+      assert <<0x12>> = encoded
     end
   end
 
   describe "encode_batch_end/0" do
     test "encodes batch_end" do
       encoded = Protocol.encode_batch_end()
-      assert {:ok, :batch_end} = Protocol.decode_command(encoded)
-    end
-  end
-
-  describe "decode_command/1 — errors" do
-    test "returns error for unknown command opcode" do
-      assert {:error, :unknown_opcode} = Protocol.decode_command(<<0xFE>>)
-    end
-
-    test "returns error for empty binary" do
-      assert {:error, :malformed} = Protocol.decode_command(<<>>)
+      assert <<0x13>> = encoded
     end
   end
 
   # ── Binary format verification ──
 
   describe "binary format" do
-    test "draw_text has correct byte layout" do
-      encoded = Protocol.encode_draw(1, 2, "ab", fg: 0xAABBCC, bg: 0x112233, bold: true)
-
-      assert <<0x10, 1::16, 2::16, 0xAA, 0xBB, 0xCC, 0x11, 0x22, 0x33, 0x01, 2::16, "ab">> =
-               encoded
-    end
-
     test "set_cursor has correct byte layout" do
       assert <<0x11, 0::16, 5::16>> = Protocol.encode_cursor(0, 5)
     end
@@ -575,73 +398,80 @@ defmodule MingaEditor.Frontend.ProtocolTest do
     end
   end
 
-  describe "cursor shape round-trip" do
-    test "encode/decode block cursor" do
+  describe "cursor shape protocol" do
+    test "encodes block cursor" do
       encoded = Protocol.encode_cursor_shape(:block)
-      assert {:ok, {:set_cursor_shape, :block}} = Protocol.decode_command(encoded)
+      assert <<0x15, 0>> = encoded
     end
 
-    test "encode/decode beam cursor" do
+    test "encodes beam cursor" do
       encoded = Protocol.encode_cursor_shape(:beam)
-      assert {:ok, {:set_cursor_shape, :beam}} = Protocol.decode_command(encoded)
+      assert <<0x15, 1>> = encoded
     end
 
-    test "encode/decode underline cursor" do
+    test "encodes underline cursor" do
       encoded = Protocol.encode_cursor_shape(:underline)
-      assert {:ok, {:set_cursor_shape, :underline}} = Protocol.decode_command(encoded)
+      assert <<0x15, 2>> = encoded
     end
   end
 
   describe "set_title protocol" do
-    test "encode/decode round-trip" do
+    test "encodes title" do
       encoded = Protocol.encode_set_title("editor.ex [+] (lib) - Minga")
-      assert {:ok, {:set_title, "editor.ex [+] (lib) - Minga"}} = Protocol.decode_command(encoded)
+      assert <<0x16, 27::16, "editor.ex [+] (lib) - Minga">> = encoded
     end
 
-    test "encode/decode empty title" do
+    test "encodes empty title" do
       encoded = Protocol.encode_set_title("")
-      assert {:ok, {:set_title, ""}} = Protocol.decode_command(encoded)
+      assert <<0x16, 0::16>> = encoded
     end
 
-    test "encode/decode unicode title" do
+    test "encodes unicode title with byte length" do
       encoded = Protocol.encode_set_title("файл.ex - Minga")
-      assert {:ok, {:set_title, "файл.ex - Minga"}} = Protocol.decode_command(encoded)
+      title = "файл.ex - Minga"
+      title_len = byte_size(title)
+      assert <<0x16, ^title_len::16, ^title::binary>> = encoded
     end
   end
 
   describe "set_font protocol" do
-    test "encode/decode round-trip with ligatures enabled, default weight" do
+    test "encodes ligatures enabled with default weight" do
       encoded = Protocol.encode_set_font("JetBrains Mono", 14, true)
-
-      assert {:ok, {:set_font, "JetBrains Mono", 14, :regular, true}} =
-               Protocol.decode_command(encoded)
+      assert <<0x50, 14::16, 2::8, 1::8, 14::16, "JetBrains Mono">> = encoded
     end
 
-    test "encode/decode round-trip with ligatures disabled" do
+    test "encodes ligatures disabled" do
       encoded = Protocol.encode_set_font("Menlo", 13, false)
-      assert {:ok, {:set_font, "Menlo", 13, :regular, false}} = Protocol.decode_command(encoded)
+      assert <<0x50, 13::16, 2::8, 0::8, 5::16, "Menlo">> = encoded
     end
 
-    test "encode/decode with unicode font name" do
+    test "encodes unicode font name with byte length" do
       encoded = Protocol.encode_set_font("Iosevka Термин", 12, true)
-
-      assert {:ok, {:set_font, "Iosevka Термин", 12, :regular, true}} =
-               Protocol.decode_command(encoded)
+      font_name = "Iosevka Термин"
+      font_name_len = byte_size(font_name)
+      assert <<0x50, 12::16, 2::8, 1::8, ^font_name_len::16, ^font_name::binary>> = encoded
     end
 
-    test "encode/decode with explicit weight" do
+    test "encodes explicit weight" do
       encoded = Protocol.encode_set_font("JetBrains Mono", 14, true, :light)
-
-      assert {:ok, {:set_font, "JetBrains Mono", 14, :light, true}} =
-               Protocol.decode_command(encoded)
+      assert <<0x50, 14::16, 1::8, 1::8, 14::16, "JetBrains Mono">> = encoded
     end
 
-    test "encode/decode all weight values" do
-      weights = [:thin, :light, :regular, :medium, :semibold, :bold, :heavy, :black]
+    test "encodes all weight values" do
+      weights = [
+        thin: 0,
+        light: 1,
+        regular: 2,
+        medium: 3,
+        semibold: 4,
+        bold: 5,
+        heavy: 6,
+        black: 7
+      ]
 
-      for weight <- weights do
+      for {weight, encoded_weight} <- weights do
         encoded = Protocol.encode_set_font("Test", 13, true, weight)
-        assert {:ok, {:set_font, "Test", 13, ^weight, true}} = Protocol.decode_command(encoded)
+        assert <<0x50, 13::16, ^encoded_weight::8, 1::8, 4::16, "Test">> = encoded
       end
     end
 
@@ -885,79 +715,6 @@ defmodule MingaEditor.Frontend.ProtocolTest do
     test "encode_edit_buffer with empty edits list" do
       result = Protocol.encode_edit_buffer(0, 1, [])
       assert <<0x26, 0::32, 1::32, 0::16>> = result
-    end
-  end
-
-  describe "region commands" do
-    test "encode_define_region produces correct binary" do
-      result = Protocol.encode_define_region(1, 0, :modeline, 23, 0, 80, 1, 0)
-      assert <<0x14, 1::16, 0::16, 1, 23::16, 0::16, 80::16, 1::16, 0>> = result
-    end
-
-    test "encode_clear_region" do
-      assert <<0x18, 1::16>> = Protocol.encode_clear_region(1)
-    end
-
-    test "encode_destroy_region" do
-      assert <<0x19, 2::16>> = Protocol.encode_destroy_region(2)
-    end
-
-    test "encode_set_active_region" do
-      assert <<0x1A, 1::16>> = Protocol.encode_set_active_region(1)
-    end
-
-    test "encode_set_active_region with root (0)" do
-      assert <<0x1A, 0::16>> = Protocol.encode_set_active_region(0)
-    end
-
-    test "all region roles encode to unique values" do
-      roles = [:editor, :modeline, :minibuffer, :gutter, :popup, :panel, :border]
-
-      values =
-        Enum.map(roles, fn role ->
-          <<0x14, _::16, _::16, v::8, _rest::binary>> =
-            Protocol.encode_define_region(1, 0, role, 0, 0, 1, 1, 0)
-
-          v
-        end)
-
-      assert length(Enum.uniq(values)) == length(roles)
-    end
-  end
-
-  # ── Scroll region command ──
-
-  describe "scroll_region" do
-    test "encode_scroll_region produces 7-byte binary with correct layout" do
-      result = Protocol.encode_scroll_region(2, 20, 1)
-      assert <<0x1B, 2::16, 20::16, 1::16-signed>> = result
-      assert byte_size(result) == 7
-    end
-
-    test "encode_scroll_region with negative delta (scroll down)" do
-      result = Protocol.encode_scroll_region(5, 30, -3)
-      assert <<0x1B, 5::16, 30::16, delta::16-signed>> = result
-      assert delta == -3
-    end
-
-    test "encode_scroll_region with zero delta" do
-      result = Protocol.encode_scroll_region(0, 10, 0)
-      assert <<0x1B, 0::16, 10::16, 0::16-signed>> = result
-    end
-
-    test "encode_scroll_region round-trips through decode_command" do
-      encoded = Protocol.encode_scroll_region(3, 22, 2)
-      assert {:ok, {:scroll_region, 3, 22, 2}} = Protocol.decode_command(encoded)
-    end
-
-    test "encode_scroll_region round-trips with negative delta" do
-      encoded = Protocol.encode_scroll_region(1, 19, -1)
-      assert {:ok, {:scroll_region, 1, 19, -1}} = Protocol.decode_command(encoded)
-    end
-
-    test "encode_scroll_region with large row values" do
-      encoded = Protocol.encode_scroll_region(0, 65_535, 3)
-      assert {:ok, {:scroll_region, 0, 65_535, 3}} = Protocol.decode_command(encoded)
     end
   end
 

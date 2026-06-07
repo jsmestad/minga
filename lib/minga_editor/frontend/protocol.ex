@@ -15,17 +15,9 @@ defmodule MingaEditor.Frontend.Protocol do
   | 0x03   | ready       | `width::16, height::16`                                     |
   | 0x04   | mouse_event | `row::16-signed, col::16-signed, button::8, mods::8, type::8` |
 
-  ## Render Commands (BEAM → Zig)
+  ## Render Commands (BEAM → frontend)
 
-  | Opcode | Name             | Payload                                                              |
-  |--------|------------------|----------------------------------------------------------------------|
-  | 0x10   | draw_text        | `row::16, col::16, fg::24, bg::24, attrs::8, text_len::16, text`     |
-  | 0x1C   | draw_styled_text | `row::16, col::16, fg::24, bg::24, attrs::16, ul_color::24, blend::8, font_weight::8, font_id::8, text_len::16, text` |
-  | 0x11   | set_cursor       | `row::16, col::16`                                                   |
-  | 0x12   | clear            | (empty)                                                              |
-  | 0x13   | batch_end        | (empty)                                                              |
-  | 0x15   | set_cursor_shape | `shape::8` (BLOCK=0, BEAM=1, UNDERLINE=2)                           |
-  | 0x1B   | scroll_region    | `top_row::16, bottom_row::16, delta::16-signed`                      |
+  Rendering is semantic-first. GUI render commands are encoded by `Minga.Frontend.Adapter.GUI`, with this module retaining the common side-channel encoders for cursor state, titles, fonts, clear, and batch boundaries.
 
   ## Modifier Flags
 
@@ -46,24 +38,16 @@ defmodule MingaEditor.Frontend.Protocol do
   @op_capabilities_updated Opcodes.capabilities_updated()
   @op_paste_event Opcodes.paste_event()
   @op_gui_action Opcodes.gui_action()
-  @op_draw_text Opcodes.draw_text()
   @op_set_cursor Opcodes.set_cursor()
   @op_clear Opcodes.clear()
   @op_batch_end Opcodes.batch_end()
-  @op_define_region Opcodes.define_region()
   @op_set_cursor_shape Opcodes.set_cursor_shape()
   @op_set_title Opcodes.set_title()
   @op_set_window_bg Opcodes.set_window_bg()
-  @op_clear_region Opcodes.clear_region()
-  @op_destroy_region Opcodes.destroy_region()
-  @op_set_active_region Opcodes.set_active_region()
-  @op_scroll_region Opcodes.scroll_region()
-  @op_draw_styled_text Opcodes.draw_styled_text()
   @op_set_font Opcodes.set_font()
   @op_set_font_fallback Opcodes.set_font_fallback()
   @op_register_font Opcodes.register_font()
 
-  alias Minga.Core.Face
   alias Minga.Parser.StructuralNavResult
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
@@ -80,8 +64,6 @@ defmodule MingaEditor.Frontend.Protocol do
     heavy: 6,
     black: 7
   }
-
-  @font_weight_reverse Map.new(@font_weight_map, fn {k, v} -> {v, k} end)
 
   # GUI chrome commands live in Protocol.GUI (contiguous range 0x70-0x78)
 
@@ -182,23 +164,6 @@ defmodule MingaEditor.Frontend.Protocol do
   @typedoc "A highlight span from tree-sitter."
   @type highlight_span :: Minga.Language.Highlight.Span.t()
 
-  @typedoc "Text style attributes."
-  @type style :: [
-          {:fg, non_neg_integer()}
-          | {:bg, non_neg_integer()}
-          | {:bold, boolean()}
-          | {:underline, boolean()}
-          | {:italic, boolean()}
-          | {:reverse, boolean()}
-          | {:strikethrough, boolean()}
-          | {:underline_style, :line | :curl | :dashed | :dotted | :double}
-          | {:underline_color, non_neg_integer()}
-          | {:blend, 0..100}
-          | {:font_weight,
-             :thin | :light | :regular | :medium | :semibold | :bold | :heavy | :black}
-          | {:font_id, non_neg_integer()}
-        ]
-
   # ── Modifier helpers ──
 
   @doc "Returns the SHIFT modifier flag."
@@ -225,82 +190,6 @@ defmodule MingaEditor.Frontend.Protocol do
   end
 
   # ── Encoding (BEAM → Zig) ──
-
-  @doc "Encodes a draw_text command."
-  @spec encode_draw(non_neg_integer(), non_neg_integer(), String.t(), style()) :: binary()
-  def encode_draw(row, col, text, style \\ [])
-      when is_integer(row) and row >= 0 and is_integer(col) and col >= 0 and is_binary(text) do
-    fg = Keyword.get(style, :fg, 0xFFFFFF)
-    bg = Keyword.get(style, :bg, 0x000000)
-    attrs = encode_attrs(style)
-    text_len = byte_size(text)
-
-    <<@op_draw_text, row::16, col::16, fg::24, bg::24, attrs::8, text_len::16, text::binary>>
-  end
-
-  @doc "Encodes a draw_text command directly from a simple face."
-  @spec encode_draw_face(non_neg_integer(), non_neg_integer(), String.t(), Face.t()) :: binary()
-  def encode_draw_face(row, col, text, %Face{} = face)
-      when is_integer(row) and row >= 0 and is_integer(col) and col >= 0 and is_binary(text) do
-    fg = if face.fg && face.fg != 0xBBC2CF, do: face.fg, else: 0xFFFFFF
-    bg = if face.bg && face.bg != 0x282C34, do: face.bg, else: 0x000000
-    attrs = encode_face_attrs(face)
-    text_len = byte_size(text)
-
-    <<@op_draw_text, row::16, col::16, fg::24, bg::24, attrs::8, text_len::16, text::binary>>
-  end
-
-  @doc """
-  Encodes a draw_styled_text command with extended attributes.
-
-  Extended over `draw_text` with:
-  - `attrs` expanded to 16 bits (adds strikethrough 0x10, underline_style 3 bits at 0xE0)
-  - `underline_color` as a separate 24-bit RGB field (0x000000 = use fg)
-  - `blend` as an 8-bit opacity value (0-100, 100 = fully opaque)
-  - `font_weight` as an 8-bit weight index (0-7, maps to thin through black)
-
-  Use this for text that needs underline styles, strikethrough, underline
-  color, blend, or per-span font weight. For simple text
-  (fg/bg/bold/italic/underline/reverse), `encode_draw/4` is more compact.
-  """
-  @spec encode_draw_styled(non_neg_integer(), non_neg_integer(), String.t(), style()) :: binary()
-  def encode_draw_styled(row, col, text, style \\ [])
-      when is_integer(row) and row >= 0 and is_integer(col) and col >= 0 and is_binary(text) do
-    fg = Keyword.get(style, :fg, 0xFFFFFF)
-    bg = Keyword.get(style, :bg, 0x000000)
-    attrs = encode_attrs_extended(style)
-    ul_color = Keyword.get(style, :underline_color, 0x000000)
-    blend = Keyword.get(style, :blend, 100)
-    font_weight = Map.get(@font_weight_map, Keyword.get(style, :font_weight, :regular), 2)
-    font_id = Keyword.get(style, :font_id, 0)
-    text_len = byte_size(text)
-
-    <<@op_draw_styled_text, row::16, col::16, fg::24, bg::24, attrs::16, ul_color::24, blend::8,
-      font_weight::8, font_id::8, text_len::16, text::binary>>
-  end
-
-  @doc """
-  Smart encoder: uses `draw_styled_text` if the style contains extended
-  attributes, otherwise falls back to the more compact `draw_text`.
-  """
-  @spec encode_draw_smart(non_neg_integer(), non_neg_integer(), String.t(), style()) :: binary()
-  def encode_draw_smart(row, col, text, style \\ []) do
-    if needs_extended_encoding?(style) do
-      encode_draw_styled(row, col, text, style)
-    else
-      encode_draw(row, col, text, style)
-    end
-  end
-
-  @spec needs_extended_encoding?(style()) :: boolean()
-  defp needs_extended_encoding?(style) do
-    Keyword.has_key?(style, :strikethrough) ||
-      Keyword.has_key?(style, :underline_style) ||
-      Keyword.has_key?(style, :underline_color) ||
-      Keyword.has_key?(style, :blend) ||
-      Keyword.has_key?(style, :font_weight) ||
-      Keyword.has_key?(style, :font_id)
-  end
 
   @doc "Encodes a set_cursor command."
   @spec encode_cursor(non_neg_integer(), non_neg_integer()) :: binary()
@@ -407,78 +296,6 @@ defmodule MingaEditor.Frontend.Protocol do
       when is_integer(font_id) and font_id >= 0 and font_id <= 255 and is_binary(family) do
     <<@op_register_font, font_id::8, byte_size(family)::16, family::binary>>
   end
-
-  # ── Encoding: region commands (BEAM → Zig) ──
-
-  # Region role constants
-  @region_editor 0
-  @region_modeline 1
-  @region_minibuffer 2
-  @region_gutter 3
-  @region_popup 4
-  @region_panel 5
-  @region_border 6
-
-  @typedoc "Region role atom."
-  @type region_role :: :editor | :modeline | :minibuffer | :gutter | :popup | :panel | :border
-
-  @doc "Encodes a define_region command."
-  @spec encode_define_region(
-          non_neg_integer(),
-          non_neg_integer(),
-          region_role(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer()
-        ) :: binary()
-  def encode_define_region(id, parent_id, role, row, col, width, height, z_order) do
-    <<@op_define_region, id::16, parent_id::16, encode_region_role(role)::8, row::16, col::16,
-      width::16, height::16, z_order::8>>
-  end
-
-  @doc "Encodes a clear_region command."
-  @spec encode_clear_region(non_neg_integer()) :: binary()
-  def encode_clear_region(id), do: <<@op_clear_region, id::16>>
-
-  @doc "Encodes a destroy_region command."
-  @spec encode_destroy_region(non_neg_integer()) :: binary()
-  def encode_destroy_region(id), do: <<@op_destroy_region, id::16>>
-
-  @doc "Encodes a set_active_region command. Pass 0 to reset to root."
-  @spec encode_set_active_region(non_neg_integer()) :: binary()
-  def encode_set_active_region(id), do: <<@op_set_active_region, id::16>>
-
-  @doc """
-  Encodes a scroll_region command for terminal scroll optimization.
-
-  Tells the Zig renderer to use ANSI scroll region sequences to shift
-  content within the given screen row range by `delta` lines, avoiding
-  a full redraw.
-
-  * `top_row` / `bottom_row` — screen row range (inclusive) for the scroll region.
-  * `delta` — positive = scroll up (content moves up, new lines at bottom),
-              negative = scroll down (content moves down, new lines at top).
-
-  Wire format: `opcode(1) + top_row(2) + bottom_row(2) + delta(2, signed)` = 7 bytes.
-  """
-  @spec encode_scroll_region(non_neg_integer(), non_neg_integer(), integer()) :: binary()
-  def encode_scroll_region(top_row, bottom_row, delta)
-      when is_integer(top_row) and top_row >= 0 and
-             is_integer(bottom_row) and bottom_row >= 0 and
-             is_integer(delta) do
-    <<@op_scroll_region, top_row::16, bottom_row::16, delta::16-signed>>
-  end
-
-  @spec encode_region_role(region_role()) :: non_neg_integer()
-  defp encode_region_role(:editor), do: @region_editor
-  defp encode_region_role(:modeline), do: @region_modeline
-  defp encode_region_role(:minibuffer), do: @region_minibuffer
-  defp encode_region_role(:gutter), do: @region_gutter
-  defp encode_region_role(:popup), do: @region_popup
-  defp encode_region_role(:panel), do: @region_panel
-  defp encode_region_role(:border), do: @region_border
 
   # ── Parser protocol (delegated to Minga.Parser.Protocol) ──
 
@@ -615,214 +432,7 @@ defmodule MingaEditor.Frontend.Protocol do
     {:error, :malformed}
   end
 
-  # ── Decoding render commands (for testing round-trips) ──
-
-  @doc "Decodes a render command from a binary payload (primarily for testing)."
-  @spec decode_command(binary()) ::
-          {:ok,
-           :clear
-           | :batch_end
-           | {:draw_text, map()}
-           | {:draw_styled_text, map()}
-           | {:set_cursor, non_neg_integer(), non_neg_integer()}
-           | {:set_cursor_shape, cursor_shape()}}
-          | {:error, :unknown_opcode | :malformed}
-  def decode_command(
-        <<@op_draw_text, row::16, col::16, fg::24, bg::24, attrs::8, text_len::16,
-          text::binary-size(text_len)>>
-      ) do
-    {:ok,
-     {:draw_text, %{row: row, col: col, fg: fg, bg: bg, attrs: decode_attrs(attrs), text: text}}}
-  end
-
-  def decode_command(
-        <<@op_draw_styled_text, row::16, col::16, fg::24, bg::24, attrs::16, ul_color::24,
-          blend::8, font_weight_byte::8, font_id::8, text_len::16, text::binary-size(text_len)>>
-      ) do
-    decoded_attrs = decode_attrs_extended(attrs)
-    font_weight = Map.get(@font_weight_reverse, font_weight_byte, :regular)
-
-    style =
-      decoded_attrs
-      |> then(fn a -> if ul_color != 0, do: [{:underline_color, ul_color} | a], else: a end)
-      |> then(fn a -> if blend < 100, do: [{:blend, blend} | a], else: a end)
-      |> then(fn a ->
-        if font_weight != :regular, do: [{:font_weight, font_weight} | a], else: a
-      end)
-      |> then(fn a -> if font_id != 0, do: [{:font_id, font_id} | a], else: a end)
-
-    {:ok, {:draw_styled_text, %{row: row, col: col, fg: fg, bg: bg, attrs: style, text: text}}}
-  end
-
-  def decode_command(<<@op_set_cursor, row::16, col::16>>) do
-    {:ok, {:set_cursor, row, col}}
-  end
-
-  def decode_command(<<@op_clear>>) do
-    {:ok, :clear}
-  end
-
-  def decode_command(<<@op_batch_end>>) do
-    {:ok, :batch_end}
-  end
-
-  def decode_command(<<@op_set_cursor_shape, @cursor_block>>) do
-    {:ok, {:set_cursor_shape, :block}}
-  end
-
-  def decode_command(<<@op_set_cursor_shape, @cursor_beam>>) do
-    {:ok, {:set_cursor_shape, :beam}}
-  end
-
-  def decode_command(<<@op_set_cursor_shape, @cursor_underline>>) do
-    {:ok, {:set_cursor_shape, :underline}}
-  end
-
-  def decode_command(<<@op_set_title, len::16, title::binary-size(len)>>) do
-    {:ok, {:set_title, title}}
-  end
-
-  def decode_command(<<@op_scroll_region, top_row::16, bottom_row::16, delta::16-signed>>) do
-    {:ok, {:scroll_region, top_row, bottom_row, delta}}
-  end
-
-  def decode_command(
-        <<@op_set_font, size::16, weight_byte::8, lig::8, name_len::16,
-          name::binary-size(name_len)>>
-      ) do
-    weight = Map.get(@font_weight_reverse, weight_byte, :regular)
-    {:ok, {:set_font, name, size, weight, lig == 1}}
-  end
-
-  def decode_command(<<@op_set_font_fallback, count::8, rest::binary>>) do
-    case decode_font_fallback_entries(rest, count, []) do
-      {:ok, families} -> {:ok, {:set_font_fallback, families}}
-      :error -> {:error, :malformed}
-    end
-  end
-
-  def decode_command(<<_opcode::8, _rest::binary>>) do
-    {:error, :unknown_opcode}
-  end
-
-  def decode_command(<<>>) do
-    {:error, :malformed}
-  end
-
-  # ── Private ──
-
-  @attr_bold 0x01
-  @attr_underline 0x02
-  @attr_italic 0x04
-  @attr_reverse 0x08
-  @attr_strikethrough 0x10
-  # Underline style occupies bits 5-7 (3 bits) in extended attrs (u16)
-  # 0b000 = line (default), 0b001 = curl, 0b010 = dashed, 0b011 = dotted, 0b100 = double
-  @ul_style_shift 5
-
-  @spec encode_attrs(style()) :: non_neg_integer()
-  defp encode_attrs(style) do
-    import Bitwise
-
-    0
-    |> then(fn a -> if Keyword.get(style, :bold, false), do: a ||| @attr_bold, else: a end)
-    |> then(fn a ->
-      if Keyword.get(style, :underline, false), do: a ||| @attr_underline, else: a
-    end)
-    |> then(fn a -> if Keyword.get(style, :italic, false), do: a ||| @attr_italic, else: a end)
-    |> then(fn a -> if Keyword.get(style, :reverse, false), do: a ||| @attr_reverse, else: a end)
-  end
-
-  @spec encode_face_attrs(Face.t()) :: non_neg_integer()
-  defp encode_face_attrs(%Face{} = face) do
-    import Bitwise
-
-    attrs = if face.bold, do: @attr_bold, else: 0
-    attrs = if face.underline, do: attrs ||| @attr_underline, else: attrs
-    attrs = if face.italic, do: attrs ||| @attr_italic, else: attrs
-    if face.reverse, do: attrs ||| @attr_reverse, else: attrs
-  end
-
-  @spec encode_attrs_extended(style()) :: non_neg_integer()
-  defp encode_attrs_extended(style) do
-    import Bitwise
-
-    base = encode_attrs(style)
-
-    base
-    |> then(fn a ->
-      if Keyword.get(style, :strikethrough, false), do: a ||| @attr_strikethrough, else: a
-    end)
-    |> then(fn a ->
-      ul_style = Keyword.get(style, :underline_style, :line)
-      a ||| ul_style_to_bits(ul_style) <<< @ul_style_shift
-    end)
-  end
-
-  @spec ul_style_to_bits(atom()) :: non_neg_integer()
-  defp ul_style_to_bits(:line), do: 0
-  defp ul_style_to_bits(:curl), do: 1
-  defp ul_style_to_bits(:dashed), do: 2
-  defp ul_style_to_bits(:dotted), do: 3
-  defp ul_style_to_bits(:double), do: 4
-  defp ul_style_to_bits(_), do: 0
-
-  @spec bits_to_ul_style(non_neg_integer()) :: atom()
-  defp bits_to_ul_style(0), do: :line
-  defp bits_to_ul_style(1), do: :curl
-  defp bits_to_ul_style(2), do: :dashed
-  defp bits_to_ul_style(3), do: :dotted
-  defp bits_to_ul_style(4), do: :double
-  defp bits_to_ul_style(_), do: :line
-
-  @spec decode_font_fallback_entries(binary(), non_neg_integer(), [String.t()]) ::
-          {:ok, [String.t()]} | :error
-  defp decode_font_fallback_entries(_rest, 0, acc), do: {:ok, Enum.reverse(acc)}
-
-  defp decode_font_fallback_entries(
-         <<name_len::16, name::binary-size(name_len), rest::binary>>,
-         remaining,
-         acc
-       )
-       when remaining > 0 do
-    decode_font_fallback_entries(rest, remaining - 1, [name | acc])
-  end
-
-  defp decode_font_fallback_entries(_rest, _remaining, _acc), do: :error
-
   @type conceal_span :: Minga.Parser.Protocol.conceal_span()
-
-  @spec decode_attrs(non_neg_integer()) :: [atom()]
-  defp decode_attrs(attrs) do
-    import Bitwise
-
-    []
-    |> then(fn a -> if (attrs &&& @attr_bold) != 0, do: [:bold | a], else: a end)
-    |> then(fn a -> if (attrs &&& @attr_underline) != 0, do: [:underline | a], else: a end)
-    |> then(fn a -> if (attrs &&& @attr_italic) != 0, do: [:italic | a], else: a end)
-    |> then(fn a -> if (attrs &&& @attr_reverse) != 0, do: [:reverse | a], else: a end)
-    |> Enum.reverse()
-  end
-
-  @spec decode_attrs_extended(non_neg_integer()) :: keyword()
-  defp decode_attrs_extended(attrs) do
-    import Bitwise
-
-    base = decode_attrs(Bitwise.band(attrs, 0x0F))
-
-    base =
-      if (attrs &&& @attr_strikethrough) != 0,
-        do: [{:strikethrough, true} | base],
-        else: base
-
-    ul_bits = attrs >>> @ul_style_shift &&& 0x07
-
-    if ul_bits != 0 do
-      [{:underline_style, bits_to_ul_style(ul_bits)} | base]
-    else
-      base
-    end
-  end
 
   # ── Mouse helpers ──
 

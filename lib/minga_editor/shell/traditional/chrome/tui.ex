@@ -15,7 +15,6 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
   alias MingaEditor.Renderer.Caps
   alias MingaEditor.Renderer.CommandCompletionUI
   alias MingaEditor.Renderer.Minibuffer
-  alias MingaEditor.Renderer.Regions
   alias MingaEditor.RenderPipeline.Chrome
   alias MingaEditor.RenderPipeline.Scroll.WindowScroll
   alias MingaEditor.State, as: EditorState
@@ -84,17 +83,13 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
           # Tab bar
           {tab_bar_draws, tab_bar_regions} = ChromeHelpers.render_tab_bar(state, layout)
 
-          # Region definitions
-          regions = Regions.define_regions(layout)
-
           %Chrome{
             stable_fingerprint: stable_fp,
             tab_bar: tab_bar_draws,
             tab_bar_click_regions: tab_bar_regions,
             minibuffer: [minibuffer_draw],
             separators: separator_draws,
-            file_tree: tree_draws,
-            regions: regions
+            file_tree: tree_draws
           }
       end
 
@@ -127,7 +122,6 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
       file_tree: stable.file_tree,
       agent_panel: [],
       overlays: overlays,
-      regions: stable.regions,
       stable_fingerprint: stable_fp
     }
   end

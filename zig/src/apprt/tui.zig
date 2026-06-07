@@ -1,11 +1,7 @@
 /// TUI backend — libvaxis terminal rendering and input.
 ///
 /// Implements the AppRuntime lifecycle (init/run/deinit) and provides
-/// a VaxisSurface that implements the Surface interface for the generic
-/// Renderer.
-///
-/// This is a direct extraction of the original main.zig event loop with
-/// no behavioral changes.
+/// a VaxisSurface that semantic UI renders into.
 const std = @import("std");
 const builtin = @import("builtin");
 const vaxis = @import("vaxis");
@@ -13,10 +9,10 @@ const root = @import("../main.zig");
 const protocol = @import("../protocol.zig");
 const port_writer = @import("../port_writer.zig");
 const recovery_mod = @import("../recovery.zig");
-const renderer_mod = @import("../renderer.zig");
+const semantic_mod = @import("../semantic.zig");
 const surface_mod = @import("../surface.zig");
 // Note: tree-sitter highlighting is handled by the separate minga-parser
-// process. The renderer does not embed any grammars or the highlighter.
+// process. The TUI does not embed any grammars or the highlighter.
 const Cell = surface_mod.Cell;
 
 // ── VaxisSurface ──────────────────────────────────────────────────────────────
@@ -116,7 +112,7 @@ pub const VaxisSurface = struct {
     /// Shifts terminal tracking state to match the terminal's scroll and then
     /// rebuilds the desired screen from that owned tracking state.
     ///
-    /// `vx.screen` cells often point into the renderer's per-frame arena. That
+    /// `vx.screen` cells often point into the semantic frame arena. That
     /// arena is reset after `batch_end`, so copying `vx.screen` cells across a
     /// later scroll can preserve stale grapheme pointers. `screen_last` owns its
     /// character bytes in its own arena, so it is the safe source of truth after
@@ -140,7 +136,7 @@ pub const VaxisSurface = struct {
 
     /// Copies the scroll region in the desired screen from screen_last's owned
     /// storage. This keeps the next render diff synchronized without retaining
-    /// renderer arena pointers from a previous frame.
+    /// semantic frame arena pointers from a previous frame.
     fn syncScreenFromLast(screen: *vaxis.Screen, screen_last: *vaxis.AllocatingScreen, top: u16, bottom: u16) void {
         if (screen.width != screen_last.width or screen.height != screen_last.height) return;
 
@@ -161,7 +157,7 @@ pub const VaxisSurface = struct {
 
     /// Builds a desired-screen cell that borrows grapheme storage from
     /// screen_last. The borrowed bytes live in screen_last's arena, not the
-    /// renderer frame arena, so they remain valid across scroll frames.
+    /// semantic frame arena, so they remain valid across scroll frames.
     fn internalCellToScreenCell(cell: *const vaxis.AllocatingScreen.InternalCell) vaxis.Cell {
         const cell_width = vaxis.gwidth.gwidth(cell.char.items, .wcwidth);
 
@@ -283,6 +279,63 @@ pub const VaxisSurface = struct {
     }
 };
 
+/// Surface wrapper for retained semantic rendering.
+///
+/// Semantic renderers compose small stack-backed strings while drawing. The
+/// surface contract requires grapheme slices to remain valid until libvaxis
+/// renders the frame, so this wrapper copies semantic graphemes into a frame
+/// arena before forwarding cells to the terminal surface.
+pub const SemanticFrameSurface = struct {
+    base: *VaxisSurface,
+    arena: *std.heap.ArenaAllocator,
+
+    pub fn beginFrame(self: *SemanticFrameSurface) void {
+        _ = self.arena.reset(.retain_capacity);
+    }
+
+    pub fn clear(self: *SemanticFrameSurface) void {
+        self.base.clear();
+    }
+
+    pub fn fillBg(self: *SemanticFrameSurface, bg: u24) void {
+        self.base.fillBg(bg);
+    }
+
+    pub fn writeCell(self: *SemanticFrameSurface, col: u16, row: u16, cell: Cell) void {
+        self.base.writeCell(col, row, self.stableCell(cell));
+    }
+
+    fn stableCell(self: *SemanticFrameSurface, cell: Cell) Cell {
+        var stable = cell;
+        stable.grapheme = self.arena.allocator().dupe(u8, cell.grapheme) catch cell.grapheme;
+        return stable;
+    }
+
+    pub fn showCursor(self: *SemanticFrameSurface, col: u16, row: u16) void {
+        self.base.showCursor(col, row);
+    }
+
+    pub fn setCursorShape(self: *SemanticFrameSurface, shape: surface_mod.CursorShape) void {
+        self.base.setCursorShape(shape);
+    }
+
+    pub fn scrollRegion(self: *SemanticFrameSurface, top: u16, bottom: u16, delta: i16) void {
+        self.base.scrollRegion(top, bottom, delta);
+    }
+
+    pub fn render(self: *SemanticFrameSurface) !void {
+        try self.base.render();
+    }
+
+    pub fn width(self: *SemanticFrameSurface) u16 {
+        return self.base.width();
+    }
+
+    pub fn height(self: *SemanticFrameSurface) u16 {
+        return self.base.height();
+    }
+};
+
 /// Convert a surface Cell to a vaxis Cell.Style.
 fn cellToStyle(cell: Cell) vaxis.Cell.Style {
     var style: vaxis.Cell.Style = .{};
@@ -360,7 +413,9 @@ pub const TuiRuntime = struct {
     tty: vaxis.Tty,
     vx: vaxis.Vaxis,
     surface: VaxisSurface,
-    rend: renderer_mod.Renderer(VaxisSurface),
+    semantic_arena: std.heap.ArenaAllocator,
+    semantic_surface: SemanticFrameSurface,
+    semantic: semantic_mod.State,
     tty_write_buf: [4096]u8,
     /// Number of render batches remaining that need a full repaint after
     /// a resize. Set to 2 on resize (enough for one stale pre-resize
@@ -445,9 +500,11 @@ pub const TuiRuntime = struct {
         // Install signal handlers.
         installSignalHandlers();
 
-        // Initialize surface and renderer.
+        // Initialize semantic rendering state.
         self.surface = .{ .vx = &self.vx, .tty_writer = self.tty.writer() };
-        self.rend = renderer_mod.Renderer(VaxisSurface).init(&self.surface, alloc);
+        self.semantic_arena = std.heap.ArenaAllocator.init(alloc);
+        self.semantic_surface = .{ .base = &self.surface, .arena = &self.semantic_arena };
+        self.semantic = semantic_mod.State.init(alloc);
 
         return self;
     }
@@ -462,7 +519,8 @@ pub const TuiRuntime = struct {
         vaxis.tty.global_tty = self.tty;
         self.surface.vx = &self.vx;
         self.surface.tty_writer = self.tty.writer();
-        self.rend.surface = &self.surface;
+        self.semantic_surface.base = &self.surface;
+        self.semantic_surface.arena = &self.semantic_arena;
 
         // Query terminal capabilities (Kitty keyboard protocol, RGB color,
         // Unicode width, graphics support, etc.). This must happen in run(),
@@ -515,10 +573,11 @@ pub const TuiRuntime = struct {
         try self.runEventLoop(&pw);
     }
 
-    /// Clean up: free renderer, vaxis, and restore terminal.
+    /// Clean up semantic state, vaxis, and restore terminal.
     pub fn deinit(self: *TuiRuntime) void {
         self.paste_buf.deinit(self.alloc);
-        self.rend.deinit();
+        self.semantic.deinit();
+        self.semantic_arena.deinit();
         // Restore the terminal title saved at init.
         self.tty.writer().writeAll("\x1b[23;0t") catch {};
         self.vx.deinit(self.alloc, self.tty.writer());
@@ -613,12 +672,226 @@ pub const TuiRuntime = struct {
                         break;
                     };
                     switch (cmd) {
+                        .clear => {
+                            self.semantic.clear();
+                            self.semantic_surface.clear();
+                        },
                         .batch_end => {
                             // BEAM sent a complete frame. Reset unresponsive timer.
                             recovery.onRenderReceived();
-                            self.rend.handleCommand(cmd) catch |err| {
-                                std.log.warn("renderer error: {}", .{err});
+                            self.semantic_surface.beginFrame();
+                            self.semantic.render(SemanticFrameSurface, &self.semantic_surface);
+                            self.semantic_surface.render() catch |err| {
+                                std.log.warn("semantic render flush error: {}", .{err});
                             };
+                        },
+                        .noop => {
+                            if (remaining.len > 0 and remaining[0] == protocol.OP_GUI_TAB_BAR) {
+                                const cmd_size = protocol.commandSize(remaining);
+                                self.semantic.applyTabBarPacket(remaining[0..cmd_size]) catch |err| {
+                                    std.log.warn("semantic tab decode error: {}", .{err});
+                                };
+                            } else if (remaining.len > 0 and remaining[0] == protocol.OP_GUI_WHICH_KEY) {
+                                const cmd_size = protocol.commandSize(remaining);
+                                self.semantic.applyWhichKeyPacket(remaining[0..cmd_size]) catch |err| {
+                                    std.log.warn("semantic which-key decode error: {}", .{err});
+                                };
+                            } else if (remaining.len > 0 and remaining[0] == protocol.OP_GUI_COMPLETION) {
+                                const cmd_size = protocol.commandSize(remaining);
+                                self.semantic.applyCompletionPacket(remaining[0..cmd_size]) catch |err| {
+                                    std.log.warn("semantic completion decode error: {}", .{err});
+                                };
+                            } else if (remaining.len > 0 and remaining[0] == protocol.OP_GUI_THEME) {
+                                const cmd_size = protocol.commandSize(remaining);
+                                self.semantic.applyThemePacket(remaining[0..cmd_size]) catch |err| {
+                                    std.log.warn("semantic theme decode error: {}", .{err});
+                                };
+                            } else if (remaining.len > 0 and remaining[0] == protocol.OP_GUI_BREADCRUMB) {
+                                const cmd_size = protocol.commandSize(remaining);
+                                self.semantic.applyBreadcrumbPacket(remaining[0..cmd_size]) catch |err| {
+                                    std.log.warn("semantic breadcrumb decode error: {}", .{err});
+                                };
+                            } else if (remaining.len > 0 and remaining[0] == protocol.OP_GUI_FILE_TREE) {
+                                const cmd_size = protocol.commandSize(remaining);
+                                self.semantic.applyFileTreePacket(remaining[0..cmd_size]) catch |err| {
+                                    std.log.warn("semantic file tree decode error: {}", .{err});
+                                };
+                            } else if (remaining.len > 0 and remaining[0] == protocol.OP_GUI_FILE_TREE_SELECTION) {
+                                const cmd_size = protocol.commandSize(remaining);
+                                self.semantic.applyFileTreeSelectionPacket(remaining[0..cmd_size]) catch |err| {
+                                    std.log.warn("semantic file tree selection decode error: {}", .{err});
+                                };
+                            } else if (remaining.len > 0 and remaining[0] == protocol.OP_GUI_SIDEBARS) {
+                                const cmd_size = protocol.commandSize(remaining);
+                                self.semantic.applySidebarsPacket(remaining[0..cmd_size]) catch |err| {
+                                    std.log.warn("semantic sidebars decode error: {}", .{err});
+                                };
+                            } else if (remaining.len > 0 and remaining[0] == protocol.OP_GUI_GUTTER) {
+                                const cmd_size = protocol.commandSize(remaining);
+                                self.semantic.applyGutterPacket(remaining[0..cmd_size]) catch |err| {
+                                    std.log.warn("semantic gutter decode error: {}", .{err});
+                                };
+                            } else if (remaining.len > 0 and remaining[0] == protocol.OP_GUI_INDENT_GUIDES) {
+                                const cmd_size = protocol.commandSize(remaining);
+                                self.semantic.applyIndentGuidesPacket(remaining[0..cmd_size]) catch |err| {
+                                    std.log.warn("semantic indent guides decode error: {}", .{err});
+                                };
+                            } else if (remaining.len > 0 and remaining[0] == protocol.OP_GUI_WINDOW_CONTENT) {
+                                const cmd_size = protocol.commandSize(remaining);
+                                self.semantic.applyWindowContentPacket(remaining[0..cmd_size]) catch |err| {
+                                    std.log.warn("semantic window content decode error: {}", .{err});
+                                };
+                            } else if (remaining.len > 0 and remaining[0] == protocol.OP_GUI_WINDOW_OVERLAY_DELTA) {
+                                const cmd_size = protocol.commandSize(remaining);
+                                self.semantic.applyWindowOverlayDeltaPacket(remaining[0..cmd_size]) catch |err| {
+                                    std.log.warn("semantic window overlay delta decode error: {}", .{err});
+                                };
+                            } else if (remaining.len > 0 and (remaining[0] == protocol.OP_GUI_WINDOW_ROWS_DELTA or remaining[0] == protocol.OP_GUI_WINDOW_VIEWPORT_DELTA)) {
+                                const cmd_size = protocol.commandSize(remaining);
+                                self.semantic.applyWindowRowsDeltaPacket(remaining[0..cmd_size]) catch |err| {
+                                    std.log.warn("semantic window rows delta decode error: {}", .{err});
+                                };
+                            } else if (remaining.len > 0 and remaining[0] == protocol.OP_GUI_PICKER) {
+                                const cmd_size = protocol.commandSize(remaining);
+                                self.semantic.applyPickerPacket(remaining[0..cmd_size]) catch |err| {
+                                    std.log.warn("semantic picker decode error: {}", .{err});
+                                };
+                            } else if (remaining.len > 0 and remaining[0] == protocol.OP_GUI_PICKER_PREVIEW) {
+                                const cmd_size = protocol.commandSize(remaining);
+                                self.semantic.applyPickerPreviewPacket(remaining[0..cmd_size]) catch |err| {
+                                    std.log.warn("semantic picker preview decode error: {}", .{err});
+                                };
+                            } else if (remaining.len > 0 and remaining[0] == protocol.OP_GUI_HOVER_POPUP) {
+                                const cmd_size = protocol.commandSize(remaining);
+                                self.semantic.applyHoverPopupPacket(remaining[0..cmd_size]) catch |err| {
+                                    std.log.warn("semantic hover decode error: {}", .{err});
+                                };
+                            } else if (remaining.len > 0 and remaining[0] == protocol.OP_GUI_SIGNATURE_HELP) {
+                                const cmd_size = protocol.commandSize(remaining);
+                                self.semantic.applySignatureHelpPacket(remaining[0..cmd_size]) catch |err| {
+                                    std.log.warn("semantic signature help decode error: {}", .{err});
+                                };
+                            } else if (remaining.len > 0 and remaining[0] == protocol.OP_GUI_FLOAT_POPUP) {
+                                const cmd_size = protocol.commandSize(remaining);
+                                self.semantic.applyFloatPopupPacket(remaining[0..cmd_size]) catch |err| {
+                                    std.log.warn("semantic float popup decode error: {}", .{err});
+                                };
+                            } else if (remaining.len > 0 and remaining[0] == protocol.OP_GUI_GIT_STATUS) {
+                                const cmd_size = protocol.commandSize(remaining);
+                                self.semantic.applyGitStatusPacket(remaining[0..cmd_size]) catch |err| {
+                                    std.log.warn("semantic git status decode error: {}", .{err});
+                                };
+                            } else if (remaining.len > 0 and remaining[0] == protocol.OP_GUI_BOTTOM_PANEL) {
+                                const cmd_size = protocol.commandSize(remaining);
+                                self.semantic.applyBottomPanelPacket(remaining[0..cmd_size]) catch |err| {
+                                    std.log.warn("semantic bottom panel decode error: {}", .{err});
+                                };
+                            } else if (remaining.len > 0 and remaining[0] == protocol.OP_GUI_SPLIT_SEPARATORS) {
+                                const cmd_size = protocol.commandSize(remaining);
+                                self.semantic.applySplitSeparatorsPacket(remaining[0..cmd_size]) catch |err| {
+                                    std.log.warn("semantic split separators decode error: {}", .{err});
+                                };
+                            } else if (remaining.len > 0 and remaining[0] == protocol.OP_GUI_SEARCH_STATE) {
+                                const cmd_size = protocol.commandSize(remaining);
+                                self.semantic.applySearchStatePacket(remaining[0..cmd_size]) catch |err| {
+                                    std.log.warn("semantic search state decode error: {}", .{err});
+                                };
+                            } else if (remaining.len > 0 and remaining[0] == protocol.OP_GUI_CHANGE_SUMMARY) {
+                                const cmd_size = protocol.commandSize(remaining);
+                                self.semantic.applyChangeSummaryPacket(remaining[0..cmd_size]) catch |err| {
+                                    std.log.warn("semantic change summary decode error: {}", .{err});
+                                };
+                            } else if (remaining.len > 0 and remaining[0] == protocol.OP_GUI_NOTIFICATIONS) {
+                                const cmd_size = protocol.commandSize(remaining);
+                                self.semantic.applyNotificationsPacket(remaining[0..cmd_size]) catch |err| {
+                                    std.log.warn("semantic notifications decode error: {}", .{err});
+                                };
+                            } else if (remaining.len > 0 and remaining[0] == protocol.OP_GUI_EDIT_TIMELINE) {
+                                const cmd_size = protocol.commandSize(remaining);
+                                self.semantic.applyEditTimelinePacket(remaining[0..cmd_size]) catch |err| {
+                                    std.log.warn("semantic edit timeline decode error: {}", .{err});
+                                };
+                            } else if (remaining.len > 0 and remaining[0] == protocol.OP_GUI_EXTENSION_OVERLAY) {
+                                const cmd_size = protocol.commandSize(remaining);
+                                self.semantic.applyExtensionOverlayPacket(remaining[0..cmd_size]) catch |err| {
+                                    std.log.warn("semantic extension overlay decode error: {}", .{err});
+                                };
+                            } else if (remaining.len > 0 and remaining[0] == protocol.OP_GUI_EXTENSION_PANEL) {
+                                const cmd_size = protocol.commandSize(remaining);
+                                self.semantic.applyExtensionPanelPacket(remaining[0..cmd_size]) catch |err| {
+                                    std.log.warn("semantic extension panel decode error: {}", .{err});
+                                };
+                            } else if (remaining.len > 0 and remaining[0] == protocol.OP_GUI_OBSERVATORY) {
+                                const cmd_size = protocol.commandSize(remaining);
+                                self.semantic.applyObservatoryPacket(remaining[0..cmd_size]) catch |err| {
+                                    std.log.warn("semantic observatory decode error: {}", .{err});
+                                };
+                            } else if (remaining.len > 0 and remaining[0] == protocol.OP_GUI_AGENT_CONTEXT) {
+                                const cmd_size = protocol.commandSize(remaining);
+                                self.semantic.applyAgentContextPacket(remaining[0..cmd_size]) catch |err| {
+                                    std.log.warn("semantic agent context decode error: {}", .{err});
+                                };
+                            } else if (remaining.len > 0 and remaining[0] == protocol.OP_GUI_TOOL_MANAGER) {
+                                const cmd_size = protocol.commandSize(remaining);
+                                self.semantic.applyToolManagerPacket(remaining[0..cmd_size]) catch |err| {
+                                    std.log.warn("semantic tool manager decode error: {}", .{err});
+                                };
+                            } else if (remaining.len > 0 and remaining[0] == protocol.OP_GUI_CURSORLINE) {
+                                const cmd_size = protocol.commandSize(remaining);
+                                self.semantic.applyCursorlinePacket(remaining[0..cmd_size]) catch |err| {
+                                    std.log.warn("semantic cursorline decode error: {}", .{err});
+                                };
+                            } else if (remaining.len > 0 and remaining[0] == protocol.OP_GUI_GUTTER_SEP) {
+                                const cmd_size = protocol.commandSize(remaining);
+                                self.semantic.applyGutterSeparatorPacket(remaining[0..cmd_size]) catch |err| {
+                                    std.log.warn("semantic gutter separator decode error: {}", .{err});
+                                };
+                            } else if (remaining.len > 0 and remaining[0] == protocol.OP_GUI_LINE_SPACING) {
+                                const cmd_size = protocol.commandSize(remaining);
+                                self.semantic.applyLineSpacingPacket(remaining[0..cmd_size]) catch |err| {
+                                    std.log.warn("semantic line spacing decode error: {}", .{err});
+                                };
+                            } else if (remaining.len > 0 and remaining[0] == protocol.OP_GUI_CURSOR_ANIMATION) {
+                                const cmd_size = protocol.commandSize(remaining);
+                                self.semantic.applyCursorAnimationPacket(remaining[0..cmd_size]) catch |err| {
+                                    std.log.warn("semantic cursor animation decode error: {}", .{err});
+                                };
+                            } else if (remaining.len > 0 and remaining[0] == protocol.OP_GUI_CONFIG_STATE) {
+                                const cmd_size = protocol.commandSize(remaining);
+                                self.semantic.applyConfigStatePacket(remaining[0..cmd_size]) catch |err| {
+                                    std.log.warn("semantic config state decode error: {}", .{err});
+                                };
+                            } else if (remaining.len > 0 and remaining[0] == protocol.OP_GUI_HOVER_ACTION) {
+                                const cmd_size = protocol.commandSize(remaining);
+                                self.semantic.applyHoverActionPacket(remaining[0..cmd_size]) catch |err| {
+                                    std.log.warn("semantic hover action decode error: {}", .{err});
+                                };
+                            } else if (remaining.len > 0 and remaining[0] == protocol.OP_GUI_BOARD) {
+                                const cmd_size = protocol.commandSize(remaining);
+                                self.semantic.applyBoardPacket(remaining[0..cmd_size]) catch |err| {
+                                    std.log.warn("semantic board decode error: {}", .{err});
+                                };
+                            } else if (remaining.len > 0 and remaining[0] == protocol.OP_GUI_AGENT_CHAT) {
+                                const cmd_size = protocol.commandSize(remaining);
+                                self.semantic.applyAgentChatPacket(remaining[0..cmd_size]) catch |err| {
+                                    std.log.warn("semantic agent chat decode error: {}", .{err});
+                                };
+                            } else if (remaining.len > 0 and remaining[0] == protocol.OP_GUI_MINIBUFFER) {
+                                const cmd_size = protocol.commandSize(remaining);
+                                self.semantic.applyMinibufferPacket(remaining[0..cmd_size]) catch |err| {
+                                    std.log.warn("semantic minibuffer decode error: {}", .{err});
+                                };
+                            } else if (remaining.len > 0 and remaining[0] == protocol.OP_GUI_WORKSPACES) {
+                                const cmd_size = protocol.commandSize(remaining);
+                                self.semantic.applyWorkspacesPacket(remaining[0..cmd_size]) catch |err| {
+                                    std.log.warn("semantic workspaces decode error: {}", .{err});
+                                };
+                            } else if (remaining.len > 0 and remaining[0] == protocol.OP_GUI_STATUS_BAR) {
+                                const cmd_size = protocol.commandSize(remaining);
+                                self.semantic.applyStatusBarPacket(remaining[0..cmd_size]) catch |err| {
+                                    std.log.warn("semantic status decode error: {}", .{err});
+                                };
+                            }
                         },
                         .measure_text => |mt| {
                             self.handleMeasureText(mt, pw) catch |err| {
@@ -626,15 +899,18 @@ pub const TuiRuntime = struct {
                             };
                         },
                         .set_language, .parse_buffer, .set_highlight_query, .set_injection_query, .load_grammar, .query_language_at, .edit_buffer => {
-                            std.log.warn("renderer received highlight command (should go to parser)", .{});
+                            std.log.warn("TUI received parser command (should go to parser)", .{});
                         },
                         else => {
-                            self.rend.handleCommand(cmd) catch |err| {
-                                std.log.warn("renderer error: {}", .{err});
-                            };
+                            std.log.warn("semantic TUI ignored non-semantic render command: {s}", .{@tagName(cmd)});
                         },
                     }
-                    offset += protocol.commandSize(remaining);
+                    const advance = protocol.commandSize(remaining);
+                    if (advance == 0) {
+                        std.log.warn("protocol command made no progress at offset {}", .{offset});
+                        break;
+                    }
+                    offset += advance;
                 }
             }
 
@@ -925,6 +1201,15 @@ fn handleTtyEvent(self: *TuiRuntime, event: vaxis.Event, pw: *port_writer, recov
                 .drag => protocol.MOUSE_DRAG,
             };
 
+            if (button == protocol.MOUSE_LEFT and event_type == protocol.MOUSE_PRESS and mouse.row >= 0 and mouse.col >= 0) {
+                const row: u16 = @intCast(mouse.row);
+                const col: u16 = @intCast(mouse.col);
+                if (self.semantic.hitTest(row, col, self.semantic_surface.width(), self.semantic_surface.height())) |action| {
+                    try enqueueSemanticHitAction(pw, action);
+                    return;
+                }
+            }
+
             var mbuf: [9]u8 = undefined;
             const mlen = try protocol.encodeMouseEvent(&mbuf, mouse.row, mouse.col, button, mods, event_type, 1);
             try pw.enqueue(mbuf[0..mlen]);
@@ -932,6 +1217,17 @@ fn handleTtyEvent(self: *TuiRuntime, event: vaxis.Event, pw: *port_writer, recov
 
         else => {},
     }
+}
+
+fn enqueueSemanticHitAction(pw: *port_writer, action: semantic_mod.HitAction) !void {
+    var buf: [8]u8 = undefined;
+    const len = switch (action) {
+        .no_payload => |action_id| try protocol.encodeGuiAction(&buf, action_id),
+        .u16_payload => |payload| try protocol.encodeGuiActionU16(&buf, payload.action, payload.value),
+        .u32_payload => |payload| try protocol.encodeGuiActionU32(&buf, payload.action, payload.value),
+        .fold_toggle => |payload| try protocol.encodeGuiActionFoldToggle(&buf, payload.window_id, payload.buffer_line),
+    };
+    try pw.enqueue(buf[0..len]);
 }
 
 /// Read exactly `buf.len` bytes from `fd`, blocking until done.
@@ -955,6 +1251,26 @@ fn putInternalCell(screen_last: *vaxis.AllocatingScreen, row: usize, col: usize,
     cell.char.clearRetainingCapacity();
     try cell.char.appendSlice(screen_last.arena.allocator(), text);
     cell.default = false;
+}
+
+test "semantic frame surface owns stack grapheme bytes until frame reset" {
+    const alloc = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(alloc);
+    defer arena.deinit();
+
+    var surface = SemanticFrameSurface{
+        .base = undefined,
+        .arena = &arena,
+    };
+
+    var stack_text = [_]u8{ '1', '2', '3' };
+    const stable = surface.stableCell(.{ .grapheme = stack_text[0..] });
+    try std.testing.expectEqualStrings("123", stable.grapheme);
+
+    stack_text = .{ 'x', 'x', 'x' };
+    try std.testing.expectEqualStrings("123", stable.grapheme);
+
+    surface.beginFrame();
 }
 
 test "scroll sync rebuilds desired screen from owned tracking storage" {

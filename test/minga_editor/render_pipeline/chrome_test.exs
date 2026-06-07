@@ -52,16 +52,6 @@ defmodule MingaEditor.RenderPipeline.ChromeTest do
 
       assert [_ | _] = chrome.status_bar_draws
     end
-
-    test "chrome regions is a list of binaries" do
-      state = base_state()
-      {scrolls, cursor_info, state, layout} = run_through_content(state)
-
-      chrome = state.shell.build_chrome(state, layout, scrolls, cursor_info)
-
-      assert is_list(chrome.regions)
-      assert Enum.all?(chrome.regions, &is_binary/1)
-    end
   end
 
   describe "build_chrome/4 GUI path" do
@@ -111,16 +101,6 @@ defmodule MingaEditor.RenderPipeline.ChromeTest do
       chrome = state.shell.build_chrome(state, layout, scrolls, cursor_info)
 
       assert chrome.minibuffer == []
-    end
-
-    test "regions are still produced" do
-      state = gui_state()
-      {scrolls, cursor_info, state, layout} = run_through_content(state)
-
-      chrome = state.shell.build_chrome(state, layout, scrolls, cursor_info)
-
-      assert is_list(chrome.regions)
-      assert Enum.all?(chrome.regions, &is_binary/1)
     end
   end
 end

@@ -4,8 +4,8 @@
 /// implements this by wrapping libvaxis; a future GPU backend would implement
 /// it with Metal/OpenGL draw calls.
 ///
-/// Backends implement the required methods and are selected at comptime via
-/// `Renderer(SurfaceT)` generic parameterization.
+/// Backends implement the required methods and the semantic renderer writes to
+/// whichever Surface implementation is passed at comptime.
 ///
 /// Required methods for a Surface implementation:
 ///   fn clear(*Self) void
@@ -24,7 +24,8 @@ pub const CursorShape = protocol.CursorShape;
 /// implementation maps this to its native representation.
 pub const Cell = struct {
     /// UTF-8 encoded grapheme cluster. The slice must remain valid until
-    /// the next `render()` call (the renderer's arena guarantees this).
+    /// the next `render()` call. The semantic frame arena owns copied graphemes
+    /// for the libvaxis backend.
     grapheme: []const u8 = "",
 
     /// Display width in terminal columns (1 for most characters, 2 for
@@ -41,7 +42,7 @@ pub const Cell = struct {
     /// Uses protocol.ATTR_* constants.
     attrs: u8 = 0,
 
-    // ── Extended style attributes (from draw_styled_text opcode 0x1C) ──
+    // ── Extended semantic text style attributes ──
 
     /// Underline style: 0=off, 1=curl, 2=dashed, 3=dotted, 4=double.
     /// Matches the BEAM-side encoding in protocol.ex (ul_style_to_bits).

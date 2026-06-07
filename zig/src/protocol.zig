@@ -8,6 +8,7 @@
 ///   0x03 ready:        width:u16, height:u16
 ///   0x04 mouse_event:  row:i16, col:i16, button:u8, modifiers:u8, event_type:u8
 ///   0x06 paste_event:  text_len:u16, text:u8[text_len]
+///   0x07 gui_action:   action:u8, payload
 ///
 /// Render commands (BEAM → Zig):
 ///   0x10 draw_text:        row:u16, col:u16, fg:u24, bg:u24, attrs:u8, text_len:u16, text
@@ -666,6 +667,42 @@ pub fn encodeMouseEvent(buf: []u8, row: i16, col: i16, button: u8, modifiers: u8
     return 9;
 }
 
+/// Encodes a semantic GUI action with no payload.
+pub fn encodeGuiAction(buf: []u8, action: u8) !usize {
+    if (buf.len < 2) return error.Malformed;
+    buf[0] = OP_GUI_ACTION;
+    buf[1] = action;
+    return 2;
+}
+
+/// Encodes a semantic GUI action with a u16 payload.
+pub fn encodeGuiActionU16(buf: []u8, action: u8, value: u16) !usize {
+    if (buf.len < 4) return error.Malformed;
+    buf[0] = OP_GUI_ACTION;
+    buf[1] = action;
+    std.mem.writeInt(u16, buf[2..4], value, .big);
+    return 4;
+}
+
+/// Encodes a semantic GUI action with a u32 payload.
+pub fn encodeGuiActionU32(buf: []u8, action: u8, value: u32) !usize {
+    if (buf.len < 6) return error.Malformed;
+    buf[0] = OP_GUI_ACTION;
+    buf[1] = action;
+    std.mem.writeInt(u32, buf[2..6], value, .big);
+    return 6;
+}
+
+/// Encodes fold_toggle_at_line: window_id:u16, buffer_line:u32.
+pub fn encodeGuiActionFoldToggle(buf: []u8, window_id: u16, buffer_line: u32) !usize {
+    if (buf.len < 8) return error.Malformed;
+    buf[0] = OP_GUI_ACTION;
+    buf[1] = GUI_ACTION_FOLD_TOGGLE_AT_LINE;
+    std.mem.writeInt(u16, buf[2..4], window_id, .big);
+    std.mem.writeInt(u32, buf[4..8], buffer_line, .big);
+    return 8;
+}
+
 /// Encodes a paste_event into an allocator-owned buffer.
 /// Layout: opcode(1) + text_len(2, big-endian) + text(text_len).
 /// The text is UTF-8 encoded. Maximum text length is 65535 bytes (u16 max).
@@ -1175,9 +1212,9 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
             return .noop;
         },
         else => switch (generated_command_size.commandSize(data).status) {
-            .sized => return .noop,
+            .sized, .custom => return .noop,
             .incomplete => return error.Malformed,
-            .unknown, .custom => return error.UnknownOpcode,
+            .unknown => return error.UnknownOpcode,
         },
     }
 }
@@ -1255,9 +1292,498 @@ fn customCommandSize(payload: []const u8) usize {
             }
             break :blk offset;
         },
+        OP_GUI_TAB_BAR => guiTabBarSize(payload),
+        OP_GUI_WHICH_KEY => guiWhichKeySize(payload),
+        OP_GUI_COMPLETION => guiCompletionSize(payload),
+        OP_GUI_THEME => guiThemeSize(payload),
+        OP_GUI_BREADCRUMB => guiBreadcrumbSize(payload),
+        OP_GUI_FILE_TREE => len32CommandSize(payload),
+        OP_GUI_FILE_TREE_SELECTION => len16CommandSize(payload),
+        OP_GUI_GUTTER => sectionedGuiSize(payload),
+        OP_GUI_INDENT_GUIDES => len16CommandSize(payload),
+        OP_GUI_WINDOW_CONTENT => sectionedGuiSize(payload),
+        OP_GUI_WINDOW_OVERLAY_DELTA => guiWindowOverlayDeltaSize(payload),
+        OP_GUI_WINDOW_VIEWPORT_DELTA => sectionedGuiSize(payload),
+        OP_GUI_WINDOW_ROWS_DELTA => sectionedGuiSize(payload),
+        OP_GUI_PICKER => sectionedGuiSize(payload),
+        OP_GUI_PICKER_PREVIEW => guiPickerPreviewSize(payload),
+        OP_GUI_HOVER_POPUP => guiHoverPopupSize(payload),
+        OP_GUI_SIGNATURE_HELP => guiSignatureHelpSize(payload),
+        OP_GUI_FLOAT_POPUP => guiFloatPopupSize(payload),
+        OP_GUI_GIT_STATUS => guiGitStatusSize(payload),
+        OP_GUI_BOTTOM_PANEL => guiBottomPanelSize(payload),
+        OP_GUI_SPLIT_SEPARATORS => guiSplitSeparatorsSize(payload),
+        OP_GUI_SEARCH_STATE => len16CommandSize(payload),
+        OP_GUI_CHANGE_SUMMARY => guiChangeSummarySize(payload),
+        OP_GUI_NOTIFICATIONS => len16CommandSize(payload),
+        OP_GUI_EDIT_TIMELINE => len16CommandSize(payload),
+        OP_GUI_EXTENSION_OVERLAY => len16CommandSize(payload),
+        OP_GUI_EXTENSION_PANEL => len16CommandSize(payload),
+        OP_GUI_OBSERVATORY => len32CommandSize(payload),
+        OP_GUI_SIDEBARS => len32CommandSize(payload),
+        OP_GUI_AGENT_CONTEXT => guiAgentContextSize(payload),
+        OP_GUI_TOOL_MANAGER => guiToolManagerSize(payload),
+        OP_GUI_CURSORLINE => fixedCommandSize(payload, 6),
+        OP_GUI_GUTTER_SEP => fixedCommandSize(payload, 6),
+        OP_GUI_LINE_SPACING => len16CommandSize(payload),
+        OP_GUI_CURSOR_ANIMATION => len16CommandSize(payload),
+        OP_GUI_CONFIG_STATE => len16CommandSize(payload),
+        OP_GUI_HOVER_ACTION => len16CommandSize(payload),
+        OP_GUI_BOARD => guiBoardSize(payload),
+        OP_GUI_AGENT_CHAT => sectionedGuiSize(payload),
+        OP_GUI_MINIBUFFER => guiMinibufferSize(payload),
+        OP_GUI_WORKSPACES => len16CommandSize(payload),
         else => parserCommandSize(payload) orelse 1,
     };
     return @min(decoded_size, payload.len);
+}
+
+fn guiTabBarSize(payload: []const u8) usize {
+    if (payload.len < 3) return payload.len;
+    const count = payload[2];
+    var offset: usize = 3;
+    var i: u8 = 0;
+    while (i < count) : (i += 1) {
+        if (payload.len < offset + 8) return payload.len;
+        const icon_len: usize = payload[offset + 7];
+        offset += 8;
+        if (payload.len < offset + icon_len + 2) return payload.len;
+        offset += icon_len;
+        const label_len: usize = std.mem.readInt(u16, payload[offset..][0..2], .big);
+        offset += 2;
+        if (payload.len < offset + label_len + 4) return payload.len;
+        offset += label_len + 4;
+    }
+    return offset;
+}
+
+fn fixedCommandSize(payload: []const u8, size: usize) usize {
+    return if (payload.len < size) payload.len else size;
+}
+
+fn guiWhichKeySize(payload: []const u8) usize {
+    if (payload.len < 2) return payload.len;
+    if (payload[1] == 0) return 2;
+
+    var offset: usize = 2;
+    _ = readString16Size(payload, &offset) orelse return payload.len;
+    if (payload.len < offset + 4) return payload.len;
+    offset += 2;
+    const binding_count = std.mem.readInt(u16, payload[offset..][0..2], .big);
+    offset += 2;
+
+    var i: u16 = 0;
+    while (i < binding_count) : (i += 1) {
+        if (payload.len < offset + 1) return payload.len;
+        offset += 1;
+        if (!readString8Size(payload, &offset)) return payload.len;
+        _ = readString16Size(payload, &offset) orelse return payload.len;
+        if (!readString8Size(payload, &offset)) return payload.len;
+    }
+
+    return offset;
+}
+
+fn guiCompletionSize(payload: []const u8) usize {
+    if (payload.len < 2) return payload.len;
+    if (payload[1] == 0) return 2;
+    if (payload.len < 10) return payload.len;
+
+    var offset: usize = 8;
+    const item_count = std.mem.readInt(u16, payload[offset..][0..2], .big);
+    offset += 2;
+
+    var i: u16 = 0;
+    while (i < item_count) : (i += 1) {
+        if (payload.len < offset + 1) return payload.len;
+        offset += 1;
+        _ = readString16Size(payload, &offset) orelse return payload.len;
+        _ = readString16Size(payload, &offset) orelse return payload.len;
+    }
+
+    return offset;
+}
+
+fn guiThemeSize(payload: []const u8) usize {
+    if (payload.len < 2) return payload.len;
+    return @min(2 + @as(usize, payload[1]) * 4, payload.len);
+}
+
+fn guiChangeSummarySize(payload: []const u8) usize {
+    if (payload.len < 6) return payload.len;
+    const count = std.mem.readInt(u16, payload[4..][0..2], .big);
+    var offset: usize = 6;
+    var index: u16 = 0;
+    while (index < count) : (index += 1) {
+        _ = readString16Size(payload, &offset) orelse return payload.len;
+        if (payload.len < offset + 9) return payload.len;
+        offset += 9;
+    }
+    return offset;
+}
+
+fn guiAgentContextSize(payload: []const u8) usize {
+    if (payload.len < 4) return payload.len;
+    const task_len: usize = std.mem.readInt(u16, payload[2..][0..2], .big);
+    return @min(4 + task_len + 10, payload.len);
+}
+
+fn guiToolManagerSize(payload: []const u8) usize {
+    if (payload.len < 2) return payload.len;
+    if (payload[1] == 0) return 2;
+    if (payload.len < 7) return payload.len;
+
+    const count = std.mem.readInt(u16, payload[5..][0..2], .big);
+    var offset: usize = 7;
+    var index: u16 = 0;
+    while (index < count) : (index += 1) {
+        if (!readString8Size(payload, &offset)) return payload.len;
+        if (!readString8Size(payload, &offset)) return payload.len;
+        _ = readString16Size(payload, &offset) orelse return payload.len;
+        if (payload.len < offset + 4) return payload.len;
+        offset += 3;
+        const language_count = payload[offset];
+        offset += 1;
+        var language_index: u8 = 0;
+        while (language_index < language_count) : (language_index += 1) {
+            if (!readString8Size(payload, &offset)) return payload.len;
+        }
+        if (!readString8Size(payload, &offset)) return payload.len;
+        _ = readString16Size(payload, &offset) orelse return payload.len;
+        if (payload.len < offset + 1) return payload.len;
+        const provides_count = payload[offset];
+        offset += 1;
+        var provides_index: u8 = 0;
+        while (provides_index < provides_count) : (provides_index += 1) {
+            if (!readString8Size(payload, &offset)) return payload.len;
+        }
+        _ = readString16Size(payload, &offset) orelse return payload.len;
+    }
+    return offset;
+}
+
+fn guiBoardSize(payload: []const u8) usize {
+    if (payload.len < 11) return payload.len;
+    const card_count = std.mem.readInt(u16, payload[6..][0..2], .big);
+    var offset: usize = 9;
+    _ = readString16Size(payload, &offset) orelse return payload.len;
+    var index: u16 = 0;
+    while (index < card_count) : (index += 1) {
+        if (payload.len < offset + 6) return payload.len;
+        offset += 6;
+        _ = readString16Size(payload, &offset) orelse return payload.len;
+        if (!readString8Size(payload, &offset)) return payload.len;
+        if (payload.len < offset + 5) return payload.len;
+        offset += 4;
+        const recent_count = payload[offset];
+        offset += 1;
+        var recent_index: u8 = 0;
+        while (recent_index < recent_count) : (recent_index += 1) {
+            _ = readString16Size(payload, &offset) orelse return payload.len;
+        }
+        if (payload.len < offset + 1) return payload.len;
+        const sparkline_count = payload[offset];
+        offset += 1;
+        if (payload.len < offset + @as(usize, sparkline_count) * 2) return payload.len;
+        offset += @as(usize, sparkline_count) * 2;
+    }
+    return offset;
+}
+
+fn guiBreadcrumbSize(payload: []const u8) usize {
+    if (payload.len < 2) return payload.len;
+
+    var offset: usize = 2;
+    var i: u8 = 0;
+    while (i < payload[1]) : (i += 1) {
+        _ = readString16Size(payload, &offset) orelse return payload.len;
+    }
+
+    return offset;
+}
+
+fn sectionedGuiSize(payload: []const u8) usize {
+    if (payload.len < 2) return payload.len;
+    if (payload[1] == 0) return 2;
+
+    var offset: usize = 2;
+    var i: u8 = 0;
+    while (i < payload[1]) : (i += 1) {
+        if (payload.len < offset + 3) return payload.len;
+        const section_len: usize = std.mem.readInt(u16, payload[offset + 1 ..][0..2], .big);
+        offset += 3;
+        if (payload.len < offset + section_len) return payload.len;
+        offset += section_len;
+    }
+
+    return offset;
+}
+
+fn guiWindowOverlayDeltaSize(payload: []const u8) usize {
+    if (payload.len < 13) return payload.len;
+    var offset: usize = 13;
+    if (payload[7] & 0x02 != 0) {
+        if (payload.len < offset + 5) return payload.len;
+        offset += 5;
+    }
+    return offset;
+}
+
+fn len32CommandSize(payload: []const u8) usize {
+    if (payload.len < 5) return payload.len;
+    const payload_len: usize = std.mem.readInt(u32, payload[1..][0..4], .big);
+    return @min(5 + payload_len, payload.len);
+}
+
+fn len16CommandSize(payload: []const u8) usize {
+    if (payload.len < 3) return payload.len;
+    const payload_len: usize = std.mem.readInt(u16, payload[1..][0..2], .big);
+    return @min(3 + payload_len, payload.len);
+}
+
+fn guiPickerPreviewSize(payload: []const u8) usize {
+    if (payload.len < 2) return payload.len;
+    if (payload[1] == 0) return 2;
+    if (payload.len < 4) return payload.len;
+
+    var offset: usize = 2;
+    const line_count = std.mem.readInt(u16, payload[offset..][0..2], .big);
+    offset += 2;
+
+    var line_index: u16 = 0;
+    while (line_index < line_count) : (line_index += 1) {
+        if (payload.len < offset + 1) return payload.len;
+        const segment_count = payload[offset];
+        offset += 1;
+
+        var segment_index: u8 = 0;
+        while (segment_index < segment_count) : (segment_index += 1) {
+            if (payload.len < offset + 4) return payload.len;
+            offset += 4;
+            _ = readString16Size(payload, &offset) orelse return payload.len;
+        }
+    }
+
+    return offset;
+}
+
+fn guiHoverPopupSize(payload: []const u8) usize {
+    if (payload.len < 2) return payload.len;
+    if (payload[1] == 0) return 2;
+    if (payload.len < 11) return payload.len;
+
+    var offset: usize = 9;
+    const line_count = std.mem.readInt(u16, payload[offset..][0..2], .big);
+    offset += 2;
+
+    var line_index: u16 = 0;
+    while (line_index < line_count) : (line_index += 1) {
+        if (payload.len < offset + 3) return payload.len;
+        offset += 1;
+        const segment_count = std.mem.readInt(u16, payload[offset..][0..2], .big);
+        offset += 2;
+
+        var segment_index: u16 = 0;
+        while (segment_index < segment_count) : (segment_index += 1) {
+            if (payload.len < offset + 1) return payload.len;
+            const style = payload[offset];
+            offset += 1;
+            if (style == 13) {
+                if (payload.len < offset + 4) return payload.len;
+                offset += 4;
+            }
+            _ = readString16Size(payload, &offset) orelse return payload.len;
+        }
+    }
+
+    return offset;
+}
+
+fn guiSignatureHelpSize(payload: []const u8) usize {
+    if (payload.len < 2) return payload.len;
+    if (payload[1] == 0) return 2;
+    if (payload.len < 9) return payload.len;
+
+    var offset: usize = 8;
+    const signature_count = payload[offset];
+    offset += 1;
+
+    var signature_index: u8 = 0;
+    while (signature_index < signature_count) : (signature_index += 1) {
+        _ = readString16Size(payload, &offset) orelse return payload.len;
+        _ = readString16Size(payload, &offset) orelse return payload.len;
+        if (payload.len < offset + 1) return payload.len;
+        const parameter_count = payload[offset];
+        offset += 1;
+
+        var parameter_index: u8 = 0;
+        while (parameter_index < parameter_count) : (parameter_index += 1) {
+            _ = readString16Size(payload, &offset) orelse return payload.len;
+            _ = readString16Size(payload, &offset) orelse return payload.len;
+        }
+    }
+
+    return offset;
+}
+
+fn guiFloatPopupSize(payload: []const u8) usize {
+    if (payload.len < 2) return payload.len;
+    if (payload[1] == 0) return 2;
+    if (payload.len < 8) return payload.len;
+
+    var offset: usize = 6;
+    _ = readString16Size(payload, &offset) orelse return payload.len;
+    if (payload.len < offset + 2) return payload.len;
+    const line_count = std.mem.readInt(u16, payload[offset..][0..2], .big);
+    offset += 2;
+
+    var line_index: u16 = 0;
+    while (line_index < line_count) : (line_index += 1) {
+        _ = readString16Size(payload, &offset) orelse return payload.len;
+    }
+
+    return offset;
+}
+
+fn guiGitStatusSize(payload: []const u8) usize {
+    if (payload.len < 9) return payload.len;
+
+    var offset: usize = 7;
+    _ = readString16Size(payload, &offset) orelse return payload.len;
+    if (payload.len < offset + 2) return payload.len;
+    const entry_count = std.mem.readInt(u16, payload[offset..][0..2], .big);
+    offset += 2;
+
+    var entry_index: u16 = 0;
+    while (entry_index < entry_count) : (entry_index += 1) {
+        if (payload.len < offset + 6) return payload.len;
+        offset += 6;
+        _ = readString16Size(payload, &offset) orelse return payload.len;
+    }
+
+    if (payload.len < offset + 1) return payload.len;
+    if (payload[offset] == 0) {
+        offset += 1;
+    } else {
+        if (payload.len < offset + 3) return payload.len;
+        offset += 3;
+        _ = readString16Size(payload, &offset) orelse return payload.len;
+    }
+
+    _ = readString16Size(payload, &offset) orelse return payload.len;
+    _ = readString16Size(payload, &offset) orelse return payload.len;
+    if (payload.len < offset + 2) return payload.len;
+    return offset + 2;
+}
+
+fn guiBottomPanelSize(payload: []const u8) usize {
+    if (payload.len < 2) return payload.len;
+    if (payload[1] == 0) return 2;
+    if (payload.len < 6) return payload.len;
+
+    var offset: usize = 6;
+    const tab_count = payload[5];
+    var tab_index: u8 = 0;
+    while (tab_index < tab_count) : (tab_index += 1) {
+        if (payload.len < offset + 1) return payload.len;
+        offset += 1;
+        if (!readString8Size(payload, &offset)) return payload.len;
+    }
+
+    if (payload.len < offset + 2) return payload.len;
+    const entry_count = std.mem.readInt(u16, payload[offset..][0..2], .big);
+    offset += 2;
+
+    var entry_index: u16 = 0;
+    while (entry_index < entry_count) : (entry_index += 1) {
+        if (payload.len < offset + 10) return payload.len;
+        offset += 10;
+        _ = readString16Size(payload, &offset) orelse return payload.len;
+        _ = readString16Size(payload, &offset) orelse return payload.len;
+    }
+
+    return offset;
+}
+
+fn guiSplitSeparatorsSize(payload: []const u8) usize {
+    if (payload.len < 5) return payload.len;
+
+    const vertical_count = payload[4];
+    var offset: usize = 5 + @as(usize, vertical_count) * 6;
+    if (payload.len < offset + 1) return payload.len;
+    const horizontal_count = payload[offset];
+    offset += 1;
+
+    var horizontal_index: u8 = 0;
+    while (horizontal_index < horizontal_count) : (horizontal_index += 1) {
+        if (payload.len < offset + 6) return payload.len;
+        offset += 6;
+        _ = readString16Size(payload, &offset) orelse return payload.len;
+    }
+
+    return offset;
+}
+
+fn guiMinibufferSize(payload: []const u8) usize {
+    if (payload.len < 2) return payload.len;
+    if (payload[1] == 0) return 2;
+    if (payload.len < 8) return payload.len;
+
+    var offset: usize = 5;
+    const prompt_len: usize = payload[offset];
+    offset += 1;
+    if (payload.len < offset + prompt_len + 2) return payload.len;
+    offset += prompt_len;
+
+    const input_len: usize = std.mem.readInt(u16, payload[offset..][0..2], .big);
+    offset += 2;
+    if (payload.len < offset + input_len + 2) return payload.len;
+    offset += input_len;
+
+    const context_len: usize = std.mem.readInt(u16, payload[offset..][0..2], .big);
+    offset += 2;
+    if (payload.len < offset + context_len + 6) return payload.len;
+    offset += context_len + 2;
+
+    const candidate_count = std.mem.readInt(u16, payload[offset..][0..2], .big);
+    offset += 4;
+
+    var i: u16 = 0;
+    while (i < candidate_count) : (i += 1) {
+        if (payload.len < offset + 1) return payload.len;
+        offset += 1;
+        const label_len = readString16Size(payload, &offset) orelse return payload.len;
+        _ = label_len;
+        const description_len = readString16Size(payload, &offset) orelse return payload.len;
+        _ = description_len;
+        const annotation_len = readString16Size(payload, &offset) orelse return payload.len;
+        _ = annotation_len;
+        if (payload.len < offset + 1) return payload.len;
+        const match_count: usize = payload[offset];
+        offset += 1;
+        if (payload.len < offset + match_count * 2) return payload.len;
+        offset += match_count * 2;
+    }
+
+    return offset;
+}
+
+fn readString8Size(payload: []const u8, offset: *usize) bool {
+    if (payload.len < offset.* + 1) return false;
+    const len: usize = payload[offset.*];
+    offset.* += 1;
+    if (payload.len < offset.* + len) return false;
+    offset.* += len;
+    return true;
+}
+
+fn readString16Size(payload: []const u8, offset: *usize) ?usize {
+    if (payload.len < offset.* + 2) return null;
+    const len: usize = std.mem.readInt(u16, payload[offset.*..][0..2], .big);
+    offset.* += 2;
+    if (payload.len < offset.* + len) return null;
+    offset.* += len;
+    return len;
 }
 
 fn parserCommandSize(payload: []const u8) ?usize {
@@ -1709,6 +2235,56 @@ test "decode gui_observatory as noop in TUI" {
 test "decode gui_sidebars as noop in TUI" {
     const data = [_]u8{ OP_GUI_SIDEBARS, 0x00, 0x00, 0x00, 0x03, 0x01, 0x02, 0x03 };
     try std.testing.expect((try decodeCommand(&data)) == .noop);
+}
+
+test "all generated GUI render opcodes are accounted for by TUI semantic noops" {
+    inline for (.{
+        &[_]u8{ OP_GUI_TAB_BAR, 0, 0 },
+        &[_]u8{ OP_GUI_WHICH_KEY, 0 },
+        &[_]u8{ OP_GUI_COMPLETION, 0 },
+        &[_]u8{ OP_GUI_THEME, 0 },
+        &[_]u8{ OP_GUI_BREADCRUMB, 0 },
+        &[_]u8{ OP_GUI_STATUS_BAR, 0 },
+        &[_]u8{ OP_GUI_PICKER, 0 },
+        &[_]u8{ OP_GUI_AGENT_CHAT, 0 },
+        &[_]u8{ OP_GUI_GUTTER_SEP, 0, 0, 0, 0, 0 },
+        &[_]u8{ OP_GUI_CURSORLINE, 0xFF, 0xFF, 0, 0, 0 },
+        &[_]u8{ OP_GUI_GUTTER, 0 },
+        &[_]u8{ OP_GUI_BOTTOM_PANEL, 0 },
+        &[_]u8{ OP_GUI_PICKER_PREVIEW, 0 },
+        &[_]u8{ OP_GUI_TOOL_MANAGER, 0 },
+        &[_]u8{ OP_GUI_MINIBUFFER, 0 },
+        &[_]u8{ OP_GUI_WINDOW_CONTENT, 0 },
+        &[_]u8{ OP_GUI_HOVER_POPUP, 0 },
+        &[_]u8{ OP_GUI_SIGNATURE_HELP, 0 },
+        &[_]u8{ OP_GUI_FLOAT_POPUP, 0 },
+        &[_]u8{ OP_GUI_SPLIT_SEPARATORS, 0, 0, 0, 0 },
+        &[_]u8{ OP_GUI_GIT_STATUS, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+        &[_]u8{ OP_GUI_BOARD, 0, 1, 0 },
+        &[_]u8{ OP_GUI_AGENT_CONTEXT, 0, 0 },
+        &[_]u8{ OP_GUI_CHANGE_SUMMARY, 0 },
+        &[_]u8{ OP_GUI_HOVER_ACTION, 0, 1, 0 },
+        &[_]u8{ OP_GUI_CONFIG_STATE, 0, 0 },
+        &[_]u8{ OP_GUI_WORKSPACES, 0, 6, 2, 0, 0, 0, 0, 0 },
+        &[_]u8{ OP_GUI_NOTIFICATIONS, 0, 3, 0, 0, 0 },
+        &[_]u8{ OP_GUI_OBSERVATORY, 0, 0, 0, 0 },
+        &[_]u8{ OP_GUI_EDIT_TIMELINE, 0, 4, 0, 0, 0, 0 },
+        &[_]u8{ OP_GUI_EXTENSION_OVERLAY, 0, 2, 0, 0 },
+        &[_]u8{ OP_GUI_EXTENSION_PANEL, 0, 1, 0 },
+        &[_]u8{ OP_GUI_SEARCH_STATE, 0, 6, 0, 0, 0, 0, 0, 0 },
+        &[_]u8{ OP_GUI_SIDEBARS, 0, 0, 0, 0 },
+        &[_]u8{ OP_GUI_WINDOW_OVERLAY_DELTA, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0 },
+        &[_]u8{ OP_GUI_WINDOW_VIEWPORT_DELTA, 0 },
+        &[_]u8{ OP_GUI_WINDOW_ROWS_DELTA, 0 },
+        &[_]u8{ OP_GUI_INDENT_GUIDES, 0, 6, 0, 1, 2, 0xFF, 0xFF, 0 },
+        &[_]u8{ OP_GUI_LINE_SPACING, 0, 2, 0, 100 },
+        &[_]u8{ OP_GUI_FILE_TREE, 0, 0, 0, 0 },
+        &[_]u8{ OP_GUI_FILE_TREE_SELECTION, 0, 1, 0 },
+        &[_]u8{ OP_GUI_CURSOR_ANIMATION, 0, 1, 0 },
+    }) |packet| {
+        try std.testing.expectEqual(packet.len, commandSize(packet));
+        try std.testing.expect((try decodeCommand(packet)) == .noop);
+    }
 }
 
 test "decode truncated gui_observatory returns malformed" {
@@ -2184,6 +2760,693 @@ test "commandSize: draw_text with 0-byte text is 14 bytes" {
         0x00, 0x00, // text_len = 0
     };
     try std.testing.expectEqual(@as(usize, 14), commandSize(&data));
+}
+
+test "commandSize: gui_tab_bar custom packet" {
+    const data = [_]u8{
+        OP_GUI_TAB_BAR, 0,    1,
+        0x01,           0,    0,
+        0,              1,    0,
+        0,              1,    'e',
+        0,              7,    'm',
+        'a',            'i',  'n',
+        '.',            'e',  'x',
+        0x11,           0x22, 0x33,
+        0x44,
+    };
+    try std.testing.expectEqual(data.len, commandSize(&data));
+}
+
+test "commandSize: gui_which_key custom packet" {
+    const data = [_]u8{
+        OP_GUI_WHICH_KEY, 1,
+        0,                3,
+        'S',              'P',
+        'C',              0,
+        2,                0,
+        1,                0,
+        1,                'f',
+        0,                4,
+        'f',              'i',
+        'l',              'e',
+        0,
+    };
+    try std.testing.expectEqual(data.len, commandSize(&data));
+}
+
+test "commandSize: hidden gui_which_key is two bytes" {
+    const data = [_]u8{ OP_GUI_WHICH_KEY, 0, OP_BATCH_END };
+    try std.testing.expectEqual(@as(usize, 2), commandSize(&data));
+}
+
+test "commandSize: gui_completion custom packet" {
+    const data = [_]u8{
+        OP_GUI_COMPLETION, 1,
+        0,                 4,
+        0,                 12,
+        0,                 1,
+        0,                 2,
+        1,                 0,
+        5,                 'w',
+        'r',               'i',
+        't',               'e',
+        0,                 9,
+        'S',               'a',
+        'v',               'e',
+        ' ',               'f',
+        'i',               'l',
+        'e',               5,
+        0,                 5,
+        'M',               'i',
+        'n',               'g',
+        'a',               0,
+        6,                 'm',
+        'o',               'd',
+        'u',               'l',
+        'e',
+    };
+    try std.testing.expectEqual(data.len, commandSize(&data));
+}
+
+test "commandSize: hidden gui_completion is two bytes" {
+    const data = [_]u8{ OP_GUI_COMPLETION, 0, OP_BATCH_END };
+    try std.testing.expectEqual(@as(usize, 2), commandSize(&data));
+}
+
+test "commandSize: gui_theme custom packet" {
+    const data = [_]u8{
+        OP_GUI_THEME, 2,
+        0x40,         0x11,
+        0x22,         0x33,
+        0x30,         0x44,
+        0x55,         0x66,
+        OP_BATCH_END,
+    };
+    try std.testing.expectEqual(data.len - 1, commandSize(&data));
+}
+
+test "commandSize: gui_breadcrumb custom packet" {
+    const data = [_]u8{
+        OP_GUI_BREADCRUMB, 3,
+        0,                 3,
+        'l',               'i',
+        'b',               0,
+        5,                 'm',
+        'i',               'n',
+        'g',               'a',
+        0,                 9,
+        'e',               'd',
+        'i',               't',
+        'o',               'r',
+        '.',               'e',
+        'x',               OP_BATCH_END,
+    };
+    try std.testing.expectEqual(data.len - 1, commandSize(&data));
+}
+
+test "commandSize: empty gui_breadcrumb is two bytes" {
+    const data = [_]u8{ OP_GUI_BREADCRUMB, 0, OP_BATCH_END };
+    try std.testing.expectEqual(@as(usize, 2), commandSize(&data));
+}
+
+test "commandSize: gui_file_tree len32 packet" {
+    const data = [_]u8{
+        OP_GUI_FILE_TREE, 0, 0, 0,            3,
+        2,                0, 0, OP_BATCH_END,
+    };
+    try std.testing.expectEqual(data.len - 1, commandSize(&data));
+}
+
+test "commandSize: gui_file_tree_selection len16 packet" {
+    const data = [_]u8{
+        OP_GUI_FILE_TREE_SELECTION, 0,            4,
+        1,                          0,            1,
+        'a',                        OP_BATCH_END,
+    };
+    try std.testing.expectEqual(data.len - 1, commandSize(&data));
+}
+
+test "commandSize: gui_gutter sectioned packet" {
+    const data = [_]u8{
+        OP_GUI_GUTTER, 1,
+        0x01,          0,
+        11,            0,
+        7,             0,
+        1,             0,
+        0,             0,
+        2,             1,
+        0,             4,
+        OP_BATCH_END,
+    };
+    try std.testing.expectEqual(data.len - 1, commandSize(&data));
+}
+
+test "commandSize: gui_indent_guides len16 packet" {
+    const data = [_]u8{
+        OP_GUI_INDENT_GUIDES, 0,    6,
+        0,                    7,    2,
+        0xFF,                 0xFF, 0,
+        OP_BATCH_END,
+    };
+    try std.testing.expectEqual(data.len - 1, commandSize(&data));
+}
+
+test "commandSize: gui_workspaces len16 packet" {
+    const data = [_]u8{
+        OP_GUI_WORKSPACES, 0, 6,
+        2,                 0, 7,
+        0,                 0, 0,
+        OP_BATCH_END,
+    };
+    try std.testing.expectEqual(data.len - 1, commandSize(&data));
+}
+
+test "commandSize: gui_picker sectioned packet" {
+    const data = [_]u8{
+        OP_GUI_PICKER, 5,
+        0x01,          0,
+        17,            1,
+        0,             0,
+        0,             1,
+        0,             2,
+        0,             0,
+        5,             'F',
+        'i',           'l',
+        'e',           's',
+        0,             1,
+        0x02,          0,
+        5,             0,
+        3,             's',
+        'r',           'c',
+        0x03,          0,
+        31,            0,
+        1,             0x11,
+        0x22,          0x33,
+        0x02,          0,
+        7,             'm',
+        'a',           'i',
+        'n',           '.',
+        'e',           'x',
+        0,             3,
+        'l',           'i',
+        'b',           0,
+        8,             'm',
+        'o',           'd',
+        'i',           'f',
+        'i',           'e',
+        'd',           0,
+        0x05,          0,
+        3,             0,
+        1,             '>',
+        0x06,          0,
+        1,             0,
+        OP_BATCH_END,
+    };
+    try std.testing.expectEqual(data.len - 1, commandSize(&data));
+}
+
+test "commandSize: hidden gui_picker is two bytes" {
+    const data = [_]u8{ OP_GUI_PICKER, 0, OP_BATCH_END };
+    try std.testing.expectEqual(@as(usize, 2), commandSize(&data));
+}
+
+test "commandSize: gui_picker_preview packet" {
+    const data = [_]u8{
+        OP_GUI_PICKER_PREVIEW, 1,
+        0,                     1,
+        1,                     0x11,
+        0x22,                  0x33,
+        1,                     0,
+        7,                     'p',
+        'r',                   'e',
+        'v',                   'i',
+        'e',                   'w',
+        OP_BATCH_END,
+    };
+    try std.testing.expectEqual(data.len - 1, commandSize(&data));
+}
+
+test "commandSize: hidden gui_picker_preview is two bytes" {
+    const data = [_]u8{ OP_GUI_PICKER_PREVIEW, 0, OP_BATCH_END };
+    try std.testing.expectEqual(@as(usize, 2), commandSize(&data));
+}
+
+test "commandSize: gui_hover_popup packet" {
+    const data = [_]u8{
+        OP_GUI_HOVER_POPUP, 1,
+        0,                  3,
+        0,                  9,
+        1,                  0,
+        2,                  0,
+        1,                  0,
+        0,                  2,
+        1,                  0,
+        4,                  'B',
+        'o',                'l',
+        'd',                13,
+        0x11,               0x22,
+        0x33,               1,
+        0,                  4,
+        'C',                'o',
+        'd',                'e',
+        OP_BATCH_END,
+    };
+    try std.testing.expectEqual(data.len - 1, commandSize(&data));
+}
+
+test "commandSize: hidden gui_hover_popup is two bytes" {
+    const data = [_]u8{ OP_GUI_HOVER_POPUP, 0, OP_BATCH_END };
+    try std.testing.expectEqual(@as(usize, 2), commandSize(&data));
+}
+
+test "commandSize: gui_signature_help packet" {
+    const data = [_]u8{
+        OP_GUI_SIGNATURE_HELP, 1,
+        0,                     2,
+        0,                     3,
+        0,                     1,
+        1,                     0,
+        8,                     'f',
+        'o',                   'o',
+        '(',                   'a',
+        ',',                   'b',
+        ')',                   0,
+        4,                     'd',
+        'o',                   'c',
+        's',                   2,
+        0,                     1,
+        'a',                   0,
+        5,                     'f',
+        'i',                   'r',
+        's',                   't',
+        0,                     1,
+        'b',                   0,
+        6,                     's',
+        'e',                   'c',
+        'o',                   'n',
+        'd',                   OP_BATCH_END,
+    };
+    try std.testing.expectEqual(data.len - 1, commandSize(&data));
+}
+
+test "commandSize: hidden gui_signature_help is two bytes" {
+    const data = [_]u8{ OP_GUI_SIGNATURE_HELP, 0, OP_BATCH_END };
+    try std.testing.expectEqual(@as(usize, 2), commandSize(&data));
+}
+
+test "commandSize: gui_float_popup packet" {
+    const data = [_]u8{
+        OP_GUI_FLOAT_POPUP, 1,
+        0,                  24,
+        0,                  5,
+        0,                  5,
+        'H',                'e',
+        'l',                'l',
+        'o',                0,
+        2,                  0,
+        5,                  'l',
+        'i',                'n',
+        'e',                '1',
+        0,                  5,
+        'l',                'i',
+        'n',                'e',
+        '2',                OP_BATCH_END,
+    };
+    try std.testing.expectEqual(data.len - 1, commandSize(&data));
+}
+
+test "commandSize: hidden gui_float_popup is two bytes" {
+    const data = [_]u8{ OP_GUI_FLOAT_POPUP, 0, OP_BATCH_END };
+    try std.testing.expectEqual(@as(usize, 2), commandSize(&data));
+}
+
+test "commandSize: gui_git_status packet" {
+    const data = [_]u8{
+        OP_GUI_GIT_STATUS, 0,
+        1,                 0,
+        2,                 0,
+        1,                 0,
+        4,                 'm',
+        'a',               'i',
+        'n',               0,
+        1,                 0x11,
+        0x22,              0x33,
+        0x44,              1,
+        6,                 0,
+        8,                 'l',
+        'i',               'b',
+        '/',               'a',
+        '.',               'e',
+        'x',               1,
+        0,                 1,
+        0,                 6,
+        'p',               'u',
+        's',               'h',
+        'e',               'd',
+        0,                 3,
+        'l',               'i',
+        'b',               0,
+        6,                 'c',
+        'o',               'm',
+        'm',               'i',
+        't',               0,
+        2,                 OP_BATCH_END,
+    };
+    try std.testing.expectEqual(data.len - 1, commandSize(&data));
+}
+
+test "commandSize: minimal gui_git_status packet" {
+    const data = [_]u8{
+        OP_GUI_GIT_STATUS, 0,
+        0,                 0,
+        0,                 0,
+        0,                 0,
+        0,                 0,
+        0,                 0,
+        0,                 0,
+        0,                 0,
+        0,                 0,
+        OP_BATCH_END,
+    };
+    try std.testing.expectEqual(data.len - 1, commandSize(&data));
+}
+
+test "commandSize: gui_bottom_panel packet" {
+    const data = [_]u8{
+        OP_GUI_BOTTOM_PANEL, 1,
+        1,                   30,
+        2,                   2,
+        1,                   4,
+        'L',                 'o',
+        'g',                 's',
+        2,                   5,
+        'T',                 'e',
+        's',                 't',
+        's',                 0,
+        1,                   0,
+        0,                   0,
+        7,                   3,
+        4,                   0,
+        0,                   0,
+        42,                  0,
+        8,                   'l',
+        'i',                 'b',
+        '/',                 'a',
+        '.',                 'e',
+        'x',                 0,
+        4,                   'b',
+        'o',                 'o',
+        'm',                 OP_BATCH_END,
+    };
+    try std.testing.expectEqual(data.len - 1, commandSize(&data));
+}
+
+test "commandSize: hidden gui_bottom_panel is two bytes" {
+    const data = [_]u8{ OP_GUI_BOTTOM_PANEL, 0, OP_BATCH_END };
+    try std.testing.expectEqual(@as(usize, 2), commandSize(&data));
+}
+
+test "commandSize: gui_window_content sectioned packet" {
+    const data = [_]u8{
+        OP_GUI_WINDOW_CONTENT, 1,
+        0x01,                  0,
+        14,                    0,
+        7,                     0x02,
+        0,                     1,
+        0,                     2,
+        0,                     0,
+        0,                     0,
+        0,                     0,
+        9,                     OP_BATCH_END,
+    };
+    try std.testing.expectEqual(data.len - 1, commandSize(&data));
+}
+
+test "commandSize: gui_window_rows_delta sectioned packet" {
+    const data = [_]u8{
+        OP_GUI_WINDOW_ROWS_DELTA, 1,
+        0x01,                     0,
+        14,                       0,
+        7,                        0,
+        0,                        0,
+        9,                        0x01,
+        0,                        3,
+        0,                        4,
+        2,                        0,
+        1,                        OP_BATCH_END,
+    };
+    try std.testing.expectEqual(data.len - 1, commandSize(&data));
+}
+
+test "commandSize: gui_window_overlay_delta with cursorline" {
+    const data = [_]u8{
+        OP_GUI_WINDOW_OVERLAY_DELTA,
+        0,
+        7,
+        0,
+        0,
+        0,
+        9,
+        0x03,
+        0,
+        3,
+        0,
+        4,
+        2,
+        0,
+        1,
+        0x12,
+        0x34,
+        0x56,
+        OP_BATCH_END,
+    };
+    try std.testing.expectEqual(data.len - 1, commandSize(&data));
+}
+
+test "commandSize: gui_split_separators packet" {
+    const data = [_]u8{
+        OP_GUI_SPLIT_SEPARATORS, 0x11,
+        0x22,                    0x33,
+        1,                       0,
+        4,                       0,
+        1,                       0,
+        3,                       1,
+        0,                       2,
+        0,                       0,
+        0,                       8,
+        0,                       7,
+        'm',                     'a',
+        'i',                     'n',
+        '.',                     'e',
+        'x',                     OP_BATCH_END,
+    };
+    try std.testing.expectEqual(data.len - 1, commandSize(&data));
+}
+
+test "commandSize: empty gui_split_separators packet" {
+    const data = [_]u8{ OP_GUI_SPLIT_SEPARATORS, 0, 0, 0, 0, 0, OP_BATCH_END };
+    try std.testing.expectEqual(data.len - 1, commandSize(&data));
+}
+
+test "commandSize: gui_search_state len16 packet" {
+    const data = [_]u8{ OP_GUI_SEARCH_STATE, 0, 6, 1, 0, 5, 0, 3, 0x0F, OP_BATCH_END };
+    try std.testing.expectEqual(data.len - 1, commandSize(&data));
+}
+
+test "commandSize: gui_change_summary custom packet" {
+    const data = [_]u8{
+        OP_GUI_CHANGE_SUMMARY,
+        1,
+        0,
+        0,
+        0,
+        1,
+        0,
+        8,
+        'l',
+        'i',
+        'b',
+        '/',
+        'a',
+        '.',
+        'e',
+        'x',
+        1,
+        0,
+        0,
+        0,
+        4,
+        0,
+        0,
+        0,
+        2,
+        OP_BATCH_END,
+    };
+    try std.testing.expectEqual(data.len - 1, commandSize(&data));
+}
+
+test "commandSize: gui_notifications len16 packet" {
+    const data = [_]u8{ OP_GUI_NOTIFICATIONS, 0, 3, 1, 0, 0, OP_BATCH_END };
+    try std.testing.expectEqual(data.len - 1, commandSize(&data));
+}
+
+test "commandSize: gui_edit_timeline len16 packet" {
+    const data = [_]u8{ OP_GUI_EDIT_TIMELINE, 0, 4, 1, 0, 0, 0, OP_BATCH_END };
+    try std.testing.expectEqual(data.len - 1, commandSize(&data));
+}
+
+test "commandSize: extension footer summary packets" {
+    const overlay = [_]u8{ OP_GUI_EXTENSION_OVERLAY, 0, 1, 2, OP_BATCH_END };
+    const panel = [_]u8{ OP_GUI_EXTENSION_PANEL, 0, 1, 3, OP_BATCH_END };
+    const observatory = [_]u8{ OP_GUI_OBSERVATORY, 0, 0, 0, 6, 0x01, 0, 3, 1, 0, 4, OP_BATCH_END };
+    try std.testing.expectEqual(overlay.len - 1, commandSize(&overlay));
+    try std.testing.expectEqual(panel.len - 1, commandSize(&panel));
+    try std.testing.expectEqual(observatory.len - 1, commandSize(&observatory));
+}
+
+test "commandSize: agent context and tool manager custom packets" {
+    const context = [_]u8{
+        OP_GUI_AGENT_CONTEXT,
+        1,
+        0,
+        6,
+        'R',
+        'e',
+        'v',
+        'i',
+        'e',
+        'w',
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        42,
+        1,
+        1,
+        OP_BATCH_END,
+    };
+    const tools = [_]u8{
+        OP_GUI_TOOL_MANAGER,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        4,
+        'r',
+        'e',
+        'a',
+        'd',
+        4,
+        'R',
+        'e',
+        'a',
+        'd',
+        0,
+        0,
+        0,
+        2,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        OP_BATCH_END,
+    };
+    const hidden_tools = [_]u8{ OP_GUI_TOOL_MANAGER, 0, OP_BATCH_END };
+    try std.testing.expectEqual(context.len - 1, commandSize(&context));
+    try std.testing.expectEqual(tools.len - 1, commandSize(&tools));
+    try std.testing.expectEqual(@as(usize, 2), commandSize(&hidden_tools));
+}
+
+test "commandSize: small retained semantic state packets" {
+    const cursorline = [_]u8{ OP_GUI_CURSORLINE, 0, 2, 0x11, 0x22, 0x33, OP_BATCH_END };
+    const separator = [_]u8{ OP_GUI_GUTTER_SEP, 0, 7, 0x44, 0x55, 0x66, OP_BATCH_END };
+    const spacing = [_]u8{ OP_GUI_LINE_SPACING, 0, 2, 0, 120, OP_BATCH_END };
+    const animation = [_]u8{ OP_GUI_CURSOR_ANIMATION, 0, 1, 0, OP_BATCH_END };
+    const config = [_]u8{ OP_GUI_CONFIG_STATE, 0, 3, 1, 2, 3, OP_BATCH_END };
+    const hover = [_]u8{ OP_GUI_HOVER_ACTION, 0, 4, 1, 0, 1, 'x', OP_BATCH_END };
+
+    try std.testing.expectEqual(cursorline.len - 1, commandSize(&cursorline));
+    try std.testing.expectEqual(separator.len - 1, commandSize(&separator));
+    try std.testing.expectEqual(spacing.len - 1, commandSize(&spacing));
+    try std.testing.expectEqual(animation.len - 1, commandSize(&animation));
+    try std.testing.expectEqual(config.len - 1, commandSize(&config));
+    try std.testing.expectEqual(hover.len - 1, commandSize(&hover));
+}
+
+test "commandSize: board and agent chat packets" {
+    const board = [_]u8{
+        OP_GUI_BOARD,
+        1,
+        0,
+        0,
+        0,
+        7,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        7,
+        1,
+        0x02,
+        0,
+        6,
+        'F',
+        'i',
+        'x',
+        ' ',
+        'C',
+        'I',
+        3,
+        'g',
+        'p',
+        't',
+        0,
+        0,
+        0,
+        9,
+        0,
+        0,
+        OP_BATCH_END,
+    };
+    const chat = [_]u8{
+        OP_GUI_AGENT_CHAT, 1,
+        0x01,              0,
+        2,                 1,
+        2,                 OP_BATCH_END,
+    };
+
+    try std.testing.expectEqual(board.len - 1, commandSize(&board));
+    try std.testing.expectEqual(chat.len - 1, commandSize(&chat));
+}
+
+test "commandSize: gui_minibuffer custom packet" {
+    const data = [_]u8{
+        OP_GUI_MINIBUFFER, 1,
+        0,                 0,
+        3,                 1,
+        ':',               0,
+        5,                 'w',
+        'r',               'i',
+        't',               'e',
+        0,                 0,
+        0,                 0,
+        0,                 0,
+        0,                 0,
+    };
+    try std.testing.expectEqual(data.len, commandSize(&data));
 }
 
 test "commandSize: truncated draw_text returns remaining length" {

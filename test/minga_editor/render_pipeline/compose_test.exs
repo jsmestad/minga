@@ -53,7 +53,6 @@ defmodule MingaEditor.RenderPipeline.ComposeTest do
       frame = Compose.compose_windows(frames, chrome, cursor_info, state)
 
       assert frame.minibuffer != []
-      assert is_list(frame.regions)
     end
   end
 end

@@ -13,7 +13,6 @@ defmodule MingaEditor.Shell.Traditional.Chrome.GUI do
   alias MingaEditor.DisplayList.{Cursor, Overlay}
   alias MingaEditor.Layout
   alias MingaEditor.MinibufferData
-  alias MingaEditor.Renderer.Regions
   alias MingaEditor.RenderPipeline.Chrome
   alias MingaEditor.RenderPipeline.Scroll.WindowScroll
   alias MingaEditor.State, as: EditorState
@@ -33,7 +32,7 @@ defmodule MingaEditor.Shell.Traditional.Chrome.GUI do
           %{MingaEditor.Window.id() => WindowScroll.t()},
           Cursor.t() | nil
         ) :: Chrome.t()
-  def build(state, layout, _scrolls, _cursor_info) do
+  def build(state, _layout, _scrolls, _cursor_info) do
     # Compute status bar data (used by the GUI adapter to encode the 0x76 opcode).
     # No cell rendering for the GUI — SwiftUI owns the status bar surface.
     status_bar_data = status_bar_data(state)
@@ -48,9 +47,6 @@ defmodule MingaEditor.Shell.Traditional.Chrome.GUI do
     # Picker, which-key, and completion are handled by SwiftUI.
     overlays = build_overlays(state)
 
-    # Region definitions
-    regions = Regions.define_regions(layout)
-
     %Chrome{
       status_bar_draws: [],
       status_bar_data: status_bar_data,
@@ -62,8 +58,7 @@ defmodule MingaEditor.Shell.Traditional.Chrome.GUI do
       separators: [],
       file_tree: [],
       agent_panel: [],
-      overlays: overlays,
-      regions: regions
+      overlays: overlays
     }
   end
 
