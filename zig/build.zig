@@ -46,6 +46,10 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    const zigzag = b.dependency("zigzag", .{
+        .target = target,
+        .optimize = optimize,
+    });
 
     // Build options module — passes compile-time config to Zig source.
     const build_options = b.addOptions();
@@ -151,6 +155,8 @@ pub fn build(b: *std.Build) void {
             }),
         });
         exe.root_module.addImport("vaxis", vaxis.module("vaxis"));
+        // ZigZag is linked into the existing minga-renderer target only. Do not add a parallel renderer binary; later slices should replace current-renderer internals in place.
+        exe.root_module.addImport("zigzag", zigzag.module("zigzag"));
         exe.root_module.addImport("build_options", build_options.createModule());
         exe.root_module.link_libc = true;
         // Note: tree-sitter and grammars are linked only to minga-parser, not the renderer.
@@ -175,6 +181,7 @@ pub fn build(b: *std.Build) void {
             }),
         });
         tests.root_module.addImport("vaxis", vaxis.module("vaxis"));
+        tests.root_module.addImport("zigzag", zigzag.module("zigzag"));
         tests.root_module.addImport("build_options", build_options.createModule());
         tests.root_module.link_libc = true;
 
