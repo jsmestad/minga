@@ -82,7 +82,7 @@ defmodule MingaEditor.DisplayList do
 
     Contains gutter, content lines, tilde filler, and modeline data,
     all in window-relative coordinates. The `rect` field gives the
-    absolute screen position for `to_commands/1`.
+    absolute screen position for semantic window model construction.
     """
 
     alias MingaEditor.DisplayList
