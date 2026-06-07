@@ -14,6 +14,7 @@ pub const surface = @import("surface.zig");
 pub const apprt = @import("apprt.zig");
 pub const zigzag_bridge = @import("zigzag_bridge.zig");
 pub const zigzag_view_data = @import("zigzag_view_data.zig");
+pub const zigzag_chrome = @import("zigzag_chrome.zig");
 // Note: highlighter.zig is compiled into minga-parser, not the renderer.
 // Font rendering (CoreText, atlas) lives in the macOS Swift app (macos/).
 
@@ -115,4 +116,5 @@ test {
     _ = apprt;
     _ = zigzag_bridge;
     _ = zigzag_view_data;
+    _ = zigzag_chrome;
 }
