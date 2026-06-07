@@ -13,6 +13,7 @@ const charm = @import("semantic/charm.zig");
 const theme_mod = @import("semantic/theme.zig");
 const decode = @import("semantic/decode.zig");
 const zigzag_chrome = @import("zigzag_chrome.zig");
+const zigzag_component_adapters = @import("zigzag_component_adapters.zig");
 
 pub const Error = types.Error;
 pub const StatusSegment = types.StatusSegment;
@@ -2015,12 +2016,49 @@ fn renderWhichKey(surface: anytype, which_key: WhichKey, has_minibuffer: bool, h
     }
 
     row += 1;
+    renderWhichKeyBindingsWithZigZag(surface, row, end_row, content_col, content_end_col, which_key.bindings, maybe_theme);
+}
+
+fn renderWhichKeyBindingsWithZigZag(surface: anytype, start_row: u16, end_row: u16, start_col: u16, end_col: u16, bindings: []const WhichKeyBinding, maybe_theme: ?Theme) void {
+    const width = if (end_col > start_col) end_col - start_col else 0;
+    if (width == 0 or start_row >= end_row) return;
+
+    var buffer: [4096]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buffer);
+    var arena = std.heap.ArenaAllocator.init(fba.allocator());
+    defer arena.deinit();
+    const rendered = zigzag_component_adapters.renderWhichKeyHelp(arena.allocator(), bindings, width) catch {
+        renderWhichKeyBindingsManual(surface, start_row, end_row, start_col, end_col, bindings, maybe_theme);
+        return;
+    };
+
+    var row = start_row;
+    var lines = std.mem.splitScalar(u8, rendered, '\n');
+    while (row < end_row) : (row += 1) {
+        const line = lines.next() orelse break;
+        renderWhichKeyHelpLine(surface, row, start_col, end_col, line, maybe_theme);
+    }
+}
+
+fn renderWhichKeyHelpLine(surface: anytype, row: u16, start_col: u16, end_col: u16, line: []const u8, maybe_theme: ?Theme) void {
+    const key_end = std.mem.indexOfScalar(u8, line, ' ') orelse line.len;
+    var col = start_col;
+    if (key_end > 0) {
+        col = writeText(surface, row, col, end_col, line[0..key_end], popupSelectionFg(maybe_theme), popupSelectionBg(maybe_theme), protocol.ATTR_BOLD);
+    }
+    if (key_end < line.len and col < end_col) {
+        _ = writeText(surface, row, col, end_col, line[key_end..], popupFg(maybe_theme), popupBg(maybe_theme), 0);
+    }
+}
+
+fn renderWhichKeyBindingsManual(surface: anytype, start_row: u16, end_row: u16, start_col: u16, end_col: u16, bindings: []const WhichKeyBinding, maybe_theme: ?Theme) void {
+    var row = start_row;
     var index: usize = 0;
-    while (row < end_row and index < which_key.bindings.len) : ({
+    while (row < end_row and index < bindings.len) : ({
         row += 1;
         index += 1;
     }) {
-        _ = renderWhichKeyBinding(surface, row, content_col, content_end_col, which_key.bindings[index], maybe_theme);
+        _ = renderWhichKeyBinding(surface, row, start_col, end_col, bindings[index], maybe_theme);
     }
 }
 
@@ -2062,22 +2100,52 @@ fn renderCompletion(surface: anytype, completion: Completion, has_minibuffer: bo
     _ = writeText(surface, row, content_col, content_end_col, "Completion", accentFg(maybe_theme), popupBg(maybe_theme), protocol.ATTR_BOLD);
 
     row += 1;
-    var index: usize = 0;
-    while (row < rect.end_row and index < completion.items.len) : ({
+    renderCompletionItemsWithZigZag(surface, row, rect.end_row, content_col, content_end_col, completion, maybe_theme);
+}
+
+fn renderCompletionItemsWithZigZag(surface: anytype, start_row: u16, end_row: u16, content_col: u16, content_end_col: u16, completion: Completion, maybe_theme: ?Theme) void {
+    if (start_row >= end_row) return;
+    const visible_height = end_row - start_row;
+    var buffer: [4096]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buffer);
+    const rows = zigzag_component_adapters.completionRows(fba.allocator(), completion.items, completion.selected_index, visible_height) catch {
+        renderCompletionItemsManual(surface, start_row, end_row, content_col, content_end_col, completion, maybe_theme);
+        return;
+    };
+
+    var row = start_row;
+    for (rows) |item| {
+        if (row >= end_row) break;
+        renderCompletionItemRow(surface, row, content_col, content_end_col, item.label, item.detail, item.selected, maybe_theme);
+        row += 1;
+    }
+}
+
+fn renderCompletionItemsManual(surface: anytype, start_row: u16, end_row: u16, content_col: u16, content_end_col: u16, completion: Completion, maybe_theme: ?Theme) void {
+    const visible_height: usize = end_row - start_row;
+    const selected: usize = if (completion.items.len == 0) 0 else @min(completion.selected_index, completion.items.len - 1);
+    const start_index: usize = if (selected >= visible_height) selected - visible_height + 1 else 0;
+
+    var row = start_row;
+    var index = start_index;
+    while (row < end_row and index < completion.items.len) : ({
         row += 1;
         index += 1;
     }) {
         const item = completion.items[index];
-        const selected = index == completion.selected_index;
-        const fg = if (selected) popupSelectionFg(maybe_theme) else popupFg(maybe_theme);
-        const bg = if (selected) popupSelectionBg(maybe_theme) else popupBg(maybe_theme);
-        fillRowRangeWith(surface, row, content_col, content_end_col, bg);
-        var col: u16 = content_col;
-        col = writeText(surface, row, col, content_end_col, item.label, fg, bg, 0);
-        if (item.detail.len > 0) {
-            col = writeText(surface, row, col, content_end_col, "  ", fg, bg, 0);
-            _ = writeText(surface, row, col, content_end_col, item.detail, fg, bg, 0);
-        }
+        renderCompletionItemRow(surface, row, content_col, content_end_col, item.label, item.detail, index == selected, maybe_theme);
+    }
+}
+
+fn renderCompletionItemRow(surface: anytype, row: u16, content_col: u16, content_end_col: u16, label: []const u8, detail: []const u8, selected: bool, maybe_theme: ?Theme) void {
+    const fg = if (selected) popupSelectionFg(maybe_theme) else popupFg(maybe_theme);
+    const bg = if (selected) popupSelectionBg(maybe_theme) else popupBg(maybe_theme);
+    fillRowRangeWith(surface, row, content_col, content_end_col, bg);
+    var col: u16 = content_col;
+    col = writeText(surface, row, col, content_end_col, label, fg, bg, 0);
+    if (detail.len > 0) {
+        col = writeText(surface, row, col, content_end_col, "  ", fg, bg, 0);
+        _ = writeText(surface, row, col, content_end_col, detail, fg, bg, 0);
     }
 }
 
@@ -2138,6 +2206,22 @@ fn renderPickerList(surface: anytype, picker: Picker, start_row: u16, end_row: u
     renderPickerTitle(surface, picker, row, start_col, end_col, maybe_theme);
     row += 1;
 
+    const row_budget: u16 = end_row - row;
+    var buffer: [8192]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buffer);
+    const rows = zigzag_component_adapters.pickerRows(fba.allocator(), picker.items, picker.selected_index, row_budget) catch {
+        renderPickerItemsManual(surface, picker, row, end_row, start_col, end_col, maybe_theme);
+        return;
+    };
+    for (rows) |picker_row| {
+        if (row >= end_row or picker_row.index >= picker.items.len) break;
+        renderPickerItem(surface, picker.items[picker_row.index], picker_row.selected, row, start_col, end_col, maybe_theme);
+        row += 1;
+    }
+}
+
+fn renderPickerItemsManual(surface: anytype, picker: Picker, start_row: u16, end_row: u16, start_col: u16, end_col: u16, maybe_theme: ?Theme) void {
+    var row = start_row;
     const row_budget: usize = @intCast(end_row - row);
     const selected: usize = if (picker.items.len == 0) 0 else @min(@as(usize, picker.selected_index), picker.items.len - 1);
     const start_index: usize = if (selected >= row_budget and row_budget > 0) selected - row_budget + 1 else 0;
@@ -2281,12 +2365,7 @@ fn renderHoverPopup(surface: anytype, hover: HoverPopup, maybe_action: ?HoverAct
         row += 1;
         index += 1;
     }) {
-        const line = hover.lines[index];
-        var col = content_col;
-        for (line.segments) |segment| {
-            const attrs: u8 = hoverSegmentAttrs(segment);
-            col = writeText(surface, row, col, content_end_col, segment.text, if (segment.fg != 0) segment.fg else popupFg(maybe_theme), popupBg(maybe_theme), attrs);
-        }
+        renderHoverLine(surface, hover.lines[index], title, row, content_col, content_end_col, maybe_theme);
     }
     if (row < rect.end_row) {
         if (maybe_action) |action| {
@@ -2295,6 +2374,32 @@ fn renderHoverPopup(surface: anytype, hover: HoverPopup, maybe_action: ?HoverAct
             }
         }
     }
+}
+
+fn renderHoverLine(surface: anytype, line: HoverLine, title: []const u8, row: u16, content_col: u16, content_end_col: u16, maybe_theme: ?Theme) void {
+    if (hoverLinePlain(line)) {
+        var buffer: [2048]u8 = undefined;
+        var fba = std.heap.FixedBufferAllocator.init(&buffer);
+        if (zigzag_component_adapters.hoverTooltipRows(fba.allocator(), title, line)) |rows| {
+            if (rows.len > 0) {
+                _ = writeText(surface, row, content_col, content_end_col, rows[0].title, popupFg(maybe_theme), popupBg(maybe_theme), 0);
+                return;
+            }
+        } else |_| {}
+    }
+
+    var col = content_col;
+    for (line.segments) |segment| {
+        const attrs: u8 = hoverSegmentAttrs(segment);
+        col = writeText(surface, row, col, content_end_col, segment.text, if (segment.fg != 0) segment.fg else popupFg(maybe_theme), popupBg(maybe_theme), attrs);
+    }
+}
+
+fn hoverLinePlain(line: HoverLine) bool {
+    for (line.segments) |segment| {
+        if (segment.style != 0 or segment.fg != 0 or segment.flags != 0) return false;
+    }
+    return true;
 }
 
 fn hoverSegmentAttrs(segment: HoverSegment) u8 {
@@ -2419,6 +2524,23 @@ fn renderToolManager(surface: anytype, manager: ToolManager, has_minibuffer: boo
         return;
     }
 
+    var buffer: [8192]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buffer);
+    const rows = zigzag_component_adapters.toolRows(fba.allocator(), manager.tools, manager.selected) catch {
+        renderToolManagerRowsManual(surface, manager, row, content, maybe_theme);
+        return;
+    };
+    for (rows, 0..) |tool_row, index| {
+        if (row >= content.end_row or index >= manager.tools.len) break;
+        var detail_buf: [96]u8 = undefined;
+        const tool = manager.tools[index];
+        const description = std.fmt.bufPrint(&detail_buf, "{s} {s}", .{ tool_row.detail, toolStatusLabel(tool.status) }) catch tool_row.detail;
+        row = renderPopupListItem(surface, row, content.end_row, content.col, content.end_col, tool_row.title, std.mem.trim(u8, description, " "), tool_row.selected, maybe_theme);
+    }
+}
+
+fn renderToolManagerRowsManual(surface: anytype, manager: ToolManager, start_row: u16, content: OverlayRect, maybe_theme: ?Theme) void {
+    var row = start_row;
     const selected_index: usize = @min(@as(usize, manager.selected), manager.tools.len - 1);
     var index: usize = 0;
     while (row < content.end_row and index < manager.tools.len) : (index += 1) {
@@ -2445,6 +2567,22 @@ fn renderBoard(surface: anytype, board: Board, has_minibuffer: bool, has_status_
     _ = writeText(surface, row, col, content.end_col, " cards", accentFg(maybe_theme), popupBg(maybe_theme), protocol.ATTR_BOLD);
     row += 1;
 
+    var buffer: [8192]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buffer);
+    const rows = zigzag_component_adapters.boardRows(fba.allocator(), board.cards, board.focused_card_id) catch {
+        renderBoardRowsManual(surface, board, row, content, maybe_theme);
+        return;
+    };
+    for (rows) |board_row| {
+        if (row >= content.end_row) break;
+        var title_buf: [64]u8 = undefined;
+        const title = std.fmt.bufPrint(&title_buf, "{s} {s}", .{ if (board_row.selected) ">" else " ", board_row.title }) catch board_row.title;
+        row = renderPopupListItem(surface, row, content.end_row, content.col, content.end_col, title, board_row.detail, board_row.selected, maybe_theme);
+    }
+}
+
+fn renderBoardRowsManual(surface: anytype, board: Board, start_row: u16, content: OverlayRect, maybe_theme: ?Theme) void {
+    var row = start_row;
     var selected_index: usize = 0;
     for (board.cards, 0..) |card, card_index| {
         if (card.id == board.focused_card_id or card.flags & 0x02 != 0) {
@@ -2822,6 +2960,21 @@ fn renderAgentSuggestionRow(surface: anytype, row: u16, rect: OverlayRect, left_
 fn renderAgentChatMessages(surface: anytype, chat: AgentChat, start_row: u16, rect: OverlayRect, maybe_theme: ?Theme, has_prompt: bool) u16 {
     var row = start_row;
     const prompt_rows: u16 = if (has_prompt and rect.end_row > row + 1) 2 else 0;
+    const available_rows: usize = rect.end_row -| row -| prompt_rows;
+    var buffer: [16384]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buffer);
+    const rows = zigzag_component_adapters.agentMessageRows(fba.allocator(), chat.messages, @intCast(@min(available_rows, std.math.maxInt(u16)))) catch {
+        return renderAgentChatMessagesManual(surface, chat, row, rect, maybe_theme, prompt_rows);
+    };
+    for (rows) |message_row| {
+        if (row >= rect.end_row -| prompt_rows or message_row.index >= chat.messages.len) break;
+        row = renderAgentChatMessage(surface, chat.messages[message_row.index], row, rect, maybe_theme);
+    }
+    return row;
+}
+
+fn renderAgentChatMessagesManual(surface: anytype, chat: AgentChat, start_row: u16, rect: OverlayRect, maybe_theme: ?Theme, prompt_rows: u16) u16 {
+    var row = start_row;
     const available_rows: usize = rect.end_row -| row -| prompt_rows;
     const first_index: usize = if (chat.messages.len > available_rows) chat.messages.len - available_rows else 0;
     var index = first_index;
@@ -4237,6 +4390,31 @@ test "semantic state renders retained completion overlay anchored to cursor" {
     try std.testing.expect(saw_selected_label);
     try std.testing.expect(saw_selected_detail);
     try std.testing.expect(saw_background);
+}
+
+test "manual completion fallback keeps selected item visible" {
+    const alloc = std.testing.allocator;
+    var completion = Completion{
+        .selected_index = 4,
+        .items = try alloc.dupe(CompletionItem, &[_]CompletionItem{
+            .{ .label = try alloc.dupe(u8, "alpha") },
+            .{ .label = try alloc.dupe(u8, "beta") },
+            .{ .label = try alloc.dupe(u8, "gamma") },
+            .{ .label = try alloc.dupe(u8, "delta") },
+            .{ .label = try alloc.dupe(u8, "epsilon") },
+        }),
+    };
+    defer completion.deinit(alloc);
+
+    var surface = MockSurface{ .mock_width = 30, .mock_height = 5 };
+    defer surface.deinit(alloc);
+    renderCompletionItemsManual(&surface, 1, 4, 0, 20, completion, null);
+
+    var saw_selected = false;
+    for (surface.cells.items) |cell| {
+        if (cell.row == 3 and std.mem.eql(u8, cell.text, "e")) saw_selected = true;
+    }
+    try std.testing.expect(saw_selected);
 }
 
 test "decodeBreadcrumb retains path segments" {
