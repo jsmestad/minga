@@ -11,7 +11,6 @@ defmodule MingaEditor.Agent.SemanticUI.Registry do
   alias Minga.Extension.Manifest
   alias Minga.RenderModel.UI.Action
   alias Minga.RenderModel.UI.AgentChat
-  alias Minga.RenderModel.UI.Board
   alias Minga.RenderModel.UI.ExtensionPanel
   alias MingaEditor.Agent.SemanticUI.Entry
   alias MingaEditor.Commands
@@ -152,17 +151,6 @@ defmodule MingaEditor.Agent.SemanticUI.Registry do
     table
     |> all()
     |> Enum.filter(&(&1.surface == surface))
-  end
-
-  @doc "Returns cached status cards contributed to the board surface."
-  @spec status_cards() :: [Board.Card.t()]
-  @spec status_cards(table()) :: [Board.Card.t()]
-  def status_cards, do: status_cards(@table)
-
-  def status_cards(table) do
-    table
-    |> entries(:status_card)
-    |> Enum.map(& &1.payload)
   end
 
   @doc "Returns cached transcript enrichment bodies."

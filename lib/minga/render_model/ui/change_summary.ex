@@ -2,7 +2,7 @@ defmodule Minga.RenderModel.UI.ChangeSummary do
   @moduledoc """
   Semantic change summary model.
 
-  Describes the diff-stat entries shown for a zoomed board card: per-file path,
+  Describes the diff-stat entries shown for an agent change summary: per-file path,
   change action, and added/removed line counts, plus the currently selected
   entry index. An empty `entries` list means the surface is hidden.
 

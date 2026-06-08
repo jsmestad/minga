@@ -188,7 +188,7 @@ defmodule MingaEditor.AgentLifecycle do
     end
   end
 
-  # No tab_bar (e.g., Board shell) — nothing to update.
+  # No tab_bar (e.g., an extension shell) — nothing to update.
   def maybe_update_tab_label(state), do: state
 
   # ── Private helpers ──────────────────────────────────────────────────────

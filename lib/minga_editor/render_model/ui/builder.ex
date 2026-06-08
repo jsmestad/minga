@@ -5,7 +5,6 @@ defmodule MingaEditor.RenderModel.UI.Builder do
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.RenderModel.UI.AgentChatBuilder
   alias MingaEditor.RenderModel.UI.AgentContextBuilder
-  alias MingaEditor.RenderModel.UI.BoardBuilder
   alias MingaEditor.RenderModel.UI.BottomPanelBuilder
   alias MingaEditor.RenderModel.UI.BreadcrumbBuilder
   alias MingaEditor.RenderModel.UI.ChangeSummaryBuilder
@@ -63,7 +62,6 @@ defmodule MingaEditor.RenderModel.UI.Builder do
       agent_context: AgentContextBuilder.build(gui_payload),
       status_bar: build_status_bar(sb_data, ctx),
       observatory: ObservatoryBuilder.build(ctx.shell_state),
-      board: BoardBuilder.build(gui_payload),
       tab_bar: TabBarBuilder.build(ctx),
       workspaces: WorkspacesBuilder.build(ctx),
       sidebars: SidebarsBuilder.build(ctx),

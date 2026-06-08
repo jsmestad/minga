@@ -3,7 +3,7 @@ defmodule MingaEditor.UI do
   Visual primitives domain facade.
 
   Themes, faces, highlighting, icons, and fonts. Shared by all
-  presentation surfaces (Shell.Traditional, Shell.Board, TUI, GUI).
+  presentation surfaces (Shell.Traditional, extension shells, TUI, GUI).
 
   External callers use this facade for behavior. Struct types
   (`MingaEditor.UI.Theme.t()`, `Minga.Core.Face.t()`) may be referenced

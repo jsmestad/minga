@@ -1,13 +1,8 @@
-defmodule Minga.RenderModel.UI.Board do
+defmodule MingaBoard.RenderModel.UI.Board do
   @moduledoc """
-  Semantic board model: the agent card grid.
+  Extension-owned semantic board model for the agent card grid.
 
-  Describes the board surface as domain data, the visible cards, focus and zoom
-  state, and filter state, rather than a pre-encoded binary. The GUI adapter
-  (`Minga.Frontend.Adapter.GUI.BoardEncoder`) owns the wire encoding.
-
-  This type doubles as the shell's `:board` contribution payload: a shell builds
-  a `%Board{}` and the render-model builder carries it straight through.
+  This model intentionally lives under `MingaBoard` instead of the shared `Minga.RenderModel.UI` namespace. Board can keep its experiment-specific data shape without making every frontend treat it as required core semantic UI.
   """
 
   alias __MODULE__.Card
@@ -49,8 +44,7 @@ defmodule Minga.RenderModel.UI.Board do
 
   defmodule Card do
     @moduledoc """
-    One board card: an agent (or the user's own) workspace with status, task,
-    model, recent files, and a sparkline of recent activity.
+    One Board card: an agent or user workspace with status, task, model, recent files, and activity sparkline.
     """
 
     @type status :: :idle | :working | :iterating | :needs_you | :done | :errored

@@ -195,18 +195,6 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     route_panel_action_to_extension(state, ext_name, action_name, context)
   end
 
-  defp dispatch_action(state, {:board_select_card, _card_id} = action),
-    do: dispatch_to_active_shell(state, action)
-
-  defp dispatch_action(state, {:board_close_card, _card_id} = action),
-    do: dispatch_to_active_shell(state, action)
-
-  defp dispatch_action(state, {:board_reorder, _card_id, _index} = action),
-    do: dispatch_to_active_shell(state, action)
-
-  defp dispatch_action(state, {:board_dispatch_agent, _task, _model} = action),
-    do: dispatch_to_active_shell(state, action)
-
   defp dispatch_action(state, :agent_approve), do: dispatch_to_active_shell(state, :agent_approve)
 
   defp dispatch_action(state, :agent_request_changes),
@@ -247,8 +235,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   defp dispatch_action(state, {:close_tab, id}) do
-    # Delegate to the shell: Traditional switches to the target tab when
-    # needed; Board and tab-bar-less Traditional return unchanged.
+    # Delegate to the shell: Traditional switches to the target tab when needed; tab-bar-less shells return unchanged.
     state = handle_shell_gui_action(state, {:close_tab, id})
 
     # Only close the buffer when the shell has a tab bar.
@@ -795,6 +782,10 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     EditorState.update_search(state, &SearchData.dismiss_gui_search/1)
   end
 
+  defp dispatch_action(state, {:extension_action, _extension_id, _action, _payload} = action) do
+    dispatch_to_active_shell(state, action)
+  end
+
   # Catch-all for unrecognized actions: log and return state unchanged.
   defp dispatch_action(state, action) do
     Minga.Log.warning(:editor, "[gui_action] unrecognized action: #{inspect(action)}")
@@ -806,34 +797,26 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     state = EditorState.ensure_shell_available(state)
     shell = EditorState.active_shell_module(state)
 
-    case board_shell_active?(shell, state) do
-      true ->
-        {shell_state, workspace} =
-          shell.handle_gui_action(
-            state.shell_state,
-            state.workspace,
-            action
-          )
-
-        state
-        |> EditorState.update_shell_state(fn _ -> shell_state end)
-        |> EditorState.set_workspace(workspace)
-        |> after_shell_gui_action(shell, action)
-
-      false ->
-        Minga.Log.warning(
-          :editor,
-          "Board GUI action ignored because Board shell is unavailable: #{inspect(action)}"
+    if function_exported?(shell, :handle_gui_action, 3) do
+      {shell_state, workspace} =
+        shell.handle_gui_action(
+          state.shell_state,
+          state.workspace,
+          action
         )
 
-        EditorState.set_status(state, "Board shell is unavailable")
-    end
-  end
+      state
+      |> EditorState.update_shell_state(fn _ -> shell_state end)
+      |> EditorState.set_workspace(workspace)
+      |> after_shell_gui_action(shell, action)
+    else
+      Minga.Log.warning(
+        :editor,
+        "GUI action ignored because active shell cannot handle it: #{inspect(action)}"
+      )
 
-  @spec board_shell_active?(module(), EditorState.t()) :: boolean()
-  defp board_shell_active?(shell, state) do
-    function_exported?(shell, :gui_payload, 1) and
-      match?({:board, _payload}, shell.gui_payload(state))
+      EditorState.set_status(state, "GUI action is unavailable")
+    end
   end
 
   @spec after_shell_gui_action(EditorState.t(), module(), term()) :: EditorState.t()

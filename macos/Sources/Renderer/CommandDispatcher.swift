@@ -202,9 +202,6 @@ final class CommandDispatcher {
             guiState.workspaceState.update(version: version, activeWorkspaceId: activeWorkspaceId, mode: mode, flags: flags, workspaces: workspaces, visibleTabs: visibleTabs)
             guiState.tabBarState.updateWorkspaces(activeWorkspaceId: activeWorkspaceId, mode: mode, flags: flags, entries: workspaces, visibleTabs: visibleTabs)
 
-        case .guiBoard(let visible, let focusedCardId, let cards, let filterMode, let filterText):
-            guiState.boardState.update(visible: visible, focusedCardId: focusedCardId, cards: cards,
-                                        filterMode: filterMode, filterText: filterText)
 
         case .guiAgentContext(let visible, let task, let dispatchTimestamp, let status, let canApprove):
             guiState.agentContextBarState.update(visible: visible, task: task, dispatchTimestamp: dispatchTimestamp,
@@ -519,6 +516,9 @@ final class CommandDispatcher {
 
         case .guiExtensionPanel(let panels):
             guiState.extensionPanelState.update(panels)
+
+        case .guiExtensionRuntime(let message):
+            guiState.frontendExtensions.dispatch(message)
 
         case .guiSearchState(let active, let matchCount, let currentIndex, let flags):
             if active {

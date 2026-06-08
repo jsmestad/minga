@@ -4,7 +4,7 @@ defmodule MingaEditor.Session.State do
 
   A workspace is the editing state that gets saved/restored when
   switching tabs. It works identically whether rendered as a tab in
-  the traditional editor, a card on The Board, or running headless
+  the traditional editor, an extension shell surface, or running headless
   without any UI.
 
   This struct formalizes the `@per_tab_fields` boundary from

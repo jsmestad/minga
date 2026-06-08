@@ -866,11 +866,6 @@ pub const TuiRuntime = struct {
                                 self.semantic.applyHoverActionPacket(remaining[0..cmd_size]) catch |err| {
                                     std.log.warn("semantic hover action decode error: {}", .{err});
                                 };
-                            } else if (remaining.len > 0 and remaining[0] == protocol.OP_GUI_BOARD) {
-                                const cmd_size = protocol.commandSize(remaining);
-                                self.semantic.applyBoardPacket(remaining[0..cmd_size]) catch |err| {
-                                    std.log.warn("semantic board decode error: {}", .{err});
-                                };
                             } else if (remaining.len > 0 and remaining[0] == protocol.OP_GUI_AGENT_CHAT) {
                                 const cmd_size = protocol.commandSize(remaining);
                                 self.semantic.applyAgentChatPacket(remaining[0..cmd_size]) catch |err| {

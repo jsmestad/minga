@@ -30,9 +30,6 @@ func (m Model) overlayLines() []string {
 	if tools, ok := m.toolManager(); ok && tools.Visible {
 		return m.renderToolManager(tools)
 	}
-	if board, ok := m.board(); ok && board.Visible {
-		return m.renderBoard(board)
-	}
 	if bottom, ok := m.bottomPanel(); ok && bottom.Visible {
 		return m.renderBottomPanel(bottom)
 	}
@@ -134,20 +131,6 @@ func toolStatusName(status byte) string {
 	default:
 		return "not installed"
 	}
-}
-
-func (m Model) renderBoard(board protocol.Board) []string {
-	items := make([]componentItem, 0, len(board.Cards))
-	selected := 0
-	for i, card := range board.Cards {
-		marker := " "
-		if card.ID == board.FocusedCardID || card.Flags&0x02 != 0 {
-			marker = ">"
-			selected = i
-		}
-		items = append(items, componentItem{title: fmt.Sprintf("%s %s", marker, statusName(card.Status)), description: card.Task})
-	}
-	return takeLines(m.charmList(fmt.Sprintf("Board  %d cards", len(board.Cards)), items, selected, m.maxOverlayHeight(), true), m.maxOverlayHeight())
 }
 
 func (m Model) renderBottomPanel(panel protocol.BottomPanel) []string {

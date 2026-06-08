@@ -12,9 +12,6 @@ defmodule MingaEditor.RenderModel.UI.TabBarBuilder do
   @spec build(Context.t()) :: TabBar.t()
   def build(%Context{} = ctx) do
     case shell_gui_payload(ctx) do
-      {:board, _payload} ->
-        %TabBar{}
-
       nil ->
         build_standard(ctx)
 

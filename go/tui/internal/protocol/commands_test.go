@@ -890,7 +890,7 @@ func TestDecodePanelAndSidebarChrome(t *testing.T) {
 	}
 }
 
-func TestDecodeAgentBoardTimelineChrome(t *testing.T) {
+func TestDecodeAgentTimelineChrome(t *testing.T) {
 	messageBody := []byte{0, 0, 0, 42, 0x02}
 	messageBody = append(messageBody, 0, 0, 0, 5, 'h', 'e', 'l', 'l', 'o')
 	messages := []byte{0xFF, 1, 0, 1, byte(len(messageBody) >> 24), byte(len(messageBody) >> 16), byte(len(messageBody) >> 8), byte(len(messageBody))}
@@ -905,20 +905,6 @@ func TestDecodeAgentBoardTimelineChrome(t *testing.T) {
 	}
 	if !command.Chrome.AgentChat.Visible || command.Chrome.AgentChat.ModelName != "gpt" || len(command.Chrome.AgentChat.Messages) != 1 || command.Chrome.AgentChat.Messages[0].Text != "hello" {
 		t.Fatalf("agent chat decoded incorrectly: %+v", command.Chrome.AgentChat)
-	}
-
-	board := []byte{generated.OPGuiBoard, 1, 0, 0, 0, 7, 0, 1, 0}
-	board = append(board, string16("")...)
-	board = append(board, 0, 0, 0, 7, 1, 0x02)
-	board = append(board, string16("Fix CI")...)
-	board = append(board, string8("gpt")...)
-	board = append(board, 0, 0, 0, 9, 0, 0)
-	command, err = DecodeCommand(board)
-	if err != nil {
-		t.Fatalf("DecodeCommand board returned error: %v", err)
-	}
-	if !command.Chrome.Board.Visible || len(command.Chrome.Board.Cards) != 1 || command.Chrome.Board.Cards[0].Task != "Fix CI" {
-		t.Fatalf("board decoded incorrectly: %+v", command.Chrome.Board)
 	}
 
 	timelinePayload := []byte{1, 0xFF, 0xFF, 1, 3}

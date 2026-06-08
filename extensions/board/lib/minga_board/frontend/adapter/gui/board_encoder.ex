@@ -1,38 +1,27 @@
-defmodule Minga.Frontend.Adapter.GUI.BoardEncoder do
-  @moduledoc false
+defmodule MingaBoard.Frontend.Adapter.GUI.BoardEncoder do
+  @moduledoc """
+  Extension-owned legacy encoder for the Board GUI surface.
+
+  Board is no longer part of the shared protocol schema. The extension keeps the old experimental wire format here so the implementation is owned with the Board package instead of `Minga.Frontend.Adapter.GUI`.
+  """
 
   import Bitwise
 
-  alias Minga.Frontend.Adapter.GUI.Caches
-  alias Minga.Protocol.Opcodes
-  alias Minga.RenderModel.UI.Board
+  alias MingaBoard.RenderModel.UI.Board
+  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
 
-  @op_gui_board Opcodes.gui_board()
+  @extension_id "minga_board"
+  @channel "board"
+  @op_gui_board 0x87
 
-  @spec encode(Board.t(), Caches.t()) :: {binary() | nil, Caches.t()}
-  def encode(%Board{} = model, %Caches{} = caches) do
-    fp = :erlang.phash2(model)
-
-    if fp != caches.last_board_fp do
-      {encode_binary(model), %{caches | last_board_fp: fp}}
-    else
-      {nil, caches}
-    end
+  @spec encode(Board.t()) :: binary()
+  def encode(%Board{} = model) do
+    ProtocolGUI.encode_gui_extension_runtime(@extension_id, @channel, encode_payload(model))
   end
 
-  # Wire format:
-  #   opcode + visible(1) + focused_card_id(4) + card_count(2)
-  #   + filter_mode(1) + filter_len(2) + filter_text + cards...
-  #
-  # Per card:
-  #   card_id(4) + status(1) + flags(1) + task_len(2) + task
-  #   + model_len(1) + model + dispatch_timestamp(4)
-  #   + recent_file_count(1) + recent_files... + sparkline_count(1) + sparkline...
-  #
-  # Status bytes: 0=idle, 1=working, 2=iterating, 3=needs_you, 4=done, 5=errored
-  # Flags: bit 0 = is_you_card, bit 1 = is_focused
-  @spec encode_binary(Board.t()) :: binary()
-  defp encode_binary(%Board{} = board) do
+  @doc false
+  @spec encode_payload(Board.t()) :: binary()
+  def encode_payload(%Board{} = board) do
     :ok = validate_board!(board)
     cards = board.cards
     visible = if board.visible?, do: 1, else: 0
@@ -61,8 +50,6 @@ defmodule Minga.Frontend.Adapter.GUI.BoardEncoder do
 
     task_bytes = :erlang.iolist_to_binary([card.display_task])
     model_bytes = :erlang.iolist_to_binary([card.model || ""])
-
-    # Send Unix timestamp so the frontend can compute elapsed time locally.
     dispatch_timestamp = DateTime.to_unix(card.created_at)
 
     file_entries =
@@ -85,7 +72,6 @@ defmodule Minga.Frontend.Adapter.GUI.BoardEncoder do
     ])
   end
 
-  # Encode a float as half-precision: clamp to [0.0, 1.0], scale to [0, 65535].
   @spec encode_float16(number()) :: binary()
   defp encode_float16(value) do
     clamped = max(0.0, min(1.0, value))

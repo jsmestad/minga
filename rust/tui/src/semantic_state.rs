@@ -40,7 +40,6 @@ pub struct SemanticState {
     extension_panel: Option<semantic::ExtensionPanel>,
     observatory: Option<semantic::Observatory>,
     sidebars: Option<semantic::Sidebars>,
-    board: Option<semantic::Board>,
     agent_chat: Option<semantic::AgentChat>,
     tool_manager: Option<semantic::ToolManager>,
     theme: Option<semantic::Theme>,
@@ -102,7 +101,6 @@ impl SemanticState {
             extension_panel: None,
             observatory: None,
             sidebars: None,
-            board: None,
             agent_chat: None,
             tool_manager: None,
             theme: None,
@@ -152,6 +150,7 @@ impl SemanticState {
                 StateEffect::render()
             }
             ProtocolCommand::SetWindowBg(_)
+            | ProtocolCommand::ExtensionRuntime(_)
             | ProtocolCommand::DefineRegion(_)
             | ProtocolCommand::ClearRegion(_)
             | ProtocolCommand::DestroyRegion(_)
@@ -296,10 +295,6 @@ impl SemanticState {
         self.sidebars.as_ref()
     }
 
-    pub fn board(&self) -> Option<&semantic::Board> {
-        self.board.as_ref()
-    }
-
     pub fn agent_chat(&self) -> Option<&semantic::AgentChat> {
         self.agent_chat.as_ref()
     }
@@ -380,7 +375,6 @@ impl SemanticState {
         self.extension_panel = None;
         self.observatory = None;
         self.sidebars = None;
-        self.board = None;
         self.agent_chat = None;
         self.tool_manager = None;
         self.diagnostic = None;
@@ -548,10 +542,6 @@ impl SemanticState {
             }
             semantic::Command::Sidebars(sidebars, _) => {
                 self.sidebars = Some(sidebars);
-                StateEffect::render()
-            }
-            semantic::Command::Board(board, _) => {
-                self.board = Some(board);
                 StateEffect::render()
             }
             semantic::Command::AgentChat(agent_chat, _) => {
@@ -940,16 +930,6 @@ mod tests {
             },
             0,
         )));
-        state.apply_protocol_command(ProtocolCommand::Semantic(semantic::Command::Board(
-            semantic::Board {
-                visible: 1,
-                focused_card_id: 9,
-                card_count: 10,
-                filter_mode: 0,
-                cards: Vec::new(),
-            },
-            0,
-        )));
         state.apply_protocol_command(ProtocolCommand::Semantic(semantic::Command::AgentChat(
             semantic::AgentChat {
                 visible: 1,
@@ -985,7 +965,6 @@ mod tests {
         assert_eq!(state.extension_panel().unwrap().panel_count, 6);
         assert_eq!(state.observatory().unwrap().payload, vec![6, 7]);
         assert_eq!(state.sidebars().unwrap().visible_count(), 1);
-        assert_eq!(state.board.as_ref().unwrap().card_count, 10);
         assert_eq!(state.agent_chat().unwrap().status, 1);
         assert_eq!(state.tool_manager().unwrap().visible, 1);
 
@@ -1005,7 +984,6 @@ mod tests {
         assert!(state.extension_panel().is_none());
         assert!(state.observatory().is_none());
         assert!(state.sidebars().is_none());
-        assert!(state.board.is_none());
         assert!(state.agent_chat().is_none());
         assert!(state.tool_manager().is_none());
     }

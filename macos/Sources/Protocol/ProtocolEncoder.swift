@@ -46,6 +46,7 @@ protocol InputEncoder: AnyObject, Sendable {
     func sendBreadcrumbClick(index: UInt8)
     func sendTogglePanel(panel: UInt8)
     func sendSidebarAction(sidebarId: String, kind: String, action: String)
+    func sendExtensionAction(extensionID: String, action: String, payload: Data)
     func sendNewTab()
     func sendSystemWillSleep()
     func sendSystemDidWake()
@@ -103,12 +104,6 @@ protocol InputEncoder: AnyObject, Sendable {
     // Find Pasteboard
     func sendFindPasteboardSearch(text: String, direction: UInt8)
 
-    // Board actions
-    func sendBoardSelectCard(id: UInt32)
-    func sendBoardCloseCard(id: UInt32)
-    func sendBoardReorder(cardId: UInt32, newIndex: UInt16)
-    func sendDispatchAgent(task: String, model: String)
-
     // Agent review actions
     func sendAgentApprove()
     func sendAgentRequestChanges()
@@ -163,6 +158,9 @@ extension InputEncoder {
 
     /// Default no-op so existing test spies do not need to implement sidebar host actions.
     func sendSidebarAction(sidebarId: String, kind: String, action: String) {}
+
+    /// Default no-op so existing test spies do not need to implement frontend extension actions.
+    func sendExtensionAction(extensionID: String, action: String, payload: Data) {}
 
     /// Default no-op so existing test spies do not need to implement power and thermal actions.
     func sendPowerThermalState(lowPowerMode: Bool, thermalState: UInt8) {}
@@ -606,6 +604,15 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         writeFrame(buf)
     }
 
+    /// Send a gui_action: extension_action. Layout: opcode(1) + action_type(1) + extension_id + action + opaque payload.
+    func sendExtensionAction(extensionID: String, action: String, payload: Data) {
+        var buf = Data([OP_GUI_ACTION, GUI_ACTION_EXTENSION_ACTION])
+        appendString16(&buf, extensionID)
+        appendString16(&buf, action)
+        buf.append(payload)
+        writeFrame(buf)
+    }
+
     /// Send a gui_action: new_tab. Layout: opcode(1) + action_type(1).
     func sendNewTab() {
         var buf = Data(count: 2)
@@ -952,64 +959,6 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         if pathLen > 0 {
             buf.replaceSubrange(4..<(4 + pathLen), with: utf8[0..<pathLen])
         }
-        writeFrame(buf)
-    }
-
-    // MARK: - Board Actions
-
-    /// Send a gui_action: board_select_card. Layout: opcode(1) + action_type(1) + card_id(4).
-    func sendBoardSelectCard(id: UInt32) {
-        var buf = Data(count: 6)
-        buf[0] = OP_GUI_ACTION
-        buf[1] = GUI_ACTION_BOARD_SELECT_CARD
-        writeU32(&buf, 2, id)
-        writeFrame(buf)
-    }
-
-    /// Send a gui_action: board_close_card. Layout: opcode(1) + action_type(1) + card_id(4).
-    func sendBoardCloseCard(id: UInt32) {
-        var buf = Data(count: 6)
-        buf[0] = OP_GUI_ACTION
-        buf[1] = GUI_ACTION_BOARD_CLOSE_CARD
-        writeU32(&buf, 2, id)
-        writeFrame(buf)
-    }
-
-    /// Send a gui_action: board_reorder. Layout: opcode(1) + action_type(1) + card_id(4) + new_index(2).
-    func sendBoardReorder(cardId: UInt32, newIndex: UInt16) {
-        var buf = Data(count: 8)
-        buf[0] = OP_GUI_ACTION
-        buf[1] = GUI_ACTION_BOARD_REORDER
-        writeU32(&buf, 2, cardId)
-        writeU16(&buf, 6, newIndex)
-        writeFrame(buf)
-    }
-
-    /// Send a gui_action: board_dispatch_agent.
-    /// Layout: opcode(1) + action_type(1) + model_len(2) + model_name + task_len(2) + task_text.
-    func sendDispatchAgent(task: String, model: String) {
-        let taskUtf8 = Array(task.utf8)
-        let modelUtf8 = Array(model.utf8)
-        let taskLen = min(taskUtf8.count, Int(UInt16.max))
-        let modelLen = min(modelUtf8.count, Int(UInt16.max))
-
-        var buf = Data(count: 6 + modelLen + taskLen)
-        buf[0] = OP_GUI_ACTION
-        buf[1] = GUI_ACTION_BOARD_DISPATCH_AGENT
-
-        // Write model
-        writeU16(&buf, 2, UInt16(modelLen))
-        if modelLen > 0 {
-            buf.replaceSubrange(4..<(4 + modelLen), with: modelUtf8[0..<modelLen])
-        }
-
-        // Write task
-        let taskOffset = 4 + modelLen
-        writeU16(&buf, taskOffset, UInt16(taskLen))
-        if taskLen > 0 {
-            buf.replaceSubrange((taskOffset + 2)..<(taskOffset + 2 + taskLen), with: taskUtf8[0..<taskLen])
-        }
-
         writeFrame(buf)
     }
 

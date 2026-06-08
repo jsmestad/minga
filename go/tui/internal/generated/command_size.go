@@ -42,11 +42,11 @@ func CommandSize(payload []byte) (int, CommandSizeStatus) {
 		return fixedCommandSize(payload, 15)
 	case OPSetTitle, OPClipboardWrite, OPGuiIndentGuides, OPGuiLineSpacing, OPGuiFileTreeSelection, OPGuiCursorAnimation, OPGuiHoverAction, OPGuiConfigState, OPGuiWorkspaces, OPGuiNotifications, OPGuiEditTimeline, OPGuiExtensionOverlay, OPGuiExtensionPanel, OPGuiSearchState:
 		return len16CommandSize(payload)
-	case OPGuiFileTree, OPGuiObservatory, OPGuiSidebars:
+	case OPGuiFileTree, OPGuiObservatory, OPGuiSidebars, OPGuiExtensionRuntime:
 		return len32CommandSize(payload)
 	case OPGuiStatusBar, OPGuiGutter, OPGuiWindowContent, OPGuiWindowViewportDelta, OPGuiWindowRowsDelta:
 		return sectionedCommandSize(payload)
-	case OPDrawText, OPDrawStyledText, OPSetFont, OPSetFontFallback, OPRegisterFont, OPGuiTabBar, OPGuiWhichKey, OPGuiCompletion, OPGuiTheme, OPGuiBreadcrumb, OPGuiPicker, OPGuiAgentChat, OPGuiBottomPanel, OPGuiPickerPreview, OPGuiToolManager, OPGuiMinibuffer, OPGuiHoverPopup, OPGuiSignatureHelp, OPGuiFloatPopup, OPGuiSplitSeparators, OPGuiGitStatus, OPGuiBoard, OPGuiAgentContext, OPGuiChangeSummary, OPGuiWindowOverlayDelta:
+	case OPDrawText, OPDrawStyledText, OPSetFont, OPSetFontFallback, OPRegisterFont, OPGuiTabBar, OPGuiWhichKey, OPGuiCompletion, OPGuiTheme, OPGuiBreadcrumb, OPGuiPicker, OPGuiAgentChat, OPGuiBottomPanel, OPGuiPickerPreview, OPGuiToolManager, OPGuiMinibuffer, OPGuiHoverPopup, OPGuiSignatureHelp, OPGuiFloatPopup, OPGuiSplitSeparators, OPGuiGitStatus, OPGuiAgentContext, OPGuiChangeSummary, OPGuiWindowOverlayDelta:
 		return 0, CommandSizeCustom
 	default:
 		// Forward-compatibility: opcodes >= 0x90 carry a u16 length prefix.

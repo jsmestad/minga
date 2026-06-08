@@ -79,8 +79,6 @@ const LineSpacing = types.LineSpacing;
 const CursorAnimation = types.CursorAnimation;
 const ConfigState = types.ConfigState;
 const HoverAction = types.HoverAction;
-const BoardCard = types.BoardCard;
-const Board = types.Board;
 const AgentChat = types.AgentChat;
 const AgentChatMessage = types.AgentChatMessage;
 const WindowContent = types.WindowContent;
@@ -2382,74 +2380,6 @@ pub fn decodeHoverAction(alloc: std.mem.Allocator, packet: []const u8) Error!Hov
         }
     }
     return action;
-}
-
-/// Decodes a `gui_board` packet into owned board summary state.
-pub fn decodeBoard(alloc: std.mem.Allocator, packet: []const u8) Error!Board {
-    if (packet.len < 11 or packet[0] != protocol.OP_GUI_BOARD) return error.Malformed;
-
-    const count = std.mem.readInt(u16, packet[6..][0..2], .big);
-    var offset: usize = 9;
-    const filter_text = try readString16(packet, &offset);
-
-    var board = Board{
-        .visible = packet[1] != 0,
-        .focused_card_id = readU32(packet[2..6]),
-        .card_count = count,
-        .filter_mode = packet[8],
-        .filter_text = try alloc.dupe(u8, filter_text),
-        .cards = try alloc.alloc(BoardCard, count),
-    };
-    @memset(board.cards, .{});
-    errdefer board.deinit(alloc);
-
-    var index: usize = 0;
-    while (index < board.cards.len) : (index += 1) {
-        board.cards[index] = try decodeBoardCard(alloc, packet, &offset);
-    }
-
-    return board;
-}
-
-fn decodeBoardCard(alloc: std.mem.Allocator, packet: []const u8, offset: *usize) Error!BoardCard {
-    if (packet.len < offset.* + 6) return error.Malformed;
-    const id = readU32(packet[offset.* .. offset.* + 4]);
-    const status = packet[offset.* + 4];
-    const flags = packet[offset.* + 5];
-    offset.* += 6;
-    const task = try readString16(packet, offset);
-    const model = try readString8(packet, offset);
-    if (packet.len < offset.* + 5) return error.Malformed;
-    const timestamp = readU32(packet[offset.* .. offset.* + 4]);
-    offset.* += 4;
-    const recent_count = packet[offset.*];
-    offset.* += 1;
-    var recent_files = try alloc.alloc([]u8, recent_count);
-    @memset(recent_files, &.{});
-    errdefer {
-        for (recent_files) |file| alloc.free(file);
-        alloc.free(recent_files);
-    }
-    var recent_index: u8 = 0;
-    while (recent_index < recent_count) : (recent_index += 1) {
-        const file = try readString16(packet, offset);
-        recent_files[recent_index] = try alloc.dupe(u8, file);
-    }
-    if (packet.len < offset.* + 1) return error.Malformed;
-    const sparkline_count = packet[offset.*];
-    offset.* += 1;
-    if (packet.len < offset.* + @as(usize, sparkline_count) * 2) return error.Malformed;
-    offset.* += @as(usize, sparkline_count) * 2;
-
-    return .{
-        .id = id,
-        .status = status,
-        .flags = flags,
-        .task = try alloc.dupe(u8, task),
-        .model = try alloc.dupe(u8, model),
-        .timestamp = timestamp,
-        .recent_files = recent_files,
-    };
 }
 
 /// Decodes a `gui_agent_chat` packet into owned chat summary state.

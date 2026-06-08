@@ -159,6 +159,12 @@ struct StatusBarUpdate: Sendable {
 
 // MARK: - Render command types
 
+struct FrontendExtensionRuntimeMessage: Sendable, Equatable {
+    let extensionID: String
+    let channel: String
+    let payload: Data
+}
+
 /// A decoded render command from the BEAM.
 enum RenderCommand: Sendable {
     case clear
@@ -213,7 +219,6 @@ enum RenderCommand: Sendable {
     case guiSplitSeparators(borderColor: UInt32, verticals: [Wire.VerticalSeparator], horizontals: [Wire.HorizontalSeparator])
     case guiGitStatus(repoState: UInt8, syncing: Bool, ahead: UInt16, behind: UInt16, branchName: String, entries: [Wire.GitStatusEntry], toast: (message: String, level: UInt8, action: UInt8)?, entryBasePath: String, lastCommitMessage: String, stashCount: UInt16)
     case guiWorkspaces(version: UInt8, activeWorkspaceId: UInt16, mode: UInt8, flags: UInt8, workspaces: [Wire.WorkspaceEntry], visibleTabs: [Wire.WorkspaceTabEntry])
-    case guiBoard(visible: Bool, focusedCardId: UInt32, cards: [BoardCard], filterMode: Bool, filterText: String)
     case guiAgentContext(visible: Bool, task: String, dispatchTimestamp: Date, status: CardStatus, canApprove: Bool)
     case guiChangeSummary(visible: Bool, entries: [ChangeSummaryEntry], selectedIndex: Int)
     case guiConfigState(Wire.ConfigState)
@@ -221,6 +226,7 @@ enum RenderCommand: Sendable {
     case guiEditTimeline(visible: Bool, viewingIndex: UInt16, entries: [Wire.TimelineEntry])
     case guiExtensionOverlay([Wire.ExtensionOverlayEntry])
     case guiExtensionPanel([Wire.ExtensionPanelEntry])
+    case guiExtensionRuntime(FrontendExtensionRuntimeMessage)
     case guiSearchState(active: Bool, matchCount: UInt16, currentIndex: UInt16, flags: UInt8)
     case guiSidebars(version: UInt8, activeId: String, sidebars: [Wire.SidebarMetadata])
 }
@@ -2255,83 +2261,6 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         return (.guiWorkspaces(version: version, activeWorkspaceId: activeGId, mode: mode, flags: workspaceFlags, workspaces: workspaces, visibleTabs: visibleTabs),
                 payloadEnd - offset)
 
-    case OP_GUI_BOARD:
-        // visible(1) + focused_card_id(4) + card_count(2) + filter_mode(1) + filter_len(2) + filter
-        guard data.count >= rest + 10 else { throw ProtocolDecodeError.malformed }
-        let boardVisible = data[rest] != 0
-        let focusedId = readU32(data, rest + 1)
-        let cardCount = Int(readU16(data, rest + 5))
-        let boardFilterMode = data[rest + 7] != 0
-        let filterLen = Int(readU16(data, rest + 8))
-        guard data.count >= rest + 10 + filterLen else { throw ProtocolDecodeError.malformed }
-        let filterData = data[(rest + 10)..<(rest + 10 + filterLen)]
-        let boardFilterText = String(data: filterData, encoding: .utf8) ?? ""
-        var boardCards: [BoardCard] = []
-        boardCards.reserveCapacity(cardCount)
-        var bPos = rest + 10 + filterLen
-        for _ in 0..<cardCount {
-            // card_id(4) + status(1) + flags(1) + task_len(2) + task + model_len(1) + model + elapsed(4) + file_count(1) + files
-            guard data.count >= bPos + 8 else { throw ProtocolDecodeError.malformed }
-            let cardId = readU32(data, bPos)
-            let statusRaw = data[bPos + 4]
-            let flags = data[bPos + 5]
-            let taskLen = Int(readU16(data, bPos + 6))
-            guard data.count >= bPos + 8 + taskLen else { throw ProtocolDecodeError.malformed }
-            let taskData = data[(bPos + 8)..<(bPos + 8 + taskLen)]
-            let task = String(data: taskData, encoding: .utf8) ?? ""
-            var cPos = bPos + 8 + taskLen
-            guard data.count >= cPos + 1 else { throw ProtocolDecodeError.malformed }
-            let modelLen = Int(data[cPos])
-            cPos += 1
-            guard data.count >= cPos + modelLen else { throw ProtocolDecodeError.malformed }
-            let modelData = data[cPos..<(cPos + modelLen)]
-            let model = String(data: modelData, encoding: .utf8) ?? ""
-            cPos += modelLen
-            guard data.count >= cPos + 5 else { throw ProtocolDecodeError.malformed }
-            let elapsed = readU32(data, cPos)
-            let fileCount = Int(data[cPos + 4])
-            cPos += 5
-            var recentFiles: [String] = []
-            for _ in 0..<fileCount {
-                guard data.count >= cPos + 2 else { throw ProtocolDecodeError.malformed }
-                let pathLen = Int(readU16(data, cPos))
-                cPos += 2
-                guard data.count >= cPos + pathLen else { throw ProtocolDecodeError.malformed }
-                let pathData = data[cPos..<(cPos + pathLen)]
-                recentFiles.append(String(data: pathData, encoding: .utf8) ?? "")
-                cPos += pathLen
-            }
-            // sparkline_count(1) + sparkline_data(count * 2 bytes as Float16)
-            guard data.count >= cPos + 1 else { throw ProtocolDecodeError.malformed }
-            let sparklineCount = Int(data[cPos])
-            cPos += 1
-            guard data.count >= cPos + sparklineCount * 2 else { throw ProtocolDecodeError.malformed }
-            var sparkline: [Float] = []
-            sparkline.reserveCapacity(sparklineCount)
-            for _ in 0..<sparklineCount {
-                let raw = readU16(data, cPos)
-                sparkline.append(Float(raw) / 65535.0)
-                cPos += 2
-            }
-            let isYou = (flags & 0x01) != 0
-            let isFocused = (flags & 0x02) != 0
-            boardCards.append(BoardCard(
-                id: cardId,
-                status: CardStatus(rawValue: statusRaw) ?? .idle,
-                isYouCard: isYou,
-                isFocused: isFocused,
-                task: task,
-                model: model,
-                dispatchTimestamp: elapsed,
-                recentFiles: recentFiles,
-                sparkline: sparkline
-            ))
-            bPos = cPos
-        }
-        return (.guiBoard(visible: boardVisible, focusedCardId: focusedId, cards: boardCards,
-                         filterMode: boardFilterMode, filterText: boardFilterText),
-                bPos - offset)
-
     case OP_GUI_AGENT_CONTEXT:
         // visible(1) + task_len(2) + task + dispatch_timestamp(8) + status(1) + can_approve(1)
         guard data.count >= rest + 3 else { throw ProtocolDecodeError.malformed }
@@ -2641,6 +2570,18 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             ))
         }
         return (.guiExtensionPanel(epPanels), 1 + 2 + epPayloadLen)
+
+    case OP_GUI_EXTENSION_RUNTIME:
+        guard data.count >= rest + 4 else { throw ProtocolDecodeError.malformed }
+        let payloadLen = Int(readU32(data, rest))
+        let payloadStart = rest + 4
+        let payloadEnd = payloadStart + payloadLen
+        guard data.count >= payloadEnd else { throw ProtocolDecodeError.malformed }
+        var pos = payloadStart
+        let extensionID = try readString16(data: data, pos: &pos, end: payloadEnd)
+        let channel = try readString16(data: data, pos: &pos, end: payloadEnd)
+        let payload = data[pos..<payloadEnd]
+        return (.guiExtensionRuntime(FrontendExtensionRuntimeMessage(extensionID: extensionID, channel: channel, payload: Data(payload))), 1 + 4 + payloadLen)
 
     case OP_GUI_SEARCH_STATE:
         // Forward-compatible format: opcode(1) + payload_len(2) + active(1) + match_count(2) + current_index(2) + flags(1)

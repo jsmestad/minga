@@ -155,7 +155,6 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       gui_float_popup: 0x83,
       gui_split_separators: 0x84,
       gui_git_status: 0x85,
-      gui_board: 0x87,
       gui_agent_context: 0x88,
       gui_change_summary: 0x89,
       gui_hover_action: 0x96,
@@ -170,7 +169,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       gui_sidebars: 0x9F,
       gui_window_overlay_delta: 0xA0,
       gui_window_viewport_delta: 0xA1,
-      gui_window_rows_delta: 0xA2
+      gui_window_rows_delta: 0xA2,
+      gui_extension_runtime: 0xA3
     )
   end
 
@@ -212,10 +212,6 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       space_leader_chord: 0x22,
       space_leader_retract: 0x23,
       find_pasteboard_search: 0x24,
-      board_select_card: 0x25,
-      board_close_card: 0x26,
-      board_reorder: 0x27,
-      board_dispatch_agent: 0x28,
       agent_approve: 0x29,
       agent_request_changes: 0x2A,
       agent_dismiss: 0x2B,
@@ -262,7 +258,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       search_replace: 0x54,
       search_replace_all: 0x55,
       search_dismiss: 0x56,
-      sidebar_action: 0x57
+      sidebar_action: 0x57,
+      extension_action: 0x58
     )
   end
 

@@ -36,7 +36,7 @@ defmodule MingaEditor.Shell.TabQueries do
 
   @doc """
   Returns the agent session pid for the user's current view. For
-  Traditional this is the active tab's `:session`; for Board it's the
+  Traditional this is the active tab's `:session`; extension shells may expose their own
   zoomed card's `:session`. Returns `nil` when no session is in scope.
 
   This callback is the source of truth for "which agent session is the

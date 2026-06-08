@@ -2,6 +2,7 @@
 
 **Date:** 2026-03-28
 **Related:** PROPOSAL-shell-state-transitions.md, Epic #1304, #1203 (Board V1)
+**Status:** Historical analysis. Board is now extension-owned and is not a core semantic UI surface or frontend parity target.
 
 ## Summary
 

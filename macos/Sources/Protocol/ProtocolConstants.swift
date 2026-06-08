@@ -83,7 +83,7 @@ let GUI_COLOR_HIGHLIGHT_READ_BG: UInt8 = 0x59
 let GUI_COLOR_HIGHLIGHT_WRITE_BG: UInt8 = 0x5A
 let GUI_COLOR_SELECTION_BG: UInt8 = 0x5B
 
-// Agent status color slots (shared across Board cards, tab bar badges, chat header, etc.)
+// Agent status color slots (shared across tab bar badges, chat header, etc.)
 let GUI_COLOR_AGENT_STATUS_IDLE: UInt8 = 0x5C
 let GUI_COLOR_AGENT_STATUS_WORKING: UInt8 = 0x5D
 let GUI_COLOR_AGENT_STATUS_ITERATING: UInt8 = 0x5E

@@ -1447,30 +1447,6 @@ pub fn decode_gui_change_summary_fields(bytes: &[u8], offset: usize) -> Result<(
     }, pos - offset))
 }
 
-// Command field decoder for gui_board
-
-pub fn decode_gui_board_fields(bytes: &[u8], offset: usize) -> Result<(GuiBoardFields, usize), DecodeError> {
-    let mut pos = offset;
-    require_len(bytes, pos + 1, "visible")?;
-    let visible = bytes[pos];
-    pos += 1;
-    require_len(bytes, pos + 4, "focused_card_id")?;
-    let focused_card_id = read_u32(bytes, pos);
-    pos += 4;
-    require_len(bytes, pos + 2, "card_count")?;
-    let card_count = read_u16(bytes, pos);
-    pos += 2;
-    require_len(bytes, pos + 1, "filter_mode")?;
-    let filter_mode = bytes[pos];
-    pos += 1;
-    Ok((GuiBoardFields {
-        visible,
-        focused_card_id,
-        card_count,
-        filter_mode,
-    }, pos - offset))
-}
-
 // Command field decoder for gui_agent_context
 
 pub fn decode_gui_agent_context_fields(bytes: &[u8], offset: usize) -> Result<(GuiAgentContextFields, usize), DecodeError> {

@@ -3,7 +3,6 @@ defmodule Minga.Frontend.Adapter.GUI do
 
   alias Minga.Frontend.Adapter.GUI.AgentChatEncoder
   alias Minga.Frontend.Adapter.GUI.AgentContextEncoder
-  alias Minga.Frontend.Adapter.GUI.BoardEncoder
   alias Minga.Frontend.Adapter.GUI.BottomPanelEncoder
   alias Minga.Frontend.Adapter.GUI.BreadcrumbEncoder
   alias Minga.Frontend.Adapter.GUI.Caches
@@ -46,7 +45,6 @@ defmodule Minga.Frontend.Adapter.GUI do
     {:agent_context, AgentContextEncoder},
     {:status_bar, StatusBarEncoder},
     {:observatory, ObservatoryEncoder},
-    {:board, BoardEncoder},
     {:tab_bar, TabBarEncoder},
     {:workspaces, WorkspacesEncoder},
     {:sidebars, SidebarsEncoder},

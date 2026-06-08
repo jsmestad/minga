@@ -45,15 +45,16 @@ defmodule MingaBoard.ShellIntegrationTest do
   end
 
   describe "Board grid rendering" do
-    test "Board shell renders card grid with You card" do
-      ctx = start_editor("", shell: :board)
+    test "Board shell initializes card grid with You card" do
+      ctx =
+        start_editor("", shell: :board, capabilities: MingaEditor.Frontend.Capabilities.default())
 
       state = editor_state(ctx)
       assert state.shell == MingaBoard.Shell
       assert MingaBoard.Shell.State.card_count(state.shell_state) == 1
 
-      # The screen should show Board content
-      assert screen_contains?(ctx, "The Board") or screen_contains?(ctx, "You")
+      assert [%MingaBoard.Shell.Card{task: "You", kind: :you}] =
+               MingaBoard.Shell.State.sorted_cards(state.shell_state)
     end
 
     test "toggle_board switches from Traditional to Board" do

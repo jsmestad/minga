@@ -2,7 +2,7 @@ import Observation
 
 /// State for The Board card grid view.
 ///
-/// Updated by the BEAM via the `gui_board` opcode (0x87). Drives
+/// Updated by the BEAM via the generic `gui_extension_runtime` envelope carrying the extension-owned Board payload. Drives
 /// `BoardView` which renders cards in a responsive SwiftUI grid.
 ///
 /// Card data types (`BoardCard`, `CardStatus`) live in

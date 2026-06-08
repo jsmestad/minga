@@ -1991,38 +1991,6 @@ func DecodeGuiChangeSummaryFields(data []byte, offset int) (GuiChangeSummaryFiel
 	}, pos, nil
 }
 
-// Command field decoder for gui_board
-
-func DecodeGuiBoardFields(data []byte, offset int) (GuiBoardFields, int, error) {
-	pos := offset
-	if err := decodeRequireLen(data, pos+1, "visible"); err != nil {
-		return GuiBoardFields{}, offset, err
-	}
-	visible := data[pos]
-	pos++
-	if err := decodeRequireLen(data, pos+4, "focused_card_id"); err != nil {
-		return GuiBoardFields{}, offset, err
-	}
-	focusedCardID := decodeU32(data, pos)
-	pos += 4
-	if err := decodeRequireLen(data, pos+2, "card_count"); err != nil {
-		return GuiBoardFields{}, offset, err
-	}
-	cardCount := decodeU16(data, pos)
-	pos += 2
-	if err := decodeRequireLen(data, pos+1, "filter_mode"); err != nil {
-		return GuiBoardFields{}, offset, err
-	}
-	filterMode := data[pos]
-	pos++
-	return GuiBoardFields{
-		Visible:       visible,
-		FocusedCardID: focusedCardID,
-		CardCount:     cardCount,
-		FilterMode:    filterMode,
-	}, pos, nil
-}
-
 // Command field decoder for gui_agent_context
 
 func DecodeGuiAgentContextFields(data []byte, offset int) (GuiAgentContextFields, int, error) {

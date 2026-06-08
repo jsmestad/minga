@@ -400,13 +400,6 @@ type GuiChangeSummaryFields struct {
 	EntryCount    uint16
 }
 
-type GuiBoardFields struct {
-	Visible       uint8
-	FocusedCardID uint32
-	CardCount     uint16
-	FilterMode    uint8
-}
-
 type GuiAgentContextFields struct {
 	Visible uint8
 }

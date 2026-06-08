@@ -256,15 +256,6 @@ func (m Model) agentAnimating() bool {
 	return false
 }
 
-func (m Model) board() (protocol.Board, bool) {
-	for _, payload := range m.chrome {
-		if payload.Board.Visible {
-			return payload.Board, true
-		}
-	}
-	return protocol.Board{}, false
-}
-
 func (m Model) editTimeline() (protocol.EditTimeline, bool) {
 	for _, payload := range m.chrome {
 		if payload.Timeline.Visible {

@@ -2,7 +2,7 @@ import Observation
 
 /// State for the change summary sidebar shown when zoomed into an agent card.
 ///
-/// Updated by the BEAM via the `gui_board` opcode (0x87) with per-file diff
+/// Updated by the BEAM via semantic change-summary commands with per-file diff
 /// stats. Drives `ChangeSummaryView` which renders a list of changed files
 /// with their status and line counts.
 @MainActor

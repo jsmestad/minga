@@ -5,7 +5,7 @@ defmodule MingaEditor.State.Agent do
 
   This struct is **not** the source of truth for the active agent session.
   The session pid lives on the active `Tab` (Traditional shell) or the
-  zoomed `Card` (Board shell). `MingaEditor.State.AgentAccess.session/1`
+  shell-owned surface. `MingaEditor.State.AgentAccess.session/1`
   reads it through the `Shell.active_session/1` callback.
 
   After a tab switch, `MingaEditor.State.rebuild_agent_from_session/2`
@@ -109,7 +109,7 @@ defmodule MingaEditor.State.Agent do
   session has been torn down. The session pid itself lives on the tab
   or card, not on this struct, so callers must clear that separately
   via `EditorState.set_tab_session/3` (Traditional) or by clearing the
-  card's `:session` field (Board).
+  shell-owned session field.
   """
   @spec reset_cache(t()) :: t()
   def reset_cache(%__MODULE__{} = agent) do

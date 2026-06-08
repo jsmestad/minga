@@ -11,7 +11,6 @@ defmodule MingaEditor.Frontend.Emit.AdapterGUIChromeCacheTest do
   alias Minga.Frontend.Adapter.GUI, as: AdapterGUI
   alias Minga.Frontend.Adapter.GUI.Caches, as: AdapterCaches
   alias MingaEditor.Frontend.Emit.Context
-  alias Minga.RenderModel.UI.Board
   alias MingaEditor.RenderModel.UI.Builder
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
@@ -20,38 +19,6 @@ defmodule MingaEditor.Frontend.Emit.AdapterGUIChromeCacheTest do
 
   import ExUnit.CaptureLog
   import MingaEditor.RenderPipeline.TestHelpers
-
-  defmodule BoardPayloadShell do
-    @moduledoc false
-
-    alias Minga.RenderModel.UI.Board
-
-    @spec compute_layout(map()) :: MingaEditor.Layout.t()
-    def compute_layout(state), do: MingaEditor.Shell.Traditional.compute_layout(state)
-
-    @spec active_session(term()) :: nil
-    def active_session(_shell_state), do: nil
-
-    @spec gui_payload(term()) :: {:board, Board.t()}
-    def gui_payload(_state) do
-      {:board,
-       %Board{
-         visible?: true,
-         focused_card_id: 1,
-         zoomed_card_id: 1,
-         cards: [
-           %Board.Card{
-             id: 1,
-             status: :idle,
-             kind: :agent,
-             task: "Board task",
-             display_task: "Board task",
-             created_at: DateTime.from_unix!(0)
-           }
-         ]
-       }}
-    end
-  end
 
   defmodule PreviewSource do
     @behaviour MingaEditor.UI.Picker.Source
@@ -128,37 +95,14 @@ defmodule MingaEditor.Frontend.Emit.AdapterGUIChromeCacheTest do
              "tab bar command should appear in adapter output"
     end
 
-    test "board is emitted through adapter" do
-      board_state = %{gui_state() | shell: BoardPayloadShell}
-      {_ctx, _caches, cmds} = encode_via_adapter(board_state)
-
-      assert opcode_count(cmds, 0x87) == 1,
-             "board command should appear in adapter output"
-    end
-
-    test "board dismiss is emitted through adapter" do
-      board_state = %{gui_state() | shell: BoardPayloadShell}
-
-      {_ctx, caches, _cmds} = encode_via_adapter(board_state)
-      {_ctx, _caches, dismiss_cmds} = encode_via_adapter(gui_state(), caches)
-
-      assert opcode_count(dismiss_cmds, 0x87) == 1,
-             "board dismiss should appear in adapter output"
-    end
-
-    test "unsupported shell GUI payload dismisses Board via adapter without crashing" do
-      board_state = %{gui_state() | shell: BoardPayloadShell}
-
-      {_ctx, caches, _board_cmds} = encode_via_adapter(board_state)
+    test "unsupported shell GUI payload logs and keeps standard chrome" do
       unsupported_state = %{gui_state() | shell: UnknownGuiPayloadShell}
 
       {{_ctx, _caches, cmds}, log} =
-        with_log(fn -> encode_via_adapter(unsupported_state, caches) end)
+        with_log(fn -> encode_via_adapter(unsupported_state) end)
 
       assert log =~ "Unsupported GUI shell payload"
-
-      assert opcode_count(cmds, 0x87) == 1,
-             "board dismiss should appear in adapter output"
+      assert is_list(cmds)
     end
 
     test "workspaces are emitted through adapter" do

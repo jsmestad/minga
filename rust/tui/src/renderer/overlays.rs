@@ -20,7 +20,6 @@ pub fn render(state: &SemanticState, area: Rect, buffer: &mut Buffer) {
     render_agent_context(state, area, buffer);
     render_agent_chat(state, area, buffer);
     render_tool_manager(state, area, buffer);
-    render_board(state, area, buffer);
     render_notifications(state, area, buffer);
     render_edit_timeline(state, area, buffer);
     render_observatory(state, area, buffer);
@@ -260,39 +259,6 @@ fn render_tool_manager(state: &SemanticState, area: Rect, buffer: &mut Buffer) {
         .min(area.height);
     let rect = geometry::centered_rect(area, area.width.min(60), height);
     components::popup_frame("Tool manager", lines, rect, &palette, buffer);
-}
-
-fn render_board(state: &SemanticState, area: Rect, buffer: &mut Buffer) {
-    let Some(board) = state
-        .board()
-        .filter(|b| b.visible != 0 && !b.cards.is_empty())
-    else {
-        return;
-    };
-    let palette = Palette::new(state.theme());
-    let lines = board
-        .cards
-        .iter()
-        .map(|card| {
-            let marker = if card.id == board.focused_card_id || card.flags & 0x02 != 0 {
-                ">"
-            } else {
-                " "
-            };
-            let status = status_name(card.status);
-            components::list_item_line(
-                format!("{marker} {status}  {}", card.task),
-                card.id == board.focused_card_id,
-                &palette,
-            )
-        })
-        .collect();
-    let title = format!("Board  {} cards", board.cards.len());
-    let height = (board.cards.len() as u16)
-        .saturating_add(2)
-        .min(area.height);
-    let rect = geometry::centered_rect(area, area.width.min(70), height);
-    components::popup_frame(&title, lines, rect, &palette, buffer);
 }
 
 fn render_notifications(state: &SemanticState, area: Rect, buffer: &mut Buffer) {

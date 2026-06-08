@@ -22,20 +22,22 @@ const (
 	CommandWindowDelta
 	CommandChrome
 	CommandClipboardWrite
+	CommandExtensionRuntime
 )
 
 type Command struct {
-	Kind          CommandKind
-	Size          int
-	Draw          DrawText
-	CursorRow     uint16
-	CursorCol     uint16
-	CursorShape   byte
-	Title         string
-	WindowBg      uint32
-	Window        WindowContent
-	Chrome        ChromePayload
-	ClipboardText string
+	Kind             CommandKind
+	Size             int
+	Draw             DrawText
+	CursorRow        uint16
+	CursorCol        uint16
+	CursorShape      byte
+	Title            string
+	WindowBg         uint32
+	Window           WindowContent
+	Chrome           ChromePayload
+	ClipboardText    string
+	ExtensionRuntime ExtensionRuntimePayload
 }
 
 type DrawText struct {
@@ -45,6 +47,13 @@ type DrawText struct {
 	BG    uint32
 	Attrs uint16
 	Text  string
+}
+
+type ExtensionRuntimePayload struct {
+	ExtensionID string
+	Channel     string
+	Payload     []byte
+	Bytes       int
 }
 
 type ChromePayload struct {
@@ -78,7 +87,6 @@ type ChromePayload struct {
 	Observatory       Observatory
 	AgentContext      AgentContext
 	AgentChat         AgentChat
-	Board             Board
 	Timeline          EditTimeline
 	Gutter            GutterSeparator
 	CursorlineChrome  CursorlineChrome
@@ -193,6 +201,8 @@ func DecodeCommand(payload []byte) (Command, error) {
 		return decodeWindowContent(payload)
 	case generated.OPGuiWindowOverlayDelta:
 		return decodeOverlayDelta(payload)
+	case generated.OPGuiExtensionRuntime:
+		return decodeExtensionRuntime(payload)
 	default:
 		return decodeSkipOrChrome(payload)
 	}
@@ -433,6 +443,30 @@ func decodeClipboardWrite(payload []byte) (Command, error) {
 	}
 	text := string(payload[6 : 6+textLen])
 	return Command{Kind: CommandClipboardWrite, Size: size, ClipboardText: text}, nil
+}
+
+func decodeExtensionRuntime(payload []byte) (Command, error) {
+	if len(payload) < 5 {
+		return Command{}, fmt.Errorf("short extension runtime")
+	}
+	payloadLen := int(u32(payload, 1))
+	end := 5 + payloadLen
+	if len(payload) < end {
+		return Command{}, fmt.Errorf("short extension runtime payload")
+	}
+	offset := 5
+	extensionID, next, ok := readString16(payload, offset)
+	if !ok || next > end {
+		return Command{}, fmt.Errorf("malformed extension runtime extension id")
+	}
+	offset = next
+	channel, next, ok := readString16(payload, offset)
+	if !ok || next > end {
+		return Command{}, fmt.Errorf("malformed extension runtime channel")
+	}
+	offset = next
+	raw := append([]byte(nil), payload[offset:end]...)
+	return Command{Kind: CommandExtensionRuntime, Size: end, ExtensionRuntime: ExtensionRuntimePayload{ExtensionID: extensionID, Channel: channel, Payload: raw, Bytes: end}}, nil
 }
 
 func decodeSkipOrChrome(payload []byte) (Command, error) {

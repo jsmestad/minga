@@ -1014,7 +1014,7 @@ defmodule MingaEditor.State do
   # ── Shell field delegates ────────────────────────────────────────────────
   # Thin wrappers that delegate to `ShellState` through `update_shell_state/2`.
   # Both `update_shell_state` and `ShellState` methods use bare-map patterns
-  # so they work with Traditional state, Board state, and test stubs alike.
+  # so they work with Traditional state, extension shell state, and test stubs alike.
   # The canonical @doc lives in `MingaEditor.Shell.Traditional.State`.
 
   @spec status_msg(t()) :: String.t() | nil

@@ -540,10 +540,6 @@ final class SpyEncoder: InputEncoder, Sendable {
         case gitCommitAmend(message: String)
         case gitPullAndRetry
         case foldToggleAtLine(windowId: UInt16, bufferLine: UInt32)
-        case boardSelectCard(id: UInt32)
-        case boardCloseCard(id: UInt32)
-        case boardReorder(cardId: UInt32, newIndex: UInt16)
-        case boardDispatchAgent(task: String, model: String)
         case observatoryInspect(pid: String)
     }
 
@@ -651,18 +647,6 @@ final class SpyEncoder: InputEncoder, Sendable {
     func sendSpaceLeaderChord(codepoint: UInt32, modifiers: UInt8) { /* no-op for tests */ }
     func sendSpaceLeaderRetract(codepoint: UInt32, modifiers: UInt8) { /* no-op for tests */ }
     func sendFindPasteboardSearch(text: String, direction: UInt8) { /* no-op for tests */ }
-    func sendBoardSelectCard(id: UInt32) {
-        state.withLock { $0.guiActions.append(.boardSelectCard(id: id)) }
-    }
-    func sendBoardCloseCard(id: UInt32) {
-        state.withLock { $0.guiActions.append(.boardCloseCard(id: id)) }
-    }
-    func sendBoardReorder(cardId: UInt32, newIndex: UInt16) {
-        state.withLock { $0.guiActions.append(.boardReorder(cardId: cardId, newIndex: newIndex)) }
-    }
-    func sendDispatchAgent(task: String, model: String) {
-        state.withLock { $0.guiActions.append(.boardDispatchAgent(task: task, model: model)) }
-    }
     func sendAgentApprove() { /* no-op for tests */ }
     func sendAgentRequestChanges() { /* no-op for tests */ }
     func sendAgentDismiss() { /* no-op for tests */ }

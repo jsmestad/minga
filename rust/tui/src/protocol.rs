@@ -74,6 +74,7 @@ pub enum Command {
     SetActiveRegion(u16),
     ScrollRegion { top: u16, bottom: u16, delta: i16 },
     MeasureText { request_id: u32, text: String },
+    ExtensionRuntime(ExtensionRuntimePayload),
     Semantic(semantic::Command),
     Noop(usize),
 }
@@ -84,6 +85,7 @@ impl Command {
             Self::DrawText(draw) => 14 + draw.text.len(),
             Self::DrawStyledText(draw) => 21 + draw.text.len(),
             Self::MeasureText { text, .. } => 7 + text.len(),
+            Self::ExtensionRuntime(payload) => payload.size,
             Self::Semantic(command) => command.custom_size(),
             Self::Noop(size) => *size,
             Self::Clear
@@ -99,6 +101,14 @@ impl Command {
             | Self::ScrollRegion { .. } => 0,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtensionRuntimePayload {
+    pub extension_id: String,
+    pub channel: String,
+    pub payload: Vec<u8>,
+    pub size: usize,
 }
 
 pub fn command_byte_size(bytes: &[u8]) -> Result<usize, DecodeError> {
@@ -246,6 +256,7 @@ pub fn decode_command(bytes: &[u8]) -> Result<Command, DecodeError> {
         | opcodes::OP_SET_INDENT_QUERY
         | opcodes::OP_SET_TEXTOBJECT_QUERY
         | opcodes::OP_SET_TAGS_QUERY => skip_len32_at(bytes, 5),
+        opcodes::OP_GUI_EXTENSION_RUNTIME => decode_extension_runtime(bytes),
         opcodes::OP_LOAD_GRAMMAR => skip_load_grammar(bytes),
         opcodes::OP_QUERY_LANGUAGE_AT | opcodes::OP_REQUEST_INDENT => {
             fixed_noop(bytes, 13, "fixed parser request")
@@ -449,6 +460,23 @@ fn skip_len32_at(bytes: &[u8], len_offset: usize) -> Result<Command, DecodeError
     Ok(Command::Noop(len_offset + 4 + len))
 }
 
+fn decode_extension_runtime(bytes: &[u8]) -> Result<Command, DecodeError> {
+    require_len(bytes, 5, "extension runtime header")?;
+    let payload_len = read_u32(bytes, 1) as usize;
+    let end = 5 + payload_len;
+    require_len(bytes, end, "extension runtime payload")?;
+    let mut offset = 5;
+    let extension_id = read_string16_at(bytes, &mut offset, end)?;
+    let channel = read_string16_at(bytes, &mut offset, end)?;
+    let payload = bytes[offset..end].to_vec();
+    Ok(Command::ExtensionRuntime(ExtensionRuntimePayload {
+        extension_id,
+        channel,
+        payload,
+        size: end,
+    }))
+}
+
 fn fixed_noop(bytes: &[u8], size: usize, name: &'static str) -> Result<Command, DecodeError> {
     require_len(bytes, size, name)?;
     Ok(Command::Noop(size))
@@ -503,6 +531,20 @@ fn require_len(bytes: &[u8], needed: usize, message: &'static str) -> Result<(),
     } else {
         Ok(())
     }
+}
+
+fn read_string16_at(bytes: &[u8], offset: &mut usize, end: usize) -> Result<String, DecodeError> {
+    if *offset + 2 > end {
+        return Err(DecodeError::Malformed("string16 header"));
+    }
+    let len = read_u16(bytes, *offset) as usize;
+    *offset += 2;
+    if *offset + len > end {
+        return Err(DecodeError::Malformed("string16 body"));
+    }
+    let value = read_string(bytes, *offset, len)?;
+    *offset += len;
+    Ok(value)
 }
 
 fn read_string(bytes: &[u8], offset: usize, len: usize) -> Result<String, DecodeError> {
@@ -739,6 +781,26 @@ mod tests {
         assert_eq!(size, packet.len() - 1);
         assert!(matches!(command, Command::Noop(_)));
         assert_eq!(decode_command(&packet[size..]).unwrap(), Command::BatchEnd);
+    }
+
+    #[test]
+    fn decodes_generic_extension_runtime_envelope() {
+        let mut packet = vec![opcodes::OP_GUI_EXTENSION_RUNTIME, 0, 0, 0, 18, 0, 5];
+        packet.extend_from_slice(b"hello");
+        packet.extend_from_slice(&[0, 4]);
+        packet.extend_from_slice(b"pane");
+        packet.extend_from_slice(&[0x87, 1, 2, 3, 4]);
+        let command = decode_command(&packet).unwrap();
+
+        match command {
+            Command::ExtensionRuntime(runtime) => {
+                assert_eq!(runtime.extension_id, "hello");
+                assert_eq!(runtime.channel, "pane");
+                assert_eq!(runtime.payload, [0x87, 1, 2, 3, 4]);
+                assert_eq!(runtime.size, packet.len());
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
     }
 }
 

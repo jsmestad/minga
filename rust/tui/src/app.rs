@@ -541,6 +541,7 @@ fn command_name(command: &protocol::Command) -> &'static str {
         protocol::Command::ScrollRegion { .. } => "scroll_region",
         protocol::Command::MeasureText { .. } => "measure_text",
         protocol::Command::Semantic(command) => semantic_command_name(command),
+        protocol::Command::ExtensionRuntime(_) => "extension_runtime",
         protocol::Command::Noop(_) => "noop",
     }
 }
@@ -585,7 +586,6 @@ fn semantic_command_name(command: &crate::semantic::Command) -> &'static str {
         crate::semantic::Command::ExtensionPanel(_, _) => "semantic_extension_panel",
         crate::semantic::Command::Observatory(_, _) => "semantic_observatory",
         crate::semantic::Command::Sidebars(_, _) => "semantic_sidebars",
-        crate::semantic::Command::Board(_, _) => "semantic_board",
         crate::semantic::Command::AgentChat(_, _) => "semantic_agent_chat",
         crate::semantic::Command::ToolManager(_, _) => "semantic_tool_manager",
         crate::semantic::Command::Theme(_, _) => "semantic_theme",

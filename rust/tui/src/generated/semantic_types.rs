@@ -457,14 +457,6 @@ pub struct GuiChangeSummaryFields {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct GuiBoardFields {
-    pub visible: u8,
-    pub focused_card_id: u32,
-    pub card_count: u16,
-    pub filter_mode: u8,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GuiAgentContextFields {
     pub visible: u8,
 }

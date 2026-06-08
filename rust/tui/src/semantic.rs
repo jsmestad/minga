@@ -45,7 +45,6 @@ pub enum Command {
     ExtensionPanel(ExtensionPanel, usize),
     Observatory(Observatory, usize),
     Sidebars(Sidebars, usize),
-    Board(Board, usize),
     AgentChat(AgentChat, usize),
     ToolManager(ToolManager, usize),
 }
@@ -92,7 +91,6 @@ impl Command {
             Self::ExtensionPanel(_, size) => *size,
             Self::Observatory(_, size) => *size,
             Self::Sidebars(_, size) => *size,
-            Self::Board(_, size) => *size,
             Self::AgentChat(_, size) => *size,
             Self::ToolManager(_, size) => *size,
         }
@@ -720,23 +718,6 @@ impl Sidebars {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Board {
-    pub visible: u8,
-    pub focused_card_id: u32,
-    pub card_count: u16,
-    pub filter_mode: u8,
-    pub cards: Vec<BoardCard>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BoardCard {
-    pub id: u32,
-    pub status: u8,
-    pub flags: u8,
-    pub task: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentChat {
     pub visible: u8,
     pub status: u8,
@@ -818,7 +799,6 @@ pub fn decode(bytes: &[u8]) -> Result<Command, DecodeError> {
         opcodes::OP_GUI_EXTENSION_PANEL => decode_extension_panel(bytes),
         opcodes::OP_GUI_OBSERVATORY => decode_observatory(bytes),
         opcodes::OP_GUI_SIDEBARS => decode_sidebars(bytes),
-        opcodes::OP_GUI_BOARD => decode_board(bytes),
         opcodes::OP_GUI_AGENT_CHAT => decode_agent_chat(bytes),
         opcodes::OP_GUI_TOOL_MANAGER => decode_tool_manager(bytes),
         _ => Err(DecodeError::UnknownOpcode(opcode)),
@@ -2467,66 +2447,6 @@ fn decode_sidebars(bytes: &[u8]) -> Result<Command, DecodeError> {
     ))
 }
 
-fn decode_board(bytes: &[u8]) -> Result<Command, DecodeError> {
-    let size = board_size(bytes)?;
-    require_len(bytes, 9, "board fields")?;
-    let visible = bytes[1];
-    let focused_card_id = read_u32(bytes, 2);
-    let count = read_u16(bytes, 6) as usize;
-    let filter_mode = bytes[8];
-    let mut offset = 9;
-    let _ = read_string16(bytes, &mut offset);
-    let mut cards = Vec::with_capacity(count);
-    for _ in 0..count {
-        if offset + 6 > bytes.len().min(size) {
-            break;
-        }
-        let id = read_u32(bytes, offset);
-        let status = bytes[offset + 4];
-        let flags = bytes[offset + 5];
-        offset += 6;
-        let task = match read_string16(bytes, &mut offset) {
-            Ok(s) => s,
-            Err(_) => break,
-        };
-        let _ = read_string8(bytes, &mut offset);
-        if offset + 5 > bytes.len().min(size) {
-            cards.push(BoardCard {
-                id,
-                status,
-                flags,
-                task,
-            });
-            break;
-        }
-        let file_count = bytes[offset + 4] as usize;
-        offset += 5;
-        for _ in 0..file_count {
-            let _ = read_string16(bytes, &mut offset);
-        }
-        if offset < bytes.len().min(size) {
-            let spark_count = bytes[offset] as usize;
-            offset += 1 + spark_count * 2;
-        }
-        cards.push(BoardCard {
-            id,
-            status,
-            flags,
-            task,
-        });
-    }
-    Ok(Command::Board(
-        Board {
-            visible,
-            focused_card_id,
-            card_count: count as u16,
-            filter_mode,
-            cards,
-        },
-        size,
-    ))
-}
-
 fn decode_agent_chat(bytes: &[u8]) -> Result<Command, DecodeError> {
     let size = sectioned_size(bytes, "agent chat")?;
     let secs = sections(&bytes[..size])?;
@@ -2854,7 +2774,6 @@ fn custom_semantic_size(bytes: &[u8]) -> Result<usize, DecodeError> {
         opcodes::OP_GUI_FLOAT_POPUP => float_popup_size(bytes),
         opcodes::OP_GUI_SPLIT_SEPARATORS => split_separators_size(bytes),
         opcodes::OP_GUI_GIT_STATUS => git_status_size(bytes),
-        opcodes::OP_GUI_BOARD => board_size(bytes),
         opcodes::OP_GUI_AGENT_CONTEXT => agent_context_size(bytes),
         opcodes::OP_GUI_CHANGE_SUMMARY => change_summary_size(bytes),
         opcodes::OP_GUI_TOOL_MANAGER => tool_manager_size(bytes),
@@ -3090,32 +3009,6 @@ fn change_summary_size(bytes: &[u8]) -> Result<usize, DecodeError> {
         skip_string16(bytes, &mut offset)?;
         require_len(bytes, offset + 9, "change summary entry")?;
         offset += 9;
-    }
-    Ok(offset)
-}
-
-fn board_size(bytes: &[u8]) -> Result<usize, DecodeError> {
-    require_len(bytes, 11, "board")?;
-    let card_count = read_u16(bytes, 6) as usize;
-    let mut offset = 9;
-    skip_string16(bytes, &mut offset)?;
-    for _ in 0..card_count {
-        require_len(bytes, offset + 6, "board card")?;
-        offset += 6;
-        skip_string16(bytes, &mut offset)?;
-        skip_string8(bytes, &mut offset)?;
-        require_len(bytes, offset + 5, "board card timestamp and recent files")?;
-        offset += 4;
-        let recent_count = bytes[offset] as usize;
-        offset += 1;
-        for _ in 0..recent_count {
-            skip_string16(bytes, &mut offset)?;
-        }
-        require_len(bytes, offset + 1, "board sparkline count")?;
-        let sparkline_count = bytes[offset] as usize;
-        offset += 1;
-        require_len(bytes, offset + sparkline_count * 2, "board sparkline")?;
-        offset += sparkline_count * 2;
     }
     Ok(offset)
 }
@@ -3947,15 +3840,6 @@ mod tests {
             Command::AgentContext(AgentContext { visible: 1, .. }, _)
         ));
 
-        let board = vec![opcodes::OP_GUI_BOARD, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-        let packet = [board, vec![opcodes::OP_BATCH_END]].concat();
-        let command = decode(&packet).unwrap();
-        assert_eq!(semantic_size(&packet).unwrap(), packet.len() - 1);
-        assert!(matches!(
-            command,
-            Command::Board(Board { visible: 1, .. }, _)
-        ));
-
         // Agent chat: 1 section (0x01 header), payload: visible=1, status=2
         let agent_chat = vec![opcodes::OP_GUI_AGENT_CHAT, 1, 0x01, 0, 2, 1, 2];
         let packet = [agent_chat, vec![opcodes::OP_BATCH_END]].concat();
@@ -4412,13 +4296,6 @@ mod tests {
             decode(&packet[semantic_size(&packet).unwrap()..]).unwrap(),
             Command::Theme(Theme { slots }, _) if slots.is_empty()
         ));
-    }
-
-    #[test]
-    fn board_size_visible_zero_regression() {
-        // Board with visible=0: opcode(1) + visible=0(1) + focused_card_id(4) + card_count=0(2) + filter_mode(1) + filter_text_len=0(2) = 11 bytes
-        let bytes = [opcodes::OP_GUI_BOARD, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-        assert_eq!(decode(&bytes).unwrap().custom_size(), 11);
     }
 
     #[test]

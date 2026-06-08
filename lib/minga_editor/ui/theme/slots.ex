@@ -92,7 +92,7 @@ defmodule MingaEditor.UI.Theme.Slots do
   @highlight_write_bg 0x5A
   @selection_bg 0x5B
 
-  # ── Agent status (shared across Board cards, tab badges, chat header) ──
+  # ── Agent status (shared across tab badges, chat header) ──
   @agent_status_idle 0x5C
   @agent_status_working 0x5D
   @agent_status_iterating 0x5E

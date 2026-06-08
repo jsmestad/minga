@@ -16,7 +16,6 @@ defmodule Minga.RenderModel.UITest do
       assert ui.agent_context == nil
       assert ui.status_bar == nil
       assert ui.observatory == nil
-      assert ui.board == nil
       assert ui.tab_bar == nil
       assert ui.workspaces == nil
       assert ui.sidebars == nil

@@ -115,7 +115,7 @@ final class ThemeColors {
     var gitModifiedFgRGB: UInt32 = 0x51AFEF
     var gitDeletedFgRGB: UInt32 = 0xFF6C6B
 
-    // ── Agent status (shared across Board cards, tab badges, chat header) ──
+    // ── Agent status (shared across tab badges, chat header) ──
     var agentStatusIdle: Color = color(0x555555)
     var agentStatusWorking: Color = color(0x98BE65)
     var agentStatusIterating: Color = color(0x98BE65)

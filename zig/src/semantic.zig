@@ -91,8 +91,6 @@ pub const LineSpacing = types.LineSpacing;
 pub const CursorAnimation = types.CursorAnimation;
 pub const ConfigState = types.ConfigState;
 pub const HoverAction = types.HoverAction;
-pub const BoardCard = types.BoardCard;
-pub const Board = types.Board;
 pub const AgentChat = types.AgentChat;
 pub const AgentChatMessage = types.AgentChatMessage;
 pub const WindowContent = types.WindowContent;
@@ -219,7 +217,6 @@ pub const decodeLineSpacing = decode.decodeLineSpacing;
 pub const decodeCursorAnimation = decode.decodeCursorAnimation;
 pub const decodeConfigState = decode.decodeConfigState;
 pub const decodeHoverAction = decode.decodeHoverAction;
-pub const decodeBoard = decode.decodeBoard;
 pub const decodeAgentChat = decode.decodeAgentChat;
 pub const decodeStatusBar = decode.decodeStatusBar;
 const applyWindowOverlaySections = decode.applyWindowOverlaySections;
@@ -271,7 +268,6 @@ pub const State = struct {
     cursor_animation: ?CursorAnimation = null,
     config_state: ?ConfigState = null,
     hover_action: ?HoverAction = null,
-    board: ?Board = null,
     agent_chat: ?AgentChat = null,
     status_bar: ?StatusBar = null,
     cursor_window_id: ?u16 = null,
@@ -321,7 +317,6 @@ pub const State = struct {
         if (self.tool_manager) |*manager| manager.deinit(self.alloc);
         if (self.config_state) |*config| config.deinit(self.alloc);
         if (self.hover_action) |*action| action.deinit(self.alloc);
-        if (self.board) |*board| board.deinit(self.alloc);
         if (self.agent_chat) |*chat| chat.deinit(self.alloc);
         if (self.status_bar) |*status| status.deinit(self.alloc);
         self.windows = &.{};
@@ -359,7 +354,6 @@ pub const State = struct {
         self.cursor_animation = null;
         self.config_state = null;
         self.hover_action = null;
-        self.board = null;
         self.agent_chat = null;
         self.status_bar = null;
         self.cursor_window_id = null;
@@ -812,15 +806,6 @@ pub const State = struct {
         self.hover_action = action;
     }
 
-    /// Decodes and retains a `gui_board` packet.
-    pub fn applyBoardPacket(self: *State, packet: []const u8) Error!void {
-        var board = try decodeBoard(self.alloc, packet);
-        errdefer board.deinit(self.alloc);
-
-        if (self.board) |*old| old.deinit(self.alloc);
-        self.board = board;
-    }
-
     /// Decodes and retains a `gui_agent_chat` packet.
     pub fn applyAgentChatPacket(self: *State, packet: []const u8) Error!void {
         var chat = try decodeAgentChat(self.alloc, packet);
@@ -865,9 +850,9 @@ pub const State = struct {
         if (self.which_key) |which_key| renderWhichKey(surface, which_key, self.minibuffer != null, self.status_bar != null, self.theme);
         if (self.minibuffer) |minibuffer| renderMinibuffer(surface, minibuffer, self.theme);
         if (self.status_bar) |status| {
-            renderStatusBar(surface, status, self.search_state, self.change_summary, self.notifications, self.edit_timeline, self.extension_overlay, self.extension_panel, self.observatory, self.agent_context, self.tool_manager, self.board, self.agent_chat, self.theme);
+            renderStatusBar(surface, status, self.search_state, self.change_summary, self.notifications, self.edit_timeline, self.extension_overlay, self.extension_panel, self.observatory, self.agent_context, self.tool_manager, self.agent_chat, self.theme);
         } else {
-            renderStandaloneFooter(surface, self.search_state, self.change_summary, self.notifications, self.edit_timeline, self.extension_overlay, self.extension_panel, self.observatory, self.agent_context, self.tool_manager, self.board, self.agent_chat, self.minibuffer != null, self.theme);
+            renderStandaloneFooter(surface, self.search_state, self.change_summary, self.notifications, self.edit_timeline, self.extension_overlay, self.extension_panel, self.observatory, self.agent_context, self.tool_manager, self.agent_chat, self.minibuffer != null, self.theme);
         }
         self.renderCursor(surface);
     }
@@ -963,12 +948,6 @@ pub const State = struct {
         if (self.tool_manager) |manager| {
             if (manager.visible) {
                 renderToolManager(surface, manager, has_minibuffer, has_status_bar, self.theme);
-                return;
-            }
-        }
-        if (self.board) |board| {
-            if (board.visible) {
-                renderBoard(surface, board, has_minibuffer, has_status_bar, self.theme);
                 return;
             }
         }
@@ -2281,78 +2260,6 @@ fn renderFloatPopup(surface: anytype, popup: FloatPopup, has_minibuffer: bool, h
     }
 }
 
-fn renderAgentContext(surface: anytype, context: AgentContext, has_minibuffer: bool, has_status_bar: bool, maybe_theme: ?Theme) void {
-    if (!context.visible) return;
-
-    const rect = centeredOverlayRect(surface, 60, if (context.can_approve) 5 else 3, has_minibuffer, has_status_bar) orelse return;
-    const content = preparePopup(surface, rect, maybe_theme) orelse return;
-    var row = content.row;
-    _ = writeText(surface, row, content.col, content.end_col, "Agent context", accentFg(maybe_theme), popupBg(maybe_theme), protocol.ATTR_BOLD);
-    row += 1;
-    row = renderPopupListItem(surface, row, content.end_row, content.col, content.end_col, agentContextStatusLabel(context.status), context.task, true, maybe_theme);
-    if (context.can_approve) _ = renderPopupListItem(surface, row, content.end_row, content.col, content.end_col, "approval", "approve or request changes", false, maybe_theme);
-}
-
-fn renderToolManager(surface: anytype, manager: ToolManager, has_minibuffer: bool, has_status_bar: bool, maybe_theme: ?Theme) void {
-    if (!manager.visible) return;
-
-    const item_count = @max(manager.tools.len, 1);
-    const row_count: u16 = @as(u16, @intCast(@min(item_count * 2, 9))) + 1;
-    const rect = centeredOverlayRect(surface, 60, @max(@as(u16, 3), row_count), has_minibuffer, has_status_bar) orelse return;
-    const content = preparePopup(surface, rect, maybe_theme) orelse return;
-    var row = content.row;
-    _ = writeText(surface, row, content.col, content.end_col, "Tool manager", accentFg(maybe_theme), popupBg(maybe_theme), protocol.ATTR_BOLD);
-    row += 1;
-
-    if (manager.tools.len == 0 and row < content.end_row) {
-        _ = renderPopupListItem(surface, row, content.end_row, content.col, content.end_col, "No tools", "No matching tools", true, maybe_theme);
-        return;
-    }
-
-    const selected_index: usize = @min(@as(usize, manager.selected), manager.tools.len - 1);
-    var index: usize = 0;
-    while (row < content.end_row and index < manager.tools.len) : (index += 1) {
-        const tool = manager.tools[index];
-        const selected = index == selected_index;
-        var detail_buf: [96]u8 = undefined;
-        const description = std.fmt.bufPrint(&detail_buf, "{s} {s}", .{ tool.name, toolStatusLabel(tool.status) }) catch tool.name;
-        row = renderPopupListItem(surface, row, content.end_row, content.col, content.end_col, tool.label, std.mem.trim(u8, description, " "), selected, maybe_theme);
-    }
-}
-
-fn renderBoard(surface: anytype, board: Board, has_minibuffer: bool, has_status_bar: bool, maybe_theme: ?Theme) void {
-    if (!board.visible or board.cards.len == 0) return;
-
-    const row_count: u16 = @as(u16, @intCast(@min(board.cards.len * 2, 9))) + 1;
-    const rect = centeredOverlayRect(surface, 70, @max(@as(u16, 3), row_count), has_minibuffer, has_status_bar) orelse return;
-    const content = preparePopup(surface, rect, maybe_theme) orelse return;
-    var row = content.row;
-    var col = content.col;
-    col = writeText(surface, row, col, content.end_col, "Board  ", accentFg(maybe_theme), popupBg(maybe_theme), protocol.ATTR_BOLD);
-    var count_buf: [16]u8 = undefined;
-    const count = std.fmt.bufPrint(&count_buf, "{d}", .{board.cards.len}) catch "";
-    col = writeAsciiStableText(surface, row, col, content.end_col, count, accentFg(maybe_theme), popupBg(maybe_theme), protocol.ATTR_BOLD);
-    _ = writeText(surface, row, col, content.end_col, " cards", accentFg(maybe_theme), popupBg(maybe_theme), protocol.ATTR_BOLD);
-    row += 1;
-
-    var selected_index: usize = 0;
-    for (board.cards, 0..) |card, card_index| {
-        if (card.id == board.focused_card_id or card.flags & 0x02 != 0) {
-            selected_index = card_index;
-            break;
-        }
-    }
-
-    var index: usize = 0;
-    while (row < content.end_row and index < board.cards.len) : (index += 1) {
-        const card = board.cards[index];
-        const focused = index == selected_index;
-        var title_buf: [64]u8 = undefined;
-        const title = std.fmt.bufPrint(&title_buf, "{s} {s}", .{ if (focused) ">" else " ", boardStatusLabel(card.status) }) catch boardStatusLabel(card.status);
-        row = renderPopupListItem(surface, row, content.end_row, content.col, content.end_col, title, card.task, focused, maybe_theme);
-    }
-}
-
 fn renderPopupListItem(surface: anytype, row: u16, end_row: u16, start_col: u16, end_col: u16, title: []const u8, description: []const u8, selected: bool, maybe_theme: ?Theme) u16 {
     if (row >= end_row or start_col >= end_col) return row;
 
@@ -2955,6 +2862,45 @@ fn renderChangeSummary(surface: anytype, summary: ChangeSummary, has_minibuffer:
     }
 }
 
+fn renderAgentContext(surface: anytype, context: AgentContext, has_minibuffer: bool, has_status_bar: bool, maybe_theme: ?Theme) void {
+    if (!context.visible) return;
+
+    const rect = centeredOverlayRect(surface, 60, if (context.can_approve) 5 else 3, has_minibuffer, has_status_bar) orelse return;
+    const content = preparePopup(surface, rect, maybe_theme) orelse return;
+    var row = content.row;
+    _ = writeText(surface, row, content.col, content.end_col, "Agent context", accentFg(maybe_theme), popupBg(maybe_theme), protocol.ATTR_BOLD);
+    row += 1;
+    row = renderPopupListItem(surface, row, content.end_row, content.col, content.end_col, agentContextStatusLabel(context.status), context.task, true, maybe_theme);
+    if (context.can_approve) _ = renderPopupListItem(surface, row, content.end_row, content.col, content.end_col, "approval", "approve or request changes", false, maybe_theme);
+}
+
+fn renderToolManager(surface: anytype, manager: ToolManager, has_minibuffer: bool, has_status_bar: bool, maybe_theme: ?Theme) void {
+    if (!manager.visible) return;
+
+    const item_count = @max(manager.tools.len, 1);
+    const row_count: u16 = @as(u16, @intCast(@min(item_count * 2, 9))) + 1;
+    const rect = centeredOverlayRect(surface, 60, @max(@as(u16, 3), row_count), has_minibuffer, has_status_bar) orelse return;
+    const content = preparePopup(surface, rect, maybe_theme) orelse return;
+    var row = content.row;
+    _ = writeText(surface, row, content.col, content.end_col, "Tool manager", accentFg(maybe_theme), popupBg(maybe_theme), protocol.ATTR_BOLD);
+    row += 1;
+
+    if (manager.tools.len == 0 and row < content.end_row) {
+        _ = renderPopupListItem(surface, row, content.end_row, content.col, content.end_col, "No tools", "No matching tools", true, maybe_theme);
+        return;
+    }
+
+    const selected_index: usize = @min(@as(usize, manager.selected), manager.tools.len - 1);
+    var index: usize = 0;
+    while (row < content.end_row and index < manager.tools.len) : (index += 1) {
+        const tool = manager.tools[index];
+        const selected = index == selected_index;
+        var detail_buf: [96]u8 = undefined;
+        const description = std.fmt.bufPrint(&detail_buf, "{s} {s}", .{ tool.name, toolStatusLabel(tool.status) }) catch tool.name;
+        row = renderPopupListItem(surface, row, content.end_row, content.col, content.end_col, tool.label, std.mem.trim(u8, description, " "), selected, maybe_theme);
+    }
+}
+
 fn renderNotifications(surface: anytype, notifications: Notifications, has_minibuffer: bool, has_status_bar: bool, maybe_theme: ?Theme) void {
     if (!notifications.visible or notifications.items.len == 0) return;
 
@@ -3197,17 +3143,6 @@ fn toolStatusLabel(status: u8) []const u8 {
     };
 }
 
-fn boardStatusLabel(status: u8) []const u8 {
-    return switch (status) {
-        1 => "working",
-        2 => "iterating",
-        3 => "needs you",
-        4 => "done",
-        5 => "error",
-        else => if (status == 0) "idle" else "unknown",
-    };
-}
-
 fn boundedDimension(preferred: u16, minimum: u16, maximum: u16) u16 {
     if (maximum == 0) return 0;
     return @min(maximum, @max(minimum, preferred));
@@ -3383,7 +3318,7 @@ fn bottomPanelTitle(panel: BottomPanel) []const u8 {
     return "Panel";
 }
 
-fn renderStatusBar(surface: anytype, status: StatusBar, search: ?SearchState, changes: ?ChangeSummary, notifications: ?Notifications, timeline: ?EditTimeline, extension_overlay: ?ExtensionOverlay, extension_panel: ?ExtensionPanel, observatory: ?Observatory, agent_context: ?AgentContext, tool_manager: ?ToolManager, board: ?Board, agent_chat: ?AgentChat, maybe_theme: ?Theme) void {
+fn renderStatusBar(surface: anytype, status: StatusBar, search: ?SearchState, changes: ?ChangeSummary, notifications: ?Notifications, timeline: ?EditTimeline, extension_overlay: ?ExtensionOverlay, extension_panel: ?ExtensionPanel, observatory: ?Observatory, agent_context: ?AgentContext, tool_manager: ?ToolManager, agent_chat: ?AgentChat, maybe_theme: ?Theme) void {
     const width = surface.width();
     const height = surface.height();
     if (width == 0 or height == 0) return;
@@ -3396,30 +3331,30 @@ fn renderStatusBar(surface: anytype, status: StatusBar, search: ?SearchState, ch
     fillRowRemainder(surface, row, 0, width, modelineBg(maybe_theme));
 
     if (status.left_segments.len > 0 or status.right_segments.len > 0) {
-        renderStatusSegments(surface, row, width, status, search, changes, notifications, timeline, extension_overlay, extension_panel, observatory, agent_context, tool_manager, board, agent_chat, maybe_theme);
+        renderStatusSegments(surface, row, width, status, search, changes, notifications, timeline, extension_overlay, extension_panel, observatory, agent_context, tool_manager, agent_chat, maybe_theme);
     } else {
-        renderStatusFallback(surface, row, width, status, search, changes, notifications, timeline, extension_overlay, extension_panel, observatory, agent_context, tool_manager, board, agent_chat, maybe_theme);
+        renderStatusFallback(surface, row, width, status, search, changes, notifications, timeline, extension_overlay, extension_panel, observatory, agent_context, tool_manager, agent_chat, maybe_theme);
     }
 }
 
-fn renderStandaloneFooter(surface: anytype, search: ?SearchState, changes: ?ChangeSummary, notifications: ?Notifications, timeline: ?EditTimeline, extension_overlay: ?ExtensionOverlay, extension_panel: ?ExtensionPanel, observatory: ?Observatory, agent_context: ?AgentContext, tool_manager: ?ToolManager, board: ?Board, agent_chat: ?AgentChat, has_minibuffer: bool, maybe_theme: ?Theme) void {
+fn renderStandaloneFooter(surface: anytype, search: ?SearchState, changes: ?ChangeSummary, notifications: ?Notifications, timeline: ?EditTimeline, extension_overlay: ?ExtensionOverlay, extension_panel: ?ExtensionPanel, observatory: ?Observatory, agent_context: ?AgentContext, tool_manager: ?ToolManager, agent_chat: ?AgentChat, has_minibuffer: bool, maybe_theme: ?Theme) void {
     const width = surface.width();
     const height = surface.height();
     if (width == 0 or height == 0) return;
-    if (!hasFooterIndicators(search, changes, notifications, timeline, extension_overlay, extension_panel, observatory, agent_context, tool_manager, board, agent_chat)) return;
+    if (!hasFooterIndicators(search, changes, notifications, timeline, extension_overlay, extension_panel, observatory, agent_context, tool_manager, agent_chat)) return;
 
     const row = if (has_minibuffer and height > 1) height - 2 else height - 1;
     clearRow(surface, row, width);
     fillRowRemainder(surface, row, 0, width, modelineBg(maybe_theme));
-    _ = renderFooterIndicators(surface, row, width, 0, search, changes, notifications, timeline, extension_overlay, extension_panel, observatory, agent_context, tool_manager, board, agent_chat, maybe_theme);
+    _ = renderFooterIndicators(surface, row, width, 0, search, changes, notifications, timeline, extension_overlay, extension_panel, observatory, agent_context, tool_manager, agent_chat, maybe_theme);
 }
 
-fn renderStatusSegments(surface: anytype, row: u16, width: u16, status: StatusBar, search: ?SearchState, changes: ?ChangeSummary, notifications: ?Notifications, timeline: ?EditTimeline, extension_overlay: ?ExtensionOverlay, extension_panel: ?ExtensionPanel, observatory: ?Observatory, agent_context: ?AgentContext, tool_manager: ?ToolManager, board: ?Board, agent_chat: ?AgentChat, maybe_theme: ?Theme) void {
+fn renderStatusSegments(surface: anytype, row: u16, width: u16, status: StatusBar, search: ?SearchState, changes: ?ChangeSummary, notifications: ?Notifications, timeline: ?EditTimeline, extension_overlay: ?ExtensionOverlay, extension_panel: ?ExtensionPanel, observatory: ?Observatory, agent_context: ?AgentContext, tool_manager: ?ToolManager, agent_chat: ?AgentChat, maybe_theme: ?Theme) void {
     var col: u16 = 0;
     for (status.left_segments) |segment| {
         col = writeText(surface, row, col, width, segment.text, themedSegmentFg(segment, maybe_theme), themedSegmentBg(segment, maybe_theme), segment.attrs);
     }
-    col = renderFooterIndicators(surface, row, width, col, search, changes, notifications, timeline, extension_overlay, extension_panel, observatory, agent_context, tool_manager, board, agent_chat, maybe_theme);
+    col = renderFooterIndicators(surface, row, width, col, search, changes, notifications, timeline, extension_overlay, extension_panel, observatory, agent_context, tool_manager, agent_chat, maybe_theme);
 
     var right_width: u16 = 0;
     for (status.right_segments) |segment| {
@@ -3432,7 +3367,7 @@ fn renderStatusSegments(surface: anytype, row: u16, width: u16, status: StatusBa
     }
 }
 
-fn renderStatusFallback(surface: anytype, row: u16, width: u16, status: StatusBar, search: ?SearchState, changes: ?ChangeSummary, notifications: ?Notifications, timeline: ?EditTimeline, extension_overlay: ?ExtensionOverlay, extension_panel: ?ExtensionPanel, observatory: ?Observatory, agent_context: ?AgentContext, tool_manager: ?ToolManager, board: ?Board, agent_chat: ?AgentChat, maybe_theme: ?Theme) void {
+fn renderStatusFallback(surface: anytype, row: u16, width: u16, status: StatusBar, search: ?SearchState, changes: ?ChangeSummary, notifications: ?Notifications, timeline: ?EditTimeline, extension_overlay: ?ExtensionOverlay, extension_panel: ?ExtensionPanel, observatory: ?Observatory, agent_context: ?AgentContext, tool_manager: ?ToolManager, agent_chat: ?AgentChat, maybe_theme: ?Theme) void {
     var col: u16 = 0;
     if (status.filename.len > 0) {
         col = writeText(surface, row, col, width, status.filename, modelineFg(maybe_theme), modelineBg(maybe_theme), 0);
@@ -3448,10 +3383,10 @@ fn renderStatusFallback(surface: anytype, row: u16, width: u16, status: StatusBa
         col = writeText(surface, row, col, width, status.message, modelineFg(maybe_theme), modelineBg(maybe_theme), protocol.ATTR_BOLD);
     }
 
-    _ = renderFooterIndicators(surface, row, width, col, search, changes, notifications, timeline, extension_overlay, extension_panel, observatory, agent_context, tool_manager, board, agent_chat, maybe_theme);
+    _ = renderFooterIndicators(surface, row, width, col, search, changes, notifications, timeline, extension_overlay, extension_panel, observatory, agent_context, tool_manager, agent_chat, maybe_theme);
 }
 
-fn hasFooterIndicators(search: ?SearchState, changes: ?ChangeSummary, notifications: ?Notifications, timeline: ?EditTimeline, extension_overlay: ?ExtensionOverlay, extension_panel: ?ExtensionPanel, observatory: ?Observatory, agent_context: ?AgentContext, tool_manager: ?ToolManager, board: ?Board, agent_chat: ?AgentChat) bool {
+fn hasFooterIndicators(search: ?SearchState, changes: ?ChangeSummary, notifications: ?Notifications, timeline: ?EditTimeline, extension_overlay: ?ExtensionOverlay, extension_panel: ?ExtensionPanel, observatory: ?Observatory, agent_context: ?AgentContext, tool_manager: ?ToolManager, agent_chat: ?AgentChat) bool {
     _ = notifications;
     _ = timeline;
     _ = extension_overlay;
@@ -3459,7 +3394,6 @@ fn hasFooterIndicators(search: ?SearchState, changes: ?ChangeSummary, notificati
     _ = observatory;
     _ = agent_context;
     _ = tool_manager;
-    _ = board;
     _ = agent_chat;
     if (search) |state| {
         if (state.active) return true;
@@ -3470,7 +3404,7 @@ fn hasFooterIndicators(search: ?SearchState, changes: ?ChangeSummary, notificati
     return false;
 }
 
-fn renderFooterIndicators(surface: anytype, row: u16, width: u16, start_col: u16, search: ?SearchState, changes: ?ChangeSummary, notifications: ?Notifications, timeline: ?EditTimeline, extension_overlay: ?ExtensionOverlay, extension_panel: ?ExtensionPanel, observatory: ?Observatory, agent_context: ?AgentContext, tool_manager: ?ToolManager, board: ?Board, agent_chat: ?AgentChat, maybe_theme: ?Theme) u16 {
+fn renderFooterIndicators(surface: anytype, row: u16, width: u16, start_col: u16, search: ?SearchState, changes: ?ChangeSummary, notifications: ?Notifications, timeline: ?EditTimeline, extension_overlay: ?ExtensionOverlay, extension_panel: ?ExtensionPanel, observatory: ?Observatory, agent_context: ?AgentContext, tool_manager: ?ToolManager, agent_chat: ?AgentChat, maybe_theme: ?Theme) u16 {
     _ = notifications;
     _ = timeline;
     _ = extension_overlay;
@@ -3478,7 +3412,6 @@ fn renderFooterIndicators(surface: anytype, row: u16, width: u16, start_col: u16
     _ = observatory;
     _ = agent_context;
     _ = tool_manager;
-    _ = board;
     _ = agent_chat;
     var col = start_col;
     const fg = modelineFg(maybe_theme);
@@ -8375,148 +8308,6 @@ test "semantic state applies cursorline and renders gutter separator" {
     try expectMockCellStyled(&surface, 0, "│", 0x445566, 0x010203, 0);
 }
 
-test "decodeBoard retains card summaries" {
-    const alloc = std.testing.allocator;
-    const packet = &[_]u8{
-        protocol.OP_GUI_BOARD,
-        1,
-        0,
-        0,
-        0,
-        7,
-        0,
-        1,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        7,
-        1,
-        0x02,
-        0,
-        6,
-        'F',
-        'i',
-        'x',
-        ' ',
-        'C',
-        'I',
-        3,
-        'g',
-        'p',
-        't',
-        0,
-        0,
-        0,
-        9,
-        1,
-        0,
-        10,
-        'l',
-        'i',
-        'b',
-        '/',
-        'a',
-        'p',
-        'p',
-        '.',
-        'e',
-        'x',
-        0,
-    };
-
-    var board = try decodeBoard(alloc, packet);
-    defer board.deinit(alloc);
-
-    try std.testing.expect(board.visible);
-    try std.testing.expectEqual(@as(u32, 7), board.focused_card_id);
-    try std.testing.expectEqual(@as(u16, 1), board.card_count);
-    try std.testing.expectEqualStrings("", board.filter_text);
-    try std.testing.expectEqual(@as(usize, 1), board.cards.len);
-    try std.testing.expectEqual(@as(u32, 7), board.cards[0].id);
-    try std.testing.expectEqual(@as(u8, 1), board.cards[0].status);
-    try std.testing.expectEqual(@as(u8, 0x02), board.cards[0].flags);
-    try std.testing.expectEqualStrings("Fix CI", board.cards[0].task);
-    try std.testing.expectEqualStrings("gpt", board.cards[0].model);
-    try std.testing.expectEqual(@as(u32, 9), board.cards[0].timestamp);
-    try std.testing.expectEqual(@as(usize, 1), board.cards[0].recent_files.len);
-    try std.testing.expectEqualStrings("lib/app.ex", board.cards[0].recent_files[0]);
-}
-
-test "semantic state suppresses visible empty board like Go" {
-    const alloc = std.testing.allocator;
-    var state = State.init(alloc);
-    defer state.deinit();
-    state.board = .{ .visible = true };
-
-    var surface = MockSurface{ .mock_width = 80, .mock_height = 8 };
-    defer surface.deinit(alloc);
-    state.render(MockSurface, &surface);
-
-    var saw_title = false;
-    for (surface.cells.items) |cell| {
-        if (std.mem.eql(u8, cell.text, "B")) saw_title = true;
-    }
-
-    try std.testing.expect(!saw_title);
-}
-
-test "semantic state renders board cards like Go list items" {
-    const alloc = std.testing.allocator;
-    const packet = &[_]u8{
-        protocol.OP_GUI_BOARD,
-        1,
-        0,
-        0,
-        0,
-        7,
-        0,
-        1,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        7,
-        1,
-        0x02,
-        0,
-        6,
-        'F',
-        'i',
-        'x',
-        ' ',
-        'C',
-        'I',
-        3,
-        'g',
-        'p',
-        't',
-        0,
-        0,
-        0,
-        9,
-        0,
-        0,
-    };
-
-    var state = State.init(alloc);
-    defer state.deinit();
-    try state.applyBoardPacket(packet);
-
-    var surface = MockSurface{ .mock_width = 80, .mock_height = 8 };
-    defer surface.deinit(alloc);
-    state.render(MockSurface, &surface);
-
-    try expectMockCell(&surface, 2, "B", protocol.ATTR_BOLD);
-    try expectMockCell(&surface, 3, ">", protocol.ATTR_BOLD);
-    try expectMockCell(&surface, 3, "w", protocol.ATTR_BOLD);
-    try expectMockCell(&surface, 4, "F", null);
-}
-
 test "decodeAgentChat retains chat summary" {
     const alloc = std.testing.allocator;
     const packet = &[_]u8{
@@ -8794,82 +8585,6 @@ test "decodeAgentChatMessage retains Go styled tool result text" {
     try std.testing.expectEqualStrings("lib/app.ex", message.summary);
     try std.testing.expectEqualStrings("ok", message.result);
     try std.testing.expectEqual(@as(u8, 2), message.auto_approved_scope);
-}
-
-test "semantic state renders agent chat before board overlay" {
-    const alloc = std.testing.allocator;
-    const status_packet = &[_]u8{
-        protocol.OP_GUI_STATUS_BAR, 1,
-        0x07,                       0,
-        4,                          0,
-        2,                          'o',
-        'k',
-    };
-    const board_packet = &[_]u8{
-        protocol.OP_GUI_BOARD,
-        1,
-        0,
-        0,
-        0,
-        7,
-        0,
-        1,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        7,
-        1,
-        0x02,
-        0,
-        6,
-        'F',
-        'i',
-        'x',
-        ' ',
-        'C',
-        'I',
-        3,
-        'g',
-        'p',
-        't',
-        0,
-        0,
-        0,
-        9,
-        0,
-        0,
-    };
-    const chat_packet = &[_]u8{
-        protocol.OP_GUI_AGENT_CHAT, 1,
-        0x01,                       0,
-        2,                          1,
-        2,
-    };
-
-    var state = State.init(alloc);
-    defer state.deinit();
-    try state.applyStatusBarPacket(status_packet);
-    try state.applyBoardPacket(board_packet);
-    try state.applyAgentChatPacket(chat_packet);
-
-    var surface = MockSurface{ .mock_width = 100 };
-    defer surface.deinit(alloc);
-    state.render(MockSurface, &surface);
-
-    var saw_chat = false;
-    var saw_transcript = false;
-    var saw_board = false;
-    for (surface.cells.items) |cell| {
-        if (std.mem.eql(u8, cell.text, "A")) saw_chat = true;
-        if (std.mem.eql(u8, cell.text, "T")) saw_transcript = true;
-        if (std.mem.eql(u8, cell.text, "B")) saw_board = true;
-    }
-    try std.testing.expect(saw_chat);
-    try std.testing.expect(saw_transcript);
-    try std.testing.expect(!saw_board);
 }
 
 test "semantic state renders agent chat transcript rows" {
