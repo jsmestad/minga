@@ -1040,8 +1040,11 @@ fn installSignalHandlers() void {
         std.posix.sigaddset(&unblock_set, std.posix.SIG.WINCH);
         std.posix.sigaddset(&unblock_set, std.posix.SIG.TERM);
         std.posix.sigaddset(&unblock_set, std.posix.SIG.INT);
-        const SIG_UNBLOCK = 2;
-        std.posix.sigprocmask(SIG_UNBLOCK, &unblock_set, null);
+        // SIG.UNBLOCK is 1 on x86_64 Linux but 2 on macOS/BSD. Hardcoding 2
+        // means SIG_SETMASK on Linux, which would *set* the mask to block
+        // exactly these signals instead of unblocking them, so SIGWINCH would
+        // still never reach the handler. Use the portable constant.
+        std.posix.sigprocmask(std.posix.SIG.UNBLOCK, &unblock_set, null);
     }
 
     const mask = switch (builtin.os.tag) {
