@@ -141,7 +141,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       if is_active do
         not Minga.Editing.minibuffer_mode?(state)
       else
-        true
+        false
       end
 
     # Selection in display coordinates

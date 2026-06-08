@@ -5,8 +5,11 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 )
+
+const maxTabLabelWidth = 24
 
 func (m Model) headerLines() []string {
 	lines := []string{}
@@ -101,7 +104,8 @@ func (m Model) renderTabs(tabBar protocol.TabBar) string {
 		if icon.color != "" {
 			iconText = lipgloss.NewStyle().Foreground(lipgloss.Color(icon.color)).Background(iconBackground).Render(icon.glyph)
 		}
-		label := strings.TrimSpace(iconText + " " + tab.Label)
+		tabLabel := ansi.TruncateWc(tab.Label, maxTabLabelWidth, "…")
+		label := strings.TrimSpace(iconText + " " + tabLabel)
 		if tab.Active {
 			label = lipgloss.NewStyle().Foreground(theme.Accent()).Background(theme.TabActive()).Render("▌") + " " + label
 		}
@@ -117,7 +121,7 @@ func (m Model) renderTabs(tabBar protocol.TabBar) string {
 		} else if tab.Tint != 0 {
 			style = style.Foreground(lipgloss.Color(fmt.Sprintf("#%06X", tab.Tint&0xFFFFFF)))
 		}
-		rendered = append(rendered, style.Render(label))
+		rendered = append(rendered, m.zones.Mark(zoneIDTab(tab.ID), style.Render(label)))
 	}
 	return rowStyle.Render(fitStyled(strings.Join(rendered, " "), m.width))
 }
@@ -191,7 +195,7 @@ func (m Model) renderStatusSegments(status protocol.StatusBar) string {
 	}
 	leftSpacer := strings.Repeat(" ", max((available-messageWidth)/2, 0))
 	rightSpacer := strings.Repeat(" ", max(available-messageWidth-lipgloss.Width(leftSpacer), 0))
-	spacerStyle := lipgloss.NewStyle().Background(m.palette().Base())
+	spacerStyle := lipgloss.NewStyle().Background(m.palette().ChromeSurface())
 	return left + spacerStyle.Render(leftSpacer) + message + spacerStyle.Render(rightSpacer) + right
 }
 
@@ -199,7 +203,7 @@ func (m Model) renderStatusMessage(message string) string {
 	if message == "" {
 		return ""
 	}
-	return lipgloss.NewStyle().Bold(true).Foreground(m.palette().Warning()).Background(m.palette().Base()).Render(message)
+	return lipgloss.NewStyle().Bold(true).Foreground(m.palette().Warning()).Background(m.palette().ChromeSurface()).Render(message)
 }
 
 func (m Model) renderSegmentList(segments []protocol.StatusSegment) string {
@@ -209,7 +213,7 @@ func (m Model) renderSegmentList(segments []protocol.StatusSegment) string {
 		if text == "" {
 			continue
 		}
-		style := lipgloss.NewStyle().Foreground(m.palette().Muted()).Background(m.palette().Base())
+		style := lipgloss.NewStyle().Foreground(m.palette().ChromeText()).Background(m.palette().ChromeSurface())
 		if segment.FG != 0 {
 			style = style.Foreground(lipgloss.Color(fmt.Sprintf("#%06X", segment.FG)))
 		}
@@ -363,9 +367,10 @@ func (m Model) renderPickerItemRow(title string, item protocol.PickerItem, selec
 	rowBackground := theme.PopupSurface()
 	rowForeground := theme.PopupText()
 	if selected {
+		rowBackground = theme.PopupSelection()
 		rowForeground = theme.PopupSelectionText()
 	}
-	markerText := lipgloss.NewStyle().Foreground(theme.Muted()).Background(rowBackground).Render(marker)
+	markerText := lipgloss.NewStyle().Foreground(theme.PopupMutedText()).Background(rowBackground).Render(marker)
 	if selected {
 		markerText = lipgloss.NewStyle().Bold(true).Foreground(theme.Accent()).Background(rowBackground).Render(marker)
 	} else if item.Marked {
@@ -381,14 +386,15 @@ func (m Model) renderPickerItemRow(title string, item protocol.PickerItem, selec
 	}
 	text := markerText + labelStyle.Render(" "+strings.TrimSpace(iconText+" "+item.Label))
 	if strings.TrimSpace(detail) != "" {
-		text += lipgloss.NewStyle().Foreground(theme.Muted()).Background(rowBackground).Render("  " + strings.TrimSpace(detail))
+		text += lipgloss.NewStyle().Foreground(theme.PopupMutedText()).Background(rowBackground).Render("  " + strings.TrimSpace(detail))
 	}
 	return lipgloss.NewStyle().Background(rowBackground).Width(width).Render(fitStyled(" "+text, width))
 }
 
 func (m Model) renderPickerWithSidePreview(title string, picker protocol.Picker, preview protocol.PickerPreview, height int) []string {
-	leftWidth := min(max(m.width*45/100, 36), max(m.width-20, 1))
-	rightWidth := max(m.width-leftWidth, 1)
+	dividerWidth := 1
+	leftWidth := min(max(m.width*42/100, 36), max(m.width-20-dividerWidth, 1))
+	rightWidth := max(m.width-leftWidth-dividerWidth, 1)
 	bodyHeight := max(height-1, 1)
 	left := m.renderPickerList(title, picker, bodyHeight, leftWidth)
 	right := m.renderPickerPreview(preview, bodyHeight, rightWidth)
@@ -396,8 +402,9 @@ func (m Model) renderPickerWithSidePreview(title string, picker protocol.Picker,
 	right = m.fillPopupLines(right, bodyHeight, rightWidth)
 	lines := make([]string, 0, height)
 	leftStyle := lipgloss.NewStyle().Width(leftWidth).Background(m.palette().PopupSurface())
+	divider := lipgloss.NewStyle().Foreground(m.palette().PopupBorder()).Background(m.palette().PopupSurface()).Render("│")
 	for i := 0; i < bodyHeight; i++ {
-		lines = append(lines, lipgloss.JoinHorizontal(lipgloss.Top, leftStyle.Render(left[i]), right[i]))
+		lines = append(lines, lipgloss.JoinHorizontal(lipgloss.Top, leftStyle.Render(left[i]), divider, right[i]))
 	}
 	lines = append(lines, m.renderPickerHelp(picker, m.width))
 	return lines
@@ -411,8 +418,8 @@ func (m Model) renderPickerHelp(picker protocol.Picker, width int) string {
 	}
 	left := fmt.Sprintf(" %d/%d", selected, len(picker.Items))
 	right := "↑↓ move  Enter choose  Esc close"
-	leftText := lipgloss.NewStyle().Foreground(p.Muted()).Background(p.PopupChrome()).Render(left)
-	rightText := lipgloss.NewStyle().Foreground(p.Muted()).Background(p.PopupChrome()).Render(right)
+	leftText := lipgloss.NewStyle().Foreground(p.PopupMutedText()).Background(p.PopupChrome()).Render(left)
+	rightText := lipgloss.NewStyle().Foreground(p.PopupMutedText()).Background(p.PopupChrome()).Render(right)
 	spacer := strings.Repeat(" ", max(width-lipgloss.Width(leftText)-lipgloss.Width(rightText), 0))
 	return lipgloss.NewStyle().Background(p.PopupChrome()).Width(width).Render(fitStyled(leftText+spacer+rightText, width))
 }
@@ -421,11 +428,13 @@ func (m Model) renderPickerPreview(preview protocol.PickerPreview, height int, w
 	theme := m.palette()
 	style := m.popupLineStyle(width)
 	limit := min(len(preview.Lines), max(height-1, 0))
-	lines := []string{style.Bold(true).Foreground(theme.Accent()).Render(fit("Preview", width))}
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.Accent()).Background(theme.PopupChrome()).Width(width)
+	lines := []string{titleStyle.Render(fit(" Preview", width))}
 	for _, line := range preview.Lines[:limit] {
 		var builder strings.Builder
+		builder.WriteString(lipgloss.NewStyle().Background(theme.PopupSurface()).Render(" "))
 		for _, segment := range line.Segments {
-			segmentStyle := lipgloss.NewStyle().Background(theme.PopupSurface())
+			segmentStyle := lipgloss.NewStyle().Foreground(theme.PopupText()).Background(theme.PopupSurface())
 			if segment.FG != 0 {
 				segmentStyle = segmentStyle.Foreground(lipgloss.Color(fmt.Sprintf("#%06X", segment.FG)))
 			}

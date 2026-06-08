@@ -43,6 +43,7 @@ type Model struct {
 	cursorlineChrome      protocol.CursorlineChrome
 	pendingClipboard      string
 	lastError             string
+	bottomPanelScrollback int
 	agentAnimationFrame   uint64
 	agentAnimationRunning bool
 }
@@ -108,7 +109,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.PasteMsg:
 		m.send(pastePacket(msg))
 	case tea.MouseMsg:
-		if packet, ok := m.semanticMousePacket(msg); ok {
+		if updated, ok := m.localMouse(msg); ok {
+			m = updated
+		} else if packet, ok := m.semanticMousePacket(msg); ok {
 			m.send(packet)
 		} else {
 			m.send(mousePacket(msg))
@@ -216,6 +219,8 @@ func (m *Model) applyCommands(commands []protocol.Command) tea.Cmd {
 				m.indentGuides[command.Chrome.IndentGuides.WindowID] = command.Chrome.IndentGuides
 			case generated.OPGuiFileTreeSelection:
 				m.applyFileTreeSelection(command.Chrome.FileTreeSelection)
+			case generated.OPGuiBottomPanel:
+				m.clampBottomPanelScrollback(command.Chrome.Bottom)
 			}
 		}
 	}
@@ -233,9 +238,7 @@ func (m *Model) putWindow(window protocol.WindowContent) {
 		sort.Slice(m.windowOrder, func(i, j int) bool { return m.windowOrder[i] < m.windowOrder[j] })
 	}
 	m.windows[window.ID] = window
-	m.cursorRow = window.CursorRow
-	m.cursorCol = window.CursorCol
-	m.cursorShape = window.CursorShape
+	m.refreshCursorFromWindows()
 }
 
 func (m *Model) applyWindowDelta(delta protocol.WindowContent) {
@@ -246,6 +249,7 @@ func (m *Model) applyWindowDelta(delta protocol.WindowContent) {
 	window.CursorRow = delta.CursorRow
 	window.CursorCol = delta.CursorCol
 	window.CursorShape = delta.CursorShape
+	window.CursorVisible = delta.CursorVisible
 	window.ContentEpoch = delta.ContentEpoch
 	if delta.ScrollLeftSet {
 		window.ScrollLeft = delta.ScrollLeft
@@ -284,9 +288,19 @@ func (m *Model) applyWindowDelta(delta protocol.WindowContent) {
 		window.Rows = rows
 	}
 	m.windows[delta.ID] = window
-	m.cursorRow = delta.CursorRow
-	m.cursorCol = delta.CursorCol
-	m.cursorShape = delta.CursorShape
+	m.refreshCursorFromWindows()
+}
+
+func (m *Model) refreshCursorFromWindows() {
+	for _, id := range m.windowOrder {
+		window := m.windows[id]
+		if !window.CursorVisible {
+			continue
+		}
+		m.cursorRow = window.CursorRow
+		m.cursorCol = window.CursorCol
+		m.cursorShape = window.CursorShape
+	}
 }
 
 func resolveWindowRows(previous []protocol.WindowRow, delta []protocol.WindowRow) ([]protocol.WindowRow, error) {

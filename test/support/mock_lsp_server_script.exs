@@ -19,6 +19,7 @@ defmodule MockServer do
     # of the parent port doesn't produce noisy :epipe errors.
     :io.setopts(:standard_io, binary: true, encoding: :latin1)
     Logger.configure(level: :none)
+    if stderr_banner?(), do: IO.puts(:standard_error, "mock lsp stderr banner")
     loop("")
   end
 
@@ -195,6 +196,10 @@ defmodule MockServer do
 
   defp request_unknown? do
     "--request-unknown" in System.argv()
+  end
+
+  defp stderr_banner? do
+    "--stderr-banner" in System.argv()
   end
 
   defp send_test_diagnostic(uri, code, message) do

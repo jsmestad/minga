@@ -44,7 +44,7 @@ func keyPacket(msg tea.KeyPressMsg) ([]byte, bool) {
 	if key.Text != "" {
 		runes := []rune(key.Text)
 		if len(runes) == 1 {
-			return protocol.EncodeKeyPress(runes[0], keyModifiers(key)), true
+			return protocol.EncodeKeyPress(runes[0], printableTextModifiers(key)), true
 		}
 		return protocol.EncodePaste(key.Text), true
 	}
@@ -111,6 +111,14 @@ func sgrMouseParts(code int, release bool) (byte, byte, byte) {
 		eventType = 2
 	}
 	return button, mods, eventType
+}
+
+func printableTextModifiers(key tea.Key) byte {
+	mods := keyModifiers(key)
+	if key.Mod.Contains(tea.ModShift) && !key.Mod.Contains(tea.ModCtrl) && !key.Mod.Contains(tea.ModAlt) {
+		mods &^= protocol.ModShift
+	}
+	return mods
 }
 
 func keyModifiers(key tea.Key) byte {

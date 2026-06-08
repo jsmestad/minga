@@ -121,6 +121,27 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       assert Enum.any?(divider_regions, &(&1.rect == {0, 39, 1, 23}))
     end
 
+    test "inactive GUI windows hide their cursor" do
+      state = gui_state(content: "left\nright")
+      buffer = state.workspace.buffers.active
+      {:ok, tree} = WindowTree.split(state.workspace.windows.tree, 1, :vertical, 2)
+      second = EditorWindow.new(2, buffer, 24, 80)
+
+      windows = %Windows{
+        state.workspace.windows
+        | tree: tree,
+          map: Map.put(state.workspace.windows.map, 2, second),
+          next_id: 3
+      }
+
+      state = %{state | workspace: %{state.workspace | windows: windows}}
+
+      {[left, right], _cursor, _state} = build_content(state)
+
+      assert left.window_model.cursor_visible == true
+      assert right.window_model.cursor_visible == false
+    end
+
     test "ordinary buffer edits change row hashes without bumping content epoch or forcing refresh" do
       state = gui_state(content: "hello")
       {[wf], _cursor, state} = build_content(state)
