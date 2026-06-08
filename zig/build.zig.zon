@@ -8,6 +8,10 @@
             .url = "git+https://github.com/rockorager/libvaxis.git#1dbbe575dff4586fe51e3217aa5c3fecdcbb6089",
             .hash = "vaxis-0.6.0-BWNV_CrbCQCscGpzsAlR402rYQ_tV3aAl081c2iRRkka",
         },
+        .zigzag = .{
+            .url = "git+https://github.com/meszmate/zigzag.git?ref=v0.1.5#4286ed5a1f919c1ee19ef4831021a57d18322905",
+            .hash = "zigzag-0.1.2-YXwYS17aEQBlpxPETTrhY5leFh7vV0DpnXJbHogs4Lsv",
+        },
     },
 
     .paths = .{
