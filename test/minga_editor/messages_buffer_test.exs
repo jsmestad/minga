@@ -7,31 +7,27 @@ defmodule MingaEditor.MessagesBufferTest do
 
   use Minga.Test.EditorCase, async: true
 
-  alias Minga.Buffer
-
   defp unique_tag(prefix) do
     "msgtest-#{prefix}-#{System.unique_integer([:positive])}"
   end
 
-  describe "*Messages* buffer popup" do
-    test "SPC b m opens a read-only messages popup and toggles it closed" do
+  describe "Messages tray" do
+    test "SPC b m opens the bottom messages tray without replacing the active buffer" do
       ctx = start_editor("hello")
+      active_before = active_window_buffer(ctx)
 
       send_keys_sync(ctx, "<SPC>bm")
-      assert Buffer.buffer_name(active_window_buffer(ctx)) == "*Messages*"
-      assert Buffer.read_only?(active_window_buffer(ctx))
 
-      send_keys_sync(ctx, "<SPC>bm")
-      refute Buffer.buffer_name(active_window_buffer(ctx)) == "*Messages*"
+      assert %{visible: true, active_tab: :messages, filter: nil} = bottom_panel(ctx)
+      assert active_window_buffer(ctx) == active_before
     end
 
-    test "insert mode is blocked in the read-only messages buffer" do
+    test "messages tray does not block normal editor input" do
       ctx = start_editor("hello")
       send_keys_sync(ctx, "<SPC>bm")
       send_keys_sync(ctx, "i")
 
-      assert editor_mode(ctx) == :normal
-      assert status_msg(ctx) =~ "read-only"
+      assert editor_mode(ctx) == :insert
     end
   end
 
@@ -47,7 +43,7 @@ defmodule MingaEditor.MessagesBufferTest do
 
       assert Minga.Log.messages_buffer() == pid_before
       assert Process.alive?(pid_before)
-      assert Buffer.buffer_name(pid_before) == "*Messages*"
+      assert Minga.Buffer.buffer_name(pid_before) == "*Messages*"
     end
   end
 
@@ -70,4 +66,6 @@ defmodule MingaEditor.MessagesBufferTest do
              end)
     end
   end
+
+  defp bottom_panel(ctx), do: editor_state(ctx).shell_state.bottom_panel
 end
