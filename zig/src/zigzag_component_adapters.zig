@@ -2,6 +2,8 @@
 ///
 /// These helpers use ZigZag components as presentation adapters only. They do not let ZigZag own query text, focus, filtering, selection, command execution, protocol meaning, or terminal output.
 const std = @import("std");
+const builtin = @import("builtin");
+const root = @import("root");
 const zz = @import("zigzag");
 const types = @import("semantic/types.zig");
 
@@ -206,7 +208,11 @@ pub fn agentMessageRows(alloc: std.mem.Allocator, messages: []const AgentChatMes
     if (messages.len == 0 or height == 0) return &.{};
     var log = zz.RichLog.init(alloc, @max(@as(usize, height), 1));
     defer log.deinit();
-    for (messages) |message| try log.append(std.testing.io, .info, messageText(message));
+    // RichLog.append only needs an Io to timestamp entries; the timestamp is
+    // unused here. std.testing.io is a @compileError outside test builds, so use
+    // the renderer's real Io in production and the test Io under `zig test`.
+    const append_io: std.Io = if (builtin.is_test) std.testing.io else root.g_io;
+    for (messages) |message| try log.append(append_io, .info, messageText(message));
     const rendered = try log.view(alloc);
     if (messages.len > 0 and std.mem.indexOf(u8, rendered, messageText(messages[messages.len - 1])) == null) return error.ComponentOutputMismatch;
 

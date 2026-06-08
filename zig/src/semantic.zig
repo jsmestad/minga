@@ -2041,7 +2041,10 @@ fn renderWhichKeyBindingsWithZigZag(surface: anytype, start_row: u16, end_row: u
 }
 
 fn renderWhichKeyHelpLine(surface: anytype, row: u16, start_col: u16, end_col: u16, line: []const u8, maybe_theme: ?Theme) void {
-    const key_end = std.mem.indexOfScalar(u8, line, ' ') orelse line.len;
+    // renderHelpPlainVertical separates the (trimmed) key from the description
+    // with a >=2-space pad, so split on the first double space. Splitting on the
+    // first single space would mis-bold keys that contain a space (e.g. "SPC f").
+    const key_end = std.mem.indexOf(u8, line, "  ") orelse line.len;
     var col = start_col;
     if (key_end > 0) {
         col = writeText(surface, row, col, end_col, line[0..key_end], popupSelectionFg(maybe_theme), popupSelectionBg(maybe_theme), protocol.ATTR_BOLD);
