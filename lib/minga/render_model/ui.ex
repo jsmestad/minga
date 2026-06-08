@@ -29,8 +29,7 @@ defmodule Minga.RenderModel.UI do
           hover_popup: Minga.RenderModel.UI.HoverPopup.t() | nil,
           float_popup: Minga.RenderModel.UI.FloatPopup.t() | nil,
           gutter_separator: term(),
-          split_separators: term(),
-          cell_layer: Minga.RenderModel.UI.CellLayer.t()
+          split_separators: term()
         }
 
   defstruct [
@@ -61,7 +60,6 @@ defmodule Minga.RenderModel.UI do
     :hover_popup,
     :float_popup,
     :gutter_separator,
-    :split_separators,
-    cell_layer: %Minga.RenderModel.UI.CellLayer{}
+    :split_separators
   ]
 end

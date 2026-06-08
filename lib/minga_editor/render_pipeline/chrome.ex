@@ -30,7 +30,6 @@ defmodule MingaEditor.RenderPipeline.Chrome do
             file_tree: [],
             agent_panel: [],
             overlays: [],
-            regions: [],
             stable_fingerprint: nil
 
   @type t :: %__MODULE__{
@@ -45,7 +44,6 @@ defmodule MingaEditor.RenderPipeline.Chrome do
           file_tree: [DisplayList.draw()],
           agent_panel: [DisplayList.draw()],
           overlays: [DisplayList.Overlay.t()],
-          regions: [binary()],
           stable_fingerprint: integer() | nil
         }
 

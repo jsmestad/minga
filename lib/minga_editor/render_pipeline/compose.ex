@@ -67,8 +67,7 @@ defmodule MingaEditor.RenderPipeline.Compose do
       status_bar: chrome.status_bar_draws,
       agent_panel: chrome.agent_panel,
       minibuffer: chrome.minibuffer,
-      overlays: chrome.overlays,
-      regions: chrome.regions
+      overlays: chrome.overlays
     }
   end
 

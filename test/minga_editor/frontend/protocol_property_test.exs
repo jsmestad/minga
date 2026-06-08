@@ -49,23 +49,6 @@ defmodule MingaEditor.Frontend.ProtocolPropertyTest do
 
   # ── Encode produces valid binary ───────────────────────────────────────
 
-  property "encode_draw produces valid binary for any row, col, text, style" do
-    check all(
-            row <- integer(0..1000),
-            col <- integer(0..1000),
-            text <- string(:ascii, min_length: 0, max_length: 50),
-            fg <- integer(0..0xFFFFFF),
-            bg <- integer(0..0xFFFFFF),
-            bold <- boolean(),
-            italic <- boolean()
-          ) do
-      style = [fg: fg, bg: bg, bold: bold, italic: italic]
-      result = Protocol.encode_draw(row, col, text, style)
-      assert is_binary(result)
-      assert <<0x10, _rest::binary>> = result
-    end
-  end
-
   property "encode_cursor produces valid binary for any row, col" do
     check all(
             row <- integer(0..1000),
@@ -88,25 +71,6 @@ defmodule MingaEditor.Frontend.ProtocolPropertyTest do
     check all(rgb <- integer(0..0xFFFFFF)) do
       result = Protocol.encode_set_window_bg(rgb)
       assert <<0x17, ^rgb::24>> = result
-    end
-  end
-
-  # ── Round-trip: encode draw then verify structure ──────────────────────
-
-  property "encode_draw output has correct opcode, row, col, and text" do
-    check all(
-            row <- integer(0..500),
-            col <- integer(0..500),
-            text <- string(:ascii, min_length: 1, max_length: 30)
-          ) do
-      encoded = Protocol.encode_draw(row, col, text)
-
-      <<0x10, enc_row::16, enc_col::16, _fg::24, _bg::24, _attrs::8, text_len::16,
-        enc_text::binary-size(text_len)>> = encoded
-
-      assert enc_row == row
-      assert enc_col == col
-      assert enc_text == text
     end
   end
 end

@@ -11,11 +11,11 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
   alias MingaEditor.DisplayList
   alias MingaEditor.DisplayList.{Cursor, Overlay}
   alias MingaEditor.Layout
+  alias MingaEditor.MinibufferData
   alias MingaEditor.PickerUI
   alias MingaEditor.Renderer.Caps
   alias MingaEditor.Renderer.CommandCompletionUI
   alias MingaEditor.Renderer.Minibuffer
-  alias MingaEditor.Renderer.Regions
   alias MingaEditor.RenderPipeline.Chrome
   alias MingaEditor.RenderPipeline.Scroll.WindowScroll
   alias MingaEditor.State, as: EditorState
@@ -84,17 +84,13 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
           # Tab bar
           {tab_bar_draws, tab_bar_regions} = ChromeHelpers.render_tab_bar(state, layout)
 
-          # Region definitions
-          regions = Regions.define_regions(layout)
-
           %Chrome{
             stable_fingerprint: stable_fp,
             tab_bar: tab_bar_draws,
             tab_bar_click_regions: tab_bar_regions,
             minibuffer: [minibuffer_draw],
             separators: separator_draws,
-            file_tree: tree_draws,
-            regions: regions
+            file_tree: tree_draws
           }
       end
 
@@ -116,9 +112,17 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
         status_bar_bottom
       )
 
+    # Structured minibuffer data drives the semantic `gui_minibuffer` packet
+    # (0x7F), which is how the Zig TUI renders the minibuffer and places its
+    # cursor. This must be recomputed every frame (input/cursor change), so it
+    # lives outside the `stable` cached block. The cell-grid `minibuffer` draws
+    # are retained only for any non-semantic consumers.
+    minibuffer_data = MinibufferData.from_state(state)
+
     %Chrome{
       status_bar_draws: status_bar_draws,
       status_bar_data: status_bar_data,
+      minibuffer_data: minibuffer_data,
       modeline_click_regions: modeline_click_regions,
       tab_bar: stable.tab_bar,
       tab_bar_click_regions: stable.tab_bar_click_regions,
@@ -127,7 +131,6 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
       file_tree: stable.file_tree,
       agent_panel: [],
       overlays: overlays,
-      regions: stable.regions,
       stable_fingerprint: stable_fp
     }
   end

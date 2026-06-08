@@ -125,11 +125,10 @@ defmodule MingaEditor.MinibufferData do
     }
   end
 
-  def from_state(%{workspace: %{editing: %{mode: :command, mode_state: ms}}}) do
+  def from_state(%{workspace: %{editing: %{mode: :command, mode_state: ms}}} = state) do
     input = ms.input
-    {candidates, total} = complete_ex_command(input)
-    raw_index = ms.candidate_index
-    selected = clamp_index(raw_index, length(candidates))
+    {candidates, total} = command_candidates(state, input)
+    selected = clamp_index(ms.candidate_index, length(candidates))
 
     %__MODULE__{
       visible: true,
@@ -342,6 +341,28 @@ defmodule MingaEditor.MinibufferData do
 
     {candidates, total}
   end
+
+  # The :command_completion overlay payload, refreshed by the key dispatcher on
+  # every keystroke, already holds the fuzzy-scored candidates for the current
+  # input. Reuse it so rendering (which runs every frame, including cursor-blink
+  # redraws with unchanged input) does not rescan the command registry. Fall
+  # back to computing only when the overlay is absent or stale (e.g. the first
+  # frame on entry, or a programmatic input change the dispatcher hasn't synced).
+  @spec command_candidates(map(), String.t()) :: {[candidate()], non_neg_integer()}
+  defp command_candidates(
+         %{
+           shell_state: %{
+             modal:
+               {:command_completion, %{filter_text: ft, candidates: candidates, total: total}}
+           }
+         },
+         input
+       )
+       when ft == input do
+    {candidates, total}
+  end
+
+  defp command_candidates(_state, input), do: complete_ex_command(input)
 
   # When input is empty, show commonly used commands
   @spec popular_commands() :: {[candidate()], non_neg_integer()}

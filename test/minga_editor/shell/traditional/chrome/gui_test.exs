@@ -67,14 +67,5 @@ defmodule MingaEditor.Shell.Traditional.Chrome.GUITest do
 
       assert chrome.minibuffer == []
     end
-
-    test "includes region definitions" do
-      state = gui_state()
-      {scrolls, cursor_info, state, layout} = run_through_content(state)
-
-      chrome = ChromeGUI.build(state, layout, scrolls, cursor_info)
-
-      assert is_list(chrome.regions)
-    end
   end
 end

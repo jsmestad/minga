@@ -2,9 +2,6 @@ defmodule MingaEditor.DisplayListTest do
   use ExUnit.Case, async: true
 
   alias MingaEditor.DisplayList
-  alias MingaEditor.DisplayList.{Cursor, Frame, Overlay, WindowFrame}
-  alias MingaEditor.Frontend.Protocol
-  alias MingaEditor.UI.FontRegistry
   alias Minga.Core.Face
 
   describe "draw/4" do
@@ -116,117 +113,6 @@ defmodule MingaEditor.DisplayListTest do
     test "ignores unchanged rows" do
       layer = %{0 => [{0, "hello", Face.new()}], 1 => [{0, "world", Face.new()}]}
       assert DisplayList.changed_rows(layer, layer) == MapSet.new()
-    end
-  end
-
-  describe "to_commands/1" do
-    test "produces clear, cursor_shape, cursor, and batch_end" do
-      frame = %Frame{cursor: Cursor.new(5, 10, :beam)}
-      commands = DisplayList.to_commands(frame)
-
-      assert hd(commands) == Protocol.encode_clear()
-      assert List.last(commands) == Protocol.encode_batch_end()
-
-      assert Enum.member?(commands, Protocol.encode_cursor(5, 10))
-      assert Enum.member?(commands, Protocol.encode_cursor_shape(:beam))
-    end
-
-    test "encodes window frame draws at rect offset" do
-      wf = %WindowFrame{
-        rect: {10, 20, 40, 5},
-        lines: %{0 => [{0, "hello", Face.new(fg: 0xFF0000)}]}
-      }
-
-      frame = %Frame{cursor: Cursor.new(0, 0, :block), windows: [wf]}
-      commands = DisplayList.to_commands(frame)
-
-      # The draw should be at row 10+0=10, col 20+0=20
-      expected = Protocol.encode_draw(10, 20, "hello", Face.to_style(Face.new(fg: 0xFF0000)))
-      assert Enum.member?(commands, expected)
-    end
-
-    test "encodes splash draws directly" do
-      frame = %Frame{
-        cursor: Cursor.new(0, 0, :block),
-        splash: [{0, 0, "Welcome", Face.new()}]
-      }
-
-      commands = DisplayList.to_commands(frame)
-      expected = Protocol.encode_draw(0, 0, "Welcome")
-      assert Enum.member?(commands, expected)
-    end
-
-    test "encodes overlay draws" do
-      overlay = %Overlay{draws: [{5, 0, "popup", Face.new(fg: 0xFFFF00)}]}
-
-      frame = %Frame{
-        cursor: Cursor.new(0, 0, :block),
-        overlays: [overlay]
-      }
-
-      commands = DisplayList.to_commands(frame)
-      expected = Protocol.encode_draw(5, 0, "popup", Face.to_style(Face.new(fg: 0xFFFF00)))
-      assert Enum.member?(commands, expected)
-    end
-
-    test "includes region commands pass-through" do
-      region_cmd = Protocol.encode_define_region(1, 0, :editor, 0, 0, 80, 24, 0)
-
-      frame = %Frame{
-        cursor: Cursor.new(0, 0, :block),
-        regions: [region_cmd]
-      }
-
-      commands = DisplayList.to_commands(frame)
-      assert Enum.member?(commands, region_cmd)
-    end
-
-    test "round-trips a known draw to identical protocol binary" do
-      # Verify that draw → to_commands produces the same binary as Protocol.encode_draw
-      face = Face.new(fg: 0xFF6C6B, bg: 0x282C34, bold: true)
-      expected_binary = Protocol.encode_draw(5, 10, "hello world", Face.to_style(face))
-
-      frame = %Frame{
-        cursor: Cursor.new(0, 0, :block),
-        minibuffer: [{5, 10, "hello world", face}]
-      }
-
-      commands = DisplayList.to_commands(frame)
-      assert Enum.member?(commands, expected_binary)
-    end
-  end
-
-  describe "draws_to_commands/1" do
-    test "font families fall back to primary font when no render-local registry is installed" do
-      draws = [
-        {0, 0, "hello", Face.new(font_family: "Fira Code")}
-      ]
-
-      commands = DisplayList.draws_to_commands(draws)
-
-      assert Enum.all?(commands, fn
-               <<0x52, _::binary>> -> false
-               _ -> true
-             end)
-
-      assert FontRegistry.process_registry() == nil
-    end
-
-    test "converts draw tuples to protocol binaries" do
-      draws = [
-        {0, 0, "hello", Face.new()},
-        {1, 5, "world", Face.new(fg: 0xFF0000)}
-      ]
-
-      commands = DisplayList.draws_to_commands(draws)
-
-      assert length(commands) == 2
-      assert Enum.all?(commands, &is_binary/1)
-
-      assert Enum.at(commands, 0) == Protocol.encode_draw(0, 0, "hello")
-
-      assert Enum.at(commands, 1) ==
-               Protocol.encode_draw(1, 5, "world", Face.to_style(Face.new(fg: 0xFF0000)))
     end
   end
 end

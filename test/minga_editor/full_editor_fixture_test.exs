@@ -1,21 +1,51 @@
 defmodule MingaEditor.FullEditorFixtureTest do
   use ExUnit.Case, async: true
 
-  alias MingaEditor.Frontend.Protocol
+  alias Minga.Protocol.Opcodes
+
+  # The opcodes the curated `full_editor.bin` fixture is expected to contain.
+  # Built from named constants so a wire-format rename surfaces here instead of
+  # in opaque hex literals. Regenerate the fixture with
+  # `mix run scripts/generate_snapshot_fixtures.exs` if this list changes.
+  @expected_opcodes [
+    Opcodes.set_window_bg(),
+    Opcodes.gui_window_content(),
+    Opcodes.gui_theme(),
+    Opcodes.gui_status_bar(),
+    Opcodes.gui_tab_bar(),
+    Opcodes.gui_file_tree(),
+    Opcodes.batch_end()
+  ]
 
   test "full_editor fixture stays synced and renderable" do
-    packets = fixture_packets()
-    decoded_packets = Enum.map(packets, &Protocol.decode_command/1)
-
     assert File.exists?(fixture_path())
-    assert first_opcode(packets) == Minga.Protocol.Opcodes.set_window_bg()
-    assert Enum.all?(Enum.drop(decoded_packets, 1), &match?({:ok, _}, &1))
-    assert Enum.any?(Enum.drop(decoded_packets, 1), &meaningful_draw_or_content_command?/1)
-    assert List.last(decoded_packets) == {:ok, :batch_end}
+
+    packets = fixture_packets()
+    opcodes = Enum.map(packets, &opcode/1)
+
+    # The replay order is curated: the frame opens with the window background
+    # and closes with the batch flush.
+    assert List.first(opcodes) == Opcodes.set_window_bg()
+    assert List.last(opcodes) == Opcodes.batch_end()
+
+    # A real full-editor frame carries the buffer window content plus the
+    # surrounding chrome. The previous 46-byte stub failed exactly here.
+    assert Opcodes.gui_window_content() in opcodes
+    assert Opcodes.gui_file_tree() in opcodes
+    assert Opcodes.gui_status_bar() in opcodes
+    assert Opcodes.gui_tab_bar() in opcodes
+
+    # Every packet must be non-empty and lead with a recognized opcode.
+    allowed = MapSet.new(@expected_opcodes)
+
+    for {packet, opcode} <- Enum.zip(packets, opcodes) do
+      assert byte_size(packet) > 0
+      assert MapSet.member?(allowed, opcode)
+    end
   end
 
   defp fixture_packets do
-    File.read!(fixture_path()) |> split_packets()
+    fixture_path() |> File.read!() |> split_packets()
   end
 
   defp fixture_path do
@@ -28,11 +58,5 @@ defmodule MingaEditor.FullEditorFixtureTest do
     [packet | split_packets(rest)]
   end
 
-  defp first_opcode([<<opcode::8, _rest::binary>> | _]), do: opcode
-
-  defp meaningful_draw_or_content_command?({:ok, {:draw_text, _}}), do: true
-  defp meaningful_draw_or_content_command?({:ok, {:draw_styled_text, _}}), do: true
-  defp meaningful_draw_or_content_command?({:ok, {:gui_window_content, _}}), do: true
-  defp meaningful_draw_or_content_command?({:ok, {:gui_status_bar, _}}), do: true
-  defp meaningful_draw_or_content_command?(_), do: false
+  defp opcode(<<opcode::8, _rest::binary>>), do: opcode
 end

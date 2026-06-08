@@ -108,16 +108,6 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUITest do
       assert [_ | _] = chrome.status_bar_draws
     end
 
-    test "includes region definitions" do
-      state = base_state()
-      {scrolls, cursor_info, state, layout} = run_through_content(state)
-
-      chrome = ChromeTUI.build(state, layout, scrolls, cursor_info)
-
-      assert is_list(chrome.regions)
-      assert Enum.all?(chrome.regions, &is_binary/1)
-    end
-
     test "same-named theme color changes rebuild stable chrome" do
       state = base_state()
       {scrolls, cursor_info, state, layout} = run_through_content(state)

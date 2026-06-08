@@ -21,7 +21,7 @@ Port.Manager  ──stdin ({:packet,4})──►  main.zig (event loop)
                                        protocol.zig (decoder)
                                            │
                                            ▼
-                                       renderer.zig (Surface-generic)
+                                       semantic.zig (Surface-generic State)
                                            │
                                            ▼
                                        apprt/tui.zig (VaxisSurface)
@@ -57,7 +57,7 @@ zig/
     main.zig                       # Renderer entry point, backend dispatch, panic handler
     parser_main.zig                # Parser entry point, buffer management, command loop
     protocol.zig                   # Port protocol encoder/decoder (shared by both binaries)
-    renderer.zig                   # Generic renderer: protocol commands → Surface draw calls
+    semantic.zig                   # Semantic render: GUI render-model packets → Surface draw calls + mouse hit-testing
     surface.zig                    # Surface interface (comptime duck typing)
     apprt.zig                      # Backend dispatch (tui, future: gpu)
     apprt/tui.zig                  # TUI backend: libvaxis integration, event loop
@@ -68,11 +68,11 @@ zig/
     recovery.zig                   # Terminal recovery on crash (restores raw mode)
     posix_regex.zig                # POSIX regex wrapper for #match? predicates
 
-    font/
-      main.zig                     # Font face abstraction
-      atlas.zig                    # Glyph atlas (for future GPU backend)
-      coretext.zig                 # CoreText font loader (macOS snapshots)
-      freetype.zig                 # FreeType font loader (Linux snapshots)
+    semantic/
+      types.zig                    # Semantic render-model struct definitions
+      decode.zig                   # GUI render-model packet decoders
+      theme.zig                    # Theme/color slot resolution
+      charm.zig                    # Charm/styling helpers
 
   vendor/grammars/                 # Vendored tree-sitter grammar sources
     {lang}/src/parser.c            # Each grammar has parser.c + optional scanner.c
@@ -84,8 +84,8 @@ zig/
 
 `build.zig` produces two separate executables:
 
-- **minga-renderer**: `main.zig` → `protocol.zig` + `renderer.zig` + `apprt/tui.zig`. Selected via `-Dbackend=tui` (default). Does NOT include `highlighter.zig` or tree-sitter.
-- **minga-parser**: `parser_main.zig` → `protocol.zig` + `highlighter.zig` + all grammars. Does NOT include `renderer.zig` or libvaxis.
+- **minga-renderer**: `main.zig` → `protocol.zig` + `semantic.zig` + `apprt/tui.zig`. Selected via `-Dbackend=tui` (default). Does NOT include `highlighter.zig` or tree-sitter.
+- **minga-parser**: `parser_main.zig` → `protocol.zig` + `highlighter.zig` + all grammars. Does NOT include `semantic.zig` or libvaxis.
 
 This separation matters: the parser links ~40 tree-sitter grammar C files. The renderer links libvaxis. Neither needs the other's dependencies.
 
@@ -93,16 +93,16 @@ This separation matters: the parser links ~40 tree-sitter grammar C files. The r
 
 ### Surface abstraction
 
-`renderer.zig` is generic over a `Surface` type. The Surface interface is enforced at comptime via `surface.zig`:
+`semantic.zig` holds the decoded render-model `State` and draws it to any `Surface`. `State.render` is generic over the surface type at comptime; the Surface interface is enforced via `surface.zig`:
 
 ```zig
-pub fn Renderer(comptime SurfaceT: type) type {
+pub fn render(self: *State, comptime SurfaceT: type, surface: *SurfaceT) void {
     comptime surface_mod.assertSurface(SurfaceT);
-    return struct { ... };
+    // ... draw windows, chrome, overlays, cursor to `surface`
 }
 ```
 
-The TUI backend provides `VaxisSurface` (wraps libvaxis). A future GPU backend would provide a `MetalSurface` or similar. The renderer doesn't know which backend it's drawing to.
+The TUI backend provides `VaxisSurface` (wraps libvaxis). A future GPU backend would provide a `MetalSurface` or similar. `State` doesn't know which backend it's drawing to.
 
 ### Arena-per-frame memory
 

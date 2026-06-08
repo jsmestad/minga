@@ -201,20 +201,33 @@ defmodule MingaEditor.DashboardTest do
       # Receive the cast sent to self() (port_manager)
       assert_receive {:"$gen_cast", {:send_commands, commands}}
 
-      # The commands should contain picker content ("> " is the prompt prefix)
-      # encoded as binary protocol commands. Verify the list is non-empty
-      # and longer than a bare dashboard render (which has no overlays).
-      assert is_list(commands)
-      assert commands != []
+      # The semantic protocol always emits a single gui_picker (0x77) command;
+      # its visibility is carried in the payload (a non-zero section count when
+      # the picker is open). The old assertion compared command *counts*, which
+      # no longer changes between open and dismissed because the picker is one
+      # retained command either way. Assert the picker is emitted *visible*
+      # instead.
+      assert visible_picker_command?(commands),
+             "expected a visible gui_picker (0x77) command while the picker is open"
 
-      # Re-render without the picker to compare command counts
+      # Re-render without the picker: the gui_picker command is still present,
+      # but now in its hidden (zero-section) form.
       bare_state = ModalOverlay.dismiss(state)
       _new_bare = Renderer.render(bare_state)
       assert_receive {:"$gen_cast", {:send_commands, bare_commands}}
 
-      # With a picker, we should have more draw commands (the overlay draws)
-      assert length(commands) > length(bare_commands),
-             "picker overlay should add draw commands to the dashboard frame"
+      refute visible_picker_command?(bare_commands),
+             "expected the gui_picker command to be hidden after the picker is dismissed"
     end
+  end
+
+  # The gui_picker (0x77) command's second byte is its section count: 0 means
+  # the picker is hidden, non-zero means it carries visible picker content.
+  @gui_picker_opcode 0x77
+  defp visible_picker_command?(commands) do
+    Enum.any?(commands, fn
+      <<@gui_picker_opcode, section_count, _rest::binary>> -> section_count > 0
+      _ -> false
+    end)
   end
 end
