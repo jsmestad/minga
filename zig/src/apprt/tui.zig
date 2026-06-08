@@ -688,7 +688,7 @@ pub const TuiRuntime = struct {
                         .noop => {
                             const cmd_size = protocol.commandSize(remaining);
                             self.semantic.applyRetainedSemanticPacket(remaining[0..cmd_size]) catch |err| {
-                                std.log.warn("semantic retained packet decode error: {}", .{err});
+                                std.log.warn("semantic retained packet decode error (op {d}): {}", .{ remaining[0], err });
                             };
                         },
                         .measure_text => |mt| {
