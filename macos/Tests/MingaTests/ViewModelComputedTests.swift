@@ -7,6 +7,7 @@
 
 import Testing
 import Foundation
+import SwiftUI
 
 // MARK: - PickerItem
 
@@ -316,7 +317,9 @@ private func computedFileTreeEntry(path: String, relPath: String, isDir: Bool = 
                   isFocused: false, isActive: false, isDirty: isDirty, isEditing: false,
                   isLastChild: false, depth: 0, gitStatus: 0, diagnosticErrorCount: 0,
                   diagnosticWarningCount: 0, diagnosticInfoCount: 0, diagnosticHintCount: 0,
-                  guides: [], icon: "", name: "test", relPath: relPath, path: path,
+                  guides: [], icon: "",
+                  iconColor: Color(red: 0x6D / 255, green: 0x80 / 255, blue: 0x86 / 255),
+                  name: "test", relPath: relPath, path: path,
                   editingType: 0xFF, editingText: "")
 }
 
@@ -326,6 +329,7 @@ private func computedWireFileTreeEntry(id: String, isSelected: Bool, isFocused: 
                        isDirty: isDirty, isEditing: false, isLastChild: false, depth: 0,
                        gitStatus: gitStatus, diagnosticErrorCount: diagnosticErrorCount, diagnosticWarningCount: diagnosticWarningCount,
                        diagnosticInfoCount: diagnosticInfoCount, diagnosticHintCount: diagnosticHintCount, guides: [], icon: "",
+                       iconColorR: 0x6D, iconColorG: 0x80, iconColorB: 0x86,
                        name: "editor.ex", relPath: "lib/editor.ex", editingType: 0xFF,
                        editingText: "")
 }

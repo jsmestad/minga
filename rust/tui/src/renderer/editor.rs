@@ -565,6 +565,7 @@ mod tests {
                 id: "row-1".to_owned(),
                 name: "main.ex".to_owned(),
                 icon: String::new(),
+                icon_color: 0,
                 depth: 0,
                 flags: 0,
                 git_status: 0,

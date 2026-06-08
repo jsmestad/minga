@@ -631,6 +631,8 @@ pub const FileTreeRow = struct {
     path: []u8 = &.{},
     name: []u8 = &.{},
     icon: []u8 = &.{},
+    /// Per-row icon color resolved from the active theme's icon palette by the BEAM.
+    icon_color: u24 = 0,
     depth: u8 = 0,
     flags: u16 = 0,
     git_status: u8 = 0,

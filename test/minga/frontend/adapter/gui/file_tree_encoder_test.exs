@@ -56,6 +56,8 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoderTest do
             path: "/project/lib",
             name: "lib",
             icon: "󰉋",
+            # Folder default; the theme-less legacy encoder resolves :directory to this.
+            icon_color: 0x519ABA,
             flags: %Flags{
               directory?: true,
               expanded?: true,

@@ -195,6 +195,7 @@ pub struct FileTreeRow {
     pub id: String,
     pub name: String,
     pub icon: String,
+    pub icon_color: u32,
     pub depth: u8,
     pub flags: u16,
     pub git_status: u8,
@@ -2760,6 +2761,10 @@ fn decode_file_tree_row(bytes: &[u8]) -> Result<(FileTreeRow, usize), DecodeErro
     let _relative = read_string16(bytes, &mut offset)?;
     let name = read_string16(bytes, &mut offset)?;
     let icon = read_string8(bytes, &mut offset)?;
+    require_len(bytes, offset + 3, "file tree icon color")?;
+    let icon_color =
+        (bytes[offset] as u32) << 16 | (bytes[offset + 1] as u32) << 8 | bytes[offset + 2] as u32;
+    offset += 3;
     require_len(bytes, offset + 1, "file tree editing type")?;
     offset += 1;
     let editing_text = read_string16(bytes, &mut offset)?;
@@ -2769,6 +2774,7 @@ fn decode_file_tree_row(bytes: &[u8]) -> Result<(FileTreeRow, usize), DecodeErro
             id,
             name,
             icon,
+            icon_color,
             depth,
             flags,
             git_status,
@@ -3548,6 +3554,7 @@ mod tests {
             string16("main.ex"),
             string16("main.ex"),
             string8("rs"),
+            vec![0x6D, 0x80, 0x86], // icon color (R,G,B)
             vec![0xFF],
             string16(""),
         ]

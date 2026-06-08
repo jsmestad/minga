@@ -19,8 +19,19 @@ defmodule Minga.ThemeTest do
   end
 
   describe "default/0" do
-    test "returns :doom_one" do
-      assert Theme.default() == :doom_one
+    test "returns :astrodark" do
+      assert Theme.default() == :astrodark
+    end
+  end
+
+  describe "icon_color/2" do
+    test "uses language and folder defaults when the theme defines no overrides" do
+      theme = Theme.get!(:one_dark)
+
+      assert theme.icon == %{}
+      assert Theme.icon_color(theme, :rust) == Minga.Language.Devicon.color(:rust)
+      # Folders have no language definition; default folder tint is used.
+      assert Theme.icon_color(theme, :directory) == 0x519ABA
     end
   end
 

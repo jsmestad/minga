@@ -1245,7 +1245,7 @@ defmodule Minga.Test.HeadlessPort do
            _hints::16, guide_count::8, guides::binary-size(guide_count), id_len::16,
            id::binary-size(id_len), path_len::16, _path::binary-size(path_len), rel_len::16,
            _rel::binary-size(rel_len), name_len::16, name::binary-size(name_len), icon_len::8,
-           icon::binary-size(icon_len), editing_type::8, editing_len::16,
+           icon::binary-size(icon_len), _icon_color::24, editing_type::8, editing_len::16,
            editing::binary-size(editing_len), rest::binary>>,
          remaining,
          acc

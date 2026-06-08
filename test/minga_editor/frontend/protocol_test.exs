@@ -1002,13 +1002,15 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       {rel_path, strings} = take_string16(strings)
       {name, strings} = take_string16(strings)
       {icon, strings} = take_string8(strings)
-      <<255::8, 0::16>> = strings
+      <<icon_r::8, icon_g::8, icon_b::8, 255::8, 0::16>> = strings
 
       assert id == row.id
       assert path == row.path
       assert rel_path == "lib/hello.ex"
       assert name == row.name
       assert icon != ""
+      # Elixir file → language default icon color (0x9B59B6) on the wire.
+      assert <<icon_r, icon_g, icon_b>> == <<0x9B, 0x59, 0xB6>>
     end
 
     test "encodes semantic gui sidebar metadata" do
@@ -1230,7 +1232,10 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       {_rel_path, strings} = take_string16(strings)
       {_name, strings} = take_string16(strings)
       {_icon, strings} = take_string8(strings)
-      <<2::8, editing_text_len::16, editing_text::binary-size(editing_text_len)>> = strings
+
+      <<_icon_r::8, _icon_g::8, _icon_b::8, 2::8, editing_text_len::16,
+        editing_text::binary-size(editing_text_len)>> = strings
+
       assert editing_text == "renamed.txt"
     end
 

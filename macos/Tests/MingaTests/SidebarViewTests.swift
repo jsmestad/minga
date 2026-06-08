@@ -705,6 +705,8 @@ private func sidebarFileTreeEntry(
                   isFocused: isFocused, isActive: isActive, isDirty: isDirty, isEditing: isEditing,
                   isLastChild: false, depth: depth, gitStatus: gitStatus, diagnosticErrorCount: diagnosticErrorCount,
                   diagnosticWarningCount: diagnosticWarningCount, diagnosticInfoCount: diagnosticInfoCount, diagnosticHintCount: diagnosticHintCount,
-                  guides: guides, icon: icon, name: name, relPath: relPath, path: path ?? relPath,
+                  guides: guides, icon: icon,
+                  iconColor: Color(red: 0x6D / 255, green: 0x80 / 255, blue: 0x86 / 255),
+                  name: name, relPath: relPath, path: path ?? relPath,
                   editingType: editingType, editingText: editingText)
 }

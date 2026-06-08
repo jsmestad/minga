@@ -420,7 +420,9 @@ func TestDecodeFileTreeChromeRows(t *testing.T) {
 	row = append(row, string16("/repo/lib")...)
 	row = append(row, string16("lib")...)
 	row = append(row, string16("lib")...)
-	row = append(row, 1, 'd', 0xFF)
+	row = append(row, 1, 'd')
+	row = append(row, 0x6D, 0x80, 0x86) // icon color (R,G,B)
+	row = append(row, 0xFF)
 	row = append(row, 0, 0)
 	body := []byte{2, 1, 3}
 	body = append(body, string16("/repo/lib")...)

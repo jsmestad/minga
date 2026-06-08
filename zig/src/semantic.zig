@@ -1180,7 +1180,17 @@ fn renderFileTreeRow(surface: anytype, file_tree: FileTree, row: FileTreeRow, sc
     col = writeText(surface, screen_row, col, tree_width, marker, fg, bg, attrs);
     col = writeText(surface, screen_row, col, tree_width, " ", fg, bg, attrs);
     if (row.icon.len > 0) {
-        col = writeText(surface, screen_row, col, tree_width, row.icon, fg, bg, attrs);
+        // Icon uses its per-row themed color, except when selection/active states
+        // own the row foreground for contrast.
+        const icon_fg: u24 = if (selected or focused)
+            treeSelectionFg(maybe_theme)
+        else if (active)
+            accentFg(maybe_theme)
+        else if (row.icon_color != 0)
+            row.icon_color
+        else
+            fg;
+        col = writeText(surface, screen_row, col, tree_width, row.icon, icon_fg, bg, attrs);
         col = writeText(surface, screen_row, col, tree_width, " ", fg, bg, attrs);
     }
     const label = if (row.editing_text.len > 0) row.editing_text else row.name;
@@ -5029,7 +5039,7 @@ test "decodeFileTree retains rows and metadata" {
     const alloc = std.testing.allocator;
     const packet =
         &[_]u8{
-            protocol.OP_GUI_FILE_TREE, 0,    0,   0,   134,
+            protocol.OP_GUI_FILE_TREE, 0,    0,   0,   140,
             2,                         3,    3,   0,   5,
             'r',                       'o',  'w', '-', '1',
             0,                         5,    '/', 'r', 'e',
@@ -5044,8 +5054,9 @@ test "decodeFileTree retains rows and metadata" {
             'l',                       'i',  'b', 0,   3,
             'l',                       'i',  'b', 0,   3,
             'l',                       'i',  'b', 1,   'D',
-            0xFF,                      0,    0,   0,   0,
-            0,                         2,    0,   32,  1,
+            0,                         0,    0,   0xFF, 0,
+            0,                         0,    0,   0,   2,
+            0,                         32,   1,
             0,                         0,    0,   0,   0,
             0,                         0,    0,   0,   0,
             0,                         5,    'r', 'o', 'w',
@@ -5056,7 +5067,8 @@ test "decodeFileTree retains rows and metadata" {
             'l',                       'i',  'b', '/', 'a',
             '.',                       'e',  'x', 0,   4,
             'a',                       '.',  'e', 'x', 1,
-            'E',                       0xFF, 0,   0,
+            'E',                       0,    0,   0,   0xFF,
+            0,                         0,
         };
 
     var tree = try decodeFileTree(alloc, packet);
@@ -5087,7 +5099,7 @@ test "semantic state applies retained file tree selection" {
     const alloc = std.testing.allocator;
     const tree_packet =
         &[_]u8{
-            protocol.OP_GUI_FILE_TREE, 0,   0,   0,    76,
+            protocol.OP_GUI_FILE_TREE, 0,   0,   0,    79,
             2,                         1,   3,   0,    5,
             'r',                       'o', 'w', '-',  '0',
             0,                         5,   '/', 'r',  'e',
@@ -5102,8 +5114,8 @@ test "semantic state applies retained file tree selection" {
             'a',                       '.', 'e', 'x',  0,
             4,                         'a', '.', 'e',  'x',
             0,                         4,   'a', '.',  'e',
-            'x',                       1,   'E', 0xFF, 0,
-            0,
+            'x',                       1,   'E', 0,    0,
+            0,                         0xFF, 0,   0,
         };
     const selection_packet =
         &[_]u8{
@@ -5126,7 +5138,7 @@ test "semantic state renders retained file tree sidebar" {
     const alloc = std.testing.allocator;
     const packet =
         &[_]u8{
-            protocol.OP_GUI_FILE_TREE, 0,   0,   0,    76,
+            protocol.OP_GUI_FILE_TREE, 0,   0,   0,    79,
             2,                         1,   3,   0,    5,
             'r',                       'o', 'w', '-',  '0',
             0,                         5,   '/', 'r',  'e',
@@ -5141,8 +5153,8 @@ test "semantic state renders retained file tree sidebar" {
             'a',                       '.', 'e', 'x',  0,
             4,                         'a', '.', 'e',  'x',
             0,                         4,   'a', '.',  'e',
-            'x',                       1,   'E', 0xFF, 0,
-            0,
+            'x',                       1,   'E', 0,    0,
+            0,                         0xFF, 0,   0,
         };
 
     var state = State.init(alloc);
@@ -5219,7 +5231,7 @@ test "semantic state renders file tree row selected from decoded row flags" {
     const alloc = std.testing.allocator;
     const packet =
         &[_]u8{
-            protocol.OP_GUI_FILE_TREE, 0,   0,   0,    76,
+            protocol.OP_GUI_FILE_TREE, 0,   0,   0,    79,
             2,                         1,   3,   0,    5,
             'r',                       'o', 'w', '-',  '9',
             0,                         5,   '/', 'r',  'e',
@@ -5234,8 +5246,8 @@ test "semantic state renders file tree row selected from decoded row flags" {
             'a',                       '.', 'e', 'x',  0,
             4,                         'a', '.', 'e',  'x',
             0,                         4,   'a', '.',  'e',
-            'x',                       1,   'E', 0xFF, 0,
-            0,
+            'x',                       1,   'E', 0,    0,
+            0,                         0xFF, 0,   0,
         };
 
     var state = State.init(alloc);
@@ -5263,7 +5275,7 @@ test "semantic state lets sidebars render when file tree is not visible for widt
     const alloc = std.testing.allocator;
     const tree_packet =
         &[_]u8{
-            protocol.OP_GUI_FILE_TREE, 0,   0,   0,    76,
+            protocol.OP_GUI_FILE_TREE, 0,   0,   0,    79,
             2,                         1,   3,   0,    5,
             'r',                       'o', 'w', '-',  '0',
             0,                         5,   '/', 'r',  'e',
@@ -5278,8 +5290,8 @@ test "semantic state lets sidebars render when file tree is not visible for widt
             'a',                       '.', 'e', 'x',  0,
             4,                         'a', '.', 'e',  'x',
             0,                         4,   'a', '.',  'e',
-            'x',                       1,   'E', 0xFF, 0,
-            0,
+            'x',                       1,   'E', 0,    0,
+            0,                         0xFF, 0,   0,
         };
     const sidebars_packet =
         &[_]u8{

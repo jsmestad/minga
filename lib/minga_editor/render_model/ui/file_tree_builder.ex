@@ -16,6 +16,7 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilder do
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.UI.Devicon
+  alias MingaEditor.UI.Theme
 
   @folder_icon "\u{F024B}"
 
@@ -62,7 +63,7 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilder do
         diagnostics: diagnostics,
         selected_index: tree.cursor
       )
-      |> Enum.map(&row_model/1)
+      |> Enum.map(&row_model(&1, ctx.theme))
 
     %FileTreeModel{
       root_path: tree.root,
@@ -91,13 +92,14 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilder do
     %FileTreeModel{root_path: root_path, status: :hidden}
   end
 
-  @spec row_model(Row.t()) :: FileTreeRowModel.t()
-  defp row_model(%Row{} = row) do
+  @spec row_model(Row.t(), Theme.t()) :: FileTreeRowModel.t()
+  defp row_model(%Row{} = row, %Theme{} = theme) do
     %FileTreeRowModel{
       id: row.id,
       path: row.path,
       name: row.name,
       icon: row_icon(row),
+      icon_color: Theme.icon_color(theme, icon_key(row)),
       flags: %FileTreeFlagsModel{
         directory?: row.directory?,
         expanded?: row.expanded?,
@@ -120,6 +122,11 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilder do
   @spec row_icon(Row.t()) :: String.t()
   defp row_icon(%Row{directory?: true}), do: @folder_icon
   defp row_icon(%Row{name: name}), do: Devicon.icon(Language.detect_filetype(name))
+
+  # Icon-color key for theme resolution: a filetype atom, or `:directory` for folders.
+  @spec icon_key(Row.t()) :: atom()
+  defp icon_key(%Row{directory?: true}), do: :directory
+  defp icon_key(%Row{name: name}), do: Language.detect_filetype(name)
 
   @spec active_buffer_path(Context.t()) :: String.t() | nil
   defp active_buffer_path(%{buffers: %{active: buf}}) when is_pid(buf) do
