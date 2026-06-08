@@ -85,79 +85,87 @@ pub fn componentInventory() []const []const u8 {
 }
 
 test "ZigZag component inventory compiles in minga-renderer" {
-    const ComponentRefs = struct {
-        const TabGroup = zz.TabGroup;
-        const StatusBar = zz.StatusBar;
-        const StatusSegment = zz.StatusSegment;
-        const Tree = zz.Tree;
-        const SplitPane = zz.SplitPane;
-        const CommandPalette = zz.CommandPalette;
-        const List = zz.List;
-        const VirtualList = zz.VirtualList;
-        const StyledList = zz.StyledList;
-        const Tooltip = zz.Tooltip;
-        const Modal = zz.Modal;
-        const ContextMenu = zz.ContextMenu;
-        const Dropdown = zz.Dropdown;
-        const TextInput = zz.TextInput;
-        const TextArea = zz.TextArea;
-        const CodeView = zz.CodeView;
-        const DiffView = zz.DiffView;
-        const RichLog = zz.RichLog;
-        const Help = zz.Help;
-        const Markdown = zz.Markdown;
-        const Viewport = zz.Viewport;
-        const Table = zz.Table;
-        const DataTable = zz.DataTable;
-        const SortableTable = zz.SortableTable;
-        const Paginator = zz.Paginator;
-        const HitBox = zz.HitBox;
-        const MouseState = zz.MouseState;
-        const KeyMap = zz.KeyMap;
-        const KeyBinding = zz.KeyBinding;
-        const Breadcrumb = zz.Breadcrumb;
-        const Stepper = zz.Stepper;
-        const Progress = zz.Progress;
-        const Gauge = zz.Gauge;
-        const Spinner = zz.Spinner;
-        const Timer = zz.Timer;
-        const Toast = zz.Toast;
-        const Notification = zz.Notification;
-        const Form = zz.Form;
-        const Confirm = zz.Confirm;
-        const Checkbox = zz.Checkbox;
-        const CheckboxGroup = zz.CheckboxGroup;
-        const RadioGroup = zz.RadioGroup;
-        const Slider = zz.Slider;
-        const FilePicker = zz.FilePicker;
-        const MenuBar = zz.MenuBar;
-        const Calendar = zz.Calendar;
-        const Chart = zz.Chart;
-        const BarChart = zz.BarChart;
-        const Sparkline = zz.Sparkline;
-        const Heatmap = zz.Heatmap;
-        const Canvas = zz.Canvas;
-        const BrailleCanvas = zz.BrailleCanvas;
-        const renderWithRanges = zz.renderWithRanges;
-        const renderWithHighlights = zz.renderWithHighlights;
-        const fuzzy = zz.fuzzy;
-        const Style = zz.Style;
-        const Color = zz.Color;
-        const Border = zz.Border;
-        const Theme = zz.Theme;
-        const AdaptivePalette = zz.AdaptivePalette;
-        const Program = zz.Program;
-        const Terminal = zz.Terminal;
-        const CacheImage = zz.CacheImage;
-        const measure = zz.measure;
-        const join = zz.join;
-        const place = zz.place;
-        const Flex = zz.Flex;
-        const layer = zz.layout.layer;
+    // Reference every export directly in the function body so a renamed or
+    // missing ZigZag component fails compilation here. These must NOT live in a
+    // nested struct: Zig analyzes container-level declarations lazily, so
+    // `_ = SomeStruct` would resolve the type without ever checking the
+    // `zz.X` references inside it, silently defeating this guard. A function-body
+    // tuple is analyzed eagerly, so each `zz.X` is resolved when the tuple is built.
+    const component_refs = .{
+        zz.TabGroup,
+        zz.StatusBar,
+        zz.StatusSegment,
+        zz.Tree,
+        zz.SplitPane,
+        zz.CommandPalette,
+        zz.List,
+        zz.components.VirtualList,
+        zz.StyledList,
+        zz.Tooltip,
+        zz.Modal,
+        zz.ContextMenu,
+        zz.Dropdown,
+        zz.TextInput,
+        zz.TextArea,
+        zz.components.CodeView,
+        zz.components.DiffView,
+        zz.RichLog,
+        zz.components.Help,
+        zz.Markdown,
+        zz.Viewport,
+        zz.Table,
+        zz.DataTable,
+        zz.components.SortableTable,
+        zz.components.Paginator,
+        zz.HitBox,
+        zz.MouseState,
+        zz.KeyMap,
+        zz.KeyBinding,
+        zz.Breadcrumb,
+        zz.Stepper,
+        zz.Progress,
+        zz.Gauge,
+        zz.Spinner,
+        zz.components.Timer,
+        zz.Toast,
+        zz.Notification,
+        zz.Form,
+        zz.Confirm,
+        zz.Checkbox,
+        zz.CheckboxGroup,
+        zz.RadioGroup,
+        zz.Slider,
+        zz.components.FilePicker,
+        zz.MenuBar,
+        zz.Calendar,
+        zz.Chart,
+        zz.BarChart,
+        zz.Sparkline,
+        zz.Heatmap,
+        zz.Canvas,
+        zz.BrailleCanvas,
+        zz.renderWithRanges,
+        zz.renderWithHighlights,
+        zz.fuzzy,
+        zz.Style,
+        zz.Color,
+        zz.Border,
+        zz.Theme,
+        zz.AdaptivePalette,
+        zz.Program,
+        zz.Terminal,
+        zz.CacheImage,
+        zz.measure,
+        zz.join,
+        zz.place,
+        zz.Flex,
+        zz.layout.layer,
     };
 
-    _ = ComponentRefs;
-    try std.testing.expectEqual(@as(usize, 68), componentInventory().len);
+    // Building the tuple above is the real export check (a renamed/missing
+    // component fails compilation here). Tie its length to the verified-name
+    // list so the PR-evidence inventory cannot silently drift.
+    try std.testing.expectEqual(component_refs.len, componentInventory().len);
     try std.testing.expectEqualStrings("TabGroup", componentInventory()[0]);
     try std.testing.expectEqualStrings("layer", componentInventory()[componentInventory().len - 1]);
 }
