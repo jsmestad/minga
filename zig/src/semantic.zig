@@ -1098,26 +1098,11 @@ fn minibufferCursorPosition(surface: anytype, minibuffer: Minibuffer) ?RenderedC
     const prompt_width = charm.textWidth(prompt);
     // `cursor_pos` is a grapheme offset into the input. Advance by the display
     // width of the input prefix so wide graphemes map to the right column.
-    const input_offset = textPrefixWidth(minibuffer.input, minibuffer.cursor_pos);
+    const input_offset = charm.textWidthPrefix(minibuffer.input, minibuffer.cursor_pos);
     const col = prompt_width +| input_offset;
     if (col >= width) return null;
 
     return .{ .row = row, .col = col, .shape = .beam };
-}
-
-/// Display width of the first `grapheme_count` graphemes of `text`.
-fn textPrefixWidth(text: []const u8, grapheme_count: u16) u16 {
-    var total: u16 = 0;
-    var seen: u16 = 0;
-    var iter = vaxis.unicode.graphemeIterator(text);
-    while (iter.next()) |grapheme| {
-        if (seen >= grapheme_count) break;
-        const raw = grapheme.bytes(text);
-        const w: u16 = vaxis.gwidth.gwidth(raw, .wcwidth);
-        total +|= if (w == 0) 1 else w;
-        seen += 1;
-    }
-    return total;
 }
 
 fn semanticCursorShape(shape: u8) surface_mod.CursorShape {

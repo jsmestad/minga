@@ -1,3 +1,4 @@
+const std = @import("std");
 const vaxis = @import("vaxis");
 
 pub fn writeText(
@@ -30,12 +31,20 @@ pub fn writeText(
 }
 
 pub fn textWidth(text: []const u8) u16 {
+    return textWidthPrefix(text, std.math.maxInt(u16));
+}
+
+/// Display width of the first `grapheme_count` graphemes of `text`.
+pub fn textWidthPrefix(text: []const u8, grapheme_count: u16) u16 {
     var total: u16 = 0;
+    var seen: u16 = 0;
     var iter = vaxis.unicode.graphemeIterator(text);
     while (iter.next()) |grapheme| {
+        if (seen >= grapheme_count) break;
         const raw = grapheme.bytes(text);
         const width: u16 = vaxis.gwidth.gwidth(raw, .wcwidth);
         total +|= if (width == 0) 1 else width;
+        seen += 1;
     }
     return total;
 }

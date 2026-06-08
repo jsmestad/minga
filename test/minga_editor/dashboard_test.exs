@@ -207,8 +207,6 @@ defmodule MingaEditor.DashboardTest do
       # no longer changes between open and dismissed because the picker is one
       # retained command either way. Assert the picker is emitted *visible*
       # instead.
-      assert is_list(commands)
-
       assert visible_picker_command?(commands),
              "expected a visible gui_picker (0x77) command while the picker is open"
 
