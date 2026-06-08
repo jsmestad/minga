@@ -18,6 +18,7 @@ pub const zigzag_chrome = @import("zigzag_chrome.zig");
 pub const zigzag_editor_fit = @import("zigzag_editor_fit.zig");
 pub const zigzag_overlay_fit = @import("zigzag_overlay_fit.zig");
 pub const zigzag_component_adapters = @import("zigzag_component_adapters.zig");
+pub const zigzag_runtime_boundary = @import("zigzag_runtime_boundary.zig");
 // Note: highlighter.zig is compiled into minga-parser, not the renderer.
 // Font rendering (CoreText, atlas) lives in the macOS Swift app (macos/).
 
@@ -123,4 +124,5 @@ test {
     _ = zigzag_editor_fit;
     _ = zigzag_overlay_fit;
     _ = zigzag_component_adapters;
+    _ = zigzag_runtime_boundary;
 }
