@@ -48,37 +48,37 @@ type palette struct {
 
 func defaultPalette() palette {
 	return palette{colors: map[byte]uint32{
-		themeEditorBG:         0x282C34,
-		themeEditorFG:         0xBBC2CF,
-		themeTreeBG:           0x21242B,
-		themeTreeFG:           0xBBC2CF,
-		themeTreeSelectBG:     0x3E4451,
-		themeTreeHeaderBG:     0x282C34,
-		themeTreeHeaderFG:     0xBBC2CF,
-		themeTabBG:            0x282C34,
-		themeTabActiveBG:      0x3E4451,
-		themeTabActiveFG:      0xFFFFFF,
-		themeTabInactiveFG:    0x5B6268,
-		themeTabModifiedFG:    0xFF6C6B,
-		themeTabAttentionFG:   0xECBE7B,
-		themePopupBG:          0x252A38,
-		themePopupFG:          0xD7DDF0,
-		themePopupBorder:      0x7A849B,
-		themePopupSelBG:       0x2F3650,
-		themePopupSelFG:       0xF2F5FF,
-		themeBreadcrumbBG:     0x21242B,
-		themeModelineBG:       0x22252D,
-		themeModelineFG:       0xBBC2CF,
-		themeAccent:           0x51AFEF,
-		themeGutterFG:         0x5B6268,
-		themeGutterCurrentFG:  0xBBC2CF,
-		themeDiagnosticError:  0xFF6C6B,
-		themeWarningFG:        0xECBE7B,
-		themeDiagnosticInfo:   0x51AFEF,
-		themeDiagnosticHint:   0x98BE65,
-		themeHighlightReadBG:  0x3A3F4B,
+		themeEditorBG:         0x1E1F2A,
+		themeEditorFG:         0xC7D0E8,
+		themeTreeBG:           0x222433,
+		themeTreeFG:           0xB8C0D8,
+		themeTreeSelectBG:     0x343A52,
+		themeTreeHeaderBG:     0x1A1D29,
+		themeTreeHeaderFG:     0x9EC5FF,
+		themeTabBG:            0x242634,
+		themeTabActiveBG:      0x30364D,
+		themeTabActiveFG:      0xF2F5FF,
+		themeTabInactiveFG:    0x747B93,
+		themeTabModifiedFG:    0xF5B66F,
+		themeTabAttentionFG:   0xE8C774,
+		themePopupBG:          0x292D3E,
+		themePopupFG:          0xD9E0F5,
+		themePopupBorder:      0x4C5267,
+		themePopupSelBG:       0x3A425C,
+		themePopupSelFG:       0xF7FAFF,
+		themeBreadcrumbBG:     0x232634,
+		themeModelineBG:       0x222536,
+		themeModelineFG:       0xAEB7D0,
+		themeAccent:           0x7DB7FF,
+		themeGutterFG:         0x697088,
+		themeGutterCurrentFG:  0xC7D0E8,
+		themeDiagnosticError:  0xFF8AA6,
+		themeWarningFG:        0xF5C276,
+		themeDiagnosticInfo:   0x7DCFFF,
+		themeDiagnosticHint:   0xA6DA95,
+		themeHighlightReadBG:  0x33384C,
 		themeHighlightWriteBG: 0x4A3F2B,
-		themeSelectionBG:      0x264F78,
+		themeSelectionBG:      0x2F4463,
 	}}
 }
 
@@ -111,7 +111,19 @@ func (p palette) Text() color.Color {
 }
 
 func (p palette) Muted() color.Color {
+	return p.slot(themeTabInactiveFG)
+}
+
+func (p palette) ChromeText() color.Color {
 	return p.slot(themeModelineFG)
+}
+
+func (p palette) ChromeMuted() color.Color {
+	return p.slot(themeTabInactiveFG)
+}
+
+func (p palette) ChromeSurface() color.Color {
+	return p.slot(themeModelineBG)
 }
 
 func (p palette) Accent() color.Color {
@@ -179,8 +191,20 @@ func (p palette) TreeText() color.Color {
 	return p.slot(themeTreeFG)
 }
 
+func (p palette) TreeMutedText() color.Color {
+	return p.slot(themeTabInactiveFG)
+}
+
+func (p palette) TreeDirectoryText() color.Color {
+	return p.slot(themeAccent)
+}
+
 func (p palette) TreeSelection() color.Color {
 	return p.slot(themeTreeSelectBG)
+}
+
+func (p palette) TreeSelectionText() color.Color {
+	return p.slot(themePopupSelFG)
 }
 
 func (p palette) TreeHeader() color.Color {
@@ -232,7 +256,31 @@ func (p palette) PopupSelectionText() color.Color {
 }
 
 func (p palette) PopupChrome() color.Color {
-	return lipgloss.Color("#202532")
+	return p.slot(themeBreadcrumbBG)
+}
+
+func (p palette) PopupMutedText() color.Color {
+	return p.slot(themeTabInactiveFG)
+}
+
+func (p palette) KeycapSurface() color.Color {
+	return p.slot(themePopupSelBG)
+}
+
+func (p palette) KeycapText() color.Color {
+	return p.slot(themePopupSelFG)
+}
+
+func (p palette) Error() color.Color {
+	return p.slot(themeDiagnosticError)
+}
+
+func (p palette) Info() color.Color {
+	return p.slot(themeDiagnosticInfo)
+}
+
+func (p palette) Hint() color.Color {
+	return p.slot(themeDiagnosticHint)
 }
 
 func (p palette) slot(slot byte) color.Color {

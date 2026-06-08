@@ -3,7 +3,9 @@ defmodule MingaEditor.RenderPipeline.InputTest do
 
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.TestHelpers
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Buffers
 
   setup do
     state = TestHelpers.base_state()
@@ -252,6 +254,23 @@ defmodule MingaEditor.RenderPipeline.InputTest do
       win_id = synced.workspace.windows.active
       window = Map.get(synced.workspace.windows.map, win_id)
       assert window.cursor == {1, 0}
+    end
+
+    test "does not copy the active buffer cursor into a window showing another buffer", %{
+      state: state
+    } do
+      original_window = Map.fetch!(state.workspace.windows.map, state.workspace.windows.active)
+      original_cursor = original_window.cursor
+      {:ok, other_buf} = BufferProcess.start_link(content: "other buffer")
+      :ok = Minga.Buffer.move_to(other_buf, {0, 5})
+
+      state = put_in(state.workspace.buffers, Buffers.add(state.workspace.buffers, other_buf))
+      input = Input.from_editor_state(state)
+      synced = Input.sync_active_window_cursor(input)
+
+      window = Map.fetch!(synced.workspace.windows.map, synced.workspace.windows.active)
+      assert window.buffer == original_window.buffer
+      assert window.cursor == original_cursor
     end
 
     test "no-op when no active buffer", %{state: state} do

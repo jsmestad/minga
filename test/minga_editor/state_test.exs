@@ -106,6 +106,41 @@ defmodule MingaEditor.StateTest do
       assert EditorState.focus_window(new_state(), 2) == new_state()
       assert EditorState.sync_active_window_cursor(new_state()) == new_state()
     end
+
+    test "sync_active_window_cursor does not write active buffer cursor into another buffer window" do
+      {state, files_buf} = state_with_buffer("files")
+      file_buf = start_buffer("typed text")
+      BufferProcess.move_to(file_buf, {0, 5})
+
+      state = put_in(state.workspace.buffers, Buffers.add(state.workspace.buffers, file_buf))
+      synced = EditorState.sync_active_window_cursor(state)
+
+      assert active_window(synced).buffer == files_buf
+      assert active_window(synced).cursor == active_window(state).cursor
+    end
+  end
+
+  describe "tab context restore" do
+    test "file tab restore syncs the active window back to the restored active buffer" do
+      {state, files_buf} = state_with_buffer("files")
+      file_buf = start_buffer("typed text")
+      buffers = %Buffers{list: [files_buf, file_buf], active: file_buf, active_index: 1}
+      windows = state.workspace.windows
+      files_window = Window.new(1, files_buf, 24, 80)
+
+      context =
+        %{state.workspace | buffers: buffers, windows: %{windows | map: %{1 => files_window}}}
+        |> SessionState.to_tab_context()
+
+      tab = Tab.new_file(1, "[new 1]") |> Tab.set_context(context)
+      state = EditorState.set_tab_bar(state, TabBar.new(tab))
+
+      restored = EditorState.restore_tab_context(state, context)
+
+      assert restored.workspace.buffers.active == file_buf
+      assert active_window(restored).buffer == file_buf
+      assert Content.buffer_pid(active_window(restored).content) == file_buf
+    end
   end
 
   describe "window content synchronization" do

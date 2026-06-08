@@ -29,12 +29,17 @@ func TestKeyPacketEncodesSpace(t *testing.T) {
 }
 
 func TestKeyPacketEncodesPrintableUppercaseWithoutShiftModifier(t *testing.T) {
-	packet, ok := keyPacket(tea.KeyPressMsg(tea.Key{Code: 'T', Text: "T"}))
-	if !ok {
-		t.Fatal("uppercase printable should encode a key packet")
-	}
-	if packet[0] != generated.OPKeyPress || codepoint(packet) != 'T' || packet[5] != 0 {
-		t.Fatalf("uppercase printable packet = %#v", packet)
+	for _, key := range []tea.Key{
+		{Code: 'T', Text: "T"},
+		{Code: 'T', Text: "T", Mod: tea.ModShift},
+	} {
+		packet, ok := keyPacket(tea.KeyPressMsg(key))
+		if !ok {
+			t.Fatal("uppercase printable should encode a key packet")
+		}
+		if packet[0] != generated.OPKeyPress || codepoint(packet) != 'T' || packet[5] != 0 {
+			t.Fatalf("uppercase printable packet = %#v", packet)
+		}
 	}
 }
 
