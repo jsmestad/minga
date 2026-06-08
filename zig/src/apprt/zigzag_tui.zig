@@ -47,7 +47,7 @@ pub const TuiRuntime = struct {
         installSignalHandlers();
 
         const tty = try openTty();
-        defer std.posix.close(tty.handle);
+        defer _ = std.c.close(tty.handle);
         const stdout_fd = std.posix.STDOUT_FILENO;
 
         var program = try zz.Program(MingaModel).initWithOptions(self.alloc, root.g_io, root.g_env_map, .{
@@ -125,7 +125,8 @@ const ProgramAdapter = struct {
                 break;
             };
 
-            std.Thread.sleep(8 * std.time.ns_per_ms);
+            var sleep_req = std.c.timespec{ .sec = 0, .nsec = 8 * std.time.ns_per_ms };
+            _ = std.c.nanosleep(&sleep_req, null);
         }
     }
 
@@ -255,7 +256,9 @@ const MingaModel = struct {
     semantic: semantic_mod.State,
     surface: AnsiSurface,
     port_writer: ?*port_writer = null,
-    recovery: recovery_mod = recovery_mod.init(),
+    // No default: recovery_mod.init() reads the clock, so it cannot be a
+    // comptime-known field default. init() sets it at runtime below.
+    recovery: recovery_mod,
     last_cols: u16 = 0,
     last_rows: u16 = 0,
 
@@ -264,6 +267,7 @@ const MingaModel = struct {
             .alloc = ctx.persistent_allocator,
             .semantic = semantic_mod.State.init(ctx.persistent_allocator),
             .surface = AnsiSurface.init(ctx.persistent_allocator, ctx.width, ctx.height) catch AnsiSurface.empty(ctx.persistent_allocator),
+            .recovery = recovery_mod.init(),
         };
         return .none;
     }
@@ -722,8 +726,11 @@ fn installSignalHandlers() void {
     std.posix.sigaddset(&unblock_set, std.posix.SIG.WINCH);
     std.posix.sigaddset(&unblock_set, std.posix.SIG.TERM);
     std.posix.sigaddset(&unblock_set, std.posix.SIG.INT);
-    const SIG_UNBLOCK = 2;
-    std.posix.sigprocmask(SIG_UNBLOCK, &unblock_set, null);
+    // Use the portable SIG.UNBLOCK constant: it is 1 on x86_64 Linux but 2 on
+    // macOS/BSD. Hardcoding 2 means SIG_SETMASK on Linux, which would *set* the
+    // mask to block exactly these signals instead of unblocking them, defeating
+    // the resize/quit signal delivery this function exists to enable.
+    std.posix.sigprocmask(std.posix.SIG.UNBLOCK, &unblock_set, null);
 
     const mask = switch (@import("builtin").os.tag) {
         .macos => @as(u32, 0),
