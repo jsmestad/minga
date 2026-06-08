@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -23,13 +24,20 @@ func tabIcon(tab protocol.Tab) uiIcon {
 
 func fileTreeIcon(row protocol.FileTreeRow) uiIcon {
 	if strings.TrimSpace(row.Icon) != "" {
-		return uiIcon{glyph: strings.TrimSpace(row.Icon)}
+		// The BEAM sends the glyph plus a per-row icon color resolved from the
+		// active theme's icon palette. Use it so the tree matches the theme.
+		return uiIcon{glyph: strings.TrimSpace(row.Icon), color: iconColorHex(row.IconColor)}
 	}
 	path := row.Path
 	if strings.TrimSpace(path) == "" {
 		path = row.Name
 	}
 	return devIconForPath(path, row.Directory)
+}
+
+// iconColorHex formats a 24-bit RGB icon color as a lipgloss hex string.
+func iconColorHex(rgb uint32) string {
+	return fmt.Sprintf("#%06X", rgb&0xFFFFFF)
 }
 
 func pickerItemIcon(title string, item protocol.PickerItem) uiIcon {
