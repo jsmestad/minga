@@ -56,6 +56,27 @@ defmodule MingaEditor.State.Highlighting do
     %{state | highlights: highlights}
   end
 
+  @doc """
+  Rebuilds every buffer's highlight face registry from a new theme.
+
+  Buffers with a stored `syntax_overrides` entry (e.g. the agent buffer's
+  dimmed delimiters) keep their custom, theme-independent palette and are
+  left untouched.
+  """
+  @spec retheme_all(t(), MingaEditor.UI.Theme.t()) :: t()
+  def retheme_all(%__MODULE__{highlights: highlights, syntax_overrides: overrides} = state, theme) do
+    rethemed =
+      Map.new(highlights, fn {pid, hl} ->
+        if Map.has_key?(overrides, pid) do
+          {pid, hl}
+        else
+          {pid, Highlight.retheme(hl, theme)}
+        end
+      end)
+
+    %{state | highlights: rethemed}
+  end
+
   @doc "Removes all highlight-related state for a buffer."
   @spec remove_buffer(t(), pid(), non_neg_integer(), %{pid() => non_neg_integer()}) :: t()
   def remove_buffer(%__MODULE__{} = state, buffer_pid, buffer_id, remaining_ids) do
