@@ -38,6 +38,7 @@ targets:
       - path: ../extensions/board/frontend/macos/Sources
         name: FrontendExtensionRuntimeSource
         type: group
+        createIntermediateGroups: false
       - path: Resources
         type: group
     settings:
@@ -107,6 +108,7 @@ targets:
       - path: ../extensions/board/frontend/macos/Sources
         name: FrontendExtensionRuntimeSource
         type: group
+        createIntermediateGroups: false
     settings:
       base:
         PRODUCT_NAME: MingaTests
@@ -141,6 +143,7 @@ targets:
       - path: ../extensions/board/frontend/macos/Sources
         name: FrontendExtensionRuntimeSource
         type: group
+        createIntermediateGroups: false
     settings:
       base:
         PRODUCT_NAME: PreviewHost
