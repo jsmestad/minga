@@ -2,13 +2,11 @@ Code.require_file("mix/protocol_generator.ex", __DIR__)
 Code.require_file("mix/compilers/protocol_gen.ex", __DIR__)
 Code.require_file("mix/compilers/minga_bundled_extensions.ex", __DIR__)
 Code.require_file("mix/compilers/minga_zig.ex", __DIR__)
-Code.require_file("mix/compilers/minga_rust_tui.ex", __DIR__)
 Code.require_file("mix/compilers/minga_go_tui.ex", __DIR__)
 Code.require_file("mix/tasks/protocol.gen.ex", __DIR__)
 Code.require_file("mix/tasks/native_build/result.ex", __DIR__)
 Code.require_file("mix/tasks/native_build_support.ex", __DIR__)
 Code.require_file("mix/tasks/native_build_tui.ex", __DIR__)
-Code.require_file("mix/tasks/native_build_rust_tui.ex", __DIR__)
 Code.require_file("mix/tasks/native_build_go_tui.ex", __DIR__)
 
 defmodule Minga.MixProject do

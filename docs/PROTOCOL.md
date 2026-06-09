@@ -4,7 +4,7 @@ The BEAM editor core and rendering frontends communicate over a binary protocol 
 
 **Shared chrome is delivered as Semantic UI, not cells.** The structured opcodes in GUI_PROTOCOL.md are the canonical contract for shared visible chrome (tab bar, status bar, file tree, picker, popups, agent surfaces, and so on). Each frontend decodes these semantic models and renders them with its own surface strategy: SwiftUI views, terminal widgets, GTK widgets, web components, or another future client. The cell-grid `draw_text`/`clear`/region commands below are **not** the extension point for shared chrome; they remain only for legacy terminal compatibility and explicitly tracked buffer-window compatibility. New shared chrome must be modeled as a `Minga.RenderModel.UI.*` semantic model and encoded by `Minga.Frontend.Adapter.GUI`, never added as ad-hoc cell draws.
 
-Frontend identity is opaque to Minga product behavior. The BEAM may adapt to declared capabilities such as terminal grid versus desktop window, text measurement, color depth, image support, float support, and Semantic UI support, but it must not special-case Swift, Rust, Go, GTK, or another implementation name for product features.
+Frontend identity is opaque to Minga product behavior. The BEAM may adapt to declared capabilities such as terminal grid versus desktop window, text measurement, color depth, image support, float support, and Semantic UI support, but it must not special-case Swift, Go, GTK, or another implementation name for product features.
 
 ## Transport
 
