@@ -33,7 +33,7 @@ The `frontend_type` byte describes the rendering surface, not the product implem
 | 0x01 | native_gui | Native desktop GUI frontend (SwiftUI, GTK4) |
 | 0x02 | web | Web frontend (future) |
 
-The `semantic_ui` capability decides whether a non-GUI frontend can consume Semantic UI opcodes. Native GUI frontends are expected to consume Semantic UI. Product behavior should adapt through capability helpers such as semantic UI support, text measurement, color depth, float support, image support, and surface type. It should not branch on Swift, Rust, Go, GTK, or another implementation identity.
+The `semantic_ui` capability decides whether a non-GUI frontend can consume Semantic UI opcodes. Native GUI frontends are expected to consume Semantic UI. Product behavior should adapt through capability helpers such as semantic UI support, text measurement, color depth, float support, image support, and surface type. It should not branch on Swift, Go, GTK, or another implementation identity.
 
 ## Semantic UI Opcodes (BEAM → Frontend)
 

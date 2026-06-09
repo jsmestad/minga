@@ -1,5 +1,5 @@
 .PHONY: help lint lint.format lint.credo lint.compile lint.dialyzer lint.fix test test.llm \
-       native.support native.tui native.rust-tui native.go-tui \
+       native.support native.tui native.go-tui \
        release release-tui release-mac install install-tui install-mac uninstall
 
 .DEFAULT_GOAL := help
@@ -11,7 +11,6 @@ help:
 	@printf "\033[1;36mRun the editor\033[0m\n"
 	@printf "  \033[1mbin/minga\033[0m          Launch the default Zig TUI\n"
 	@printf "  \033[1mbin/minga-go\033[0m       Launch the Go/Charm TUI\n"
-	@printf "  \033[1mbin/minga-rust\033[0m     Launch the Rust TUI\n"
 	@printf "  \033[1mbin/minga +gui\033[0m     Launch the native macOS GUI\n\n"
 	@printf "\033[1;36mQuality checks\033[0m\n"
 	@printf "  \033[1mmake lint\033[0m          Format, credo, compile, and dialyzer\n"
@@ -21,7 +20,6 @@ help:
 	@printf "\033[1;36mNative builds\033[0m\n"
 	@printf "  \033[1mmake native.support\033[0m Build parser and hook-runner support binaries\n"
 	@printf "  \033[1mmake native.tui\033[0m     Build the default Zig TUI binaries\n"
-	@printf "  \033[1mmake native.rust-tui\033[0m Build the experimental Rust TUI renderer\n"
 	@printf "  \033[1mmake native.go-tui\033[0m  Build the experimental Go TUI renderer\n\n"
 	@printf "\033[1;36mBuild and install\033[0m\n"
 	@printf "  \033[1mmake release\033[0m       Build release artifacts for this platform\n"
@@ -112,9 +110,6 @@ native.support:
 
 native.tui:
 	mix native.build.tui
-
-native.rust-tui:
-	mix native.build.rust_tui
 
 native.go-tui:
 	mix native.build.go_tui

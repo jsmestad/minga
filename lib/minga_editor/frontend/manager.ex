@@ -32,7 +32,7 @@ defmodule MingaEditor.Frontend.Manager do
 
   @typedoc "Renderer backend."
   @type backend :: :tui | :gui
-  @type tui_impl :: :zig | :rust | :go
+  @type tui_impl :: :zig | :go
 
   @typedoc "Options for starting the port manager."
   @type start_opt ::
@@ -369,7 +369,6 @@ defmodule MingaEditor.Frontend.Manager do
   defp dev_fallback_path(:tui) do
     case tui_impl() do
       :go -> Path.join([File.cwd!(), "go", "tui", "bin", "minga-renderer-go"])
-      :rust -> Path.join([File.cwd!(), "rust", "tui", "target", "release", "minga-renderer-rs"])
       :zig -> Path.join([File.cwd!(), "zig", "zig-out", "bin", "minga-renderer"])
     end
   end
@@ -442,7 +441,6 @@ defmodule MingaEditor.Frontend.Manager do
   defp renderer_binary_name(:tui) do
     case tui_impl() do
       :go -> "minga-renderer-go"
-      :rust -> "minga-renderer-rs"
       :zig -> "minga-renderer"
     end
   end
@@ -454,8 +452,6 @@ defmodule MingaEditor.Frontend.Manager do
     case System.get_env("MINGA_TUI_IMPL") || Application.get_env(:minga, :tui_impl, "zig") do
       "go" -> :go
       :go -> :go
-      "rust" -> :rust
-      :rust -> :rust
       _other -> :zig
     end
   end

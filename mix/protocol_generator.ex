@@ -2,7 +2,7 @@ defmodule Minga.Mix.ProtocolGenerator do
   @moduledoc """
   Generates protocol opcode artifacts from `docs/protocol_schema.toml`.
 
-  The schema is the source of truth. Generated protocol artifacts are written under `.generated/protocol/` for Elixir, `macos/.generated/protocol/` for Swift, `zig/src/generated/` for Zig, `rust/tui/src/generated/` for the Rust TUI, and `go/tui/internal/generated/` for the Go TUI. The generated Zig public export block in `zig/src/protocol.zig` is also refreshed from the schema.
+  The schema is the source of truth. Generated protocol artifacts are written under `.generated/protocol/` for Elixir, `macos/.generated/protocol/` for Swift, `zig/src/generated/` for Zig, and `go/tui/internal/generated/` for the Go TUI. The generated Zig public export block in `zig/src/protocol.zig` is also refreshed from the schema.
   """
 
   @schema_path "docs/protocol_schema.toml"
@@ -11,14 +11,10 @@ defmodule Minga.Mix.ProtocolGenerator do
   @generated_swift_path "macos/.generated/protocol/ProtocolOpcodes.generated.swift"
   @generated_zig_opcodes_path "zig/src/generated/protocol_opcodes.zig"
   @generated_zig_schema_test_path "zig/src/generated/protocol_schema_test.zig"
-  @generated_rust_opcodes_path "rust/tui/src/generated/opcodes.rs"
   @generated_go_opcodes_path "go/tui/internal/generated/opcodes.go"
   @generated_go_command_size_path "go/tui/internal/generated/command_size.go"
-  @generated_rust_command_size_path "rust/tui/src/generated/command_size.rs"
   @generated_zig_command_size_path "zig/src/generated/protocol_command_size.zig"
   @generated_swift_command_size_path "macos/.generated/protocol/ProtocolCommandSize.generated.swift"
-  @generated_rust_semantic_types_path "rust/tui/src/generated/semantic_types.rs"
-  @generated_rust_semantic_decode_path "rust/tui/src/generated/semantic_decode.rs"
   @generated_go_semantic_types_path "go/tui/internal/generated/semantic_types.go"
   @generated_go_semantic_decode_path "go/tui/internal/generated/semantic_decode.go"
   @protocol_zig_path "zig/src/protocol.zig"
@@ -94,8 +90,8 @@ defmodule Minga.Mix.ProtocolGenerator do
   end
 
   # A conditional_tail guard is decoded by substituting base-field names with
-  # their decoded locals (rust_guard_expression / go_guard_expression). It must
-  # render identically in Rust, Go, and Elixir after substitution, so the legal
+  # their decoded locals (go_guard_expression). It must render identically in Go
+  # and Elixir after substitution, so the legal
   # grammar is the cross-language-common subset: base-field identifiers, integer
   # literals, the boolean literals `true`/`false`, comparison operators
   # (== != < > <= >=), and the connectives && / ||. Any other identifier (named
@@ -150,14 +146,10 @@ defmodule Minga.Mix.ProtocolGenerator do
       {@generated_swift_path, swift_file(schema)},
       {@generated_zig_opcodes_path, zig_opcodes_file(schema)},
       {@generated_zig_schema_test_path, zig_schema_test_file(schema)},
-      {@generated_rust_opcodes_path, rust_opcodes_file(schema)},
       {@generated_go_opcodes_path, go_opcodes_file(schema)},
       {@generated_go_command_size_path, go_command_size_file(schema)},
-      {@generated_rust_command_size_path, rust_command_size_file(schema)},
       {@generated_zig_command_size_path, zig_command_size_file(schema)},
       {@generated_swift_command_size_path, swift_command_size_file(schema)},
-      {@generated_rust_semantic_types_path, rust_semantic_types_file(schema)},
-      {@generated_rust_semantic_decode_path, rust_semantic_decode_file(schema)},
       {@generated_go_semantic_types_path, go_semantic_types_file(schema)},
       {@generated_go_semantic_decode_path, go_semantic_decode_file(schema)}
     ]
@@ -452,41 +444,6 @@ defmodule Minga.Mix.ProtocolGenerator do
 
   @spec zig_gui_action_line(gui_action()) :: String.t()
   defp zig_gui_action_line(%{"name" => name, "value" => value}) do
-    "pub const GUI_ACTION_#{constant_name(name)}: u8 = #{hex(value)};\n"
-  end
-
-  @spec rust_opcodes_file(schema()) :: String.t()
-  defp rust_opcodes_file(schema) do
-    opcodes = Map.fetch!(schema, "opcodes")
-    actions = Map.fetch!(schema, "gui_actions")
-
-    [
-      "// Generated protocol opcode constants.\n",
-      "//\n",
-      "// Generated from `docs/protocol_schema.toml` by `mix protocol.gen`. Do not edit by hand.\n\n",
-      rust_opcodes(opcodes),
-      "// GUI action sub-opcodes.\n\n",
-      Enum.map(actions, &rust_gui_action_line/1)
-    ]
-    |> IO.iodata_to_binary()
-  end
-
-  @spec rust_opcodes([opcode()]) :: iodata()
-  defp rust_opcodes(opcodes) do
-    opcodes
-    |> group_by_category()
-    |> Enum.map(fn {category, entries} ->
-      ["// ", category_title(category), "\n\n", Enum.map(entries, &rust_opcode_line/1), "\n"]
-    end)
-  end
-
-  @spec rust_opcode_line(opcode()) :: String.t()
-  defp rust_opcode_line(%{"name" => name, "value" => value}) do
-    "pub const OP_#{constant_name(name)}: u8 = #{hex(value)};\n"
-  end
-
-  @spec rust_gui_action_line(gui_action()) :: String.t()
-  defp rust_gui_action_line(%{"name" => name, "value" => value}) do
     "pub const GUI_ACTION_#{constant_name(name)}: u8 = #{hex(value)};\n"
   end
 
@@ -805,8 +762,8 @@ defmodule Minga.Mix.ProtocolGenerator do
     |> Enum.sort()
   end
 
-  @spec rust_swift_zig_const_name(opcode()) :: String.t()
-  defp rust_swift_zig_const_name(%{"name" => name}), do: "OP_#{constant_name(name)}"
+  @spec swift_zig_const_name(opcode()) :: String.t()
+  defp swift_zig_const_name(%{"name" => name}), do: "OP_#{constant_name(name)}"
 
   # ── Go: command_size.go ───────────────────────────────────────────────────
 
@@ -907,128 +864,12 @@ defmodule Minga.Mix.ProtocolGenerator do
     """
   end
 
-  # ── Rust: command_size.rs ─────────────────────────────────────────────────
-
-  @spec rust_command_size_file(schema()) :: String.t()
-  defp rust_command_size_file(schema) do
-    ops = framing_opcodes(schema)
-    cn = &rust_swift_zig_const_name/1
-
-    fixed_arms =
-      Enum.map(fixed_sizes(ops), fn n ->
-        names =
-          ops
-          |> opcodes_of_kind({:fixed, n})
-          |> Enum.map_join("\n        | ", &"opcodes::#{cn.(&1)}")
-
-        "        #{names} => fixed(payload, #{n}),\n"
-      end)
-
-    rust_arm = fn kind, call ->
-      names =
-        ops |> opcodes_of_kind(kind) |> Enum.map_join("\n        | ", &"opcodes::#{cn.(&1)}")
-
-      "        #{names} => #{call},\n"
-    end
-
-    "// Generated protocol command sizing.\n" <>
-      "//\n" <>
-      "// Generated from `docs/protocol_schema.toml` by `mix protocol.gen`. Do not edit by hand.\n\n" <>
-      "use crate::protocol::opcodes;\n\n" <>
-      "/// Outcome of [`command_size`].\n" <>
-      "#[derive(Debug, Clone, Copy, PartialEq, Eq)]\n" <>
-      "pub enum CommandSize {\n" <>
-      "    /// Authoritative on-wire byte length of the command.\n" <>
-      "    Sized(usize),\n" <>
-      "    /// Opcode uses bespoke framing; its decoder owns sizing.\n" <>
-      "    Custom,\n" <>
-      "    /// Payload is truncated; read more bytes.\n" <>
-      "    Incomplete,\n" <>
-      "    /// Opcode is unknown and cannot be sized.\n" <>
-      "    Unknown,\n" <>
-      "}\n\n" <>
-      "/// Returns the on-wire byte length of the first command in `payload`,\n" <>
-      "/// derived from each opcode's schema framing.\n" <>
-      "pub fn command_size(payload: &[u8]) -> CommandSize {\n" <>
-      "    let opcode = match payload.first() {\n" <>
-      "        Some(byte) => *byte,\n" <>
-      "        None => return CommandSize::Incomplete,\n" <>
-      "    };\n" <>
-      "    match opcode {\n" <>
-      IO.iodata_to_binary(fixed_arms) <>
-      rust_arm.(:len16, "len16(payload)") <>
-      rust_arm.(:len32, "len32(payload)") <>
-      rust_arm.(:sectioned, "sectioned(payload)") <>
-      rust_arm.(:custom, "CommandSize::Custom") <>
-      "        // Forward-compatibility: opcodes >= 0x90 carry a u16 length prefix.\n" <>
-      "        _ if opcode >= 0x90 => len16(payload),\n" <>
-      "        _ => CommandSize::Unknown,\n" <>
-      "    }\n}\n\n" <>
-      rust_command_size_helpers()
-  end
-
-  @spec rust_command_size_helpers() :: String.t()
-  defp rust_command_size_helpers do
-    """
-    fn fixed(payload: &[u8], size: usize) -> CommandSize {
-        if payload.len() < size {
-            return CommandSize::Incomplete;
-        }
-        CommandSize::Sized(size)
-    }
-
-    fn len16(payload: &[u8]) -> CommandSize {
-        if payload.len() < 3 {
-            return CommandSize::Incomplete;
-        }
-        let size = 3 + ((payload[1] as usize) << 8 | payload[2] as usize);
-        if payload.len() < size {
-            return CommandSize::Incomplete;
-        }
-        CommandSize::Sized(size)
-    }
-
-    fn len32(payload: &[u8]) -> CommandSize {
-        if payload.len() < 5 {
-            return CommandSize::Incomplete;
-        }
-        let size = 5
-            + ((payload[1] as usize) << 24
-                | (payload[2] as usize) << 16
-                | (payload[3] as usize) << 8
-                | payload[4] as usize);
-        if payload.len() < size {
-            return CommandSize::Incomplete;
-        }
-        CommandSize::Sized(size)
-    }
-
-    fn sectioned(payload: &[u8]) -> CommandSize {
-        if payload.len() < 2 {
-            return CommandSize::Incomplete;
-        }
-        let mut offset = 2;
-        let count = payload[1] as usize;
-        for _ in 0..count {
-            if payload.len() < offset + 3 {
-                return CommandSize::Incomplete;
-            }
-            offset += 3 + ((payload[offset + 1] as usize) << 8 | payload[offset + 2] as usize);
-            if payload.len() < offset {
-                return CommandSize::Incomplete;
-            }
-        }
-        CommandSize::Sized(offset)
-    }
-    """
-  end
-
   # ── Zig: protocol_command_size.zig ────────────────────────────────────────
 
   @spec zig_command_size_file(schema()) :: String.t()
   defp zig_command_size_file(schema) do
     ops = framing_opcodes(schema)
-    cn = &rust_swift_zig_const_name/1
+    cn = &swift_zig_const_name/1
 
     fixed_arms =
       Enum.map(fixed_sizes(ops), fn n ->
@@ -1106,7 +947,7 @@ defmodule Minga.Mix.ProtocolGenerator do
   defp swift_command_size_file(schema) do
     ops = framing_opcodes(schema)
     swift_custom_ops = opcodes_of_kind(ops, :custom) ++ parser_command_opcodes(schema)
-    cn = &rust_swift_zig_const_name/1
+    cn = &swift_zig_const_name/1
 
     fixed_cases =
       Enum.map(fixed_sizes(ops), fn n ->
@@ -1415,18 +1256,8 @@ defmodule Minga.Mix.ProtocolGenerator do
   }
 
   # Single source of truth for how each primitive wire type is read, shared by
-  # the scalar-field, conditional-tail, and counted_array-element decoders in
-  # both languages. Byte sizes come from @primitive_sizes so a width lives in
-  # exactly one place.
-  @rust_primitive_reads %{
-    "u8" => "bytes[pos]",
-    "u16" => "read_u16(bytes, pos)",
-    "u24" => "read_u24(bytes, pos)",
-    "rgb" => "read_u24(bytes, pos)",
-    "u32" => "read_u32(bytes, pos)",
-    "u64" => "read_u64(bytes, pos)"
-  }
-
+  # the scalar-field, conditional-tail, and counted_array-element decoders. Byte
+  # sizes come from @primitive_sizes so a width lives in exactly one place.
   @go_primitive_reads %{
     "u8" => "data[pos]",
     "u16" => "decodeU16(data, pos)",
@@ -1434,12 +1265,6 @@ defmodule Minga.Mix.ProtocolGenerator do
     "rgb" => "decodeU24(data, pos)",
     "u32" => "decodeU32(data, pos)",
     "u64" => "decodeU64(data, pos)"
-  }
-
-  @rust_string_readers %{
-    "string8" => "read_string8",
-    "string16" => "read_string16",
-    "string32" => "read_string32"
   }
 
   @go_string_decoders %{
@@ -1513,18 +1338,6 @@ defmodule Minga.Mix.ProtocolGenerator do
       guard,
       Enum.map(Map.get(entry, "fields", []), fn field ->
         {field["name"], go_local_name(field["name"])}
-      end)
-    )
-  end
-
-  @spec rust_guard_expression(map()) :: String.t()
-  defp rust_guard_expression(entry) do
-    guard = conditional_tail_guard(entry) || "true"
-
-    translate_guard(
-      guard,
-      Enum.map(Map.get(entry, "fields", []), fn field ->
-        {field["name"], rust_field_name(field["name"])}
       end)
     )
   end
@@ -1677,451 +1490,11 @@ defmodule Minga.Mix.ProtocolGenerator do
     ]
   end
 
-  @spec rust_zero_value(map(), %{String.t() => structure()}) :: String.t()
-  defp rust_zero_value(%{"type" => type}, _smap)
-       when type in ["u8", "u16", "u24", "u32", "u64", "rgb"], do: "0"
-
-  defp rust_zero_value(%{"type" => type}, _smap) when type in ["string8", "string16", "string32"],
-    do: "String::new()"
-
-  defp rust_zero_value(%{"type" => "struct", "element" => element}, _smap),
-    do: "#{rust_struct_name(element)}::default()"
-
-  defp rust_zero_value(%{"type" => "counted_array", "element" => element}, smap),
-    do: "Vec::<#{rust_type(element_field(element), smap)}>::new()"
-
-  defp rust_zero_value(_field, _smap), do: "Default::default()"
-
-  @spec rust_decode_conditional_tail_block(map(), %{String.t() => structure()}) :: iodata()
-  defp rust_decode_conditional_tail_block(entry, smap) do
-    tail_fields = conditional_tail_fields(entry)
-
-    case tail_fields do
-      [] ->
-        []
-
-      _ ->
-        [
-          Enum.map(tail_fields, fn field ->
-            "    let mut #{rust_field_name(field["name"])} = #{rust_zero_value(field, smap)};\n"
-          end),
-          "    if #{rust_guard_expression(entry)} {\n",
-          Enum.map(tail_fields, fn field ->
-            rust_decode_field_assignment_statement(field, smap)
-          end),
-          "    }\n"
-        ]
-    end
-  end
-
-  @spec rust_decode_field_assignment_statement(map(), %{String.t() => structure()}) :: iodata()
-  defp rust_decode_field_assignment_statement(%{"name" => name, "type" => type}, _smap)
-       when is_map_key(@rust_primitive_reads, type) do
-    local = rust_field_name(name)
-    size = @primitive_sizes[type]
-
-    [
-      "        require_len(bytes, pos + #{size}, \"#{name}\")?;\n",
-      "        #{local} = #{@rust_primitive_reads[type]};\n",
-      "        pos += #{size};\n"
-    ]
-  end
-
-  defp rust_decode_field_assignment_statement(%{"name" => name, "type" => "string8"}, _smap) do
-    local = rust_field_name(name)
-
-    [
-      "        #{local} = read_string8(bytes, &mut pos)?;\n"
-    ]
-  end
-
-  defp rust_decode_field_assignment_statement(%{"name" => name, "type" => "string16"}, _smap) do
-    local = rust_field_name(name)
-
-    [
-      "        #{local} = read_string16(bytes, &mut pos)?;\n"
-    ]
-  end
-
-  defp rust_decode_field_assignment_statement(%{"name" => name, "type" => "string32"}, _smap) do
-    local = rust_field_name(name)
-
-    [
-      "        #{local} = read_string32(bytes, &mut pos)?;\n"
-    ]
-  end
-
-  defp rust_decode_field_assignment_statement(
-         %{"name" => name, "type" => "struct", "element" => element},
-         _smap
-       ) do
-    local = rust_field_name(name)
-
-    [
-      "        let (#{local}_value, consumed) = decode_#{element}(bytes, pos)?;\n",
-      "        #{local} = #{local}_value;\n",
-      "        pos += consumed;\n"
-    ]
-  end
-
-  defp rust_decode_field_assignment_statement(
-         %{
-           "name" => name,
-           "type" => "counted_array",
-           "count_type" => count_type,
-           "element" => element
-         },
-         smap
-       ) do
-    local = rust_field_name(name)
-    {count_read, count_size} = rust_count_read(count_type)
-
-    stride_check =
-      case element_fixed_byte_size(element, smap) do
-        nil ->
-          []
-
-        stride ->
-          ["        require_len(bytes, pos + #{local}_count * #{stride}, \"#{name}\")?;\n"]
-      end
-
-    [
-      "        require_len(bytes, pos + #{count_size}, \"#{name} count\")?;\n",
-      "        let #{local}_count = #{count_read};\n",
-      "        pos += #{count_size};\n",
-      stride_check,
-      "        let mut #{local}_value = Vec::with_capacity(#{rust_prealloc("#{local}_count", element, smap)});\n",
-      "        for _ in 0..#{local}_count {\n",
-      rust_decode_array_element(element, "#{local}_value", "            "),
-      "        }\n",
-      "        #{local} = #{local}_value;\n"
-    ]
-  end
-
-  # ── Rust type mapping helpers ────────────────────────────────────────────
-
-  @spec rust_type(map(), %{String.t() => structure()}) :: String.t()
-  defp rust_type(%{"type" => "u8"}, _smap), do: "u8"
-  defp rust_type(%{"type" => "u16"}, _smap), do: "u16"
-  defp rust_type(%{"type" => "u24"}, _smap), do: "u32"
-  defp rust_type(%{"type" => "u32"}, _smap), do: "u32"
-  defp rust_type(%{"type" => "u64"}, _smap), do: "u64"
-  defp rust_type(%{"type" => "rgb"}, _smap), do: "u32"
-  defp rust_type(%{"type" => "string8"}, _smap), do: "String"
-  defp rust_type(%{"type" => "string16"}, _smap), do: "String"
-  defp rust_type(%{"type" => "string32"}, _smap), do: "String"
-
-  defp rust_type(%{"type" => "struct", "element" => element}, _smap) do
-    rust_struct_name(element)
-  end
-
-  defp rust_type(%{"type" => "counted_array", "element" => element}, smap) do
-    "Vec<#{rust_type(element_field(element), smap)}>"
-  end
-
-  @spec rust_struct_name(String.t()) :: String.t()
-  defp rust_struct_name(name) do
-    name
-    |> String.split("_")
-    |> Enum.map_join("", &String.capitalize/1)
-  end
-
   # Locals the generated decoders introduce themselves. A schema field whose
   # name matches one of these would shadow the byte cursor, input slice, or loop
   # temp and silently corrupt decoding (or fail to compile in Go), so field names
   # that collide are suffixed. Kept in sync with the decode templates below.
   @reserved_decoder_locals ~w(pos offset data bytes err item consumed next_pos count)
-  @rust_keywords ~w(type self super crate mod fn struct enum impl trait pub use let mut const static ref match return if else for while loop break continue where as in move box dyn async await try macro yield)
-  @spec rust_field_name(String.t()) :: String.t()
-  defp rust_field_name(name) when name in @rust_keywords, do: "r##{name}"
-  defp rust_field_name(name) when name in @reserved_decoder_locals, do: "#{name}_"
-  defp rust_field_name(name), do: name
-
-  # ── Rust: semantic_types.rs ──────────────────────────────────────────────
-
-  @spec rust_semantic_types_file(schema()) :: String.t()
-  defp rust_semantic_types_file(schema) do
-    structures = Map.get(schema, "structures", [])
-    sections = sections_list(schema)
-    command_fields = command_fields_list(schema)
-    smap = structures_map(schema)
-
-    [
-      "// Generated semantic wire types.\n",
-      "//\n",
-      "// Generated from `docs/protocol_schema.toml` by `mix protocol.gen`. Do not edit by hand.\n\n",
-      rust_structure_definitions(structures, smap),
-      "\n",
-      rust_size_constants(structures, smap),
-      "\n",
-      rust_section_struct_definitions(sections, smap),
-      rust_command_fields_struct_definitions(command_fields, smap)
-    ]
-    |> IO.iodata_to_binary()
-  end
-
-  @spec rust_structure_definitions([structure()], %{String.t() => structure()}) :: iodata()
-  defp rust_structure_definitions(structures, smap) do
-    Enum.map(structures, fn s ->
-      name = rust_struct_name(s["name"])
-      fields = entry_fields(s)
-
-      has_variable =
-        Map.has_key?(s, "conditional_tail") or
-          Enum.any?(fields, fn f -> fixed_field_size(f, smap) == nil end)
-
-      derive =
-        if has_variable,
-          do: "#[derive(Debug, Clone, Default, PartialEq, Eq)]\n",
-          else: "#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]\n"
-
-      [
-        derive,
-        "pub struct #{name} {\n",
-        Enum.map(fields, fn field ->
-          "    pub #{rust_field_name(field["name"])}: #{rust_type(field, smap)},\n"
-        end),
-        "}\n\n"
-      ]
-    end)
-  end
-
-  @spec rust_size_constants([structure()], %{String.t() => structure()}) :: iodata()
-  defp rust_size_constants(structures, smap) do
-    structures
-    |> Enum.flat_map(fn s ->
-      case fixed_structure_size(s["name"], smap) do
-        nil -> []
-        size -> [{s["name"], size}]
-      end
-    end)
-    |> Enum.map(fn {name, size} ->
-      "pub const #{constant_name(name)}_SIZE: usize = #{size};\n"
-    end)
-  end
-
-  @spec rust_section_struct_definitions([section()], %{String.t() => structure()}) :: iodata()
-  defp rust_section_struct_definitions(sections, smap) do
-    # Only generate structs for sections with inline fields (not counted_array layout or custom sections)
-    sections
-    |> Enum.reject(&entry_custom_layout?/1)
-    |> Enum.filter(&(Map.has_key?(&1, "fields") or Map.has_key?(&1, "conditional_tail")))
-    |> Enum.map(fn s ->
-      name = rust_section_struct_name(s)
-      fields = entry_fields(s)
-      has_variable = Enum.any?(fields, fn f -> fixed_field_size(f, smap) == nil end)
-
-      derive =
-        if has_variable,
-          do: "#[derive(Debug, Clone, Default, PartialEq, Eq)]\n",
-          else: "#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]\n"
-
-      [
-        derive,
-        "pub struct #{name} {\n",
-        Enum.map(fields, fn field ->
-          "    pub #{rust_field_name(field["name"])}: #{rust_type(field, smap)},\n"
-        end),
-        "}\n\n"
-      ]
-    end)
-  end
-
-  @spec rust_section_struct_name(section()) :: String.t()
-  defp rust_section_struct_name(section) do
-    opcode_part = rust_struct_name(section["opcode"])
-    section_part = rust_struct_name(section["name"])
-    "#{opcode_part}#{section_part}"
-  end
-
-  # ── Rust: semantic_decode.rs ─────────────────────────────────────────────
-
-  @spec rust_semantic_decode_file(schema()) :: String.t()
-  defp rust_semantic_decode_file(schema) do
-    structures = Map.get(schema, "structures", [])
-    sections = sections_list(schema)
-    command_fields = command_fields_list(schema)
-    smap = structures_map(schema)
-
-    [
-      "// Generated semantic decode functions.\n",
-      "//\n",
-      "// Generated from `docs/protocol_schema.toml` by `mix protocol.gen`. Do not edit by hand.\n\n",
-      "use crate::protocol::DecodeError;\n",
-      "use super::semantic_types::*;\n\n",
-      rust_decode_helpers(),
-      "\n",
-      Enum.map(structures, &rust_decode_structure(&1, smap)),
-      "\n",
-      rust_decode_section_functions(sections, smap),
-      rust_decode_command_fields_functions(command_fields, smap)
-    ]
-    |> IO.iodata_to_binary()
-  end
-
-  @spec rust_decode_helpers() :: iodata()
-  defp rust_decode_helpers do
-    """
-    fn require_len(bytes: &[u8], needed: usize, label: &'static str) -> Result<(), DecodeError> {
-        if bytes.len() < needed {
-            Err(DecodeError::Malformed(label))
-        } else {
-            Ok(())
-        }
-    }
-
-    fn read_u16(bytes: &[u8], offset: usize) -> u16 {
-        u16::from_be_bytes([bytes[offset], bytes[offset + 1]])
-    }
-
-    fn read_u24(bytes: &[u8], offset: usize) -> u32 {
-        ((bytes[offset] as u32) << 16) | ((bytes[offset + 1] as u32) << 8) | bytes[offset + 2] as u32
-    }
-
-    fn read_u32(bytes: &[u8], offset: usize) -> u32 {
-        u32::from_be_bytes([bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]])
-    }
-
-    fn read_u64(bytes: &[u8], offset: usize) -> u64 {
-        u64::from_be_bytes([
-            bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3],
-            bytes[offset + 4], bytes[offset + 5], bytes[offset + 6], bytes[offset + 7],
-        ])
-    }
-
-    fn read_string(bytes: &[u8], offset: usize, len: usize) -> Result<String, DecodeError> {
-        require_len(bytes, offset + len, "string body")?;
-        std::str::from_utf8(&bytes[offset..offset + len])
-            .map(str::to_owned)
-            .map_err(|_| DecodeError::Utf8)
-    }
-
-    fn read_string8(bytes: &[u8], offset: &mut usize) -> Result<String, DecodeError> {
-        require_len(bytes, *offset + 1, "string8 header")?;
-        let len = bytes[*offset] as usize;
-        *offset += 1;
-        let value = read_string(bytes, *offset, len)?;
-        *offset += len;
-        Ok(value)
-    }
-
-    fn read_string16(bytes: &[u8], offset: &mut usize) -> Result<String, DecodeError> {
-        require_len(bytes, *offset + 2, "string16 header")?;
-        let len = read_u16(bytes, *offset) as usize;
-        *offset += 2;
-        let value = read_string(bytes, *offset, len)?;
-        *offset += len;
-        Ok(value)
-    }
-
-    fn read_string32(bytes: &[u8], offset: &mut usize) -> Result<String, DecodeError> {
-        require_len(bytes, *offset + 4, "string32 header")?;
-        let len = read_u32(bytes, *offset) as usize;
-        *offset += 4;
-        let value = read_string(bytes, *offset, len)?;
-        *offset += len;
-        Ok(value)
-    }
-    """
-  end
-
-  @spec rust_decode_structure(structure(), %{String.t() => structure()}) :: iodata()
-  defp rust_decode_structure(structure, smap) do
-    rust_record_decoder(
-      "decode_#{structure["name"]}",
-      rust_struct_name(structure["name"]),
-      structure,
-      smap
-    )
-  end
-
-  # Emit a Rust decode function for any record (structure, inline section, or
-  # command_fields): base fields, then the conditional tail, then construct from
-  # the full field list. The three callers differ only in fn/struct name.
-  @spec rust_record_decoder(String.t(), String.t(), map(), %{String.t() => structure()}) ::
-          iodata()
-  defp rust_record_decoder(fn_name, struct_name, entry, smap) do
-    [
-      "pub fn #{fn_name}(bytes: &[u8], offset: usize) -> Result<(#{struct_name}, usize), DecodeError> {\n",
-      "    let mut pos = offset;\n",
-      Enum.map(entry["fields"] || [], &rust_decode_field_statement(&1, smap)),
-      rust_decode_conditional_tail_block(entry, smap),
-      "    Ok((#{struct_name} {\n",
-      Enum.map(entry_fields(entry), fn field -> "        #{rust_field_name(field["name"])},\n" end),
-      "    }, pos - offset))\n",
-      "}\n\n"
-    ]
-  end
-
-  @spec rust_decode_field_statement(map(), %{String.t() => structure()}) :: iodata()
-  defp rust_decode_field_statement(%{"name" => name, "type" => type}, _smap)
-       when is_map_key(@rust_primitive_reads, type) do
-    rname = rust_field_name(name)
-    size = @primitive_sizes[type]
-
-    [
-      "    require_len(bytes, pos + #{size}, \"#{name}\")?;\n",
-      "    let #{rname} = #{@rust_primitive_reads[type]};\n",
-      "    pos += #{size};\n"
-    ]
-  end
-
-  defp rust_decode_field_statement(%{"name" => name, "type" => "string8"}, _smap) do
-    rname = rust_field_name(name)
-    ["    let #{rname} = read_string8(bytes, &mut pos)?;\n"]
-  end
-
-  defp rust_decode_field_statement(%{"name" => name, "type" => "string16"}, _smap) do
-    rname = rust_field_name(name)
-    ["    let #{rname} = read_string16(bytes, &mut pos)?;\n"]
-  end
-
-  defp rust_decode_field_statement(%{"name" => name, "type" => "string32"}, _smap) do
-    rname = rust_field_name(name)
-    ["    let #{rname} = read_string32(bytes, &mut pos)?;\n"]
-  end
-
-  defp rust_decode_field_statement(
-         %{"name" => name, "type" => "struct", "element" => element},
-         _smap
-       ) do
-    rname = rust_field_name(name)
-
-    [
-      "    let (#{rname}, consumed) = decode_#{element}(bytes, pos)?;\n",
-      "    pos += consumed;\n"
-    ]
-  end
-
-  defp rust_decode_field_statement(
-         %{
-           "name" => name,
-           "type" => "counted_array",
-           "count_type" => count_type,
-           "element" => element
-         },
-         smap
-       ) do
-    rname = rust_field_name(name)
-    {count_read, count_size} = rust_count_read(count_type)
-
-    stride_check =
-      case element_fixed_byte_size(element, smap) do
-        nil -> []
-        stride -> ["    require_len(bytes, pos + #{rname}_count * #{stride}, \"#{name}\")?;\n"]
-      end
-
-    [
-      "    require_len(bytes, pos + #{count_size}, \"#{name} count\")?;\n",
-      "    let #{rname}_count = #{count_read};\n",
-      "    pos += #{count_size};\n",
-      stride_check,
-      "    let mut #{rname} = Vec::with_capacity(#{rust_prealloc("#{rname}_count", element, smap)});\n",
-      "    for _ in 0..#{rname}_count {\n",
-      rust_decode_array_element(element, rname, "        "),
-      "    }\n"
-    ]
-  end
 
   # A counted_array element is either a named structure or a bare wire type
   # (primitive or string). This normalizes it to a field-shaped map so the
@@ -2155,116 +1528,12 @@ defmodule Minga.Mix.ProtocolGenerator do
   # least one byte, so the remaining buffer length is a safe, self-scaling upper
   # bound: tight for small buffers (DoS-safe) and unbounded for genuinely large
   # payloads (no needless regrowth).
-  @spec rust_prealloc(String.t(), String.t(), %{String.t() => structure()}) :: String.t()
-  defp rust_prealloc(count_var, element, smap) do
-    case element_fixed_byte_size(element, smap) do
-      nil -> "#{count_var}.min(bytes.len() - pos)"
-      _ -> count_var
-    end
-  end
-
   @spec go_prealloc(String.t(), String.t(), %{String.t() => structure()}) :: String.t()
   defp go_prealloc(count_var, element, smap) do
     case element_fixed_byte_size(element, smap) do
       nil -> "min(#{count_var}, len(data)-pos)"
       _ -> count_var
     end
-  end
-
-  # Decode one counted_array element at `pos` and push it onto `vec`, advancing
-  # `pos`. Struct elements emit the same `(item, consumed)` form as before, so
-  # existing struct arrays regenerate byte-for-byte.
-  @spec rust_decode_array_element(String.t(), String.t(), String.t()) :: iodata()
-  defp rust_decode_array_element(element, vec, indent) do
-    case element_field(element) do
-      %{"type" => "struct", "element" => el} ->
-        [
-          "#{indent}let (item, consumed) = decode_#{el}(bytes, pos)?;\n",
-          "#{indent}pos += consumed;\n",
-          "#{indent}#{vec}.push(item);\n"
-        ]
-
-      %{"type" => str} when is_map_key(@rust_string_readers, str) ->
-        ["#{indent}#{vec}.push(#{@rust_string_readers[str]}(bytes, &mut pos)?);\n"]
-
-      %{"type" => prim} ->
-        [
-          "#{indent}#{vec}.push(#{@rust_primitive_reads[prim]});\n",
-          "#{indent}pos += #{@primitive_sizes[prim]};\n"
-        ]
-    end
-  end
-
-  @spec rust_count_read(String.t()) :: {String.t(), non_neg_integer()}
-  defp rust_count_read("u8"), do: {"bytes[pos] as usize", 1}
-  defp rust_count_read("u16"), do: {"read_u16(bytes, pos) as usize", 2}
-  defp rust_count_read("u32"), do: {"read_u32(bytes, pos) as usize", 4}
-
-  @spec rust_decode_section_functions([section()], %{String.t() => structure()}) :: iodata()
-  defp rust_decode_section_functions(sections, smap) do
-    sections
-    |> Enum.group_by(& &1["opcode"])
-    |> Enum.sort_by(fn {opcode, _} -> opcode end)
-    |> Enum.map(fn {opcode, secs} ->
-      rust_decode_opcode_sections(opcode, Enum.sort_by(secs, & &1["id"]), smap)
-    end)
-  end
-
-  @spec rust_decode_opcode_sections(String.t(), [section()], %{String.t() => structure()}) ::
-          iodata()
-  defp rust_decode_opcode_sections(opcode, secs, smap) do
-    [
-      "// Section decoders for #{opcode}\n\n",
-      Enum.map(secs, fn sec ->
-        cond do
-          entry_custom_layout?(sec) -> []
-          sec["layout"] == "counted_array" -> rust_decode_counted_array_section(opcode, sec, smap)
-          true -> rust_decode_inline_section(opcode, sec, smap)
-        end
-      end)
-    ]
-  end
-
-  @spec rust_decode_inline_section(String.t(), section(), %{String.t() => structure()}) ::
-          iodata()
-  defp rust_decode_inline_section(_opcode, section, smap) do
-    rust_record_decoder(
-      "decode_#{section["opcode"]}_#{section["name"]}",
-      rust_section_struct_name(section),
-      section,
-      smap
-    )
-  end
-
-  @spec rust_decode_counted_array_section(String.t(), section(), %{String.t() => structure()}) ::
-          iodata()
-  defp rust_decode_counted_array_section(_opcode, section, smap) do
-    element = section["element"]
-    element_type = rust_type(element_field(element), smap)
-    fn_name = "decode_#{section["opcode"]}_#{section["name"]}"
-    count_type = section["count_type"] || "u16"
-    {count_read, count_size} = rust_count_read(count_type)
-
-    stride_check =
-      case element_fixed_byte_size(element, smap) do
-        nil -> []
-        stride -> ["    require_len(bytes, pos + count * #{stride}, \"#{section["name"]}\")?;\n"]
-      end
-
-    [
-      "pub fn #{fn_name}(bytes: &[u8], offset: usize) -> Result<(Vec<#{element_type}>, usize), DecodeError> {\n",
-      "    let mut pos = offset;\n",
-      "    require_len(bytes, pos + #{count_size}, \"#{section["name"]} count\")?;\n",
-      "    let count = #{count_read};\n",
-      "    pos += #{count_size};\n",
-      stride_check,
-      "    let mut items = Vec::with_capacity(#{rust_prealloc("count", element, smap)});\n",
-      "    for _ in 0..count {\n",
-      rust_decode_array_element(element, "items", "        "),
-      "    }\n",
-      "    Ok((items, pos - offset))\n",
-      "}\n\n"
-    ]
   end
 
   # ── Go type mapping helpers ───────────────────────────────────────────────
@@ -2763,47 +2032,6 @@ defmodule Minga.Mix.ProtocolGenerator do
       "\treturn items, pos, nil\n",
       "}\n\n"
     ]
-  end
-
-  # ── Rust: command_fields types & decode ────────────────────────────────
-
-  @spec rust_command_fields_struct_definitions([command_fields()], %{String.t() => structure()}) ::
-          iodata()
-  defp rust_command_fields_struct_definitions(command_fields, smap) do
-    command_fields
-    |> Enum.map(fn cf ->
-      name = rust_struct_name(cf["opcode"]) <> "Fields"
-      fields = entry_fields(cf)
-      has_variable = Enum.any?(fields, fn f -> fixed_field_size(f, smap) == nil end)
-
-      derive =
-        if has_variable,
-          do: "#[derive(Debug, Clone, PartialEq, Eq)]\n",
-          else: "#[derive(Debug, Clone, Copy, PartialEq, Eq)]\n"
-
-      [
-        derive,
-        "pub struct #{name} {\n",
-        Enum.map(fields, fn field ->
-          "    pub #{rust_field_name(field["name"])}: #{rust_type(field, smap)},\n"
-        end),
-        "}\n\n"
-      ]
-    end)
-  end
-
-  @spec rust_decode_command_fields_functions([command_fields()], %{String.t() => structure()}) ::
-          iodata()
-  defp rust_decode_command_fields_functions(command_fields, smap) do
-    command_fields
-    |> Enum.map(fn cf ->
-      struct_name = rust_struct_name(cf["opcode"]) <> "Fields"
-
-      [
-        "// Command field decoder for #{cf["opcode"]}\n\n",
-        rust_record_decoder("decode_#{cf["opcode"]}_fields", struct_name, cf, smap)
-      ]
-    end)
   end
 
   # ── Go: command_fields types & decode ──────────────────────────────────

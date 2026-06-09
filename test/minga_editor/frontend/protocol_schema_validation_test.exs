@@ -8,9 +8,9 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
   these tests fail.
 
   The exact byte layouts asserted here for picker/completion are decoded back by
-  the generated Rust/Go decoders in `rust/tui/src/protocol.rs` and
-  `go/tui/internal/protocol/generated_decode_test.go`. Those three fixtures must
-  stay in lockstep: a wire-format change has to be reflected in all three, or one
+  the generated Go decoder in
+  `go/tui/internal/protocol/generated_decode_test.go`. Both fixtures must
+  stay in lockstep: a wire-format change has to be reflected in both, or one
   side silently tests a stale format.
   """
 

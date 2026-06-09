@@ -28,8 +28,8 @@ The daily-driver slice is not "all of Emacs plus all of Claude Code." It is the 
 - **Editor Kernel:** buffer correctness, undo/redo, save/load, cursor/motion, search, project navigation, LSP, diagnostics, git state.
 - **Agent Runtime:** sessions, tool execution, approvals, filesystem edits, shell execution, change inspection, safety boundaries.
 - **Shell Composition:** traditional editor shell first, agentic shell experiments second, shared state underneath both.
-- **Semantic UI Contract:** one frontend contract for GUI and terminal clients, with capability flags rather than Swift/Rust/GTK identity.
-- **Frontend Clients:** Swift/macOS as the polish reference, Go terminal as the temporary semantic reference, Rust terminal as the desired long-term terminal frontend, Zig parser/tree-sitter until replaced.
+- **Semantic UI Contract:** one frontend contract for GUI and terminal clients, with capability flags rather than Swift/Go/GTK identity.
+- **Frontend Clients:** Swift/macOS as the polish reference, Go terminal as the semantic terminal frontend, the legacy Zig/libvaxis cell-grid renderer as the current default until Go reaches parity, Zig parser/tree-sitter retained.
 
 ## Daily Driver Checklist
 
@@ -54,4 +54,4 @@ Every ticket in this workstream must include:
 - Validation commands.
 - Forbidden changes.
 
-Tickets that mix protocol cleanup, Rust renderer rebuilding, Zig deletion, and agent shell redesign in one scope should be split before implementation.
+Tickets that mix protocol cleanup, terminal renderer work, Zig deletion, and agent shell redesign in one scope should be split before implementation.

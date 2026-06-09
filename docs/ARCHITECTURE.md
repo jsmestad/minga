@@ -289,9 +289,8 @@ Minga's frontends use the best native toolkit for their rendering surface, but t
 
 - **macOS: Swift + Metal.** SwiftUI renders chrome (tab bar, file tree, status bar, popups) as native views. Metal renders the editor text surface with GPU-accelerated glyph rasterization via CoreText. This gives macOS users native scrolling, system fonts, trackpad gestures, and full accessibility support.
 - **Linux: GTK4 (planned).** GTK4 widgets for chrome, Cairo or OpenGL for the text surface. Native Wayland/X11 integration, IME support, system theming.
-- **Terminal: Rust TUI target.** The desired terminal frontend is a semantic Ratatui/Terminal client that renders the same Semantic UI models as native GUI clients. The launch path is BEAM-owned: Minga starts the editor core, spawns the Rust renderer as a Port, and passes `MINGA_TTY` so Rust can use Ratatui/Crossterm on the real terminal while stdin/stdout remain the packet protocol.
-- **Terminal bakeoff: Go semantic reference.** The Go/Bubble Tea frontend is a working semantic reference while Rust is rebuilt.
-- **Parser: Zig + tree-sitter.** Zig remains parser infrastructure until that code is replaced.
+- **Terminal: Go + Bubble Tea.** The terminal frontend is a semantic Charm/Bubble Tea client that renders the same Semantic UI models as native GUI clients. The launch path is BEAM-owned: Minga starts the editor core, spawns the Go renderer as a Port, and passes `MINGA_TTY` so Go can drive the real terminal while stdin/stdout remain the packet protocol. The legacy Zig/libvaxis cell-grid renderer remains the current default until the Go semantic frontend reaches parity and Zig is retired.
+- **Parser: Zig + tree-sitter.** Zig remains parser infrastructure (the `minga-parser` Port); it embeds the tree-sitter C grammars directly and stays in place regardless of the terminal frontend choice.
 
 Each frontend is a "dumb" renderer and input source: it reads Semantic UI and protocol commands, draws them using its own surface primitives, and writes input events back to stdout. All editor state and product policy live in the BEAM.
 
@@ -346,7 +345,7 @@ graph LR
 
 For the full specification with byte-level field descriptions, sequencing rules, and implementation guidance, see **[docs/PROTOCOL.md](PROTOCOL.md)**. For the Semantic UI opcodes historically named GUI chrome, see **[docs/GUI_PROTOCOL.md](GUI_PROTOCOL.md)**.
 
-Any process that implements the frontend behavior and speaks this protocol can serve as a Minga rendering backend. Frontend identity is opaque to product behavior; capabilities describe the surface and feature support. The macOS Swift frontend is the polish reference, the Go terminal frontend is the semantic reference during the bakeoff, the Rust terminal frontend is the desired long-term terminal target, and GTK4 remains planned for Linux.
+Any process that implements the frontend behavior and speaks this protocol can serve as a Minga rendering backend. Frontend identity is opaque to product behavior; capabilities describe the surface and feature support. The macOS Swift frontend is the polish reference, the Go terminal frontend is the semantic terminal target, the legacy Zig/libvaxis cell-grid renderer remains the current terminal default until Go reaches parity, and GTK4 remains planned for Linux.
 
 ### Display List (Rendering IR)
 
