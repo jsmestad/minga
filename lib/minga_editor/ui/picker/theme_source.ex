@@ -54,17 +54,13 @@ defmodule MingaEditor.UI.Picker.ThemeSource do
   # ── Private ─────────────────────────────────────────────────────────────────
 
   @spec put_theme(term(), Theme.t()) :: term()
-  defp put_theme(state, %Theme{} = theme) do
+  defp put_theme(%EditorState{} = state, %Theme{} = theme) do
     state
-    |> Map.put(:theme, theme)
-    |> reset_frontend_render_state()
+    |> EditorState.apply_theme(theme)
+    |> EditorState.reset_frontend_render_state()
   end
 
-  @spec reset_frontend_render_state(term()) :: term()
-  defp reset_frontend_render_state(%EditorState{} = state),
-    do: EditorState.reset_frontend_render_state(state)
-
-  defp reset_frontend_render_state(state), do: state
+  defp put_theme(state, %Theme{} = theme), do: Map.put(state, :theme, theme)
 
   @spec display_name(atom()) :: String.t()
   defp display_name(name) do

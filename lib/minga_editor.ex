@@ -987,7 +987,8 @@ defmodule MingaEditor do
           ])
         end
 
-        %{state | theme: theme}
+        state
+        |> EditorState.apply_theme(theme)
         |> EditorState.invalidate_all_windows()
         |> Layout.invalidate()
 
