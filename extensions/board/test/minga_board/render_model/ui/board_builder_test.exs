@@ -1,21 +1,21 @@
-defmodule MingaEditor.RenderModel.UI.BoardBuilderTest do
+defmodule MingaBoard.RenderModel.UI.BoardBuilderTest do
   use ExUnit.Case, async: true
 
   import ExUnit.CaptureLog
 
-  alias MingaEditor.RenderModel.UI.BoardBuilder
-  alias Minga.RenderModel.UI.Board
+  alias MingaBoard.RenderModel.UI.Board
+  alias MingaBoard.RenderModel.UI.BoardBuilder
 
   describe "build/1" do
     test "builds a hidden board when payload is nil" do
       assert %Board{visible?: false, cards: []} = BoardBuilder.build(nil)
     end
 
-    test "builds a hidden board when payload is unsupported (with warning)" do
+    test "builds a hidden board when payload is unsupported" do
       {model, log} = with_log(fn -> BoardBuilder.build({:unknown, %{}}) end)
 
       assert %Board{visible?: false, cards: []} = model
-      assert log =~ "Unsupported GUI shell payload"
+      assert log =~ "Unsupported Board extension GUI payload"
     end
 
     test "passes a board payload through as the render model" do

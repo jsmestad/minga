@@ -417,7 +417,7 @@ defmodule MingaEditor.Shell.Traditional.TreeRendererTest do
   defp nested_fixture_tree(tmp_dir, opts) do
     width = Keyword.fetch!(opts, :width)
     deep_dir = Path.join(tmp_dir, "lib/minga_editor/shell/traditional")
-    sibling_dir = Path.join(tmp_dir, "lib/minga_editor/shell/board")
+    sibling_dir = Path.join(tmp_dir, "lib/minga_editor/shell/extension_shell")
 
     File.mkdir_p!(deep_dir)
     File.mkdir_p!(sibling_dir)

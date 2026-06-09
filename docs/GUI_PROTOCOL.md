@@ -64,6 +64,22 @@ The BEAM-side encoder must use a documented length-prefixed envelope for all new
 | 0x96 | gui_hover_action | Optional action metadata for the hover popup |
 | 0x9A | gui_observatory | BEAM Observatory process tree and metrics for native sidebars. Uses a 32-bit payload length because large supervision trees can exceed 64KB. |
 | 0x9F | gui_sidebars | Semantic sidebar host metadata. Uses a 32-bit payload length so future sidebar lists can grow without changing the envelope. |
+| 0xA3 | gui_extension_runtime | Generic frontend-extension runtime envelope. Uses a 32-bit payload length so extension-owned payloads can grow without changing the shared envelope. |
+
+### 0xA3 — gui_extension_runtime
+
+Frontend extensions receive opaque runtime messages through a generic envelope. The shared protocol identifies the extension and channel; the payload bytes are owned by that extension's frontend adapter and must not require shared protocol structs or generated Board-specific frontend paths.
+
+```
+opcode(1) + payload_len(4) + payload(payload_len)
+
+Payload:
+  extension_id_len(2) + extension_id(extension_id_len) + channel_len(2) + channel(channel_len) + extension_payload
+```
+
+`extension_id` is the stable bundled or installed extension id, for example `minga_board`. `channel` is an extension-owned routing key, for example `board`. `extension_payload` is intentionally opaque to shared frontend code; a frontend that has a registered runtime decoder for the extension may decode it, and a frontend without one should ignore the message without crashing.
+
+This envelope is for extension-owned runtime state such as bundled Board chrome. New shared chrome should still use a normal Semantic UI opcode instead of hiding shared product contracts inside extension payloads.
 
 ### 0x9F — gui_sidebars
 
@@ -1006,10 +1022,6 @@ opcode(1) + action_type(1) + payload...
 | 0x22 | space_leader_chord | codepoint(4) + modifiers(1) | Enter leader mode from a clean Space chord |
 | 0x23 | space_leader_retract | codepoint(4) + modifiers(1) | Retract a literal Space and enter leader mode |
 | 0x24 | find_pasteboard_search | direction(1) + text_len(2) + text(text_len) | Search from the macOS find pasteboard |
-| 0x25 | board_select_card | card_id(4) | Select a Board card |
-| 0x26 | board_close_card | card_id(4) | Close a Board card |
-| 0x27 | board_reorder | card_id(4) + new_index(2) | Reorder a Board card |
-| 0x28 | board_dispatch_agent | model_len(2) + model + task_len(2) + task | Dispatch a Board agent task |
 | 0x29 | agent_approve | (empty) | Approve an agent change request |
 | 0x2A | agent_request_changes | (empty) | Request agent changes |
 | 0x2B | agent_dismiss | (empty) | Dismiss agent review UI |
@@ -1035,6 +1047,7 @@ opcode(1) + action_type(1) + payload...
 | 0x4C | tab_move_right | tab_id(4) | Move a tab one visible slot right without selecting it first |
 | 0x4D | observatory_inspect | pid_len(2) + pid | Inspect a BEAM Observatory process PID |
 | 0x57 | sidebar_action | sidebar_id_len(2) + sidebar_id + kind_len(2) + kind + action_len(2) + action | Invoke a semantic sidebar host action tied to BEAM-owned sidebar identity |
+| 0x58 | extension_action | extension_id_len(2) + extension_id + action_len(2) + action + extension_payload | Invoke an extension-owned frontend action through the active shell; the trailing payload is opaque to shared GUI action decoding |
 | 0x34 | system_will_sleep | (empty) | System is about to sleep |
 | 0x35 | system_did_wake | (empty) | System woke and BEAM should refresh external state |
 | 0x36 | cmd_copy | (empty) | Execute mode-aware copy from the macOS menu |
@@ -1052,6 +1065,8 @@ opcode(1) + action_type(1) + payload...
 Older path-only `git_open_diff` payloads are accepted as a compatibility fallback only when the path is unambiguous. Native frontends should always send the section-aware form.
 
 For `file_tree_drop`, `target_kind` is `1` for a directory and `0` for a file. Each source is encoded as `path_len(2) + path(path_len)`. Frontends should send both the target index and stable target identity so the BEAM can reject stale drops safely; drops onto files are resolved to the file's parent directory by the BEAM.
+
+For `extension_action`, shared decoding stops after `extension_id` and `action`; the remaining bytes are passed unchanged to the active shell or extension adapter. Frontends should use this only for extension-owned actions, not for shared chrome interactions that need a durable cross-frontend contract.
 
 ## Settings State (0x97)
 

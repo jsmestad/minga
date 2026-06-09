@@ -12,7 +12,6 @@ pub const CompletionItem = types.CompletionItem;
 pub const PickerItem = types.PickerItem;
 pub const HoverLine = types.HoverLine;
 pub const ToolSummary = types.ToolSummary;
-pub const BoardCard = types.BoardCard;
 pub const AgentChatMessage = types.AgentChatMessage;
 
 pub const IndexedRow = struct {
@@ -182,27 +181,6 @@ pub fn toolRows(alloc: std.mem.Allocator, tools: []const ToolSummary, selected_i
     return rows;
 }
 
-/// Uses ZigZag `DataTable` to adapt board card rows while keeping focus/action state BEAM-owned.
-pub fn boardRows(alloc: std.mem.Allocator, cards: []const BoardCard, focused_card_id: u32) ![]PlainRow {
-    if (cards.len == 0) return &.{};
-    var table = zz.DataTable.init(alloc);
-    defer table.deinit();
-    try table.setColumns(&[_]zz.components.DataColumn{
-        .{ .header = "Status", .width = 10 },
-        .{ .header = "Task", .width = 40 },
-    });
-    for (cards) |card| try table.addRow(&[_][]const u8{ boardStatusLabel(card.status), card.task });
-    const rendered = try table.view(alloc);
-    if (std.mem.indexOf(u8, rendered, "Task") == null) return error.ComponentOutputMismatch;
-
-    const rows = try alloc.alloc(PlainRow, cards.len);
-    for (rows, 0..) |*row, index| {
-        const card = cards[index];
-        row.* = .{ .title = boardStatusLabel(card.status), .detail = card.task, .selected = card.id == focused_card_id or card.flags & 0x02 != 0 };
-    }
-    return rows;
-}
-
 /// Uses ZigZag `RichLog` as a transcript viewport helper while keeping transcript entries BEAM-owned.
 pub fn agentMessageRows(alloc: std.mem.Allocator, messages: []const AgentChatMessage, height: u16) ![]IndexedRow {
     if (messages.len == 0 or height == 0) return &.{};
@@ -221,17 +199,6 @@ pub fn agentMessageRows(alloc: std.mem.Allocator, messages: []const AgentChatMes
     const rows = try alloc.alloc(IndexedRow, visible_count);
     for (rows, 0..) |*row, offset| row.* = .{ .index = start + offset, .selected = false };
     return rows;
-}
-
-fn boardStatusLabel(status: u8) []const u8 {
-    return switch (status) {
-        1 => "working",
-        2 => "iterating",
-        3 => "needs you",
-        4 => "done",
-        5 => "error",
-        else => if (status == 0) "idle" else "unknown",
-    };
 }
 
 fn messageText(message: AgentChatMessage) []const u8 {
@@ -304,7 +271,7 @@ test "tooltip adapter evaluates plain tooltip rows" {
     try std.testing.expectEqualStrings("docs", rows[0].title);
 }
 
-test "table adapters preserve tool and board semantic rows" {
+test "table adapter preserves tool semantic rows" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
@@ -314,13 +281,6 @@ test "table adapters preserve tool and board semantic rows" {
     }, 1);
     try std.testing.expectEqualStrings("Write", tools[1].title);
     try std.testing.expect(tools[1].selected);
-
-    const boards = try boardRows(alloc, &[_]BoardCard{
-        .{ .id = 1, .status = 1, .task = try alloc.dupe(u8, "first") },
-        .{ .id = 2, .status = 2, .task = try alloc.dupe(u8, "second") },
-    }, 2);
-    try std.testing.expectEqualStrings("iterating", boards[1].title);
-    try std.testing.expect(boards[1].selected);
 }
 
 test "rich log adapter preserves visible BEAM-owned transcript indices" {

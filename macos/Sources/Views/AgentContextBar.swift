@@ -1,4 +1,4 @@
-/// Agent context bar for Board shell when zoomed into an agent card.
+/// Agent context bar for the active agent surface.
 ///
 /// Shows the agent's task, status badge, elapsed time, and review actions.
 /// Replaces the breadcrumb bar when zoomed into a non-You agent card.

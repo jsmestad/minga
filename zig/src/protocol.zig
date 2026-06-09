@@ -121,7 +121,6 @@ pub const OP_GUI_SIGNATURE_HELP = opcodes.OP_GUI_SIGNATURE_HELP;
 pub const OP_GUI_FLOAT_POPUP = opcodes.OP_GUI_FLOAT_POPUP;
 pub const OP_GUI_SPLIT_SEPARATORS = opcodes.OP_GUI_SPLIT_SEPARATORS;
 pub const OP_GUI_GIT_STATUS = opcodes.OP_GUI_GIT_STATUS;
-pub const OP_GUI_BOARD = opcodes.OP_GUI_BOARD;
 pub const OP_GUI_AGENT_CONTEXT = opcodes.OP_GUI_AGENT_CONTEXT;
 pub const OP_GUI_CHANGE_SUMMARY = opcodes.OP_GUI_CHANGE_SUMMARY;
 pub const OP_GUI_HOVER_ACTION = opcodes.OP_GUI_HOVER_ACTION;
@@ -137,6 +136,7 @@ pub const OP_GUI_SIDEBARS = opcodes.OP_GUI_SIDEBARS;
 pub const OP_GUI_WINDOW_OVERLAY_DELTA = opcodes.OP_GUI_WINDOW_OVERLAY_DELTA;
 pub const OP_GUI_WINDOW_VIEWPORT_DELTA = opcodes.OP_GUI_WINDOW_VIEWPORT_DELTA;
 pub const OP_GUI_WINDOW_ROWS_DELTA = opcodes.OP_GUI_WINDOW_ROWS_DELTA;
+pub const OP_GUI_EXTENSION_RUNTIME = opcodes.OP_GUI_EXTENSION_RUNTIME;
 
 pub const GUI_ACTION_SELECT_TAB = opcodes.GUI_ACTION_SELECT_TAB;
 pub const GUI_ACTION_CLOSE_TAB = opcodes.GUI_ACTION_CLOSE_TAB;
@@ -174,10 +174,6 @@ pub const GUI_ACTION_WORKSPACE_CLOSE = opcodes.GUI_ACTION_WORKSPACE_CLOSE;
 pub const GUI_ACTION_SPACE_LEADER_CHORD = opcodes.GUI_ACTION_SPACE_LEADER_CHORD;
 pub const GUI_ACTION_SPACE_LEADER_RETRACT = opcodes.GUI_ACTION_SPACE_LEADER_RETRACT;
 pub const GUI_ACTION_FIND_PASTEBOARD_SEARCH = opcodes.GUI_ACTION_FIND_PASTEBOARD_SEARCH;
-pub const GUI_ACTION_BOARD_SELECT_CARD = opcodes.GUI_ACTION_BOARD_SELECT_CARD;
-pub const GUI_ACTION_BOARD_CLOSE_CARD = opcodes.GUI_ACTION_BOARD_CLOSE_CARD;
-pub const GUI_ACTION_BOARD_REORDER = opcodes.GUI_ACTION_BOARD_REORDER;
-pub const GUI_ACTION_BOARD_DISPATCH_AGENT = opcodes.GUI_ACTION_BOARD_DISPATCH_AGENT;
 pub const GUI_ACTION_AGENT_APPROVE = opcodes.GUI_ACTION_AGENT_APPROVE;
 pub const GUI_ACTION_AGENT_REQUEST_CHANGES = opcodes.GUI_ACTION_AGENT_REQUEST_CHANGES;
 pub const GUI_ACTION_AGENT_DISMISS = opcodes.GUI_ACTION_AGENT_DISMISS;
@@ -225,6 +221,7 @@ pub const GUI_ACTION_SEARCH_REPLACE = opcodes.GUI_ACTION_SEARCH_REPLACE;
 pub const GUI_ACTION_SEARCH_REPLACE_ALL = opcodes.GUI_ACTION_SEARCH_REPLACE_ALL;
 pub const GUI_ACTION_SEARCH_DISMISS = opcodes.GUI_ACTION_SEARCH_DISMISS;
 pub const GUI_ACTION_SIDEBAR_ACTION = opcodes.GUI_ACTION_SIDEBAR_ACTION;
+pub const GUI_ACTION_EXTENSION_ACTION = opcodes.GUI_ACTION_EXTENSION_ACTION;
 // END GENERATED OPCODE EXPORTS.
 
 // Log levels
@@ -1329,7 +1326,6 @@ fn customCommandSize(payload: []const u8) usize {
         OP_GUI_CURSOR_ANIMATION => len16CommandSize(payload),
         OP_GUI_CONFIG_STATE => len16CommandSize(payload),
         OP_GUI_HOVER_ACTION => len16CommandSize(payload),
-        OP_GUI_BOARD => guiBoardSize(payload),
         OP_GUI_AGENT_CHAT => sectionedGuiSize(payload),
         OP_GUI_MINIBUFFER => guiMinibufferSize(payload),
         OP_GUI_WORKSPACES => len16CommandSize(payload),
@@ -1458,34 +1454,6 @@ fn guiToolManagerSize(payload: []const u8) usize {
             if (!readString8Size(payload, &offset)) return payload.len;
         }
         _ = readString16Size(payload, &offset) orelse return payload.len;
-    }
-    return offset;
-}
-
-fn guiBoardSize(payload: []const u8) usize {
-    if (payload.len < 11) return payload.len;
-    const card_count = std.mem.readInt(u16, payload[6..][0..2], .big);
-    var offset: usize = 9;
-    _ = readString16Size(payload, &offset) orelse return payload.len;
-    var index: u16 = 0;
-    while (index < card_count) : (index += 1) {
-        if (payload.len < offset + 6) return payload.len;
-        offset += 6;
-        _ = readString16Size(payload, &offset) orelse return payload.len;
-        if (!readString8Size(payload, &offset)) return payload.len;
-        if (payload.len < offset + 5) return payload.len;
-        offset += 4;
-        const recent_count = payload[offset];
-        offset += 1;
-        var recent_index: u8 = 0;
-        while (recent_index < recent_count) : (recent_index += 1) {
-            _ = readString16Size(payload, &offset) orelse return payload.len;
-        }
-        if (payload.len < offset + 1) return payload.len;
-        const sparkline_count = payload[offset];
-        offset += 1;
-        if (payload.len < offset + @as(usize, sparkline_count) * 2) return payload.len;
-        offset += @as(usize, sparkline_count) * 2;
     }
     return offset;
 }
@@ -2260,7 +2228,6 @@ test "all generated GUI render opcodes are accounted for by TUI semantic noops" 
         &[_]u8{ OP_GUI_FLOAT_POPUP, 0 },
         &[_]u8{ OP_GUI_SPLIT_SEPARATORS, 0, 0, 0, 0 },
         &[_]u8{ OP_GUI_GIT_STATUS, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
-        &[_]u8{ OP_GUI_BOARD, 0, 1, 0 },
         &[_]u8{ OP_GUI_AGENT_CONTEXT, 0, 0 },
         &[_]u8{ OP_GUI_CHANGE_SUMMARY, 0 },
         &[_]u8{ OP_GUI_HOVER_ACTION, 0, 1, 0 },
@@ -2271,6 +2238,7 @@ test "all generated GUI render opcodes are accounted for by TUI semantic noops" 
         &[_]u8{ OP_GUI_EDIT_TIMELINE, 0, 4, 0, 0, 0, 0 },
         &[_]u8{ OP_GUI_EXTENSION_OVERLAY, 0, 2, 0, 0 },
         &[_]u8{ OP_GUI_EXTENSION_PANEL, 0, 1, 0 },
+        &[_]u8{ OP_GUI_EXTENSION_RUNTIME, 0, 0, 0, 0 },
         &[_]u8{ OP_GUI_SEARCH_STATE, 0, 6, 0, 0, 0, 0, 0, 0 },
         &[_]u8{ OP_GUI_SIDEBARS, 0, 0, 0, 0 },
         &[_]u8{ OP_GUI_WINDOW_OVERLAY_DELTA, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0 },
@@ -3382,45 +3350,7 @@ test "commandSize: small retained semantic state packets" {
     try std.testing.expectEqual(hover.len - 1, commandSize(&hover));
 }
 
-test "commandSize: board and agent chat packets" {
-    const board = [_]u8{
-        OP_GUI_BOARD,
-        1,
-        0,
-        0,
-        0,
-        7,
-        0,
-        1,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        7,
-        1,
-        0x02,
-        0,
-        6,
-        'F',
-        'i',
-        'x',
-        ' ',
-        'C',
-        'I',
-        3,
-        'g',
-        'p',
-        't',
-        0,
-        0,
-        0,
-        9,
-        0,
-        0,
-        OP_BATCH_END,
-    };
+test "commandSize: agent chat packet" {
     const chat = [_]u8{
         OP_GUI_AGENT_CHAT, 1,
         0x01,              0,
@@ -3428,7 +3358,6 @@ test "commandSize: board and agent chat packets" {
         2,                 OP_BATCH_END,
     };
 
-    try std.testing.expectEqual(board.len - 1, commandSize(&board));
     try std.testing.expectEqual(chat.len - 1, commandSize(&chat));
 }
 
@@ -3462,6 +3391,11 @@ test "commandSize: truncated variable-size commands clamp to available payload" 
 
 test "commandSize: gui_observatory uses forward-compatible envelope" {
     const data = [_]u8{ OP_GUI_OBSERVATORY, 0x00, 0x00, 0x00, 0x03, 0x01, 0x02, 0x03 };
+    try std.testing.expectEqual(@as(usize, data.len), commandSize(&data));
+}
+
+test "commandSize: gui_extension_runtime uses forward-compatible envelope" {
+    const data = [_]u8{ OP_GUI_EXTENSION_RUNTIME, 0x00, 0x00, 0x00, 0x03, 0x01, 0x02, 0x03 };
     try std.testing.expectEqual(@as(usize, data.len), commandSize(&data));
 }
 

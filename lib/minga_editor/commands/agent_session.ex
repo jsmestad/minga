@@ -32,12 +32,7 @@ defmodule MingaEditor.Commands.AgentSession do
   @doc """
   Stops the current session and restarts if the panel is visible.
 
-  Traditional-shell only: restart cycles the session pid on the active
-  tab. The Board shell has its own per-card lifecycle (cards are
-  long-lived and own their session pid through zoom in/out), so a
-  generic "restart" without card context isn't meaningful there. Board
-  callers go through the active shell's session-start callback
-  for new sessions and rely on `:agent_session_stopped` events for cleanup.
+  Traditional-shell only: restart cycles the session pid on the active tab. Extension shells may own their own per-surface lifecycle, so a generic "restart" without shell-specific context is not meaningful there. Extension callers go through their active shell's session-start callback for new sessions and rely on `:agent_session_stopped` events for cleanup.
   """
   @spec restart_session(state(), String.t()) :: state()
   def restart_session(%{shell_id: :traditional} = state, message) do

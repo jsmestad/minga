@@ -6,7 +6,7 @@ The rendering pipeline has too many parts, too many lines of code, and is unnece
 
 The rendering simplification now has three completed foundations and one active cleanup track. First, GUI buffer windows use `Minga.RenderModel.Window` with BEAM-authored row IDs, content epochs, and Swift atlas reuse keyed by stable row identity instead of display row. Second, production TUI command building routes through `Minga.RenderModel`: buffer windows use the shared TUI window adapter, and remaining cell-grid chrome is narrowed into `Minga.RenderModel.UI.CellLayer` compatibility data instead of being read from `DisplayList.Frame` during emit. Third, retained GUI deltas are implemented for overlays, viewport snapshots, and row snapshots with `window_id + content_epoch` guards and full-frame recovery after an un-applied delta.
 
-The BEAM-side semantic GUI chrome migration is complete. All shared visible chrome, including the agent-heavy surfaces (`agent_chat`, `bottom_panel`, `change_summary`, `edit_timeline`, `board`) and `agent_context`, now builds a semantic core render model and is encoded by `Minga.Frontend.Adapter.GUI.*`. The executable guardrail in `test/minga/render_model/guardrails_test.exs` now enforces this with **empty** allowlists that pass: no `Minga.RenderModel.UI.*` struct carries a protocol-binary payload field, and no builder under `lib/minga_editor/render_model/` references `MingaEditor.Frontend.Protocol.GUI`. The remaining `ProtocolGUI.encode_gui_*` functions persist only as byte-for-byte parity oracles for protocol tests and are not on any production render path.
+The BEAM-side semantic GUI chrome migration is complete. Shared visible chrome, including the agent-heavy surfaces (`agent_chat`, `bottom_panel`, `change_summary`, `edit_timeline`) and `agent_context`, now builds a semantic core render model and is encoded by `Minga.Frontend.Adapter.GUI.*`. Board is no longer a shared core semantic surface; Board-like experiments must be extension-owned or use generic extension panels/overlays. The executable guardrail in `test/minga/render_model/guardrails_test.exs` now enforces this with **empty** allowlists that pass: no `Minga.RenderModel.UI.*` struct carries a protocol-binary payload field, and no builder under `lib/minga_editor/render_model/` references `MingaEditor.Frontend.Protocol.GUI`. The remaining `ProtocolGUI.encode_gui_*` functions persist only as byte-for-byte parity oracles for protocol tests and are not on any production render path.
 
 `GUI` remains historical naming in protocol modules, opcodes, and this document title. The steady-state contract is Semantic UI for every capable frontend. Frontend clients may be terminal grids, desktop windows, web views, or future hosts; Minga product behavior should adapt through capabilities rather than implementation identity.
 
@@ -148,11 +148,10 @@ Migrated since this plan was written (now semantic, encoded by `Minga.Frontend.A
 - `bottom_panel`
 - `change_summary`
 - `edit_timeline`
-- `board`
 
 Recommended next order:
 
-1. Agent surfaces: agent chat, bottom panel, change summary, edit timeline, board. These are the largest and should move with the MingaAgent boundary cleanup in step 4.
+1. Agent surfaces: agent chat, bottom panel, change summary, edit timeline. These are the largest and should move with the MingaAgent boundary cleanup in step 4.
 2. Cleanup: delete migrated `ProtocolGUI.encode_gui_*` compatibility functions, split remaining protocol helpers into focused core modules, and remove compatibility tests that only prove deleted paths.
 
 Acceptance criteria per component:
@@ -171,7 +170,7 @@ The spec says `MingaAgent` should produce agent UI models. That is not true yet 
 
 Acceptance criteria:
 
-- Agent chat, prompt, board, change summary, bottom panel, and edit timeline model builders live in `MingaAgent` or consume input structs owned by `MingaAgent`.
+- Agent chat, prompt, change summary, bottom panel, and edit timeline model builders live in `MingaAgent` or consume input structs owned by `MingaAgent`.
 - `MingaEditor.RenderPipeline.Content` no longer imports `MingaEditor.Agent.View.*` modules for agent rendering.
 - `MingaEditor.RenderModel.UI.AgentChatBuilder` no longer reaches into `MingaEditor.Agent.UIState` or calls `MingaAgent.Session` directly. The editor extracts a narrow input contract and hands it to `MingaAgent`.
 - `MingaAgent` imports core render model types but does not import `MingaEditor` for rendering.
@@ -421,7 +420,7 @@ The exact names can change. The point is ownership: this object is the canonical
 
 **`lib/minga_editor`:** The render model builder that derives `Minga.RenderModel` from `EditorState`. Pipeline orchestration (invalidation, layout, scroll, content, compose). The editor is the compositor: it assembles the full render model from its own state plus contributions from agents and extensions, and hands it to core adapters.
 
-**`lib/minga_agent`:** Agent UI model producers. `MingaAgent` builds `Minga.RenderModel.UI.AgentChat`, `Minga.RenderModel.UI.Board`, etc. using core types. It never imports `MingaEditor`.
+**`lib/minga_agent`:** Agent UI model producers. `MingaAgent` builds shared agent UI models such as `Minga.RenderModel.UI.AgentChat` using core types. It never imports `MingaEditor`.
 
 This follows the same pattern as the existing extensions API: `Minga.Extension.Sidebar.Snapshot` (the type) lives in core, `MingaEditor.Extension.Sidebar` (the registry and runtime) lives in the editor. Data contracts in core, machinery in the product.
 
@@ -607,13 +606,12 @@ Migrated since this plan was written (now semantic, encoded by `Minga.Frontend.A
 - `bottom_panel`
 - `change_summary`
 - `edit_timeline`
-- `board`
 
 Recommended next order:
 
 | Order | Group | Components | Why this order |
 |-------|-------|------------|----------------|
-| 1 | Agent surfaces | agent chat, bottom panel, change summary, edit timeline, board | Largest group, should move with the MingaAgent boundary cleanup |
+| 1 | Agent surfaces | agent chat, bottom panel, change summary, edit timeline | Largest group, should move with the MingaAgent boundary cleanup |
 | 2 | Protocol cleanup | migrated `ProtocolGUI.encode_gui_*` wrappers | Delete compatibility wrappers and tests once no production or compatibility caller needs them |
 
 Acceptance criteria per remaining component:
@@ -733,7 +731,7 @@ The render model enforces the boundary. `MingaAgent` is responsible for producin
 The contract:
 
 ```text
-MingaAgent produces:  Minga.RenderModel.UI.AgentChat, .Board,
+MingaAgent produces:  Minga.RenderModel.UI.AgentChat,
                       .AgentContext, .ChangeSummary, .EditTimeline
 MingaEditor consumes: places them in Minga.RenderModel.UI, hands to core adapters
 ```
@@ -746,7 +744,7 @@ Today, agent view modules (`PromptRenderer`, `DashboardRenderer`, `PromptSemanti
 
 The input contract: these modules currently take `ViewContext`, a narrow projection of `EditorState`. In the new world, `MingaAgent` defines what inputs it needs to produce its UI models (buffer content, cursor position, viewport, styled messages, etc.). `MingaEditor` extracts those inputs from `EditorState` and passes them to `MingaAgent`'s builders. The context type can live in core if both systems need it, or `MingaAgent` can define its own input struct.
 
-`MingaAgent` is also the proof-of-concept for the extensions-as-UI-contributors pattern. It is the first and most complex test case. If the render model contract is expressive enough for agent chat windows, board views, context bars, change summaries, and edit timelines, all produced by `MingaAgent` without `MingaEditor` importing a single agent module, then it is expressive enough for any extension. This is why agent surfaces remain a distinct remaining work track.
+`MingaAgent` is also the proof-of-concept for the extensions-as-UI-contributors pattern. It is the first and most complex test case. If the render model contract is expressive enough for agent chat windows, context bars, change summaries, and edit timelines, all produced by `MingaAgent` without `MingaEditor` importing a single agent module, then it is expressive enough for any extension. This is why agent surfaces remain a distinct remaining work track.
 
 ## Extensions API alignment
 

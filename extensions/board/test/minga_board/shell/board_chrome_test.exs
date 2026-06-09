@@ -5,6 +5,7 @@ defmodule MingaBoard.Shell.ChromeTest do
 
   alias Minga.Core.Face
   alias MingaEditor.DisplayList.Frame
+  alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Layout
   alias MingaEditor.RenderPipeline
   alias MingaEditor.RenderPipeline.Chrome
@@ -17,6 +18,9 @@ defmodule MingaBoard.Shell.ChromeTest do
   alias MingaEditor.Shell.Traditional
 
   import MingaEditor.RenderPipeline.TestHelpers
+
+  @op_gui_extension_runtime Minga.Protocol.Opcodes.gui_extension_runtime()
+  @op_gui_board 0x87
 
   # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -60,6 +64,45 @@ defmodule MingaBoard.Shell.ChromeTest do
     }
   end
 
+  defp gui_board_state(state) do
+    %{state | capabilities: %Capabilities{frontend_type: :native_gui}, port_manager: self()}
+  end
+
+  defp assert_board_runtime(command, expected_visible) do
+    payload = unwrap_board_runtime(command)
+
+    assert <<@op_gui_board, visible::8, _focused_id::32, card_count::16, _rest::binary>> = payload
+    assert visible == if(expected_visible, do: 1, else: 0)
+    card_count
+  end
+
+  defp unwrap_board_runtime(binary) do
+    <<@op_gui_extension_runtime, envelope_len::32, envelope::binary-size(envelope_len)>> = binary
+
+    <<extension_len::16, extension_id::binary-size(extension_len), channel_len::16,
+      channel::binary-size(channel_len), payload::binary>> = envelope
+
+    assert extension_id == "minga_board"
+    assert channel == "board"
+    payload
+  end
+
+  defp drain_send_commands(acc \\ []) do
+    receive do
+      {:"$gen_cast", {:send_commands, commands}} -> drain_send_commands(acc ++ commands)
+      {:"$gen_cast", {:hop_mark, _name, _time}} -> drain_send_commands(acc)
+    after
+      0 -> acc
+    end
+  end
+
+  defp board_runtime_commands(commands) do
+    Enum.filter(commands, fn
+      <<@op_gui_extension_runtime, _rest::binary>> -> true
+      _other -> false
+    end)
+  end
+
   defp run_through_content(state) do
     state = EditorState.sync_active_window_cursor(state)
     state = RenderPipeline.compute_layout(state)
@@ -89,6 +132,47 @@ defmodule MingaBoard.Shell.ChromeTest do
     end
   end
 
+  # ── GUI runtime payloads ────────────────────────────────────────────────
+
+  describe "GUI Board runtime payloads" do
+    test "zoomed GUI render sends hidden Board runtime before buffer rendering" do
+      state = zoomed_board_state() |> gui_board_state()
+
+      _state = Shell.render(state)
+
+      assert_receive {:"$gen_cast", {:send_commands, [command]}}, 100
+      assert 0 = assert_board_runtime(command, false)
+    end
+
+    test "grid GUI render sends visible Board runtime" do
+      state = grid_board_state() |> gui_board_state()
+
+      _state = Shell.render(state)
+
+      assert_receive {:"$gen_cast", {:send_commands, [command]}}, 100
+      assert 0 = assert_board_runtime(command, true)
+    end
+
+    test "toggling away from Board on GUI sends hidden Board runtime" do
+      state = grid_board_state() |> gui_board_state()
+
+      state = MingaBoard.Commands.toggle(state)
+
+      assert state.shell_id == :traditional
+      assert_receive {:"$gen_cast", {:send_commands, [command]}}, 100
+      assert 0 = assert_board_runtime(command, false)
+    end
+
+    test "zoomed TUI render does not send Board runtime" do
+      state = zoomed_board_state()
+
+      _state = Shell.render(state)
+      commands = drain_send_commands()
+
+      assert board_runtime_commands(commands) == []
+    end
+  end
+
   # ── Grid view ────────────────────────────────────────────────────────────
 
   describe "build_chrome/4 grid view" do
@@ -106,7 +190,6 @@ defmodule MingaBoard.Shell.ChromeTest do
       assert chrome.agent_panel == []
       assert chrome.overlays == []
       assert chrome.separators == []
-      assert chrome.regions == []
     end
   end
 
@@ -166,16 +249,6 @@ defmodule MingaBoard.Shell.ChromeTest do
       chrome = Shell.build_chrome(state, layout, scrolls, cursor_info)
 
       refute context_bar_text(chrome) =~ " · "
-    end
-
-    test "produces regions list" do
-      state = zoomed_board_state()
-      {scrolls, _frames, cursor_info, state, layout} = run_through_content(state)
-
-      chrome = Shell.build_chrome(state, layout, scrolls, cursor_info)
-
-      assert is_list(chrome.regions)
-      assert Enum.all?(chrome.regions, &is_binary/1)
     end
 
     test "leaves other chrome fields empty" do

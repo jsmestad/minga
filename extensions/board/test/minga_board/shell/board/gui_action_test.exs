@@ -27,8 +27,14 @@ defmodule MingaBoard.Shell.GUIActionTest do
     old_home = System.get_env("HOME")
     System.put_env("HOME", dir)
 
+    ShellRegistry.reset_for_test()
+    ShellRegistry.seed_builtin()
+    :ok = MingaBoard.Feature.register_contributions()
+
     on_exit(fn ->
       restore_env("HOME", old_home)
+      ShellRegistry.reset_for_test()
+      ShellRegistry.seed_builtin()
     end)
 
     %{workspace: %SessionState{viewport: Viewport.new(24, 80)}}
@@ -132,7 +138,9 @@ defmodule MingaBoard.Shell.GUIActionTest do
       assert dismissed.shell_state.agent.error == nil
     end
 
-    test "routes board card selection through the active extension shell", %{workspace: workspace} do
+    test "routes generic extension card selection through the active extension shell", %{
+      workspace: workspace
+    } do
       board = BoardState.new()
       {board, card} = BoardState.create_card(board, task: "Agent")
       {:ok, agent_buf} = Minga.Buffer.start_link(content: "")
@@ -147,7 +155,12 @@ defmodule MingaBoard.Shell.GUIActionTest do
         shell_state: board
       }
 
-      dispatched = GuiActionHandler.dispatch(state, {:board_select_card, card.id})
+      dispatched =
+        GuiActionHandler.dispatch(
+          state,
+          {:extension_action, "minga_board", "select_card", <<card.id::32>>}
+        )
+
       selected_card = dispatched.shell_state.cards[card.id]
       selected_session = selected_card.session
       on_exit(fn -> stop_session(selected_session) end)

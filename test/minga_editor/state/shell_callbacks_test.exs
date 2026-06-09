@@ -4,7 +4,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
 
   Verifies that `switch_buffer`, `close_buffer_pure`, and the tab delegate
   functions correctly dispatch through the Shell behaviour. Tests both
-  Traditional (with tab bar) and Board (no tab bar) paths.
+  Traditional (with tab bar) and tab-less extension shell paths.
 
   Part of the shell-owned state transitions proposal
   (`docs/PROPOSAL-shell-state-transitions.md`).
@@ -201,11 +201,11 @@ defmodule MingaEditor.State.ShellCallbacksTest do
       refute new_state.workspace.buffers.active == buf2
     end
 
-    test "Board: switch_buffer preserves agent_chat window content" do
+    test "tab-less extension shell: switch_buffer preserves agent_chat window content" do
       {state, agent_buf} = state_with_agent_chat()
       file_buf = start_buffer("file content")
 
-      # Add file buffer (Board's on_buffer_added doesn't overwrite agent_chat)
+      # Add file buffer (the tab-less shell's on_buffer_added doesn't overwrite agent_chat)
       state = EditorState.add_buffer(state, file_buf)
 
       # Verify window still shows agent_chat
@@ -246,7 +246,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
       assert window.buffer == buf1
     end
 
-    test "Board: preserves agent_chat window content on buffer death" do
+    test "tab-less extension shell: preserves agent_chat window content on buffer death" do
       {state, agent_buf} = state_with_agent_chat()
       file_buf = start_buffer("file content")
 

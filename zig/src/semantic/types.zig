@@ -1194,42 +1194,6 @@ pub const HoverAction = struct {
     }
 };
 
-/// One retained board card decoded from `gui_board`.
-pub const BoardCard = struct {
-    id: u32 = 0,
-    status: u8 = 0,
-    flags: u8 = 0,
-    task: []u8 = &.{},
-    model: []u8 = &.{},
-    timestamp: u32 = 0,
-    recent_files: [][]u8 = &.{},
-
-    pub fn deinit(self: *BoardCard, alloc: std.mem.Allocator) void {
-        alloc.free(self.task);
-        alloc.free(self.model);
-        for (self.recent_files) |file| alloc.free(file);
-        alloc.free(self.recent_files);
-        self.* = .{};
-    }
-};
-
-/// Retained board state decoded from `gui_board`.
-pub const Board = struct {
-    visible: bool = false,
-    focused_card_id: u32 = 0,
-    card_count: u16 = 0,
-    filter_mode: u8 = 0,
-    filter_text: []u8 = &.{},
-    cards: []BoardCard = &.{},
-
-    pub fn deinit(self: *Board, alloc: std.mem.Allocator) void {
-        alloc.free(self.filter_text);
-        for (self.cards) |*card| card.deinit(alloc);
-        alloc.free(self.cards);
-        self.* = .{};
-    }
-};
-
 /// Retained agent chat state decoded from `gui_agent_chat`.
 pub const AgentChat = struct {
     visible: bool = false,

@@ -6,7 +6,7 @@ defmodule Minga.RenderModel.UI.AgentContext do
   @type t :: %__MODULE__{
           visible: boolean(),
           task: String.t(),
-          dispatch_timestamp: DateTime.t(),
+          dispatch_timestamp: DateTime.t() | nil,
           status: status(),
           can_approve: boolean()
         }

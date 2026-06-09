@@ -68,12 +68,6 @@ final class GUIState {
     /// Float popup state (0x83).
     let floatPopupState = FloatPopupState()
 
-    /// Board card grid state (0x87).
-    let boardState = BoardState()
-
-    /// Agent dispatch sheet state.
-    let dispatchSheetState = DispatchSheetState()
-
     /// Agent context bar state (0x88).
     let agentContextBarState = AgentContextBarState()
     /// Change summary sidebar for agent card zoomed-in view.
@@ -87,6 +81,9 @@ final class GUIState {
 
     /// Extension panel state (0x9D).
     let extensionPanelState = ExtensionPanelState()
+
+    /// Frontend extension runtime registry for extension-owned decoders and views.
+    let frontendExtensions = FrontendExtensionRuntimeRegistry()
 
     /// Search toolbar state (0x9E).
     let searchState = SearchState()

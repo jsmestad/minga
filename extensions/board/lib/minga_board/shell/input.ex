@@ -21,6 +21,7 @@ defmodule MingaBoard.Shell.Input do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.Session.State, as: SessionState
+  alias MingaBoard.Shell
   alias MingaBoard.Shell.Card
   alias MingaBoard.Shell.SessionLifecycle
   alias MingaBoard.Shell.State, as: BoardState
@@ -153,7 +154,7 @@ defmodule MingaBoard.Shell.Input do
 
   # Escape / q (unmodified): toggle back to the registered Traditional shell and stash Board state.
   defp dispatch_grid_key(state, cp, 0) when cp in [@key_escape, @key_q] do
-    {:handled, EditorState.switch_shell(state, :traditional)}
+    {:handled, state |> Shell.hide_gui_board() |> EditorState.switch_shell(:traditional)}
   end
 
   # Ctrl/Cmd-modified keys pass through to GlobalBindings (Ctrl+Q quit,

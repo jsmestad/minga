@@ -69,12 +69,8 @@ enum PreviewRegistry {
             agentChatCompletionPreview()
         case "AgentChatSummary":
             agentChatSummaryPreview()
-        case "BoardView":
-            boardPreview()
         case "ChangeSummaryView":
             changeSummaryPreview()
-        case "DispatchSheetView":
-            dispatchSheetPreview()
         case "PickerOverlay":
             pickerPreview()
         case "MinibufferView":
@@ -1714,12 +1710,6 @@ enum PreviewRegistry {
             .background(theme.agentPanelBg)
     }
 
-    // MARK: - BoardView
-
-    private static func boardPreview() -> some View {
-        BoardPreviewWrapper()
-    }
-
     // MARK: - ChangeSummaryView
 
     private static func changeSummaryPreview() -> some View {
@@ -1740,26 +1730,6 @@ enum PreviewRegistry {
         return ChangeSummaryView(state: state, theme: theme, encoder: nil)
             .frame(width: 280, height: 400)
             .background(theme.treeBg)
-    }
-
-    // MARK: - DispatchSheetView
-
-    private static func dispatchSheetPreview() -> some View {
-        let state = DispatchSheetState()
-        let theme = populatedTheme()
-        state.update(
-            visible: true,
-            models: [
-                (name: "claude-sonnet-4", hint: "Fast, balanced"),
-                (name: "claude-opus-4", hint: "Deep reasoning"),
-                (name: "gpt-4o", hint: "OpenAI flagship"),
-            ]
-        )
-        state.taskText = "Refactor the buffer module to separate read and write concerns"
-
-        return DispatchSheetView(state: state, theme: theme, encoder: nil)
-            .frame(width: 600, height: 500)
-            .background(theme.editorBg.opacity(0.5))
     }
 
     // MARK: - Hover / Signature Help data
@@ -2047,42 +2017,5 @@ enum PreviewRegistry {
             editingType: editingType,
             editingText: editingText
         )
-    }
-}
-
-// MARK: - Board preview wrapper (requires @Namespace for matchedGeometryEffect)
-
-/// Wraps BoardView in a struct that owns a @Namespace for the zoom animation.
-/// BoardView requires a Namespace.ID for matchedGeometryEffect, which can only
-/// be created via the @Namespace property wrapper on a View struct.
-private struct BoardPreviewWrapper: View {
-    @Namespace private var ns
-
-    private static func boardState() -> BoardState {
-        let state = BoardState()
-        let now = UInt32(Date().timeIntervalSince1970)
-        state.update(
-            visible: true,
-            focusedCardId: 2,
-            cards: [
-                BoardCard(id: 1, status: .working, isYouCard: true, isFocused: false, task: "Refactor buffer read/write separation", model: "claude-sonnet-4", dispatchTimestamp: now - 180, recentFiles: ["lib/minga/buffer/process.ex", "lib/minga/buffer/reader.ex"], sparkline: [0.2, 0.4, 0.6, 0.5, 0.7, 0.8]),
-                BoardCard(id: 2, status: .needsYou, isYouCard: false, isFocused: true, task: "Add validation to registration form", model: "claude-sonnet-4", dispatchTimestamp: now - 420, recentFiles: ["lib/minga/accounts/registration.ex"], sparkline: [0.3, 0.5, 0.4, 0.6, 0.3, 0.2]),
-                BoardCard(id: 3, status: .done, isYouCard: false, isFocused: false, task: "Fix notification theme colors", model: "claude-sonnet-4", dispatchTimestamp: now - 900, recentFiles: ["macos/Sources/Views/NotificationCenterView.swift"], sparkline: [0.5, 0.7, 0.6, 0.4, 0.2, 0.1]),
-                BoardCard(id: 4, status: .errored, isYouCard: false, isFocused: false, task: "Deploy staging environment", model: "claude-opus-4", dispatchTimestamp: now - 600, recentFiles: ["scripts/deploy.sh"], sparkline: [0.1, 0.3, 0.8, 0.9, 1.0, 0.0]),
-            ],
-            filterMode: false,
-            filterText: ""
-        )
-        return state
-    }
-
-    var body: some View {
-        let state = Self.boardState()
-        let dispatchSheet = DispatchSheetState()
-        let theme = ThemeColors()
-
-        BoardView(state: state, dispatchSheet: dispatchSheet, theme: theme, encoder: nil, namespace: ns)
-            .frame(width: 900, height: 600)
-            .background(theme.editorBg)
     }
 }

@@ -99,7 +99,6 @@ const (
 	OPGuiFloatPopup          byte = 0x83
 	OPGuiSplitSeparators     byte = 0x84
 	OPGuiGitStatus           byte = 0x85
-	OPGuiBoard               byte = 0x87
 	OPGuiAgentContext        byte = 0x88
 	OPGuiChangeSummary       byte = 0x89
 	OPGuiHoverAction         byte = 0x96
@@ -115,6 +114,7 @@ const (
 	OPGuiWindowOverlayDelta  byte = 0xA0
 	OPGuiWindowViewportDelta byte = 0xA1
 	OPGuiWindowRowsDelta     byte = 0xA2
+	OPGuiExtensionRuntime    byte = 0xA3
 
 	GUIActionSelectTab            byte = 0x01
 	GUIActionCloseTab             byte = 0x02
@@ -152,10 +152,6 @@ const (
 	GUIActionSpaceLeaderChord     byte = 0x22
 	GUIActionSpaceLeaderRetract   byte = 0x23
 	GUIActionFindPasteboardSearch byte = 0x24
-	GUIActionBoardSelectCard      byte = 0x25
-	GUIActionBoardCloseCard       byte = 0x26
-	GUIActionBoardReorder         byte = 0x27
-	GUIActionBoardDispatchAgent   byte = 0x28
 	GUIActionAgentApprove         byte = 0x29
 	GUIActionAgentRequestChanges  byte = 0x2A
 	GUIActionAgentDismiss         byte = 0x2B
@@ -203,4 +199,5 @@ const (
 	GUIActionSearchReplaceAll     byte = 0x55
 	GUIActionSearchDismiss        byte = 0x56
 	GUIActionSidebarAction        byte = 0x57
+	GUIActionExtensionAction      byte = 0x58
 )

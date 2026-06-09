@@ -5,7 +5,7 @@ import Foundation
 ///
 /// Displays the agent's task, status, elapsed time, and review actions
 /// (Approve, Request Changes, Dismiss). Replaces the breadcrumb bar
-/// when the Board shell is zoomed into a non-You agent card.
+/// when the active agent surface exposes a non-user agent context.
 ///
 /// Updated by the BEAM via the `gui_agent_context` opcode (0x88).
 @MainActor

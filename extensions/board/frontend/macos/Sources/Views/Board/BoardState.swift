@@ -2,12 +2,10 @@ import Observation
 
 /// State for The Board card grid view.
 ///
-/// Updated by the BEAM via the `gui_board` opcode (0x87). Drives
+/// Updated by the BEAM via the generic `gui_extension_runtime` envelope carrying the extension-owned Board payload. Drives
 /// `BoardView` which renders cards in a responsive SwiftUI grid.
 ///
-/// Card data types (`BoardCard`, `CardStatus`) live in
-/// `Protocol/BoardTypes.swift` so the headless test harness can
-/// compile them without SwiftUI dependencies.
+/// Card data types are split between `Protocol/BoardTypes.swift` for `BoardCard` and `Protocol/AgentSurfaceTypes.swift` for `CardStatus`, so the headless test harness can compile them without SwiftUI dependencies.
 @MainActor
 @Observable
 final class BoardState {

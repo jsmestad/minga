@@ -26,7 +26,7 @@ defmodule Minga.Keymap.Scope do
   ## Built-in scopes
 
   * `:editor` — normal text editing (default)
-  * `:agent` — agent chat view (Board zoom or side panel)
+  * `:agent` — agent chat view or side panel
   * `:file_tree` — file tree panel
   * `:git_status` — git status panel
 

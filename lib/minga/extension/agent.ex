@@ -38,7 +38,7 @@ defmodule Minga.Extension.Agent do
 
         slash_command :my_cmd, "Runs my custom command", command: "commands/my-cmd.sh"
 
-        agent_ui id: "status", surface: :status_card, payload: %Minga.RenderModel.UI.Board.Card{...}
+        agent_ui id: "status", surface: :panel, payload: %Minga.RenderModel.UI.ExtensionPanel.Panel{...}
 
         @impl true
         def name, do: :minga_lint
@@ -196,11 +196,11 @@ defmodule Minga.Extension.Agent do
   @doc """
   Declares a semantic agent UI contribution.
 
-  The payload must be an existing render-model value accepted by `MingaEditor.Agent.SemanticUI.Entry`, such as a board card, an agent chat message body, extension-panel content, or an extension-panel panel.
+  The payload must be an existing render-model value accepted by `MingaEditor.Agent.SemanticUI.Entry`, such as an agent chat message body, extension-panel content, or an extension-panel panel.
 
   ## Examples
 
-      agent_ui id: "status", surface: :status_card, payload: %Minga.RenderModel.UI.Board.Card{...}
+      agent_ui id: "status", surface: :panel, payload: %Minga.RenderModel.UI.ExtensionPanel.Panel{...}
       agent_ui id: "note", surface: :transcript_enrichment, payload: {:system, "Ready", :info}
   """
   defmacro agent_ui(attrs) do

@@ -36,10 +36,10 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   | 0x84   | gui_split_separators | Split pane separator lines |
   | 0x85   | gui_git_status       | Git status panel data      |
   | 0x98   | gui_workspaces    | Canonical workspace state |
-  | 0x87   | gui_board           | Board card grid state      |
   | 0x97   | gui_config_state    | Settings panel state       |
   | 0x9E   | gui_search_state    | Search toolbar state       |
   | 0x9F   | gui_sidebars        | Semantic sidebar metadata  |
+  | 0xA3   | gui_extension_runtime | Generic extension-owned frontend runtime envelope |
 
   ## GUI Actions (Frontend → BEAM)
 
@@ -107,6 +107,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   | 0x55       | search_replace_all      |
   | 0x56       | search_dismiss          |
   | 0x57       | sidebar_action          |
+  | 0x58       | extension_action        |
   | 0x34       | system_will_sleep       |
   | 0x35       | system_did_wake         |
 
@@ -167,6 +168,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @op_gui_observatory Opcodes.gui_observatory()
   @op_gui_extension_overlay Opcodes.gui_extension_overlay()
   @op_gui_extension_panel Opcodes.gui_extension_panel()
+  @op_gui_extension_runtime Opcodes.gui_extension_runtime()
 
   @gui_action_select_tab Opcodes.gui_action_select_tab()
   @gui_action_close_tab Opcodes.gui_action_close_tab()
@@ -204,10 +206,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_space_leader_chord Opcodes.gui_action_space_leader_chord()
   @gui_action_space_leader_retract Opcodes.gui_action_space_leader_retract()
   @gui_action_find_pasteboard_search Opcodes.gui_action_find_pasteboard_search()
-  @gui_action_board_select_card Opcodes.gui_action_board_select_card()
-  @gui_action_board_close_card Opcodes.gui_action_board_close_card()
-  @gui_action_board_reorder Opcodes.gui_action_board_reorder()
-  @gui_action_board_dispatch_agent Opcodes.gui_action_board_dispatch_agent()
   @gui_action_agent_approve Opcodes.gui_action_agent_approve()
   @gui_action_agent_request_changes Opcodes.gui_action_agent_request_changes()
   @gui_action_agent_dismiss Opcodes.gui_action_agent_dismiss()
@@ -248,6 +246,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_font_size_adjust Opcodes.gui_action_font_size_adjust()
   @gui_action_timeline_navigate Opcodes.gui_action_timeline_navigate()
   @gui_action_extension_panel_action Opcodes.gui_action_extension_panel_action()
+  @gui_action_extension_action Opcodes.gui_action_extension_action()
   @gui_action_search_query Opcodes.gui_action_search_query()
   @gui_action_search_next Opcodes.gui_action_search_next()
   @gui_action_search_prev Opcodes.gui_action_search_prev()
@@ -368,10 +367,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | {:space_leader_retract, codepoint :: non_neg_integer(),
              modifiers :: non_neg_integer()}
           | {:find_pasteboard_search, text :: String.t(), direction :: non_neg_integer()}
-          | {:board_select_card, card_id :: pos_integer()}
-          | {:board_close_card, card_id :: pos_integer()}
-          | {:board_reorder, card_id :: pos_integer(), new_index :: non_neg_integer()}
-          | {:board_dispatch_agent, task :: String.t(), model :: String.t()}
           | :agent_approve
           | :agent_request_changes
           | :agent_dismiss
@@ -415,6 +410,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | {:search_replace_all, replacement :: String.t()}
           | :search_dismiss
           | {:sidebar_action, sidebar_id :: String.t(), kind :: String.t(), action :: String.t()}
+          | {:extension_action, extension_id :: String.t(), action :: String.t(),
+             payload :: binary()}
 
   @typedoc "Semantic sidebar metadata sent to native GUI frontends."
   @type sidebar_metadata :: %{
@@ -868,6 +865,23 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
     payload = IO.iodata_to_binary([<<length(panels)::8>> | panel_binaries])
     <<@op_gui_extension_panel, byte_size(payload)::16, payload::binary>>
+  end
+
+  @doc """
+  Encodes a generic frontend-extension runtime message.
+
+  Shared protocol owns only the envelope. The named frontend extension owns the payload schema and decoder.
+
+  Format: opcode(1) + payload_length(4) + extension_id_len(2) + extension_id + channel_len(2) + channel + payload.
+  """
+  @spec encode_gui_extension_runtime(String.t(), String.t(), binary()) :: binary()
+  def encode_gui_extension_runtime(extension_id, channel, payload)
+      when is_binary(extension_id) and is_binary(channel) and is_binary(payload) do
+    envelope =
+      <<byte_size(extension_id)::16, extension_id::binary, byte_size(channel)::16,
+        channel::binary, payload::binary>>
+
+    <<@op_gui_extension_runtime, byte_size(envelope)::32, envelope::binary>>
   end
 
   @spec encode_content_blocks([Minga.Extension.Panel.content_block()]) :: binary()
@@ -2665,22 +2679,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
       ),
       do: {:ok, {:find_pasteboard_search, text, direction}}
 
-  def decode_gui_action(@gui_action_board_select_card, <<card_id::32>>),
-    do: {:ok, {:board_select_card, card_id}}
-
-  def decode_gui_action(@gui_action_board_close_card, <<card_id::32>>),
-    do: {:ok, {:board_close_card, card_id}}
-
-  def decode_gui_action(@gui_action_board_reorder, <<card_id::32, new_index::16>>),
-    do: {:ok, {:board_reorder, card_id, new_index}}
-
-  def decode_gui_action(
-        @gui_action_board_dispatch_agent,
-        <<model_len::16, model::binary-size(model_len), task_len::16,
-          task::binary-size(task_len)>>
-      ),
-      do: {:ok, {:board_dispatch_agent, task, model}}
-
   def decode_gui_action(@gui_action_agent_approve, <<>>),
     do: {:ok, :agent_approve}
 
@@ -2825,6 +2823,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   def decode_gui_action(@gui_action_sidebar_action, payload), do: decode_sidebar_action(payload)
 
+  def decode_gui_action(@gui_action_extension_action, payload),
+    do: decode_extension_action(payload)
+
   def decode_gui_action(_, _), do: :error
 
   @spec decode_sidebar_action(binary()) :: {:ok, gui_action()} | :error
@@ -2836,6 +2837,16 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   end
 
   defp decode_sidebar_action(_payload), do: :error
+
+  @spec decode_extension_action(binary()) :: {:ok, gui_action()} | :error
+  defp decode_extension_action(
+         <<extension_len::16, extension_id::binary-size(extension_len), action_len::16,
+           action::binary-size(action_len), payload::binary>>
+       ) do
+    {:ok, {:extension_action, extension_id, action, payload}}
+  end
+
+  defp decode_extension_action(_payload), do: :error
 
   @spec decode_panel_action_context(binary()) :: map()
   defp decode_panel_action_context(<<0x01, index::16, _rest::binary>>), do: %{index: index}

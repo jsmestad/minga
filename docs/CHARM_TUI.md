@@ -39,7 +39,7 @@ The Charm renderer targets the Semantic UI path, not the legacy cell-grid path. 
 - file tree
 - picker, picker preview, completion, and which-key overlays
 
-It renders roughly 9 of the shared-chrome components today. Decoding and rendering the remaining components is tracked in #2100, and overall cross-frontend coverage is tracked in the Semantic UI inventory (#2113).
+It renders roughly 9 of the shared-chrome components today. Decoding and rendering the remaining components is tracked in #2100, and overall cross-frontend coverage is tracked in the Semantic UI inventory (#2113). Board-specific rendering is not part of Charm TUI parity; Board experiments must stay extension-owned or use generic extension panels/overlays.
 
 ## Validation
 

@@ -343,55 +343,6 @@ func plainStyledLines(lines []AgentStyledLine) string {
 	return stringsJoin(plainLines, " ")
 }
 
-func decodeBoard(payload []byte) (Board, string, int) {
-	if len(payload) < 10 {
-		return Board{}, "", len(payload)
-	}
-	board := Board{Visible: payload[1] != 0, FocusedCardID: u32(payload, 2), FilterMode: payload[8] != 0}
-	count := int(u16(payload, 6))
-	offset := 9
-	var ok bool
-	board.FilterText, offset, ok = readString16(payload, offset)
-	if !ok {
-		return board, "", len(payload)
-	}
-	board.Cards = make([]BoardCard, 0, count)
-	for i := 0; i < count && len(payload) >= offset+16; i++ {
-		card := BoardCard{ID: u32(payload, offset), Status: payload[offset+4], Flags: payload[offset+5]}
-		offset += 6
-		card.Task, offset, ok = readString16(payload, offset)
-		if !ok {
-			break
-		}
-		card.Model, offset, ok = readString8(payload, offset)
-		if !ok || len(payload) < offset+5 {
-			break
-		}
-		card.Timestamp = u32(payload, offset)
-		fileCount := int(payload[offset+4])
-		offset += 5
-		card.RecentFiles = make([]string, 0, fileCount)
-		for j := 0; j < fileCount; j++ {
-			file, next, ok := readString16(payload, offset)
-			if !ok {
-				break
-			}
-			card.RecentFiles = append(card.RecentFiles, file)
-			offset = next
-		}
-		if len(payload) < offset+1 {
-			break
-		}
-		sparkCount := int(payload[offset])
-		offset += 1 + sparkCount*2
-		if len(payload) < offset {
-			break
-		}
-		board.Cards = append(board.Cards, card)
-	}
-	return board, fmt.Sprintf("%d cards", len(board.Cards)), offset
-}
-
 func decodeEditTimeline(payload []byte) (EditTimeline, string, int) {
 	size := payloadLen16Size(payload)
 	if size == 0 {

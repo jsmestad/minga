@@ -139,6 +139,7 @@ struct ContentView: View {
     @State private var workspaceWidth: CGFloat = 800
     @State private var sidebarWidth: CGFloat = SidebarSizing.defaultWidth
     @State private var changeSummaryWidth: CGFloat = 280
+    @Namespace private var frontendExtensionNamespace
 
     private let activityBarWidth: CGFloat = 32
 
@@ -195,6 +196,7 @@ struct ContentView: View {
                 }
                 statusBar
             }
+            frontendExtensionRuntimeLayer
             windowOverlays
         }
         .navigationTitle(appState.windowTitle)
@@ -420,7 +422,6 @@ struct ContentView: View {
 
     // MARK: - Editor Body
 
-    @Namespace private var zoomNamespace
 
     private var editorBody: some View {
         VStack(spacing: 0) {
@@ -463,44 +464,9 @@ struct ContentView: View {
                     changeSummarySidebar
                 }
 
-                // ZStack: editor surface (always present for keyboard input)
-                // with Board overlay on top when active.
-                ZStack {
-                    editorSurface
-                        .opacity(appState.gui.boardState.visible ? 0 : 1)
-
-                    if appState.gui.boardState.visible {
-                        BoardView(
-                            state: appState.gui.boardState,
-                            dispatchSheet: appState.gui.dispatchSheetState,
-                            theme: appState.gui.themeColors,
-                            encoder: appState.encoder,
-                            namespace: zoomNamespace
-                        )
-                        .transition(
-                            NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-                                ? .opacity
-                                : .scale(scale: 0.97).combined(with: .opacity)
-                        )
-                    }
-                }
+                editorSurface
 
                 extensionRightPanels
-            }
-            .animation(
-                NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-                    ? nil
-                    : .spring(response: 0.25, dampingFraction: 0.85),
-                value: appState.gui.boardState.visible
-            )
-            .animation(
-                NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-                    ? nil
-                    : .spring(response: 0.25, dampingFraction: 0.85),
-                value: appState.gui.boardState.zoomedCardId
-            )
-            .onChange(of: appState.gui.boardState.visible) { _, newVisible in
-                appState.editorNSView?.setBoardVisible(newVisible)
             }
             .onChange(of: appState.gui.agentChatState.visible) { _, visible in
                 appState.editorNSView?.setAgentChatVisible(visible)
@@ -853,6 +819,18 @@ struct ContentView: View {
             isAgentChatVisible: appState.gui.agentChatState.visible,
             gitSyncing: appState.gui.gitStatusState.syncing
         )
+    }
+
+    // MARK: - Frontend Extension Runtime
+
+    @ViewBuilder
+    private var frontendExtensionRuntimeLayer: some View {
+        let context = FrontendExtensionViewContext(theme: appState.gui.themeColors, encoder: appState.encoder, namespace: frontendExtensionNamespace)
+        ForEach(appState.gui.frontendExtensions.activeExtensionIDs, id: \.self) { extensionID in
+            if let view = appState.gui.frontendExtensions.view(for: extensionID, context: context) {
+                view
+            }
+        }
     }
 
     // MARK: - Window Overlays (floating UI on top of everything)

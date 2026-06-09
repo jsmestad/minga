@@ -85,7 +85,6 @@ macos/
       ProtocolDecoder.swift                # Binary → RenderCommand enum + all data types
       ProtocolEncoder.swift                # Input/GUI events → binary on stdout
       ProtocolReader.swift                 # Background thread reading {:packet,4} from stdin
-      BoardTypes.swift                     # Board card data types
       PortLogger.swift                     # Thread-safe logging to BEAM via protocol
 
     Renderer/
@@ -134,8 +133,10 @@ macos/
       BottomPanelState.swift / BottomPanelView.swift
       MessagesContentState.swift / MessagesContentView.swift
       ToolManagerState.swift / ToolManagerView.swift
-      Board/BoardState.swift / Board/BoardView.swift
       WorkspaceIconPicker.swift
+
+    Extensions/
+      FrontendExtensionRuntime.swift       # Generic runtime hook for extension-owned decoders and views
 
   Tests/
     MingaTests/

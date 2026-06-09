@@ -463,24 +463,6 @@ type AgentUsage struct {
 	CostMicros uint32
 }
 
-type Board struct {
-	Visible       bool
-	FocusedCardID uint32
-	FilterMode    bool
-	FilterText    string
-	Cards         []BoardCard
-}
-
-type BoardCard struct {
-	ID          uint32
-	Status      byte
-	Flags       byte
-	Task        string
-	Model       string
-	Timestamp   uint32
-	RecentFiles []string
-}
-
 type EditTimeline struct {
 	Visible      bool
 	ViewingIndex uint16

@@ -560,13 +560,6 @@ framing = "custom"
 
 [[opcodes]]
 category = "gui_semantic"
-name = "gui_board"
-value = 0x87
-direction = "beam_to_frontend"
-framing = "custom"
-
-[[opcodes]]
-category = "gui_semantic"
 name = "gui_agent_context"
 value = 0x88
 direction = "beam_to_frontend"
@@ -669,6 +662,13 @@ name = "gui_window_rows_delta"
 value = 0xA2
 direction = "beam_to_frontend"
 framing = "sectioned"
+
+[[opcodes]]
+category = "gui_semantic"
+name = "gui_extension_runtime"
+value = 0xA3
+direction = "beam_to_frontend"
+framing = "len32"
 
 # Sub-opcodes inside gui_action (0x07).
 [[gui_actions]]
@@ -814,22 +814,6 @@ value = 0x23
 [[gui_actions]]
 name = "find_pasteboard_search"
 value = 0x24
-
-[[gui_actions]]
-name = "board_select_card"
-value = 0x25
-
-[[gui_actions]]
-name = "board_close_card"
-value = 0x26
-
-[[gui_actions]]
-name = "board_reorder"
-value = 0x27
-
-[[gui_actions]]
-name = "board_dispatch_agent"
-value = 0x28
 
 [[gui_actions]]
 name = "agent_approve"
@@ -1021,6 +1005,10 @@ value = 0x56
 name = "sidebar_action"
 value = 0x57
 
+[[gui_actions]]
+name = "extension_action"
+value = 0x58
+
 # ── Shared wire structures ────────────────────────────────────────────────
 #
 # Reusable fixed-size and variable-length sub-structures referenced by name
@@ -1038,169 +1026,166 @@ value = 0x57
 [[structures]]
 name = "rect"
 fields = [
-  {name = "row", type = "u16"},
-  {name = "col", type = "u16"},
-  {name = "width", type = "u16"},
-  {name = "height", type = "u16"},
+  { name = "row", type = "u16" },
+  { name = "col", type = "u16" },
+  { name = "width", type = "u16" },
+  { name = "height", type = "u16" },
 ]
 
 [[structures]]
 name = "span"
 fields = [
-  {name = "start_col", type = "u16"},
-  {name = "end_col", type = "u16"},
-  {name = "fg", type = "rgb"},
-  {name = "bg", type = "rgb"},
-  {name = "attrs", type = "u8"},
-  {name = "font_weight", type = "u8"},
-  {name = "font_id", type = "u8"},
+  { name = "start_col", type = "u16" },
+  { name = "end_col", type = "u16" },
+  { name = "fg", type = "rgb" },
+  { name = "bg", type = "rgb" },
+  { name = "attrs", type = "u8" },
+  { name = "font_weight", type = "u8" },
+  { name = "font_id", type = "u8" },
 ]
 
 [[structures]]
 name = "row"
 fields = [
-  {name = "row_type", type = "u8"},
-  {name = "row_id", type = "u64"},
-  {name = "buf_line", type = "u32"},
-  {name = "content_hash", type = "u32"},
-  {name = "text", type = "string32"},
-  {name = "spans", type = "counted_array", count_type = "u16", element = "span"},
+  { name = "row_type", type = "u8" },
+  { name = "row_id", type = "u64" },
+  { name = "buf_line", type = "u32" },
+  { name = "content_hash", type = "u32" },
+  { name = "text", type = "string32" },
+  { name = "spans", type = "counted_array", count_type = "u16", element = "span" },
 ]
 
 [[structures]]
 name = "search_match"
 fields = [
-  {name = "row", type = "u16"},
-  {name = "start_col", type = "u16"},
-  {name = "end_col", type = "u16"},
-  {name = "is_current", type = "u8"},
+  { name = "row", type = "u16" },
+  { name = "start_col", type = "u16" },
+  { name = "end_col", type = "u16" },
+  { name = "is_current", type = "u8" },
 ]
 
 [[structures]]
 name = "diagnostic_range"
 fields = [
-  {name = "start_row", type = "u16"},
-  {name = "start_col", type = "u16"},
-  {name = "end_row", type = "u16"},
-  {name = "end_col", type = "u16"},
-  {name = "severity", type = "u8"},
+  { name = "start_row", type = "u16" },
+  { name = "start_col", type = "u16" },
+  { name = "end_row", type = "u16" },
+  { name = "end_col", type = "u16" },
+  { name = "severity", type = "u8" },
 ]
 
 [[structures]]
 name = "document_highlight"
 fields = [
-  {name = "start_row", type = "u16"},
-  {name = "start_col", type = "u16"},
-  {name = "end_row", type = "u16"},
-  {name = "end_col", type = "u16"},
-  {name = "kind", type = "u8"},
+  { name = "start_row", type = "u16" },
+  { name = "start_col", type = "u16" },
+  { name = "end_row", type = "u16" },
+  { name = "end_col", type = "u16" },
+  { name = "kind", type = "u8" },
 ]
 
 [[structures]]
 name = "annotation"
 fields = [
-  {name = "row", type = "u16"},
-  {name = "kind", type = "u8"},
-  {name = "fg", type = "rgb"},
-  {name = "bg", type = "rgb"},
-  {name = "text", type = "string16"},
+  { name = "row", type = "u16" },
+  { name = "kind", type = "u8" },
+  { name = "fg", type = "rgb" },
+  { name = "bg", type = "rgb" },
+  { name = "text", type = "string16" },
 ]
 
 [[structures]]
 name = "hit_region"
 fields = [
-  {name = "kind", type = "u8"},
-  {name = "rect", type = "struct", element = "rect"},
-  {name = "id", type = "u16"},
+  { name = "kind", type = "u8" },
+  { name = "rect", type = "struct", element = "rect" },
+  { name = "id", type = "u16" },
 ]
 
 [[structures]]
 name = "gutter_entry"
 fields = [
-  {name = "buf_line", type = "u32"},
-  {name = "display_type", type = "u8"},
-  {name = "sign_type", type = "u8"},
-  {name = "fold_end_line", type = "u32"},
+  { name = "buf_line", type = "u32" },
+  { name = "display_type", type = "u8" },
+  { name = "sign_type", type = "u8" },
+  { name = "fold_end_line", type = "u32" },
 ]
-conditional_tail = {guard = "sign_type == 8", fields = [
-  {name = "sign_fg", type = "rgb"},
-  {name = "sign_text", type = "string8"},
-]}
+conditional_tail = { guard = "sign_type == 8", fields = [
+  { name = "sign_fg", type = "rgb" },
+  { name = "sign_text", type = "string8" },
+] }
 
 [[structures]]
 name = "modeline_segment"
 fields = [
-  {name = "name", type = "string8"},
-  {name = "fg", type = "rgb"},
-  {name = "bg", type = "rgb"},
-  {name = "attrs", type = "u8"},
-  {name = "text", type = "string16"},
-  {name = "target", type = "string16"},
+  { name = "name", type = "string8" },
+  { name = "fg", type = "rgb" },
+  { name = "bg", type = "rgb" },
+  { name = "attrs", type = "u8" },
+  { name = "text", type = "string16" },
+  { name = "target", type = "string16" },
 ]
 
 [[structures]]
 name = "tab_entry"
 fields = [
-  {name = "flags", type = "u8"},
-  {name = "id", type = "u32"},
-  {name = "workspace_id", type = "u16"},
-  {name = "icon", type = "string8"},
-  {name = "label", type = "string16"},
-  {name = "tint_color", type = "u32"},
+  { name = "flags", type = "u8" },
+  { name = "id", type = "u32" },
+  { name = "workspace_id", type = "u16" },
+  { name = "icon", type = "string8" },
+  { name = "label", type = "string16" },
+  { name = "tint_color", type = "u32" },
 ]
 
 [[structures]]
 name = "theme_color"
-fields = [
-  {name = "slot", type = "u8"},
-  {name = "color", type = "rgb"},
-]
+fields = [{ name = "slot", type = "u8" }, { name = "color", type = "rgb" }]
 
 [[structures]]
 name = "completion_item"
 fields = [
-  {name = "kind", type = "u8"},
-  {name = "label", type = "string16"},
-  {name = "detail", type = "string16"},
+  { name = "kind", type = "u8" },
+  { name = "label", type = "string16" },
+  { name = "detail", type = "string16" },
 ]
 
 [[structures]]
 name = "picker_item"
 fields = [
-  {name = "icon_color", type = "u24"},
-  {name = "flags", type = "u8"},
-  {name = "label", type = "string16"},
-  {name = "description", type = "string16"},
-  {name = "annotation", type = "string16"},
+  { name = "icon_color", type = "u24" },
+  { name = "flags", type = "u8" },
+  { name = "label", type = "string16" },
+  { name = "description", type = "string16" },
+  { name = "annotation", type = "string16" },
   # u8-counted list of u16 fuzzy-match highlight indices into the label.
-  {name = "match_positions", type = "counted_array", count_type = "u8", element = "u16"},
+  { name = "match_positions", type = "counted_array", count_type = "u8", element = "u16" },
 ]
 
 [[structures]]
 name = "which_key_binding"
 fields = [
-  {name = "kind", type = "u8"},
-  {name = "key", type = "string8"},
-  {name = "desc", type = "string16"},
-  {name = "icon", type = "string8"},
+  { name = "kind", type = "u8" },
+  { name = "key", type = "string8" },
+  { name = "desc", type = "string16" },
+  { name = "icon", type = "string8" },
 ]
 
 [[structures]]
 name = "change_summary_entry"
 fields = [
-  {name = "path", type = "string16"},
-  {name = "action", type = "u8"},
-  {name = "lines_added", type = "u32"},
-  {name = "lines_removed", type = "u32"},
+  { name = "path", type = "string16" },
+  { name = "action", type = "u8" },
+  { name = "lines_added", type = "u32" },
+  { name = "lines_removed", type = "u32" },
 ]
 
 [[structures]]
 name = "git_status_entry"
 fields = [
-  {name = "path_hash", type = "u32"},
-  {name = "section", type = "u8"},
-  {name = "status", type = "u8"},
-  {name = "path", type = "string16"},
+  { name = "path_hash", type = "u32" },
+  { name = "section", type = "u8" },
+  { name = "status", type = "u8" },
+  { name = "path", type = "string16" },
 ]
 
 # ── Section layouts for sectioned commands ────────────────────────────────
@@ -1216,13 +1201,13 @@ opcode = "gui_window_content"
 id = 0x01
 name = "header"
 fields = [
-  {name = "window_id", type = "u16"},
-  {name = "flags", type = "u8"},
-  {name = "cursor_row", type = "u16"},
-  {name = "cursor_col", type = "u16"},
-  {name = "cursor_shape", type = "u8"},
-  {name = "scroll_left", type = "u16"},
-  {name = "content_epoch", type = "u32"},
+  { name = "window_id", type = "u16" },
+  { name = "flags", type = "u8" },
+  { name = "cursor_row", type = "u16" },
+  { name = "cursor_col", type = "u16" },
+  { name = "cursor_shape", type = "u8" },
+  { name = "scroll_left", type = "u16" },
+  { name = "content_epoch", type = "u32" },
 ]
 
 [[sections]]
@@ -1237,16 +1222,14 @@ element = "row"
 opcode = "gui_window_content"
 id = 0x03
 name = "selection"
-fields = [
-  {name = "type", type = "u8"},
-]
+fields = [{ name = "type", type = "u8" }]
 # When type != 0, followed by: start_row:u16, start_col:u16, end_row:u16, end_col:u16
-conditional_tail = {guard = "type != 0", fields = [
-  {name = "start_row", type = "u16"},
-  {name = "start_col", type = "u16"},
-  {name = "end_row", type = "u16"},
-  {name = "end_col", type = "u16"},
-]}
+conditional_tail = { guard = "type != 0", fields = [
+  { name = "start_row", type = "u16" },
+  { name = "start_col", type = "u16" },
+  { name = "end_row", type = "u16" },
+  { name = "end_col", type = "u16" },
+] }
 
 [[sections]]
 opcode = "gui_window_content"
@@ -1285,32 +1268,29 @@ opcode = "gui_window_content"
 id = 0x08
 name = "geometry"
 fields = [
-  {name = "window_id", type = "u16"},
-  {name = "total_rect", type = "struct", element = "rect"},
-  {name = "content_rect", type = "struct", element = "rect"},
-  {name = "text_rect", type = "struct", element = "rect"},
-  {name = "gutter_rect", type = "struct", element = "rect"},
-  {name = "clip_rect", type = "struct", element = "rect"},
-  {name = "viewport_top", type = "u32"},
-  {name = "viewport_left", type = "u16"},
-  {name = "viewport_rows", type = "u16"},
-  {name = "viewport_cols", type = "u16"},
-  {name = "viewport_total_lines", type = "u32"},
-  {name = "viewport_visual_row_offset", type = "u16"},
-  {name = "viewport_total_visual_rows", type = "u32"},
-  {name = "line_number_width", type = "u16"},
-  {name = "sign_col_width", type = "u16"},
-  {name = "hit_regions", type = "counted_array", count_type = "u8", element = "hit_region"},
+  { name = "window_id", type = "u16" },
+  { name = "total_rect", type = "struct", element = "rect" },
+  { name = "content_rect", type = "struct", element = "rect" },
+  { name = "text_rect", type = "struct", element = "rect" },
+  { name = "gutter_rect", type = "struct", element = "rect" },
+  { name = "clip_rect", type = "struct", element = "rect" },
+  { name = "viewport_top", type = "u32" },
+  { name = "viewport_left", type = "u16" },
+  { name = "viewport_rows", type = "u16" },
+  { name = "viewport_cols", type = "u16" },
+  { name = "viewport_total_lines", type = "u32" },
+  { name = "viewport_visual_row_offset", type = "u16" },
+  { name = "viewport_total_visual_rows", type = "u32" },
+  { name = "line_number_width", type = "u16" },
+  { name = "sign_col_width", type = "u16" },
+  { name = "hit_regions", type = "counted_array", count_type = "u8", element = "hit_region" },
 ]
 
 [[sections]]
 opcode = "gui_window_content"
 id = 0x09
 name = "cursorline"
-fields = [
-  {name = "row", type = "u16"},
-  {name = "bg", type = "rgb"},
-]
+fields = [{ name = "row", type = "u16" }, { name = "bg", type = "rgb" }]
 
 # gui_status_bar (0x76) sections
 
@@ -1319,9 +1299,9 @@ opcode = "gui_status_bar"
 id = 0x01
 name = "identity"
 fields = [
-  {name = "content_kind", type = "u8"},
-  {name = "mode", type = "u8"},
-  {name = "flags", type = "u8"},
+  { name = "content_kind", type = "u8" },
+  { name = "mode", type = "u8" },
+  { name = "flags", type = "u8" },
 ]
 
 [[sections]]
@@ -1329,9 +1309,9 @@ opcode = "gui_status_bar"
 id = 0x02
 name = "cursor"
 fields = [
-  {name = "line", type = "u32"},
-  {name = "col", type = "u32"},
-  {name = "line_count", type = "u32"},
+  { name = "line", type = "u32" },
+  { name = "col", type = "u32" },
+  { name = "line_count", type = "u32" },
 ]
 
 [[sections]]
@@ -1339,11 +1319,11 @@ opcode = "gui_status_bar"
 id = 0x03
 name = "diagnostics"
 fields = [
-  {name = "errors", type = "u16"},
-  {name = "warnings", type = "u16"},
-  {name = "info", type = "u16"},
-  {name = "hints", type = "u16"},
-  {name = "hint_text", type = "string16"},
+  { name = "errors", type = "u16" },
+  { name = "warnings", type = "u16" },
+  { name = "info", type = "u16" },
+  { name = "hints", type = "u16" },
+  { name = "hint_text", type = "string16" },
 ]
 
 [[sections]]
@@ -1351,8 +1331,8 @@ opcode = "gui_status_bar"
 id = 0x04
 name = "language"
 fields = [
-  {name = "lsp_status", type = "u8"},
-  {name = "parser_status", type = "u8"},
+  { name = "lsp_status", type = "u8" },
+  { name = "parser_status", type = "u8" },
 ]
 
 [[sections]]
@@ -1360,10 +1340,10 @@ opcode = "gui_status_bar"
 id = 0x05
 name = "git"
 fields = [
-  {name = "branch", type = "string8"},
-  {name = "added", type = "u16"},
-  {name = "modified", type = "u16"},
-  {name = "deleted", type = "u16"},
+  { name = "branch", type = "string8" },
+  { name = "added", type = "u16" },
+  { name = "modified", type = "u16" },
+  { name = "deleted", type = "u16" },
 ]
 
 [[sections]]
@@ -1371,27 +1351,23 @@ opcode = "gui_status_bar"
 id = 0x06
 name = "file"
 fields = [
-  {name = "icon", type = "string8"},
-  {name = "icon_color", type = "rgb"},
-  {name = "filename", type = "string16"},
-  {name = "filetype", type = "string8"},
+  { name = "icon", type = "string8" },
+  { name = "icon_color", type = "rgb" },
+  { name = "filename", type = "string16" },
+  { name = "filetype", type = "string8" },
 ]
 
 [[sections]]
 opcode = "gui_status_bar"
 id = 0x07
 name = "message"
-fields = [
-  {name = "text", type = "string16"},
-]
+fields = [{ name = "text", type = "string16" }]
 
 [[sections]]
 opcode = "gui_status_bar"
 id = 0x08
 name = "recording"
-fields = [
-  {name = "macro_register", type = "u8"},
-]
+fields = [{ name = "macro_register", type = "u8" }]
 
 [[sections]]
 opcode = "gui_status_bar"
@@ -1404,8 +1380,8 @@ opcode = "gui_status_bar"
 id = 0x0A
 name = "indent"
 fields = [
-  {name = "indent_type", type = "u8"},
-  {name = "indent_size", type = "u8"},
+  { name = "indent_type", type = "u8" },
+  { name = "indent_size", type = "u8" },
 ]
 
 [[sections]]
@@ -1413,9 +1389,9 @@ opcode = "gui_status_bar"
 id = 0x0B
 name = "modeline"
 fields = [
-  {name = "format", type = "u8"},
-  {name = "left_segments", type = "counted_array", count_type = "u16", element = "modeline_segment"},
-  {name = "right_segments", type = "counted_array", count_type = "u16", element = "modeline_segment"},
+  { name = "format", type = "u8" },
+  { name = "left_segments", type = "counted_array", count_type = "u16", element = "modeline_segment" },
+  { name = "right_segments", type = "counted_array", count_type = "u16", element = "modeline_segment" },
 ]
 
 [[sections]]
@@ -1423,8 +1399,8 @@ opcode = "gui_status_bar"
 id = 0x0C
 name = "selection"
 fields = [
-  {name = "selection_mode", type = "u8"},
-  {name = "selection_size", type = "u32"},
+  { name = "selection_mode", type = "u8" },
+  { name = "selection_size", type = "u32" },
 ]
 
 [[sections]]
@@ -1432,16 +1408,16 @@ opcode = "gui_status_bar"
 id = 0x0D
 name = "workspace"
 fields = [
-  {name = "workspace_id", type = "u16"},
-  {name = "kind", type = "u8"},
-  {name = "status", type = "u8"},
-  {name = "flags", type = "u16"},
-  {name = "draft_count", type = "u16"},
-  {name = "conflict_count", type = "u16"},
-  {name = "running_background_count", type = "u16"},
-  {name = "attention_count", type = "u16"},
-  {name = "label", type = "string8"},
-  {name = "icon", type = "string8"},
+  { name = "workspace_id", type = "u16" },
+  { name = "kind", type = "u8" },
+  { name = "status", type = "u8" },
+  { name = "flags", type = "u16" },
+  { name = "draft_count", type = "u16" },
+  { name = "conflict_count", type = "u16" },
+  { name = "running_background_count", type = "u16" },
+  { name = "attention_count", type = "u16" },
+  { name = "label", type = "string8" },
+  { name = "icon", type = "string8" },
 ]
 
 # gui_gutter (0x7B) sections
@@ -1451,12 +1427,12 @@ opcode = "gui_gutter"
 id = 0x01
 name = "window"
 fields = [
-  {name = "window_id", type = "u16"},
-  {name = "content_row", type = "u16"},
-  {name = "content_col", type = "u16"},
-  {name = "content_height", type = "u16"},
-  {name = "is_active", type = "u8"},
-  {name = "content_width", type = "u16"},
+  { name = "window_id", type = "u16" },
+  { name = "content_row", type = "u16" },
+  { name = "content_col", type = "u16" },
+  { name = "content_height", type = "u16" },
+  { name = "is_active", type = "u8" },
+  { name = "content_width", type = "u16" },
 ]
 
 [[sections]]
@@ -1464,10 +1440,10 @@ opcode = "gui_gutter"
 id = 0x02
 name = "config"
 fields = [
-  {name = "cursor_line", type = "u32"},
-  {name = "line_number_style", type = "u8"},
-  {name = "line_number_width", type = "u8"},
-  {name = "sign_col_width", type = "u8"},
+  { name = "cursor_line", type = "u32" },
+  { name = "line_number_style", type = "u8" },
+  { name = "line_number_width", type = "u8" },
+  { name = "sign_col_width", type = "u8" },
 ]
 
 [[sections]]
@@ -1485,13 +1461,13 @@ opcode = "gui_window_viewport_delta"
 id = 0x01
 name = "header"
 fields = [
-  {name = "window_id", type = "u16"},
-  {name = "content_epoch", type = "u32"},
-  {name = "flags", type = "u8"},
-  {name = "cursor_row", type = "u16"},
-  {name = "cursor_col", type = "u16"},
-  {name = "cursor_shape", type = "u8"},
-  {name = "scroll_left", type = "u16"},
+  { name = "window_id", type = "u16" },
+  { name = "content_epoch", type = "u32" },
+  { name = "flags", type = "u8" },
+  { name = "cursor_row", type = "u16" },
+  { name = "cursor_col", type = "u16" },
+  { name = "cursor_shape", type = "u8" },
+  { name = "scroll_left", type = "u16" },
 ]
 
 [[sections]]
@@ -1509,13 +1485,13 @@ opcode = "gui_window_rows_delta"
 id = 0x01
 name = "header"
 fields = [
-  {name = "window_id", type = "u16"},
-  {name = "content_epoch", type = "u32"},
-  {name = "flags", type = "u8"},
-  {name = "cursor_row", type = "u16"},
-  {name = "cursor_col", type = "u16"},
-  {name = "cursor_shape", type = "u8"},
-  {name = "scroll_left", type = "u16"},
+  { name = "window_id", type = "u16" },
+  { name = "content_epoch", type = "u32" },
+  { name = "flags", type = "u8" },
+  { name = "cursor_row", type = "u16" },
+  { name = "cursor_col", type = "u16" },
+  { name = "cursor_shape", type = "u8" },
+  { name = "scroll_left", type = "u16" },
 ]
 
 [[sections]]
@@ -1536,22 +1512,20 @@ name = "header"
 # counts, has_preview flag, title, and marked_count. The encoder writes
 # total_count as u16, not u32, and emits the title + marked_count tail.
 fields = [
-  {name = "visible", type = "u8"},
-  {name = "selected_index", type = "u16"},
-  {name = "filtered_count", type = "u16"},
-  {name = "total_count", type = "u16"},
-  {name = "has_preview", type = "u8"},
-  {name = "title", type = "string16"},
-  {name = "marked_count", type = "u16"},
+  { name = "visible", type = "u8" },
+  { name = "selected_index", type = "u16" },
+  { name = "filtered_count", type = "u16" },
+  { name = "total_count", type = "u16" },
+  { name = "has_preview", type = "u8" },
+  { name = "title", type = "string16" },
+  { name = "marked_count", type = "u16" },
 ]
 
 [[sections]]
 opcode = "gui_picker"
 id = 0x02
 name = "query"
-fields = [
-  {name = "text", type = "string16"},
-]
+fields = [{ name = "text", type = "string16" }]
 
 [[sections]]
 opcode = "gui_picker"
@@ -1568,21 +1542,17 @@ name = "action_menu"
 # picker_encoder.ex encode_action_menu/1: hidden menus encode just the visible
 # byte (0); a visible menu adds selected_index plus a u8-counted list of action
 # name strings.
-fields = [
-  {name = "visible", type = "u8"},
-]
-conditional_tail = {guard = "visible == 1", fields = [
-  {name = "selected_index", type = "u8"},
-  {name = "actions", type = "counted_array", count_type = "u8", element = "string16"},
-]}
+fields = [{ name = "visible", type = "u8" }]
+conditional_tail = { guard = "visible == 1", fields = [
+  { name = "selected_index", type = "u8" },
+  { name = "actions", type = "counted_array", count_type = "u8", element = "string16" },
+] }
 
 [[sections]]
 opcode = "gui_picker"
 id = 0x05
 name = "mode_prefix"
-fields = [
-  {name = "text", type = "string16"},
-]
+fields = [{ name = "text", type = "string16" }]
 
 [[sections]]
 opcode = "gui_picker"
@@ -1590,12 +1560,10 @@ id = 0x06
 name = "load_status"
 # picker_encoder.ex encode_load_status/1: :ready/:loading encode just the status
 # byte (0/1); {:error, reason} adds status 2 plus the message string.
-fields = [
-  {name = "status", type = "u8"},
-]
-conditional_tail = {guard = "status == 2", fields = [
-  {name = "message", type = "string16"},
-]}
+fields = [{ name = "status", type = "u8" }]
+conditional_tail = { guard = "status == 2", fields = [
+  { name = "message", type = "string16" },
+] }
 
 # gui_agent_chat (0x78) sections
 
@@ -1603,10 +1571,7 @@ conditional_tail = {guard = "status == 2", fields = [
 opcode = "gui_agent_chat"
 id = 0x01
 name = "header"
-fields = [
-  {name = "visible", type = "u8"},
-  {name = "status", type = "u8"},
-]
+fields = [{ name = "visible", type = "u8" }, { name = "status", type = "u8" }]
 
 # gui_picker_preview (0x7D) sections
 
@@ -1615,9 +1580,9 @@ opcode = "gui_picker_preview"
 id = 0x01
 name = "header"
 fields = [
-  {name = "visible", type = "u8"},
-  {name = "kind", type = "u8"},
-  {name = "title", type = "string16"},
+  { name = "visible", type = "u8" },
+  { name = "kind", type = "u8" },
+  { name = "title", type = "string16" },
 ]
 
 # ── Command field layouts for custom-framed commands ───────────────────────
@@ -1631,191 +1596,150 @@ fields = [
 [[command_fields]]
 opcode = "gui_tab_bar"
 fields = [
-  {name = "active_index", type = "u8"},
-  {name = "tab_count", type = "u8"},
+  { name = "active_index", type = "u8" },
+  { name = "tab_count", type = "u8" },
 ]
 
 [[command_fields]]
 opcode = "gui_theme"
-fields = [
-  {name = "color_count", type = "u8"},
-]
+fields = [{ name = "color_count", type = "u8" }]
 
 [[command_fields]]
 opcode = "gui_breadcrumb"
-fields = [
-  {name = "segment_count", type = "u8"},
-]
+fields = [{ name = "segment_count", type = "u8" }]
 
 [[command_fields]]
 opcode = "gui_completion"
-fields = [
-  {name = "visible", type = "u8"},
-]
+fields = [{ name = "visible", type = "u8" }]
 # When visible, the encoder emits the popup placement plus a u16-counted list of
 # items (completion_encoder.ex encode_command/1). When hidden, only the visible
 # byte is present.
-conditional_tail = {guard = "visible == 1", fields = [
-  {name = "cursor_row", type = "u16"},
-  {name = "cursor_col", type = "u16"},
-  {name = "selected_offset", type = "u16"},
-  {name = "items", type = "counted_array", count_type = "u16", element = "completion_item"},
-]}
+conditional_tail = { guard = "visible == 1", fields = [
+  { name = "cursor_row", type = "u16" },
+  { name = "cursor_col", type = "u16" },
+  { name = "selected_offset", type = "u16" },
+  { name = "items", type = "counted_array", count_type = "u16", element = "completion_item" },
+] }
 
 [[command_fields]]
 opcode = "gui_which_key"
-fields = [
-  {name = "visible", type = "u8"},
-]
+fields = [{ name = "visible", type = "u8" }]
 
 [[command_fields]]
 opcode = "gui_minibuffer"
-fields = [
-  {name = "visible", type = "u8"},
-]
+fields = [{ name = "visible", type = "u8" }]
 
 [[command_fields]]
 opcode = "gui_hover_popup"
-fields = [
-  {name = "visible", type = "u8"},
-]
+fields = [{ name = "visible", type = "u8" }]
 
 [[command_fields]]
 opcode = "gui_signature_help"
-fields = [
-  {name = "visible", type = "u8"},
-]
+fields = [{ name = "visible", type = "u8" }]
 
 [[command_fields]]
 opcode = "gui_float_popup"
-fields = [
-  {name = "visible", type = "u8"},
-]
+fields = [{ name = "visible", type = "u8" }]
 
 [[command_fields]]
 opcode = "gui_split_separators"
 fields = [
-  {name = "bg", type = "rgb"},
-  {name = "vertical_count", type = "u8"},
+  { name = "bg", type = "rgb" },
+  { name = "vertical_count", type = "u8" },
 ]
 
 [[command_fields]]
 opcode = "gui_git_status"
 fields = [
-  {name = "repo_state", type = "u8"},
-  {name = "syncing", type = "u8"},
-  {name = "ahead", type = "u16"},
-  {name = "behind", type = "u16"},
+  { name = "repo_state", type = "u8" },
+  { name = "syncing", type = "u8" },
+  { name = "ahead", type = "u16" },
+  { name = "behind", type = "u16" },
 ]
 
 [[command_fields]]
 opcode = "gui_bottom_panel"
-fields = [
-  {name = "visible", type = "u8"},
-]
+fields = [{ name = "visible", type = "u8" }]
 
 [[command_fields]]
 opcode = "gui_change_summary"
 fields = [
-  {name = "visible", type = "u8"},
-  {name = "selected_index", type = "u16"},
-  {name = "entry_count", type = "u16"},
-]
-
-[[command_fields]]
-opcode = "gui_board"
-fields = [
-  {name = "visible", type = "u8"},
-  {name = "focused_card_id", type = "u32"},
-  {name = "card_count", type = "u16"},
-  {name = "filter_mode", type = "u8"},
+  { name = "visible", type = "u8" },
+  { name = "selected_index", type = "u16" },
+  { name = "entry_count", type = "u16" },
 ]
 
 [[command_fields]]
 opcode = "gui_agent_context"
-fields = [
-  {name = "visible", type = "u8"},
-]
+fields = [{ name = "visible", type = "u8" }]
 
 [[command_fields]]
 opcode = "gui_gutter_sep"
-fields = [
-  {name = "col", type = "u16"},
-  {name = "bg", type = "rgb"},
-]
+fields = [{ name = "col", type = "u16" }, { name = "bg", type = "rgb" }]
 
 [[command_fields]]
 opcode = "gui_cursorline"
-fields = [
-  {name = "col", type = "u16"},
-  {name = "bg", type = "rgb"},
-]
+fields = [{ name = "col", type = "u16" }, { name = "bg", type = "rgb" }]
 
 [[command_fields]]
 opcode = "gui_search_state"
 fields = [
-  {name = "active", type = "u8"},
-  {name = "match_count", type = "u16"},
-  {name = "current_index", type = "u16"},
-  {name = "flags", type = "u8"},
+  { name = "active", type = "u8" },
+  { name = "match_count", type = "u16" },
+  { name = "current_index", type = "u16" },
+  { name = "flags", type = "u8" },
 ]
 
 [[command_fields]]
 opcode = "gui_edit_timeline"
 fields = [
-  {name = "visible", type = "u8"},
-  {name = "viewing_index", type = "u16"},
-  {name = "entry_count", type = "u8"},
+  { name = "visible", type = "u8" },
+  { name = "viewing_index", type = "u16" },
+  { name = "entry_count", type = "u8" },
 ]
 
 [[command_fields]]
 opcode = "gui_workspaces"
 fields = [
-  {name = "visible", type = "u8"},
-  {name = "active_workspace_id", type = "u16"},
-  {name = "mode", type = "u8"},
-  {name = "flags", type = "u8"},
-  {name = "workspace_count", type = "u8"},
+  { name = "visible", type = "u8" },
+  { name = "active_workspace_id", type = "u16" },
+  { name = "mode", type = "u8" },
+  { name = "flags", type = "u8" },
+  { name = "workspace_count", type = "u8" },
 ]
 
 [[command_fields]]
 opcode = "gui_notifications"
 fields = [
-  {name = "visible", type = "u8"},
-  {name = "notification_count", type = "u16"},
+  { name = "visible", type = "u8" },
+  { name = "notification_count", type = "u16" },
 ]
 
 [[command_fields]]
 opcode = "gui_sidebars"
 fields = [
-  {name = "visible", type = "u8"},
-  {name = "sidebar_count", type = "u16"},
+  { name = "visible", type = "u8" },
+  { name = "sidebar_count", type = "u16" },
 ]
 
 [[command_fields]]
 opcode = "gui_extension_overlay"
-fields = [
-  {name = "entry_count", type = "u8"},
-]
+fields = [{ name = "entry_count", type = "u8" }]
 
 [[command_fields]]
 opcode = "gui_extension_panel"
-fields = [
-  {name = "panel_count", type = "u8"},
-]
+fields = [{ name = "panel_count", type = "u8" }]
 
 [[command_fields]]
 opcode = "gui_file_tree"
 # Full 0x93 payload details live in docs/GUI_PROTOCOL.md because the row list is variable-length and currently hand-decoded by frontends.
 # Payload v2 row tail order is icon(string8), editing_type(u8), editing_text(string16), icon_color(rgb).
 fields = [
-  {name = "visible", type = "u8"},
-  {name = "flags", type = "u8"},
-  {name = "status", type = "u8"},
+  { name = "visible", type = "u8" },
+  { name = "flags", type = "u8" },
+  { name = "status", type = "u8" },
 ]
 
 [[command_fields]]
 opcode = "gui_tool_manager"
-fields = [
-  {name = "visible", type = "u8"},
-]
+fields = [{ name = "visible", type = "u8" }]

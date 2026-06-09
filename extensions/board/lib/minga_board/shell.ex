@@ -27,20 +27,20 @@ defmodule MingaBoard.Shell do
   @behaviour MingaEditor.Shell.BufferLifecycle
   @behaviour MingaEditor.Shell.TabQueries
 
-  alias Minga.RenderModel.UI
   alias MingaAgent.Session, as: AgentSession
   alias MingaAgent.Subagent.Handle
   alias MingaEditor.DisplayList
   alias MingaEditor.DisplayList.{Cursor, Frame}
-  alias MingaEditor.RenderModel.UI.BoardBuilder
   alias MingaEditor.RenderPipeline.Chrome
-  alias MingaEditor.Renderer.Regions
-  alias Minga.RenderModel.UI.Board, as: BoardPayload
-  alias Minga.RenderModel.UI.Board.Card, as: BoardCardPayload
+  alias MingaBoard.Frontend.Adapter.GUI.ActionDecoder
+  alias MingaBoard.Frontend.Adapter.GUI.BoardEncoder
   alias MingaBoard.AgentActivation
   alias MingaBoard.Shell.AgentDeactivation
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.AgentAccess
+  alias MingaBoard.RenderModel.UI.Board, as: BoardPayload
+  alias MingaBoard.RenderModel.UI.Board.Card, as: BoardCardPayload
+  alias MingaBoard.RenderModel.UI.BoardBuilder
   alias MingaBoard.Shell.Card
   alias MingaBoard.Shell.SessionLifecycle
   alias MingaBoard.Shell.State, as: BoardState
@@ -103,6 +103,17 @@ defmodule MingaBoard.Shell do
   @impl true
   @spec handle_gui_action(BoardState.t(), MingaEditor.Session.State.t(), term()) ::
           {BoardState.t(), MingaEditor.Session.State.t()}
+  def handle_gui_action(
+        shell_state,
+        workspace,
+        {:extension_action, _extension_id, _action, _payload} = action
+      ) do
+    case ActionDecoder.decode(action) do
+      {:ok, board_action} -> handle_gui_action(shell_state, workspace, board_action)
+      :error -> {shell_state, workspace}
+    end
+  end
+
   def handle_gui_action(shell_state, workspace, {:board_select_card, card_id}) do
     case Map.fetch(shell_state.cards, card_id) do
       {:ok, card} ->
@@ -256,6 +267,13 @@ defmodule MingaBoard.Shell do
 
   @impl true
   @spec after_gui_action(MingaEditor.State.t(), term()) :: MingaEditor.State.t()
+  def after_gui_action(state, {:extension_action, _extension_id, _action, _payload} = action) do
+    case ActionDecoder.decode(action) do
+      {:ok, board_action} -> after_gui_action(state, board_action)
+      :error -> state
+    end
+  end
+
   def after_gui_action(state, :agent_dismiss) do
     AgentDeactivation.deactivate_agent_for_card(state)
   end
@@ -347,15 +365,14 @@ defmodule MingaBoard.Shell do
   @impl true
   @spec build_chrome(term(), MingaEditor.Layout.t(), map(), term()) ::
           Chrome.t()
-  def build_chrome(editor_state, layout, _scrolls, _cursor_info) do
+  def build_chrome(editor_state, _layout, _scrolls, _cursor_info) do
     if BoardState.grid_view?(editor_state.shell_state) do
       # Grid view: BoardView overlay handles everything, empty chrome
       %Chrome{}
     else
       # Zoomed: context bar in tab_bar slot, everything else empty
       context_draws = build_zoom_context_bar(editor_state)
-      regions = Regions.define_regions(layout)
-      %Chrome{tab_bar: context_draws, regions: regions}
+      %Chrome{tab_bar: context_draws}
     end
   end
 
@@ -458,37 +475,33 @@ defmodule MingaBoard.Shell do
     }
   end
 
+  @doc "Sends a hidden Board GUI payload when a GUI frontend is active. No-op for TUI frontends."
+  @spec hide_gui_board(term()) :: term()
+  def hide_gui_board(editor_state) do
+    send_gui_board(editor_state, BoardPayload.hidden())
+    editor_state
+  end
+
   @impl true
   @spec render(term()) :: term()
   def render(editor_state) do
     if BoardState.grid_view?(editor_state.shell_state) do
       render_board_grid(editor_state)
     else
-      # Zoomed into a card: render_buffer runs the full pipeline, including the core GUI adapter when a GUI frontend is active, so no explicit chrome call is needed here.
-      MingaEditor.Renderer.render_buffer(editor_state)
+      # Zoomed into a card: hide the native Board overlay before rendering the card's buffer so GUI frontends cannot keep stale Board chrome visible over editor content.
+      editor_state
+      |> hide_gui_board()
+      |> MingaEditor.Renderer.render_buffer()
     end
   end
 
   @spec render_board_grid(term()) :: term()
   defp render_board_grid(editor_state) do
-    gui? = MingaEditor.Frontend.gui?(editor_state.capabilities)
-
-    if gui? do
-      # GUI: send the gui_board opcode so Swift shows BoardView.
-      # Thread caches so fingerprint-based skipping works across frames.
-      ui = %UI{board: BoardBuilder.build(gui_payload(editor_state))}
-
-      {chrome_cmds, adapter_caches} =
-        Minga.Frontend.Adapter.GUI.encode_ui(ui, editor_state.caches.adapter_gui_caches)
-
-      if chrome_cmds != [] do
-        MingaEditor.Frontend.send_commands(editor_state.port_manager, chrome_cmds)
-      end
-
-      new_caches = %{editor_state.caches | adapter_gui_caches: adapter_caches}
-      %{editor_state | caches: new_caches}
+    if MingaEditor.Frontend.gui?(editor_state.capabilities) do
+      board = BoardBuilder.build(gui_payload(editor_state))
+      send_gui_board(editor_state, board)
+      editor_state
     else
-      # TUI: render card grid as cell grid commands
       vp = editor_state.terminal_viewport
       board = editor_state.shell_state
 
@@ -503,10 +516,23 @@ defmodule MingaBoard.Shell do
         overlays: []
       }
 
-      commands = DisplayList.to_commands(frame)
-      MingaEditor.Frontend.send_commands(editor_state.port_manager, commands)
-      editor_state
+      input = MingaEditor.RenderPipeline.Input.from_editor_state(editor_state)
+      ctx = MingaEditor.Frontend.Emit.Context.from_editor_state(input)
+
+      {caches, _font_registry} =
+        MingaEditor.Frontend.Emit.emit(frame, ctx, nil, editor_state.caches)
+
+      %{editor_state | caches: caches}
     end
+  end
+
+  @spec send_gui_board(term(), BoardPayload.t()) :: :ok
+  defp send_gui_board(editor_state, %BoardPayload{} = board) do
+    if MingaEditor.Frontend.gui?(editor_state.capabilities) do
+      MingaEditor.Frontend.send_commands(editor_state.port_manager, [BoardEncoder.encode(board)])
+    end
+
+    :ok
   end
 
   @impl true
@@ -624,6 +650,7 @@ defmodule MingaBoard.Shell do
     end
   end
 
+  @impl true
   @doc "Refreshes a card after SessionManager restarts its agent session."
   @spec handle_agent_session_restarted(BoardState.t(), pid(), pid(), term()) ::
           {BoardState.t(), boolean()}

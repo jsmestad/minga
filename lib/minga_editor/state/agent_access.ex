@@ -4,7 +4,7 @@ defmodule MingaEditor.State.AgentAccess do
 
   Agent lifecycle data is workspace-owned for the Traditional shell. The active agent workspace stores its session pid and `MingaEditor.Agent.UIState`; `state.workspace.agent_ui` is only a live mirror for renderers that still read the current workspace struct directly.
 
-  The Board shell still owns session pids on cards until it moves to the same workspace model.
+  Extension shells may own session pids on shell-specific surfaces until they move to the same workspace model.
   """
 
   alias MingaEditor.Agent.UIState
@@ -49,7 +49,7 @@ defmodule MingaEditor.State.AgentAccess do
   @doc """
   Returns the agent session pid for the user's current view, or `nil`.
 
-  Traditional reads the active workspace. Board reads through the shell behaviour until Board moves onto the same workspace model.
+  Traditional reads the active workspace. Extension shells read through shell behaviours until they move onto the same workspace model.
   """
   @spec session(EditorState.t() | map()) :: pid() | nil
   def session(%EditorState{} = state) do

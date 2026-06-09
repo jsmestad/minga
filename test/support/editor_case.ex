@@ -92,7 +92,7 @@ defmodule Minga.Test.EditorCase do
     editing_model = Keyword.get(opts, :editing_model, :vim)
     # Backend defaults to :headless; override to :tui for TUI-specific tests.
     backend = Keyword.get(opts, :backend, :headless)
-    # Shell defaults to nil (uses config); override to :board for Board tests.
+    # Shell defaults to nil (uses config); override in tests that need a custom shell.
     shell = Keyword.get(opts, :shell)
 
     editor_opts = [

@@ -8,7 +8,6 @@ defmodule MingaEditor.Agent.SemanticUI.Entry do
   alias Minga.Extension.ContributionCleanup
   alias Minga.RenderModel.UI.Action
   alias Minga.RenderModel.UI.AgentChat
-  alias Minga.RenderModel.UI.Board
   alias Minga.RenderModel.UI.ExtensionPanel
   alias Minga.RenderModel.UI.ExtensionPanel.Content
   alias Minga.RenderModel.UI.ExtensionPanel.Content.KeyValue
@@ -26,11 +25,10 @@ defmodule MingaEditor.Agent.SemanticUI.Entry do
   @type source :: ContributionCleanup.contribution_source()
 
   @typedoc "Semantic surface where the contribution is consumed."
-  @type surface :: :status_card | :transcript_enrichment | :dashboard_section | :panel
+  @type surface :: :transcript_enrichment | :dashboard_section | :panel
 
   @typedoc "Existing render-model value stored by the registry."
-  @type payload ::
-          Board.Card.t() | AgentChat.message_body() | [Content.t()] | ExtensionPanel.Panel.t()
+  @type payload :: AgentChat.message_body() | [Content.t()] | ExtensionPanel.Panel.t()
 
   @type t :: %__MODULE__{
           source: source(),
@@ -128,7 +126,7 @@ defmodule MingaEditor.Agent.SemanticUI.Entry do
 
   @spec surface(term()) :: {:ok, surface()} | {:error, term()}
   defp surface(surface)
-       when surface in [:status_card, :transcript_enrichment, :dashboard_section, :panel],
+       when surface in [:transcript_enrichment, :dashboard_section, :panel],
        do: {:ok, surface}
 
   defp surface(other), do: {:error, {:invalid, :surface, other}}
@@ -152,7 +150,6 @@ defmodule MingaEditor.Agent.SemanticUI.Entry do
   end
 
   @spec payload(surface(), term()) :: {:ok, payload()} | {:error, term()}
-  defp payload(:status_card, %Board.Card{} = card), do: board_card(card)
   defp payload(:panel, %ExtensionPanel.Panel{} = panel), do: panel(panel)
   defp payload(:dashboard_section, blocks) when is_list(blocks), do: dashboard_content(blocks, [])
   defp payload(:transcript_enrichment, body), do: transcript_body(body)
@@ -189,23 +186,6 @@ defmodule MingaEditor.Agent.SemanticUI.Entry do
       Minga.RenderModel.UI.ExtensionPanel.Content.Tree,
       Minga.RenderModel.UI.ExtensionPanel.Content.Unknown
     ]
-  end
-
-  @spec board_card(Board.Card.t()) :: {:ok, Board.Card.t()} | {:error, term()}
-  defp board_card(%Board.Card{} = card) do
-    with true <- is_integer(card.id) and card.id > 0,
-         true <- card.status in [:idle, :working, :iterating, :needs_you, :done, :errored],
-         true <- card.kind in [:you, :agent],
-         true <- is_binary(card.task),
-         true <- is_binary(card.display_task),
-         true <- is_nil(card.model) or is_binary(card.model),
-         true <- match?(%DateTime{}, card.created_at),
-         true <- string_list?(card.recent_files),
-         true <- is_list(card.sparkline) and Enum.all?(card.sparkline, &is_number/1) do
-      {:ok, card}
-    else
-      false -> {:error, {:invalid_payload, :status_card}}
-    end
   end
 
   @spec panel(ExtensionPanel.Panel.t()) :: {:ok, ExtensionPanel.Panel.t()} | {:error, term()}

@@ -128,19 +128,6 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     assert EditorState.sidebar_active_id(closed) == nil
   end
 
-  test "board GUI actions report unavailable when Board is not the active shell", %{
-    sidebar_registry: table
-  } do
-    state = base_state(table)
-
-    new_state = GuiActionHandler.dispatch(state, {:board_select_card, 123})
-
-    assert EditorState.status_msg(new_state) == "Board shell is unavailable"
-    assert new_state.shell_id == state.shell_id
-    assert new_state.shell == state.shell
-    refute Map.has_key?(new_state.shell_state, :zoomed_into)
-  end
-
   test "git porcelain GUI actions report disabled extension instead of no-op", %{
     sidebar_registry: table
   } do

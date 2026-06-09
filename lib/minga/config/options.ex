@@ -385,7 +385,7 @@ defmodule Minga.Config.Options do
      "Whether all event types are persisted, including high-volume buffer and mode changes."},
     {:event_size_cap_mb, :pos_integer, 128,
      "Hard size cap in MiB for the event database including WAL and shared-memory files."},
-    {:default_shell, {:enum, [:traditional, :board]}, :traditional,
+    {:default_shell, {:enum, [:traditional]}, :traditional,
      "Shell implementation opened by default."},
     {:file_find_excludes, :string_list,
      [

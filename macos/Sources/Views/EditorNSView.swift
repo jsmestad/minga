@@ -740,14 +740,6 @@ final class EditorNSView: MTKView {
 
     // MARK: - Agent chat key forwarding
 
-    /// Activates Board overlay mode: suspends the first responder guard
-    /// so SwiftUI card interactions work, but keys still flow to the BEAM
-    /// through the EditorNSView (it remains in the responder chain at
-    /// opacity 0 behind the BoardView).
-    func setBoardVisible(_ visible: Bool) {
-        firstResponderGuard?.suspended = visible
-    }
-
     /// Activates the agent chat overlay mode. The Metal surface goes to
     /// opacity(0) so the SwiftUI chat overlay is visible. Since opacity(0)
     /// disconnects normal event delivery, a local event monitor forwards

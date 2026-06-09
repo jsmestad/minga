@@ -5,7 +5,8 @@ defmodule MingaBoard.Shell.InputTest do
   Follows the Dashboard test pattern: builds a minimal EditorState with
   Board shell state and calls handler functions directly. No GenServer.
   """
-  use ExUnit.Case, async: true
+  # This test module serializes because it relies on the global MingaEditor.Input surface-handler registry, which other async tests mutate during the full suite.
+  use ExUnit.Case, async: false
 
   alias MingaAgent.RuntimeState
   alias MingaAgent.SessionManager

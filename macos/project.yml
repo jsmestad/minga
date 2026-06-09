@@ -35,6 +35,10 @@ targets:
       - path: .generated/protocol/ProtocolCommandSize.generated.swift
         name: ProtocolCommandSize.generated.swift
         type: file
+      - path: ../extensions/board/frontend/macos/Sources
+        name: FrontendExtensionRuntimeSource
+        type: group
+        createIntermediateGroups: false
       - path: Resources
         type: group
     settings:
@@ -101,6 +105,10 @@ targets:
       - path: .generated/protocol/ProtocolCommandSize.generated.swift
         name: ProtocolCommandSize.generated.swift
         type: file
+      - path: ../extensions/board/frontend/macos/Sources
+        name: FrontendExtensionRuntimeSource
+        type: group
+        createIntermediateGroups: false
     settings:
       base:
         PRODUCT_NAME: MingaTests
@@ -132,6 +140,10 @@ targets:
       - path: .generated/protocol/ProtocolCommandSize.generated.swift
         name: ProtocolCommandSize.generated.swift
         type: file
+      - path: ../extensions/board/frontend/macos/Sources
+        name: FrontendExtensionRuntimeSource
+        type: group
+        createIntermediateGroups: false
     settings:
       base:
         PRODUCT_NAME: PreviewHost
