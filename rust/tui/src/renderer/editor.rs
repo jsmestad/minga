@@ -77,13 +77,18 @@ pub fn render_file_tree(
         } else {
             palette.tree()
         };
-        let mut spans = vec![Span::styled(
-            format!(
-                "{marker}{indent}{expansion}{icon_text}{}{git_marker}",
-                row.name
-            ),
-            style,
-        )];
+        // The icon uses its per-row theme color, except when selection owns the
+        // row foreground for contrast. Matches the Go/Zig/Swift renderers.
+        let icon_style = if selected || row.icon_color == 0 {
+            style
+        } else {
+            Style::default().fg(theme::rgb(row.icon_color))
+        };
+        let mut spans = vec![
+            Span::styled(format!("{marker}{indent}{expansion}"), style),
+            Span::styled(icon_text, icon_style),
+            Span::styled(format!("{}{git_marker}", row.name), style),
+        ];
         let diag_total = row.diagnostics.0 + row.diagnostics.1;
         if diag_total > 0 {
             let diag_color = if row.diagnostics.0 > 0 {
@@ -565,6 +570,7 @@ mod tests {
                 id: "row-1".to_owned(),
                 name: "main.ex".to_owned(),
                 icon: String::new(),
+                icon_color: 0,
                 depth: 0,
                 flags: 0,
                 git_status: 0,
@@ -585,6 +591,46 @@ mod tests {
         assert_ne!(buffer.cell((11, 0)).unwrap().symbol(), "│");
         assert_eq!(buffer.cell((11, 1)).unwrap().symbol(), " ");
         assert_eq!(buffer.cell((11, 2)).unwrap().symbol(), " ");
+    }
+
+    #[test]
+    fn file_tree_icon_uses_the_themed_icon_color() {
+        let file_tree = semantic::FileTree {
+            visible: true,
+            focused: true,
+            status: 0,
+            selected_id: "other".to_owned(),
+            root_path: String::new(),
+            width: 20,
+            error: String::new(),
+            rows: vec![semantic::FileTreeRow {
+                id: "row-1".to_owned(),
+                name: "main.rs".to_owned(),
+                icon: "I".to_owned(),
+                icon_color: 0xDEA584,
+                depth: 0,
+                flags: 0,
+                git_status: 0,
+                diagnostics: (0, 0, 0, 0),
+                editing_text: String::new(),
+            }],
+        };
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 20,
+            height: 1,
+        };
+        let mut buffer = Buffer::empty(area);
+
+        render_file_tree(&file_tree, None, area, &mut buffer);
+
+        // Row layout: marker(1) + expansion(2) puts the icon glyph at column 3.
+        let icon_cell = buffer.cell((3, 0)).unwrap();
+        assert_eq!(icon_cell.symbol(), "I");
+        assert_eq!(icon_cell.fg, theme::rgb(0xDEA584));
+        // The name is not the icon color (it uses the row style).
+        assert_ne!(buffer.cell((5, 0)).unwrap().fg, theme::rgb(0xDEA584));
     }
 
     #[test]

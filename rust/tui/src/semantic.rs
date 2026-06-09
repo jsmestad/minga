@@ -195,6 +195,7 @@ pub struct FileTreeRow {
     pub id: String,
     pub name: String,
     pub icon: String,
+    pub icon_color: u32,
     pub depth: u8,
     pub flags: u16,
     pub git_status: u8,
@@ -2763,12 +2764,17 @@ fn decode_file_tree_row(bytes: &[u8]) -> Result<(FileTreeRow, usize), DecodeErro
     require_len(bytes, offset + 1, "file tree editing type")?;
     offset += 1;
     let editing_text = read_string16(bytes, &mut offset)?;
+    require_len(bytes, offset + 3, "file tree icon color")?;
+    let icon_color =
+        (bytes[offset] as u32) << 16 | (bytes[offset + 1] as u32) << 8 | bytes[offset + 2] as u32;
+    offset += 3;
 
     Ok((
         FileTreeRow {
             id,
             name,
             icon,
+            icon_color,
             depth,
             flags,
             git_status,
@@ -3550,6 +3556,7 @@ mod tests {
             string8("rs"),
             vec![0xFF],
             string16(""),
+            vec![0x6D, 0x80, 0x86], // icon color (R,G,B) follows editing payload
         ]
         .concat();
         let payload = [
@@ -3570,7 +3577,7 @@ mod tests {
         assert!(matches!(
             command,
             Command::FileTree(FileTree { visible: true, focused: true, width: 24, selected_id, rows, .. }, _)
-                if selected_id == "id-1" && rows[0].name == "main.ex" && rows[0].flags == 0x15
+                if selected_id == "id-1" && rows[0].name == "main.ex" && rows[0].flags == 0x15 && rows[0].icon_color == 0x6D8086
         ));
 
         let selection_payload = [vec![1], string16("id-2")].concat();

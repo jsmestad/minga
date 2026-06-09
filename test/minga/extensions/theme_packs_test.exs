@@ -16,6 +16,10 @@ defmodule Minga.Extensions.ThemePacksTest do
   end
 
   describe "register_pack/1" do
+    test "AstroNvim pack registers astrodark" do
+      assert {:ok, _} = Theme.get(:astrodark)
+    end
+
     test "Catppuccin pack registers its four themes" do
       assert {:ok, _} = Theme.get(:catppuccin_frappe)
       assert {:ok, _} = Theme.get(:catppuccin_latte)

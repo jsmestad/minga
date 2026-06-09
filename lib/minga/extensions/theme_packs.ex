@@ -16,6 +16,7 @@ defmodule Minga.Extensions.ThemePacks do
   @type state :: %{loaded: [atom()], failed: [{atom(), term()}]}
 
   @packs [
+    Minga.Extensions.ThemePacks.AstroNvim,
     Minga.Extensions.ThemePacks.Catppuccin,
     Minga.Extensions.ThemePacks.Doom,
     Minga.Extensions.ThemePacks.One

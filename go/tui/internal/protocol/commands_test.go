@@ -427,8 +427,10 @@ func TestDecodeFileTreeChromeRows(t *testing.T) {
 	row = append(row, string16("/repo/lib")...)
 	row = append(row, string16("lib")...)
 	row = append(row, string16("lib")...)
-	row = append(row, 1, 'd', 0xFF)
+	row = append(row, 1, 'd')
+	row = append(row, 0xFF)
 	row = append(row, 0, 0)
+	row = append(row, 0x6D, 0x80, 0x86) // icon color (R,G,B) follows editing payload
 	body := []byte{2, 1, 3}
 	body = append(body, string16("/repo/lib")...)
 	body = append(body, string16("/repo")...)
@@ -445,7 +447,7 @@ func TestDecodeFileTreeChromeRows(t *testing.T) {
 	if !tree.Visible || tree.Status != 3 || tree.Root != "/repo" || len(tree.Rows) != 1 {
 		t.Fatalf("file tree decoded incorrectly: %+v", tree)
 	}
-	if got := tree.Rows[0]; !got.Directory || !got.Selected || got.Name != "lib" || got.Depth != 1 {
+	if got := tree.Rows[0]; !got.Directory || !got.Selected || got.Name != "lib" || got.Depth != 1 || got.IconColor != 0x6D8086 {
 		t.Fatalf("file tree row decoded incorrectly: %+v", got)
 	}
 }

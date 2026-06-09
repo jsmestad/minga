@@ -746,7 +746,7 @@ func (m Model) renderFileTreeRow(row protocol.FileTreeRow, width int) string {
 	if row.Selected {
 		markerStyle = markerStyle.Foreground(theme.Accent()).Bold(true)
 	}
-	icon := fileTreeIcon(row)
+	icon := fileTreeIcon(row, row.Selected)
 	iconStyle := rowStyle
 	if icon.color != "" && !row.Selected && !fileTreeRowMuted(row) {
 		iconStyle = iconStyle.Foreground(lipgloss.Color(icon.color))

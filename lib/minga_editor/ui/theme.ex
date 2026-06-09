@@ -46,7 +46,8 @@ defmodule MingaEditor.UI.Theme do
     :hl_todo,
     :agent,
     :tab_bar,
-    :dashboard
+    :dashboard,
+    :icon
   ]
 
   @typedoc "Source that contributed registry entries."
@@ -65,6 +66,13 @@ defmodule MingaEditor.UI.Theme do
   @typedoc "Syntax theme: tree-sitter capture name → style."
   @type syntax :: %{String.t() => style()}
 
+  @typedoc """
+  Optional per-filetype icon color overrides, keyed by filetype atom (e.g. `:rust`)
+  with a special `:directory` key for folder icons. Unset filetypes fall back to the
+  language's default `icon_color`. `nil`/empty means \"use defaults everywhere\".
+  """
+  @type icon_overrides :: %{atom() => color()}
+
   @type t :: %__MODULE__{
           name: atom(),
           syntax: syntax(),
@@ -80,7 +88,8 @@ defmodule MingaEditor.UI.Theme do
           hl_todo: %{atom() => Face.t()} | nil,
           agent: MingaEditor.UI.Theme.Agent.t() | nil,
           tab_bar: MingaEditor.UI.Theme.TabBar.t() | nil,
-          dashboard: MingaEditor.UI.Theme.Dashboard.t() | nil
+          dashboard: MingaEditor.UI.Theme.Dashboard.t() | nil,
+          icon: icon_overrides() | nil
         }
 
   # ── Color group structs ─────────────────────────────────────────────────────
@@ -554,14 +563,40 @@ defmodule MingaEditor.UI.Theme do
     Minga.Config.ThemeRegistry.available()
   end
 
-  @doc "Returns the default theme name atom. Falls back to `:minga_default` if `:doom_one` is not available."
+  @doc "Returns the default theme name atom. Falls back to `:minga_default` if `:astrodark` is not available."
   @spec default() :: atom()
   def default do
-    case Minga.Config.ThemeRegistry.get_theme(:doom_one) do
-      {:ok, _} -> :doom_one
+    case Minga.Config.ThemeRegistry.get_theme(:astrodark) do
+      {:ok, _} -> :astrodark
       :error -> :minga_default
     end
   end
+
+  # Folder icons have no language definition; this is their default tint when a
+  # theme does not override the `:directory` key.
+  @folder_icon_color 0x519ABA
+
+  @doc """
+  Resolves the icon color for a filetype, preferring the theme's `:icon` overrides
+  over the language's default `icon_color`. The special `:directory` key colors
+  folder icons. Themes without overrides fall back to language/folder defaults.
+  """
+  @spec icon_color(t(), atom()) :: color()
+  def icon_color(%__MODULE__{icon: overrides}, filetype) do
+    case overrides && Map.get(overrides, filetype) do
+      color when is_integer(color) and color >= 0 -> color
+      _ -> default_icon_color(filetype)
+    end
+  end
+
+  @doc """
+  The theme-independent default icon color for a filetype (or `:directory`), used
+  when no theme override applies. Equivalent to `icon_color/2` against a theme with
+  no `:icon` overrides.
+  """
+  @spec default_icon_color(atom()) :: color()
+  def default_icon_color(:directory), do: @folder_icon_color
+  def default_icon_color(filetype), do: Minga.Language.Devicon.color(filetype)
 
   @doc """
   Registers user-defined themes loaded from disk.

@@ -1209,12 +1209,16 @@ fn decodeFileTreeRow(alloc: std.mem.Allocator, payload: []const u8, offset: *usi
     if (payload.len < offset.* + 1) return error.Malformed;
     offset.* += 1;
     const editing_text = try readString16(payload, offset);
+    if (payload.len < offset.* + 3) return error.Malformed;
+    const icon_color = readU24(payload[offset.* .. offset.* + 3]);
+    offset.* += 3;
 
     return .{
         .id = try alloc.dupe(u8, id),
         .path = try alloc.dupe(u8, path),
         .name = try alloc.dupe(u8, name),
         .icon = try alloc.dupe(u8, icon),
+        .icon_color = icon_color,
         .depth = depth,
         .flags = flags,
         .git_status = git_status,

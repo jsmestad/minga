@@ -71,6 +71,37 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilderTest do
       assert row.guides == [true]
       assert row.editing.type == :rename
       assert row.editing.text == "renamed"
+      # Folder rows resolve to the theme's :directory icon color (doom_one uses the default).
+      assert row.icon_color == 0x519ABA
+    end
+
+    test "resolves per-filetype icon colors from the active theme" do
+      path = "/project/main.rs"
+
+      tree = %ProjectFileTree{
+        root: "/project",
+        width: 32,
+        cursor: 0,
+        expanded: MapSet.new(["/project"]),
+        git_status: %{},
+        entries: [
+          %{path: path, name: "main.rs", dir?: false, depth: 1, last_child?: true, guides: []}
+        ]
+      }
+
+      file_tree = %FileTreeState{tree: tree, focused: true, tree_status: :ready}
+
+      astrodark =
+        FileTreeBuilder.build(build_minimal_context(file_tree: file_tree, theme: :astrodark))
+
+      doom = FileTreeBuilder.build(build_minimal_context(file_tree: file_tree, theme: :doom_one))
+
+      assert [%{icon_color: astrodark_color}] = astrodark.rows
+      assert [%{icon_color: doom_color}] = doom.rows
+
+      # astrodark overrides Rust's icon color; doom_one keeps the language default.
+      assert astrodark_color == 0xDEA584
+      assert doom_color == Minga.Language.Devicon.color(:rust)
     end
 
     test "semantic model is consistent for same hidden state" do
@@ -84,11 +115,12 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilderTest do
 
   defp build_minimal_context(opts \\ []) do
     file_tree = Keyword.get(opts, :file_tree, nil)
+    theme = Keyword.get(opts, :theme, :doom_one)
 
     %MingaEditor.Frontend.Emit.Context{
       port_manager: self(),
       capabilities: MingaEditor.Frontend.Capabilities.default(),
-      theme: MingaEditor.UI.Theme.get!(:doom_one),
+      theme: MingaEditor.UI.Theme.get!(theme),
       font_registry: MingaEditor.UI.FontRegistry.new(),
       windows: %MingaEditor.State.Windows{map: %{}, active: 1},
       layout: %MingaEditor.Layout{

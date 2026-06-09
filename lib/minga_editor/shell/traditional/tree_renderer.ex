@@ -542,7 +542,7 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
     dirty_width = if is_dirty, do: 1, else: 0
     indicator_width = diagnostic_width + dirty_width + git_width
 
-    {prefix, structure_prefix, icon, icon_color} =
+    {prefix, structure_prefix, icon, icon_key} =
       row_prefix(tree_row, width, indicator_width, @minimum_name_width)
 
     prefix_width = Unicode.display_width(prefix)
@@ -553,7 +553,7 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
 
     # Build draw commands: structure, icon, name, diagnostic marker, dirty marker, and git marker.
     guide_style = guide_draw_style(is_cursor, focused, theme)
-    icon_style = icon_draw_style(icon_color, is_cursor, focused, theme)
+    icon_style = icon_draw_style(Theme.icon_color(theme, icon_key), is_cursor, focused, theme)
     name_style = name_draw_style(tree_row, is_cursor, tree_row.active?, focused, theme)
     structure_width = Unicode.display_width(structure_prefix)
 
@@ -602,10 +602,10 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
 
     # Type indicator: file icon for new file, folder icon for new folder,
     # the entry's own icon for rename
-    {icon, _icon_color} =
+    {icon, _icon_key} =
       case editing.type do
-        :new_file -> {"", 0x519ABA}
-        :new_folder -> {@folder_open, 0x519ABA}
+        :new_file -> {"", :directory}
+        :new_folder -> {@folder_open, :directory}
         :rename -> entry_icon(tree_row)
       end
 
@@ -656,15 +656,15 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
 
   @spec fixed_prefix_width(Row.t()) :: non_neg_integer()
   defp fixed_prefix_width(tree_row) do
-    {icon, _icon_color} = entry_icon(tree_row)
+    {icon, _icon_key} = entry_icon(tree_row)
     Unicode.display_width(disclosure_marker(tree_row) <> icon <> " ")
   end
 
   @spec row_prefix(Row.t(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
-          {String.t(), String.t(), String.t(), non_neg_integer()}
+          {String.t(), String.t(), String.t(), atom()}
   defp row_prefix(tree_row, row_width, indicator_width, minimum_name_width) do
     disclosure = disclosure_marker(tree_row)
-    {icon, icon_color} = entry_icon(tree_row)
+    {icon, icon_key} = entry_icon(tree_row)
     fixed_prefix = disclosure <> icon <> " "
 
     guide_width =
@@ -677,7 +677,7 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
     structure_prefix = guide_prefix <> disclosure
     prefix = structure_prefix <> icon <> " "
 
-    {prefix, structure_prefix, icon, icon_color}
+    {prefix, structure_prefix, icon, icon_key}
   end
 
   @spec build_guides([boolean()], non_neg_integer()) :: String.t()
@@ -789,18 +789,21 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
 
   # ── Icon selection ──────────────────────────────────────────────────────
 
-  @spec entry_icon(Row.t()) :: {String.t(), non_neg_integer()}
+  # Returns the glyph and the icon-color key (a filetype atom, or `:directory` for
+  # folders). The concrete color is resolved later via `Theme.icon_color/2` so the
+  # active theme can override it.
+  @spec entry_icon(Row.t()) :: {String.t(), atom()}
   defp entry_icon(%Row{directory?: true, expanded?: true}) do
-    {@folder_open, 0x519ABA}
+    {@folder_open, :directory}
   end
 
   defp entry_icon(%Row{directory?: true}) do
-    {@folder_closed, 0x519ABA}
+    {@folder_closed, :directory}
   end
 
   defp entry_icon(%Row{path: path}) do
     filetype = Language.detect_filetype(path)
-    Devicon.icon_and_color(filetype)
+    {Devicon.icon(filetype), filetype}
   end
 
   # ── Style helpers ──────────────────────────────────────────────────────
