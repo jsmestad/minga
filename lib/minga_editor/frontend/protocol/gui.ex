@@ -1570,10 +1570,10 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   Per row:
 
-      stable_hash(4) + row_flags(2) + depth(1) + git_status(1) + diagnostics(8) + guide_count(1) + guides + id + path + rel_path + name + icon + icon_color(3) + editing_type(1) + editing_text
+      stable_hash(4) + row_flags(2) + depth(1) + git_status(1) + diagnostics(8) + guide_count(1) + guides + id + path + rel_path + name + icon + editing_type(1) + editing_text + icon_color(3)
 
   String fields use uint16 byte lengths except icon, which uses a uint8 byte length.
-  `icon_color` is three bytes (R, G, B), following the icon glyph.
+  `icon_color` is three bytes (R, G, B), following the editing payload.
   """
   @type file_tree_status :: FileTreeState.tree_status()
 
@@ -1641,9 +1641,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
       encode_string16(Path.relative_to(row.path, root)),
       encode_string16(row.name),
       encode_string8(icon),
-      <<icon_r::8, icon_g::8, icon_b::8>>,
       <<editing_type::8>>,
-      encode_string16(editing_text)
+      encode_string16(editing_text),
+      <<icon_r::8, icon_g::8, icon_b::8>>
     ]
   end
 

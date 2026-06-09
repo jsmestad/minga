@@ -22,11 +22,16 @@ func tabIcon(tab protocol.Tab) uiIcon {
 	return devIconForPath(tab.Label, false)
 }
 
-func fileTreeIcon(row protocol.FileTreeRow) uiIcon {
+func fileTreeIcon(row protocol.FileTreeRow, selected bool) uiIcon {
 	if strings.TrimSpace(row.Icon) != "" {
 		// The BEAM sends the glyph plus a per-row icon color resolved from the
-		// active theme's icon palette. Use it so the tree matches the theme.
-		return uiIcon{glyph: strings.TrimSpace(row.Icon), color: iconColorHex(row.IconColor)}
+		// active theme's icon palette. Preserve it on unselected rows only so
+		// selected rows keep the selection contrast.
+		color := iconColorHex(row.IconColor)
+		if selected {
+			color = ""
+		}
+		return uiIcon{glyph: strings.TrimSpace(row.Icon), color: color}
 	}
 	path := row.Path
 	if strings.TrimSpace(path) == "" {

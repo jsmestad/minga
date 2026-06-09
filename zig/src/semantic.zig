@@ -5039,36 +5039,35 @@ test "decodeFileTree retains rows and metadata" {
     const alloc = std.testing.allocator;
     const packet =
         &[_]u8{
-            protocol.OP_GUI_FILE_TREE, 0,    0,   0,   140,
-            2,                         3,    3,   0,   5,
-            'r',                       'o',  'w', '-', '1',
-            0,                         5,    '/', 'r', 'e',
-            'p',                       'o',  0,   18,  0,
-            2,                         0,    0,   0,   0,
-            0,                         1,    0,   3,   0,
-            0,                         0,    0,   0,   0,
-            0,                         0,    0,   0,   0,
-            0,                         5,    'r', 'o', 'w',
-            '-',                       '0',  0,   9,   '/',
-            'r',                       'e',  'p', 'o', '/',
-            'l',                       'i',  'b', 0,   3,
-            'l',                       'i',  'b', 0,   3,
-            'l',                       'i',  'b', 1,   'D',
-            0,                         0,    0,   0xFF, 0,
-            0,                         0,    0,   0,   2,
-            0,                         32,   1,
-            0,                         0,    0,   0,   0,
-            0,                         0,    0,   0,   0,
-            0,                         5,    'r', 'o', 'w',
-            '-',                       '1',  0,   14,  '/',
-            'r',                       'e',  'p', 'o', '/',
-            'l',                       'i',  'b', '/', 'a',
-            '.',                       'e',  'x', 0,   8,
-            'l',                       'i',  'b', '/', 'a',
-            '.',                       'e',  'x', 0,   4,
-            'a',                       '.',  'e', 'x', 1,
-            'E',                       0,    0,   0,   0xFF,
-            0,                         0,
+            protocol.OP_GUI_FILE_TREE, 0,   0,    0,    140,
+            2,                         3,   3,    0,    5,
+            'r',                       'o', 'w',  '-',  '1',
+            0,                         5,   '/',  'r',  'e',
+            'p',                       'o', 0,    18,   0,
+            2,                         0,   0,    0,    0,
+            0,                         1,   0,    3,    0,
+            0,                         0,   0,    0,    0,
+            0,                         0,   0,    0,    0,
+            0,                         5,   'r',  'o',  'w',
+            '-',                       '0', 0,    9,    '/',
+            'r',                       'e', 'p',  'o',  '/',
+            'l',                       'i', 'b',  0,    3,
+            'l',                       'i', 'b',  0,    3,
+            'l',                       'i', 'b',  1,    'D',
+            0xFF,                      0,   0,    0,    0,
+            0,                         0,   0,    0,    2,
+            0,                         32,  1,    0,    0,
+            0,                         0,   0,    0,    0,
+            0,                         0,   0,    0,    5,
+            'r',                       'o', 'w',  '-',  '1',
+            0,                         14,  '/',  'r',  'e',
+            'p',                       'o', '/',  'l',  'i',
+            'b',                       '/', 'a',  '.',  'e',
+            'x',                       0,   8,    'l',  'i',
+            'b',                       '/', 'a',  '.',  'e',
+            'x',                       0,   4,    'a',  '.',
+            'e',                       'x', 1,    'E',  0xFF,
+            0,                         0,   0x6D, 0x80, 0x86,
         };
 
     var tree = try decodeFileTree(alloc, packet);
@@ -5093,6 +5092,7 @@ test "decodeFileTree retains rows and metadata" {
     try std.testing.expectEqual(@as(u16, 0), tree.rows[1].visibleDiagnostics());
     try std.testing.expectEqualStrings("/repo/lib/a.ex", tree.rows[1].path);
     try std.testing.expectEqualStrings("a.ex", tree.rows[1].name);
+    try std.testing.expectEqual(@as(u24, 0x6D8086), tree.rows[1].icon_color);
 }
 
 test "semantic state applies retained file tree selection" {
@@ -5114,8 +5114,8 @@ test "semantic state applies retained file tree selection" {
             'a',                       '.', 'e', 'x',  0,
             4,                         'a', '.', 'e',  'x',
             0,                         4,   'a', '.',  'e',
-            'x',                       1,   'E', 0,    0,
-            0,                         0xFF, 0,   0,
+            'x',                       1,   'E', 0xFF, 0,
+            0,                         0,   0,   0,
         };
     const selection_packet =
         &[_]u8{
@@ -5153,8 +5153,8 @@ test "semantic state renders retained file tree sidebar" {
             'a',                       '.', 'e', 'x',  0,
             4,                         'a', '.', 'e',  'x',
             0,                         4,   'a', '.',  'e',
-            'x',                       1,   'E', 0,    0,
-            0,                         0xFF, 0,   0,
+            'x',                       1,   'E', 0xFF, 0,
+            0,                         0,   0,   0,
         };
 
     var state = State.init(alloc);
@@ -5246,8 +5246,8 @@ test "semantic state renders file tree row selected from decoded row flags" {
             'a',                       '.', 'e', 'x',  0,
             4,                         'a', '.', 'e',  'x',
             0,                         4,   'a', '.',  'e',
-            'x',                       1,   'E', 0,    0,
-            0,                         0xFF, 0,   0,
+            'x',                       1,   'E', 0xFF, 0,
+            0,                         0,   0,   0,
         };
 
     var state = State.init(alloc);
@@ -5290,8 +5290,8 @@ test "semantic state lets sidebars render when file tree is not visible for widt
             'a',                       '.', 'e', 'x',  0,
             4,                         'a', '.', 'e',  'x',
             0,                         4,   'a', '.',  'e',
-            'x',                       1,   'E', 0,    0,
-            0,                         0xFF, 0,   0,
+            'x',                       1,   'E', 0xFF, 0,
+            0,                         0,   0,   0,
         };
     const sidebars_packet =
         &[_]u8{

@@ -1293,7 +1293,7 @@ struct GUIFileTreeDecoderTests {
         #expect(entries[1].guides == [true])
         #expect(entries[1].name == "editor.ex")
         #expect(entries[1].relPath == "lib/editor.ex")
-        // Per-row icon color (3 bytes after the glyph) round-trips through the decoder.
+        // Per-row icon color (3 bytes after the editing payload) round-trips through the decoder.
         #expect(entries[0].iconColorR == 0x6D)
         #expect(entries[0].iconColorG == 0x80)
         #expect(entries[0].iconColorB == 0x86)
@@ -1488,11 +1488,11 @@ struct GUIFileTreeDecoderTests {
         appendString16(&data, relPath)
         appendString16(&data, name)
         appendString8(&data, icon)
+        data.append(editingType)
+        appendString16(&data, editingText)
         data.append(iconColorR)
         data.append(iconColorG)
         data.append(iconColorB)
-        data.append(editingType)
-        appendString16(&data, editingText)
     }
 }
 

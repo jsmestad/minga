@@ -595,16 +595,16 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             pos += iconLen
 
             guard pos + 3 <= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
-            let iconColorR = data[pos]; pos += 1
-            let iconColorG = data[pos]; pos += 1
-            let iconColorB = data[pos]; pos += 1
-
-            guard pos + 3 <= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
             let editingType = data[pos]; pos += 1
             let editingTextLen = Int(readU16(data, pos)); pos += 2
             guard pos + editingTextLen <= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
             let editingText = String(data: data[pos..<(pos + editingTextLen)], encoding: .utf8) ?? ""
             pos += editingTextLen
+
+            guard pos + 3 <= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
+            let iconColorR = data[pos]; pos += 1
+            let iconColorG = data[pos]; pos += 1
+            let iconColorB = data[pos]; pos += 1
 
             entries.append(Wire.FileTreeEntry(
                 pathHash: pathHash,

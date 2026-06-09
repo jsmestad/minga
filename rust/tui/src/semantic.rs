@@ -2761,13 +2761,13 @@ fn decode_file_tree_row(bytes: &[u8]) -> Result<(FileTreeRow, usize), DecodeErro
     let _relative = read_string16(bytes, &mut offset)?;
     let name = read_string16(bytes, &mut offset)?;
     let icon = read_string8(bytes, &mut offset)?;
+    require_len(bytes, offset + 1, "file tree editing type")?;
+    offset += 1;
+    let editing_text = read_string16(bytes, &mut offset)?;
     require_len(bytes, offset + 3, "file tree icon color")?;
     let icon_color =
         (bytes[offset] as u32) << 16 | (bytes[offset + 1] as u32) << 8 | bytes[offset + 2] as u32;
     offset += 3;
-    require_len(bytes, offset + 1, "file tree editing type")?;
-    offset += 1;
-    let editing_text = read_string16(bytes, &mut offset)?;
 
     Ok((
         FileTreeRow {
@@ -3554,9 +3554,9 @@ mod tests {
             string16("main.ex"),
             string16("main.ex"),
             string8("rs"),
-            vec![0x6D, 0x80, 0x86], // icon color (R,G,B)
             vec![0xFF],
             string16(""),
+            vec![0x6D, 0x80, 0x86], // icon color (R,G,B) follows editing payload
         ]
         .concat();
         let payload = [
@@ -3577,7 +3577,7 @@ mod tests {
         assert!(matches!(
             command,
             Command::FileTree(FileTree { visible: true, focused: true, width: 24, selected_id, rows, .. }, _)
-                if selected_id == "id-1" && rows[0].name == "main.ex" && rows[0].flags == 0x15
+                if selected_id == "id-1" && rows[0].name == "main.ex" && rows[0].flags == 0x15 && rows[0].icon_color == 0x6D8086
         ));
 
         let selection_payload = [vec![1], string16("id-2")].concat();

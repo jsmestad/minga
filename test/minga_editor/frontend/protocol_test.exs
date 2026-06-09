@@ -1002,7 +1002,7 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       {rel_path, strings} = take_string16(strings)
       {name, strings} = take_string16(strings)
       {icon, strings} = take_string8(strings)
-      <<icon_r::8, icon_g::8, icon_b::8, 255::8, 0::16>> = strings
+      <<255::8, 0::16, icon_r::8, icon_g::8, icon_b::8>> = strings
 
       assert id == row.id
       assert path == row.path
@@ -1233,8 +1233,8 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       {_name, strings} = take_string16(strings)
       {_icon, strings} = take_string8(strings)
 
-      <<_icon_r::8, _icon_g::8, _icon_b::8, 2::8, editing_text_len::16,
-        editing_text::binary-size(editing_text_len)>> = strings
+      <<2::8, editing_text_len::16, editing_text::binary-size(editing_text_len), _icon_r::8,
+        _icon_g::8, _icon_b::8>> = strings
 
       assert editing_text == "renamed.txt"
     end

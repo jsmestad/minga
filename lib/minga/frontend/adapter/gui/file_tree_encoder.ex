@@ -117,9 +117,9 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoder do
       Wire.encode_string16(Path.relative_to(row.path, root)),
       Wire.encode_string16(row.name),
       Wire.encode_string8(row.icon),
-      <<icon_r::8, icon_g::8, icon_b::8>>,
       <<editing_type::8>>,
-      Wire.encode_string16(editing_text)
+      Wire.encode_string16(editing_text),
+      <<icon_r::8, icon_g::8, icon_b::8>>
     ]
   end
 

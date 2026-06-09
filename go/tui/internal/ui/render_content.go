@@ -710,7 +710,7 @@ func (m Model) renderFileTree(tree protocol.FileTree, width int, height int) []s
 		if row.Dirty {
 			dirty = " *"
 		}
-		icon := fileTreeIcon(row)
+		icon := fileTreeIcon(row, row.Selected)
 		iconText := icon.glyph
 		iconBackground := theme.TreeSurface()
 		if row.Selected {
