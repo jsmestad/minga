@@ -54,6 +54,17 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUITest do
       assert %Chrome{} = chrome
     end
 
+    test "handles layouts too short for a status bar" do
+      state = base_state(rows: 3)
+      {scrolls, cursor_info, state, layout} = run_through_content(state)
+
+      chrome = ChromeTUI.build(state, layout, scrolls, cursor_info)
+
+      assert %Chrome{} = chrome
+      assert chrome.status_bar_draws == []
+      assert chrome.status_bar_data == nil
+    end
+
     test "tab bar field is a list (TUI renders tab bar)" do
       state = base_state()
       {scrolls, cursor_info, state, layout} = run_through_content(state)

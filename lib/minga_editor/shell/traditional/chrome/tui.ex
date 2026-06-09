@@ -143,7 +143,7 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
     end
   end
 
-  @spec stable_chrome_fingerprint(state(), Layout.t(), StatusBarData.t()) :: integer()
+  @spec stable_chrome_fingerprint(state(), Layout.t(), StatusBarData.t() | nil) :: integer()
   defp stable_chrome_fingerprint(state, layout, status_bar_data) do
     :erlang.phash2({
       layout.editor_area,
@@ -166,7 +166,7 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
   end
 
   @spec build_status_bar(state(), Layout.t(), map() | nil) ::
-          {[DisplayList.draw()], StatusBarData.t(),
+          {[DisplayList.draw()], StatusBarData.t() | nil,
            [MingaEditor.Shell.Traditional.Modeline.click_region()]}
   defp build_status_bar(_state, %{status_bar: nil}, _active_scroll) do
     {[], nil, []}
@@ -194,7 +194,8 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
     :exit, _ -> StatusBarData.from_state(state)
   end
 
-  @spec status_bar_dirty?(StatusBarData.t()) :: boolean()
+  @spec status_bar_dirty?(StatusBarData.t() | nil) :: boolean()
+  defp status_bar_dirty?(nil), do: false
   defp status_bar_dirty?({:buffer, %{dirty: dirty}}), do: dirty
   defp status_bar_dirty?({:agent, %{dirty: dirty}}), do: dirty
 
