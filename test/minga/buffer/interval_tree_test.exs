@@ -44,8 +44,14 @@ defmodule Minga.Core.IntervalTreeTest do
     end
   end
 
-  defp interval_list_gen(max_count, max_line, max_col) do
-    gen all(intervals <- list_of(interval_gen(max_line, max_col), max_length: max_count)) do
+  defp interval_list_gen(max_count, max_line, max_col, min_count \\ 0) do
+    gen all(
+          intervals <-
+            list_of(interval_gen(max_line, max_col),
+              min_length: min_count,
+              max_length: max_count
+            )
+        ) do
       intervals
     end
   end
@@ -487,7 +493,7 @@ defmodule Minga.Core.IntervalTreeTest do
     end
 
     property "delete removes exactly the targeted interval" do
-      check all(intervals <- interval_list_gen(20, 50, 20), intervals != []) do
+      check all(intervals <- interval_list_gen(20, 50, 20, 1)) do
         tree = IntervalTree.from_list(intervals)
         target = Enum.random(intervals)
 
