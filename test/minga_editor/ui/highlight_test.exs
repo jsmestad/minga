@@ -409,5 +409,31 @@ defmodule Minga.HighlightTest do
     end
   end
 
+  describe "retheme/2" do
+    test "swaps colors to the new theme while preserving spans, version, and capture names" do
+      spans = [%{start_byte: 0, end_byte: 7, capture_id: 0}]
+
+      hl =
+        Highlight.from_theme(MingaEditor.UI.Theme.get!(:doom_one))
+        |> Highlight.put_names(["keyword"])
+        |> Highlight.put_spans(3, spans)
+
+      before_fg = MingaEditor.UI.Face.Registry.style_for(hl.face_registry, "keyword").fg
+
+      one_light = MingaEditor.UI.Theme.get!(:one_light)
+      rethemed = Highlight.retheme(hl, one_light)
+
+      # Parse results are theme-independent and survive the swap.
+      assert rethemed.version == 3
+      assert rethemed.spans == List.to_tuple(spans)
+      assert rethemed.capture_names == {"keyword"}
+
+      # Colors come from the new theme.
+      assert rethemed.theme == one_light.syntax
+      after_fg = MingaEditor.UI.Face.Registry.style_for(rethemed.face_registry, "keyword").fg
+      assert after_fg != before_fg
+    end
+  end
+
   defp joined_text(result), do: Enum.map_join(result, fn {text, _style} -> text end)
 end

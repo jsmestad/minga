@@ -72,6 +72,19 @@ defmodule MingaEditor.UI.Highlight do
     }
   end
 
+  @doc """
+  Rebuilds the theme and face registry from a new `MingaEditor.UI.Theme.t()`.
+
+  Preserves the parsed `spans`, `version`, and `capture_names` (which are
+  theme-independent) while swapping the color mapping. Used when the editor
+  theme changes so existing tree-sitter highlights re-render with the new
+  palette instead of the stale one baked into the old `face_registry`.
+  """
+  @spec retheme(t(), MingaEditor.UI.Theme.t()) :: t()
+  def retheme(%__MODULE__{} = hl, %MingaEditor.UI.Theme{} = theme) do
+    %{hl | theme: theme.syntax, face_registry: FaceRegistry.from_theme(theme)}
+  end
+
   @doc "Stores capture names from a `highlight_names` event."
   @spec put_names(t(), [String.t()]) :: t()
   def put_names(%__MODULE__{} = hl, names) when is_list(names) do

@@ -453,6 +453,20 @@ defmodule MingaEditor.State do
     update_workspace(state, fn workspace -> SessionState.update_highlight(workspace, fun) end)
   end
 
+  @doc """
+  Switches the active editor theme and re-colors existing syntax highlights.
+
+  Sets `state.theme` and rebuilds each buffer's highlight `face_registry`
+  from the new theme so tree-sitter colors update immediately. Buffers with
+  a syntax override keep their custom palette.
+  """
+  @spec apply_theme(t(), Theme.t()) :: t()
+  def apply_theme(%__MODULE__{} = state, %Theme{} = theme) do
+    state
+    |> Map.put(:theme, theme)
+    |> update_highlight(&Highlighting.retheme_all(&1, theme))
+  end
+
   @doc "Replaces the active workspace editing state."
   @spec set_editing(t(), VimState.t()) :: t()
   def set_editing(%__MODULE__{} = state, %VimState{} = editing) do
