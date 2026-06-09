@@ -26,8 +26,8 @@ defmodule Mix.Tasks.Swift.Harness do
       "macos/Sources/Protocol/ProtocolConstants.swift",
       "macos/Sources/Protocol/ProtocolTypes.swift",
       "macos/Sources/Protocol/ProtocolDecoder.swift",
+      "macos/Sources/Protocol/AgentSurfaceTypes.swift",
       "macos/Sources/Renderer/WindowContent.swift",
-      "extensions/board/frontend/macos/Sources/Protocol/BoardTypes.swift",
       "macos/TestHarness/main.swift"
     ]
 
