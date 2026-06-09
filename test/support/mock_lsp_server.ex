@@ -25,7 +25,10 @@ defmodule Minga.Test.MockLSPServer do
 
   @typedoc "Options for the mock server config."
   @type server_config_opt ::
-          {:request_configuration, boolean()} | {:request_unknown, boolean()} | {:settings, map()}
+          {:request_configuration, boolean()}
+          | {:request_unknown, boolean()}
+          | {:stderr_banner, boolean()}
+          | {:settings, map()}
 
   @doc """
   Returns a ServerConfig struct suitable for `LSP.Client.start_link/1`.
@@ -37,7 +40,8 @@ defmodule Minga.Test.MockLSPServer do
     request_args =
       [
         {Keyword.get(opts, :request_configuration, false), "--request-configuration"},
-        {Keyword.get(opts, :request_unknown, false), "--request-unknown"}
+        {Keyword.get(opts, :request_unknown, false), "--request-unknown"},
+        {Keyword.get(opts, :stderr_banner, false), "--stderr-banner"}
       ]
       |> Enum.flat_map(fn
         {true, arg} -> [arg]

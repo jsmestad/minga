@@ -226,7 +226,7 @@ defmodule Minga.Config.Options do
     {:scroll_margin, :non_neg_integer, 5,
      "Minimum number of context lines kept around the cursor while scrolling."},
     {:scroll_lines, :pos_integer, 1, "Number of lines moved for each wheel-scroll step."},
-    {:theme, :theme_atom, :doom_one, "Active color theme."},
+    {:theme, :theme_atom, :astrodark, "Active color theme."},
     {:indent_with, {:enum, [:spaces, :tabs]}, :spaces,
      "Whether indentation inserts spaces or tab characters."},
     {:indent_guides, :boolean, true, "Whether indentation guide decorations are shown."},

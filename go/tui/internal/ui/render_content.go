@@ -134,8 +134,13 @@ func (m Model) semanticWindowPlacement(window protocol.WindowContent) (semanticW
 	}, true
 }
 
-// Protocol geometry is absolute screen geometry, while Bubble Tea renders the body after header and left chrome are already consumed.
+// Protocol window geometry is relative to the semantic editor surface. Bubble Tea adds TUI chrome around that surface after semantic content is composed.
 func (m Model) normalizeSemanticGeometry(row int, col int) (int, int) {
+	return row, col
+}
+
+// Protocol chrome geometry is absolute terminal geometry, so split separators are normalized into Bubble Tea's body canvas.
+func (m Model) normalizeChromeGeometry(row int, col int) (int, int) {
 	rowOffset, colOffset := m.semanticContentOffsets()
 	return row - rowOffset, col - colOffset
 }
@@ -441,8 +446,8 @@ func (m Model) withSplitSeparators(lines []string) []string {
 		style = style.Foreground(lipgloss.Color(fmt.Sprintf("#%06X", splits.Color)))
 	}
 	for _, vertical := range splits.Verticals {
-		startRow, col := m.normalizeSemanticGeometry(int(vertical.StartRow), int(vertical.Col))
-		endRow, _ := m.normalizeSemanticGeometry(int(vertical.EndRow), int(vertical.Col))
+		startRow, col := m.normalizeChromeGeometry(int(vertical.StartRow), int(vertical.Col))
+		endRow, _ := m.normalizeChromeGeometry(int(vertical.EndRow), int(vertical.Col))
 		if col < 0 || endRow < 0 {
 			continue
 		}
@@ -452,7 +457,7 @@ func (m Model) withSplitSeparators(lines []string) []string {
 		}
 	}
 	for _, horizontal := range splits.Horizontals {
-		row, col := m.normalizeSemanticGeometry(int(horizontal.Row), int(horizontal.Col))
+		row, col := m.normalizeChromeGeometry(int(horizontal.Row), int(horizontal.Col))
 		if row < 0 || row >= len(out) {
 			continue
 		}
@@ -690,40 +695,15 @@ func (m Model) gutterSign(entry protocol.GutterEntry) string {
 func (m Model) renderFileTree(tree protocol.FileTree, width int, height int) []string {
 	theme := m.palette()
 	style := lipgloss.NewStyle().Foreground(theme.TreeText()).Background(theme.TreeSurface()).Width(width)
-	selectedStyle := style.Foreground(theme.Text()).Background(theme.TreeSelection()).Bold(true)
-	header := style.Bold(true).Foreground(theme.TreeHeaderText()).Background(theme.TreeHeader()).Render(fit("Files  "+tree.Root, width))
+	header := style.Bold(true).Foreground(theme.TreeHeaderText()).Background(theme.TreeHeader()).Render(fit(" Files  "+tree.Root, width))
 	lines := []string{header}
 	if len(tree.Rows) == 0 {
 		if status := fileTreeStatusText(tree); status != "" && len(lines) < height {
-			lines = append(lines, style.Render(fit(status, width)))
+			lines = append(lines, style.Foreground(theme.TreeMutedText()).Render(fit(" "+status, width)))
 		}
 	}
 	for rowIndex, row := range tree.Rows {
-		prefix := strings.Repeat("  ", int(row.Depth))
-		marker := " "
-		if row.Directory && row.Expanded {
-			marker = "v"
-		} else if row.Directory {
-			marker = ">"
-		}
-		dirty := ""
-		if row.Dirty {
-			dirty = " *"
-		}
-		icon := fileTreeIcon(row)
-		iconText := icon.glyph
-		iconBackground := theme.TreeSurface()
-		if row.Selected {
-			iconBackground = theme.TreeSelection()
-		}
-		if icon.color != "" {
-			iconText = lipgloss.NewStyle().Foreground(lipgloss.Color(icon.color)).Background(iconBackground).Render(icon.glyph)
-		}
-		text := fit(fmt.Sprintf("%s%s %s %s%s", prefix, marker, iconText, row.Name, dirty), width)
-		rendered := style.Render(text)
-		if row.Selected {
-			rendered = selectedStyle.Render(text)
-		}
+		rendered := m.renderFileTreeRow(row, width)
 		lines = append(lines, m.zones.Mark(zoneIDFileTreeRow(rowIndex), rendered))
 		if len(lines) >= height {
 			return lines
@@ -733,6 +713,62 @@ func (m Model) renderFileTree(tree protocol.FileTree, width int, height int) []s
 		lines = append(lines, style.Render(strings.Repeat(" ", width)))
 	}
 	return lines
+}
+
+func (m Model) renderFileTreeRow(row protocol.FileTreeRow, width int) string {
+	theme := m.palette()
+	rowBackground := theme.TreeSurface()
+	textColor := theme.TreeText()
+	markerColor := theme.TreeMutedText()
+	if row.Directory {
+		textColor = theme.TreeDirectoryText()
+	}
+	if fileTreeRowMuted(row) {
+		textColor = theme.TreeMutedText()
+	}
+	if row.Selected {
+		rowBackground = theme.TreeSelection()
+		textColor = theme.TreeSelectionText()
+	}
+	selectionMarker := " "
+	if row.Selected {
+		selectionMarker = "▌"
+	}
+	prefix := strings.Repeat("  ", int(row.Depth))
+	expander := " "
+	if row.Directory && row.Expanded {
+		expander = "▾"
+	} else if row.Directory {
+		expander = "▸"
+	}
+	rowStyle := lipgloss.NewStyle().Foreground(textColor).Background(rowBackground)
+	markerStyle := lipgloss.NewStyle().Foreground(markerColor).Background(rowBackground)
+	if row.Selected {
+		markerStyle = markerStyle.Foreground(theme.Accent()).Bold(true)
+	}
+	icon := fileTreeIcon(row, row.Selected)
+	iconStyle := rowStyle
+	if icon.color != "" && !row.Selected && !fileTreeRowMuted(row) {
+		iconStyle = iconStyle.Foreground(lipgloss.Color(icon.color))
+	}
+	nameStyle := rowStyle
+	if row.Selected || row.Directory {
+		nameStyle = nameStyle.Bold(true)
+	}
+	content := markerStyle.Render(selectionMarker+prefix+expander) + rowStyle.Render(" ") + iconStyle.Render(icon.glyph) + rowStyle.Render(" ") + nameStyle.Render(row.Name)
+	if row.Dirty {
+		dirty := lipgloss.NewStyle().Foreground(theme.Warning()).Background(rowBackground).Render("●")
+		space := strings.Repeat(" ", max(width-lipgloss.Width(content)-lipgloss.Width(dirty), 1))
+		content += rowStyle.Render(space) + dirty
+	} else if remaining := width - lipgloss.Width(content); remaining > 0 {
+		content += rowStyle.Render(strings.Repeat(" ", remaining))
+	}
+	return rowStyle.Width(width).Render(fitStyled(content, width))
+}
+
+func fileTreeRowMuted(row protocol.FileTreeRow) bool {
+	name := strings.TrimSpace(row.Name)
+	return strings.HasPrefix(name, ".") || strings.Contains(row.Path, "/.")
 }
 
 func fileTreeStatusText(tree protocol.FileTree) string {

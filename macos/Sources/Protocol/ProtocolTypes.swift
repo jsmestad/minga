@@ -210,6 +210,10 @@ enum Wire {
         let diagnosticHintCount: UInt16
         let guides: [Bool]
         let icon: String
+        /// Per-row icon color (R, G, B), resolved from the active theme's icon palette.
+        let iconColorR: UInt8
+        let iconColorG: UInt8
+        let iconColorB: UInt8
         let name: String
         let relPath: String
         /// 0=new_file, 1=new_folder, 2=rename, 255=none.

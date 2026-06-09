@@ -268,10 +268,9 @@ struct FileTreeRowView: View {
         if entry.showsActiveAccent {
             return theme.treeActiveFg
         }
-        if entry.isDir {
-            return theme.treeDirFg
-        }
-        return theme.treeFg.opacity(0.7)
+        // Otherwise use the per-row icon color resolved from the active theme's icon
+        // palette by the BEAM (devicon colors for files, themed folder tint for dirs).
+        return entry.iconColor
     }
 
     private var nameColor: Color {

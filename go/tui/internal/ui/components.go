@@ -35,11 +35,11 @@ func (m Model) charmList(title string, items []componentItem, selected int, heig
 	delegate.ShowDescription = descriptions
 	delegate.SetSpacing(0)
 	delegate.Styles.NormalTitle = lipgloss.NewStyle().Foreground(theme.PopupText()).Background(theme.PopupSurface())
-	delegate.Styles.NormalDesc = lipgloss.NewStyle().Foreground(theme.Muted()).Background(theme.PopupSurface())
-	delegate.Styles.SelectedTitle = lipgloss.NewStyle().Bold(true).Foreground(theme.SelectionText()).Background(theme.Selection()).Padding(0, 1)
-	delegate.Styles.SelectedDesc = lipgloss.NewStyle().Foreground(theme.SelectionText()).Background(theme.Selection()).Padding(0, 1)
-	delegate.Styles.DimmedTitle = lipgloss.NewStyle().Foreground(theme.Muted())
-	delegate.Styles.DimmedDesc = lipgloss.NewStyle().Foreground(theme.Muted())
+	delegate.Styles.NormalDesc = lipgloss.NewStyle().Foreground(theme.PopupMutedText()).Background(theme.PopupSurface())
+	delegate.Styles.SelectedTitle = lipgloss.NewStyle().Bold(true).Foreground(theme.PopupSelectionText()).Background(theme.PopupSelection()).Padding(0, 1)
+	delegate.Styles.SelectedDesc = lipgloss.NewStyle().Foreground(theme.PopupSelectionText()).Background(theme.PopupSelection()).Padding(0, 1)
+	delegate.Styles.DimmedTitle = lipgloss.NewStyle().Foreground(theme.PopupMutedText())
+	delegate.Styles.DimmedDesc = lipgloss.NewStyle().Foreground(theme.PopupMutedText())
 	delegate.Styles.FilterMatch = lipgloss.NewStyle().Foreground(theme.Accent()).Underline(true)
 
 	listItems := make([]list.Item, 0, len(items))
@@ -50,8 +50,8 @@ func (m Model) charmList(title string, items []componentItem, selected int, heig
 	component.Title = title
 	component.Styles.Title = lipgloss.NewStyle().Bold(true).Foreground(theme.Accent()).Background(theme.PopupSurface())
 	component.Styles.TitleBar = lipgloss.NewStyle().Background(theme.PopupSurface()).Width(m.width)
-	component.Styles.StatusBar = lipgloss.NewStyle().Foreground(theme.Muted()).Background(theme.PopupSurface())
-	component.Styles.NoItems = lipgloss.NewStyle().Foreground(theme.Muted()).Background(theme.PopupSurface())
+	component.Styles.StatusBar = lipgloss.NewStyle().Foreground(theme.PopupMutedText()).Background(theme.PopupSurface())
+	component.Styles.NoItems = lipgloss.NewStyle().Foreground(theme.PopupMutedText()).Background(theme.PopupSurface())
 	component.SetShowStatusBar(false)
 	component.SetShowPagination(len(items) > height)
 	component.SetShowHelp(false)
@@ -68,7 +68,7 @@ func (m Model) charmTable(columns []table.Column, rows []table.Row, selected int
 	styles := table.DefaultStyles()
 	styles.Header = lipgloss.NewStyle().Bold(true).Foreground(theme.Accent()).Background(theme.PopupSurface()).Padding(0, 1)
 	styles.Cell = lipgloss.NewStyle().Foreground(theme.PopupText()).Background(theme.PopupSurface()).Padding(0, 1)
-	styles.Selected = lipgloss.NewStyle().Bold(true).Foreground(theme.SelectionText()).Background(theme.Selection())
+	styles.Selected = lipgloss.NewStyle().Bold(true).Foreground(theme.PopupSelectionText()).Background(theme.PopupSelection())
 	component := table.New(
 		table.WithColumns(columns),
 		table.WithRows(rows),

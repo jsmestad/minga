@@ -105,6 +105,7 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoder do
     editing_text = if row.editing, do: row.editing.text, else: ""
     guides = Enum.map(row.guides, fn guide? -> if guide?, do: <<1>>, else: <<0>> end)
     {errors, warnings, info, hints} = clamp_diagnostics(row.diagnostics)
+    {icon_r, icon_g, icon_b} = Wire.rgb(row.icon_color)
 
     [
       <<:erlang.phash2(row.id, 0xFFFFFFFF)::32, file_tree_row_flags(row, model)::16, row.depth::8,
@@ -117,7 +118,8 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoder do
       Wire.encode_string16(row.name),
       Wire.encode_string8(row.icon),
       <<editing_type::8>>,
-      Wire.encode_string16(editing_text)
+      Wire.encode_string16(editing_text),
+      <<icon_r::8, icon_g::8, icon_b::8>>
     ]
   end
 

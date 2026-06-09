@@ -145,50 +145,6 @@ jobs:
       - name: Run Zig tests
         run: cd zig && zig build test
 
-  test-rust-tui:
-    name: Test (Rust TUI)
-    runs-on: ubuntu-latest
-    env:
-      MIX_ENV: test
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: erlef/setup-beam@v1
-        with:
-          version-file: .tool-versions
-          version-type: strict
-
-      - name: Cache deps
-        uses: actions/cache@v4
-        with:
-          path: |
-            deps
-            _build
-          key: rust-tui-deps-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock') }}
-          restore-keys: rust-tui-deps-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-
-
-      - name: Cache Cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            rust/tui/target
-          key: rust-tui-cargo-${{ runner.os }}-${{ hashFiles('rust/tui/Cargo.lock') }}
-          restore-keys: rust-tui-cargo-${{ runner.os }}-
-
-      - run: mix deps.get
-      - run: mix protocol.gen
-
-      - name: Check Rust formatting
-        run: cargo fmt --manifest-path rust/tui/Cargo.toml --check
-
-      - name: Run Rust tests
-        run: cargo test --manifest-path rust/tui/Cargo.toml
-
-      - name: Run Rust clippy
-        run: cargo clippy --manifest-path rust/tui/Cargo.toml -- -D warnings
-
   test-go-tui:
     name: Test (Go TUI)
     runs-on: ubuntu-latest

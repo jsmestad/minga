@@ -134,6 +134,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   alias MingaEditor.UI.Devicon
   alias MingaEditor.UI.Notification
   alias MingaEditor.UI.NotificationCenter
+  alias MingaEditor.UI.Theme
   alias MingaEditor.UI.Theme.Slots
   alias MingaEditor.Session.ChromeState
   alias MingaEditor.Session.ChromeState.TabSummary
@@ -1583,9 +1584,10 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   Per row:
 
-      stable_hash(4) + row_flags(2) + depth(1) + git_status(1) + diagnostics(8) + guide_count(1) + guides + id + path + rel_path + name + icon + editing_type(1) + editing_text
+      stable_hash(4) + row_flags(2) + depth(1) + git_status(1) + diagnostics(8) + guide_count(1) + guides + id + path + rel_path + name + icon + editing_type(1) + editing_text + icon_color(3)
 
   String fields use uint16 byte lengths except icon, which uses a uint8 byte length.
+  `icon_color` is three bytes (R, G, B), following the editing payload.
   """
   @type file_tree_status :: FileTreeState.tree_status()
 
@@ -1633,6 +1635,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @spec encode_file_tree_row(Row.t(), String.t()) :: iodata()
   defp encode_file_tree_row(%Row{} = row, root) do
     icon = file_tree_row_icon(row)
+    {icon_r, icon_g, icon_b} = encode_rgb(file_tree_row_icon_color(row))
     editing_type = if row.editing, do: encode_editing_type(row.editing.type), else: 0xFF
     editing_text = if row.editing, do: row.editing.text, else: ""
     guides = Enum.map(row.guides, fn guide? -> if guide?, do: <<1>>, else: <<0>> end)
@@ -1653,7 +1656,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
       encode_string16(row.name),
       encode_string8(icon),
       <<editing_type::8>>,
-      encode_string16(editing_text)
+      encode_string16(editing_text),
+      <<icon_r::8, icon_g::8, icon_b::8>>
     ]
   end
 
@@ -1732,6 +1736,14 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @spec file_tree_row_icon(Row.t()) :: String.t()
   defp file_tree_row_icon(%Row{directory?: true}), do: @folder_icon
   defp file_tree_row_icon(%Row{name: name}), do: Devicon.icon(Language.detect_filetype(name))
+
+  # This legacy encoder has no theme in scope, so it emits the theme-independent
+  # default icon color. The live adapter (FileTreeEncoder) carries themed colors.
+  @spec file_tree_row_icon_color(Row.t()) :: non_neg_integer()
+  defp file_tree_row_icon_color(%Row{directory?: true}), do: Theme.default_icon_color(:directory)
+
+  defp file_tree_row_icon_color(%Row{name: name}),
+    do: Theme.default_icon_color(Language.detect_filetype(name))
 
   @spec encode_git_status(atom() | nil) :: non_neg_integer()
   defp encode_git_status(nil), do: 0

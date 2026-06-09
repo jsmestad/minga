@@ -15,8 +15,8 @@ import (
 //
 // This test lives in the protocol package (not internal/generated) so that
 // mix protocol.gen, which rewrites the generated/ directory, can never clobber
-// it. Keep the fixtures in sync with the Rust twins in rust/tui/src/protocol.rs
-// and the encoder assertions in protocol_schema_validation_test.exs.
+// it. Keep the fixtures in sync with the encoder assertions in
+// protocol_schema_validation_test.exs.
 
 func TestDecodeGuiCompletionFieldsWithItems(t *testing.T) {
 	bytes := []byte{1, 0, 3, 0, 7, 0, 1, 0, 1, 1, 0, 3, 'f', 'o', 'o', 0, 3, 'b', 'a', 'r'}

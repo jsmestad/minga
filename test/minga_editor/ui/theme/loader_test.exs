@@ -291,9 +291,10 @@ defmodule MingaEditor.UI.Theme.LoaderTest do
       """)
 
       {:ok, loaded} = Loader.load_file(path)
-      doom = MingaEditor.UI.Theme.get!(:doom_one)
+      # A theme without an explicit `inherits` falls back to the active default theme.
+      default = MingaEditor.UI.Theme.get!(MingaEditor.UI.Theme.default())
 
-      assert loaded.theme.editor.bg == doom.editor.bg
+      assert loaded.theme.editor.bg == default.editor.bg
       assert loaded.theme.popup.title_fg == 0x123456
     end
 

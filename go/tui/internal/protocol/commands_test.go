@@ -55,6 +55,9 @@ func TestDecodeWindowContentRows(t *testing.T) {
 	if command.Window.ID != 7 || command.Window.CursorRow != 3 || command.Window.CursorCol != 4 {
 		t.Fatalf("header decoded incorrectly: %+v", command.Window)
 	}
+	if !command.Window.CursorVisible {
+		t.Fatalf("full window header should decode cursor_visible from flags: %+v", command.Window)
+	}
 	if len(command.Window.Rows) != 1 || command.Window.Rows[0].Text != "hi" {
 		t.Fatalf("rows decoded incorrectly: %+v", command.Window.Rows)
 	}
@@ -71,18 +74,19 @@ func TestDecodeWindowRowsAndViewportDeltasIncludeRowRefs(t *testing.T) {
 	}
 	rowsPayload := append([]byte{0, 1}, ref...)
 	tests := []struct {
-		name       string
-		opcode     byte
-		header     []byte
-		wantID     uint16
-		wantEpoch  uint32
-		wantRow    uint16
-		wantCol    uint16
-		wantShape  byte
-		wantScroll uint16
+		name              string
+		opcode            byte
+		header            []byte
+		wantID            uint16
+		wantEpoch         uint32
+		wantRow           uint16
+		wantCol           uint16
+		wantShape         byte
+		wantScroll        uint16
+		wantCursorVisible bool
 	}{
-		{name: "rows", opcode: generated.OPGuiWindowRowsDelta, header: []byte{0, 7, 0x12, 0x34, 0x56, 0x78, 0xAA, 0, 9, 0, 11, 2, 0, 13}, wantID: 7, wantEpoch: 0x12345678, wantRow: 9, wantCol: 11, wantShape: 2, wantScroll: 13},
-		{name: "viewport", opcode: generated.OPGuiWindowViewportDelta, header: []byte{0, 8, 0x22, 0x33, 0x44, 0x55, 0xBB, 0, 10, 0, 12, 3, 0, 14}, wantID: 8, wantEpoch: 0x22334455, wantRow: 10, wantCol: 12, wantShape: 3, wantScroll: 14},
+		{name: "rows", opcode: generated.OPGuiWindowRowsDelta, header: []byte{0, 7, 0x12, 0x34, 0x56, 0x78, 0xAA, 0, 9, 0, 11, 2, 0, 13}, wantID: 7, wantEpoch: 0x12345678, wantRow: 9, wantCol: 11, wantShape: 2, wantScroll: 13, wantCursorVisible: false},
+		{name: "viewport", opcode: generated.OPGuiWindowViewportDelta, header: []byte{0, 8, 0x22, 0x33, 0x44, 0x55, 0xBB, 0, 10, 0, 12, 3, 0, 14}, wantID: 8, wantEpoch: 0x22334455, wantRow: 10, wantCol: 12, wantShape: 3, wantScroll: 14, wantCursorVisible: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -104,6 +108,9 @@ func TestDecodeWindowRowsAndViewportDeltasIncludeRowRefs(t *testing.T) {
 			}
 			if window.ID != tt.wantID || window.ContentEpoch != tt.wantEpoch || window.CursorRow != tt.wantRow || window.CursorCol != tt.wantCol || window.CursorShape != tt.wantShape || window.ScrollLeft != tt.wantScroll {
 				t.Fatalf("header decoded incorrectly: %+v", window)
+			}
+			if window.CursorVisible != tt.wantCursorVisible {
+				t.Fatalf("cursor_visible decoded incorrectly: got %v want %v in %+v", window.CursorVisible, tt.wantCursorVisible, window)
 			}
 			if len(window.Rows) != 1 || !window.Rows[0].Ref {
 				t.Fatalf("row ref decoded incorrectly: %+v", window.Rows)
@@ -420,8 +427,10 @@ func TestDecodeFileTreeChromeRows(t *testing.T) {
 	row = append(row, string16("/repo/lib")...)
 	row = append(row, string16("lib")...)
 	row = append(row, string16("lib")...)
-	row = append(row, 1, 'd', 0xFF)
+	row = append(row, 1, 'd')
+	row = append(row, 0xFF)
 	row = append(row, 0, 0)
+	row = append(row, 0x6D, 0x80, 0x86) // icon color (R,G,B) follows editing payload
 	body := []byte{2, 1, 3}
 	body = append(body, string16("/repo/lib")...)
 	body = append(body, string16("/repo")...)
@@ -438,7 +447,7 @@ func TestDecodeFileTreeChromeRows(t *testing.T) {
 	if !tree.Visible || tree.Status != 3 || tree.Root != "/repo" || len(tree.Rows) != 1 {
 		t.Fatalf("file tree decoded incorrectly: %+v", tree)
 	}
-	if got := tree.Rows[0]; !got.Directory || !got.Selected || got.Name != "lib" || got.Depth != 1 {
+	if got := tree.Rows[0]; !got.Directory || !got.Selected || got.Name != "lib" || got.Depth != 1 || got.IconColor != 0x6D8086 {
 		t.Fatalf("file tree row decoded incorrectly: %+v", got)
 	}
 }

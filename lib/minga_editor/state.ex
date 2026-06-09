@@ -2019,7 +2019,7 @@ defmodule MingaEditor.State do
         } = state
       ) do
     case Map.fetch(windows, id) do
-      {:ok, window} ->
+      {:ok, %{buffer: ^buf} = window} ->
         cursor = Buffer.cursor(buf)
 
         %{
@@ -2029,6 +2029,9 @@ defmodule MingaEditor.State do
               | windows: %{ws | map: Map.put(windows, id, %{window | cursor: cursor})}
             }
         }
+
+      {:ok, _window} ->
+        state
 
       :error ->
         state
@@ -2179,8 +2182,27 @@ defmodule MingaEditor.State do
 
     state
     |> set_workspace(SessionState.restore_tab_context(state.workspace, context))
+    |> sync_file_tab_active_window_buffer()
     |> sync_agent_ui_from_active_workspace()
   end
+
+  @spec sync_file_tab_active_window_buffer(t()) :: t()
+  defp sync_file_tab_active_window_buffer(%__MODULE__{} = state) do
+    case tab_bar(state) do
+      %TabBar{} = tb ->
+        sync_file_tab_active_window_buffer(state, TabBar.active(tb))
+
+      nil ->
+        state
+    end
+  end
+
+  @spec sync_file_tab_active_window_buffer(t(), Tab.t() | nil) :: t()
+  defp sync_file_tab_active_window_buffer(%__MODULE__{} = state, %Tab{kind: :file}) do
+    sync_active_window_buffer(state)
+  end
+
+  defp sync_file_tab_active_window_buffer(%__MODULE__{} = state, _tab), do: state
 
   # Builds a typed context for a brand-new tab, using agent-shaped defaults for agent tabs.
   @spec build_empty_tab_defaults(t()) :: Tab.context()

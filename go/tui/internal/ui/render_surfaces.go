@@ -2,9 +2,11 @@ package ui
 
 import (
 	"fmt"
+	"image/color"
 	"strings"
 
 	"charm.land/bubbles/v2/table"
+	"charm.land/lipgloss/v2"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 )
 
@@ -138,16 +140,89 @@ func (m Model) renderBottomPanel(panel protocol.BottomPanel) []string {
 	if len(panel.Tabs) > int(panel.ActiveTab) {
 		title = panel.Tabs[panel.ActiveTab].Name
 	}
-	rows := make([]table.Row, 0, len(panel.Messages))
-	for _, msg := range panel.Messages {
-		rows = append(rows, table.Row{levelName(msg.Level), msg.Path, msg.Text})
+	messages := m.visibleBottomPanelMessages(panel)
+	width := max(m.width, 1)
+	height := m.maxOverlayHeight()
+	p := m.palette()
+	headerLeft := fmt.Sprintf(" %s", title)
+	headerRight := fmt.Sprintf("%d messages", len(panel.Messages))
+	if m.bottomPanelScrollback > 0 {
+		headerRight += fmt.Sprintf("  ↑%d", m.bottomPanelScrollback)
 	}
-	columns := []table.Column{
-		{Title: title, Width: 10},
-		{Title: "Path", Width: max(m.width/4, 12)},
-		{Title: "Message", Width: max(m.width-max(m.width/4, 12)-14, 20)},
+	leftText := lipgloss.NewStyle().Bold(true).Foreground(p.Accent()).Background(p.PopupChrome()).Render(headerLeft)
+	rightText := lipgloss.NewStyle().Foreground(p.PopupMutedText()).Background(p.PopupChrome()).Render(headerRight)
+	spacer := strings.Repeat(" ", max(width-lipgloss.Width(leftText)-lipgloss.Width(rightText), 0))
+	lines := []string{lipgloss.NewStyle().Background(p.PopupChrome()).Width(width).Render(fitStyled(leftText+spacer+rightText, width))}
+	rowBudget := max(height-1, 0)
+	pathWidth := min(max(width/4, 12), max(width-18, 1))
+	messageWidth := max(width-pathWidth-8, 1)
+	for _, msg := range messages[:min(len(messages), rowBudget)] {
+		lines = append(lines, m.renderBottomPanelMessage(msg, pathWidth, messageWidth, width))
 	}
-	return takeLines(m.charmTable(columns, rows, 0, m.maxOverlayHeight()), m.maxOverlayHeight())
+	lineStyle := m.popupLineStyle(width)
+	for len(lines) < height {
+		lines = append(lines, lineStyle.Render(strings.Repeat(" ", width)))
+	}
+	return takeLines(lines, height)
+}
+
+func (m Model) renderBottomPanelMessage(msg protocol.PanelMessage, pathWidth int, messageWidth int, width int) string {
+	p := m.palette()
+	badge := bottomPanelLevelBadge(msg.Level)
+	badgeColor := bottomPanelLevelColor(p, msg.Level)
+	badgeText := lipgloss.NewStyle().Bold(true).Foreground(p.EditorSurface()).Background(badgeColor).Width(5).Align(lipgloss.Center).Render(badge)
+	path := msg.Path
+	if strings.TrimSpace(path) == "" {
+		path = "messages"
+	}
+	pathText := lipgloss.NewStyle().Foreground(p.PopupMutedText()).Background(p.PopupSurface()).Width(pathWidth).Render(fit(path, pathWidth))
+	messageText := lipgloss.NewStyle().Foreground(p.PopupText()).Background(p.PopupSurface()).Width(messageWidth).Render(fit(msg.Text, messageWidth))
+	row := " " + badgeText + " " + pathText + " " + messageText
+	return lipgloss.NewStyle().Background(p.PopupSurface()).Width(width).Render(fitStyled(row, width))
+}
+
+func bottomPanelLevelBadge(level byte) string {
+	switch level {
+	case 1:
+		return "WRN"
+	case 2:
+		return "ERR"
+	case 3:
+		return "OK"
+	case 4:
+		return "RUN"
+	default:
+		return "INF"
+	}
+}
+
+func bottomPanelLevelColor(p palette, level byte) color.Color {
+	switch level {
+	case 1:
+		return p.Warning()
+	case 2:
+		return p.Error()
+	case 3:
+		return p.Hint()
+	case 4:
+		return p.Info()
+	default:
+		return p.Info()
+	}
+}
+
+func (m Model) visibleBottomPanelMessages(panel protocol.BottomPanel) []protocol.PanelMessage {
+	visibleRows := m.bottomPanelVisibleRows()
+	if len(panel.Messages) <= visibleRows {
+		return panel.Messages
+	}
+	start := max(len(panel.Messages)-visibleRows-m.bottomPanelScrollback, 0)
+	end := min(start+visibleRows, len(panel.Messages))
+	return panel.Messages[start:end]
+}
+
+func (m Model) bottomPanelVisibleRows() int {
+	return max(m.maxOverlayHeight()-1, 1)
 }
 
 func (m Model) renderExtensionPanels(ext protocol.ExtensionPanel) []string {

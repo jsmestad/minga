@@ -2,6 +2,7 @@ package ui
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -105,8 +106,40 @@ func TestWhichKeyRendersCompactFloatingPopup(t *testing.T) {
 	}
 
 	view := ansi.Strip(model.View().Content)
-	if !strings.Contains(view, "Keys SPC  1/2") || !strings.Contains(view, "/   Search project") || !strings.Contains(view, "1  󰓩 Tab 1") {
-		t.Fatalf("which-key popup should render compact icon/key/description rows: %q", view)
+	if !strings.Contains(view, "Keys SPC") || !strings.Contains(view, "1/2") || !strings.Contains(view, "/    Search project") || !strings.Contains(view, "1   󰓩 Tab 1") {
+		t.Fatalf("which-key popup should render structured key/description rows: %q", view)
+	}
+	if !strings.Contains(view, "3 bindings") || !strings.Contains(view, "Esc") {
+		t.Fatalf("which-key popup should include a compact footer: %q", view)
+	}
+}
+
+func TestWhichKeyStylesGroupsAndLimitsColumnCount(t *testing.T) {
+	model := New(160, 24, nil)
+	bindings := []protocol.WhichKeyBinding{
+		{Key: "f", Description: "+file"},
+		{Key: "g", Description: "+git"},
+		{Key: "b", Description: "+buffer"},
+		{Key: "s", Description: "Search project"},
+		{Key: "1", Description: "Tab 1"},
+		{Key: "2", Description: "Tab 2"},
+		{Key: "3", Description: "Tab 3"},
+		{Key: "4", Description: "Tab 4"},
+		{Key: "5", Description: "Tab 5"},
+	}
+	popup := ansi.Strip(model.renderFloatingWhichKey(protocol.WhichKey{Visible: true, Prefix: "SPC", Bindings: bindings}))
+	if !strings.Contains(popup, "› +file ›") || !strings.Contains(popup, "› +git ›") {
+		t.Fatalf("group entries should read as navigable groups: %q", popup)
+	}
+	firstBindingRow := ""
+	for _, line := range strings.Split(popup, "\n") {
+		if strings.Contains(line, "+file") {
+			firstBindingRow = line
+			break
+		}
+	}
+	if count := strings.Count(firstBindingRow, "│"); count > 4 {
+		t.Fatalf("which-key should use at most three columns, got row %q", firstBindingRow)
 	}
 }
 
@@ -132,7 +165,7 @@ func TestHeaderRendersBreadcrumbWithTabs(t *testing.T) {
 	model := New(120, 24, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiTabBar: {
-			Tabs: protocol.TabBar{Tabs: []protocol.Tab{{Icon: "󰈙", Label: "main.ex", Active: true}}},
+			Tabs: protocol.TabBar{Tabs: []protocol.Tab{{ID: 1, Icon: "󰈙", Label: "main.ex", Active: true}}},
 		},
 		generated.OPGuiBreadcrumb: {
 			Breadcrumb: protocol.Breadcrumb{Segments: []string{"lib", "minga", "main.ex"}},
@@ -142,6 +175,20 @@ func TestHeaderRendersBreadcrumbWithTabs(t *testing.T) {
 	header := ansi.Strip(strings.Join(model.headerLines(), "\n"))
 	if !strings.Contains(header, "▌ 󰈙 main.ex") || !strings.Contains(header, "lib › minga › main.ex") {
 		t.Fatalf("wide header should render active tab accent and breadcrumbs together: %q", header)
+	}
+}
+
+func TestHeaderTruncatesLongTabLabels(t *testing.T) {
+	model := New(120, 24, nil)
+	model.chrome = map[byte]protocol.ChromePayload{
+		generated.OPGuiTabBar: {
+			Tabs: protocol.TabBar{Tabs: []protocol.Tab{{ID: 1, Icon: "󰈙", Label: "signature_help_builder_test.exs", Active: true}}},
+		},
+	}
+
+	header := ansi.Strip(strings.Join(model.headerLines(), "\n"))
+	if !strings.Contains(header, "signature_help_builder_…") || strings.Contains(header, "signature_help_builder_test.exs") {
+		t.Fatalf("header should truncate long tab labels, got %q", header)
 	}
 }
 
@@ -203,6 +250,34 @@ func TestPickerSelectedRowHasVisibleMarker(t *testing.T) {
 	}
 }
 
+func TestPickerSelectedRowUsesSelectionColors(t *testing.T) {
+	model := New(80, 24, nil)
+	rows := model.renderPickerList("Buffers", protocol.Picker{
+		Visible:  true,
+		Selected: 0,
+		Items:    []protocol.PickerItem{{Label: "[new 1]", Description: "dirty"}},
+	}, 2, 40)
+	joined := strings.Join(rows, "\n")
+	if !strings.Contains(joined, "48;2;58;66;92") {
+		t.Fatalf("selected picker row should use popup selection background: %q", joined)
+	}
+	if !strings.Contains(joined, "38;2;247;250;255") {
+		t.Fatalf("selected picker row should use popup selection foreground: %q", joined)
+	}
+}
+
+func TestPickerPreviewDefaultsToPopupTextAndSurface(t *testing.T) {
+	model := New(80, 24, nil)
+	rendered := model.renderPickerPreview(protocol.PickerPreview{Visible: true, Lines: []protocol.PreviewLine{{Segments: []protocol.PreviewSegment{{Text: "plain preview"}}}}}, 3, 40)
+	joined := strings.Join(rendered, "\n")
+	if !strings.Contains(joined, "38;2;217;224;245") {
+		t.Fatalf("plain preview text should use popup foreground instead of terminal default: %q", joined)
+	}
+	if !strings.Contains(joined, "48;2;41;45;62") {
+		t.Fatalf("preview rows should use popup surface background: %q", joined)
+	}
+}
+
 func TestPickerOverlayIsBounded(t *testing.T) {
 	model := New(100, 24, nil)
 	items := make([]protocol.PickerItem, 20)
@@ -237,6 +312,52 @@ func TestWidePickerPreviewRendersBesideList(t *testing.T) {
 	}
 	if len(rendered) > model.maxOverlayHeight() {
 		t.Fatalf("wide picker overlay height = %d, want <= %d", len(rendered), model.maxOverlayHeight())
+	}
+}
+
+func TestHiddenWindowCursorDoesNotOverrideVisibleWindowCursor(t *testing.T) {
+	model := New(80, 24, nil)
+	model.putWindow(protocol.WindowContent{ID: 1, CursorRow: 4, CursorCol: 18, CursorShape: 1, CursorVisible: true, Rows: []protocol.WindowRow{{Text: "typed text"}}})
+	model.putWindow(protocol.WindowContent{ID: 2, CursorRow: 1, CursorCol: 0, CursorShape: 0, CursorVisible: false, Rows: []protocol.WindowRow{{Text: "[new 1] *"}}})
+
+	if model.cursorRow != 4 || model.cursorCol != 18 || model.cursorShape != 1 {
+		t.Fatalf("hidden secondary window cursor should not override active cursor: row=%d col=%d shape=%d", model.cursorRow, model.cursorCol, model.cursorShape)
+	}
+}
+
+func TestHiddenWindowDeltaDoesNotOverrideVisibleWindowCursor(t *testing.T) {
+	model := New(80, 24, nil)
+	model.putWindow(protocol.WindowContent{ID: 1, ContentEpoch: 2, CursorRow: 4, CursorCol: 18, CursorShape: 1, CursorVisible: true, Rows: []protocol.WindowRow{{Text: "typed text"}}})
+	model.putWindow(protocol.WindowContent{ID: 2, ContentEpoch: 2, CursorRow: 1, CursorCol: 0, CursorShape: 0, CursorVisible: false, Rows: []protocol.WindowRow{{Text: "[new 1] *"}}})
+
+	model.applyWindowDelta(protocol.WindowContent{ID: 2, ContentEpoch: 2, CursorRow: 1, CursorCol: 0, CursorShape: 0, CursorVisible: false, Rows: []protocol.WindowRow{{Text: "[new 1] *"}}})
+
+	if model.cursorRow != 4 || model.cursorCol != 18 || model.cursorShape != 1 {
+		t.Fatalf("hidden secondary window delta should not override active cursor: row=%d col=%d shape=%d", model.cursorRow, model.cursorCol, model.cursorShape)
+	}
+}
+
+func TestVisibleToHiddenWindowDeltaRestoresRemainingVisibleCursor(t *testing.T) {
+	model := New(80, 24, nil)
+	model.putWindow(protocol.WindowContent{ID: 1, ContentEpoch: 2, CursorRow: 4, CursorCol: 18, CursorShape: 1, CursorVisible: true, Rows: []protocol.WindowRow{{Text: "typed text"}}})
+	model.putWindow(protocol.WindowContent{ID: 2, ContentEpoch: 2, CursorRow: 1, CursorCol: 0, CursorShape: 0, CursorVisible: true, Rows: []protocol.WindowRow{{Text: "[new 1] *"}}})
+
+	model.applyWindowDelta(protocol.WindowContent{ID: 2, ContentEpoch: 2, CursorRow: 1, CursorCol: 0, CursorShape: 0, CursorVisible: false, Rows: []protocol.WindowRow{{Text: "[new 1] *"}}})
+
+	if model.cursorRow != 4 || model.cursorCol != 18 || model.cursorShape != 1 {
+		t.Fatalf("visible-to-hidden delta should restore remaining visible cursor: row=%d col=%d shape=%d", model.cursorRow, model.cursorCol, model.cursorShape)
+	}
+}
+
+func TestHiddenToVisibleWindowDeltaUpdatesCursor(t *testing.T) {
+	model := New(80, 24, nil)
+	model.putWindow(protocol.WindowContent{ID: 1, ContentEpoch: 2, CursorRow: 4, CursorCol: 18, CursorShape: 1, CursorVisible: true, Rows: []protocol.WindowRow{{Text: "typed text"}}})
+	model.putWindow(protocol.WindowContent{ID: 2, ContentEpoch: 2, CursorRow: 1, CursorCol: 0, CursorShape: 0, CursorVisible: false, Rows: []protocol.WindowRow{{Text: "[new 1] *"}}})
+
+	model.applyWindowDelta(protocol.WindowContent{ID: 2, ContentEpoch: 2, CursorRow: 2, CursorCol: 5, CursorShape: 2, CursorVisible: true, Rows: []protocol.WindowRow{{Text: "[new 1] *"}}})
+
+	if model.cursorRow != 2 || model.cursorCol != 5 || model.cursorShape != 2 {
+		t.Fatalf("hidden-to-visible delta should update cursor: row=%d col=%d shape=%d", model.cursorRow, model.cursorCol, model.cursorShape)
 	}
 }
 
@@ -523,6 +644,17 @@ func TestSplitSeparatorsNormalizeAgainstHeaderAndFileTree(t *testing.T) {
 	}
 }
 
+func TestFileTreeSelectedRowPaintsBackgroundAcrossSegments(t *testing.T) {
+	model := New(40, 8, nil)
+	rendered := model.renderFileTreeRow(protocol.FileTreeRow{Name: "installer", Icon: "󰉋", Directory: true, Selected: true}, 24)
+	if count := strings.Count(rendered, "48;2;52;58;82"); count < 4 {
+		t.Fatalf("selected file-tree row should carry selection background across marker, icon, label, and fill, count=%d row=%q", count, rendered)
+	}
+	if got := displayWidth(ansi.Strip(rendered)); got != 24 {
+		t.Fatalf("selected file-tree row should fill requested width, got %d row=%q", got, rendered)
+	}
+}
+
 func TestFileTreeWidthRespectsProtocolGeometryAndSafetyClamp(t *testing.T) {
 	if got := fileTreeWidth(80, protocol.FileTree{Width: 18}); got != 18 {
 		t.Fatalf("file tree width = %d, want narrow protocol width 18", got)
@@ -539,7 +671,7 @@ func TestFileTreeReservesVisibleEmptyState(t *testing.T) {
 	model := New(80, 6, nil)
 	model.title = "Header"
 	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: protocol.FileTree{Visible: true, Status: 2, Width: 18, Root: "/repo"}}}
-	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "pane"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 1, Col: 18, Width: 8, Height: 1}}})
+	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "pane"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 0, Col: 0, Width: 8, Height: 1}}})
 	model.viewport.SetContent(model.content())
 
 	lines := strings.Split(ansi.Strip(model.View().Content), "\n")
@@ -558,7 +690,7 @@ func TestSemanticWindowsRespectProtocolFileTreeWidth(t *testing.T) {
 	model := New(80, 6, nil)
 	model.title = "Header"
 	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: protocol.FileTree{Visible: true, Width: 36, Rows: []protocol.FileTreeRow{{ID: "row-0", Name: "row-0"}}}}}
-	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "pane"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 1, Col: 36, Width: 8, Height: 1}}})
+	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "pane"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 0, Col: 0, Width: 8, Height: 1}}})
 	model.viewport.SetContent(model.content())
 
 	lines := strings.Split(ansi.Strip(model.View().Content), "\n")
@@ -697,8 +829,8 @@ func TestCellbufStyleMapsProtocolAttrs(t *testing.T) {
 
 func TestSemanticWindowsUsePaneGeometryRects(t *testing.T) {
 	model := New(24, 6, nil)
-	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "left"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 1, Col: 0, Width: 10, Height: 1}}})
-	model.putWindow(protocol.WindowContent{ID: 2, Rows: []protocol.WindowRow{{Text: "right"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 1, Col: 12, Width: 10, Height: 1}}})
+	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "left"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 0, Col: 0, Width: 10, Height: 1}}})
+	model.putWindow(protocol.WindowContent{ID: 2, Rows: []protocol.WindowRow{{Text: "right"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 0, Col: 12, Width: 10, Height: 1}}})
 
 	lines := ansi.Strip(strings.Join(model.semanticLines(), "\n"))
 	first := strings.Split(lines, "\n")[0]
@@ -713,7 +845,7 @@ func TestSemanticWindowsUsePaneGeometryRects(t *testing.T) {
 func TestSemanticWindowsRespectHeaderRowOffset(t *testing.T) {
 	model := New(24, 6, nil)
 	model.title = "Header"
-	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "pane"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 1, Col: 0, Width: 8, Height: 1}}})
+	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "pane"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 0, Col: 0, Width: 8, Height: 1}}})
 	model.viewport.SetContent(model.content())
 
 	lines := strings.Split(ansi.Strip(model.View().Content), "\n")
@@ -722,11 +854,26 @@ func TestSemanticWindowsRespectHeaderRowOffset(t *testing.T) {
 	}
 }
 
+func TestSemanticWindowsDoNotClipFirstRowWithWorkspaceAndTabHeaders(t *testing.T) {
+	model := New(80, 8, nil)
+	model.chrome = map[byte]protocol.ChromePayload{
+		generated.OPGuiWorkspaces: {Spaces: protocol.WorkspaceBar{Spaces: []protocol.Workspace{{ID: 1, Label: "Files", Icon: "folder", Active: true, TabCount: 1}}}},
+		generated.OPGuiTabBar:     {Tabs: protocol.TabBar{ActiveIndex: 0, Tabs: []protocol.Tab{{ID: 1, Label: "[new 1]", Active: true, Dirty: true}}}},
+	}
+	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "Hey this is a thing"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 0, Col: 0, Width: 24, Height: 1}}})
+	model.viewport.SetContent(model.content())
+
+	lines := strings.Split(ansi.Strip(model.View().Content), "\n")
+	if len(lines) < 3 || !strings.Contains(lines[2], "Hey this is a thing") {
+		t.Fatalf("semantic editor row 0 should render below workspace and tab headers: %+v", lines)
+	}
+}
+
 func TestSemanticWindowsRespectFileTreeOffset(t *testing.T) {
 	model := New(80, 6, nil)
 	model.title = "Header"
 	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: protocol.FileTree{Visible: true, Width: 24, Rows: []protocol.FileTreeRow{{ID: "row-0", Name: "row-0"}}}}}
-	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "pane"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 1, Col: 24, Width: 8, Height: 1}}})
+	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "pane"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 0, Col: 0, Width: 8, Height: 1}}})
 	model.viewport.SetContent(model.content())
 
 	lines := strings.Split(ansi.Strip(model.View().Content), "\n")
@@ -742,7 +889,7 @@ func TestSemanticWindowsRespectSidebarOffset(t *testing.T) {
 	model := New(80, 6, nil)
 	model.title = "Header"
 	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiSidebars: {Sidebars: protocol.Sidebars{Visible: true, Items: []protocol.Sidebar{{ID: "files", DisplayName: "Files", SemanticKind: "file_tree", PreferredWidth: 18, Visible: true}}}}}
-	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "pane"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 1, Col: 18, Width: 8, Height: 1}}})
+	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "pane"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 0, Col: 0, Width: 8, Height: 1}}})
 	model.viewport.SetContent(model.content())
 
 	lines := strings.Split(ansi.Strip(model.View().Content), "\n")
@@ -835,6 +982,7 @@ func TestSemanticMouseRoutesModelineAndFileTreeZones(t *testing.T) {
 	model := New(60, 12, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiStatusBar: {Status: protocol.StatusBar{Left: []protocol.StatusSegment{{Text: " save ", Command: "save"}}, Right: []protocol.StatusSegment{{Text: " quit", Command: "quit"}}}},
+		generated.OPGuiTabBar:    {Tabs: protocol.TabBar{Tabs: []protocol.Tab{{ID: 41, Icon: "󰈙", Label: "one.ex"}, {ID: 42, Icon: "󰈙", Label: "two.ex", Active: true}}}},
 		generated.OPGuiFileTree:  {Tree: protocol.FileTree{Visible: true, Width: 24, Rows: []protocol.FileTreeRow{{ID: "row-0", Name: "row-0"}, {ID: "row-1", Name: "row-1"}}}},
 	}
 	model.viewport.SetContent(model.content())
@@ -849,6 +997,12 @@ func TestSemanticMouseRoutesModelineAndFileTreeZones(t *testing.T) {
 		t.Fatalf("non-left clicks should fall back")
 	}
 
+	tabZone := waitForZone(t, model, zoneIDTab(42))
+	cmd, ok = model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: tabZone.StartX + 1, Y: tabZone.StartY}))
+	if !ok || !bytes.Equal(cmd, protocol.EncodeGUISelectTab(42)) {
+		t.Fatalf("tab click should route select-tab packet, ok=%v packet=%v", ok, cmd)
+	}
+
 	rowZone := waitForZone(t, model, zoneIDFileTreeRow(0))
 	cmd, ok = model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: rowZone.StartX + 1, Y: rowZone.StartY}))
 	if !ok || !bytes.Equal(cmd, protocol.EncodeGUIFileTreeClick(0)) {
@@ -857,6 +1011,92 @@ func TestSemanticMouseRoutesModelineAndFileTreeZones(t *testing.T) {
 	if _, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: rowZone.EndX + 10, Y: rowZone.EndY + 10})); ok {
 		t.Fatalf("out-of-bounds clicks should fall back")
 	}
+}
+
+func TestBottomPanelShowsLatestMessagesByDefault(t *testing.T) {
+	model, panel := bottomPanelTestModel(10, nil)
+	visible := model.visibleBottomPanelMessages(panel)
+	if len(visible) != model.bottomPanelVisibleRows() {
+		t.Fatalf("visible message count mismatch: got %d want %d", len(visible), model.bottomPanelVisibleRows())
+	}
+	if visible[0].Text != "msg-7" || visible[len(visible)-1].Text != "msg-9" {
+		t.Fatalf("bottom panel should start at latest messages, got %+v", visible)
+	}
+}
+
+func TestBottomPanelWheelScrollIsHandledLocally(t *testing.T) {
+	out := make(chan []byte, 1)
+	model, _ := bottomPanelTestModel(10, out)
+	next, _ := model.Update(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseWheelUp, X: 10, Y: 9}))
+	updated := next.(Model)
+	if updated.bottomPanelScrollback != bottomPanelWheelLines {
+		t.Fatalf("wheel over bottom panel should update local scrollback, got %d", updated.bottomPanelScrollback)
+	}
+	select {
+	case packet := <-out:
+		t.Fatalf("wheel over bottom panel should not send editor mouse packet: %v", packet)
+	default:
+	}
+	body := ansi.Strip(strings.Join(updated.overlayLines(), "\n"))
+	if !strings.Contains(body, "msg-4") || strings.Contains(body, "msg-9") {
+		t.Fatalf("bottom panel should scroll older messages, got %q", body)
+	}
+}
+
+func TestBottomPanelWheelOutsidePanelFallsThrough(t *testing.T) {
+	out := make(chan []byte, 1)
+	model, _ := bottomPanelTestModel(10, out)
+	next, _ := model.Update(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseWheelUp, X: 10, Y: 2}))
+	updated := next.(Model)
+	if updated.bottomPanelScrollback != 0 {
+		t.Fatalf("wheel outside bottom panel should not update local scrollback, got %d", updated.bottomPanelScrollback)
+	}
+	select {
+	case <-out:
+	default:
+		t.Fatalf("wheel outside bottom panel should fall through to editor mouse packet")
+	}
+}
+
+func TestBottomPanelChromeUpdateClampsAndResetsScrollback(t *testing.T) {
+	t.Run("shrinking list clamps stale scrollback", func(t *testing.T) {
+		model, panel := bottomPanelTestModel(10, nil)
+		model.bottomPanelScrollback = 6
+
+		shrunk := panel
+		shrunk.Messages = shrunk.Messages[:4]
+		updated, _ := model.Update(port.PacketMsg{Commands: []protocol.Command{{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiBottomPanel, Bottom: shrunk}}}})
+		got := updated.(Model)
+
+		if got.bottomPanelScrollback != 1 {
+			t.Fatalf("shrinking bottom panel should clamp stale scrollback to 1, got %d", got.bottomPanelScrollback)
+		}
+	})
+
+	t.Run("hidden panel resets stale scrollback", func(t *testing.T) {
+		model, panel := bottomPanelTestModel(10, nil)
+		model.bottomPanelScrollback = 5
+
+		hidden := panel
+		hidden.Visible = false
+		updated, _ := model.Update(port.PacketMsg{Commands: []protocol.Command{{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiBottomPanel, Bottom: hidden}}}})
+		got := updated.(Model)
+
+		if got.bottomPanelScrollback != 0 {
+			t.Fatalf("hidden bottom panel should reset stale scrollback to 0, got %d", got.bottomPanelScrollback)
+		}
+	})
+}
+
+func bottomPanelTestModel(messageCount int, out chan<- []byte) (Model, protocol.BottomPanel) {
+	model := New(80, 12, out)
+	messages := make([]protocol.PanelMessage, 0, messageCount)
+	for i := 0; i < messageCount; i++ {
+		messages = append(messages, protocol.PanelMessage{ID: uint32(i + 1), Level: 1, Text: fmt.Sprintf("msg-%d", i)})
+	}
+	panel := protocol.BottomPanel{Visible: true, ActiveTab: 0, Tabs: []protocol.PanelTab{{Type: 0x01, Name: "Messages"}}, Messages: messages}
+	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiBottomPanel: {Opcode: generated.OPGuiBottomPanel, Bottom: panel}}
+	return model, panel
 }
 
 func visibleIndex(value string, needle string) int {

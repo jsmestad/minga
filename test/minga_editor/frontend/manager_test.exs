@@ -20,7 +20,7 @@ defmodule MingaEditor.Frontend.ManagerTest do
       name = unique_name()
 
       renderer_path =
-        Path.join(System.tmp_dir!(), "minga-renderer-rs-#{System.unique_integer([:positive])}")
+        Path.join(System.tmp_dir!(), "minga-renderer-go-#{System.unique_integer([:positive])}")
 
       File.write!(renderer_path, "")
       previous_tty = System.get_env("MINGA_TTY")

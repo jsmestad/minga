@@ -144,6 +144,7 @@ defmodule Minga.Credo.DependencyDirectionCheck do
     # SystemObserver displays the editor supervisor tree as process topology data.
     "Minga.SystemObserver" => ["MingaEditor.Supervisor"],
     # Built-in theme packs register concrete presentation theme modules as data.
+    "Minga.Extensions.ThemePacks.AstroNvim" => ["MingaEditor.UI.Theme"],
     "Minga.Extensions.ThemePacks.Catppuccin" => ["MingaEditor.UI.Theme"],
     "Minga.Extensions.ThemePacks.Doom" => ["MingaEditor.UI.Theme"],
     "Minga.Extensions.ThemePacks.One" => ["MingaEditor.UI.Theme"],

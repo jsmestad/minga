@@ -28,6 +28,8 @@ struct FileTreeEntry: Identifiable {
     let diagnosticHintCount: UInt16
     let guides: [Bool]
     let icon: String
+    /// Per-row icon color resolved from the active theme's icon palette by the BEAM.
+    let iconColor: Color
     let name: String
     /// Path relative to the project root (e.g., "lib/minga/editor.ex").
     let relPath: String
@@ -59,6 +61,7 @@ struct FileTreeEntry: Identifiable {
             diagnosticHintCount: diagnosticHintCount,
             guides: guides,
             icon: icon,
+            iconColor: iconColor,
             name: name,
             relPath: relPath,
             path: path,
@@ -192,6 +195,11 @@ final class FileTreeState {
                 diagnosticHintCount: entry.diagnosticHintCount,
                 guides: entry.guides,
                 icon: entry.icon,
+                iconColor: Color(
+                    red: Double(entry.iconColorR) / 255.0,
+                    green: Double(entry.iconColorG) / 255.0,
+                    blue: Double(entry.iconColorB) / 255.0
+                ),
                 name: entry.name,
                 relPath: entry.relPath,
                 path: entry.path,

@@ -33,7 +33,7 @@ The `frontend_type` byte describes the rendering surface, not the product implem
 | 0x01 | native_gui | Native desktop GUI frontend (SwiftUI, GTK4) |
 | 0x02 | web | Web frontend (future) |
 
-The `semantic_ui` capability decides whether a non-GUI frontend can consume Semantic UI opcodes. Native GUI frontends are expected to consume Semantic UI. Product behavior should adapt through capability helpers such as semantic UI support, text measurement, color depth, float support, image support, and surface type. It should not branch on Swift, Rust, Go, GTK, or another implementation identity.
+The `semantic_ui` capability decides whether a non-GUI frontend can consume Semantic UI opcodes. Native GUI frontends are expected to consume Semantic UI. Product behavior should adapt through capability helpers such as semantic UI support, text measurement, color depth, float support, image support, and surface type. It should not branch on Swift, Go, GTK, or another implementation identity.
 
 ## Semantic UI Opcodes (BEAM → Frontend)
 
@@ -141,7 +141,7 @@ Payload v2:
 Payload v1, kept for decoder compatibility, omitted `tree_state` and `error_reason`. Frontends should derive v1 state from `visible` and `empty`, but all new BEAM payloads use v2.
 
 Per row:
-  path_hash(4) + row_flags(2) + depth(1) + git_status(1) + diagnostic_error_count(2) + diagnostic_warning_count(2) + diagnostic_info_count(2) + diagnostic_hint_count(2) + guide_count(1) + guides(guide_count) + id_len(2) + id(id_len) + path_len(2) + path(path_len) + rel_path_len(2) + rel_path(rel_path_len) + name_len(2) + name(name_len) + icon_len(1) + icon(icon_len) + editing_type(1) + editing_text_len(2) + editing_text(editing_text_len)
+  path_hash(4) + row_flags(2) + depth(1) + git_status(1) + diagnostic_error_count(2) + diagnostic_warning_count(2) + diagnostic_info_count(2) + diagnostic_hint_count(2) + guide_count(1) + guides(guide_count) + id_len(2) + id(id_len) + path_len(2) + path(path_len) + rel_path_len(2) + rel_path(rel_path_len) + name_len(2) + name(name_len) + icon_len(1) + icon(icon_len) + editing_type(1) + editing_text_len(2) + editing_text(editing_text_len) + icon_color(3)
 
 Tree flag bits:
   bit 0: visible

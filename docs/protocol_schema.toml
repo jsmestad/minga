@@ -1732,6 +1732,8 @@ fields = [{ name = "panel_count", type = "u8" }]
 
 [[command_fields]]
 opcode = "gui_file_tree"
+# Full 0x93 payload details live in docs/GUI_PROTOCOL.md because the row list is variable-length and currently hand-decoded by frontends.
+# Payload v2 row tail order is icon(string8), editing_type(u8), editing_text(string16), icon_color(rgb).
 fields = [
   { name = "visible", type = "u8" },
   { name = "flags", type = "u8" },

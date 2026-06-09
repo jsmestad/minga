@@ -12,6 +12,7 @@ defmodule MingaEditor.UI.Theme.Builder do
   @type section_overrides :: %{optional(atom()) => term()}
   @type overrides :: %{
           optional(:syntax) => Theme.syntax(),
+          optional(:icon) => Theme.icon_overrides(),
           optional(:hl_todo) => %{atom() => Face.t()},
           optional(:editor) => section_overrides(),
           optional(:gutter) => section_overrides(),
@@ -192,6 +193,7 @@ defmodule MingaEditor.UI.Theme.Builder do
     %Theme{
       name: name,
       syntax: syntax(palette),
+      icon: %{},
       hl_todo: hl_todo(palette),
       editor: editor(palette),
       gutter: gutter(palette),
@@ -554,6 +556,10 @@ defmodule MingaEditor.UI.Theme.Builder do
   @spec apply_override({atom(), term()}, Theme.t()) :: Theme.t()
   defp apply_override({:syntax, overrides}, %Theme{} = theme) when is_map(overrides) do
     %{theme | syntax: Map.merge(theme.syntax, overrides)}
+  end
+
+  defp apply_override({:icon, overrides}, %Theme{} = theme) when is_map(overrides) do
+    %{theme | icon: Map.merge(theme.icon || %{}, overrides)}
   end
 
   defp apply_override({:hl_todo, overrides}, %Theme{} = theme) when is_map(overrides) do

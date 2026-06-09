@@ -105,6 +105,7 @@ type WindowContent struct {
 	CursorRow      uint16
 	CursorCol      uint16
 	CursorShape    byte
+	CursorVisible  bool
 	ScrollLeft     uint16
 	ScrollLeftSet  bool
 	ContentEpoch   uint32
@@ -323,11 +324,12 @@ func decodeOverlayDelta(payload []byte) (Command, error) {
 	}
 
 	window := WindowContent{
-		ID:           u16(payload, 1),
-		ContentEpoch: u32(payload, 3),
-		CursorRow:    u16(payload, 8),
-		CursorCol:    u16(payload, 10),
-		CursorShape:  payload[12],
+		ID:            u16(payload, 1),
+		ContentEpoch:  u32(payload, 3),
+		CursorRow:     u16(payload, 8),
+		CursorCol:     u16(payload, 10),
+		CursorShape:   payload[12],
+		CursorVisible: payload[7]&0x01 != 0,
 	}
 
 	size := base
@@ -352,6 +354,7 @@ func decodeWindowHeader(opcode byte, section []byte, window *WindowContent) {
 		window.CursorRow = hdr.CursorRow
 		window.CursorCol = hdr.CursorCol
 		window.CursorShape = hdr.CursorShape
+		window.CursorVisible = hdr.Flags&0x02 != 0
 		window.ScrollLeft = hdr.ScrollLeft
 		window.ScrollLeftSet = true
 		window.ContentEpoch = hdr.ContentEpoch
@@ -364,6 +367,7 @@ func decodeWindowHeader(opcode byte, section []byte, window *WindowContent) {
 	}
 	window.ID = u16(section, 0)
 	window.ContentEpoch = u32(section, 2)
+	window.CursorVisible = section[6]&0x01 != 0
 	window.CursorRow = u16(section, 7)
 	window.CursorCol = u16(section, 9)
 	window.CursorShape = section[11]

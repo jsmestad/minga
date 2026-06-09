@@ -12,6 +12,8 @@ const types = @import("semantic/types.zig");
 const charm = @import("semantic/charm.zig");
 const theme_mod = @import("semantic/theme.zig");
 const decode = @import("semantic/decode.zig");
+const zigzag_chrome = @import("zigzag_chrome.zig");
+const zigzag_component_adapters = @import("zigzag_component_adapters.zig");
 
 pub const Error = types.Error;
 pub const StatusSegment = types.StatusSegment;
@@ -357,6 +359,54 @@ pub const State = struct {
         self.agent_chat = null;
         self.status_bar = null;
         self.cursor_window_id = null;
+    }
+
+    /// Applies any retained semantic GUI packet recognized by the current renderer.
+    pub fn applyRetainedSemanticPacket(self: *State, packet: []const u8) Error!void {
+        if (packet.len == 0) return;
+        switch (packet[0]) {
+            protocol.OP_GUI_THEME => try self.applyThemePacket(packet),
+            protocol.OP_GUI_WORKSPACES => try self.applyWorkspacesPacket(packet),
+            protocol.OP_GUI_GUTTER => try self.applyGutterPacket(packet),
+            protocol.OP_GUI_INDENT_GUIDES => try self.applyIndentGuidesPacket(packet),
+            protocol.OP_GUI_FILE_TREE => try self.applyFileTreePacket(packet),
+            protocol.OP_GUI_FILE_TREE_SELECTION => try self.applyFileTreeSelectionPacket(packet),
+            protocol.OP_GUI_SIDEBARS => try self.applySidebarsPacket(packet),
+            protocol.OP_GUI_WINDOW_CONTENT => try self.applyWindowContentPacket(packet),
+            protocol.OP_GUI_WINDOW_ROWS_DELTA, protocol.OP_GUI_WINDOW_VIEWPORT_DELTA => try self.applyWindowRowsDeltaPacket(packet),
+            protocol.OP_GUI_WINDOW_OVERLAY_DELTA => try self.applyWindowOverlayDeltaPacket(packet),
+            protocol.OP_GUI_TAB_BAR => try self.applyTabBarPacket(packet),
+            protocol.OP_GUI_MINIBUFFER => try self.applyMinibufferPacket(packet),
+            protocol.OP_GUI_WHICH_KEY => try self.applyWhichKeyPacket(packet),
+            protocol.OP_GUI_COMPLETION => try self.applyCompletionPacket(packet),
+            protocol.OP_GUI_BREADCRUMB => try self.applyBreadcrumbPacket(packet),
+            protocol.OP_GUI_PICKER => try self.applyPickerPacket(packet),
+            protocol.OP_GUI_PICKER_PREVIEW => try self.applyPickerPreviewPacket(packet),
+            protocol.OP_GUI_HOVER_POPUP => try self.applyHoverPopupPacket(packet),
+            protocol.OP_GUI_SIGNATURE_HELP => try self.applySignatureHelpPacket(packet),
+            protocol.OP_GUI_FLOAT_POPUP => try self.applyFloatPopupPacket(packet),
+            protocol.OP_GUI_GIT_STATUS => try self.applyGitStatusPacket(packet),
+            protocol.OP_GUI_BOTTOM_PANEL => try self.applyBottomPanelPacket(packet),
+            protocol.OP_GUI_SPLIT_SEPARATORS => try self.applySplitSeparatorsPacket(packet),
+            protocol.OP_GUI_SEARCH_STATE => try self.applySearchStatePacket(packet),
+            protocol.OP_GUI_CHANGE_SUMMARY => try self.applyChangeSummaryPacket(packet),
+            protocol.OP_GUI_NOTIFICATIONS => try self.applyNotificationsPacket(packet),
+            protocol.OP_GUI_EDIT_TIMELINE => try self.applyEditTimelinePacket(packet),
+            protocol.OP_GUI_EXTENSION_OVERLAY => try self.applyExtensionOverlayPacket(packet),
+            protocol.OP_GUI_EXTENSION_PANEL => try self.applyExtensionPanelPacket(packet),
+            protocol.OP_GUI_OBSERVATORY => try self.applyObservatoryPacket(packet),
+            protocol.OP_GUI_AGENT_CONTEXT => try self.applyAgentContextPacket(packet),
+            protocol.OP_GUI_TOOL_MANAGER => try self.applyToolManagerPacket(packet),
+            protocol.OP_GUI_CURSORLINE => try self.applyCursorlinePacket(packet),
+            protocol.OP_GUI_GUTTER_SEP => try self.applyGutterSeparatorPacket(packet),
+            protocol.OP_GUI_LINE_SPACING => try self.applyLineSpacingPacket(packet),
+            protocol.OP_GUI_CURSOR_ANIMATION => try self.applyCursorAnimationPacket(packet),
+            protocol.OP_GUI_CONFIG_STATE => try self.applyConfigStatePacket(packet),
+            protocol.OP_GUI_HOVER_ACTION => try self.applyHoverActionPacket(packet),
+            protocol.OP_GUI_AGENT_CHAT => try self.applyAgentChatPacket(packet),
+            protocol.OP_GUI_STATUS_BAR => try self.applyStatusBarPacket(packet),
+            else => {},
+        }
     }
 
     /// Decodes and retains a `gui_theme` packet.
@@ -1131,16 +1181,42 @@ fn renderFileTree(surface: anytype, file_tree: FileTree, header_rows: u16, has_s
         return;
     }
 
+    var buffer: [8192]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buffer);
+    const rows = zigzag_chrome.fileTreeRows(fba.allocator(), file_tree) catch {
+        renderFileTreeRowsManual(surface, file_tree, row, end_row, tree_width, maybe_theme);
+        return;
+    };
+
+    var index: usize = 0;
+    while (row < end_row and index < rows.len) : ({
+        row += 1;
+        index += 1;
+    }) {
+        const presentation = rows[index];
+        if (presentation.source_index >= file_tree.rows.len) continue;
+        renderFileTreeRow(surface, file_tree, file_tree.rows[presentation.source_index], presentation, row, tree_width, maybe_theme);
+    }
+}
+
+fn renderFileTreeRowsManual(surface: anytype, file_tree: FileTree, start_row: u16, end_row: u16, tree_width: u16, maybe_theme: ?Theme) void {
+    var row = start_row;
     var index: usize = 0;
     while (row < end_row and index < file_tree.rows.len) : ({
         row += 1;
         index += 1;
     }) {
-        renderFileTreeRow(surface, file_tree, file_tree.rows[index], row, tree_width, maybe_theme);
+        const tree_row = file_tree.rows[index];
+        renderFileTreeRow(surface, file_tree, tree_row, .{
+            .source_index = index,
+            .depth = tree_row.depth,
+            .marker = if (tree_row.directory()) (if (tree_row.expanded()) "v" else ">") else " ",
+            .label = if (tree_row.editing_text.len > 0) tree_row.editing_text else tree_row.name,
+        }, row, tree_width, maybe_theme);
     }
 }
 
-fn renderFileTreeRow(surface: anytype, file_tree: FileTree, row: FileTreeRow, screen_row: u16, tree_width: u16, maybe_theme: ?Theme) void {
+fn renderFileTreeRow(surface: anytype, file_tree: FileTree, row: FileTreeRow, presentation: zigzag_chrome.TreeRowPresentation, screen_row: u16, tree_width: u16, maybe_theme: ?Theme) void {
     const selected = row.selected() or std.mem.eql(u8, row.id, file_tree.selected_id);
     const focused = row.focused() or (selected and file_tree.focused);
     const active = row.active();
@@ -1151,19 +1227,27 @@ fn renderFileTreeRow(surface: anytype, file_tree: FileTree, row: FileTreeRow, sc
 
     var col: u16 = 0;
     var depth: u8 = 0;
-    while (depth < row.depth and col < tree_width) : (depth += 1) {
+    while (depth < presentation.depth and col < tree_width) : (depth += 1) {
         col = writeText(surface, screen_row, col, tree_width, "  ", fg, bg, attrs);
     }
 
-    const marker = if (row.directory()) (if (row.expanded()) "v" else ">") else " ";
-    col = writeText(surface, screen_row, col, tree_width, marker, fg, bg, attrs);
+    col = writeText(surface, screen_row, col, tree_width, presentation.marker, fg, bg, attrs);
     col = writeText(surface, screen_row, col, tree_width, " ", fg, bg, attrs);
     if (row.icon.len > 0) {
-        col = writeText(surface, screen_row, col, tree_width, row.icon, fg, bg, attrs);
+        // Icon uses its per-row themed color, except when selection/active states
+        // own the row foreground for contrast.
+        const icon_fg: u24 = if (selected or focused)
+            treeSelectionFg(maybe_theme)
+        else if (active)
+            accentFg(maybe_theme)
+        else if (row.icon_color != 0)
+            row.icon_color
+        else
+            fg;
+        col = writeText(surface, screen_row, col, tree_width, row.icon, icon_fg, bg, attrs);
         col = writeText(surface, screen_row, col, tree_width, " ", fg, bg, attrs);
     }
-    const label = if (row.editing_text.len > 0) row.editing_text else row.name;
-    col = writeText(surface, screen_row, col, tree_width, label, fg, bg, attrs);
+    col = writeText(surface, screen_row, col, tree_width, presentation.label, fg, bg, attrs);
     const git_marker = fileTreeGitMarker(row.git_status);
     if (git_marker.len > 0) {
         _ = writeText(surface, screen_row, col, tree_width, git_marker, fg, bg, attrs);
@@ -1671,35 +1755,55 @@ fn renderTabBar(surface: anytype, tab_bar: TabBar, has_workspaces: bool, maybe_t
     clearRow(surface, row, width);
     fillRowRemainder(surface, row, 0, width, tabBg(maybe_theme));
 
+    var buffer: [4096]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buffer);
+    const rows = zigzag_chrome.tabRows(fba.allocator(), tab_bar.tabs, tab_bar.active_index) catch {
+        renderTabBarManual(surface, tab_bar, row, width, maybe_theme);
+        return;
+    };
+
+    var col: u16 = 0;
+    for (rows, 0..) |tab_row, rendered_index| {
+        if (col >= width or tab_row.index >= tab_bar.tabs.len) break;
+        col = renderTabBarItem(surface, row, col, width, tab_bar.tabs[tab_row.index], tab_row.active, rendered_index, maybe_theme);
+    }
+}
+
+fn renderTabBarManual(surface: anytype, tab_bar: TabBar, row: u16, width: u16, maybe_theme: ?Theme) void {
     var col: u16 = 0;
     for (tab_bar.tabs, 0..) |tab, index| {
         if (col >= width) break;
-        const active = tab.active() or index == tab_bar.active_index;
-        const tab_fg = if (active) tabActiveFg(maybe_theme) else tabInactiveFg(maybe_theme);
-        const tab_bg = if (active) tabActiveBg(maybe_theme) else tabBg(maybe_theme);
-        const attrs: u8 = if (active) protocol.ATTR_BOLD else 0;
-        if (index > 0) col = writeText(surface, row, col, width, " ", tab_fg, tabBg(maybe_theme), 0);
-
-        if (active) {
-            col = writeText(surface, row, col, width, "▌ ", tabActiveFg(maybe_theme), tabActiveBg(maybe_theme), protocol.ATTR_BOLD);
-        }
-
-        if (tab.icon.len > 0) {
-            const icon_fg: u24 = if (tab.tint != 0) @intCast(tab.tint & 0x00FF_FFFF) else tab_fg;
-            col = writeText(surface, row, col, width, tab.icon, icon_fg, tab_bg, attrs);
-            col = writeText(surface, row, col, width, " ", tab_fg, tab_bg, attrs);
-        }
-
-        col = writeText(surface, row, col, width, tab.label, tab_fg, tab_bg, attrs);
-
-        if (tab.dirty()) {
-            col = writeText(surface, row, col, width, " *", tabDirtyFg(maybe_theme), tab_bg, 0);
-        }
-
-        if (tab.attention()) {
-            col = writeText(surface, row, col, width, " !", tabAttentionFg(maybe_theme), tabBg(maybe_theme), protocol.ATTR_BOLD);
-        }
+        col = renderTabBarItem(surface, row, col, width, tab, tab.active() or index == tab_bar.active_index, index, maybe_theme);
     }
+}
+
+fn renderTabBarItem(surface: anytype, row: u16, start_col: u16, width: u16, tab: Tab, active: bool, index: usize, maybe_theme: ?Theme) u16 {
+    var col = start_col;
+    const tab_fg = if (active) tabActiveFg(maybe_theme) else tabInactiveFg(maybe_theme);
+    const tab_bg = if (active) tabActiveBg(maybe_theme) else tabBg(maybe_theme);
+    const attrs: u8 = if (active) protocol.ATTR_BOLD else 0;
+    if (index > 0) col = writeText(surface, row, col, width, " ", tab_fg, tabBg(maybe_theme), 0);
+
+    if (active) {
+        col = writeText(surface, row, col, width, "▌ ", tabActiveFg(maybe_theme), tabActiveBg(maybe_theme), protocol.ATTR_BOLD);
+    }
+
+    if (tab.icon.len > 0) {
+        const icon_fg: u24 = if (tab.tint != 0) @intCast(tab.tint & 0x00FF_FFFF) else tab_fg;
+        col = writeText(surface, row, col, width, tab.icon, icon_fg, tab_bg, attrs);
+        col = writeText(surface, row, col, width, " ", tab_fg, tab_bg, attrs);
+    }
+
+    col = writeText(surface, row, col, width, tab.label, tab_fg, tab_bg, attrs);
+
+    if (tab.dirty()) {
+        col = writeText(surface, row, col, width, " *", tabDirtyFg(maybe_theme), tab_bg, 0);
+    }
+
+    if (tab.attention()) {
+        col = writeText(surface, row, col, width, " !", tabAttentionFg(maybe_theme), tabBg(maybe_theme), protocol.ATTR_BOLD);
+    }
+    return col;
 }
 
 fn hitTabBar(tab_bar: TabBar, row: u16, col: u16, width: u16, height: u16, has_workspaces: bool) ?HitAction {
@@ -1885,12 +1989,52 @@ fn renderWhichKey(surface: anytype, which_key: WhichKey, has_minibuffer: bool, h
     }
 
     row += 1;
+    renderWhichKeyBindingsWithZigZag(surface, row, end_row, content_col, content_end_col, which_key.bindings, maybe_theme);
+}
+
+fn renderWhichKeyBindingsWithZigZag(surface: anytype, start_row: u16, end_row: u16, start_col: u16, end_col: u16, bindings: []const WhichKeyBinding, maybe_theme: ?Theme) void {
+    const width = if (end_col > start_col) end_col - start_col else 0;
+    if (width == 0 or start_row >= end_row) return;
+
+    var buffer: [4096]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buffer);
+    var arena = std.heap.ArenaAllocator.init(fba.allocator());
+    defer arena.deinit();
+    const rendered = zigzag_component_adapters.renderWhichKeyHelp(arena.allocator(), bindings, width) catch {
+        renderWhichKeyBindingsManual(surface, start_row, end_row, start_col, end_col, bindings, maybe_theme);
+        return;
+    };
+
+    var row = start_row;
+    var lines = std.mem.splitScalar(u8, rendered, '\n');
+    while (row < end_row) : (row += 1) {
+        const line = lines.next() orelse break;
+        renderWhichKeyHelpLine(surface, row, start_col, end_col, line, maybe_theme);
+    }
+}
+
+fn renderWhichKeyHelpLine(surface: anytype, row: u16, start_col: u16, end_col: u16, line: []const u8, maybe_theme: ?Theme) void {
+    // renderHelpPlainVertical separates the (trimmed) key from the description
+    // with a >=2-space pad, so split on the first double space. Splitting on the
+    // first single space would mis-bold keys that contain a space (e.g. "SPC f").
+    const key_end = std.mem.indexOf(u8, line, "  ") orelse line.len;
+    var col = start_col;
+    if (key_end > 0) {
+        col = writeText(surface, row, col, end_col, line[0..key_end], popupSelectionFg(maybe_theme), popupSelectionBg(maybe_theme), protocol.ATTR_BOLD);
+    }
+    if (key_end < line.len and col < end_col) {
+        _ = writeText(surface, row, col, end_col, line[key_end..], popupFg(maybe_theme), popupBg(maybe_theme), 0);
+    }
+}
+
+fn renderWhichKeyBindingsManual(surface: anytype, start_row: u16, end_row: u16, start_col: u16, end_col: u16, bindings: []const WhichKeyBinding, maybe_theme: ?Theme) void {
+    var row = start_row;
     var index: usize = 0;
-    while (row < end_row and index < which_key.bindings.len) : ({
+    while (row < end_row and index < bindings.len) : ({
         row += 1;
         index += 1;
     }) {
-        _ = renderWhichKeyBinding(surface, row, content_col, content_end_col, which_key.bindings[index], maybe_theme);
+        _ = renderWhichKeyBinding(surface, row, start_col, end_col, bindings[index], maybe_theme);
     }
 }
 
@@ -1932,22 +2076,52 @@ fn renderCompletion(surface: anytype, completion: Completion, has_minibuffer: bo
     _ = writeText(surface, row, content_col, content_end_col, "Completion", accentFg(maybe_theme), popupBg(maybe_theme), protocol.ATTR_BOLD);
 
     row += 1;
-    var index: usize = 0;
-    while (row < rect.end_row and index < completion.items.len) : ({
+    renderCompletionItemsWithZigZag(surface, row, rect.end_row, content_col, content_end_col, completion, maybe_theme);
+}
+
+fn renderCompletionItemsWithZigZag(surface: anytype, start_row: u16, end_row: u16, content_col: u16, content_end_col: u16, completion: Completion, maybe_theme: ?Theme) void {
+    if (start_row >= end_row) return;
+    const visible_height = end_row - start_row;
+    var buffer: [4096]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buffer);
+    const rows = zigzag_component_adapters.completionRows(fba.allocator(), completion.items, completion.selected_index, visible_height) catch {
+        renderCompletionItemsManual(surface, start_row, end_row, content_col, content_end_col, completion, maybe_theme);
+        return;
+    };
+
+    var row = start_row;
+    for (rows) |item| {
+        if (row >= end_row) break;
+        renderCompletionItemRow(surface, row, content_col, content_end_col, item.label, item.detail, item.selected, maybe_theme);
+        row += 1;
+    }
+}
+
+fn renderCompletionItemsManual(surface: anytype, start_row: u16, end_row: u16, content_col: u16, content_end_col: u16, completion: Completion, maybe_theme: ?Theme) void {
+    const visible_height: usize = end_row - start_row;
+    const selected: usize = if (completion.items.len == 0) 0 else @min(completion.selected_index, completion.items.len - 1);
+    const start_index: usize = if (selected >= visible_height) selected - visible_height + 1 else 0;
+
+    var row = start_row;
+    var index = start_index;
+    while (row < end_row and index < completion.items.len) : ({
         row += 1;
         index += 1;
     }) {
         const item = completion.items[index];
-        const selected = index == completion.selected_index;
-        const fg = if (selected) popupSelectionFg(maybe_theme) else popupFg(maybe_theme);
-        const bg = if (selected) popupSelectionBg(maybe_theme) else popupBg(maybe_theme);
-        fillRowRangeWith(surface, row, content_col, content_end_col, bg);
-        var col: u16 = content_col;
-        col = writeText(surface, row, col, content_end_col, item.label, fg, bg, 0);
-        if (item.detail.len > 0) {
-            col = writeText(surface, row, col, content_end_col, "  ", fg, bg, 0);
-            _ = writeText(surface, row, col, content_end_col, item.detail, fg, bg, 0);
-        }
+        renderCompletionItemRow(surface, row, content_col, content_end_col, item.label, item.detail, index == selected, maybe_theme);
+    }
+}
+
+fn renderCompletionItemRow(surface: anytype, row: u16, content_col: u16, content_end_col: u16, label: []const u8, detail: []const u8, selected: bool, maybe_theme: ?Theme) void {
+    const fg = if (selected) popupSelectionFg(maybe_theme) else popupFg(maybe_theme);
+    const bg = if (selected) popupSelectionBg(maybe_theme) else popupBg(maybe_theme);
+    fillRowRangeWith(surface, row, content_col, content_end_col, bg);
+    var col: u16 = content_col;
+    col = writeText(surface, row, col, content_end_col, label, fg, bg, 0);
+    if (detail.len > 0) {
+        col = writeText(surface, row, col, content_end_col, "  ", fg, bg, 0);
+        _ = writeText(surface, row, col, content_end_col, detail, fg, bg, 0);
     }
 }
 
@@ -1984,7 +2158,8 @@ fn renderPicker(surface: anytype, picker: Picker, maybe_preview: ?PickerPreview,
     const preview = if (maybe_preview) |preview| if (preview.visible and preview.lines.len > 0 and width >= 100) preview else null else null;
     if (preview) |visible_preview| {
         const content_width = content_end_col - content_col;
-        const left_width: u16 = @min(@max((content_width * 45) / 100, 36), @max(content_width -| 20, 1));
+        const split = zigzag_chrome.horizontalSplit(content_width, rect.end_row -| rect.row, 0.45);
+        const left_width: u16 = @min(@max(split.left_width, 36), @max(content_width -| 20, 1));
         const split_col = @min(content_end_col, content_col + left_width);
         renderPickerList(surface, picker, rect.row, rect.end_row -| 1, content_col, split_col, maybe_theme);
         renderPickerPreviewContent(surface, visible_preview, rect.row, rect.end_row -| 1, split_col, content_end_col, maybe_theme);
@@ -2007,6 +2182,22 @@ fn renderPickerList(surface: anytype, picker: Picker, start_row: u16, end_row: u
     renderPickerTitle(surface, picker, row, start_col, end_col, maybe_theme);
     row += 1;
 
+    const row_budget: u16 = end_row - row;
+    var buffer: [8192]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buffer);
+    const rows = zigzag_component_adapters.pickerRows(fba.allocator(), picker.items, picker.selected_index, row_budget) catch {
+        renderPickerItemsManual(surface, picker, row, end_row, start_col, end_col, maybe_theme);
+        return;
+    };
+    for (rows) |picker_row| {
+        if (row >= end_row or picker_row.index >= picker.items.len) break;
+        renderPickerItem(surface, picker.items[picker_row.index], picker_row.selected, row, start_col, end_col, maybe_theme);
+        row += 1;
+    }
+}
+
+fn renderPickerItemsManual(surface: anytype, picker: Picker, start_row: u16, end_row: u16, start_col: u16, end_col: u16, maybe_theme: ?Theme) void {
+    var row = start_row;
     const row_budget: usize = @intCast(end_row - row);
     const selected: usize = if (picker.items.len == 0) 0 else @min(@as(usize, picker.selected_index), picker.items.len - 1);
     const start_index: usize = if (selected >= row_budget and row_budget > 0) selected - row_budget + 1 else 0;
@@ -2150,12 +2341,7 @@ fn renderHoverPopup(surface: anytype, hover: HoverPopup, maybe_action: ?HoverAct
         row += 1;
         index += 1;
     }) {
-        const line = hover.lines[index];
-        var col = content_col;
-        for (line.segments) |segment| {
-            const attrs: u8 = hoverSegmentAttrs(segment);
-            col = writeText(surface, row, col, content_end_col, segment.text, if (segment.fg != 0) segment.fg else popupFg(maybe_theme), popupBg(maybe_theme), attrs);
-        }
+        renderHoverLine(surface, hover.lines[index], title, row, content_col, content_end_col, maybe_theme);
     }
     if (row < rect.end_row) {
         if (maybe_action) |action| {
@@ -2164,6 +2350,32 @@ fn renderHoverPopup(surface: anytype, hover: HoverPopup, maybe_action: ?HoverAct
             }
         }
     }
+}
+
+fn renderHoverLine(surface: anytype, line: HoverLine, title: []const u8, row: u16, content_col: u16, content_end_col: u16, maybe_theme: ?Theme) void {
+    if (hoverLinePlain(line)) {
+        var buffer: [2048]u8 = undefined;
+        var fba = std.heap.FixedBufferAllocator.init(&buffer);
+        if (zigzag_component_adapters.hoverTooltipRows(fba.allocator(), title, line)) |rows| {
+            if (rows.len > 0) {
+                _ = writeText(surface, row, content_col, content_end_col, rows[0].title, popupFg(maybe_theme), popupBg(maybe_theme), 0);
+                return;
+            }
+        } else |_| {}
+    }
+
+    var col = content_col;
+    for (line.segments) |segment| {
+        const attrs: u8 = hoverSegmentAttrs(segment);
+        col = writeText(surface, row, col, content_end_col, segment.text, if (segment.fg != 0) segment.fg else popupFg(maybe_theme), popupBg(maybe_theme), attrs);
+    }
+}
+
+fn hoverLinePlain(line: HoverLine) bool {
+    for (line.segments) |segment| {
+        if (segment.style != 0 or segment.fg != 0 or segment.flags != 0) return false;
+    }
+    return true;
 }
 
 fn hoverSegmentAttrs(segment: HoverSegment) u8 {
@@ -2619,6 +2831,21 @@ fn renderAgentSuggestionRow(surface: anytype, row: u16, rect: OverlayRect, left_
 fn renderAgentChatMessages(surface: anytype, chat: AgentChat, start_row: u16, rect: OverlayRect, maybe_theme: ?Theme, has_prompt: bool) u16 {
     var row = start_row;
     const prompt_rows: u16 = if (has_prompt and rect.end_row > row + 1) 2 else 0;
+    const available_rows: usize = rect.end_row -| row -| prompt_rows;
+    var buffer: [16384]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buffer);
+    const rows = zigzag_component_adapters.agentMessageRows(fba.allocator(), chat.messages, @intCast(@min(available_rows, std.math.maxInt(u16)))) catch {
+        return renderAgentChatMessagesManual(surface, chat, row, rect, maybe_theme, prompt_rows);
+    };
+    for (rows) |message_row| {
+        if (row >= rect.end_row -| prompt_rows or message_row.index >= chat.messages.len) break;
+        row = renderAgentChatMessage(surface, chat.messages[message_row.index], row, rect, maybe_theme);
+    }
+    return row;
+}
+
+fn renderAgentChatMessagesManual(surface: anytype, chat: AgentChat, start_row: u16, rect: OverlayRect, maybe_theme: ?Theme, prompt_rows: u16) u16 {
+    var row = start_row;
     const available_rows: usize = rect.end_row -| row -| prompt_rows;
     const first_index: usize = if (chat.messages.len > available_rows) chat.messages.len - available_rows else 0;
     var index = first_index;
@@ -3356,12 +3583,15 @@ fn renderStatusSegments(surface: anytype, row: u16, width: u16, status: StatusBa
     }
     col = renderFooterIndicators(surface, row, width, col, search, changes, notifications, timeline, extension_overlay, extension_panel, observatory, agent_context, tool_manager, agent_chat, maybe_theme);
 
-    var right_width: u16 = 0;
-    for (status.right_segments) |segment| {
-        right_width +|= textWidth(segment.text);
-    }
-
-    col = if (right_width >= width) 0 else width - right_width;
+    var buffer: [4096]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buffer);
+    col = zigzag_chrome.statusRightStart(fba.allocator(), status, width) catch blk: {
+        var right_width: u16 = 0;
+        for (status.right_segments) |segment| {
+            right_width +|= textWidth(segment.text);
+        }
+        break :blk if (right_width >= width) 0 else width - right_width;
+    };
     for (status.right_segments) |segment| {
         col = writeText(surface, row, col, width, segment.text, themedSegmentFg(segment, maybe_theme), themedSegmentBg(segment, maybe_theme), segment.attrs);
     }
@@ -4058,6 +4288,31 @@ test "semantic state renders retained completion overlay anchored to cursor" {
     try std.testing.expect(saw_selected_label);
     try std.testing.expect(saw_selected_detail);
     try std.testing.expect(saw_background);
+}
+
+test "manual completion fallback keeps selected item visible" {
+    const alloc = std.testing.allocator;
+    var completion = Completion{
+        .selected_index = 4,
+        .items = try alloc.dupe(CompletionItem, &[_]CompletionItem{
+            .{ .label = try alloc.dupe(u8, "alpha") },
+            .{ .label = try alloc.dupe(u8, "beta") },
+            .{ .label = try alloc.dupe(u8, "gamma") },
+            .{ .label = try alloc.dupe(u8, "delta") },
+            .{ .label = try alloc.dupe(u8, "epsilon") },
+        }),
+    };
+    defer completion.deinit(alloc);
+
+    var surface = MockSurface{ .mock_width = 30, .mock_height = 5 };
+    defer surface.deinit(alloc);
+    renderCompletionItemsManual(&surface, 1, 4, 0, 20, completion, null);
+
+    var saw_selected = false;
+    for (surface.cells.items) |cell| {
+        if (cell.row == 3 and std.mem.eql(u8, cell.text, "e")) saw_selected = true;
+    }
+    try std.testing.expect(saw_selected);
 }
 
 test "decodeBreadcrumb retains path segments" {
@@ -4962,34 +5217,35 @@ test "decodeFileTree retains rows and metadata" {
     const alloc = std.testing.allocator;
     const packet =
         &[_]u8{
-            protocol.OP_GUI_FILE_TREE, 0,    0,   0,   134,
-            2,                         3,    3,   0,   5,
-            'r',                       'o',  'w', '-', '1',
-            0,                         5,    '/', 'r', 'e',
-            'p',                       'o',  0,   18,  0,
-            2,                         0,    0,   0,   0,
-            0,                         1,    0,   3,   0,
-            0,                         0,    0,   0,   0,
-            0,                         0,    0,   0,   0,
-            0,                         5,    'r', 'o', 'w',
-            '-',                       '0',  0,   9,   '/',
-            'r',                       'e',  'p', 'o', '/',
-            'l',                       'i',  'b', 0,   3,
-            'l',                       'i',  'b', 0,   3,
-            'l',                       'i',  'b', 1,   'D',
-            0xFF,                      0,    0,   0,   0,
-            0,                         2,    0,   32,  1,
-            0,                         0,    0,   0,   0,
-            0,                         0,    0,   0,   0,
-            0,                         5,    'r', 'o', 'w',
-            '-',                       '1',  0,   14,  '/',
-            'r',                       'e',  'p', 'o', '/',
-            'l',                       'i',  'b', '/', 'a',
-            '.',                       'e',  'x', 0,   8,
-            'l',                       'i',  'b', '/', 'a',
-            '.',                       'e',  'x', 0,   4,
-            'a',                       '.',  'e', 'x', 1,
-            'E',                       0xFF, 0,   0,
+            protocol.OP_GUI_FILE_TREE, 0,   0,    0,    140,
+            2,                         3,   3,    0,    5,
+            'r',                       'o', 'w',  '-',  '1',
+            0,                         5,   '/',  'r',  'e',
+            'p',                       'o', 0,    18,   0,
+            2,                         0,   0,    0,    0,
+            0,                         1,   0,    3,    0,
+            0,                         0,   0,    0,    0,
+            0,                         0,   0,    0,    0,
+            0,                         5,   'r',  'o',  'w',
+            '-',                       '0', 0,    9,    '/',
+            'r',                       'e', 'p',  'o',  '/',
+            'l',                       'i', 'b',  0,    3,
+            'l',                       'i', 'b',  0,    3,
+            'l',                       'i', 'b',  1,    'D',
+            0xFF,                      0,   0,    0,    0,
+            0,                         0,   0,    0,    2,
+            0,                         32,  1,    0,    0,
+            0,                         0,   0,    0,    0,
+            0,                         0,   0,    0,    5,
+            'r',                       'o', 'w',  '-',  '1',
+            0,                         14,  '/',  'r',  'e',
+            'p',                       'o', '/',  'l',  'i',
+            'b',                       '/', 'a',  '.',  'e',
+            'x',                       0,   8,    'l',  'i',
+            'b',                       '/', 'a',  '.',  'e',
+            'x',                       0,   4,    'a',  '.',
+            'e',                       'x', 1,    'E',  0xFF,
+            0,                         0,   0x6D, 0x80, 0x86,
         };
 
     var tree = try decodeFileTree(alloc, packet);
@@ -5014,13 +5270,14 @@ test "decodeFileTree retains rows and metadata" {
     try std.testing.expectEqual(@as(u16, 0), tree.rows[1].visibleDiagnostics());
     try std.testing.expectEqualStrings("/repo/lib/a.ex", tree.rows[1].path);
     try std.testing.expectEqualStrings("a.ex", tree.rows[1].name);
+    try std.testing.expectEqual(@as(u24, 0x6D8086), tree.rows[1].icon_color);
 }
 
 test "semantic state applies retained file tree selection" {
     const alloc = std.testing.allocator;
     const tree_packet =
         &[_]u8{
-            protocol.OP_GUI_FILE_TREE, 0,   0,   0,    76,
+            protocol.OP_GUI_FILE_TREE, 0,   0,   0,    79,
             2,                         1,   3,   0,    5,
             'r',                       'o', 'w', '-',  '0',
             0,                         5,   '/', 'r',  'e',
@@ -5036,7 +5293,7 @@ test "semantic state applies retained file tree selection" {
             4,                         'a', '.', 'e',  'x',
             0,                         4,   'a', '.',  'e',
             'x',                       1,   'E', 0xFF, 0,
-            0,
+            0,                         0,   0,   0,
         };
     const selection_packet =
         &[_]u8{
@@ -5059,7 +5316,7 @@ test "semantic state renders retained file tree sidebar" {
     const alloc = std.testing.allocator;
     const packet =
         &[_]u8{
-            protocol.OP_GUI_FILE_TREE, 0,   0,   0,    76,
+            protocol.OP_GUI_FILE_TREE, 0,   0,   0,    79,
             2,                         1,   3,   0,    5,
             'r',                       'o', 'w', '-',  '0',
             0,                         5,   '/', 'r',  'e',
@@ -5075,7 +5332,7 @@ test "semantic state renders retained file tree sidebar" {
             4,                         'a', '.', 'e',  'x',
             0,                         4,   'a', '.',  'e',
             'x',                       1,   'E', 0xFF, 0,
-            0,
+            0,                         0,   0,   0,
         };
 
     var state = State.init(alloc);
@@ -5152,7 +5409,7 @@ test "semantic state renders file tree row selected from decoded row flags" {
     const alloc = std.testing.allocator;
     const packet =
         &[_]u8{
-            protocol.OP_GUI_FILE_TREE, 0,   0,   0,    76,
+            protocol.OP_GUI_FILE_TREE, 0,   0,   0,    79,
             2,                         1,   3,   0,    5,
             'r',                       'o', 'w', '-',  '9',
             0,                         5,   '/', 'r',  'e',
@@ -5168,7 +5425,7 @@ test "semantic state renders file tree row selected from decoded row flags" {
             4,                         'a', '.', 'e',  'x',
             0,                         4,   'a', '.',  'e',
             'x',                       1,   'E', 0xFF, 0,
-            0,
+            0,                         0,   0,   0,
         };
 
     var state = State.init(alloc);
@@ -5196,7 +5453,7 @@ test "semantic state lets sidebars render when file tree is not visible for widt
     const alloc = std.testing.allocator;
     const tree_packet =
         &[_]u8{
-            protocol.OP_GUI_FILE_TREE, 0,   0,   0,    76,
+            protocol.OP_GUI_FILE_TREE, 0,   0,   0,    79,
             2,                         1,   3,   0,    5,
             'r',                       'o', 'w', '-',  '0',
             0,                         5,   '/', 'r',  'e',
@@ -5212,7 +5469,7 @@ test "semantic state lets sidebars render when file tree is not visible for widt
             4,                         'a', '.', 'e',  'x',
             0,                         4,   'a', '.',  'e',
             'x',                       1,   'E', 0xFF, 0,
-            0,
+            0,                         0,   0,   0,
         };
     const sidebars_packet =
         &[_]u8{

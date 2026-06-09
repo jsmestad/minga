@@ -158,6 +158,7 @@ type FileTreeRow struct {
 	Path      string
 	Name      string
 	Icon      string
+	IconColor uint32
 	Depth     byte
 	Flags     uint16
 	Directory bool

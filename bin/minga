@@ -33,4 +33,48 @@ MINGA_ERL_FLAGS="+A 4 +sbwt none +sbwtdcpu none +sbwtdio none +swt very_low +swt
 
 export ERL_FLAGS="${MINGA_ERL_FLAGS} ${ERL_FLAGS:-}"
 
-exec mix minga "$@"
+should_redirect_stdio() {
+  if [ "${MINGA_DISABLE_LAUNCH_STDIO_REDIRECT:-}" = "1" ]; then
+    return 1
+  fi
+
+  local args=("$@")
+  local first=""
+  local i=0
+  while [ "$i" -lt "${#args[@]}" ]; do
+    local arg="${args[$i]}"
+    case "$arg" in
+      +gui|--headless|--minimal|--safe|-Q|--editor|--help|-h|--version|-v)
+        return 1
+        ;;
+      --config|--debug-log|-D|--name|--sname|--cookie-file|--host|--port)
+        i=$((i + 2))
+        continue
+        ;;
+      --no-context)
+        i=$((i + 1))
+        continue
+        ;;
+      *)
+        first="$arg"
+        break
+        ;;
+    esac
+  done
+
+  case "$first" in
+    sessions|detach|kill-session|login)
+      return 1
+      ;;
+  esac
+
+  return 0
+}
+
+if should_redirect_stdio "$@"; then
+  LOG_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/minga"
+  mkdir -p "$LOG_DIR"
+  exec mix minga "$@" >> "$LOG_DIR/minga.log" 2>&1
+else
+  exec mix minga "$@"
+fi
