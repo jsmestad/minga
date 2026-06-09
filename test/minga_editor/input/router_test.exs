@@ -3,6 +3,7 @@ defmodule MingaEditor.Input.RouterTest do
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Test.InputRouterMouseProbe
+  alias MingaEditor.BottomPanel
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.FocusTree
   alias MingaEditor.FocusTree.Node, as: FocusNode
@@ -79,6 +80,25 @@ defmodule MingaEditor.Input.RouterTest do
           handler: InputRouterMouseProbe,
           ref: :tree,
           scrollable?: true
+        )
+      ]
+    })
+  end
+
+  defp bottom_panel_tree do
+    FocusTree.link_tree(%FocusNode{
+      id: :viewport,
+      content_type: :viewport,
+      rect: {0, 0, 20, 10},
+      children: [
+        FocusNode.new(:buffer_content, {0, 0, 20, 10},
+          handler: InputRouterMouseProbe,
+          ref: :editor
+        ),
+        FocusNode.new(:bottom_panel, {7, 0, 20, 3},
+          handler: MingaEditor.Input.BottomPanel,
+          scrollable?: true,
+          focusable?: true
         )
       ]
     })
@@ -178,6 +198,39 @@ defmodule MingaEditor.Input.RouterTest do
       cursor = BufferProcess.cursor(state.workspace.buffers.active)
       assert elem(cursor, 0) == 0
     end
+
+    test "focused bottom panel handles Vim normal q" do
+      state =
+        EditorState.set_bottom_panel(base_state(), %BottomPanel{visible: true, focused: true})
+
+      new_state = Router.dispatch(state, ?q, 0)
+
+      refute new_state.shell_state.bottom_panel.visible
+    end
+
+    test "focused bottom panel handles CUA Escape" do
+      state = %{
+        EditorState.set_bottom_panel(base_state(), %BottomPanel{visible: true, focused: true})
+        | editing_model: :cua
+      }
+
+      new_state = Router.dispatch(state, 27, 0)
+
+      refute new_state.shell_state.bottom_panel.visible
+    end
+
+    test "focused bottom panel consumes CUA q without closing or editing the buffer" do
+      state = %{
+        EditorState.set_bottom_panel(base_state(), %BottomPanel{visible: true, focused: true})
+        | editing_model: :cua
+      }
+
+      before_content = BufferProcess.content(state.workspace.buffers.active)
+      new_state = Router.dispatch(state, ?q, 0)
+
+      assert new_state.shell_state.bottom_panel.visible
+      assert BufferProcess.content(new_state.workspace.buffers.active) == before_content
+    end
   end
 
   describe "dispatch_mouse/7" do
@@ -205,6 +258,16 @@ defmodule MingaEditor.Input.RouterTest do
       _state = Router.dispatch_mouse(state, 3, 3, :wheel_down, 0, :press, 1)
 
       assert_receive {:mouse_probe, :file_tree, :tree}
+      refute_receive {:mouse_probe, :buffer_content, :editor}, 20
+    end
+
+    test "clicking the bottom panel focuses it instead of the underlying editor" do
+      state = %{base_state() | focus_tree: bottom_panel_tree()}
+      state = EditorState.set_bottom_panel(state, %BottomPanel{visible: true})
+
+      new_state = Router.dispatch_mouse(state, 8, 10, :left, 0, :press, 1)
+
+      assert BottomPanel.focused?(new_state.shell_state.bottom_panel)
       refute_receive {:mouse_probe, :buffer_content, :editor}, 20
     end
 

@@ -64,7 +64,7 @@ func (m *Model) clampBottomPanelScrollback(panel protocol.BottomPanel) {
 }
 
 func (m Model) maxBottomPanelScrollback(panel protocol.BottomPanel) int {
-	return max(len(panel.Messages)-m.bottomPanelVisibleRows(), 0)
+	return max(len(panel.Messages)-m.bottomPanelVisibleRows(panel), 0)
 }
 
 func (m Model) semanticMousePacket(msg tea.MouseMsg) ([]byte, bool) {

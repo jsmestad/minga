@@ -20,11 +20,12 @@ defmodule MingaEditor.Commands.BufferManagement.FrontendTest do
   end
 
   describe "GUI.view_messages/1" do
-    test "opens bottom panel on messages tab" do
+    test "opens bottom panel on messages tab without stealing focus" do
       state = BufGUI.view_messages(base_state())
       assert state.shell_state.bottom_panel.visible == true
       assert state.shell_state.bottom_panel.active_tab == :messages
       assert state.shell_state.bottom_panel.filter == nil
+      assert state.shell_state.bottom_panel.focused == false
     end
 
     test "clears dismissed state" do
@@ -35,29 +36,32 @@ defmodule MingaEditor.Commands.BufferManagement.FrontendTest do
   end
 
   describe "GUI.view_warnings/1" do
-    test "opens bottom panel with warnings filter" do
+    test "opens bottom panel with warnings filter without stealing focus" do
       state = BufGUI.view_warnings(base_state())
       assert state.shell_state.bottom_panel.visible == true
       assert state.shell_state.bottom_panel.active_tab == :messages
       assert state.shell_state.bottom_panel.filter == :warnings
+      assert state.shell_state.bottom_panel.focused == false
     end
   end
 
   describe "TUI.view_messages/1" do
-    test "opens bottom panel on messages tab" do
+    test "opens bottom panel on messages tab without stealing focus" do
       state = BufTUI.view_messages(base_state())
       assert state.shell_state.bottom_panel.visible == true
       assert state.shell_state.bottom_panel.active_tab == :messages
       assert state.shell_state.bottom_panel.filter == nil
+      assert state.shell_state.bottom_panel.focused == false
     end
   end
 
   describe "TUI.view_warnings/1" do
-    test "opens bottom panel with warnings filter" do
+    test "opens bottom panel with warnings filter without stealing focus" do
       state = BufTUI.view_warnings(base_state())
       assert state.shell_state.bottom_panel.visible == true
       assert state.shell_state.bottom_panel.active_tab == :messages
       assert state.shell_state.bottom_panel.filter == :warnings
+      assert state.shell_state.bottom_panel.focused == false
     end
   end
 end

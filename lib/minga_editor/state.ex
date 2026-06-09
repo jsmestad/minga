@@ -2062,8 +2062,9 @@ defmodule MingaEditor.State do
   """
   @spec focus_window(t(), Window.id()) :: t()
   def focus_window(%__MODULE__{workspace: %{windows: %{active: active}}} = state, target_id)
-      when target_id == active,
-      do: state
+      when target_id == active do
+    set_bottom_panel(state, BottomPanel.blur(bottom_panel(state)))
+  end
 
   def focus_window(%__MODULE__{workspace: %{buffers: %{active: nil}}} = state, _target_id),
     do: state
@@ -2087,6 +2088,8 @@ defmodule MingaEditor.State do
         # Agent chat windows use :agent scope; buffer windows use the
         # current scope (preserving :file_tree if the tree is focused).
         scope = scope_for_content(target_win.content, wspace.keymap_scope)
+
+        state = set_bottom_panel(state, BottomPanel.blur(bottom_panel(state)))
 
         %{
           state

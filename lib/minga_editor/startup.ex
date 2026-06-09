@@ -432,7 +432,7 @@ defmodule MingaEditor.Startup do
   def apply_config_options(state) do
     state =
       try do
-        theme_name = Config.get(:theme)
+        theme_name = Minga.Config.Options.get(EditorState.options_server(state), :theme)
 
         theme =
           case MingaEditor.UI.Theme.get(theme_name) do
@@ -448,7 +448,7 @@ defmodule MingaEditor.Startup do
               MingaEditor.UI.Theme.get!(MingaEditor.UI.Theme.default())
           end
 
-        %{state | theme: theme}
+        EditorState.apply_theme(state, theme)
       catch
         :exit, _ -> state
       end

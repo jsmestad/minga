@@ -3,6 +3,7 @@ defmodule MingaEditor.Commands.WindowTest do
   use ExUnit.Case, async: false
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias MingaEditor.BottomPanel
   alias Minga.Config.Options
   alias MingaEditor
   alias MingaEditor.Commands.Movement
@@ -146,6 +147,26 @@ defmodule MingaEditor.Commands.WindowTest do
 
       result = Movement.execute(state, :window_left)
 
+      assert result.workspace.windows.active == state.workspace.windows.active
+    end
+
+    test "window_down focuses visible bottom panel when no lower window exists" do
+      {state, _buffer} = start_command_state()
+      state = EditorState.set_bottom_panel(state, %BottomPanel{visible: true})
+
+      result = Movement.execute(state, :window_down)
+
+      assert BottomPanel.focused?(result.shell_state.bottom_panel)
+      assert result.workspace.windows.active == state.workspace.windows.active
+    end
+
+    test "window_up returns from focused bottom panel to active editor window" do
+      {state, _buffer} = start_command_state()
+      state = EditorState.set_bottom_panel(state, %BottomPanel{visible: true, focused: true})
+
+      result = Movement.execute(state, :window_up)
+
+      refute BottomPanel.focused?(result.shell_state.bottom_panel)
       assert result.workspace.windows.active == state.workspace.windows.active
     end
   end

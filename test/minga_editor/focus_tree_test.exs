@@ -9,6 +9,7 @@ defmodule MingaEditor.FocusTreeTest do
 
   use ExUnit.Case, async: true
 
+  alias MingaEditor.BottomPanel
   alias MingaEditor.FocusTree
   alias MingaEditor.FocusTree.Node, as: TreeNode
   alias MingaEditor.Layout
@@ -229,6 +230,23 @@ defmodule MingaEditor.FocusTreeTest do
       rendered_height = Enum.max(rendered_rows) - Enum.min(rendered_rows) + 1
 
       assert elem(picker_node.rect, 3) == rendered_height
+    end
+  end
+
+  describe "bottom panel" do
+    test "visible bottom panel is a focusable frontmost hit target" do
+      state = %MingaEditor.State{
+        port_manager: self(),
+        workspace: %SessionState{viewport: Viewport.new(24, 80), editing: VimState.new()},
+        layout: single_window_layout(),
+        shell_state: %ShellState{bottom_panel: %BottomPanel{visible: true, height_percent: 25}}
+      }
+
+      tree = FocusTree.from_state(state)
+      hit = FocusTree.hit_test(tree, 20, 10)
+
+      assert hit.content_type == :bottom_panel
+      assert hit.focusable?
     end
   end
 

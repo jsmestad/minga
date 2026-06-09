@@ -702,6 +702,25 @@ func TestSemanticWindowsRespectProtocolFileTreeWidth(t *testing.T) {
 	}
 }
 
+func TestSemanticWindowsNormalizeAbsoluteTUILayoutGeometry(t *testing.T) {
+	model := New(90, 8, nil)
+	model.title = "Header"
+	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: protocol.FileTree{Visible: true, Width: 36, Rows: []protocol.FileTreeRow{{ID: "row-0", Name: "row-0"}}}}}
+	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "pane"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 1, Col: 37, Width: 8, Height: 1}}})
+	model.viewport.SetContent(model.content())
+
+	lines := strings.Split(ansi.Strip(model.View().Content), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("semantic window should render with normalized geometry: %+v", lines)
+	}
+	if got := strings.Index(lines[1], "pane"); got != 37 {
+		t.Fatalf("absolute TUI geometry should not double-count file-tree width, got pane at %d in %q", got, lines[1])
+	}
+	if len(lines) > 2 && strings.Contains(lines[2], "pane") {
+		t.Fatalf("absolute TUI geometry should not double-count header rows: %+v", lines[:3])
+	}
+}
+
 func TestApplyWindowDeltaAppliesScrollLeftSetAndCropsRendering(t *testing.T) {
 	model := New(20, 6, nil)
 	model.putWindow(protocol.WindowContent{ID: 7, ContentEpoch: 9, ScrollLeft: 0, Rows: []protocol.WindowRow{{Text: "abcdef"}}})
@@ -1016,11 +1035,20 @@ func TestSemanticMouseRoutesModelineAndFileTreeZones(t *testing.T) {
 func TestBottomPanelShowsLatestMessagesByDefault(t *testing.T) {
 	model, panel := bottomPanelTestModel(10, nil)
 	visible := model.visibleBottomPanelMessages(panel)
-	if len(visible) != model.bottomPanelVisibleRows() {
-		t.Fatalf("visible message count mismatch: got %d want %d", len(visible), model.bottomPanelVisibleRows())
+	if len(visible) != model.bottomPanelVisibleRows(panel) {
+		t.Fatalf("visible message count mismatch: got %d want %d", len(visible), model.bottomPanelVisibleRows(panel))
 	}
 	if visible[0].Text != "msg-7" || visible[len(visible)-1].Text != "msg-9" {
 		t.Fatalf("bottom panel should start at latest messages, got %+v", visible)
+	}
+}
+
+func TestBottomPanelHeightUsesSemanticPercent(t *testing.T) {
+	model := New(80, 20, nil)
+	panel := protocol.BottomPanel{Visible: true, HeightPercent: 50}
+
+	if got := model.bottomPanelHeight(panel); got != 10 {
+		t.Fatalf("bottom panel height = %d, want semantic 50%% of terminal height", got)
 	}
 }
 

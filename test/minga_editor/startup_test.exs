@@ -295,6 +295,28 @@ defmodule MingaEditor.StartupTest do
       ShellRegistry.seed_builtin()
     end
 
+    test "apply_config_options uses the editor options server for the initial theme" do
+      editor_options = start_supervised!({Options, name: nil}, id: :editor_theme_options)
+      other_options = start_supervised!({Options, name: nil}, id: :other_theme_options)
+      {:ok, :doom_one} = Options.set(editor_options, :theme, :doom_one)
+      {:ok, :one_light} = Options.set(other_options, :theme, :one_light)
+      Process.put(:minga_config_options, other_options)
+
+      state =
+        Startup.build_initial_state(
+          backend: :headless,
+          port_manager: nil,
+          parser_manager: nil,
+          options_server: editor_options,
+          width: 80,
+          height: 24
+        )
+
+      assert Startup.apply_config_options(state).theme.name == :doom_one
+    after
+      Process.delete(:minga_config_options)
+    end
+
     test "normalizes nil and supplied options servers" do
       default_state =
         Startup.build_initial_state(
