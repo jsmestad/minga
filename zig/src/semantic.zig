@@ -365,6 +365,55 @@ pub const State = struct {
         self.cursor_window_id = null;
     }
 
+    /// Applies any retained semantic GUI packet recognized by the current renderer.
+    pub fn applyRetainedSemanticPacket(self: *State, packet: []const u8) Error!void {
+        if (packet.len == 0) return;
+        switch (packet[0]) {
+            protocol.OP_GUI_THEME => try self.applyThemePacket(packet),
+            protocol.OP_GUI_WORKSPACES => try self.applyWorkspacesPacket(packet),
+            protocol.OP_GUI_GUTTER => try self.applyGutterPacket(packet),
+            protocol.OP_GUI_INDENT_GUIDES => try self.applyIndentGuidesPacket(packet),
+            protocol.OP_GUI_FILE_TREE => try self.applyFileTreePacket(packet),
+            protocol.OP_GUI_FILE_TREE_SELECTION => try self.applyFileTreeSelectionPacket(packet),
+            protocol.OP_GUI_SIDEBARS => try self.applySidebarsPacket(packet),
+            protocol.OP_GUI_WINDOW_CONTENT => try self.applyWindowContentPacket(packet),
+            protocol.OP_GUI_WINDOW_ROWS_DELTA, protocol.OP_GUI_WINDOW_VIEWPORT_DELTA => try self.applyWindowRowsDeltaPacket(packet),
+            protocol.OP_GUI_WINDOW_OVERLAY_DELTA => try self.applyWindowOverlayDeltaPacket(packet),
+            protocol.OP_GUI_TAB_BAR => try self.applyTabBarPacket(packet),
+            protocol.OP_GUI_MINIBUFFER => try self.applyMinibufferPacket(packet),
+            protocol.OP_GUI_WHICH_KEY => try self.applyWhichKeyPacket(packet),
+            protocol.OP_GUI_COMPLETION => try self.applyCompletionPacket(packet),
+            protocol.OP_GUI_BREADCRUMB => try self.applyBreadcrumbPacket(packet),
+            protocol.OP_GUI_PICKER => try self.applyPickerPacket(packet),
+            protocol.OP_GUI_PICKER_PREVIEW => try self.applyPickerPreviewPacket(packet),
+            protocol.OP_GUI_HOVER_POPUP => try self.applyHoverPopupPacket(packet),
+            protocol.OP_GUI_SIGNATURE_HELP => try self.applySignatureHelpPacket(packet),
+            protocol.OP_GUI_FLOAT_POPUP => try self.applyFloatPopupPacket(packet),
+            protocol.OP_GUI_GIT_STATUS => try self.applyGitStatusPacket(packet),
+            protocol.OP_GUI_BOTTOM_PANEL => try self.applyBottomPanelPacket(packet),
+            protocol.OP_GUI_SPLIT_SEPARATORS => try self.applySplitSeparatorsPacket(packet),
+            protocol.OP_GUI_SEARCH_STATE => try self.applySearchStatePacket(packet),
+            protocol.OP_GUI_CHANGE_SUMMARY => try self.applyChangeSummaryPacket(packet),
+            protocol.OP_GUI_NOTIFICATIONS => try self.applyNotificationsPacket(packet),
+            protocol.OP_GUI_EDIT_TIMELINE => try self.applyEditTimelinePacket(packet),
+            protocol.OP_GUI_EXTENSION_OVERLAY => try self.applyExtensionOverlayPacket(packet),
+            protocol.OP_GUI_EXTENSION_PANEL => try self.applyExtensionPanelPacket(packet),
+            protocol.OP_GUI_OBSERVATORY => try self.applyObservatoryPacket(packet),
+            protocol.OP_GUI_AGENT_CONTEXT => try self.applyAgentContextPacket(packet),
+            protocol.OP_GUI_TOOL_MANAGER => try self.applyToolManagerPacket(packet),
+            protocol.OP_GUI_CURSORLINE => try self.applyCursorlinePacket(packet),
+            protocol.OP_GUI_GUTTER_SEP => try self.applyGutterSeparatorPacket(packet),
+            protocol.OP_GUI_LINE_SPACING => try self.applyLineSpacingPacket(packet),
+            protocol.OP_GUI_CURSOR_ANIMATION => try self.applyCursorAnimationPacket(packet),
+            protocol.OP_GUI_CONFIG_STATE => try self.applyConfigStatePacket(packet),
+            protocol.OP_GUI_HOVER_ACTION => try self.applyHoverActionPacket(packet),
+            protocol.OP_GUI_BOARD => try self.applyBoardPacket(packet),
+            protocol.OP_GUI_AGENT_CHAT => try self.applyAgentChatPacket(packet),
+            protocol.OP_GUI_STATUS_BAR => try self.applyStatusBarPacket(packet),
+            else => {},
+        }
+    }
+
     /// Decodes and retains a `gui_theme` packet.
     pub fn applyThemePacket(self: *State, packet: []const u8) Error!void {
         var theme = try decodeTheme(self.alloc, packet);
