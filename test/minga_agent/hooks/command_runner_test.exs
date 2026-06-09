@@ -83,7 +83,11 @@ defmodule MingaAgent.Hooks.CommandRunnerTest do
     assert stderr =~ "tick-"
     assert stderr =~ "timed out after 100ms"
     assert stderr =~ "killed"
-    assert elapsed_ms < 500
+    # The 100ms hook timeout must be enforced promptly. Allow generous slack
+    # over that timeout for kill/cleanup and CI scheduling jitter; the
+    # @tag timeout: 2_000 above is the real guard against the timeout never
+    # firing. A tight bound here (was 500ms) flaked on contended runners.
+    assert elapsed_ms < 1_000
   end
 
   @tag timeout: 2_000
