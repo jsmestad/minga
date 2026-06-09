@@ -996,10 +996,22 @@ defmodule Minga.LSP.Client do
 
   @spec spawn_server(String.t(), [String.t()], String.t()) :: port()
   defp spawn_server(executable, args, root_path) do
+    stderr_path = child_stderr_log_path()
+
     Port.open(
-      {:spawn_executable, String.to_charlist(executable)},
+      {:spawn_executable, ~c"/bin/sh"},
       [
-        {:args, Enum.map(args, &String.to_charlist/1)},
+        {:args,
+         Enum.map(
+           [
+             "-c",
+             "log_path=$1; shift; exec \"$@\" 2>> \"$log_path\"",
+             "minga-lsp-wrapper",
+             stderr_path,
+             executable | args
+           ],
+           &String.to_charlist/1
+         )},
         {:cd, String.to_charlist(root_path)},
         {:env, []},
         :binary,
@@ -1008,6 +1020,13 @@ defmodule Minga.LSP.Client do
         :stream
       ]
     )
+  end
+
+  @spec child_stderr_log_path() :: String.t()
+  defp child_stderr_log_path do
+    log_dir = Path.expand("~/.local/share/minga")
+    File.mkdir_p!(log_dir)
+    Path.join(log_dir, "minga.log")
   end
 
   @spec find_executable(Minga.LSP.ServerConfig.t()) ::

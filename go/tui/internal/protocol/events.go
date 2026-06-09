@@ -72,6 +72,10 @@ func EncodeGUIFileTreeClick(index uint16) []byte {
 	return []byte{generated.OPGuiAction, generated.GUIActionFileTreeClick, byte(index >> 8), byte(index)}
 }
 
+func EncodeGUISelectTab(id uint32) []byte {
+	return []byte{generated.OPGuiAction, generated.GUIActionSelectTab, byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)}
+}
+
 func EncodeGUIExecuteCommand(command string) []byte {
 	payload := []byte(command)
 	if len(payload) > 65535 {

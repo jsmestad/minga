@@ -1,26 +1,22 @@
 defmodule MingaEditor.Commands.BufferManagement.TUI do
-  @moduledoc "TUI variant of buffer management commands. Opens gap buffers in windows."
+  @moduledoc "TUI variant of buffer management commands. Uses the bottom message tray."
 
   @behaviour MingaEditor.Commands.BufferManagement.Frontend
 
-  alias MingaEditor.Commands.BufferManagement
+  alias MingaEditor.BottomPanel
   alias MingaEditor.State, as: EditorState
 
   @impl true
   @spec view_messages(EditorState.t()) :: EditorState.t()
   def view_messages(state) do
-    case Minga.Log.MessagesBuffer.pid() do
-      nil -> EditorState.set_status(state, "No messages buffer")
-      pid -> BufferManagement.open_special_buffer(state, "*Messages*", pid)
-    end
+    new_panel = BottomPanel.show(EditorState.bottom_panel(state), :messages)
+    EditorState.set_bottom_panel(state, new_panel)
   end
 
   @impl true
   @spec view_warnings(EditorState.t()) :: EditorState.t()
   def view_warnings(state) do
-    case Minga.Log.MessagesBuffer.pid() do
-      nil -> EditorState.set_status(state, "No messages buffer")
-      pid -> BufferManagement.open_special_buffer(state, "*Messages*", pid)
-    end
+    new_panel = BottomPanel.show(EditorState.bottom_panel(state), :messages, :warnings)
+    EditorState.set_bottom_panel(state, new_panel)
   end
 end

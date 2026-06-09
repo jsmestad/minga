@@ -51,6 +51,28 @@ defmodule Minga.LSP.ClientTest do
       assert Client.encoding(client) == :utf8
       assert Client.server_name(client) == :mock_lsp
     end
+
+    test "server stderr output does not break stdio protocol", %{diag_server: diag_server} do
+      root_path = Path.join(System.tmp_dir!(), "stderr_lsp_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(root_path)
+      Minga.Events.subscribe(:lsp_status_changed)
+
+      client =
+        start_supervised!(
+          Supervisor.child_spec(
+            {Client,
+             server_config: MockLSPServer.server_config(stderr_banner: true),
+             root_path: root_path,
+             diagnostics: diag_server},
+            id: :stderr_lsp_client
+          )
+        )
+
+      wait_until_ready(client)
+
+      assert Client.status(client) == :ready
+      assert Client.server_name(client) == :mock_lsp
+    end
   end
 
   describe "document sync" do

@@ -44,7 +44,7 @@ defmodule Mix.Tasks.Minga do
       Application.put_env(:minga, :backend, :gui)
     end
 
-    install_protocol_stdio_guard()
+    install_protocol_stdio_guard(gui?, headless?, terminal_command?, help_args?(args))
     Mix.Task.run("app.start")
     Minga.CLI.main(remaining_args)
 
@@ -70,10 +70,17 @@ defmodule Mix.Tasks.Minga do
     "--help" in args or "-h" in args
   end
 
-  @spec install_protocol_stdio_guard() :: :ok
-  defp install_protocol_stdio_guard do
-    if System.get_env("MINGA_PORT_MODE") == "connected" do
-      Minga.LoggerHandler.install()
+  @spec install_protocol_stdio_guard(boolean(), boolean(), boolean(), boolean()) :: :ok
+  defp install_protocol_stdio_guard(gui?, headless?, terminal_command?, help?) do
+    cond do
+      System.get_env("MINGA_PORT_MODE") == "connected" ->
+        Minga.LoggerHandler.install()
+
+      not gui? and not headless? and not terminal_command? and not help? ->
+        Minga.LoggerHandler.install()
+
+      true ->
+        :ok
     end
 
     :ok
