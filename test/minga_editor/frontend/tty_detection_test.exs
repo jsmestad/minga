@@ -48,5 +48,22 @@ defmodule MingaEditor.Frontend.TtyDetectionTest do
       # A name that definitely won't have a matching /dev/ entry
       assert Manager.tty_path_for("z999") == "/dev/ttyz999"
     end
+
+    test "returns nil for the Linux no-controlling-tty sentinel" do
+      # `ps -o tty=` reports a bare "?" on Linux when there is no controlling
+      # terminal. Building "/dev/tty?" crashes the Go renderer, so we must
+      # return nil and let it fall back to /dev/tty.
+      assert Manager.tty_path_for("?") == nil
+    end
+
+    test "returns nil for the macOS no-controlling-tty sentinel" do
+      # macOS reports "??" in the same situation.
+      assert Manager.tty_path_for("??") == nil
+    end
+
+    test "returns nil for an empty name" do
+      assert Manager.tty_path_for("") == nil
+      assert Manager.tty_path_for("   ") == nil
+    end
   end
 end
