@@ -305,11 +305,8 @@ defmodule MingaEditor.Frontend.Manager do
 
   @spec detect_tty() :: String.t() | nil
   defp detect_tty do
-    with {output, 0} <- System.cmd("ps", ["-o", "tty=", "-p", to_string(:os.getpid())]),
-         tty_name = String.trim(output),
-         true <- tty_name != "" and tty_name != "??" do
-      tty_path_for(tty_name)
-    else
+    case System.cmd("ps", ["-o", "tty=", "-p", to_string(:os.getpid())]) do
+      {output, 0} -> tty_path_for(String.trim(output))
       _ -> nil
     end
   end
@@ -324,16 +321,32 @@ defmodule MingaEditor.Frontend.Manager do
 
   Checks if `/dev/{name}` exists first (handles long form and Linux).
   Falls back to `/dev/tty{name}` for short forms.
-  """
-  @spec tty_path_for(String.t()) :: String.t()
-  def tty_path_for(tty_name) do
-    path = "/dev/#{tty_name}"
 
-    if File.exists?(path) do
-      path
+  Returns `nil` when the process has no controlling terminal. `ps -o tty=`
+  reports this as all question marks: `"??"` on macOS, `"?"` on Linux. Without
+  this guard we would build a bogus path like `/dev/tty?`, which the Go renderer
+  cannot open and crashes on. Returning `nil` lets the renderer fall back to
+  `/dev/tty`.
+  """
+  @spec tty_path_for(String.t()) :: String.t() | nil
+  def tty_path_for(tty_name) do
+    if no_controlling_tty?(tty_name) do
+      nil
     else
-      "/dev/tty#{tty_name}"
+      path = "/dev/#{tty_name}"
+
+      if File.exists?(path) do
+        path
+      else
+        "/dev/tty#{tty_name}"
+      end
     end
+  end
+
+  @spec no_controlling_tty?(String.t()) :: boolean()
+  defp no_controlling_tty?(tty_name) do
+    trimmed = String.trim(tty_name)
+    trimmed == "" or trimmed == String.duplicate("?", String.length(trimmed))
   end
 
   @spec log_renderer_message(String.t(), String.t()) :: :ok
