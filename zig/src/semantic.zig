@@ -12,6 +12,7 @@ const types = @import("semantic/types.zig");
 const charm = @import("semantic/charm.zig");
 const theme_mod = @import("semantic/theme.zig");
 const decode = @import("semantic/decode.zig");
+const zigzag_chrome = @import("zigzag_chrome.zig");
 
 pub const Error = types.Error;
 pub const StatusSegment = types.StatusSegment;
@@ -1201,16 +1202,42 @@ fn renderFileTree(surface: anytype, file_tree: FileTree, header_rows: u16, has_s
         return;
     }
 
+    var buffer: [8192]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buffer);
+    const rows = zigzag_chrome.fileTreeRows(fba.allocator(), file_tree) catch {
+        renderFileTreeRowsManual(surface, file_tree, row, end_row, tree_width, maybe_theme);
+        return;
+    };
+
+    var index: usize = 0;
+    while (row < end_row and index < rows.len) : ({
+        row += 1;
+        index += 1;
+    }) {
+        const presentation = rows[index];
+        if (presentation.source_index >= file_tree.rows.len) continue;
+        renderFileTreeRow(surface, file_tree, file_tree.rows[presentation.source_index], presentation, row, tree_width, maybe_theme);
+    }
+}
+
+fn renderFileTreeRowsManual(surface: anytype, file_tree: FileTree, start_row: u16, end_row: u16, tree_width: u16, maybe_theme: ?Theme) void {
+    var row = start_row;
     var index: usize = 0;
     while (row < end_row and index < file_tree.rows.len) : ({
         row += 1;
         index += 1;
     }) {
-        renderFileTreeRow(surface, file_tree, file_tree.rows[index], row, tree_width, maybe_theme);
+        const tree_row = file_tree.rows[index];
+        renderFileTreeRow(surface, file_tree, tree_row, .{
+            .source_index = index,
+            .depth = tree_row.depth,
+            .marker = if (tree_row.directory()) (if (tree_row.expanded()) "v" else ">") else " ",
+            .label = if (tree_row.editing_text.len > 0) tree_row.editing_text else tree_row.name,
+        }, row, tree_width, maybe_theme);
     }
 }
 
-fn renderFileTreeRow(surface: anytype, file_tree: FileTree, row: FileTreeRow, screen_row: u16, tree_width: u16, maybe_theme: ?Theme) void {
+fn renderFileTreeRow(surface: anytype, file_tree: FileTree, row: FileTreeRow, presentation: zigzag_chrome.TreeRowPresentation, screen_row: u16, tree_width: u16, maybe_theme: ?Theme) void {
     const selected = row.selected() or std.mem.eql(u8, row.id, file_tree.selected_id);
     const focused = row.focused() or (selected and file_tree.focused);
     const active = row.active();
@@ -1221,12 +1248,11 @@ fn renderFileTreeRow(surface: anytype, file_tree: FileTree, row: FileTreeRow, sc
 
     var col: u16 = 0;
     var depth: u8 = 0;
-    while (depth < row.depth and col < tree_width) : (depth += 1) {
+    while (depth < presentation.depth and col < tree_width) : (depth += 1) {
         col = writeText(surface, screen_row, col, tree_width, "  ", fg, bg, attrs);
     }
 
-    const marker = if (row.directory()) (if (row.expanded()) "v" else ">") else " ";
-    col = writeText(surface, screen_row, col, tree_width, marker, fg, bg, attrs);
+    col = writeText(surface, screen_row, col, tree_width, presentation.marker, fg, bg, attrs);
     col = writeText(surface, screen_row, col, tree_width, " ", fg, bg, attrs);
     if (row.icon.len > 0) {
         // Icon uses its per-row themed color, except when selection/active states
@@ -1242,8 +1268,7 @@ fn renderFileTreeRow(surface: anytype, file_tree: FileTree, row: FileTreeRow, sc
         col = writeText(surface, screen_row, col, tree_width, row.icon, icon_fg, bg, attrs);
         col = writeText(surface, screen_row, col, tree_width, " ", fg, bg, attrs);
     }
-    const label = if (row.editing_text.len > 0) row.editing_text else row.name;
-    col = writeText(surface, screen_row, col, tree_width, label, fg, bg, attrs);
+    col = writeText(surface, screen_row, col, tree_width, presentation.label, fg, bg, attrs);
     const git_marker = fileTreeGitMarker(row.git_status);
     if (git_marker.len > 0) {
         _ = writeText(surface, screen_row, col, tree_width, git_marker, fg, bg, attrs);
@@ -1751,35 +1776,55 @@ fn renderTabBar(surface: anytype, tab_bar: TabBar, has_workspaces: bool, maybe_t
     clearRow(surface, row, width);
     fillRowRemainder(surface, row, 0, width, tabBg(maybe_theme));
 
+    var buffer: [4096]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buffer);
+    const rows = zigzag_chrome.tabRows(fba.allocator(), tab_bar.tabs, tab_bar.active_index) catch {
+        renderTabBarManual(surface, tab_bar, row, width, maybe_theme);
+        return;
+    };
+
+    var col: u16 = 0;
+    for (rows, 0..) |tab_row, rendered_index| {
+        if (col >= width or tab_row.index >= tab_bar.tabs.len) break;
+        col = renderTabBarItem(surface, row, col, width, tab_bar.tabs[tab_row.index], tab_row.active, rendered_index, maybe_theme);
+    }
+}
+
+fn renderTabBarManual(surface: anytype, tab_bar: TabBar, row: u16, width: u16, maybe_theme: ?Theme) void {
     var col: u16 = 0;
     for (tab_bar.tabs, 0..) |tab, index| {
         if (col >= width) break;
-        const active = tab.active() or index == tab_bar.active_index;
-        const tab_fg = if (active) tabActiveFg(maybe_theme) else tabInactiveFg(maybe_theme);
-        const tab_bg = if (active) tabActiveBg(maybe_theme) else tabBg(maybe_theme);
-        const attrs: u8 = if (active) protocol.ATTR_BOLD else 0;
-        if (index > 0) col = writeText(surface, row, col, width, " ", tab_fg, tabBg(maybe_theme), 0);
-
-        if (active) {
-            col = writeText(surface, row, col, width, "▌ ", tabActiveFg(maybe_theme), tabActiveBg(maybe_theme), protocol.ATTR_BOLD);
-        }
-
-        if (tab.icon.len > 0) {
-            const icon_fg: u24 = if (tab.tint != 0) @intCast(tab.tint & 0x00FF_FFFF) else tab_fg;
-            col = writeText(surface, row, col, width, tab.icon, icon_fg, tab_bg, attrs);
-            col = writeText(surface, row, col, width, " ", tab_fg, tab_bg, attrs);
-        }
-
-        col = writeText(surface, row, col, width, tab.label, tab_fg, tab_bg, attrs);
-
-        if (tab.dirty()) {
-            col = writeText(surface, row, col, width, " *", tabDirtyFg(maybe_theme), tab_bg, 0);
-        }
-
-        if (tab.attention()) {
-            col = writeText(surface, row, col, width, " !", tabAttentionFg(maybe_theme), tabBg(maybe_theme), protocol.ATTR_BOLD);
-        }
+        col = renderTabBarItem(surface, row, col, width, tab, tab.active() or index == tab_bar.active_index, index, maybe_theme);
     }
+}
+
+fn renderTabBarItem(surface: anytype, row: u16, start_col: u16, width: u16, tab: Tab, active: bool, index: usize, maybe_theme: ?Theme) u16 {
+    var col = start_col;
+    const tab_fg = if (active) tabActiveFg(maybe_theme) else tabInactiveFg(maybe_theme);
+    const tab_bg = if (active) tabActiveBg(maybe_theme) else tabBg(maybe_theme);
+    const attrs: u8 = if (active) protocol.ATTR_BOLD else 0;
+    if (index > 0) col = writeText(surface, row, col, width, " ", tab_fg, tabBg(maybe_theme), 0);
+
+    if (active) {
+        col = writeText(surface, row, col, width, "▌ ", tabActiveFg(maybe_theme), tabActiveBg(maybe_theme), protocol.ATTR_BOLD);
+    }
+
+    if (tab.icon.len > 0) {
+        const icon_fg: u24 = if (tab.tint != 0) @intCast(tab.tint & 0x00FF_FFFF) else tab_fg;
+        col = writeText(surface, row, col, width, tab.icon, icon_fg, tab_bg, attrs);
+        col = writeText(surface, row, col, width, " ", tab_fg, tab_bg, attrs);
+    }
+
+    col = writeText(surface, row, col, width, tab.label, tab_fg, tab_bg, attrs);
+
+    if (tab.dirty()) {
+        col = writeText(surface, row, col, width, " *", tabDirtyFg(maybe_theme), tab_bg, 0);
+    }
+
+    if (tab.attention()) {
+        col = writeText(surface, row, col, width, " !", tabAttentionFg(maybe_theme), tabBg(maybe_theme), protocol.ATTR_BOLD);
+    }
+    return col;
 }
 
 fn hitTabBar(tab_bar: TabBar, row: u16, col: u16, width: u16, height: u16, has_workspaces: bool) ?HitAction {
@@ -2064,7 +2109,8 @@ fn renderPicker(surface: anytype, picker: Picker, maybe_preview: ?PickerPreview,
     const preview = if (maybe_preview) |preview| if (preview.visible and preview.lines.len > 0 and width >= 100) preview else null else null;
     if (preview) |visible_preview| {
         const content_width = content_end_col - content_col;
-        const left_width: u16 = @min(@max((content_width * 45) / 100, 36), @max(content_width -| 20, 1));
+        const split = zigzag_chrome.horizontalSplit(content_width, rect.end_row -| rect.row, 0.45);
+        const left_width: u16 = @min(@max(split.left_width, 36), @max(content_width -| 20, 1));
         const split_col = @min(content_end_col, content_col + left_width);
         renderPickerList(surface, picker, rect.row, rect.end_row -| 1, content_col, split_col, maybe_theme);
         renderPickerPreviewContent(surface, visible_preview, rect.row, rect.end_row -| 1, split_col, content_end_col, maybe_theme);
@@ -3480,12 +3526,15 @@ fn renderStatusSegments(surface: anytype, row: u16, width: u16, status: StatusBa
     }
     col = renderFooterIndicators(surface, row, width, col, search, changes, notifications, timeline, extension_overlay, extension_panel, observatory, agent_context, tool_manager, board, agent_chat, maybe_theme);
 
-    var right_width: u16 = 0;
-    for (status.right_segments) |segment| {
-        right_width +|= textWidth(segment.text);
-    }
-
-    col = if (right_width >= width) 0 else width - right_width;
+    var buffer: [4096]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buffer);
+    col = zigzag_chrome.statusRightStart(fba.allocator(), status, width) catch blk: {
+        var right_width: u16 = 0;
+        for (status.right_segments) |segment| {
+            right_width +|= textWidth(segment.text);
+        }
+        break :blk if (right_width >= width) 0 else width - right_width;
+    };
     for (status.right_segments) |segment| {
         col = writeText(surface, row, col, width, segment.text, themedSegmentFg(segment, maybe_theme), themedSegmentBg(segment, maybe_theme), segment.attrs);
     }

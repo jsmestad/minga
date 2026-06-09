@@ -166,7 +166,8 @@ fn colorFromU24(rgb: u24) zz.Color {
     );
 }
 
-fn decodeFixtureState(alloc: std.mem.Allocator, bytes: []const u8) !semantic.State {
+/// Decodes a length-prefixed render fixture into retained semantic state for Zig-side adapter and chrome tests.
+pub fn decodeFixtureState(alloc: std.mem.Allocator, bytes: []const u8) !semantic.State {
     var state = semantic.State.init(alloc);
     errdefer state.deinit();
 
