@@ -1249,6 +1249,19 @@ conditional_tail = { guard = "present == 1", fields = [
 # Each [[sections]] entry describes one section within a sectioned opcode.
 # The opcode field links it to the parent [[opcodes]] entry by name.
 # The generator uses these to emit section-dispatch decode functions.
+#
+# Generated section decoders take an explicit window end (sectionStart +
+# sectionLen) and bound every read against it: a section decoder never reads
+# past its own section even when the underlying buffer carries more bytes.
+#
+# A trailing field may set `optional = true`. Optional fields must form a
+# contiguous suffix of an inline section's fixed `fields` (it is rejected on
+# command_fields, structures, and counted_array-layout sections, none of which
+# carry a section window). Semantics: the decoder reads an optional field only
+# if the window has room for it; otherwise the field takes its zero value
+# (empty string / 0) and the tail stops. This expresses positionally the
+# `if psLen >= N` tolerance the hand-written frontend decoders use, so a peer
+# that emits a shorter section (an older or newer frontend) still decodes.
 
 # gui_window_content (0x80) sections
 
@@ -1567,14 +1580,22 @@ name = "header"
 # picker_encoder.ex encode_picker/1: a constant marker byte (1), then the
 # counts, has_preview flag, title, and marked_count. The encoder writes
 # total_count as u16, not u32, and emits the title + marked_count tail.
+#
+# `title` and `marked_count` are the trailing tail the hand-written frontend
+# decoders read only `if psLen >= 10`. Marking them `optional = true` declares
+# that positional tolerance: a section decoder reads them only if its window has
+# room, otherwise they take their zero value (empty string / 0) and the tail
+# stops. This keeps the generated decoder as forward-compatible as the
+# hand-written one. The Elixir encoder always emits the full tail, so full-tail
+# goldens are unaffected; new short-section fixtures prove the tolerance.
 fields = [
   { name = "visible", type = "u8" },
   { name = "selected_index", type = "u16" },
   { name = "filtered_count", type = "u16" },
   { name = "total_count", type = "u16" },
   { name = "has_preview", type = "u8" },
-  { name = "title", type = "string16" },
-  { name = "marked_count", type = "u16" },
+  { name = "title", type = "string16", optional = true },
+  { name = "marked_count", type = "u16", optional = true },
 ]
 
 [[sections]]

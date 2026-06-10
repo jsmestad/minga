@@ -282,7 +282,7 @@ func decodeOverlayDelta(payload []byte) (Command, error) {
 
 func decodeWindowHeader(opcode byte, section []byte, window *WindowContent) {
 	if opcode == generated.OPGuiWindowContent {
-		hdr, _, err := generated.DecodeGuiWindowContentHeader(section, 0)
+		hdr, _, err := generated.DecodeGuiWindowContentHeader(section, 0, len(section))
 		if err != nil {
 			return
 		}
@@ -312,7 +312,7 @@ func decodeWindowHeader(opcode byte, section []byte, window *WindowContent) {
 }
 
 func decodeCursorline(section []byte, window *WindowContent) {
-	cl, _, err := generated.DecodeGuiWindowContentCursorline(section, 0)
+	cl, _, err := generated.DecodeGuiWindowContentCursorline(section, 0, len(section))
 	if err != nil {
 		return
 	}
@@ -354,7 +354,7 @@ func decodeRows(section []byte, window *WindowContent, delta bool) {
 }
 
 func decodeRow(section []byte, offset int) (WindowRow, int, bool) {
-	genRow, nextOffset, err := generated.DecodeRow(section, offset)
+	genRow, nextOffset, err := generated.DecodeRow(section, offset, len(section))
 	if err != nil {
 		return WindowRow{}, offset, false
 	}

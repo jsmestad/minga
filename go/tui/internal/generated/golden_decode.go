@@ -11,187 +11,187 @@ import "fmt"
 func GoldenDecode(name string, payload []byte) (any, int, error) {
 	switch name {
 	case "GuiAgentChatHeader":
-		v, n, err := DecodeGuiAgentChatHeader(payload, 0)
+		v, n, err := DecodeGuiAgentChatHeader(payload, 0, len(payload))
 		return v, n, err
 	case "GuiAgentContextFields":
-		v, n, err := DecodeGuiAgentContextFields(payload, 0)
+		v, n, err := DecodeGuiAgentContextFields(payload, 0, len(payload))
 		return v, n, err
 	case "GuiBottomPanelFields":
-		v, n, err := DecodeGuiBottomPanelFields(payload, 0)
+		v, n, err := DecodeGuiBottomPanelFields(payload, 0, len(payload))
 		return v, n, err
 	case "GuiBreadcrumbFields":
-		v, n, err := DecodeGuiBreadcrumbFields(payload, 0)
+		v, n, err := DecodeGuiBreadcrumbFields(payload, 0, len(payload))
 		return v, n, err
 	case "GuiChangeSummaryFields":
-		v, n, err := DecodeGuiChangeSummaryFields(payload, 0)
+		v, n, err := DecodeGuiChangeSummaryFields(payload, 0, len(payload))
 		return v, n, err
 	case "GuiCompletionFields":
-		v, n, err := DecodeGuiCompletionFields(payload, 0)
+		v, n, err := DecodeGuiCompletionFields(payload, 0, len(payload))
 		return v, n, err
 	case "GuiCursorlineFields":
-		v, n, err := DecodeGuiCursorlineFields(payload, 0)
+		v, n, err := DecodeGuiCursorlineFields(payload, 0, len(payload))
 		return v, n, err
 	case "GuiEditTimelineFields":
-		v, n, err := DecodeGuiEditTimelineFields(payload, 0)
+		v, n, err := DecodeGuiEditTimelineFields(payload, 0, len(payload))
 		return v, n, err
 	case "GuiExtensionOverlayFields":
-		v, n, err := DecodeGuiExtensionOverlayFields(payload, 0)
+		v, n, err := DecodeGuiExtensionOverlayFields(payload, 0, len(payload))
 		return v, n, err
 	case "GuiExtensionPanelFields":
-		v, n, err := DecodeGuiExtensionPanelFields(payload, 0)
+		v, n, err := DecodeGuiExtensionPanelFields(payload, 0, len(payload))
 		return v, n, err
 	case "GuiFileTreeFields":
-		v, n, err := DecodeGuiFileTreeFields(payload, 0)
+		v, n, err := DecodeGuiFileTreeFields(payload, 0, len(payload))
 		return v, n, err
 	case "GuiFloatPopupFields":
-		v, n, err := DecodeGuiFloatPopupFields(payload, 0)
+		v, n, err := DecodeGuiFloatPopupFields(payload, 0, len(payload))
 		return v, n, err
 	case "GuiGitStatusFields":
-		v, n, err := DecodeGuiGitStatusFields(payload, 0)
+		v, n, err := DecodeGuiGitStatusFields(payload, 0, len(payload))
 		return v, n, err
 	case "GuiGutterConfig":
-		v, n, err := DecodeGuiGutterConfig(payload, 0)
+		v, n, err := DecodeGuiGutterConfig(payload, 0, len(payload))
 		return v, n, err
 	case "GuiGutterEntries":
-		v, n, err := DecodeGuiGutterEntries(payload, 0)
+		v, n, err := DecodeGuiGutterEntries(payload, 0, len(payload))
 		return v, n, err
 	case "GuiGutterSepFields":
-		v, n, err := DecodeGuiGutterSepFields(payload, 0)
+		v, n, err := DecodeGuiGutterSepFields(payload, 0, len(payload))
 		return v, n, err
 	case "GuiGutterWindow":
-		v, n, err := DecodeGuiGutterWindow(payload, 0)
+		v, n, err := DecodeGuiGutterWindow(payload, 0, len(payload))
 		return v, n, err
 	case "GuiHoverPopupFields":
-		v, n, err := DecodeGuiHoverPopupFields(payload, 0)
+		v, n, err := DecodeGuiHoverPopupFields(payload, 0, len(payload))
 		return v, n, err
 	case "GuiMinibufferFields":
-		v, n, err := DecodeGuiMinibufferFields(payload, 0)
+		v, n, err := DecodeGuiMinibufferFields(payload, 0, len(payload))
 		return v, n, err
 	case "GuiNotificationsFields":
-		v, n, err := DecodeGuiNotificationsFields(payload, 0)
+		v, n, err := DecodeGuiNotificationsFields(payload, 0, len(payload))
 		return v, n, err
 	case "GuiPickerActionMenu":
-		v, n, err := DecodeGuiPickerActionMenu(payload, 0)
+		v, n, err := DecodeGuiPickerActionMenu(payload, 0, len(payload))
 		return v, n, err
 	case "GuiPickerHeader":
-		v, n, err := DecodeGuiPickerHeader(payload, 0)
+		v, n, err := DecodeGuiPickerHeader(payload, 0, len(payload))
 		return v, n, err
 	case "GuiPickerItems":
-		v, n, err := DecodeGuiPickerItems(payload, 0)
+		v, n, err := DecodeGuiPickerItems(payload, 0, len(payload))
 		return v, n, err
 	case "GuiPickerLoadStatus":
-		v, n, err := DecodeGuiPickerLoadStatus(payload, 0)
+		v, n, err := DecodeGuiPickerLoadStatus(payload, 0, len(payload))
 		return v, n, err
 	case "GuiPickerModePrefix":
-		v, n, err := DecodeGuiPickerModePrefix(payload, 0)
+		v, n, err := DecodeGuiPickerModePrefix(payload, 0, len(payload))
 		return v, n, err
 	case "GuiPickerPreviewHeader":
-		v, n, err := DecodeGuiPickerPreviewHeader(payload, 0)
+		v, n, err := DecodeGuiPickerPreviewHeader(payload, 0, len(payload))
 		return v, n, err
 	case "GuiPickerQuery":
-		v, n, err := DecodeGuiPickerQuery(payload, 0)
+		v, n, err := DecodeGuiPickerQuery(payload, 0, len(payload))
 		return v, n, err
 	case "GuiSearchStateFields":
-		v, n, err := DecodeGuiSearchStateFields(payload, 0)
+		v, n, err := DecodeGuiSearchStateFields(payload, 0, len(payload))
 		return v, n, err
 	case "GuiSidebarsFields":
-		v, n, err := DecodeGuiSidebarsFields(payload, 0)
+		v, n, err := DecodeGuiSidebarsFields(payload, 0, len(payload))
 		return v, n, err
 	case "GuiSignatureHelpFields":
-		v, n, err := DecodeGuiSignatureHelpFields(payload, 0)
+		v, n, err := DecodeGuiSignatureHelpFields(payload, 0, len(payload))
 		return v, n, err
 	case "GuiSplitSeparatorsFields":
-		v, n, err := DecodeGuiSplitSeparatorsFields(payload, 0)
+		v, n, err := DecodeGuiSplitSeparatorsFields(payload, 0, len(payload))
 		return v, n, err
 	case "GuiStatusBarCursor":
-		v, n, err := DecodeGuiStatusBarCursor(payload, 0)
+		v, n, err := DecodeGuiStatusBarCursor(payload, 0, len(payload))
 		return v, n, err
 	case "GuiStatusBarDiagnostics":
-		v, n, err := DecodeGuiStatusBarDiagnostics(payload, 0)
+		v, n, err := DecodeGuiStatusBarDiagnostics(payload, 0, len(payload))
 		return v, n, err
 	case "GuiStatusBarFile":
-		v, n, err := DecodeGuiStatusBarFile(payload, 0)
+		v, n, err := DecodeGuiStatusBarFile(payload, 0, len(payload))
 		return v, n, err
 	case "GuiStatusBarGit":
-		v, n, err := DecodeGuiStatusBarGit(payload, 0)
+		v, n, err := DecodeGuiStatusBarGit(payload, 0, len(payload))
 		return v, n, err
 	case "GuiStatusBarIdentity":
-		v, n, err := DecodeGuiStatusBarIdentity(payload, 0)
+		v, n, err := DecodeGuiStatusBarIdentity(payload, 0, len(payload))
 		return v, n, err
 	case "GuiStatusBarIndent":
-		v, n, err := DecodeGuiStatusBarIndent(payload, 0)
+		v, n, err := DecodeGuiStatusBarIndent(payload, 0, len(payload))
 		return v, n, err
 	case "GuiStatusBarLanguage":
-		v, n, err := DecodeGuiStatusBarLanguage(payload, 0)
+		v, n, err := DecodeGuiStatusBarLanguage(payload, 0, len(payload))
 		return v, n, err
 	case "GuiStatusBarMessage":
-		v, n, err := DecodeGuiStatusBarMessage(payload, 0)
+		v, n, err := DecodeGuiStatusBarMessage(payload, 0, len(payload))
 		return v, n, err
 	case "GuiStatusBarModeline":
-		v, n, err := DecodeGuiStatusBarModeline(payload, 0)
+		v, n, err := DecodeGuiStatusBarModeline(payload, 0, len(payload))
 		return v, n, err
 	case "GuiStatusBarRecording":
-		v, n, err := DecodeGuiStatusBarRecording(payload, 0)
+		v, n, err := DecodeGuiStatusBarRecording(payload, 0, len(payload))
 		return v, n, err
 	case "GuiStatusBarSelection":
-		v, n, err := DecodeGuiStatusBarSelection(payload, 0)
+		v, n, err := DecodeGuiStatusBarSelection(payload, 0, len(payload))
 		return v, n, err
 	case "GuiStatusBarWorkspace":
-		v, n, err := DecodeGuiStatusBarWorkspace(payload, 0)
+		v, n, err := DecodeGuiStatusBarWorkspace(payload, 0, len(payload))
 		return v, n, err
 	case "GuiTabBarFields":
-		v, n, err := DecodeGuiTabBarFields(payload, 0)
+		v, n, err := DecodeGuiTabBarFields(payload, 0, len(payload))
 		return v, n, err
 	case "GuiThemeFields":
-		v, n, err := DecodeGuiThemeFields(payload, 0)
+		v, n, err := DecodeGuiThemeFields(payload, 0, len(payload))
 		return v, n, err
 	case "GuiToolManagerFields":
-		v, n, err := DecodeGuiToolManagerFields(payload, 0)
+		v, n, err := DecodeGuiToolManagerFields(payload, 0, len(payload))
 		return v, n, err
 	case "GuiWhichKeyFields":
-		v, n, err := DecodeGuiWhichKeyFields(payload, 0)
+		v, n, err := DecodeGuiWhichKeyFields(payload, 0, len(payload))
 		return v, n, err
 	case "GuiWindowContentAnnotations":
-		v, n, err := DecodeGuiWindowContentAnnotations(payload, 0)
+		v, n, err := DecodeGuiWindowContentAnnotations(payload, 0, len(payload))
 		return v, n, err
 	case "GuiWindowContentCursorline":
-		v, n, err := DecodeGuiWindowContentCursorline(payload, 0)
+		v, n, err := DecodeGuiWindowContentCursorline(payload, 0, len(payload))
 		return v, n, err
 	case "GuiWindowContentDiagnosticRanges":
-		v, n, err := DecodeGuiWindowContentDiagnosticRanges(payload, 0)
+		v, n, err := DecodeGuiWindowContentDiagnosticRanges(payload, 0, len(payload))
 		return v, n, err
 	case "GuiWindowContentDocumentHighlights":
-		v, n, err := DecodeGuiWindowContentDocumentHighlights(payload, 0)
+		v, n, err := DecodeGuiWindowContentDocumentHighlights(payload, 0, len(payload))
 		return v, n, err
 	case "GuiWindowContentGeometry":
-		v, n, err := DecodeGuiWindowContentGeometry(payload, 0)
+		v, n, err := DecodeGuiWindowContentGeometry(payload, 0, len(payload))
 		return v, n, err
 	case "GuiWindowContentHeader":
-		v, n, err := DecodeGuiWindowContentHeader(payload, 0)
+		v, n, err := DecodeGuiWindowContentHeader(payload, 0, len(payload))
 		return v, n, err
 	case "GuiWindowContentRows":
-		v, n, err := DecodeGuiWindowContentRows(payload, 0)
+		v, n, err := DecodeGuiWindowContentRows(payload, 0, len(payload))
 		return v, n, err
 	case "GuiWindowContentSearchMatches":
-		v, n, err := DecodeGuiWindowContentSearchMatches(payload, 0)
+		v, n, err := DecodeGuiWindowContentSearchMatches(payload, 0, len(payload))
 		return v, n, err
 	case "GuiWindowContentSelection":
-		v, n, err := DecodeGuiWindowContentSelection(payload, 0)
+		v, n, err := DecodeGuiWindowContentSelection(payload, 0, len(payload))
 		return v, n, err
 	case "GuiWindowRowsDeltaHeader":
-		v, n, err := DecodeGuiWindowRowsDeltaHeader(payload, 0)
+		v, n, err := DecodeGuiWindowRowsDeltaHeader(payload, 0, len(payload))
 		return v, n, err
 	case "GuiWindowRowsDeltaRows":
-		v, n, err := DecodeGuiWindowRowsDeltaRows(payload, 0)
+		v, n, err := DecodeGuiWindowRowsDeltaRows(payload, 0, len(payload))
 		return v, n, err
 	case "GuiWindowViewportDeltaHeader":
-		v, n, err := DecodeGuiWindowViewportDeltaHeader(payload, 0)
+		v, n, err := DecodeGuiWindowViewportDeltaHeader(payload, 0, len(payload))
 		return v, n, err
 	case "GuiWindowViewportDeltaRows":
-		v, n, err := DecodeGuiWindowViewportDeltaRows(payload, 0)
+		v, n, err := DecodeGuiWindowViewportDeltaRows(payload, 0, len(payload))
 		return v, n, err
 	case "GuiWorkspacesFields":
-		v, n, err := DecodeGuiWorkspacesFields(payload, 0)
+		v, n, err := DecodeGuiWorkspacesFields(payload, 0, len(payload))
 		return v, n, err
 	default:
 		return nil, 0, fmt.Errorf("unknown golden decoder %q", name)

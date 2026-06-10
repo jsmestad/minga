@@ -740,7 +740,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         // tail; we map it into the existing RenderCommand shape. CompletionKind's
         // raw value matches the UInt8 kind the hand-written decoder produced.
         do {
-            let (fields, nextPos) = try GeneratedProtocol.decodeGuiCompletionFields(data, rest)
+            let (fields, nextPos) = try GeneratedProtocol.decodeGuiCompletionFields(data, rest, data.count)
             let items = fields.items.map {
                 Wire.CompletionItem(kind: $0.kind.rawValue, label: $0.label, detail: $0.detail)
             }
@@ -792,7 +792,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         // Schema-generated decoder (gui_breadcrumb command_fields): a u8-counted
         // list of string16 segments, mirroring the Go decoder.
         do {
-            let (fields, nextPos) = try GeneratedProtocol.decodeGuiBreadcrumbFields(data, rest)
+            let (fields, nextPos) = try GeneratedProtocol.decodeGuiBreadcrumbFields(data, rest, data.count)
             return (.guiBreadcrumb(segments: fields.segments), nextPos - offset)
         } catch {
             throw ProtocolDecodeError.malformed
@@ -1082,113 +1082,76 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         var pkModePrefix = ""
         var pkLoadStatus: Wire.PickerLoadStatus = .ready
 
+        // The section-dispatch loop stays hand-written (it owns the outer framing);
+        // each section body is decoded by the schema-generated, window-aware
+        // decoder. `psEnd = psStart + psLen` is the section window: every generated
+        // read bounds against it, and the header's optional title/marked_count tail
+        // degrades to its zero value when the window is short, reproducing the old
+        // `if psLen >= 10` ladder. A truncated section throws, which the caller maps
+        // to .malformed exactly as before.
         for _ in 0..<pickerSectionCount {
             guard data.count >= pickerPos + 3 else { throw ProtocolDecodeError.malformed }
             let psId = data[pickerPos]
             let psLen = Int(readU16(data, pickerPos + 1))
             let psStart = pickerPos + 3
             guard data.count >= psStart + psLen else { throw ProtocolDecodeError.malformed }
+            let psEnd = psStart + psLen
 
-            switch psId {
-            case 0x01: // Header: visible(1) + selected(2) + filtered(2) + total(2) + has_preview(1) + title_len(2) + title + marked_count(2)
-                guard psLen >= 8 else { break }
-                pkVisible = data[psStart] != 0
-                pkSelectedIndex = readU16(data, psStart + 1)
-                pkFilteredCount = readU16(data, psStart + 3)
-                pkTotalCount = readU16(data, psStart + 5)
-                pkHasPreview = data[psStart + 7] != 0
-                if psLen >= 10 {
-                    let tLen = Int(readU16(data, psStart + 8))
-                    if psLen >= 10 + tLen {
-                        pkTitle = String(data: data[(psStart + 10)..<(psStart + 10 + tLen)], encoding: .utf8) ?? ""
+            do {
+                switch psId {
+                case 0x01: // Header
+                    let (h, _) = try GeneratedProtocol.decodeGuiPickerHeader(data, psStart, psEnd)
+                    pkVisible = h.visible != 0
+                    pkSelectedIndex = h.selectedIndex
+                    pkFilteredCount = h.filteredCount
+                    pkTotalCount = h.totalCount
+                    pkHasPreview = h.hasPreview != 0
+                    pkTitle = h.title
+                    pkMarkedCount = h.markedCount
+
+                case 0x02: // Query
+                    let (q, _) = try GeneratedProtocol.decodeGuiPickerQuery(data, psStart, psEnd)
+                    pkQuery = q.text
+
+                case 0x05: // Mode prefix
+                    let (m, _) = try GeneratedProtocol.decodeGuiPickerModePrefix(data, psStart, psEnd)
+                    pkModePrefix = m.text
+
+                case 0x03: // Items
+                    let (items, _) = try GeneratedProtocol.decodeGuiPickerItems(data, psStart, psEnd)
+                    pkItems = items.map {
+                        Wire.PickerItem(
+                            iconColor: $0.iconColor, flags: $0.flags, label: $0.label,
+                            description: $0.description, annotation: $0.annotation,
+                            matchPositions: $0.matchPositions
+                        )
                     }
-                    if psLen >= 12 + tLen {
-                        pkMarkedCount = readU16(data, psStart + 10 + tLen)
+
+                case 0x04: // Action menu
+                    let (m, _) = try GeneratedProtocol.decodeGuiPickerActionMenu(data, psStart, psEnd)
+                    if m.visible != 0 {
+                        pkActionMenu = Wire.PickerActionMenu(selectedIndex: m.selectedIndex, actions: m.actions)
                     }
-                }
 
-            case 0x02: // Query: query_len(2) + query
-                guard psLen >= 2 else { break }
-                let qLen = Int(readU16(data, psStart))
-                if psLen >= 2 + qLen {
-                    pkQuery = String(data: data[(psStart + 2)..<(psStart + 2 + qLen)], encoding: .utf8) ?? ""
-                }
-
-            case 0x05: // Mode prefix: mode_prefix_len(2) + mode_prefix
-                guard psLen >= 2 else { break }
-                let pLen = Int(readU16(data, psStart))
-                if psLen >= 2 + pLen {
-                    pkModePrefix = String(data: data[(psStart + 2)..<(psStart + 2 + pLen)], encoding: .utf8) ?? ""
-                }
-
-            case 0x03: // Items: item_count(2) + items...
-                guard psLen >= 2 else { break }
-                let itemCount = Int(readU16(data, psStart))
-                pkItems.reserveCapacity(itemCount)
-                var iPos = psStart + 2
-                let sectionEnd = psStart + psLen
-                for _ in 0..<itemCount {
-                    guard iPos + 6 <= sectionEnd else { break }
-                    let iconColor = readU24(data, iPos)
-                    let itemFlags = data[iPos + 3]
-                    let labelLen = Int(readU16(data, iPos + 4))
-                    iPos += 6
-                    guard iPos + labelLen + 2 <= sectionEnd else { break }
-                    let label = String(data: data[iPos..<(iPos + labelLen)], encoding: .utf8) ?? ""
-                    iPos += labelLen
-                    let descLen = Int(readU16(data, iPos)); iPos += 2
-                    guard iPos + descLen + 2 <= sectionEnd else { break }
-                    let desc = String(data: data[iPos..<(iPos + descLen)], encoding: .utf8) ?? ""
-                    iPos += descLen
-                    let annotLen = Int(readU16(data, iPos)); iPos += 2
-                    guard iPos + annotLen + 1 <= sectionEnd else { break }
-                    let annot = String(data: data[iPos..<(iPos + annotLen)], encoding: .utf8) ?? ""
-                    iPos += annotLen
-                    let mpc = Int(data[iPos]); iPos += 1
-                    guard iPos + mpc * 2 <= sectionEnd else { break }
-                    var matchPos: [UInt16] = []
-                    for _ in 0..<mpc { matchPos.append(readU16(data, iPos)); iPos += 2 }
-                    pkItems.append(Wire.PickerItem(iconColor: UInt32(iconColor), flags: itemFlags, label: label, description: desc, annotation: annot, matchPositions: matchPos))
-                }
-
-            case 0x04: // Action menu: visible(1), if visible: selected(1) + count(1) + actions
-                guard psLen >= 1 else { break }
-                let amVisible = data[psStart] != 0
-                if amVisible, psLen >= 3 {
-                    let amSelected = data[psStart + 1]
-                    let amCount = Int(data[psStart + 2])
-                    var amPos = psStart + 3
-                    var amNames: [String] = []
-                    for _ in 0..<amCount {
-                        guard amPos + 2 <= psStart + psLen else { break }
-                        let nLen = Int(readU16(data, amPos)); amPos += 2
-                        guard amPos + nLen <= psStart + psLen else { break }
-                        amNames.append(String(data: data[amPos..<(amPos + nLen)], encoding: .utf8) ?? "")
-                        amPos += nLen
+                case 0x06: // LoadStatus
+                    let (s, _) = try GeneratedProtocol.decodeGuiPickerLoadStatus(data, psStart, psEnd)
+                    switch s.status {
+                    case 1: pkLoadStatus = .loading
+                    // The encoder always writes a (valid-UTF-8) message for status 2,
+                    // so the generated decoder reproduces it exactly; the old
+                    // `?? "Unknown error"` fallback only covered invalid UTF-8, which
+                    // the wire never carries.
+                    case 2: pkLoadStatus = .error(s.message)
+                    default: pkLoadStatus = .ready
                     }
-                    pkActionMenu = Wire.PickerActionMenu(selectedIndex: amSelected, actions: amNames)
-                }
 
-            case 0x06: // LoadStatus: status(1), if error: error_len(2) + error_message
-                guard psLen >= 1 else { break }
-                let statusByte = data[psStart]
-                switch statusByte {
-                case 1: pkLoadStatus = .loading
-                case 2:
-                    if psLen >= 3 {
-                        let errLen = Int(readU16(data, psStart + 1))
-                        if psLen >= 3 + errLen {
-                            let errMsg = String(data: data[(psStart + 3)..<(psStart + 3 + errLen)], encoding: .utf8) ?? "Unknown error"
-                            pkLoadStatus = .error(errMsg)
-                        }
-                    }
-                default: pkLoadStatus = .ready
+                default: break
                 }
-
-            default: break
+            } catch {
+                throw ProtocolDecodeError.malformed
             }
 
-            pickerPos = psStart + psLen
+            pickerPos = psEnd
         }
 
         return (.guiPicker(visible: pkVisible, selectedIndex: pkSelectedIndex, filteredCount: pkFilteredCount, totalCount: pkTotalCount, markedCount: pkMarkedCount, title: pkTitle, query: pkQuery, hasPreview: pkHasPreview, items: pkItems, actionMenu: pkActionMenu, modePrefix: pkModePrefix, loadStatus: pkLoadStatus), pickerPos - offset)
@@ -2022,6 +1985,15 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
 
     case OP_GUI_GIT_STATUS:
         // Header: repo_state:1, syncing:1, ahead:2, behind:2, branch_len:2, branch, entry_count:2
+        //
+        // gui_git_status stays hand-written (ticket #2225 ruling): this decoder is
+        // strict where the generated one is lenient. It range-validates repo_state
+        // (<= 2), syncing (0/1), entry section (<= 3) and status (<= 7) and rejects
+        // invalid UTF-8 via readRequiredUTF8, throwing .malformed. The generated
+        // GuiGitStatusFields decoder maps unknown enum bytes to a default and
+        // coalesces invalid UTF-8 to "", so swapping it would silently accept
+        // payloads this path rejects. Strict IS the byte-neutral outcome here, so
+        // it is intentionally not migrated.
         guard data.count >= rest + 10 else { throw ProtocolDecodeError.malformed }
         let gsRepoState = data[rest]
         guard gsRepoState <= 2 else { throw ProtocolDecodeError.malformed }
