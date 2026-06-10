@@ -70,11 +70,21 @@ type Model struct {
 	// a tab_reorder or file_tree_drop gui_action (ticket #2229, AC3). It is nil
 	// when no draggable press is active.
 	mouseDrag *chromeDrag
+	// renderedHeaderHeight caches the number of header rows the last rendered
+	// frame placed above the editor body. Since #2244 collapsed layout to
+	// Layout.GUI (editor at BEAM row 0), outbound editor-body mouse rows must
+	// subtract this offset to mirror the inbound translation
+	// (render_content.go semanticContentOffsets). It is the single source of
+	// truth shared with the renderer (headerLines), recomputed whenever the
+	// inputs to headerLines change: applied commands (chrome) and resize
+	// (width/height). Caching avoids recomputing headerLines inconsistently per
+	// mouse event (ticket #2256).
+	renderedHeaderHeight int
 }
 
 func New(width, height uint16, out chan<- []byte) Model {
 	vp := viewport.New(viewport.WithWidth(int(width)), viewport.WithHeight(max(int(height)-3, 1)))
-	return Model{
+	m := Model{
 		width:             int(width),
 		height:            int(height),
 		out:               out,
@@ -91,6 +101,10 @@ func New(width, height uint16, out chan<- []byte) Model {
 		// toggled at runtime with ctrl+alt+l (ticket #2215).
 		hudVisible: latencyHUDEnvEnabled(),
 	}
+	// Seed the header-offset cache so the first mouse event before any
+	// frame/resize still translates against the rendered fallback header.
+	m.refreshRenderedHeaderHeight()
+	return m
 }
 
 // latencyHUDEnvEnabled reports whether MINGA_LATENCY_HUD requests the overlay on
@@ -123,6 +137,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.refreshRenderedHeaderHeight()
 		m.viewport.SetWidth(msg.Width)
 		m.viewport.SetHeight(m.bodyHeight())
 		m.send(protocol.EncodeResize(uint16(max(msg.Width, 1)), uint16(max(msg.Height, 1))))
@@ -154,8 +169,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			default:
 				if packet, ok := m.semanticMousePacket(msg); ok {
 					m.send(packet)
-				} else {
-					m.send(mousePacket(msg))
+				} else if packet, ok := m.mousePacket(msg); ok {
+					m.send(packet)
 				}
 			}
 		}
@@ -168,6 +183,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case port.PacketMsg:
 		cmd = m.applyCommands(msg.Commands)
+		m.refreshRenderedHeaderHeight()
 	case port.LogMsg:
 		m.send(protocol.EncodeLogMessage(msg.Level, msg.Text))
 	case port.ErrorMsg:
@@ -440,6 +456,15 @@ func (m *Model) removeWindow(id uint16) {
 
 func (m Model) bodyHeight() int {
 	return max(m.height-len(m.headerLines())-len(m.footerLines()), 1)
+}
+
+// refreshRenderedHeaderHeight recomputes the cached header offset from the same
+// headerLines the renderer uses, so outbound mouse translation (mousePacket)
+// stays consistent with the frame on screen (ticket #2256). Call it whenever an
+// input to headerLines changes: applied commands (chrome content) and resize
+// (width drives the breadcrumb threshold).
+func (m *Model) refreshRenderedHeaderHeight() {
+	m.renderedHeaderHeight = len(m.headerLines())
 }
 
 func (m Model) maxOverlayHeight() int {
