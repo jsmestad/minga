@@ -25,6 +25,9 @@ defmodule Mix.Tasks.Protocol.Golden do
   @manifest_path "go/tui/internal/protocol/testdata/golden/manifest.json"
 
   @fixtures_module Minga.Test.ProtocolGolden
+  # Test-support module, only compiled in MIX_ENV=test; ensure_fixtures_available!
+  # guards the runtime call, so the dev-env undefined warning is expected noise.
+  @compile {:no_warn_undefined, Minga.Test.ProtocolGolden}
 
   @impl Mix.Task
   @spec run([String.t()]) :: :ok
@@ -59,10 +62,7 @@ defmodule Mix.Tasks.Protocol.Golden do
 
   @spec manifest_json() :: String.t()
   defp manifest_json do
-    # apply/3 keeps the test-support module out of dev-env compile-time
-    # resolution; ensure_loaded! above guards the runtime call.
-    @fixtures_module
-    |> apply(:manifest, [])
+    @fixtures_module.manifest()
     |> JSON.encode!()
     |> Kernel.<>("\n")
   end
