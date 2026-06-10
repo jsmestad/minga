@@ -321,7 +321,7 @@ defmodule MingaEditor.Renderer.BufferLine do
 
     # GUI frontends draw the cursorline bg natively as a Metal quad.
     # Skip the full-width space fill draw that the TUI needs for bg painting.
-    if ctx.is_gui do
+    if ctx.is_semantic do
       tinted
     else
       fill =

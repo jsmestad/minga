@@ -238,7 +238,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
   test "command-opened observatory replaces stale active sidebar id", %{sidebar_registry: table} do
     state =
       base_state(table)
-      |> Map.put(:capabilities, %Capabilities{frontend_type: :native_gui})
+      |> Map.put(:capabilities, %Capabilities{frontend_type: :native_gui, semantic_ui: true})
       |> EditorState.update_file_tree(fn _file_tree ->
         %FileTreeState{tree_status: :loading, focused: true}
       end)

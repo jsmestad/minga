@@ -143,6 +143,79 @@ func TestWhichKeyStylesGroupsAndLimitsColumnCount(t *testing.T) {
 	}
 }
 
+func TestExtensionRuntimeEnvelopeIsStoredAndSurfacedInFooter(t *testing.T) {
+	model := New(80, 24, nil)
+	updated, _ := model.Update(port.PacketMsg{Commands: []protocol.Command{
+		{Kind: protocol.CommandExtensionRuntime, ExtensionRuntime: protocol.ExtensionRuntimePayload{
+			ExtensionID: "acme.lint",
+			Channel:     "pane",
+			Payload:     []byte{0x01, 0x02, 0x03},
+		}},
+	}})
+	model = updated.(Model)
+
+	stored, ok := model.extensionRuntimes["acme.lint"]
+	if !ok {
+		t.Fatalf("extension runtime envelope was dropped instead of stored: %#v", model.extensionRuntimes)
+	}
+	if stored.Channel != "pane" || !bytes.Equal(stored.Payload, []byte{0x01, 0x02, 0x03}) {
+		t.Fatalf("stored extension runtime payload mismatch: %#v", stored)
+	}
+
+	footer := ansi.Strip(strings.Join(model.footerLines(), "\n"))
+	if !strings.Contains(footer, "ext acme.lint") {
+		t.Fatalf("footer should surface the active extension runtime: %q", footer)
+	}
+}
+
+func TestExtensionRuntimeLatestEnvelopeWinsAndIdsAreSortedDeterministically(t *testing.T) {
+	model := New(80, 24, nil)
+	updated, _ := model.Update(port.PacketMsg{Commands: []protocol.Command{
+		{Kind: protocol.CommandExtensionRuntime, ExtensionRuntime: protocol.ExtensionRuntimePayload{ExtensionID: "zeta", Channel: "a", Payload: []byte{0x01}}},
+		{Kind: protocol.CommandExtensionRuntime, ExtensionRuntime: protocol.ExtensionRuntimePayload{ExtensionID: "alpha", Channel: "b", Payload: []byte{0x02}}},
+		{Kind: protocol.CommandExtensionRuntime, ExtensionRuntime: protocol.ExtensionRuntimePayload{ExtensionID: "zeta", Channel: "c", Payload: []byte{0x09}}},
+	}})
+	model = updated.(Model)
+
+	if got := model.extensionRuntimes["zeta"]; got.Channel != "c" || !bytes.Equal(got.Payload, []byte{0x09}) {
+		t.Fatalf("latest envelope per extension id should win: %#v", got)
+	}
+	if got := model.extensionRuntimeStatus(); got != "ext alpha,zeta" {
+		t.Fatalf("extension runtime status should list ids sorted: %q", got)
+	}
+}
+
+func TestExtensionRuntimeIsClearedOnFrameClear(t *testing.T) {
+	model := New(80, 24, nil)
+	updated, _ := model.Update(port.PacketMsg{Commands: []protocol.Command{
+		{Kind: protocol.CommandExtensionRuntime, ExtensionRuntime: protocol.ExtensionRuntimePayload{ExtensionID: "acme.lint", Channel: "pane", Payload: []byte{0x01}}},
+	}})
+	model = updated.(Model)
+	if model.extensionRuntimeStatus() == "" {
+		t.Fatalf("precondition: expected an active extension runtime before clear")
+	}
+
+	updated, _ = model.Update(port.PacketMsg{Commands: []protocol.Command{{Kind: protocol.CommandClear}}})
+	model = updated.(Model)
+	if len(model.extensionRuntimes) != 0 {
+		t.Fatalf("CommandClear should reset extension runtimes, got %#v", model.extensionRuntimes)
+	}
+	if status := model.extensionRuntimeStatus(); status != "" {
+		t.Fatalf("extension runtime status should be empty after clear, got %q", status)
+	}
+}
+
+func TestExtensionRuntimeIgnoresEmptyExtensionID(t *testing.T) {
+	model := New(80, 24, nil)
+	updated, _ := model.Update(port.PacketMsg{Commands: []protocol.Command{
+		{Kind: protocol.CommandExtensionRuntime, ExtensionRuntime: protocol.ExtensionRuntimePayload{ExtensionID: "", Channel: "pane", Payload: []byte{0x01}}},
+	}})
+	model = updated.(Model)
+	if len(model.extensionRuntimes) != 0 {
+		t.Fatalf("envelope with empty extension id should be ignored, got %#v", model.extensionRuntimes)
+	}
+}
+
 func TestFooterRendersStatusMessageWithModelineSegments(t *testing.T) {
 	model := New(80, 24, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
@@ -1083,6 +1156,88 @@ func TestSemanticMouseRoutesModelineAndFileTreeZones(t *testing.T) {
 	}
 	if _, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: rowZone.EndX + 10, Y: rowZone.EndY + 10})); ok {
 		t.Fatalf("out-of-bounds clicks should fall back")
+	}
+}
+
+func TestSemanticMouseRoutesBreadcrumbSegmentZones(t *testing.T) {
+	model := New(120, 12, nil)
+	model.chrome = map[byte]protocol.ChromePayload{
+		generated.OPGuiBreadcrumb: {Breadcrumb: protocol.Breadcrumb{Segments: []string{"lib", "minga", "main.ex"}}},
+	}
+	model.viewport.SetContent(model.content())
+	_ = model.View()
+
+	zone := waitForZone(t, model, zoneIDBreadcrumbSegment(1))
+	cmd, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: zone.StartX + 1, Y: zone.StartY}))
+	if !ok || !bytes.Equal(cmd, protocol.EncodeGUIBreadcrumbClick(1)) {
+		t.Fatalf("breadcrumb click should route breadcrumb_click for segment 1, ok=%v packet=%v", ok, cmd)
+	}
+	if _, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseRight, X: zone.StartX + 1, Y: zone.StartY})); ok {
+		t.Fatalf("non-left breadcrumb clicks should fall back")
+	}
+}
+
+func TestSemanticMouseRoutesCompletionItemZones(t *testing.T) {
+	model := New(60, 16, nil)
+	model.chrome = map[byte]protocol.ChromePayload{
+		generated.OPGuiCompletion: {Complete: protocol.Completion{Visible: true, Selected: 0, Items: []protocol.CompletionItem{
+			{Label: "alpha", Detail: "fn"},
+			{Label: "beta", Detail: "fn"},
+		}}},
+	}
+	model.viewport.SetContent(model.content())
+	_ = model.View()
+
+	zone := waitForZone(t, model, zoneIDCompletionItem(1))
+	cmd, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: zone.StartX + 1, Y: zone.StartY}))
+	if !ok || !bytes.Equal(cmd, protocol.EncodeGUICompletionSelect(1)) {
+		t.Fatalf("completion row click should route completion_select index 1, ok=%v packet=%v", ok, cmd)
+	}
+	if _, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: zone.EndX + 50, Y: zone.EndY + 50})); ok {
+		t.Fatalf("out-of-bounds completion clicks should fall back")
+	}
+}
+
+func TestSemanticMouseRoutesSidebarItemZones(t *testing.T) {
+	model := New(80, 6, nil)
+	model.chrome = map[byte]protocol.ChromePayload{
+		generated.OPGuiSidebars: {Sidebars: protocol.Sidebars{Visible: true, ActiveID: "files", Items: []protocol.Sidebar{
+			{ID: "files", DisplayName: "Files", SemanticKind: "file_tree", PreferredWidth: 18, Visible: true},
+			{ID: "git", DisplayName: "Git", SemanticKind: "git_status", PreferredWidth: 18, Visible: true},
+		}}},
+	}
+	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "pane"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 0, Col: 0, Width: 8, Height: 1}}})
+	model.viewport.SetContent(model.content())
+	_ = model.View()
+
+	// Active sidebar click sends "toggle".
+	activeZone := waitForZone(t, model, zoneIDSidebarItem("files"))
+	cmd, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: activeZone.StartX + 1, Y: activeZone.StartY}))
+	if !ok || !bytes.Equal(cmd, protocol.EncodeGUISidebarAction("files", "file_tree", "toggle")) {
+		t.Fatalf("active sidebar click should route sidebar_action toggle, ok=%v packet=%v", ok, cmd)
+	}
+
+	// Inactive sidebar click sends "activate".
+	inactiveZone := waitForZone(t, model, zoneIDSidebarItem("git"))
+	cmd, ok = model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: inactiveZone.StartX + 1, Y: inactiveZone.StartY}))
+	if !ok || !bytes.Equal(cmd, protocol.EncodeGUISidebarAction("git", "git_status", "activate")) {
+		t.Fatalf("inactive sidebar click should route sidebar_action activate, ok=%v packet=%v", ok, cmd)
+	}
+}
+
+func TestSemanticMouseRoutesHoverActionZone(t *testing.T) {
+	model := New(60, 16, nil)
+	model.chrome = map[byte]protocol.ChromePayload{
+		generated.OPGuiHoverPopup:  {Hover: protocol.HoverPopup{Visible: true, Lines: []protocol.RichLine{{Segments: []protocol.RichSegment{{Text: "doc"}}}}}},
+		generated.OPGuiHoverAction: {HoverAction: protocol.HoverAction{Visible: true, Name: "Open documentation"}},
+	}
+	model.viewport.SetContent(model.content())
+	_ = model.View()
+
+	zone := waitForZone(t, model, zoneIDHoverAction)
+	cmd, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: zone.StartX + 1, Y: zone.StartY}))
+	if !ok || !bytes.Equal(cmd, protocol.EncodeGUIHoverOpenAction()) {
+		t.Fatalf("hover action click should route hover_open_action, ok=%v packet=%v", ok, cmd)
 	}
 }
 

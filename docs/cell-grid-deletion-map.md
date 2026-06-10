@@ -199,7 +199,7 @@ These are one per cluster, sequenced. File them against epic #2218. Each carries
 
 **Expected test fallout.** Delete `chrome/tui_test.exs`, `layout/tui_test.exs`, `tree_renderer_test.exs` and the cell-chrome cases in `emit/tui_test.exs`. Semantic file-tree tests (`render_model/ui/file_tree_builder_test.exs`) and the headless-port file-tree integration tests stay green.
 
-**Sequencing.** After Ticket A. Independent of C (picker) but commonly landed adjacent.
+**Sequencing (corrected 2026-06-10).** After Ticket A AND gated on #2223: the #2234 dispatchers deliberately route the legacy Zig frontend (no semantic_ui capability) to `Chrome.TUI`/`Layout.TUI`, so deleting them before Zig retirement hard-crashes the `MINGA_FRONTEND=zig` escape hatch (`UndefinedFunctionError` on first render), violating the README 30-day removal commitment. Lands with or after #2223, at which point the dispatcher else-branches collapse to always-semantic. Inventory additions found by the gated attempt: `shell/traditional/sidebar_renderer.ex:14,26` (TreeRenderer orphan, must be deleted too) and live Zig-path tests `sidebar_integration_test.exs` + `file_tree/feature_test.exs` (not in the original delete list).
 
 ---
 
@@ -213,7 +213,7 @@ These are one per cluster, sequenced. File them against epic #2218. Each carries
 
 **Expected test fallout.** Delete `picker_ui_test.exs`; keep `ui/picker_test.exs` and `render_model/ui/picker_builder_test.exs`. The Go parity "Picker" row stays PASS.
 
-**Sequencing.** After Ticket A. Parallel-safe with Ticket B.
+**Sequencing (corrected 2026-06-10).** Gated on #2223 with Ticket B, and re-scoped to a split-and-delete: `picker_ui.ex` fuses a LIVE picker orchestration API (`open/3`, `handle_key/3`, `close/1`, `refresh_items/1`, `update_picker/2`; ~25 lib callers including the key-dispatch path; the semantic `picker_builder.ex` reads the modal state these produce) with the DEAD cell renderer (`render/2` + DisplayList helpers, ~600-700 lines, callers: `renderer.ex:112` and `chrome/tui.ex:214`). Only the renderer half is deletable, and only once #2223/Ticket B remove its Zig-path callers. The orchestration API has no semantic replacement (`UI.Picker` is a fuzzy-match data struct) and stays. The original "1,664 lines deleted, near-zero residual callers" figures classified the module by line count and are wrong.
 
 ---
 

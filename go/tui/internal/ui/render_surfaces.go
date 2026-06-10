@@ -61,7 +61,8 @@ func (m Model) renderHover(hover protocol.HoverPopup) []string {
 		lines = append(lines, style.Render(fit(renderRichLine(line), m.width)))
 	}
 	if action, ok := m.hoverAction(); ok && action.Visible {
-		lines = append(lines, style.Foreground(m.palette().Accent()).Render(fit(action.Name, m.width)))
+		rendered := style.Foreground(m.palette().Accent()).Render(fit(action.Name, m.width))
+		lines = append(lines, m.zones.Mark(zoneIDHoverAction, rendered))
 	}
 	return takeLines(lines, m.maxOverlayHeight())
 }

@@ -638,7 +638,8 @@ func (m Model) withSemanticSidebars(mainLines []string) []string {
 		if item.ID == sidebars.ActiveID || item.Focused {
 			leftStyle = activeStyle
 		}
-		lines[i+1] = lipgloss.JoinHorizontal(lipgloss.Top, leftStyle.Render(fit(label, width)), lineAt(mainLines, i+1))
+		marked := m.zones.Mark(zoneIDSidebarItem(item.ID), leftStyle.Render(fit(label, width)))
+		lines[i+1] = lipgloss.JoinHorizontal(lipgloss.Top, marked, lineAt(mainLines, i+1))
 	}
 	for i := len(visible) + 1; i < len(lines); i++ {
 		lines[i] = lipgloss.JoinHorizontal(lipgloss.Top, style.Render(strings.Repeat(" ", width)), lineAt(mainLines, i))

@@ -9,10 +9,14 @@ import (
 )
 
 const (
-	zonePrefixFileTreeRow     = "file-tree:row:"
-	zonePrefixModelineCommand = "modeline:command:"
-	zonePrefixTab             = "tab:id:"
-	bottomPanelWheelLines     = 3
+	zonePrefixFileTreeRow       = "file-tree:row:"
+	zonePrefixModelineCommand   = "modeline:command:"
+	zonePrefixTab               = "tab:id:"
+	zonePrefixBreadcrumbSegment = "breadcrumb:segment:"
+	zonePrefixCompletionItem    = "completion:item:"
+	zonePrefixSidebarItem       = "sidebar:item:"
+	zoneIDHoverAction           = "hover:action"
+	bottomPanelWheelLines       = 3
 )
 
 func zoneIDFileTreeRow(index int) string {
@@ -25,6 +29,18 @@ func zoneIDModelineCommand(command string) string {
 
 func zoneIDTab(id uint32) string {
 	return fmt.Sprintf("%s%d", zonePrefixTab, id)
+}
+
+func zoneIDBreadcrumbSegment(index int) string {
+	return fmt.Sprintf("%s%d", zonePrefixBreadcrumbSegment, index)
+}
+
+func zoneIDCompletionItem(index int) string {
+	return fmt.Sprintf("%s%d", zonePrefixCompletionItem, index)
+}
+
+func zoneIDSidebarItem(id string) string {
+	return zonePrefixSidebarItem + url.QueryEscape(id)
 }
 
 func (m Model) localMouse(msg tea.MouseMsg) (Model, bool) {
@@ -80,6 +96,80 @@ func (m Model) semanticMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	}
 	if packet, ok := m.fileTreeMousePacket(msg); ok {
 		return packet, true
+	}
+	if packet, ok := m.breadcrumbMousePacket(msg); ok {
+		return packet, true
+	}
+	if packet, ok := m.completionMousePacket(msg); ok {
+		return packet, true
+	}
+	if packet, ok := m.sidebarMousePacket(msg); ok {
+		return packet, true
+	}
+	if packet, ok := m.hoverActionMousePacket(msg); ok {
+		return packet, true
+	}
+	return nil, false
+}
+
+func (m Model) breadcrumbMousePacket(msg tea.MouseMsg) ([]byte, bool) {
+	crumb, ok := m.breadcrumb()
+	if !ok || len(crumb.Segments) == 0 {
+		return nil, false
+	}
+	for index := range crumb.Segments {
+		zoneInfo := m.zones.Get(zoneIDBreadcrumbSegment(index))
+		if zoneInfo != nil && zoneInfo.InBounds(msg) {
+			return protocol.EncodeGUIBreadcrumbClick(byte(min(index, 0xFF))), true
+		}
+	}
+	return nil, false
+}
+
+func (m Model) completionMousePacket(msg tea.MouseMsg) ([]byte, bool) {
+	completion, ok := m.completion()
+	if !ok || !completion.Visible {
+		return nil, false
+	}
+	for index := range completion.Items {
+		zoneInfo := m.zones.Get(zoneIDCompletionItem(index))
+		if zoneInfo != nil && zoneInfo.InBounds(msg) {
+			return protocol.EncodeGUICompletionSelect(uint16(index)), true
+		}
+	}
+	return nil, false
+}
+
+func (m Model) sidebarMousePacket(msg tea.MouseMsg) ([]byte, bool) {
+	sidebars, ok := m.sidebars()
+	if !ok {
+		return nil, false
+	}
+	for _, item := range visibleSidebars(sidebars) {
+		zoneInfo := m.zones.Get(zoneIDSidebarItem(item.ID))
+		if zoneInfo == nil || !zoneInfo.InBounds(msg) {
+			continue
+		}
+		// Mirror the macOS primary action: "toggle" when the clicked sidebar is
+		// already the active one, "activate" otherwise (ActivityBar.swift:39,
+		// NativeSidebarRegistry.swift:64).
+		action := "activate"
+		if item.ID == sidebars.ActiveID {
+			action = "toggle"
+		}
+		return protocol.EncodeGUISidebarAction(item.ID, item.SemanticKind, action), true
+	}
+	return nil, false
+}
+
+func (m Model) hoverActionMousePacket(msg tea.MouseMsg) ([]byte, bool) {
+	action, ok := m.hoverAction()
+	if !ok || !action.Visible {
+		return nil, false
+	}
+	zoneInfo := m.zones.Get(zoneIDHoverAction)
+	if zoneInfo != nil && zoneInfo.InBounds(msg) {
+		return protocol.EncodeGUIHoverOpenAction(), true
 	}
 	return nil, false
 }
