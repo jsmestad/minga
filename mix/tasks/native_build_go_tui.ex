@@ -1,11 +1,11 @@
 defmodule Mix.Tasks.Native.Build.GoTui do
   @moduledoc """
-  Builds the experimental Go TUI renderer.
+  Builds the Go TUI renderer (the default terminal frontend).
   """
 
   use Mix.Task
 
-  @shortdoc "Builds the experimental Go TUI renderer"
+  @shortdoc "Builds the Go TUI renderer (default terminal frontend)"
 
   @impl Mix.Task
   @spec run([String.t()]) :: :ok

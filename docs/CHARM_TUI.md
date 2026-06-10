@@ -21,13 +21,13 @@ go test ./...
 
 ## Run
 
-Use `bin/minga` so the terminal device is captured correctly for the TUI port:
+Go is the default terminal frontend, so `bin/minga` launches it. Use `bin/minga` (not `mix minga`) so the terminal device is captured correctly for the TUI port:
 
 ```bash
-MINGA_TUI_IMPL=go bin/minga path/to/file
+bin/minga path/to/file
 ```
 
-`MINGA_TUI_IMPL=go` tells `MingaEditor.Frontend.Manager` to launch `priv/minga-renderer-go` instead of the default TUI renderer. The Go renderer opens `/dev/tty` by default, or `MINGA_TTY` when it is set.
+`MingaEditor.Frontend.Manager` launches `priv/minga-renderer-go` by default. The Go renderer opens `/dev/tty` by default, or `MINGA_TTY` when it is set (the BEAM launch path sets `MINGA_TTY` automatically). Set `MINGA_FRONTEND=zig` to fall back to the legacy Zig renderer; any other value of `MINGA_FRONTEND` is an error.
 
 ## Current Scope
 

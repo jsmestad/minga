@@ -29,10 +29,11 @@ defmodule MingaEditor.Frontend.Manager do
 
   alias Minga.Telemetry
   alias MingaEditor.Frontend.Protocol
+  alias MingaEditor.Frontend.Selection
 
   @typedoc "Renderer backend."
   @type backend :: :tui | :gui
-  @type tui_impl :: :zig | :go
+  @type tui_impl :: Selection.tui_impl()
 
   @typedoc "Options for starting the port manager."
   @type start_opt ::
@@ -379,12 +380,14 @@ defmodule MingaEditor.Frontend.Manager do
   @spec dev_fallback_path(backend()) :: String.t()
   defp dev_fallback_path(:gui), do: find_xcode_build_product("Minga")
 
-  defp dev_fallback_path(:tui) do
-    case tui_impl() do
-      :go -> Path.join([File.cwd!(), "go", "tui", "bin", "minga-renderer-go"])
-      :zig -> Path.join([File.cwd!(), "zig", "zig-out", "bin", "minga-renderer"])
-    end
-  end
+  defp dev_fallback_path(:tui), do: tui_dev_fallback_path(Selection.tui_impl())
+
+  @spec tui_dev_fallback_path(tui_impl()) :: String.t()
+  defp tui_dev_fallback_path(:go),
+    do: Path.join([File.cwd!(), "go", "tui", "bin", "minga-renderer-go"])
+
+  defp tui_dev_fallback_path(:zig),
+    do: Path.join([File.cwd!(), "zig", "zig-out", "bin", "minga-renderer"])
 
   # When running from a BEAM release embedded inside a .app bundle,
   # resolve the frontend binary relative to the bundle root.
@@ -451,23 +454,8 @@ defmodule MingaEditor.Frontend.Manager do
   end
 
   @spec renderer_binary_name(backend()) :: String.t()
-  defp renderer_binary_name(:tui) do
-    case tui_impl() do
-      :go -> "minga-renderer-go"
-      :zig -> "minga-renderer"
-    end
-  end
-
+  defp renderer_binary_name(:tui), do: Selection.renderer_binary_name(Selection.tui_impl())
   defp renderer_binary_name(:gui), do: "Minga"
-
-  @spec tui_impl() :: tui_impl()
-  defp tui_impl do
-    case System.get_env("MINGA_TUI_IMPL") || Application.get_env(:minga, :tui_impl, "zig") do
-      "go" -> :go
-      :go -> :go
-      _other -> :zig
-    end
-  end
 
   # Find the Xcode build product in DerivedData.
   # Uses `xcodebuild -showBuildSettings` to get the exact path.

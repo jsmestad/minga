@@ -16,6 +16,10 @@ jobs:
   lint:
     name: Lint & Format
     runs-on: ubuntu-latest
+    env:
+      # Lint does not exercise the Go renderer; skip its build so this job
+      # does not depend on the runner's ambient unpinned Go toolchain.
+      MINGA_SKIP_GO_TUI_BUILD: "1"
     steps:
       - uses: actions/checkout@v4
 
@@ -41,6 +45,10 @@ jobs:
   test:
     name: Test (Elixir)
     runs-on: ubuntu-latest
+    env:
+      # The Elixir suite does not exercise the Go renderer binary; the
+      # dedicated go-tui jobs build it with a pinned toolchain.
+      MINGA_SKIP_GO_TUI_BUILD: "1"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -169,6 +177,41 @@ jobs:
 
       - name: Run Go tests
         run: cd go/tui && go test ./...
+
+  go-tui-boot-smoke:
+    name: Go TUI Boot Smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go/tui/go.mod
+          cache-dependency-path: go/tui/go.sum
+
+      - name: Cache deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: deps-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock') }}
+          restore-keys: deps-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-
+
+      - run: mix deps.get
+
+      # Build the production Go renderer binary into priv/.
+      - run: mix native.build.go_tui
+
+      # Boot the default Go frontend under a real PTY (via MINGA_TTY) and assert
+      # it emits a rendered first frame. Headless, no controlling terminal needed.
+      - name: Boot Go frontend and verify first frame
+        run: python3 scripts/go_tui_boot_smoke.py
 
   test-board-frontends:
     name: Test (Board Frontends)

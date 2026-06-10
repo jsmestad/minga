@@ -74,7 +74,7 @@ For the full technical story (supervision tree, port protocol, display list IR, 
 - **Headless runtime.** `Minga.Runtime.start/1` boots the full runtime (buffers, config, LSP, agent sessions) without any frontend. Use it for CI pipelines, scripting, or as a backend for external tools.
 - **API gateway.** External clients connect via WebSocket + JSON-RPC to start agent sessions, execute tools, and receive streaming events. No frontend required.
 - **Extensible in Elixir.** Commands, keybindings, hooks, advice system, extensions, hot reload. The config is the same language as the editor.
-- **Native frontends.** Terminal (Zig + libvaxis) and macOS (Swift + Metal). Same core, same config.
+- **Native frontends.** Terminal (Go + Bubble Tea) and macOS (Swift + Metal). Same core, same config.
 - **Project management.** Auto-detected root, file finder, project search, recent files per project.
 
 ## Quick start
@@ -87,6 +87,20 @@ bin/minga
 ```
 
 Press `Space` to see what's possible. Read the [Getting Started guide](https://jsmestad.github.io/minga/getting-started.html) for the full walkthrough.
+
+### Terminal frontend
+
+In a terminal, `bin/minga` boots the Go/Bubble Tea renderer by default. It speaks Minga's Semantic UI protocol and is the canonical terminal frontend.
+
+The legacy Zig/libvaxis renderer is still available as a temporary escape hatch:
+
+```bash
+MINGA_FRONTEND=zig bin/minga path/to/file
+```
+
+`MINGA_FRONTEND` accepts `go` (default) or `zig`. Any other value fails fast with an error instead of silently falling back, so a typo never boots the wrong renderer.
+
+**Escape hatch removal date.** `MINGA_FRONTEND=zig` is a transitional fallback, not a supported long-term option. It is removed when [#2223](https://github.com/jsmestad/minga/issues/2223) lands, and no earlier than 30 days after this change merges. Minga has no fixed release cadence, so this is the concrete removal commitment rather than a "next release" marker. Once it is removed, the Go renderer is the only terminal frontend.
 
 ## Where to go from here
 
