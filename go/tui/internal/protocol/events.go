@@ -9,6 +9,18 @@ const (
 	ModSuper byte = 0x08
 )
 
+// Mouse event types for the eventType byte of EncodeMouseEvent, matching the
+// BEAM's decode_mouse_event_type (frontend/protocol.ex) and the macOS encoder
+// (ProtocolConstants.swift). The BEAM treats a held-button drag (MouseDrag)
+// and a free-pointer motion (MouseMotion) differently: only MouseDrag extends
+// a selection; MouseMotion drives hover. The frontend must send the correct one.
+const (
+	MousePress   byte = 0x00
+	MouseRelease byte = 0x01
+	MouseMotion  byte = 0x02
+	MouseDrag    byte = 0x03
+)
+
 // Log levels for EncodeLogMessage, matching the BEAM's decode_log_level.
 const (
 	LogLevelErr   byte = 0
@@ -83,6 +95,51 @@ func EncodeGUIFileTreeClick(index uint16) []byte {
 
 func EncodeGUISelectTab(id uint32) []byte {
 	return []byte{generated.OPGuiAction, generated.GUIActionSelectTab, byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)}
+}
+
+// EncodeGUITabReorder encodes a tab_reorder action. Wire format:
+// <gui_action, 0x48, tab_id:u32, new_index:u16>. Moves the visible tab `id` to
+// the zero-based slot `newIndex`, mirroring the macOS encoder
+// (ProtocolEncoder.swift sendTabReorder) and the BEAM decoder
+// (gui.ex decode_gui_action @gui_action_tab_reorder).
+func EncodeGUITabReorder(id uint32, newIndex uint16) []byte {
+	return []byte{
+		generated.OPGuiAction, generated.GUIActionTabReorder,
+		byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id),
+		byte(newIndex >> 8), byte(newIndex),
+	}
+}
+
+// EncodeGUIFileTreeDrop encodes a file_tree_drop action. Wire format:
+// <gui_action, 0x40, target_index:u16, target_path_hash:u32, target_kind:u8,
+// modifiers:u8, target_id(string16), target_path(string16), source_count:u16,
+// source_paths(string16)...>. target_kind is 1 for a directory, 0 for a file.
+// The BEAM validates the drop against its own tree by re-hashing the target
+// path, so target_path_hash must be the per-row hash the BEAM emitted for the
+// target row (FileTreeRow.PathHash), and target_id/target_path must match that
+// row. Mirrors the macOS encoder (ProtocolEncoder.swift sendFileTreeDrop) and
+// the BEAM decoder (gui.ex decode_file_tree_drop).
+func EncodeGUIFileTreeDrop(targetIndex uint16, targetPathHash uint32, targetIsDir bool, modifiers byte, targetID, targetPath string, sourcePaths []string) []byte {
+	out := []byte{generated.OPGuiAction, generated.GUIActionFileTreeDrop}
+	out = append(out, byte(targetIndex>>8), byte(targetIndex))
+	out = append(out, byte(targetPathHash>>24), byte(targetPathHash>>16), byte(targetPathHash>>8), byte(targetPathHash))
+	if targetIsDir {
+		out = append(out, 1)
+	} else {
+		out = append(out, 0)
+	}
+	out = append(out, modifiers)
+	out = appendString16(out, targetID)
+	out = appendString16(out, targetPath)
+	count := len(sourcePaths)
+	if count > 0xFFFF {
+		count = 0xFFFF
+	}
+	out = append(out, byte(count>>8), byte(count))
+	for _, path := range sourcePaths[:count] {
+		out = appendString16(out, path)
+	}
+	return out
 }
 
 func EncodeGUIExecuteCommand(command string) []byte {

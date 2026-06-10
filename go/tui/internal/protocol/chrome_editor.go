@@ -232,6 +232,7 @@ func decodeFileTreeRows(body []byte, offset int, count int) []FileTreeRow {
 	for i := 0; i < count && len(body) >= offset+17; i++ {
 		flags := u16(body, offset+4)
 		row := FileTreeRow{
+			PathHash:  u32(body, offset),
 			Flags:     flags,
 			Depth:     body[offset+6],
 			Directory: flags&0x01 != 0,

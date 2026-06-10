@@ -95,6 +95,78 @@ defmodule Minga.Integration.MouseTest do
     end
   end
 
+  describe "Go TUI event-stream parity (#2229)" do
+    # These tests assert what the editor does with the exact (button, event_type,
+    # click_count) tuples the Go TUI forwards. They are the empirical evidence
+    # for the #2229 verification: AC1 multi-click works via BEAM synthesis when
+    # the frontend sends click_count=1; AC2 drag selection requires the frontend
+    # to distinguish a button-held drag (:drag) from a free-moving hover
+    # (:motion). The Go TUI must therefore send :drag for held-button motion.
+
+    # Screen row 1 maps to buffer line 0; gutter is ~6 cols wide, so screen
+    # col 8 lands inside the first word ("hello"). Row 0 is the header/tab bar.
+    test "double-click word selection works when the frontend sends click_count=1 (AC1)" do
+      ctx = start_editor("hello world\nsecond line")
+
+      # Two rapid presses at the same cell, each with the click_count=1 the Go
+      # TUI sends. record_press/4 synthesizes click_count=2 from the timing.
+      send_mouse(ctx, 1, 8, :left, 0, :press, 1)
+      send_mouse(ctx, 1, 8, :left, 0, :press, 1)
+
+      state = editor_state(ctx)
+      assert editor_mode(ctx) == :visual
+      assert state.workspace.editing.mode_state.visual_type == :char
+
+      # The selection covers a whole word (anchor and cursor on the same line,
+      # spanning more than one column), which is the double-click behavior.
+      {anchor_line, anchor_col} = state.workspace.editing.mode_state.visual_anchor
+      {cursor_line, cursor_col} = buffer_cursor(ctx)
+      assert anchor_line == cursor_line
+      assert abs(cursor_col - anchor_col) >= 1
+    end
+
+    test "triple-click line selection works when the frontend sends click_count=1 (AC1)" do
+      ctx = start_editor("hello world\nsecond line")
+
+      send_mouse(ctx, 1, 8, :left, 0, :press, 1)
+      send_mouse(ctx, 1, 8, :left, 0, :press, 1)
+      send_mouse(ctx, 1, 8, :left, 0, :press, 1)
+
+      state = editor_state(ctx)
+      assert editor_mode(ctx) == :visual
+      assert state.workspace.editing.mode_state.visual_type == :line
+    end
+
+    test "a button-held drag (event_type :drag) produces a visual selection (AC2)" do
+      ctx = start_editor("hello world\nsecond line\nthird line")
+
+      send_mouse(ctx, 1, 8, :left, 0, :press, 1)
+      assert editor_mode(ctx) == :normal
+
+      # Held-button motion arrives as :drag. This is what the Go TUI must send
+      # for MouseMotionMsg while a button is down.
+      send_mouse(ctx, 3, 12, :left, 0, :drag, 1)
+
+      assert editor_mode(ctx) == :visual,
+             "a left-button drag should extend a visual selection from the press anchor"
+    end
+
+    test "free pointer motion (event_type :motion) does NOT start a selection" do
+      ctx = start_editor("hello world\nsecond line\nthird line")
+
+      send_mouse(ctx, 1, 8, :left, 0, :press, 1)
+
+      # Free motion (no button held) is hover, not drag. The Go TUI must send
+      # :motion for these so the BEAM treats them as hover, not drag. The press
+      # above left an active drag anchor, so this proves :motion is inert for
+      # selection while :drag (previous test) extends it.
+      send_mouse(ctx, 3, 12, :none, 0, :motion, 1)
+
+      assert editor_mode(ctx) == :normal,
+             "free pointer motion must not extend a selection; only :drag does"
+    end
+  end
+
   describe "shared post-action housekeeping" do
     test "mouse clicks exit visual mode and clear LSP selection ranges" do
       ctx = start_editor("hello world\nsecond line\nthird line")

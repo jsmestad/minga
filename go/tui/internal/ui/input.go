@@ -108,11 +108,19 @@ func sgrMouseParts(code int, release bool) (byte, byte, byte) {
 	} else {
 		button = byte(code & 0x03)
 	}
-	eventType := byte(0)
+	eventType := protocol.MousePress
 	if release && code&wheelBit == 0 {
-		eventType = 1
+		eventType = protocol.MouseRelease
 	} else if code&motionBit != 0 && code&wheelBit == 0 {
-		eventType = 2
+		// SGR motion: the low two bits carry the held button (0=left, 1=middle,
+		// 2=right, 3=none). A held button means a drag; "none" means free
+		// pointer motion. The BEAM only extends a selection on a drag, so keep
+		// the two distinct (mirrors mousePacket and the macOS frontend).
+		if code&0x03 == 0x03 {
+			eventType = protocol.MouseMotion
+		} else {
+			eventType = protocol.MouseDrag
+		}
 	}
 	return button, mods, eventType
 }
@@ -181,9 +189,19 @@ func mousePacket(msg tea.MouseMsg) []byte {
 	}
 	switch msg.(type) {
 	case tea.MouseReleaseMsg:
-		eventType = 1
+		eventType = protocol.MouseRelease
 	case tea.MouseMotionMsg:
-		eventType = 2
+		// MouseModeCellMotion (DECSET 1002) delivers motion only while a button
+		// is held (a drag) plus, on some terminals, free motion. Bubble Tea sets
+		// Mouse.Button to the held button during a drag and MouseNone for free
+		// motion. The BEAM only extends a selection on a drag (event_type
+		// :drag), so report a held-button motion as MouseDrag and free motion as
+		// MouseMotion, matching the macOS frontend (EditorNSView.swift:1219/1233).
+		if mouse.Button == tea.MouseNone {
+			eventType = protocol.MouseMotion
+		} else {
+			eventType = protocol.MouseDrag
+		}
 	}
 	return protocol.EncodeMouseEvent(int16(mouse.Y), int16(mouse.X), button, keyModToProtocol(mouse.Mod), eventType, 1)
 }
