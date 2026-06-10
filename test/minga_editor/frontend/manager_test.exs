@@ -61,7 +61,7 @@ defmodule MingaEditor.Frontend.ManagerTest do
       start_manager(name)
 
       assert :ok = Manager.send_commands(name, [])
-      assert :ok = Manager.send_commands(name, [Protocol.encode_batch_end()])
+      assert :ok = Manager.send_commands(name, [Protocol.encode_commit_frame(0)])
     end
   end
 
@@ -74,6 +74,18 @@ defmodule MingaEditor.Frontend.ManagerTest do
       send_port_data(pid, nil, <<0x01, ?h::32, 0::8>>)
 
       assert_receive {:minga_input, {:key_press, ?h, 0, 0}}
+    end
+
+    test "request_keyframe is routed opaquely to subscribers (#2219)" do
+      name = unique_name()
+      pid = start_manager(name)
+      :ok = Manager.subscribe(name)
+
+      # opcode 0x08 + last_good_frame_seq:u32. The Manager stays opaque transport
+      # and only broadcasts the decoded event; the BEAM owns keyframe forcing.
+      send_port_data(pid, nil, <<0x08, 42::32>>)
+
+      assert_receive {:minga_input, {:request_keyframe, 42}}
     end
 
     test "duplicate subscriptions receive one copy of each event" do
@@ -316,14 +328,14 @@ defmodule MingaEditor.Frontend.ManagerTest do
       refute Manager.ready?(name)
 
       send(pid, {fake_port, :eof})
-      assert :ok = Manager.send_commands(name, [Protocol.encode_batch_end()])
+      assert :ok = Manager.send_commands(name, [Protocol.encode_commit_frame(0)])
     end
 
     test "send_commands works when connected" do
       name = unique_name()
       {_pid, _fake_port} = start_connected(name)
 
-      assert :ok = Manager.send_commands(name, [Protocol.encode_batch_end()])
+      assert :ok = Manager.send_commands(name, [Protocol.encode_commit_frame(0)])
     end
 
     test "send_commands emits actual port write telemetry when connected" do
@@ -342,7 +354,7 @@ defmodule MingaEditor.Frontend.ManagerTest do
 
       try do
         {_pid, _fake_port} = start_connected(name)
-        command = Protocol.encode_batch_end()
+        command = Protocol.encode_commit_frame(0)
 
         assert :ok = Manager.send_commands(name, [command])
         assert_receive {:port_write, %{duration: duration}, %{byte_count: byte_count}}, 1_000

@@ -2,7 +2,7 @@ defmodule Minga.Frontend.Adapter.GUI.EncodedFrame do
   @moduledoc """
   GUI adapter output for one render model.
 
-  Metal-critical commands are sent in the frame batch before `batch_end`. SwiftUI chrome commands are sent separately because they do not participate in the Metal render pass. Keeping the split in the adapter makes command ordering an adapter concern instead of an emit-stage concern.
+  Metal-critical commands are sent in the frame batch before `commit_frame` (the frame-transaction terminator, #2219). SwiftUI chrome commands are sent separately because they do not participate in the Metal render pass. Keeping the split in the adapter makes command ordering an adapter concern instead of an emit-stage concern.
   """
 
   alias Minga.Frontend.Adapter.GUI.Caches

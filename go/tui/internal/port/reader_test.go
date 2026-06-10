@@ -16,7 +16,7 @@ func TestDecodePacketDoesNotSwallowAfterIndentGuides(t *testing.T) {
 	batch = append(batch, generated.OPSetCursorShape, 0)                             // fixed:2
 	batch = append(batch, generated.OPGuiIndentGuides, 0x00, 0x06, 1, 2, 3, 4, 5, 6) // len16, 9 bytes
 	batch = append(batch, generated.OPGuiStatusBar, 1, 0x01, 0x00, 0x02, 0xAA, 0xBB) // sectioned, 7 bytes
-	batch = append(batch, generated.OPBatchEnd, 0, 0, 0, 0)                          // fixed:5 (echoed seq)
+	batch = append(batch, generated.OPCommitFrame, 0, 0, 0, 0, 0, 0, 0, 0)                          // fixed:9 (frame_seq + echoed input_seq)
 
 	var warnings []string
 	cmds, err := decodePacket(batch, func(_ byte, text string) { warnings = append(warnings, text) })
@@ -27,21 +27,21 @@ func TestDecodePacketDoesNotSwallowAfterIndentGuides(t *testing.T) {
 		t.Fatalf("unexpected warnings: %v", warnings)
 	}
 
-	// All four commands must survive: cursor, indent-guides (chrome), status bar, batch_end.
+	// All four commands must survive: cursor, indent-guides (chrome), status bar, commit_frame.
 	if len(cmds) != 4 {
 		t.Fatalf("got %d commands, want 4: %+v", len(cmds), cmds)
 	}
 	if cmds[0].Kind != protocol.CommandSetCursorShape {
 		t.Errorf("cmd[0] = %v, want SetCursorShape", cmds[0].Kind)
 	}
-	if cmds[len(cmds)-1].Kind != protocol.CommandBatchEnd {
-		t.Errorf("last cmd = %v, want BatchEnd (frame not swallowed)", cmds[len(cmds)-1].Kind)
+	if cmds[len(cmds)-1].Kind != protocol.CommandCommitFrame {
+		t.Errorf("last cmd = %v, want CommitFrame (frame not swallowed)", cmds[len(cmds)-1].Kind)
 	}
 }
 
 // gui_window_overlay_delta (0xA0) is custom-framed: its decoder owns sizing.
 // It must return a bounded size (13 bytes, or 18 with a cursorline) rather than
-// len(payload); otherwise an overlay-only cursor update swallows batch_end and
+// len(payload); otherwise an overlay-only cursor update swallows commit_frame and
 // any following chrome, the same blank/stale-frame failure this PR prevents.
 func TestDecodePacketDoesNotSwallowAfterOverlayDelta(t *testing.T) {
 	for _, tc := range []struct {
@@ -58,7 +58,7 @@ func TestDecodePacketDoesNotSwallowAfterOverlayDelta(t *testing.T) {
 			batch = append(batch, generated.OPGuiWindowOverlayDelta, 0, 1, 0, 0, 0, 2, tc.flags, 0, 3, 0, 4, 1)
 			batch = append(batch, tc.extra...)
 			batch = append(batch, generated.OPGuiStatusBar, 1, 0x01, 0x00, 0x02, 0xAA, 0xBB) // sectioned
-			batch = append(batch, generated.OPBatchEnd, 0, 0, 0, 0)                          // fixed:5 (echoed seq)
+			batch = append(batch, generated.OPCommitFrame, 0, 0, 0, 0, 0, 0, 0, 0)                          // fixed:9 (frame_seq + echoed input_seq)
 
 			cmds, err := decodePacket(batch, func(_ byte, text string) { t.Fatalf("unexpected warning: %s", text) })
 			if err != nil {
@@ -70,8 +70,8 @@ func TestDecodePacketDoesNotSwallowAfterOverlayDelta(t *testing.T) {
 			if cmds[0].Kind != protocol.CommandWindowDelta {
 				t.Errorf("cmd[0] = %v, want WindowDelta", cmds[0].Kind)
 			}
-			if cmds[len(cmds)-1].Kind != protocol.CommandBatchEnd {
-				t.Errorf("last cmd = %v, want BatchEnd", cmds[len(cmds)-1].Kind)
+			if cmds[len(cmds)-1].Kind != protocol.CommandCommitFrame {
+				t.Errorf("last cmd = %v, want CommitFrame", cmds[len(cmds)-1].Kind)
 			}
 		})
 	}

@@ -68,17 +68,33 @@ private func appendConfigStateValue(_ data: inout Data, _ value: SettingValue) {
 
 @Suite("Protocol Decoder")
 struct ProtocolDecoderTests {
-    @Test("Decode batch_end command")
-    func decodeBatchEnd() throws {
-        // batch_end now carries a u32 echoed input correlation sequence (#2215).
-        let data = Data([OP_BATCH_END, 0x00, 0x00, 0x10, 0x2A])
+    @Test("Decode commit_frame command")
+    func decodeCommitFrame() throws {
+        // commit_frame (#2219): frame_seq:u32 + input_seq:u32. input_seq is the
+        // echoed input correlation sequence (#2215, formerly carried by batch_end).
+        let data = Data([OP_COMMIT_FRAME, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x10, 0x2A])
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
-        #expect(size == 5)
-        guard case .batchEnd(let seq) = cmd else {
-            Issue.record("Expected .batchEnd, got \(String(describing: cmd))")
+        #expect(size == 9)
+        guard case .commitFrame(let frameSeq, let seq) = cmd else {
+            Issue.record("Expected .commitFrame, got \(String(describing: cmd))")
             return
         }
+        #expect(frameSeq == 7)
         #expect(seq == 0x0000_102A)
+    }
+
+    @Test("Decode begin_frame command")
+    func decodeBeginFrame() throws {
+        // begin_frame (#2219): frame_seq:u32 + base_frame_seq:u32.
+        let data = Data([OP_BEGIN_FRAME, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x03])
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == 9)
+        guard case .beginFrame(let frameSeq, let baseFrameSeq) = cmd else {
+            Issue.record("Expected .beginFrame, got \(String(describing: cmd))")
+            return
+        }
+        #expect(frameSeq == 7)
+        #expect(baseFrameSeq == 3)
     }
 
     @Test("Decode protocol_error command")
@@ -87,8 +103,8 @@ struct ProtocolDecoderTests {
         let messageBytes = Array(message.utf8)
         var data = Data([OP_PROTOCOL_ERROR, UInt8(messageBytes.count >> 8), UInt8(messageBytes.count & 0xFF)])
         data.append(contentsOf: messageBytes)
-        // A trailing batch_end proves the len16 frame is bounded.
-        data.append(contentsOf: [OP_BATCH_END, 0, 0, 0, 0])
+        // A trailing commit_frame proves the len16 frame is bounded.
+        data.append(contentsOf: [OP_COMMIT_FRAME, 0, 0, 0, 0, 0, 0, 0, 0])
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == 3 + messageBytes.count)
@@ -100,8 +116,8 @@ struct ProtocolDecoderTests {
 
         // The next command must still decode from the bounded offset.
         let (next, _) = try decodeCommand(data: data, offset: size)
-        guard case .batchEnd = next else {
-            Issue.record("Expected trailing .batchEnd, got \(String(describing: next))")
+        guard case .commitFrame = next else {
+            Issue.record("Expected trailing .commitFrame, got \(String(describing: next))")
             return
         }
     }
@@ -268,14 +284,14 @@ struct ProtocolDecoderTests {
 
     @Test("Decode multiple commands in one payload")
     func decodeMultipleCommands() throws {
-        // Transport survivors only: set_cursor_shape(2) + set_window_bg(4) + batch_end(5).
+        // Transport survivors only: set_cursor_shape(2) + set_window_bg(4) + commit_frame(9).
         var data = Data()
         data.append(OP_SET_CURSOR_SHAPE)
         data.append(CURSOR_BLOCK)
         data.append(OP_SET_WINDOW_BG)
         data.append(contentsOf: [0x28, 0x2C, 0x34])
-        data.append(OP_BATCH_END)
-        data.append(contentsOf: [0, 0, 0, 0]) // batch_end echoed seq (fixed:5, #2215)
+        data.append(OP_COMMIT_FRAME)
+        data.append(contentsOf: [0, 0, 0, 0, 0, 0, 0, 0]) // commit_frame frame_seq + echoed input_seq (fixed:9, #2219/#2215)
 
         var commands: [RenderCommand] = []
         try decodeCommands(from: data) { cmd in

@@ -20,7 +20,7 @@ defmodule MingaEditor.Frontend.Protocol do
 
   ## Render Commands (BEAM → frontend)
 
-  Rendering is semantic-first. GUI render commands are encoded by `Minga.Frontend.Adapter.GUI`, with this module retaining the common side-channel encoders for titles, fonts, window background, batch boundaries, and the `protocol_error` version-mismatch signal. The cell-paradigm encoders (`draw_text`, `set_cursor`, `clear`, region commands) were retired in protocol_version 2.
+  Rendering is semantic-first. GUI render commands are encoded by `Minga.Frontend.Adapter.GUI`, with this module retaining the common side-channel encoders for titles, fonts, window background, frame-transaction boundaries (`begin_frame`/`commit_frame`), and the `protocol_error` version-mismatch signal. The cell-paradigm encoders (`draw_text`, `set_cursor`, `clear`, region commands) were retired in protocol_version 2; `batch_end` was replaced by the begin/commit frame transaction in protocol_version 3 (#2219).
 
   ## Modifier Flags
 
@@ -42,7 +42,9 @@ defmodule MingaEditor.Frontend.Protocol do
   @op_paste_event Opcodes.paste_event()
   @op_gui_action Opcodes.gui_action()
   @op_protocol_error Opcodes.protocol_error()
-  @op_batch_end Opcodes.batch_end()
+  @op_begin_frame Opcodes.begin_frame()
+  @op_commit_frame Opcodes.commit_frame()
+  @op_request_keyframe Opcodes.request_keyframe()
   @op_set_title Opcodes.set_title()
   @op_set_window_bg Opcodes.set_window_bg()
   @op_set_font Opcodes.set_font()
@@ -123,7 +125,7 @@ defmodule MingaEditor.Frontend.Protocol do
 
   Stamped by the frontend at input decode for end-to-end keystroke latency
   instrumentation (ticket #2215). The BEAM echoes the latest processed sequence
-  back on `batch_end`. `0` means "no correlation" (legacy frontends that omit it).
+  back on `commit_frame`. `0` means "no correlation" (legacy frontends that omit it).
   """
   @type input_seq :: non_neg_integer()
 
@@ -163,6 +165,7 @@ defmodule MingaEditor.Frontend.Protocol do
           | {:request_reparse, buffer_id :: non_neg_integer()}
           | {:log_message, level :: String.t(), text :: String.t()}
           | {:gui_action, ProtocolGUI.gui_action()}
+          | {:request_keyframe, last_good_frame_seq :: non_neg_integer()}
 
   @typedoc "Cursor shape."
   @type cursor_shape :: :block | :beam | :underline
@@ -211,16 +214,38 @@ defmodule MingaEditor.Frontend.Protocol do
   end
 
   @doc """
-  Encodes a batch_end command (triggers render flush).
+  Encodes a begin_frame command that opens a frame transaction (#2219).
 
-  Carries the echoed input correlation sequence (u32) so the frontend can
-  resolve a keystroke-to-write latency sample when the frame reaches the
-  terminal (ticket #2215). `seq` defaults to `0` ("no correlation").
+  `frame_seq` is the strictly monotonic global frame sequence (reuses
+  Renderer.Server's seq) used for resync/attach ordering. `base_frame_seq` names
+  the frame this transaction's deltas assume; `base_frame_seq == 0` means keyframe
+  (full snapshots, no deltas). Both fields are masked to u32 so a large monotonic
+  `frame_seq` stays wire-safe. fixed:9 = opcode(1) + frame_seq(u32) + base(u32).
   """
-  @spec encode_batch_end(input_seq()) :: binary()
-  def encode_batch_end(seq \\ 0) when is_integer(seq) and seq >= 0 do
-    <<@op_batch_end, seq::32>>
+  @spec encode_begin_frame(non_neg_integer(), non_neg_integer()) :: binary()
+  def encode_begin_frame(frame_seq, base_frame_seq)
+      when is_integer(frame_seq) and frame_seq >= 0 and is_integer(base_frame_seq) and
+             base_frame_seq >= 0 do
+    <<@op_begin_frame, u32(frame_seq)::32, u32(base_frame_seq)::32>>
   end
+
+  @doc """
+  Encodes a commit_frame command that closes a frame transaction (#2219).
+
+  `frame_seq` must match the open begin_frame's `frame_seq`. `input_seq` is the
+  echoed input correlation sequence (formerly carried by batch_end, ticket #2215):
+  the frontend resolves a keystroke-to-write latency sample when the frame presents.
+  `input_seq` defaults to `0` ("no correlation") and is a SEPARATE id from
+  `frame_seq`. fixed:9 = opcode(1) + frame_seq(u32) + input_seq(u32).
+  """
+  @spec encode_commit_frame(non_neg_integer(), input_seq()) :: binary()
+  def encode_commit_frame(frame_seq, input_seq \\ 0)
+      when is_integer(frame_seq) and frame_seq >= 0 and is_integer(input_seq) and input_seq >= 0 do
+    <<@op_commit_frame, u32(frame_seq)::32, u32(input_seq)::32>>
+  end
+
+  @spec u32(non_neg_integer()) :: non_neg_integer()
+  defp u32(value), do: Bitwise.band(value, 0xFFFFFFFF)
 
   @doc "Encodes a set_title command to update the terminal window title."
   @spec encode_set_title(String.t()) :: binary()
@@ -422,6 +447,13 @@ defmodule MingaEditor.Frontend.Protocol do
   # Paste event: opcode(1) + text_len(2, big-endian) + text(text_len)
   def decode_event(<<@op_paste_event, text_len::16, text::binary-size(text_len)>>) do
     {:ok, {:paste_event, text}}
+  end
+
+  # request_keyframe (#2219): a frontend asks the BEAM to send the next frame as a
+  # full keyframe after an invalidation. fixed:5 = opcode(1) + last_good_frame_seq(u32).
+  # The BEAM forces the next frame to base_frame_seq 0 + full snapshots.
+  def decode_event(<<@op_request_keyframe, last_good_frame_seq::32>>) do
+    {:ok, {:request_keyframe, last_good_frame_seq}}
   end
 
   # GUI action: opcode(1) + action_type(1) + payload

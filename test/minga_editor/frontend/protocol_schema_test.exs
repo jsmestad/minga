@@ -59,13 +59,12 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
   end
 
   test "render opcodes match schema (cell-paradigm opcodes retired in v2)", %{schema: schema} do
-    # begin_frame/commit_frame (#2219 child A) reuse the freed draw_text (0x10) and
-    # set_cursor (0x11) cell-paradigm slots under protocol_version 3. batch_end is
-    # deprecated but still present until child B retires emission.
+    # begin_frame/commit_frame (#2219) reuse the freed draw_text (0x10) and
+    # set_cursor (0x11) cell-paradigm slots under protocol_version 3. batch_end (0x13)
+    # was retired in child B; its input-correlation u32 moved onto commit_frame.
     assert_opcodes(schema, "render",
       begin_frame: 0x10,
       commit_frame: 0x11,
-      batch_end: 0x13,
       set_cursor_shape: 0x15,
       set_title: 0x16,
       set_window_bg: 0x17,

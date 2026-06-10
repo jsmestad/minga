@@ -8,13 +8,14 @@ defmodule MingaEditor.FullEditorFixtureTest do
   # in opaque hex literals. Regenerate the fixture with
   # `mix run scripts/generate_snapshot_fixtures.exs` if this list changes.
   @expected_opcodes [
+    Opcodes.begin_frame(),
     Opcodes.set_window_bg(),
     Opcodes.gui_window_content(),
     Opcodes.gui_theme(),
     Opcodes.gui_status_bar(),
     Opcodes.gui_tab_bar(),
     Opcodes.gui_file_tree(),
-    Opcodes.batch_end()
+    Opcodes.commit_frame()
   ]
 
   test "full_editor fixture stays synced and renderable" do
@@ -23,10 +24,10 @@ defmodule MingaEditor.FullEditorFixtureTest do
     packets = fixture_packets()
     opcodes = Enum.map(packets, &opcode/1)
 
-    # The replay order is curated: the frame opens with the window background
-    # and closes with the batch flush.
-    assert List.first(opcodes) == Opcodes.set_window_bg()
-    assert List.last(opcodes) == Opcodes.batch_end()
+    # The replay order is curated: the frame is a transaction (#2219) that opens
+    # with begin_frame and closes with commit_frame.
+    assert List.first(opcodes) == Opcodes.begin_frame()
+    assert List.last(opcodes) == Opcodes.commit_frame()
 
     # A real full-editor frame carries the buffer window content plus the
     # surrounding chrome. The previous 46-byte stub failed exactly here.

@@ -12,7 +12,7 @@ var sgrMouseTailPattern = regexp.MustCompile(`^<?(\d+);(\d+);(\d+)([Mm])$`)
 
 // keyPacket encodes a key press, stamping the latency correlation sequence
 // (ticket #2215) into every actual key_press packet so the resulting frame's
-// batch_end can resolve a keystroke-to-write sample. Mouse-tail and paste
+// commit_frame can resolve a keystroke-to-write sample. Mouse-tail and paste
 // packets use other opcodes and carry no sequence.
 func keyPacket(msg tea.KeyPressMsg, seq uint32) ([]byte, bool) {
 	if packet, ok := sgrMouseTailPacket(msg); ok {

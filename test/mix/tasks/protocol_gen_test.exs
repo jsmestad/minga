@@ -71,7 +71,7 @@ defmodule Mix.Tasks.Protocol.GenTest do
         String.replace(
           schema,
           "[[opcodes]]\ncategory = \"input\"\nname = \"log_message\"\nvalue = 0x60\ndirection = \"frontend_to_beam\"",
-          "[[opcodes]]\ncategory = \"input\"\nname = \"log_message\"\nvalue = 0x60\ndirection = \"frontend_to_beam\"\n\n[[opcodes]]\ncategory = \"input\"\nname = \"test_sync\"\nvalue = 0x08\ndirection = \"frontend_to_beam\"",
+          "[[opcodes]]\ncategory = \"input\"\nname = \"log_message\"\nvalue = 0x60\ndirection = \"frontend_to_beam\"\n\n[[opcodes]]\ncategory = \"input\"\nname = \"test_sync\"\nvalue = 0x6F\ndirection = \"frontend_to_beam\"",
           global: false
         )
       end)

@@ -240,6 +240,90 @@ defmodule MingaEditor.RenderPipeline.InputTest do
       assert result.shell_id == :fake
       assert result.shell_state.modeline_click_regions == []
     end
+
+    # Regression (#2219): an in-flight delta render's writeback must not clear a
+    # keyframe request that arrived after the render started. The delta writeback
+    # carries keyframe?: false, so the pending flag survives until a frame that
+    # actually honored the request writes back.
+    test "a delta writeback does not clear a pending keyframe request", %{state: state} do
+      input = Input.from_editor_state(state)
+      state = %{state | keyframe_pending?: true}
+
+      delta_writeback = %{
+        caches: input.caches,
+        layout: :rendered_layout,
+        focus_tree: :rendered_focus_tree,
+        windows: state.workspace.windows,
+        shell_id: :traditional,
+        shell_identity: input.shell_identity,
+        shell_state: state.shell_state,
+        keyframe?: false
+      }
+
+      result = EditorState.apply_renderer_writeback(state, delta_writeback)
+
+      assert result.keyframe_pending?,
+             "delta writeback must leave the pending keyframe request set"
+    end
+
+    test "a keyframe writeback clears the pending keyframe request", %{state: state} do
+      input = Input.from_editor_state(state)
+      state = %{state | keyframe_pending?: true}
+
+      keyframe_writeback = %{
+        caches: input.caches,
+        layout: :rendered_layout,
+        focus_tree: :rendered_focus_tree,
+        windows: state.workspace.windows,
+        shell_id: :traditional,
+        shell_identity: input.shell_identity,
+        shell_state: state.shell_state,
+        keyframe?: true
+      }
+
+      result = EditorState.apply_renderer_writeback(state, keyframe_writeback)
+
+      refute result.keyframe_pending?,
+             "a writeback whose frame carried the keyframe clears the request"
+    end
+
+    # Regression (#2219), full async sequence: an in-flight delta render A is still
+    # rendering when request_keyframe arrives (sets keyframe_pending?) and a keyframe
+    # render B is cast. A's delta writeback lands first; a keystroke then coalesces B
+    # away. The next render C must STILL carry force_keyframe? so a base-0 keyframe is
+    # eventually emitted and the requester is not left desynced.
+    test "pending keyframe survives an in-flight delta writeback + coalescing and forces the next frame to keyframe",
+         %{state: state} do
+      input_a = Input.from_editor_state(state)
+
+      # request_keyframe arrives while delta render A is in-flight.
+      state = %{state | keyframe_pending?: true}
+
+      # A's writeback (a delta frame that started before the request) lands first.
+      delta_writeback = %{
+        caches: input_a.caches,
+        layout: :rendered_layout,
+        focus_tree: :rendered_focus_tree,
+        windows: state.workspace.windows,
+        shell_id: :traditional,
+        shell_identity: input_a.shell_identity,
+        shell_state: state.shell_state,
+        keyframe?: false
+      }
+
+      state = EditorState.apply_renderer_writeback(state, delta_writeback)
+
+      assert state.keyframe_pending?,
+             "A's delta writeback must not swallow the keyframe request"
+
+      # Render B (the keyframe render) is coalesced away by a later keystroke, so it
+      # never reaches emit. The keystroke builds render C from the live state. C must
+      # still force a keyframe because the request is still pending.
+      input_c = Input.from_editor_state(state)
+
+      assert input_c.force_keyframe?,
+             "render C inherits the still-pending keyframe request, so it emits base 0"
+    end
   end
 
   describe "sync_active_window_cursor/1" do

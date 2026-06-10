@@ -32,9 +32,9 @@ func TestDecodeProtocolError(t *testing.T) {
 	message := "protocol_version mismatch: frontend 1, beam 2"
 	packet := []byte{generated.OPProtocolError, byte(len(message) >> 8), byte(len(message))}
 	packet = append(packet, []byte(message)...)
-	// A trailing batch_end proves the len16 frame is bounded and does not swallow
+	// A trailing commit_frame proves the len16 frame is bounded and does not swallow
 	// the rest of the stream.
-	packet = append(packet, generated.OPBatchEnd, 0, 0, 0, 0)
+	packet = append(packet, generated.OPCommitFrame, 0, 0, 0, 0, 0, 0, 0, 0)
 
 	command, err := DecodeCommand(packet)
 	if err != nil {
@@ -52,10 +52,50 @@ func TestDecodeProtocolError(t *testing.T) {
 
 	second, err := DecodeCommand(packet[command.Size:])
 	if err != nil {
-		t.Fatalf("DecodeCommand batch returned error: %v", err)
+		t.Fatalf("DecodeCommand commit_frame returned error: %v", err)
 	}
-	if second.Kind != CommandBatchEnd {
-		t.Fatalf("second kind = %v, want batch end", second.Kind)
+	if second.Kind != CommandCommitFrame {
+		t.Fatalf("second kind = %v, want commit frame", second.Kind)
+	}
+}
+
+func TestDecodeBeginFrame(t *testing.T) {
+	// begin_frame (#2219): opcode + frame_seq:u32 + base_frame_seq:u32.
+	packet := []byte{generated.OPBeginFrame, 0, 0, 0, 7, 0, 0, 0, 3}
+	cmd, err := DecodeCommand(packet)
+	if err != nil {
+		t.Fatalf("DecodeCommand returned error: %v", err)
+	}
+	if cmd.Kind != CommandBeginFrame {
+		t.Fatalf("kind = %v, want begin frame", cmd.Kind)
+	}
+	if cmd.Size != 9 {
+		t.Fatalf("size = %d, want 9", cmd.Size)
+	}
+	if cmd.FrameSeq != 7 || cmd.BaseFrameSeq != 3 {
+		t.Fatalf("frame_seq/base = %d/%d, want 7/3", cmd.FrameSeq, cmd.BaseFrameSeq)
+	}
+}
+
+func TestDecodeCommitFrameCarriesInputSeq(t *testing.T) {
+	// commit_frame (#2219): opcode + frame_seq:u32 + input_seq:u32. input_seq is
+	// the echoed correlation sequence formerly carried by batch_end (ticket #2215).
+	packet := []byte{generated.OPCommitFrame, 0, 0, 0, 7, 0, 0, 0x10, 0x92}
+	cmd, err := DecodeCommand(packet)
+	if err != nil {
+		t.Fatalf("DecodeCommand returned error: %v", err)
+	}
+	if cmd.Kind != CommandCommitFrame {
+		t.Fatalf("kind = %v, want commit frame", cmd.Kind)
+	}
+	if cmd.Size != 9 {
+		t.Fatalf("size = %d, want 9", cmd.Size)
+	}
+	if cmd.FrameSeq != 7 {
+		t.Fatalf("frame_seq = %d, want 7", cmd.FrameSeq)
+	}
+	if cmd.BatchSeq != 0x1092 {
+		t.Fatalf("input_seq = %d, want %d", cmd.BatchSeq, 0x1092)
 	}
 }
 
@@ -138,7 +178,7 @@ func TestDecodeWindowRowsAndViewportDeltasIncludeRowRefs(t *testing.T) {
 			packet := append([]byte{tt.opcode, 2, 0x01, 0, byte(len(tt.header))}, tt.header...)
 			packet = append(packet, 0x02, byte(len(rowsPayload)>>8), byte(len(rowsPayload)))
 			packet = append(packet, rowsPayload...)
-			packet = append(packet, generated.OPBatchEnd, 0, 0, 0, 0)
+			packet = append(packet, generated.OPCommitFrame, 0, 0, 0, 0, 0, 0, 0, 0)
 
 			command, err := DecodeCommand(packet)
 			if err != nil {
@@ -166,10 +206,10 @@ func TestDecodeWindowRowsAndViewportDeltasIncludeRowRefs(t *testing.T) {
 
 			second, err := DecodeCommand(packet[command.Size:])
 			if err != nil {
-				t.Fatalf("DecodeCommand batch returned error: %v", err)
+				t.Fatalf("DecodeCommand commit_frame returned error: %v", err)
 			}
-			if second.Kind != CommandBatchEnd {
-				t.Fatalf("second kind = %v, want batch end", second.Kind)
+			if second.Kind != CommandCommitFrame {
+				t.Fatalf("second kind = %v, want commit frame", second.Kind)
 			}
 		})
 	}
@@ -177,8 +217,8 @@ func TestDecodeWindowRowsAndViewportDeltasIncludeRowRefs(t *testing.T) {
 
 func TestDecodeSkipsFontCommandsWithoutDroppingFollowingCommands(t *testing.T) {
 	registerFont := []byte{generated.OPRegisterFont, 1, 0, 4, 'F', 'i', 'r', 'a'}
-	batchEnd := []byte{generated.OPBatchEnd, 0, 0, 0, 0}
-	packet := append(registerFont, batchEnd...)
+	commitFrame := []byte{generated.OPCommitFrame, 0, 0, 0, 0, 0, 0, 0, 0}
+	packet := append(registerFont, commitFrame...)
 
 	first, err := DecodeCommand(packet)
 	if err != nil {
@@ -190,10 +230,10 @@ func TestDecodeSkipsFontCommandsWithoutDroppingFollowingCommands(t *testing.T) {
 
 	second, err := DecodeCommand(packet[first.Size:])
 	if err != nil {
-		t.Fatalf("DecodeCommand batch returned error: %v", err)
+		t.Fatalf("DecodeCommand commit_frame returned error: %v", err)
 	}
-	if second.Kind != CommandBatchEnd {
-		t.Fatalf("second kind = %v, want batch end", second.Kind)
+	if second.Kind != CommandCommitFrame {
+		t.Fatalf("second kind = %v, want commit frame", second.Kind)
 	}
 }
 
@@ -275,7 +315,7 @@ func TestDecodeWorkspacesChromeDoesNotSwallowFollowingCommands(t *testing.T) {
 	body = append(body, tab...)
 	packet := []byte{generated.OPGuiWorkspaces, byte(len(body) >> 8), byte(len(body))}
 	packet = append(packet, body...)
-	packet = append(packet, generated.OPBatchEnd, 0, 0, 0, 0)
+	packet = append(packet, generated.OPCommitFrame, 0, 0, 0, 0, 0, 0, 0, 0)
 
 	first, err := DecodeCommand(packet)
 	if err != nil {
@@ -284,8 +324,8 @@ func TestDecodeWorkspacesChromeDoesNotSwallowFollowingCommands(t *testing.T) {
 	if first.Kind != CommandChrome {
 		t.Fatalf("kind = %v, want chrome", first.Kind)
 	}
-	if first.Size != len(packet)-5 {
-		t.Fatalf("workspace size = %d, want %d", first.Size, len(packet)-5)
+	if first.Size != len(packet)-9 {
+		t.Fatalf("workspace size = %d, want %d", first.Size, len(packet)-9)
 	}
 	spaces := first.Chrome.Spaces
 	if spaces.ActiveID != 7 || len(spaces.Spaces) != 1 || len(spaces.Tabs) != 1 {
@@ -300,10 +340,10 @@ func TestDecodeWorkspacesChromeDoesNotSwallowFollowingCommands(t *testing.T) {
 
 	second, err := DecodeCommand(packet[first.Size:])
 	if err != nil {
-		t.Fatalf("DecodeCommand batch returned error: %v", err)
+		t.Fatalf("DecodeCommand commit_frame returned error: %v", err)
 	}
-	if second.Kind != CommandBatchEnd {
-		t.Fatalf("second kind = %v, want batch end", second.Kind)
+	if second.Kind != CommandCommitFrame {
+		t.Fatalf("second kind = %v, want commit frame", second.Kind)
 	}
 }
 
@@ -312,14 +352,14 @@ func TestDecodeCompletionChromeDoesNotSwallowFollowingCommands(t *testing.T) {
 	item = append(item, string16("Enum.map/2")...)
 	packet := []byte{generated.OPGuiCompletion, 1, 0, 9, 0, 4, 0, 0, 0, 1}
 	packet = append(packet, item...)
-	packet = append(packet, generated.OPBatchEnd, 0, 0, 0, 0)
+	packet = append(packet, generated.OPCommitFrame, 0, 0, 0, 0, 0, 0, 0, 0)
 
 	first, err := DecodeCommand(packet)
 	if err != nil {
 		t.Fatalf("DecodeCommand returned error: %v", err)
 	}
-	if first.Size != len(packet)-5 {
-		t.Fatalf("completion size = %d, want %d", first.Size, len(packet)-5)
+	if first.Size != len(packet)-9 {
+		t.Fatalf("completion size = %d, want %d", first.Size, len(packet)-9)
 	}
 	completion := first.Chrome.Complete
 	if !completion.Visible || completion.Row != 9 || completion.Col != 4 || len(completion.Items) != 1 {
@@ -331,10 +371,10 @@ func TestDecodeCompletionChromeDoesNotSwallowFollowingCommands(t *testing.T) {
 
 	second, err := DecodeCommand(packet[first.Size:])
 	if err != nil {
-		t.Fatalf("DecodeCommand batch returned error: %v", err)
+		t.Fatalf("DecodeCommand commit_frame returned error: %v", err)
 	}
-	if second.Kind != CommandBatchEnd {
-		t.Fatalf("second kind = %v, want batch end", second.Kind)
+	if second.Kind != CommandCommitFrame {
+		t.Fatalf("second kind = %v, want commit frame", second.Kind)
 	}
 }
 
@@ -347,14 +387,14 @@ func TestDecodeWhichKeyChromeDoesNotSwallowFollowingCommands(t *testing.T) {
 	packet = append(packet, string16("SPC")...)
 	packet = append(packet, 0, 2, 0, 1)
 	packet = append(packet, binding...)
-	packet = append(packet, generated.OPBatchEnd, 0, 0, 0, 0)
+	packet = append(packet, generated.OPCommitFrame, 0, 0, 0, 0, 0, 0, 0, 0)
 
 	first, err := DecodeCommand(packet)
 	if err != nil {
 		t.Fatalf("DecodeCommand returned error: %v", err)
 	}
-	if first.Size != len(packet)-5 {
-		t.Fatalf("which-key size = %d, want %d", first.Size, len(packet)-5)
+	if first.Size != len(packet)-9 {
+		t.Fatalf("which-key size = %d, want %d", first.Size, len(packet)-9)
 	}
 	which := first.Chrome.Which
 	if !which.Visible || which.Prefix != "SPC" || which.PageCount != 2 || len(which.Bindings) != 1 {
@@ -366,10 +406,10 @@ func TestDecodeWhichKeyChromeDoesNotSwallowFollowingCommands(t *testing.T) {
 
 	second, err := DecodeCommand(packet[first.Size:])
 	if err != nil {
-		t.Fatalf("DecodeCommand batch returned error: %v", err)
+		t.Fatalf("DecodeCommand commit_frame returned error: %v", err)
 	}
-	if second.Kind != CommandBatchEnd {
-		t.Fatalf("second kind = %v, want batch end", second.Kind)
+	if second.Kind != CommandCommitFrame {
+		t.Fatalf("second kind = %v, want commit frame", second.Kind)
 	}
 }
 
@@ -395,14 +435,14 @@ func TestDecodePickerChromeDoesNotSwallowFollowingCommands(t *testing.T) {
 	body = append(body, section(0x06, []byte{0})...)
 	packet := []byte{generated.OPGuiPicker, 6}
 	packet = append(packet, body...)
-	packet = append(packet, generated.OPBatchEnd, 0, 0, 0, 0)
+	packet = append(packet, generated.OPCommitFrame, 0, 0, 0, 0, 0, 0, 0, 0)
 
 	first, err := DecodeCommand(packet)
 	if err != nil {
 		t.Fatalf("DecodeCommand returned error: %v", err)
 	}
-	if first.Size != len(packet)-5 {
-		t.Fatalf("picker size = %d, want %d", first.Size, len(packet)-5)
+	if first.Size != len(packet)-9 {
+		t.Fatalf("picker size = %d, want %d", first.Size, len(packet)-9)
 	}
 	picker := first.Chrome.Picker
 	if !picker.Visible || picker.Title != "Files" || picker.Query != "main" || picker.Marked != 1 || len(picker.Items) != 1 {
@@ -417,10 +457,10 @@ func TestDecodePickerChromeDoesNotSwallowFollowingCommands(t *testing.T) {
 
 	second, err := DecodeCommand(packet[first.Size:])
 	if err != nil {
-		t.Fatalf("DecodeCommand batch returned error: %v", err)
+		t.Fatalf("DecodeCommand commit_frame returned error: %v", err)
 	}
-	if second.Kind != CommandBatchEnd {
-		t.Fatalf("second kind = %v, want batch end", second.Kind)
+	if second.Kind != CommandCommitFrame {
+		t.Fatalf("second kind = %v, want commit frame", second.Kind)
 	}
 }
 
@@ -429,14 +469,14 @@ func TestDecodePickerPreviewChromeDoesNotSwallowFollowingCommands(t *testing.T) 
 	segment = append(segment, string16("def main")...)
 	packet := []byte{generated.OPGuiPickerPreview, 1, 0, 1, 1}
 	packet = append(packet, segment...)
-	packet = append(packet, generated.OPBatchEnd, 0, 0, 0, 0)
+	packet = append(packet, generated.OPCommitFrame, 0, 0, 0, 0, 0, 0, 0, 0)
 
 	first, err := DecodeCommand(packet)
 	if err != nil {
 		t.Fatalf("DecodeCommand returned error: %v", err)
 	}
-	if first.Size != len(packet)-5 {
-		t.Fatalf("picker preview size = %d, want %d", first.Size, len(packet)-5)
+	if first.Size != len(packet)-9 {
+		t.Fatalf("picker preview size = %d, want %d", first.Size, len(packet)-9)
 	}
 	preview := first.Chrome.Preview
 	if !preview.Visible || len(preview.Lines) != 1 || len(preview.Lines[0].Segments) != 1 {
@@ -449,10 +489,10 @@ func TestDecodePickerPreviewChromeDoesNotSwallowFollowingCommands(t *testing.T) 
 
 	second, err := DecodeCommand(packet[first.Size:])
 	if err != nil {
-		t.Fatalf("DecodeCommand batch returned error: %v", err)
+		t.Fatalf("DecodeCommand commit_frame returned error: %v", err)
 	}
-	if second.Kind != CommandBatchEnd {
-		t.Fatalf("second kind = %v, want batch end", second.Kind)
+	if second.Kind != CommandCommitFrame {
+		t.Fatalf("second kind = %v, want commit frame", second.Kind)
 	}
 }
 
@@ -712,12 +752,12 @@ func TestDecodeRemainingSemanticChrome(t *testing.T) {
 }
 
 func TestDecodeThemeAndEverydayChrome(t *testing.T) {
-	packet := []byte{generated.OPGuiTheme, 2, 0x40, 0x11, 0x22, 0x33, 0x30, 0x44, 0x55, 0x66, generated.OPBatchEnd, 0, 0, 0, 0}
+	packet := []byte{generated.OPGuiTheme, 2, 0x40, 0x11, 0x22, 0x33, 0x30, 0x44, 0x55, 0x66, generated.OPCommitFrame, 0, 0, 0, 0, 0, 0, 0, 0}
 	first, err := DecodeCommand(packet)
 	if err != nil {
 		t.Fatalf("DecodeCommand theme returned error: %v", err)
 	}
-	if first.Size != len(packet)-5 || first.Chrome.Theme.Colors[0x40] != 0x112233 {
+	if first.Size != len(packet)-9 || first.Chrome.Theme.Colors[0x40] != 0x112233 {
 		t.Fatalf("theme decoded incorrectly: size=%d theme=%+v", first.Size, first.Chrome.Theme)
 	}
 
@@ -739,13 +779,13 @@ func TestDecodeThemeAndEverydayChrome(t *testing.T) {
 	git = append(git, 0)
 	git = append(git, string16("/repo")...)
 	git = append(git, string16("last commit")...)
-	// Trailing batch_end is a fixed:5 sentinel (opcode + echoed seq u32).
-	git = append(git, 0, 3, generated.OPBatchEnd, 0, 0, 0, 0)
+	// Trailing commit_frame is a fixed:9 sentinel (opcode + frame_seq + echoed input_seq).
+	git = append(git, 0, 3, generated.OPCommitFrame, 0, 0, 0, 0, 0, 0, 0, 0)
 	command, err = DecodeCommand(git)
 	if err != nil {
 		t.Fatalf("DecodeCommand git returned error: %v", err)
 	}
-	if command.Size != len(git)-5 || command.Chrome.Git.Branch != "main" || command.Chrome.Git.Ahead != 2 || len(command.Chrome.Git.Entries) != 1 || command.Chrome.Git.StashCount != 3 {
+	if command.Size != len(git)-9 || command.Chrome.Git.Branch != "main" || command.Chrome.Git.Ahead != 2 || len(command.Chrome.Git.Entries) != 1 || command.Chrome.Git.StashCount != 3 {
 		t.Fatalf("git decoded incorrectly: size=%d git=%+v", command.Size, command.Chrome.Git)
 	}
 
@@ -910,8 +950,8 @@ func TestDecodePanelAndSidebarChrome(t *testing.T) {
 	tool = append(tool, string16("")...)
 	tool = append(tool, 0)
 	tool = append(tool, string16("")...)
-	// Trailing batch_end is a fixed:5 sentinel (opcode + echoed seq u32).
-	tool = append(tool, generated.OPBatchEnd, 0, 0, 0, 0)
+	// Trailing commit_frame is a fixed:9 sentinel (opcode + frame_seq + echoed input_seq).
+	tool = append(tool, generated.OPCommitFrame, 0, 0, 0, 0, 0, 0, 0, 0)
 	command, err = DecodeCommand(tool)
 	if err != nil {
 		t.Fatalf("DecodeCommand tool manager returned error: %v", err)
@@ -919,15 +959,15 @@ func TestDecodePanelAndSidebarChrome(t *testing.T) {
 	if !command.Chrome.ToolManager.Visible || len(command.Chrome.ToolManager.Tools) != 1 || command.Chrome.ToolManager.Tools[0].Label != "Elixir LS" {
 		t.Fatalf("tool manager decoded incorrectly: %+v", command.Chrome.ToolManager)
 	}
-	if command.Size != len(tool)-5 {
-		t.Fatalf("tool manager size = %d, want %d", command.Size, len(tool)-5)
+	if command.Size != len(tool)-9 {
+		t.Fatalf("tool manager size = %d, want %d", command.Size, len(tool)-9)
 	}
 	second, err := DecodeCommand(tool[command.Size:])
 	if err != nil {
-		t.Fatalf("DecodeCommand batch returned error: %v", err)
+		t.Fatalf("DecodeCommand commit_frame returned error: %v", err)
 	}
-	if second.Kind != CommandBatchEnd {
-		t.Fatalf("second kind = %v, want batch end", second.Kind)
+	if second.Kind != CommandCommitFrame {
+		t.Fatalf("second kind = %v, want commit frame", second.Kind)
 	}
 
 	node := string8("<0.1.0>")

@@ -167,14 +167,21 @@ struct FrontendExtensionRuntimeMessage: Sendable, Equatable {
 
 /// A decoded render command from the BEAM.
 enum RenderCommand: Sendable {
-    /// Frame boundary carrying the echoed input correlation sequence (ticket
-    /// #2215). 0 means "no correlation".
+    /// Opens a frame transaction (#2219): frame_seq is the strictly monotonic
+    /// global frame sequence; baseFrameSeq names the frame this transaction's
+    /// deltas assume (0 means keyframe). Decoded but ignored for now; staging on
+    /// begin/commit lands in a later child.
     ///
     /// The cell-paradigm render commands (clear, draw_text, draw_styled_text,
     /// set_cursor, and the region commands) were retired in protocol_version 2;
     /// all content now flows through gui_window_content (0x80) and the dedicated
     /// gui_* semantic opcodes.
-    case batchEnd(seq: UInt32)
+    case beginFrame(frameSeq: UInt32, baseFrameSeq: UInt32)
+    /// Closes a frame transaction (#2219): frameSeq matches the open begin_frame;
+    /// seq is the echoed input correlation sequence (ticket #2215, formerly carried
+    /// by batch_end). The frontend presents the frame and resolves keystroke latency
+    /// here. 0 means "no correlation".
+    case commitFrame(frameSeq: UInt32, seq: UInt32)
     case setCursorShape(CursorShape)
     case setTitle(String)
     case setWindowBg(r: UInt8, g: UInt8, b: UInt8)
@@ -361,12 +368,20 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         guard data.count >= rest + 17 else { throw ProtocolDecodeError.malformed }
         return (nil, 18)
 
-    case OP_BATCH_END:
-        // batch_end now carries a u32 echoed input correlation sequence
-        // (ticket #2215): <opcode, seq:u32>.
-        guard data.count >= rest + 4 else { throw ProtocolDecodeError.malformed }
-        let seq = readU32(data, rest)
-        return (.batchEnd(seq: seq), 5)
+    case OP_BEGIN_FRAME:
+        // begin_frame (#2219): <opcode, frame_seq:u32, base_frame_seq:u32>.
+        guard data.count >= rest + 8 else { throw ProtocolDecodeError.malformed }
+        let frameSeq = readU32(data, rest)
+        let baseFrameSeq = readU32(data, rest + 4)
+        return (.beginFrame(frameSeq: frameSeq, baseFrameSeq: baseFrameSeq), 9)
+
+    case OP_COMMIT_FRAME:
+        // commit_frame (#2219): <opcode, frame_seq:u32, input_seq:u32>. input_seq is
+        // the echoed input correlation sequence (ticket #2215, formerly batch_end).
+        guard data.count >= rest + 8 else { throw ProtocolDecodeError.malformed }
+        let frameSeq = readU32(data, rest)
+        let seq = readU32(data, rest + 4)
+        return (.commitFrame(frameSeq: frameSeq, seq: seq), 9)
 
     case OP_SET_CURSOR_SHAPE:
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }

@@ -1522,7 +1522,7 @@ final class EditorNSView: MTKView {
     /// Sends a key press and updates recovery tracking in one place.
     ///
     /// Stamps a latency correlation sequence (ticket #2215) so the resulting
-    /// frame's batch_end resolves a keystroke-to-present sample on the shared
+    /// frame's commit_frame resolves a keystroke-to-present sample on the shared
     /// dispatcher recorder.
     private func sendKeyPress(codepoint: UInt32, modifiers: UInt8) {
         updateOptimisticTextInputMode(codepoint: codepoint, modifiers: modifiers)

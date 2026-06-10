@@ -92,9 +92,18 @@ defmodule MingaEditor.RenderPipeline.Input do
     # fallback; Renderer.Server replaces it with its persistent registry.
     font_registry: FontRegistry.new(),
     # Latest frontend-originated input correlation sequence (ticket #2215),
-    # echoed on batch_end so the frontend can resolve a keystroke-to-write
+    # echoed on commit_frame so the frontend can resolve a keystroke-to-write
     # latency sample. 0 means "no correlation".
-    last_input_seq: 0
+    last_input_seq: 0,
+    # The strictly monotonic global frame sequence (#2219) used to bracket this
+    # frame's begin_frame/commit_frame transaction. The async path threads
+    # Renderer.Server's seq here; sync/headless paths default to a fresh monotonic
+    # value so every emit still carries a unique, advancing frame_seq.
+    frame_seq: nil,
+    # When true, the emitter forces this frame to a keyframe (base_frame_seq 0,
+    # full window snapshots, every chrome surface re-emitted). Set by the BEAM
+    # after an inbound request_keyframe (#2219).
+    force_keyframe?: false
   ]
 
   @typedoc """
@@ -141,6 +150,8 @@ defmodule MingaEditor.RenderPipeline.Input do
           caches: Caches.t(),
           terminal_viewport: Viewport.t(),
           last_input_seq: non_neg_integer(),
+          frame_seq: non_neg_integer() | nil,
+          force_keyframe?: boolean(),
           workspace: workspace()
         }
 
@@ -176,6 +187,7 @@ defmodule MingaEditor.RenderPipeline.Input do
       caches: state.caches,
       terminal_viewport: state.terminal_viewport,
       last_input_seq: state.last_input_seq,
+      force_keyframe?: Map.get(state, :keyframe_pending?, false),
       workspace: %{
         windows: ws.windows,
         buffers: ws.buffers,

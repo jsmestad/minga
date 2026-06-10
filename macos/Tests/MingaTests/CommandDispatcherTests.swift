@@ -19,8 +19,8 @@ struct CommandDispatcherRoutingTests {
 
     // MARK: - Basic commands
 
-    @Test("batchEnd preserves retained windows (no cell-grid clear/prune path)")
-    @MainActor func batchEndPreservesRetainedWindows() {
+    @Test("commitFrame preserves retained windows (no cell-grid clear/prune path)")
+    @MainActor func commitFramePreservesRetainedWindows() {
         let (dispatcher, gui) = makeDispatcher()
         gui.windowContents[1] = GUIWindowContent(
             windowId: 1, fullRefresh: false,
@@ -30,7 +30,7 @@ struct CommandDispatcherRoutingTests {
             documentHighlights: []
         )
 
-        dispatcher.dispatch(.batchEnd(seq: 0))
+        dispatcher.dispatch(.commitFrame(frameSeq: 0, seq: 0))
 
         #expect(gui.windowContents[1] != nil)
     }
@@ -876,17 +876,17 @@ struct CommandDispatcherRoutingTests {
 
     // MARK: - Batch lifecycle
 
-    @Test("batchEnd fires onFirstRender once then clears it")
-    @MainActor func batchEndFiresFirstRenderOnce() {
+    @Test("commitFrame fires onFirstRender once then clears it")
+    @MainActor func commitFrameFiresFirstRenderOnce() {
         let (dispatcher, _) = makeDispatcher()
         var callCount = 0
         dispatcher.onFirstRender = { callCount += 1 }
 
-        dispatcher.dispatch(.batchEnd(seq: 0))
+        dispatcher.dispatch(.commitFrame(frameSeq: 0, seq: 0))
         #expect(callCount == 1)
         #expect(dispatcher.onFirstRender == nil)
 
-        dispatcher.dispatch(.batchEnd(seq: 0))
+        dispatcher.dispatch(.commitFrame(frameSeq: 0, seq: 0))
         #expect(callCount == 1)
     }
 

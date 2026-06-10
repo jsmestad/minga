@@ -132,7 +132,7 @@ defmodule Minga.Test.EditorCase do
 
     # Drain any deferred messages queued by the :ready handler (e.g.
     # :setup_highlight, :debounced_render). Without this, a background
-    # render can produce a spurious batch_end that satisfies the next
+    # render can produce a spurious commit_frame that satisfies the next
     # send_key's frame waiter before the key press is actually processed.
     _ = sync_editor(editor)
     _ = sync_port(port)

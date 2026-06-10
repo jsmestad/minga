@@ -75,14 +75,25 @@ defmodule MingaEditor.Frontend do
   defdelegate default_capabilities, to: MingaEditor.Frontend.Capabilities, as: :default
 
   @doc """
-  Sends a batch-end marker to the frontend.
+  Sends a bare, content-free frame transaction to the frontend (#2219).
 
-  `seq` is the echoed input correlation sequence (ticket #2215); it defaults to
-  `0` ("no correlation") for callers that emit a bare frame boundary.
+  Used by frame-synchronization contracts that must emit a frame boundary without
+  re-rendering (the operator-pending no-op optimization). Brackets nothing with
+  `begin_frame ++ commit_frame`. `frame_seq` is the strictly monotonic global frame
+  sequence; `base_frame_seq` names the previously emitted frame (0 for the first).
+  `input_seq` is the echoed input correlation sequence (ticket #2215, default 0).
   """
-  @spec send_batch_end(GenServer.server(), non_neg_integer()) :: :ok
-  def send_batch_end(port, seq \\ 0) do
-    send_commands(port, [Protocol.encode_batch_end(seq)])
+  @spec send_frame_boundary(
+          GenServer.server(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: :ok
+  def send_frame_boundary(port, frame_seq, base_frame_seq, input_seq \\ 0) do
+    send_commands(port, [
+      Protocol.encode_begin_frame(frame_seq, base_frame_seq),
+      Protocol.encode_commit_frame(frame_seq, input_seq)
+    ])
   end
 
   # ── Configuration ────────────────────────────────────────────────────────

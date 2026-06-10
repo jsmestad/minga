@@ -40,6 +40,18 @@ defmodule MingaEditor.Renderer.Caches do
     last_title: nil,
     last_window_bg: nil,
 
+    # ── Frame transaction (#2219) ────────────────────────────────────────────
+    # The frame_seq of the last successfully-emitted frame. A delta frame names
+    # it as its begin_frame base_frame_seq; a keyframe forces base 0. Starts at 0
+    # so the very first frame is a keyframe by construction.
+    last_emitted_frame_seq: 0,
+
+    # Whether the most recently emitted frame was a keyframe (base_frame_seq 0,
+    # full window snapshots). The Editor reads this to clear `keyframe_pending?`
+    # only when a frame that actually honored the request reaches emit, so a
+    # concurrent delta writeback can't silently swallow a pending keyframe (#2219).
+    last_frame_keyframe?: false,
+
     # ── Core adapter caches (render-model migration) ─────────────────────────
     adapter_gui_caches: Minga.Frontend.Adapter.GUI.Caches.new()
   ]
@@ -58,6 +70,8 @@ defmodule MingaEditor.Renderer.Caches do
           emit_prev_editing_mode: atom() | nil,
           last_title: String.t() | nil,
           last_window_bg: non_neg_integer() | nil,
+          last_emitted_frame_seq: non_neg_integer(),
+          last_frame_keyframe?: boolean(),
           adapter_gui_caches: Minga.Frontend.Adapter.GUI.Caches.t()
         }
 
@@ -72,7 +86,10 @@ defmodule MingaEditor.Renderer.Caches do
       caches
       | adapter_gui_caches: Minga.Frontend.Adapter.GUI.Caches.new(),
         last_title: nil,
-        last_window_bg: nil
+        last_window_bg: nil,
+        # A reconnecting frontend has no committed base, so force the next frame to
+        # a keyframe (base_frame_seq 0) by clearing the last-emitted frame_seq.
+        last_emitted_frame_seq: 0
     }
   end
 end

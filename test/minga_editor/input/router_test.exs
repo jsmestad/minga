@@ -161,7 +161,7 @@ defmodule MingaEditor.Input.RouterTest do
       _new_state = Router.dispatch(state, ?j, 0)
     end
 
-    test "entering operator_pending mode skips full render but emits batch_end" do
+    test "entering operator_pending mode skips full render but emits a bare frame transaction" do
       state = base_state()
       # Flush any startup messages
       flush_mailbox()
@@ -170,10 +170,11 @@ defmodule MingaEditor.Input.RouterTest do
       new_state = Router.dispatch(state, ?d, 0)
       assert new_state.workspace.editing.mode == :operator_pending
 
-      # Only a single no-op batch_end message should be sent (no full render).
-      # port_manager is self(), so GenServer.cast sends a $gen_cast message.
+      # A single no-op frame boundary (begin_frame + commit_frame in one
+      # send_commands cast) is sent, not a full render (#2219). port_manager is
+      # self(), so GenServer.cast sends one $gen_cast message.
       msg_count = flush_mailbox()
-      assert msg_count == 1, "Expected exactly 1 batch_end message, got #{msg_count}"
+      assert msg_count == 1, "Expected exactly 1 frame-boundary message, got #{msg_count}"
     end
 
     test "normal motion triggers full render (more than one message)" do
@@ -230,6 +231,111 @@ defmodule MingaEditor.Input.RouterTest do
 
       assert new_state.shell_state.bottom_panel.visible
       assert BufferProcess.content(new_state.workspace.buffers.active) == before_content
+    end
+  end
+
+  describe "operator-pending frame ordering (#2219)" do
+    alias MingaEditor.Renderer.Server, as: RendererServer
+    alias MingaEditor.Viewport
+    alias Minga.Protocol.Opcodes
+
+    # A bare boundary is exactly two commands in one send_commands cast:
+    # begin_frame then commit_frame, no content between.
+    defp bare_boundary_cast? do
+      begin_op = Opcodes.begin_frame()
+      commit_op = Opcodes.commit_frame()
+
+      receive do
+        {:"$gen_cast", {:send_commands, [<<^begin_op, _::binary>>, <<^commit_op, _::binary>>]}} ->
+          true
+      after
+        0 -> false
+      end
+    end
+
+    defp async_state(renderer_pid) do
+      buf = start_supervised!({BufferProcess, content: "hello\nworld\nthird"})
+
+      %EditorState{
+        backend: :tui,
+        port_manager: self(),
+        renderer: renderer_pid,
+        sidebar_registry: Process.get(:sidebar_registry),
+        terminal_viewport: Viewport.new(24, 80),
+        workspace: %MingaEditor.Session.State{
+          viewport: Viewport.new(24, 80),
+          editing: VimState.new(),
+          buffers: %Buffers{active: buf, list: [buf], active_index: 0},
+          windows: %MingaEditor.State.Windows{
+            tree: MingaEditor.WindowTree.new(1),
+            map: %{1 => MingaEditor.Window.new(1, buf, 24, 80)},
+            active: 1,
+            next_id: 2
+          }
+        },
+        focus_stack: Input.default_stack()
+      }
+    end
+
+    defp park_busy(renderer) do
+      :sys.replace_state(renderer, fn s ->
+        %{
+          s
+          | rendering?: true,
+            in_flight:
+              {%MingaEditor.RenderPipeline.Input{
+                 port_manager: self(),
+                 theme: MingaEditor.UI.Theme.get!(:doom_one),
+                 capabilities: %MingaEditor.Frontend.Capabilities{},
+                 shell_id: :traditional,
+                 shell: MingaEditor.Shell.Traditional,
+                 workspace: %{
+                   windows: %MingaEditor.State.Windows{},
+                   viewport: Viewport.new(24, 80)
+                 }
+               }, 0, 0}
+        }
+      end)
+    end
+
+    test "an operator-pending no-op emits a bare boundary when the renderer is idle" do
+      renderer =
+        start_supervised!({RendererServer, name: nil, editor_pid: self(), pipeline: & &1})
+
+      state = async_state(renderer)
+      flush_mailbox()
+
+      new_state = Router.dispatch(state, ?d, 0)
+      assert new_state.workspace.editing.mode == :operator_pending
+
+      # The idle renderer is the sole writer, so the boundary is emitted directly and
+      # the editor's last_emitted_frame_seq advances.
+      assert bare_boundary_cast?(), "idle path emits a bare frame boundary"
+      assert new_state.caches.last_emitted_frame_seq > state.caches.last_emitted_frame_seq
+    end
+
+    test "an operator-pending no-op routes through the renderer (no bare boundary) when busy" do
+      renderer =
+        start_supervised!({RendererServer, name: nil, editor_pid: self(), pipeline: & &1})
+
+      state = async_state(renderer)
+      park_busy(renderer)
+      flush_mailbox()
+
+      new_state = Router.dispatch(state, ?d, 0)
+      assert new_state.workspace.editing.mode == :operator_pending
+
+      # Ordering invariant: while a lower-seq render is in-flight, the boundary must
+      # NOT be written straight to the port (that would put a decreasing frame_seq on
+      # the wire). It is serialized through the renderer instead.
+      refute bare_boundary_cast?(),
+             "busy path must not emit a bare boundary straight to the port"
+
+      # The async render was cast to the parked-busy renderer, which holds it as the
+      # pending snapshot (most-recent-wins) instead of writing the port out of order.
+      assert {_snap, _seq, _pushed_at} = :sys.get_state(renderer).pending
+      # last_emitted_frame_seq is NOT advanced at cast time; it advances on writeback.
+      assert new_state.caches.last_emitted_frame_seq == state.caches.last_emitted_frame_seq
     end
   end
 

@@ -4,7 +4,7 @@ defmodule Minga.Bench.KeystrokeLatencyBaseline do
 
   Measures the time from injecting a key press into the editor to the frame that
   results being written to the (headless) frontend, correlated by the input
-  sequence echoed on `batch_end`. This is the BEAM-side foundation of the
+  sequence echoed on `commit_frame`. This is the BEAM-side foundation of the
   end-to-end measurement: the Go TUI and macOS GUI resolve the same correlation
   scheme at their terminal write / present points.
 
@@ -113,8 +113,9 @@ defmodule Minga.Bench.KeystrokeLatencyBaseline do
   end
 
   # Injects a key press carrying the correlation sequence and waits for the
-  # resulting frame. Verifies the echoed sequence on batch_end matches, proving
-  # the round-trip correlation (ticket #2215 acceptance).
+  # resulting frame. Verifies the echoed sequence on commit_frame matches, proving
+  # the round-trip correlation (ticket #2215 acceptance; commit_frame absorbed the
+  # echo from batch_end in #2219).
   @spec send_key(map(), non_neg_integer(), pos_integer()) :: %{
           wall_us: non_neg_integer(),
           correlated: boolean()

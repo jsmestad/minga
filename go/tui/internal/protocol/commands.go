@@ -11,7 +11,13 @@ type CommandKind int
 
 const (
 	CommandNoop CommandKind = iota
-	CommandBatchEnd
+	// CommandBeginFrame opens a frame transaction (#2219). The frontend decodes it
+	// but ignores base_frame_seq for now (staging is children C/D).
+	CommandBeginFrame
+	// CommandCommitFrame closes a frame transaction (#2219), carrying the echoed
+	// input correlation sequence formerly on batch_end. The frontend gates the frame
+	// and resolves keystroke latency on it.
+	CommandCommitFrame
 	CommandSetCursorShape
 	CommandSetTitle
 	CommandSetWindowBg
@@ -26,8 +32,15 @@ const (
 type Command struct {
 	Kind CommandKind
 	Size int
+	// FrameSeq is the strictly monotonic global frame sequence carried by both
+	// begin_frame and commit_frame (#2219). It is ignored for rendering today;
+	// staging/resync that consumes it lands in children C/D.
+	FrameSeq uint32
+	// BaseFrameSeq is the frame a begin_frame transaction's deltas assume; 0 means
+	// keyframe (#2219). Ignored for now.
+	BaseFrameSeq uint32
 	// BatchSeq is the echoed input correlation sequence carried by a
-	// CommandBatchEnd (ticket #2215). 0 means "no correlation".
+	// CommandCommitFrame (ticket #2215; formerly batch_end). 0 means "no correlation".
 	BatchSeq         uint32
 	CursorShape      byte
 	Title            string
@@ -144,13 +157,31 @@ func DecodeCommand(payload []byte) (Command, error) {
 	}
 
 	switch payload[0] {
-	case generated.OPBatchEnd:
-		// batch_end now carries a u32 echoed input correlation sequence
-		// (ticket #2215): <opcode, seq:u32>.
-		if len(payload) < 5 {
-			return Command{}, fmt.Errorf("short batch_end")
+	case generated.OPBeginFrame:
+		// begin_frame opens a frame transaction (#2219): <opcode, frame_seq:u32,
+		// base_frame_seq:u32>. Decoded but ignored for rendering today.
+		if len(payload) < 9 {
+			return Command{}, fmt.Errorf("short begin_frame")
 		}
-		return Command{Kind: CommandBatchEnd, Size: 5, BatchSeq: binary.BigEndian.Uint32(payload[1:5])}, nil
+		return Command{
+			Kind:         CommandBeginFrame,
+			Size:         9,
+			FrameSeq:     binary.BigEndian.Uint32(payload[1:5]),
+			BaseFrameSeq: binary.BigEndian.Uint32(payload[5:9]),
+		}, nil
+	case generated.OPCommitFrame:
+		// commit_frame closes a frame transaction (#2219): <opcode, frame_seq:u32,
+		// input_seq:u32>. input_seq is the echoed input correlation sequence
+		// (ticket #2215, formerly carried by batch_end).
+		if len(payload) < 9 {
+			return Command{}, fmt.Errorf("short commit_frame")
+		}
+		return Command{
+			Kind:     CommandCommitFrame,
+			Size:     9,
+			FrameSeq: binary.BigEndian.Uint32(payload[1:5]),
+			BatchSeq: binary.BigEndian.Uint32(payload[5:9]),
+		}, nil
 	case generated.OPSetCursorShape:
 		if len(payload) < 2 {
 			return Command{}, fmt.Errorf("short set_cursor_shape")

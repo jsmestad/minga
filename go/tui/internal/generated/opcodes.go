@@ -21,7 +21,6 @@ const (
 	// Render
 	OPBeginFrame     byte = 0x10
 	OPCommitFrame    byte = 0x11
-	OPBatchEnd       byte = 0x13
 	OPSetCursorShape byte = 0x15
 	OPSetTitle       byte = 0x16
 	OPSetWindowBg    byte = 0x17

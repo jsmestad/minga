@@ -14,7 +14,7 @@ protocol InputEncoder: AnyObject, Sendable {
     func sendReady(cols: UInt16, rows: UInt16)
     func sendKeyPress(codepoint: UInt32, modifiers: UInt8)
     /// Send a key press carrying the latency correlation sequence (ticket
-    /// #2215). The BEAM echoes the sequence on batch_end so a keystroke-to-
+    /// #2215). The BEAM echoes the sequence on commit_frame so a keystroke-to-
     /// present sample can be resolved.
     func sendKeyPress(codepoint: UInt32, modifiers: UInt8, seq: UInt32)
     func sendResize(cols: UInt16, rows: UInt16)

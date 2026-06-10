@@ -68,7 +68,7 @@ func EncodeResize(width, height uint16) []byte {
 
 // EncodeKeyPress encodes a key press carrying a u32 input correlation sequence
 // (ticket #2215) appended after the modifiers byte. The BEAM echoes the sequence
-// on batch_end so the frontend can resolve an end-to-end keystroke-to-write
+// on commit_frame so the frontend can resolve an end-to-end keystroke-to-write
 // latency sample. A sequence of 0 means "no correlation".
 func EncodeKeyPress(codepoint rune, modifiers byte, seq uint32) []byte {
 	value := uint32(codepoint)

@@ -16,11 +16,11 @@ final class CommandDispatcher {
     /// Font manager for per-span font family support.
     var fontManager: FontManager?
 
-    /// Called after each `batch_end` command. The renderer hooks into
+    /// Called after each `commit_frame` command. The renderer hooks into
     /// this to trigger a GPU frame.
     var onFrameReady: (() -> Void)?
 
-    /// Called after each `batch_end` command so recovery logic knows the
+    /// Called after each `commit_frame` command so recovery logic knows the
     /// BEAM is still responding to input.
     var onBatchEnd: (() -> Void)?
 
@@ -49,7 +49,7 @@ final class CommandDispatcher {
     /// Called when the BEAM changes the GUI cursor animation preference.
     var onCursorAnimationChanged: ((Bool) -> Void)?
 
-    /// Called once after the first `batch_end` is received from the BEAM.
+    /// Called once after the first `commit_frame` is received from the BEAM.
     /// Used in bundle mode to flush pending file URLs after the BEAM is ready.
     var onFirstRender: (() -> Void)?
 
@@ -62,7 +62,7 @@ final class CommandDispatcher {
 
     /// Records end-to-end keystroke-to-present latency (ticket #2215). The input
     /// path stamps a correlation sequence into each key packet; this dispatcher
-    /// resolves the sample when the echoed sequence arrives on `batch_end`.
+    /// resolves the sample when the echoed sequence arrives on `commit_frame`.
     let latency = LatencyRecorder()
 
     /// Window ids that arrived in the current frame batch. Used for input hit testing so stale
@@ -83,10 +83,17 @@ final class CommandDispatcher {
         case .setCursorShape(let shape):
             frameState.cursorShape = shape
 
-        case .batchEnd(let seq):
-            // Resolve the keystroke-to-present latency sample for the echoed
-            // input correlation sequence (ticket #2215). The frame is fully
-            // dispatched here and about to be presented by the Metal renderer.
+        case .beginFrame:
+            // begin_frame opens a frame transaction (#2219). The frontend still
+            // presents one packet per frame, so the marker is decoded and ignored
+            // (base_frame_seq is for staging in a later child).
+            break
+
+        case .commitFrame(_, let seq):
+            // commit_frame closes the frame transaction (#2219, formerly batch_end).
+            // Resolve the keystroke-to-present latency sample for the echoed input
+            // correlation sequence (ticket #2215). The frame is fully dispatched here
+            // and about to be presented by the Metal renderer.
             latency.resolve(seq: seq)
             if let firstRender = onFirstRender {
                 firstRender()
