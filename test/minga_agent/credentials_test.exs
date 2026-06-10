@@ -16,6 +16,13 @@ defmodule MingaAgent.CredentialsTest do
 
     for var <- @provider_env_vars, do: System.delete_env(var)
 
+    # Capture the existing XDG_CONFIG_HOME so we restore it afterward. test_helper.exs
+    # sets a hermetic temp config home for the whole suite; deleting it here would
+    # expose the developer's real ~/.config/minga (including any openai-codex OAuth
+    # token) to every test that runs after this file, which leaks live codex models
+    # into ModelCatalog-backed assertions elsewhere (e.g. slash_command_test).
+    previous_xdg_config_home = System.get_env("XDG_CONFIG_HOME")
+
     # Use a unique temp dir per test to avoid interference
     dir = Path.join(@test_dir, "#{System.unique_integer([:positive])}")
     File.mkdir_p!(dir)
@@ -31,7 +38,12 @@ defmodule MingaAgent.CredentialsTest do
         if val, do: System.put_env(var, val), else: System.delete_env(var)
       end
 
-      System.delete_env("XDG_CONFIG_HOME")
+      if previous_xdg_config_home do
+        System.put_env("XDG_CONFIG_HOME", previous_xdg_config_home)
+      else
+        System.delete_env("XDG_CONFIG_HOME")
+      end
+
       File.rm_rf!(dir)
     end)
 
