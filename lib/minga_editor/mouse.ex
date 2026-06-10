@@ -36,6 +36,7 @@ defmodule MingaEditor.Mouse do
   alias MingaEditor.FocusTree.Node, as: FocusNode
   alias MingaEditor.FoldMap
   alias MingaEditor.Layout
+  alias MingaEditor.Layout.SurfaceRegistry
   alias MingaEditor.Mouse.HitTest
   alias MingaEditor.Mouse.Target.Buffer, as: BufferTarget
   alias MingaEditor.Renderer.Gutter
@@ -1665,22 +1666,17 @@ defmodule MingaEditor.Mouse do
 
   # ── Tab bar click detection ──────────────────────────────────────────────
 
+  # The tab-bar *surface rect* comes from the surface registry (the single
+  # source for "what is where on screen"); the per-tab *segment* command lookup
+  # stays here because segments are render-time text-property spans, not placed
+  # surfaces. See `MingaEditor.Layout.SurfaceRegistry` moduledoc.
   @spec tab_bar_click(state(), non_neg_integer(), non_neg_integer()) ::
           {:command, tab_command()} | :not_tab_bar
   defp tab_bar_click(state, row, col) do
-    layout = Layout.get(state)
-
-    case layout.tab_bar do
-      nil ->
-        :not_tab_bar
-
-      {tb_row, tb_col, tb_width, tb_height} ->
-        if row >= tb_row and row < tb_row + tb_height and col >= tb_col and
-             col < tb_col + tb_width do
-          find_tab_bar_region(state.shell_state.tab_bar_click_regions, row, col)
-        else
-          :not_tab_bar
-        end
+    if SurfaceRegistry.within?(state, :tab_bar, row, col) do
+      find_tab_bar_region(state.shell_state.tab_bar_click_regions, row, col)
+    else
+      :not_tab_bar
     end
   end
 

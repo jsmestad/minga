@@ -16,7 +16,7 @@ func TestDecodePacketDoesNotSwallowAfterIndentGuides(t *testing.T) {
 	batch = append(batch, generated.OPSetCursorShape, 0)                             // fixed:2
 	batch = append(batch, generated.OPGuiIndentGuides, 0x00, 0x06, 1, 2, 3, 4, 5, 6) // len16, 9 bytes
 	batch = append(batch, generated.OPGuiStatusBar, 1, 0x01, 0x00, 0x02, 0xAA, 0xBB) // sectioned, 7 bytes
-	batch = append(batch, generated.OPCommitFrame, 0, 0, 0, 0, 0, 0, 0, 0)                          // fixed:9 (frame_seq + echoed input_seq)
+	batch = append(batch, generated.OPCommitFrame, 0, 0, 0, 0, 0, 0, 0, 0)           // fixed:9 (frame_seq + echoed input_seq)
 
 	var warnings []string
 	cmds, err := decodePacket(batch, func(_ byte, text string) { warnings = append(warnings, text) })
@@ -58,7 +58,7 @@ func TestDecodePacketDoesNotSwallowAfterOverlayDelta(t *testing.T) {
 			batch = append(batch, generated.OPGuiWindowOverlayDelta, 0, 1, 0, 0, 0, 2, tc.flags, 0, 3, 0, 4, 1)
 			batch = append(batch, tc.extra...)
 			batch = append(batch, generated.OPGuiStatusBar, 1, 0x01, 0x00, 0x02, 0xAA, 0xBB) // sectioned
-			batch = append(batch, generated.OPCommitFrame, 0, 0, 0, 0, 0, 0, 0, 0)                          // fixed:9 (frame_seq + echoed input_seq)
+			batch = append(batch, generated.OPCommitFrame, 0, 0, 0, 0, 0, 0, 0, 0)           // fixed:9 (frame_seq + echoed input_seq)
 
 			cmds, err := decodePacket(batch, func(_ byte, text string) { t.Fatalf("unexpected warning: %s", text) })
 			if err != nil {

@@ -1,25 +1,25 @@
 defmodule MingaEditor.Agent.View.PromptRenderer do
   @moduledoc """
-  Renders the agent prompt input box: bordered text area with vim mode
-  indicator, model info, visual selection, and paste block placeholders.
+  Prompt-input layout math for the agent chat window.
 
-  Also exposes layout helpers (`input_box_width/1`, `input_inner_width/1`,
-  `input_v_gap/0`, `compute_input_height/2`) used by `Input.AgentMouse`
-  for hit-testing.
+  This module owns the geometry of the bordered prompt box: its width, inner
+  text width, dynamic height, the vertical gap above the modeline, and the
+  cursor position inside a bounded content rect. The render pipeline and
+  `Input.AgentMouse` use these helpers for layout and hit-testing.
 
-  Called by `MingaEditor.RenderPipeline.Content` when rendering agent
-  chat windows.
+  The visible prompt is drawn by the semantic surfaces: the prompt buffer is a
+  `RenderWindow` built by `MingaEditor.Agent.View.PromptRenderWindow`, and the
+  surrounding chrome (model line, mode, completion) rides the `AgentChat`
+  semantic model built by `MingaEditor.RenderModel.UI.AgentChatBuilder`. The
+  cell-era draw path that previously lived here was retired in #2221 once both
+  live frontends became semantic-only; this module keeps only the layout API
+  those surfaces still depend on.
   """
 
-  alias MingaAgent.Config, as: AgentConfig
   alias MingaEditor.Agent.UIState
-  alias MingaEditor.Agent.View.RenderInput
   alias MingaEditor.Agent.ViewContext
-  alias Minga.Core.Face
-  alias MingaEditor.DisplayList
 
   alias MingaEditor.Input.Wrap, as: InputWrap
-  alias MingaEditor.UI.Theme
 
   @typedoc "Screen rectangle {row_offset, col_offset, width, height}."
   @type rect :: {non_neg_integer(), non_neg_integer(), pos_integer(), pos_integer()}
@@ -40,23 +40,9 @@ defmodule MingaEditor.Agent.View.PromptRenderer do
   """
   @spec prompt_height(ViewContext.t(), pos_integer()) :: pos_integer()
   def prompt_height(%ViewContext{} = ctx, chat_width) do
-    input = RenderInput.extract(ctx)
+    input_lines = UIState.input_lines(ctx.ui_state.panel)
     box_width = max(chat_width - 2 * @input_h_margin, 10)
-    compute_input_height(input.panel.input_lines, input_inner_width(box_width))
-  end
-
-  @doc """
-  Renders only the prompt input area into the given rect.
-
-  Used by the Content stage when the chat content is rendered through
-  the standard buffer pipeline with decorations.
-  """
-  @spec render(ViewContext.t(), rect()) :: [DisplayList.draw()]
-  def render(%ViewContext{} = ctx, {row, col, width, _height}) do
-    input = RenderInput.extract(ctx)
-    box_width = max(width - 2 * @input_h_margin, 10)
-    box_col = col + @input_h_margin
-    render_input_from_input(input, row, box_col, box_width)
+    compute_input_height(input_lines, input_inner_width(box_width))
   end
 
   @doc """
@@ -142,299 +128,4 @@ defmodule MingaEditor.Agent.View.PromptRenderer do
     visible = InputWrap.visible_height(input_lines, inner_width, @max_input_lines)
     visible + 2
   end
-
-  # ── Private rendering ───────────────────────────────────────────────────────
-
-  @spec render_input_from_input(
-          RenderInput.t(),
-          non_neg_integer(),
-          non_neg_integer(),
-          pos_integer()
-        ) ::
-          [DisplayList.draw()]
-  defp render_input_from_input(input, row, col_off, width) do
-    at = Theme.agent_theme(input.theme)
-    panel = input.panel
-    border_style = Face.new(fg: at.input_border, bg: at.panel_bg)
-
-    is_empty = panel.input_lines == [""]
-    inner_width = input_inner_width(width)
-    total_visual = InputWrap.visual_line_count(panel.input_lines, inner_width)
-    visible_lines = max(min(total_visual, @max_input_lines), 1)
-
-    # Horizontal layout: borders plus a small text inset on each side.
-    pad_left = @input_pad_left
-    pad_right = @input_pad_right
-    left_pad = String.duplicate(" ", pad_left)
-    right_pad = String.duplicate(" ", pad_right)
-
-    # ── Top border: ╭─ Prompt ─────────── NORMAL ─╮
-    mode_tag = input_mode_label(panel)
-    label = "─ Prompt "
-    right_tag = if mode_tag != "", do: " " <> mode_tag <> " ─", else: ""
-    fill_len = max(width - 2 - String.length(label) - String.length(right_tag), 0)
-    top_line = "╭" <> label <> String.duplicate("─", fill_len) <> right_tag <> "╮"
-    top_cmd = DisplayList.draw(row, col_off, top_line, border_style)
-
-    # ── Content rows: │   text            │
-    content_start = row + 1
-
-    line_cmds =
-      if is_empty do
-        placeholder_text =
-          if panel.credentials_configured,
-            do: "Type a message, Enter to send",
-            else: "Type /auth <provider> <key> to get started"
-
-        placeholder = String.slice(placeholder_text, 0, inner_width)
-        padded = String.pad_trailing(placeholder, inner_width)
-        inner = left_pad <> padded <> right_pad
-        fill = String.pad_trailing(inner, max(width - 2, 0))
-
-        [
-          DisplayList.draw(content_start, col_off, "│" <> fill <> "│", Face.new(bg: at.input_bg)),
-          DisplayList.draw(content_start, col_off, "│", border_style),
-          DisplayList.draw(content_start, col_off + width - 1, "│", border_style),
-          DisplayList.draw(
-            content_start,
-            col_off + 1 + pad_left,
-            padded,
-            Face.new(fg: at.input_placeholder, bg: at.input_bg, italic: true)
-          )
-        ]
-      else
-        # Map logical cursor to visual row for scrolling
-        {cursor_visual, _} =
-          InputWrap.logical_to_visual(panel.input_lines, inner_width, panel.input_cursor)
-
-        scroll = InputWrap.scroll_offset(cursor_visual, visible_lines, total_visual)
-
-        # Build flat list of visual lines tagged with logical line index
-        visual_lines = InputWrap.wrap_lines(panel.input_lines, inner_width)
-
-        sel_range = vim_visual_range(panel)
-
-        chrome = %{
-          col_off: col_off,
-          inner_width: inner_width,
-          width: width,
-          left_pad: left_pad,
-          right_pad: right_pad,
-          pad_left: pad_left,
-          border_style: border_style,
-          input_bg: at.input_bg
-        }
-
-        visual_lines
-        |> Enum.drop(scroll)
-        |> Enum.take(visible_lines)
-        |> Enum.with_index()
-        |> Enum.flat_map(fn {{logical_idx, vl}, idx} ->
-          r = content_start + idx
-          line_text = Enum.at(panel.input_lines, logical_idx)
-
-          {display_text, fg_color} =
-            visual_row_display(vl, line_text, inner_width, panel, at)
-
-          render_input_row(r, display_text, fg_color, chrome, logical_idx, vl, sel_range)
-        end)
-      end
-
-    # ── Bottom border with model info: ╰─ 󰚩 model · provider ───╯
-    bottom_row = content_start + max(visible_lines, 1)
-    model_label = model_info_text(input)
-    model_prefix = "─ " <> model_label <> " "
-    model_fill_len = max(width - 2 - String.length(model_prefix), 0)
-    bottom_line = "╰" <> model_prefix <> String.duplicate("─", model_fill_len) <> "╯"
-    bottom_cmd = DisplayList.draw(bottom_row, col_off, bottom_line, border_style)
-
-    [top_cmd | line_cmds] ++ [bottom_cmd]
-  end
-
-  @spec model_info_text(RenderInput.t()) :: String.t()
-  defp model_info_text(%{panel: %{credentials_configured: false}}) do
-    "Not configured · /auth or /login"
-  end
-
-  defp model_info_text(%{agent_status: :tool_executing, active_tool_name: name})
-       when is_binary(name) and name != "" do
-    "⟳ #{name}"
-  end
-
-  defp model_info_text(%{agent_status: :thinking}) do
-    "⟳ thinking..."
-  end
-
-  defp model_info_text(input) do
-    panel = input.panel
-    model = panel.model_name |> AgentConfig.strip_provider_prefix() |> titleize()
-    provider = if panel.provider_name != "", do: " · #{titleize(panel.provider_name)}", else: ""
-    thinking = if panel.thinking_level != "", do: " · #{panel.thinking_level}", else: ""
-    "󰚩 #{model}#{provider}#{thinking}"
-  end
-
-  @spec titleize(String.t()) :: String.t()
-  defp titleize(str) do
-    str
-    |> String.split(~r/[-_\s]+/)
-    |> Enum.map_join(" ", fn word ->
-      {first, rest} = String.split_at(word, 1)
-      String.upcase(first) <> rest
-    end)
-  end
-
-  # Returns display text and color for a single visual row within a wrapped input.
-  # Paste placeholder lines show a compact indicator on their first visual row only.
-  # All other visual rows show their wrapped text segment.
-  @spec visual_row_display(
-          InputWrap.visual_line(),
-          String.t(),
-          pos_integer(),
-          RenderInput.panel_data(),
-          Theme.Agent.t()
-        ) :: {String.t(), Theme.color()}
-  defp visual_row_display(vl, line_text, inner_width, panel, at) do
-    if UIState.paste_placeholder?(line_text) and vl.col_offset == 0 do
-      input_line_display(line_text, inner_width, panel, at)
-    else
-      {vl.text, at.text_fg}
-    end
-  end
-
-  # Renders a single content row inside the input box with borders, padding,
-  # and optional visual selection highlighting.
-  @spec render_input_row(
-          non_neg_integer(),
-          String.t(),
-          Theme.color(),
-          map(),
-          non_neg_integer(),
-          InputWrap.visual_line(),
-          {{non_neg_integer(), non_neg_integer()}, {non_neg_integer(), non_neg_integer()}} | nil
-        ) :: [DisplayList.draw()]
-  defp render_input_row(row, display_text, fg_color, chrome, logical_idx, vl, sel_range) do
-    c = Map.get(chrome, :col_off, 0)
-    padded = String.pad_trailing(display_text, chrome.inner_width)
-    inner = chrome.left_pad <> padded <> chrome.right_pad
-    fill = String.pad_trailing(inner, max(chrome.width - 2, 0))
-    text_col = c + 1 + chrome.pad_left
-
-    base = [
-      DisplayList.draw(row, c, "│" <> fill <> "│", Face.new(bg: chrome.input_bg)),
-      DisplayList.draw(row, c, "│", chrome.border_style),
-      DisplayList.draw(row, c + chrome.width - 1, "│", chrome.border_style),
-      DisplayList.draw(row, text_col, padded, Face.new(fg: fg_color, bg: chrome.input_bg))
-    ]
-
-    case selection_slice(logical_idx, vl.col_offset, String.length(display_text), sel_range) do
-      nil ->
-        base
-
-      {sel_start, sel_len} ->
-        sel_text =
-          display_text
-          |> String.slice(sel_start, sel_len)
-          |> String.pad_trailing(sel_len)
-
-        base ++
-          [
-            DisplayList.draw(
-              row,
-              text_col + sel_start,
-              sel_text,
-              Face.new(fg: fg_color, bg: chrome.input_bg, reverse: true)
-            )
-          ]
-    end
-  end
-
-  # Returns {start_col, length} of the selected portion within a visual line,
-  # or nil if no overlap. All coordinates are grapheme-based.
-  @spec selection_slice(
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          {{non_neg_integer(), non_neg_integer()}, {non_neg_integer(), non_neg_integer()}} | nil
-        ) :: {non_neg_integer(), pos_integer()} | nil
-  defp selection_slice(_logical_idx, _col_offset, _text_len, nil), do: nil
-
-  defp selection_slice(logical_idx, _col_offset, _text_len, {{from_line, _}, {to_line, _}})
-       when logical_idx < from_line or logical_idx > to_line,
-       do: nil
-
-  defp selection_slice(
-         logical_idx,
-         col_offset,
-         text_len,
-         {{from_line, from_col}, {to_line, to_col}}
-       ) do
-    sel_start = if logical_idx == from_line, do: from_col, else: 0
-    sel_end = if logical_idx == to_line, do: to_col + 1, else: col_offset + text_len
-
-    # Clip to this visual line's column range
-    vis_start = max(sel_start - col_offset, 0)
-    vis_end = min(sel_end - col_offset, text_len)
-
-    if vis_end > vis_start, do: {vis_start, vis_end - vis_start}, else: nil
-  end
-
-  # Returns the display text and foreground color for a paste placeholder line.
-  @spec input_line_display(String.t(), pos_integer(), RenderInput.panel_data(), Theme.Agent.t()) ::
-          {String.t(), Theme.color()}
-  defp input_line_display(line_text, inner_width, panel, at) do
-    case UIState.paste_block_index(line_text) do
-      nil ->
-        {String.slice(line_text, 0, inner_width), at.text_fg}
-
-      block_index ->
-        line_count = paste_block_line_count(panel.pasted_blocks, block_index)
-        indicator = "󰆏 [pasted #{line_count} lines]"
-        {String.slice(indicator, 0, inner_width), at.hint_fg}
-    end
-  end
-
-  # Count lines in a paste block by index. Returns 0 if the index is invalid.
-  @spec paste_block_line_count([UIState.paste_block()], non_neg_integer()) ::
-          non_neg_integer()
-  defp paste_block_line_count(blocks, index) do
-    case Enum.at(blocks, index) do
-      %{text: text} -> text |> String.split("\n") |> length()
-      nil -> 0
-    end
-  end
-
-  # Visual selection range for the prompt input. Uses the editor's mode
-  # state (visual_start) when in visual mode, since the prompt uses the
-  # standard Mode FSM.
-  @spec vim_visual_range(map()) ::
-          {{non_neg_integer(), non_neg_integer()}, {non_neg_integer(), non_neg_integer()}} | nil
-  defp vim_visual_range(%{input_cursor: cursor, mode: mode, mode_state: mode_state})
-       when mode in [:visual, :visual_line] do
-    case mode_state do
-      %{visual_start: {vl, vc}} when is_integer(vl) ->
-        {from, to} = if {vl, vc} <= cursor, do: {{vl, vc}, cursor}, else: {cursor, {vl, vc}}
-
-        if mode == :visual_line do
-          {from_line, _} = from
-          {to_line, _} = to
-          {{from_line, 0}, {to_line, 999_999}}
-        else
-          {from, to}
-        end
-
-      _ ->
-        nil
-    end
-  end
-
-  defp vim_visual_range(_panel), do: nil
-
-  # Returns a mode label for the prompt border.
-  @spec input_mode_label(map()) :: String.t()
-  defp input_mode_label(%{mode: :insert}), do: ""
-  defp input_mode_label(%{mode: :normal}), do: "NORMAL"
-  defp input_mode_label(%{mode: :visual}), do: "VISUAL"
-  defp input_mode_label(%{mode: :visual_line}), do: "V-LINE"
-  defp input_mode_label(%{mode: :operator_pending}), do: "OP"
-  defp input_mode_label(_panel), do: ""
 end

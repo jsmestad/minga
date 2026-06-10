@@ -1,10 +1,16 @@
 defmodule MingaEditor.InlineEdit.Render do
   @moduledoc """
   Renders inline edits as transient block decorations.
+
+  This is the edit variant adapter over the shared
+  `MingaEditor.InlineOverlay.Render` framework: it supplies the
+  edit-specific spec (group, glyph, diff body, footer, faces) and the
+  store accessor, and delegates layout to the framework.
   """
 
   alias Minga.Core.Decorations
   alias Minga.Core.Face
+  alias MingaEditor.InlineOverlay.Render, as: Overlay
   alias MingaEditor.State.InlineEdit
 
   @group :inline_edit
@@ -14,46 +20,34 @@ defmodule MingaEditor.InlineEdit.Render do
   def merge_decorations(%Decorations{} = decorations, state, buffer_pid)
       when is_pid(buffer_pid) do
     edit = state |> inline_edits() |> InlineEdit.active(buffer_pid)
-
-    case edit do
-      %InlineEdit{} -> add_edit_block(decorations, edit)
-      nil -> decorations
-    end
+    Overlay.merge_decorations(decorations, edit, spec())
   end
 
   def merge_decorations(%Decorations{} = decorations, _state, _buffer_pid), do: decorations
 
-  @spec add_edit_block(Decorations.t(), InlineEdit.t()) :: Decorations.t()
-  defp add_edit_block(%Decorations{} = decorations, %InlineEdit{} = edit) do
-    {_id, decorations} =
-      Decorations.add_block_decoration(decorations, elem(edit.selection_range, 1),
-        placement: :below,
-        height: :dynamic,
-        priority: 1001,
-        group: @group,
-        render: fn width -> render_edit(edit, width) end
-      )
-
-    %{decorations | version: decorations.version + :erlang.phash2(edit)}
+  @spec spec() :: Overlay.spec()
+  defp spec do
+    %{
+      group: @group,
+      priority: 1001,
+      anchor_line: &elem(&1.selection_range, 1),
+      prompt_glyph: "✎ ",
+      prompt: & &1.prompt,
+      header: &InlineEdit.header/1,
+      input?: &(&1.status == :input),
+      body_lines: &body_lines/2,
+      footer: &footer_text/1,
+      face: &face/1
+    }
   end
 
-  @spec render_edit(InlineEdit.t(), pos_integer()) :: [[{String.t(), Face.t()}]]
-  defp render_edit(%InlineEdit{} = edit, width) do
-    content_width = max(width - 4, 10)
-    header = [line("╭─ " <> InlineEdit.header(edit), :header, width)]
-    prompt = [line("│ ✎ " <> edit.prompt <> prompt_cursor(edit), :input, width)]
-    body = body_lines(edit, content_width, width)
-    footer = [line(footer_text(edit), :help, width)]
-    header ++ prompt ++ body ++ footer
-  end
+  @spec body_lines(InlineEdit.t(), pos_integer()) :: [{String.t(), atom()}]
+  defp body_lines(%InlineEdit{status: :input}, _content_width), do: []
 
-  @spec body_lines(InlineEdit.t(), pos_integer(), pos_integer()) :: [[{String.t(), Face.t()}]]
-  defp body_lines(%InlineEdit{status: :input}, _content_width, _width), do: []
+  defp body_lines(%InlineEdit{status: :thinking}, _content_width),
+    do: [{"… thinking", :body}]
 
-  defp body_lines(%InlineEdit{status: :thinking}, _content_width, width),
-    do: [line("│ … thinking", :body, width)]
-
-  defp body_lines(%InlineEdit{} = edit, content_width, width) do
+  defp body_lines(%InlineEdit{} = edit, content_width) do
     removed = edit.original_text |> String.split("\n") |> Enum.map(&{"- " <> &1, :remove})
 
     added =
@@ -64,14 +58,8 @@ defmodule MingaEditor.InlineEdit.Render do
     (removed ++ added)
     |> Enum.drop(edit.scroll)
     |> Enum.take(10)
-    |> Enum.map(fn {text, face} ->
-      line("│ " <> String.slice(text, 0, content_width), face, width)
-    end)
+    |> Enum.map(fn {text, face} -> {String.slice(text, 0, content_width), face} end)
   end
-
-  @spec prompt_cursor(InlineEdit.t()) :: String.t()
-  defp prompt_cursor(%InlineEdit{status: :input}), do: "█"
-  defp prompt_cursor(%InlineEdit{}), do: ""
 
   @spec footer_text(InlineEdit.t()) :: String.t()
   defp footer_text(%InlineEdit{status: :input}), do: "╰─ Enter submit · Esc cancel"
@@ -82,9 +70,6 @@ defmodule MingaEditor.InlineEdit.Render do
   @spec status_face(InlineEdit.status()) :: atom()
   defp status_face(:error), do: :error
   defp status_face(_status), do: :add
-
-  @spec line(String.t(), atom(), pos_integer()) :: [{String.t(), Face.t()}]
-  defp line(text, kind, width), do: [{String.slice(text, 0, width), face(kind)}]
 
   @spec face(atom()) :: Face.t()
   defp face(:header), do: Face.new(fg: 0xC792EA, bold: true)
