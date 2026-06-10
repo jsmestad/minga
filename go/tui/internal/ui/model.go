@@ -420,9 +420,16 @@ func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cm
 // live model keeps the last committed frame, so View() never paints a partial.
 func (m *Model) invalidateStaging(cmds []tea.Cmd, reason string) []tea.Cmd {
 	m.staging = nil
-	m.resyncPending = true
 	fmt.Fprintf(os.Stderr, "minga: frame invalidated (%s), requesting keyframe from %d\n", reason, m.lastCommittedSeq)
-	m.send(protocol.EncodeRequestKeyframe(m.lastCommittedSeq))
+	// Debounce the keyframe request: after an invalidation, every stale
+	// in-flight frame also fails its base check (the BEAM advances
+	// base_frame_seq for frames we discarded), and re-requesting per frame
+	// would force a duplicate BEAM render each. One request per resync
+	// window; the pending flag clears when a valid commit applies.
+	if !m.resyncPending {
+		m.resyncPending = true
+		m.send(protocol.EncodeRequestKeyframe(m.lastCommittedSeq))
+	}
 	return cmds
 }
 

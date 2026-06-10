@@ -57,7 +57,37 @@ func applyTo(t *testing.T, model Model, commands ...protocol.Command) Model {
 	return updated.(Model)
 }
 
+// Stale in-flight frames after an invalidation each fail their base check,
+// but only the FIRST invalidation sends request_keyframe; the rest discard
+// silently until a valid commit clears the pending flag (#2266 review).
+func TestInvalidationDebouncesKeyframeRequests(t *testing.T) {
+	out := make(chan []byte, 8)
+	m := New(80, 24, out)
+
+	// First invalidation: commit with no open transaction.
+	m = applyTo(t, m, commitFrame(7))
+	if seqs := drainKeyframeRequests(t, out); len(seqs) != 1 {
+		t.Fatalf("first invalidation should send one request_keyframe, got %d", len(seqs))
+	}
+
+	// Stale in-flight frame: base mismatch while resync is already pending.
+	m = applyTo(t, m, beginFrame(8, 7), windowRowsCommand(1, "stale"), commitFrame(8))
+	if seqs := drainKeyframeRequests(t, out); len(seqs) != 0 {
+		t.Fatalf("pending resync must not re-request, got %d", len(seqs))
+	}
+
+	// The keyframe arrives and commits: pending clears, content applies.
+	m = applyTo(t, m, beginFrame(9, 0), windowRowsCommand(1, "fresh"), commitFrame(9))
+	if m.resyncPending {
+		t.Fatal("valid commit should clear resyncPending")
+	}
+	if !strings.Contains(renderedBody(m), "fresh") {
+		t.Fatal("keyframe content should render after commit")
+	}
+}
+
 // AC-3: a begin + partial content leaves View() output unchanged until commit.
+
 func TestStagingDoesNotPaintBeforeCommit(t *testing.T) {
 	out := make(chan []byte, 16)
 	model := New(40, 8, out)
