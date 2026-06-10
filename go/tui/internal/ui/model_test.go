@@ -15,6 +15,18 @@ import (
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 )
 
+// frame wraps semantic/chrome commands in a keyframe transaction (#2219):
+// begin_frame(seq=1, base=0) ++ commands ++ commit_frame(seq=1). Under the
+// staged model nothing applies until commit, so tests that exercise the live
+// effect of a command must deliver it inside a transaction.
+func frame(commands ...protocol.Command) []protocol.Command {
+	out := make([]protocol.Command, 0, len(commands)+2)
+	out = append(out, protocol.Command{Kind: protocol.CommandBeginFrame, FrameSeq: 1, BaseFrameSeq: 0})
+	out = append(out, commands...)
+	out = append(out, protocol.Command{Kind: protocol.CommandCommitFrame, FrameSeq: 1})
+	return out
+}
+
 func TestFloatingPickerRendersOverEditorAndSuppressesFooterOverlays(t *testing.T) {
 	model := New(80, 24, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
@@ -129,13 +141,13 @@ func TestWhichKeyStylesGroupsAndLimitsColumnCount(t *testing.T) {
 
 func TestExtensionRuntimeEnvelopeIsStoredAndSurfacedInFooter(t *testing.T) {
 	model := New(80, 24, nil)
-	updated, _ := model.Update(port.PacketMsg{Commands: []protocol.Command{
-		{Kind: protocol.CommandExtensionRuntime, ExtensionRuntime: protocol.ExtensionRuntimePayload{
+	updated, _ := model.Update(port.PacketMsg{Commands: frame(
+		protocol.Command{Kind: protocol.CommandExtensionRuntime, ExtensionRuntime: protocol.ExtensionRuntimePayload{
 			ExtensionID: "acme.lint",
 			Channel:     "pane",
 			Payload:     []byte{0x01, 0x02, 0x03},
 		}},
-	}})
+	)})
 	model = updated.(Model)
 
 	stored, ok := model.extensionRuntimes["acme.lint"]
@@ -154,11 +166,11 @@ func TestExtensionRuntimeEnvelopeIsStoredAndSurfacedInFooter(t *testing.T) {
 
 func TestExtensionRuntimeLatestEnvelopeWinsAndIdsAreSortedDeterministically(t *testing.T) {
 	model := New(80, 24, nil)
-	updated, _ := model.Update(port.PacketMsg{Commands: []protocol.Command{
-		{Kind: protocol.CommandExtensionRuntime, ExtensionRuntime: protocol.ExtensionRuntimePayload{ExtensionID: "zeta", Channel: "a", Payload: []byte{0x01}}},
-		{Kind: protocol.CommandExtensionRuntime, ExtensionRuntime: protocol.ExtensionRuntimePayload{ExtensionID: "alpha", Channel: "b", Payload: []byte{0x02}}},
-		{Kind: protocol.CommandExtensionRuntime, ExtensionRuntime: protocol.ExtensionRuntimePayload{ExtensionID: "zeta", Channel: "c", Payload: []byte{0x09}}},
-	}})
+	updated, _ := model.Update(port.PacketMsg{Commands: frame(
+		protocol.Command{Kind: protocol.CommandExtensionRuntime, ExtensionRuntime: protocol.ExtensionRuntimePayload{ExtensionID: "zeta", Channel: "a", Payload: []byte{0x01}}},
+		protocol.Command{Kind: protocol.CommandExtensionRuntime, ExtensionRuntime: protocol.ExtensionRuntimePayload{ExtensionID: "alpha", Channel: "b", Payload: []byte{0x02}}},
+		protocol.Command{Kind: protocol.CommandExtensionRuntime, ExtensionRuntime: protocol.ExtensionRuntimePayload{ExtensionID: "zeta", Channel: "c", Payload: []byte{0x09}}},
+	)})
 	model = updated.(Model)
 
 	if got := model.extensionRuntimes["zeta"]; got.Channel != "c" || !bytes.Equal(got.Payload, []byte{0x09}) {
@@ -184,16 +196,18 @@ func TestProtocolErrorRendersBlockingSurfaceAndTakesPrecedence(t *testing.T) {
 	model := New(80, 24, nil)
 	// Seed normal content so the test proves the error surface takes precedence
 	// over it rather than only rendering on a blank model.
-	updated, _ := model.Update(port.PacketMsg{Commands: []protocol.Command{
-		{Kind: protocol.CommandSetTitle, Title: "editor"},
-		{Kind: protocol.CommandWindowContent, Window: protocol.WindowContent{
+	updated, _ := model.Update(port.PacketMsg{Commands: frame(
+		protocol.Command{Kind: protocol.CommandSetTitle, Title: "editor"},
+		protocol.Command{Kind: protocol.CommandWindowContent, Window: protocol.WindowContent{
 			ID:   1,
 			Rows: []protocol.WindowRow{{Text: "normal editor content"}},
 		}},
-	}})
+	)})
 	model = updated.(Model)
 
 	message := "protocol_version mismatch: frontend 1, beam 2"
+	// protocol_error is out-of-band: it arrives with no open transaction and
+	// latches directly.
 	updated, _ = model.Update(port.PacketMsg{Commands: []protocol.Command{
 		{Kind: protocol.CommandProtocolError, ProtocolError: message},
 	}})
@@ -561,7 +575,7 @@ func TestCursorShapeSequenceTracksProtocolShape(t *testing.T) {
 
 func TestThemeCommandUpdatesModelPalette(t *testing.T) {
 	model := New(20, 4, nil)
-	_ = model.applyCommands([]protocol.Command{{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiTheme, Theme: protocol.Theme{Colors: map[byte]uint32{themeEditorBG: 0x010203, themeSelectionBG: 0x112233}}}}})
+	_ = model.applyCommands(frame(protocol.Command{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiTheme, Theme: protocol.Theme{Colors: map[byte]uint32{themeEditorBG: 0x010203, themeSelectionBG: 0x112233}}}}))
 
 	if got := model.activePalette.colors[themeEditorBG]; got != 0x010203 {
 		t.Fatalf("editor background slot = 0x%06X, want 0x010203", got)
@@ -874,7 +888,7 @@ func TestLegacyCursorlineAppliesToCellFallback(t *testing.T) {
 
 func TestApplyCommandsStoresIndentGuidesByWindow(t *testing.T) {
 	model := New(30, 6, nil)
-	_ = model.applyCommands([]protocol.Command{{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiIndentGuides, IndentGuides: protocol.IndentGuides{WindowID: 7, TabWidth: 2, GuideCols: []uint16{2}, IndentLevels: []byte{2}}}}})
+	_ = model.applyCommands(frame(protocol.Command{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiIndentGuides, IndentGuides: protocol.IndentGuides{WindowID: 7, TabWidth: 2, GuideCols: []uint16{2}, IndentLevels: []byte{2}}}}))
 
 	guides, ok := model.indentGuides[7]
 	if !ok || len(guides.GuideCols) != 1 || guides.GuideCols[0] != 2 {
@@ -895,10 +909,10 @@ func TestFileTreeSelectionUpdatesExistingTree(t *testing.T) {
 
 func TestApplyCommandsStoresSemanticGuttersByWindow(t *testing.T) {
 	model := New(30, 6, nil)
-	_ = model.applyCommands([]protocol.Command{
-		{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiGutter, WindowGutter: protocol.Gutter{WindowID: 1, LineNumberWidth: 3, Entries: []protocol.GutterEntry{{BufferLine: 0}}}}},
-		{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiGutter, WindowGutter: protocol.Gutter{WindowID: 2, LineNumberWidth: 3, Entries: []protocol.GutterEntry{{BufferLine: 9}}}}},
-	})
+	_ = model.applyCommands(frame(
+		protocol.Command{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiGutter, WindowGutter: protocol.Gutter{WindowID: 1, LineNumberWidth: 3, Entries: []protocol.GutterEntry{{BufferLine: 0}}}}},
+		protocol.Command{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiGutter, WindowGutter: protocol.Gutter{WindowID: 2, LineNumberWidth: 3, Entries: []protocol.GutterEntry{{BufferLine: 9}}}}},
+	))
 
 	first, firstOK := model.windowGutter(1)
 	second, secondOK := model.windowGutter(2)
@@ -1252,7 +1266,7 @@ func TestBottomPanelChromeUpdateClampsAndResetsScrollback(t *testing.T) {
 
 		shrunk := panel
 		shrunk.Messages = shrunk.Messages[:4]
-		updated, _ := model.Update(port.PacketMsg{Commands: []protocol.Command{{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiBottomPanel, Bottom: shrunk}}}})
+		updated, _ := model.Update(port.PacketMsg{Commands: frame(protocol.Command{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiBottomPanel, Bottom: shrunk}})})
 		got := updated.(Model)
 
 		if got.bottomPanelScrollback != 1 {
@@ -1266,7 +1280,7 @@ func TestBottomPanelChromeUpdateClampsAndResetsScrollback(t *testing.T) {
 
 		hidden := panel
 		hidden.Visible = false
-		updated, _ := model.Update(port.PacketMsg{Commands: []protocol.Command{{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiBottomPanel, Bottom: hidden}}}})
+		updated, _ := model.Update(port.PacketMsg{Commands: frame(protocol.Command{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiBottomPanel, Bottom: hidden}})})
 		got := updated.(Model)
 
 		if got.bottomPanelScrollback != 0 {

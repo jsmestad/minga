@@ -11,12 +11,13 @@ type CommandKind int
 
 const (
 	CommandNoop CommandKind = iota
-	// CommandBeginFrame opens a frame transaction (#2219). The frontend decodes it
-	// but ignores base_frame_seq for now (staging is children C/D).
+	// CommandBeginFrame opens a frame transaction (#2219). The frontend opens a
+	// staging buffer keyed by frame_seq/base_frame_seq and accumulates the
+	// transaction's commands until commit_frame.
 	CommandBeginFrame
 	// CommandCommitFrame closes a frame transaction (#2219), carrying the echoed
-	// input correlation sequence formerly on batch_end. The frontend gates the frame
-	// and resolves keystroke latency on it.
+	// input correlation sequence (input_seq). The frontend gates the frame and
+	// resolves keystroke latency on it.
 	CommandCommitFrame
 	CommandSetCursorShape
 	CommandSetTitle
@@ -27,21 +28,28 @@ const (
 	CommandClipboardWrite
 	CommandExtensionRuntime
 	CommandProtocolError
+	// CommandStreamError is a synthetic, in-band marker the reader injects when a
+	// command in a batch cannot be sized or decoded (#2219). It carries no wire
+	// payload; the model treats it as a transaction invalidation when a frame
+	// transaction is open, so a partial/garbled frame triggers request_keyframe
+	// instead of warn-and-continue swallowing the rest of the open transaction.
+	CommandStreamError
 )
 
 type Command struct {
 	Kind CommandKind
 	Size int
 	// FrameSeq is the strictly monotonic global frame sequence carried by both
-	// begin_frame and commit_frame (#2219). It is ignored for rendering today;
-	// staging/resync that consumes it lands in children C/D.
+	// begin_frame and commit_frame (#2219). The staging buffer matches a commit's
+	// FrameSeq against the open begin's to validate the transaction.
 	FrameSeq uint32
 	// BaseFrameSeq is the frame a begin_frame transaction's deltas assume; 0 means
-	// keyframe (#2219). Ignored for now.
+	// keyframe (#2219). A non-zero base must equal the last committed frame_seq or
+	// the transaction is invalidated.
 	BaseFrameSeq uint32
-	// BatchSeq is the echoed input correlation sequence carried by a
-	// CommandCommitFrame (ticket #2215; formerly batch_end). 0 means "no correlation".
-	BatchSeq         uint32
+	// InputSeq is the echoed input correlation sequence carried by a
+	// CommandCommitFrame (ticket #2215, wire field input_seq). 0 means "no correlation".
+	InputSeq         uint32
 	CursorShape      byte
 	Title            string
 	WindowBg         uint32
@@ -172,7 +180,7 @@ func DecodeCommand(payload []byte) (Command, error) {
 	case generated.OPCommitFrame:
 		// commit_frame closes a frame transaction (#2219): <opcode, frame_seq:u32,
 		// input_seq:u32>. input_seq is the echoed input correlation sequence
-		// (ticket #2215, formerly carried by batch_end).
+		// (ticket #2215).
 		if len(payload) < 9 {
 			return Command{}, fmt.Errorf("short commit_frame")
 		}
@@ -180,7 +188,7 @@ func DecodeCommand(payload []byte) (Command, error) {
 			Kind:     CommandCommitFrame,
 			Size:     9,
 			FrameSeq: binary.BigEndian.Uint32(payload[1:5]),
-			BatchSeq: binary.BigEndian.Uint32(payload[5:9]),
+			InputSeq: binary.BigEndian.Uint32(payload[5:9]),
 		}, nil
 	case generated.OPSetCursorShape:
 		if len(payload) < 2 {

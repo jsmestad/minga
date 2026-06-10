@@ -80,6 +80,38 @@ type Model struct {
 	// (width/height). Caching avoids recomputing headerLines inconsistently per
 	// mouse event (ticket #2256).
 	renderedHeaderHeight int
+	// staging holds the open frame transaction (#2219). It is non-nil only
+	// between a begin_frame and its commit_frame: semantic/chrome commands
+	// accumulate here instead of mutating the live model, so View() never paints
+	// a partially-applied frame. commit_frame validates seq/base and replays the
+	// buffer through the live per-command mutation switch in one shot; any
+	// invalidation discards it. nil between commits means the live model is the
+	// last cleanly committed frame.
+	staging *frameStaging
+	// lastCommittedSeq is the frame_seq of the most recently committed (applied)
+	// transaction. It validates a delta transaction's base_frame_seq and is the
+	// last_good_frame_seq carried by request_keyframe. 0 means no frame committed
+	// yet (only a base-0 keyframe is valid until then).
+	lastCommittedSeq uint32
+	// resyncPending is set when the model discarded a transaction and asked the
+	// BEAM for a keyframe (#2219). It drives a subtle footer indicator while the
+	// frontend waits, and clears when a valid commit applies.
+	resyncPending bool
+}
+
+// frameStaging is the open frame transaction buffer (#2219). It lives only
+// between begin_frame and commit_frame. Memory is one frame's worth of decoded
+// commands (the same commands the model would otherwise apply immediately);
+// it is released at commit or discard, so nothing accumulates between frames.
+type frameStaging struct {
+	// seq is the begin_frame's frame_seq; commit_frame must echo it.
+	seq uint32
+	// base is the begin_frame's base_frame_seq; 0 means keyframe (always valid),
+	// otherwise it must equal lastCommittedSeq.
+	base uint32
+	// commands are the buffered semantic/chrome commands in arrival order,
+	// replayed through the live mutation switch at a valid commit.
+	commands []protocol.Command
 }
 
 func New(width, height uint16, out chan<- []byte) Model {
@@ -283,59 +315,154 @@ func (m Model) cursorStyleSequence() string {
 	}
 }
 
+// applyCommands routes a decoded batch through the frame-transaction state
+// machine (#2219). begin_frame opens a staging buffer; semantic/chrome commands
+// accumulate in it without touching the live model; commit_frame validates and
+// replays the buffer atomically. Out-of-band commands (set_title/set_window_bg
+// side channels, protocol_error, transport survivors) apply directly with no
+// open transaction; the same command inside a transaction stages and applies at
+// commit. A semantic/chrome command with NO open transaction, or any stream
+// error / invalidation, is a protocol violation under the staged model and
+// triggers request_keyframe instead of a partial paint.
 func (m *Model) applyCommands(commands []protocol.Command) tea.Cmd {
 	cmds := make([]tea.Cmd, 0, 1)
 	for _, command := range commands {
 		switch command.Kind {
 		case protocol.CommandBeginFrame:
-			// begin_frame opens a frame transaction (#2219). The frontend still
-			// presents one packet per frame, so the marker is decoded and ignored;
-			// staging on begin/commit lands in child C.
+			if m.staging != nil {
+				// A new begin while one is open means the prior transaction was
+				// truncated before its commit. Discard it and resync (#2219).
+				cmds = m.invalidateStaging(cmds, "truncated frame transaction (begin while open)")
+			}
+			m.staging = &frameStaging{
+				seq:      command.FrameSeq,
+				base:     command.BaseFrameSeq,
+				commands: make([]protocol.Command, 0, 16),
+			}
 		case protocol.CommandCommitFrame:
-			// commit_frame closes the frame transaction (#2219). The frame is now
-			// fully applied and about to be written to the terminal; resolve the
-			// keystroke-to-write latency sample for the echoed correlation sequence
-			// (ticket #2215, formerly resolved on batch_end).
-			m.latency.Resolve(command.BatchSeq)
-		case protocol.CommandSetCursorShape:
-			m.cursorShape = command.CursorShape
-		case protocol.CommandSetTitle:
-			m.title = command.Title
-		case protocol.CommandSetWindowBg:
-			m.bg = command.WindowBg
-		case protocol.CommandWindowContent:
-			m.putWindow(command.Window)
-		case protocol.CommandWindowDelta:
-			m.applyWindowDelta(command.Window)
-		case protocol.CommandClipboardWrite:
-			m.pendingClipboard = command.ClipboardText
-		case protocol.CommandExtensionRuntime:
-			m.applyExtensionRuntime(command.ExtensionRuntime)
+			cmds = m.commitStaging(cmds, command)
+		case protocol.CommandStreamError:
+			// The reader hit a sizing/decode failure: byte boundaries inside an
+			// open transaction are no longer trustworthy, so abort it and resync.
+			// Out of band it is harmless (warned already), so only act when staging.
+			if m.staging != nil {
+				cmds = m.invalidateStaging(cmds, "stream error inside open frame transaction")
+			}
 		case protocol.CommandProtocolError:
-			// The BEAM rejected this frontend's handshake protocol_version. Log
-			// to stderr and latch the reason so View renders a blocking error
-			// surface instead of leaving a blank screen (ticket #2237).
+			// Out-of-band by design (#2219): the BEAM rejected this frontend's
+			// handshake protocol_version, so it never enters a transaction. Latch
+			// the reason so View renders a blocking error surface (ticket #2237).
 			m.protocolError = command.ProtocolError
 			fmt.Fprintf(os.Stderr, "minga: protocol error: %s\n", command.ProtocolError)
-		case protocol.CommandChrome:
-			m.chrome[command.Chrome.Opcode] = command.Chrome
-			switch command.Chrome.Opcode {
-			case generated.OPGuiTheme:
-				m.activePalette = paletteFromTheme(command.Chrome.Theme)
-			case generated.OPGuiCursorline:
-				m.cursorlineChrome = command.Chrome.CursorlineChrome
-			case generated.OPGuiGutter:
-				m.gutters[command.Chrome.WindowGutter.WindowID] = command.Chrome.WindowGutter
-			case generated.OPGuiIndentGuides:
-				m.indentGuides[command.Chrome.IndentGuides.WindowID] = command.Chrome.IndentGuides
-			case generated.OPGuiFileTreeSelection:
-				m.applyFileTreeSelection(command.Chrome.FileTreeSelection)
-			case generated.OPGuiBottomPanel:
-				m.clampBottomPanelScrollback(command.Chrome.Bottom)
+		case protocol.CommandSetTitle, protocol.CommandSetWindowBg:
+			// Sanctioned out-of-band side channels (emit.ex send_title/
+			// send_window_bg write these outside the begin/commit bracket). If one
+			// arrives inside an open transaction it still stages so the swap stays
+			// atomic; outside one it applies directly.
+			if m.staging != nil {
+				m.staging.commands = append(m.staging.commands, command)
+			} else {
+				m.applyMutation(command)
 			}
+		default:
+			// Semantic/chrome commands. These are only legitimate inside a
+			// transaction. Outside one they are a protocol violation under the
+			// staged model, so resync rather than partially paint (#2219).
+			if m.staging == nil {
+				cmds = m.invalidateStaging(cmds, "semantic command outside frame transaction")
+				continue
+			}
+			m.staging.commands = append(m.staging.commands, command)
 		}
 	}
 	return tea.Batch(cmds...)
+}
+
+// commitStaging validates the open transaction against the commit and, if valid,
+// replays its buffered commands through the live mutation switch in one shot,
+// then fires the commit-gated behaviors (latency resolve). An invalid or missing
+// transaction discards staging and requests a keyframe (#2219).
+func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cmd {
+	if m.staging == nil {
+		// commit with no open begin: the begin was lost or truncated. Resync.
+		return m.invalidateStaging(cmds, "commit_frame with no open transaction")
+	}
+	if command.FrameSeq != m.staging.seq {
+		return m.invalidateStaging(cmds, "commit_frame seq mismatch")
+	}
+	// base 0 is a keyframe and always valid; a non-zero base must match the last
+	// committed frame_seq, otherwise this delta assumes a frame we never applied.
+	if m.staging.base != 0 && m.staging.base != m.lastCommittedSeq {
+		return m.invalidateStaging(cmds, "frame base mismatch")
+	}
+
+	// Valid: replay the buffer atomically through the live mutation path.
+	for _, staged := range m.staging.commands {
+		m.applyMutation(staged)
+	}
+	m.lastCommittedSeq = m.staging.seq
+	m.staging = nil
+	// A clean commit clears any pending resync indicator: the frontend is back
+	// in sync with the BEAM (#2219).
+	m.resyncPending = false
+
+	// Commit-gated behaviors: the frame is fully applied and about to be written
+	// to the terminal, so resolve the keystroke-to-write latency sample now for
+	// the echoed correlation sequence (ticket #2215, resolved on commit).
+	m.latency.Resolve(command.InputSeq)
+	return cmds
+}
+
+// invalidateStaging discards any open transaction and emits a request_keyframe
+// carrying the last cleanly committed frame_seq (#2219). It is the single sink
+// for every invalidation: truncation, seq mismatch, base mismatch, a stream
+// error inside a transaction, and an out-of-transaction semantic command. The
+// live model keeps the last committed frame, so View() never paints a partial.
+func (m *Model) invalidateStaging(cmds []tea.Cmd, reason string) []tea.Cmd {
+	m.staging = nil
+	m.resyncPending = true
+	fmt.Fprintf(os.Stderr, "minga: frame invalidated (%s), requesting keyframe from %d\n", reason, m.lastCommittedSeq)
+	m.send(protocol.EncodeRequestKeyframe(m.lastCommittedSeq))
+	return cmds
+}
+
+// applyMutation runs a single command through the live per-command mutation
+// switch (#2219). It is the ONE mutation path: both a committed transaction's
+// replay and an out-of-band side-channel write go through here, so there is no
+// shadow Model and no forked mutators.
+func (m *Model) applyMutation(command protocol.Command) {
+	switch command.Kind {
+	case protocol.CommandSetCursorShape:
+		m.cursorShape = command.CursorShape
+	case protocol.CommandSetTitle:
+		m.title = command.Title
+	case protocol.CommandSetWindowBg:
+		m.bg = command.WindowBg
+	case protocol.CommandWindowContent:
+		m.putWindow(command.Window)
+	case protocol.CommandWindowDelta:
+		m.applyWindowDelta(command.Window)
+	case protocol.CommandClipboardWrite:
+		m.pendingClipboard = command.ClipboardText
+	case protocol.CommandExtensionRuntime:
+		m.applyExtensionRuntime(command.ExtensionRuntime)
+	case protocol.CommandChrome:
+		m.chrome[command.Chrome.Opcode] = command.Chrome
+		switch command.Chrome.Opcode {
+		case generated.OPGuiTheme:
+			m.activePalette = paletteFromTheme(command.Chrome.Theme)
+		case generated.OPGuiCursorline:
+			m.cursorlineChrome = command.Chrome.CursorlineChrome
+		case generated.OPGuiGutter:
+			m.gutters[command.Chrome.WindowGutter.WindowID] = command.Chrome.WindowGutter
+		case generated.OPGuiIndentGuides:
+			m.indentGuides[command.Chrome.IndentGuides.WindowID] = command.Chrome.IndentGuides
+		case generated.OPGuiFileTreeSelection:
+			m.applyFileTreeSelection(command.Chrome.FileTreeSelection)
+		case generated.OPGuiBottomPanel:
+			m.clampBottomPanelScrollback(command.Chrome.Bottom)
+		}
+	}
 }
 
 // applyExtensionRuntime stores the latest gui_extension_runtime (0xA3) envelope
