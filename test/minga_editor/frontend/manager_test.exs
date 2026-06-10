@@ -73,7 +73,7 @@ defmodule MingaEditor.Frontend.ManagerTest do
 
       send_port_data(pid, nil, <<0x01, ?h::32, 0::8>>)
 
-      assert_receive {:minga_input, {:key_press, ?h, 0}}
+      assert_receive {:minga_input, {:key_press, ?h, 0, 0}}
     end
 
     test "duplicate subscriptions receive one copy of each event" do
@@ -254,7 +254,7 @@ defmodule MingaEditor.Frontend.ManagerTest do
 
       send_port_data(pid, fake_port, <<0x01, ?j::32, 0::8>>)
 
-      assert_receive {:minga_input, {:key_press, ?j, 0}}
+      assert_receive {:minga_input, {:key_press, ?j, 0, 0}}
     end
 
     test "EOF on connected port clears ready state" do

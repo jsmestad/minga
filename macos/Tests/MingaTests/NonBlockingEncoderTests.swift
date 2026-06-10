@@ -130,6 +130,8 @@ struct NonBlockingEncoderTests {
         let raw = pipe.fileHandleForReading.readDataToEndOfFile()
         let frames = parseFrames(raw)
         #expect(frames?.count == 200)
-        #expect(frames?.allSatisfy { $0.count == 6 && $0.first == OP_KEY_PRESS } == true)
+        // Key press frames are 10 bytes: opcode + codepoint(4) + modifiers(1) +
+        // correlation sequence(4) (ticket #2215).
+        #expect(frames?.allSatisfy { $0.count == 10 && $0.first == OP_KEY_PRESS } == true)
     }
 }

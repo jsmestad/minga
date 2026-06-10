@@ -44,7 +44,9 @@ defmodule MingaEditor.Frontend.EmitTest do
       refute match?([<<0x12>> | _], commands)
       assert [<<first_opcode, _::binary>> | _] = commands
       assert first_opcode >= 0x70
-      assert List.last(commands) == <<Opcodes.batch_end()>>
+      # batch_end now carries the echoed input correlation sequence (ticket
+      # #2215): <opcode, seq::32>. With no key seq in scope the echo is 0.
+      assert List.last(commands) == <<Opcodes.batch_end(), 0::32>>
     end
 
     test "GUI path produces commands (no clear expected for GUI with to_commands)" do

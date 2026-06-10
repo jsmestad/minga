@@ -134,7 +134,11 @@ defmodule MingaEditor.State do
             shell_state_stash: %{},
             keystroke_history: KeystrokeHistory.new(),
             git_commit_gen_ref: nil,
-            font_size_override: nil
+            font_size_override: nil,
+            # Latest frontend-originated input correlation sequence (ticket #2215).
+            # Echoed back on batch_end so the frontend can resolve a
+            # keystroke-to-write latency sample. 0 means "no correlation".
+            last_input_seq: 0
 
   @type backend :: :tui | :gui | :native_gui | :headless
 
@@ -183,7 +187,8 @@ defmodule MingaEditor.State do
           shell_state_stash: shell_state_stash(),
           keystroke_history: KeystrokeHistory.t(),
           git_commit_gen_ref: reference() | nil,
-          font_size_override: pos_integer() | nil
+          font_size_override: pos_integer() | nil,
+          last_input_seq: non_neg_integer()
         }
 
   @doc "Returns the active sidebar registry table for this state."

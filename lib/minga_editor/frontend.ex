@@ -74,10 +74,15 @@ defmodule MingaEditor.Frontend do
   @spec default_capabilities() :: MingaEditor.Frontend.Capabilities.t()
   defdelegate default_capabilities, to: MingaEditor.Frontend.Capabilities, as: :default
 
-  @doc "Sends a batch-end marker to the frontend."
-  @spec send_batch_end(GenServer.server()) :: :ok
-  def send_batch_end(port) do
-    send_commands(port, [Protocol.encode_batch_end()])
+  @doc """
+  Sends a batch-end marker to the frontend.
+
+  `seq` is the echoed input correlation sequence (ticket #2215); it defaults to
+  `0` ("no correlation") for callers that emit a bare frame boundary.
+  """
+  @spec send_batch_end(GenServer.server(), non_neg_integer()) :: :ok
+  def send_batch_end(port, seq \\ 0) do
+    send_commands(port, [Protocol.encode_batch_end(seq)])
   end
 
   # ── Configuration ────────────────────────────────────────────────────────

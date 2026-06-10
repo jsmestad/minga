@@ -47,20 +47,28 @@ defmodule MingaEditor.Frontend.Emit do
 
     caches = %{caches | adapter_gui_caches: encoded_frame.caches}
 
+    # Echo the latest input correlation sequence on batch_end (ticket #2215) so
+    # the frontend can resolve a keystroke-to-write latency sample.
+    input_seq = Map.get(ctx, :last_input_seq, 0)
+
     commands =
       flush_font_registration_commands() ++
         encoded_frame.metal_commands ++
-        encoded_frame.chrome_commands ++ [Protocol.encode_batch_end()]
+        encoded_frame.chrome_commands ++ [Protocol.encode_batch_end(input_seq)]
 
     caches = update_tracking(ctx, caches)
     byte_count = IO.iodata_length(commands)
 
-    Telemetry.span([:minga, :render, :emit_prepare], %{byte_count: byte_count}, fn ->
-      MingaEditor.Frontend.send_render_commands(ctx.port_manager, commands)
-      caches = send_title(render_model, caches)
-      caches = send_window_bg(render_model, caches)
-      caches
-    end)
+    Telemetry.span(
+      [:minga, :render, :emit_prepare],
+      %{byte_count: byte_count, input_seq: input_seq},
+      fn ->
+        MingaEditor.Frontend.send_render_commands(ctx.port_manager, commands)
+        caches = send_title(render_model, caches)
+        caches = send_window_bg(render_model, caches)
+        caches
+      end
+    )
   end
 
   @spec adapter_encode_metadata(Minga.Frontend.Adapter.GUI.EncodedFrame.metrics()) :: map()

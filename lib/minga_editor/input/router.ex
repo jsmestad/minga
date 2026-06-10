@@ -302,7 +302,7 @@ defmodule MingaEditor.Input.Router do
   defp maybe_render(state, buf_version_before) do
     if Editing.mode(state) == :operator_pending and
          buffer_version(state) == buf_version_before do
-      MingaEditor.Frontend.send_batch_end(state.port_manager)
+      MingaEditor.Frontend.send_batch_end(state.port_manager, state.last_input_seq)
       state
     else
       MingaEditor.do_render(state)

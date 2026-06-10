@@ -13,6 +13,10 @@ import Foundation
 protocol InputEncoder: AnyObject, Sendable {
     func sendReady(cols: UInt16, rows: UInt16)
     func sendKeyPress(codepoint: UInt32, modifiers: UInt8)
+    /// Send a key press carrying the latency correlation sequence (ticket
+    /// #2215). The BEAM echoes the sequence on batch_end so a keystroke-to-
+    /// present sample can be resolved.
+    func sendKeyPress(codepoint: UInt32, modifiers: UInt8, seq: UInt32)
     func sendResize(cols: UInt16, rows: UInt16)
     func sendMouseEvent(row: Int16, col: Int16, button: UInt8, modifiers: UInt8, eventType: UInt8, clickCount: UInt8)
     func sendPasteEvent(text: String)
@@ -142,6 +146,13 @@ extension InputEncoder {
     /// Convenience: send a mouse event with click count defaulting to 1.
     func sendMouseEvent(row: Int16, col: Int16, button: UInt8, modifiers: UInt8, eventType: UInt8) {
         sendMouseEvent(row: row, col: col, button: button, modifiers: modifiers, eventType: eventType, clickCount: 1)
+    }
+
+    /// Default: forward to the sequence-less encoder so existing test spies and
+    /// alternate conformers do not need to implement latency stamping (ticket
+    /// #2215). `ProtocolEncoder` overrides this to append the sequence on the wire.
+    func sendKeyPress(codepoint: UInt32, modifiers: UInt8, seq: UInt32) {
+        sendKeyPress(codepoint: codepoint, modifiers: modifiers)
     }
 
     /// Default no-op so existing test spies do not need to implement settings actions.
@@ -280,12 +291,19 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         writeFrame(buf)
     }
 
-    /// Send a key press event.
+    /// Send a key press event without a latency correlation sequence.
     func sendKeyPress(codepoint: UInt32, modifiers: UInt8) {
-        var buf = Data(count: 6)
+        sendKeyPress(codepoint: codepoint, modifiers: modifiers, seq: 0)
+    }
+
+    /// Send a key press event carrying a u32 latency correlation sequence
+    /// (ticket #2215) appended after the modifiers byte.
+    func sendKeyPress(codepoint: UInt32, modifiers: UInt8, seq: UInt32) {
+        var buf = Data(count: 10)
         buf[0] = OP_KEY_PRESS
         writeU32(&buf, 1, codepoint)
         buf[5] = modifiers
+        writeU32(&buf, 6, seq)
         writeFrame(buf)
     }
 

@@ -10,7 +10,7 @@ defmodule MingaEditor.Frontend.Protocol do
 
   | Opcode | Name        | Payload                                                     |
   |--------|-------------|-------------------------------------------------------------|
-  | 0x01   | key_press   | `codepoint::32, modifiers::8`                               |
+  | 0x01   | key_press   | `codepoint::32, modifiers::8[, seq::32]`                    |
   | 0x02   | resize      | `width::16, height::16`                                     |
   | 0x03   | ready       | `width::16, height::16`                                     |
   | 0x04   | mouse_event | `row::16-signed, col::16-signed, button::8, mods::8, type::8` |
@@ -122,9 +122,18 @@ defmodule MingaEditor.Frontend.Protocol do
   @typedoc "Mouse event type."
   @type mouse_event_type :: :press | :release | :motion | :drag | {:unknown, non_neg_integer()}
 
+  @typedoc """
+  A frontend-originated input correlation sequence (u32).
+
+  Stamped by the frontend at input decode for end-to-end keystroke latency
+  instrumentation (ticket #2215). The BEAM echoes the latest processed sequence
+  back on `batch_end`. `0` means "no correlation" (legacy frontends that omit it).
+  """
+  @type input_seq :: non_neg_integer()
+
   @typedoc "An input event decoded from Zig."
   @type input_event ::
-          {:key_press, codepoint :: non_neg_integer(), modifiers()}
+          {:key_press, codepoint :: non_neg_integer(), modifiers(), input_seq()}
           | {:resize, width :: pos_integer(), height :: pos_integer()}
           | {:ready, width :: pos_integer(), height :: pos_integer()}
           | {:ready, width :: pos_integer(), height :: pos_integer(), Capabilities.t()}
@@ -202,9 +211,17 @@ defmodule MingaEditor.Frontend.Protocol do
   @spec encode_clear() :: binary()
   def encode_clear, do: <<@op_clear>>
 
-  @doc "Encodes a batch_end command (triggers render flush)."
-  @spec encode_batch_end() :: binary()
-  def encode_batch_end, do: <<@op_batch_end>>
+  @doc """
+  Encodes a batch_end command (triggers render flush).
+
+  Carries the echoed input correlation sequence (u32) so the frontend can
+  resolve a keystroke-to-write latency sample when the frame reaches the
+  terminal (ticket #2215). `seq` defaults to `0` ("no correlation").
+  """
+  @spec encode_batch_end(input_seq()) :: binary()
+  def encode_batch_end(seq \\ 0) when is_integer(seq) and seq >= 0 do
+    <<@op_batch_end, seq::32>>
+  end
 
   @doc "Encodes a set_cursor_shape command."
   @spec encode_cursor_shape(cursor_shape()) :: binary()
@@ -339,8 +356,15 @@ defmodule MingaEditor.Frontend.Protocol do
 
   @doc "Decodes an input event from a binary payload."
   @spec decode_event(binary()) :: {:ok, input_event()} | {:error, :unknown_opcode | :malformed}
+  # New form carries a u32 input correlation sequence (ticket #2215) appended
+  # after modifiers so latency samples can be resolved at the frame boundary.
+  def decode_event(<<@op_key_press, codepoint::32, modifiers::8, seq::32>>) do
+    {:ok, {:key_press, codepoint, modifiers, seq}}
+  end
+
+  # Legacy form without a sequence; treat as uncorrelated (seq 0).
   def decode_event(<<@op_key_press, codepoint::32, modifiers::8>>) do
-    {:ok, {:key_press, codepoint, modifiers}}
+    {:ok, {:key_press, codepoint, modifiers, 0}}
   end
 
   def decode_event(<<@op_resize, width::16, height::16>>) do

@@ -75,14 +75,16 @@ struct EncoderReadyTests {
 
 @Suite("Encoder Binary: Key Press")
 struct EncoderKeyPressTests {
-    @Test("key press encodes codepoint and modifiers")
+    @Test("key press encodes codepoint, modifiers, and zero correlation sequence")
     func keyPressLayout() {
+        // The sequence-less encoder appends a zero correlation sequence (#2215).
         let payload = captureFrame { $0.sendKeyPress(codepoint: 27, modifiers: 0x02) }
 
-        #expect(payload.count == 6)
+        #expect(payload.count == 10)
         #expect(payload[0] == OP_KEY_PRESS)
-        #expect(readU32(payload, 1) == 27)  // codepoint (Escape)
+        #expect(readU32(payload, 1) == 27)   // codepoint (Escape)
         #expect(payload[5] == 0x02)          // modifiers (Ctrl)
+        #expect(readU32(payload, 6) == 0)    // correlation sequence
     }
 
     @Test("key press with large codepoint")
@@ -91,6 +93,18 @@ struct EncoderKeyPressTests {
         let payload = captureFrame { $0.sendKeyPress(codepoint: 57350, modifiers: 0) }
 
         #expect(readU32(payload, 1) == 57350)
+    }
+
+    @Test("key press stamps the latency correlation sequence (#2215)")
+    func keyPressCorrelationSequence() {
+        let payload = captureFrame {
+            $0.sendKeyPress(codepoint: 0x61, modifiers: 0, seq: 0x0102_0304)
+        }
+
+        #expect(payload.count == 10)
+        #expect(payload[0] == OP_KEY_PRESS)
+        #expect(readU32(payload, 1) == 0x61)        // codepoint ('a')
+        #expect(readU32(payload, 6) == 0x0102_0304) // correlation sequence
     }
 }
 

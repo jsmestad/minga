@@ -26,8 +26,11 @@ const (
 )
 
 type Command struct {
-	Kind             CommandKind
-	Size             int
+	Kind CommandKind
+	Size int
+	// BatchSeq is the echoed input correlation sequence carried by a
+	// CommandBatchEnd (ticket #2215). 0 means "no correlation".
+	BatchSeq         uint32
 	Draw             DrawText
 	CursorRow        uint16
 	CursorCol        uint16
@@ -153,7 +156,12 @@ func DecodeCommand(payload []byte) (Command, error) {
 	case generated.OPClear:
 		return Command{Kind: CommandClear, Size: 1}, nil
 	case generated.OPBatchEnd:
-		return Command{Kind: CommandBatchEnd, Size: 1}, nil
+		// batch_end now carries a u32 echoed input correlation sequence
+		// (ticket #2215): <opcode, seq:u32>.
+		if len(payload) < 5 {
+			return Command{}, fmt.Errorf("short batch_end")
+		}
+		return Command{Kind: CommandBatchEnd, Size: 5, BatchSeq: binary.BigEndian.Uint32(payload[1:5])}, nil
 	case generated.OPDrawText:
 		return decodeDrawText(payload)
 	case generated.OPDrawStyledText:

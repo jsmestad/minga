@@ -81,13 +81,15 @@ struct ProtocolDecoderTests {
 
     @Test("Decode batch_end command")
     func decodeBatchEnd() throws {
-        let data = Data([OP_BATCH_END])
+        // batch_end now carries a u32 echoed input correlation sequence (#2215).
+        let data = Data([OP_BATCH_END, 0x00, 0x00, 0x10, 0x2A])
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
-        #expect(size == 1)
-        guard case .batchEnd = cmd else {
+        #expect(size == 5)
+        guard case .batchEnd(let seq) = cmd else {
             Issue.record("Expected .batchEnd, got \(String(describing: cmd))")
             return
         }
+        #expect(seq == 0x0000_102A)
     }
 
     @Test("Decode set_cursor command")
@@ -314,6 +316,7 @@ struct ProtocolDecoderTests {
         data.append(OP_SET_CURSOR)
         data.append(contentsOf: [0x00, 0x03, 0x00, 0x07])
         data.append(OP_BATCH_END)
+        data.append(contentsOf: [0, 0, 0, 0]) // batch_end echoed seq (fixed:5, #2215)
 
         var commands: [RenderCommand] = []
         try decodeCommands(from: data) { cmd in

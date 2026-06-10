@@ -76,6 +76,51 @@ jobs:
       - run: mix native.build.support
       - run: mix test --warnings-as-errors --exclude system_clipboard --exclude conformance
 
+  keystroke-latency-baseline:
+    name: Keystroke Latency Baseline (record-only)
+    runs-on: ubuntu-latest
+    # Record-only: this job tracks p50/p99 over time and uploads the JSON as an
+    # artifact. It must never gate merges (ticket #2215), so it does not fail the
+    # workflow if the numbers drift.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Cache deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: deps-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock') }}
+          restore-keys: deps-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-
+
+      - run: mix deps.get
+      - run: mix deps.compile
+      - run: mix protocol.gen
+      - run: mix native.build.support
+
+      - name: Record keystroke latency baseline
+        run: MIX_ENV=test mix run bench/keystroke_latency_baseline.exs | tee keystroke_latency_metrics.txt
+
+      - name: Upload latency baseline JSON
+        uses: actions/upload-artifact@v4
+        with:
+          name: keystroke-latency-baseline
+          path: |
+            bench/baselines/keystroke_latency.json
+            keystroke_latency_metrics.txt
+          if-no-files-found: error
+
   conformance:
     name: Neovim Conformance
     runs-on: ubuntu-latest

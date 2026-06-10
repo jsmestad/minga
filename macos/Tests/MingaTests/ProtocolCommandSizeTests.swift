@@ -34,7 +34,8 @@ struct ProtocolCommandSizeTests {
     }
 
     @Test func decodeCommandsSkipsGeneratedSizedUnrenderedOpcode() throws {
-        let payload = Data([0xB7, 0x00, 0x02, 0xAA, 0xBB, OP_BATCH_END])
+        // batch_end is now fixed:5 (opcode + echoed correlation seq u32, #2215).
+        let payload = Data([0xB7, 0x00, 0x02, 0xAA, 0xBB, OP_BATCH_END, 0, 0, 0, 0])
         var commands: [RenderCommand] = []
 
         try decodeCommands(from: payload) { command in

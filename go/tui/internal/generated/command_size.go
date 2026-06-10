@@ -24,7 +24,7 @@ func CommandSize(payload []byte) (int, CommandSizeStatus) {
 		return 0, CommandSizeIncomplete
 	}
 	switch payload[0] {
-	case OPClear, OPBatchEnd:
+	case OPClear:
 		return fixedCommandSize(payload, 1)
 	case OPSetCursorShape:
 		return fixedCommandSize(payload, 2)
@@ -32,7 +32,7 @@ func CommandSize(payload []byte) (int, CommandSizeStatus) {
 		return fixedCommandSize(payload, 3)
 	case OPSetWindowBg:
 		return fixedCommandSize(payload, 4)
-	case OPSetCursor:
+	case OPSetCursor, OPBatchEnd:
 		return fixedCommandSize(payload, 5)
 	case OPGuiGutterSep, OPGuiCursorline:
 		return fixedCommandSize(payload, 6)

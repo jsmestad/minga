@@ -81,12 +81,17 @@ value = 0x12
 direction = "beam_to_frontend"
 framing = "fixed:1"
 
+# batch_end carries the echoed input correlation sequence (u32) introduced for
+# end-to-end keystroke latency instrumentation (ticket #2215). A frontend stamps
+# a monotonic sequence into each key_press packet; the BEAM echoes the latest
+# processed sequence here so the frontend can resolve a keystroke-to-write sample
+# when the frame reaches the terminal. Sequence 0 means "no correlation".
 [[opcodes]]
 category = "render"
 name = "batch_end"
 value = 0x13
 direction = "beam_to_frontend"
-framing = "fixed:1"
+framing = "fixed:5"
 
 [[opcodes]]
 category = "render"

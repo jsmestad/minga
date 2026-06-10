@@ -454,16 +454,24 @@ defmodule MingaEditor do
   # The router walks ConflictPrompt → Picker → Completion → GlobalBindings → ModeFSM
   # and runs centralized post-key housekeeping (highlight sync, reparse,
   # completion, render) exactly once.
-  def handle_info({:minga_input, {:key_press, codepoint, modifiers}}, state) do
+  def handle_info({:minga_input, {:key_press, codepoint, modifiers, seq}}, state) do
     state = cancel_nav_flash(state)
     state = cancel_yank_flash(state)
+    # Record the input correlation sequence (ticket #2215) so the render that
+    # this keystroke triggers echoes it on batch_end for latency resolution.
+    state = %{state | last_input_seq: seq}
 
     new_state =
-      Minga.Telemetry.span([:minga, :input, :dispatch], %{}, fn ->
+      Minga.Telemetry.span([:minga, :input, :dispatch], %{input_seq: seq}, fn ->
         Input.Router.dispatch(state, codepoint, modifiers)
       end)
 
     {:noreply, new_state}
+  end
+
+  # Legacy 3-tuple key_press (frontends that predate the correlation sequence).
+  def handle_info({:minga_input, {:key_press, codepoint, modifiers}}, state) do
+    handle_info({:minga_input, {:key_press, codepoint, modifiers, 0}}, state)
   end
 
   # ── Paste event (bracketed paste from TUI, Cmd+V from GUI) ──
