@@ -203,17 +203,17 @@ These are one per cluster, sequenced. File them against epic #2218. Each carries
 
 ---
 
-### Ticket C (#2236): Delete the cell-era picker and its dual-picker duplication
+### Ticket C (#2236): Delete the cell-era picker renderer (DONE)
 
 **Type:** Chore (deletion)
 
-**Scope.** Delete `picker_ui.ex`, the cell-rendered fuzzy picker (command palette, file finder, buffer list). The semantic picker (`gui_picker` 0x77 via `render_model/ui/picker_builder.ex` and `ui/picker.ex`) is the replacement and is already live and Go-verified. This retires the known dual-picker duplication called out in epic #2218 Developer Notes.
+**Status (2026-06-10).** DONE as a split-and-delete. Deleted only the cell renderer half of `picker_ui.ex` (`render/1` + `render/2` + the `RenderInput` struct + DisplayList/Face cell-draw helpers, ~880 lines net) and its single live call site at `renderer.ex:112`. Kept the live picker orchestration API byte-for-byte (`open/3`, `handle_key/3`, `close/1`, `refresh_items/1`, `update_picker/2`, plus the mode-switch and preview helpers) with a corrected moduledoc. The module was intentionally NOT renamed (the ~40-caller `PickerUI` → `UI.Picker.Controller` rename was ruled out of scope).
 
-**Inventory slice.** Delete `lib/minga_editor/picker_ui.ex` (1,664 lines). Repoint any caller still invoking `PickerUI` to the semantic `UI.Picker` source. Audit `ui/picker/source.ex` and the picker key-dispatch path for residual `PickerUI` references.
+**What `renderer.ex:112` turned out to be.** `Renderer.render_dashboard/1` stuffed `PickerUI.render/2`'s cell draws into `%Frame{overlays: ...}`. The semantic emit path (`Frontend.Emit.emit_semantic` → `RenderModel.Builder.build/3`) reads only `frame.cursor` and `frame.windows`, never `frame.splash`/`frame.overlays`, so those cell draws were dropped for every semantic frontend. The dashboard picker overlay reaches the GUI and Go TUI semantically through `RenderModel.UI.PickerBuilder.build/1`, which reads the modal `picker_ui` state directly. After #2235 deleted `Chrome.TUI` (the other `render/2` caller) and #2223 retired Zig, `renderer.ex:112` was the last consumer of the cell path and was dead. Removed it, along with the now-unused `Overlay`/`PickerUI` aliases and `viewport` local in `renderer.ex`.
 
-**Expected test fallout.** Delete `picker_ui_test.exs`; keep `ui/picker_test.exs` and `render_model/ui/picker_builder_test.exs`. The Go parity "Picker" row stays PASS.
+**Inventory slice (actual).** `lib/minga_editor/picker_ui.ex`: deleted the render functions and helpers, the `RenderInput` struct, and the `Face`/`Unicode`/`DisplayList`/`FloatingWindow` aliases that only the renderer used (`import Bitwise` stays — `handle_key/3` guards use `band/2`). `lib/minga_editor/renderer.ex`: removed the `PickerUI.render` call and overlay/cursor branching in `render_dashboard/1`. The ~25 orchestration callers (`commands/*`, `lsp_actions.ex`, `agent/*`, `input/picker.ex`, etc.) were untouched.
 
-**Sequencing (corrected 2026-06-10).** Gated on #2223 with Ticket B, and re-scoped to a split-and-delete: `picker_ui.ex` fuses a LIVE picker orchestration API (`open/3`, `handle_key/3`, `close/1`, `refresh_items/1`, `update_picker/2`; ~25 lib callers including the key-dispatch path; the semantic `picker_builder.ex` reads the modal state these produce) with the DEAD cell renderer (`render/2` + DisplayList helpers, ~600-700 lines, callers: `renderer.ex:112` and `chrome/tui.ex:214`). Only the renderer half is deletable, and only once #2223/Ticket B remove its Zig-path callers. The orchestration API has no semantic replacement (`UI.Picker` is a fuzzy-match data struct) and stays. The original "1,664 lines deleted, near-zero residual callers" figures classified the module by line count and are wrong.
+**Test fallout (actual).** Trimmed `picker_ui_test.exs` to the orchestration cases (the three render describe blocks deleted; the two mode-switch tests kept but their cell-cursor/draw assertions removed). Trimmed `focus_tree_test.exs` (deleted the one test that cross-checked the cell-rendered popup height against the `FocusTree` hit-test geometry; the hit-test tests stay). `ui/picker_test.exs` and `render_model/ui/picker_builder_test.exs` stay green. The Go parity "Picker" row stays PASS (no protocol change).
 
 ---
 
