@@ -157,13 +157,13 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       assert {:ok, {:ready, 80, 24}} = Protocol.decode_event(payload)
     end
 
-    test "decodes an extended ready event with capabilities" do
+    test "decodes an extended ready without a version tail as protocol_version 0 (legacy)" do
       # caps_version=1, caps_len=6, frontend_type=0(tui), color_depth=2(rgb),
       # unicode_width=1(unicode_15), image_support=1(kitty), float_support=0(emulated),
       # text_rendering=0(monospace)
       payload = <<0x03, 120::16, 40::16, 1, 6, 0, 2, 1, 1, 0, 0>>
 
-      assert {:ok, {:ready, 120, 40, caps}} = Protocol.decode_event(payload)
+      assert {:ok, {:ready, 120, 40, caps, 0}} = Protocol.decode_event(payload)
       assert caps.frontend_type == :tui
       assert caps.color_depth == :rgb
       assert caps.unicode_width == :unicode_15
@@ -171,10 +171,11 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       assert caps.float_support == :emulated
     end
 
-    test "decodes an extended ready with native GUI capabilities" do
-      payload = <<0x03, 200::16, 60::16, 1, 6, 1, 2, 1, 3, 1, 0>>
+    test "decodes a versioned ready (extended caps + u16 protocol_version tail)" do
+      # 7 caps fields then a u16 protocol_version of 2.
+      payload = <<0x03, 200::16, 60::16, 1, 7, 1, 2, 1, 3, 1, 1, 1, 2::16>>
 
-      assert {:ok, {:ready, 200, 60, caps}} = Protocol.decode_event(payload)
+      assert {:ok, {:ready, 200, 60, caps, 2}} = Protocol.decode_event(payload)
       assert caps.frontend_type == :native_gui
       assert caps.image_support == :native
       assert caps.float_support == :native
@@ -263,22 +264,14 @@ defmodule MingaEditor.Frontend.ProtocolTest do
     end
   end
 
-  describe "encode_cursor/2" do
-    test "encodes set_cursor" do
-      encoded = Protocol.encode_cursor(10, 25)
-      assert <<0x11, 10::16, 25::16>> = encoded
+  describe "encode_protocol_error/1" do
+    test "encodes a len16-framed UTF-8 reason" do
+      encoded = Protocol.encode_protocol_error("nope")
+      assert <<0x18, 4::16, "nope">> = encoded
     end
 
-    test "encodes cursor at origin" do
-      encoded = Protocol.encode_cursor(0, 0)
-      assert <<0x11, 0::16, 0::16>> = encoded
-    end
-  end
-
-  describe "encode_clear/0" do
-    test "encodes clear" do
-      encoded = Protocol.encode_clear()
-      assert <<0x12>> = encoded
+    test "encodes an empty reason" do
+      assert <<0x18, 0::16>> = Protocol.encode_protocol_error("")
     end
   end
 
@@ -296,12 +289,8 @@ defmodule MingaEditor.Frontend.ProtocolTest do
   # ── Binary format verification ──
 
   describe "binary format" do
-    test "set_cursor has correct byte layout" do
-      assert <<0x11, 0::16, 5::16>> = Protocol.encode_cursor(0, 5)
-    end
-
-    test "clear is a single byte" do
-      assert <<0x12>> = Protocol.encode_clear()
+    test "protocol_error has correct len16 byte layout" do
+      assert <<0x18, 3::16, "bad">> = Protocol.encode_protocol_error("bad")
     end
 
     test "batch_end carries a u32 correlation sequence (opcode + 4 bytes)" do
@@ -311,12 +300,6 @@ defmodule MingaEditor.Frontend.ProtocolTest do
     test "key_press event has correct byte layout" do
       payload = <<0x01, 65::32, 0x03::8>>
       assert {:ok, {:key_press, 65, 3, 0}} = Protocol.decode_event(payload)
-    end
-
-    test "set_cursor_shape has correct byte layout" do
-      assert <<0x15, 0x00>> = Protocol.encode_cursor_shape(:block)
-      assert <<0x15, 0x01>> = Protocol.encode_cursor_shape(:beam)
-      assert <<0x15, 0x02>> = Protocol.encode_cursor_shape(:underline)
     end
   end
 
@@ -406,23 +389,6 @@ defmodule MingaEditor.Frontend.ProtocolTest do
 
       assert {:ok, {:mouse_event, 0, 5, :wheel_up, 0x02, :press, 1}} =
                Protocol.decode_event(payload)
-    end
-  end
-
-  describe "cursor shape protocol" do
-    test "encodes block cursor" do
-      encoded = Protocol.encode_cursor_shape(:block)
-      assert <<0x15, 0>> = encoded
-    end
-
-    test "encodes beam cursor" do
-      encoded = Protocol.encode_cursor_shape(:beam)
-      assert <<0x15, 1>> = encoded
-    end
-
-    test "encodes underline cursor" do
-      encoded = Protocol.encode_cursor_shape(:underline)
-      assert <<0x15, 2>> = encoded
     end
   end
 

@@ -74,36 +74,6 @@ private func appendRandomU32(_ data: inout Data) {
 
 // MARK: - Payload builders per opcode
 
-/// Builds a valid draw_text payload with random values.
-private func randomDrawText() -> Data {
-    var data = Data([OP_DRAW_TEXT])
-    appendRandomU16(&data)  // row
-    appendRandomU16(&data)  // col
-    appendRandomRGB(&data)  // fg
-    appendRandomRGB(&data)  // bg
-    data.append(UInt8.random(in: 0...0x0F))  // attrs
-    let text = randomString16Field(maxLen: 30)
-    data.append(text)
-    return data
-}
-
-/// Builds a valid draw_styled_text payload with random values.
-private func randomDrawStyledText() -> Data {
-    var data = Data([OP_DRAW_STYLED_TEXT])
-    appendRandomU16(&data)  // row
-    appendRandomU16(&data)  // col
-    appendRandomRGB(&data)  // fg
-    appendRandomRGB(&data)  // bg
-    appendRandomU16(&data)  // attrs16
-    appendRandomRGB(&data)  // underlineColor
-    data.append(UInt8.random(in: 0...255))  // blend
-    data.append(UInt8.random(in: 0...7))    // fontWeight
-    data.append(UInt8.random(in: 0...3))    // fontId
-    let text = randomString16Field(maxLen: 30)
-    data.append(text)
-    return data
-}
-
 /// Builds a valid gui_theme payload with random slots.
 private func randomGuiTheme() -> Data {
     let count = UInt8.random(in: 0...20)
@@ -225,27 +195,6 @@ private let fuzzIterations = 500
 @Suite("Decoder Fuzz: Fixed-Size Commands")
 struct DecoderFuzzFixedSizeTests {
 
-    @Test("clear never crashes on valid input")
-    func fuzzClear() throws {
-        for _ in 0..<fuzzIterations {
-            let (cmd, size) = try decodeCommand(data: Data([OP_CLEAR]), offset: 0)
-            #expect(size == 1)
-            guard case .clear = cmd else { Issue.record("Expected .clear"); return }
-        }
-    }
-
-    @Test("set_cursor with random values never crashes")
-    func fuzzSetCursor() throws {
-        for _ in 0..<fuzzIterations {
-            var data = Data([OP_SET_CURSOR])
-            appendRandomU16(&data)
-            appendRandomU16(&data)
-            let (cmd, size) = try decodeCommand(data: data, offset: 0)
-            #expect(size == 5)
-            guard case .setCursor = cmd else { Issue.record("Expected .setCursor"); return }
-        }
-    }
-
     @Test("gui_gutter_sep with random values never crashes")
     func fuzzGutterSep() throws {
         for _ in 0..<fuzzIterations {
@@ -269,26 +218,6 @@ struct DecoderFuzzFixedSizeTests {
 
 @Suite("Decoder Fuzz: Variable-Length Commands")
 struct DecoderFuzzVariableLengthTests {
-
-    @Test("draw_text with random values never crashes")
-    func fuzzDrawText() throws {
-        for _ in 0..<fuzzIterations {
-            let data = randomDrawText()
-            let (cmd, size) = try decodeCommand(data: data, offset: 0)
-            #expect(size == data.count)
-            guard case .drawText = cmd else { Issue.record("Expected .drawText"); return }
-        }
-    }
-
-    @Test("draw_styled_text with random values never crashes")
-    func fuzzDrawStyledText() throws {
-        for _ in 0..<fuzzIterations {
-            let data = randomDrawStyledText()
-            let (cmd, size) = try decodeCommand(data: data, offset: 0)
-            #expect(size == data.count)
-            guard case .drawStyledText = cmd else { Issue.record("Expected .drawStyledText"); return }
-        }
-    }
 
     @Test("gui_theme with random slots never crashes")
     func fuzzGuiTheme() throws {
@@ -343,37 +272,6 @@ struct DecoderFuzzVariableLengthTests {
 
 @Suite("Decoder Fuzz: Truncation at Every Byte Position")
 struct DecoderFuzzTruncationTests {
-
-    @Test("draw_text truncated at every position throws, never crashes")
-    func truncateDrawText() {
-        for _ in 0..<100 {
-            let full = randomDrawText()
-            for cutoff in 1..<full.count {
-                let truncated = full.prefix(cutoff)
-                do {
-                    _ = try decodeCommand(data: Data(truncated), offset: 0)
-                    // If it decodes, it must have consumed <= cutoff bytes
-                } catch {
-                    // Expected: ProtocolDecodeError
-                }
-            }
-        }
-    }
-
-    @Test("draw_styled_text truncated at every position throws, never crashes")
-    func truncateDrawStyledText() {
-        for _ in 0..<100 {
-            let full = randomDrawStyledText()
-            for cutoff in 1..<full.count {
-                let truncated = full.prefix(cutoff)
-                do {
-                    _ = try decodeCommand(data: Data(truncated), offset: 0)
-                } catch {
-                    // Expected
-                }
-            }
-        }
-    }
 
     @Test("gui_tab_bar truncated at every position throws, never crashes")
     func truncateGuiTabBar() {

@@ -13,7 +13,7 @@ import (
 // mis-sized to 2 bytes and a stray byte consumed every following chrome command.
 func TestDecodePacketDoesNotSwallowAfterIndentGuides(t *testing.T) {
 	var batch []byte
-	batch = append(batch, generated.OPSetCursor, 0, 0, 0, 0)                         // fixed:5
+	batch = append(batch, generated.OPSetCursorShape, 0)                             // fixed:2
 	batch = append(batch, generated.OPGuiIndentGuides, 0x00, 0x06, 1, 2, 3, 4, 5, 6) // len16, 9 bytes
 	batch = append(batch, generated.OPGuiStatusBar, 1, 0x01, 0x00, 0x02, 0xAA, 0xBB) // sectioned, 7 bytes
 	batch = append(batch, generated.OPBatchEnd, 0, 0, 0, 0)                          // fixed:5 (echoed seq)
@@ -31,8 +31,8 @@ func TestDecodePacketDoesNotSwallowAfterIndentGuides(t *testing.T) {
 	if len(cmds) != 4 {
 		t.Fatalf("got %d commands, want 4: %+v", len(cmds), cmds)
 	}
-	if cmds[0].Kind != protocol.CommandSetCursor {
-		t.Errorf("cmd[0] = %v, want SetCursor", cmds[0].Kind)
+	if cmds[0].Kind != protocol.CommandSetCursorShape {
+		t.Errorf("cmd[0] = %v, want SetCursorShape", cmds[0].Kind)
 	}
 	if cmds[len(cmds)-1].Kind != protocol.CommandBatchEnd {
 		t.Errorf("last cmd = %v, want BatchEnd (frame not swallowed)", cmds[len(cmds)-1].Kind)

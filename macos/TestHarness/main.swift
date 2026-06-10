@@ -245,9 +245,6 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
     case .batchEnd:
         return ["type": "batch_end"]
 
-    case .clear:
-        return ["type": "clear"]
-
     case .guiToolManager(let visible, let filter, let selectedIndex, let tools):
         let toolArray = tools.map { t -> [String: Any] in
             var entry: [String: Any] = [
@@ -326,16 +323,6 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
 
     case .guiWindowRowsDelta(let delta):
         return windowRowsDeltaResult(type: "gui_window_rows_delta", delta: delta)
-
-    case .drawStyledText(let row, let col, let fg, let bg, let attrs, let underlineColor, let blend, let fontWeight, let fontId, let text):
-        return ["type": "draw_styled_text", "row": Int(row), "col": Int(col),
-                "fg": Int(fg), "bg": Int(bg), "attrs": Int(attrs),
-                "underline_color": Int(underlineColor), "blend": Int(blend),
-                "font_weight": Int(fontWeight), "font_id": Int(fontId), "text": text]
-
-    case .drawText(let row, let col, let fg, let bg, let attrs, let text):
-        return ["type": "draw_text", "row": Int(row), "col": Int(col),
-                "fg": Int(fg), "bg": Int(bg), "attrs": Int(attrs), "text": text]
 
     case .guiMinibuffer(let visible, let mode, let cursorPos, let prompt,
                          let input, let context, let selectedIndex,

@@ -1,23 +1,26 @@
 defmodule MingaEditor.Frontend.Protocol do
   @moduledoc """
-  Binary protocol encoder/decoder for BEAM ↔ Zig communication.
+  Binary protocol encoder/decoder for BEAM ↔ frontend communication.
 
   Messages are length-prefixed binaries (4-byte big-endian header,
   handled by Erlang's `{:packet, 4}` Port option). The payload
   starts with a 1-byte opcode followed by opcode-specific fields.
 
-  ## Input Events (Zig → BEAM)
+  ## Input Events (frontend → BEAM)
 
   | Opcode | Name        | Payload                                                     |
   |--------|-------------|-------------------------------------------------------------|
   | 0x01   | key_press   | `codepoint::32, modifiers::8[, seq::32]`                    |
   | 0x02   | resize      | `width::16, height::16`                                     |
-  | 0x03   | ready       | `width::16, height::16`                                     |
+  | 0x03   | ready       | `width::16, height::16[, caps..., protocol_version::16]`    |
   | 0x04   | mouse_event | `row::16-signed, col::16-signed, button::8, mods::8, type::8` |
+
+  The extended `ready` handshake carries the frontend's compiled-in
+  `protocol_version`; the BEAM rejects a mismatch with `protocol_error` (0x18).
 
   ## Render Commands (BEAM → frontend)
 
-  Rendering is semantic-first. GUI render commands are encoded by `Minga.Frontend.Adapter.GUI`, with this module retaining the common side-channel encoders for cursor state, titles, fonts, clear, and batch boundaries.
+  Rendering is semantic-first. GUI render commands are encoded by `Minga.Frontend.Adapter.GUI`, with this module retaining the common side-channel encoders for titles, fonts, window background, batch boundaries, and the `protocol_error` version-mismatch signal. The cell-paradigm encoders (`draw_text`, `set_cursor`, `clear`, region commands) were retired in protocol_version 2.
 
   ## Modifier Flags
 
@@ -38,10 +41,8 @@ defmodule MingaEditor.Frontend.Protocol do
   @op_capabilities_updated Opcodes.capabilities_updated()
   @op_paste_event Opcodes.paste_event()
   @op_gui_action Opcodes.gui_action()
-  @op_set_cursor Opcodes.set_cursor()
-  @op_clear Opcodes.clear()
+  @op_protocol_error Opcodes.protocol_error()
   @op_batch_end Opcodes.batch_end()
-  @op_set_cursor_shape Opcodes.set_cursor_shape()
   @op_set_title Opcodes.set_title()
   @op_set_window_bg Opcodes.set_window_bg()
   @op_set_font Opcodes.set_font()
@@ -71,11 +72,6 @@ defmodule MingaEditor.Frontend.Protocol do
   # Encode/decode functions for parser commands are delegated there.
 
   # Log message opcode is defined in Minga.Parser.Protocol (0x60)
-
-  # Cursor shapes
-  @cursor_block 0x00
-  @cursor_beam 0x01
-  @cursor_underline 0x02
 
   # ── Modifier flags ──
 
@@ -136,7 +132,8 @@ defmodule MingaEditor.Frontend.Protocol do
           {:key_press, codepoint :: non_neg_integer(), modifiers(), input_seq()}
           | {:resize, width :: pos_integer(), height :: pos_integer()}
           | {:ready, width :: pos_integer(), height :: pos_integer()}
-          | {:ready, width :: pos_integer(), height :: pos_integer(), Capabilities.t()}
+          | {:ready, width :: pos_integer(), height :: pos_integer(), Capabilities.t(),
+             protocol_version :: non_neg_integer()}
           | {:capabilities_updated, Capabilities.t()}
           | {:paste_event, text :: String.t()}
           | {:mouse_event, row :: integer(), col :: integer(), mouse_button(), modifiers(),
@@ -198,18 +195,20 @@ defmodule MingaEditor.Frontend.Protocol do
     Bitwise.band(mods, flag) != 0
   end
 
-  # ── Encoding (BEAM → Zig) ──
+  # ── Encoding (BEAM → frontend) ──
 
-  @doc "Encodes a set_cursor command."
-  @spec encode_cursor(non_neg_integer(), non_neg_integer()) :: binary()
-  def encode_cursor(row, col)
-      when is_integer(row) and row >= 0 and is_integer(col) and col >= 0 do
-    <<@op_set_cursor, row::16, col::16>>
+  @doc """
+  Encodes a protocol_error command.
+
+  The BEAM emits this when a frontend's handshake `protocol_version` does not
+  match the BEAM's compiled-in `Opcodes.protocol_version()`. The frontend
+  displays the UTF-8 reason as a blocking error instead of trying to decode a
+  command stream it cannot parse. len16-framed: opcode(1) + len(u16) + message.
+  """
+  @spec encode_protocol_error(String.t()) :: binary()
+  def encode_protocol_error(message) when is_binary(message) do
+    <<@op_protocol_error, byte_size(message)::16, message::binary>>
   end
-
-  @doc "Encodes a clear screen command."
-  @spec encode_clear() :: binary()
-  def encode_clear, do: <<@op_clear>>
 
   @doc """
   Encodes a batch_end command (triggers render flush).
@@ -222,12 +221,6 @@ defmodule MingaEditor.Frontend.Protocol do
   def encode_batch_end(seq \\ 0) when is_integer(seq) and seq >= 0 do
     <<@op_batch_end, seq::32>>
   end
-
-  @doc "Encodes a set_cursor_shape command."
-  @spec encode_cursor_shape(cursor_shape()) :: binary()
-  def encode_cursor_shape(:block), do: <<@op_set_cursor_shape, @cursor_block>>
-  def encode_cursor_shape(:beam), do: <<@op_set_cursor_shape, @cursor_beam>>
-  def encode_cursor_shape(:underline), do: <<@op_set_cursor_shape, @cursor_underline>>
 
   @doc "Encodes a set_title command to update the terminal window title."
   @spec encode_set_title(String.t()) :: binary()
@@ -371,13 +364,26 @@ defmodule MingaEditor.Frontend.Protocol do
     {:ok, {:resize, width, height}}
   end
 
-  # Extended ready with capabilities: opcode(1) + width(2) + height(2) + caps_version(1) + caps_len(1) + caps_data
+  # Versioned ready: extended ready followed by a u16 protocol_version tail
+  # (protocol_version 2+). The frontend stamps the wire-contract version it was
+  # generated against so the BEAM can reject a mismatch before streaming frames.
+  def decode_event(
+        <<@op_ready, width::16, height::16, _caps_version::8, caps_len::8,
+          caps_data::binary-size(caps_len), protocol_version::16>>
+      ) do
+    caps = Capabilities.from_binary(caps_data)
+    {:ok, {:ready, width, height, caps, protocol_version}}
+  end
+
+  # Extended ready with capabilities, no version tail (legacy frontend): opcode(1)
+  # + width(2) + height(2) + caps_version(1) + caps_len(1) + caps_data. Surfaced
+  # as protocol_version 0 ("unversioned") so the Manager can reject it explicitly.
   def decode_event(
         <<@op_ready, width::16, height::16, _caps_version::8, caps_len::8,
           caps_data::binary-size(caps_len)>>
       ) do
     caps = Capabilities.from_binary(caps_data)
-    {:ok, {:ready, width, height, caps}}
+    {:ok, {:ready, width, height, caps, 0}}
   end
 
   # Short ready (backward compat with old frontends).

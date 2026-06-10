@@ -1,7 +1,13 @@
 # Minga port protocol opcode registry.
 # This is the single source of truth for generated opcode constants across Elixir, Swift, and Zig.
 
-version = "1.0.0"
+version = "2.0.0"
+# protocol_version is the integer the BEAM and every frontend compile against and
+# exchange in the `ready` handshake. The BEAM rejects a frontend whose value does
+# not match and shows an explicit `protocol_error` instead of silently desyncing.
+# Bump this whenever the wire contract changes incompatibly (this 2.0.0 bump
+# retired the 9 cell-paradigm render opcodes; see docs/cell-grid-deletion-map.md).
+protocol_version = 2
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -59,27 +65,13 @@ name = "log_message"
 value = 0x60
 direction = "frontend_to_beam"
 
-# Cell-grid render commands.
-[[opcodes]]
-category = "render"
-name = "draw_text"
-value = 0x10
-direction = "beam_to_frontend"
-framing = "custom"
-
-[[opcodes]]
-category = "render"
-name = "set_cursor"
-value = 0x11
-direction = "beam_to_frontend"
-framing = "fixed:5"
-
-[[opcodes]]
-category = "render"
-name = "clear"
-value = 0x12
-direction = "beam_to_frontend"
-framing = "fixed:1"
+# Render-transport commands. The 9 cell-paradigm opcodes (draw_text 0x10,
+# set_cursor 0x11, clear 0x12, define_region 0x14, clear_region 0x18,
+# destroy_region 0x19, set_active_region 0x1A, scroll_region 0x1B,
+# draw_styled_text 0x1C) were retired in protocol_version 2; semantic windows
+# (gui_window_content 0x80) replaced them. Only transport-level framing survives
+# here: batch_end, set_cursor_shape, set_title, set_window_bg, and the new
+# protocol_error. See docs/cell-grid-deletion-map.md.
 
 # batch_end carries the echoed input correlation sequence (u32) introduced for
 # end-to-end keystroke latency instrumentation (ticket #2215). A frontend stamps
@@ -92,13 +84,6 @@ name = "batch_end"
 value = 0x13
 direction = "beam_to_frontend"
 framing = "fixed:5"
-
-[[opcodes]]
-category = "render"
-name = "define_region"
-value = 0x14
-direction = "beam_to_frontend"
-framing = "fixed:15"
 
 [[opcodes]]
 category = "render"
@@ -121,40 +106,16 @@ value = 0x17
 direction = "beam_to_frontend"
 framing = "fixed:4"
 
+# protocol_error reuses the freed cell-paradigm value 0x18. The BEAM emits it when
+# a frontend's handshake protocol_version does not match the BEAM's, carrying a
+# UTF-8 reason the frontend displays as a blocking error instead of decoding a
+# stream it cannot parse. len16-framed: opcode(1) + len(u16) + UTF-8 message.
 [[opcodes]]
 category = "render"
-name = "clear_region"
+name = "protocol_error"
 value = 0x18
 direction = "beam_to_frontend"
-framing = "fixed:3"
-
-[[opcodes]]
-category = "render"
-name = "destroy_region"
-value = 0x19
-direction = "beam_to_frontend"
-framing = "fixed:3"
-
-[[opcodes]]
-category = "render"
-name = "set_active_region"
-value = 0x1A
-direction = "beam_to_frontend"
-framing = "fixed:3"
-
-[[opcodes]]
-category = "render"
-name = "scroll_region"
-value = 0x1B
-direction = "beam_to_frontend"
-framing = "fixed:7"
-
-[[opcodes]]
-category = "render"
-name = "draw_styled_text"
-value = 0x1C
-direction = "beam_to_frontend"
-framing = "custom"
+framing = "len16"
 
 # Frontend configuration commands.
 [[opcodes]]

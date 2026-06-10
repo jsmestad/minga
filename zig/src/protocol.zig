@@ -10,12 +10,11 @@
 ///   0x06 paste_event:  text_len:u16, text:u8[text_len]
 ///   0x07 gui_action:   action:u8, payload
 ///
-/// Render commands (BEAM → Zig):
-///   0x10 draw_text:        row:u16, col:u16, fg:u24, bg:u24, attrs:u8, text_len:u16, text
-///   0x1C draw_styled_text: row:u16, col:u16, fg:u24, bg:u24, attrs:u16, ul_color:u24, blend:u8, text_len:u16, text
-///   0x11 set_cursor:       row:u16, col:u16
-///   0x12 clear:      (empty)
-///   0x13 batch_end:  (empty)
+/// Render commands (BEAM → frontend), transport survivors only. The
+/// cell-paradigm opcodes (draw_text, set_cursor, clear, region commands,
+/// draw_styled_text) were retired in protocol_version 2 with the Zig renderer:
+///   0x13 batch_end:        seq:u32
+///   0x15 set_cursor_shape: shape:u8
 ///
 /// The 4-byte length prefix is handled by Erlang's {:packet, 4} and
 /// is NOT included in encode/decode here.
@@ -36,19 +35,11 @@ pub const OP_GUI_ACTION = opcodes.OP_GUI_ACTION;
 pub const OP_LOG_MESSAGE = opcodes.OP_LOG_MESSAGE;
 
 // Render
-pub const OP_DRAW_TEXT = opcodes.OP_DRAW_TEXT;
-pub const OP_SET_CURSOR = opcodes.OP_SET_CURSOR;
-pub const OP_CLEAR = opcodes.OP_CLEAR;
 pub const OP_BATCH_END = opcodes.OP_BATCH_END;
-pub const OP_DEFINE_REGION = opcodes.OP_DEFINE_REGION;
 pub const OP_SET_CURSOR_SHAPE = opcodes.OP_SET_CURSOR_SHAPE;
 pub const OP_SET_TITLE = opcodes.OP_SET_TITLE;
 pub const OP_SET_WINDOW_BG = opcodes.OP_SET_WINDOW_BG;
-pub const OP_CLEAR_REGION = opcodes.OP_CLEAR_REGION;
-pub const OP_DESTROY_REGION = opcodes.OP_DESTROY_REGION;
-pub const OP_SET_ACTIVE_REGION = opcodes.OP_SET_ACTIVE_REGION;
-pub const OP_SCROLL_REGION = opcodes.OP_SCROLL_REGION;
-pub const OP_DRAW_STYLED_TEXT = opcodes.OP_DRAW_STYLED_TEXT;
+pub const OP_PROTOCOL_ERROR = opcodes.OP_PROTOCOL_ERROR;
 
 // Config
 pub const OP_SET_FONT = opcodes.OP_SET_FONT;
@@ -334,18 +325,6 @@ pub const SYMBOL_METHOD: u8 = 2;
 pub const SYMBOL_INTERFACE: u8 = 3;
 pub const SYMBOL_TEST: u8 = 4;
 
-/// A layout region defines a rectangular area on screen.
-pub const Region = struct {
-    id: u16,
-    parent_id: u16,
-    role: u8,
-    row: u16,
-    col: u16,
-    width: u16,
-    height: u16,
-    z_order: u8,
-};
-
 /// Frontend capabilities, reported in the extended ready event and
 /// capabilities_updated events.
 pub const Capabilities = struct {
@@ -378,20 +357,15 @@ pub const CursorShape = enum(u8) {
 };
 
 pub const RenderCommand = union(enum) {
-    draw_text: DrawText,
-    draw_styled_text: DrawStyledText,
-    set_cursor: SetCursor,
+    // The cell-paradigm render commands (draw_text, draw_styled_text, set_cursor,
+    // clear, define_region, clear_region, destroy_region, set_active_region,
+    // scroll_region) were retired in protocol_version 2 along with the Zig
+    // renderer (#2223). The parser decodes only the transport survivors and its
+    // own parser commands; any other opcode yields error.UnknownOpcode, which
+    // the command loop breaks on (render opcodes never reach the parser stream).
     set_cursor_shape: CursorShape,
     set_title: []const u8,
-    clear: void,
     batch_end: void,
-    // Region commands
-    define_region: Region,
-    clear_region: u16,
-    destroy_region: u16,
-    set_active_region: u16,
-    // Scroll region (terminal scroll optimization)
-    scroll_region: ScrollRegion,
     // Incremental content sync
     edit_buffer: EditBuffer,
     // Text measurement
@@ -530,47 +504,6 @@ pub const RequestStructuralNav = struct {
 pub const LoadGrammar = struct {
     name: []const u8,
     path: []const u8,
-};
-
-/// A scroll region command: tells the renderer to use ANSI scroll
-/// region sequences to shift content within a screen row range.
-///
-/// `delta` > 0: scroll up (content moves up, new lines revealed at bottom).
-/// `delta` < 0: scroll down (content moves down, new lines revealed at top).
-pub const ScrollRegion = struct {
-    top_row: u16,
-    bottom_row: u16,
-    delta: i16,
-};
-
-pub const DrawText = struct {
-    row: u16,
-    col: u16,
-    fg: u24,
-    bg: u24,
-    attrs: u8,
-    text: []const u8,
-};
-
-/// Extended draw command with 16-bit attrs, underline color, blend, font weight, and font ID.
-/// Opcode 0x1C. Wire format:
-///   row:u16, col:u16, fg:u24, bg:u24, attrs:u16, ul_color:u24, blend:u8, font_weight:u8, font_id:u8, text_len:u16, text
-/// The TUI ignores font_id (not stored in DrawStyledText).
-pub const DrawStyledText = struct {
-    row: u16,
-    col: u16,
-    fg: u24,
-    bg: u24,
-    attrs: u16,
-    ul_color: u24,
-    blend: u8,
-    font_weight: u8,
-    text: []const u8,
-};
-
-pub const SetCursor = struct {
-    row: u16,
-    col: u16,
 };
 
 pub const DecodeError = error{
@@ -885,60 +818,6 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
     const rest = data[1..];
 
     switch (opcode) {
-        OP_DRAW_TEXT => {
-            // row:2, col:2, fg:3, bg:3, attrs:1, text_len:2 = 13 bytes minimum
-            if (rest.len < 13) return error.Malformed;
-            const row = std.mem.readInt(u16, rest[0..2], .big);
-            const col = std.mem.readInt(u16, rest[2..4], .big);
-            const fg = readU24(rest[4..7]);
-            const bg = readU24(rest[7..10]);
-            const attrs = rest[10];
-            const text_len = std.mem.readInt(u16, rest[11..13], .big);
-            if (rest.len < 13 + text_len) return error.Malformed;
-            const text = rest[13 .. 13 + text_len];
-            return .{ .draw_text = .{
-                .row = row,
-                .col = col,
-                .fg = fg,
-                .bg = bg,
-                .attrs = attrs,
-                .text = text,
-            } };
-        },
-        OP_DRAW_STYLED_TEXT => {
-            // row:2, col:2, fg:3, bg:3, attrs:2, ul_color:3, blend:1, font_weight:1, font_id:1, text_len:2 = 20 bytes min
-            if (rest.len < 20) return error.Malformed;
-            const row = std.mem.readInt(u16, rest[0..2], .big);
-            const col = std.mem.readInt(u16, rest[2..4], .big);
-            const fg = readU24(rest[4..7]);
-            const bg = readU24(rest[7..10]);
-            const attrs = std.mem.readInt(u16, rest[10..12], .big);
-            const ul_color = readU24(rest[12..15]);
-            const blend = rest[15];
-            const font_weight = rest[16];
-            // font_id at rest[17] (ignored by TUI)
-            const text_len = std.mem.readInt(u16, rest[18..20], .big);
-            if (rest.len < 20 + text_len) return error.Malformed;
-            const text = rest[20 .. 20 + text_len];
-            return .{ .draw_styled_text = .{
-                .row = row,
-                .col = col,
-                .fg = fg,
-                .bg = bg,
-                .attrs = attrs,
-                .ul_color = ul_color,
-                .blend = blend,
-                .font_weight = font_weight,
-                .text = text,
-            } };
-        },
-        OP_SET_CURSOR => {
-            if (rest.len < 4) return error.Malformed;
-            const row = std.mem.readInt(u16, rest[0..2], .big);
-            const col = std.mem.readInt(u16, rest[2..4], .big);
-            return .{ .set_cursor = .{ .row = row, .col = col } };
-        },
-        OP_CLEAR => return .clear,
         OP_BATCH_END => return .batch_end,
         OP_SET_CURSOR_SHAPE => {
             if (rest.len < 1) return error.Malformed;
@@ -1142,41 +1021,6 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
                 .text = rest[6 .. 6 + text_len],
             } };
         },
-        OP_DEFINE_REGION => {
-            // id:2, parent_id:2, role:1, row:2, col:2, width:2, height:2, z_order:1 = 14
-            if (rest.len < 14) return error.Malformed;
-            return .{ .define_region = .{
-                .id = std.mem.readInt(u16, rest[0..2], .big),
-                .parent_id = std.mem.readInt(u16, rest[2..4], .big),
-                .role = rest[4],
-                .row = std.mem.readInt(u16, rest[5..7], .big),
-                .col = std.mem.readInt(u16, rest[7..9], .big),
-                .width = std.mem.readInt(u16, rest[9..11], .big),
-                .height = std.mem.readInt(u16, rest[11..13], .big),
-                .z_order = rest[13],
-            } };
-        },
-        OP_CLEAR_REGION => {
-            if (rest.len < 2) return error.Malformed;
-            return .{ .clear_region = std.mem.readInt(u16, rest[0..2], .big) };
-        },
-        OP_DESTROY_REGION => {
-            if (rest.len < 2) return error.Malformed;
-            return .{ .destroy_region = std.mem.readInt(u16, rest[0..2], .big) };
-        },
-        OP_SET_ACTIVE_REGION => {
-            if (rest.len < 2) return error.Malformed;
-            return .{ .set_active_region = std.mem.readInt(u16, rest[0..2], .big) };
-        },
-        OP_SCROLL_REGION => {
-            // top_row:2, bottom_row:2, delta:2(signed) = 6 bytes
-            if (rest.len < 6) return error.Malformed;
-            return .{ .scroll_region = .{
-                .top_row = std.mem.readInt(u16, rest[0..2], .big),
-                .bottom_row = std.mem.readInt(u16, rest[2..4], .big),
-                .delta = std.mem.readInt(i16, rest[4..6], .big),
-            } };
-        },
         OP_SET_FONT => {
             // size:2, weight:1, ligatures:1, name_len:2 = 6 bytes after opcode
             if (rest.len < 6) return error.Malformed;
@@ -1233,11 +1077,8 @@ fn decodeStructuralNavAction(action: u8) !StructuralNavAction {
 /// each command.
 ///
 /// Fixed sizes:
-///   0x12 clear:            1 byte  (opcode only)
-///   0x13 batch_end:        1 byte  (opcode only)
-///   0x11 set_cursor:       5 bytes (opcode + row:2 + col:2)
+///   0x13 batch_end:        5 bytes (opcode + seq:4)
 ///   0x15 set_cursor_shape: 2 bytes (opcode + shape:1)
-///   0x10 draw_text:       14 bytes + text_len
 pub fn commandSize(payload: []const u8) usize {
     if (payload.len == 0) return 0;
 
@@ -1253,17 +1094,6 @@ pub fn commandSize(payload: []const u8) usize {
 fn customCommandSize(payload: []const u8) usize {
     if (payload.len == 0) return 0;
     const decoded_size = switch (payload[0]) {
-        OP_DRAW_TEXT => blk: {
-            // opcode(1) + row(2) + col(2) + fg(3) + bg(3) + attrs(1) + text_len(2) = 14 fixed bytes
-            if (payload.len < 14) break :blk payload.len;
-            const text_len: usize = std.mem.readInt(u16, payload[12..14], .big);
-            break :blk 14 + text_len;
-        },
-        OP_DRAW_STYLED_TEXT => blk: {
-            if (payload.len < 21) break :blk payload.len;
-            const text_len: usize = std.mem.readInt(u16, payload[19..21], .big);
-            break :blk 21 + text_len;
-        },
         OP_SET_FONT => blk: {
             // opcode(1) + size(2) + weight(1) + ligatures(1) + name_len(2) + name
             if (payload.len < 7) break :blk payload.len;
@@ -2052,12 +1882,6 @@ pub fn readMessageLength(reader: anytype) !?u32 {
     return std.mem.readInt(u32, &len_buf, .big);
 }
 
-// ── Helpers ──
-
-fn readU24(bytes: *const [3]u8) u24 {
-    return (@as(u24, bytes[0]) << 16) | (@as(u24, bytes[1]) << 8) | @as(u24, bytes[2]);
-}
-
 // ── Tests ──
 
 test "encode and verify key_press" {
@@ -2089,50 +1913,6 @@ test "encode and verify resize" {
     var buf: [5]u8 = undefined;
     _ = try encodeResize(&buf, 120, 40);
     try std.testing.expectEqual(@as(u8, OP_RESIZE), buf[0]);
-}
-
-test "decode draw_text command" {
-    // Opcode 0x10, row=5, col=10, fg=0xFFFFFF, bg=0x000000, attrs=0, text_len=5, "hello"
-    const data = [_]u8{
-        0x10,
-        0x00, 0x05, // row
-        0x00, 0x0A, // col
-        0xFF, 0xFF, 0xFF, // fg
-        0x00, 0x00, 0x00, // bg
-        0x00, // attrs
-        0x00, 0x05, // text_len
-    } ++ "hello".*;
-
-    const cmd = try decodeCommand(&data);
-    switch (cmd) {
-        .draw_text => |dt| {
-            try std.testing.expectEqual(@as(u16, 5), dt.row);
-            try std.testing.expectEqual(@as(u16, 10), dt.col);
-            try std.testing.expectEqual(@as(u24, 0xFFFFFF), dt.fg);
-            try std.testing.expectEqual(@as(u24, 0x000000), dt.bg);
-            try std.testing.expectEqual(@as(u8, 0), dt.attrs);
-            try std.testing.expectEqualStrings("hello", dt.text);
-        },
-        else => return error.Malformed,
-    }
-}
-
-test "decode set_cursor command" {
-    const data = [_]u8{ 0x11, 0x00, 0x0A, 0x00, 0x19 };
-    const cmd = try decodeCommand(&data);
-    switch (cmd) {
-        .set_cursor => |sc| {
-            try std.testing.expectEqual(@as(u16, 10), sc.row);
-            try std.testing.expectEqual(@as(u16, 25), sc.col);
-        },
-        else => return error.Malformed,
-    }
-}
-
-test "decode clear command" {
-    const data = [_]u8{0x12};
-    const cmd = try decodeCommand(&data);
-    try std.testing.expect(cmd == .clear);
 }
 
 test "decode batch_end command" {
@@ -2275,12 +2055,6 @@ test "decode unknown opcode returns error" {
 
 test "decode empty data returns malformed" {
     const result = decodeCommand(&[_]u8{});
-    try std.testing.expectError(error.Malformed, result);
-}
-
-test "decode truncated draw_text returns malformed" {
-    const data = [_]u8{ 0x10, 0x00, 0x05 }; // too short
-    const result = decodeCommand(&data);
     try std.testing.expectError(error.Malformed, result);
 }
 
@@ -2494,118 +2268,6 @@ test "encodeResize with minimum dimensions (1x1)" {
     try std.testing.expectEqual(@as(u16, 1), std.mem.readInt(u16, buf[3..5], .big));
 }
 
-// ── Decoding: draw_text edge cases ────────────────────────────────────────────
-
-test "decode draw_text with empty text (text_len=0)" {
-    const data = [_]u8{
-        0x10,
-        0x00, 0x01, // row=1
-        0x00, 0x02, // col=2
-        0x00, 0x00, 0x00, // fg=0
-        0x00, 0x00, 0x00, // bg=0
-        0x00, // attrs
-        0x00, 0x00, // text_len=0
-    };
-    const cmd = try decodeCommand(&data);
-    switch (cmd) {
-        .draw_text => |dt| {
-            try std.testing.expectEqual(@as(u16, 1), dt.row);
-            try std.testing.expectEqual(@as(u16, 2), dt.col);
-            try std.testing.expectEqual(@as(usize, 0), dt.text.len);
-        },
-        else => return error.WrongVariant,
-    }
-}
-
-test "decode draw_text with all style attributes (bold+italic+underline+reverse)" {
-    const all_attrs = ATTR_BOLD | ATTR_ITALIC | ATTR_UNDERLINE | ATTR_REVERSE;
-    const data = [_]u8{
-        0x10,
-        0x00, 0x00, // row=0
-        0x00, 0x00, // col=0
-        0x00, 0x00, 0x00, // fg=0
-        0x00, 0x00, 0x00, // bg=0
-        all_attrs, // attrs
-        0x00, 0x00, // text_len=0
-    };
-    const cmd = try decodeCommand(&data);
-    switch (cmd) {
-        .draw_text => |dt| {
-            try std.testing.expectEqual(all_attrs, dt.attrs);
-        },
-        else => return error.WrongVariant,
-    }
-}
-
-test "decode draw_text with max colors (0xFFFFFF fg and bg)" {
-    const data = [_]u8{
-        0x10,
-        0x00, 0x00, // row=0
-        0x00, 0x00, // col=0
-        0xFF, 0xFF, 0xFF, // fg=0xFFFFFF
-        0xFF, 0xFF, 0xFF, // bg=0xFFFFFF
-        0x00, // attrs
-        0x00, 0x00, // text_len=0
-    };
-    const cmd = try decodeCommand(&data);
-    switch (cmd) {
-        .draw_text => |dt| {
-            try std.testing.expectEqual(@as(u24, 0xFFFFFF), dt.fg);
-            try std.testing.expectEqual(@as(u24, 0xFFFFFF), dt.bg);
-        },
-        else => return error.WrongVariant,
-    }
-}
-
-test "decode draw_text where text_len exceeds remaining data returns malformed" {
-    const data = [_]u8{
-        0x10,
-        0x00, 0x00, // row
-        0x00, 0x00, // col
-        0x00, 0x00, 0x00, // fg
-        0x00, 0x00, 0x00, // bg
-        0x00, // attrs
-        0x00, 0x0A, // text_len=10, but no text bytes follow
-    };
-    const result = decodeCommand(&data);
-    try std.testing.expectError(error.Malformed, result);
-}
-
-// ── Decoding: set_cursor edge cases ───────────────────────────────────────────
-
-test "decode set_cursor with row=0 col=0" {
-    const data = [_]u8{ 0x11, 0x00, 0x00, 0x00, 0x00 };
-    const cmd = try decodeCommand(&data);
-    switch (cmd) {
-        .set_cursor => |sc| {
-            try std.testing.expectEqual(@as(u16, 0), sc.row);
-            try std.testing.expectEqual(@as(u16, 0), sc.col);
-        },
-        else => return error.WrongVariant,
-    }
-}
-
-test "decode set_cursor with large values (1000, 2000)" {
-    var data: [5]u8 = undefined;
-    data[0] = OP_SET_CURSOR;
-    std.mem.writeInt(u16, data[1..3], 1000, .big);
-    std.mem.writeInt(u16, data[3..5], 2000, .big);
-    const cmd = try decodeCommand(&data);
-    switch (cmd) {
-        .set_cursor => |sc| {
-            try std.testing.expectEqual(@as(u16, 1000), sc.row);
-            try std.testing.expectEqual(@as(u16, 2000), sc.col);
-        },
-        else => return error.WrongVariant,
-    }
-}
-
-test "decode set_cursor truncated (only 3 bytes after opcode) returns malformed" {
-    const data = [_]u8{ 0x11, 0x00, 0x05, 0x00 }; // 4 bytes total: opcode + 3
-    const result = decodeCommand(&data);
-    try std.testing.expectError(error.Malformed, result);
-}
-
 // ── writeMessage ──────────────────────────────────────────────────────────────
 
 test "writeMessage writes correct 4-byte big-endian length prefix" {
@@ -2672,19 +2334,9 @@ test "encodeKeyPress byte layout: each position verified" {
 
 // ── commandSize ──────────────────────────────────────────────────────────────
 
-test "commandSize: clear is 1 byte" {
-    const data = [_]u8{OP_CLEAR};
-    try std.testing.expectEqual(@as(usize, 1), commandSize(&data));
-}
-
 test "commandSize: batch_end is 1 byte" {
     const data = [_]u8{OP_BATCH_END};
     try std.testing.expectEqual(@as(usize, 1), commandSize(&data));
-}
-
-test "commandSize: set_cursor is 5 bytes" {
-    const data = [_]u8{ OP_SET_CURSOR, 0x00, 0x01, 0x00, 0x02 };
-    try std.testing.expectEqual(@as(usize, 5), commandSize(&data));
 }
 
 test "commandSize: fixed-size commands clamp to available payload" {
@@ -2695,39 +2347,6 @@ test "commandSize: fixed-size commands clamp to available payload" {
 test "commandSize: set_cursor_shape is 2 bytes" {
     const data = [_]u8{ OP_SET_CURSOR_SHAPE, CURSOR_BLOCK };
     try std.testing.expectEqual(@as(usize, 2), commandSize(&data));
-}
-
-test "commandSize: draw_text with 5-byte text is 19 bytes" {
-    // 14 fixed + 5 text = 19
-    const data = [_]u8{
-        OP_DRAW_TEXT,
-        0x00, 0x00, // row
-        0x00, 0x00, // col
-        0xFF, 0xFF, 0xFF, // fg
-        0x00, 0x00, 0x00, // bg
-        0x00, // attrs
-        0x00, 0x05, // text_len = 5
-    } ++ "hello".*;
-    try std.testing.expectEqual(@as(usize, 19), commandSize(&data));
-}
-
-test "commandSize: draw_text with 0-byte text is 14 bytes" {
-    const data = [_]u8{
-        OP_DRAW_TEXT,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00, 0x00, // text_len = 0
-    };
-    try std.testing.expectEqual(@as(usize, 14), commandSize(&data));
 }
 
 test "commandSize: gui_tab_bar custom packet" {
@@ -3378,12 +2997,6 @@ test "commandSize: gui_minibuffer custom packet" {
     try std.testing.expectEqual(data.len, commandSize(&data));
 }
 
-test "commandSize: truncated draw_text returns remaining length" {
-    // Only 3 bytes — malformed, returns what's left
-    const data = [_]u8{ OP_DRAW_TEXT, 0x00, 0x01 };
-    try std.testing.expectEqual(@as(usize, 3), commandSize(&data));
-}
-
 test "commandSize: truncated variable-size commands clamp to available payload" {
     const data = [_]u8{ OP_SET_FONT_FALLBACK, 0x01, 0xFF, 0xFF };
     try std.testing.expectEqual(@as(usize, data.len), commandSize(&data));
@@ -3423,16 +3036,16 @@ test "commandSize: empty payload returns 0" {
     try std.testing.expectEqual(@as(usize, 0), commandSize(&[_]u8{}));
 }
 
-test "batch decode: clear + set_cursor + batch_end parsed correctly" {
-    // Concatenated batch: clear(1) + set_cursor(5) + batch_end(1) = 7 bytes
+test "batch decode: transport survivors parse with correct sizing" {
+    // Concatenated batch of surviving transport opcodes:
+    // set_cursor_shape(2) + set_window_bg(4) + batch_end(5) = 11 bytes.
     const payload = [_]u8{
-        OP_CLEAR,
-        OP_SET_CURSOR,
+        OP_SET_CURSOR_SHAPE, CURSOR_BLOCK,
+        OP_SET_WINDOW_BG,    0x28,
+        0x2C,                0x34,
+        OP_BATCH_END,        0x00,
+        0x00,                0x00,
         0x00,
-        0x05,
-        0x00,
-        0x0A,
-        OP_BATCH_END,
     };
 
     var offset: usize = 0;
@@ -3447,45 +3060,9 @@ test "batch decode: clear + set_cursor + batch_end parsed correctly" {
     }
 
     try std.testing.expectEqual(@as(usize, 3), count);
-    try std.testing.expect(cmds[0] == .clear);
-    try std.testing.expect(cmds[1] == .set_cursor);
-    try std.testing.expectEqual(@as(u16, 5), cmds[1].set_cursor.row);
-    try std.testing.expectEqual(@as(u16, 10), cmds[1].set_cursor.col);
-    try std.testing.expect(cmds[2] == .batch_end);
-}
-
-test "batch decode: draw_text (variable length) in the middle" {
-    // clear(1) + draw_text(19) + batch_end(1) = 21 bytes
-    const payload = [_]u8{OP_CLEAR} ++ [_]u8{
-        OP_DRAW_TEXT,
-        0x00, 0x01, // row=1
-        0x00, 0x02, // col=2
-        0xFF, 0xFF, 0xFF, // fg
-        0x00, 0x00, 0x00, // bg
-        0x00, // attrs
-        0x00, 0x05, // text_len=5
-    } ++ "hello".* ++ [_]u8{OP_BATCH_END};
-
-    var offset: usize = 0;
-    var cmds: [3]RenderCommand = undefined;
-    var count: usize = 0;
-
-    while (offset < payload.len) {
-        const remaining = payload[offset..];
-        cmds[count] = try decodeCommand(remaining);
-        count += 1;
-        offset += commandSize(remaining);
-    }
-
-    try std.testing.expectEqual(@as(usize, 3), count);
-    try std.testing.expect(cmds[0] == .clear);
-    switch (cmds[1]) {
-        .draw_text => |dt| {
-            try std.testing.expectEqual(@as(u16, 1), dt.row);
-            try std.testing.expectEqualStrings("hello", dt.text);
-        },
-        else => return error.WrongVariant,
-    }
+    try std.testing.expect(cmds[0] == .set_cursor_shape);
+    try std.testing.expect(cmds[1] == .set_default_bg);
+    try std.testing.expectEqual(@as(u24, 0x282C34), cmds[1].set_default_bg);
     try std.testing.expect(cmds[2] == .batch_end);
 }
 
@@ -3881,164 +3458,6 @@ test "encodeRequestReparse buffer too small returns error" {
     try std.testing.expectError(error.Malformed, result);
 }
 
-// ── Scroll region protocol tests ──────────────────────────────────────────────
-
-test "decode scroll_region with positive delta (scroll up)" {
-    var data: [7]u8 = undefined;
-    data[0] = OP_SCROLL_REGION;
-    std.mem.writeInt(u16, data[1..3], 2, .big); // top_row
-    std.mem.writeInt(u16, data[3..5], 20, .big); // bottom_row
-    std.mem.writeInt(i16, data[5..7], 1, .big); // delta
-    const cmd = try decodeCommand(&data);
-    switch (cmd) {
-        .scroll_region => |sr| {
-            try std.testing.expectEqual(@as(u16, 2), sr.top_row);
-            try std.testing.expectEqual(@as(u16, 20), sr.bottom_row);
-            try std.testing.expectEqual(@as(i16, 1), sr.delta);
-        },
-        else => return error.WrongVariant,
-    }
-}
-
-test "decode scroll_region with negative delta (scroll down)" {
-    var data: [7]u8 = undefined;
-    data[0] = OP_SCROLL_REGION;
-    std.mem.writeInt(u16, data[1..3], 0, .big);
-    std.mem.writeInt(u16, data[3..5], 30, .big);
-    std.mem.writeInt(i16, data[5..7], -3, .big);
-    const cmd = try decodeCommand(&data);
-    switch (cmd) {
-        .scroll_region => |sr| {
-            try std.testing.expectEqual(@as(u16, 0), sr.top_row);
-            try std.testing.expectEqual(@as(u16, 30), sr.bottom_row);
-            try std.testing.expectEqual(@as(i16, -3), sr.delta);
-        },
-        else => return error.WrongVariant,
-    }
-}
-
-test "decode scroll_region truncated returns malformed" {
-    const data = [_]u8{ OP_SCROLL_REGION, 0x00, 0x02, 0x00 }; // only 4 bytes, need 7
-    const result = decodeCommand(&data);
-    try std.testing.expectError(error.Malformed, result);
-}
-
-test "commandSize: scroll_region is 7 bytes" {
-    var data: [7]u8 = undefined;
-    data[0] = OP_SCROLL_REGION;
-    std.mem.writeInt(u16, data[1..3], 0, .big);
-    std.mem.writeInt(u16, data[3..5], 20, .big);
-    std.mem.writeInt(i16, data[5..7], 1, .big);
-    try std.testing.expectEqual(@as(usize, 7), commandSize(&data));
-}
-
-test "batch decode: scroll_region + draw_text + batch_end" {
-    var payload: [7 + 19 + 1]u8 = undefined;
-    // scroll_region: top=1, bottom=20, delta=1
-    payload[0] = OP_SCROLL_REGION;
-    std.mem.writeInt(u16, payload[1..3], 1, .big);
-    std.mem.writeInt(u16, payload[3..5], 20, .big);
-    std.mem.writeInt(i16, payload[5..7], 1, .big);
-    // draw_text: row=20, col=0, "hello"
-    payload[7] = OP_DRAW_TEXT;
-    std.mem.writeInt(u16, payload[8..10], 20, .big); // row
-    std.mem.writeInt(u16, payload[10..12], 0, .big); // col
-    payload[12] = 0xFF;
-    payload[13] = 0xFF;
-    payload[14] = 0xFF; // fg
-    payload[15] = 0x00;
-    payload[16] = 0x00;
-    payload[17] = 0x00; // bg
-    payload[18] = 0x00; // attrs
-    std.mem.writeInt(u16, payload[19..21], 5, .big); // text_len
-    @memcpy(payload[21..26], "hello");
-    // batch_end
-    payload[26] = OP_BATCH_END;
-
-    var offset: usize = 0;
-    var cmds: [3]RenderCommand = undefined;
-    var count: usize = 0;
-    while (offset < payload.len) {
-        const remaining = payload[offset..];
-        cmds[count] = try decodeCommand(remaining);
-        count += 1;
-        offset += commandSize(remaining);
-    }
-    try std.testing.expectEqual(@as(usize, 3), count);
-    try std.testing.expect(cmds[0] == .scroll_region);
-    try std.testing.expect(cmds[1] == .draw_text);
-    try std.testing.expect(cmds[2] == .batch_end);
-}
-
-// ── draw_styled_text (0x1C) tests ────────────────────────────────────────────
-
-test "decode draw_styled_text command" {
-    // Opcode 0x1C, row=3, col=7, fg=0xFF6C6B, bg=0x282C34,
-    // attrs=0x0015 (bold | strikethrough), ul_color=0xFF0000, blend=50,
-    // font_weight=5 (bold), text_len=5, "error"
-    const data = [_]u8{
-        0x1C,
-        0x00, 0x03, // row
-        0x00, 0x07, // col
-        0xFF, 0x6C, 0x6B, // fg
-        0x28, 0x2C, 0x34, // bg
-        0x00, 0x11, // attrs: bold(0x01) | strikethrough(0x10)
-        0xFF, 0x00, 0x00, // ul_color: red
-        0x32, // blend: 50
-        0x05, // font_weight: bold
-        0x00, // font_id: primary
-        0x00, 0x05, // text_len
-    } ++ "error".*;
-
-    const cmd = try decodeCommand(&data);
-    switch (cmd) {
-        .draw_styled_text => |dt| {
-            try std.testing.expectEqual(@as(u16, 3), dt.row);
-            try std.testing.expectEqual(@as(u16, 7), dt.col);
-            try std.testing.expectEqual(@as(u24, 0xFF6C6B), dt.fg);
-            try std.testing.expectEqual(@as(u24, 0x282C34), dt.bg);
-            try std.testing.expectEqual(@as(u16, 0x0011), dt.attrs);
-            try std.testing.expectEqual(@as(u24, 0xFF0000), dt.ul_color);
-            try std.testing.expectEqual(@as(u8, 50), dt.blend);
-            try std.testing.expectEqual(@as(u8, 5), dt.font_weight);
-            try std.testing.expectEqualStrings("error", dt.text);
-        },
-        else => return error.Malformed,
-    }
-}
-
-test "decode draw_styled_text with underline style curl" {
-    // attrs: underline(0x02) | curl style (1 << 5 = 0x20) = 0x0022
-    const data = [_]u8{
-        0x1C,
-        0x00, 0x00, // row
-        0x00, 0x00, // col
-        0xFF, 0xFF, 0xFF, // fg
-        0x00, 0x00, 0x00, // bg
-        0x00, 0x22, // attrs: underline | curl
-        0xFF, 0x00, 0x00, // ul_color: red
-        0x64, // blend: 100
-        0x02, // font_weight: regular
-        0x00, // font_id: primary
-        0x00, 0x03, // text_len
-    } ++ "abc".*;
-
-    const cmd = try decodeCommand(&data);
-    switch (cmd) {
-        .draw_styled_text => |dt| {
-            try std.testing.expectEqual(@as(u16, 0x0022), dt.attrs);
-            // Verify underline style bits: (attrs >> 5) & 0x07 == 1 (curl)
-            try std.testing.expectEqual(@as(u16, 1), (dt.attrs >> 5) & 0x07);
-        },
-        else => return error.Malformed,
-    }
-}
-
-test "decode draw_styled_text truncated returns malformed" {
-    const data = [_]u8{ 0x1C, 0x00, 0x03 }; // too short
-    try std.testing.expectError(error.Malformed, decodeCommand(&data));
-}
-
 test "tab GUI action re-exports stay wired to generated opcodes" {
     try std.testing.expectEqual(opcodes.GUI_ACTION_TAB_REORDER, GUI_ACTION_TAB_REORDER);
     try std.testing.expectEqual(opcodes.GUI_ACTION_TAB_PIN, GUI_ACTION_TAB_PIN);
@@ -4056,8 +3475,8 @@ test "generated commandSize matches protocol.commandSize" {
     const generated_size = @import("generated/protocol_command_size.zig");
 
     const cases = [_][]const u8{
-        &[_]u8{OP_CLEAR},
-        &[_]u8{ OP_SET_CURSOR, 0, 0, 0, 0 },
+        &[_]u8{ OP_SET_CURSOR_SHAPE, CURSOR_BLOCK },
+        &[_]u8{ OP_SET_WINDOW_BG, 0x28, 0x2C, 0x34 },
         &[_]u8{ OP_SET_TITLE, 0x00, 0x03, 'a', 'b', 'c' },
         &[_]u8{ opcodes.OP_GUI_INDENT_GUIDES, 0x00, 0x06, 1, 2, 3, 4, 5, 6 },
         &[_]u8{ opcodes.OP_GUI_FILE_TREE, 0, 0, 0, 2, 0xAA, 0xBB },

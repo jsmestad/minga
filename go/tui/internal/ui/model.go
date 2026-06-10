@@ -35,8 +35,6 @@ type Model struct {
 	activePalette    palette
 	gutters          map[uint16]protocol.Gutter
 	indentGuides     map[uint16]protocol.IndentGuides
-	cells            map[position]cell
-	drawSeq          uint64
 	cursorRow        uint16
 	cursorCol        uint16
 	cursorShape      byte
@@ -45,6 +43,12 @@ type Model struct {
 	cursorlineChrome protocol.CursorlineChrome
 	pendingClipboard string
 	lastError        string
+	// protocolError holds the reason from a protocol_error (0x18) command. The
+	// BEAM emits it when this frontend's handshake protocol_version does not
+	// match the BEAM's, so the frontend never reaches ready. While set, the UI
+	// renders a blocking full-screen error surface that takes precedence over
+	// normal content instead of showing a blank screen (ticket #2237).
+	protocolError string
 	// extensionRuntimes holds the most recent gui_extension_runtime (0xA3)
 	// envelope per extension id, mirroring the macOS registry that routes
 	// payloads by extension id (FrontendExtensionRuntime.swift:26). No
@@ -68,21 +72,6 @@ type Model struct {
 	mouseDrag *chromeDrag
 }
 
-type position struct {
-	row uint16
-	col uint16
-}
-
-type cell struct {
-	text  string
-	fg    uint32
-	bg    uint32
-	attrs uint16
-	// seq records the draw-command order so overlapping cells replay
-	// deterministically, instead of in Go's randomized map order.
-	seq uint64
-}
-
 func New(width, height uint16, out chan<- []byte) Model {
 	vp := viewport.New(viewport.WithWidth(int(width)), viewport.WithHeight(max(int(height)-3, 1)))
 	return Model{
@@ -96,7 +85,6 @@ func New(width, height uint16, out chan<- []byte) Model {
 		activePalette:     defaultPalette(),
 		gutters:           map[uint16]protocol.Gutter{},
 		indentGuides:      map[uint16]protocol.IndentGuides{},
-		cells:             map[position]cell{},
 		extensionRuntimes: map[string]protocol.ExtensionRuntimePayload{},
 		latency:           latency.New(),
 		// MINGA_LATENCY_HUD=1 shows the latency overlay at boot; it is also
@@ -199,10 +187,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) View() tea.View {
-	body := m.viewport.View()
-	parts := append(m.headerLines(), body)
-	parts = append(parts, m.footerLines()...)
-	content := m.zones.Scan(lipgloss.JoinVertical(lipgloss.Left, parts...))
+	var content string
+	if m.protocolError != "" {
+		// A protocol_error (0x18) latched: this frontend's protocol_version was
+		// rejected, so it will never reach ready. Render a blocking full-screen
+		// error surface that takes precedence over normal content instead of
+		// leaving a blank screen (ticket #2237).
+		content = m.protocolErrorView()
+	} else {
+		body := m.viewport.View()
+		parts := append(m.headerLines(), body)
+		parts = append(parts, m.footerLines()...)
+		content = m.zones.Scan(lipgloss.JoinVertical(lipgloss.Left, parts...))
+	}
 	out := m.cursorStyleSequence() + m.composeFrame(content) + m.latencyHUDSequence() + m.cursorPositionSequence()
 	if m.pendingClipboard != "" {
 		out += ansi.SetClipboard(ansi.SystemClipboard, m.pendingClipboard)
@@ -214,6 +211,25 @@ func (m Model) View() tea.View {
 	view.BackgroundColor = m.editorBackground()
 	view.ForegroundColor = m.palette().Text()
 	return view
+}
+
+// protocolErrorView renders the blocking full-screen surface shown when a
+// protocol_error (0x18) latched. It centers a short title and the BEAM-supplied
+// reason on the standard editor background so a version-mismatched frontend
+// shows an explicit error instead of a blank screen (ticket #2237).
+func (m Model) protocolErrorView() string {
+	width := max(m.width, 1)
+	height := max(m.height, 1)
+	bg := m.editorBackground()
+	title := lipgloss.NewStyle().Bold(true).Foreground(m.palette().Error()).Background(bg).Render("Protocol error")
+	message := lipgloss.NewStyle().Foreground(m.palette().Text()).Background(bg).Render(m.protocolError)
+	block := lipgloss.JoinVertical(lipgloss.Center, title, "", message)
+	return lipgloss.Place(
+		width, height,
+		lipgloss.Center, lipgloss.Center,
+		block,
+		lipgloss.WithWhitespaceStyle(lipgloss.NewStyle().Background(bg)),
+	)
 }
 
 func (m Model) cursorPositionSequence() string {
@@ -260,21 +276,6 @@ func (m *Model) applyCommands(commands []protocol.Command) tea.Cmd {
 			// terminal; resolve the keystroke-to-write latency sample for the
 			// echoed correlation sequence (ticket #2215).
 			m.latency.Resolve(command.BatchSeq)
-		case protocol.CommandClear:
-			m.windows = map[uint16]protocol.WindowContent{}
-			m.windowOrder = nil
-			m.chrome = map[byte]protocol.ChromePayload{}
-			m.gutters = map[uint16]protocol.Gutter{}
-			m.indentGuides = map[uint16]protocol.IndentGuides{}
-			m.cursorlineChrome = protocol.CursorlineChrome{}
-			m.cells = map[position]cell{}
-			m.extensionRuntimes = map[string]protocol.ExtensionRuntimePayload{}
-			m.drawSeq = 0
-		case protocol.CommandDrawText:
-			m.applyDraw(command.Draw)
-		case protocol.CommandSetCursor:
-			m.cursorRow = command.CursorRow
-			m.cursorCol = command.CursorCol
 		case protocol.CommandSetCursorShape:
 			m.cursorShape = command.CursorShape
 		case protocol.CommandSetTitle:
@@ -289,6 +290,12 @@ func (m *Model) applyCommands(commands []protocol.Command) tea.Cmd {
 			m.pendingClipboard = command.ClipboardText
 		case protocol.CommandExtensionRuntime:
 			m.applyExtensionRuntime(command.ExtensionRuntime)
+		case protocol.CommandProtocolError:
+			// The BEAM rejected this frontend's handshake protocol_version. Log
+			// to stderr and latch the reason so View renders a blocking error
+			// surface instead of leaving a blank screen (ticket #2237).
+			m.protocolError = command.ProtocolError
+			fmt.Fprintf(os.Stderr, "minga: protocol error: %s\n", command.ProtocolError)
 		case protocol.CommandChrome:
 			m.chrome[command.Chrome.Opcode] = command.Chrome
 			switch command.Chrome.Opcode {
@@ -325,11 +332,6 @@ func (m *Model) applyExtensionRuntime(payload protocol.ExtensionRuntimePayload) 
 		m.extensionRuntimes = map[string]protocol.ExtensionRuntimePayload{}
 	}
 	m.extensionRuntimes[payload.ExtensionID] = payload
-}
-
-func (m *Model) applyDraw(draw protocol.DrawText) {
-	m.drawSeq++
-	m.cells[position{row: draw.Row, col: draw.Col}] = cell{text: draw.Text, fg: draw.FG, bg: draw.BG, attrs: draw.Attrs, seq: m.drawSeq}
 }
 
 func (m *Model) putWindow(window protocol.WindowContent) {

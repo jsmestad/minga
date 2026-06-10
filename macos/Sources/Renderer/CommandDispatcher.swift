@@ -1,31 +1,17 @@
 /// Routes decoded protocol commands to FrameState and GUIState, triggering rendering.
 ///
-/// Handles region tracking (define/clear/destroy/set_active) with coordinate
-/// offset and clipping, matching the Zig renderer.zig logic.
+/// Rendering is semantic-first: content flows through gui_window_content (0x80)
+/// and the dedicated gui_* opcodes. The cell-paradigm commands (draw_text,
+/// set_cursor, clear, region tracking) were retired in protocol_version 2.
 
 import Foundation
 import AppKit
-
-/// Tracks a defined region for coordinate offset/clipping.
-struct Region {
-    let id: UInt16
-    let parentId: UInt16
-    let role: UInt8
-    let row: UInt16
-    let col: UInt16
-    let width: UInt16
-    let height: UInt16
-    let zOrder: UInt8
-}
 
 /// Dispatches render commands to FrameState (metadata) and GUIState (chrome).
 @MainActor
 final class CommandDispatcher {
     /// Per-frame metadata for the Metal render pass.
     var frameState: FrameState
-
-    private var regions: [UInt16: Region] = [:]
-    private var activeRegion: Region?
 
     /// Font manager for per-span font family support.
     var fontManager: FontManager?
@@ -81,56 +67,19 @@ final class CommandDispatcher {
 
     /// Window ids that arrived in the current frame batch. Used for input hit testing so stale
     /// retained pane geometry can still render without being clickable.
+    // TODO(#2241-adjacent): no reset path since the cell-era clear opcode was
+    // retired; grows by distinct window ids seen this session (bounded, ids are
+    // reused). Reset at semantic frame start when frame lifecycle is reworked.
     private(set) var currentFrameWindowIds: Set<UInt16> = []
-
-    /// True after a protocol clear starts a real render frame. Metadata-only updates that do not
-    /// start with clear must not prune retained window geometry.
-    private var frameHasClear: Bool = false
 
     init(cols: UInt16, rows: UInt16, guiState: GUIState) {
         self.frameState = FrameState(cols: cols, rows: rows)
         self.guiState = guiState
     }
 
-    // TEMP INSTRUMENTATION (cell-grid deletion audit, ticket #2224).
-    // Counts how many legacy cell-grid decode entry points actually fire at
-    // runtime. In a semantic-only session this stays 0 for the whole session.
-    // Exercise a real GUI session, then check the log for
-    // "[#2224 cell-decode]" lines. A nonzero count means a cell opcode reached
-    // the Swift decoder, which would block deletion. Remove this block and the
-    // increments below once the audit's live run is recorded.
-    static var legacyCellDecodeCount: Int = 0
-    private func noteLegacyCellDecode(_ which: String) {
-        Self.legacyCellDecodeCount += 1
-        PortLogger.info("[#2224 cell-decode] \(which) fired; session total=\(Self.legacyCellDecodeCount)")
-    }
-
     /// Process a single render command.
     func dispatch(_ command: RenderCommand) {
         switch command {
-        case .clear:
-            frameState.beginFrame()
-            guiState.beginFrame()
-            currentFrameWindowIds.removeAll(keepingCapacity: true)
-            frameHasClear = true
-
-        case .drawText, .drawStyledText:
-            // Legacy cell-grid text rendering. All content now flows through
-            // gui_window_content (0x80) and dedicated GUI opcodes. Discard.
-            noteLegacyCellDecode("drawText/drawStyledText")  // TEMP #2224, remove after live run
-            break
-
-        case .setCursor(let row, let col):
-            var absRow = row
-            var absCol = col
-            if let region = activeRegion {
-                absRow &+= region.row
-                absCol &+= region.col
-            }
-            frameState.cursorCol = absCol
-            frameState.cursorRow = absRow
-            frameState.dirty = true
-
         case .setCursorShape(let shape):
             frameState.cursorShape = shape
 
@@ -139,7 +88,6 @@ final class CommandDispatcher {
             // input correlation sequence (ticket #2215). The frame is fully
             // dispatched here and about to be presented by the Metal renderer.
             latency.resolve(seq: seq)
-            pruneStaleWindowGeometry()
             if let firstRender = onFirstRender {
                 firstRender()
                 onFirstRender = nil
@@ -162,28 +110,12 @@ final class CommandDispatcher {
             PortLogger.info("Window bg received: r=\(r) g=\(g) b=\(b)")
             onWindowBgChanged?(color)
 
-        case .defineRegion(let id, let parentId, let role, let row, let col, let width, let height, let zOrder):
-            let region = Region(id: id, parentId: parentId, role: role, row: row, col: col, width: width, height: height, zOrder: zOrder)
-            regions[id] = region
-
-        case .clearRegion:
-            // Cell-grid clearing no longer needed; semantic content is managed
-            // by gui_window_content (0x80). Region tracking kept for cursor offset.
-            noteLegacyCellDecode("clearRegion")  // TEMP #2224, remove after live run
-            break
-
-        case .destroyRegion(let id):
-            regions.removeValue(forKey: id)
-            if activeRegion?.id == id {
-                activeRegion = nil
-            }
-
-        case .setActiveRegion(let id):
-            if id == 0 {
-                activeRegion = nil
-            } else {
-                activeRegion = regions[id]
-            }
+        case .protocolError(let message):
+            // The BEAM rejected this frontend's handshake protocol_version, so
+            // we will never reach ready. Log to the port log and latch a blocking
+            // error overlay instead of leaving a blank window (ticket #2237).
+            PortLogger.error("Protocol error from BEAM: \(message)")
+            guiState.protocolErrorState.present(message: message)
 
         case .setFont(let family, let size, let ligatures, let weight):
             onFontChanged?(family, size, ligatures, weight)
@@ -571,18 +503,4 @@ final class CommandDispatcher {
         pasteboard.setString(text, forType: .string)
     }
 
-    private func pruneStaleWindowGeometry() {
-        guard frameHasClear else { return }
-        defer { frameHasClear = false }
-
-        let liveWindowIds = currentFrameWindowIds
-        frameState.windowGutters = frameState.windowGutters.filter { liveWindowIds.contains($0.key) }
-        frameState.windowIndentGuides = frameState.windowIndentGuides.filter { liveWindowIds.contains($0.key) }
-        guiState.windowContents = guiState.windowContents.filter { liveWindowIds.contains($0.key) }
-
-        if liveWindowIds.isEmpty {
-            frameState.verticalSeparators.removeAll(keepingCapacity: true)
-            frameState.horizontalSeparators.removeAll(keepingCapacity: true)
-        }
-    }
 }

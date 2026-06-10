@@ -9,8 +9,9 @@ import (
 
 func TestEncodeReadyReportsSemanticTUI(t *testing.T) {
 	packet := EncodeReady(120, 40)
-	if len(packet) != 14 {
-		t.Fatalf("ready packet length = %d, want 14", len(packet))
+	// 14 caps bytes + a u16 protocol_version tail (protocol_version 2).
+	if len(packet) != 16 {
+		t.Fatalf("ready packet length = %d, want 16", len(packet))
 	}
 	if packet[0] != generated.OPReady {
 		t.Fatalf("opcode = 0x%02X, want ready", packet[0])
@@ -20,6 +21,50 @@ func TestEncodeReadyReportsSemanticTUI(t *testing.T) {
 	}
 	if packet[7] != 0 || packet[13] != 1 {
 		t.Fatalf("capabilities should report tui with semantic_ui=true: %#v", packet[7:])
+	}
+	version := uint16(packet[14])<<8 | uint16(packet[15])
+	if version != generated.ProtocolVersion {
+		t.Fatalf("protocol_version tail = %d, want %d", version, generated.ProtocolVersion)
+	}
+}
+
+func TestDecodeProtocolError(t *testing.T) {
+	message := "protocol_version mismatch: frontend 1, beam 2"
+	packet := []byte{generated.OPProtocolError, byte(len(message) >> 8), byte(len(message))}
+	packet = append(packet, []byte(message)...)
+	// A trailing batch_end proves the len16 frame is bounded and does not swallow
+	// the rest of the stream.
+	packet = append(packet, generated.OPBatchEnd, 0, 0, 0, 0)
+
+	command, err := DecodeCommand(packet)
+	if err != nil {
+		t.Fatalf("DecodeCommand returned error: %v", err)
+	}
+	if command.Kind != CommandProtocolError {
+		t.Fatalf("kind = %v, want protocol error", command.Kind)
+	}
+	if command.ProtocolError != message {
+		t.Fatalf("message = %q, want %q", command.ProtocolError, message)
+	}
+	if command.Size != 3+len(message) {
+		t.Fatalf("size = %d, want %d", command.Size, 3+len(message))
+	}
+
+	second, err := DecodeCommand(packet[command.Size:])
+	if err != nil {
+		t.Fatalf("DecodeCommand batch returned error: %v", err)
+	}
+	if second.Kind != CommandBatchEnd {
+		t.Fatalf("second kind = %v, want batch end", second.Kind)
+	}
+}
+
+func TestDecodeProtocolErrorShortPayloads(t *testing.T) {
+	if _, err := DecodeCommand([]byte{generated.OPProtocolError, 0}); err == nil {
+		t.Fatalf("expected error for truncated protocol_error header")
+	}
+	if _, err := DecodeCommand([]byte{generated.OPProtocolError, 0, 5, 'h', 'i'}); err == nil {
+		t.Fatalf("expected error for truncated protocol_error message")
 	}
 }
 

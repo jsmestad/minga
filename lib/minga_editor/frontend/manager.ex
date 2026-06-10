@@ -192,10 +192,8 @@ defmodule MingaEditor.Frontend.Manager do
   @spec handle_info(term(), state()) :: {:noreply, state()}
   def handle_info({port, {:data, data}}, %{port: port} = state) do
     case Protocol.decode_event(data) do
-      {:ok, {:ready, width, height, caps}} ->
-        new_state = %{state | ready: true, terminal_size: {width, height}, capabilities: caps}
-        broadcast(new_state.subscribers, {:minga_input, {:ready, width, height}})
-        {:noreply, new_state}
+      {:ok, {:ready, width, height, caps, protocol_version}} ->
+        handle_ready(state, width, height, caps, protocol_version)
 
       {:ok, {:ready, width, height}} ->
         new_state = %{state | ready: true, terminal_size: {width, height}}
@@ -359,6 +357,50 @@ defmodule MingaEditor.Frontend.Manager do
   defp log_renderer_message("ERR", text), do: Minga.Log.error(:port, text)
   defp log_renderer_message("WARN", text), do: Minga.Log.warning(:port, text)
   defp log_renderer_message(_level, text), do: Minga.Log.info(:port, text)
+
+  # Handle a `ready` handshake that carries the frontend's compiled-in
+  # protocol_version. Only an exact match proceeds: a mismatch (including 0, a
+  # frontend built before this mechanism) means the frontend was built against a
+  # different wire contract, so the BEAM sends an explicit `protocol_error` and
+  # does NOT mark it ready. This way the BEAM never streams frames the frontend
+  # cannot decode (silent desync); the frontend displays the error and the
+  # operator rebuilds it with `mix protocol.gen`.
+  @spec handle_ready(
+          state(),
+          pos_integer(),
+          pos_integer(),
+          MingaEditor.Frontend.Capabilities.t(),
+          non_neg_integer()
+        ) :: {:noreply, state()}
+  defp handle_ready(state, width, height, caps, protocol_version) do
+    expected = Minga.Protocol.Opcodes.protocol_version()
+
+    case protocol_version do
+      ^expected ->
+        new_state = %{state | ready: true, terminal_size: {width, height}, capabilities: caps}
+        broadcast(new_state.subscribers, {:minga_input, {:ready, width, height}})
+        {:noreply, new_state}
+
+      other ->
+        reject_protocol_mismatch(state, expected, other)
+    end
+  end
+
+  @spec reject_protocol_mismatch(state(), non_neg_integer(), non_neg_integer()) ::
+          {:noreply, state()}
+  defp reject_protocol_mismatch(state, expected, actual) do
+    message =
+      "Protocol version mismatch: this frontend speaks protocol v#{actual} but the editor " <>
+        "speaks v#{expected}. Rebuild the frontend (mix protocol.gen) to match the editor."
+
+    Minga.Log.error(:port, message)
+
+    if state.port do
+      Port.command(state.port, Protocol.encode_protocol_error(message))
+    end
+
+    {:noreply, %{state | ready: false}}
+  end
 
   @spec broadcast([pid()], term()) :: :ok
   defp broadcast(subscribers, message) do

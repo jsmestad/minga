@@ -50,13 +50,11 @@ defmodule MingaEditor.Frontend.ProtocolPropertyTest do
 
   # ── Encode produces valid binary ───────────────────────────────────────
 
-  property "encode_cursor produces valid binary for any row, col" do
-    check all(
-            row <- integer(0..1000),
-            col <- integer(0..1000)
-          ) do
-      result = Protocol.encode_cursor(row, col)
-      assert <<0x11, ^row::16, ^col::16>> = result
+  property "encode_protocol_error produces a len16-framed binary for any message" do
+    check all(message <- string(:utf8, min_length: 0, max_length: 200)) do
+      result = Protocol.encode_protocol_error(message)
+      len = byte_size(message)
+      assert <<0x18, ^len::16, ^message::binary>> = result
     end
   end
 
