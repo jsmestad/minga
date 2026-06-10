@@ -12,6 +12,11 @@ func TestCommandSizeFramings(t *testing.T) {
 		{"fixed set_cursor_shape", []byte{OPSetCursorShape, 0}, 2, CommandSizeOK},
 		{"fixed set_window_bg", []byte{OPSetWindowBg, 0x28, 0x2C, 0x34}, 4, CommandSizeOK},
 		{"fixed gutter_sep", []byte{OPGuiGutterSep, 0, 0, 0, 0, 0}, 6, CommandSizeOK},
+		// Frame-transaction markers (#2219 child A): begin_frame/commit_frame are
+		// fixed:9 = opcode + two u32 fields.
+		{"fixed begin_frame", []byte{OPBeginFrame, 0, 0, 0, 7, 0, 0, 0, 0}, 9, CommandSizeOK},
+		{"fixed commit_frame", []byte{OPCommitFrame, 0, 0, 0, 7, 0, 0, 0, 5}, 9, CommandSizeOK},
+		{"incomplete begin_frame", []byte{OPBeginFrame, 0, 0, 0}, 0, CommandSizeIncomplete},
 		// gui_indent_guides: the opcode that previously desynced the Go reader.
 		{"len16 indent_guides", []byte{OPGuiIndentGuides, 0x00, 0x06, 1, 2, 3, 4, 5, 6}, 9, CommandSizeOK},
 		{"len16 set_title", append([]byte{OPSetTitle, 0x00, 0x03}, []byte("abc")...), 6, CommandSizeOK},

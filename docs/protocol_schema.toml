@@ -7,7 +7,11 @@ version = "2.0.0"
 # not match and shows an explicit `protocol_error` instead of silently desyncing.
 # Bump this whenever the wire contract changes incompatibly (this 2.0.0 bump
 # retired the 9 cell-paradigm render opcodes; see docs/cell-grid-deletion-map.md).
-protocol_version = 2
+# protocol_version 3 (#2219 child A) adds the frame-transaction vocabulary
+# (begin_frame, commit_frame, request_keyframe) and authoritative layout
+# (surface_placement, gui_surface_layout). batch_end is deprecated but still
+# emitted until #2219 child B lands; see its comment below and docs/PROTOCOL.md.
+protocol_version = 3
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -59,6 +63,19 @@ name = "gui_action"
 value = 0x07
 direction = "frontend_to_beam"
 
+# request_keyframe (#2219 child A) asks the BEAM to send the next frame as a full
+# keyframe (a transaction with base_frame_seq == 0). A frontend emits it after any
+# invalidation (truncation, seq mismatch, in-transaction sizing failure, base
+# mismatch) carrying last_good_frame_seq:u32 — the last frame_seq it committed
+# cleanly (0 if it has none). fixed:5 = opcode(1) + last_good_frame_seq(u32).
+# Decoders exist now; nothing on either frontend emits it until #2219 child C/D.
+[[opcodes]]
+category = "input"
+name = "request_keyframe"
+value = 0x08
+direction = "frontend_to_beam"
+framing = "fixed:5"
+
 [[opcodes]]
 category = "input"
 name = "log_message"
@@ -70,9 +87,53 @@ direction = "frontend_to_beam"
 # destroy_region 0x19, set_active_region 0x1A, scroll_region 0x1B,
 # draw_styled_text 0x1C) were retired in protocol_version 2; semantic windows
 # (gui_window_content 0x80) replaced them. Only transport-level framing survives
-# here: batch_end, set_cursor_shape, set_title, set_window_bg, and the new
-# protocol_error. See docs/cell-grid-deletion-map.md.
+# here: batch_end, set_cursor_shape, set_title, set_window_bg, protocol_error,
+# and the protocol_version-3 frame-transaction markers begin_frame/commit_frame.
+# See docs/cell-grid-deletion-map.md.
 
+# Reuse policy for freed cell-paradigm values: a retired value may be reassigned
+# once protocol_version has bumped past the version that retired it, the same way
+# protocol_error (0x18) reuses the freed clear_region slot under version 2. Under
+# protocol_version 3, begin_frame and commit_frame reuse the freed draw_text
+# (0x10) and set_cursor (0x11) slots.
+
+# begin_frame (#2219 child A) opens a frame transaction. fixed:9 = opcode(1) +
+# frame_seq(u32) + base_frame_seq(u32). frame_seq is the strictly monotonic global
+# frame sequence (reuses Renderer.Server's seq) used for resync/attach ordering.
+# base_frame_seq names the frame this transaction's deltas assume; base_frame_seq
+# == 0 means keyframe (full snapshots, no deltas — also the multi-client attach
+# mechanism). Decoders exist now; the BEAM does not emit it until #2219 child B.
+[[opcodes]]
+category = "render"
+name = "begin_frame"
+value = 0x10
+direction = "beam_to_frontend"
+framing = "fixed:9"
+
+# commit_frame (#2219 child A) closes a frame transaction; a frontend promotes its
+# staged commands and presents the frame on this opcode. fixed:9 = opcode(1) +
+# frame_seq(u32) + input_seq(u32). frame_seq must match the open begin_frame's
+# frame_seq (a mismatch is an invalidation). input_seq is batch_end's echoed input
+# correlation sequence, moved here verbatim: a frontend resolves a keystroke-to-
+# write latency sample when the frame presents. input_seq 0 means "no correlation";
+# it is a SEPARATE id from frame_seq (idle re-renders advance frame_seq while
+# echoing a stale input_seq). Decoders exist now; the BEAM emits batch_end, not
+# commit_frame, until #2219 child B.
+[[opcodes]]
+category = "render"
+name = "commit_frame"
+value = 0x11
+direction = "beam_to_frontend"
+framing = "fixed:9"
+
+# DEPRECATED (protocol_version 3, #2219). batch_end is superseded by the
+# begin_frame/commit_frame transaction pair: commit_frame absorbs the input
+# correlation sequence below verbatim and adds atomic frame boundaries. batch_end
+# is retained in the schema (still generated, still decoded) because the BEAM keeps
+# emitting it and both frontends keep gating frames on it until #2219 child B moves
+# emission to the transaction envelope. Child B's PR removes this entry once nothing
+# emits or reads it. Do not add new emitters or readers of batch_end.
+#
 # batch_end carries the echoed input correlation sequence (u32) introduced for
 # end-to-end keystroke latency instrumentation (ticket #2215). A frontend stamps
 # a monotonic sequence into each key_press packet; the BEAM echoes the latest
@@ -636,6 +697,27 @@ value = 0xA3
 direction = "beam_to_frontend"
 framing = "len32"
 
+# gui_surface_layout (#2219 child A) carries authoritative per-frame surface
+# placement inside a frame transaction. It is the single source of placement and
+# precedence: surface rects/z come from data, not from frontend overlay heuristics
+# (Go deletes overlayLines() and sorts by z; mouse zones derive from these rects).
+# It carries one counted array of surface_placement (see the section below).
+# Coordinates are TERMINAL CELLS for both frontends; the GUI treats rect/z as
+# structural hints and keeps native intra-widget pixel layout (never send pixels).
+# Sectioned framing reuses the gui_window_content counted-array carrier so the
+# generator emits a placement decoder both frontends already know how to size.
+# Decoders exist now; the BEAM does not emit it until #2219 child E (#2268).
+# Child E note: the golden fixtures in test/support/protocol_golden.ex currently
+# build placements via the generated Minga.Protocol.Encode encoder; if E adds a
+# hand-written production encoder, switch the fixtures to it so hand-encoder
+# drift is also caught.
+[[opcodes]]
+category = "gui_semantic"
+name = "gui_surface_layout"
+value = 0xA4
+direction = "beam_to_frontend"
+framing = "sectioned"
+
 # Sub-opcodes inside gui_action (0x07).
 [[gui_actions]]
 name = "select_tab"
@@ -1145,6 +1227,21 @@ fields = [
   { name = "id", type = "u16" },
 ]
 
+# surface_placement (#2219 child A) is the authoritative position/precedence of one
+# surface for the current frame, carried by gui_surface_layout. surface_id keys the
+# surface; rect is its terminal-cell bounds; z is the stacking order (higher draws
+# later/on top, replacing overlayLines() precedence); hit_kind classifies it for
+# mouse hit-testing, derived from the same BEAM-side surface registry the emitter
+# uses so placement and hit zones never skew.
+[[structures]]
+name = "surface_placement"
+fields = [
+  { name = "surface_id", type = "u16" },
+  { name = "rect", type = "struct", element = "rect" },
+  { name = "z", type = "u16" },
+  { name = "hit_kind", type = "u8" },
+]
+
 [[structures]]
 name = "gutter_entry"
 fields = [
@@ -1570,6 +1667,16 @@ name = "rows"
 layout = "counted_array"
 count_type = "u16"
 element = "row"
+
+# gui_surface_layout (0xA4) sections
+
+[[sections]]
+opcode = "gui_surface_layout"
+id = 0x01
+name = "placements"
+layout = "counted_array"
+count_type = "u16"
+element = "surface_placement"
 
 # gui_picker (0x77) sections
 

@@ -106,13 +106,13 @@ struct ProtocolSchemaSwiftTests {
     @Test("Input opcode constants match schema")
     func inputOpcodes() throws {
         let schema = try loadSchema()
-        try expectOpcodes(schema, "input", [("key_press", OP_KEY_PRESS), ("resize", OP_RESIZE), ("ready", OP_READY), ("mouse_event", OP_MOUSE_EVENT), ("capabilities_updated", OP_CAPABILITIES_UPDATED), ("paste_event", OP_PASTE_EVENT), ("gui_action", OP_GUI_ACTION), ("log_message", OP_LOG_MESSAGE)])
+        try expectOpcodes(schema, "input", [("key_press", OP_KEY_PRESS), ("resize", OP_RESIZE), ("ready", OP_READY), ("mouse_event", OP_MOUSE_EVENT), ("capabilities_updated", OP_CAPABILITIES_UPDATED), ("paste_event", OP_PASTE_EVENT), ("gui_action", OP_GUI_ACTION), ("request_keyframe", OP_REQUEST_KEYFRAME), ("log_message", OP_LOG_MESSAGE)])
     }
 
     @Test("Render opcode constants match schema")
     func renderOpcodes() throws {
         let schema = try loadSchema()
-        try expectOpcodes(schema, "render", [("batch_end", OP_BATCH_END), ("set_cursor_shape", OP_SET_CURSOR_SHAPE), ("set_title", OP_SET_TITLE), ("set_window_bg", OP_SET_WINDOW_BG), ("protocol_error", OP_PROTOCOL_ERROR)])
+        try expectOpcodes(schema, "render", [("begin_frame", OP_BEGIN_FRAME), ("commit_frame", OP_COMMIT_FRAME), ("batch_end", OP_BATCH_END), ("set_cursor_shape", OP_SET_CURSOR_SHAPE), ("set_title", OP_SET_TITLE), ("set_window_bg", OP_SET_WINDOW_BG), ("protocol_error", OP_PROTOCOL_ERROR)])
     }
 
     @Test("Config opcode constants match schema")
@@ -142,7 +142,7 @@ struct ProtocolSchemaSwiftTests {
     @Test("GUI semantic opcodes match schema")
     func guiSemanticOpcodes() throws {
         let schema = try loadSchema()
-        try expectOpcodes(schema, "gui_semantic", [("gui_window_content", OP_GUI_WINDOW_CONTENT), ("gui_hover_popup", OP_GUI_HOVER_POPUP), ("gui_signature_help", OP_GUI_SIGNATURE_HELP), ("gui_float_popup", OP_GUI_FLOAT_POPUP), ("gui_split_separators", OP_GUI_SPLIT_SEPARATORS), ("gui_git_status", OP_GUI_GIT_STATUS), ("gui_workspaces", OP_GUI_WORKSPACES), ("gui_notifications", OP_GUI_NOTIFICATIONS), ("gui_agent_context", OP_GUI_AGENT_CONTEXT), ("gui_change_summary", OP_GUI_CHANGE_SUMMARY), ("gui_hover_action", OP_GUI_HOVER_ACTION), ("gui_config_state", OP_GUI_CONFIG_STATE), ("gui_observatory", OP_GUI_OBSERVATORY), ("gui_edit_timeline", OP_GUI_EDIT_TIMELINE), ("gui_extension_overlay", OP_GUI_EXTENSION_OVERLAY), ("gui_extension_panel", OP_GUI_EXTENSION_PANEL), ("gui_search_state", OP_GUI_SEARCH_STATE), ("gui_sidebars", OP_GUI_SIDEBARS), ("gui_window_overlay_delta", OP_GUI_WINDOW_OVERLAY_DELTA), ("gui_window_viewport_delta", OP_GUI_WINDOW_VIEWPORT_DELTA), ("gui_window_rows_delta", OP_GUI_WINDOW_ROWS_DELTA)])
+        try expectOpcodes(schema, "gui_semantic", [("gui_window_content", OP_GUI_WINDOW_CONTENT), ("gui_hover_popup", OP_GUI_HOVER_POPUP), ("gui_signature_help", OP_GUI_SIGNATURE_HELP), ("gui_float_popup", OP_GUI_FLOAT_POPUP), ("gui_split_separators", OP_GUI_SPLIT_SEPARATORS), ("gui_git_status", OP_GUI_GIT_STATUS), ("gui_workspaces", OP_GUI_WORKSPACES), ("gui_notifications", OP_GUI_NOTIFICATIONS), ("gui_agent_context", OP_GUI_AGENT_CONTEXT), ("gui_change_summary", OP_GUI_CHANGE_SUMMARY), ("gui_hover_action", OP_GUI_HOVER_ACTION), ("gui_config_state", OP_GUI_CONFIG_STATE), ("gui_observatory", OP_GUI_OBSERVATORY), ("gui_edit_timeline", OP_GUI_EDIT_TIMELINE), ("gui_extension_overlay", OP_GUI_EXTENSION_OVERLAY), ("gui_extension_panel", OP_GUI_EXTENSION_PANEL), ("gui_search_state", OP_GUI_SEARCH_STATE), ("gui_sidebars", OP_GUI_SIDEBARS), ("gui_window_overlay_delta", OP_GUI_WINDOW_OVERLAY_DELTA), ("gui_window_viewport_delta", OP_GUI_WINDOW_VIEWPORT_DELTA), ("gui_window_rows_delta", OP_GUI_WINDOW_ROWS_DELTA), ("gui_surface_layout", OP_GUI_SURFACE_LAYOUT)])
     }
 
     @Test("GUI action sub-opcode constants match schema")

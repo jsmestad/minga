@@ -366,6 +366,35 @@ func DecodeHitRegion(data []byte, offset int, windowEnd int) (HitRegion, int, er
 	}, pos, nil
 }
 
+func DecodeSurfacePlacement(data []byte, offset int, windowEnd int) (SurfacePlacement, int, error) {
+	pos := offset
+	if err := decodeRequireWindow(windowEnd, pos+2, "surface_id"); err != nil {
+		return SurfacePlacement{}, offset, err
+	}
+	surfaceID := decodeU16(data, pos)
+	pos += 2
+	rect, pos, err := DecodeRect(data, pos, windowEnd)
+	if err != nil {
+		return SurfacePlacement{}, offset, err
+	}
+	if err := decodeRequireWindow(windowEnd, pos+2, "z"); err != nil {
+		return SurfacePlacement{}, offset, err
+	}
+	z := decodeU16(data, pos)
+	pos += 2
+	if err := decodeRequireWindow(windowEnd, pos+1, "hit_kind"); err != nil {
+		return SurfacePlacement{}, offset, err
+	}
+	hitKind := data[pos]
+	pos++
+	return SurfacePlacement{
+		SurfaceID: surfaceID,
+		Rect:      rect,
+		Z:         z,
+		HitKind:   hitKind,
+	}, pos, nil
+}
+
 func DecodeGutterEntry(data []byte, offset int, windowEnd int) (GutterEntry, int, error) {
 	pos := offset
 	if err := decodeRequireWindow(windowEnd, pos+4, "buf_line"); err != nil {
@@ -1310,6 +1339,30 @@ func DecodeGuiStatusBarWorkspace(data []byte, offset int, windowEnd int) (GuiSta
 		Label:                  label,
 		Icon:                   icon,
 	}, pos, nil
+}
+
+// Section decoders for gui_surface_layout
+
+func DecodeGuiSurfaceLayoutPlacements(data []byte, offset int, windowEnd int) ([]SurfacePlacement, int, error) {
+	pos := offset
+	if err := decodeRequireWindow(windowEnd, pos+2, "placements count"); err != nil {
+		return nil, offset, err
+	}
+	count := int(decodeU16(data, pos))
+	pos += 2
+	if err := decodeRequireWindow(windowEnd, pos+count*13, "placements"); err != nil {
+		return nil, offset, err
+	}
+	items := make([]SurfacePlacement, 0, count)
+	for i := 0; i < count; i++ {
+		item, nextPos, err := DecodeSurfacePlacement(data, pos, windowEnd)
+		if err != nil {
+			return nil, offset, err
+		}
+		pos = nextPos
+		items = append(items, item)
+	}
+	return items, pos, nil
 }
 
 // Section decoders for gui_window_content

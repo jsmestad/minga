@@ -37,7 +37,9 @@ The cell-paradigm render opcodes (`draw_text`, `set_cursor`, `clear`, and the re
 
 | Opcode | Name | Size | Description |
 |--------|------|------|-------------|
-| `0x13` | batch_end | 5 | End of frame; flush to screen (carries u32 latency echo, #2215) |
+| `0x10` | begin_frame | 9 | Open a frame transaction (frame_seq + base_frame_seq); see Frame Transactions |
+| `0x11` | commit_frame | 9 | Close a frame transaction; promote staging and present (frame_seq + input_seq) |
+| `0x13` | batch_end | 5 | DEPRECATED (v3): end of frame; carries u32 latency echo (#2215). Superseded by commit_frame |
 | `0x15` | set_cursor_shape | 2 | Change cursor appearance |
 | `0x16` | set_title | 3 + title_len | Set the window/terminal title |
 | `0x17` | set_window_bg | 4 | Set the default background color |
@@ -79,6 +81,7 @@ The cell-paradigm render opcodes (`draw_text`, `set_cursor`, `clear`, and the re
 | `0x03` | ready | 5, 13, or 15+ | Frontend is initialized and ready (15+ carries a u16 protocol_version) |
 | `0x04` | mouse_event | 9 | Mouse button, wheel, or motion (8-byte legacy also accepted) |
 | `0x05` | capabilities_updated | 9 | Updated capabilities after async detection |
+| `0x08` | request_keyframe | 5 | Ask the BEAM for a full keyframe after an invalidation (last_good_frame_seq) |
 
 ### Frontend → BEAM (Highlight Responses)
 
@@ -111,9 +114,13 @@ The cell-paradigm render opcodes (`draw_text`, `set_cursor`, `clear`, and the re
 
 The cell-paradigm render opcodes (`draw_text` 0x10, `set_cursor` 0x11, `clear` 0x12, and the region commands 0x14/0x18-0x1A/0x1B and `draw_styled_text` 0x1C) were retired in protocol_version 2 along with the Zig cell-grid renderer (#2223). All visible content is now carried by Semantic UI opcodes (GUI_PROTOCOL.md, `gui_window_content` 0x80 and the `gui_*` chrome opcodes), which embed their own cursor position and shape per window. Only the transport-level opcodes below survive in the render category.
 
-### `0x13` batch_end
+### `0x10` begin_frame / `0x11` commit_frame
 
-End of a render frame.
+Frame transaction markers. See the "Frame Transactions" section for the full wire shapes, invalidation rules, and keyframe semantics.
+
+### `0x13` batch_end (DEPRECATED in protocol_version 3)
+
+End of a render frame. Superseded by the `begin_frame`/`commit_frame` transaction pair (#2219): `commit_frame` absorbs the latency echo below verbatim and adds atomic frame boundaries. `batch_end` remains in the protocol because the BEAM keeps emitting it and both frontends keep gating frames on it until #2219 child B moves emission to the transaction envelope. Do not add new emitters or readers.
 
 ```
 opcode: u8  = 0x13
@@ -201,6 +208,67 @@ batch_end            (triggers the actual present; carries the latency echo)
 The BEAM sends the entire frame as a single batched message. The frontend processes commands in order and only presents on `batch_end`. Cursor position and shape are embedded per window inside `gui_window_content`, not carried by standalone cell opcodes.
 
 Between frames, the frontend must not modify the screen. The BEAM drives all visual updates.
+
+---
+
+## Frame Transactions
+
+> Status: protocol_version 3 defines the transaction vocabulary and both frontends ship decoders for it (#2219 child A). The BEAM still emits the legacy `batch_end` frame shape, and both frontends still gate on `batch_end`, until #2219 child B moves emission into the transaction envelope and children C/D move the frontends onto staging/commit. This section is the authoritative spec the implementation children build against.
+
+A frame transaction makes a frame atomic: the BEAM brackets a frame's semantic commands between `begin_frame` and `commit_frame`, and a frontend paints nothing until it sees the matching `commit_frame`. This replaces the single `batch_end` terminator with an explicit open/close pair so a truncated or out-of-order stream can never paint a partial frame.
+
+### Wire shapes
+
+`begin_frame` (0x10), fixed 9 bytes:
+
+```
+opcode:         u8  = 0x10
+frame_seq:      u32           strictly monotonic global frame sequence
+base_frame_seq: u32           the frame these deltas assume; 0 = keyframe
+```
+
+`commit_frame` (0x11), fixed 9 bytes:
+
+```
+opcode:    u8  = 0x11
+frame_seq: u32                must equal the open begin_frame's frame_seq
+input_seq: u32                echoed input correlation sequence (#2215); 0 = no correlation
+```
+
+`request_keyframe` (0x08, Frontend → BEAM), fixed 5 bytes:
+
+```
+opcode:              u8  = 0x08
+last_good_frame_seq: u32      last frame_seq the frontend committed cleanly; 0 if none
+```
+
+A frame is therefore: `begin_frame ++ gui_* semantic/chrome commands ++ gui_surface_layout ++ commit_frame`. The placement envelope (`gui_surface_layout` 0xA4) is sent inside the transaction; see GUI_PROTOCOL.md for its section layout.
+
+### Sequence identifiers
+
+`frame_seq` and `input_seq` are separate correlation IDs and must not be conflated:
+
+- `frame_seq` is strictly monotonic (it reuses `Renderer.Server`'s existing seq). It orders frames for resync and multi-client attach. Idle re-renders still advance `frame_seq`.
+- `input_seq` is the latency echo moved verbatim from `batch_end` (#2215). It is the latest processed `key_press` correlation sequence, so the frontend resolves a keystroke-to-present latency sample when the frame presents. An idle re-render advances `frame_seq` while echoing a stale (unchanged) `input_seq`.
+
+### Keyframe as base 0
+
+There is no separate keyframe opcode. A keyframe is just a transaction whose `base_frame_seq == 0`: it depends on no prior frame and carries full snapshots (full `gui_window_content`, fresh content epochs) rather than deltas. Because it assumes nothing, a keyframe also doubles as the multi-client attach mechanism: a newly attached client is brought current by a full keyframe.
+
+`base_frame_seq` names the frame whose committed state this transaction's deltas build on. A frontend may only apply a delta transaction whose `base_frame_seq` is a frame it has committed; otherwise the base is unknown (see invalidation below).
+
+### Invalidation rules
+
+Four conditions invalidate the in-flight frame. In every case the frontend discards its staged (uncommitted) frame and sends `request_keyframe` with its `last_good_frame_seq`, then resumes only once a fresh keyframe arrives:
+
+1. **Truncation.** The stream ends mid-transaction, or a new `begin_frame` arrives before the open transaction's `commit_frame`. The partial frame is never presented.
+2. **Seq mismatch.** A `commit_frame` whose `frame_seq` does not match the open `begin_frame`'s `frame_seq`, or a `begin_frame` arriving while a transaction is already open.
+3. **In-transaction sizing failure or unknown opcode.** An unsizable or unknown opcode encountered inside an open transaction. Byte boundaries are no longer trustworthy, so the frontend cannot safely continue. This deliberately tightens the reader's normal warn-and-continue policy: outside a transaction the reader may still skip an unknown opcode, but inside one it invalidates.
+4. **Base mismatch.** A delta transaction whose `base_frame_seq` names a frame this client never committed.
+
+### request_keyframe flow
+
+After any invalidation, the frontend emits `request_keyframe(last_good_frame_seq)`. The BEAM responds by sending the next frame as a full keyframe (`base_frame_seq == 0`), which re-establishes a known base for subsequent deltas. `last_good_frame_seq` is informational for the BEAM (the cleanly committed frame the client last held); the recovery action is the same regardless of its value: send a full keyframe. In the child-B single-client prototype, an inbound `request_keyframe` simply forces the next frame full.
 
 ---
 
@@ -310,6 +378,19 @@ Total size: 9 bytes.
 | `0x01` | Release |
 | `0x02` | Motion (no button held) |
 | `0x03` | Drag (button held during motion) |
+
+### `0x08` request_keyframe
+
+Ask the BEAM to send the next frame as a full keyframe. A frontend emits this after a frame transaction is invalidated (see "Frame Transactions"). Decoders ship in protocol_version 3; nothing on either frontend emits it until the staging/commit children (#2219 C/D) land.
+
+```
+opcode:              u8  = 0x08
+last_good_frame_seq: u32      last frame_seq the frontend committed cleanly; 0 if none
+```
+
+Total size: 5 bytes.
+
+**Behavior:** The BEAM forces the next frame full (`base_frame_seq == 0`), re-establishing a known delta base. See "Frame Transactions" for the full recovery flow.
 
 ---
 
@@ -681,7 +762,7 @@ Total size: 4 + msg_len bytes.
 
 ## Protocol Version Negotiation
 
-The schema (`docs/protocol_schema.toml`) carries a `protocol_version` integer (currently 2). `mix protocol.gen` emits it as a constant on every side: `Minga.Protocol.Opcodes.protocol_version()` (Elixir), `generated.ProtocolVersion` (Go), `PROTOCOL_VERSION` (Swift), `PROTOCOL_VERSION` (Zig parser). Bump it whenever the wire contract changes incompatibly; protocol_version 2 is the bump that retired the 9 cell-paradigm render opcodes.
+The schema (`docs/protocol_schema.toml`) carries a `protocol_version` integer (currently 3). `mix protocol.gen` emits it as a constant on every side: `Minga.Protocol.Opcodes.protocol_version()` (Elixir), `generated.ProtocolVersion` (Go), `PROTOCOL_VERSION` (Swift), `PROTOCOL_VERSION` (Zig parser). Bump it whenever the wire contract changes incompatibly; protocol_version 2 retired the 9 cell-paradigm render opcodes, and protocol_version 3 (#2219) added the frame-transaction vocabulary (`begin_frame`, `commit_frame`, `request_keyframe`) and authoritative layout (`surface_placement`, `gui_surface_layout`). A frontend built against protocol_version 2 handshakes as 2, mismatches the BEAM's 3, and receives the `protocol_error` blocking surface instead of a desynced stream.
 
 **Handshake.** A frontend appends its compiled-in `protocol_version` as a u16 tail on the extended `ready` event (after `caps_data`). A frontend that omits the tail (short ready, or extended ready without the tail) is treated as protocol_version 0.
 
