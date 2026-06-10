@@ -61,6 +61,11 @@ type Model struct {
 	// updates. hudVisible toggles the on-screen p50/p99 overlay at runtime.
 	latency    *latency.Recorder
 	hudVisible bool
+	// mouseDrag tracks an in-progress press-drag over a draggable chrome zone
+	// (a tab or a file-tree row), so a release over a different target can emit
+	// a tab_reorder or file_tree_drop gui_action (ticket #2229, AC3). It is nil
+	// when no draggable press is active.
+	mouseDrag *chromeDrag
 }
 
 type position struct {
@@ -148,10 +153,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMsg:
 		if updated, ok := m.localMouse(msg); ok {
 			m = updated
-		} else if packet, ok := m.semanticMousePacket(msg); ok {
-			m.send(packet)
 		} else {
-			m.send(mousePacket(msg))
+			updated, dragPacket, handled := m.handleChromeDrag(msg)
+			m = updated
+			switch {
+			case dragPacket != nil:
+				m.send(dragPacket)
+			case handled:
+				// A chrome drag consumed the event (origin press recorded or an
+				// in-progress drag motion). Do not also forward it as a raw
+				// buffer event or a single-click select.
+			default:
+				if packet, ok := m.semanticMousePacket(msg); ok {
+					m.send(packet)
+				} else {
+					m.send(mousePacket(msg))
+				}
+			}
 		}
 	case agentAnimationTickMsg:
 		m.agentAnimationFrame++

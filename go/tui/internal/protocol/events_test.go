@@ -15,6 +15,40 @@ func TestEncodeGUIFileTreeClick(t *testing.T) {
 	}
 }
 
+func TestEncodeGUITabReorder(t *testing.T) {
+	got := EncodeGUITabReorder(0x01020304, 5)
+	want := []byte{generated.OPGuiAction, generated.GUIActionTabReorder, 0x01, 0x02, 0x03, 0x04, 0, 5}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("tab_reorder packet = %v, want %v", got, want)
+	}
+}
+
+func TestEncodeGUIFileTreeDrop(t *testing.T) {
+	got := EncodeGUIFileTreeDrop(2, 0xAABBCCDD, true, 0, "id", "p", []string{"src/a.ex"})
+	want := []byte{
+		generated.OPGuiAction, generated.GUIActionFileTreeDrop,
+		0, 2, // target_index
+		0xAA, 0xBB, 0xCC, 0xDD, // target_path_hash
+		1,              // target_kind (dir)
+		0,              // modifiers
+		0, 2, 'i', 'd', // target_id (string16)
+		0, 1, 'p', // target_path (string16)
+		0, 1, // source_count
+		0, 8, 's', 'r', 'c', '/', 'a', '.', 'e', 'x', // source path (string16)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("file_tree_drop packet = %v, want %v", got, want)
+	}
+}
+
+func TestEncodeGUIFileTreeDropFileTarget(t *testing.T) {
+	got := EncodeGUIFileTreeDrop(0, 0, false, 0, "", "", nil)
+	// target_kind byte must be 0 for a file target, source_count 0.
+	if got[8] != 0 {
+		t.Fatalf("target_kind = %d, want 0 for a file target", got[8])
+	}
+}
+
 func TestEncodeGUIExecuteCommand(t *testing.T) {
 	got := EncodeGUIExecuteCommand("write")
 	want := []byte{generated.OPGuiAction, generated.GUIActionExecuteCommand, 0, 5, 'w', 'r', 'i', 't', 'e'}

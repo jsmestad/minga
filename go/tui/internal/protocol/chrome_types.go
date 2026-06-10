@@ -156,6 +156,7 @@ type FileTree struct {
 type FileTreeRow struct {
 	ID        string
 	Path      string
+	PathHash  uint32
 	Name      string
 	Icon      string
 	IconColor uint32

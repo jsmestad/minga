@@ -108,6 +108,66 @@ func TestMousePacketEncodesHorizontalWheel(t *testing.T) {
 	}
 }
 
+// A held-button motion is a drag (event_type 0x03) and a free-pointer motion is
+// a hover (event_type 0x02). The BEAM only extends a selection on a drag, so the
+// distinction is load-bearing for drag selection (ticket #2229, AC2).
+func TestMousePacketDistinguishesDragFromMotion(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		msg           tea.MouseMsg
+		wantEventType byte
+		wantButton    byte
+	}{
+		{
+			name:          "left-button held motion is a drag",
+			msg:           tea.MouseMotionMsg(tea.Mouse{X: 5, Y: 3, Button: tea.MouseLeft}),
+			wantEventType: protocol.MouseDrag,
+			wantButton:    0,
+		},
+		{
+			name:          "free pointer motion is a hover",
+			msg:           tea.MouseMotionMsg(tea.Mouse{X: 5, Y: 3, Button: tea.MouseNone}),
+			wantEventType: protocol.MouseMotion,
+			wantButton:    3,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			packet := mousePacket(tc.msg)
+			if packet[7] != tc.wantEventType {
+				t.Fatalf("event type = %#x, want %#x", packet[7], tc.wantEventType)
+			}
+			if packet[5] != tc.wantButton {
+				t.Fatalf("button = %#x, want %#x", packet[5], tc.wantButton)
+			}
+		})
+	}
+}
+
+// The SGR-tail decode path (used when the terminal mouse report arrives as
+// fragmented key text) must make the same drag/motion distinction.
+func TestSGRMouseTailDistinguishesDragFromMotion(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		text          string
+		wantEventType byte
+	}{
+		// Button code 32 = left button (0) + motion bit (0x20): a left-drag.
+		{name: "left drag", text: "<32;10;5M", wantEventType: protocol.MouseDrag},
+		// Button code 35 = none (0x03) + motion bit (0x20): free motion.
+		{name: "free motion", text: "<35;10;5M", wantEventType: protocol.MouseMotion},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			packet, ok := keyPacket(tea.KeyPressMsg(tea.Key{Code: tea.KeyExtended, Text: tc.text}), 0)
+			if !ok {
+				t.Fatal("SGR motion tail should encode a mouse packet")
+			}
+			if packet[7] != tc.wantEventType {
+				t.Fatalf("event type = %#x, want %#x", packet[7], tc.wantEventType)
+			}
+		})
+	}
+}
+
 func TestKeyPacketParsesShiftWheelSGRMouseTailAsHorizontal(t *testing.T) {
 	packet, ok := keyPacket(tea.KeyPressMsg(tea.Key{Code: tea.KeyExtended, Text: "<69;57;23M"}), 0)
 	if !ok {
