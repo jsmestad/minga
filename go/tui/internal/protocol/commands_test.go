@@ -477,14 +477,15 @@ func TestDecodePickerShortHeaderSectionStopsAtWindow(t *testing.T) {
 	body := section(0x01, header)
 	packet := []byte{generated.OPGuiPicker, 1}
 	packet = append(packet, body...)
-	packet = append(packet, generated.OPBatchEnd, 0, 0, 0, 0)
+	packet = append(packet, generated.OPCommitFrame, 0, 0, 0, 0, 0, 0, 0, 0)
 
 	first, err := DecodeCommand(packet)
 	if err != nil {
 		t.Fatalf("DecodeCommand returned error: %v", err)
 	}
-	if first.Size != len(packet)-5 {
-		t.Fatalf("picker size = %d, want %d", first.Size, len(packet)-5)
+	// commit_frame is 9 bytes (opcode + frame_seq:u32 + input_seq:u32).
+	if first.Size != len(packet)-9 {
+		t.Fatalf("picker size = %d, want %d", first.Size, len(packet)-9)
 	}
 	picker := first.Chrome.Picker
 	if !picker.Visible || picker.Selected != 5 || picker.Filtered != 9 || picker.Total != 12 || !picker.HasPreview {
@@ -498,8 +499,8 @@ func TestDecodePickerShortHeaderSectionStopsAtWindow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecodeCommand batch returned error: %v", err)
 	}
-	if second.Kind != CommandBatchEnd {
-		t.Fatalf("second kind = %v, want batch end", second.Kind)
+	if second.Kind != CommandCommitFrame {
+		t.Fatalf("second kind = %v, want commit frame", second.Kind)
 	}
 }
 
