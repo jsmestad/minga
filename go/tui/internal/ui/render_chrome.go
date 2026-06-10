@@ -134,7 +134,7 @@ func (m Model) renderBreadcrumb(crumb protocol.Breadcrumb) string {
 		if index == len(crumb.Segments)-1 {
 			style = style.Foreground(m.palette().Text())
 		}
-		segments = append(segments, style.Render(segment))
+		segments = append(segments, m.zones.Mark(zoneIDBreadcrumbSegment(index), style.Render(segment)))
 	}
 	separator := lipgloss.NewStyle().Foreground(m.palette().GutterText()).Background(m.palette().EditorSurface()).Render(" › ")
 	text := "  " + strings.Join(segments, separator)
@@ -296,12 +296,54 @@ func (m Model) renderMinibuffer(mini protocol.Minibuffer) string {
 	return m.charmInput(prompt, value, mini.CursorPos)
 }
 
+// renderCompletion draws the completion popup as directly-styled rows rather
+// than a charm list so each row can carry a lipgloss zone marker. Mouse routing
+// (semantic_mouse.go) maps a row click to completion_select, matching the GUI
+// (CompletionOverlay.swift:93); the visual stays a titled, selectable list.
 func (m Model) renderCompletion(completion protocol.Completion) []string {
-	items := make([]componentItem, 0, len(completion.Items))
-	for _, item := range completion.Items {
-		items = append(items, componentItem{title: item.Label, description: item.Detail})
+	height := m.maxOverlayHeight()
+	width := max(m.width, 1)
+	theme := m.palette()
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.Accent()).Background(theme.PopupChrome()).Width(width).ColorWhitespace(true)
+	lines := []string{renderPadded(titleStyle, " Completion", width)}
+
+	rowBudget := max(height-1, 0)
+	selected := min(max(int(completion.Selected), 0), max(len(completion.Items)-1, 0))
+	start := 0
+	if selected >= rowBudget && rowBudget > 0 {
+		start = selected - rowBudget + 1
 	}
-	return takeLines(m.charmList("Completion", items, int(completion.Selected), m.maxOverlayHeight(), true), m.maxOverlayHeight())
+	end := min(start+rowBudget, len(completion.Items))
+	for index := start; index < end; index++ {
+		row := m.renderCompletionItemRow(completion.Items[index], index == selected, width)
+		lines = append(lines, m.zones.Mark(zoneIDCompletionItem(index), row))
+	}
+	return takeLines(lines, height)
+}
+
+func (m Model) renderCompletionItemRow(item protocol.CompletionItem, selected bool, width int) string {
+	theme := m.palette()
+	rowBackground := theme.PopupSurface()
+	rowForeground := theme.PopupText()
+	if selected {
+		rowBackground = theme.PopupSelection()
+		rowForeground = theme.PopupSelectionText()
+	}
+	labelStyle := lipgloss.NewStyle().Foreground(rowForeground).Background(rowBackground).ColorWhitespace(true)
+	if selected {
+		labelStyle = labelStyle.Bold(true)
+	}
+	marker := " "
+	if selected {
+		marker = "▌"
+	}
+	markerStyle := lipgloss.NewStyle().Foreground(theme.Accent()).Background(rowBackground).ColorWhitespace(true)
+	text := markerStyle.Render(marker) + labelStyle.Render(" "+item.Label)
+	if strings.TrimSpace(item.Detail) != "" {
+		text += lipgloss.NewStyle().Foreground(theme.PopupMutedText()).Background(rowBackground).ColorWhitespace(true).Render("  " + strings.TrimSpace(item.Detail))
+	}
+	rowStyle := lipgloss.NewStyle().Background(rowBackground).Width(width).ColorWhitespace(true)
+	return renderPadded(rowStyle, text, width)
 }
 
 func (m Model) renderWhichKey(which protocol.WhichKey) []string {

@@ -94,6 +94,52 @@ func EncodeGUIExecuteCommand(command string) []byte {
 	return append(out, payload...)
 }
 
+// EncodeGUIBreadcrumbClick encodes a breadcrumb_click action. Wire format:
+// <gui_action, 0x06, segment_index:u8>. The GUI sends the clicked segment's
+// zero-based index (BreadcrumbBar.swift:51).
+func EncodeGUIBreadcrumbClick(index byte) []byte {
+	return []byte{generated.OPGuiAction, generated.GUIActionBreadcrumbClick, index}
+}
+
+// EncodeGUICompletionSelect encodes a completion_select action. Wire format:
+// <gui_action, 0x05, index:u16>. The GUI sends the selected completion item
+// index (CompletionOverlay.swift:93).
+func EncodeGUICompletionSelect(index uint16) []byte {
+	return []byte{generated.OPGuiAction, generated.GUIActionCompletionSelect, byte(index >> 8), byte(index)}
+}
+
+// EncodeGUIHoverOpenAction encodes a hover_open_action. Wire format:
+// <gui_action, 0x3F> with an empty payload, matching the GUI accept gesture
+// (HoverPopupOverlay.swift:123).
+func EncodeGUIHoverOpenAction() []byte {
+	return []byte{generated.OPGuiAction, generated.GUIActionHoverOpenAction}
+}
+
+// EncodeGUISidebarAction encodes a sidebar_action. Wire format:
+// <gui_action, 0x57, sidebar_id_len:u16, sidebar_id, kind_len:u16, kind,
+// action_len:u16, action>. Mirrors NativeSidebarRegistry's primary action,
+// which sends "activate" for an inactive sidebar and "toggle" for the active
+// one (NativeSidebarRegistry.swift:64, ProtocolEncoder.swift:624).
+func EncodeGUISidebarAction(sidebarID, kind, action string) []byte {
+	out := []byte{generated.OPGuiAction, generated.GUIActionSidebarAction}
+	out = appendString16(out, sidebarID)
+	out = appendString16(out, kind)
+	out = appendString16(out, action)
+	return out
+}
+
+// appendString16 appends a length-prefixed string (len:u16 big-endian, then
+// utf8 bytes) to out, truncating to the u16 ceiling, matching the macOS
+// appendString16 helper used by every string-bearing gui_action.
+func appendString16(out []byte, value string) []byte {
+	payload := []byte(value)
+	if len(payload) > 65535 {
+		payload = payload[:65535]
+	}
+	out = append(out, byte(len(payload)>>8), byte(len(payload)))
+	return append(out, payload...)
+}
+
 func EncodePaste(text string) []byte {
 	payload := []byte(text)
 	if len(payload) > 65535 {
