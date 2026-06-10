@@ -23,18 +23,22 @@ defmodule Minga.Test.ProtocolGolden do
   payloads (max-length strings, unicode, zero-item and populated lists).
   """
 
+  alias Minga.Frontend.Adapter.GUI.BreadcrumbEncoder
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Frontend.Adapter.GUI.ChangeSummaryEncoder
   alias Minga.Frontend.Adapter.GUI.CompletionEncoder
   alias Minga.Frontend.Adapter.GUI.GitStatusEncoder
   alias Minga.Frontend.Adapter.GUI.PickerEncoder
   alias Minga.Frontend.Adapter.GUI.SearchStateEncoder
+  alias Minga.Frontend.Protocol.Encoding
   alias Minga.Protocol.GoldenFields
+  alias Minga.RenderModel.UI.Breadcrumb
   alias Minga.RenderModel.UI.ChangeSummary
   alias Minga.RenderModel.UI.Completion
   alias Minga.RenderModel.UI.GitStatus
   alias Minga.RenderModel.UI.Picker
   alias Minga.RenderModel.UI.SearchState
+  alias MingaEditor.RenderModel.UI.GitStatusBuilder
 
   @typedoc """
   One golden fixture: a human name, the generated decoder unit name (matches a
@@ -59,6 +63,7 @@ defmodule Minga.Test.ProtocolGolden do
       picker_action_menu_fixtures() ++
       picker_load_status_fixtures() ++
       picker_query_fixtures() ++
+      breadcrumb_fixtures() ++
       git_status_fixtures() ++
       change_summary_fixtures() ++
       search_state_fixtures() ++
@@ -236,7 +241,7 @@ defmodule Minga.Test.ProtocolGolden do
 
   # ── Fixtures: gui_picker header (GuiPickerHeader) ─────────────────────────
 
-  @spec picker_model([Picker.Item.t()]) :: Picker.t()
+  @spec picker_model([Picker.item()]) :: Picker.t()
   defp picker_model(items) do
     %Picker{
       visible?: true,
@@ -312,63 +317,63 @@ defmodule Minga.Test.ProtocolGolden do
 
   @spec picker_item_fixtures() :: [fixture()]
   defp picker_item_fixtures do
+    # Items are the wire-shaped maps the Layer 2 builder produces (flags packed,
+    # nil-vs-empty defaulted, match_positions clamped). The shell passes these
+    # straight to the generated encode_picker_item/1.
     items = [
-      %Picker.Item{
-        id: 1,
+      %{
+        icon_color: 0x00AABBCC,
+        flags: 0,
         label: "file.ex",
         description: "desc",
         annotation: "ann",
-        icon_color: 0x00AABBCC,
-        two_line?: false,
-        match_positions: [1, 4],
-        marked?: false
+        match_positions: [1, 4]
       },
-      %Picker.Item{
-        id: 2,
+      %{
+        # two_line sets bit 0, marked sets bit 1 => 0b11 = 3
+        icon_color: 0,
+        flags: 3,
         label: "x",
         description: "",
         annotation: "",
-        icon_color: nil,
-        two_line?: true,
-        match_positions: [],
-        marked?: true
+        match_positions: []
       }
     ]
 
+    # Boundary fixture at the wire maximum: a full 255-entry match_positions
+    # list (the value the builder produces at and above its clamp). This proves
+    # the generated encode_picker_item/1 lays out a max-count u8 list correctly.
+    # The 256 -> 255 clamp itself is a builder-layer concern, covered by
+    # MingaEditor.RenderModel.UI.PickerBuilderTest.
+    boundary_max = %{
+      icon_color: 0,
+      flags: 0,
+      label: "bmax",
+      description: "",
+      annotation: "",
+      match_positions: Enum.to_list(0..254)
+    }
+
     payload = section_body(picker_command(picker_model(items)), 0x03)
-    # The items section body is count(u16) ++ items; strip the count prefix so
-    # the GuiPickerItems decoder (which reads the count) is exercised separately
-    # by re-using the section body directly.
+
     [
       %{
         name: "picker_items_list",
         decoder: "GuiPickerItems",
         payload: payload,
-        expected: [
-          %{
-            icon_color: 0x00AABBCC,
-            flags: 0,
-            label: "file.ex",
-            description: "desc",
-            annotation: "ann",
-            match_positions: [1, 4]
-          },
-          %{
-            icon_color: 0,
-            # two_line? sets bit 0, marked? sets bit 1 => 0b11 = 3
-            flags: 3,
-            label: "x",
-            description: "",
-            annotation: "",
-            match_positions: []
-          }
-        ]
+        expected: items
       },
       %{
         name: "picker_items_empty",
         decoder: "GuiPickerItems",
         payload: section_body(picker_command(picker_model([])), 0x03),
         expected: []
+      },
+      %{
+        name: "picker_items_match_positions_max",
+        decoder: "GuiPickerItems",
+        payload: section_body(picker_command(picker_model([boundary_max])), 0x03),
+        expected: [boundary_max]
       }
     ]
   end
@@ -434,50 +439,201 @@ defmodule Minga.Test.ProtocolGolden do
     ]
   end
 
-  # ── Fixtures: gui_git_status header (GuiGitStatusFields) ──────────────────
+  # ── Fixtures: gui_breadcrumb (GuiBreadcrumbFields) ────────────────────────
 
-  @spec git_status_payload(GitStatus.t()) :: binary()
-  defp git_status_payload(model) do
-    # gui_git_status is custom-framed: opcode(1) then the payload. The generated
-    # decoder reads only the fixed 6-byte header (repo_state, syncing, ahead,
-    # behind), so take just that prefix after the opcode byte.
-    {cmd, _caches} = GitStatusEncoder.encode(model, Caches.new())
-    <<_op::8, header::binary-size(6), _tail::binary>> = cmd
-    header
+  # gui_breadcrumb is custom-framed: opcode(1) then the GuiBreadcrumbFields
+  # payload (u8 segment count + that many string16 segments). Strip the opcode.
+  @spec breadcrumb_payload(Breadcrumb.t()) :: binary()
+  defp breadcrumb_payload(model) do
+    {cmd, _caches} = BreadcrumbEncoder.encode(model, Caches.new())
+    <<_op::8, payload::binary>> = cmd
+    payload
   end
 
-  @spec git_status_fixtures() :: [fixture()]
-  defp git_status_fixtures do
-    normal = %GitStatus{
-      repo_state: :normal,
-      syncing: true,
-      branch: "main",
-      ahead: 2,
-      behind: 1,
-      entries: []
-    }
+  @spec breadcrumb_model([String.t()]) :: Breadcrumb.t()
+  defp breadcrumb_model(segments) do
+    %Breadcrumb{file_path: "fixture", root: "/", segments: segments}
+  end
 
-    not_repo = %GitStatus{repo_state: :not_a_repo, syncing: false, ahead: 0, behind: 0}
-    loading = %GitStatus{repo_state: :loading, syncing: false, ahead: 65_535, behind: 65_535}
+  @spec breadcrumb_fixtures() :: [fixture()]
+  defp breadcrumb_fixtures do
+    empty = breadcrumb_model([])
+    typical = breadcrumb_model(["lib", "foo.ex"])
+    unicode = breadcrumb_model(["λ", "café→.ex"])
+    # A 255-byte segment is the string16 element max worth covering here.
+    max_segment = breadcrumb_model([String.duplicate("x", 255)])
 
     [
       %{
-        name: "git_status_normal",
-        decoder: "GuiGitStatusFields",
-        payload: git_status_payload(normal),
-        expected: %{repo_state: 0, syncing: 1, ahead: 2, behind: 1}
+        name: "breadcrumb_empty",
+        decoder: "GuiBreadcrumbFields",
+        payload: breadcrumb_payload(empty),
+        expected: %{segments: []}
       },
       %{
-        name: "git_status_not_repo",
+        name: "breadcrumb_typical",
+        decoder: "GuiBreadcrumbFields",
+        payload: breadcrumb_payload(typical),
+        expected: %{segments: ["lib", "foo.ex"]}
+      },
+      %{
+        name: "breadcrumb_unicode",
+        decoder: "GuiBreadcrumbFields",
+        payload: breadcrumb_payload(unicode),
+        expected: %{segments: ["λ", "café→.ex"]}
+      },
+      %{
+        name: "breadcrumb_max_segment",
+        decoder: "GuiBreadcrumbFields",
+        payload: breadcrumb_payload(max_segment),
+        expected: %{segments: [String.duplicate("x", 255)]}
+      }
+    ]
+  end
+
+  # ── Fixtures: gui_git_status (GuiGitStatusFields) ─────────────────────────
+
+  # gui_git_status is custom-framed: opcode(1) then the full GuiGitStatusFields
+  # payload (header + entries + toast + base_path/last_commit/stash tail). Strip
+  # the opcode byte.
+  @spec git_status_payload(GitStatus.t()) :: binary()
+  defp git_status_payload(model) do
+    {cmd, _caches} = GitStatusEncoder.encode(model, Caches.new())
+    <<_op::8, payload::binary>> = cmd
+    payload
+  end
+
+  @spec git_path_hash(String.t()) :: non_neg_integer()
+  defp git_path_hash(path), do: :erlang.phash2(path, 0xFFFFFFFF)
+
+  @spec absent_toast() :: map()
+  defp absent_toast, do: %{present: 0, level: 0, action: 0, message: ""}
+
+  @spec git_status_fixtures() :: [fixture()]
+  defp git_status_fixtures do
+    # not_a_repo with an absent toast: presence-byte == 0 path.
+    not_repo = GitStatusBuilder.build(nil, false, nil)
+
+    # loading repo at the u16 ahead/behind boundary.
+    loading =
+      GitStatusBuilder.build(%{repo_state: :loading, ahead: 65_535, behind: 65_535}, false, nil)
+
+    # Normal repo exercising the section predicate (staged/untracked/conflict/
+    # other), the per-entry path_hash, and a present error toast.
+    entries = [
+      %{path: "lib/a.ex", status: :modified, staged: true},
+      %{path: "lib/b.ex", status: :untracked, staged: false},
+      %{path: "lib/c.ex", status: :conflict, staged: false},
+      %{path: "lib/d.ex", status: :added, staged: false}
+    ]
+
+    normal =
+      GitStatusBuilder.build(
+        %{
+          repo_state: :normal,
+          branch: "main",
+          ahead: 2,
+          behind: 1,
+          entries: entries,
+          entry_base_path: "/repo",
+          last_commit_message: "fix: λ café→",
+          stash_count: 5
+        },
+        true,
+        %{message: "Pull failed", level: :error, action: :pull_and_retry}
+      )
+
+    # Boundary case: oversized stash_count clamps to u16 max, and an over-length
+    # last_commit_message is utf8-truncated (the builder appends the suffix).
+    over_limit_message = String.duplicate("λ", 40_000)
+
+    clamp =
+      GitStatusBuilder.build(
+        %{
+          repo_state: :normal,
+          branch: "b",
+          stash_count: 70_000,
+          last_commit_message: over_limit_message
+        },
+        true,
+        %{message: "Done", level: :success, action: nil}
+      )
+
+    [
+      %{
+        name: "git_status_not_repo_no_toast",
         decoder: "GuiGitStatusFields",
         payload: git_status_payload(not_repo),
-        expected: %{repo_state: 1, syncing: 0, ahead: 0, behind: 0}
+        expected: %{
+          repo_state: 1,
+          syncing: 0,
+          ahead: 0,
+          behind: 0,
+          branch: "",
+          entries: [],
+          toast: absent_toast(),
+          entry_base_path: "",
+          last_commit_message: "",
+          stash_count: 0
+        }
       },
       %{
         name: "git_status_loading_max",
         decoder: "GuiGitStatusFields",
         payload: git_status_payload(loading),
-        expected: %{repo_state: 2, syncing: 0, ahead: 65_535, behind: 65_535}
+        expected: %{
+          repo_state: 2,
+          syncing: 0,
+          ahead: 65_535,
+          behind: 65_535,
+          branch: "",
+          entries: [],
+          toast: absent_toast(),
+          entry_base_path: "",
+          last_commit_message: "",
+          stash_count: 0
+        }
+      },
+      %{
+        name: "git_status_normal_entries_toast",
+        decoder: "GuiGitStatusFields",
+        payload: git_status_payload(normal),
+        expected: %{
+          repo_state: 0,
+          syncing: 1,
+          ahead: 2,
+          behind: 1,
+          branch: "main",
+          entries: [
+            %{path_hash: git_path_hash("lib/a.ex"), section: 0, status: 1, path: "lib/a.ex"},
+            %{path_hash: git_path_hash("lib/b.ex"), section: 2, status: 6, path: "lib/b.ex"},
+            %{path_hash: git_path_hash("lib/c.ex"), section: 3, status: 7, path: "lib/c.ex"},
+            %{path_hash: git_path_hash("lib/d.ex"), section: 1, status: 2, path: "lib/d.ex"}
+          ],
+          toast: %{present: 1, level: 1, action: 1, message: "Pull failed"},
+          entry_base_path: "/repo",
+          last_commit_message: "fix: λ café→",
+          stash_count: 5
+        }
+      },
+      %{
+        name: "git_status_clamp_truncate_boundary",
+        decoder: "GuiGitStatusFields",
+        payload: git_status_payload(clamp),
+        expected: %{
+          repo_state: 0,
+          syncing: 1,
+          ahead: 0,
+          behind: 0,
+          branch: "b",
+          entries: [],
+          toast: %{present: 1, level: 0, action: 0, message: "Done"},
+          entry_base_path: "",
+          # The builder truncates to the u16 byte limit; re-derive the exact
+          # truncated value so the fixture pins byte-for-byte agreement.
+          last_commit_message: Encoding.utf8_prefix_bytes(over_limit_message, 65_535),
+          stash_count: 65_535
+        }
       }
     ]
   end

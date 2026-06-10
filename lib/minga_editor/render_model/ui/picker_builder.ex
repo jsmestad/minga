@@ -1,14 +1,16 @@
 defmodule MingaEditor.RenderModel.UI.PickerBuilder do
   @moduledoc false
 
+  import Bitwise
+
   alias Minga.Buffer
   alias Minga.RenderModel.UI.Picker, as: PickerModel
   alias Minga.RenderModel.UI.Picker.ActionMenu
-  alias Minga.RenderModel.UI.Picker.Item, as: PickerItemModel
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.UI.Picker
 
   @max_items 100
+  @max_match_positions 255
   @preview_max_lines 50
   @binary_preview_message "Binary file preview unavailable"
 
@@ -62,19 +64,30 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
     }
   end
 
-  @spec item_model(Picker.t(), Picker.Item.t()) :: PickerItemModel.t()
+  # Normalize one picker source item into the wire-shaped map the generated
+  # `encode_picker_item/1` consumes. All derivation lives here (ruling 4): the
+  # `flags` byte, the `icon_color || 0` / `annotation || ""` nil-vs-empty
+  # defaulting, and the 255 match_positions clamp. (The source `description` is
+  # already typed non-nil with a "" default, so it needs no defaulting.) The
+  # encoder shell passes these maps straight to the generated codec without
+  # further derivation.
+  @spec item_model(Picker.t(), Picker.Item.t()) :: PickerModel.item()
   defp item_model(picker, item) do
-    %PickerItemModel{
-      id: item.id,
+    %{
+      icon_color: item.icon_color || 0,
+      flags: item_flags(item, Picker.marked?(picker, item)),
       label: item.label,
-      description: item.description || "",
+      description: item.description,
       annotation: item.annotation || "",
-      search_text: item.search_text || "",
-      icon_color: item.icon_color,
-      two_line?: item.two_line,
-      match_positions: item.match_positions,
-      marked?: Picker.marked?(picker, item)
+      match_positions: Enum.take(item.match_positions, @max_match_positions)
     }
+  end
+
+  @spec item_flags(Picker.Item.t(), boolean()) :: non_neg_integer()
+  defp item_flags(item, marked?) do
+    two_line = if item.two_line, do: 1, else: 0
+    marked = if marked?, do: 1, else: 0
+    bor(two_line, marked <<< 1)
   end
 
   @spec action_menu_model(term()) :: ActionMenu.t() | nil

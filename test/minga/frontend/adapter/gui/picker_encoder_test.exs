@@ -5,7 +5,6 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
   alias Minga.Frontend.Adapter.GUI.PickerEncoder
   alias Minga.RenderModel.UI.Picker
   alias Minga.RenderModel.UI.Picker.ActionMenu
-  alias Minga.RenderModel.UI.Picker.Item
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
   alias MingaEditor.UI.Picker, as: LegacyPicker
   alias MingaEditor.UI.Picker.Item, as: LegacyPickerItem
@@ -31,14 +30,14 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
         marked_count: 1,
         has_preview?: true,
         items: [
-          %Item{
-            id: "one",
+          # Wire-shaped item map as produced by the builder: flags 0b11 = 3
+          # (two_line + marked), icon_color present, no nil defaulting needed.
+          %{
+            icon_color: 0x123456,
+            flags: 3,
             label: "One",
             description: "First",
             annotation: "open",
-            icon_color: 0x123456,
-            two_line?: true,
-            marked?: true,
             match_positions: [0, 2]
           }
         ],
@@ -93,7 +92,16 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
         total_count: 2,
         marked_count: 1,
         has_preview?: true,
-        items: [%Item{id: "one", label: "One", marked?: true, match_positions: [0]}],
+        items: [
+          %{
+            icon_color: 0,
+            flags: 2,
+            label: "One",
+            description: "",
+            annotation: "",
+            match_positions: [0]
+          }
+        ],
         action_menu: %ActionMenu{actions: ["open"], selected_index: 0},
         mode_prefix: ">",
         preview_lines: [[{"hello", 0xFFFFFF, true}]]

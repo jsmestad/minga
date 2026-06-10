@@ -3,14 +3,14 @@ defmodule Minga.Frontend.Adapter.GUI.GitStatusEncoderTest do
 
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Frontend.Adapter.GUI.GitStatusEncoder
-  alias Minga.RenderModel.UI.GitStatus
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
+  alias MingaEditor.RenderModel.UI.GitStatusBuilder
 
   @op_gui_git_status Minga.Protocol.Opcodes.gui_git_status()
 
   describe "encode/2" do
     test "encodes minimal not_a_repo status" do
-      model = %GitStatus{repo_state: :not_a_repo, syncing: false}
+      model = GitStatusBuilder.build(nil, false, nil)
       caches = Caches.new()
 
       {cmd, _caches} = GitStatusEncoder.encode(model, caches)
@@ -20,19 +20,18 @@ defmodule Minga.Frontend.Adapter.GUI.GitStatusEncoderTest do
     end
 
     test "encodes normal repo with entries" do
-      model = %GitStatus{
+      data = %{
         repo_state: :normal,
-        syncing: true,
         branch: "main",
         ahead: 2,
         behind: 1,
-        entries: [
-          %{path: "lib/foo.ex", status: :modified, staged: false}
-        ],
+        entries: [%{path: "lib/foo.ex", status: :modified, staged: false}],
         entry_base_path: "/project",
         last_commit_message: "fix",
         stash_count: 1
       }
+
+      model = GitStatusBuilder.build(data, true, nil)
 
       caches = Caches.new()
       {cmd, _caches} = GitStatusEncoder.encode(model, caches)
@@ -41,7 +40,7 @@ defmodule Minga.Frontend.Adapter.GUI.GitStatusEncoderTest do
     end
 
     test "returns nil on second call with same model (fingerprint skip)" do
-      model = %GitStatus{repo_state: :not_a_repo, syncing: false}
+      model = GitStatusBuilder.build(nil, false, nil)
       caches = Caches.new()
 
       {cmd1, caches} = GitStatusEncoder.encode(model, caches)
@@ -52,8 +51,8 @@ defmodule Minga.Frontend.Adapter.GUI.GitStatusEncoderTest do
     end
 
     test "re-encodes when model changes" do
-      model1 = %GitStatus{repo_state: :not_a_repo, syncing: false}
-      model2 = %GitStatus{repo_state: :normal, syncing: true, branch: "main"}
+      model1 = GitStatusBuilder.build(nil, false, nil)
+      model2 = GitStatusBuilder.build(%{repo_state: :normal, branch: "main"}, true, nil)
 
       caches = Caches.new()
       {_, caches} = GitStatusEncoder.encode(model1, caches)

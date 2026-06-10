@@ -57,8 +57,58 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
       assert model.load_status == :loading
       assert model.action_menu.actions == ["Open"]
       assert model.action_menu.selected_index == 0
-      assert [%{id: "one", marked?: true, two_line?: true, match_positions: [0, 2]}] = model.items
+      # The builder emits wire-shaped item maps: flags packs two_line (bit 0)
+      # and marked (bit 1), description/annotation default to "", icon_color
+      # defaults to 0, and match_positions are clamped to 255.
+      assert [
+               %{
+                 icon_color: 0x123456,
+                 flags: 3,
+                 label: "One",
+                 description: "First result",
+                 annotation: "enter",
+                 match_positions: [0, 2]
+               }
+             ] = model.items
+
       assert model.preview_lines == [[{"preview: One", 0xABCDEF, true}]]
+    end
+
+    test "normalizes item nil defaults and clamps match_positions to 255" do
+      # Source item with nil icon_color/annotation and an oversized
+      # match_positions list. The builder owns this derivation (ruling 4): the
+      # wire map must default nils and clamp the highlight list to 255 entries.
+      item = %Item{
+        id: "one",
+        label: "One",
+        description: "",
+        icon_color: nil,
+        annotation: nil,
+        match_positions: Enum.to_list(0..300)
+      }
+
+      picker = %PickerState{items: [item], filtered: [item], title: "Find", selected: 0}
+      modal = picker_modal(picker, nil, nil, "", :ready)
+
+      model = PickerBuilder.build(build_context(modal))
+
+      assert [wire_item] = model.items
+      assert wire_item.icon_color == 0
+      assert wire_item.description == ""
+      assert wire_item.annotation == ""
+      assert length(wire_item.match_positions) == 255
+      assert wire_item.match_positions == Enum.to_list(0..254)
+    end
+
+    test "exactly 255 match_positions are preserved (clamp boundary)" do
+      item = %Item{id: "one", label: "One", match_positions: Enum.to_list(0..254)}
+      picker = %PickerState{items: [item], filtered: [item], title: "Find", selected: 0}
+      modal = picker_modal(picker, nil, nil, "", :ready)
+
+      model = PickerBuilder.build(build_context(modal))
+
+      assert [%{match_positions: positions}] = model.items
+      assert length(positions) == 255
     end
 
     test "falls back to file preview when source has GUI preview but no preview callback" do

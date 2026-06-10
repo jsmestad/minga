@@ -464,15 +464,15 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
 
   describe "gui_picker items section matches schema" do
     test "items section encodes picker_item fields per schema" do
-      item = %Picker.Item{
-        id: "1",
+      # The shell consumes the builder's wire-shaped item map (flags packed,
+      # nil-vs-empty defaulted) and delegates to the generated encode_picker_item/1.
+      item = %{
+        icon_color: 0xAABBCC,
+        flags: 0,
         label: "file.ex",
         description: "desc",
         annotation: "ann",
-        icon_color: 0xAABBCC,
-        two_line?: false,
-        match_positions: [1, 4],
-        marked?: false
+        match_positions: [1, 4]
       }
 
       <<_opcode, section_count::8, sections_binary::binary>> =
@@ -489,11 +489,13 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
     end
 
     test "picker_item flags pack two_line (bit 0) and marked (bit 1)" do
-      item = %Picker.Item{
-        id: "1",
+      # flags 0b11 = 3 is computed by the builder; the shell just lays it out.
+      item = %{
+        icon_color: 0,
+        flags: 3,
         label: "x",
-        two_line?: true,
-        marked?: true,
+        description: "",
+        annotation: "",
         match_positions: []
       }
 
@@ -509,11 +511,17 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
     test "schema models every section the picker encoder emits", %{sections: sections} do
       schema_ids = sections["gui_picker"] |> Enum.map(& &1["id"]) |> MapSet.new()
 
+      item = %{
+        icon_color: 0,
+        flags: 0,
+        label: "x",
+        description: "",
+        annotation: "",
+        match_positions: []
+      }
+
       <<_opcode, section_count::8, sections_binary::binary>> =
-        PickerEncoder.encode_command(%Picker{
-          visible?: true,
-          items: [%Picker.Item{id: "1", label: "x"}]
-        })
+        PickerEncoder.encode_command(%Picker{visible?: true, items: [item]})
 
       actual_ids = extract_section_ids(sections_binary, section_count)
 

@@ -657,6 +657,41 @@ func DecodeGitStatusEntry(data []byte, offset int) (GitStatusEntry, int, error) 
 	}, pos, nil
 }
 
+func DecodeGitToast(data []byte, offset int) (GitToast, int, error) {
+	pos := offset
+	if err := decodeRequireLen(data, pos+1, "present"); err != nil {
+		return GitToast{}, offset, err
+	}
+	present := data[pos]
+	pos++
+	var level GitToastLevel
+	var action GitToastAction
+	var message string
+	if present == 1 {
+		var err error
+		if err := decodeRequireLen(data, pos+1, "level"); err != nil {
+			return GitToast{}, offset, err
+		}
+		level = GitToastLevel(data[pos])
+		pos++
+		if err := decodeRequireLen(data, pos+1, "action"); err != nil {
+			return GitToast{}, offset, err
+		}
+		action = GitToastAction(data[pos])
+		pos++
+		message, pos, err = decodeString16(data, pos)
+		if err != nil {
+			return GitToast{}, offset, err
+		}
+	}
+	return GitToast{
+		Present: present,
+		Level:   level,
+		Action:  action,
+		Message: message,
+	}, pos, nil
+}
+
 // Section decoders for gui_agent_chat
 
 func DecodeGuiAgentChatHeader(data []byte, offset int) (GuiAgentChatHeader, int, error) {
@@ -1766,13 +1801,22 @@ func DecodeGuiThemeFields(data []byte, offset int) (GuiThemeFields, int, error) 
 
 func DecodeGuiBreadcrumbFields(data []byte, offset int) (GuiBreadcrumbFields, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+1, "segment_count"); err != nil {
+	if err := decodeRequireLen(data, pos+1, "segments count"); err != nil {
 		return GuiBreadcrumbFields{}, offset, err
 	}
-	segmentCount := data[pos]
-	pos++
+	segmentsCount := int(data[pos])
+	pos += 1
+	segments := make([]string, 0, min(segmentsCount, len(data)-pos))
+	for i := 0; i < segmentsCount; i++ {
+		item, nextPos, err := decodeString16(data, pos)
+		if err != nil {
+			return GuiBreadcrumbFields{}, offset, err
+		}
+		pos = nextPos
+		segments = append(segments, item)
+	}
 	return GuiBreadcrumbFields{
-		SegmentCount: segmentCount,
+		Segments: segments,
 	}, pos, nil
 }
 
@@ -1926,7 +1970,7 @@ func DecodeGuiGitStatusFields(data []byte, offset int) (GuiGitStatusFields, int,
 	if err := decodeRequireLen(data, pos+1, "repo_state"); err != nil {
 		return GuiGitStatusFields{}, offset, err
 	}
-	repoState := data[pos]
+	repoState := GitRepoState(data[pos])
 	pos++
 	if err := decodeRequireLen(data, pos+1, "syncing"); err != nil {
 		return GuiGitStatusFields{}, offset, err
@@ -1943,11 +1987,52 @@ func DecodeGuiGitStatusFields(data []byte, offset int) (GuiGitStatusFields, int,
 	}
 	behind := decodeU16(data, pos)
 	pos += 2
+	branch, pos, err := decodeString16(data, pos)
+	if err != nil {
+		return GuiGitStatusFields{}, offset, err
+	}
+	if err := decodeRequireLen(data, pos+2, "entries count"); err != nil {
+		return GuiGitStatusFields{}, offset, err
+	}
+	entriesCount := int(decodeU16(data, pos))
+	pos += 2
+	entries := make([]GitStatusEntry, 0, min(entriesCount, len(data)-pos))
+	for i := 0; i < entriesCount; i++ {
+		item, nextPos, err := DecodeGitStatusEntry(data, pos)
+		if err != nil {
+			return GuiGitStatusFields{}, offset, err
+		}
+		pos = nextPos
+		entries = append(entries, item)
+	}
+	toast, pos, err := DecodeGitToast(data, pos)
+	if err != nil {
+		return GuiGitStatusFields{}, offset, err
+	}
+	entryBasePath, pos, err := decodeString16(data, pos)
+	if err != nil {
+		return GuiGitStatusFields{}, offset, err
+	}
+	lastCommitMessage, pos, err := decodeString16(data, pos)
+	if err != nil {
+		return GuiGitStatusFields{}, offset, err
+	}
+	if err := decodeRequireLen(data, pos+2, "stash_count"); err != nil {
+		return GuiGitStatusFields{}, offset, err
+	}
+	stashCount := decodeU16(data, pos)
+	pos += 2
 	return GuiGitStatusFields{
-		RepoState: repoState,
-		Syncing:   syncing,
-		Ahead:     ahead,
-		Behind:    behind,
+		RepoState:         repoState,
+		Syncing:           syncing,
+		Ahead:             ahead,
+		Behind:            behind,
+		Branch:            branch,
+		Entries:           entries,
+		Toast:             toast,
+		EntryBasePath:     entryBasePath,
+		LastCommitMessage: lastCommitMessage,
+		StashCount:        stashCount,
 	}, pos, nil
 }
 
