@@ -4,11 +4,11 @@ defmodule Mix.Tasks.Native.Build.Tui do
 
   The packaged TUI ships:
 
-    - the Go/Bubble Tea renderer (`minga-renderer-go`), the default terminal frontend;
-    - the Zig renderer (`minga-renderer`), the `MINGA_FRONTEND=zig` escape hatch;
+    - the Go/Bubble Tea renderer (`minga-renderer-go`), the terminal frontend;
     - the Zig parser (`minga-parser`) and hook runner (`minga-hook-runner`).
 
-  Both renderers ship so the escape hatch keeps working from a single binary.
+  The Zig renderer was removed in #2223; only the parser infrastructure ships
+  from the Zig build now.
   """
 
   use Mix.Task
@@ -19,7 +19,7 @@ defmodule Mix.Tasks.Native.Build.Tui do
   @spec run([String.t()]) :: :ok
   def run(_args) do
     Mix.Tasks.Native.Build.Result.raise_on_error(
-      Mix.Tasks.Compile.MingaZig.run(profile: :full),
+      Mix.Tasks.Compile.MingaZig.run([]),
       "native TUI build failed"
     )
 

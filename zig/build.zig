@@ -1,9 +1,5 @@
 const std = @import("std");
 
-const BackendOption = enum {
-    tui,
-};
-
 const generated_protocol_files = [_][]const u8{
     "src/generated/protocol_opcodes.zig",
     "src/generated/protocol_schema_test.zig",
@@ -38,22 +34,6 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     ensureGeneratedProtocolArtifacts(b);
-
-    const backend = b.option(BackendOption, "backend", "Rendering backend (default: tui)") orelse .tui;
-    const renderer = b.option(bool, "renderer", "Build the TUI renderer frontend binary") orelse true;
-
-    const vaxis = b.dependency("vaxis", .{
-        .target = target,
-        .optimize = optimize,
-    });
-    const zigzag = b.dependency("zigzag", .{
-        .target = target,
-        .optimize = optimize,
-    });
-
-    // Build options module — passes compile-time config to Zig source.
-    const build_options = b.addOptions();
-    build_options.addOption(BackendOption, "backend", backend);
 
     // ── Tree-sitter static library ────────────────────────────────────────
     // Always optimize vendored C code — query compilation is 100x slower
@@ -144,52 +124,10 @@ pub fn build(b: *std.Build) void {
 
     const test_step = b.step("test", "Run unit tests");
 
-    if (renderer) {
-        // Main executable
-        const exe = b.addExecutable(.{
-            .name = "minga-renderer",
-            .root_module = b.createModule(.{
-                .root_source_file = b.path("src/main.zig"),
-                .target = target,
-                .optimize = optimize,
-            }),
-        });
-        exe.root_module.addImport("vaxis", vaxis.module("vaxis"));
-        // ZigZag is linked into the existing minga-renderer target only. Do not add a parallel renderer binary; later slices should replace current-renderer internals in place.
-        exe.root_module.addImport("zigzag", zigzag.module("zigzag"));
-        exe.root_module.addImport("build_options", build_options.createModule());
-        exe.root_module.link_libc = true;
-        // Note: tree-sitter and grammars are linked only to minga-parser, not the renderer.
-
-        b.installArtifact(exe);
-
-        // Run step
-        const run_cmd = b.addRunArtifact(exe);
-        run_cmd.step.dependOn(b.getInstallStep());
-        if (b.args) |args| {
-            run_cmd.addArgs(args);
-        }
-        const run_step = b.step("run", "Run the renderer");
-        run_step.dependOn(&run_cmd.step);
-
-        // Renderer tests
-        const tests = b.addTest(.{
-            .root_module = b.createModule(.{
-                .root_source_file = b.path("src/main.zig"),
-                .target = target,
-                .optimize = optimize,
-            }),
-        });
-        tests.root_module.addImport("vaxis", vaxis.module("vaxis"));
-        tests.root_module.addImport("zigzag", zigzag.module("zigzag"));
-        tests.root_module.addImport("build_options", build_options.createModule());
-        tests.root_module.link_libc = true;
-
-        const run_tests = b.addRunArtifact(tests);
-        test_step.dependOn(&run_tests.step);
-    }
-
-    // ── Parser executable (tree-sitter only, no renderer/libvaxis) ────────
+    // ── Parser executable (tree-sitter only) ──────────────────────────────
+    // The Zig renderer (libvaxis/zigzag) was removed in #2223. This build now
+    // produces parser infrastructure only: minga-parser, minga-hook-runner, and
+    // the highlight benchmark.
     const parser_exe = b.addExecutable(.{
         .name = "minga-parser",
         .root_module = b.createModule(.{
@@ -225,7 +163,6 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
-    parser_tests.root_module.addImport("build_options", build_options.createModule());
     parser_tests.root_module.addIncludePath(b.path("vendor/tree-sitter/include"));
     parser_tests.root_module.link_libc = true;
     parser_tests.root_module.addCSourceFile(.{ .file = b.path("src/regex_sizeof.c"), .flags = &.{"-std=c11"} });
@@ -256,7 +193,6 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
-    highlight_bench.root_module.addImport("build_options", build_options.createModule());
     highlight_bench.root_module.addIncludePath(b.path("vendor/tree-sitter/include"));
     highlight_bench.root_module.link_libc = true;
     highlight_bench.root_module.addCSourceFile(.{ .file = b.path("src/regex_sizeof.c"), .flags = &.{"-std=c11"} });

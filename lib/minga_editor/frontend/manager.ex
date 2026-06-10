@@ -58,7 +58,7 @@ defmodule MingaEditor.Frontend.Manager do
     GenServer.start_link(__MODULE__, opts, name: name)
   end
 
-  @doc "Sends a list of encoded render command binaries to the Zig renderer."
+  @doc "Sends a list of encoded render command binaries to the renderer."
   @impl MingaEditor.Frontend.Adapter
   @spec send_commands(GenServer.server(), [binary()]) :: :ok
   def send_commands(server \\ __MODULE__, commands) when is_list(commands) do
@@ -94,7 +94,7 @@ defmodule MingaEditor.Frontend.Manager do
     GenServer.call(server, :terminal_size)
   end
 
-  @doc "Returns whether the Zig renderer has sent its ready signal."
+  @doc "Returns whether the renderer has sent its ready signal."
   @impl MingaEditor.Frontend.Adapter
   @spec ready?(GenServer.server()) :: boolean()
   def ready?(server \\ __MODULE__) do
@@ -289,7 +289,7 @@ defmodule MingaEditor.Frontend.Manager do
     end
   end
 
-  # Detect the tty device path and pass it to the Zig renderer.
+  # Detect the tty device path and pass it to the renderer.
   #
   # When spawned as a BEAM Port, the child process loses access to /dev/tty
   # because Erlang's erl_child_setup calls setsid().  We detect the real tty
@@ -298,7 +298,7 @@ defmodule MingaEditor.Frontend.Manager do
   # Detection order:
   #   1. MINGA_TTY env var (set by bin/minga shell wrapper or user)
   #   2. `ps -o tty=` on the BEAM process (reads from kernel, not stdin)
-  #   3. Empty (Zig renderer falls back to /dev/tty — may fail)
+  #   3. Empty (the renderer falls back to /dev/tty — may fail)
   @spec tty_env() :: [{charlist(), charlist()}]
   defp tty_env do
     tty_path = System.get_env("MINGA_TTY") || detect_tty()
@@ -391,15 +391,12 @@ defmodule MingaEditor.Frontend.Manager do
   defp tui_dev_fallback_path(:go),
     do: Path.join([File.cwd!(), "go", "tui", "bin", "minga-renderer-go"])
 
-  defp tui_dev_fallback_path(:zig),
-    do: Path.join([File.cwd!(), "zig", "zig-out", "bin", "minga-renderer"])
-
   # When running from a BEAM release embedded inside a .app bundle,
   # resolve the frontend binary relative to the bundle root.
   #
   # The release root is at: Minga.app/Contents/Resources/release/
   # The GUI binary is at:   Minga.app/Contents/MacOS/Minga
-  # The TUI binary is at:   Minga.app/Contents/Resources/release/lib/minga-*/priv/minga-renderer
+  # The TUI binary is at:   Minga.app/Contents/Resources/release/lib/minga-*/priv/minga-renderer-go
   #                         (which Application.app_dir already resolves, so TUI returns :not_in_bundle)
   @spec find_app_bundle_binary(String.t(), backend()) :: {:ok, String.t()} | :not_in_bundle
   defp find_app_bundle_binary(binary_name, :gui) do

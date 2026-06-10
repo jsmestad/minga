@@ -1,6 +1,6 @@
 # Charm TUI Renderer
 
-The Charm renderer is an experimental Go/Bubble Tea frontend for Minga's Semantic UI protocol. It is the working semantic terminal reference during the frontend bakeoff while Rust is rebuilt as the desired long-term terminal frontend. Zig remains relevant for parser/tree-sitter infrastructure and legacy terminal rendering until that path is retired.
+The Charm renderer is the Go/Bubble Tea frontend for Minga's Semantic UI protocol and the only terminal frontend. It is the working semantic terminal reference while Rust is rebuilt as the desired long-term terminal frontend. Zig is parser/tree-sitter infrastructure only; the legacy Zig terminal renderer was removed in #2223.
 
 ## Build
 
@@ -27,7 +27,7 @@ Go is the default terminal frontend, so `bin/minga` launches it. Use `bin/minga`
 bin/minga path/to/file
 ```
 
-`MingaEditor.Frontend.Manager` launches `priv/minga-renderer-go` by default. The Go renderer opens `/dev/tty` by default, or `MINGA_TTY` when it is set (the BEAM launch path sets `MINGA_TTY` automatically). Set `MINGA_FRONTEND=zig` to fall back to the legacy Zig renderer; any other value of `MINGA_FRONTEND` is an error.
+`MingaEditor.Frontend.Manager` launches `priv/minga-renderer-go`. The Go renderer opens `/dev/tty` by default, or `MINGA_TTY` when it is set (the BEAM launch path sets `MINGA_TTY` automatically). `MINGA_FRONTEND` accepts only `go`; any other value (including the removed `zig`) is an error.
 
 ## Current Scope
 

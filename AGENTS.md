@@ -6,7 +6,7 @@ Minga is a BEAM-powered modal text editor with native GUI frontends. The editor 
 
 ## Strategic Direction: GUI-First
 
-Native GUI experiences lead the design. The macOS frontend (Swift/Metal) is the most mature and sets the quality bar. A Linux frontend (GTK4) is planned. The TUI frontend (Zig/libvaxis) continues to ship features, but new work is designed for GUI frontends first. Think Emacs: the GUI is the primary experience, the terminal mode is a capable fallback that benefits from the same core improvements.
+Native GUI experiences lead the design. The macOS frontend (Swift/Metal) is the most mature and sets the quality bar. A Linux frontend (GTK4) is planned. The TUI frontend (Go/Bubble Tea) continues to ship features, but new work is designed for GUI frontends first. Think Emacs: the GUI is the primary experience, the terminal mode is a capable fallback that benefits from the same core improvements.
 
 When building new features, design for the GUI rendering path first, then ensure the TUI has a reasonable equivalent.
 
@@ -15,14 +15,16 @@ When building new features, design for the GUI rendering path first, then ensure
 Each frontend has its own AGENTS.md with architecture, coding standards, and conventions specific to that platform. **Read the relevant frontend guide before working on frontend code.**
 
 - **macOS (Swift/Metal):** `macos/AGENTS.md` — CoreText rendering pipeline, State+View pattern, Metal shader conventions, protocol sync rules
-- **TUI + Parser (Zig/libvaxis):** `zig/AGENTS.md` — two-binary architecture, Surface abstraction, arena-per-frame memory, tree-sitter grammar registration
+- **Terminal (Go/Bubble Tea):** `docs/CHARM_TUI.md` — semantic Charm/Bubble Tea client, the only terminal frontend
+- **Parser (Zig + tree-sitter):** `zig/AGENTS.md` — the `minga-parser` Port, tree-sitter grammar registration, queries, highlighter
 
 ## Tech Stack
 
 - **Elixir 1.19** / OTP 28 — editor core (buffers, modes, commands, orchestration)
 - **Swift 6 / Metal 3.1** — macOS native GUI frontend (primary)
 - **GTK4** — Linux native GUI frontend (planned)
-- **Zig 0.15** with libvaxis — TUI frontend + tree-sitter parser
+- **Go 1.23 / Bubble Tea** — terminal frontend (the only TUI)
+- **Zig 0.15** — tree-sitter parser infrastructure (`minga-parser`)
 - **ExUnit** + **StreamData** — testing
 - Pinned versions in `.tool-versions`
 
@@ -109,13 +111,12 @@ macos/                        # macOS native GUI frontend (primary)
     Views/                    # SwiftUI + NSView wrappers
   Tests/                      # Protocol round-trip tests
 
-zig/                          # TUI frontend + tree-sitter parser
+zig/                          # tree-sitter parser (the legacy TUI renderer was removed in #2223)
   build.zig                   # Zig build configuration
-  build.zig.zon               # Zig package manifest (libvaxis dep)
+  build.zig.zon               # Zig package manifest (no external deps)
   src/
-    main.zig                  # Entry point, event loop
+    parser_main.zig           # Parser entry point, buffer management, command loop
     protocol.zig              # Port protocol encoder/decoder
-    renderer.zig              # libvaxis render command handler
     highlighter.zig           # Tree-sitter highlighter (shared by all frontends via parser Port)
 
 test/                         # Mirrors lib/ structure
@@ -785,7 +786,7 @@ The tradeoff: scopes can't automatically inherit bindings from a parent scope. I
 
 ## Mouse Support (first-class citizen)
 
-Mouse support is not optional or secondary to keyboard input. Minga ships multiple frontends (macOS GUI via Swift/Metal, TUI via Zig/libvaxis, Linux GUI via GTK4 planned), and all must handle mouse interactions properly. The bar is **Doom Emacs**: if Doom supports a mouse interaction, Minga should too.
+Mouse support is not optional or secondary to keyboard input. Minga ships multiple frontends (macOS GUI via Swift/Metal, TUI via Go/Bubble Tea, Linux GUI via GTK4 planned), and all must handle mouse interactions properly. The bar is **Doom Emacs**: if Doom supports a mouse interaction, Minga should too.
 
 See [#217](https://github.com/jsmestad/minga/issues/217) for the full tracker.
 
@@ -852,9 +853,9 @@ If a doc reads like a dry API reference with no narrative, it needs a rewrite. T
 ### Semantic UI first for shared visible chrome
 Shared visible chrome (status bar, tab bar, file tree, picker, popups, agent surfaces, panels, and similar) is delivered as a **Semantic UI** model, not as pre-encoded protocol binaries or cell draws. The canonical path is: build a `Minga.RenderModel.UI.*` semantic struct in a builder under `lib/minga_editor/render_model/ui/`, then encode it with a `Minga.Frontend.Adapter.GUI` encoder under `lib/minga/frontend/adapter/gui/`. The guardrail in `test/minga/render_model/guardrails_test.exs` enforces this: a `Minga.RenderModel.UI.*` struct must not carry a protocol-binary payload field (`:encoded`, `:cmd`, `*_encoded`, `*_cmd`, etc.), and a builder under `lib/minga_editor/render_model/` must not reference `MingaEditor.Frontend.Protocol.GUI`. Both allowlists are empty; keep them empty.
 
-Do **not** add new shared chrome through `ProtocolGUI.encode_gui_*`, `DisplayList`, or another compatibility layer. The remaining `ProtocolGUI.encode_gui_*` functions exist only as byte-for-byte parity oracles for protocol tests; `DisplayList` feeds only the legacy zig cell-grid TUI and is slated for removal on zig retirement.
+Do **not** add new shared chrome through `ProtocolGUI.encode_gui_*`, `DisplayList`, or another compatibility layer. The remaining `ProtocolGUI.encode_gui_*` functions exist only as byte-for-byte parity oracles for protocol tests. The legacy Zig cell-grid TUI that consumed cell draws was removed in #2223; the BEAM-side cell chrome/layout/picker builders that produced `DisplayList` cell frames (`Chrome.TUI`, `Layout.TUI`, `tree_renderer.ex`, `picker_ui.ex`'s renderer) are slated for removal in #2235/#2236. `DisplayList` itself is retained because the semantic window builder reads its styled runs.
 
-Render and command code selects the semantic path with `Capabilities.semantic_ui?`, never `gui?`. Both live frontends (macOS GUI and Go TUI) advertise `semantic_ui` and take `Chrome.GUI` / `Layout.GUI` / the semantic builders; only the legacy Zig cell-grid TUI (no `semantic_ui`, behind `MINGA_FRONTEND=zig` until #2223) takes `Chrome.TUI` / `Layout.TUI`. `gui?` is reserved for native-window-only concerns that are not render/command dispatch (native-renderer config, GUI defaults, the native-window title, GUI-only key bindings, settings-panel config push). There are no `Commands.*.GUI` / `Commands.*.TUI` dispatch submodules; shared chrome commands live directly in their command module.
+Render and command code selects the semantic path with `Capabilities.semantic_ui?`, never `gui?`. Both live frontends (macOS GUI and Go TUI) advertise `semantic_ui` and take `Chrome.GUI` / `Layout.GUI` / the semantic builders. The legacy Zig cell-grid TUI that took `Chrome.TUI` / `Layout.TUI` was removed in #2223; those cell builders are now dead code pending deletion in #2235. `gui?` is reserved for native-window-only concerns that are not render/command dispatch (native-renderer config, GUI defaults, the native-window title, GUI-only key bindings, settings-panel config push). There are no `Commands.*.GUI` / `Commands.*.TUI` dispatch submodules; shared chrome commands live directly in their command module.
 
 When adding chrome data (diagnostic counts, indent info, selection size, etc.), design the semantic model fields first, extend the wire format in `docs/PROTOCOL.md` / `docs/GUI_PROTOCOL.md`, update the adapter encoder and `gui_protocol_test.exs`, then ensure each frontend that should display it decodes and renders the new fields. The cell-painted zig TUI modeline (`Chrome.TUI`) consumes the same model through the TUI adapter. Cross-frontend coverage (macOS SwiftUI, Charm/Go TUI) is tracked in the Semantic UI inventory (#2113); forgetting to update a frontend is a common mistake.
 
@@ -903,9 +904,9 @@ Agent tools live in `lib/minga_agent/tools/`. When adding or modifying a tool th
 1. Add the opcode to `docs/protocol_schema.toml`, then run `mix protocol.gen`. Do not hand-edit generated opcode constants.
 2. Add the BEAM encoder/decoder behavior in the relevant protocol module under `lib/minga_editor/frontend/` or `lib/minga/parser/`.
 3. **macOS GUI:** Use the generated constants from `macos/.generated/protocol/ProtocolOpcodes.generated.swift`, add decoder behavior in `macos/Sources/Protocol/ProtocolDecoder.swift`, and add the handler in `CommandDispatcher.swift`.
-4. **TUI:** Use the generated re-export in `zig/src/protocol.zig`, then add decoder and handler behavior in `zig/src/protocol.zig` + `zig/src/renderer.zig`.
+4. **TUI:** Use the generated constants from `go/tui/internal/generated/opcodes.go`, then add decoder and handler behavior in the Go renderer under `go/tui/internal/protocol/` and `go/tui/internal/ui/`.
 5. **Linux GUI:** (when it exists) Add decoder and handler behavior in the GTK4 frontend.
-6. Test encode/decode round-trip on all sides. GUI chrome and semantic opcodes are schema-defined and normally target native GUI support; if a GUI-only opcode can appear on the TUI stream, add an explicit Zig decoder skip or no-op handler for that opcode.
+6. Test encode/decode round-trip on all sides. GUI chrome and semantic opcodes are schema-defined and consumed by the GUI and Go TUI frontends. The `minga-parser` Port (`zig/src/protocol.zig`) also decodes the protocol; if a frontend-only opcode can appear on the parser stream, add an explicit decoder skip or no-op handler for it there.
 
 ### New tree-sitter grammar
 

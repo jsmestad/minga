@@ -451,7 +451,7 @@ jobs:
           # frozen_string_literal: true
 
           class Minga < Formula
-            desc "BEAM-powered modal text editor with Zig terminal renderer"
+            desc "BEAM-powered modal text editor with native GUI and terminal frontends"
             homepage "https://github.com/jsmestad/minga"
             version "{v}"
             license "MIT"
