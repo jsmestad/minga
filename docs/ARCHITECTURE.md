@@ -49,13 +49,13 @@ graph LR
         GTK_PROTO --> GTK_RENDER
     end
 
-    subgraph ZIG["Zig + libvaxis (TUI)"]
+    subgraph GO["Go + Bubble Tea (TUI)"]
         EVLOOP["Event Loop"]
-        ZIG_PROTO["Protocol<br/>decoder/encoder"]
-        RENDER["Renderer<br/>cell grid"]
+        GO_PROTO["Protocol<br/>decoder/encoder"]
+        RENDER["Renderer<br/>semantic UI"]
         TTY["/dev/tty"]
 
-        EVLOOP <--> ZIG_PROTO
+        EVLOOP <--> GO_PROTO
         EVLOOP <--> RENDER
         RENDER <--> TTY
     end
@@ -66,13 +66,13 @@ graph LR
     PORT -. "render commands + GUI chrome" .-> GTK_PROTO
     GTK_PROTO -. "input events" .-> PORT
 
-    PORT -- "render commands" --> ZIG_PROTO
-    ZIG_PROTO -- "input events + highlights" --> PORT
+    PORT -- "render commands + GUI chrome" --> GO_PROTO
+    GO_PROTO -- "input events" --> PORT
 
     style BEAM fill:#1a1a2e,stroke:#6c3483,color:#fff
     style SWIFT fill:#1a2e1a,stroke:#1e8449,color:#fff
     style GTK fill:#2e1a1a,stroke:#844935,color:#fff
-    style ZIG fill:#1a1a1a,stroke:#666666,color:#fff
+    style GO fill:#1a1a1a,stroke:#666666,color:#fff
 ```
 
 All frontends communicate with the BEAM over the same binary protocol on stdin/stdout. They share no memory. The BEAM is the single source of truth for all editor state; frontends are "dumb" renderers and input sources. Every internal component (each buffer, the editor, the port manager, each future plugin) runs as its own lightweight BEAM process with its own state. They can't interfere with each other because the VM enforces the boundaries.
@@ -147,7 +147,7 @@ graph TD
     SUP --> SVC["Services.Supervisor<br/><i>LSP, extensions, diagnostics, agents</i>"]
     SUP --> RT["Runtime.Supervisor<br/><i>renderer, parser, editor orchestration</i>"]
 
-    RT -. "stdin/stdout" .-> FE["Frontend Process<br/><i>Swift/Metal, GTK4, or Zig/libvaxis</i>"]
+    RT -. "stdin/stdout" .-> FE["Frontend Process<br/><i>Swift/Metal, GTK4, or Go/Bubble Tea</i>"]
     RT -. "stdin/stdout" .-> PARSER["Parser Process<br/><i>Zig + tree-sitter</i>"]
 
     style SUP fill:#6c3483,stroke:#4a235a,color:#fff
@@ -257,7 +257,7 @@ graph TD
     ED -. "snapshots" .-> RENDER
     RENDER -. "writebacks" .-> ED
     RENDER -. "render commands" .-> PM
-    PM -. "stdin/stdout<br/>Port protocol" .-> FE["Frontend<br/><i>Swift/Metal, GTK4, or Zig/libvaxis</i>"]
+    PM -. "stdin/stdout<br/>Port protocol" .-> FE["Frontend<br/><i>Swift/Metal, GTK4, or Go/Bubble Tea</i>"]
     PARSER -. "stdin/stdout<br/>Port protocol" .-> ZIG_P["minga-parser<br/><i>Zig + tree-sitter</i>"]
 
     style RT fill:#b7950b,stroke:#9a7d0a,color:#fff
@@ -289,7 +289,7 @@ Minga's frontends use the best native toolkit for their rendering surface, but t
 
 - **macOS: Swift + Metal.** SwiftUI renders chrome (tab bar, file tree, status bar, popups) as native views. Metal renders the editor text surface with GPU-accelerated glyph rasterization via CoreText. This gives macOS users native scrolling, system fonts, trackpad gestures, and full accessibility support.
 - **Linux: GTK4 (planned).** GTK4 widgets for chrome, Cairo or OpenGL for the text surface. Native Wayland/X11 integration, IME support, system theming.
-- **Terminal: Go + Bubble Tea.** The terminal frontend is a semantic Charm/Bubble Tea client that renders the same Semantic UI models as native GUI clients, and it is the default terminal frontend. The launch path is BEAM-owned: Minga starts the editor core, spawns the Go renderer as a Port, and passes `MINGA_TTY` so Go can drive the real terminal while stdin/stdout remain the packet protocol. The legacy Zig/libvaxis cell-grid renderer is now a temporary escape hatch behind `MINGA_FRONTEND=zig`, kept only until the cell-grid deletion epic (#2218) retires it.
+- **Terminal: Go + Bubble Tea.** The terminal frontend is a semantic Charm/Bubble Tea client that renders the same Semantic UI models as native GUI clients, and it is the only terminal frontend. The launch path is BEAM-owned: Minga starts the editor core, spawns the Go renderer as a Port, and passes `MINGA_TTY` so Go can drive the real terminal while stdin/stdout remain the packet protocol. The legacy Zig/libvaxis cell-grid renderer was removed in #2223; Zig is now parser infrastructure only.
 - **Parser: Zig + tree-sitter.** Zig remains parser infrastructure (the `minga-parser` Port); it embeds the tree-sitter C grammars directly and stays in place regardless of the terminal frontend choice.
 
 Each frontend is a "dumb" renderer and input source: it reads Semantic UI and protocol commands, draws them using its own surface primitives, and writes input events back to stdout. All editor state and product policy live in the BEAM.
@@ -345,7 +345,7 @@ graph LR
 
 For the full specification with byte-level field descriptions, sequencing rules, and implementation guidance, see **[docs/PROTOCOL.md](PROTOCOL.md)**. For the Semantic UI opcodes historically named GUI chrome, see **[docs/GUI_PROTOCOL.md](GUI_PROTOCOL.md)**.
 
-Any process that implements the frontend behavior and speaks this protocol can serve as a Minga rendering backend. Frontend identity is opaque to product behavior; capabilities describe the surface and feature support. The macOS Swift frontend is the polish reference, the Go terminal frontend is the semantic terminal target, the legacy Zig/libvaxis cell-grid renderer remains the current terminal default until Go reaches parity, and GTK4 remains planned for Linux.
+Any process that implements the frontend behavior and speaks this protocol can serve as a Minga rendering backend. Frontend identity is opaque to product behavior; capabilities describe the surface and feature support. The macOS Swift frontend is the polish reference, the Go terminal frontend is the only terminal frontend, and GTK4 remains planned for Linux. The legacy Zig/libvaxis cell-grid renderer was removed in #2223.
 
 ### Display List (Rendering IR)
 
@@ -445,7 +445,7 @@ Scopes are Minga's equivalent of Emacs major modes. A buffer's scope determines 
 
 Mouse events flow through the same focus stack as keyboard input, but with a key difference: **mouse routing is position-based, not scope-based.** Keyboard input routes through `keymap_scope` (which pane has focus). Mouse input routes by hit-testing the cursor position against `Layout.get(state)` rects (where on screen did the event happen). This means scrolling over the agent chat scrolls the chat regardless of which pane has keyboard focus.
 
-Both the Zig TUI and the Swift GUI encode mouse events as 9-byte `mouse_event` messages (opcode `0x04`) containing row, col, button, modifiers, event type, and click count. The BEAM decodes them in `Port.Protocol` and dispatches through `Input.Router.dispatch_mouse/7`, which walks the focus stack calling `handle_mouse/7` on each handler that implements it.
+Both the Go TUI and the Swift GUI encode mouse events as 9-byte `mouse_event` messages (opcode `0x04`) containing row, col, button, modifiers, event type, and click count. The BEAM decodes them in `Port.Protocol` and dispatches through `Input.Router.dispatch_mouse/7`, which walks the focus stack calling `handle_mouse/7` on each handler that implements it.
 
 ```
 Mouse event arrives (9 bytes: opcode + row + col + button + mods + event_type + click_count)
@@ -671,7 +671,7 @@ LSP communication, file indexing, git operations: these can run as separate BEAM
 
 ## Semantic render and command path
 
-Render and command code does **not** branch on `Capabilities.gui?`. Every live frontend (the macOS GUI and the Go TUI) advertises `semantic_ui` in its `ready` handshake and takes a single semantic path: the BEAM builds a semantic render model (`Chrome.GUI`, `Layout.GUI`, the `RenderModel.UI.*` builders) and the frontend renders it natively. The only frontend that still consumes cell draws is the legacy Zig cell-grid TUI, which does not advertise `semantic_ui` and survives behind `MINGA_FRONTEND=zig` until Zig retirement (#2223).
+Render and command code does **not** branch on `Capabilities.gui?`. Every live frontend (the macOS GUI and the Go TUI) advertises `semantic_ui` in its `ready` handshake and takes a single semantic path: the BEAM builds a semantic render model (`Chrome.GUI`, `Layout.GUI`, the `RenderModel.UI.*` builders) and the frontend renders it natively. The legacy Zig cell-grid TUI, the last consumer of cell draws, was removed in #2223; the BEAM-side cell chrome/layout/picker builders it fed are pending deletion in #2235/#2236.
 
 **The predicate is `Capabilities.semantic_ui?`, not `gui?`.** When a render or command path must decide between the semantic model and the legacy cell path, branch on `semantic_ui?`. `gui?` (true only for `frontend_type: :native_gui`) remains available for genuinely native-window-only concerns that are not render/command dispatch: native-renderer config (line spacing, cursor animation), GUI defaults (absolute line numbers), the native-window title, GUI-only key bindings, and the GUI settings-panel config push. Do not use `gui?` to gate semantic chrome or semantic-capable features (e.g. the BEAM observatory, which the Go TUI renders), or you will strand the Go TUI.
 

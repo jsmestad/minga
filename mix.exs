@@ -279,7 +279,7 @@ defmodule Minga.MixProject do
   defp ensure_tui_release_artifacts(release) do
     ensure_release_artifacts!(
       release,
-      ["minga-renderer-go", "minga-renderer", "minga-parser", "minga-hook-runner"],
+      ["minga-renderer-go", "minga-parser", "minga-hook-runner"],
       "Run `MIX_ENV=prod mix native.build.tui` before `mix release minga`."
     )
   end

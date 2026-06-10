@@ -90,17 +90,9 @@ Press `Space` to see what's possible. Read the [Getting Started guide](https://j
 
 ### Terminal frontend
 
-In a terminal, `bin/minga` boots the Go/Bubble Tea renderer by default. It speaks Minga's Semantic UI protocol and is the canonical terminal frontend.
+In a terminal, `bin/minga` boots the Go/Bubble Tea renderer. It speaks Minga's Semantic UI protocol and is the only terminal frontend.
 
-The legacy Zig/libvaxis renderer is still available as a temporary escape hatch:
-
-```bash
-MINGA_FRONTEND=zig bin/minga path/to/file
-```
-
-`MINGA_FRONTEND` accepts `go` (default) or `zig`. Any other value fails fast with an error instead of silently falling back, so a typo never boots the wrong renderer.
-
-**Escape hatch removal date.** `MINGA_FRONTEND=zig` is a transitional fallback, not a supported long-term option. It is removed when [#2223](https://github.com/jsmestad/minga/issues/2223) lands, and no earlier than 30 days after this change merges. Minga has no fixed release cadence, so this is the concrete removal commitment rather than a "next release" marker. Once it is removed, the Go renderer is the only terminal frontend.
+The legacy Zig/libvaxis renderer was removed in [#2223](https://github.com/jsmestad/minga/issues/2223), ahead of the original 30-day escape-hatch window by owner decision; `git history` is the fallback if you need the old code. Zig now builds the tree-sitter parser only.
 
 ## Where to go from here
 

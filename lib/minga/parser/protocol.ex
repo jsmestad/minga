@@ -3,10 +3,10 @@ defmodule Minga.Parser.Protocol do
   Binary protocol encoding/decoding for the tree-sitter parser Port.
 
   The parser Port (minga-parser) speaks the same wire format as the
-  frontend Port (minga-renderer). This module owns the parser-specific
-  opcodes and encode/decode functions. `MingaEditor.Frontend.Protocol`
-  delegates parser functions here so existing Layer 2 callers work
-  unchanged.
+  frontend Port (the Go/Bubble Tea renderer and native GUI clients). This
+  module owns the parser-specific opcodes and encode/decode functions.
+  `MingaEditor.Frontend.Protocol` delegates parser functions here so existing
+  Layer 2 callers work unchanged.
 
   This is a Layer 0 module. It has no dependencies on MingaEditor.*.
   """

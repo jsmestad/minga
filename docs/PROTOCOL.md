@@ -709,9 +709,9 @@ Total size: 4 + msg_len bytes.
 
 ### Current design
 
-Tree-sitter parsing runs in a dedicated `minga-parser` Zig process, separate from the rendering frontend. The renderer process handles only render commands (`0x10`-`0x1B` plus GUI chrome `0x70+`). The parser process handles highlight commands (`0x20`-`0x2F`) and sends highlight responses (`0x30`-`0x3D`). Both use the same `{:packet, 4}` framing on their respective stdin/stdout pipes. The BEAM manages both Port processes, routing commands to the appropriate one.
+Tree-sitter parsing runs in a dedicated `minga-parser` Zig process, separate from the rendering frontend. The rendering frontend handles render commands (`0x10`-`0x1B` plus GUI chrome `0x70+`). The parser process handles highlight commands (`0x20`-`0x2F`) and sends highlight responses (`0x30`-`0x3D`). Both use the same `{:packet, 4}` framing on their respective stdin/stdout pipes. The BEAM manages both Port processes, routing commands to the appropriate one. Zig is parser infrastructure only; the legacy Zig terminal renderer was removed in #2223.
 
-This separation means rendering frontends (Swift/Metal, GTK4, Zig/libvaxis) only need to implement render commands. Tree-sitter parsing is handled by the shared parser process regardless of which frontend is active.
+This separation means rendering frontends (Swift/Metal, GTK4, Go/Bubble Tea) only need to implement render commands. Tree-sitter parsing is handled by the shared parser process regardless of which frontend is active.
 
 ---
 
@@ -772,7 +772,7 @@ Total size: 9 bytes.
 
 ### Implementation Notes
 
-The TUI backend sends `ready` with default capabilities immediately at startup, then sends `capabilities_updated` once libvaxis finishes its async terminal capability detection (triggered by the DA1 response). The GUI backend sends `ready` with full native capabilities upfront since there is no detection delay.
+The TUI backend may send `ready` with default capabilities immediately at startup, then send `capabilities_updated` once its async terminal capability detection completes (e.g. after the DA1 response). The GUI backend sends `ready` with full native capabilities upfront since there is no detection delay.
 
 ## Layout Regions
 

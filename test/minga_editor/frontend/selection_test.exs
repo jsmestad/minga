@@ -24,15 +24,18 @@ defmodule MingaEditor.Frontend.SelectionTest do
     end
   end
 
-  describe "MINGA_FRONTEND escape hatch" do
-    test "zig selects the legacy Zig renderer" do
-      System.put_env("MINGA_FRONTEND", "zig")
-      assert Selection.tui_impl() == :zig
-    end
-
+  describe "MINGA_FRONTEND" do
     test "go selects the Go renderer explicitly" do
       System.put_env("MINGA_FRONTEND", "go")
       assert Selection.tui_impl() == :go
+    end
+
+    test "zig raises now that the Zig renderer is removed" do
+      System.put_env("MINGA_FRONTEND", "zig")
+
+      assert_raise ArgumentError, ~r/MINGA_FRONTEND=zig is not a valid terminal frontend/, fn ->
+        Selection.tui_impl()
+      end
     end
 
     test "an unknown value raises instead of silently falling back" do
@@ -43,22 +46,36 @@ defmodule MingaEditor.Frontend.SelectionTest do
       end
     end
 
+    test "the error message names only \"go\" as valid" do
+      System.put_env("MINGA_FRONTEND", "zig")
+
+      assert_raise ArgumentError, ~r/Only "go" is valid/, fn ->
+        Selection.tui_impl()
+      end
+    end
+
     test "the env var wins over the application env" do
-      Application.put_env(:minga, :tui_impl, :zig)
+      Application.put_env(:minga, :tui_impl, :go)
       System.put_env("MINGA_FRONTEND", "go")
       assert Selection.tui_impl() == :go
     end
   end
 
   describe "application env override (tests)" do
-    test "accepts an atom" do
-      Application.put_env(:minga, :tui_impl, :zig)
-      assert Selection.tui_impl() == :zig
+    test "accepts the :go atom" do
+      Application.put_env(:minga, :tui_impl, :go)
+      assert Selection.tui_impl() == :go
     end
 
-    test "accepts a string" do
+    test "accepts the \"go\" string" do
       Application.put_env(:minga, :tui_impl, "go")
       assert Selection.tui_impl() == :go
+    end
+
+    test "rejects the :zig atom now that the Zig renderer is removed" do
+      Application.put_env(:minga, :tui_impl, :zig)
+
+      assert_raise ArgumentError, fn -> Selection.tui_impl() end
     end
 
     test "rejects an unknown atom" do
@@ -69,9 +86,8 @@ defmodule MingaEditor.Frontend.SelectionTest do
   end
 
   describe "renderer_binary_name/1" do
-    test "maps implementations to their shipped binary names" do
+    test "maps the Go implementation to its shipped binary name" do
       assert Selection.renderer_binary_name(:go) == "minga-renderer-go"
-      assert Selection.renderer_binary_name(:zig) == "minga-renderer"
     end
   end
 

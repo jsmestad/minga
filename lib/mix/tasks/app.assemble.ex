@@ -202,7 +202,7 @@ defmodule Mix.Tasks.App.Assemble do
 
     priv_dirs = Path.wildcard(priv_glob)
 
-    tui_binaries = ["minga-renderer", "minga-renderer-go"]
+    tui_binaries = ["minga-renderer-go"]
 
     for priv_dir <- priv_dirs, binary_name <- tui_binaries do
       path = Path.join(priv_dir, binary_name)
