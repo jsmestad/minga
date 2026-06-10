@@ -139,71 +139,6 @@ defmodule MingaEditor.Agent.View.PromptRendererTest do
     end
   end
 
-  describe "render/2" do
-    test "returns draw tuples with prompt border" do
-      state = base_state()
-      ctx = ViewContext.from_editor_state(state)
-      commands = PromptRenderer.render(ctx, {30, 0, 80, 5})
-
-      assert [_ | _] = commands
-      texts = Enum.map(commands, fn d -> elem(d, 2) end)
-      assert Enum.any?(texts, &String.starts_with?(&1, "╭─ Prompt"))
-      assert Enum.any?(texts, &String.starts_with?(&1, "╰─"))
-    end
-
-    test "model info is embedded in bottom border" do
-      state = base_state()
-      ctx = ViewContext.from_editor_state(state)
-      commands = PromptRenderer.render(ctx, {30, 0, 80, 5})
-      texts = Enum.map(commands, fn d -> elem(d, 2) end)
-
-      assert Enum.any?(texts, fn text ->
-               String.starts_with?(text, "╰─") and String.contains?(text, "Claude Sonnet 4")
-             end)
-    end
-
-    test "bottom border shows a setup hint instead of a model when no credentials" do
-      state = base_state(credentials_configured: false)
-      ctx = ViewContext.from_editor_state(state)
-      commands = PromptRenderer.render(ctx, {30, 0, 80, 5})
-      texts = Enum.map(commands, fn d -> elem(d, 2) end)
-
-      bottom_border = Enum.find(texts, &String.starts_with?(&1, "╰─"))
-
-      assert bottom_border != nil
-      assert String.contains?(bottom_border, "Not configured")
-      assert String.contains?(bottom_border, "/auth")
-      # Never advertise a model the user cannot call.
-      refute String.contains?(bottom_border, "Claude Sonnet 4")
-    end
-
-    test "empty-input placeholder guides setup when no credentials" do
-      state = base_state(credentials_configured: false)
-      ctx = ViewContext.from_editor_state(state)
-      commands = PromptRenderer.render(ctx, {30, 0, 80, 5})
-      texts = Enum.map(commands, fn d -> elem(d, 2) end)
-
-      assert Enum.any?(texts, &String.contains?(&1, "/auth <provider> <key>"))
-      refute Enum.any?(texts, &String.contains?(&1, "Type a message"))
-    end
-
-    test "placeholder uses readable text color" do
-      state = base_state()
-      ctx = ViewContext.from_editor_state(state)
-      commands = PromptRenderer.render(ctx, {30, 0, 80, 5})
-      theme = Theme.agent_theme(state.theme)
-
-      {_row, _col, _text, face} =
-        Enum.find(commands, fn {_row, _col, text, face} ->
-          String.contains?(text, "Type a message") and face.fg != nil
-        end)
-
-      assert face.fg == theme.input_placeholder
-      assert face.bg == theme.input_bg
-      assert face.italic == true
-    end
-  end
-
   describe "input layout helpers" do
     test "input_box_width applies horizontal margins" do
       assert PromptRenderer.input_box_width(80) == 80 - 2 * 2
@@ -226,23 +161,4 @@ defmodule MingaEditor.Agent.View.PromptRendererTest do
     end
   end
 
-  describe "model name display with provider prefix" do
-    test "prompt bar strips provider prefix from model name" do
-      state = base_state()
-      ctx = ViewContext.from_editor_state(state)
-      commands = PromptRenderer.render(ctx, {30, 0, 80, 5})
-      texts = Enum.map(commands, fn d -> elem(d, 2) end)
-
-      # model_name defaults to "anthropic:claude-sonnet-4" but the display
-      # should strip the prefix and titleize to "Claude Sonnet 4"
-      bottom_border =
-        Enum.find(texts, fn text ->
-          String.starts_with?(text, "╰─")
-        end)
-
-      assert bottom_border != nil
-      assert String.contains?(bottom_border, "Claude Sonnet 4")
-      refute String.contains?(bottom_border, "Anthropic:claude")
-    end
-  end
 end

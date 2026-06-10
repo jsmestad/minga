@@ -2,12 +2,11 @@ defmodule MingaEditor.Agent.ViewContext do
   @moduledoc """
   Agent view rendering context.
 
-  Contains the subset of `MingaEditor.State` that agent renderers need to
-  draw the prompt input, dashboard sidebar, and agent chat chrome.
-  Decouples `lib/minga/agent/view/` modules from `MingaEditor.State`
-  dependencies (per ticket #1224).
+  Contains the subset of `MingaEditor.State` that the agent prompt geometry
+  (`PromptRenderer`) and the semantic prompt model (`PromptRenderWindow`)
+  need. Decouples `lib/minga_editor/agent/view/` modules from
+  `MingaEditor.State` dependencies (per ticket #1224).
 
-  Both `PromptRenderer` and `DashboardRenderer` consume this struct.
   Constructed via `from_editor_state/1` at the call sites in the
   render pipeline.
   """
