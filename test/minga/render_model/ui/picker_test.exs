@@ -3,7 +3,6 @@ defmodule Minga.RenderModel.UI.PickerTest do
 
   alias Minga.RenderModel.UI.Picker
   alias Minga.RenderModel.UI.Picker.ActionMenu
-  alias Minga.RenderModel.UI.Picker.Item
 
   describe "%Picker{}" do
     test "defaults to closed" do
@@ -15,7 +14,16 @@ defmodule Minga.RenderModel.UI.PickerTest do
     end
 
     test "carries open picker data" do
-      item = %Item{id: "one", label: "One", marked?: true}
+      # Items are wire-shaped maps produced by the Layer 2 builder.
+      item = %{
+        icon_color: 0,
+        flags: 2,
+        label: "One",
+        description: "",
+        annotation: "",
+        match_positions: []
+      }
+
       menu = %ActionMenu{actions: ["open"], selected_index: 0}
 
       picker = %Picker{

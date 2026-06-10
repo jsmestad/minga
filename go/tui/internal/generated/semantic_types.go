@@ -33,6 +33,31 @@ const (
 	GitFileStatusConflict  GitFileStatus = 7
 )
 
+// GitRepoState is a generated enum (repr u8).
+type GitRepoState uint8
+
+const (
+	GitRepoStateNormal   GitRepoState = 0
+	GitRepoStateNotARepo GitRepoState = 1
+	GitRepoStateLoading  GitRepoState = 2
+)
+
+// GitToastLevel is a generated enum (repr u8).
+type GitToastLevel uint8
+
+const (
+	GitToastLevelSuccess GitToastLevel = 0
+	GitToastLevelError   GitToastLevel = 1
+)
+
+// GitToastAction is a generated enum (repr u8).
+type GitToastAction uint8
+
+const (
+	GitToastActionNone         GitToastAction = 0
+	GitToastActionPullAndRetry GitToastAction = 1
+)
+
 type Rect struct {
 	Row    uint16
 	Col    uint16
@@ -162,6 +187,13 @@ type GitStatusEntry struct {
 	Section  uint8
 	Status   GitFileStatus
 	Path     string
+}
+
+type GitToast struct {
+	Present uint8
+	Level   GitToastLevel
+	Action  GitToastAction
+	Message string
 }
 
 const (
@@ -378,7 +410,7 @@ type GuiThemeFields struct {
 }
 
 type GuiBreadcrumbFields struct {
-	SegmentCount uint8
+	Segments []string
 }
 
 type GuiCompletionFields struct {
@@ -415,10 +447,16 @@ type GuiSplitSeparatorsFields struct {
 }
 
 type GuiGitStatusFields struct {
-	RepoState uint8
-	Syncing   uint8
-	Ahead     uint16
-	Behind    uint16
+	RepoState         GitRepoState
+	Syncing           uint8
+	Ahead             uint16
+	Behind            uint16
+	Branch            string
+	Entries           []GitStatusEntry
+	Toast             GitToast
+	EntryBasePath     string
+	LastCommitMessage string
+	StashCount        uint16
 }
 
 type GuiBottomPanelFields struct {

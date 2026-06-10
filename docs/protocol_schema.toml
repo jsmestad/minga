@@ -1057,6 +1057,39 @@ values = [
   { name = "conflict", value = 7 },
 ]
 
+# Byte values copied exactly from git_status_encoder.ex encode_repo_state/1.
+[[enums]]
+name = "git_repo_state"
+repr = "u8"
+default = "not_a_repo"
+values = [
+  { name = "normal", value = 0 },
+  { name = "not_a_repo", value = 1 },
+  { name = "loading", value = 2 },
+]
+
+# Byte values copied exactly from git_status_encoder.ex encode_toast_level/1.
+[[enums]]
+name = "git_toast_level"
+repr = "u8"
+default = "success"
+values = [
+  { name = "success", value = 0 },
+  { name = "error", value = 1 },
+]
+
+# Byte values copied exactly from git_status_encoder.ex encode_toast_action/1.
+# A nil action maps to the `none` default byte (0); the builder normalizes nil
+# to :none so the wire stays non-nullable.
+[[enums]]
+name = "git_toast_action"
+repr = "u8"
+default = "none"
+values = [
+  { name = "none", value = 0 },
+  { name = "pull_and_retry", value = 1 },
+]
+
 # ── Shared wire structures ────────────────────────────────────────────────
 #
 # Reusable fixed-size and variable-length sub-structures referenced by name
@@ -1236,6 +1269,19 @@ fields = [
   { name = "status", type = "enum", enum = "git_file_status" },
   { name = "path", type = "string16" },
 ]
+
+# git_status_encoder.ex encode_git_toast/1: an absent toast is just a presence
+# byte (0); a present toast adds level, action, and the message string. The
+# Layer 2 builder normalizes a missing toast to %{present: 0} so the wire stays
+# non-nullable.
+[[structures]]
+name = "git_toast"
+fields = [{ name = "present", type = "u8" }]
+conditional_tail = { guard = "present == 1", fields = [
+  { name = "level", type = "enum", enum = "git_toast_level" },
+  { name = "action", type = "enum", enum = "git_toast_action" },
+  { name = "message", type = "string16" },
+] }
 
 # ── Section layouts for sectioned commands ────────────────────────────────
 #
@@ -1655,7 +1701,13 @@ fields = [{ name = "color_count", type = "u8" }]
 
 [[command_fields]]
 opcode = "gui_breadcrumb"
-fields = [{ name = "segment_count", type = "u8" }]
+# breadcrumb_encoder.ex: a u8-counted list of string16 path segments. The u8
+# count is the segment count; there is no separate count byte. The Layer 2
+# builder derives the segment list (Path.relative_to/split); the wire layout is
+# exactly this counted array.
+fields = [
+  { name = "segments", type = "counted_array", count_type = "u8", element = "string16" },
+]
 
 [[command_fields]]
 opcode = "gui_completion"
@@ -1699,11 +1751,23 @@ fields = [
 
 [[command_fields]]
 opcode = "gui_git_status"
+# git_status_encoder.ex encode_git_status_binary/1: the fixed header (repo_state,
+# syncing, ahead, behind, branch), then the entries counted array, the toast
+# structure, and the base_path/last_commit_message/stash_count tail. The Layer 2
+# builder owns all derivation (path hashing, the section predicate, utf8
+# truncation, the stash clamp, toast normalization); the wire layout is exactly
+# this field list.
 fields = [
-  { name = "repo_state", type = "u8" },
+  { name = "repo_state", type = "enum", enum = "git_repo_state" },
   { name = "syncing", type = "u8" },
   { name = "ahead", type = "u16" },
   { name = "behind", type = "u16" },
+  { name = "branch", type = "string16" },
+  { name = "entries", type = "counted_array", count_type = "u16", element = "git_status_entry" },
+  { name = "toast", type = "struct", element = "git_toast" },
+  { name = "entry_base_path", type = "string16" },
+  { name = "last_commit_message", type = "string16" },
+  { name = "stash_count", type = "u16" },
 ]
 
 [[command_fields]]

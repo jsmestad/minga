@@ -4,10 +4,23 @@ defmodule Minga.RenderModel.UI.Picker do
   """
 
   alias Minga.RenderModel.UI.Picker.ActionMenu
-  alias Minga.RenderModel.UI.Picker.Item
 
   @type load_status :: :ready | :loading | {:error, String.t()}
   @type preview_segment :: {String.t(), non_neg_integer(), boolean()}
+
+  @typedoc """
+  A wire-shaped picker item. The Layer 2 builder normalizes each source item
+  into this map (flags packed, nil-vs-empty defaulted, match_positions clamped),
+  so the adapter passes it straight to the generated `encode_picker_item/1`.
+  """
+  @type item :: %{
+          icon_color: non_neg_integer(),
+          flags: non_neg_integer(),
+          label: String.t(),
+          description: String.t(),
+          annotation: String.t(),
+          match_positions: [non_neg_integer()]
+        }
 
   @type t :: %__MODULE__{
           visible?: boolean(),
@@ -18,7 +31,7 @@ defmodule Minga.RenderModel.UI.Picker do
           total_count: non_neg_integer(),
           marked_count: non_neg_integer(),
           has_preview?: boolean(),
-          items: [Item.t()],
+          items: [item()],
           action_menu: ActionMenu.t() | nil,
           mode_prefix: String.t(),
           load_status: load_status(),

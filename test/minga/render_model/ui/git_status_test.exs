@@ -16,7 +16,8 @@ defmodule Minga.RenderModel.UI.GitStatusTest do
       assert gs.entry_base_path == ""
       assert gs.last_commit_message == ""
       assert gs.stash_count == 0
-      assert gs.git_toast == nil
+      # git_toast defaults to the non-nullable wire "absent" map.
+      assert gs.git_toast == %{present: 0}
     end
 
     test "raises when enforce_keys are missing" do
