@@ -669,20 +669,13 @@ LSP communication, file indexing, git operations: these can run as separate BEAM
 
 ---
 
-## GUI/TUI Command Branching
+## Semantic render and command path
 
-Commands that open GUI-native chrome (bottom panel, native pickers, native tooltips) need a TUI fallback that does something reasonable with the TUI's tools (gap buffers, popup windows, cell-grid overlays). The branching uses `Capabilities.gui?` at runtime since the frontend type isn't known at compile time.
+Render and command code does **not** branch on `Capabilities.gui?`. Every live frontend (the macOS GUI and the Go TUI) advertises `semantic_ui` in its `ready` handshake and takes a single semantic path: the BEAM builds a semantic render model (`Chrome.GUI`, `Layout.GUI`, the `RenderModel.UI.*` builders) and the frontend renders it natively. The only frontend that still consumes cell draws is the legacy Zig cell-grid TUI, which does not advertise `semantic_ui` and survives behind `MINGA_FRONTEND=zig` until Zig retirement (#2223).
 
-**Established pattern:** follow the Chrome module's approach. `Chrome` dispatches to `Chrome.TUI` / `Chrome.GUI` submodules. Command modules with GUI/TUI branches use `Commands.Foo.GUI` and `Commands.Foo.TUI` submodules with a `Frontend` behaviour and a single dispatch in the parent. Already implemented in `Commands.UI` and `Commands.BufferManagement`. For simpler cases with 1-2 branches that don't warrant submodules, inline `if Capabilities.gui?` checks are acceptable.
+**The predicate is `Capabilities.semantic_ui?`, not `gui?`.** When a render or command path must decide between the semantic model and the legacy cell path, branch on `semantic_ui?`. `gui?` (true only for `frontend_type: :native_gui`) remains available for genuinely native-window-only concerns that are not render/command dispatch: native-renderer config (line spacing, cursor animation), GUI defaults (absolute line numbers), the native-window title, GUI-only key bindings, and the GUI settings-panel config push. Do not use `gui?` to gate semantic chrome or semantic-capable features (e.g. the BEAM observatory, which the Go TUI renders), or you will strand the Go TUI.
 
-```
-lib/minga/editor/commands/
-  buffer_management.ex          # shared commands + dispatch
-  buffer_management/gui.ex      # GUI-specific (bottom panel, native UI)
-  buffer_management/tui.ex      # TUI-specific (gap buffers, popups)
-```
-
-The dispatch helper lives in the parent module (not a shared utility), since each command group may dispatch on different capabilities.
+**Command dispatch is single-path.** Shared chrome commands (bottom panel, message tray) live directly in their command module with no `Commands.Foo.GUI` / `Commands.Foo.TUI` submodules and no `Frontend` behaviour. The chrome and layout builders dispatch `Chrome.GUI` / `Layout.GUI` for semantic frontends and keep `Chrome.TUI` / `Layout.TUI` only for legacy Zig (slated for deletion in #2235).
 
 ---
 
