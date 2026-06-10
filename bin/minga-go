@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Development launcher for Minga with the Go/Charm TUI renderer.
+# Development launcher for Minga with the Go/Bubble Tea TUI renderer.
+#
+# Go is now the default terminal frontend, so this is equivalent to `bin/minga`.
+# It is kept as an explicit shortcut that also pins MINGA_FRONTEND=go.
 #
 # Usage:
 #   bin/minga-go [filename]
-#
-# Equivalent to:
-#   MINGA_TUI_IMPL=go bin/minga [filename]
 
 set -euo pipefail
 
@@ -14,7 +14,7 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 (cd "$PROJECT_DIR" && mix native.build.support && mix native.build.go_tui)
 
-export MINGA_TUI_IMPL=go
+export MINGA_FRONTEND=go
 export MINGA_SKIP_NATIVE_LAUNCH_BUILD=1
 
 exec "$SCRIPT_DIR/minga" "$@"

@@ -2,7 +2,9 @@ defmodule Mix.Tasks.Compile.MingaGoTui do
   @moduledoc """
   Custom Mix compiler that builds the Charm-based Go TUI renderer.
 
-  The Go renderer is copied to `priv/minga-renderer-go` and selected at runtime with `MINGA_TUI_IMPL=go`.
+  The Go renderer is the default terminal frontend. It is copied to
+  `priv/minga-renderer-go` and launched at runtime unless `MINGA_FRONTEND=zig`
+  selects the legacy Zig renderer.
   """
 
   use Mix.Task.Compiler
@@ -50,9 +52,19 @@ defmodule Mix.Tasks.Compile.MingaGoTui do
     end
   end
 
+  # Go is the default terminal frontend, so a missing Go toolchain is a hard
+  # error unless the operator explicitly opted into the Zig escape hatch.
   @spec go_required?() :: boolean()
   defp go_required? do
-    System.get_env("MINGA_TUI_IMPL") == "go" or System.get_env("MINGA_GO_TUI_REQUIRED") == "1"
+    System.get_env("MINGA_GO_TUI_REQUIRED") == "1" or
+      (System.get_env("MINGA_FRONTEND") != "zig" and not skip_default_go_build?())
+  end
+
+  # Some build contexts (e.g. building only the Zig release) want to skip the
+  # default Go requirement without flipping the runtime frontend selection.
+  @spec skip_default_go_build?() :: boolean()
+  defp skip_default_go_build? do
+    System.get_env("MINGA_SKIP_GO_TUI_BUILD") == "1"
   end
 
   @spec go_executable() :: String.t() | nil
