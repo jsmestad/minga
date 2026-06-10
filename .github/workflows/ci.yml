@@ -81,6 +81,8 @@ jobs:
         if: github.event_name == 'pull_request'
         run: scripts/check_protocol_generated_edits "${{ github.event.pull_request.base.sha }}"
       - run: mix protocol.gen --check
+      - name: Check cross-language golden manifest is committed
+        run: MIX_ENV=test mix protocol.golden --check
       - run: mix native.build.support
       - run: mix test --warnings-as-errors --exclude system_clipboard --exclude conformance
 
