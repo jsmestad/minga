@@ -87,6 +87,19 @@ final class CommandDispatcher {
         self.guiState = guiState
     }
 
+    // TEMP INSTRUMENTATION (cell-grid deletion audit, ticket #2224).
+    // Counts how many legacy cell-grid decode entry points actually fire at
+    // runtime. In a semantic-only session this stays 0 for the whole session.
+    // Exercise a real GUI session, then check the log for
+    // "[#2224 cell-decode]" lines. A nonzero count means a cell opcode reached
+    // the Swift decoder, which would block deletion. Remove this block and the
+    // increments below once the audit's live run is recorded.
+    static var legacyCellDecodeCount: Int = 0
+    private func noteLegacyCellDecode(_ which: String) {
+        Self.legacyCellDecodeCount += 1
+        PortLogger.info("[#2224 cell-decode] \(which) fired; session total=\(Self.legacyCellDecodeCount)")
+    }
+
     /// Process a single render command.
     func dispatch(_ command: RenderCommand) {
         switch command {
@@ -99,6 +112,7 @@ final class CommandDispatcher {
         case .drawText, .drawStyledText:
             // Legacy cell-grid text rendering. All content now flows through
             // gui_window_content (0x80) and dedicated GUI opcodes. Discard.
+            noteLegacyCellDecode("drawText/drawStyledText")  // TEMP #2224, remove after live run
             break
 
         case .setCursor(let row, let col):
@@ -146,6 +160,7 @@ final class CommandDispatcher {
         case .clearRegion:
             // Cell-grid clearing no longer needed; semantic content is managed
             // by gui_window_content (0x80). Region tracking kept for cursor offset.
+            noteLegacyCellDecode("clearRegion")  // TEMP #2224, remove after live run
             break
 
         case .destroyRegion(let id):
