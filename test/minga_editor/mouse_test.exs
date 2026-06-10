@@ -538,6 +538,15 @@ defmodule MingaEditor.MouseTest do
 
       assert state.shell_state.tab_bar.active_id == first_tab_id
 
+      # The tab goto recomputes the layout, so re-inject the tab-bar rect before
+      # the close click.
+      state =
+        set_tab_click_regions(state, [
+          {1, 0, 4, {:tab_goto_id, first_tab_id}},
+          {1, 5, 7, :"tab_close_#{close_tab_id}"},
+          {0, 0, 4, {:workspace_goto, 1}}
+        ])
+
       state = mouse(state, 1, 6, :left, :press)
 
       assert length(state.shell_state.tab_bar.tabs) == initial_count - 1
@@ -769,7 +778,20 @@ defmodule MingaEditor.MouseTest do
   end
 
   defp set_tab_click_regions(state, regions) do
-    EditorState.update_shell_state(state, &%{&1 | tab_bar_click_regions: regions})
+    # The semantic GUI layout reserves no BEAM row for the tab bar; the frontend
+    # renders it natively and sends `select_tab`/`close_tab` gui_actions. The
+    # legacy cell-coordinate hit-test (`Mouse.tab_bar_click`) still exists and
+    # is what these tests exercise, so inject an explicit tab-bar rect (rows 0-1,
+    # covering the workspace and tab rows) onto the cached layout.
+    state
+    |> EditorState.update_shell_state(&%{&1 | tab_bar_click_regions: regions})
+    |> with_tab_bar_rect()
+  end
+
+  defp with_tab_bar_rect(state) do
+    %Layout{} = base_layout = Layout.get(state)
+    {_, _, width, _} = base_layout.terminal
+    %{state | layout: %Layout{base_layout | tab_bar: {0, 0, width, 2}}}
   end
 
   defp start_workspace_tab_state do

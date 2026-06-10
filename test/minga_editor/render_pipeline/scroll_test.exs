@@ -195,7 +195,9 @@ defmodule MingaEditor.RenderPipeline.ScrollTest do
     test "wrapped scroll uses rows remaining to eof for penultimate wrapped lines" do
       penultimate = "    " <> String.duplicate("alpha beta ", 4)
       last_line = String.duplicate("omega psi ", 12)
-      state = base_state(content: penultimate <> "\n" <> last_line, rows: 5, cols: 24)
+      # Layout.GUI reserves only the minibuffer row, so a smaller viewport
+      # reproduces the overflow the TUI layout produced with its taller chrome.
+      state = base_state(content: penultimate <> "\n" <> last_line, rows: 3, cols: 24)
       buffer = state.workspace.buffers.active
 
       _ = BufferProcess.set_option(buffer, :wrap, true)
@@ -213,7 +215,7 @@ defmodule MingaEditor.RenderPipeline.ScrollTest do
         )
 
       assert WrapMap.visual_row_count([penultimate_entry, last_entry]) >
-               Viewport.content_rows(Viewport.new(5, 24, 0))
+               Viewport.content_rows(Viewport.new(3, 24, 0))
 
       BufferProcess.move_to(buffer, {0, List.last(penultimate_entry).byte_offset})
 

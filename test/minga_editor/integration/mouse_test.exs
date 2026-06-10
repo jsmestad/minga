@@ -58,15 +58,22 @@ defmodule Minga.Integration.MouseTest do
 
       send_keys_sync(ctx, "<Space>op")
       assert file_tree_open?(ctx)
-      tree_width = EditorState.file_tree_state(editor_state(ctx)).tree_width
 
+      # An editor click routes through the raw mouse path to the buffer window.
       send_mouse(ctx, 5, div(ctx.width, 2), :left)
 
-      send_mouse(ctx, 5, max(tree_width - 2, 0), :left)
+      # The semantic frontend renders the file tree natively and reports
+      # interactions as gui_actions (the BEAM reserves no file-tree columns after
+      # #2235) rather than raw cell coordinates. Activating the file-tree sidebar
+      # the way the Go TUI does focuses it and switches the keymap scope.
+      send_gui_action(ctx, {:sidebar_action, "file_tree", "file_tree", "activate"})
       state = editor_state(ctx)
 
       assert FileTree.focused?(EditorState.file_tree_state(state)),
-             "clicking file tree should focus it"
+             "activating the file tree should focus it"
+
+      assert state.workspace.keymap_scope == :file_tree,
+             "focus should route input to the file-tree scope"
     end
   end
 

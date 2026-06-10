@@ -208,18 +208,16 @@ defmodule MingaEditor.DisplayListAssertionsTest do
       assert Enum.any?(all_text, &String.contains?(&1, "second line"))
     end
 
-    test "frame has status bar draws" do
+    # The semantic chrome owns the status bar (0x76) and minibuffer (0x7F)
+    # natively, so the composed Frame carries empty cell-draw lists for them
+    # (the `Chrome.TUI` cell builder was deleted in #2235). Status-bar/minibuffer
+    # content is verified through the semantic emit path instead.
+    test "frame has empty status bar and minibuffer cell draws" do
       state = base_state()
       frame = render_frame(state)
 
-      assert [_ | _] = frame.status_bar
-    end
-
-    test "frame has minibuffer draws" do
-      state = base_state()
-      frame = render_frame(state)
-
-      assert [_ | _] = frame.minibuffer
+      assert frame.status_bar == []
+      assert frame.minibuffer == []
     end
 
     test "frame has tab bar draws" do
@@ -287,11 +285,16 @@ defmodule MingaEditor.DisplayListAssertionsTest do
   end
 
   describe "assert_status_bar_contains/2" do
-    test "passes when status bar has matching text" do
-      state = base_state()
-      frame = render_frame(state)
+    test "matches against an explicit cell-draw status bar" do
+      # The composed Frame no longer carries cell status-bar draws (semantic
+      # chrome owns the 0x76 status bar after #2235), so drive the assertion
+      # macro with a Frame that has explicit status-bar draws to keep the helper
+      # covered.
+      frame = %Frame{
+        cursor: Cursor.new(0, 0, :block),
+        status_bar: [MingaEditor.DisplayList.draw(0, 0, "NORMAL scratch 1:1", Face.new())]
+      }
 
-      # In normal mode, status bar should show NORMAL
       assert_status_bar_contains(frame, "NORMAL")
     end
   end

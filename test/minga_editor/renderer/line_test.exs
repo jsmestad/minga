@@ -140,9 +140,13 @@ defmodule MingaEditor.Renderer.LineTest do
       refute String.contains?(row_text, "line 0"),
              "Expected line 0 to have scrolled off, got: #{inspect(row_text)}"
 
-      # In a 10-row terminal with tab bar, there are 7 content rows (rows 1-7).
-      # After scrolling 10 lines, line 10 should be at the last content row.
-      assert_row_contains(ctx, @content_row + 6, "line 10")
+      # The semantic GUI window viewport is the full terminal minus the
+      # minibuffer; this headless port (like the Go TUI) renders a tab bar above
+      # and a status bar + minibuffer below the editor, clipping the taller
+      # window to the 7 visible content rows (rows 1-7). After scrolling down 10
+      # lines, the topmost visible line has advanced past line 0 and line 8 has
+      # scrolled into the last content row.
+      assert_row_contains(ctx, @content_row + 6, "line 8")
     end
   end
 

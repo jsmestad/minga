@@ -3,9 +3,10 @@ defmodule MingaEditor.Extension.SidebarIntegrationTest do
 
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.FocusTree
+  alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.Input.Router
-  alias MingaEditor.Shell.Traditional.Layout.TUI, as: LayoutTUI
-  alias MingaEditor.Shell.Traditional.SidebarRenderer
+  alias MingaEditor.Layout
+  alias MingaEditor.RenderModel.UI.SidebarsBuilder
   alias MingaEditor.State, as: EditorState
 
   import MingaEditor.RenderPipeline.TestHelpers
@@ -16,12 +17,19 @@ defmodule MingaEditor.Extension.SidebarIntegrationTest do
     %{sidebar_registry: table}
   end
 
-  test "layout reserves and reclaims space for a visible registered sidebar", %{
+  # The Traditional shell no longer reserves BEAM columns for the sidebar; every
+  # live frontend renders it natively (the legacy Zig cell-grid frontend, and its
+  # `Layout.TUI`/`SidebarRenderer` cell renderers, were retired in #2223/#2235).
+  # These tests assert the surviving semantic equivalents: the sidebar registry
+  # state, the `SidebarsBuilder` metadata the frontend reads, and the FocusTree
+  # input routing that turns a sidebar rect into editor input.
+
+  test "a visible registered sidebar is emitted with its width and reclaimed when hidden", %{
     sidebar_registry: table
   } do
-    state = base_state(cols: 80, rows: 24, sidebar_registry: table)
+    state = gui_state(cols: 80, rows: 24, sidebar_registry: table)
 
-    assert LayoutTUI.compute(state).file_tree == nil
+    refute visible_sidebar(state, "outline")
 
     assert :ok =
              Sidebar.register(table, {:extension, :outline}, %{
@@ -31,37 +39,20 @@ defmodule MingaEditor.Extension.SidebarIntegrationTest do
                visible?: true
              })
 
-    layout = LayoutTUI.compute(state)
-    assert {1, 0, 25, 21} = layout.file_tree
-    assert {1, 26, 54, 21} = layout.editor_area
+    entry = visible_sidebar(state, "outline")
+    assert entry.visible?
+    assert entry.preferred_width == 25
+    assert SidebarsBuilder.build(Context.from_editor_state(state)).active_id == "outline"
 
     assert :ok = Sidebar.set_visible(table, {:extension, :outline}, "outline", false)
-    assert LayoutTUI.compute(state).file_tree == nil
+    refute visible_sidebar(state, "outline")
+    assert SidebarsBuilder.build(Context.from_editor_state(state)).active_id == ""
   end
 
-  test "tiny terminals collapse registered sidebars instead of invalid editor dimensions", %{
+  test "focus tree routes a registered sidebar rect to the generic sidebar handler", %{
     sidebar_registry: table
   } do
-    state = base_state(cols: 12, rows: 8, sidebar_registry: table)
-
-    assert :ok =
-             Sidebar.register(table, {:extension, :outline}, %{
-               id: "outline",
-               display_name: "Outline",
-               preferred_width: 30,
-               visible?: true
-             })
-
-    layout = LayoutTUI.compute(state)
-    assert layout.file_tree == nil
-    assert elem(layout.editor_area, 2) >= 1
-    assert elem(layout.editor_area, 3) >= 1
-  end
-
-  test "focus tree routes registered sidebars to the generic sidebar handler", %{
-    sidebar_registry: table
-  } do
-    state = base_state(cols: 80, rows: 24, sidebar_registry: table)
+    state = gui_state(cols: 80, rows: 24, sidebar_registry: table)
 
     assert :ok =
              Sidebar.register(table, {:extension, :outline}, %{
@@ -72,7 +63,7 @@ defmodule MingaEditor.Extension.SidebarIntegrationTest do
                focused?: true
              })
 
-    state = %{state | layout: LayoutTUI.compute(state)}
+    state = %{state | layout: sidebar_layout(state, {1, 0, 25, 21})}
     node = state |> FocusTree.from_state() |> FocusTree.hit_test(2, 2)
 
     assert node.content_type == {:custom, :sidebar}
@@ -83,7 +74,7 @@ defmodule MingaEditor.Extension.SidebarIntegrationTest do
   test "mouse input routes local coordinates through the generic sidebar handler", %{
     sidebar_registry: table
   } do
-    state = base_state(cols: 80, rows: 24, sidebar_registry: table)
+    state = gui_state(cols: 80, rows: 24, sidebar_registry: table)
 
     assert :ok =
              Sidebar.register(table, {:extension, :outline}, %{
@@ -100,7 +91,7 @@ defmodule MingaEditor.Extension.SidebarIntegrationTest do
                end
              })
 
-    state = %{state | layout: LayoutTUI.compute(state)}
+    state = %{state | layout: sidebar_layout(state, {1, 0, 25, 21})}
     focus_tree = FocusTree.from_state(state)
 
     new_state =
@@ -151,8 +142,8 @@ defmodule MingaEditor.Extension.SidebarIntegrationTest do
     assert_receive {:sidebar_changed, ^table}
   end
 
-  test "TUI renderer uses cached snapshot rows", %{sidebar_registry: table} do
-    state = base_state(cols: 80, rows: 24, sidebar_registry: table)
+  test "snapshot rows feed the semantic sidebar metadata", %{sidebar_registry: table} do
+    state = gui_state(cols: 80, rows: 24, sidebar_registry: table)
 
     assert :ok =
              Sidebar.register(table, {:extension, :outline}, %{
@@ -160,27 +151,31 @@ defmodule MingaEditor.Extension.SidebarIntegrationTest do
                display_name: "Outline",
                preferred_width: 25,
                visible?: true,
+               focused?: true,
                snapshot: [
                  rows: [
-                   %{id: "a", text: "alpha", icon: "λ", indent: 0},
+                   %{id: "a", text: "alpha", icon: "λ", indent: 0, badge: "!"},
                    %{id: "b", text: "beta", indent: 1, selected?: true}
                  ]
                ]
              })
 
-    sidebar = SidebarRenderer.active_sidebar(state)
-    draws = SidebarRenderer.render(state, {1, 0, 25, 10}, sidebar)
-    texts = Enum.map(draws, fn {_row, _col, text, _face} -> String.trim(text) end)
+    %{sidebars: sidebars, active_id: active_id} =
+      SidebarsBuilder.build(Context.from_editor_state(state))
 
-    assert "Outline" in texts
-    assert "λ alpha" in texts
-    assert "beta" in Enum.map(texts, &String.trim/1)
+    assert active_id == "outline"
+
+    outline = Enum.find(sidebars, &(&1.id == "outline"))
+    assert outline.display_name == "Outline"
+    assert outline.visible?
+    # The badge in the snapshot rows is reflected in the emitted metadata.
+    assert outline.badge_count == 1
   end
 
   test "non-built-in sidebar semantic kinds do not trigger built-in renderers", %{
     sidebar_registry: table
   } do
-    state = base_state(cols: 80, rows: 24, sidebar_registry: table)
+    state = gui_state(cols: 80, rows: 24, sidebar_registry: table)
 
     assert :ok =
              Sidebar.register(table, {:extension, :outline}, %{
@@ -188,16 +183,33 @@ defmodule MingaEditor.Extension.SidebarIntegrationTest do
                display_name: "Outline",
                preferred_width: 25,
                visible?: true,
+               focused?: true,
                semantic_kind: "file_tree",
                snapshot: [rows: [%{id: "a", text: "alpha"}]]
              })
 
-    sidebar = SidebarRenderer.active_sidebar(state)
-    draws = SidebarRenderer.render(state, {1, 0, 25, 10}, sidebar)
-    texts = Enum.map(draws, fn {_row, _col, text, _face} -> String.trim(text) end)
+    %{sidebars: sidebars} = SidebarsBuilder.build(Context.from_editor_state(state))
 
-    assert "Outline" in texts
-    assert "alpha" in texts
+    outline = Enum.find(sidebars, &(&1.id == "outline"))
+    # The extension keeps its own id; it is not coerced into the built-in file_tree surface.
+    assert outline.id == "outline"
+    assert outline.semantic_kind == "file_tree"
+    assert outline.display_name == "Outline"
+  end
+
+  # Drives the live FocusTree sidebar routing with an explicit sidebar rect. The
+  # semantic `Layout.GUI` reserves no columns, so the rect is supplied directly;
+  # the routing code under test is frontend-agnostic.
+  defp sidebar_layout(state, file_tree_rect) do
+    %Layout{} = base_layout = Layout.GUI.compute(state)
+    %Layout{base_layout | file_tree: file_tree_rect}
+  end
+
+  defp visible_sidebar(state, id) do
+    state
+    |> Sidebar.table_for()
+    |> Sidebar.all()
+    |> Enum.find(fn sidebar -> sidebar.id == id and sidebar.visible? end)
   end
 
   defp flush_sidebar_messages(table) do

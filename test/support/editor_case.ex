@@ -925,7 +925,34 @@ defmodule Minga.Test.EditorCase do
       ) do
     _ = sync_editor(editor)
     ref = HeadlessPort.prepare_await(port)
-    send(editor, {:minga_input, {:mouse_event, row, col, button, mods, event_type, click_count}})
+
+    # A real frontend translates terminal mouse coordinates into the BEAM's
+    # offset-free editor coordinate space before forwarding them. The headless
+    # port stacks a tab-bar row above the editor surface, so subtract that
+    # offset here (the semantic GUI layout addresses the editor from row 0).
+    beam_row = max(row - HeadlessPort.editor_row_offset(port), 0)
+
+    send(
+      editor,
+      {:minga_input, {:mouse_event, beam_row, col, button, mods, event_type, click_count}}
+    )
+
+    {:ok, snapshot} = HeadlessPort.collect_frame(ref, @sync_timeout)
+    Process.put({:last_frame_snapshot, port}, snapshot)
+    :ok
+  end
+
+  @doc """
+  Sends a semantic `gui_action` to the editor and waits for the next frame.
+
+  Models how a native/Go frontend reports semantic interactions (file-tree
+  clicks, sidebar actions, tab selection) instead of raw cell coordinates.
+  """
+  @spec send_gui_action(editor_ctx(), term()) :: :ok
+  def send_gui_action(%{editor: editor, port: port}, action) do
+    _ = sync_editor(editor)
+    ref = HeadlessPort.prepare_await(port)
+    send(editor, {:minga_input, {:gui_action, action}})
     {:ok, snapshot} = HeadlessPort.collect_frame(ref, @sync_timeout)
     Process.put({:last_frame_snapshot, port}, snapshot)
     :ok

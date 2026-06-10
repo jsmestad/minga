@@ -187,7 +187,9 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
 
     test "visual_row_offset renders the correct continuation slice and cursor position" do
       line = "    alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu"
-      state = base_state(content: line, rows: 5, cols: 24)
+      # Layout.GUI reserves only the minibuffer row, so a smaller viewport is
+      # needed for the wrapped line to still overflow the editor area.
+      state = base_state(content: line, rows: 3, cols: 24)
       buffer = state.workspace.buffers.active
 
       _ = BufferProcess.set_option(buffer, :wrap, true)

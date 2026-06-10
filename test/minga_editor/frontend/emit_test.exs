@@ -2,8 +2,7 @@ defmodule MingaEditor.Frontend.EmitTest do
   @moduledoc """
   Tests for the Emit stage dispatcher and shared helpers.
 
-  TUI-specific tests are in `emit/tui_test.exs`.
-  GUI-specific tests are in `emit/gui_test.exs`.
+  GUI chrome cache tests are in `emit/gui_chrome_cache_test.exs`.
   """
 
   use ExUnit.Case, async: true

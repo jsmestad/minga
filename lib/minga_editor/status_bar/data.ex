@@ -2,9 +2,9 @@ defmodule MingaEditor.StatusBar.Data do
   @moduledoc """
   Tagged-union data struct for the global status bar.
 
-  Computed once per frame from editor state and consumed by both rendering
-  paths: `Chrome.TUI` feeds it to `Modeline.render/5` as cell draws;
-  the GUI emit path encodes it as the 0x76 structured opcode for SwiftUI.
+  Computed once per frame from editor state and consumed by the semantic emit
+  path, which encodes it as the 0x76 (`gui_status_bar`) structured opcode for
+  every live frontend.
 
   The two variants reflect the two kinds of focused window content:
   - `{:buffer, t:buffer_data()}` — a normal buffer window

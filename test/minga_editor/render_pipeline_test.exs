@@ -110,10 +110,11 @@ defmodule MingaEditor.RenderPipelineTest do
       assert mh == 1
 
       {er, _ec, ew, eh} = layout.editor_area
-      assert er == 1
+      # Semantic GUI layout (#2235): the editor area starts at row 0 and fills the
+      # viewport minus the minibuffer row; the frontend renders tab/status natively.
+      assert er == 0
       assert ew == 100
-      # 30 rows: tab=1, status_bar=1, minibuffer=1, editor=27
-      assert eh == 27
+      assert eh == 29
     end
   end
 

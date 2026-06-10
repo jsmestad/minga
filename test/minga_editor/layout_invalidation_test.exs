@@ -151,41 +151,39 @@ defmodule MingaEditor.LayoutInvalidationTest do
       assert is_nil(state.layout), "layout cache should be nil after invalidation"
     end
 
-    test "fresh compute after invalidation includes file tree rect" do
+    test "fresh compute after invalidation reflects the file tree toggle" do
+      # The semantic GUI layout reserves no BEAM columns for the file tree (the
+      # frontend renders it natively, `Layout.TUI` was deleted in #2235), so the
+      # editor stays at col 0. The behavior under test is that invalidation forces
+      # a fresh recompute that picks up the toggled file-tree state.
       state =
         new_state()
         |> with_window()
         |> Layout.put()
 
-      # Cached layout has no file tree
       assert state.layout.file_tree == nil
 
-      # Open file tree and invalidate
       state = with_file_tree(state, 20) |> Layout.invalidate()
       assert is_nil(state.layout)
 
-      # Recompute gives correct layout with file tree (height = rows - tab - status_bar - mini = 21)
       layout = Layout.compute(state)
-      assert layout.file_tree != nil
-      assert layout.file_tree == {1, 0, 20, 21}
-
-      # Editor area starts after tree + separator
+      assert layout.file_tree == nil
       {_r, col, _w, _h} = layout.editor_area
-      assert col == 21
+      assert col == 0
     end
 
-    test "closing file tree and recomputing removes file tree rect" do
+    test "closing file tree and recomputing keeps the editor full-width" do
       state =
         new_state()
         |> with_window()
         |> with_file_tree(20)
         |> Layout.put()
 
-      assert state.layout.file_tree != nil
+      # No reserved columns even with the file tree open.
+      assert state.layout.file_tree == nil
       {_r, col, _w, _h} = state.layout.editor_area
-      assert col == 21
+      assert col == 0
 
-      # Close file tree and invalidate
       state =
         EditorState.set_file_tree(state, %MingaEditor.State.FileTree{}) |> Layout.invalidate()
 
@@ -199,36 +197,68 @@ defmodule MingaEditor.LayoutInvalidationTest do
   # ── Integration: stale cache detection ─────────────────────────────────────
 
   describe "stale window cache detection" do
-    test "window caches with old col_off are stale after tree toggle" do
+    test "window caches with baked-in coordinates are cleared on invalidation" do
+      # The file tree no longer shifts the editor column (semantic GUI layout,
+      # #2235), so a window split is the layout change that makes cached absolute
+      # coordinates stale. The guard is that `invalidate_all_windows` clears the
+      # cached draws so they re-render with the new offsets.
       state = new_state() |> with_window()
 
-      # Simulate a render cycle: compute layout, note the editor col offset
       layout_before = Layout.compute(state)
       {_r, col_before, _w, _h} = layout_before.editor_area
-      assert col_before == 0, "editor starts at col 0 without tree"
+      assert col_before == 0, "editor starts at col 0"
 
       # The window has cached draws with col_off=0 baked in (see with_window helper)
       window = EditorState.active_window_struct(state)
       [{_row, cached_col, _text, _style}] = window.render_cache.cached_content[0]
       assert cached_col == 4, "cached draw at col 4 (gutter_w=4, col_off=0)"
 
-      # Now open file tree. The editor should shift right.
-      state = with_file_tree(state, 20)
+      # Splitting the window vertically moves the right pane's column offset, so
+      # the cached col=4 draws on a moved window are stale.
+      state = with_vsplit(state)
       layout_after = Layout.compute(state)
-      {_r, col_after, _w, _h} = layout_after.editor_area
-      assert col_after == 21, "editor starts at col 21 with tree"
+      assert map_size(layout_after.window_layouts) == 2
 
-      # WITHOUT invalidation, the cached draws still have col=4 (old col_off=0).
-      # That's wrong: they should be at col=25 (col_off=21 + gutter_w=4).
-      # The test verifies that invalidate_all_windows clears these stale caches.
       state = EditorState.invalidate_all_windows(state)
-      window = EditorState.active_window_struct(state)
 
-      assert window.render_cache.cached_content == %{},
-             "stale cached draws should be cleared after invalidation"
+      for {_id, win} <- state.workspace.windows.map do
+        assert win.render_cache.cached_content == %{},
+               "stale cached draws should be cleared after invalidation"
 
-      assert window.render_cache.dirty_lines == :all,
-             "all lines should be marked dirty for re-render with new col_off"
+        assert win.render_cache.dirty_lines == :all,
+               "all lines should be marked dirty for re-render with new offsets"
+      end
     end
+  end
+
+  defp with_vsplit(state) do
+    win1 = %Window{
+      id: 1,
+      content: {:buffer, self()},
+      buffer: self(),
+      viewport: Viewport.new(24, 40),
+      render_cache: %MingaEditor.Window.RenderCache{
+        cached_content: %{0 => [{0, 4, "hello", []}]},
+        dirty_lines: %{}
+      }
+    }
+
+    win2 = %Window{
+      id: 2,
+      content: {:buffer, self()},
+      buffer: self(),
+      viewport: Viewport.new(24, 40),
+      render_cache: %MingaEditor.Window.RenderCache{
+        cached_content: %{0 => [{0, 44, "world", []}]},
+        dirty_lines: %{}
+      }
+    }
+
+    put_in(state.workspace.windows, %Windows{
+      tree: {:split, :vertical, {:leaf, 1}, {:leaf, 2}, 0},
+      map: %{1 => win1, 2 => win2},
+      active: 1,
+      next_id: 3
+    })
   end
 end

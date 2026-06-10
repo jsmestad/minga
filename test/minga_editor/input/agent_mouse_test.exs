@@ -88,6 +88,17 @@ defmodule MingaEditor.Input.AgentMouseTest do
     |> Layout.invalidate()
   end
 
+  # The semantic GUI layout reserves no BEAM rows for the agent panel; the
+  # frontend renders it natively (`Layout.TUI`'s reserved agent rows were
+  # deleted in #2235). Inject an explicit panel rect onto the cached layout so
+  # the live FocusTree agent-panel routing and `AgentMouse` dispatch logic stay
+  # exercised. Returns the state with the rect cached plus the rect itself.
+  defp with_agent_panel_rect(state, rect \\ {16, 0, 80, 8}) do
+    %Layout{} = base_layout = Layout.compute(state)
+    layout = %Layout{base_layout | agent_panel: rect}
+    {%{state | layout: layout}, rect}
+  end
+
   defp agent_chat_window_rect(state) do
     layout = Layout.compute(state)
 
@@ -253,9 +264,8 @@ defmodule MingaEditor.Input.AgentMouseTest do
 
   describe "agent side panel scroll" do
     setup do
-      state = base_state() |> with_agent_panel()
-      layout = Layout.compute(state)
-      {:ok, state: state, panel_rect: layout.agent_panel}
+      {state, panel_rect} = base_state() |> with_agent_panel() |> with_agent_panel_rect()
+      {:ok, state: state, panel_rect: panel_rect}
     end
 
     test "scroll down over agent panel scrolls chat", %{state: state, panel_rect: panel_rect} do
@@ -290,9 +300,8 @@ defmodule MingaEditor.Input.AgentMouseTest do
 
   describe "agent side panel click" do
     setup do
-      state = base_state() |> with_agent_panel()
-      layout = Layout.compute(state)
-      {:ok, state: state, panel_rect: layout.agent_panel}
+      {state, panel_rect} = base_state() |> with_agent_panel() |> with_agent_panel_rect()
+      {:ok, state: state, panel_rect: panel_rect}
     end
 
     test "click in panel chat area unfocuses input", %{state: state, panel_rect: panel_rect} do

@@ -671,11 +671,11 @@ LSP communication, file indexing, git operations: these can run as separate BEAM
 
 ## Semantic render and command path
 
-Render and command code does **not** branch on `Capabilities.gui?`. Every live frontend (the macOS GUI and the Go TUI) advertises `semantic_ui` in its `ready` handshake and takes a single semantic path: the BEAM builds a semantic render model (`Chrome.GUI`, `Layout.GUI`, the `RenderModel.UI.*` builders) and the frontend renders it natively. The legacy Zig cell-grid TUI, the last consumer of cell draws, was removed in #2223; the BEAM-side cell chrome/layout/picker builders it fed are pending deletion in #2235/#2236.
+Render and command code does **not** branch on `Capabilities.gui?`. Every live frontend (the macOS GUI and the Go TUI) advertises `semantic_ui` in its `ready` handshake and takes a single semantic path: the BEAM builds a semantic render model (`Chrome.GUI`, `Layout.GUI`, the `RenderModel.UI.*` builders) and the frontend renders it natively. The legacy Zig cell-grid TUI, the last consumer of cell draws, was removed in #2223; the BEAM-side cell chrome/layout builders it fed (`Chrome.TUI`, `Layout.TUI`, `tree_renderer.ex`, `sidebar_renderer.ex`) were deleted in #2235, leaving `picker_ui.ex`'s cell renderer pending deletion in #2236.
 
 **The predicate is `Capabilities.semantic_ui?`, not `gui?`.** When a render or command path must decide between the semantic model and the legacy cell path, branch on `semantic_ui?`. `gui?` (true only for `frontend_type: :native_gui`) remains available for genuinely native-window-only concerns that are not render/command dispatch: native-renderer config (line spacing, cursor animation), GUI defaults (absolute line numbers), the native-window title, GUI-only key bindings, and the GUI settings-panel config push. Do not use `gui?` to gate semantic chrome or semantic-capable features (e.g. the BEAM observatory, which the Go TUI renders), or you will strand the Go TUI.
 
-**Command dispatch is single-path.** Shared chrome commands (bottom panel, message tray) live directly in their command module with no `Commands.Foo.GUI` / `Commands.Foo.TUI` submodules and no `Frontend` behaviour. The chrome and layout builders dispatch `Chrome.GUI` / `Layout.GUI` for semantic frontends and keep `Chrome.TUI` / `Layout.TUI` only for legacy Zig (slated for deletion in #2235).
+**Command dispatch is single-path.** Shared chrome commands (bottom panel, message tray) live directly in their command module with no `Commands.Foo.GUI` / `Commands.Foo.TUI` submodules and no `Frontend` behaviour. The chrome and layout builders call `Chrome.GUI` / `Layout.GUI` unconditionally; the `Chrome.TUI` / `Layout.TUI` cell builders were deleted in #2235.
 
 ---
 

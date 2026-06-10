@@ -88,7 +88,9 @@ defmodule MingaEditor.Commands.WindowTest do
 
       Enum.each(viewports, fn viewport ->
         assert viewport.cols < 80
-        assert viewport.rows == 21
+        # Semantic GUI layout reserves only the minibuffer row (#2235), so each
+        # window viewport is the full height minus that row.
+        assert viewport.rows == 23
       end)
     end
 

@@ -211,6 +211,17 @@ defmodule Minga.Test.HeadlessPort do
   end
 
   @doc """
+  Returns the number of screen rows this port stacks above the editor surface
+  (the tab-bar row). A real frontend subtracts this from terminal mouse
+  coordinates before forwarding them to the BEAM, which addresses the editor in
+  its own (offset-free) coordinate space.
+  """
+  @spec editor_row_offset(GenServer.server()) :: non_neg_integer()
+  def editor_row_offset(server) do
+    GenServer.call(server, :editor_row_offset)
+  end
+
+  @doc """
   Blocks until a new frame is rendered (batch_end received).
   Returns `:ok` or `{:error, :timeout}`.
   """
@@ -354,6 +365,10 @@ defmodule Minga.Test.HeadlessPort do
 
   def handle_call(:frame_count, _from, state) do
     {:reply, state.frame_count, state}
+  end
+
+  def handle_call(:editor_row_offset, _from, state) do
+    {:reply, top_chrome_offset(state), state}
   end
 
   def handle_call(:reset, _from, state) do
@@ -561,50 +576,82 @@ defmodule Minga.Test.HeadlessPort do
 
   @spec draw_windows(State.t()) :: State.t()
   defp draw_windows(state) do
+    offset = top_chrome_offset(state)
+
     state.windows
     |> Map.values()
     |> Enum.sort_by(fn window -> window_origin(window) end)
     |> Enum.reduce(state, fn window, acc ->
-      acc = draw_window_gutter(acc, window, Map.get(acc.gutters, window.window_id))
-      draw_window_rows(acc, window)
+      acc = draw_window_gutter(acc, window, Map.get(acc.gutters, window.window_id), offset)
+      draw_window_rows(acc, window, offset)
     end)
   end
 
-  @spec draw_window_rows(State.t(), map()) :: State.t()
-  defp draw_window_rows(state, %{rows: rows} = window) do
+  # The BEAM's semantic GUI layout reserves no editor rows for the tab bar or
+  # status bar (`Layout.TUI` was deleted in #2235); the emitted window fills the
+  # viewport minus the minibuffer row. Like the production Go TUI, this headless
+  # port renders a one-row tab bar above the editor and a status bar +
+  # minibuffer below it, then clips the taller emitted window to the rows that
+  # remain (the Go `bodyHeight` clip). Window content shifts down by the tab-bar
+  # height and is clamped to the content region; the file tree already starts at
+  # the first editor row.
+  @spec top_chrome_offset(State.t()) :: non_neg_integer()
+  defp top_chrome_offset(%{tab_bar: nil}), do: 0
+  defp top_chrome_offset(_state), do: 1
+
+  # Rows reserved below the editor: the status bar (rows-2) and minibuffer (rows-1).
+  @bottom_chrome_rows 2
+
+  # Number of editor rows the port shows after reserving top and bottom chrome.
+  @spec content_region_height(State.t(), non_neg_integer()) :: non_neg_integer()
+  defp content_region_height(state, offset) do
+    max(state.height - offset - @bottom_chrome_rows, 0)
+  end
+
+  @spec draw_window_rows(State.t(), map(), non_neg_integer()) :: State.t()
+  defp draw_window_rows(state, %{rows: rows} = window, offset) do
     {row0, col0} = window_text_origin(window)
+    row0 = row0 + offset
+    region = content_region_height(state, offset)
 
     state =
       rows
       |> Enum.with_index()
       |> Enum.reduce(state, fn {row, display_row}, acc ->
-        draw_semantic_row(
-          acc,
-          row0 + display_row,
-          col0,
-          row,
-          display_row,
-          Map.get(window, :selection)
-        )
+        if display_row < region do
+          draw_semantic_row(
+            acc,
+            row0 + display_row,
+            col0,
+            row,
+            display_row,
+            Map.get(window, :selection)
+          )
+        else
+          acc
+        end
       end)
 
     rows
     |> length()
-    |> draw_window_tildes(state, window, row0, col0)
-    |> put_window_cursor(window)
+    |> draw_window_tildes(state, window, row0, col0, region)
+    |> put_window_cursor(window, offset)
   end
 
-  defp draw_window_rows(state, _window), do: state
+  defp draw_window_rows(state, _window, _offset), do: state
 
   @spec draw_window_tildes(
           non_neg_integer(),
           State.t(),
           map(),
           non_neg_integer(),
+          non_neg_integer(),
           non_neg_integer()
         ) :: State.t()
-  defp draw_window_tildes(row_count, state, window, row0, col0) do
-    height = window_text_height(window)
+  defp draw_window_tildes(row_count, state, window, row0, col0, region) do
+    # Fill empty editor rows with tildes, clamped to the content region so they
+    # never bleed into the status bar or minibuffer.
+    height = min(window_text_height(window), region)
 
     row_count..max(row_count, height - 1)
     |> Enum.reduce(state, fn display_row, acc ->
@@ -616,24 +663,31 @@ defmodule Minga.Test.HeadlessPort do
     end)
   end
 
-  @spec draw_window_gutter(State.t(), map(), map() | nil) :: State.t()
-  defp draw_window_gutter(state, _window, nil), do: state
+  @spec draw_window_gutter(State.t(), map(), map() | nil, non_neg_integer()) :: State.t()
+  defp draw_window_gutter(state, _window, nil, _offset), do: state
 
-  defp draw_window_gutter(state, _window, gutter) do
+  defp draw_window_gutter(state, _window, gutter, offset) do
+    region = content_region_height(state, offset)
+
     gutter.entries
     |> Enum.with_index(gutter.content_row)
-    |> Enum.reduce(state, fn {entry, row}, acc ->
-      draw_text(acc, row, gutter.content_col, gutter_entry_text(gutter, entry))
+    |> Enum.reduce(state, fn {entry, display_row}, acc ->
+      if display_row - gutter.content_row < region do
+        draw_text(acc, display_row + offset, gutter.content_col, gutter_entry_text(gutter, entry))
+      else
+        acc
+      end
     end)
   end
 
-  @spec put_window_cursor(State.t(), map()) :: State.t()
-  defp put_window_cursor(state, window) do
+  @spec put_window_cursor(State.t(), map(), non_neg_integer()) :: State.t()
+  defp put_window_cursor(state, window, offset) do
     # A window whose cursor is hidden (e.g. while a minibuffer input mode owns
     # the cursor) must not position the terminal cursor. Mirrors the Zig
     # `windowCursorPosition`, which returns null when `cursor_visible` is false.
     if Map.get(window, :cursor_visible, true) do
       {row0, col0} = window_text_origin(window)
+      row0 = row0 + offset
       cursor_shape = Map.get(window, :cursor_shape, :block)
 
       %{

@@ -2,8 +2,7 @@ defmodule MingaEditor.RenderPipeline.ComposeHelpers do
   @moduledoc """
   Helper functions for the Compose stage of the render pipeline.
 
-  Injects modeline draws into window frames, resolves cursor position
-  and shape, and handles agent panel cursor overrides.
+  Resolves cursor position and shape, and handles agent panel cursor overrides.
 
   Extracted from `RenderPipeline` to reduce module size.
   """
