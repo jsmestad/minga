@@ -1159,6 +1159,88 @@ func TestSemanticMouseRoutesModelineAndFileTreeZones(t *testing.T) {
 	}
 }
 
+func TestSemanticMouseRoutesBreadcrumbSegmentZones(t *testing.T) {
+	model := New(120, 12, nil)
+	model.chrome = map[byte]protocol.ChromePayload{
+		generated.OPGuiBreadcrumb: {Breadcrumb: protocol.Breadcrumb{Segments: []string{"lib", "minga", "main.ex"}}},
+	}
+	model.viewport.SetContent(model.content())
+	_ = model.View()
+
+	zone := waitForZone(t, model, zoneIDBreadcrumbSegment(1))
+	cmd, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: zone.StartX + 1, Y: zone.StartY}))
+	if !ok || !bytes.Equal(cmd, protocol.EncodeGUIBreadcrumbClick(1)) {
+		t.Fatalf("breadcrumb click should route breadcrumb_click for segment 1, ok=%v packet=%v", ok, cmd)
+	}
+	if _, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseRight, X: zone.StartX + 1, Y: zone.StartY})); ok {
+		t.Fatalf("non-left breadcrumb clicks should fall back")
+	}
+}
+
+func TestSemanticMouseRoutesCompletionItemZones(t *testing.T) {
+	model := New(60, 16, nil)
+	model.chrome = map[byte]protocol.ChromePayload{
+		generated.OPGuiCompletion: {Complete: protocol.Completion{Visible: true, Selected: 0, Items: []protocol.CompletionItem{
+			{Label: "alpha", Detail: "fn"},
+			{Label: "beta", Detail: "fn"},
+		}}},
+	}
+	model.viewport.SetContent(model.content())
+	_ = model.View()
+
+	zone := waitForZone(t, model, zoneIDCompletionItem(1))
+	cmd, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: zone.StartX + 1, Y: zone.StartY}))
+	if !ok || !bytes.Equal(cmd, protocol.EncodeGUICompletionSelect(1)) {
+		t.Fatalf("completion row click should route completion_select index 1, ok=%v packet=%v", ok, cmd)
+	}
+	if _, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: zone.EndX + 50, Y: zone.EndY + 50})); ok {
+		t.Fatalf("out-of-bounds completion clicks should fall back")
+	}
+}
+
+func TestSemanticMouseRoutesSidebarItemZones(t *testing.T) {
+	model := New(80, 6, nil)
+	model.chrome = map[byte]protocol.ChromePayload{
+		generated.OPGuiSidebars: {Sidebars: protocol.Sidebars{Visible: true, ActiveID: "files", Items: []protocol.Sidebar{
+			{ID: "files", DisplayName: "Files", SemanticKind: "file_tree", PreferredWidth: 18, Visible: true},
+			{ID: "git", DisplayName: "Git", SemanticKind: "git_status", PreferredWidth: 18, Visible: true},
+		}}},
+	}
+	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "pane"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 0, Col: 0, Width: 8, Height: 1}}})
+	model.viewport.SetContent(model.content())
+	_ = model.View()
+
+	// Active sidebar click sends "toggle".
+	activeZone := waitForZone(t, model, zoneIDSidebarItem("files"))
+	cmd, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: activeZone.StartX + 1, Y: activeZone.StartY}))
+	if !ok || !bytes.Equal(cmd, protocol.EncodeGUISidebarAction("files", "file_tree", "toggle")) {
+		t.Fatalf("active sidebar click should route sidebar_action toggle, ok=%v packet=%v", ok, cmd)
+	}
+
+	// Inactive sidebar click sends "activate".
+	inactiveZone := waitForZone(t, model, zoneIDSidebarItem("git"))
+	cmd, ok = model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: inactiveZone.StartX + 1, Y: inactiveZone.StartY}))
+	if !ok || !bytes.Equal(cmd, protocol.EncodeGUISidebarAction("git", "git_status", "activate")) {
+		t.Fatalf("inactive sidebar click should route sidebar_action activate, ok=%v packet=%v", ok, cmd)
+	}
+}
+
+func TestSemanticMouseRoutesHoverActionZone(t *testing.T) {
+	model := New(60, 16, nil)
+	model.chrome = map[byte]protocol.ChromePayload{
+		generated.OPGuiHoverPopup:  {Hover: protocol.HoverPopup{Visible: true, Lines: []protocol.RichLine{{Segments: []protocol.RichSegment{{Text: "doc"}}}}}},
+		generated.OPGuiHoverAction: {HoverAction: protocol.HoverAction{Visible: true, Name: "Open documentation"}},
+	}
+	model.viewport.SetContent(model.content())
+	_ = model.View()
+
+	zone := waitForZone(t, model, zoneIDHoverAction)
+	cmd, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: zone.StartX + 1, Y: zone.StartY}))
+	if !ok || !bytes.Equal(cmd, protocol.EncodeGUIHoverOpenAction()) {
+		t.Fatalf("hover action click should route hover_open_action, ok=%v packet=%v", ok, cmd)
+	}
+}
+
 func TestBottomPanelShowsLatestMessagesByDefault(t *testing.T) {
 	model, panel := bottomPanelTestModel(10, nil)
 	visible := model.visibleBottomPanelMessages(panel)
