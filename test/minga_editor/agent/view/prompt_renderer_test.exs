@@ -160,5 +160,4 @@ defmodule MingaEditor.Agent.View.PromptRendererTest do
       assert PromptRenderer.input_v_gap() >= 0
     end
   end
-
 end
