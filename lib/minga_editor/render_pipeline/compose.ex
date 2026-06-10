@@ -2,9 +2,11 @@ defmodule MingaEditor.RenderPipeline.Compose do
   @moduledoc """
   Stage 6: Compose.
 
-  Merges content `WindowFrame` structs and `Chrome` into a final `Frame`.
-  Injects modeline draws into each window frame, resolves cursor position
-  and shape from the priority chain (picker > minibuffer > agent > window > fallback).
+  Merges content `WindowFrame` structs and `Chrome` into a final `Frame`, and
+  resolves cursor position and shape from the priority chain
+  (picker > minibuffer > agent > window > fallback). The modeline is carried by
+  the semantic chrome (`gui_status_bar` 0x76), so no modeline draws are injected
+  into window frames here.
   """
 
   alias MingaEditor.DisplayList.{Cursor, Frame, WindowFrame}
@@ -20,8 +22,7 @@ defmodule MingaEditor.RenderPipeline.Compose do
   @doc """
   Merges content WindowFrames and Chrome into a `Frame` struct.
 
-  Injects modeline draws into each WindowFrame, resolves cursor
-  position and shape, and assembles the final frame.
+  Resolves cursor position and shape and assembles the final frame.
   """
   @spec compose_windows(
           [WindowFrame.t()],

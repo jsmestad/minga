@@ -5,8 +5,9 @@ defmodule MingaEditor.FileTree.FeatureTest do
   alias Minga.Project.FileTree
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.FileTree.Feature, as: FileTreeFeature
+  alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.Input
-  alias MingaEditor.Shell.Traditional.Layout.TUI, as: LayoutTUI
+  alias MingaEditor.RenderModel.UI.SidebarsBuilder
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.FileTree, as: FileTreeState
 
@@ -51,19 +52,31 @@ defmodule MingaEditor.FileTree.FeatureTest do
     Input.reset_handlers()
   end
 
-  test "layout uses FileTree sidebar registry visibility and width", %{sidebar_registry: table} do
-    state = base_state(cols: 80, rows: 24, sidebar_registry: table)
+  test "semantic sidebar metadata uses FileTree registry visibility and width", %{
+    sidebar_registry: table
+  } do
+    # The BEAM no longer reserves cell columns for the file tree; the frontend
+    # renders it natively. The surviving behavior is that the file tree's
+    # visibility and width flow into the semantic sidebar metadata the frontend
+    # reads, and that closing it marks the sidebar hidden.
+    state = gui_state(cols: 80, rows: 24, sidebar_registry: table)
     tree = FileTree.new(File.cwd!(), width: 26)
     file_tree = %FileTreeState{} |> FileTreeState.open(tree, nil)
 
     state = EditorState.set_file_tree(state, file_tree)
-    layout = LayoutTUI.compute(state)
 
-    assert {1, 0, 26, 21} = layout.file_tree
-    assert {1, 27, 53, 21} = layout.editor_area
+    %{sidebars: sidebars, active_id: active_id} =
+      SidebarsBuilder.build(Context.from_editor_state(state))
+
+    assert active_id == "file_tree"
+    entry = Enum.find(sidebars, &(&1.id == "file_tree"))
+    assert entry.visible?
+    assert entry.preferred_width == 26
 
     state = EditorState.set_file_tree(state, FileTreeState.close(file_tree))
-    assert LayoutTUI.compute(state).file_tree == nil
+    %{sidebars: sidebars} = SidebarsBuilder.build(Context.from_editor_state(state))
+    entry = Enum.find(sidebars, &(&1.id == "file_tree"))
+    refute entry.visible?
   end
 
   test "workspace replacement re-syncs the active FileTree sidebar", %{sidebar_registry: table} do

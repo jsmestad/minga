@@ -11,13 +11,13 @@ defmodule Minga.Project.FileTree.BufferSync do
   alias Minga.Project.FileTree
   alias Minga.Language.Devicon
 
-  # Box-drawing characters matching TreeRenderer
+  # Box-drawing characters matching the semantic file-tree builder
   @guide_pipe "│ "
   @guide_tee "├─"
   @guide_elbow "└─"
   @guide_blank "  "
 
-  # Nerd Font folder icons matching TreeRenderer
+  # Nerd Font folder icons matching the semantic file-tree builder
   @folder_closed "\u{F024B}"
   @folder_open "\u{F0256}"
 

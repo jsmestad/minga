@@ -8,10 +8,8 @@ defmodule Minga.Integration.FileTreeTest do
   use Minga.Test.EditorCase, async: false
 
   alias Minga.Project.FileTree
-  alias Minga.Test.HeadlessPort
 
   @moduletag :tmp_dir
-  @sync_timeout 15_000
 
   defp setup_fixture(%{tmp_dir: dir}) do
     File.mkdir_p!(Path.join(dir, "subdir"))
@@ -33,15 +31,6 @@ defmodule Minga.Integration.FileTreeTest do
     assert file_tree_open?(ctx)
     assert file_tree_contains?(ctx, "alpha.txt")
     ctx
-  end
-
-  defp send_gui_action(%{editor: editor, port: port}, action) do
-    _ = GenServer.call(editor, :api_mode, @sync_timeout)
-    ref = HeadlessPort.prepare_await(port)
-    send(editor, {:minga_input, {:gui_action, action}})
-    {:ok, snapshot} = HeadlessPort.collect_frame(ref, @sync_timeout)
-    Process.put({:last_frame_snapshot, port}, snapshot)
-    :ok
   end
 
   describe "file tree integration" do

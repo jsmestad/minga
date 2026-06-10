@@ -132,7 +132,13 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
       assert fp_hidden != fp_snapshot
     end
 
-    test "second frame updates sidebar output after snapshot changes", %{sidebar_registry: table} do
+    test "second frame rebuilds chrome after a sidebar snapshot changes", %{
+      sidebar_registry: table
+    } do
+      # The frontend renders sidebar rows natively from the registry snapshot; the
+      # BEAM no longer paints sidebar cells into chrome.file_tree. The surviving
+      # cross-frame behavior is that a snapshot change invalidates the chrome
+      # fingerprint, forcing a rebuild so the next frame re-emits sidebar metadata.
       assert :ok =
                Sidebar.register(table, {:extension, :outline}, %{
                  id: "outline",
@@ -145,11 +151,6 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
 
       state = TestHelpers.base_state(sidebar_registry: table)
       state1 = TestHelpers.run_pipeline(state)
-      first_sidebar = state1.caches.chrome_prev_result.file_tree
-
-      assert Enum.any?(first_sidebar, fn {_row, _col, text, _face} ->
-               String.trim(text) == "alpha"
-             end)
 
       assert :ok =
                Sidebar.publish_snapshot(table, {:extension, :outline}, "outline",
@@ -157,18 +158,8 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
                )
 
       state2 = TestHelpers.run_pipeline(state1)
-      second_sidebar = state2.caches.chrome_prev_result.file_tree
 
       assert state2.caches.chrome_prev_fingerprint != state1.caches.chrome_prev_fingerprint
-      assert first_sidebar != second_sidebar
-
-      assert Enum.any?(second_sidebar, fn {_row, _col, text, _face} ->
-               String.trim(text) == "beta"
-             end)
-
-      refute Enum.any?(second_sidebar, fn {_row, _col, text, _face} ->
-               String.trim(text) == "alpha"
-             end)
     end
 
     test "shell-owned chrome state changes fingerprint through shell hook" do

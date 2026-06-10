@@ -149,7 +149,7 @@ defmodule MingaEditor.Layout do
     EditorState.active_shell_module(state).compute_layout(state)
   end
 
-  # ── Shared helpers (used by Layout.TUI and Layout.GUI) ─────────────────────
+  # ── Shared helpers (used by Layout.GUI) ────────────────────────────────────
 
   @doc """
   Computes window layouts and horizontal separator positions simultaneously.

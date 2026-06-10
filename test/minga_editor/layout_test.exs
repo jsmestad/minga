@@ -14,6 +14,12 @@ defmodule MingaEditor.LayoutTest do
   alias MingaEditor.Window
   alias Minga.Project.FileTree
 
+  # Every live frontend is semantic (`Layout.GUI`); the legacy cell-grid
+  # `Layout.TUI` and its reserved tab-bar/file-tree/agent-panel geometry were
+  # deleted in #2235. These tests drive the surviving GUI layout: the Metal
+  # viewport is pure editor area plus a minibuffer row, and the shared
+  # window-subdivision/split math in `MingaEditor.Layout`.
+
   setup do
     table = Module.concat(__MODULE__, "Sidebar#{System.unique_integer([:positive])}")
     start_supervised!({Sidebar, name: table, notify: false})
@@ -30,6 +36,10 @@ defmodule MingaEditor.LayoutTest do
       port_manager: nil,
       sidebar_registry: Process.get(:sidebar_registry),
       terminal_viewport: vp,
+      capabilities: %MingaEditor.Frontend.Capabilities{
+        frontend_type: :native_gui,
+        semantic_ui: true
+      },
       workspace: %MingaEditor.Session.State{
         viewport: vp,
         editing: VimState.new()
@@ -64,28 +74,16 @@ defmodule MingaEditor.LayoutTest do
     EditorState.set_file_tree(state, file_tree)
   end
 
-  defp with_agent_workspace(state) do
-    file_tab = %MingaEditor.State.Tab{id: 1, kind: :file, label: "scratch"}
-    tb = MingaEditor.State.tab_bar(state) || TabBar.new(file_tab)
-    {tb, _workspace} = TabBar.add_workspace(tb, "Agent: tests")
-    ss = state.shell_state
-    %{state | shell_state: %{ss | tab_bar: tb}}
-  end
-
   defp with_agent_panel(state) do
     agent = %AgentState{}
     base = UIState.new()
     agentic = %{base | panel: %{base.panel | visible: true}}
     agent_ctx = %{keymap_scope: :agent}
 
-    # Ensure a file tab exists and is active, then add a background agent tab.
-    # TabBar.new/1 requires an initial Tab; we start with a file tab.
     file_tab = %MingaEditor.State.Tab{id: 1, kind: :file, label: "scratch"}
     tb = MingaEditor.State.tab_bar(state) || TabBar.new(file_tab)
     {tb, agent_tab} = TabBar.add(tb, :agent, "Agent")
     tb = TabBar.update_context(tb, agent_tab.id, agent_ctx)
-
-    # Keep the file tab active
     tb = TabBar.switch_to(tb, file_tab.id)
 
     state = put_in(state.workspace.agent_ui, agentic)
@@ -139,122 +137,70 @@ defmodule MingaEditor.LayoutTest do
     })
   end
 
-  # ── Basic layout ─────────────────────────────────────────────────────────────
-  # Tab bar at row 0, editor starts at row 1, status bar at row 22, minibuffer at last row.
-  # For 24-row terminal: tab_bar={0,0,80,1}, editor={1,0,80,21}, status_bar={22,0,80,1}, minibuffer={23,0,80,1}
+  # ── Single window ────────────────────────────────────────────────────────────
 
   describe "compute/1 single window" do
-    test "full terminal minus minibuffer, status bar, and tab bar rows" do
+    test "editor area is the full viewport minus the minibuffer row" do
       state = new_state(24, 80) |> with_window()
       layout = Layout.compute(state)
 
       assert layout.terminal == {0, 0, 80, 24}
-      assert layout.tab_bar == {0, 0, 80, 1}
-      assert layout.status_bar == {22, 0, 80, 1}
-      assert layout.minibuffer == {23, 0, 80, 1}
-      assert layout.editor_area == {1, 0, 80, 21}
+      # SwiftUI/Go render tab bar, status bar, and file tree natively; the BEAM
+      # reserves no rows or columns for them.
+      assert layout.tab_bar == nil
+      assert layout.status_bar == nil
       assert layout.file_tree == nil
       assert layout.agent_panel == nil
+      assert layout.minibuffer == {23, 0, 80, 1}
+      assert layout.editor_area == {0, 0, 80, 23}
     end
 
-    test "single window fills editor area; modeline row is the global status bar" do
+    test "single window fills the editor area with a zero-height modeline" do
       state = new_state(24, 80) |> with_window()
       layout = Layout.compute(state)
 
-      # Tab bar at row 0, status bar at row 22, minibuffer at row 23.
-      # Editor area gets rows 1-21 (21 rows, same content height as before).
       assert %{1 => wl} = layout.window_layouts
-      assert wl.total == {1, 0, 80, 21}
-      assert wl.content == {1, 0, 80, 21}
-      # Zero-height modeline: per-window modelines are gone; global status bar handles display.
-      assert wl.modeline == {22, 0, 80, 0}
-      # Global status bar occupies row 22 (one row above minibuffer).
-      assert layout.status_bar == {22, 0, 80, 1}
+      assert wl.total == {0, 0, 80, 23}
+      assert wl.content == {0, 0, 80, 23}
+      # Per-window modelines are gone; the global status bar (0x76) handles display.
+      {_, _, _, ml_h} = wl.modeline
+      assert ml_h == 0
     end
 
-    test "workspace context reserves a workspace row when terminal height allows it" do
-      state = new_state(24, 80) |> with_window() |> with_agent_workspace()
-      layout = Layout.compute(state)
-
-      assert layout.tab_bar == {0, 0, 80, 2}
-      assert layout.editor_area == {2, 0, 80, 20}
-    end
-
-    test "workspace context collapses into modeline on short terminals" do
-      state = new_state(6, 80) |> with_window() |> with_agent_workspace()
-      layout = Layout.compute(state)
-
-      assert layout.tab_bar == {0, 0, 80, 1}
-      assert layout.editor_area == {1, 0, 80, 3}
-    end
-  end
-
-  # ── File tree ──────────────────────────────────────────────────────────────
-
-  describe "compute/1 with file tree" do
-    test "file tree takes left columns, editor shifts right" do
+    test "file tree open does not reserve BEAM columns" do
       state = new_state(24, 80) |> with_window() |> with_file_tree(30)
       layout = Layout.compute(state)
 
-      # Tree starts at row 1 (below tab bar), height = 21 (24 - tab_bar - status_bar - minibuffer)
-      assert layout.file_tree == {1, 0, 30, 21}
-      assert layout.editor_area == {1, 31, 49, 21}
+      assert layout.file_tree == nil
+      {_row, col, width, _h} = layout.editor_area
+      assert col == 0
+      assert width == 80
     end
 
-    test "window layouts use editor area coordinates" do
-      state = new_state(24, 80) |> with_window() |> with_file_tree(30)
-      layout = Layout.compute(state)
-
-      %{1 => wl} = layout.window_layouts
-      # Editor area is 21 rows (24 - tab - status_bar - minibuffer).
-      assert wl.total == {1, 31, 49, 21}
-      assert wl.content == {1, 31, 49, 21}
-      # Zero-height modeline; global status bar at row 22 handles display.
-      assert wl.modeline == {22, 31, 49, 0}
-    end
-  end
-
-  # ── Agent panel ────────────────────────────────────────────────────────────
-
-  describe "compute/1 with agent panel" do
-    test "agent panel takes 35% of terminal rows" do
+    test "agent panel does not reserve BEAM rows" do
       state = new_state(24, 80) |> with_window() |> with_agent_panel()
       layout = Layout.compute(state)
 
-      # remaining = 21 (24 - tab - status_bar - minibuffer). 35% of 24 = 8 rows for agent panel.
-      # editor_height = 21 - 8 = 13
-      assert layout.agent_panel == {14, 0, 80, 8}
-      assert layout.editor_area == {1, 0, 80, 13}
-    end
-
-    test "agent panel with file tree" do
-      state = new_state(24, 80) |> with_window() |> with_file_tree(20) |> with_agent_panel()
-      layout = Layout.compute(state)
-
-      # Agent panel is within the editor column space
-      {_r, col, width, _h} = layout.agent_panel
-      assert col == 21
-      assert width == 59
+      assert layout.agent_panel == nil
+      assert layout.editor_area == {0, 0, 80, 23}
     end
   end
 
-  # ── Split windows ──────────────────────────────────────────────────────────
+  # ── Splits (shared window-subdivision math) ──────────────────────────────────
 
   describe "compute/1 with vertical split" do
-    test "two windows side by side with zero-height modelines (global status bar)" do
+    test "two windows side by side with zero-height modelines" do
       state = new_state(24, 80) |> with_vsplit()
       layout = Layout.compute(state)
 
       assert map_size(layout.window_layouts) == 2
       %{1 => left, 2 => right} = layout.window_layouts
 
-      # Per-window modelines are gone; all windows have zero-height modeline rects.
       {_, _, _, lmh} = left.modeline
       {_, _, _, rmh} = right.modeline
       assert lmh == 0
       assert rmh == 0
 
-      # Each window fills its full allocated rect with content.
       {_, _, _, left_h} = left.total
       {_, _, _, left_ch} = left.content
       assert left_h == left_ch
@@ -266,247 +212,47 @@ defmodule MingaEditor.LayoutTest do
   end
 
   describe "compute/1 with horizontal split" do
-    test "two windows stacked with horizontal separator" do
+    test "two windows stacked with a horizontal separator" do
       state = new_state(24, 80) |> with_hsplit()
       layout = Layout.compute(state)
 
       assert map_size(layout.window_layouts) == 2
       %{1 => top, 2 => bottom} = layout.window_layouts
 
-      # Both windows have zero-height modelines (global status bar handles display).
       {_, _, _, tmh} = top.modeline
       assert tmh == 0
 
-      # A horizontal separator appears between the panes.
       assert [sep | _] = layout.horizontal_separators
       {sep_row, _sep_col, _sep_w, _sep_name} = sep
 
-      # Separator is positioned at the boundary (top's last content row + 1).
       {tr, _, _, th} = top.total
       assert sep_row == tr + th
 
-      # Bottom window starts below the separator.
       {br, _, _, _} = bottom.total
       assert br == sep_row + 1
     end
   end
 
-  # ── Non-overlap invariant ──────────────────────────────────────────────────
+  # ── Non-overlap invariant ────────────────────────────────────────────────────
 
   describe "non-overlap invariant" do
     test "no regions overlap in single window mode" do
       state = new_state(24, 80) |> with_window()
-      layout = Layout.compute(state)
-      assert_no_overlap(layout)
-    end
-
-    test "no regions overlap with file tree" do
-      state = new_state(24, 80) |> with_window() |> with_file_tree(30)
-      layout = Layout.compute(state)
-      assert_no_overlap(layout)
-    end
-
-    test "no regions overlap with agent panel" do
-      state = new_state(24, 80) |> with_window() |> with_agent_panel()
-      layout = Layout.compute(state)
-      assert_no_overlap(layout)
-    end
-
-    test "no regions overlap with file tree and agent panel" do
-      state = new_state(24, 80) |> with_window() |> with_file_tree(20) |> with_agent_panel()
-      layout = Layout.compute(state)
-      assert_no_overlap(layout)
+      assert_no_overlap(Layout.compute(state))
     end
 
     test "no regions overlap with vertical split" do
       state = new_state(24, 80) |> with_vsplit()
-      layout = Layout.compute(state)
-      assert_no_overlap(layout)
+      assert_no_overlap(Layout.compute(state))
     end
 
     test "no regions overlap with horizontal split" do
       state = new_state(24, 80) |> with_hsplit()
-      layout = Layout.compute(state)
-      assert_no_overlap(layout)
+      assert_no_overlap(Layout.compute(state))
     end
   end
 
-  # ── Constraint satisfaction ──────────────────────────────────────────────────
-  #
-  # Constraints (from layout.ex):
-  #   @editor_min_cols      10   — editor area never narrower than this
-  #   @editor_min_rows       3   — editor area never shorter than this
-  #   @file_tree_min_cols    8   — tree collapses below this width
-  #   @agent_panel_min_rows  5   — panel collapses below this height
-  #
-  # Collapse priority: agent panel first, file tree second, editor never.
-
-  describe "constraints: agent panel" do
-    test "stays when panel height meets minimum" do
-      # 17 rows. tab_bar=1, minibuffer=1, remaining=15. Panel = 35% of 17 = 5. Editor = 10.
-      state = new_state(17, 80) |> with_window() |> with_agent_panel()
-      layout = Layout.compute(state)
-      assert layout.agent_panel != nil
-      {_, _, _, ph} = layout.agent_panel
-      assert ph == 5
-    end
-
-    test "collapses when panel height is below minimum (boundary)" do
-      # 14 rows: tab=1, status_bar=1, minibuffer=1, remaining=11.
-      # Panel = 35% of 14 = 4 < 5 (min), so it collapses → editor_height = 11.
-      state = new_state(14, 80) |> with_window() |> with_agent_panel()
-      layout = Layout.compute(state)
-      assert layout.agent_panel == nil
-      {_, _, _, eh} = layout.editor_area
-      assert eh == 11
-    end
-
-    test "collapses when remaining editor height would be below minimum" do
-      # 9 rows. tab=1, status=1, mini=1, remaining=6. Panel = 35% of 9 = 3. 3 < 5, collapse.
-      state = new_state(9, 80) |> with_window() |> with_agent_panel()
-      layout = Layout.compute(state)
-      assert layout.agent_panel == nil
-
-      # 22 rows. remaining=19. Panel = 35% of 22 = 7. Editor = 19-7 = 12. Fine.
-      state = new_state(22, 80) |> with_window() |> with_agent_panel()
-      layout = Layout.compute(state)
-      assert layout.agent_panel != nil
-      {_, _, _, eh} = layout.editor_area
-      assert eh == 12
-    end
-  end
-
-  describe "constraints: file tree" do
-    test "stays when editor width meets minimum (boundary)" do
-      state = new_state(24, 21) |> with_window() |> with_file_tree(10)
-      layout = Layout.compute(state)
-      assert layout.file_tree != nil
-      {_, _, tw, _} = layout.file_tree
-      assert tw == 10
-      {_, _, ew, _} = layout.editor_area
-      assert ew == 10
-    end
-
-    test "collapses when editor width would be below minimum" do
-      state = new_state(24, 20) |> with_window() |> with_file_tree(10)
-      layout = Layout.compute(state)
-      assert layout.file_tree == nil
-      {_, col, ew, _} = layout.editor_area
-      assert col == 0
-      assert ew == 20
-    end
-
-    test "collapses when tree width is below its own minimum" do
-      state = new_state(24, 80) |> with_window() |> with_file_tree(5)
-      layout = Layout.compute(state)
-      assert layout.file_tree == nil
-    end
-
-    test "stays when tree width meets its own minimum (boundary)" do
-      state = new_state(24, 80) |> with_window() |> with_file_tree(8)
-      layout = Layout.compute(state)
-      assert layout.file_tree != nil
-      {_, _, tw, _} = layout.file_tree
-      assert tw == 8
-    end
-
-    test "wide tree gets clamped then collapses if clamped width < minimum" do
-      state = new_state(24, 12) |> with_window() |> with_file_tree(30)
-      layout = Layout.compute(state)
-      assert layout.file_tree == nil
-    end
-  end
-
-  describe "constraints: collapse order" do
-    test "agent panel collapses before file tree when both are tight" do
-      state = new_state(7, 50) |> with_window() |> with_file_tree(15) |> with_agent_panel()
-      layout = Layout.compute(state)
-
-      # Panel = 35% of 7 = 2 < 5, collapses
-      assert layout.agent_panel == nil
-      # Tree stays (50 - 15 - 1 = 34 >> 10)
-      assert layout.file_tree != nil
-    end
-
-    test "both collapse when terminal is tiny" do
-      # 5 rows: tab=1, status_bar=1, minibuffer=1, remaining=2.
-      # Agent panel and file tree both collapse; editor gets the remaining 2 rows.
-      state = new_state(5, 10) |> with_window() |> with_file_tree(8) |> with_agent_panel()
-      layout = Layout.compute(state)
-      assert layout.agent_panel == nil
-      assert layout.file_tree == nil
-      {_, col, w, h} = layout.editor_area
-      assert col == 0
-      assert w == 10
-      assert h == 2
-    end
-
-    test "editor area always has positive dimensions at minimum terminal" do
-      state = new_state(3, 3) |> with_window()
-      layout = Layout.compute(state)
-      {_, _, w, h} = layout.editor_area
-      assert w > 0
-      assert h > 0
-    end
-
-    test "file tree collapse recalculates agent panel rect with full width" do
-      state = new_state(20, 40) |> with_window() |> with_file_tree(12) |> with_agent_panel()
-      layout = Layout.compute(state)
-
-      if layout.agent_panel != nil do
-        {_, ac, aw, _} = layout.agent_panel
-        {_, ec, ew, _} = layout.editor_area
-        assert ac == ec
-        assert aw == ew
-      end
-    end
-  end
-
-  describe "constraints: dynamic resize" do
-    test "shrinking height collapses agent panel, file tree stays" do
-      state = new_state(24, 80) |> with_window() |> with_file_tree(20) |> with_agent_panel()
-      layout = Layout.compute(state)
-      assert layout.file_tree != nil
-      assert layout.agent_panel != nil
-
-      vp = Viewport.new(7, 80)
-      short_state = %{state | workspace: %{state.workspace | viewport: vp}, terminal_viewport: vp}
-      layout = Layout.compute(short_state)
-      assert layout.agent_panel == nil
-      assert layout.file_tree != nil
-    end
-
-    test "shrinking width collapses file tree, agent panel unaffected" do
-      state = new_state(24, 80) |> with_window() |> with_file_tree(20) |> with_agent_panel()
-
-      vp = Viewport.new(24, 25)
-
-      narrow_state = %{
-        state
-        | workspace: %{state.workspace | viewport: vp},
-          terminal_viewport: vp
-      }
-
-      layout = Layout.compute(narrow_state)
-      assert layout.file_tree == nil
-      assert layout.agent_panel != nil
-    end
-
-    test "growing terminal restores regions" do
-      state = new_state(5, 10) |> with_window() |> with_file_tree(20) |> with_agent_panel()
-      layout = Layout.compute(state)
-      assert layout.agent_panel == nil
-      assert layout.file_tree == nil
-
-      vp = Viewport.new(30, 100)
-      big_state = %{state | workspace: %{state.workspace | viewport: vp}, terminal_viewport: vp}
-      layout = Layout.compute(big_state)
-      assert layout.agent_panel != nil
-      assert layout.file_tree != nil
-    end
-  end
-
-  # ── Resize ─────────────────────────────────────────────────────────────────
+  # ── Resize ───────────────────────────────────────────────────────────────────
 
   describe "resize" do
     test "layout adapts to new terminal size" do
@@ -520,7 +266,6 @@ defmodule MingaEditor.LayoutTest do
       assert layout2.terminal == {0, 0, 120, 40}
       assert layout2.minibuffer == {39, 0, 120, 1}
 
-      # Editor area grew
       {_, _, w1, h1} = layout1.editor_area
       {_, _, w2, h2} = layout2.editor_area
       assert w2 > w1
@@ -528,16 +273,14 @@ defmodule MingaEditor.LayoutTest do
     end
   end
 
-  # ── Property-based tests ──────────────────────────────────────────────────
+  # ── Property-based tests ──────────────────────────────────────────────────────
 
   describe "property: no overlap for random configurations" do
     property "no regions overlap and no zero/negative dimensions for random terminal sizes" do
       check all(
               rows <- StreamData.integer(3..100),
               cols <- StreamData.integer(3..300),
-              split_type <- StreamData.member_of([:none, :vertical, :horizontal]),
-              has_tree <- StreamData.boolean(),
-              has_agent <- StreamData.boolean()
+              split_type <- StreamData.member_of([:none, :vertical, :horizontal])
             ) do
         state = new_state(rows, cols)
 
@@ -548,12 +291,8 @@ defmodule MingaEditor.LayoutTest do
             :horizontal -> with_hsplit(state)
           end
 
-        state = if has_tree, do: with_file_tree(state, 20), else: state
-        state = if has_agent, do: with_agent_panel(state), else: state
-
         layout = Layout.compute(state)
 
-        # All rects fit within terminal bounds
         {_tr, _tc, term_w, term_h} = layout.terminal
         all_rects = collect_all_rects(layout)
 
@@ -567,12 +306,10 @@ defmodule MingaEditor.LayoutTest do
           assert c + w <= term_w, "rect #{inspect(rect)} exceeds terminal width #{term_w}"
         end
 
-        # Editor area always exists with positive dimensions
         {_, _, ew, eh} = layout.editor_area
         assert ew > 0, "editor width must be positive, got #{ew}"
         assert eh > 0, "editor height must be positive, got #{eh}"
 
-        # Non-overlay rects don't overlap
         assert_no_overlap(layout)
       end
     end
@@ -625,6 +362,8 @@ defmodule MingaEditor.LayoutTest do
     not (c1 + w1 <= c2 or c2 + w2 <= c1 or r1 + h1 <= r2 or r2 + h2 <= r1)
   end
 
+  # ── add_sidebar/1 (live shared helper) ───────────────────────────────────────
+
   describe "add_sidebar/1" do
     test "returns nil sidebar when window is too narrow" do
       layout = %{
@@ -653,9 +392,7 @@ defmodule MingaEditor.LayoutTest do
       {_, _, chat_w, _} = result.content
       {_, sidebar_col, sidebar_w, _} = result.sidebar
 
-      # chat + 1 separator + sidebar = original width
       assert chat_w + 1 + sidebar_w == 120
-      # sidebar starts after chat + separator
       assert sidebar_col == chat_w + 1
     end
 
@@ -691,39 +428,19 @@ defmodule MingaEditor.LayoutTest do
     end
   end
 
-  # ── GUI layout ──────────────────────────────────────────────────────────────
+  # ── GUI layout specifics ─────────────────────────────────────────────────────
 
-  describe "GUI layout (compute_gui)" do
-    defp with_gui_caps(state) do
-      %{
-        state
-        | capabilities: %MingaEditor.Frontend.Capabilities{
-            frontend_type: :native_gui,
-            semantic_ui: true
-          }
-      }
-    end
-
+  describe "GUI layout" do
     test "editor area starts at row 0 (no tab bar row)" do
-      state = new_state(40, 120) |> with_window() |> with_gui_caps()
+      state = new_state(40, 120) |> with_window()
       layout = Layout.compute(state)
 
       {row, _col, _w, _h} = layout.editor_area
       assert row == 0
     end
 
-    test "no file tree columns even when file tree is open" do
-      state = new_state(40, 120) |> with_window() |> with_file_tree(30) |> with_gui_caps()
-      layout = Layout.compute(state)
-
-      assert layout.file_tree == nil
-      {_row, col, width, _h} = layout.editor_area
-      assert col == 0
-      assert width == 120
-    end
-
-    test "editor area uses full viewport width" do
-      state = new_state(40, 120) |> with_window() |> with_gui_caps()
+    test "editor area uses the full viewport width" do
+      state = new_state(40, 120) |> with_window()
       layout = Layout.compute(state)
 
       {_row, col, width, _h} = layout.editor_area
@@ -731,96 +448,54 @@ defmodule MingaEditor.LayoutTest do
       assert width == 120
     end
 
-    test "minibuffer stays as the last row" do
-      state = new_state(40, 120) |> with_window() |> with_gui_caps()
+    test "minibuffer is the last row" do
+      state = new_state(40, 120) |> with_window()
       layout = Layout.compute(state)
 
-      {row, col, width, height} = layout.minibuffer
-      assert row == 39
-      assert col == 0
-      assert width == 120
-      assert height == 1
+      assert layout.minibuffer == {39, 0, 120, 1}
     end
 
-    test "editor area height is viewport minus minibuffer" do
-      state = new_state(40, 120) |> with_window() |> with_gui_caps()
+    test "editor area height is the viewport minus the minibuffer" do
+      state = new_state(40, 120) |> with_window()
       layout = Layout.compute(state)
 
       {_row, _col, _w, height} = layout.editor_area
       assert height == 39
     end
 
-    test "tab bar rect is nil" do
-      state = new_state(40, 120) |> with_window() |> with_gui_caps()
+    test "tab bar, status bar, file tree, and agent panel rects are nil" do
+      state = new_state(40, 120) |> with_window() |> with_file_tree(30) |> with_agent_panel()
       layout = Layout.compute(state)
 
       assert layout.tab_bar == nil
-    end
-
-    test "agent panel is nil in GUI mode" do
-      state = new_state(40, 120) |> with_window() |> with_agent_panel() |> with_gui_caps()
-      layout = Layout.compute(state)
-
+      assert layout.status_bar == nil
+      assert layout.file_tree == nil
       assert layout.agent_panel == nil
     end
 
-    test "single-window GUI mode hides modeline (status bar handles it)" do
-      state = new_state(40, 120) |> with_window() |> with_gui_caps()
+    test "single-window mode hides the modeline (status bar handles it)" do
+      state = new_state(40, 120) |> with_window()
       layout = Layout.compute(state)
 
       win_layout = layout.window_layouts[1]
       {_ml_row, _col, _w, ml_h} = win_layout.modeline
       assert ml_h == 0
-      # Content fills the entire editor area (no modeline row reserved)
+
       {_content_row, _c, _cw, content_h} = win_layout.content
       {_ea_row, _ea_c, _ea_w, ea_h} = layout.editor_area
       assert content_h == ea_h
     end
 
-    test "split-window GUI mode has zero-height per-window modelines (global status bar)" do
-      state = new_state(40, 120) |> with_vsplit() |> with_gui_caps()
+    test "split-window mode has zero-height per-window modelines" do
+      state = new_state(40, 120) |> with_vsplit()
       layout = Layout.compute(state)
 
-      # Per-window modelines are gone; all windows have zero-height modeline rects.
       Enum.each(layout.window_layouts, fn {_id, wl} ->
         {_r, _c, _w, h} = wl.modeline
         assert h == 0
       end)
 
-      # GUI doesn't use a TUI status bar rect (SwiftUI owns the status bar surface).
       assert layout.status_bar == nil
-    end
-
-    test "GUI layout differs from TUI layout for same viewport" do
-      base = new_state(40, 120) |> with_window() |> with_file_tree(30)
-
-      tui_layout = Layout.compute(base)
-      gui_layout = Layout.compute(with_gui_caps(base))
-
-      # TUI reserves row 0 for tab bar, GUI doesn't
-      {tui_row, _, _, _} = tui_layout.editor_area
-      {gui_row, _, _, _} = gui_layout.editor_area
-      assert tui_row == 1
-      assert gui_row == 0
-
-      # TUI reserves columns for file tree, GUI doesn't
-      {_, tui_col, _, _} = tui_layout.editor_area
-      {_, gui_col, _, _} = gui_layout.editor_area
-      assert tui_col > 0
-      assert gui_col == 0
-    end
-
-    test "window splits work correctly in GUI mode" do
-      state = new_state(40, 120) |> with_vsplit() |> with_gui_caps()
-      layout = Layout.compute(state)
-
-      # Both windows should exist
-      assert map_size(layout.window_layouts) == 2
-      # No per-window modelines; global SwiftUI status bar handles this.
-      Enum.each(layout.window_layouts, fn {_id, wl} ->
-        {_r, _c, _w, h} = wl.modeline
-        assert h == 0
-      end)
     end
   end
 end

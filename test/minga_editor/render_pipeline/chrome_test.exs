@@ -24,37 +24,7 @@ defmodule MingaEditor.RenderPipeline.ChromeTest do
     {scrolls, cursor_info, state, layout}
   end
 
-  describe "build_chrome/4 TUI path" do
-    test "returns a Chrome struct" do
-      state = base_state()
-      {scrolls, cursor_info, state, layout} = run_through_content(state)
-
-      chrome = state.shell.build_chrome(state, layout, scrolls, cursor_info)
-
-      assert %Chrome{} = chrome
-    end
-
-    test "chrome contains minibuffer draw" do
-      state = base_state()
-      {scrolls, cursor_info, state, layout} = run_through_content(state)
-
-      chrome = state.shell.build_chrome(state, layout, scrolls, cursor_info)
-
-      assert [_ | _] = chrome.minibuffer
-      assert Enum.all?(chrome.minibuffer, &is_tuple/1)
-    end
-
-    test "chrome contains global status bar draws" do
-      state = base_state()
-      {scrolls, cursor_info, state, layout} = run_through_content(state)
-
-      chrome = state.shell.build_chrome(state, layout, scrolls, cursor_info)
-
-      assert [_ | _] = chrome.status_bar_draws
-    end
-  end
-
-  describe "build_chrome/4 GUI path" do
+  describe "build_chrome/4" do
     test "returns a Chrome struct with GUI capabilities" do
       state = gui_state()
       {scrolls, cursor_info, state, layout} = run_through_content(state)

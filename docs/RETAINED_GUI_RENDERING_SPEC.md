@@ -750,7 +750,7 @@ The input contract: these modules currently take `ViewContext`, a narrow project
 
 The extensions API already uses the pattern this spec proposes: extensions register metadata, publish snapshots to ETS, and the render pipeline reads those snapshots during frame construction. Extensions never provide render callbacks. The rendering side is entirely owned by the pipeline.
 
-Today, rendering extension contributions is hardcoded in `Emit.GUI` (`build_gui_sidebars_cmd`, `build_gui_bottom_panel_cmd`, etc.) and in the TUI's `SidebarRenderer`. Adding a new extension surface type requires adding a new `build_gui_*` function, a new protocol opcode, and a new TUI render path. That's core pipeline surgery for every new surface type.
+Today, rendering extension contributions is hardcoded in `Emit.GUI` (`build_gui_sidebars_cmd`, `build_gui_bottom_panel_cmd`, etc.). Adding a new extension surface type requires adding a new `build_gui_*` function and a new protocol opcode. That's core pipeline surgery for every new surface type. (The legacy cell TUI render path, `SidebarRenderer`, was deleted in #2235.)
 
 With `Minga.RenderModel.UI` in core, the contract between extensions and rendering becomes the model itself. An extension publishes a model using core types. The core adapter encodes it. The editor is not in the path for extension UI.
 

@@ -15,7 +15,9 @@ defmodule MingaEditor.MouseMultiClickTest do
   alias MingaEditor.State, as: EditorState
 
   @gutter 6
-  @content_row 1
+  # The semantic GUI layout places the editor window at screen row 0 (#2235), so
+  # a click at row 0 maps to the first buffer line.
+  @content_row 0
   @shift 0x01
 
   setup :verify_on_exit!
