@@ -37,15 +37,17 @@ defmodule MingaEditor.Frontend.EmitTest do
 
       assert_receive {:"$gen_cast", {:send_commands, commands}}
 
-      # The TUI now renders via the semantic GUI protocol. The frame no longer
-      # starts with a cell-grid clear (0x12); it opens with chrome commands and
-      # closes with batch_end (0x13).
-      refute match?([<<0x12>> | _], commands)
-      assert [<<first_opcode, _::binary>> | _] = commands
-      assert first_opcode >= 0x70
-      # batch_end now carries the echoed input correlation sequence (ticket
-      # #2215): <opcode, seq::32>. With no key seq in scope the echo is 0.
-      assert List.last(commands) == <<Opcodes.batch_end(), 0::32>>
+      # The TUI renders via the semantic GUI protocol, now bracketed as a frame
+      # transaction (#2219): every frame opens with begin_frame (0x10) and closes
+      # with commit_frame (0x11). The frame no longer starts with a cell-grid clear.
+      refute Enum.any?(commands, &match?(<<0x12, _::binary>>, &1))
+      assert [<<first_opcode, frame_seq::32, base_frame_seq::32>> | _] = commands
+      assert first_opcode == Opcodes.begin_frame()
+      # First frame is a keyframe (no committed base), so base_frame_seq is 0.
+      assert base_frame_seq == 0
+      # commit_frame closes the frame, carrying frame_seq + echoed input_seq (ticket
+      # #2215). With no key seq in scope the echo is 0; frame_seq matches begin_frame.
+      assert List.last(commands) == <<Opcodes.commit_frame(), frame_seq::32, 0::32>>
     end
 
     test "GUI path produces commands (no clear expected for GUI with to_commands)" do
@@ -102,6 +104,103 @@ defmodule MingaEditor.Frontend.EmitTest do
                <<0x80, _::binary>> -> true
                _ -> false
              end)
+    end
+  end
+
+  describe "frame transactions (#2219)" do
+    test "every frame is bracketed with begin_frame/commit_frame and a monotonic frame_seq" do
+      frame = window_frame_with_content()
+      state = semantic_state()
+
+      caches = %Caches{}
+      {commands1, _caches} = emit_and_capture(frame, state, caches, frame_seq: 100)
+      {commands2, _caches} = emit_and_capture(frame, state, caches, frame_seq: 200)
+
+      assert [<<op_begin, fs1::32, _base::32>> | _] = commands1
+      assert op_begin == Opcodes.begin_frame()
+      assert List.last(commands1) == <<Opcodes.commit_frame(), fs1::32, 0::32>>
+
+      assert [<<_, fs2::32, _::32>> | _] = commands2
+      # frame_seq advances per emit even though the snapshot is identical.
+      assert fs2 > fs1
+    end
+
+    test "the first frame is a keyframe (base 0) carrying full window content" do
+      frame = window_frame_with_content()
+      state = semantic_state()
+
+      {commands, _caches} = emit_and_capture(frame, state, %Caches{}, frame_seq: 7)
+
+      assert [<<_, 7::32, base_frame_seq::32>> | _] = commands
+      assert base_frame_seq == 0
+
+      assert Enum.any?(commands, &match?(<<0x80, _::binary>>, &1)),
+             "keyframe carries full window content"
+    end
+
+    test "a later frame names the previous frame_seq as its delta base" do
+      frame = window_frame_with_content()
+      state = semantic_state()
+
+      {_c1, caches} = emit_and_capture(frame, state, %Caches{}, frame_seq: 11)
+      {commands, _c2} = emit_and_capture(frame, state, caches, frame_seq: 22)
+
+      assert [<<_, 22::32, base_frame_seq::32>> | _] = commands
+      assert base_frame_seq == 11, "non-keyframe bases on the previously emitted frame_seq"
+    end
+
+    test "request_keyframe forces the next frame back to base 0 with full window content" do
+      frame = window_frame_with_content()
+      state = semantic_state()
+
+      # Establish a delta base: frame two bases on frame one and skips full content.
+      {_c1, caches} = emit_and_capture(frame, state, %Caches{}, frame_seq: 11)
+      {delta_commands, caches} = emit_and_capture(frame, state, caches, frame_seq: 22)
+
+      refute Enum.any?(delta_commands, &match?(<<0x80, _::binary>>, &1)),
+             "unchanged second frame does not resend full window content"
+
+      # A forced keyframe drops the deltas: base 0 and full content again.
+      {key_commands, _caches} =
+        emit_and_capture(frame, state, caches, frame_seq: 33, force_keyframe?: true)
+
+      assert [<<_, 33::32, 0::32>> | _] = key_commands
+
+      assert Enum.any?(key_commands, &match?(<<0x80, _::binary>>, &1)),
+             "forced keyframe resends full window content"
+    end
+
+    # Regression (#2219): a keyframe re-establishes the frontend from scratch, so it
+    # must drop the title/window-bg side-channel caches too, so a frontend that lost
+    # its title or background mid-session gets them back. Here we pin that the keyframe
+    # branch resets last_frame_keyframe? and re-derives the side channels from the
+    # current render model rather than carrying a stale cached value forward. The
+    # end-to-end re-send (the actual set_title/set_window_bg commands) is pinned in
+    # emit/keyframe_side_channel_test.exs, which observes the named Frontend.Manager.
+    test "a forced keyframe re-derives the title and window-bg side channels" do
+      frame = window_frame_with_content()
+      state = semantic_state()
+
+      # Compute the values a normal frame would cache, so we can prove the keyframe
+      # reset path lands on the freshly recomputed values, not the seeded ones.
+      {_c0, fresh} = emit_and_capture(frame, state, %Caches{}, frame_seq: 5)
+
+      # Seed caches with stale side-channel values plus a committed base.
+      seeded = %Caches{
+        last_title: "stale title",
+        last_window_bg: 0x123456,
+        last_emitted_frame_seq: 22
+      }
+
+      {_key, key_caches} =
+        emit_and_capture(frame, state, seeded, frame_seq: 33, force_keyframe?: true)
+
+      assert key_caches.last_frame_keyframe?
+      # The stale seed was dropped; the keyframe re-derived both side channels.
+      assert key_caches.last_title == fresh.last_title
+      assert key_caches.last_window_bg == fresh.last_window_bg
+      refute key_caches.last_title == "stale title"
+      refute key_caches.last_window_bg == 0x123456
     end
   end
 
@@ -222,5 +321,50 @@ defmodule MingaEditor.Frontend.EmitTest do
       assert_receive {:"$gen_cast", {:send_commands, _}}
       assert caches2.last_window_bg == caches1.last_window_bg
     end
+  end
+
+  # ── Frame-transaction test helpers ───────────────────────────────────────
+
+  defp semantic_state do
+    %{base_state() | capabilities: %Capabilities{frontend_type: :tui, semantic_ui: true}}
+  end
+
+  defp window_frame_with_content do
+    frame = build_frame_with_window(base_state(), viewport_top: 0)
+    [window_frame] = frame.windows
+
+    row = %RenderRow{
+      row_id: RenderRow.stable_id(:normal, 0),
+      row_type: :normal,
+      buf_line: 0,
+      text: "semantic",
+      spans: [%RenderSpan{start_col: 0, end_col: 8, fg: 0xBBC2CF, bg: 0x282C34, attrs: 0}]
+    }
+
+    window_model = %RenderWindow{
+      window_id: 1,
+      content_kind: :buffer,
+      rect: {0, 0, 80, 20},
+      rows: [row],
+      cursor_row: 0,
+      cursor_col: 0,
+      cursor_shape: :block
+    }
+
+    %{frame | windows: [%{window_frame | window_model: window_model}]}
+  end
+
+  # Drives Emit.emit/4 with an explicit frame_seq and optional keyframe forcing,
+  # capturing the single send_commands cast (port_manager is self()).
+  defp emit_and_capture(frame, state, caches, opts) do
+    ctx = %{
+      Context.from_editor_state(state)
+      | frame_seq: Keyword.fetch!(opts, :frame_seq),
+        force_keyframe?: Keyword.get(opts, :force_keyframe?, false)
+    }
+
+    {new_caches, _font_registry} = Emit.emit(frame, ctx, nil, caches)
+    assert_receive {:"$gen_cast", {:send_commands, commands}}
+    {commands, new_caches}
   end
 end

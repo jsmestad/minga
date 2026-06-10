@@ -60,7 +60,7 @@ private final class TitleBarDragNSView: NSView {
 /// Loading overlay shown while the BEAM boots and renders its first frame.
 /// Covers the empty Metal framebuffer with the app icon, a spinner, and a
 /// random quip so the user sees a friendly loading state instead of a blank
-/// dark screen. Fades out when the first batch_end arrives.
+/// dark screen. Fades out when the first commit_frame arrives.
 ///
 /// Adapts to the macOS system appearance (light/dark) to minimize the flash
 /// when the editor's actual theme loads. The exact theme colors are not
@@ -896,7 +896,7 @@ struct ContentView: View {
         )
 
         // Startup overlay: covers the empty Metal framebuffer with a
-        // spinner while the BEAM boots. Fades out on first batch_end.
+        // spinner while the BEAM boots. Fades out on first commit_frame.
         if !appState.hasReceivedFirstFrame {
             StartupOverlay()
                 .transition(.opacity)

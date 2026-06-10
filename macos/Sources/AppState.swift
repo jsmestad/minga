@@ -12,7 +12,7 @@ final class AppState {
     var isFullScreen: Bool = false
     /// Vertical center of the traffic light buttons, measured from the window top.
     var trafficLightMidY: CGFloat = 14
-    /// Flipped once when the first complete frame (batch_end) arrives from the BEAM. The startup overlay fades out when this becomes true.
+    /// Flipped once when the first complete frame (commit_frame) arrives from the BEAM. The startup overlay fades out when this becomes true.
     var hasReceivedFirstFrame: Bool = false
     /// All GUI chrome sub-states in a single container.
     let gui = GUIState()

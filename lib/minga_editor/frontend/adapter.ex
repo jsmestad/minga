@@ -26,8 +26,8 @@ defmodule MingaEditor.Frontend.Adapter do
   Sends a list of pre-encoded render command binaries to the frontend.
 
   Commands are encoded via `MingaEditor.Frontend.Protocol.encode_*` functions.
-  The frontend processes them in order. A `batch_end` command signals
-  the end of a frame and triggers a render flush.
+  The frontend processes them in order. A `commit_frame` command closes the
+  frame transaction and triggers a render flush (#2219).
   """
   @callback send_commands(server :: GenServer.server(), commands :: [binary()]) :: :ok
 

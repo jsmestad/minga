@@ -5,7 +5,7 @@ import Foundation
 ///
 /// The renderer stamps a monotonically increasing correlation sequence into each
 /// key packet at input time (``stamp()``). The BEAM echoes that sequence back on
-/// the `batch_end` of the resulting frame; the renderer resolves the sample when
+/// the `commit_frame` of the resulting frame; the renderer resolves the sample when
 /// the frame is presented (``resolve(seq:)``). Samples live in a fixed-size ring
 /// buffer so the recorder never grows unbounded.
 ///

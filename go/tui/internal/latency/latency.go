@@ -3,7 +3,7 @@
 //
 // The frontend stamps a monotonically increasing correlation sequence into each
 // key packet at input decode (Stamp). The BEAM echoes that sequence back on the
-// batch_end of the resulting frame; the frontend resolves the sample when the
+// commit_frame of the resulting frame; the frontend resolves the sample when the
 // frame is about to be written to the terminal (Resolve). Samples are kept in a
 // fixed-size ring buffer so the recorder never grows unbounded and the HUD can
 // report live p50/p99 without allocating.

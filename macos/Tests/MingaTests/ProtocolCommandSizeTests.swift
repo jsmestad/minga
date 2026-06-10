@@ -41,8 +41,8 @@ struct ProtocolCommandSizeTests {
     }
 
     @Test func decodeCommandsSkipsGeneratedSizedUnrenderedOpcode() throws {
-        // batch_end is now fixed:5 (opcode + echoed correlation seq u32, #2215).
-        let payload = Data([0xB7, 0x00, 0x02, 0xAA, 0xBB, OP_BATCH_END, 0, 0, 0, 0])
+        // commit_frame is fixed:9 (opcode + frame_seq + echoed input_seq u32, #2219/#2215).
+        let payload = Data([0xB7, 0x00, 0x02, 0xAA, 0xBB, OP_COMMIT_FRAME, 0, 0, 0, 0, 0, 0, 0, 0])
         var commands: [RenderCommand] = []
 
         try decodeCommands(from: payload) { command in
@@ -50,8 +50,8 @@ struct ProtocolCommandSizeTests {
         }
 
         #expect(commands.count == 1)
-        guard case .batchEnd = commands.first else {
-            Issue.record("Expected .batchEnd but got \(String(describing: commands.first))")
+        guard case .commitFrame = commands.first else {
+            Issue.record("Expected .commitFrame but got \(String(describing: commands.first))")
             return
         }
     }

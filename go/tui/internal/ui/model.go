@@ -146,7 +146,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 		// Stamp the latency correlation sequence (ticket #2215) before
-		// encoding so the resulting frame's batch_end resolves the sample.
+		// encoding so the resulting frame's commit_frame resolves the sample.
 		seq := m.latency.Stamp()
 		if packet, ok := keyPacket(msg, seq); ok {
 			m.send(packet)
@@ -287,10 +287,15 @@ func (m *Model) applyCommands(commands []protocol.Command) tea.Cmd {
 	cmds := make([]tea.Cmd, 0, 1)
 	for _, command := range commands {
 		switch command.Kind {
-		case protocol.CommandBatchEnd:
-			// The frame is now fully applied and about to be written to the
-			// terminal; resolve the keystroke-to-write latency sample for the
-			// echoed correlation sequence (ticket #2215).
+		case protocol.CommandBeginFrame:
+			// begin_frame opens a frame transaction (#2219). The frontend still
+			// presents one packet per frame, so the marker is decoded and ignored;
+			// staging on begin/commit lands in child C.
+		case protocol.CommandCommitFrame:
+			// commit_frame closes the frame transaction (#2219). The frame is now
+			// fully applied and about to be written to the terminal; resolve the
+			// keystroke-to-write latency sample for the echoed correlation sequence
+			// (ticket #2215, formerly resolved on batch_end).
 			m.latency.Resolve(command.BatchSeq)
 		case protocol.CommandSetCursorShape:
 			m.cursorShape = command.CursorShape

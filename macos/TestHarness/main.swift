@@ -242,8 +242,11 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
                 "height_percent": Int(heightPercent), "filter_preset": Int(filterPreset),
                 "tabs": tabList, "entries": entryList]
 
-    case .batchEnd:
-        return ["type": "batch_end"]
+    case .beginFrame(let frameSeq, let baseFrameSeq):
+        return ["type": "begin_frame", "frame_seq": Int(frameSeq), "base_frame_seq": Int(baseFrameSeq)]
+
+    case .commitFrame(let frameSeq, let seq):
+        return ["type": "commit_frame", "frame_seq": Int(frameSeq), "input_seq": Int(seq)]
 
     case .guiToolManager(let visible, let filter, let selectedIndex, let tools):
         let toolArray = tools.map { t -> [String: Any] in

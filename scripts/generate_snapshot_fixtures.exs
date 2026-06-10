@@ -13,9 +13,9 @@
 # Each command is length-prefixed as `<<byte_size(cmd)::32, cmd::binary>>` and
 # the commands are concatenated. The curated replay order is:
 #
-#   set_window_bg :: metal_commands :: chrome_commands :: batch_end
+#   begin_frame :: set_window_bg :: metal_commands :: chrome_commands :: commit_frame
 #
-# so the first packet is always `set_window_bg` and the last is `batch_end`.
+# so the first packet is always `begin_frame` and the last is `commit_frame`.
 #
 # Usage: mix run scripts/generate_snapshot_fixtures.exs
 
@@ -219,10 +219,16 @@ end
 model = SnapshotModel.build()
 encoded = GUI.encode(model, GUI.Caches.new())
 
+# A frame is a transaction (#2219): it opens with begin_frame (keyframe ⇒ base 0)
+# and closes with commit_frame. set_window_bg leads the body so the fixture keeps a
+# stable, curated body order.
+frame_seq = 1
+
 commands =
-  [Protocol.encode_set_window_bg(SnapshotModel.window_bg())] ++
+  [Protocol.encode_begin_frame(frame_seq, 0)] ++
+    [Protocol.encode_set_window_bg(SnapshotModel.window_bg())] ++
     encoded.metal_commands ++
     encoded.chrome_commands ++
-    [Protocol.encode_batch_end()]
+    [Protocol.encode_commit_frame(frame_seq)]
 
 FixtureWriter.write_fixture("full_editor", commands)

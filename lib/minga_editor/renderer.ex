@@ -120,8 +120,17 @@ defmodule MingaEditor.Renderer do
     ctx = EmitContext.from_editor_state(input)
     {caches, _font_registry} = Emit.emit(frame, ctx, nil, state.caches)
 
-    %{state | caches: caches}
+    # Clear keyframe_pending? only when the dashboard frame actually carried the
+    # keyframe (last_frame_keyframe? is stamped by the Emit stage). A delta frame
+    # must not swallow a still-pending request (#2219).
+    %{state | caches: caches, keyframe_pending?: clear_dashboard_keyframe_pending?(state, caches)}
   end
+
+  @spec clear_dashboard_keyframe_pending?(state(), MingaEditor.Renderer.Caches.t()) :: boolean()
+  defp clear_dashboard_keyframe_pending?(%{keyframe_pending?: false}, _caches), do: false
+
+  defp clear_dashboard_keyframe_pending?(%{keyframe_pending?: true}, caches),
+    do: not caches.last_frame_keyframe?
 
   @doc """
   Runs the full render pipeline (content, chrome, compose, emit).

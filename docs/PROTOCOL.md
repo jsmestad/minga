@@ -2,7 +2,7 @@
 
 The BEAM editor core and rendering frontends communicate over a binary protocol on stdin/stdout of each frontend process. All frontends speak the same base transport, input, parser, and diagnostic protocol. Shared visible UI is carried as Semantic UI opcodes documented in [GUI_PROTOCOL.md](GUI_PROTOCOL.md); the `GUI` name is historical wire terminology, not a product split between GUI and terminal clients. This document is the authoritative reference for implementing a Minga frontend. You should be able to build a working frontend by reading this file plus GUI_PROTOCOL.md for Semantic UI surfaces.
 
-**Shared chrome is delivered as Semantic UI, not cells.** The structured opcodes in GUI_PROTOCOL.md are the canonical contract for shared visible chrome (tab bar, status bar, file tree, picker, popups, agent surfaces, and so on). Each frontend decodes these semantic models and renders them with its own surface strategy: SwiftUI views, terminal widgets, GTK widgets, web components, or another future client. The cell-grid `draw_text`/`clear`/region commands were retired from the protocol in protocol_version 2; the only render-category opcodes that survive are transport-level framing (`batch_end`, `set_cursor_shape`, `set_title`, `set_window_bg`, `protocol_error`). New shared chrome must be modeled as a `Minga.RenderModel.UI.*` semantic model and encoded by `Minga.Frontend.Adapter.GUI`, never added as ad-hoc cell draws.
+**Shared chrome is delivered as Semantic UI, not cells.** The structured opcodes in GUI_PROTOCOL.md are the canonical contract for shared visible chrome (tab bar, status bar, file tree, picker, popups, agent surfaces, and so on). Each frontend decodes these semantic models and renders them with its own surface strategy: SwiftUI views, terminal widgets, GTK widgets, web components, or another future client. The cell-grid `draw_text`/`clear`/region commands were retired from the protocol in protocol_version 2; the only render-category opcodes that survive are transport-level framing (`begin_frame`, `commit_frame`, `set_cursor_shape`, `set_title`, `set_window_bg`, `protocol_error`). New shared chrome must be modeled as a `Minga.RenderModel.UI.*` semantic model and encoded by `Minga.Frontend.Adapter.GUI`, never added as ad-hoc cell draws.
 
 Frontend identity is opaque to Minga product behavior. The BEAM may adapt to declared capabilities such as terminal grid versus desktop window, text measurement, color depth, image support, float support, and Semantic UI support, but it must not special-case Swift, Go, GTK, or another implementation name for product features.
 
@@ -25,7 +25,7 @@ The frontend runs as a child process of the BEAM. Communication uses stdin (BEAM
 
 **Text encoding:** All text fields (titles, language names, query source, semantic content) are UTF-8 encoded.
 
-**Protocol version:** The schema carries a `protocol_version` integer (currently 2). The BEAM and every frontend compile against it and exchange it in the `ready` handshake. The BEAM rejects a frontend whose version does not match and sends an explicit `protocol_error` instead of streaming frames the frontend cannot decode. See "Protocol Version Negotiation" below.
+**Protocol version:** The schema carries a `protocol_version` integer (currently 3). The BEAM and every frontend compile against it and exchange it in the `ready` handshake. The BEAM rejects a frontend whose version does not match and sends an explicit `protocol_error` instead of streaming frames the frontend cannot decode. See "Protocol Version Negotiation" below.
 
 ---
 
@@ -39,7 +39,7 @@ The cell-paradigm render opcodes (`draw_text`, `set_cursor`, `clear`, and the re
 |--------|------|------|-------------|
 | `0x10` | begin_frame | 9 | Open a frame transaction (frame_seq + base_frame_seq); see Frame Transactions |
 | `0x11` | commit_frame | 9 | Close a frame transaction; promote staging and present (frame_seq + input_seq) |
-| `0x13` | batch_end | 5 | DEPRECATED (v3): end of frame; carries u32 latency echo (#2215). Superseded by commit_frame |
+| `0x13` | _(reserved)_ | — | Freed by retiring batch_end in v3; do not reassign before a version bump past 3 |
 | `0x15` | set_cursor_shape | 2 | Change cursor appearance |
 | `0x16` | set_title | 3 + title_len | Set the window/terminal title |
 | `0x17` | set_window_bg | 4 | Set the default background color |
@@ -118,18 +118,9 @@ The cell-paradigm render opcodes (`draw_text` 0x10, `set_cursor` 0x11, `clear` 0
 
 Frame transaction markers. See the "Frame Transactions" section for the full wire shapes, invalidation rules, and keyframe semantics.
 
-### `0x13` batch_end (DEPRECATED in protocol_version 3)
+### `0x13` _(reserved; batch_end retired in protocol_version 3)_
 
-End of a render frame. Superseded by the `begin_frame`/`commit_frame` transaction pair (#2219): `commit_frame` absorbs the latency echo below verbatim and adds atomic frame boundaries. `batch_end` remains in the protocol because the BEAM keeps emitting it and both frontends keep gating frames on it until #2219 child B moves emission to the transaction envelope. Do not add new emitters or readers.
-
-```
-opcode: u8  = 0x13
-seq:    u32           echoed input correlation sequence (ticket #2215); 0 = no correlation
-```
-
-Total size: 5 bytes.
-
-**Behavior:** The frontend flushes all pending draw operations and presents the frame. The `seq` echoes the latest processed `key_press` correlation sequence so the frontend can resolve an end-to-end keystroke-to-present latency sample.
+`batch_end` (0x13) was the single per-frame terminator before protocol_version 3. It was retired in #2219 child B: its echoed input-correlation u32 (ticket #2215) moved verbatim onto `commit_frame`, and the begin/commit transaction pair now brackets every frame. The 0x13 slot is reserved and must not be reassigned before a version bump past 3 (the freed-value reuse policy).
 
 ### `0x15` set_cursor_shape
 
@@ -197,15 +188,16 @@ Total size: 3 + msg_len bytes.
 
 ## Render Frame Lifecycle
 
-Visible content is carried by Semantic UI opcodes (GUI_PROTOCOL.md). A render frame is a single batched message of `gui_*` semantic commands (window content, chrome, overlays) terminated by `batch_end`:
+Visible content is carried by Semantic UI opcodes (GUI_PROTOCOL.md). A render frame is a single batched message of `gui_*` semantic commands (window content, chrome, overlays) bracketed by a `begin_frame`/`commit_frame` transaction (#2219):
 
 ```
+begin_frame          (opens the transaction; frame_seq + base_frame_seq)
 gui_window_content / gui_* chrome commands ...   (the semantic frame; see GUI_PROTOCOL.md)
 set_cursor_shape     (optional; may be omitted if unchanged)
-batch_end            (triggers the actual present; carries the latency echo)
+commit_frame         (triggers the actual present; carries frame_seq + the latency echo)
 ```
 
-The BEAM sends the entire frame as a single batched message. The frontend processes commands in order and only presents on `batch_end`. Cursor position and shape are embedded per window inside `gui_window_content`, not carried by standalone cell opcodes.
+The BEAM sends the entire frame as a single batched message. The frontend processes commands in order and only presents on `commit_frame`. Cursor position and shape are embedded per window inside `gui_window_content`, not carried by standalone cell opcodes.
 
 Between frames, the frontend must not modify the screen. The BEAM drives all visual updates.
 
@@ -213,7 +205,7 @@ Between frames, the frontend must not modify the screen. The BEAM drives all vis
 
 ## Frame Transactions
 
-> Status: protocol_version 3 defines the transaction vocabulary and both frontends ship decoders for it (#2219 child A). The BEAM still emits the legacy `batch_end` frame shape, and both frontends still gate on `batch_end`, until #2219 child B moves emission into the transaction envelope and children C/D move the frontends onto staging/commit. This section is the authoritative spec the implementation children build against.
+> Status: protocol_version 3 defines the transaction vocabulary (#2219 child A) and the BEAM now brackets every emitted frame with `begin_frame`/`commit_frame` (#2219 child B). Both frontends decode the markers and gate frames and latency on `commit_frame` exactly as they did `batch_end`; they ignore `base_frame_seq` for now. Children C/D move the frontends onto real staging/commit (paint nothing until the matching `commit_frame`, resync on truncation). This section is the authoritative spec those children build against.
 
 A frame transaction makes a frame atomic: the BEAM brackets a frame's semantic commands between `begin_frame` and `commit_frame`, and a frontend paints nothing until it sees the matching `commit_frame`. This replaces the single `batch_end` terminator with an explicit open/close pair so a truncated or out-of-order stream can never paint a partial frame.
 
@@ -782,7 +774,7 @@ A frontend that receives `protocol_error` should display the message as a blocki
 
 ### Current design
 
-Tree-sitter parsing runs in a dedicated `minga-parser` Zig process, separate from the rendering frontend. The rendering frontend handles the surviving render-transport commands (`batch_end`, `set_cursor_shape`, `set_title`, `set_window_bg`, `protocol_error`) plus GUI chrome (`0x70+`). The parser process handles highlight commands (`0x20`-`0x2F`) and sends highlight responses (`0x30`-`0x3D`). Both use the same `{:packet, 4}` framing on their respective stdin/stdout pipes. The BEAM manages both Port processes, routing commands to the appropriate one. Zig is parser infrastructure only; the legacy Zig terminal renderer was removed in #2223.
+Tree-sitter parsing runs in a dedicated `minga-parser` Zig process, separate from the rendering frontend. The rendering frontend handles the surviving render-transport commands (`begin_frame`, `commit_frame`, `set_cursor_shape`, `set_title`, `set_window_bg`, `protocol_error`) plus GUI chrome (`0x70+`). The parser process handles highlight commands (`0x20`-`0x2F`) and sends highlight responses (`0x30`-`0x3D`). Both use the same `{:packet, 4}` framing on their respective stdin/stdout pipes. The BEAM manages both Port processes, routing commands to the appropriate one. Zig is parser infrastructure only; the legacy Zig terminal renderer was removed in #2223.
 
 This separation means rendering frontends (Swift/Metal, GTK4, Go/Bubble Tea) only need to implement render commands. Tree-sitter parsing is handled by the shared parser process regardless of which frontend is active.
 

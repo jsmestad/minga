@@ -7,10 +7,11 @@ version = "2.0.0"
 # not match and shows an explicit `protocol_error` instead of silently desyncing.
 # Bump this whenever the wire contract changes incompatibly (this 2.0.0 bump
 # retired the 9 cell-paradigm render opcodes; see docs/cell-grid-deletion-map.md).
-# protocol_version 3 (#2219 child A) adds the frame-transaction vocabulary
+# protocol_version 3 (#2219 children A/B) adds the frame-transaction vocabulary
 # (begin_frame, commit_frame, request_keyframe) and authoritative layout
-# (surface_placement, gui_surface_layout). batch_end is deprecated but still
-# emitted until #2219 child B lands; see its comment below and docs/PROTOCOL.md.
+# (surface_placement, gui_surface_layout). batch_end (0x13) was retired: child B
+# moved its input-correlation u32 onto commit_frame and made the begin/commit pair
+# bracket every frame. See docs/PROTOCOL.md.
 protocol_version = 3
 description = "Minga port protocol opcode registry"
 
@@ -68,7 +69,8 @@ direction = "frontend_to_beam"
 # invalidation (truncation, seq mismatch, in-transaction sizing failure, base
 # mismatch) carrying last_good_frame_seq:u32 — the last frame_seq it committed
 # cleanly (0 if it has none). fixed:5 = opcode(1) + last_good_frame_seq(u32).
-# Decoders exist now; nothing on either frontend emits it until #2219 child C/D.
+# The BEAM decodes it and forces the next frame to a keyframe (base_frame_seq 0,
+# full snapshots) since #2219 child B. Frontends do not emit it until #2219 child C/D.
 [[opcodes]]
 category = "input"
 name = "request_keyframe"
@@ -87,8 +89,9 @@ direction = "frontend_to_beam"
 # destroy_region 0x19, set_active_region 0x1A, scroll_region 0x1B,
 # draw_styled_text 0x1C) were retired in protocol_version 2; semantic windows
 # (gui_window_content 0x80) replaced them. Only transport-level framing survives
-# here: batch_end, set_cursor_shape, set_title, set_window_bg, protocol_error,
-# and the protocol_version-3 frame-transaction markers begin_frame/commit_frame.
+# here: set_cursor_shape, set_title, set_window_bg, protocol_error, and the
+# protocol_version-3 frame-transaction markers begin_frame/commit_frame (which
+# replaced batch_end as the per-frame boundary in child B).
 # See docs/cell-grid-deletion-map.md.
 
 # Reuse policy for freed cell-paradigm values: a retired value may be reassigned
@@ -102,7 +105,8 @@ direction = "frontend_to_beam"
 # frame sequence (reuses Renderer.Server's seq) used for resync/attach ordering.
 # base_frame_seq names the frame this transaction's deltas assume; base_frame_seq
 # == 0 means keyframe (full snapshots, no deltas — also the multi-client attach
-# mechanism). Decoders exist now; the BEAM does not emit it until #2219 child B.
+# mechanism). The BEAM emits begin_frame at the head of every frame (#2219 child B);
+# both frontends decode it but ignore base_frame_seq for now (staging is child C/D).
 [[opcodes]]
 category = "render"
 name = "begin_frame"
@@ -117,8 +121,8 @@ framing = "fixed:9"
 # correlation sequence, moved here verbatim: a frontend resolves a keystroke-to-
 # write latency sample when the frame presents. input_seq 0 means "no correlation";
 # it is a SEPARATE id from frame_seq (idle re-renders advance frame_seq while
-# echoing a stale input_seq). Decoders exist now; the BEAM emits batch_end, not
-# commit_frame, until #2219 child B.
+# echoing a stale input_seq). The BEAM emits commit_frame to close every frame
+# (#2219 child B); both frontends gate the frame and resolve latency on it.
 [[opcodes]]
 category = "render"
 name = "commit_frame"
@@ -126,25 +130,11 @@ value = 0x11
 direction = "beam_to_frontend"
 framing = "fixed:9"
 
-# DEPRECATED (protocol_version 3, #2219). batch_end is superseded by the
-# begin_frame/commit_frame transaction pair: commit_frame absorbs the input
-# correlation sequence below verbatim and adds atomic frame boundaries. batch_end
-# is retained in the schema (still generated, still decoded) because the BEAM keeps
-# emitting it and both frontends keep gating frames on it until #2219 child B moves
-# emission to the transaction envelope. Child B's PR removes this entry once nothing
-# emits or reads it. Do not add new emitters or readers of batch_end.
-#
-# batch_end carries the echoed input correlation sequence (u32) introduced for
-# end-to-end keystroke latency instrumentation (ticket #2215). A frontend stamps
-# a monotonic sequence into each key_press packet; the BEAM echoes the latest
-# processed sequence here so the frontend can resolve a keystroke-to-write sample
-# when the frame reaches the terminal. Sequence 0 means "no correlation".
-[[opcodes]]
-category = "render"
-name = "batch_end"
-value = 0x13
-direction = "beam_to_frontend"
-framing = "fixed:5"
+# batch_end (value 0x13) was retired in protocol_version 3 (#2219 child B). Its
+# input-correlation u32 moved verbatim onto commit_frame, which now closes every
+# frame transaction; both frontends gate frames and resolve keystroke latency on
+# commit_frame. The 0x13 slot is reserved (do not reassign before a version bump
+# past 3, per the freed-value reuse policy above).
 
 [[opcodes]]
 category = "render"

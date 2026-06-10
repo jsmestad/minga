@@ -136,9 +136,13 @@ defmodule MingaEditor.State do
             git_commit_gen_ref: nil,
             font_size_override: nil,
             # Latest frontend-originated input correlation sequence (ticket #2215).
-            # Echoed back on batch_end so the frontend can resolve a
+            # Echoed back on commit_frame so the frontend can resolve a
             # keystroke-to-write latency sample. 0 means "no correlation".
-            last_input_seq: 0
+            last_input_seq: 0,
+            # Set when the frontend sends request_keyframe (#2219). The next emitted
+            # frame is forced to a keyframe (base_frame_seq 0, full snapshots) and the
+            # flag is cleared once that frame goes out.
+            keyframe_pending?: false
 
   @type backend :: :tui | :gui | :native_gui | :headless
 
@@ -188,7 +192,8 @@ defmodule MingaEditor.State do
           keystroke_history: KeystrokeHistory.t(),
           git_commit_gen_ref: reference() | nil,
           font_size_override: pos_integer() | nil,
-          last_input_seq: non_neg_integer()
+          last_input_seq: non_neg_integer(),
+          keyframe_pending?: boolean()
         }
 
   @doc "Returns the active sidebar registry table for this state."
@@ -613,8 +618,21 @@ defmodule MingaEditor.State do
         shell_identity: Map.get(render_output, :shell_identity, state.shell_identity),
         layout: render_output.layout,
         focus_tree: render_output.focus_tree,
-        caches: render_output.caches
+        caches: render_output.caches,
+        # Clear keyframe_pending? only when the frame that just emitted actually
+        # carried the keyframe. A render that started before the request (or one
+        # that the request didn't force) must not swallow the still-pending flag (#2219).
+        keyframe_pending?: clear_keyframe_pending?(state, render_output.caches)
     }
+  end
+
+  # The flag stays set until a frame that genuinely honored force_keyframe? reaches
+  # emit. last_frame_keyframe? is stamped by the Emit stage on the caches it returns.
+  @spec clear_keyframe_pending?(t(), map()) :: boolean()
+  defp clear_keyframe_pending?(%__MODULE__{keyframe_pending?: false}, _caches), do: false
+
+  defp clear_keyframe_pending?(%__MODULE__{keyframe_pending?: true}, caches) do
+    not Map.get(caches, :last_frame_keyframe?, false)
   end
 
   @doc """
@@ -629,13 +647,36 @@ defmodule MingaEditor.State do
   @spec apply_renderer_writeback(t(), map()) :: t()
   def apply_renderer_writeback(%__MODULE__{} = state, %{caches: caches, layout: layout} = wb) do
     if renderer_writeback_shell_current?(state, wb) do
-      state = %{state | caches: caches, layout: layout, focus_tree: Map.get(wb, :focus_tree)}
+      # Clear keyframe_pending? only when this writeback's frame actually carried
+      # the keyframe. An in-flight delta render that started before the request
+      # writes back without the keyframe flag, so the pending request survives until
+      # a forced frame reaches emit (#2219). The writeback threads last_frame_keyframe?
+      # via writeback_from_output/2.
+      state = %{
+        state
+        | caches: caches,
+          layout: layout,
+          focus_tree: Map.get(wb, :focus_tree),
+          keyframe_pending?: clear_keyframe_pending_from_writeback?(state, wb)
+      }
+
       state = merge_renderer_windows_from_writeback(state, wb)
       merge_renderer_shell_from_writeback(state, wb)
     else
       log_stale_renderer_writeback(state, wb)
       state
     end
+  end
+
+  # Keeps keyframe_pending? set until an async frame that actually honored the
+  # request writes back. The flag lives on the writeback's `keyframe?` field, stamped
+  # from the emitted caches in Renderer.Server.writeback_from_output/2 (#2219).
+  @spec clear_keyframe_pending_from_writeback?(t(), map()) :: boolean()
+  defp clear_keyframe_pending_from_writeback?(%__MODULE__{keyframe_pending?: false}, _wb),
+    do: false
+
+  defp clear_keyframe_pending_from_writeback?(%__MODULE__{keyframe_pending?: true}, wb) do
+    not Map.get(wb, :keyframe?, false)
   end
 
   @spec renderer_writeback_shell_current?(t(), map()) :: boolean()

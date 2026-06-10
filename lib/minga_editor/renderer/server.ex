@@ -67,6 +67,7 @@ defmodule MingaEditor.Renderer.Server do
           required(:shell_state) => term(),
           required(:windows) => term(),
           required(:frame_seq) => non_neg_integer(),
+          required(:keyframe?) => boolean(),
           required(:render_sent_at) => integer()
         }
 
@@ -164,7 +165,12 @@ defmodule MingaEditor.Renderer.Server do
       Telemetry.span(
         [:minga, :render, :pipeline],
         %{frame_seq: seq},
-        fn -> snap |> Input.with_font_registry(state.font_registry) |> state.pipeline.() end
+        fn ->
+          snap
+          |> Input.with_font_registry(state.font_registry)
+          |> Map.put(:frame_seq, seq)
+          |> state.pipeline.()
+        end
       )
 
     emit_complete_at = monotonic_now()
@@ -231,6 +237,10 @@ defmodule MingaEditor.Renderer.Server do
       shell_state: output.shell_state,
       windows: output.workspace.windows,
       frame_seq: seq,
+      # Whether the frame this render emitted carried the keyframe. The Editor clears
+      # keyframe_pending? only on a writeback that actually honored the request, so an
+      # in-flight delta render can't swallow a pending keyframe (#2219).
+      keyframe?: output.caches.last_frame_keyframe?,
       # Stamped at writeback construction (immediately before send) so the
       # Editor can measure the Renderer.Server → Editor scheduling delay.
       render_sent_at: monotonic_now()

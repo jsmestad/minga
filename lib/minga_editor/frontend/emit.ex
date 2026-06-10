@@ -39,6 +39,32 @@ defmodule MingaEditor.Frontend.Emit do
         RenderModelBuilder.build(frame, ctx, chrome)
       end)
 
+    # Frame transaction (#2219). frame_seq is the strictly monotonic global frame
+    # sequence (Renderer.Server's seq on the async path; a fresh monotonic value on
+    # sync/headless paths). A keyframe is forced by an inbound request_keyframe, and
+    # is also the first-frame state (no committed base yet). A keyframe drops the
+    # adapter delta caches so every window emits full content and every chrome
+    # surface re-emits, and brackets the frame with base_frame_seq 0.
+    frame_seq = frame_seq(ctx)
+    keyframe? = ctx.force_keyframe? or caches.last_emitted_frame_seq == 0
+    base_frame_seq = if keyframe?, do: 0, else: caches.last_emitted_frame_seq
+
+    caches =
+      if keyframe? do
+        # A keyframe re-establishes the frontend from scratch, so drop every
+        # side-channel delta cache too: clearing last_title/last_window_bg forces
+        # the title and window background to re-send, restoring a frontend that lost
+        # them mid-session (mirrors Caches.reset_frontend_state/1) (#2219).
+        %{
+          caches
+          | adapter_gui_caches: Minga.Frontend.Adapter.GUI.Caches.new(),
+            last_title: nil,
+            last_window_bg: nil
+        }
+      else
+        caches
+      end
+
     encoded_frame =
       Telemetry.span_with_stop_metadata([:minga, :render, :adapter_encode], %{}, fn ->
         encoded_frame = Minga.Frontend.Adapter.GUI.encode(render_model, caches.adapter_gui_caches)
@@ -47,21 +73,26 @@ defmodule MingaEditor.Frontend.Emit do
 
     caches = %{caches | adapter_gui_caches: encoded_frame.caches}
 
-    # Echo the latest input correlation sequence on batch_end (ticket #2215) so
+    # Echo the latest input correlation sequence on commit_frame (ticket #2215) so
     # the frontend can resolve a keystroke-to-write latency sample.
     input_seq = Map.get(ctx, :last_input_seq, 0)
 
     commands =
-      flush_font_registration_commands() ++
+      [Protocol.encode_begin_frame(frame_seq, base_frame_seq)] ++
+        flush_font_registration_commands() ++
         encoded_frame.metal_commands ++
-        encoded_frame.chrome_commands ++ [Protocol.encode_batch_end(input_seq)]
+        encoded_frame.chrome_commands ++ [Protocol.encode_commit_frame(frame_seq, input_seq)]
 
     caches = update_tracking(ctx, caches)
+    # Record both the seq and whether this frame carried the keyframe so the Editor
+    # clears `keyframe_pending?` only when a frame that actually honored the request
+    # reached emit (#2219). A concurrent delta writeback must not swallow the flag.
+    caches = %{caches | last_emitted_frame_seq: frame_seq, last_frame_keyframe?: keyframe?}
     byte_count = IO.iodata_length(commands)
 
     Telemetry.span(
       [:minga, :render, :emit_prepare],
-      %{byte_count: byte_count, input_seq: input_seq},
+      %{byte_count: byte_count, input_seq: input_seq, frame_seq: frame_seq, keyframe?: keyframe?},
       fn ->
         MingaEditor.Frontend.send_render_commands(ctx.port_manager, commands)
         caches = send_title(render_model, caches)
@@ -70,6 +101,13 @@ defmodule MingaEditor.Frontend.Emit do
       end
     )
   end
+
+  # The async render path threads Renderer.Server's monotonic seq through the
+  # context; sync/headless paths leave it nil, so we mint a fresh monotonic value
+  # to keep frame_seq strictly advancing per emit on every path.
+  @spec frame_seq(ctx()) :: non_neg_integer()
+  defp frame_seq(%{frame_seq: seq}) when is_integer(seq) and seq >= 0, do: seq
+  defp frame_seq(_ctx), do: System.unique_integer([:positive, :monotonic])
 
   @spec adapter_encode_metadata(Minga.Frontend.Adapter.GUI.EncodedFrame.metrics()) :: map()
   defp adapter_encode_metadata(metrics) do

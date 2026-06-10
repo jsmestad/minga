@@ -3,7 +3,7 @@ defmodule Minga.Test.HeadlessPort do
   Virtual port manager that captures render commands into an in-memory
   screen grid. Drop-in replacement for `MingaEditor.Frontend.Manager` in tests.
 
-  Decodes semantic GUI render commands from the editor's render pipeline into a queryable 2D cell grid. The `batch_end` opcode marks a complete frame and notifies waiters, providing a natural synchronization point for test assertions.
+  Decodes semantic GUI render commands from the editor's render pipeline into a queryable 2D cell grid. The `commit_frame` opcode (which closes each frame transaction, #2219) marks a complete frame and notifies waiters, providing a natural synchronization point for test assertions.
 
   ## Usage
 
@@ -24,7 +24,8 @@ defmodule Minga.Test.HeadlessPort do
   alias Minga.Test.GUIWindowDecoder
   alias MingaEditor.Frontend.Protocol
 
-  @op_batch_end Opcodes.batch_end()
+  @op_begin_frame Opcodes.begin_frame()
+  @op_commit_frame Opcodes.commit_frame()
   @op_set_title Opcodes.set_title()
   @op_set_window_bg Opcodes.set_window_bg()
   @op_set_font Opcodes.set_font()
@@ -204,7 +205,7 @@ defmodule Minga.Test.HeadlessPort do
     GenServer.call(server, {:resize, width, height})
   end
 
-  @doc "Returns the total number of completed frames (batch_end count)."
+  @doc "Returns the total number of completed frames (commit_frame count)."
   @spec frame_count(GenServer.server()) :: non_neg_integer()
   def frame_count(server) do
     GenServer.call(server, :frame_count)
@@ -222,7 +223,7 @@ defmodule Minga.Test.HeadlessPort do
   end
 
   @doc """
-  Blocks until a new frame is rendered (batch_end received).
+  Blocks until a new frame is rendered (commit_frame received).
   Returns `:ok` or `{:error, :timeout}`.
   """
   @spec await_frame(GenServer.server(), timeout()) :: :ok | {:error, :timeout}
@@ -253,7 +254,7 @@ defmodule Minga.Test.HeadlessPort do
   Waits for a frame using a ref from `prepare_await/1`.
 
   Returns `{:ok, snapshot}` where snapshot is the frozen screen state at
-  the moment `batch_end` was processed. This is race-free: no subsequent
+  the moment `commit_frame` was processed. This is race-free: no subsequent
   render can overwrite the captured data because it lives in the calling
   process's mailbox, not in the HeadlessPort's mutable grid.
   """
@@ -424,14 +425,17 @@ defmodule Minga.Test.HeadlessPort do
 
   @spec apply_command(binary(), State.t()) :: State.t()
 
-  # batch_end now carries the echoed input correlation sequence (ticket #2215).
-  defp apply_command(<<@op_batch_end, input_seq::32>>, state) do
-    apply_batch_end(state, input_seq)
+  # begin_frame opens a frame transaction (#2219). The harness presents one packet
+  # per frame, so it decodes the marker and ignores it (staging is children C/D).
+  defp apply_command(<<@op_begin_frame, _frame_seq::32, _base_frame_seq::32>>, state) do
+    state
   end
 
-  # Legacy bare batch_end (frontends/tests that predate the sequence echo).
-  defp apply_command(<<@op_batch_end>>, state) do
-    apply_batch_end(state, 0)
+  # commit_frame closes a frame transaction (#2219), carrying the echoed input
+  # correlation sequence (ticket #2215, formerly on batch_end). It marks frame
+  # completion and notifies waiters.
+  defp apply_command(<<@op_commit_frame, _frame_seq::32, input_seq::32>>, state) do
+    apply_commit_frame(state, input_seq)
   end
 
   defp apply_command(<<@op_gui_window_content, _rest::binary>> = binary, state) do
@@ -511,8 +515,8 @@ defmodule Minga.Test.HeadlessPort do
 
   defp apply_command(_cmd_binary, state), do: state
 
-  @spec apply_batch_end(State.t(), non_neg_integer()) :: State.t()
-  defp apply_batch_end(state, input_seq) do
+  @spec apply_commit_frame(State.t(), non_neg_integer()) :: State.t()
+  defp apply_commit_frame(state, input_seq) do
     state = project_semantic_grid(state)
 
     snapshot = %{

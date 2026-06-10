@@ -28,8 +28,6 @@ func CommandSize(payload []byte) (int, CommandSizeStatus) {
 		return fixedCommandSize(payload, 2)
 	case OPSetWindowBg:
 		return fixedCommandSize(payload, 4)
-	case OPBatchEnd:
-		return fixedCommandSize(payload, 5)
 	case OPGuiGutterSep, OPGuiCursorline:
 		return fixedCommandSize(payload, 6)
 	case OPBeginFrame, OPCommitFrame:

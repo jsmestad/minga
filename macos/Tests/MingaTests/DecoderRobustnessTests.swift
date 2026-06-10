@@ -23,7 +23,7 @@ struct DecoderEmptyInputTests {
 
     @Test("Offset past end throws insufficientData")
     func offsetPastEnd() {
-        let data = Data([OP_BATCH_END])
+        let data = Data([OP_COMMIT_FRAME])
         #expect(throws: ProtocolDecodeError.self) {
             try decodeCommand(data: data, offset: 5)
         }
@@ -349,20 +349,20 @@ struct DecoderForwardCompatTests {
         // Known commands that follow
         data.append(OP_SET_CURSOR_SHAPE)
         data.append(CURSOR_BLOCK)
-        data.append(OP_BATCH_END)
-        data.append(contentsOf: [0, 0, 0, 0]) // batch_end echoed seq (fixed:5, #2215)
+        data.append(OP_COMMIT_FRAME)
+        data.append(contentsOf: [0, 0, 0, 0, 0, 0, 0, 0]) // commit_frame frame_seq + echoed input_seq (fixed:9, #2219/#2215)
 
         var commands: [RenderCommand] = []
         try decodeCommands(from: data) { cmd in
             commands.append(cmd)
         }
-        // The unknown opcode is skipped (nil), so only set_cursor_shape and batchEnd are collected
+        // The unknown opcode is skipped (nil), so only set_cursor_shape and commitFrame are collected
         #expect(commands.count == 2)
         guard case .setCursorShape = commands[0] else {
             Issue.record("Expected .setCursorShape after skipped opcode"); return
         }
-        guard case .batchEnd = commands[1] else {
-            Issue.record("Expected .batchEnd"); return
+        guard case .commitFrame = commands[1] else {
+            Issue.record("Expected .commitFrame"); return
         }
     }
 
@@ -504,8 +504,8 @@ struct DecoderEdgeCaseTests {
         var data = Data()
         data.append(OP_SET_CURSOR_SHAPE)
         data.append(CURSOR_BLOCK)
-        data.append(OP_BATCH_END)
-        data.append(contentsOf: [0, 0, 0, 0]) // batch_end echoed seq (fixed:5, #2215)
+        data.append(OP_COMMIT_FRAME)
+        data.append(contentsOf: [0, 0, 0, 0, 0, 0, 0, 0]) // commit_frame frame_seq + echoed input_seq (fixed:9, #2219/#2215)
 
         var commands: [RenderCommand] = []
         try decodeCommands(from: data) { cmd in

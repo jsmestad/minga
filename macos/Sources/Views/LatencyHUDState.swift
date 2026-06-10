@@ -3,7 +3,7 @@
 ///
 /// The macOS GUI's `LatencyRecorder` (owned by `CommandDispatcher`) records
 /// keystroke-to-present samples: the input path stamps a correlation sequence
-/// into each key packet, and `batch_end` resolves the sample when the frame is
+/// into each key packet, and `commit_frame` resolves the sample when the frame is
 /// presented. This state object is the client-local, ephemeral display layer for
 /// those numbers, mirroring the Go TUI's HUD: it shows live p50/p99/max and the
 /// sample count, refreshed on a coarse timer so reading the recorder never

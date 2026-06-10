@@ -275,14 +275,28 @@ defmodule MingaEditor.Frontend.ProtocolTest do
     end
   end
 
-  describe "encode_batch_end/1" do
-    test "encodes batch_end with a zero correlation sequence by default" do
-      encoded = Protocol.encode_batch_end()
-      assert <<0x13, 0::32>> = encoded
+  describe "encode_begin_frame/2" do
+    test "encodes begin_frame with frame_seq and base_frame_seq (#2219)" do
+      assert <<0x10, 7::32, 6::32>> = Protocol.encode_begin_frame(7, 6)
+    end
+
+    test "encodes a keyframe as base_frame_seq 0" do
+      assert <<0x10, 9::32, 0::32>> = Protocol.encode_begin_frame(9, 0)
+    end
+
+    test "masks large monotonic frame_seq values to u32" do
+      big = 0x1_0000_0001
+      assert <<0x10, 1::32, 0::32>> = Protocol.encode_begin_frame(big, 0)
+    end
+  end
+
+  describe "encode_commit_frame/2" do
+    test "encodes commit_frame with frame_seq and a zero input_seq by default (#2219)" do
+      assert <<0x11, 7::32, 0::32>> = Protocol.encode_commit_frame(7)
     end
 
     test "encodes the echoed input correlation sequence (ticket #2215)" do
-      assert <<0x13, 4_242::32>> = Protocol.encode_batch_end(4_242)
+      assert <<0x11, 7::32, 4_242::32>> = Protocol.encode_commit_frame(7, 4_242)
     end
   end
 
@@ -293,8 +307,16 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       assert <<0x18, 3::16, "bad">> = Protocol.encode_protocol_error("bad")
     end
 
-    test "batch_end carries a u32 correlation sequence (opcode + 4 bytes)" do
-      assert <<0x13, 0::32>> = Protocol.encode_batch_end()
+    test "commit_frame carries frame_seq + input_seq (opcode + 8 bytes)" do
+      assert <<0x11, 0::32, 0::32>> = Protocol.encode_commit_frame(0)
+    end
+
+    test "begin_frame carries frame_seq + base_frame_seq (opcode + 8 bytes)" do
+      assert <<0x10, 0::32, 0::32>> = Protocol.encode_begin_frame(0, 0)
+    end
+
+    test "request_keyframe decodes last_good_frame_seq (#2219)" do
+      assert {:ok, {:request_keyframe, 12}} = Protocol.decode_event(<<0x08, 12::32>>)
     end
 
     test "key_press event has correct byte layout" do

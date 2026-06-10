@@ -13,7 +13,8 @@
 /// Render commands (BEAM → frontend), transport survivors only. The
 /// cell-paradigm opcodes (draw_text, set_cursor, clear, region commands,
 /// draw_styled_text) were retired in protocol_version 2 with the Zig renderer:
-///   0x13 batch_end:        seq:u32
+///   0x10 begin_frame:      frame_seq:u32, base_frame_seq:u32
+///   0x11 commit_frame:     frame_seq:u32, input_seq:u32
 ///   0x15 set_cursor_shape: shape:u8
 ///
 /// The 4-byte length prefix is handled by Erlang's {:packet, 4} and
@@ -38,7 +39,6 @@ pub const OP_LOG_MESSAGE = opcodes.OP_LOG_MESSAGE;
 // Render
 pub const OP_BEGIN_FRAME = opcodes.OP_BEGIN_FRAME;
 pub const OP_COMMIT_FRAME = opcodes.OP_COMMIT_FRAME;
-pub const OP_BATCH_END = opcodes.OP_BATCH_END;
 pub const OP_SET_CURSOR_SHAPE = opcodes.OP_SET_CURSOR_SHAPE;
 pub const OP_SET_TITLE = opcodes.OP_SET_TITLE;
 pub const OP_SET_WINDOW_BG = opcodes.OP_SET_WINDOW_BG;
@@ -369,7 +369,11 @@ pub const RenderCommand = union(enum) {
     // the command loop breaks on (render opcodes never reach the parser stream).
     set_cursor_shape: CursorShape,
     set_title: []const u8,
-    batch_end: void,
+    // Frame transaction markers (#2219). begin_frame opens a frame; commit_frame
+    // closes it (carrying the echoed input correlation seq formerly on batch_end).
+    // The parser decodes them only as transport survivors; it does not render.
+    begin_frame: void,
+    commit_frame: void,
     // Incremental content sync
     edit_buffer: EditBuffer,
     // Text measurement
@@ -822,7 +826,8 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
     const rest = data[1..];
 
     switch (opcode) {
-        OP_BATCH_END => return .batch_end,
+        OP_BEGIN_FRAME => return .begin_frame,
+        OP_COMMIT_FRAME => return .commit_frame,
         OP_SET_CURSOR_SHAPE => {
             if (rest.len < 1) return error.Malformed;
             switch (rest[0]) {
@@ -1081,7 +1086,8 @@ fn decodeStructuralNavAction(action: u8) !StructuralNavAction {
 /// each command.
 ///
 /// Fixed sizes:
-///   0x13 batch_end:        5 bytes (opcode + seq:4)
+///   0x10 begin_frame:      9 bytes (opcode + frame_seq:4 + base_frame_seq:4)
+///   0x11 commit_frame:     9 bytes (opcode + frame_seq:4 + input_seq:4)
 ///   0x15 set_cursor_shape: 2 bytes (opcode + shape:1)
 pub fn commandSize(payload: []const u8) usize {
     if (payload.len == 0) return 0;
@@ -1919,10 +1925,16 @@ test "encode and verify resize" {
     try std.testing.expectEqual(@as(u8, OP_RESIZE), buf[0]);
 }
 
-test "decode batch_end command" {
-    const data = [_]u8{0x13};
+test "decode begin_frame command" {
+    const data = [_]u8{ OP_BEGIN_FRAME, 0, 0, 0, 7, 0, 0, 0, 0 };
     const cmd = try decodeCommand(&data);
-    try std.testing.expect(cmd == .batch_end);
+    try std.testing.expect(cmd == .begin_frame);
+}
+
+test "decode commit_frame command" {
+    const data = [_]u8{ OP_COMMIT_FRAME, 0, 0, 0, 7, 0, 0, 0, 5 };
+    const cmd = try decodeCommand(&data);
+    try std.testing.expect(cmd == .commit_frame);
 }
 
 test "decode set_window_bg as set_default_bg" {
@@ -2338,9 +2350,14 @@ test "encodeKeyPress byte layout: each position verified" {
 
 // ── commandSize ──────────────────────────────────────────────────────────────
 
-test "commandSize: batch_end is 1 byte" {
-    const data = [_]u8{OP_BATCH_END};
-    try std.testing.expectEqual(@as(usize, 1), commandSize(&data));
+test "commandSize: commit_frame is 9 bytes when complete" {
+    const data = [_]u8{ OP_COMMIT_FRAME, 0, 0, 0, 7, 0, 0, 0, 5 };
+    try std.testing.expectEqual(@as(usize, 9), commandSize(&data));
+}
+
+test "commandSize: begin_frame is 9 bytes when complete" {
+    const data = [_]u8{ OP_BEGIN_FRAME, 0, 0, 0, 7, 0, 0, 0, 0 };
+    try std.testing.expectEqual(@as(usize, 9), commandSize(&data));
 }
 
 test "commandSize: fixed-size commands clamp to available payload" {
@@ -2386,7 +2403,7 @@ test "commandSize: gui_which_key custom packet" {
 }
 
 test "commandSize: hidden gui_which_key is two bytes" {
-    const data = [_]u8{ OP_GUI_WHICH_KEY, 0, OP_BATCH_END };
+    const data = [_]u8{ OP_GUI_WHICH_KEY, 0, OP_COMMIT_FRAME };
     try std.testing.expectEqual(@as(usize, 2), commandSize(&data));
 }
 
@@ -2420,7 +2437,7 @@ test "commandSize: gui_completion custom packet" {
 }
 
 test "commandSize: hidden gui_completion is two bytes" {
-    const data = [_]u8{ OP_GUI_COMPLETION, 0, OP_BATCH_END };
+    const data = [_]u8{ OP_GUI_COMPLETION, 0, OP_COMMIT_FRAME };
     try std.testing.expectEqual(@as(usize, 2), commandSize(&data));
 }
 
@@ -2431,7 +2448,7 @@ test "commandSize: gui_theme custom packet" {
         0x22,         0x33,
         0x30,         0x44,
         0x55,         0x66,
-        OP_BATCH_END,
+        OP_COMMIT_FRAME,
     };
     try std.testing.expectEqual(data.len - 1, commandSize(&data));
 }
@@ -2450,20 +2467,20 @@ test "commandSize: gui_breadcrumb custom packet" {
         'i',               't',
         'o',               'r',
         '.',               'e',
-        'x',               OP_BATCH_END,
+        'x',               OP_COMMIT_FRAME,
     };
     try std.testing.expectEqual(data.len - 1, commandSize(&data));
 }
 
 test "commandSize: empty gui_breadcrumb is two bytes" {
-    const data = [_]u8{ OP_GUI_BREADCRUMB, 0, OP_BATCH_END };
+    const data = [_]u8{ OP_GUI_BREADCRUMB, 0, OP_COMMIT_FRAME };
     try std.testing.expectEqual(@as(usize, 2), commandSize(&data));
 }
 
 test "commandSize: gui_file_tree len32 packet" {
     const data = [_]u8{
         OP_GUI_FILE_TREE, 0, 0, 0,            3,
-        2,                0, 0, OP_BATCH_END,
+        2,                0, 0, OP_COMMIT_FRAME,
     };
     try std.testing.expectEqual(data.len - 1, commandSize(&data));
 }
@@ -2472,7 +2489,7 @@ test "commandSize: gui_file_tree_selection len16 packet" {
     const data = [_]u8{
         OP_GUI_FILE_TREE_SELECTION, 0,            4,
         1,                          0,            1,
-        'a',                        OP_BATCH_END,
+        'a',                        OP_COMMIT_FRAME,
     };
     try std.testing.expectEqual(data.len - 1, commandSize(&data));
 }
@@ -2487,7 +2504,7 @@ test "commandSize: gui_gutter sectioned packet" {
         0,             0,
         2,             1,
         0,             4,
-        OP_BATCH_END,
+        OP_COMMIT_FRAME,
     };
     try std.testing.expectEqual(data.len - 1, commandSize(&data));
 }
@@ -2497,7 +2514,7 @@ test "commandSize: gui_indent_guides len16 packet" {
         OP_GUI_INDENT_GUIDES, 0,    6,
         0,                    7,    2,
         0xFF,                 0xFF, 0,
-        OP_BATCH_END,
+        OP_COMMIT_FRAME,
     };
     try std.testing.expectEqual(data.len - 1, commandSize(&data));
 }
@@ -2507,7 +2524,7 @@ test "commandSize: gui_workspaces len16 packet" {
         OP_GUI_WORKSPACES, 0, 6,
         2,                 0, 7,
         0,                 0, 0,
-        OP_BATCH_END,
+        OP_COMMIT_FRAME,
     };
     try std.testing.expectEqual(data.len - 1, commandSize(&data));
 }
@@ -2551,13 +2568,13 @@ test "commandSize: gui_picker sectioned packet" {
         1,             '>',
         0x06,          0,
         1,             0,
-        OP_BATCH_END,
+        OP_COMMIT_FRAME,
     };
     try std.testing.expectEqual(data.len - 1, commandSize(&data));
 }
 
 test "commandSize: hidden gui_picker is two bytes" {
-    const data = [_]u8{ OP_GUI_PICKER, 0, OP_BATCH_END };
+    const data = [_]u8{ OP_GUI_PICKER, 0, OP_COMMIT_FRAME };
     try std.testing.expectEqual(@as(usize, 2), commandSize(&data));
 }
 
@@ -2572,13 +2589,13 @@ test "commandSize: gui_picker_preview packet" {
         'r',                   'e',
         'v',                   'i',
         'e',                   'w',
-        OP_BATCH_END,
+        OP_COMMIT_FRAME,
     };
     try std.testing.expectEqual(data.len - 1, commandSize(&data));
 }
 
 test "commandSize: hidden gui_picker_preview is two bytes" {
-    const data = [_]u8{ OP_GUI_PICKER_PREVIEW, 0, OP_BATCH_END };
+    const data = [_]u8{ OP_GUI_PICKER_PREVIEW, 0, OP_COMMIT_FRAME };
     try std.testing.expectEqual(@as(usize, 2), commandSize(&data));
 }
 
@@ -2600,13 +2617,13 @@ test "commandSize: gui_hover_popup packet" {
         0,                  4,
         'C',                'o',
         'd',                'e',
-        OP_BATCH_END,
+        OP_COMMIT_FRAME,
     };
     try std.testing.expectEqual(data.len - 1, commandSize(&data));
 }
 
 test "commandSize: hidden gui_hover_popup is two bytes" {
-    const data = [_]u8{ OP_GUI_HOVER_POPUP, 0, OP_BATCH_END };
+    const data = [_]u8{ OP_GUI_HOVER_POPUP, 0, OP_COMMIT_FRAME };
     try std.testing.expectEqual(@as(usize, 2), commandSize(&data));
 }
 
@@ -2635,13 +2652,13 @@ test "commandSize: gui_signature_help packet" {
         6,                     's',
         'e',                   'c',
         'o',                   'n',
-        'd',                   OP_BATCH_END,
+        'd',                   OP_COMMIT_FRAME,
     };
     try std.testing.expectEqual(data.len - 1, commandSize(&data));
 }
 
 test "commandSize: hidden gui_signature_help is two bytes" {
-    const data = [_]u8{ OP_GUI_SIGNATURE_HELP, 0, OP_BATCH_END };
+    const data = [_]u8{ OP_GUI_SIGNATURE_HELP, 0, OP_COMMIT_FRAME };
     try std.testing.expectEqual(@as(usize, 2), commandSize(&data));
 }
 
@@ -2661,13 +2678,13 @@ test "commandSize: gui_float_popup packet" {
         0,                  5,
         'l',                'i',
         'n',                'e',
-        '2',                OP_BATCH_END,
+        '2',                OP_COMMIT_FRAME,
     };
     try std.testing.expectEqual(data.len - 1, commandSize(&data));
 }
 
 test "commandSize: hidden gui_float_popup is two bytes" {
-    const data = [_]u8{ OP_GUI_FLOAT_POPUP, 0, OP_BATCH_END };
+    const data = [_]u8{ OP_GUI_FLOAT_POPUP, 0, OP_COMMIT_FRAME };
     try std.testing.expectEqual(@as(usize, 2), commandSize(&data));
 }
 
@@ -2701,7 +2718,7 @@ test "commandSize: gui_git_status packet" {
         'o',               'm',
         'm',               'i',
         't',               0,
-        2,                 OP_BATCH_END,
+        2,                 OP_COMMIT_FRAME,
     };
     try std.testing.expectEqual(data.len - 1, commandSize(&data));
 }
@@ -2717,7 +2734,7 @@ test "commandSize: minimal gui_git_status packet" {
         0,                 0,
         0,                 0,
         0,                 0,
-        OP_BATCH_END,
+        OP_COMMIT_FRAME,
     };
     try std.testing.expectEqual(data.len - 1, commandSize(&data));
 }
@@ -2747,13 +2764,13 @@ test "commandSize: gui_bottom_panel packet" {
         'x',                 0,
         4,                   'b',
         'o',                 'o',
-        'm',                 OP_BATCH_END,
+        'm',                 OP_COMMIT_FRAME,
     };
     try std.testing.expectEqual(data.len - 1, commandSize(&data));
 }
 
 test "commandSize: hidden gui_bottom_panel is two bytes" {
-    const data = [_]u8{ OP_GUI_BOTTOM_PANEL, 0, OP_BATCH_END };
+    const data = [_]u8{ OP_GUI_BOTTOM_PANEL, 0, OP_COMMIT_FRAME };
     try std.testing.expectEqual(@as(usize, 2), commandSize(&data));
 }
 
@@ -2768,7 +2785,7 @@ test "commandSize: gui_window_content sectioned packet" {
         0,                     0,
         0,                     0,
         0,                     0,
-        9,                     OP_BATCH_END,
+        9,                     OP_COMMIT_FRAME,
     };
     try std.testing.expectEqual(data.len - 1, commandSize(&data));
 }
@@ -2784,7 +2801,7 @@ test "commandSize: gui_window_rows_delta sectioned packet" {
         0,                        3,
         0,                        4,
         2,                        0,
-        1,                        OP_BATCH_END,
+        1,                        OP_COMMIT_FRAME,
     };
     try std.testing.expectEqual(data.len - 1, commandSize(&data));
 }
@@ -2809,7 +2826,7 @@ test "commandSize: gui_window_overlay_delta with cursorline" {
         0x12,
         0x34,
         0x56,
-        OP_BATCH_END,
+        OP_COMMIT_FRAME,
     };
     try std.testing.expectEqual(data.len - 1, commandSize(&data));
 }
@@ -2829,18 +2846,18 @@ test "commandSize: gui_split_separators packet" {
         'm',                     'a',
         'i',                     'n',
         '.',                     'e',
-        'x',                     OP_BATCH_END,
+        'x',                     OP_COMMIT_FRAME,
     };
     try std.testing.expectEqual(data.len - 1, commandSize(&data));
 }
 
 test "commandSize: empty gui_split_separators packet" {
-    const data = [_]u8{ OP_GUI_SPLIT_SEPARATORS, 0, 0, 0, 0, 0, OP_BATCH_END };
+    const data = [_]u8{ OP_GUI_SPLIT_SEPARATORS, 0, 0, 0, 0, 0, OP_COMMIT_FRAME };
     try std.testing.expectEqual(data.len - 1, commandSize(&data));
 }
 
 test "commandSize: gui_search_state len16 packet" {
-    const data = [_]u8{ OP_GUI_SEARCH_STATE, 0, 6, 1, 0, 5, 0, 3, 0x0F, OP_BATCH_END };
+    const data = [_]u8{ OP_GUI_SEARCH_STATE, 0, 6, 1, 0, 5, 0, 3, 0x0F, OP_COMMIT_FRAME };
     try std.testing.expectEqual(data.len - 1, commandSize(&data));
 }
 
@@ -2871,25 +2888,25 @@ test "commandSize: gui_change_summary custom packet" {
         0,
         0,
         2,
-        OP_BATCH_END,
+        OP_COMMIT_FRAME,
     };
     try std.testing.expectEqual(data.len - 1, commandSize(&data));
 }
 
 test "commandSize: gui_notifications len16 packet" {
-    const data = [_]u8{ OP_GUI_NOTIFICATIONS, 0, 3, 1, 0, 0, OP_BATCH_END };
+    const data = [_]u8{ OP_GUI_NOTIFICATIONS, 0, 3, 1, 0, 0, OP_COMMIT_FRAME };
     try std.testing.expectEqual(data.len - 1, commandSize(&data));
 }
 
 test "commandSize: gui_edit_timeline len16 packet" {
-    const data = [_]u8{ OP_GUI_EDIT_TIMELINE, 0, 4, 1, 0, 0, 0, OP_BATCH_END };
+    const data = [_]u8{ OP_GUI_EDIT_TIMELINE, 0, 4, 1, 0, 0, 0, OP_COMMIT_FRAME };
     try std.testing.expectEqual(data.len - 1, commandSize(&data));
 }
 
 test "commandSize: extension footer summary packets" {
-    const overlay = [_]u8{ OP_GUI_EXTENSION_OVERLAY, 0, 1, 2, OP_BATCH_END };
-    const panel = [_]u8{ OP_GUI_EXTENSION_PANEL, 0, 1, 3, OP_BATCH_END };
-    const observatory = [_]u8{ OP_GUI_OBSERVATORY, 0, 0, 0, 6, 0x01, 0, 3, 1, 0, 4, OP_BATCH_END };
+    const overlay = [_]u8{ OP_GUI_EXTENSION_OVERLAY, 0, 1, 2, OP_COMMIT_FRAME };
+    const panel = [_]u8{ OP_GUI_EXTENSION_PANEL, 0, 1, 3, OP_COMMIT_FRAME };
+    const observatory = [_]u8{ OP_GUI_OBSERVATORY, 0, 0, 0, 6, 0x01, 0, 3, 1, 0, 4, OP_COMMIT_FRAME };
     try std.testing.expectEqual(overlay.len - 1, commandSize(&overlay));
     try std.testing.expectEqual(panel.len - 1, commandSize(&panel));
     try std.testing.expectEqual(observatory.len - 1, commandSize(&observatory));
@@ -2917,7 +2934,7 @@ test "commandSize: agent context and tool manager custom packets" {
         42,
         1,
         1,
-        OP_BATCH_END,
+        OP_COMMIT_FRAME,
     };
     const tools = [_]u8{
         OP_GUI_TOOL_MANAGER,
@@ -2949,21 +2966,21 @@ test "commandSize: agent context and tool manager custom packets" {
         0,
         0,
         0,
-        OP_BATCH_END,
+        OP_COMMIT_FRAME,
     };
-    const hidden_tools = [_]u8{ OP_GUI_TOOL_MANAGER, 0, OP_BATCH_END };
+    const hidden_tools = [_]u8{ OP_GUI_TOOL_MANAGER, 0, OP_COMMIT_FRAME };
     try std.testing.expectEqual(context.len - 1, commandSize(&context));
     try std.testing.expectEqual(tools.len - 1, commandSize(&tools));
     try std.testing.expectEqual(@as(usize, 2), commandSize(&hidden_tools));
 }
 
 test "commandSize: small retained semantic state packets" {
-    const cursorline = [_]u8{ OP_GUI_CURSORLINE, 0, 2, 0x11, 0x22, 0x33, OP_BATCH_END };
-    const separator = [_]u8{ OP_GUI_GUTTER_SEP, 0, 7, 0x44, 0x55, 0x66, OP_BATCH_END };
-    const spacing = [_]u8{ OP_GUI_LINE_SPACING, 0, 2, 0, 120, OP_BATCH_END };
-    const animation = [_]u8{ OP_GUI_CURSOR_ANIMATION, 0, 1, 0, OP_BATCH_END };
-    const config = [_]u8{ OP_GUI_CONFIG_STATE, 0, 3, 1, 2, 3, OP_BATCH_END };
-    const hover = [_]u8{ OP_GUI_HOVER_ACTION, 0, 4, 1, 0, 1, 'x', OP_BATCH_END };
+    const cursorline = [_]u8{ OP_GUI_CURSORLINE, 0, 2, 0x11, 0x22, 0x33, OP_COMMIT_FRAME };
+    const separator = [_]u8{ OP_GUI_GUTTER_SEP, 0, 7, 0x44, 0x55, 0x66, OP_COMMIT_FRAME };
+    const spacing = [_]u8{ OP_GUI_LINE_SPACING, 0, 2, 0, 120, OP_COMMIT_FRAME };
+    const animation = [_]u8{ OP_GUI_CURSOR_ANIMATION, 0, 1, 0, OP_COMMIT_FRAME };
+    const config = [_]u8{ OP_GUI_CONFIG_STATE, 0, 3, 1, 2, 3, OP_COMMIT_FRAME };
+    const hover = [_]u8{ OP_GUI_HOVER_ACTION, 0, 4, 1, 0, 1, 'x', OP_COMMIT_FRAME };
 
     try std.testing.expectEqual(cursorline.len - 1, commandSize(&cursorline));
     try std.testing.expectEqual(separator.len - 1, commandSize(&separator));
@@ -2978,7 +2995,7 @@ test "commandSize: agent chat packet" {
         OP_GUI_AGENT_CHAT, 1,
         0x01,              0,
         2,                 1,
-        2,                 OP_BATCH_END,
+        2,                 OP_COMMIT_FRAME,
     };
 
     try std.testing.expectEqual(chat.len - 1, commandSize(&chat));
@@ -3042,14 +3059,16 @@ test "commandSize: empty payload returns 0" {
 
 test "batch decode: transport survivors parse with correct sizing" {
     // Concatenated batch of surviving transport opcodes:
-    // set_cursor_shape(2) + set_window_bg(4) + batch_end(5) = 11 bytes.
+    // set_cursor_shape(2) + set_window_bg(4) + commit_frame(9) = 15 bytes (#2219).
     const payload = [_]u8{
         OP_SET_CURSOR_SHAPE, CURSOR_BLOCK,
         OP_SET_WINDOW_BG,    0x28,
         0x2C,                0x34,
-        OP_BATCH_END,        0x00,
+        OP_COMMIT_FRAME,     0x00,
         0x00,                0x00,
-        0x00,
+        0x07,                0x00,
+        0x00,                0x00,
+        0x05,
     };
 
     var offset: usize = 0;
@@ -3067,7 +3086,7 @@ test "batch decode: transport survivors parse with correct sizing" {
     try std.testing.expect(cmds[0] == .set_cursor_shape);
     try std.testing.expect(cmds[1] == .set_default_bg);
     try std.testing.expectEqual(@as(u24, 0x282C34), cmds[1].set_default_bg);
-    try std.testing.expect(cmds[2] == .batch_end);
+    try std.testing.expect(cmds[2] == .commit_frame);
 }
 
 test "encodeResize byte layout: self-consistent encoding" {
@@ -3495,8 +3514,8 @@ test "generated commandSize matches protocol.commandSize" {
 
 test "generated-sized unrendered opcode does not consume following command" {
     const cases = [_][]const u8{
-        &[_]u8{ opcodes.OP_GUI_INDENT_GUIDES, 0x00, 0x06, 1, 2, 3, 4, 5, 6, OP_BATCH_END },
-        &[_]u8{ 0xB7, 0x00, 0x02, 0xAA, 0xBB, OP_BATCH_END },
+        &[_]u8{ opcodes.OP_GUI_INDENT_GUIDES, 0x00, 0x06, 1, 2, 3, 4, 5, 6, OP_COMMIT_FRAME },
+        &[_]u8{ 0xB7, 0x00, 0x02, 0xAA, 0xBB, OP_COMMIT_FRAME },
     };
 
     for (cases) |packet| {
@@ -3507,6 +3526,6 @@ test "generated-sized unrendered opcode does not consume following command" {
         offset += commandSize(packet[offset..]);
 
         const second = try decodeCommand(packet[offset..]);
-        try std.testing.expect(second == .batch_end);
+        try std.testing.expect(second == .commit_frame);
     }
 }

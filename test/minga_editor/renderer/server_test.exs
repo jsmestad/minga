@@ -63,7 +63,7 @@ defmodule MingaEditor.Renderer.ServerTest do
   end
 
   test "successful async render sends writeback and emits a frame" do
-    renderer = start_renderer(self(), pipeline: &emit_batch_end/1)
+    renderer = start_renderer(self(), pipeline: &emit_commit_frame/1)
     state = build_editor_state(:tui, nil)
     snapshot = Input.from_editor_state(state)
     frame_ref = Minga.Test.HeadlessPort.prepare_await(state.port_manager)
@@ -118,9 +118,11 @@ defmodule MingaEditor.Renderer.ServerTest do
     start_supervised!({RendererServer, opts})
   end
 
-  defp emit_batch_end(input) do
+  defp emit_commit_frame(input) do
+    # The HeadlessPort fires :frame_ready on commit_frame (#2219), so a minimal
+    # pipeline stub only needs to send a frame terminator.
     MingaEditor.Frontend.send_commands(input.port_manager, [
-      MingaEditor.Frontend.Protocol.encode_batch_end()
+      MingaEditor.Frontend.Protocol.encode_commit_frame(input.frame_seq || 0)
     ])
 
     input

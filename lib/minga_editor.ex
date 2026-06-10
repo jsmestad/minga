@@ -458,7 +458,7 @@ defmodule MingaEditor do
     state = cancel_nav_flash(state)
     state = cancel_yank_flash(state)
     # Record the input correlation sequence (ticket #2215) so the render that
-    # this keystroke triggers echoes it on batch_end for latency resolution.
+    # this keystroke triggers echoes it on commit_frame for latency resolution.
     state = %{state | last_input_seq: seq}
 
     new_state =
@@ -511,6 +511,15 @@ defmodule MingaEditor do
     new_state = Input.Router.dispatch_mouse(state, row, col, button, mods, event_type, 1)
     new_state = Input.Router.post_action_housekeeping(new_state, snapshot)
     {:noreply, new_state}
+  end
+
+  # ── Frame transaction: keyframe request (#2219) ──────────────────────────
+  # A frontend asks for a full keyframe after a decode invalidation. Mark the next
+  # frame keyframe-forced and re-render so the full snapshot goes out promptly. The
+  # last_good_frame_seq is informational under single-client scope.
+  def handle_info({:minga_input, {:request_keyframe, _last_good_frame_seq}}, state) do
+    new_state = %{state | keyframe_pending?: true}
+    {:noreply, Renderer.render_or_async(new_state)}
   end
 
   # ── GUI action events (semantic commands from SwiftUI chrome) ────────────
