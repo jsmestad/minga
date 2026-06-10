@@ -159,8 +159,43 @@ func keyModifiers(key tea.Key) byte {
 	return mods
 }
 
-func mousePacket(msg tea.MouseMsg) []byte {
+// mousePacket encodes a raw editor-body mouse event for the BEAM, translating
+// the terminal row into the editor-relative row the BEAM hit-tests.
+//
+// Since #2244 collapsed layout to Layout.GUI, the BEAM places the editor at row
+// 0, but the Go TUI renders headerLines (tab bar, breadcrumb, ...) above the
+// body. The renderer already translates inbound BEAM geometry down by the
+// header height (render_content.go semanticContentOffsets); this is the
+// symmetric outbound subtraction so a click on the visually-Nth buffer line
+// reaches the BEAM as editor row N (ticket #2256). The macOS GUI already sends
+// editor-relative coordinates because its chrome lives outside the Metal view.
+//
+// Header-click policy: chrome (tabs, breadcrumbs, file tree) is zone-routed
+// before reaching here, so a raw event whose row lands in the header region is
+// an unrouted header pixel, not a buffer click. Forwarding it would become a
+// phantom click on editor row 0, so it is suppressed (ok=false). Wheel events
+// are forwarded regardless of row: the BEAM treats a wheel as a viewport scroll
+// (no buffer hit-test), and dropping a wheel over the header would silently
+// swallow scroll input. Only carried-row buffer events (press/release/drag/
+// motion) honor the suppression.
+func (m Model) mousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	mouse := msg.Mouse()
+	offset := m.renderedHeaderHeight
+	row := mouse.Y - offset
+	if !isWheelButton(mouse.Button) && mouse.Y < offset {
+		// Header-region policy: a PRESS on an unrouted header pixel must not
+		// become a phantom row-0 buffer click, so it is suppressed. Drag,
+		// motion, and release events are forwarded clamped to row 0 instead:
+		// an upward drag keeps extending at the top visible line, and a
+		// release over the header still terminates the BEAM's drag state
+		// (suppressing it latched dragging until the next press).
+		if _, isPress := msg.(tea.MouseClickMsg); isPress {
+			return nil, false
+		}
+	}
+	if row < 0 {
+		row = 0
+	}
 	button := byte(3)
 	eventType := byte(0)
 	switch mouse.Button {
@@ -203,7 +238,19 @@ func mousePacket(msg tea.MouseMsg) []byte {
 			eventType = protocol.MouseDrag
 		}
 	}
-	return protocol.EncodeMouseEvent(int16(mouse.Y), int16(mouse.X), button, keyModToProtocol(mouse.Mod), eventType, 1)
+	return protocol.EncodeMouseEvent(int16(row), int16(mouse.X), button, keyModToProtocol(mouse.Mod), eventType, 1), true
+}
+
+// isWheelButton reports whether a Bubble Tea mouse button is a scroll-wheel
+// button. Wheel events are forwarded as viewport scrolls and bypass the
+// header-region suppression that protects buffer hit-test rows (ticket #2256).
+func isWheelButton(button tea.MouseButton) bool {
+	switch button {
+	case tea.MouseWheelUp, tea.MouseWheelDown, tea.MouseWheelLeft, tea.MouseWheelRight:
+		return true
+	default:
+		return false
+	}
 }
 
 func keyModToProtocol(mod tea.KeyMod) byte {
