@@ -508,7 +508,7 @@ func DecodeCompletionItem(data []byte, offset int) (CompletionItem, int, error) 
 	if err := decodeRequireLen(data, pos+1, "kind"); err != nil {
 		return CompletionItem{}, offset, err
 	}
-	kind := data[pos]
+	kind := CompletionKind(data[pos])
 	pos++
 	label, pos, err := decodeString16(data, pos)
 	if err != nil {
@@ -643,7 +643,7 @@ func DecodeGitStatusEntry(data []byte, offset int) (GitStatusEntry, int, error) 
 	if err := decodeRequireLen(data, pos+1, "status"); err != nil {
 		return GitStatusEntry{}, offset, err
 	}
-	status := data[pos]
+	status := GitFileStatus(data[pos])
 	pos++
 	path, pos, err := decodeString16(data, pos)
 	if err != nil {

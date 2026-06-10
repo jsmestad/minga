@@ -1014,6 +1014,49 @@ value = 0x57
 name = "extension_action"
 value = 0x58
 
+# ── Enum vocabularies ─────────────────────────────────────────────────────
+#
+# An [[enums]] entry names a closed set of wire byte values with a stable
+# repr primitive. A field references one with `type = "enum", enum = "<name>"`,
+# which is sized and read as the underlying repr (so existing wire bytes are
+# unchanged) and surfaces in generated decoders as a typed constant rather than
+# a bare integer. The optional `default` is the byte value an encoder emits for
+# an unmapped atom (it must appear in `values`). Validation requires unique
+# value bytes, every byte in range for the repr, and a resolvable `default`.
+
+[[enums]]
+name = "completion_kind"
+repr = "u8"
+default = "unknown"
+values = [
+  { name = "unknown", value = 0 },
+  { name = "function", value = 1 },
+  { name = "method", value = 2 },
+  { name = "variable", value = 3 },
+  { name = "field", value = 4 },
+  { name = "module", value = 5 },
+  { name = "keyword", value = 7 },
+  { name = "snippet", value = 8 },
+  { name = "constant", value = 9 },
+  { name = "struct", value = 11 },
+  { name = "enum", value = 12 },
+]
+
+[[enums]]
+name = "git_file_status"
+repr = "u8"
+default = "unknown"
+values = [
+  { name = "unknown", value = 0 },
+  { name = "modified", value = 1 },
+  { name = "added", value = 2 },
+  { name = "deleted", value = 3 },
+  { name = "renamed", value = 4 },
+  { name = "copied", value = 5 },
+  { name = "untracked", value = 6 },
+  { name = "conflict", value = 7 },
+]
+
 # ── Shared wire structures ────────────────────────────────────────────────
 #
 # Reusable fixed-size and variable-length sub-structures referenced by name
@@ -1027,6 +1070,7 @@ value = 0x58
 #   rgb                            — 3-byte color (r:u8, g:u8, b:u8)
 #   counted_array                  — count prefix + repeated elements
 #   struct                         — reference to another [[structures]] entry
+#   enum                           — closed byte vocabulary ([[enums]] entry)
 
 [[structures]]
 name = "rect"
@@ -1149,7 +1193,7 @@ fields = [{ name = "slot", type = "u8" }, { name = "color", type = "rgb" }]
 [[structures]]
 name = "completion_item"
 fields = [
-  { name = "kind", type = "u8" },
+  { name = "kind", type = "enum", enum = "completion_kind" },
   { name = "label", type = "string16" },
   { name = "detail", type = "string16" },
 ]
@@ -1189,7 +1233,7 @@ name = "git_status_entry"
 fields = [
   { name = "path_hash", type = "u32" },
   { name = "section", type = "u8" },
-  { name = "status", type = "u8" },
+  { name = "status", type = "enum", enum = "git_file_status" },
   { name = "path", type = "string16" },
 ]
 

@@ -35,6 +35,32 @@ func TestDecodeGuiCompletionFieldsWithItems(t *testing.T) {
 	}
 }
 
+// The completion_item.kind and git_status_entry.status fields are schema enums,
+// so the generated decoders surface them as typed constants rather than bare
+// bytes. This pins the byte<->constant mapping and the typed field shape.
+func TestDecodeCompletionItemKindIsTypedEnum(t *testing.T) {
+	bytes := []byte{12, 0, 1, 'x', 0, 0}
+	item, _, err := generated.DecodeCompletionItem(bytes, 0)
+	if err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if item.Kind != generated.CompletionKindEnum {
+		t.Fatalf("kind = %d, want CompletionKindEnum (%d)", item.Kind, generated.CompletionKindEnum)
+	}
+}
+
+func TestDecodeGitStatusEntryStatusIsTypedEnum(t *testing.T) {
+	// path_hash(4) + section(1) + status(1)=conflict(7) + empty path.
+	bytes := []byte{0, 0, 0, 0, 1, 7, 0, 0}
+	entry, _, err := generated.DecodeGitStatusEntry(bytes, 0)
+	if err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if entry.Status != generated.GitFileStatusConflict {
+		t.Fatalf("status = %d, want GitFileStatusConflict (%d)", entry.Status, generated.GitFileStatusConflict)
+	}
+}
+
 func TestDecodeHiddenCompletionSkipsTail(t *testing.T) {
 	f, consumed, err := generated.DecodeGuiCompletionFields([]byte{0}, 0)
 	if err != nil || consumed != 1 || f.Visible != 0 || len(f.Items) != 0 {

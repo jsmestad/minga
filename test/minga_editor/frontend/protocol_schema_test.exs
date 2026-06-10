@@ -263,6 +263,54 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
     )
   end
 
+  test "every enum has a repr, a resolvable default, and unique in-range values", %{
+    schema: schema
+  } do
+    repr_max = %{"u8" => 0xFF, "u16" => 0xFFFF, "u32" => 0xFFFFFFFF}
+
+    for enum <- schema["enums"] || [] do
+      assert is_binary(enum["name"])
+
+      assert Map.has_key?(repr_max, enum["repr"]),
+             "enum #{enum["name"]} has bad repr #{enum["repr"]}"
+
+      values = enum["values"] || []
+      value_names = MapSet.new(values, & &1["name"])
+      byte_values = Enum.map(values, & &1["value"])
+
+      assert byte_values == Enum.uniq(byte_values),
+             "enum #{enum["name"]} has duplicate value bytes"
+
+      for v <- values do
+        assert v["value"] >= 0 and v["value"] <= repr_max[enum["repr"]],
+               "enum #{enum["name"]} value #{v["name"]} out of range for #{enum["repr"]}"
+      end
+
+      if default = enum["default"] do
+        assert MapSet.member?(value_names, default),
+               "enum #{enum["name"]} default #{default} is not a declared value"
+      end
+    end
+  end
+
+  test "retrofitted enum fields reference declared enums", %{schema: schema} do
+    enum_names = MapSet.new(schema["enums"] || [], & &1["name"])
+    structures = Map.new(schema["structures"], fn s -> {s["name"], s} end)
+
+    completion_kind = field(structures["completion_item"], "kind")
+    assert completion_kind["type"] == "enum"
+    assert MapSet.member?(enum_names, completion_kind["enum"])
+
+    git_status = field(structures["git_status_entry"], "status")
+    assert git_status["type"] == "enum"
+    assert MapSet.member?(enum_names, git_status["enum"])
+  end
+
+  @spec field(map(), String.t()) :: map()
+  defp field(structure, name) do
+    Enum.find(structure["fields"], fn f -> f["name"] == name end)
+  end
+
   @spec assert_opcodes(map(), String.t(), keyword(non_neg_integer())) :: :ok
   defp assert_opcodes(schema, category, expected) do
     actual = opcodes_by_name(schema, category)
