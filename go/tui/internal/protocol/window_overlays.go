@@ -82,7 +82,7 @@ func decodeSelection(section []byte, window *WindowContent) {
 
 func decodeSearchMatches(section []byte, window *WindowContent) {
 	window.SearchSet = true
-	genMatches, _, err := generated.DecodeGuiWindowContentSearchMatches(section, 0)
+	genMatches, _, err := generated.DecodeGuiWindowContentSearchMatches(section, 0, len(section))
 	if err != nil {
 		window.SearchMatches = nil
 		return
@@ -96,7 +96,7 @@ func decodeSearchMatches(section []byte, window *WindowContent) {
 
 func decodeDiagnosticRanges(section []byte, window *WindowContent) {
 	window.DiagnosticsSet = true
-	genRanges, _, err := generated.DecodeGuiWindowContentDiagnosticRanges(section, 0)
+	genRanges, _, err := generated.DecodeGuiWindowContentDiagnosticRanges(section, 0, len(section))
 	if err != nil {
 		window.Diagnostics = nil
 		return
@@ -110,7 +110,7 @@ func decodeDiagnosticRanges(section []byte, window *WindowContent) {
 
 func decodeDocumentHighlights(section []byte, window *WindowContent) {
 	window.HighlightsSet = true
-	genHighlights, _, err := generated.DecodeGuiWindowContentDocumentHighlights(section, 0)
+	genHighlights, _, err := generated.DecodeGuiWindowContentDocumentHighlights(section, 0, len(section))
 	if err != nil {
 		window.Highlights = nil
 		return
@@ -124,7 +124,7 @@ func decodeDocumentHighlights(section []byte, window *WindowContent) {
 
 func decodeLineAnnotations(section []byte, window *WindowContent) {
 	window.AnnotationsSet = true
-	genAnnotations, _, err := generated.DecodeGuiWindowContentAnnotations(section, 0)
+	genAnnotations, _, err := generated.DecodeGuiWindowContentAnnotations(section, 0, len(section))
 	if err != nil {
 		window.Annotations = nil
 		return
@@ -137,7 +137,7 @@ func decodeLineAnnotations(section []byte, window *WindowContent) {
 }
 
 func decodePaneGeometry(section []byte, window *WindowContent) {
-	gen, _, err := generated.DecodeGuiWindowContentGeometry(section, 0)
+	gen, _, err := generated.DecodeGuiWindowContentGeometry(section, 0, len(section))
 	if err != nil {
 		return
 	}

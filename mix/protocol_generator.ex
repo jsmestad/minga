@@ -1353,7 +1353,100 @@ defmodule Minga.Mix.ProtocolGenerator do
     validate_section_ids!(sections)
     validate_section_element_refs!(sections, smap)
     validate_section_field_refs!(sections, smap)
+    validate_optional_fields!(schema, sections)
   end
+
+  # `optional = true` is a section-only, suffix-only tail marker. It is rejected
+  # on command_fields, structures, and counted_array-layout sections (none carry
+  # a section window), and within an inline section the optional fields must form
+  # a contiguous trailing run (a non-optional field may not follow an optional
+  # one). Conditional-tail fields are never optional: a guarded tail is all-or-
+  # nothing, decoded only when its guard holds.
+  @spec validate_optional_fields!(schema(), [section()]) :: :ok
+  defp validate_optional_fields!(schema, sections) do
+    raise_if_any!(
+      non_section_optionals(schema),
+      "`optional = true` is only allowed on section fields"
+    )
+
+    raise_if_any!(
+      counted_array_optionals(sections),
+      "`optional = true` is not allowed on counted_array sections"
+    )
+
+    raise_if_any!(
+      conditional_tail_optionals(sections),
+      "`optional = true` is not allowed on conditional_tail fields"
+    )
+
+    raise_if_any!(
+      non_suffix_optional_sections(sections),
+      "`optional = true` fields must be a contiguous trailing suffix"
+    )
+  end
+
+  @spec raise_if_any!([String.t()], String.t()) :: :ok
+  defp raise_if_any!([], _message), do: :ok
+
+  defp raise_if_any!(bad, message),
+    do: Mix.raise("#{message} in #{@schema_path}: #{Enum.join(bad, ", ")}")
+
+  @spec non_section_optionals(schema()) :: [String.t()]
+  defp non_section_optionals(schema) do
+    (Map.get(schema, "structures", []) ++ command_fields_list(schema))
+    |> Enum.flat_map(fn entry ->
+      entry
+      |> entry_fields()
+      |> Enum.filter(&field_optional?/1)
+      |> Enum.map(fn field -> "#{entry["name"] || entry["opcode"]}.#{field["name"]}" end)
+    end)
+  end
+
+  @spec counted_array_optionals([section()]) :: [String.t()]
+  defp counted_array_optionals(sections) do
+    sections
+    |> Enum.filter(fn s -> s["layout"] == "counted_array" end)
+    |> Enum.flat_map(&optional_field_labels/1)
+  end
+
+  @spec conditional_tail_optionals([section()]) :: [String.t()]
+  defp conditional_tail_optionals(sections) do
+    Enum.flat_map(sections, fn s ->
+      s
+      |> conditional_tail_fields()
+      |> Enum.filter(&field_optional?/1)
+      |> Enum.map(fn f -> "#{s["opcode"]}/#{s["name"]}.#{f["name"]}" end)
+    end)
+  end
+
+  @spec non_suffix_optional_sections([section()]) :: [String.t()]
+  defp non_suffix_optional_sections(sections) do
+    sections
+    |> Enum.reject(fn s ->
+      entry_custom_layout?(s) or s["layout"] == "counted_array" or
+        s |> Map.get("fields", []) |> optional_suffix?()
+    end)
+    |> Enum.map(fn s -> "#{s["opcode"]}/#{s["name"]}" end)
+  end
+
+  @spec optional_field_labels(section()) :: [String.t()]
+  defp optional_field_labels(s) do
+    s
+    |> entry_fields()
+    |> Enum.filter(&field_optional?/1)
+    |> Enum.map(fn field -> "#{s["opcode"]}/#{s["name"]}.#{field["name"]}" end)
+  end
+
+  # True when no required (non-optional) field follows an optional one.
+  @spec optional_suffix?([map()]) :: boolean()
+  defp optional_suffix?(fields) do
+    fields
+    |> Enum.drop_while(&(not field_optional?(&1)))
+    |> Enum.all?(&field_optional?/1)
+  end
+
+  @spec field_optional?(map()) :: boolean()
+  defp field_optional?(field), do: Map.get(field, "optional", false) == true
 
   @spec validate_section_opcodes!([section()], MapSet.t()) :: :ok
   defp validate_section_opcodes!(sections, opcode_names) do
@@ -1487,10 +1580,12 @@ defmodule Minga.Mix.ProtocolGenerator do
     "u64" => "decodeU64(data, pos)"
   }
 
-  @go_string_decoders %{
-    "string8" => "decodeString8",
-    "string16" => "decodeString16",
-    "string32" => "decodeString32"
+  # Window-bounded string readers, used inside generated record decoders so every
+  # read bounds against the section window end instead of the whole buffer.
+  @go_string_window_decoders %{
+    "string8" => "decodeString8Window",
+    "string16" => "decodeString16Window",
+    "string32" => "decodeString32Window"
   }
 
   @spec fixed_type_size(String.t(), %{String.t() => structure()}) :: non_neg_integer() | nil
@@ -1621,7 +1716,7 @@ defmodule Minga.Mix.ProtocolGenerator do
     size = @primitive_sizes[repr]
 
     [
-      "\t\tif err := decodeRequireLen(data, pos+#{size}, \"#{name}\"); err != nil {\n",
+      "\t\tif err := decodeRequireWindow(windowEnd, pos+#{size}, \"#{name}\"); err != nil {\n",
       "\t\t\treturn #{zero}, offset, err\n",
       "\t\t}\n",
       "\t\t#{local} = #{go_struct_name(enum_name)}(#{@go_primitive_reads[repr]})\n",
@@ -1635,7 +1730,7 @@ defmodule Minga.Mix.ProtocolGenerator do
     size = @primitive_sizes[type]
 
     [
-      "\t\tif err := decodeRequireLen(data, pos+#{size}, \"#{name}\"); err != nil {\n",
+      "\t\tif err := decodeRequireWindow(windowEnd, pos+#{size}, \"#{name}\"); err != nil {\n",
       "\t\t\treturn #{zero}, offset, err\n",
       "\t\t}\n",
       "\t\t#{local} = #{@go_primitive_reads[type]}\n",
@@ -1643,33 +1738,12 @@ defmodule Minga.Mix.ProtocolGenerator do
     ]
   end
 
-  defp go_decode_field_assignment_statement(%{"name" => name, "type" => "string8"}, _smap, zero) do
+  defp go_decode_field_assignment_statement(%{"name" => name, "type" => str}, _smap, zero)
+       when is_map_key(@go_string_window_decoders, str) do
     local = go_local_name(name)
 
     [
-      "\t\t#{local}, pos, err = decodeString8(data, pos)\n",
-      "\t\tif err != nil {\n",
-      "\t\t\treturn #{zero}, offset, err\n",
-      "\t\t}\n"
-    ]
-  end
-
-  defp go_decode_field_assignment_statement(%{"name" => name, "type" => "string16"}, _smap, zero) do
-    local = go_local_name(name)
-
-    [
-      "\t\t#{local}, pos, err = decodeString16(data, pos)\n",
-      "\t\tif err != nil {\n",
-      "\t\t\treturn #{zero}, offset, err\n",
-      "\t\t}\n"
-    ]
-  end
-
-  defp go_decode_field_assignment_statement(%{"name" => name, "type" => "string32"}, _smap, zero) do
-    local = go_local_name(name)
-
-    [
-      "\t\t#{local}, pos, err = decodeString32(data, pos)\n",
+      "\t\t#{local}, pos, err = #{@go_string_window_decoders[str]}(data, pos, windowEnd)\n",
       "\t\tif err != nil {\n",
       "\t\t\treturn #{zero}, offset, err\n",
       "\t\t}\n"
@@ -1684,7 +1758,7 @@ defmodule Minga.Mix.ProtocolGenerator do
     local = go_local_name(name)
 
     [
-      "\t\t#{local}, pos, err = Decode#{go_struct_name(element)}(data, pos)\n",
+      "\t\t#{local}, pos, err = Decode#{go_struct_name(element)}(data, pos, windowEnd)\n",
       "\t\tif err != nil {\n",
       "\t\t\treturn #{zero}, offset, err\n",
       "\t\t}\n"
@@ -1711,14 +1785,14 @@ defmodule Minga.Mix.ProtocolGenerator do
 
         stride ->
           [
-            "\t\tif err := decodeRequireLen(data, pos+#{local}Count*#{stride}, \"#{name}\"); err != nil {\n",
+            "\t\tif err := decodeRequireWindow(windowEnd, pos+#{local}Count*#{stride}, \"#{name}\"); err != nil {\n",
             "\t\t\treturn #{zero}, offset, err\n",
             "\t\t}\n"
           ]
       end
 
     [
-      "\t\tif err := decodeRequireLen(data, pos+#{count_size}, \"#{name} count\"); err != nil {\n",
+      "\t\tif err := decodeRequireWindow(windowEnd, pos+#{count_size}, \"#{name} count\"); err != nil {\n",
       "\t\t\treturn #{zero}, offset, err\n",
       "\t\t}\n",
       "\t\t#{local}Count := int(#{count_read})\n",
@@ -2005,11 +2079,56 @@ defmodule Minga.Mix.ProtocolGenerator do
   @spec go_decode_helpers() :: String.t()
   defp go_decode_helpers do
     """
-    func decodeRequireLen(data []byte, needed int, label string) error {
-    \tif len(data) < needed {
+    // decodeRequireWindow bounds a section read against the section window end
+    // (sectionStart + sectionLen) so a section decoder never reads past its own
+    // section even when the underlying buffer carries more bytes.
+    func decodeRequireWindow(windowEnd, needed int, label string) error {
+    \tif needed > windowEnd {
     \t\treturn fmt.Errorf("short %s", label)
     \t}
     \treturn nil
+    }
+
+    // decodeString8Window/16/32 decode a length-prefixed UTF-8 string but bound
+    // both the length header and the body against the section window end, so a
+    // section decoder never reads past its own section.
+    func decodeString8Window(data []byte, offset, windowEnd int) (string, int, error) {
+    \tif err := decodeRequireWindow(windowEnd, offset+1, "string8 header"); err != nil {
+    \t\treturn "", offset, err
+    \t}
+    \tl := int(data[offset])
+    \toffset++
+    \tif err := decodeRequireWindow(windowEnd, offset+l, "string8 body"); err != nil {
+    \t\treturn "", offset, err
+    \t}
+    \ts := string(data[offset : offset+l])
+    \treturn s, offset + l, nil
+    }
+
+    func decodeString16Window(data []byte, offset, windowEnd int) (string, int, error) {
+    \tif err := decodeRequireWindow(windowEnd, offset+2, "string16 header"); err != nil {
+    \t\treturn "", offset, err
+    \t}
+    \tl := int(decodeU16(data, offset))
+    \toffset += 2
+    \tif err := decodeRequireWindow(windowEnd, offset+l, "string16 body"); err != nil {
+    \t\treturn "", offset, err
+    \t}
+    \ts := string(data[offset : offset+l])
+    \treturn s, offset + l, nil
+    }
+
+    func decodeString32Window(data []byte, offset, windowEnd int) (string, int, error) {
+    \tif err := decodeRequireWindow(windowEnd, offset+4, "string32 header"); err != nil {
+    \t\treturn "", offset, err
+    \t}
+    \tl := int(decodeU32(data, offset))
+    \toffset += 4
+    \tif err := decodeRequireWindow(windowEnd, offset+l, "string32 body"); err != nil {
+    \t\treturn "", offset, err
+    \t}
+    \ts := string(data[offset : offset+l])
+    \treturn s, offset + l, nil
     }
 
     func decodeU16(data []byte, offset int) uint16 {
@@ -2027,45 +2146,6 @@ defmodule Minga.Mix.ProtocolGenerator do
     func decodeU64(data []byte, offset int) uint64 {
     \treturn binary.BigEndian.Uint64(data[offset : offset+8])
     }
-
-    func decodeString8(data []byte, offset int) (string, int, error) {
-    \tif err := decodeRequireLen(data, offset+1, "string8 header"); err != nil {
-    \t\treturn "", offset, err
-    \t}
-    \tl := int(data[offset])
-    \toffset++
-    \tif err := decodeRequireLen(data, offset+l, "string8 body"); err != nil {
-    \t\treturn "", offset, err
-    \t}
-    \ts := string(data[offset : offset+l])
-    \treturn s, offset + l, nil
-    }
-
-    func decodeString16(data []byte, offset int) (string, int, error) {
-    \tif err := decodeRequireLen(data, offset+2, "string16 header"); err != nil {
-    \t\treturn "", offset, err
-    \t}
-    \tl := int(decodeU16(data, offset))
-    \toffset += 2
-    \tif err := decodeRequireLen(data, offset+l, "string16 body"); err != nil {
-    \t\treturn "", offset, err
-    \t}
-    \ts := string(data[offset : offset+l])
-    \treturn s, offset + l, nil
-    }
-
-    func decodeString32(data []byte, offset int) (string, int, error) {
-    \tif err := decodeRequireLen(data, offset+4, "string32 header"); err != nil {
-    \t\treturn "", offset, err
-    \t}
-    \tl := int(decodeU32(data, offset))
-    \toffset += 4
-    \tif err := decodeRequireLen(data, offset+l, "string32 body"); err != nil {
-    \t\treturn "", offset, err
-    \t}
-    \ts := string(data[offset : offset+l])
-    \treturn s, offset + l, nil
-    }
     """
   end
 
@@ -2076,15 +2156,28 @@ defmodule Minga.Mix.ProtocolGenerator do
   end
 
   # Emit a Go decode function for any record (structure, inline section, or
-  # command_fields). The three callers differ only in fn/struct name.
+  # command_fields). Every read bounds against `windowEnd` (sectionStart +
+  # sectionLen). Callers without a real section window (structures, command_fields)
+  # pass `len(data)`, so their bound is unchanged. Trailing fields marked
+  # `optional = true` are read only when the window has room; otherwise they keep
+  # their Go zero value and the tail stops.
   @spec go_record_decoder(String.t(), String.t(), map(), %{String.t() => structure()}) :: iodata()
   defp go_record_decoder(fn_name, struct_name, entry, smap) do
     zero = "#{struct_name}{}"
+    fields = entry["fields"] || []
+    {required, optional} = Enum.split_with(fields, &(not field_optional?(&1)))
+
+    optional_decls =
+      Enum.map(optional, fn field ->
+        "\tvar #{go_local_name(field["name"])} #{go_type(field, smap)}\n"
+      end)
 
     [
-      "func #{fn_name}(data []byte, offset int) (#{struct_name}, int, error) {\n",
+      "func #{fn_name}(data []byte, offset int, windowEnd int) (#{struct_name}, int, error) {\n",
       "\tpos := offset\n",
-      Enum.map(entry["fields"] || [], &go_decode_field_statement(&1, smap, zero)),
+      Enum.map(required, &go_decode_field_statement(&1, smap, zero)),
+      optional_decls,
+      go_optional_cascade(optional, smap, "\t"),
       go_decode_conditional_tail_block(entry, smap, zero),
       "\treturn #{struct_name}{\n",
       Enum.map(entry_fields(entry), fn field ->
@@ -2094,6 +2187,69 @@ defmodule Minga.Mix.ProtocolGenerator do
       "}\n\n"
     ]
   end
+
+  # Optional trailing fields decode in order as a nested if-cascade: each field is
+  # read only when the window has room, and a missing field stops the tail so it
+  # and every field after it keep their pre-declared zero value. A string body
+  # that would exceed the window also stops the tail (the field stays empty),
+  # mirroring the hand-written `if psLen >= 10 { read title; if psLen >= 12+tLen {
+  # read marked_count } }` ladder. Subsequent fields are emitted inside the
+  # deepest success branch so they run only when this field fully decoded.
+  @spec go_optional_cascade([map()], %{String.t() => structure()}, String.t()) :: iodata()
+  defp go_optional_cascade([], _smap, _indent), do: []
+
+  defp go_optional_cascade([%{"type" => str} = field | rest], smap, indent)
+       when str in ["string8", "string16", "string32"] do
+    local = go_local_name(field["name"])
+    {count_read, count_size} = go_string_count_read(str)
+    inner = indent <> "\t"
+    inner2 = inner <> "\t"
+
+    [
+      "#{indent}if pos+#{count_size} <= windowEnd {\n",
+      "#{inner}#{local}Len := int(#{count_read})\n",
+      "#{inner}if pos+#{count_size}+#{local}Len <= windowEnd {\n",
+      "#{inner2}#{local} = string(data[pos+#{count_size} : pos+#{count_size}+#{local}Len])\n",
+      "#{inner2}pos += #{count_size} + #{local}Len\n",
+      go_optional_cascade(rest, smap, inner2),
+      "#{inner}}\n",
+      "#{indent}}\n"
+    ]
+  end
+
+  defp go_optional_cascade([%{"type" => "enum", "repr" => repr} = field | rest], smap, indent) do
+    local = go_local_name(field["name"])
+    size = @primitive_sizes[repr]
+    inner = indent <> "\t"
+
+    [
+      "#{indent}if pos+#{size} <= windowEnd {\n",
+      "#{inner}#{local} = #{go_struct_name(field["enum"])}(#{@go_primitive_reads[repr]})\n",
+      go_pos_advance(size, inner),
+      go_optional_cascade(rest, smap, inner),
+      "#{indent}}\n"
+    ]
+  end
+
+  defp go_optional_cascade([%{"type" => type} = field | rest], smap, indent)
+       when is_map_key(@go_primitive_reads, type) do
+    local = go_local_name(field["name"])
+    size = @primitive_sizes[type]
+    inner = indent <> "\t"
+
+    [
+      "#{indent}if pos+#{size} <= windowEnd {\n",
+      "#{inner}#{local} = #{@go_primitive_reads[type]}\n",
+      go_pos_advance(size, inner),
+      go_optional_cascade(rest, smap, inner),
+      "#{indent}}\n"
+    ]
+  end
+
+  @spec go_string_count_read(String.t()) :: {String.t(), non_neg_integer()}
+  defp go_string_count_read("string8"), do: {"data[pos]", 1}
+  defp go_string_count_read("string16"), do: {"decodeU16(data, pos)", 2}
+  defp go_string_count_read("string32"), do: {"decodeU32(data, pos)", 4}
 
   @spec go_decode_field_statement(map(), %{String.t() => structure()}, String.t()) :: iodata()
   defp go_decode_field_statement(
@@ -2105,7 +2261,7 @@ defmodule Minga.Mix.ProtocolGenerator do
     size = @primitive_sizes[repr]
 
     [
-      "\tif err := decodeRequireLen(data, pos+#{size}, \"#{name}\"); err != nil {\n",
+      "\tif err := decodeRequireWindow(windowEnd, pos+#{size}, \"#{name}\"); err != nil {\n",
       "\t\treturn #{zero}, offset, err\n",
       "\t}\n",
       "\t#{local} := #{go_struct_name(enum_name)}(#{@go_primitive_reads[repr]})\n",
@@ -2119,7 +2275,7 @@ defmodule Minga.Mix.ProtocolGenerator do
     size = @primitive_sizes[type]
 
     [
-      "\tif err := decodeRequireLen(data, pos+#{size}, \"#{name}\"); err != nil {\n",
+      "\tif err := decodeRequireWindow(windowEnd, pos+#{size}, \"#{name}\"); err != nil {\n",
       "\t\treturn #{zero}, offset, err\n",
       "\t}\n",
       "\t#{local} := #{@go_primitive_reads[type]}\n",
@@ -2127,33 +2283,12 @@ defmodule Minga.Mix.ProtocolGenerator do
     ]
   end
 
-  defp go_decode_field_statement(%{"name" => name, "type" => "string8"}, _smap, zero) do
+  defp go_decode_field_statement(%{"name" => name, "type" => str}, _smap, zero)
+       when is_map_key(@go_string_window_decoders, str) do
     local = go_local_name(name)
 
     [
-      "\t#{local}, pos, err := decodeString8(data, pos)\n",
-      "\tif err != nil {\n",
-      "\t\treturn #{zero}, offset, err\n",
-      "\t}\n"
-    ]
-  end
-
-  defp go_decode_field_statement(%{"name" => name, "type" => "string16"}, _smap, zero) do
-    local = go_local_name(name)
-
-    [
-      "\t#{local}, pos, err := decodeString16(data, pos)\n",
-      "\tif err != nil {\n",
-      "\t\treturn #{zero}, offset, err\n",
-      "\t}\n"
-    ]
-  end
-
-  defp go_decode_field_statement(%{"name" => name, "type" => "string32"}, _smap, zero) do
-    local = go_local_name(name)
-
-    [
-      "\t#{local}, pos, err := decodeString32(data, pos)\n",
+      "\t#{local}, pos, err := #{@go_string_window_decoders[str]}(data, pos, windowEnd)\n",
       "\tif err != nil {\n",
       "\t\treturn #{zero}, offset, err\n",
       "\t}\n"
@@ -2168,7 +2303,7 @@ defmodule Minga.Mix.ProtocolGenerator do
     local = go_local_name(name)
 
     [
-      "\t#{local}, pos, err := Decode#{go_struct_name(element)}(data, pos)\n",
+      "\t#{local}, pos, err := Decode#{go_struct_name(element)}(data, pos, windowEnd)\n",
       "\tif err != nil {\n",
       "\t\treturn #{zero}, offset, err\n",
       "\t}\n"
@@ -2195,14 +2330,14 @@ defmodule Minga.Mix.ProtocolGenerator do
 
         stride ->
           [
-            "\tif err := decodeRequireLen(data, pos+#{local}Count*#{stride}, \"#{name}\"); err != nil {\n",
+            "\tif err := decodeRequireWindow(windowEnd, pos+#{local}Count*#{stride}, \"#{name}\"); err != nil {\n",
             "\t\treturn #{zero}, offset, err\n",
             "\t}\n"
           ]
       end
 
     [
-      "\tif err := decodeRequireLen(data, pos+#{count_size}, \"#{name} count\"); err != nil {\n",
+      "\tif err := decodeRequireWindow(windowEnd, pos+#{count_size}, \"#{name} count\"); err != nil {\n",
       "\t\treturn #{zero}, offset, err\n",
       "\t}\n",
       "\t#{local}Count := int(#{count_read})\n",
@@ -2216,16 +2351,27 @@ defmodule Minga.Mix.ProtocolGenerator do
   end
 
   # Decode one counted_array element at `pos`, append it onto `vec`, advance
-  # `pos`. Struct elements emit the same `(item, nextPos, err)` form as before,
-  # so existing struct arrays regenerate byte-for-byte.
+  # `pos`. Reads bound against `windowEnd`: struct elements thread it down, string
+  # elements use the window-aware reader, primitives are stride-checked by the
+  # caller's window guard.
   @spec go_decode_array_element(String.t(), String.t(), String.t(), String.t()) :: iodata()
   defp go_decode_array_element(element, vec, indent, zero) do
     case element_field(element) do
       %{"type" => "struct", "element" => el} ->
-        go_decode_array_element_via("Decode#{go_struct_name(el)}(data, pos)", vec, indent, zero)
+        go_decode_array_element_via(
+          "Decode#{go_struct_name(el)}(data, pos, windowEnd)",
+          vec,
+          indent,
+          zero
+        )
 
-      %{"type" => str} when is_map_key(@go_string_decoders, str) ->
-        go_decode_array_element_via("#{@go_string_decoders[str]}(data, pos)", vec, indent, zero)
+      %{"type" => str} when is_map_key(@go_string_window_decoders, str) ->
+        go_decode_array_element_via(
+          "#{@go_string_window_decoders[str]}(data, pos, windowEnd)",
+          vec,
+          indent,
+          zero
+        )
 
       %{"type" => prim} ->
         [
@@ -2299,16 +2445,16 @@ defmodule Minga.Mix.ProtocolGenerator do
 
         stride ->
           [
-            "\tif err := decodeRequireLen(data, pos+count*#{stride}, \"#{section["name"]}\"); err != nil {\n",
+            "\tif err := decodeRequireWindow(windowEnd, pos+count*#{stride}, \"#{section["name"]}\"); err != nil {\n",
             "\t\treturn nil, offset, err\n",
             "\t}\n"
           ]
       end
 
     [
-      "func #{fn_name}(data []byte, offset int) ([]#{element_type}, int, error) {\n",
+      "func #{fn_name}(data []byte, offset int, windowEnd int) ([]#{element_type}, int, error) {\n",
       "\tpos := offset\n",
-      "\tif err := decodeRequireLen(data, pos+#{count_size}, \"#{section["name"]} count\"); err != nil {\n",
+      "\tif err := decodeRequireWindow(windowEnd, pos+#{count_size}, \"#{section["name"]} count\"); err != nil {\n",
       "\t\treturn nil, offset, err\n",
       "\t}\n",
       "\tcount := int(#{count_read})\n",
@@ -2525,7 +2671,7 @@ defmodule Minga.Mix.ProtocolGenerator do
       Enum.map(units, fn %{name: name, fn: fn_name} ->
         [
           "\tcase \"#{name}\":\n",
-          "\t\tv, n, err := #{fn_name}(payload, 0)\n",
+          "\t\tv, n, err := #{fn_name}(payload, 0, len(payload))\n",
           "\t\treturn v, n, err\n"
         ]
       end),
@@ -2579,10 +2725,11 @@ defmodule Minga.Mix.ProtocolGenerator do
     "u64" => "decodeU64(data, pos)"
   }
 
-  @swift_string_decoders %{
-    "string8" => "decodeString8",
-    "string16" => "decodeString16",
-    "string32" => "decodeString32"
+  # Window-bounded Swift string readers, mirroring @go_string_window_decoders.
+  @swift_string_window_decoders %{
+    "string8" => "decodeString8Window",
+    "string16" => "decodeString16Window",
+    "string32" => "decodeString32Window"
   }
 
   @spec swift_semantic_decode_file(schema()) :: String.t()
@@ -2653,9 +2800,12 @@ defmodule Minga.Mix.ProtocolGenerator do
   @spec swift_decode_helpers() :: String.t()
   defp swift_decode_helpers do
     """
+        // requireWindow bounds a section read against the section window end
+        // (sectionStart + sectionLen) so a section decoder never reads past its
+        // own section even when the buffer carries more bytes.
         @inline(__always)
-        static func requireLen(_ data: Data, _ needed: Int, _ label: String) throws {
-            if data.count < needed { throw DecodeError.short(label) }
+        static func requireWindow(_ windowEnd: Int, _ needed: Int, _ label: String) throws {
+            if needed > windowEnd { throw DecodeError.short(label) }
         }
 
         @inline(__always)
@@ -2683,29 +2833,32 @@ defmodule Minga.Mix.ProtocolGenerator do
             return hi | lo
         }
 
-        static func decodeString8(_ data: Data, _ offset: Int) throws -> (String, Int) {
-            try requireLen(data, offset + 1, "string8 header")
+        // Window-bounded string readers: bound both the length header and the
+        // body against the section window end so a section decoder never reads
+        // past its own section.
+        static func decodeString8Window(_ data: Data, _ offset: Int, _ windowEnd: Int) throws -> (String, Int) {
+            try requireWindow(windowEnd, offset + 1, "string8 header")
             let l = Int(data[offset])
             let body = offset + 1
-            try requireLen(data, body + l, "string8 body")
+            try requireWindow(windowEnd, body + l, "string8 body")
             let s = String(data: data[body..<(body + l)], encoding: .utf8) ?? ""
             return (s, body + l)
         }
 
-        static func decodeString16(_ data: Data, _ offset: Int) throws -> (String, Int) {
-            try requireLen(data, offset + 2, "string16 header")
+        static func decodeString16Window(_ data: Data, _ offset: Int, _ windowEnd: Int) throws -> (String, Int) {
+            try requireWindow(windowEnd, offset + 2, "string16 header")
             let l = Int(decodeU16(data, offset))
             let body = offset + 2
-            try requireLen(data, body + l, "string16 body")
+            try requireWindow(windowEnd, body + l, "string16 body")
             let s = String(data: data[body..<(body + l)], encoding: .utf8) ?? ""
             return (s, body + l)
         }
 
-        static func decodeString32(_ data: Data, _ offset: Int) throws -> (String, Int) {
-            try requireLen(data, offset + 4, "string32 header")
+        static func decodeString32Window(_ data: Data, _ offset: Int, _ windowEnd: Int) throws -> (String, Int) {
+            try requireWindow(windowEnd, offset + 4, "string32 header")
             let l = Int(decodeU32(data, offset))
             let body = offset + 4
-            try requireLen(data, body + l, "string32 body")
+            try requireWindow(windowEnd, body + l, "string32 body")
             let s = String(data: data[body..<(body + l)], encoding: .utf8) ?? ""
             return (s, body + l)
         }
@@ -2809,16 +2962,27 @@ defmodule Minga.Mix.ProtocolGenerator do
   end
 
   # Emit a Swift decode function for any record (structure, inline section, or
-  # command_fields). Mirrors go_record_decoder: name a `(Struct, Int)` tuple
-  # decoder, decode each base field, then the optional conditional tail, then
-  # build the struct.
+  # command_fields). Mirrors go_record_decoder: take an explicit window end, bound
+  # every read against it, decode required fields, then the optional-suffix
+  # cascade and the conditional tail, then build the struct. Callers without a
+  # real section window pass `data.count`, so their bound is unchanged.
   @spec swift_record_decoder(String.t(), String.t(), map(), %{String.t() => structure()}) ::
           iodata()
   defp swift_record_decoder(fn_name, struct_name, entry, smap) do
+    fields = entry["fields"] || []
+    {required, optional} = Enum.split_with(fields, &(not field_optional?(&1)))
+
+    optional_decls =
+      Enum.map(optional, fn field ->
+        "        var #{swift_local_name(field["name"])}: #{swift_type(field, smap)} = #{swift_zero_value(field, smap)}\n"
+      end)
+
     [
-      "    static func #{fn_name}(_ data: Data, _ offset: Int) throws -> (#{struct_name}, Int) {\n",
+      "    static func #{fn_name}(_ data: Data, _ offset: Int, _ windowEnd: Int) throws -> (#{struct_name}, Int) {\n",
       "        var pos = offset\n",
-      Enum.map(entry["fields"] || [], &swift_decode_field_statement(&1, smap)),
+      Enum.map(required, &swift_decode_field_statement(&1, smap)),
+      optional_decls,
+      swift_optional_cascade(optional, smap, "        "),
       swift_decode_conditional_tail_block(entry, smap),
       "        return (#{struct_name}(\n",
       swift_struct_initializer_args(entry_fields(entry)),
@@ -2826,6 +2990,66 @@ defmodule Minga.Mix.ProtocolGenerator do
       "    }\n\n"
     ]
   end
+
+  # Mirror of go_optional_cascade: nested if-room blocks that read each optional
+  # field only when the window has space, stopping the tail on the first absent
+  # field (its and later fields keep their pre-declared zero value). A string body
+  # that would exceed the window also stops the tail.
+  @spec swift_optional_cascade([map()], %{String.t() => structure()}, String.t()) :: iodata()
+  defp swift_optional_cascade([], _smap, _indent), do: []
+
+  defp swift_optional_cascade([%{"type" => str} = field | rest], smap, indent)
+       when str in ["string8", "string16", "string32"] do
+    local = swift_local_name(field["name"])
+    {count_read, count_size} = swift_string_count_read(str)
+    inner = indent <> "    "
+    inner2 = inner <> "    "
+
+    [
+      "#{indent}if pos + #{count_size} <= windowEnd {\n",
+      "#{inner}let #{local}Len = Int(#{count_read})\n",
+      "#{inner}if pos + #{count_size} + #{local}Len <= windowEnd {\n",
+      "#{inner2}#{local} = String(data: data[(pos + #{count_size})..<(pos + #{count_size} + #{local}Len)], encoding: .utf8) ?? \"\"\n",
+      "#{inner2}pos += #{count_size} + #{local}Len\n",
+      swift_optional_cascade(rest, smap, inner2),
+      "#{inner}}\n",
+      "#{indent}}\n"
+    ]
+  end
+
+  defp swift_optional_cascade([%{"type" => "enum", "repr" => repr} = field | rest], smap, indent) do
+    local = swift_local_name(field["name"])
+    size = @primitive_sizes[repr]
+    inner = indent <> "    "
+
+    [
+      "#{indent}if pos + #{size} <= windowEnd {\n",
+      "#{inner}#{local} = #{swift_struct_name(field["enum"])}.decode(#{@swift_primitive_reads[repr]})\n",
+      "#{inner}pos += #{size}\n",
+      swift_optional_cascade(rest, smap, inner),
+      "#{indent}}\n"
+    ]
+  end
+
+  defp swift_optional_cascade([%{"type" => type} = field | rest], smap, indent)
+       when is_map_key(@swift_primitive_reads, type) do
+    local = swift_local_name(field["name"])
+    size = @primitive_sizes[type]
+    inner = indent <> "    "
+
+    [
+      "#{indent}if pos + #{size} <= windowEnd {\n",
+      "#{inner}#{local} = #{@swift_primitive_reads[type]}\n",
+      "#{inner}pos += #{size}\n",
+      swift_optional_cascade(rest, smap, inner),
+      "#{indent}}\n"
+    ]
+  end
+
+  @spec swift_string_count_read(String.t()) :: {String.t(), non_neg_integer()}
+  defp swift_string_count_read("string8"), do: {"data[pos]", 1}
+  defp swift_string_count_read("string16"), do: {"decodeU16(data, pos)", 2}
+  defp swift_string_count_read("string32"), do: {"decodeU32(data, pos)", 4}
 
   @spec swift_struct_initializer_args([map()]) :: iodata()
   defp swift_struct_initializer_args(fields) do
@@ -2884,7 +3108,7 @@ defmodule Minga.Mix.ProtocolGenerator do
     bind = swift_bind_keyword(mode)
 
     [
-      "#{ind}try requireLen(data, pos + #{size}, \"#{name}\")\n",
+      "#{ind}try requireWindow(windowEnd, pos + #{size}, \"#{name}\")\n",
       "#{ind}#{bind}#{local} = #{swift_struct_name(enum_name)}.decode(#{@swift_primitive_reads[repr]})\n",
       "#{ind}pos += #{size}\n"
     ]
@@ -2897,27 +3121,27 @@ defmodule Minga.Mix.ProtocolGenerator do
     bind = swift_bind_keyword(mode)
 
     [
-      "#{ind}try requireLen(data, pos + #{size}, \"#{name}\")\n",
+      "#{ind}try requireWindow(windowEnd, pos + #{size}, \"#{name}\")\n",
       "#{ind}#{bind}#{local} = #{@swift_primitive_reads[type]}\n",
       "#{ind}pos += #{size}\n"
     ]
   end
 
   defp swift_decode_field(%{"name" => name, "type" => type}, _smap, mode, ind)
-       when is_map_key(@swift_string_decoders, type) do
+       when is_map_key(@swift_string_window_decoders, type) do
     local = swift_local_name(name)
-    decoder = @swift_string_decoders[type]
+    decoder = @swift_string_window_decoders[type]
 
     case mode do
       :let ->
         [
-          "#{ind}let (#{local}, #{local}Pos) = try #{decoder}(data, pos)\n",
+          "#{ind}let (#{local}, #{local}Pos) = try #{decoder}(data, pos, windowEnd)\n",
           "#{ind}pos = #{local}Pos\n"
         ]
 
       :assign ->
         [
-          "#{ind}let (#{local}Val, #{local}Pos) = try #{decoder}(data, pos)\n",
+          "#{ind}let (#{local}Val, #{local}Pos) = try #{decoder}(data, pos, windowEnd)\n",
           "#{ind}#{local} = #{local}Val\n",
           "#{ind}pos = #{local}Pos\n"
         ]
@@ -2936,13 +3160,13 @@ defmodule Minga.Mix.ProtocolGenerator do
     case mode do
       :let ->
         [
-          "#{ind}let (#{local}, #{local}Pos) = try #{decoder}(data, pos)\n",
+          "#{ind}let (#{local}, #{local}Pos) = try #{decoder}(data, pos, windowEnd)\n",
           "#{ind}pos = #{local}Pos\n"
         ]
 
       :assign ->
         [
-          "#{ind}let (#{local}Val, #{local}Pos) = try #{decoder}(data, pos)\n",
+          "#{ind}let (#{local}Val, #{local}Pos) = try #{decoder}(data, pos, windowEnd)\n",
           "#{ind}#{local} = #{local}Val\n",
           "#{ind}pos = #{local}Pos\n"
         ]
@@ -2970,11 +3194,11 @@ defmodule Minga.Mix.ProtocolGenerator do
           []
 
         stride ->
-          ["#{ind}try requireLen(data, pos + #{local}Count * #{stride}, \"#{name}\")\n"]
+          ["#{ind}try requireWindow(windowEnd, pos + #{local}Count * #{stride}, \"#{name}\")\n"]
       end
 
     [
-      "#{ind}try requireLen(data, pos + #{count_size}, \"#{name} count\")\n",
+      "#{ind}try requireWindow(windowEnd, pos + #{count_size}, \"#{name} count\")\n",
       "#{ind}let #{local}Count = Int(#{count_read})\n",
       "#{ind}pos += #{count_size}\n",
       stride_check,
@@ -2987,19 +3211,27 @@ defmodule Minga.Mix.ProtocolGenerator do
   end
 
   # Decode one counted_array element at `pos`, append it onto `vec`, advance `pos`.
-  # Mirrors go_decode_array_element.
+  # Mirrors go_decode_array_element: reads bound against `windowEnd`.
   @spec swift_decode_array_element(String.t(), String.t(), String.t()) :: iodata()
   defp swift_decode_array_element(element, vec, ind) do
     case element_field(element) do
       %{"type" => "struct", "element" => el} ->
-        swift_decode_array_element_via("decode#{swift_struct_name(el)}(data, pos)", vec, ind)
+        swift_decode_array_element_via(
+          "decode#{swift_struct_name(el)}(data, pos, windowEnd)",
+          vec,
+          ind
+        )
 
-      %{"type" => str} when is_map_key(@swift_string_decoders, str) ->
-        swift_decode_array_element_via("#{@swift_string_decoders[str]}(data, pos)", vec, ind)
+      %{"type" => str} when is_map_key(@swift_string_window_decoders, str) ->
+        swift_decode_array_element_via(
+          "#{@swift_string_window_decoders[str]}(data, pos, windowEnd)",
+          vec,
+          ind
+        )
 
       %{"type" => prim} ->
         [
-          "#{ind}try requireLen(data, pos + #{@primitive_sizes[prim]}, \"element\")\n",
+          "#{ind}try requireWindow(windowEnd, pos + #{@primitive_sizes[prim]}, \"element\")\n",
           "#{ind}#{vec}.append(#{@swift_primitive_reads[prim]})\n",
           "#{ind}pos += #{@primitive_sizes[prim]}\n"
         ]
@@ -3065,13 +3297,15 @@ defmodule Minga.Mix.ProtocolGenerator do
           []
 
         stride ->
-          ["        try requireLen(data, pos + count * #{stride}, \"#{section["name"]}\")\n"]
+          [
+            "        try requireWindow(windowEnd, pos + count * #{stride}, \"#{section["name"]}\")\n"
+          ]
       end
 
     [
-      "    static func #{fn_name}(_ data: Data, _ offset: Int) throws -> ([#{element_type}], Int) {\n",
+      "    static func #{fn_name}(_ data: Data, _ offset: Int, _ windowEnd: Int) throws -> ([#{element_type}], Int) {\n",
       "        var pos = offset\n",
-      "        try requireLen(data, pos + #{count_size}, \"#{section["name"]} count\")\n",
+      "        try requireWindow(windowEnd, pos + #{count_size}, \"#{section["name"]} count\")\n",
       "        let count = Int(#{count_read})\n",
       "        pos += #{count_size}\n",
       stride_check,

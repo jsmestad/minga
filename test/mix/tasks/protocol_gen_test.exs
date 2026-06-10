@@ -195,6 +195,65 @@ defmodule Mix.Tasks.Protocol.GenTest do
     end)
   end
 
+  test "rejects optional on a command_fields field" do
+    with_fixture_dir(fn dir ->
+      mutate_schema(dir, fn schema ->
+        String.replace(
+          schema,
+          "{ name = \"color_count\", type = \"u8\" }",
+          "{ name = \"color_count\", type = \"u8\", optional = true }",
+          global: false
+        )
+      end)
+
+      File.cd!(dir, fn ->
+        assert_raise Mix.Error, ~r/only allowed on section fields/, fn ->
+          Mix.Tasks.Protocol.Gen.run([])
+        end
+      end)
+    end)
+  end
+
+  test "rejects optional fields that are not a trailing suffix" do
+    with_fixture_dir(fn dir ->
+      mutate_schema(dir, fn schema ->
+        # `title` stays optional but the trailing `marked_count` becomes required:
+        # an optional field now precedes a required one, which must be rejected.
+        String.replace(
+          schema,
+          "{ name = \"marked_count\", type = \"u16\", optional = true }",
+          "{ name = \"marked_count\", type = \"u16\" }",
+          global: false
+        )
+      end)
+
+      File.cd!(dir, fn ->
+        assert_raise Mix.Error, ~r/must be a contiguous trailing suffix/, fn ->
+          Mix.Tasks.Protocol.Gen.run([])
+        end
+      end)
+    end)
+  end
+
+  test "rejects optional on a counted_array section field" do
+    with_fixture_dir(fn dir ->
+      mutate_schema(dir, fn schema ->
+        String.replace(
+          schema,
+          "element = \"picker_item\"",
+          "element = \"picker_item\"\nfields = [{ name = \"trailing\", type = \"u8\", optional = true }]",
+          global: false
+        )
+      end)
+
+      File.cd!(dir, fn ->
+        assert_raise Mix.Error, ~r/not allowed on counted_array sections/, fn ->
+          Mix.Tasks.Protocol.Gen.run([])
+        end
+      end)
+    end)
+  end
+
   @spec with_fixture_dir((Path.t() -> any())) :: any()
   defp with_fixture_dir(fun) do
     dir = Path.join(System.tmp_dir!(), "protocol-gen-#{System.unique_integer([:positive])}")

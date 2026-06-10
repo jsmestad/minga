@@ -7,11 +7,56 @@ import (
 	"fmt"
 )
 
-func decodeRequireLen(data []byte, needed int, label string) error {
-	if len(data) < needed {
+// decodeRequireWindow bounds a section read against the section window end
+// (sectionStart + sectionLen) so a section decoder never reads past its own
+// section even when the underlying buffer carries more bytes.
+func decodeRequireWindow(windowEnd, needed int, label string) error {
+	if needed > windowEnd {
 		return fmt.Errorf("short %s", label)
 	}
 	return nil
+}
+
+// decodeString8Window/16/32 decode a length-prefixed UTF-8 string but bound
+// both the length header and the body against the section window end, so a
+// section decoder never reads past its own section.
+func decodeString8Window(data []byte, offset, windowEnd int) (string, int, error) {
+	if err := decodeRequireWindow(windowEnd, offset+1, "string8 header"); err != nil {
+		return "", offset, err
+	}
+	l := int(data[offset])
+	offset++
+	if err := decodeRequireWindow(windowEnd, offset+l, "string8 body"); err != nil {
+		return "", offset, err
+	}
+	s := string(data[offset : offset+l])
+	return s, offset + l, nil
+}
+
+func decodeString16Window(data []byte, offset, windowEnd int) (string, int, error) {
+	if err := decodeRequireWindow(windowEnd, offset+2, "string16 header"); err != nil {
+		return "", offset, err
+	}
+	l := int(decodeU16(data, offset))
+	offset += 2
+	if err := decodeRequireWindow(windowEnd, offset+l, "string16 body"); err != nil {
+		return "", offset, err
+	}
+	s := string(data[offset : offset+l])
+	return s, offset + l, nil
+}
+
+func decodeString32Window(data []byte, offset, windowEnd int) (string, int, error) {
+	if err := decodeRequireWindow(windowEnd, offset+4, "string32 header"); err != nil {
+		return "", offset, err
+	}
+	l := int(decodeU32(data, offset))
+	offset += 4
+	if err := decodeRequireWindow(windowEnd, offset+l, "string32 body"); err != nil {
+		return "", offset, err
+	}
+	s := string(data[offset : offset+l])
+	return s, offset + l, nil
 }
 
 func decodeU16(data []byte, offset int) uint16 {
@@ -30,63 +75,24 @@ func decodeU64(data []byte, offset int) uint64 {
 	return binary.BigEndian.Uint64(data[offset : offset+8])
 }
 
-func decodeString8(data []byte, offset int) (string, int, error) {
-	if err := decodeRequireLen(data, offset+1, "string8 header"); err != nil {
-		return "", offset, err
-	}
-	l := int(data[offset])
-	offset++
-	if err := decodeRequireLen(data, offset+l, "string8 body"); err != nil {
-		return "", offset, err
-	}
-	s := string(data[offset : offset+l])
-	return s, offset + l, nil
-}
-
-func decodeString16(data []byte, offset int) (string, int, error) {
-	if err := decodeRequireLen(data, offset+2, "string16 header"); err != nil {
-		return "", offset, err
-	}
-	l := int(decodeU16(data, offset))
-	offset += 2
-	if err := decodeRequireLen(data, offset+l, "string16 body"); err != nil {
-		return "", offset, err
-	}
-	s := string(data[offset : offset+l])
-	return s, offset + l, nil
-}
-
-func decodeString32(data []byte, offset int) (string, int, error) {
-	if err := decodeRequireLen(data, offset+4, "string32 header"); err != nil {
-		return "", offset, err
-	}
-	l := int(decodeU32(data, offset))
-	offset += 4
-	if err := decodeRequireLen(data, offset+l, "string32 body"); err != nil {
-		return "", offset, err
-	}
-	s := string(data[offset : offset+l])
-	return s, offset + l, nil
-}
-
-func DecodeRect(data []byte, offset int) (Rect, int, error) {
+func DecodeRect(data []byte, offset int, windowEnd int) (Rect, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+2, "row"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "row"); err != nil {
 		return Rect{}, offset, err
 	}
 	row := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+2, "col"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "col"); err != nil {
 		return Rect{}, offset, err
 	}
 	col := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+2, "width"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "width"); err != nil {
 		return Rect{}, offset, err
 	}
 	width := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+2, "height"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "height"); err != nil {
 		return Rect{}, offset, err
 	}
 	height := decodeU16(data, pos)
@@ -99,39 +105,39 @@ func DecodeRect(data []byte, offset int) (Rect, int, error) {
 	}, pos, nil
 }
 
-func DecodeSpan(data []byte, offset int) (Span, int, error) {
+func DecodeSpan(data []byte, offset int, windowEnd int) (Span, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+2, "start_col"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "start_col"); err != nil {
 		return Span{}, offset, err
 	}
 	startCol := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+2, "end_col"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "end_col"); err != nil {
 		return Span{}, offset, err
 	}
 	endCol := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+3, "fg"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+3, "fg"); err != nil {
 		return Span{}, offset, err
 	}
 	fg := decodeU24(data, pos)
 	pos += 3
-	if err := decodeRequireLen(data, pos+3, "bg"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+3, "bg"); err != nil {
 		return Span{}, offset, err
 	}
 	bg := decodeU24(data, pos)
 	pos += 3
-	if err := decodeRequireLen(data, pos+1, "attrs"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "attrs"); err != nil {
 		return Span{}, offset, err
 	}
 	attrs := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+1, "font_weight"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "font_weight"); err != nil {
 		return Span{}, offset, err
 	}
 	fontWeight := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+1, "font_id"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "font_id"); err != nil {
 		return Span{}, offset, err
 	}
 	fontID := data[pos]
@@ -147,43 +153,43 @@ func DecodeSpan(data []byte, offset int) (Span, int, error) {
 	}, pos, nil
 }
 
-func DecodeRow(data []byte, offset int) (Row, int, error) {
+func DecodeRow(data []byte, offset int, windowEnd int) (Row, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+1, "row_type"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "row_type"); err != nil {
 		return Row{}, offset, err
 	}
 	rowType := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+8, "row_id"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+8, "row_id"); err != nil {
 		return Row{}, offset, err
 	}
 	rowID := decodeU64(data, pos)
 	pos += 8
-	if err := decodeRequireLen(data, pos+4, "buf_line"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+4, "buf_line"); err != nil {
 		return Row{}, offset, err
 	}
 	bufLine := decodeU32(data, pos)
 	pos += 4
-	if err := decodeRequireLen(data, pos+4, "content_hash"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+4, "content_hash"); err != nil {
 		return Row{}, offset, err
 	}
 	contentHash := decodeU32(data, pos)
 	pos += 4
-	text, pos, err := decodeString32(data, pos)
+	text, pos, err := decodeString32Window(data, pos, windowEnd)
 	if err != nil {
 		return Row{}, offset, err
 	}
-	if err := decodeRequireLen(data, pos+2, "spans count"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "spans count"); err != nil {
 		return Row{}, offset, err
 	}
 	spansCount := int(decodeU16(data, pos))
 	pos += 2
-	if err := decodeRequireLen(data, pos+spansCount*13, "spans"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+spansCount*13, "spans"); err != nil {
 		return Row{}, offset, err
 	}
 	spans := make([]Span, 0, spansCount)
 	for i := 0; i < spansCount; i++ {
-		item, nextPos, err := DecodeSpan(data, pos)
+		item, nextPos, err := DecodeSpan(data, pos, windowEnd)
 		if err != nil {
 			return Row{}, offset, err
 		}
@@ -200,24 +206,24 @@ func DecodeRow(data []byte, offset int) (Row, int, error) {
 	}, pos, nil
 }
 
-func DecodeSearchMatch(data []byte, offset int) (SearchMatch, int, error) {
+func DecodeSearchMatch(data []byte, offset int, windowEnd int) (SearchMatch, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+2, "row"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "row"); err != nil {
 		return SearchMatch{}, offset, err
 	}
 	row := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+2, "start_col"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "start_col"); err != nil {
 		return SearchMatch{}, offset, err
 	}
 	startCol := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+2, "end_col"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "end_col"); err != nil {
 		return SearchMatch{}, offset, err
 	}
 	endCol := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+1, "is_current"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "is_current"); err != nil {
 		return SearchMatch{}, offset, err
 	}
 	isCurrent := data[pos]
@@ -230,29 +236,29 @@ func DecodeSearchMatch(data []byte, offset int) (SearchMatch, int, error) {
 	}, pos, nil
 }
 
-func DecodeDiagnosticRange(data []byte, offset int) (DiagnosticRange, int, error) {
+func DecodeDiagnosticRange(data []byte, offset int, windowEnd int) (DiagnosticRange, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+2, "start_row"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "start_row"); err != nil {
 		return DiagnosticRange{}, offset, err
 	}
 	startRow := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+2, "start_col"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "start_col"); err != nil {
 		return DiagnosticRange{}, offset, err
 	}
 	startCol := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+2, "end_row"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "end_row"); err != nil {
 		return DiagnosticRange{}, offset, err
 	}
 	endRow := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+2, "end_col"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "end_col"); err != nil {
 		return DiagnosticRange{}, offset, err
 	}
 	endCol := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+1, "severity"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "severity"); err != nil {
 		return DiagnosticRange{}, offset, err
 	}
 	severity := data[pos]
@@ -266,29 +272,29 @@ func DecodeDiagnosticRange(data []byte, offset int) (DiagnosticRange, int, error
 	}, pos, nil
 }
 
-func DecodeDocumentHighlight(data []byte, offset int) (DocumentHighlight, int, error) {
+func DecodeDocumentHighlight(data []byte, offset int, windowEnd int) (DocumentHighlight, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+2, "start_row"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "start_row"); err != nil {
 		return DocumentHighlight{}, offset, err
 	}
 	startRow := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+2, "start_col"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "start_col"); err != nil {
 		return DocumentHighlight{}, offset, err
 	}
 	startCol := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+2, "end_row"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "end_row"); err != nil {
 		return DocumentHighlight{}, offset, err
 	}
 	endRow := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+2, "end_col"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "end_col"); err != nil {
 		return DocumentHighlight{}, offset, err
 	}
 	endCol := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+1, "kind"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "kind"); err != nil {
 		return DocumentHighlight{}, offset, err
 	}
 	kind := data[pos]
@@ -302,29 +308,29 @@ func DecodeDocumentHighlight(data []byte, offset int) (DocumentHighlight, int, e
 	}, pos, nil
 }
 
-func DecodeAnnotation(data []byte, offset int) (Annotation, int, error) {
+func DecodeAnnotation(data []byte, offset int, windowEnd int) (Annotation, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+2, "row"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "row"); err != nil {
 		return Annotation{}, offset, err
 	}
 	row := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+1, "kind"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "kind"); err != nil {
 		return Annotation{}, offset, err
 	}
 	kind := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+3, "fg"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+3, "fg"); err != nil {
 		return Annotation{}, offset, err
 	}
 	fg := decodeU24(data, pos)
 	pos += 3
-	if err := decodeRequireLen(data, pos+3, "bg"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+3, "bg"); err != nil {
 		return Annotation{}, offset, err
 	}
 	bg := decodeU24(data, pos)
 	pos += 3
-	text, pos, err := decodeString16(data, pos)
+	text, pos, err := decodeString16Window(data, pos, windowEnd)
 	if err != nil {
 		return Annotation{}, offset, err
 	}
@@ -337,18 +343,18 @@ func DecodeAnnotation(data []byte, offset int) (Annotation, int, error) {
 	}, pos, nil
 }
 
-func DecodeHitRegion(data []byte, offset int) (HitRegion, int, error) {
+func DecodeHitRegion(data []byte, offset int, windowEnd int) (HitRegion, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+1, "kind"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "kind"); err != nil {
 		return HitRegion{}, offset, err
 	}
 	kind := data[pos]
 	pos++
-	rect, pos, err := DecodeRect(data, pos)
+	rect, pos, err := DecodeRect(data, pos, windowEnd)
 	if err != nil {
 		return HitRegion{}, offset, err
 	}
-	if err := decodeRequireLen(data, pos+2, "id"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "id"); err != nil {
 		return HitRegion{}, offset, err
 	}
 	id := decodeU16(data, pos)
@@ -360,24 +366,24 @@ func DecodeHitRegion(data []byte, offset int) (HitRegion, int, error) {
 	}, pos, nil
 }
 
-func DecodeGutterEntry(data []byte, offset int) (GutterEntry, int, error) {
+func DecodeGutterEntry(data []byte, offset int, windowEnd int) (GutterEntry, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+4, "buf_line"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+4, "buf_line"); err != nil {
 		return GutterEntry{}, offset, err
 	}
 	bufLine := decodeU32(data, pos)
 	pos += 4
-	if err := decodeRequireLen(data, pos+1, "display_type"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "display_type"); err != nil {
 		return GutterEntry{}, offset, err
 	}
 	displayType := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+1, "sign_type"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "sign_type"); err != nil {
 		return GutterEntry{}, offset, err
 	}
 	signType := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+4, "fold_end_line"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+4, "fold_end_line"); err != nil {
 		return GutterEntry{}, offset, err
 	}
 	foldEndLine := decodeU32(data, pos)
@@ -386,12 +392,12 @@ func DecodeGutterEntry(data []byte, offset int) (GutterEntry, int, error) {
 	var signText string
 	if signType == 8 {
 		var err error
-		if err := decodeRequireLen(data, pos+3, "sign_fg"); err != nil {
+		if err := decodeRequireWindow(windowEnd, pos+3, "sign_fg"); err != nil {
 			return GutterEntry{}, offset, err
 		}
 		signFG = decodeU24(data, pos)
 		pos += 3
-		signText, pos, err = decodeString8(data, pos)
+		signText, pos, err = decodeString8Window(data, pos, windowEnd)
 		if err != nil {
 			return GutterEntry{}, offset, err
 		}
@@ -406,32 +412,32 @@ func DecodeGutterEntry(data []byte, offset int) (GutterEntry, int, error) {
 	}, pos, nil
 }
 
-func DecodeModelineSegment(data []byte, offset int) (ModelineSegment, int, error) {
+func DecodeModelineSegment(data []byte, offset int, windowEnd int) (ModelineSegment, int, error) {
 	pos := offset
-	name, pos, err := decodeString8(data, pos)
+	name, pos, err := decodeString8Window(data, pos, windowEnd)
 	if err != nil {
 		return ModelineSegment{}, offset, err
 	}
-	if err := decodeRequireLen(data, pos+3, "fg"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+3, "fg"); err != nil {
 		return ModelineSegment{}, offset, err
 	}
 	fg := decodeU24(data, pos)
 	pos += 3
-	if err := decodeRequireLen(data, pos+3, "bg"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+3, "bg"); err != nil {
 		return ModelineSegment{}, offset, err
 	}
 	bg := decodeU24(data, pos)
 	pos += 3
-	if err := decodeRequireLen(data, pos+1, "attrs"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "attrs"); err != nil {
 		return ModelineSegment{}, offset, err
 	}
 	attrs := data[pos]
 	pos++
-	text, pos, err := decodeString16(data, pos)
+	text, pos, err := decodeString16Window(data, pos, windowEnd)
 	if err != nil {
 		return ModelineSegment{}, offset, err
 	}
-	target, pos, err := decodeString16(data, pos)
+	target, pos, err := decodeString16Window(data, pos, windowEnd)
 	if err != nil {
 		return ModelineSegment{}, offset, err
 	}
@@ -445,32 +451,32 @@ func DecodeModelineSegment(data []byte, offset int) (ModelineSegment, int, error
 	}, pos, nil
 }
 
-func DecodeTabEntry(data []byte, offset int) (TabEntry, int, error) {
+func DecodeTabEntry(data []byte, offset int, windowEnd int) (TabEntry, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+1, "flags"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "flags"); err != nil {
 		return TabEntry{}, offset, err
 	}
 	flags := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+4, "id"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+4, "id"); err != nil {
 		return TabEntry{}, offset, err
 	}
 	id := decodeU32(data, pos)
 	pos += 4
-	if err := decodeRequireLen(data, pos+2, "workspace_id"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "workspace_id"); err != nil {
 		return TabEntry{}, offset, err
 	}
 	workspaceID := decodeU16(data, pos)
 	pos += 2
-	icon, pos, err := decodeString8(data, pos)
+	icon, pos, err := decodeString8Window(data, pos, windowEnd)
 	if err != nil {
 		return TabEntry{}, offset, err
 	}
-	label, pos, err := decodeString16(data, pos)
+	label, pos, err := decodeString16Window(data, pos, windowEnd)
 	if err != nil {
 		return TabEntry{}, offset, err
 	}
-	if err := decodeRequireLen(data, pos+4, "tint_color"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+4, "tint_color"); err != nil {
 		return TabEntry{}, offset, err
 	}
 	tintColor := decodeU32(data, pos)
@@ -485,14 +491,14 @@ func DecodeTabEntry(data []byte, offset int) (TabEntry, int, error) {
 	}, pos, nil
 }
 
-func DecodeThemeColor(data []byte, offset int) (ThemeColor, int, error) {
+func DecodeThemeColor(data []byte, offset int, windowEnd int) (ThemeColor, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+1, "slot"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "slot"); err != nil {
 		return ThemeColor{}, offset, err
 	}
 	slot := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+3, "color"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+3, "color"); err != nil {
 		return ThemeColor{}, offset, err
 	}
 	color := decodeU24(data, pos)
@@ -503,18 +509,18 @@ func DecodeThemeColor(data []byte, offset int) (ThemeColor, int, error) {
 	}, pos, nil
 }
 
-func DecodeCompletionItem(data []byte, offset int) (CompletionItem, int, error) {
+func DecodeCompletionItem(data []byte, offset int, windowEnd int) (CompletionItem, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+1, "kind"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "kind"); err != nil {
 		return CompletionItem{}, offset, err
 	}
 	kind := CompletionKind(data[pos])
 	pos++
-	label, pos, err := decodeString16(data, pos)
+	label, pos, err := decodeString16Window(data, pos, windowEnd)
 	if err != nil {
 		return CompletionItem{}, offset, err
 	}
-	detail, pos, err := decodeString16(data, pos)
+	detail, pos, err := decodeString16Window(data, pos, windowEnd)
 	if err != nil {
 		return CompletionItem{}, offset, err
 	}
@@ -525,36 +531,36 @@ func DecodeCompletionItem(data []byte, offset int) (CompletionItem, int, error) 
 	}, pos, nil
 }
 
-func DecodePickerItem(data []byte, offset int) (PickerItem, int, error) {
+func DecodePickerItem(data []byte, offset int, windowEnd int) (PickerItem, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+3, "icon_color"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+3, "icon_color"); err != nil {
 		return PickerItem{}, offset, err
 	}
 	iconColor := decodeU24(data, pos)
 	pos += 3
-	if err := decodeRequireLen(data, pos+1, "flags"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "flags"); err != nil {
 		return PickerItem{}, offset, err
 	}
 	flags := data[pos]
 	pos++
-	label, pos, err := decodeString16(data, pos)
+	label, pos, err := decodeString16Window(data, pos, windowEnd)
 	if err != nil {
 		return PickerItem{}, offset, err
 	}
-	description, pos, err := decodeString16(data, pos)
+	description, pos, err := decodeString16Window(data, pos, windowEnd)
 	if err != nil {
 		return PickerItem{}, offset, err
 	}
-	annotation, pos, err := decodeString16(data, pos)
+	annotation, pos, err := decodeString16Window(data, pos, windowEnd)
 	if err != nil {
 		return PickerItem{}, offset, err
 	}
-	if err := decodeRequireLen(data, pos+1, "match_positions count"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "match_positions count"); err != nil {
 		return PickerItem{}, offset, err
 	}
 	matchPositionsCount := int(data[pos])
 	pos += 1
-	if err := decodeRequireLen(data, pos+matchPositionsCount*2, "match_positions"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+matchPositionsCount*2, "match_positions"); err != nil {
 		return PickerItem{}, offset, err
 	}
 	matchPositions := make([]uint16, 0, matchPositionsCount)
@@ -572,22 +578,22 @@ func DecodePickerItem(data []byte, offset int) (PickerItem, int, error) {
 	}, pos, nil
 }
 
-func DecodeWhichKeyBinding(data []byte, offset int) (WhichKeyBinding, int, error) {
+func DecodeWhichKeyBinding(data []byte, offset int, windowEnd int) (WhichKeyBinding, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+1, "kind"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "kind"); err != nil {
 		return WhichKeyBinding{}, offset, err
 	}
 	kind := data[pos]
 	pos++
-	key, pos, err := decodeString8(data, pos)
+	key, pos, err := decodeString8Window(data, pos, windowEnd)
 	if err != nil {
 		return WhichKeyBinding{}, offset, err
 	}
-	desc, pos, err := decodeString16(data, pos)
+	desc, pos, err := decodeString16Window(data, pos, windowEnd)
 	if err != nil {
 		return WhichKeyBinding{}, offset, err
 	}
-	icon, pos, err := decodeString8(data, pos)
+	icon, pos, err := decodeString8Window(data, pos, windowEnd)
 	if err != nil {
 		return WhichKeyBinding{}, offset, err
 	}
@@ -599,23 +605,23 @@ func DecodeWhichKeyBinding(data []byte, offset int) (WhichKeyBinding, int, error
 	}, pos, nil
 }
 
-func DecodeChangeSummaryEntry(data []byte, offset int) (ChangeSummaryEntry, int, error) {
+func DecodeChangeSummaryEntry(data []byte, offset int, windowEnd int) (ChangeSummaryEntry, int, error) {
 	pos := offset
-	path, pos, err := decodeString16(data, pos)
+	path, pos, err := decodeString16Window(data, pos, windowEnd)
 	if err != nil {
 		return ChangeSummaryEntry{}, offset, err
 	}
-	if err := decodeRequireLen(data, pos+1, "action"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "action"); err != nil {
 		return ChangeSummaryEntry{}, offset, err
 	}
 	action := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+4, "lines_added"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+4, "lines_added"); err != nil {
 		return ChangeSummaryEntry{}, offset, err
 	}
 	linesAdded := decodeU32(data, pos)
 	pos += 4
-	if err := decodeRequireLen(data, pos+4, "lines_removed"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+4, "lines_removed"); err != nil {
 		return ChangeSummaryEntry{}, offset, err
 	}
 	linesRemoved := decodeU32(data, pos)
@@ -628,24 +634,24 @@ func DecodeChangeSummaryEntry(data []byte, offset int) (ChangeSummaryEntry, int,
 	}, pos, nil
 }
 
-func DecodeGitStatusEntry(data []byte, offset int) (GitStatusEntry, int, error) {
+func DecodeGitStatusEntry(data []byte, offset int, windowEnd int) (GitStatusEntry, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+4, "path_hash"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+4, "path_hash"); err != nil {
 		return GitStatusEntry{}, offset, err
 	}
 	pathHash := decodeU32(data, pos)
 	pos += 4
-	if err := decodeRequireLen(data, pos+1, "section"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "section"); err != nil {
 		return GitStatusEntry{}, offset, err
 	}
 	section := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+1, "status"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "status"); err != nil {
 		return GitStatusEntry{}, offset, err
 	}
 	status := GitFileStatus(data[pos])
 	pos++
-	path, pos, err := decodeString16(data, pos)
+	path, pos, err := decodeString16Window(data, pos, windowEnd)
 	if err != nil {
 		return GitStatusEntry{}, offset, err
 	}
@@ -657,9 +663,9 @@ func DecodeGitStatusEntry(data []byte, offset int) (GitStatusEntry, int, error) 
 	}, pos, nil
 }
 
-func DecodeGitToast(data []byte, offset int) (GitToast, int, error) {
+func DecodeGitToast(data []byte, offset int, windowEnd int) (GitToast, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+1, "present"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "present"); err != nil {
 		return GitToast{}, offset, err
 	}
 	present := data[pos]
@@ -669,17 +675,17 @@ func DecodeGitToast(data []byte, offset int) (GitToast, int, error) {
 	var message string
 	if present == 1 {
 		var err error
-		if err := decodeRequireLen(data, pos+1, "level"); err != nil {
+		if err := decodeRequireWindow(windowEnd, pos+1, "level"); err != nil {
 			return GitToast{}, offset, err
 		}
 		level = GitToastLevel(data[pos])
 		pos++
-		if err := decodeRequireLen(data, pos+1, "action"); err != nil {
+		if err := decodeRequireWindow(windowEnd, pos+1, "action"); err != nil {
 			return GitToast{}, offset, err
 		}
 		action = GitToastAction(data[pos])
 		pos++
-		message, pos, err = decodeString16(data, pos)
+		message, pos, err = decodeString16Window(data, pos, windowEnd)
 		if err != nil {
 			return GitToast{}, offset, err
 		}
@@ -694,14 +700,14 @@ func DecodeGitToast(data []byte, offset int) (GitToast, int, error) {
 
 // Section decoders for gui_agent_chat
 
-func DecodeGuiAgentChatHeader(data []byte, offset int) (GuiAgentChatHeader, int, error) {
+func DecodeGuiAgentChatHeader(data []byte, offset int, windowEnd int) (GuiAgentChatHeader, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+1, "visible"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "visible"); err != nil {
 		return GuiAgentChatHeader{}, offset, err
 	}
 	visible := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+1, "status"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "status"); err != nil {
 		return GuiAgentChatHeader{}, offset, err
 	}
 	status := data[pos]
@@ -714,34 +720,34 @@ func DecodeGuiAgentChatHeader(data []byte, offset int) (GuiAgentChatHeader, int,
 
 // Section decoders for gui_gutter
 
-func DecodeGuiGutterWindow(data []byte, offset int) (GuiGutterWindow, int, error) {
+func DecodeGuiGutterWindow(data []byte, offset int, windowEnd int) (GuiGutterWindow, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+2, "window_id"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "window_id"); err != nil {
 		return GuiGutterWindow{}, offset, err
 	}
 	windowID := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+2, "content_row"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "content_row"); err != nil {
 		return GuiGutterWindow{}, offset, err
 	}
 	contentRow := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+2, "content_col"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "content_col"); err != nil {
 		return GuiGutterWindow{}, offset, err
 	}
 	contentCol := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+2, "content_height"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "content_height"); err != nil {
 		return GuiGutterWindow{}, offset, err
 	}
 	contentHeight := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+1, "is_active"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "is_active"); err != nil {
 		return GuiGutterWindow{}, offset, err
 	}
 	isActive := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+2, "content_width"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "content_width"); err != nil {
 		return GuiGutterWindow{}, offset, err
 	}
 	contentWidth := decodeU16(data, pos)
@@ -756,24 +762,24 @@ func DecodeGuiGutterWindow(data []byte, offset int) (GuiGutterWindow, int, error
 	}, pos, nil
 }
 
-func DecodeGuiGutterConfig(data []byte, offset int) (GuiGutterConfig, int, error) {
+func DecodeGuiGutterConfig(data []byte, offset int, windowEnd int) (GuiGutterConfig, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+4, "cursor_line"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+4, "cursor_line"); err != nil {
 		return GuiGutterConfig{}, offset, err
 	}
 	cursorLine := decodeU32(data, pos)
 	pos += 4
-	if err := decodeRequireLen(data, pos+1, "line_number_style"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "line_number_style"); err != nil {
 		return GuiGutterConfig{}, offset, err
 	}
 	lineNumberStyle := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+1, "line_number_width"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "line_number_width"); err != nil {
 		return GuiGutterConfig{}, offset, err
 	}
 	lineNumberWidth := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+1, "sign_col_width"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "sign_col_width"); err != nil {
 		return GuiGutterConfig{}, offset, err
 	}
 	signColWidth := data[pos]
@@ -786,16 +792,16 @@ func DecodeGuiGutterConfig(data []byte, offset int) (GuiGutterConfig, int, error
 	}, pos, nil
 }
 
-func DecodeGuiGutterEntries(data []byte, offset int) ([]GutterEntry, int, error) {
+func DecodeGuiGutterEntries(data []byte, offset int, windowEnd int) ([]GutterEntry, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+2, "entries count"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "entries count"); err != nil {
 		return nil, offset, err
 	}
 	count := int(decodeU16(data, pos))
 	pos += 2
 	items := make([]GutterEntry, 0, min(count, len(data)-pos))
 	for i := 0; i < count; i++ {
-		item, nextPos, err := DecodeGutterEntry(data, pos)
+		item, nextPos, err := DecodeGutterEntry(data, pos, windowEnd)
 		if err != nil {
 			return nil, offset, err
 		}
@@ -807,42 +813,46 @@ func DecodeGuiGutterEntries(data []byte, offset int) ([]GutterEntry, int, error)
 
 // Section decoders for gui_picker
 
-func DecodeGuiPickerHeader(data []byte, offset int) (GuiPickerHeader, int, error) {
+func DecodeGuiPickerHeader(data []byte, offset int, windowEnd int) (GuiPickerHeader, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+1, "visible"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "visible"); err != nil {
 		return GuiPickerHeader{}, offset, err
 	}
 	visible := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+2, "selected_index"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "selected_index"); err != nil {
 		return GuiPickerHeader{}, offset, err
 	}
 	selectedIndex := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+2, "filtered_count"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "filtered_count"); err != nil {
 		return GuiPickerHeader{}, offset, err
 	}
 	filteredCount := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+2, "total_count"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "total_count"); err != nil {
 		return GuiPickerHeader{}, offset, err
 	}
 	totalCount := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+1, "has_preview"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "has_preview"); err != nil {
 		return GuiPickerHeader{}, offset, err
 	}
 	hasPreview := data[pos]
 	pos++
-	title, pos, err := decodeString16(data, pos)
-	if err != nil {
-		return GuiPickerHeader{}, offset, err
+	var title string
+	var markedCount uint16
+	if pos+2 <= windowEnd {
+		titleLen := int(decodeU16(data, pos))
+		if pos+2+titleLen <= windowEnd {
+			title = string(data[pos+2 : pos+2+titleLen])
+			pos += 2 + titleLen
+			if pos+2 <= windowEnd {
+				markedCount = decodeU16(data, pos)
+				pos += 2
+			}
+		}
 	}
-	if err := decodeRequireLen(data, pos+2, "marked_count"); err != nil {
-		return GuiPickerHeader{}, offset, err
-	}
-	markedCount := decodeU16(data, pos)
-	pos += 2
 	return GuiPickerHeader{
 		Visible:       visible,
 		SelectedIndex: selectedIndex,
@@ -854,9 +864,9 @@ func DecodeGuiPickerHeader(data []byte, offset int) (GuiPickerHeader, int, error
 	}, pos, nil
 }
 
-func DecodeGuiPickerQuery(data []byte, offset int) (GuiPickerQuery, int, error) {
+func DecodeGuiPickerQuery(data []byte, offset int, windowEnd int) (GuiPickerQuery, int, error) {
 	pos := offset
-	text, pos, err := decodeString16(data, pos)
+	text, pos, err := decodeString16Window(data, pos, windowEnd)
 	if err != nil {
 		return GuiPickerQuery{}, offset, err
 	}
@@ -865,16 +875,16 @@ func DecodeGuiPickerQuery(data []byte, offset int) (GuiPickerQuery, int, error) 
 	}, pos, nil
 }
 
-func DecodeGuiPickerItems(data []byte, offset int) ([]PickerItem, int, error) {
+func DecodeGuiPickerItems(data []byte, offset int, windowEnd int) ([]PickerItem, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+2, "items count"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "items count"); err != nil {
 		return nil, offset, err
 	}
 	count := int(decodeU16(data, pos))
 	pos += 2
 	items := make([]PickerItem, 0, min(count, len(data)-pos))
 	for i := 0; i < count; i++ {
-		item, nextPos, err := DecodePickerItem(data, pos)
+		item, nextPos, err := DecodePickerItem(data, pos, windowEnd)
 		if err != nil {
 			return nil, offset, err
 		}
@@ -884,9 +894,9 @@ func DecodeGuiPickerItems(data []byte, offset int) ([]PickerItem, int, error) {
 	return items, pos, nil
 }
 
-func DecodeGuiPickerActionMenu(data []byte, offset int) (GuiPickerActionMenu, int, error) {
+func DecodeGuiPickerActionMenu(data []byte, offset int, windowEnd int) (GuiPickerActionMenu, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+1, "visible"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "visible"); err != nil {
 		return GuiPickerActionMenu{}, offset, err
 	}
 	visible := data[pos]
@@ -894,19 +904,19 @@ func DecodeGuiPickerActionMenu(data []byte, offset int) (GuiPickerActionMenu, in
 	var selectedIndex uint8
 	var actions []string
 	if visible == 1 {
-		if err := decodeRequireLen(data, pos+1, "selected_index"); err != nil {
+		if err := decodeRequireWindow(windowEnd, pos+1, "selected_index"); err != nil {
 			return GuiPickerActionMenu{}, offset, err
 		}
 		selectedIndex = data[pos]
 		pos++
-		if err := decodeRequireLen(data, pos+1, "actions count"); err != nil {
+		if err := decodeRequireWindow(windowEnd, pos+1, "actions count"); err != nil {
 			return GuiPickerActionMenu{}, offset, err
 		}
 		actionsCount := int(data[pos])
 		pos += 1
 		actions = make([]string, 0, min(actionsCount, len(data)-pos))
 		for i := 0; i < actionsCount; i++ {
-			item, nextPos, err := decodeString16(data, pos)
+			item, nextPos, err := decodeString16Window(data, pos, windowEnd)
 			if err != nil {
 				return GuiPickerActionMenu{}, offset, err
 			}
@@ -921,9 +931,9 @@ func DecodeGuiPickerActionMenu(data []byte, offset int) (GuiPickerActionMenu, in
 	}, pos, nil
 }
 
-func DecodeGuiPickerModePrefix(data []byte, offset int) (GuiPickerModePrefix, int, error) {
+func DecodeGuiPickerModePrefix(data []byte, offset int, windowEnd int) (GuiPickerModePrefix, int, error) {
 	pos := offset
-	text, pos, err := decodeString16(data, pos)
+	text, pos, err := decodeString16Window(data, pos, windowEnd)
 	if err != nil {
 		return GuiPickerModePrefix{}, offset, err
 	}
@@ -932,9 +942,9 @@ func DecodeGuiPickerModePrefix(data []byte, offset int) (GuiPickerModePrefix, in
 	}, pos, nil
 }
 
-func DecodeGuiPickerLoadStatus(data []byte, offset int) (GuiPickerLoadStatus, int, error) {
+func DecodeGuiPickerLoadStatus(data []byte, offset int, windowEnd int) (GuiPickerLoadStatus, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+1, "status"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "status"); err != nil {
 		return GuiPickerLoadStatus{}, offset, err
 	}
 	status := data[pos]
@@ -942,7 +952,7 @@ func DecodeGuiPickerLoadStatus(data []byte, offset int) (GuiPickerLoadStatus, in
 	var message string
 	if status == 2 {
 		var err error
-		message, pos, err = decodeString16(data, pos)
+		message, pos, err = decodeString16Window(data, pos, windowEnd)
 		if err != nil {
 			return GuiPickerLoadStatus{}, offset, err
 		}
@@ -955,19 +965,19 @@ func DecodeGuiPickerLoadStatus(data []byte, offset int) (GuiPickerLoadStatus, in
 
 // Section decoders for gui_picker_preview
 
-func DecodeGuiPickerPreviewHeader(data []byte, offset int) (GuiPickerPreviewHeader, int, error) {
+func DecodeGuiPickerPreviewHeader(data []byte, offset int, windowEnd int) (GuiPickerPreviewHeader, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+1, "visible"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "visible"); err != nil {
 		return GuiPickerPreviewHeader{}, offset, err
 	}
 	visible := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+1, "kind"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "kind"); err != nil {
 		return GuiPickerPreviewHeader{}, offset, err
 	}
 	kind := data[pos]
 	pos++
-	title, pos, err := decodeString16(data, pos)
+	title, pos, err := decodeString16Window(data, pos, windowEnd)
 	if err != nil {
 		return GuiPickerPreviewHeader{}, offset, err
 	}
@@ -980,19 +990,19 @@ func DecodeGuiPickerPreviewHeader(data []byte, offset int) (GuiPickerPreviewHead
 
 // Section decoders for gui_status_bar
 
-func DecodeGuiStatusBarIdentity(data []byte, offset int) (GuiStatusBarIdentity, int, error) {
+func DecodeGuiStatusBarIdentity(data []byte, offset int, windowEnd int) (GuiStatusBarIdentity, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+1, "content_kind"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "content_kind"); err != nil {
 		return GuiStatusBarIdentity{}, offset, err
 	}
 	contentKind := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+1, "mode"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "mode"); err != nil {
 		return GuiStatusBarIdentity{}, offset, err
 	}
 	mode := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+1, "flags"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "flags"); err != nil {
 		return GuiStatusBarIdentity{}, offset, err
 	}
 	flags := data[pos]
@@ -1004,19 +1014,19 @@ func DecodeGuiStatusBarIdentity(data []byte, offset int) (GuiStatusBarIdentity, 
 	}, pos, nil
 }
 
-func DecodeGuiStatusBarCursor(data []byte, offset int) (GuiStatusBarCursor, int, error) {
+func DecodeGuiStatusBarCursor(data []byte, offset int, windowEnd int) (GuiStatusBarCursor, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+4, "line"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+4, "line"); err != nil {
 		return GuiStatusBarCursor{}, offset, err
 	}
 	line := decodeU32(data, pos)
 	pos += 4
-	if err := decodeRequireLen(data, pos+4, "col"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+4, "col"); err != nil {
 		return GuiStatusBarCursor{}, offset, err
 	}
 	col := decodeU32(data, pos)
 	pos += 4
-	if err := decodeRequireLen(data, pos+4, "line_count"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+4, "line_count"); err != nil {
 		return GuiStatusBarCursor{}, offset, err
 	}
 	lineCount := decodeU32(data, pos)
@@ -1028,29 +1038,29 @@ func DecodeGuiStatusBarCursor(data []byte, offset int) (GuiStatusBarCursor, int,
 	}, pos, nil
 }
 
-func DecodeGuiStatusBarDiagnostics(data []byte, offset int) (GuiStatusBarDiagnostics, int, error) {
+func DecodeGuiStatusBarDiagnostics(data []byte, offset int, windowEnd int) (GuiStatusBarDiagnostics, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+2, "errors"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "errors"); err != nil {
 		return GuiStatusBarDiagnostics{}, offset, err
 	}
 	errors := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+2, "warnings"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "warnings"); err != nil {
 		return GuiStatusBarDiagnostics{}, offset, err
 	}
 	warnings := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+2, "info"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "info"); err != nil {
 		return GuiStatusBarDiagnostics{}, offset, err
 	}
 	info := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+2, "hints"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "hints"); err != nil {
 		return GuiStatusBarDiagnostics{}, offset, err
 	}
 	hints := decodeU16(data, pos)
 	pos += 2
-	hintText, pos, err := decodeString16(data, pos)
+	hintText, pos, err := decodeString16Window(data, pos, windowEnd)
 	if err != nil {
 		return GuiStatusBarDiagnostics{}, offset, err
 	}
@@ -1063,14 +1073,14 @@ func DecodeGuiStatusBarDiagnostics(data []byte, offset int) (GuiStatusBarDiagnos
 	}, pos, nil
 }
 
-func DecodeGuiStatusBarLanguage(data []byte, offset int) (GuiStatusBarLanguage, int, error) {
+func DecodeGuiStatusBarLanguage(data []byte, offset int, windowEnd int) (GuiStatusBarLanguage, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+1, "lsp_status"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "lsp_status"); err != nil {
 		return GuiStatusBarLanguage{}, offset, err
 	}
 	lspStatus := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+1, "parser_status"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "parser_status"); err != nil {
 		return GuiStatusBarLanguage{}, offset, err
 	}
 	parserStatus := data[pos]
@@ -1081,23 +1091,23 @@ func DecodeGuiStatusBarLanguage(data []byte, offset int) (GuiStatusBarLanguage, 
 	}, pos, nil
 }
 
-func DecodeGuiStatusBarGit(data []byte, offset int) (GuiStatusBarGit, int, error) {
+func DecodeGuiStatusBarGit(data []byte, offset int, windowEnd int) (GuiStatusBarGit, int, error) {
 	pos := offset
-	branch, pos, err := decodeString8(data, pos)
+	branch, pos, err := decodeString8Window(data, pos, windowEnd)
 	if err != nil {
 		return GuiStatusBarGit{}, offset, err
 	}
-	if err := decodeRequireLen(data, pos+2, "added"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "added"); err != nil {
 		return GuiStatusBarGit{}, offset, err
 	}
 	added := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+2, "modified"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "modified"); err != nil {
 		return GuiStatusBarGit{}, offset, err
 	}
 	modified := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+2, "deleted"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "deleted"); err != nil {
 		return GuiStatusBarGit{}, offset, err
 	}
 	deleted := decodeU16(data, pos)
@@ -1110,22 +1120,22 @@ func DecodeGuiStatusBarGit(data []byte, offset int) (GuiStatusBarGit, int, error
 	}, pos, nil
 }
 
-func DecodeGuiStatusBarFile(data []byte, offset int) (GuiStatusBarFile, int, error) {
+func DecodeGuiStatusBarFile(data []byte, offset int, windowEnd int) (GuiStatusBarFile, int, error) {
 	pos := offset
-	icon, pos, err := decodeString8(data, pos)
+	icon, pos, err := decodeString8Window(data, pos, windowEnd)
 	if err != nil {
 		return GuiStatusBarFile{}, offset, err
 	}
-	if err := decodeRequireLen(data, pos+3, "icon_color"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+3, "icon_color"); err != nil {
 		return GuiStatusBarFile{}, offset, err
 	}
 	iconColor := decodeU24(data, pos)
 	pos += 3
-	filename, pos, err := decodeString16(data, pos)
+	filename, pos, err := decodeString16Window(data, pos, windowEnd)
 	if err != nil {
 		return GuiStatusBarFile{}, offset, err
 	}
-	filetype, pos, err := decodeString8(data, pos)
+	filetype, pos, err := decodeString8Window(data, pos, windowEnd)
 	if err != nil {
 		return GuiStatusBarFile{}, offset, err
 	}
@@ -1137,9 +1147,9 @@ func DecodeGuiStatusBarFile(data []byte, offset int) (GuiStatusBarFile, int, err
 	}, pos, nil
 }
 
-func DecodeGuiStatusBarMessage(data []byte, offset int) (GuiStatusBarMessage, int, error) {
+func DecodeGuiStatusBarMessage(data []byte, offset int, windowEnd int) (GuiStatusBarMessage, int, error) {
 	pos := offset
-	text, pos, err := decodeString16(data, pos)
+	text, pos, err := decodeString16Window(data, pos, windowEnd)
 	if err != nil {
 		return GuiStatusBarMessage{}, offset, err
 	}
@@ -1148,9 +1158,9 @@ func DecodeGuiStatusBarMessage(data []byte, offset int) (GuiStatusBarMessage, in
 	}, pos, nil
 }
 
-func DecodeGuiStatusBarRecording(data []byte, offset int) (GuiStatusBarRecording, int, error) {
+func DecodeGuiStatusBarRecording(data []byte, offset int, windowEnd int) (GuiStatusBarRecording, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+1, "macro_register"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "macro_register"); err != nil {
 		return GuiStatusBarRecording{}, offset, err
 	}
 	macroRegister := data[pos]
@@ -1160,14 +1170,14 @@ func DecodeGuiStatusBarRecording(data []byte, offset int) (GuiStatusBarRecording
 	}, pos, nil
 }
 
-func DecodeGuiStatusBarIndent(data []byte, offset int) (GuiStatusBarIndent, int, error) {
+func DecodeGuiStatusBarIndent(data []byte, offset int, windowEnd int) (GuiStatusBarIndent, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+1, "indent_type"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "indent_type"); err != nil {
 		return GuiStatusBarIndent{}, offset, err
 	}
 	indentType := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+1, "indent_size"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "indent_size"); err != nil {
 		return GuiStatusBarIndent{}, offset, err
 	}
 	indentSize := data[pos]
@@ -1178,35 +1188,35 @@ func DecodeGuiStatusBarIndent(data []byte, offset int) (GuiStatusBarIndent, int,
 	}, pos, nil
 }
 
-func DecodeGuiStatusBarModeline(data []byte, offset int) (GuiStatusBarModeline, int, error) {
+func DecodeGuiStatusBarModeline(data []byte, offset int, windowEnd int) (GuiStatusBarModeline, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+1, "format"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "format"); err != nil {
 		return GuiStatusBarModeline{}, offset, err
 	}
 	format := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+2, "left_segments count"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "left_segments count"); err != nil {
 		return GuiStatusBarModeline{}, offset, err
 	}
 	leftSegmentsCount := int(decodeU16(data, pos))
 	pos += 2
 	leftSegments := make([]ModelineSegment, 0, min(leftSegmentsCount, len(data)-pos))
 	for i := 0; i < leftSegmentsCount; i++ {
-		item, nextPos, err := DecodeModelineSegment(data, pos)
+		item, nextPos, err := DecodeModelineSegment(data, pos, windowEnd)
 		if err != nil {
 			return GuiStatusBarModeline{}, offset, err
 		}
 		pos = nextPos
 		leftSegments = append(leftSegments, item)
 	}
-	if err := decodeRequireLen(data, pos+2, "right_segments count"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "right_segments count"); err != nil {
 		return GuiStatusBarModeline{}, offset, err
 	}
 	rightSegmentsCount := int(decodeU16(data, pos))
 	pos += 2
 	rightSegments := make([]ModelineSegment, 0, min(rightSegmentsCount, len(data)-pos))
 	for i := 0; i < rightSegmentsCount; i++ {
-		item, nextPos, err := DecodeModelineSegment(data, pos)
+		item, nextPos, err := DecodeModelineSegment(data, pos, windowEnd)
 		if err != nil {
 			return GuiStatusBarModeline{}, offset, err
 		}
@@ -1220,14 +1230,14 @@ func DecodeGuiStatusBarModeline(data []byte, offset int) (GuiStatusBarModeline, 
 	}, pos, nil
 }
 
-func DecodeGuiStatusBarSelection(data []byte, offset int) (GuiStatusBarSelection, int, error) {
+func DecodeGuiStatusBarSelection(data []byte, offset int, windowEnd int) (GuiStatusBarSelection, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+1, "selection_mode"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "selection_mode"); err != nil {
 		return GuiStatusBarSelection{}, offset, err
 	}
 	selectionMode := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+4, "selection_size"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+4, "selection_size"); err != nil {
 		return GuiStatusBarSelection{}, offset, err
 	}
 	selectionSize := decodeU32(data, pos)
@@ -1238,53 +1248,53 @@ func DecodeGuiStatusBarSelection(data []byte, offset int) (GuiStatusBarSelection
 	}, pos, nil
 }
 
-func DecodeGuiStatusBarWorkspace(data []byte, offset int) (GuiStatusBarWorkspace, int, error) {
+func DecodeGuiStatusBarWorkspace(data []byte, offset int, windowEnd int) (GuiStatusBarWorkspace, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+2, "workspace_id"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "workspace_id"); err != nil {
 		return GuiStatusBarWorkspace{}, offset, err
 	}
 	workspaceID := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+1, "kind"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "kind"); err != nil {
 		return GuiStatusBarWorkspace{}, offset, err
 	}
 	kind := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+1, "status"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "status"); err != nil {
 		return GuiStatusBarWorkspace{}, offset, err
 	}
 	status := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+2, "flags"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "flags"); err != nil {
 		return GuiStatusBarWorkspace{}, offset, err
 	}
 	flags := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+2, "draft_count"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "draft_count"); err != nil {
 		return GuiStatusBarWorkspace{}, offset, err
 	}
 	draftCount := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+2, "conflict_count"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "conflict_count"); err != nil {
 		return GuiStatusBarWorkspace{}, offset, err
 	}
 	conflictCount := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+2, "running_background_count"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "running_background_count"); err != nil {
 		return GuiStatusBarWorkspace{}, offset, err
 	}
 	runningBackgroundCount := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+2, "attention_count"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "attention_count"); err != nil {
 		return GuiStatusBarWorkspace{}, offset, err
 	}
 	attentionCount := decodeU16(data, pos)
 	pos += 2
-	label, pos, err := decodeString8(data, pos)
+	label, pos, err := decodeString8Window(data, pos, windowEnd)
 	if err != nil {
 		return GuiStatusBarWorkspace{}, offset, err
 	}
-	icon, pos, err := decodeString8(data, pos)
+	icon, pos, err := decodeString8Window(data, pos, windowEnd)
 	if err != nil {
 		return GuiStatusBarWorkspace{}, offset, err
 	}
@@ -1304,39 +1314,39 @@ func DecodeGuiStatusBarWorkspace(data []byte, offset int) (GuiStatusBarWorkspace
 
 // Section decoders for gui_window_content
 
-func DecodeGuiWindowContentHeader(data []byte, offset int) (GuiWindowContentHeader, int, error) {
+func DecodeGuiWindowContentHeader(data []byte, offset int, windowEnd int) (GuiWindowContentHeader, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+2, "window_id"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "window_id"); err != nil {
 		return GuiWindowContentHeader{}, offset, err
 	}
 	windowID := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+1, "flags"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "flags"); err != nil {
 		return GuiWindowContentHeader{}, offset, err
 	}
 	flags := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+2, "cursor_row"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "cursor_row"); err != nil {
 		return GuiWindowContentHeader{}, offset, err
 	}
 	cursorRow := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+2, "cursor_col"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "cursor_col"); err != nil {
 		return GuiWindowContentHeader{}, offset, err
 	}
 	cursorCol := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+1, "cursor_shape"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "cursor_shape"); err != nil {
 		return GuiWindowContentHeader{}, offset, err
 	}
 	cursorShape := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+2, "scroll_left"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "scroll_left"); err != nil {
 		return GuiWindowContentHeader{}, offset, err
 	}
 	scrollLeft := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+4, "content_epoch"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+4, "content_epoch"); err != nil {
 		return GuiWindowContentHeader{}, offset, err
 	}
 	contentEpoch := decodeU32(data, pos)
@@ -1352,16 +1362,16 @@ func DecodeGuiWindowContentHeader(data []byte, offset int) (GuiWindowContentHead
 	}, pos, nil
 }
 
-func DecodeGuiWindowContentRows(data []byte, offset int) ([]Row, int, error) {
+func DecodeGuiWindowContentRows(data []byte, offset int, windowEnd int) ([]Row, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+2, "rows count"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "rows count"); err != nil {
 		return nil, offset, err
 	}
 	count := int(decodeU16(data, pos))
 	pos += 2
 	items := make([]Row, 0, min(count, len(data)-pos))
 	for i := 0; i < count; i++ {
-		item, nextPos, err := DecodeRow(data, pos)
+		item, nextPos, err := DecodeRow(data, pos, windowEnd)
 		if err != nil {
 			return nil, offset, err
 		}
@@ -1371,9 +1381,9 @@ func DecodeGuiWindowContentRows(data []byte, offset int) ([]Row, int, error) {
 	return items, pos, nil
 }
 
-func DecodeGuiWindowContentSelection(data []byte, offset int) (GuiWindowContentSelection, int, error) {
+func DecodeGuiWindowContentSelection(data []byte, offset int, windowEnd int) (GuiWindowContentSelection, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+1, "type"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "type"); err != nil {
 		return GuiWindowContentSelection{}, offset, err
 	}
 	typeVal := data[pos]
@@ -1383,22 +1393,22 @@ func DecodeGuiWindowContentSelection(data []byte, offset int) (GuiWindowContentS
 	var endRow uint16
 	var endCol uint16
 	if typeVal != 0 {
-		if err := decodeRequireLen(data, pos+2, "start_row"); err != nil {
+		if err := decodeRequireWindow(windowEnd, pos+2, "start_row"); err != nil {
 			return GuiWindowContentSelection{}, offset, err
 		}
 		startRow = decodeU16(data, pos)
 		pos += 2
-		if err := decodeRequireLen(data, pos+2, "start_col"); err != nil {
+		if err := decodeRequireWindow(windowEnd, pos+2, "start_col"); err != nil {
 			return GuiWindowContentSelection{}, offset, err
 		}
 		startCol = decodeU16(data, pos)
 		pos += 2
-		if err := decodeRequireLen(data, pos+2, "end_row"); err != nil {
+		if err := decodeRequireWindow(windowEnd, pos+2, "end_row"); err != nil {
 			return GuiWindowContentSelection{}, offset, err
 		}
 		endRow = decodeU16(data, pos)
 		pos += 2
-		if err := decodeRequireLen(data, pos+2, "end_col"); err != nil {
+		if err := decodeRequireWindow(windowEnd, pos+2, "end_col"); err != nil {
 			return GuiWindowContentSelection{}, offset, err
 		}
 		endCol = decodeU16(data, pos)
@@ -1413,19 +1423,19 @@ func DecodeGuiWindowContentSelection(data []byte, offset int) (GuiWindowContentS
 	}, pos, nil
 }
 
-func DecodeGuiWindowContentSearchMatches(data []byte, offset int) ([]SearchMatch, int, error) {
+func DecodeGuiWindowContentSearchMatches(data []byte, offset int, windowEnd int) ([]SearchMatch, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+2, "search_matches count"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "search_matches count"); err != nil {
 		return nil, offset, err
 	}
 	count := int(decodeU16(data, pos))
 	pos += 2
-	if err := decodeRequireLen(data, pos+count*7, "search_matches"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+count*7, "search_matches"); err != nil {
 		return nil, offset, err
 	}
 	items := make([]SearchMatch, 0, count)
 	for i := 0; i < count; i++ {
-		item, nextPos, err := DecodeSearchMatch(data, pos)
+		item, nextPos, err := DecodeSearchMatch(data, pos, windowEnd)
 		if err != nil {
 			return nil, offset, err
 		}
@@ -1435,19 +1445,19 @@ func DecodeGuiWindowContentSearchMatches(data []byte, offset int) ([]SearchMatch
 	return items, pos, nil
 }
 
-func DecodeGuiWindowContentDiagnosticRanges(data []byte, offset int) ([]DiagnosticRange, int, error) {
+func DecodeGuiWindowContentDiagnosticRanges(data []byte, offset int, windowEnd int) ([]DiagnosticRange, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+2, "diagnostic_ranges count"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "diagnostic_ranges count"); err != nil {
 		return nil, offset, err
 	}
 	count := int(decodeU16(data, pos))
 	pos += 2
-	if err := decodeRequireLen(data, pos+count*9, "diagnostic_ranges"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+count*9, "diagnostic_ranges"); err != nil {
 		return nil, offset, err
 	}
 	items := make([]DiagnosticRange, 0, count)
 	for i := 0; i < count; i++ {
-		item, nextPos, err := DecodeDiagnosticRange(data, pos)
+		item, nextPos, err := DecodeDiagnosticRange(data, pos, windowEnd)
 		if err != nil {
 			return nil, offset, err
 		}
@@ -1457,19 +1467,19 @@ func DecodeGuiWindowContentDiagnosticRanges(data []byte, offset int) ([]Diagnost
 	return items, pos, nil
 }
 
-func DecodeGuiWindowContentDocumentHighlights(data []byte, offset int) ([]DocumentHighlight, int, error) {
+func DecodeGuiWindowContentDocumentHighlights(data []byte, offset int, windowEnd int) ([]DocumentHighlight, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+2, "document_highlights count"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "document_highlights count"); err != nil {
 		return nil, offset, err
 	}
 	count := int(decodeU16(data, pos))
 	pos += 2
-	if err := decodeRequireLen(data, pos+count*9, "document_highlights"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+count*9, "document_highlights"); err != nil {
 		return nil, offset, err
 	}
 	items := make([]DocumentHighlight, 0, count)
 	for i := 0; i < count; i++ {
-		item, nextPos, err := DecodeDocumentHighlight(data, pos)
+		item, nextPos, err := DecodeDocumentHighlight(data, pos, windowEnd)
 		if err != nil {
 			return nil, offset, err
 		}
@@ -1479,16 +1489,16 @@ func DecodeGuiWindowContentDocumentHighlights(data []byte, offset int) ([]Docume
 	return items, pos, nil
 }
 
-func DecodeGuiWindowContentAnnotations(data []byte, offset int) ([]Annotation, int, error) {
+func DecodeGuiWindowContentAnnotations(data []byte, offset int, windowEnd int) ([]Annotation, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+2, "annotations count"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "annotations count"); err != nil {
 		return nil, offset, err
 	}
 	count := int(decodeU16(data, pos))
 	pos += 2
 	items := make([]Annotation, 0, min(count, len(data)-pos))
 	for i := 0; i < count; i++ {
-		item, nextPos, err := DecodeAnnotation(data, pos)
+		item, nextPos, err := DecodeAnnotation(data, pos, windowEnd)
 		if err != nil {
 			return nil, offset, err
 		}
@@ -1498,89 +1508,89 @@ func DecodeGuiWindowContentAnnotations(data []byte, offset int) ([]Annotation, i
 	return items, pos, nil
 }
 
-func DecodeGuiWindowContentGeometry(data []byte, offset int) (GuiWindowContentGeometry, int, error) {
+func DecodeGuiWindowContentGeometry(data []byte, offset int, windowEnd int) (GuiWindowContentGeometry, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+2, "window_id"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "window_id"); err != nil {
 		return GuiWindowContentGeometry{}, offset, err
 	}
 	windowID := decodeU16(data, pos)
 	pos += 2
-	totalRect, pos, err := DecodeRect(data, pos)
+	totalRect, pos, err := DecodeRect(data, pos, windowEnd)
 	if err != nil {
 		return GuiWindowContentGeometry{}, offset, err
 	}
-	contentRect, pos, err := DecodeRect(data, pos)
+	contentRect, pos, err := DecodeRect(data, pos, windowEnd)
 	if err != nil {
 		return GuiWindowContentGeometry{}, offset, err
 	}
-	textRect, pos, err := DecodeRect(data, pos)
+	textRect, pos, err := DecodeRect(data, pos, windowEnd)
 	if err != nil {
 		return GuiWindowContentGeometry{}, offset, err
 	}
-	gutterRect, pos, err := DecodeRect(data, pos)
+	gutterRect, pos, err := DecodeRect(data, pos, windowEnd)
 	if err != nil {
 		return GuiWindowContentGeometry{}, offset, err
 	}
-	clipRect, pos, err := DecodeRect(data, pos)
+	clipRect, pos, err := DecodeRect(data, pos, windowEnd)
 	if err != nil {
 		return GuiWindowContentGeometry{}, offset, err
 	}
-	if err := decodeRequireLen(data, pos+4, "viewport_top"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+4, "viewport_top"); err != nil {
 		return GuiWindowContentGeometry{}, offset, err
 	}
 	viewportTop := decodeU32(data, pos)
 	pos += 4
-	if err := decodeRequireLen(data, pos+2, "viewport_left"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "viewport_left"); err != nil {
 		return GuiWindowContentGeometry{}, offset, err
 	}
 	viewportLeft := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+2, "viewport_rows"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "viewport_rows"); err != nil {
 		return GuiWindowContentGeometry{}, offset, err
 	}
 	viewportRows := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+2, "viewport_cols"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "viewport_cols"); err != nil {
 		return GuiWindowContentGeometry{}, offset, err
 	}
 	viewportCols := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+4, "viewport_total_lines"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+4, "viewport_total_lines"); err != nil {
 		return GuiWindowContentGeometry{}, offset, err
 	}
 	viewportTotalLines := decodeU32(data, pos)
 	pos += 4
-	if err := decodeRequireLen(data, pos+2, "viewport_visual_row_offset"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "viewport_visual_row_offset"); err != nil {
 		return GuiWindowContentGeometry{}, offset, err
 	}
 	viewportVisualRowOffset := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+4, "viewport_total_visual_rows"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+4, "viewport_total_visual_rows"); err != nil {
 		return GuiWindowContentGeometry{}, offset, err
 	}
 	viewportTotalVisualRows := decodeU32(data, pos)
 	pos += 4
-	if err := decodeRequireLen(data, pos+2, "line_number_width"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "line_number_width"); err != nil {
 		return GuiWindowContentGeometry{}, offset, err
 	}
 	lineNumberWidth := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+2, "sign_col_width"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "sign_col_width"); err != nil {
 		return GuiWindowContentGeometry{}, offset, err
 	}
 	signColWidth := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+1, "hit_regions count"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "hit_regions count"); err != nil {
 		return GuiWindowContentGeometry{}, offset, err
 	}
 	hitRegionsCount := int(data[pos])
 	pos += 1
-	if err := decodeRequireLen(data, pos+hitRegionsCount*11, "hit_regions"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+hitRegionsCount*11, "hit_regions"); err != nil {
 		return GuiWindowContentGeometry{}, offset, err
 	}
 	hitRegions := make([]HitRegion, 0, hitRegionsCount)
 	for i := 0; i < hitRegionsCount; i++ {
-		item, nextPos, err := DecodeHitRegion(data, pos)
+		item, nextPos, err := DecodeHitRegion(data, pos, windowEnd)
 		if err != nil {
 			return GuiWindowContentGeometry{}, offset, err
 		}
@@ -1607,14 +1617,14 @@ func DecodeGuiWindowContentGeometry(data []byte, offset int) (GuiWindowContentGe
 	}, pos, nil
 }
 
-func DecodeGuiWindowContentCursorline(data []byte, offset int) (GuiWindowContentCursorline, int, error) {
+func DecodeGuiWindowContentCursorline(data []byte, offset int, windowEnd int) (GuiWindowContentCursorline, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+2, "row"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "row"); err != nil {
 		return GuiWindowContentCursorline{}, offset, err
 	}
 	row := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+3, "bg"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+3, "bg"); err != nil {
 		return GuiWindowContentCursorline{}, offset, err
 	}
 	bg := decodeU24(data, pos)
@@ -1627,39 +1637,39 @@ func DecodeGuiWindowContentCursorline(data []byte, offset int) (GuiWindowContent
 
 // Section decoders for gui_window_rows_delta
 
-func DecodeGuiWindowRowsDeltaHeader(data []byte, offset int) (GuiWindowRowsDeltaHeader, int, error) {
+func DecodeGuiWindowRowsDeltaHeader(data []byte, offset int, windowEnd int) (GuiWindowRowsDeltaHeader, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+2, "window_id"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "window_id"); err != nil {
 		return GuiWindowRowsDeltaHeader{}, offset, err
 	}
 	windowID := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+4, "content_epoch"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+4, "content_epoch"); err != nil {
 		return GuiWindowRowsDeltaHeader{}, offset, err
 	}
 	contentEpoch := decodeU32(data, pos)
 	pos += 4
-	if err := decodeRequireLen(data, pos+1, "flags"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "flags"); err != nil {
 		return GuiWindowRowsDeltaHeader{}, offset, err
 	}
 	flags := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+2, "cursor_row"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "cursor_row"); err != nil {
 		return GuiWindowRowsDeltaHeader{}, offset, err
 	}
 	cursorRow := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+2, "cursor_col"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "cursor_col"); err != nil {
 		return GuiWindowRowsDeltaHeader{}, offset, err
 	}
 	cursorCol := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+1, "cursor_shape"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "cursor_shape"); err != nil {
 		return GuiWindowRowsDeltaHeader{}, offset, err
 	}
 	cursorShape := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+2, "scroll_left"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "scroll_left"); err != nil {
 		return GuiWindowRowsDeltaHeader{}, offset, err
 	}
 	scrollLeft := decodeU16(data, pos)
@@ -1675,16 +1685,16 @@ func DecodeGuiWindowRowsDeltaHeader(data []byte, offset int) (GuiWindowRowsDelta
 	}, pos, nil
 }
 
-func DecodeGuiWindowRowsDeltaRows(data []byte, offset int) ([]Row, int, error) {
+func DecodeGuiWindowRowsDeltaRows(data []byte, offset int, windowEnd int) ([]Row, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+2, "rows count"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "rows count"); err != nil {
 		return nil, offset, err
 	}
 	count := int(decodeU16(data, pos))
 	pos += 2
 	items := make([]Row, 0, min(count, len(data)-pos))
 	for i := 0; i < count; i++ {
-		item, nextPos, err := DecodeRow(data, pos)
+		item, nextPos, err := DecodeRow(data, pos, windowEnd)
 		if err != nil {
 			return nil, offset, err
 		}
@@ -1696,39 +1706,39 @@ func DecodeGuiWindowRowsDeltaRows(data []byte, offset int) ([]Row, int, error) {
 
 // Section decoders for gui_window_viewport_delta
 
-func DecodeGuiWindowViewportDeltaHeader(data []byte, offset int) (GuiWindowViewportDeltaHeader, int, error) {
+func DecodeGuiWindowViewportDeltaHeader(data []byte, offset int, windowEnd int) (GuiWindowViewportDeltaHeader, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+2, "window_id"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "window_id"); err != nil {
 		return GuiWindowViewportDeltaHeader{}, offset, err
 	}
 	windowID := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+4, "content_epoch"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+4, "content_epoch"); err != nil {
 		return GuiWindowViewportDeltaHeader{}, offset, err
 	}
 	contentEpoch := decodeU32(data, pos)
 	pos += 4
-	if err := decodeRequireLen(data, pos+1, "flags"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "flags"); err != nil {
 		return GuiWindowViewportDeltaHeader{}, offset, err
 	}
 	flags := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+2, "cursor_row"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "cursor_row"); err != nil {
 		return GuiWindowViewportDeltaHeader{}, offset, err
 	}
 	cursorRow := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+2, "cursor_col"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "cursor_col"); err != nil {
 		return GuiWindowViewportDeltaHeader{}, offset, err
 	}
 	cursorCol := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+1, "cursor_shape"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "cursor_shape"); err != nil {
 		return GuiWindowViewportDeltaHeader{}, offset, err
 	}
 	cursorShape := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+2, "scroll_left"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "scroll_left"); err != nil {
 		return GuiWindowViewportDeltaHeader{}, offset, err
 	}
 	scrollLeft := decodeU16(data, pos)
@@ -1744,16 +1754,16 @@ func DecodeGuiWindowViewportDeltaHeader(data []byte, offset int) (GuiWindowViewp
 	}, pos, nil
 }
 
-func DecodeGuiWindowViewportDeltaRows(data []byte, offset int) ([]Row, int, error) {
+func DecodeGuiWindowViewportDeltaRows(data []byte, offset int, windowEnd int) ([]Row, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+2, "rows count"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "rows count"); err != nil {
 		return nil, offset, err
 	}
 	count := int(decodeU16(data, pos))
 	pos += 2
 	items := make([]Row, 0, min(count, len(data)-pos))
 	for i := 0; i < count; i++ {
-		item, nextPos, err := DecodeRow(data, pos)
+		item, nextPos, err := DecodeRow(data, pos, windowEnd)
 		if err != nil {
 			return nil, offset, err
 		}
@@ -1765,14 +1775,14 @@ func DecodeGuiWindowViewportDeltaRows(data []byte, offset int) ([]Row, int, erro
 
 // Command field decoder for gui_tab_bar
 
-func DecodeGuiTabBarFields(data []byte, offset int) (GuiTabBarFields, int, error) {
+func DecodeGuiTabBarFields(data []byte, offset int, windowEnd int) (GuiTabBarFields, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+1, "active_index"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "active_index"); err != nil {
 		return GuiTabBarFields{}, offset, err
 	}
 	activeIndex := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+1, "tab_count"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "tab_count"); err != nil {
 		return GuiTabBarFields{}, offset, err
 	}
 	tabCount := data[pos]
@@ -1785,9 +1795,9 @@ func DecodeGuiTabBarFields(data []byte, offset int) (GuiTabBarFields, int, error
 
 // Command field decoder for gui_theme
 
-func DecodeGuiThemeFields(data []byte, offset int) (GuiThemeFields, int, error) {
+func DecodeGuiThemeFields(data []byte, offset int, windowEnd int) (GuiThemeFields, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+1, "color_count"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "color_count"); err != nil {
 		return GuiThemeFields{}, offset, err
 	}
 	colorCount := data[pos]
@@ -1799,16 +1809,16 @@ func DecodeGuiThemeFields(data []byte, offset int) (GuiThemeFields, int, error) 
 
 // Command field decoder for gui_breadcrumb
 
-func DecodeGuiBreadcrumbFields(data []byte, offset int) (GuiBreadcrumbFields, int, error) {
+func DecodeGuiBreadcrumbFields(data []byte, offset int, windowEnd int) (GuiBreadcrumbFields, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+1, "segments count"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "segments count"); err != nil {
 		return GuiBreadcrumbFields{}, offset, err
 	}
 	segmentsCount := int(data[pos])
 	pos += 1
 	segments := make([]string, 0, min(segmentsCount, len(data)-pos))
 	for i := 0; i < segmentsCount; i++ {
-		item, nextPos, err := decodeString16(data, pos)
+		item, nextPos, err := decodeString16Window(data, pos, windowEnd)
 		if err != nil {
 			return GuiBreadcrumbFields{}, offset, err
 		}
@@ -1822,9 +1832,9 @@ func DecodeGuiBreadcrumbFields(data []byte, offset int) (GuiBreadcrumbFields, in
 
 // Command field decoder for gui_completion
 
-func DecodeGuiCompletionFields(data []byte, offset int) (GuiCompletionFields, int, error) {
+func DecodeGuiCompletionFields(data []byte, offset int, windowEnd int) (GuiCompletionFields, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+1, "visible"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "visible"); err != nil {
 		return GuiCompletionFields{}, offset, err
 	}
 	visible := data[pos]
@@ -1834,29 +1844,29 @@ func DecodeGuiCompletionFields(data []byte, offset int) (GuiCompletionFields, in
 	var selectedOffset uint16
 	var items []CompletionItem
 	if visible == 1 {
-		if err := decodeRequireLen(data, pos+2, "cursor_row"); err != nil {
+		if err := decodeRequireWindow(windowEnd, pos+2, "cursor_row"); err != nil {
 			return GuiCompletionFields{}, offset, err
 		}
 		cursorRow = decodeU16(data, pos)
 		pos += 2
-		if err := decodeRequireLen(data, pos+2, "cursor_col"); err != nil {
+		if err := decodeRequireWindow(windowEnd, pos+2, "cursor_col"); err != nil {
 			return GuiCompletionFields{}, offset, err
 		}
 		cursorCol = decodeU16(data, pos)
 		pos += 2
-		if err := decodeRequireLen(data, pos+2, "selected_offset"); err != nil {
+		if err := decodeRequireWindow(windowEnd, pos+2, "selected_offset"); err != nil {
 			return GuiCompletionFields{}, offset, err
 		}
 		selectedOffset = decodeU16(data, pos)
 		pos += 2
-		if err := decodeRequireLen(data, pos+2, "items count"); err != nil {
+		if err := decodeRequireWindow(windowEnd, pos+2, "items count"); err != nil {
 			return GuiCompletionFields{}, offset, err
 		}
 		itemsCount := int(decodeU16(data, pos))
 		pos += 2
 		items = make([]CompletionItem, 0, min(itemsCount, len(data)-pos))
 		for i := 0; i < itemsCount; i++ {
-			item, nextPos, err := DecodeCompletionItem(data, pos)
+			item, nextPos, err := DecodeCompletionItem(data, pos, windowEnd)
 			if err != nil {
 				return GuiCompletionFields{}, offset, err
 			}
@@ -1875,9 +1885,9 @@ func DecodeGuiCompletionFields(data []byte, offset int) (GuiCompletionFields, in
 
 // Command field decoder for gui_which_key
 
-func DecodeGuiWhichKeyFields(data []byte, offset int) (GuiWhichKeyFields, int, error) {
+func DecodeGuiWhichKeyFields(data []byte, offset int, windowEnd int) (GuiWhichKeyFields, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+1, "visible"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "visible"); err != nil {
 		return GuiWhichKeyFields{}, offset, err
 	}
 	visible := data[pos]
@@ -1889,9 +1899,9 @@ func DecodeGuiWhichKeyFields(data []byte, offset int) (GuiWhichKeyFields, int, e
 
 // Command field decoder for gui_minibuffer
 
-func DecodeGuiMinibufferFields(data []byte, offset int) (GuiMinibufferFields, int, error) {
+func DecodeGuiMinibufferFields(data []byte, offset int, windowEnd int) (GuiMinibufferFields, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+1, "visible"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "visible"); err != nil {
 		return GuiMinibufferFields{}, offset, err
 	}
 	visible := data[pos]
@@ -1903,9 +1913,9 @@ func DecodeGuiMinibufferFields(data []byte, offset int) (GuiMinibufferFields, in
 
 // Command field decoder for gui_hover_popup
 
-func DecodeGuiHoverPopupFields(data []byte, offset int) (GuiHoverPopupFields, int, error) {
+func DecodeGuiHoverPopupFields(data []byte, offset int, windowEnd int) (GuiHoverPopupFields, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+1, "visible"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "visible"); err != nil {
 		return GuiHoverPopupFields{}, offset, err
 	}
 	visible := data[pos]
@@ -1917,9 +1927,9 @@ func DecodeGuiHoverPopupFields(data []byte, offset int) (GuiHoverPopupFields, in
 
 // Command field decoder for gui_signature_help
 
-func DecodeGuiSignatureHelpFields(data []byte, offset int) (GuiSignatureHelpFields, int, error) {
+func DecodeGuiSignatureHelpFields(data []byte, offset int, windowEnd int) (GuiSignatureHelpFields, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+1, "visible"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "visible"); err != nil {
 		return GuiSignatureHelpFields{}, offset, err
 	}
 	visible := data[pos]
@@ -1931,9 +1941,9 @@ func DecodeGuiSignatureHelpFields(data []byte, offset int) (GuiSignatureHelpFiel
 
 // Command field decoder for gui_float_popup
 
-func DecodeGuiFloatPopupFields(data []byte, offset int) (GuiFloatPopupFields, int, error) {
+func DecodeGuiFloatPopupFields(data []byte, offset int, windowEnd int) (GuiFloatPopupFields, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+1, "visible"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "visible"); err != nil {
 		return GuiFloatPopupFields{}, offset, err
 	}
 	visible := data[pos]
@@ -1945,14 +1955,14 @@ func DecodeGuiFloatPopupFields(data []byte, offset int) (GuiFloatPopupFields, in
 
 // Command field decoder for gui_split_separators
 
-func DecodeGuiSplitSeparatorsFields(data []byte, offset int) (GuiSplitSeparatorsFields, int, error) {
+func DecodeGuiSplitSeparatorsFields(data []byte, offset int, windowEnd int) (GuiSplitSeparatorsFields, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+3, "bg"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+3, "bg"); err != nil {
 		return GuiSplitSeparatorsFields{}, offset, err
 	}
 	bg := decodeU24(data, pos)
 	pos += 3
-	if err := decodeRequireLen(data, pos+1, "vertical_count"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "vertical_count"); err != nil {
 		return GuiSplitSeparatorsFields{}, offset, err
 	}
 	verticalCount := data[pos]
@@ -1965,59 +1975,59 @@ func DecodeGuiSplitSeparatorsFields(data []byte, offset int) (GuiSplitSeparators
 
 // Command field decoder for gui_git_status
 
-func DecodeGuiGitStatusFields(data []byte, offset int) (GuiGitStatusFields, int, error) {
+func DecodeGuiGitStatusFields(data []byte, offset int, windowEnd int) (GuiGitStatusFields, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+1, "repo_state"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "repo_state"); err != nil {
 		return GuiGitStatusFields{}, offset, err
 	}
 	repoState := GitRepoState(data[pos])
 	pos++
-	if err := decodeRequireLen(data, pos+1, "syncing"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "syncing"); err != nil {
 		return GuiGitStatusFields{}, offset, err
 	}
 	syncing := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+2, "ahead"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "ahead"); err != nil {
 		return GuiGitStatusFields{}, offset, err
 	}
 	ahead := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+2, "behind"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "behind"); err != nil {
 		return GuiGitStatusFields{}, offset, err
 	}
 	behind := decodeU16(data, pos)
 	pos += 2
-	branch, pos, err := decodeString16(data, pos)
+	branch, pos, err := decodeString16Window(data, pos, windowEnd)
 	if err != nil {
 		return GuiGitStatusFields{}, offset, err
 	}
-	if err := decodeRequireLen(data, pos+2, "entries count"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "entries count"); err != nil {
 		return GuiGitStatusFields{}, offset, err
 	}
 	entriesCount := int(decodeU16(data, pos))
 	pos += 2
 	entries := make([]GitStatusEntry, 0, min(entriesCount, len(data)-pos))
 	for i := 0; i < entriesCount; i++ {
-		item, nextPos, err := DecodeGitStatusEntry(data, pos)
+		item, nextPos, err := DecodeGitStatusEntry(data, pos, windowEnd)
 		if err != nil {
 			return GuiGitStatusFields{}, offset, err
 		}
 		pos = nextPos
 		entries = append(entries, item)
 	}
-	toast, pos, err := DecodeGitToast(data, pos)
+	toast, pos, err := DecodeGitToast(data, pos, windowEnd)
 	if err != nil {
 		return GuiGitStatusFields{}, offset, err
 	}
-	entryBasePath, pos, err := decodeString16(data, pos)
+	entryBasePath, pos, err := decodeString16Window(data, pos, windowEnd)
 	if err != nil {
 		return GuiGitStatusFields{}, offset, err
 	}
-	lastCommitMessage, pos, err := decodeString16(data, pos)
+	lastCommitMessage, pos, err := decodeString16Window(data, pos, windowEnd)
 	if err != nil {
 		return GuiGitStatusFields{}, offset, err
 	}
-	if err := decodeRequireLen(data, pos+2, "stash_count"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "stash_count"); err != nil {
 		return GuiGitStatusFields{}, offset, err
 	}
 	stashCount := decodeU16(data, pos)
@@ -2038,9 +2048,9 @@ func DecodeGuiGitStatusFields(data []byte, offset int) (GuiGitStatusFields, int,
 
 // Command field decoder for gui_bottom_panel
 
-func DecodeGuiBottomPanelFields(data []byte, offset int) (GuiBottomPanelFields, int, error) {
+func DecodeGuiBottomPanelFields(data []byte, offset int, windowEnd int) (GuiBottomPanelFields, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+1, "visible"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "visible"); err != nil {
 		return GuiBottomPanelFields{}, offset, err
 	}
 	visible := data[pos]
@@ -2052,19 +2062,19 @@ func DecodeGuiBottomPanelFields(data []byte, offset int) (GuiBottomPanelFields, 
 
 // Command field decoder for gui_change_summary
 
-func DecodeGuiChangeSummaryFields(data []byte, offset int) (GuiChangeSummaryFields, int, error) {
+func DecodeGuiChangeSummaryFields(data []byte, offset int, windowEnd int) (GuiChangeSummaryFields, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+1, "visible"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "visible"); err != nil {
 		return GuiChangeSummaryFields{}, offset, err
 	}
 	visible := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+2, "selected_index"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "selected_index"); err != nil {
 		return GuiChangeSummaryFields{}, offset, err
 	}
 	selectedIndex := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+2, "entry_count"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "entry_count"); err != nil {
 		return GuiChangeSummaryFields{}, offset, err
 	}
 	entryCount := decodeU16(data, pos)
@@ -2078,9 +2088,9 @@ func DecodeGuiChangeSummaryFields(data []byte, offset int) (GuiChangeSummaryFiel
 
 // Command field decoder for gui_agent_context
 
-func DecodeGuiAgentContextFields(data []byte, offset int) (GuiAgentContextFields, int, error) {
+func DecodeGuiAgentContextFields(data []byte, offset int, windowEnd int) (GuiAgentContextFields, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+1, "visible"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "visible"); err != nil {
 		return GuiAgentContextFields{}, offset, err
 	}
 	visible := data[pos]
@@ -2092,14 +2102,14 @@ func DecodeGuiAgentContextFields(data []byte, offset int) (GuiAgentContextFields
 
 // Command field decoder for gui_gutter_sep
 
-func DecodeGuiGutterSepFields(data []byte, offset int) (GuiGutterSepFields, int, error) {
+func DecodeGuiGutterSepFields(data []byte, offset int, windowEnd int) (GuiGutterSepFields, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+2, "col"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "col"); err != nil {
 		return GuiGutterSepFields{}, offset, err
 	}
 	col := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+3, "bg"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+3, "bg"); err != nil {
 		return GuiGutterSepFields{}, offset, err
 	}
 	bg := decodeU24(data, pos)
@@ -2112,14 +2122,14 @@ func DecodeGuiGutterSepFields(data []byte, offset int) (GuiGutterSepFields, int,
 
 // Command field decoder for gui_cursorline
 
-func DecodeGuiCursorlineFields(data []byte, offset int) (GuiCursorlineFields, int, error) {
+func DecodeGuiCursorlineFields(data []byte, offset int, windowEnd int) (GuiCursorlineFields, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+2, "col"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "col"); err != nil {
 		return GuiCursorlineFields{}, offset, err
 	}
 	col := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+3, "bg"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+3, "bg"); err != nil {
 		return GuiCursorlineFields{}, offset, err
 	}
 	bg := decodeU24(data, pos)
@@ -2132,24 +2142,24 @@ func DecodeGuiCursorlineFields(data []byte, offset int) (GuiCursorlineFields, in
 
 // Command field decoder for gui_search_state
 
-func DecodeGuiSearchStateFields(data []byte, offset int) (GuiSearchStateFields, int, error) {
+func DecodeGuiSearchStateFields(data []byte, offset int, windowEnd int) (GuiSearchStateFields, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+1, "active"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "active"); err != nil {
 		return GuiSearchStateFields{}, offset, err
 	}
 	active := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+2, "match_count"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "match_count"); err != nil {
 		return GuiSearchStateFields{}, offset, err
 	}
 	matchCount := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+2, "current_index"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "current_index"); err != nil {
 		return GuiSearchStateFields{}, offset, err
 	}
 	currentIndex := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+1, "flags"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "flags"); err != nil {
 		return GuiSearchStateFields{}, offset, err
 	}
 	flags := data[pos]
@@ -2164,19 +2174,19 @@ func DecodeGuiSearchStateFields(data []byte, offset int) (GuiSearchStateFields, 
 
 // Command field decoder for gui_edit_timeline
 
-func DecodeGuiEditTimelineFields(data []byte, offset int) (GuiEditTimelineFields, int, error) {
+func DecodeGuiEditTimelineFields(data []byte, offset int, windowEnd int) (GuiEditTimelineFields, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+1, "visible"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "visible"); err != nil {
 		return GuiEditTimelineFields{}, offset, err
 	}
 	visible := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+2, "viewing_index"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "viewing_index"); err != nil {
 		return GuiEditTimelineFields{}, offset, err
 	}
 	viewingIndex := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+1, "entry_count"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "entry_count"); err != nil {
 		return GuiEditTimelineFields{}, offset, err
 	}
 	entryCount := data[pos]
@@ -2190,29 +2200,29 @@ func DecodeGuiEditTimelineFields(data []byte, offset int) (GuiEditTimelineFields
 
 // Command field decoder for gui_workspaces
 
-func DecodeGuiWorkspacesFields(data []byte, offset int) (GuiWorkspacesFields, int, error) {
+func DecodeGuiWorkspacesFields(data []byte, offset int, windowEnd int) (GuiWorkspacesFields, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+1, "visible"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "visible"); err != nil {
 		return GuiWorkspacesFields{}, offset, err
 	}
 	visible := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+2, "active_workspace_id"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "active_workspace_id"); err != nil {
 		return GuiWorkspacesFields{}, offset, err
 	}
 	activeWorkspaceID := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireLen(data, pos+1, "mode"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "mode"); err != nil {
 		return GuiWorkspacesFields{}, offset, err
 	}
 	mode := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+1, "flags"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "flags"); err != nil {
 		return GuiWorkspacesFields{}, offset, err
 	}
 	flags := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+1, "workspace_count"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "workspace_count"); err != nil {
 		return GuiWorkspacesFields{}, offset, err
 	}
 	workspaceCount := data[pos]
@@ -2228,14 +2238,14 @@ func DecodeGuiWorkspacesFields(data []byte, offset int) (GuiWorkspacesFields, in
 
 // Command field decoder for gui_notifications
 
-func DecodeGuiNotificationsFields(data []byte, offset int) (GuiNotificationsFields, int, error) {
+func DecodeGuiNotificationsFields(data []byte, offset int, windowEnd int) (GuiNotificationsFields, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+1, "visible"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "visible"); err != nil {
 		return GuiNotificationsFields{}, offset, err
 	}
 	visible := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+2, "notification_count"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "notification_count"); err != nil {
 		return GuiNotificationsFields{}, offset, err
 	}
 	notificationCount := decodeU16(data, pos)
@@ -2248,14 +2258,14 @@ func DecodeGuiNotificationsFields(data []byte, offset int) (GuiNotificationsFiel
 
 // Command field decoder for gui_sidebars
 
-func DecodeGuiSidebarsFields(data []byte, offset int) (GuiSidebarsFields, int, error) {
+func DecodeGuiSidebarsFields(data []byte, offset int, windowEnd int) (GuiSidebarsFields, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+1, "visible"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "visible"); err != nil {
 		return GuiSidebarsFields{}, offset, err
 	}
 	visible := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+2, "sidebar_count"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "sidebar_count"); err != nil {
 		return GuiSidebarsFields{}, offset, err
 	}
 	sidebarCount := decodeU16(data, pos)
@@ -2268,9 +2278,9 @@ func DecodeGuiSidebarsFields(data []byte, offset int) (GuiSidebarsFields, int, e
 
 // Command field decoder for gui_extension_overlay
 
-func DecodeGuiExtensionOverlayFields(data []byte, offset int) (GuiExtensionOverlayFields, int, error) {
+func DecodeGuiExtensionOverlayFields(data []byte, offset int, windowEnd int) (GuiExtensionOverlayFields, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+1, "entry_count"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "entry_count"); err != nil {
 		return GuiExtensionOverlayFields{}, offset, err
 	}
 	entryCount := data[pos]
@@ -2282,9 +2292,9 @@ func DecodeGuiExtensionOverlayFields(data []byte, offset int) (GuiExtensionOverl
 
 // Command field decoder for gui_extension_panel
 
-func DecodeGuiExtensionPanelFields(data []byte, offset int) (GuiExtensionPanelFields, int, error) {
+func DecodeGuiExtensionPanelFields(data []byte, offset int, windowEnd int) (GuiExtensionPanelFields, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+1, "panel_count"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "panel_count"); err != nil {
 		return GuiExtensionPanelFields{}, offset, err
 	}
 	panelCount := data[pos]
@@ -2296,19 +2306,19 @@ func DecodeGuiExtensionPanelFields(data []byte, offset int) (GuiExtensionPanelFi
 
 // Command field decoder for gui_file_tree
 
-func DecodeGuiFileTreeFields(data []byte, offset int) (GuiFileTreeFields, int, error) {
+func DecodeGuiFileTreeFields(data []byte, offset int, windowEnd int) (GuiFileTreeFields, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+1, "visible"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "visible"); err != nil {
 		return GuiFileTreeFields{}, offset, err
 	}
 	visible := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+1, "flags"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "flags"); err != nil {
 		return GuiFileTreeFields{}, offset, err
 	}
 	flags := data[pos]
 	pos++
-	if err := decodeRequireLen(data, pos+1, "status"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "status"); err != nil {
 		return GuiFileTreeFields{}, offset, err
 	}
 	status := data[pos]
@@ -2322,9 +2332,9 @@ func DecodeGuiFileTreeFields(data []byte, offset int) (GuiFileTreeFields, int, e
 
 // Command field decoder for gui_tool_manager
 
-func DecodeGuiToolManagerFields(data []byte, offset int) (GuiToolManagerFields, int, error) {
+func DecodeGuiToolManagerFields(data []byte, offset int, windowEnd int) (GuiToolManagerFields, int, error) {
 	pos := offset
-	if err := decodeRequireLen(data, pos+1, "visible"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "visible"); err != nil {
 		return GuiToolManagerFields{}, offset, err
 	}
 	visible := data[pos]

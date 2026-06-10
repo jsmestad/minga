@@ -291,6 +291,44 @@ defmodule Minga.Test.ProtocolGolden do
           title: "",
           marked_count: 3
         }
+      },
+      # Short-section tolerance fixtures (ticket #2225). The Elixir encoder always
+      # emits the full header tail, so these payloads are hand-crafted to model a
+      # peer that emits a shorter header (an older or newer frontend). They prove
+      # the generated decoder reads the `optional` title/marked_count tail only
+      # when the section window has room, degrading absent fields to their zero
+      # value, exactly as the hand-written frontend decoders do.
+      %{
+        name: "picker_header_short_no_marked_count",
+        decoder: "GuiPickerHeader",
+        # visible(1) selected(2) filtered(2) total(2) has_preview(1) title("Files")
+        # but no marked_count tail.
+        payload: <<1, 0, 2, 0, 10, 0, 100, 1, 0, 5, "Files">>,
+        expected: %{
+          visible: 1,
+          selected_index: 2,
+          filtered_count: 10,
+          total_count: 100,
+          has_preview: 1,
+          title: "Files",
+          marked_count: 0
+        }
+      },
+      %{
+        name: "picker_header_short_no_title",
+        decoder: "GuiPickerHeader",
+        # Header truncated right after has_preview: both title and marked_count
+        # are absent and decode to their zero value.
+        payload: <<1, 0, 2, 0, 10, 0, 100, 1>>,
+        expected: %{
+          visible: 1,
+          selected_index: 2,
+          filtered_count: 10,
+          total_count: 100,
+          has_preview: 1,
+          title: "",
+          marked_count: 0
+        }
       }
     ]
   end
