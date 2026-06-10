@@ -180,7 +180,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
           content_w: 10,
           has_sign_column: true,
           is_active: true,
-          is_gui: false,
+          is_semantic: false,
           wrap_on: false,
           line_number_style: :absolute,
           width_oracle: oracle

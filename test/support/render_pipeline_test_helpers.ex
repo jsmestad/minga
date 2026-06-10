@@ -88,7 +88,7 @@ defmodule MingaEditor.RenderPipeline.TestHelpers do
   @spec gui_state(keyword()) :: EditorState.t()
   def gui_state(opts \\ []) do
     state = base_state(opts)
-    %{state | capabilities: %Capabilities{frontend_type: :native_gui}}
+    %{state | capabilities: %Capabilities{frontend_type: :native_gui, semantic_ui: true}}
   end
 
   @doc """

@@ -3,69 +3,81 @@ defmodule MingaEditor.Commands.UI.FrontendTest do
 
   alias MingaEditor.BottomPanel
   alias MingaEditor.Commands
-  alias MingaEditor.Commands.UI.GUI, as: UIGUI
-  alias MingaEditor.Commands.UI.TUI, as: UITUI
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Viewport
 
-  defp base_state do
+  # The bottom-panel and observatory commands no longer branch on the frontend.
+  # Both the macOS GUI and the Go TUI advertise `semantic_ui` and share the same
+  # behaviour; only the legacy Zig cell-grid frontend (no `semantic_ui`) is
+  # excluded. These tests drive the collapsed dispatch through `Commands.execute/2`.
+  @gui %Capabilities{frontend_type: :native_gui, semantic_ui: true}
+  @go_tui %Capabilities{frontend_type: :tui, semantic_ui: true}
+  @zig %Capabilities{frontend_type: :tui, semantic_ui: false}
+
+  defp base_state(caps) do
     %EditorState{
       port_manager: self(),
+      capabilities: caps,
       workspace: %SessionState{viewport: Viewport.new(24, 80)},
-      capabilities: %Capabilities{frontend_type: :native_gui},
       shell_state: %MingaEditor.Shell.Traditional.State{bottom_panel: %BottomPanel{}}
     }
   end
 
-  describe "GUI.toggle_bottom_panel/1" do
-    test "opens panel when hidden" do
-      state = UIGUI.toggle_bottom_panel(base_state())
-      assert state.shell_state.bottom_panel.visible == true
-    end
+  describe "bottom panel commands" do
+    for {label, caps} <- [{"GUI", @gui}, {"Go TUI", @go_tui}] do
+      test "#{label} toggle_bottom_panel opens panel when hidden" do
+        state = Commands.execute(base_state(unquote(Macro.escape(caps))), :toggle_bottom_panel)
+        assert state.shell_state.bottom_panel.visible == true
+      end
 
-    test "closes panel when visible" do
-      state = MingaEditor.State.set_bottom_panel(base_state(), %BottomPanel{visible: true})
-      state = UIGUI.toggle_bottom_panel(state)
-      assert state.shell_state.bottom_panel.visible == false
-    end
-  end
+      test "#{label} toggle_bottom_panel closes panel when visible" do
+        state =
+          MingaEditor.State.set_bottom_panel(
+            base_state(unquote(Macro.escape(caps))),
+            %BottomPanel{visible: true}
+          )
 
-  describe "GUI.bottom_panel_next_tab/1" do
-    test "cycles to next tab" do
-      state =
-        MingaEditor.State.set_bottom_panel(
-          base_state(),
-          %BottomPanel{tabs: [:messages, :diagnostics], active_tab: :messages}
-        )
+        state = Commands.execute(state, :toggle_bottom_panel)
+        assert state.shell_state.bottom_panel.visible == false
+      end
 
-      state = UIGUI.bottom_panel_next_tab(state)
-      assert state.shell_state.bottom_panel.active_tab == :diagnostics
-    end
-  end
+      test "#{label} bottom_panel_next_tab cycles to next tab" do
+        state =
+          MingaEditor.State.set_bottom_panel(
+            base_state(unquote(Macro.escape(caps))),
+            %BottomPanel{tabs: [:messages, :diagnostics], active_tab: :messages}
+          )
 
-  describe "GUI.bottom_panel_prev_tab/1" do
-    test "cycles to previous tab" do
-      state =
-        MingaEditor.State.set_bottom_panel(
-          base_state(),
-          %BottomPanel{tabs: [:messages, :diagnostics], active_tab: :diagnostics}
-        )
+        state = Commands.execute(state, :bottom_panel_next_tab)
+        assert state.shell_state.bottom_panel.active_tab == :diagnostics
+      end
 
-      state = UIGUI.bottom_panel_prev_tab(state)
-      assert state.shell_state.bottom_panel.active_tab == :messages
+      test "#{label} bottom_panel_prev_tab cycles to previous tab" do
+        state =
+          MingaEditor.State.set_bottom_panel(
+            base_state(unquote(Macro.escape(caps))),
+            %BottomPanel{tabs: [:messages, :diagnostics], active_tab: :diagnostics}
+          )
+
+        state = Commands.execute(state, :bottom_panel_prev_tab)
+        assert state.shell_state.bottom_panel.active_tab == :messages
+      end
     end
   end
 
   describe "toggle_beam_observatory command" do
-    test "opens the observatory and stores a refresh timer" do
-      state = Commands.execute(base_state(), :toggle_beam_observatory)
+    for {label, caps} <- [{"GUI", @gui}, {"Go TUI", @go_tui}] do
+      test "#{label} opens the observatory and stores a refresh timer" do
+        state =
+          Commands.execute(base_state(unquote(Macro.escape(caps))), :toggle_beam_observatory)
 
-      assert state.shell_state.observatory_visible == true
-      assert {timer, _token} = state.shell_state.observatory_timer
+        assert state.shell_state.observatory_visible == true
+        assert {timer, _token} = state.shell_state.observatory_timer
 
-      Process.cancel_timer(timer)
+        Process.cancel_timer(timer)
+      end
     end
 
     test "closes the observatory and clears transient state" do
@@ -73,10 +85,10 @@ defmodule MingaEditor.Commands.UI.FrontendTest do
       timer = Process.send_after(self(), {:observatory_tick, token}, 60_000)
 
       state = %{
-        base_state()
+        base_state(@gui)
         | shell_state:
             MingaEditor.Shell.Traditional.State.open_observatory(
-              base_state().shell_state,
+              base_state(@gui).shell_state,
               {timer, token}
             )
       }
@@ -89,54 +101,25 @@ defmodule MingaEditor.Commands.UI.FrontendTest do
       assert state.shell_state.observatory_data == nil
     end
 
-    test "is a no-op for non-GUI frontends" do
-      state = %{base_state() | capabilities: %Capabilities{frontend_type: :tui}}
+    test "is a no-op for the legacy Zig cell-grid frontend (no semantic_ui)" do
+      state = base_state(@zig)
 
       assert Commands.execute(state, :toggle_beam_observatory) == state
     end
 
     test "is a no-op when the active shell has no observatory fields" do
-      state = %{base_state() | shell_state: %{}}
+      state = %{base_state(@gui) | shell_state: %{}}
 
       assert Commands.execute(state, :toggle_beam_observatory) == state
     end
 
     test "ignores stale refresh ticks" do
-      state = Commands.execute(base_state(), :toggle_beam_observatory)
+      state = Commands.execute(base_state(@gui), :toggle_beam_observatory)
       assert {timer, _token} = state.shell_state.observatory_timer
 
       assert {:noreply, ^state} = MingaEditor.handle_info({:observatory_tick, make_ref()}, state)
 
       Process.cancel_timer(timer)
-    end
-  end
-
-  describe "TUI bottom panel commands" do
-    test "toggle_bottom_panel opens panel when hidden" do
-      state = UITUI.toggle_bottom_panel(base_state())
-      assert state.shell_state.bottom_panel.visible == true
-    end
-
-    test "bottom_panel_next_tab cycles to next tab" do
-      state =
-        MingaEditor.State.set_bottom_panel(
-          base_state(),
-          %BottomPanel{tabs: [:messages, :diagnostics], active_tab: :messages}
-        )
-
-      state = UITUI.bottom_panel_next_tab(state)
-      assert state.shell_state.bottom_panel.active_tab == :diagnostics
-    end
-
-    test "bottom_panel_prev_tab cycles to previous tab" do
-      state =
-        MingaEditor.State.set_bottom_panel(
-          base_state(),
-          %BottomPanel{tabs: [:messages, :diagnostics], active_tab: :diagnostics}
-        )
-
-      state = UITUI.bottom_panel_prev_tab(state)
-      assert state.shell_state.bottom_panel.active_tab == :messages
     end
   end
 end

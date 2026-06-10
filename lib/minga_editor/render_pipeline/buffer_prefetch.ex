@@ -479,7 +479,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
           Minga.Buffer.RenderSnapshot.t()
         ) :: {non_neg_integer() | nil, Window.t()}
   defp total_visual_rows_for_frontend(state, window, true, nil, content_w, oracle, snapshot) do
-    if Capabilities.gui?(state.capabilities) do
+    if Capabilities.semantic_ui?(state.capabilities) do
       key = total_visual_rows_cache_key(snapshot, content_w, oracle)
 
       case Window.cached_total_visual_rows(window, key) do

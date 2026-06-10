@@ -695,7 +695,13 @@ defmodule MingaEditor.LayoutTest do
 
   describe "GUI layout (compute_gui)" do
     defp with_gui_caps(state) do
-      %{state | capabilities: %MingaEditor.Frontend.Capabilities{frontend_type: :native_gui}}
+      %{
+        state
+        | capabilities: %MingaEditor.Frontend.Capabilities{
+            frontend_type: :native_gui,
+            semantic_ui: true
+          }
+      }
     end
 
     test "editor area starts at row 0 (no tab bar row)" do

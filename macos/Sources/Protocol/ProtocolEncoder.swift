@@ -275,19 +275,26 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send the ready event with initial dimensions and capabilities.
+    ///
+    /// The macOS GUI renders every surface through the semantic protocol
+    /// (`gui_window_content` and the `gui_*` chrome opcodes via
+    /// `WindowContentRenderer`/`CommandDispatcher`), so it advertises
+    /// `semantic_ui = true`. The BEAM uses this capability, not `frontend_type`,
+    /// to select the semantic render/chrome path shared with the Go TUI.
     func sendReady(cols: UInt16, rows: UInt16) {
-        var buf = Data(count: 13)
+        var buf = Data(count: 14)
         buf[0] = OP_READY
         writeU16(&buf, 1, cols)
         writeU16(&buf, 3, rows)
         buf[5] = CAPS_VERSION
-        buf[6] = 6 // 6 capability fields
+        buf[6] = 7 // 7 capability fields
         buf[7] = FRONTEND_NATIVE_GUI
         buf[8] = COLOR_RGB
         buf[9] = UNICODE_15
         buf[10] = IMAGE_NATIVE
         buf[11] = FLOAT_NATIVE
         buf[12] = TEXT_PROPORTIONAL
+        buf[13] = SEMANTIC_UI_ENABLED
         writeFrame(buf)
     }
 

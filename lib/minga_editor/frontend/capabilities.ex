@@ -44,7 +44,7 @@ defmodule MingaEditor.Frontend.Capabilities do
   @spec default() :: t()
   def default, do: %__MODULE__{}
 
-  @doc "Decodes capability fields from the binary payload (6 bytes)."
+  @doc "Decodes capability fields from the binary payload (7 bytes with semantic_ui; 6- and 5-byte legacy forms decode with semantic_ui false)."
   @spec from_binary(binary()) :: t()
   def from_binary(
         <<frontend_type::8, color_depth::8, unicode_width::8, image_support::8, float_support::8,

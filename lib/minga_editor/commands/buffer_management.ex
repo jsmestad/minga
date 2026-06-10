@@ -17,6 +17,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   alias Minga.Buffer.Document
   alias Minga.Config
 
+  alias MingaEditor.BottomPanel
   alias MingaEditor.Commands
   alias MingaEditor.Commands.Helpers
   alias MingaEditor.Commands.Movement
@@ -175,8 +176,8 @@ defmodule MingaEditor.Commands.BufferManagement do
     end
   end
 
-  def execute(state, :view_messages), do: frontend(state).view_messages(state)
-  def execute(state, :view_warnings), do: frontend(state).view_warnings(state)
+  def execute(state, :view_messages), do: view_messages(state)
+  def execute(state, :view_warnings), do: view_warnings(state)
 
   def execute(state, {:open_special_buffer, buffer_name, buffer_pid})
       when is_binary(buffer_name) and is_pid(buffer_pid) do
@@ -2335,8 +2336,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   # matching popup rule exists, otherwise falls back to normal buffer switching.
   # If the buffer is already open in a popup, toggles it closed.
   @doc """
-  Opens a special buffer in a popup window (TUI) or switches to it.
-  Public so `BufferManagement.TUI` can call it for TUI fallback paths.
+  Opens a special buffer in a popup window or switches to it.
   """
   @spec open_special_buffer(state(), String.t(), pid()) :: state()
   def open_special_buffer(state, buffer_name, buffer_pid) do
@@ -2486,11 +2486,18 @@ defmodule MingaEditor.Commands.BufferManagement do
     option_toggle: :show_invisible
   )
 
-  # ── Frontend dispatch ─────────────────────────────────────────────────────
+  # ── Message panel commands ────────────────────────────────────────────────
 
-  @spec frontend(state()) :: module()
-  defp frontend(%{capabilities: caps}) do
-    if MingaEditor.Frontend.gui?(caps), do: __MODULE__.GUI, else: __MODULE__.TUI
+  @spec view_messages(state()) :: state()
+  defp view_messages(state) do
+    new_panel = state |> EditorState.bottom_panel() |> BottomPanel.show(:messages)
+    EditorState.set_bottom_panel(state, new_panel)
+  end
+
+  @spec view_warnings(state()) :: state()
+  defp view_warnings(state) do
+    new_panel = state |> EditorState.bottom_panel() |> BottomPanel.show(:messages, :warnings)
+    EditorState.set_bottom_panel(state, new_panel)
   end
 
   # In headless mode, apply highlight setup synchronously; otherwise defer.

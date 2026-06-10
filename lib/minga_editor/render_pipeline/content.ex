@@ -127,7 +127,7 @@ defmodule MingaEditor.RenderPipeline.Content do
         decorations: snapshot.decorations,
         git_signs: scroll.git_signs,
         is_active: is_active,
-        is_gui: MingaEditor.Frontend.gui?(state.capabilities),
+        is_semantic: MingaEditor.Frontend.semantic_ui?(state.capabilities),
         wrap_on: wrap_on,
         line_number_style: line_number_style,
         width_oracle: width_oracle
@@ -139,10 +139,10 @@ defmodule MingaEditor.RenderPipeline.Content do
     ctx_fp = ContentHelpers.context_fingerprint(render_ctx, is_active)
     window = Window.detect_context_change(window, ctx_fp)
 
-    gui? = MingaEditor.Frontend.gui?(state.capabilities)
+    semantic? = MingaEditor.Frontend.semantic_ui?(state.capabilities)
 
-    # Render lines with dirty-aware loop. GUI buffer windows build the canonical window model below
-    # instead of building throwaway DisplayList draw layers.
+    # Render lines with dirty-aware loop. Semantic frontends build the canonical window model below
+    # instead of building throwaway DisplayList draw layers; only the legacy Zig cell frontend needs them.
     line_opts = %{
       first_line: first_line,
       cursor_line: cursor_line,
@@ -161,7 +161,7 @@ defmodule MingaEditor.RenderPipeline.Content do
     }
 
     {gutter_layer, line_layer, rows_used, window} =
-      if gui? do
+      if semantic? do
         {%{}, %{}, visible_rows, window}
       else
         render_display_layers(lines, visible_rows, line_opts, scroll, wrap_on, window)
@@ -236,9 +236,9 @@ defmodule MingaEditor.RenderPipeline.Content do
 
     win_frame = %WindowFrame{
       rect: {0, 0, content_width, content_height},
-      gutter: if(gui?, do: %{}, else: gutter_layer),
-      lines: if(gui?, do: %{}, else: line_layer),
-      tilde_lines: if(gui?, do: %{}, else: DisplayList.draws_to_layer_sorted(tilde_draws)),
+      gutter: if(semantic?, do: %{}, else: gutter_layer),
+      lines: if(semantic?, do: %{}, else: line_layer),
+      tilde_lines: if(semantic?, do: %{}, else: DisplayList.draws_to_layer_sorted(tilde_draws)),
       modeline: %{},
       cursor: buf_cursor,
       window_model: window_model
@@ -570,7 +570,7 @@ defmodule MingaEditor.RenderPipeline.Content do
         content_w: content_w,
         has_sign_column: true,
         is_active: is_active,
-        is_gui: MingaEditor.Frontend.gui?(state.capabilities),
+        is_semantic: MingaEditor.Frontend.semantic_ui?(state.capabilities),
         wrap_on: true,
         line_number_style: line_number_style,
         options: snapshot.options,
@@ -612,7 +612,7 @@ defmodule MingaEditor.RenderPipeline.Content do
     ctx_fp = ContentHelpers.context_fingerprint(render_ctx, is_active)
     window = Window.detect_context_change(window, ctx_fp)
 
-    gui? = MingaEditor.Frontend.gui?(state.capabilities)
+    semantic? = MingaEditor.Frontend.semantic_ui?(state.capabilities)
 
     {window, content_epoch, full_refresh?} =
       Window.prepare_render_epoch(
@@ -653,7 +653,7 @@ defmodule MingaEditor.RenderPipeline.Content do
     }
 
     {gutter_draws, line_draws, rendered_rows, window} =
-      render_agent_lines(gui?, snapshot.lines, visible_rows, opts)
+      render_agent_lines(semantic?, snapshot.lines, visible_rows, opts)
 
     # Snapshot render state so future frames can detect changes.
     # Without this, dirty_lines stays empty and content is never re-rendered.
@@ -730,7 +730,7 @@ defmodule MingaEditor.RenderPipeline.Content do
       agent_window_models(state, model_scroll, render_ctx, ctx, chat_width, prompt_rect)
 
     frame =
-      agent_window_frame(gui?, %{
+      agent_window_frame(semantic?, %{
         chat_width: chat_width,
         height: height,
         gutter_draws: gutter_draws,
@@ -878,7 +878,7 @@ defmodule MingaEditor.RenderPipeline.Content do
     inner_width = PromptRenderer.input_inner_width(PromptRenderer.input_box_width(chat_width))
 
     additional_window_models =
-      if MingaEditor.Frontend.gui?(state.capabilities) do
+      if MingaEditor.Frontend.semantic_ui?(state.capabilities) do
         case PromptRenderWindow.build(ctx, inner_width, prompt_rect,
                content_epoch: model_scroll.content_epoch,
                full_refresh: model_scroll.full_refresh
