@@ -71,6 +71,36 @@ func TestKeyPacketParsesFragmentedSGRMouseTail(t *testing.T) {
 	}
 }
 
+func TestMousePacketEncodesHorizontalWheel(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		msg  tea.MouseMsg
+		want byte
+	}{
+		{name: "wheel right", msg: tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelRight}), want: 0x42},
+		{name: "wheel left", msg: tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelLeft}), want: 0x43},
+		{name: "shift wheel down", msg: tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, Mod: tea.ModShift}), want: 0x42},
+		{name: "shift wheel up", msg: tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelUp, Mod: tea.ModShift}), want: 0x43},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			packet := mousePacket(tc.msg)
+			if packet[0] != generated.OPMouseEvent || packet[5] != tc.want {
+				t.Fatalf("mouse packet opcode/button = %#x/%#x, want mouse/%#x", packet[0], packet[5], tc.want)
+			}
+		})
+	}
+}
+
+func TestKeyPacketParsesShiftWheelSGRMouseTailAsHorizontal(t *testing.T) {
+	packet, ok := keyPacket(tea.KeyPressMsg(tea.Key{Code: tea.KeyExtended, Text: "<69;57;23M"}))
+	if !ok {
+		t.Fatal("SGR shift wheel tail should encode a mouse packet")
+	}
+	if packet[5] != 0x42 {
+		t.Fatalf("shift wheel-down should encode wheel-right button, got %#x", packet[5])
+	}
+}
+
 func TestPastePacketEncodesBracketedPasteAsPasteEvent(t *testing.T) {
 	packet := pastePacket(tea.PasteMsg{Content: "hello\nworld"})
 	if packet[0] != generated.OPPasteEvent {

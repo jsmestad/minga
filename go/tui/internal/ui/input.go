@@ -100,7 +100,7 @@ func sgrMouseParts(code int, release bool) (byte, byte, byte) {
 	}
 	button := byte(3)
 	if code&wheelBit != 0 {
-		button = 0x40 + byte(code&0x03)
+		button = wheelButtonByte(code&0x03, code&shiftBit != 0)
 	} else {
 		button = byte(code & 0x03)
 	}
@@ -111,6 +111,18 @@ func sgrMouseParts(code int, release bool) (byte, byte, byte) {
 		eventType = 2
 	}
 	return button, mods, eventType
+}
+
+func wheelButtonByte(bits int, shifted bool) byte {
+	if shifted {
+		switch bits {
+		case 0:
+			return 0x43
+		case 1:
+			return 0x42
+		}
+	}
+	return 0x40 + byte(bits)
 }
 
 func printableTextModifiers(key tea.Key) byte {
@@ -147,9 +159,21 @@ func mousePacket(msg tea.MouseMsg) []byte {
 	case tea.MouseRight:
 		button = 2
 	case tea.MouseWheelUp:
-		button = 0x40
+		if mouse.Mod.Contains(tea.ModShift) {
+			button = 0x43
+		} else {
+			button = 0x40
+		}
 	case tea.MouseWheelDown:
-		button = 0x41
+		if mouse.Mod.Contains(tea.ModShift) {
+			button = 0x42
+		} else {
+			button = 0x41
+		}
+	case tea.MouseWheelRight:
+		button = 0x42
+	case tea.MouseWheelLeft:
+		button = 0x43
 	}
 	switch msg.(type) {
 	case tea.MouseReleaseMsg:

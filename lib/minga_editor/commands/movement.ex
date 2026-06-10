@@ -13,6 +13,7 @@ defmodule MingaEditor.Commands.Movement do
   alias Minga.Parser.Manager, as: ParserManager
   alias Minga.Parser.StructuralNavResult
 
+  alias MingaEditor.BottomPanel
   alias MingaEditor.DisplayMap
   alias MingaEditor.Renderer.Gutter
   alias MingaEditor.Commands.Helpers
@@ -553,6 +554,18 @@ defmodule MingaEditor.Commands.Movement do
   @spec navigate_window(state(), WindowTree.nav_direction()) :: state()
   defp navigate_window(%{workspace: %{windows: %{tree: nil}}} = state, _direction), do: state
 
+  defp navigate_window(state, :up) do
+    if BottomPanel.focused?(EditorState.bottom_panel(state)) do
+      panel = state |> EditorState.bottom_panel() |> BottomPanel.blur()
+
+      state
+      |> EditorState.set_bottom_panel(panel)
+      |> EditorState.set_keymap_scope(EditorState.scope_for_active_window(state))
+    else
+      navigate_window_to_neighbor(state, :up)
+    end
+  end
+
   # When file tree is focused, navigating right unfocuses the tree
   # and restores the scope based on the active window's content type.
   defp navigate_window(state, :right) do
@@ -583,10 +596,26 @@ defmodule MingaEditor.Commands.Movement do
         EditorState.focus_window(state, neighbor_id)
 
       :error ->
-        # No neighbor in that direction; check if the file tree is there
-        maybe_focus_file_tree(state, direction)
+        # No neighbor in that direction; check if an edge panel is there.
+        maybe_focus_edge_panel(state, direction)
     end
   end
+
+  @spec maybe_focus_edge_panel(state(), :left | :right | :up | :down) :: state()
+  defp maybe_focus_edge_panel(state, :down) do
+    panel = EditorState.bottom_panel(state)
+
+    if panel.visible do
+      state
+      |> EditorState.set_bottom_panel(BottomPanel.focus(panel))
+      |> update_file_tree(&FileTreeState.unfocus/1)
+      |> EditorState.set_keymap_scope(EditorState.scope_for_active_window(state))
+    else
+      state
+    end
+  end
+
+  defp maybe_focus_edge_panel(state, direction), do: maybe_focus_file_tree(state, direction)
 
   @spec maybe_focus_file_tree(state(), :left | :right | :up | :down) :: state()
   defp maybe_focus_file_tree(state, :left) do

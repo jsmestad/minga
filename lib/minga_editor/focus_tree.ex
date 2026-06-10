@@ -9,6 +9,7 @@ defmodule MingaEditor.FocusTree do
 
   alias Minga.Buffer
   alias Minga.Editing.Completion
+  alias MingaEditor.BottomPanel
   alias MingaEditor.CompletionUI
   alias MingaEditor.FocusTree.Node, as: TreeNode
   alias MingaEditor.Input
@@ -164,6 +165,7 @@ defmodule MingaEditor.FocusTree do
       |> maybe_add(layout.agent_panel, &agent_panel_node/1)
       |> maybe_add(layout.status_bar, &TreeNode.new(:status_bar, &1, handler: bottom_handler))
       |> Kernel.++([TreeNode.new(:minibuffer, layout.minibuffer, handler: bottom_handler)])
+      |> maybe_add(bottom_panel_rect(layout, state), &bottom_panel_node/1)
 
     %TreeNode{
       id: :viewport,
@@ -174,6 +176,44 @@ defmodule MingaEditor.FocusTree do
       focusable?: false,
       children: children
     }
+  end
+
+  @spec bottom_panel_rect(Layout.t(), map() | nil) :: Layout.rect() | nil
+  defp bottom_panel_rect(_layout, nil), do: nil
+
+  defp bottom_panel_rect(
+         %Layout{terminal: {row, col, width, rows}},
+         %{
+           shell_state: %{
+             bottom_panel: %BottomPanel{visible: true, height_percent: height_percent}
+           }
+         }
+       ) do
+    panel_height = bottom_panel_height(rows, height_percent)
+    {row + rows - panel_height, col, width, panel_height}
+  end
+
+  defp bottom_panel_rect(_layout, _state), do: nil
+
+  @spec bottom_panel_height(non_neg_integer(), non_neg_integer()) :: non_neg_integer()
+  defp bottom_panel_height(rows, height_percent) do
+    max_height = max(rows - 1, 1)
+    percent = height_percent |> max(1) |> min(100)
+
+    rows
+    |> Kernel.*(percent)
+    |> div(100)
+    |> max(4)
+    |> min(max_height)
+  end
+
+  @spec bottom_panel_node(Layout.rect()) :: TreeNode.t()
+  defp bottom_panel_node(rect) do
+    TreeNode.new(:bottom_panel, rect,
+      handler: Input.BottomPanel,
+      scrollable?: true,
+      focusable?: true
+    )
   end
 
   @spec file_tree_node(Layout.rect(), map() | nil) :: TreeNode.t()

@@ -21,6 +21,7 @@ defmodule MingaEditor.Input do
   alias MingaEditor.Input.AgentMouse
   alias MingaEditor.Input.AgentNav
   alias MingaEditor.Input.AgentPanel
+  alias MingaEditor.Input.BottomPanel
   alias MingaEditor.Input.Completion
   alias MingaEditor.Input.ConflictPrompt
   alias MingaEditor.Input.Dashboard
@@ -63,6 +64,7 @@ defmodule MingaEditor.Input do
     {Scoped, 100},
     {AgentNav, 110},
     {GlobalBindings, 120},
+    {BottomPanel, 125},
     {AgentMouse, 130}
   ]
 
@@ -96,6 +98,7 @@ defmodule MingaEditor.Input do
       Completion,
       Scoped,
       GlobalBindings,
+      BottomPanel,
       ModeFSM
     ]
   end
@@ -233,9 +236,36 @@ defmodule MingaEditor.Input do
   @spec ensure_handler_registry!() :: :ok
   defp ensure_handler_registry! do
     case :persistent_term.get(@handler_registry_key, :missing) do
-      :missing -> seed_builtin_handlers!()
-      _entries -> :ok
+      :missing ->
+        seed_builtin_handlers!()
+
+      entries ->
+        refresh_builtin_handlers!(entries)
     end
+  end
+
+  @spec refresh_builtin_handlers!([handler_entry()]) :: :ok
+  defp refresh_builtin_handlers!(entries) do
+    builtin_modules =
+      MapSet.new(Enum.map(@builtin_surface_handlers, fn {module, _priority} -> module end))
+
+    preserved_entries =
+      Enum.reject(entries, fn {module, source, _meta} ->
+        source == :builtin and MapSet.member?(builtin_modules, module)
+      end)
+
+    builtin_entries =
+      Enum.map(@builtin_surface_handlers, fn {module, priority} ->
+        {module, :builtin, %{phase: :surface, priority: priority}}
+      end)
+
+    refreshed = builtin_entries ++ preserved_entries
+
+    if refreshed != entries do
+      :persistent_term.put(@handler_registry_key, refreshed)
+    end
+
+    :ok
   end
 
   @spec seed_builtin_handlers!() :: :ok

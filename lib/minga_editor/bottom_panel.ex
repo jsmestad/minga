@@ -29,6 +29,7 @@ defmodule MingaEditor.BottomPanel do
 
   @type t :: %__MODULE__{
           visible: boolean(),
+          focused: boolean(),
           active_tab: tab(),
           tabs: [tab()],
           dismissed: boolean(),
@@ -37,6 +38,7 @@ defmodule MingaEditor.BottomPanel do
         }
 
   defstruct visible: false,
+            focused: false,
             active_tab: :messages,
             tabs: [:messages],
             dismissed: false,
@@ -46,7 +48,7 @@ defmodule MingaEditor.BottomPanel do
   @doc "Toggle panel visibility. Clears dismissed state on explicit open."
   @spec toggle(t()) :: t()
   def toggle(%__MODULE__{visible: true} = panel) do
-    %{panel | visible: false}
+    %{panel | visible: false, focused: false}
   end
 
   def toggle(%__MODULE__{visible: false} = panel) do
@@ -62,14 +64,28 @@ defmodule MingaEditor.BottomPanel do
   @doc "Hide the panel."
   @spec hide(t()) :: t()
   def hide(%__MODULE__{} = panel) do
-    %{panel | visible: false}
+    %{panel | visible: false, focused: false}
   end
 
   @doc "Dismiss the panel (prevents auto-open until explicit open)."
   @spec dismiss(t()) :: t()
   def dismiss(%__MODULE__{} = panel) do
-    %{panel | visible: false, dismissed: true}
+    %{panel | visible: false, focused: false, dismissed: true}
   end
+
+  @doc "Focuses the visible panel. Hidden panels stay unfocused."
+  @spec focus(t()) :: t()
+  def focus(%__MODULE__{visible: true} = panel), do: %{panel | focused: true}
+  def focus(%__MODULE__{} = panel), do: %{panel | focused: false}
+
+  @doc "Clears panel focus without changing visibility."
+  @spec blur(t()) :: t()
+  def blur(%__MODULE__{} = panel), do: %{panel | focused: false}
+
+  @doc "Returns true when the panel is visible and focused."
+  @spec focused?(t()) :: boolean()
+  def focused?(%__MODULE__{visible: true, focused: true}), do: true
+  def focused?(%__MODULE__{}), do: false
 
   @doc "Switch to a tab by index."
   @spec switch_tab(t(), non_neg_integer()) :: t()

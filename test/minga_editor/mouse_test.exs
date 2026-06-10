@@ -33,8 +33,8 @@ defmodule MingaEditor.MouseTest do
       {state, buffer} = start_mouse_state(lines(0..29))
 
       state = mouse(state, 0, 0, :wheel_down, :press)
-      assert BufferProcess.cursor(buffer) == {4, 0}
-      assert active_viewport(state).top == 1
+      assert BufferProcess.cursor(buffer) == {6, 0}
+      assert active_viewport(state).top == 3
 
       BufferProcess.move_to(buffer, {5, 0})
       state = mouse(state, 0, 0, :wheel_up, :press)

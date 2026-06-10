@@ -111,20 +111,32 @@ defmodule MingaEditor.Commands.UI.FrontendTest do
     end
   end
 
-  describe "TUI variants are no-ops" do
-    test "toggle_bottom_panel returns state unchanged" do
-      state = base_state()
-      assert UITUI.toggle_bottom_panel(state) == state
+  describe "TUI bottom panel commands" do
+    test "toggle_bottom_panel opens panel when hidden" do
+      state = UITUI.toggle_bottom_panel(base_state())
+      assert state.shell_state.bottom_panel.visible == true
     end
 
-    test "bottom_panel_next_tab returns state unchanged" do
-      state = base_state()
-      assert UITUI.bottom_panel_next_tab(state) == state
+    test "bottom_panel_next_tab cycles to next tab" do
+      state =
+        MingaEditor.State.set_bottom_panel(
+          base_state(),
+          %BottomPanel{tabs: [:messages, :diagnostics], active_tab: :messages}
+        )
+
+      state = UITUI.bottom_panel_next_tab(state)
+      assert state.shell_state.bottom_panel.active_tab == :diagnostics
     end
 
-    test "bottom_panel_prev_tab returns state unchanged" do
-      state = base_state()
-      assert UITUI.bottom_panel_prev_tab(state) == state
+    test "bottom_panel_prev_tab cycles to previous tab" do
+      state =
+        MingaEditor.State.set_bottom_panel(
+          base_state(),
+          %BottomPanel{tabs: [:messages, :diagnostics], active_tab: :diagnostics}
+        )
+
+      state = UITUI.bottom_panel_prev_tab(state)
+      assert state.shell_state.bottom_panel.active_tab == :messages
     end
   end
 end

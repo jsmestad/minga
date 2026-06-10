@@ -134,9 +134,16 @@ func (m Model) semanticWindowPlacement(window protocol.WindowContent) (semanticW
 	}, true
 }
 
-// Protocol window geometry is relative to the semantic editor surface. Bubble Tea adds TUI chrome around that surface after semantic content is composed.
+// Protocol window geometry may arrive as absolute TUI geometry from the BEAM layout. Bubble Tea composes header rows and left chrome around the body after semantic content is rendered, so subtract any visible chrome offsets when the protocol coordinates include them. Body-relative geometry stays unchanged.
 func (m Model) normalizeSemanticGeometry(row int, col int) (int, int) {
-	return row, col
+	rowOffset, colOffset := m.semanticContentOffsets()
+	if rowOffset > 0 {
+		row -= min(row, rowOffset)
+	}
+	if colOffset > 0 && col >= colOffset {
+		col -= colOffset
+	}
+	return max(row, 0), max(col, 0)
 }
 
 // Protocol chrome geometry is absolute terminal geometry, so split separators are normalized into Bubble Tea's body canvas.

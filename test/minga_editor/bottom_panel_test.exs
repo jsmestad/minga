@@ -10,6 +10,7 @@ defmodule MingaEditor.BottomPanelTest do
       assert panel.active_tab == :messages
       assert panel.tabs == [:messages]
       assert panel.dismissed == false
+      assert panel.focused == false
       assert panel.filter == nil
       assert panel.height_percent == 30
     end
@@ -28,6 +29,7 @@ defmodule MingaEditor.BottomPanelTest do
       panel = %BottomPanel{visible: true}
       result = BottomPanel.toggle(panel)
       assert result.visible == false
+      assert result.focused == false
     end
 
     test "clears dismissed state on open" do
@@ -63,6 +65,27 @@ defmodule MingaEditor.BottomPanelTest do
       result = BottomPanel.dismiss(panel)
       assert result.visible == false
       assert result.dismissed == true
+    end
+  end
+
+  describe "focus/1 and blur/1" do
+    test "focuses a visible panel" do
+      panel = %BottomPanel{visible: true}
+      result = BottomPanel.focus(panel)
+      assert BottomPanel.focused?(result)
+    end
+
+    test "does not focus a hidden panel" do
+      panel = %BottomPanel{visible: false}
+      result = BottomPanel.focus(panel)
+      refute BottomPanel.focused?(result)
+    end
+
+    test "blur clears focus without hiding" do
+      panel = %BottomPanel{visible: true, focused: true}
+      result = BottomPanel.blur(panel)
+      assert result.visible == true
+      refute BottomPanel.focused?(result)
     end
   end
 

@@ -142,7 +142,7 @@ func (m Model) renderBottomPanel(panel protocol.BottomPanel) []string {
 	}
 	messages := m.visibleBottomPanelMessages(panel)
 	width := max(m.width, 1)
-	height := m.maxOverlayHeight()
+	height := m.bottomPanelHeight(panel)
 	p := m.palette()
 	headerLeft := fmt.Sprintf(" %s", title)
 	headerRight := fmt.Sprintf("%d messages", len(panel.Messages))
@@ -212,7 +212,7 @@ func bottomPanelLevelColor(p palette, level byte) color.Color {
 }
 
 func (m Model) visibleBottomPanelMessages(panel protocol.BottomPanel) []protocol.PanelMessage {
-	visibleRows := m.bottomPanelVisibleRows()
+	visibleRows := m.bottomPanelVisibleRows(panel)
 	if len(panel.Messages) <= visibleRows {
 		return panel.Messages
 	}
@@ -221,8 +221,18 @@ func (m Model) visibleBottomPanelMessages(panel protocol.BottomPanel) []protocol
 	return panel.Messages[start:end]
 }
 
-func (m Model) bottomPanelVisibleRows() int {
-	return max(m.maxOverlayHeight()-1, 1)
+func (m Model) bottomPanelVisibleRows(panel protocol.BottomPanel) int {
+	return max(m.bottomPanelHeight(panel)-1, 1)
+}
+
+func (m Model) bottomPanelHeight(panel protocol.BottomPanel) int {
+	maxHeight := max(m.height-1, 1)
+	percent := int(panel.HeightPercent)
+	if percent <= 0 {
+		percent = 30
+	}
+	percent = min(max(percent, 1), 100)
+	return min(max(m.height*percent/100, 4), maxHeight)
 }
 
 func (m Model) renderExtensionPanels(ext protocol.ExtensionPanel) []string {
