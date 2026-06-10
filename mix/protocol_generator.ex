@@ -23,6 +23,7 @@ defmodule Minga.Mix.ProtocolGenerator do
   @generated_go_command_size_path "go/tui/internal/generated/command_size.go"
   @generated_zig_command_size_path "zig/src/generated/protocol_command_size.zig"
   @generated_swift_command_size_path "macos/.generated/protocol/ProtocolCommandSize.generated.swift"
+  @generated_swift_semantic_decode_path "macos/.generated/protocol/ProtocolSemanticDecode.generated.swift"
   @generated_go_semantic_types_path "go/tui/internal/generated/semantic_types.go"
   @generated_go_semantic_decode_path "go/tui/internal/generated/semantic_decode.go"
   @generated_go_golden_path "go/tui/internal/generated/golden_decode.go"
@@ -214,6 +215,7 @@ defmodule Minga.Mix.ProtocolGenerator do
       {@generated_go_command_size_path, go_command_size_file(schema)},
       {@generated_zig_command_size_path, zig_command_size_file(schema)},
       {@generated_swift_command_size_path, swift_command_size_file(schema)},
+      {@generated_swift_semantic_decode_path, swift_semantic_decode_file(schema)},
       {@generated_go_semantic_types_path, go_semantic_types_file(schema)},
       {@generated_go_semantic_decode_path, go_semantic_decode_file(schema)},
       {@generated_go_golden_path, go_golden_decode_file(schema)}
@@ -2521,6 +2523,703 @@ defmodule Minga.Mix.ProtocolGenerator do
     ]
     |> IO.iodata_to_binary()
     |> format_generated_go_file()
+  end
+
+  # ── Swift: ProtocolSemanticDecode.generated.swift ────────────────────────
+  #
+  # Mirrors the Go semantic decoders (semantic_types.go + semantic_decode.go) for
+  # the Swift frontend. Every generated record decoder is the structural twin of
+  # its Go counterpart: same field order, same length guards, same big-endian
+  # reads, same conditional-tail guard, same counted_array prealloc clamp. The two
+  # languages therefore decode byte-identical wire payloads to the same field
+  # values, which the swift_harness integration tests prove against the Elixir
+  # encoder output.
+  #
+  # Everything is namespaced under the `GeneratedProtocol` caseless enum so the
+  # generated struct/enum types (CompletionItem, GuiCompletionFields, …) never
+  # collide with the hand-written `Wire` types or the production decoder's private
+  # read helpers. The production decoder swaps a hand-written body for a call to
+  # `GeneratedProtocol.decodeGui<Opcode>Fields(_:_:)` and maps the result into the
+  # existing `RenderCommand` case, keeping the public decode surface unchanged.
+  #
+  # Enum representation: each schema enum becomes a Swift `enum Name: <repr>` whose
+  # `decode(_:)` maps an unknown byte to the schema `default` value, exactly as the
+  # Go side maps `byte -> typed constant`. The raw value round-trips to the same
+  # integer the hand-written `UInt8` field carried, so the harness JSON projection
+  # (`Int(item.kind)`) is unchanged.
+
+  @swift_primitive_decode_types %{
+    "u8" => "UInt8",
+    "u16" => "UInt16",
+    "u24" => "UInt32",
+    "u32" => "UInt32",
+    "u64" => "UInt64",
+    "rgb" => "UInt32"
+  }
+
+  @swift_primitive_reads %{
+    "u8" => "data[pos]",
+    "u16" => "decodeU16(data, pos)",
+    "u24" => "decodeU24(data, pos)",
+    "rgb" => "decodeU24(data, pos)",
+    "u32" => "decodeU32(data, pos)",
+    "u64" => "decodeU64(data, pos)"
+  }
+
+  @swift_string_decoders %{
+    "string8" => "decodeString8",
+    "string16" => "decodeString16",
+    "string32" => "decodeString32"
+  }
+
+  @spec swift_semantic_decode_file(schema()) :: String.t()
+  defp swift_semantic_decode_file(schema) do
+    structures = Map.get(schema, "structures", [])
+    sections = sections_list(schema)
+    command_fields = command_fields_list(schema)
+    smap = structures_map(schema)
+
+    # Default-case lookup for enum zero values in conditional tails, captured here
+    # so swift_zero_value/2 stays a pure name lookup without threading the enums
+    # map through every type helper.
+    enum_defaults =
+      Map.new(enums_list(schema), fn enum ->
+        {enum["name"], swift_enum_default_case(enum)}
+      end)
+
+    Process.put(:swift_enum_defaults, enum_defaults)
+
+    try do
+      swift_semantic_decode_iodata(structures, sections, command_fields, smap, enums_list(schema))
+    after
+      Process.delete(:swift_enum_defaults)
+    end
+  end
+
+  @spec swift_semantic_decode_iodata([map()], [section()], [command_fields()], map(), [enum()]) ::
+          String.t()
+  defp swift_semantic_decode_iodata(structures, sections, command_fields, smap, enums) do
+    [
+      "// Generated protocol payload decoders.\n",
+      "//\n",
+      "// Generated from `docs/protocol_schema.toml` by `mix protocol.gen`. Do not edit by hand.\n",
+      "//\n",
+      "// Structural twin of the Go semantic decoders. The production ProtocolDecoder\n",
+      "// calls these and maps the result into its `RenderCommand` cases.\n\n",
+      "import Foundation\n\n",
+      "/// Namespace for schema-generated payload decoders, enum types, and struct types.\n",
+      "enum GeneratedProtocol {\n\n",
+      swift_decode_error(),
+      swift_decode_helpers(),
+      swift_enum_definitions(enums),
+      swift_struct_definitions(structures, smap),
+      swift_section_struct_definitions(sections, smap),
+      swift_command_fields_struct_definitions(command_fields, smap),
+      "\n    // MARK: - Structure decoders\n\n",
+      Enum.map(structures, &swift_decode_structure(&1, smap)),
+      "    // MARK: - Section decoders\n\n",
+      swift_decode_section_functions(sections, smap),
+      "    // MARK: - Command field decoders\n\n",
+      swift_decode_command_fields_functions(command_fields, smap),
+      "}\n"
+    ]
+    |> IO.iodata_to_binary()
+  end
+
+  @spec swift_decode_error() :: String.t()
+  defp swift_decode_error do
+    """
+        /// Raised when a payload is shorter than a field requires.
+        enum DecodeError: Error, Equatable {
+            case short(String)
+        }
+
+    """
+  end
+
+  @spec swift_decode_helpers() :: String.t()
+  defp swift_decode_helpers do
+    """
+        @inline(__always)
+        static func requireLen(_ data: Data, _ needed: Int, _ label: String) throws {
+            if data.count < needed { throw DecodeError.short(label) }
+        }
+
+        @inline(__always)
+        static func decodeU16(_ data: Data, _ offset: Int) -> UInt16 {
+            UInt16(data[offset]) << 8 | UInt16(data[offset + 1])
+        }
+
+        @inline(__always)
+        static func decodeU24(_ data: Data, _ offset: Int) -> UInt32 {
+            UInt32(data[offset]) << 16 | UInt32(data[offset + 1]) << 8 | UInt32(data[offset + 2])
+        }
+
+        @inline(__always)
+        static func decodeU32(_ data: Data, _ offset: Int) -> UInt32 {
+            UInt32(data[offset]) << 24 | UInt32(data[offset + 1]) << 16
+                | UInt32(data[offset + 2]) << 8 | UInt32(data[offset + 3])
+        }
+
+        @inline(__always)
+        static func decodeU64(_ data: Data, _ offset: Int) -> UInt64 {
+            let hi = UInt64(data[offset]) << 56 | UInt64(data[offset + 1]) << 48
+                | UInt64(data[offset + 2]) << 40 | UInt64(data[offset + 3]) << 32
+            let lo = UInt64(data[offset + 4]) << 24 | UInt64(data[offset + 5]) << 16
+                | UInt64(data[offset + 6]) << 8 | UInt64(data[offset + 7])
+            return hi | lo
+        }
+
+        static func decodeString8(_ data: Data, _ offset: Int) throws -> (String, Int) {
+            try requireLen(data, offset + 1, "string8 header")
+            let l = Int(data[offset])
+            let body = offset + 1
+            try requireLen(data, body + l, "string8 body")
+            let s = String(data: data[body..<(body + l)], encoding: .utf8) ?? ""
+            return (s, body + l)
+        }
+
+        static func decodeString16(_ data: Data, _ offset: Int) throws -> (String, Int) {
+            try requireLen(data, offset + 2, "string16 header")
+            let l = Int(decodeU16(data, offset))
+            let body = offset + 2
+            try requireLen(data, body + l, "string16 body")
+            let s = String(data: data[body..<(body + l)], encoding: .utf8) ?? ""
+            return (s, body + l)
+        }
+
+        static func decodeString32(_ data: Data, _ offset: Int) throws -> (String, Int) {
+            try requireLen(data, offset + 4, "string32 header")
+            let l = Int(decodeU32(data, offset))
+            let body = offset + 4
+            try requireLen(data, body + l, "string32 body")
+            let s = String(data: data[body..<(body + l)], encoding: .utf8) ?? ""
+            return (s, body + l)
+        }
+
+    """
+  end
+
+  # Emit one Swift enum per schema enum plus a `decode(_:)` that maps an unknown
+  # byte to the schema `default` value, mirroring Go's byte -> typed constant
+  # mapping. The raw value is the repr primitive so `.rawValue` round-trips to the
+  # same integer the hand-written UInt8 field carried.
+  @spec swift_enum_definitions([enum()]) :: iodata()
+  defp swift_enum_definitions([]), do: []
+
+  defp swift_enum_definitions(enums) do
+    [
+      "    // MARK: - Enum types\n\n",
+      Enum.map(enums, fn enum ->
+        type_name = swift_struct_name(enum["name"])
+        repr_type = @swift_primitive_decode_types[enum["repr"]]
+        values = Map.get(enum, "values", [])
+        default_case = swift_enum_default_case(enum)
+
+        [
+          "    enum #{type_name}: #{repr_type}, Equatable {\n",
+          Enum.map(values, fn v ->
+            "        case #{swift_enum_case_name(v["name"])} = #{v["value"]}\n"
+          end),
+          "\n",
+          "        static func decode(_ raw: #{repr_type}) -> #{type_name} {\n",
+          "            #{type_name}(rawValue: raw) ?? .#{default_case}\n",
+          "        }\n",
+          "    }\n\n"
+        ]
+      end)
+    ]
+  end
+
+  @spec swift_enum_default_case(enum()) :: String.t()
+  defp swift_enum_default_case(%{"default" => default}) when is_binary(default),
+    do: swift_enum_case_name(default)
+
+  defp swift_enum_default_case(enum) do
+    enum |> Map.get("values", []) |> List.first() |> Map.fetch!("name") |> swift_enum_case_name()
+  end
+
+  @spec swift_struct_definitions([structure()], %{String.t() => structure()}) :: iodata()
+  defp swift_struct_definitions(structures, smap) do
+    [
+      "    // MARK: - Structure types\n\n",
+      Enum.map(structures, fn s ->
+        swift_struct_block(swift_struct_name(s["name"]), entry_fields(s), smap)
+      end)
+    ]
+  end
+
+  @spec swift_section_struct_definitions([section()], %{String.t() => structure()}) :: iodata()
+  defp swift_section_struct_definitions(sections, smap) do
+    blocks =
+      sections
+      |> Enum.reject(&entry_custom_layout?/1)
+      |> Enum.filter(&(Map.has_key?(&1, "fields") or Map.has_key?(&1, "conditional_tail")))
+      |> Enum.map(fn s ->
+        swift_struct_block(swift_section_struct_name(s), entry_fields(s), smap)
+      end)
+
+    case blocks do
+      [] -> []
+      _ -> ["    // MARK: - Section types\n\n", blocks]
+    end
+  end
+
+  @spec swift_command_fields_struct_definitions([command_fields()], %{String.t() => structure()}) ::
+          iodata()
+  defp swift_command_fields_struct_definitions([], _smap), do: []
+
+  defp swift_command_fields_struct_definitions(command_fields, smap) do
+    [
+      "    // MARK: - Command field types\n\n",
+      Enum.map(command_fields, fn cf ->
+        swift_struct_block(swift_struct_name(cf["opcode"]) <> "Fields", entry_fields(cf), smap)
+      end)
+    ]
+  end
+
+  @spec swift_struct_block(String.t(), [map()], %{String.t() => structure()}) :: iodata()
+  defp swift_struct_block(name, fields, smap) do
+    [
+      "    struct #{name}: Equatable {\n",
+      Enum.map(fields, fn field ->
+        "        let #{swift_field_name(field["name"])}: #{swift_type(field, smap)}\n"
+      end),
+      "    }\n\n"
+    ]
+  end
+
+  @spec swift_decode_structure(structure(), %{String.t() => structure()}) :: iodata()
+  defp swift_decode_structure(structure, smap) do
+    struct_name = swift_struct_name(structure["name"])
+    swift_record_decoder("decode#{struct_name}", struct_name, structure, smap)
+  end
+
+  # Emit a Swift decode function for any record (structure, inline section, or
+  # command_fields). Mirrors go_record_decoder: name a `(Struct, Int)` tuple
+  # decoder, decode each base field, then the optional conditional tail, then
+  # build the struct.
+  @spec swift_record_decoder(String.t(), String.t(), map(), %{String.t() => structure()}) ::
+          iodata()
+  defp swift_record_decoder(fn_name, struct_name, entry, smap) do
+    [
+      "    static func #{fn_name}(_ data: Data, _ offset: Int) throws -> (#{struct_name}, Int) {\n",
+      "        var pos = offset\n",
+      Enum.map(entry["fields"] || [], &swift_decode_field_statement(&1, smap)),
+      swift_decode_conditional_tail_block(entry, smap),
+      "        return (#{struct_name}(\n",
+      swift_struct_initializer_args(entry_fields(entry)),
+      "        ), pos)\n",
+      "    }\n\n"
+    ]
+  end
+
+  @spec swift_struct_initializer_args([map()]) :: iodata()
+  defp swift_struct_initializer_args(fields) do
+    last = length(fields) - 1
+
+    fields
+    |> Enum.with_index()
+    |> Enum.map(fn {field, idx} ->
+      name = swift_field_name(field["name"])
+      comma = if idx == last, do: "", else: ","
+      "            #{name}: #{swift_local_name(field["name"])}#{comma}\n"
+    end)
+  end
+
+  # A field declared with `let` in the base scope; the conditional tail instead
+  # pre-declares `var` locals and assigns them inside the guard, so they default
+  # to a zero value when the tail is absent (mirroring Go's `var x T` zero value).
+  @spec swift_decode_field_statement(map(), %{String.t() => structure()}) :: iodata()
+  defp swift_decode_field_statement(field, smap),
+    do: swift_decode_field(field, smap, :let, "        ")
+
+  @spec swift_decode_conditional_tail_block(map(), %{String.t() => structure()}) :: iodata()
+  defp swift_decode_conditional_tail_block(entry, smap) do
+    case conditional_tail_fields(entry) do
+      [] ->
+        []
+
+      tail_fields ->
+        [
+          Enum.map(tail_fields, fn field ->
+            "        var #{swift_local_name(field["name"])}: #{swift_type(field, smap)} = #{swift_zero_value(field, smap)}\n"
+          end),
+          "        if #{swift_guard_expression(entry)} {\n",
+          Enum.map(tail_fields, fn field ->
+            swift_decode_field(field, smap, :assign, "            ")
+          end),
+          "        }\n"
+        ]
+    end
+  end
+
+  # Decode one field at `pos`, bind/assign it to its local, advance `pos`. `mode`
+  # is `:let` for base fields (fresh binding) or `:assign` for conditional-tail
+  # fields (pre-declared `var`). Mirrors go_decode_field_statement /
+  # go_decode_field_assignment_statement.
+  @spec swift_decode_field(map(), %{String.t() => structure()}, :let | :assign, String.t()) ::
+          iodata()
+  defp swift_decode_field(
+         %{"name" => name, "type" => "enum", "enum" => enum_name, "repr" => repr},
+         _smap,
+         mode,
+         ind
+       ) do
+    local = swift_local_name(name)
+    size = @primitive_sizes[repr]
+    bind = swift_bind_keyword(mode)
+
+    [
+      "#{ind}try requireLen(data, pos + #{size}, \"#{name}\")\n",
+      "#{ind}#{bind}#{local} = #{swift_struct_name(enum_name)}.decode(#{@swift_primitive_reads[repr]})\n",
+      "#{ind}pos += #{size}\n"
+    ]
+  end
+
+  defp swift_decode_field(%{"name" => name, "type" => type}, _smap, mode, ind)
+       when is_map_key(@swift_primitive_reads, type) do
+    local = swift_local_name(name)
+    size = @primitive_sizes[type]
+    bind = swift_bind_keyword(mode)
+
+    [
+      "#{ind}try requireLen(data, pos + #{size}, \"#{name}\")\n",
+      "#{ind}#{bind}#{local} = #{@swift_primitive_reads[type]}\n",
+      "#{ind}pos += #{size}\n"
+    ]
+  end
+
+  defp swift_decode_field(%{"name" => name, "type" => type}, _smap, mode, ind)
+       when is_map_key(@swift_string_decoders, type) do
+    local = swift_local_name(name)
+    decoder = @swift_string_decoders[type]
+
+    case mode do
+      :let ->
+        [
+          "#{ind}let (#{local}, #{local}Pos) = try #{decoder}(data, pos)\n",
+          "#{ind}pos = #{local}Pos\n"
+        ]
+
+      :assign ->
+        [
+          "#{ind}let (#{local}Val, #{local}Pos) = try #{decoder}(data, pos)\n",
+          "#{ind}#{local} = #{local}Val\n",
+          "#{ind}pos = #{local}Pos\n"
+        ]
+    end
+  end
+
+  defp swift_decode_field(
+         %{"name" => name, "type" => "struct", "element" => element},
+         _smap,
+         mode,
+         ind
+       ) do
+    local = swift_local_name(name)
+    decoder = "decode#{swift_struct_name(element)}"
+
+    case mode do
+      :let ->
+        [
+          "#{ind}let (#{local}, #{local}Pos) = try #{decoder}(data, pos)\n",
+          "#{ind}pos = #{local}Pos\n"
+        ]
+
+      :assign ->
+        [
+          "#{ind}let (#{local}Val, #{local}Pos) = try #{decoder}(data, pos)\n",
+          "#{ind}#{local} = #{local}Val\n",
+          "#{ind}pos = #{local}Pos\n"
+        ]
+    end
+  end
+
+  defp swift_decode_field(
+         %{
+           "name" => name,
+           "type" => "counted_array",
+           "count_type" => count_type,
+           "element" => element
+         },
+         smap,
+         mode,
+         ind
+       ) do
+    local = swift_local_name(name)
+    {count_read, count_size} = swift_count_read(count_type)
+    bind = if mode == :let, do: "var ", else: ""
+
+    stride_check =
+      case element_fixed_byte_size(element, smap) do
+        nil ->
+          []
+
+        stride ->
+          ["#{ind}try requireLen(data, pos + #{local}Count * #{stride}, \"#{name}\")\n"]
+      end
+
+    [
+      "#{ind}try requireLen(data, pos + #{count_size}, \"#{name} count\")\n",
+      "#{ind}let #{local}Count = Int(#{count_read})\n",
+      "#{ind}pos += #{count_size}\n",
+      stride_check,
+      "#{ind}#{bind}#{local} = #{swift_array_type(element, smap)}()\n",
+      "#{ind}#{local}.reserveCapacity(#{swift_prealloc("#{local}Count", element, smap)})\n",
+      "#{ind}for _ in 0..<#{local}Count {\n",
+      swift_decode_array_element(element, local, ind <> "    "),
+      "#{ind}}\n"
+    ]
+  end
+
+  # Decode one counted_array element at `pos`, append it onto `vec`, advance `pos`.
+  # Mirrors go_decode_array_element.
+  @spec swift_decode_array_element(String.t(), String.t(), String.t()) :: iodata()
+  defp swift_decode_array_element(element, vec, ind) do
+    case element_field(element) do
+      %{"type" => "struct", "element" => el} ->
+        swift_decode_array_element_via("decode#{swift_struct_name(el)}(data, pos)", vec, ind)
+
+      %{"type" => str} when is_map_key(@swift_string_decoders, str) ->
+        swift_decode_array_element_via("#{@swift_string_decoders[str]}(data, pos)", vec, ind)
+
+      %{"type" => prim} ->
+        [
+          "#{ind}try requireLen(data, pos + #{@primitive_sizes[prim]}, \"element\")\n",
+          "#{ind}#{vec}.append(#{@swift_primitive_reads[prim]})\n",
+          "#{ind}pos += #{@primitive_sizes[prim]}\n"
+        ]
+    end
+  end
+
+  @spec swift_decode_array_element_via(String.t(), String.t(), String.t()) :: iodata()
+  defp swift_decode_array_element_via(call, vec, ind) do
+    [
+      "#{ind}let (item, nextPos) = try #{call}\n",
+      "#{ind}pos = nextPos\n",
+      "#{ind}#{vec}.append(item)\n"
+    ]
+  end
+
+  @spec swift_count_read(String.t()) :: {String.t(), non_neg_integer()}
+  defp swift_count_read("u8"), do: {"data[pos]", 1}
+  defp swift_count_read("u16"), do: {"decodeU16(data, pos)", 2}
+  defp swift_count_read("u32"), do: {"decodeU32(data, pos)", 4}
+
+  @spec swift_decode_section_functions([section()], %{String.t() => structure()}) :: iodata()
+  defp swift_decode_section_functions(sections, smap) do
+    sections
+    |> Enum.group_by(& &1["opcode"])
+    |> Enum.sort_by(fn {opcode, _} -> opcode end)
+    |> Enum.map(fn {opcode, secs} ->
+      swift_decode_opcode_sections(opcode, Enum.sort_by(secs, & &1["id"]), smap)
+    end)
+  end
+
+  @spec swift_decode_opcode_sections(String.t(), [section()], %{String.t() => structure()}) ::
+          iodata()
+  defp swift_decode_opcode_sections(opcode, secs, smap) do
+    Enum.map(secs, fn sec ->
+      cond do
+        entry_custom_layout?(sec) -> []
+        sec["layout"] == "counted_array" -> swift_decode_counted_array_section(opcode, sec, smap)
+        true -> swift_decode_inline_section(opcode, sec, smap)
+      end
+    end)
+  end
+
+  @spec swift_decode_inline_section(String.t(), section(), %{String.t() => structure()}) ::
+          iodata()
+  defp swift_decode_inline_section(_opcode, section, smap) do
+    fn_name = "decode#{swift_struct_name(section["opcode"])}#{swift_struct_name(section["name"])}"
+    swift_record_decoder(fn_name, swift_section_struct_name(section), section, smap)
+  end
+
+  @spec swift_decode_counted_array_section(String.t(), section(), %{String.t() => structure()}) ::
+          iodata()
+  defp swift_decode_counted_array_section(_opcode, section, smap) do
+    element = section["element"]
+    element_type = swift_type(element_field(element), smap)
+    array_type = swift_array_type(element, smap)
+    fn_name = "decode#{swift_struct_name(section["opcode"])}#{swift_struct_name(section["name"])}"
+    count_type = section["count_type"] || "u16"
+    {count_read, count_size} = swift_count_read(count_type)
+
+    stride_check =
+      case element_fixed_byte_size(element, smap) do
+        nil ->
+          []
+
+        stride ->
+          ["        try requireLen(data, pos + count * #{stride}, \"#{section["name"]}\")\n"]
+      end
+
+    [
+      "    static func #{fn_name}(_ data: Data, _ offset: Int) throws -> ([#{element_type}], Int) {\n",
+      "        var pos = offset\n",
+      "        try requireLen(data, pos + #{count_size}, \"#{section["name"]} count\")\n",
+      "        let count = Int(#{count_read})\n",
+      "        pos += #{count_size}\n",
+      stride_check,
+      "        var items = #{array_type}()\n",
+      "        items.reserveCapacity(#{swift_prealloc("count", element, smap)})\n",
+      "        for _ in 0..<count {\n",
+      swift_decode_array_element(element, "items", "            "),
+      "        }\n",
+      "        return (items, pos)\n",
+      "    }\n\n"
+    ]
+  end
+
+  @spec swift_decode_command_fields_functions([command_fields()], %{String.t() => structure()}) ::
+          iodata()
+  defp swift_decode_command_fields_functions(command_fields, smap) do
+    Enum.map(command_fields, fn cf ->
+      struct_name = swift_struct_name(cf["opcode"]) <> "Fields"
+      swift_record_decoder("decode#{struct_name}", struct_name, cf, smap)
+    end)
+  end
+
+  # ── Swift decode: type & name mapping ─────────────────────────────────────
+
+  @spec swift_type(map(), %{String.t() => structure()}) :: String.t()
+  defp swift_type(%{"type" => "enum", "enum" => name}, _smap), do: swift_struct_name(name)
+  defp swift_type(%{"type" => "u8"}, _smap), do: "UInt8"
+  defp swift_type(%{"type" => "u16"}, _smap), do: "UInt16"
+  defp swift_type(%{"type" => "u24"}, _smap), do: "UInt32"
+  defp swift_type(%{"type" => "u32"}, _smap), do: "UInt32"
+  defp swift_type(%{"type" => "u64"}, _smap), do: "UInt64"
+  defp swift_type(%{"type" => "rgb"}, _smap), do: "UInt32"
+  defp swift_type(%{"type" => "string8"}, _smap), do: "String"
+  defp swift_type(%{"type" => "string16"}, _smap), do: "String"
+  defp swift_type(%{"type" => "string32"}, _smap), do: "String"
+
+  defp swift_type(%{"type" => "struct", "element" => element}, _smap),
+    do: swift_struct_name(element)
+
+  defp swift_type(%{"type" => "counted_array", "element" => element}, smap),
+    do: "[#{swift_type(element_field(element), smap)}]"
+
+  @spec swift_array_type(String.t(), %{String.t() => structure()}) :: String.t()
+  defp swift_array_type(element, smap), do: "[#{swift_type(element_field(element), smap)}]"
+
+  # A zero value for a conditional-tail var declaration, mirroring Go's `var x T`.
+  @spec swift_zero_value(map(), %{String.t() => structure()}) :: String.t()
+  defp swift_zero_value(%{"type" => "enum", "enum" => name}, _smap),
+    do: ".#{swift_enum_default_case_by_name(name)}"
+
+  defp swift_zero_value(%{"type" => type}, _smap)
+       when type in ["u8", "u16", "u24", "u32", "u64", "rgb"],
+       do: "0"
+
+  defp swift_zero_value(%{"type" => type}, _smap)
+       when type in ["string8", "string16", "string32"],
+       do: "\"\""
+
+  defp swift_zero_value(%{"type" => "counted_array", "element" => element}, smap),
+    do: "#{swift_array_type(element, smap)}()"
+
+  defp swift_zero_value(%{"type" => "struct", "element" => _element}, _smap),
+    do: "nil"
+
+  # Resolve an enum's default case name from a field reference; the enums map is
+  # captured at file build time so this stays a pure lookup by enum name.
+  @spec swift_enum_default_case_by_name(String.t()) :: String.t()
+  defp swift_enum_default_case_by_name(name) do
+    case Process.get(:swift_enum_defaults) do
+      %{} = defaults -> Map.get(defaults, name, "unknown")
+      _ -> "unknown"
+    end
+  end
+
+  @spec swift_bind_keyword(:let | :assign) :: String.t()
+  defp swift_bind_keyword(:let), do: "let "
+  defp swift_bind_keyword(:assign), do: ""
+
+  # The conditional-tail guard with each base-field identifier rewritten to its
+  # decoded Swift local, mirroring go_guard_expression. The legal guard grammar
+  # (validate_conditional_tail_guards!) is the cross-language subset, so the
+  # operators carry over verbatim.
+  @spec swift_guard_expression(map()) :: String.t()
+  defp swift_guard_expression(entry) do
+    guard = conditional_tail_guard(entry) || "true"
+
+    translate_guard(
+      guard,
+      Enum.map(Map.get(entry, "fields", []), fn field ->
+        {field["name"], swift_local_name(field["name"])}
+      end)
+    )
+  end
+
+  @spec swift_prealloc(String.t(), String.t(), %{String.t() => structure()}) :: String.t()
+  defp swift_prealloc(count_var, element, smap) do
+    case element_fixed_byte_size(element, smap) do
+      nil -> "min(#{count_var}, data.count - pos)"
+      _ -> count_var
+    end
+  end
+
+  @spec swift_struct_name(String.t()) :: String.t()
+  defp swift_struct_name(name) do
+    name
+    |> String.split("_")
+    |> Enum.map_join("", &String.capitalize/1)
+  end
+
+  @spec swift_section_struct_name(section()) :: String.t()
+  defp swift_section_struct_name(section) do
+    swift_struct_name(section["opcode"]) <> swift_struct_name(section["name"])
+  end
+
+  # Swift convention: lowerCamelCase fields. Acronyms stay uppercase only when the
+  # whole word is the acronym; mirrors the Go acronym set so field intent reads the
+  # same across languages.
+  @spec swift_field_name(String.t()) :: String.t()
+  defp swift_field_name(name), do: swift_lower_camel(name)
+
+  @swift_reserved_locals ~w(pos offset data item nextPos count)
+  @swift_keywords ~w(default case enum struct func let var if for in return guard try throw)
+  @spec swift_local_name(String.t()) :: String.t()
+  defp swift_local_name(name) do
+    camel = swift_lower_camel(name)
+
+    if camel in @swift_keywords or name in @swift_reserved_locals,
+      do: camel <> "Value",
+      else: camel
+  end
+
+  @swift_acronyms %{
+    "id" => "ID",
+    "fg" => "FG",
+    "bg" => "BG",
+    "url" => "URL",
+    "ip" => "IP",
+    "lsp" => "LSP"
+  }
+
+  @spec swift_lower_camel(String.t()) :: String.t()
+  defp swift_lower_camel(name) do
+    case String.split(name, "_") do
+      [first | rest] ->
+        first <>
+          Enum.map_join(rest, "", fn part ->
+            Map.get(@swift_acronyms, part, String.capitalize(part))
+          end)
+
+      _ ->
+        name
+    end
+  end
+
+  # An enum case name. Swift keywords (struct, enum, default, …) are legal case
+  # names only when escaped with backticks, so they are quoted here and at every
+  # `.case` reference site.
+  @spec swift_enum_case_name(String.t()) :: String.t()
+  defp swift_enum_case_name(name) do
+    camel = swift_lower_camel(name)
+    if camel in @swift_keywords, do: "`#{camel}`", else: camel
   end
 
   # ── Elixir: encode.ex (pure schema-derived encoders) ─────────────────────

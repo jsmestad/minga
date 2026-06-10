@@ -801,32 +801,25 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         return (.guiTheme(slots: slots), 1 + 1 + count * 4)
 
     case OP_GUI_COMPLETION:
-        guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
-        let visible = data[rest] != 0
-        if !visible {
-            return (.guiCompletion(visible: false, anchorRow: 0, anchorCol: 0, selectedIndex: 0, items: []), 2)
+        // Schema-generated decoder (gui_completion command_fields). The generated
+        // GuiCompletionFields mirrors the Go decoder's field order and conditional
+        // tail; we map it into the existing RenderCommand shape. CompletionKind's
+        // raw value matches the UInt8 kind the hand-written decoder produced.
+        do {
+            let (fields, nextPos) = try GeneratedProtocol.decodeGuiCompletionFields(data, rest)
+            let items = fields.items.map {
+                Wire.CompletionItem(kind: $0.kind.rawValue, label: $0.label, detail: $0.detail)
+            }
+            return (.guiCompletion(
+                visible: fields.visible != 0,
+                anchorRow: fields.cursorRow,
+                anchorCol: fields.cursorCol,
+                selectedIndex: fields.selectedOffset,
+                items: items
+            ), nextPos - offset)
+        } catch {
+            throw ProtocolDecodeError.malformed
         }
-        guard data.count >= rest + 9 else { throw ProtocolDecodeError.malformed }
-        let anchorRow = readU16(data, rest + 1)
-        let anchorCol = readU16(data, rest + 3)
-        let selectedIndex = readU16(data, rest + 5)
-        let itemCount = Int(readU16(data, rest + 7))
-        var items: [Wire.CompletionItem] = []
-        items.reserveCapacity(itemCount)
-        var pos = rest + 9
-        for _ in 0..<itemCount {
-            guard data.count >= pos + 5 else { throw ProtocolDecodeError.malformed }
-            let kind = data[pos]
-            let labelLen = Int(readU16(data, pos + 1))
-            guard data.count >= pos + 3 + labelLen + 2 else { throw ProtocolDecodeError.malformed }
-            let label = String(data: data[(pos + 3)..<(pos + 3 + labelLen)], encoding: .utf8) ?? ""
-            let detailLen = Int(readU16(data, pos + 3 + labelLen))
-            guard data.count >= pos + 5 + labelLen + detailLen else { throw ProtocolDecodeError.malformed }
-            let detail = String(data: data[(pos + 5 + labelLen)..<(pos + 5 + labelLen + detailLen)], encoding: .utf8) ?? ""
-            items.append(Wire.CompletionItem(kind: kind, label: label, detail: detail))
-            pos += 5 + labelLen + detailLen
-        }
-        return (.guiCompletion(visible: true, anchorRow: anchorRow, anchorCol: anchorCol, selectedIndex: selectedIndex, items: items), pos - offset)
 
     case OP_GUI_WHICH_KEY:
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
@@ -862,20 +855,14 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         return (.guiWhichKey(visible: true, prefix: prefix, page: page, pageCount: pageCount, bindings: bindings), pos - offset)
 
     case OP_GUI_BREADCRUMB:
-        guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
-        let segCount = Int(data[rest])
-        var segments: [String] = []
-        segments.reserveCapacity(segCount)
-        var pos = rest + 1
-        for _ in 0..<segCount {
-            guard data.count >= pos + 2 else { throw ProtocolDecodeError.malformed }
-            let segLen = Int(readU16(data, pos))
-            guard data.count >= pos + 2 + segLen else { throw ProtocolDecodeError.malformed }
-            let seg = String(data: data[(pos + 2)..<(pos + 2 + segLen)], encoding: .utf8) ?? ""
-            segments.append(seg)
-            pos += 2 + segLen
+        // Schema-generated decoder (gui_breadcrumb command_fields): a u8-counted
+        // list of string16 segments, mirroring the Go decoder.
+        do {
+            let (fields, nextPos) = try GeneratedProtocol.decodeGuiBreadcrumbFields(data, rest)
+            return (.guiBreadcrumb(segments: fields.segments), nextPos - offset)
+        } catch {
+            throw ProtocolDecodeError.malformed
         }
-        return (.guiBreadcrumb(segments: segments), pos - offset)
 
     case OP_GUI_STATUS_BAR:
         // Sectioned wire format: opcode(1) + section_count(1) + sections...
