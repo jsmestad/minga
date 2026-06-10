@@ -24,27 +24,35 @@ const (
 )
 
 type Model struct {
-	width                 int
-	height                int
-	out                   chan<- []byte
-	viewport              viewport.Model
-	zones                 *zoneManager
-	windows               map[uint16]protocol.WindowContent
-	windowOrder           []uint16
-	chrome                map[byte]protocol.ChromePayload
-	activePalette         palette
-	gutters               map[uint16]protocol.Gutter
-	indentGuides          map[uint16]protocol.IndentGuides
-	cells                 map[position]cell
-	drawSeq               uint64
-	cursorRow             uint16
-	cursorCol             uint16
-	cursorShape           byte
-	title                 string
-	bg                    uint32
-	cursorlineChrome      protocol.CursorlineChrome
-	pendingClipboard      string
-	lastError             string
+	width            int
+	height           int
+	out              chan<- []byte
+	viewport         viewport.Model
+	zones            *zoneManager
+	windows          map[uint16]protocol.WindowContent
+	windowOrder      []uint16
+	chrome           map[byte]protocol.ChromePayload
+	activePalette    palette
+	gutters          map[uint16]protocol.Gutter
+	indentGuides     map[uint16]protocol.IndentGuides
+	cells            map[position]cell
+	drawSeq          uint64
+	cursorRow        uint16
+	cursorCol        uint16
+	cursorShape      byte
+	title            string
+	bg               uint32
+	cursorlineChrome protocol.CursorlineChrome
+	pendingClipboard string
+	lastError        string
+	// extensionRuntimes holds the most recent gui_extension_runtime (0xA3)
+	// envelope per extension id, mirroring the macOS registry that routes
+	// payloads by extension id (FrontendExtensionRuntime.swift:26). No
+	// in-tree extension registers a terminal renderer yet, so the payload is
+	// opaque: we store it keyed by extension id and surface a diagnostic line
+	// (footerLines) so the envelope is consumed rather than silently dropped.
+	// Once an extension ships a terminal runtime decoder, it reads from here.
+	extensionRuntimes     map[string]protocol.ExtensionRuntimePayload
 	bottomPanelScrollback int
 	agentAnimationFrame   uint64
 	agentAnimationRunning bool
@@ -73,18 +81,19 @@ type cell struct {
 func New(width, height uint16, out chan<- []byte) Model {
 	vp := viewport.New(viewport.WithWidth(int(width)), viewport.WithHeight(max(int(height)-3, 1)))
 	return Model{
-		width:         int(width),
-		height:        int(height),
-		out:           out,
-		viewport:      vp,
-		zones:         newZoneManager(),
-		windows:       map[uint16]protocol.WindowContent{},
-		chrome:        map[byte]protocol.ChromePayload{},
-		activePalette: defaultPalette(),
-		gutters:       map[uint16]protocol.Gutter{},
-		indentGuides:  map[uint16]protocol.IndentGuides{},
-		cells:         map[position]cell{},
-		latency:       latency.New(),
+		width:             int(width),
+		height:            int(height),
+		out:               out,
+		viewport:          vp,
+		zones:             newZoneManager(),
+		windows:           map[uint16]protocol.WindowContent{},
+		chrome:            map[byte]protocol.ChromePayload{},
+		activePalette:     defaultPalette(),
+		gutters:           map[uint16]protocol.Gutter{},
+		indentGuides:      map[uint16]protocol.IndentGuides{},
+		cells:             map[position]cell{},
+		extensionRuntimes: map[string]protocol.ExtensionRuntimePayload{},
+		latency:           latency.New(),
 		// MINGA_LATENCY_HUD=1 shows the latency overlay at boot; it is also
 		// toggled at runtime with ctrl+alt+l (ticket #2215).
 		hudVisible: latencyHUDEnvEnabled(),
@@ -241,6 +250,7 @@ func (m *Model) applyCommands(commands []protocol.Command) tea.Cmd {
 			m.indentGuides = map[uint16]protocol.IndentGuides{}
 			m.cursorlineChrome = protocol.CursorlineChrome{}
 			m.cells = map[position]cell{}
+			m.extensionRuntimes = map[string]protocol.ExtensionRuntimePayload{}
 			m.drawSeq = 0
 		case protocol.CommandDrawText:
 			m.applyDraw(command.Draw)
@@ -259,6 +269,8 @@ func (m *Model) applyCommands(commands []protocol.Command) tea.Cmd {
 			m.applyWindowDelta(command.Window)
 		case protocol.CommandClipboardWrite:
 			m.pendingClipboard = command.ClipboardText
+		case protocol.CommandExtensionRuntime:
+			m.applyExtensionRuntime(command.ExtensionRuntime)
 		case protocol.CommandChrome:
 			m.chrome[command.Chrome.Opcode] = command.Chrome
 			switch command.Chrome.Opcode {
@@ -278,6 +290,23 @@ func (m *Model) applyCommands(commands []protocol.Command) tea.Cmd {
 		}
 	}
 	return tea.Batch(cmds...)
+}
+
+// applyExtensionRuntime stores the latest gui_extension_runtime (0xA3) envelope
+// keyed by extension id, mirroring the macOS registry dispatch by extension id
+// (FrontendExtensionRuntime.swift:26). The payload is opaque: the shared
+// protocol owns only the envelope (gui.ex:873), and no in-tree extension ships
+// a terminal decoder yet, so we keep the most recent envelope per extension so
+// a future extension renderer can read it and footerLines can surface that a
+// runtime is active instead of dropping the frame.
+func (m *Model) applyExtensionRuntime(payload protocol.ExtensionRuntimePayload) {
+	if payload.ExtensionID == "" {
+		return
+	}
+	if m.extensionRuntimes == nil {
+		m.extensionRuntimes = map[string]protocol.ExtensionRuntimePayload{}
+	}
+	m.extensionRuntimes[payload.ExtensionID] = payload
 }
 
 func (m *Model) applyDraw(draw protocol.DrawText) {

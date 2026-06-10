@@ -143,6 +143,79 @@ func TestWhichKeyStylesGroupsAndLimitsColumnCount(t *testing.T) {
 	}
 }
 
+func TestExtensionRuntimeEnvelopeIsStoredAndSurfacedInFooter(t *testing.T) {
+	model := New(80, 24, nil)
+	updated, _ := model.Update(port.PacketMsg{Commands: []protocol.Command{
+		{Kind: protocol.CommandExtensionRuntime, ExtensionRuntime: protocol.ExtensionRuntimePayload{
+			ExtensionID: "acme.lint",
+			Channel:     "pane",
+			Payload:     []byte{0x01, 0x02, 0x03},
+		}},
+	}})
+	model = updated.(Model)
+
+	stored, ok := model.extensionRuntimes["acme.lint"]
+	if !ok {
+		t.Fatalf("extension runtime envelope was dropped instead of stored: %#v", model.extensionRuntimes)
+	}
+	if stored.Channel != "pane" || !bytes.Equal(stored.Payload, []byte{0x01, 0x02, 0x03}) {
+		t.Fatalf("stored extension runtime payload mismatch: %#v", stored)
+	}
+
+	footer := ansi.Strip(strings.Join(model.footerLines(), "\n"))
+	if !strings.Contains(footer, "ext acme.lint") {
+		t.Fatalf("footer should surface the active extension runtime: %q", footer)
+	}
+}
+
+func TestExtensionRuntimeLatestEnvelopeWinsAndIdsAreSortedDeterministically(t *testing.T) {
+	model := New(80, 24, nil)
+	updated, _ := model.Update(port.PacketMsg{Commands: []protocol.Command{
+		{Kind: protocol.CommandExtensionRuntime, ExtensionRuntime: protocol.ExtensionRuntimePayload{ExtensionID: "zeta", Channel: "a", Payload: []byte{0x01}}},
+		{Kind: protocol.CommandExtensionRuntime, ExtensionRuntime: protocol.ExtensionRuntimePayload{ExtensionID: "alpha", Channel: "b", Payload: []byte{0x02}}},
+		{Kind: protocol.CommandExtensionRuntime, ExtensionRuntime: protocol.ExtensionRuntimePayload{ExtensionID: "zeta", Channel: "c", Payload: []byte{0x09}}},
+	}})
+	model = updated.(Model)
+
+	if got := model.extensionRuntimes["zeta"]; got.Channel != "c" || !bytes.Equal(got.Payload, []byte{0x09}) {
+		t.Fatalf("latest envelope per extension id should win: %#v", got)
+	}
+	if got := model.extensionRuntimeStatus(); got != "ext alpha,zeta" {
+		t.Fatalf("extension runtime status should list ids sorted: %q", got)
+	}
+}
+
+func TestExtensionRuntimeIsClearedOnFrameClear(t *testing.T) {
+	model := New(80, 24, nil)
+	updated, _ := model.Update(port.PacketMsg{Commands: []protocol.Command{
+		{Kind: protocol.CommandExtensionRuntime, ExtensionRuntime: protocol.ExtensionRuntimePayload{ExtensionID: "acme.lint", Channel: "pane", Payload: []byte{0x01}}},
+	}})
+	model = updated.(Model)
+	if model.extensionRuntimeStatus() == "" {
+		t.Fatalf("precondition: expected an active extension runtime before clear")
+	}
+
+	updated, _ = model.Update(port.PacketMsg{Commands: []protocol.Command{{Kind: protocol.CommandClear}}})
+	model = updated.(Model)
+	if len(model.extensionRuntimes) != 0 {
+		t.Fatalf("CommandClear should reset extension runtimes, got %#v", model.extensionRuntimes)
+	}
+	if status := model.extensionRuntimeStatus(); status != "" {
+		t.Fatalf("extension runtime status should be empty after clear, got %q", status)
+	}
+}
+
+func TestExtensionRuntimeIgnoresEmptyExtensionID(t *testing.T) {
+	model := New(80, 24, nil)
+	updated, _ := model.Update(port.PacketMsg{Commands: []protocol.Command{
+		{Kind: protocol.CommandExtensionRuntime, ExtensionRuntime: protocol.ExtensionRuntimePayload{ExtensionID: "", Channel: "pane", Payload: []byte{0x01}}},
+	}})
+	model = updated.(Model)
+	if len(model.extensionRuntimes) != 0 {
+		t.Fatalf("envelope with empty extension id should be ignored, got %#v", model.extensionRuntimes)
+	}
+}
+
 func TestFooterRendersStatusMessageWithModelineSegments(t *testing.T) {
 	model := New(80, 24, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
