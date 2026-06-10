@@ -119,7 +119,12 @@ defmodule MingaEditor.Frontend.Manager do
 
     backend = Keyword.get(opts, :backend, :tui)
     port_mode = Keyword.get(opts, :port_mode, Application.get_env(:minga, :port_mode, :spawn))
-    renderer_path = Keyword.get(opts, :renderer_path, default_renderer_path(backend))
+    # get_lazy: resolving the default path reads the global MINGA_FRONTEND
+    # selection, which must not happen when an explicit path is supplied
+    # (tests pass explicit paths and run concurrently with SelectionTest's
+    # env mutations).
+    renderer_path =
+      Keyword.get_lazy(opts, :renderer_path, fn -> default_renderer_path(backend) end)
 
     port_opener = Keyword.get(opts, :port_opener, &Port.open/2)
     state = %PortState{renderer_path: renderer_path, port_mode: port_mode}
