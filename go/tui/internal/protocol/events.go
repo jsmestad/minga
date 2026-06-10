@@ -66,6 +66,20 @@ func EncodeResize(width, height uint16) []byte {
 	return []byte{generated.OPResize, byte(width >> 8), byte(width), byte(height >> 8), byte(height)}
 }
 
+// EncodeRequestKeyframe asks the BEAM to send the next frame as a full keyframe
+// after the frontend invalidated its staged/committed state (#2219). The frontend
+// emits it when a frame transaction is truncated, carries a mismatched seq/base,
+// or fails to size/decode mid-transaction. last_good_frame_seq is the last frame
+// the frontend committed cleanly (informational under single-client scope; the
+// BEAM forces the next frame full regardless). Wire format: fixed:5 =
+// opcode(1) + last_good_frame_seq(u32), matching protocol.ex decode_event/1.
+func EncodeRequestKeyframe(lastGoodFrameSeq uint32) []byte {
+	return []byte{
+		generated.OPRequestKeyframe,
+		byte(lastGoodFrameSeq >> 24), byte(lastGoodFrameSeq >> 16), byte(lastGoodFrameSeq >> 8), byte(lastGoodFrameSeq),
+	}
+}
+
 // EncodeKeyPress encodes a key press carrying a u32 input correlation sequence
 // (ticket #2215) appended after the modifiers byte. The BEAM echoes the sequence
 // on commit_frame so the frontend can resolve an end-to-end keystroke-to-write

@@ -171,6 +171,15 @@ func (m Model) footerLines() []string {
 	if ext := m.extensionRuntimeStatus(); ext != "" {
 		status += "  " + ext
 	}
+	if m.resyncPending {
+		// A frame transaction was discarded and the model asked the BEAM for a
+		// keyframe (#2219). Surface a subtle indicator while it waits so a stalled
+		// resync is visible without competing with real status content; it clears
+		// when a valid commit applies. Styled with the muted error tone at low
+		// intensity rather than the loud full-screen surface.
+		badge := lipgloss.NewStyle().Faint(true).Foreground(m.palette().Warning()).Background(m.palette().Base()).Render("resync…")
+		status += "  " + badge
+	}
 	lines := []string{
 		lipgloss.NewStyle().Foreground(m.palette().Muted()).Background(m.palette().Base()).Width(m.width).Render(fitStyled(status, m.width)),
 	}

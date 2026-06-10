@@ -19,10 +19,7 @@ func TestDecodePacketDoesNotSwallowAfterIndentGuides(t *testing.T) {
 	batch = append(batch, generated.OPCommitFrame, 0, 0, 0, 0, 0, 0, 0, 0)           // fixed:9 (frame_seq + echoed input_seq)
 
 	var warnings []string
-	cmds, err := decodePacket(batch, func(_ byte, text string) { warnings = append(warnings, text) })
-	if err != nil {
-		t.Fatalf("decodePacket error: %v", err)
-	}
+	cmds := decodePacket(batch, func(_ byte, text string) { warnings = append(warnings, text) })
 	if len(warnings) != 0 {
 		t.Fatalf("unexpected warnings: %v", warnings)
 	}
@@ -60,10 +57,7 @@ func TestDecodePacketDoesNotSwallowAfterOverlayDelta(t *testing.T) {
 			batch = append(batch, generated.OPGuiStatusBar, 1, 0x01, 0x00, 0x02, 0xAA, 0xBB) // sectioned
 			batch = append(batch, generated.OPCommitFrame, 0, 0, 0, 0, 0, 0, 0, 0)           // fixed:9 (frame_seq + echoed input_seq)
 
-			cmds, err := decodePacket(batch, func(_ byte, text string) { t.Fatalf("unexpected warning: %s", text) })
-			if err != nil {
-				t.Fatalf("decodePacket error: %v", err)
-			}
+			cmds := decodePacket(batch, func(_ byte, text string) { t.Fatalf("unexpected warning: %s", text) })
 			if len(cmds) != 3 {
 				t.Fatalf("got %d commands, want 3 (overlay delta did not swallow): %+v", len(cmds), cmds)
 			}
@@ -74,5 +68,28 @@ func TestDecodePacketDoesNotSwallowAfterOverlayDelta(t *testing.T) {
 				t.Errorf("last cmd = %v, want CommitFrame", cmds[len(cmds)-1].Kind)
 			}
 		})
+	}
+}
+
+// A sizing/decode failure mid-batch must surface a CommandStreamError marker
+// at the failure point and stop, rather than silently swallowing the rest (#2219).
+// The model uses the marker to abort an open frame transaction and resync.
+func TestDecodePacketSurfacesStreamErrorOnUnknownOpcode(t *testing.T) {
+	var batch []byte
+	batch = append(batch, generated.OPBeginFrame, 0, 0, 0, 5, 0, 0, 0, 0) // open transaction (seq 5, base 0)
+	batch = append(batch, generated.OPSetCursorShape, 0)                  // a valid command before the failure
+	batch = append(batch, 0x6F)                                           // unknown opcode (below chrome range, no schema size)
+
+	var warnings []string
+	cmds := decodePacket(batch, func(_ byte, text string) { warnings = append(warnings, text) })
+
+	if len(cmds) != 3 {
+		t.Fatalf("got %d commands, want 3 (begin, cursor, stream error): %+v", len(cmds), cmds)
+	}
+	if cmds[len(cmds)-1].Kind != protocol.CommandStreamError {
+		t.Fatalf("last command should be a stream error marker, got %v", cmds[len(cmds)-1].Kind)
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("a stream error should warn exactly once, got %v", warnings)
 	}
 }

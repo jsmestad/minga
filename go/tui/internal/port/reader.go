@@ -40,11 +40,7 @@ func StartReader(program *tea.Program, reader io.Reader) {
 				return
 			}
 
-			commands, err := decodePacket(packet, warn)
-			if err != nil {
-				warn(protocol.LogLevelWarn, fmt.Sprintf("protocol decode error: %v", err))
-				continue
-			}
+			commands := decodePacket(packet, warn)
 			program.Send(PacketMsg{Commands: commands})
 		}
 	}()
@@ -54,37 +50,51 @@ func StartReader(program *tea.Program, reader io.Reader) {
 // generated.CommandSize is the single authority for how far to advance after
 // each command, so an opcode this build does not render still advances by the
 // correct number of bytes instead of swallowing the rest of the frame.
-func decodePacket(packet []byte, warn func(byte, string)) ([]protocol.Command, error) {
+//
+// A sizing or decode failure can no longer be silently dropped: once byte
+// boundaries are untrustworthy the rest of the batch cannot be parsed, and if
+// the failure lands inside an open frame transaction (#2219) the model must
+// invalidate that transaction and request a keyframe rather than swap in a
+// partial frame. decodePacket therefore appends a synthetic
+// CommandStreamError marker at the point of failure (preserving in-order
+// position so the model sees it mid-transaction) and stops, returning whatever
+// it decoded up to that point. The model decides whether the marker aborts a
+// transaction or is harmless out of band.
+func decodePacket(packet []byte, warn func(byte, string)) []protocol.Command {
 	commands := make([]protocol.Command, 0, 32)
+	streamError := func(format string, args ...any) []protocol.Command {
+		warn(protocol.LogLevelWarn, fmt.Sprintf(format, args...))
+		return append(commands, protocol.Command{Kind: protocol.CommandStreamError})
+	}
 	for offset := 0; offset < len(packet); {
 		rest := packet[offset:]
 		size, status := generated.CommandSize(rest)
 		switch status {
 		case generated.CommandSizeOK:
 			// Sizing is authoritative. Decode for rendering within the exact
-			// command bounds; a render-decode failure must not desync the
-			// stream, so we warn and keep advancing.
-			if command, err := protocol.DecodeCommand(rest[:size]); err == nil {
-				commands = append(commands, command)
-			} else {
-				warn(protocol.LogLevelWarn, fmt.Sprintf("render decode failed for opcode 0x%02X (%d bytes): %v", rest[0], size, err))
+			// command bounds; a render-decode failure inside an open transaction
+			// must abort it rather than warn-and-continue (#2219).
+			command, err := protocol.DecodeCommand(rest[:size])
+			if err != nil {
+				return streamError("render decode failed for opcode 0x%02X (%d bytes): %v", rest[0], size, err)
 			}
+			commands = append(commands, command)
 			offset += size
 		case generated.CommandSizeCustom:
 			command, err := protocol.DecodeCommand(rest)
 			if err != nil {
-				return commands, err
+				return streamError("protocol decode error: %v", err)
 			}
 			if command.Size <= 0 {
-				return commands, io.ErrNoProgress
+				return streamError("protocol decode error: %v", io.ErrNoProgress)
 			}
 			commands = append(commands, command)
 			offset += command.Size
 		case generated.CommandSizeIncomplete:
-			return commands, io.ErrUnexpectedEOF
+			return streamError("protocol decode error: %v", io.ErrUnexpectedEOF)
 		default: // generated.CommandSizeUnknown
-			return commands, fmt.Errorf("unknown opcode 0x%02X at offset %d", rest[0], offset)
+			return streamError("unknown opcode 0x%02X at offset %d", rest[0], offset)
 		}
 	}
-	return commands, nil
+	return commands
 }

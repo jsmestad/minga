@@ -79,7 +79,7 @@ func TestDecodeBeginFrame(t *testing.T) {
 
 func TestDecodeCommitFrameCarriesInputSeq(t *testing.T) {
 	// commit_frame (#2219): opcode + frame_seq:u32 + input_seq:u32. input_seq is
-	// the echoed correlation sequence formerly carried by batch_end (ticket #2215).
+	// the echoed input correlation sequence (ticket #2215).
 	packet := []byte{generated.OPCommitFrame, 0, 0, 0, 7, 0, 0, 0x10, 0x92}
 	cmd, err := DecodeCommand(packet)
 	if err != nil {
@@ -94,8 +94,8 @@ func TestDecodeCommitFrameCarriesInputSeq(t *testing.T) {
 	if cmd.FrameSeq != 7 {
 		t.Fatalf("frame_seq = %d, want 7", cmd.FrameSeq)
 	}
-	if cmd.BatchSeq != 0x1092 {
-		t.Fatalf("input_seq = %d, want %d", cmd.BatchSeq, 0x1092)
+	if cmd.InputSeq != 0x1092 {
+		t.Fatalf("input_seq = %d, want %d", cmd.InputSeq, 0x1092)
 	}
 }
 
