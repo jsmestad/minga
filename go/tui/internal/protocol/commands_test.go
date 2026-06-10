@@ -424,6 +424,45 @@ func TestDecodePickerChromeDoesNotSwallowFollowingCommands(t *testing.T) {
 	}
 }
 
+// A peer that emits a header section ending right after has_preview (no
+// title/marked_count tail) must decode through DecodeCommand to a UI-visible
+// Picker whose optional tail degrades to its zero value, without reading the
+// bytes of the following command into the header. This proves the section
+// window bounds the generated decoder on the production path, not just in the
+// generated-package unit tests.
+func TestDecodePickerShortHeaderSectionStopsAtWindow(t *testing.T) {
+	// visible(1) selected(2) filtered(2) total(2) has_preview(1) = 8 bytes,
+	// the window ends before the optional title/marked_count tail.
+	header := []byte{1, 0, 5, 0, 9, 0, 12, 1}
+	body := section(0x01, header)
+	packet := []byte{generated.OPGuiPicker, 1}
+	packet = append(packet, body...)
+	packet = append(packet, generated.OPBatchEnd, 0, 0, 0, 0)
+
+	first, err := DecodeCommand(packet)
+	if err != nil {
+		t.Fatalf("DecodeCommand returned error: %v", err)
+	}
+	if first.Size != len(packet)-5 {
+		t.Fatalf("picker size = %d, want %d", first.Size, len(packet)-5)
+	}
+	picker := first.Chrome.Picker
+	if !picker.Visible || picker.Selected != 5 || picker.Filtered != 9 || picker.Total != 12 || !picker.HasPreview {
+		t.Fatalf("picker header decoded incorrectly: %+v", picker)
+	}
+	if picker.Title != "" || picker.Marked != 0 {
+		t.Fatalf("omitted tail must be zero-valued, got title=%q marked=%d", picker.Title, picker.Marked)
+	}
+
+	second, err := DecodeCommand(packet[first.Size:])
+	if err != nil {
+		t.Fatalf("DecodeCommand batch returned error: %v", err)
+	}
+	if second.Kind != CommandBatchEnd {
+		t.Fatalf("second kind = %v, want batch end", second.Kind)
+	}
+}
+
 func TestDecodePickerPreviewChromeDoesNotSwallowFollowingCommands(t *testing.T) {
 	segment := []byte{0xCC, 0xDD, 0xEE, 1}
 	segment = append(segment, string16("def main")...)

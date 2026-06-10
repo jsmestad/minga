@@ -1,6 +1,10 @@
 package protocol
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/jsmestad/minga/go/tui/internal/generated"
+)
 
 func decodeCompletion(payload []byte) (Completion, string, int) {
 	if len(payload) < 2 || payload[1] == 0 {
@@ -80,6 +84,13 @@ func decodeWhichKey(payload []byte) (WhichKey, string, int) {
 	return which, stringsJoin(summary, "  "), offset
 }
 
+// decodePicker owns the outer section framing (read each section's id/len, skip
+// unknown ids) by hand, then decodes every section body through the
+// schema-generated, window-aware decoders. The section window
+// [sectionStart, sectionEnd) bounds every generated read, so the header's
+// optional title/marked_count tail degrades to its zero value when a section is
+// short, reproducing the old length-tolerant ladder. This mirrors the Swift
+// OP_GUI_PICKER path collapsed onto the generated decoders in #2262.
 func decodePicker(payload []byte) (Picker, string, int) {
 	if len(payload) < 2 || payload[1] == 0 {
 		return Picker{}, "", min(len(payload), 2)
@@ -93,26 +104,46 @@ func decodePicker(payload []byte) (Picker, string, int) {
 	for i := 0; i < int(payload[1]); i++ {
 		sectionID := payload[offset]
 		sectionLen := int(u16(payload, offset+1))
-		offset += 3
-		section := payload[offset : offset+sectionLen]
-		offset += sectionLen
+		sectionStart := offset + 3
+		sectionEnd := sectionStart + sectionLen
+		offset = sectionEnd
+
 		switch sectionID {
-		case 0x01:
-			decodePickerHeader(section, &picker)
-		case 0x02:
-			if query, _, ok := readString16(section, 0); ok {
-				picker.Query = query
+		case 0x01: // Header
+			if h, _, err := generated.DecodeGuiPickerHeader(payload, sectionStart, sectionEnd); err == nil {
+				picker.Visible = h.Visible != 0
+				picker.Selected = h.SelectedIndex
+				picker.Filtered = h.FilteredCount
+				picker.Total = h.TotalCount
+				picker.HasPreview = h.HasPreview != 0
+				picker.Title = h.Title
+				picker.Marked = h.MarkedCount
 			}
-		case 0x03:
-			picker.Items = decodePickerItems(section)
-		case 0x04:
-			decodePickerActions(section, &picker)
-		case 0x05:
-			if modePrefix, _, ok := readString16(section, 0); ok {
-				picker.ModePrefix = modePrefix
+		case 0x02: // Query
+			if q, _, err := generated.DecodeGuiPickerQuery(payload, sectionStart, sectionEnd); err == nil {
+				picker.Query = q.Text
 			}
-		case 0x06:
-			decodePickerLoadStatus(section, &picker)
+		case 0x03: // Items
+			if items, _, err := generated.DecodeGuiPickerItems(payload, sectionStart, sectionEnd); err == nil {
+				picker.Items = mapPickerItems(items)
+			}
+		case 0x04: // Action menu
+			if m, _, err := generated.DecodeGuiPickerActionMenu(payload, sectionStart, sectionEnd); err == nil {
+				picker.ActionVisible = m.Visible != 0
+				picker.ActionIndex = m.SelectedIndex
+				picker.Actions = m.Actions
+			}
+		case 0x05: // Mode prefix
+			if m, _, err := generated.DecodeGuiPickerModePrefix(payload, sectionStart, sectionEnd); err == nil {
+				picker.ModePrefix = m.Text
+			}
+		case 0x06: // Load status
+			if s, _, err := generated.DecodeGuiPickerLoadStatus(payload, sectionStart, sectionEnd); err == nil {
+				picker.LoadStatus = s.Status
+				if s.Status == 2 {
+					picker.LoadError = s.Message
+				}
+			}
 		}
 	}
 	summary := picker.Title
@@ -122,95 +153,26 @@ func decodePicker(payload []byte) (Picker, string, int) {
 	return picker, summary, size
 }
 
-func decodePickerHeader(section []byte, picker *Picker) {
-	if len(section) < 10 {
-		return
-	}
-	picker.Visible = section[0] != 0
-	picker.Selected = u16(section, 1)
-	picker.Filtered = u16(section, 3)
-	picker.Total = u16(section, 5)
-	picker.HasPreview = section[7] != 0
-	title, offset, ok := readString16(section, 8)
-	if !ok {
-		return
-	}
-	picker.Title = title
-	if len(section) >= offset+2 {
-		picker.Marked = u16(section, offset)
-	}
-}
-
-func decodePickerItems(section []byte) []PickerItem {
-	if len(section) < 2 {
+// mapPickerItems lowers the generated PickerItem (raw flags only) into the
+// protocol PickerItem the UI consumes, deriving the TwoLine/Marked booleans
+// from the flag bits exactly as the old hand decode did.
+func mapPickerItems(items []generated.PickerItem) []PickerItem {
+	if items == nil {
 		return nil
 	}
-	count := int(u16(section, 0))
-	offset := 2
-	items := make([]PickerItem, 0, count)
-	for i := 0; i < count && len(section) >= offset+8; i++ {
-		item := PickerItem{
-			IconColor: u24(section, offset),
-			Flags:     section[offset+3],
-		}
-		item.TwoLine = item.Flags&0x01 != 0
-		item.Marked = item.Flags&0x02 != 0
-		offset += 4
-		var ok bool
-		item.Label, offset, ok = readString16(section, offset)
-		if !ok {
-			break
-		}
-		item.Description, offset, ok = readString16(section, offset)
-		if !ok {
-			break
-		}
-		item.Annotation, offset, ok = readString16(section, offset)
-		if !ok || len(section) < offset+1 {
-			break
-		}
-		matchCount := int(section[offset])
-		offset += 1 + matchCount*2
-		if len(section) < offset {
-			break
-		}
-		items = append(items, item)
+	out := make([]PickerItem, 0, len(items))
+	for _, item := range items {
+		out = append(out, PickerItem{
+			IconColor:   item.IconColor,
+			Flags:       item.Flags,
+			Label:       item.Label,
+			Description: item.Description,
+			Annotation:  item.Annotation,
+			TwoLine:     item.Flags&0x01 != 0,
+			Marked:      item.Flags&0x02 != 0,
+		})
 	}
-	return items
-}
-
-func decodePickerActions(section []byte, picker *Picker) {
-	if len(section) < 1 {
-		return
-	}
-	picker.ActionVisible = section[0] != 0
-	if !picker.ActionVisible || len(section) < 3 {
-		return
-	}
-	picker.ActionIndex = section[1]
-	count := int(section[2])
-	offset := 3
-	picker.Actions = make([]string, 0, count)
-	for i := 0; i < count; i++ {
-		action, next, ok := readString16(section, offset)
-		if !ok {
-			break
-		}
-		picker.Actions = append(picker.Actions, action)
-		offset = next
-	}
-}
-
-func decodePickerLoadStatus(section []byte, picker *Picker) {
-	if len(section) < 1 {
-		return
-	}
-	picker.LoadStatus = section[0]
-	if picker.LoadStatus == 2 {
-		if err, _, ok := readString16(section, 1); ok {
-			picker.LoadError = err
-		}
-	}
+	return out
 }
 
 func decodePickerPreview(payload []byte) (PickerPreview, string, int) {
