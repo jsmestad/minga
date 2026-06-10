@@ -8,6 +8,10 @@ defmodule Minga.Mix.ProtocolGenerator do
   @schema_path "docs/protocol_schema.toml"
   @generated_root ".generated/protocol"
   @generated_elixir_path Path.join([@generated_root, "elixir/lib/minga/protocol/opcodes.ex"])
+  @generated_golden_fields_path Path.join([
+                                  @generated_root,
+                                  "elixir/lib/minga/protocol/golden_fields.ex"
+                                ])
   @generated_swift_path "macos/.generated/protocol/ProtocolOpcodes.generated.swift"
   @generated_zig_opcodes_path "zig/src/generated/protocol_opcodes.zig"
   @generated_zig_schema_test_path "zig/src/generated/protocol_schema_test.zig"
@@ -17,6 +21,7 @@ defmodule Minga.Mix.ProtocolGenerator do
   @generated_swift_command_size_path "macos/.generated/protocol/ProtocolCommandSize.generated.swift"
   @generated_go_semantic_types_path "go/tui/internal/generated/semantic_types.go"
   @generated_go_semantic_decode_path "go/tui/internal/generated/semantic_decode.go"
+  @generated_go_golden_path "go/tui/internal/generated/golden_decode.go"
   @protocol_zig_path "zig/src/protocol.zig"
   @allowed_opcode_categories [
     "input",
@@ -143,6 +148,7 @@ defmodule Minga.Mix.ProtocolGenerator do
   defp generated_files(schema) do
     [
       {@generated_elixir_path, elixir_file(schema)},
+      {@generated_golden_fields_path, golden_fields_elixir_file(schema)},
       {@generated_swift_path, swift_file(schema)},
       {@generated_zig_opcodes_path, zig_opcodes_file(schema)},
       {@generated_zig_schema_test_path, zig_schema_test_file(schema)},
@@ -151,7 +157,8 @@ defmodule Minga.Mix.ProtocolGenerator do
       {@generated_zig_command_size_path, zig_command_size_file(schema)},
       {@generated_swift_command_size_path, swift_command_size_file(schema)},
       {@generated_go_semantic_types_path, go_semantic_types_file(schema)},
-      {@generated_go_semantic_decode_path, go_semantic_decode_file(schema)}
+      {@generated_go_semantic_decode_path, go_semantic_decode_file(schema)},
+      {@generated_go_golden_path, go_golden_decode_file(schema)}
     ]
   end
 
@@ -2066,6 +2073,187 @@ defmodule Minga.Mix.ProtocolGenerator do
         go_record_decoder("Decode#{struct_name}", struct_name, cf, smap)
       ]
     end)
+  end
+
+  # ── Elixir: golden_fields.ex (golden fixture field metadata) ─────────────
+  #
+  # Emits a schema-derived description of every golden unit's field layout so the
+  # Elixir golden-fixture builder can construct expected maps keyed by the exact
+  # Go struct field names the generated decoders produce, without hand-mapping
+  # snake_case to Go's PascalCase. Each field entry is
+  # `{schema_name, go_name, shape}` where shape is one of:
+  #   :scalar | :string
+  #   {:struct, [field_entry]}            (nested fixed/section struct)
+  #   {:array, element_shape}             (counted_array; element_shape is
+  #                                        :scalar | :string | {:struct, [...]})
+  # Counted-array elements that are bare wire types use :scalar/:string; struct
+  # elements expand recursively. This is metadata only; the generated Go decoder
+  # and the expected JSON are the two sides the golden test compares.
+
+  @spec golden_fields_elixir_file(schema()) :: String.t()
+  defp golden_fields_elixir_file(schema) do
+    smap = structures_map(schema)
+    units = golden_field_units(schema, smap)
+
+    [
+      "defmodule Minga.Protocol.GoldenFields do\n",
+      "  @moduledoc \"\"\"\n",
+      "  Generated golden-fixture field metadata.\n\n",
+      "  Generated from `docs/protocol_schema.toml` by `mix protocol.gen`. Do not edit by hand.\n",
+      "  \"\"\"\n\n",
+      "  @units %{\n",
+      Enum.map_join(units, "", fn {name, fields} ->
+        "    #{inspect(name)} => #{golden_fields_inspect(fields)},\n"
+      end),
+      "  }\n\n",
+      "  @doc \"Ordered `{schema_name, go_name, shape}` field list for a golden decoder unit.\"\n",
+      "  @spec fields(String.t()) :: [tuple()] | nil\n",
+      "  def fields(unit), do: Map.get(@units, unit)\n\n",
+      "  @doc \"All golden decoder unit names.\"\n",
+      "  @spec units() :: [String.t()]\n",
+      "  def units, do: Map.keys(@units)\n",
+      "end\n"
+    ]
+    |> IO.iodata_to_binary()
+  end
+
+  @spec golden_field_units(schema(), %{String.t() => structure()}) :: [{String.t(), [tuple()]}]
+  defp golden_field_units(schema, smap) do
+    section_units =
+      schema
+      |> sections_list()
+      |> Enum.reject(&entry_custom_layout?/1)
+      |> Enum.map(fn s ->
+        name = "#{go_struct_name(s["opcode"])}#{go_struct_name(s["name"])}"
+        {name, golden_unit_fields(s, smap)}
+      end)
+
+    command_field_units =
+      schema
+      |> command_fields_list()
+      |> Enum.map(fn cf ->
+        name = go_struct_name(cf["opcode"]) <> "Fields"
+        {name, golden_unit_fields(cf, smap)}
+      end)
+
+    Enum.sort_by(section_units ++ command_field_units, fn {name, _} -> name end)
+  end
+
+  # A counted_array section (e.g. gui_picker.items) decodes to a bare slice, so
+  # its "fields" are the single element's shape under the schema name "items".
+  @spec golden_unit_fields(map(), %{String.t() => structure()}) :: [tuple()]
+  defp golden_unit_fields(%{"layout" => "counted_array", "element" => element} = entry, smap) do
+    [{entry["name"], go_field_name(entry["name"]), {:array, golden_element_shape(element, smap)}}]
+  end
+
+  defp golden_unit_fields(entry, smap) do
+    Enum.map(entry_fields(entry), &golden_field_entry(&1, smap))
+  end
+
+  @spec golden_field_entry(map(), %{String.t() => structure()}) :: tuple()
+  defp golden_field_entry(%{"name" => name} = field, smap) do
+    {name, go_field_name(name), golden_field_shape(field, smap)}
+  end
+
+  @spec golden_field_shape(map(), %{String.t() => structure()}) :: term()
+  defp golden_field_shape(%{"type" => type}, _smap)
+       when type in ["string8", "string16", "string32"],
+       do: :string
+
+  defp golden_field_shape(%{"type" => "struct", "element" => element}, smap) do
+    {:struct, golden_struct_fields(element, smap)}
+  end
+
+  defp golden_field_shape(%{"type" => "counted_array", "element" => element}, smap) do
+    {:array, golden_element_shape(element, smap)}
+  end
+
+  defp golden_field_shape(_field, _smap), do: :scalar
+
+  @spec golden_element_shape(String.t(), %{String.t() => structure()}) :: term()
+  defp golden_element_shape(element, _smap) when element in ["string8", "string16", "string32"],
+    do: :string
+
+  defp golden_element_shape(element, _smap) when element in @element_wire_types, do: :scalar
+
+  defp golden_element_shape(element, smap), do: {:struct, golden_struct_fields(element, smap)}
+
+  @spec golden_struct_fields(String.t(), %{String.t() => structure()}) :: [tuple()]
+  defp golden_struct_fields(element, smap) do
+    case Map.get(smap, element) do
+      nil -> []
+      structure -> Enum.map(entry_fields(structure), &golden_field_entry(&1, smap))
+    end
+  end
+
+  @spec golden_fields_inspect([tuple()]) :: String.t()
+  defp golden_fields_inspect(fields), do: inspect(fields, limit: :infinity)
+
+  # ── Go: golden_decode.go (cross-language golden test dispatcher) ──────────
+  #
+  # Emits a single `GoldenDecode(name, payload)` entry point that maps a golden
+  # fixture's decoder name to the matching generated decoder and returns the
+  # decoded value as `any`. The cross-language golden test (golden_cross_lang_test.go)
+  # marshals that value to JSON and compares it to the expected JSON produced by
+  # the Elixir fixture builder, so encoder/decoder field drift fails CI. The set
+  # of dispatchable units is exactly the on-wire payload units a frontend decodes:
+  # non-custom sections and command_fields entries. Custom-layout sections own
+  # their framing and are excluded.
+
+  @type golden_unit :: %{name: String.t(), fn: String.t()}
+
+  @spec golden_units(schema()) :: [golden_unit()]
+  defp golden_units(schema) do
+    section_units =
+      schema
+      |> sections_list()
+      |> Enum.reject(&entry_custom_layout?/1)
+      |> Enum.map(fn s ->
+        %{
+          name: "#{go_struct_name(s["opcode"])}#{go_struct_name(s["name"])}",
+          fn: "Decode#{go_struct_name(s["opcode"])}#{go_struct_name(s["name"])}"
+        }
+      end)
+
+    command_field_units =
+      schema
+      |> command_fields_list()
+      |> Enum.map(fn cf ->
+        struct_name = go_struct_name(cf["opcode"]) <> "Fields"
+        %{name: struct_name, fn: "Decode#{struct_name}"}
+      end)
+
+    Enum.sort_by(section_units ++ command_field_units, & &1.name)
+  end
+
+  @spec go_golden_decode_file(schema()) :: String.t()
+  defp go_golden_decode_file(schema) do
+    units = golden_units(schema)
+
+    [
+      "// Code generated by mix protocol.gen. DO NOT EDIT.\n\n",
+      "package generated\n\n",
+      "import \"fmt\"\n\n",
+      "// GoldenDecode dispatches a cross-language golden fixture's decoder name to\n",
+      "// the matching generated decoder and returns the decoded value. The golden\n",
+      "// test marshals the result to JSON and compares it field-by-field against the\n",
+      "// expected JSON the Elixir fixture builder produced from the same model.\n",
+      "func GoldenDecode(name string, payload []byte) (any, int, error) {\n",
+      "\tswitch name {\n",
+      Enum.map(units, fn %{name: name, fn: fn_name} ->
+        [
+          "\tcase \"#{name}\":\n",
+          "\t\tv, n, err := #{fn_name}(payload, 0)\n",
+          "\t\treturn v, n, err\n"
+        ]
+      end),
+      "\tdefault:\n",
+      "\t\treturn nil, 0, fmt.Errorf(\"unknown golden decoder %q\", name)\n",
+      "\t}\n",
+      "}\n"
+    ]
+    |> IO.iodata_to_binary()
+    |> format_generated_go_file()
   end
 
   @spec constant_name(String.t()) :: String.t()
