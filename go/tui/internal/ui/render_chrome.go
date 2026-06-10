@@ -332,8 +332,8 @@ func (m Model) renderPicker(picker protocol.Picker, preview protocol.PickerPrevi
 func (m Model) renderPickerList(title string, picker protocol.Picker, height int, width int) []string {
 	theme := m.palette()
 	panelStyle := m.popupLineStyle(width)
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.Accent()).Background(theme.PopupChrome()).Width(width)
-	lines := []string{titleStyle.Render(fitStyled(" "+title, width))}
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.Accent()).Background(theme.PopupChrome()).Width(width).ColorWhitespace(true)
+	lines := []string{renderPadded(titleStyle, " "+title, width)}
 	rowBudget := max(height-1, 0)
 	selected := min(max(int(picker.Selected), 0), max(len(picker.Items)-1, 0))
 	start := 0
@@ -370,25 +370,31 @@ func (m Model) renderPickerItemRow(title string, item protocol.PickerItem, selec
 		rowBackground = theme.PopupSelection()
 		rowForeground = theme.PopupSelectionText()
 	}
-	markerText := lipgloss.NewStyle().Foreground(theme.PopupMutedText()).Background(rowBackground).Render(marker)
+	markerText := lipgloss.NewStyle().Foreground(theme.PopupMutedText()).Background(rowBackground).ColorWhitespace(true).Render(marker)
 	if selected {
-		markerText = lipgloss.NewStyle().Bold(true).Foreground(theme.Accent()).Background(rowBackground).Render(marker)
+		markerText = lipgloss.NewStyle().Bold(true).Foreground(theme.Accent()).Background(rowBackground).ColorWhitespace(true).Render(marker)
 	} else if item.Marked {
-		markerText = lipgloss.NewStyle().Foreground(theme.Warning()).Background(rowBackground).Render(marker)
+		markerText = lipgloss.NewStyle().Foreground(theme.Warning()).Background(rowBackground).ColorWhitespace(true).Render(marker)
 	}
-	iconText := icon.glyph
-	if icon.color != "" && !selected {
-		iconText = lipgloss.NewStyle().Foreground(lipgloss.Color(icon.color)).Background(rowBackground).Render(icon.glyph)
-	}
-	labelStyle := lipgloss.NewStyle().Foreground(rowForeground).Background(rowBackground)
+	labelStyle := lipgloss.NewStyle().Foreground(rowForeground).Background(rowBackground).ColorWhitespace(true)
 	if selected {
 		labelStyle = labelStyle.Bold(true)
 	}
-	text := markerText + labelStyle.Render(" "+strings.TrimSpace(iconText+" "+item.Label))
-	if strings.TrimSpace(detail) != "" {
-		text += lipgloss.NewStyle().Foreground(theme.PopupMutedText()).Background(rowBackground).Render("  " + strings.TrimSpace(detail))
+	text := markerText + labelStyle.Render(" ")
+	if icon.glyph != "" {
+		if icon.color != "" && !selected {
+			text += lipgloss.NewStyle().Foreground(lipgloss.Color(icon.color)).Background(rowBackground).ColorWhitespace(true).Render(icon.glyph)
+		} else {
+			text += labelStyle.Render(icon.glyph)
+		}
+		text += labelStyle.Render(" ")
 	}
-	return lipgloss.NewStyle().Background(rowBackground).Width(width).Render(fitStyled(" "+text, width))
+	text += labelStyle.Render(item.Label)
+	if strings.TrimSpace(detail) != "" {
+		text += lipgloss.NewStyle().Foreground(theme.PopupMutedText()).Background(rowBackground).ColorWhitespace(true).Render("  " + strings.TrimSpace(detail))
+	}
+	rowStyle := lipgloss.NewStyle().Background(rowBackground).Width(width).ColorWhitespace(true)
+	return renderPadded(rowStyle, " "+text, width)
 }
 
 func (m Model) renderPickerWithSidePreview(title string, picker protocol.Picker, preview protocol.PickerPreview, height int) []string {
@@ -401,7 +407,7 @@ func (m Model) renderPickerWithSidePreview(title string, picker protocol.Picker,
 	left = m.fillPopupLines(left, bodyHeight, leftWidth)
 	right = m.fillPopupLines(right, bodyHeight, rightWidth)
 	lines := make([]string, 0, height)
-	leftStyle := lipgloss.NewStyle().Width(leftWidth).Background(m.palette().PopupSurface())
+	leftStyle := lipgloss.NewStyle().Width(leftWidth).Background(m.palette().PopupSurface()).ColorWhitespace(true)
 	divider := lipgloss.NewStyle().Foreground(m.palette().PopupBorder()).Background(m.palette().PopupSurface()).Render("│")
 	for i := 0; i < bodyHeight; i++ {
 		lines = append(lines, lipgloss.JoinHorizontal(lipgloss.Top, leftStyle.Render(left[i]), divider, right[i]))
@@ -418,23 +424,25 @@ func (m Model) renderPickerHelp(picker protocol.Picker, width int) string {
 	}
 	left := fmt.Sprintf(" %d/%d", selected, len(picker.Items))
 	right := "↑↓ move  Enter choose  Esc close"
-	leftText := lipgloss.NewStyle().Foreground(p.PopupMutedText()).Background(p.PopupChrome()).Render(left)
-	rightText := lipgloss.NewStyle().Foreground(p.PopupMutedText()).Background(p.PopupChrome()).Render(right)
-	spacer := strings.Repeat(" ", max(width-lipgloss.Width(leftText)-lipgloss.Width(rightText), 0))
-	return lipgloss.NewStyle().Background(p.PopupChrome()).Width(width).Render(fitStyled(leftText+spacer+rightText, width))
+	textStyle := lipgloss.NewStyle().Foreground(p.PopupMutedText()).Background(p.PopupChrome()).ColorWhitespace(true)
+	leftText := textStyle.Render(left)
+	rightText := textStyle.Render(right)
+	spacer := textStyle.Render(strings.Repeat(" ", max(width-lipgloss.Width(leftText)-lipgloss.Width(rightText), 0)))
+	rowStyle := lipgloss.NewStyle().Background(p.PopupChrome()).Width(width).ColorWhitespace(true)
+	return renderPadded(rowStyle, leftText+spacer+rightText, width)
 }
 
 func (m Model) renderPickerPreview(preview protocol.PickerPreview, height int, width int) []string {
 	theme := m.palette()
 	style := m.popupLineStyle(width)
 	limit := min(len(preview.Lines), max(height-1, 0))
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.Accent()).Background(theme.PopupChrome()).Width(width)
-	lines := []string{titleStyle.Render(fit(" Preview", width))}
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.Accent()).Background(theme.PopupChrome()).Width(width).ColorWhitespace(true)
+	lines := []string{renderPadded(titleStyle, " Preview", width)}
 	for _, line := range preview.Lines[:limit] {
 		var builder strings.Builder
-		builder.WriteString(lipgloss.NewStyle().Background(theme.PopupSurface()).Render(" "))
+		builder.WriteString(lipgloss.NewStyle().Background(theme.PopupSurface()).ColorWhitespace(true).Render(" "))
 		for _, segment := range line.Segments {
-			segmentStyle := lipgloss.NewStyle().Foreground(theme.PopupText()).Background(theme.PopupSurface())
+			segmentStyle := lipgloss.NewStyle().Foreground(theme.PopupText()).Background(theme.PopupSurface()).ColorWhitespace(true)
 			if segment.FG != 0 {
 				segmentStyle = segmentStyle.Foreground(lipgloss.Color(fmt.Sprintf("#%06X", segment.FG)))
 			}
@@ -443,23 +451,39 @@ func (m Model) renderPickerPreview(preview protocol.PickerPreview, height int, w
 			}
 			builder.WriteString(segmentStyle.Render(segment.Text))
 		}
-		lines = append(lines, style.Render(fitStyled(builder.String(), width)))
+		lines = append(lines, renderPadded(style, builder.String(), width))
 	}
 	return m.fillPopupLines(lines, height, width)
 }
 
 func (m Model) popupLineStyle(width int) lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(m.palette().PopupText()).Background(m.palette().PopupSurface()).Width(width)
+	return lipgloss.NewStyle().Foreground(m.palette().PopupText()).Background(m.palette().PopupSurface()).Width(width).ColorWhitespace(true)
 }
 
 func (m Model) fillPopupLines(lines []string, height int, width int) []string {
 	style := m.popupLineStyle(width)
 	out := make([]string, 0, height)
 	for _, line := range lines[:min(len(lines), height)] {
-		out = append(out, style.Render(fitStyled(line, width)))
+		out = append(out, renderPadded(style, line, width))
 	}
 	for len(out) < height {
-		out = append(out, style.Render(strings.Repeat(" ", max(width, 1))))
+		out = append(out, renderPadded(style, "", width))
 	}
 	return out
+}
+
+func renderPadded(style lipgloss.Style, value string, width int) string {
+	return style.Render(fitStyledWithPad(value, width, style))
+}
+
+func fitStyledWithPad(value string, width int, padStyle lipgloss.Style) string {
+	if width <= 0 {
+		return ""
+	}
+	value = lipgloss.NewStyle().Inline(true).MaxWidth(width).Render(value)
+	visible := lipgloss.Width(value)
+	if visible >= width {
+		return value
+	}
+	return value + padStyle.Render(strings.Repeat(" ", width-visible))
 }
