@@ -126,6 +126,7 @@ let UNICODE_15: UInt8 = 1
 let IMAGE_NATIVE: UInt8 = 3
 let FLOAT_NATIVE: UInt8 = 1
 let TEXT_PROPORTIONAL: UInt8 = 1
+let SEMANTIC_UI_ENABLED: UInt8 = 1
 
 // MARK: - Text attribute bits
 

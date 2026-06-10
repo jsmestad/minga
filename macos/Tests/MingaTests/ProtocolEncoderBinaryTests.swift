@@ -56,18 +56,19 @@ struct EncoderReadyTests {
     func readyLayout() {
         let payload = captureFrame { $0.sendReady(cols: 120, rows: 40) }
 
-        #expect(payload.count == 13)
+        #expect(payload.count == 14)
         #expect(payload[0] == OP_READY)
         #expect(readU16(payload, 1) == 120) // cols
         #expect(readU16(payload, 3) == 40)  // rows
         #expect(payload[5] == CAPS_VERSION)
-        #expect(payload[6] == 6) // 6 capability fields
+        #expect(payload[6] == 7) // 7 capability fields
         #expect(payload[7] == FRONTEND_NATIVE_GUI)
         #expect(payload[8] == COLOR_RGB)
         #expect(payload[9] == UNICODE_15)
         #expect(payload[10] == IMAGE_NATIVE)
         #expect(payload[11] == FLOAT_NATIVE)
         #expect(payload[12] == TEXT_PROPORTIONAL)
+        #expect(payload[13] == SEMANTIC_UI_ENABLED)
     }
 }
 

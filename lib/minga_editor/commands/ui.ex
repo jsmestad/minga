@@ -7,6 +7,7 @@ defmodule MingaEditor.Commands.UI do
 
   use MingaEditor.Commands.Provider
 
+  alias MingaEditor.BottomPanel
   alias MingaEditor.Frontend
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.PickerUI
@@ -79,17 +80,18 @@ defmodule MingaEditor.Commands.UI do
   )
 
   @spec toggle_bottom_panel(EditorState.t()) :: EditorState.t()
-  defp toggle_bottom_panel(state), do: frontend(state).toggle_bottom_panel(state)
+  defp toggle_bottom_panel(state) do
+    EditorState.set_bottom_panel(state, BottomPanel.toggle(EditorState.bottom_panel(state)))
+  end
 
   @spec bottom_panel_next_tab(EditorState.t()) :: EditorState.t()
-  defp bottom_panel_next_tab(state), do: frontend(state).bottom_panel_next_tab(state)
+  defp bottom_panel_next_tab(state) do
+    EditorState.set_bottom_panel(state, BottomPanel.next_tab(EditorState.bottom_panel(state)))
+  end
 
   @spec bottom_panel_prev_tab(EditorState.t()) :: EditorState.t()
-  defp bottom_panel_prev_tab(state), do: frontend(state).bottom_panel_prev_tab(state)
-
-  @spec frontend(EditorState.t()) :: module()
-  defp frontend(%{capabilities: caps}) do
-    if MingaEditor.Frontend.gui?(caps), do: __MODULE__.GUI, else: __MODULE__.TUI
+  defp bottom_panel_prev_tab(state) do
+    EditorState.set_bottom_panel(state, BottomPanel.prev_tab(EditorState.bottom_panel(state)))
   end
 
   @spec toggle_beam_observatory(EditorState.t()) :: EditorState.t()
@@ -163,7 +165,7 @@ defmodule MingaEditor.Commands.UI do
     observatory_shell_supported?(state) and
       state
       |> Map.get(:capabilities, %Capabilities{})
-      |> Frontend.gui?()
+      |> Frontend.semantic_ui?()
   end
 
   @spec observatory_shell_supported?(EditorState.t()) :: boolean()
