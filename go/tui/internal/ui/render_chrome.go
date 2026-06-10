@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -167,6 +168,9 @@ func (m Model) footerLines() []string {
 	if changes, ok := m.changeSummary(); ok && changes.Visible && len(changes.Entries) > 0 {
 		status += fmt.Sprintf("  changes %d", len(changes.Entries))
 	}
+	if ext := m.extensionRuntimeStatus(); ext != "" {
+		status += "  " + ext
+	}
 	lines := []string{
 		lipgloss.NewStyle().Foreground(m.palette().Muted()).Background(m.palette().Base()).Width(m.width).Render(fitStyled(status, m.width)),
 	}
@@ -197,6 +201,24 @@ func (m Model) renderStatusSegments(status protocol.StatusBar) string {
 	rightSpacer := strings.Repeat(" ", max(available-messageWidth-lipgloss.Width(leftSpacer), 0))
 	spacerStyle := lipgloss.NewStyle().Background(m.palette().ChromeSurface())
 	return left + spacerStyle.Render(leftSpacer) + message + spacerStyle.Render(rightSpacer) + right
+}
+
+// extensionRuntimeStatus returns a compact, deterministic summary of the active
+// gui_extension_runtime (0xA3) envelopes for the footer status line. It is the
+// minimal honest "expose to render" surface until an extension ships a terminal
+// view (mirroring the macOS registry, which also has no in-tree renderer): it
+// proves the envelope was consumed and names which extensions are live without
+// inventing payload-specific UI.
+func (m Model) extensionRuntimeStatus() string {
+	if len(m.extensionRuntimes) == 0 {
+		return ""
+	}
+	ids := make([]string, 0, len(m.extensionRuntimes))
+	for id := range m.extensionRuntimes {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return "ext " + strings.Join(ids, ",")
 }
 
 func (m Model) renderStatusMessage(message string) string {
