@@ -888,6 +888,13 @@ struct ContentView: View {
             bottomInset: notificationCenterBottomInset
         )
 
+        // Keystroke-to-present latency HUD (ticket #2215). Top-right, client-local
+        // debug overlay; visibility is owned by LatencyHUDState.
+        LatencyHUDOverlay(
+            state: appState.gui.latencyHUDState,
+            theme: appState.gui.themeColors
+        )
+
         // Startup overlay: covers the empty Metal framebuffer with a
         // spinner while the BEAM boots. Fades out on first batch_end.
         if !appState.hasReceivedFirstFrame {
