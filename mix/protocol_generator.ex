@@ -12,6 +12,10 @@ defmodule Minga.Mix.ProtocolGenerator do
                                   @generated_root,
                                   "elixir/lib/minga/protocol/golden_fields.ex"
                                 ])
+  @generated_encode_path Path.join([
+                           @generated_root,
+                           "elixir/lib/minga/protocol/encode.ex"
+                         ])
   @generated_swift_path "macos/.generated/protocol/ProtocolOpcodes.generated.swift"
   @generated_zig_opcodes_path "zig/src/generated/protocol_opcodes.zig"
   @generated_zig_schema_test_path "zig/src/generated/protocol_schema_test.zig"
@@ -202,6 +206,7 @@ defmodule Minga.Mix.ProtocolGenerator do
     [
       {@generated_elixir_path, elixir_file(schema)},
       {@generated_golden_fields_path, golden_fields_elixir_file(schema)},
+      {@generated_encode_path, encode_elixir_file(schema)},
       {@generated_swift_path, swift_file(schema)},
       {@generated_zig_opcodes_path, zig_opcodes_file(schema)},
       {@generated_zig_schema_test_path, zig_schema_test_file(schema)},
@@ -2517,6 +2522,269 @@ defmodule Minga.Mix.ProtocolGenerator do
     |> IO.iodata_to_binary()
     |> format_generated_go_file()
   end
+
+  # ── Elixir: encode.ex (pure schema-derived encoders) ─────────────────────
+  #
+  # Emits one pure `encode_<unit>(model) :: iodata()` per wire record (structure,
+  # non-custom section, command_fields) plus one `encode_<enum>(atom) :: byte`
+  # clause set per enum. Each encoder is the structural inverse of the generated
+  # Go decoder above: fixed primitives become big-endian bitstrings, strings a
+  # length prefix + bytes, structs delegate to the element's encoder, counted
+  # arrays a count prefix + mapped elements, conditional tails a guard on base
+  # fields that emits the tail iodata or `[]`, and enum fields an atom -> byte
+  # mapping with the schema `default` byte as the fallback (the inverse of the Go
+  # byte -> typed constant mapping).
+  #
+  # The encoders are pure serialization only: no caching, no derivation, no
+  # nil-handling. The adapter layer keeps the fingerprint/skip-if-unchanged shell
+  # and the Layer 2 builders normalize the model (defaulting, derivation, clamps)
+  # before calling these. Field values are read by schema name from the model
+  # struct or map, matching the names the hand-written encoders consume today.
+
+  @spec encode_elixir_file(schema()) :: String.t()
+  defp encode_elixir_file(schema) do
+    smap = structures_map(schema)
+    enums = enums_list(schema)
+    structures = Map.get(schema, "structures", [])
+    sections = sections_list(schema) |> Enum.reject(&entry_custom_layout?/1)
+    command_fields = command_fields_list(schema)
+
+    [
+      "defmodule Minga.Protocol.Encode do\n",
+      "  @moduledoc \"\"\"\n",
+      "  Generated pure protocol encoders.\n\n",
+      "  Generated from `docs/protocol_schema.toml` by `mix protocol.gen`. Do not edit by hand.\n\n",
+      "  Each `encode_*/1` returns the on-wire iodata for one schema record; the\n",
+      "  adapter layer wraps these with framing and the fingerprint cache, and the\n",
+      "  Layer 2 builders normalize the model before encoding.\n",
+      "  \"\"\"\n\n",
+      Enum.map(enums, &elixir_encode_enum/1),
+      Enum.map(structures, fn s ->
+        elixir_record_encoder(encode_fn_name(s["name"]), s, smap)
+      end),
+      Enum.map(sections, fn s ->
+        elixir_record_encoder(section_encode_fn_name(s), s, smap)
+      end),
+      Enum.map(command_fields, fn cf ->
+        elixir_record_encoder(command_fields_encode_fn_name(cf), cf, smap)
+      end),
+      "end\n"
+    ]
+    |> IO.iodata_to_binary()
+  end
+
+  @spec encode_fn_name(String.t()) :: String.t()
+  defp encode_fn_name(name), do: "encode_#{name}"
+
+  @spec section_encode_fn_name(section()) :: String.t()
+  defp section_encode_fn_name(section) do
+    "encode_#{section["opcode"]}_#{section["name"]}"
+  end
+
+  @spec command_fields_encode_fn_name(command_fields()) :: String.t()
+  defp command_fields_encode_fn_name(cf), do: "encode_#{cf["opcode"]}"
+
+  # An enum encoder is the inverse of the Go byte -> constant mapping: one clause
+  # per declared atom plus a catch-all that emits the schema `default` byte. The
+  # atom names mirror the value names (the hand-written encoders pattern-match the
+  # same atoms today).
+  @spec elixir_encode_enum(enum()) :: iodata()
+  defp elixir_encode_enum(%{"name" => name} = enum) do
+    values = Map.get(enum, "values", [])
+    default_byte = enum_default_byte(enum)
+    fn_name = "encode_#{name}"
+
+    [
+      "  @spec #{fn_name}(atom()) :: non_neg_integer()\n",
+      Enum.map(values, fn v ->
+        "  def #{fn_name}(:#{v["name"]}), do: #{v["value"]}\n"
+      end),
+      "  def #{fn_name}(_), do: #{default_byte}\n\n"
+    ]
+  end
+
+  @spec enum_default_byte(enum()) :: non_neg_integer()
+  defp enum_default_byte(%{"default" => default} = enum) when is_binary(default) do
+    enum
+    |> Map.get("values", [])
+    |> Enum.find(fn v -> v["name"] == default end)
+    |> Map.fetch!("value")
+  end
+
+  defp enum_default_byte(_enum), do: 0
+
+  # A counted_array-layout section (e.g. gui_picker.items) has no named fields:
+  # it decodes to a bare slice, so its encoder takes the list directly and emits
+  # the count prefix + mapped elements, the inverse of the Go counted_array
+  # section decoder.
+  @spec elixir_record_encoder(String.t(), map(), %{String.t() => structure()}) :: iodata()
+  defp elixir_record_encoder(
+         fn_name,
+         %{"layout" => "counted_array", "element" => element} = entry,
+         smap
+       ) do
+    count_type = entry["count_type"] || "u16"
+    bits = @primitive_sizes[count_type] * 8
+    element_encoder = elixir_array_element_encoder(element, smap)
+
+    [
+      "  @spec #{fn_name}([term()]) :: iodata()\n",
+      "  def #{fn_name}(items) when is_list(items) do\n",
+      "    [<<length(items)::#{bits}>> | Enum.map(items, #{element_encoder})]\n",
+      "  end\n\n"
+    ]
+  end
+
+  # Emit `encode_<unit>(model) :: iodata()` for one record. Base fields are
+  # encoded in order; an optional conditional tail emits its fields only when the
+  # guard (rewritten to read `model.<field>`) holds. A record with no fields and
+  # no tail (none exist today) still compiles to an empty list.
+  defp elixir_record_encoder(fn_name, entry, smap) do
+    base_fields = Map.get(entry, "fields", [])
+
+    [
+      "  @spec #{fn_name}(map()) :: iodata()\n",
+      "  def #{fn_name}(model) do\n",
+      "    [\n",
+      Enum.map(base_fields, fn field ->
+        "      #{elixir_encode_field(field, "model", smap)},\n"
+      end),
+      elixir_encode_conditional_tail(entry, smap),
+      "    ]\n",
+      "  end\n\n"
+    ]
+  end
+
+  # The conditional tail compiles to a nested list guarded by an `if`. The guard
+  # is the schema guard with each base-field identifier rewritten to
+  # `Map.fetch!(model, :<field>)` so it reads the same field the fixed section
+  # decoded, mirroring the Go decoder's substitution of decoded locals.
+  @spec elixir_encode_conditional_tail(map(), %{String.t() => structure()}) :: iodata()
+  defp elixir_encode_conditional_tail(entry, smap) do
+    case conditional_tail_fields(entry) do
+      [] ->
+        []
+
+      tail_fields ->
+        [
+          "      if #{elixir_guard_expression(entry)} do\n",
+          "        [\n",
+          Enum.map(tail_fields, fn field ->
+            "          #{elixir_encode_field(field, "model", smap)},\n"
+          end),
+          "        ]\n",
+          "      else\n",
+          "        []\n",
+          "      end\n"
+        ]
+    end
+  end
+
+  @spec elixir_guard_expression(map()) :: String.t()
+  defp elixir_guard_expression(entry) do
+    guard = conditional_tail_guard(entry) || "true"
+
+    translate_guard(
+      guard,
+      Enum.map(Map.get(entry, "fields", []), fn field ->
+        {field["name"], "Map.fetch!(model, :#{field["name"]})"}
+      end)
+    )
+  end
+
+  # Encode one field as iodata, reading its value from `<source>.<name>` (a struct
+  # or map field with the schema name). Mirrors the Go decode-field dispatch.
+  @spec elixir_encode_field(map(), String.t(), %{String.t() => structure()}) :: String.t()
+  defp elixir_encode_field(
+         %{"name" => name, "type" => "enum", "enum" => enum_name, "repr" => repr},
+         source,
+         _smap
+       ) do
+    bits = @primitive_sizes[repr] * 8
+    "<<encode_#{enum_name}(#{field_read(source, name)})::#{bits}>>"
+  end
+
+  defp elixir_encode_field(%{"name" => name, "type" => type}, source, _smap)
+       when type in ["u8", "u16", "u24", "u32", "u64"] do
+    bits = @primitive_sizes[type] * 8
+    "<<#{field_read(source, name)}::#{bits}>>"
+  end
+
+  defp elixir_encode_field(%{"name" => name, "type" => "rgb"}, source, _smap) do
+    "<<#{field_read(source, name)}::24>>"
+  end
+
+  defp elixir_encode_field(%{"name" => name, "type" => "string8"}, source, _smap) do
+    elixir_encode_string(field_read(source, name), 8)
+  end
+
+  defp elixir_encode_field(%{"name" => name, "type" => "string16"}, source, _smap) do
+    elixir_encode_string(field_read(source, name), 16)
+  end
+
+  defp elixir_encode_field(%{"name" => name, "type" => "string32"}, source, _smap) do
+    elixir_encode_string(field_read(source, name), 32)
+  end
+
+  defp elixir_encode_field(
+         %{"name" => name, "type" => "struct", "element" => element},
+         source,
+         _smap
+       ) do
+    "#{encode_fn_name(element)}(#{field_read(source, name)})"
+  end
+
+  defp elixir_encode_field(
+         %{
+           "name" => name,
+           "type" => "counted_array",
+           "count_type" => count_type,
+           "element" => element
+         },
+         source,
+         smap
+       ) do
+    bits = @primitive_sizes[count_type] * 8
+    list = field_read(source, name)
+    element_encoder = elixir_array_element_encoder(element, smap)
+    "[<<length(#{list})::#{bits}>> | Enum.map(#{list}, #{element_encoder})]"
+  end
+
+  # A counted_array element is either a bare wire type or a named structure. Bare
+  # primitives/strings encode inline; structures delegate to their encoder. The
+  # returned string is an anonymous fn passed to `Enum.map/2`.
+  @spec elixir_array_element_encoder(String.t(), %{String.t() => structure()}) :: String.t()
+  defp elixir_array_element_encoder(element, _smap)
+       when element in ["u8", "u16", "u24", "u32", "u64"] do
+    bits = @primitive_sizes[element] * 8
+    "fn v -> <<v::#{bits}>> end"
+  end
+
+  defp elixir_array_element_encoder("rgb", _smap), do: "fn v -> <<v::24>> end"
+
+  defp elixir_array_element_encoder("string8", _smap),
+    do: "fn v -> #{elixir_encode_string("v", 8)} end"
+
+  defp elixir_array_element_encoder("string16", _smap),
+    do: "fn v -> #{elixir_encode_string("v", 16)} end"
+
+  defp elixir_array_element_encoder("string32", _smap),
+    do: "fn v -> #{elixir_encode_string("v", 32)} end"
+
+  defp elixir_array_element_encoder(element, _smap),
+    do: "&#{encode_fn_name(element)}/1"
+
+  # A length-prefixed string: `<<byte_size(bin)::N, bin::binary>>` where `bin` is
+  # the value coerced to a binary. The hand-written encoders use
+  # `:erlang.iolist_to_binary/1`; matching that keeps bytes identical for iodata
+  # values while a plain binary passes through unchanged.
+  @spec elixir_encode_string(String.t(), non_neg_integer()) :: String.t()
+  defp elixir_encode_string(expr, bits) do
+    "(fn bin -> <<byte_size(bin)::#{bits}, bin::binary>> end).(:erlang.iolist_to_binary([#{expr}]))"
+  end
+
+  @spec field_read(String.t(), String.t()) :: String.t()
+  defp field_read(source, name), do: "Map.fetch!(#{source}, :#{name})"
 
   @spec constant_name(String.t()) :: String.t()
   defp constant_name(name), do: String.upcase(name)

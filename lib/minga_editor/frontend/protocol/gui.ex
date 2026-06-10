@@ -144,7 +144,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   @op_gui_tab_bar Opcodes.gui_tab_bar()
   @op_gui_which_key Opcodes.gui_which_key()
-  @op_gui_completion Opcodes.gui_completion()
   @op_gui_theme Opcodes.gui_theme()
   @op_gui_breadcrumb Opcodes.gui_breadcrumb()
   @op_gui_status_bar Opcodes.gui_status_bar()
@@ -1755,52 +1754,11 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   defp encode_git_status(:deleted), do: 6
 
   # ── Completion ──
-
-  @doc "Encodes a gui_completion command."
-  @spec encode_gui_completion(
-          Minga.Editing.Completion.t() | nil,
-          non_neg_integer(),
-          non_neg_integer()
-        ) ::
-          binary()
-  def encode_gui_completion(nil, _row, _col), do: <<@op_gui_completion, 0::8>>
-
-  def encode_gui_completion(%Minga.Editing.Completion{filtered: []}, _row, _col) do
-    <<@op_gui_completion, 0::8>>
-  end
-
-  def encode_gui_completion(%Minga.Editing.Completion{} = comp, cursor_row, cursor_col) do
-    {items, selected_offset} = Minga.Editing.Completion.visible_items(comp)
-
-    entries =
-      Enum.map(items, fn item ->
-        kind_byte = encode_completion_kind(item.kind)
-        label = :erlang.iolist_to_binary([item.label])
-        detail = :erlang.iolist_to_binary([item.detail || ""])
-
-        <<kind_byte::8, byte_size(label)::16, label::binary, byte_size(detail)::16,
-          detail::binary>>
-      end)
-
-    IO.iodata_to_binary([
-      @op_gui_completion,
-      <<1::8, cursor_row::16, cursor_col::16, selected_offset::16, length(items)::16>>
-      | entries
-    ])
-  end
-
-  @spec encode_completion_kind(atom()) :: non_neg_integer()
-  defp encode_completion_kind(:function), do: 1
-  defp encode_completion_kind(:method), do: 2
-  defp encode_completion_kind(:variable), do: 3
-  defp encode_completion_kind(:field), do: 4
-  defp encode_completion_kind(:module), do: 5
-  defp encode_completion_kind(:keyword), do: 7
-  defp encode_completion_kind(:snippet), do: 8
-  defp encode_completion_kind(:constant), do: 9
-  defp encode_completion_kind(:struct), do: 11
-  defp encode_completion_kind(:enum), do: 12
-  defp encode_completion_kind(_), do: 0
+  #
+  # The gui_completion parity oracle (encode_gui_completion/encode_completion_kind)
+  # was removed once the production CompletionEncoder migrated to the
+  # schema-generated codec (#2225): the cross-language golden tests now prove
+  # byte-exactness, which is the only role this oracle served.
 
   # ── Which-key ──
 

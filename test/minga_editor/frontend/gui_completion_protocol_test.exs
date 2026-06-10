@@ -2,19 +2,41 @@ defmodule MingaEditor.Frontend.GUICompletionProtocolTest do
   @moduledoc "Tests for GUI completion protocol encoding."
   use ExUnit.Case, async: true
 
-  alias Minga.Editing.Completion
-  alias MingaEditor.Frontend.Protocol.GUI
+  alias Minga.Editing.Completion, as: EditingCompletion
+  alias Minga.Frontend.Adapter.GUI.CompletionEncoder
+  alias Minga.RenderModel.UI.Completion
+  alias Minga.RenderModel.UI.Completion.Item
 
-  test "encode_gui_completion sends the visible completion window and selected offset" do
+  @op_gui_completion Minga.Protocol.Opcodes.gui_completion()
+
+  test "encode_command sends the visible completion window and selected offset" do
     comp = many_items_completion(15)
     comp = %{comp | selected: 7}
 
-    <<0x73, 1, 4::16, 12::16, selected_offset::16, count::16, entries::binary>> =
-      GUI.encode_gui_completion(comp, 4, 12)
+    <<@op_gui_completion, 1, 4::16, 12::16, selected_offset::16, count::16, entries::binary>> =
+      comp |> completion_model(4, 12) |> CompletionEncoder.encode_command()
 
     assert selected_offset == 5
     assert count == 10
     assert decode_labels(entries, count) == Enum.map(2..11, &label/1)
+  end
+
+  # Mirror the production CompletionBuilder transformation: window the legacy
+  # completion via visible_items, then map to the semantic Completion model the
+  # generated encoder consumes.
+  defp completion_model(comp, cursor_row, cursor_col) do
+    {visible_items, selected_offset} = EditingCompletion.visible_items(comp)
+
+    %Completion{
+      visible?: true,
+      cursor_row: cursor_row,
+      cursor_col: cursor_col,
+      selected_offset: selected_offset,
+      items:
+        Enum.map(visible_items, fn item ->
+          %Item{kind: item.kind, label: item.label, detail: item.detail || ""}
+        end)
+    }
   end
 
   defp many_items_completion(count) do
@@ -34,7 +56,7 @@ defmodule MingaEditor.Frontend.GUICompletionProtocolTest do
         raw: nil
       }
     end)
-    |> Completion.new({0, 0})
+    |> EditingCompletion.new({0, 0})
   end
 
   defp label(index), do: "item_" <> String.pad_leading(Integer.to_string(index), 2, "0")

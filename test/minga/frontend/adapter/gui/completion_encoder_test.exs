@@ -1,12 +1,10 @@
 defmodule Minga.Frontend.Adapter.GUI.CompletionEncoderTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Editing.Completion, as: EditingCompletion
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Frontend.Adapter.GUI.CompletionEncoder
   alias Minga.RenderModel.UI.Completion
   alias Minga.RenderModel.UI.Completion.Item
-  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
 
   @op_gui_completion Minga.Protocol.Opcodes.gui_completion()
 
@@ -49,52 +47,32 @@ defmodule Minga.Frontend.Adapter.GUI.CompletionEncoderTest do
       assert cmd2 == CompletionEncoder.encode_command(model2)
     end
 
-    test "produces byte-identical output to legacy ProtocolGUI for hidden state" do
-      model = %Completion{}
-
-      assert CompletionEncoder.encode_command(model) ==
-               ProtocolGUI.encode_gui_completion(nil, 0, 0)
-    end
-
-    test "produces byte-identical output to legacy ProtocolGUI for visible items" do
-      legacy_completion =
-        EditingCompletion.new(
-          [
-            item("map", :function, "Enum.map/2"),
-            item("value", :variable, nil)
-          ],
-          {0, 0}
-        )
-
-      {visible_items, selected_offset} = EditingCompletion.visible_items(legacy_completion)
-
+    # Byte-exactness against the schema-generated codec is now proven by the
+    # cross-language golden tests (test/support/protocol_golden.ex +
+    # go/tui/internal/protocol/golden_cross_lang_test.go), which replaced the
+    # former hand-written ProtocolGUI parity oracle for this family.
+    test "encodes the visible window header and items" do
       model = %Completion{
         visible?: true,
         cursor_row: 5,
         cursor_col: 2,
-        selected_offset: selected_offset,
-        items:
-          Enum.map(visible_items, fn item ->
-            %Item{kind: item.kind, label: item.label, detail: item.detail || ""}
-          end)
+        selected_offset: 1,
+        items: [
+          %Item{kind: :function, label: "map", detail: "Enum.map/2"},
+          %Item{kind: :variable, label: "value", detail: ""}
+        ]
       }
 
-      assert CompletionEncoder.encode_command(model) ==
-               ProtocolGUI.encode_gui_completion(legacy_completion, 5, 2)
-    end
-  end
+      <<@op_gui_completion, 1::8, 5::16, 2::16, 1::16, count::16, rest::binary>> =
+        CompletionEncoder.encode_command(model)
 
-  defp item(label, kind, detail) do
-    %{
-      label: label,
-      kind: kind,
-      insert_text: label,
-      filter_text: label,
-      detail: detail,
-      documentation: "",
-      sort_text: label,
-      text_edit: nil,
-      raw: nil
-    }
+      assert count == 2
+
+      <<1::8, label_len::16, label::binary-size(label_len), detail_len::16,
+        detail::binary-size(detail_len), _next::binary>> = rest
+
+      assert label == "map"
+      assert detail == "Enum.map/2"
+    end
   end
 end

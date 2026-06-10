@@ -10,9 +10,9 @@ defmodule Mix.Tasks.Protocol.Golden do
   field-by-field. Together they make payload drift between the Elixir encoders
   and the generated decoders a CI failure.
 
-  Must run under `MIX_ENV=test` because the fixtures live in the test support
-  tree. Run with `--check` to verify the committed manifest is current instead
-  of rewriting it.
+  This task lives under `test/support` because its fixtures do: it is compiled
+  only under `MIX_ENV=test`, so the test-support dependency is structural
+  rather than guarded. In other envs the task does not exist.
 
       MIX_ENV=test mix protocol.golden
       MIX_ENV=test mix protocol.golden --check
@@ -24,14 +24,11 @@ defmodule Mix.Tasks.Protocol.Golden do
 
   @manifest_path "go/tui/internal/protocol/testdata/golden/manifest.json"
 
-  @fixtures_module Minga.Test.ProtocolGolden
-
   @impl Mix.Task
   @spec run([String.t()]) :: :ok
   def run(args) do
     Mix.Task.run("app.config")
     Mix.Task.run("loadpaths")
-    ensure_fixtures_available!()
 
     {opts, _argv, _invalid} = OptionParser.parse(args, strict: [check: :boolean])
     content = manifest_json()
@@ -42,24 +39,9 @@ defmodule Mix.Tasks.Protocol.Golden do
     end
   end
 
-  # The fixtures live in the test support tree, so this task only works under
-  # MIX_ENV=test. Fail with a clear message instead of an opaque UndefinedFunctionError.
-  @spec ensure_fixtures_available!() :: :ok
-  defp ensure_fixtures_available! do
-    case Code.ensure_loaded(@fixtures_module) do
-      {:module, _} ->
-        :ok
-
-      {:error, _} ->
-        Mix.raise(
-          "#{inspect(@fixtures_module)} is not loaded. Run this task under MIX_ENV=test (e.g. `MIX_ENV=test mix protocol.golden`)."
-        )
-    end
-  end
-
   @spec manifest_json() :: String.t()
   defp manifest_json do
-    @fixtures_module.manifest()
+    Minga.Test.ProtocolGolden.manifest()
     |> JSON.encode!()
     |> Kernel.<>("\n")
   end

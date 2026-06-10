@@ -2,9 +2,9 @@ defmodule Minga.Frontend.Adapter.GUI.CompletionEncoder do
   @moduledoc false
 
   alias Minga.Frontend.Adapter.GUI.Caches
+  alias Minga.Protocol.Encode
   alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.UI.Completion
-  alias Minga.RenderModel.UI.Completion.Item
 
   @op_gui_completion Opcodes.gui_completion()
 
@@ -19,18 +19,27 @@ defmodule Minga.Frontend.Adapter.GUI.CompletionEncoder do
     end
   end
 
+  # The fingerprint/skip-if-unchanged shell stays hand-written here; byte
+  # production delegates to the schema-generated pure encoder. The visible/hidden
+  # dispatch maps the `Completion` struct to the schema-shaped map the generated
+  # `encode_gui_completion/1` consumes (visible flag as 0/1, items as plain
+  # field maps).
   @spec encode_command(Completion.t()) :: binary()
-  def encode_command(%Completion{visible?: false}), do: <<@op_gui_completion, 0::8>>
-
   def encode_command(%Completion{} = model) do
-    entries = Enum.map(model.items, &encode_item/1)
+    IO.iodata_to_binary([@op_gui_completion | Encode.encode_gui_completion(to_wire(model))])
+  end
 
-    IO.iodata_to_binary([
-      @op_gui_completion,
-      <<1::8, model.cursor_row::16, model.cursor_col::16, model.selected_offset::16,
-        length(model.items)::16>>
-      | entries
-    ])
+  @spec to_wire(Completion.t()) :: map()
+  defp to_wire(%Completion{visible?: false}), do: %{visible: 0}
+
+  defp to_wire(%Completion{} = model) do
+    %{
+      visible: 1,
+      cursor_row: model.cursor_row,
+      cursor_col: model.cursor_col,
+      selected_offset: model.selected_offset,
+      items: Enum.map(model.items, fn item -> Map.from_struct(item) end)
+    }
   end
 
   @spec fingerprint(Completion.t()) :: term()
@@ -39,26 +48,4 @@ defmodule Minga.Frontend.Adapter.GUI.CompletionEncoder do
   defp fingerprint(%Completion{} = model) do
     {model.visible?, model.cursor_row, model.cursor_col, model.selected_offset, model.items}
   end
-
-  @spec encode_item(Item.t()) :: binary()
-  defp encode_item(%Item{} = item) do
-    kind_byte = encode_completion_kind(item.kind)
-    label = :erlang.iolist_to_binary([item.label])
-    detail = :erlang.iolist_to_binary([item.detail || ""])
-
-    <<kind_byte::8, byte_size(label)::16, label::binary, byte_size(detail)::16, detail::binary>>
-  end
-
-  @spec encode_completion_kind(atom()) :: non_neg_integer()
-  defp encode_completion_kind(:function), do: 1
-  defp encode_completion_kind(:method), do: 2
-  defp encode_completion_kind(:variable), do: 3
-  defp encode_completion_kind(:field), do: 4
-  defp encode_completion_kind(:module), do: 5
-  defp encode_completion_kind(:keyword), do: 7
-  defp encode_completion_kind(:snippet), do: 8
-  defp encode_completion_kind(:constant), do: 9
-  defp encode_completion_kind(:struct), do: 11
-  defp encode_completion_kind(:enum), do: 12
-  defp encode_completion_kind(_), do: 0
 end
