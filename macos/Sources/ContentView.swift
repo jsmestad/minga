@@ -895,6 +895,14 @@ struct ContentView: View {
             theme: appState.gui.themeColors
         )
 
+        // Frame-transaction resync hint (#2219 child D). Bottom-trailing badge
+        // shown while a keyframe is in flight after an invalidation; the editor
+        // keeps showing the last good frame underneath.
+        ResyncOverlay(
+            state: appState.gui.resyncState,
+            theme: appState.gui.themeColors
+        )
+
         // Startup overlay: covers the empty Metal framebuffer with a
         // spinner while the BEAM boots. Fades out on first commit_frame.
         if !appState.hasReceivedFirstFrame {

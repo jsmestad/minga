@@ -114,7 +114,7 @@ struct MouseInputTests {
         let cw = view.cellWidth
         let ch = view.cellHeight
 
-        view.dispatcher.dispatch(.guiSplitSeparators(
+        view.dispatcher.applyForTesting(.guiSplitSeparators(
             borderColor: 0x555555,
             verticals: [Wire.VerticalSeparator(col: 40, startRow: 0, endRow: 23)],
             horizontals: []
@@ -135,7 +135,7 @@ struct MouseInputTests {
         let cw = view.cellWidth
         let ch = view.cellHeight
 
-        view.dispatcher.dispatch(.guiSplitSeparators(
+        view.dispatcher.applyForTesting(.guiSplitSeparators(
             borderColor: 0x555555,
             verticals: [Wire.VerticalSeparator(col: 40, startRow: 0, endRow: 23)],
             horizontals: []
@@ -186,8 +186,8 @@ struct MouseInputTests {
             isActive: true, contentWidth: 39, cursorLine: 3, lineNumberStyle: .hybrid,
             lineNumberWidth: 8, signColWidth: 1, entries: []
         )
-        view.dispatcher.dispatch(.guiGutter(data: clickedGutter))
-        view.dispatcher.dispatch(.guiGutter(data: activeWideGutter))
+        view.dispatcher.applyForTesting(.guiGutter(data: clickedGutter))
+        view.dispatcher.applyForTesting(.guiGutter(data: activeWideGutter))
 
         let firstTextColX = CoreTextMetalRenderer.gutterLeftMarginPt + CGFloat(clickedGutter.lineNumberWidth + clickedGutter.signColWidth) * cw + CoreTextMetalRenderer.gutterRightGapPt + cw * 0.2
         guard let event = mouseEvent(type: .leftMouseDown, location: NSPoint(x: firstTextColX, y: ch * 2.5)) else { return }
@@ -310,8 +310,8 @@ struct MouseInputTests {
             lineNumberWidth: 4, signColWidth: 3,
             entries: [Wire.GutterEntry(bufLine: 42, displayType: .foldStart, signType: .none, foldEndLine: 50)]
         )
-        view.dispatcher.dispatch(.guiGutter(data: activeGutter))
-        view.dispatcher.dispatch(.guiGutter(data: inactiveGutter))
+        view.dispatcher.applyForTesting(.guiGutter(data: activeGutter))
+        view.dispatcher.applyForTesting(.guiGutter(data: inactiveGutter))
 
         guard let event = mouseEvent(type: .leftMouseDown,
                                      location: NSPoint(x: cw * 22.2, y: ch * 0.5)) else { return }

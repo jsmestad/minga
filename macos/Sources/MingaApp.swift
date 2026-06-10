@@ -324,8 +324,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         observeWorkspaceLifecycleNotifications()
         os_signpost(.event, log: startupLog, name: "EditorViewCreated")
 
-        disp.onBatchEnd = { [weak recovery] in
+        disp.onFramePresented = { [weak recovery] in
             recovery?.onRenderReceived()
+        }
+        // Route through the app delegate's live encoder, not the encoder captured
+        // at startup: a BEAM crash restart swaps `self.encoder` for a new pipe, so
+        // a resync request must reach the current process, not the dead one.
+        disp.onRequestKeyframe = { [weak self] lastGoodFrameSeq in
+            self?.encoder?.sendRequestKeyframe(lastGoodFrameSeq: lastGoodFrameSeq)
         }
         disp.onFrameReady = { [weak nsView] in
             nsView?.renderFrame()
@@ -711,7 +717,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 dispatcher.dispatch(command)
             }
         } catch {
+            // A decode failure (sizing error or unknown opcode) mid-stream means
+            // the byte boundaries are no longer trustworthy. If a frame
+            // transaction is open, this tightens the usual log-and-continue policy:
+            // discard the staged frame and request a keyframe (#2219 child D).
             PortLogger.error("Protocol decode error: \(error)")
+            dispatcher.decodeFailed()
         }
     }
 }

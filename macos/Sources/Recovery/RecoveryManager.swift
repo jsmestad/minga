@@ -1,8 +1,9 @@
 /// Detects frontend-to-BEAM stalls and presents a native recovery dialog.
 ///
 /// The macOS frontend keeps accepting keyboard events even when the BEAM stops
-/// reading from its port. If key events have been sent and no render batch has
-/// completed for a few seconds, Ctrl-G becomes an explicit recovery gesture.
+/// reading from its port. If key events have been sent and no frame has
+/// committed (`commit_frame`) for a few seconds, Ctrl-G becomes an explicit
+/// recovery gesture.
 
 import AppKit
 import Darwin
@@ -13,19 +14,19 @@ final class RecoveryManager {
     private let timeoutSeconds: CFTimeInterval
     private let restartAction: @MainActor () -> Void
 
-    private(set) var lastBatchEndTime: CFAbsoluteTime
+    private(set) var lastFramePresentedTime: CFAbsoluteTime
     private(set) var keysSinceLastRender: Int = 0
     private(set) var isShowingAlert: Bool = false
 
     init(timeoutSeconds: CFTimeInterval = 3.0, restartAction: @escaping @MainActor () -> Void = RecoveryManager.sendRestartSignalToParent) {
         self.timeoutSeconds = timeoutSeconds
         self.restartAction = restartAction
-        self.lastBatchEndTime = CFAbsoluteTimeGetCurrent()
+        self.lastFramePresentedTime = CFAbsoluteTimeGetCurrent()
     }
 
-    /// Records that a complete render batch arrived from the BEAM.
+    /// Records that a frame committed (`commit_frame`) and presented.
     func onRenderReceived() {
-        lastBatchEndTime = CFAbsoluteTimeGetCurrent()
+        lastFramePresentedTime = CFAbsoluteTimeGetCurrent()
         keysSinceLastRender = 0
         isShowingAlert = false
     }
@@ -37,7 +38,7 @@ final class RecoveryManager {
 
     /// Returns true when user input is pending and the BEAM has not rendered within the timeout.
     func isUnresponsive(now: CFAbsoluteTime = CFAbsoluteTimeGetCurrent()) -> Bool {
-        keysSinceLastRender > 0 && now - lastBatchEndTime > timeoutSeconds
+        keysSinceLastRender > 0 && now - lastFramePresentedTime > timeoutSeconds
     }
 
     /// Handles Ctrl-G. Returns true when the recovery gesture was consumed.
@@ -50,8 +51,8 @@ final class RecoveryManager {
     }
 
     /// Test helper for deterministic timeout checks.
-    func setLastBatchEndTimeForTesting(_ time: CFAbsoluteTime) {
-        lastBatchEndTime = time
+    func setLastFramePresentedTimeForTesting(_ time: CFAbsoluteTime) {
+        lastFramePresentedTime = time
     }
 
     private func showRecoveryAlert() {

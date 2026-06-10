@@ -3,6 +3,26 @@
 /// Rendering is semantic-first: content flows through gui_window_content (0x80)
 /// and the dedicated gui_* opcodes. The cell-paradigm commands (draw_text,
 /// set_cursor, clear, region tracking) were retired in protocol_version 2.
+///
+/// ## Frame transactions (#2219 child D)
+///
+/// Every BEAM frame is bracketed by `begin_frame` and `commit_frame`. Between
+/// the two, transaction-scoped commands are *buffered* in `stagedCommands`
+/// rather than mutating the presented `FrameState`/`GUIState`, so SwiftUI never
+/// renders a half-applied frame. At `commit_frame` the dispatcher validates the
+/// transaction (frame_seq matches the open begin; base_frame_seq is 0 or the
+/// last committed seq) and *replays* the buffered commands through the same
+/// `apply(_:)` switch that drives non-transactional dispatch. This is the
+/// buffered-commands design from the AC-1 consult: one mutation path, no shadow
+/// state, no per-field staging twins. The replay happens synchronously inside
+/// `commit_frame` before `onFrameReady`, so the SwiftUI render pass observes the
+/// whole frame as one consistent update.
+///
+/// Invalidation (truncation via double-begin, seq mismatch, base mismatch, or a
+/// decode failure surfaced while a transaction is open) discards the staged
+/// buffer and requests a fresh keyframe via `onRequestKeyframe`. A subtle
+/// resync-pending hint (`GUIState.resyncState`) is raised until the next clean
+/// commit lands.
 
 import Foundation
 import AppKit
@@ -16,13 +36,21 @@ final class CommandDispatcher {
     /// Font manager for per-span font family support.
     var fontManager: FontManager?
 
-    /// Called after each `commit_frame` command. The renderer hooks into
-    /// this to trigger a GPU frame.
+    /// Called after each `commit_frame` command promotes its staged transaction.
+    /// The renderer hooks into this to trigger a GPU frame.
     var onFrameReady: (() -> Void)?
 
     /// Called after each `commit_frame` command so recovery logic knows the
-    /// BEAM is still responding to input.
-    var onBatchEnd: (() -> Void)?
+    /// BEAM is still responding to input (formerly `onBatchEnd`, renamed for the
+    /// frame-transaction model in #2219 child D).
+    var onFramePresented: (() -> Void)?
+
+    /// Called on any frame-transaction invalidation (#2219 child D). The
+    /// parameter is `last_good_frame_seq`: the most recent frame_seq this
+    /// dispatcher committed cleanly, or 0 if it has none. The app wires this to
+    /// `ProtocolEncoder.sendRequestKeyframe(...)` so the BEAM re-sends the next
+    /// frame as a full keyframe.
+    var onRequestKeyframe: ((UInt32) -> Void)?
 
     /// Called when the window title should change.
     var onTitleChanged: ((String) -> Void)?
@@ -72,35 +100,198 @@ final class CommandDispatcher {
     // reused). Reset at semantic frame start when frame lifecycle is reworked.
     private(set) var currentFrameWindowIds: Set<UInt16> = []
 
+    // MARK: - Frame transaction staging (#2219 child D)
+
+    /// frame_seq of the currently open `begin_frame`, or nil when no transaction
+    /// is open. Set on `begin_frame`, cleared on `commit_frame` or invalidation.
+    private(set) var openFrameSeq: UInt32?
+
+    /// base_frame_seq of the currently open transaction (0 means keyframe).
+    /// Validated against `lastCommittedFrameSeq` at commit.
+    private var openBaseFrameSeq: UInt32 = 0
+
+    /// Commands buffered since the open `begin_frame`. Replayed through
+    /// `apply(_:)` at `commit_frame` so the presented state changes in one batch.
+    private var stagedCommands: [RenderCommand] = []
+
+    /// frame_seq of the last transaction this dispatcher committed cleanly.
+    /// Doubles as the delta base validator and the `last_good_frame_seq` carried
+    /// by `request_keyframe` on invalidation. 0 until the first clean commit.
+    private(set) var lastCommittedFrameSeq: UInt32 = 0
+
+    /// True once at least one frame has committed, so `lastCommittedFrameSeq == 0`
+    /// can still be told apart from "never committed" when validating a base.
+    private var hasCommitted = false
+
+    /// Out-of-band commands the BEAM legitimately emits OUTSIDE a transaction
+    /// (#2219 child B / AC-1 consult): set_title and set_window_bg are emitted
+    /// post-commit, and protocol_error / the frame markers themselves are never
+    /// inside a transaction. These apply immediately even with no open begin.
+    /// Any OTHER semantic or chrome command outside a transaction is an
+    /// invalidation, because byte boundaries are no longer trustworthy.
+    private static func isOutOfBandAllowed(_ command: RenderCommand) -> Bool {
+        switch command {
+        case .setTitle, .setWindowBg, .protocolError:
+            return true
+        default:
+            return false
+        }
+    }
+
     init(cols: UInt16, rows: UInt16, guiState: GUIState) {
         self.frameState = FrameState(cols: cols, rows: rows)
         self.guiState = guiState
     }
 
-    /// Process a single render command.
+    /// Entry point from the protocol reader. Routes a decoded command through the
+    /// frame-transaction state machine: frame markers open/close transactions,
+    /// transaction-scoped commands buffer into `stagedCommands`, and the
+    /// out-of-band allowlist applies immediately. Anything else seen outside a
+    /// transaction invalidates and requests a keyframe.
     func dispatch(_ command: RenderCommand) {
+        switch command {
+        case .beginFrame(let frameSeq, let baseFrameSeq):
+            beginTransaction(frameSeq: frameSeq, baseFrameSeq: baseFrameSeq)
+
+        case .commitFrame(let frameSeq, let seq):
+            commitTransaction(frameSeq: frameSeq, inputSeq: seq)
+
+        default:
+            if openFrameSeq != nil {
+                // Inside a transaction: buffer for atomic replay at commit.
+                stagedCommands.append(command)
+            } else if CommandDispatcher.isOutOfBandAllowed(command) {
+                // Legitimately out-of-band (post-commit title/bg, protocol_error).
+                apply(command)
+            } else {
+                // A semantic/chrome command arrived with no open transaction.
+                // The stream boundaries are no longer trustworthy; resync.
+                invalidate(reason: "out-of-transaction command")
+            }
+        }
+    }
+
+    /// Opens a frame transaction. A second `begin_frame` before its matching
+    /// `commit_frame` is truncation: the prior frame never closed, so its staged
+    /// commands are discarded and we resync before opening the new transaction.
+    private func beginTransaction(frameSeq: UInt32, baseFrameSeq: UInt32) {
+        if openFrameSeq != nil {
+            // Double-begin = truncation of the previous frame.
+            invalidate(reason: "begin_frame while a transaction was open")
+        }
+        openFrameSeq = frameSeq
+        openBaseFrameSeq = baseFrameSeq
+        stagedCommands.removeAll(keepingCapacity: true)
+    }
+
+    /// Closes a frame transaction. Validates frame_seq against the open begin and
+    /// base_frame_seq against the last clean commit, then replays the buffered
+    /// commands through `apply(_:)` in one batch and presents. Any validation
+    /// failure discards staging and requests a keyframe without partial promotion.
+    private func commitTransaction(frameSeq: UInt32, inputSeq: UInt32) {
+        guard let open = openFrameSeq else {
+            // commit_frame with no open begin: truncation/desync.
+            invalidate(reason: "commit_frame with no open transaction")
+            return
+        }
+
+        guard frameSeq == open else {
+            invalidate(reason: "commit_frame seq \(frameSeq) != open begin seq \(open)")
+            return
+        }
+
+        // base_frame_seq == 0 is a keyframe (depends on nothing). Otherwise the
+        // base must name the frame_seq this client last committed cleanly.
+        let baseValid = openBaseFrameSeq == 0 ||
+            (hasCommitted && openBaseFrameSeq == lastCommittedFrameSeq)
+        guard baseValid else {
+            invalidate(reason: "base_frame_seq \(openBaseFrameSeq) != last committed \(lastCommittedFrameSeq)")
+            return
+        }
+
+        // Promote: replay the staged commands through the single mutation path.
+        // This whole loop runs synchronously before onFrameReady, so SwiftUI's
+        // render pass observes one consistent update rather than each step.
+        for staged in stagedCommands {
+            apply(staged)
+        }
+
+        // Record the clean commit and clear the transaction.
+        lastCommittedFrameSeq = frameSeq
+        hasCommitted = true
+        openFrameSeq = nil
+        stagedCommands.removeAll(keepingCapacity: true)
+        guiState.resyncState.clear()
+
+        // Resolve the keystroke-to-present latency sample for the echoed input
+        // correlation sequence (ticket #2215). The frame is fully promoted here
+        // and about to be presented by the Metal renderer.
+        latency.resolve(seq: inputSeq)
+        if let firstRender = onFirstRender {
+            firstRender()
+            onFirstRender = nil
+        }
+        onFramePresented?()
+        onFrameReady?()
+    }
+
+    /// Discards the open transaction's staged commands without promoting any of
+    /// them and asks the BEAM for a fresh keyframe (#2219 child D). The presented
+    /// state is left exactly as the last clean commit left it, so the screen
+    /// holds the last good frame until the keyframe arrives. Raises a subtle
+    /// resync-pending hint in the meantime.
+    private func invalidate(reason: String) {
+        PortLogger.warn("Frame transaction invalidated (\(reason)); requesting keyframe from \(lastCommittedFrameSeq)")
+        openFrameSeq = nil
+        openBaseFrameSeq = 0
+        stagedCommands.removeAll(keepingCapacity: false)
+        // Debounce the keyframe request: after an invalidation, every stale
+        // in-flight frame also fails its base check (the BEAM advances
+        // base_frame_seq for frames we discarded), and re-requesting per frame
+        // would force a duplicate BEAM render each. One request per resync
+        // window; pending clears when a valid commit promotes.
+        let alreadyPending = guiState.resyncState.pending
+        guiState.resyncState.markPending()
+        if !alreadyPending {
+            onRequestKeyframe?(lastCommittedFrameSeq)
+        }
+    }
+
+    /// Surfaced by the protocol reader when `decodeCommands` throws mid-stream.
+    /// Per the AC-1 consult, a sizing failure or unknown opcode INSIDE an open
+    /// transaction tightens the reader's usual warn-and-continue policy: the byte
+    /// boundaries are no longer trustworthy, so we invalidate and resync. Outside
+    /// a transaction there is nothing staged to discard, so the reader keeps its
+    /// existing log-and-continue behavior.
+    func decodeFailed() {
+        guard openFrameSeq != nil else { return }
+        invalidate(reason: "decode failure inside an open transaction")
+    }
+
+    /// Test seam: apply a single command directly to the presented state,
+    /// bypassing the frame-transaction machinery. Production code never calls
+    /// this; it routes through `dispatch`. Routing/setup tests use it to assert a
+    /// command's mutation without bracketing every call in begin/commit.
+    func applyForTesting(_ command: RenderCommand) {
+        apply(command)
+    }
+
+    /// Apply a single render command to the presented FrameState/GUIState. This
+    /// is the single mutation path: called directly for out-of-band commands and
+    /// replayed for every staged command at commit. It must NOT handle the frame
+    /// markers (begin/commit) — those drive the transaction state machine in
+    /// `dispatch`/`commitTransaction`, not the presented state.
+    private func apply(_ command: RenderCommand) {
         switch command {
         case .setCursorShape(let shape):
             frameState.cursorShape = shape
 
-        case .beginFrame:
-            // begin_frame opens a frame transaction (#2219). The frontend still
-            // presents one packet per frame, so the marker is decoded and ignored
-            // (base_frame_seq is for staging in a later child).
-            break
-
-        case .commitFrame(_, let seq):
-            // commit_frame closes the frame transaction (#2219, formerly batch_end).
-            // Resolve the keystroke-to-present latency sample for the echoed input
-            // correlation sequence (ticket #2215). The frame is fully dispatched here
-            // and about to be presented by the Metal renderer.
-            latency.resolve(seq: seq)
-            if let firstRender = onFirstRender {
-                firstRender()
-                onFirstRender = nil
-            }
-            onBatchEnd?()
-            onFrameReady?()
+        case .beginFrame, .commitFrame:
+            // Frame markers drive the transaction state machine in `dispatch`,
+            // not the presented state. They are intercepted before `apply` is
+            // called and are never buffered into `stagedCommands`, so reaching
+            // here means a routing bug.
+            PortLogger.warn("Frame marker reached apply(_:); transaction routing bug")
 
         case .setTitle(let title):
             onTitleChanged?(title)
