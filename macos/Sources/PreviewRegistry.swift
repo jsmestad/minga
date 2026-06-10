@@ -101,6 +101,10 @@ enum PreviewRegistry {
             fileTreeRenamePreview()
         case "WhichKeyPaged":
             whichKeyPagedPreview()
+        case "LatencyHUDOverlay":
+            latencyHUDPreview()
+        case "LatencyHUDEmpty":
+            latencyHUDEmptyPreview()
         default:
             Text("Unknown view: \(name)")
                 .font(.title)
@@ -1302,6 +1306,27 @@ enum PreviewRegistry {
 
         return WhichKeyOverlay(state: state, theme: theme)
             .frame(width: 520, height: 300)
+            .background(theme.editorBg)
+    }
+
+    // MARK: - LatencyHUDOverlay
+
+    private static func latencyHUDPreview() -> some View {
+        let theme = populatedTheme()
+        let state = LatencyHUDState(environment: ["MINGA_LATENCY_HUD": "1"])
+        state.stats = LatencyRecorder.Stats(count: 128, p50Micros: 812, p99Micros: 2450, maxMicros: 5100)
+
+        return LatencyHUDOverlay(state: state, theme: theme)
+            .frame(width: 520, height: 120)
+            .background(theme.editorBg)
+    }
+
+    private static func latencyHUDEmptyPreview() -> some View {
+        let theme = populatedTheme()
+        let state = LatencyHUDState(environment: ["MINGA_LATENCY_HUD": "1"])
+
+        return LatencyHUDOverlay(state: state, theme: theme)
+            .frame(width: 520, height: 120)
             .background(theme.editorBg)
     }
 

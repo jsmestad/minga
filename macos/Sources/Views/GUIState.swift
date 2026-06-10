@@ -88,6 +88,10 @@ final class GUIState {
     /// Search toolbar state (0x9E).
     let searchState = SearchState()
 
+    /// Keystroke-to-present latency HUD state (ticket #2215). Client-local debug
+    /// overlay; boots visible when MINGA_LATENCY_HUD=1, toggled from the View menu.
+    let latencyHUDState = LatencyHUDState()
+
     /// Semantic window content from gui_window_content (0x80).
     /// Keyed by windowId. NOT cleared between frames; the guiWindowContent
     /// dispatch overwrites per-window data each frame. Stale entries serve
