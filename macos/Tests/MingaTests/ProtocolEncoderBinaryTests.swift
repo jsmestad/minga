@@ -74,6 +74,30 @@ struct EncoderReadyTests {
     }
 }
 
+// MARK: - Request keyframe
+
+@Suite("Encoder Binary: Request Keyframe")
+struct EncoderRequestKeyframeTests {
+    @Test("request_keyframe encodes opcode and last_good_frame_seq (#2219 child D)")
+    func requestKeyframeLayout() {
+        let payload = captureFrame { $0.sendRequestKeyframe(lastGoodFrameSeq: 0x0A0B_0C0D) }
+
+        // fixed:5 = opcode(1) + last_good_frame_seq(u32, big-endian).
+        #expect(payload.count == 5)
+        #expect(payload[0] == OP_REQUEST_KEYFRAME)
+        #expect(readU32(payload, 1) == 0x0A0B_0C0D)
+    }
+
+    @Test("request_keyframe carries a zero seq when the frontend has no good frame")
+    func requestKeyframeZeroSeq() {
+        let payload = captureFrame { $0.sendRequestKeyframe(lastGoodFrameSeq: 0) }
+
+        #expect(payload.count == 5)
+        #expect(payload[0] == OP_REQUEST_KEYFRAME)
+        #expect(readU32(payload, 1) == 0)
+    }
+}
+
 // MARK: - Key press
 
 @Suite("Encoder Binary: Key Press")

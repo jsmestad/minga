@@ -30,7 +30,9 @@ struct CommandDispatcherRoutingTests {
             documentHighlights: []
         )
 
-        dispatcher.dispatch(.commitFrame(frameSeq: 0, seq: 0))
+        // A keyframe transaction (base 0) opened then committed.
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
 
         #expect(gui.windowContents[1] != nil)
     }
@@ -38,7 +40,7 @@ struct CommandDispatcherRoutingTests {
     @Test("setCursorShape updates frameState cursor shape")
     @MainActor func setCursorShapeCommand() {
         let (dispatcher, _) = makeDispatcher()
-        dispatcher.dispatch(.setCursorShape(.beam))
+        dispatcher.applyForTesting(.setCursorShape(.beam))
         #expect(dispatcher.frameState.cursorShape == .beam)
     }
 
@@ -47,7 +49,7 @@ struct CommandDispatcherRoutingTests {
         let (dispatcher, gui) = makeDispatcher()
         #expect(gui.protocolErrorState.isPresented == false)
 
-        dispatcher.dispatch(.protocolError(message: "protocol_version mismatch: frontend 1, beam 2"))
+        dispatcher.applyForTesting(.protocolError(message: "protocol_version mismatch: frontend 1, beam 2"))
 
         #expect(gui.protocolErrorState.isPresented == true)
         #expect(gui.protocolErrorState.message == "protocol_version mismatch: frontend 1, beam 2")
@@ -56,7 +58,7 @@ struct CommandDispatcherRoutingTests {
     @Test("setWindowBg updates frameState defaultBg")
     @MainActor func setWindowBgCommand() {
         let (dispatcher, _) = makeDispatcher()
-        dispatcher.dispatch(.setWindowBg(r: 0x28, g: 0x2C, b: 0x34))
+        dispatcher.applyForTesting(.setWindowBg(r: 0x28, g: 0x2C, b: 0x34))
         let expected: UInt32 = (0x28 << 16) | (0x2C << 8) | 0x34
         #expect(dispatcher.frameState.defaultBg == expected)
     }
@@ -70,7 +72,7 @@ struct CommandDispatcherRoutingTests {
             Wire.TabEntry(id: 1, groupId: 0, isActive: true, isDirty: false, isAgent: false,
                        hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "", label: "test.ex")
         ]
-        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: tabs))
+        dispatcher.applyForTesting(.guiTabBar(activeIndex: 0, tabs: tabs))
 
         #expect(gui.tabBarState.tabs.count == 1)
         #expect(gui.tabBarState.tabs[0].label == "test.ex")
@@ -82,7 +84,7 @@ struct CommandDispatcherRoutingTests {
         let (dispatcher, gui) = makeDispatcher()
         let nodes = [Wire.ObservatoryNode(pid: "<0.1.0>", parentPid: "", name: "Minga.Supervisor", processClass: 0, depth: 0, memory: 1024, messageQueueLen: 0, reductions: 10, sparkline: [0, 0.5])]
 
-        dispatcher.dispatch(.guiObservatory(visible: true, nodeCount: 1, nodes: nodes))
+        dispatcher.applyForTesting(.guiObservatory(visible: true, nodeCount: 1, nodes: nodes))
 
         #expect(gui.observatoryState.visible == true)
         #expect(gui.observatoryState.nodes.count == 1)
@@ -94,9 +96,9 @@ struct CommandDispatcherRoutingTests {
     @MainActor func guiObservatoryHiddenRouting() {
         let (dispatcher, gui) = makeDispatcher()
         let nodes = [Wire.ObservatoryNode(pid: "<0.1.0>", parentPid: "", name: "Minga.Supervisor", processClass: 0, depth: 0, memory: 1024, messageQueueLen: 0, reductions: 10, sparkline: [])]
-        dispatcher.dispatch(.guiObservatory(visible: true, nodeCount: 1, nodes: nodes))
+        dispatcher.applyForTesting(.guiObservatory(visible: true, nodeCount: 1, nodes: nodes))
 
-        dispatcher.dispatch(.guiObservatory(visible: false, nodeCount: 0, nodes: []))
+        dispatcher.applyForTesting(.guiObservatory(visible: false, nodeCount: 0, nodes: []))
 
         #expect(gui.observatoryState.visible == false)
         #expect(gui.observatoryState.nodes.isEmpty)
@@ -106,7 +108,7 @@ struct CommandDispatcherRoutingTests {
     @MainActor func guiFileTreeRouting() {
         let (dispatcher, gui) = makeDispatcher()
         let entries = [wireFileTreeEntry(pathHash: 123, isDir: true, isExpanded: true, id: "/project/lib", path: "/project/lib", name: "lib", relPath: "lib")]
-        dispatcher.dispatch(.guiFileTree(version: 2, treeFlags: 0x03, treeState: 3, selectedId: "/project/lib", treeWidth: 30,
+        dispatcher.applyForTesting(.guiFileTree(version: 2, treeFlags: 0x03, treeState: 3, selectedId: "/project/lib", treeWidth: 30,
                                           rootPath: "/project", errorReason: "", entries: entries))
 
         #expect(gui.fileTreeState.visible == true)
@@ -124,10 +126,10 @@ struct CommandDispatcherRoutingTests {
             wireFileTreeEntry(pathHash: 1, isSelected: true, isFocused: true, id: "/project/a", path: "/project/a", name: "a", relPath: "a"),
             wireFileTreeEntry(pathHash: 2, id: "/project/b", path: "/project/b", name: "b", relPath: "b")
         ]
-        dispatcher.dispatch(.guiFileTree(version: 2, treeFlags: 0x03, treeState: 3, selectedId: "/project/a", treeWidth: 30,
+        dispatcher.applyForTesting(.guiFileTree(version: 2, treeFlags: 0x03, treeState: 3, selectedId: "/project/a", treeWidth: 30,
                                           rootPath: "/project", errorReason: "", entries: entries))
 
-        dispatcher.dispatch(.guiFileTreeSelection(selectedId: "/project/b", focused: false))
+        dispatcher.applyForTesting(.guiFileTreeSelection(selectedId: "/project/b", focused: false))
 
         #expect(gui.fileTreeState.entries.count == 2)
         #expect(gui.fileTreeState.entries[0].id == "/project/a")
@@ -146,10 +148,10 @@ struct CommandDispatcherRoutingTests {
         let entries = [
             wireFileTreeEntry(pathHash: 1, isSelected: true, isFocused: true, id: "/project/a", path: "/project/a", name: "a", relPath: "a")
         ]
-        dispatcher.dispatch(.guiFileTree(version: 2, treeFlags: 0x03, treeState: 3, selectedId: "/project/a", treeWidth: 30,
+        dispatcher.applyForTesting(.guiFileTree(version: 2, treeFlags: 0x03, treeState: 3, selectedId: "/project/a", treeWidth: 30,
                                           rootPath: "/project", errorReason: "", entries: entries))
 
-        dispatcher.dispatch(.guiFileTreeSelection(selectedId: "/project/missing", focused: false))
+        dispatcher.applyForTesting(.guiFileTreeSelection(selectedId: "/project/missing", focused: false))
 
         #expect(gui.fileTreeState.selectedId == "/project/a")
         #expect(gui.fileTreeState.selectedIndex == 0)
@@ -161,12 +163,12 @@ struct CommandDispatcherRoutingTests {
     @Test("guiFileTree hides when explicit tree state is hidden")
     @MainActor func guiFileTreeHidesOnHiddenState() {
         let (dispatcher, gui) = makeDispatcher()
-        dispatcher.dispatch(.guiFileTree(version: 2, treeFlags: 0x01, treeState: 3, selectedId: "/project/a", treeWidth: 30,
+        dispatcher.applyForTesting(.guiFileTree(version: 2, treeFlags: 0x01, treeState: 3, selectedId: "/project/a", treeWidth: 30,
                                           rootPath: "/project", errorReason: "",
                                           entries: [wireFileTreeEntry(pathHash: 1, id: "/project/a", path: "/project/a", name: "a", relPath: "a")]))
         #expect(gui.fileTreeState.visible == true)
 
-        dispatcher.dispatch(.guiFileTree(version: 2, treeFlags: 0x00, treeState: 0, selectedId: "", treeWidth: 0,
+        dispatcher.applyForTesting(.guiFileTree(version: 2, treeFlags: 0x00, treeState: 0, selectedId: "", treeWidth: 0,
                                           rootPath: "/project", errorReason: "", entries: []))
         #expect(gui.fileTreeState.visible == false)
         #expect(gui.fileTreeState.projectRoot == "/project")
@@ -175,11 +177,11 @@ struct CommandDispatcherRoutingTests {
     @Test("guiFileTree clears project root when hidden payload has no root")
     @MainActor func guiFileTreeClearsRootOnHiddenPayload() {
         let (dispatcher, gui) = makeDispatcher()
-        dispatcher.dispatch(.guiFileTree(version: 2, treeFlags: 0x01, treeState: 3, selectedId: "/project/a", treeWidth: 30,
+        dispatcher.applyForTesting(.guiFileTree(version: 2, treeFlags: 0x01, treeState: 3, selectedId: "/project/a", treeWidth: 30,
                                           rootPath: "/project", errorReason: "",
                                           entries: [wireFileTreeEntry(pathHash: 1, id: "/project/a", path: "/project/a", name: "a", relPath: "a")]))
 
-        dispatcher.dispatch(.guiFileTree(version: 2, treeFlags: 0x00, treeState: 0, selectedId: "", treeWidth: 0,
+        dispatcher.applyForTesting(.guiFileTree(version: 2, treeFlags: 0x00, treeState: 0, selectedId: "", treeWidth: 0,
                                           rootPath: "", errorReason: "", entries: []))
 
         #expect(gui.fileTreeState.visible == false)
@@ -190,7 +192,7 @@ struct CommandDispatcherRoutingTests {
     @MainActor func guiFileTreeKeepsEmptyVisibleTreeOpen() {
         let (dispatcher, gui) = makeDispatcher()
 
-        dispatcher.dispatch(.guiFileTree(version: 2, treeFlags: 0x11, treeState: 2, selectedId: "", treeWidth: 30,
+        dispatcher.applyForTesting(.guiFileTree(version: 2, treeFlags: 0x11, treeState: 2, selectedId: "", treeWidth: 30,
                                           rootPath: "/empty-project", errorReason: "", entries: []))
 
         #expect(gui.fileTreeState.visible == true)
@@ -203,12 +205,12 @@ struct CommandDispatcherRoutingTests {
     @MainActor func guiFileTreePreservesLoadingAndErrorStates() {
         let (dispatcher, gui) = makeDispatcher()
 
-        dispatcher.dispatch(.guiFileTree(version: 2, treeFlags: 0x01, treeState: 1, selectedId: "", treeWidth: 30,
+        dispatcher.applyForTesting(.guiFileTree(version: 2, treeFlags: 0x01, treeState: 1, selectedId: "", treeWidth: 30,
                                           rootPath: "/project", errorReason: "", entries: []))
         #expect(gui.fileTreeState.visible == true)
         #expect(gui.fileTreeState.treeState == .loading)
 
-        dispatcher.dispatch(.guiFileTree(version: 2, treeFlags: 0x01, treeState: 4, selectedId: "", treeWidth: 30,
+        dispatcher.applyForTesting(.guiFileTree(version: 2, treeFlags: 0x01, treeState: 4, selectedId: "", treeWidth: 30,
                                           rootPath: "/project", errorReason: "permission denied", entries: []))
         #expect(gui.fileTreeState.visible == true)
         #expect(gui.fileTreeState.treeState == .error)
@@ -221,7 +223,7 @@ struct CommandDispatcherRoutingTests {
         let rawEntries = [
             Wire.GitStatusEntry(pathHash: 12345, section: 1, status: 1, path: "lib/editor.ex")
         ]
-        dispatcher.dispatch(.guiGitStatus(repoState: 0, syncing: false, ahead: 2, behind: 0,
+        dispatcher.applyForTesting(.guiGitStatus(repoState: 0, syncing: false, ahead: 2, behind: 0,
                                            branchName: "main", entries: rawEntries, toast: nil, entryBasePath: "", lastCommitMessage: "", stashCount: 4))
 
         #expect(gui.gitStatusState.visible == true)
@@ -239,12 +241,12 @@ struct CommandDispatcherRoutingTests {
         let rawEntries = [
             Wire.GitStatusEntry(pathHash: 12345, section: 1, status: 1, path: "lib/editor.ex")
         ]
-        dispatcher.dispatch(.guiGitStatus(repoState: 0, syncing: false, ahead: 0, behind: 0,
+        dispatcher.applyForTesting(.guiGitStatus(repoState: 0, syncing: false, ahead: 0, behind: 0,
                                            branchName: "main", entries: rawEntries, toast: nil, entryBasePath: "", lastCommitMessage: "", stashCount: 0))
         #expect(gui.gitStatusState.visible == true)
 
         // Then send the "panel closed" sentinel: notARepo (1) + empty entries. Syncing and toast still update because remote operations can finish while the panel is hidden.
-        dispatcher.dispatch(.guiGitStatus(repoState: 1, syncing: true, ahead: 0, behind: 0,
+        dispatcher.applyForTesting(.guiGitStatus(repoState: 1, syncing: true, ahead: 0, behind: 0,
                                            branchName: "", entries: [], toast: (message: "Push failed", level: 1, action: 1), entryBasePath: "", lastCommitMessage: "", stashCount: 0))
         #expect(gui.gitStatusState.visible == false)
         #expect(gui.gitStatusState.syncing == true)
@@ -259,7 +261,7 @@ struct CommandDispatcherRoutingTests {
             Wire.GitStatusEntry(pathHash: 12345, section: 1, status: 0, path: "lib/unknown.ex"),
             Wire.GitStatusEntry(pathHash: 12346, section: 1, status: 99, path: "lib/invalid-status.ex")
         ]
-        dispatcher.dispatch(.guiGitStatus(repoState: 0, syncing: false, ahead: 0, behind: 0,
+        dispatcher.applyForTesting(.guiGitStatus(repoState: 0, syncing: false, ahead: 0, behind: 0,
                                            branchName: "main", entries: rawEntries, toast: nil, entryBasePath: "", lastCommitMessage: "", stashCount: 0))
 
         #expect(gui.gitStatusState.changedEntries.count == 2)
@@ -273,7 +275,7 @@ struct CommandDispatcherRoutingTests {
         let rawEntries = [
             Wire.GitStatusEntry(pathHash: 12345, section: 99, status: 1, path: "lib/bad-section.ex")
         ]
-        dispatcher.dispatch(.guiGitStatus(repoState: 0, syncing: false, ahead: 0, behind: 0,
+        dispatcher.applyForTesting(.guiGitStatus(repoState: 0, syncing: false, ahead: 0, behind: 0,
                                            branchName: "main", entries: rawEntries, toast: nil, entryBasePath: "", lastCommitMessage: "", stashCount: 0))
 
         #expect(gui.gitStatusState.totalCount == 0)
@@ -283,7 +285,7 @@ struct CommandDispatcherRoutingTests {
     @MainActor func guiGitStatusShowsNotARepoPanel() {
         let (dispatcher, gui) = makeDispatcher()
 
-        dispatcher.dispatch(.guiGitStatus(repoState: 1, syncing: false, ahead: 0, behind: 0,
+        dispatcher.applyForTesting(.guiGitStatus(repoState: 1, syncing: false, ahead: 0, behind: 0,
                                            branchName: "", entries: [], toast: nil, entryBasePath: "/project", lastCommitMessage: "", stashCount: 0))
 
         #expect(gui.gitStatusState.visible == true)
@@ -296,7 +298,7 @@ struct CommandDispatcherRoutingTests {
         let (dispatcher, gui) = makeDispatcher()
         // Normal repo (0) with zero entries is a clean working tree, NOT
         // a hide signal. Only notARepo + empty triggers hide.
-        dispatcher.dispatch(.guiGitStatus(repoState: 0, syncing: false, ahead: 0, behind: 0,
+        dispatcher.applyForTesting(.guiGitStatus(repoState: 0, syncing: false, ahead: 0, behind: 0,
                                            branchName: "main", entries: [], toast: nil, entryBasePath: "", lastCommitMessage: "", stashCount: 0))
         #expect(gui.gitStatusState.visible == true)
         #expect(gui.gitStatusState.branchName == "main")
@@ -305,14 +307,14 @@ struct CommandDispatcherRoutingTests {
     @Test("guiGitStatus preserves toast message when metadata is unknown")
     @MainActor func guiGitStatusToastFallback() {
         let (dispatcher, gui) = makeDispatcher()
-        dispatcher.dispatch(.guiGitStatus(repoState: 0, syncing: false, ahead: 0, behind: 0,
+        dispatcher.applyForTesting(.guiGitStatus(repoState: 0, syncing: false, ahead: 0, behind: 0,
                                            branchName: "main", entries: [], toast: (message: "Remote failed", level: 99, action: 99), entryBasePath: "", lastCommitMessage: "", stashCount: 0))
 
         #expect(gui.gitStatusState.toastMessage == "Remote failed")
         #expect(gui.gitStatusState.toastLevel == .error)
         #expect(gui.gitStatusState.toastAction == .none)
 
-        dispatcher.dispatch(.guiGitStatus(repoState: 0, syncing: false, ahead: 0, behind: 0,
+        dispatcher.applyForTesting(.guiGitStatus(repoState: 0, syncing: false, ahead: 0, behind: 0,
                                            branchName: "main", entries: [], toast: nil, entryBasePath: "", lastCommitMessage: "", stashCount: 0))
 
         #expect(gui.gitStatusState.toastMessage == nil)
@@ -324,7 +326,7 @@ struct CommandDispatcherRoutingTests {
     @MainActor func guiCompletionVisible() {
         let (dispatcher, gui) = makeDispatcher()
         let items = [Wire.CompletionItem(kind: 1, label: "def", detail: "keyword")]
-        dispatcher.dispatch(.guiCompletion(visible: true, anchorRow: 5, anchorCol: 10,
+        dispatcher.applyForTesting(.guiCompletion(visible: true, anchorRow: 5, anchorCol: 10,
                                             selectedIndex: 0, items: items))
 
         #expect(gui.completionState.visible == true)
@@ -337,9 +339,9 @@ struct CommandDispatcherRoutingTests {
         let (dispatcher, gui) = makeDispatcher()
         // Show then hide
         let items = [Wire.CompletionItem(kind: 1, label: "def", detail: "keyword")]
-        dispatcher.dispatch(.guiCompletion(visible: true, anchorRow: 5, anchorCol: 10,
+        dispatcher.applyForTesting(.guiCompletion(visible: true, anchorRow: 5, anchorCol: 10,
                                             selectedIndex: 0, items: items))
-        dispatcher.dispatch(.guiCompletion(visible: false, anchorRow: 0, anchorCol: 0,
+        dispatcher.applyForTesting(.guiCompletion(visible: false, anchorRow: 0, anchorCol: 0,
                                             selectedIndex: 0, items: []))
 
         #expect(gui.completionState.visible == false)
@@ -350,7 +352,7 @@ struct CommandDispatcherRoutingTests {
     @MainActor func guiWhichKeyVisible() {
         let (dispatcher, gui) = makeDispatcher()
         let bindings = [Wire.WhichKeyBinding(kind: 0, key: "f", description: "Find file", icon: "")]
-        dispatcher.dispatch(.guiWhichKey(visible: true, prefix: "SPC",
+        dispatcher.applyForTesting(.guiWhichKey(visible: true, prefix: "SPC",
                                           page: 0, pageCount: 1, bindings: bindings))
 
         #expect(gui.whichKeyState.visible == true)
@@ -361,7 +363,7 @@ struct CommandDispatcherRoutingTests {
     @Test("guiWhichKey hidden clears whichKeyState")
     @MainActor func guiWhichKeyHidden() {
         let (dispatcher, gui) = makeDispatcher()
-        dispatcher.dispatch(.guiWhichKey(visible: false, prefix: "", page: 0,
+        dispatcher.applyForTesting(.guiWhichKey(visible: false, prefix: "", page: 0,
                                           pageCount: 0, bindings: []))
         #expect(gui.whichKeyState.visible == false)
     }
@@ -369,7 +371,7 @@ struct CommandDispatcherRoutingTests {
     @Test("guiStatusBar updates statusBarState and clears safeMode")
     @MainActor func guiStatusBarRouting() {
         let (dispatcher, gui) = makeDispatcher()
-        dispatcher.dispatch(.guiStatusBar(StatusBarUpdate(contentKind: 0, mode: 1, cursorLine: 42,
+        dispatcher.applyForTesting(.guiStatusBar(StatusBarUpdate(contentKind: 0, mode: 1, cursorLine: 42,
                                            cursorCol: 9, lineCount: 500, flags: 0x0B, safeMode: true,
                                            lspStatus: 1, gitBranch: "main",
                                            message: "-- INSERT --", filetype: "elixir",
@@ -401,7 +403,7 @@ struct CommandDispatcherRoutingTests {
         #expect(gui.statusBarState.selection.size == 3)
         #expect(gui.statusBarState.activeToolName.isEmpty)
 
-        dispatcher.dispatch(.guiStatusBar(StatusBarUpdate(contentKind: 0, mode: 1, cursorLine: 42,
+        dispatcher.applyForTesting(.guiStatusBar(StatusBarUpdate(contentKind: 0, mode: 1, cursorLine: 42,
                                            cursorCol: 9, lineCount: 500, flags: 0x03, safeMode: false,
                                            lspStatus: 1, gitBranch: "main",
                                            message: "-- INSERT --", filetype: "elixir",
@@ -425,7 +427,7 @@ struct CommandDispatcherRoutingTests {
     @Test("guiStatusBar agent variant populates background buffer fields")
     @MainActor func guiStatusBarAgentRouting() {
         let (dispatcher, gui) = makeDispatcher()
-        dispatcher.dispatch(.guiStatusBar(StatusBarUpdate(contentKind: 1, mode: 0, cursorLine: 11,
+        dispatcher.applyForTesting(.guiStatusBar(StatusBarUpdate(contentKind: 1, mode: 0, cursorLine: 11,
                                            cursorCol: 6, lineCount: 100, flags: 0x03,
                                            lspStatus: 1, gitBranch: "feat/agent",
                                            message: "", filetype: "elixir",
@@ -458,7 +460,7 @@ struct CommandDispatcherRoutingTests {
     @Test("guiBreadcrumb updates breadcrumbState")
     @MainActor func guiBreadcrumbRouting() {
         let (dispatcher, gui) = makeDispatcher()
-        dispatcher.dispatch(.guiBreadcrumb(segments: ["lib", "minga", "editor.ex"]))
+        dispatcher.applyForTesting(.guiBreadcrumb(segments: ["lib", "minga", "editor.ex"]))
 
         #expect(gui.breadcrumbState.segments == ["lib", "minga", "editor.ex"])
     }
@@ -466,7 +468,7 @@ struct CommandDispatcherRoutingTests {
     @Test("guiPicker visible updates pickerState")
     @MainActor func guiPickerVisible() {
         let (dispatcher, gui) = makeDispatcher()
-        dispatcher.dispatch(.guiPicker(visible: true, selectedIndex: 0, filteredCount: 5,
+        dispatcher.applyForTesting(.guiPicker(visible: true, selectedIndex: 0, filteredCount: 5,
                                         totalCount: 100, markedCount: 2, title: "Find File", query: "edi",
                                         hasPreview: false, items: [], actionMenu: nil, modePrefix: ">", loadStatus: .ready))
 
@@ -480,10 +482,10 @@ struct CommandDispatcherRoutingTests {
     @Test("guiPicker hidden clears pickerState")
     @MainActor func guiPickerHidden() {
         let (dispatcher, gui) = makeDispatcher()
-        dispatcher.dispatch(.guiPicker(visible: true, selectedIndex: 0, filteredCount: 5,
+        dispatcher.applyForTesting(.guiPicker(visible: true, selectedIndex: 0, filteredCount: 5,
                                         totalCount: 100, markedCount: 2, title: "Find File", query: "edi",
                                         hasPreview: false, items: [], actionMenu: nil, modePrefix: ">", loadStatus: .ready))
-        dispatcher.dispatch(.guiPicker(visible: false, selectedIndex: 0, filteredCount: 0,
+        dispatcher.applyForTesting(.guiPicker(visible: false, selectedIndex: 0, filteredCount: 0,
                                         totalCount: 0, markedCount: 0, title: "", query: "",
                                         hasPreview: false, items: [], actionMenu: nil, modePrefix: "", loadStatus: .ready))
 
@@ -497,7 +499,7 @@ struct CommandDispatcherRoutingTests {
     @MainActor func guiAgentChatVisible() {
         let (dispatcher, gui) = makeDispatcher()
         let messages: [Wire.ChatMessage] = [Wire.ChatMessage(beamId: 1, content: .user(text: "hello"))]
-        dispatcher.dispatch(.guiAgentChat(visible: true, status: 1, model: "claude",
+        dispatcher.applyForTesting(.guiAgentChat(visible: true, status: 1, model: "claude",
                                            thinkingLevel: "medium", prompt: "Fix this", promptLineCount: 1,
                                            promptCursorLine: 0, promptCursorCol: 0,
                                            promptVimMode: 1, promptVisibleRows: 1,
@@ -513,7 +515,7 @@ struct CommandDispatcherRoutingTests {
     @Test("guiAgentChat hidden clears agentChatState")
     @MainActor func guiAgentChatHidden() {
         let (dispatcher, gui) = makeDispatcher()
-        dispatcher.dispatch(.guiAgentChat(visible: false, status: 0, model: "",
+        dispatcher.applyForTesting(.guiAgentChat(visible: false, status: 0, model: "",
                                            thinkingLevel: "", prompt: "", promptLineCount: 1,
                                            promptCursorLine: 0, promptCursorCol: 0,
                                            promptVimMode: 0, promptVisibleRows: 1,
@@ -530,7 +532,7 @@ struct CommandDispatcherRoutingTests {
         let tabs = [Wire.BottomPanelTab(tabType: 0, name: "Messages")]
         let entries = [Wire.MessageEntry(id: 1, level: 1, subsystem: 0,
                                        timestampSecs: 3600, filePath: "", text: "test")]
-        dispatcher.dispatch(.guiBottomPanel(visible: true, activeTabIndex: 0,
+        dispatcher.applyForTesting(.guiBottomPanel(visible: true, activeTabIndex: 0,
                                              heightPercent: 30, filterPreset: 0,
                                              tabs: tabs, entries: entries))
 
@@ -542,7 +544,7 @@ struct CommandDispatcherRoutingTests {
     @Test("guiBottomPanel hidden hides bottomPanelState")
     @MainActor func guiBottomPanelHidden() {
         let (dispatcher, gui) = makeDispatcher()
-        dispatcher.dispatch(.guiBottomPanel(visible: false, activeTabIndex: 0,
+        dispatcher.applyForTesting(.guiBottomPanel(visible: false, activeTabIndex: 0,
                                              heightPercent: 30, filterPreset: 0,
                                              tabs: [], entries: []))
         #expect(gui.bottomPanelState.visible == false)
@@ -556,7 +558,7 @@ struct CommandDispatcherRoutingTests {
                                   method: 0, languages: ["elixir"], version: "0.22",
                                   homepage: "", provides: ["elixir-ls"],
                                   errorReason: "")]
-        dispatcher.dispatch(.guiToolManager(visible: true, filter: 0,
+        dispatcher.applyForTesting(.guiToolManager(visible: true, filter: 0,
                                              selectedIndex: 0, tools: tools))
 
         #expect(gui.toolManagerState.visible == true)
@@ -567,7 +569,7 @@ struct CommandDispatcherRoutingTests {
     @Test("guiToolManager hidden clears toolManagerState")
     @MainActor func guiToolManagerHidden() {
         let (dispatcher, gui) = makeDispatcher()
-        dispatcher.dispatch(.guiToolManager(visible: false, filter: 0,
+        dispatcher.applyForTesting(.guiToolManager(visible: false, filter: 0,
                                              selectedIndex: 0, tools: []))
         #expect(gui.toolManagerState.visible == false)
         #expect(gui.toolManagerState.tools.isEmpty)
@@ -583,7 +585,7 @@ struct CommandDispatcherRoutingTests {
             searchMatches: [], diagnosticUnderlines: [],
             documentHighlights: []
         )
-        dispatcher.dispatch(.guiWindowContent(data: content))
+        dispatcher.applyForTesting(.guiWindowContent(data: content))
 
         #expect(gui.windowContents[7] != nil)
         #expect(gui.windowContents[7]?.cursorRow == 5)
@@ -600,7 +602,7 @@ struct CommandDispatcherRoutingTests {
             documentHighlights: []
         )
 
-        dispatcher.dispatch(.guiWindowOverlayDelta(data: GUIWindowOverlayDelta(
+        dispatcher.applyForTesting(.guiWindowOverlayDelta(data: GUIWindowOverlayDelta(
             windowId: 7, contentEpoch: 42, cursorVisible: false,
             cursorRow: 6, cursorCol: 11, cursorShape: .beam,
             cursorline: GUICursorline(row: 6, bg: 0x112233)
@@ -627,7 +629,7 @@ struct CommandDispatcherRoutingTests {
             cursorline: GUICursorline(row: 5, bg: 0x112233)
         )
 
-        dispatcher.dispatch(.guiWindowOverlayDelta(data: GUIWindowOverlayDelta(
+        dispatcher.applyForTesting(.guiWindowOverlayDelta(data: GUIWindowOverlayDelta(
             windowId: 7, contentEpoch: 42, cursorVisible: true,
             cursorRow: 6, cursorCol: 11, cursorShape: .beam,
             cursorline: nil
@@ -653,7 +655,7 @@ struct CommandDispatcherRoutingTests {
         gui.windowContents[7] = content
         dispatcher.frameState.cursorVisible = true
 
-        dispatcher.dispatch(.guiWindowOverlayDelta(data: GUIWindowOverlayDelta(
+        dispatcher.applyForTesting(.guiWindowOverlayDelta(data: GUIWindowOverlayDelta(
             windowId: 7, contentEpoch: 41, cursorVisible: false,
             cursorRow: 6, cursorCol: 11, cursorShape: .beam,
             cursorline: nil
@@ -669,7 +671,7 @@ struct CommandDispatcherRoutingTests {
         let (dispatcher, gui) = makeDispatcher()
         dispatcher.frameState.cursorVisible = true
 
-        dispatcher.dispatch(.guiWindowOverlayDelta(data: GUIWindowOverlayDelta(
+        dispatcher.applyForTesting(.guiWindowOverlayDelta(data: GUIWindowOverlayDelta(
             windowId: 7, contentEpoch: 42, cursorVisible: false,
             cursorRow: 6, cursorCol: 11, cursorShape: .beam,
             cursorline: nil
@@ -693,7 +695,7 @@ struct CommandDispatcherRoutingTests {
             documentHighlights: []
         )
 
-        dispatcher.dispatch(.guiWindowRowsDelta(data: GUIWindowRowsDelta(
+        dispatcher.applyForTesting(.guiWindowRowsDelta(data: GUIWindowRowsDelta(
             windowId: 7,
             contentEpoch: 42,
             cursorVisible: true,
@@ -729,7 +731,7 @@ struct CommandDispatcherRoutingTests {
             documentHighlights: []
         )
 
-        dispatcher.dispatch(.guiWindowViewportDelta(data: GUIWindowRowsDelta(
+        dispatcher.applyForTesting(.guiWindowViewportDelta(data: GUIWindowRowsDelta(
             windowId: 7,
             contentEpoch: 42,
             cursorVisible: true,
@@ -766,7 +768,7 @@ struct CommandDispatcherRoutingTests {
         )
         gui.windowContents[7] = content
 
-        dispatcher.dispatch(.guiWindowRowsDelta(data: GUIWindowRowsDelta(
+        dispatcher.applyForTesting(.guiWindowRowsDelta(data: GUIWindowRowsDelta(
             windowId: 7,
             contentEpoch: 41,
             cursorVisible: true,
@@ -800,7 +802,7 @@ struct CommandDispatcherRoutingTests {
             documentHighlights: []
         )
 
-        dispatcher.dispatch(.guiWindowRowsDelta(data: GUIWindowRowsDelta(
+        dispatcher.applyForTesting(.guiWindowRowsDelta(data: GUIWindowRowsDelta(
             windowId: 7,
             contentEpoch: 42,
             cursorVisible: true,
@@ -825,7 +827,7 @@ struct CommandDispatcherRoutingTests {
     @Test("guiGutterSeparator updates frameState gutter state")
     @MainActor func guiGutterSepRouting() {
         let (dispatcher, _) = makeDispatcher()
-        dispatcher.dispatch(.guiGutterSeparator(col: 4, r: 0x3F, g: 0x44, b: 0x4A))
+        dispatcher.applyForTesting(.guiGutterSeparator(col: 4, r: 0x3F, g: 0x44, b: 0x4A))
 
         #expect(dispatcher.frameState.gutterCol == 4)
         let expected: UInt32 = (0x3F << 16) | (0x44 << 8) | 0x4A
@@ -835,7 +837,7 @@ struct CommandDispatcherRoutingTests {
     @Test("guiCursorline updates frameState cursorline state")
     @MainActor func guiCursorlineRouting() {
         let (dispatcher, _) = makeDispatcher()
-        dispatcher.dispatch(.guiCursorline(row: 12, r: 0x2C, g: 0x32, b: 0x3C))
+        dispatcher.applyForTesting(.guiCursorline(row: 12, r: 0x2C, g: 0x32, b: 0x3C))
 
         #expect(dispatcher.frameState.cursorlineRow == 12)
         let expected: UInt32 = (0x2C << 16) | (0x32 << 8) | 0x3C
@@ -850,7 +852,7 @@ struct CommandDispatcherRoutingTests {
             isActive: true, contentWidth: 80, cursorLine: 10, lineNumberStyle: .hybrid,
             lineNumberWidth: 4, signColWidth: 1, entries: []
         )
-        dispatcher.dispatch(.guiGutter(data: gutter))
+        dispatcher.applyForTesting(.guiGutter(data: gutter))
 
         #expect(dispatcher.frameState.windowGutters[1] != nil)
         #expect(dispatcher.currentFrameWindowIds.contains(1))
@@ -867,7 +869,7 @@ struct CommandDispatcherRoutingTests {
             Wire.HoverLine(lineType: .text, segments: [Wire.HoverSegment(style: .plain, fgColor: nil, flags: 0, text: "three")])
         ]
 
-        dispatcher.dispatch(.guiHoverPopup(visible: true, anchorRow: 4, anchorCol: 8, focused: true, scrollOffset: 1, lines: lines))
+        dispatcher.applyForTesting(.guiHoverPopup(visible: true, anchorRow: 4, anchorCol: 8, focused: true, scrollOffset: 1, lines: lines))
 
         #expect(gui.hoverPopupState.visible == true)
         #expect(gui.hoverPopupState.scrollOffset == 1)
@@ -882,11 +884,14 @@ struct CommandDispatcherRoutingTests {
         var callCount = 0
         dispatcher.onFirstRender = { callCount += 1 }
 
-        dispatcher.dispatch(.commitFrame(frameSeq: 0, seq: 0))
+        // Two well-formed keyframe transactions; onFirstRender fires only once.
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
         #expect(callCount == 1)
         #expect(dispatcher.onFirstRender == nil)
 
-        dispatcher.dispatch(.commitFrame(frameSeq: 0, seq: 0))
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 0))
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
         #expect(callCount == 1)
     }
 
@@ -898,12 +903,317 @@ struct CommandDispatcherRoutingTests {
         let slots: [(slotId: UInt8, r: UInt8, g: UInt8, b: UInt8)] = [
             (GUI_COLOR_GUTTER_FG, 0xAA, 0xBB, 0xCC)
         ]
-        dispatcher.dispatch(.guiTheme(slots: slots))
+        dispatcher.applyForTesting(.guiTheme(slots: slots))
 
         // Check frameState got the RGB value synced
         let expected: UInt32 = (0xAA << 16) | (0xBB << 8) | 0xCC
         #expect(dispatcher.frameState.gutterColors.fg == expected)
         #expect(gui.themeColors.gutterFgRGB == expected)
+    }
+}
+
+/// AC tests for frame-transaction staging and commit (#2219 child D).
+///
+/// Mirrors the epic headline in Swift: observable state is unchanged between
+/// begin and commit, commit promotes atomically, invalidation requests a
+/// keyframe with no partial promotion, and out-of-band commands apply without a
+/// transaction.
+@Suite("CommandDispatcher Frame Staging")
+struct CommandDispatcherStagingTests {
+
+    @MainActor
+    private func makeDispatcher() -> (CommandDispatcher, GUIState) {
+        let gui = GUIState()
+        let dispatcher = CommandDispatcher(cols: 80, rows: 24, guiState: gui)
+        return (dispatcher, gui)
+    }
+
+    private func tab(_ label: String) -> Wire.TabEntry {
+        Wire.TabEntry(id: 1, groupId: 0, isActive: true, isDirty: false, isAgent: false,
+                      hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0,
+                      icon: "", label: label)
+    }
+
+    // MARK: - Nothing paints between begin and commit
+
+    @Test("observable GUIState is unchanged between begin and a partial frame")
+    @MainActor func guiStateUnchangedMidTransaction() {
+        let (dispatcher, gui) = makeDispatcher()
+
+        // Establish a committed baseline so we have a "presented" tab bar.
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("old.ex")]))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        #expect(gui.tabBarState.tabs.first?.label == "old.ex")
+
+        // Open a new transaction and stage a different tab bar, but do NOT commit.
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("new.ex")]))
+
+        // The presented state still shows the last committed frame.
+        #expect(gui.tabBarState.tabs.first?.label == "old.ex")
+    }
+
+    @Test("observable FrameState is unchanged between begin and a partial frame")
+    @MainActor func frameStateUnchangedMidTransaction() {
+        let (dispatcher, _) = makeDispatcher()
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
+        dispatcher.dispatch(.setCursorShape(.block))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        #expect(dispatcher.frameState.cursorShape == .block)
+
+        // Stage a shape change without committing; the presented shape holds.
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1))
+        dispatcher.dispatch(.setCursorShape(.beam))
+        #expect(dispatcher.frameState.cursorShape == .block)
+    }
+
+    // MARK: - Commit promotes atomically
+
+    @Test("commit promotes all staged commands in one batch")
+    @MainActor func commitPromotesStagedCommands() {
+        let (dispatcher, gui) = makeDispatcher()
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("a.ex")]))
+        dispatcher.dispatch(.setCursorShape(.beam))
+        // Nothing promoted yet.
+        #expect(gui.tabBarState.tabs.isEmpty)
+        #expect(dispatcher.frameState.cursorShape == .block)
+
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        // Both staged mutations land together at commit.
+        #expect(gui.tabBarState.tabs.first?.label == "a.ex")
+        #expect(dispatcher.frameState.cursorShape == .beam)
+        #expect(dispatcher.lastCommittedFrameSeq == 1)
+    }
+
+    @Test("onFrameReady fires only at commit, not on staged commands")
+    @MainActor func frameReadyFiresAtCommit() {
+        let (dispatcher, _) = makeDispatcher()
+        var readyCount = 0
+        dispatcher.onFrameReady = { readyCount += 1 }
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("a.ex")]))
+        #expect(readyCount == 0)
+
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        #expect(readyCount == 1)
+    }
+
+    // MARK: - Delta-base validation
+
+    @Test("delta frame committing against the last committed seq promotes cleanly")
+    @MainActor func deltaBaseMatchesCommits() {
+        let (dispatcher, gui) = makeDispatcher()
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 5, baseFrameSeq: 0))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("base.ex")]))
+        dispatcher.dispatch(.commitFrame(frameSeq: 5, seq: 0))
+
+        // Next frame is a delta whose base names the frame we just committed.
+        dispatcher.dispatch(.beginFrame(frameSeq: 6, baseFrameSeq: 5))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("delta.ex")]))
+        dispatcher.dispatch(.commitFrame(frameSeq: 6, seq: 0))
+
+        #expect(gui.tabBarState.tabs.first?.label == "delta.ex")
+        #expect(dispatcher.lastCommittedFrameSeq == 6)
+    }
+
+    // MARK: - Invalidation requests a keyframe with no partial promotion
+
+    @Test("commit seq mismatch invalidates with no promotion and requests keyframe")
+    @MainActor func seqMismatchInvalidates() {
+        let (dispatcher, gui) = makeDispatcher()
+        var requested: [UInt32] = []
+        dispatcher.onRequestKeyframe = { requested.append($0) }
+
+        // Commit a clean baseline so lastCommittedFrameSeq is known.
+        dispatcher.dispatch(.beginFrame(frameSeq: 3, baseFrameSeq: 0))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("good.ex")]))
+        dispatcher.dispatch(.commitFrame(frameSeq: 3, seq: 0))
+
+        // Open a frame, stage a change, then commit with the WRONG seq.
+        dispatcher.dispatch(.beginFrame(frameSeq: 4, baseFrameSeq: 3))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("bad.ex")]))
+        dispatcher.dispatch(.commitFrame(frameSeq: 99, seq: 0))
+
+        // No partial promotion: the presented tab bar is still the good frame.
+        #expect(gui.tabBarState.tabs.first?.label == "good.ex")
+        // Keyframe requested carrying the last good frame_seq.
+        #expect(requested == [3])
+        // Resync hint raised.
+        #expect(gui.resyncState.pending == true)
+        #expect(dispatcher.lastCommittedFrameSeq == 3)
+    }
+
+    @Test("pending resync debounces further keyframe requests until a valid commit")
+    @MainActor func resyncDebouncesRequests() {
+        let (dispatcher, gui) = makeDispatcher()
+        var requested: [UInt32] = []
+        dispatcher.onRequestKeyframe = { requested.append($0) }
+
+        // First invalidation: commit with no open transaction.
+        dispatcher.dispatch(.commitFrame(frameSeq: 7, seq: 0))
+        #expect(requested == [0])
+
+        // Stale in-flight frame: base mismatch while resync is already pending.
+        // It must discard silently without re-requesting (#2267 review: every
+        // stale frame after an invalidation fails its base check; re-requesting
+        // per frame would force a duplicate BEAM render each).
+        dispatcher.dispatch(.beginFrame(frameSeq: 8, baseFrameSeq: 7))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("stale.ex")]))
+        dispatcher.dispatch(.commitFrame(frameSeq: 8, seq: 0))
+        #expect(requested == [0])
+
+        // The keyframe arrives: pending clears and content promotes.
+        dispatcher.dispatch(.beginFrame(frameSeq: 9, baseFrameSeq: 0))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("fresh.ex")]))
+        dispatcher.dispatch(.commitFrame(frameSeq: 9, seq: 0))
+        #expect(gui.resyncState.pending == false)
+        #expect(gui.tabBarState.tabs.first?.label == "fresh.ex")
+    }
+
+    @Test("double begin (truncation) invalidates the open frame and requests keyframe")
+    @MainActor func doubleBeginTruncates() {
+        let (dispatcher, gui) = makeDispatcher()
+        var requested: [UInt32] = []
+        dispatcher.onRequestKeyframe = { requested.append($0) }
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("staged.ex")]))
+        // A new begin before commit: the first frame was truncated.
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 0))
+
+        // The truncated frame promoted nothing.
+        #expect(gui.tabBarState.tabs.isEmpty)
+        #expect(requested == [0]) // no good frame yet
+        #expect(gui.resyncState.pending == true)
+    }
+
+    @Test("base mismatch invalidates without promotion")
+    @MainActor func baseMismatchInvalidates() {
+        let (dispatcher, gui) = makeDispatcher()
+        var requested: [UInt32] = []
+        dispatcher.onRequestKeyframe = { requested.append($0) }
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 10, baseFrameSeq: 0))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("base.ex")]))
+        dispatcher.dispatch(.commitFrame(frameSeq: 10, seq: 0))
+
+        // Delta whose base names a frame this client never committed (7, not 10).
+        dispatcher.dispatch(.beginFrame(frameSeq: 11, baseFrameSeq: 7))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("orphan.ex")]))
+        dispatcher.dispatch(.commitFrame(frameSeq: 11, seq: 0))
+
+        #expect(gui.tabBarState.tabs.first?.label == "base.ex")
+        #expect(requested == [10])
+        #expect(gui.resyncState.pending == true)
+    }
+
+    @Test("commit with no open begin invalidates and requests keyframe")
+    @MainActor func commitWithoutBeginInvalidates() {
+        let (dispatcher, _) = makeDispatcher()
+        var requested: [UInt32] = []
+        dispatcher.onRequestKeyframe = { requested.append($0) }
+
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        #expect(requested == [0])
+    }
+
+    @Test("decodeFailed inside an open transaction invalidates and requests keyframe")
+    @MainActor func decodeFailureInsideTransactionInvalidates() {
+        let (dispatcher, gui) = makeDispatcher()
+        var requested: [UInt32] = []
+        dispatcher.onRequestKeyframe = { requested.append($0) }
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 0))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("partial.ex")]))
+        dispatcher.decodeFailed()
+
+        #expect(gui.tabBarState.tabs.isEmpty)
+        #expect(requested == [0])
+        #expect(gui.resyncState.pending == true)
+        // A subsequent decode failure with no open transaction is a no-op.
+        requested.removeAll()
+        dispatcher.decodeFailed()
+        #expect(requested.isEmpty)
+    }
+
+    @Test("a clean commit after a resync clears the pending hint")
+    @MainActor func cleanCommitClearsResyncHint() {
+        let (dispatcher, gui) = makeDispatcher()
+        dispatcher.onRequestKeyframe = { _ in }
+
+        // Force a resync.
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        #expect(gui.resyncState.pending == true)
+
+        // The recovering keyframe arrives and commits cleanly.
+        dispatcher.dispatch(.beginFrame(frameSeq: 7, baseFrameSeq: 0))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("recovered.ex")]))
+        dispatcher.dispatch(.commitFrame(frameSeq: 7, seq: 0))
+
+        #expect(gui.resyncState.pending == false)
+        #expect(gui.tabBarState.tabs.first?.label == "recovered.ex")
+    }
+
+    // MARK: - Out-of-band allowlist
+
+    @Test("set_title applies immediately with no open transaction")
+    @MainActor func titleAppliesOutOfBand() {
+        let (dispatcher, _) = makeDispatcher()
+        var requested: [UInt32] = []
+        var title: String?
+        dispatcher.onRequestKeyframe = { requested.append($0) }
+        dispatcher.onTitleChanged = { title = $0 }
+
+        dispatcher.dispatch(.setTitle("buffer.ex"))
+
+        #expect(title == "buffer.ex")
+        #expect(requested.isEmpty) // out-of-band, not an invalidation
+    }
+
+    @Test("set_window_bg applies immediately with no open transaction")
+    @MainActor func windowBgAppliesOutOfBand() {
+        let (dispatcher, _) = makeDispatcher()
+        var requested: [UInt32] = []
+        dispatcher.onRequestKeyframe = { requested.append($0) }
+
+        dispatcher.dispatch(.setWindowBg(r: 0x28, g: 0x2C, b: 0x34))
+
+        let expected: UInt32 = (0x28 << 16) | (0x2C << 8) | 0x34
+        #expect(dispatcher.frameState.defaultBg == expected)
+        #expect(requested.isEmpty)
+    }
+
+    @Test("protocol_error applies immediately with no open transaction")
+    @MainActor func protocolErrorAppliesOutOfBand() {
+        let (dispatcher, gui) = makeDispatcher()
+        var requested: [UInt32] = []
+        dispatcher.onRequestKeyframe = { requested.append($0) }
+
+        dispatcher.dispatch(.protocolError(message: "version mismatch"))
+
+        #expect(gui.protocolErrorState.isPresented == true)
+        #expect(requested.isEmpty)
+    }
+
+    @Test("a chrome command outside a transaction is an invalidation, not applied")
+    @MainActor func chromeOutOfBandInvalidates() {
+        let (dispatcher, gui) = makeDispatcher()
+        var requested: [UInt32] = []
+        dispatcher.onRequestKeyframe = { requested.append($0) }
+
+        // guiTabBar is NOT on the out-of-band allowlist.
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("rogue.ex")]))
+
+        #expect(gui.tabBarState.tabs.isEmpty)
+        #expect(requested == [0])
+        #expect(gui.resyncState.pending == true)
     }
 }
 

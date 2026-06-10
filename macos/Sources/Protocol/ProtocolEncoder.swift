@@ -18,6 +18,10 @@ protocol InputEncoder: AnyObject, Sendable {
     /// present sample can be resolved.
     func sendKeyPress(codepoint: UInt32, modifiers: UInt8, seq: UInt32)
     func sendResize(cols: UInt16, rows: UInt16)
+    /// Ask the BEAM to send the next frame as a full keyframe (#2219 child D).
+    /// Emitted by `CommandDispatcher` after a frame-transaction invalidation,
+    /// carrying the last frame_seq this frontend committed cleanly (0 if none).
+    func sendRequestKeyframe(lastGoodFrameSeq: UInt32)
     func sendMouseEvent(row: Int16, col: Int16, button: UInt8, modifiers: UInt8, eventType: UInt8, clickCount: UInt8)
     func sendPasteEvent(text: String)
     func sendLog(level: UInt8, message: String)
@@ -154,6 +158,10 @@ extension InputEncoder {
     func sendKeyPress(codepoint: UInt32, modifiers: UInt8, seq: UInt32) {
         sendKeyPress(codepoint: codepoint, modifiers: modifiers)
     }
+
+    /// Default no-op so existing test spies do not need to implement the
+    /// frame-transaction resync request (#2219 child D).
+    func sendRequestKeyframe(lastGoodFrameSeq: UInt32) {}
 
     /// Default no-op so existing test spies do not need to implement settings actions.
     func sendConfigQuery() {}
@@ -323,6 +331,17 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         buf[0] = OP_RESIZE
         writeU16(&buf, 1, cols)
         writeU16(&buf, 3, rows)
+        writeFrame(buf)
+    }
+
+    /// Send a request_keyframe event (#2219 child D).
+    /// Layout: opcode(1) + last_good_frame_seq(4, big-endian). Asks the BEAM to
+    /// emit the next frame as a keyframe (base_frame_seq == 0, full snapshots)
+    /// after this frontend invalidated an in-flight frame transaction.
+    func sendRequestKeyframe(lastGoodFrameSeq: UInt32) {
+        var buf = Data(count: 5)
+        buf[0] = OP_REQUEST_KEYFRAME
+        writeU32(&buf, 1, lastGoodFrameSeq)
         writeFrame(buf)
     }
 

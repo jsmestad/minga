@@ -98,6 +98,12 @@ final class GUIState {
     /// overlay; boots visible when MINGA_LATENCY_HUD=1, toggled from the View menu.
     let latencyHUDState = LatencyHUDState()
 
+    /// Pending frame-transaction resync hint (#2219 child D). Raised by
+    /// CommandDispatcher when a frame is invalidated and a keyframe is requested;
+    /// cleared on the next clean commit. Ephemeral: it lives between commits and
+    /// never routes through staging.
+    let resyncState = ResyncState()
+
     /// Semantic window content from gui_window_content (0x80).
     /// Keyed by windowId. NOT cleared between frames; the guiWindowContent
     /// dispatch overwrites per-window data each frame. Stale entries serve

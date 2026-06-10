@@ -31,6 +31,7 @@
 		0D5DFD181E86D51707D3A59E /* AgentChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD14027C8C7BD17057DE820B /* AgentChatView.swift */; };
 		0E10D47CFF85000F62B5AB9A /* TextHighlighting.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDA1A468192F9DE2BBF374DD /* TextHighlighting.swift */; };
 		0F9A12A65D471F160AEF35FB /* BoardFrontendRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = D54319ABC904DA03C61A9921 /* BoardFrontendRuntime.swift */; };
+		100F9845FD215A51C25CEDB4 /* ResyncState.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2121F82B813972A7A40BEEA /* ResyncState.swift */; };
 		107A3231D5F372CB917A07C0 /* EditorSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE9448826AA38AB5FC0CEB79 /* EditorSettingsView.swift */; };
 		10DCD0BD58EEB5D10454DE22 /* SettingsState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77BBC8154E1D48CE215F2F25 /* SettingsState.swift */; };
 		119048334DAF989E5BA568EA /* ActivityBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A80457F318D9322F416DA291 /* ActivityBar.swift */; };
@@ -104,6 +105,7 @@
 		42E4FAA9F204D88F8D19EFF6 /* MessagesContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFE9DFE38318A361BEF0B773 /* MessagesContentView.swift */; };
 		43116CD030B0374BE3F4B3FE /* BEAMProcessManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F2A06C5BA9E3F53A59E202F /* BEAMProcessManagerTests.swift */; };
 		4451B7F61D8FB50D964406A0 /* ProtocolReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AF6BEBA233BA1169CF8C642 /* ProtocolReader.swift */; };
+		44A0C5B801D94EF5C0D3CFC4 /* ResyncState.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2121F82B813972A7A40BEEA /* ResyncState.swift */; };
 		44D48DF33203C53ACC3BA1AA /* WindowContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 790F7E20F30FEEFC552B3685 /* WindowContent.swift */; };
 		44DB0905958BC68A0D5DD518 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65B982679577E3DBD4E7A69D /* SettingsView.swift */; };
 		4515011E135C9FAE8D843610 /* ProtocolTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08DE9CEF5C3D599B42635554 /* ProtocolTypes.swift */; };
@@ -120,6 +122,7 @@
 		50197E6E97D44EB7FF02A4E9 /* HoverPopupState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B66E4E27BE182768B01E5F64 /* HoverPopupState.swift */; };
 		50C327D61ECA2C35142198D7 /* ProtocolCommandSize.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = 762CD389E04B0DE6A86CDBF2 /* ProtocolCommandSize.generated.swift */; };
 		51BE3CA19AB1A7E18479EDD4 /* HoverPopupOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBE5B840DF73BAC1A97CB7E6 /* HoverPopupOverlay.swift */; };
+		51BE4CB5B3E8D421AD11BE3D /* ResyncOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7341589545AC031FB682B58 /* ResyncOverlay.swift */; };
 		527C7DB557EFD09B3161BC20 /* CoreTextMetalRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DDE4A535E0895090BF02EE8 /* CoreTextMetalRenderer.swift */; };
 		531166B714D49278BA811033 /* StatusBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E892F827AFBE959F9DF25C05 /* StatusBarView.swift */; };
 		5311F1060367B40B4077309F /* FileTreeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5458552EC58E44C7CD15A98A /* FileTreeView.swift */; };
@@ -151,6 +154,7 @@
 		6474095F95F4DA480AFE91B7 /* WhichKeyOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF8ACE680725ECE21E6E03B4 /* WhichKeyOverlay.swift */; };
 		64A5A16E02B3E2694060F1A1 /* BitmapRasterizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42375D2D8B25AF31BEB11AB5 /* BitmapRasterizer.swift */; };
 		654E7E631260BE13502E1C32 /* FloatPopupOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84C47F406747CA6DD924A1AB /* FloatPopupOverlay.swift */; };
+		65FF30014B2C31FC36B56E98 /* ResyncOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7341589545AC031FB682B58 /* ResyncOverlay.swift */; };
 		66314FC85298ED8BA412C02F /* ProtocolCommandSizeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AB492F643770698E3E7F419 /* ProtocolCommandSizeTests.swift */; };
 		6691CAB367FB0BA9821C79E5 /* KeybindingsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C50661EF3472E892F77AF9C2 /* KeybindingsSettingsView.swift */; };
 		6700C63C4B7070D3388A7BD4 /* SlotAllocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 371C61E78D4BB39467516BA7 /* SlotAllocator.swift */; };
@@ -179,6 +183,7 @@
 		75836AA3D1FB27575C00755A /* WindowContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 790F7E20F30FEEFC552B3685 /* WindowContent.swift */; };
 		7680EFD077E0B916411123FA /* SymbolsNerdFontMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = FD66FBCBFC20D50D22A969C8 /* SymbolsNerdFontMono-Regular.ttf */; };
 		778C6A917140005C0C0643CB /* ProtocolEncoderBinaryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47BD56B7D6D195D236F9BF40 /* ProtocolEncoderBinaryTests.swift */; };
+		784D69384238EF5731A141B7 /* ResyncOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7341589545AC031FB682B58 /* ResyncOverlay.swift */; };
 		785A55B784A3EE17DC3E0AC6 /* PickerState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92C0836F0D4150126F181C05 /* PickerState.swift */; };
 		78644398F50FDB9206F731CB /* ProtocolConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = C441427A427E23B912F70092 /* ProtocolConstants.swift */; };
 		78F06B9BFB553B50D9BDD50F /* FontFace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BC98120D82BD7548347875E /* FontFace.swift */; };
@@ -281,6 +286,7 @@
 		B33F3F024CB62AFB86A64504 /* MessagesContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFE9DFE38318A361BEF0B773 /* MessagesContentView.swift */; };
 		B3E09FFA229E669574BA2380 /* SearchState.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAB3FF00584DBCEDE5FF79AC /* SearchState.swift */; };
 		B4AA8AEC6D3ED269B8860786 /* GitStatusHeaderContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = D13F0F0C4944C98854B726C0 /* GitStatusHeaderContent.swift */; };
+		B52AA9E18CD97F7F5F6A5701 /* ResyncState.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2121F82B813972A7A40BEEA /* ResyncState.swift */; };
 		B52CC06DF924153EAA3BADBE /* SidebarHeaderButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C991989EF4CA9F705DD3F4E /* SidebarHeaderButton.swift */; };
 		B6295F0247ADE2D1D0133DCB /* ThemeColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00D6B3C68CFF37BC4303933A /* ThemeColors.swift */; };
 		B7203DF9CF85663B0A266580 /* PowerThermalPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4D576456737CFE8706B66F5 /* PowerThermalPolicy.swift */; };
@@ -506,6 +512,7 @@
 		A5BA668E827BD6B77C72E9D6 /* CoreTextMetalRendererCursorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreTextMetalRendererCursorTests.swift; sourceTree = "<group>"; };
 		A64B96EAA100E627F4E8E0A1 /* ToolManagerState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolManagerState.swift; sourceTree = "<group>"; };
 		A69F88438F21DF56F11861F9 /* ExtensionOverlayState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtensionOverlayState.swift; sourceTree = "<group>"; };
+		A7341589545AC031FB682B58 /* ResyncOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResyncOverlay.swift; sourceTree = "<group>"; };
 		A80457F318D9322F416DA291 /* ActivityBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityBar.swift; sourceTree = "<group>"; };
 		AA65B90C0347C6496C7FA986 /* MouseInputTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MouseInputTests.swift; sourceTree = "<group>"; };
 		AB89E1589D78EC2BACA5D892 /* ObservatoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObservatoryView.swift; sourceTree = "<group>"; };
@@ -547,6 +554,7 @@
 		DF1919291250D9AD1375A8C9 /* CompletionOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompletionOverlay.swift; sourceTree = "<group>"; };
 		E156287E8ABA1AB91EBF4014 /* LatencyRecorderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LatencyRecorderTests.swift; sourceTree = "<group>"; };
 		E1AF508EECAEFEA4ADC41409 /* RecoveryManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecoveryManagerTests.swift; sourceTree = "<group>"; };
+		E2121F82B813972A7A40BEEA /* ResyncState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResyncState.swift; sourceTree = "<group>"; };
 		E22A4DA9EAA5CD1CFD71D3A8 /* ChangeSummaryState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChangeSummaryState.swift; sourceTree = "<group>"; };
 		E244758FFE2BDDE3A8108C70 /* AgentChatState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentChatState.swift; sourceTree = "<group>"; };
 		E2C629D58FF3305F579BA5E2 /* GUIActionEncoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GUIActionEncoderTests.swift; sourceTree = "<group>"; };
@@ -746,6 +754,8 @@
 				92C0836F0D4150126F181C05 /* PickerState.swift */,
 				271269086D4FB1EC9FB5444D /* ProtocolErrorOverlay.swift */,
 				6629A966DB0AA4903F49E756 /* ProtocolErrorState.swift */,
+				A7341589545AC031FB682B58 /* ResyncOverlay.swift */,
+				E2121F82B813972A7A40BEEA /* ResyncState.swift */,
 				BEFD30A2572AE2608F099407 /* ScrollAccumulator.swift */,
 				BAB3FF00584DBCEDE5FF79AC /* SearchState.swift */,
 				D48E4A7CE35A41F8198B7AE4 /* SearchToolbar.swift */,
@@ -1220,6 +1230,8 @@
 				CED32F817C08FC30D21E09AC /* ProtocolSemanticDecode.generated.swift in Sources */,
 				F5DA741E5CBCF22184C6C712 /* ProtocolTypes.swift in Sources */,
 				8A0B62C670C71DB327CE1A29 /* RecoveryManager.swift in Sources */,
+				51BE4CB5B3E8D421AD11BE3D /* ResyncOverlay.swift in Sources */,
+				44A0C5B801D94EF5C0D3CFC4 /* ResyncState.swift in Sources */,
 				A1AFA4551E04034C5FF5D39B /* ScrollAccumulator.swift in Sources */,
 				08631573E0CDF33BF841C1B8 /* SearchState.swift in Sources */,
 				897DC9DC6216A32D94B2BC5D /* SearchToolbar.swift in Sources */,
@@ -1345,6 +1357,8 @@
 				A911CF7DE0346417471AF27A /* ProtocolSemanticDecode.generated.swift in Sources */,
 				719318748BDDAEBE10DFBB2E /* ProtocolTypes.swift in Sources */,
 				FD4F1E64AF19C8199D4AAEAA /* RecoveryManager.swift in Sources */,
+				65FF30014B2C31FC36B56E98 /* ResyncOverlay.swift in Sources */,
+				B52AA9E18CD97F7F5F6A5701 /* ResyncState.swift in Sources */,
 				DBB1CFFF8301A15D950AD07F /* ScrollAccumulator.swift in Sources */,
 				B3E09FFA229E669574BA2380 /* SearchState.swift in Sources */,
 				C584795C157090A25C15518B /* SearchToolbar.swift in Sources */,
@@ -1495,6 +1509,8 @@
 				4515011E135C9FAE8D843610 /* ProtocolTypes.swift in Sources */,
 				9C0676A96179F6068B85CCA1 /* RecoveryManager.swift in Sources */,
 				A9EE5F81AE818C176D03A6E3 /* RecoveryManagerTests.swift in Sources */,
+				784D69384238EF5731A141B7 /* ResyncOverlay.swift in Sources */,
+				100F9845FD215A51C25CEDB4 /* ResyncState.swift in Sources */,
 				793247C2AB95598A1AC4C6EC /* ScrollAccumulator.swift in Sources */,
 				D42695D627BD38405475ECFF /* ScrollAccumulatorTests.swift in Sources */,
 				93C5B2485AF3667DC638D76C /* SearchState.swift in Sources */,

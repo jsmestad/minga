@@ -17,7 +17,7 @@ struct RecoveryManagerTests {
     @Test("not unresponsive if no keys were sent")
     func notUnresponsiveWithoutPendingKeys() {
         let manager = RecoveryManager()
-        manager.setLastBatchEndTimeForTesting(CFAbsoluteTimeGetCurrent() - 10.0)
+        manager.setLastFramePresentedTimeForTesting(CFAbsoluteTimeGetCurrent() - 10.0)
 
         #expect(manager.isUnresponsive() == false)
     }
@@ -26,7 +26,7 @@ struct RecoveryManagerTests {
     func unresponsiveAfterTimeoutWithPendingKeys() {
         let manager = RecoveryManager()
         manager.onKeySent()
-        manager.setLastBatchEndTimeForTesting(CFAbsoluteTimeGetCurrent() - 4.0)
+        manager.setLastFramePresentedTimeForTesting(CFAbsoluteTimeGetCurrent() - 4.0)
 
         #expect(manager.isUnresponsive() == true)
     }
@@ -35,7 +35,7 @@ struct RecoveryManagerTests {
     func renderReceiptResetsState() {
         let manager = RecoveryManager()
         manager.onKeySent()
-        manager.setLastBatchEndTimeForTesting(CFAbsoluteTimeGetCurrent() - 4.0)
+        manager.setLastFramePresentedTimeForTesting(CFAbsoluteTimeGetCurrent() - 4.0)
         #expect(manager.isUnresponsive() == true)
 
         manager.onRenderReceived()

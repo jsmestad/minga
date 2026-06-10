@@ -391,7 +391,7 @@ struct CoreTextMetalRendererCursorTests {
             searchMatches: [], diagnosticUnderlines: [],
             documentHighlights: []
         )
-        dispatcher.dispatch(.guiWindowContent(data: content))
+        dispatcher.applyForTesting(.guiWindowContent(data: content))
 
         let cursor = CoreTextMetalRenderer.resolveCursor(
             frameState: dispatcher.frameState,
