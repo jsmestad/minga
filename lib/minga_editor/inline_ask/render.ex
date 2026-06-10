@@ -1,10 +1,16 @@
 defmodule MingaEditor.InlineAsk.Render do
   @moduledoc """
   Renders inline asks as transient block decorations.
+
+  This is the ask variant adapter over the shared
+  `MingaEditor.InlineOverlay.Render` framework: it supplies the ask-specific
+  spec (group, glyph, body, footer, faces) and the store accessor, and
+  delegates layout to the framework.
   """
 
   alias Minga.Core.Decorations
   alias Minga.Core.Face
+  alias MingaEditor.InlineOverlay.Render, as: Overlay
   alias MingaEditor.State.InlineAsk
 
   @group :inline_ask
@@ -14,11 +20,7 @@ defmodule MingaEditor.InlineAsk.Render do
   def merge_decorations(%Decorations{} = decorations, state, buffer_pid)
       when is_pid(buffer_pid) do
     ask = state |> inline_asks() |> InlineAsk.active(buffer_pid)
-
-    case ask do
-      %InlineAsk{} -> add_ask_block(decorations, ask)
-      nil -> decorations
-    end
+    Overlay.merge_decorations(decorations, ask, spec())
   end
 
   def merge_decorations(%Decorations{} = decorations, _state, _buffer_pid), do: decorations
@@ -31,48 +33,36 @@ defmodule MingaEditor.InlineAsk.Render do
 
   def active?(_state), do: false
 
-  @spec add_ask_block(Decorations.t(), InlineAsk.t()) :: Decorations.t()
-  defp add_ask_block(%Decorations{} = decorations, %InlineAsk{} = ask) do
-    {_id, decorations} =
-      Decorations.add_block_decoration(decorations, ask.anchor_line,
-        placement: :below,
-        height: :dynamic,
-        priority: 1000,
-        group: @group,
-        render: fn width -> render_ask(ask, width) end
-      )
-
-    %{decorations | version: decorations.version + :erlang.phash2(ask)}
+  @spec spec() :: Overlay.spec()
+  defp spec do
+    %{
+      group: @group,
+      priority: 1000,
+      anchor_line: & &1.anchor_line,
+      prompt_glyph: "? ",
+      prompt: & &1.prompt,
+      header: &InlineAsk.header/1,
+      input?: &(&1.status == :input),
+      body_lines: &response_lines/2,
+      footer: fn _ask -> "╰─ Esc dismiss · Tab promote to workspace" end,
+      face: &face/1
+    }
   end
 
-  @spec render_ask(InlineAsk.t(), pos_integer()) :: [[{String.t(), Face.t()}]]
-  defp render_ask(%InlineAsk{} = ask, width) do
-    content_width = max(width - 4, 10)
-    base = [line("╭─ " <> InlineAsk.header(ask), :header, width)]
-    prompt = [line("│ ? " <> ask.prompt <> prompt_cursor(ask), :input, width)]
-    body = response_lines(ask, content_width, width)
-    footer = [line("╰─ Esc dismiss · Tab promote to workspace", :help, width)]
-    base ++ prompt ++ body ++ footer
-  end
+  @spec response_lines(InlineAsk.t(), pos_integer()) :: [{String.t(), atom()}]
+  defp response_lines(%InlineAsk{status: :input}, _content_width), do: []
 
-  @spec response_lines(InlineAsk.t(), pos_integer(), pos_integer()) :: [[{String.t(), Face.t()}]]
-  defp response_lines(%InlineAsk{status: :input}, _content_width, _width), do: []
+  defp response_lines(%InlineAsk{status: :thinking}, _content_width),
+    do: [{"… thinking", :body}]
 
-  defp response_lines(%InlineAsk{status: :thinking}, _content_width, width),
-    do: [line("│ … thinking", :body, width)]
-
-  defp response_lines(%InlineAsk{response: response, scroll: scroll}, content_width, width) do
+  defp response_lines(%InlineAsk{response: response, scroll: scroll}, content_width) do
     response
     |> String.split("\n")
     |> Enum.flat_map(&wrap_line(&1, content_width))
     |> Enum.drop(scroll)
     |> Enum.take(8)
-    |> Enum.map(&line("│ " <> &1, :body, width))
+    |> Enum.map(&{&1, :body})
   end
-
-  @spec prompt_cursor(InlineAsk.t()) :: String.t()
-  defp prompt_cursor(%InlineAsk{status: :input}), do: "█"
-  defp prompt_cursor(%InlineAsk{}), do: ""
 
   @spec wrap_line(String.t(), pos_integer()) :: [String.t()]
   defp wrap_line("", _width), do: [""]
@@ -82,11 +72,6 @@ defmodule MingaEditor.InlineAsk.Render do
     |> String.graphemes()
     |> Enum.chunk_every(width)
     |> Enum.map(&Enum.join/1)
-  end
-
-  @spec line(String.t(), atom(), pos_integer()) :: [{String.t(), Face.t()}]
-  defp line(text, kind, width) do
-    [{String.slice(text, 0, width), face(kind)}]
   end
 
   @spec face(atom()) :: Face.t()
