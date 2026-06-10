@@ -10,9 +10,11 @@ defmodule Minga.Integration.GUIProtocolTest do
   # async: false: spawns the headless Swift test harness as a real OS process via Port.open/2
   use ExUnit.Case, async: false
 
+  alias Minga.Frontend.Adapter.GUI.CompletionEncoder
   alias Minga.Frontend.Adapter.GUI.WindowEncoder
   alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.UI.AgentChat.ToolCallView
+  alias Minga.RenderModel.UI.Completion
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
   alias MingaEditor.UI.Picker
 
@@ -515,7 +517,7 @@ defmodule Minga.Integration.GUIProtocolTest do
 
       cases = [
         {"gui_agent_chat", encode_gui_agent_chat(%{visible: false})},
-        {"gui_completion", ProtocolGUI.encode_gui_completion(nil, 0, 0)},
+        {"gui_completion", CompletionEncoder.encode_command(%Completion{})},
         {"gui_which_key", ProtocolGUI.encode_gui_which_key(%{show: false})},
         {"gui_picker", ProtocolGUI.encode_gui_picker(nil)},
         {"gui_bottom_panel", bottom_panel_cmd},
@@ -638,7 +640,20 @@ defmodule Minga.Integration.GUIProtocolTest do
         max_visible: 10
       }
 
-      cmd = ProtocolGUI.encode_gui_completion(comp, 5, 0)
+      {visible_items, selected_offset} = Minga.Editing.Completion.visible_items(comp)
+
+      model = %Completion{
+        visible?: true,
+        cursor_row: 5,
+        cursor_col: 0,
+        selected_offset: selected_offset,
+        items:
+          Enum.map(visible_items, fn item ->
+            %Completion.Item{kind: item.kind, label: item.label, detail: item.detail || ""}
+          end)
+      }
+
+      cmd = CompletionEncoder.encode_command(model)
       Port.command(port, cmd)
 
       assert_receive {^port, {:data, json}}, 5_000

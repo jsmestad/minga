@@ -59,7 +59,10 @@ defmodule Mix.Tasks.Protocol.Golden do
 
   @spec manifest_json() :: String.t()
   defp manifest_json do
-    @fixtures_module.manifest()
+    # apply/3 keeps the test-support module out of dev-env compile-time
+    # resolution; ensure_loaded! above guards the runtime call.
+    @fixtures_module
+    |> apply(:manifest, [])
     |> JSON.encode!()
     |> Kernel.<>("\n")
   end
