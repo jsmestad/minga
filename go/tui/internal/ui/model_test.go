@@ -231,6 +231,60 @@ func TestPickerPreviewRendersWithPicker(t *testing.T) {
 	}
 }
 
+func TestFloatingPickerCoversEditorContentBelow(t *testing.T) {
+	model := New(120, 30, nil)
+	picker := protocol.Picker{
+		Visible: true,
+		Title:   "Find File",
+		Items: []protocol.PickerItem{
+			{Label: "test-advisor.md", Description: ".pi/agents"},
+			{Label: "git-worktrees.md", Description: ".pi/prompts"},
+			{Label: "Makefile"},
+		},
+	}
+	preview := protocol.PickerPreview{Visible: true, Lines: []protocol.PreviewLine{
+		{Segments: []protocol.PreviewSegment{{Text: ".PHONY: help lint lint.format lint.credo", FG: 0xCCDDEE}}},
+		{Segments: []protocol.PreviewSegment{{Text: "native.support native.tui native.go-tui", FG: 0xCCDDEE}}},
+	}}
+	model.chrome = map[byte]protocol.ChromePayload{
+		generated.OPGuiPicker:        {Picker: picker},
+		generated.OPGuiPickerPreview: {Preview: preview},
+	}
+
+	popup := model.renderFloatingPicker(picker, preview)
+	popupWidth := lipgloss.Width(popup)
+	popupHeight := lipgloss.Height(popup)
+	buffer := cellbuf.NewBuffer(popupWidth, popupHeight)
+	cellbuf.SetContent(buffer, popup)
+	for row := 0; row < popupHeight; row++ {
+		for col := 0; col < popupWidth; col++ {
+			cell := buffer.Cell(col, row)
+			if cell.Width == 0 && cell.Rune == 0 {
+				continue
+			}
+			if cell.Style.Bg == nil {
+				t.Fatalf("floating picker cell %d,%d has no background style: rune=%q width=%d popup=%q", row, col, cell.Rune, cell.Width, popup)
+			}
+		}
+	}
+	x := max((model.width-popupWidth)/2, 0)
+	y := max((model.height-popupHeight)/2, 0)
+	background := strings.TrimSuffix(strings.Repeat(strings.Repeat("X", model.width)+"\n", model.height), "\n")
+	view := ansi.Strip(model.composeFrame(background))
+	viewLines := strings.Split(view, "\n")
+
+	for row := y; row < min(y+popupHeight, len(viewLines)); row++ {
+		cells := []rune(viewLines[row])
+		if len(cells) < x+popupWidth {
+			t.Fatalf("composed row %d too narrow: width=%d want at least %d in %q", row, len(cells), x+popupWidth, viewLines[row])
+		}
+		popupCells := string(cells[x : x+popupWidth])
+		if strings.Contains(popupCells, "X") {
+			t.Fatalf("floating picker leaked editor content on row %d: %q", row, popupCells)
+		}
+	}
+}
+
 func TestPickerSelectedRowHasVisibleMarker(t *testing.T) {
 	model := New(80, 24, nil)
 	rows := model.renderPickerList("Agent Model", protocol.Picker{

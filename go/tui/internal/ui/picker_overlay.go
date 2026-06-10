@@ -37,7 +37,7 @@ func (m Model) renderFloatingPicker(picker protocol.Picker, preview protocol.Pic
 		return ""
 	}
 	content := strings.Join(lines, "\n")
-	return lipgloss.NewStyle().Width(contentWidth).Padding(0, 1).Border(lipgloss.RoundedBorder()).BorderForeground(m.palette().PopupBorder()).Background(m.palette().PopupSurface()).Render(content)
+	return lipgloss.NewStyle().Width(contentWidth).Padding(0, 1).Border(lipgloss.RoundedBorder()).BorderForeground(m.palette().PopupBorder()).BorderBackground(m.palette().PopupSurface()).Background(m.palette().PopupSurface()).ColorWhitespace(true).Render(content)
 }
 
 func (m Model) floatingPickerWidth() int {
