@@ -7,7 +7,6 @@ import (
 
 	"charm.land/lipgloss/v2"
 	xansi "github.com/charmbracelet/x/ansi"
-	"github.com/charmbracelet/x/cellbuf"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 	"github.com/rivo/uniseg"
 )
@@ -19,17 +18,11 @@ func (m Model) content() string {
 	if len(m.windows) > 0 {
 		return strings.Join(m.fillBody(m.withFileTree(m.withSplitSeparators(m.semanticLines()))), "\n")
 	}
-	if len(m.cells) > 0 {
-		return strings.Join(m.fillBody(m.legacyCellGridDiagnosticLines()), "\n")
-	}
-	return strings.Join(m.fillBody(m.withFileTree(m.withSplitSeparators(m.withLegacyCursorline(m.cellLines())))), "\n")
-}
-
-func (m Model) legacyCellGridDiagnosticLines() []string {
-	return []string{
-		"Semantic UI required: received legacy cell-grid frame without semantic window content.",
-		"Shared chrome must be emitted as Semantic UI, not draw_text cells.",
-	}
+	// No semantic windows yet (startup/teardown): render an empty body with the
+	// semantic chrome overlays still applied. The cell-grid fallback was retired
+	// with the cell-paradigm opcodes (protocol_version 2); the BEAM only emits
+	// semantic windows now.
+	return strings.Join(m.fillBody(m.withFileTree(m.withSplitSeparators(m.withLegacyCursorline(nil)))), "\n")
 }
 
 func (m Model) semanticLines() []string {
@@ -330,78 +323,6 @@ func rangeContains(startRow uint16, startCol uint16, endRow uint16, endCol uint1
 		return false
 	}
 	return true
-}
-
-func (m Model) cellLines() []string {
-	buffer := cellbuf.NewBuffer(max(m.width, 1), max(m.height-2, 1))
-	for _, draw := range m.orderedCells() {
-		writeCellText(buffer, int(draw.pos.col), int(draw.pos.row), draw.cell)
-	}
-
-	rendered := make([]string, buffer.Height())
-	for i := range rendered {
-		_, line := cellbuf.RenderLine(buffer, i)
-		rendered[i] = m.editorStyle().Render(fitStyled(line, m.width))
-	}
-	return rendered
-}
-
-type orderedCell struct {
-	pos  position
-	cell cell
-}
-
-// orderedCells returns the fallback draws sorted by draw-command order. Go map
-// iteration is randomized, so replaying m.cells directly lets a later wide draw
-// (for example a full-row space clear) blank earlier content depending on
-// iteration order. Sorting by seq replays draws in the order they arrived, which
-// keeps overlaps deterministic.
-func (m Model) orderedCells() []orderedCell {
-	draws := make([]orderedCell, 0, len(m.cells))
-	for pos, c := range m.cells {
-		draws = append(draws, orderedCell{pos: pos, cell: c})
-	}
-	sort.Slice(draws, func(i, j int) bool { return draws[i].cell.seq < draws[j].cell.seq })
-	return draws
-}
-
-func writeCellText(buffer *cellbuf.Buffer, col int, row int, fallback cell) {
-	style := cellbufStyle(fallback)
-	graphemes := uniseg.NewGraphemes(fallback.text)
-	for graphemes.Next() {
-		c := cellbuf.NewGraphemeCell(graphemes.Str())
-		c.Style = style
-		if !buffer.SetCell(col, row, c) {
-			return
-		}
-		col += max(c.Width, 1)
-	}
-}
-
-func cellbufStyle(fallback cell) cellbuf.Style {
-	style := cellbuf.Style{}
-	if fallback.fg != 0 {
-		style.Fg = xansi.TrueColor(fallback.fg)
-	}
-	if fallback.bg != 0 {
-		style.Bg = xansi.TrueColor(fallback.bg)
-	}
-	if fallback.attrs&0x01 != 0 {
-		style.Attrs |= cellbuf.BoldAttr
-	}
-	if fallback.attrs&0x02 != 0 {
-		style.UlStyle = cellbuf.SingleUnderline
-	}
-	if fallback.attrs&0x04 != 0 {
-		style.Attrs |= cellbuf.ItalicAttr
-	}
-	if fallback.attrs&0x08 != 0 {
-		style.Attrs |= cellbuf.ReverseAttr
-	}
-	if fallback.attrs&0x10 != 0 {
-		style.Attrs |= cellbuf.StrikethroughAttr
-	}
-	return style
 }
 
 func (m Model) fillBody(lines []string) []string {

@@ -350,13 +350,11 @@ struct GUIStateFrameTests {
             documentHighlights: []
         )
         state.windowContents[1] = content
-        #expect(state.windowContents.count == 1)
-
-        // beginFrame() intentionally does NOT clear windowContents.
-        // Stale content serves as a fallback to prevent blank viewport
-        // flashes if frame delivery is interrupted. The guiWindowContent
-        // dispatch overwrites per-window data each frame.
-        state.beginFrame()
+        // Stale window content persists across frames by design: it is the
+        // fallback that prevents blank-viewport flashes if frame delivery is
+        // interrupted. The guiWindowContent dispatch overwrites per-window
+        // data each frame (the cell-era beginFrame no-op was removed with
+        // the clear opcode).
         #expect(state.windowContents.count == 1)
         #expect(state.windowContents[1]?.windowId == 1)
     }

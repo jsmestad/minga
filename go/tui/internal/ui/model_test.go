@@ -76,22 +76,6 @@ func TestViewCarriesFullWindowBackgroundColor(t *testing.T) {
 	}
 }
 
-func TestLegacyCellOnlyFrameRendersDiagnosticInsteadOfFallbackContent(t *testing.T) {
-	model := New(80, 24, nil)
-	updated, _ := model.Update(port.PacketMsg{Commands: []protocol.Command{
-		{Kind: protocol.CommandDrawText, Draw: protocol.DrawText{Row: 0, Col: 0, Text: "legacy status bar"}},
-	}})
-	model = updated.(Model)
-
-	view := ansi.Strip(model.View().Content)
-	if !strings.Contains(view, "Semantic UI required") {
-		t.Fatalf("legacy-only frame should render a semantic diagnostic: %q", view)
-	}
-	if strings.Contains(view, "legacy status bar") {
-		t.Fatalf("legacy-only frame should not silently render cell-grid content: %q", view)
-	}
-}
-
 func TestWhichKeyRendersCompactFloatingPopup(t *testing.T) {
 	model := New(80, 24, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
@@ -185,26 +169,6 @@ func TestExtensionRuntimeLatestEnvelopeWinsAndIdsAreSortedDeterministically(t *t
 	}
 }
 
-func TestExtensionRuntimeIsClearedOnFrameClear(t *testing.T) {
-	model := New(80, 24, nil)
-	updated, _ := model.Update(port.PacketMsg{Commands: []protocol.Command{
-		{Kind: protocol.CommandExtensionRuntime, ExtensionRuntime: protocol.ExtensionRuntimePayload{ExtensionID: "acme.lint", Channel: "pane", Payload: []byte{0x01}}},
-	}})
-	model = updated.(Model)
-	if model.extensionRuntimeStatus() == "" {
-		t.Fatalf("precondition: expected an active extension runtime before clear")
-	}
-
-	updated, _ = model.Update(port.PacketMsg{Commands: []protocol.Command{{Kind: protocol.CommandClear}}})
-	model = updated.(Model)
-	if len(model.extensionRuntimes) != 0 {
-		t.Fatalf("CommandClear should reset extension runtimes, got %#v", model.extensionRuntimes)
-	}
-	if status := model.extensionRuntimeStatus(); status != "" {
-		t.Fatalf("extension runtime status should be empty after clear, got %q", status)
-	}
-}
-
 func TestExtensionRuntimeIgnoresEmptyExtensionID(t *testing.T) {
 	model := New(80, 24, nil)
 	updated, _ := model.Update(port.PacketMsg{Commands: []protocol.Command{
@@ -213,6 +177,41 @@ func TestExtensionRuntimeIgnoresEmptyExtensionID(t *testing.T) {
 	model = updated.(Model)
 	if len(model.extensionRuntimes) != 0 {
 		t.Fatalf("envelope with empty extension id should be ignored, got %#v", model.extensionRuntimes)
+	}
+}
+
+func TestProtocolErrorRendersBlockingSurfaceAndTakesPrecedence(t *testing.T) {
+	model := New(80, 24, nil)
+	// Seed normal content so the test proves the error surface takes precedence
+	// over it rather than only rendering on a blank model.
+	updated, _ := model.Update(port.PacketMsg{Commands: []protocol.Command{
+		{Kind: protocol.CommandSetTitle, Title: "editor"},
+		{Kind: protocol.CommandWindowContent, Window: protocol.WindowContent{
+			ID:   1,
+			Rows: []protocol.WindowRow{{Text: "normal editor content"}},
+		}},
+	}})
+	model = updated.(Model)
+
+	message := "protocol_version mismatch: frontend 1, beam 2"
+	updated, _ = model.Update(port.PacketMsg{Commands: []protocol.Command{
+		{Kind: protocol.CommandProtocolError, ProtocolError: message},
+	}})
+	model = updated.(Model)
+
+	if model.protocolError != message {
+		t.Fatalf("model did not latch protocol error: %q", model.protocolError)
+	}
+
+	rendered := ansi.Strip(model.View().Content)
+	if !strings.Contains(rendered, "Protocol error") {
+		t.Fatalf("blocking surface should show a title, got: %q", rendered)
+	}
+	if !strings.Contains(rendered, message) {
+		t.Fatalf("blocking surface should show the reason, got: %q", rendered)
+	}
+	if strings.Contains(rendered, "normal editor content") {
+		t.Fatalf("blocking surface should take precedence over normal content, got: %q", rendered)
 	}
 }
 
@@ -921,55 +920,6 @@ func TestSemanticWindowsUsePerWindowHeights(t *testing.T) {
 	joined := ansi.Strip(strings.Join(lines, "\n"))
 	if len(lines) != 2 || !strings.Contains(joined, "first") || !strings.Contains(joined, "second") {
 		t.Fatalf("semantic windows should not pad the first window over later windows: lines=%d %q", len(lines), joined)
-	}
-}
-
-func TestCellLinesAdvanceByGraphemeWidth(t *testing.T) {
-	model := New(8, 5, nil)
-	model.cells[position{row: 0, col: 0}] = cell{text: "👍🏼x"}
-	model.cells[position{row: 0, col: 3}] = cell{text: "z"}
-
-	rendered := model.cellLines()
-	stripped := ansi.Strip(rendered[0])
-
-	if !strings.HasPrefix(stripped, "👍🏼xz") {
-		t.Fatalf("cell line = %q, want grapheme-width placement prefix %q", stripped, "👍🏼xz")
-	}
-	if width := ansi.StringWidthWc(stripped); width != 8 {
-		t.Fatalf("cell line width = %d, want 8 for %q", width, stripped)
-	}
-}
-
-func TestCellLinesPreserveDrawOrderForOverlappingClearThenContent(t *testing.T) {
-	// The scroll-redraw path sends a full-row space clear and then the
-	// replacement content for that row. The clear must render before the
-	// content, otherwise it blanks the freshly drawn row. Because m.cells is a
-	// Go map, replaying it in iteration order is nondeterministic, so this drives
-	// the real applyDraw path (which records draw order) and asserts the content
-	// survives. Run repeatedly to defeat any accidental iteration-order reliance.
-	for attempt := 0; attempt < 50; attempt++ {
-		model := New(20, 5, nil)
-		model.applyDraw(protocol.DrawText{Row: 0, Col: 0, Text: strings.Repeat(" ", 20)})
-		model.applyDraw(protocol.DrawText{Row: 0, Col: 2, Text: "HELLO"})
-
-		stripped := ansi.Strip(model.cellLines()[0])
-		if !strings.Contains(stripped, "HELLO") {
-			t.Fatalf("attempt %d: clear blanked redrawn content: %q", attempt, stripped)
-		}
-	}
-}
-
-func TestCellbufStyleMapsProtocolAttrs(t *testing.T) {
-	style := cellbufStyle(cell{fg: 0x112233, bg: 0x445566, attrs: 0x01 | 0x02 | 0x04 | 0x08 | 0x10})
-
-	if style.Fg == nil || style.Bg == nil {
-		t.Fatalf("style should carry foreground and background: %+v", style)
-	}
-	if !style.Attrs.Contains(cellbuf.BoldAttr) || !style.Attrs.Contains(cellbuf.ItalicAttr) || !style.Attrs.Contains(cellbuf.ReverseAttr) || !style.Attrs.Contains(cellbuf.StrikethroughAttr) {
-		t.Fatalf("style attrs not mapped: %+v", style.Attrs)
-	}
-	if style.UlStyle != cellbuf.SingleUnderline {
-		t.Fatalf("underline style = %v, want single underline", style.UlStyle)
 	}
 }
 

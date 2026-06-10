@@ -19,69 +19,8 @@ struct CommandDispatcherRoutingTests {
 
     // MARK: - Basic commands
 
-    @Test("clear marks dirty but preserves windowContents and windowGutters")
-    @MainActor func clearCommand() {
-        let (dispatcher, gui) = makeDispatcher()
-        // Seed window content and gutter data
-        let content = GUIWindowContent(
-            windowId: 1, fullRefresh: true,
-            cursorRow: 0, cursorCol: 0, cursorShape: .block,
-            rows: [], selection: nil,
-            searchMatches: [], diagnosticUnderlines: [],
-            documentHighlights: []
-        )
-        gui.windowContents[1] = content
-
-        let gutter = Wire.WindowGutter(
-            windowId: 1, contentRow: 0, contentCol: 5, contentHeight: 24,
-            isActive: true, contentWidth: 80, cursorLine: 10, lineNumberStyle: .hybrid,
-            lineNumberWidth: 4, signColWidth: 1, entries: []
-        )
-        dispatcher.dispatch(.guiGutter(data: gutter))
-        dispatcher.frameState.dirty = false
-
-        dispatcher.dispatch(.clear)
-
-        // FrameState is marked dirty
-        #expect(dispatcher.frameState.dirty == true)
-        // windowContents persists through clear (defense-in-depth:
-        // stale content is better than a blank viewport flash)
-        #expect(gui.windowContents.count == 1)
-        // windowGutters persists through clear (gutter positions are
-        // stable between frames, only change on resize/split)
-        #expect(dispatcher.frameState.windowGutters[1] != nil)
-        #expect(dispatcher.currentFrameWindowIds.isEmpty)
-    }
-
-    @Test("clear plus batchEnd prunes retained windows when frame has no live window ids")
-    @MainActor func clearBatchEndPrunesEmptyFrame() {
-        let (dispatcher, gui) = makeDispatcher()
-        gui.windowContents[1] = GUIWindowContent(
-            windowId: 1, fullRefresh: false,
-            cursorRow: 0, cursorCol: 0, cursorShape: .block,
-            rows: [], selection: nil,
-            searchMatches: [], diagnosticUnderlines: [],
-            documentHighlights: []
-        )
-        dispatcher.frameState.windowGutters[1] = Wire.WindowGutter(
-            windowId: 1, contentRow: 0, contentCol: 0, contentHeight: 10,
-            isActive: true, contentWidth: 40, cursorLine: 0, lineNumberStyle: .absolute,
-            lineNumberWidth: 2, signColWidth: 1, entries: []
-        )
-        dispatcher.frameState.windowIndentGuides[1] = IndentGuideData(windowId: 1, tabWidth: 2, activeGuideCol: 0xFFFF, guideCols: [], lineIndentLevels: [])
-        dispatcher.frameState.verticalSeparators = [Wire.VerticalSeparator(col: 20, startRow: 0, endRow: 9)]
-
-        dispatcher.dispatch(.clear)
-        dispatcher.dispatch(.batchEnd(seq: 0))
-
-        #expect(gui.windowContents.isEmpty)
-        #expect(dispatcher.frameState.windowGutters.isEmpty)
-        #expect(dispatcher.frameState.windowIndentGuides.isEmpty)
-        #expect(dispatcher.frameState.verticalSeparators.isEmpty)
-    }
-
-    @Test("metadata-only batchEnd without clear preserves retained windows")
-    @MainActor func metadataOnlyBatchEndPreservesRetainedWindows() {
+    @Test("batchEnd preserves retained windows (no cell-grid clear/prune path)")
+    @MainActor func batchEndPreservesRetainedWindows() {
         let (dispatcher, gui) = makeDispatcher()
         gui.windowContents[1] = GUIWindowContent(
             windowId: 1, fullRefresh: false,
@@ -96,19 +35,22 @@ struct CommandDispatcherRoutingTests {
         #expect(gui.windowContents[1] != nil)
     }
 
-    @Test("setCursor updates frameState cursor position")
-    @MainActor func setCursorCommand() {
-        let (dispatcher, _) = makeDispatcher()
-        dispatcher.dispatch(.setCursor(row: 10, col: 20))
-        #expect(dispatcher.frameState.cursorRow == 10)
-        #expect(dispatcher.frameState.cursorCol == 20)
-    }
-
     @Test("setCursorShape updates frameState cursor shape")
     @MainActor func setCursorShapeCommand() {
         let (dispatcher, _) = makeDispatcher()
         dispatcher.dispatch(.setCursorShape(.beam))
         #expect(dispatcher.frameState.cursorShape == .beam)
+    }
+
+    @Test("protocolError latches a blocking message on protocolErrorState")
+    @MainActor func protocolErrorRouting() {
+        let (dispatcher, gui) = makeDispatcher()
+        #expect(gui.protocolErrorState.isPresented == false)
+
+        dispatcher.dispatch(.protocolError(message: "protocol_version mismatch: frontend 1, beam 2"))
+
+        #expect(gui.protocolErrorState.isPresented == true)
+        #expect(gui.protocolErrorState.message == "protocol_version mismatch: frontend 1, beam 2")
     }
 
     @Test("setWindowBg updates frameState defaultBg")
@@ -933,52 +875,6 @@ struct CommandDispatcherRoutingTests {
     }
 
     // MARK: - Batch lifecycle
-
-    @Test("batchEnd prunes stale window geometry when a new gutter frame arrives")
-    @MainActor func batchEndPrunesStaleWindowGeometry() {
-        let (dispatcher, gui) = makeDispatcher()
-        let liveContent = GUIWindowContent(
-            windowId: 1, fullRefresh: true,
-            cursorRow: 0, cursorCol: 0, cursorShape: .block,
-            rows: [], selection: nil,
-            searchMatches: [], diagnosticUnderlines: [],
-            documentHighlights: []
-        )
-        let staleContent = GUIWindowContent(
-            windowId: 2, fullRefresh: true,
-            cursorRow: 0, cursorCol: 0, cursorShape: .block,
-            rows: [], selection: nil,
-            searchMatches: [], diagnosticUnderlines: [],
-            documentHighlights: []
-        )
-        let liveGutter = Wire.WindowGutter(
-            windowId: 1, contentRow: 0, contentCol: 0, contentHeight: 24,
-            isActive: true, contentWidth: 80, cursorLine: 10, lineNumberStyle: .hybrid,
-            lineNumberWidth: 4, signColWidth: 1, entries: []
-        )
-        let staleGutter = Wire.WindowGutter(
-            windowId: 2, contentRow: 12, contentCol: 0, contentHeight: 12,
-            isActive: false, contentWidth: 80, cursorLine: 10, lineNumberStyle: .hybrid,
-            lineNumberWidth: 4, signColWidth: 1, entries: []
-        )
-
-        gui.windowContents[1] = liveContent
-        gui.windowContents[2] = staleContent
-        dispatcher.frameState.windowGutters[1] = liveGutter
-        dispatcher.frameState.windowGutters[2] = staleGutter
-        dispatcher.frameState.windowIndentGuides[2] = IndentGuideData(windowId: 2, tabWidth: 2, activeGuideCol: 0xFFFF, guideCols: [], lineIndentLevels: [])
-
-        dispatcher.dispatch(.clear)
-        dispatcher.dispatch(.guiGutter(data: liveGutter))
-        dispatcher.dispatch(.guiWindowContent(data: liveContent))
-        dispatcher.dispatch(.batchEnd(seq: 0))
-
-        #expect(dispatcher.frameState.windowGutters[1] != nil)
-        #expect(dispatcher.frameState.windowGutters[2] == nil)
-        #expect(gui.windowContents[1] === liveContent)
-        #expect(gui.windowContents[2] == nil)
-        #expect(dispatcher.frameState.windowIndentGuides[2] == nil)
-    }
 
     @Test("batchEnd fires onFirstRender once then clears it")
     @MainActor func batchEndFiresFirstRenderOnce() {

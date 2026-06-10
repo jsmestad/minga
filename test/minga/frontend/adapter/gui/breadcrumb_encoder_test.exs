@@ -4,7 +4,6 @@ defmodule Minga.Frontend.Adapter.GUI.BreadcrumbEncoderTest do
   alias Minga.Frontend.Adapter.GUI.BreadcrumbEncoder
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.RenderModel.UI.Breadcrumb
-  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
   alias MingaEditor.RenderModel.UI.BreadcrumbBuilder
 
   @op_gui_breadcrumb Minga.Protocol.Opcodes.gui_breadcrumb()
@@ -62,28 +61,46 @@ defmodule Minga.Frontend.Adapter.GUI.BreadcrumbEncoderTest do
       assert cmd2 != nil
     end
 
-    test "produces byte-identical output to legacy ProtocolGUI.encode_gui_breadcrumb/2" do
+    # Byte-exactness against the schema-generated codec is proven by the
+    # cross-language golden tests (test/support/protocol_golden.ex +
+    # go/tui/internal/protocol/golden_cross_lang_test.go), which replaced the
+    # former hand-written ProtocolGUI.encode_gui_breadcrumb parity oracle for
+    # this family. The case below decodes the production wire format and asserts
+    # on the decoded segments, preserving the path-derivation coverage (nil
+    # path, nested dirs, root-level file, unicode, max-length segment) the
+    # oracle-anchored test carried.
+    test "encodes the builder-derived segments into the string16 list wire layout" do
       test_cases = [
-        {nil, "/home/user/project"},
-        {"/home/user/project/lib/foo.ex", "/home/user/project"},
-        {"/home/user/project/lib/sub/deep.ex", "/home/user/project"},
-        {"/home/user/project/mix.exs", "/home/user/project"},
+        {{nil, "/home/user/project"}, []},
+        {{"/home/user/project/lib/foo.ex", "/home/user/project"}, ["lib", "foo.ex"]},
+        {{"/home/user/project/lib/sub/deep.ex", "/home/user/project"}, ["lib", "sub", "deep.ex"]},
+        {{"/home/user/project/mix.exs", "/home/user/project"}, ["mix.exs"]},
         # Unicode segments and a max-length (255-byte) segment exercise the
         # relocated derivation and the string16 element layout.
-        {"/home/user/project/λ/café→.ex", "/home/user/project"},
-        {"/home/user/project/#{String.duplicate("x", 255)}.ex", "/home/user/project"}
+        {{"/home/user/project/λ/café→.ex", "/home/user/project"}, ["λ", "café→.ex"]},
+        {{"/home/user/project/#{String.duplicate("x", 255)}.ex", "/home/user/project"},
+         ["#{String.duplicate("x", 255)}.ex"]}
       ]
 
-      for {file_path, root} <- test_cases do
-        legacy_binary = ProtocolGUI.encode_gui_breadcrumb(file_path, root)
-
+      for {{file_path, root}, expected_segments} <- test_cases do
         model = BreadcrumbBuilder.build(file_path, root)
-        caches = Caches.new()
-        {new_binary, _caches} = BreadcrumbEncoder.encode(model, caches)
+        {cmd, _caches} = BreadcrumbEncoder.encode(model, Caches.new())
 
-        assert new_binary == legacy_binary,
-               "Breadcrumb (#{inspect(file_path)}, #{inspect(root)}): new encoder output does not match legacy output"
+        assert decode_breadcrumb(cmd) == expected_segments,
+               "Breadcrumb (#{inspect(file_path)}, #{inspect(root)}): unexpected decoded segments"
       end
     end
+  end
+
+  # Decodes the production gui_breadcrumb wire format: opcode(1) + count(1) then
+  # `count` string16 segments.
+  defp decode_breadcrumb(<<@op_gui_breadcrumb, count::8, rest::binary>>) do
+    decode_segments(rest, count, [])
+  end
+
+  defp decode_segments(_rest, 0, acc), do: Enum.reverse(acc)
+
+  defp decode_segments(<<len::16, seg::binary-size(len), rest::binary>>, n, acc) do
+    decode_segments(rest, n - 1, [seg | acc])
   end
 end

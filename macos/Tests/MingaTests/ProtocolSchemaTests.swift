@@ -112,7 +112,7 @@ struct ProtocolSchemaSwiftTests {
     @Test("Render opcode constants match schema")
     func renderOpcodes() throws {
         let schema = try loadSchema()
-        try expectOpcodes(schema, "render", [("draw_text", OP_DRAW_TEXT), ("set_cursor", OP_SET_CURSOR), ("clear", OP_CLEAR), ("batch_end", OP_BATCH_END), ("define_region", OP_DEFINE_REGION), ("set_cursor_shape", OP_SET_CURSOR_SHAPE), ("set_title", OP_SET_TITLE), ("set_window_bg", OP_SET_WINDOW_BG), ("clear_region", OP_CLEAR_REGION), ("destroy_region", OP_DESTROY_REGION), ("set_active_region", OP_SET_ACTIVE_REGION), ("scroll_region", OP_SCROLL_REGION), ("draw_styled_text", OP_DRAW_STYLED_TEXT)])
+        try expectOpcodes(schema, "render", [("batch_end", OP_BATCH_END), ("set_cursor_shape", OP_SET_CURSOR_SHAPE), ("set_title", OP_SET_TITLE), ("set_window_bg", OP_SET_WINDOW_BG), ("protocol_error", OP_PROTOCOL_ERROR)])
     }
 
     @Test("Config opcode constants match schema")

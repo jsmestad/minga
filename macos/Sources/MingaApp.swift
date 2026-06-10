@@ -56,6 +56,7 @@ struct MingaMenuCommands: Commands {
 
     private var encoder: InputEncoder? { appState.encoder }
     private var connected: Bool { encoder != nil }
+    private var latencyHUDState: LatencyHUDState { appState.gui.latencyHUDState }
 
     var body: some Commands {
         // Replace the default text editing commands (Cmd+C/V/X/Z/A) with
@@ -138,6 +139,17 @@ struct MingaMenuCommands: Commands {
             Button("Reset Font Size") { encoder?.sendFontSizeAdjust(direction: 0x02) }
                 .keyboardShortcut("0", modifiers: .command)
                 .disabled(!connected)
+
+            Divider()
+
+            // Keystroke-to-present latency HUD (ticket #2215). This is a
+            // frontend-local debug surface, so the toggle does not route through
+            // the BEAM and stays enabled even before connection. cmd-ctrl-l is the
+            // macOS-conventional equivalent of the Go TUI's ctrl+alt+l chord.
+            Button(latencyHUDState.visible ? "Hide Latency HUD" : "Show Latency HUD") {
+                latencyHUDState.toggle()
+            }
+            .keyboardShortcut("l", modifiers: [.command, .control])
         }
     }
 
@@ -264,6 +276,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.handleFontChange(family: family, size: CGFloat(size), ligatures: ligatures, weight: weight)
         }
         self.dispatcher = disp
+
+        // Wire the latency HUD (ticket #2215) to the recorder. The snapshot is
+        // computed outside the stamp/resolve critical sections, so the HUD's
+        // refresh timer never perturbs the keystroke-to-present samples.
+        appState.gui.latencyHUDState.connect { [weak disp] in
+            disp?.latency.snapshot() ?? LatencyRecorder.Stats()
+        }
 
         // Recovery manager tracks key input and render responses so Ctrl-G
         // can present a native restart dialog if the BEAM stops responding.

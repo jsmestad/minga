@@ -10,13 +10,17 @@ defmodule Minga.Integration.GUIProtocolTest do
   # async: false: spawns the headless Swift test harness as a real OS process via Port.open/2
   use ExUnit.Case, async: false
 
+  alias Minga.Frontend.Adapter.GUI.BreadcrumbEncoder
+  alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Frontend.Adapter.GUI.CompletionEncoder
+  alias Minga.Frontend.Adapter.GUI.PickerEncoder
   alias Minga.Frontend.Adapter.GUI.WindowEncoder
   alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.UI.AgentChat.ToolCallView
   alias Minga.RenderModel.UI.Completion
+  alias Minga.RenderModel.UI.Picker, as: PickerModel
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
-  alias MingaEditor.UI.Picker
+  alias MingaEditor.RenderModel.UI.BreadcrumbBuilder
 
   @harness_path Path.join(:code.priv_dir(:minga), "minga-test-harness")
 
@@ -121,8 +125,10 @@ defmodule Minga.Integration.GUIProtocolTest do
     end
 
     test "gui_breadcrumb encodes and decodes correctly", %{port: port} do
-      cmd =
-        ProtocolGUI.encode_gui_breadcrumb("/home/user/project/lib/foo.ex", "/home/user/project")
+      model =
+        BreadcrumbBuilder.build("/home/user/project/lib/foo.ex", "/home/user/project")
+
+      {cmd, _caches} = BreadcrumbEncoder.encode(model, Caches.new())
 
       Port.command(port, cmd)
       assert_receive {^port, {:data, json}}, 5_000
@@ -519,7 +525,7 @@ defmodule Minga.Integration.GUIProtocolTest do
         {"gui_agent_chat", encode_gui_agent_chat(%{visible: false})},
         {"gui_completion", CompletionEncoder.encode_command(%Completion{})},
         {"gui_which_key", ProtocolGUI.encode_gui_which_key(%{show: false})},
-        {"gui_picker", ProtocolGUI.encode_gui_picker(nil)},
+        {"gui_picker", <<Opcodes.gui_picker(), 0::8>>},
         {"gui_bottom_panel", bottom_panel_cmd},
         {"gui_tool_manager", ProtocolGUI.encode_gui_tool_manager(nil)}
       ]
@@ -708,32 +714,35 @@ defmodule Minga.Integration.GUIProtocolTest do
 
   describe "gui_picker visible" do
     test "round-trips visible picker with items", %{port: port} do
-      marked_item = %MingaEditor.UI.Picker.Item{
-        id: "editor.ex",
-        label: "editor.ex",
-        description: "lib",
-        annotation: "",
-        icon_color: 0x51AFEF,
-        two_line: false,
-        match_positions: [0, 3]
+      # The production PickerBuilder normalizes a filtered legacy picker into
+      # this wire-shaped RenderModel.UI.Picker (flags packed: marked => bit 1 =>
+      # 2; query "edi" re-derives match_positions [0, 1, 2] against "editor.ex").
+      # This mirrors what the old ProtocolGUI.encode_gui_picker oracle received.
+      model = %PickerModel{
+        visible?: true,
+        title: "Find File",
+        query: "edi",
+        selected_index: 0,
+        filtered_count: 1,
+        total_count: 2,
+        marked_count: 1,
+        has_preview?: false,
+        items: [
+          %{
+            icon_color: 0x51AFEF,
+            flags: 2,
+            label: "editor.ex",
+            description: "lib",
+            annotation: "",
+            match_positions: [0, 1, 2]
+          }
+        ],
+        action_menu: nil,
+        mode_prefix: ">",
+        load_status: :ready
       }
 
-      other_item = %MingaEditor.UI.Picker.Item{
-        id: "mix.exs",
-        label: "mix.exs",
-        description: "",
-        annotation: "",
-        icon_color: 0x98BE65,
-        two_line: false,
-        match_positions: []
-      }
-
-      picker =
-        Picker.new([marked_item, other_item], title: "Find File", max_visible: 50)
-        |> Picker.toggle_mark()
-        |> Picker.filter("edi")
-
-      cmd = ProtocolGUI.encode_gui_picker(picker, false, nil, 0, ">")
+      cmd = PickerEncoder.encode_command(model)
       Port.command(port, cmd)
 
       assert_receive {^port, {:data, json}}, 5_000
@@ -1150,36 +1159,6 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert ref["row_id"] == Row.stable_id(:normal, 0)
       assert full["entry_type"] == "full"
       assert full["text"] == "new"
-    end
-  end
-
-  describe "draw_styled_text" do
-    test "round-trips styled text with all attributes", %{port: port} do
-      # Raw binary: opcode + row(2) + col(2) + fg(3) + bg(3) + attrs(2)
-      # + ul_color(3) + blend(1) + font_weight(1) + font_id(1) + text_len(2) + text
-      text = "hello"
-      attrs16 = 0x0025
-
-      cmd =
-        <<0x1C, 5::16, 10::16, 0xFF, 0x6C, 0x6B, 0x28, 0x2C, 0x34, attrs16::16, 0xFF, 0x00, 0x00,
-          128::8, 5::8, 2::8, byte_size(text)::16, text::binary>>
-
-      Port.command(port, cmd)
-
-      assert_receive {^port, {:data, json}}, 5_000
-      decoded = JSON.decode!(json)
-
-      assert decoded["type"] == "draw_styled_text"
-      assert decoded["row"] == 5
-      assert decoded["col"] == 10
-      assert decoded["fg"] == 0xFF6C6B
-      assert decoded["bg"] == 0x282C34
-      assert decoded["attrs"] == attrs16
-      assert decoded["underline_color"] == 0xFF0000
-      assert decoded["blend"] == 128
-      assert decoded["font_weight"] == 5
-      assert decoded["font_id"] == 2
-      assert decoded["text"] == "hello"
     end
   end
 end

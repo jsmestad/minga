@@ -83,14 +83,6 @@ struct FrameState {
         self.rows = rows
     }
 
-    /// Mark the frame as dirty at the start of a new batch.
-    /// Does NOT clear windowGutters (prevents blank-gutter flash).
-    mutating func beginFrame() {
-        dirty = true
-        cursorlineRow = 0xFFFF
-        cursorlineBg = 0
-    }
-
     /// Resize the grid. Marks dirty.
     mutating func resize(newCols: UInt16, newRows: UInt16) {
         guard newCols != cols || newRows != rows else { return }

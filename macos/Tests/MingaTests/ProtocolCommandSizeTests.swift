@@ -10,8 +10,8 @@ import Testing
 
 struct ProtocolCommandSizeTests {
     @Test func sizesGenericFramings() {
-        #expect(commandSize([OP_CLEAR]) == .sized(1))
-        #expect(commandSize([OP_SET_CURSOR, 0, 0, 0, 0]) == .sized(5))
+        #expect(commandSize([OP_SET_CURSOR_SHAPE, 0]) == .sized(2))
+        #expect(commandSize([OP_SET_WINDOW_BG, 0x28, 0x2C, 0x34]) == .sized(4))
         #expect(commandSize([OP_GUI_GUTTER_SEP, 0, 0, 0, 0, 0]) == .sized(6))
         // len16, the framing the Go reader previously mis-sized.
         #expect(commandSize([OP_GUI_INDENT_GUIDES, 0x00, 0x06, 1, 2, 3, 4, 5, 6]) == .sized(9))

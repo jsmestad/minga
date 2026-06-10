@@ -282,7 +282,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     /// `semantic_ui = true`. The BEAM uses this capability, not `frontend_type`,
     /// to select the semantic render/chrome path shared with the Go TUI.
     func sendReady(cols: UInt16, rows: UInt16) {
-        var buf = Data(count: 14)
+        var buf = Data(count: 16)
         buf[0] = OP_READY
         writeU16(&buf, 1, cols)
         writeU16(&buf, 3, rows)
@@ -295,6 +295,9 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         buf[11] = FLOAT_NATIVE
         buf[12] = TEXT_PROPORTIONAL
         buf[13] = SEMANTIC_UI_ENABLED
+        // protocol_version (u16): the wire contract this frontend was generated
+        // against. The BEAM rejects a mismatch with an explicit protocol_error.
+        writeU16(&buf, 14, PROTOCOL_VERSION)
         writeFrame(buf)
     }
 

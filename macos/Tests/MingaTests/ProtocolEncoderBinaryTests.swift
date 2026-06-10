@@ -56,7 +56,8 @@ struct EncoderReadyTests {
     func readyLayout() {
         let payload = captureFrame { $0.sendReady(cols: 120, rows: 40) }
 
-        #expect(payload.count == 14)
+        // 14 caps bytes + a u16 protocol_version tail (protocol_version 2).
+        #expect(payload.count == 16)
         #expect(payload[0] == OP_READY)
         #expect(readU16(payload, 1) == 120) // cols
         #expect(readU16(payload, 3) == 40)  // rows
@@ -69,6 +70,7 @@ struct EncoderReadyTests {
         #expect(payload[11] == FLOAT_NATIVE)
         #expect(payload[12] == TEXT_PROPORTIONAL)
         #expect(payload[13] == SEMANTIC_UI_ENABLED)
+        #expect(readU16(payload, 14) == PROTOCOL_VERSION) // protocol_version tail
     }
 }
 

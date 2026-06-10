@@ -888,11 +888,28 @@ struct ContentView: View {
             bottomInset: notificationCenterBottomInset
         )
 
+        // Keystroke-to-present latency HUD (ticket #2215). Top-right, client-local
+        // debug overlay; visibility is owned by LatencyHUDState.
+        LatencyHUDOverlay(
+            state: appState.gui.latencyHUDState,
+            theme: appState.gui.themeColors
+        )
+
         // Startup overlay: covers the empty Metal framebuffer with a
         // spinner while the BEAM boots. Fades out on first batch_end.
         if !appState.hasReceivedFirstFrame {
             StartupOverlay()
                 .transition(.opacity)
+        }
+
+        // Protocol error overlay: blocks the whole window when the BEAM rejects
+        // this frontend's handshake protocol_version (0x18). Highest z-order so
+        // it takes precedence over the startup overlay and all content.
+        if appState.gui.protocolErrorState.isPresented {
+            ProtocolErrorOverlay(
+                state: appState.gui.protocolErrorState,
+                theme: appState.gui.themeColors
+            )
         }
     }
 }

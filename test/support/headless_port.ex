@@ -24,7 +24,6 @@ defmodule Minga.Test.HeadlessPort do
   alias Minga.Test.GUIWindowDecoder
   alias MingaEditor.Frontend.Protocol
 
-  @op_clear Opcodes.clear()
   @op_batch_end Opcodes.batch_end()
   @op_set_title Opcodes.set_title()
   @op_set_window_bg Opcodes.set_window_bg()
@@ -424,19 +423,6 @@ defmodule Minga.Test.HeadlessPort do
   # ── Command application ────────────────────────────────────────────────────
 
   @spec apply_command(binary(), State.t()) :: State.t()
-  defp apply_command(<<@op_clear>>, state) do
-    %{
-      state
-      | grid: blank_grid(state.width, state.height),
-        windows: %{},
-        gutters: %{},
-        tab_bar: nil,
-        status_bar: nil,
-        minibuffer: nil,
-        file_tree: nil,
-        agent_chat: nil
-    }
-  end
 
   # batch_end now carries the echoed input correlation sequence (ticket #2215).
   defp apply_command(<<@op_batch_end, input_seq::32>>, state) do

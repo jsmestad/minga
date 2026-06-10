@@ -88,22 +88,20 @@ final class GUIState {
     /// Search toolbar state (0x9E).
     let searchState = SearchState()
 
+    /// Blocking protocol_error state (0x18). Set when the BEAM rejects this
+    /// frontend's handshake protocol_version; drives a full-window error overlay
+    /// so a version-mismatched frontend shows an explicit reason instead of a
+    /// blank screen (ticket #2237).
+    let protocolErrorState = ProtocolErrorState()
+
+    /// Keystroke-to-present latency HUD state (ticket #2215). Client-local debug
+    /// overlay; boots visible when MINGA_LATENCY_HUD=1, toggled from the View menu.
+    let latencyHUDState = LatencyHUDState()
+
     /// Semantic window content from gui_window_content (0x80).
     /// Keyed by windowId. NOT cleared between frames; the guiWindowContent
     /// dispatch overwrites per-window data each frame. Stale entries serve
     /// as fallback to prevent blank viewport flashes.
     var windowContents: [UInt16: GUIWindowContent] = [:]
 
-    /// Prepares for a new frame.
-    ///
-    /// Note: `windowContents` is intentionally NOT cleared here.
-    /// The `guiWindowContent` dispatch overwrites per-window data each
-    /// frame. Keeping stale content as fallback prevents a blank viewport
-    /// flash if frame delivery is interrupted (defense-in-depth alongside
-    /// the atomic Metal frame bundling on the BEAM side).
-    func beginFrame() {
-        // No-op: all per-frame state is overwritten by incoming commands.
-        // Previously cleared windowContents here, but that caused blank
-        // frames when vsync fired between clear and content arrival.
-    }
 }

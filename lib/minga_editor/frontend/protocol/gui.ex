@@ -145,10 +145,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @op_gui_tab_bar Opcodes.gui_tab_bar()
   @op_gui_which_key Opcodes.gui_which_key()
   @op_gui_theme Opcodes.gui_theme()
-  @op_gui_breadcrumb Opcodes.gui_breadcrumb()
   @op_gui_status_bar Opcodes.gui_status_bar()
-  @op_gui_picker Opcodes.gui_picker()
-  @op_gui_picker_preview Opcodes.gui_picker_preview()
   @op_gui_tool_manager Opcodes.gui_tool_manager()
   @op_gui_minibuffer Opcodes.gui_minibuffer()
   @op_clipboard_write Opcodes.clipboard_write()
@@ -159,7 +156,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @op_gui_hover_popup Opcodes.gui_hover_popup()
   @op_gui_signature_help Opcodes.gui_signature_help()
   @op_gui_float_popup Opcodes.gui_float_popup()
-  @op_gui_git_status Opcodes.gui_git_status()
   @op_gui_workspaces Opcodes.gui_workspaces()
   @op_gui_hover_action Opcodes.gui_hover_action()
   @op_gui_config_state Opcodes.gui_config_state()
@@ -293,14 +289,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @section_modeline_segments 0x0B
   @section_selection 0x0C
   @section_workspace 0x0D
-
-  # gui_picker sections
-  @section_picker_header 0x01
-  @section_picker_query 0x02
-  @section_picker_items 0x03
-  @section_picker_action_menu 0x04
-  @section_picker_mode_prefix 0x05
-  @section_picker_load_status 0x06
 
   @value_boolean 0x01
   @value_integer 0x02
@@ -1795,22 +1783,11 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   end
 
   # ── Breadcrumb ──
-
-  @doc "Encodes a gui_breadcrumb command."
-  @spec encode_gui_breadcrumb(String.t() | nil, String.t()) :: binary()
-  def encode_gui_breadcrumb(nil, _root), do: <<@op_gui_breadcrumb, 0::8>>
-
-  def encode_gui_breadcrumb(file_path, root) do
-    segments = file_path |> Path.relative_to(root) |> Path.split()
-
-    entries =
-      Enum.map(segments, fn seg ->
-        seg_bytes = :erlang.iolist_to_binary([seg])
-        <<byte_size(seg_bytes)::16, seg_bytes::binary>>
-      end)
-
-    IO.iodata_to_binary([@op_gui_breadcrumb, <<length(segments)::8>> | entries])
-  end
+  #
+  # The gui_breadcrumb parity oracle (encode_gui_breadcrumb/2) was removed once
+  # the production BreadcrumbEncoder migrated to the schema-generated codec
+  # (#2225): the cross-language golden tests now prove byte-exactness, which is
+  # the only role this oracle served.
 
   # ── Section encoding helper ──
 
@@ -2172,218 +2149,12 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   defp encode_agent_session_status(_), do: 0
 
   # ── Picker ──
-
-  @doc """
-  Encodes a gui_picker command.
-
-  Wire format (sectioned):
-  ```
-  opcode(1) + section_count(1) + sections...
-
-  Each section:
-    section_id(1) + payload_len(2) + payload(payload_len)
-
-  Header section 0x01 payload:
-    visible(1) + selected_index(2) + filtered_count(2) + total_count(2)
-    + has_preview(1) + title_len(2) + title(title_len)
-
-  Query section 0x02 payload:
-    query_len(2) + query(query_len)
-
-  Items section 0x03 payload:
-    item_count(2) + items...
-
-  Per item:
-    icon_color(3) + flags(1) + label_len(2) + label + desc_len(2) + desc
-    + annotation_len(2) + annotation + match_pos_count(1) + match_positions(each 2 bytes)
-
-  ActionMenu section 0x04 payload:
-    action_visible(1)
-    When action_visible == 1:
-      selected_action(1) + action_count(1) + actions...
-      Per action: name_len(2) + name(name_len)
-
-  ModePrefix section 0x05 payload:
-    mode_prefix_len(2) + mode_prefix(mode_prefix_len)
-
-  LoadStatus section 0x06 payload:
-    status(1): 0=ready, 1=loading, 2=error
-    When status == 2:
-      error_len(2) + error_message(error_len)
-
-  Flags bits:
-    bit 0: two_line (file-style two-line layout)
-    bit 1: marked (multi-select checkmark)
-  ```
-  """
-  @typedoc "Action menu state: `{actions, selected_index}` or nil."
-  @type action_menu_state ::
-          {[{String.t(), term()}], non_neg_integer()} | nil
-
-  @spec encode_gui_picker(
-          MingaEditor.UI.Picker.t() | nil,
-          boolean(),
-          action_menu_state(),
-          non_neg_integer(),
-          String.t(),
-          MingaEditor.State.Picker.load_status()
-        ) ::
-          binary()
-  def encode_gui_picker(
-        picker,
-        has_preview \\ false,
-        action_menu \\ nil,
-        max_items \\ 0,
-        mode_prefix \\ "",
-        load_status \\ :ready
-      )
-
-  def encode_gui_picker(nil, _has_preview, _action_menu, _max_items, _mode_prefix, _load_status),
-    do: <<@op_gui_picker, 0::8>>
-
-  def encode_gui_picker(
-        %MingaEditor.UI.Picker{} = picker,
-        has_preview,
-        action_menu,
-        max_items,
-        mode_prefix,
-        load_status
-      ) do
-    limit = if max_items > 0, do: max_items, else: picker.max_visible
-    items = Enum.take(picker.filtered, limit)
-    title_bytes = :erlang.iolist_to_binary([picker.title])
-    query_bytes = :erlang.iolist_to_binary([picker.query])
-    mode_prefix_bytes = :erlang.iolist_to_binary([mode_prefix])
-    filtered_count = length(picker.filtered)
-    total_count = length(picker.items)
-    marked_count = MingaEditor.UI.Picker.marked_count(picker)
-    has_preview_byte = if has_preview, do: 1, else: 0
-
-    entries =
-      Enum.map(items, fn item ->
-        label_bytes = :erlang.iolist_to_binary([item.label])
-        desc_bytes = :erlang.iolist_to_binary([item.description || ""])
-        annotation_bytes = :erlang.iolist_to_binary([item.annotation || ""])
-        icon_color = item.icon_color || 0
-
-        flags = encode_picker_item_flags(item, picker)
-
-        positions = item.match_positions
-        pos_count = min(length(positions), 255)
-
-        pos_bytes =
-          Enum.take(positions, pos_count) |> Enum.map(&<<&1::16>>) |> IO.iodata_to_binary()
-
-        <<icon_color::24, flags::8, byte_size(label_bytes)::16, label_bytes::binary,
-          byte_size(desc_bytes)::16, desc_bytes::binary, byte_size(annotation_bytes)::16,
-          annotation_bytes::binary, pos_count::8, pos_bytes::binary>>
-      end)
-
-    items_payload = IO.iodata_to_binary([<<length(items)::16>> | entries])
-    action_menu_bytes = encode_picker_action_menu(action_menu)
-
-    # Header payload includes visibility, counts, preview flag, title, and marked_count.
-    sections = [
-      encode_section(
-        @section_picker_header,
-        <<1::8, picker.selected::16, filtered_count::16, total_count::16, has_preview_byte::8,
-          byte_size(title_bytes)::16, title_bytes::binary, marked_count::16>>
-      ),
-      encode_section(@section_picker_query, <<byte_size(query_bytes)::16, query_bytes::binary>>),
-      encode_section(@section_picker_items, items_payload),
-      encode_section(@section_picker_action_menu, action_menu_bytes),
-      encode_section(
-        @section_picker_mode_prefix,
-        <<byte_size(mode_prefix_bytes)::16, mode_prefix_bytes::binary>>
-      ),
-      encode_section(@section_picker_load_status, encode_load_status(load_status))
-    ]
-
-    IO.iodata_to_binary([<<@op_gui_picker, length(sections)::8>> | sections])
-  end
-
-  @spec encode_picker_action_menu(action_menu_state()) :: binary()
-  defp encode_picker_action_menu(nil), do: <<0::8>>
-
-  defp encode_picker_action_menu({actions, selected}) do
-    action_bins =
-      Enum.map(actions, fn {name, _id} ->
-        name_bytes = :erlang.iolist_to_binary([name])
-        <<byte_size(name_bytes)::16, name_bytes::binary>>
-      end)
-
-    IO.iodata_to_binary([
-      <<1::8, selected::8, length(actions)::8>>,
-      action_bins
-    ])
-  end
-
-  @spec encode_picker_item_flags(MingaEditor.UI.Picker.Item.t(), MingaEditor.UI.Picker.t()) ::
-          non_neg_integer()
-  defp encode_picker_item_flags(item, picker) do
-    two_line = if item.two_line, do: 1, else: 0
-    marked = if MingaEditor.UI.Picker.marked?(picker, item), do: 1, else: 0
-    bor(two_line, marked <<< 1)
-  end
-
-  @spec encode_load_status(MingaEditor.State.Picker.load_status()) :: binary()
-  defp encode_load_status(:ready), do: <<0::8>>
-  defp encode_load_status(:loading), do: <<1::8>>
-
-  defp encode_load_status({:error, reason}) do
-    <<2::8, byte_size(reason)::16, reason::binary>>
-  end
-
-  # ── Picker preview ──
-
-  @typedoc "A styled text segment for preview content: {text, fg_color, bold?}."
-  @type preview_segment :: {String.t(), non_neg_integer(), boolean()}
-
-  @doc """
-  Encodes a gui_picker_preview command.
-
-  Wire format:
-  ```
-  opcode(1) + visible(1)
-
-  When visible:
-    opcode(1) + 1(1) + line_count(2) + lines...
-
-  Per line:
-    segment_count(1) + segments...
-
-  Per segment:
-    fg_color(3) + flags(1) + text_len(2) + text
-
-  Flags bits:
-    bit 0: bold
-  ```
-  """
-  @spec encode_gui_picker_preview([[preview_segment()]] | nil) :: binary()
-  def encode_gui_picker_preview(nil), do: <<@op_gui_picker_preview, 0::8>>
-
-  def encode_gui_picker_preview(lines) when is_list(lines) do
-    line_binaries = Enum.map(lines, &encode_preview_line/1)
-
-    IO.iodata_to_binary([
-      @op_gui_picker_preview,
-      <<1::8, length(lines)::16>>
-      | line_binaries
-    ])
-  end
-
-  @spec encode_preview_line([preview_segment()]) :: iodata()
-  defp encode_preview_line(segments) do
-    seg_bins = Enum.map(segments, &encode_preview_segment/1)
-    [<<length(segments)::8>> | seg_bins]
-  end
-
-  @spec encode_preview_segment(preview_segment()) :: binary()
-  defp encode_preview_segment({text, fg_color, bold}) do
-    text_bytes = :erlang.iolist_to_binary([text])
-    flags = if bold, do: 1, else: 0
-    <<fg_color::24, flags::8, byte_size(text_bytes)::16, text_bytes::binary>>
-  end
+  #
+  # The gui_picker and gui_picker_preview parity oracles (encode_gui_picker/6,
+  # encode_gui_picker_preview/1, and their private section/flag/load-status
+  # helpers) were removed once the production PickerEncoder migrated to the
+  # schema-generated codec (#2225): the cross-language golden tests now prove
+  # byte-exactness, which is the only role these oracles served.
 
   @spec utf8_prefix_bytes(String.t(), non_neg_integer()) :: binary()
   defp utf8_prefix_bytes(text, max_bytes) when byte_size(text) <= max_bytes do
@@ -3385,6 +3156,18 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   defp notification_level_byte(:progress), do: 4
 
   # ── Git status panel (0x85) ──
+  #
+  # The gui_git_status parity oracle (encode_gui_git_status/1, its repo-state/
+  # section/status/toast encode helpers, and the encode-only git_status_data/
+  # git_status_panel_data types) was removed once the production GitStatusEncoder
+  # migrated to the schema-generated codec (#2225): the cross-language golden
+  # tests now prove byte-exactness, which is the only role this oracle served.
+  # The git_status decode path (decode_gui_action) and the file_tree row's
+  # encode_git_status/1 helper are unrelated and remain.
+  #
+  # The git_toast/git_toast_action types stay: they are the canonical shape for
+  # git toast data carried by the production emit context and traditional shell
+  # state, not an artifact of the deleted oracle.
 
   @typedoc "Git toast action for error recovery."
   @type git_toast_action :: :pull_and_retry | nil
@@ -3396,138 +3179,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           required(:action) => git_toast_action(),
           optional(:dismiss_ref) => reference()
         }
-
-  @typedoc "Base git status data stored on the panel (without emit-time fields)."
-  @type git_status_panel_data :: %{
-          repo_state: :normal | :not_a_repo | :loading,
-          branch: String.t(),
-          ahead: non_neg_integer(),
-          behind: non_neg_integer(),
-          entries: [Minga.Git.StatusEntry.t()],
-          entry_base_path: String.t(),
-          last_commit_message: String.t(),
-          stash_count: non_neg_integer()
-        }
-
-  @typedoc "Git status data enriched with syncing/toast for protocol encoding."
-  @type git_status_data :: %{
-          repo_state: :normal | :not_a_repo | :loading,
-          syncing: boolean(),
-          branch: String.t(),
-          ahead: non_neg_integer(),
-          behind: non_neg_integer(),
-          entries: [Minga.Git.StatusEntry.t()],
-          entry_base_path: String.t(),
-          last_commit_message: String.t(),
-          stash_count: non_neg_integer(),
-          git_toast: git_toast() | nil
-        }
-
-  @doc """
-  Encodes a gui_git_status command (0x85) for the native GUI frontend.
-
-  Wire format:
-    opcode:1, repo_state:1, syncing:1, ahead:2, behind:2, branch_len:2, branch,
-    entry_count:2, then per entry:
-      path_hash:4, section:1, status:1, path_len:2, path
-    then toast section:
-      toast_present:1, [toast_level:1, action:1, msg_len:2, msg]
-    then repo metadata:
-      entry_base_path_len:2, entry_base_path, last_commit_message_len:2, last_commit_message,
-      stash_count:2
-  """
-  @spec encode_gui_git_status(git_status_data()) :: binary()
-  def encode_gui_git_status(
-        %{
-          repo_state: repo_state,
-          syncing: syncing,
-          branch: branch,
-          ahead: ahead,
-          behind: behind,
-          entries: entries
-        } = data
-      ) do
-    repo_state_byte = encode_repo_state(repo_state)
-    syncing_byte = bool_to_byte(syncing)
-    branch_bytes = :erlang.iolist_to_binary([branch || ""])
-    entry_count = length(entries)
-
-    entry_binaries =
-      Enum.map(entries, fn entry ->
-        path_bytes = :erlang.iolist_to_binary([entry.path])
-        path_hash = :erlang.phash2(entry.path, 0xFFFFFFFF)
-        section = encode_status_section(entry)
-        status = encode_file_status(entry.status)
-
-        <<path_hash::32, section::8, status::8, byte_size(path_bytes)::16, path_bytes::binary>>
-      end)
-
-    toast_binary = encode_git_toast(Map.get(data, :git_toast))
-
-    entry_base_path_bytes =
-      utf8_prefix_bytes(
-        Map.get(data, :entry_base_path) || Map.get(data, :git_root) || "",
-        @max_u16
-      )
-
-    last_commit_message_bytes =
-      utf8_prefix_bytes(Map.get(data, :last_commit_message) || "", @max_u16)
-
-    stash_count = min(Map.get(data, :stash_count, 0), @max_u16)
-
-    IO.iodata_to_binary([
-      <<@op_gui_git_status, repo_state_byte::8, syncing_byte::8, ahead::16, behind::16,
-        byte_size(branch_bytes)::16, branch_bytes::binary, entry_count::16>>,
-      entry_binaries,
-      toast_binary,
-      <<byte_size(entry_base_path_bytes)::16, entry_base_path_bytes::binary,
-        byte_size(last_commit_message_bytes)::16, last_commit_message_bytes::binary,
-        stash_count::16>>
-    ])
-  end
-
-  @spec bool_to_byte(boolean()) :: 0 | 1
-  defp bool_to_byte(true), do: 1
-  defp bool_to_byte(false), do: 0
-
-  @spec encode_git_toast(git_toast() | nil) :: binary()
-  defp encode_git_toast(nil), do: <<0::8>>
-
-  defp encode_git_toast(%{message: message, level: level, action: action}) do
-    level_byte = encode_toast_level(level)
-    action_byte = encode_toast_action(action)
-    msg_bytes = :erlang.iolist_to_binary([message])
-    <<1::8, level_byte::8, action_byte::8, byte_size(msg_bytes)::16, msg_bytes::binary>>
-  end
-
-  @spec encode_toast_level(:success | :error) :: non_neg_integer()
-  defp encode_toast_level(:success), do: 0
-  defp encode_toast_level(:error), do: 1
-
-  @spec encode_toast_action(git_toast_action()) :: non_neg_integer()
-  defp encode_toast_action(nil), do: 0
-  defp encode_toast_action(:pull_and_retry), do: 1
-
-  @spec encode_repo_state(:normal | :not_a_repo | :loading) :: non_neg_integer()
-  defp encode_repo_state(:normal), do: 0
-  defp encode_repo_state(:not_a_repo), do: 1
-  defp encode_repo_state(:loading), do: 2
-
-  @spec encode_status_section(Minga.Git.StatusEntry.t()) :: non_neg_integer()
-  defp encode_status_section(%{staged: true}), do: 0
-  defp encode_status_section(%{status: :untracked}), do: 2
-  defp encode_status_section(%{status: :conflict}), do: 3
-  defp encode_status_section(_), do: 1
-
-  @spec encode_file_status(atom()) :: non_neg_integer()
-  defp encode_file_status(:modified), do: 1
-  defp encode_file_status(:added), do: 2
-  defp encode_file_status(:deleted), do: 3
-  defp encode_file_status(:renamed), do: 4
-  defp encode_file_status(:copied), do: 5
-  defp encode_file_status(:untracked), do: 6
-  defp encode_file_status(:conflict), do: 7
-  defp encode_file_status(:unknown), do: 0
 
   # ── Shared encoding helpers for hover/overlay content ──
 
