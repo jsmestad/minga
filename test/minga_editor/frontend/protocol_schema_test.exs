@@ -57,21 +57,13 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
     )
   end
 
-  test "render opcodes match schema", %{schema: schema} do
+  test "render opcodes match schema (cell-paradigm opcodes retired in v2)", %{schema: schema} do
     assert_opcodes(schema, "render",
-      draw_text: 0x10,
-      set_cursor: 0x11,
-      clear: 0x12,
       batch_end: 0x13,
-      define_region: 0x14,
       set_cursor_shape: 0x15,
       set_title: 0x16,
       set_window_bg: 0x17,
-      clear_region: 0x18,
-      destroy_region: 0x19,
-      set_active_region: 0x1A,
-      scroll_region: 0x1B,
-      draw_styled_text: 0x1C
+      protocol_error: 0x18
     )
   end
 

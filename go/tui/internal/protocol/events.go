@@ -56,6 +56,9 @@ func EncodeReady(width, height uint16) []byte {
 		0, // float_support: emulated
 		0, // text_rendering: monospace
 		1, // semantic_ui: true
+		// protocol_version (u16): the wire contract this frontend was generated
+		// against. The BEAM rejects a mismatch with an explicit protocol_error.
+		byte(generated.ProtocolVersion >> 8), byte(generated.ProtocolVersion),
 	}
 }
 

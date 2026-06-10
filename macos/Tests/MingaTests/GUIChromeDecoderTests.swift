@@ -2760,47 +2760,6 @@ struct GUIHoverPopupDecoderTests {
     }
 }
 
-// MARK: - draw_styled_text (0x1C)
-
-@Suite("Draw Styled Text Decoder")
-struct DrawStyledTextDecoderTests {
-    @Test("Decode draw_styled_text with all attributes")
-    func decodeStyledText() throws {
-        var data = Data()
-        data.append(OP_DRAW_STYLED_TEXT)
-        appendU16(&data, 5) // row
-        appendU16(&data, 10) // col
-        appendRGB(&data, 0xFF, 0x6C, 0x6B) // fg
-        appendRGB(&data, 0x28, 0x2C, 0x34) // bg
-        // attrs16: bold(0x01) + underline(0x04) + curl style(1) at bits 5-7
-        let attrs16: UInt16 = 0x05 | (1 << 5)  // bold + underline + curl style
-        data.append(UInt8(attrs16 >> 8))
-        data.append(UInt8(attrs16 & 0xFF))
-        appendRGB(&data, 0xFF, 0x00, 0x00) // underlineColor
-        data.append(128) // blend
-        data.append(5) // fontWeight = bold
-        data.append(2) // fontId
-        appendString16(&data, "hello world")
-
-        let (cmd, size) = try decodeCommand(data: data, offset: 0)
-        #expect(size == data.count)
-
-        guard case .drawStyledText(let row, let col, let fg, let bg, let attrs, let underlineColor, let blend, let fontWeight, let fontId, let text) = cmd else {
-            Issue.record("Expected .drawStyledText"); return
-        }
-
-        #expect(row == 5)
-        #expect(col == 10)
-        #expect(fg == 0xFF6C6B)
-        #expect(bg == 0x282C34)
-        #expect(attrs == attrs16)
-        #expect(underlineColor == 0xFF0000)
-        #expect(blend == 128)
-        #expect(fontWeight == 5)
-        #expect(fontId == 2)
-        #expect(text == "hello world")
-    }
-}
 
 // MARK: - gui_git_status (0x85)
 

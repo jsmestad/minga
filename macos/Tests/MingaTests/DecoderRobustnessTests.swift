@@ -23,7 +23,7 @@ struct DecoderEmptyInputTests {
 
     @Test("Offset past end throws insufficientData")
     func offsetPastEnd() {
-        let data = Data([OP_CLEAR])
+        let data = Data([OP_BATCH_END])
         #expect(throws: ProtocolDecodeError.self) {
             try decodeCommand(data: data, offset: 5)
         }
@@ -43,65 +43,10 @@ struct DecoderEmptyInputTests {
 @Suite("Decoder Robustness: Truncated Basic Commands")
 struct DecoderTruncatedBasicTests {
 
-    @Test("set_cursor truncated (only 3 bytes instead of 5)")
-    func truncatedSetCursor() {
-        let data = Data([OP_SET_CURSOR, 0x00, 0x05]) // missing col bytes
-        #expect(throws: ProtocolDecodeError.self) {
-            try decodeCommand(data: data, offset: 0)
-        }
-    }
-
-    @Test("draw_text truncated header")
-    func truncatedDrawTextHeader() {
-        // draw_text needs 13 bytes after opcode; provide only 5
-        let data = Data([OP_DRAW_TEXT, 0x00, 0x01, 0x00, 0x02, 0xFF])
-        #expect(throws: ProtocolDecodeError.self) {
-            try decodeCommand(data: data, offset: 0)
-        }
-    }
-
-    @Test("draw_text truncated text body")
-    func truncatedDrawTextBody() {
-        // Header says text_len=10 but only 3 bytes of text follow
-        var data = Data()
-        data.append(OP_DRAW_TEXT)
-        data.append(contentsOf: [0x00, 0x00]) // row
-        data.append(contentsOf: [0x00, 0x00]) // col
-        data.append(contentsOf: [0xFF, 0x00, 0x00]) // fg
-        data.append(contentsOf: [0x00, 0x00, 0x00]) // bg
-        data.append(0x00) // attrs
-        data.append(contentsOf: [0x00, 0x0A]) // text_len=10
-        data.append(contentsOf: "Hi".utf8) // only 2 bytes, not 10
-
-        #expect(throws: ProtocolDecodeError.self) {
-            try decodeCommand(data: data, offset: 0)
-        }
-    }
-
-    @Test("draw_styled_text truncated header")
-    func truncatedDrawStyledText() {
-        // Needs 20 bytes after opcode; provide only 10
-        var data = Data([OP_DRAW_STYLED_TEXT])
-        data.append(contentsOf: Array(repeating: UInt8(0), count: 10))
-        #expect(throws: ProtocolDecodeError.self) {
-            try decodeCommand(data: data, offset: 0)
-        }
-    }
-
     @Test("set_title truncated (length prefix but no text)")
     func truncatedSetTitle() {
         var data = Data([OP_SET_TITLE])
         data.append(contentsOf: [0x00, 0x10]) // title_len=16 but no text
-        #expect(throws: ProtocolDecodeError.self) {
-            try decodeCommand(data: data, offset: 0)
-        }
-    }
-
-    @Test("define_region truncated")
-    func truncatedDefineRegion() {
-        // Needs 14 bytes after opcode; provide only 5
-        var data = Data([OP_DEFINE_REGION])
-        data.append(contentsOf: Array(repeating: UInt8(0), count: 5))
         #expect(throws: ProtocolDecodeError.self) {
             try decodeCommand(data: data, offset: 0)
         }
@@ -395,14 +340,15 @@ struct DecoderForwardCompatTests {
 
     @Test("Unknown opcode skipped, subsequent commands decoded correctly")
     func skipThenDecode() throws {
-        // Build a batch: unknown 0xFE (5-byte payload) + clear + batch_end
+        // Build a batch: unknown 0xFE (5-byte payload) + set_cursor_shape + batch_end
         var data = Data()
         // Unknown opcode
         data.append(0xFE)
         data.append(contentsOf: [0x00, 0x05]) // payload_length = 5
         data.append(contentsOf: [0x01, 0x02, 0x03, 0x04, 0x05]) // 5 bytes of payload
         // Known commands that follow
-        data.append(OP_CLEAR)
+        data.append(OP_SET_CURSOR_SHAPE)
+        data.append(CURSOR_BLOCK)
         data.append(OP_BATCH_END)
         data.append(contentsOf: [0, 0, 0, 0]) // batch_end echoed seq (fixed:5, #2215)
 
@@ -410,10 +356,10 @@ struct DecoderForwardCompatTests {
         try decodeCommands(from: data) { cmd in
             commands.append(cmd)
         }
-        // The unknown opcode is skipped (nil), so only clear and batchEnd are collected
+        // The unknown opcode is skipped (nil), so only set_cursor_shape and batchEnd are collected
         #expect(commands.count == 2)
-        guard case .clear = commands[0] else {
-            Issue.record("Expected .clear after skipped opcode"); return
+        guard case .setCursorShape = commands[0] else {
+            Issue.record("Expected .setCursorShape after skipped opcode"); return
         }
         guard case .batchEnd = commands[1] else {
             Issue.record("Expected .batchEnd"); return
@@ -442,15 +388,16 @@ struct DecoderForwardCompatTests {
         data.append(0xFC)
         data.append(contentsOf: [0x00, 0x00])
         // Known command
-        data.append(OP_CLEAR)
+        data.append(OP_SET_CURSOR_SHAPE)
+        data.append(CURSOR_BLOCK)
 
         var commands: [RenderCommand] = []
         try decodeCommands(from: data) { cmd in
             commands.append(cmd)
         }
         #expect(commands.count == 1)
-        guard case .clear = commands[0] else {
-            Issue.record("Expected .clear"); return
+        guard case .setCursorShape = commands[0] else {
+            Issue.record("Expected .setCursorShape"); return
         }
     }
 
@@ -535,12 +482,12 @@ struct DecoderEdgeCaseTests {
         }
     }
 
-    @Test("Single-byte commands at end of buffer don't over-read")
-    func singleByteAtEnd() throws {
-        let (cmd, size) = try decodeCommand(data: Data([OP_CLEAR]), offset: 0)
-        #expect(size == 1)
-        guard case .clear = cmd else {
-            Issue.record("Expected .clear"); return
+    @Test("Small fixed-size command at end of buffer doesn't over-read")
+    func smallFixedAtEnd() throws {
+        let (cmd, size) = try decodeCommand(data: Data([OP_SET_CURSOR_SHAPE, CURSOR_BLOCK]), offset: 0)
+        #expect(size == 2)
+        guard case .setCursorShape = cmd else {
+            Issue.record("Expected .setCursorShape"); return
         }
     }
 
@@ -555,7 +502,8 @@ struct DecoderEdgeCaseTests {
     @Test("decodeCommands stops cleanly at end of valid multi-command payload")
     func multiCommandStopsCleanly() throws {
         var data = Data()
-        data.append(OP_CLEAR)
+        data.append(OP_SET_CURSOR_SHAPE)
+        data.append(CURSOR_BLOCK)
         data.append(OP_BATCH_END)
         data.append(contentsOf: [0, 0, 0, 0]) // batch_end echoed seq (fixed:5, #2215)
 

@@ -362,12 +362,12 @@ struct WindowContentDecoderTests {
         data.append(contentsOf: [0x00, 0x03]) // cursor_row
         data.append(contentsOf: [0x00, 0x07]) // cursor_col
         data.append(0x01) // beam
-        data.append(OP_CLEAR) // next opcode proves consumed size stays aligned
+        data.append(OP_BATCH_END) // next opcode proves consumed size stays aligned
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
 
         #expect(size == 13)
-        #expect(data[size] == OP_CLEAR)
+        #expect(data[size] == OP_BATCH_END)
         guard case .guiWindowOverlayDelta(let delta) = cmd else {
             Issue.record("Expected .guiWindowOverlayDelta"); return
         }

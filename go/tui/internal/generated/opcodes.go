@@ -2,6 +2,10 @@
 
 package generated
 
+// ProtocolVersion is the wire-contract version the frontend exchanges with
+// the BEAM in the ready handshake. A mismatch yields an explicit protocol_error.
+const ProtocolVersion uint16 = 2
+
 const (
 	// Input
 	OPKeyPress            byte = 0x01
@@ -14,19 +18,11 @@ const (
 	OPLogMessage          byte = 0x60
 
 	// Render
-	OPDrawText        byte = 0x10
-	OPSetCursor       byte = 0x11
-	OPClear           byte = 0x12
-	OPBatchEnd        byte = 0x13
-	OPDefineRegion    byte = 0x14
-	OPSetCursorShape  byte = 0x15
-	OPSetTitle        byte = 0x16
-	OPSetWindowBg     byte = 0x17
-	OPClearRegion     byte = 0x18
-	OPDestroyRegion   byte = 0x19
-	OPSetActiveRegion byte = 0x1A
-	OPScrollRegion    byte = 0x1B
-	OPDrawStyledText  byte = 0x1C
+	OPBatchEnd       byte = 0x13
+	OPSetCursorShape byte = 0x15
+	OPSetTitle       byte = 0x16
+	OPSetWindowBg    byte = 0x17
+	OPProtocolError  byte = 0x18
 
 	// Config
 	OPSetFont         byte = 0x50

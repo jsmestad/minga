@@ -40,8 +40,8 @@ struct EncoderDisconnectTests {
         pipe.fileHandleForWriting.closeFile()
         let raw = pipe.fileHandleForReading.readDataToEndOfFile()
 
-        // Only the ready frame should have been written (14 bytes payload + 4 length).
-        #expect(raw.count == 18)
+        // Only the ready frame should have been written (16 bytes payload + 4 length).
+        #expect(raw.count == 20)
     }
 
     @Test("disconnect() is idempotent")

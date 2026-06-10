@@ -894,5 +894,15 @@ struct ContentView: View {
             StartupOverlay()
                 .transition(.opacity)
         }
+
+        // Protocol error overlay: blocks the whole window when the BEAM rejects
+        // this frontend's handshake protocol_version (0x18). Highest z-order so
+        // it takes precedence over the startup overlay and all content.
+        if appState.gui.protocolErrorState.isPresented {
+            ProtocolErrorOverlay(
+                state: appState.gui.protocolErrorState,
+                theme: appState.gui.themeColors
+            )
+        }
     }
 }

@@ -167,22 +167,22 @@ struct FrontendExtensionRuntimeMessage: Sendable, Equatable {
 
 /// A decoded render command from the BEAM.
 enum RenderCommand: Sendable {
-    case clear
     /// Frame boundary carrying the echoed input correlation sequence (ticket
     /// #2215). 0 means "no correlation".
+    ///
+    /// The cell-paradigm render commands (clear, draw_text, draw_styled_text,
+    /// set_cursor, and the region commands) were retired in protocol_version 2;
+    /// all content now flows through gui_window_content (0x80) and the dedicated
+    /// gui_* semantic opcodes.
     case batchEnd(seq: UInt32)
-    /// Legacy cell-grid text commands. Decoded but discarded by CommandDispatcher.
-    /// Kept in the enum so the decoder can skip the bytes without crashing.
-    case drawText(row: UInt16, col: UInt16, fg: UInt32, bg: UInt32, attrs: UInt8, text: String)
-    case drawStyledText(row: UInt16, col: UInt16, fg: UInt32, bg: UInt32, attrs: UInt16, underlineColor: UInt32, blend: UInt8, fontWeight: UInt8, fontId: UInt8, text: String)
-    case setCursor(row: UInt16, col: UInt16)
     case setCursorShape(CursorShape)
     case setTitle(String)
     case setWindowBg(r: UInt8, g: UInt8, b: UInt8)
-    case defineRegion(id: UInt16, parentId: UInt16, role: UInt8, row: UInt16, col: UInt16, width: UInt16, height: UInt16, zOrder: UInt8)
-    case clearRegion(id: UInt16)
-    case destroyRegion(id: UInt16)
-    case setActiveRegion(id: UInt16)
+    /// protocol_error (0x18): the BEAM rejected this frontend's handshake
+    /// protocol_version, so it carries a UTF-8 reason the frontend shows as a
+    /// blocking error instead of decoding a stream it cannot parse (ticket
+    /// #2237). Wire format: opcode(1) + len(u16) + UTF-8 message.
+    case protocolError(message: String)
     case setFont(family: String, size: UInt16, ligatures: Bool, weight: UInt8)
     case setFontFallback(families: [String])
     case registerFont(id: UInt8, family: String)
@@ -361,53 +361,12 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         guard data.count >= rest + 17 else { throw ProtocolDecodeError.malformed }
         return (nil, 18)
 
-    case OP_CLEAR:
-        return (.clear, 1)
-
     case OP_BATCH_END:
         // batch_end now carries a u32 echoed input correlation sequence
         // (ticket #2215): <opcode, seq:u32>.
         guard data.count >= rest + 4 else { throw ProtocolDecodeError.malformed }
         let seq = readU32(data, rest)
         return (.batchEnd(seq: seq), 5)
-
-    case OP_DRAW_TEXT:
-        // row:2, col:2, fg:3, bg:3, attrs:1, text_len:2 = 13 bytes after opcode
-        guard data.count >= rest + 13 else { throw ProtocolDecodeError.malformed }
-        let row = readU16(data, rest)
-        let col = readU16(data, rest + 2)
-        let fg = readU24(data, rest + 4)
-        let bg = readU24(data, rest + 7)
-        let attrs = data[rest + 10]
-        let textLen = Int(readU16(data, rest + 11))
-        guard data.count >= rest + 13 + textLen else { throw ProtocolDecodeError.malformed }
-        let textData = data[(rest + 13)..<(rest + 13 + textLen)]
-        let text = String(data: textData, encoding: .utf8) ?? ""
-        return (.drawText(row: row, col: col, fg: fg, bg: bg, attrs: attrs, text: text), 1 + 13 + textLen)
-
-    case OP_DRAW_STYLED_TEXT:
-        // row:2, col:2, fg:3, bg:3, attrs:2(16-bit), ul_color:3, blend:1, font_weight:1, font_id:1, text_len:2 = 20 bytes after opcode
-        guard data.count >= rest + 20 else { throw ProtocolDecodeError.malformed }
-        let row = readU16(data, rest)
-        let col = readU16(data, rest + 2)
-        let fg = readU24(data, rest + 4)
-        let bg = readU24(data, rest + 7)
-        let attrs16 = UInt16(data[rest + 10]) << 8 | UInt16(data[rest + 11])
-        let ulColor = readU24(data, rest + 12)
-        let blend = data[rest + 15]
-        let fontWeight = data[rest + 16]
-        let fontId = data[rest + 17]
-        let textLen = Int(readU16(data, rest + 18))
-        guard data.count >= rest + 20 + textLen else { throw ProtocolDecodeError.malformed }
-        let textData = data[(rest + 20)..<(rest + 20 + textLen)]
-        let text = String(data: textData, encoding: .utf8) ?? ""
-        return (.drawStyledText(row: row, col: col, fg: fg, bg: bg, attrs: attrs16, underlineColor: ulColor, blend: blend, fontWeight: fontWeight, fontId: fontId, text: text), 1 + 20 + textLen)
-
-    case OP_SET_CURSOR:
-        guard data.count >= rest + 4 else { throw ProtocolDecodeError.malformed }
-        let row = readU16(data, rest)
-        let col = readU16(data, rest + 2)
-        return (.setCursor(row: row, col: col), 5)
 
     case OP_SET_CURSOR_SHAPE:
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
@@ -425,31 +384,6 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
     case OP_SET_WINDOW_BG:
         guard data.count >= rest + 3 else { throw ProtocolDecodeError.malformed }
         return (.setWindowBg(r: data[rest], g: data[rest + 1], b: data[rest + 2]), 4)
-
-    case OP_DEFINE_REGION:
-        // id:2, parent_id:2, role:1, row:2, col:2, width:2, height:2, z_order:1 = 14
-        guard data.count >= rest + 14 else { throw ProtocolDecodeError.malformed }
-        let id = readU16(data, rest)
-        let parentId = readU16(data, rest + 2)
-        let role = data[rest + 4]
-        let row = readU16(data, rest + 5)
-        let col = readU16(data, rest + 7)
-        let width = readU16(data, rest + 9)
-        let height = readU16(data, rest + 11)
-        let zOrder = data[rest + 13]
-        return (.defineRegion(id: id, parentId: parentId, role: role, row: row, col: col, width: width, height: height, zOrder: zOrder), 15)
-
-    case OP_CLEAR_REGION:
-        guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
-        return (.clearRegion(id: readU16(data, rest)), 3)
-
-    case OP_DESTROY_REGION:
-        guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
-        return (.destroyRegion(id: readU16(data, rest)), 3)
-
-    case OP_SET_ACTIVE_REGION:
-        guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
-        return (.setActiveRegion(id: readU16(data, rest)), 3)
 
     // Config commands.
     case OP_SET_FONT:
@@ -2652,6 +2586,18 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let textData = data[(payloadStart + 3)..<(payloadStart + 3 + textLen)]
         let text = String(data: textData, encoding: .utf8) ?? ""
         return (.clipboardWrite(target: target, text: text), 1 + 2 + payloadLen)
+
+    case OP_PROTOCOL_ERROR:
+        // protocol_error: opcode(1) + message_len(2) + UTF-8 message. The BEAM
+        // emits it when this frontend's handshake protocol_version does not match
+        // the BEAM's, so the frontend shows a blocking error instead of decoding
+        // a stream it cannot parse (ticket #2237).
+        guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
+        let messageLen = Int(readU16(data, rest))
+        guard data.count >= rest + 2 + messageLen else { throw ProtocolDecodeError.malformed }
+        let messageData = data[(rest + 2)..<(rest + 2 + messageLen)]
+        let message = String(data: messageData, encoding: .utf8) ?? ""
+        return (.protocolError(message: message), 1 + 2 + messageLen)
 
     default:
         // Forward-compatibility: opcodes 0x90+ use a 2-byte length prefix

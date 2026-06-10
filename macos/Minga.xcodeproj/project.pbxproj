@@ -135,6 +135,7 @@
 		5DE70D2369F1CB92DD8D5000 /* PreviewSnapshotPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E1D0E05FBEEC550591460C7 /* PreviewSnapshotPolicy.swift */; };
 		5FC076D7FA45C7F1829213AA /* GitStatusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA5F52D925D26A6D8919A0CB /* GitStatusView.swift */; };
 		5FDD7CBBCB910BDC63276AA7 /* WhichKeyState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70D5765529645C5D860576B7 /* WhichKeyState.swift */; };
+		60A665135E96BD4C179DC3BC /* ProtocolErrorState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6629A966DB0AA4903F49E756 /* ProtocolErrorState.swift */; };
 		619712AD984E8EA2ED68AE2C /* PreviewRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = D17B2A4D2BADE64E249073E1 /* PreviewRegistry.swift */; };
 		61CF67858355FFF4962D9D99 /* ThemeColorsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F086ACF8E4F305C9DDAE24FF /* ThemeColorsTests.swift */; };
 		6201A672B27F794F4B5BF19B /* NativeSidebarRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6E97CAAF19098EC60D6557B /* NativeSidebarRegistry.swift */; };
@@ -211,6 +212,7 @@
 		8B08DE7B7A01C13A28656173 /* BoardFrontendRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = D54319ABC904DA03C61A9921 /* BoardFrontendRuntime.swift */; };
 		8B836B6CADA9E21721BAD96C /* PickerState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92C0836F0D4150126F181C05 /* PickerState.swift */; };
 		8B944E100C80DFF282D25D4C /* MingaWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D02E1034A8BFBDB7E15FCE9 /* MingaWindow.swift */; };
+		8C29B80ABC5A804F27DF5C8F /* ProtocolErrorState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6629A966DB0AA4903F49E756 /* ProtocolErrorState.swift */; };
 		8C9C3976E598C7F553B003B6 /* WorkspaceHeaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 556F4CD63B4A102AB3099B54 /* WorkspaceHeaderView.swift */; };
 		8CB3E1EEDEA109F6C0183597 /* SignatureHelpState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EED42A8B64B9CDFEF37ED9D /* SignatureHelpState.swift */; };
 		8D55764B8CF042B4C48AA5D0 /* MessagesContentState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A67102D81C9E70546F1019B /* MessagesContentState.swift */; };
@@ -276,6 +278,7 @@
 		B52CC06DF924153EAA3BADBE /* SidebarHeaderButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C991989EF4CA9F705DD3F4E /* SidebarHeaderButton.swift */; };
 		B6295F0247ADE2D1D0133DCB /* ThemeColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00D6B3C68CFF37BC4303933A /* ThemeColors.swift */; };
 		B7203DF9CF85663B0A266580 /* PowerThermalPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4D576456737CFE8706B66F5 /* PowerThermalPolicy.swift */; };
+		B7680FF62DC02C916D1A3B89 /* ProtocolErrorOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 271269086D4FB1EC9FB5444D /* ProtocolErrorOverlay.swift */; };
 		B7CC10FD96E51A293C3D4920 /* WhichKeyState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70D5765529645C5D860576B7 /* WhichKeyState.swift */; };
 		B7EA51EE1C9145223251B68C /* ProtocolSemanticDecode.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = B639BCE7660087F70778E839 /* ProtocolSemanticDecode.generated.swift */; };
 		B9AC7DFF11C810A393597F9F /* WorkspaceState.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3E27B6DBF72413F1D8CBBFD /* WorkspaceState.swift */; };
@@ -337,6 +340,7 @@
 		E20D436BEA6628E24B9FFA2C /* BEAMProcessManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0EFEC421284D11AD2177113 /* BEAMProcessManager.swift */; };
 		E2BC69E1121328310B830E45 /* CachedLineTexture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C9F6C86861307AE9524E8F5 /* CachedLineTexture.swift */; };
 		E3B2DB94D802E1831C17474E /* PipelineCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EE75BA15B74A84B77B5B911 /* PipelineCache.swift */; };
+		E3D0BCCD6EF3B0AFBCD15B3B /* ProtocolErrorState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6629A966DB0AA4903F49E756 /* ProtocolErrorState.swift */; };
 		E480C69FBC5BB4A7B8474928 /* IMEComposition.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2912755A61AF5BAF6ED3A480 /* IMEComposition.swift */; };
 		E48B681F8D87180834B92C57 /* InlineEditField.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AC5F0D37085813890268537 /* InlineEditField.swift */; };
 		E4A2887CDB5EDB64080E5096 /* FrameState.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2D59D9EEB390C8DF351D595 /* FrameState.swift */; };
@@ -366,11 +370,13 @@
 		F2D5D585C99B45C63240426D /* ChangeSummaryState.swift in Sources */ = {isa = PBXBuildFile; fileRef = E22A4DA9EAA5CD1CFD71D3A8 /* ChangeSummaryState.swift */; };
 		F318B2BFA81A36DFBED83F72 /* WorkspaceHeaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 556F4CD63B4A102AB3099B54 /* WorkspaceHeaderView.swift */; };
 		F3BB64E36F257BD7FACEA5D6 /* CoreTextShaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = 48E21C30D142028698027567 /* CoreTextShaders.metal */; };
+		F4096578F8824E4D42C5B80B /* ProtocolErrorOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 271269086D4FB1EC9FB5444D /* ProtocolErrorOverlay.swift */; };
 		F560D385A1FB0A46824F7B1F /* PickerOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52F606681DE9AA9D502A42AA /* PickerOverlay.swift */; };
 		F5DA741E5CBCF22184C6C712 /* ProtocolTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08DE9CEF5C3D599B42635554 /* ProtocolTypes.swift */; };
 		F6F56719C285CB9C3EA62A57 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F5647A59C841B3C408994CC7 /* Assets.xcassets */; };
 		F73BC19318B2FB4D1BBC01CB /* SidebarHeaderButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C991989EF4CA9F705DD3F4E /* SidebarHeaderButton.swift */; };
 		F7BE488FD715F65ECA74233B /* BoardTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = F51BD8657C8C04A1278DEF83 /* BoardTypes.swift */; };
+		F901A7186D01942A7F9223D6 /* ProtocolErrorOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 271269086D4FB1EC9FB5444D /* ProtocolErrorOverlay.swift */; };
 		F99ACADC9C8BF572A3E6115F /* PreviewSnapshotPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E1D0E05FBEEC550591460C7 /* PreviewSnapshotPolicy.swift */; };
 		F9D5CBB0A577EBDB976DB406 /* BoardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14491B0CD5CB7C9361D2211A /* BoardView.swift */; };
 		F9F3F732BC6DBB9ACDD4399D /* EditorNSView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83165B89231936674C54B513 /* EditorNSView.swift */; };
@@ -414,6 +420,7 @@
 		25B93E05D6126B3BC32280CA /* ProtocolOpcodes.generated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolOpcodes.generated.swift; sourceTree = "<group>"; };
 		26134C841A15020D9C61E4F9 /* PreviewHost.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PreviewHost.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		26C02007D4036FC9C7D0FB71 /* SettingsStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStateTests.swift; sourceTree = "<group>"; };
+		271269086D4FB1EC9FB5444D /* ProtocolErrorOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolErrorOverlay.swift; sourceTree = "<group>"; };
 		2912755A61AF5BAF6ED3A480 /* IMEComposition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IMEComposition.swift; sourceTree = "<group>"; };
 		2F2E999D82FCC18364568E8B /* EditTimelineState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditTimelineState.swift; sourceTree = "<group>"; };
 		321E4E28F5F49F089CCE2E1D /* PipelineCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipelineCacheTests.swift; sourceTree = "<group>"; };
@@ -457,6 +464,7 @@
 		63BEE0084CA75E6863E479DC /* ChangeSummaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChangeSummaryView.swift; sourceTree = "<group>"; };
 		64CEFB02A774E5E8EF19029F /* MingaTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MingaTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		65B982679577E3DBD4E7A69D /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		6629A966DB0AA4903F49E756 /* ProtocolErrorState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolErrorState.swift; sourceTree = "<group>"; };
 		70D5765529645C5D860576B7 /* WhichKeyState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhichKeyState.swift; sourceTree = "<group>"; };
 		73F9A4109AB33ABF7FB441EE /* WorkspaceIconPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceIconPicker.swift; sourceTree = "<group>"; };
 		749F7E4A3595F1289002943E /* LatencyRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LatencyRecorder.swift; sourceTree = "<group>"; };
@@ -724,6 +732,8 @@
 				AB89E1589D78EC2BACA5D892 /* ObservatoryView.swift */,
 				52F606681DE9AA9D502A42AA /* PickerOverlay.swift */,
 				92C0836F0D4150126F181C05 /* PickerState.swift */,
+				271269086D4FB1EC9FB5444D /* ProtocolErrorOverlay.swift */,
+				6629A966DB0AA4903F49E756 /* ProtocolErrorState.swift */,
 				BEFD30A2572AE2608F099407 /* ScrollAccumulator.swift */,
 				BAB3FF00584DBCEDE5FF79AC /* SearchState.swift */,
 				D48E4A7CE35A41F8198B7AE4 /* SearchToolbar.swift */,
@@ -1188,6 +1198,8 @@
 				A409AE210CBAE48D4DCE47F7 /* ProtocolConstants.swift in Sources */,
 				FFA8B5D73FABC2792F4A3589 /* ProtocolDecoder.swift in Sources */,
 				BF41C04B7AF7C400A4DC1474 /* ProtocolEncoder.swift in Sources */,
+				F901A7186D01942A7F9223D6 /* ProtocolErrorOverlay.swift in Sources */,
+				E3D0BCCD6EF3B0AFBCD15B3B /* ProtocolErrorState.swift in Sources */,
 				2C176B25F957ABFA236A1F31 /* ProtocolOpcodes.generated.swift in Sources */,
 				364C48575BB95C9CA535A9C8 /* ProtocolReader.swift in Sources */,
 				CED32F817C08FC30D21E09AC /* ProtocolSemanticDecode.generated.swift in Sources */,
@@ -1309,6 +1321,8 @@
 				78644398F50FDB9206F731CB /* ProtocolConstants.swift in Sources */,
 				72CC62FDCBD531FEFE4D07DF /* ProtocolDecoder.swift in Sources */,
 				A4E838B0B19ED0B8F9CC4654 /* ProtocolEncoder.swift in Sources */,
+				F4096578F8824E4D42C5B80B /* ProtocolErrorOverlay.swift in Sources */,
+				60A665135E96BD4C179DC3BC /* ProtocolErrorState.swift in Sources */,
 				6AFA24DC3EE21023636C136A /* ProtocolOpcodes.generated.swift in Sources */,
 				4451B7F61D8FB50D964406A0 /* ProtocolReader.swift in Sources */,
 				A911CF7DE0346417471AF27A /* ProtocolSemanticDecode.generated.swift in Sources */,
@@ -1451,6 +1465,8 @@
 				7C9B7CB6670412D9F4DE60BB /* ProtocolEncoder.swift in Sources */,
 				778C6A917140005C0C0643CB /* ProtocolEncoderBinaryTests.swift in Sources */,
 				DF3B2A645C089F616B9DBD1B /* ProtocolEncoderDisconnectTests.swift in Sources */,
+				B7680FF62DC02C916D1A3B89 /* ProtocolErrorOverlay.swift in Sources */,
+				8C29B80ABC5A804F27DF5C8F /* ProtocolErrorState.swift in Sources */,
 				647346FE3161B2C2FC4A5436 /* ProtocolOpcodes.generated.swift in Sources */,
 				FA582944CD6B90BCABC13FCE /* ProtocolReader.swift in Sources */,
 				F0A2BCCA095F1CA4FBE9BE3F /* ProtocolSchemaTests.swift in Sources */,

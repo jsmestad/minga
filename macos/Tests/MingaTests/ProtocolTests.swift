@@ -68,17 +68,6 @@ private func appendConfigStateValue(_ data: inout Data, _ value: SettingValue) {
 
 @Suite("Protocol Decoder")
 struct ProtocolDecoderTests {
-    @Test("Decode clear command")
-    func decodeClear() throws {
-        let data = Data([OP_CLEAR])
-        let (cmd, size) = try decodeCommand(data: data, offset: 0)
-        #expect(size == 1)
-        guard case .clear = cmd else {
-            Issue.record("Expected .clear, got \(String(describing: cmd))")
-            return
-        }
-    }
-
     @Test("Decode batch_end command")
     func decodeBatchEnd() throws {
         // batch_end now carries a u32 echoed input correlation sequence (#2215).
@@ -92,18 +81,39 @@ struct ProtocolDecoderTests {
         #expect(seq == 0x0000_102A)
     }
 
-    @Test("Decode set_cursor command")
-    func decodeSetCursor() throws {
-        // row=5 (0x0005), col=10 (0x000A)
-        let data = Data([OP_SET_CURSOR, 0x00, 0x05, 0x00, 0x0A])
+    @Test("Decode protocol_error command")
+    func decodeProtocolError() throws {
+        let message = "protocol_version mismatch: frontend 1, beam 2"
+        let messageBytes = Array(message.utf8)
+        var data = Data([OP_PROTOCOL_ERROR, UInt8(messageBytes.count >> 8), UInt8(messageBytes.count & 0xFF)])
+        data.append(contentsOf: messageBytes)
+        // A trailing batch_end proves the len16 frame is bounded.
+        data.append(contentsOf: [OP_BATCH_END, 0, 0, 0, 0])
+
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
-        #expect(size == 5)
-        guard case .setCursor(let row, let col) = cmd else {
-            Issue.record("Expected .setCursor, got \(String(describing: cmd))")
+        #expect(size == 3 + messageBytes.count)
+        guard case .protocolError(let decoded) = cmd else {
+            Issue.record("Expected .protocolError, got \(String(describing: cmd))")
             return
         }
-        #expect(row == 5)
-        #expect(col == 10)
+        #expect(decoded == message)
+
+        // The next command must still decode from the bounded offset.
+        let (next, _) = try decodeCommand(data: data, offset: size)
+        guard case .batchEnd = next else {
+            Issue.record("Expected trailing .batchEnd, got \(String(describing: next))")
+            return
+        }
+    }
+
+    @Test("Decode protocol_error rejects truncated payloads")
+    func decodeProtocolErrorTruncated() {
+        #expect(throws: ProtocolDecodeError.self) {
+            _ = try decodeCommand(data: Data([OP_PROTOCOL_ERROR, 0x00]), offset: 0)
+        }
+        #expect(throws: ProtocolDecodeError.self) {
+            _ = try decodeCommand(data: Data([OP_PROTOCOL_ERROR, 0x00, 0x05, 0x68, 0x69]), offset: 0)
+        }
     }
 
     @Test("Decode set_cursor_shape command")
@@ -256,65 +266,14 @@ struct ProtocolDecoderTests {
         #expect(notifications[0].actions[0].label == "Show logs")
     }
 
-    @Test("Decode draw_text command")
-    func decodeDrawText() throws {
-        // row=1, col=2, fg=0xFF0000 (red), bg=0x00FF00 (green), attrs=0x01 (bold), text="Hi"
-        var data = Data()
-        data.append(OP_DRAW_TEXT)
-        data.append(contentsOf: [0x00, 0x01]) // row=1
-        data.append(contentsOf: [0x00, 0x02]) // col=2
-        data.append(contentsOf: [0xFF, 0x00, 0x00]) // fg=red
-        data.append(contentsOf: [0x00, 0xFF, 0x00]) // bg=green
-        data.append(0x01) // attrs=bold
-        data.append(contentsOf: [0x00, 0x02]) // text_len=2
-        data.append(contentsOf: "Hi".utf8)
-
-        let (cmd, size) = try decodeCommand(data: data, offset: 0)
-        #expect(size == 16) // 1 + 13 + 2
-        guard case .drawText(let row, let col, let fg, let bg, let attrs, let text) = cmd else {
-            Issue.record("Expected .drawText, got \(String(describing: cmd))")
-            return
-        }
-        #expect(row == 1)
-        #expect(col == 2)
-        #expect(fg == 0xFF0000)
-        #expect(bg == 0x00FF00)
-        #expect(attrs == 0x01)
-        #expect(text == "Hi")
-    }
-
-    @Test("Decode define_region command")
-    func decodeDefineRegion() throws {
-        var data = Data()
-        data.append(OP_DEFINE_REGION)
-        data.append(contentsOf: [0x00, 0x64]) // id=100
-        data.append(contentsOf: [0x00, 0x00]) // parent_id=0
-        data.append(0x01) // role=1
-        data.append(contentsOf: [0x00, 0x02]) // row=2
-        data.append(contentsOf: [0x00, 0x03]) // col=3
-        data.append(contentsOf: [0x00, 0x50]) // width=80
-        data.append(contentsOf: [0x00, 0x18]) // height=24
-        data.append(0x00) // z_order=0
-
-        let (cmd, size) = try decodeCommand(data: data, offset: 0)
-        #expect(size == 15)
-        guard case .defineRegion(let id, _, _, let row, let col, let width, let height, _) = cmd else {
-            Issue.record("Expected .defineRegion, got \(String(describing: cmd))")
-            return
-        }
-        #expect(id == 100)
-        #expect(row == 2)
-        #expect(col == 3)
-        #expect(width == 80)
-        #expect(height == 24)
-    }
-
     @Test("Decode multiple commands in one payload")
     func decodeMultipleCommands() throws {
+        // Transport survivors only: set_cursor_shape(2) + set_window_bg(4) + batch_end(5).
         var data = Data()
-        data.append(OP_CLEAR)
-        data.append(OP_SET_CURSOR)
-        data.append(contentsOf: [0x00, 0x03, 0x00, 0x07])
+        data.append(OP_SET_CURSOR_SHAPE)
+        data.append(CURSOR_BLOCK)
+        data.append(OP_SET_WINDOW_BG)
+        data.append(contentsOf: [0x28, 0x2C, 0x34])
         data.append(OP_BATCH_END)
         data.append(contentsOf: [0, 0, 0, 0]) // batch_end echoed seq (fixed:5, #2215)
 

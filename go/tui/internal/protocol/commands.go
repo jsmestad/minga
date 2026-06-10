@@ -11,10 +11,7 @@ type CommandKind int
 
 const (
 	CommandNoop CommandKind = iota
-	CommandClear
 	CommandBatchEnd
-	CommandDrawText
-	CommandSetCursor
 	CommandSetCursorShape
 	CommandSetTitle
 	CommandSetWindowBg
@@ -23,6 +20,7 @@ const (
 	CommandChrome
 	CommandClipboardWrite
 	CommandExtensionRuntime
+	CommandProtocolError
 )
 
 type Command struct {
@@ -31,9 +29,6 @@ type Command struct {
 	// BatchSeq is the echoed input correlation sequence carried by a
 	// CommandBatchEnd (ticket #2215). 0 means "no correlation".
 	BatchSeq         uint32
-	Draw             DrawText
-	CursorRow        uint16
-	CursorCol        uint16
 	CursorShape      byte
 	Title            string
 	WindowBg         uint32
@@ -41,15 +36,11 @@ type Command struct {
 	Chrome           ChromePayload
 	ClipboardText    string
 	ExtensionRuntime ExtensionRuntimePayload
-}
-
-type DrawText struct {
-	Row   uint16
-	Col   uint16
-	FG    uint32
-	BG    uint32
-	Attrs uint16
-	Text  string
+	// ProtocolError carries the UTF-8 reason from a protocol_error (0x18)
+	// command. The BEAM emits it when a frontend's handshake protocol_version
+	// does not match the BEAM's, so the frontend shows a blocking error instead
+	// of decoding a stream it cannot parse (ticket #2237).
+	ProtocolError string
 }
 
 type ExtensionRuntimePayload struct {
@@ -153,8 +144,6 @@ func DecodeCommand(payload []byte) (Command, error) {
 	}
 
 	switch payload[0] {
-	case generated.OPClear:
-		return Command{Kind: CommandClear, Size: 1}, nil
 	case generated.OPBatchEnd:
 		// batch_end now carries a u32 echoed input correlation sequence
 		// (ticket #2215): <opcode, seq:u32>.
@@ -162,15 +151,6 @@ func DecodeCommand(payload []byte) (Command, error) {
 			return Command{}, fmt.Errorf("short batch_end")
 		}
 		return Command{Kind: CommandBatchEnd, Size: 5, BatchSeq: binary.BigEndian.Uint32(payload[1:5])}, nil
-	case generated.OPDrawText:
-		return decodeDrawText(payload)
-	case generated.OPDrawStyledText:
-		return decodeDrawStyledText(payload)
-	case generated.OPSetCursor:
-		if len(payload) < 5 {
-			return Command{}, fmt.Errorf("short set_cursor")
-		}
-		return Command{Kind: CommandSetCursor, Size: 5, CursorRow: u16(payload, 1), CursorCol: u16(payload, 3)}, nil
 	case generated.OPSetCursorShape:
 		if len(payload) < 2 {
 			return Command{}, fmt.Errorf("short set_cursor_shape")
@@ -190,12 +170,6 @@ func DecodeCommand(payload []byte) (Command, error) {
 			return Command{}, fmt.Errorf("short set_window_bg")
 		}
 		return Command{Kind: CommandSetWindowBg, Size: 4, WindowBg: u24(payload, 1)}, nil
-	case generated.OPDefineRegion:
-		return fixedNoop(payload, 15, "define_region")
-	case generated.OPClearRegion, generated.OPDestroyRegion, generated.OPSetActiveRegion:
-		return fixedNoop(payload, 3, "region_id")
-	case generated.OPScrollRegion:
-		return fixedNoop(payload, 7, "scroll_region")
 	case generated.OPSetFont:
 		return skipString16(payload, 5, "set_font")
 	case generated.OPRegisterFont:
@@ -204,6 +178,8 @@ func DecodeCommand(payload []byte) (Command, error) {
 		return skipFontFallback(payload)
 	case generated.OPMeasureText:
 		return skipString16(payload, 5, "measure_text")
+	case generated.OPProtocolError:
+		return decodeProtocolError(payload)
 	case generated.OPClipboardWrite:
 		return decodeClipboardWrite(payload)
 	case generated.OPGuiWindowContent, generated.OPGuiWindowViewportDelta, generated.OPGuiWindowRowsDelta:
@@ -215,54 +191,6 @@ func DecodeCommand(payload []byte) (Command, error) {
 	default:
 		return decodeSkipOrChrome(payload)
 	}
-}
-
-func decodeDrawText(payload []byte) (Command, error) {
-	if len(payload) < 14 {
-		return Command{}, fmt.Errorf("short draw_text")
-	}
-
-	textLen := int(u16(payload, 12))
-	if len(payload) < 14+textLen {
-		return Command{}, fmt.Errorf("short draw_text text")
-	}
-
-	return Command{
-		Kind: CommandDrawText,
-		Size: 14 + textLen,
-		Draw: DrawText{
-			Row:   u16(payload, 1),
-			Col:   u16(payload, 3),
-			FG:    u24(payload, 5),
-			BG:    u24(payload, 8),
-			Attrs: uint16(payload[11]),
-			Text:  string(payload[14 : 14+textLen]),
-		},
-	}, nil
-}
-
-func decodeDrawStyledText(payload []byte) (Command, error) {
-	if len(payload) < 21 {
-		return Command{}, fmt.Errorf("short draw_styled_text")
-	}
-
-	textLen := int(u16(payload, 19))
-	if len(payload) < 21+textLen {
-		return Command{}, fmt.Errorf("short draw_styled_text text")
-	}
-
-	return Command{
-		Kind: CommandDrawText,
-		Size: 21 + textLen,
-		Draw: DrawText{
-			Row:   u16(payload, 1),
-			Col:   u16(payload, 3),
-			FG:    u24(payload, 5),
-			BG:    u24(payload, 8),
-			Attrs: u16(payload, 11),
-			Text:  string(payload[21 : 21+textLen]),
-		},
-	}, nil
 }
 
 func decodeWindowContent(payload []byte) (Command, error) {
@@ -438,6 +366,23 @@ func decodeRow(section []byte, offset int) (WindowRow, int, bool) {
 		Text:        genRow.Text,
 		Spans:       genRow.Spans,
 	}, nextOffset, true
+}
+
+// decodeProtocolError decodes a protocol_error (0x18) command. The BEAM emits it
+// when a frontend's handshake protocol_version does not match the BEAM's; the
+// frontend displays the UTF-8 reason as a blocking error instead of decoding a
+// stream it cannot parse (ticket #2237). Wire format: opcode(1) + len(u16) +
+// UTF-8 message.
+func decodeProtocolError(payload []byte) (Command, error) {
+	if len(payload) < 3 {
+		return Command{}, fmt.Errorf("short protocol_error")
+	}
+	messageLen := int(u16(payload, 1))
+	size := 3 + messageLen
+	if len(payload) < size {
+		return Command{}, fmt.Errorf("short protocol_error message")
+	}
+	return Command{Kind: CommandProtocolError, Size: size, ProtocolError: string(payload[3:size])}, nil
 }
 
 func decodeClipboardWrite(payload []byte) (Command, error) {

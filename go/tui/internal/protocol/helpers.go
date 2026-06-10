@@ -8,13 +8,6 @@ import (
 	"github.com/jsmestad/minga/go/tui/internal/generated"
 )
 
-func fixedNoop(payload []byte, size int, name string) (Command, error) {
-	if len(payload) < size {
-		return Command{}, fmt.Errorf("short %s", name)
-	}
-	return Command{Kind: CommandNoop, Size: size}, nil
-}
-
 func skipString16(payload []byte, lengthOffset int, name string) (Command, error) {
 	if len(payload) < lengthOffset+2 {
 		return Command{}, fmt.Errorf("short %s", name)

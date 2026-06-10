@@ -61,7 +61,7 @@ defmodule MingaEditor.Frontend.ManagerTest do
       start_manager(name)
 
       assert :ok = Manager.send_commands(name, [])
-      assert :ok = Manager.send_commands(name, [Protocol.encode_clear()])
+      assert :ok = Manager.send_commands(name, [Protocol.encode_batch_end()])
     end
   end
 
@@ -100,6 +100,44 @@ defmodule MingaEditor.Frontend.ManagerTest do
       assert Manager.ready?(name)
       assert Manager.terminal_size(name) == {120, 40}
       assert_receive {:minga_input, {:ready, 120, 40}}
+    end
+
+    test "versioned ready with the matching protocol_version becomes ready" do
+      name = unique_name()
+      pid = start_manager(name)
+      :ok = Manager.subscribe(name)
+
+      version = Minga.Protocol.Opcodes.protocol_version()
+      # 7 caps fields (native GUI) then the u16 protocol_version tail.
+      ready = <<0x03, 120::16, 40::16, 1, 7, 1, 2, 1, 3, 1, 1, 1, version::16>>
+      send_port_data(pid, nil, ready)
+
+      assert Manager.ready?(name)
+      assert Manager.terminal_size(name) == {120, 40}
+      assert_receive {:minga_input, {:ready, 120, 40}}
+    end
+
+    test "ready with a mismatched protocol_version stays not ready (no silent desync)" do
+      name = unique_name()
+      pid = start_manager(name)
+      :ok = Manager.subscribe(name)
+
+      bad = Minga.Protocol.Opcodes.protocol_version() + 99
+      ready = <<0x03, 120::16, 40::16, 1, 7, 1, 2, 1, 3, 1, 1, 1, bad::16>>
+      send_port_data(pid, nil, ready)
+
+      refute Manager.ready?(name)
+      refute_receive {:minga_input, {:ready, 120, 40}}, 50
+    end
+
+    test "legacy unversioned extended ready is rejected (protocol_version 0)" do
+      name = unique_name()
+      pid = start_manager(name)
+
+      # Extended ready with no version tail decodes as protocol_version 0.
+      send_port_data(pid, nil, <<0x03, 120::16, 40::16, 1, 7, 1, 2, 1, 3, 1, 1, 1>>)
+
+      refute Manager.ready?(name)
     end
 
     test "resize event updates terminal size" do
@@ -278,14 +316,14 @@ defmodule MingaEditor.Frontend.ManagerTest do
       refute Manager.ready?(name)
 
       send(pid, {fake_port, :eof})
-      assert :ok = Manager.send_commands(name, [Protocol.encode_clear()])
+      assert :ok = Manager.send_commands(name, [Protocol.encode_batch_end()])
     end
 
     test "send_commands works when connected" do
       name = unique_name()
       {_pid, _fake_port} = start_connected(name)
 
-      assert :ok = Manager.send_commands(name, [Protocol.encode_clear()])
+      assert :ok = Manager.send_commands(name, [Protocol.encode_batch_end()])
     end
 
     test "send_commands emits actual port write telemetry when connected" do
@@ -304,7 +342,7 @@ defmodule MingaEditor.Frontend.ManagerTest do
 
       try do
         {_pid, _fake_port} = start_connected(name)
-        command = Protocol.encode_clear()
+        command = Protocol.encode_batch_end()
 
         assert :ok = Manager.send_commands(name, [command])
         assert_receive {:port_write, %{duration: duration}, %{byte_count: byte_count}}, 1_000

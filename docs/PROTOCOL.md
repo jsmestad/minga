@@ -2,7 +2,7 @@
 
 The BEAM editor core and rendering frontends communicate over a binary protocol on stdin/stdout of each frontend process. All frontends speak the same base transport, input, parser, and diagnostic protocol. Shared visible UI is carried as Semantic UI opcodes documented in [GUI_PROTOCOL.md](GUI_PROTOCOL.md); the `GUI` name is historical wire terminology, not a product split between GUI and terminal clients. This document is the authoritative reference for implementing a Minga frontend. You should be able to build a working frontend by reading this file plus GUI_PROTOCOL.md for Semantic UI surfaces.
 
-**Shared chrome is delivered as Semantic UI, not cells.** The structured opcodes in GUI_PROTOCOL.md are the canonical contract for shared visible chrome (tab bar, status bar, file tree, picker, popups, agent surfaces, and so on). Each frontend decodes these semantic models and renders them with its own surface strategy: SwiftUI views, terminal widgets, GTK widgets, web components, or another future client. The cell-grid `draw_text`/`clear`/region commands below are **not** the extension point for shared chrome; they remain only for legacy terminal compatibility and explicitly tracked buffer-window compatibility. New shared chrome must be modeled as a `Minga.RenderModel.UI.*` semantic model and encoded by `Minga.Frontend.Adapter.GUI`, never added as ad-hoc cell draws.
+**Shared chrome is delivered as Semantic UI, not cells.** The structured opcodes in GUI_PROTOCOL.md are the canonical contract for shared visible chrome (tab bar, status bar, file tree, picker, popups, agent surfaces, and so on). Each frontend decodes these semantic models and renders them with its own surface strategy: SwiftUI views, terminal widgets, GTK widgets, web components, or another future client. The cell-grid `draw_text`/`clear`/region commands were retired from the protocol in protocol_version 2; the only render-category opcodes that survive are transport-level framing (`batch_end`, `set_cursor_shape`, `set_title`, `set_window_bg`, `protocol_error`). New shared chrome must be modeled as a `Minga.RenderModel.UI.*` semantic model and encoded by `Minga.Frontend.Adapter.GUI`, never added as ad-hoc cell draws.
 
 Frontend identity is opaque to Minga product behavior. The BEAM may adapt to declared capabilities such as terminal grid versus desktop window, text measurement, color depth, image support, float support, and Semantic UI support, but it must not special-case Swift, Go, GTK, or another implementation name for product features.
 
@@ -23,26 +23,25 @@ The frontend runs as a child process of the BEAM. Communication uses stdin (BEAM
 
 **Byte order:** All multi-byte integers are big-endian unless noted otherwise.
 
-**Text encoding:** All text fields (draw_text content, language names, query source) are UTF-8 encoded.
+**Text encoding:** All text fields (titles, language names, query source, semantic content) are UTF-8 encoded.
+
+**Protocol version:** The schema carries a `protocol_version` integer (currently 2). The BEAM and every frontend compile against it and exchange it in the `ready` handshake. The BEAM rejects a frontend whose version does not match and sends an explicit `protocol_error` instead of streaming frames the frontend cannot decode. See "Protocol Version Negotiation" below.
 
 ---
 
 ## Quick Reference
 
-### BEAM → Frontend (Render Commands)
+### BEAM → Frontend (Render-Transport Commands)
+
+The cell-paradigm render opcodes (`draw_text`, `set_cursor`, `clear`, and the region commands) were retired in protocol_version 2. All visible content now flows through Semantic UI opcodes (see GUI_PROTOCOL.md, `gui_window_content` 0x80). Only transport-level framing survives in this category.
 
 | Opcode | Name | Size | Description |
 |--------|------|------|-------------|
-| `0x10` | draw_text | 14 + text_len | Draw styled text at a position |
-| `0x11` | set_cursor | 5 | Position the cursor |
-| `0x12` | clear | 1 | Clear the entire screen |
-| `0x13` | batch_end | 1 | End of frame; flush to screen |
-| `0x14` | define_region | 15 | Create/update a layout region |
+| `0x13` | batch_end | 5 | End of frame; flush to screen (carries u32 latency echo, #2215) |
 | `0x15` | set_cursor_shape | 2 | Change cursor appearance |
 | `0x16` | set_title | 3 + title_len | Set the window/terminal title |
-| `0x18` | clear_region | 3 | Clear a specific region |
-| `0x19` | destroy_region | 3 | Remove a region |
-| `0x1A` | set_active_region | 3 | Route draw commands to a region |
+| `0x17` | set_window_bg | 4 | Set the default background color |
+| `0x18` | protocol_error | 3 + msg_len | Version-mismatch error; frontend shows it and stops decoding |
 | `0x27` | measure_text | 7 + text_len | Request display width of text |
 
 ### BEAM → Frontend (Config Commands)
@@ -77,7 +76,7 @@ The frontend runs as a child process of the BEAM. Communication uses stdin (BEAM
 |--------|------|------|-------------|
 | `0x01` | key_press | 6 | A key was pressed |
 | `0x02` | resize | 5 | Terminal/window was resized |
-| `0x03` | ready | 5 or 13 | Frontend is initialized and ready |
+| `0x03` | ready | 5, 13, or 15+ | Frontend is initialized and ready (15+ carries a u16 protocol_version) |
 | `0x04` | mouse_event | 9 | Mouse button, wheel, or motion (8-byte legacy also accepted) |
 | `0x05` | capabilities_updated | 9 | Updated capabilities after async detection |
 
@@ -108,77 +107,22 @@ The frontend runs as a child process of the BEAM. Communication uses stdin (BEAM
 
 ---
 
-## Render Commands (BEAM → Frontend)
+## Render-Transport Commands (BEAM → Frontend)
 
-### `0x10` draw_text
-
-Draw styled text at a screen position.
-
-```
-opcode:   u8  = 0x10
-row:      u16           screen row (0-indexed from top)
-col:      u16           screen column (0-indexed from left)
-fg:       u24           foreground color (RGB, 0x000000 = terminal default)
-bg:       u24           background color (RGB, 0x000000 = terminal default)
-attrs:    u8            style attribute flags (see below)
-text_len: u16           byte length of text
-text:     [text_len]u8  UTF-8 encoded text
-```
-
-Total size: 14 + text_len bytes.
-
-**Attribute flags:**
-
-| Flag | Value | Meaning |
-|------|-------|---------|
-| BOLD | `0x01` | Bold weight |
-| UNDERLINE | `0x02` | Single underline |
-| ITALIC | `0x04` | Italic style |
-| REVERSE | `0x08` | Swap foreground and background |
-
-Multiple flags can be combined with bitwise OR: `0x05` = bold + italic.
-
-**Behavior:** The frontend writes each grapheme cluster in the text to consecutive screen cells starting at `(row, col)`. Wide characters (CJK, emoji) occupy 2 cells. The frontend is responsible for grapheme iteration and display width calculation. Text that extends past the screen width is clipped.
-
-**Color convention:** `0x000000` for fg means "use the terminal's default foreground." `0x000000` for bg means "use the terminal's default background." Actual black can be represented as `0x000001` if needed, though in practice themes avoid this ambiguity.
-
-### `0x11` set_cursor
-
-Position the visible cursor.
-
-```
-opcode: u8  = 0x11
-row:    u16           screen row
-col:    u16           screen column
-```
-
-Total size: 5 bytes.
-
-**Behavior:** Move the cursor to the specified position. The cursor is displayed at this location after the next `batch_end` render. Only one cursor position is active at a time; the last `set_cursor` in a frame wins.
-
-### `0x12` clear
-
-Clear the entire screen.
-
-```
-opcode: u8 = 0x12
-```
-
-Total size: 1 byte.
-
-**Behavior:** Reset all cells to blank (space character, default colors, no attributes). This is always the first command in a render frame.
+The cell-paradigm render opcodes (`draw_text` 0x10, `set_cursor` 0x11, `clear` 0x12, and the region commands 0x14/0x18-0x1A/0x1B and `draw_styled_text` 0x1C) were retired in protocol_version 2 along with the Zig cell-grid renderer (#2223). All visible content is now carried by Semantic UI opcodes (GUI_PROTOCOL.md, `gui_window_content` 0x80 and the `gui_*` chrome opcodes), which embed their own cursor position and shape per window. Only the transport-level opcodes below survive in the render category.
 
 ### `0x13` batch_end
 
 End of a render frame.
 
 ```
-opcode: u8 = 0x13
+opcode: u8  = 0x13
+seq:    u32           echoed input correlation sequence (ticket #2215); 0 = no correlation
 ```
 
-Total size: 1 byte.
+Total size: 5 bytes.
 
-**Behavior:** The frontend flushes all pending draw operations to the screen. For a TUI, this means writing the diff of changed cells to the terminal. For a GUI, this means triggering a display refresh. No visible changes should appear until `batch_end` is received.
+**Behavior:** The frontend flushes all pending draw operations and presents the frame. The `seq` echoes the latest processed `key_press` correlation sequence so the frontend can resolve an end-to-end keystroke-to-present latency sample.
 
 ### `0x15` set_cursor_shape
 
@@ -213,21 +157,48 @@ Total size: 3 + title_len bytes.
 
 **Behavior:** TUI frontends emit OSC 0 (`\x1b]0;{title}\x07`). GUI frontends set the window title.
 
+### `0x17` set_window_bg
+
+Set the default background color for the frontend surface.
+
+```
+opcode: u8 = 0x17
+r:      u8
+g:      u8
+b:      u8
+```
+
+Total size: 4 bytes.
+
+**Behavior:** The frontend uses this as the fallback background so content does not fall back to the terminal/window default, which may not match the editor theme.
+
+### `0x18` protocol_error
+
+Sent by the BEAM when a frontend's handshake `protocol_version` does not match the BEAM's. See "Protocol Version Negotiation".
+
+```
+opcode:  u8  = 0x18
+msg_len: u16            UTF-8 byte length of the message
+message: [msg_len]u8    human-readable reason
+```
+
+Total size: 3 + msg_len bytes.
+
+**Behavior:** The frontend displays the message as a blocking error and stops decoding subsequent frames. The BEAM does not stream render frames to a version-mismatched frontend.
+
 ---
 
 ## Render Frame Lifecycle
 
-Every render frame follows this sequence:
+Visible content is carried by Semantic UI opcodes (GUI_PROTOCOL.md). A render frame is a single batched message of `gui_*` semantic commands (window content, chrome, overlays) terminated by `batch_end`:
 
 ```
-clear
-draw_text × N       (one per styled text segment, ordered top-to-bottom)
-set_cursor           (exactly once)
-set_cursor_shape     (exactly once; may be omitted if unchanged)
-batch_end            (triggers the actual render)
+gui_window_content / gui_* chrome commands ...   (the semantic frame; see GUI_PROTOCOL.md)
+set_cursor_shape     (optional; may be omitted if unchanged)
+batch_end            (triggers the actual present; carries the latency echo)
 ```
 
-The BEAM sends the entire frame as a single batched message. The frontend processes commands in order and only renders to screen on `batch_end`.
+The BEAM sends the entire frame as a single batched message. The frontend processes commands in order and only presents on `batch_end`. Cursor position and shape are embedded per window inside `gui_window_content`, not carried by standalone cell opcodes.
 
 Between frames, the frontend must not modify the screen. The BEAM drives all visual updates.
 
@@ -285,19 +256,20 @@ width:  u16           initial width
 height: u16           initial height
 ```
 
-**Extended format (13 bytes):**
+**Extended format (13 bytes, or 15+ with a version tail):**
 ```
-opcode:       u8  = 0x03
-width:        u16           initial width
-height:       u16           initial height
-caps_version: u8            capability format version (currently 1)
-caps_len:     u8            length of capability data
-caps_data:    [caps_len]u8  capability fields (see "Capability Negotiation" section)
+opcode:           u8  = 0x03
+width:            u16           initial width
+height:           u16           initial height
+caps_version:     u8            capability format version (currently 1)
+caps_len:         u8            length of capability data
+caps_data:        [caps_len]u8  capability fields (see "Capability Negotiation" section)
+protocol_version: u16           OPTIONAL: the wire-contract version the frontend was generated against
 ```
 
 **Behavior:** Sent exactly once, during startup, after the frontend has set up its rendering surface. The BEAM waits for this event before sending any render commands.
 
-Frontends should use the extended format when possible. The BEAM detects which format was sent by checking the payload length: 5 bytes = short format with default capabilities, 13+ bytes = extended format with explicit capabilities.
+Frontends should use the extended format with the `protocol_version` tail. The BEAM detects which format was sent by checking the payload length: 5 bytes = short format with default capabilities and no version (treated as protocol_version 0); 13 bytes = extended capabilities with no version tail (also treated as protocol_version 0); 15+ bytes = extended capabilities followed by a u16 `protocol_version`. See "Protocol Version Negotiation".
 
 ### `0x04` mouse_event
 
@@ -699,9 +671,29 @@ Total size: 4 + msg_len bytes.
 
 **Malformed payloads:** If a payload is too short for its opcode's expected format, the receiver should log a warning and discard the message.
 
-**Version mismatches:** The BEAM discards `highlight_spans` responses where the version is lower than the most recently requested version. This prevents stale async results from overwriting current highlights.
+**Highlight version mismatches:** The BEAM discards `highlight_spans` responses where the version is lower than the most recently requested version. This prevents stale async results from overwriting current highlights.
+
+**Protocol version mismatches:** If a frontend's handshake `protocol_version` does not match the BEAM's compiled-in version, the BEAM does not mark the frontend ready and sends a single `protocol_error` (0x18) instead of streaming render frames. See "Protocol Version Negotiation".
 
 **Frontend crash:** The BEAM's supervisor detects the Port exit and can restart the frontend. Buffer state, undo history, and cursor positions are preserved in the BEAM. The restarted frontend receives a full re-render on its first frame.
+
+---
+
+## Protocol Version Negotiation
+
+The schema (`docs/protocol_schema.toml`) carries a `protocol_version` integer (currently 2). `mix protocol.gen` emits it as a constant on every side: `Minga.Protocol.Opcodes.protocol_version()` (Elixir), `generated.ProtocolVersion` (Go), `PROTOCOL_VERSION` (Swift), `PROTOCOL_VERSION` (Zig parser). Bump it whenever the wire contract changes incompatibly; protocol_version 2 is the bump that retired the 9 cell-paradigm render opcodes.
+
+**Handshake.** A frontend appends its compiled-in `protocol_version` as a u16 tail on the extended `ready` event (after `caps_data`). A frontend that omits the tail (short ready, or extended ready without the tail) is treated as protocol_version 0.
+
+**Enforcement.** The BEAM compares the handshake version against its own `Opcodes.protocol_version()` in `MingaEditor.Frontend.Manager`. On a match it marks the frontend ready and streams normally. On any mismatch (including 0, a frontend built before this mechanism) it does **not** mark the frontend ready and sends one `protocol_error` (0x18) carrying a human-readable reason, then drives nothing further. This converts a silent desync (a stale frontend decoding opcodes that moved or vanished) into an explicit, debuggable error.
+
+**`0x18` protocol_error.**
+```
+opcode:  u8  = 0x18
+msg_len: u16            UTF-8 byte length of the message
+message: [msg_len]u8    human-readable reason
+```
+A frontend that receives `protocol_error` should display the message as a blocking error (not attempt to decode subsequent frames) and the operator should rebuild the frontend with `mix protocol.gen` so its constants match the editor.
 
 ---
 
@@ -709,7 +701,7 @@ Total size: 4 + msg_len bytes.
 
 ### Current design
 
-Tree-sitter parsing runs in a dedicated `minga-parser` Zig process, separate from the rendering frontend. The rendering frontend handles render commands (`0x10`-`0x1B` plus GUI chrome `0x70+`). The parser process handles highlight commands (`0x20`-`0x2F`) and sends highlight responses (`0x30`-`0x3D`). Both use the same `{:packet, 4}` framing on their respective stdin/stdout pipes. The BEAM manages both Port processes, routing commands to the appropriate one. Zig is parser infrastructure only; the legacy Zig terminal renderer was removed in #2223.
+Tree-sitter parsing runs in a dedicated `minga-parser` Zig process, separate from the rendering frontend. The rendering frontend handles the surviving render-transport commands (`batch_end`, `set_cursor_shape`, `set_title`, `set_window_bg`, `protocol_error`) plus GUI chrome (`0x70+`). The parser process handles highlight commands (`0x20`-`0x2F`) and sends highlight responses (`0x30`-`0x3D`). Both use the same `{:packet, 4}` framing on their respective stdin/stdout pipes. The BEAM manages both Port processes, routing commands to the appropriate one. Zig is parser infrastructure only; the legacy Zig terminal renderer was removed in #2223.
 
 This separation means rendering frontends (Swift/Metal, GTK4, Go/Bubble Tea) only need to implement render commands. Tree-sitter parsing is handled by the shared parser process regardless of which frontend is active.
 
@@ -773,87 +765,6 @@ Total size: 9 bytes.
 ### Implementation Notes
 
 The TUI backend may send `ready` with default capabilities immediately at startup, then send `capabilities_updated` once its async terminal capability detection completes (e.g. after the DA1 response). The GUI backend sends `ready` with full native capabilities upfront since there is no detection delay.
-
-## Layout Regions
-
-Regions express layout structure so frontends can map editor areas to their native abstraction: virtual viewports with clipping (TUI), NSView hierarchy (AppKit), GtkWidget containers (GTK4).
-
-Region ID 0 is the implicit root region (the entire screen). All draw commands before any `set_active_region` target the root.
-
-### `0x14` define_region
-
-Create or update a layout region.
-
-```
-opcode:    u8  = 0x14
-id:        u16           region identifier (must be > 0)
-parent_id: u16           parent region (0 = root)
-role:      u8            semantic role (see table below)
-row:       u16           top-left row relative to parent
-col:       u16           top-left column relative to parent
-width:     u16           width in columns
-height:    u16           height in rows
-z_order:   u8            stacking order (higher = on top)
-```
-
-Total size: 15 bytes.
-
-**Region roles:**
-
-| Value | Role | Description |
-|-------|------|-------------|
-| 0 | editor | Main editor viewport |
-| 1 | modeline | Status line |
-| 2 | minibuffer | Command/message input area |
-| 3 | gutter | Line numbers and signs |
-| 4 | popup | Floating completion, which-key, etc. |
-| 5 | panel | Side panel (file tree, etc.) |
-| 6 | border | Window split borders |
-
-### `0x18` clear_region
-
-Clear all cells within a region to blank.
-
-```
-opcode: u8  = 0x18
-id:     u16           region to clear
-```
-
-Total size: 3 bytes.
-
-### `0x19` destroy_region
-
-Remove a region and clear its area.
-
-```
-opcode: u8  = 0x19
-id:     u16           region to destroy
-```
-
-Total size: 3 bytes.
-
-If the destroyed region was the active region, the frontend resets to the root region.
-
-### `0x1A` set_active_region
-
-Route subsequent `draw_text` commands to a region.
-
-```
-opcode: u8  = 0x1A
-id:     u16           region to activate (0 = root)
-```
-
-Total size: 3 bytes.
-
-**Behavior:** After this command, `draw_text` coordinates are relative to the active region's origin. The frontend offsets and clips draw commands to stay within the region bounds. The active region resets to root on `clear`.
-
-### TUI Implementation
-
-The TUI renderer maintains a hash map of regions. When `set_active_region` is called, the renderer adds the region's row/col offset to every subsequent `draw_text` and clips at the region boundary. `clear_region` blanks only the cells within the region's bounds.
-
-### GUI Implementation
-
-Native GUI frontends should map regions to native view objects: `define_region` creates a view, `destroy_region` removes it, `set_active_region` targets draw commands into the view's coordinate space. The `role` field provides semantic hints for styling and layout behavior.
 
 ## Text Measurement
 
