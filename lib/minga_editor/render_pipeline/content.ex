@@ -7,7 +7,6 @@ defmodule MingaEditor.RenderPipeline.Content do
   tildes (but without modeline, which is added in the Chrome stage).
   """
 
-  alias MingaEditor.Agent.View.DashboardRenderer
   alias MingaEditor.Agent.View.PromptRenderer
   alias MingaEditor.Agent.View.PromptRenderWindow
   alias MingaEditor.Agent.ViewContext
@@ -429,59 +428,34 @@ defmodule MingaEditor.RenderPipeline.Content do
           Layout.window_layout()
         ) :: {WindowFrame.t(), Cursor.t() | nil, state()}
   defp render_agent_chat_window(state, window, prefetch, _win_id, win_layout) do
-    # Build ViewContext once for all agent renderers
+    # Build ViewContext once for the prompt geometry and the semantic prompt model.
     ctx = ViewContext.from_editor_state(state)
 
-    # Split the content rect to carve out a sidebar when wide enough.
+    # Split the content rect to carve out a sidebar when wide enough. The
+    # carved rect still drives layout (chat width, cursor math); the dashboard
+    # itself is a semantic surface (AgentChatBuilder), not a cell-era sidebar.
     win_layout = Layout.add_sidebar(win_layout)
     {row_off, col_off, chat_width, height} = win_layout.content
 
-    # Render the sidebar (dashboard) if the layout carved one out.
-    sidebar_draws =
-      case win_layout.sidebar do
-        {sr, sc, sw, sh} ->
-          separator_col = sc - 1
-
-          separator =
-            for row <- 0..(sh - 1) do
-              DisplayList.draw(
-                sr + row,
-                separator_col,
-                "│",
-                Face.new(fg: state.theme.editor.split_border_fg)
-              )
-            end
-
-          separator ++ DashboardRenderer.render(ctx, {sr, sc, sw, sh})
-
-        nil ->
-          []
-      end
-
-    # Compute prompt height and subdivide the content rect.
-    # Subdivide the content rect for chat content vs prompt input.
+    # Compute prompt height and subdivide the content rect for chat content vs
+    # prompt input. PromptRenderer here is pure layout math (no cell drawing).
     prompt_height = PromptRenderer.prompt_height(ctx, chat_width)
     input_v_gap = 1
     chat_height = max(height - prompt_height - input_v_gap, 1)
     prompt_row = row_off + chat_height + input_v_gap
-
-    # Render the prompt (agent chrome, not buffer content)
     prompt_rect = {prompt_row, col_off, chat_width, prompt_height}
-    prompt_draws = PromptRenderer.render(ctx, prompt_rect)
 
-    # When help overlay is visible, render help content instead of buffer
+    # When help is visible the chat buffer is suppressed. The help overlay,
+    # prompt, and dashboard all reach the live (semantic) frontends through the
+    # AgentChat semantic model, so this branch emits an empty-content frame and
+    # carries no cell-era draws.
     help_visible = state.workspace.agent_ui.view.help_visible
 
     if help_visible do
-      focus = state.workspace.agent_ui.view.focus
-      help_groups = Minga.Keymap.Scope.Agent.help_groups(focus)
-      chat_rect = {row_off, col_off, chat_width, chat_height}
-      help_draws = render_help_overlay(help_groups, chat_rect, state.theme)
-
       frame = %WindowFrame{
         rect: {0, 0, chat_width, height},
         gutter: %{},
-        lines: DisplayList.draws_to_layer(help_draws ++ prompt_draws ++ sidebar_draws),
+        lines: %{},
         tilde_lines: %{},
         modeline: %{},
         cursor: nil
@@ -495,8 +469,6 @@ defmodule MingaEditor.RenderPipeline.Content do
         window,
         prefetch,
         win_layout,
-        sidebar_draws,
-        prompt_draws,
         row_off: row_off,
         col_off: col_off,
         chat_width: chat_width,
@@ -513,8 +485,6 @@ defmodule MingaEditor.RenderPipeline.Content do
           Window.t(),
           AgentChatPrefetch.t(),
           Layout.window_layout(),
-          [DisplayList.draw()],
-          [DisplayList.draw()],
           keyword()
         ) :: {WindowFrame.t(), Cursor.t() | nil, state()}
   defp render_agent_chat_buffer(
@@ -523,8 +493,6 @@ defmodule MingaEditor.RenderPipeline.Content do
          _window,
          %AgentChatPrefetch{} = prefetch,
          win_layout,
-         sidebar_draws,
-         prompt_draws,
          opts
        ) do
     row_off = Keyword.fetch!(opts, :row_off)
@@ -735,8 +703,6 @@ defmodule MingaEditor.RenderPipeline.Content do
         height: height,
         gutter_draws: gutter_draws,
         line_draws: line_draws,
-        prompt_draws: prompt_draws,
-        sidebar_draws: sidebar_draws,
         tilde_draws: tilde_draws,
         cursor: final_cursor,
         window_model: window_model,
@@ -895,10 +861,12 @@ defmodule MingaEditor.RenderPipeline.Content do
 
   @spec agent_window_frame(boolean(), map()) :: WindowFrame.t()
   defp agent_window_frame(true, params) do
+    # Semantic frontends consume the window models (chat buffer + prompt) and the
+    # AgentChat semantic surface; the cell-era line/gutter/sidebar draws are unused.
     %WindowFrame{
       rect: {0, 0, params.chat_width, params.height},
       gutter: %{},
-      lines: DisplayList.draws_to_layer(params.sidebar_draws),
+      lines: %{},
       tilde_lines: %{},
       modeline: %{},
       cursor: params.cursor,
@@ -910,123 +878,14 @@ defmodule MingaEditor.RenderPipeline.Content do
   defp agent_window_frame(false, params) do
     %WindowFrame{
       rect: {0, 0, params.chat_width, params.height},
-      gutter: %{},
-      lines: DisplayList.draws_to_layer(params.prompt_draws ++ params.sidebar_draws),
-      tilde_lines: %{},
+      gutter: DisplayList.draws_to_layer(params.gutter_draws),
+      lines: DisplayList.draws_to_layer(params.line_draws),
+      tilde_lines: DisplayList.draws_to_layer(params.tilde_draws),
       modeline: %{},
       cursor: params.cursor,
       window_model: params.window_model,
       additional_window_models: params.additional_window_models
     }
-  end
-
-  # Renders help overlay content as display list draws in the chat area.
-  # Shows keybinding groups from Scope.Agent.help_groups/1 with category
-  # headers in accent color and key/description pairs.
-  @spec render_help_overlay(
-          [{String.t(), [{String.t(), String.t()}]}],
-          {non_neg_integer(), non_neg_integer(), pos_integer(), pos_integer()},
-          MingaEditor.UI.Theme.t()
-        ) :: [DisplayList.draw()]
-  defp render_help_overlay(help_groups, {row_off, col_off, width, height}, theme) do
-    at = MingaEditor.UI.Theme.agent_theme(theme)
-    blank = String.duplicate(" ", width)
-    bg_face = Face.new(bg: at.panel_bg)
-
-    # Background fill
-    bg_cmds =
-      for row <- 0..(height - 1) do
-        DisplayList.draw(row_off + row, col_off, blank, bg_face)
-      end
-
-    # Header
-    header_face = Face.new(fg: at.text_fg, bg: at.panel_bg, bold: true)
-    hint_face = Face.new(fg: at.hint_fg, bg: at.panel_bg)
-    label_face = Face.new(fg: at.dashboard_label, bg: at.panel_bg, bold: true)
-    key_face = Face.new(fg: at.text_fg, bg: at.panel_bg)
-    desc_face = Face.new(fg: at.hint_fg, bg: at.panel_bg)
-
-    header_row = 1
-
-    draws = [
-      DisplayList.draw(row_off + header_row, col_off + 2, "Keyboard Shortcuts", header_face),
-      DisplayList.draw(
-        row_off + header_row,
-        col_off + width - 24,
-        "? or Esc to close",
-        hint_face
-      )
-    ]
-
-    # Render groups
-    key_col_width = min(div(width, 3), 20)
-    row = header_row + 2
-
-    {draws, _row} =
-      Enum.reduce(help_groups, {draws, row}, fn {title, bindings}, {acc, r} ->
-        if r >= height - 1,
-          do: {acc, r},
-          else:
-            render_help_group(title, bindings, acc, r,
-              row_off: row_off,
-              col_off: col_off,
-              width: width,
-              height: height,
-              key_col_width: key_col_width,
-              label_face: label_face,
-              key_face: key_face,
-              desc_face: desc_face
-            )
-      end)
-
-    bg_cmds ++ draws
-  end
-
-  @spec render_help_group(
-          String.t(),
-          [{String.t(), String.t()}],
-          [DisplayList.draw()],
-          non_neg_integer(),
-          keyword()
-        ) :: {[DisplayList.draw()], non_neg_integer()}
-  defp render_help_group(title, bindings, draws, row, opts) do
-    height = Keyword.fetch!(opts, :height)
-
-    if row >= height - 1 do
-      {draws, row}
-    else
-      row_off = Keyword.fetch!(opts, :row_off)
-      col_off = Keyword.fetch!(opts, :col_off)
-      label_face = Keyword.fetch!(opts, :label_face)
-
-      title_draw = DisplayList.draw(row_off + row, col_off + 2, title, label_face)
-      row = row + 1
-
-      {binding_draws, row} =
-        Enum.map_reduce(bindings, row, fn
-          {_key, _desc}, r when r >= height - 1 -> {[], r}
-          {key, desc}, r -> {render_help_binding(key, desc, r, opts), r + 1}
-        end)
-
-      {[title_draw | List.flatten(binding_draws)] ++ draws, row + 1}
-    end
-  end
-
-  @spec render_help_binding(String.t(), String.t(), non_neg_integer(), keyword()) ::
-          [DisplayList.draw()]
-  defp render_help_binding(key, desc, row, opts) do
-    row_off = Keyword.fetch!(opts, :row_off)
-    col_off = Keyword.fetch!(opts, :col_off)
-    key_col_width = Keyword.fetch!(opts, :key_col_width)
-    key_face = Keyword.fetch!(opts, :key_face)
-    desc_face = Keyword.fetch!(opts, :desc_face)
-
-    key_text = String.pad_trailing(key, key_col_width)
-
-    [
-      DisplayList.draw(row_off + row, col_off + 4, key_text, key_face),
-      DisplayList.draw(row_off + row, col_off + 4 + key_col_width, desc, desc_face)
-    ]
   end
 
   defp cursor_text_from_snapshot(lines, cursor_line, first_line) do
