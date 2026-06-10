@@ -56,7 +56,7 @@ struct EncoderReadyTests {
     func readyLayout() {
         let payload = captureFrame { $0.sendReady(cols: 120, rows: 40) }
 
-        // 14 caps bytes + a u16 protocol_version tail (protocol_version 2).
+        // 14 caps bytes + a u16 protocol_version tail (the compiled PROTOCOL_VERSION).
         #expect(payload.count == 16)
         #expect(payload[0] == OP_READY)
         #expect(readU16(payload, 1) == 120) // cols

@@ -31,6 +31,7 @@ defmodule Minga.Test.ProtocolGolden do
   alias Minga.Frontend.Adapter.GUI.PickerEncoder
   alias Minga.Frontend.Adapter.GUI.SearchStateEncoder
   alias Minga.Frontend.Protocol.Encoding
+  alias Minga.Protocol.Encode
   alias Minga.Protocol.GoldenFields
   alias Minga.RenderModel.UI.Breadcrumb
   alias Minga.RenderModel.UI.ChangeSummary
@@ -67,6 +68,7 @@ defmodule Minga.Test.ProtocolGolden do
       git_status_fixtures() ++
       change_summary_fixtures() ++
       search_state_fixtures() ++
+      surface_layout_fixtures() ++
       theme_fixtures()
   end
 
@@ -762,6 +764,72 @@ defmodule Minga.Test.ProtocolGolden do
   defp search_state_expected(model) do
     <<active::8, match_count::16, current_index::16, flags::8>> = search_state_payload(model)
     %{active: active, match_count: match_count, current_index: current_index, flags: flags}
+  end
+
+  # ── Fixtures: gui_surface_layout placements (GuiSurfaceLayoutPlacements) ───
+
+  # gui_surface_layout (#2219 child A) has no hand-written production encoder yet
+  # (the BEAM does not emit it until child E). Its placements section is a generated
+  # counted_array, so the fixture builds the section body with the generated
+  # `Minga.Protocol.Encode.encode_gui_surface_layout_placements/1` — the exact
+  # inverse of the generated Go/Swift placement decoder. The golden test still
+  # proves cross-language agreement: the generated Elixir encoder and the generated
+  # Go decoder must produce identical field values for the same bytes.
+  @spec surface_layout_payload([map()]) :: binary()
+  defp surface_layout_payload(placements) do
+    placements
+    |> Encode.encode_gui_surface_layout_placements()
+    |> IO.iodata_to_binary()
+  end
+
+  @spec placement(
+          non_neg_integer(),
+          {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()},
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: map()
+  defp placement(surface_id, {row, col, width, height}, z, hit_kind) do
+    %{
+      surface_id: surface_id,
+      rect: %{row: row, col: col, width: width, height: height},
+      z: z,
+      hit_kind: hit_kind
+    }
+  end
+
+  @spec surface_layout_fixtures() :: [fixture()]
+  defp surface_layout_fixtures do
+    typical = [
+      placement(1, {0, 0, 80, 24}, 0, 1),
+      placement(7, {2, 4, 40, 10}, 5, 2)
+    ]
+
+    # Boundary fixture at the u16 ceilings for every numeric field, proving the
+    # generated decoder reads full-width values without truncation.
+    boundary = [
+      placement(65_535, {65_535, 65_535, 65_535, 65_535}, 65_535, 255)
+    ]
+
+    [
+      %{
+        name: "surface_layout_empty",
+        decoder: "GuiSurfaceLayoutPlacements",
+        payload: surface_layout_payload([]),
+        expected: []
+      },
+      %{
+        name: "surface_layout_typical",
+        decoder: "GuiSurfaceLayoutPlacements",
+        payload: surface_layout_payload(typical),
+        expected: typical
+      },
+      %{
+        name: "surface_layout_boundary_max",
+        decoder: "GuiSurfaceLayoutPlacements",
+        payload: surface_layout_payload(boundary),
+        expected: boundary
+      }
+    ]
   end
 
   # gui_theme is a header-only command_fields unit (only color_count is modeled

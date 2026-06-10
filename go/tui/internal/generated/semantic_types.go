@@ -121,6 +121,13 @@ type HitRegion struct {
 	ID   uint16
 }
 
+type SurfacePlacement struct {
+	SurfaceID uint16
+	Rect      Rect
+	Z         uint16
+	HitKind   uint8
+}
+
 type GutterEntry struct {
 	BufLine     uint32
 	DisplayType uint8
@@ -203,6 +210,7 @@ const (
 	DiagnosticRangeSize   = 9
 	DocumentHighlightSize = 9
 	HitRegionSize         = 11
+	SurfacePlacementSize  = 13
 	ThemeColorSize        = 4
 )
 

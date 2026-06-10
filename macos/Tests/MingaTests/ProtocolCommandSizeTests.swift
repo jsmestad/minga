@@ -20,6 +20,13 @@ struct ProtocolCommandSizeTests {
         #expect(commandSize([OP_GUI_FILE_TREE, 0, 0, 0, 2, 0xAA, 0xBB]) == .sized(7))
     }
 
+    @Test func sizesFrameTransactionMarkers() {
+        // begin_frame/commit_frame (#2219 child A) are fixed:9 = opcode + two u32.
+        #expect(commandSize([OP_BEGIN_FRAME, 0, 0, 0, 7, 0, 0, 0, 0]) == .sized(9))
+        #expect(commandSize([OP_COMMIT_FRAME, 0, 0, 0, 7, 0, 0, 0, 5]) == .sized(9))
+        #expect(commandSize([OP_BEGIN_FRAME, 0, 0, 0]) == .incomplete)
+    }
+
     @Test func customOpcodesDeferToDecoder() {
         #expect(commandSize([OP_GUI_GIT_STATUS, 0, 0, 0, 0]) == .custom)
     }
