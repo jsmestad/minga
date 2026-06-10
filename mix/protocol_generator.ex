@@ -74,10 +74,61 @@ defmodule Minga.Mix.ProtocolGenerator do
   @spec load_schema!() :: schema()
   defp load_schema! do
     case @schema_path |> File.read!() |> Toml.decode() do
-      {:ok, schema} -> validate_schema!(schema)
+      {:ok, schema} -> schema |> validate_schema!() |> attach_enum_reprs()
       {:error, reason} -> Mix.raise("Failed to parse #{@schema_path}: #{inspect(reason)}")
     end
   end
+
+  # Annotate every `type = "enum"` field with the repr primitive of its enum so
+  # the downstream sizing/decode helpers can read it as that primitive while the
+  # Go type mapping still names the typed constant. Runs after validation so the
+  # enum reference is known to resolve.
+  @spec attach_enum_reprs(schema()) :: schema()
+  defp attach_enum_reprs(schema) do
+    emap = enums_map(schema)
+
+    schema
+    |> Map.update("structures", [], fn structs ->
+      Enum.map(structs, &map_entry_fields(&1, emap))
+    end)
+    |> Map.update("sections", [], fn sections ->
+      Enum.map(sections, &map_entry_fields(&1, emap))
+    end)
+    |> Map.update("command_fields", [], fn cfs -> Enum.map(cfs, &map_entry_fields(&1, emap)) end)
+  end
+
+  @spec map_entry_fields(map(), %{String.t() => enum()}) :: map()
+  defp map_entry_fields(entry, emap) do
+    entry
+    |> maybe_map_fields("fields", emap)
+    |> maybe_map_conditional_tail(emap)
+  end
+
+  @spec maybe_map_fields(map(), String.t(), %{String.t() => enum()}) :: map()
+  defp maybe_map_fields(entry, key, emap) do
+    case Map.get(entry, key) do
+      fields when is_list(fields) ->
+        Map.put(entry, key, Enum.map(fields, &annotate_enum_field(&1, emap)))
+
+      _ ->
+        entry
+    end
+  end
+
+  @spec maybe_map_conditional_tail(map(), %{String.t() => enum()}) :: map()
+  defp maybe_map_conditional_tail(entry, emap) do
+    case Map.get(entry, "conditional_tail") do
+      %{} = tail -> Map.put(entry, "conditional_tail", maybe_map_fields(tail, "fields", emap))
+      _ -> entry
+    end
+  end
+
+  @spec annotate_enum_field(map(), %{String.t() => enum()}) :: map()
+  defp annotate_enum_field(%{"type" => "enum", "enum" => name} = field, emap) do
+    Map.put(field, "repr", Map.fetch!(emap, name)["repr"])
+  end
+
+  defp annotate_enum_field(field, _emap), do: field
 
   @spec validate_schema!(schema()) :: schema()
   defp validate_schema!(schema) do
@@ -87,9 +138,11 @@ defmodule Minga.Mix.ProtocolGenerator do
     validate_duplicate_values!(Map.fetch!(schema, "gui_actions"), "GUI action")
     validate_gui_action_canonicals!(Map.fetch!(schema, "gui_actions"))
     validate_framing!(schema)
+    validate_enums!(schema)
     validate_structures!(schema)
     validate_sections!(schema)
     validate_command_fields!(schema)
+    validate_enum_field_refs!(schema)
     validate_conditional_tail_guards!(schema)
     schema
   end
@@ -738,6 +791,146 @@ defmodule Minga.Mix.ProtocolGenerator do
   defp framing_kind(%{"framing" => "fixed:" <> rest}), do: {:fixed, String.to_integer(rest)}
   defp framing_kind(%{"framing" => framing}), do: String.to_atom(framing)
 
+  # ── Enums ─────────────────────────────────────────────────────────────────
+  #
+  # An [[enums]] entry declares a closed byte vocabulary. A field references it
+  # with `type = "enum", enum = "<name>"`; it is sized and decoded as the
+  # underlying `repr` primitive and surfaces in generated decoders as a typed
+  # constant. Validation guards the invariants the consult locked: unique value
+  # bytes, every byte in range for the repr, and a `default` that resolves to a
+  # declared value.
+
+  @type enum :: %{String.t() => term()}
+
+  @enum_repr_max %{"u8" => 0xFF, "u16" => 0xFFFF, "u32" => 0xFFFFFFFF}
+
+  @spec enums_list(schema()) :: [enum()]
+  defp enums_list(schema), do: Map.get(schema, "enums", [])
+
+  @spec enums_map(schema()) :: %{String.t() => enum()}
+  defp enums_map(schema), do: Map.new(enums_list(schema), fn e -> {e["name"], e} end)
+
+  @spec enum_field?(map()) :: boolean()
+  defp enum_field?(%{"type" => "enum"}), do: true
+  defp enum_field?(_field), do: false
+
+  @spec validate_enums!(schema()) :: :ok
+  defp validate_enums!(schema) do
+    enums = enums_list(schema)
+    validate_enum_names!(enums)
+
+    Enum.each(enums, fn enum ->
+      validate_enum_repr!(enum)
+      validate_enum_values!(enum)
+      validate_enum_default!(enum)
+    end)
+  end
+
+  @spec validate_enum_names!([enum()]) :: :ok
+  defp validate_enum_names!(enums) do
+    names = Enum.map(enums, & &1["name"])
+    dupes = names -- Enum.uniq(names)
+
+    case dupes do
+      [] ->
+        :ok
+
+      _ ->
+        Mix.raise("Duplicate enum names in #{@schema_path}: #{Enum.join(Enum.uniq(dupes), ", ")}")
+    end
+  end
+
+  @spec validate_enum_repr!(enum()) :: :ok
+  defp validate_enum_repr!(%{"repr" => repr})
+       when is_map_key(@enum_repr_max, repr),
+       do: :ok
+
+  defp validate_enum_repr!(%{"name" => name} = enum) do
+    Mix.raise(
+      "Enum #{name} has invalid repr #{inspect(enum["repr"])} in #{@schema_path} (allowed: u8, u16, u32)"
+    )
+  end
+
+  @spec validate_enum_values!(enum()) :: :ok
+  defp validate_enum_values!(%{"name" => name, "repr" => repr} = enum) do
+    values = Map.get(enum, "values", [])
+    max = @enum_repr_max[repr]
+
+    out_of_range =
+      values
+      |> Enum.reject(fn v -> is_integer(v["value"]) and v["value"] >= 0 and v["value"] <= max end)
+      |> Enum.map_join(", ", fn v -> "#{v["name"]}=#{inspect(v["value"])}" end)
+
+    case out_of_range do
+      "" ->
+        :ok
+
+      _ ->
+        Mix.raise(
+          "Enum #{name} values out of range for #{repr} in #{@schema_path}: #{out_of_range}"
+        )
+    end
+
+    byte_values = Enum.map(values, & &1["value"])
+    dupes = byte_values -- Enum.uniq(byte_values)
+
+    case dupes do
+      [] ->
+        :ok
+
+      _ ->
+        Mix.raise(
+          "Enum #{name} has duplicate value bytes in #{@schema_path}: #{Enum.join(Enum.uniq(dupes), ", ")}"
+        )
+    end
+  end
+
+  @spec validate_enum_default!(enum()) :: :ok
+  defp validate_enum_default!(%{"default" => nil}), do: :ok
+  defp validate_enum_default!(enum) when not is_map_key(enum, "default"), do: :ok
+
+  defp validate_enum_default!(%{"name" => name, "default" => default} = enum) do
+    value_names = enum |> Map.get("values", []) |> MapSet.new(& &1["name"])
+
+    case MapSet.member?(value_names, default) do
+      true ->
+        :ok
+
+      false ->
+        Mix.raise(
+          "Enum #{name} default #{inspect(default)} is not a declared value in #{@schema_path}"
+        )
+    end
+  end
+
+  @spec validate_enum_field_refs!(schema()) :: :ok
+  defp validate_enum_field_refs!(schema) do
+    emap = enums_map(schema)
+
+    entries =
+      Map.get(schema, "structures", []) ++
+        Enum.reject(sections_list(schema), &entry_custom_layout?/1) ++
+        command_fields_list(schema)
+
+    bad =
+      entries
+      |> Enum.flat_map(fn entry ->
+        label = entry["name"] || entry["opcode"]
+        Enum.map(entry_fields(entry), &{label, &1})
+      end)
+      |> Enum.filter(fn {_label, field} ->
+        enum_field?(field) and not Map.has_key?(emap, field["enum"])
+      end)
+      |> Enum.map_join(", ", fn {label, field} ->
+        "#{label}.#{field["name"]} -> #{inspect(field["enum"])}"
+      end)
+
+    case bad do
+      "" -> :ok
+      _ -> Mix.raise("Fields reference unknown enums in #{@schema_path}: #{bad}")
+    end
+  end
+
   @spec framing_opcodes(schema()) :: [opcode()]
   defp framing_opcodes(schema) do
     schema
@@ -1303,6 +1496,10 @@ defmodule Minga.Mix.ProtocolGenerator do
   end
 
   defp fixed_field_size(%{"type" => "counted_array"}, _smap), do: nil
+
+  defp fixed_field_size(%{"type" => "enum", "repr" => repr}, smap),
+    do: fixed_type_size(repr, smap)
+
   defp fixed_field_size(%{"type" => type_name}, smap), do: fixed_type_size(type_name, smap)
 
   @spec fixed_structure_size(String.t(), %{String.t() => structure()}) :: non_neg_integer() | nil
@@ -1395,6 +1592,23 @@ defmodule Minga.Mix.ProtocolGenerator do
 
   @spec go_decode_field_assignment_statement(map(), %{String.t() => structure()}, String.t()) ::
           iodata()
+  defp go_decode_field_assignment_statement(
+         %{"name" => name, "type" => "enum", "enum" => enum_name, "repr" => repr},
+         _smap,
+         zero
+       ) do
+    local = go_local_name(name)
+    size = @primitive_sizes[repr]
+
+    [
+      "\t\tif err := decodeRequireLen(data, pos+#{size}, \"#{name}\"); err != nil {\n",
+      "\t\t\treturn #{zero}, offset, err\n",
+      "\t\t}\n",
+      "\t\t#{local} = #{go_struct_name(enum_name)}(#{@go_primitive_reads[repr]})\n",
+      go_pos_advance(size, "\t\t")
+    ]
+  end
+
   defp go_decode_field_assignment_statement(%{"name" => name, "type" => type}, _smap, zero)
        when is_map_key(@go_primitive_reads, type) do
     local = go_local_name(name)
@@ -1546,6 +1760,7 @@ defmodule Minga.Mix.ProtocolGenerator do
   # ── Go type mapping helpers ───────────────────────────────────────────────
 
   @spec go_type(map(), %{String.t() => structure()}) :: String.t()
+  defp go_type(%{"type" => "enum", "enum" => name}, _smap), do: go_struct_name(name)
   defp go_type(%{"type" => "u8"}, _smap), do: "uint8"
   defp go_type(%{"type" => "u16"}, _smap), do: "uint16"
   defp go_type(%{"type" => "u24"}, _smap), do: "uint32"
@@ -1633,6 +1848,7 @@ defmodule Minga.Mix.ProtocolGenerator do
     [
       "// Code generated by mix protocol.gen. DO NOT EDIT.\n\n",
       "package generated\n\n",
+      go_enum_definitions(enums_list(schema)),
       go_structure_definitions(structures, smap),
       go_size_constants(structures, smap),
       go_section_struct_definitions(sections, smap),
@@ -1640,6 +1856,35 @@ defmodule Minga.Mix.ProtocolGenerator do
     ]
     |> IO.iodata_to_binary()
     |> format_generated_go_file()
+  end
+
+  # Emit one named uint type per enum plus a typed constant for each value, so a
+  # decoded enum field surfaces as a self-documenting constant instead of a bare
+  # byte while still marshaling to its integer value.
+  @spec go_enum_definitions([enum()]) :: iodata()
+  defp go_enum_definitions([]), do: []
+
+  defp go_enum_definitions(enums) do
+    Enum.map(enums, fn enum ->
+      type_name = go_struct_name(enum["name"])
+      values = Map.get(enum, "values", [])
+
+      width =
+        values
+        |> Enum.map(fn v -> String.length("#{type_name}#{go_struct_name(v["name"])}") end)
+        |> Enum.max(fn -> 0 end)
+
+      [
+        "// #{type_name} is a generated enum (repr #{enum["repr"]}).\n",
+        "type #{type_name} #{go_type(%{"type" => enum["repr"]}, %{})}\n\n",
+        "const (\n",
+        Enum.map(values, fn v ->
+          cname = "#{type_name}#{go_struct_name(v["name"])}"
+          "\t#{String.pad_trailing(cname, width)} #{type_name} = #{v["value"]}\n"
+        end),
+        ")\n\n"
+      ]
+    end)
   end
 
   @spec go_structure_definitions([structure()], %{String.t() => structure()}) :: iodata()
@@ -1831,6 +2076,23 @@ defmodule Minga.Mix.ProtocolGenerator do
   end
 
   @spec go_decode_field_statement(map(), %{String.t() => structure()}, String.t()) :: iodata()
+  defp go_decode_field_statement(
+         %{"name" => name, "type" => "enum", "enum" => enum_name, "repr" => repr},
+         _smap,
+         zero
+       ) do
+    local = go_local_name(name)
+    size = @primitive_sizes[repr]
+
+    [
+      "\tif err := decodeRequireLen(data, pos+#{size}, \"#{name}\"); err != nil {\n",
+      "\t\treturn #{zero}, offset, err\n",
+      "\t}\n",
+      "\t#{local} := #{go_struct_name(enum_name)}(#{@go_primitive_reads[repr]})\n",
+      go_pos_advance(size, "\t")
+    ]
+  end
+
   defp go_decode_field_statement(%{"name" => name, "type" => type}, _smap, zero)
        when is_map_key(@go_primitive_reads, type) do
     local = go_local_name(name)

@@ -2,6 +2,37 @@
 
 package generated
 
+// CompletionKind is a generated enum (repr u8).
+type CompletionKind uint8
+
+const (
+	CompletionKindUnknown  CompletionKind = 0
+	CompletionKindFunction CompletionKind = 1
+	CompletionKindMethod   CompletionKind = 2
+	CompletionKindVariable CompletionKind = 3
+	CompletionKindField    CompletionKind = 4
+	CompletionKindModule   CompletionKind = 5
+	CompletionKindKeyword  CompletionKind = 7
+	CompletionKindSnippet  CompletionKind = 8
+	CompletionKindConstant CompletionKind = 9
+	CompletionKindStruct   CompletionKind = 11
+	CompletionKindEnum     CompletionKind = 12
+)
+
+// GitFileStatus is a generated enum (repr u8).
+type GitFileStatus uint8
+
+const (
+	GitFileStatusUnknown   GitFileStatus = 0
+	GitFileStatusModified  GitFileStatus = 1
+	GitFileStatusAdded     GitFileStatus = 2
+	GitFileStatusDeleted   GitFileStatus = 3
+	GitFileStatusRenamed   GitFileStatus = 4
+	GitFileStatusCopied    GitFileStatus = 5
+	GitFileStatusUntracked GitFileStatus = 6
+	GitFileStatusConflict  GitFileStatus = 7
+)
+
 type Rect struct {
 	Row    uint16
 	Col    uint16
@@ -98,7 +129,7 @@ type ThemeColor struct {
 }
 
 type CompletionItem struct {
-	Kind   uint8
+	Kind   CompletionKind
 	Label  string
 	Detail string
 }
@@ -129,7 +160,7 @@ type ChangeSummaryEntry struct {
 type GitStatusEntry struct {
 	PathHash uint32
 	Section  uint8
-	Status   uint8
+	Status   GitFileStatus
 	Path     string
 }
 
