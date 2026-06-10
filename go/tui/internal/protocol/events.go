@@ -51,9 +51,18 @@ func EncodeResize(width, height uint16) []byte {
 	return []byte{generated.OPResize, byte(width >> 8), byte(width), byte(height >> 8), byte(height)}
 }
 
-func EncodeKeyPress(codepoint rune, modifiers byte) []byte {
+// EncodeKeyPress encodes a key press carrying a u32 input correlation sequence
+// (ticket #2215) appended after the modifiers byte. The BEAM echoes the sequence
+// on batch_end so the frontend can resolve an end-to-end keystroke-to-write
+// latency sample. A sequence of 0 means "no correlation".
+func EncodeKeyPress(codepoint rune, modifiers byte, seq uint32) []byte {
 	value := uint32(codepoint)
-	return []byte{generated.OPKeyPress, byte(value >> 24), byte(value >> 16), byte(value >> 8), byte(value), modifiers}
+	return []byte{
+		generated.OPKeyPress,
+		byte(value >> 24), byte(value >> 16), byte(value >> 8), byte(value),
+		modifiers,
+		byte(seq >> 24), byte(seq >> 16), byte(seq >> 8), byte(seq),
+	}
 }
 
 func EncodeMouseEvent(row, col int16, button, mods, eventType, clickCount byte) []byte {

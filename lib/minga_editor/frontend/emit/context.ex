@@ -50,7 +50,8 @@ defmodule MingaEditor.Frontend.Emit.Context do
           status_bar_data: term(),
           git_syncing: boolean(),
           git_toast: ProtocolGUI.git_toast() | nil,
-          search: Search.t()
+          search: Search.t(),
+          last_input_seq: non_neg_integer()
         }
 
   @enforce_keys [:port_manager, :capabilities, :theme, :font_registry, :windows, :layout, :shell]
@@ -79,7 +80,8 @@ defmodule MingaEditor.Frontend.Emit.Context do
             status_bar_data: nil,
             git_syncing: false,
             git_toast: nil,
-            search: %Search{}
+            search: %Search{},
+            last_input_seq: 0
 
   @doc "Builds an emit context from render pipeline input."
   @spec from_editor_state(map()) :: t()
@@ -112,7 +114,8 @@ defmodule MingaEditor.Frontend.Emit.Context do
       status_bar_data: MingaEditor.StatusBar.Data.from_state(state),
       git_syncing: Map.get(state, :git_remote_op) != nil,
       git_toast: Map.get(state.shell_state, :git_toast),
-      search: state.workspace.search
+      search: state.workspace.search,
+      last_input_seq: Map.get(state, :last_input_seq, 0)
     }
   end
 

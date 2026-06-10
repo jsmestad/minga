@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/jsmestad/minga/go/tui/internal/generated"
+	"github.com/jsmestad/minga/go/tui/internal/latency"
 	"github.com/jsmestad/minga/go/tui/internal/port"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 )
@@ -46,6 +48,11 @@ type Model struct {
 	bottomPanelScrollback int
 	agentAnimationFrame   uint64
 	agentAnimationRunning bool
+	// latency records end-to-end keystroke-to-write samples (ticket #2215).
+	// It is a pointer so the recorder persists across value-copied Model
+	// updates. hudVisible toggles the on-screen p50/p99 overlay at runtime.
+	latency    *latency.Recorder
+	hudVisible bool
 }
 
 type position struct {
@@ -77,6 +84,21 @@ func New(width, height uint16, out chan<- []byte) Model {
 		gutters:       map[uint16]protocol.Gutter{},
 		indentGuides:  map[uint16]protocol.IndentGuides{},
 		cells:         map[position]cell{},
+		latency:       latency.New(),
+		// MINGA_LATENCY_HUD=1 shows the latency overlay at boot; it is also
+		// toggled at runtime with ctrl+alt+l (ticket #2215).
+		hudVisible: latencyHUDEnvEnabled(),
+	}
+}
+
+// latencyHUDEnvEnabled reports whether MINGA_LATENCY_HUD requests the overlay on
+// at startup. Any non-empty value other than "0"/"false" enables it.
+func latencyHUDEnvEnabled() bool {
+	switch os.Getenv("MINGA_LATENCY_HUD") {
+	case "", "0", "false", "no":
+		return false
+	default:
+		return true
 	}
 }
 
@@ -103,7 +125,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport.SetHeight(m.bodyHeight())
 		m.send(protocol.EncodeResize(uint16(max(msg.Width, 1)), uint16(max(msg.Height, 1))))
 	case tea.KeyPressMsg:
-		if packet, ok := keyPacket(msg); ok {
+		if m.toggleHUD(msg) {
+			break
+		}
+		// Stamp the latency correlation sequence (ticket #2215) before
+		// encoding so the resulting frame's batch_end resolves the sample.
+		seq := m.latency.Stamp()
+		if packet, ok := keyPacket(msg, seq); ok {
 			m.send(packet)
 		}
 	case tea.PasteMsg:
@@ -148,7 +176,7 @@ func (m Model) View() tea.View {
 	parts := append(m.headerLines(), body)
 	parts = append(parts, m.footerLines()...)
 	content := m.zones.Scan(lipgloss.JoinVertical(lipgloss.Left, parts...))
-	out := m.cursorStyleSequence() + m.composeFrame(content) + m.cursorPositionSequence()
+	out := m.cursorStyleSequence() + m.composeFrame(content) + m.latencyHUDSequence() + m.cursorPositionSequence()
 	if m.pendingClipboard != "" {
 		out += ansi.SetClipboard(ansi.SystemClipboard, m.pendingClipboard)
 	}
@@ -163,6 +191,26 @@ func (m Model) View() tea.View {
 
 func (m Model) cursorPositionSequence() string {
 	return ansi.CursorPosition(int(m.cursorCol)+1, int(m.cursorRow)+1)
+}
+
+// latencyHUDSequence renders the latency overlay (ticket #2215) as a top-right
+// badge positioned with raw ANSI so it sits above the composited frame without
+// re-laying-out the lipgloss tree. It is intentionally cheap: a single
+// percentile snapshot and one styled string per frame, so the HUD does not
+// distort the numbers it reports.
+func (m Model) latencyHUDSequence() string {
+	if !m.hudVisible || m.latency == nil {
+		return ""
+	}
+
+	text := " " + m.latency.Snapshot().HUD() + " "
+	badge := lipgloss.NewStyle().
+		Background(lipgloss.Color("#1f2335")).
+		Foreground(lipgloss.Color("#7aa2f7")).
+		Render(text)
+
+	col := max(m.width-lipgloss.Width(badge)+1, 1)
+	return ansi.SaveCursor + ansi.CursorPosition(col, 1) + badge + ansi.RestoreCursor
 }
 
 func (m Model) cursorStyleSequence() string {
@@ -180,6 +228,11 @@ func (m *Model) applyCommands(commands []protocol.Command) tea.Cmd {
 	cmds := make([]tea.Cmd, 0, 1)
 	for _, command := range commands {
 		switch command.Kind {
+		case protocol.CommandBatchEnd:
+			// The frame is now fully applied and about to be written to the
+			// terminal; resolve the keystroke-to-write latency sample for the
+			// echoed correlation sequence (ticket #2215).
+			m.latency.Resolve(command.BatchSeq)
 		case protocol.CommandClear:
 			m.windows = map[uint16]protocol.WindowContent{}
 			m.windowOrder = nil
@@ -348,4 +401,16 @@ func (m Model) send(payload []byte) {
 	if m.out != nil {
 		m.out <- payload
 	}
+}
+
+// toggleHUD flips the latency overlay when the toggle chord (ctrl+alt+l) is
+// pressed and reports whether it consumed the key. Consuming it keeps the chord
+// from being forwarded to the editor as a normal keystroke (ticket #2215).
+func (m *Model) toggleHUD(msg tea.KeyPressMsg) bool {
+	key := msg.Key()
+	if key.Code == 'l' && key.Mod.Contains(tea.ModCtrl) && key.Mod.Contains(tea.ModAlt) {
+		m.hudVisible = !m.hudVisible
+		return true
+	}
+	return false
 }

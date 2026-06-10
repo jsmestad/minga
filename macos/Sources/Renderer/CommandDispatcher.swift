@@ -74,6 +74,11 @@ final class CommandDispatcher {
     /// Non-optional: forgetting to wire this is a compile-time error.
     let guiState: GUIState
 
+    /// Records end-to-end keystroke-to-present latency (ticket #2215). The input
+    /// path stamps a correlation sequence into each key packet; this dispatcher
+    /// resolves the sample when the echoed sequence arrives on `batch_end`.
+    let latency = LatencyRecorder()
+
     /// Window ids that arrived in the current frame batch. Used for input hit testing so stale
     /// retained pane geometry can still render without being clickable.
     private(set) var currentFrameWindowIds: Set<UInt16> = []
@@ -115,7 +120,11 @@ final class CommandDispatcher {
         case .setCursorShape(let shape):
             frameState.cursorShape = shape
 
-        case .batchEnd:
+        case .batchEnd(let seq):
+            // Resolve the keystroke-to-present latency sample for the echoed
+            // input correlation sequence (ticket #2215). The frame is fully
+            // dispatched here and about to be presented by the Metal renderer.
+            latency.resolve(seq: seq)
             pruneStaleWindowGeometry()
             if let firstRender = onFirstRender {
                 firstRender()

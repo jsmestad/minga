@@ -10,41 +10,45 @@ import (
 
 var sgrMouseTailPattern = regexp.MustCompile(`^<?(\d+);(\d+);(\d+)([Mm])$`)
 
-func keyPacket(msg tea.KeyPressMsg) ([]byte, bool) {
+// keyPacket encodes a key press, stamping the latency correlation sequence
+// (ticket #2215) into every actual key_press packet so the resulting frame's
+// batch_end can resolve a keystroke-to-write sample. Mouse-tail and paste
+// packets use other opcodes and carry no sequence.
+func keyPacket(msg tea.KeyPressMsg, seq uint32) ([]byte, bool) {
 	if packet, ok := sgrMouseTailPacket(msg); ok {
 		return packet, true
 	}
 
 	key := msg.Key()
 	if key.Mod.Contains(tea.ModCtrl) && key.Code >= 'a' && key.Code <= 'z' {
-		return protocol.EncodeKeyPress(key.Code, keyModifiers(key)), true
+		return protocol.EncodeKeyPress(key.Code, keyModifiers(key), seq), true
 	}
 
 	switch key.Code {
 	case tea.KeyEnter, tea.KeyKpEnter:
-		return protocol.EncodeKeyPress(13, keyModifiers(key)), true
+		return protocol.EncodeKeyPress(13, keyModifiers(key), seq), true
 	case tea.KeyBackspace:
-		return protocol.EncodeKeyPress(127, keyModifiers(key)), true
+		return protocol.EncodeKeyPress(127, keyModifiers(key), seq), true
 	case tea.KeyEsc:
-		return protocol.EncodeKeyPress(27, keyModifiers(key)), true
+		return protocol.EncodeKeyPress(27, keyModifiers(key), seq), true
 	case tea.KeyTab:
-		return protocol.EncodeKeyPress(9, keyModifiers(key)), true
+		return protocol.EncodeKeyPress(9, keyModifiers(key), seq), true
 	case tea.KeyUp:
-		return protocol.EncodeKeyPress(arrowUp, keyModifiers(key)), true
+		return protocol.EncodeKeyPress(arrowUp, keyModifiers(key), seq), true
 	case tea.KeyDown:
-		return protocol.EncodeKeyPress(arrowDown, keyModifiers(key)), true
+		return protocol.EncodeKeyPress(arrowDown, keyModifiers(key), seq), true
 	case tea.KeyLeft:
-		return protocol.EncodeKeyPress(arrowLeft, keyModifiers(key)), true
+		return protocol.EncodeKeyPress(arrowLeft, keyModifiers(key), seq), true
 	case tea.KeyRight:
-		return protocol.EncodeKeyPress(arrowRight, keyModifiers(key)), true
+		return protocol.EncodeKeyPress(arrowRight, keyModifiers(key), seq), true
 	case tea.KeySpace:
-		return protocol.EncodeKeyPress(' ', keyModifiers(key)), true
+		return protocol.EncodeKeyPress(' ', keyModifiers(key), seq), true
 	}
 
 	if key.Text != "" {
 		runes := []rune(key.Text)
 		if len(runes) == 1 {
-			return protocol.EncodeKeyPress(runes[0], printableTextModifiers(key)), true
+			return protocol.EncodeKeyPress(runes[0], printableTextModifiers(key), seq), true
 		}
 		return protocol.EncodePaste(key.Text), true
 	}

@@ -107,28 +107,35 @@ defmodule MingaEditor.Frontend.ProtocolTest do
   # ── Input event encoding/decoding round-trips ──
 
   describe "decode_event/1 — key_press" do
-    test "decodes a simple key press" do
-      # 'a' = 97, no modifiers
+    test "decodes a legacy key press without a correlation sequence (seq 0)" do
+      # 'a' = 97, no modifiers, no sequence appended
       payload = <<0x01, 97::32, 0::8>>
-      assert {:ok, {:key_press, 97, 0}} = Protocol.decode_event(payload)
+      assert {:ok, {:key_press, 97, 0, 0}} = Protocol.decode_event(payload)
     end
 
     test "decodes key press with modifiers" do
       mods = Bitwise.bor(Protocol.mod_ctrl(), Protocol.mod_shift())
       payload = <<0x01, 99::32, mods::8>>
-      assert {:ok, {:key_press, 99, ^mods}} = Protocol.decode_event(payload)
+      assert {:ok, {:key_press, 99, ^mods, 0}} = Protocol.decode_event(payload)
     end
 
     test "decodes unicode codepoint" do
       # 🥨 = U+1F968 = 129384
       codepoint = 0x1F968
       payload = <<0x01, codepoint::32, 0::8>>
-      assert {:ok, {:key_press, ^codepoint, 0}} = Protocol.decode_event(payload)
+      assert {:ok, {:key_press, ^codepoint, 0, 0}} = Protocol.decode_event(payload)
     end
 
     test "decodes special keys (escape = 27)" do
       payload = <<0x01, 27::32, 0::8>>
-      assert {:ok, {:key_press, 27, 0}} = Protocol.decode_event(payload)
+      assert {:ok, {:key_press, 27, 0, 0}} = Protocol.decode_event(payload)
+    end
+
+    test "decodes the correlation sequence appended after modifiers (ticket #2215)" do
+      mods = Protocol.mod_ctrl()
+      seq = 4_242
+      payload = <<0x01, 97::32, mods::8, seq::32>>
+      assert {:ok, {:key_press, 97, ^mods, ^seq}} = Protocol.decode_event(payload)
     end
   end
 
@@ -275,10 +282,14 @@ defmodule MingaEditor.Frontend.ProtocolTest do
     end
   end
 
-  describe "encode_batch_end/0" do
-    test "encodes batch_end" do
+  describe "encode_batch_end/1" do
+    test "encodes batch_end with a zero correlation sequence by default" do
       encoded = Protocol.encode_batch_end()
-      assert <<0x13>> = encoded
+      assert <<0x13, 0::32>> = encoded
+    end
+
+    test "encodes the echoed input correlation sequence (ticket #2215)" do
+      assert <<0x13, 4_242::32>> = Protocol.encode_batch_end(4_242)
     end
   end
 
@@ -293,13 +304,13 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       assert <<0x12>> = Protocol.encode_clear()
     end
 
-    test "batch_end is a single byte" do
-      assert <<0x13>> = Protocol.encode_batch_end()
+    test "batch_end carries a u32 correlation sequence (opcode + 4 bytes)" do
+      assert <<0x13, 0::32>> = Protocol.encode_batch_end()
     end
 
     test "key_press event has correct byte layout" do
       payload = <<0x01, 65::32, 0x03::8>>
-      assert {:ok, {:key_press, 65, 3}} = Protocol.decode_event(payload)
+      assert {:ok, {:key_press, 65, 3, 0}} = Protocol.decode_event(payload)
     end
 
     test "set_cursor_shape has correct byte layout" do

@@ -18,9 +18,10 @@ defmodule MingaEditor.Frontend.ProtocolPropertyTest do
 
   property "decode_event produces valid key_press for any codepoint and modifiers" do
     check all(event <- key_press_event()) do
-      assert {:ok, {:key_press, codepoint, modifiers}} = Protocol.decode_event(event)
+      assert {:ok, {:key_press, codepoint, modifiers, seq}} = Protocol.decode_event(event)
       assert is_integer(codepoint) and codepoint > 0
       assert is_integer(modifiers) and modifiers >= 0
+      assert is_integer(seq) and seq >= 0
     end
   end
 

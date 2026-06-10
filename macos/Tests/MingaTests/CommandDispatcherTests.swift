@@ -72,7 +72,7 @@ struct CommandDispatcherRoutingTests {
         dispatcher.frameState.verticalSeparators = [Wire.VerticalSeparator(col: 20, startRow: 0, endRow: 9)]
 
         dispatcher.dispatch(.clear)
-        dispatcher.dispatch(.batchEnd)
+        dispatcher.dispatch(.batchEnd(seq: 0))
 
         #expect(gui.windowContents.isEmpty)
         #expect(dispatcher.frameState.windowGutters.isEmpty)
@@ -91,7 +91,7 @@ struct CommandDispatcherRoutingTests {
             documentHighlights: []
         )
 
-        dispatcher.dispatch(.batchEnd)
+        dispatcher.dispatch(.batchEnd(seq: 0))
 
         #expect(gui.windowContents[1] != nil)
     }
@@ -971,7 +971,7 @@ struct CommandDispatcherRoutingTests {
         dispatcher.dispatch(.clear)
         dispatcher.dispatch(.guiGutter(data: liveGutter))
         dispatcher.dispatch(.guiWindowContent(data: liveContent))
-        dispatcher.dispatch(.batchEnd)
+        dispatcher.dispatch(.batchEnd(seq: 0))
 
         #expect(dispatcher.frameState.windowGutters[1] != nil)
         #expect(dispatcher.frameState.windowGutters[2] == nil)
@@ -986,11 +986,11 @@ struct CommandDispatcherRoutingTests {
         var callCount = 0
         dispatcher.onFirstRender = { callCount += 1 }
 
-        dispatcher.dispatch(.batchEnd)
+        dispatcher.dispatch(.batchEnd(seq: 0))
         #expect(callCount == 1)
         #expect(dispatcher.onFirstRender == nil)
 
-        dispatcher.dispatch(.batchEnd)
+        dispatcher.dispatch(.batchEnd(seq: 0))
         #expect(callCount == 1)
     }
 

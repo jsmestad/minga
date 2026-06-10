@@ -93,7 +93,7 @@ func TestDecodeWindowRowsAndViewportDeltasIncludeRowRefs(t *testing.T) {
 			packet := append([]byte{tt.opcode, 2, 0x01, 0, byte(len(tt.header))}, tt.header...)
 			packet = append(packet, 0x02, byte(len(rowsPayload)>>8), byte(len(rowsPayload)))
 			packet = append(packet, rowsPayload...)
-			packet = append(packet, generated.OPBatchEnd)
+			packet = append(packet, generated.OPBatchEnd, 0, 0, 0, 0)
 
 			command, err := DecodeCommand(packet)
 			if err != nil {
@@ -132,7 +132,7 @@ func TestDecodeWindowRowsAndViewportDeltasIncludeRowRefs(t *testing.T) {
 
 func TestDecodeSkipsFontCommandsWithoutDroppingFollowingCommands(t *testing.T) {
 	registerFont := []byte{generated.OPRegisterFont, 1, 0, 4, 'F', 'i', 'r', 'a'}
-	batchEnd := []byte{generated.OPBatchEnd}
+	batchEnd := []byte{generated.OPBatchEnd, 0, 0, 0, 0}
 	packet := append(registerFont, batchEnd...)
 
 	first, err := DecodeCommand(packet)
@@ -230,7 +230,7 @@ func TestDecodeWorkspacesChromeDoesNotSwallowFollowingCommands(t *testing.T) {
 	body = append(body, tab...)
 	packet := []byte{generated.OPGuiWorkspaces, byte(len(body) >> 8), byte(len(body))}
 	packet = append(packet, body...)
-	packet = append(packet, generated.OPBatchEnd)
+	packet = append(packet, generated.OPBatchEnd, 0, 0, 0, 0)
 
 	first, err := DecodeCommand(packet)
 	if err != nil {
@@ -239,8 +239,8 @@ func TestDecodeWorkspacesChromeDoesNotSwallowFollowingCommands(t *testing.T) {
 	if first.Kind != CommandChrome {
 		t.Fatalf("kind = %v, want chrome", first.Kind)
 	}
-	if first.Size != len(packet)-1 {
-		t.Fatalf("workspace size = %d, want %d", first.Size, len(packet)-1)
+	if first.Size != len(packet)-5 {
+		t.Fatalf("workspace size = %d, want %d", first.Size, len(packet)-5)
 	}
 	spaces := first.Chrome.Spaces
 	if spaces.ActiveID != 7 || len(spaces.Spaces) != 1 || len(spaces.Tabs) != 1 {
@@ -267,14 +267,14 @@ func TestDecodeCompletionChromeDoesNotSwallowFollowingCommands(t *testing.T) {
 	item = append(item, string16("Enum.map/2")...)
 	packet := []byte{generated.OPGuiCompletion, 1, 0, 9, 0, 4, 0, 0, 0, 1}
 	packet = append(packet, item...)
-	packet = append(packet, generated.OPBatchEnd)
+	packet = append(packet, generated.OPBatchEnd, 0, 0, 0, 0)
 
 	first, err := DecodeCommand(packet)
 	if err != nil {
 		t.Fatalf("DecodeCommand returned error: %v", err)
 	}
-	if first.Size != len(packet)-1 {
-		t.Fatalf("completion size = %d, want %d", first.Size, len(packet)-1)
+	if first.Size != len(packet)-5 {
+		t.Fatalf("completion size = %d, want %d", first.Size, len(packet)-5)
 	}
 	completion := first.Chrome.Complete
 	if !completion.Visible || completion.Row != 9 || completion.Col != 4 || len(completion.Items) != 1 {
@@ -302,14 +302,14 @@ func TestDecodeWhichKeyChromeDoesNotSwallowFollowingCommands(t *testing.T) {
 	packet = append(packet, string16("SPC")...)
 	packet = append(packet, 0, 2, 0, 1)
 	packet = append(packet, binding...)
-	packet = append(packet, generated.OPBatchEnd)
+	packet = append(packet, generated.OPBatchEnd, 0, 0, 0, 0)
 
 	first, err := DecodeCommand(packet)
 	if err != nil {
 		t.Fatalf("DecodeCommand returned error: %v", err)
 	}
-	if first.Size != len(packet)-1 {
-		t.Fatalf("which-key size = %d, want %d", first.Size, len(packet)-1)
+	if first.Size != len(packet)-5 {
+		t.Fatalf("which-key size = %d, want %d", first.Size, len(packet)-5)
 	}
 	which := first.Chrome.Which
 	if !which.Visible || which.Prefix != "SPC" || which.PageCount != 2 || len(which.Bindings) != 1 {
@@ -350,14 +350,14 @@ func TestDecodePickerChromeDoesNotSwallowFollowingCommands(t *testing.T) {
 	body = append(body, section(0x06, []byte{0})...)
 	packet := []byte{generated.OPGuiPicker, 6}
 	packet = append(packet, body...)
-	packet = append(packet, generated.OPBatchEnd)
+	packet = append(packet, generated.OPBatchEnd, 0, 0, 0, 0)
 
 	first, err := DecodeCommand(packet)
 	if err != nil {
 		t.Fatalf("DecodeCommand returned error: %v", err)
 	}
-	if first.Size != len(packet)-1 {
-		t.Fatalf("picker size = %d, want %d", first.Size, len(packet)-1)
+	if first.Size != len(packet)-5 {
+		t.Fatalf("picker size = %d, want %d", first.Size, len(packet)-5)
 	}
 	picker := first.Chrome.Picker
 	if !picker.Visible || picker.Title != "Files" || picker.Query != "main" || picker.Marked != 1 || len(picker.Items) != 1 {
@@ -384,14 +384,14 @@ func TestDecodePickerPreviewChromeDoesNotSwallowFollowingCommands(t *testing.T) 
 	segment = append(segment, string16("def main")...)
 	packet := []byte{generated.OPGuiPickerPreview, 1, 0, 1, 1}
 	packet = append(packet, segment...)
-	packet = append(packet, generated.OPBatchEnd)
+	packet = append(packet, generated.OPBatchEnd, 0, 0, 0, 0)
 
 	first, err := DecodeCommand(packet)
 	if err != nil {
 		t.Fatalf("DecodeCommand returned error: %v", err)
 	}
-	if first.Size != len(packet)-1 {
-		t.Fatalf("picker preview size = %d, want %d", first.Size, len(packet)-1)
+	if first.Size != len(packet)-5 {
+		t.Fatalf("picker preview size = %d, want %d", first.Size, len(packet)-5)
 	}
 	preview := first.Chrome.Preview
 	if !preview.Visible || len(preview.Lines) != 1 || len(preview.Lines[0].Segments) != 1 {
@@ -667,12 +667,12 @@ func TestDecodeRemainingSemanticChrome(t *testing.T) {
 }
 
 func TestDecodeThemeAndEverydayChrome(t *testing.T) {
-	packet := []byte{generated.OPGuiTheme, 2, 0x40, 0x11, 0x22, 0x33, 0x30, 0x44, 0x55, 0x66, generated.OPBatchEnd}
+	packet := []byte{generated.OPGuiTheme, 2, 0x40, 0x11, 0x22, 0x33, 0x30, 0x44, 0x55, 0x66, generated.OPBatchEnd, 0, 0, 0, 0}
 	first, err := DecodeCommand(packet)
 	if err != nil {
 		t.Fatalf("DecodeCommand theme returned error: %v", err)
 	}
-	if first.Size != len(packet)-1 || first.Chrome.Theme.Colors[0x40] != 0x112233 {
+	if first.Size != len(packet)-5 || first.Chrome.Theme.Colors[0x40] != 0x112233 {
 		t.Fatalf("theme decoded incorrectly: size=%d theme=%+v", first.Size, first.Chrome.Theme)
 	}
 
@@ -694,12 +694,13 @@ func TestDecodeThemeAndEverydayChrome(t *testing.T) {
 	git = append(git, 0)
 	git = append(git, string16("/repo")...)
 	git = append(git, string16("last commit")...)
-	git = append(git, 0, 3, generated.OPBatchEnd)
+	// Trailing batch_end is a fixed:5 sentinel (opcode + echoed seq u32).
+	git = append(git, 0, 3, generated.OPBatchEnd, 0, 0, 0, 0)
 	command, err = DecodeCommand(git)
 	if err != nil {
 		t.Fatalf("DecodeCommand git returned error: %v", err)
 	}
-	if command.Size != len(git)-1 || command.Chrome.Git.Branch != "main" || command.Chrome.Git.Ahead != 2 || len(command.Chrome.Git.Entries) != 1 || command.Chrome.Git.StashCount != 3 {
+	if command.Size != len(git)-5 || command.Chrome.Git.Branch != "main" || command.Chrome.Git.Ahead != 2 || len(command.Chrome.Git.Entries) != 1 || command.Chrome.Git.StashCount != 3 {
 		t.Fatalf("git decoded incorrectly: size=%d git=%+v", command.Size, command.Chrome.Git)
 	}
 
@@ -864,7 +865,8 @@ func TestDecodePanelAndSidebarChrome(t *testing.T) {
 	tool = append(tool, string16("")...)
 	tool = append(tool, 0)
 	tool = append(tool, string16("")...)
-	tool = append(tool, generated.OPBatchEnd)
+	// Trailing batch_end is a fixed:5 sentinel (opcode + echoed seq u32).
+	tool = append(tool, generated.OPBatchEnd, 0, 0, 0, 0)
 	command, err = DecodeCommand(tool)
 	if err != nil {
 		t.Fatalf("DecodeCommand tool manager returned error: %v", err)
@@ -872,8 +874,8 @@ func TestDecodePanelAndSidebarChrome(t *testing.T) {
 	if !command.Chrome.ToolManager.Visible || len(command.Chrome.ToolManager.Tools) != 1 || command.Chrome.ToolManager.Tools[0].Label != "Elixir LS" {
 		t.Fatalf("tool manager decoded incorrectly: %+v", command.Chrome.ToolManager)
 	}
-	if command.Size != len(tool)-1 {
-		t.Fatalf("tool manager size = %d, want %d", command.Size, len(tool)-1)
+	if command.Size != len(tool)-5 {
+		t.Fatalf("tool manager size = %d, want %d", command.Size, len(tool)-5)
 	}
 	second, err := DecodeCommand(tool[command.Size:])
 	if err != nil {

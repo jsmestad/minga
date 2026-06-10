@@ -404,6 +404,7 @@ struct DecoderForwardCompatTests {
         // Known commands that follow
         data.append(OP_CLEAR)
         data.append(OP_BATCH_END)
+        data.append(contentsOf: [0, 0, 0, 0]) // batch_end echoed seq (fixed:5, #2215)
 
         var commands: [RenderCommand] = []
         try decodeCommands(from: data) { cmd in
@@ -556,6 +557,7 @@ struct DecoderEdgeCaseTests {
         var data = Data()
         data.append(OP_CLEAR)
         data.append(OP_BATCH_END)
+        data.append(contentsOf: [0, 0, 0, 0]) // batch_end echoed seq (fixed:5, #2215)
 
         var commands: [RenderCommand] = []
         try decodeCommands(from: data) { cmd in

@@ -423,22 +423,14 @@ defmodule Minga.Test.HeadlessPort do
     }
   end
 
+  # batch_end now carries the echoed input correlation sequence (ticket #2215).
+  defp apply_command(<<@op_batch_end, input_seq::32>>, state) do
+    apply_batch_end(state, input_seq)
+  end
+
+  # Legacy bare batch_end (frontends/tests that predate the sequence echo).
   defp apply_command(<<@op_batch_end>>, state) do
-    state = project_semantic_grid(state)
-
-    snapshot = %{
-      grid: state.grid,
-      cursor: state.cursor,
-      cursor_shape: state.cursor_shape,
-      width: state.width,
-      height: state.height
-    }
-
-    Enum.each(state.waiters, fn {pid, ref} ->
-      send(pid, {:frame_ready, ref, snapshot})
-    end)
-
-    %{state | waiters: [], frame_count: state.frame_count + 1}
+    apply_batch_end(state, 0)
   end
 
   defp apply_command(<<@op_gui_window_content, _rest::binary>> = binary, state) do
@@ -517,6 +509,26 @@ defmodule Minga.Test.HeadlessPort do
        do: state
 
   defp apply_command(_cmd_binary, state), do: state
+
+  @spec apply_batch_end(State.t(), non_neg_integer()) :: State.t()
+  defp apply_batch_end(state, input_seq) do
+    state = project_semantic_grid(state)
+
+    snapshot = %{
+      grid: state.grid,
+      cursor: state.cursor,
+      cursor_shape: state.cursor_shape,
+      width: state.width,
+      height: state.height,
+      input_seq: input_seq
+    }
+
+    Enum.each(state.waiters, fn {pid, ref} ->
+      send(pid, {:frame_ready, ref, snapshot})
+    end)
+
+    %{state | waiters: [], frame_count: state.frame_count + 1}
+  end
 
   @spec project_semantic_grid(State.t()) :: State.t()
   defp project_semantic_grid(state) do

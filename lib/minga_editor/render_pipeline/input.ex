@@ -90,7 +90,11 @@ defmodule MingaEditor.RenderPipeline.Input do
     caches: %Caches{},
     # Renderer-owned font registration state. Editor snapshots use a fresh
     # fallback; Renderer.Server replaces it with its persistent registry.
-    font_registry: FontRegistry.new()
+    font_registry: FontRegistry.new(),
+    # Latest frontend-originated input correlation sequence (ticket #2215),
+    # echoed on batch_end so the frontend can resolve a keystroke-to-write
+    # latency sample. 0 means "no correlation".
+    last_input_seq: 0
   ]
 
   @typedoc """
@@ -136,6 +140,7 @@ defmodule MingaEditor.RenderPipeline.Input do
           status_bar_data: StatusBarData.t() | nil,
           caches: Caches.t(),
           terminal_viewport: Viewport.t(),
+          last_input_seq: non_neg_integer(),
           workspace: workspace()
         }
 
@@ -170,6 +175,7 @@ defmodule MingaEditor.RenderPipeline.Input do
       status_bar_data: safe_status_bar_data(state),
       caches: state.caches,
       terminal_viewport: state.terminal_viewport,
+      last_input_seq: state.last_input_seq,
       workspace: %{
         windows: ws.windows,
         buffers: ws.buffers,

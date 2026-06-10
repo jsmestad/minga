@@ -9,7 +9,7 @@ import (
 )
 
 func TestKeyPacketPreservesCtrlLetter(t *testing.T) {
-	packet, ok := keyPacket(tea.KeyPressMsg(tea.Key{Code: 'c', Mod: tea.ModCtrl}))
+	packet, ok := keyPacket(tea.KeyPressMsg(tea.Key{Code: 'c', Mod: tea.ModCtrl}), 0)
 	if !ok {
 		t.Fatal("ctrl-c should encode a key packet")
 	}
@@ -18,8 +18,25 @@ func TestKeyPacketPreservesCtrlLetter(t *testing.T) {
 	}
 }
 
+// TestKeyPacketStampsCorrelationSequence verifies the latency sequence (ticket
+// #2215) is appended as a big-endian u32 after the modifiers byte.
+func TestKeyPacketStampsCorrelationSequence(t *testing.T) {
+	const seq = 0x01020304
+	packet, ok := keyPacket(tea.KeyPressMsg(tea.Key{Code: 'a', Text: "a"}), seq)
+	if !ok {
+		t.Fatal("printable key should encode a key packet")
+	}
+	if len(packet) != 10 {
+		t.Fatalf("key packet len = %d, want 10 (opcode + codepoint + mods + seq)", len(packet))
+	}
+	got := uint32(packet[6])<<24 | uint32(packet[7])<<16 | uint32(packet[8])<<8 | uint32(packet[9])
+	if got != seq {
+		t.Fatalf("stamped seq = %#x, want %#x", got, uint32(seq))
+	}
+}
+
 func TestKeyPacketEncodesSpace(t *testing.T) {
-	packet, ok := keyPacket(tea.KeyPressMsg(tea.Key{Code: tea.KeySpace, Text: " "}))
+	packet, ok := keyPacket(tea.KeyPressMsg(tea.Key{Code: tea.KeySpace, Text: " "}), 0)
 	if !ok {
 		t.Fatal("space should encode a key packet")
 	}
@@ -33,7 +50,7 @@ func TestKeyPacketEncodesPrintableUppercaseWithoutShiftModifier(t *testing.T) {
 		{Code: 'T', Text: "T"},
 		{Code: 'T', Text: "T", Mod: tea.ModShift},
 	} {
-		packet, ok := keyPacket(tea.KeyPressMsg(key))
+		packet, ok := keyPacket(tea.KeyPressMsg(key), 0)
 		if !ok {
 			t.Fatal("uppercase printable should encode a key packet")
 		}
@@ -45,7 +62,7 @@ func TestKeyPacketEncodesPrintableUppercaseWithoutShiftModifier(t *testing.T) {
 
 func TestKeyPacketEncodesLoggedInsertSentence(t *testing.T) {
 	for _, ch := range "This is the thing that we're doing" {
-		packet, ok := keyPacket(tea.KeyPressMsg(tea.Key{Code: ch, Text: string(ch)}))
+		packet, ok := keyPacket(tea.KeyPressMsg(tea.Key{Code: ch, Text: string(ch)}), 0)
 		if !ok {
 			t.Fatalf("char %q should encode a key packet", ch)
 		}
@@ -56,7 +73,7 @@ func TestKeyPacketEncodesLoggedInsertSentence(t *testing.T) {
 }
 
 func TestKeyPacketParsesFragmentedSGRMouseTail(t *testing.T) {
-	packet, ok := keyPacket(tea.KeyPressMsg(tea.Key{Code: tea.KeyExtended, Text: "<65;57;23M"}))
+	packet, ok := keyPacket(tea.KeyPressMsg(tea.Key{Code: tea.KeyExtended, Text: "<65;57;23M"}), 0)
 	if !ok {
 		t.Fatal("SGR mouse tail should encode a mouse packet")
 	}
@@ -92,7 +109,7 @@ func TestMousePacketEncodesHorizontalWheel(t *testing.T) {
 }
 
 func TestKeyPacketParsesShiftWheelSGRMouseTailAsHorizontal(t *testing.T) {
-	packet, ok := keyPacket(tea.KeyPressMsg(tea.Key{Code: tea.KeyExtended, Text: "<69;57;23M"}))
+	packet, ok := keyPacket(tea.KeyPressMsg(tea.Key{Code: tea.KeyExtended, Text: "<69;57;23M"}), 0)
 	if !ok {
 		t.Fatal("SGR shift wheel tail should encode a mouse packet")
 	}
@@ -112,7 +129,7 @@ func TestPastePacketEncodesBracketedPasteAsPasteEvent(t *testing.T) {
 }
 
 func TestKeyPacketPreservesNavigationModifiers(t *testing.T) {
-	packet, ok := keyPacket(tea.KeyPressMsg(tea.Key{Code: tea.KeyRight, Mod: tea.ModCtrl | tea.ModShift}))
+	packet, ok := keyPacket(tea.KeyPressMsg(tea.Key{Code: tea.KeyRight, Mod: tea.ModCtrl | tea.ModShift}), 0)
 	if !ok {
 		t.Fatal("ctrl-shift-right should encode a key packet")
 	}

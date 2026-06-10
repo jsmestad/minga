@@ -168,7 +168,9 @@ struct FrontendExtensionRuntimeMessage: Sendable, Equatable {
 /// A decoded render command from the BEAM.
 enum RenderCommand: Sendable {
     case clear
-    case batchEnd
+    /// Frame boundary carrying the echoed input correlation sequence (ticket
+    /// #2215). 0 means "no correlation".
+    case batchEnd(seq: UInt32)
     /// Legacy cell-grid text commands. Decoded but discarded by CommandDispatcher.
     /// Kept in the enum so the decoder can skip the bytes without crashing.
     case drawText(row: UInt16, col: UInt16, fg: UInt32, bg: UInt32, attrs: UInt8, text: String)
@@ -363,7 +365,11 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         return (.clear, 1)
 
     case OP_BATCH_END:
-        return (.batchEnd, 1)
+        // batch_end now carries a u32 echoed input correlation sequence
+        // (ticket #2215): <opcode, seq:u32>.
+        guard data.count >= rest + 4 else { throw ProtocolDecodeError.malformed }
+        let seq = readU32(data, rest)
+        return (.batchEnd(seq: seq), 5)
 
     case OP_DRAW_TEXT:
         // row:2, col:2, fg:3, bg:3, attrs:1, text_len:2 = 13 bytes after opcode
