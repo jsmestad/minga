@@ -1011,24 +1011,18 @@ defmodule MingaEditor do
   @doc false
   @spec apply_runtime_config_option(EditorState.t(), atom(), term()) :: EditorState.t()
   def apply_runtime_config_option(state, :theme, theme_name) when is_atom(theme_name) do
-    case MingaEditor.UI.Theme.get(theme_name) do
-      {:ok, theme} ->
-        if state.port_manager do
-          MingaEditor.Frontend.send_commands(state.port_manager, [
-            MingaEditor.Frontend.Protocol.GUI.encode_gui_theme(theme)
-          ])
-        end
+    theme = MingaEditor.UI.Theme.get!(theme_name)
 
-        state
-        |> EditorState.apply_theme(theme)
-        |> EditorState.invalidate_all_windows()
-        |> Layout.invalidate()
-
-      :error ->
-        state
+    if state.port_manager do
+      MingaEditor.Frontend.send_commands(state.port_manager, [
+        MingaEditor.Frontend.Protocol.GUI.encode_gui_theme(theme)
+      ])
     end
-  catch
-    :exit, _ -> state
+
+    state
+    |> EditorState.apply_theme(theme)
+    |> EditorState.invalidate_all_windows()
+    |> Layout.invalidate()
   end
 
   def apply_runtime_config_option(state, name, _value)

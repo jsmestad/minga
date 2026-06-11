@@ -1,12 +1,15 @@
 defmodule Minga.ThemeTest do
-  use ExUnit.Case, async: true
+  # async: false because this suite mutates the global theme pack registry.
+  use ExUnit.Case, async: false
 
+  alias Minga.Extensions.ThemePacks
   alias MingaEditor.UI.Theme
 
   describe "available/0" do
     test "includes fallback and all bundled pack themes" do
       themes = Theme.available()
       assert :minga_default in themes
+      assert :astrodark in themes
       assert :doom_one in themes
       assert :catppuccin_frappe in themes
       assert :catppuccin_latte in themes
@@ -21,6 +24,15 @@ defmodule Minga.ThemeTest do
   describe "default/0" do
     test "returns :astrodark" do
       assert Theme.default() == :astrodark
+    end
+
+    test "stays :astrodark when AstroNvim is unavailable" do
+      ThemePacks.unregister_pack(ThemePacks.AstroNvim)
+
+      assert Theme.default() == :astrodark
+      refute :astrodark in Theme.available()
+    after
+      ThemePacks.register_pack(ThemePacks.AstroNvim)
     end
   end
 
@@ -107,6 +119,7 @@ defmodule Minga.ThemeTest do
   describe "all themes are valid" do
     for theme_name <- [
           :minga_default,
+          :astrodark,
           :doom_one,
           :catppuccin_frappe,
           :catppuccin_latte,

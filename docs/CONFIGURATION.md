@@ -27,7 +27,7 @@ That's it. Save the file and restart Minga. Your options take effect immediately
 | `:autopair` | boolean | `true` | Auto-insert matching brackets and quotes |
 | `:autopair_block` | boolean | `true` | Auto-insert language-aware block-closing keywords on Enter |
 | `:scroll_margin` | non-negative integer | `5` | Lines to keep visible above/below cursor when scrolling |
-| `:theme` | theme name atom | `:doom_one` | Color theme (see [Themes](#themes) below) |
+| `:theme` | theme name atom | `:astrodark` | Color theme (see [Themes](#themes) below) |
 | `:indent_with` | `:spaces` or `:tabs` | `:spaces` | Whether to indent with spaces or tab characters |
 | `:trim_trailing_whitespace` | boolean | `false` | Strip trailing whitespace on save |
 | `:insert_final_newline` | boolean | `false` | Ensure file ends with a newline on save |
@@ -358,7 +358,8 @@ set :theme, :catppuccin_mocha
 
 | Theme | Style |
 |-------|-------|
-| `:doom_one` | Dark (default), Doom Emacs |
+| `:astrodark` | Dark (default), AstroNvim |
+| `:doom_one` | Dark, Doom Emacs |
 | `:catppuccin_frappe` | Dark, Catppuccin family |
 | `:catppuccin_latte` | Light, Catppuccin family |
 | `:catppuccin_macchiato` | Dark, Catppuccin family |

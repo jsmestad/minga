@@ -33,6 +33,7 @@ type Model struct {
 	windowOrder      []uint16
 	chrome           map[byte]protocol.ChromePayload
 	activePalette    palette
+	themeApplied     bool
 	gutters          map[uint16]protocol.Gutter
 	indentGuides     map[uint16]protocol.IndentGuides
 	cursorRow        uint16
@@ -138,7 +139,7 @@ func New(width, height uint16, out chan<- []byte) Model {
 		zones:             newZoneManager(),
 		windows:           map[uint16]protocol.WindowContent{},
 		chrome:            map[byte]protocol.ChromePayload{},
-		activePalette:     defaultPalette(),
+		activePalette:     bootstrapPalette(),
 		gutters:           map[uint16]protocol.Gutter{},
 		indentGuides:      map[uint16]protocol.IndentGuides{},
 		extensionRuntimes: map[string]protocol.ExtensionRuntimePayload{},
@@ -416,10 +417,23 @@ func (m *Model) applyCommands(commands []protocol.Command) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+func stagingThemeValidation(commands []protocol.Command) (found bool, missing []byte) {
+	for _, command := range commands {
+		if command.Kind == protocol.CommandChrome && command.Chrome.Opcode == generated.OPGuiTheme {
+			found = true
+			missing = missingThemeSlots(command.Chrome.Theme)
+			if len(missing) > 0 {
+				return true, missing
+			}
+		}
+	}
+	return found, nil
+}
+
 // commitStaging validates the open transaction against the commit and, if valid,
 // replays its buffered commands through the live mutation switch in one shot,
 // then fires the commit-gated behaviors (latency resolve). An invalid or missing
-// transaction discards staging and requests a keyframe (#2219).
+// transaction discards staging and requests a keyframe (#2219), except a missing theme on a keyframe latches a protocol error because the BEAM must own theme selection.
 func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cmd {
 	if m.staging == nil {
 		// commit with no open begin: the begin was lost or truncated. Resync.
@@ -434,12 +448,24 @@ func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cm
 		return m.invalidateStaging(cmds, "frame base mismatch")
 	}
 
-	// Resync safety (#2288 AC 5): a keyframe (base 0) is a full reset of the
-	// staged state, so the composed-line cache must reset with it. The keyframe
-	// carries fresh full rows for the whole frame; clearing first guarantees no
-	// line composed against the pre-resync state survives. Delta frames (base
-	// != 0) keep the cache so their ref rows hit it.
+	// Resync safety (#2288 AC 5): gui_theme must be complete before any frame
+	// promotes. Keyframes must also carry gui_theme at all because the BEAM owns
+	// theme selection; otherwise the frontend would silently keep using
+	// bootstrap colors and hide a startup bug.
+	found, missing := stagingThemeValidation(m.staging.commands)
+	if found && len(missing) > 0 {
+		if m.staging.base == 0 {
+			m.protocolError = fmt.Sprintf("missing gui_theme slots in keyframe: %s", formatMissingThemeSlots(missing))
+			return m.invalidateStaging(cmds, "missing gui_theme slots in keyframe")
+		}
+		m.protocolError = fmt.Sprintf("missing gui_theme slots: %s", formatMissingThemeSlots(missing))
+		return m.invalidateStaging(cmds, "missing gui_theme slots")
+	}
 	if m.staging.base == 0 {
+		if !found {
+			m.protocolError = "missing gui_theme in keyframe"
+			return m.invalidateStaging(cmds, "missing gui_theme in keyframe")
+		}
 		m.lineCache.reset()
 	}
 
@@ -505,6 +531,7 @@ func (m *Model) applyMutation(command protocol.Command) {
 		switch command.Chrome.Opcode {
 		case generated.OPGuiTheme:
 			m.activePalette = paletteFromTheme(command.Chrome.Theme)
+			m.themeApplied = true
 		case generated.OPGuiCursorline:
 			m.cursorlineChrome = command.Chrome.CursorlineChrome
 		case generated.OPGuiGutter:

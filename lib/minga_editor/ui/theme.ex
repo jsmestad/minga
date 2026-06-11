@@ -6,7 +6,7 @@ defmodule MingaEditor.UI.Theme do
   syntax highlighting, editor chrome, modeline, gutter, picker, minibuffer,
   search highlights, and popups.
 
-  Built-in themes are shipped as bundled theme pack extensions under `Minga.Extensions.ThemePacks`. The core retains a single minimal fallback theme (`:minga_default`) that always loads regardless of which extensions are enabled.
+  Built-in themes are shipped as bundled theme pack extensions under `Minga.Extensions.ThemePacks`. The core retains a single minimal theme (`:minga_default`) for tests and explicit use, but startup does not silently fall back to it when the configured theme is unavailable.
 
   ## Usage in config
 
@@ -563,14 +563,9 @@ defmodule MingaEditor.UI.Theme do
     Minga.Config.ThemeRegistry.available()
   end
 
-  @doc "Returns the default theme name atom. Falls back to `:minga_default` if `:astrodark` is not available."
+  @doc "Returns the configured default theme name atom. Startup fails if this theme is unavailable."
   @spec default() :: atom()
-  def default do
-    case Minga.Config.ThemeRegistry.get_theme(:astrodark) do
-      {:ok, _} -> :astrodark
-      :error -> :minga_default
-    end
-  end
+  def default, do: :astrodark
 
   # Folder icons have no language definition; this is their default tint when a
   # theme does not override the `:directory` key.

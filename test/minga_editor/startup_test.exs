@@ -317,6 +317,71 @@ defmodule MingaEditor.StartupTest do
       Process.delete(:minga_config_options)
     end
 
+    test "apply_config_options raises when the configured theme is unavailable" do
+      options_server = start_supervised!({Options, name: nil}, id: :missing_theme_options)
+      {:ok, :astrodark} = Options.set(options_server, :theme, :astrodark)
+      Minga.Extensions.ThemePacks.unregister_pack(Minga.Extensions.ThemePacks.AstroNvim)
+
+      state =
+        Startup.build_initial_state(
+          backend: :headless,
+          port_manager: nil,
+          parser_manager: nil,
+          options_server: options_server,
+          width: 80,
+          height: 24
+        )
+
+      assert_raise ArgumentError, ~r/unknown theme: :astrodark/, fn ->
+        Startup.apply_config_options(state)
+      end
+    after
+      Minga.Extensions.ThemePacks.register_pack(Minga.Extensions.ThemePacks.AstroNvim)
+    end
+
+    test "apply_config_options exits instead of silently keeping a fallback theme when options go away" do
+      options_server = start_supervised!({Options, name: nil}, id: :gone_options)
+      {:ok, _} = Options.set(options_server, :theme, :doom_one)
+
+      state =
+        Startup.build_initial_state(
+          backend: :headless,
+          port_manager: nil,
+          parser_manager: nil,
+          options_server: options_server,
+          width: 80,
+          height: 24
+        )
+
+      ref = Process.monitor(options_server)
+      Process.exit(options_server, :shutdown)
+      assert_receive {:DOWN, ^ref, :process, ^options_server, _}
+
+      assert catch_exit(Startup.apply_config_options(state))
+    end
+
+    test "runtime theme application raises when the requested theme is unavailable" do
+      options_server = start_supervised!({Options, name: nil}, id: :runtime_missing_theme_options)
+      {:ok, :doom_one} = Options.set(options_server, :theme, :doom_one)
+      Minga.Extensions.ThemePacks.unregister_pack(Minga.Extensions.ThemePacks.AstroNvim)
+
+      state =
+        Startup.build_initial_state(
+          backend: :headless,
+          port_manager: nil,
+          parser_manager: nil,
+          options_server: options_server,
+          width: 80,
+          height: 24
+        )
+
+      assert_raise ArgumentError, ~r/unknown theme: :astrodark/, fn ->
+        MingaEditor.apply_runtime_config_option(state, :theme, :astrodark)
+      end
+    after
+      Minga.Extensions.ThemePacks.register_pack(Minga.Extensions.ThemePacks.AstroNvim)
+    end
+
     test "normalizes nil and supplied options servers" do
       default_state =
         Startup.build_initial_state(

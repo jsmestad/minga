@@ -23,6 +23,22 @@ struct ThemeColorsSlotMappingTests {
         Color(red: Double(r) / 255.0, green: Double(g) / 255.0, blue: Double(b) / 255.0)
     }
 
+    @Test("ThemeColors bootstrap is neutral until guiTheme arrives")
+    @MainActor func bootstrapIsNeutral() {
+        let theme = ThemeColors()
+        #expect(theme.hasAppliedTheme == false)
+        #expect(theme.editorBg == Color(red: 0, green: 0, blue: 0))
+        #expect(theme.editorFg == Color(red: 1, green: 1, blue: 1))
+        #expect(theme.popupBg == Color(red: 0, green: 0, blue: 0))
+        #expect(theme.selectionBg == Color(red: Double(0x33) / 255.0, green: Double(0x33) / 255.0, blue: Double(0x33) / 255.0))
+    }
+
+    @Test("applySlots marks BEAM theme as applied")
+    @MainActor func applySlotsMarksThemeApplied() {
+        let theme = applySlot(GUI_COLOR_EDITOR_BG)
+        #expect(theme.hasAppliedTheme)
+    }
+
     // MARK: - Editor slots
 
     @Test("Slot 0x01 maps to editorBg")

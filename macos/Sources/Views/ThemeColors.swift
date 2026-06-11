@@ -1,8 +1,6 @@
 /// Observable theme colors driven by the BEAM via the gui_theme protocol message.
 ///
-/// All SwiftUI chrome views reference this shared instance for their colors.
-/// Defaults to Doom One colors so the app looks correct before the BEAM sends
-/// a theme. Updated by CommandDispatcher when a gui_theme message arrives.
+/// All SwiftUI chrome views reference this shared instance for their colors. Initial values are neutral bootstrap colors used only before the first BEAM gui_theme command arrives. Theme selection belongs to the BEAM.
 
 import SwiftUI
 
@@ -11,137 +9,139 @@ import SwiftUI
 @Observable
 final class ThemeColors {
     // ── Editor ──
-    var editorBg: Color = color(0x282C34)
-    var editorFg: Color = color(0xBBC2CF)
+    var editorBg: Color = color(0x000000)
+    var editorFg: Color = color(0xFFFFFF)
 
     // ── File tree ──
-    var treeBg: Color = color(0x21242B)
-    var treeFg: Color = color(0xBBC2CF)
-    var treeSelectionBg: Color = color(0x2257A0)
-    var treeDirFg: Color = color(0x51AFEF)
-    var treeActiveFg: Color = color(0x51AFEF)
-    var treeHeaderBg: Color = color(0x21242B)
-    var treeHeaderFg: Color = color(0x51AFEF)
-    var treeSeparatorFg: Color = color(0x3F444A)
-    var treeGitModified: Color = color(0xECBE7B)
-    var treeGitStaged: Color = color(0x98BE65)
-    var treeGitUntracked: Color = color(0x98BE65)
-    var treeSelectionFg: Color = color(0xBBC2CF)
-    var treeGuideFg: Color = color(0x3F444A)
+    var treeBg: Color = color(0x000000)
+    var treeFg: Color = color(0xFFFFFF)
+    var treeSelectionBg: Color = color(0x333333)
+    var treeDirFg: Color = color(0xFFFFFF)
+    var treeActiveFg: Color = color(0xFFFFFF)
+    var treeHeaderBg: Color = color(0x000000)
+    var treeHeaderFg: Color = color(0xFFFFFF)
+    var treeSeparatorFg: Color = color(0x666666)
+    var treeGitModified: Color = color(0xFFAA00)
+    var treeGitStaged: Color = color(0x00AA00)
+    var treeGitUntracked: Color = color(0x00AA00)
+    var treeSelectionFg: Color = color(0xFFFFFF)
+    var treeGuideFg: Color = color(0x666666)
 
     // ── Tab bar ──
-    var tabBg: Color = color(0x21242B)
-    var tabActiveBg: Color = color(0x282C34)
-    var tabActiveFg: Color = color(0xBBC2CF)
-    var tabInactiveFg: Color = color(0x5B6268)
-    var tabModifiedFg: Color = color(0xECBE7B)
-    var tabSeparatorFg: Color = color(0x3F444A)
-    var tabCloseHoverFg: Color = color(0xFF6C6B)
-    var tabAttentionFg: Color = color(0xFF6C6B)
+    var tabBg: Color = color(0x000000)
+    var tabActiveBg: Color = color(0x333333)
+    var tabActiveFg: Color = color(0xFFFFFF)
+    var tabInactiveFg: Color = color(0x999999)
+    var tabModifiedFg: Color = color(0xFFAA00)
+    var tabSeparatorFg: Color = color(0x666666)
+    var tabCloseHoverFg: Color = color(0xFF0000)
+    var tabAttentionFg: Color = color(0xFFAA00)
 
     // ── Popup (which-key, completion) ──
-    var popupBg: Color = color(0x21242B)
-    var popupFg: Color = color(0xBBC2CF)
-    var popupBorder: Color = color(0x3F444A)
-    var popupSelBg: Color = color(0x2257A0)
-    var popupSelFg: Color = color(0xDFDFDF)
-    var popupKeyFg: Color = color(0x51AFEF)
-    var popupGroupFg: Color = color(0xC678DD)
-    var popupDescFg: Color = color(0xBBC2CF)
+    var popupBg: Color = color(0x000000)
+    var popupFg: Color = color(0xFFFFFF)
+    var popupBorder: Color = color(0x666666)
+    var popupSelBg: Color = color(0x333333)
+    var popupSelFg: Color = color(0xFFFFFF)
+    var popupKeyFg: Color = color(0xFFFFFF)
+    var popupGroupFg: Color = color(0xFFFFFF)
+    var popupDescFg: Color = color(0xFFFFFF)
 
     // ── Breadcrumb ──
-    var breadcrumbBg: Color = color(0x21242B)
-    var breadcrumbFg: Color = color(0xBBC2CF)
-    var breadcrumbSeparatorFg: Color = color(0x3F444A)
+    var breadcrumbBg: Color = color(0x000000)
+    var breadcrumbFg: Color = color(0xFFFFFF)
+    var breadcrumbSeparatorFg: Color = color(0x666666)
 
     // ── Modeline / status bar ──
-    var modelineBarBg: Color = color(0x21242B)
-    var modelineBarFg: Color = color(0xBBC2CF)
-    var modelineInfoBg: Color = color(0x3F444A)
-    var modelineInfoFg: Color = color(0xBBC2CF)
-    var modeNormalBg: Color = color(0x51AFEF)
-    var modeNormalFg: Color = color(0x21242B)
-    var modeInsertBg: Color = color(0x98BE65)
-    var modeInsertFg: Color = color(0x21242B)
-    var modeVisualBg: Color = color(0xC678DD)
-    var modeVisualFg: Color = color(0x21242B)
-    var statusbarAccentFg: Color = color(0x51AFEF)
+    var modelineBarBg: Color = color(0x000000)
+    var modelineBarFg: Color = color(0xFFFFFF)
+    var modelineInfoBg: Color = color(0x333333)
+    var modelineInfoFg: Color = color(0xFFFFFF)
+    var modeNormalBg: Color = color(0xFFFFFF)
+    var modeNormalFg: Color = color(0x000000)
+    var modeInsertBg: Color = color(0xFFFFFF)
+    var modeInsertFg: Color = color(0x000000)
+    var modeVisualBg: Color = color(0xFFFFFF)
+    var modeVisualFg: Color = color(0x000000)
+    var statusbarAccentFg: Color = color(0xFFFFFF)
 
     // ── Gutter ──
-    var gutterFg: Color = color(0x555555)
-    var gutterCurrentFg: Color = color(0xBBC2CF)
-    var gutterErrorFg: Color = color(0xFF6C6B)
-    var gutterWarningFg: Color = color(0xECBE7B)
-    var gutterInfoFg: Color = color(0x51AFEF)
-    var gutterHintFg: Color = color(0x555555)
-    var gutterFoldFg: Color = color(0x555555)
-    var gitAddedFg: Color = color(0x98BE65)
-    var gitModifiedFg: Color = color(0x51AFEF)
-    var gitDeletedFg: Color = color(0xFF6C6B)
+    var gutterFg: Color = color(0x999999)
+    var gutterCurrentFg: Color = color(0xFFFFFF)
+    var gutterErrorFg: Color = color(0xFF0000)
+    var gutterWarningFg: Color = color(0xFFAA00)
+    var gutterInfoFg: Color = color(0x00AAFF)
+    var gutterHintFg: Color = color(0x999999)
+    var gutterFoldFg: Color = color(0x999999)
+    var gitAddedFg: Color = color(0x00AA00)
+    var gitModifiedFg: Color = color(0x00AAFF)
+    var gitDeletedFg: Color = color(0xFF0000)
 
     // ── Document highlights + Selection ──
-    var highlightReadBg: Color = color(0x3A3F4B)
-    var highlightWriteBg: Color = color(0x4A3F2B)
-    var selectionBg: Color = color(0x264F78)
+    var highlightReadBg: Color = color(0x333333)
+    var highlightWriteBg: Color = color(0x333333)
+    var selectionBg: Color = color(0x333333)
 
     // Raw SIMD3 values for Metal renderer (highlight + selection).
     var highlightReadBgSIMD: SIMD3<Float> = SIMD3<Float>(
-        Float((0x3A3F4B >> 16) & 0xFF) / 255.0,
-        Float((0x3A3F4B >> 8) & 0xFF) / 255.0,
-        Float(0x3A3F4B & 0xFF) / 255.0
+        Float((0x333333 >> 16) & 0xFF) / 255.0,
+        Float((0x333333 >> 8) & 0xFF) / 255.0,
+        Float(0x333333 & 0xFF) / 255.0
     )
     var highlightWriteBgSIMD: SIMD3<Float> = SIMD3<Float>(
-        Float((0x4A3F2B >> 16) & 0xFF) / 255.0,
-        Float((0x4A3F2B >> 8) & 0xFF) / 255.0,
-        Float(0x4A3F2B & 0xFF) / 255.0
+        Float((0x333333 >> 16) & 0xFF) / 255.0,
+        Float((0x333333 >> 8) & 0xFF) / 255.0,
+        Float(0x333333 & 0xFF) / 255.0
     )
     var selectionBgSIMD: SIMD3<Float> = SIMD3<Float>(
-        Float((0x264F78 >> 16) & 0xFF) / 255.0,
-        Float((0x264F78 >> 8) & 0xFF) / 255.0,
-        Float(0x264F78 & 0xFF) / 255.0
+        Float((0x333333 >> 16) & 0xFF) / 255.0,
+        Float((0x333333 >> 8) & 0xFF) / 255.0,
+        Float(0x333333 & 0xFF) / 255.0
     )
 
     // Raw 24-bit RGB values for Metal renderer.
     // Updated alongside the Color properties when gui_theme slots arrive.
-    var editorFgRGB: UInt32 = 0xBBC2CF
-    var gutterFgRGB: UInt32 = 0x555555
-    var gutterCurrentFgRGB: UInt32 = 0xBBC2CF
-    var gutterErrorFgRGB: UInt32 = 0xFF6C6B
-    var gutterWarningFgRGB: UInt32 = 0xECBE7B
-    var gutterInfoFgRGB: UInt32 = 0x51AFEF
-    var gutterHintFgRGB: UInt32 = 0x555555
-    var gutterFoldFgRGB: UInt32 = 0x555555
-    var gitAddedFgRGB: UInt32 = 0x98BE65
-    var gitModifiedFgRGB: UInt32 = 0x51AFEF
-    var gitDeletedFgRGB: UInt32 = 0xFF6C6B
+    var editorFgRGB: UInt32 = 0xFFFFFF
+    var gutterFgRGB: UInt32 = 0x999999
+    var gutterCurrentFgRGB: UInt32 = 0xFFFFFF
+    var gutterErrorFgRGB: UInt32 = 0xFF0000
+    var gutterWarningFgRGB: UInt32 = 0xFFAA00
+    var gutterInfoFgRGB: UInt32 = 0x00AAFF
+    var gutterHintFgRGB: UInt32 = 0x999999
+    var gutterFoldFgRGB: UInt32 = 0x999999
+    var gitAddedFgRGB: UInt32 = 0x00AA00
+    var gitModifiedFgRGB: UInt32 = 0x00AAFF
+    var gitDeletedFgRGB: UInt32 = 0xFF0000
 
     // ── Agent status (shared across tab badges, chat header) ──
-    var agentStatusIdle: Color = color(0x555555)
-    var agentStatusWorking: Color = color(0x98BE65)
-    var agentStatusIterating: Color = color(0x98BE65)
-    var agentStatusNeedsYou: Color = color(0xECBE7B)
-    var agentStatusDone: Color = color(0x51AFEF)
-    var agentStatusErrored: Color = color(0xFF6C6B)
+    var agentStatusIdle: Color = color(0x999999)
+    var agentStatusWorking: Color = color(0x00AA00)
+    var agentStatusIterating: Color = color(0x00AA00)
+    var agentStatusNeedsYou: Color = color(0xFFAA00)
+    var agentStatusDone: Color = color(0xFFFFFF)
+    var agentStatusErrored: Color = color(0xFF0000)
 
     // ── Agent chat theme ──
-    var agentPanelBg: Color = color(0x282C34)
-    var agentHeaderBg: Color = color(0x1E2127)
-    var agentHeaderFg: Color = color(0x51AFEF)
-    var agentUserBorder: Color = color(0x51AFEF)
-    var agentUserLabel: Color = color(0x51AFEF)
-    var agentAssistantBorder: Color = color(0x98BE65)
-    var agentAssistantLabel: Color = color(0x98BE65)
-    var agentInputBorder: Color = color(0x51AFEF)
-    var agentInputBg: Color = color(0x282C34)
-    var agentInputPlaceholder: Color = color(0x5B6268)
-    var agentTextFg: Color = color(0xBBC2CF)
-    var agentToolBorder: Color = color(0xECBE7B)
-    var agentToolHeader: Color = color(0xECBE7B)
-    var agentCodeBg: Color = color(0x1E2127)
-    var agentCodeBorder: Color = color(0x5B6268)
+    var agentPanelBg: Color = color(0x000000)
+    var agentHeaderBg: Color = color(0x000000)
+    var agentHeaderFg: Color = color(0xFFFFFF)
+    var agentUserBorder: Color = color(0xFFFFFF)
+    var agentUserLabel: Color = color(0xFFFFFF)
+    var agentAssistantBorder: Color = color(0x00AA00)
+    var agentAssistantLabel: Color = color(0x00AA00)
+    var agentInputBorder: Color = color(0xFFFFFF)
+    var agentInputBg: Color = color(0x000000)
+    var agentInputPlaceholder: Color = color(0x999999)
+    var agentTextFg: Color = color(0xFFFFFF)
+    var agentToolBorder: Color = color(0xFFAA00)
+    var agentToolHeader: Color = color(0xFFAA00)
+    var agentCodeBg: Color = color(0x000000)
+    var agentCodeBorder: Color = color(0x666666)
 
     // ── Accent ──
-    var accent: Color = color(0x51AFEF)
+    var accent: Color = color(0xFFFFFF)
+
+    private(set) var hasAppliedTheme = false
 
     // ── Shared chrome contrast tokens ──
     var chromeSecondaryFg: Color { editorFg.opacity(0.78) }
@@ -167,6 +167,8 @@ final class ThemeColors {
 
     /// Apply a batch of color slot updates from the gui_theme protocol message.
     func applySlots(_ slots: [(UInt8, UInt8, UInt8, UInt8)]) {
+        hasAppliedTheme = true
+
         for (slotId, r, g, b) in slots {
             let c = Color(
                 red: Double(r) / 255.0,

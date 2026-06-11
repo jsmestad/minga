@@ -3,19 +3,25 @@ package ui
 import (
 	"fmt"
 	"image/color"
+	"strings"
 
 	"charm.land/lipgloss/v2"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 )
 
 const (
+	// Slot IDs mirror MingaEditor.UI.Theme.Slots. The bootstrap values below are only used before the first BEAM gui_theme command arrives.
 	themeEditorBG         byte = 0x01
 	themeEditorFG         byte = 0x02
 	themeTreeBG           byte = 0x03
 	themeTreeFG           byte = 0x04
 	themeTreeSelectBG     byte = 0x05
+	themeTreeDirFG        byte = 0x06
+	themeTreeActiveFG     byte = 0x07
 	themeTreeHeaderBG     byte = 0x08
 	themeTreeHeaderFG     byte = 0x09
+	themeTreeSeparatorFG  byte = 0x0A
+	themeTreeSelectionFG  byte = 0x0E
 	themeTabBG            byte = 0x10
 	themeTabActiveBG      byte = 0x11
 	themeTabActiveFG      byte = 0x12
@@ -26,11 +32,11 @@ const (
 	themePopupFG          byte = 0x21
 	themePopupBorder      byte = 0x22
 	themePopupSelBG       byte = 0x23
-	themePopupSelFG       byte = 0x2A
+	themePopupKeyFG       byte = 0x24
+	themePopupGroupFG     byte = 0x25
+	themePopupDescFG      byte = 0x26
 	themeBreadcrumbBG     byte = 0x27
-	themeHighlightReadBG  byte = 0x59
-	themeHighlightWriteBG byte = 0x5A
-	themeSelectionBG      byte = 0x5B
+	themePopupSelFG       byte = 0x2A
 	themeModelineBG       byte = 0x30
 	themeModelineFG       byte = 0x31
 	themeAccent           byte = 0x40
@@ -40,54 +46,99 @@ const (
 	themeWarningFG        byte = 0x53
 	themeDiagnosticInfo   byte = 0x54
 	themeDiagnosticHint   byte = 0x55
+	themeHighlightReadBG  byte = 0x59
+	themeHighlightWriteBG byte = 0x5A
+	themeSelectionBG      byte = 0x5B
 )
+
+var requiredThemeSlots = []byte{
+	0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A,
+	0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
+	0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+	0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A,
+	0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3A,
+	0x40,
+	0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5A, 0x5B,
+	0x5C, 0x5D, 0x5E, 0x5F, 0x60, 0x61,
+	0x62,
+	0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0xAC, 0xAD, 0xAE,
+}
 
 type palette struct {
 	colors map[byte]uint32
 }
 
-func defaultPalette() palette {
+func bootstrapPalette() palette {
 	return palette{colors: map[byte]uint32{
-		themeEditorBG:         0x1E1F2A,
-		themeEditorFG:         0xC7D0E8,
-		themeTreeBG:           0x222433,
-		themeTreeFG:           0xB8C0D8,
-		themeTreeSelectBG:     0x343A52,
-		themeTreeHeaderBG:     0x1A1D29,
-		themeTreeHeaderFG:     0x9EC5FF,
-		themeTabBG:            0x242634,
-		themeTabActiveBG:      0x30364D,
-		themeTabActiveFG:      0xF2F5FF,
-		themeTabInactiveFG:    0x747B93,
-		themeTabModifiedFG:    0xF5B66F,
-		themeTabAttentionFG:   0xE8C774,
-		themePopupBG:          0x292D3E,
-		themePopupFG:          0xD9E0F5,
-		themePopupBorder:      0x4C5267,
-		themePopupSelBG:       0x3A425C,
-		themePopupSelFG:       0xF7FAFF,
-		themeBreadcrumbBG:     0x232634,
-		themeModelineBG:       0x222536,
-		themeModelineFG:       0xAEB7D0,
-		themeAccent:           0x7DB7FF,
-		themeGutterFG:         0x697088,
-		themeGutterCurrentFG:  0xC7D0E8,
-		themeDiagnosticError:  0xFF8AA6,
-		themeWarningFG:        0xF5C276,
-		themeDiagnosticInfo:   0x7DCFFF,
-		themeDiagnosticHint:   0xA6DA95,
-		themeHighlightReadBG:  0x33384C,
-		themeHighlightWriteBG: 0x4A3F2B,
-		themeSelectionBG:      0x2F4463,
+		themeEditorBG:         0x000000,
+		themeEditorFG:         0xFFFFFF,
+		themeTreeBG:           0x000000,
+		themeTreeFG:           0xFFFFFF,
+		themeTreeSelectBG:     0x333333,
+		themeTreeDirFG:        0xFFFFFF,
+		themeTreeActiveFG:     0xFFFFFF,
+		themeTreeHeaderBG:     0x000000,
+		themeTreeHeaderFG:     0xFFFFFF,
+		themeTreeSeparatorFG:  0x666666,
+		themeTreeSelectionFG:  0xFFFFFF,
+		themeTabBG:            0x000000,
+		themeTabActiveBG:      0x333333,
+		themeTabActiveFG:      0xFFFFFF,
+		themeTabInactiveFG:    0x999999,
+		themeTabModifiedFG:    0xFFAA00,
+		themeTabAttentionFG:   0xFFAA00,
+		themePopupBG:          0x000000,
+		themePopupFG:          0xFFFFFF,
+		themePopupBorder:      0x666666,
+		themePopupSelBG:       0x333333,
+		themePopupKeyFG:       0xFFFFFF,
+		themePopupGroupFG:     0xFFFFFF,
+		themePopupDescFG:      0xFFFFFF,
+		themeBreadcrumbBG:     0x000000,
+		themePopupSelFG:       0xFFFFFF,
+		themeModelineBG:       0x000000,
+		themeModelineFG:       0xFFFFFF,
+		themeAccent:           0xFFFFFF,
+		themeGutterFG:         0x999999,
+		themeGutterCurrentFG:  0xFFFFFF,
+		themeDiagnosticError:  0xFF0000,
+		themeWarningFG:        0xFFAA00,
+		themeDiagnosticInfo:   0x00AAFF,
+		themeDiagnosticHint:   0x999999,
+		themeHighlightReadBG:  0x333333,
+		themeHighlightWriteBG: 0x333333,
+		themeSelectionBG:      0x333333,
 	}}
 }
 
 func paletteFromTheme(theme protocol.Theme) palette {
-	base := defaultPalette()
+	colors := make(map[byte]uint32, len(theme.Colors))
 	for slot, rgb := range theme.Colors {
-		base.colors[slot] = rgb
+		colors[slot] = rgb
 	}
-	return base
+	return palette{colors: colors}
+}
+
+func missingThemeSlots(theme protocol.Theme) []byte {
+	missing := make([]byte, 0, len(requiredThemeSlots))
+	for _, slot := range requiredThemeSlots {
+		if _, ok := theme.Colors[slot]; !ok {
+			missing = append(missing, slot)
+		}
+	}
+	return missing
+}
+
+func formatMissingThemeSlots(slots []byte) string {
+	if len(slots) == 0 {
+		return ""
+	}
+
+	parts := make([]string, len(slots))
+	for i, slot := range slots {
+		parts[i] = fmt.Sprintf("0x%02X", slot)
+	}
+	return strings.Join(parts, ", ")
 }
 
 func (p palette) Base() color.Color {
@@ -196,7 +247,7 @@ func (p palette) TreeMutedText() color.Color {
 }
 
 func (p palette) TreeDirectoryText() color.Color {
-	return p.slot(themeAccent)
+	return p.slot(themeTreeDirFG)
 }
 
 func (p palette) TreeSelection() color.Color {
@@ -204,7 +255,7 @@ func (p palette) TreeSelection() color.Color {
 }
 
 func (p palette) TreeSelectionText() color.Color {
-	return p.slot(themePopupSelFG)
+	return p.slot(themeTreeSelectionFG)
 }
 
 func (p palette) TreeHeader() color.Color {
@@ -260,7 +311,7 @@ func (p palette) PopupChrome() color.Color {
 }
 
 func (p palette) PopupMutedText() color.Color {
-	return p.slot(themeTabInactiveFG)
+	return p.slot(themePopupDescFG)
 }
 
 func (p palette) KeycapSurface() color.Color {
@@ -268,7 +319,7 @@ func (p palette) KeycapSurface() color.Color {
 }
 
 func (p palette) KeycapText() color.Color {
-	return p.slot(themePopupSelFG)
+	return p.slot(themePopupKeyFG)
 }
 
 func (p palette) Error() color.Color {

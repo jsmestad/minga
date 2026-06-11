@@ -1992,9 +1992,27 @@ enum PreviewRegistry {
 
     // MARK: - Helpers
 
-    /// ThemeColors() already initializes with Doom One defaults, which look representative for preview screenshots without any BEAM theme push.
+    /// Preview-only theme fixture. Runtime theme selection comes from the BEAM via guiTheme; previews apply explicit slots because ThemeColors itself starts with neutral bootstrap colors.
     private static func populatedTheme() -> ThemeColors {
-        ThemeColors()
+        let theme = ThemeColors()
+        theme.applySlots([
+            (GUI_COLOR_EDITOR_BG, 0x28, 0x2C, 0x34),
+            (GUI_COLOR_EDITOR_FG, 0xBB, 0xC2, 0xCF),
+            (GUI_COLOR_TREE_BG, 0x21, 0x24, 0x2B),
+            (GUI_COLOR_TREE_FG, 0xBB, 0xC2, 0xCF),
+            (GUI_COLOR_TREE_SELECTION_BG, 0x22, 0x57, 0xA0),
+            (GUI_COLOR_TAB_BG, 0x21, 0x24, 0x2B),
+            (GUI_COLOR_TAB_ACTIVE_BG, 0x28, 0x2C, 0x34),
+            (GUI_COLOR_TAB_ACTIVE_FG, 0xBB, 0xC2, 0xCF),
+            (GUI_COLOR_TAB_INACTIVE_FG, 0x5B, 0x62, 0x68),
+            (GUI_COLOR_POPUP_BG, 0x21, 0x24, 0x2B),
+            (GUI_COLOR_POPUP_FG, 0xBB, 0xC2, 0xCF),
+            (GUI_COLOR_MODELINE_BAR_BG, 0x21, 0x24, 0x2B),
+            (GUI_COLOR_MODELINE_BAR_FG, 0xBB, 0xC2, 0xCF),
+            (GUI_COLOR_ACCENT, 0x51, 0xAF, 0xEF),
+            (GUI_COLOR_SELECTION_BG, 0x26, 0x4F, 0x78),
+        ])
+        return theme
     }
 
     private static func wireFileEntry(

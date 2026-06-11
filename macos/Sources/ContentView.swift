@@ -62,10 +62,9 @@ private final class TitleBarDragNSView: NSView {
 /// random quip so the user sees a friendly loading state instead of a blank
 /// dark screen. Fades out when the first commit_frame arrives.
 ///
-/// Adapts to the macOS system appearance (light/dark) to minimize the flash
-/// when the editor's actual theme loads. The exact theme colors are not
-/// available yet (BEAM has not sent guiTheme), but matching the system
-/// appearance gets close enough for most users.
+/// Adapts to the macOS system appearance (light/dark) before the BEAM sends
+/// guiTheme. The overlay is a loading surface, not a theme fallback; the BEAM
+/// still owns the editor theme.
 struct StartupOverlay: View {
     @Environment(\.colorScheme) private var systemScheme
 
