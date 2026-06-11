@@ -51,6 +51,20 @@ type Recorder struct {
 
 	resolved uint64
 	dropped  uint64
+
+	// compose is a ring buffer of frame compose-time durations (most recent
+	// wins), tracking how long View() spent building the frame (#2288). It is
+	// separate from the keystroke-to-write samples above so the HUD can show
+	// both the end-to-end latency and the frontend's own compose cost, the
+	// metric the line-cache is meant to drive down on large terminals.
+	compose      []time.Duration
+	composeHead  int
+	composeCount int
+	// composeCacheHits/Misses count cached vs recomposed body lines across all
+	// composes since boot. They feed the HUD and let tests assert the cache is
+	// actually serving hits on ref-row frames.
+	composeCacheHits   uint64
+	composeCacheMisses uint64
 }
 
 // New returns a Recorder using the wall clock.
@@ -63,6 +77,7 @@ func newWithClock(now func() time.Time) *Recorder {
 		now:     now,
 		pending: make(map[uint32]time.Time, ringSize),
 		samples: make([]time.Duration, ringSize),
+		compose: make([]time.Duration, ringSize),
 	}
 }
 
@@ -137,6 +152,23 @@ func (r *Recorder) dropForgetOrder(seq uint32) {
 	}
 }
 
+// ObserveCompose records a single frame's compose duration into the compose
+// ring (#2288). It also folds in how many body lines that compose served from
+// the line cache (hits) versus recomposed (misses), so the HUD can show the
+// cache's effect alongside the compose time it drives down.
+func (r *Recorder) ObserveCompose(d time.Duration, cacheHits, cacheMisses uint64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.compose[r.composeHead] = d
+	r.composeHead = (r.composeHead + 1) % ringSize
+	if r.composeCount < ringSize {
+		r.composeCount++
+	}
+	r.composeCacheHits += cacheHits
+	r.composeCacheMisses += cacheMisses
+}
+
 // Stats summarizes the resolved samples currently in the ring buffer.
 type Stats struct {
 	Count    int
@@ -145,6 +177,16 @@ type Stats struct {
 	P50      time.Duration
 	P99      time.Duration
 	Max      time.Duration
+
+	// ComposeCount/ComposeP50/ComposeP99/ComposeMax summarize frame compose
+	// time over the compose ring (#2288). ComposeCacheHits/Misses are the
+	// cumulative cached-vs-recomposed body-line counts since boot.
+	ComposeCount       int
+	ComposeP50         time.Duration
+	ComposeP99         time.Duration
+	ComposeMax         time.Duration
+	ComposeCacheHits   uint64
+	ComposeCacheMisses uint64
 }
 
 // Snapshot returns percentile statistics over the buffered samples. It copies
@@ -157,8 +199,27 @@ func (r *Recorder) Snapshot() Stats {
 		idx := (r.head - r.count + i + ringSize) % ringSize
 		window[i] = r.samples[idx]
 	}
-	stats := Stats{Count: r.count, Resolved: r.resolved, Dropped: r.dropped}
+	composeWindow := make([]time.Duration, r.composeCount)
+	for i := 0; i < r.composeCount; i++ {
+		idx := (r.composeHead - r.composeCount + i + ringSize) % ringSize
+		composeWindow[i] = r.compose[idx]
+	}
+	stats := Stats{
+		Count:              r.count,
+		Resolved:           r.resolved,
+		Dropped:            r.dropped,
+		ComposeCount:       r.composeCount,
+		ComposeCacheHits:   r.composeCacheHits,
+		ComposeCacheMisses: r.composeCacheMisses,
+	}
 	r.mu.Unlock()
+
+	if len(composeWindow) > 0 {
+		sort.Slice(composeWindow, func(i, j int) bool { return composeWindow[i] < composeWindow[j] })
+		stats.ComposeP50 = percentile(composeWindow, 0.50)
+		stats.ComposeP99 = percentile(composeWindow, 0.99)
+		stats.ComposeMax = composeWindow[len(composeWindow)-1]
+	}
 
 	if len(window) == 0 {
 		return stats
@@ -187,14 +248,34 @@ func percentile(sorted []time.Duration, ratio float64) time.Duration {
 	return sorted[index]
 }
 
-// HUD renders a one-line latency overlay suitable for an on-screen badge.
+// HUD renders a one-line latency overlay suitable for an on-screen badge. It
+// shows the keystroke-to-write latency and, when available, the frame compose
+// time and line-cache hit rate the #2288 line cache drives (compose time down,
+// hit rate up).
 func (s Stats) HUD() string {
-	if s.Count == 0 {
-		return "lat: (no samples)"
+	latPart := "lat: (no samples)"
+	if s.Count > 0 {
+		latPart = fmt.Sprintf(
+			"lat p50 %s  p99 %s  max %s  n=%d",
+			fmtDur(s.P50), fmtDur(s.P99), fmtDur(s.Max), s.Count,
+		)
+	}
+	if s.ComposeCount == 0 {
+		return latPart
+	}
+	return fmt.Sprintf("%s  %s", latPart, s.composeHUD())
+}
+
+// composeHUD renders the compose-time and cache portion of the HUD.
+func (s Stats) composeHUD() string {
+	total := s.ComposeCacheHits + s.ComposeCacheMisses
+	hitRate := 0.0
+	if total > 0 {
+		hitRate = float64(s.ComposeCacheHits) / float64(total) * 100
 	}
 	return fmt.Sprintf(
-		"lat p50 %s  p99 %s  max %s  n=%d",
-		fmtDur(s.P50), fmtDur(s.P99), fmtDur(s.Max), s.Count,
+		"compose p50 %s  p99 %s  cache %.0f%% (%d/%d)",
+		fmtDur(s.ComposeP50), fmtDur(s.ComposeP99), hitRate, s.ComposeCacheHits, total,
 	)
 }
 
