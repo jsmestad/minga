@@ -97,6 +97,25 @@ struct ProtocolDecoderTests {
         #expect(baseFrameSeq == 3)
     }
 
+    @Test("Skip known sized command without renderer handler")
+    func skipKnownSizedCommandWithoutRendererHandler() throws {
+        let data = Data([OP_GUI_SURFACE_LAYOUT, 0x01, 0x01, 0x00, 0x00, OP_COMMIT_FRAME, 0, 0, 0, 7, 0, 0, 0, 0])
+
+        let (ignored, size) = try decodeCommand(data: data, offset: 0)
+        guard case nil = ignored else {
+            Issue.record("Expected gui_surface_layout to be skipped, got \(String(describing: ignored))")
+            return
+        }
+        #expect(size == 5)
+
+        let (next, _) = try decodeCommand(data: data, offset: size)
+        guard case .commitFrame(let frameSeq, _) = next else {
+            Issue.record("Expected trailing .commitFrame, got \(String(describing: next))")
+            return
+        }
+        #expect(frameSeq == 7)
+    }
+
     @Test("Decode protocol_error command")
     func decodeProtocolError() throws {
         let message = "protocol_version mismatch: frontend 1, beam 2"
