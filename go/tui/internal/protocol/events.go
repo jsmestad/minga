@@ -202,6 +202,23 @@ func EncodeGUISidebarAction(sidebarID, kind, action string) []byte {
 	return out
 }
 
+// EncodeGUINotificationDismiss encodes a notification_dismiss action. Wire
+// format: <gui_action, 0x45, id_len:u16, id>. Mirrors the macOS dismiss button
+// (ProtocolEncoder.swift:1085 sendNotificationDismiss).
+func EncodeGUINotificationDismiss(id string) []byte {
+	out := []byte{generated.OPGuiAction, generated.GUIActionNotificationDismiss}
+	return appendString16(out, id)
+}
+
+// EncodeGUINotificationAction encodes a notification_action. Wire format:
+// <gui_action, 0x46, id_len:u16, id, action_len:u16, action_id>. Mirrors the
+// macOS per-action button (ProtocolEncoder.swift:1094 sendNotificationAction).
+func EncodeGUINotificationAction(id, actionID string) []byte {
+	out := []byte{generated.OPGuiAction, generated.GUIActionNotificationAction}
+	out = appendString16(out, id)
+	return appendString16(out, actionID)
+}
+
 // appendString16 appends a length-prefixed string (len:u16 big-endian, then
 // utf8 bytes) to out, truncating to the u16 ceiling, matching the macOS
 // appendString16 helper used by every string-bearing gui_action.

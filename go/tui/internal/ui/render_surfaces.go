@@ -465,12 +465,89 @@ func (m Model) renderEditTimeline(timeline protocol.EditTimeline) []string {
 	return takeLines(m.charmTable(columns, rows, selected, m.maxOverlayHeight()), m.maxOverlayHeight())
 }
 
+// renderNotifications draws the notification center as directly-styled rows
+// rather than an opaque charm list so each interactive affordance can carry a
+// lipgloss zone marker, mirroring how renderCompletion was converted (#2230).
+// The clickable affordances match the macOS frontend exactly
+// (NotificationCenterView.swift): the dismiss "x" on the title row sends
+// notification_dismiss, and each inline action sends notification_action. There
+// is no body-click "activate" gesture, because neither macOS nor the keyboard
+// has one. The per-item base shape is a title row + a source/body row (2 lines),
+// matching the BEAM content-height model (FooterOverlays.content_height_
+// notifications = 1 + 2*items); an item with inline actions adds one actions
+// row, the documented per-item slack the band ceiling clamps.
 func (m Model) renderNotifications(notes protocol.Notifications) []string {
-	items := make([]componentItem, 0, len(notes.Items))
+	height := m.maxOverlayHeight()
+	width := max(m.width, 1)
+	theme := m.palette()
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.Accent()).Background(theme.PopupChrome()).Width(width).ColorWhitespace(true)
+	lines := []string{renderPadded(titleStyle, " Notifications", width)}
+
 	for _, note := range notes.Items {
-		items = append(items, componentItem{title: note.Title, description: strings.TrimSpace(note.Source + " " + note.Body)})
+		lines = append(lines, m.renderNotificationHeaderRow(note, width))
+		lines = append(lines, m.renderNotificationBodyRow(note, width))
+		if len(note.Actions) > 0 {
+			lines = append(lines, m.renderNotificationActionsRow(note, width))
+		}
 	}
-	return takeLines(m.charmList("Notifications", items, 0, m.maxOverlayHeight(), true), m.maxOverlayHeight())
+	return takeLines(lines, height)
+}
+
+// renderNotificationHeaderRow draws a notification's title and, when the
+// notification is dismissable, a trailing dismiss "x" affordance pinned to the
+// right edge. Only the "x" cell carries the dismiss zone so a click on the title
+// text itself misses every zone and is contained by the BEAM (matching macOS,
+// where the title is not a button and only the "x" dismisses).
+func (m Model) renderNotificationHeaderRow(note protocol.Notification, width int) string {
+	theme := m.palette()
+	rowStyle := lipgloss.NewStyle().Background(theme.PopupSurface()).Width(width).ColorWhitespace(true)
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.PopupText()).Background(theme.PopupSurface()).ColorWhitespace(true)
+
+	if !note.Dismissable {
+		return renderPadded(rowStyle, titleStyle.Render(" "+note.Title), width)
+	}
+
+	dismissGlyph := "x"
+	dismissStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.PopupMutedText()).Background(theme.PopupSurface()).ColorWhitespace(true)
+	dismiss := m.zones.Mark(zoneIDNotificationDismiss(note.ID), dismissStyle.Render(dismissGlyph))
+	// Reserve the rightmost cell for the dismiss glyph; fit the title into the
+	// remaining width so the glyph stays at a fixed, clickable column.
+	titleWidth := max(width-2, 1)
+	title := titleStyle.Render(" " + fit(note.Title, titleWidth))
+	gap := max(width-lipgloss.Width(title)-lipgloss.Width(dismissGlyph)-1, 0)
+	spacer := lipgloss.NewStyle().Background(theme.PopupSurface()).Render(strings.Repeat(" ", gap))
+	return rowStyle.Render(title + spacer + dismiss + lipgloss.NewStyle().Background(theme.PopupSurface()).Render(" "))
+}
+
+// renderNotificationBodyRow draws the source + body summary line, the same text
+// the prior charm-list description carried, so the visual stays a titled list.
+func (m Model) renderNotificationBodyRow(note protocol.Notification, width int) string {
+	theme := m.palette()
+	rowStyle := lipgloss.NewStyle().Background(theme.PopupSurface()).Width(width).ColorWhitespace(true)
+	bodyStyle := lipgloss.NewStyle().Foreground(theme.PopupMutedText()).Background(theme.PopupSurface()).ColorWhitespace(true)
+	summary := strings.TrimSpace(note.Source + " " + note.Body)
+	return renderPadded(rowStyle, bodyStyle.Render("   "+summary), width)
+}
+
+// renderNotificationActionsRow draws each inline action as a bracketed,
+// addressable affordance marked with its action zone, mirroring the macOS
+// per-action buttons. A click on an action sends notification_action(id,
+// action_id); a click in the surrounding row padding misses every zone and is
+// contained.
+func (m Model) renderNotificationActionsRow(note protocol.Notification, width int) string {
+	theme := m.palette()
+	rowStyle := lipgloss.NewStyle().Background(theme.PopupSurface()).Width(width).ColorWhitespace(true)
+	actionStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.Accent()).Background(theme.PopupSurface()).ColorWhitespace(true)
+	gapStyle := lipgloss.NewStyle().Background(theme.PopupSurface()).ColorWhitespace(true)
+	rendered := gapStyle.Render("   ")
+	for index, action := range note.Actions {
+		if index > 0 {
+			rendered += gapStyle.Render("  ")
+		}
+		label := actionStyle.Render("[" + action.Label + "]")
+		rendered += m.zones.Mark(zoneIDNotificationAction(note.ID, action.ID), label)
+	}
+	return renderPadded(rowStyle, rendered, width)
 }
 
 func (m Model) renderExtensionOverlay(overlay protocol.ExtensionOverlay) []string {

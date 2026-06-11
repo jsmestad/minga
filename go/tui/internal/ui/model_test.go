@@ -1378,6 +1378,91 @@ func TestSemanticMouseRoutesCompletionItemZones(t *testing.T) {
 	}
 }
 
+func TestSemanticMouseRoutesNotificationDismissAndActionZones(t *testing.T) {
+	model := New(60, 24, nil)
+	model.chrome = map[byte]protocol.ChromePayload{
+		generated.OPGuiNotifications: {Notifications: protocol.Notifications{
+			Visible: true,
+			Items: []protocol.Notification{{
+				ID:          "build:test",
+				Title:       "Build failed",
+				Source:      "build",
+				Body:        "exit 1",
+				Dismissable: true,
+				Actions: []protocol.NotificationAction{
+					{ID: "show_logs", Label: "Show logs"},
+					{ID: "retry", Label: "Retry"},
+				},
+			}},
+		}},
+	}
+	// Notifications is registry-placed (#2281): it renders at its BEAM placement
+	// rect and its zones are scanned from there. Height 4 is the BEAM-derived
+	// value for this state, NOT an arbitrary fit: FooterOverlays computes
+	// 1 (title bar) + 2*items + items_with_actions = 1 + 2 + 1 = 4 (#2333).
+	// If the renderer ever emits more rows than that formula counts, takeLines
+	// clips the extra rows and their zones never register -- which is exactly
+	// the production bug this height models, so keep the two in lockstep.
+	model.surfacePlacements = []generated.SurfacePlacement{
+		{SurfaceID: surfaceIDNotifications, Rect: generated.Rect{Row: 20, Col: 0, Width: 60, Height: 4}, Z: 160, HitKind: 8},
+	}
+	model.viewport.SetContent(model.content())
+	_ = model.View()
+
+	// Dismiss "x" zone routes notification_dismiss for the clicked id. Its
+	// absolute coords come from the bottom-aligned placement, proving the overlay
+	// zones merge at the placement offset (ScanInto).
+	dismiss := waitForZone(t, model, zoneIDNotificationDismiss("build:test"))
+	if dismiss.StartY < 20 || dismiss.StartY >= 24 {
+		t.Fatalf("dismiss zone Y %d outside the notifications band rows 20..23", dismiss.StartY)
+	}
+	cmd, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: dismiss.StartX, Y: dismiss.StartY}))
+	if !ok || !bytes.Equal(cmd, protocol.EncodeGUINotificationDismiss("build:test")) {
+		t.Fatalf("dismiss click should route notification_dismiss, ok=%v packet=%v", ok, cmd)
+	}
+
+	// Action zone routes notification_action(id, action_id) for the clicked action.
+	action := waitForZone(t, model, zoneIDNotificationAction("build:test", "retry"))
+	cmd, ok = model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: action.StartX + 1, Y: action.StartY}))
+	if !ok || !bytes.Equal(cmd, protocol.EncodeGUINotificationAction("build:test", "retry")) {
+		t.Fatalf("action click should route notification_action retry, ok=%v packet=%v", ok, cmd)
+	}
+
+	// A click that misses every notification zone falls through (ok=false) so the
+	// BEAM OverlaySink containment swallows it: this is AC 2, the containment
+	// fallback, and must not synthesize a buffer click.
+	if _, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: dismiss.EndX + 40, Y: dismiss.EndY + 30})); ok {
+		t.Fatalf("out-of-bounds notification clicks should fall back to BEAM containment")
+	}
+}
+
+func TestNotificationDismissZoneAbsentWhenNotDismissable(t *testing.T) {
+	model := New(60, 24, nil)
+	model.chrome = map[byte]protocol.ChromePayload{
+		generated.OPGuiNotifications: {Notifications: protocol.Notifications{
+			Visible: true,
+			Items: []protocol.Notification{{
+				ID:          "progress:1",
+				Title:       "Building",
+				Source:      "build",
+				Dismissable: false,
+			}},
+		}},
+	}
+	model.surfacePlacements = []generated.SurfacePlacement{
+		{SurfaceID: surfaceIDNotifications, Rect: generated.Rect{Row: 21, Col: 0, Width: 60, Height: 3}, Z: 160, HitKind: 8},
+	}
+	model.viewport.SetContent(model.content())
+	_ = model.View()
+
+	// A non-dismissable notification renders no dismiss affordance, so there is no
+	// dismiss zone and nothing routes notification_dismiss (mirrors macOS, which
+	// only draws the "x" when notification.dismissable).
+	if zone := model.zones.Get(zoneIDNotificationDismiss("progress:1")); zone != nil {
+		t.Fatalf("non-dismissable notification must not register a dismiss zone, got %+v", zone)
+	}
+}
+
 func TestCompletionRendersDocumentationPreviewWhenPresent(t *testing.T) {
 	model := New(60, 24, nil)
 	completion := protocol.Completion{

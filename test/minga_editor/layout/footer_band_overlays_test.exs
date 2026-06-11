@@ -92,6 +92,29 @@ defmodule MingaEditor.Layout.FooterBandOverlaysTest do
       assert row + height == 24
     end
 
+    test "an item with inline actions adds one row to the notifications band" do
+      # The Go renderer draws an actions row for items carrying inline actions
+      # (#2333). The BEAM height must count it: an undercounted rect clips the
+      # actions row out of the band and its click zones become unreachable.
+      note =
+        Notification.new(%{
+          id: "n-actions",
+          level: :error,
+          title: "Build failed",
+          created_at: System.system_time(:millisecond),
+          actions: [%{id: "retry", label: "Retry", dispatch: {:command, :test_rerun}}]
+        })
+
+      center = NotificationCenter.upsert(NotificationCenter.new(), note)
+      state = %{base_state(rows: 24, cols: 80) | notifications: center}
+
+      {row, _col, _width, height} = SurfaceRegistry.rect_for(state, :notifications)
+
+      # title bar (1) + header+body (2) + actions row (1) = 4
+      assert height == 4
+      assert row + height == 24
+    end
+
     test "no footer overlay is placed when none is visible" do
       state = base_state()
       ids = state |> SurfaceRegistry.placements() |> Enum.map(& &1.surface_id)
