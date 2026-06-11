@@ -52,6 +52,7 @@ defmodule Minga.Integration.AttachKeyframeTest do
   use Minga.Test.EditorCase, async: true
 
   alias Minga.Protocol.Opcodes
+  alias MingaEditor.Frontend.Capabilities
   alias Minga.Test.HeadlessPort
   alias Minga.Test.RecordingFrontend
 
@@ -63,6 +64,9 @@ defmodule Minga.Integration.AttachKeyframeTest do
   @op_gui_window_overlay_delta Opcodes.gui_window_overlay_delta()
   @op_gui_status_bar Opcodes.gui_status_bar()
   @op_gui_minibuffer Opcodes.gui_minibuffer()
+  @op_gui_line_spacing Opcodes.gui_line_spacing()
+  @op_gui_cursor_animation Opcodes.gui_cursor_animation()
+  @op_gui_config_state Opcodes.gui_config_state()
 
   @width 80
   @height 24
@@ -155,6 +159,69 @@ defmodule Minga.Integration.AttachKeyframeTest do
            "a keyframe must carry full window content, never deltas; opcodes were #{inspect(opcodes)}"
   end
 
+  test "the attach keyframe carries the GUI config settings without any runtime config change (#2119)" do
+    # A native GUI session: line_spacing, cursor_animation, and config_state are
+    # emitted in-frame as semantic models (#2119), not pushed out-of-band at
+    # startup. So a late-attaching client's keyframe must carry all three with the
+    # CURRENT config values, even though no setting changes during the attach.
+    # Isolated options server: a :native_gui startup PROMOTES an unset
+    # line_spacing (1.0 -> 1.2) by writing the option, so running this against
+    # the global server would mutate state concurrent async tests read.
+    id = :erlang.unique_integer([:positive])
+    events_registry = :"attach_gui_config_events_#{id}"
+    start_supervised!({Minga.Events, name: events_registry})
+
+    options_server =
+      start_supervised!({Minga.Config.Options, name: nil, events_registry: events_registry},
+        id: {:attach_gui_config_options, id}
+      )
+
+    gui_caps = %Capabilities{frontend_type: :native_gui}
+
+    ctx =
+      start_editor("alpha\nbeta",
+        width: @width,
+        height: @height,
+        capabilities: gui_caps,
+        options_server: options_server
+      )
+
+    send_keys(ctx, "ix<Esc>")
+    sync_screen(ctx)
+
+    {:ok, recorder} =
+      RecordingFrontend.start_link(
+        owner: self(),
+        width: @width,
+        height: @height,
+        capabilities: gui_caps
+      )
+
+    attach_client!(ctx.editor, recorder)
+    send(ctx.editor, {:minga_input, {:request_keyframe, 0}})
+    _ = GenServer.call(ctx.editor, :api_mode, 15_000)
+
+    keyframe_batch = await_keyframe_batch(recorder)
+    opcodes = Enum.map(keyframe_batch, fn <<op, _rest::binary>> -> op end)
+
+    assert @op_gui_line_spacing in opcodes,
+           "keyframe must re-emit line_spacing; opcodes were #{inspect(opcodes)}"
+
+    assert @op_gui_cursor_animation in opcodes,
+           "keyframe must re-emit cursor_animation; opcodes were #{inspect(opcodes)}"
+
+    assert @op_gui_config_state in opcodes,
+           "keyframe must re-emit config_state; opcodes were #{inspect(opcodes)}"
+
+    # The re-emitted values are the current config, decoded from the keyframe
+    # bytes against the SAME (isolated) options server the editor read.
+    assert keyframe_line_spacing(keyframe_batch) ==
+             round((Minga.Config.Options.get(options_server, :line_spacing) || 1.0) * 100)
+
+    assert keyframe_cursor_animation(keyframe_batch) ==
+             Minga.Config.Options.get(options_server, :cursor_animate)
+  end
+
   test "reconnect handshake: a fresh `ready` also keyframes the attaching client by construction" do
     # The other half of the attach mechanism: a frontend that (re)connects and
     # sends `ready` triggers reset_frontend_render_state, which zeroes the delta
@@ -186,6 +253,24 @@ defmodule Minga.Integration.AttachKeyframeTest do
   end
 
   # ── Helpers ─────────────────────────────────────────────────────────────────
+
+  # Decodes the spacing_x100 value out of the keyframe's gui_line_spacing command
+  # (opcode + payload_length(2) + spacing_x100(2)).
+  defp keyframe_line_spacing(batch) do
+    Enum.find_value(batch, fn
+      <<@op_gui_line_spacing, _len::16, spacing_x100::16>> -> spacing_x100
+      _ -> nil
+    end)
+  end
+
+  # Decodes the enabled flag out of the keyframe's gui_cursor_animation command
+  # (opcode + payload_length(2) + enabled(1)).
+  defp keyframe_cursor_animation(batch) do
+    Enum.find_value(batch, fn
+      <<@op_gui_cursor_animation, _len::16, enabled::8>> -> enabled == 1
+      _ -> nil
+    end)
+  end
 
   # Captures the first client's last committed frame as frozen test-process data
   # (rows + cursor). Reads the live HeadlessPort grid after a sync barrier; the

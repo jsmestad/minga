@@ -128,23 +128,10 @@ defmodule MingaEditor.Frontend do
     send_commands(port, cmds)
   end
 
-  @doc "Sends the line_spacing multiplier to the GUI frontend."
-  @spec send_line_spacing(GenServer.server(), number()) :: :ok
-  def send_line_spacing(port, spacing) when is_number(spacing) and spacing >= 1.0 do
-    send_commands(port, [MingaEditor.Frontend.Protocol.GUI.encode_gui_line_spacing(spacing)])
-  end
-
-  @doc "Sends whether GUI frontends should animate cursor movement."
-  @spec send_cursor_animation(GenServer.server(), boolean()) :: :ok
-  def send_cursor_animation(port, enabled) when is_boolean(enabled) do
-    send_commands(port, [MingaEditor.Frontend.Protocol.GUI.encode_gui_cursor_animation(enabled)])
-  end
-
-  @doc "Sends the native settings panel state to GUI frontends."
-  @spec send_config_state(GenServer.server(), ProtocolGUI.config_state()) :: :ok
-  def send_config_state(port, config_state) do
-    send_commands(port, [ProtocolGUI.encode_gui_config_state(config_state)])
-  end
+  # line_spacing, cursor_animation, and config_state are no longer pushed
+  # out-of-band (#2119). They are emitted in-frame as semantic models by
+  # Minga.Frontend.Adapter.GUI (LineSpacingEncoder / CursorAnimationEncoder /
+  # ConfigStateEncoder), so a late-attaching client's keyframe carries them.
 
   # ── Parser/Highlight commands ────────────────────────────────────────────
 

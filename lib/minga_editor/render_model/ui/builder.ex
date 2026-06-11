@@ -9,6 +9,8 @@ defmodule MingaEditor.RenderModel.UI.Builder do
   alias MingaEditor.RenderModel.UI.BreadcrumbBuilder
   alias MingaEditor.RenderModel.UI.ChangeSummaryBuilder
   alias MingaEditor.RenderModel.UI.CompletionBuilder
+  alias MingaEditor.RenderModel.UI.CursorAnimationBuilder
+  alias MingaEditor.RenderModel.UI.LineSpacingBuilder
   alias MingaEditor.RenderModel.UI.EditTimelineBuilder
   alias MingaEditor.RenderModel.UI.ExtensionOverlayBuilder
   alias MingaEditor.RenderModel.UI.ExtensionPanelBuilder
@@ -79,7 +81,12 @@ defmodule MingaEditor.RenderModel.UI.Builder do
       hover_popup: HoverPopupBuilder.build(ctx),
       float_popup: FloatPopupBuilder.build(ctx),
       gutter_separator: GutterSeparatorBuilder.build(ctx),
-      split_separators: SplitSeparatorsBuilder.build(ctx)
+      split_separators: SplitSeparatorsBuilder.build(ctx),
+      # GUI config settings carried in-frame (#2119). All three are GUI-only and
+      # return nil for non-GUI frontends so they are omitted from the frame.
+      line_spacing: LineSpacingBuilder.build(ctx.line_spacing, ctx.gui?),
+      cursor_animation: CursorAnimationBuilder.build(ctx.cursor_animate, ctx.gui?),
+      config_state: ctx.config_state
     }
 
     {ui, ctx}

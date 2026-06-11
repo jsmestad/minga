@@ -21,7 +21,6 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   alias MingaEditor.Remote.EventReplay
   alias MingaEditor.Remote.SessionClient
   alias MingaEditor.Renderer
-  alias MingaEditor.Startup
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
@@ -133,11 +132,13 @@ defmodule MingaEditor.Handlers.EventDispatcher do
         _msg
       )
       when is_boolean(enabled) do
+    # cursor_animate rides in-frame as the CursorAnimation semantic model (#2119),
+    # so a re-render delivers the new value (no out-of-band push).
     if option_source_matches?(source, EditorState.options_server(state)) do
-      Startup.send_cursor_animation_config(state, enabled)
+      Renderer.render_or_async(state)
+    else
+      state
     end
-
-    state
   end
 
   def dispatch(
@@ -148,9 +149,13 @@ defmodule MingaEditor.Handlers.EventDispatcher do
       ) do
     if option_source_matches?(source, EditorState.options_server(state)) and
          Protocol.GUI.settings_option?(name) do
+      # The config_state semantic model is emitted in-frame (#2119): rebuild the
+      # cached settings snapshot, apply the runtime change, then re-render so the
+      # next frame transaction carries the updated config_state (and theme/font).
       state
       |> MingaEditor.apply_runtime_config_option(name, value)
-      |> MingaEditor.push_config_state_entry(name, value)
+      |> MingaEditor.refresh_gui_config_state()
+      |> Renderer.render_or_async()
     else
       state
     end

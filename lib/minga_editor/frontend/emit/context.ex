@@ -54,7 +54,11 @@ defmodule MingaEditor.Frontend.Emit.Context do
           last_input_seq: non_neg_integer(),
           frame_seq: non_neg_integer() | nil,
           force_keyframe?: boolean(),
-          surface_placements: [MingaEditor.Layout.SurfaceRegistry.wire_placement()]
+          surface_placements: [MingaEditor.Layout.SurfaceRegistry.wire_placement()],
+          gui?: boolean(),
+          line_spacing: number() | nil,
+          cursor_animate: boolean() | nil,
+          config_state: Minga.RenderModel.UI.ConfigState.t() | nil
         }
 
   @enforce_keys [:port_manager, :capabilities, :theme, :font_registry, :windows, :layout, :shell]
@@ -87,12 +91,17 @@ defmodule MingaEditor.Frontend.Emit.Context do
             last_input_seq: 0,
             frame_seq: nil,
             force_keyframe?: false,
-            surface_placements: []
+            surface_placements: [],
+            gui?: false,
+            line_spacing: nil,
+            cursor_animate: nil,
+            config_state: nil
 
   @doc "Builds an emit context from render pipeline input."
   @spec from_editor_state(map()) :: t()
   def from_editor_state(state) do
     title = compute_title(state)
+    gui? = MingaEditor.Frontend.gui?(state.capabilities)
 
     %__MODULE__{
       port_manager: state.port_manager,
@@ -129,9 +138,23 @@ defmodule MingaEditor.Frontend.Emit.Context do
       # routing hit-tests against, so the emitted placement rect for every surface
       # equals its BEAM hit-test rect by construction. The encoder consumes these
       # plain maps and stays free of any MingaEditor dependency.
-      surface_placements: MingaEditor.Layout.SurfaceRegistry.wire_placements(state)
+      surface_placements: MingaEditor.Layout.SurfaceRegistry.wire_placements(state),
+      # GUI config settings carried in-frame as semantic models (#2119). These are
+      # GUI-only renderer preferences plus the native settings snapshot; they ride
+      # inside the frame transaction so a late-attaching client's keyframe carries
+      # them. The render pipeline Input pre-computes them from EditorState (a cheap
+      # ETS read for line_spacing/cursor_animate, a cached field for config_state)
+      # so the emit stage never reaches back into the config or keymap servers.
+      gui?: gui?,
+      line_spacing: gui_only(gui?, Map.get(state, :line_spacing)),
+      cursor_animate: gui_only(gui?, Map.get(state, :cursor_animate)),
+      config_state: gui_only(gui?, Map.get(state, :gui_config_state))
     }
   end
+
+  @spec gui_only(boolean(), value) :: value | nil when value: var
+  defp gui_only(true, value), do: value
+  defp gui_only(false, _value), do: nil
 
   @spec compute_title(map()) :: String.t()
   defp compute_title(%{shell: shell} = state) do

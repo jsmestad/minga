@@ -103,7 +103,14 @@ defmodule MingaEditor.RenderPipeline.Input do
     # When true, the emitter forces this frame to a keyframe (base_frame_seq 0,
     # full window snapshots, every chrome surface re-emitted). Set by the BEAM
     # after an inbound request_keyframe (#2219).
-    force_keyframe?: false
+    force_keyframe?: false,
+    # GUI config settings emitted in-frame as semantic models (#2119). Pre-computed
+    # from EditorState so the pipeline never reaches back into the config/keymap
+    # servers: line_spacing/cursor_animate are cheap ETS option reads; gui_config_state
+    # is the editor's cached settings snapshot, rebuilt only on a settings change.
+    line_spacing: nil,
+    cursor_animate: nil,
+    gui_config_state: nil
   ]
 
   @typedoc """
@@ -152,6 +159,9 @@ defmodule MingaEditor.RenderPipeline.Input do
           last_input_seq: non_neg_integer(),
           frame_seq: non_neg_integer() | nil,
           force_keyframe?: boolean(),
+          line_spacing: number() | nil,
+          cursor_animate: boolean() | nil,
+          gui_config_state: Minga.RenderModel.UI.ConfigState.t() | nil,
           workspace: workspace()
         }
 
@@ -188,6 +198,9 @@ defmodule MingaEditor.RenderPipeline.Input do
       terminal_viewport: state.terminal_viewport,
       last_input_seq: state.last_input_seq,
       force_keyframe?: Map.get(state, :keyframe_pending?, false),
+      line_spacing: Minga.Config.Options.get(state.options_server, :line_spacing) || 1.0,
+      cursor_animate: Minga.Config.Options.get(state.options_server, :cursor_animate),
+      gui_config_state: state.gui_config_state,
       workspace: %{
         windows: ws.windows,
         buffers: ws.buffers,
