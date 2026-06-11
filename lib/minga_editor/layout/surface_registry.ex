@@ -13,6 +13,23 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
   is no ETS, no GenServer, no cache of its own. It is consumed where
   `MingaEditor.FocusTree`/`MingaEditor.Layout` are consumed today.
 
+  ## The input rule (design of record, epic #2330)
+
+  Clients resolve clicks on content they render and send semantic intents
+  (`gui_actions`); the BEAM owns placement, stacking, and containment for
+  registry-placed surfaces. That is the governing line for all surface input.
+
+  A frontend hit-tests its own rendered content (a completion row, a
+  notification action, an observatory node) and emits an intent like
+  "item N clicked", exactly as SwiftUI's native hit-test already does. The BEAM
+  does not re-derive what a click means on rendered content. What it owns is
+  structure: which rect a surface occupies (placements), which surface wins when
+  rects overlap (z-order arbitration, since stacking depends on editor state only
+  the BEAM has), and containment, so a click that misses every interactive
+  element of a registry-placed surface is swallowed instead of falling through to
+  the buffer underneath (`MingaEditor.Input.OverlaySink`). The picker is the one
+  documented exception: it predates this rule and stays BEAM-resolved as shipped.
+
   ## One source, derived from the focus tree
 
   The registry is built by flattening the existing `MingaEditor.FocusTree`. The

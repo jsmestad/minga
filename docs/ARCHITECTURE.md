@@ -314,7 +314,7 @@ A Port is an OS-level process boundary. A frontend can crash completely, and the
 
 BEAM and the frontend communicate via `{:packet, 4}`: each message is prefixed with a 4-byte big-endian length, followed by a 1-byte opcode and opcode-specific binary fields. This is a simple, fast, zero-copy-friendly wire format.
 
-Legacy cell-grid render frames follow the pattern: `clear` → N × `draw_text` → `set_cursor` → `set_cursor_shape` → `batch_end`. Semantic UI frontends also receive structured Semantic UI opcodes for shared visible UI. New shared UI must use Semantic UI rather than adding more cell drawing.
+The cell-paradigm render opcodes (`draw_text`, `set_cursor`, `clear`, the region commands) were retired in protocol_version 2, and `batch_end` was replaced by the begin/commit frame transaction in protocol_version 3 (#2219). All visible content now flows through Semantic UI opcodes (the `0x70`+ family; window/buffer content rides `gui_window_content` at `0x80` and up), bracketed by a frame transaction. Only transport-level framing (frame boundaries, cursor shape, title, window background, font, protocol_error) survives in the render-transport category.
 
 The protocol has 20+ opcodes covering rendering, input, syntax highlighting, and diagnostics:
 
@@ -331,12 +331,12 @@ graph LR
     end
 
     subgraph BEAMToFrontend["BEAM → Frontend"]
-        DT["0x10 Draw Text<br/>row, col, fg, bg, attrs, text"]
-        SC["0x11 Set Cursor<br/>row::16, col::16"]
-        CL["0x12 Clear"]
-        BE["0x13 Batch End<br/>(flush frame)"]
+        BF["0x10 begin_frame<br/>frame_seq, base_frame_seq"]
+        CF["0x11 commit_frame<br/>frame_seq, input_seq"]
         CS["0x15 Cursor Shape<br/>block/beam/underline"]
-        GUI["0x70+ Semantic UI<br/>tabs, tree, status, popups"]
+        TI["0x16 set_title"]
+        WB["0x17 set_window_bg"]
+        GUI["0x70+ Semantic UI<br/>tabs, tree, status, popups; 0x80+ window content"]
     end
 
     style FrontendToBEAM fill:#1a2e1a,stroke:#1e8449,color:#fff
@@ -347,43 +347,91 @@ For the full specification with byte-level field descriptions, sequencing rules,
 
 Any process that implements the frontend behavior and speaks this protocol can serve as a Minga rendering backend. Frontend identity is opaque to product behavior; capabilities describe the surface and feature support. The macOS Swift frontend is the polish reference, the Go terminal frontend is the only terminal frontend, and GTK4 remains planned for Linux. The legacy Zig/libvaxis cell-grid renderer was removed in #2223.
 
-### Display List (Rendering IR)
+### The Render Model and the rendering pipeline
 
-The BEAM side owns a **display list** of styled text runs that sits between editor state and protocol encoding. This intermediate representation is the single source of truth for "what's on screen" and is consumed by all frontends (macOS GUI, Linux GUI, TUI).
+The BEAM does not paint cells. It builds a **semantic render model** (`Minga.RenderModel`) and hands it to per-frontend adapter encoders, which serialize it to the wire. Every live frontend (macOS GUI and Go TUI) decodes that model and draws it with its own native primitives. There is no shared cell grid, no styled-text-run IR sitting between editor state and the protocol, and no last-mile text-run translation on any frontend. The TUI decodes the same semantic models as the GUI; it is a semantic client, not a terminal-cell renderer (the legacy cell-grid TUI was removed in #2223).
 
-The display list uses **styled text runs**, not a cell grid. A cell grid is terminal-shaped and would force GUI frontends to fake a terminal. Styled text runs stay line-and-column based (monospaced editing model) while being abstract enough for both TUI and GUI frontends:
+The render path runs as an explicit pipeline whose stages narrow editor state down to the literal product the adapters encode:
 
-```elixir
-# A styled run: "draw this text in this style starting at this column"
-@type text_run :: {col :: non_neg_integer(), text :: String.t(), style :: style()}
-
-# A line's visual content: a list of runs
-@type display_line :: [text_run()]
-
-# A window's frame: positioned rectangle with visible lines
-@type window_frame :: %{
-  rect: rect(),
-  lines: %{row :: non_neg_integer() => display_line()},
-  gutter: %{row :: non_neg_integer() => display_line()},
-  cursor: {row :: non_neg_integer(), col :: non_neg_integer()}
-}
+```
+EditorState
+   │  Content stage (RenderPipeline.Content)
+   ▼  builds Minga.RenderModel.Window models per editor window
+WindowContent carriers (RenderPipeline.WindowContent)
+   │  Compose stage flattens them across all windows
+   ▼
+ComposedFrame (RenderPipeline.ComposedFrame)   ← the literal pipeline product (#2241)
+   │  holds the flattened RenderModel.Window list + the single resolved RenderModel.Cursor
+   ▼  RenderModel.Builder reads those two fields directly; Chrome/UI surfaces ride alongside
+Minga.RenderModel
+   │  Emit stage (Frontend.Emit)
+   ▼
+adapter encoders (Minga.Frontend.Adapter.GUI)  →  semantic protocol commands on the wire
 ```
 
-Each frontend does the last-mile translation. The macOS GUI converts text runs into CoreText attributed strings drawn on a Metal surface at pixel positions derived from the font metrics. The TUI frontend converts text runs into terminal cells (a run `{5, "hello", green}` becomes five green cells at columns 5-9). The IR doesn't change; only the frontend's interpretation does.
+Chrome and shared UI (tab bars, file trees, status bars, which-key popups, completion menus, agent chat, popups) are not cells either. They are `Minga.RenderModel.UI.*` values built into the same render model and encoded as Semantic UI opcodes (the `0x70`+ family — tab bar `0x71`, status bar `0x76`, and so on — distinct from the `gui_window_content` buffer-rendering opcodes at `0x80` and up; see [docs/GUI_PROTOCOL.md](GUI_PROTOCOL.md)). Each frontend renders them as platform-native widgets or terminal widgets. The status bar resolves the same configured modeline segments for every semantic frontend, then ships styled segment data in the `gui_status_bar` payload so custom and hidden segments stay in sync across frontends.
 
-Semantic-capable frontends also receive **structured Semantic UI data** (opcodes 0x70+) for shared UI elements: tab bars, file trees, status bars, which-key popups, completion menus, agent chat views, and buffer-window semantic content. These are rendered as platform-native widgets, terminal widgets, or web components rather than painted as ad-hoc cells. The status bar uses the same configured modeline segment resolution for every semantic frontend, then sends styled segment data in the historical `gui_status_bar` payload so custom and hidden segments stay in sync across frontends. See **[docs/GUI_PROTOCOL.md](GUI_PROTOCOL.md)** for the full specification.
+Because the model carries character offsets, not pixel positions, the same model drives both monospaced and variable-width font rendering in GUI frontends: a monospaced frontend multiplies by cell width; a proportional frontend measures preceding characters to find the pixel X. The `measure_text` opcode handles the cases where the BEAM needs the frontend to measure precise display widths.
 
-This design also supports variable-width font rendering in GUI frontends. The IR uses character offsets, not pixel positions. A monospaced frontend multiplies by cell width; a proportional frontend measures the preceding characters to find the pixel X. The `measure_text` / `text_width` protocol opcodes handle the cases where the BEAM needs to query the frontend for precise measurements.
+#### What survives of the DisplayList
+
+`MingaEditor.DisplayList` still exists, but it is no longer "what's on screen". The cell-grid window carriers (`Frame`, `WindowFrame`) were removed in #2241, and the per-surface chrome painters (completion menu, hover/signature popups, modeline, tab bar, float popups) were deleted in #2311, because the semantic frontends render those surfaces natively. What remains is a small set of `draw/4` + `Overlay` primitives for a shrinking set of renderers that still produce raw draw tuples or popup geometry: the styled-run gutter (`Renderer.Gutter`, line numbers and git signs), extension block decorations (`Core.Decorations.BlockDecoration`), the popup-geometry `:content` draw list used to size floating windows, the `Overlay` carrier whose `cursor` field still resolves the picker cursor in Compose, and the Board and Git Porcelain extension shell renderers. It is a leftover for extension and gutter draw paths, not the pipeline's spine.
+
+---
+
+## Frame Transactions
+
+A frame is atomic on the wire. The Emit stage brackets every frame's semantic and chrome commands between `begin_frame{frame_seq, base_frame_seq}` and `commit_frame{frame_seq, input_seq}` (`MingaEditor.Frontend.Emit`, epic #2219). The frontend decodes the commands into a staging model and atomically swaps it in only on `commit_frame`, so `View()` never paints a half-applied frame. `frame_seq` is the strictly monotonic global frame sequence; `input_seq` echoes the latest input correlation sequence so the frontend can resolve a keystroke-to-write latency sample.
+
+**Keyframe-as-attach.** There is no separate keyframe opcode. A keyframe is just a transaction whose `base_frame_seq == 0`: it depends on no prior frame, so it carries full snapshots (every window as full `gui_window_content`, every chrome surface re-emitted, title and window background re-sent) instead of deltas against a base the client may never have seen. A keyframe is forced when the frontend sends `request_keyframe`, and it is also the first-frame state by construction (`last_emitted_frame_seq == 0`). Because a fresh client re-readies and any `ready` zeroes the emit cache, the first frame after any reconnect is full for free. This doubles as the attach handshake: a frontend that connects mid-session decodes one self-contained keyframe and is immediately consistent. See [Attach protocol](#attach-protocol-how-a-frontend-joins-a-running-session) for the daemon-scope details and the honest single-port limitation.
+
+**Debounced resync.** Four conditions invalidate the in-flight frame on the frontend: truncation (a new `begin_frame` before the open transaction commits), seq mismatch, an unsizable/unknown opcode inside a transaction, and a base mismatch (a delta whose `base_frame_seq` names a frame the client never committed). On any of these the frontend discards its staged frame and sends `request_keyframe(last_good_frame_seq)`. The request is **debounced**: after an invalidation, every stale in-flight frame also fails its base check, so the Go model latches a `resyncPending` flag and sends exactly one keyframe request per resync window (`go/tui/internal/ui/model.go`), clearing it when a clean commit applies. The BEAM responds by setting `keyframe_pending?` and forcing the next frame to a keyframe (`MingaEditor.handle_info({:request_keyframe, _})`).
+
+**The out-of-band allowlist.** A small set of commands is sanctioned to ride outside the transaction bracket. `set_title` and `set_window_bg` are side-channel writes the Emit stage sends only when they change (`send_title`/`send_window_bg`); if one happens to arrive inside an open transaction it still stages so the swap stays atomic, otherwise it applies directly. `protocol_error` is out-of-band by design: the BEAM rejected the frontend's handshake `protocol_version`, so it never enters a transaction; the frontend latches the reason and renders a blocking error surface. Everything else (semantic and chrome commands) is a protocol violation outside a transaction and triggers a resync rather than a partial paint.
+
+**The ephemeral-layer carve-out.** The transaction model says the BEAM owns structure, not pixels. A documented client-local ephemeral layer states what a frontend may render *between* commits without a round-trip: cursor blink, spinners, smooth scroll, local scrollback. The line is hit-testing: anything the BEAM hit-tests against (any placed surface) must come through a frame transaction, because input correctness depends on the BEAM and the frontend agreeing on geometry. Purely visual, non-interactive motion may live in the frontend. This is an accepted, bounded impurity, not a general escape hatch.
+
+---
+
+## Surface Placement Authority
+
+The BEAM is the single authority for where every surface sits and which one wins when surfaces overlap. `MingaEditor.Layout.SurfaceRegistry` is a pure calculation (state in, placements out) that flattens the focus tree into an ordered list of placements, each carrying a `surface_id`, a `rect` (terminal cells), a `z` band, and a `hit_kind`. The list is ordered back-to-front by `z`, so a stable sort reproduces paint order and a reverse walk reproduces hit-test precedence. Because the registry projects the same focus tree that already drives mouse routing, the rect it emits for a surface *is* the rect every hit-test uses, by construction.
+
+These placements are emitted inside the frame transaction as a `gui_surface_layout` command (`Minga.Frontend.Adapter.GUI.SurfaceLayoutEncoder`, from `ctx.surface_placements`). One rect+z list does double duty: the frontend composites surfaces by `z` and derives its mouse zones from these rects, and the BEAM arbitrates stacking and containment from the same placements. The Go compositor's old hand-ordered `overlayLines()` fallback table is gone; every overlay surface is now a focus-tree node with a BEAM-authoritative rect (#2268 → #2281). Footer-band secondary overlays (float popup, agent context, tool manager, extension panel, observatory, edit timeline, notifications, extension overlay) are content-height-sized and bottom-anchored via `MingaEditor.Layout.OverlayBand`, carrying their historical stacking z so the single highest-z winner positions at its placement rect instead of footer-appending.
+
+The registry owns surface *rects and z-order*, not every handler's interpretation of a click inside its surface. Intra-window geometry (gutter width, fold column, cell-to-buffer-line) stays in `MingaEditor.Mouse.HitTest`; the agent window's chat/preview/prompt sub-division stays in `Input.AgentMouse`; per-segment tab-bar and modeline click regions stay as render-time text-property spans. The registry places the surface; the handler interprets the click.
+
+### The input rule
+
+This is the design of record (recorded on epic #2330) for all surface input:
+
+> **Clients resolve clicks on content they render and send semantic intents (`gui_actions`); the BEAM owns placement, stacking, and containment for registry-placed surfaces.**
+
+A frontend hit-tests its own rendered content and emits an intent ("completion item 3 selected", "notification N dismissed"), exactly the contract SwiftUI already uses (native hit-test → `gui_action`). One pipeline, one way of doing things, on every client. The BEAM does not re-derive what a click means on rendered content. It owns structure: which rect a surface occupies, which surface wins when rects overlap (stacking depends on editor state only the BEAM has), and containment, so a click that misses every interactive element of a placed surface is swallowed (`MingaEditor.Input.OverlaySink`) instead of falling through to the buffer underneath.
+
+Worked examples. Completion menu, notifications (dismiss and action), observatory rows, edit-timeline entries, and the float popup are all client-resolved on both frontends: the Go TUI tracks click zones (`completion:item:`, `notification:action:`, `observatory:node:`, `timeline:entry:`) and emits the matching `gui_action`, mirroring SwiftUI's native hit-testing. **The picker is the one documented exception:** it predates this rule and stays BEAM-resolved as shipped, to be aligned only if it ever needs rework.
+
+---
+
+## Two-Tier Rendering
+
+Rendering avoids redundant work on both sides of the protocol, with telemetry so the savings are observable rather than assumed.
+
+**BEAM: retained-row reuse with patch/full classification (#2287).** `MingaEditor.RenderPipeline.Classifier` tags each frame `:patch` or `:full`. Both paths run the same seven stages and emit the same transaction with the same encodings; the tag is observability, not a fork. On a `:patch` frame (cursor motion or a single-line edit confined to the active window's current viewport) the upstream row-retention cache lets unchanged rows skip composition, so the frame rasterizes only the rows that changed. Anything structural (split/open/close, resize, theme change, chrome state change, forced keyframe, first frame, scroll, multi-window) classifies `:full`. Classification is conservative by construction: it only ever labels the frame, so a mislabel is at worst pessimistic, never wrong.
+
+**Go: composed-line cache (#2288).** The Go TUI memoizes each window body row's rendered string (`go/tui/internal/ui/line_cache.go`) so a window-content delta whose rows are mostly refs reuses the previously composed lines instead of re-running the lipgloss tree per row per frame. Correctness over cleverness: a cached line is returned only when every input that produced it (content hash, per-window context, and row index) is identical, so patched output is byte-identical to a from-scratch compose. Per-frame hit/miss counters feed the latency HUD and tests.
+
+**Agent stream: coalescing ingest (#2289).** Agent token deltas can arrive at hundreds of messages per second. Delivered straight into the Editor mailbox, each runs a real buffer write and sits FIFO ahead of any queued keystroke (head-of-line blocking that jitters latency under streaming load). `MingaEditor.Agent.Ingest` sits between the session and the Editor, subscribing on the Editor's behalf so deltas land in *its* mailbox. It forwards one `{:agent_stream_batch, ...}` per coalescing window using a leading + trailing edge strategy: the first delta after idle forwards immediately (time-to-first-token unchanged), then deltas within the window accumulate and flush as a single batch on a tick. Control events (status change, tool start/end, turn end) flush the pending batch ahead of themselves in order, so the Editor never sees a turn end before its trailing text.
 
 ---
 
 ## Life of a Keystroke
 
-Here's what happens when you press `dd` (delete a line) in normal mode. The entire round-trip takes under 1ms on the BEAM side.
+Here's what happens when you press `dd` (delete a line) in normal mode. The measured end-to-end keystroke latency is ~1ms locally (see [Latency](#latency-measured-not-asserted) for the committed baseline and the CI gate); the BEAM side of that round-trip is a small fraction of it.
 
 ```mermaid
 sequenceDiagram
-    participant FE as Frontend<br/>(Swift, GTK4, or Zig)
+    participant FE as Frontend<br/>(Swift or Go TUI)
     participant PM as Frontend.Manager
     participant Ed as Editor
     participant Render as Renderer.Server
@@ -408,11 +456,11 @@ sequenceDiagram
 
     Note over Ed,Render: Render cycle
     Ed->>Render: render snapshot
-    Render->>Render: layout, content, chrome, compose
-    Render->>PM: [clear, draw_text x N, set_cursor, batch_end]
+    Render->>Render: content, compose, build render model
+    Render->>PM: begin_frame, gui_window_content (delta or full), commit_frame
     Render-->>Ed: renderer-owned cache writeback
     PM->>FE: render commands via stdin
-    FE->>FE: render to screen (Metal/GTK4/terminal)
+    FE->>FE: decode model, render to screen (Metal/terminal)
 ```
 
 ### Keymap Scopes
@@ -487,6 +535,22 @@ The `handle_mouse/7` callback is optional on `Input.Handler`. Handlers that don'
 
 ---
 
+## Latency: measured, not asserted
+
+The architecture trades direct function calls for message passing across a process boundary, so latency is a thing we measure rather than assert. The committed baseline lives in `bench/baselines/keystroke_latency.json` (generated by `bench/keystroke_latency_baseline.exs`). The current numbers, end-to-end keystroke-to-write, p50 in microseconds:
+
+| Scenario | p50 | p99 |
+|----------|-----|-----|
+| small_frame (single-line edit) | ~972µs (~1.0ms) | ~1221µs |
+| large_frame (full repaint) | ~1145µs (~1.1ms) | ~1576µs |
+| agent_stream (typing under an agent stream) | ~1223µs | ~3082µs |
+
+These are local M1 reads. They are not a promise of a fixed ceiling, and they differ from CI runner reads: a GitHub hosted runner measured small-frame p50 *faster* than the M1 baseline on one run, yet inflated the tails by ~30% (#2298). Absolute numbers are machine-dependent, so the file ships honest measurements with a pointer, not an aspiration.
+
+**The CI gate is relative, not absolute (#2290 / #2298).** Because hosted runners vary run-to-run, an absolute ceiling calibrated on one machine can never be both tight and stable. So on every `pull_request` CI run the workflow benches the PR's merge-base *and* the PR HEAD on the same runner in the same job, then requires `head <= base * (1 + tolerance)` per scenario per metric (`bench/check_latency_budgets.exs`, tolerances in `bench/latency_budgets.json`: p50 +10%, p99 +20%, looser for tails because tails are noisier even same-runner). Runner speed cancels out. Absolute ceilings survive only as loose catastrophic sanity bounds (~2x a healthy runner read) that catch a gross regression when the base bench is unavailable; they are not the gate.
+
+---
+
 ## Syntax Highlighting Pipeline
 
 Tree-sitter parsing runs in the Zig process to avoid sending parse trees across the protocol boundary. The BEAM controls *what* to parse and *how* to color it; Zig does the actual parsing.
@@ -517,13 +581,13 @@ sequenceDiagram
 
     Note over Ed,Render: Next render frame
     Ed->>Render: render snapshot with highlight spans
-    Render->>Render: slice visible lines at span boundaries
-    Render->>FM: draw_text with per-segment colors
+    Render->>Render: slice visible lines into styled spans, build window model
+    Render->>FM: gui_window_content (spans carry per-segment colors)
     FM->>FE: render commands
-    FE->>FE: render colored text
+    FE->>FE: decode model, render colored text
 ```
 
-All 39 grammars are compiled into the Zig binary. Highlight queries are embedded via `@embedFile` and pre-compiled on a background thread at startup. First-file highlighting appears in ~16ms.
+All 50 grammars are compiled into the Zig binary (`zig/build.zig`). Highlight queries are embedded via `@embedFile` and pre-compiled on a background thread at startup. First-file highlighting appears in ~16ms.
 
 Users can override queries by placing `.scm` files in `~/.config/minga/queries/{lang}/highlights.scm`.
 
@@ -671,9 +735,9 @@ LSP communication, file indexing, git operations: these can run as separate BEAM
 
 ## Semantic render and command path
 
-Render and command code does **not** branch on `Capabilities.gui?`. Every live frontend (the macOS GUI and the Go TUI) advertises `semantic_ui` in its `ready` handshake and takes a single semantic path: the BEAM builds a semantic render model (`Chrome.GUI`, `Layout.GUI`, the `RenderModel.UI.*` builders) and the frontend renders it natively. The legacy Zig cell-grid TUI, the last consumer of cell draws, was removed in #2223; the BEAM-side cell chrome/layout builders it fed (`Chrome.TUI`, `Layout.TUI`, `tree_renderer.ex`, `sidebar_renderer.ex`) were deleted in #2235, leaving `picker_ui.ex`'s cell renderer pending deletion in #2236.
+Render and command code does **not** branch on `Capabilities.gui?`. Every live frontend (the macOS GUI and the Go TUI) advertises `semantic_ui` in its `ready` handshake and takes a single semantic path: the BEAM builds a semantic render model (`Chrome.GUI`, `Layout.GUI`, the `RenderModel.UI.*` builders) and the frontend renders it natively. There is no cell path left to branch against. The legacy Zig cell-grid TUI, the last consumer of cell draws, was removed in #2223; the BEAM-side cell chrome/layout builders it fed (`Chrome.TUI`, `Layout.TUI`, `tree_renderer.ex`, `sidebar_renderer.ex`) were deleted in #2235, and `picker_ui.ex` is now pure picker state that the semantic `RenderModel.UI.PickerBuilder` consumes; its old cell renderer is gone with the rest of the cell paradigm.
 
-**The predicate is `Capabilities.semantic_ui?`, not `gui?`.** When a render or command path must decide between the semantic model and the legacy cell path, branch on `semantic_ui?`. `gui?` (true only for `frontend_type: :native_gui`) remains available for genuinely native-window-only concerns that are not render/command dispatch: native-renderer config (line spacing, cursor animation), GUI defaults (absolute line numbers), the native-window title, GUI-only key bindings, and the GUI settings-panel config push. Do not use `gui?` to gate semantic chrome or semantic-capable features (e.g. the BEAM observatory, which the Go TUI renders), or you will strand the Go TUI.
+**The predicate is `Capabilities.semantic_ui?`, not `gui?`.** `gui?` (true only for `frontend_type: :native_gui`) remains available for genuinely native-window-only concerns that are not render/command dispatch: native-renderer config (line spacing, cursor animation), GUI defaults (absolute line numbers), the native-window title, GUI-only key bindings, and the GUI settings-panel config push. Do not use `gui?` to gate semantic chrome or semantic-capable features (e.g. the BEAM observatory, which the Go TUI renders), or you will strand the Go TUI.
 
 **Command dispatch is single-path.** Shared chrome commands (bottom panel, message tray) live directly in their command module with no `Commands.Foo.GUI` / `Commands.Foo.TUI` submodules and no `Frontend` behaviour. The chrome and layout builders call `Chrome.GUI` / `Layout.GUI` unconditionally; the `Chrome.TUI` / `Layout.TUI` cell builders were deleted in #2235.
 
@@ -687,7 +751,7 @@ These guide what we build and how:
 - **Fault tolerance over speed.** The BEAM's supervision model means crashes are recoverable events, not catastrophes.
 - **Process isolation.** Editor state and rendering never share memory; either can fail independently. Multiple frontends can exist because the protocol enforces this boundary.
 - **Vim grammar, modern UX.** Modal editing with discoverable leader-key menus.
-- **Elixir for logic, platform-native rendering.** The BEAM handles everything a text editor needs to think about. Swift, GTK4, and Zig handle everything a display needs to draw.
+- **Elixir for logic, platform-native rendering.** The BEAM handles everything a text editor needs to think about. Swift/Metal, Go/Bubble Tea, and the planned GTK4 frontend handle everything a display needs to draw; Zig is parser infrastructure, not a display.
 - **Test everything.** Property-based tests for data structures, snapshot tests for UI, integration tests for the full pipeline.
 - **Convention over configuration.** Minga ships working defaults for everything: theme, keybindings, tab width, formatters, LSP servers. A fresh install with no config file should feel like Doom Emacs on day one. Your `config.exs` is a diff, not a manifest; it contains only what you've changed. Defaults are inspectable (`:set` shows current values, `SPC h k` shows bindings and whether they're defaults or overrides) and never hidden so deep that users can't find them.
 - **Core vs. extension.** If a Doom Emacs user installs Minga with zero configuration, would they expect this feature to work? If yes, it ships built-in. If it's a power-user addition, a niche workflow, or a matter of taste, it's an extension. Built-in features that touch only public APIs should be architected as if they were extensions (clean boundary, no internal coupling) so extraction is possible later. See `docs/AUTHORING_EXTENSIONS.md` for the full philosophy.
@@ -730,7 +794,7 @@ Agent Level 2: bundled integrations, adapters, and agent presentation surfaces
 
 **Agent Level 1** contains core runtime services and source-owned safety boundaries. These modules may depend on Level 0, but they must not depend on bundled packs or presentation modules. Current examples: `MingaAgent.Session`, `MingaAgent.SessionManager`, `MingaAgent.SessionMetadata`, `MingaAgent.SubagentContext`, `MingaAgent.Supervisor`, `MingaAgent.Runtime`, `MingaAgent.Config`, `MingaAgent.ContextArtifact`, `MingaAgent.Retry`, `MingaAgent.ProviderRegistry`, `MingaAgent.ProviderResolver`, `MingaAgent.Tool.BundledSources`, `MingaAgent.Tool.Context`, `MingaAgent.Tool.Registry`, `MingaAgent.Tool.Executor`, `MingaAgent.ToolRouter`, `MingaAgent.ProjectView`, `MingaAgent.Changeset`, `MingaAgent.Credentials`, `MingaAgent.Hooks.Dispatcher`, `MingaAgent.Hooks.Registry`, `MingaAgent.MCP.Registry`, `MingaAgent.MCP.ServerRegistry`, `MingaAgent.Skills.Registry`, `MingaAgent.EventLog`, `MingaAgent.Gateway.*`, `MingaAgent.RemoteAPI`, `Minga.Extension.CodeLease`, and the extension-facing runtime facade `Minga.Extension.AgentAPI`.
 
-**Agent Level 2** contains code that adapts the core runtime into a concrete integration or user-facing agent surface. Current examples live under `MingaEditor.Agent.*`, including `MingaEditor.Agent.UIState`, `MingaEditor.Agent.Events`, `MingaEditor.Agent.View.*`, `MingaEditor.Agent.DiffReview`, `MingaEditor.Agent.DiffRenderer`, `MingaEditor.Agent.SlashCommand`, and `MingaEditor.Agent.SemanticUI.Registry`. Bundled integration examples now include `MingaAgent.ToolPacks.ReadOnly`, which contributes `find`, `grep`, `list_directory`, and `fetch_url` through the source-owned tool registry, and `MingaAgent.ToolPacks.LSP`, which contributes diagnostics, navigation, symbol, rename, and code-action tools while the core LSP services keep owning workspace state. `MingaAgent.ProviderPacks.Native` contributes the existing `native` provider declaration through the source-owned provider registry as `{:bundle, :native_provider}` while `MingaAgent.Providers.Native` keeps turn orchestration, retry, cost, compaction, approval, tools, and event normalization. `MingaAgent.Providers.Native.ReqLLMAdapter` remains the ReqLLM seam inside that native provider: it owns request options, model/provider translation, stream decoding, and ReqLLM message compatibility. Semantic agent UI packs contribute existing `Minga.RenderModel.UI.*` values through the source-owned semantic UI registry, so render and input hot paths read cached render-model data instead of extension callbacks. Git/MCP packs are target Level 2 modules as they are extracted by later #2075 child tickets. Today, several mutating built-in tools remain Level 1 until their context-bound execution boundaries land.
+**Agent Level 2** contains code that adapts the core runtime into a concrete integration or user-facing agent surface. Current examples live under `MingaEditor.Agent.*`, including `MingaEditor.Agent.UIState`, `MingaEditor.Agent.Events`, `MingaEditor.Agent.View.*`, `MingaEditor.Agent.DiffReview`, `MingaEditor.Agent.DiffSnapshot`, `MingaEditor.Agent.SlashCommand`, and `MingaEditor.Agent.SemanticUI.Registry`. Bundled integration examples now include `MingaAgent.ToolPacks.ReadOnly`, which contributes `find`, `grep`, `list_directory`, and `fetch_url` through the source-owned tool registry, and `MingaAgent.ToolPacks.LSP`, which contributes diagnostics, navigation, symbol, rename, and code-action tools while the core LSP services keep owning workspace state. `MingaAgent.ProviderPacks.Native` contributes the existing `native` provider declaration through the source-owned provider registry as `{:bundle, :native_provider}` while `MingaAgent.Providers.Native` keeps turn orchestration, retry, cost, compaction, approval, tools, and event normalization. `MingaAgent.Providers.Native.ReqLLMAdapter` remains the ReqLLM seam inside that native provider: it owns request options, model/provider translation, stream decoding, and ReqLLM message compatibility. Semantic agent UI packs contribute existing `Minga.RenderModel.UI.*` values through the source-owned semantic UI registry, so render and input hot paths read cached render-model data instead of extension callbacks. Git/MCP packs are target Level 2 modules as they are extracted by later #2075 child tickets. Today, several mutating built-in tools remain Level 1 until their context-bound execution boundaries land.
 
 The custom Credo check `Minga.Credo.DependencyDirectionCheck` enforces both maps. It flags Agent Level 0 references to Level 1 or 2 and Agent Level 1 references to Level 2. The check intentionally uses prefix lists so later extraction tickets can move a module group from Level 1 to Level 2 without rewriting the check.
 
@@ -818,10 +882,10 @@ Honest accounting of what this architecture costs:
 
 | Trade-off | Why we accept it |
 |-----------|-----------------|
-| **Serialization overhead** (every render frame crosses a process boundary) | The protocol is ~50 bytes per draw command. At 60fps with 50 visible lines, that's ~150KB/s, trivial for a pipe. |
-| **Multiple binaries to ship** (Elixir release + platform frontend) | macOS: `.app` bundle. Linux: Flatpak/AppImage. TUI: Burrito single binary. |
+| **Serialization overhead** (every render frame crosses a process boundary) | Frames are semantic and delta-encoded inside a transaction, so a typical keystroke emits only the rows that changed, not a full repaint. Even a full keyframe is a few KB; steady-state editing is well under that. Trivial for a pipe, and the two-tier caches keep both sides from re-doing the work. |
+| **Multiple binaries to ship** (Elixir release + platform frontend + parser) | The BEAM release packages as a Burrito single binary; the macOS GUI ships as a `.app` bundle and Linux as Flatpak/AppImage; the terminal frontend is a Go binary and the parser is the Zig `minga-parser`, both spawned as Ports. |
 | **BEAM startup time** (the Erlang VM isn't instant) | ~200ms cold start. Acceptable for an editor you keep open. |
 | **Memory overhead** (the BEAM VM has a baseline footprint) | ~30MB for the VM + processes. Comparable to Neovim with plugins. |
-| **Latency floor** (message passing adds microseconds vs direct function calls) | Measured end-to-end keystroke latency is <1ms. Below human perception. |
+| **Latency floor** (message passing adds microseconds vs direct function calls) | Measured end-to-end keystroke latency is ~1.0–1.1ms p50 locally (`bench/baselines/keystroke_latency.json`), below human perception. The relative CI gate keeps it from regressing. See [Latency](#latency-measured-not-asserted). |
 
 None of these are deal-breakers. The isolation, concurrency, and observability more than compensate.
