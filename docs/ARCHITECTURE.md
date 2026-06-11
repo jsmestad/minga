@@ -763,6 +763,16 @@ Minga runs as a daemon: one BEAM process is one Minga server, and frontends (TUI
 
 This rule is the diagnostic the test-isolation epic (#1456) used to decide which singletons get migrated to the explicit-server-parameter pattern (Keymap.Active, Config.Options, Events registry, Git.Tracker, Config.Hooks) versus which stay as foundation singletons that tests work around (`*Messages*`, Popup.Registry, Config.Advice).
 
+### Attach protocol: how a frontend joins a running session
+
+The daemon model implies frontends come and go while the server keeps running, so a newly-connected frontend needs a way to learn the current screen without replaying the whole session. The mechanism is the keyframe, and it doubles as the attach handshake (epic #2219).
+
+**`request_keyframe(0)` is the attach handshake.** Every emitted frame is a transaction bracketed by `begin_frame{frame_seq, base_frame_seq}` and `commit_frame{frame_seq, input_seq}`. `base_frame_seq == 0` means keyframe: the transaction depends on nothing, so it carries full snapshots (every window as full `gui_window_content`, every chrome surface re-emitted, title and window background re-sent) instead of deltas against a frame the client never saw. A frontend that connects mid-session sends `request_keyframe(last_good_frame_seq)` on first contact; the editor sets `keyframe_pending?` and forces the next frame to a keyframe (`MingaEditor.Frontend.Emit`: a keyframe drops the adapter delta caches so nothing references a prior base). The attaching client decodes that one self-contained transaction and is immediately consistent with the session's committed state.
+
+**Reconnect keyframes by construction too.** The `:ready` handler calls `EditorState.reset_frontend_render_state/1`, which zeroes `caches.last_emitted_frame_seq`. Because `Emit` treats `last_emitted_frame_seq == 0` as a keyframe, the first frame after any `ready` is full by construction, even without an explicit `request_keyframe`. So both "a fresh client re-readies" and "an existing client asks for a keyframe after a decode invalidation" converge on the same full-frame recovery path.
+
+**Limitation, stated honestly: the keyframe is GLOBAL, not per-client.** Today one Editor emits to one transport (`MingaEditor.Frontend.Manager` is opaque single-Port transport, and the prototype keeps it that way). When any client requests a keyframe, the *next global frame* becomes a full frame; there is no per-client delta base, so attach cost does not scale down with client count and one client's attach forces a full frame for whatever transport is currently attached. The attach prototype (child #2269) demonstrates the protocol end to end over this single-port lifecycle (a second client takes over the port, sends `request_keyframe(0)`, and decodes to state equivalent to the first client's last committed frame; the first client's committed state is untouched because the keyframe is global). **Per-client delta divergence, fan-out of one frame to many simultaneous transports, and per-client base tracking are deferred to the daemon epic.** When that work lands, each connected client will own its own delta base and the emitter will fan a single logical frame out to all of them, with keyframes scoped to the client that asked.
+
 ---
 
 ## Headless Runtime
