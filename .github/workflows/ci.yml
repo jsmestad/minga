@@ -87,12 +87,14 @@ jobs:
       - run: mix test --warnings-as-errors --exclude system_clipboard --exclude conformance
 
   keystroke-latency-baseline:
-    name: Keystroke Latency Baseline (record-only)
+    name: Keystroke Latency Baseline
     runs-on: ubuntu-latest
-    # Record-only: this job tracks p50/p99 over time and uploads the JSON as an
-    # artifact. It must never gate merges (ticket #2215), so it does not fail the
-    # workflow if the numbers drift.
-    continue-on-error: true
+    # Enforces keystroke latency budgets: the bench is recorded on every CI run,
+    # then checked against configured ceilings (bench/latency_budgets.json). The
+    # job fails if any scenario exceeds its p50 or p99 budget. Flake protection is
+    # rerun-once-on-breach: a first breach re-runs the full bench and re-checks, and
+    # only a second consecutive breach fails the job. The bench's 120-sample
+    # percentiles are the primary jitter defense; the rerun covers runner-level noise.
     steps:
       - uses: actions/checkout@v4
 
@@ -122,7 +124,20 @@ jobs:
       - name: Record keystroke latency baseline
         run: MIX_ENV=test mix run bench/keystroke_latency_baseline.exs | tee keystroke_latency_metrics.txt
 
+      - name: Check keystroke latency budgets
+        id: budget_check
+        continue-on-error: true
+        run: MIX_ENV=test mix run bench/check_latency_budgets.exs
+
+      - name: Re-run bench and re-check on breach (flake protection)
+        if: steps.budget_check.outcome == 'failure'
+        run: |
+          echo "First run breached budgets; re-running bench once before failing."
+          MIX_ENV=test mix run bench/keystroke_latency_baseline.exs | tee keystroke_latency_metrics.txt
+          MIX_ENV=test mix run bench/check_latency_budgets.exs
+
       - name: Upload latency baseline JSON
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: keystroke-latency-baseline

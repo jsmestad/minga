@@ -1,0 +1,19 @@
+{
+  "description": "Keystroke latency budgets (ceilings) per scenario. Values are in microseconds. Budgets include ~15% headroom over the 2026-06-10 baseline (bench/baselines/keystroke_latency.json). Ratchet protocol: after each fast-path optimization PR merges (#2287, #2288, #2289), re-baseline with `mix run bench/keystroke_latency_baseline.exs`, then reduce all ceilings to new_measured + 15%.",
+  "baseline_date": "2026-06-10",
+  "baseline_source": "bench/baselines/keystroke_latency.json",
+  "scenarios": {
+    "small_frame": {
+      "p50_us": 2000,
+      "p99_us": 2400
+    },
+    "large_frame": {
+      "p50_us": 2100,
+      "p99_us": 2600
+    },
+    "agent_stream": {
+      "p50_us": 2200,
+      "p99_us": 2700
+    }
+  }
+}
