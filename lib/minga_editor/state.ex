@@ -98,6 +98,7 @@ defmodule MingaEditor.State do
   defstruct backend: :headless,
             port_manager: nil,
             renderer: nil,
+            agent_ingest: nil,
             keymap_server: @default_keymap_server,
             options_server: @default_options_server,
             events_registry: @default_events_registry,
@@ -155,6 +156,7 @@ defmodule MingaEditor.State do
           backend: backend(),
           port_manager: GenServer.server() | nil,
           renderer: pid() | nil,
+          agent_ingest: pid() | nil,
           keymap_server: keymap_server(),
           options_server: options_server(),
           events_registry: events_registry(),
@@ -203,6 +205,15 @@ defmodule MingaEditor.State do
   @spec set_renderer(t(), pid() | nil) :: t()
   def set_renderer(%__MODULE__{} = state, pid) when is_pid(pid) or is_nil(pid),
     do: %{state | renderer: pid}
+
+  @doc "Stores the agent stream-ingest coalescer pid (see `MingaEditor.Agent.Ingest`)."
+  @spec set_agent_ingest(t(), pid() | nil) :: t()
+  def set_agent_ingest(%__MODULE__{} = state, pid) when is_pid(pid) or is_nil(pid),
+    do: %{state | agent_ingest: pid}
+
+  @doc "Returns the agent stream-ingest coalescer pid, or nil if not started."
+  @spec agent_ingest(t()) :: pid() | nil
+  def agent_ingest(%__MODULE__{agent_ingest: pid}), do: pid
 
   @doc "Updates the current frontend-reported resource pressure."
   @spec set_resource_pressure(

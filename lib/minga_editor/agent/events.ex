@@ -82,20 +82,15 @@ defmodule MingaEditor.Agent.Events do
     {state, [:render | effects]}
   end
 
-  # Text deltas use a 1ms render delay so streaming text appears with
-  # minimal latency. The throttle guard in schedule_render coalesces
-  # multiple deltas arriving in the same millisecond into one render.
-  def handle(state, {:text_delta, _delta}) do
-    state = AgentAccess.update_agent_ui(state, &UIState.maybe_auto_scroll/1)
-    state = AgentAccess.update_panel(state, &Panel.bump_message_version/1)
-    {state, [{:render, 1}, :sync_agent_buffer]}
-  end
+  # Single-delta entry points. The live streaming path coalesces deltas through
+  # `MingaEditor.Agent.Ingest` and applies them via `handle_batch/2`; these
+  # clauses remain for the durable remote event-replay path
+  # (`MingaEditor.Remote.EventReplay`), which feeds individual records and is a
+  # bounded one-shot, not a hot streaming loop. They delegate to the batch path
+  # so the state transitions stay in one place.
+  def handle(state, {:text_delta, _delta} = delta), do: handle_batch(state, [delta])
 
-  def handle(state, {:thinking_delta, _delta}) do
-    state = AgentAccess.update_agent_ui(state, &UIState.maybe_auto_scroll/1)
-    state = AgentAccess.update_panel(state, &Panel.bump_message_version/1)
-    {state, [{:render, 50}, :sync_agent_buffer]}
-  end
+  def handle(state, {:thinking_delta, _delta} = delta), do: handle_batch(state, [delta])
 
   def handle(state, :messages_changed) do
     state = AgentAccess.update_agent_ui(state, &UIState.maybe_auto_scroll/1)
@@ -336,7 +331,56 @@ defmodule MingaEditor.Agent.Events do
     {state, []}
   end
 
+  @doc """
+  Applies one coalesced batch of stream deltas (#2289).
+
+  `MingaEditor.Agent.Ingest` accumulates `{:text_delta, _}`, `{:thinking_delta, _}`
+  and `{:tool_update, _, _, _}` events arriving within a coalescing window and
+  forwards them here as a single batch. Applying the batch once means one
+  `bump_message_version`, one `:sync_agent_buffer`, and one render request per
+  window instead of per delta, which keeps the Editor mailbox shallow under
+  streaming load. The per-delta state transitions (auto-scroll, shell preview
+  updates) are folded in arrival order so the visible result matches the
+  unbatched path.
+  """
+  @spec handle_batch(EditorState.t(), [term()]) :: {EditorState.t(), [effect()]}
+  def handle_batch(state, []), do: {state, []}
+
+  def handle_batch(state, batch) do
+    state = AgentAccess.update_agent_ui(state, &UIState.maybe_auto_scroll/1)
+    state = Enum.reduce(batch, state, &apply_batched_delta/2)
+
+    if buffer_affecting_batch?(batch) do
+      state = AgentAccess.update_panel(state, &Panel.bump_message_version/1)
+      {state, [{:render, 16}, :sync_agent_buffer]}
+    else
+      {state, [{:render, 16}]}
+    end
+  end
+
   # ── Private ────────────────────────────────────────────────────────────────
+
+  # Folds a single delta's preview-side mutation into state. Text and thinking
+  # deltas carry no per-delta state beyond the once-applied bump/sync; only
+  # shell tool updates mutate the preview, and they replace (not append) the
+  # partial output, so applying them in order matches the unbatched path.
+  @spec apply_batched_delta(term(), EditorState.t()) :: EditorState.t()
+  defp apply_batched_delta({:tool_update, _id, "shell", partial}, state) do
+    update_preview(state, &Preview.update_shell_output(&1, partial))
+  end
+
+  defp apply_batched_delta(_delta, state), do: state
+
+  # The agent transcript buffer only needs re-syncing when the batch carries
+  # assistant text or thinking; tool updates render into the preview only.
+  @spec buffer_affecting_batch?([term()]) :: boolean()
+  defp buffer_affecting_batch?(batch) do
+    Enum.any?(batch, fn
+      {:text_delta, _} -> true
+      {:thinking_delta, _} -> true
+      _ -> false
+    end)
+  end
 
   @spec sync_active_tool_name(EditorState.t(), String.t() | nil) :: EditorState.t()
   defp sync_active_tool_name(state, fallback_name) do

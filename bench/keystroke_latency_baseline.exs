@@ -12,10 +12,20 @@ defmodule Minga.Bench.KeystrokeLatencyBaseline do
 
     * `small_frame`   — 100x40, a plain editor frame.
     * `large_frame`   — 220x60 with the file tree sidebar and status bar visible.
-    * `agent_stream`  — typing while a deterministic synthetic agent-streaming
-                        replay fixture drives competing render work between
-                        keystrokes. The jitter this adds is expected; we record
-                        it honestly so later work can show it shrinking.
+    * `agent_stream`  — typing while a deterministic synthetic agent producer
+                        drives token deltas at a fixed rate CONCURRENTLY with
+                        the keystrokes (a background process floods the
+                        production subscriber's mailbox, not the gaps between
+                        keys). This is the head-of-line-blocking pressure #2289
+                        targets. We sample the Editor `message_queue_len` during
+                        the run so the mailbox depth is recorded honestly and
+                        later work can show it shrinking (AC 1, AC 4).
+
+  When `MingaEditor.Agent.Ingest` is present (#2289), the producer feeds the
+  Ingest coalescer (the real subscriber) and the Editor receives batched
+  `{:agent_stream_batch, ...}` messages; otherwise it feeds the Editor directly,
+  reproducing the pre-#2289 per-delta path. The same bench therefore measures
+  before and after honestly across branches.
 
   Writes p50/p99 (and p99.9/max) JSON to `bench/baselines/keystroke_latency.json`
   and prints `METRIC` lines so a CI job can track the numbers over time without
@@ -28,7 +38,6 @@ defmodule Minga.Bench.KeystrokeLatencyBaseline do
   alias Minga.Test.HeadlessPort
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Frontend.Capabilities
-  alias MingaEditor.UI.Panel.MessageStore
 
   Code.require_file("fixtures/agent_stream_replay.exs", __DIR__)
 
@@ -80,27 +89,122 @@ defmodule Minga.Bench.KeystrokeLatencyBaseline do
     end)
   end
 
+  # Inter-token interval for the synthetic producer. ~6ms ≈ 160 tokens/sec, a
+  # realistic fast-model streaming rate that, delivered per-delta, floods the
+  # Editor mailbox ahead of queued keystrokes. The producer emits a small burst
+  # each cycle so deltas can pile up faster than the per-delta path drains them.
+  @agent_token_interval_ms 4
+  @agent_burst 3
+
   @spec scenario_agent_stream() :: map()
   defp scenario_agent_stream do
-    chunks = Minga.Bench.AgentStreamReplay.chunks()
-
     with_editor([width: 220, height: 60, capabilities: @gui_caps], fn ctx ->
       reveal_file_tree(ctx)
       warmup(ctx)
 
-      # Each keystroke is preceded by replaying the next deterministic agent
-      # chunk into the message store, so render work competes with typing in a
-      # repeatable way (no wall-clock randomness).
-      stream = Stream.cycle(chunks) |> Enum.take(@measured_keys)
+      {producer, session} = start_agent_producer(ctx)
 
-      stream
-      |> Enum.with_index(1)
-      |> Enum.map(fn {chunk, seq} ->
-        append_agent_chunk(ctx, chunk)
-        send_key(ctx, ?a, seq)
-      end)
-      |> summarize()
+      try do
+        samples =
+          1..@measured_keys
+          |> Enum.map(fn seq ->
+            # Sample the Editor mailbox depth at the instant the keystroke is
+            # enqueued: this is the head-of-line depth a key sees behind queued
+            # agent traffic (#2289 AC 4). send_key then measures the time for
+            # that key to produce its frame, which absorbs any blocking.
+            queue_len = editor_queue_len(ctx)
+            sample = send_key(ctx, ?a, seq)
+            Map.put(sample, :queue_len, queue_len)
+          end)
+
+        summarize(samples)
+      after
+        stop_agent_producer(producer, ctx, session)
+      end
     end)
+  end
+
+  # ── Concurrent agent producer (#2289) ───────────────────────────────────────
+
+  # Spawns a background process that streams agent token deltas at a fixed rate
+  # into the production subscriber, concurrent with typing. When the Editor runs
+  # an Ingest coalescer the deltas feed Ingest (the real subscriber) so the
+  # Editor sees batched messages; otherwise they feed the Editor directly,
+  # reproducing the pre-#2289 per-delta mailbox pressure.
+  @spec start_agent_producer(map()) :: {pid(), pid()}
+  defp start_agent_producer(ctx) do
+    chunks = Minga.Bench.AgentStreamReplay.chunks()
+    session = spawn(fn -> receive(do: (:stop -> :ok)) end)
+    target = agent_stream_target(ctx)
+
+    producer =
+      spawn_link(fn ->
+        stream_agent_deltas(target, session, chunks)
+      end)
+
+    {producer, session}
+  end
+
+  # The subscriber the real session would deliver to: the Ingest coalescer if
+  # this build has it (#2289), else the Editor itself.
+  @spec agent_stream_target(map()) :: pid()
+  defp agent_stream_target(%{editor: editor}) do
+    state = :sys.get_state(editor)
+
+    case ingest_pid(state) do
+      pid when is_pid(pid) -> pid
+      _ -> editor
+    end
+  end
+
+  @spec ingest_pid(term()) :: pid() | nil
+  defp ingest_pid(state) do
+    if Code.ensure_loaded?(MingaEditor.State) and
+         function_exported?(MingaEditor.State, :agent_ingest, 1) do
+      MingaEditor.State.agent_ingest(state)
+    end
+  rescue
+    _ -> nil
+  catch
+    _, _ -> nil
+  end
+
+  @spec stream_agent_deltas(pid(), pid(), [String.t()]) :: no_return()
+  defp stream_agent_deltas(target, session, chunks) do
+    chunks
+    |> Stream.cycle()
+    |> Stream.chunk_every(@agent_burst)
+    |> Enum.each(fn burst ->
+      Enum.each(burst, fn chunk ->
+        send(target, {:agent_event, session, {:text_delta, chunk}})
+      end)
+
+      receive do
+        :stop -> exit(:normal)
+      after
+        @agent_token_interval_ms -> :ok
+      end
+    end)
+  end
+
+  @spec stop_agent_producer(pid(), map(), pid()) :: :ok
+  defp stop_agent_producer(producer, _ctx, session) do
+    if Process.alive?(producer) do
+      send(producer, :stop)
+    end
+
+    if Process.alive?(session), do: Process.exit(session, :kill)
+    :ok
+  catch
+    _, _ -> :ok
+  end
+
+  @spec editor_queue_len(map()) :: non_neg_integer()
+  defp editor_queue_len(%{editor: editor}) do
+    case Process.info(editor, :message_queue_len) do
+      {:message_queue_len, len} -> len
+      _ -> 0
+    end
   end
 
   # ── Measurement core ─────────────────────────────────────────────────────────
@@ -121,7 +225,10 @@ defmodule Minga.Bench.KeystrokeLatencyBaseline do
           correlated: boolean()
         }
   defp send_key(%{editor: editor, port: port}, codepoint, seq) do
-    _ = :sys.get_state(editor)
+    # Generous timeout: under the concurrent agent producer the per-delta path
+    # (pre-#2289) can deeply back up the Editor mailbox; we want the run to
+    # complete and surface that as large latency, not crash the sync barrier.
+    _ = :sys.get_state(editor, 30_000)
     ref = HeadlessPort.prepare_await(port)
     started_at = System.monotonic_time(:microsecond)
     send(editor, {:minga_input, {:key_press, codepoint, 0, seq}})
@@ -144,12 +251,12 @@ defmodule Minga.Bench.KeystrokeLatencyBaseline do
     :ok
   end
 
-  @spec summarize([%{wall_us: non_neg_integer(), correlated: boolean()}]) :: map()
+  @spec summarize([map()]) :: map()
   defp summarize(samples) do
     wall = Enum.map(samples, & &1.wall_us)
     correlated = Enum.count(samples, & &1.correlated)
 
-    %{
+    base = %{
       samples: length(samples),
       correlated: correlated,
       p50_us: percentile(wall, 0.50),
@@ -157,6 +264,25 @@ defmodule Minga.Bench.KeystrokeLatencyBaseline do
       p999_us: percentile(wall, 0.999),
       max_us: Enum.max(wall, fn -> 0 end)
     }
+
+    merge_queue_stats(base, Enum.flat_map(samples, &queue_len_of/1))
+  end
+
+  @spec queue_len_of(map()) :: [non_neg_integer()]
+  defp queue_len_of(%{queue_len: len}) when is_integer(len), do: [len]
+  defp queue_len_of(_sample), do: []
+
+  # When the scenario sampled the Editor mailbox depth, fold its distribution in
+  # so before/after runs can show the queue staying low (#2289 AC 4).
+  @spec merge_queue_stats(map(), [non_neg_integer()]) :: map()
+  defp merge_queue_stats(base, []), do: base
+
+  defp merge_queue_stats(base, queue_lens) do
+    Map.merge(base, %{
+      queue_p50: percentile(queue_lens, 0.50),
+      queue_p99: percentile(queue_lens, 0.99),
+      queue_max: Enum.max(queue_lens, fn -> 0 end)
+    })
   end
 
   # ── Editor lifecycle ─────────────────────────────────────────────────────────
@@ -232,20 +358,6 @@ defmodule Minga.Bench.KeystrokeLatencyBaseline do
     _, _ -> :ok
   end
 
-  # Appends one deterministic agent chunk to the message store so the next
-  # render does more work, replicating agent-streaming pressure deterministically.
-  @spec append_agent_chunk(map(), String.t()) :: :ok
-  defp append_agent_chunk(%{editor: editor}, chunk) do
-    :sys.replace_state(editor, fn state ->
-      store = MessageStore.append(state.message_store, "[agent] " <> chunk)
-      %{state | message_store: store}
-    end)
-
-    :ok
-  catch
-    _, _ -> :ok
-  end
-
   @spec document() :: String.t()
   defp document do
     1..2_000
@@ -278,6 +390,15 @@ defmodule Minga.Bench.KeystrokeLatencyBaseline do
     Enum.each(results, fn {scenario, stats} ->
       Enum.each([:p50_us, :p99_us, :p999_us, :max_us], fn field ->
         IO.puts("METRIC keystroke_#{scenario}_#{field}=#{Map.fetch!(stats, field)}")
+      end)
+
+      # Editor mailbox depth sampled during the scenario (#2289 AC 4). Only the
+      # agent_stream scenario records these.
+      Enum.each([:queue_p50, :queue_p99, :queue_max], fn field ->
+        case Map.fetch(stats, field) do
+          {:ok, value} -> IO.puts("METRIC keystroke_#{scenario}_#{field}=#{value}")
+          :error -> :ok
+        end
       end)
     end)
 
