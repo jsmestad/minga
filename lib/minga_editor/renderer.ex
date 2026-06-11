@@ -21,11 +21,12 @@ defmodule MingaEditor.Renderer do
   * `DisplayList`              — frame assembly
   """
 
+  alias Minga.RenderModel.Cursor
   alias MingaEditor.Dashboard
-  alias MingaEditor.DisplayList.{Cursor, Frame}
   alias MingaEditor.Frontend.Emit
   alias MingaEditor.Frontend.Emit.Context, as: EmitContext
   alias MingaEditor.RenderPipeline
+  alias MingaEditor.RenderPipeline.ComposedFrame
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.Renderer.Server, as: RendererServer
   alias MingaEditor.State, as: EditorState
@@ -103,18 +104,15 @@ defmodule MingaEditor.Renderer do
         _ -> Dashboard.new_state()
       end
 
-    splash_draws = Dashboard.render(cols, rows, state.theme, dash_state)
+    # The dashboard splash and any open picker reach the live (semantic)
+    # frontends through their own semantic surfaces (the dashboard surface and
+    # `RenderModel.UI.PickerBuilder`). The composed frame for the dashboard
+    # carries no window models, so it only needs to park the cursor. The cell
+    # splash draws are still computed for the (retired) cell frontend path but
+    # are not part of the composed frame.
+    _splash_draws = Dashboard.render(cols, rows, state.theme, dash_state)
 
-    # The picker overlay is delivered semantically: when a picker is open over
-    # the dashboard (e.g. :find_file or :project_switch from a dashboard quick
-    # action), `RenderModel.UI.PickerBuilder` reads the modal `picker_ui` state
-    # and emits `gui_picker`. The semantic emit path ignores `frame.splash` and
-    # `frame.overlays`, so the dashboard frame only needs to park the cursor.
-    frame = %Frame{
-      cursor: Cursor.new(0, 0, :block),
-      splash: splash_draws,
-      overlays: []
-    }
+    frame = ComposedFrame.new([], Cursor.new(0, 0, :block))
 
     input = Input.from_editor_state(state)
     ctx = EmitContext.from_editor_state(input)

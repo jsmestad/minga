@@ -10,7 +10,7 @@ defmodule MingaEditor.Shell.Traditional.Chrome do
   and hover popups.
   """
 
-  alias MingaEditor.DisplayList.Cursor
+  alias Minga.RenderModel.Cursor
   alias MingaEditor.Layout
   alias MingaEditor.RenderPipeline.Chrome
   alias MingaEditor.RenderPipeline.Scroll.WindowScroll

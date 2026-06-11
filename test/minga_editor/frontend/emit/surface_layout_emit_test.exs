@@ -24,8 +24,8 @@ defmodule MingaEditor.Frontend.Emit.SurfaceLayoutEmitTest do
 
   import MingaEditor.RenderPipeline.TestHelpers
 
-  alias MingaEditor.DisplayList
-  alias MingaEditor.DisplayList.{Cursor, Frame}
+  alias Minga.RenderModel.Cursor
+  alias MingaEditor.RenderPipeline.ComposedFrame
 
   @op_surface_layout Opcodes.gui_surface_layout()
 
@@ -52,7 +52,7 @@ defmodule MingaEditor.Frontend.Emit.SurfaceLayoutEmitTest do
   end
 
   defp emit_commands(state) do
-    frame = %Frame{cursor: Cursor.new(0, 0, :block), splash: [DisplayList.draw(0, 0, "x")]}
+    frame = ComposedFrame.new([], Cursor.new(0, 0, :block))
     ctx = Context.from_editor_state(state)
     Emit.emit(frame, ctx)
     assert_receive {:"$gen_cast", {:send_commands, commands}}

@@ -70,7 +70,6 @@ defmodule MingaEditor.Frontend.Emit.KeyframeSideChannelTest do
 
   defp window_frame_with_content do
     frame = build_frame_with_window(base_state(), viewport_top: 0)
-    [window_frame] = frame.windows
 
     row = %RenderRow{
       row_id: RenderRow.stable_id(:normal, 0),
@@ -90,7 +89,7 @@ defmodule MingaEditor.Frontend.Emit.KeyframeSideChannelTest do
       cursor_shape: :block
     }
 
-    %{frame | windows: [%{window_frame | window_model: window_model}]}
+    %{frame | windows: [window_model]}
   end
 
   defp emit_and_capture(frame, state, caches, opts) do

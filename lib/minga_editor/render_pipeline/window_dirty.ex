@@ -5,7 +5,7 @@ defmodule MingaEditor.RenderPipeline.WindowDirty do
   ## Modes
 
   - `:clean` — nothing changed since last frame; downstream stages
-    can reuse the cached `WindowFrame` and skip `Buffer.render_snapshot/3`.
+    can reuse the cached window model and skip `Buffer.render_snapshot/3`.
   - `:rows` — only the listed rows (`dirty_rows`) need rebuilding;
     the rest of the window keeps its cached drawing.
   - `:all` — the whole window must rebuild (the today-default for any

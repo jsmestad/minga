@@ -8,8 +8,8 @@ defmodule MingaEditor.Frontend.EmitTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
-  alias MingaEditor.DisplayList
-  alias MingaEditor.DisplayList.{Cursor, Frame}
+  alias Minga.RenderModel.Cursor
+  alias MingaEditor.RenderPipeline.ComposedFrame
   alias MingaEditor.Layout
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Frontend.Emit
@@ -26,10 +26,7 @@ defmodule MingaEditor.Frontend.EmitTest do
 
   describe "emit/2 dispatching" do
     test "TUI path emits a semantic frame, not a leading cell-grid clear" do
-      frame = %Frame{
-        cursor: Cursor.new(0, 0, :block),
-        splash: [DisplayList.draw(0, 0, "hello")]
-      }
+      frame = ComposedFrame.new([], Cursor.new(0, 0, :block))
 
       state = base_state()
       ctx = Context.from_editor_state(state)
@@ -51,10 +48,7 @@ defmodule MingaEditor.Frontend.EmitTest do
     end
 
     test "GUI path produces commands (no clear expected for GUI with to_commands)" do
-      frame = %Frame{
-        cursor: Cursor.new(0, 0, :block),
-        splash: [DisplayList.draw(0, 0, "hello")]
-      }
+      frame = ComposedFrame.new([], Cursor.new(0, 0, :block))
 
       state = gui_state()
       ctx = Context.from_editor_state(state)
@@ -67,7 +61,6 @@ defmodule MingaEditor.Frontend.EmitTest do
 
     test "semantic TUI path emits semantic window commands instead of cell-grid clear" do
       frame = build_frame_with_window(base_state(), viewport_top: 0)
-      [window_frame] = frame.windows
 
       row = %RenderRow{
         row_id: RenderRow.stable_id(:normal, 0),
@@ -87,7 +80,7 @@ defmodule MingaEditor.Frontend.EmitTest do
         cursor_shape: :block
       }
 
-      frame = %{frame | windows: [%{window_frame | window_model: window_model}]}
+      frame = %{frame | windows: [window_model]}
 
       state = %{
         base_state()
@@ -238,10 +231,7 @@ defmodule MingaEditor.Frontend.EmitTest do
     end
 
     test "flushes font registrations allocated before emit" do
-      frame = %Frame{
-        cursor: Cursor.new(0, 0, :block),
-        splash: [DisplayList.draw(0, 0, "hello")]
-      }
+      frame = ComposedFrame.new([], Cursor.new(0, 0, :block))
 
       {_id, registry, true} = FontRegistry.get_or_register(FontRegistry.new(), "Fira Code")
       ctx = %{Context.from_editor_state(base_state()) | font_registry: registry}
@@ -277,10 +267,7 @@ defmodule MingaEditor.Frontend.EmitTest do
 
   describe "send_title (shared)" do
     test "sends title command only when title changes" do
-      frame = %Frame{
-        cursor: Cursor.new(0, 0, :block),
-        splash: [DisplayList.draw(0, 0, "hello")]
-      }
+      frame = ComposedFrame.new([], Cursor.new(0, 0, :block))
 
       state = base_state()
       ctx = Context.from_editor_state(state)
@@ -302,10 +289,7 @@ defmodule MingaEditor.Frontend.EmitTest do
 
   describe "send_window_bg (shared)" do
     test "sends background command only when theme changes" do
-      frame = %Frame{
-        cursor: Cursor.new(0, 0, :block),
-        splash: [DisplayList.draw(0, 0, "hello")]
-      }
+      frame = ComposedFrame.new([], Cursor.new(0, 0, :block))
 
       state = base_state()
       ctx = Context.from_editor_state(state)
@@ -331,7 +315,6 @@ defmodule MingaEditor.Frontend.EmitTest do
 
   defp window_frame_with_content do
     frame = build_frame_with_window(base_state(), viewport_top: 0)
-    [window_frame] = frame.windows
 
     row = %RenderRow{
       row_id: RenderRow.stable_id(:normal, 0),
@@ -351,7 +334,7 @@ defmodule MingaEditor.Frontend.EmitTest do
       cursor_shape: :block
     }
 
-    %{frame | windows: [%{window_frame | window_model: window_model}]}
+    %{frame | windows: [window_model]}
   end
 
   # Drives Emit.emit/4 with an explicit frame_seq and optional keyframe forcing,

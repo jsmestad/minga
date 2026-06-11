@@ -21,12 +21,24 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
 
   import MingaEditor.RenderPipeline.TestHelpers
 
+  # Runs the Content stage and reshapes each WindowContent carrier into a map
+  # exposing the primary window model, any additional models, and the cursor,
+  # so these builder tests can assert against the window model directly.
   defp build_content(state) do
     state = EditorState.sync_active_window_cursor(state)
     state = MingaEditor.RenderPipeline.compute_layout(state)
     layout = Layout.get(state)
     {scrolls, state} = Scroll.scroll_windows(state, layout)
-    Content.build_content(state, scrolls)
+    {contents, cursor, state} = Content.build_content(state, scrolls)
+    {Enum.map(contents, &to_window_view/1), cursor, state}
+  end
+
+  defp to_window_view(%MingaEditor.RenderPipeline.WindowContent{models: models, cursor: cursor}) do
+    %{
+      window_model: List.first(models),
+      additional_window_models: Enum.drop(models, 1),
+      cursor: cursor
+    }
   end
 
   defp add_conceal(decs, start_pos, end_pos) do
@@ -62,16 +74,13 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
   end
 
   describe "GUI content stage" do
-    test "builds a canonical window model and no GUI draw layers" do
+    test "builds a canonical window model" do
       state = gui_state(content: "hello\nworld")
       {[wf], _cursor, _state} = build_content(state)
 
       assert %Window{} = wf.window_model
       assert wf.window_model.content_kind == :buffer
       assert Enum.map(wf.window_model.rows, & &1.text) == ["hello", "world"]
-      assert wf.gutter == %{}
-      assert wf.lines == %{}
-      assert wf.tilde_lines == %{}
     end
 
     test "includes pane geometry and content epoch for GUI windows" do
@@ -416,14 +425,6 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       assert wf.window_model.gutter.window_id == state.workspace.windows.active
       assert wf.window_model.gutter.entries != []
       assert wf.window_model.indent_guides.window_id == state.workspace.windows.active
-    end
-
-    test "TUI path keeps draw layers and attaches the shared window model" do
-      state = base_state(content: "hello\nworld")
-      {[wf], _cursor, _state} = build_content(state)
-
-      assert wf.window_model.rows |> Enum.map(& &1.text) |> Enum.take(2) == ["hello", "world"]
-      assert map_size(wf.lines) > 0
     end
   end
 end

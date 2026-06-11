@@ -1,27 +1,28 @@
 defmodule MingaEditor.DisplayList do
   @moduledoc """
-  BEAM-side display list: a styled text run intermediate representation.
+  Cell-grid draw primitives for chrome surfaces.
 
-  Sits between editor state and semantic render-model encoding. The renderer produces a `Frame` struct containing visual content that semantic model builders can consume.
+  The buffer/window render path is fully semantic: editor windows build
+  `Minga.RenderModel.Window` models that frontend adapters encode directly
+  (see `MingaEditor.RenderPipeline.Content` and `RenderModel.Window.Builder`).
+  The dead cell-grid window carriers (`Frame`, `WindowFrame`) and their line
+  producers were removed in #2241.
 
-  ## Coordinate system
-
-  All coordinates within a `WindowFrame` are **window-relative**: row 0, col 0 is the top-left of the window's content rect. The `rect` field carries the absolute screen position for semantic window model construction.
-
-  Other frame sections (file_tree, agent_panel, minibuffer, overlays) use
-  **absolute screen coordinates** since they're not scoped to a window.
+  What remains here is the small set of cell-grid draw primitives that the
+  per-surface chrome painters still emit (completion menu, dashboard, hover and
+  signature popups, modeline, tab bar, float popups, etc.). Those surfaces are
+  scheduled for their own semantic migration in #2311; until then they share the
+  `draw/4` constructor and the `Overlay` carrier defined here.
 
   ## Types
 
-  * `draw()` — a pending draw: `{row, col, text, style}`. This is the
-    return type of all renderer modules after the display list refactor.
+  * `draw()` — a pending draw: `{row, col, text, style}`.
   * `text_run()` — column + text + style (no row; row is the map key).
   * `display_line()` — a list of text runs for one screen row.
   * `render_layer()` — rows mapped to their display lines.
   """
 
   alias Minga.Core.Face
-  alias MingaEditor.Layout
 
   # ── Fundamental types ──────────────────────────────────────────────────────
 
@@ -34,7 +35,7 @@ defmodule MingaEditor.DisplayList do
   @typedoc """
   A pending draw command: `{row, col, text, Face.t()}`.
 
-  This is the intermediate representation that renderer modules produce.
+  This is the intermediate representation that chrome-surface painters produce.
   """
   @type draw :: {non_neg_integer(), non_neg_integer(), String.t(), Face.t()}
 
@@ -47,75 +48,12 @@ defmodule MingaEditor.DisplayList do
   @typedoc "Screen rows mapped to their display lines."
   @type render_layer :: %{non_neg_integer() => display_line()}
 
-  # ── Frame components ───────────────────────────────────────────────────────
-
-  defmodule Cursor do
-    @moduledoc """
-    Cursor state: position and shape as a single unit.
-
-    Used by `WindowFrame` (optional, nil for non-active windows) and
-    `Frame` (always present). Bundling position and shape prevents
-    them from getting out of sync.
-    """
-
-    @enforce_keys [:row, :col, :shape]
-    defstruct [:row, :col, :shape]
-
-    @type shape :: :block | :beam | :underline
-
-    @type t :: %__MODULE__{
-            row: non_neg_integer(),
-            col: non_neg_integer(),
-            shape: shape()
-          }
-
-    @doc "Creates a cursor at the given position with the given shape."
-    @spec new(non_neg_integer(), non_neg_integer(), shape()) :: t()
-    def new(row, col, shape) when is_integer(row) and is_integer(col) do
-      %__MODULE__{row: row, col: col, shape: shape}
-    end
-  end
-
-  defmodule WindowFrame do
-    @moduledoc """
-    Display data for a single editor window.
-
-    Contains gutter, content lines, tilde filler, and modeline data,
-    all in window-relative coordinates. The `rect` field gives the
-    absolute screen position for semantic window model construction.
-    """
-
-    alias MingaEditor.DisplayList
-    alias MingaEditor.DisplayList.Cursor
-    alias MingaEditor.Layout
-    alias Minga.RenderModel.Window, as: RenderWindow
-
-    @enforce_keys [:rect]
-    defstruct rect: nil,
-              gutter: %{},
-              lines: %{},
-              tilde_lines: %{},
-              modeline: %{},
-              cursor: nil,
-              window_model: nil,
-              additional_window_models: []
-
-    @type t :: %__MODULE__{
-            rect: Layout.rect(),
-            gutter: DisplayList.render_layer(),
-            lines: DisplayList.render_layer(),
-            tilde_lines: DisplayList.render_layer(),
-            modeline: DisplayList.render_layer(),
-            cursor: Cursor.t() | nil,
-            window_model: RenderWindow.t() | nil,
-            additional_window_models: [RenderWindow.t()]
-          }
-  end
+  # ── Components ─────────────────────────────────────────────────────────────
 
   defmodule Overlay do
     @moduledoc """
-    An overlay popup (picker, which-key, completion menu) with absolute
-    screen coordinates and an optional cursor override.
+    An overlay popup (picker, which-key, completion menu, hover, signature help)
+    with absolute screen coordinates and an optional cursor override.
     """
 
     alias MingaEditor.DisplayList
@@ -125,48 +63,6 @@ defmodule MingaEditor.DisplayList do
     @type t :: %__MODULE__{
             draws: [DisplayList.draw()],
             cursor: {non_neg_integer(), non_neg_integer()} | nil
-          }
-  end
-
-  defmodule Frame do
-    @moduledoc """
-    Complete display state for one rendered frame.
-
-    Contains all visual content needed to build the semantic render model.
-    """
-
-    alias MingaEditor.DisplayList
-    alias MingaEditor.DisplayList.{Cursor, Overlay, WindowFrame}
-
-    @enforce_keys [:cursor]
-    defstruct cursor: nil,
-              tab_bar: [],
-              windows: [],
-              file_tree: [],
-              agent_panel: [],
-              agentic_view: [],
-              status_bar: [],
-              minibuffer: [],
-              separators: [],
-              overlays: [],
-              splash: nil,
-              title: nil,
-              window_bg: nil
-
-    @type t :: %__MODULE__{
-            cursor: Cursor.t(),
-            tab_bar: [DisplayList.draw()],
-            windows: [WindowFrame.t()],
-            file_tree: [DisplayList.draw()],
-            agent_panel: [DisplayList.draw()],
-            agentic_view: [DisplayList.draw()],
-            status_bar: [DisplayList.draw()],
-            minibuffer: [DisplayList.draw()],
-            separators: [DisplayList.draw()],
-            overlays: [Overlay.t()],
-            splash: [DisplayList.draw()] | nil,
-            title: String.t() | nil,
-            window_bg: non_neg_integer() | nil
           }
   end
 
@@ -187,114 +83,5 @@ defmodule MingaEditor.DisplayList do
   def draw(row, col, text, %Face{} = face \\ Face.new())
       when is_integer(row) and row >= 0 and is_integer(col) and col >= 0 and is_binary(text) do
     {row, col, text, face}
-  end
-
-  # ── Layer helpers ──────────────────────────────────────────────────────────
-
-  @doc """
-  Groups a list of draws by row into a render layer.
-
-  Each draw's row becomes the map key; the draw is converted to a text_run
-  (col, text, style) within that row's display_line.
-  """
-  @spec draws_to_layer([draw()]) :: render_layer()
-  def draws_to_layer(draws) do
-    draws
-    |> Enum.group_by(fn {row, _, _, _} -> row end)
-    |> Map.new(fn {row, row_draws} ->
-      runs = Enum.map(row_draws, fn {_, col, text, style} -> {col, text, style} end)
-      {row, runs}
-    end)
-  end
-
-  @doc """
-  Groups row-sorted draws into a render layer in one pass.
-
-  Use this only when all draws for a row are contiguous and rows are emitted in ascending order.
-  """
-  @spec draws_to_layer_sorted([draw()]) :: render_layer()
-  def draws_to_layer_sorted([]), do: %{}
-
-  def draws_to_layer_sorted([{row, col, text, style} | rest]) do
-    {layer, current_row, runs_rev} =
-      Enum.reduce(rest, {%{}, row, [{col, text, style}]}, fn {next_row, col, text, style},
-                                                             {layer, row, runs} ->
-        if next_row == row do
-          {layer, row, [{col, text, style} | runs]}
-        else
-          {Map.put(layer, row, Enum.reverse(runs)), next_row, [{col, text, style}]}
-        end
-      end)
-
-    Map.put(layer, current_row, Enum.reverse(runs_rev))
-  end
-
-  # ── Draw offsetting ────────────────────────────────────────────────────────
-
-  @doc "Offsets draw tuples by the given row and column amounts."
-  @spec offset_draws([draw()], non_neg_integer(), non_neg_integer()) :: [draw()]
-  def offset_draws(draws, 0, 0), do: draws
-
-  def offset_draws(draws, row_off, col_off) do
-    Enum.map(draws, fn {row, col, text, style} ->
-      {row + row_off, col + col_off, text, style}
-    end)
-  end
-
-  # ── Grayscale dimming (inactive windows) ───────────────────────────────────
-
-  @doc "Converts draw tuples to grayscale (luminance-weighted)."
-  @spec grayscale_draws([draw()]) :: [draw()]
-  def grayscale_draws(draws) do
-    Enum.map(draws, fn {row, col, text, %Face{} = face} ->
-      fg = face.fg || 0xFFFFFF
-      bg = face.bg || 0x000000
-
-      %{face | fg: grayscale_color(fg), bg: grayscale_color(bg)}
-      |> then(fn new_face -> {row, col, text, new_face} end)
-    end)
-  end
-
-  @spec grayscale_color(non_neg_integer()) :: non_neg_integer()
-  defp grayscale_color(rgb) do
-    r = Bitwise.band(Bitwise.bsr(rgb, 16), 0xFF)
-    g = Bitwise.band(Bitwise.bsr(rgb, 8), 0xFF)
-    b = Bitwise.band(rgb, 0xFF)
-    gray = round(r * 0.299 + g * 0.587 + b * 0.114)
-    Bitwise.bor(Bitwise.bor(Bitwise.bsl(gray, 16), Bitwise.bsl(gray, 8)), gray)
-  end
-
-  # ── Layer ↔ draws ──────────────────────────────────────────────────────────
-
-  @doc "Flattens a render layer back into a list of draw tuples."
-  @spec layer_to_draws(render_layer()) :: [draw()]
-  def layer_to_draws(layer) when is_map(layer) do
-    Enum.flat_map(layer, fn {row, runs} ->
-      Enum.map(runs, fn {col, text, style} -> {row, col, text, style} end)
-    end)
-  end
-
-  # ── Frame diffing (structural support) ─────────────────────────────────────
-
-  @doc """
-  Compares two render layers line-by-line and returns the set of changed rows.
-
-  This enables incremental rendering: only rows that differ between
-  frames need to be re-sent to the frontend.
-  """
-  @spec changed_rows(render_layer(), render_layer()) :: MapSet.t(non_neg_integer())
-  def changed_rows(old_layer, new_layer) do
-    all_rows = MapSet.union(MapSet.new(Map.keys(old_layer)), MapSet.new(Map.keys(new_layer)))
-
-    Enum.reduce(all_rows, MapSet.new(), fn row, acc ->
-      old_line = Map.get(old_layer, row, [])
-      new_line = Map.get(new_layer, row, [])
-
-      if old_line == new_line do
-        acc
-      else
-        MapSet.put(acc, row)
-      end
-    end)
   end
 end

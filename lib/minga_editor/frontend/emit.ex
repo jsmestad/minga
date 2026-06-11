@@ -5,9 +5,9 @@ defmodule MingaEditor.Frontend.Emit do
   Encodes the composed frame as semantic render-model protocol commands, then handles shared concerns (viewport tracking, title, window background).
   """
 
-  alias MingaEditor.DisplayList.Frame
   alias MingaEditor.RenderModel.Builder, as: RenderModelBuilder
   alias MingaEditor.RenderPipeline.Chrome
+  alias MingaEditor.RenderPipeline.ComposedFrame
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.Frontend.Protocol
   alias MingaEditor.Renderer.Caches
@@ -24,7 +24,8 @@ defmodule MingaEditor.Frontend.Emit do
   (side-channel writes). Returns updated caches and the renderer-owned font
   registry for write-back to the Renderer process.
   """
-  @spec emit(Frame.t(), ctx(), Chrome.t() | nil, Caches.t()) :: {Caches.t(), FontRegistry.t()}
+  @spec emit(ComposedFrame.t(), ctx(), Chrome.t() | nil, Caches.t()) ::
+          {Caches.t(), FontRegistry.t()}
   def emit(frame, ctx, chrome \\ nil, caches \\ %Caches{}) do
     FontRegistry.with_process_registry(ctx.font_registry, fn ->
       caches = emit_semantic(frame, ctx, chrome, caches)
@@ -32,7 +33,7 @@ defmodule MingaEditor.Frontend.Emit do
     end)
   end
 
-  @spec emit_semantic(Frame.t(), ctx(), Chrome.t() | nil, Caches.t()) :: Caches.t()
+  @spec emit_semantic(ComposedFrame.t(), ctx(), Chrome.t() | nil, Caches.t()) :: Caches.t()
   defp emit_semantic(frame, ctx, chrome, caches) do
     {render_model, ctx} =
       Telemetry.span([:minga, :render, :ui_model_build], %{}, fn ->

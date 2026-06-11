@@ -102,17 +102,17 @@ defmodule MingaEditor.RenderPipeline.LinePatchFastPathTest do
     win_id = input.workspace.windows.active
     scroll = Map.fetch!(scrolls, win_id)
 
-    {[reuse_frame], _cursor, _st} = Content.build_content(input, %{win_id => scroll})
+    {[reuse_content], _cursor, _st} = Content.build_content(input, %{win_id => scroll})
 
     fresh_window =
       scroll.window
       |> Window.put_retained_rows(%{})
       |> Window.put_retained_wrap_lines(%{})
 
-    {[fresh_frame], _cursor, _st} =
+    {[fresh_content], _cursor, _st} =
       Content.build_content(input, %{win_id => %{scroll | window: fresh_window}})
 
-    {reuse_frame.window_model.rows, fresh_frame.window_model.rows}
+    {hd(reuse_content.models).rows, hd(fresh_content.models).rows}
   end
 
   describe "AC 1: cursor motion without scrolling" do

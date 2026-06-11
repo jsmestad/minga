@@ -5,7 +5,8 @@ defmodule MingaEditor.RenderPipeline.ComposeTest do
 
   use ExUnit.Case, async: true
 
-  alias MingaEditor.DisplayList.{Cursor, Frame}
+  alias Minga.RenderModel.Cursor
+  alias MingaEditor.RenderPipeline.ComposedFrame
   alias MingaEditor.Layout
   alias MingaEditor.RenderPipeline
   alias MingaEditor.RenderPipeline.Compose
@@ -21,42 +22,28 @@ defmodule MingaEditor.RenderPipeline.ComposeTest do
     state = RenderPipeline.compute_layout(state)
     layout = Layout.get(state)
     {scrolls, state} = Scroll.scroll_windows(state, layout)
-    {frames, cursor_info, state} = Content.build_content(state, scrolls)
+    {contents, cursor_info, state} = Content.build_content(state, scrolls)
     chrome = state.shell.build_chrome(state, layout, scrolls, cursor_info)
-    {frames, chrome, cursor_info, state}
+    {contents, chrome, cursor_info, state}
   end
 
   describe "compose_windows/4" do
-    test "returns a Frame struct" do
+    test "returns a ComposedFrame with the flattened window models and resolved cursor" do
       state = base_state()
-      {frames, chrome, cursor_info, state} = run_through_chrome(state)
+      {contents, chrome, cursor_info, state} = run_through_chrome(state)
 
-      frame = Compose.compose_windows(frames, chrome, cursor_info, state)
+      frame = Compose.compose_windows(contents, chrome, cursor_info, state)
 
-      assert %Frame{cursor: %Cursor{}} = frame
+      assert %ComposedFrame{cursor: %Cursor{}} = frame
       assert frame.cursor.shape in [:block, :beam, :underline]
-    end
-
-    test "frame carries the chrome struct fields through unchanged" do
-      # Compose assembles the chrome fields into the final frame. The semantic
-      # chrome owns the status bar (0x76) and minibuffer (0x7F) natively, so the
-      # cell-draw lists are empty; Compose still threads whatever chrome built.
-      state = base_state()
-      {frames, chrome, cursor_info, state} = run_through_chrome(state)
-
-      frame = Compose.compose_windows(frames, chrome, cursor_info, state)
-
-      assert frame.status_bar == chrome.status_bar_draws
-      assert frame.minibuffer == chrome.minibuffer
-      assert frame.tab_bar == chrome.tab_bar
-      assert frame.overlays == chrome.overlays
+      assert [%Minga.RenderModel.Window{} | _] = frame.windows
     end
 
     test "frame resolves a cursor from the window content" do
       state = base_state()
-      {frames, chrome, cursor_info, state} = run_through_chrome(state)
+      {contents, chrome, cursor_info, state} = run_through_chrome(state)
 
-      frame = Compose.compose_windows(frames, chrome, cursor_info, state)
+      frame = Compose.compose_windows(contents, chrome, cursor_info, state)
 
       assert %Cursor{} = frame.cursor
     end
