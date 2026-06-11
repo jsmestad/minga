@@ -107,17 +107,12 @@ defmodule Minga.Git.System do
   @impl true
   @spec status(String.t()) :: {:ok, [Minga.Git.status_entry()]} | {:error, String.t()}
   def status(git_root) when is_binary(git_root) do
-    case System.cmd("git", ["status", "--porcelain=v1", "-uall"],
+    case System.cmd("git", ["status", "--porcelain=v2", "-z", "-uall"],
            cd: git_root,
            stderr_to_stdout: true
          ) do
       {output, 0} ->
-        entries =
-          output
-          |> String.split("\n", trim: true)
-          |> Enum.flat_map(&parse_status_line/1)
-
-        {:ok, entries}
+        {:ok, parse_status_output(output)}
 
       {output, _} ->
         {:error, "git status failed: #{String.trim(output)}"}
@@ -537,16 +532,106 @@ defmodule Minga.Git.System do
 
   alias Minga.Git.StatusEntry
 
-  @spec parse_status_line(String.t()) :: [Minga.Git.status_entry()]
-  defp parse_status_line(line) when byte_size(line) >= 3 do
-    index_status = String.at(line, 0)
-    worktree_status = String.at(line, 1)
-    path = String.trim(String.slice(line, 3..-1//1))
-
-    interpret_status_codes(index_status, worktree_status, path)
+  @doc false
+  @spec parse_status_output(String.t()) :: [Minga.Git.status_entry()]
+  def parse_status_output(output) when is_binary(output) do
+    output
+    |> String.split(<<0>>, trim: true)
+    |> parse_status_tokens()
   end
 
-  defp parse_status_line(_), do: []
+  @spec parse_status_tokens([String.t()]) :: [Minga.Git.status_entry()]
+  defp parse_status_tokens([]), do: []
+
+  defp parse_status_tokens(["2 " <> _ = record, _old_path | rest]) do
+    # Porcelain v2 `-z` emits rename/copy records as the new path in the main record.
+    # The following token is the old path; StatusEntry intentionally keeps only the current path.
+    parse_status_record(record) ++ parse_status_tokens(rest)
+  end
+
+  defp parse_status_tokens([record | rest]) do
+    parse_status_record(record) ++ parse_status_tokens(rest)
+  end
+
+  @spec parse_status_record(String.t()) :: [Minga.Git.status_entry()]
+  defp parse_status_record("1 " <> _ = record), do: parse_tracked_status_record(record)
+
+  defp parse_status_record("2 " <> _ = record), do: parse_renamed_or_copied_status_record(record)
+
+  defp parse_status_record("u " <> _ = record), do: parse_unmerged_status_record(record)
+
+  defp parse_status_record("? " <> path),
+    do: [%StatusEntry{path: path, status: :untracked, staged: false}]
+
+  defp parse_status_record(_), do: []
+
+  @spec parse_tracked_status_record(String.t()) :: [Minga.Git.status_entry()]
+  defp parse_tracked_status_record(record) do
+    case String.split(record, " ", parts: 9) do
+      ["1", xy, _sub, _mode_head, _mode_index, _mode_worktree, _head_hash, _index_hash, path] ->
+        interpret_status_codes(status_code_at(xy, 0), status_code_at(xy, 1), path)
+
+      _ ->
+        []
+    end
+  end
+
+  @spec parse_renamed_or_copied_status_record(String.t()) :: [Minga.Git.status_entry()]
+  defp parse_renamed_or_copied_status_record(record) do
+    case String.split(record, " ", parts: 10) do
+      [
+        "2",
+        xy,
+        _sub,
+        _mode_head,
+        _mode_index,
+        _mode_worktree,
+        _head_hash,
+        _index_hash,
+        _score,
+        path
+      ] ->
+        interpret_status_codes(status_code_at(xy, 0), status_code_at(xy, 1), path)
+
+      _ ->
+        []
+    end
+  end
+
+  @spec parse_unmerged_status_record(String.t()) :: [Minga.Git.status_entry()]
+  defp parse_unmerged_status_record(record) do
+    case String.split(record, " ", parts: 11) do
+      [
+        "u",
+        _xy,
+        _sub,
+        _mode_stage1,
+        _mode_stage2,
+        _mode_stage3,
+        _mode_worktree,
+        _hash_stage1,
+        _hash_stage2,
+        _hash_stage3,
+        path
+      ] ->
+        [%StatusEntry{path: path, status: :conflict, staged: false}]
+
+      _ ->
+        []
+    end
+  end
+
+  @spec status_code_at(String.t(), 0 | 1) :: String.t()
+  defp status_code_at(xy, index) do
+    xy
+    |> String.at(index)
+    |> normalize_status_code()
+  end
+
+  @spec normalize_status_code(String.t() | nil) :: String.t()
+  defp normalize_status_code("."), do: " "
+  defp normalize_status_code(nil), do: " "
+  defp normalize_status_code(code), do: code
 
   @spec interpret_status_codes(String.t(), String.t(), String.t()) :: [Minga.Git.status_entry()]
   # Conflict/unmerged states
