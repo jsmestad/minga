@@ -460,9 +460,9 @@ final class CommandDispatcher {
         case .guiFileTreeSelection(let selectedId, let focused):
             guiState.fileTreeState.updateSelection(selectedId: selectedId, focused: focused)
 
-        case .guiCompletion(let visible, let anchorRow, let anchorCol, let selectedIndex, let items):
+        case .guiCompletion(let visible, let anchorRow, let anchorCol, let selectedIndex, let items, let documentation):
             if visible {
-                guiState.completionState.update(visible: true, anchorRow: anchorRow, anchorCol: anchorCol, selectedIndex: selectedIndex, rawItems: items)
+                guiState.completionState.update(visible: true, anchorRow: anchorRow, anchorCol: anchorCol, selectedIndex: selectedIndex, rawItems: items, documentation: documentation)
             } else {
                 guiState.completionState.hide()
             }

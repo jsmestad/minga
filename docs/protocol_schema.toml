@@ -1791,14 +1791,25 @@ fields = [
 [[command_fields]]
 opcode = "gui_completion"
 fields = [{ name = "visible", type = "u8" }]
-# When visible, the encoder emits the popup placement plus a u16-counted list of
-# items (completion_encoder.ex encode_command/1). When hidden, only the visible
-# byte is present.
+# When visible, the encoder emits the popup placement, a u16-counted list of
+# items, then the selected item's documentation preview (completion_encoder.ex
+# encode_command/1). When hidden, only the visible byte is present.
+#
+# `documentation` carries ONLY the selected item's docs (markdown or plaintext),
+# not per-item docs: docs can be large and selection moves already re-emit this
+# command (selected_offset is in the encoder fingerprint), so a single doc string
+# that changes with the selection keeps the payload bounded. The BEAM truncates
+# the doc to a 4096-byte (4 KiB) UTF-8 cap before encoding (see
+# CompletionBuilder.@doc_byte_cap); a string16 length prefix could hold up to
+# 65535 bytes, but the 4 KiB cap keeps the per-keystroke payload small. An empty
+# string means the selected item has no documentation, which both frontends
+# render as "no preview pane" (no layout shift).
 conditional_tail = { guard = "visible == 1", fields = [
   { name = "cursor_row", type = "u16" },
   { name = "cursor_col", type = "u16" },
   { name = "selected_offset", type = "u16" },
   { name = "items", type = "counted_array", count_type = "u16", element = "completion_item" },
+  { name = "documentation", type = "string16" },
 ] }
 
 [[command_fields]]

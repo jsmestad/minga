@@ -19,7 +19,8 @@ import (
 // protocol_schema_validation_test.exs.
 
 func TestDecodeGuiCompletionFieldsWithItems(t *testing.T) {
-	bytes := []byte{1, 0, 3, 0, 7, 0, 1, 0, 1, 1, 0, 3, 'f', 'o', 'o', 0, 3, 'b', 'a', 'r'}
+	// header(7) + items(1: kind 'foo' 'bar') + documentation string16 "doc".
+	bytes := []byte{1, 0, 3, 0, 7, 0, 1, 0, 1, 1, 0, 3, 'f', 'o', 'o', 0, 3, 'b', 'a', 'r', 0, 3, 'd', 'o', 'c'}
 	f, consumed, err := generated.DecodeGuiCompletionFields(bytes, 0, len(bytes))
 	if err != nil {
 		t.Fatalf("decode error: %v", err)
@@ -32,6 +33,9 @@ func TestDecodeGuiCompletionFieldsWithItems(t *testing.T) {
 	}
 	if len(f.Items) != 1 || f.Items[0].Kind != 1 || f.Items[0].Label != "foo" || f.Items[0].Detail != "bar" {
 		t.Fatalf("items mismatch: %+v", f.Items)
+	}
+	if f.Documentation != "doc" {
+		t.Fatalf("documentation = %q, want \"doc\"", f.Documentation)
 	}
 }
 

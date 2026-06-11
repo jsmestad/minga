@@ -198,7 +198,7 @@ enum RenderCommand: Sendable {
     case guiFileTree(version: UInt8, treeFlags: UInt8, treeState: UInt8, selectedId: String, treeWidth: UInt16, rootPath: String, errorReason: String, entries: [Wire.FileTreeEntry])
     case guiFileTreeSelection(selectedId: String, focused: Bool)
     case guiObservatory(visible: Bool, nodeCount: UInt16, nodes: [Wire.ObservatoryNode])
-    case guiCompletion(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, selectedIndex: UInt16, items: [Wire.CompletionItem])
+    case guiCompletion(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, selectedIndex: UInt16, items: [Wire.CompletionItem], documentation: String)
     case guiWhichKey(visible: Bool, prefix: String, page: UInt8, pageCount: UInt8, bindings: [Wire.WhichKeyBinding])
     case guiBreadcrumb(segments: [String])
     case guiStatusBar(StatusBarUpdate)
@@ -764,7 +764,8 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                 anchorRow: fields.cursorRow,
                 anchorCol: fields.cursorCol,
                 selectedIndex: fields.selectedOffset,
-                items: items
+                items: items,
+                documentation: fields.documentation
             ), nextPos - offset)
         } catch {
             throw ProtocolDecodeError.malformed

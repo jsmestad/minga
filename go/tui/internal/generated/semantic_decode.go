@@ -1896,7 +1896,9 @@ func DecodeGuiCompletionFields(data []byte, offset int, windowEnd int) (GuiCompl
 	var cursorCol uint16
 	var selectedOffset uint16
 	var items []CompletionItem
+	var documentation string
 	if visible == 1 {
+		var err error
 		if err := decodeRequireWindow(windowEnd, pos+2, "cursor_row"); err != nil {
 			return GuiCompletionFields{}, offset, err
 		}
@@ -1926,6 +1928,10 @@ func DecodeGuiCompletionFields(data []byte, offset int, windowEnd int) (GuiCompl
 			pos = nextPos
 			items = append(items, item)
 		}
+		documentation, pos, err = decodeString16Window(data, pos, windowEnd)
+		if err != nil {
+			return GuiCompletionFields{}, offset, err
+		}
 	}
 	return GuiCompletionFields{
 		Visible:        visible,
@@ -1933,6 +1939,7 @@ func DecodeGuiCompletionFields(data []byte, offset int, windowEnd int) (GuiCompl
 		CursorCol:      cursorCol,
 		SelectedOffset: selectedOffset,
 		Items:          items,
+		Documentation:  documentation,
 	}, pos, nil
 }
 

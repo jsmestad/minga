@@ -183,11 +183,12 @@ defmodule MingaEditor.CompletionDocPreviewTest do
     # opcode. `menu_rect/2` is the live surface that resolves the menu's screen
     # rect for the FocusTree's hit region.
     #
-    # KNOWN GAP (#2311): the semantic Completion model carries label/kind/detail
-    # but not documentation, so the doc-preview pane the cell painter drew has no
-    # semantic equivalent. The cell path was already dead before this change, so
-    # deleting it does not regress a live frontend; the doc-preview capability is
-    # tracked as a follow-up, not a silent loss.
+    # The doc-preview capability the cell painter drew is restored in #2322: the
+    # semantic Completion model now carries the selected item's `documentation`
+    # (truncated to a 4 KiB cap in CompletionBuilder), the 0x78 payload ships it
+    # via the schema (gui_completion conditional_tail), and both frontends render
+    # a preview pane. See completion_builder_test.exs for the model-level coverage
+    # and the schema golden manifest for the wire round-trip.
     test "returns the bordered menu rect anchored below the cursor" do
       items = [Completion.parse_item(%{"label" => "alpha", "kind" => 3, "detail" => "Function"})]
       completion = Completion.new(items, {0, 0})

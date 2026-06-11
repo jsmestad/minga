@@ -316,7 +316,21 @@ func (m Model) renderCompletion(completion protocol.Completion) []string {
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.Accent()).Background(theme.PopupChrome()).Width(width).ColorWhitespace(true)
 	lines := []string{renderPadded(titleStyle, " Completion", width)}
 
-	rowBudget := max(height-1, 0)
+	// When the selected item carries LSP documentation, reserve a slice of the
+	// overlay budget for a preview pane below the item list. Items without docs
+	// reserve nothing, so the list renders exactly as before (no layout shift).
+	doc := strings.TrimSpace(completion.Documentation)
+	docLines := []string(nil)
+	if doc != "" {
+		docLines = m.renderCompletionDocPane(doc, width, height-1)
+		// The pane must never starve the item list: at extreme overlay
+		// heights, showing the item being selected beats showing its docs.
+		if height-1-len(docLines) < 1 {
+			docLines = nil
+		}
+	}
+
+	rowBudget := max(height-1-len(docLines), 0)
 	selected := min(max(int(completion.Selected), 0), max(len(completion.Items)-1, 0))
 	start := 0
 	if selected >= rowBudget && rowBudget > 0 {
@@ -327,7 +341,32 @@ func (m Model) renderCompletion(completion protocol.Completion) []string {
 		row := m.renderCompletionItemRow(completion.Items[index], index == selected, width)
 		lines = append(lines, m.zones.Mark(zoneIDCompletionItem(index), row))
 	}
+	lines = append(lines, docLines...)
 	return takeLines(lines, height)
+}
+
+// renderCompletionDocPane renders the selected item's documentation as a titled,
+// word-wrapped block below the completion list. It caps itself at roughly half
+// the remaining overlay budget so the item list stays usable; markdown is shown
+// as plain styled text for v1 (matching the GUI preview's plain rendering).
+func (m Model) renderCompletionDocPane(doc string, width int, budget int) []string {
+	if budget < 2 {
+		return nil
+	}
+	theme := m.palette()
+	paneBudget := max(min(budget/2, 6), 2)
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.PopupMutedText()).Background(theme.PopupChrome()).Width(width).ColorWhitespace(true)
+	bodyStyle := lipgloss.NewStyle().Foreground(theme.PopupText()).Background(theme.PopupSurface()).Width(width).ColorWhitespace(true)
+
+	lines := []string{renderPadded(titleStyle, " Documentation", width)}
+	wrapped := lipgloss.NewStyle().Width(max(width-1, 1)).Render(doc)
+	for _, line := range strings.Split(wrapped, "\n") {
+		if len(lines) >= paneBudget {
+			break
+		}
+		lines = append(lines, renderPadded(bodyStyle, " "+line, width))
+	}
+	return lines
 }
 
 func (m Model) renderCompletionItemRow(item protocol.CompletionItem, selected bool, width int) string {

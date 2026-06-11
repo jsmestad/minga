@@ -10,6 +10,12 @@ defmodule MingaEditor.RenderModel.UI.CompletionBuilder do
   alias MingaEditor.Renderer.Gutter
   alias MingaEditor.Viewport
 
+  # Cap the selected item's documentation at 4 KiB of UTF-8. Docs re-emit on
+  # every selection move, so a small cap keeps the per-keystroke payload bounded.
+  # The wire field is a string16 (max 65535 bytes); this cap is the product
+  # decision, documented in docs/protocol_schema.toml under gui_completion.
+  @doc_byte_cap 4096
+
   @spec build(Context.t()) :: Completion.t()
   def build(%{completion: comp} = ctx) do
     {cursor_row, cursor_col} = current_cursor_screen_pos(ctx)
@@ -33,8 +39,44 @@ defmodule MingaEditor.RenderModel.UI.CompletionBuilder do
           cursor_row: cursor_row,
           cursor_col: cursor_col,
           selected_offset: selected_offset,
-          items: Enum.map(visible_items, &item_model/1)
+          items: Enum.map(visible_items, &item_model/1),
+          documentation: selected_documentation(comp)
         }
+    end
+  end
+
+  # The selected item's documentation (markdown or plaintext from the LSP
+  # completion item, already parsed by Minga.Editing.Completion.parse_item/1),
+  # truncated to @doc_byte_cap. Empty string when there is no selected item or it
+  # has no docs.
+  @spec selected_documentation(EditingCompletion.t()) :: String.t()
+  defp selected_documentation(%EditingCompletion{} = comp) do
+    case EditingCompletion.selected_item(comp) do
+      %{documentation: doc} when is_binary(doc) -> truncate_utf8(doc, @doc_byte_cap)
+      _ -> ""
+    end
+  end
+
+  @spec truncate_utf8(String.t(), non_neg_integer()) :: String.t()
+  defp truncate_utf8(text, cap) when byte_size(text) <= cap, do: text
+
+  defp truncate_utf8(text, cap) do
+    # Take whole codepoints up to the byte cap; never split a multi-byte char.
+    text
+    |> binary_part(0, cap)
+    |> trim_to_valid_utf8()
+  end
+
+  # Drop any trailing bytes that form an incomplete (split) UTF-8 codepoint after
+  # a hard byte-length cut, so the result is always valid UTF-8.
+  @spec trim_to_valid_utf8(binary()) :: String.t()
+  defp trim_to_valid_utf8(bin) when byte_size(bin) == 0, do: ""
+
+  defp trim_to_valid_utf8(bin) do
+    if String.valid?(bin) do
+      bin
+    else
+      trim_to_valid_utf8(binary_part(bin, 0, byte_size(bin) - 1))
     end
   end
 

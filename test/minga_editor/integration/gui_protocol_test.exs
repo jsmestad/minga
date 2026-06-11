@@ -653,6 +653,7 @@ defmodule Minga.Integration.GUIProtocolTest do
         cursor_row: 5,
         cursor_col: 0,
         selected_offset: selected_offset,
+        documentation: "Defines a function.",
         items:
           Enum.map(visible_items, fn item ->
             %Completion.Item{kind: item.kind, label: item.label, detail: item.detail || ""}
@@ -672,6 +673,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["selected_index"] == 0
       assert length(decoded["items"]) == 2
       assert hd(decoded["items"])["label"] == "def"
+      assert decoded["documentation"] == "Defines a function."
     end
   end
 

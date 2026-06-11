@@ -352,6 +352,8 @@ func TestDecodeCompletionChromeDoesNotSwallowFollowingCommands(t *testing.T) {
 	item = append(item, string16("Enum.map/2")...)
 	packet := []byte{generated.OPGuiCompletion, 1, 0, 9, 0, 4, 0, 0, 0, 1}
 	packet = append(packet, item...)
+	// documentation string16 (selected item's doc preview) trails the item list.
+	packet = append(packet, string16("Applies fun to each element.")...)
 	packet = append(packet, generated.OPCommitFrame, 0, 0, 0, 0, 0, 0, 0, 0)
 
 	first, err := DecodeCommand(packet)
@@ -367,6 +369,9 @@ func TestDecodeCompletionChromeDoesNotSwallowFollowingCommands(t *testing.T) {
 	}
 	if got := completion.Items[0]; got.Kind != 1 || got.Label != "map" || got.Detail != "Enum.map/2" {
 		t.Fatalf("completion item decoded incorrectly: %+v", got)
+	}
+	if completion.Documentation != "Applies fun to each element." {
+		t.Fatalf("completion documentation = %q, want preview text", completion.Documentation)
 	}
 
 	second, err := DecodeCommand(packet[first.Size:])

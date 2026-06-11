@@ -1364,6 +1364,52 @@ func TestSemanticMouseRoutesCompletionItemZones(t *testing.T) {
 	}
 }
 
+func TestCompletionRendersDocumentationPreviewWhenPresent(t *testing.T) {
+	model := New(60, 24, nil)
+	completion := protocol.Completion{
+		Visible:       true,
+		Selected:      0,
+		Items:         []protocol.CompletionItem{{Label: "map", Detail: "Enum.map/2"}},
+		Documentation: "Applies fun to each element of the enumerable.",
+	}
+
+	view := ansi.Strip(strings.Join(model.renderCompletion(completion), "\n"))
+	if !strings.Contains(view, "Documentation") {
+		t.Fatalf("expected a Documentation pane title, got: %q", view)
+	}
+	if !strings.Contains(view, "Applies fun to each element") {
+		t.Fatalf("expected the doc preview body to render, got: %q", view)
+	}
+}
+
+func TestCompletionWithoutDocumentationRendersNoPreviewPane(t *testing.T) {
+	model := New(60, 24, nil)
+	withDoc := model.renderCompletion(protocol.Completion{
+		Visible:       true,
+		Items:         []protocol.CompletionItem{{Label: "map", Detail: "Enum.map/2"}},
+		Documentation: "Applies fun.",
+	})
+	withoutDoc := model.renderCompletion(protocol.Completion{
+		Visible: true,
+		Items:   []protocol.CompletionItem{{Label: "map", Detail: "Enum.map/2"}},
+	})
+
+	noDocView := ansi.Strip(strings.Join(withoutDoc, "\n"))
+	if strings.Contains(noDocView, "Documentation") {
+		t.Fatalf("items without docs must not render a Documentation pane: %q", noDocView)
+	}
+	// AC 3: the item list must be unchanged (no layout shift) when docs are absent.
+	// The doc variant adds extra pane lines, so the no-doc render is shorter, and
+	// its item rows match the leading item rows of the doc variant.
+	if len(withoutDoc) >= len(withDoc) {
+		t.Fatalf("doc preview should add lines: withDoc=%d withoutDoc=%d", len(withDoc), len(withoutDoc))
+	}
+	itemRow := ansi.Strip(withoutDoc[1])
+	if !strings.Contains(itemRow, "map") {
+		t.Fatalf("expected first item row to render the label, got: %q", itemRow)
+	}
+}
+
 func TestSemanticMouseRoutesSidebarItemZones(t *testing.T) {
 	model := New(80, 6, nil)
 	model.chrome = map[byte]protocol.ChromePayload{

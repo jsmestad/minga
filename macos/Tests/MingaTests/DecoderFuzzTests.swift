@@ -159,6 +159,7 @@ private func randomGuiCompletion() -> Data {
         data.append(randomString16Field(maxLen: 15))  // label
         data.append(randomString16Field(maxLen: 15))  // detail
     }
+    data.append(randomString16Field(maxLen: 40))  // documentation (selected item's doc preview)
     return data
 }
 

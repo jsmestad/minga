@@ -38,6 +38,15 @@ func decodeCompletion(payload []byte) (Completion, string, int) {
 		completion.Items = append(completion.Items, item)
 		labels = append(labels, item.Label)
 	}
+	// The selected item's documentation preview trails the item list as a
+	// string16 (schema: gui_completion conditional_tail). A conformant BEAM
+	// always emits it when visible==1 (empty string for items without docs), so
+	// consume it as part of this command's bytes. A short/legacy packet that
+	// omits it leaves Documentation empty and does not advance the offset.
+	if doc, next, ok := readString16(payload, offset); ok {
+		completion.Documentation = doc
+		offset = next
+	}
 	return completion, stringsJoin(labels, "  "), offset
 }
 

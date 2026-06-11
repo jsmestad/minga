@@ -112,11 +112,11 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         }
         return ["type": "gui_file_tree", "version": Int(version), "tree_flags": Int(treeFlags), "tree_state": Int(treeState), "selected_id": selectedId, "tree_width": Int(treeWidth), "root_path": rootPath, "error_reason": errorReason, "entries": entryArray]
 
-    case .guiCompletion(let visible, let anchorRow, let anchorCol, let selectedIndex, let items):
+    case .guiCompletion(let visible, let anchorRow, let anchorCol, let selectedIndex, let items, let documentation):
         let itemArray = items.map { i -> [String: Any] in
             ["label": i.label, "detail": i.detail, "kind": Int(i.kind)]
         }
-        return ["type": "gui_completion", "visible": visible, "anchor_row": Int(anchorRow), "anchor_col": Int(anchorCol), "selected_index": Int(selectedIndex), "items": itemArray]
+        return ["type": "gui_completion", "visible": visible, "anchor_row": Int(anchorRow), "anchor_col": Int(anchorCol), "selected_index": Int(selectedIndex), "items": itemArray, "documentation": documentation]
 
     case .guiWhichKey(let visible, let prefix, let page, let pageCount, let bindings):
         let bindingArray = bindings.map { b -> [String: Any] in

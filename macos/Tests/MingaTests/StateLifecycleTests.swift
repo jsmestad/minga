@@ -20,7 +20,7 @@ struct CompletionStateLifecycleTests {
             Wire.CompletionItem(kind: 6, label: "my_var", detail: "String.t()")
         ]
         state.update(visible: true, anchorRow: 5, anchorCol: 10,
-                     selectedIndex: 1, rawItems: raw)
+                     selectedIndex: 1, rawItems: raw, documentation: "Defines a function.")
 
         #expect(state.visible == true)
         #expect(state.anchorRow == 5)
@@ -31,6 +31,7 @@ struct CompletionStateLifecycleTests {
         #expect(state.items[0].kind == 1)
         #expect(state.items[1].label == "my_var")
         #expect(state.items[1].detail == "String.t()")
+        #expect(state.documentation == "Defines a function.")
     }
 
     @Test("hide() clears all state")
@@ -38,11 +39,13 @@ struct CompletionStateLifecycleTests {
         let state = CompletionState()
         state.update(visible: true, anchorRow: 5, anchorCol: 10,
                      selectedIndex: 0,
-                     rawItems: [Wire.CompletionItem(kind: 1, label: "x", detail: "")])
+                     rawItems: [Wire.CompletionItem(kind: 1, label: "x", detail: "")],
+                     documentation: "doc")
         state.hide()
 
         #expect(state.visible == false)
         #expect(state.items.isEmpty)
+        #expect(state.documentation.isEmpty)
     }
 }
 

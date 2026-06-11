@@ -10,12 +10,14 @@ defmodule Minga.RenderModel.UI.Completion do
           cursor_row: non_neg_integer(),
           cursor_col: non_neg_integer(),
           selected_offset: non_neg_integer(),
-          items: [Item.t()]
+          items: [Item.t()],
+          documentation: String.t()
         }
 
   defstruct visible?: false,
             cursor_row: 0,
             cursor_col: 0,
             selected_offset: 0,
-            items: []
+            items: [],
+            documentation: ""
 end

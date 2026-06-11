@@ -45,7 +45,8 @@ struct CompletionOverlayViewTests {
             rawItems: [
                 Wire.CompletionItem(kind: 1, label: "def", detail: "keyword"),
                 Wire.CompletionItem(kind: 2, label: "defmodule", detail: "keyword"),
-            ]
+            ],
+            documentation: ""
         )
 
         let sut = CompletionOverlay(
@@ -59,6 +60,38 @@ struct CompletionOverlayViewTests {
         let labels = texts.compactMap { try? $0.string() }
         #expect(labels.contains("def"))
         #expect(labels.contains("defmodule"))
+    }
+
+    @Test("Selected item documentation renders a preview pane")
+    @MainActor func documentationPreview() throws {
+        let state = CompletionState()
+        state.update(
+            visible: true, anchorRow: 5, anchorCol: 10, selectedIndex: 0,
+            rawItems: [Wire.CompletionItem(kind: 1, label: "def", detail: "keyword")],
+            documentation: "Applies fun to each element."
+        )
+
+        let sut = CompletionOverlay(state: state, theme: ThemeColors(), encoder: nil)
+        let texts = try sut.inspect().findAll(ViewInspectorQuery.text)
+        let strings = texts.compactMap { try? $0.string() }
+        #expect(strings.contains("Applies fun to each element."))
+    }
+
+    @Test("Items without documentation render no preview pane")
+    @MainActor func noDocumentationNoPane() throws {
+        let state = CompletionState()
+        state.update(
+            visible: true, anchorRow: 5, anchorCol: 10, selectedIndex: 0,
+            rawItems: [Wire.CompletionItem(kind: 1, label: "def", detail: "keyword")],
+            documentation: ""
+        )
+
+        let sut = CompletionOverlay(state: state, theme: ThemeColors(), encoder: nil)
+        // The doc pane is the only place the Divider + scrollable Text appears; with
+        // empty docs the documentationPane @ViewBuilder produces nothing (AC 3).
+        #expect(throws: (any Error).self) {
+            _ = try sut.inspect().find(ViewType.Divider.self)
+        }
     }
 }
 
