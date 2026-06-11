@@ -61,7 +61,6 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
             viewport: scroll.viewport,
             gutter_w: scroll.gutter_w,
             content_w: scroll.content_w,
-            is_semantic: true,
             wrap_on: scroll.wrap_on,
             line_number_style: scroll.line_number_style,
             width_oracle: scroll.width_oracle

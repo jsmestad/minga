@@ -9,10 +9,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
 
   alias Minga.Config.ModelineSegment
   alias Minga.Config.ModelineSegments
-  alias Minga.Core.Face
-  alias Minga.Core.Unicode
   alias Minga.Mode
-  alias MingaEditor.DisplayList
   alias MingaEditor.UI.Devicon
   alias MingaEditor.UI.Theme
 
@@ -65,7 +62,6 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
           optional(:active_background_subagent_label) => String.t() | nil
         }
 
-  @type separator_style :: :powerline | :round | :slant | :none
   @type render_segment :: ModelineSegment.render_segment()
   @type gui_segment ::
           {atom(), String.t(), non_neg_integer(), non_neg_integer(), keyword(), atom() | nil}
@@ -102,13 +98,6 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
     selection: 75
   }
 
-  @separator_chars %{
-    powerline: {"", ""},
-    round: {"", ""},
-    slant: {"", ""},
-    none: {"", ""}
-  }
-
   @boolean_segment_attrs [:bold, :italic, :underline, :strikethrough, :reverse]
   @underline_styles [:line, :curl, :dashed, :dotted, :double]
   @font_weights [:thin, :light, :regular, :medium, :semibold, :bold, :heavy, :black]
@@ -125,42 +114,6 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
   @doc "Returns the built-in modeline segment names."
   @spec built_in_segments() :: [atom()]
   def built_in_segments, do: ModelineSegments.reserved_names()
-
-  @doc """
-  Renders the modeline at the given row using the provided data.
-
-  Returns `{draw_commands, click_regions}` where click_regions is a list of `{col_start, col_end, command_atom}` tuples for mouse hit-testing.
-  """
-  @spec render(non_neg_integer(), pos_integer(), modeline_data(), Theme.t(), non_neg_integer()) ::
-          {[DisplayList.draw()], [click_region()]}
-  def render(
-        row,
-        cols,
-        data,
-        theme \\ MingaEditor.UI.Theme.get!(MingaEditor.UI.Theme.default()),
-        col_off \\ 0
-      ) do
-    ctx = context(data, theme)
-    separator_style = Minga.Config.get(:modeline_separator)
-    {left_names, right_names} = configured_segment_names()
-    left_groups = build_segment_groups(left_names, ctx)
-    right_groups = build_segment_groups(right_names, ctx)
-
-    {left_groups, right_groups} =
-      fit_segment_groups(left_groups, right_groups, cols, separator_style, ctx.bar_bg)
-
-    left_segments = left_segments(left_groups, separator_style, ctx.bar_bg)
-    right_segments = right_segments(right_groups, separator_style, ctx.bar_bg)
-    left_width = segments_width(left_segments)
-    right_width = segments_width(right_segments)
-    fill_width = max(0, cols - left_width - right_width)
-
-    all_segments =
-      left_segments ++
-        [{String.duplicate(" ", fill_width), ctx.bar_fg, ctx.bar_bg, [], nil}] ++ right_segments
-
-    emit_segments(row, col_off, all_segments)
-  end
 
   @doc "Returns configured modeline segments for native GUI status bars."
   @spec gui_segments(modeline_data(), Theme.t()) :: gui_segments()
@@ -220,9 +173,8 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
     }
   end
 
-  @spec configured_segment_names() :: {[atom()], [atom()]}
   @spec configured_segment_names(ModelineSegments.table()) :: {[atom()], [atom()]}
-  defp configured_segment_names(modeline_segments_table \\ ModelineSegments) do
+  defp configured_segment_names(modeline_segments_table) do
     left = Minga.Config.get(:modeline_left_segments)
     right = Minga.Config.get(:modeline_right_segments)
     configured = MapSet.new(left ++ right)
@@ -240,9 +192,8 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
     {left ++ left_defaults, right ++ right_defaults}
   end
 
-  @spec build_segment_groups([atom()], context()) :: [segment_group()]
   @spec build_segment_groups([atom()], context(), ModelineSegments.table()) :: [segment_group()]
-  defp build_segment_groups(names, ctx, modeline_segments_table \\ ModelineSegments) do
+  defp build_segment_groups(names, ctx, modeline_segments_table) do
     names
     |> Enum.map(&build_segment_group(&1, ctx, modeline_segments_table))
     |> Enum.reject(&is_nil/1)
@@ -475,213 +426,12 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
     )
   end
 
-  @spec fit_segment_groups(
-          [segment_group()],
-          [segment_group()],
-          non_neg_integer(),
-          separator_style(),
-          non_neg_integer()
-        ) :: {[segment_group()], [segment_group()]}
-  defp fit_segment_groups(left, right, cols, separator_style, bar_bg) do
-    if groups_width(left, right, separator_style, bar_bg) <= cols do
-      {left, right}
-    else
-      drop_lowest_priority(left, right)
-      |> fit_segment_groups(cols, separator_style, bar_bg)
-    end
-  end
-
-  @spec fit_segment_groups(
-          {[segment_group()], [segment_group()]},
-          non_neg_integer(),
-          separator_style(),
-          non_neg_integer()
-        ) :: {[segment_group()], [segment_group()]}
-  defp fit_segment_groups({left, right}, cols, separator_style, bar_bg),
-    do: fit_segment_groups(left, right, cols, separator_style, bar_bg)
-
-  @spec drop_lowest_priority([segment_group()], [segment_group()]) ::
-          {[segment_group()], [segment_group()]}
-  defp drop_lowest_priority([], []), do: {[], []}
-
-  defp drop_lowest_priority(left, right) do
-    {side, name} =
-      (Enum.map(left, &{:left, &1.name, &1.priority}) ++
-         Enum.map(right, &{:right, &1.name, &1.priority}))
-      |> Enum.min_by(fn {_side, name, priority} -> {priority, name} end)
-      |> then(fn {side, name, _priority} -> {side, name} end)
-
-    {drop_group(left, side, name, :left), drop_group(right, side, name, :right)}
-  end
-
-  @spec drop_group([segment_group()], :left | :right, atom(), :left | :right) :: [segment_group()]
-  defp drop_group(groups, side, name, side), do: Enum.reject(groups, &(&1.name == name))
-  defp drop_group(groups, _drop_side, _name, _own_side), do: groups
-
   @spec gui_segments_from_groups([segment_group()]) :: [gui_segment()]
   defp gui_segments_from_groups(groups) do
     Enum.flat_map(groups, fn %{name: name, segments: segments} ->
       Enum.map(segments, fn {text, fg, bg, opts, target} -> {name, text, fg, bg, opts, target} end)
     end)
   end
-
-  @spec groups_width([segment_group()], [segment_group()], separator_style(), non_neg_integer()) ::
-          non_neg_integer()
-  defp groups_width(left, right, separator_style, bar_bg),
-    do:
-      segments_width(left_segments(left, separator_style, bar_bg)) +
-        segments_width(right_segments(right, separator_style, bar_bg))
-
-  @spec left_segments([segment_group()], separator_style(), non_neg_integer()) :: [
-          render_segment()
-        ]
-  defp left_segments(groups, separator_style, bar_bg) do
-    groups
-    |> groups_with_left_separators(separator_style)
-    |> maybe_append_left_boundary(separator_style, bar_bg)
-  end
-
-  @spec groups_with_left_separators([segment_group()], separator_style()) :: [render_segment()]
-  defp groups_with_left_separators([], _separator_style), do: []
-
-  defp groups_with_left_separators([first | rest], separator_style) do
-    Enum.reduce(rest, first.segments, fn group, acc ->
-      acc ++ left_separator_between(acc, group.segments, separator_style) ++ group.segments
-    end)
-  end
-
-  @spec maybe_append_left_boundary([render_segment()], separator_style(), non_neg_integer()) :: [
-          render_segment()
-        ]
-  defp maybe_append_left_boundary([], _separator_style, _bar_bg), do: []
-
-  defp maybe_append_left_boundary(segments, separator_style, bar_bg) do
-    case List.last(segments) do
-      {_text, _fg, ^bar_bg, _opts, _target} ->
-        segments
-
-      {_text, _fg, bg, _opts, _target} ->
-        segments ++ [forward_separator(bg, bar_bg, separator_style)]
-    end
-  end
-
-  @spec left_separator_between([render_segment()], [render_segment()], separator_style()) :: [
-          render_segment()
-        ]
-  defp left_separator_between(previous_segments, next_segments, separator_style) do
-    case {List.last(previous_segments), List.first(next_segments)} do
-      {{_prev_text, _prev_fg, prev_bg, _prev_opts, _prev_target},
-       {_next_text, _next_fg, next_bg, _next_opts, _next_target}} ->
-        separator_for_left_transition(prev_bg, next_bg, separator_style)
-
-      _other ->
-        []
-    end
-  end
-
-  @spec separator_for_left_transition(non_neg_integer(), non_neg_integer(), separator_style()) ::
-          [render_segment()]
-  defp separator_for_left_transition(bg, bg, _separator_style), do: []
-
-  defp separator_for_left_transition(prev_bg, next_bg, separator_style),
-    do: [forward_separator(prev_bg, next_bg, separator_style)]
-
-  @spec right_segments([segment_group()], separator_style(), non_neg_integer()) :: [
-          render_segment()
-        ]
-  defp right_segments(groups, separator_style, bar_bg) do
-    groups
-    |> groups_with_right_separators(separator_style, bar_bg)
-  end
-
-  @spec groups_with_right_separators([segment_group()], separator_style(), non_neg_integer()) :: [
-          render_segment()
-        ]
-  defp groups_with_right_separators([], _separator_style, _bar_bg), do: []
-
-  defp groups_with_right_separators([first | rest], separator_style, bar_bg) do
-    initial = leading_right_separator(first.segments, separator_style, bar_bg) ++ first.segments
-
-    Enum.reduce(rest, initial, fn group, acc ->
-      acc ++ right_separator_between(acc, group.segments, separator_style) ++ group.segments
-    end)
-  end
-
-  @spec leading_right_separator([render_segment()], separator_style(), non_neg_integer()) :: [
-          render_segment()
-        ]
-  defp leading_right_separator([], _separator_style, _bar_bg), do: []
-
-  defp leading_right_separator(
-         [{_text, _fg, bg, _opts, _target} | _rest],
-         separator_style,
-         bar_bg
-       ),
-       do: separator_for_right_transition(bar_bg, bg, separator_style)
-
-  @spec right_separator_between([render_segment()], [render_segment()], separator_style()) :: [
-          render_segment()
-        ]
-  defp right_separator_between(previous_segments, next_segments, separator_style) do
-    case {List.last(previous_segments), List.first(next_segments)} do
-      {{_prev_text, _prev_fg, prev_bg, _prev_opts, _prev_target},
-       {_next_text, _next_fg, next_bg, _next_opts, _next_target}} ->
-        separator_for_right_transition(prev_bg, next_bg, separator_style)
-
-      _other ->
-        []
-    end
-  end
-
-  @spec separator_for_right_transition(non_neg_integer(), non_neg_integer(), separator_style()) ::
-          [render_segment()]
-  defp separator_for_right_transition(bg, bg, _separator_style), do: []
-
-  defp separator_for_right_transition(prev_bg, next_bg, separator_style),
-    do: [reverse_separator(next_bg, prev_bg, separator_style)]
-
-  @spec forward_separator(non_neg_integer(), non_neg_integer(), separator_style()) ::
-          render_segment()
-  defp forward_separator(prev_bg, next_bg, separator_style) do
-    {char, _reverse_char} = Map.fetch!(@separator_chars, separator_style)
-    {char, prev_bg, next_bg, [], nil}
-  end
-
-  @spec reverse_separator(non_neg_integer(), non_neg_integer(), separator_style()) ::
-          render_segment()
-  defp reverse_separator(next_bg, prev_bg, separator_style) do
-    {_char, reverse_char} = Map.fetch!(@separator_chars, separator_style)
-    {reverse_char, next_bg, prev_bg, [], nil}
-  end
-
-  @spec segments_width([render_segment()]) :: non_neg_integer()
-  defp segments_width(segments) do
-    Enum.reduce(segments, 0, fn {text, _fg, _bg, _opts, _target}, acc ->
-      acc + Unicode.display_width(text)
-    end)
-  end
-
-  @spec emit_segments(non_neg_integer(), non_neg_integer(), [render_segment()]) ::
-          {[DisplayList.draw()], [click_region()]}
-  defp emit_segments(row, col_off, segments) do
-    {commands, click_regions, _col} =
-      Enum.reduce(segments, {[], [], col_off}, fn {text, fg, bg, opts, target},
-                                                  {cmds, regions, col} ->
-        cmd = DisplayList.draw(row, col, text, Face.new([{:fg, fg}, {:bg, bg} | opts]))
-        width = Unicode.display_width(text)
-        next_col = col + width
-        new_regions = click_region(regions, col, next_col, target)
-        {[cmd | cmds], new_regions, next_col}
-      end)
-
-    {Enum.reverse(commands), Enum.reverse(click_regions)}
-  end
-
-  @spec click_region([click_region()], non_neg_integer(), non_neg_integer(), atom() | nil) :: [
-          click_region()
-        ]
-  defp click_region(regions, _col, _next_col, nil), do: regions
-  defp click_region(regions, col, next_col, command), do: [{col, next_col, command} | regions]
 
   @spec render_builtin(atom(), context()) :: [render_segment()]
   defp render_builtin(:mode, ctx), do: render_mode(ctx)

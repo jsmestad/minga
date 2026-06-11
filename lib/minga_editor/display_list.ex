@@ -8,11 +8,20 @@ defmodule MingaEditor.DisplayList do
   The dead cell-grid window carriers (`Frame`, `WindowFrame`) and their line
   producers were removed in #2241.
 
-  What remains here is the small set of cell-grid draw primitives that the
-  per-surface chrome painters still emit (completion menu, dashboard, hover and
-  signature popups, modeline, tab bar, float popups, etc.). Those surfaces are
-  scheduled for their own semantic migration in #2311; until then they share the
-  `draw/4` constructor and the `Overlay` carrier defined here.
+  The per-surface chrome painters (completion menu, dashboard, hover/signature
+  popups, modeline, tab bar, float popups, etc.) were deleted in #2311; the
+  semantic frontends render those surfaces natively. `draw/4` and the `Overlay`
+  carrier are retained for the remaining legitimate consumers:
+
+    * `Renderer.Gutter` / `Renderer.Line` — the styled-run draw primitives the
+      `RenderModel.Window.Builder` shares via `Renderer.Composition`.
+    * `Minga.Core.Decorations.BlockDecoration` — raw draw tuples for extension
+      block decorations.
+    * `FloatingWindow.Spec` / `HoverPopup` / `SignatureHelp` — the `:content`
+      draw list type used to compute popup geometry for `box/3`.
+    * `RenderPipeline.Chrome` / `ComposeHelpers` — the `Overlay` carrier, whose
+      `cursor` field still resolves the picker cursor in Compose.
+    * The Board and Git Porcelain extension shell renderers.
 
   ## Types
 

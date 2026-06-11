@@ -1,7 +1,6 @@
 defmodule MingaEditor.UI.Popup.LifecycleTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.Layout
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
@@ -412,35 +411,6 @@ defmodule MingaEditor.UI.Popup.LifecycleTest do
       assert Window.popup?(popup_window)
       assert popup_window.popup_meta.rule.display == :float
       assert popup_window.popup_meta.rule.border == :double
-    end
-
-    test "render_float_overlays returns overlays for float popups", %{state: state, table: t} do
-      real_buf =
-        start_supervised!(
-          {BufferProcess, content: "hello world", buffer_name: "*Help*"},
-          id: :float_overlay_buf
-        )
-
-      PopupRegistry.register(Rule.new("*Help*", display: :float, focus: true), t)
-      {:ok, with_popup} = Lifecycle.open_popup(state, "*Help*", real_buf, registry: t)
-
-      overlays = Lifecycle.render_float_overlays(with_popup)
-      assert length(overlays) == 1
-      [overlay] = overlays
-      assert is_list(overlay.draws)
-      assert overlay.draws != []
-    end
-
-    test "render_float_overlays returns empty for split-only popups", %{
-      state: state,
-      popup_buf: popup_buf,
-      table: t
-    } do
-      PopupRegistry.register(Rule.new("*Warnings*", display: :split, side: :bottom), t)
-      {:ok, with_popup} = Lifecycle.open_popup(state, "*Warnings*", popup_buf, registry: t)
-
-      overlays = Lifecycle.render_float_overlays(with_popup)
-      assert overlays == []
     end
   end
 end

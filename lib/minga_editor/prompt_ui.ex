@@ -141,28 +141,6 @@ defmodule MingaEditor.PromptUI do
   end
 
   @doc """
-  Renders the prompt overlay into draw commands and a cursor position.
-
-  Returns `{draws, cursor}` where draws is a list of display list
-  draw commands and cursor is a `%Cursor{}` for the input position.
-  Returns `{[], nil}` when no prompt is active.
-  """
-  @spec render(state(), MingaEditor.Viewport.t()) ::
-          {[MingaEditor.DisplayList.draw()], {non_neg_integer(), non_neg_integer()} | nil}
-  def render(state, viewport) do
-    case state.shell_state.modal do
-      {:prompt, %{prompt_ui: %PromptState{handler: nil}}} ->
-        {[], nil}
-
-      {:prompt, %{prompt_ui: prompt}} ->
-        do_render(prompt, state.theme, viewport)
-
-      _ ->
-        {[], nil}
-    end
-  end
-
-  @doc """
   Applies `fun` to the current PromptState inside the modal and writes
   back via `ModalOverlay.transition`, keeping the modal sum type and
   consistency check in sync.
@@ -182,34 +160,6 @@ defmodule MingaEditor.PromptUI do
       {:prompt, %{prompt_ui: prompt}} -> prompt
       _ -> %PromptState{}
     end
-  end
-
-  @spec do_render(PromptState.t(), MingaEditor.UI.Theme.t(), MingaEditor.Viewport.t()) ::
-          {[MingaEditor.DisplayList.draw()], {non_neg_integer(), non_neg_integer()}}
-  defp do_render(prompt, theme, viewport) do
-    alias MingaEditor.DisplayList
-    alias Minga.Core.Face
-
-    pc = theme.picker
-    row = viewport.rows - 1
-    label = prompt.label
-    text = prompt.text
-    label_len = String.length(label)
-
-    label_face = Face.new(fg: pc.highlight_fg, bg: pc.prompt_bg)
-    input_face = Face.new(fg: pc.text_fg, bg: pc.bg)
-
-    total_len = label_len + String.length(text)
-    padding = String.duplicate(" ", max(0, viewport.cols - total_len))
-
-    draws = [
-      DisplayList.draw(row, 0, label, label_face),
-      DisplayList.draw(row, label_len, text <> padding, input_face)
-    ]
-
-    cursor_pos = {row, label_len + prompt.cursor}
-
-    {draws, cursor_pos}
   end
 
   @spec do_tab(state(), PromptState.t()) :: state()

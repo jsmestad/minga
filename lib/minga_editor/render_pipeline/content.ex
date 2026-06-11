@@ -140,7 +140,6 @@ defmodule MingaEditor.RenderPipeline.Content do
         decorations: snapshot.decorations,
         git_signs: scroll.git_signs,
         is_active: is_active,
-        is_semantic: true,
         wrap_on: wrap_on,
         line_number_style: line_number_style,
         width_oracle: width_oracle
@@ -219,12 +218,10 @@ defmodule MingaEditor.RenderPipeline.Content do
 
     cursor_info = buf_cursor
 
-    # Snapshot tracking fields and prune cache to visible range
-    last_visible = first_line + length(lines) - 1
-
+    # Snapshot tracking fields after the render pass.
     updated_window =
-      window
-      |> Window.snapshot_after_render(
+      Window.snapshot_after_render(
+        window,
         viewport.top,
         Viewport.cache_key(viewport),
         gutter_w,
@@ -233,7 +230,6 @@ defmodule MingaEditor.RenderPipeline.Content do
         scroll.buf_version,
         ctx_fp
       )
-      |> Window.prune_cache(first_line, last_visible)
 
     new_map = Map.put(state.workspace.windows.map, scroll.win_id, updated_window)
     ws = state.workspace
@@ -453,7 +449,6 @@ defmodule MingaEditor.RenderPipeline.Content do
         content_w: content_w,
         has_sign_column: true,
         is_active: is_active,
-        is_semantic: true,
         wrap_on: true,
         line_number_style: line_number_style,
         options: snapshot.options,
@@ -516,11 +511,9 @@ defmodule MingaEditor.RenderPipeline.Content do
     # Snapshot render state so future frames can detect changes.
     # Without this, dirty_lines stays empty and content is never re-rendered.
     # buf_version was already fetched above for detect_invalidation.
-    last_visible = first_line + length(snapshot.lines) - 1
-
     window =
-      window
-      |> Window.snapshot_after_render(
+      Window.snapshot_after_render(
+        window,
         viewport.top,
         Viewport.cache_key(viewport),
         gutter_w,
@@ -529,7 +522,6 @@ defmodule MingaEditor.RenderPipeline.Content do
         buf_version,
         ctx_fp
       )
-      |> Window.prune_cache(first_line, last_visible)
 
     # Persist the updated window back to input
     ws = state.workspace

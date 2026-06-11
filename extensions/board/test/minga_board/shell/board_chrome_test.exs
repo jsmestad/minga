@@ -3,7 +3,6 @@ defmodule MingaBoard.Shell.ChromeTest do
 
   use ExUnit.Case, async: true
 
-  alias Minga.Core.Face
   alias MingaEditor.RenderPipeline.ComposedFrame
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Layout
@@ -112,10 +111,6 @@ defmodule MingaBoard.Shell.ChromeTest do
     {scrolls, frames, cursor_info, state, layout}
   end
 
-  defp context_bar_text(chrome) do
-    Enum.map_join(chrome.tab_bar, fn {_row, _col, text, _face} -> text end)
-  end
-
   # ── Async render eligibility ─────────────────────────────────────────────
 
   describe "async_render?/1" do
@@ -183,100 +178,50 @@ defmodule MingaBoard.Shell.ChromeTest do
       chrome = Shell.build_chrome(state, layout, scrolls, cursor_info)
 
       assert %Chrome{} = chrome
-      assert chrome.tab_bar == []
-      assert chrome.status_bar_draws == []
-      assert chrome.minibuffer == []
-      assert chrome.file_tree == []
-      assert chrome.agent_panel == []
       assert chrome.overlays == []
-      assert chrome.separators == []
+      assert chrome.status_bar_data == nil
     end
   end
 
   # ── Zoomed view ──────────────────────────────────────────────────────────
 
   describe "build_chrome/4 zoomed view" do
-    test "returns context bar draws in tab_bar" do
+    # The cell-grid zoom context-bar painter was removed in #2311 along with the
+    # Chrome struct's draw slots. The zoomed view renders the card's workspace
+    # through the traditional editor window pipeline, not through any chrome draw
+    # slot, so `build_chrome/4` now returns an empty Chrome in both views.
+    test "returns an empty Chrome struct (zoom renders through the window pipeline)" do
       state = zoomed_board_state()
       {scrolls, _frames, cursor_info, state, layout} = run_through_content(state)
 
       chrome = Shell.build_chrome(state, layout, scrolls, cursor_info)
 
-      assert [_ | _] = chrome.tab_bar
-      assert Enum.all?(chrome.tab_bar, &match?({_, _, _, %Face{}}, &1))
-    end
-
-    test "context bar contains card task text" do
-      state = zoomed_board_state(task: "Fix the login bug")
-      {scrolls, _frames, cursor_info, state, layout} = run_through_content(state)
-
-      chrome = Shell.build_chrome(state, layout, scrolls, cursor_info)
-
-      assert context_bar_text(chrome) =~ "Fix the login bug"
-    end
-
-    test "context bar contains model name when present" do
-      state = zoomed_board_state(model: "sonnet-4")
-      {scrolls, _frames, cursor_info, state, layout} = run_through_content(state)
-
-      chrome = Shell.build_chrome(state, layout, scrolls, cursor_info)
-
-      assert context_bar_text(chrome) =~ "sonnet-4"
-    end
-
-    test "context bar contains ESC hint" do
-      state = zoomed_board_state()
-      {scrolls, _frames, cursor_info, state, layout} = run_through_content(state)
-
-      chrome = Shell.build_chrome(state, layout, scrolls, cursor_info)
-
-      assert context_bar_text(chrome) =~ "ESC back to Board"
-    end
-
-    test "context bar shows Untitled for empty task" do
-      state = zoomed_board_state(task: "")
-      {scrolls, _frames, cursor_info, state, layout} = run_through_content(state)
-
-      chrome = Shell.build_chrome(state, layout, scrolls, cursor_info)
-
-      assert context_bar_text(chrome) =~ "Untitled"
-    end
-
-    test "context bar omits model segment when model is nil" do
-      state = zoomed_board_state(model: nil)
-      {scrolls, _frames, cursor_info, state, layout} = run_through_content(state)
-
-      chrome = Shell.build_chrome(state, layout, scrolls, cursor_info)
-
-      refute context_bar_text(chrome) =~ " · "
-    end
-
-    test "leaves other chrome fields empty" do
-      state = zoomed_board_state()
-      {scrolls, _frames, cursor_info, state, layout} = run_through_content(state)
-
-      chrome = Shell.build_chrome(state, layout, scrolls, cursor_info)
-
-      assert chrome.status_bar_draws == []
-      assert chrome.minibuffer == []
-      assert chrome.file_tree == []
-      assert chrome.agent_panel == []
+      assert %Chrome{} = chrome
       assert chrome.overlays == []
+      assert chrome.status_bar_data == nil
     end
+  end
 
-    test "each card status has a distinct icon" do
-      statuses = [:idle, :working, :iterating, :needs_you, :done, :errored]
+  # ── Zoomed layout (no dead context-bar row) ──────────────────────────────
 
-      icons =
-        Enum.map(statuses, fn status ->
-          state = zoomed_board_state(status: status)
-          {scrolls, _frames, cursor_info, state, layout} = run_through_content(state)
-          chrome = Shell.build_chrome(state, layout, scrolls, cursor_info)
-          context_bar_text(chrome)
-        end)
+  describe "compute_layout/1 zoomed view" do
+    test "editor area starts at row 0 with no reserved context-bar row" do
+      state = zoomed_board_state()
+      state = RenderPipeline.compute_layout(state)
+      layout = Layout.get(state)
 
-      # All texts should be unique (different status icons)
-      assert length(Enum.uniq(icons)) == length(statuses)
+      {editor_top, _left, _cols, editor_rows} = layout.editor_area
+      {minibuffer_row, _, _, minibuffer_height} = layout.minibuffer
+      {_, _, _, total_rows} = layout.terminal
+
+      # No blank top row: the editor begins at row 0, not row 1.
+      assert editor_top == 0
+
+      # The minibuffer takes the last row and the editor fills everything above
+      # it, so no row is reserved-but-unpainted.
+      assert minibuffer_height == 1
+      assert minibuffer_row == editor_rows
+      assert editor_top + editor_rows + minibuffer_height == total_rows
     end
   end
 
@@ -298,7 +243,7 @@ defmodule MingaBoard.Shell.ChromeTest do
   # ── Independence from Traditional ───────────────────────────────────────
 
   describe "build_chrome/4 independence from Traditional layout" do
-    test "Board grid chrome has no status bar, no tab bar, no file tree regardless of viewport" do
+    test "Board grid chrome carries no Traditional status bar data regardless of viewport" do
       for cols <- [40, 80, 120, 200] do
         board = BoardState.new()
         state = base_state(cols: cols)
@@ -314,24 +259,21 @@ defmodule MingaBoard.Shell.ChromeTest do
         {scrolls, _frames, cursor_info, state, layout} = run_through_content(state)
         chrome = Shell.build_chrome(state, layout, scrolls, cursor_info)
 
-        assert chrome.tab_bar == [], "tab_bar should be empty at cols=#{cols}"
-        assert chrome.status_bar_draws == [], "status_bar should be empty at cols=#{cols}"
-        assert chrome.file_tree == [], "file_tree should be empty at cols=#{cols}"
+        assert chrome.status_bar_data == nil, "no status bar data at cols=#{cols}"
+        assert chrome.overlays == [], "no overlays at cols=#{cols}"
       end
     end
 
-    test "Board zoomed chrome produces context bar draws independent of Traditional modeline fields" do
-      # Even if the shell_state has Traditional-like fields, Board uses its own context bar
+    test "Board zoomed chrome carries no Traditional modeline fields" do
+      # Even if the shell_state has Traditional-like fields, Board renders its
+      # zoom view through the editor window pipeline, not Traditional chrome.
       state = zoomed_board_state(task: "My task")
       {scrolls, _frames, cursor_info, state, layout} = run_through_content(state)
 
       chrome = Shell.build_chrome(state, layout, scrolls, cursor_info)
 
-      # Context bar is in tab_bar slot (Board's convention)
-      assert [_ | _] = chrome.tab_bar
-      # No Traditional-style status bar
-      assert chrome.status_bar_draws == []
       assert chrome.status_bar_data == nil
+      assert chrome.modeline_click_regions == []
     end
   end
 end

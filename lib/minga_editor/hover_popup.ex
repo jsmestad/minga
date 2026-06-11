@@ -109,21 +109,6 @@ defmodule MingaEditor.HoverPopup do
   end
 
   @doc """
-  Renders the hover popup as a list of display list draws.
-
-  Returns an empty list if the content is empty. The draws are
-  absolute screen coordinates ready for an Overlay.
-  """
-  @spec render(t(), {pos_integer(), pos_integer()}, map()) :: [DisplayList.draw()]
-  def render(%__MODULE__{content_lines: []}, _viewport, _theme), do: []
-
-  def render(%__MODULE__{} = popup, viewport, theme) do
-    popup
-    |> spec(viewport, theme)
-    |> FloatingWindow.render()
-  end
-
-  @doc """
   Returns the popup's outer rect `{row, col, width, height}` in screen cells.
 
   This is the same box `render/3` paints into (border, anchor placement, and

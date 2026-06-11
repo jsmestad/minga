@@ -15,14 +15,11 @@ defmodule MingaEditor.Renderer do
   * `Renderer.Gutter`          — line number rendering
   * `Renderer.Line`            — line content and selection rendering
   * `Renderer.SearchHighlight` — search/substitute highlight overlays
-  * `Renderer.Minibuffer`      — command/search/status line
   * `Renderer.Caps`            — capability-aware rendering helpers
   * `Renderer.Regions`         — region definition commands
-  * `DisplayList`              — frame assembly
   """
 
   alias Minga.RenderModel.Cursor
-  alias MingaEditor.Dashboard
   alias MingaEditor.Frontend.Emit
   alias MingaEditor.Frontend.Emit.Context, as: EmitContext
   alias MingaEditor.RenderPipeline
@@ -92,26 +89,11 @@ defmodule MingaEditor.Renderer do
   """
   @spec render_dashboard(state()) :: state()
   def render_dashboard(%{workspace: %{buffers: %{active: nil}}} = state) do
-    rows = state.terminal_viewport.rows
-    cols = state.terminal_viewport.cols
-
-    # Dashboard state lives on the modal overlay when the dashboard is
-    # open. Fall back to a fresh state when no dashboard modal is active
-    # (the renderer still draws the splash whenever no buffer is open).
-    dash_state =
-      case state.shell_state.modal do
-        {:dashboard, %{state: dash}} -> dash
-        _ -> Dashboard.new_state()
-      end
-
-    # The dashboard splash and any open picker reach the live (semantic)
-    # frontends through their own semantic surfaces (the dashboard surface and
-    # `RenderModel.UI.PickerBuilder`). The composed frame for the dashboard
-    # carries no window models, so it only needs to park the cursor. The cell
-    # splash draws are still computed for the (retired) cell frontend path but
-    # are not part of the composed frame.
-    _splash_draws = Dashboard.render(cols, rows, state.theme, dash_state)
-
+    # The dashboard's selectable state lives on the modal overlay (driven by the
+    # input layer via `MingaEditor.Dashboard`). The composed frame carries no
+    # window models — there is no semantic dashboard window builder yet — so the
+    # dashboard frame only parks the cursor. The cell-grid splash painter was
+    # removed in #2311.
     frame = ComposedFrame.new([], Cursor.new(0, 0, :block))
 
     input = Input.from_editor_state(state)

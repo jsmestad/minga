@@ -30,8 +30,6 @@ defmodule MingaEditor.UI.Popup.Lifecycle do
   removes its own window without affecting other open popups.
   """
 
-  alias Minga.Buffer
-  alias MingaEditor.DisplayList
   alias MingaEditor.FloatingWindow
   alias MingaEditor.Layout
   alias MingaEditor.State, as: EditorState
@@ -39,7 +37,6 @@ defmodule MingaEditor.UI.Popup.Lifecycle do
   alias MingaEditor.Viewport
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
-  alias Minga.Core.Face
   alias MingaEditor.UI.Popup.Active, as: PopupActive
   alias Minga.Popup.Registry, as: PopupRegistry
   alias Minga.Popup.Rule
@@ -131,21 +128,6 @@ defmodule MingaEditor.UI.Popup.Lifecycle do
   end
 
   @doc """
-  Renders floating popup overlays for all float-mode popup windows.
-
-  Called by the render pipeline's Chrome stage. Returns a list of
-  `DisplayList.Overlay` structs, one per float popup. Split-mode
-  popups are rendered as normal windows and are not included here.
-  """
-  @spec render_float_overlays(state()) :: [DisplayList.Overlay.t()]
-  def render_float_overlays(state) do
-    state.workspace.windows
-    |> Windows.popup_windows()
-    |> Enum.filter(fn {_id, w} -> float_popup?(w) end)
-    |> Enum.map(fn {_id, window} -> render_float_overlay(state, window) end)
-  end
-
-  @doc """
   Returns true when the click at `{row, col}` falls inside any float
   popup's bounding box. Used by the input layer to decide whether a
   click should be swallowed or should dismiss the popup.
@@ -181,80 +163,6 @@ defmodule MingaEditor.UI.Popup.Lifecycle do
   defp resolve_float_dim({:percent, pct}, total), do: max(div(total * pct, 100), 1)
   defp resolve_float_dim({:cols, n}, _total), do: n
   defp resolve_float_dim({:rows, n}, _total), do: n
-
-  @spec render_float_overlay(state(), Window.t()) :: DisplayList.Overlay.t()
-  defp render_float_overlay(state, window) do
-    rule = window.popup_meta.rule
-    vp = state.terminal_viewport
-    theme = state.theme.popup
-
-    # Build content draws from the buffer
-    content = build_float_content(window.buffer, rule, vp, theme)
-
-    # Build the floating window spec
-    spec = %FloatingWindow.Spec{
-      title: buffer_title(window.buffer),
-      content: content,
-      width: float_width(rule),
-      height: float_height(rule),
-      position: :center,
-      border: rule.border,
-      theme: theme,
-      viewport: {vp.rows, vp.cols}
-    }
-
-    draws = FloatingWindow.render(spec)
-    %DisplayList.Overlay{draws: draws}
-  end
-
-  @spec build_float_content(pid(), Rule.t(), Viewport.t(), map()) :: [DisplayList.draw()]
-  defp build_float_content(buffer_pid, rule, vp, theme) do
-    # Compute interior dimensions to know how many lines to fetch
-    spec = %FloatingWindow.Spec{
-      title: nil,
-      width: float_width(rule),
-      height: float_height(rule),
-      border: rule.border,
-      theme: theme,
-      viewport: {vp.rows, vp.cols}
-    }
-
-    {interior_h, interior_w} = FloatingWindow.interior_size(spec)
-
-    # Fetch buffer lines (with a short timeout to avoid blocking the render)
-    lines =
-      if is_pid(buffer_pid) do
-        try do
-          snapshot = Buffer.render_snapshot(buffer_pid, 0, interior_h)
-          snapshot.lines
-        catch
-          :exit, _ -> []
-        end
-      else
-        []
-      end
-
-    # Convert lines to draw tuples (relative to interior origin)
-    lines
-    |> Enum.with_index()
-    |> Enum.flat_map(fn {line, row} ->
-      if row < interior_h do
-        text = String.slice(line, 0, interior_w)
-        [DisplayList.draw(row, 0, text, Face.new(fg: theme.fg, bg: theme.bg))]
-      else
-        []
-      end
-    end)
-  end
-
-  @spec buffer_title(pid()) :: String.t() | nil
-  defp buffer_title(pid) when is_pid(pid) do
-    Buffer.buffer_name(pid)
-  catch
-    :exit, _ -> nil
-  end
-
-  defp buffer_title(_), do: nil
 
   @spec float_width(Rule.t()) :: FloatingWindow.Spec.size()
   defp float_width(%Rule{width: nil, size: size}), do: size

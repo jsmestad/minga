@@ -11,68 +11,26 @@ defmodule MingaEditor.RenderPipeline.Chrome do
   """
 
   alias MingaEditor.DisplayList
-  alias MingaEditor.HoverPopup
   alias MingaEditor.MinibufferData
-  alias MingaEditor.SignatureHelp
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.StatusBar.Data, as: StatusBarData
 
   # ── Result struct ──────────────────────────────────────────────────────────
 
-  defstruct status_bar_draws: [],
-            status_bar_data: nil,
+  defstruct status_bar_data: nil,
             minibuffer_data: nil,
             modeline_click_regions: [],
-            tab_bar: [],
             tab_bar_click_regions: [],
-            minibuffer: [],
-            separators: [],
-            file_tree: [],
-            agent_panel: [],
-            overlays: [],
-            stable_fingerprint: nil
+            overlays: []
 
   @type t :: %__MODULE__{
-          status_bar_draws: [DisplayList.draw()],
           status_bar_data: StatusBarData.t() | nil,
           minibuffer_data: MinibufferData.t() | nil,
           modeline_click_regions: [MingaEditor.Shell.Traditional.Modeline.click_region()],
-          tab_bar: [DisplayList.draw()],
           tab_bar_click_regions: [MingaEditor.Shell.Traditional.TabBarRenderer.click_region()],
-          minibuffer: [DisplayList.draw()],
-          separators: [DisplayList.draw()],
-          file_tree: [DisplayList.draw()],
-          agent_panel: [DisplayList.draw()],
-          overlays: [DisplayList.Overlay.t()],
-          stable_fingerprint: integer() | nil
+          overlays: [DisplayList.Overlay.t()]
         }
 
   @typedoc "Editor state or render pipeline input."
   @type state :: MingaEditor.State.t() | Input.t()
-
-  # ── Shared helpers (used by shell chrome builders) ─────────────────────────
-
-  @doc "Renders the hover popup overlay draws."
-  @spec render_hover_popup(state()) :: [DisplayList.draw()]
-  def render_hover_popup(%{shell_state: %{hover_popup: nil}}), do: []
-
-  def render_hover_popup(%{
-        shell_state: %{hover_popup: popup},
-        workspace: %{viewport: vp},
-        theme: theme
-      }) do
-    HoverPopup.render(popup, {vp.rows, vp.cols}, theme)
-  end
-
-  @doc "Renders signature help overlay draws."
-  @spec render_signature_help(state()) :: [DisplayList.draw()]
-  def render_signature_help(%{shell_state: %{signature_help: nil}}), do: []
-
-  def render_signature_help(%{
-        shell_state: %{signature_help: sh},
-        workspace: %{viewport: vp},
-        theme: theme
-      }) do
-    SignatureHelp.render(sh, {vp.rows, vp.cols}, theme)
-  end
 end
