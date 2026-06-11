@@ -1,12 +1,20 @@
 defmodule MingaEditor.Input.InlineEdit do
   @moduledoc """
   Input handler for the active inline edit overlay.
+
+  This is the edit variant adapter over the shared
+  `MingaEditor.Input.InlineOverlay` plumbing: it supplies the store
+  accessor/setter and the edit-specific key table (Esc/n reject, y/Enter
+  accept, j/k scroll), and delegates the active lookup, submit, and prompt
+  editing to the framework. Accept and reject route through
+  `MingaEditor.Commands.InlineEdit`.
   """
 
   @behaviour MingaEditor.Input.Handler
 
   alias MingaAgent.EphemeralSession
   alias MingaEditor.Commands.InlineEdit, as: InlineEditCommand
+  alias MingaEditor.Input.InlineOverlay, as: Overlay
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.InlineEdit
 
@@ -15,17 +23,12 @@ defmodule MingaEditor.Input.InlineEdit do
   @impl true
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
-  def handle_key(%{workspace: %{buffers: %{active: buffer_pid}}} = state, codepoint, _modifiers)
-      when is_pid(buffer_pid) do
-    edit = state |> EditorState.inline_edits() |> InlineEdit.active(buffer_pid)
-
-    case edit do
-      %InlineEdit{} -> {:handled, handle_inline_key(state, edit, codepoint)}
+  def handle_key(state, codepoint, _modifiers) do
+    case Overlay.active(state, spec()) do
+      %InlineEdit{} = edit -> {:handled, handle_inline_key(state, edit, codepoint)}
       nil -> {:passthrough, state}
     end
   end
-
-  def handle_key(state, _codepoint, _modifiers), do: {:passthrough, state}
 
   @impl true
   @spec handle_mouse(
@@ -50,56 +53,36 @@ defmodule MingaEditor.Input.InlineEdit do
     do: InlineEditCommand.accept(state, edit)
 
   defp handle_inline_key(state, %InlineEdit{status: status} = edit, ?j)
-       when status in [:proposed, :error], do: update_edit(state, InlineEdit.scroll(edit, 1))
+       when status in [:proposed, :error],
+       do: Overlay.update(state, InlineEdit.scroll(edit, 1), spec())
 
   defp handle_inline_key(state, %InlineEdit{status: status} = edit, ?k)
-       when status in [:proposed, :error], do: update_edit(state, InlineEdit.scroll(edit, -1))
+       when status in [:proposed, :error],
+       do: Overlay.update(state, InlineEdit.scroll(edit, -1), spec())
 
-  defp handle_inline_key(state, %InlineEdit{status: :input} = edit, 13), do: submit(state, edit)
+  defp handle_inline_key(state, %InlineEdit{status: :input} = edit, 13),
+    do: Overlay.submit(state, edit, "Type a rewrite instruction first", spec())
 
   defp handle_inline_key(state, %InlineEdit{status: :input} = edit, 127),
-    do: update_edit(state, InlineEdit.backspace(edit))
+    do: Overlay.backspace(state, edit, spec())
 
   defp handle_inline_key(state, %InlineEdit{status: :input} = edit, 8),
-    do: update_edit(state, InlineEdit.backspace(edit))
+    do: Overlay.backspace(state, edit, spec())
 
   defp handle_inline_key(state, %InlineEdit{status: :input} = edit, codepoint)
-       when codepoint >= 32 do
-    update_edit(state, InlineEdit.append_input(edit, <<codepoint::utf8>>))
-  end
+       when codepoint >= 32,
+       do: Overlay.append_printable(state, edit, codepoint, 0, spec())
 
   defp handle_inline_key(state, _edit, _codepoint), do: state
 
-  @spec submit(state(), InlineEdit.t()) :: state()
-  defp submit(state, %InlineEdit{prompt: ""}),
-    do: EditorState.set_status(state, "Type a rewrite instruction first")
-
-  defp submit(state, %InlineEdit{} = edit) do
-    case EphemeralSession.rewrite(InlineEdit.agent_prompt(edit), project_root(state),
-           subscriber: self()
-         ) do
-      {:ok, session_pid} ->
-        update_edit(state, InlineEdit.thinking(edit, session_pid))
-
-      {:error, reason} ->
-        update_edit(
-          state,
-          InlineEdit.fail(edit, "Failed to start inline edit: #{inspect(reason)}")
-        )
-    end
-  end
-
-  @spec update_edit(state(), InlineEdit.t()) :: state()
-  defp update_edit(state, %InlineEdit{} = edit) do
-    state
-    |> EditorState.inline_edits()
-    |> InlineEdit.put(edit)
-    |> then(&EditorState.set_inline_edits(state, &1))
-  end
-
-  @spec project_root(state()) :: String.t()
-  defp project_root(state) do
-    file_tree = EditorState.file_tree_state(state)
-    file_tree.project_root || file_tree.original_root || File.cwd!()
+  @spec spec() :: Overlay.spec()
+  defp spec do
+    %{
+      store: &EditorState.inline_edits/1,
+      set_store: &EditorState.set_inline_edits/2,
+      state_module: InlineEdit,
+      session_starter: &EphemeralSession.rewrite/3,
+      fail_prefix: "Failed to start inline edit: "
+    }
   end
 end
