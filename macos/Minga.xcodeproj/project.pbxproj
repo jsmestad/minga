@@ -48,6 +48,7 @@
 		1A5BEC77FAE9F5332258C932 /* DispatchSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C82ED3FA8689E002C7BF1CD /* DispatchSheetView.swift */; };
 		1A7BC027E152504B67F6F418 /* CoreTextShaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = 48E21C30D142028698027567 /* CoreTextShaders.metal */; };
 		1BED638F0EE72345B63FA3E2 /* BottomPanelState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 638ED9425257ED4E5A2A9C5A /* BottomPanelState.swift */; };
+		1BF0117CF5B2C485E0C717E8 /* BoardZoomHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F6549E7DC147CB555B065EF /* BoardZoomHeader.swift */; };
 		1D2AE6CCA8AEE36DA0731D7B /* GitStatusState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16B5F67DE84B139C6F8F3C9F /* GitStatusState.swift */; };
 		1E77051711F9373850137201 /* ObservatoryState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B1421FF1F017E45A031AF18 /* ObservatoryState.swift */; };
 		1F3D130725BB056ADCFAC2EB /* AgentSurfaceTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 483AA21EF140F07296D1E16A /* AgentSurfaceTypes.swift */; };
@@ -224,6 +225,7 @@
 		8C29B80ABC5A804F27DF5C8F /* ProtocolErrorState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6629A966DB0AA4903F49E756 /* ProtocolErrorState.swift */; };
 		8C9C3976E598C7F553B003B6 /* WorkspaceHeaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 556F4CD63B4A102AB3099B54 /* WorkspaceHeaderView.swift */; };
 		8CB3E1EEDEA109F6C0183597 /* SignatureHelpState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EED42A8B64B9CDFEF37ED9D /* SignatureHelpState.swift */; };
+		8D40258AC6336BA114C3E1D1 /* BoardZoomHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F6549E7DC147CB555B065EF /* BoardZoomHeader.swift */; };
 		8D55764B8CF042B4C48AA5D0 /* MessagesContentState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A67102D81C9E70546F1019B /* MessagesContentState.swift */; };
 		8DA7795B9AD0EC93BCC40D6D /* LatencyHUDState.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF3CDCE4CBD952FB00D1D347 /* LatencyHUDState.swift */; };
 		8F6865441CD813045F071273 /* BreadcrumbBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA9D8D41BCA4E6CB45243A2 /* BreadcrumbBar.swift */; };
@@ -322,6 +324,7 @@
 		C963537E4C814650ECD2097B /* DispatchSheetState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82D3C16BE95F0D44FFC187D7 /* DispatchSheetState.swift */; };
 		C97709E4D4BED5B2807481F5 /* EditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C26E064D810299C0302F439 /* EditorView.swift */; };
 		CA45D5770C1B334A821D3338 /* GitStatusHeaderContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = D13F0F0C4944C98854B726C0 /* GitStatusHeaderContent.swift */; };
+		CAACD2F4F8686A05F78F9679 /* BoardZoomHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F6549E7DC147CB555B065EF /* BoardZoomHeader.swift */; };
 		CC72FE91F267AA744D4A6F1D /* GitStatusHeaderContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = D13F0F0C4944C98854B726C0 /* GitStatusHeaderContent.swift */; };
 		CC8B2D0174D3E5839980702C /* FileTreeRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D767F7A50F82AD806EA1B86E /* FileTreeRowView.swift */; };
 		CD2952CCEB2FD594B269A75D /* GUIActionEncoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2C629D58FF3305F579BA5E2 /* GUIActionEncoderTests.swift */; };
@@ -490,6 +493,7 @@
 		7A67102D81C9E70546F1019B /* MessagesContentState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessagesContentState.swift; sourceTree = "<group>"; };
 		7CDC524DEAE5431F6B18A31B /* ProtocolEncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolEncoder.swift; sourceTree = "<group>"; };
 		7E4E980D53CCCE228BA59BD5 /* KeyboardInputTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardInputTests.swift; sourceTree = "<group>"; };
+		7F6549E7DC147CB555B065EF /* BoardZoomHeader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoardZoomHeader.swift; sourceTree = "<group>"; };
 		82B744449C852E13511FFE8D /* MinibufferStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MinibufferStateTests.swift; sourceTree = "<group>"; };
 		82D3C16BE95F0D44FFC187D7 /* DispatchSheetState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DispatchSheetState.swift; sourceTree = "<group>"; };
 		83165B89231936674C54B513 /* EditorNSView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorNSView.swift; sourceTree = "<group>"; };
@@ -845,6 +849,7 @@
 			children = (
 				E3C7CD67746339B8220B016D /* BoardState.swift */,
 				14491B0CD5CB7C9361D2211A /* BoardView.swift */,
+				7F6549E7DC147CB555B065EF /* BoardZoomHeader.swift */,
 				82D3C16BE95F0D44FFC187D7 /* DispatchSheetState.swift */,
 				8C82ED3FA8689E002C7BF1CD /* DispatchSheetView.swift */,
 				5F731BABFBA0763268D6CD19 /* SparklineView.swift */,
@@ -1154,6 +1159,7 @@
 				DC64A4E8CF70866DFA0BC0D2 /* BoardState.swift in Sources */,
 				714E12952A0A53C30BDC8574 /* BoardTypes.swift in Sources */,
 				5B0A6E233E7A2A70B60604DA /* BoardView.swift in Sources */,
+				1BF0117CF5B2C485E0C717E8 /* BoardZoomHeader.swift in Sources */,
 				941C53DDBC488FE908656CD3 /* BottomPanelState.swift in Sources */,
 				1965FE752C77D2EB386EC4D8 /* BottomPanelView.swift in Sources */,
 				6860E9D6217B72EAA8AD71A5 /* BreadcrumbBar.swift in Sources */,
@@ -1280,6 +1286,7 @@
 				BC252EEC3A93FA52DD175768 /* BoardState.swift in Sources */,
 				D7F5054FF020EE435B8109E8 /* BoardTypes.swift in Sources */,
 				F9D5CBB0A577EBDB976DB406 /* BoardView.swift in Sources */,
+				8D40258AC6336BA114C3E1D1 /* BoardZoomHeader.swift in Sources */,
 				1BED638F0EE72345B63FA3E2 /* BottomPanelState.swift in Sources */,
 				279CEBE1AD001C3AFD74E285 /* BottomPanelView.swift in Sources */,
 				3DB25E7E934FAAD7A7B51084 /* BreadcrumbBar.swift in Sources */,
@@ -1409,6 +1416,7 @@
 				9F459146947E0ED4B4D8CA44 /* BoardState.swift in Sources */,
 				F7BE488FD715F65ECA74233B /* BoardTypes.swift in Sources */,
 				6C0BCE6332F19B87575EDDDA /* BoardView.swift in Sources */,
+				CAACD2F4F8686A05F78F9679 /* BoardZoomHeader.swift in Sources */,
 				5BEEC2FD4D95EBA70FE036E7 /* BottomPanelState.swift in Sources */,
 				59546703C9DBB4BA6E15DE28 /* BottomPanelView.swift in Sources */,
 				8F6865441CD813045F071273 /* BreadcrumbBar.swift in Sources */,

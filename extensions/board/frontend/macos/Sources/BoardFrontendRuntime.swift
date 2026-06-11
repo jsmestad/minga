@@ -24,7 +24,8 @@ final class BoardFrontendRuntime {
                     focusedCardId: decoded.focusedCardID,
                     cards: decoded.cards,
                     filterMode: decoded.filterMode,
-                    filterText: decoded.filterText
+                    filterText: decoded.filterText,
+                    zoomedCardId: decoded.zoomedCardID
                 )
             },
             view: { context in
@@ -38,6 +39,15 @@ final class BoardFrontendRuntime {
                                 encoder: context.encoder,
                                 namespace: context.namespace
                             )
+                        } else if let card = state.zoomedCard {
+                            // Grid hidden but a card is zoomed: render the zoom
+                            // header at the top over the editor. The editor body
+                            // itself renders through the window pipeline; this is
+                            // a contextual header only, no cell-grid path (#2328).
+                            VStack(spacing: 0) {
+                                BoardZoomHeader(card: card, theme: context.theme)
+                                Spacer(minLength: 0)
+                            }
                         }
                     }
                 )
@@ -51,6 +61,10 @@ final class BoardFrontendRuntime {
         let filterMode: Bool
         let filterText: String
         let cards: [BoardCard]
+        // Card the user is zoomed into, or 0 in grid view. Non-zero means the
+        // grid is hidden (visible false) but the zoom header should render the
+        // card identity + ESC affordance over the editor (ticket #2328).
+        let zoomedCardID: UInt32
     }
 
     static var stateForTesting: BoardState {
@@ -127,7 +141,15 @@ final class BoardFrontendRuntime {
             ))
         }
 
-        return DecodedBoard(visible: visible, focusedCardID: focusedCardID, filterMode: filterMode, filterText: filterText, cards: cards)
+        // Trailing zoomed_card_id u32 (0 = grid view). Tolerate older BEAMs that
+        // omit the trailer by defaulting to 0 rather than failing the decode.
+        var zoomedCardID: UInt32 = 0
+        if pos + 4 <= data.endIndex {
+            zoomedCardID = readU32(data, pos)
+            pos += 4
+        }
+
+        return DecodedBoard(visible: visible, focusedCardID: focusedCardID, filterMode: filterMode, filterText: filterText, cards: cards, zoomedCardID: zoomedCardID)
     }
 
     private static func readString16(_ data: Data, _ pos: inout Int, _ end: Int) -> String? {

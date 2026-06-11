@@ -26,6 +26,13 @@ defmodule MingaBoard.Frontend.Adapter.GUI.BoardEncoder do
     cards = board.cards
     visible = if board.visible?, do: 1, else: 0
     focused_id = board.focused_card_id || 0
+    # zoomed_card_id (0 = grid view, not zoomed). When zoomed, visible? is false
+    # but this carries which card the user is inside so frontends can render the
+    # zoom header (status icon, task, model, ESC affordance) over the editor
+    # without reintroducing any cell-grid draw path (ticket #2328). It is a fixed
+    # u32 trailer after the cards array; older frontends that stop reading after
+    # the last card simply ignore it.
+    zoomed_id = board.zoomed_card_id || 0
 
     card_entries = Enum.map(cards, &encode_card(&1, board.focused_card_id))
 
@@ -35,8 +42,9 @@ defmodule MingaBoard.Frontend.Adapter.GUI.BoardEncoder do
     IO.iodata_to_binary([
       @op_gui_board,
       <<visible::8, focused_id::32, length(cards)::16, filter_mode::8,
-        byte_size(filter_bytes)::16, filter_bytes::binary>>
-      | card_entries
+        byte_size(filter_bytes)::16, filter_bytes::binary>>,
+      card_entries,
+      <<zoomed_id::32>>
     ])
   end
 

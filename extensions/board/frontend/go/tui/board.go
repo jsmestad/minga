@@ -12,6 +12,23 @@ type Board struct {
 	FilterMode    bool
 	FilterText    string
 	Cards         []BoardCard
+	// ZoomedCardID is the card the user is zoomed into, or 0 in grid view. When
+	// non-zero, Visible is false and the frontend renders a zoom header (status
+	// icon, task, model, ESC affordance) over the editor instead of the grid.
+	ZoomedCardID uint32
+}
+
+// ZoomedCard returns the card matching ZoomedCardID, or nil when not zoomed.
+func (b Board) ZoomedCard() *BoardCard {
+	if b.ZoomedCardID == 0 {
+		return nil
+	}
+	for i := range b.Cards {
+		if b.Cards[i].ID == b.ZoomedCardID {
+			return &b.Cards[i]
+		}
+	}
+	return nil
 }
 
 // BoardCard is one Board card in the extension-owned legacy GUI payload.
@@ -79,6 +96,12 @@ func DecodeBoard(payload []byte) (Board, string, int) {
 		}
 		offset += sparklineCount * 2
 		board.Cards = append(board.Cards, card)
+	}
+	// Trailing zoomed_card_id u32 (0 = grid view). Tolerate older BEAMs that omit
+	// the trailer by leaving ZoomedCardID at zero rather than failing the decode.
+	if len(payload) >= offset+4 {
+		board.ZoomedCardID = binary.BigEndian.Uint32(payload[offset : offset+4])
+		offset += 4
 	}
 	return board, fmt.Sprintf("%d cards", len(board.Cards)), offset
 }
