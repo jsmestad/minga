@@ -28,6 +28,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   alias MingaEditor.LspActions
   alias MingaEditor.Input.Observatory
   alias MingaEditor.MinibufferData
+  alias MingaEditor.UI.Popup.Lifecycle, as: PopupLifecycle
   alias MingaEditor.PickerUI
   alias MingaEditor.Renderer
   alias MingaEditor.Viewport
@@ -795,6 +796,18 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     dispatch_to_active_shell(state, action)
   end
 
+  # Float popup dismiss (#2338). A click outside the rendered float popup but
+  # inside its overlay band routes here, the same dismiss intent the keyboard
+  # quit key reaches (MingaEditor.Input.Popup). The float popup has two sources
+  # (MingaEditor.RenderModel.UI.FloatPopupBuilder), so dismissal mirrors them:
+  # an observatory inspection float clears via Observatory.inspect_process("")
+  # (set_observatory_inspection nil); a :float popup window closes via the popup
+  # lifecycle. Observatory inspection is checked first because it is the higher-
+  # priority float source in the builder. With neither present this is a no-op.
+  defp dispatch_action(state, :float_popup_dismiss) do
+    dismiss_float_popup(state)
+  end
+
   # Catch-all for unrecognized actions: log and return state unchanged.
   defp dispatch_action(state, action) do
     Minga.Log.warning(:editor, "[gui_action] unrecognized action: #{inspect(action)}")
@@ -1526,6 +1539,40 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   @spec normalize_command_result(state() | {state(), term()}) :: state()
   defp normalize_command_result({new_state, _action}), do: new_state
   defp normalize_command_result(new_state), do: new_state
+
+  # Dismisses whichever float popup source is live (#2338), mirroring the two
+  # sources FloatPopupBuilder reads. Observatory inspection takes precedence
+  # (the builder checks it first); otherwise close the :float popup window via
+  # the popup lifecycle. Returns state unchanged when neither is present.
+  @spec dismiss_float_popup(state()) :: state()
+  defp dismiss_float_popup(%{shell_state: %{observatory_inspection: %{visible: true}}} = state) do
+    Observatory.inspect_process(state, "")
+  end
+
+  defp dismiss_float_popup(state) do
+    case find_float_popup_window_id(state) do
+      nil -> state
+      window_id -> PopupLifecycle.close_popup(state, window_id)
+    end
+  end
+
+  @spec find_float_popup_window_id(state()) :: MingaEditor.Window.id() | nil
+  defp find_float_popup_window_id(%{workspace: %{windows: %{map: map}}}) when is_map(map) do
+    Enum.find_value(map, fn
+      {id,
+       %{
+         popup_meta: %MingaEditor.UI.Popup.Active{
+           rule: %Minga.Popup.Rule{display: :float}
+         }
+       }} ->
+        id
+
+      _ ->
+        nil
+    end)
+  end
+
+  defp find_float_popup_window_id(_state), do: nil
 
   @spec route_panel_action_to_extension(state(), String.t(), atom(), map()) :: state()
   defp route_panel_action_to_extension(state, ext_name, action_name, context) do

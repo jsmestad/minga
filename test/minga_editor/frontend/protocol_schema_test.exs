@@ -257,7 +257,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       search_replace_all: 0x55,
       search_dismiss: 0x56,
       sidebar_action: 0x57,
-      extension_action: 0x58
+      extension_action: 0x58,
+      float_popup_dismiss: 0x59
     )
   end
 

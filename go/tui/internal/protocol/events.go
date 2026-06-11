@@ -238,6 +238,17 @@ func EncodeGUITimelineNavigate(index uint16) []byte {
 	return []byte{generated.OPGuiAction, generated.GUIActionTimelineNavigate, byte(index >> 8), byte(index)}
 }
 
+// EncodeGUIFloatPopupDismiss encodes a float_popup_dismiss action. Wire format:
+// <gui_action, 0x59> with an empty payload (#2338). There is no macOS sender:
+// the macOS FloatPopupOverlay is display-only with no dismiss gesture, so this
+// is a TUI-originated intent that maps to the same BEAM dismiss the keyboard
+// quit key reaches (MingaEditor.Input.Popup). A click in the float popup's
+// overlay band but outside the rendered popup content sends it; the BEAM clears
+// the observatory inspection float or closes the :float popup window.
+func EncodeGUIFloatPopupDismiss() []byte {
+	return []byte{generated.OPGuiAction, generated.GUIActionFloatPopupDismiss}
+}
+
 // appendString16 appends a length-prefixed string (len:u16 big-endian, then
 // utf8 bytes) to out, truncating to the u16 ceiling, matching the macOS
 // appendString16 helper used by every string-bearing gui_action.

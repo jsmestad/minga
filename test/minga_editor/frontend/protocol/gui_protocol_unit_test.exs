@@ -409,6 +409,18 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
     end
   end
 
+  describe "decode_gui_action for float popup dismiss" do
+    test "decodes an empty-payload float_popup_dismiss" do
+      opcode = Minga.Protocol.Opcodes.gui_action_float_popup_dismiss()
+      assert {:ok, :float_popup_dismiss} == ProtocolGUI.decode_gui_action(opcode, <<>>)
+    end
+
+    test "rejects a float_popup_dismiss carrying a payload" do
+      opcode = Minga.Protocol.Opcodes.gui_action_float_popup_dismiss()
+      assert :error == ProtocolGUI.decode_gui_action(opcode, <<1>>)
+    end
+  end
+
   describe "decode_gui_action for context menu actions" do
     test "decodes file tree open in split" do
       assert {:ok, {:file_tree_open_in_split, 9}} ==

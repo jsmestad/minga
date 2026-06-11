@@ -242,6 +242,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_timeline_navigate Opcodes.gui_action_timeline_navigate()
   @gui_action_extension_panel_action Opcodes.gui_action_extension_panel_action()
   @gui_action_extension_action Opcodes.gui_action_extension_action()
+  @gui_action_float_popup_dismiss Opcodes.gui_action_float_popup_dismiss()
   @gui_action_search_query Opcodes.gui_action_search_query()
   @gui_action_search_next Opcodes.gui_action_search_next()
   @gui_action_search_prev Opcodes.gui_action_search_prev()
@@ -399,6 +400,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | {:sidebar_action, sidebar_id :: String.t(), kind :: String.t(), action :: String.t()}
           | {:extension_action, extension_id :: String.t(), action :: String.t(),
              payload :: binary()}
+          | :float_popup_dismiss
 
   @typedoc "Semantic sidebar metadata sent to native GUI frontends."
   @type sidebar_metadata :: %{
@@ -2568,6 +2570,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   def decode_gui_action(@gui_action_extension_action, payload),
     do: decode_extension_action(payload)
+
+  def decode_gui_action(@gui_action_float_popup_dismiss, <<>>), do: {:ok, :float_popup_dismiss}
 
   def decode_gui_action(_, _), do: :error
 

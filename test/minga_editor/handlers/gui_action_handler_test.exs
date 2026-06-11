@@ -21,6 +21,8 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
+  alias MingaEditor.UI.Popup.Active, as: PopupActive
+  alias Minga.Popup.Rule
 
   setup do
     table = Module.concat(__MODULE__, "Sidebar#{System.unique_integer([:positive])}")
@@ -259,6 +261,74 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     state = %{base_state(table) | shell_state: %{}}
 
     assert GuiActionHandler.dispatch(state, {:observatory_inspect, "<0.1.0>"}) == state
+  end
+
+  test "float_popup_dismiss clears a visible observatory inspection float (#2338)", %{
+    sidebar_registry: table
+  } do
+    # The observatory inspection is the higher-priority float source
+    # (FloatPopupBuilder checks it first), so dismissing the float clears it back
+    # to nil, the same effect inspect_process(state, "") produces.
+    inspection = %MingaEditor.Observatory.Inspection{
+      visible: true,
+      title: "Process <0.1.0>",
+      lines: ["Class: worker"],
+      width: 82,
+      height: 10
+    }
+
+    state = %{base_state(table) | shell_state: %{observatory_inspection: inspection}}
+
+    new_state = GuiActionHandler.dispatch(state, :float_popup_dismiss)
+
+    assert new_state.shell_state.observatory_inspection == nil
+  end
+
+  test "float_popup_dismiss closes the open :float popup window (#2338)", %{
+    sidebar_registry: table
+  } do
+    # A window carrying a :float popup rule is the second float source; dismissing
+    # the float removes that window from the workspace, the same effect the popup
+    # lifecycle close produces (and the keyboard quit key reaches).
+    state = base_state(table)
+    main_id = state.workspace.windows.active
+    popup_id = state.workspace.windows.next_id
+
+    {:ok, popup_buf} = Minga.Buffer.Process.start_link(content: "help")
+
+    popup_window =
+      %Window{
+        Window.new(popup_id, popup_buf, 10, 40)
+        | popup_meta: %PopupActive{
+            rule: Rule.new("*Help*", display: :float),
+            window_id: popup_id,
+            previous_active: main_id
+          }
+      }
+
+    state =
+      update_in(state.workspace.windows, fn windows ->
+        %{
+          windows
+          | map: Map.put(windows.map, popup_id, popup_window),
+            active: popup_id,
+            next_id: popup_id + 1
+        }
+      end)
+
+    assert Map.has_key?(state.workspace.windows.map, popup_id)
+
+    new_state = GuiActionHandler.dispatch(state, :float_popup_dismiss)
+
+    refute Map.has_key?(new_state.workspace.windows.map, popup_id)
+  end
+
+  test "float_popup_dismiss is a no-op when no float popup is visible (#2338)", %{
+    sidebar_registry: table
+  } do
+    state = base_state(table)
+
+    assert GuiActionHandler.dispatch(state, :float_popup_dismiss) == state
   end
 
   test "power thermal gui action updates resource pressure and broadcasts the event", %{
