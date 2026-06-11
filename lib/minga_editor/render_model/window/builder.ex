@@ -56,17 +56,50 @@ defmodule MingaEditor.RenderModel.Window.Builder do
 
   @type state :: EditorState.t() | MingaEditor.RenderPipeline.Input.t()
   @typep visual_row_entry :: %{
-           row: Row.t(),
-           buf_line: non_neg_integer(),
-           visual_index: non_neg_integer(),
-           display_row: non_neg_integer(),
-           source_text: String.t(),
-           source_start_byte: non_neg_integer(),
-           source_end_byte: non_neg_integer(),
-           source_start_col: non_neg_integer(),
-           source_end_col: non_neg_integer(),
-           indent_width: non_neg_integer(),
-           row_width: non_neg_integer()
+           :row => Row.t(),
+           :buf_line => non_neg_integer(),
+           :visual_index => non_neg_integer(),
+           :display_row => non_neg_integer(),
+           :source_text => String.t(),
+           :source_start_byte => non_neg_integer(),
+           :source_end_byte => non_neg_integer(),
+           :source_start_col => non_neg_integer(),
+           :source_end_col => non_neg_integer(),
+           :indent_width => non_neg_integer(),
+           :row_width => non_neg_integer(),
+           # Upstream row-retention metadata (#2287); absent on entries built
+           # through the public click hit-testing path. `wrap_line_hash` is set
+           # only on wrapped entries to key the per-logical-line reuse cache.
+           optional(:input_hash) => non_neg_integer(),
+           optional(:reused?) => boolean(),
+           optional(:wrap_line_hash) => non_neg_integer()
+         }
+
+  @typedoc """
+  Per-build retained-row statistics (#2287).
+
+  * `rasterized` — rows whose text and spans were freshly composed this frame.
+  * `retained_rows` — the `{row_id => {input_hash, Row.t()}}` map to carry into
+    the next frame so unchanged rows can be reused without recomposing.
+  * `retained_wrap_lines` — the `{buf_line => {input_hash, [entry]}}` map to
+    carry into the next frame so unchanged wrapped logical lines can be reused
+    without recomposing or re-wrapping.
+  """
+  @type build_stats :: %{
+          rasterized: non_neg_integer(),
+          retained_rows: %{optional(non_neg_integer()) => {non_neg_integer(), Row.t()}},
+          retained_wrap_lines: %{optional(non_neg_integer()) => {non_neg_integer(), [map()]}}
+        }
+
+  # Threaded through the visual-entry builders to drive upstream row reuse
+  # (#2287). `prev` is the previous frame's per-visual-row retained-row map;
+  # `prev_wrap` is the previous frame's per-logical-line wrapped-line cache;
+  # `compose_fp` is a cheap fingerprint of the composition-relevant context
+  # shared by every row.
+  @typep retain_ctx :: %{
+           prev: %{optional(non_neg_integer()) => {non_neg_integer(), Row.t()}},
+           prev_wrap: %{optional(non_neg_integer()) => {non_neg_integer(), [visual_row_entry()]}},
+           compose_fp: non_neg_integer()
          }
 
   @doc """
@@ -77,6 +110,21 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   """
   @spec build(state(), WindowScroll.t(), Context.t(), keyword()) :: RenderWindow.t()
   def build(state, scroll, ctx, opts \\ []) do
+    {window, _stats} = build_with_stats(state, scroll, ctx, opts)
+    window
+  end
+
+  @doc """
+  Builds a `RenderWindow` and reports retained-row statistics (#2287).
+
+  Identical output to `build/4` but also returns how many rows were freshly
+  rasterized and the retained-row map to carry into the next frame. Pass the
+  previous frame's retained rows via the `:retained_rows` option so unchanged
+  rows are reused verbatim instead of being recomposed.
+  """
+  @spec build_with_stats(state(), WindowScroll.t(), Context.t(), keyword()) ::
+          {RenderWindow.t(), build_stats()}
+  def build_with_stats(state, scroll, ctx, opts \\ []) do
     %WindowScroll{
       win_id: win_id,
       is_active: is_active,
@@ -98,11 +146,23 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     rect = win_layout.content
     {content_row, _content_col, _content_width, _content_height} = rect
 
-    # Build visual rows from the same data the draw path uses.
+    retain_ctx =
+      retain_ctx(
+        ctx,
+        Keyword.get(opts, :retained_rows, %{}),
+        Keyword.get(opts, :retained_wrap_lines, %{})
+      )
+
+    # Build visual rows from the same data the draw path uses. Unchanged rows
+    # are reused from the retained-row cache (no recompose) when their cheap
+    # input fingerprint matches; only composed rows count as rasterized (#2287).
     visual_entries =
       lines
-      |> build_visual_entries(first_line, visible_line_map, wrap_on, ctx, snapshot)
+      |> build_visual_entries(first_line, visible_line_map, wrap_on, ctx, snapshot, retain_ctx)
       |> trim_visual_entries(viewport.visual_row_offset, visible_row_count)
+
+    {new_retained, rasterized} = retained_stats(visual_entries, retain_ctx)
+    new_retained_wrap = retained_wrap_lines(visual_entries, wrap_on and visible_line_map == nil)
 
     visual_rows = Enum.map(visual_entries, & &1.row)
     wrapped_coordinates? = wrap_on and visible_line_map == nil
@@ -197,7 +257,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
         wrapped_coordinates?
       )
 
-    %RenderWindow{
+    render_window = %RenderWindow{
       window_id: win_id,
       content_kind: content_kind,
       rect: rect,
@@ -219,7 +279,120 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       content_epoch: scroll.content_epoch,
       full_refresh: scroll.full_refresh
     }
+
+    {render_window,
+     %{
+       rasterized: rasterized,
+       retained_rows: new_retained,
+       retained_wrap_lines: new_retained_wrap
+     }}
   end
+
+  # ── Upstream row retention (#2287) ─────────────────────────────────────────
+
+  # A row may be reused only when nothing the composition reads has changed.
+  # `compose_fp` folds the composition-relevant context (decorations, invisible
+  # rendering, tab width, todo faces, and — only when conceals exist — the
+  # cursor line) into one hash. A retained row is reused when both its stored
+  # input fingerprint AND this frame's compose_fp match, so any context change
+  # conservatively forces a full recompose.
+  @spec retain_ctx(
+          Context.t(),
+          %{optional(non_neg_integer()) => {non_neg_integer(), Row.t()}},
+          %{optional(non_neg_integer()) => {non_neg_integer(), [visual_row_entry()]}}
+        ) :: retain_ctx()
+  defp retain_ctx(%Context{} = ctx, prev, prev_wrap) when is_map(prev) and is_map(prev_wrap) do
+    conceal_cursor =
+      if Decorations.has_conceal_ranges?(ctx.decorations), do: ctx.cursor_line, else: nil
+
+    compose_fp =
+      :erlang.phash2({
+        ctx.decorations,
+        ctx.show_invisible,
+        ctx.tab_width,
+        ctx.whitespace_face,
+        ctx.hl_todo_faces,
+        ctx.highlight != nil,
+        conceal_cursor
+      })
+
+    %{prev: prev, prev_wrap: prev_wrap, compose_fp: compose_fp}
+  end
+
+  # Cheap per-row input fingerprint: the line text, its highlight segments, and
+  # the shared compose fingerprint. When this matches the retained row's stored
+  # fingerprint, the previously composed Row is reused without recomposing.
+  @spec row_input_hash(retain_ctx(), term()) :: non_neg_integer()
+  defp row_input_hash(%{compose_fp: compose_fp}, key) do
+    :erlang.phash2({key, compose_fp})
+  end
+
+  # Returns the composed Row for a visual row, reusing the retained Row when the
+  # input fingerprint is unchanged. The returned entry carries `:input_hash` and
+  # `:reused?` so the build can report rasterized counts and refresh the cache.
+  @spec compose_or_reuse(retain_ctx(), non_neg_integer(), term(), (-> Row.t())) ::
+          {Row.t(), non_neg_integer(), boolean()}
+  defp compose_or_reuse(%{prev: prev} = retain_ctx, row_id, key, compose_fun) do
+    input_hash = row_input_hash(retain_ctx, key)
+
+    case Map.get(prev, row_id) do
+      {^input_hash, %Row{} = cached} -> {cached, input_hash, true}
+      _ -> {compose_fun.(), input_hash, false}
+    end
+  end
+
+  @spec retained_stats([visual_row_entry()], retain_ctx()) ::
+          {%{optional(non_neg_integer()) => {non_neg_integer(), Row.t()}}, non_neg_integer()}
+  defp retained_stats(visual_entries, _retain_ctx) do
+    Enum.reduce(visual_entries, {%{}, 0}, fn entry, {map, rasterized} ->
+      row = entry.row
+      input_hash = Map.get(entry, :input_hash, row.content_hash)
+      map = Map.put(map, row.row_id, {input_hash, row})
+      rasterized = if Map.get(entry, :reused?, false), do: rasterized, else: rasterized + 1
+      {map, rasterized}
+    end)
+  end
+
+  # Rebuilds the per-logical-line wrapped-line cache from this frame's visual
+  # entries so the next wrapped frame can reuse unchanged logical lines whole.
+  # Only meaningful for the wrapped path; other modes carry an empty map (#2287).
+  #
+  # Entries are stored UNTRIMMED-shape but already trimmed to the visible set; we
+  # reset each entry's `display_row` to 0 so a reused logical line is positioned
+  # identically by `trim_visual_entries/3` regardless of where it landed this
+  # frame. Trimming may drop a logical line's leading rows; such partial groups
+  # are not cached so reuse only ever replays a complete logical line.
+  @spec retained_wrap_lines([visual_row_entry()], boolean()) ::
+          %{optional(non_neg_integer()) => {non_neg_integer(), [visual_row_entry()]}}
+  defp retained_wrap_lines(_visual_entries, false), do: %{}
+
+  defp retained_wrap_lines(visual_entries, true) do
+    visual_entries
+    |> Enum.group_by(& &1.buf_line)
+    |> Enum.reduce(%{}, fn {buf_line, entries}, acc ->
+      case wrap_line_cache_entry(entries) do
+        nil -> acc
+        cached -> Map.put(acc, buf_line, cached)
+      end
+    end)
+  end
+
+  # A logical line is cacheable only when its full visual-row set is present
+  # (first row is visual_index 0) and every row shares one wrap-line fingerprint.
+  @spec wrap_line_cache_entry([visual_row_entry()]) ::
+          {non_neg_integer(), [visual_row_entry()]} | nil
+  defp wrap_line_cache_entry([%{visual_index: 0} = first | _] = entries) do
+    case Map.get(first, :wrap_line_hash) do
+      nil ->
+        nil
+
+      hash ->
+        normalized = Enum.map(entries, fn entry -> %{entry | display_row: 0} end)
+        {hash, normalized}
+    end
+  end
+
+  defp wrap_line_cache_entry(_entries), do: nil
 
   @doc "Returns the source buffer position for a click in wrapped composed rows."
   @spec wrapped_source_position(
@@ -241,10 +414,12 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       when is_list(lines) and is_integer(first_line) and is_integer(visual_row) and
              is_integer(display_col) and is_map(options) do
     lines
-    |> build_visual_entries_wrapped(first_line, ctx, %{
-      first_line_byte_offset: 0,
-      options: options
-    })
+    |> build_visual_entries_wrapped(
+      first_line,
+      ctx,
+      %{first_line_byte_offset: 0, options: options},
+      no_retain()
+    )
     |> Enum.at(visual_row)
     |> source_position_from_visual_entry(display_col, ctx.decorations)
   end
@@ -271,11 +446,32 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           [DisplayMap.entry()] | nil,
           boolean(),
           Context.t(),
-          map()
+          map(),
+          retain_ctx()
         ) :: [visual_row_entry()]
-  defp build_visual_entries(lines, first_line, visible_line_map, wrap_on, ctx, snapshot) do
-    build_visual_entries_for_mode(lines, first_line, visible_line_map, wrap_on, ctx, snapshot)
+  defp build_visual_entries(
+         lines,
+         first_line,
+         visible_line_map,
+         wrap_on,
+         ctx,
+         snapshot,
+         retain_ctx
+       ) do
+    build_visual_entries_for_mode(
+      lines,
+      first_line,
+      visible_line_map,
+      wrap_on,
+      ctx,
+      snapshot,
+      retain_ctx
+    )
   end
+
+  # Click hit-testing builds entries without retention (no previous-frame cache).
+  @spec no_retain() :: retain_ctx()
+  defp no_retain, do: %{prev: %{}, prev_wrap: %{}, compose_fp: 0}
 
   @spec build_visual_entries_for_mode(
           [String.t()],
@@ -283,19 +479,28 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           [DisplayMap.entry()] | nil,
           boolean(),
           Context.t(),
-          map()
+          map(),
+          retain_ctx()
         ) :: [visual_row_entry()]
-  defp build_visual_entries_for_mode(lines, first_line, visible_line_map, _wrap_on, ctx, snapshot)
+  defp build_visual_entries_for_mode(
+         lines,
+         first_line,
+         visible_line_map,
+         _wrap_on,
+         ctx,
+         snapshot,
+         retain_ctx
+       )
        when is_list(visible_line_map) do
-    build_visual_entries_folded(lines, first_line, visible_line_map, ctx, snapshot)
+    build_visual_entries_folded(lines, first_line, visible_line_map, ctx, snapshot, retain_ctx)
   end
 
-  defp build_visual_entries_for_mode(lines, first_line, nil, true, ctx, snapshot) do
-    build_visual_entries_wrapped(lines, first_line, ctx, snapshot)
+  defp build_visual_entries_for_mode(lines, first_line, nil, true, ctx, snapshot, retain_ctx) do
+    build_visual_entries_wrapped(lines, first_line, ctx, snapshot, retain_ctx)
   end
 
-  defp build_visual_entries_for_mode(lines, first_line, nil, false, ctx, snapshot) do
-    build_visual_entries_sequential(lines, first_line, ctx, snapshot)
+  defp build_visual_entries_for_mode(lines, first_line, nil, false, ctx, snapshot, retain_ctx) do
+    build_visual_entries_sequential(lines, first_line, ctx, snapshot, retain_ctx)
   end
 
   # Sequential path (no folds): one visual row per line.
@@ -303,9 +508,10 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           [String.t()],
           non_neg_integer(),
           Context.t(),
-          map()
+          map(),
+          retain_ctx()
         ) :: [visual_row_entry()]
-  defp build_visual_entries_sequential(lines, first_line, ctx, snapshot) do
+  defp build_visual_entries_sequential(lines, first_line, ctx, snapshot, retain_ctx) do
     first_byte_off = snapshot.first_line_byte_offset
 
     lines_with_offsets = build_lines_with_offsets(lines, first_byte_off)
@@ -322,27 +528,37 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     |> Enum.with_index()
     |> Enum.map(fn {{{line_text, line_byte_offset}, hl_segments}, idx} ->
       buf_line = first_line + idx
+      row_id = Row.stable_id(:normal, buf_line)
 
-      {composed_text, spans} =
-        compose_line(line_text, hl_segments, ctx, buf_line, line_byte_offset)
+      {row, input_hash, reused?} =
+        compose_or_reuse(retain_ctx, row_id, {:seq, line_text, hl_segments}, fn ->
+          {composed_text, spans} =
+            compose_line(line_text, hl_segments, ctx, buf_line, line_byte_offset)
 
-      row = %Row{
-        row_id: Row.stable_id(:normal, buf_line),
-        row_type: :normal,
-        buf_line: buf_line,
-        text: composed_text,
-        spans: spans,
-        content_hash: Row.compute_hash(composed_text, spans)
-      }
+          %Row{
+            row_id: row_id,
+            row_type: :normal,
+            buf_line: buf_line,
+            text: composed_text,
+            spans: spans,
+            content_hash: Row.compute_hash(composed_text, spans)
+          }
+        end)
 
-      visual_entry(row, 0, Unicode.display_width(composed_text), 0)
+      row
+      |> visual_entry(0, Unicode.display_width(row.text), 0)
+      |> with_retain_meta(input_hash, reused?)
     end)
   end
 
-  @spec build_visual_entries_wrapped([String.t()], non_neg_integer(), Context.t(), map()) :: [
-          visual_row_entry()
-        ]
-  defp build_visual_entries_wrapped(lines, first_line, ctx, snapshot) do
+  @spec build_visual_entries_wrapped(
+          [String.t()],
+          non_neg_integer(),
+          Context.t(),
+          map(),
+          retain_ctx()
+        ) :: [visual_row_entry()]
+  defp build_visual_entries_wrapped(lines, first_line, ctx, snapshot, retain_ctx) do
     first_byte_off = snapshot.first_line_byte_offset
     lines_with_offsets = build_lines_with_offsets(lines, first_byte_off)
 
@@ -353,17 +569,105 @@ defmodule MingaEditor.RenderModel.Window.Builder do
         List.duplicate(nil, length(lines))
       end
 
+    wrap_opts = wrap_options(ctx, snapshot.options)
+    content_width = Keyword.fetch!(wrap_opts, :content_width)
+
     lines_with_offsets
     |> Enum.zip(highlight_segments_list)
     |> Enum.with_index()
     |> Enum.flat_map(fn {{{line_text, line_byte_offset}, hl_segments}, idx} ->
-      buf_line = first_line + idx
-
-      {composed_text, spans} =
-        compose_line(line_text, hl_segments, ctx, buf_line, line_byte_offset)
-
-      wrap_composed_entries(composed_text, spans, buf_line, wrap_options(ctx, snapshot.options))
+      build_wrapped_logical_line(%{
+        line_text: line_text,
+        line_byte_offset: line_byte_offset,
+        hl_segments: hl_segments,
+        buf_line: first_line + idx,
+        content_width: content_width,
+        wrap_opts: wrap_opts,
+        ctx: ctx,
+        retain_ctx: retain_ctx
+      })
     end)
+  end
+
+  # Builds (or replays) the full visual-row set for one wrapped logical line.
+  #
+  # True logical-line reuse: when the line's full input fingerprint (text,
+  # highlight segments, shared compose context, AND content width, since wrap
+  # points depend on width) matches the cached logical line, the entire
+  # visual-row set is replayed verbatim, skipping both compose_line and the wrap
+  # computation. Otherwise the line is composed and re-wrapped from scratch (#2287).
+  @spec build_wrapped_logical_line(map()) :: [visual_row_entry()]
+  defp build_wrapped_logical_line(params) do
+    %{
+      line_text: line_text,
+      hl_segments: hl_segments,
+      buf_line: buf_line,
+      content_width: content_width,
+      retain_ctx: retain_ctx
+    } = params
+
+    wrap_line_hash =
+      row_input_hash(retain_ctx, {:wrap_line, line_text, hl_segments, content_width})
+
+    case reuse_wrapped_line(retain_ctx, buf_line, wrap_line_hash) do
+      {:reuse, entries} -> entries
+      :miss -> compose_wrapped_logical_line(params, wrap_line_hash)
+    end
+  end
+
+  @spec compose_wrapped_logical_line(map(), non_neg_integer()) :: [visual_row_entry()]
+  defp compose_wrapped_logical_line(params, wrap_line_hash) do
+    %{
+      line_text: line_text,
+      line_byte_offset: line_byte_offset,
+      hl_segments: hl_segments,
+      buf_line: buf_line,
+      wrap_opts: wrap_opts,
+      ctx: ctx
+    } = params
+
+    {composed_text, spans} =
+      compose_line(line_text, hl_segments, ctx, buf_line, line_byte_offset)
+
+    composed_text
+    |> wrap_composed_entries(spans, buf_line, wrap_opts)
+    |> Enum.map(&stamp_wrapped_entry(&1, wrap_line_hash))
+  end
+
+  @spec stamp_wrapped_entry(visual_row_entry(), non_neg_integer()) :: visual_row_entry()
+  defp stamp_wrapped_entry(entry, wrap_line_hash) do
+    entry
+    |> with_retain_meta(wrap_line_hash, false)
+    |> Map.put(:wrap_line_hash, wrap_line_hash)
+  end
+
+  # Replays a cached wrapped logical line when its fingerprint is unchanged. The
+  # cached entries already carry their Rows (ids, text, spans, hashes) and wrap
+  # metadata, so reuse reproduces the exact visual-row set with no recomposition.
+  @spec reuse_wrapped_line(retain_ctx(), non_neg_integer(), non_neg_integer()) ::
+          {:reuse, [visual_row_entry()]} | :miss
+  defp reuse_wrapped_line(%{prev_wrap: prev_wrap}, buf_line, wrap_line_hash) do
+    case Map.get(prev_wrap, buf_line) do
+      {^wrap_line_hash, entries} when is_list(entries) ->
+        {:reuse, Enum.map(entries, &mark_wrapped_reused(&1, wrap_line_hash))}
+
+      _ ->
+        :miss
+    end
+  end
+
+  @spec mark_wrapped_reused(map(), non_neg_integer()) :: visual_row_entry()
+  defp mark_wrapped_reused(entry, wrap_line_hash) do
+    entry
+    |> with_retain_meta(wrap_line_hash, true)
+    |> Map.put(:wrap_line_hash, wrap_line_hash)
+  end
+
+  @spec with_retain_meta(visual_row_entry(), non_neg_integer(), boolean()) :: visual_row_entry()
+  defp with_retain_meta(entry, input_hash, reused?) do
+    entry
+    |> Map.put(:input_hash, input_hash)
+    |> Map.put(:reused?, reused?)
   end
 
   @spec wrap_composed_entries(String.t(), [Span.t()], non_neg_integer(), keyword()) :: [
@@ -516,9 +820,10 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           non_neg_integer(),
           [DisplayMap.entry()],
           Context.t(),
-          map()
+          map(),
+          retain_ctx()
         ) :: [visual_row_entry()]
-  defp build_visual_entries_folded(lines, first_line, visible_line_map, ctx, snapshot) do
+  defp build_visual_entries_folded(lines, first_line, visible_line_map, ctx, snapshot, retain_ctx) do
     line_byte_offsets =
       build_line_byte_offsets(lines, first_line, snapshot.first_line_byte_offset)
 
@@ -526,21 +831,81 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       Enum.map_reduce(visible_line_map, %{}, fn {buf_line, entry_type}, counters ->
         {visual_identity_index, counters} = next_visual_identity(buf_line, entry_type, counters)
 
-        row =
-          build_visual_row_entry(
+        {row, input_hash, reused?} =
+          build_visual_row_entry_retained(
             buf_line,
             entry_type,
             lines,
             first_line,
             ctx,
             line_byte_offsets,
-            visual_identity_index
+            visual_identity_index,
+            retain_ctx
           )
 
-        {visual_entry(row, 0, Unicode.display_width(row.text), 0), counters}
+        entry =
+          row
+          |> visual_entry(0, Unicode.display_width(row.text), 0)
+          |> with_retain_meta(input_hash, reused?)
+
+        {entry, counters}
       end)
 
     entries
+  end
+
+  # Reuse only plain folded `:normal` rows; decoration-driven rows (folds,
+  # virtual lines, blocks) recompose every frame to stay conservative (#2287).
+  @spec build_visual_row_entry_retained(
+          non_neg_integer(),
+          term(),
+          [String.t()],
+          non_neg_integer(),
+          Context.t(),
+          %{non_neg_integer() => non_neg_integer()},
+          non_neg_integer(),
+          retain_ctx()
+        ) :: {Row.t(), non_neg_integer(), boolean()}
+  defp build_visual_row_entry_retained(
+         buf_line,
+         :normal,
+         lines,
+         first_line,
+         ctx,
+         line_byte_offsets,
+         index,
+         retain_ctx
+       ) do
+    line_text = line_at(lines, buf_line, first_line)
+    row_id = Row.stable_id(:normal, buf_line)
+
+    compose_or_reuse(retain_ctx, row_id, {:fold_normal, line_text}, fn ->
+      build_visual_row_entry(buf_line, :normal, lines, first_line, ctx, line_byte_offsets, index)
+    end)
+  end
+
+  defp build_visual_row_entry_retained(
+         buf_line,
+         entry_type,
+         lines,
+         first_line,
+         ctx,
+         line_byte_offsets,
+         index,
+         retain_ctx
+       ) do
+    row =
+      build_visual_row_entry(
+        buf_line,
+        entry_type,
+        lines,
+        first_line,
+        ctx,
+        line_byte_offsets,
+        index
+      )
+
+    {row, row_input_hash(retain_ctx, {:fold_other, row.row_id, row.content_hash}), false}
   end
 
   @spec next_visual_identity(non_neg_integer(), term(), map()) :: {non_neg_integer(), map()}

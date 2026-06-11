@@ -30,6 +30,17 @@ defmodule MingaEditor.Renderer.Caches do
     # ── Content stage: within-frame cache (reset after each window render) ────
     block_render_cache: %{},
 
+    # Number of buffer rows freshly rasterized (composed) this frame, summed
+    # across windows. Reset at the start of the Content stage and read by the
+    # pipeline telemetry span as `rows_rasterized` (#2287). A transient
+    # per-frame counter, not retained across frames.
+    frame_rows_rasterized: 0,
+
+    # Classification of this frame's render path, `:patch` or `:full` (#2287).
+    # Set after buffer prefetch resolves per-window invalidation and read by the
+    # pipeline telemetry span as the `path` tag. Transient per-frame state.
+    frame_render_path: :full,
+
     # ── Emit stage ────────────────────────────────────────────────────────────
     emit_prev_viewport_tops: %{},
     emit_prev_content_rects: %{},
@@ -62,6 +73,8 @@ defmodule MingaEditor.Renderer.Caches do
           search_decoration_cache: term(),
           doc_highlight_cache: term(),
           block_render_cache: %{term() => term()},
+          frame_rows_rasterized: non_neg_integer(),
+          frame_render_path: :patch | :full,
           emit_prev_viewport_tops: %{term() => non_neg_integer()},
           emit_prev_content_rects: %{term() => term()},
           emit_prev_gutter_ws: %{term() => non_neg_integer()},

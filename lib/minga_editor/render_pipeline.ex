@@ -33,6 +33,7 @@ defmodule MingaEditor.RenderPipeline do
 
   alias MingaEditor.RenderPipeline.BufferPrefetch
   alias MingaEditor.RenderPipeline.Chrome
+  alias MingaEditor.RenderPipeline.Classifier
   alias MingaEditor.RenderPipeline.Compose
   alias MingaEditor.RenderPipeline.Content
   alias MingaEditor.RenderPipeline.Input
@@ -71,23 +72,37 @@ defmodule MingaEditor.RenderPipeline do
   defp run_stages(input) do
     window_count = window_count(input)
 
-    Telemetry.span([:minga, :render, :pipeline], %{window_count: window_count}, fn ->
-      # Stage 1: Invalidation (global triggers: visual selection, search, theme)
-      input =
-        Telemetry.span([:minga, :render, :stage], %{stage: :invalidation}, fn ->
-          invalidate(input)
-        end)
+    # The render path (`:patch`/`:full`) and rows_rasterized are known only after
+    # the Content stage runs, so the pipeline span reports them as stop metadata
+    # (#2287). Both labels are observability only; the same transaction and wire
+    # encodings are emitted on either path.
+    Telemetry.span_with_stop_metadata(
+      [:minga, :render, :pipeline],
+      %{window_count: window_count},
+      fn ->
+        # Stage 1: Invalidation (global triggers: visual selection, search, theme)
+        input =
+          Telemetry.span([:minga, :render, :stage], %{stage: :invalidation}, fn ->
+            invalidate(input)
+          end)
 
-      # Stage 2: Layout
-      input =
-        Telemetry.span([:minga, :render, :stage], %{stage: :layout}, fn ->
-          compute_layout(input)
-        end)
+        # Stage 2: Layout
+        input =
+          Telemetry.span([:minga, :render, :stage], %{stage: :layout}, fn ->
+            compute_layout(input)
+          end)
 
-      layout = Layout.get(input)
+        layout = Layout.get(input)
 
-      run_windows_pipeline(input, layout)
-    end)
+        output = run_windows_pipeline(input, layout)
+
+        {output,
+         %{
+           path: output.caches.frame_render_path,
+           rows_rasterized: output.caches.frame_rows_rasterized
+         }}
+      end
+    )
   end
 
   @doc """
@@ -99,8 +114,18 @@ defmodule MingaEditor.RenderPipeline do
   """
   @spec run_windows_pipeline(input(), Layout.t()) :: input()
   def run_windows_pipeline(input, layout) do
+    # Reset the per-frame rasterized-row counter before any window composes (#2287).
+    input = Content.reset_rows_rasterized(input)
+
     # Pre-stage snapshot boundary: Buffer GenServer reads happen before the named render stages.
     {prefetched_scrolls, input} = BufferPrefetch.prefetch_scrolls(input, layout)
+
+    # Classify the frame's render path now that prefetch has resolved per-window
+    # invalidation (dirty lines, viewport, line count, epoch resets). Stashed
+    # transiently so the pipeline span can tag it; classification labels the
+    # frame, it never skips work the row-level content hashing decides
+    # independently (#2287).
+    input = put_render_path(input, Classifier.classify(input, prefetched_scrolls))
 
     # Stage 3: Scroll consumes pre-fetched per-window data without process calls.
     {scrolls, input} =
@@ -217,6 +242,11 @@ defmodule MingaEditor.RenderPipeline do
   @spec compute_layout(input()) :: input()
   def compute_layout(input) do
     Layout.put(input)
+  end
+
+  @spec put_render_path(input(), Classifier.path()) :: input()
+  defp put_render_path(input, path) do
+    %{input | caches: %{input.caches | frame_render_path: path}}
   end
 
   @spec window_count(input()) :: non_neg_integer()
