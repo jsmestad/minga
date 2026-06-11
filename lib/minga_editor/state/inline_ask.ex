@@ -3,9 +3,18 @@ defmodule MingaEditor.State.InlineAsk do
   Ephemeral inline ask overlays keyed by buffer.
 
   Inline asks are presentation state only. They are not persisted and they do not create workspaces until explicitly promoted.
+
+  The shared per-buffer store mechanics (`active/2`, `put/2`, `dismiss/2`,
+  `session?/2`) and prompt-input mechanics (`append_input/2`, `backspace/1`,
+  `scroll/2`) live in `MingaEditor.InlineOverlay.Store` and
+  `MingaEditor.InlineOverlay.Prompt` and are reused here. This module owns
+  only the ask-specific shape and transitions: the read-only response
+  accumulation and the `:answered` terminal state.
   """
 
   alias Minga.Project.FileRef
+  alias MingaEditor.InlineOverlay.Prompt
+  alias MingaEditor.InlineOverlay.Store
 
   @type status :: :input | :thinking | :answered | :error
 
@@ -98,50 +107,30 @@ defmodule MingaEditor.State.InlineAsk do
   defp file_identity(%FileRef{kind: :path, relative_path: path}) when is_binary(path), do: path
   defp file_identity(%FileRef{display_name: name}), do: name
 
-  @doc "Returns the active ask for a buffer."
+  # Store mechanics (active/session?/put/dismiss) and prompt mechanics
+  # (append_input/backspace/scroll) are shared with inline edit; see
+  # MingaEditor.InlineOverlay.Store and MingaEditor.InlineOverlay.Prompt.
+
   @spec active(store(), pid() | nil) :: t() | nil
-  def active(store, buffer_pid) when is_map(store) and is_pid(buffer_pid),
-    do: Map.get(store, buffer_pid)
+  defdelegate active(store, buffer_pid), to: Store
 
-  def active(_store, _buffer_pid), do: nil
-
-  @doc "Returns true when the given session pid belongs to an inline ask."
   @spec session?(store(), pid()) :: boolean()
-  def session?(store, session_pid) when is_map(store) and is_pid(session_pid) do
-    Enum.any?(store, fn {_buffer, ask} -> ask.session_pid == session_pid end)
-  end
+  defdelegate session?(store, session_pid), to: Store
 
-  @doc "Opens or replaces an ask for its buffer."
   @spec put(store(), t()) :: store()
-  def put(store, %__MODULE__{buffer_pid: buffer_pid} = ask) when is_map(store) do
-    Map.put(store, buffer_pid, ask)
-  end
+  defdelegate put(store, ask), to: Store
 
-  @doc "Dismisses the ask for a buffer."
   @spec dismiss(store(), pid() | nil) :: {store(), pid() | nil}
-  def dismiss(store, buffer_pid) when is_map(store) and is_pid(buffer_pid) do
-    {ask, store} = Map.pop(store, buffer_pid)
-    {store, if(ask, do: ask.session_pid, else: nil)}
-  end
+  defdelegate dismiss(store, buffer_pid), to: Store
 
-  def dismiss(store, _buffer_pid), do: {store, nil}
-
-  @doc "Appends input to an ask."
   @spec append_input(t(), String.t()) :: t()
-  def append_input(%__MODULE__{status: :input, prompt: prompt} = ask, text)
-      when is_binary(text) do
-    %{ask | prompt: prompt <> text}
-  end
+  defdelegate append_input(ask, text), to: Prompt
 
-  def append_input(%__MODULE__{} = ask, _text), do: ask
-
-  @doc "Deletes one input character."
   @spec backspace(t()) :: t()
-  def backspace(%__MODULE__{status: :input, prompt: prompt} = ask) do
-    %{ask | prompt: prompt |> String.graphemes() |> Enum.drop(-1) |> Enum.join()}
-  end
+  defdelegate backspace(ask), to: Prompt
 
-  def backspace(%__MODULE__{} = ask), do: ask
+  @spec scroll(t(), integer()) :: t()
+  defdelegate scroll(ask, delta), to: Prompt
 
   @doc "Marks the ask as thinking."
   @spec thinking(t(), pid()) :: t()
@@ -162,12 +151,6 @@ defmodule MingaEditor.State.InlineAsk do
   @doc "Marks the ask as answered."
   @spec answered(t()) :: t()
   def answered(%__MODULE__{} = ask), do: %{ask | status: :answered, session_pid: nil}
-
-  @doc "Scrolls response text within the bounded overlay."
-  @spec scroll(t(), integer()) :: t()
-  def scroll(%__MODULE__{scroll: current} = ask, delta) when is_integer(delta) do
-    %{ask | scroll: max(current + delta, 0)}
-  end
 
   @doc "Marks the ask as failed."
   @spec fail(t(), String.t()) :: t()

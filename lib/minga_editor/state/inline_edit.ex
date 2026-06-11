@@ -1,9 +1,19 @@
 defmodule MingaEditor.State.InlineEdit do
   @moduledoc """
   Ephemeral inline edit overlays keyed by buffer.
+
+  The shared per-buffer store mechanics (`active/2`, `put/2`, `dismiss/2`,
+  `session?/2`) and prompt-input mechanics (`append_input/2`, `backspace/1`,
+  `scroll/2`) live in `MingaEditor.InlineOverlay.Store` and
+  `MingaEditor.InlineOverlay.Prompt` and are reused here. This module owns
+  only the edit-specific shape and transitions: the selection/original text,
+  the proposed rewrite with its `:stream` vs `:tool` source tracking, and the
+  `:proposed` terminal state.
   """
 
   alias Minga.Project.FileRef
+  alias MingaEditor.InlineOverlay.Prompt
+  alias MingaEditor.InlineOverlay.Store
 
   @type status :: :input | :thinking | :proposed | :error
   @type proposal_source :: :stream | :tool | nil
@@ -75,47 +85,30 @@ defmodule MingaEditor.State.InlineEdit do
     """
   end
 
-  @doc "Returns the active edit for a buffer."
+  # Store mechanics (active/session?/put/dismiss) and prompt mechanics
+  # (append_input/backspace/scroll) are shared with inline ask; see
+  # MingaEditor.InlineOverlay.Store and MingaEditor.InlineOverlay.Prompt.
+
   @spec active(store(), pid() | nil) :: t() | nil
-  def active(store, buffer_pid) when is_map(store) and is_pid(buffer_pid),
-    do: Map.get(store, buffer_pid)
+  defdelegate active(store, buffer_pid), to: Store
 
-  def active(_store, _buffer_pid), do: nil
-
-  @doc "Returns true when the given session pid belongs to an inline edit."
   @spec session?(store(), pid()) :: boolean()
-  def session?(store, session_pid) when is_map(store) and is_pid(session_pid) do
-    Enum.any?(store, fn {_buffer, edit} -> edit.session_pid == session_pid end)
-  end
+  defdelegate session?(store, session_pid), to: Store
 
-  @doc "Opens or replaces an edit for its buffer."
   @spec put(store(), t()) :: store()
-  def put(store, %__MODULE__{buffer_pid: buffer_pid} = edit) when is_map(store),
-    do: Map.put(store, buffer_pid, edit)
+  defdelegate put(store, edit), to: Store
 
-  @doc "Dismisses the edit for a buffer."
   @spec dismiss(store(), pid() | nil) :: {store(), pid() | nil}
-  def dismiss(store, buffer_pid) when is_map(store) and is_pid(buffer_pid) do
-    {edit, store} = Map.pop(store, buffer_pid)
-    {store, if(edit, do: edit.session_pid, else: nil)}
-  end
+  defdelegate dismiss(store, buffer_pid), to: Store
 
-  def dismiss(store, _buffer_pid), do: {store, nil}
-
-  @doc "Appends prompt input."
   @spec append_input(t(), String.t()) :: t()
-  def append_input(%__MODULE__{status: :input, prompt: prompt} = edit, text) when is_binary(text),
-    do: %{edit | prompt: prompt <> text}
+  defdelegate append_input(edit, text), to: Prompt
 
-  def append_input(%__MODULE__{} = edit, _text), do: edit
-
-  @doc "Deletes one prompt character."
   @spec backspace(t()) :: t()
-  def backspace(%__MODULE__{status: :input, prompt: prompt} = edit) do
-    %{edit | prompt: prompt |> String.graphemes() |> Enum.drop(-1) |> Enum.join()}
-  end
+  defdelegate backspace(edit), to: Prompt
 
-  def backspace(%__MODULE__{} = edit), do: edit
+  @spec scroll(t(), integer()) :: t()
+  defdelegate scroll(edit, delta), to: Prompt
 
   @doc "Marks the edit as thinking."
   @spec thinking(t(), pid()) :: t()
@@ -150,11 +143,6 @@ defmodule MingaEditor.State.InlineEdit do
   @doc "Marks the edit as proposed."
   @spec proposed(t()) :: t()
   def proposed(%__MODULE__{} = edit), do: %{edit | status: :proposed, session_pid: nil}
-
-  @doc "Scrolls diff text within the bounded overlay."
-  @spec scroll(t(), integer()) :: t()
-  def scroll(%__MODULE__{scroll: current} = edit, delta) when is_integer(delta),
-    do: %{edit | scroll: max(current + delta, 0)}
 
   @doc "Marks the edit as failed."
   @spec fail(t(), String.t()) :: t()
