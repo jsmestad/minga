@@ -16,6 +16,8 @@ defmodule MingaEditor.FocusTree do
   alias MingaEditor.Input
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Layout
+  alias MingaEditor.Layout.FooterOverlays
+  alias MingaEditor.Layout.OverlayBand
   alias MingaEditor.SignatureHelp
   alias MingaEditor.Renderer.Gutter
   alias MingaEditor.State.ModalOverlay
@@ -41,6 +43,7 @@ defmodule MingaEditor.FocusTree do
 
     layout
     |> build_base(window_map(state), Input.editing_dispatch_handler(state), state)
+    |> add_footer_band_overlays(state, layout)
     |> add_floating_overlays(state)
     |> add_modal_overlays(state, layout)
     |> link_tree()
@@ -319,6 +322,49 @@ defmodule MingaEditor.FocusTree do
           [TreeNode.t()]
   defp maybe_add(children, nil, _build), do: children
   defp maybe_add(children, rect, build), do: children ++ [build.(rect)]
+
+  # ── Footer-band overlay builders ──────────────────────────────────────────
+  #
+  # The eight secondary overlays (float popup, agent context, tool manager,
+  # extension panel, observatory, edit timeline, notifications, extension
+  # overlay) the owner ruled mouse-driven (#2330). `FooterOverlays.visible/1`
+  # decides which are live this frame (single-active model still holds, but the
+  # tree expresses each visible one so the registry/emitter carry their rect/z;
+  # Go composites the single highest-z winner). Each gets a bottom-anchored band
+  # rect from `OverlayBand` and the `Input.OverlaySink` handler so a click or
+  # scroll over a visible overlay is swallowed instead of bubbling to the buffer
+  # (AC-2). Per-surface activation semantics replace the sink via epic #2330
+  # children.
+  #
+  # Ordering matters for the hit-test. `FooterOverlays.visible/1` returns entries
+  # in ASCENDING z (back-to-front); this reduce appends them as root children in
+  # that order, so the highest-z overlay is the LAST child. `do_hit_path` reverses
+  # children before searching, so the last child (highest z) wins among same-rect
+  # siblings, making the BEAM hit-winner the SAME surface Go composites on top (its
+  # highest-z render winner). Inverting the order here would let the lowest-z node
+  # win the hit-test against the render winner, which the #2330 per-surface handlers
+  # must not see.
+
+  @spec add_footer_band_overlays(t(), map(), Layout.t()) :: t()
+  defp add_footer_band_overlays(%TreeNode{} = root, state, %Layout{terminal: terminal}) do
+    state
+    |> FooterOverlays.visible()
+    |> Enum.reduce(root, fn {surface_id, content_height}, acc ->
+      case OverlayBand.rect(terminal, content_height) do
+        nil -> acc
+        rect -> append_root_child(acc, footer_overlay_node(surface_id, rect))
+      end
+    end)
+  end
+
+  @spec footer_overlay_node(atom(), Layout.rect()) :: TreeNode.t()
+  defp footer_overlay_node(surface_id, rect) do
+    TreeNode.new(surface_id, rect,
+      handler: Input.OverlaySink,
+      scrollable?: true,
+      focusable?: true
+    )
+  end
 
   # ── Floating overlay builders ─────────────────────────────────────────────
   #

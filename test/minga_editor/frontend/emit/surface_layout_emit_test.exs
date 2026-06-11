@@ -192,6 +192,43 @@ defmodule MingaEditor.Frontend.Emit.SurfaceLayoutEmitTest do
     assert decoded == expected
   end
 
+  test "a visible footer-band overlay (notifications) emits a registry placement (#2281)" do
+    note =
+      MingaEditor.UI.Notification.new(%{
+        id: "n1",
+        level: :info,
+        title: "Build finished",
+        created_at: System.system_time(:millisecond)
+      })
+
+    center =
+      MingaEditor.UI.NotificationCenter.upsert(MingaEditor.UI.NotificationCenter.new(), note)
+
+    state = %{base_state() | notifications: center}
+
+    commands = emit_commands(state)
+    decoded = commands |> surface_layout_command() |> decode_placements()
+
+    placements = SurfaceRegistry.placements(state)
+    expected = Enum.map(placements, &expected_entry/1)
+
+    # The promoted notifications surface is present in the registry derivation...
+    assert :notifications in Enum.map(placements, & &1.surface_id)
+
+    # ...and its emitted bytes carry the historical stacking z (160) and the
+    # overlay hit_kind, matching the registry rect_for field-for-field.
+    notes_u16 = SurfaceRegistry.surface_id_u16(:notifications)
+    decoded_notes = Enum.find(decoded, &(&1.surface_id == notes_u16))
+
+    assert decoded_notes, "emitted layout missing the promoted notifications surface"
+    assert decoded_notes.z == 160
+    assert decoded_notes.hit_kind == SurfaceRegistry.hit_kind_u8(:overlay)
+    assert decoded_notes.rect == SurfaceRegistry.rect_for_in(placements, :notifications)
+
+    # And the full emitted list still matches the registry, order included.
+    assert decoded == expected
+  end
+
   test "empty placement list still emits a well-formed (zero-count) command" do
     # A degenerate state with no focus tree surfaces still produces a valid,
     # decodable command: the transaction always carries the layout authority,

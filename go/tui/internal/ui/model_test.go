@@ -928,13 +928,21 @@ func TestAgentChatVisibleRendersAsMainBody(t *testing.T) {
 }
 
 func TestOverlayLinesRenderRemainingSemanticSurfaces(t *testing.T) {
+	// Every overlay surface is registry-placed now (#2281): a surface renders only
+	// when the BEAM emits its placement, so each case provides one.
 	model := New(60, 12, nil)
 	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiAgentContext: {AgentContext: protocol.AgentContext{Visible: true, Task: "Review diff", Status: 1, CanApprove: true}}}
+	model.surfacePlacements = []generated.SurfacePlacement{
+		{SurfaceID: surfaceIDAgentContext, Z: 260, HitKind: 8},
+	}
 	if got := strings.Join(model.overlayLines(), "\n"); !strings.Contains(got, "Review diff") {
 		t.Fatalf("agent context overlay missing content: %q", got)
 	}
 
 	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiToolManager: {ToolManager: protocol.ToolManager{Visible: true, Tools: []protocol.ToolSummary{{Name: "elixir-ls", Label: "Elixir LS", Status: 1}}}}}
+	model.surfacePlacements = []generated.SurfacePlacement{
+		{SurfaceID: surfaceIDToolManager, Z: 240, HitKind: 8},
+	}
 	if got := strings.Join(model.overlayLines(), "\n"); !strings.Contains(got, "Elixir LS") || !strings.Contains(got, "installed") {
 		t.Fatalf("tool manager overlay missing content: %q", got)
 	}
@@ -1351,6 +1359,12 @@ func TestSemanticMouseRoutesCompletionItemZones(t *testing.T) {
 			{Label: "beta", Detail: "fn"},
 		}}},
 	}
+	// The completion overlay is registry-placed now (#2281): it renders at its
+	// BEAM placement rect, and its zones are scanned from there. Place it at the
+	// bottom band where it historically rendered.
+	model.surfacePlacements = []generated.SurfacePlacement{
+		{SurfaceID: surfaceIDCompletionMenu, Rect: generated.Rect{Row: 12, Col: 0, Width: 60, Height: 4}, Z: 301, HitKind: 8},
+	}
 	model.viewport.SetContent(model.content())
 	_ = model.View()
 
@@ -1442,6 +1456,11 @@ func TestSemanticMouseRoutesHoverActionZone(t *testing.T) {
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiHoverPopup:  {Hover: protocol.HoverPopup{Visible: true, Lines: []protocol.RichLine{{Segments: []protocol.RichSegment{{Text: "doc"}}}}}},
 		generated.OPGuiHoverAction: {HoverAction: protocol.HoverAction{Visible: true, Name: "Open documentation"}},
+	}
+	// The hover popup is registry-placed now (#2281): it renders at its BEAM
+	// placement rect and its hover-action zone is scanned from there.
+	model.surfacePlacements = []generated.SurfacePlacement{
+		{SurfaceID: surfaceIDHoverPopup, Rect: generated.Rect{Row: 12, Col: 0, Width: 60, Height: 4}, Z: 290, HitKind: 8},
 	}
 	model.viewport.SetContent(model.content())
 	_ = model.View()
@@ -1545,6 +1564,13 @@ func bottomPanelTestModel(messageCount int, out chan<- []byte) (Model, protocol.
 	}
 	panel := protocol.BottomPanel{Visible: true, ActiveTab: 0, Tabs: []protocol.PanelTab{{Type: 0x01, Name: "Messages"}}, Messages: messages}
 	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiBottomPanel: {Opcode: generated.OPGuiBottomPanel, Bottom: panel}}
+	// The bottom panel is registry-placed now (#2281): it renders and hit-tests by
+	// its BEAM placement rect (bottom band, full width). Place it where
+	// bottomPanelHeight computes its band so local scroll routing matches.
+	height := model.bottomPanelHeight(panel)
+	model.surfacePlacements = []generated.SurfacePlacement{
+		{SurfaceID: surfaceIDBottomPanel, Rect: generated.Rect{Row: uint16(model.height - height), Col: 0, Width: uint16(model.width), Height: uint16(height)}, Z: 200, HitKind: 7},
+	}
 	return model, panel
 }
 

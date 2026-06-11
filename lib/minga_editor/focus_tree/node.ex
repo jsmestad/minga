@@ -36,6 +36,14 @@ defmodule MingaEditor.FocusTree.Node do
           | :completion_menu
           | :hover_popup
           | :signature_help
+          | :float_popup
+          | :agent_context
+          | :tool_manager
+          | :extension_panel
+          | :observatory
+          | :edit_timeline
+          | :notifications
+          | :extension_overlay
           | :which_key
           | {:custom, atom()}
 

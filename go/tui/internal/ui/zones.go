@@ -107,6 +107,55 @@ func (m *zoneManager) Scan(value string) string {
 	return string(out)
 }
 
+// ScanInto scans a detached content block (a separately composited overlay
+// layer, #2281) for zone markers, strips the markers, and merges the discovered
+// zones into the existing zone map with their coordinates offset by (offsetX,
+// offsetY). Unlike Scan it does NOT clobber the existing zones: the main frame
+// content is scanned first via Scan, then each separately positioned layer adds
+// its zones here so chrome zone routing (completion items, hover action) keeps
+// working even though the overlay is no longer footer-appended into the main
+// vertical layout. Returns the marker-stripped content for compositing.
+func (m *zoneManager) ScanInto(value string, offsetX int, offsetY int) string {
+	out := make([]byte, 0, len(value))
+	line := make([]byte, 0, 128)
+	tracked := map[string]*zoneInfo{}
+	y := 0
+
+	for pos := 0; pos < len(value); {
+		if marker, next, ok := readZoneMarker(value, pos); ok {
+			id := m.rids[marker]
+			if id != "" {
+				if start, ok := tracked[marker]; ok {
+					start.EndX = ansi.StringWidth(string(line)) - 1 + offsetX
+					start.EndY = y + offsetY
+					m.zones[id] = start
+					delete(tracked, marker)
+				} else {
+					tracked[marker] = &zoneInfo{id: id, StartX: ansi.StringWidth(string(line)) + offsetX, StartY: y + offsetY}
+				}
+			}
+			pos = next
+			continue
+		}
+
+		r, width := utf8.DecodeRuneInString(value[pos:])
+		if r == utf8.RuneError && width == 0 {
+			break
+		}
+		chunk := value[pos : pos+width]
+		out = append(out, chunk...)
+		if r == '\n' {
+			y++
+			line = line[:0]
+		} else {
+			line = append(line, chunk...)
+		}
+		pos += width
+	}
+
+	return string(out)
+}
+
 func readZoneMarker(value string, pos int) (string, int, bool) {
 	if pos+4 > len(value) || value[pos] != zoneMarkerStart || value[pos+1] != zoneMarkerBracket {
 		return "", pos, false

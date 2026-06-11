@@ -11,6 +11,12 @@ func (m Model) composeFrame(content string) string {
 		lipgloss.NewLayer(m.windowBackground()).X(0).Y(0).Z(0),
 		lipgloss.NewLayer(content).X(0).Y(0).Z(1),
 	}
+	// The single active secondary overlay is composited at its BEAM placement
+	// rect (#2281), below the picker/which-key floating layers but above the base
+	// content, instead of being footer-appended into the vertical layout.
+	if overlay := m.overlayLayer(); overlay != nil {
+		layers = append(layers, overlay)
+	}
 	if which := m.floatingWhichKeyLayer(); which != nil {
 		layers = append(layers, which)
 	}
