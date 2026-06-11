@@ -23,7 +23,8 @@ defmodule Minga.Mode do
 
   * `{:continue, state}` — no-op; remain in the same mode.
   * `{:transition, mode, state}` — switch to `mode`, no commands.
-  * `{:execute, command | [command], state}` — run commands, stay in same mode.
+  * `{:execute, command | [command], state}` — run commands, stay in same mode, and repeat them by the accumulated count.
+  * `{:execute, command | [command], state, count_policy}` — run commands with explicit count handling.
   * `{:execute_then_transition, [command], mode, state}` — run commands, then switch mode.
   """
 
@@ -78,14 +79,19 @@ defmodule Minga.Mode do
 
   * `{:continue, state}` — no-op.
   * `{:transition, mode, state}` — switch mode.
-  * `{:execute, command | [command], state}` — execute and stay.
+  * `{:execute, command | [command], state}` — execute and stay, repeating by the accumulated count.
+  * `{:execute, command | [command], state, count_policy}` — execute and stay with explicit count handling.
   * `{:execute_then_transition, [command], mode, state}` — execute then switch.
   """
   @type result ::
           {:continue, state()}
           | {:transition, mode(), state()}
           | {:execute, command() | [command()], state()}
+          | {:execute, command() | [command()], state(), count_policy()}
           | {:execute_then_transition, [command()], mode(), state()}
+
+  @typedoc "How an execute result handles an accumulated count prefix."
+  @type count_policy :: :repeat_count | :discard_count
 
   @typedoc "A key event: `{codepoint, modifiers}`."
   @type key :: {non_neg_integer(), non_neg_integer()}
@@ -228,14 +234,22 @@ defmodule Minga.Mode do
     {new_mode, [], reset_count(state)}
   end
 
-  defp apply_result(mode, {:execute, commands, state}) when is_list(commands) do
+  defp apply_result(mode, {:execute, commands, state}) do
+    apply_result(mode, {:execute, commands, state, :repeat_count})
+  end
+
+  defp apply_result(mode, {:execute, commands, state, :repeat_count}) when is_list(commands) do
     count = state.count || 1
     expanded = List.duplicate(commands, count) |> List.flatten()
     {mode, expanded, reset_count(state)}
   end
 
-  defp apply_result(mode, {:execute, command, state}) do
-    apply_result(mode, {:execute, [command], state})
+  defp apply_result(mode, {:execute, commands, state, :discard_count}) when is_list(commands) do
+    {mode, commands, reset_count(state)}
+  end
+
+  defp apply_result(mode, {:execute, command, state, count_policy}) do
+    apply_result(mode, {:execute, [command], state, count_policy})
   end
 
   defp apply_result(_mode, {:execute_then_transition, commands, new_mode, state}) do

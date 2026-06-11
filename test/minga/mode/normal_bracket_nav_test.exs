@@ -22,14 +22,14 @@ defmodule Minga.Mode.NormalBracketNavTest do
     test "]f emits goto_next_textobject for :function" do
       state = press_bracket(:next)
 
-      assert {:execute, {:goto_next_textobject, :function}, _} =
+      assert {:execute, {:goto_next_textobject, :function}, _, :discard_count} =
                Normal.handle_key({?f, 0}, state)
     end
 
     test "[f emits goto_prev_textobject for :function" do
       state = press_bracket(:prev)
 
-      assert {:execute, {:goto_prev_textobject, :function}, _} =
+      assert {:execute, {:goto_prev_textobject, :function}, _, :discard_count} =
                Normal.handle_key({?f, 0}, state)
     end
   end
@@ -40,14 +40,14 @@ defmodule Minga.Mode.NormalBracketNavTest do
     test "]t emits goto_next_textobject for :class" do
       state = press_bracket(:next)
 
-      assert {:execute, {:goto_next_textobject, :class}, _} =
+      assert {:execute, {:goto_next_textobject, :class}, _, :discard_count} =
                Normal.handle_key({?t, 0}, state)
     end
 
     test "[t emits goto_prev_textobject for :class" do
       state = press_bracket(:prev)
 
-      assert {:execute, {:goto_prev_textobject, :class}, _} =
+      assert {:execute, {:goto_prev_textobject, :class}, _, :discard_count} =
                Normal.handle_key({?t, 0}, state)
     end
   end
@@ -58,14 +58,14 @@ defmodule Minga.Mode.NormalBracketNavTest do
     test "]a emits goto_next_textobject for :parameter" do
       state = press_bracket(:next)
 
-      assert {:execute, {:goto_next_textobject, :parameter}, _} =
+      assert {:execute, {:goto_next_textobject, :parameter}, _, :discard_count} =
                Normal.handle_key({?a, 0}, state)
     end
 
     test "[a emits goto_prev_textobject for :parameter" do
       state = press_bracket(:prev)
 
-      assert {:execute, {:goto_prev_textobject, :parameter}, _} =
+      assert {:execute, {:goto_prev_textobject, :parameter}, _, :discard_count} =
                Normal.handle_key({?a, 0}, state)
     end
   end
@@ -76,7 +76,7 @@ defmodule Minga.Mode.NormalBracketNavTest do
     test "prefix_node is cleared after successful dispatch" do
       state = press_bracket(:next)
 
-      {:execute, _, new_state} = Normal.handle_key({?f, 0}, state)
+      {:execute, _, new_state, :discard_count} = Normal.handle_key({?f, 0}, state)
       assert new_state.prefix_node == nil
     end
 
@@ -101,7 +101,7 @@ defmodule Minga.Mode.NormalBracketNavTest do
     test "]a emits goto_next_textobject :parameter" do
       state = press_bracket(:next)
 
-      assert {:execute, {:goto_next_textobject, :parameter}, _} =
+      assert {:execute, {:goto_next_textobject, :parameter}, _, :discard_count} =
                Normal.handle_key({?a, 0}, state)
     end
   end

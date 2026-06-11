@@ -159,7 +159,7 @@ defmodule Minga.Mode.Normal do
   # SPC pressed while not in leader mode → start leader sequence.
   def handle_key({@space, 0}, %ModeState{leader_node: nil} = state) do
     new_state = %{state | leader_node: state.leader_trie, leader_keys: ["SPC"]}
-    {:execute, {:leader_start, state.leader_trie}, new_state}
+    execute_discarding_count({:leader_start, state.leader_trie}, new_state)
   end
 
   # SPC pressed while already in leader mode: if the current node has a
@@ -168,28 +168,28 @@ defmodule Minga.Mode.Normal do
     case Bindings.lookup(node, {@space, 0}) do
       {:command, command} ->
         new_state = %{state | leader_node: nil, leader_keys: []}
-        {:execute, [command, :leader_cancel], new_state}
+        execute_discarding_count([command, :leader_cancel], new_state)
 
       {:prefix, sub_node} ->
         formatted = Bindings.format_key({@space, 0})
         new_keys = [formatted | state.leader_keys]
         new_state = %{state | leader_node: sub_node, leader_keys: new_keys}
-        {:execute, {:leader_progress, sub_node}, new_state}
+        execute_discarding_count({:leader_progress, sub_node}, new_state)
 
       :not_found ->
         new_state = %{state | leader_node: state.leader_trie, leader_keys: ["SPC"]}
-        {:execute, [:leader_cancel, {:leader_start, state.leader_trie}], new_state}
+        execute_discarding_count([:leader_cancel, {:leader_start, state.leader_trie}], new_state)
     end
   end
 
   # Ctrl+D / Ctrl+U while in leader mode → paginate which-key popup.
   # These are intercepted before the trie walk so they don't cancel the leader sequence.
   def handle_key({?d, 0x02}, %ModeState{leader_node: node} = state) when is_map(node) do
-    {:execute, :whichkey_next_page, state}
+    execute_discarding_count(:whichkey_next_page, state)
   end
 
   def handle_key({?u, 0x02}, %ModeState{leader_node: node} = state) when is_map(node) do
-    {:execute, :whichkey_prev_page, state}
+    execute_discarding_count(:whichkey_prev_page, state)
   end
 
   # Any other key while in leader mode → walk the trie.
@@ -204,17 +204,17 @@ defmodule Minga.Mode.Normal do
             pending: nil
         }
 
-        {:execute, :leader_cancel, new_state}
+        execute_discarding_count(:leader_cancel, new_state)
 
       {:prefix, sub_node} ->
         formatted = Bindings.format_key(key)
         new_keys = [formatted | state.leader_keys]
         new_state = %{state | leader_node: sub_node, leader_keys: new_keys}
-        {:execute, {:leader_progress, sub_node}, new_state}
+        execute_discarding_count({:leader_progress, sub_node}, new_state)
 
       {:command, command} ->
         new_state = %{state | leader_node: nil, leader_keys: []}
-        {:execute, [command, :leader_cancel], new_state}
+        execute_discarding_count([command, :leader_cancel], new_state)
     end
   end
 
@@ -847,7 +847,18 @@ defmodule Minga.Mode.Normal do
      %Minga.Mode.OperatorPendingState{operator: :comment, op_count: count}}
   end
 
+  defp dispatch_prefix_command(:move_to_document_start, %ModeState{count: count} = state)
+       when is_integer(count) do
+    {:execute, {:goto_line, count}, %{state | count: nil}}
+  end
+
   defp dispatch_prefix_command(command, state) do
-    {:execute, command, state}
+    execute_discarding_count(command, state)
+  end
+
+  @spec execute_discarding_count(Mode.command() | [Mode.command()], ModeState.t()) ::
+          Mode.result()
+  defp execute_discarding_count(command_or_commands, state) do
+    {:execute, command_or_commands, state, :discard_count}
   end
 end
