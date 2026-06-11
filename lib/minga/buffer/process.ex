@@ -1525,7 +1525,8 @@ defmodule Minga.Buffer.Process do
         {:reply, {:ok, ""}, state}
 
       {:edited, yanked, new_doc, delta} ->
-        {:reply, {:ok, yanked}, push_undo(state, new_doc, :user, delta) |> mark_dirty()}
+        {:reply, {:ok, yanked},
+         push_undo(state, new_doc, :user, delta) |> mark_dirty() |> record_edit(delta)}
     end
   end
 
