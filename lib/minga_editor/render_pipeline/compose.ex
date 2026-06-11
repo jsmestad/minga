@@ -2,50 +2,46 @@ defmodule MingaEditor.RenderPipeline.Compose do
   @moduledoc """
   Stage 6: Compose.
 
-  Merges content `WindowFrame` structs and `Chrome` into a final `Frame`, and
-  resolves cursor position and shape from the priority chain
+  Flattens the per-window `WindowContent` models into the frame's window list
+  and resolves the final cursor position and shape from the priority chain
   (picker > minibuffer > agent > window > fallback). The modeline is carried by
   the semantic chrome (`gui_status_bar` 0x76), so no modeline draws are injected
-  into window frames here.
+  here. The result is a `ComposedFrame` the Emit stage encodes.
   """
 
-  alias MingaEditor.DisplayList.{Cursor, Frame, WindowFrame}
+  alias Minga.RenderModel.Cursor
   alias MingaEditor.Layout
-
   alias MingaEditor.RenderPipeline.Chrome
   alias MingaEditor.RenderPipeline.ComposeHelpers
+  alias MingaEditor.RenderPipeline.ComposedFrame
   alias MingaEditor.RenderPipeline.Input
+  alias MingaEditor.RenderPipeline.WindowContent
 
   @typedoc "Render pipeline input."
   @type state :: Input.t()
 
   @doc """
-  Merges content WindowFrames and Chrome into a `Frame` struct.
-
-  Resolves cursor position and shape and assembles the final frame.
+  Flattens window content models and resolves the final cursor into a
+  `ComposedFrame`.
   """
   @spec compose_windows(
-          [WindowFrame.t()],
+          [WindowContent.t()],
           Chrome.t(),
           Cursor.t() | nil,
           state()
-        ) :: Frame.t()
-  def compose_windows(window_frames, chrome, cursor_info, state) do
+        ) :: ComposedFrame.t()
+  def compose_windows(window_contents, chrome, cursor_info, state) do
     layout = Layout.get(state)
 
-    # Resolve cursor from window frames, overlays, and fallbacks.
-    # Priority (highest first): picker overlay → agent panel → active WindowFrame → fallback.
+    # Resolve cursor from window contents, overlays, and fallbacks.
+    # Priority (highest first): picker overlay → minibuffer → agent panel →
+    # active window cursor → fallback.
     {minibuffer_row, _, _, _} = layout.minibuffer
     picker_cursor = ComposeHelpers.find_picker_cursor(chrome.overlays)
 
-    # Build the final cursor. Priority (highest first):
-    # picker overlay → minibuffer (command/search/eval) → agent panel →
-    # active WindowFrame → fallback.
-    #
-    # Minibuffer modes must override the window frame cursor because the
-    # window frame still carries the buffer cursor from before entering
-    # command/search/eval mode.
-    active_wf_cursor = Enum.find_value(window_frames, fn wf -> wf.cursor end)
+    # Minibuffer modes must override the window cursor because the window still
+    # carries the buffer cursor from before entering command/search/eval mode.
+    active_window_cursor = Enum.find_value(window_contents, fn wc -> wc.cursor end)
     minibuffer_result = ComposeHelpers.resolve_cursor(state, cursor_info, minibuffer_row)
     minibuffer_mode? = Minga.Editing.minibuffer_mode?(state)
 
@@ -54,27 +50,22 @@ defmodule MingaEditor.RenderPipeline.Compose do
         picker_cursor,
         if(minibuffer_mode?, do: minibuffer_result),
         ComposeHelpers.agent_cursor_from_layout(state, layout),
-        active_wf_cursor,
+        active_window_cursor,
         minibuffer_result,
         Minga.Editing.cursor_shape(state)
       )
 
-    %Frame{
-      cursor: cursor,
-      tab_bar: chrome.tab_bar,
-      windows: window_frames,
-      file_tree: chrome.file_tree,
-      separators: chrome.separators,
-      status_bar: chrome.status_bar_draws,
-      agent_panel: chrome.agent_panel,
-      minibuffer: chrome.minibuffer,
-      overlays: chrome.overlays
-    }
+    ComposedFrame.new(window_models(window_contents), cursor)
+  end
+
+  @spec window_models([WindowContent.t()]) :: [Minga.RenderModel.Window.t()]
+  defp window_models(window_contents) do
+    Enum.flat_map(window_contents, fn %WindowContent{models: models} -> models end)
   end
 
   # Resolves the final frame cursor from the priority chain.
   # Each argument is checked in order; the first non-nil wins.
-  # Priority: picker → minibuffer → agent panel → window frame → fallback.
+  # Priority: picker → minibuffer → agent panel → window → fallback.
   @spec resolve_frame_cursor(
           {non_neg_integer(), non_neg_integer()} | nil,
           {non_neg_integer(), non_neg_integer()} | nil,

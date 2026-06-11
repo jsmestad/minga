@@ -10,7 +10,8 @@ defmodule MingaEditor.Shell.Traditional.Chrome.GUI do
   exception.
   """
 
-  alias MingaEditor.DisplayList.{Cursor, Overlay}
+  alias Minga.RenderModel.Cursor
+  alias MingaEditor.DisplayList.Overlay
   alias MingaEditor.Layout
   alias MingaEditor.MinibufferData
   alias MingaEditor.RenderPipeline.Chrome

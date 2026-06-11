@@ -7,10 +7,11 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Core.WrapMap
+  alias Minga.RenderModel.Cursor
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.View.PromptRenderWindow
   alias MingaEditor.Agent.ViewContext
-  alias MingaEditor.DisplayList.{Cursor, WindowFrame}
+  alias MingaEditor.RenderPipeline.WindowContent
   alias MingaEditor.Layout
   alias MingaEditor.RenderPipeline
   alias MingaEditor.RenderPipeline.AgentChatPrefetch
@@ -52,20 +53,14 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
     max(content_width - gutter_width, 1)
   end
 
-  defp layer_row_text(layer, row) do
-    layer
-    |> Map.get(row, [])
-    |> Enum.map_join("", fn {_col, text, _face} -> text end)
-  end
-
   describe "build_content/2" do
-    test "returns {WindowFrames, cursor_info, state}" do
+    test "returns {WindowContents, cursor_info, state}" do
       state = base_state()
       {scrolls, state, _layout} = run_through_scroll(state)
 
-      {frames, cursor_info, state} = Content.build_content(state, scrolls)
+      {contents, cursor_info, state} = Content.build_content(state, scrolls)
 
-      assert [%WindowFrame{} | _] = frames
+      assert [%WindowContent{models: [%Minga.RenderModel.Window{} | _]} | _] = contents
       assert %Cursor{row: row, col: col, shape: shape} = cursor_info
       assert is_integer(row)
       assert is_integer(col)
@@ -73,22 +68,14 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
       assert %EditorState{} = state
     end
 
-    test "WindowFrame contains gutter and line layers" do
+    test "window content carries the semantic window model" do
       state = base_state(content: "hello world")
       {scrolls, state, _layout} = run_through_scroll(state)
 
-      {[wf], _cursor, _state} = Content.build_content(state, scrolls)
+      {[content], _cursor, _state} = Content.build_content(state, scrolls)
 
-      assert map_size(wf.lines) >= 1
-    end
-
-    test "modeline layer is empty (Chrome handles modeline)" do
-      state = base_state()
-      {scrolls, state, _layout} = run_through_scroll(state)
-
-      {[wf], _cursor, _state} = Content.build_content(state, scrolls)
-
-      assert wf.modeline == %{}
+      assert [%Minga.RenderModel.Window{content_kind: :buffer} = model] = content.models
+      assert Enum.any?(model.rows, fn row -> String.contains?(row.text, "hello world") end)
     end
 
     test "visible_line_map keeps wrapped cursor math out of the folded path" do
@@ -114,11 +101,10 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
       [{_scroll_win_id, scroll}] = Map.to_list(scrolls)
       assert scroll.visible_line_map != nil
 
-      {[wf], cursor_info, _state} = Content.build_content(state, scrolls)
+      {[_content], cursor_info, _state} = Content.build_content(state, scrolls)
 
       assert %Cursor{row: row} = cursor_info
       assert row <= 3
-      assert Enum.max(Map.keys(wf.lines)) <= 4
     end
 
     test "updates window tracking fields after render" do
@@ -168,10 +154,11 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
         buf_version: snapshot.version
       }
 
-      {[frame], _cursor, _state} =
+      {[content], _cursor, _state} =
         Content.build_agent_chat_content(state, layout, %{win_id => prefetch})
 
-      [prompt_model] = frame.additional_window_models
+      [window_model | additional] = content.models
+      [prompt_model] = additional
 
       default_prompt =
         PromptRenderWindow.build(
@@ -180,12 +167,12 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
           prompt_model.rect
         )
 
-      assert frame.window_model.full_refresh == true
-      assert prompt_model.full_refresh == frame.window_model.full_refresh
+      assert window_model.full_refresh == true
+      assert prompt_model.full_refresh == window_model.full_refresh
       assert prompt_model.content_epoch != default_prompt.content_epoch
     end
 
-    test "visual_row_offset renders the correct continuation slice and cursor position" do
+    test "visual_row_offset resolves the cursor position within the continuation slice" do
       line = "    alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu"
       # Layout.GUI reserves only the minibuffer row, so a smaller viewport is
       # needed for the wrapped line to still overflow the editor area.
@@ -216,17 +203,12 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
       [{_win_id, scroll}] = Map.to_list(scrolls)
       assert scroll.viewport.visual_row_offset > 0
 
-      {[wf], cursor_info, _state} = Content.build_content(state, scrolls)
-      top_row = Enum.min(Map.keys(wf.lines))
+      {[_content], cursor_info, _state} = Content.build_content(state, scrolls)
 
-      assert String.contains?(
-               layer_row_text(wf.lines, top_row),
-               Enum.at(wrap_entry, scroll.viewport.visual_row_offset).source_text
-             )
-
-      assert String.trim(layer_row_text(wf.gutter, top_row + 1)) == ""
+      # The active window's cursor row accounts for the visual-row offset so the
+      # cursor lands on the on-screen continuation slice, not the logical line top.
       assert %Cursor{row: row, col: col} = cursor_info
-      assert row == top_row + target_idx - scroll.viewport.visual_row_offset
+      assert row == target_idx - scroll.viewport.visual_row_offset
       assert col == scroll.gutter_w + target_row.indent_width
     end
   end

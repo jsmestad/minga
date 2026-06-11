@@ -2,9 +2,10 @@ defmodule MingaEditor.RenderPipeline.Content do
   @moduledoc """
   Stage 4: Content.
 
-  Builds display list draws for each window's buffer content and agent
-  chat windows. Produces `WindowFrame` structs with gutter, lines, and
-  tildes (but without modeline, which is added in the Chrome stage).
+  Builds the semantic `RenderModel.Window` models for each editor window
+  (buffer windows and agent chat windows) and resolves each active window's
+  buffer cursor. Produces `WindowContent` carriers that the Compose stage
+  flattens into the frame's window list.
   """
 
   alias MingaEditor.Agent.View.PromptRenderer
@@ -13,20 +14,19 @@ defmodule MingaEditor.RenderPipeline.Content do
   alias Minga.Core.Decorations
   alias Minga.Core.Unicode
   alias Minga.Core.WrapMap
-  alias MingaEditor.DisplayList
-  alias MingaEditor.DisplayList.{Cursor, WindowFrame}
+  alias Minga.RenderModel.Cursor
   alias MingaEditor.DisplayMap
   alias MingaEditor.FoldMap
   alias MingaEditor.Layout
   alias Minga.Telemetry
 
-  alias Minga.Core.Face
   alias Minga.RenderModel.Window, as: RenderWindow
   alias MingaEditor.RenderPipeline.AgentChatPrefetch
   alias MingaEditor.RenderPipeline.ContentHelpers
   alias MingaEditor.RenderPipeline.Scroll.WindowScroll
   alias MingaEditor.RenderModel.Window.Builder, as: WindowModelBuilder
   alias MingaEditor.RenderPipeline.Input
+  alias MingaEditor.RenderPipeline.WindowContent
   alias MingaEditor.Viewport
   alias MingaEditor.Window
 
@@ -34,42 +34,41 @@ defmodule MingaEditor.RenderPipeline.Content do
   @type state :: Input.t()
 
   @doc """
-  Builds display list draws for each window's buffer content.
+  Builds the semantic window models for each buffer window.
 
-  Produces `WindowFrame` structs (with gutter, lines, tildes, but
-  without modeline; modeline is in the Chrome stage) and the absolute
-  cursor position for the active window.
+  Produces `WindowContent` carriers (the window's `RenderModel.Window`
+  models) and the absolute cursor position for the active window.
   """
   @spec build_content(state(), %{Window.id() => WindowScroll.t()}) ::
-          {[WindowFrame.t()], Cursor.t() | nil, state()}
+          {[WindowContent.t()], Cursor.t() | nil, state()}
   def build_content(state, scrolls) do
-    {frames, cursor_info, state} =
-      Enum.reduce(scrolls, {[], nil, state}, fn {_win_id, scroll}, {frames, cursor_info, st} ->
-        {wf, ci, st} = build_window_content(st, scroll)
+    {contents, cursor_info, state} =
+      Enum.reduce(scrolls, {[], nil, state}, fn {_win_id, scroll}, {contents, cursor_info, st} ->
+        {wc, ci, st} = build_window_content(st, scroll)
         new_cursor = if scroll.is_active and ci != nil, do: ci, else: cursor_info
-        {[wf | frames], new_cursor, st}
+        {[wc | contents], new_cursor, st}
       end)
 
-    {Enum.reverse(frames), cursor_info, state}
+    {Enum.reverse(contents), cursor_info, state}
   end
 
   @doc """
-  Builds display list draws for agent chat windows.
+  Builds the semantic window models for agent chat windows.
 
   Finds windows with `{:agent_chat, _}` content in the layout, renders
-  the agent chat content into their rects, and returns `WindowFrame`
-  structs. Buffer windows are skipped (handled by `build_content/2`).
+  the agent chat content into their rects, and returns `WindowContent`
+  carriers. Buffer windows are skipped (handled by `build_content/2`).
 
   Returns an empty list if no agent chat windows exist.
   """
   @spec build_agent_chat_content(state(), Layout.t()) ::
-          {[WindowFrame.t()], Cursor.t() | nil, state()}
+          {[WindowContent.t()], Cursor.t() | nil, state()}
   def build_agent_chat_content(state, layout) do
     build_agent_chat_content(state, layout, %{})
   end
 
   @spec build_agent_chat_content(state(), Layout.t(), %{Window.id() => AgentChatPrefetch.t()}) ::
-          {[WindowFrame.t()], Cursor.t() | nil, state()}
+          {[WindowContent.t()], Cursor.t() | nil, state()}
   def build_agent_chat_content(state, layout, prefetched_agent_chats) do
     layout.window_layouts
     |> Enum.reduce({[], nil, state}, fn {win_id, win_layout}, {frames, cursor, st} ->
@@ -98,7 +97,7 @@ defmodule MingaEditor.RenderPipeline.Content do
   end
 
   @spec build_window_content(state(), WindowScroll.t()) ::
-          {WindowFrame.t(), Cursor.t() | nil, state()}
+          {WindowContent.t(), Cursor.t() | nil, state()}
   defp build_window_content(state, scroll) do
     %WindowScroll{
       win_layout: win_layout,
@@ -120,8 +119,7 @@ defmodule MingaEditor.RenderPipeline.Content do
       window: window
     } = scroll
 
-    {row_off, col_off, content_width, content_height} = win_layout.content
-    visible_rows = Viewport.content_rows(viewport)
+    {row_off, col_off, _content_width, _content_height} = win_layout.content
 
     cursor = {cursor_line, cursor_byte_col}
 
@@ -142,7 +140,7 @@ defmodule MingaEditor.RenderPipeline.Content do
         decorations: snapshot.decorations,
         git_signs: scroll.git_signs,
         is_active: is_active,
-        is_semantic: MingaEditor.Frontend.semantic_ui?(state.capabilities),
+        is_semantic: true,
         wrap_on: wrap_on,
         line_number_style: line_number_style,
         width_oracle: width_oracle
@@ -154,50 +152,7 @@ defmodule MingaEditor.RenderPipeline.Content do
     ctx_fp = ContentHelpers.context_fingerprint(render_ctx, is_active)
     window = Window.detect_context_change(window, ctx_fp)
 
-    semantic? = MingaEditor.Frontend.semantic_ui?(state.capabilities)
-
-    # Render lines with dirty-aware loop. Semantic frontends build the canonical window model below
-    # instead of building throwaway DisplayList draw layers; only the legacy Zig cell frontend needs them.
-    line_opts = %{
-      first_line: first_line,
-      cursor_line: cursor_line,
-      ctx: render_ctx,
-      ln_style: line_number_style,
-      gutter_w: gutter_w,
-      first_byte_off: snapshot.first_line_byte_offset,
-      row_off: row_off,
-      col_off: col_off,
-      window: window,
-      buffer: window.buffer,
-      visible_line_map: scroll.visible_line_map,
-      fold_map: window.fold_map,
-      wrap_on: wrap_on,
-      options: snapshot.options
-    }
-
-    {gutter_layer, line_layer, rows_used, window} =
-      if semantic? do
-        {%{}, %{}, visible_rows, window}
-      else
-        render_display_layers(lines, visible_rows, line_opts, scroll, wrap_on, window)
-      end
-
-    # Tilde lines for empty space below content
-    tilde_draws =
-      if rows_used < visible_rows do
-        for row <- rows_used..(visible_rows - 1) do
-          DisplayList.draw(
-            row + row_off,
-            col_off + gutter_w,
-            "~",
-            Face.new(fg: state.theme.editor.tilde_fg)
-          )
-        end
-      else
-        []
-      end
-
-    # Build WindowFrame
+    # Resolve the active window's buffer cursor.
     buf_cursor =
       if is_active do
         # When folds are active, viewport.top is in visible-line coordinates.
@@ -260,15 +215,7 @@ defmodule MingaEditor.RenderPipeline.Content do
 
     state = add_rows_rasterized(state, build_stats.rasterized)
 
-    win_frame = %WindowFrame{
-      rect: {0, 0, content_width, content_height},
-      gutter: if(semantic?, do: %{}, else: gutter_layer),
-      lines: if(semantic?, do: %{}, else: line_layer),
-      tilde_lines: if(semantic?, do: %{}, else: DisplayList.draws_to_layer_sorted(tilde_draws)),
-      modeline: %{},
-      cursor: buf_cursor,
-      window_model: window_model
-    }
+    window_content = WindowContent.new(window_model, [], buf_cursor)
 
     cursor_info = buf_cursor
 
@@ -292,54 +239,7 @@ defmodule MingaEditor.RenderPipeline.Content do
     ws = state.workspace
     state = %{state | workspace: %{ws | windows: %{ws.windows | map: new_map}}}
 
-    {win_frame, cursor_info, state}
-  end
-
-  @spec render_display_layers(
-          [String.t()],
-          pos_integer(),
-          map(),
-          WindowScroll.t(),
-          boolean(),
-          Window.t()
-        ) ::
-          {DisplayList.render_layer(), DisplayList.render_layer(), non_neg_integer(), Window.t()}
-  defp render_display_layers(
-         lines,
-         visible_rows,
-         line_opts,
-         %{visible_line_map: nil},
-         true,
-         window
-       ) do
-    # Wrapping currently runs only on the plain sequential path. When a visible_line_map is present,
-    # folding/virtual-line bookkeeping takes priority so we do not count hidden display-map entries as rows.
-    wrap_opts = Map.drop(line_opts, [:visible_line_map, :fold_map])
-
-    {gutter_draws, line_draws, rows_used} =
-      ContentHelpers.render_lines_wrapped(lines, visible_rows, wrap_opts)
-
-    {DisplayList.draws_to_layer_sorted(gutter_draws),
-     DisplayList.draws_to_layer_sorted(line_draws), rows_used, window}
-  end
-
-  defp render_display_layers(
-         lines,
-         _visible_rows,
-         line_opts,
-         %{visible_line_map: nil},
-         _wrap_on,
-         _window
-       ) do
-    ContentHelpers.render_lines_nowrap_layers(lines, line_opts)
-  end
-
-  defp render_display_layers(lines, _visible_rows, line_opts, _scroll, _wrap_on, _window) do
-    {gutter_draws, line_draws, rows_used, window} =
-      ContentHelpers.render_lines_nowrap(lines, line_opts)
-
-    {DisplayList.draws_to_layer_sorted(gutter_draws),
-     DisplayList.draws_to_layer_sorted(line_draws), rows_used, window}
+    {window_content, cursor_info, state}
   end
 
   @spec cursor_visual_position(map()) :: {integer(), non_neg_integer(), non_neg_integer()}
@@ -428,9 +328,9 @@ defmodule MingaEditor.RenderPipeline.Content do
       Minga.Log.debug(:render, "[content] skipped agent window #{win_id}: missing prefetch")
       {frames, cursor, st}
     else
-      {frame, ci, st} = render_agent_chat_window(st, window, prefetch, win_id, win_layout)
+      {content, ci, st} = render_agent_chat_window(st, window, prefetch, win_id, win_layout)
       new_cursor = if ci != nil, do: ci, else: cursor
-      {[frame | frames], new_cursor, st}
+      {[content | frames], new_cursor, st}
     end
   catch
     # Buffer process died between the :DOWN message and this render.
@@ -453,7 +353,7 @@ defmodule MingaEditor.RenderPipeline.Content do
           AgentChatPrefetch.t() | nil,
           Window.id(),
           Layout.window_layout()
-        ) :: {WindowFrame.t(), Cursor.t() | nil, state()}
+        ) :: {WindowContent.t(), Cursor.t() | nil, state()}
   defp render_agent_chat_window(state, window, prefetch, _win_id, win_layout) do
     # Build ViewContext once for the prompt geometry and the semantic prompt model.
     ctx = ViewContext.from_editor_state(state)
@@ -474,21 +374,11 @@ defmodule MingaEditor.RenderPipeline.Content do
 
     # When help is visible the chat buffer is suppressed. The help overlay,
     # prompt, and dashboard all reach the live (semantic) frontends through the
-    # AgentChat semantic model, so this branch emits an empty-content frame and
-    # carries no cell-era draws.
+    # AgentChat semantic model, so this branch emits no window models.
     help_visible = state.workspace.agent_ui.view.help_visible
 
     if help_visible do
-      frame = %WindowFrame{
-        rect: {0, 0, chat_width, height},
-        gutter: %{},
-        lines: %{},
-        tilde_lines: %{},
-        modeline: %{},
-        cursor: nil
-      }
-
-      {frame, nil, state}
+      {WindowContent.new(nil, [], nil), nil, state}
     else
       render_agent_chat_buffer(
         state,
@@ -513,7 +403,7 @@ defmodule MingaEditor.RenderPipeline.Content do
           AgentChatPrefetch.t(),
           Layout.window_layout(),
           keyword()
-        ) :: {WindowFrame.t(), Cursor.t() | nil, state()}
+        ) :: {WindowContent.t(), Cursor.t() | nil, state()}
   defp render_agent_chat_buffer(
          state,
          ctx,
@@ -544,8 +434,6 @@ defmodule MingaEditor.RenderPipeline.Content do
       buf_version: buf_version
     } = prefetch
 
-    buf = window.buffer
-
     is_active =
       window.buffer == state.workspace.buffers.active or state.workspace.windows.active == win_id
 
@@ -565,7 +453,7 @@ defmodule MingaEditor.RenderPipeline.Content do
         content_w: content_w,
         has_sign_column: true,
         is_active: is_active,
-        is_semantic: MingaEditor.Frontend.semantic_ui?(state.capabilities),
+        is_semantic: true,
         wrap_on: true,
         line_number_style: line_number_style,
         options: snapshot.options,
@@ -607,8 +495,6 @@ defmodule MingaEditor.RenderPipeline.Content do
     ctx_fp = ContentHelpers.context_fingerprint(render_ctx, is_active)
     window = Window.detect_context_change(window, ctx_fp)
 
-    semantic? = MingaEditor.Frontend.semantic_ui?(state.capabilities)
-
     {window, content_epoch, full_refresh?} =
       Window.prepare_render_epoch(
         window,
@@ -626,29 +512,6 @@ defmodule MingaEditor.RenderPipeline.Content do
           width_oracle: MingaEditor.Frontend.Capabilities.width_oracle(state.capabilities)
         })
       )
-
-    # Render lines
-    ln_style = if line_number_style == :none, do: :none, else: :absolute
-
-    opts = %{
-      first_line: first_line,
-      cursor_line: cursor_line,
-      ctx: render_ctx,
-      ln_style: ln_style,
-      gutter_w: gutter_w,
-      first_byte_off: 0,
-      row_off: row_off,
-      col_off: col_off,
-      window: window,
-      buffer: buf,
-      visible_line_map: visible_line_map,
-      fold_map: fold_map,
-      wrap_on: true,
-      options: snapshot.options
-    }
-
-    {gutter_draws, line_draws, rendered_rows, window} =
-      render_agent_lines(semantic?, snapshot.lines, visible_rows, opts)
 
     # Snapshot render state so future frames can detect changes.
     # Without this, dirty_lines stays empty and content is never re-rendered.
@@ -672,8 +535,6 @@ defmodule MingaEditor.RenderPipeline.Content do
     ws = state.workspace
     new_map = Map.put(ws.windows.map, window.id, window)
     state = %{state | workspace: %{ws | windows: %{ws.windows | map: new_map}}}
-
-    tilde_draws = build_tilde_draws(rendered_rows, chat_height, row_off, col_off)
 
     buf_cursor =
       build_agent_buffer_cursor(is_active, %{
@@ -724,21 +585,11 @@ defmodule MingaEditor.RenderPipeline.Content do
     {window_model, additional_window_models} =
       agent_window_models(state, model_scroll, render_ctx, ctx, chat_width, prompt_rect)
 
-    frame =
-      agent_window_frame(semantic?, %{
-        chat_width: chat_width,
-        height: height,
-        gutter_draws: gutter_draws,
-        line_draws: line_draws,
-        tilde_draws: tilde_draws,
-        cursor: final_cursor,
-        window_model: window_model,
-        additional_window_models: additional_window_models
-      })
+    window_content = WindowContent.new(window_model, additional_window_models, final_cursor)
 
     state = update_agent_scroll_metrics(state, line_count, chat_height)
 
-    {frame, final_cursor, state}
+    {window_content, final_cursor, state}
   end
 
   @spec agent_render_reset_fingerprint(map()) :: term()
@@ -809,16 +660,6 @@ defmodule MingaEditor.RenderPipeline.Content do
     end
   end
 
-  @spec render_agent_lines(boolean(), [String.t()], non_neg_integer(), map()) ::
-          {[DisplayList.draw()], [DisplayList.draw()], non_neg_integer(), Window.t()}
-  defp render_agent_lines(true, _lines, visible_rows, %{window: window}) do
-    {[], [], visible_rows, window}
-  end
-
-  defp render_agent_lines(false, lines, _visible_rows, opts) do
-    ContentHelpers.render_lines_nowrap(lines, opts)
-  end
-
   @spec build_agent_buffer_cursor(boolean(), map()) :: Cursor.t() | nil
   defp build_agent_buffer_cursor(false, _params), do: nil
 
@@ -832,7 +673,10 @@ defmodule MingaEditor.RenderPipeline.Content do
 
     cr = params.cursor_line - params.viewport.top + params.row_off
     cc = params.gutter_w + adjusted_cc - params.viewport.left + params.col_off
-    Cursor.new(cr, cc, Minga.Editing.cursor_shape(params.state))
+    # Clamp: a cursor transiently outside its own viewport must not trip
+    # RenderModel.Cursor's non-negative guard (the old DisplayList.Cursor was
+    # lax here; a losing cursor candidate was simply discarded downstream).
+    Cursor.new(max(cr, 0), max(cc, 0), Minga.Editing.cursor_shape(params.state))
   end
 
   @spec prompt_cursor(
@@ -871,48 +715,15 @@ defmodule MingaEditor.RenderPipeline.Content do
     inner_width = PromptRenderer.input_inner_width(PromptRenderer.input_box_width(chat_width))
 
     additional_window_models =
-      if MingaEditor.Frontend.semantic_ui?(state.capabilities) do
-        case PromptRenderWindow.build(ctx, inner_width, prompt_rect,
-               content_epoch: model_scroll.content_epoch,
-               full_refresh: model_scroll.full_refresh
-             ) do
-          nil -> []
-          prompt_window_model -> [prompt_window_model]
-        end
-      else
-        []
+      case PromptRenderWindow.build(ctx, inner_width, prompt_rect,
+             content_epoch: model_scroll.content_epoch,
+             full_refresh: model_scroll.full_refresh
+           ) do
+        nil -> []
+        prompt_window_model -> [prompt_window_model]
       end
 
     {window_model, additional_window_models}
-  end
-
-  @spec agent_window_frame(boolean(), map()) :: WindowFrame.t()
-  defp agent_window_frame(true, params) do
-    # Semantic frontends consume the window models (chat buffer + prompt) and the
-    # AgentChat semantic surface; the cell-era line/gutter/sidebar draws are unused.
-    %WindowFrame{
-      rect: {0, 0, params.chat_width, params.height},
-      gutter: %{},
-      lines: %{},
-      tilde_lines: %{},
-      modeline: %{},
-      cursor: params.cursor,
-      window_model: params.window_model,
-      additional_window_models: params.additional_window_models
-    }
-  end
-
-  defp agent_window_frame(false, params) do
-    %WindowFrame{
-      rect: {0, 0, params.chat_width, params.height},
-      gutter: DisplayList.draws_to_layer(params.gutter_draws),
-      lines: DisplayList.draws_to_layer(params.line_draws),
-      tilde_lines: DisplayList.draws_to_layer(params.tilde_draws),
-      modeline: %{},
-      cursor: params.cursor,
-      window_model: params.window_model,
-      additional_window_models: params.additional_window_models
-    }
   end
 
   defp cursor_text_from_snapshot(lines, cursor_line, first_line) do
@@ -922,16 +733,6 @@ defmodule MingaEditor.RenderPipeline.Content do
       Enum.at(lines, idx, "")
     else
       ""
-    end
-  end
-
-  defp build_tilde_draws(rendered_rows, chat_height, row_off, col_off) do
-    if rendered_rows < chat_height do
-      for r <- rendered_rows..(chat_height - 1) do
-        DisplayList.draw(r + row_off, col_off, "~", Face.new(fg: 0x555555))
-      end
-    else
-      []
     end
   end
 end

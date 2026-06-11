@@ -6,8 +6,9 @@ defmodule MingaBoard.Shell.Renderer do
   descriptions, model names, and elapsed time. Uses the golden ratio
   layout from `Board.Layout` for card positioning.
 
-  The renderer produces a list of `DisplayList.draw()` tuples that
-  get composed into the splash layer of a `DisplayList.Frame`.
+  The renderer produces a list of `DisplayList.draw()` tuples for the
+  retired cell frontend path; live frontends render the board via the
+  semantic board surface.
   """
 
   alias Minga.Core.Face

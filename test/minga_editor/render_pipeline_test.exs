@@ -21,7 +21,6 @@ defmodule MingaEditor.RenderPipelineTest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.ModalOverlay.Completion, as: CompletionPayload
-  alias MingaEditor.Viewport
 
   import MingaEditor.RenderPipeline.TestHelpers, except: [base_state: 0, base_state: 1]
 
@@ -326,7 +325,7 @@ defmodule MingaEditor.RenderPipelineTest do
       assert window.render_cache.last_buf_version >= 0
     end
 
-    test "second render without edits reuses cached draws (clean lines)" do
+    test "second render without edits leaves the window clean" do
       # A 10-line buffer in a viewport that shows all lines
       lines = Enum.map_join(1..10, "\n", &"line #{&1}")
       state = base_state(content: lines, rows: 15, cols: 80)
@@ -335,34 +334,14 @@ defmodule MingaEditor.RenderPipelineTest do
       state = run_pipeline(state)
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
-      [{win_id, window}] = Map.to_list(state.workspace.windows.map)
-      # Verify caches were populated
-      assert map_size(window.render_cache.cached_content) > 0
-      assert map_size(window.render_cache.cached_gutter) > 0
+      [{win_id, _window}] = Map.to_list(state.workspace.windows.map)
 
       # Frame 2: no edits, no scroll, no cursor change
       state = run_pipeline(state)
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
       window2 = Map.get(state.workspace.windows.map, win_id)
-      # Caches should still be populated and window clean
-      assert map_size(window2.render_cache.cached_content) > 0
       assert window2.render_cache.dirty_lines == %{}
-    end
-
-    test "window caches contain per-line gutter and content draws" do
-      state = base_state(content: "aaa\nbbb\nccc")
-
-      state = run_pipeline(state)
-      assert_receive {:"$gen_cast", {:send_commands, _}}
-
-      [{_win_id, window}] = Map.to_list(state.workspace.windows.map)
-
-      # Should have cache entries for lines 0, 1, 2
-      assert Map.has_key?(window.render_cache.cached_content, 0)
-      assert Map.has_key?(window.render_cache.cached_content, 1)
-      assert Map.has_key?(window.render_cache.cached_content, 2)
-      assert Map.has_key?(window.render_cache.cached_gutter, 0)
     end
 
     test "unchanged lines emit a viewport delta instead of a full content frame" do
@@ -372,26 +351,16 @@ defmodule MingaEditor.RenderPipelineTest do
       state = run_pipeline(state)
       assert_receive {:"$gen_cast", {:send_commands, cmds1}}
 
-      [{win_id, window1}] = Map.to_list(state.workspace.windows.map)
-      cached_content_0 = window1.render_cache.cached_content[0]
-      cached_gutter_0 = window1.render_cache.cached_gutter[0]
-      assert cached_content_0 != nil
-      assert cached_gutter_0 != nil
-
       opcodes1 = frame_opcodes(cmds1)
       assert Opcodes.gui_window_content() in opcodes1
       refute Opcodes.gui_window_viewport_delta() in opcodes1
 
-      # Frame 2: no changes. The semantic encoder reuses the cache and emits a
-      # viewport delta (0xA1) referencing the unchanged rows rather than a fresh
-      # full content frame. This is the meaningful caching behavior: the second
-      # frame is a delta, not a byte-for-byte repeat of the full snapshot.
-      state = run_pipeline(state)
+      # Frame 2: no changes. The semantic encoder reuses its delta cache and
+      # emits a viewport delta (0xA1) referencing the unchanged rows rather than
+      # a fresh full content frame. This is the meaningful caching behavior: the
+      # second frame is a delta, not a byte-for-byte repeat of the full snapshot.
+      _state = run_pipeline(state)
       assert_receive {:"$gen_cast", {:send_commands, cmds2}}
-
-      window2 = Map.get(state.workspace.windows.map, win_id)
-      assert window2.render_cache.cached_content[0] == cached_content_0
-      assert window2.render_cache.cached_gutter[0] == cached_gutter_0
 
       opcodes2 = frame_opcodes(cmds2)
       assert Opcodes.gui_window_viewport_delta() in opcodes2
@@ -416,11 +385,9 @@ defmodule MingaEditor.RenderPipelineTest do
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
       window = Map.get(state.workspace.windows.map, win_id)
-      # After render, window should be clean with updated caches
+      # After render, window should be clean with an updated buffer version.
       assert window.render_cache.dirty_lines == %{}
       assert window.render_cache.last_buf_version > 0
-      # Content cache should have the edited line
-      assert Map.has_key?(window.render_cache.cached_content, 0)
     end
 
     test "cursor-only movement with absolute numbering dirties only 2 lines" do
@@ -509,26 +476,6 @@ defmodule MingaEditor.RenderPipelineTest do
       # Fingerprint should be updated
       assert window2.render_cache.last_context_fingerprint !=
                window.render_cache.last_context_fingerprint
-    end
-
-    test "cache is pruned to visible range after render" do
-      # 20-line buffer but viewport only shows ~10
-      lines = Enum.map_join(1..20, "\n", &"line #{&1}")
-      state = base_state(content: lines, rows: 12, cols: 80)
-
-      state = run_pipeline(state)
-      assert_receive {:"$gen_cast", {:send_commands, _}}
-
-      [{_win_id, window}] = Map.to_list(state.workspace.windows.map)
-
-      # Cache should only contain entries for visible lines (roughly 0..9)
-      # Not lines 10..19 which are below the viewport
-      max_cached_line = window.render_cache.cached_content |> Map.keys() |> Enum.max()
-      assert max_cached_line < 20, "Cache should not contain lines below viewport"
-
-      # All cached lines should be in the visible range
-      visible_count = Viewport.content_rows(window.viewport)
-      assert map_size(window.render_cache.cached_content) <= visible_count
     end
   end
 end

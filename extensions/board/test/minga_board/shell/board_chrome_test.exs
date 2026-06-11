@@ -4,7 +4,7 @@ defmodule MingaBoard.Shell.ChromeTest do
   use ExUnit.Case, async: true
 
   alias Minga.Core.Face
-  alias MingaEditor.DisplayList.Frame
+  alias MingaEditor.RenderPipeline.ComposedFrame
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Layout
   alias MingaEditor.RenderPipeline
@@ -283,14 +283,14 @@ defmodule MingaBoard.Shell.ChromeTest do
   # ── Composition ──────────────────────────────────────────────────────────
 
   describe "build_chrome/4 zoomed composition" do
-    test "zoomed chrome composes into a valid Frame without crashing" do
+    test "zoomed chrome composes into a valid ComposedFrame without crashing" do
       state = zoomed_board_state()
       {scrolls, frames, cursor_info, state, layout} = run_through_content(state)
       chrome = Shell.build_chrome(state, layout, scrolls, cursor_info)
 
       frame = Compose.compose_windows(frames, chrome, cursor_info, state)
 
-      assert %Frame{} = frame
+      assert %ComposedFrame{} = frame
       assert frame.cursor.shape in [:block, :beam, :underline]
     end
   end

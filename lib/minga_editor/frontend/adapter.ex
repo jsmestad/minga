@@ -64,21 +64,4 @@ defmodule MingaEditor.Frontend.Adapter do
   capabilities if the frontend has not reported any.
   """
   @callback capabilities(server :: GenServer.server()) :: MingaEditor.Frontend.Capabilities.t()
-
-  @doc """
-  Receives a display list frame for rendering.
-
-  This callback lets each frontend decide how to encode or render the
-  frame. Semantic frontends encode the render model through
-  `Minga.Frontend.Adapter.GUI` and render retained UI state locally.
-
-  Optional callback: frontends that only support pre-encoded commands
-  (via `send_commands/2`) do not need to implement this.
-  """
-  @callback render_frame(
-              server :: GenServer.server(),
-              frame :: MingaEditor.DisplayList.Frame.t()
-            ) :: :ok
-
-  @optional_callbacks [render_frame: 2]
 end

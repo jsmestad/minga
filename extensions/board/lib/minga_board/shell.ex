@@ -29,8 +29,9 @@ defmodule MingaBoard.Shell do
 
   alias MingaAgent.Session, as: AgentSession
   alias MingaAgent.Subagent.Handle
+  alias Minga.RenderModel.Cursor
   alias MingaEditor.DisplayList
-  alias MingaEditor.DisplayList.{Cursor, Frame}
+  alias MingaEditor.RenderPipeline.ComposedFrame
   alias MingaEditor.RenderPipeline.Chrome
   alias MingaBoard.Frontend.Adapter.GUI.ActionDecoder
   alias MingaBoard.Frontend.Adapter.GUI.BoardEncoder
@@ -505,16 +506,15 @@ defmodule MingaBoard.Shell do
       vp = editor_state.terminal_viewport
       board = editor_state.shell_state
 
-      splash_draws =
+      # The board splash reaches the live (semantic) frontends through the
+      # semantic board surface (BoardBuilder/BoardEncoder above). The composed
+      # frame for the non-GUI path carries no window models, so it only parks the
+      # cursor. The cell splash draws are still computed for the (retired) cell
+      # path but are not part of the composed frame.
+      _splash_draws =
         MingaBoard.Shell.Renderer.render(board, vp.cols, vp.rows, editor_state.theme)
 
-      cursor = Cursor.new(0, 0, :block)
-
-      frame = %Frame{
-        cursor: cursor,
-        splash: splash_draws,
-        overlays: []
-      }
+      frame = ComposedFrame.new([], Cursor.new(0, 0, :block))
 
       input = MingaEditor.RenderPipeline.Input.from_editor_state(editor_state)
       ctx = MingaEditor.Frontend.Emit.Context.from_editor_state(input)

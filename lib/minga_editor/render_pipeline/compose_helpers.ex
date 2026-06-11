@@ -9,7 +9,8 @@ defmodule MingaEditor.RenderPipeline.ComposeHelpers do
 
   alias MingaEditor.Agent.UIState
   alias Minga.Core.Unicode
-  alias MingaEditor.DisplayList.{Cursor, Overlay}
+  alias Minga.RenderModel.Cursor
+  alias MingaEditor.DisplayList.Overlay
   alias MingaEditor.Layout
 
   alias MingaEditor.RenderPipeline.Input

@@ -7,10 +7,12 @@ defmodule MingaEditor.RenderPipeline.TestHelpers do
   """
 
   alias Minga.Buffer.Process, as: BufferProcess
-  alias MingaEditor.DisplayList
-  alias MingaEditor.DisplayList.{Cursor, Frame, WindowFrame}
+  alias Minga.RenderModel.Cursor
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Layout
+  alias MingaEditor.RenderPipeline.ComposedFrame
+  alias MingaEditor.RenderPipeline.Content
+  alias MingaEditor.RenderPipeline.Scroll
   alias MingaEditor.RenderPipeline.Input, as: PipelineInput
   alias MingaEditor.Shell.Identity, as: ShellIdentity
   alias MingaEditor.Shell.Registry, as: ShellRegistry
@@ -134,53 +136,22 @@ defmodule MingaEditor.RenderPipeline.TestHelpers do
   end
 
   @doc """
-  Builds a Frame with a single window for testing emit and content stages.
+  Builds a `ComposedFrame` with a single window's semantic model for testing
+  the Emit stage. Runs the real Content stage so the frame carries a genuine
+  `RenderModel.Window`.
   """
-  @spec build_frame_with_window(EditorState.t(), keyword()) :: Frame.t()
-  def build_frame_with_window(state, opts) do
-    viewport_top = Keyword.get(opts, :viewport_top, 0)
-    layout = Layout.put(state) |> Layout.get()
+  @spec build_frame_with_window(EditorState.t(), keyword()) :: ComposedFrame.t()
+  def build_frame_with_window(state, _opts) do
+    state = EditorState.sync_active_window_cursor(state)
+    state = MingaEditor.RenderPipeline.compute_layout(state)
+    layout = Layout.get(state)
+    {scrolls, state} = Scroll.scroll_windows(state, layout)
+    {contents, cursor_info, _state} = Content.build_content(state, scrolls)
 
-    win_id = state.workspace.windows.active
-    win_layout = Map.get(layout.window_layouts, win_id)
-    {_row, _col, width, height} = win_layout.content
+    windows = Enum.flat_map(contents, fn content -> content.models end)
+    cursor = cursor_info || Cursor.new(0, 0, :block)
 
-    content_draws =
-      for row <- 0..(height - 1) do
-        DisplayList.draw(
-          row,
-          4,
-          "line #{viewport_top + row}: content",
-          Minga.Core.Face.new(fg: 0xBBC2CF, bg: 0x282C34)
-        )
-      end
-
-    gutter_draws =
-      for row <- 0..(height - 1) do
-        DisplayList.draw(
-          row,
-          0,
-          String.pad_leading("#{viewport_top + row + 1}", 3) <> " ",
-          Minga.Core.Face.new(fg: 0x5B6268, bg: 0x282C34)
-        )
-      end
-
-    win_frame = %WindowFrame{
-      rect: {0, 0, width, height},
-      gutter: DisplayList.draws_to_layer(gutter_draws),
-      lines: DisplayList.draws_to_layer(content_draws),
-      tilde_lines: %{},
-      modeline: %{},
-      cursor: nil
-    }
-
-    %Frame{
-      cursor: Cursor.new(0, 4, :block),
-      windows: [win_frame],
-      minibuffer: [
-        DisplayList.draw(height + 1, 0, " ", Minga.Core.Face.new(fg: 0xBBC2CF, bg: 0x282C34))
-      ]
-    }
+    ComposedFrame.new(windows, cursor)
   end
 
   @doc """
