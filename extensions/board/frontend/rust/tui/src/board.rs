@@ -7,6 +7,9 @@ pub struct Board {
     pub filter_mode: u8,
     pub filter_text: String,
     pub cards: Vec<BoardCard>,
+    /// Card the user is zoomed into, or 0 in grid view. Non-zero means the grid
+    /// is hidden (`visible == 0`) but the frontend renders a zoom header (#2328).
+    pub zoomed_card_id: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -94,6 +97,19 @@ pub fn decode_board(bytes: &[u8]) -> Result<(Board, usize), &'static str> {
         });
     }
 
+    // Trailing zoomed_card_id u32 (0 = grid view). Tolerate older BEAMs that omit
+    // the trailer by leaving zoomed_card_id at zero.
+    let mut zoomed_card_id = 0u32;
+    if bytes.len() >= offset + 4 {
+        zoomed_card_id = u32::from_be_bytes([
+            bytes[offset],
+            bytes[offset + 1],
+            bytes[offset + 2],
+            bytes[offset + 3],
+        ]);
+        offset += 4;
+    }
+
     Ok((
         Board {
             visible,
@@ -101,6 +117,7 @@ pub fn decode_board(bytes: &[u8]) -> Result<(Board, usize), &'static str> {
             filter_mode,
             filter_text,
             cards,
+            zoomed_card_id,
         },
         offset,
     ))

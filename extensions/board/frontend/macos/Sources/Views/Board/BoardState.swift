@@ -26,16 +26,26 @@ final class BoardState {
 
     /// ID of the card being zoomed. Set when transitioning from Board
     /// to editor (visible true→false) or editor to Board (visible false→true).
-    /// Used by matchedGeometryEffect for spatial zoom animation.
+    /// Used by matchedGeometryEffect for spatial zoom animation and by the zoom
+    /// header. This is now authoritative from the wire (`zoomed_card_id`, #2328)
+    /// rather than inferred from the visible transition.
     var zoomedCardId: UInt32? = nil
 
+    /// The card the user is zoomed into, looked up from the current cards. The
+    /// BEAM sends all cards every frame, so this resolves even while the grid is
+    /// hidden. Drives the zoom header (status icon, task, model, ESC affordance).
+    var zoomedCard: BoardCard? {
+        guard let id = zoomedCardId, id != 0 else { return nil }
+        return cards.first { $0.id == id }
+    }
+
     /// Updates the board state from a decoded protocol command.
+    ///
+    /// `zoomedCardId` is authoritative from the wire: non-zero while a card is
+    /// zoomed (grid hidden), zero in grid view.
     func update(visible: Bool, focusedCardId: UInt32, cards: [BoardCard],
-                filterMode: Bool, filterText: String) {
-        // Detect zoom transitions and track the card being zoomed
-        if self.visible != visible && focusedCardId != 0 {
-            self.zoomedCardId = focusedCardId
-        }
+                filterMode: Bool, filterText: String, zoomedCardId: UInt32 = 0) {
+        self.zoomedCardId = zoomedCardId == 0 ? nil : zoomedCardId
 
         self.visible = visible
         self.focusedCardId = focusedCardId

@@ -40,6 +40,27 @@ private func sampleBoardRuntimePayload() -> Data {
     return payload
 }
 
+/// Zoomed-state payload: visible=0, the single card is status working, and the
+/// trailing zoomed_card_id points at it (matching the BEAM's zoomed encoding).
+private func sampleZoomedBoardRuntimePayload() -> Data {
+    var payload = Data([0x87, 0x00])
+    appendBoardRuntimeU32(&payload, 0x0000002A)  // focused id
+    appendBoardRuntimeU16(&payload, 0x0001)  // card count
+    payload.append(0x00)  // filter mode off
+    appendBoardRuntimeString16(&payload, "")  // empty filter text
+    appendBoardRuntimeU32(&payload, 0x0000002A)  // card id
+    payload.append(0x01)  // status working
+    payload.append(0x02)  // flags: focused
+    appendBoardRuntimeString16(&payload, "fix auth")
+    payload.append(0x08)
+    payload.append(contentsOf: Array("claude-4".utf8))
+    appendBoardRuntimeU32(&payload, 0x00000064)  // timestamp
+    payload.append(0x00)  // recent file count
+    payload.append(0x00)  // sparkline count
+    appendBoardRuntimeU32(&payload, 0x0000002A)  // zoomed_card_id trailer
+    return payload
+}
+
 private func extensionRuntimeEnvelope(extensionID: String, channel: String, payload: Data) -> Data {
     var body = Data()
     appendBoardRuntimeString16(&body, extensionID)
@@ -109,6 +130,54 @@ struct BoardFrontendRuntimeTests {
         #expect(card.dispatchTimestamp == 0x00000064)
         #expect(card.recentFiles == ["lib/auth.ex"])
         #expect(card.sparkline.count == 2)
+    }
+
+    @Test("decodes zoomed_card_id trailer and resolves the zoomed card")
+    @MainActor func decodeZoomedCardIdTrailer() throws {
+        let payload = sampleZoomedBoardRuntimePayload()
+        let envelope = extensionRuntimeEnvelope(extensionID: "minga_board", channel: "board", payload: payload)
+        let (cmd, _) = try decodeCommand(data: envelope, offset: 0)
+        guard case .guiExtensionRuntime(let message) = cmd else {
+            Issue.record("Expected guiExtensionRuntime, got \(String(describing: cmd))")
+            return
+        }
+
+        BoardFrontendRuntime.resetForTesting()
+        let registry = FrontendExtensionRuntimeRegistry()
+        BoardFrontendRuntime.register(into: registry, encoder: nil, theme: ThemeColors())
+        registry.dispatch(message)
+
+        let state = BoardFrontendRuntime.stateForTesting
+        // Grid is hidden while zoomed, but the zoomed card resolves for the header.
+        #expect(!state.visible)
+        #expect(state.zoomedCardId == 0x0000002A)
+        let zoomed = try #require(state.zoomedCard)
+        #expect(zoomed.id == 0x0000002A)
+        #expect(zoomed.task == "fix auth")
+        #expect(zoomed.model == "claude-4")
+        #expect(zoomed.status == .working)
+    }
+
+    @Test("payload without zoomed trailer leaves the board un-zoomed")
+    @MainActor func decodeWithoutZoomTrailer() throws {
+        // The grid-view sample payload has no zoomed_card_id trailer; the decoder
+        // must tolerate it and report no zoomed card.
+        let payload = sampleBoardRuntimePayload()
+        let envelope = extensionRuntimeEnvelope(extensionID: "minga_board", channel: "board", payload: payload)
+        let (cmd, _) = try decodeCommand(data: envelope, offset: 0)
+        guard case .guiExtensionRuntime(let message) = cmd else {
+            Issue.record("Expected guiExtensionRuntime, got \(String(describing: cmd))")
+            return
+        }
+
+        BoardFrontendRuntime.resetForTesting()
+        let registry = FrontendExtensionRuntimeRegistry()
+        BoardFrontendRuntime.register(into: registry, encoder: nil, theme: ThemeColors())
+        registry.dispatch(message)
+
+        let state = BoardFrontendRuntime.stateForTesting
+        #expect(state.zoomedCardId == nil)
+        #expect(state.zoomedCard == nil)
     }
 
     @Test("truncated generic extension runtime envelope throws")

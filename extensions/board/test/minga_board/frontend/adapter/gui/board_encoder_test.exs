@@ -128,6 +128,43 @@ defmodule MingaBoard.Frontend.Adapter.GUI.BoardEncoderTest do
       assert (flags &&& 0x01) == 1
     end
 
+    test "encodes zoomed_card_id as a u32 trailer after the cards array" do
+      # Zoomed state: visible? is false (grid hidden) but the zoom header data
+      # rides along so frontends can render the card identity + ESC affordance.
+      binary =
+        encode(
+          board(
+            visible?: false,
+            zoomed_card_id: 7,
+            cards: [card(id: 7, status: :working, display_task: "fix auth", model: "claude-4")]
+          )
+        )
+
+      <<@op_gui_board, visible::8, _focused::32, card_count::16, _filter_mode::8, filter_len::16,
+        _filter::binary-size(filter_len), rest::binary>> = unwrap_runtime(binary)
+
+      assert visible == 0
+      assert card_count == 1
+
+      # Consume the single card, then the trailing zoomed_card_id u32.
+      <<_id::32, _status::8, _flags::8, task_len::16, _task::binary-size(task_len), model_len::8,
+        _model::binary-size(model_len), _elapsed::32, file_count::8, after_files::binary>> = rest
+
+      assert file_count == 0
+      <<sparkline_count::8, _sparkline::binary-size(sparkline_count * 2), zoomed_id::32>> = after_files
+      assert zoomed_id == 7
+    end
+
+    test "encodes zoomed_card_id of 0 when not zoomed" do
+      <<@op_gui_board, _visible::8, _focused::32, card_count::16, _filter_mode::8, filter_len::16,
+        _filter::binary-size(filter_len), trailer::binary>> =
+        board() |> encode() |> unwrap_runtime()
+
+      assert card_count == 0
+      assert <<zoomed_id::32>> = trailer
+      assert zoomed_id == 0
+    end
+
     test "rejects malformed cards" do
       invalid_cards = [
         card(id: 0),

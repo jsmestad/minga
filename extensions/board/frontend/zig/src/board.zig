@@ -7,6 +7,9 @@ pub const Board = struct {
     filter_mode: bool,
     filter_text: []u8,
     cards: []BoardCard,
+    // Card the user is zoomed into, or 0 in grid view. Non-zero means the grid
+    // is hidden (visible false) but the frontend renders a zoom header (#2328).
+    zoomed_card_id: u32,
 
     pub fn deinit(self: *Board, alloc: std.mem.Allocator) void {
         alloc.free(self.filter_text);
@@ -81,7 +84,15 @@ pub fn decodeBoard(alloc: std.mem.Allocator, packet: []const u8) !Board {
         cards[decoded] = .{ .id = id, .status = status, .flags = flags, .task = task, .model = model, .timestamp = timestamp, .recent_files = files };
     }
 
-    return .{ .visible = packet[1] != 0, .focused_card_id = readU32(packet, 2), .filter_mode = packet[8] != 0, .filter_text = filter, .cards = cards };
+    // Trailing zoomed_card_id u32 (0 = grid view). Tolerate older BEAMs that omit
+    // the trailer by leaving zoomed_card_id at zero.
+    var zoomed_card_id: u32 = 0;
+    if (packet.len >= offset + 4) {
+        zoomed_card_id = readU32(packet, offset);
+        offset += 4;
+    }
+
+    return .{ .visible = packet[1] != 0, .focused_card_id = readU32(packet, 2), .filter_mode = packet[8] != 0, .filter_text = filter, .cards = cards, .zoomed_card_id = zoomed_card_id };
 }
 
 pub fn statusLabel(status: u8) []const u8 {
@@ -117,18 +128,38 @@ fn readString16(alloc: std.mem.Allocator, packet: []const u8, offset: *usize) ![
 }
 
 test "decodes extension-owned board payload" {
-    const packet = [_]u8{ 0x87, 1, 0, 0, 0, 7, 0, 1, 0, 0, 0, 0, 0, 0, 7, 3, 2, 0, 8 } ++ "fix auth".* ++ [_]u8{8} ++ "claude-4".* ++ [_]u8{ 0, 0, 0, 42, 1, 0, 8 } ++ "lib/a.ex".* ++ [_]u8{ 2, 0, 0, 0xFF, 0xFF };
+    // Trailing 0,0,0,0 is the zoomed_card_id u32 (0 = grid view).
+    const packet = [_]u8{ 0x87, 1, 0, 0, 0, 7, 0, 1, 0, 0, 0, 0, 0, 0, 7, 3, 2, 0, 8 } ++ "fix auth".* ++ [_]u8{8} ++ "claude-4".* ++ [_]u8{ 0, 0, 0, 42, 1, 0, 8 } ++ "lib/a.ex".* ++ [_]u8{ 2, 0, 0, 0xFF, 0xFF } ++ [_]u8{ 0, 0, 0, 0 };
     var board = try decodeBoard(std.testing.allocator, &packet);
     defer board.deinit(std.testing.allocator);
 
     try std.testing.expect(board.visible);
     try std.testing.expectEqual(@as(u32, 7), board.focused_card_id);
+    try std.testing.expectEqual(@as(u32, 0), board.zoomed_card_id);
     try std.testing.expectEqual(@as(usize, 1), board.cards.len);
     try std.testing.expectEqual(@as(u32, 7), board.cards[0].id);
     try std.testing.expectEqual(@as(u8, 3), board.cards[0].status);
     try std.testing.expectEqualStrings("fix auth", board.cards[0].task);
     try std.testing.expectEqualStrings("claude-4", board.cards[0].model);
     try std.testing.expectEqualStrings("lib/a.ex", board.cards[0].recent_files[0]);
+}
+
+test "decodes zoomed_card_id trailer" {
+    // visible=0, status working, trailing zoomed_card_id = 7.
+    const packet = [_]u8{ 0x87, 0, 0, 0, 0, 7, 0, 1, 0, 0, 0, 0, 0, 0, 7, 1, 2, 0, 8 } ++ "fix auth".* ++ [_]u8{8} ++ "claude-4".* ++ [_]u8{ 0, 0, 0, 42, 1, 0, 8 } ++ "lib/a.ex".* ++ [_]u8{ 2, 0, 0, 0xFF, 0xFF } ++ [_]u8{ 0, 0, 0, 7 };
+    var board = try decodeBoard(std.testing.allocator, &packet);
+    defer board.deinit(std.testing.allocator);
+
+    try std.testing.expect(!board.visible);
+    try std.testing.expectEqual(@as(u32, 7), board.zoomed_card_id);
+}
+
+test "tolerates legacy packet without zoom trailer" {
+    const packet = [_]u8{ 0x87, 1, 0, 0, 0, 7, 0, 1, 0, 0, 0, 0, 0, 0, 7, 3, 2, 0, 8 } ++ "fix auth".* ++ [_]u8{8} ++ "claude-4".* ++ [_]u8{ 0, 0, 0, 42, 1, 0, 8 } ++ "lib/a.ex".* ++ [_]u8{ 2, 0, 0, 0xFF, 0xFF };
+    var board = try decodeBoard(std.testing.allocator, &packet);
+    defer board.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(@as(u32, 0), board.zoomed_card_id);
 }
 
 test "status labels are stable" {
