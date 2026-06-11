@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"charm.land/bubbles/v2/list"
-	"charm.land/bubbles/v2/table"
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/lipgloss/v2"
 )
@@ -57,27 +56,6 @@ func (m Model) charmList(title string, items []componentItem, selected int, heig
 	component.SetShowHelp(false)
 	component.SetFilteringEnabled(false)
 	component.Select(min(max(selected, 0), len(items)-1))
-	return strings.Split(component.View(), "\n")
-}
-
-func (m Model) charmTable(columns []table.Column, rows []table.Row, selected int, height int) []string {
-	if len(rows) == 0 {
-		return nil
-	}
-	theme := m.palette()
-	styles := table.DefaultStyles()
-	styles.Header = lipgloss.NewStyle().Bold(true).Foreground(theme.Accent()).Background(theme.PopupSurface()).Padding(0, 1)
-	styles.Cell = lipgloss.NewStyle().Foreground(theme.PopupText()).Background(theme.PopupSurface()).Padding(0, 1)
-	styles.Selected = lipgloss.NewStyle().Bold(true).Foreground(theme.PopupSelectionText()).Background(theme.PopupSelection())
-	component := table.New(
-		table.WithColumns(columns),
-		table.WithRows(rows),
-		table.WithFocused(true),
-		table.WithHeight(max(height, 2)),
-		table.WithWidth(max(m.width, 1)),
-		table.WithStyles(styles),
-	)
-	component.SetCursor(min(max(selected, 0), len(rows)-1))
 	return strings.Split(component.View(), "\n")
 }
 

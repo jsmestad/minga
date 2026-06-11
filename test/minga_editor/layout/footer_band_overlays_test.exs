@@ -18,6 +18,9 @@ defmodule MingaEditor.Layout.FooterBandOverlaysTest do
   import MingaEditor.RenderPipeline.TestHelpers
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.SystemObserver.ProcessSnapshot
+  alias Minga.SystemObserver.TreeNode
+  alias MingaEditor.Agent.EditTimeline
   alias MingaEditor.FocusTree
   alias MingaEditor.Input.Router
   alias MingaEditor.Layout
@@ -41,6 +44,43 @@ defmodule MingaEditor.Layout.FooterBandOverlaysTest do
 
   defp with_observatory(state) do
     put_in(state.shell_state.observatory_visible, true)
+  end
+
+  # Builds an observatory tree with `count` nodes (one root plus count-1 direct
+  # children) so content_height_observatory counts a real flattened node list,
+  # not the empty-state fallback. Snapshots carry only the metrics the count needs.
+  defp with_observatory_nodes(state, count) when count >= 1 do
+    snapshot = %ProcessSnapshot{memory: 0, message_queue_len: 0, reductions: 0}
+
+    children =
+      for _ <- 2..count//1 do
+        %TreeNode{pid: spawn(fn -> :ok end), snapshot: snapshot, children: [], depth: 1}
+      end
+
+    tree = %TreeNode{pid: spawn(fn -> :ok end), snapshot: snapshot, children: children, depth: 0}
+
+    state = with_observatory(state)
+    shell_state = %{state.shell_state | observatory_data: %{tree: tree}}
+    %{state | shell_state: shell_state}
+  end
+
+  # Records `count` agent edits for the active buffer's path and wires the
+  # resulting timeline into the agent UI view, so edit_timeline becomes visible
+  # and content_height_edit_timeline counts a real entry list. The buffer is
+  # saved to a temp path so active_buffer_path/1 has a non-nil path to key on.
+  defp with_edit_timeline(state, count) when count >= 1 do
+    buf = state.workspace.buffers.active
+    path = Path.join(System.tmp_dir!(), "edit-timeline-#{System.unique_integer([:positive])}.ex")
+    :ok = BufferProcess.save_as(buf, path)
+    ExUnit.Callbacks.on_exit(fn -> File.rm(path) end)
+    resolved = BufferProcess.file_path(buf)
+
+    timeline =
+      Enum.reduce(1..count, EditTimeline.new(), fn i, acc ->
+        EditTimeline.record_edit(acc, resolved, "call-#{i}", "write_file", "before", "after #{i}")
+      end)
+
+    put_in(state.workspace.agent_ui.view.edit_timeline, timeline)
   end
 
   describe "OverlayBand.rect/2" do
@@ -112,6 +152,34 @@ defmodule MingaEditor.Layout.FooterBandOverlaysTest do
 
       # title bar (1) + header+body (2) + actions row (1) = 4
       assert height == 4
+      assert row + height == 24
+    end
+
+    test "the observatory band height is one header plus one row per node" do
+      # The Go renderer draws an addressable row per observatory node plus a header
+      # row, and marks a click zone over each node row (#2334). The BEAM height must
+      # equal 1 + node_count, or takeLines clips the trailing node rows out of the
+      # band and their zones become unreachable (the #2333 height lesson). With 3
+      # nodes the content height is 1 (header) + 3 = 4, under the band ceiling
+      # (24/3 = 8), so the band is content-sized and hugs the screen bottom.
+      state = with_observatory_nodes(base_state(rows: 24, cols: 80), 3)
+
+      {row, _col, _width, height} = SurfaceRegistry.rect_for(state, :observatory)
+
+      assert height == 4
+      assert row + height == 24
+    end
+
+    test "the edit timeline band height is one header plus one row per entry" do
+      # The Go renderer draws an addressable row per timeline entry plus a header
+      # row, and marks a click zone over each entry row (#2335). The BEAM height must
+      # equal 1 + entry_count for the same clip-the-zones reason as observatory and
+      # notifications. With 2 entries the content height is 1 (header) + 2 = 3.
+      state = with_edit_timeline(base_state(rows: 24, cols: 80), 2)
+
+      {row, _col, _width, height} = SurfaceRegistry.rect_for(state, :edit_timeline)
+
+      assert height == 3
       assert row + height == 24
     end
 
