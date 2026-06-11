@@ -1,0 +1,28 @@
+{
+  "description": "Keystroke latency gate config. THE GATE IS RELATIVE, NOT ABSOLUTE. On pull_request CI runs we bench the PR's merge-base and the PR HEAD on the SAME runner in the same job, then require head <= base * (1 + tolerance) per scenario/metric. This cancels out runner speed: GitHub hosted runners vary run-to-run, so absolute ceilings calibrated on one machine (an M1) can never be both tight and stable. Evidence from PR #2298 run 27317381350: small_frame p50 was 1694us on the runner (FASTER than the 1813us M1 baseline) yet the tails inflated ~30% (large_frame p99 2836us vs 2174us M1; agent_stream p99 2897us vs 2245us M1). The noise lives in the tails, so the relative tolerances are looser for p99 than p50.",
+  "relative": {
+    "p50_pct": 10,
+    "p99_pct": 20,
+    "_note": "head <= base * (1 + pct/100), evaluated per scenario per metric on the same runner. p50 +10%, p99 +20% because tails are ~30% noisier even same-runner (see #2298 evidence above)."
+  },
+  "absolute_sanity": {
+    "_note": "Loose CATASTROPHIC sanity bounds only. These are NOT the gate; the relative comparison above is the gate. They are deliberately generous so a healthy runner never trips them (p50 4000us is ~2.2x the ~1800us M1 baseline and ~2.4x a fast 1694us runner read). They exist to catch a ~2x regression even when the base bench is broken/unavailable and the relative gate cannot run. Recalibrate only if normal runner reads start approaching these numbers.",
+    "scenarios": {
+      "small_frame": {
+        "p50_us": 4000,
+        "p99_us": 6000
+      },
+      "large_frame": {
+        "p50_us": 4000,
+        "p99_us": 6000
+      },
+      "agent_stream": {
+        "p50_us": 4000,
+        "p99_us": 6000
+      }
+    }
+  },
+  "baseline_date": "2026-06-10",
+  "baseline_source": "bench/baselines/keystroke_latency.json",
+  "ratchet": "Ratchet protocol: after each fast-path optimization PR merges (#2287, #2288, #2289), tighten the RELATIVE tolerances (p50_pct, p99_pct) toward 0 as the same-runner spread shrinks, and lower the absolute_sanity bounds toward (new typical runner read + generous margin). Do NOT ratchet absolute_sanity below ~2x a healthy runner read or it stops being a catastrophic bound and starts flaking on runner variance."
+}

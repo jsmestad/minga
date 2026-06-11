@@ -87,14 +87,29 @@ jobs:
       - run: mix test --warnings-as-errors --exclude system_clipboard --exclude conformance
 
   keystroke-latency-baseline:
-    name: Keystroke Latency Baseline (record-only)
+    name: Keystroke Latency Baseline
     runs-on: ubuntu-latest
-    # Record-only: this job tracks p50/p99 over time and uploads the JSON as an
-    # artifact. It must never gate merges (ticket #2215), so it does not fail the
-    # workflow if the numbers drift.
-    continue-on-error: true
+    # Same-runner A/B latency gate. GitHub hosted runners vary run-to-run, so an
+    # absolute ceiling calibrated on one machine can never be both tight and
+    # stable (PR #2298 saw runner p50 FASTER than the M1 baseline but tails ~30%
+    # noisier). So on pull_request runs we bench the PR's merge-base AND the PR
+    # HEAD on the SAME runner in the same job, then gate RELATIVELY: head must be
+    # within base * (1 + tolerance) per scenario/metric (tolerances in
+    # bench/latency_budgets.json: p50 +10%, p99 +20%). Runner speed cancels out.
+    #
+    # Absolute ceilings remain only as loose catastrophic sanity bounds. If the
+    # base bench cannot run (script missing at merge-base, base build fails) we
+    # fall back to absolute-sanity-only with a loud warning and do NOT fail the
+    # job for infrastructure reasons. On push-to-main there is no PR base, so we
+    # record + sanity-check + upload only (trend mode).
+    #
+    # Flake protection: rerun-once-on-breach re-runs only the HEAD bench and
+    # re-compares against the SAME base numbers; the base is never re-benched.
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Need the merge-base revision available to bench the base side.
+          fetch-depth: 0
 
       - uses: erlef/setup-beam@v1
         with:
@@ -114,15 +129,85 @@ jobs:
           key: deps-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock') }}
           restore-keys: deps-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-
 
+      # Bench the PR's merge-base on this same runner so the relative gate can
+      # compare like-for-like. Tolerant by design: any infrastructure failure
+      # here (script missing at base, build break) leaves BASE_AVAILABLE=0 and we
+      # fall back to absolute-sanity-only. Skipped on push (no PR base).
+      - name: Bench merge-base (A/B base side)
+        if: github.event_name == 'pull_request'
+        id: base_bench
+        run: |
+          set -u
+          HEAD_REF=$(git rev-parse HEAD)
+          BASE_SHA=$(git merge-base origin/main HEAD)
+          echo "Merge-base: $BASE_SHA"
+          echo "BASE_AVAILABLE=0" >> "$GITHUB_ENV"
+
+          if ! git cat-file -e "$BASE_SHA:bench/keystroke_latency_baseline.exs" 2>/dev/null; then
+            echo "::warning::bench/keystroke_latency_baseline.exs missing at merge-base $BASE_SHA; relative gate will be skipped (absolute sanity only)."
+            exit 0
+          fi
+
+          # A relative comparison is only valid when both sides run the same
+          # bench. If this PR changes the bench script, base and HEAD would
+          # measure different scenarios (the ruler itself changed), so skip the
+          # relative gate rather than report the scenario diff as a regression.
+          if ! git diff --quiet "$BASE_SHA" HEAD -- bench/keystroke_latency_baseline.exs; then
+            echo "::warning::bench/keystroke_latency_baseline.exs changed in this PR; base and HEAD would measure different scenarios, so the relative gate is skipped (absolute sanity only)."
+            exit 0
+          fi
+
+          # Force checkout: the working tree is CI-disposable and may carry stale
+          # generated artifacts; -f avoids "would be overwritten" aborts.
+          git checkout -f --quiet "$BASE_SHA"
+
+          if mix deps.get && mix deps.compile && mix protocol.gen && mix native.build.support \
+            && MIX_ENV=test mix run bench/keystroke_latency_baseline.exs; then
+            cp bench/baselines/keystroke_latency.json /tmp/latency_base.json
+            echo "BASE_AVAILABLE=1" >> "$GITHUB_ENV"
+            echo "Captured base bench to /tmp/latency_base.json"
+          else
+            echo "::warning::base bench build/run failed at $BASE_SHA; relative gate will be skipped (absolute sanity only)."
+          fi
+
+          # Always return to HEAD so the rest of the job runs against the PR. The
+          # base bench rewrites the tracked baseline JSON, so -f is required to
+          # switch back cleanly (we already copied what we need to /tmp).
+          git checkout -f --quiet "$HEAD_REF"
+
+      # HEAD must be benched LAST so the uploaded artifact reflects the PR HEAD.
       - run: mix deps.get
       - run: mix deps.compile
       - run: mix protocol.gen
       - run: mix native.build.support
 
-      - name: Record keystroke latency baseline
+      - name: Record keystroke latency baseline (HEAD)
         run: MIX_ENV=test mix run bench/keystroke_latency_baseline.exs | tee keystroke_latency_metrics.txt
 
+      - name: Check keystroke latency budgets
+        id: budget_check
+        continue-on-error: true
+        run: |
+          if [ "${BASE_AVAILABLE:-0}" = "1" ]; then
+            MIX_ENV=test mix run bench/check_latency_budgets.exs --base /tmp/latency_base.json
+          else
+            MIX_ENV=test mix run bench/check_latency_budgets.exs
+          fi
+
+      # Re-run only the HEAD bench and re-compare against the SAME base numbers.
+      - name: Re-run HEAD bench and re-check on breach (flake protection)
+        if: steps.budget_check.outcome == 'failure'
+        run: |
+          echo "First run breached budgets; re-running HEAD bench once before failing."
+          MIX_ENV=test mix run bench/keystroke_latency_baseline.exs | tee keystroke_latency_metrics.txt
+          if [ "${BASE_AVAILABLE:-0}" = "1" ]; then
+            MIX_ENV=test mix run bench/check_latency_budgets.exs --base /tmp/latency_base.json
+          else
+            MIX_ENV=test mix run bench/check_latency_budgets.exs
+          fi
+
       - name: Upload latency baseline JSON
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: keystroke-latency-baseline
