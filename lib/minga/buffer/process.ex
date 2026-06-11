@@ -62,6 +62,13 @@ defmodule Minga.Buffer.Process do
   @type state :: BufState.t()
   @type edit_delta_update :: {:ok, [EditDelta.t()]} | :reset_required
   @type motion_fun :: (Document.t(), Document.position() -> Document.position())
+  @typep operation_result ::
+           {:delta, Document.t(), EditDelta.t()}
+           | {:full, Document.t()}
+           | {:batch, Document.t(), [UndoPatch.t()]}
+  @typep operation_undo :: :delta | :full | :batch | :force_delta | :force_full
+  @typep operation_sync :: :record_delta | :clear
+  @typep operation_opts :: {operation_undo(), BufState.edit_source(), operation_sync()}
 
   # ── Child Spec ──
 
@@ -937,7 +944,12 @@ defmodule Minga.Buffer.Process do
     undo_source = EditSource.to_undo_source(source)
 
     state =
-      push_undo(state, new_doc, undo_source, delta) |> mark_dirty() |> record_edit(delta, source)
+      apply_operation(
+        state,
+        {:delta, new_doc, delta},
+        source,
+        {:delta, undo_source, :record_delta}
+      )
 
     {:reply, :ok, state}
   end
@@ -956,8 +968,15 @@ defmodule Minga.Buffer.Process do
 
     undo_source = EditSource.to_undo_source(source)
 
-    {:reply, :ok,
-     push_undo(state, new_doc, undo_source, delta) |> mark_dirty() |> record_edit(delta, source)}
+    state =
+      apply_operation(
+        state,
+        {:delta, new_doc, delta},
+        source,
+        {:delta, undo_source, :record_delta}
+      )
+
+    {:reply, :ok, state}
   end
 
   def handle_call({:apply_edits, _edits, _source}, _from, %{read_only: true} = state) do
@@ -973,8 +992,10 @@ defmodule Minga.Buffer.Process do
     undo_source = EditSource.to_undo_source(source)
 
     # Batch edits shift offsets between replacements, so consumers need a full content sync.
-    {:reply, :ok,
-     push_undo_batch(state, doc, undo_source, patches) |> mark_dirty() |> clear_edits(source)}
+    state =
+      apply_operation(state, {:batch, doc, patches}, source, {:batch, undo_source, :clear})
+
+    {:reply, :ok, state}
   end
 
   # ── Find and Replace ──
@@ -986,10 +1007,12 @@ defmodule Minga.Buffer.Process do
   def handle_call({:find_and_replace, old_text, new_text, boundary}, _from, state) do
     case Replace.apply_with_delta(state.document, old_text, new_text, boundary) do
       {:ok, new_doc, delta, msg} ->
-        {:reply, {:ok, msg},
-         push_undo_force(state, new_doc, :agent, delta)
-         |> mark_dirty()
-         |> clear_edits(EditSource.agent(self(), "unknown"))}
+        source = EditSource.agent(self(), "unknown")
+
+        state =
+          apply_operation(state, {:delta, new_doc, delta}, source, {:force_delta, :agent, :clear})
+
+        {:reply, {:ok, msg}, state}
 
       {:error, _} = err ->
         {:reply, err, state}
@@ -1014,9 +1037,12 @@ defmodule Minga.Buffer.Process do
           state
 
         [_patch | _rest] ->
-          push_undo_batch(state, final_doc, :agent, patches)
-          |> mark_dirty()
-          |> clear_edits(EditSource.agent(self(), "unknown"))
+          apply_operation(
+            state,
+            {:batch, final_doc, patches},
+            EditSource.agent(self(), "unknown"),
+            {:batch, :agent, :clear}
+          )
       end
 
     {:reply, {:ok, results}, new_state}
@@ -1032,8 +1058,15 @@ defmodule Minga.Buffer.Process do
         {:reply, :ok, state}
 
       {:edited, new_doc, delta} ->
-        {:reply, :ok,
-         push_undo(state, new_doc, :user, delta) |> mark_dirty() |> record_edit(delta)}
+        state =
+          apply_operation(
+            state,
+            {:delta, new_doc, delta},
+            EditSource.user(),
+            {:delta, :user, :record_delta}
+          )
+
+        {:reply, :ok, state}
     end
   end
 
@@ -1047,8 +1080,15 @@ defmodule Minga.Buffer.Process do
         {:reply, :ok, state}
 
       {:edited, new_doc, delta} ->
-        {:reply, :ok,
-         push_undo(state, new_doc, :user, delta) |> mark_dirty() |> record_edit(delta)}
+        state =
+          apply_operation(
+            state,
+            {:delta, new_doc, delta},
+            EditSource.user(),
+            {:delta, :user, :record_delta}
+          )
+
+        {:reply, :ok, state}
     end
   end
 
@@ -1205,9 +1245,12 @@ defmodule Minga.Buffer.Process do
 
   def handle_call({:replace_content, new_content, source}, _from, state) do
     new_buf = Document.new(new_content)
-    new_state = push_undo_force_full(state, new_buf, source)
     event_source = EditSource.from_undo_source(source)
-    {:reply, :ok, mark_dirty(new_state) |> clear_edits(event_source)}
+
+    new_state =
+      apply_operation(state, {:full, new_buf}, event_source, {:force_full, source, :clear})
+
+    {:reply, :ok, new_state}
   end
 
   # Force replace bypasses read_only. Used by panel buffers (file tree, agent)
@@ -1463,8 +1506,15 @@ defmodule Minga.Buffer.Process do
         {:reply, :ok, state}
 
       {:edited, new_doc, delta} ->
-        {:reply, :ok,
-         push_undo(state, new_doc, :user, delta) |> mark_dirty() |> record_edit(delta)}
+        state =
+          apply_operation(
+            state,
+            {:delta, new_doc, delta},
+            EditSource.user(),
+            {:delta, :user, :record_delta}
+          )
+
+        {:reply, :ok, state}
     end
   end
 
@@ -1493,8 +1543,15 @@ defmodule Minga.Buffer.Process do
         {:reply, :ok, state}
 
       {:edited, new_doc, delta} ->
-        {:reply, :ok,
-         push_undo(state, new_doc, :user, delta) |> mark_dirty() |> record_edit(delta)}
+        state =
+          apply_operation(
+            state,
+            {:delta, new_doc, delta},
+            EditSource.user(),
+            {:delta, :user, :record_delta}
+          )
+
+        {:reply, :ok, state}
     end
   end
 
@@ -1511,8 +1568,10 @@ defmodule Minga.Buffer.Process do
   end
 
   def handle_call({:commit_snapshot, new_buf}, _from, state) do
-    {:reply, :ok,
-     push_undo_full(state, new_buf, :user) |> mark_dirty() |> clear_edits(EditSource.user())}
+    state =
+      apply_operation(state, {:full, new_buf}, EditSource.user(), {:full, :user, :clear})
+
+    {:reply, :ok, state}
   end
 
   def handle_call({:clear_line, _line}, _from, %{read_only: true} = state) do
@@ -1525,8 +1584,15 @@ defmodule Minga.Buffer.Process do
         {:reply, {:ok, ""}, state}
 
       {:edited, yanked, new_doc, delta} ->
-        {:reply, {:ok, yanked},
-         push_undo(state, new_doc, :user, delta) |> mark_dirty() |> record_edit(delta)}
+        state =
+          apply_operation(
+            state,
+            {:delta, new_doc, delta},
+            EditSource.user(),
+            {:delta, :user, :record_delta}
+          )
+
+        {:reply, {:ok, yanked}, state}
     end
   end
 
@@ -1949,6 +2015,52 @@ defmodule Minga.Buffer.Process do
     |> Map.merge(explicit_values)
   end
 
+  @spec apply_operation(state(), operation_result(), EditSource.t(), operation_opts()) :: state()
+  defp apply_operation(
+         state,
+         {:delta, new_buf, delta},
+         source,
+         {:delta, undo_source, :record_delta}
+       ) do
+    state
+    |> push_undo(new_buf, undo_source, delta)
+    |> mark_dirty()
+    |> record_edit(delta, source)
+  end
+
+  defp apply_operation(state, {:batch, new_buf, patches}, source, {:batch, undo_source, :clear}) do
+    state
+    |> push_undo_batch(new_buf, undo_source, patches)
+    |> mark_dirty()
+    |> clear_edits(source)
+  end
+
+  defp apply_operation(
+         state,
+         {:delta, new_buf, delta},
+         source,
+         {:force_delta, undo_source, :clear}
+       ) do
+    state
+    |> push_undo_force(new_buf, undo_source, delta)
+    |> mark_dirty()
+    |> clear_edits(source)
+  end
+
+  defp apply_operation(state, {:full, new_buf}, source, {:force_full, undo_source, :clear}) do
+    state
+    |> push_undo_force_full(new_buf, undo_source)
+    |> mark_dirty()
+    |> clear_edits(source)
+  end
+
+  defp apply_operation(state, {:full, new_buf}, source, {:full, undo_source, :clear}) do
+    state
+    |> push_undo_full(new_buf, undo_source)
+    |> mark_dirty()
+    |> clear_edits(source)
+  end
+
   @spec push_undo(state(), Document.t(), BufState.edit_source(), EditDelta.t()) :: state()
   defp push_undo(state, new_buf, source, delta) do
     patch = UndoPatch.from_delta(delta, state.document)
@@ -2207,11 +2319,6 @@ defmodule Minga.Buffer.Process do
   defp delete_swap_file(_state), do: :ok
 
   # ── Edit delta tracking ──
-
-  @spec record_edit(state(), EditDelta.t()) :: state()
-  defp record_edit(state, delta) do
-    record_edit(state, delta, EditSource.user())
-  end
 
   @spec record_edit(state(), EditDelta.t(), EditSource.t()) :: state()
   defp record_edit(state, delta, source) do

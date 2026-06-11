@@ -912,6 +912,20 @@ defmodule Minga.Buffer.ProcessTest do
       assert delta.inserted_text == ""
     end
 
+    test "clear_line records a deletion delta" do
+      {:ok, pid} = BufferProcess.start_link(content: "hello\nworld")
+      assert {:ok, "hello"} = BufferProcess.clear_line(pid, 0)
+      edits = consume_edit_deltas(pid, :test)
+      assert [delta] = edits
+      assert delta.start_byte == 0
+      assert delta.old_end_byte == 5
+      assert delta.new_end_byte == 0
+      assert delta.start_position == {0, 0}
+      assert delta.old_end_position == {0, 5}
+      assert delta.new_end_position == {0, 0}
+      assert delta.inserted_text == ""
+    end
+
     test "undo clears pending edits" do
       {:ok, pid} = BufferProcess.start_link(content: "hello")
       BufferProcess.move_to(pid, {0, 5})
