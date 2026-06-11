@@ -79,7 +79,23 @@ defmodule MingaEditor.RenderPipeline.Content do
     end)
   end
 
+  @doc "Resets the per-frame rasterized-row counter at the start of the Content stage (#2287)."
+  @spec reset_rows_rasterized(state()) :: state()
+  def reset_rows_rasterized(state) do
+    %{state | caches: %{state.caches | frame_rows_rasterized: 0}}
+  end
+
+  @doc "Returns the number of buffer rows rasterized so far this frame (#2287)."
+  @spec rows_rasterized(state()) :: non_neg_integer()
+  def rows_rasterized(state), do: state.caches.frame_rows_rasterized
+
   # ── Private ──────────────────────────────────────────────────────────────
+
+  @spec add_rows_rasterized(state(), non_neg_integer()) :: state()
+  defp add_rows_rasterized(state, count) do
+    current = state.caches.frame_rows_rasterized
+    %{state | caches: %{state.caches | frame_rows_rasterized: current + count}}
+  end
 
   @spec build_window_content(state(), WindowScroll.t()) ::
           {WindowFrame.t(), Cursor.t() | nil, state()}
@@ -226,12 +242,23 @@ defmodule MingaEditor.RenderPipeline.Content do
       end
 
     # Build the canonical window model; TUI adapts it to cells at the frontend boundary.
-    window_model =
+    # Carry the previous frame's retained rows so unchanged rows are reused
+    # without recomposing, and capture how many rows were freshly rasterized (#2287).
+    {window_model, build_stats} =
       Telemetry.span([:minga, :render, :window_model_build], %{window_id: scroll.win_id}, fn ->
-        WindowModelBuilder.build(state, %{scroll | window: window}, render_ctx,
-          content_kind: :buffer
+        WindowModelBuilder.build_with_stats(state, %{scroll | window: window}, render_ctx,
+          content_kind: :buffer,
+          retained_rows: Window.retained_rows(window),
+          retained_wrap_lines: Window.retained_wrap_lines(window)
         )
       end)
+
+    window =
+      window
+      |> Window.put_retained_rows(build_stats.retained_rows)
+      |> Window.put_retained_wrap_lines(build_stats.retained_wrap_lines)
+
+    state = add_rows_rasterized(state, build_stats.rasterized)
 
     win_frame = %WindowFrame{
       rect: {0, 0, content_width, content_height},

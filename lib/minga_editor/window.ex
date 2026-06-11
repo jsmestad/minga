@@ -406,6 +406,32 @@ defmodule MingaEditor.Window do
   @spec dirty?(t(), non_neg_integer()) :: boolean()
   def dirty?(%__MODULE__{render_cache: cache}, line), do: RenderCache.dirty?(cache, line)
 
+  @doc "Returns the retained composed rows from the previous semantic content build (#2287)."
+  @spec retained_rows(t()) :: %{optional(non_neg_integer()) => RenderCache.retained_row()}
+  def retained_rows(%__MODULE__{render_cache: cache}), do: RenderCache.retained_rows(cache)
+
+  @doc "Stores the current frame's retained composed rows for upstream reuse next frame (#2287)."
+  @spec put_retained_rows(t(), %{optional(non_neg_integer()) => RenderCache.retained_row()}) ::
+          t()
+  def put_retained_rows(%__MODULE__{render_cache: cache} = window, rows) do
+    %{window | render_cache: RenderCache.put_retained_rows(cache, rows)}
+  end
+
+  @doc "Returns the retained wrapped logical lines from the previous semantic content build (#2287)."
+  @spec retained_wrap_lines(t()) ::
+          %{optional(non_neg_integer()) => RenderCache.retained_wrap_line()}
+  def retained_wrap_lines(%__MODULE__{render_cache: cache}),
+    do: RenderCache.retained_wrap_lines(cache)
+
+  @doc "Stores the current frame's retained wrapped logical lines for upstream reuse next frame (#2287)."
+  @spec put_retained_wrap_lines(
+          t(),
+          %{optional(non_neg_integer()) => RenderCache.retained_wrap_line()}
+        ) :: t()
+  def put_retained_wrap_lines(%__MODULE__{render_cache: cache} = window, lines) do
+    %{window | render_cache: RenderCache.put_retained_wrap_lines(cache, lines)}
+  end
+
   @doc """
   Checks current frame parameters against last-frame tracking fields
   and returns the window with `dirty_lines: :all` if anything that

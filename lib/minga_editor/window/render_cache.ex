@@ -36,6 +36,28 @@ defmodule MingaEditor.Window.RenderCache do
   @compile {:inline, dirty?: 2}
 
   @typedoc """
+  A retained composed row plus the cheap input fingerprint that produced it.
+
+  The Content stage (semantic Builder) keys these by `row_id`. On the next
+  frame it recomputes only the input fingerprint per row; when the fingerprint
+  matches, it reuses the cached `Row.t()` verbatim instead of recomposing the
+  text and spans. See `MingaEditor.RenderModel.Window.Builder` (#2287).
+  """
+  @type retained_row :: {input_hash :: non_neg_integer(), Minga.RenderModel.Window.Row.t()}
+
+  @typedoc """
+  A retained wrapped logical line: the cheap input fingerprint that produced its
+  visual rows plus the full visual-row entry list (Rows and their wrap metadata).
+
+  The Content stage (semantic Builder) keys these by `buf_line`. On the next
+  frame, when the logical line's fingerprint (line text, highlight segments,
+  compose context, and content width) is unchanged, the Builder reuses the
+  entire visual-row set verbatim instead of recomposing the line and recomputing
+  its wrap points. See `MingaEditor.RenderModel.Window.Builder` (#2287).
+  """
+  @type retained_wrap_line :: {input_hash :: non_neg_integer(), entries :: [map()]}
+
+  @typedoc """
   Context fingerprint: a term derived from the render context that
   captures all per-frame inputs affecting every visible line. When
   the fingerprint changes between frames, all lines are re-rendered.
@@ -60,7 +82,9 @@ defmodule MingaEditor.Window.RenderCache do
           content_epoch: non_neg_integer(),
           reset_pending: boolean(),
           last_reset_fingerprint: term(),
-          total_visual_rows_cache: {term(), non_neg_integer()} | nil
+          total_visual_rows_cache: {term(), non_neg_integer()} | nil,
+          retained_rows: %{optional(non_neg_integer()) => retained_row()},
+          retained_wrap_lines: %{optional(non_neg_integer()) => retained_wrap_line()}
         }
 
   defstruct dirty_lines: %{},
@@ -76,7 +100,9 @@ defmodule MingaEditor.Window.RenderCache do
             content_epoch: 0,
             reset_pending: true,
             last_reset_fingerprint: nil,
-            total_visual_rows_cache: nil
+            total_visual_rows_cache: nil,
+            retained_rows: %{},
+            retained_wrap_lines: %{}
 
   @doc """
   Returns a fresh cache with all lines dirty and no cached draws.
@@ -86,7 +112,12 @@ defmodule MingaEditor.Window.RenderCache do
   """
   @spec reset() :: t()
   def reset do
-    %__MODULE__{dirty_lines: :all, reset_pending: true}
+    %__MODULE__{
+      dirty_lines: :all,
+      reset_pending: true,
+      retained_rows: %{},
+      retained_wrap_lines: %{}
+    }
   end
 
   @doc "Returns a fresh cache invalidation while preserving retained-render epoch state."
@@ -105,7 +136,9 @@ defmodule MingaEditor.Window.RenderCache do
         last_buf_version: -1,
         last_context_fingerprint: nil,
         reset_pending: true,
-        total_visual_rows_cache: nil
+        total_visual_rows_cache: nil,
+        retained_rows: %{},
+        retained_wrap_lines: %{}
     }
   end
 
@@ -373,5 +406,46 @@ defmodule MingaEditor.Window.RenderCache do
       | cached_gutter: Map.filter(cache.cached_gutter, filter),
         cached_content: Map.filter(cache.cached_content, filter)
     }
+  end
+
+  # ── Retained composed rows (#2287) ─────────────────────────────────────────
+
+  @doc """
+  Returns the `{row_id => {input_hash, Row.t()}}` map captured by the last
+  semantic content build. The Builder consults it to skip recomposing rows
+  whose cheap input fingerprint is unchanged.
+  """
+  @spec retained_rows(t()) :: %{optional(non_neg_integer()) => retained_row()}
+  def retained_rows(%__MODULE__{retained_rows: rows}), do: rows
+
+  @doc """
+  Replaces the retained-row map with the current frame's composed rows.
+
+  Stored wholesale (not merged) so the map stays bounded to the visible row
+  set and never accumulates rows that scrolled out of view.
+  """
+  @spec put_retained_rows(t(), %{optional(non_neg_integer()) => retained_row()}) :: t()
+  def put_retained_rows(%__MODULE__{} = cache, rows) when is_map(rows) do
+    %{cache | retained_rows: rows}
+  end
+
+  @doc """
+  Returns the `{buf_line => {input_hash, entries}}` map captured by the last
+  semantic content build for wrapped windows. The Builder consults it to skip
+  recomposing and re-wrapping logical lines whose input fingerprint is unchanged.
+  """
+  @spec retained_wrap_lines(t()) :: %{optional(non_neg_integer()) => retained_wrap_line()}
+  def retained_wrap_lines(%__MODULE__{retained_wrap_lines: lines}), do: lines
+
+  @doc """
+  Replaces the retained wrapped-line map with the current frame's logical lines.
+
+  Stored wholesale (not merged) so the map stays bounded to the visible logical
+  lines and never accumulates lines that scrolled out of view.
+  """
+  @spec put_retained_wrap_lines(t(), %{optional(non_neg_integer()) => retained_wrap_line()}) ::
+          t()
+  def put_retained_wrap_lines(%__MODULE__{} = cache, lines) when is_map(lines) do
+    %{cache | retained_wrap_lines: lines}
   end
 end
