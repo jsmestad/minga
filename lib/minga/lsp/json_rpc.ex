@@ -138,22 +138,50 @@ defmodule Minga.LSP.JsonRpc do
       {:ok, msg, rest} ->
         decode_loop(rest, [msg | acc])
 
+      {:drop, rest} ->
+        decode_loop(rest, acc)
+
       :incomplete ->
         {Enum.reverse(acc), buffer}
     end
   end
 
-  @spec extract_one(binary()) :: {:ok, message(), binary()} | :incomplete
+  @spec extract_one(binary()) :: {:ok, message(), binary()} | {:drop, binary()} | :incomplete
   defp extract_one(buffer) do
-    with [headers_section, body_and_rest] <- :binary.split(buffer, "\r\n\r\n"),
-         {:ok, content_length} <- parse_content_length(headers_section),
-         true <- byte_size(body_and_rest) >= content_length do
-      <<json::binary-size(^content_length), rest::binary>> = body_and_rest
-      {:ok, JSON.decode!(json), rest}
-    else
-      _ -> :incomplete
+    case :binary.split(buffer, "\r\n\r\n") do
+      [headers_section, body_and_rest] ->
+        extract_with_headers(headers_section, body_and_rest)
+
+      [_partial] ->
+        :incomplete
     end
   end
+
+  @spec extract_with_headers(binary(), binary()) ::
+          {:ok, message(), binary()} | {:drop, binary()} | :incomplete
+  defp extract_with_headers(headers_section, body_and_rest) do
+    case parse_content_length(headers_section) do
+      {:ok, content_length} ->
+        extract_body(content_length, body_and_rest)
+
+      :error ->
+        Minga.Log.warning(
+          :lsp,
+          "LSP JSON-RPC decoder dropped a complete header block without a valid Content-Length"
+        )
+
+        {:drop, body_and_rest}
+    end
+  end
+
+  @spec extract_body(non_neg_integer(), binary()) :: {:ok, message(), binary()} | :incomplete
+  defp extract_body(content_length, body_and_rest)
+       when byte_size(body_and_rest) >= content_length do
+    <<json::binary-size(^content_length), rest::binary>> = body_and_rest
+    {:ok, JSON.decode!(json), rest}
+  end
+
+  defp extract_body(_content_length, _body_and_rest), do: :incomplete
 
   @spec parse_content_length(binary()) :: {:ok, non_neg_integer()} | :error
   defp parse_content_length(headers) do

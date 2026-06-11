@@ -1,6 +1,8 @@
 defmodule Minga.LSP.JsonRpcTest do
   use ExUnit.Case, async: true
 
+  import ExUnit.CaptureLog
+
   alias Minga.LSP.JsonRpc
 
   describe "encode_request/3" do
@@ -165,6 +167,46 @@ defmodule Minga.LSP.JsonRpcTest do
 
       assert messages == []
       assert rest == buffer
+    end
+
+    test "drops complete header block without Content-Length and decodes following message" do
+      valid = IO.iodata_to_binary(JsonRpc.encode_notification("valid", %{}))
+      buffer = "X-Other: 1\r\n\r\n" <> valid
+
+      log =
+        capture_log(fn ->
+          {[decoded], rest} = JsonRpc.decode(buffer)
+
+          assert decoded["method"] == "valid"
+          assert rest == ""
+        end)
+
+      assert log =~ "dropped a complete header block"
+      assert log =~ "Content-Length"
+    end
+
+    test "drops complete header block with invalid Content-Length and decodes following message" do
+      valid = IO.iodata_to_binary(JsonRpc.encode_notification("valid", %{}))
+      buffer = "Content-Length: nope\r\n\r\n" <> valid
+
+      log =
+        capture_log(fn ->
+          {[decoded], rest} = JsonRpc.decode(buffer)
+
+          assert decoded["method"] == "valid"
+          assert rest == ""
+        end)
+
+      assert log =~ "dropped a complete header block"
+      assert log =~ "Content-Length"
+    end
+
+    test "raises on malformed JSON bodies" do
+      buffer = "Content-Length: 1\r\n\r\n{"
+
+      assert_raise JSON.DecodeError, fn ->
+        JsonRpc.decode(buffer)
+      end
     end
 
     test "handles message followed by partial message" do
