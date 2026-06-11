@@ -17,7 +17,7 @@ defmodule Minga.Diagnostics.DecorationsTest do
     fold_fg: 0x5B6268
   }
 
-  defp make_diagnostic(severity, start_line, start_col, end_line, end_col) do
+  defp make_diagnostic(severity, start_line, start_col, end_line, end_col, opts \\ []) do
     %Diagnostic{
       range: %{
         start_line: start_line,
@@ -26,7 +26,8 @@ defmodule Minga.Diagnostics.DecorationsTest do
         end_col: end_col
       },
       severity: severity,
-      message: "test #{severity}"
+      message: "test #{severity}",
+      encoding: Keyword.get(opts, :encoding, :utf8)
     }
   end
 
@@ -76,6 +77,44 @@ defmodule Minga.Diagnostics.DecorationsTest do
       decs = BufferProcess.decorations(pid)
       ranges = Decorations.highlights_for_line(decs, 0)
       assert length(ranges) == 2
+    end
+
+    test "UTF-16 diagnostics convert to byte-accurate decoration columns", ctx do
+      {:ok, pid} = BufferProcess.start_link(content: "\"héllo wörld\" <> undefined_var")
+      uri = "file:///test/utf16.ex"
+
+      Diagnostics.publish(ctx.diag_name, :test, uri, [
+        make_diagnostic(:error, 0, 17, 0, 30, encoding: :utf16)
+      ])
+
+      DiagDecorations.apply(pid, uri, @gutter_colors, ctx.diag_name)
+
+      [range] =
+        pid
+        |> BufferProcess.decorations()
+        |> Decorations.highlights_for_line(0)
+
+      assert range.start == {0, 19}
+      assert range.end_ == {0, 32}
+    end
+
+    test "UTF-8 diagnostics keep raw decoration columns", ctx do
+      {:ok, pid} = BufferProcess.start_link(content: "\"héllo wörld\" <> undefined_var")
+      uri = "file:///test/utf8.ex"
+
+      Diagnostics.publish(ctx.diag_name, :test, uri, [
+        make_diagnostic(:error, 0, 19, 0, 32, encoding: :utf8)
+      ])
+
+      DiagDecorations.apply(pid, uri, @gutter_colors, ctx.diag_name)
+
+      [range] =
+        pid
+        |> BufferProcess.decorations()
+        |> Decorations.highlights_for_line(0)
+
+      assert range.start == {0, 19}
+      assert range.end_ == {0, 32}
     end
 
     test "zero-width diagnostic is skipped", ctx do

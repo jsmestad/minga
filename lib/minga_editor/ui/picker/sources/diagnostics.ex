@@ -13,6 +13,7 @@ defmodule MingaEditor.UI.Picker.Sources.Diagnostics do
 
   alias Minga.Buffer
   alias Minga.Diagnostics
+  alias Minga.Diagnostics.Diagnostic
   alias Minga.LSP.SyncServer
 
   @impl true
@@ -28,30 +29,46 @@ defmodule MingaEditor.UI.Picker.Sources.Diagnostics do
   def candidates(%{workspace: %{buffers: %{active: buf}}}) when is_pid(buf) do
     buf
     |> Buffer.file_path()
-    |> candidates_for_path()
+    |> candidates_for_path(buf)
   end
 
   def candidates(_state), do: []
 
-  @spec candidates_for_path(String.t() | nil) :: [Item.t()]
-  defp candidates_for_path(nil), do: []
+  @spec candidates_for_path(String.t() | nil, pid()) :: [Item.t()]
+  defp candidates_for_path(nil, _buf), do: []
 
-  defp candidates_for_path(path) do
+  defp candidates_for_path(path, buf) do
     path
     |> SyncServer.path_to_uri()
     |> Diagnostics.for_uri()
-    |> Enum.map(&format_candidate/1)
+    |> Enum.map(&format_candidate(&1, buf))
   end
 
-  @spec format_candidate(Diagnostics.Diagnostic.t()) :: Item.t()
-  defp format_candidate(diag) do
+  @spec format_candidate(Diagnostic.t(), pid()) :: Item.t()
+  defp format_candidate(diag, buf) do
+    {line, byte_col} = start_position(diag, buf)
     icon = severity_icon(diag.severity)
-    line = diag.range.start_line + 1
-    col = diag.range.start_col + 1
+    display_line = line + 1
+    display_col = byte_col + 1
     source_tag = if diag.source, do: " (#{diag.source})", else: ""
-    label = "#{icon} #{line}:#{col}  #{diag.message}#{source_tag}"
+    label = "#{icon} #{display_line}:#{display_col}  #{diag.message}#{source_tag}"
 
-    %Item{id: {diag.range.start_line, diag.range.start_col}, label: label}
+    %Item{id: {line, byte_col}, label: label}
+  end
+
+  @spec start_position(Diagnostic.t(), pid()) :: Diagnostic.position()
+  defp start_position(%Diagnostic{} = diag, buf) do
+    diag
+    |> start_line_text(buf)
+    |> then(&Diagnostic.start_position(diag, &1))
+  end
+
+  @spec start_line_text(Diagnostic.t(), pid()) :: String.t()
+  defp start_line_text(%Diagnostic{} = diag, buf) do
+    case Buffer.lines(buf, diag.range.start_line, 1) do
+      [text] -> text
+      _ -> ""
+    end
   end
 
   @impl true

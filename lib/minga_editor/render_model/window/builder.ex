@@ -25,6 +25,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   alias Minga.Core.Unicode
   alias Minga.Core.WrapMap
   alias Minga.Diagnostics
+  alias Minga.Diagnostics.Diagnostic
   alias MingaEditor.DisplayMap
   alias MingaEditor.FoldMap
   alias MingaEditor.Layout
@@ -234,7 +235,9 @@ defmodule MingaEditor.RenderModel.Window.Builder do
         viewport,
         visible_row_count,
         visual_entries,
-        wrapped_coordinates?
+        wrapped_coordinates?,
+        lines,
+        first_line
       )
 
     # Document highlights in display coordinates
@@ -1882,32 +1885,77 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           Viewport.t(),
           pos_integer(),
           [visual_row_entry()],
-          boolean()
+          boolean(),
+          [String.t()],
+          non_neg_integer()
         ) :: [DiagnosticRange.t()]
-  defp build_diagnostic_ranges(nil, _viewport, _visible_rows, _visual_entries, _wrapped?), do: []
+  defp build_diagnostic_ranges(
+         nil,
+         _viewport,
+         _visible_rows,
+         _visual_entries,
+         _wrapped?,
+         _lines,
+         _first_line
+       ),
+       do: []
 
-  defp build_diagnostic_ranges(path, viewport, visible_rows, visual_entries, wrapped?)
+  defp build_diagnostic_ranges(
+         path,
+         viewport,
+         visible_rows,
+         visual_entries,
+         wrapped?,
+         lines,
+         first_line
+       )
        when is_binary(path) do
     uri = SyncServer.path_to_uri(path)
-    diagnostics = Diagnostics.for_uri(uri)
-    viewport_bottom = viewport.top + visible_rows
 
-    if wrapped? do
-      Enum.flat_map(diagnostics, &diagnostic_to_wrapped_ranges(&1, visual_entries))
-    else
-      DiagnosticRange.from_diagnostics(diagnostics, viewport.top, viewport_bottom)
+    case Diagnostics.for_uri(uri) do
+      [] ->
+        []
+
+      diagnostics ->
+        viewport_bottom = viewport.top + visible_rows
+        line_cache = diagnostic_line_cache(diagnostics, lines, first_line)
+
+        if wrapped? do
+          Enum.flat_map(
+            diagnostics,
+            &diagnostic_to_wrapped_ranges(&1, visual_entries, line_cache)
+          )
+        else
+          DiagnosticRange.from_diagnostics(diagnostics, viewport.top, viewport_bottom, line_cache)
+        end
     end
   end
 
-  @spec diagnostic_to_wrapped_ranges(Diagnostics.Diagnostic.t(), [visual_row_entry()]) :: [
-          DiagnosticRange.t()
-        ]
-  defp diagnostic_to_wrapped_ranges(%{range: range, severity: severity}, visual_entries) do
+  @spec diagnostic_line_cache([Diagnostic.t()], [String.t()], non_neg_integer()) :: %{
+          non_neg_integer() => String.t()
+        }
+  defp diagnostic_line_cache(diagnostics, lines, first_line) do
+    diagnostics
+    |> Enum.flat_map(fn diag -> [diag.range.start_line, diag.range.end_line] end)
+    |> Enum.uniq()
+    |> Map.new(fn line -> {line, line_at(lines, line, first_line)} end)
+  end
+
+  @spec diagnostic_to_wrapped_ranges(Diagnostic.t(), [visual_row_entry()], %{
+          non_neg_integer() => String.t()
+        }) :: [DiagnosticRange.t()]
+  defp diagnostic_to_wrapped_ranges(%Diagnostic{} = diag, visual_entries, line_cache) do
+    {start_line, start_byte} =
+      Diagnostic.start_position(diag, Map.get(line_cache, diag.range.start_line, ""))
+
+    {end_line, end_byte} =
+      Diagnostic.end_position(diag, Map.get(line_cache, diag.range.end_line, ""))
+
     project_byte_range(
-      range.start_line,
-      range.start_col,
-      range.end_line,
-      range.end_col,
+      start_line,
+      start_byte,
+      end_line,
+      end_byte,
       visual_entries,
       fn start_row, start_col, end_row, end_col ->
         %DiagnosticRange{
@@ -1915,7 +1963,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           start_col: start_col,
           end_row: end_row,
           end_col: end_col,
-          severity: severity
+          severity: diag.severity
         }
       end
     )

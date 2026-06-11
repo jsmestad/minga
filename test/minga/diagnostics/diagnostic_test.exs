@@ -9,7 +9,8 @@ defmodule Minga.Diagnostics.DiagnosticTest do
       severity: Keyword.get(opts, :severity, :error),
       message: Keyword.get(opts, :message, "something went wrong"),
       source: Keyword.get(opts, :source, "test"),
-      code: Keyword.get(opts, :code, nil)
+      code: Keyword.get(opts, :code, nil),
+      encoding: Keyword.get(opts, :encoding, :utf8)
     }
   end
 
@@ -34,6 +35,27 @@ defmodule Minga.Diagnostics.DiagnosticTest do
     test "less severe returns :gt" do
       assert Diagnostic.compare_severity(:hint, :error) == :gt
       assert Diagnostic.compare_severity(:info, :warning) == :gt
+    end
+  end
+
+  describe "position conversion" do
+    test "defaults to UTF-8 byte columns" do
+      diag = make_diag(range: %{start_line: 0, start_col: 19, end_line: 0, end_col: 32})
+
+      assert diag.encoding == :utf8
+      assert Diagnostic.start_position(diag, "\"héllo wörld\" <> undefined_var") == {0, 19}
+      assert Diagnostic.end_position(diag, "\"héllo wörld\" <> undefined_var") == {0, 32}
+    end
+
+    test "converts UTF-16 offsets to byte columns" do
+      diag =
+        make_diag(
+          range: %{start_line: 0, start_col: 17, end_line: 0, end_col: 30},
+          encoding: :utf16
+        )
+
+      assert Diagnostic.start_position(diag, "\"héllo wörld\" <> undefined_var") == {0, 19}
+      assert Diagnostic.end_position(diag, "\"héllo wörld\" <> undefined_var") == {0, 32}
     end
   end
 

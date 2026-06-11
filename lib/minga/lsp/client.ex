@@ -908,10 +908,6 @@ defmodule Minga.LSP.Client do
     start_pos = Map.get(range, "start", %{"line" => 0, "character" => 0})
     end_pos = Map.get(range, "end", %{"line" => 0, "character" => 0})
 
-    # For position conversion we'd need the line text. For now, when using
-    # UTF-8 encoding the character offset equals byte offset. For UTF-16,
-    # we store the raw character offset — accurate conversion requires
-    # line text which will come from the buffer in the DocumentSync integration.
     start_line = Map.get(start_pos, "line", 0)
     start_col = Map.get(start_pos, "character", 0)
     end_line = Map.get(end_pos, "line", 0)
@@ -927,7 +923,8 @@ defmodule Minga.LSP.Client do
       severity: convert_severity(Map.get(raw, "severity", 1)),
       message: Map.get(raw, "message", ""),
       source: Map.get(raw, "source", to_string(state.server_config.name)),
-      code: convert_code(Map.get(raw, "code"))
+      code: convert_code(Map.get(raw, "code")),
+      encoding: state.encoding
     }
   end
 

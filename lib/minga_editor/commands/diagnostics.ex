@@ -10,6 +10,7 @@ defmodule MingaEditor.Commands.Diagnostics do
 
   alias Minga.Buffer
   alias Minga.Diagnostics
+  alias Minga.Diagnostics.Diagnostic
   alias MingaEditor.UI.Picker.Sources.Diagnostics, as: DiagPickerSource
   alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
@@ -89,9 +90,22 @@ defmodule MingaEditor.Commands.Diagnostics do
             EditorState.set_status(state, "No diagnostics")
 
           diag ->
-            Buffer.move_to(buf, {diag.range.start_line, diag.range.start_col})
+            Buffer.move_to(buf, start_position(diag, buf))
             EditorState.set_status(state, diag.message)
         end
+    end
+  end
+
+  @spec start_position(Diagnostic.t(), pid()) :: Diagnostic.position()
+  defp start_position(%Diagnostic{} = diag, buf) do
+    Diagnostic.start_position(diag, start_line_text(diag, buf))
+  end
+
+  @spec start_line_text(Diagnostic.t(), pid()) :: String.t()
+  defp start_line_text(%Diagnostic{} = diag, buf) do
+    case Buffer.lines(buf, diag.range.start_line, 1) do
+      [text] -> text
+      _ -> ""
     end
   end
 

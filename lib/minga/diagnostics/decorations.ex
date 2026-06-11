@@ -42,11 +42,12 @@ defmodule Minga.Diagnostics.Decorations do
   def apply(buf_pid, uri, gutter_colors, diag_server \\ Diagnostics)
       when is_pid(buf_pid) and is_binary(uri) do
     diagnostics = Diagnostics.for_uri(diag_server, uri)
+    line_cache = line_cache(buf_pid, diagnostics)
 
     Buffer.batch_decorations(buf_pid, fn decs ->
       decs
       |> Decorations.remove_group(@diagnostic_group)
-      |> add_diagnostic_ranges(diagnostics, gutter_colors)
+      |> add_diagnostic_ranges(diagnostics, gutter_colors, line_cache)
     end)
   end
 
@@ -62,19 +63,29 @@ defmodule Minga.Diagnostics.Decorations do
 
   # ── Private ──────────────────────────────────────────────────────────
 
-  @spec add_diagnostic_ranges(Decorations.t(), [Diagnostic.t()], MingaEditor.UI.Theme.Gutter.t()) ::
-          Decorations.t()
-  defp add_diagnostic_ranges(decs, diagnostics, gutter_colors) do
+  @spec add_diagnostic_ranges(
+          Decorations.t(),
+          [Diagnostic.t()],
+          MingaEditor.UI.Theme.Gutter.t(),
+          %{non_neg_integer() => String.t()}
+        ) :: Decorations.t()
+  defp add_diagnostic_ranges(decs, diagnostics, gutter_colors, line_cache) do
     Enum.reduce(diagnostics, decs, fn diag, acc ->
-      add_one(acc, diag, gutter_colors)
+      add_one(acc, diag, gutter_colors, line_cache)
     end)
   end
 
-  @spec add_one(Decorations.t(), Diagnostic.t(), MingaEditor.UI.Theme.Gutter.t()) ::
-          Decorations.t()
-  defp add_one(decs, %Diagnostic{range: range} = diag, gutter_colors) do
-    start_pos = {range.start_line, range.start_col}
-    end_pos = {range.end_line, range.end_col}
+  @spec add_one(
+          Decorations.t(),
+          Diagnostic.t(),
+          MingaEditor.UI.Theme.Gutter.t(),
+          %{non_neg_integer() => String.t()}
+        ) :: Decorations.t()
+  defp add_one(decs, %Diagnostic{} = diag, gutter_colors, line_cache) do
+    start_text = Map.get(line_cache, diag.range.start_line, "")
+    end_text = Map.get(line_cache, diag.range.end_line, "")
+    start_pos = Diagnostic.start_position(diag, start_text)
+    end_pos = Diagnostic.end_position(diag, end_text)
 
     # Skip zero-width ranges (some LSP servers report point diagnostics)
     if start_pos == end_pos do
@@ -98,6 +109,22 @@ defmodule Minga.Diagnostics.Decorations do
         )
 
       decs
+    end
+  end
+
+  @spec line_cache(pid(), [Diagnostic.t()]) :: %{non_neg_integer() => String.t()}
+  defp line_cache(buf_pid, diagnostics) do
+    diagnostics
+    |> Enum.flat_map(fn diag -> [diag.range.start_line, diag.range.end_line] end)
+    |> Enum.uniq()
+    |> Map.new(fn line -> {line, line_text(buf_pid, line)} end)
+  end
+
+  @spec line_text(pid(), non_neg_integer()) :: String.t()
+  defp line_text(buf_pid, line) do
+    case Buffer.lines(buf_pid, line, 1) do
+      [text] -> text
+      _ -> ""
     end
   end
 
