@@ -100,8 +100,11 @@ defmodule MingaEditor.SignatureHelpTest do
     end
   end
 
-  describe "render/3" do
-    test "returns empty list for no signatures" do
+  describe "box/3" do
+    # The cell-grid `render/3` painter was removed in #2311; signature help
+    # renders natively via the 0x82 GUI opcode. `box/3` is the live surface that
+    # resolves the tooltip's placement rect for the FocusTree/SurfaceRegistry.
+    test "returns nil for no signatures" do
       sh = %SignatureHelp{
         signatures: [],
         active_signature: 0,
@@ -110,51 +113,22 @@ defmodule MingaEditor.SignatureHelpTest do
         anchor_col: 20
       }
 
-      assert SignatureHelp.render(sh, @viewport, @theme) == []
+      assert SignatureHelp.box(sh, @viewport, @theme) == nil
     end
 
-    test "produces draw commands for valid signature" do
+    test "returns a placement rect within the viewport for a valid signature" do
       sh = SignatureHelp.from_response(@sample_response, 10, 20)
-      draws = SignatureHelp.render(sh, @viewport, @theme)
-      assert draws != []
-      assert Enum.all?(draws, &is_tuple/1)
-    end
+      {row, col, w, h} = SignatureHelp.box(sh, @viewport, @theme)
 
-    test "includes the signature label text" do
-      sh = SignatureHelp.from_response(@sample_response, 10, 20)
-      draws = SignatureHelp.render(sh, @viewport, @theme)
-      texts = Enum.map(draws, fn {_r, _c, text, _s} -> text end)
-      combined = Enum.join(texts)
-      assert String.contains?(combined, "foo")
-      assert String.contains?(combined, "bar")
-    end
-
-    test "active parameter is rendered with highlighting" do
-      sh = SignatureHelp.from_response(@sample_response, 10, 20)
-      draws = SignatureHelp.render(sh, @viewport, @theme)
-
-      # Find the draw that contains the active parameter "bar"
-      bar_draws = Enum.filter(draws, fn {_r, _c, text, _s} -> text == "bar" end)
-      assert bar_draws != []
-
-      [{_r, _c, _text, %Minga.Core.Face{} = face}] = bar_draws
-      assert face.bold == true
-    end
-
-    test "shows signature counter when multiple overloads" do
-      sh = SignatureHelp.from_response(@sample_response, 10, 20)
-      draws = SignatureHelp.render(sh, @viewport, @theme)
-      texts = Enum.map(draws, fn {_r, _c, text, _s} -> text end)
-      combined = Enum.join(texts)
-      assert String.contains?(combined, "1/2")
+      assert row >= 0 and row + h <= 24
+      assert col >= 0 and col + w <= 80
     end
 
     test "positions above the cursor" do
       sh = SignatureHelp.from_response(@sample_response, 15, 20)
-      draws = SignatureHelp.render(sh, @viewport, @theme)
-      rows = Enum.map(draws, fn {r, _c, _text, _s} -> r end)
-      max_row = Enum.max(rows)
-      assert max_row < 15
+      {row, _col, _w, h} = SignatureHelp.box(sh, @viewport, @theme)
+
+      assert row + h <= 15
     end
   end
 end

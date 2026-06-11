@@ -47,12 +47,8 @@ defmodule MingaEditor.LayoutInvalidationTest do
       content: {:buffer, self()},
       buffer: self(),
       viewport: Viewport.new(24, 80),
-      # Simulate populated caches from a previous render
-      render_cache: %MingaEditor.Window.RenderCache{
-        cached_gutter: %{0 => [{0, 0, " 1", []}], 1 => [{1, 0, " 2", []}]},
-        cached_content: %{0 => [{0, 4, "hello", []}], 1 => [{1, 4, "world", []}]},
-        dirty_lines: %{}
-      }
+      # Simulate a clean window from a previous render (no pending redraw).
+      render_cache: %MingaEditor.Window.RenderCache{dirty_lines: %{}}
     }
 
     put_in(state.workspace.windows, %Windows{
@@ -77,19 +73,14 @@ defmodule MingaEditor.LayoutInvalidationTest do
   # ── Unit tests: invalidate_all_windows ─────────────────────────────────────
 
   describe "EditorState.invalidate_all_windows/1" do
-    test "clears cached draws for all windows" do
+    test "marks all lines dirty for the active window" do
       state = new_state() |> with_window(1)
       window = EditorState.active_window_struct(state)
-      assert window.render_cache.cached_content != %{}, "precondition: cache should be populated"
-
-      assert window.render_cache.cached_gutter != %{},
-             "precondition: gutter cache should be populated"
+      assert window.render_cache.dirty_lines == %{}, "precondition: window starts clean"
 
       state = EditorState.invalidate_all_windows(state)
       window = EditorState.active_window_struct(state)
 
-      assert window.render_cache.cached_content == %{}
-      assert window.render_cache.cached_gutter == %{}
       assert window.render_cache.dirty_lines == :all
     end
 
@@ -99,10 +90,7 @@ defmodule MingaEditor.LayoutInvalidationTest do
         content: {:buffer, self()},
         buffer: self(),
         viewport: Viewport.new(12, 40),
-        render_cache: %MingaEditor.Window.RenderCache{
-          cached_content: %{0 => [{0, 0, "a", []}]},
-          dirty_lines: %{}
-        }
+        render_cache: %MingaEditor.Window.RenderCache{dirty_lines: %{}}
       }
 
       win2 = %Window{
@@ -110,10 +98,7 @@ defmodule MingaEditor.LayoutInvalidationTest do
         content: {:buffer, self()},
         buffer: self(),
         viewport: Viewport.new(12, 40),
-        render_cache: %MingaEditor.Window.RenderCache{
-          cached_content: %{0 => [{0, 41, "b", []}]},
-          dirty_lines: %{}
-        }
+        render_cache: %MingaEditor.Window.RenderCache{dirty_lines: %{}}
       }
 
       state =
@@ -127,8 +112,6 @@ defmodule MingaEditor.LayoutInvalidationTest do
       state = EditorState.invalidate_all_windows(state)
 
       for {_id, win} <- state.workspace.windows.map do
-        assert win.render_cache.cached_content == %{}
-        assert win.render_cache.cached_gutter == %{}
         assert win.render_cache.dirty_lines == :all
       end
     end
@@ -196,25 +179,18 @@ defmodule MingaEditor.LayoutInvalidationTest do
 
   # ── Integration: stale cache detection ─────────────────────────────────────
 
-  describe "stale window cache detection" do
-    test "window caches with baked-in coordinates are cleared on invalidation" do
-      # The file tree no longer shifts the editor column (semantic GUI layout,
-      # #2235), so a window split is the layout change that makes cached absolute
-      # coordinates stale. The guard is that `invalidate_all_windows` clears the
-      # cached draws so they re-render with the new offsets.
+  describe "stale window state detection" do
+    test "a window split marks every window for a full redraw on invalidation" do
+      # A layout change (here, a vertical split that moves the right pane's column
+      # offset) makes each window's last-rendered state stale. The guard is that
+      # `invalidate_all_windows` marks every window's lines dirty so they
+      # re-render with the new offsets.
       state = new_state() |> with_window()
 
       layout_before = Layout.compute(state)
       {_r, col_before, _w, _h} = layout_before.editor_area
       assert col_before == 0, "editor starts at col 0"
 
-      # The window has cached draws with col_off=0 baked in (see with_window helper)
-      window = EditorState.active_window_struct(state)
-      [{_row, cached_col, _text, _style}] = window.render_cache.cached_content[0]
-      assert cached_col == 4, "cached draw at col 4 (gutter_w=4, col_off=0)"
-
-      # Splitting the window vertically moves the right pane's column offset, so
-      # the cached col=4 draws on a moved window are stale.
       state = with_vsplit(state)
       layout_after = Layout.compute(state)
       assert map_size(layout_after.window_layouts) == 2
@@ -222,9 +198,6 @@ defmodule MingaEditor.LayoutInvalidationTest do
       state = EditorState.invalidate_all_windows(state)
 
       for {_id, win} <- state.workspace.windows.map do
-        assert win.render_cache.cached_content == %{},
-               "stale cached draws should be cleared after invalidation"
-
         assert win.render_cache.dirty_lines == :all,
                "all lines should be marked dirty for re-render with new offsets"
       end
@@ -237,10 +210,7 @@ defmodule MingaEditor.LayoutInvalidationTest do
       content: {:buffer, self()},
       buffer: self(),
       viewport: Viewport.new(24, 40),
-      render_cache: %MingaEditor.Window.RenderCache{
-        cached_content: %{0 => [{0, 4, "hello", []}]},
-        dirty_lines: %{}
-      }
+      render_cache: %MingaEditor.Window.RenderCache{dirty_lines: %{}}
     }
 
     win2 = %Window{
@@ -248,10 +218,7 @@ defmodule MingaEditor.LayoutInvalidationTest do
       content: {:buffer, self()},
       buffer: self(),
       viewport: Viewport.new(24, 40),
-      render_cache: %MingaEditor.Window.RenderCache{
-        cached_content: %{0 => [{0, 44, "world", []}]},
-        dirty_lines: %{}
-      }
+      render_cache: %MingaEditor.Window.RenderCache{dirty_lines: %{}}
     }
 
     put_in(state.workspace.windows, %Windows{

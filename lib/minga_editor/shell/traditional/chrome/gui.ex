@@ -11,7 +11,6 @@ defmodule MingaEditor.Shell.Traditional.Chrome.GUI do
   """
 
   alias Minga.RenderModel.Cursor
-  alias MingaEditor.DisplayList.Overlay
   alias MingaEditor.Layout
   alias MingaEditor.MinibufferData
   alias MingaEditor.RenderPipeline.Chrome
@@ -44,38 +43,19 @@ defmodule MingaEditor.Shell.Traditional.Chrome.GUI do
     # No cell-grid fallback; the SwiftUI MinibufferView is the only path.
     minibuffer_data = MinibufferData.from_state(state)
 
-    # Overlays: all sent via dedicated GUI opcodes (0x81, 0x82, 0x83).
-    # Picker, which-key, and completion are handled by SwiftUI.
-    overlays = build_overlays(state)
-
     %Chrome{
-      status_bar_draws: [],
       status_bar_data: status_bar_data,
       minibuffer_data: minibuffer_data,
       modeline_click_regions: [],
-      tab_bar: [],
       tab_bar_click_regions: [],
-      minibuffer: [],
-      separators: [],
-      file_tree: [],
-      agent_panel: [],
-      overlays: overlays
+      # All overlays (hover 0x81, signature 0x82, float popups 0x83) are sent via
+      # dedicated GUI opcodes; none go through the cell-grid overlay path. The
+      # empty list keeps the picker-cursor resolution in Compose a no-op.
+      overlays: []
     }
   end
 
   @spec status_bar_data(state()) :: StatusBarData.t() | nil
   defp status_bar_data(%MingaEditor.RenderPipeline.Input{status_bar_data: data}), do: data
   defp status_bar_data(state), do: StatusBarData.from_state(state)
-
-  # ── Overlays ──────────────────────────────────────────────────────────────
-
-  @spec build_overlays(state()) :: [Overlay.t()]
-  defp build_overlays(_state) do
-    # All overlays are now sent via dedicated GUI opcodes:
-    # - Hover popup: 0x81
-    # - Signature help: 0x82
-    # - Float popups: 0x83
-    # No overlay draws go through the cell-grid path for GUI frontends.
-    []
-  end
 end

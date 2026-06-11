@@ -30,24 +30,15 @@ defmodule MingaEditor.Shell.Traditional.Chrome.GUITest do
       assert %Chrome{} = chrome
     end
 
-    test "tab bar and file tree are empty (SwiftUI handles them)" do
+    test "overlays and click regions are empty (SwiftUI handles chrome surfaces)" do
       state = gui_state()
       {scrolls, cursor_info, state, layout} = run_through_content(state)
 
       chrome = ChromeGUI.build(state, layout, scrolls, cursor_info)
 
-      assert chrome.tab_bar == []
-      assert chrome.file_tree == []
-      assert chrome.agent_panel == []
-    end
-
-    test "status bar draws are empty for GUI (SwiftUI owns the status bar surface)" do
-      state = gui_state()
-      {scrolls, cursor_info, state, layout} = run_through_content(state)
-
-      chrome = ChromeGUI.build(state, layout, scrolls, cursor_info)
-
-      assert chrome.status_bar_draws == []
+      assert chrome.overlays == []
+      assert chrome.modeline_click_regions == []
+      assert chrome.tab_bar_click_regions == []
     end
 
     test "status bar data is computed for GUI emission via 0x76 opcode" do
@@ -57,15 +48,6 @@ defmodule MingaEditor.Shell.Traditional.Chrome.GUITest do
       chrome = ChromeGUI.build(state, layout, scrolls, cursor_info)
 
       assert {:buffer, _} = chrome.status_bar_data
-    end
-
-    test "minibuffer is not rendered in Metal (native SwiftUI via 0x7F)" do
-      state = gui_state()
-      {scrolls, cursor_info, state, layout} = run_through_content(state)
-
-      chrome = ChromeGUI.build(state, layout, scrolls, cursor_info)
-
-      assert chrome.minibuffer == []
     end
   end
 end

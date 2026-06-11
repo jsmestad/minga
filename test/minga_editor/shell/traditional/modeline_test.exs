@@ -6,6 +6,11 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
   alias Minga.Mode
   alias MingaEditor.Shell.Traditional.Modeline
 
+  # The cell-grid `Modeline.render/5` painter was removed in #2311; the live
+  # surface is `gui_segments/2,3`, which the GUI status-bar adapter (0x76)
+  # consumes. These tests assert on the semantic segment text and click targets
+  # the modeline produces, not on cell-grid draw geometry.
+
   @base_data %{
     mode: :normal,
     mode_state: Mode.initial_state(),
@@ -20,42 +25,26 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
     macro_recording: false
   }
 
-  describe "render/3" do
-    test "returns draws and click regions" do
-      {commands, regions} = Modeline.render(0, 80, @base_data)
-      assert is_list(commands)
-      assert commands != []
-      assert Enum.all?(commands, &is_tuple/1)
-      assert is_list(regions)
-    end
-
+  describe "segments" do
     test "renders for all modes without crashing" do
       for mode <- [:normal, :insert, :visual, :operator_pending, :command, :replace] do
         data = Map.put(@base_data, :mode, mode)
-        {commands, _regions} = Modeline.render(0, 80, data)
-        assert commands != [], "Expected commands for mode #{mode}"
+        assert segments_text(data) != "", "Expected segments for mode #{mode}"
       end
     end
 
     test "operator_pending mode shows NORMAL badge, not OPERATOR" do
-      data = Map.put(@base_data, :mode, :operator_pending)
-      {commands, _regions} = Modeline.render(0, 80, data)
+      text = segments_text(Map.put(@base_data, :mode, :operator_pending))
 
-      texts =
-        Enum.map(commands, fn {_row, _col, text, _opts} -> text end)
+      assert String.contains?(text, "NORMAL"),
+             "Expected NORMAL badge in operator_pending mode, got: #{inspect(text)}"
 
-      assert Enum.any?(texts, &String.contains?(&1, "NORMAL")),
-             "Expected NORMAL badge in operator_pending mode, got: #{inspect(texts)}"
-
-      refute Enum.any?(texts, &String.contains?(&1, "OPERATOR")),
+      refute String.contains?(text, "OPERATOR"),
              "Should not show OPERATOR badge in operator_pending mode"
     end
 
     test "safe mode prepends a visible mode badge" do
-      data = Map.put(@base_data, :safe_mode, true)
-      {commands, _regions} = Modeline.render(0, 80, data)
-      text = Enum.map_join(commands, fn {_row, _col, segment, _opts} -> segment end)
-
+      text = segments_text(Map.put(@base_data, :safe_mode, true))
       assert String.contains?(text, "[SAFE] NORMAL")
     end
 
@@ -66,14 +55,12 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
             Map.merge(@base_data, %{buf_index: 1, buf_count: 1}),
             Map.merge(@base_data, %{cursor_line: 0, line_count: 1})
           ] do
-        {commands, _} = Modeline.render(0, 80, data)
-        assert commands != []
+        assert segments_text(data) != ""
       end
     end
 
-    test "click regions include buffer_list for file segment" do
-      {_commands, regions} = Modeline.render(0, 80, @base_data)
-      assert Enum.any?(regions, fn {_start, _end, cmd} -> cmd == :buffer_list end)
+    test "file segment is clickable with buffer_list target" do
+      assert :buffer_list in segment_targets(@base_data)
     end
 
     test "shows running background subagent count and active label" do
@@ -83,13 +70,10 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
           active_background_subagent_label: "session-3: tests"
         })
 
-      {commands, regions} = Modeline.render(0, 140, data)
-      text = Enum.map_join(commands, fn {_row, _col, segment, _opts} -> segment end)
-
-      assert String.contains?(text, "bg:2")
-      assert String.contains?(text, "session-3: tests")
-      assert Enum.any?(regions, fn {_start, _end, cmd} -> cmd == :agent_session_switcher end)
-      refute Enum.any?(regions, fn {_start, _end, cmd} -> cmd == :agent_session_picker end)
+      assert String.contains?(segments_text(data), "bg:2")
+      assert String.contains?(segments_text(data), "session-3: tests")
+      assert :agent_session_switcher in segment_targets(data)
+      refute :agent_session_picker in segment_targets(data)
     end
 
     test "omits background subagent segment when none are running" do
@@ -99,10 +83,7 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
           active_background_subagent_label: "unique-bg-label"
         })
 
-      {commands, _regions} = Modeline.render(0, 140, data)
-      text = Enum.map_join(commands, fn {_row, _col, segment, _opts} -> segment end)
-
-      refute String.contains?(text, "unique-bg-label")
+      refute String.contains?(segments_text(data), "unique-bg-label")
     end
 
     test "renders active file merge conflict count when configured" do
@@ -110,11 +91,9 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
         Options.set(options, :modeline_right_segments, [:merge_conflict])
 
         data = Map.put(@base_data, :merge_conflict_count, 2)
-        {commands, regions} = Modeline.render(0, 120, data)
-        text = Enum.map_join(commands, fn {_row, _col, segment, _opts} -> segment end)
 
-        assert String.contains?(text, "X2")
-        assert Enum.any?(regions, fn {_start, _end, cmd} -> cmd == :next_merge_conflict end)
+        assert String.contains?(segments_text(data), "X2")
+        assert :next_merge_conflict in segment_targets(data)
       end)
     end
 
@@ -130,30 +109,21 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
             workspace_conflict_count: 1
           })
 
-        {commands, regions} = Modeline.render(0, 140, data)
-        text = Enum.map_join(commands, fn {_row, _col, segment, _opts} -> segment end)
-
+        text = segments_text(data)
         assert String.contains?(text, "W:Agent: tests")
         assert String.contains?(text, "D2")
         assert String.contains?(text, "C1")
-        assert Enum.any?(regions, fn {_start, _end, cmd} -> cmd == :workspace_list end)
+        assert :workspace_list in segment_targets(data)
       end)
     end
 
     test "filetype segment includes devicon for known filetype" do
-      {commands, _regions} = Modeline.render(0, 120, @base_data)
-
-      texts = Enum.map(commands, fn {_row, _col, text, _opts} -> text end)
-      combined = Enum.join(texts)
-
-      # Elixir devicon should appear somewhere in the modeline
       {icon, _color} = Minga.Language.Devicon.icon_and_color(:elixir)
-      assert String.contains?(combined, icon)
+      assert String.contains?(segments_text(@base_data), icon)
     end
 
     test "filetype segment is clickable with filetype_menu target" do
-      {_commands, regions} = Modeline.render(0, 120, @base_data)
-      assert Enum.any?(regions, fn {_start, _end, cmd} -> cmd == :filetype_menu end)
+      assert :filetype_menu in segment_targets(@base_data)
     end
 
     test "agent status indicators show text labels" do
@@ -172,9 +142,8 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
 
       for {overrides, expected, unexpected} <- cases do
         data = Map.merge(@base_data, Map.put(overrides, :agent_theme_colors, agent_colors))
-        {commands, _regions} = Modeline.render(0, 120, data, theme)
+        combined = segments_text(data, theme)
 
-        combined = combined_text(commands)
         assert String.contains?(combined, "NORMAL")
         assert String.contains?(combined, expected)
 
@@ -187,18 +156,15 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
     test "LSP indicator reflects status and click target" do
       for {status, marker} <- [ready: "●", initializing: "⟳", starting: "◯", error: "✗"] do
         data = Map.put(@base_data, :lsp_status, status)
-        {commands, regions} = Modeline.render(0, 120, data)
-        text = combined_text(commands)
 
-        assert String.contains?(text, marker)
-        assert has_region?(regions, :lsp_info)
+        assert String.contains?(segments_text(data), marker)
+        assert :lsp_info in segment_targets(data)
       end
     end
 
     test "LSP indicator is omitted when status is absent or none" do
       for data <- [@base_data, Map.put(@base_data, :lsp_status, :none)] do
-        {commands, _regions} = Modeline.render(0, 120, data)
-        text = combined_text(commands)
+        text = segments_text(data)
 
         refute String.contains?(text, "●")
         refute String.contains?(text, "⟳")
@@ -210,18 +176,17 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
   describe "git branch and diff summary" do
     test "renders branch and diff variants" do
       cases = [
-        {%{git_branch: "main"}, ["main", "\uE0A0"], []},
+        {%{git_branch: "main"}, ["main", ""], []},
         {%{git_branch: "feat/x", git_diff_summary: {3, 2, 1}}, ["+3", "~2", "-1"], []},
         {%{git_branch: "main", git_diff_summary: {5, 0, 0}}, ["+5"], ["~0", "-0"]},
         {%{git_branch: "main", git_diff_summary: {0, 0, 0}}, ["main"], ["+", "~"]},
-        {%{}, [], ["\uE0A0"]},
-        {%{git_branch: ""}, [], ["\uE0A0"]}
+        {%{}, [], [""]},
+        {%{git_branch: ""}, [], [""]}
       ]
 
       for {overrides, includes, excludes} <- cases do
         data = Map.merge(@base_data, overrides)
-        {commands, _regions} = Modeline.render(0, 120, data)
-        text = combined_text(commands)
+        text = segments_text(data)
 
         for expected <- includes, do: assert(String.contains?(text, expected))
         for unexpected <- excludes, do: refute(String.contains?(text, unexpected))
@@ -235,22 +200,19 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
         Options.set(options, :modeline_left_segments, [:mode, :filename])
         data = Map.put(@base_data, :git_branch, "main")
 
-        {commands, _regions} = Modeline.render(0, 120, data)
-        text = combined_text(commands)
-
+        text = segments_text(data)
         refute String.contains?(text, "main")
-        refute String.contains?(text, "\uE0A0")
+        refute String.contains?(text, "")
       end)
     end
 
-    test "segment order controls render order" do
+    test "segment order controls left/right ordering" do
       with_options(fn options ->
         Options.set(options, :modeline_left_segments, [:filename, :mode])
         Options.set(options, :modeline_right_segments, [])
 
-        {commands, _regions} = Modeline.render(0, 120, @base_data)
-
-        assert text_col(commands, "test.ex") < text_col(commands, "NORMAL")
+        text = segments_text(@base_data)
+        assert text_index(text, "test.ex") < text_index(text, "NORMAL")
       end)
     end
 
@@ -263,52 +225,10 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
           {" #{ctx.data.filetype}W ", ctx.info_fg, ctx.bar_bg, [], nil}
         end)
 
-        {commands, _regions} = Modeline.render(0, 120, @base_data)
-        text = combined_text(commands)
-
-        assert String.contains?(text, "elixirW")
+        assert String.contains?(segments_text(@base_data), "elixirW")
       after
         ModelineSegments.unregister(segment_name)
       end
-    end
-
-    test "responsive truncation drops lower-priority segments first" do
-      with_options(fn options ->
-        Options.set(options, :modeline_left_segments, [:mode, :filename, :git])
-        Options.set(options, :modeline_right_segments, [])
-
-        data =
-          Map.merge(@base_data, %{
-            file_name: "very_long_file_name.ex",
-            git_branch: "very-long-branch-name"
-          })
-
-        {commands, _regions} = Modeline.render(0, 24, data)
-        text = combined_text(commands)
-
-        assert String.contains?(text, "NORMAL")
-        refute String.contains?(text, "very-long-branch-name")
-      end)
-    end
-
-    test "separator styles render configured characters" do
-      with_options(fn options ->
-        Options.set(options, :modeline_left_segments, [:mode, :filename])
-        Options.set(options, :modeline_right_segments, [])
-        Options.set(options, :modeline_separator, :round)
-        {round_commands, _regions} = Modeline.render(0, 120, @base_data)
-
-        Options.set(options, :modeline_separator, :slant)
-        {slant_commands, _regions} = Modeline.render(0, 120, @base_data)
-
-        Options.set(options, :modeline_separator, :none)
-        {none_commands, _regions} = Modeline.render(0, 120, @base_data)
-
-        assert String.contains?(combined_text(round_commands), "")
-        assert String.contains?(combined_text(slant_commands), "")
-        refute String.contains?(combined_text(none_commands), "")
-        refute String.contains?(combined_text(none_commands), "")
-      end)
     end
 
     test "unknown segment names are ignored" do
@@ -316,9 +236,7 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
         Options.set(options, :modeline_left_segments, [:mode, :missing_segment, :filename])
         Options.set(options, :modeline_right_segments, [])
 
-        {commands, _regions} = Modeline.render(0, 120, @base_data)
-        text = combined_text(commands)
-
+        text = segments_text(@base_data)
         assert String.contains?(text, "NORMAL")
         assert String.contains?(text, "test.ex")
       end)
@@ -499,9 +417,6 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
         assert %{left: left, right: right} = Modeline.gui_segments(@base_data)
         refute String.contains?(segment_text(left), "BAD_UTF8")
         refute String.contains?(segment_text(right), "BAD_UTF8")
-
-        {commands, _regions} = Modeline.render(0, 120, @base_data)
-        refute String.contains?(combined_text(commands), "BAD_UTF8")
       after
         ModelineSegments.unregister(segment_name)
       end
@@ -520,9 +435,6 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
         assert %{left: left, right: right} = Modeline.gui_segments(@base_data)
         refute String.contains?(segment_text(left), "BAD_OPTS")
         refute String.contains?(segment_text(right), "BAD_OPTS")
-
-        {commands, _regions} = Modeline.render(0, 120, @base_data)
-        refute String.contains?(combined_text(commands), "BAD_OPTS")
       after
         ModelineSegments.unregister(segment_name)
       end
@@ -542,8 +454,8 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
                    {:bad_output, :counters.get(counter, 1)}
                  end)
 
-        Modeline.render(0, 120, @base_data)
-        Modeline.render(0, 120, @base_data)
+        Modeline.gui_segments(@base_data)
+        Modeline.gui_segments(@base_data)
 
         warning_keys =
           warnings_table
@@ -596,6 +508,66 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
     end
   end
 
+  describe "parser status indicator" do
+    test "reflects parser status and restart click target" do
+      data = Map.put(@base_data, :parser_status, :available)
+      refute String.contains?(segments_text(data), "🌳")
+
+      for {status, marker} <- [unavailable: "🌳✗", restarting: "🌳⟳"] do
+        data = Map.put(@base_data, :parser_status, status)
+
+        assert String.contains?(segments_text(data), marker)
+        assert :parser_restart in segment_targets(data)
+      end
+    end
+  end
+
+  describe "diagnostic counts" do
+    test "shows counts and diagnostic picker target" do
+      cases = [
+        {{3, 0, 0, 0}, ["3"]},
+        {{0, 5, 0, 0}, ["5"]},
+        {{2, 3, 0, 0}, ["2", "3"]}
+      ]
+
+      for {counts, expected_counts} <- cases do
+        data = Map.put(@base_data, :diagnostic_counts, counts)
+        text = segments_text(data)
+
+        for expected <- expected_counts, do: assert(String.contains?(text, expected))
+        assert :diagnostic_picker in segment_targets(data)
+      end
+    end
+
+    test "shows nothing when no diagnostics" do
+      with_diag = segment_targets(Map.put(@base_data, :diagnostic_counts, nil))
+      without = segment_targets(@base_data)
+      refute :diagnostic_picker in with_diag
+      refute :diagnostic_picker in without
+    end
+  end
+
+  describe "indent and selection segments" do
+    test "shows indentation and exposes indent picker click target" do
+      for {type, size, label} <- [{:spaces, 2, "Spaces:2"}, {:tabs, 4, "Tabs:4"}] do
+        data = Map.merge(@base_data, %{indent_type: type, indent_size: size})
+
+        assert String.contains?(segments_text(data), label)
+        assert :indent_picker in segment_targets(data)
+      end
+    end
+
+    test "selection info replaces cursor position" do
+      data = Map.merge(@base_data, %{selection_info: {:chars, 42}})
+      text = segments_text(data)
+
+      assert String.contains?(text, "42 chars")
+      refute String.contains?(text, "1:1")
+    end
+  end
+
+  # ── Helpers ────────────────────────────────────────────────────────────────
+
   defp with_options(fun) when is_function(fun, 1) do
     options = start_supervised!({Options, name: nil})
     previous = Process.get(:minga_config_options)
@@ -611,105 +583,30 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
   defp restore_options_server(nil), do: Process.delete(:minga_config_options)
   defp restore_options_server(previous), do: Process.put(:minga_config_options, previous)
 
-  defp combined_text(commands) do
-    Enum.map_join(commands, fn {_row, _col, segment, _opts} -> segment end)
+  defp gui_segments(data, nil), do: Modeline.gui_segments(data)
+  defp gui_segments(data, theme), do: Modeline.gui_segments(data, theme)
+
+  defp segments_text(data, theme \\ nil) do
+    %{left: left, right: right} = gui_segments(data, theme)
+    segment_text(left ++ right)
   end
 
-  defp text_col(commands, needle) do
-    commands
-    |> Enum.find_value(fn {_row, col, segment, _opts} ->
-      if String.contains?(segment, needle), do: col
-    end)
+  defp segment_targets(data, theme \\ nil) do
+    %{left: left, right: right} = gui_segments(data, theme)
+
+    (left ++ right)
+    |> Enum.map(fn {_name, _text, _fg, _bg, _opts, target} -> target end)
+    |> Enum.reject(&is_nil/1)
   end
 
   defp segment_text(segments) do
     Enum.map_join(segments, fn {_name, text, _fg, _bg, _opts, _target} -> text end)
   end
 
-  defp has_region?(regions, target) do
-    Enum.any?(regions, fn {_start, _end, command} -> command == target end)
-  end
-
-  describe "parser status indicator" do
-    test "reflects parser status and restart click target" do
-      data = Map.put(@base_data, :parser_status, :available)
-      {commands, _regions} = Modeline.render(0, 120, data)
-      refute String.contains?(combined_text(commands), "🌳")
-
-      for {status, marker} <- [unavailable: "🌳✗", restarting: "🌳⟳"] do
-        data = Map.put(@base_data, :parser_status, status)
-        {commands, regions} = Modeline.render(0, 120, data)
-
-        assert String.contains?(combined_text(commands), marker)
-        assert has_region?(regions, :parser_restart)
-      end
-    end
-  end
-
-  describe "diagnostic counts" do
-    test "shows counts and diagnostic picker target" do
-      cases = [
-        {{3, 0, 0, 0}, ["3"]},
-        {{0, 5, 0, 0}, ["5"]},
-        {{2, 3, 0, 0}, ["2", "3"]}
-      ]
-
-      for {counts, expected_counts} <- cases do
-        data = Map.put(@base_data, :diagnostic_counts, counts)
-        {commands, regions} = Modeline.render(0, 120, data)
-        text = combined_text(commands)
-
-        for expected <- expected_counts, do: assert(String.contains?(text, expected))
-        assert has_region?(regions, :diagnostic_picker)
-      end
-    end
-
-    test "shows nothing when no diagnostics" do
-      data = Map.put(@base_data, :diagnostic_counts, nil)
-      {commands_with, _} = Modeline.render(0, 120, data)
-      {commands_without, _} = Modeline.render(0, 120, @base_data)
-
-      assert length(commands_with) == length(commands_without)
-    end
-  end
-
-  describe "indent and selection segments" do
-    test "shows indentation and exposes indent picker click target" do
-      for {type, size, label} <- [{:spaces, 2, "Spaces:2"}, {:tabs, 4, "Tabs:4"}] do
-        data = Map.merge(@base_data, %{indent_type: type, indent_size: size})
-        {commands, regions} = Modeline.render(0, 120, data)
-        text = combined_text(commands)
-
-        assert String.contains?(text, label)
-        assert has_region?(regions, :indent_picker)
-      end
-    end
-
-    test "selection info replaces cursor position" do
-      data = Map.merge(@base_data, %{selection_info: {:chars, 42}})
-      {commands, _regions} = Modeline.render(0, 120, data)
-      text = Enum.map_join(commands, fn {_r, _c, segment, _s} -> segment end)
-
-      assert String.contains?(text, "42 chars")
-      refute String.contains?(text, "1:1")
-    end
-
-    test "narrow layout drops indent before diagnostics and git" do
-      data =
-        Map.merge(@base_data, %{
-          git_branch: "feature-branch",
-          git_diff_summary: {12, 3, 4},
-          diagnostic_counts: {2, 1, 0, 0},
-          indent_type: :spaces,
-          indent_size: 2
-        })
-
-      {commands, _regions} = Modeline.render(0, 55, data)
-      text = Enum.map_join(commands, fn {_r, _c, segment, _s} -> segment end)
-
-      refute String.contains?(text, "Spaces:2")
-      assert String.contains?(text, "NORMAL")
-      assert String.contains?(text, "test.ex")
+  defp text_index(text, needle) do
+    case :binary.match(text, needle) do
+      {start, _len} -> start
+      :nomatch -> nil
     end
   end
 end

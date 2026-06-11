@@ -94,22 +94,6 @@ defmodule MingaEditor.SignatureHelp do
   # ── Rendering ───────────────────────────────────────────────────────────
 
   @doc """
-  Renders the signature help as display list draws for an overlay.
-
-  Shows the active signature label with the active parameter highlighted.
-  If there are multiple signatures, shows a "1/3" counter.
-  """
-  @spec render(t(), {pos_integer(), pos_integer()}, map()) :: [DisplayList.draw()]
-  def render(%__MODULE__{signatures: []}, _viewport, _theme), do: []
-
-  def render(%__MODULE__{} = sh, viewport, theme) do
-    case spec(sh, viewport, theme) do
-      nil -> []
-      spec -> FloatingWindow.render(spec)
-    end
-  end
-
-  @doc """
   Returns the tooltip's outer rect `{row, col, width, height}` in screen cells.
 
   Same box `render/3` paints into (border, anchor placement, viewport clamping

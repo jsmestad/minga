@@ -13,10 +13,7 @@ defmodule MingaEditor.CompletionDocPreviewTest do
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.ModalOverlay.Completion, as: CompletionPayload
   alias MingaEditor.Viewport
-  alias MingaEditor.UI.Theme
   alias MingaEditor.Session.State, as: SessionState
-
-  @theme Theme.get!(:doom_one)
 
   defp make_state(completion) do
     ws = %SessionState{viewport: %Viewport{top: 0, left: 0, rows: 24, cols: 80}}
@@ -179,8 +176,19 @@ defmodule MingaEditor.CompletionDocPreviewTest do
 
   # ── Doc preview rendering ──────────────────────────────────────────────
 
-  describe "CompletionUI rendering" do
-    test "renders the completion menu with a border and selected rail" do
+  describe "CompletionUI.menu_rect/2" do
+    # The cell-grid `render/3` painter (menu border, selection rail, and the
+    # markdown doc-preview pane) was removed in #2311. The completion menu now
+    # renders natively from `Minga.RenderModel.UI.Completion` via the 0x78 GUI
+    # opcode. `menu_rect/2` is the live surface that resolves the menu's screen
+    # rect for the FocusTree's hit region.
+    #
+    # KNOWN GAP (#2311): the semantic Completion model carries label/kind/detail
+    # but not documentation, so the doc-preview pane the cell painter drew has no
+    # semantic equivalent. The cell path was already dead before this change, so
+    # deleting it does not regress a live frontend; the doc-preview capability is
+    # tracked as a follow-up, not a silent loss.
+    test "returns the bordered menu rect anchored below the cursor" do
       items = [Completion.parse_item(%{"label" => "alpha", "kind" => 3, "detail" => "Function"})]
       completion = Completion.new(items, {0, 0})
 
@@ -191,145 +199,21 @@ defmodule MingaEditor.CompletionDocPreviewTest do
         viewport_cols: 80
       }
 
-      draws = CompletionUI.render(completion, opts, @theme)
       assert {12, 6, _width, 1} = CompletionUI.menu_rect(completion, opts)
-
-      assert Enum.any?(draws, fn
-               {11, 5, "╭" <> _rest, face} -> face.fg == @theme.popup.border_fg
-               _ -> false
-             end)
-
-      assert Enum.any?(draws, fn
-               {12, 6, "▌", face} ->
-                 face.fg == @theme.picker.highlight_fg and face.bg == @theme.picker.bg
-
-               _ ->
-                 false
-             end)
     end
 
-    test "renders doc pane when selected item has documentation" do
-      items = [
-        Completion.parse_item(%{
-          "label" => "my_function",
-          "kind" => 3,
-          "documentation" => "Returns the **result** of the computation."
-        })
-      ]
-
-      completion = Completion.new(items, {0, 0})
+    test "returns nil when there are no visible items" do
+      completion = Completion.new([], {0, 0})
 
       opts = %{
         cursor_row: 10,
         cursor_col: 5,
         viewport_rows: 24,
-        viewport_cols: 120
+        viewport_cols: 80
       }
 
-      draws = CompletionUI.render(completion, opts, @theme)
-      # Should have draws for both the completion popup AND the doc pane
-      assert draws != []
-      # The doc pane draws should be at a different column than the popup
-      cols = Enum.map(draws, fn {_r, c, _text, _s} -> c end) |> Enum.uniq()
-      # Multiple column groups indicate popup + doc pane
-      assert Enum.count(cols) > 2
-    end
-
-    test "renders the doc pane on the left when right-side space is tight" do
-      items = [
-        Completion.parse_item(%{
-          "label" => "func",
-          "kind" => 3,
-          "documentation" => "Returns detailed docs for the function."
-        })
-      ]
-
-      completion = Completion.new(items, {0, 0})
-
-      opts = %{
-        cursor_row: 10,
-        cursor_col: 30,
-        viewport_rows: 24,
-        viewport_cols: 70
-      }
-
-      draws = CompletionUI.render(completion, opts, @theme)
-      assert draws != []
-
-      assert Enum.any?(draws, fn
-               {_row, 0, "╭" <> _rest, _face} -> true
-               _ -> false
-             end)
-    end
-
-    test "suppresses the doc pane when the effective width is below 20" do
-      items = [
-        Completion.parse_item(%{
-          "label" => "func",
-          "kind" => 3,
-          "documentation" => "Returns detailed docs for the function."
-        })
-      ]
-
-      completion = Completion.new(items, {0, 0})
-
-      opts = %{
-        cursor_row: 10,
-        cursor_col: 16,
-        viewport_rows: 24,
-        viewport_cols: 40
-      }
-
-      draws = CompletionUI.render(completion, opts, @theme)
-      assert draws != []
-
-      refute Enum.any?(draws, fn
-               {_row, 0, "╭" <> _rest, _face} -> true
-               _ -> false
-             end)
-    end
-
-    test "does not render doc pane when documentation is empty" do
-      items = [Completion.parse_item(%{"label" => "no_docs", "kind" => 3})]
-      completion = Completion.new(items, {0, 0})
-
-      opts = %{
-        cursor_row: 10,
-        cursor_col: 5,
-        viewport_rows: 24,
-        viewport_cols: 120
-      }
-
-      draws = CompletionUI.render(completion, opts, @theme)
-      # Should only have popup draws, no doc pane
-      assert draws != []
-      # All draws should be near the cursor column (no side panel)
-      cols = Enum.map(draws, fn {_r, c, _text, _s} -> c end)
-      max_col = Enum.max(cols)
-      # Without doc pane, nothing should extend far right
-      assert max_col < 60
-    end
-
-    test "does not render doc pane when viewport too narrow" do
-      items = [
-        Completion.parse_item(%{
-          "label" => "func",
-          "kind" => 3,
-          "documentation" => "Some docs"
-        })
-      ]
-
-      completion = Completion.new(items, {0, 0})
-
-      opts = %{
-        cursor_row: 10,
-        cursor_col: 30,
-        viewport_rows: 24,
-        viewport_cols: 60
-      }
-
-      draws = CompletionUI.render(completion, opts, @theme)
-      assert draws != []
+      assert CompletionUI.menu_rect(completion, opts) == nil
+      assert CompletionUI.menu_rect(nil, opts) == nil
     end
   end
 end

@@ -24,8 +24,6 @@ defmodule MingaEditor.WindowTest do
       assert window.popup_meta == nil
       refute Window.popup?(window)
       assert window.render_cache.dirty_lines == %{}
-      assert window.render_cache.cached_gutter == %{}
-      assert window.render_cache.cached_content == %{}
 
       for field <- [
             :last_viewport_top,
@@ -102,32 +100,8 @@ defmodule MingaEditor.WindowTest do
   end
 
   describe "render cache lifecycle" do
-    test "cache_line stores and overwrites draws, snapshot stores tracking fields, and prune_cache bounds both caches" do
+    test "snapshot stores tracking fields and clears the dirty set" do
       window = make_window()
-      gutter = [{0, 0, "  1", []}]
-      content = [{0, 4, "hello world", []}]
-      window = Window.cache_line(window, 0, gutter, content)
-      assert window.render_cache.cached_gutter[0] == gutter
-      assert window.render_cache.cached_content[0] == content
-
-      window = Window.cache_line(window, 0, [], [{0, 4, "new text", []}])
-      assert window.render_cache.cached_content[0] == [{0, 4, "new text", []}]
-
-      window =
-        Enum.reduce(1..20, window, fn line, acc ->
-          Window.cache_line(acc, line, [{line, 0, "#{line}", []}], [{line, 4, "text", []}])
-        end)
-
-      assert map_size(window.render_cache.cached_gutter) == 21
-      assert map_size(window.render_cache.cached_content) == 21
-
-      pruned = Window.prune_cache(window, 5, 15)
-      assert map_size(pruned.render_cache.cached_content) == 11
-      assert map_size(pruned.render_cache.cached_gutter) == 11
-      refute Map.has_key?(pruned.render_cache.cached_content, 4)
-      assert Map.has_key?(pruned.render_cache.cached_content, 5)
-      assert Map.has_key?(pruned.render_cache.cached_content, 15)
-      refute Map.has_key?(pruned.render_cache.cached_content, 16)
 
       window = Window.invalidate(window)
       assert window.render_cache.dirty_lines == :all
@@ -140,10 +114,6 @@ defmodule MingaEditor.WindowTest do
       assert window.render_cache.last_line_count == 200
       assert window.render_cache.last_cursor_line == 25
       assert window.render_cache.last_buf_version == 42
-
-      empty = Window.prune_cache(make_window(), 0, 10)
-      assert empty.render_cache.cached_content == %{}
-      assert empty.render_cache.cached_gutter == %{}
     end
 
     test "full dirty-line lifecycle covers first frame, clean frame, edit invalidation, and scroll invalidation" do
@@ -154,11 +124,6 @@ defmodule MingaEditor.WindowTest do
       assert window.render_cache.dirty_lines == :all
       assert Window.dirty?(window, 0)
       assert Window.dirty?(window, 99)
-
-      window =
-        Enum.reduce(0..9, window, fn line, acc ->
-          Window.cache_line(acc, line, [{line, 0, "#{line}", []}], [{line, 4, "text", []}])
-        end)
 
       window = Window.snapshot_after_render(window, 0, 4, 100, 5, 1, :test_fp)
       assert window.render_cache.dirty_lines == %{}
@@ -225,7 +190,9 @@ defmodule MingaEditor.WindowTest do
   end
 
   defp cached_window(window) do
-    Window.cache_line(window, 0, [{0, 0, "1", []}], [{0, 4, "hi", []}])
+    # Put the window in a "clean, previously rendered" state so a later
+    # resize/invalidate is observable as a transition back to a full redraw.
+    Window.snapshot_after_render(window, 0, 4, 100, 5, 1, :test_fp)
   end
 
   defp with_tracking(window, updates) do
@@ -234,8 +201,6 @@ defmodule MingaEditor.WindowTest do
 
   defp assert_fully_invalidated(window) do
     assert window.render_cache.dirty_lines == :all
-    assert window.render_cache.cached_gutter == %{}
-    assert window.render_cache.cached_content == %{}
     assert window.render_cache.last_viewport_top == -1
     assert window.render_cache.last_gutter_w == -1
     assert window.render_cache.last_line_count == -1

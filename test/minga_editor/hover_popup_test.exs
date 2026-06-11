@@ -187,99 +187,35 @@ defmodule MingaEditor.HoverPopupTest do
     end
   end
 
-  describe "render/3" do
-    test "returns empty list for empty content" do
+  describe "box/3" do
+    # The cell-grid `render/3` painter was removed in #2311; the hover popup
+    # renders natively via the 0x81 GUI opcode. `box/3` is the live surface that
+    # resolves the popup's placement rect for the FocusTree/SurfaceRegistry.
+    test "returns nil for empty content" do
       popup = %HoverPopup{content_lines: [], anchor_row: 5, anchor_col: 10}
-      assert HoverPopup.render(popup, @viewport, @theme) == []
+      assert HoverPopup.box(popup, @viewport, @theme) == nil
     end
 
-    test "returns draw commands for non-empty content" do
+    test "returns a placement rect within the viewport for non-empty content" do
       popup = HoverPopup.new("Hello world\n\nSome documentation", 10, 20)
-      draws = HoverPopup.render(popup, @viewport, @theme)
-      assert is_list(draws)
-      assert draws != []
-      assert Enum.all?(draws, &is_tuple/1)
+      {row, col, w, h} = HoverPopup.box(popup, @viewport, @theme)
+
+      assert row >= 0 and row + h <= 24
+      assert col >= 0 and col + w <= 80
     end
 
-    test "produces draws with valid screen coordinates" do
-      popup = HoverPopup.new("Type: `String.t()`", 10, 20)
-      draws = HoverPopup.render(popup, @viewport, @theme)
-
-      Enum.each(draws, fn {row, col, _text, _style} ->
-        assert row >= 0 and row < 24, "row #{row} out of viewport"
-        assert col >= 0 and col < 80, "col #{col} out of viewport"
-      end)
-    end
-
-    test "renders markdown code blocks with styling" do
-      text = "```elixir\ndef hello, do: :world\n```"
-      popup = HoverPopup.new(text, 15, 10)
-      draws = HoverPopup.render(popup, @viewport, @theme)
-      assert draws != []
-    end
-
-    test "preserves segment draw order within a rendered line" do
-      popup = %HoverPopup{
-        content_lines: [{[{"first", :plain}, {"second", :bold}], :text}],
-        anchor_row: 15,
-        anchor_col: 10
-      }
-
-      texts =
-        popup
-        |> HoverPopup.render(@viewport, @theme)
-        |> Enum.map(fn {_row, _col, text, _style} -> text end)
-        |> Enum.filter(&(&1 in ["first", "second"]))
-
-      assert texts == ["first", "second"]
-    end
-
-    test "uses rounded border when not focused, single when focused" do
-      popup = HoverPopup.new("text", 10, 10)
-
-      # Not focused: rounded border chars (╭, ╮)
-      draws = HoverPopup.render(popup, @viewport, @theme)
-      texts = Enum.map(draws, fn {_r, _c, text, _s} -> text end)
-      combined = Enum.join(texts)
-      assert String.contains?(combined, "╭") or String.contains?(combined, "┌")
-
-      # Focused: single border chars (┌, ┐)
-      focused = HoverPopup.focus(popup)
-      focused_draws = HoverPopup.render(focused, @viewport, @theme)
-      focused_texts = Enum.map(focused_draws, fn {_r, _c, text, _s} -> text end)
-      focused_combined = Enum.join(focused_texts)
-      assert String.contains?(focused_combined, "┌")
-    end
-
-    test "positions above cursor when there is room" do
+    test "positions above the cursor when there is room" do
       popup = HoverPopup.new("text", 15, 10)
-      draws = HoverPopup.render(popup, @viewport, @theme)
+      {row, _col, _w, h} = HoverPopup.box(popup, @viewport, @theme)
 
-      # All draws should be above row 15 (the anchor)
-      rows = Enum.map(draws, fn {r, _c, _text, _s} -> r end)
-      max_row = Enum.max(rows)
-      assert max_row < 15, "Expected hover above cursor row 15, got max row #{max_row}"
+      assert row + h <= 15, "Expected hover above cursor row 15, got #{row}+#{h}"
     end
 
-    test "flips below cursor when near top of screen" do
+    test "stays on screen when anchored near the top" do
       popup = HoverPopup.new("text", 1, 10)
-      draws = HoverPopup.render(popup, @viewport, @theme)
+      {row, _col, _w, _h} = HoverPopup.box(popup, @viewport, @theme)
 
-      # Some draws should be below row 1
-      rows = Enum.map(draws, fn {r, _c, _text, _s} -> r end)
-      min_row = Enum.min(rows)
-      assert min_row >= 0
-    end
-
-    test "shows scroll indicator when content exceeds window" do
-      lines = Enum.map_join(1..30, "\n", &"Line #{&1} of documentation")
-      popup = HoverPopup.new(lines, 15, 10)
-      draws = HoverPopup.render(popup, @viewport, @theme)
-
-      texts = Enum.map(draws, fn {_r, _c, text, _s} -> text end)
-      combined = Enum.join(texts)
-      # Footer should show scroll position like "1-20/30"
-      assert String.contains?(combined, "/")
+      assert row >= 0
     end
   end
 end

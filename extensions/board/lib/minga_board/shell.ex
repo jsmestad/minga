@@ -30,7 +30,6 @@ defmodule MingaBoard.Shell do
   alias MingaAgent.Session, as: AgentSession
   alias MingaAgent.Subagent.Handle
   alias Minga.RenderModel.Cursor
-  alias MingaEditor.DisplayList
   alias MingaEditor.RenderPipeline.ComposedFrame
   alias MingaEditor.RenderPipeline.Chrome
   alias MingaBoard.Frontend.Adapter.GUI.ActionDecoder
@@ -322,8 +321,10 @@ defmodule MingaBoard.Shell do
   end
 
   # Board TUI layout: no tab bar, no file tree, no modeline.
-  # Grid view uses the full viewport. Zoomed view reserves row 0
-  # for the context bar and the last row for the minibuffer.
+  # Both grid and zoomed views use the full viewport for the editor area
+  # with the last row reserved for the minibuffer. The zoomed view no longer
+  # reserves a top context-bar row: its painter was disposed in #2311 and never
+  # had a live consumer, so reserving row 0 left a dead blank row.
   @spec compute_board_tui_layout(term()) :: MingaEditor.Layout.t()
   defp compute_board_tui_layout(editor_state) do
     alias MingaEditor.Layout
@@ -340,25 +341,23 @@ defmodule MingaBoard.Shell do
         minibuffer: {editor_rows, 0, cols, 1}
       }
     else
-      # Zoomed: row 0 = context bar, last row = minibuffer, rest = editor
-      context_bar_height = 1
+      # Zoomed: full-height editor, last row = minibuffer. No reserved context bar.
       minibuffer_height = 1
-      editor_rows = max(rows - context_bar_height - minibuffer_height, 1)
-      editor_top = context_bar_height
+      editor_rows = max(rows - minibuffer_height, 1)
 
       {window_layouts, h_seps} =
         Layout.compute_window_layouts_with_separators(
           editor_state.workspace.windows.tree,
-          {editor_top, 0, cols, editor_rows},
+          {0, 0, cols, editor_rows},
           editor_state.workspace.windows.map
         )
 
       %Layout{
         terminal: {0, 0, cols, rows},
-        editor_area: {editor_top, 0, cols, editor_rows},
+        editor_area: {0, 0, cols, editor_rows},
         window_layouts: window_layouts,
         horizontal_separators: h_seps,
-        minibuffer: {editor_top + editor_rows, 0, cols, minibuffer_height}
+        minibuffer: {editor_rows, 0, cols, minibuffer_height}
       }
     end
   end
@@ -366,71 +365,16 @@ defmodule MingaBoard.Shell do
   @impl true
   @spec build_chrome(term(), MingaEditor.Layout.t(), map(), term()) ::
           Chrome.t()
-  def build_chrome(editor_state, _layout, _scrolls, _cursor_info) do
-    if BoardState.grid_view?(editor_state.shell_state) do
-      # Grid view: BoardView overlay handles everything, empty chrome
-      %Chrome{}
-    else
-      # Zoomed: context bar in tab_bar slot, everything else empty
-      context_draws = build_zoom_context_bar(editor_state)
-      %Chrome{tab_bar: context_draws}
-    end
+  def build_chrome(_editor_state, _layout, _scrolls, _cursor_info) do
+    # Board is an extension-owned surface that emits no editor chrome draws.
+    # The grid view renders through the native Board runtime payload
+    # (BoardEncoder); the zoomed view renders the card's workspace through the
+    # traditional editor window pipeline. Neither path consumed the Chrome
+    # struct's draw fields, which were removed in #2311. The zoom context-bar
+    # painter that previously filled the `tab_bar` slot was disposed with them:
+    # nothing read those draws, so the bar never reached the wire.
+    %Chrome{}
   end
-
-  @spec build_zoom_context_bar(term()) :: [DisplayList.draw()]
-  defp build_zoom_context_bar(editor_state) do
-    board = editor_state.shell_state
-    card = BoardState.zoomed(board)
-    cols = editor_state.terminal_viewport.cols
-    theme = editor_state.theme
-
-    if card do
-      icon = zoom_status_icon(card.status)
-      task = MingaBoard.Shell.Card.display_task(card)
-      model = if card.model, do: " · #{card.model}", else: ""
-      hint = "ESC back to Board"
-
-      bg = theme.editor.bg
-      bar_face = Minga.Core.Face.new(fg: theme.editor.fg, bg: bg, bold: true)
-      hint_face = Minga.Core.Face.new(fg: 0x5C6370, bg: bg)
-      status_face = zoom_status_face(card.status, theme)
-
-      left = " #{icon} #{task}#{model}"
-      right = " #{hint} "
-      gap = max(cols - String.length(left) - String.length(right), 0)
-
-      [
-        DisplayList.draw(0, 0, left, bar_face),
-        DisplayList.draw(0, String.length(left), String.duplicate(" ", gap), status_face),
-        DisplayList.draw(0, String.length(left) + gap, right, hint_face)
-      ]
-    else
-      []
-    end
-  end
-
-  @spec zoom_status_icon(MingaBoard.Shell.Card.status()) :: String.t()
-  defp zoom_status_icon(:idle), do: "○"
-  defp zoom_status_icon(:working), do: "●"
-  defp zoom_status_icon(:iterating), do: "◉"
-  defp zoom_status_icon(:needs_you), do: "◆"
-  defp zoom_status_icon(:done), do: "✓"
-  defp zoom_status_icon(:errored), do: "✗"
-
-  @spec zoom_status_face(MingaBoard.Shell.Card.status(), MingaEditor.UI.Theme.t()) ::
-          Minga.Core.Face.t()
-  defp zoom_status_face(:working, theme),
-    do: Minga.Core.Face.new(fg: 0x98C379, bg: theme.editor.bg)
-
-  defp zoom_status_face(:needs_you, theme),
-    do: Minga.Core.Face.new(fg: 0xE5C07B, bg: theme.editor.bg)
-
-  defp zoom_status_face(:done, theme), do: Minga.Core.Face.new(fg: 0x61AFEF, bg: theme.editor.bg)
-
-  defp zoom_status_face(:errored, theme),
-    do: Minga.Core.Face.new(fg: 0xE06C75, bg: theme.editor.bg)
-
-  defp zoom_status_face(_, theme), do: Minga.Core.Face.new(fg: 0x5C6370, bg: theme.editor.bg)
 
   @impl true
   @spec chrome_fingerprint(term()) :: term()

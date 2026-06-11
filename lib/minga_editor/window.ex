@@ -9,19 +9,14 @@ defmodule MingaEditor.Window do
   ## Render cache and dirty-line tracking
 
   Windows carry per-frame render state that enables incremental rendering.
-  Instead of rebuilding draw commands for every visible line on every frame,
-  the pipeline caches draws keyed by buffer line number and only re-renders
-  lines marked as dirty.
+  The semantic `RenderModel.Window.Builder` reuses retained composed rows for
+  lines whose inputs are unchanged and only recomposes lines marked as dirty.
 
   The dirty set uses two representations:
   - `:all` means every line needs re-rendering (used for scroll, resize,
     theme change, highlight update, and other wholesale invalidation)
   - A map of specific buffer line numbers (`%{line => true}`) that need re-rendering
     (used for edits that touch a few lines)
-
-  Gutter and content caches are separate because cursor movement with
-  relative line numbering dirties every gutter entry without changing
-  content. This avoids re-rendering line text when only line numbers change.
 
   Tracking fields (`last_viewport_top`, `last_viewport_cache_key`,
   `last_gutter_w`, `last_line_count`, `last_cursor_line`, `last_buf_version`)
@@ -30,7 +25,6 @@ defmodule MingaEditor.Window do
   """
 
   alias Minga.Buffer
-  alias MingaEditor.DisplayList
   alias MingaEditor.FoldMap
   alias Minga.Editing.Fold.Range, as: FoldRange
   alias Minga.Language.Symbol
@@ -568,22 +562,6 @@ defmodule MingaEditor.Window do
   end
 
   @doc """
-  Stores rendered gutter and content draws for a buffer line.
-
-  Does NOT remove the line from the dirty set; that happens when the
-  full frame is snapshotted after render.
-  """
-  @spec cache_line(
-          t(),
-          non_neg_integer(),
-          [DisplayList.draw()],
-          [DisplayList.draw()]
-        ) :: t()
-  def cache_line(%__MODULE__{render_cache: cache} = window, buf_line, gutter_draws, content_draws) do
-    %{window | render_cache: RenderCache.cache_line(cache, buf_line, gutter_draws, content_draws)}
-  end
-
-  @doc """
   Snapshots tracking fields after a successful render pass.
 
   Clears the dirty set and records the current frame's parameters so the
@@ -659,16 +637,5 @@ defmodule MingaEditor.Window do
             ctx_fingerprint
           )
     }
-  end
-
-  @doc """
-  Prunes cache entries for buffer lines no longer in the visible range.
-
-  Keeps the cache bounded to avoid memory growth as the user scrolls
-  through a large file.
-  """
-  @spec prune_cache(t(), non_neg_integer(), non_neg_integer()) :: t()
-  def prune_cache(%__MODULE__{render_cache: cache} = window, first_visible, last_visible) do
-    %{window | render_cache: RenderCache.prune(cache, first_visible, last_visible)}
   end
 end

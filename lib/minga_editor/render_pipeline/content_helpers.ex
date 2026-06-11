@@ -113,8 +113,6 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
         nil
       end
 
-    is_semantic = Map.get(params, :is_semantic, false)
-
     {show_invisible, tab_width, whitespace_face} =
       invisible_char_settings(Map.get(params, :options, %{}), state.theme)
 
@@ -130,7 +128,6 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       nav_flash: state.shell_state.nav_flash,
       nav_flash_bg: state.theme.editor.nav_flash_bg,
       editor_bg: state.theme.editor.bg,
-      is_semantic: is_semantic,
       has_sign_column: has_sign_column,
       decorations: decorations,
       diagnostic_signs: diagnostic_signs_for_path(Map.get(params, :file_path)),

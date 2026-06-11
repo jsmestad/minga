@@ -1,50 +1,21 @@
 defmodule MingaEditor.FloatingWindow do
   @moduledoc """
-  Pure rendering helper for bordered, titled floating panels.
+  Geometry for bordered, titled floating panels.
 
-  Takes a `Spec` struct describing the window's content, size, position,
-  and styling, and returns a list of `DisplayList.draw()` tuples. No
-  GenServer, no state. The caller (PickerUI, WhichKey, or any future
-  consumer) builds the spec, calls `render/1`, and includes the draws
-  as an `Overlay` in the render pipeline.
+  Takes a `Spec` struct describing a floating window's size and position and
+  resolves its outer rect via `box/1`. The cursor-anchored popups
+  (`HoverPopup`, `SignatureHelp`) build a `Spec` and ask for its `box/1` so the
+  `SurfaceRegistry`/`FocusTree` can register the popup's hit region from the
+  BEAM's own geometry.
 
-  Works for both TUI (emulated overlays) and GUI (the draws are
-  frontend-agnostic styled text runs).
-
-  ## Example
-
-      spec = %FloatingWindow.Spec{
-        title: "Select Model",
-        content: [DisplayList.draw(0, 0, "claude-sonnet-4-20250514", Face.new(fg: :white))],
-        width: {:percent, 60},
-        height: {:rows, 15},
-        border: :rounded,
-        theme: state.theme.popup,
-        viewport: {state.terminal_viewport.rows, state.terminal_viewport.cols}
-      }
-
-      draws = FloatingWindow.render(spec)
+  The cell-grid painter (`render/1` and the border/title/footer/content draw
+  helpers) was removed in #2311: the semantic frontends render these popups
+  natively from dedicated GUI opcodes, so nothing consumed the cell draws.
   """
 
-  alias Minga.Core.Face
-  alias MingaEditor.DisplayList
-
-  # ── Border character sets ────────────────────────────────────────────────
+  # ── Border styles ────────────────────────────────────────────────────────
 
   @type border_style :: :single | :double | :rounded | :none
-
-  @type border_chars :: %{
-          tl: String.t(),
-          tr: String.t(),
-          bl: String.t(),
-          br: String.t(),
-          h: String.t(),
-          v: String.t()
-        }
-
-  @border_single %{tl: "┌", tr: "┐", bl: "└", br: "┘", h: "─", v: "│"}
-  @border_double %{tl: "╔", tr: "╗", bl: "╚", br: "╝", h: "═", v: "║"}
-  @border_rounded %{tl: "╭", tr: "╮", bl: "╰", br: "╯", h: "─", v: "│"}
 
   # ── Spec ─────────────────────────────────────────────────────────────────
 
@@ -100,52 +71,12 @@ defmodule MingaEditor.FloatingWindow do
   # ── Public API ───────────────────────────────────────────────────────────
 
   @doc """
-  Renders a floating window from the given spec.
-
-  Returns a flat list of `DisplayList.draw()` tuples representing the
-  border, title, footer, background fill, and content. The draws use
-  absolute screen coordinates and can be included directly in an
-  `Overlay` struct.
-  """
-  @spec render(Spec.t()) :: [DisplayList.draw()]
-  def render(%Spec{} = spec) do
-    {vp_rows, vp_cols} = spec.viewport
-    box = compute_box(spec, vp_rows, vp_cols)
-
-    backdrop_draws = render_backdrop(spec)
-    bg_draws = render_background(box, spec.theme)
-    border_draws = render_border(box, spec.border, spec.theme)
-    title_draws = render_title(box, spec.title, spec.border, spec.theme)
-    footer_draws = render_footer(box, spec.footer, spec.border, spec.theme)
-    content_draws = offset_content(box, spec.content, spec.border)
-
-    backdrop_draws ++ bg_draws ++ border_draws ++ title_draws ++ footer_draws ++ content_draws
-  end
-
-  @doc """
-  Computes the interior dimensions (usable content area) for a spec.
-
-  Returns `{rows, cols}` representing how many rows and columns are
-  available for content inside the border. Useful for callers that need
-  to know how much content to prepare before calling `render/1`.
-  """
-  @spec interior_size(Spec.t()) :: {rows :: non_neg_integer(), cols :: non_neg_integer()}
-  def interior_size(%Spec{} = spec) do
-    {vp_rows, vp_cols} = spec.viewport
-    box = compute_box(spec, vp_rows, vp_cols)
-    border_inset = if spec.border == :none, do: 0, else: 1
-    interior_w = max(box.w - border_inset * 2, 0)
-    interior_h = max(box.h - border_inset * 2, 0)
-    {interior_h, interior_w}
-  end
-
-  @doc """
   Returns the window's outer rect in `Layout.rect()` shape: `{row, col, width, height}`.
 
-  This is the exact box `render/1` paints into, including border, position
-  resolution, and viewport clamping. It is the authoritative placement rect for a
-  floating popup, so a caller (the `SurfaceRegistry`/`FocusTree`) can register the
-  surface's rect without re-rendering its content.
+  This is the authoritative placement rect for a floating popup, including
+  border, position resolution, and viewport clamping, so a caller (the
+  `SurfaceRegistry`/`FocusTree`) can register the surface's rect without
+  rendering its content.
   """
   @spec box(Spec.t()) :: {non_neg_integer(), non_neg_integer(), pos_integer(), pos_integer()}
   def box(%Spec{} = spec) do
@@ -229,143 +160,4 @@ defmodule MingaEditor.FloatingWindow do
 
   @spec clamp(integer(), integer(), integer()) :: integer()
   defp clamp(val, lo, hi), do: max(lo, min(val, hi))
-
-  # ── Backdrop (full-viewport dimmed overlay) ──────────────────────────────
-
-  @spec render_backdrop(Spec.t()) :: [DisplayList.draw()]
-  defp render_backdrop(%Spec{backdrop: false}), do: []
-
-  defp render_backdrop(%Spec{backdrop: true, viewport: {vp_rows, vp_cols}, theme: theme}) do
-    color = Map.get(theme, :backdrop_color, 0x111111)
-    style = Face.new(bg: color)
-    fill = String.duplicate(" ", vp_cols)
-
-    for r <- 0..(vp_rows - 1) do
-      DisplayList.draw(r, 0, fill, style)
-    end
-  end
-
-  # ── Background fill ─────────────────────────────────────────────────────
-
-  @spec render_background(box(), map()) :: [DisplayList.draw()]
-  defp render_background(%{row: row, col: col, w: w, h: h}, theme) do
-    bg_style = Face.new(bg: theme.bg)
-    fill = String.duplicate(" ", w)
-
-    for r <- row..(row + h - 1) do
-      DisplayList.draw(r, col, fill, bg_style)
-    end
-  end
-
-  # ── Border rendering ─────────────────────────────────────────────────────
-
-  @spec render_border(box(), border_style(), map()) :: [DisplayList.draw()]
-  defp render_border(_box, :none, _theme), do: []
-
-  defp render_border(%{row: row, col: col, w: w, h: h}, style, theme) do
-    chars = border_chars(style)
-    border_style = Face.new(fg: theme.border_fg, bg: theme.bg)
-    inner_w = max(w - 2, 0)
-    horiz = String.duplicate(chars.h, inner_w)
-
-    top = DisplayList.draw(row, col, chars.tl <> horiz <> chars.tr, border_style)
-    bottom = DisplayList.draw(row + h - 1, col, chars.bl <> horiz <> chars.br, border_style)
-
-    sides =
-      for r <- (row + 1)..(row + h - 2)//1 do
-        [
-          DisplayList.draw(r, col, chars.v, border_style),
-          DisplayList.draw(r, col + w - 1, chars.v, border_style)
-        ]
-      end
-
-    [top, bottom | List.flatten(sides)]
-  end
-
-  # ── Title / Footer ──────────────────────────────────────────────────────
-
-  @spec render_title(box(), String.t() | nil, border_style(), map()) :: [DisplayList.draw()]
-  defp render_title(_box, nil, _border, _theme), do: []
-  defp render_title(_box, "", _border, _theme), do: []
-  defp render_title(_box, _title, :none, _theme), do: []
-
-  defp render_title(%{row: row, col: col, w: w}, title, _border, theme) do
-    inner_w = max(w - 4, 0)
-    truncated = truncate(title, inner_w)
-    title_text = " #{truncated} "
-    title_len = String.length(title_text)
-    # Center the title in the top border
-    start_col = col + max(div(w - title_len, 2), 1)
-    title_style = title_style(theme)
-    [DisplayList.draw(row, start_col, title_text, title_style)]
-  end
-
-  @spec render_footer(box(), String.t() | nil, border_style(), map()) :: [DisplayList.draw()]
-  defp render_footer(_box, nil, _border, _theme), do: []
-  defp render_footer(_box, "", _border, _theme), do: []
-  defp render_footer(_box, _footer, :none, _theme), do: []
-
-  defp render_footer(%{row: row, col: col, w: w, h: h}, footer, _border, theme) do
-    inner_w = max(w - 4, 0)
-    truncated = truncate(footer, inner_w)
-    footer_text = " #{truncated} "
-    footer_len = String.length(footer_text)
-    start_col = col + max(div(w - footer_len, 2), 1)
-    footer_style = Face.new(fg: theme.border_fg, bg: theme.bg)
-    [DisplayList.draw(row + h - 1, start_col, footer_text, footer_style)]
-  end
-
-  # ── Content offsetting ──────────────────────────────────────────────────
-
-  @spec offset_content(box(), [DisplayList.draw()], border_style()) :: [DisplayList.draw()]
-  defp offset_content(_box, [], _border), do: []
-
-  defp offset_content(%{row: row, col: col, w: w, h: h}, content, border) do
-    inset = if border == :none, do: 0, else: 1
-    interior_row = row + inset
-    interior_col = col + inset
-    interior_w = max(w - inset * 2, 0)
-    interior_h = max(h - inset * 2, 0)
-
-    content
-    |> Enum.map(fn {r, c, text, style} ->
-      abs_row = r + interior_row
-      abs_col = c + interior_col
-
-      # Clip: skip draws outside the interior
-      if r < interior_h and c < interior_w do
-        # Truncate text that would overflow the right edge
-        max_len = max(interior_w - c, 0)
-        clipped_text = truncate(text, max_len)
-        DisplayList.draw(abs_row, abs_col, clipped_text, style)
-      else
-        nil
-      end
-    end)
-    |> Enum.reject(&is_nil/1)
-  end
-
-  # ── Helpers ─────────────────────────────────────────────────────────────
-
-  @spec border_chars(border_style()) :: border_chars()
-  defp border_chars(:single), do: @border_single
-  defp border_chars(:double), do: @border_double
-  defp border_chars(:rounded), do: @border_rounded
-
-  @spec truncate(String.t(), non_neg_integer()) :: String.t()
-  defp truncate(text, max_len) when max_len <= 0, do: text
-
-  defp truncate(text, max_len) do
-    if String.length(text) > max_len do
-      String.slice(text, 0, max(max_len - 1, 0)) <> "…"
-    else
-      text
-    end
-  end
-
-  @spec title_style(map()) :: Face.t()
-  defp title_style(theme) do
-    fg = Map.get(theme, :title_fg, theme.border_fg)
-    Face.new(fg: fg, bg: theme.bg, bold: true)
-  end
 end

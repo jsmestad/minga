@@ -2,9 +2,10 @@ defmodule MingaEditor.Window.RenderCache do
   @moduledoc """
   Per-window render state for incremental rendering.
 
-  Tracks which buffer lines need re-rendering, caches draw commands from
-  previous frames, and stores last-frame comparison values so the render
-  pipeline can detect when a full redraw is needed.
+  Tracks which buffer lines need re-rendering and stores last-frame comparison
+  values so the render pipeline can detect when a full redraw is needed. The
+  semantic `RenderModel.Window.Builder` reuses retained composed rows (see the
+  `retained_rows`/`retained_wrap_lines` fields) for unchanged lines.
 
   ## Dirty-line tracking
 
@@ -16,10 +17,6 @@ defmodule MingaEditor.Window.RenderCache do
   - A map of specific buffer line numbers (`%{line => true}`) for targeted
     invalidation (edits that touch a few lines)
 
-  Gutter and content caches are separate because cursor movement with
-  relative line numbering dirties every gutter entry without changing
-  content. This avoids re-rendering line text when only line numbers change.
-
   ## Tracking fields
 
   `last_viewport_top`, `last_viewport_cache_key`, `last_gutter_w`,
@@ -30,8 +27,6 @@ defmodule MingaEditor.Window.RenderCache do
   matches, syntax highlights, signs, etc.) so context changes trigger full
   redraws.
   """
-
-  alias MingaEditor.DisplayList
 
   @compile {:inline, dirty?: 2}
 
@@ -70,8 +65,6 @@ defmodule MingaEditor.Window.RenderCache do
 
   @type t :: %__MODULE__{
           dirty_lines: :all | %{optional(non_neg_integer()) => true},
-          cached_gutter: %{optional(non_neg_integer()) => [DisplayList.draw()]},
-          cached_content: %{optional(non_neg_integer()) => [DisplayList.draw()]},
           last_viewport_top: integer(),
           last_viewport_cache_key: integer(),
           last_gutter_w: integer(),
@@ -88,8 +81,6 @@ defmodule MingaEditor.Window.RenderCache do
         }
 
   defstruct dirty_lines: %{},
-            cached_gutter: %{},
-            cached_content: %{},
             last_viewport_top: -1,
             last_viewport_cache_key: -1,
             last_gutter_w: -1,
@@ -105,9 +96,9 @@ defmodule MingaEditor.Window.RenderCache do
             retained_wrap_lines: %{}
 
   @doc """
-  Returns a fresh cache with all lines dirty and no cached draws.
+  Returns a fresh cache with all lines dirty.
 
-  Use after any event that invalidates all cached draws: buffer switch,
+  Use after any event that invalidates render state: buffer switch,
   resize, theme change, etc.
   """
   @spec reset() :: t()
@@ -126,8 +117,6 @@ defmodule MingaEditor.Window.RenderCache do
     %{
       cache
       | dirty_lines: :all,
-        cached_gutter: %{},
-        cached_content: %{},
         last_viewport_top: -1,
         last_viewport_cache_key: -1,
         last_gutter_w: -1,
@@ -308,21 +297,6 @@ defmodule MingaEditor.Window.RenderCache do
   end
 
   @doc """
-  Stores rendered gutter and content draws for a buffer line.
-
-  Does NOT remove the line from the dirty set; that happens in
-  `snapshot/7` when the full frame is complete.
-  """
-  @spec cache_line(t(), non_neg_integer(), [DisplayList.draw()], [DisplayList.draw()]) :: t()
-  def cache_line(%__MODULE__{} = cache, buf_line, gutter_draws, content_draws) do
-    %{
-      cache
-      | cached_gutter: Map.put(cache.cached_gutter, buf_line, gutter_draws),
-        cached_content: Map.put(cache.cached_content, buf_line, content_draws)
-    }
-  end
-
-  @doc """
   Snapshots tracking fields after a successful render pass.
 
   Clears the dirty set and records the current frame's parameters so the
@@ -388,23 +362,6 @@ defmodule MingaEditor.Window.RenderCache do
         last_cursor_line: cursor_line,
         last_buf_version: buf_version,
         last_context_fingerprint: ctx_fingerprint
-    }
-  end
-
-  @doc """
-  Prunes cache entries for buffer lines no longer in the visible range.
-
-  Keeps the cache bounded to avoid memory growth as the user scrolls
-  through a large file.
-  """
-  @spec prune(t(), non_neg_integer(), non_neg_integer()) :: t()
-  def prune(%__MODULE__{} = cache, first_visible, last_visible) do
-    filter = fn {line, _draws} -> line >= first_visible and line <= last_visible end
-
-    %{
-      cache
-      | cached_gutter: Map.filter(cache.cached_gutter, filter),
-        cached_content: Map.filter(cache.cached_content, filter)
     }
   end
 

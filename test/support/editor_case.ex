@@ -435,12 +435,15 @@ defmodule Minga.Test.EditorCase do
 
   @doc "Returns the semantic modeline text."
   @spec modeline(editor_ctx()) :: String.t()
-  def modeline(%{editor: editor, width: width}) do
+  def modeline(%{editor: editor}) do
     state = get_editor_state(editor)
     status_data = StatusBarData.from_state(state)
     modeline_data = StatusBarData.to_modeline_data(status_data)
-    {draws, _click_regions} = Modeline.render(0, width, modeline_data, state.theme)
-    draws_to_text(draws)
+    %{left: left, right: right} = Modeline.gui_segments(modeline_data, state.theme)
+
+    (left ++ right)
+    |> Enum.map(fn {_name, text, _fg, _bg, _opts, _target} -> text end)
+    |> Enum.join()
   end
 
   @doc "Returns the semantic minibuffer or echo-area text."
@@ -978,13 +981,6 @@ defmodule Minga.Test.EditorCase do
   def screen_contains?(ctx, text) do
     screen_text(ctx)
     |> Enum.any?(fn row -> String.contains?(row, text) end)
-  end
-
-  @spec draws_to_text([MingaEditor.DisplayList.draw()]) :: String.t()
-  defp draws_to_text(draws) do
-    draws
-    |> Enum.sort_by(fn {row, col, _text, _style} -> {row, col} end)
-    |> Enum.map_join(fn {_row, _col, text, _style} -> text end)
   end
 
   # ── Private helpers ──────────────────────────────────────────────────────────

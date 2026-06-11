@@ -6,9 +6,9 @@ defmodule MingaEditor.MinibufferData do
   completion candidates) from editor state for encoding as the `0x7F
   gui_minibuffer` protocol opcode.
 
-  The TUI continues to render the cell-grid minibuffer via
-  `MingaEditor.Renderer.Minibuffer`. This module serves the native
-  SwiftUI minibuffer only.
+  This is the only minibuffer render path: the semantic frontends draw the
+  minibuffer natively from this data. The cell-grid minibuffer painter was
+  removed in #2311.
   """
 
   alias Minga.Command
