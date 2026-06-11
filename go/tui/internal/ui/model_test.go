@@ -1546,6 +1546,79 @@ func TestSemanticMouseRoutesEditTimelineEntryZones(t *testing.T) {
 	}
 }
 
+func TestSemanticMouseRoutesFloatPopupDismissOutsideBox(t *testing.T) {
+	model := New(80, 24, nil)
+	model.chrome = map[byte]protocol.ChromePayload{
+		generated.OPGuiFloatPopup: {Float: protocol.FloatPopup{
+			Visible: true,
+			Title:   "Process <0.123.0>",
+			Lines:   []string{"Class: buffer", "Lines: 42"},
+		}},
+	}
+	// The float popup is a wrap-dependent surface: FooterOverlays sizes its band
+	// to the clamp ceiling (:max), and Go bottom-aligns the rendered content
+	// inside it (overlayLayer). With a 24-row terminal the ceiling is 24/3 = 8,
+	// but here we pin a 6-row band so there is a phantom region above the content.
+	// renderFloat draws 1 (title) + min(2 lines, ceiling-1) = 3 rows, bottom-
+	// aligned: content occupies rows 21..23, the phantom band is rows 18..20.
+	model.surfacePlacements = []generated.SurfacePlacement{
+		{SurfaceID: surfaceIDFloatPopup, Rect: generated.Rect{Row: 18, Col: 0, Width: 80, Height: 6}, Z: 270, HitKind: 8},
+	}
+	model.viewport.SetContent(model.content())
+	_ = model.View()
+
+	// A click in the phantom band ABOVE the rendered popup content (outside the
+	// box but inside the band) dismisses, the same intent the keyboard quit key
+	// reaches. Rows 18..20 are phantom; row 19 is comfortably inside.
+	cmd, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: 10, Y: 19}))
+	if !ok || !bytes.Equal(cmd, protocol.EncodeGUIFloatPopupDismiss()) {
+		t.Fatalf("click outside the float box but in band should route float_popup_dismiss, ok=%v packet=%v", ok, cmd)
+	}
+
+	// A click INSIDE the rendered popup box (rows 21..23) has no clickable
+	// affordance in the model (no links, no dismiss button), so it returns
+	// ok=false and falls through to the raw mouse path where the BEAM OverlaySink
+	// keeps it contained: it must NOT dismiss (matches the display-only macOS
+	// FloatPopupOverlay).
+	if _, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: 10, Y: 22})); ok {
+		t.Fatalf("a click inside the float popup box must not dismiss it")
+	}
+
+	// A click OUTSIDE the band rect entirely (above row 18) is buffer content,
+	// not ours: it returns ok=false so the raw mouse path forwards it to the
+	// buffer underneath (AC 2 containment fallback boundary).
+	if _, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: 10, Y: 17})); ok {
+		t.Fatalf("a click outside the float popup band must not be claimed by the float handler")
+	}
+}
+
+func TestFloatPopupDismissAbsentWhenContentFillsBand(t *testing.T) {
+	model := New(80, 24, nil)
+	// Enough lines to fill the whole band: there is no phantom region, so no
+	// outside-the-box-but-in-band click exists and nothing dismisses through this
+	// path (the user dismisses via keyboard or a click outside the band).
+	model.chrome = map[byte]protocol.ChromePayload{
+		generated.OPGuiFloatPopup: {Float: protocol.FloatPopup{
+			Visible: true,
+			Title:   "Help",
+			Lines:   []string{"a", "b", "c", "d", "e", "f", "g", "h"},
+		}},
+	}
+	// Band height 3, content 1 (title) + min(8, ceiling-1) clamped to 3 = 3 rows:
+	// content fills the band (rows 21..23), no phantom rows.
+	model.surfacePlacements = []generated.SurfacePlacement{
+		{SurfaceID: surfaceIDFloatPopup, Rect: generated.Rect{Row: 21, Col: 0, Width: 80, Height: 3}, Z: 270, HitKind: 8},
+	}
+	model.viewport.SetContent(model.content())
+	_ = model.View()
+
+	for _, y := range []int{21, 22, 23} {
+		if _, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: 10, Y: y})); ok {
+			t.Fatalf("with content filling the band, click at row %d must not dismiss the float popup", y)
+		}
+	}
+}
+
 func TestCompletionRendersDocumentationPreviewWhenPresent(t *testing.T) {
 	model := New(60, 24, nil)
 	completion := protocol.Completion{

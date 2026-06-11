@@ -160,7 +160,62 @@ func (m Model) semanticMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	if packet, ok := m.editTimelineMousePacket(msg); ok {
 		return packet, true
 	}
+	if packet, ok := m.floatPopupMousePacket(msg); ok {
+		return packet, true
+	}
 	return nil, false
+}
+
+// floatPopupMousePacket maps a click in the float popup's overlay band but
+// OUTSIDE the rendered popup content to float_popup_dismiss (#2338), the same
+// dismiss intent the keyboard quit key reaches (MingaEditor.Input.Popup) and the
+// historical TUI outside-click-dismiss the registry-placement OverlaySink
+// otherwise swallows. The float popup model (RenderModel.UI.FloatPopup) carries
+// only title + lines: no links, no dismiss affordance, so a click INSIDE the
+// rendered box has no semantic to send (matching the display-only macOS
+// FloatPopupOverlay) and returns ok=false, falling through to the raw mouse path
+// where the BEAM OverlaySink keeps it contained (AC2). The popup renders
+// full-width and bottom-aligned within its band rect (overlayLayer), so "outside
+// the box but in band" is the phantom rows ABOVE the rendered content; a click
+// there dismisses. A click outside the band rect entirely is not ours and reaches
+// the buffer underneath.
+func (m Model) floatPopupMousePacket(msg tea.MouseMsg) ([]byte, bool) {
+	float, ok := m.floatPopup()
+	if !ok || !float.Visible {
+		return nil, false
+	}
+	rect, ok := m.surfacePlacementFor(surfaceIDFloatPopup)
+	if !ok {
+		return nil, false
+	}
+	mouse := msg.Mouse()
+	row, col := mouse.Y, mouse.X
+	// Only clicks inside the band rect are ours; outside it the click is buffer
+	// content (or another surface) and must not dismiss.
+	if row < int(rect.Row) || row >= int(rect.Row)+int(rect.Height) ||
+		col < int(rect.Col) || col >= int(rect.Col)+int(rect.Width) {
+		return nil, false
+	}
+	// Content is bottom-aligned within the rect (overlayLayer): its top row is
+	// rect.Row + rect.Height - contentLines. Rows above that are the phantom band,
+	// where an outside-the-popup click dismisses; rows at/below it are the popup
+	// box itself, which has no clickable affordance, so leave them for containment.
+	contentLines := m.floatPopupContentLines(float, int(rect.Height))
+	contentTop := int(rect.Row) + int(rect.Height) - contentLines
+	if row < contentTop {
+		return protocol.EncodeGUIFloatPopupDismiss(), true
+	}
+	return nil, false
+}
+
+// floatPopupContentLines returns how many rows renderFloat draws for this popup
+// after overlayLayer's trim/clamp, kept in lockstep with renderFloat so the
+// inside/outside split matches what the user sees: a title row plus up to
+// maxOverlayHeight-1 content lines, capped by the band height. The string-built
+// renderFloat emits no trailing blanks, so no trim adjustment is needed here.
+func (m Model) floatPopupContentLines(float protocol.FloatPopup, bandHeight int) int {
+	lineRows := min(len(float.Lines), max(m.maxOverlayHeight()-1, 0))
+	return min(1+lineRows, bandHeight)
 }
 
 // observatoryMousePacket maps a click on an observatory row to the same semantic

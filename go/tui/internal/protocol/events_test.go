@@ -127,6 +127,14 @@ func TestEncodeGUITimelineNavigate(t *testing.T) {
 	}
 }
 
+func TestEncodeGUIFloatPopupDismiss(t *testing.T) {
+	got := EncodeGUIFloatPopupDismiss()
+	want := []byte{generated.OPGuiAction, generated.GUIActionFloatPopupDismiss}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("float popup dismiss packet = %v, want %v", got, want)
+	}
+}
+
 func TestEncodeGUISidebarAction(t *testing.T) {
 	got := EncodeGUISidebarAction("git", "git_status", "activate")
 	want := []byte{

@@ -1047,6 +1047,10 @@ value = 0x57
 name = "extension_action"
 value = 0x58
 
+[[gui_actions]]
+name = "float_popup_dismiss"
+value = 0x59
+
 # ── Enum vocabularies ─────────────────────────────────────────────────────
 #
 # An [[enums]] entry names a closed set of wire byte values with a stable

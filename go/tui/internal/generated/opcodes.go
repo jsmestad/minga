@@ -199,4 +199,5 @@ const (
 	GUIActionSearchDismiss        byte = 0x56
 	GUIActionSidebarAction        byte = 0x57
 	GUIActionExtensionAction      byte = 0x58
+	GUIActionFloatPopupDismiss    byte = 0x59
 )
