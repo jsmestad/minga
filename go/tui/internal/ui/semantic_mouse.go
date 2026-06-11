@@ -15,6 +15,8 @@ const (
 	zonePrefixBreadcrumbSegment = "breadcrumb:segment:"
 	zonePrefixCompletionItem    = "completion:item:"
 	zonePrefixSidebarItem       = "sidebar:item:"
+	zonePrefixNotificationItem  = "notification:dismiss:"
+	zonePrefixNotificationAct   = "notification:action:"
 	zoneIDHoverAction           = "hover:action"
 	bottomPanelWheelLines       = 3
 )
@@ -41,6 +43,20 @@ func zoneIDCompletionItem(index int) string {
 
 func zoneIDSidebarItem(id string) string {
 	return zonePrefixSidebarItem + url.QueryEscape(id)
+}
+
+// zoneIDNotificationDismiss tags the dismiss ("x") affordance of one
+// notification by its stable id, mirroring the macOS dismiss button
+// (NotificationCenterView.swift:48 sendNotificationDismiss).
+func zoneIDNotificationDismiss(id string) string {
+	return zonePrefixNotificationItem + url.QueryEscape(id)
+}
+
+// zoneIDNotificationAction tags one inline action affordance by its
+// notification id and action id, mirroring the macOS per-action buttons
+// (NotificationCenterView.swift:74 sendNotificationAction).
+func zoneIDNotificationAction(notificationID, actionID string) string {
+	return zonePrefixNotificationAct + url.QueryEscape(notificationID) + ":" + url.QueryEscape(actionID)
 }
 
 func (m Model) localMouse(msg tea.MouseMsg) (Model, bool) {
@@ -116,6 +132,39 @@ func (m Model) semanticMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	}
 	if packet, ok := m.hoverActionMousePacket(msg); ok {
 		return packet, true
+	}
+	if packet, ok := m.notificationMousePacket(msg); ok {
+		return packet, true
+	}
+	return nil, false
+}
+
+// notificationMousePacket maps a click on a notification's dismiss affordance or
+// one of its inline actions to the same semantic gui_action the macOS frontend
+// sends (NotificationCenterView.swift): notification_dismiss for the "x", and
+// notification_action(id, action_id) for an inline action. The dismiss zone is
+// checked first because the "x" sits on the same header row as the title. A
+// click that hits no notification zone returns ok=false so the overlay's BEAM
+// containment swallows it (the surface is registry-placed, #2281), exactly as a
+// click in the body region does.
+func (m Model) notificationMousePacket(msg tea.MouseMsg) ([]byte, bool) {
+	notes, ok := m.notifications()
+	if !ok || !notes.Visible {
+		return nil, false
+	}
+	for _, note := range notes.Items {
+		if note.Dismissable {
+			zoneInfo := m.zones.Get(zoneIDNotificationDismiss(note.ID))
+			if zoneInfo != nil && zoneInfo.InBounds(msg) {
+				return protocol.EncodeGUINotificationDismiss(note.ID), true
+			}
+		}
+		for _, action := range note.Actions {
+			zoneInfo := m.zones.Get(zoneIDNotificationAction(note.ID, action.ID))
+			if zoneInfo != nil && zoneInfo.InBounds(msg) {
+				return protocol.EncodeGUINotificationAction(note.ID, action.ID), true
+			}
+		}
 	}
 	return nil, false
 }

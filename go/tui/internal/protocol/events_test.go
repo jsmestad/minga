@@ -81,6 +81,29 @@ func TestEncodeGUIHoverOpenAction(t *testing.T) {
 	}
 }
 
+func TestEncodeGUINotificationDismiss(t *testing.T) {
+	got := EncodeGUINotificationDismiss("build:test")
+	want := []byte{
+		generated.OPGuiAction, generated.GUIActionNotificationDismiss,
+		0, 10, 'b', 'u', 'i', 'l', 'd', ':', 't', 'e', 's', 't',
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("notification dismiss packet = %v, want %v", got, want)
+	}
+}
+
+func TestEncodeGUINotificationAction(t *testing.T) {
+	got := EncodeGUINotificationAction("build:test", "show_logs")
+	want := []byte{
+		generated.OPGuiAction, generated.GUIActionNotificationAction,
+		0, 10, 'b', 'u', 'i', 'l', 'd', ':', 't', 'e', 's', 't',
+		0, 9, 's', 'h', 'o', 'w', '_', 'l', 'o', 'g', 's',
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("notification action packet = %v, want %v", got, want)
+	}
+}
+
 func TestEncodeGUISidebarAction(t *testing.T) {
 	got := EncodeGUISidebarAction("git", "git_status", "activate")
 	want := []byte{

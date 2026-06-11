@@ -113,12 +113,13 @@ defmodule MingaEditor.Layout.FooterOverlays do
   # count is verified against what the Go renderer actually draws (after its own
   # trailing-blank trim in overlayLayer):
   #
-  #   * notifications  Go renders charmList("Notifications", items, desc=true): a
-  #     1-line title bar plus up to 2 lines per item (title + description). The
-  #     count `1 + 2 * item_count` is an exact-or-conservative upper bound on the
-  #     trimmed Go output (an item with no body/source draws 1 line, so the rect
-  #     is at most 1 row taller than the content per such item; OverlayBand clamps
-  #     the whole thing by the band ceiling).
+  #   * notifications  Go renders a 1-line title bar plus, per item, a header row
+  #     (title + dismiss affordance) and a source/body row, plus one actions row
+  #     for each item carrying inline actions (#2333). The count
+  #     `1 + 2 * item_count + items_with_actions` is an exact-or-conservative
+  #     upper bound on the trimmed Go output; undercounting here clips the
+  #     actions row out of the band, making its click zones unreachable
+  #     (OverlayBand clamps the whole thing by the band ceiling).
   #   * observatory / edit_timeline  Go renders charmTable: a 1-line header plus
   #     one line per row. The count `1 + row_count` matches the trimmed table.
   #   * extension_overlay  Go renders a 1-line title plus one line per entry. The
@@ -126,10 +127,14 @@ defmodule MingaEditor.Layout.FooterOverlays do
 
   @spec content_height_notifications(map()) :: non_neg_integer()
   defp content_height_notifications(%{notifications: %{items: items}}) when is_list(items) do
-    1 + 2 * length(items)
+    1 + 2 * length(items) + Enum.count(items, &notification_actions?/1)
   end
 
   defp content_height_notifications(_state), do: 1
+
+  @spec notification_actions?(map() | struct()) :: boolean()
+  defp notification_actions?(%{actions: [_ | _]}), do: true
+  defp notification_actions?(_item), do: false
 
   @spec content_height_observatory(map()) :: non_neg_integer()
   defp content_height_observatory(%{shell_state: %{observatory_data: %{tree: tree}}}) do
