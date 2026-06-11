@@ -2588,19 +2588,6 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         return (.protocolError(message: message), 1 + 2 + messageLen)
 
     default:
-        // Forward-compatibility: opcodes 0x90+ use a 2-byte length prefix
-        // so we can skip unknown opcodes without crashing. Opcodes below
-        // 0x90 without a length prefix are truly unknown and we must abort
-        // (we can't determine their size).
-        if opcode >= 0x90 {
-            guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
-            let payloadLen = Int(readU16(data, rest))
-            let totalSize = 1 + 2 + payloadLen  // opcode + length + payload
-            guard data.count >= offset + totalSize else { throw ProtocolDecodeError.malformed }
-            // Skip the unknown opcode silently. The BEAM may be newer than
-            // this frontend; crashing would be worse than ignoring.
-            return (nil, totalSize)
-        }
         throw ProtocolDecodeError.unknownOpcode(opcode)
     }
 }

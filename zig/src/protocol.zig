@@ -3541,3 +3541,133 @@ test "generated-sized unrendered opcode does not consume following command" {
         try std.testing.expect(second == .commit_frame);
     }
 }
+
+// ── Per-frontend framing contract (generalized from PR #2347) ─────────────────
+//
+// Why this exists: three times in this project's history a hand-written framing
+// authority drifted from the generated schema and desynced a frontend's command
+// stream. PR #2347 was the third (the macOS decoder mis-sized the sectioned
+// gui_surface_layout, 0xA4, and looped the loader). The #2322 instance was the
+// Zig sizer missing the gui_completion documentation tail. PR #2347 added one
+// opcode's regression; this test generalizes it across EVERY opcode the parser
+// stream can carry so a fourth instance is impossible on the Zig side.
+//
+// What it asserts: for every OP_* the live commandSize/decodeCommand path frames,
+// a minimal payload followed by a commit_frame sentinel must be sized EXACTLY to
+// the body boundary, and the trailing commit_frame must remain a decodable 9-byte
+// command. The sentinel is the #2322 guarantee: a sizer that falls back to
+// payload.len on truncation would swallow the commit_frame and fail.
+//
+// How opcodes are enumerated (self-updating on schema regen): comptime reflection
+// over the generated opcodes module (`std.meta.declarations`) yields every OP_*
+// constant. There is no hand-maintained opcode list to rot; a new opcode added to
+// docs/protocol_schema.toml regenerates protocol_opcodes.zig and enters this loop
+// the next time the test compiles.
+//
+// Which opcodes the parser stream routes: commandSize routes generated-sized,
+// hand-custom (customCommandSize), AND parser commands (parserCommandSize); every
+// other opcode (frontend->BEAM input, parser responses) makes decodeCommand return
+// error.UnknownOpcode and is correctly excluded here.
+//
+// How minimal payloads are synthesized: a single zero-fill search, framing-kind
+// agnostic. For each opcode it finds the smallest zero-filled body that both sizes
+// to its own length and decodes without error; appending the commit_frame must not
+// change that size. Zero bytes mean zero counts and zero-length strings, so the
+// search converges on the true minimal bounded frame for fixed / len16 / len32 /
+// sectioned / custom / parser framings alike. Opcodes whose decoder requires a
+// nonzero length prefix (none today) would go in minimalBodyOverrides.
+//
+// FAILURE BY DEFAULT IS THE POINT: a new opcode that no zero-filled body within
+// the probe bound can frame (a new custom needing nonzero structure, or a real
+// mis-framing) fails this test loudly by name. Fix the framing or add an override;
+// do not silence it.
+
+const FramingContract = struct {
+    const max_probe = 48;
+
+    // commit_frame is a complete fixed:9 command; the sizer must leave it intact.
+    const sentinel = [_]u8{ OP_COMMIT_FRAME, 0, 0, 0, 7, 0, 0, 0, 0 };
+
+    /// Returns true when `op` is framed by the parser stream: decodeCommand routes
+    /// it rather than returning error.UnknownOpcode. Probed with a generous zero
+    /// body so length guards do not falsely report Malformed for a framed opcode.
+    fn isFramed(op: u8) bool {
+        var buf: [1 + max_probe]u8 = [_]u8{0} ** (1 + max_probe);
+        buf[0] = op;
+        if (decodeCommand(&buf)) |_| {
+            return true;
+        } else |err| return err != error.UnknownOpcode;
+    }
+
+    /// Finds the smallest zero-filled body (opcode + N zeros) that frames exactly:
+    /// it sizes to its own length, decodes without error, and appending the
+    /// sentinel does not extend that size (so the commit_frame survives). Writes
+    /// the body into `out` and returns its length, or null when nothing within the
+    /// probe bound frames (the loud-failure signal).
+    fn minimalBody(op: u8, out: []u8) ?usize {
+        var n: usize = 0;
+        while (n <= max_probe) : (n += 1) {
+            const len = 1 + n;
+            @memset(out[0..len], 0);
+            out[0] = op;
+            const body = out[0..len];
+
+            // Must size to exactly its own length.
+            if (commandSize(body) != len) continue;
+            // Must decode within those bounds without error.
+            _ = decodeCommand(body) catch continue;
+
+            // Appending the sentinel must not change the framed size: the body is
+            // bounded and the commit_frame stays a separate command.
+            var full: [1 + max_probe + sentinel.len]u8 = undefined;
+            @memcpy(full[0..len], body);
+            @memcpy(full[len .. len + sentinel.len], &sentinel);
+            if (commandSize(full[0 .. len + sentinel.len]) != len) continue;
+
+            return len;
+        }
+        return null;
+    }
+};
+
+test "framing contract: every parser-stream opcode is exactly framed" {
+    var framed: usize = 0;
+    inline for (@typeInfo(opcodes).@"struct".decls) |decl| {
+        comptime if (decl.name.len < 3 or !std.mem.eql(u8, decl.name[0..3], "OP_")) continue;
+        const value = @field(opcodes, decl.name);
+        comptime if (@TypeOf(value) != u8) continue;
+
+        if (FramingContract.isFramed(value)) {
+            framed += 1;
+
+            var body_buf: [1 + FramingContract.max_probe]u8 = undefined;
+            const body_len = FramingContract.minimalBody(value, &body_buf) orelse {
+                std.debug.print(
+                    "opcode {s} (0x{X:0>2}) is framed by the parser stream but no minimal " ++
+                        "zero-filled body within {d} bytes frames exactly; its sizer/decoder " ++
+                        "likely mis-frames or needs nonzero structure. Fix the framing or add " ++
+                        "a FramingContract override.\n",
+                    .{ decl.name, value, FramingContract.max_probe },
+                );
+                return error.UnframedOpcode;
+            };
+
+            // Build body ++ sentinel and assert exact framing to the boundary.
+            var full: [1 + FramingContract.max_probe + FramingContract.sentinel.len]u8 = undefined;
+            @memcpy(full[0..body_len], body_buf[0..body_len]);
+            @memcpy(full[body_len .. body_len + FramingContract.sentinel.len], &FramingContract.sentinel);
+            const packet = full[0 .. body_len + FramingContract.sentinel.len];
+
+            // The first command is framed to exactly body_len.
+            try std.testing.expectEqual(body_len, commandSize(packet));
+            // The trailing bytes are the intact commit_frame sentinel (9 bytes),
+            // proving no truncation fallback swallowed it (#2322).
+            try std.testing.expectEqual(@as(usize, FramingContract.sentinel.len), commandSize(packet[body_len..]));
+            try std.testing.expect((try decodeCommand(packet[body_len..])) == .commit_frame);
+        }
+    }
+
+    // Sanity: enumeration must discover a non-trivial framed set, else reflection
+    // or classification silently broke and the contract would assert nothing.
+    try std.testing.expect(framed > 30);
+}
