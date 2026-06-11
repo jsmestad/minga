@@ -65,6 +65,13 @@ type Model struct {
 	// updates. hudVisible toggles the on-screen p50/p99 overlay at runtime.
 	latency    *latency.Recorder
 	hudVisible bool
+	// lineCache memoizes composed window body lines so a window-content delta
+	// whose rows are mostly refs reuses cached lines instead of recomposing the
+	// whole body every frame (#2288). It is a pointer so it persists across the
+	// value-copied Model the Update loop produces (same lifetime trick as
+	// latency). Structural commands, resize, and keyframe resync clear it; see
+	// invalidateLineCache and the keyframe reset in commitStaging.
+	lineCache *lineCache
 	// mouseDrag tracks an in-progress press-drag over a draggable chrome zone
 	// (a tab or a file-tree row), so a release over a different target can emit
 	// a tab_reorder or file_tree_drop gui_action (ticket #2229, AC3). It is nil
@@ -139,6 +146,7 @@ func New(width, height uint16, out chan<- []byte) Model {
 		// MINGA_LATENCY_HUD=1 shows the latency overlay at boot; it is also
 		// toggled at runtime with ctrl+alt+l (ticket #2215).
 		hudVisible: latencyHUDEnvEnabled(),
+		lineCache:  newLineCache(),
 	}
 	// Seed the header-offset cache so the first mouse event before any
 	// frame/resize still translates against the rendered fallback header.
@@ -176,6 +184,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		// Resize is a structural change: every cached line was composed at the
+		// old width, so drop the cache and take the full composition path
+		// (#2288 AC 2). The context fingerprint would catch the width change on
+		// its own, but resetting here keeps the cache from holding stale lines
+		// for the old geometry.
+		m.lineCache.reset()
 		m.refreshRenderedHeaderHeight()
 		m.viewport.SetWidth(msg.Width)
 		m.viewport.SetHeight(m.bodyHeight())
@@ -237,8 +251,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	m.viewport.SetWidth(max(m.width, 1))
 	m.viewport.SetHeight(m.bodyHeight())
-	m.viewport.SetContent(m.content())
+	m.viewport.SetContent(m.composeBody())
 	return m, cmd
+}
+
+// composeBody renders the editor body (the expensive lipgloss path) and records
+// how long it took plus how many body lines came from the line cache vs were
+// recomposed (#2288). The line cache mutates its per-compose hit/miss counters
+// through its pointer while content() runs, so reset them first and fold the
+// elapsed time and counts into the latency HUD afterward. This is the single
+// compose-time observation per frame; it is where the line-cache win shows up.
+func (m *Model) composeBody() string {
+	start := time.Now()
+	m.lineCache.resetCounters()
+	content := m.content()
+	if m.latency != nil {
+		hits, misses := m.lineCache.takeCounters()
+		m.latency.ObserveCompose(time.Since(start), hits, misses)
+	}
+	return content
 }
 
 func (m Model) View() tea.View {
@@ -401,6 +432,15 @@ func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cm
 	// committed frame_seq, otherwise this delta assumes a frame we never applied.
 	if m.staging.base != 0 && m.staging.base != m.lastCommittedSeq {
 		return m.invalidateStaging(cmds, "frame base mismatch")
+	}
+
+	// Resync safety (#2288 AC 5): a keyframe (base 0) is a full reset of the
+	// staged state, so the composed-line cache must reset with it. The keyframe
+	// carries fresh full rows for the whole frame; clearing first guarantees no
+	// line composed against the pre-resync state survives. Delta frames (base
+	// != 0) keep the cache so their ref rows hit it.
+	if m.staging.base == 0 {
+		m.lineCache.reset()
 	}
 
 	// Valid: replay the buffer atomically through the live mutation path.
@@ -597,6 +637,7 @@ func resolveWindowRows(previous []protocol.WindowRow, delta []protocol.WindowRow
 
 func (m *Model) removeWindow(id uint16) {
 	delete(m.windows, id)
+	m.lineCache.dropWindow(id)
 	for index, windowID := range m.windowOrder {
 		if windowID == id {
 			m.windowOrder = append(m.windowOrder[:index], m.windowOrder[index+1:]...)

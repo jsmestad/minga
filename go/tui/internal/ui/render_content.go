@@ -26,17 +26,12 @@ func (m Model) content() string {
 }
 
 func (m Model) semanticLines() []string {
-	if lines, ok := m.composedSemanticLines(); ok {
-		if len(lines) == 0 {
-			return nil
-		}
-		return lines
-	}
-	lines := make([]string, 0, m.bodyHeight())
-	for _, id := range m.windowOrder {
-		window := m.windows[id]
-		lines = append(lines, m.renderWindowRows(window)...)
-	}
+	// composedSemanticLines renders every window's rows exactly once. When no
+	// window carries geometry it returns those same rendered lines as the
+	// no-geometry fallback, so reuse them directly instead of re-rendering the
+	// windows a second time (which would also double-count the line cache
+	// hit/miss counters, #2288).
+	lines, _ := m.composedSemanticLines()
 	if len(lines) == 0 {
 		return nil
 	}
@@ -204,8 +199,31 @@ func (m Model) renderWindowRows(window protocol.WindowContent) []string {
 	} else if len(m.windowOrder) <= 1 {
 		height = max(height, m.bodyHeight())
 	}
+	// Composed-line cache (#2288): a row that arrived as a ref (unchanged
+	// content_hash) under an unchanged window render context reuses its
+	// previously composed line instead of re-running the lipgloss tree. The
+	// context fingerprint folds in every non-row input (scroll, overlays,
+	// gutter, indent guides, theme, width), so a cached line is only ever
+	// returned when it is byte-identical to a fresh compose (AC 4). The cache is
+	// a pointer field, so this value-receiver method still mutates its counters.
+	context := m.windowContextFingerprint(window, width, gutter, hasGutter)
+	// The cache map is rebuilt fresh each frame: the builder reads hits from the
+	// prior map and writes every row it touches (hit or miss) into a new map,
+	// committed at the end. This keeps the window's map at the rendered row count
+	// instead of accumulating an entry per (row_id, hash, index) ever seen, which
+	// would grow without bound under vertical scroll.
+	builder := m.lineCache.beginWindowRender(window.ID, context)
 	lines := make([]string, 0, height)
 	for rowIndex := 0; rowIndex < height; rowIndex++ {
+		key, cacheable := lineCacheKeyFor(window, rowIndex)
+		if cacheable {
+			if cached, ok := builder.lookup(key); ok {
+				m.lineCache.hits++
+				lines = append(lines, cached)
+				continue
+			}
+		}
+
 		contentWidth := width
 		gutterText := ""
 		if hasGutter {
@@ -214,9 +232,31 @@ func (m Model) renderWindowRows(window protocol.WindowContent) []string {
 		}
 
 		content := m.renderSemanticContentRow(window, rowIndex, contentWidth)
-		lines = append(lines, lipgloss.JoinHorizontal(lipgloss.Top, gutterText, content))
+		line := lipgloss.JoinHorizontal(lipgloss.Top, gutterText, content)
+		if cacheable {
+			m.lineCache.misses++
+			builder.store(key, line)
+		}
+		lines = append(lines, line)
 	}
+	builder.commit()
 	return lines
+}
+
+// lineCacheKeyFor returns the cache key for a window row and whether the row is
+// cacheable. Only body rows with a stable wire identity (row_id and
+// content_hash both set) are cached; tilde fill rows past the content and rows
+// without an identity (e.g. synthesized in tests) always recompose so the cache
+// never keys on a degenerate identity.
+func lineCacheKeyFor(window protocol.WindowContent, rowIndex int) (lineCacheKey, bool) {
+	if rowIndex >= len(window.Rows) {
+		return lineCacheKey{}, false
+	}
+	row := window.Rows[rowIndex]
+	if row.ID == 0 || row.ContentHash == 0 {
+		return lineCacheKey{}, false
+	}
+	return lineCacheKey{rowID: row.ID, hash: row.ContentHash, rowIndex: rowIndex}, true
 }
 
 func (m Model) renderSemanticContentRow(window protocol.WindowContent, rowIndex int, width int) string {
