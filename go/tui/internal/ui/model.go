@@ -97,6 +97,13 @@ type Model struct {
 	// BEAM for a keyframe (#2219). It drives a subtle footer indicator while the
 	// frontend waits, and clears when a valid commit applies.
 	resyncPending bool
+	// surfacePlacements is the BEAM's authoritative per-frame surface layout from
+	// gui_surface_layout (0xA4, #2268): one rect+z list. Compositing reads the z
+	// of a placed surface to order it instead of the old hand-coded
+	// overlayLines() precedence chain; the rects equal what BEAM mouse
+	// hit-testing uses. Surfaces not yet promoted into the BEAM surface registry
+	// keep a reduced hand-ordered chain (transitional split, see overlayLines).
+	surfacePlacements []generated.SurfacePlacement
 }
 
 // frameStaging is the open frame transaction buffer (#2219). It lives only
@@ -468,6 +475,11 @@ func (m *Model) applyMutation(command protocol.Command) {
 			m.applyFileTreeSelection(command.Chrome.FileTreeSelection)
 		case generated.OPGuiBottomPanel:
 			m.clampBottomPanelScrollback(command.Chrome.Bottom)
+		case generated.OPGuiSurfaceLayout:
+			// The authoritative per-frame surface layout (#2268). Replace wholesale
+			// each frame: it is a full snapshot, not a delta, and an absent opcode
+			// (older BEAM) leaves the prior list which compositing tolerates.
+			m.surfacePlacements = command.Chrome.Placements
 		}
 	}
 }

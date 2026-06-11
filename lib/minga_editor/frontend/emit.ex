@@ -77,11 +77,21 @@ defmodule MingaEditor.Frontend.Emit do
     # the frontend can resolve a keystroke-to-write latency sample.
     input_seq = Map.get(ctx, :last_input_seq, 0)
 
+    # gui_surface_layout (#2219 child E / #2268): the authoritative per-frame
+    # surface placement list, emitted inside the transaction from the SAME
+    # SurfaceRegistry placements that feed BEAM mouse hit-testing. One source,
+    # one rect+z list; Go composites by z and derives mouse zones from these
+    # rects (no more overlayLines precedence chain for placed surfaces). It rides
+    # with the chrome commands so it sits after content and before commit.
+    surface_layout_command =
+      Minga.Frontend.Adapter.GUI.SurfaceLayoutEncoder.encode_command(ctx.surface_placements)
+
     commands =
       [Protocol.encode_begin_frame(frame_seq, base_frame_seq)] ++
         flush_font_registration_commands() ++
         encoded_frame.metal_commands ++
-        encoded_frame.chrome_commands ++ [Protocol.encode_commit_frame(frame_seq, input_seq)]
+        encoded_frame.chrome_commands ++
+        [surface_layout_command, Protocol.encode_commit_frame(frame_seq, input_seq)]
 
     caches = update_tracking(ctx, caches)
     # Record both the seq and whether this frame carried the keyframe so the Editor
