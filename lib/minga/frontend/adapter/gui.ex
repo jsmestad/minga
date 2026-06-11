@@ -8,6 +8,8 @@ defmodule Minga.Frontend.Adapter.GUI do
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Frontend.Adapter.GUI.ChangeSummaryEncoder
   alias Minga.Frontend.Adapter.GUI.CompletionEncoder
+  alias Minga.Frontend.Adapter.GUI.ConfigStateEncoder
+  alias Minga.Frontend.Adapter.GUI.CursorAnimationEncoder
   alias Minga.Frontend.Adapter.GUI.EditTimelineEncoder
   alias Minga.Frontend.Adapter.GUI.EncodedFrame
   alias Minga.Frontend.Adapter.GUI.ExtensionOverlayEncoder
@@ -17,6 +19,7 @@ defmodule Minga.Frontend.Adapter.GUI do
   alias Minga.Frontend.Adapter.GUI.GitStatusEncoder
   alias Minga.Frontend.Adapter.GUI.GutterSeparatorEncoder
   alias Minga.Frontend.Adapter.GUI.HoverPopupEncoder
+  alias Minga.Frontend.Adapter.GUI.LineSpacingEncoder
   alias Minga.Frontend.Adapter.GUI.MinibufferEncoder
   alias Minga.Frontend.Adapter.GUI.PickerEncoder
   alias Minga.Frontend.Adapter.GUI.NotificationsEncoder
@@ -60,7 +63,10 @@ defmodule Minga.Frontend.Adapter.GUI do
     {:extension_overlay, ExtensionOverlayEncoder},
     {:extension_panel, ExtensionPanelEncoder},
     {:hover_popup, HoverPopupEncoder},
-    {:float_popup, FloatPopupEncoder}
+    {:float_popup, FloatPopupEncoder},
+    {:line_spacing, LineSpacingEncoder},
+    {:cursor_animation, CursorAnimationEncoder},
+    {:config_state, ConfigStateEncoder}
   ]
 
   @metal_component_encoders [

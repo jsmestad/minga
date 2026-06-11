@@ -99,38 +99,23 @@ defmodule MingaEditor.StartupTest do
       refute_receive {:"$gen_cast", {:send_commands, _}}
     end
 
-    test "GUI font config includes cursor animation from the supplied options server", %{
+    test "GUI font config no longer pushes line_spacing or cursor_animation (#2119)", %{
       server: server
     } do
+      # line_spacing (0x92) and cursor_animation (0x95) moved in-frame as semantic
+      # models, so send_font_config sends only the font setup, never those opcodes.
       Startup.send_font_config(state_for_frontend(:native_gui, server))
 
       assert_receive {:"$gen_cast", {:send_commands, font_commands}}
-      assert_receive {:"$gen_cast", {:send_commands, [<<0x92, _::binary>>]}}
-      assert_receive {:"$gen_cast", {:send_commands, [<<0x95, 1::16, 1::8>>]}}
       refute Enum.any?(font_commands, &cursor_animation_opcode?/1)
       refute Enum.any?(font_commands, &gui_font_option_opcode?/1)
-
-      {:ok, false} = Options.set(server, :cursor_animate, false)
-      Startup.send_font_config(state_for_frontend(:native_gui, server))
-
-      assert_receive {:"$gen_cast", {:send_commands, _font_commands}}
-      assert_receive {:"$gen_cast", {:send_commands, [<<0x92, _::binary>>]}}
-      assert_receive {:"$gen_cast", {:send_commands, [<<0x95, 1::16, 0::8>>]}}
-    end
-  end
-
-  describe "send_cursor_animation_config/2" do
-    test "runtime cursor animation changes are GUI-only" do
-      Startup.send_cursor_animation_config(state_for_frontend(:native_gui), false)
-      assert_receive {:"$gen_cast", {:send_commands, [<<0x95, 1::16, 0::8>>]}}
-
-      Startup.send_cursor_animation_config(state_for_frontend(:tui), false)
-      refute_receive {:"$gen_cast", {:send_commands, _}}
+      refute_receive {:"$gen_cast", {:send_commands, [<<0x92, _::binary>>]}}
+      refute_receive {:"$gen_cast", {:send_commands, [<<0x95, _::binary>>]}}
     end
   end
 
   describe "runtime option change events" do
-    test "editor forwards cursor animation changes from its own options server and ignores others" do
+    test "GUI editor re-emits cursor animation in-frame on its own options server change (#2119)" do
       %{
         editor: editor,
         port: port,
@@ -142,8 +127,12 @@ defmodule MingaEditor.StartupTest do
       RecordingFrontend.reset(port)
       sync_editor(editor)
 
+      # cursor_animate now rides in-frame: changing it triggers a re-render whose
+      # frame transaction carries the gui_cursor_animation command (0x95).
       assert {:ok, false} = Options.set(options_server, :cursor_animate, false)
-      assert_receive {:frontend_commands, ^port, [<<0x95, 1::16, 0::8>>]}
+      sync_editor(editor)
+
+      assert recorded_cursor_animation(port) == false
 
       other_options =
         start_supervised!({Options, name: nil, events_registry: events_registry},
@@ -153,11 +142,14 @@ defmodule MingaEditor.StartupTest do
       RecordingFrontend.reset(port)
       sync_editor(editor)
 
+      # A change on a different options server is ignored: no re-render, so no
+      # cursor_animation command reaches this editor's port.
       assert {:ok, false} = Options.set(other_options, :cursor_animate, false)
-      refute_receive {:frontend_commands, ^port, [<<0x95, 1::16, 0::8>>]}
+      sync_editor(editor)
+      assert recorded_cursor_animation(port) == nil
     end
 
-    test "TUI editor ignores GUI-only cursor animation runtime changes" do
+    test "TUI editor never emits the GUI-only cursor animation command" do
       %{editor: editor, port: port, options_server: options_server} =
         start_recording_editor(:tui, :runtime_tui)
 
@@ -165,7 +157,8 @@ defmodule MingaEditor.StartupTest do
       sync_editor(editor)
 
       assert {:ok, false} = Options.set(options_server, :cursor_animate, false)
-      refute_receive {:frontend_commands, ^port, [<<0x95, _::binary>>]}
+      sync_editor(editor)
+      assert recorded_cursor_animation(port) == nil
     end
   end
 
@@ -730,7 +723,7 @@ defmodule MingaEditor.StartupTest do
     end
   end
 
-  defp state_for_frontend(frontend_type, server \\ nil) do
+  defp state_for_frontend(frontend_type, server) do
     %EditorState{
       port_manager: self(),
       workspace: %MingaEditor.Session.State{viewport: Viewport.new(24, 80)},
@@ -757,6 +750,23 @@ defmodule MingaEditor.StartupTest do
 
   defp gui_font_option_opcode?(<<0x92, _::binary>>), do: true
   defp gui_font_option_opcode?(_), do: false
+
+  # Returns the decoded cursor-animation enabled flag from any gui_cursor_animation
+  # (0x95) command recorded for this port, or nil if none was emitted.
+  defp recorded_cursor_animation(port) do
+    result =
+      port
+      |> RecordingFrontend.commands()
+      |> Enum.find_value(fn
+        <<0x95, _len::16, enabled::8, _rest::binary>> -> {:ok, enabled == 1}
+        _ -> nil
+      end)
+
+    case result do
+      {:ok, enabled?} -> enabled?
+      nil -> nil
+    end
+  end
 
   defp private_sidebar_registry do
     table = Module.concat(__MODULE__, "Sidebar#{System.unique_integer([:positive])}")

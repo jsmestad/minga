@@ -995,6 +995,11 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @doc """
   Encodes a gui_line_spacing command.
 
+  Parity oracle (#2119): production no longer pushes line spacing through this
+  function. line_spacing is emitted in-frame by
+  `Minga.Frontend.Adapter.GUI.LineSpacingEncoder`; this encoder is retained only
+  as the byte-for-byte oracle for the GUI protocol tests.
+
   Uses the forward-compatible 0x90+ format: opcode(1) + payload_length(2) + payload.
   Payload: spacing_x100(2) — the spacing multiplier times 100 as a 16-bit unsigned integer.
   For example, 1.2 is encoded as 120, 1.0 as 100.
@@ -1009,6 +1014,11 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   @doc """
   Encodes a gui_cursor_animation command.
+
+  Parity oracle (#2119): production no longer pushes cursor animation through this
+  function. cursor_animation is emitted in-frame by
+  `Minga.Frontend.Adapter.GUI.CursorAnimationEncoder`; this encoder is retained
+  only as the byte-for-byte oracle for the GUI protocol tests.
 
   Sends whether the GUI renderer should animate cursor movement. Reduce Motion can still disable animation on the frontend.
   Uses the forward-compatible 0x90+ format: opcode(1) + payload_length(2) + enabled(1).
@@ -1268,7 +1278,17 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           required(:keybindings) => [keybinding_entry()]
         }
 
-  @doc "Encodes the current settings panel state for native GUI frontends."
+  @doc """
+  Encodes the current settings panel state for native GUI frontends.
+
+  Parity oracle (#2119): production no longer pushes config_state through this
+  function. config_state is emitted in-frame by
+  `Minga.Frontend.Adapter.GUI.ConfigStateEncoder` from the cached snapshot the
+  builder projects via `MingaEditor.RenderModel.UI.ConfigStateBuilder`. The
+  projection helpers below (`config_state/2`, `settings_option?/1`) are still
+  live: the builder and the GUI action handler use them. This encoder is retained
+  only as the byte-for-byte oracle for the GUI protocol tests.
+  """
   @spec encode_gui_config_state(config_state()) :: binary()
   def encode_gui_config_state(%{
         options: options,
@@ -1308,12 +1328,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
       theme_previews: theme_previews(),
       keybindings: keybinding_entries(keymap_server)
     }
-  end
-
-  @doc "Builds a one-option settings state payload for incremental updates."
-  @spec config_state_entry(Options.option_name(), term()) :: config_state()
-  def config_state_entry(name, value) do
-    %{options: %{name => value}, theme_previews: [], keybindings: []}
   end
 
   @spec settings_option?(atom()) :: boolean()
@@ -2691,6 +2705,15 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   @doc """
   Encodes the tool manager panel state.
+
+  Parity oracle / future wiring (#2119): this opcode has no live BEAM emitter.
+  The macOS frontend has a fully wired decode -> `ToolManagerState` -> `ToolManagerView`
+  path designed to be BEAM-driven, but the BEAM half (a semantic tool-manager
+  model and emission) was never built, and building it is out of scope here and
+  blocked by the semantic-surface freeze. Rather than orphan the frontend decoder
+  and break the GUI protocol round-trip tests, this encoder is retained as the
+  byte-for-byte parity oracle until a tool-manager feature is built on the
+  semantic path. The `gui_protocol_test.exs` round-trip suite exercises it.
 
   Sends a rich structured view of all available tools with their install
   status, versions, categories, and progress info. The GUI frontend

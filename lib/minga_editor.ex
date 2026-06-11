@@ -406,7 +406,7 @@ defmodule MingaEditor do
     }
 
     Startup.send_font_config(new_state)
-    push_full_config_state(new_state)
+    new_state = refresh_gui_config_state(new_state)
     new_state = Renderer.render_or_async(new_state)
     # Setup highlighting after first paint with correct viewport
     new_state = setup_highlight_or_defer(new_state)
@@ -972,38 +972,28 @@ defmodule MingaEditor do
     end
   end
 
-  @doc false
-  @spec push_full_config_state(EditorState.t()) :: :ok
-  def push_full_config_state(%{port_manager: nil}), do: :ok
+  @doc """
+  Rebuilds the cached native settings snapshot (#2119).
 
-  def push_full_config_state(%{port_manager: port} = state) do
-    if MingaEditor.Frontend.gui?(state.capabilities) do
-      config_state =
+  The snapshot is emitted in-frame as the `config_state` semantic model, so this
+  only refreshes the cached struct on `EditorState`; the next render delivers it
+  inside the frame transaction. A keyframe re-emits it for free. For non-GUI
+  frontends the snapshot stays nil and nothing is emitted.
+  """
+  @spec refresh_gui_config_state(EditorState.t()) :: EditorState.t()
+  def refresh_gui_config_state(%{capabilities: caps} = state) do
+    if MingaEditor.Frontend.gui?(caps) do
+      snapshot =
         MingaEditor.Frontend.Protocol.GUI.config_state(
           EditorState.options_server(state),
           state.keymap_server
         )
+        |> MingaEditor.RenderModel.UI.ConfigStateBuilder.from_wire()
 
-      MingaEditor.Frontend.send_config_state(port, config_state)
+      EditorState.put_gui_config_state(state, snapshot)
+    else
+      state
     end
-
-    :ok
-  catch
-    :exit, _ -> :ok
-  end
-
-  @doc false
-  @spec push_config_state_entry(EditorState.t(), atom(), term()) :: EditorState.t()
-  def push_config_state_entry(%{port_manager: nil} = state, _name, _value), do: state
-
-  def push_config_state_entry(%{port_manager: port} = state, name, value) do
-    if MingaEditor.Frontend.gui?(state.capabilities) and
-         MingaEditor.Frontend.Protocol.GUI.settings_option?(name) do
-      config_state = MingaEditor.Frontend.Protocol.GUI.config_state_entry(name, value)
-      MingaEditor.Frontend.send_config_state(port, config_state)
-    end
-
-    state
   catch
     :exit, _ -> state
   end
@@ -1013,12 +1003,11 @@ defmodule MingaEditor do
   def apply_runtime_config_option(state, :theme, theme_name) when is_atom(theme_name) do
     theme = MingaEditor.UI.Theme.get!(theme_name)
 
-    if state.port_manager do
-      MingaEditor.Frontend.send_commands(state.port_manager, [
-        MingaEditor.Frontend.Protocol.GUI.encode_gui_theme(theme)
-      ])
-    end
-
+    # No out-of-band theme push (#2119): applying the theme then invalidating every
+    # window and the layout forces a full re-render, and the frame transaction's
+    # ThemeEncoder re-emits gui_theme semantically (the new theme changes the
+    # adapter cache fingerprint). A keyframe re-emits it for free. See
+    # MingaEditor.RuntimeThemePushTest for the proof.
     state
     |> EditorState.apply_theme(theme)
     |> EditorState.invalidate_all_windows()

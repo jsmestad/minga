@@ -480,7 +480,10 @@ defmodule MingaEditor.Startup do
   @doc """
   Sends font configuration to the frontend via the port protocol.
 
-  Also sends GUI renderer options such as line spacing and cursor animation.
+  Line spacing and cursor animation are no longer pushed here; they ride inside
+  the frame transaction as semantic models (#2119), so a late-attaching client's
+  keyframe carries them. This helper covers only the font family/size/weight/
+  ligatures/fallback configuration, which remains an out-of-band font setup push.
   """
   @spec send_font_config(MingaEditor.State.t()) :: :ok
   def send_font_config(%{port_manager: nil}), do: :ok
@@ -495,29 +498,6 @@ defmodule MingaEditor.Startup do
     fallback = Minga.Config.Options.get(options_server, :font_fallback)
 
     MingaEditor.Frontend.configure_font(port, family, size, ligatures, weight, fallback || [])
-
-    if MingaEditor.Frontend.gui?(state.capabilities) do
-      line_spacing = Minga.Config.Options.get(options_server, :line_spacing) || 1.0
-      MingaEditor.Frontend.send_line_spacing(port, line_spacing)
-
-      cursor_animate = Minga.Config.Options.get(options_server, :cursor_animate)
-      MingaEditor.Frontend.send_cursor_animation(port, cursor_animate)
-    end
-  catch
-    :exit, _ -> :ok
-  end
-
-  @doc "Sends the current cursor animation preference to GUI frontends after a runtime option change."
-  @spec send_cursor_animation_config(MingaEditor.State.t(), boolean()) :: :ok
-  def send_cursor_animation_config(%{port_manager: nil}, _enabled), do: :ok
-
-  def send_cursor_animation_config(%{port_manager: port} = state, enabled)
-      when is_boolean(enabled) do
-    if MingaEditor.Frontend.gui?(state.capabilities) do
-      MingaEditor.Frontend.send_cursor_animation(port, enabled)
-    end
-
-    :ok
   catch
     :exit, _ -> :ok
   end

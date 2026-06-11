@@ -110,8 +110,16 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   defp dispatch_action(state, :config_query) do
-    MingaEditor.push_full_config_state(state)
+    # The settings panel queries the full config snapshot when it opens (#2119).
+    # config_state is emitted in-frame and the adapter fingerprint-caches it, so an
+    # unchanged snapshot would be suppressed. config_query is an explicit "re-send
+    # the current state" pull, so reset the frontend render state to drop the
+    # adapter caches and force the next frame to re-emit config_state (and every
+    # other surface), then render.
     state
+    |> MingaEditor.refresh_gui_config_state()
+    |> EditorState.reset_frontend_render_state()
+    |> Renderer.render_or_async()
   end
 
   defp dispatch_action(state, {:config_update, name, value}) do
@@ -123,7 +131,8 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
           state
           |> MingaEditor.apply_runtime_config_option(name, persisted_value)
-          |> MingaEditor.push_config_state_entry(name, persisted_value)
+          |> MingaEditor.refresh_gui_config_state()
+          |> Renderer.render_or_async()
 
         {:error, reason} ->
           Minga.Log.warning(:config, "Ignored GUI config update for #{inspect(name)}: #{reason}")

@@ -143,7 +143,12 @@ defmodule MingaEditor.State do
             # Set when the frontend sends request_keyframe (#2219). The next emitted
             # frame is forced to a keyframe (base_frame_seq 0, full snapshots) and the
             # flag is cleared once that frame goes out.
-            keyframe_pending?: false
+            keyframe_pending?: false,
+            # Cached native settings snapshot emitted in-frame as the config_state
+            # semantic model (#2119). Rebuilt only when a settings option changes
+            # (see MingaEditor.refresh_gui_config_state/1), so the render pipeline
+            # reads it for free each frame. nil until the first GUI frontend attaches.
+            gui_config_state: nil
 
   @type backend :: :tui | :gui | :native_gui | :headless
 
@@ -195,8 +200,18 @@ defmodule MingaEditor.State do
           git_commit_gen_ref: reference() | nil,
           font_size_override: pos_integer() | nil,
           last_input_seq: non_neg_integer(),
-          keyframe_pending?: boolean()
+          keyframe_pending?: boolean(),
+          gui_config_state: Minga.RenderModel.UI.ConfigState.t() | nil
         }
+
+  @doc "Returns the cached native settings snapshot emitted in-frame (#2119)."
+  @spec gui_config_state(t()) :: Minga.RenderModel.UI.ConfigState.t() | nil
+  def gui_config_state(%__MODULE__{gui_config_state: snapshot}), do: snapshot
+
+  @doc "Stores the cached native settings snapshot emitted in-frame (#2119)."
+  @spec put_gui_config_state(t(), Minga.RenderModel.UI.ConfigState.t() | nil) :: t()
+  def put_gui_config_state(%__MODULE__{} = state, snapshot),
+    do: %{state | gui_config_state: snapshot}
 
   @doc "Returns the active sidebar registry table for this state."
   @spec sidebar_registry(t() | map()) :: MingaEditor.Extension.Sidebar.table()

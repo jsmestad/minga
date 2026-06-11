@@ -4,10 +4,12 @@ defmodule Minga.Integration.GUISettingsActionTest do
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Config.Options
+  alias Minga.Frontend.Adapter.GUI.ConfigStateEncoder
   alias Minga.Test.RecordingFrontend
   alias MingaEditor
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
+  alias MingaEditor.RenderModel.UI.ConfigStateBuilder
 
   setup do
     gui_settings_path = Minga.Config.Loader.gui_settings_path()
@@ -21,19 +23,25 @@ defmodule Minga.Integration.GUISettingsActionTest do
     :ok
   end
 
-  test "config_query emits full config state" do
+  test "config_query emits full config state in-frame" do
     ctx = start_recording_editor(:gui_settings_query)
     RecordingFrontend.reset(ctx.port)
 
     send(ctx.editor, {:minga_input, {:gui_action, :config_query}})
     sync_editor(ctx.editor)
 
-    expected = ProtocolGUI.config_state(ctx.options_server, Minga.Keymap.default_server())
+    # config_state rides inside the frame transaction now (#2119): the full
+    # snapshot is encoded by the adapter ConfigStateEncoder, byte-identical to the
+    # legacy out-of-band push, and appears in the emitted command stream.
+    expected =
+      ProtocolGUI.config_state(ctx.options_server, Minga.Keymap.default_server())
+      |> ConfigStateBuilder.from_wire()
+      |> ConfigStateEncoder.encode_command()
 
-    assert ProtocolGUI.encode_gui_config_state(expected) in RecordingFrontend.commands(ctx.port)
+    assert expected in RecordingFrontend.commands(ctx.port)
   end
 
-  test "config_update applies live changes and emits the changed entry" do
+  test "config_update applies live changes and emits the updated config state in-frame" do
     ctx = start_recording_editor(:gui_settings_update)
     RecordingFrontend.reset(ctx.port)
 
@@ -43,7 +51,13 @@ defmodule Minga.Integration.GUISettingsActionTest do
     assert Options.get(ctx.options_server, :wrap) == true
     assert BufferProcess.get_option(ctx.buffer, :wrap) == true
 
-    expected = ProtocolGUI.encode_gui_config_state(ProtocolGUI.config_state_entry(:wrap, true))
+    # The full config snapshot carrying the updated value is emitted in-frame,
+    # byte-identical to projecting the current servers and encoding the snapshot.
+    expected =
+      ProtocolGUI.config_state(ctx.options_server, Minga.Keymap.default_server())
+      |> ConfigStateBuilder.from_wire()
+      |> ConfigStateEncoder.encode_command()
+
     assert expected in RecordingFrontend.commands(ctx.port)
   end
 
