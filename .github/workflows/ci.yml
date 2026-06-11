@@ -148,6 +148,15 @@ jobs:
             exit 0
           fi
 
+          # A relative comparison is only valid when both sides run the same
+          # bench. If this PR changes the bench script, base and HEAD would
+          # measure different scenarios (the ruler itself changed), so skip the
+          # relative gate rather than report the scenario diff as a regression.
+          if ! git diff --quiet "$BASE_SHA" HEAD -- bench/keystroke_latency_baseline.exs; then
+            echo "::warning::bench/keystroke_latency_baseline.exs changed in this PR; base and HEAD would measure different scenarios, so the relative gate is skipped (absolute sanity only)."
+            exit 0
+          fi
+
           # Force checkout: the working tree is CI-disposable and may carry stale
           # generated artifacts; -f avoids "would be overwritten" aborts.
           git checkout -f --quiet "$BASE_SHA"
