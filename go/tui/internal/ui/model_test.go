@@ -15,13 +15,57 @@ import (
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 )
 
+func testThemeCommand() protocol.Command {
+	colors := map[byte]uint32{
+		themeEditorBG:         0x1E1F2A,
+		themeEditorFG:         0xC7D0E8,
+		themeTreeBG:           0x222433,
+		themeTreeFG:           0xB8C0D8,
+		themeTreeSelectBG:     0x343A52,
+		themeTreeDirFG:        0x7DB7FF,
+		themeTreeSelectionFG:  0xF7FAFF,
+		themeTabBG:            0x242634,
+		themeTabInactiveFG:    0x747B93,
+		themePopupBG:          0x292D3E,
+		themePopupFG:          0xD9E0F5,
+		themePopupSelBG:       0x3A425C,
+		themePopupSelFG:       0xF7FAFF,
+		themePopupDescFG:      0x747B93,
+		themePopupKeyFG:       0xF7FAFF,
+		themeBreadcrumbBG:     0x232634,
+		themeModelineBG:       0x222536,
+		themeModelineFG:       0xAEB7D0,
+		themeAccent:           0x7DB7FF,
+		themeGutterFG:         0x697088,
+		themeGutterCurrentFG:  0xC7D0E8,
+		themeDiagnosticError:  0xFF8AA6,
+		themeWarningFG:        0xF5C276,
+		themeDiagnosticInfo:   0x7DCFFF,
+		themeDiagnosticHint:   0xA6DA95,
+		themeHighlightReadBG:  0x33384C,
+		themeHighlightWriteBG: 0x4A3F2B,
+		themeSelectionBG:      0x2F4463,
+	}
+
+	for _, slot := range requiredThemeSlots {
+		if _, ok := colors[slot]; !ok {
+			colors[slot] = uint32(slot)<<16 | uint32(slot)<<8 | uint32(slot)
+		}
+	}
+
+	return protocol.Command{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiTheme, Theme: protocol.Theme{Colors: colors}}}
+}
+
 // frame wraps semantic/chrome commands in a keyframe transaction (#2219):
-// begin_frame(seq=1, base=0) ++ commands ++ commit_frame(seq=1). Under the
-// staged model nothing applies until commit, so tests that exercise the live
-// effect of a command must deliver it inside a transaction.
+// begin_frame(seq=1, base=0) ++ gui_theme ++ commands ++ commit_frame(seq=1).
+// Under the staged model nothing applies until commit, so tests that exercise
+// the live effect of a command must deliver it inside a transaction.
 func frame(commands ...protocol.Command) []protocol.Command {
-	out := make([]protocol.Command, 0, len(commands)+2)
+	out := make([]protocol.Command, 0, len(commands)+3)
 	out = append(out, protocol.Command{Kind: protocol.CommandBeginFrame, FrameSeq: 1, BaseFrameSeq: 0})
+	if found, _ := stagingThemeValidation(commands); !found {
+		out = append(out, testThemeCommand())
+	}
 	out = append(out, commands...)
 	out = append(out, protocol.Command{Kind: protocol.CommandCommitFrame, FrameSeq: 1})
 	return out
@@ -398,10 +442,10 @@ func TestPickerSelectedRowUsesSelectionColors(t *testing.T) {
 		Items:    []protocol.PickerItem{{Label: "[new 1]", Description: "dirty"}},
 	}, 2, 40)
 	joined := strings.Join(rows, "\n")
-	if !strings.Contains(joined, "48;2;58;66;92") {
+	if !strings.Contains(joined, "48;2;51;51;51") {
 		t.Fatalf("selected picker row should use popup selection background: %q", joined)
 	}
-	if !strings.Contains(joined, "38;2;247;250;255") {
+	if !strings.Contains(joined, "38;2;255;255;255") {
 		t.Fatalf("selected picker row should use popup selection foreground: %q", joined)
 	}
 }
@@ -410,10 +454,10 @@ func TestPickerPreviewDefaultsToPopupTextAndSurface(t *testing.T) {
 	model := New(80, 24, nil)
 	rendered := model.renderPickerPreview(protocol.PickerPreview{Visible: true, Lines: []protocol.PreviewLine{{Segments: []protocol.PreviewSegment{{Text: "plain preview"}}}}}, 3, 40)
 	joined := strings.Join(rendered, "\n")
-	if !strings.Contains(joined, "38;2;217;224;245") {
+	if !strings.Contains(joined, "38;2;255;255;255") {
 		t.Fatalf("plain preview text should use popup foreground instead of terminal default: %q", joined)
 	}
-	if !strings.Contains(joined, "48;2;41;45;62") {
+	if !strings.Contains(joined, "48;2;0;0;0") {
 		t.Fatalf("preview rows should use popup surface background: %q", joined)
 	}
 }
@@ -575,13 +619,171 @@ func TestCursorShapeSequenceTracksProtocolShape(t *testing.T) {
 
 func TestThemeCommandUpdatesModelPalette(t *testing.T) {
 	model := New(20, 4, nil)
-	_ = model.applyCommands(frame(protocol.Command{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiTheme, Theme: protocol.Theme{Colors: map[byte]uint32{themeEditorBG: 0x010203, themeSelectionBG: 0x112233}}}}))
+	_ = model.applyCommands(frame(testThemeCommand()))
 
-	if got := model.activePalette.colors[themeEditorBG]; got != 0x010203 {
-		t.Fatalf("editor background slot = 0x%06X, want 0x010203", got)
+	if got := model.activePalette.colors[themeEditorBG]; got != 0x1E1F2A {
+		t.Fatalf("editor background slot = 0x%06X, want 0x1E1F2A", got)
 	}
-	if got := model.activePalette.colors[themeSelectionBG]; got != 0x112233 {
-		t.Fatalf("selection slot = 0x%06X, want 0x112233", got)
+	if got := model.activePalette.colors[themeSelectionBG]; got != 0x2F4463 {
+		t.Fatalf("selection slot = 0x%06X, want 0x2F4463", got)
+	}
+}
+
+func TestBootstrapPaletteIsThemeAgnostic(t *testing.T) {
+	palette := bootstrapPalette()
+	want := map[byte]uint32{
+		themeEditorBG:        0x000000,
+		themeEditorFG:        0xFFFFFF,
+		themeTreeBG:          0x000000,
+		themeTreeSelectBG:    0x333333,
+		themeTreeSelectionFG: 0xFFFFFF,
+		themeTabBG:           0x000000,
+		themePopupBG:         0x000000,
+		themePopupSelFG:      0xFFFFFF,
+		themeModelineBG:      0x000000,
+		themeAccent:          0xFFFFFF,
+		themeDiagnosticError: 0xFF0000,
+		themeSelectionBG:     0x333333,
+	}
+
+	for slot, expected := range want {
+		if got := palette.colors[slot]; got != expected {
+			t.Fatalf("slot 0x%02X = 0x%06X, want 0x%06X", slot, got, expected)
+		}
+	}
+}
+
+func TestKeyframeWithoutThemeShowsProtocolError(t *testing.T) {
+	model := New(20, 4, nil)
+	_ = model.applyCommands([]protocol.Command{
+		{Kind: protocol.CommandBeginFrame, FrameSeq: 1, BaseFrameSeq: 0},
+		{Kind: protocol.CommandWindowContent, Window: protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "unthemed"}}}},
+		{Kind: protocol.CommandCommitFrame, FrameSeq: 1},
+	})
+
+	if model.protocolError != "missing gui_theme in keyframe" {
+		t.Fatalf("missing gui_theme should latch protocol error, got %q", model.protocolError)
+	}
+	if strings.Contains(ansi.Strip(model.View().Content), "unthemed") {
+		t.Fatalf("unthemed keyframe should not render content")
+	}
+}
+
+func TestKeyframeWithEmptyThemeShowsProtocolError(t *testing.T) {
+	model := New(20, 4, nil)
+	_ = model.applyCommands([]protocol.Command{
+		{Kind: protocol.CommandBeginFrame, FrameSeq: 1, BaseFrameSeq: 0},
+		{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiTheme, Theme: protocol.Theme{Colors: map[byte]uint32{}}}},
+		{Kind: protocol.CommandWindowContent, Window: protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "empty"}}}},
+		{Kind: protocol.CommandCommitFrame, FrameSeq: 1},
+	})
+
+	if !strings.Contains(model.protocolError, "missing gui_theme slots in keyframe") {
+		t.Fatalf("empty gui_theme should report missing slots, got %q", model.protocolError)
+	}
+	if !strings.Contains(model.protocolError, "0x01") || !strings.Contains(model.protocolError, "0xA0") {
+		t.Fatalf("empty gui_theme should list missing slot ids, got %q", model.protocolError)
+	}
+	if strings.Contains(ansi.Strip(model.View().Content), "empty") {
+		t.Fatalf("empty keyframe should not render content")
+	}
+}
+
+func TestKeyframeWithIncompleteThemeShowsProtocolError(t *testing.T) {
+	model := New(20, 4, nil)
+	_ = model.applyCommands([]protocol.Command{
+		{Kind: protocol.CommandBeginFrame, FrameSeq: 1, BaseFrameSeq: 0},
+		{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiTheme, Theme: protocol.Theme{Colors: map[byte]uint32{themeEditorBG: 0x1E1F2A, themeEditorFG: 0xC7D0E8}}}},
+		{Kind: protocol.CommandWindowContent, Window: protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "partial"}}}},
+		{Kind: protocol.CommandCommitFrame, FrameSeq: 1},
+	})
+
+	if !strings.Contains(model.protocolError, "missing gui_theme slots in keyframe") {
+		t.Fatalf("partial gui_theme should report missing slots, got %q", model.protocolError)
+	}
+	if !strings.Contains(model.protocolError, "0x03") || !strings.Contains(model.protocolError, "0xA0") {
+		t.Fatalf("partial gui_theme should list missing slot ids, got %q", model.protocolError)
+	}
+	if strings.Contains(ansi.Strip(model.View().Content), "partial") {
+		t.Fatalf("partial keyframe should not render content")
+	}
+}
+
+func TestDeltaFrameWithEmptyThemeShowsProtocolError(t *testing.T) {
+	model := New(20, 4, nil)
+	_ = model.applyCommands(frame(
+		protocol.Command{Kind: protocol.CommandWindowContent, Window: protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "baseline"}}}},
+	))
+	baselineEditorBG := model.activePalette.colors[themeEditorBG]
+
+	_ = model.applyCommands([]protocol.Command{
+		{Kind: protocol.CommandBeginFrame, FrameSeq: 2, BaseFrameSeq: 1},
+		{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiTheme, Theme: protocol.Theme{Colors: map[byte]uint32{}}}},
+		{Kind: protocol.CommandWindowContent, Window: protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "delta-empty"}}}},
+		{Kind: protocol.CommandCommitFrame, FrameSeq: 2},
+	})
+
+	if !strings.Contains(model.protocolError, "missing gui_theme slots") {
+		t.Fatalf("empty delta gui_theme should report missing slots, got %q", model.protocolError)
+	}
+	if !strings.Contains(model.protocolError, "0x01") || !strings.Contains(model.protocolError, "0xA0") {
+		t.Fatalf("empty delta gui_theme should list missing slot ids, got %q", model.protocolError)
+	}
+	if got := model.activePalette.colors[themeEditorBG]; got != baselineEditorBG {
+		t.Fatalf("delta theme failure should not change palette: 0x%06X != 0x%06X", got, baselineEditorBG)
+	}
+	if strings.Contains(ansi.Strip(model.View().Content), "delta-empty") {
+		t.Fatalf("empty delta frame should not render content")
+	}
+}
+
+func TestDeltaFrameWithPartialThemeShowsProtocolError(t *testing.T) {
+	model := New(20, 4, nil)
+	_ = model.applyCommands(frame(
+		protocol.Command{Kind: protocol.CommandWindowContent, Window: protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "baseline"}}}},
+	))
+	baselineEditorBG := model.activePalette.colors[themeEditorBG]
+
+	_ = model.applyCommands([]protocol.Command{
+		{Kind: protocol.CommandBeginFrame, FrameSeq: 3, BaseFrameSeq: 1},
+		{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiTheme, Theme: protocol.Theme{Colors: map[byte]uint32{themeEditorBG: 0x1E1F2A, themeEditorFG: 0xC7D0E8}}}},
+		{Kind: protocol.CommandWindowContent, Window: protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "delta-partial"}}}},
+		{Kind: protocol.CommandCommitFrame, FrameSeq: 3},
+	})
+
+	if !strings.Contains(model.protocolError, "missing gui_theme slots") {
+		t.Fatalf("partial delta gui_theme should report missing slots, got %q", model.protocolError)
+	}
+	if !strings.Contains(model.protocolError, "0x03") || !strings.Contains(model.protocolError, "0xA0") {
+		t.Fatalf("partial delta gui_theme should list missing slot ids, got %q", model.protocolError)
+	}
+	if got := model.activePalette.colors[themeEditorBG]; got != baselineEditorBG {
+		t.Fatalf("delta theme failure should not change palette: 0x%06X != 0x%06X", got, baselineEditorBG)
+	}
+	if strings.Contains(ansi.Strip(model.View().Content), "delta-partial") {
+		t.Fatalf("partial delta frame should not render content")
+	}
+}
+
+func TestPaletteUsesSemanticTreeAndPopupSlots(t *testing.T) {
+	palette := paletteFromTheme(protocol.Theme{Colors: map[byte]uint32{
+		themeTreeDirFG:       0x010203,
+		themeTreeSelectionFG: 0x020304,
+		themePopupDescFG:     0x030405,
+		themePopupKeyFG:      0x040506,
+	}})
+
+	if palette.TreeDirectoryText() != lipgloss.Color("#010203") {
+		t.Fatalf("tree directory text should use tree_dir_fg")
+	}
+	if palette.TreeSelectionText() != lipgloss.Color("#020304") {
+		t.Fatalf("tree selection text should use tree_selection_fg")
+	}
+	if palette.PopupMutedText() != lipgloss.Color("#030405") {
+		t.Fatalf("popup muted text should use popup_desc_fg")
+	}
+	if palette.KeycapText() != lipgloss.Color("#040506") {
+		t.Fatalf("keycap text should use popup_key_fg")
 	}
 }
 
@@ -787,7 +989,7 @@ func TestSplitSeparatorsNormalizeAgainstHeaderAndFileTree(t *testing.T) {
 func TestFileTreeSelectedRowPaintsBackgroundAcrossSegments(t *testing.T) {
 	model := New(40, 8, nil)
 	rendered := model.renderFileTreeRow(protocol.FileTreeRow{Name: "installer", Icon: "󰉋", Directory: true, Selected: true}, 24)
-	if count := strings.Count(rendered, "48;2;52;58;82"); count < 4 {
+	if count := strings.Count(rendered, "48;2;51;51;51"); count < 4 {
 		t.Fatalf("selected file-tree row should carry selection background across marker, icon, label, and fill, count=%d row=%q", count, rendered)
 	}
 	if got := displayWidth(ansi.Strip(rendered)); got != 24 {

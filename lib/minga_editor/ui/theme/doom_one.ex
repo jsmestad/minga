@@ -2,8 +2,7 @@ defmodule MingaEditor.UI.Theme.DoomOne do
   @moduledoc """
   Doom One theme, sourced from doomemacs/themes doom-one-theme.el.
 
-  A dark theme with vibrant accent colors on a muted background. This is
-  Minga's default theme.
+  A dark theme with vibrant accent colors on a muted background.
   """
 
   # ── Doom One palette ──────────────────────────────────────────────────

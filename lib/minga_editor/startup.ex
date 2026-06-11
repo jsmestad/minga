@@ -430,36 +430,13 @@ defmodule MingaEditor.Startup do
   """
   @spec apply_config_options(MingaEditor.State.t()) :: MingaEditor.State.t()
   def apply_config_options(state) do
-    state =
-      try do
-        theme_name = Minga.Config.Options.get(EditorState.options_server(state), :theme)
+    theme_name = Minga.Config.Options.get(EditorState.options_server(state), :theme)
+    theme = MingaEditor.UI.Theme.get!(theme_name)
+    state = EditorState.apply_theme(state, theme)
 
-        theme =
-          case MingaEditor.UI.Theme.get(theme_name) do
-            {:ok, t} ->
-              t
-
-            :error ->
-              Minga.Log.warning(
-                :config,
-                "Theme #{inspect(theme_name)} not available (pack disabled?), falling back to #{inspect(MingaEditor.UI.Theme.default())}"
-              )
-
-              MingaEditor.UI.Theme.get!(MingaEditor.UI.Theme.default())
-          end
-
-        EditorState.apply_theme(state, theme)
-      catch
-        :exit, _ -> state
-      end
-
-    try do
-      case Config.load_error() do
-        nil -> state
-        error -> EditorState.set_status(state, error)
-      end
-    catch
-      :exit, _ -> state
+    case Config.load_error() do
+      nil -> state
+      error -> EditorState.set_status(state, error)
     end
   end
 

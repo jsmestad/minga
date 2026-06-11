@@ -2,7 +2,7 @@ defmodule Minga.Config.ThemeRegistry do
   @moduledoc """
   Layer 0 registry of available themes with source-owned registration.
 
-  Stores theme data (opaque to this module) with source ownership tracking so that disabling or reloading an extension pack cleanly removes only that pack's themes. The core fallback theme (`:minga_default`) is always present in the name list but not stored here; it lives in `MingaEditor.UI.Theme.Fallback`.
+  Stores theme data (opaque to this module) with source ownership tracking so that disabling or reloading an extension pack cleanly removes only that pack's themes. The core minimal theme (`:minga_default`) is always present in the name list but not stored here; it lives in `MingaEditor.UI.Theme.Fallback` and is only used when selected explicitly.
 
   Config.Options and Config.Completion query `available/0` for validation and tab-completion without importing from MingaEditor.*.
   """

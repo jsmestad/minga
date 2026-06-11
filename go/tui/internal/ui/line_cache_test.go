@@ -14,6 +14,7 @@ import (
 func fullWindowFrame(seq uint32, window protocol.WindowContent) []protocol.Command {
 	return []protocol.Command{
 		beginFrame(seq, 0),
+		testThemeCommand(),
 		{Kind: protocol.CommandWindowContent, Window: window},
 		commitFrame(seq),
 	}

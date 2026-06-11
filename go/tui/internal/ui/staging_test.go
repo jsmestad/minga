@@ -77,7 +77,7 @@ func TestInvalidationDebouncesKeyframeRequests(t *testing.T) {
 	}
 
 	// The keyframe arrives and commits: pending clears, content applies.
-	m = applyTo(t, m, beginFrame(9, 0), windowRowsCommand(1, "fresh"), commitFrame(9))
+	m = applyTo(t, m, beginFrame(9, 0), testThemeCommand(), windowRowsCommand(1, "fresh"), commitFrame(9))
 	if m.resyncPending {
 		t.Fatal("valid commit should clear resyncPending")
 	}
@@ -93,7 +93,7 @@ func TestStagingDoesNotPaintBeforeCommit(t *testing.T) {
 	model := New(40, 8, out)
 
 	// Commit a first keyframe so there is a known baseline frame on screen.
-	model = applyTo(t, model, beginFrame(1, 0), windowRowsCommand(1, "committed line"), commitFrame(1))
+	model = applyTo(t, model, beginFrame(1, 0), testThemeCommand(), windowRowsCommand(1, "committed line"), commitFrame(1))
 	before := renderedBody(model)
 	if !strings.Contains(before, "committed line") {
 		t.Fatalf("baseline frame should render committed content: %q", before)
@@ -118,7 +118,7 @@ func TestStagingDoesNotPaintBeforeCommit(t *testing.T) {
 func TestStagingAppliesAtomicallyOnCommit(t *testing.T) {
 	out := make(chan []byte, 16)
 	model := New(40, 8, out)
-	model = applyTo(t, model, beginFrame(1, 0), windowRowsCommand(1, "first frame"), commitFrame(1))
+	model = applyTo(t, model, beginFrame(1, 0), testThemeCommand(), windowRowsCommand(1, "first frame"), commitFrame(1))
 
 	// Stage the next frame across two separate packets, committing only at the end.
 	model = applyTo(t, model, beginFrame(2, 1), windowRowsCommand(1, "second frame"))
@@ -144,7 +144,7 @@ func TestStagingAppliesAtomicallyOnCommit(t *testing.T) {
 func TestTruncatedTransactionRequestsKeyframeAndKeepsPriorFrame(t *testing.T) {
 	out := make(chan []byte, 16)
 	model := New(40, 8, out)
-	model = applyTo(t, model, beginFrame(7, 0), windowRowsCommand(1, "good frame"), commitFrame(7))
+	model = applyTo(t, model, beginFrame(7, 0), testThemeCommand(), windowRowsCommand(1, "good frame"), commitFrame(7))
 	drainKeyframeRequests(t, out) // clear
 
 	// Open a transaction, feed content, then open ANOTHER begin before committing.
@@ -171,7 +171,7 @@ func TestTruncatedTransactionRequestsKeyframeAndKeepsPriorFrame(t *testing.T) {
 func TestStreamErrorInsideTransactionRequestsKeyframe(t *testing.T) {
 	out := make(chan []byte, 16)
 	model := New(40, 8, out)
-	model = applyTo(t, model, beginFrame(3, 0), windowRowsCommand(1, "stable"), commitFrame(3))
+	model = applyTo(t, model, beginFrame(3, 0), testThemeCommand(), windowRowsCommand(1, "stable"), commitFrame(3))
 	drainKeyframeRequests(t, out)
 
 	// The reader appends CommandStreamError at the failure point and stops, so no
@@ -210,7 +210,7 @@ func TestStreamErrorOutsideTransactionIsHarmless(t *testing.T) {
 func TestCommitSeqMismatchRequestsKeyframe(t *testing.T) {
 	out := make(chan []byte, 16)
 	model := New(40, 8, out)
-	model = applyTo(t, model, beginFrame(10, 0), windowRowsCommand(1, "base"), commitFrame(10))
+	model = applyTo(t, model, beginFrame(10, 0), testThemeCommand(), windowRowsCommand(1, "base"), commitFrame(10))
 	drainKeyframeRequests(t, out)
 
 	model = applyTo(t, model, beginFrame(11, 10), windowRowsCommand(1, "mismatch"), commitFrame(99))
@@ -232,7 +232,7 @@ func TestCommitSeqMismatchRequestsKeyframe(t *testing.T) {
 func TestBaseMismatchRequestsKeyframe(t *testing.T) {
 	out := make(chan []byte, 16)
 	model := New(40, 8, out)
-	model = applyTo(t, model, beginFrame(20, 0), windowRowsCommand(1, "committed"), commitFrame(20))
+	model = applyTo(t, model, beginFrame(20, 0), testThemeCommand(), windowRowsCommand(1, "committed"), commitFrame(20))
 	drainKeyframeRequests(t, out)
 
 	// base 19 was never committed (last good is 20) -> base mismatch.
@@ -252,7 +252,7 @@ func TestBaseMismatchRequestsKeyframe(t *testing.T) {
 func TestResyncIndicatorShowsThenClearsOnKeyframe(t *testing.T) {
 	out := make(chan []byte, 16)
 	model := New(40, 8, out)
-	model = applyTo(t, model, beginFrame(30, 0), windowRowsCommand(1, "ok"), commitFrame(30))
+	model = applyTo(t, model, beginFrame(30, 0), testThemeCommand(), windowRowsCommand(1, "ok"), commitFrame(30))
 
 	// Force an invalidation (double begin).
 	model = applyTo(t, model, beginFrame(31, 30), beginFrame(32, 30))
@@ -265,7 +265,7 @@ func TestResyncIndicatorShowsThenClearsOnKeyframe(t *testing.T) {
 	}
 
 	// A valid keyframe (base 0) arrives and commits -> indicator clears.
-	model = applyTo(t, model, beginFrame(40, 0), windowRowsCommand(1, "recovered"), commitFrame(40))
+	model = applyTo(t, model, beginFrame(40, 0), testThemeCommand(), windowRowsCommand(1, "recovered"), commitFrame(40))
 	if model.resyncPending {
 		t.Fatal("resyncPending should clear after a valid commit")
 	}
@@ -306,7 +306,7 @@ func TestOutOfBandSideChannelsApplyWithoutTransaction(t *testing.T) {
 func TestSemanticCommandOutsideTransactionRequestsKeyframe(t *testing.T) {
 	out := make(chan []byte, 16)
 	model := New(40, 8, out)
-	model = applyTo(t, model, beginFrame(50, 0), windowRowsCommand(1, "committed"), commitFrame(50))
+	model = applyTo(t, model, beginFrame(50, 0), testThemeCommand(), windowRowsCommand(1, "committed"), commitFrame(50))
 	drainKeyframeRequests(t, out)
 
 	model = applyTo(t, model, windowRowsCommand(1, "stray semantic"))
@@ -327,7 +327,7 @@ func TestLatencyResolvesOnCommit(t *testing.T) {
 	model := New(40, 8, out)
 	seq := model.latency.Stamp()
 
-	model = applyTo(t, model, beginFrame(60, 0), windowRowsCommand(1, "frame"))
+	model = applyTo(t, model, beginFrame(60, 0), testThemeCommand(), windowRowsCommand(1, "frame"))
 	if model.latency.Snapshot().Resolved != 0 {
 		t.Fatal("latency must not resolve before commit")
 	}

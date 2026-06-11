@@ -7,6 +7,13 @@
 import Testing
 import Foundation
 
+@MainActor
+fileprivate func completeThemeSlots() -> [(UInt8, UInt8, UInt8, UInt8)] {
+    CommandDispatcher.requiredThemeSlots.map { slot in
+        (slot, slot, slot, slot)
+    }
+}
+
 @Suite("CommandDispatcher Routing")
 struct CommandDispatcherRoutingTests {
 
@@ -32,6 +39,7 @@ struct CommandDispatcherRoutingTests {
 
         // A keyframe transaction (base 0) opened then committed.
         dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
 
         #expect(gui.windowContents[1] != nil)
@@ -886,11 +894,13 @@ struct CommandDispatcherRoutingTests {
 
         // Two well-formed keyframe transactions; onFirstRender fires only once.
         dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
         #expect(callCount == 1)
         #expect(dispatcher.onFirstRender == nil)
 
         dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 0))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
         #expect(callCount == 1)
     }
@@ -909,6 +919,53 @@ struct CommandDispatcherRoutingTests {
         let expected: UInt32 = (0xAA << 16) | (0xBB << 8) | 0xCC
         #expect(dispatcher.frameState.gutterColors.fg == expected)
         #expect(gui.themeColors.gutterFgRGB == expected)
+        #expect(gui.themeColors.hasAppliedTheme)
+    }
+
+    @Test("keyframe with content but no guiTheme presents protocol error")
+    @MainActor func keyframeWithoutThemeErrors() {
+        let (dispatcher, gui) = makeDispatcher()
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [Wire.TabEntry(id: 1, groupId: 0, isActive: true, isDirty: false, isAgent: false, hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "", label: "unthemed.ex")]))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        #expect(gui.protocolErrorState.isPresented)
+        #expect(gui.protocolErrorState.message == "missing gui_theme in keyframe")
+        #expect(gui.tabBarState.tabs.isEmpty)
+    }
+
+    @Test("keyframe with empty guiTheme rejects promotion")
+    @MainActor func keyframeWithEmptyThemeErrors() {
+        let (dispatcher, gui) = makeDispatcher()
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 0))
+        dispatcher.dispatch(.guiTheme(slots: []))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [Wire.TabEntry(id: 1, groupId: 0, isActive: true, isDirty: false, isAgent: false, hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "", label: "empty.ex")]))
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+
+        #expect(gui.protocolErrorState.isPresented)
+        #expect(gui.protocolErrorState.message?.contains("missing gui_theme slots in keyframe") == true)
+        #expect(gui.protocolErrorState.message?.contains("0x01") == true)
+        #expect(gui.themeColors.hasAppliedTheme == false)
+        #expect(gui.tabBarState.tabs.isEmpty)
+    }
+
+    @Test("keyframe with partial guiTheme rejects promotion")
+    @MainActor func keyframeWithPartialThemeErrors() {
+        let (dispatcher, gui) = makeDispatcher()
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 3, baseFrameSeq: 0))
+        dispatcher.dispatch(.guiTheme(slots: [(GUI_COLOR_EDITOR_BG, 0x00, 0x00, 0x00)]))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [Wire.TabEntry(id: 1, groupId: 0, isActive: true, isDirty: false, isAgent: false, hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "", label: "partial.ex")]))
+        dispatcher.dispatch(.commitFrame(frameSeq: 3, seq: 0))
+
+        #expect(gui.protocolErrorState.isPresented)
+        #expect(gui.protocolErrorState.message?.contains("missing gui_theme slots in keyframe") == true)
+        #expect(gui.protocolErrorState.message?.contains("0x02") == true)
+        #expect(gui.protocolErrorState.message?.contains("0xA0") == true)
+        #expect(gui.themeColors.hasAppliedTheme == false)
+        #expect(gui.tabBarState.tabs.isEmpty)
     }
 }
 
@@ -942,6 +999,7 @@ struct CommandDispatcherStagingTests {
 
         // Establish a committed baseline so we have a "presented" tab bar.
         dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("old.ex")]))
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
         #expect(gui.tabBarState.tabs.first?.label == "old.ex")
@@ -959,6 +1017,7 @@ struct CommandDispatcherStagingTests {
         let (dispatcher, _) = makeDispatcher()
 
         dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.setCursorShape(.block))
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
         #expect(dispatcher.frameState.cursorShape == .block)
@@ -976,6 +1035,7 @@ struct CommandDispatcherStagingTests {
         let (dispatcher, gui) = makeDispatcher()
 
         dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("a.ex")]))
         dispatcher.dispatch(.setCursorShape(.beam))
         // Nothing promoted yet.
@@ -997,6 +1057,7 @@ struct CommandDispatcherStagingTests {
         dispatcher.onFrameReady = { readyCount += 1 }
 
         dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("a.ex")]))
         #expect(readyCount == 0)
 
@@ -1011,6 +1072,7 @@ struct CommandDispatcherStagingTests {
         let (dispatcher, gui) = makeDispatcher()
 
         dispatcher.dispatch(.beginFrame(frameSeq: 5, baseFrameSeq: 0))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("base.ex")]))
         dispatcher.dispatch(.commitFrame(frameSeq: 5, seq: 0))
 
@@ -1023,6 +1085,52 @@ struct CommandDispatcherStagingTests {
         #expect(dispatcher.lastCommittedFrameSeq == 6)
     }
 
+    @Test("delta frame with empty guiTheme rejects promotion")
+    @MainActor func deltaFrameWithEmptyThemeErrors() {
+        let (dispatcher, gui) = makeDispatcher()
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 5, baseFrameSeq: 0))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("base.ex")]))
+        dispatcher.dispatch(.commitFrame(frameSeq: 5, seq: 0))
+        let baselineThemeBg = gui.themeColors.editorBg
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 6, baseFrameSeq: 5))
+        dispatcher.dispatch(.guiTheme(slots: []))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("empty-delta.ex")]))
+        dispatcher.dispatch(.commitFrame(frameSeq: 6, seq: 0))
+
+        #expect(gui.protocolErrorState.isPresented)
+        #expect(gui.protocolErrorState.message?.contains("missing gui_theme slots: ") == true)
+        #expect(gui.protocolErrorState.message?.contains("0x01") == true)
+        #expect(gui.protocolErrorState.message?.contains("0xA0") == true)
+        #expect(gui.themeColors.editorBg == baselineThemeBg)
+        #expect(gui.tabBarState.tabs.first?.label == "base.ex")
+    }
+
+    @Test("delta frame with partial guiTheme rejects promotion")
+    @MainActor func deltaFrameWithPartialThemeErrors() {
+        let (dispatcher, gui) = makeDispatcher()
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 5, baseFrameSeq: 0))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("base.ex")]))
+        dispatcher.dispatch(.commitFrame(frameSeq: 5, seq: 0))
+        let baselineThemeBg = gui.themeColors.editorBg
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 6, baseFrameSeq: 5))
+        dispatcher.dispatch(.guiTheme(slots: [(GUI_COLOR_EDITOR_BG, 0x00, 0x00, 0x00)]))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("partial-delta.ex")]))
+        dispatcher.dispatch(.commitFrame(frameSeq: 6, seq: 0))
+
+        #expect(gui.protocolErrorState.isPresented)
+        #expect(gui.protocolErrorState.message?.contains("missing gui_theme slots: ") == true)
+        #expect(gui.protocolErrorState.message?.contains("0x02") == true)
+        #expect(gui.protocolErrorState.message?.contains("0xA0") == true)
+        #expect(gui.themeColors.editorBg == baselineThemeBg)
+        #expect(gui.tabBarState.tabs.first?.label == "base.ex")
+    }
+
     // MARK: - Invalidation requests a keyframe with no partial promotion
 
     @Test("commit seq mismatch invalidates with no promotion and requests keyframe")
@@ -1033,6 +1141,7 @@ struct CommandDispatcherStagingTests {
 
         // Commit a clean baseline so lastCommittedFrameSeq is known.
         dispatcher.dispatch(.beginFrame(frameSeq: 3, baseFrameSeq: 0))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("good.ex")]))
         dispatcher.dispatch(.commitFrame(frameSeq: 3, seq: 0))
 
@@ -1071,6 +1180,7 @@ struct CommandDispatcherStagingTests {
 
         // The keyframe arrives: pending clears and content promotes.
         dispatcher.dispatch(.beginFrame(frameSeq: 9, baseFrameSeq: 0))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("fresh.ex")]))
         dispatcher.dispatch(.commitFrame(frameSeq: 9, seq: 0))
         #expect(gui.resyncState.pending == false)
@@ -1084,9 +1194,11 @@ struct CommandDispatcherStagingTests {
         dispatcher.onRequestKeyframe = { requested.append($0) }
 
         dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("staged.ex")]))
         // A new begin before commit: the first frame was truncated.
         dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 0))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
 
         // The truncated frame promoted nothing.
         #expect(gui.tabBarState.tabs.isEmpty)
@@ -1101,6 +1213,7 @@ struct CommandDispatcherStagingTests {
         dispatcher.onRequestKeyframe = { requested.append($0) }
 
         dispatcher.dispatch(.beginFrame(frameSeq: 10, baseFrameSeq: 0))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("base.ex")]))
         dispatcher.dispatch(.commitFrame(frameSeq: 10, seq: 0))
 
@@ -1131,6 +1244,7 @@ struct CommandDispatcherStagingTests {
         dispatcher.onRequestKeyframe = { requested.append($0) }
 
         dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 0))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("partial.ex")]))
         dispatcher.decodeFailed()
 
@@ -1154,6 +1268,7 @@ struct CommandDispatcherStagingTests {
 
         // The recovering keyframe arrives and commits cleanly.
         dispatcher.dispatch(.beginFrame(frameSeq: 7, baseFrameSeq: 0))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("recovered.ex")]))
         dispatcher.dispatch(.commitFrame(frameSeq: 7, seq: 0))
 
