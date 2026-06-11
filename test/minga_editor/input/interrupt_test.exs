@@ -5,7 +5,6 @@ defmodule MingaEditor.Input.InterruptTest do
   alias Minga.Editing.Completion
   alias Minga.Mode
   alias MingaEditor.Agent.UIState
-  alias MingaEditor.Dashboard
   alias MingaEditor.HoverPopup
   alias MingaEditor.Input
   alias MingaEditor.Input.Interrupt
@@ -15,7 +14,6 @@ defmodule MingaEditor.Input.InterruptTest do
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.ModalOverlay.Completion, as: CompletionPayload
   alias MingaEditor.State.ModalOverlay.Conflict, as: ConflictPayload
-  alias MingaEditor.State.ModalOverlay.Dashboard, as: DashboardPayload
   alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
   alias MingaEditor.State.ModalOverlay.Prompt, as: PromptPayload
   alias MingaEditor.State.Picker
@@ -25,7 +23,7 @@ defmodule MingaEditor.Input.InterruptTest do
   alias MingaEditor.VimState
 
   @ctrl_g 7
-  @modal_variants [:picker, :prompt, :completion, :conflict, :dashboard]
+  @modal_variants [:picker, :prompt, :completion, :conflict]
 
   defp base_state(opts \\ []) do
     buf_opts = Keyword.get(opts, :buffer_opts, content: "hello\nworld")
@@ -68,10 +66,6 @@ defmodule MingaEditor.Input.InterruptTest do
       :conflict,
       ConflictPayload.new(state.workspace.buffers.active, "/tmp/test.txt")
     )
-  end
-
-  defp open_modal_variant(state, :dashboard) do
-    ModalOverlay.open(state, :dashboard, DashboardPayload.new(Dashboard.new_state()))
   end
 
   @spec dirty_interrupt_axes(EditorState.t()) :: {EditorState.t(), HoverPopup.t()}

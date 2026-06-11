@@ -12,10 +12,6 @@ defmodule MingaEditor.Shell.Traditional.Renderer do
   """
 
   @spec render(term()) :: term()
-  def render(%{workspace: %{buffers: %{active: nil}}} = state) do
-    MingaEditor.Renderer.render_dashboard(state)
-  end
-
   def render(state) do
     MingaEditor.Renderer.render_buffer(state)
   end

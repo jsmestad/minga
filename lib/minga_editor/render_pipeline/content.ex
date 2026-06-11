@@ -355,7 +355,7 @@ defmodule MingaEditor.RenderPipeline.Content do
     ctx = ViewContext.from_editor_state(state)
 
     # Split the content rect to carve out a sidebar when wide enough. The
-    # carved rect still drives layout (chat width, cursor math); the dashboard
+    # carved rect still drives layout (chat width, cursor math); the sidebar
     # itself is a semantic surface (AgentChatBuilder), not a cell-era sidebar.
     win_layout = Layout.add_sidebar(win_layout)
     {row_off, col_off, chat_width, height} = win_layout.content
@@ -368,8 +368,8 @@ defmodule MingaEditor.RenderPipeline.Content do
     prompt_row = row_off + chat_height + input_v_gap
     prompt_rect = {prompt_row, col_off, chat_width, prompt_height}
 
-    # When help is visible the chat buffer is suppressed. The help overlay,
-    # prompt, and dashboard all reach the live (semantic) frontends through the
+    # When help is visible the chat buffer is suppressed. The help overlay
+    # and prompt both reach the live (semantic) frontends through the
     # AgentChat semantic model, so this branch emits no window models.
     help_visible = state.workspace.agent_ui.view.help_visible
 

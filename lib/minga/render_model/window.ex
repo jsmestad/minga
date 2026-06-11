@@ -18,7 +18,7 @@ defmodule Minga.RenderModel.Window do
     Selection
   }
 
-  @type content_kind :: :buffer | :agent_chat | :agent_prompt | :dashboard
+  @type content_kind :: :buffer | :agent_chat | :agent_prompt
   @type cursor_shape :: :block | :beam | :underline
   @type rect ::
           {row :: non_neg_integer(), col :: non_neg_integer(), width :: non_neg_integer(),

@@ -7,7 +7,6 @@ defmodule MingaEditor.State.ModalOverlayTest do
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.ModalOverlay.Completion, as: CompletionPayload
   alias MingaEditor.State.ModalOverlay.Conflict, as: ConflictPayload
-  alias MingaEditor.State.ModalOverlay.Dashboard, as: DashboardPayload
   alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
   alias MingaEditor.State.ModalOverlay.Prompt, as: PromptPayload
   alias MingaEditor.State.Picker, as: PickerLegacy
@@ -44,10 +43,6 @@ defmodule MingaEditor.State.ModalOverlayTest do
     )
   end
 
-  defp dashboard_payload do
-    DashboardPayload.new(%{cursor: 0, items: []}, opened_at: 1_002)
-  end
-
   defp completion_payload(tab_id \\ 1) do
     completion = Completion.new([], {0, 0})
     CompletionPayload.new(tab_id, completion: completion, opened_at: 1_003)
@@ -76,7 +71,6 @@ defmodule MingaEditor.State.ModalOverlayTest do
       assert ModalOverlay.tag({:prompt, prompt_payload()}) == :prompt
       assert ModalOverlay.tag({:completion, completion_payload()}) == :completion
       assert ModalOverlay.tag({:conflict, conflict_payload()}) == :conflict
-      assert ModalOverlay.tag({:dashboard, dashboard_payload()}) == :dashboard
     end
 
     test "active?/1 distinguishes :none from any variant" do
@@ -111,15 +105,6 @@ defmodule MingaEditor.State.ModalOverlayTest do
       result = ModalOverlay.open(state, :prompt, payload)
 
       assert result.shell_state.modal == {:prompt, payload}
-    end
-
-    test "writes the dashboard variant" do
-      state = base_state()
-      payload = dashboard_payload()
-
-      result = ModalOverlay.open(state, :dashboard, payload)
-
-      assert result.shell_state.modal == {:dashboard, payload}
     end
 
     test "writes the completion modal payload" do
@@ -165,17 +150,6 @@ defmodule MingaEditor.State.ModalOverlayTest do
 
       assert result.shell_state.modal == {:picker, picker}
       assert ModalOverlay.completion(result) == nil
-    end
-
-    test "replacing dashboard with picker swaps the active modal" do
-      state =
-        base_state()
-        |> ModalOverlay.open(:dashboard, dashboard_payload())
-
-      picker = picker_payload()
-      result = ModalOverlay.open(state, :picker, picker)
-
-      assert result.shell_state.modal == {:picker, picker}
     end
   end
 

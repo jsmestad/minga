@@ -19,7 +19,7 @@ defmodule MingaEditor.State do
   ## Composed sub-structs
 
   * `MingaEditor.Session.State`           — per-tab editing context (buffers, windows, vim, etc.)
-  * `MingaEditor.Shell.Traditional.State`   — default presentation state (nav_flash, hover, dashboard, etc.)
+  * `MingaEditor.Shell.Traditional.State`   — default presentation state (nav_flash, hover, status_msg, etc.)
   * `MingaEditor.State.WhichKey`     — which-key popup node, timer, visibility
   * `MingaEditor.State.Registers`    — named registers and active register selection
   """
@@ -1723,7 +1723,7 @@ defmodule MingaEditor.State do
   @doc """
   Returns the terminal-level viewport: total screen rows/cols reported by
   the frontend on resize. Used for screen-spanning chrome (picker,
-  popups, dashboard, completion menu placement) and for layout
+  popups, completion menu placement) and for layout
   computation that needs the editor's full canvas.
 
   This is distinct from `current_viewport/1`, which scopes to the
@@ -1744,7 +1744,7 @@ defmodule MingaEditor.State do
   @doc """
   Returns the viewport for the user's current focus: the active window's
   viewport when a window is active, otherwise a derived terminal-size
-  viewport (the no-window dashboard case). Use this for scroll commands
+  viewport (the no-window fallback case). Use this for scroll commands
   that read/write the focused window's viewport.
 
   Replaces the older `active_window_viewport/1` (renamed for symmetry
@@ -1760,7 +1760,7 @@ defmodule MingaEditor.State do
 
   @doc """
   Updates the active window's viewport. No-op when no window is active
-  (the dashboard case has no per-window viewport to write).
+  (the no-window fallback case has no per-window viewport to write).
 
   Replaces the older `put_active_window_viewport/2`.
   """

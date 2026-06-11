@@ -2,7 +2,7 @@ defmodule MingaEditor.RenderPipeline.AgentChatPrefetch do
   @moduledoc """
   Pre-fetched buffer data for one agent chat window.
 
-  The agent chat renderer combines normal buffer content with prompt and dashboard chrome. This struct carries the buffer-owned data captured before the named render stages run, so the `:agent_content` stage can render without calling the buffer process.
+  The agent chat renderer combines normal buffer content with prompt and sidebar chrome. This struct carries the buffer-owned data captured before the named render stages run, so the `:agent_content` stage can render without calling the buffer process.
   """
 
   alias Minga.Buffer.RenderSnapshot

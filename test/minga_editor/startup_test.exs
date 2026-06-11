@@ -163,6 +163,30 @@ defmodule MingaEditor.StartupTest do
   end
 
   describe "build_initial_state/1" do
+    test "empty launch (no file buffer) opens a normal blank active buffer, never a nil active" do
+      # Regression pin for the dashboard removal (#2323). The dashboard was the
+      # only path that left buffers.active == nil; with it gone, an empty launch
+      # must always land on a real blank buffer so input/render never route to a
+      # missing surface.
+      state =
+        Startup.build_initial_state(
+          backend: :headless,
+          port_manager: nil,
+          parser_manager: nil,
+          options_server: nil,
+          view_mode: :editor,
+          width: 80,
+          height: 24,
+          sidebar_registry: private_sidebar_registry()
+        )
+
+      active = state.workspace.buffers.active
+      assert is_pid(active)
+      assert active in state.workspace.buffers.list
+      # No modal overlay is pushed on an empty launch.
+      assert state.shell_state.modal == :none
+    end
+
     test "uses supplied options server for automatic startup view" do
       options_server = start_supervised!({Options, name: nil})
       {:ok, :agent} = Options.set(options_server, :startup_view, :agent)
