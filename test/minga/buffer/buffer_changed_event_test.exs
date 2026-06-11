@@ -4,6 +4,8 @@ defmodule Minga.Buffer.BufferChangedEventTest do
   alias Minga.Buffer.EditDelta
   alias Minga.Buffer.EditSource
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Core.Decorations
+  alias Minga.Core.Face
   alias Minga.Events
   alias Minga.Events.BufferChangedEvent
 
@@ -94,6 +96,42 @@ defmodule Minga.Buffer.BufferChangedEventTest do
                         source: :user,
                         delta: %EditDelta{inserted_text: ""}
                       }}
+    end
+  end
+
+  describe "clear_line broadcasts delta" do
+    test "clear_line sends a deletion delta, records it for consumers, and adjusts decorations" do
+      buf = start_supervised!({BufferProcess, content: "one\ntwo\nthree"})
+
+      _id =
+        BufferProcess.add_virtual_text(buf, {1, 3},
+          segments: [{" note", Face.new(fg: 0xFF0000)}],
+          placement: :inline
+        )
+
+      assert {:ok, "two"} = BufferProcess.clear_line(buf, 1)
+
+      assert_receive {:minga_event, :buffer_changed,
+                      %BufferChangedEvent{
+                        buffer: ^buf,
+                        source: :user,
+                        delta: %EditDelta{inserted_text: ""} = delta
+                      }}
+
+      assert delta.start_byte == 4
+      assert delta.old_end_byte == 7
+      assert delta.new_end_byte == 4
+      assert delta.start_position == {1, 0}
+      assert delta.old_end_position == {1, 3}
+      assert delta.new_end_position == {1, 0}
+      assert {:ok, [^delta]} = BufferProcess.consume_edit_deltas(buf, :lsp)
+
+      assert [virtual_text] =
+               buf
+               |> BufferProcess.decorations()
+               |> Decorations.virtual_texts_for_line(1)
+
+      assert virtual_text.anchor == {1, 0}
     end
   end
 
