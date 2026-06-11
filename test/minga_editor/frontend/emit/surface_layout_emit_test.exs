@@ -16,8 +16,11 @@ defmodule MingaEditor.Frontend.Emit.SurfaceLayoutEmitTest do
   alias Minga.Protocol.Opcodes
   alias MingaEditor.Frontend.Emit
   alias MingaEditor.Frontend.Emit.Context
+  alias MingaEditor.HoverPopup
   alias MingaEditor.Layout.SurfaceRegistry
   alias MingaEditor.Layout.SurfaceRegistry.Placement
+  alias MingaEditor.SignatureHelp
+  alias MingaEditor.Shell.Traditional.State, as: ShellState
 
   import MingaEditor.RenderPipeline.TestHelpers
 
@@ -25,6 +28,28 @@ defmodule MingaEditor.Frontend.Emit.SurfaceLayoutEmitTest do
   alias MingaEditor.DisplayList.{Cursor, Frame}
 
   @op_surface_layout Opcodes.gui_surface_layout()
+
+  # A base state with both promoted floating popups live in shell_state, so the
+  # focus tree adds hover/signature-help overlay nodes and the registry places them.
+  defp state_with_floating_popups do
+    state = base_state()
+    hover = HoverPopup.new("Returns the **value**.", 2, 6)
+
+    signature = %SignatureHelp{
+      signatures: [%{label: "map(enumerable, fun)", documentation: "", parameters: []}],
+      active_signature: 0,
+      active_parameter: 0,
+      anchor_row: 4,
+      anchor_col: 3
+    }
+
+    shell_state =
+      state.shell_state
+      |> ShellState.set_hover_popup(hover)
+      |> Map.put(:signature_help, signature)
+
+    %{state | shell_state: shell_state}
+  end
 
   defp emit_commands(state) do
     frame = %Frame{cursor: Cursor.new(0, 0, :block), splash: [DisplayList.draw(0, 0, "x")]}
@@ -128,6 +153,43 @@ defmodule MingaEditor.Frontend.Emit.SurfaceLayoutEmitTest do
       assert surface_id, "decoded surface_id #{u16} has no registry surface"
       assert SurfaceRegistry.rect_for_in(placements, surface_id) != nil
     end
+  end
+
+  test "promoted floating popups (hover, signature help) emit registry placements (#2281)" do
+    state = state_with_floating_popups()
+    commands = emit_commands(state)
+    decoded = commands |> surface_layout_command() |> decode_placements()
+
+    placements = SurfaceRegistry.placements(state)
+    expected = Enum.map(placements, &expected_entry/1)
+
+    # The promoted surfaces are present in the registry derivation...
+    surface_ids = Enum.map(placements, & &1.surface_id)
+    assert :hover_popup in surface_ids, "hover popup should be a registry-placed surface"
+    assert :signature_help in surface_ids, "signature help should be a registry-placed surface"
+
+    # ...and their emitted bytes match the registry rect/z/hit_kind field-for-field.
+    hover_u16 = SurfaceRegistry.surface_id_u16(:hover_popup)
+    sig_u16 = SurfaceRegistry.surface_id_u16(:signature_help)
+    decoded_hover = Enum.find(decoded, &(&1.surface_id == hover_u16))
+    decoded_sig = Enum.find(decoded, &(&1.surface_id == sig_u16))
+
+    assert decoded_hover, "emitted layout missing the promoted hover surface"
+    assert decoded_sig, "emitted layout missing the promoted signature-help surface"
+
+    # Behaviour-neutral stacking: hover (z=290) paints in front of signature
+    # help (z=280), exactly the historical Go transitional order.
+    assert decoded_hover.z == 290
+    assert decoded_sig.z == 280
+    assert decoded_hover.z > decoded_sig.z
+
+    # The emitted rect equals the registry rect_for that surface (AC-1, AC-3:
+    # the same rect BEAM hit-testing routes against).
+    assert decoded_hover.rect == SurfaceRegistry.rect_for_in(placements, :hover_popup)
+    assert decoded_sig.rect == SurfaceRegistry.rect_for_in(placements, :signature_help)
+
+    # And the full emitted list still matches the registry, order included.
+    assert decoded == expected
   end
 
   test "empty placement list still emits a well-formed (zero-count) command" do

@@ -11,12 +11,15 @@ import (
 )
 
 // Registry surface ids (mirror MingaEditor.Layout.SurfaceRegistry.surface_id_u16/1).
-// Only the overlay surfaces the BEAM registry actually places are listed here;
-// the rest of the overlay candidates are not yet promoted into the registry
-// (transitional split, #2268; follow-up #2281 promotes them).
+// Only the overlay surfaces the BEAM registry actually places are listed here.
+// #2281 promoted the two cursor-anchored popups (hover, signature help) whose
+// rect the BEAM authoritatively computes; the remaining overlay candidates have
+// no BEAM rect source and stay transitional (see overlayCandidates).
 const (
 	surfaceIDBottomPanel    uint16 = 12
 	surfaceIDCompletionMenu uint16 = 16
+	surfaceIDHoverPopup     uint16 = 17
+	surfaceIDSignatureHelp  uint16 = 18
 )
 
 // overlayCandidate is one floating surface that may occupy the single active
@@ -57,14 +60,15 @@ func (m Model) overlayLines() []string {
 }
 
 // overlayCandidates lists every floating overlay surface with its stacking
-// order on ONE comparable scale. Placed surfaces (completion, bottom panel) use
-// their BEAM placement z directly; the not-yet-promoted surfaces use
-// transitional orders derived from the same registry z bands, slotted at their
-// old relative positions, until each is promoted into the BEAM surface registry
-// (#2281). Because everything shares the band scale, the old top-to-bottom
-// precedence is preserved exactly: completion (overlay band, top) > the six
-// floating overlays that historically sat above the bottom panel > bottom panel
-// (floating band, z=200) > the lower transitional set.
+// order on ONE comparable scale. Registry-placed surfaces (completion, bottom
+// panel, and the #2281-promoted hover/signature-help popups) use their BEAM
+// placement z directly; the remaining surfaces have no BEAM rect source yet and
+// keep transitional orders derived from the same registry z bands, slotted at
+// their old relative positions. Because everything shares the band scale, the
+// old top-to-bottom precedence is preserved exactly: completion (overlay band,
+// top) > hover > signature help > the four transitional overlays that
+// historically sat above the bottom panel > bottom panel (floating band, z=200)
+// > the lower transitional set.
 func (m Model) overlayCandidates() []overlayCandidate {
 	completion, completionOK := m.completion()
 	hover, hoverOK := m.hoverPopup()
@@ -90,20 +94,24 @@ func (m Model) overlayCandidates() []overlayCandidate {
 			order:   m.surfaceOrder(surfaceIDCompletionMenu, orderOverlayTop),
 			render:  func() []string { return m.renderCompletion(completion) },
 		},
-		// ── transitional overlays that historically sat ABOVE the bottom panel ──
-		// These live between the floating band (200) and the overlay band (300),
-		// preserving their old relative order: hover > signature > float >
-		// agentContext > agentChat > toolManager.
-		{visible: hoverOK && hover.Visible && len(hover.Lines) > 0, order: orderHover, render: func() []string { return m.renderHover(hover) }},
-		{visible: sigOK && sig.Visible && len(sig.Signatures) > 0, order: orderSignatureHelp, render: func() []string { return m.renderSignature(sig) }},
+		// ── floating popups that historically sat ABOVE the bottom panel ──
+		// hover and signature help are registry-placed (#2281): the BEAM emits a
+		// placement z for each, so they order by that data; the orderHover/
+		// orderSignatureHelp constants survive only as fallbacks for an older BEAM
+		// that emits no placement. The remaining surfaces below keep their
+		// transitional rank (no BEAM rect source yet), preserving the old relative
+		// order: hover > signature > float > agentContext > agentChat > toolManager.
+		{visible: hoverOK && hover.Visible && len(hover.Lines) > 0, order: m.surfaceOrder(surfaceIDHoverPopup, orderHover), render: func() []string { return m.renderHover(hover) }},
+		{visible: sigOK && sig.Visible && len(sig.Signatures) > 0, order: m.surfaceOrder(surfaceIDSignatureHelp, orderSignatureHelp), render: func() []string { return m.renderSignature(sig) }},
 		{visible: floatOK && float.Visible, order: orderFloatPopup, render: func() []string { return m.renderFloat(float) }},
 		{visible: contextOK && context.Visible, order: orderAgentContext, render: func() []string { return m.renderAgentContext(context) }},
 		{visible: chatOK && chat.Visible, order: orderAgentChat, render: func() []string { return m.renderAgentChat(chat) }},
 		{visible: toolsOK && tools.Visible, order: orderToolManager, render: func() []string { return m.renderToolManager(tools) }},
 		// Bottom panel is registry-placed in the floating band (z=200): it sits
-		// BELOW the six overlays above and ABOVE the lower transitional set, exactly
-		// as the old chain ordered it. Fallback orderBottomPanelFallback keeps that
-		// relative position when no placement is emitted.
+		// BELOW the popups and the four transitional overlays above, and ABOVE the
+		// lower transitional set, exactly as the old chain ordered it. Fallback
+		// orderBottomPanelFallback keeps that relative position when no placement is
+		// emitted.
 		{
 			visible: bottomOK && bottom.Visible,
 			order:   m.surfaceOrder(surfaceIDBottomPanel, orderBottomPanelFallback),
@@ -134,29 +142,38 @@ func (m Model) surfaceOrder(surfaceID uint16, fallback int) int {
 	return fallback
 }
 
-// Transitional stacking orders for the not-yet-promoted overlay surfaces (#2281
-// deletes this whole table once they are promoted/placed). They are derived from
-// the registry z bands in MingaEditor.Layout.SurfaceRegistry (base 0 / editor
-// 100 / floating 200 / overlay 300; bottom_panel emits z=200, completion_menu
-// emits z=300+1). Go cannot import the Elixir bands, so this coupling is
-// documented explicitly: keep these values in step with surface_registry.ex.
+// Transitional stacking orders for the overlay surfaces that are not yet
+// registry-placed (#2281 shrank this table by promoting hover/signature help;
+// it is fully deleted only once every surface grows a BEAM rect source). They
+// are derived from the registry z bands in MingaEditor.Layout.SurfaceRegistry
+// (base 0 / editor 100 / floating 200 / floating-overlay 280 / overlay 300;
+// bottom_panel emits z=200, completion_menu z=301, hover z=290, signature
+// help z=280). Go cannot import the Elixir bands, so this coupling is documented
+// explicitly: keep these values in step with surface_registry.ex.
 //
 // Scale, highest paints front-most:
 //   - completion (placed, overlay band, z=301) sits on top.
-//   - the six overlays that historically sat above the bottom panel occupy
-//     210..290, between the floating band (200) and the overlay band (300),
+//   - hover (placed, z=290) and signature help (placed, z=280) follow; their
+//     orderHover/orderSignatureHelp constants are kept only as fallbacks for an
+//     older BEAM that emits no placement.
+//   - the four transitional overlays that historically sat above the bottom
+//     panel occupy 240..270, between the floating band (200) and the popups,
 //     preserving their old relative order.
-//   - bottom_panel (placed, floating band, z=200) sits below those six.
+//   - bottom_panel (placed, floating band, z=200) sits below those.
 //   - the lower transitional set occupies 150..199, below the floating band,
 //     preserving its old relative order.
 const (
-	// Above the bottom panel (200) and below the overlay band (300).
+	// Fallbacks for the registry-placed popups (used only when the BEAM emits no
+	// placement for them): hover above signature help, both above the floating band.
 	orderHover         = 290
 	orderSignatureHelp = 280
-	orderFloatPopup    = 270
-	orderAgentContext  = 260
-	orderAgentChat     = 250
-	orderToolManager   = 240
+
+	// Transitional ranks for the surfaces with no BEAM rect source yet, above the
+	// bottom panel (200) and below the popups.
+	orderFloatPopup   = 270
+	orderAgentContext = 260
+	orderAgentChat    = 250
+	orderToolManager  = 240
 
 	// Below the bottom panel (200).
 	orderExtensionPanel   = 190

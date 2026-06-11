@@ -103,8 +103,25 @@ defmodule MingaEditor.SignatureHelp do
   def render(%__MODULE__{signatures: []}, _viewport, _theme), do: []
 
   def render(%__MODULE__{} = sh, viewport, theme) do
-    sig = Enum.at(sh.signatures, sh.active_signature)
-    if sig == nil, do: [], else: do_render(sh, sig, viewport, theme)
+    case spec(sh, viewport, theme) do
+      nil -> []
+      spec -> FloatingWindow.render(spec)
+    end
+  end
+
+  @doc """
+  Returns the tooltip's outer rect `{row, col, width, height}` in screen cells.
+
+  Same box `render/3` paints into (border, anchor placement, viewport clamping
+  included), so the `SurfaceRegistry` registers the signature-help surface's rect
+  from the BEAM's own geometry. Returns `nil` when there is no signature to place.
+  """
+  @spec box(t(), {pos_integer(), pos_integer()}, map()) :: MingaEditor.Layout.rect() | nil
+  def box(%__MODULE__{} = sh, viewport, theme) do
+    case spec(sh, viewport, theme) do
+      nil -> nil
+      spec -> FloatingWindow.box(spec)
+    end
   end
 
   # ── Private: parsing ────────────────────────────────────────────────────
@@ -151,9 +168,17 @@ defmodule MingaEditor.SignatureHelp do
 
   # ── Private: rendering ─────────────────────────────────────────────────
 
-  @spec do_render(t(), signature(), {pos_integer(), pos_integer()}, map()) ::
-          [DisplayList.draw()]
-  defp do_render(sh, sig, viewport, theme) do
+  @spec spec(t(), {pos_integer(), pos_integer()}, map()) :: FloatingWindow.Spec.t() | nil
+  defp spec(%__MODULE__{signatures: []}, _viewport, _theme), do: nil
+
+  defp spec(%__MODULE__{} = sh, viewport, theme) do
+    sig = Enum.at(sh.signatures, sh.active_signature)
+    if sig == nil, do: nil, else: build_spec(sh, sig, viewport, theme)
+  end
+
+  @spec build_spec(t(), signature(), {pos_integer(), pos_integer()}, map()) ::
+          FloatingWindow.Spec.t()
+  defp build_spec(sh, sig, viewport, theme) do
     popup_theme = Map.get(theme, :popup, %{bg: 0x21242B, border_fg: 0x5B6268, title_fg: 0xBBC2CF})
     syntax = Map.get(theme, :syntax, %{})
     editor_theme = Map.get(theme, :editor, %{})
@@ -198,7 +223,7 @@ defmodule MingaEditor.SignatureHelp do
     sig_width = String.length(sig.label) + 4
     width = max(sig_width, 30) |> min(elem(viewport, 1) - 4)
 
-    spec = %FloatingWindow.Spec{
+    %FloatingWindow.Spec{
       content: all_draws,
       width: {:cols, width + 2},
       height: {:rows, min(content_height, 8) + 2},
@@ -208,8 +233,6 @@ defmodule MingaEditor.SignatureHelp do
       theme: popup_theme,
       viewport: viewport
     }
-
-    FloatingWindow.render(spec)
   end
 
   @spec render_param_doc(String.t(), map(), non_neg_integer()) :: [DisplayList.draw()]
