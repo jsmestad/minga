@@ -6,6 +6,7 @@ defmodule Minga.Mode.NormalMovementDispatchTest do
   """
   use ExUnit.Case, async: true
 
+  alias Minga.Keymap.Defaults
   alias Minga.Mode
 
   @ctrl 0x02
@@ -51,6 +52,35 @@ defmodule Minga.Mode.NormalMovementDispatchTest do
       assert Mode.process(:normal, {?j, 0}, state) ==
                {:normal, [:move_down, :move_down], Mode.initial_state()}
     end
+
+    test "count before a leader sequence is discarded instead of multiplying commands" do
+      {:normal, [], counted} = Mode.process(:normal, {?3, 0}, leader_state())
+      {:normal, leader_start_commands, leader} = Mode.process(:normal, {32, 0}, counted)
+      {:normal, progress_commands, leader} = Mode.process(:normal, {?w, 0}, leader)
+      {:normal, split_commands, finished} = Mode.process(:normal, {?v, 0}, leader)
+
+      assert match?([{:leader_start, _node}], leader_start_commands)
+      assert match?([{:leader_progress, _node}], progress_commands)
+      assert split_commands == [:split_vertical, :leader_cancel]
+      assert finished.count == nil
+      assert finished.leader_node == nil
+    end
+
+    test "count before a prefix-trie command is discarded instead of multiplying the command" do
+      {:normal, [], counted} = Mode.process(:normal, {?3, 0}, Mode.initial_state())
+      {:normal, [], prefix} = Mode.process(:normal, {?g, 0}, counted)
+
+      assert Mode.process(:normal, {?d, 0}, prefix) ==
+               {:normal, [:goto_definition], Mode.initial_state()}
+    end
+
+    test "gg consumes a count as a target line instead of repeating the prefix command" do
+      {:normal, [], counted} = Mode.process(:normal, {?5, 0}, Mode.initial_state())
+      {:normal, [], prefix} = Mode.process(:normal, {?g, 0}, counted)
+
+      assert Mode.process(:normal, {?g, 0}, prefix) ==
+               {:normal, [{:goto_line, 5}], Mode.initial_state()}
+    end
   end
 
   describe "Layer 0 pure key dispatch — page and viewport scroll commands" do
@@ -93,6 +123,10 @@ defmodule Minga.Mode.NormalMovementDispatchTest do
       assert_commands(?;, [:repeat_find_char])
       assert_commands(?,, [:repeat_find_char_reverse])
     end
+  end
+
+  defp leader_state do
+    %{Mode.initial_state() | leader_trie: Defaults.leader_trie()}
   end
 
   defp assert_commands(codepoint, expected_commands),
