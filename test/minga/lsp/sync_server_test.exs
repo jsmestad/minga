@@ -3,9 +3,14 @@ defmodule Minga.LSP.SyncServerTest do
   use ExUnit.Case, async: false
 
   alias Minga.Buffer.EditDelta
+  import ExUnit.CaptureLog
+
   alias Minga.Buffer.EditSource
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Events
+  alias Minga.Language
+  alias Minga.Language.Registry, as: LanguageRegistry
+  alias Minga.LSP.ServerConfig
   alias Minga.LSP.SyncServer
 
   @moduletag :tmp_dir
@@ -44,6 +49,27 @@ defmodule Minga.LSP.SyncServerTest do
       Events.broadcast(:buffer_opened, %Events.BufferEvent{buffer: buf, path: "/tmp/no_lsp.txt"})
       sync_server()
 
+      assert SyncServer.clients_for_buffer(buf) == []
+    end
+
+    test "buffer_opened logs open path exceptions and keeps SyncServer alive", %{tmp_dir: dir} do
+      Minga.Config.Options.set(:lsp_auto_start, true)
+      on_exit(fn -> Minga.Config.Options.set(:lsp_auto_start, false) end)
+      register_broken_lsp_language()
+
+      path = Path.join(dir, "boom.lspboom")
+      File.write!(path, "hello")
+      buf = start_buffer(file_path: path, filetype: :lsp_boom)
+
+      log =
+        capture_log(fn ->
+          Events.broadcast(:buffer_opened, %Events.BufferEvent{buffer: buf, path: path})
+          sync_server()
+        end)
+
+      assert log =~ "LSP buffer open failed"
+      assert log =~ "FunctionClauseError"
+      assert is_map(:sys.get_state(SyncServer))
       assert SyncServer.clients_for_buffer(buf) == []
     end
 
@@ -171,6 +197,21 @@ defmodule Minga.LSP.SyncServerTest do
       ref = Process.monitor(client)
       %{state | client_monitors: Map.put(state.client_monitors, ref, {buf, client})}
     end)
+  end
+
+  defp register_broken_lsp_language do
+    language = %Language{
+      name: :lsp_boom,
+      label: "Broken LSP",
+      comment_token: "#",
+      extensions: ["lspboom"],
+      language_servers: [
+        %ServerConfig{name: :broken_lsp, command: "broken-lsp", root_markers: nil}
+      ]
+    }
+
+    :ok = LanguageRegistry.register(language, {:extension, :sync_server_test})
+    on_exit(fn -> LanguageRegistry.unregister_source({:extension, :sync_server_test}) end)
   end
 
   defp sync_server do
