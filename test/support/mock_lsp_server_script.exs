@@ -73,7 +73,7 @@ defmodule MockServer do
   defp handle_message(%{"method" => "initialize", "id" => id}) do
     result = %{
       "capabilities" => %{
-        "positionEncoding" => "utf-8",
+        "positionEncoding" => position_encoding(),
         "textDocumentSync" => %{
           "openClose" => true,
           "change" => 1,
@@ -200,6 +200,13 @@ defmodule MockServer do
 
   defp stderr_banner? do
     "--stderr-banner" in System.argv()
+  end
+
+  defp position_encoding do
+    Enum.find_value(System.argv(), "utf-8", fn
+      "--position-encoding=" <> encoding -> encoding
+      _ -> nil
+    end)
   end
 
   defp send_test_diagnostic(uri, code, message) do

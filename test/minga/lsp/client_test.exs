@@ -20,6 +20,7 @@ defmodule Minga.LSP.ClientTest do
       MockLSPServer.server_config(
         request_configuration: Map.get(context, :request_configuration, false),
         request_unknown: Map.get(context, :request_unknown, false),
+        position_encoding: Map.get(context, :position_encoding, "utf-8"),
         settings: server_settings
       )
 
@@ -95,6 +96,26 @@ defmodule Minga.LSP.ClientTest do
       assert diag.code == "W001"
       assert diag.range.start_line == 0
       assert diag.range.start_col == 0
+    end
+
+    @tag position_encoding: "utf-16"
+    test "didOpen stores diagnostics with the negotiated UTF-16 encoding", %{
+      client: client,
+      diag_server: diag_server
+    } do
+      Minga.Events.subscribe(:diagnostics_updated)
+
+      Client.did_open(client, @uri, "elixir", "\"héllo wörld\" <> undefined_var\n")
+
+      assert_receive {:minga_event, :diagnostics_updated,
+                      %Minga.Events.DiagnosticsUpdatedEvent{uri: @uri}},
+                     @event_timeout
+
+      assert Client.encoding(client) == :utf16
+      assert [diag] = Diagnostics.for_uri(diag_server, @uri)
+      assert diag.encoding == :utf16
+      assert diag.range.start_col == 0
+      assert diag.range.end_col == 5
     end
 
     test "didOpen during startup is sent once the client becomes ready", %{

@@ -7,13 +7,18 @@ defmodule Minga.Diagnostics.Diagnostic do
   (e.g., `"expert"`, `"mix_compile"`).
   """
 
+  alias Minga.Core.PositionEncoding
+
   @enforce_keys [:range, :severity, :message]
-  defstruct [:range, :severity, :message, :source, :code]
+  defstruct [:range, :severity, :message, :source, :code, encoding: :utf8]
 
   @typedoc "Severity level, ordered from most to least severe."
   @type severity :: :error | :warning | :info | :hint
 
-  @typedoc "A source location range (zero-indexed lines and byte columns)."
+  @typedoc "The LSP position encoding used by range columns."
+  @type encoding :: :utf8 | :utf16 | :utf32
+
+  @typedoc "A zero-indexed source location range. Columns are raw offsets in the diagnostic's encoding."
   @type range :: %{
           start_line: non_neg_integer(),
           start_col: non_neg_integer(),
@@ -21,13 +26,16 @@ defmodule Minga.Diagnostics.Diagnostic do
           end_col: non_neg_integer()
         }
 
+  @type position :: {line :: non_neg_integer(), col :: non_neg_integer()}
+
   @typedoc "A diagnostic entry."
   @type t :: %__MODULE__{
           range: range(),
           severity: severity(),
           message: String.t(),
           source: String.t() | nil,
-          code: String.t() | integer() | nil
+          code: String.t() | integer() | nil,
+          encoding: encoding()
         }
 
   @severity_rank %{error: 0, warning: 1, info: 2, hint: 3}
@@ -50,11 +58,29 @@ defmodule Minga.Diagnostics.Diagnostic do
     rank_a = Map.fetch!(@severity_rank, a)
     rank_b = Map.fetch!(@severity_rank, b)
 
-    cond do
-      rank_a < rank_b -> :lt
-      rank_a > rank_b -> :gt
-      true -> :eq
-    end
+    compare_rank(rank_a, rank_b)
+  end
+
+  @doc "Returns the diagnostic start position as a byte-column position for the given line text."
+  @spec start_position(t(), String.t()) :: position()
+  def start_position(%__MODULE__{} = diagnostic, line_text) when is_binary(line_text) do
+    position_to_byte(
+      diagnostic.range.start_line,
+      diagnostic.range.start_col,
+      line_text,
+      diagnostic.encoding
+    )
+  end
+
+  @doc "Returns the diagnostic end position as a byte-column position for the given line text."
+  @spec end_position(t(), String.t()) :: position()
+  def end_position(%__MODULE__{} = diagnostic, line_text) when is_binary(line_text) do
+    position_to_byte(
+      diagnostic.range.end_line,
+      diagnostic.range.end_col,
+      line_text,
+      diagnostic.encoding
+    )
   end
 
   @doc """
@@ -93,5 +119,18 @@ defmodule Minga.Diagnostics.Diagnostic do
         (a_line == b_line and a_col == b_col and
            compare_severity(a.severity, b.severity) == :lt)
     end)
+  end
+
+  @spec compare_rank(non_neg_integer(), non_neg_integer()) :: :lt | :eq | :gt
+  defp compare_rank(a, b) when a < b, do: :lt
+  defp compare_rank(a, b) when a > b, do: :gt
+  defp compare_rank(_a, _b), do: :eq
+
+  @spec position_to_byte(non_neg_integer(), non_neg_integer(), String.t(), encoding()) ::
+          position()
+  defp position_to_byte(line, col, _line_text, :utf8), do: {line, col}
+
+  defp position_to_byte(line, col, line_text, encoding) do
+    PositionEncoding.from_lsp(%{"line" => line, "character" => col}, line_text, encoding)
   end
 end

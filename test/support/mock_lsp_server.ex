@@ -28,6 +28,7 @@ defmodule Minga.Test.MockLSPServer do
           {:request_configuration, boolean()}
           | {:request_unknown, boolean()}
           | {:stderr_banner, boolean()}
+          | {:position_encoding, String.t()}
           | {:settings, map()}
 
   @doc """
@@ -41,7 +42,8 @@ defmodule Minga.Test.MockLSPServer do
       [
         {Keyword.get(opts, :request_configuration, false), "--request-configuration"},
         {Keyword.get(opts, :request_unknown, false), "--request-unknown"},
-        {Keyword.get(opts, :stderr_banner, false), "--stderr-banner"}
+        {Keyword.get(opts, :stderr_banner, false), "--stderr-banner"},
+        {true, "--position-encoding=#{Keyword.get(opts, :position_encoding, "utf-8")}"}
       ]
       |> Enum.flat_map(fn
         {true, arg} -> [arg]
