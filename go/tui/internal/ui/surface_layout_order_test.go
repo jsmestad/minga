@@ -111,6 +111,67 @@ func TestOverlayBottomPanelOpenHoverWins(t *testing.T) {
 	}
 }
 
+func TestOverlayHoverOrdersByEmittedPlacementZ(t *testing.T) {
+	// Hover is registry-placed (#2281): its stacking order is the emitted
+	// placement z, not the hardcoded fallback. Place the bottom panel ABOVE hover
+	// (higher z than hover's emitted z), and the bottom panel must win the slot,
+	// inverting the historical hover>panel order. This is the AC-2 proof that the
+	// promoted hover popup orders by placement data.
+	model := New(80, 16, nil)
+	model.chrome = map[byte]protocol.ChromePayload{
+		generated.OPGuiBottomPanel: {
+			Opcode: generated.OPGuiBottomPanel,
+			Bottom: protocol.BottomPanel{Visible: true, Tabs: []protocol.PanelTab{{Type: 0x01, Name: "Messages"}}, Messages: []protocol.PanelMessage{{ID: 1, Level: 1, Text: "panel-msg"}}},
+		},
+		generated.OPGuiHoverPopup: {
+			Opcode: generated.OPGuiHoverPopup,
+			Hover:  protocol.HoverPopup{Visible: true, Lines: []protocol.RichLine{{Segments: []protocol.RichSegment{{Text: "hover-doc"}}}}},
+		},
+	}
+	model.surfacePlacements = []generated.SurfacePlacement{
+		{SurfaceID: surfaceIDHoverPopup, Z: 290, HitKind: 8},
+		{SurfaceID: surfaceIDBottomPanel, Z: 295, HitKind: 7},
+	}
+
+	got := strings.Join(model.overlayLines(), "\n")
+	if !strings.Contains(got, "panel-msg") {
+		t.Fatalf("bottom panel placed above hover should win the slot, got %q", got)
+	}
+	if strings.Contains(got, "hover-doc") {
+		t.Fatalf("hover should lose when placed below the bottom panel, got %q", got)
+	}
+}
+
+func TestOverlaySignatureHelpOrdersByEmittedPlacementZ(t *testing.T) {
+	// Signature help is registry-placed (#2281). With its emitted z below the
+	// bottom panel's, the panel wins the single active overlay slot, proving the
+	// promoted signature-help surface orders by placement data rather than the
+	// orderSignatureHelp fallback constant.
+	model := New(80, 16, nil)
+	model.chrome = map[byte]protocol.ChromePayload{
+		generated.OPGuiBottomPanel: {
+			Opcode: generated.OPGuiBottomPanel,
+			Bottom: protocol.BottomPanel{Visible: true, Tabs: []protocol.PanelTab{{Type: 0x01, Name: "Messages"}}, Messages: []protocol.PanelMessage{{ID: 1, Level: 1, Text: "panel-msg"}}},
+		},
+		generated.OPGuiSignatureHelp: {
+			Opcode:    generated.OPGuiSignatureHelp,
+			Signature: protocol.SignatureHelp{Visible: true, Signatures: []protocol.Signature{{Label: "map(enumerable, fun)"}}},
+		},
+	}
+	model.surfacePlacements = []generated.SurfacePlacement{
+		{SurfaceID: surfaceIDSignatureHelp, Z: 180, HitKind: 8},
+		{SurfaceID: surfaceIDBottomPanel, Z: 200, HitKind: 7},
+	}
+
+	got := strings.Join(model.overlayLines(), "\n")
+	if !strings.Contains(got, "panel-msg") {
+		t.Fatalf("bottom panel placed above signature help should win the slot, got %q", got)
+	}
+	if strings.Contains(got, "map(enumerable, fun)") {
+		t.Fatalf("signature help should lose when placed below the bottom panel, got %q", got)
+	}
+}
+
 func TestOverlayBottomPanelOpenSignatureHelpWins(t *testing.T) {
 	// Same inversion guard for signature help: it historically sat above the
 	// bottom panel (orderSignatureHelp 280 > floating band 200), so with the panel

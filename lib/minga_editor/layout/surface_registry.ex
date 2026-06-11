@@ -34,20 +34,30 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
   simultaneous overlays are newly *expressible* as a list but are deliberately
   NOT produced here. Enabling them is out of scope (see #2268, AC-4).
 
-  Known enumeration gap (transitional split, #2268). The Go compositor's
-  `overlayLines()` chain also stacks surfaces that are not focus-tree nodes
-  today (hover, signature help, float popups, agent context, tool manager,
-  extension panels/overlays, observatory, timeline, notifications). #2268 ships
-  a *transitional split*: the surfaces the focus tree already places (the editor
-  area + chrome, and the single active modal overlay: picker or completion)
-  composite by placement/z and hit-test from these placement rects; the
-  not-yet-promoted overlay set keeps a reduced, hand-ordered chain on the Go
-  side until each is promoted into the focus tree. Promoting them is mechanical
-  per surface (each already has BEAM-tracked state) but balloons across ~10
-  surfaces, so it is deferred to a follow-up (#2281): "promote ephemeral/agent
-  overlays into FocusTree so the registry enumerates every composited surface
-  and the Go reduced chain can be deleted." The gap lives in the FocusTree's
-  coverage, not in this module's derivation.
+  Enumeration gap (transitional split, #2268; partially closed by #2281). The Go
+  compositor's `overlayLines()` chain also stacks surfaces that are not focus-tree
+  nodes. #2268 shipped a *transitional split*; #2281 promotes the surfaces whose
+  rect the BEAM authoritatively computes:
+
+  * **Promoted (#2281): hover popup, signature help.** Both are cursor-anchored
+    floating popups whose exact on-screen box the BEAM already computes for layout
+    (`HoverPopup.box/3`/`SignatureHelp.box/3`, driven by `FloatingWindow`).
+    `FocusTree.add_floating_overlays/2` now adds them as overlay nodes from
+    `shell_state`, so the registry places them with a real rect/z/hit_kind and the
+    AC-1 one-source property covers them. They occupy the `@z_floating_overlay`
+    region (hover 290 > signature help 280), preserving the historical order.
+
+  * **Still transitional (documented remainder):** float popup, agent context,
+    agent chat, tool manager, extension panels/overlays, observatory, timeline,
+    notifications. These are NOT focus-tree nodes and the BEAM does not compute a
+    layout rect for them: the Go compositor positions each entirely frontend-side
+    (footer-appended, sized by `maxOverlayHeight`/terminal width), so there is no
+    BEAM-authoritative rect to register. Inventing one would not be behaviour-
+    neutral, so they keep a reduced hand-ordered fallback on the Go side until
+    each grows a BEAM rect source. The gap lives in the FocusTree's coverage (and,
+    upstream, in whether each surface's rect is BEAM-known), not in this module's
+    derivation. Because the remainder is non-empty, Go's transitional rank table is
+    *shrunk*, not deleted.
 
   ## surface_id namespace and the identity-unification call (#2268)
 
@@ -135,6 +145,8 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
           | :picker
           | :completion_backdrop
           | :completion_menu
+          | :hover_popup
+          | :signature_help
 
   @typedoc "Coarse classification of what a click on a surface means."
   @type hit_kind ::
@@ -152,11 +164,22 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
   # Bands leave gaps so future surfaces can slot between without renumbering the
   # whole stack. These mirror the back-to-front order FocusTree already builds:
   # base chrome and the editor area, then floating chrome (bottom panel), then
-  # the single active modal overlay on top.
+  # cursor-anchored floating popups (hover, signature help), then the single
+  # active modal overlay on top.
+  #
+  # Band policy for the promoted floating popups (#2281): the historical Go
+  # transitional chain placed hover (290) above signature help (280), and both
+  # above the bottom panel (200) and below the modal overlay band (300). The
+  # registry reproduces that exact order by slotting both popups in a
+  # `@z_floating_overlay` region between the floating-chrome band (200) and the
+  # overlay band (300), with hover one step above signature help. The numeric
+  # gap to the overlay band stays explicit so a future surface can land between
+  # the popups and the modal overlay without renumbering.
 
   @z_base_chrome 0
   @z_editor_area 100
   @z_floating_chrome 200
+  @z_floating_overlay 280
   @z_overlay 300
 
   @doc """
@@ -355,6 +378,8 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
   def surface_id(:picker), do: :picker
   def surface_id(:completion_backdrop), do: :completion_backdrop
   def surface_id(:completion_menu), do: :completion_menu
+  def surface_id(:hover_popup), do: :hover_popup
+  def surface_id(:signature_help), do: :signature_help
   def surface_id({:custom, :sidebar}), do: :custom_sidebar
   def surface_id({:custom, _other}), do: :custom_sidebar
   def surface_id(_other), do: nil
@@ -384,6 +409,8 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
   def surface_id_u16(:picker), do: 14
   def surface_id_u16(:completion_backdrop), do: 15
   def surface_id_u16(:completion_menu), do: 16
+  def surface_id_u16(:hover_popup), do: 17
+  def surface_id_u16(:signature_help), do: 18
 
   @doc """
   Maps a registry `hit_kind` atom to its `u8` wire value.
@@ -412,6 +439,11 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
   defp z_for(:agent_chat_content), do: @z_editor_area + 1
   defp z_for(:modeline), do: @z_editor_area + 2
   defp z_for(:bottom_panel), do: @z_floating_chrome
+  # Cursor-anchored floating popups, above floating chrome and below the modal
+  # overlay band. hover (z=290) paints in front of signature help (z=280),
+  # reproducing the historical Go transitional order exactly (#2281).
+  defp z_for(:hover_popup), do: @z_floating_overlay + 10
+  defp z_for(:signature_help), do: @z_floating_overlay
   defp z_for(id) when id in [:picker_backdrop, :completion_backdrop], do: @z_overlay
   defp z_for(id) when id in [:picker, :completion_menu], do: @z_overlay + 1
   defp z_for(_base_chrome), do: @z_base_chrome
@@ -425,5 +457,6 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
   defp hit_kind_for(:status_bar), do: :status_bar
   defp hit_kind_for(id) when id in [:picker, :completion_menu], do: :overlay
   defp hit_kind_for(id) when id in [:picker_backdrop, :completion_backdrop], do: :overlay
+  defp hit_kind_for(id) when id in [:hover_popup, :signature_help], do: :overlay
   defp hit_kind_for(_chrome), do: :chrome
 end

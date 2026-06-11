@@ -118,6 +118,32 @@ defmodule MingaEditor.HoverPopup do
   def render(%__MODULE__{content_lines: []}, _viewport, _theme), do: []
 
   def render(%__MODULE__{} = popup, viewport, theme) do
+    popup
+    |> spec(viewport, theme)
+    |> FloatingWindow.render()
+  end
+
+  @doc """
+  Returns the popup's outer rect `{row, col, width, height}` in screen cells.
+
+  This is the same box `render/3` paints into (border, anchor placement, and
+  viewport clamping included), so the `SurfaceRegistry` can register the hover
+  surface's rect from the BEAM's own geometry instead of inventing one. Returns
+  `nil` when there is no content to place.
+  """
+  @spec box(t(), {pos_integer(), pos_integer()}, map()) :: MingaEditor.Layout.rect() | nil
+  def box(%__MODULE__{content_lines: []}, _viewport, _theme), do: nil
+
+  def box(%__MODULE__{} = popup, viewport, theme) do
+    popup
+    |> spec(viewport, theme)
+    |> FloatingWindow.box()
+  end
+
+  # ── Private ──────────────────────────────────────────────────────────────
+
+  @spec spec(t(), {pos_integer(), pos_integer()}, map()) :: FloatingWindow.Spec.t()
+  defp spec(%__MODULE__{} = popup, viewport, theme) do
     {vp_rows, vp_cols} = viewport
     popup_theme = Map.get(theme, :popup, default_popup_theme())
 
@@ -146,7 +172,7 @@ defmodule MingaEditor.HoverPopup do
     # Focus indicator in border
     border_style = if popup.focused, do: :single, else: :rounded
 
-    spec = %FloatingWindow.Spec{
+    %FloatingWindow.Spec{
       content: content_draws,
       width: {:cols, total_width},
       height: {:rows, total_height},
@@ -156,11 +182,7 @@ defmodule MingaEditor.HoverPopup do
       theme: popup_theme,
       viewport: viewport
     }
-
-    FloatingWindow.render(spec)
   end
-
-  # ── Private ──────────────────────────────────────────────────────────────
 
   @spec build_content_draws(
           [Markdown.parsed_line()],

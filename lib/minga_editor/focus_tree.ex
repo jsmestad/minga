@@ -12,9 +12,11 @@ defmodule MingaEditor.FocusTree do
   alias MingaEditor.BottomPanel
   alias MingaEditor.CompletionUI
   alias MingaEditor.FocusTree.Node, as: TreeNode
+  alias MingaEditor.HoverPopup
   alias MingaEditor.Input
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Layout
+  alias MingaEditor.SignatureHelp
   alias MingaEditor.Renderer.Gutter
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.UI.Picker, as: PickerData
@@ -39,6 +41,7 @@ defmodule MingaEditor.FocusTree do
 
     layout
     |> build_base(window_map(state), Input.editing_dispatch_handler(state), state)
+    |> add_floating_overlays(state)
     |> add_modal_overlays(state, layout)
     |> link_tree()
   end
@@ -316,6 +319,66 @@ defmodule MingaEditor.FocusTree do
           [TreeNode.t()]
   defp maybe_add(children, nil, _build), do: children
   defp maybe_add(children, rect, build), do: children ++ [build.(rect)]
+
+  # ── Floating overlay builders ─────────────────────────────────────────────
+  #
+  # Cursor-anchored LSP popups (hover, signature help). Their rect is the exact
+  # box the BEAM already computes for layout (`HoverPopup.box/3`/`SignatureHelp.box/3`,
+  # both driven by `FloatingWindow`), so the SurfaceRegistry can place them with a
+  # real rect/z/hit_kind instead of leaving them to a Go-side transitional rank
+  # (#2281). They sit ABOVE floating chrome (bottom panel) and BELOW the single
+  # active modal overlay, preserving the historical stacking order.
+
+  @spec add_floating_overlays(t(), map()) :: t()
+  defp add_floating_overlays(%TreeNode{} = root, state) do
+    root
+    |> maybe_add_hover_overlay(state)
+    |> maybe_add_signature_overlay(state)
+  end
+
+  @spec maybe_add_hover_overlay(t(), map()) :: t()
+  defp maybe_add_hover_overlay(%TreeNode{} = root, %{
+         shell_state: %{hover_popup: %HoverPopup{} = popup},
+         terminal_viewport: vp,
+         theme: theme
+       }) do
+    case HoverPopup.box(popup, {vp.rows, vp.cols}, theme) do
+      nil ->
+        root
+
+      rect ->
+        append_root_child(
+          root,
+          TreeNode.new(:hover_popup, rect,
+            handler: Input.Hover,
+            scrollable?: true,
+            focusable?: true
+          )
+        )
+    end
+  end
+
+  defp maybe_add_hover_overlay(%TreeNode{} = root, _state), do: root
+
+  @spec maybe_add_signature_overlay(t(), map()) :: t()
+  defp maybe_add_signature_overlay(%TreeNode{} = root, %{
+         shell_state: %{signature_help: %SignatureHelp{} = sh},
+         terminal_viewport: vp,
+         theme: theme
+       }) do
+    case SignatureHelp.box(sh, {vp.rows, vp.cols}, theme) do
+      nil ->
+        root
+
+      rect ->
+        append_root_child(
+          root,
+          TreeNode.new(:signature_help, rect, handler: Input.SignatureHelp)
+        )
+    end
+  end
+
+  defp maybe_add_signature_overlay(%TreeNode{} = root, _state), do: root
 
   # ── Overlay builders ──────────────────────────────────────────────────────
 

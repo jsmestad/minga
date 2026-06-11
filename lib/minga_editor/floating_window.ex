@@ -139,6 +139,21 @@ defmodule MingaEditor.FloatingWindow do
     {interior_h, interior_w}
   end
 
+  @doc """
+  Returns the window's outer rect in `Layout.rect()` shape: `{row, col, width, height}`.
+
+  This is the exact box `render/1` paints into, including border, position
+  resolution, and viewport clamping. It is the authoritative placement rect for a
+  floating popup, so a caller (the `SurfaceRegistry`/`FocusTree`) can register the
+  surface's rect without re-rendering its content.
+  """
+  @spec box(Spec.t()) :: {non_neg_integer(), non_neg_integer(), pos_integer(), pos_integer()}
+  def box(%Spec{} = spec) do
+    {vp_rows, vp_cols} = spec.viewport
+    %{row: row, col: col, w: w, h: h} = compute_box(spec, vp_rows, vp_cols)
+    {row, col, w, h}
+  end
+
   # ── Box computation ──────────────────────────────────────────────────────
 
   @typep box :: %{
