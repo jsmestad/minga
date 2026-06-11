@@ -5,7 +5,6 @@ import (
 	"image/color"
 	"strings"
 
-	"charm.land/bubbles/v2/table"
 	"charm.land/lipgloss/v2"
 	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/jsmestad/minga/go/tui/internal/generated"
@@ -435,34 +434,118 @@ func (m Model) renderExtensionPanels(ext protocol.ExtensionPanel) []string {
 	return takeLines(lines, m.maxOverlayHeight())
 }
 
+// renderObservatory draws the observatory as directly-styled addressable rows
+// rather than an opaque charm table so each node row can carry a lipgloss zone
+// marker, mirroring how renderNotifications was converted (#2333) and the macOS
+// ObservatoryView. A click on a node row sends observatory_inspect(node.pid),
+// the same semantic the macOS info-circle button sends and the inspect intent
+// the keyboard reaches (#2334). The row shape is unchanged from the charm table
+// it replaces: a 1-line header plus one line per node (PID, depth-indented name,
+// message-queue length), so the BEAM content-height model
+// (FooterOverlays.content_height_observatory = 1 + node_count) is exact. The
+// per-row tableCell columns reproduce the charm table's Padding(0,1) cell layout
+// so the visual stays equivalent.
 func (m Model) renderObservatory(obs protocol.Observatory) []string {
-	rows := make([]table.Row, 0, len(obs.Nodes))
+	height := m.maxOverlayHeight()
+	theme := m.palette()
+	pidWidth := 12
+	qWidth := 6
+	nameWidth := max(m.width-pidWidth-qWidth, 20)
+
+	header := tableHeaderRow(theme, m.width, []tableCell{
+		{text: fmt.Sprintf("Observatory %d", max(int(obs.Count), len(obs.Nodes))), width: pidWidth},
+		{text: "Process", width: nameWidth},
+		{text: "Q", width: qWidth},
+	})
+	lines := []string{header}
 	for _, node := range obs.Nodes {
-		rows = append(rows, table.Row{node.PID, strings.Repeat("  ", int(node.Depth)) + node.Name, fmt.Sprintf("%d", node.MessageQueueLen)})
+		row := tableDataRow(theme, m.width, false, []tableCell{
+			{text: node.PID, width: pidWidth},
+			{text: strings.Repeat("  ", int(node.Depth)) + node.Name, width: nameWidth},
+			{text: fmt.Sprintf("%d", node.MessageQueueLen), width: qWidth},
+		})
+		lines = append(lines, m.zones.Mark(zoneIDObservatoryNode(node.PID), row))
 	}
-	columns := []table.Column{
-		{Title: fmt.Sprintf("Observatory %d", max(int(obs.Count), len(obs.Nodes))), Width: 12},
-		{Title: "Process", Width: max(m.width-24, 20)},
-		{Title: "Q", Width: 6},
-	}
-	return takeLines(m.charmTable(columns, rows, 0, m.maxOverlayHeight()), m.maxOverlayHeight())
+	return takeLines(lines, height)
 }
 
+// renderEditTimeline draws the edit timeline as directly-styled addressable rows
+// rather than an opaque charm table so each entry row can carry a lipgloss zone
+// marker, mirroring renderObservatory and the macOS EditTimelineView. A click on
+// an entry row sends timeline_navigate(entry.index), the same semantic the macOS
+// circle tap sends and the destination the keyboard timeline_next_edit/
+// timeline_prev_edit commands land on (#2335). The currently-viewed entry is
+// highlighted, reproducing the charm table's selected-row style. The row shape is
+// unchanged: a 1-line header plus one line per entry, so the BEAM content-height
+// model (FooterOverlays.content_height_edit_timeline = 1 + entry_count) is exact.
 func (m Model) renderEditTimeline(timeline protocol.EditTimeline) []string {
-	rows := make([]table.Row, 0, len(timeline.Entries))
-	selected := 0
-	for i, entry := range timeline.Entries {
-		if uint16(entry.Index) == timeline.ViewingIndex {
-			selected = i
-		}
-		rows = append(rows, table.Row{fmt.Sprintf("%d", entry.Index), entry.ToolName, fmt.Sprintf("%d", entry.TimestampDelta)})
+	height := m.maxOverlayHeight()
+	theme := m.palette()
+	idxWidth := 4
+	ageWidth := 8
+	toolWidth := max(m.width-idxWidth-ageWidth, 18)
+
+	header := tableHeaderRow(theme, m.width, []tableCell{
+		{text: "#", width: idxWidth},
+		{text: "Tool", width: toolWidth},
+		{text: "Age", width: ageWidth},
+	})
+	lines := []string{header}
+	for _, entry := range timeline.Entries {
+		selected := uint16(entry.Index) == timeline.ViewingIndex
+		row := tableDataRow(theme, m.width, selected, []tableCell{
+			{text: fmt.Sprintf("%d", entry.Index), width: idxWidth},
+			{text: entry.ToolName, width: toolWidth},
+			{text: fmt.Sprintf("%d", entry.TimestampDelta), width: ageWidth},
+		})
+		lines = append(lines, m.zones.Mark(zoneIDTimelineEntry(entry.Index), row))
 	}
-	columns := []table.Column{
-		{Title: "#", Width: 4},
-		{Title: "Tool", Width: max(m.width-18, 18)},
-		{Title: "Age", Width: 8},
+	return takeLines(lines, height)
+}
+
+// tableCell is one column's content and total column width (including the
+// Padding(0,1) the charm table applied: 1 leading + 1 trailing space).
+type tableCell struct {
+	text  string
+	width int
+}
+
+// tableHeaderRow renders a charmTable-equivalent header row: each cell is bold
+// accent text on the popup surface, left-padded one cell and clipped to its
+// column width, with the row filled to the full overlay width so the band
+// background stays solid.
+func tableHeaderRow(theme palette, width int, cells []tableCell) string {
+	style := lipgloss.NewStyle().Bold(true).Foreground(theme.Accent()).Background(theme.PopupSurface()).ColorWhitespace(true)
+	rowStyle := lipgloss.NewStyle().Background(theme.PopupSurface()).Width(max(width, 1)).ColorWhitespace(true)
+	return renderPadded(rowStyle, style.Render(tableCellsText(cells)), max(width, 1))
+}
+
+// tableDataRow renders a charmTable-equivalent data row. A selected row uses the
+// popup-selection colors (bold selection text on the selection background),
+// matching the charm table's Selected style; an unselected row uses popup text on
+// the popup surface. The whole row is filled to the overlay width so the zone the
+// caller marks over it covers the full clickable line.
+func tableDataRow(theme palette, width int, selected bool, cells []tableCell) string {
+	width = max(width, 1)
+	text := tableCellsText(cells)
+	if selected {
+		style := lipgloss.NewStyle().Bold(true).Foreground(theme.PopupSelectionText()).Background(theme.PopupSelection()).Width(width).ColorWhitespace(true)
+		return renderPadded(style, text, width)
 	}
-	return takeLines(m.charmTable(columns, rows, selected, m.maxOverlayHeight()), m.maxOverlayHeight())
+	cellStyle := lipgloss.NewStyle().Foreground(theme.PopupText()).Background(theme.PopupSurface()).ColorWhitespace(true)
+	rowStyle := lipgloss.NewStyle().Background(theme.PopupSurface()).Width(width).ColorWhitespace(true)
+	return renderPadded(rowStyle, cellStyle.Render(text), width)
+}
+
+// tableCellsText lays out cells side by side, each clipped/padded to its column
+// width with one leading and one trailing space (the charm table's Padding(0,1)).
+func tableCellsText(cells []tableCell) string {
+	var b strings.Builder
+	for _, cell := range cells {
+		inner := max(cell.width-2, 1)
+		b.WriteString(" " + fit(cell.text, inner) + " ")
+	}
+	return b.String()
 }
 
 // renderNotifications draws the notification center as directly-styled rows

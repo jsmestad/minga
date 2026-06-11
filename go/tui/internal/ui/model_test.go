@@ -1463,6 +1463,89 @@ func TestNotificationDismissZoneAbsentWhenNotDismissable(t *testing.T) {
 	}
 }
 
+func TestSemanticMouseRoutesObservatoryNodeZones(t *testing.T) {
+	model := New(80, 24, nil)
+	model.chrome = map[byte]protocol.ChromePayload{
+		generated.OPGuiObservatory: {Observatory: protocol.Observatory{
+			Visible: true,
+			Count:   2,
+			Nodes: []protocol.ObservatoryNode{
+				{PID: "<0.123.0>", Name: "Editor", Depth: 0, MessageQueueLen: 0},
+				{PID: "<0.456.0>", Name: "Buffer", Depth: 1, MessageQueueLen: 3},
+			},
+		}},
+	}
+	// Observatory is registry-placed (#2281): it renders at its BEAM placement rect
+	// and its zones are scanned from there. Height 3 is the BEAM-derived value for
+	// this state, NOT an arbitrary fit: FooterOverlays.content_height_observatory =
+	// 1 (header) + node_count = 1 + 2 = 3. If the renderer ever emits more rows than
+	// that formula counts, takeLines clips the extra rows and their zones never
+	// register, so keep the two in lockstep (the #2333 height lesson).
+	model.surfacePlacements = []generated.SurfacePlacement{
+		{SurfaceID: surfaceIDObservatory, Rect: generated.Rect{Row: 21, Col: 0, Width: 80, Height: 3}, Z: 180, HitKind: 8},
+	}
+	model.viewport.SetContent(model.content())
+	_ = model.View()
+
+	// Each node row carries a zone keyed by its PID; a click routes
+	// observatory_inspect(pid). The absolute coords come from the bottom-aligned
+	// placement, proving the overlay zones merge at the placement offset (ScanInto).
+	node := waitForZone(t, model, zoneIDObservatoryNode("<0.456.0>"))
+	if node.StartY < 21 || node.StartY >= 24 {
+		t.Fatalf("observatory node zone Y %d outside the band rows 21..23", node.StartY)
+	}
+	cmd, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: node.StartX + 1, Y: node.StartY}))
+	if !ok || !bytes.Equal(cmd, protocol.EncodeGUIObservatoryInspect("<0.456.0>")) {
+		t.Fatalf("observatory row click should route observatory_inspect, ok=%v packet=%v", ok, cmd)
+	}
+
+	// A click that misses every observatory zone falls through (ok=false) so the
+	// BEAM OverlaySink containment swallows it: this is AC 2, the containment
+	// fallback, and must not synthesize a buffer click.
+	if _, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: node.EndX + 40, Y: node.EndY + 30})); ok {
+		t.Fatalf("out-of-bounds observatory clicks should fall back to BEAM containment")
+	}
+}
+
+func TestSemanticMouseRoutesEditTimelineEntryZones(t *testing.T) {
+	model := New(80, 24, nil)
+	model.chrome = map[byte]protocol.ChromePayload{
+		generated.OPGuiEditTimeline: {Timeline: protocol.EditTimeline{
+			Visible:      true,
+			ViewingIndex: 0,
+			Entries: []protocol.TimelineEntry{
+				{Index: 0, ToolName: "write_file", TimestampDelta: 12},
+				{Index: 1, ToolName: "apply_patch", TimestampDelta: 4},
+			},
+		}},
+	}
+	// Edit timeline is registry-placed (#2281). Height 3 is the BEAM-derived value:
+	// FooterOverlays.content_height_edit_timeline = 1 (header) + entry_count =
+	// 1 + 2 = 3. Same takeLines/clip lockstep as observatory and notifications.
+	model.surfacePlacements = []generated.SurfacePlacement{
+		{SurfaceID: surfaceIDEditTimeline, Rect: generated.Rect{Row: 21, Col: 0, Width: 80, Height: 3}, Z: 170, HitKind: 8},
+	}
+	model.viewport.SetContent(model.content())
+	_ = model.View()
+
+	// Each entry row carries a zone keyed by its index; a click routes
+	// timeline_navigate(index).
+	entry := waitForZone(t, model, zoneIDTimelineEntry(1))
+	if entry.StartY < 21 || entry.StartY >= 24 {
+		t.Fatalf("timeline entry zone Y %d outside the band rows 21..23", entry.StartY)
+	}
+	cmd, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: entry.StartX + 1, Y: entry.StartY}))
+	if !ok || !bytes.Equal(cmd, protocol.EncodeGUITimelineNavigate(1)) {
+		t.Fatalf("timeline row click should route timeline_navigate(1), ok=%v packet=%v", ok, cmd)
+	}
+
+	// A click that misses every timeline zone falls through (ok=false) so the BEAM
+	// OverlaySink containment swallows it (AC 2 containment fallback).
+	if _, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: entry.EndX + 40, Y: entry.EndY + 30})); ok {
+		t.Fatalf("out-of-bounds timeline clicks should fall back to BEAM containment")
+	}
+}
+
 func TestCompletionRendersDocumentationPreviewWhenPresent(t *testing.T) {
 	model := New(60, 24, nil)
 	completion := protocol.Completion{

@@ -17,6 +17,8 @@ const (
 	zonePrefixSidebarItem       = "sidebar:item:"
 	zonePrefixNotificationItem  = "notification:dismiss:"
 	zonePrefixNotificationAct   = "notification:action:"
+	zonePrefixObservatoryNode   = "observatory:node:"
+	zonePrefixTimelineEntry     = "timeline:entry:"
 	zoneIDHoverAction           = "hover:action"
 	bottomPanelWheelLines       = 3
 )
@@ -57,6 +59,22 @@ func zoneIDNotificationDismiss(id string) string {
 // (NotificationCenterView.swift:74 sendNotificationAction).
 func zoneIDNotificationAction(notificationID, actionID string) string {
 	return zonePrefixNotificationAct + url.QueryEscape(notificationID) + ":" + url.QueryEscape(actionID)
+}
+
+// zoneIDObservatoryNode tags one observatory row by its node PID string,
+// mirroring the macOS info-circle button (ObservatoryView.swift:69
+// sendObservatoryInspect). A click routes observatory_inspect(pid) to inspect
+// that node, matching the keyboard/native inspect semantics (#2334).
+func zoneIDObservatoryNode(pid string) string {
+	return zonePrefixObservatoryNode + url.QueryEscape(pid)
+}
+
+// zoneIDTimelineEntry tags one edit-timeline row by its entry index, mirroring
+// the macOS circle tap (EditTimelineView.swift:40 sendTimelineNavigate). A
+// click routes timeline_navigate(index) to jump to that edit, the same
+// destination the keyboard timeline_next_edit/timeline_prev_edit land on (#2335).
+func zoneIDTimelineEntry(index byte) string {
+	return fmt.Sprintf("%s%d", zonePrefixTimelineEntry, index)
 }
 
 func (m Model) localMouse(msg tea.MouseMsg) (Model, bool) {
@@ -135,6 +153,50 @@ func (m Model) semanticMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	}
 	if packet, ok := m.notificationMousePacket(msg); ok {
 		return packet, true
+	}
+	if packet, ok := m.observatoryMousePacket(msg); ok {
+		return packet, true
+	}
+	if packet, ok := m.editTimelineMousePacket(msg); ok {
+		return packet, true
+	}
+	return nil, false
+}
+
+// observatoryMousePacket maps a click on an observatory row to the same semantic
+// gui_action the macOS frontend sends (ObservatoryView.swift): observatory_inspect
+// for the clicked node's PID. A click that hits no row zone returns ok=false so
+// the overlay's BEAM containment swallows it (the surface is registry-placed,
+// #2281), satisfying the AC2 containment fallback (#2334).
+func (m Model) observatoryMousePacket(msg tea.MouseMsg) ([]byte, bool) {
+	obs, ok := m.observatory()
+	if !ok || !obs.Visible {
+		return nil, false
+	}
+	for _, node := range obs.Nodes {
+		zoneInfo := m.zones.Get(zoneIDObservatoryNode(node.PID))
+		if zoneInfo != nil && zoneInfo.InBounds(msg) {
+			return protocol.EncodeGUIObservatoryInspect(node.PID), true
+		}
+	}
+	return nil, false
+}
+
+// editTimelineMousePacket maps a click on an edit-timeline row to the same
+// semantic gui_action the macOS frontend sends (EditTimelineView.swift):
+// timeline_navigate for the clicked entry's index. A click that hits no row zone
+// returns ok=false so the overlay's BEAM containment swallows it (the surface is
+// registry-placed, #2281), satisfying the AC2 containment fallback (#2335).
+func (m Model) editTimelineMousePacket(msg tea.MouseMsg) ([]byte, bool) {
+	timeline, ok := m.editTimeline()
+	if !ok || !timeline.Visible {
+		return nil, false
+	}
+	for _, entry := range timeline.Entries {
+		zoneInfo := m.zones.Get(zoneIDTimelineEntry(entry.Index))
+		if zoneInfo != nil && zoneInfo.InBounds(msg) {
+			return protocol.EncodeGUITimelineNavigate(uint16(entry.Index)), true
+		}
 	}
 	return nil, false
 }

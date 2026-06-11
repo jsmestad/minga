@@ -219,6 +219,25 @@ func EncodeGUINotificationAction(id, actionID string) []byte {
 	return appendString16(out, actionID)
 }
 
+// EncodeGUIObservatoryInspect encodes an observatory_inspect action. Wire
+// format: <gui_action, 0x4D, pid_len:u16, pid>. Mirrors the macOS info-circle
+// button (ProtocolEncoder.swift:1104 sendObservatoryInspect): a click on an
+// observatory row sends the node's BEAM PID string, which the BEAM resolves into
+// the inspection float popup. An empty pid dismisses the inspection.
+func EncodeGUIObservatoryInspect(pid string) []byte {
+	out := []byte{generated.OPGuiAction, generated.GUIActionObservatoryInspect}
+	return appendString16(out, pid)
+}
+
+// EncodeGUITimelineNavigate encodes a timeline_navigate action. Wire format:
+// <gui_action, 0x4F, index:u16 big-endian>. Mirrors the macOS timeline circle
+// tap (ProtocolEncoder.swift:1123 sendTimelineNavigate): a click on a timeline
+// entry sends that entry's index, the same destination the keyboard
+// timeline_next_edit/timeline_prev_edit commands land on.
+func EncodeGUITimelineNavigate(index uint16) []byte {
+	return []byte{generated.OPGuiAction, generated.GUIActionTimelineNavigate, byte(index >> 8), byte(index)}
+}
+
 // appendString16 appends a length-prefixed string (len:u16 big-endian, then
 // utf8 bytes) to out, truncating to the u16 ceiling, matching the macOS
 // appendString16 helper used by every string-bearing gui_action.

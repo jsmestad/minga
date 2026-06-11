@@ -104,6 +104,29 @@ func TestEncodeGUINotificationAction(t *testing.T) {
 	}
 }
 
+func TestEncodeGUIObservatoryInspect(t *testing.T) {
+	got := EncodeGUIObservatoryInspect("<0.123.0>")
+	want := []byte{
+		generated.OPGuiAction, generated.GUIActionObservatoryInspect,
+		0, 9, '<', '0', '.', '1', '2', '3', '.', '0', '>',
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("observatory inspect packet = %v, want %v", got, want)
+	}
+}
+
+func TestEncodeGUITimelineNavigate(t *testing.T) {
+	// index is a big-endian u16, matching macOS sendTimelineNavigate (writeU16).
+	got := EncodeGUITimelineNavigate(258)
+	want := []byte{
+		generated.OPGuiAction, generated.GUIActionTimelineNavigate,
+		0x01, 0x02,
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("timeline navigate packet = %v, want %v", got, want)
+	}
+}
+
 func TestEncodeGUISidebarAction(t *testing.T) {
 	got := EncodeGUISidebarAction("git", "git_status", "activate")
 	want := []byte{
