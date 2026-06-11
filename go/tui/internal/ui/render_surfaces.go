@@ -10,48 +10,172 @@ import (
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 )
 
-func (m Model) overlayLines() []string {
-	if completion, ok := m.completion(); ok && completion.Visible && len(completion.Items) > 0 {
-		return m.renderCompletion(completion)
-	}
-	if hover, ok := m.hoverPopup(); ok && hover.Visible && len(hover.Lines) > 0 {
-		return m.renderHover(hover)
-	}
-	if sig, ok := m.signatureHelp(); ok && sig.Visible && len(sig.Signatures) > 0 {
-		return m.renderSignature(sig)
-	}
-	if float, ok := m.floatPopup(); ok && float.Visible {
-		return m.renderFloat(float)
-	}
-	if context, ok := m.agentContext(); ok && context.Visible {
-		return m.renderAgentContext(context)
-	}
-	if chat, ok := m.agentChat(); ok && chat.Visible {
-		return m.renderAgentChat(chat)
-	}
-	if tools, ok := m.toolManager(); ok && tools.Visible {
-		return m.renderToolManager(tools)
-	}
-	if bottom, ok := m.bottomPanel(); ok && bottom.Visible {
-		return m.renderBottomPanel(bottom)
-	}
-	if ext, ok := m.extensionPanel(); ok && len(ext.Panels) > 0 {
-		return m.renderExtensionPanels(ext)
-	}
-	if obs, ok := m.observatory(); ok && obs.Visible {
-		return m.renderObservatory(obs)
-	}
-	if timeline, ok := m.editTimeline(); ok && timeline.Visible {
-		return m.renderEditTimeline(timeline)
-	}
-	if notes, ok := m.notifications(); ok && notes.Visible && len(notes.Items) > 0 {
-		return m.renderNotifications(notes)
-	}
-	if overlay, ok := m.extensionOverlay(); ok && len(overlay.Entries) > 0 {
-		return m.renderExtensionOverlay(overlay)
-	}
-	return nil
+// Registry surface ids (mirror MingaEditor.Layout.SurfaceRegistry.surface_id_u16/1).
+// Only the overlay surfaces the BEAM registry actually places are listed here;
+// the rest of the overlay candidates are not yet promoted into the registry
+// (transitional split, #2268; follow-up #2281 promotes them).
+const (
+	surfaceIDBottomPanel    uint16 = 12
+	surfaceIDCompletionMenu uint16 = 16
+)
+
+// overlayCandidate is one floating surface that may occupy the single active
+// overlay slot. order is its stacking key on one comparable z-band scale: lower
+// paints further back, so the HIGHEST-order visible candidate wins. For surfaces
+// the BEAM registry places, order is the BEAM-authoritative placement z (data,
+// looked up by surfaceID). For not-yet-promoted surfaces it is a transitional
+// order derived from the same registry z bands at its old relative position, so
+// the two are directly comparable. Either way the precedence is no longer a
+// hardcoded if-ladder: it is sorted data.
+type overlayCandidate struct {
+	visible bool
+	order   int
+	render  func() []string
 }
+
+// overlayLines returns the single active overlay's lines (the BEAM emits a
+// single-active-overlay decision; multiple simultaneous overlays remain out of
+// scope, #2268 AC-4). The precedence chain is deleted: candidates are collected
+// and the front-most visible one (highest order) wins, where a placed surface's
+// order is its gui_surface_layout z and an unplaced surface's order is a
+// documented transitional rank.
+func (m Model) overlayLines() []string {
+	candidates := m.overlayCandidates()
+
+	best := -1
+	var winner func() []string
+	for _, c := range candidates {
+		if c.visible && c.order > best {
+			best = c.order
+			winner = c.render
+		}
+	}
+	if winner == nil {
+		return nil
+	}
+	return winner()
+}
+
+// overlayCandidates lists every floating overlay surface with its stacking
+// order on ONE comparable scale. Placed surfaces (completion, bottom panel) use
+// their BEAM placement z directly; the not-yet-promoted surfaces use
+// transitional orders derived from the same registry z bands, slotted at their
+// old relative positions, until each is promoted into the BEAM surface registry
+// (#2281). Because everything shares the band scale, the old top-to-bottom
+// precedence is preserved exactly: completion (overlay band, top) > the six
+// floating overlays that historically sat above the bottom panel > bottom panel
+// (floating band, z=200) > the lower transitional set.
+func (m Model) overlayCandidates() []overlayCandidate {
+	completion, completionOK := m.completion()
+	hover, hoverOK := m.hoverPopup()
+	sig, sigOK := m.signatureHelp()
+	float, floatOK := m.floatPopup()
+	context, contextOK := m.agentContext()
+	chat, chatOK := m.agentChat()
+	tools, toolsOK := m.toolManager()
+	bottom, bottomOK := m.bottomPanel()
+	ext, extOK := m.extensionPanel()
+	obs, obsOK := m.observatory()
+	timeline, timelineOK := m.editTimeline()
+	notes, notesOK := m.notifications()
+	overlay, overlayOK := m.extensionOverlay()
+
+	return []overlayCandidate{
+		// Completion is registry-placed in the overlay band (z=301): it sits at the
+		// top, beating every transitional overlay below the overlay band, exactly
+		// as the old chain listed it first. Fallback orderOverlayTop is used only
+		// when the BEAM emits no placement for it (older BEAM / absent this frame).
+		{
+			visible: completionOK && completion.Visible && len(completion.Items) > 0,
+			order:   m.surfaceOrder(surfaceIDCompletionMenu, orderOverlayTop),
+			render:  func() []string { return m.renderCompletion(completion) },
+		},
+		// ── transitional overlays that historically sat ABOVE the bottom panel ──
+		// These live between the floating band (200) and the overlay band (300),
+		// preserving their old relative order: hover > signature > float >
+		// agentContext > agentChat > toolManager.
+		{visible: hoverOK && hover.Visible && len(hover.Lines) > 0, order: orderHover, render: func() []string { return m.renderHover(hover) }},
+		{visible: sigOK && sig.Visible && len(sig.Signatures) > 0, order: orderSignatureHelp, render: func() []string { return m.renderSignature(sig) }},
+		{visible: floatOK && float.Visible, order: orderFloatPopup, render: func() []string { return m.renderFloat(float) }},
+		{visible: contextOK && context.Visible, order: orderAgentContext, render: func() []string { return m.renderAgentContext(context) }},
+		{visible: chatOK && chat.Visible, order: orderAgentChat, render: func() []string { return m.renderAgentChat(chat) }},
+		{visible: toolsOK && tools.Visible, order: orderToolManager, render: func() []string { return m.renderToolManager(tools) }},
+		// Bottom panel is registry-placed in the floating band (z=200): it sits
+		// BELOW the six overlays above and ABOVE the lower transitional set, exactly
+		// as the old chain ordered it. Fallback orderBottomPanelFallback keeps that
+		// relative position when no placement is emitted.
+		{
+			visible: bottomOK && bottom.Visible,
+			order:   m.surfaceOrder(surfaceIDBottomPanel, orderBottomPanelFallback),
+			render:  func() []string { return m.renderBottomPanel(bottom) },
+		},
+		// ── transitional overlays that historically sat BELOW the bottom panel ──
+		// Below the floating band (200), preserving their old relative order.
+		{visible: extOK && len(ext.Panels) > 0, order: orderExtensionPanel, render: func() []string { return m.renderExtensionPanels(ext) }},
+		{visible: obsOK && obs.Visible, order: orderObservatory, render: func() []string { return m.renderObservatory(obs) }},
+		{visible: timelineOK && timeline.Visible, order: orderEditTimeline, render: func() []string { return m.renderEditTimeline(timeline) }},
+		{visible: notesOK && notes.Visible && len(notes.Items) > 0, order: orderNotifications, render: func() []string { return m.renderNotifications(notes) }},
+		{visible: overlayOK && len(overlay.Entries) > 0, order: orderExtensionOverlay, render: func() []string { return m.renderExtensionOverlay(overlay) }},
+	}
+}
+
+// surfaceOrder returns the BEAM placement z for a registry-placed surface, used
+// directly on the shared band scale, or the transitional fallback when the BEAM
+// has not (yet) emitted a placement for it (older BEAM, or the surface absent
+// from this frame's layout). The placement z and the transitional orders below
+// are derived from the SAME registry z bands, so a placed surface's data z and
+// an unplaced surface's transitional order are comparable on one scale.
+func (m Model) surfaceOrder(surfaceID uint16, fallback int) int {
+	for _, p := range m.surfacePlacements {
+		if p.SurfaceID == surfaceID {
+			return int(p.Z)
+		}
+	}
+	return fallback
+}
+
+// Transitional stacking orders for the not-yet-promoted overlay surfaces (#2281
+// deletes this whole table once they are promoted/placed). They are derived from
+// the registry z bands in MingaEditor.Layout.SurfaceRegistry (base 0 / editor
+// 100 / floating 200 / overlay 300; bottom_panel emits z=200, completion_menu
+// emits z=300+1). Go cannot import the Elixir bands, so this coupling is
+// documented explicitly: keep these values in step with surface_registry.ex.
+//
+// Scale, highest paints front-most:
+//   - completion (placed, overlay band, z=301) sits on top.
+//   - the six overlays that historically sat above the bottom panel occupy
+//     210..290, between the floating band (200) and the overlay band (300),
+//     preserving their old relative order.
+//   - bottom_panel (placed, floating band, z=200) sits below those six.
+//   - the lower transitional set occupies 150..199, below the floating band,
+//     preserving its old relative order.
+const (
+	// Above the bottom panel (200) and below the overlay band (300).
+	orderHover         = 290
+	orderSignatureHelp = 280
+	orderFloatPopup    = 270
+	orderAgentContext  = 260
+	orderAgentChat     = 250
+	orderToolManager   = 240
+
+	// Below the bottom panel (200).
+	orderExtensionPanel   = 190
+	orderObservatory      = 180
+	orderEditTimeline     = 170
+	orderNotifications    = 160
+	orderExtensionOverlay = 150
+
+	// orderOverlayTop is the fallback for completion when the BEAM emits no
+	// placement: it must outrank every transitional order, matching the live
+	// completion_menu z (overlay band + 1 = 301).
+	orderOverlayTop = 301
+
+	// orderBottomPanelFallback is the fallback for the bottom panel when the BEAM
+	// emits no placement: it sits at the floating band (200), keeping the bottom
+	// panel below the six overlays above and above the lower transitional set,
+	// exactly as the old chain ordered it.
+	orderBottomPanelFallback = 200
+)
 
 func (m Model) renderHover(hover protocol.HoverPopup) []string {
 	style := m.panelStyle()

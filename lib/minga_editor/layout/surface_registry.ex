@@ -34,29 +34,42 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
   simultaneous overlays are newly *expressible* as a list but are deliberately
   NOT produced here. Enabling them is out of scope (see #2268, AC-4).
 
-  Known enumeration gap for #2268 proper: the Go compositor's `overlayLines()`
-  chain also stacks surfaces that are not focus-tree nodes today (hover,
-  signature help, float popups, agent context, tool manager, extension
-  panels/overlays, observatory, timeline, notifications). Before "composite by
-  placement" is complete, those must be promoted to focus-tree/registry
-  surfaces; the gap lives in the FocusTree's coverage, not in this module's
-  derivation.
+  Known enumeration gap (transitional split, #2268). The Go compositor's
+  `overlayLines()` chain also stacks surfaces that are not focus-tree nodes
+  today (hover, signature help, float popups, agent context, tool manager,
+  extension panels/overlays, observatory, timeline, notifications). #2268 ships
+  a *transitional split*: the surfaces the focus tree already places (the editor
+  area + chrome, and the single active modal overlay: picker or completion)
+  composite by placement/z and hit-test from these placement rects; the
+  not-yet-promoted overlay set keeps a reduced, hand-ordered chain on the Go
+  side until each is promoted into the focus tree. Promoting them is mechanical
+  per surface (each already has BEAM-tracked state) but balloons across ~10
+  surfaces, so it is deferred to a follow-up (#2281): "promote ephemeral/agent
+  overlays into FocusTree so the registry enumerates every composited surface
+  and the Go reduced chain can be deleted." The gap lives in the FocusTree's
+  coverage, not in this module's derivation.
 
-  ## surface_id namespace and the #2264 coordination point
+  ## surface_id namespace and the identity-unification call (#2268)
 
   `surface_id/1` maps each focus-tree `content_type` to a stable atom in the
-  registry's namespace, and `surface_id_u16/1` maps that atom to a `u16` for
-  wire emission. This module is the single source of that mapping today.
+  registry's namespace; `surface_id_u16/1` maps that atom to its `u16` wire
+  value and `hit_kind_u8/1` maps a `hit_kind` atom to its `u8` wire value. This
+  module is the single source of both mappings.
 
-  Schema child #2264 (`feat/frame-transaction-schema-2264`) will define the
-  authoritative wire enum for `gui_surface_layout`'s `surface_id:u16`. That
-  branch is NOT merged at the time of this change, so the mapping lives here on
-  the BEAM side. **Unification point:** when #2264 lands, the generated enum
-  should become the single source and `surface_id_u16/1` should read from it
-  (or be replaced by the generated encoder reading these atoms). Until then,
-  keep `surface_id_u16/1` and the schema enum numerically in sync. No wire
-  packet is emitted from this slice; emission lands with #2268 proper after the
-  schema/emission children merge.
+  **Unification decision (#2268 proper):** the schema (`surface_placement` in
+  `docs/protocol_schema.toml`, generated decoders on every frontend) carries
+  `surface_id` as a raw `u16` and `hit_kind` as a raw `u8`. It deliberately does
+  NOT add a `surface_id`/`hit_kind` enum: that would be a new schema vocabulary,
+  and the consult's instruction was to keep the schema as the cross-language
+  source of truth *without* a new vocabulary. The cross-language source of truth
+  is therefore the wire shape plus the generated codec; the numeric identity of
+  each surface stays authoritative here, and the emitter
+  (`Minga.Frontend.Adapter.GUI.SurfaceLayoutEncoder`) *consumes* these functions
+  rather than re-deriving numbers. One writer (this module), one reader (the
+  encoder). `hit_kind_u8/1` reuses the window-encoder hit-kind numbering
+  (`Minga.Frontend.Adapter.GUI.WindowEncoder` 1..6) and extends it with
+  `:chrome` (7) and `:overlay` (8) so a placement's hit kind and a window hit
+  region speak the same u8.
 
   ## hit_kind
 
@@ -159,6 +172,54 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
     state
     |> FocusTree.get()
     |> from_tree()
+  end
+
+  @typedoc """
+  A placement projected to its wire shape: surface_id/hit_kind already mapped to
+  their numeric identity, rect as a `{row, col, width, height}` cell map, z verbatim.
+  """
+  @type wire_placement :: %{
+          surface_id: 0..65_535,
+          rect: %{
+            row: non_neg_integer(),
+            col: non_neg_integer(),
+            width: non_neg_integer(),
+            height: non_neg_integer()
+          },
+          z: non_neg_integer(),
+          hit_kind: 0..255
+        }
+
+  @doc """
+  Returns the frame's placements projected to their wire shape.
+
+  This is the boundary between the registry (which owns the surface/hit-kind
+  numbering) and the wire encoder (which only lays out bytes). The encoder
+  consumes these plain maps, so it never depends on `MingaEditor.*`: the registry
+  stays the single authority for the numeric identity (#2268 unification call),
+  and the emitter stays a pure byte layout over data. Order is preserved
+  (back-to-front by z), so the wire list IS the compositing order.
+  """
+  @spec wire_placements(map()) :: [wire_placement()]
+  def wire_placements(state) do
+    state
+    |> placements()
+    |> Enum.map(&to_wire/1)
+  end
+
+  @spec to_wire(Placement.t()) :: wire_placement()
+  defp to_wire(%Placement{
+         surface_id: surface_id,
+         rect: {row, col, width, height},
+         z: z,
+         hit_kind: hit_kind
+       }) do
+    %{
+      surface_id: surface_id_u16(surface_id),
+      rect: %{row: row, col: col, width: width, height: height},
+      z: z,
+      hit_kind: hit_kind_u8(hit_kind)
+    }
   end
 
   @doc """
@@ -301,11 +362,10 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
   @doc """
   Maps a registry `surface_id` atom to its `u16` wire value.
 
-  This is the single BEAM-side source of the surface enum until schema child
-  #2264 lands its generated enum. **Coordination point (#2264):** keep these
-  numbers in sync with `docs/protocol_schema.toml`'s `surface_id` enum when
-  that branch merges, then replace this with a read of the generated enum. See
-  the moduledoc.
+  Single BEAM-side source of the surface numbering. The schema carries
+  `surface_id` as a raw `u16` (no enum, by decision: see the moduledoc), and
+  `Minga.Frontend.Adapter.GUI.SurfaceLayoutEncoder` consumes this function
+  rather than re-deriving numbers.
   """
   @spec surface_id_u16(surface_id()) :: 0..65_535
   def surface_id_u16(:editor_area), do: 1
@@ -324,6 +384,25 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
   def surface_id_u16(:picker), do: 14
   def surface_id_u16(:completion_backdrop), do: 15
   def surface_id_u16(:completion_menu), do: 16
+
+  @doc """
+  Maps a registry `hit_kind` atom to its `u8` wire value.
+
+  Reuses the window-encoder hit-kind numbering
+  (`Minga.Frontend.Adapter.GUI.WindowEncoder`: text 1, gutter 2, fold_control 3,
+  modeline 4, divider 5, status_bar 6) so a placement's hit kind and a per-window
+  hit region speak the same u8, and extends it with `:chrome` (7) and `:overlay`
+  (8) for surface-level entries. Consumed by `SurfaceLayoutEncoder`.
+  """
+  @spec hit_kind_u8(hit_kind()) :: 0..255
+  def hit_kind_u8(:text), do: 1
+  def hit_kind_u8(:gutter), do: 2
+  def hit_kind_u8(:fold_control), do: 3
+  def hit_kind_u8(:modeline), do: 4
+  def hit_kind_u8(:divider), do: 5
+  def hit_kind_u8(:status_bar), do: 6
+  def hit_kind_u8(:chrome), do: 7
+  def hit_kind_u8(:overlay), do: 8
 
   # ── z assignment ────────────────────────────────────────────────────────────
 

@@ -53,7 +53,8 @@ defmodule MingaEditor.Frontend.Emit.Context do
           search: Search.t(),
           last_input_seq: non_neg_integer(),
           frame_seq: non_neg_integer() | nil,
-          force_keyframe?: boolean()
+          force_keyframe?: boolean(),
+          surface_placements: [MingaEditor.Layout.SurfaceRegistry.wire_placement()]
         }
 
   @enforce_keys [:port_manager, :capabilities, :theme, :font_registry, :windows, :layout, :shell]
@@ -85,7 +86,8 @@ defmodule MingaEditor.Frontend.Emit.Context do
             search: %Search{},
             last_input_seq: 0,
             frame_seq: nil,
-            force_keyframe?: false
+            force_keyframe?: false,
+            surface_placements: []
 
   @doc "Builds an emit context from render pipeline input."
   @spec from_editor_state(map()) :: t()
@@ -121,7 +123,13 @@ defmodule MingaEditor.Frontend.Emit.Context do
       search: state.workspace.search,
       last_input_seq: Map.get(state, :last_input_seq, 0),
       frame_seq: Map.get(state, :frame_seq),
-      force_keyframe?: Map.get(state, :force_keyframe?, false)
+      force_keyframe?: Map.get(state, :force_keyframe?, false),
+      # The single per-frame surface layout authority (#2268), already projected
+      # to wire shape by the registry. Derived from the same focus tree mouse
+      # routing hit-tests against, so the emitted placement rect for every surface
+      # equals its BEAM hit-test rect by construction. The encoder consumes these
+      # plain maps and stays free of any MingaEditor dependency.
+      surface_placements: MingaEditor.Layout.SurfaceRegistry.wire_placements(state)
     }
   end
 

@@ -81,6 +81,8 @@ func decodeChrome(payload []byte) ChromePayload {
 		chrome.ConfigState, chrome.Summary, chrome.Bytes = decodeConfigState(payload)
 	case generated.OPGuiSplitSeparators:
 		chrome.Splits, chrome.Summary, chrome.Bytes = decodeSplitSeparators(payload)
+	case generated.OPGuiSurfaceLayout:
+		chrome.Placements, chrome.Summary, chrome.Bytes = decodeSurfaceLayout(payload)
 	default:
 		// Size unhandled chrome through the schema authority; fall back to the
 		// sectioned envelope only if the opcode is not generically sized.
