@@ -261,11 +261,34 @@ defmodule MingaEditor.Commands.AgentSubStates do
     approval = agent.pending_approval
 
     if is_pid(session) and is_map(approval) do
-      AgentSession.respond_to_approval_pid(session, approval.tool_call_id, decision)
-      update_agent(state, &AgentState.clear_pending_approval/1)
+      apply_approval_response(
+        state,
+        AgentSession.respond_to_approval_pid(session, approval.tool_call_id, decision)
+      )
     else
       state
     end
+  end
+
+  # Only clear the approval UI once the session has *accepted* the decision,
+  # so an undelivered response never silently drops the prompt while the agent
+  # stays blocked. `:no_pending_approval` is the one error that means the
+  # session already resolved this approval, so the prompt is stale: clear it
+  # rather than leave a dead prompt that every retry would re-fail.
+  @spec apply_approval_response(state(), :ok | {:error, term()}) :: state()
+  defp apply_approval_response(state, :ok) do
+    update_agent(state, &AgentState.clear_pending_approval/1)
+  end
+
+  defp apply_approval_response(state, {:error, :no_pending_approval}) do
+    state
+    |> update_agent(&AgentState.clear_pending_approval/1)
+    |> EditorState.set_status("Tool approval already resolved")
+  end
+
+  defp apply_approval_response(state, {:error, reason}) do
+    Minga.Log.error(:agent, "[Agent] tool approval response failed: #{inspect(reason)}")
+    EditorState.set_status(state, "Tool approval failed: #{inspect(reason)}")
   end
 
   # ── Private helpers ────────────────────────────────────────────────────────

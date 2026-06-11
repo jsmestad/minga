@@ -190,6 +190,13 @@ defmodule MingaEditor do
 
     state = EditorState.set_renderer(state, renderer_pid)
 
+    # Agent stream coalescer (#2289). Linked to the Editor so it shares the
+    # Editor's lifecycle: it subscribes to agent sessions on the Editor's behalf
+    # and forwards coalesced {:agent_stream_batch, ...} messages back here,
+    # keeping per-delta traffic out of the Editor mailbox.
+    {:ok, ingest} = MingaEditor.Agent.Ingest.start_link(editor: self())
+    state = EditorState.set_agent_ingest(state, ingest)
+
     # Logger redirect and startup messages
     if state.backend != :headless do
       log_path = Minga.LoggerHandler.install()
@@ -689,6 +696,14 @@ defmodule MingaEditor do
     route_agent_event(state, session_pid, event)
   end
 
+  # Coalesced agent stream batch from MingaEditor.Agent.Ingest (#2289). One
+  # batch replaces N per-delta messages: applied once (one bump_message_version,
+  # one :sync_agent_buffer, one render) instead of once per delta, so streaming
+  # load no longer floods the Editor mailbox ahead of queued keystrokes.
+  def handle_info({:agent_stream_batch, session_pid, batch}, state) do
+    route_agent_stream_batch(state, session_pid, batch)
+  end
+
   def handle_info({:inline_ask_prompt_sent, session_pid, result}, state) do
     state = InlineAskEvents.handle_prompt_result(state, session_pid, result)
     {:noreply, schedule_render(state, 16)}
@@ -1056,6 +1071,27 @@ defmodule MingaEditor do
   @spec route_agent_event(EditorState.t(), pid(), term()) :: {:noreply, EditorState.t()}
   defp route_agent_event(state, session_pid, event) do
     route_agent_event(state, session_pid, event, agent_event_owner(state, session_pid))
+  end
+
+  # Applies a coalesced stream batch (#2289). Mirrors route_agent_event owner
+  # routing: the active foreground agent's batch mutates the agent surface once;
+  # a background subagent's deltas carry no shell state (the shell only reacts to
+  # control events, which Ingest forwards individually), so its batch just
+  # schedules a render. Ephemeral inline sessions never route through Ingest.
+  @spec route_agent_stream_batch(EditorState.t(), pid(), [term()]) :: {:noreply, EditorState.t()}
+  defp route_agent_stream_batch(state, session_pid, batch) do
+    route_agent_stream_batch(state, session_pid, batch, agent_event_owner(state, session_pid))
+  end
+
+  @spec route_agent_stream_batch(EditorState.t(), pid(), [term()], atom()) ::
+          {:noreply, EditorState.t()}
+  defp route_agent_stream_batch(state, _session_pid, batch, :active_agent) do
+    {state, effects} = Events.handle_batch(state, batch)
+    {:noreply, EffectHandler.apply_effects(state, effects)}
+  end
+
+  defp route_agent_stream_batch(state, _session_pid, _batch, _owner) do
+    {:noreply, schedule_render(state, 16)}
   end
 
   @spec route_agent_event(EditorState.t(), pid(), term(), atom()) :: {:noreply, EditorState.t()}

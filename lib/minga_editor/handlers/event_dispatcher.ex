@@ -208,7 +208,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
         %Subagent.Handle{} = handle,
         _msg
       ) do
-    case subscribe_to_session(handle.pid) do
+    case subscribe_to_session(state, handle.pid) do
       :ok ->
         state = EditorState.ensure_shell_available(state)
 
@@ -301,7 +301,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
 
     with {:ok, ^new_pid} <- safe_session_lookup(event.session_id),
          true <- Commands.BufferManagement.agent_session_restart_owned?(state, event.old_pid),
-         :ok <- subscribe_to_restarted_session(event) do
+         :ok <- subscribe_to_restarted_session(state, event) do
       {:ok,
        Commands.BufferManagement.handle_agent_session_restarted(
          state,
@@ -335,9 +335,10 @@ defmodule MingaEditor.Handlers.EventDispatcher do
     :exit, reason -> {:error, {:exit, reason}}
   end
 
-  @spec subscribe_to_restarted_session(SessionManager.SessionRestartedEvent.t()) :: :ok | :stale
-  defp subscribe_to_restarted_session(%SessionManager.SessionRestartedEvent{} = event) do
-    case subscribe_to_session(event.new_pid) do
+  @spec subscribe_to_restarted_session(EditorState.t(), SessionManager.SessionRestartedEvent.t()) ::
+          :ok | :stale
+  defp subscribe_to_restarted_session(state, %SessionManager.SessionRestartedEvent{} = event) do
+    case subscribe_to_session(state, event.new_pid) do
       :ok ->
         :ok
 
@@ -347,11 +348,24 @@ defmodule MingaEditor.Handlers.EventDispatcher do
     end
   end
 
-  @spec subscribe_to_session(pid()) :: :ok | {:error, term()}
-  defp subscribe_to_session(pid) do
-    AgentSession.subscribe(pid, self())
+  # Subscribes to a local session through the agent stream coalescer (#2289) so
+  # token deltas are batched before reaching the Editor mailbox. Falls back to a
+  # direct Editor subscription if the coalescer is not running (e.g. headless
+  # boot races); correctness is unaffected, only mailbox pressure.
+  @spec subscribe_to_session(EditorState.t(), pid()) :: :ok | {:error, term()}
+  defp subscribe_to_session(state, pid) do
+    subscribe_through_ingest(EditorState.agent_ingest(state), pid)
   catch
     :exit, reason -> {:error, reason}
+  end
+
+  @spec subscribe_through_ingest(pid() | nil, pid()) :: :ok | {:error, term()}
+  defp subscribe_through_ingest(ingest, pid) when is_pid(ingest) do
+    MingaEditor.Agent.Ingest.subscribe_session(ingest, pid)
+  end
+
+  defp subscribe_through_ingest(_ingest, pid) do
+    AgentSession.subscribe(pid, self())
   end
 
   @spec log_stale_agent_session_restart(SessionManager.SessionRestartedEvent.t(), term()) :: :ok

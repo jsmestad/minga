@@ -109,7 +109,7 @@ defmodule MingaEditor.Commands.AgentSession do
       ]
     ]
 
-    case start_and_subscribe(session_opts) do
+    case start_and_subscribe(state, session_opts) do
       {:ok, pid} ->
         state =
           if AgentAccess.agent(state).buffer == nil do
@@ -216,9 +216,17 @@ defmodule MingaEditor.Commands.AgentSession do
   @doc "Responds to a stable tool approval id on a local or remote session."
   @spec respond_to_approval_pid(pid(), String.t() | nil, Session.approval_decision()) ::
           :ok | {:error, term()}
-  def respond_to_approval_pid(session, approval_id, decision)
+  def respond_to_approval_pid(session, _approval_id, decision)
       when is_pid(session) and node(session) == node() do
-    Session.respond_to_approval_as(session, self(), approval_id, decision)
+    # Local session: the Editor is not the session's driver. With the #2289
+    # ingest coalescer, the foreground session is subscribed by the Ingest
+    # process (which becomes the driver), and even without it the Editor's own
+    # subscription does not make it the *caller* of this function. The gated
+    # `respond_to_approval_as` would return {:error, :not_driver} here, so we use
+    # the ungated single-process variant, mirroring how `send_prompt_pid` uses
+    # ungated `Session.send_prompt` for the local-node case. Remote sessions keep
+    # the driver-attach semantics below.
+    Session.respond_to_approval(session, decision)
   end
 
   def respond_to_approval_pid(session, approval_id, decision) when is_pid(session) do
@@ -340,12 +348,12 @@ defmodule MingaEditor.Commands.AgentSession do
   defp sessionless_agent?(%Tab{kind: :agent, session: nil}), do: true
   defp sessionless_agent?(%Tab{}), do: false
 
-  @spec start_and_subscribe(keyword()) :: {:ok, pid()} | {:error, term()}
-  defp start_and_subscribe(opts) do
+  @spec start_and_subscribe(state(), keyword()) :: {:ok, pid()} | {:error, term()}
+  defp start_and_subscribe(state, opts) do
     case MingaAgent.SessionManager.start_session(opts) do
       {:ok, _session_id, pid} ->
         try do
-          Session.subscribe(pid)
+          subscribe_active_session(state, pid)
           {:ok, pid}
         catch
           :exit, reason ->
@@ -355,6 +363,17 @@ defmodule MingaEditor.Commands.AgentSession do
 
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  # Routes the foreground session's events through the agent stream coalescer
+  # (#2289) so token deltas are batched before reaching the Editor mailbox.
+  # Falls back to a direct Editor subscription when the coalescer is absent.
+  @spec subscribe_active_session(state(), pid()) :: :ok | {:error, term()}
+  defp subscribe_active_session(state, pid) do
+    case EditorState.agent_ingest(state) do
+      ingest when is_pid(ingest) -> MingaEditor.Agent.Ingest.subscribe_session(ingest, pid)
+      _ -> Session.subscribe(pid)
     end
   end
 

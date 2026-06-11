@@ -69,20 +69,26 @@ defmodule MingaEditor.State.EventRoutingTest do
   end
 
   describe "Agent.Events.handle/2 — content deltas" do
-    test "text_delta triggers throttled render" do
+    # Live streaming coalesces deltas through MingaEditor.Agent.Ingest and applies
+    # them via handle_batch/2; the single-delta handle/2 clauses remain for the
+    # bounded remote event-replay path and delegate to the batch path, so they
+    # now request one coalesced render and one buffer sync.
+    test "text_delta requests a render and a buffer sync" do
       %{state: state} = make_state()
 
       {_new_state, effects} = AgentEvents.handle(state, {:text_delta, "hello"})
 
-      assert {:render, 1} in effects
+      assert {:render, 16} in effects
+      assert :sync_agent_buffer in effects
     end
 
-    test "thinking_delta triggers throttled render" do
+    test "thinking_delta requests a render and a buffer sync" do
       %{state: state} = make_state()
 
       {_new_state, effects} = AgentEvents.handle(state, {:thinking_delta, "hmm"})
 
-      assert {:render, 50} in effects
+      assert {:render, 16} in effects
+      assert :sync_agent_buffer in effects
     end
 
     test "messages_changed triggers buffer sync and tab label update" do
@@ -94,6 +100,46 @@ defmodule MingaEditor.State.EventRoutingTest do
       assert {:update_tab_label, ""} in effects
       # message_version is bumped so the GUI fingerprint cache is invalidated
       assert AgentAccess.panel(new_state).message_version == 1
+    end
+  end
+
+  describe "Agent.Events.handle_batch/2 — coalesced stream batch (#2289)" do
+    test "N text/thinking deltas produce exactly one buffer sync and one version bump" do
+      %{state: state} = make_state()
+
+      batch = [
+        {:text_delta, "a"},
+        {:thinking_delta, "b"},
+        {:text_delta, "c"},
+        {:text_delta, "d"}
+      ]
+
+      {new_state, effects} = AgentEvents.handle_batch(state, batch)
+
+      # One buffer sync, one render — not one per delta. AC 2.
+      assert Enum.count(effects, &(&1 == :sync_agent_buffer)) == 1
+      assert Enum.count(effects, &match?({:render, _}, &1)) == 1
+      # A single coalesced batch bumps the version exactly once.
+      assert AgentAccess.panel(new_state).message_version == 1
+    end
+
+    test "a tool-update-only batch renders without syncing the transcript buffer" do
+      %{state: state} = make_state()
+
+      batch = [{:tool_update, "id", "search", "partial"}]
+
+      {new_state, effects} = AgentEvents.handle_batch(state, batch)
+
+      refute :sync_agent_buffer in effects
+      assert {:render, 16} in effects
+      # No assistant text, so the transcript version is untouched.
+      assert AgentAccess.panel(new_state).message_version == 0
+    end
+
+    test "an empty batch is a no-op" do
+      %{state: state} = make_state()
+
+      assert {^state, []} = AgentEvents.handle_batch(state, [])
     end
   end
 
