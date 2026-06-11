@@ -271,9 +271,17 @@ defmodule Minga.LSP.SyncServer do
         end
     end
   rescue
-    _ -> state
+    exception ->
+      Minga.Log.warning(
+        :lsp,
+        "LSP buffer open failed: " <> Exception.format(:error, exception, __STACKTRACE__)
+      )
+
+      state
   catch
-    :exit, _ -> state
+    :exit, reason ->
+      Minga.Log.warning(:lsp, "LSP buffer open exited: #{inspect(reason)}")
+      state
   end
 
   @spec lsp_auto_start?() :: boolean()
