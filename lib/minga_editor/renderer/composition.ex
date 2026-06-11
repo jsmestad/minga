@@ -1,15 +1,13 @@
 defmodule MingaEditor.Renderer.Composition do
   @moduledoc """
-  Shared text composition pipeline for both draw and semantic render paths.
+  Shared text composition pipeline for the semantic render path.
 
-  Provides three pure operations on styled segment lists:
+  Provides the pure operations on styled segment lists used by the window
+  render-model builder (semantic 0x80 path):
   1. Conceal application (hide concealed text, insert replacements)
   2. Inline virtual text injection (splice ghost text at anchor columns)
   3. Text splitting at display column boundaries
-
-  These functions are used by both `Renderer.Line` (draw-based path) and
-  the window render-model builder (semantic 0x80 path) to ensure both paths
-  produce identical composed output for the same input.
+  4. Invisible-character substitution (tabs → `→`, trailing spaces → `·`)
 
   All functions are pure calculations with no rendering or viewport
   dependencies. They operate on `[{text, Face.t()}]` styled segments
@@ -86,8 +84,8 @@ defmodule MingaEditor.Renderer.Composition do
   Runs the full composition pipeline on styled segments:
   merge_highlights → apply_conceals → inject_inline_virtual_text.
 
-  Returns the final composed segments suitable for conversion to either
-  draw commands (Line.ex) or text + spans (window render-model builder).
+  Returns the final composed segments suitable for conversion to
+  text + spans by the window render-model builder.
   """
   @spec compose_segments(
           [styled_segment()],
