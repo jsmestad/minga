@@ -34,30 +34,32 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
   simultaneous overlays are newly *expressible* as a list but are deliberately
   NOT produced here. Enabling them is out of scope (see #2268, AC-4).
 
-  Enumeration gap (transitional split, #2268; partially closed by #2281). The Go
-  compositor's `overlayLines()` chain also stacks surfaces that are not focus-tree
-  nodes. #2268 shipped a *transitional split*; #2281 promotes the surfaces whose
-  rect the BEAM authoritatively computes:
+  Enumeration history (#2268 -> #2281). The Go compositor's `overlayLines()` chain
+  once stacked surfaces that were not focus-tree nodes via a hand-ordered rank
+  table. That table is now gone: every overlay surface is a focus-tree node with a
+  BEAM-authoritative rect.
 
-  * **Promoted (#2281): hover popup, signature help.** Both are cursor-anchored
-    floating popups whose exact on-screen box the BEAM already computes for layout
+  * **Cursor-anchored popups: hover popup, signature help.** Both are floating
+    popups whose exact on-screen box the BEAM computes for layout
     (`HoverPopup.box/3`/`SignatureHelp.box/3`, driven by `FloatingWindow`).
-    `FocusTree.add_floating_overlays/2` now adds them as overlay nodes from
-    `shell_state`, so the registry places them with a real rect/z/hit_kind and the
-    AC-1 one-source property covers them. They occupy the `@z_floating_overlay`
-    region (hover 290 > signature help 280), preserving the historical order.
+    `FocusTree.add_floating_overlays/2` adds them as overlay nodes from
+    `shell_state`; they occupy the `@z_floating_overlay` region (hover 290 >
+    signature help 280).
 
-  * **Still transitional (documented remainder):** float popup, agent context,
-    agent chat, tool manager, extension panels/overlays, observatory, timeline,
-    notifications. These are NOT focus-tree nodes and the BEAM does not compute a
-    layout rect for them: the Go compositor positions each entirely frontend-side
-    (footer-appended, sized by `maxOverlayHeight`/terminal width), so there is no
-    BEAM-authoritative rect to register. Inventing one would not be behaviour-
-    neutral, so they keep a reduced hand-ordered fallback on the Go side until
-    each grows a BEAM rect source. The gap lives in the FocusTree's coverage (and,
-    upstream, in whether each surface's rect is BEAM-known), not in this module's
-    derivation. Because the remainder is non-empty, Go's transitional rank table is
-    *shrunk*, not deleted.
+  * **Footer-band secondary overlays (#2281): float popup, agent context, tool
+    manager, extension panel, observatory, edit timeline, notifications, extension
+    overlay.** The owner ruled these mouse-driven (#2330), so the BEAM owning their
+    footer-band geometry is now the *designed* layout. `FocusTree.add_footer_band_overlays/3`
+    adds each visible one (per `MingaEditor.Layout.FooterOverlays`) as an overlay
+    node with a bottom-anchored full-width rect from `MingaEditor.Layout.OverlayBand`
+    (porting the Go `maxOverlayHeight` clamp). They carry the exact historical
+    stacking z (270/260/240/190/180/170/160/150), so Go composites the single
+    highest-z winner by its placement rect instead of footer-appending. The
+    single-active model still holds (#2268 AC-4): the tree may express several
+    placements, but Go renders one. Their click events route to
+    `MingaEditor.Input.OverlaySink`, which swallows mouse events so a click over a
+    visible overlay never reaches the buffer underneath (AC-2). Per-surface
+    activation semantics land as epic #2330 children.
 
   ## surface_id namespace and the identity-unification call (#2268)
 
@@ -147,6 +149,14 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
           | :completion_menu
           | :hover_popup
           | :signature_help
+          | :float_popup
+          | :agent_context
+          | :tool_manager
+          | :extension_panel
+          | :observatory
+          | :edit_timeline
+          | :notifications
+          | :extension_overlay
 
   @typedoc "Coarse classification of what a click on a surface means."
   @type hit_kind ::
@@ -181,6 +191,23 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
   @z_floating_chrome 200
   @z_floating_overlay 280
   @z_overlay 300
+
+  # Footer-band secondary overlays (#2281). These eight occupy the historical
+  # transitional stacking the Go compositor encoded by hand. The owner ruled them
+  # mouse-driven (#2330), so the BEAM now owns their geometry and z. The exact z
+  # values are preserved from the Go transitional table so promotion is behaviour-
+  # neutral: float popup highest, extension overlay lowest. Some sit above the
+  # floating-chrome band (bottom panel, z=200) and some below it, exactly as the
+  # old chain ordered them. The single-active model still holds; multiple visible
+  # placements are expressible but Go renders only the highest-z winner.
+  @z_float_popup 270
+  @z_agent_context 260
+  @z_tool_manager 240
+  @z_extension_panel 190
+  @z_observatory 180
+  @z_edit_timeline 170
+  @z_notifications 160
+  @z_extension_overlay 150
 
   @doc """
   Returns the frame's surface placements ordered back-to-front by `z`.
@@ -380,6 +407,14 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
   def surface_id(:completion_menu), do: :completion_menu
   def surface_id(:hover_popup), do: :hover_popup
   def surface_id(:signature_help), do: :signature_help
+  def surface_id(:float_popup), do: :float_popup
+  def surface_id(:agent_context), do: :agent_context
+  def surface_id(:tool_manager), do: :tool_manager
+  def surface_id(:extension_panel), do: :extension_panel
+  def surface_id(:observatory), do: :observatory
+  def surface_id(:edit_timeline), do: :edit_timeline
+  def surface_id(:notifications), do: :notifications
+  def surface_id(:extension_overlay), do: :extension_overlay
   def surface_id({:custom, :sidebar}), do: :custom_sidebar
   def surface_id({:custom, _other}), do: :custom_sidebar
   def surface_id(_other), do: nil
@@ -411,6 +446,14 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
   def surface_id_u16(:completion_menu), do: 16
   def surface_id_u16(:hover_popup), do: 17
   def surface_id_u16(:signature_help), do: 18
+  def surface_id_u16(:float_popup), do: 19
+  def surface_id_u16(:agent_context), do: 20
+  def surface_id_u16(:tool_manager), do: 21
+  def surface_id_u16(:extension_panel), do: 22
+  def surface_id_u16(:observatory), do: 23
+  def surface_id_u16(:edit_timeline), do: 24
+  def surface_id_u16(:notifications), do: 25
+  def surface_id_u16(:extension_overlay), do: 26
 
   @doc """
   Maps a registry `hit_kind` atom to its `u8` wire value.
@@ -444,6 +487,16 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
   # reproducing the historical Go transitional order exactly (#2281).
   defp z_for(:hover_popup), do: @z_floating_overlay + 10
   defp z_for(:signature_help), do: @z_floating_overlay
+  # Footer-band secondary overlays (#2281): exact historical stacking z preserved
+  # from the Go transitional table so promotion is behaviour-neutral.
+  defp z_for(:float_popup), do: @z_float_popup
+  defp z_for(:agent_context), do: @z_agent_context
+  defp z_for(:tool_manager), do: @z_tool_manager
+  defp z_for(:extension_panel), do: @z_extension_panel
+  defp z_for(:observatory), do: @z_observatory
+  defp z_for(:edit_timeline), do: @z_edit_timeline
+  defp z_for(:notifications), do: @z_notifications
+  defp z_for(:extension_overlay), do: @z_extension_overlay
   defp z_for(id) when id in [:picker_backdrop, :completion_backdrop], do: @z_overlay
   defp z_for(id) when id in [:picker, :completion_menu], do: @z_overlay + 1
   defp z_for(_base_chrome), do: @z_base_chrome
@@ -458,5 +511,19 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
   defp hit_kind_for(id) when id in [:picker, :completion_menu], do: :overlay
   defp hit_kind_for(id) when id in [:picker_backdrop, :completion_backdrop], do: :overlay
   defp hit_kind_for(id) when id in [:hover_popup, :signature_help], do: :overlay
+
+  defp hit_kind_for(id)
+       when id in [
+              :float_popup,
+              :agent_context,
+              :tool_manager,
+              :extension_panel,
+              :observatory,
+              :edit_timeline,
+              :notifications,
+              :extension_overlay
+            ],
+       do: :overlay
+
   defp hit_kind_for(_chrome), do: :chrome
 end

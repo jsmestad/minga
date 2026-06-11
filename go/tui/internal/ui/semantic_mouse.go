@@ -62,12 +62,20 @@ func (m Model) localMouse(msg tea.MouseMsg) (Model, bool) {
 }
 
 func (m Model) mouseInBottomPanel(y int) bool {
-	footerCount := len(m.footerLines())
-	overlayCount := max(footerCount-1, 0)
-	if overlayCount == 0 {
+	// The bottom panel is composited at its BEAM placement rect now (#2281), not
+	// footer-appended, so its on-screen band comes from the placement, not from a
+	// footer line count. Use the placement rect's row span when present; fall back
+	// to the locally computed panel height when no placement was emitted (older
+	// BEAM) so frontend scroll still works.
+	if rect, ok := m.surfacePlacementFor(surfaceIDBottomPanel); ok {
+		return y >= int(rect.Row) && y < int(rect.Row)+int(rect.Height)
+	}
+	panel, ok := m.bottomPanel()
+	if !ok || !panel.Visible {
 		return false
 	}
-	start := m.height - overlayCount
+	height := m.bottomPanelHeight(panel)
+	start := m.height - height
 	return y >= start && y < m.height
 }
 

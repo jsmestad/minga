@@ -183,12 +183,15 @@ func (m Model) footerLines() []string {
 	lines := []string{
 		lipgloss.NewStyle().Foreground(m.palette().Muted()).Background(m.palette().Base()).Width(m.width).Render(fitStyled(status, m.width)),
 	}
+	// The single active secondary overlay is no longer footer-appended here: it is
+	// composited at its BEAM placement rect by overlayLayer (#2281). The footer
+	// still carries the minibuffer when no full overlay is active so the prompt
+	// line stays in the vertical layout.
 	if !m.pickerVisible() && !m.whichKeyVisible() && !m.agentChatVisible() {
-		overlay := m.overlayLines()
-		if len(overlay) > 0 {
-			lines = append(lines, overlay...)
-		} else if mini, ok := m.minibuffer(); ok && mini.Visible {
-			lines = append(lines, m.renderMinibuffer(mini))
+		if _, active := m.overlayWinner(); !active {
+			if mini, ok := m.minibuffer(); ok && mini.Visible {
+				lines = append(lines, m.renderMinibuffer(mini))
+			}
 		}
 	}
 	return lines
