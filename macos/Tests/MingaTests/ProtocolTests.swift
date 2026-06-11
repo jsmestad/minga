@@ -116,6 +116,232 @@ struct ProtocolDecoderTests {
         #expect(frameSeq == 7)
     }
 
+    // Per-frontend framing contract (generalized from PR #2347).
+    //
+    // Why this exists: three times in this project's history a hand-written framing
+    // authority drifted from the generated schema and desynced a frontend's command
+    // stream. PR #2347 was the third: this decoder's deleted fallback assumed unknown
+    // 0x90+ opcodes were len16-prefixed, mis-sized the sectioned gui_surface_layout
+    // (0xA4), corrupted the stream, and looped the loader. The generated commandSize
+    // table is now the single framing authority. skipKnownSizedCommandWithoutRendererHandler
+    // above covers ONE opcode; this test generalizes it across EVERY beam_to_frontend
+    // opcode the live decodeCommand path frames so a fourth instance is impossible.
+    //
+    // What it asserts: for every framed opcode, a minimal payload followed by a
+    // commit_frame sentinel must be consumed EXACTLY to the sentinel boundary by the
+    // live decodeCommand, and the sentinel must decode as the next command. A sizer
+    // that fell back to data.count on truncation would swallow the commit_frame and
+    // fail (the #2322 sentinel guarantee).
+    //
+    // How opcodes are enumerated (self-updating on schema regen): the test parses the
+    // generated opcode constants file (ProtocolOpcodes.generated.swift: `let OP_* :
+    // UInt8 = 0x..`) for the full real opcode set, located relative to this source via
+    // #filePath. There is no hand-maintained opcode list to rot; a new opcode added to
+    // docs/protocol_schema.toml regenerates that file and enters this loop. Each opcode
+    // is then classified through the live commandSize: .sized/.custom opcodes are framed
+    // by the renderer path; .unknown opcodes are input/parser-response opcodes the
+    // renderer never frames and are skipped.
+    //
+    // How minimal payloads are synthesized: a single zero-fill synthesizer, framing-kind
+    // agnostic. For each framed opcode it searches the smallest zero-filled body
+    // (opcode + N zero bytes) such that decodeCommand frames it to exactly its own length
+    // and the appended commit_frame decodes intact. Zero bytes mean zero section/array
+    // counts and zero-length strings, so the search converges on each opcode's true
+    // minimal bounded frame for both generated-sized framings (fixed / len16 / len32 /
+    // sectioned) and the custom decoders this file still owns (set_font, gui_git_status,
+    // the parser commands, etc.). Opcodes whose decoder requires a nonzero length prefix
+    // go in minimalBodyOverrides.
+    //
+    // FAILURE BY DEFAULT IS THE POINT: a new opcode that no zero-filled body within the
+    // probe bound can frame (a new custom needing nonzero structure, or a real
+    // mis-framing) fails this test loudly by name. Fix the framing or add an override;
+    // do not silence it.
+    @Test("Framing contract: every beam_to_frontend opcode is exactly framed")
+    func framingContractEveryFramedOpcode() throws {
+        let opcodes = try Self.loadGeneratedOpcodes()
+        #expect(opcodes.count > 30, "opcode enumeration parsed too few constants; the generated format may have changed")
+
+        var framed = 0
+        for op in opcodes {
+            // Classify each opcode by its framing kind on a minimal zero body. The two
+            // framing layers have different authorities and so are asserted differently:
+            //
+            //   .sized  -> the generated commandSize table is the authority and frames
+            //              the opcode from its length fields alone, no decoder needed.
+            //              An all-zero body gives zero length fields, i.e. the minimal
+            //              frame, for every fixed / len16 / len32 / sectioned opcode,
+            //              including ones whose hand decoder rejects empty content (the
+            //              decoder's content validation is orthogonal to framing). This
+            //              is the exact #2347 class: a sized-but-unhandled opcode that
+            //              must be skipped by its commandSize size, not a guessed one.
+            //
+            //   .custom -> the opcode uses bespoke framing; its live decoder owns sizing.
+            //              Here the live decodeCommand IS the framing authority, so the
+            //              contract drives it directly (zero-fill search, or an override
+            //              for a content-strict custom).
+            //
+            //   .unknown -> input / parser-response opcode the renderer never frames.
+            //   .incomplete -> only on a truncated probe; the probe is generously sized
+            //                  so this means the opcode is not a real framed command.
+            let probe = [op.value] + [UInt8](repeating: 0, count: Self.maxMinimalBodyProbe)
+            switch commandSize(probe) {
+            case .sized:
+                framed += 1
+                Self.assertSizedFramesToSentinel(op: op)
+            case .custom:
+                framed += 1
+                guard let body = Self.minimalCustomBody(for: op.value) else {
+                    Issue.record("custom opcode \(op.name) (0x\(String(op.value, radix: 16))) is framed by the renderer but no minimal zero-filled body within \(Self.maxMinimalBodyProbe) bytes yields an exact live frame; its decoder likely mis-frames or needs nonzero structure. Fix the framing or add an entry to minimalBodyOverrides.")
+                    continue
+                }
+                Self.assertCustomFramesToSentinel(op: op, body: body)
+            case .unknown, .incomplete:
+                continue
+            }
+        }
+
+        #expect(framed > 30, "discovered too few framed opcodes; classification silently broke")
+    }
+
+    // commit_frame is a complete fixed:9 command appended as the sentinel.
+    static let commitFrameSentinel: [UInt8] = [OP_COMMIT_FRAME, 0, 0, 0, 7, 0, 0, 0, 0]
+
+    // Bounds the zero-fill search for custom opcodes. The largest known minimal bounded
+    // custom frame is well under this; a failed search stays fast and unambiguous.
+    static let maxMinimalBodyProbe = 64
+
+    // Hand-built minimal bodies for CUSTOM opcodes whose live decoder rejects an all-zero
+    // body and requires a nonzero inner length field. Keyed by opcode value. Empty today;
+    // a new custom opcode that needs nonzero structure goes here, and until it does the
+    // contract fails and names it.
+    static let minimalBodyOverrides: [UInt8: [UInt8]] = [:]
+
+    // assertSizedFramesToSentinel asserts the generated commandSize authority frames a
+    // sized opcode exactly. The body is a zero-filled command of the authority's own
+    // size (zero length fields = minimal). The trailing commit_frame must then size as
+    // its own 9-byte command: a sizer that fell back to data.count on this minimal body
+    // would consume the sentinel and fail (the #2322 sentinel guarantee).
+    static func assertSizedFramesToSentinel(op: GeneratedOpcode) {
+        let label = "\(op.name) (0x\(String(op.value, radix: 16)))"
+        // Resolve the authority's size for a minimal zero body of this opcode.
+        let probe = [op.value] + [UInt8](repeating: 0, count: maxMinimalBodyProbe)
+        guard case .sized(let size) = commandSize(probe), size >= 1, size <= 1 + maxMinimalBodyProbe else {
+            Issue.record("\(label): expected a sized framing on a minimal body")
+            return
+        }
+        var body = [UInt8](repeating: 0, count: size)
+        body[0] = op.value
+
+        let framed = body + commitFrameSentinel
+        guard case .sized(let framedFirst) = commandSize(framed), framedFirst == size else {
+            Issue.record("\(label): commandSize re-framed the minimal body to a different size with the sentinel appended; the framing is not stable")
+            return
+        }
+        // The sentinel must remain an intact, separately-sized commit_frame.
+        let trailing = Array(framed[size...])
+        guard case .sized(let sentinelSize) = commandSize(trailing), sentinelSize == commitFrameSentinel.count else {
+            Issue.record("\(label): the trailing commit_frame did not size as a standalone 9-byte command (got \(commandSize(trailing))); the opcode frame over-read into the sentinel")
+            return
+        }
+
+        // And the live decodeCommand must advance by exactly that size: a sized opcode
+        // is either decoded or skipped, but never consumes past its commandSize bound.
+        // A content-strict decoder may throw .malformed on this synthetic minimal body;
+        // that is a content concern, not a framing one, so only a size mismatch fails.
+        if let (_, liveSize) = try? decodeCommand(data: Data(framed), offset: 0) {
+            if liveSize != size {
+                Issue.record("\(label): live decodeCommand advanced \(liveSize) bytes, want \(size) (the commandSize authority); the live path disagrees with the framing table")
+            }
+        }
+    }
+
+    static func minimalCustomBody(for opcode: UInt8) -> [UInt8]? {
+        if let override = minimalBodyOverrides[opcode] {
+            return customFramesExactly(override) ? override : nil
+        }
+        for n in 0...maxMinimalBodyProbe {
+            var candidate = [UInt8](repeating: 0, count: 1 + n)
+            candidate[0] = opcode
+            if customFramesExactly(candidate) {
+                return candidate
+            }
+        }
+        return nil
+    }
+
+    // customFramesExactly reports whether a custom body ++ commit_frame decodes through
+    // the live path as exactly [body's command, commit_frame]: the first command consumes
+    // exactly body.count and the trailing 9 bytes decode as commit_frame. A decoder that
+    // throws on a too-short probe, or mis-sizes and swallows the sentinel, returns false
+    // so the search continues; a length that genuinely frames converges.
+    static func customFramesExactly(_ body: [UInt8]) -> Bool {
+        let data = Data(body + commitFrameSentinel)
+        guard let (_, size) = try? decodeCommand(data: data, offset: 0) else { return false }
+        guard size == body.count else { return false }
+        guard let (next, _) = try? decodeCommand(data: data, offset: size) else { return false }
+        if case .commitFrame = next { return true }
+        return false
+    }
+
+    static func assertCustomFramesToSentinel(op: GeneratedOpcode, body: [UInt8]) {
+        let data = Data(body + commitFrameSentinel)
+        let label = "\(op.name) (0x\(String(op.value, radix: 16)))"
+        do {
+            let (_, size) = try decodeCommand(data: data, offset: 0)
+            guard size == body.count else {
+                Issue.record("\(label): live decoder framed to \(size) bytes, want \(body.count); the custom opcode was mis-sized and swallowed or split the commit_frame sentinel")
+                return
+            }
+            let (next, _) = try decodeCommand(data: data, offset: size)
+            guard case .commitFrame = next else {
+                Issue.record("\(label): trailing command is \(String(describing: next)), want .commitFrame; the custom frame did not stop at the sentinel boundary")
+                return
+            }
+        } catch {
+            Issue.record("\(label): live decode threw while framing a minimal custom payload: \(error)")
+        }
+    }
+
+    struct GeneratedOpcode {
+        let name: String
+        let value: UInt8
+    }
+
+    // loadGeneratedOpcodes parses the generated opcode constants for the real opcode
+    // set. The file is located relative to this test source (#filePath) so the list
+    // tracks whatever `mix protocol.gen` last wrote.
+    static func loadGeneratedOpcodes() throws -> [GeneratedOpcode] {
+        // .../macos/Tests/MingaTests/ProtocolTests.swift -> .../macos/.generated/protocol/ProtocolOpcodes.generated.swift
+        let testFile = URL(fileURLWithPath: #filePath)
+        let generated = testFile
+            .deletingLastPathComponent()  // MingaTests
+            .deletingLastPathComponent()  // Tests
+            .deletingLastPathComponent()  // macos
+            .appendingPathComponent(".generated/protocol/ProtocolOpcodes.generated.swift")
+
+        let source = try String(contentsOf: generated, encoding: .utf8)
+
+        // Matches: let OP_FOO: UInt8 = 0x1A   (only OP_-prefixed UInt8 wire opcodes;
+        // GUI_ACTION_* sub-opcodes and PROTOCOL_VERSION are excluded by the pattern).
+        let pattern = #"let\s+(OP_[A-Z0-9_]+)\s*:\s*UInt8\s*=\s*(0x[0-9A-Fa-f]+)"#
+        let regex = try NSRegularExpression(pattern: pattern)
+        let full = NSRange(source.startIndex..<source.endIndex, in: source)
+
+        var opcodes: [GeneratedOpcode] = []
+        var seen = Set<UInt8>()
+        regex.enumerateMatches(in: source, range: full) { match, _, _ in
+            guard let match,
+                  let nameRange = Range(match.range(at: 1), in: source),
+                  let valueRange = Range(match.range(at: 2), in: source),
+                  let value = UInt8(String(source[valueRange]).dropFirst(2), radix: 16)
+            else { return }
+            if seen.insert(value).inserted {
+                opcodes.append(GeneratedOpcode(name: String(source[nameRange]), value: value))
+            }
+        }
+        return opcodes
+    }
+
     @Test("Decode protocol_error command")
     func decodeProtocolError() throws {
         let message = "protocol_version mismatch: frontend 1, beam 2"
