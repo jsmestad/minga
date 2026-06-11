@@ -173,7 +173,8 @@ defmodule Minga.Test.ProtocolGolden do
       items: [
         %Completion.Item{kind: :function, label: "foo", detail: "bar"},
         %Completion.Item{kind: :module, label: "Baz", detail: ""}
-      ]
+      ],
+      documentation: "Calls foo/1.\n\nReturns the result."
     }
 
     unicode = %Completion{
@@ -181,7 +182,8 @@ defmodule Minga.Test.ProtocolGolden do
       cursor_row: 0,
       cursor_col: 0,
       selected_offset: 0,
-      items: [%Completion.Item{kind: :variable, label: "café→λ", detail: "ünïcödé"}]
+      items: [%Completion.Item{kind: :variable, label: "café→λ", detail: "ünïcödé"}],
+      documentation: "Café λ docs → ✓"
     }
 
     empty_items = %Completion{visible?: true, cursor_row: 1, cursor_col: 2, items: []}
@@ -196,7 +198,8 @@ defmodule Minga.Test.ProtocolGolden do
           cursor_row: 0,
           cursor_col: 0,
           selected_offset: 0,
-          items: []
+          items: [],
+          documentation: ""
         }
       },
       %{
@@ -211,7 +214,8 @@ defmodule Minga.Test.ProtocolGolden do
           items: [
             %{kind: 1, label: "foo", detail: "bar"},
             %{kind: 5, label: "Baz", detail: ""}
-          ]
+          ],
+          documentation: "Calls foo/1.\n\nReturns the result."
         }
       },
       %{
@@ -223,7 +227,8 @@ defmodule Minga.Test.ProtocolGolden do
           cursor_row: 0,
           cursor_col: 0,
           selected_offset: 0,
-          items: [%{kind: 3, label: "café→λ", detail: "ünïcödé"}]
+          items: [%{kind: 3, label: "café→λ", detail: "ünïcödé"}],
+          documentation: "Café λ docs → ✓"
         }
       },
       %{
@@ -235,7 +240,8 @@ defmodule Minga.Test.ProtocolGolden do
           cursor_row: 1,
           cursor_col: 2,
           selected_offset: 0,
-          items: []
+          items: [],
+          documentation: ""
         }
       }
     ]

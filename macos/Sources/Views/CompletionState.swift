@@ -17,12 +17,16 @@ final class CompletionState {
     var anchorCol: Int = 0
     var selectedIndex: Int = 0
     var items: [CompletionItem] = []
+    /// Documentation preview for the selected item (markdown or plaintext from the
+    /// LSP completion item). Empty when the selected item has no docs.
+    var documentation: String = ""
 
-    func update(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, selectedIndex: UInt16, rawItems: [Wire.CompletionItem]) {
+    func update(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, selectedIndex: UInt16, rawItems: [Wire.CompletionItem], documentation: String) {
         self.visible = visible
         self.anchorRow = Int(anchorRow)
         self.anchorCol = Int(anchorCol)
         self.selectedIndex = Int(selectedIndex)
+        self.documentation = documentation
         self.items = rawItems.enumerated().map { i, item in
             CompletionItem(id: i, kind: item.kind, label: item.label, detail: item.detail)
         }
@@ -31,5 +35,6 @@ final class CompletionState {
     func hide() {
         visible = false
         items = []
+        documentation = ""
     }
 }

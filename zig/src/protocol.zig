@@ -1237,6 +1237,11 @@ fn guiCompletionSize(payload: []const u8) usize {
         _ = readString16Size(payload, &offset) orelse return payload.len;
     }
 
+    // Trailing selected-item documentation (string16), present whenever
+    // visible == 1 (#2322). Skipping it would desync every following
+    // command in the batch.
+    _ = readString16Size(payload, &offset) orelse return payload.len;
+
     return offset;
 }
 
@@ -2431,9 +2436,15 @@ test "commandSize: gui_completion custom packet" {
         6,                 'm',
         'o',               'd',
         'u',               'l',
-        'e',
+        'e',               0,
+        4,                 'd',
+        'o',               'c',
+        's',               OP_COMMIT_FRAME,
     };
-    try std.testing.expectEqual(data.len, commandSize(&data));
+    // The trailing OP_COMMIT_FRAME sentinel proves the sizer stops exactly
+    // after the selected-item documentation tail (#2322) rather than falling
+    // back to payload.len on truncation.
+    try std.testing.expectEqual(data.len - 1, commandSize(&data));
 }
 
 test "commandSize: hidden gui_completion is two bytes" {
@@ -2443,11 +2454,11 @@ test "commandSize: hidden gui_completion is two bytes" {
 
 test "commandSize: gui_theme custom packet" {
     const data = [_]u8{
-        OP_GUI_THEME, 2,
-        0x40,         0x11,
-        0x22,         0x33,
-        0x30,         0x44,
-        0x55,         0x66,
+        OP_GUI_THEME,    2,
+        0x40,            0x11,
+        0x22,            0x33,
+        0x30,            0x44,
+        0x55,            0x66,
         OP_COMMIT_FRAME,
     };
     try std.testing.expectEqual(data.len - 1, commandSize(&data));
@@ -2479,7 +2490,7 @@ test "commandSize: empty gui_breadcrumb is two bytes" {
 
 test "commandSize: gui_file_tree len32 packet" {
     const data = [_]u8{
-        OP_GUI_FILE_TREE, 0, 0, 0,            3,
+        OP_GUI_FILE_TREE, 0, 0, 0,               3,
         2,                0, 0, OP_COMMIT_FRAME,
     };
     try std.testing.expectEqual(data.len - 1, commandSize(&data));
@@ -2487,8 +2498,8 @@ test "commandSize: gui_file_tree len32 packet" {
 
 test "commandSize: gui_file_tree_selection len16 packet" {
     const data = [_]u8{
-        OP_GUI_FILE_TREE_SELECTION, 0,            4,
-        1,                          0,            1,
+        OP_GUI_FILE_TREE_SELECTION, 0,               4,
+        1,                          0,               1,
         'a',                        OP_COMMIT_FRAME,
     };
     try std.testing.expectEqual(data.len - 1, commandSize(&data));
@@ -2496,14 +2507,14 @@ test "commandSize: gui_file_tree_selection len16 packet" {
 
 test "commandSize: gui_gutter sectioned packet" {
     const data = [_]u8{
-        OP_GUI_GUTTER, 1,
-        0x01,          0,
-        11,            0,
-        7,             0,
-        1,             0,
-        0,             0,
-        2,             1,
-        0,             4,
+        OP_GUI_GUTTER,   1,
+        0x01,            0,
+        11,              0,
+        7,               0,
+        1,               0,
+        0,               0,
+        2,               1,
+        0,               4,
         OP_COMMIT_FRAME,
     };
     try std.testing.expectEqual(data.len - 1, commandSize(&data));
@@ -2531,43 +2542,43 @@ test "commandSize: gui_workspaces len16 packet" {
 
 test "commandSize: gui_picker sectioned packet" {
     const data = [_]u8{
-        OP_GUI_PICKER, 5,
-        0x01,          0,
-        17,            1,
-        0,             0,
-        0,             1,
-        0,             2,
-        0,             0,
-        5,             'F',
-        'i',           'l',
-        'e',           's',
-        0,             1,
-        0x02,          0,
-        5,             0,
-        3,             's',
-        'r',           'c',
-        0x03,          0,
-        31,            0,
-        1,             0x11,
-        0x22,          0x33,
-        0x02,          0,
-        7,             'm',
-        'a',           'i',
-        'n',           '.',
-        'e',           'x',
-        0,             3,
-        'l',           'i',
-        'b',           0,
-        8,             'm',
-        'o',           'd',
-        'i',           'f',
-        'i',           'e',
-        'd',           0,
-        0x05,          0,
-        3,             0,
-        1,             '>',
-        0x06,          0,
-        1,             0,
+        OP_GUI_PICKER,   5,
+        0x01,            0,
+        17,              1,
+        0,               0,
+        0,               1,
+        0,               2,
+        0,               0,
+        5,               'F',
+        'i',             'l',
+        'e',             's',
+        0,               1,
+        0x02,            0,
+        5,               0,
+        3,               's',
+        'r',             'c',
+        0x03,            0,
+        31,              0,
+        1,               0x11,
+        0x22,            0x33,
+        0x02,            0,
+        7,               'm',
+        'a',             'i',
+        'n',             '.',
+        'e',             'x',
+        0,               3,
+        'l',             'i',
+        'b',             0,
+        8,               'm',
+        'o',             'd',
+        'i',             'f',
+        'i',             'e',
+        'd',             0,
+        0x05,            0,
+        3,               0,
+        1,               '>',
+        0x06,            0,
+        1,               0,
         OP_COMMIT_FRAME,
     };
     try std.testing.expectEqual(data.len - 1, commandSize(&data));

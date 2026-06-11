@@ -71,11 +71,12 @@ type Minibuffer struct {
 }
 
 type Completion struct {
-	Visible  bool
-	Row      uint16
-	Col      uint16
-	Selected uint16
-	Items    []CompletionItem
+	Visible       bool
+	Row           uint16
+	Col           uint16
+	Selected      uint16
+	Items         []CompletionItem
+	Documentation string
 }
 
 type CompletionItem struct {

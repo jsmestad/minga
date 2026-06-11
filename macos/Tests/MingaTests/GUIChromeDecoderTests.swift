@@ -239,10 +239,12 @@ struct GUICompletionDecoderTests {
         appendString16(&data, "my_var") // label
         appendString16(&data, "String.t()") // detail
 
+        appendString16(&data, "Defines a function.") // documentation (selected item's doc preview)
+
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiCompletion(let visible, let anchorRow, let anchorCol, let selectedIndex, let items) = cmd else {
+        guard case .guiCompletion(let visible, let anchorRow, let anchorCol, let selectedIndex, let items, let documentation) = cmd else {
             Issue.record("Expected .guiCompletion"); return
         }
 
@@ -256,6 +258,7 @@ struct GUICompletionDecoderTests {
         #expect(items[0].detail == "keyword")
         #expect(items[1].label == "my_var")
         #expect(items[1].detail == "String.t()")
+        #expect(documentation == "Defines a function.")
     }
 
     @Test("Decode gui_completion hidden")
@@ -265,11 +268,12 @@ struct GUICompletionDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == 2)
 
-        guard case .guiCompletion(let visible, _, _, _, let items) = cmd else {
+        guard case .guiCompletion(let visible, _, _, _, let items, let documentation) = cmd else {
             Issue.record("Expected .guiCompletion"); return
         }
         #expect(visible == false)
         #expect(items.isEmpty)
+        #expect(documentation.isEmpty)
     }
 }
 

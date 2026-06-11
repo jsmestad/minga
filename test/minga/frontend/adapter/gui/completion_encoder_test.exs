@@ -47,6 +47,46 @@ defmodule Minga.Frontend.Adapter.GUI.CompletionEncoderTest do
       assert cmd2 == CompletionEncoder.encode_command(model2)
     end
 
+    test "re-encodes when only the documentation changes" do
+      base = %Completion{
+        visible?: true,
+        cursor_row: 5,
+        cursor_col: 0,
+        items: [%Item{kind: :function, label: "map", detail: "Enum.map/2"}],
+        documentation: "First doc"
+      }
+
+      moved = %{base | documentation: "Second doc"}
+
+      caches = Caches.new()
+      {cmd1, caches} = CompletionEncoder.encode(base, caches)
+      assert cmd1 != nil
+
+      # A selection move re-emits completion with the newly-selected item's docs;
+      # the fingerprint includes documentation, so the encoder must re-fire.
+      {cmd2, _caches} = CompletionEncoder.encode(moved, caches)
+      assert cmd2 != nil
+      assert cmd2 == CompletionEncoder.encode_command(moved)
+    end
+
+    test "encodes the documentation tail after the items" do
+      model = %Completion{
+        visible?: true,
+        cursor_row: 5,
+        cursor_col: 2,
+        selected_offset: 0,
+        items: [%Item{kind: :function, label: "map", detail: "Enum.map/2"}],
+        documentation: "Applies fun."
+      }
+
+      <<@op_gui_completion, 1::8, _row::16, _col::16, _sel::16, 1::16, _kind::8, label_len::16,
+        _label::binary-size(label_len), detail_len::16, _detail::binary-size(detail_len),
+        doc_len::16, doc::binary-size(doc_len)>> =
+        CompletionEncoder.encode_command(model)
+
+      assert doc == "Applies fun."
+    end
+
     # Byte-exactness against the schema-generated codec is now proven by the
     # cross-language golden tests (test/support/protocol_golden.ex +
     # go/tui/internal/protocol/golden_cross_lang_test.go), which replaced the

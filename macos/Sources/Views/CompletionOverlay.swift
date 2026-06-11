@@ -17,6 +17,8 @@ struct CompletionOverlay: View {
 
     @State private var hoveredItemId: Int? = nil
 
+    private let docPaneMaxHeight: CGFloat = 160
+
     var body: some View {
         if state.visible && !state.items.isEmpty {
             VStack(spacing: 0) {
@@ -34,9 +36,14 @@ struct CompletionOverlay: View {
                         }
                     }
                 }
+                .frame(maxHeight: CGFloat(min(state.items.count, maxVisibleItems)) * itemHeight + 8)
+
+                // Documentation preview for the selected item. Renders only when the
+                // item carries docs, so items without docs show no pane (no layout
+                // shift). Markdown is shown as plain styled text for v1.
+                documentationPane
             }
             .frame(width: popupWidth)
-            .frame(maxHeight: CGFloat(min(state.items.count, maxVisibleItems)) * itemHeight + 8)
             .background(
                 RoundedRectangle(cornerRadius: 8)
                     .fill(theme.popupBg)
@@ -47,6 +54,25 @@ struct CompletionOverlay: View {
                     .strokeBorder(theme.popupBorder.opacity(0.5), lineWidth: 1)
             )
             .padding(4)
+        }
+    }
+
+    @ViewBuilder
+    private var documentationPane: some View {
+        let doc = state.documentation.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !doc.isEmpty {
+            Divider()
+                .overlay(theme.popupBorder.opacity(0.4))
+            ScrollView(.vertical, showsIndicators: true) {
+                Text(doc)
+                    .font(.system(size: 11))
+                    .foregroundStyle(theme.popupFg.opacity(0.85))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+            }
+            .frame(maxHeight: docPaneMaxHeight)
         }
     }
 

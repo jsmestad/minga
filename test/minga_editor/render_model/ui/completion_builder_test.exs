@@ -40,6 +40,56 @@ defmodule MingaEditor.RenderModel.UI.CompletionBuilderTest do
       assert [%Item{kind: :function, label: "map", detail: "Enum.map/2"}] = model.items
     end
 
+    test "carries the selected item's documentation into the model" do
+      # EditingCompletion.new sorts by sort_text (== label here): "alpha" < "beta",
+      # so "alpha" is selected at index 0 and its docs flow into the model.
+      items = [
+        item("alpha", :function, "Enum.map/2", "Applies fun to each element."),
+        item("beta", :function, "Enum.filter/2", "Keeps matching elements.")
+      ]
+
+      completion = EditingCompletion.new(items, {0, 0})
+
+      model = CompletionBuilder.build(ctx(completion))
+
+      assert model.documentation == "Applies fun to each element."
+    end
+
+    test "follows the selection when it moves to a different item" do
+      items = [
+        item("alpha", :function, "Enum.map/2", "Applies fun to each element."),
+        item("beta", :function, "Enum.filter/2", "Keeps matching elements.")
+      ]
+
+      completion = items |> EditingCompletion.new({0, 0}) |> EditingCompletion.move_down()
+
+      model = CompletionBuilder.build(ctx(completion))
+
+      assert model.selected_offset == 1
+      assert model.documentation == "Keeps matching elements."
+    end
+
+    test "documentation is empty when the selected item has no docs" do
+      completion = EditingCompletion.new([item("map", :function, "Enum.map/2")], {0, 0})
+
+      model = CompletionBuilder.build(ctx(completion))
+
+      assert model.documentation == ""
+    end
+
+    test "truncates oversized documentation to the byte cap on a codepoint boundary" do
+      # 5000 multi-byte codepoints (é is 2 bytes) exceeds the 4096-byte cap.
+      long_doc = String.duplicate("é", 5000)
+      completion = EditingCompletion.new([item("map", :function, "Enum.map/2", long_doc)], {0, 0})
+
+      model = CompletionBuilder.build(ctx(completion))
+
+      assert byte_size(model.documentation) <= 4096
+      # Truncation never splits a codepoint: the result stays valid UTF-8.
+      assert String.valid?(model.documentation)
+      assert String.starts_with?(long_doc, model.documentation)
+    end
+
     test "uses buffer cursor, viewport offset, and gutter width for popup anchor" do
       buffer = start_supervised!({Minga.Buffer.Process, content: "zero\none\nhello world"})
       assert {:ok, :absolute} = Buffer.set_option(buffer, :line_numbers, :absolute)
@@ -69,14 +119,14 @@ defmodule MingaEditor.RenderModel.UI.CompletionBuilderTest do
     }
   end
 
-  defp item(label, kind, detail) do
+  defp item(label, kind, detail, documentation \\ "") do
     %{
       label: label,
       kind: kind,
       insert_text: label,
       filter_text: label,
       detail: detail,
-      documentation: "",
+      documentation: documentation,
       sort_text: label,
       text_edit: nil,
       raw: nil

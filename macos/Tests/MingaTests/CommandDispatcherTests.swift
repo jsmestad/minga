@@ -335,11 +335,12 @@ struct CommandDispatcherRoutingTests {
         let (dispatcher, gui) = makeDispatcher()
         let items = [Wire.CompletionItem(kind: 1, label: "def", detail: "keyword")]
         dispatcher.applyForTesting(.guiCompletion(visible: true, anchorRow: 5, anchorCol: 10,
-                                            selectedIndex: 0, items: items))
+                                            selectedIndex: 0, items: items, documentation: "Defines a function."))
 
         #expect(gui.completionState.visible == true)
         #expect(gui.completionState.items.count == 1)
         #expect(gui.completionState.anchorRow == 5)
+        #expect(gui.completionState.documentation == "Defines a function.")
     }
 
     @Test("guiCompletion hidden clears completionState")
@@ -348,12 +349,13 @@ struct CommandDispatcherRoutingTests {
         // Show then hide
         let items = [Wire.CompletionItem(kind: 1, label: "def", detail: "keyword")]
         dispatcher.applyForTesting(.guiCompletion(visible: true, anchorRow: 5, anchorCol: 10,
-                                            selectedIndex: 0, items: items))
+                                            selectedIndex: 0, items: items, documentation: "doc"))
         dispatcher.applyForTesting(.guiCompletion(visible: false, anchorRow: 0, anchorCol: 0,
-                                            selectedIndex: 0, items: []))
+                                            selectedIndex: 0, items: [], documentation: ""))
 
         #expect(gui.completionState.visible == false)
         #expect(gui.completionState.items.isEmpty)
+        #expect(gui.completionState.documentation.isEmpty)
     }
 
     @Test("guiWhichKey visible updates whichKeyState")

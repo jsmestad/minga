@@ -427,6 +427,7 @@ type GuiCompletionFields struct {
 	CursorCol      uint16
 	SelectedOffset uint16
 	Items          []CompletionItem
+	Documentation  string
 }
 
 type GuiWhichKeyFields struct {
