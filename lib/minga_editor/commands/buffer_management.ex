@@ -2400,8 +2400,8 @@ defmodule MingaEditor.Commands.BufferManagement do
     end
   end
 
-  # Creates an empty buffer when the last buffer is killed.
-  # Dashboard is disabled pending rewrite as a special buffer.
+  # Creates an empty buffer when the last buffer is killed, so the editor
+  # always has an active buffer to render.
   @spec create_fallback_buffer(state(), EditorState.Buffers.t()) :: state()
   defp create_fallback_buffer(state, bs) do
     case DynamicSupervisor.start_child(

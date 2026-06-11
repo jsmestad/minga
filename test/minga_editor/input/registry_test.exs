@@ -18,9 +18,9 @@ defmodule MingaEditor.Input.RegistryTest do
     handlers = Input.surface_handlers(%{editing_model: Minga.Editing.Model.Vim})
 
     assert Enum.take(handlers, 3) == [
-             MingaEditor.Input.Dashboard,
              MingaEditor.Input.MentionCompletion,
-             MingaEditor.Input.ToolApproval
+             MingaEditor.Input.ToolApproval,
+             MingaEditor.Input.DiffReview
            ]
 
     assert List.last(handlers) == MingaEditor.Input.ModeFSM
@@ -43,8 +43,11 @@ defmodule MingaEditor.Input.RegistryTest do
     assert Enum.find_index(handlers, &(&1 == MingaEditor.Input.AgentMouse)) <
              Enum.find_index(handlers, &(&1 == MingaEditor.Input.GlobalBindings))
 
+    # The negative-priority extension copies sort before every seeded
+    # built-in. MentionCompletion (priority 10) is the lowest-priority
+    # built-in with no extension duplicate, so it anchors that boundary.
     assert Enum.find_index(handlers, &(&1 == MingaEditor.Input.GlobalBindings)) <
-             Enum.find_index(handlers, &(&1 == MingaEditor.Input.Dashboard))
+             Enum.find_index(handlers, &(&1 == MingaEditor.Input.MentionCompletion))
   end
 
   test "unregister_source(:builtin) preserves seeded built-in handlers" do
@@ -94,7 +97,10 @@ defmodule MingaEditor.Input.RegistryTest do
              Enum.find_index(handlers_with_extension, &(&1 == MingaEditor.Input.ExtensionTwo))
 
     assert Enum.find_index(handlers_with_extension, &(&1 == MingaEditor.Input.ExtensionTwo)) <
-             Enum.find_index(handlers_with_extension, &(&1 == MingaEditor.Input.Dashboard))
+             Enum.find_index(
+               handlers_with_extension,
+               &(&1 == MingaEditor.Input.MentionCompletion)
+             )
 
     :ok = Input.unregister_source(source)
     handlers_after_cleanup = Input.surface_handlers(%{editing_model: Minga.Editing.Model.Vim})
@@ -105,6 +111,6 @@ defmodule MingaEditor.Input.RegistryTest do
              MingaEditor.Input.ExtensionTwo
 
     assert Enum.find_index(handlers_after_cleanup, &(&1 == MingaEditor.Input.ExtensionTwo)) <
-             Enum.find_index(handlers_after_cleanup, &(&1 == MingaEditor.Input.Dashboard))
+             Enum.find_index(handlers_after_cleanup, &(&1 == MingaEditor.Input.MentionCompletion))
   end
 end

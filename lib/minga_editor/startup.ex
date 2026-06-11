@@ -42,7 +42,7 @@ defmodule MingaEditor.Startup do
 
   In agent mode the initial window is an agent chat window (full screen).
   In editor mode it's a regular buffer window showing the file buffer
-  (or the dashboard if no file was specified). The mode decision happens *before* window creation so
+  (or a blank buffer if no file was specified). The mode decision happens *before* window creation so
   there's no create-then-replace dance.
   """
   @spec build_initial_state(keyword()) :: EditorState.t()
@@ -73,8 +73,7 @@ defmodule MingaEditor.Startup do
 
     # Always ensure an active buffer exists. The editor's render pipeline,
     # command dispatch, and input routing all assume buffers.active is a
-    # pid. The dashboard feature (which set active to nil) is disabled
-    # until it can be reimplemented as a special buffer. See #XXX.
+    # pid. An empty launch (no file argument) opens a normal blank buffer.
     {active_buf, buffers} =
       case buffer do
         pid when is_pid(pid) ->
@@ -89,8 +88,6 @@ defmodule MingaEditor.Startup do
 
           {buf, [buf]}
       end
-
-    dashboard = nil
 
     # Decide mode FIRST, then create the right window type.
     {keymap_scope, agentic_state} =
@@ -165,7 +162,7 @@ defmodule MingaEditor.Startup do
       shell_id: shell_entry.id,
       shell: shell_entry.module,
       shell_identity: ShellIdentity.new(shell_entry),
-      shell_state: init_shell_state(shell_entry.module, dashboard, opts),
+      shell_state: init_shell_state(shell_entry.module, opts),
       session: EditorSessionState.new(Keyword.take(opts, [:swap_dir, :session_dir]))
     }
 
@@ -205,7 +202,7 @@ defmodule MingaEditor.Startup do
 
   In agent mode: starts the `*Agent*` buffer and creates an agent chat
   window. In editor mode: creates a regular buffer window for the
-  file buffer (or dashboard if no file was specified).
+  file buffer (or a blank buffer if no file was specified).
 
   Returns `{window | nil, agent_state_update}` where the update is
   either `{:agent_buffer, pid}` or `:noop`.
@@ -502,9 +499,6 @@ defmodule MingaEditor.Startup do
     :exit, _ -> :ok
   end
 
-  # NOTE: safe_recent_files/0 removed with dashboard disable.
-  # Will be restored when dashboard is reimplemented as a buffer.
-
   # ── Shell resolution ───────────────────────────────────────────────────
 
   @spec resolve_shell(keyword()) :: MingaEditor.Shell.Entry.t()
@@ -577,14 +571,14 @@ defmodule MingaEditor.Startup do
     end
   end
 
-  @spec init_shell_state(module(), term(), keyword()) :: term()
-  defp init_shell_state(MingaEditor.Shell.Traditional, _dashboard, opts) do
+  @spec init_shell_state(module(), keyword()) :: term()
+  defp init_shell_state(MingaEditor.Shell.Traditional, opts) do
     %MingaEditor.Shell.Traditional.State{
       suppress_tool_prompts: Keyword.get(opts, :suppress_tool_prompts, false)
     }
   end
 
-  defp init_shell_state(module, _dashboard, opts) do
+  defp init_shell_state(module, opts) do
     module.init(opts)
   end
 end

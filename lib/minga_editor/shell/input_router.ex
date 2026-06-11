@@ -17,7 +17,7 @@ defmodule MingaEditor.Shell.InputRouter do
   @doc """
   Returns the input handler stack for this shell. Overlay handlers
   (picker, completion, conflict prompt) sit above the surface and
-  intercept keys first; surface handlers (dashboard, file tree, agent
+  intercept keys first; surface handlers (file tree, agent
   panel, mode dispatch) handle keys when no overlay claims them.
   """
   @callback input_handlers(editor_state :: term()) ::

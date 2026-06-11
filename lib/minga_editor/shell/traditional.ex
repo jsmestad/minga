@@ -16,7 +16,7 @@ defmodule MingaEditor.Shell.Traditional do
   `Shell.Traditional.State` in batches. See `BIG_REFACTOR_PLAN.md`
   Phase F for the full plan.
 
-  Batch 1 (current): `nav_flash`, `hover_popup`, `dashboard`, `status_msg`
+  Batch 1 (current): `nav_flash`, `hover_popup`, `status_msg`
 
   ## Rendering architecture
 
@@ -218,7 +218,7 @@ defmodule MingaEditor.Shell.Traditional do
         ) :: {ShellState.t(), SessionState.t(), [MingaEditor.effect()]}
   def on_buffer_added(shell_state, prev_workspace, workspace, buffer_pid, context) do
     do_on_buffer_added(
-      maybe_dismiss_dashboard(shell_state),
+      shell_state,
       prev_workspace,
       workspace,
       buffer_pid,
@@ -231,16 +231,6 @@ defmodule MingaEditor.Shell.Traditional do
   def on_buffer_added(shell_state, workspace, buffer_pid, context \\ :open) do
     on_buffer_added(shell_state, workspace, workspace, buffer_pid, context)
   end
-
-  # Dismisses the dashboard modal when a buffer becomes active. The
-  # dashboard is the "no buffer" splash; once a buffer opens, the
-  # splash should disappear so it does not stick visually behind the
-  # buffer view. Other modal variants are left alone.
-  @spec maybe_dismiss_dashboard(ShellState.t()) :: ShellState.t()
-  defp maybe_dismiss_dashboard(%ShellState{modal: {:dashboard, _}} = shell_state),
-    do: ShellState.set_modal(shell_state, :none)
-
-  defp maybe_dismiss_dashboard(shell_state), do: shell_state
 
   @spec do_on_buffer_added(
           ShellState.t(),

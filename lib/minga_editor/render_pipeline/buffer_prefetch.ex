@@ -60,7 +60,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
   @doc """
   Prefetches agent chat buffer data before the `:agent_content` stage runs.
 
-  Prompt and dashboard chrome remain pure render work. The chat buffer snapshot, cursor, options, and version are captured here so the content stage does not call `Minga.Buffer`.
+  Prompt and sidebar chrome remain pure render work. The chat buffer snapshot, cursor, options, and version are captured here so the content stage does not call `Minga.Buffer`.
   """
   @spec prefetch_agent_chat_windows(state(), Layout.t()) :: %{
           Window.id() => AgentChatPrefetch.t()

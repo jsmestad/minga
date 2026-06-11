@@ -16,8 +16,8 @@ defmodule MingaEditor.RenderPipeline.Classifier do
     (pure cursor motion) or only the affected rows (a single-line edit).
   - `:full` — anything structural: a window split/open/close, a resize, a
     theme change, chrome state changes, a forced keyframe, the first frame, a
-    content-epoch reset, or a viewport scroll. Multi-window frames and the
-    dashboard are always `:full`.
+    content-epoch reset, or a viewport scroll. Multi-window frames are
+    always `:full`.
 
   ## Conservative by construction
 
@@ -58,7 +58,7 @@ defmodule MingaEditor.RenderPipeline.Classifier do
   # A forced keyframe (#2219) re-emits every surface from scratch: never a patch.
   # More than one buffer window means splits, opens, or closes are in play, or an
   # agent chat window competes for the frame; classify conservatively as full.
-  # An empty scroll set (dashboard, no buffer windows) is also full.
+  # An empty scroll set (no buffer windows) is also full.
   @spec multi_window?(scrolls()) :: boolean()
   defp multi_window?(scrolls), do: map_size(scrolls) != 1
 

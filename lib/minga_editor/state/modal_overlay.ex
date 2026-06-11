@@ -2,10 +2,10 @@ defmodule MingaEditor.State.ModalOverlay do
   @moduledoc """
   Tagged-union representation of input-capturing modal overlays.
 
-  Before this work, the picker, prompt, completion menu, conflict prompt,
-  and dashboard each lived as an independent nullable field on shell
-  state or workspace state. The type system permitted 32 combinations
-  even though only six were meaningful, and `MingaEditor.Input.Interrupt`
+  Before this work, the picker, prompt, completion menu, and conflict
+  prompt each lived as an independent nullable field on shell
+  state or workspace state. The type system permitted many combinations
+  even though only a few were meaningful, and `MingaEditor.Input.Interrupt`
   reset eight independent axes by hand. See `docs/UI-STATE-ANALYSIS.md`
   for the full analysis.
 
@@ -17,9 +17,8 @@ defmodule MingaEditor.State.ModalOverlay do
       | {:completion, ModalOverlay.Completion.t()}
       | {:command_completion, ModalOverlay.CommandCompletion.t()}
       | {:conflict, ModalOverlay.Conflict.t()}
-      | {:dashboard, ModalOverlay.Dashboard.t()}
 
-  The modal field is the only storage location for these six variants. There is no dual-write migration path and no dev/test divergence assertion; future modal changes must go through this gate directly.
+  The modal field is the only storage location for these variants. There is no dual-write migration path and no dev/test divergence assertion; future modal changes must go through this gate directly.
 
   **Do not mutate `:modal` directly**: always call this module's
   `open/3`, `transition/3`, `close/1`, `dismiss/1`, `update_completion/2`,
@@ -53,11 +52,10 @@ defmodule MingaEditor.State.ModalOverlay do
   alias MingaEditor.State.ModalOverlay.CommandCompletion, as: CommandCompletionPayload
   alias MingaEditor.State.ModalOverlay.Completion, as: CompletionPayload
   alias MingaEditor.State.ModalOverlay.Conflict, as: ConflictPayload
-  alias MingaEditor.State.ModalOverlay.Dashboard, as: DashboardPayload
   alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
   alias MingaEditor.State.ModalOverlay.Prompt, as: PromptPayload
 
-  @type variant :: :picker | :prompt | :completion | :command_completion | :conflict | :dashboard
+  @type variant :: :picker | :prompt | :completion | :command_completion | :conflict
 
   @type payload ::
           PickerPayload.t()
@@ -65,7 +63,6 @@ defmodule MingaEditor.State.ModalOverlay do
           | CompletionPayload.t()
           | CommandCompletionPayload.t()
           | ConflictPayload.t()
-          | DashboardPayload.t()
 
   @type t ::
           :none
@@ -74,12 +71,11 @@ defmodule MingaEditor.State.ModalOverlay do
           | {:completion, CompletionPayload.t()}
           | {:command_completion, CommandCompletionPayload.t()}
           | {:conflict, ConflictPayload.t()}
-          | {:dashboard, DashboardPayload.t()}
 
-  # Single source of truth for the variant tag list. Adding a seventh modal
+  # Single source of truth for the variant tag list. Adding a new modal
   # later means adding to this attribute plus the `t()` and `payload()`
   # types; the guards below stay correct automatically.
-  @variants [:picker, :prompt, :completion, :command_completion, :conflict, :dashboard]
+  @variants [:picker, :prompt, :completion, :command_completion, :conflict]
 
   # ── Pure queries on the modal value ────────────────────────────────────────
 

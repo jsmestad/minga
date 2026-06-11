@@ -19,11 +19,7 @@ defmodule MingaEditor.Renderer do
   * `Renderer.Regions`         — region definition commands
   """
 
-  alias Minga.RenderModel.Cursor
-  alias MingaEditor.Frontend.Emit
-  alias MingaEditor.Frontend.Emit.Context, as: EmitContext
   alias MingaEditor.RenderPipeline
-  alias MingaEditor.RenderPipeline.ComposedFrame
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.Renderer.Server, as: RendererServer
   alias MingaEditor.State, as: EditorState
@@ -42,9 +38,6 @@ defmodule MingaEditor.Renderer do
   The returned state contains per-window render caches that enable
   dirty-line tracking on subsequent frames. Callers must use the
   returned state for the optimization to work.
-
-  For the dashboard home screen, returns state with dashboard state
-  initialized (if needed). No windows to cache.
   """
   @spec render(state()) :: state()
   def render(state) do
@@ -81,36 +74,6 @@ defmodule MingaEditor.Renderer do
 
   @spec async_render?(state()) :: boolean()
   defp async_render?(state), do: EditorState.active_shell_module(state).async_render?(state)
-
-  @doc """
-  Renders the dashboard home screen (no active buffer).
-
-  Called by Shell.Traditional.render when no file buffers are open.
-  """
-  @spec render_dashboard(state()) :: state()
-  def render_dashboard(%{workspace: %{buffers: %{active: nil}}} = state) do
-    # The dashboard's selectable state lives on the modal overlay (driven by the
-    # input layer via `MingaEditor.Dashboard`). The composed frame carries no
-    # window models — there is no semantic dashboard window builder yet — so the
-    # dashboard frame only parks the cursor. The cell-grid splash painter was
-    # removed in #2311.
-    frame = ComposedFrame.new([], Cursor.new(0, 0, :block))
-
-    input = Input.from_editor_state(state)
-    ctx = EmitContext.from_editor_state(input)
-    {caches, _font_registry} = Emit.emit(frame, ctx, nil, state.caches)
-
-    # Clear keyframe_pending? only when the dashboard frame actually carried the
-    # keyframe (last_frame_keyframe? is stamped by the Emit stage). A delta frame
-    # must not swallow a still-pending request (#2219).
-    %{state | caches: caches, keyframe_pending?: clear_dashboard_keyframe_pending?(state, caches)}
-  end
-
-  @spec clear_dashboard_keyframe_pending?(state(), MingaEditor.Renderer.Caches.t()) :: boolean()
-  defp clear_dashboard_keyframe_pending?(%{keyframe_pending?: false}, _caches), do: false
-
-  defp clear_dashboard_keyframe_pending?(%{keyframe_pending?: true}, caches),
-    do: not caches.last_frame_keyframe?
 
   @doc """
   Runs the full render pipeline (content, chrome, compose, emit).

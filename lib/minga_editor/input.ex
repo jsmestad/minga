@@ -24,7 +24,6 @@ defmodule MingaEditor.Input do
   alias MingaEditor.Input.BottomPanel
   alias MingaEditor.Input.Completion
   alias MingaEditor.Input.ConflictPrompt
-  alias MingaEditor.Input.Dashboard
   alias MingaEditor.Input.DiffReview
   alias MingaEditor.Input.Dired
   alias MingaEditor.Input.GlobalBindings
@@ -52,7 +51,6 @@ defmodule MingaEditor.Input do
 
   @handler_registry_key {__MODULE__, :surface_handlers}
   @builtin_surface_handlers [
-    {Dashboard, 0},
     {MentionCompletion, 10},
     {ToolApproval, 20},
     {DiffReview, 30},
@@ -90,7 +88,6 @@ defmodule MingaEditor.Input do
   def default_stack do
     [
       Interrupt,
-      Dashboard,
       ConflictPrompt,
       Picker,
       Hover,
