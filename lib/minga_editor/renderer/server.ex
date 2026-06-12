@@ -12,12 +12,18 @@ defmodule MingaEditor.Renderer.Server do
   ## Snapshot mechanics
 
   The Editor pushes `RenderPipeline.Input` snapshots via
-  `cast_snapshot/3`. The Renderer holds an in-flight snapshot and a
-  pending one. When a snapshot arrives while a render is in progress,
-  the previous pending snapshot is dropped (most-recent-wins
-  coalescing) and a `[:minga, :render, :coalesced]` telemetry event
-  fires. After each render emit completes, the Renderer pulls any
-  pending snapshot and starts the next frame; otherwise it goes idle.
+  `cast_snapshot/3`. The Renderer holds an in-flight snapshot, a
+  pending one, and the latest frontend cache state it emitted. When a
+  snapshot arrives while a render is in progress, the previous pending
+  snapshot is dropped (most-recent-wins coalescing) and a
+  `[:minga, :render, :coalesced]` telemetry event fires. Each snapshot
+  is normalized against the renderer-owned cache state before it renders.
+  After each render emit completes, the Renderer stores the emitted
+  cache state and threads it into any pending snapshot before starting
+  the next frame; otherwise it goes idle. If the Editor emits a direct
+  bare frame boundary, that newer snapshot cache wins instead. That keeps
+  delta frame bases aligned with what the frontend just received, even
+  when the Editor has not yet processed the prior render writeback.
 
   ## Click-region writeback
 
@@ -49,6 +55,7 @@ defmodule MingaEditor.Renderer.Server do
   alias Minga.Telemetry
   alias MingaEditor.RenderPipeline
   alias MingaEditor.RenderPipeline.Input
+  alias MingaEditor.Renderer.Caches
   alias MingaEditor.UI.FontRegistry
 
   @typedoc "Render pipeline output after a frame has run."
@@ -81,6 +88,7 @@ defmodule MingaEditor.Renderer.Server do
           pending: {Input.t(), non_neg_integer(), integer()} | nil,
           in_flight: {Input.t(), non_neg_integer(), integer()} | nil,
           font_registry: FontRegistry.t(),
+          caches: Caches.t(),
           pipeline: pipeline()
         }
 
@@ -89,6 +97,7 @@ defmodule MingaEditor.Renderer.Server do
             pending: nil,
             in_flight: nil,
             font_registry: FontRegistry.new(),
+            caches: Caches.new(),
             pipeline: &RenderPipeline.run/1
 
   # ── API ────────────────────────────────────────────────────────────────────
@@ -149,12 +158,14 @@ defmodule MingaEditor.Renderer.Server do
       })
     end
 
+    snap = use_latest_caches(snap, state.caches)
     {:noreply, %{state | pending: {snap, seq, pushed_at}}}
   end
 
   def handle_cast({:render, snap, seq, pushed_at}, %__MODULE__{rendering?: false} = state) do
     Telemetry.hop_latency(:cast_snapshot, pushed_at)
     send(self(), :do_render)
+    snap = use_latest_caches(snap, state.caches)
     {:noreply, %{state | rendering?: true, in_flight: {snap, seq, pushed_at}}}
   end
 
@@ -181,9 +192,9 @@ defmodule MingaEditor.Renderer.Server do
       %{frame_seq: seq}
     )
 
-    state = %{state | font_registry: output.font_registry}
+    state = %{state | font_registry: output.font_registry, caches: output.caches}
     send_writeback(state.editor_pid, output, seq)
-    advance_pending(state)
+    advance_pending(state, output.caches)
   rescue
     e ->
       trace = Exception.format_stacktrace(__STACKTRACE__) |> String.slice(0, 500)
@@ -193,7 +204,7 @@ defmodule MingaEditor.Renderer.Server do
         "Renderer frame #{seq} dropped: #{Exception.message(e)}\n#{trace}"
       )
 
-      advance_pending(state)
+      advance_pending(state, state.caches)
   end
 
   def handle_info(_other, state), do: {:noreply, state}
@@ -247,16 +258,38 @@ defmodule MingaEditor.Renderer.Server do
     }
   end
 
-  @spec advance_pending(t()) :: {:noreply, t()}
-  defp advance_pending(state) do
+  @spec advance_pending(t(), Caches.t()) :: {:noreply, t()}
+  defp advance_pending(state, latest_caches) do
     case state.pending do
       nil ->
         {:noreply, %{state | rendering?: false, in_flight: nil}}
 
       {next_snap, next_seq, next_pushed_at} ->
         send(self(), :do_render)
+        next_snap = use_latest_caches(next_snap, latest_caches)
         {:noreply, %{state | in_flight: {next_snap, next_seq, next_pushed_at}, pending: nil}}
     end
+  end
+
+  @spec use_latest_caches(Input.t(), Caches.t()) :: Input.t()
+  defp use_latest_caches(
+         %Input{caches: %Caches{last_emitted_frame_seq: 0}} = snap,
+         %Caches{last_emitted_frame_seq: latest_seq}
+       )
+       when latest_seq > 0 do
+    snap
+  end
+
+  defp use_latest_caches(
+         %Input{caches: %Caches{last_emitted_frame_seq: snap_seq}} = snap,
+         %Caches{last_emitted_frame_seq: latest_seq}
+       )
+       when snap_seq > latest_seq do
+    snap
+  end
+
+  defp use_latest_caches(%Input{} = snap, %Caches{} = latest_caches) do
+    %{snap | caches: latest_caches}
   end
 
   @spec monotonic_now() :: integer()
