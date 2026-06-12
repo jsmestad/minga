@@ -142,7 +142,11 @@ defmodule MingaEditor.Commands.FileTree do
 
   @spec refresh(state()) :: state()
   def refresh(state) do
-    with_tree(state, fn tree -> tree |> FileTree.refresh() |> FileTree.refresh_git_status() end)
+    with_tree(state, fn tree ->
+      tree
+      |> FileTree.refresh()
+      |> FileTreeFreshness.refresh_tree_git_status_from_cache(EditorState.events_registry(state))
+    end)
   end
 
   @spec with_tree(state(), (FileTree.t() -> FileTree.t())) :: state()
@@ -792,7 +796,9 @@ defmodule MingaEditor.Commands.FileTree do
         new_tree =
           tree
           |> FileTree.reroot(root)
-          |> FileTree.refresh_git_status()
+          |> FileTreeFreshness.refresh_tree_git_status_from_cache(
+            EditorState.events_registry(state)
+          )
 
         FileTreeFreshness.watch_expanded_dirs(new_tree)
         sync_and_update(state, new_tree)
@@ -867,7 +873,13 @@ defmodule MingaEditor.Commands.FileTree do
 
     root = file_tree_state(state).project_root || Minga.Project.root() || File.cwd!()
     tree = FileTree.new(root)
-    tree = FileTree.refresh_git_status(tree)
+
+    tree =
+      FileTreeFreshness.refresh_tree_git_status_from_cache(
+        tree,
+        EditorState.events_registry(state)
+      )
+
     tree = reveal_active(tree, state.workspace.buffers.active)
     FileTreeFreshness.watch_expanded_dirs(tree)
     buf = BufferSync.start_buffer(tree, EditorState.options_server(state))

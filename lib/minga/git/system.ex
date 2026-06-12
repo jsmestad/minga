@@ -3,19 +3,21 @@ defmodule Minga.Git.System do
   Git backend that shells out to the `git` CLI.
 
   This is the default (production) implementation of `Minga.Git.Backend`.
-  Every function spawns a short-lived OS process via `System.cmd/3`.
+  Every function spawns a short-lived OS process through a timeout-bounded helper.
   """
 
   @behaviour Minga.Git.Backend
 
   @cmd_timeout 5_000
+  @default_timeout_ms 2_000
+  @status_timeout_ms 2_000
 
   @impl true
   @spec root_for(String.t()) :: {:ok, String.t()} | :not_git
   def root_for(path) when is_binary(path) do
     dir = if File.dir?(path), do: path, else: Path.dirname(path)
 
-    case System.cmd("git", ["rev-parse", "--show-toplevel"],
+    case git_cmd(["rev-parse", "--show-toplevel"],
            cd: dir,
            stderr_to_stdout: true
          ) do
@@ -29,7 +31,7 @@ defmodule Minga.Git.System do
   @impl true
   @spec show_head(String.t(), String.t()) :: {:ok, String.t()} | :error
   def show_head(git_root, relative_path) when is_binary(git_root) and is_binary(relative_path) do
-    case System.cmd("git", ["show", "HEAD:#{relative_path}"],
+    case git_cmd(["show", "HEAD:#{relative_path}"],
            cd: git_root,
            stderr_to_stdout: true
          ) do
@@ -44,7 +46,7 @@ defmodule Minga.Git.System do
   @spec show_staged(String.t(), String.t()) :: {:ok, String.t()} | :error
   def show_staged(git_root, relative_path)
       when is_binary(git_root) and is_binary(relative_path) do
-    case System.cmd("git", ["show", ":#{relative_path}"],
+    case git_cmd(["show", ":#{relative_path}"],
            cd: git_root,
            stderr_to_stdout: true
          ) do
@@ -91,8 +93,7 @@ defmodule Minga.Git.System do
       when is_binary(git_root) and is_binary(relative_path) and is_integer(line_number) do
     line_1 = line_number + 1
 
-    case System.cmd(
-           "git",
+    case git_cmd(
            ["blame", "-L", "#{line_1},#{line_1}", "--porcelain", relative_path],
            cd: git_root,
            stderr_to_stdout: true
@@ -105,11 +106,16 @@ defmodule Minga.Git.System do
   end
 
   @impl true
-  @spec status(String.t()) :: {:ok, [Minga.Git.status_entry()]} | {:error, String.t()}
-  def status(git_root) when is_binary(git_root) do
-    case System.cmd("git", ["status", "--porcelain=v2", "-z", "-uall"],
+  @spec status(String.t(), Minga.Git.status_opts()) ::
+          {:ok, [Minga.Git.status_entry()]} | {:error, String.t()}
+  def status(git_root, opts \\ []) when is_binary(git_root) and is_list(opts) do
+    mode = Keyword.get(opts, :untracked_mode, :normal)
+    timeout_ms = Keyword.get(opts, :timeout_ms, @status_timeout_ms)
+
+    case git_cmd(["status", "--porcelain=v2", "-z", untracked_arg(mode)],
            cd: git_root,
-           stderr_to_stdout: true
+           stderr_to_stdout: true,
+           timeout_ms: timeout_ms
          ) do
       {output, 0} ->
         {:ok, parse_status_output(output)}
@@ -127,7 +133,7 @@ defmodule Minga.Git.System do
     with :ok <- Minga.Git.DiffOptions.validate(opts) do
       args = diff_args(opts)
 
-      case System.cmd("git", args, cd: git_root, stderr_to_stdout: true) do
+      case git_cmd(args, cd: git_root, stderr_to_stdout: true) do
         {output, 0} -> {:ok, output}
         {output, _} -> {:error, "git diff failed: #{String.trim(output)}"}
       end
@@ -169,7 +175,7 @@ defmodule Minga.Git.System do
     args = ["log", "--format=#{format}", "-n", "#{count}"]
     args = if path, do: args ++ ["--", path], else: args
 
-    case System.cmd("git", args, cd: git_root, stderr_to_stdout: true) do
+    case git_cmd(args, cd: git_root, stderr_to_stdout: true) do
       {output, 0} ->
         entries =
           output
@@ -195,7 +201,7 @@ defmodule Minga.Git.System do
   def stage(git_root, paths) when is_binary(git_root) and is_list(paths) do
     args = ["add", "--"] ++ paths
 
-    case System.cmd("git", args, cd: git_root, stderr_to_stdout: true) do
+    case git_cmd(args, cd: git_root, stderr_to_stdout: true) do
       {_, 0} -> :ok
       {output, _} -> {:error, "git add failed: #{String.trim(output)}"}
     end
@@ -210,7 +216,7 @@ defmodule Minga.Git.System do
     args = ["commit", "-m", message]
     args = if Keyword.get(opts, :amend, false), do: args ++ ["--amend"], else: args
 
-    case System.cmd("git", args, cd: git_root, stderr_to_stdout: true) do
+    case git_cmd(args, cd: git_root, stderr_to_stdout: true) do
       {output, 0} ->
         short_hash =
           case Regex.run(~r"\[[\w/.-]+ ([a-f0-9]+)\]", output) do
@@ -230,7 +236,7 @@ defmodule Minga.Git.System do
   @impl true
   @spec last_commit_message(String.t()) :: {:ok, String.t()} | :error
   def last_commit_message(git_root) when is_binary(git_root) do
-    case System.cmd("git", ["log", "-1", "--format=%B"], cd: git_root, stderr_to_stdout: true) do
+    case git_cmd(["log", "-1", "--format=%B"], cd: git_root, stderr_to_stdout: true) do
       {msg, 0} -> {:ok, String.trim(msg)}
       _ -> :error
     end
@@ -241,7 +247,7 @@ defmodule Minga.Git.System do
   @impl true
   @spec ahead_behind(String.t()) :: {:ok, non_neg_integer(), non_neg_integer()} | :error
   def ahead_behind(git_root) when is_binary(git_root) do
-    case System.cmd("git", ["rev-list", "--left-right", "--count", "HEAD...@{upstream}"],
+    case git_cmd(["rev-list", "--left-right", "--count", "HEAD...@{upstream}"],
            cd: git_root,
            stderr_to_stdout: true
          ) do
@@ -272,7 +278,7 @@ defmodule Minga.Git.System do
   def unstage(git_root, paths) when is_binary(git_root) and is_list(paths) do
     args = ["reset", "HEAD", "--"] ++ paths
 
-    case System.cmd("git", args, cd: git_root, stderr_to_stdout: true) do
+    case git_cmd(args, cd: git_root, stderr_to_stdout: true) do
       {_, 0} -> :ok
       {output, _} -> {:error, "git reset failed: #{String.trim(output)}"}
     end
@@ -283,7 +289,7 @@ defmodule Minga.Git.System do
   @impl true
   @spec unstage_all(String.t()) :: :ok | {:error, String.t()}
   def unstage_all(git_root) when is_binary(git_root) do
-    case System.cmd("git", ["reset", "HEAD"], cd: git_root, stderr_to_stdout: true) do
+    case git_cmd(["reset", "HEAD"], cd: git_root, stderr_to_stdout: true) do
       {_, 0} -> :ok
       {output, _} -> {:error, "git reset failed: #{String.trim(output)}"}
     end
@@ -297,13 +303,13 @@ defmodule Minga.Git.System do
     abs_path = Path.join(git_root, path)
 
     # Check if the file is tracked by git
-    case System.cmd("git", ["ls-files", "--error-unmatch", path],
+    case git_cmd(["ls-files", "--error-unmatch", path],
            cd: git_root,
            stderr_to_stdout: true
          ) do
       {_, 0} ->
         # Tracked file: restore from index/HEAD
-        case System.cmd("git", ["checkout", "--", path],
+        case git_cmd(["checkout", "--", path],
                cd: git_root,
                stderr_to_stdout: true
              ) do
@@ -327,7 +333,7 @@ defmodule Minga.Git.System do
   def branch_list(git_root) when is_binary(git_root) do
     format = "%(refname:short)%09%(upstream:short)%09%(upstream:track)%09%(HEAD)"
 
-    case System.cmd("git", ["branch", "-a", "--format=#{format}"],
+    case git_cmd(["branch", "-a", "--format=#{format}"],
            cd: git_root,
            stderr_to_stdout: true
          ) do
@@ -350,7 +356,7 @@ defmodule Minga.Git.System do
   @impl true
   @spec branch_create(String.t(), String.t()) :: :ok | {:error, String.t()}
   def branch_create(git_root, name) when is_binary(git_root) and is_binary(name) do
-    case System.cmd("git", ["checkout", "-b", name], cd: git_root, stderr_to_stdout: true) do
+    case git_cmd(["checkout", "-b", name], cd: git_root, stderr_to_stdout: true) do
       {_, 0} -> :ok
       {output, _} -> {:error, "git checkout -b failed: #{String.trim(output)}"}
     end
@@ -362,7 +368,7 @@ defmodule Minga.Git.System do
   @impl true
   @spec branch_switch(String.t(), String.t()) :: :ok | {:error, String.t()}
   def branch_switch(git_root, name) when is_binary(git_root) and is_binary(name) do
-    case System.cmd("git", ["checkout", name], cd: git_root, stderr_to_stdout: true) do
+    case git_cmd(["checkout", name], cd: git_root, stderr_to_stdout: true) do
       {_, 0} -> :ok
       {output, _} -> {:error, "git checkout failed: #{String.trim(output)}"}
     end
@@ -377,7 +383,7 @@ defmodule Minga.Git.System do
       when is_binary(git_root) and is_binary(name) do
     flag = if force, do: "-D", else: "-d"
 
-    case System.cmd("git", ["branch", flag, name], cd: git_root, stderr_to_stdout: true) do
+    case git_cmd(["branch", flag, name], cd: git_root, stderr_to_stdout: true) do
       {_, 0} -> :ok
       {output, _} -> {:error, "git branch delete failed: #{String.trim(output)}"}
     end
@@ -396,7 +402,7 @@ defmodule Minga.Git.System do
         do: args ++ ["--include-untracked"],
         else: args
 
-    case System.cmd("git", args, cd: git_root, stderr_to_stdout: true) do
+    case git_cmd(args, cd: git_root, stderr_to_stdout: true) do
       {output, 0} ->
         case String.trim(output) do
           "No local changes to save" -> {:error, "No changes to stash"}
@@ -413,7 +419,7 @@ defmodule Minga.Git.System do
   @impl true
   @spec stash_pop(String.t()) :: :ok | {:error, String.t()}
   def stash_pop(git_root) when is_binary(git_root) do
-    case System.cmd("git", ["stash", "pop"], cd: git_root, stderr_to_stdout: true) do
+    case git_cmd(["stash", "pop"], cd: git_root, stderr_to_stdout: true) do
       {_, 0} -> :ok
       {output, _} -> {:error, "git stash pop failed: #{String.trim(output)}"}
     end
@@ -426,7 +432,7 @@ defmodule Minga.Git.System do
   def stash_list(git_root) when is_binary(git_root) do
     format = "%gd%x1f%cr%x1f%gs"
 
-    case System.cmd("git", ["stash", "list", "--format=#{format}"],
+    case git_cmd(["stash", "list", "--format=#{format}"],
            cd: git_root,
            stderr_to_stdout: true
          ) do
@@ -449,7 +455,7 @@ defmodule Minga.Git.System do
   @impl true
   @spec stash_drop(String.t(), non_neg_integer()) :: :ok | {:error, String.t()}
   def stash_drop(git_root, index) when is_binary(git_root) and is_integer(index) and index >= 0 do
-    case System.cmd("git", ["stash", "drop", "stash@{#{index}}"],
+    case git_cmd(["stash", "drop", "stash@{#{index}}"],
            cd: git_root,
            stderr_to_stdout: true
          ) do
@@ -467,7 +473,7 @@ defmodule Minga.Git.System do
     args = if Keyword.get(opts, :set_upstream), do: args ++ ["--set-upstream"], else: args
     args = if Keyword.get(opts, :force), do: args ++ ["--force-with-lease"], else: args
 
-    case System.cmd("git", args, cd: git_root, stderr_to_stdout: true) do
+    case git_cmd(args, cd: git_root, stderr_to_stdout: true) do
       {_, 0} -> :ok
       {output, _} -> {:error, "git push failed: #{String.trim(output)}"}
     end
@@ -481,7 +487,7 @@ defmodule Minga.Git.System do
     args = ["pull"]
     args = if Keyword.get(opts, :rebase), do: args ++ ["--rebase"], else: args
 
-    case System.cmd("git", args, cd: git_root, stderr_to_stdout: true) do
+    case git_cmd(args, cd: git_root, stderr_to_stdout: true) do
       {_, 0} -> :ok
       {output, _} -> {:error, "git pull failed: #{String.trim(output)}"}
     end
@@ -492,7 +498,7 @@ defmodule Minga.Git.System do
   @impl true
   @spec fetch_remotes(String.t(), keyword()) :: :ok | {:error, String.t()}
   def fetch_remotes(git_root, _opts \\ []) when is_binary(git_root) do
-    case System.cmd("git", ["fetch", "--all"], cd: git_root, stderr_to_stdout: true) do
+    case git_cmd(["fetch", "--all"], cd: git_root, stderr_to_stdout: true) do
       {_, 0} -> :ok
       {output, _} -> {:error, "git fetch failed: #{String.trim(output)}"}
     end
@@ -513,7 +519,7 @@ defmodule Minga.Git.System do
 
       {:ok, _detached} ->
         # Detached HEAD: fall back to git CLI for the short SHA
-        case System.cmd("git", ["rev-parse", "--short", "HEAD"],
+        case git_cmd(["rev-parse", "--short", "HEAD"],
                cd: git_root,
                stderr_to_stdout: true
              ) do
@@ -531,6 +537,37 @@ defmodule Minga.Git.System do
   # ── Private ────────────────────────────────────────────────────────────────
 
   alias Minga.Git.StatusEntry
+
+  @spec untracked_arg(Minga.Git.untracked_mode()) :: String.t()
+  defp untracked_arg(:no), do: "-uno"
+  defp untracked_arg(:normal), do: "-unormal"
+  defp untracked_arg(:all), do: "-uall"
+  defp untracked_arg(_), do: "-unormal"
+
+  @spec git_cmd([String.t()], keyword()) :: {String.t(), non_neg_integer()}
+  defp git_cmd(args, opts) when is_list(args) and is_list(opts) do
+    timeout_ms = Keyword.get(opts, :timeout_ms, @default_timeout_ms)
+    cmd_opts = opts |> Keyword.delete(:timeout_ms) |> Keyword.put_new(:stderr_to_stdout, true)
+
+    case System.find_executable("git") do
+      nil -> {"git executable not found", 127}
+      executable -> run_cmd_with_timeout(executable, args, cmd_opts, timeout_ms)
+    end
+  rescue
+    e in [ErlangError, ArgumentError] -> {Exception.message(e), 1}
+  end
+
+  @spec run_cmd_with_timeout(String.t(), [String.t()], keyword(), pos_integer()) ::
+          {String.t(), non_neg_integer()}
+  defp run_cmd_with_timeout(executable, args, opts, timeout_ms) do
+    task = Task.async(fn -> System.cmd(executable, args, opts) end)
+
+    case Task.yield(task, timeout_ms) || Task.shutdown(task, :brutal_kill) do
+      {:ok, {output, code}} -> {output, code}
+      {:exit, reason} -> {inspect(reason), 1}
+      nil -> {"git command timed out after #{timeout_ms}ms", 124}
+    end
+  end
 
   @doc false
   @spec parse_status_output(String.t()) :: [Minga.Git.status_entry()]

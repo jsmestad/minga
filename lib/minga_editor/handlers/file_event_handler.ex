@@ -135,7 +135,7 @@ defmodule MingaEditor.Handlers.FileEventHandler do
   defp handle_buffer_saved(state, saved_buf) do
     new_state =
       state
-      |> FileTreeFreshness.refresh_git_status_from_disk()
+      |> FileTreeFreshness.refresh_git_status_from_cache()
       |> refresh_git_diff_views_for_buffer(saved_buf)
       |> EditorState.rebind_buffer_file_identity(saved_buf)
 

@@ -1,13 +1,8 @@
 defmodule Minga.Project.FileTree.GitStatus do
   @moduledoc """
-  Computes git status for all files under a directory tree.
+  Builds file-tree git badge maps from already-fetched repo status entries.
 
-  Runs `git status --porcelain=v1` and parses the output into a map
-  of `%{absolute_path => status_atom}`. Also propagates status up to
-  parent directories so collapsed dirs show the "worst" child status.
-
-  This module is pure (no GenServer). The caller is responsible for
-  caching the result and refreshing it on save/git operations.
+  This module never shells out to git. `Minga.Git.Repo` owns fetching and caching repo status; the file tree consumes those cached entries and converts them into `%{absolute_path => status_atom}` maps. Directory entries inherit the most severe descendant status so collapsed directories still show useful badges.
   """
 
   @typedoc "Git status for a single file."
@@ -15,29 +10,6 @@ defmodule Minga.Project.FileTree.GitStatus do
 
   @typedoc "Status map keyed by absolute file path."
   @type status_map :: %{String.t() => file_status()}
-
-  @doc """
-  Computes git status for all files under `root_path`.
-
-  Returns a status map with absolute paths as keys. If the path is not
-  inside a git repo, returns an empty map. Directory entries are included
-  with the "worst" status of any descendant.
-
-  Runs asynchronously-friendly: no side effects, no process state.
-  """
-  @spec compute(String.t()) :: status_map()
-  def compute(root_path) when is_binary(root_path) do
-    case Minga.Git.root_for(root_path) do
-      {:ok, git_root} ->
-        case Minga.Git.status(git_root) do
-          {:ok, entries} -> from_entries(entries, git_root, root_path)
-          {:error, _} -> %{}
-        end
-
-      :not_git ->
-        %{}
-    end
-  end
 
   @doc """
   Builds file-tree git status from an already-fetched git status event.

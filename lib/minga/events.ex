@@ -157,6 +157,7 @@ defmodule Minga.Events do
       :branch,
       :ahead,
       :behind,
+      entry_base_path: nil,
       last_commit_message: "",
       stash_count: 0
     ]
@@ -167,6 +168,7 @@ defmodule Minga.Events do
             branch: String.t() | nil,
             ahead: non_neg_integer(),
             behind: non_neg_integer(),
+            entry_base_path: String.t() | nil,
             last_commit_message: String.t(),
             stash_count: non_neg_integer()
           }

@@ -357,10 +357,7 @@ func (m Model) cursorStyleSequence() string {
 // applyCommands routes a decoded batch through the frame-transaction state
 // machine (#2219). begin_frame opens a staging buffer; semantic/chrome commands
 // accumulate in it without touching the live model; commit_frame validates and
-// replays the buffer atomically. Out-of-band commands (set_title/set_window_bg
-// side channels, protocol_error, transport survivors) apply directly with no
-// open transaction; the same command inside a transaction stages and applies at
-// commit. A semantic/chrome command with NO open transaction, or any stream
+// replays the buffer atomically. Out-of-band commands (set_title/set_window_bg, clipboard writes, no-op compatibility commands, protocol_error, transport survivors) apply directly with no open transaction; the same command inside a transaction stages and applies at commit. A semantic/chrome command with NO open transaction, or any stream
 // error / invalidation, is a protocol violation under the staged model and
 // triggers request_keyframe instead of a partial paint.
 func (m *Model) applyCommands(commands []protocol.Command) tea.Cmd {
@@ -396,11 +393,11 @@ func (m *Model) applyCommands(commands []protocol.Command) tea.Cmd {
 			// land in Minga's *Messages* buffer instead.
 			m.protocolError = command.ProtocolError
 			m.logToMessages(protocol.LogLevelErr, "Go TUI protocol error: %s", command.ProtocolError)
-		case protocol.CommandSetTitle, protocol.CommandSetWindowBg:
-			// Sanctioned out-of-band side channels (emit.ex send_title/
-			// send_window_bg write these outside the begin/commit bracket). If one
-			// arrives inside an open transaction it still stages so the swap stays
-			// atomic; outside one it applies directly.
+		case protocol.CommandNoop:
+			// Sized-but-ignored compatibility commands, such as font setup, can arrive out of band during startup. They do not mutate the Go TUI and should not be treated as frame-transaction violations.
+			continue
+		case protocol.CommandSetTitle, protocol.CommandSetWindowBg, protocol.CommandClipboardWrite:
+			// Sanctioned out-of-band side channels (emit.ex send_title/send_window_bg and command helpers can write these outside the begin/commit bracket). If one arrives inside an open transaction it still stages so the swap stays atomic; outside one it applies directly.
 			if m.staging != nil {
 				m.staging.commands = append(m.staging.commands, command)
 			} else {
