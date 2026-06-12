@@ -39,16 +39,42 @@ func renderedBody(model Model) string {
 func drainKeyframeRequests(t *testing.T, out chan []byte) []uint32 {
 	t.Helper()
 	var seqs []uint32
+	for _, packet := range drainOutboundPackets(out) {
+		if seq, ok := decodeKeyframeRequest(packet); ok {
+			seqs = append(seqs, seq)
+		}
+	}
+	return seqs
+}
+
+func drainOutboundPackets(out chan []byte) [][]byte {
+	var packets [][]byte
 	for {
 		select {
 		case packet := <-out:
-			if len(packet) == 5 && packet[0] == generated.OPRequestKeyframe {
-				seqs = append(seqs, uint32(packet[1])<<24|uint32(packet[2])<<16|uint32(packet[3])<<8|uint32(packet[4]))
-			}
+			packets = append(packets, packet)
 		default:
-			return seqs
+			return packets
 		}
 	}
+}
+
+func decodeKeyframeRequest(packet []byte) (uint32, bool) {
+	if len(packet) != 5 || packet[0] != generated.OPRequestKeyframe {
+		return 0, false
+	}
+	return uint32(packet[1])<<24 | uint32(packet[2])<<16 | uint32(packet[3])<<8 | uint32(packet[4]), true
+}
+
+func decodeLogMessage(packet []byte) (byte, string, bool) {
+	if len(packet) < 4 || packet[0] != generated.OPLogMessage {
+		return 0, "", false
+	}
+	msgLen := int(packet[2])<<8 | int(packet[3])
+	if len(packet) != 4+msgLen {
+		return 0, "", false
+	}
+	return packet[1], string(packet[4:]), true
 }
 
 func applyTo(t *testing.T, model Model, commands ...protocol.Command) Model {
@@ -83,6 +109,43 @@ func TestInvalidationDebouncesKeyframeRequests(t *testing.T) {
 	}
 	if !strings.Contains(renderedBody(m), "fresh") {
 		t.Fatal("keyframe content should render after commit")
+	}
+}
+
+func TestInvalidationLogsToMessagesAndDebouncesDiagnostics(t *testing.T) {
+	out := make(chan []byte, 8)
+	m := New(80, 24, out)
+
+	m = applyTo(t, m, commitFrame(7))
+	packets := drainOutboundPackets(out)
+
+	var logs []string
+	var keyframes []uint32
+	for _, packet := range packets {
+		if seq, ok := decodeKeyframeRequest(packet); ok {
+			keyframes = append(keyframes, seq)
+		}
+		if level, text, ok := decodeLogMessage(packet); ok {
+			if level != protocol.LogLevelWarn {
+				t.Fatalf("invalidation log level = %d, want warn", level)
+			}
+			logs = append(logs, text)
+		}
+	}
+
+	if len(keyframes) != 1 || keyframes[0] != 0 {
+		t.Fatalf("first invalidation should request keyframe from last good seq 0, got %v", keyframes)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("first invalidation should send one log_message, got %d", len(logs))
+	}
+	if !strings.Contains(logs[0], "Go TUI frame invalidated (commit_frame with no open transaction)") {
+		t.Fatalf("invalidation log should explain the reason, got %q", logs[0])
+	}
+
+	m = applyTo(t, m, beginFrame(8, 7), windowRowsCommand(1, "stale"), commitFrame(8))
+	if packets := drainOutboundPackets(out); len(packets) != 0 {
+		t.Fatalf("pending resync should debounce duplicate keyframe requests and logs, got %d packets", len(packets))
 	}
 }
 

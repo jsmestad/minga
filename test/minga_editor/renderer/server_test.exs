@@ -9,6 +9,7 @@ defmodule MingaEditor.Renderer.ServerTest do
   use ExUnit.Case, async: false
 
   alias MingaEditor.RenderPipeline.Input
+  alias MingaEditor.Renderer.Caches
   alias MingaEditor.Renderer.Server, as: RendererServer
   alias MingaEditor.Viewport
 
@@ -79,6 +80,80 @@ defmodule MingaEditor.Renderer.ServerTest do
     refute renderer_busy?(renderer)
   end
 
+  test "pending snapshots inherit the latest emitted caches before rendering" do
+    parent = self()
+    renderer = start_renderer(parent, pipeline: cache_probe_pipeline(parent))
+    initial_caches = %Caches{last_emitted_frame_seq: 10}
+    in_flight = %{stub_snapshot() | caches: initial_caches}
+    pending = %{stub_snapshot() | caches: initial_caches}
+
+    :sys.replace_state(renderer, fn state ->
+      %{state | rendering?: true, in_flight: {in_flight, 11, 0}, pending: {pending, 12, 0}}
+    end)
+
+    send(renderer, :do_render)
+
+    assert_receive {:pipeline_input, 11, 10}, @async_render_timeout
+    assert_receive {:pipeline_input, 12, 11}, @async_render_timeout
+
+    assert_receive {:render_done, %{frame_seq: 11, caches: %Caches{last_emitted_frame_seq: 11}}},
+                   @async_render_timeout
+
+    assert_receive {:render_done, %{frame_seq: 12, caches: %Caches{last_emitted_frame_seq: 12}}},
+                   @async_render_timeout
+  end
+
+  test "idle renderer uses its latest caches when the editor writeback is still stale" do
+    parent = self()
+    renderer = start_renderer(parent, pipeline: cache_probe_pipeline(parent))
+    stale_editor_snapshot = %{stub_snapshot() | caches: %Caches{last_emitted_frame_seq: 10}}
+
+    :sys.replace_state(renderer, fn state ->
+      %{state | caches: %Caches{last_emitted_frame_seq: 11}}
+    end)
+
+    RendererServer.cast_snapshot(renderer, stale_editor_snapshot, 12)
+
+    assert_receive {:pipeline_input, 12, 11}, @async_render_timeout
+
+    assert_receive {:render_done, %{frame_seq: 12, caches: %Caches{last_emitted_frame_seq: 12}}},
+                   @async_render_timeout
+  end
+
+  test "frontend reset snapshots keep their reset caches" do
+    parent = self()
+    renderer = start_renderer(parent, pipeline: cache_probe_pipeline(parent))
+    reset_snapshot = %{stub_snapshot() | caches: %Caches{last_emitted_frame_seq: 0}}
+
+    :sys.replace_state(renderer, fn state ->
+      %{state | caches: %Caches{last_emitted_frame_seq: 11}}
+    end)
+
+    RendererServer.cast_snapshot(renderer, reset_snapshot, 12)
+
+    assert_receive {:pipeline_input, 12, 0}, @async_render_timeout
+
+    assert_receive {:render_done, %{frame_seq: 12, caches: %Caches{last_emitted_frame_seq: 12}}},
+                   @async_render_timeout
+  end
+
+  test "direct editor-emitted frame boundaries can advance beyond renderer caches" do
+    parent = self()
+    renderer = start_renderer(parent, pipeline: cache_probe_pipeline(parent))
+    boundary_advanced_snapshot = %{stub_snapshot() | caches: %Caches{last_emitted_frame_seq: 12}}
+
+    :sys.replace_state(renderer, fn state ->
+      %{state | caches: %Caches{last_emitted_frame_seq: 11}}
+    end)
+
+    RendererServer.cast_snapshot(renderer, boundary_advanced_snapshot, 13)
+
+    assert_receive {:pipeline_input, 13, 12}, @async_render_timeout
+
+    assert_receive {:render_done, %{frame_seq: 13, caches: %Caches{last_emitted_frame_seq: 13}}},
+                   @async_render_timeout
+  end
+
   describe "render_or_async dispatch" do
     test "non-headless backend with renderer dispatches asynchronously" do
       renderer = start_renderer(self(), pipeline: & &1)
@@ -126,6 +201,13 @@ defmodule MingaEditor.Renderer.ServerTest do
     ])
 
     input
+  end
+
+  defp cache_probe_pipeline(parent) do
+    fn input ->
+      send(parent, {:pipeline_input, input.frame_seq, input.caches.last_emitted_frame_seq})
+      %{input | caches: %{input.caches | last_emitted_frame_seq: input.frame_seq}}
+    end
   end
 
   defp attach_coalesce_handler do
