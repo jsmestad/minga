@@ -7,6 +7,8 @@ defmodule MingaEditor.FileTree.Freshness do
 
   alias Minga.Buffer
   alias Minga.LSP.SyncServer
+  alias Minga.Git.Repo, as: GitRepo
+  alias Minga.Git.Repo.StatusSnapshot
   alias Minga.Project.FileTree
   alias Minga.Project.FileTree.BufferSync
   alias Minga.Project.FileTree.GitStatus
@@ -76,7 +78,11 @@ defmodule MingaEditor.FileTree.Freshness do
         set_file_tree(state, FileTreeState.clear_refresh(file_tree))
 
       %FileTreeState{tree: %FileTree{} = tree} = file_tree ->
-        refreshed_tree = tree |> FileTree.refresh() |> FileTree.refresh_git_status()
+        refreshed_tree =
+          tree
+          |> FileTree.refresh()
+          |> refresh_tree_git_status_from_cache(EditorState.events_registry(state))
+
         watch_expanded_dirs(refreshed_tree)
 
         file_tree =
@@ -92,13 +98,17 @@ defmodule MingaEditor.FileTree.Freshness do
 
   @doc "Updates tree git badges from an already-fetched git status event."
   @spec refresh_git_status(state(), Minga.Events.GitStatusEvent.t()) :: state()
-  def refresh_git_status(state, %Minga.Events.GitStatusEvent{git_root: git_root, entries: entries}) do
+  def refresh_git_status(state, %Minga.Events.GitStatusEvent{
+        git_root: git_root,
+        entry_base_path: entry_base_path,
+        entries: entries
+      }) do
     case file_tree_state(state) do
       %FileTreeState{tree: nil} ->
         state
 
       %FileTreeState{tree: %FileTree{} = tree} = file_tree ->
-        status = GitStatus.from_entries(entries, git_root, tree.root)
+        status = GitStatus.from_entries(entries, entry_base_path || git_root, tree.root)
         updated_tree = FileTree.replace_git_status(tree, status)
         file_tree = FileTreeState.replace_tree(file_tree, updated_tree)
 
@@ -108,15 +118,36 @@ defmodule MingaEditor.FileTree.Freshness do
     end
   end
 
-  @doc "Refreshes tree git badges by querying the current git backend."
-  @spec refresh_git_status_from_disk(state()) :: state()
-  def refresh_git_status_from_disk(state) do
+  @doc "Refreshes tree git badges from the cached Git.Repo snapshot without shelling out to git."
+  @spec refresh_tree_git_status_from_cache(FileTree.t(), Minga.Events.registry()) :: FileTree.t()
+  def refresh_tree_git_status_from_cache(
+        %FileTree{} = tree,
+        events_registry \\ Minga.Events.default_registry()
+      ) do
+    case GitRepo.cached_status_for_path(tree.root) do
+      {:ok, %StatusSnapshot{entry_base_path: entry_base_path, entries: entries}} ->
+        status = GitStatus.from_entries(entries, entry_base_path, tree.root)
+        FileTree.replace_git_status(tree, status)
+
+      :not_tracked ->
+        ensure_repo_started(tree.root, events_registry)
+        tree
+    end
+  catch
+    :exit, _ -> tree
+  end
+
+  @doc "Refreshes tree git badges from the cached Git.Repo snapshot without shelling out to git."
+  @spec refresh_git_status_from_cache(state()) :: state()
+  def refresh_git_status_from_cache(state) do
     case file_tree_state(state) do
       %FileTreeState{tree: nil} ->
         state
 
       %FileTreeState{tree: %FileTree{} = tree} = file_tree ->
-        updated_tree = FileTree.refresh_git_status(tree)
+        updated_tree =
+          refresh_tree_git_status_from_cache(tree, EditorState.events_registry(state))
+
         file_tree = FileTreeState.replace_tree(file_tree, updated_tree)
 
         state
@@ -141,7 +172,7 @@ defmodule MingaEditor.FileTree.Freshness do
         new_tree =
           expanded_root
           |> FileTree.new(width: old_tree.width)
-          |> FileTree.refresh_git_status()
+          |> refresh_tree_git_status_from_cache(EditorState.events_registry(state))
 
         watch_expanded_dirs(new_tree)
 
@@ -169,6 +200,37 @@ defmodule MingaEditor.FileTree.Freshness do
   @spec unwatch_expanded_dirs(FileTree.t()) :: :ok
   def unwatch_expanded_dirs(%FileTree{root: root}) do
     safe_unwatch_directory_tree(root)
+  end
+
+  @spec ensure_repo_started(String.t(), Minga.Events.registry()) :: :ok
+  defp ensure_repo_started(root, events_registry) when is_binary(root) do
+    case Minga.Git.root_for(root) do
+      {:ok, git_root} ->
+        case GitRepo.ensure_started(git_root, root, events_registry) do
+          {:ok, _pid} ->
+            :ok
+
+          {:error, {:already_started, _pid}} ->
+            :ok
+
+          {:error, reason} ->
+            Minga.Log.warning(
+              :editor,
+              "File tree git repo start failed for #{root}: #{inspect(reason)}"
+            )
+        end
+
+      :not_git ->
+        :ok
+    end
+  catch
+    :exit, reason ->
+      Minga.Log.warning(
+        :editor,
+        "File tree git repo lookup failed for #{root}: #{inspect(reason)}"
+      )
+
+      :ok
   end
 
   @spec sync_buffer(state(), FileTree.t()) :: state()

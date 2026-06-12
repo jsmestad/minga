@@ -2,80 +2,60 @@ defmodule Minga.Project.FileTree.GitStatusTest do
   use ExUnit.Case, async: true
 
   alias Minga.Git.StatusEntry
-  alias Minga.Git.Stub, as: GitStub
   alias Minga.Project.FileTree.GitStatus
 
   @moduletag :tmp_dir
 
-  setup %{tmp_dir: dir} do
-    GitStub.set_root(dir, dir)
-    on_exit(fn -> GitStub.clear(dir) end)
-    %{root: dir}
-  end
+  describe "from_entries/3" do
+    test "detects untracked files", %{tmp_dir: dir} do
+      entries = [%StatusEntry{path: "new_file.txt", status: :untracked, staged: false}]
 
-  describe "compute/1" do
-    test "returns empty map for non-git directory" do
-      assert GitStatus.compute("/tmp/not_a_repo_#{System.unique_integer()}") == %{}
-    end
-
-    test "detects untracked files", %{root: dir} do
-      GitStub.set_status(dir, [
-        %StatusEntry{path: "new_file.txt", status: :untracked, staged: false}
-      ])
-
-      status = GitStatus.compute(dir)
+      status = GitStatus.from_entries(entries, dir, dir)
       assert Map.get(status, Path.join(dir, "new_file.txt")) == :untracked
     end
 
-    test "detects staged files", %{root: dir} do
-      GitStub.set_status(dir, [
-        %StatusEntry{path: "staged.txt", status: :added, staged: true}
-      ])
+    test "detects staged files", %{tmp_dir: dir} do
+      entries = [%StatusEntry{path: "staged.txt", status: :added, staged: true}]
 
-      status = GitStatus.compute(dir)
+      status = GitStatus.from_entries(entries, dir, dir)
       assert Map.get(status, Path.join(dir, "staged.txt")) == :staged
     end
 
-    test "detects modified files", %{root: dir} do
-      GitStub.set_status(dir, [
-        %StatusEntry{path: "tracked.txt", status: :modified, staged: false}
-      ])
+    test "detects modified files", %{tmp_dir: dir} do
+      entries = [%StatusEntry{path: "tracked.txt", status: :modified, staged: false}]
 
-      status = GitStatus.compute(dir)
+      status = GitStatus.from_entries(entries, dir, dir)
       assert Map.get(status, Path.join(dir, "tracked.txt")) == :modified
     end
 
-    test "propagates status to parent directories", %{root: dir} do
-      GitStub.set_status(dir, [
-        %StatusEntry{path: "lib/app.ex", status: :untracked, staged: false}
-      ])
+    test "propagates status to parent directories", %{tmp_dir: dir} do
+      entries = [%StatusEntry{path: "lib/app.ex", status: :untracked, staged: false}]
 
-      status = GitStatus.compute(dir)
+      status = GitStatus.from_entries(entries, dir, dir)
       assert Map.get(status, Path.join(dir, "lib/app.ex")) == :untracked
       assert Map.get(status, Path.join(dir, "lib")) == :untracked
     end
 
-    test "directory shows worst child status", %{root: dir} do
-      GitStub.set_status(dir, [
+    test "directory shows worst child status", %{tmp_dir: dir} do
+      entries = [
         %StatusEntry{path: "src/tracked.ex", status: :modified, staged: false},
         %StatusEntry{path: "src/new.ex", status: :untracked, staged: false}
-      ])
+      ]
 
-      status = GitStatus.compute(dir)
+      status = GitStatus.from_entries(entries, dir, dir)
       assert Map.get(status, Path.join(dir, "src")) == :modified
     end
 
-    test "filters repo status to the requested root path", %{root: dir} do
+    test "filters repo status to the requested root path", %{tmp_dir: dir} do
       root_path = Path.join(dir, "app")
       File.mkdir_p!(root_path)
-      GitStub.set_root(root_path, dir)
 
-      GitStub.set_status(dir, [
+      entries = [
         %StatusEntry{path: "app/lib/inside.ex", status: :modified, staged: false},
         %StatusEntry{path: "application/lib/outside.ex", status: :conflict, staged: false}
-      ])
+      ]
 
-      status = GitStatus.compute(root_path)
+      status = GitStatus.from_entries(entries, dir, root_path)
 
       assert Map.get(status, Path.join([dir, "app", "lib"])) == :modified
       refute Map.has_key?(status, Path.join([dir, "application", "lib"]))

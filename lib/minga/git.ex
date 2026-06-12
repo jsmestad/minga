@@ -73,6 +73,14 @@ defmodule Minga.Git do
 
   @type diff_opts :: [diff_opt()]
 
+  @typedoc "How much untracked-file detail `git status` should enumerate."
+  @type untracked_mode :: :no | :normal | :all
+
+  @typedoc "Accepted `status/2` options."
+  @type status_opt :: {:untracked_mode, untracked_mode()} | {:timeout_ms, pos_integer()}
+
+  @type status_opts :: [status_opt()]
+
   # ── Delegated operations (go through the backend) ──────────────────────
 
   @doc """
@@ -122,8 +130,8 @@ defmodule Minga.Git do
   @doc """
   Returns a structured list of changed files with their status.
   """
-  @spec status(String.t()) :: {:ok, [status_entry()]} | {:error, String.t()}
-  def status(git_root), do: impl().status(git_root)
+  @spec status(String.t(), status_opts()) :: {:ok, [status_entry()]} | {:error, String.t()}
+  def status(git_root, opts \\ []), do: impl().status(git_root, opts)
 
   @doc """
   Returns the diff for a specific file or all changes.

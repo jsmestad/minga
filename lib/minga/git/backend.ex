@@ -27,7 +27,7 @@ defmodule Minga.Git.Backend do
             ) ::
               {:ok, String.t()} | :error
 
-  @callback status(git_root :: String.t()) ::
+  @callback status(git_root :: String.t(), opts :: keyword()) ::
               {:ok, [Minga.Git.status_entry()]} | {:error, String.t()}
 
   @callback diff(git_root :: String.t(), opts :: Minga.Git.diff_opts()) ::

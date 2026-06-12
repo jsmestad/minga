@@ -341,9 +341,22 @@ func TestResyncIndicatorShowsThenClearsOnKeyframe(t *testing.T) {
 	}
 }
 
-// Out-of-band allowance: set_title / set_window_bg arriving with no open
-// transaction apply directly (sanctioned side channels) and do NOT request a
-// keyframe.
+// Out-of-band no-op compatibility commands, such as font setup decoded by the TUI only for sizing, must not invalidate the frame stream.
+func TestOutOfBandNoopDoesNotRequestKeyframe(t *testing.T) {
+	out := make(chan []byte, 16)
+	model := New(40, 8, out)
+
+	model = applyTo(t, model, protocol.Command{Kind: protocol.CommandNoop})
+
+	if model.resyncPending {
+		t.Fatal("out-of-band no-op must not mark resync pending")
+	}
+	if reqs := drainKeyframeRequests(t, out); len(reqs) != 0 {
+		t.Fatalf("out-of-band no-op must not request a keyframe: %v", reqs)
+	}
+}
+
+// Out-of-band allowance: set_title, set_window_bg, and clipboard_write arriving with no open transaction apply directly as sanctioned side channels and do NOT request a keyframe.
 func TestOutOfBandSideChannelsApplyWithoutTransaction(t *testing.T) {
 	out := make(chan []byte, 16)
 	model := New(40, 8, out)
@@ -351,6 +364,7 @@ func TestOutOfBandSideChannelsApplyWithoutTransaction(t *testing.T) {
 	model = applyTo(t, model,
 		protocol.Command{Kind: protocol.CommandSetTitle, Title: "minga - file.ex"},
 		protocol.Command{Kind: protocol.CommandSetWindowBg, WindowBg: 0x112233},
+		protocol.Command{Kind: protocol.CommandClipboardWrite, ClipboardText: "copied text"},
 	)
 
 	if model.title != "minga - file.ex" {
@@ -358,6 +372,9 @@ func TestOutOfBandSideChannelsApplyWithoutTransaction(t *testing.T) {
 	}
 	if model.bg != 0x112233 {
 		t.Fatalf("out-of-band set_window_bg should apply directly, got 0x%06X", model.bg)
+	}
+	if model.pendingClipboard != "copied text" {
+		t.Fatalf("out-of-band clipboard_write should apply directly, got %q", model.pendingClipboard)
 	}
 	if reqs := drainKeyframeRequests(t, out); len(reqs) != 0 {
 		t.Fatalf("sanctioned out-of-band commands must not request a keyframe: %v", reqs)

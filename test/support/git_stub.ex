@@ -49,7 +49,16 @@ defmodule Minga.Git.Stub do
   @doc "Sets the status entries returned for `git_root`."
   @spec set_status(String.t(), [Minga.Git.status_entry()]) :: :ok
   def set_status(git_root, entries) when is_list(entries) do
-    :ets.insert(@table, {{:status, Path.expand(git_root)}, entries})
+    expanded = Path.expand(git_root)
+    :ets.delete(@table, {:status_error, expanded})
+    :ets.insert(@table, {{:status, expanded}, entries})
+    :ok
+  end
+
+  @doc "Forces `status/2` to return an error for `git_root`."
+  @spec set_status_error(String.t(), String.t()) :: :ok
+  def set_status_error(git_root, reason) when is_binary(reason) do
+    :ets.insert(@table, {{:status_error, Path.expand(git_root)}, reason})
     :ok
   end
 
@@ -141,6 +150,7 @@ defmodule Minga.Git.Stub do
     expanded = Path.expand(git_root)
     :ets.match_delete(@table, {{:root, expanded}, :_})
     :ets.match_delete(@table, {{:status, expanded}, :_})
+    :ets.match_delete(@table, {{:status_error, expanded}, :_})
     :ets.match_delete(@table, {{:head, expanded, :_}, :_})
     :ets.match_delete(@table, {{:staged, expanded, :_}, :_})
     :ets.match_delete(@table, {{:staged_paths, expanded}, :_})
@@ -189,11 +199,19 @@ defmodule Minga.Git.Stub do
   def blame_line(_git_root, _relative_path, _line_number), do: :error
 
   @impl true
-  @spec status(String.t()) :: {:ok, [Minga.Git.status_entry()]}
-  def status(git_root) do
-    case :ets.lookup(@table, {:status, Path.expand(git_root)}) do
-      [{_, entries}] -> {:ok, entries}
-      [] -> {:ok, []}
+  @spec status(String.t(), keyword()) :: {:ok, [Minga.Git.status_entry()]}
+  def status(git_root, _opts \\ []) do
+    expanded = Path.expand(git_root)
+
+    case :ets.lookup(@table, {:status_error, expanded}) do
+      [{_, reason}] ->
+        {:error, reason}
+
+      [] ->
+        case :ets.lookup(@table, {:status, expanded}) do
+          [{_, entries}] -> {:ok, entries}
+          [] -> {:ok, []}
+        end
     end
   end
 

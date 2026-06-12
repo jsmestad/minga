@@ -641,7 +641,7 @@ defmodule MingaGitPorcelain.Commands do
 
   @spec staged_deleted?(String.t(), String.t()) :: boolean()
   defp staged_deleted?(git_root, rel_path) do
-    case Git.status(git_root) do
+    case Git.status(git_root, untracked_mode: :no) do
       {:ok, entries} -> Enum.any?(entries, &staged_deleted_entry?(&1, rel_path))
       {:error, _reason} -> false
     end

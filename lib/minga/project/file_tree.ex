@@ -273,12 +273,6 @@ defmodule Minga.Project.FileTree do
     invalidate_entries(%{tree | filter: nil, cursor: 0})
   end
 
-  @doc "Refreshes git status for the tree root. Returns the updated tree."
-  @spec refresh_git_status(t()) :: t()
-  def refresh_git_status(%__MODULE__{} = tree) do
-    replace_git_status(tree, GitStatus.compute(tree.root))
-  end
-
   @doc "Replaces the cached git status map for the tree."
   @spec replace_git_status(t(), GitStatus.status_map()) :: t()
   def replace_git_status(%__MODULE__{} = tree, git_status) when is_map(git_status) do
