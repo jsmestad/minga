@@ -391,8 +391,11 @@ func (m *Model) applyCommands(commands []protocol.Command) tea.Cmd {
 			// Out-of-band by design (#2219): the BEAM rejected this frontend's
 			// handshake protocol_version, so it never enters a transaction. Latch
 			// the reason so View renders a blocking error surface (ticket #2237).
+			// Do not write diagnostics to stderr: the TUI owns the terminal, so raw
+			// stderr can corrupt the rendered frame. Send them back to BEAM so they
+			// land in Minga's *Messages* buffer instead.
 			m.protocolError = command.ProtocolError
-			fmt.Fprintf(os.Stderr, "minga: protocol error: %s\n", command.ProtocolError)
+			m.logToMessages(protocol.LogLevelErr, "Go TUI protocol error: %s", command.ProtocolError)
 		case protocol.CommandSetTitle, protocol.CommandSetWindowBg:
 			// Sanctioned out-of-band side channels (emit.ex send_title/
 			// send_window_bg write these outside the begin/commit bracket). If one
@@ -493,14 +496,16 @@ func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cm
 // live model keeps the last committed frame, so View() never paints a partial.
 func (m *Model) invalidateStaging(cmds []tea.Cmd, reason string) []tea.Cmd {
 	m.staging = nil
-	fmt.Fprintf(os.Stderr, "minga: frame invalidated (%s), requesting keyframe from %d\n", reason, m.lastCommittedSeq)
 	// Debounce the keyframe request: after an invalidation, every stale
 	// in-flight frame also fails its base check (the BEAM advances
 	// base_frame_seq for frames we discarded), and re-requesting per frame
 	// would force a duplicate BEAM render each. One request per resync
-	// window; the pending flag clears when a valid commit applies.
+	// window; the pending flag clears when a valid commit applies. The diagnostic
+	// follows the same debounce and is sent to BEAM's *Messages* log instead of
+	// raw stderr, because stderr writes can corrupt the terminal renderer.
 	if !m.resyncPending {
 		m.resyncPending = true
+		m.logToMessages(protocol.LogLevelWarn, "Go TUI frame invalidated (%s), requesting keyframe from %d", reason, m.lastCommittedSeq)
 		m.send(protocol.EncodeRequestKeyframe(m.lastCommittedSeq))
 	}
 	return cmds
@@ -694,6 +699,10 @@ func (m Model) send(payload []byte) {
 	if m.out != nil {
 		m.out <- payload
 	}
+}
+
+func (m Model) logToMessages(level byte, format string, args ...any) {
+	m.send(protocol.EncodeLogMessage(level, fmt.Sprintf(format, args...)))
 }
 
 // toggleHUD flips the latency overlay when the toggle chord (ctrl+alt+l) is

@@ -237,7 +237,8 @@ func TestExtensionRuntimeIgnoresEmptyExtensionID(t *testing.T) {
 }
 
 func TestProtocolErrorRendersBlockingSurfaceAndTakesPrecedence(t *testing.T) {
-	model := New(80, 24, nil)
+	out := make(chan []byte, 4)
+	model := New(80, 24, out)
 	// Seed normal content so the test proves the error surface takes precedence
 	// over it rather than only rendering on a blank model.
 	updated, _ := model.Update(port.PacketMsg{Commands: frame(
@@ -270,6 +271,21 @@ func TestProtocolErrorRendersBlockingSurfaceAndTakesPrecedence(t *testing.T) {
 	}
 	if strings.Contains(rendered, "normal editor content") {
 		t.Fatalf("blocking surface should take precedence over normal content, got: %q", rendered)
+	}
+
+	packets := drainOutboundPackets(out)
+	if len(packets) != 1 {
+		t.Fatalf("protocol error should send one log_message packet, got %d", len(packets))
+	}
+	level, text, ok := decodeLogMessage(packets[0])
+	if !ok {
+		t.Fatalf("protocol error packet should be log_message, got %v", packets[0])
+	}
+	if level != protocol.LogLevelErr {
+		t.Fatalf("protocol error log level = %d, want err", level)
+	}
+	if !strings.Contains(text, "Go TUI protocol error: "+message) {
+		t.Fatalf("protocol error log should include reason, got %q", text)
 	}
 }
 
