@@ -9,6 +9,7 @@ defmodule MingaEditor.Input.PickerMouseTest do
   alias MingaEditor.VimState
   alias MingaEditor.Input.Picker, as: PickerInput
   alias MingaEditor.UI.Picker, as: PickerData
+  alias MingaEditor.UI.Picker.Item
 
   defmodule TestSource do
     @moduledoc false
@@ -47,14 +48,14 @@ defmodule MingaEditor.Input.PickerMouseTest do
 
   describe "scroll wheel" do
     test "wheel_down moves picker selection down" do
-      state = picker_state([%{id: 1, label: "one"}, %{id: 2, label: "two"}])
+      state = picker_state([%Item{id: 1, label: "one"}, %Item{id: 2, label: "two"}])
       {:handled, new_state} = PickerInput.handle_mouse(state, 10, 10, :wheel_down, 0, :press, 1)
       {:picker, %{picker_ui: %{picker: pui}}} = new_state.shell_state.modal
       assert pui.selected == 1
     end
 
     test "wheel_up moves picker selection up" do
-      state = picker_state([%{id: 1, label: "one"}, %{id: 2, label: "two"}])
+      state = picker_state([%Item{id: 1, label: "one"}, %Item{id: 2, label: "two"}])
       # Move down first, then up
       {:handled, state} = PickerInput.handle_mouse(state, 10, 10, :wheel_down, 0, :press, 1)
       {:handled, new_state} = PickerInput.handle_mouse(state, 10, 10, :wheel_up, 0, :press, 1)
@@ -65,7 +66,7 @@ defmodule MingaEditor.Input.PickerMouseTest do
 
   describe "click to select" do
     test "clicking a candidate selects and confirms it" do
-      items = [%{id: 1, label: "alpha"}, %{id: 2, label: "beta"}, %{id: 3, label: "gamma"}]
+      items = [%Item{id: 1, label: "alpha"}, %Item{id: 2, label: "beta"}, %Item{id: 3, label: "gamma"}]
       state = picker_state(items)
 
       # Items render upward from prompt_row (29). With 3 items:
@@ -79,7 +80,7 @@ defmodule MingaEditor.Input.PickerMouseTest do
     end
 
     test "clicking the only bottom candidate selects and confirms it" do
-      state = picker_state([%{id: 1, label: "only"}])
+      state = picker_state([%Item{id: 1, label: "only"}])
 
       {:handled, new_state} = PickerInput.handle_mouse(state, 28, 10, :left, 0, :press, 1)
 
@@ -88,7 +89,7 @@ defmodule MingaEditor.Input.PickerMouseTest do
     end
 
     test "clicking the last rendered bottom candidate selects it when the list is viewport-capped" do
-      items = for n <- 1..40, do: %{id: n, label: "item-#{n}"}
+      items = for n <- 1..40, do: %Item{id: n, label: "item-#{n}"}
       state = picker_state(items, 40)
 
       # 30 rows leave 27 item rows, plus separator and prompt. The last rendered item is item 27.
@@ -99,7 +100,7 @@ defmodule MingaEditor.Input.PickerMouseTest do
     end
 
     test "clicking the bottom picker separator does not select from the end of the list" do
-      items = for n <- 1..40, do: %{id: n, label: "item-#{n}"}
+      items = for n <- 1..40, do: %Item{id: n, label: "item-#{n}"}
       state = picker_state(items, 40)
 
       {:handled, new_state} = PickerInput.handle_mouse(state, 1, 10, :left, 0, :press, 1)
@@ -109,7 +110,7 @@ defmodule MingaEditor.Input.PickerMouseTest do
     end
 
     test "clicking outside items area is handled but does nothing" do
-      items = [%{id: 1, label: "one"}]
+      items = [%Item{id: 1, label: "one"}]
       state = picker_state(items)
 
       # Click on row 0 (well above the picker)
@@ -143,7 +144,7 @@ defmodule MingaEditor.Input.PickerMouseTest do
     end
 
     test "clicking an item inside the centered float selects it" do
-      items = [%{id: 1, label: "alpha"}, %{id: 2, label: "beta"}]
+      items = [%Item{id: 1, label: "alpha"}, %Item{id: 2, label: "beta"}]
       state = centered_picker_state(items)
 
       # Two visible items + prompt + border = 5 rows, centered: box starts at row 9.
@@ -156,7 +157,7 @@ defmodule MingaEditor.Input.PickerMouseTest do
     end
 
     test "clicking the prompt row in a tall centered picker ignores hidden items" do
-      items = for n <- 1..20, do: %{id: n, label: "item-#{n}"}
+      items = for n <- 1..20, do: %Item{id: n, label: "item-#{n}"}
       state = centered_picker_state(items, 20)
 
       max_height = max(div(24 * 7, 10), 5)
@@ -172,7 +173,7 @@ defmodule MingaEditor.Input.PickerMouseTest do
     end
 
     test "clicking the last rendered row in a tall centered picker selects the selected-visible slice" do
-      items = for n <- 1..20, do: %{id: n, label: "item-#{n}"}
+      items = for n <- 1..20, do: %Item{id: n, label: "item-#{n}"}
 
       state =
         items
@@ -197,7 +198,7 @@ defmodule MingaEditor.Input.PickerMouseTest do
     end
 
     test "clicking outside the centered float dismisses the picker" do
-      items = [%{id: 1, label: "alpha"}]
+      items = [%Item{id: 1, label: "alpha"}]
       state = centered_picker_state(items)
 
       # One visible item + prompt + border = 4 rows, centered: box starts at row 10.
@@ -210,7 +211,7 @@ defmodule MingaEditor.Input.PickerMouseTest do
     end
 
     test "scroll wheel works inside centered picker" do
-      items = [%{id: 1, label: "one"}, %{id: 2, label: "two"}]
+      items = [%Item{id: 1, label: "one"}, %Item{id: 2, label: "two"}]
       state = centered_picker_state(items)
 
       {:handled, new_state} =

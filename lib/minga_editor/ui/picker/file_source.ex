@@ -41,7 +41,7 @@ defmodule MingaEditor.UI.Picker.FileSource do
         score_map = build_score_map(frecency_map, git_status_map)
 
         paths
-        |> Enum.map(&format_file_candidate(&1, git_status_map))
+        |> Enum.map(&lean_candidate(&1, git_status_map))
         |> sort_by_score(score_map)
 
       {:error, msg} ->
@@ -49,23 +49,40 @@ defmodule MingaEditor.UI.Picker.FileSource do
     end
   end
 
-  @spec format_file_candidate(String.t(), %{String.t() => atom()}) :: Item.t()
-  defp format_file_candidate(path, git_status_map) do
+  # Lean candidate: just enough to match (filename label, full-path search text)
+  # and to enrich later (git status stashed in `meta`). Icon, color, two-line
+  # description, and the status annotation are built in `enrich/1` for the
+  # bounded winners only, so a 50k-file repo never materializes 50k rich items.
+  @spec lean_candidate(String.t(), %{String.t() => atom()}) :: Item.t()
+  defp lean_candidate(path, git_status_map) do
+    %Item{
+      id: path,
+      label: Path.basename(path),
+      search_text: path,
+      meta: %{git: Map.get(git_status_map, path)}
+    }
+  end
+
+  @impl true
+  @spec enrich([Item.t()]) :: [Item.t()]
+  def enrich(items), do: Enum.map(items, &enrich_item/1)
+
+  @spec enrich_item(Item.t()) :: Item.t()
+  defp enrich_item(%Item{id: path, meta: meta} = item) do
     filename = Path.basename(path)
     dir = Path.dirname(path)
     ft = Language.detect_filetype(filename)
     {icon, color} = Devicon.icon_and_color(ft)
     dir_display = if dir == ".", do: "", else: dir
+    annotation = git_status_annotation(Map.get(meta, :git))
 
-    annotation = git_status_annotation(Map.get(git_status_map, path))
-
-    %Item{
-      id: path,
-      label: "#{icon} #{filename}",
-      description: dir_display,
-      icon_color: color,
-      annotation: annotation,
-      two_line: true
+    %{
+      item
+      | label: "#{icon} #{filename}",
+        description: dir_display,
+        icon_color: color,
+        annotation: annotation,
+        two_line: true
     }
   end
 

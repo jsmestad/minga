@@ -27,7 +27,8 @@ defmodule MingaEditor.UI.Picker.Source do
         def title, do: "My picker"
 
         @impl true
-        def candidates(_context), do: [{:a, "item a", "description"}]
+        def candidates(_context),
+          do: [%MingaEditor.UI.Picker.Item{id: :a, label: "item a", description: "description"}]
 
         @impl true
         def on_select(item, state), do: state
@@ -138,6 +139,21 @@ defmodule MingaEditor.UI.Picker.Source do
   """
   @callback async?() :: boolean()
 
+  @doc """
+  Enriches a bounded list of items for display.
+
+  Filtering keeps only the top results, so a source with expensive per-item
+  display work (icons, colors, two-line descriptions, status annotations) can
+  return lean items from `candidates/1` and defer that work to this callback,
+  which runs only on the small set actually shown. The default is identity, so
+  sources that already return fully-built items need not implement it.
+
+  Enrichment must be a pure function of the items themselves (any state a source
+  needs should be stashed in `Item.meta` at `candidates/1` time), because it runs
+  on every render of the visible window.
+  """
+  @callback enrich([Picker.item()]) :: [Picker.item()]
+
   @optional_callbacks [
     preview?: 0,
     live_preview?: 0,
@@ -150,7 +166,8 @@ defmodule MingaEditor.UI.Picker.Source do
     on_bulk_action: 3,
     layout: 0,
     keep_open_on_select?: 0,
-    async?: 0
+    async?: 0,
+    enrich: 1
   ]
 
   @doc """
@@ -307,6 +324,23 @@ defmodule MingaEditor.UI.Picker.Source do
       module.async?()
     else
       false
+    end
+  end
+
+  @doc "Returns whether a source defers display enrichment to `enrich/1`."
+  @spec enriches?(module()) :: boolean()
+  def enriches?(module), do: exported?(module, :enrich, 1)
+
+  @doc """
+  Enriches the bounded display items for a source, returning them unchanged
+  when the source does not implement `enrich/1`.
+  """
+  @spec enrich(module(), [Picker.item()]) :: [Picker.item()]
+  def enrich(module, items) do
+    if enriches?(module) do
+      module.enrich(items)
+    else
+      items
     end
   end
 

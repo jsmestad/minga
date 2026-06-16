@@ -46,7 +46,7 @@ defmodule MingaEditor.Input.InterruptTest do
 
   @spec open_modal_variant(EditorState.t(), ModalOverlay.variant()) :: EditorState.t()
   defp open_modal_variant(state, :picker) do
-    picker = MingaEditor.UI.Picker.new(["x"])
+    picker = MingaEditor.UI.Picker.new([%MingaEditor.UI.Picker.Item{id: "x", label: "x"}])
     ModalOverlay.open(state, :picker, PickerPayload.new(%Picker{picker: picker}))
   end
 
@@ -240,7 +240,12 @@ defmodule MingaEditor.Input.InterruptTest do
   describe "overlay dismissal" do
     test "closes open picker" do
       state = base_state()
-      picker = MingaEditor.UI.Picker.new(["a", "b", "c"])
+      picker =
+        MingaEditor.UI.Picker.new([
+          %MingaEditor.UI.Picker.Item{id: "a", label: "a"},
+          %MingaEditor.UI.Picker.Item{id: "b", label: "b"},
+          %MingaEditor.UI.Picker.Item{id: "c", label: "c"}
+        ])
 
       state =
         ModalOverlay.open(state, :picker, PickerPayload.new(%Picker{picker: picker, source: nil}))

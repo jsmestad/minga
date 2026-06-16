@@ -241,6 +241,36 @@ defmodule MingaEditor.UI.Picker.FileSourceTest do
     assert hot_index < cold_index
   end
 
+  describe "lean candidates and enrich/1" do
+    test "enrich builds icon, color, two-line description, and git annotation for winners" do
+      lean = %Item{
+        id: "lib/foo/bar.ex",
+        label: "bar.ex",
+        search_text: "lib/foo/bar.ex",
+        meta: %{git: :modified}
+      }
+
+      [enriched] = FileSource.enrich([lean])
+
+      assert enriched.id == "lib/foo/bar.ex"
+      assert String.ends_with?(enriched.label, " bar.ex")
+      assert String.first(enriched.label) != "b"
+      assert enriched.description == "lib/foo"
+      assert enriched.annotation == "M"
+      assert enriched.two_line == true
+      assert is_integer(enriched.icon_color)
+    end
+
+    test "enrich uses an empty description for root-level files and no git annotation" do
+      lean = %Item{id: "mix.exs", label: "mix.exs", search_text: "mix.exs", meta: %{git: nil}}
+
+      [enriched] = FileSource.enrich([lean])
+
+      assert enriched.description == ""
+      assert enriched.annotation == nil
+    end
+  end
+
   defp build_file_picker_state(state, items) do
     picker = items |> Picker.new(title: "Find file", max_visible: 10) |> mark_all_picker()
 
