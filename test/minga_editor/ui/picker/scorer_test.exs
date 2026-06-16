@@ -32,7 +32,9 @@ defmodule MingaEditor.UI.Picker.ScorerTest do
     end
 
     test "bounded result is the prefix of the brute-force order" do
-      cands = candidates(["config.exs", "xconfig.exs", "lib/config/runtime.exs", "config_helper.ex"])
+      cands =
+        candidates(["config.exs", "xconfig.exs", "lib/config/runtime.exs", "config_helper.ex"])
+
       segments = ["config"]
 
       full = brute_force(cands, segments)

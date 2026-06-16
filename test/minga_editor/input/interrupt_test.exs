@@ -240,6 +240,7 @@ defmodule MingaEditor.Input.InterruptTest do
   describe "overlay dismissal" do
     test "closes open picker" do
       state = base_state()
+
       picker =
         MingaEditor.UI.Picker.new([
           %MingaEditor.UI.Picker.Item{id: "a", label: "a"},

@@ -28,7 +28,13 @@ defmodule MingaEditor.UI.Picker.CandidateTest do
   test "norm_search folds description, annotation, and search_text" do
     cand =
       Candidate.from_item(
-        %Item{id: 1, label: "app.ex", description: "Lib/Deep", annotation: "M", search_text: "PATH"},
+        %Item{
+          id: 1,
+          label: "app.ex",
+          description: "Lib/Deep",
+          annotation: "M",
+          search_text: "PATH"
+        },
         0
       )
 
@@ -37,7 +43,10 @@ defmodule MingaEditor.UI.Picker.CandidateTest do
 
   test "nil annotation is skipped during normalization" do
     cand =
-      Candidate.from_item(%Item{id: 1, label: "x", description: "d", annotation: nil, search_text: "y"}, 0)
+      Candidate.from_item(
+        %Item{id: 1, label: "x", description: "d", annotation: nil, search_text: "y"},
+        0
+      )
 
     assert cand.norm_search == "d y"
   end

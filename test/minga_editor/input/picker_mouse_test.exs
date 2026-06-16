@@ -66,7 +66,12 @@ defmodule MingaEditor.Input.PickerMouseTest do
 
   describe "click to select" do
     test "clicking a candidate selects and confirms it" do
-      items = [%Item{id: 1, label: "alpha"}, %Item{id: 2, label: "beta"}, %Item{id: 3, label: "gamma"}]
+      items = [
+        %Item{id: 1, label: "alpha"},
+        %Item{id: 2, label: "beta"},
+        %Item{id: 3, label: "gamma"}
+      ]
+
       state = picker_state(items)
 
       # Items render upward from prompt_row (29). With 3 items:

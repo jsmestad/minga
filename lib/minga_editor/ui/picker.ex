@@ -318,7 +318,12 @@ defmodule MingaEditor.UI.Picker do
     case split_query(query) do
       [] ->
         filtered = bounded_unscored(picker.items, result_limit(picker))
-        %{picker | filtered: filtered, selected: clamp_selection(picker.selected, length(filtered))}
+
+        %{
+          picker
+          | filtered: filtered,
+            selected: clamp_selection(picker.selected, length(filtered))
+        }
 
       segments ->
         filtered =
@@ -326,7 +331,11 @@ defmodule MingaEditor.UI.Picker do
           |> Scorer.top_k(segments, result_limit(picker))
           |> Enum.map(&highlight_winner(&1, query))
 
-        %{picker | filtered: filtered, selected: clamp_selection(picker.selected, length(filtered))}
+        %{
+          picker
+          | filtered: filtered,
+            selected: clamp_selection(picker.selected, length(filtered))
+        }
     end
   end
 

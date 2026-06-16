@@ -71,8 +71,12 @@ defmodule MingaEditor.UI.Picker.Scorer do
 
   # Maintain `kept` as a list sorted worst-first so the weakest entry is the head
   # and cheap to evict once the window exceeds `k`.
-  @spec bounded_insert([{non_neg_integer(), Candidate.t()}], non_neg_integer(),
-          {non_neg_integer(), Candidate.t()}, pos_integer()) ::
+  @spec bounded_insert(
+          [{non_neg_integer(), Candidate.t()}],
+          non_neg_integer(),
+          {non_neg_integer(), Candidate.t()},
+          pos_integer()
+        ) ::
           {non_neg_integer(), [{non_neg_integer(), Candidate.t()}]}
   defp bounded_insert(kept, count, entry, k) do
     kept = insert_sorted(kept, entry)
