@@ -301,4 +301,96 @@ defmodule MingaEditor.PickerUITest do
       assert pui.picker.query == "fix"
     end
   end
+
+  describe "async revision-tagged filtering" do
+    test "typing updates the query and schedules a refilter without applying it inline" do
+      state = async_filter_state(["bravo", "boson", "charlie", "alpha"])
+
+      state =
+        state
+        |> PickerUI.handle_key(?b, 0)
+        |> PickerUI.handle_key(?r, 0)
+
+      pui = picker_ui(state)
+      assert pui.picker.query == "br"
+      assert pui.filter_revision == 2
+      assert pui.filter_status == :filtering
+      # Deferred: the previous (empty-query) results are still shown.
+      assert Picker.count(pui.picker) == 4
+    end
+
+    test "handle_key schedules a revision-tagged refilter message" do
+      state = async_filter_state(["bravo", "alpha"])
+      _ = PickerUI.handle_key(state, ?b, 0)
+      assert_received {:picker_refilter, 1}
+    end
+
+    test "applying the current revision updates the filtered results" do
+      state = async_filter_state(["bravo", "boson", "charlie", "alpha"])
+
+      state =
+        state
+        |> PickerUI.handle_key(?b, 0)
+        |> PickerUI.handle_key(?r, 0)
+        |> PickerUI.apply_refilter(2)
+
+      pui = picker_ui(state)
+      assert pui.filter_status == :idle
+      assert Enum.map(pui.picker.filtered, & &1.label) == ["bravo"]
+    end
+
+    test "a stale revision is ignored and does not overwrite newer results" do
+      state = async_filter_state(["bravo", "boson", "charlie", "alpha"])
+
+      state =
+        state
+        |> PickerUI.handle_key(?b, 0)
+        |> PickerUI.handle_key(?r, 0)
+
+      # Revision 1 ("b") finishes late; it must not apply over the pending "br".
+      state = PickerUI.apply_refilter(state, 1)
+      stale_pui = picker_ui(state)
+      assert stale_pui.filter_status == :filtering
+      assert Picker.count(stale_pui.picker) == 4
+
+      # The current revision applies.
+      state = PickerUI.apply_refilter(state, 2)
+      assert Enum.map(picker_ui(state).picker.filtered, & &1.label) == ["bravo"]
+    end
+
+    test "backspace schedules a refilter that widens the query" do
+      state = async_filter_state(["bravo", "boson", "charlie", "alpha"])
+
+      state =
+        state
+        |> PickerUI.handle_key(?b, 0)
+        |> PickerUI.handle_key(?r, 0)
+        |> PickerUI.apply_refilter(2)
+
+      assert Enum.map(picker_ui(state).picker.filtered, & &1.label) == ["bravo"]
+
+      state = PickerUI.handle_key(state, 127, 0)
+      pui = picker_ui(state)
+      assert pui.picker.query == "b"
+      assert pui.filter_revision == 3
+      assert pui.filter_status == :filtering
+
+      state = PickerUI.apply_refilter(state, 3)
+      labels = Enum.map(picker_ui(state).picker.filtered, & &1.label)
+      assert "bravo" in labels and "boson" in labels
+    end
+  end
+
+  defp async_filter_state(labels) do
+    state = TestHelpers.base_state(content: "x")
+    items = Enum.map(labels, &%Item{id: &1, label: &1})
+    picker = Picker.new(items, title: "Test", max_visible: 10)
+    picker_state = %PickerState{picker: picker, source: NoBulkActionsSource, restore: 0}
+    ModalOverlay.open(state, :picker, PickerPayload.new(picker_state))
+  end
+
+  defp picker_ui(state) do
+    {:picker, %{picker_ui: pui}} = state.shell_state.modal
+    pui
+  end
 end

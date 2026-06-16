@@ -3,9 +3,11 @@ defmodule MingaEditor.PickerUI do
   Picker orchestration and modal state: open, key handling, close, and refresh.
 
   This is the live picker state layer used by the command palette, file finder,
-  buffer list, LSP actions, and agent pickers. All functions are pure
-  `state → state` or `state → {state, action}` transformations; the GenServer
-  dispatches any returned action tuple.
+  buffer list, LSP actions, and agent pickers. Functions are `state → state` or
+  `state → {state, action}` transformations; the GenServer dispatches any
+  returned action tuple. The one controlled side effect is that `handle_key/3`,
+  on a query-changing keystroke, enqueues a deferred `{:picker_refilter, rev}`
+  message to `self()` so input never blocks on scoring (see `apply_refilter/2`).
 
   The modal `picker_ui` state these functions produce is read directly by the
   semantic render-model builder (`RenderModel.UI.PickerBuilder`), which emits the
@@ -401,14 +403,13 @@ defmodule MingaEditor.PickerUI do
         _mods
       )
       when cp in [8, 127] do
-    new_picker = Picker.backspace(picker)
+    new_query = backspace_query(picker.query)
 
     # If query is now empty and we had mode-switched, switch back to original source
-    if new_picker.query == "" and prefix != "" and orig != nil do
+    if new_query == "" and prefix != "" and orig != nil do
       switch_back_to_original(state)
     else
-      state = update_picker(state, &%{&1 | picker: new_picker})
-      maybe_preview_selection(state)
+      schedule_refilter(state, new_query)
     end
   end
 
@@ -452,11 +453,77 @@ defmodule MingaEditor.PickerUI do
         new_state
 
       :no_switch ->
-        new_picker = Picker.type_char(picker, char)
-        state = update_picker(state, &%{&1 | picker: new_picker})
-        maybe_preview_selection(state)
+        schedule_refilter(state, picker.query <> char)
     end
   end
+
+  # ── Async revision-tagged filtering ─────────────────────────────────────────
+  # Keypresses update the query immediately and schedule a refilter tagged with a
+  # bumped revision, so input never blocks on scoring a large candidate set. The
+  # editor process applies a refilter only if its revision is still current
+  # (`apply_refilter/2`), so a burst of keystrokes coalesces to a single scoring
+  # pass and stale results are dropped.
+
+  @spec backspace_query(String.t()) :: String.t()
+  defp backspace_query(""), do: ""
+  defp backspace_query(query), do: String.slice(query, 0, String.length(query) - 1)
+
+  @spec schedule_refilter(state(), String.t()) :: state()
+  defp schedule_refilter(state, new_query) do
+    {:picker, payload} = state.shell_state.modal
+    new_revision = payload.picker_ui.filter_revision + 1
+
+    new_state =
+      update_picker(state, fn ps ->
+        %{
+          ps
+          | picker: Picker.put_query(ps.picker, new_query),
+            filter_revision: new_revision,
+            filter_status: :filtering
+        }
+      end)
+
+    send(self(), {:picker_refilter, new_revision})
+    new_state
+  end
+
+  @doc """
+  Returns whether a scheduled refilter for `revision` is still the latest, so the
+  caller can skip applying and re-rendering superseded revisions entirely.
+  """
+  @spec pending_refilter?(state(), non_neg_integer()) :: boolean()
+  def pending_refilter?(
+        %{shell_state: %{modal: {:picker, %{picker_ui: %{filter_revision: revision}}}}},
+        revision
+      ),
+      do: true
+
+  def pending_refilter?(_state, _revision), do: false
+
+  @doc """
+  Applies the result of a scheduled refilter, but only when `revision` still
+  matches the picker's current `filter_revision`. A stale revision (superseded
+  by newer typing) is ignored, so out-of-date results never overwrite newer
+  ones. Runs the live preview for the freshly applied selection.
+  """
+  @spec apply_refilter(state(), non_neg_integer()) :: state()
+  def apply_refilter(
+        %{
+          shell_state: %{
+            modal:
+              {:picker, %{picker_ui: %{filter_revision: revision, picker: %Picker{} = picker}}}
+          }
+        } = state,
+        revision
+      ) do
+    refiltered = Picker.filter(picker, picker.query)
+
+    state
+    |> update_picker(fn ps -> %{ps | picker: refiltered, filter_status: :idle} end)
+    |> maybe_preview_selection()
+  end
+
+  def apply_refilter(state, _revision), do: state
 
   @spec select_item(EditorState.t(), Picker.t(), Picker.item(), module()) ::
           EditorState.t() | {EditorState.t(), {:execute_command, atom()}}

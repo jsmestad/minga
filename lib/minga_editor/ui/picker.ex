@@ -124,6 +124,18 @@ defmodule MingaEditor.UI.Picker do
     refilter(%{picker | query: query})
   end
 
+  @doc """
+  Sets the query without refiltering, keeping the current `filtered` results.
+
+  Used by the async/revision-tagged filtering path: the query updates
+  immediately for display while the (potentially expensive) refilter is
+  scheduled separately, so previous results stay visible until it completes.
+  """
+  @spec put_query(t(), String.t()) :: t()
+  def put_query(%__MODULE__{} = picker, query) when is_binary(query) do
+    %{picker | query: query}
+  end
+
   # ── Navigation ──────────────────────────────────────────────────────────────
 
   @doc "Moves the selection down by one (wraps around)."

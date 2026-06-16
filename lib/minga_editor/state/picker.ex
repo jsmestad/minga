@@ -13,6 +13,12 @@ defmodule MingaEditor.State.Picker do
   @typedoc "Async loading status for sources that fetch candidates in the background."
   @type load_status :: :ready | :loading | {:error, String.t()}
 
+  @typedoc """
+  Async filtering status. `:idle` when the shown results match the current
+  query; `:filtering` while a refilter for the latest query revision is pending.
+  """
+  @type filter_status :: :idle | :filtering
+
   @type t :: %__MODULE__{
           picker: MingaEditor.UI.Picker.t() | nil,
           source: module() | nil,
@@ -23,7 +29,9 @@ defmodule MingaEditor.State.Picker do
           layout: MingaEditor.UI.Picker.Source.layout(),
           original_source: module() | nil,
           mode_prefix: String.t(),
-          load_status: load_status()
+          load_status: load_status(),
+          filter_revision: non_neg_integer(),
+          filter_status: filter_status()
         }
 
   defstruct picker: nil,
@@ -35,7 +43,9 @@ defmodule MingaEditor.State.Picker do
             layout: :bottom,
             original_source: nil,
             mode_prefix: "",
-            load_status: :ready
+            load_status: :ready,
+            filter_revision: 0,
+            filter_status: :idle
 
   @doc "Returns true if a picker is currently open."
   @spec open?(t()) :: boolean()

@@ -845,6 +845,18 @@ defmodule MingaEditor do
     end
   end
 
+  # Async picker refilter: PickerUI.handle_key updates the query and schedules
+  # this message tagged with a revision. Apply only if the revision is still
+  # current; a burst of keystrokes leaves several of these queued and all but
+  # the latest are dropped by the revision check in apply_refilter/2.
+  def handle_info({:picker_refilter, revision}, state) do
+    if MingaEditor.PickerUI.pending_refilter?(state, revision) do
+      {:noreply, Renderer.render_or_async(MingaEditor.PickerUI.apply_refilter(state, revision))}
+    else
+      {:noreply, state}
+    end
+  end
+
   def handle_info(_msg, state) do
     {:noreply, state}
   end
