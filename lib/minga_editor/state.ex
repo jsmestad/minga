@@ -115,9 +115,9 @@ defmodule MingaEditor.State do
             message_store: %MessageStore{},
             notifications: NotificationCenter.new(),
             git_remote_op: nil,
-            # Per-lane tokens for slow work offloaded via MingaEditor.AsyncAction.
-            # lane (atom) => latest reference(). A result whose token no longer
-            # matches its lane's entry has been superseded and is dropped.
+            # Per-lane serial gates for slow work offloaded via
+            # MingaEditor.AsyncAction. lane (atom) => %{running: reference() | nil,
+            # queue: [work_fun]}. Operations on a lane run one at a time, in order.
             async_actions: %{},
             lsp: %LSPState{},
             parser_status: :available,
@@ -156,6 +156,12 @@ defmodule MingaEditor.State do
 
   @type backend :: :tui | :gui | :native_gui | :headless
 
+  @typedoc """
+  Per-lane serial gate for `MingaEditor.AsyncAction`: the in-flight operation's
+  token (or `nil` when idle) and a FIFO queue of pending zero-arity work funcs.
+  """
+  @type async_lane :: %{running: reference() | nil, queue: [(-> term())]}
+
   @type shell_id :: atom()
   @type shell_state :: term()
   @type shell_identity :: ShellIdentity.t() | nil
@@ -182,7 +188,7 @@ defmodule MingaEditor.State do
           message_store: MessageStore.t(),
           notifications: NotificationCenter.t(),
           git_remote_op: git_remote_op(),
-          async_actions: %{optional(atom()) => reference()},
+          async_actions: %{optional(atom()) => async_lane()},
           lsp: LSPState.t(),
           parser_status: MingaEditor.Shell.Traditional.Modeline.parser_status(),
           focus_stack: [module()],
@@ -1402,22 +1408,22 @@ defmodule MingaEditor.State do
   @spec clear_git_remote_op(t()) :: t()
   def clear_git_remote_op(%__MODULE__{} = state), do: %{state | git_remote_op: nil}
 
-  @doc "Records `token` as the latest in-flight async-action token for `lane`."
-  @spec put_async_token(t(), atom(), reference()) :: t()
-  def put_async_token(%__MODULE__{async_actions: actions} = state, lane, token)
-      when is_atom(lane) and is_reference(token) do
-    %{state | async_actions: Map.put(actions, lane, token)}
+  @doc "Returns the async-action gate state for `lane` (idle default when absent)."
+  @spec get_async_lane(t(), atom()) :: async_lane()
+  def get_async_lane(%__MODULE__{async_actions: actions}, lane) when is_atom(lane) do
+    Map.get(actions, lane, %{running: nil, queue: []})
   end
 
-  @doc "Returns whether `token` is still the latest token recorded for `lane`."
-  @spec async_token_current?(t(), atom(), reference()) :: boolean()
-  def async_token_current?(%__MODULE__{async_actions: actions}, lane, token) do
-    Map.get(actions, lane) == token
+  @doc "Stores the async-action gate state for `lane`."
+  @spec put_async_lane(t(), atom(), async_lane()) :: t()
+  def put_async_lane(%__MODULE__{async_actions: actions} = state, lane, lane_state)
+      when is_atom(lane) and is_map(lane_state) do
+    %{state | async_actions: Map.put(actions, lane, lane_state)}
   end
 
-  @doc "Clears the recorded async-action token for `lane`."
-  @spec clear_async_token(t(), atom()) :: t()
-  def clear_async_token(%__MODULE__{async_actions: actions} = state, lane) do
+  @doc "Removes the async-action gate state for `lane`, marking it idle."
+  @spec delete_async_lane(t(), atom()) :: t()
+  def delete_async_lane(%__MODULE__{async_actions: actions} = state, lane) when is_atom(lane) do
     %{state | async_actions: Map.delete(actions, lane)}
   end
 

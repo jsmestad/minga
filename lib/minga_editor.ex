@@ -854,15 +854,16 @@ defmodule MingaEditor do
   end
 
   # Async editor-action result: slow work offloaded via MingaEditor.AsyncAction
-  # sends this when it finishes. Apply it only if its token is still the latest
-  # for the lane; a superseded (stale) result is dropped so it can't overwrite
-  # newer state.
+  # sends this when it finishes. Apply the in-flight result, then advance the lane
+  # so the next queued op (if any) starts — lanes run one op at a time, in order.
+  # A token that is not the in-flight one (a defensive guard against duplicate or
+  # out-of-band messages) is dropped without advancing.
   def handle_info({:async_action_result, lane, token, result}, state) do
     if MingaEditor.AsyncAction.current?(state, lane, token) do
       new_state =
         state
         |> apply_async_result(lane, result)
-        |> EditorState.clear_async_token(lane)
+        |> MingaEditor.AsyncAction.advance(lane)
 
       {:noreply, Renderer.render_or_async(new_state)}
     else

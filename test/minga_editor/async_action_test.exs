@@ -1,5 +1,5 @@
 defmodule MingaEditor.AsyncActionTest do
-  @moduledoc "Token-tagged offloading of slow editor work with stale-result protection."
+  @moduledoc "Per-lane serial offloading of slow editor work with error capture."
   use ExUnit.Case, async: true
 
   alias MingaEditor.AsyncAction
@@ -7,27 +7,60 @@ defmodule MingaEditor.AsyncActionTest do
 
   defp state, do: %EditorState{port_manager: self(), workspace: nil}
 
-  test "run/3 records a token and offloads the work, returning immediately" do
+  test "run/3 starts the work, records an in-flight token, and reports back async" do
     s = AsyncAction.run(state(), :demo, fn -> send(self(), :work_ran) end)
 
-    token = s.async_actions[:demo]
-    assert is_reference(token)
-    assert AsyncAction.current?(s, :demo, token)
+    lane = s.async_actions[:demo]
+    assert is_reference(lane.running)
+    assert lane.queue == []
+    assert AsyncAction.current?(s, :demo, lane.running)
     # The work runs in a Task and reports back asynchronously, not inline.
-    assert_receive {:async_action_result, :demo, ^token, _result}
+    assert_receive {:async_action_result, :demo, _token, _result}
   end
 
-  test "a newer run on the same lane supersedes the older token" do
-    s1 = AsyncAction.run(state(), :demo, fn -> :a end)
-    old = s1.async_actions[:demo]
+  test "a second op on a busy lane is queued, not started concurrently" do
+    s = AsyncAction.run(state(), :demo, fn -> :first end)
+    token1 = s.async_actions[:demo].running
 
-    s2 = AsyncAction.run(s1, :demo, fn -> :b end)
-    new = s2.async_actions[:demo]
+    # Enqueue while busy: running token unchanged, queue grows, no new Task yet.
+    s = AsyncAction.run(s, :demo, fn -> :second end)
+    assert s.async_actions[:demo].running == token1
+    assert length(s.async_actions[:demo].queue) == 1
 
-    refute old == new
-    # The out-of-order/stale result for `old` is no longer current and is dropped.
-    refute AsyncAction.current?(s2, :demo, old)
-    assert AsyncAction.current?(s2, :demo, new)
+    # Only the in-flight op has reported.
+    assert_receive {:async_action_result, :demo, ^token1, :first}
+    refute_received {:async_action_result, :demo, _t, :second}
+  end
+
+  test "advance/2 starts the next queued op under a fresh token, FIFO order" do
+    s =
+      state()
+      |> AsyncAction.run(:demo, fn -> :a end)
+
+    ta = s.async_actions[:demo].running
+    s = AsyncAction.run(s, :demo, fn -> :b end)
+    s = AsyncAction.run(s, :demo, fn -> :c end)
+    assert_receive {:async_action_result, :demo, ^ta, :a}
+
+    s = AsyncAction.advance(s, :demo)
+    tb = s.async_actions[:demo].running
+    refute tb == ta
+    assert_receive {:async_action_result, :demo, ^tb, :b}
+
+    s = AsyncAction.advance(s, :demo)
+    tc = s.async_actions[:demo].running
+    assert_receive {:async_action_result, :demo, ^tc, :c}
+
+    # Draining the last op idles (removes) the lane.
+    s = AsyncAction.advance(s, :demo)
+    refute Map.has_key?(s.async_actions, :demo)
+  end
+
+  test "current? is true only for the in-flight token" do
+    s = AsyncAction.run(state(), :demo, fn -> :x end)
+    assert AsyncAction.current?(s, :demo, s.async_actions[:demo].running)
+    refute AsyncAction.current?(s, :demo, make_ref())
+    refute AsyncAction.current?(s, :other, make_ref())
   end
 
   test "lanes are independent" do
@@ -36,20 +69,24 @@ defmodule MingaEditor.AsyncActionTest do
       |> AsyncAction.run(:git_worktree, fn -> :a end)
       |> AsyncAction.run(:file_tree, fn -> :b end)
 
-    assert AsyncAction.current?(s, :git_worktree, s.async_actions[:git_worktree])
-    assert AsyncAction.current?(s, :file_tree, s.async_actions[:file_tree])
+    assert AsyncAction.current?(s, :git_worktree, s.async_actions[:git_worktree].running)
+    assert AsyncAction.current?(s, :file_tree, s.async_actions[:file_tree].running)
   end
 
   test "a raising work function is captured as an error result, not a crash" do
-    AsyncAction.run(state(), :demo, fn -> raise "boom" end)
-    assert_receive {:async_action_result, :demo, _token, {:error, "boom"}}
+    s = AsyncAction.run(state(), :demo, fn -> raise "boom" end)
+    token = s.async_actions[:demo].running
+    assert_receive {:async_action_result, :demo, ^token, {:error, "boom"}}
   end
 
-  test "clear_async_token makes a later result non-current" do
-    s = AsyncAction.run(state(), :demo, fn -> :x end)
-    token = s.async_actions[:demo]
+  test "a failing op still advances the lane so the queue does not wedge" do
+    s = AsyncAction.run(state(), :demo, fn -> raise "boom" end)
+    ta = s.async_actions[:demo].running
+    s = AsyncAction.run(s, :demo, fn -> :next end)
+    assert_receive {:async_action_result, :demo, ^ta, {:error, "boom"}}
 
-    cleared = EditorState.clear_async_token(s, :demo)
-    refute AsyncAction.current?(cleared, :demo, token)
+    s = AsyncAction.advance(s, :demo)
+    tb = s.async_actions[:demo].running
+    assert_receive {:async_action_result, :demo, ^tb, :next}
   end
 end

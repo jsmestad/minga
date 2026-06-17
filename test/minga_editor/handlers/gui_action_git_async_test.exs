@@ -71,4 +71,31 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
     applied = GuiActionHandler.apply_git_result(state, {:error, "fatal: pathspec", "/tmp/repo"})
     assert EditorState.status_msg(applied) == "Git error: fatal: pathspec"
   end
+
+  test "a generic (2-tuple) error from a raised op is surfaced, not crashed", %{state: state} do
+    # AsyncAction.safely/1 hands back {:error, reason} (no git_root) when the work
+    # raises/exits/throws; apply_git_result must handle it without FunctionClause.
+    applied = GuiActionHandler.apply_git_result(state, {:error, "boom"})
+    assert EditorState.status_msg(applied) == "Git error: boom"
+  end
+
+  test "an unexpected result shape degrades to a failure status", %{state: state} do
+    applied = GuiActionHandler.apply_git_result(state, :weird)
+    assert EditorState.status_msg(applied) == "Git action failed"
+  end
+
+  test "rapid git actions serialize: the second is queued, not run concurrently",
+       %{state: state} do
+    state = GuiActionHandler.dispatch(state, {:git_stage_file, "a.ex"})
+    state = GuiActionHandler.dispatch(state, {:git_discard_file, "b.ex"})
+
+    lane = state.async_actions[:git_worktree]
+    assert is_reference(lane.running)
+    # The discard is queued behind the in-flight stage rather than racing it.
+    assert length(lane.queue) == 1
+
+    # Only the in-flight stage has reported; the discard waits for advance.
+    assert_receive {:async_action_result, :git_worktree, _t, {:ok, "Staged a.ex", _}}
+    refute_received {:async_action_result, :git_worktree, _t2, {:ok, "Discarded b.ex", _}}
+  end
 end

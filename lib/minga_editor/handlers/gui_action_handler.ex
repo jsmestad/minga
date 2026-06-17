@@ -1242,7 +1242,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   posts the success status, or surfaces the error. Called by the editor when an
   `{:async_action_result, :git_worktree, _, _}` message arrives and is current.
   """
-  @spec apply_git_result(state(), git_result()) :: state()
+  @spec apply_git_result(state(), git_result() | {:error, String.t()} | term()) :: state()
   def apply_git_result(state, {:ok, success_msg, git_root}) do
     MingaEditor.refresh_git_repo(git_root)
     EditorState.set_status(state, success_msg)
@@ -1258,6 +1258,23 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   def apply_git_result(state, :not_a_repo) do
     EditorState.set_status(state, "Not in a git repository")
+  end
+
+  # The git work raised/exited/threw before producing a git_result(), so
+  # AsyncAction.safely/1 handed back a generic 2-tuple error. There is no
+  # git_root to refresh against; just surface the failure. Without this clause an
+  # exception in a git op would FunctionClause-crash the editor GenServer in
+  # handle_info, defeating AsyncAction's "a failing action can never crash the
+  # editor" guarantee.
+  def apply_git_result(state, {:error, reason}) when is_binary(reason) do
+    EditorState.set_status(state, "Git error: #{reason}")
+  end
+
+  # Defensive total fallback: any unexpected result shape degrades to a status
+  # message instead of crashing the editor.
+  def apply_git_result(state, other) do
+    Minga.Log.warning(:editor, "[git] unexpected async git result: #{inspect(other)}")
+    EditorState.set_status(state, "Git action failed")
   end
 
   # ── Completion helpers ─────────────────────────────────────────────
