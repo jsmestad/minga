@@ -115,6 +115,10 @@ defmodule MingaEditor.State do
             message_store: %MessageStore{},
             notifications: NotificationCenter.new(),
             git_remote_op: nil,
+            # Per-lane tokens for slow work offloaded via MingaEditor.AsyncAction.
+            # lane (atom) => latest reference(). A result whose token no longer
+            # matches its lane's entry has been superseded and is dropped.
+            async_actions: %{},
             lsp: %LSPState{},
             parser_status: :available,
             focus_stack: [],
@@ -178,6 +182,7 @@ defmodule MingaEditor.State do
           message_store: MessageStore.t(),
           notifications: NotificationCenter.t(),
           git_remote_op: git_remote_op(),
+          async_actions: %{optional(atom()) => reference()},
           lsp: LSPState.t(),
           parser_status: MingaEditor.Shell.Traditional.Modeline.parser_status(),
           focus_stack: [module()],
@@ -1396,6 +1401,25 @@ defmodule MingaEditor.State do
 
   @spec clear_git_remote_op(t()) :: t()
   def clear_git_remote_op(%__MODULE__{} = state), do: %{state | git_remote_op: nil}
+
+  @doc "Records `token` as the latest in-flight async-action token for `lane`."
+  @spec put_async_token(t(), atom(), reference()) :: t()
+  def put_async_token(%__MODULE__{async_actions: actions} = state, lane, token)
+      when is_atom(lane) and is_reference(token) do
+    %{state | async_actions: Map.put(actions, lane, token)}
+  end
+
+  @doc "Returns whether `token` is still the latest token recorded for `lane`."
+  @spec async_token_current?(t(), atom(), reference()) :: boolean()
+  def async_token_current?(%__MODULE__{async_actions: actions}, lane, token) do
+    Map.get(actions, lane) == token
+  end
+
+  @doc "Clears the recorded async-action token for `lane`."
+  @spec clear_async_token(t(), atom()) :: t()
+  def clear_async_token(%__MODULE__{async_actions: actions} = state, lane) do
+    %{state | async_actions: Map.delete(actions, lane)}
+  end
 
   @spec register_diff_view(t(), pid(), diff_view_info()) :: t()
   def register_diff_view(%__MODULE__{} = state, diff_buf, info) when is_pid(diff_buf),
