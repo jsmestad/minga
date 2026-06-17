@@ -14,6 +14,11 @@ defmodule Minga.Project.FileFind do
   (it has a `.git` entry). `fd` no longer follows symlinks, so symlinked or
   cyclic trees are never traversed.
 
+  Because `git ls-files` reads the index, files inside git **submodules** appear
+  only as their gitlink entry, not as individual files. This matches git's own
+  view of the worktree; open the submodule directly to browse its files. (The
+  previous `fd`-first behaviour walked into submodules.)
+
   All paths are returned relative to the given root directory.
   """
 
