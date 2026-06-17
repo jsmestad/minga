@@ -681,30 +681,24 @@ final class EditorNSView: MTKView {
 
     // MARK: - Scroll indicator interaction
 
-    /// Width of the scroll indicator hit-test region (wider than the visual indicator for easy clicking).
-    private let scrollTrackHitWidth: CGFloat = 20.0
-
     /// Whether the user is currently dragging the scroll indicator.
     private var isDraggingScrollIndicator = false
 
     /// Tests whether a point is in the scroll indicator track region (right edge).
+    /// Geometry lives in `EditorScrollTrack` so it can be unit-tested.
     private func isInScrollTrack(_ point: NSPoint) -> Bool {
-        let trackX = bounds.width - scrollTrackHitWidth
-        return point.x >= trackX && point.x <= bounds.width
+        EditorScrollTrack.isInTrack(x: point.x, viewWidth: bounds.width)
     }
 
     /// Converts a Y coordinate in the scroll track to a target line number.
     private func scrollTrackYToLine(_ y: CGFloat) -> UInt32 {
         let fs = dispatcher.frameState
-        let totalLines = fs.totalLineCount
-        let visibleRows = UInt32(fs.rows)
-        guard totalLines > visibleRows else { return 0 }
-
-        // In AppKit, Y increases upward. Convert to top-down.
-        let flippedY = bounds.height - y
-        let proportion = max(0, min(1, flippedY / bounds.height))
-        let maxTop = Int64(totalLines) - Int64(visibleRows)
-        return UInt32(max(0, min(maxTop, Int64(Double(proportion) * Double(maxTop)))))
+        return EditorScrollTrack.line(
+            forY: y,
+            viewHeight: bounds.height,
+            totalLines: fs.totalLineCount,
+            visibleRows: UInt32(fs.rows)
+        )
     }
 
     // MARK: - Line spacing
