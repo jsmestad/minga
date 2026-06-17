@@ -103,6 +103,11 @@ defmodule MingaEditor.RenderModel.Window.Builder do
            compose_fp: non_neg_integer()
          }
 
+  @typep folded_source_ctx :: %{
+           line_byte_offsets: %{non_neg_integer() => non_neg_integer()},
+           highlight_segments_by_line: %{non_neg_integer() => [Highlight.styled_segment()]}
+         }
+
   @doc """
   Builds a `RenderWindow` for one editor window.
 
@@ -830,6 +835,20 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     line_byte_offsets =
       build_line_byte_offsets(lines, first_line, snapshot.first_line_byte_offset)
 
+    highlight_segments_by_line =
+      build_highlight_segments_by_line(
+        lines,
+        first_line,
+        visible_line_map,
+        line_byte_offsets,
+        ctx.highlight
+      )
+
+    source_ctx = %{
+      line_byte_offsets: line_byte_offsets,
+      highlight_segments_by_line: highlight_segments_by_line
+    }
+
     {entries, _counters} =
       Enum.map_reduce(visible_line_map, %{}, fn {buf_line, entry_type}, counters ->
         {visual_identity_index, counters} = next_visual_identity(buf_line, entry_type, counters)
@@ -841,7 +860,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
             lines,
             first_line,
             ctx,
-            line_byte_offsets,
+            source_ctx,
             visual_identity_index,
             retain_ctx
           )
@@ -857,6 +876,46 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     entries
   end
 
+  @spec build_highlight_segments_by_line(
+          [String.t()],
+          non_neg_integer(),
+          [DisplayMap.entry()],
+          %{non_neg_integer() => non_neg_integer()},
+          Highlight.t() | nil
+        ) :: %{non_neg_integer() => [Highlight.styled_segment()]}
+  defp build_highlight_segments_by_line(_lines, _first_line, _visible_line_map, _offsets, nil),
+    do: %{}
+
+  defp build_highlight_segments_by_line(
+         lines,
+         first_line,
+         visible_line_map,
+         line_byte_offsets,
+         %Highlight{} = hl
+       ) do
+    source_lines =
+      visible_line_map
+      |> Enum.map(&source_highlight_line/1)
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+      |> Enum.map(fn buf_line ->
+        {buf_line,
+         {line_at(lines, buf_line, first_line), Map.get(line_byte_offsets, buf_line, 0)}}
+      end)
+      |> Enum.sort_by(fn {_buf_line, {_line_text, line_byte_offset}} -> line_byte_offset end)
+
+    source_lines
+    |> Enum.map(fn {_buf_line, line_with_offset} -> line_with_offset end)
+    |> then(&Highlight.styles_for_visible_lines(hl, &1))
+    |> then(fn highlight_segments -> Enum.zip(source_lines, highlight_segments) end)
+    |> Map.new(fn {{buf_line, _line_with_offset}, segments} -> {buf_line, segments} end)
+  end
+
+  @spec source_highlight_line(DisplayMap.entry()) :: non_neg_integer() | nil
+  defp source_highlight_line({buf_line, :normal}), do: buf_line
+  defp source_highlight_line({buf_line, {:fold_start, _hidden_count}}), do: buf_line
+  defp source_highlight_line(_entry), do: nil
+
   # Reuse only plain folded `:normal` rows; decoration-driven rows (folds,
   # virtual lines, blocks) recompose every frame to stay conservative (#2287).
   @spec build_visual_row_entry_retained(
@@ -865,7 +924,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           [String.t()],
           non_neg_integer(),
           Context.t(),
-          %{non_neg_integer() => non_neg_integer()},
+          folded_source_ctx(),
           non_neg_integer(),
           retain_ctx()
         ) :: {Row.t(), non_neg_integer(), boolean()}
@@ -875,15 +934,16 @@ defmodule MingaEditor.RenderModel.Window.Builder do
          lines,
          first_line,
          ctx,
-         line_byte_offsets,
+         source_ctx,
          index,
          retain_ctx
        ) do
     line_text = line_at(lines, buf_line, first_line)
+    hl_segments = Map.get(source_ctx.highlight_segments_by_line, buf_line)
     row_id = Row.stable_id(:normal, buf_line)
 
-    compose_or_reuse(retain_ctx, row_id, {:fold_normal, line_text}, fn ->
-      build_visual_row_entry(buf_line, :normal, lines, first_line, ctx, line_byte_offsets, index)
+    compose_or_reuse(retain_ctx, row_id, {:fold_normal, line_text, hl_segments}, fn ->
+      build_visual_row_entry(buf_line, :normal, lines, first_line, ctx, source_ctx, index)
     end)
   end
 
@@ -893,20 +953,11 @@ defmodule MingaEditor.RenderModel.Window.Builder do
          lines,
          first_line,
          ctx,
-         line_byte_offsets,
+         source_ctx,
          index,
          retain_ctx
        ) do
-    row =
-      build_visual_row_entry(
-        buf_line,
-        entry_type,
-        lines,
-        first_line,
-        ctx,
-        line_byte_offsets,
-        index
-      )
+    row = build_visual_row_entry(buf_line, entry_type, lines, first_line, ctx, source_ctx, index)
 
     {row, row_input_hash(retain_ctx, {:fold_other, row.row_id, row.content_hash}), false}
   end
@@ -934,7 +985,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           [String.t()],
           non_neg_integer(),
           Context.t(),
-          %{non_neg_integer() => non_neg_integer()},
+          folded_source_ctx(),
           non_neg_integer()
         ) :: Row.t()
   defp build_visual_row_entry(
@@ -943,12 +994,13 @@ defmodule MingaEditor.RenderModel.Window.Builder do
          lines,
          first_line,
          ctx,
-         line_byte_offsets,
+         source_ctx,
          _index
        ) do
     line_text = line_at(lines, buf_line, first_line)
-    line_byte_offset = Map.get(line_byte_offsets, buf_line, 0)
-    {composed, spans} = compose_line(line_text, nil, ctx, buf_line, line_byte_offset)
+    line_byte_offset = Map.get(source_ctx.line_byte_offsets, buf_line, 0)
+    hl_segments = Map.get(source_ctx.highlight_segments_by_line, buf_line)
+    {composed, spans} = compose_line(line_text, hl_segments, ctx, buf_line, line_byte_offset)
 
     %Row{
       row_id: Row.stable_id(:normal, buf_line),
@@ -966,12 +1018,13 @@ defmodule MingaEditor.RenderModel.Window.Builder do
          lines,
          first_line,
          ctx,
-         line_byte_offsets,
+         source_ctx,
          _index
        ) do
     line_text = line_at(lines, buf_line, first_line)
-    line_byte_offset = Map.get(line_byte_offsets, buf_line, 0)
-    {composed, spans} = compose_line(line_text, nil, ctx, buf_line, line_byte_offset)
+    line_byte_offset = Map.get(source_ctx.line_byte_offsets, buf_line, 0)
+    hl_segments = Map.get(source_ctx.highlight_segments_by_line, buf_line)
+    {composed, spans} = compose_line(line_text, hl_segments, ctx, buf_line, line_byte_offset)
     {composed, spans} = append_fold_summary(composed, spans, hidden_count, ctx)
 
     %Row{
@@ -990,7 +1043,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
          _lines,
          _first_line,
          _ctx,
-         _line_byte_offsets,
+         _source_ctx,
          visual_identity_index
        ) do
     text = virtual_text_to_string(vt)
@@ -1014,7 +1067,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
          _lines,
          _first_line,
          ctx,
-         _line_byte_offsets,
+         _source_ctx,
          visual_identity_index
        ) do
     # Block decorations render via callback; capture the rendered text using the same text width as the draw path.
@@ -1041,7 +1094,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
          _lines,
          _first_line,
          _ctx,
-         _line_byte_offsets,
+         _source_ctx,
          _index
        ) do
     hidden = FoldRegion.hidden_count(fold)

@@ -6,16 +6,19 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
   alias Minga.Core.Face
   alias Minga.Editing.Fold.Range, as: FoldRange
   alias Minga.Editing.Search.Match
+  alias Minga.Language.Highlight.Span, as: HighlightSpan
   alias MingaEditor.Layout
   alias MingaEditor.RenderModel.Window.Builder
   alias MingaEditor.RenderPipeline.Content
   alias MingaEditor.RenderPipeline.Scroll
   alias MingaEditor.Renderer.Context
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Highlighting
   alias MingaEditor.State.Windows
   alias MingaEditor.Viewport
   alias MingaEditor.Window, as: EditorWindow
   alias MingaEditor.WindowTree
+  alias MingaEditor.UI.Highlight
   alias Minga.RenderModel.Window
   alias Minga.RenderModel.Window.Row
 
@@ -44,6 +47,17 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
   defp add_conceal(decs, start_pos, end_pos) do
     {_id, decs} = Decorations.add_conceal(decs, start_pos, end_pos, group: :test)
     decs
+  end
+
+  defp highlight_span(lines, line, start_col, width, capture_id) do
+    start_byte = Highlight.byte_offset_for_line(lines, line) + start_col
+    HighlightSpan.new(start_byte, start_byte + width, capture_id)
+  end
+
+  defp has_span?(%Row{spans: spans}, start_col, end_col) do
+    Enum.any?(spans, fn span ->
+      span.start_col == start_col and span.end_col == end_col and span.fg != 0
+    end)
   end
 
   defp build_window_model(state, ctx_overrides) do
@@ -311,6 +325,47 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       [fold_gutter] = Enum.filter(wf.window_model.gutter.entries, &(&1.buf_line == 0))
       assert fold_row.row_id == Row.stable_id(:fold_start, 0, 0, 2)
       assert fold_gutter.display_type == :fold_start
+    end
+
+    test "folded window rows preserve syntax highlight spans" do
+      content = "def folded\n  :ok\nend\nclass Visible\nend"
+      lines = String.split(content, "\n")
+      state = gui_state(content: content)
+      buffer = state.workspace.buffers.active
+
+      highlight =
+        state.theme
+        |> Highlight.from_theme()
+        |> Highlight.put_names(["keyword"])
+        |> Highlight.put_spans(1, [
+          highlight_span(lines, 0, 0, 3, 0),
+          highlight_span(lines, 3, 0, 5, 0)
+        ])
+
+      state =
+        EditorState.set_highlight(state, %Highlighting{highlights: %{buffer => highlight}})
+
+      window = Map.fetch!(state.workspace.windows.map, state.workspace.windows.active)
+      window = EditorWindow.set_fold_ranges(window, [FoldRange.new!(0, 2)])
+      window = EditorWindow.fold_at(window, 0)
+
+      windows =
+        Windows.set_map(
+          state.workspace.windows,
+          Map.put(state.workspace.windows.map, state.workspace.windows.active, window)
+        )
+
+      state = %{state | workspace: %{state.workspace | windows: windows}}
+
+      {[wf], _cursor, _state} = build_content(state)
+
+      [fold_row, visible_row | _rest] = wf.window_model.rows
+      assert fold_row.row_type == :fold_start
+      assert fold_row.text == "def folded ··· 2 lines"
+      assert has_span?(fold_row, 0, 3)
+
+      assert visible_row.text == "class Visible"
+      assert has_span?(visible_row, 0, 5)
     end
 
     test "decoration fold rows use stable decoration ids" do
