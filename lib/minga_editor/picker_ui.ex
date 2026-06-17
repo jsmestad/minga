@@ -751,7 +751,11 @@ defmodule MingaEditor.PickerUI do
           source: new_source,
           layout: layout,
           original_source: original,
-          mode_prefix: prefix
+          mode_prefix: prefix,
+          # Fresh picker is already filtered synchronously; bump the revision so
+          # any refilter still queued for the previous source is dropped as stale.
+          filter_revision: &1.filter_revision + 1,
+          filter_status: :idle
       }
     )
   end
@@ -775,7 +779,10 @@ defmodule MingaEditor.PickerUI do
           source: orig,
           layout: layout,
           original_source: nil,
-          mode_prefix: ""
+          mode_prefix: "",
+          # See switch_to_source: drop any refilter queued for the prior source.
+          filter_revision: &1.filter_revision + 1,
+          filter_status: :idle
       }
     )
   end

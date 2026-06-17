@@ -379,6 +379,29 @@ defmodule MingaEditor.PickerUITest do
       labels = Enum.map(picker_ui(state).picker.filtered, & &1.label)
       assert "bravo" in labels and "boson" in labels
     end
+
+    test "switching source drops a refilter queued for the previous source" do
+      {state, _original_buf, _preview_buf} = preview_promotion_state()
+
+      # Type then backspace to an empty query so the next char can mode-switch;
+      # both keystrokes schedule a refilter for the FileSource picker.
+      state = PickerUI.handle_key(state, ?x, 0)
+      state = PickerUI.handle_key(state, 127, 0)
+      stale_rev = picker_ui(state).filter_revision
+      assert picker_ui(state).filter_status == :filtering
+
+      # ">" mode-switches to the command source (query is now empty).
+      state = PickerUI.handle_key(state, ?>, 0)
+      switched = picker_ui(state)
+      assert switched.source == MingaEditor.UI.Picker.CommandSource
+      assert switched.filter_status == :idle
+      assert switched.filter_revision > stale_rev
+
+      # The refilter queued for the old FileSource picker is now stale: it must
+      # not apply to the new source.
+      refute PickerUI.pending_refilter?(state, stale_rev)
+      assert PickerUI.apply_refilter(state, stale_rev) == state
+    end
   end
 
   defp async_filter_state(labels) do

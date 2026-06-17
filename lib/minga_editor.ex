@@ -882,8 +882,11 @@ defmodule MingaEditor do
         ) :: state()
   defp handle_picker_candidates(state, payload, {:ok, items}) do
     picker_state = payload.picker_ui
+    # replace_items refilters synchronously against the current query, so the
+    # shown results are fresh; clear any :filtering status left by typing during
+    # the async load (its queued refilter is now redundant).
     picker = MingaEditor.UI.Picker.replace_items(picker_state.picker, items)
-    new_picker_state = %{picker_state | picker: picker, load_status: :ready}
+    new_picker_state = %{picker_state | picker: picker, load_status: :ready, filter_status: :idle}
 
     ModalOverlay.transition(
       state,
