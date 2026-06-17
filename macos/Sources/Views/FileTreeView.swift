@@ -5,6 +5,7 @@
 /// No box-drawing characters, no stock List widget. Styled for
 /// tight vertical rhythm with native macOS feel.
 
+import AppKit
 import SwiftUI
 
 /// The file tree sidebar rendered on the left side of the window.
@@ -39,6 +40,27 @@ struct FileTreeView: View {
     @State private var dropTargetEntryId: String? = nil
     @State private var lastClickEntryId: String? = nil
     @State private var lastClickTime: Date? = nil
+    /// Whether the pointer is over the file tree (drives scrollbar visibility).
+    @State private var isHoveringFileTree = false
+
+    /// Tracks whether macOS prefers always-visible scrollbars.
+    @State private var usesLegacyScrollerStyle = NSScroller.preferredScrollerStyle == .legacy
+
+    /// Task observing live macOS scrollbar-style changes.
+    @State private var scrollerStyleTask: Task<Void, Never>?
+
+    /// Whether the file tree's scroll indicator should be shown.
+    ///
+    /// The sidebar scrollbar is de-emphasized when the file tree is idle chrome:
+    /// it appears only while the tree is focused or hovered (issue #2358). When
+    /// the user's macOS setting forces always-visible scrollbars
+    /// (`NSScroller.preferredScrollerStyle == .legacy`), we never hide it, so
+    /// Minga doesn't fight the system preference.
+    private var showsScrollIndicators: Bool {
+        fileTreeState.focused
+            || isHoveringFileTree
+            || usesLegacyScrollerStyle
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -46,6 +68,8 @@ struct FileTreeView: View {
         }
         .focusable(false)
         .focusEffectDisabled()
+        .onAppear { observeScrollerStyleChanges() }
+        .onDisappear { stopObservingScrollerStyleChanges() }
     }
 
     // MARK: - Entry list
@@ -66,7 +90,7 @@ struct FileTreeView: View {
             .clipped()
         } else {
             ScrollViewReader { proxy in
-                ScrollView(.vertical) {
+                ScrollView(.vertical, showsIndicators: showsScrollIndicators) {
                     LazyVStack(spacing: 0) {
                         ForEach(fileTreeState.entries) { entry in
                             entryRow(entry)
@@ -95,6 +119,9 @@ struct FileTreeView: View {
                             proxy.scrollTo(selectedEntry.id, anchor: .center)
                         }
                     }
+                }
+                .onHover { hovering in
+                    isHoveringFileTree = hovering
                 }
             }
         }
@@ -499,6 +526,25 @@ struct FileTreeView: View {
         if flags.contains(.option) { mods |= 0x04 }
         if flags.contains(.command) { mods |= 0x08 }
         return mods
+    }
+
+    /// Starts observing live macOS scrollbar-style changes.
+    @MainActor
+    private func observeScrollerStyleChanges() {
+        guard scrollerStyleTask == nil else { return }
+        usesLegacyScrollerStyle = NSScroller.preferredScrollerStyle == .legacy
+        scrollerStyleTask = Task { @MainActor in
+            for await _ in NotificationCenter.default.notifications(named: NSScroller.preferredScrollerStyleDidChangeNotification) {
+                usesLegacyScrollerStyle = NSScroller.preferredScrollerStyle == .legacy
+            }
+        }
+    }
+
+    /// Stops observing macOS scrollbar-style changes when the view disappears.
+    @MainActor
+    private func stopObservingScrollerStyleChanges() {
+        scrollerStyleTask?.cancel()
+        scrollerStyleTask = nil
     }
 
 }

@@ -225,6 +225,7 @@ final class EditorNSView: MTKView {
         scrollerStyleTask = nil
         scrollFadeWorkItem?.cancel()
         scrollFadeWorkItem = nil
+        scrollIndicatorDragOffset = nil
         spaceGraceTimer?.cancel()
         spaceGraceTimer = nil
         dividerDragState = .none
@@ -681,30 +682,60 @@ final class EditorNSView: MTKView {
 
     // MARK: - Scroll indicator interaction
 
-    /// Width of the scroll indicator hit-test region (wider than the visual indicator for easy clicking).
-    private let scrollTrackHitWidth: CGFloat = 20.0
-
     /// Whether the user is currently dragging the scroll indicator.
     private var isDraggingScrollIndicator = false
 
-    /// Tests whether a point is in the scroll indicator track region (right edge).
-    private func isInScrollTrack(_ point: NSPoint) -> Bool {
-        let trackX = bounds.width - scrollTrackHitWidth
-        return point.x >= trackX && point.x <= bounds.width
+    /// Pointer offset from the rendered thumb's top edge captured at drag start.
+    private var scrollIndicatorDragOffset: CGFloat?
+
+    /// Tests whether a point should start scroll-track interaction.
+    ///
+    /// The track only captures clicks when the document can scroll, the viewport top is valid,
+    /// and either the indicator is currently visible or the macOS setting forces it to stay visible.
+    private func shouldCaptureScrollTrackClick(_ point: NSPoint) -> Bool {
+        EditorScrollTrack.isInTrack(x: point.x, viewWidth: bounds.width)
+            && EditorScrollTrack.shouldCaptureTrackClick(
+                totalLines: dispatcher.frameState.totalLineCount,
+                visibleRows: UInt32(dispatcher.frameState.rows),
+                viewportTopLine: dispatcher.frameState.viewportTopLine,
+                scrollIndicatorAlpha: coreTextRenderer.scrollIndicatorAlpha,
+                alwaysShowScrollbar: alwaysShowScrollbar
+            )
+    }
+
+    /// Captures the pointer's offset inside the rendered thumb when the user starts dragging on the thumb.
+    private func scrollTrackDragOffset(forY y: CGFloat) -> CGFloat? {
+        let fs = dispatcher.frameState
+        guard let thumb = EditorScrollTrack.thumb(
+            viewHeight: bounds.height,
+            totalLines: fs.totalLineCount,
+            visibleRows: UInt32(fs.rows),
+            viewportTopLine: fs.viewportTopLine
+        ) else { return nil }
+        return EditorScrollTrack.dragOffset(forY: y, thumb: thumb)
     }
 
     /// Converts a Y coordinate in the scroll track to a target line number.
     private func scrollTrackYToLine(_ y: CGFloat) -> UInt32 {
         let fs = dispatcher.frameState
-        let totalLines = fs.totalLineCount
         let visibleRows = UInt32(fs.rows)
-        guard totalLines > visibleRows else { return 0 }
 
-        // In AppKit, Y increases upward. Convert to top-down.
-        let flippedY = bounds.height - y
-        let proportion = max(0, min(1, flippedY / bounds.height))
-        let maxTop = Int64(totalLines) - Int64(visibleRows)
-        return UInt32(max(0, min(maxTop, Int64(Double(proportion) * Double(maxTop)))))
+        if let scrollIndicatorDragOffset {
+            return EditorScrollTrack.line(
+                forDraggedY: y,
+                dragOffset: scrollIndicatorDragOffset,
+                viewHeight: bounds.height,
+                totalLines: fs.totalLineCount,
+                visibleRows: visibleRows
+            )
+        }
+
+        return EditorScrollTrack.line(
+            forY: y,
+            viewHeight: bounds.height,
+            totalLines: fs.totalLineCount,
+            visibleRows: visibleRows
+        )
     }
 
     // MARK: - Line spacing
@@ -1067,8 +1098,9 @@ final class EditorNSView: MTKView {
     override func mouseDown(with event: NSEvent) {
         // Scroll indicator track: intercept clicks on the right edge.
         let point = convert(event.locationInWindow, from: nil)
-        if isInScrollTrack(point) {
+        if shouldCaptureScrollTrackClick(point) {
             isDraggingScrollIndicator = true
+            scrollIndicatorDragOffset = scrollTrackDragOffset(forY: point.y)
             let line = scrollTrackYToLine(point.y)
             encoder.sendScrollToLine(line: line)
             flashScrollIndicator()
@@ -1096,6 +1128,7 @@ final class EditorNSView: MTKView {
     override func mouseUp(with event: NSEvent) {
         if isDraggingScrollIndicator {
             isDraggingScrollIndicator = false
+            scrollIndicatorDragOffset = nil
             flashScrollIndicator()
             return
         }
@@ -1261,6 +1294,7 @@ final class EditorNSView: MTKView {
 
         // Cancel any pending fade.
         scrollFadeWorkItem?.cancel()
+        scrollFadeWorkItem = nil
 
         // Don't fade if system preference is "Always show".
         guard !alwaysShowScrollbar else { return }
@@ -1278,6 +1312,13 @@ final class EditorNSView: MTKView {
 
     /// Gradually fades the scroll indicator alpha to zero.
     private func fadeScrollIndicator(steps remaining: Int) {
+        guard !alwaysShowScrollbar else {
+            scrollFadeWorkItem?.cancel()
+            scrollFadeWorkItem = nil
+            coreTextRenderer.scrollIndicatorAlpha = 1.0
+            setNeedsDisplay(bounds)
+            return
+        }
         guard remaining > 0 else {
             coreTextRenderer.scrollIndicatorAlpha = 0.0
             setNeedsDisplay(bounds)
@@ -1304,6 +1345,8 @@ final class EditorNSView: MTKView {
                 guard let self else { return }
                 self.alwaysShowScrollbar = NSScroller.preferredScrollerStyle == .legacy
                 if self.alwaysShowScrollbar {
+                    self.scrollFadeWorkItem?.cancel()
+                    self.scrollFadeWorkItem = nil
                     self.coreTextRenderer.scrollIndicatorAlpha = 1.0
                     self.setNeedsDisplay(self.bounds)
                 } else {
