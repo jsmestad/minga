@@ -8,6 +8,43 @@ defmodule Minga.Project.FileFindTest do
       strategy = FileFind.detect_strategy(File.cwd!())
       assert strategy in [:fd, :git, :find, :none]
     end
+
+    test "prefers git inside a git work tree" do
+      tmp_dir = make_tmp_dir("minga_file_find_git")
+      on_exit(fn -> File.rm_rf!(tmp_dir) end)
+      {_out, 0} = System.cmd("git", ["init"], cd: tmp_dir, stderr_to_stdout: true)
+
+      assert FileFind.detect_strategy(tmp_dir) == :git
+    end
+
+    test "uses fd or find outside a git repo, never git" do
+      tmp_dir = make_tmp_dir("minga_file_find_nongit")
+      on_exit(fn -> File.rm_rf!(tmp_dir) end)
+
+      strategy = FileFind.detect_strategy(tmp_dir)
+      refute strategy == :git
+      assert strategy in [:fd, :find, :none]
+    end
+  end
+
+  describe "fd_args/1" do
+    test "does not follow symlinks" do
+      refute "--follow" in FileFind.fd_args([])
+    end
+
+    test "lists hidden files of type file under the current directory" do
+      args = FileFind.fd_args([])
+      assert "--type" in args
+      assert "f" in args
+      assert "--hidden" in args
+      assert List.last(args) == "."
+    end
+
+    test "passes configured excludes as --exclude pairs" do
+      args = FileFind.fd_args(["node_modules", "vendor"])
+      assert chunk_pairs(args) |> Enum.member?(["--exclude", "node_modules"])
+      assert chunk_pairs(args) |> Enum.member?(["--exclude", "vendor"])
+    end
   end
 
   describe "list_files/1" do
@@ -107,4 +144,12 @@ defmodule Minga.Project.FileFindTest do
       assert "README.md" in files
     end
   end
+
+  defp make_tmp_dir(prefix) do
+    dir = Path.join(System.tmp_dir!(), "#{prefix}_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    dir
+  end
+
+  defp chunk_pairs(args), do: Enum.chunk_every(args, 2, 1, :discard)
 end
