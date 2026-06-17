@@ -53,6 +53,10 @@ defmodule MingaEditor.UI.Picker do
   # tens of thousands of paths) are bounded to the best matches so each keystroke
   # never scores-and-sorts the entire candidate list. Generous so paging past the
   # visible window still has somewhere to land.
+  #
+  # Consequence: `count/1` (and the picker footer's filtered count) reports how
+  # many results are *shown*, capped here, not the true number of matches in a
+  # huge source. `total/1` still reflects the full candidate count.
   @result_limit 200
 
   @typedoc "A picker item struct."
