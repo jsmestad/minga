@@ -533,7 +533,15 @@ defmodule MingaEditor do
 
   def handle_info({:minga_input, {:gui_action, action}}, state) do
     snapshot = Input.Router.capture_snapshot(state)
-    new_state = GuiActionHandler.dispatch(state, action)
+
+    # Span the synchronous dispatch so slow GUI actions still on the input path
+    # surface as structured, aggregatable timing (issue #2357 AC7). Slow work
+    # offloaded via MingaEditor.AsyncAction leaves the span fast by design.
+    new_state =
+      Minga.Telemetry.span([:minga, :gui, :action], %{action: gui_action_tag(action)}, fn ->
+        GuiActionHandler.dispatch(state, action)
+      end)
+
     new_state = Input.Router.post_action_housekeeping(new_state, snapshot)
     {:noreply, new_state}
   end
@@ -845,9 +853,50 @@ defmodule MingaEditor do
     end
   end
 
+  # Async editor-action result: slow work offloaded via MingaEditor.AsyncAction
+  # sends this when it finishes. Apply the in-flight result, then advance the lane
+  # so the next queued op (if any) starts — lanes run one op at a time, in order.
+  # A token that is not the in-flight one (a defensive guard against duplicate or
+  # out-of-band messages) is dropped without advancing.
+  def handle_info({:async_action_result, lane, token, result}, state) do
+    if MingaEditor.AsyncAction.current?(state, lane, token) do
+      new_state =
+        state
+        |> apply_async_result(lane, result)
+        |> MingaEditor.AsyncAction.advance(lane)
+
+      {:noreply, Renderer.render_or_async(new_state)}
+    else
+      {:noreply, state}
+    end
+  end
+
   def handle_info(_msg, state) do
     {:noreply, state}
   end
+
+  # Applies a current async-action result by routing it to the owning domain.
+  @spec apply_async_result(state(), atom(), term()) :: state()
+  defp apply_async_result(state, :git_worktree, result) do
+    GuiActionHandler.apply_git_result(state, result)
+  end
+
+  # Defensive fallthrough: a lane with no apply handler degrades to a logged
+  # no-op rather than crashing the editor GenServer.
+  defp apply_async_result(state, lane, _result) do
+    Minga.Log.warning(:editor, "[async_action] no apply handler for lane #{inspect(lane)}")
+    state
+  end
+
+  # Identifies the GUI action for the dispatch telemetry span (issue #2357 AC7),
+  # so slow synchronous actions can be found by their tag without logging paths.
+  @spec gui_action_tag(term()) :: atom()
+  defp gui_action_tag(action) when is_atom(action), do: action
+
+  defp gui_action_tag(action) when is_tuple(action) and tuple_size(action) > 0,
+    do: elem(action, 0)
+
+  defp gui_action_tag(_action), do: :unknown
 
   # In headless mode, apply highlight setup synchronously so tests get
   # deterministic highlights without timer races. In normal mode, defer

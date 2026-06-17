@@ -112,7 +112,12 @@ defmodule Minga.Git.System do
     mode = Keyword.get(opts, :untracked_mode, :normal)
     timeout_ms = Keyword.get(opts, :timeout_ms, @status_timeout_ms)
 
-    case git_cmd(["status", "--porcelain=v2", "-z", untracked_arg(mode)],
+    # `--no-optional-locks` keeps status from taking `.git/index.lock` to refresh
+    # the stat cache. Status is a read that can run concurrently with a worktree
+    # mutation (stage/discard); without this it can contend with the writer's lock.
+    # Worktree writes are serialized among themselves elsewhere (the editor's
+    # :git_worktree async lane); this makes the read side lock-free too.
+    case git_cmd(["--no-optional-locks", "status", "--porcelain=v2", "-z", untracked_arg(mode)],
            cd: git_root,
            stderr_to_stdout: true,
            timeout_ms: timeout_ms

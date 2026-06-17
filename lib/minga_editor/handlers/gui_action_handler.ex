@@ -19,6 +19,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   alias Minga.LSP.Supervisor, as: LspSupervisor
   alias Minga.LSP.SyncServer, as: LspSyncServer
 
+  alias MingaEditor.AsyncAction
   alias MingaEditor.BottomPanel
   alias MingaEditor.Commands
   alias MingaEditor.Extension.Sidebar
@@ -500,6 +501,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   defp dispatch_action(state, {:git_stage_file, path}) do
     git_action(
       state,
+      "Staging #{path}…",
       fn git_root -> Minga.Git.stage(git_root, git_relative_path(git_root, path)) end,
       "Staged #{path}"
     )
@@ -508,6 +510,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   defp dispatch_action(state, {:git_unstage_file, path}) do
     git_action(
       state,
+      "Unstaging #{path}…",
       fn git_root -> Minga.Git.unstage(git_root, git_relative_path(git_root, path)) end,
       "Unstaged #{path}"
     )
@@ -516,17 +519,28 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   defp dispatch_action(state, {:git_discard_file, path}) do
     git_action(
       state,
+      "Discarding #{path}…",
       fn git_root -> Minga.Git.discard(git_root, git_relative_path(git_root, path)) end,
       "Discarded #{path}"
     )
   end
 
   defp dispatch_action(state, :git_stage_all) do
-    git_action(state, fn git_root -> Minga.Git.stage(git_root, ".") end, "Staged all changes")
+    git_action(
+      state,
+      "Staging all changes…",
+      fn git_root -> Minga.Git.stage(git_root, ".") end,
+      "Staged all changes"
+    )
   end
 
   defp dispatch_action(state, :git_unstage_all) do
-    git_action(state, fn git_root -> Minga.Git.unstage_all(git_root) end, "Unstaged all")
+    git_action(
+      state,
+      "Unstaging all…",
+      fn git_root -> Minga.Git.unstage_all(git_root) end,
+      "Unstaged all"
+    )
   end
 
   defp dispatch_action(state, {:git_commit, message}) do
@@ -1177,22 +1191,90 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   # ── Git action helper ──────────────────────────────────────────────
 
-  @spec git_action(state(), (String.t() -> :ok | {:error, String.t()}), String.t()) :: state()
-  defp git_action(state, operation, success_msg) when is_binary(success_msg) do
-    git_root = MingaEditor.resolve_git_root()
+  @git_lane :git_worktree
 
-    if git_root do
-      case operation.(git_root) do
-        :ok ->
-          MingaEditor.refresh_git_repo(git_root)
-          EditorState.set_status(state, success_msg)
+  @typedoc "Result of an async git worktree operation, applied via apply_git_result/2."
+  @type git_result ::
+          {:ok, success_msg :: String.t(), git_root :: String.t()}
+          | {:error, reason :: String.t(), git_root :: String.t()}
+          | :not_a_repo
 
-        {:error, reason} ->
-          EditorState.set_status(state, "Git error: #{reason}")
-      end
-    else
-      EditorState.set_status(state, "Not in a git repository")
+  # Runs a worktree git command off the editor's critical path: shows a pending
+  # status immediately, then `apply_git_result/2` posts the outcome and refreshes
+  # the repo when the result comes back (only if still the latest git action).
+  # Git-root resolution shells out to `git rev-parse`, so it runs inside the
+  # offloaded work too, keeping every subprocess call off the input path.
+  @spec git_action(state(), String.t(), (String.t() -> :ok | {:error, String.t()}), String.t()) ::
+          state()
+  defp git_action(state, pending_msg, operation, success_msg)
+       when is_binary(pending_msg) and is_binary(success_msg) do
+    state
+    |> EditorState.set_status(pending_msg)
+    |> AsyncAction.run(@git_lane, fn -> run_git_op(operation, success_msg) end)
+  end
+
+  @spec run_git_op((String.t() -> :ok | {:error, String.t()}), String.t()) :: git_result()
+  defp run_git_op(operation, success_msg) do
+    case MingaEditor.resolve_git_root() do
+      nil -> :not_a_repo
+      git_root -> run_git_op(operation, git_root, success_msg)
     end
+  end
+
+  @spec run_git_op((String.t() -> :ok | {:error, String.t()}), String.t(), String.t()) ::
+          git_result()
+  defp run_git_op(operation, git_root, success_msg) do
+    # Span the actual git subprocess (runs in the offloaded Task) so the slow
+    # work AC7 cares about is measured, not just the cheap dispatch (#2357).
+    result =
+      Minga.Telemetry.span([:minga, :git, :worktree_action], %{git_root: git_root}, fn ->
+        operation.(git_root)
+      end)
+
+    case result do
+      :ok -> {:ok, success_msg, git_root}
+      {:error, reason} -> {:error, reason, git_root}
+    end
+  end
+
+  @doc """
+  Applies the result of an async git worktree action: refreshes the repo and
+  posts the success status, or surfaces the error. Called by the editor when an
+  `{:async_action_result, :git_worktree, _, _}` message arrives and is current.
+  """
+  @spec apply_git_result(state(), git_result() | {:error, String.t()} | term()) :: state()
+  def apply_git_result(state, {:ok, success_msg, git_root}) do
+    MingaEditor.refresh_git_repo(git_root)
+    EditorState.set_status(state, success_msg)
+  end
+
+  def apply_git_result(state, {:error, reason, git_root}) do
+    # Refresh on failure too: a superseded earlier op on this lane may have
+    # mutated the index already (its own result was dropped as stale), so the
+    # repo state can have changed even though this latest op failed.
+    MingaEditor.refresh_git_repo(git_root)
+    EditorState.set_status(state, "Git error: #{reason}")
+  end
+
+  def apply_git_result(state, :not_a_repo) do
+    EditorState.set_status(state, "Not in a git repository")
+  end
+
+  # The git work raised/exited/threw before producing a git_result(), so
+  # AsyncAction.safely/1 handed back a generic 2-tuple error. There is no
+  # git_root to refresh against; just surface the failure. Without this clause an
+  # exception in a git op would FunctionClause-crash the editor GenServer in
+  # handle_info, defeating AsyncAction's "a failing action can never crash the
+  # editor" guarantee.
+  def apply_git_result(state, {:error, reason}) when is_binary(reason) do
+    EditorState.set_status(state, "Git error: #{reason}")
+  end
+
+  # Defensive total fallback: any unexpected result shape degrades to a status
+  # message instead of crashing the editor.
+  def apply_git_result(state, other) do
+    Minga.Log.warning(:editor, "[git] unexpected async git result: #{inspect(other)}")
+    EditorState.set_status(state, "Git action failed")
   end
 
   # ── Completion helpers ─────────────────────────────────────────────
