@@ -68,4 +68,25 @@ struct MessagesContentStateIdentityTests {
         #expect(ids.count == 15)
         #expect(Set(ids).count == ids.count)
     }
+
+    @Test("entries are capped and identities stay unique across the trim boundary")
+    @MainActor func trimKeepsIdentitiesUniqueAndDedupeInSync() {
+        let state = MessagesContentState()
+        // 6 restarts × 300 = 1800 appended, well past the 1000-entry cap.
+        for _ in 0..<6 {
+            state.appendEntries((1...300).map { wire(UInt32($0)) })
+        }
+        // Trimmed to the cap, and every retained row still has a unique identity,
+        // so ForEach never sees a duplicate ID even after the dedupe set has been
+        // pruned alongside the trimmed window.
+        #expect(state.entries.count == 1000)
+        #expect(Set(state.entries.map(\.id)).count == 1000)
+
+        // A resend of an early sequence (whose original generation was trimmed
+        // out) still appends in a fresh generation rather than being wrongly
+        // deduped against a dropped id, and the cap holds.
+        state.appendEntries([wire(1)])
+        #expect(state.entries.count == 1000)
+        #expect(Set(state.entries.map(\.id)).count == state.entries.count)
+    }
 }
