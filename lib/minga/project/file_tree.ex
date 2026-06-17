@@ -236,7 +236,20 @@ defmodule Minga.Project.FileTree do
   def ensure_entries(%__MODULE__{entries: entries} = tree) when is_list(entries), do: tree
 
   def ensure_entries(%__MODULE__{} = tree) do
-    %{tree | entries: tree.root |> walk(0, tree, []) |> filter_entries(tree)}
+    # Span only the actual filesystem walk (the memoized path above returns
+    # early), so `[:minga, :file_tree, :walk]` records real walk cost — its
+    # entry count and duration — for spotting large-repo overages (#2367).
+    entries =
+      Minga.Telemetry.span_with_stop_metadata(
+        [:minga, :file_tree, :walk],
+        %{root: tree.root},
+        fn ->
+          entries = tree.root |> walk(0, tree, []) |> filter_entries(tree)
+          {entries, %{entry_count: length(entries)}}
+        end
+      )
+
+    %{tree | entries: entries}
   end
 
   @doc "Refreshes the tree by rescanning the filesystem (clamps cursor)."
@@ -304,6 +317,12 @@ defmodule Minga.Project.FileTree do
   @spec invalidate_entries(t()) :: t()
   defp invalidate_entries(%__MODULE__{} = tree), do: %{tree | entries: nil}
 
+  # A child after a single stat pass: its name, absolute path, whether it is a
+  # directory (following symlinks, so a symlink-to-dir counts), and whether it
+  # is itself a symlink (so the walk shows it but never descends into it).
+  @typep stat_child ::
+           {name :: String.t(), full :: String.t(), dir? :: boolean(), symlink? :: boolean()}
+
   @spec walk(String.t(), non_neg_integer(), t(), [boolean()]) :: [entry()]
   defp walk(dir_path, depth, tree, parent_guides) do
     case File.ls(dir_path) do
@@ -312,17 +331,17 @@ defmodule Minga.Project.FileTree do
           names
           |> Enum.reject(&ignored?/1)
           |> maybe_filter_hidden(tree.show_hidden)
-          |> Enum.sort_by(fn name ->
-            full = Path.join(dir_path, name)
-            {if(File.dir?(full), do: 0, else: 1), String.downcase(name)}
+          |> Enum.map(&stat_child(dir_path, &1))
+          |> Enum.sort_by(fn {name, _full, dir?, _symlink?} ->
+            {if(dir?, do: 0, else: 1), String.downcase(name)}
           end)
 
         last_idx = length(sorted) - 1
 
         sorted
         |> Enum.with_index()
-        |> Enum.flat_map(fn {name, idx} ->
-          walk_entry(name, dir_path, depth, tree, parent_guides, idx == last_idx)
+        |> Enum.flat_map(fn {child, idx} ->
+          walk_entry(child, depth, tree, parent_guides, idx == last_idx)
         end)
 
       {:error, _} ->
@@ -330,22 +349,51 @@ defmodule Minga.Project.FileTree do
     end
   end
 
-  @spec walk_entry(String.t(), String.t(), non_neg_integer(), t(), [boolean()], boolean()) ::
-          [entry()]
-  defp walk_entry(name, dir_path, depth, tree, parent_guides, is_last) do
+  # Stats a child exactly once (plus a single follow-stat only for symlinks),
+  # replacing the previous `File.dir?` (sort) + `File.dir?` (walk_entry) +
+  # `File.lstat` (descend guard) per child.
+  @spec stat_child(String.t(), String.t()) :: stat_child()
+  defp stat_child(dir_path, name) do
     full = Path.join(dir_path, name)
-    is_dir = File.dir?(full)
+    {dir?, symlink?} = dir_and_symlink(full)
+    {name, full, dir?, symlink?}
+  end
 
+  # Resolves directory-ness (following symlinks) and symlink-ness with the
+  # fewest stats: one `File.lstat` settles real dirs and files; only an entry
+  # that is itself a symlink needs a second, following `File.stat` to learn
+  # whether its target is a directory.
+  @spec dir_and_symlink(String.t()) :: {dir? :: boolean(), symlink? :: boolean()}
+  defp dir_and_symlink(full) do
+    case File.lstat(full) do
+      {:ok, %File.Stat{type: :directory}} -> {true, false}
+      {:ok, %File.Stat{type: :symlink}} -> {symlink_target_dir?(full), true}
+      {:ok, %File.Stat{}} -> {false, false}
+      {:error, _} -> {false, false}
+    end
+  end
+
+  @spec symlink_target_dir?(String.t()) :: boolean()
+  defp symlink_target_dir?(full) do
+    case File.stat(full) do
+      {:ok, %File.Stat{type: :directory}} -> true
+      _ -> false
+    end
+  end
+
+  @spec walk_entry(stat_child(), non_neg_integer(), t(), [boolean()], boolean()) :: [entry()]
+  defp walk_entry({name, full, dir?, symlink?}, depth, tree, parent_guides, is_last) do
     entry = %{
       path: full,
       name: name,
-      dir?: is_dir,
+      dir?: dir?,
       depth: depth,
       last_child?: is_last,
       guides: parent_guides
     }
 
-    if is_dir and descend_into_directory?(tree, full) and not symlinked_directory?(full) do
+    # Show symlinked directories, but never descend into them (cycle safety).
+    if dir? and not symlink? and descend_into_directory?(tree, full) do
       # Children need to know: at this entry's depth, are there more siblings?
       # If this entry is NOT the last child, its depth column should draw │.
       child_guides = parent_guides ++ [not is_last]
@@ -375,14 +423,6 @@ defmodule Minga.Project.FileTree do
 
     entry.name |> String.downcase() |> String.contains?(needle) or
       relative_path |> String.downcase() |> String.contains?(needle)
-  end
-
-  @spec symlinked_directory?(String.t()) :: boolean()
-  defp symlinked_directory?(path) do
-    case File.lstat(path) do
-      {:ok, %File.Stat{type: :symlink}} -> true
-      _ -> false
-    end
   end
 
   @spec active_filter?(t()) :: boolean()

@@ -327,4 +327,102 @@ defmodule Minga.Project.FileTreeTest do
       assert MapSet.member?(rerooted.expanded, Path.expand(next_root))
     end
   end
+
+  describe "symlinks" do
+    @tag :tmp_dir
+    test "a symlinked directory is shown as a directory but never descended", %{tmp_dir: tmp_dir} do
+      mkdir(Path.join(tmp_dir, "real"))
+      touch(Path.join(tmp_dir, "real/inside.txt"))
+      :ok = File.ln_s(Path.join(tmp_dir, "real"), Path.join(tmp_dir, "link"))
+
+      entries =
+        tmp_dir
+        |> FileTree.new()
+        |> expand_path(["link"])
+        |> FileTree.visible_entries()
+
+      link_entry = Enum.find(entries, &(&1.name == "link"))
+      # Shown as an expandable directory (target is a dir, following the link)...
+      assert link_entry.dir? == true
+      # ...but the target's children are never walked, even when expanded (cycle safety).
+      refute "inside.txt" in Enum.map(entries, & &1.name)
+
+      # The real directory still descends normally.
+      real_names =
+        tmp_dir |> FileTree.new() |> expand_path(["real"]) |> FileTree.visible_entries()
+
+      assert "inside.txt" in Enum.map(real_names, & &1.name)
+    end
+
+    @tag :tmp_dir
+    test "a symlink to a file is shown as a file", %{tmp_dir: tmp_dir} do
+      touch(Path.join(tmp_dir, "target.txt"))
+      :ok = File.ln_s(Path.join(tmp_dir, "target.txt"), Path.join(tmp_dir, "alias.txt"))
+
+      alias_entry =
+        tmp_dir
+        |> FileTree.new()
+        |> FileTree.visible_entries()
+        |> Enum.find(&(&1.name == "alias.txt"))
+
+      assert alias_entry.dir? == false
+    end
+  end
+
+  describe "walk telemetry (#2367)" do
+    @tag :tmp_dir
+    test "emits a [:minga, :file_tree, :walk] span with the entry count", %{tmp_dir: tmp_dir} do
+      touch(Path.join(tmp_dir, "a.txt"))
+      touch(Path.join(tmp_dir, "b.txt"))
+
+      ref = make_ref()
+      parent = self()
+      handler_id = {__MODULE__, ref}
+
+      :telemetry.attach(
+        handler_id,
+        [:minga, :file_tree, :walk, :stop],
+        fn _event, measurements, metadata, _ ->
+          send(parent, {ref, measurements, metadata})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      # Force a real walk (fresh tree has entries: nil).
+      tmp_dir |> FileTree.new() |> FileTree.visible_entries()
+
+      assert_receive {^ref, measurements, metadata}
+      assert is_integer(measurements.duration)
+      assert metadata.entry_count == 2
+      assert metadata.root == Path.expand(tmp_dir)
+    end
+
+    @tag :tmp_dir
+    test "does not span when entries are already memoized", %{tmp_dir: tmp_dir} do
+      touch(Path.join(tmp_dir, "a.txt"))
+
+      ref = make_ref()
+      parent = self()
+      handler_id = {__MODULE__, ref}
+
+      :telemetry.attach(
+        handler_id,
+        [:minga, :file_tree, :walk, :stop],
+        fn _event, _m, _meta, _ -> send(parent, {ref, :walked}) end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      # First call walks (and memoizes entries); a second ensure_entries on the
+      # already-populated tree must not walk again.
+      walked = tmp_dir |> FileTree.new() |> FileTree.ensure_entries()
+      assert_receive {^ref, :walked}
+
+      FileTree.ensure_entries(walked)
+      refute_receive {^ref, :walked}
+    end
+  end
 end
