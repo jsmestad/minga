@@ -43,6 +43,12 @@ struct FileTreeView: View {
     /// Whether the pointer is over the file tree (drives scrollbar visibility).
     @State private var isHoveringFileTree = false
 
+    /// Tracks whether macOS prefers always-visible scrollbars.
+    @State private var usesLegacyScrollerStyle = NSScroller.preferredScrollerStyle == .legacy
+
+    /// Task observing live macOS scrollbar-style changes.
+    @State private var scrollerStyleTask: Task<Void, Never>?
+
     /// Whether the file tree's scroll indicator should be shown.
     ///
     /// The sidebar scrollbar is de-emphasized when the file tree is idle chrome:
@@ -53,7 +59,7 @@ struct FileTreeView: View {
     private var showsScrollIndicators: Bool {
         fileTreeState.focused
             || isHoveringFileTree
-            || NSScroller.preferredScrollerStyle == .legacy
+            || usesLegacyScrollerStyle
     }
 
     var body: some View {
@@ -62,6 +68,8 @@ struct FileTreeView: View {
         }
         .focusable(false)
         .focusEffectDisabled()
+        .onAppear { observeScrollerStyleChanges() }
+        .onDisappear { stopObservingScrollerStyleChanges() }
     }
 
     // MARK: - Entry list
@@ -518,6 +526,25 @@ struct FileTreeView: View {
         if flags.contains(.option) { mods |= 0x04 }
         if flags.contains(.command) { mods |= 0x08 }
         return mods
+    }
+
+    /// Starts observing live macOS scrollbar-style changes.
+    @MainActor
+    private func observeScrollerStyleChanges() {
+        guard scrollerStyleTask == nil else { return }
+        usesLegacyScrollerStyle = NSScroller.preferredScrollerStyle == .legacy
+        scrollerStyleTask = Task { @MainActor in
+            for await _ in NotificationCenter.default.notifications(named: NSScroller.preferredScrollerStyleDidChangeNotification) {
+                usesLegacyScrollerStyle = NSScroller.preferredScrollerStyle == .legacy
+            }
+        }
+    }
+
+    /// Stops observing macOS scrollbar-style changes when the view disappears.
+    @MainActor
+    private func stopObservingScrollerStyleChanges() {
+        scrollerStyleTask?.cancel()
+        scrollerStyleTask = nil
     }
 
 }
