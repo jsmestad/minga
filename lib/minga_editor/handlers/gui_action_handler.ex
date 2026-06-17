@@ -1196,7 +1196,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   @typedoc "Result of an async git worktree operation, applied via apply_git_result/2."
   @type git_result ::
           {:ok, success_msg :: String.t(), git_root :: String.t()}
-          | {:error, String.t()}
+          | {:error, reason :: String.t(), git_root :: String.t()}
           | :not_a_repo
 
   # Runs a worktree git command off the editor's critical path: shows a pending
@@ -1224,9 +1224,16 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   @spec run_git_op((String.t() -> :ok | {:error, String.t()}), String.t(), String.t()) ::
           git_result()
   defp run_git_op(operation, git_root, success_msg) do
-    case operation.(git_root) do
+    # Span the actual git subprocess (runs in the offloaded Task) so the slow
+    # work AC7 cares about is measured, not just the cheap dispatch (#2357).
+    result =
+      Minga.Telemetry.span([:minga, :git, :worktree_action], %{git_root: git_root}, fn ->
+        operation.(git_root)
+      end)
+
+    case result do
       :ok -> {:ok, success_msg, git_root}
-      {:error, reason} -> {:error, reason}
+      {:error, reason} -> {:error, reason, git_root}
     end
   end
 
@@ -1241,7 +1248,11 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     EditorState.set_status(state, success_msg)
   end
 
-  def apply_git_result(state, {:error, reason}) do
+  def apply_git_result(state, {:error, reason, git_root}) do
+    # Refresh on failure too: a superseded earlier op on this lane may have
+    # mutated the index already (its own result was dropped as stale), so the
+    # repo state can have changed even though this latest op failed.
+    MingaEditor.refresh_git_repo(git_root)
     EditorState.set_status(state, "Git error: #{reason}")
   end
 

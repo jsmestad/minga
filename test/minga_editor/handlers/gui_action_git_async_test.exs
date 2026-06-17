@@ -67,8 +67,8 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
     assert EditorState.status_msg(applied) == "Staged lib/foo.ex"
   end
 
-  test "applying a git error surfaces it", %{state: state} do
-    applied = GuiActionHandler.apply_git_result(state, {:error, "fatal: pathspec"})
+  test "applying a git error surfaces it and still refreshes the repo", %{state: state} do
+    applied = GuiActionHandler.apply_git_result(state, {:error, "fatal: pathspec", "/tmp/repo"})
     assert EditorState.status_msg(applied) == "Git error: fatal: pathspec"
   end
 end
