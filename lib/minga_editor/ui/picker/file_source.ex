@@ -270,10 +270,10 @@ defmodule MingaEditor.UI.Picker.FileSource do
   defp git_status_annotation(_), do: nil
 
   @spec project_root(Context.t() | EditorState.t() | nil) :: String.t()
-  defp project_root(%Context{file_tree: %{project_root: root}}) when is_binary(root), do: root
-
   defp project_root(%Context{picker_ui: %{context: %{project_root: root}}}) when is_binary(root),
     do: root
+
+  defp project_root(%Context{file_tree: %{project_root: root}}) when is_binary(root), do: root
 
   defp project_root(%EditorState{} = state) do
     case EditorState.file_tree_state(state).project_root do

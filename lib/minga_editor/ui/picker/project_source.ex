@@ -8,7 +8,10 @@ defmodule MingaEditor.UI.Picker.ProjectSource do
 
   @behaviour MingaEditor.UI.Picker.Source
 
+  alias MingaEditor.FileTree.Freshness, as: FileTreeFreshness
+  alias MingaEditor.PickerUI
   alias MingaEditor.UI.Picker.Context
+  alias MingaEditor.UI.Picker.FileSource
   alias MingaEditor.UI.Picker.Item
 
   alias Minga.Project
@@ -37,12 +40,12 @@ defmodule MingaEditor.UI.Picker.ProjectSource do
   @impl true
   @spec on_select(Item.t(), term()) :: term()
   def on_select(%Item{id: root_path}, state) do
-    Project.switch(root_path)
+    expanded_root = Path.expand(root_path)
+    Project.switch(expanded_root)
 
-    # After switching project, open the file finder scoped to the new root.
-    # We use a pending_command pattern so the Editor dispatches it after
-    # the picker closes.
-    Map.put(state, :pending_command, :project_find_file)
+    state
+    |> FileTreeFreshness.update_project_root(expanded_root)
+    |> PickerUI.open(FileSource, %{project_root: expanded_root})
   catch
     :exit, _ -> state
   end

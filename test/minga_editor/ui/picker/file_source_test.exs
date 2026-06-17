@@ -9,6 +9,7 @@ defmodule MingaEditor.UI.Picker.FileSourceTest do
   alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
   alias MingaEditor.State.Picker, as: PickerState
   alias MingaEditor.UI.Picker
+  alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.FileSource
   alias MingaEditor.UI.Picker.Item
 
@@ -239,6 +240,32 @@ defmodule MingaEditor.UI.Picker.FileSourceTest do
     assert is_integer(hot_index)
     assert is_integer(cold_index)
     assert hot_index < cold_index
+  end
+
+  test "explicit picker project root overrides stale file tree root", %{tmp_dir: tmp_dir} do
+    stale_root = Path.join(tmp_dir, "stale_file_source_root")
+    selected_root = Path.join(tmp_dir, "selected_file_source_root")
+
+    File.mkdir_p!(stale_root)
+    File.mkdir_p!(selected_root)
+    File.write!(Path.join(stale_root, "stale.txt"), "stale")
+    File.write!(Path.join(selected_root, "target.txt"), "target")
+
+    ctx =
+      start_editor("stale",
+        file_path: Path.join(stale_root, "stale.txt"),
+        project_root: stale_root
+      )
+
+    picker_context =
+      ctx
+      |> editor_state()
+      |> Context.from_editor_state(%{project_root: selected_root})
+
+    ids = FileSource.candidates(picker_context) |> Enum.map(& &1.id)
+
+    assert "target.txt" in ids
+    refute "stale.txt" in ids
   end
 
   describe "lean candidates and enrich/1" do
