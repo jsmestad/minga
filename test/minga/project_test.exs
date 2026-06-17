@@ -143,6 +143,7 @@ defmodule Minga.ProjectTest do
       File.write!(Path.join(project, "README.md"), "hello")
       File.mkdir_p!(Path.join(project, "lib"))
       File.write!(Path.join(project, "lib/app.ex"), "")
+      init_git_repo!(project)
 
       {_pid, name} = start_project!()
       Project.detect_and_set(name, Path.join(project, "lib/app.ex"))
@@ -216,6 +217,7 @@ defmodule Minga.ProjectTest do
       File.mkdir_p!(project)
       File.write!(Path.join(project, "mix.exs"), "")
       File.write!(Path.join(project, "file.ex"), "")
+      init_git_repo!(project)
 
       {_pid, name} = start_project!()
       Project.detect_and_set(name, Path.join(project, "file.ex"))
@@ -493,5 +495,13 @@ defmodule Minga.ProjectTest do
       scores = Project.frecency_scores(name)
       assert scores["lib/hot.ex"] > scores["lib/cold.ex"]
     end
+  end
+
+  # Makes a fixture directory a self-contained git repo so file discovery uses
+  # the git-first path. Without an inner `.git`, git would resolve to the outer
+  # minga repo, where the test's `tmp/` fixtures are gitignored and list empty.
+  defp init_git_repo!(dir) do
+    {_out, 0} = System.cmd("git", ["init"], cd: dir, stderr_to_stdout: true)
+    :ok
   end
 end

@@ -2,11 +2,17 @@ defmodule Minga.Project.FileFind do
   @moduledoc """
   Discovers project files for the `SPC f f` (find file) picker.
 
-  Uses the fastest available tool to list files in the project directory:
+  Uses the cheapest available tool to list files in the project directory:
 
-  1. `fd` — preferred, fast, respects `.gitignore`
-  2. `git ls-files` — fast in git repos, respects `.gitignore`
+  1. `git ls-files` — preferred inside git repos, reads the index instead of
+     walking the filesystem, and respects `.gitignore`
+  2. `fd` — preferred outside git repos, fast, respects `.gitignore`
   3. `find` — universally available fallback, slower, no gitignore support
+
+  In a large monorepo the git index is far cheaper than a full filesystem
+  walk, so git wins whenever the root is a git repository or worktree root
+  (it has a `.git` entry). `fd` no longer follows symlinks, so symlinked or
+  cyclic trees are never traversed.
 
   All paths are returned relative to the given root directory.
   """
@@ -47,20 +53,26 @@ defmodule Minga.Project.FileFind do
 
   @doc """
   Detects which file-finding strategy to use for the given root directory.
+
+  Git repos prefer `:git` whenever `git` is available and `root` is a git
+  repository or worktree root (it has a `.git` entry), since reading the index
+  avoids traversing the filesystem. Otherwise `fd` is preferred, falling back
+  to `find`.
   """
   @spec detect_strategy(String.t()) :: strategy()
   def detect_strategy(root) do
-    case fd_executable() do
-      fd when is_binary(fd) -> :fd
-      nil -> detect_strategy_without_fd(root)
-    end
+    detect_strategy(git_strategy_available?(root), root)
   end
 
-  @spec detect_strategy_without_fd(String.t()) :: strategy()
-  defp detect_strategy_without_fd(root) do
-    case git_repo?(root) and executable_available?("git") do
-      true -> :git
-      false -> detect_find_strategy()
+  @spec detect_strategy(boolean(), String.t()) :: strategy()
+  defp detect_strategy(true, _root), do: :git
+  defp detect_strategy(false, root), do: detect_strategy_without_git(root)
+
+  @spec detect_strategy_without_git(String.t()) :: strategy()
+  defp detect_strategy_without_git(_root) do
+    case fd_executable() do
+      fd when is_binary(fd) -> :fd
+      nil -> detect_find_strategy()
     end
   end
 
@@ -77,12 +89,22 @@ defmodule Minga.Project.FileFind do
   @spec excludes() :: [String.t()]
   defp excludes, do: Minga.Config.get(:file_find_excludes)
 
+  @doc """
+  Builds the argument list for the `fd` file-discovery command.
+
+  Symlinks are deliberately not followed (no `--follow`), so large or cyclic
+  symlinked trees are never traversed. Configured excludes are passed through
+  as `--exclude` pairs.
+  """
+  @spec fd_args([String.t()]) :: [String.t()]
+  def fd_args(exclude_list \\ excludes()) do
+    exclude_args = Enum.flat_map(exclude_list, &["--exclude", &1])
+    ["--type", "f", "--hidden"] ++ exclude_args ++ ["."]
+  end
+
   @spec list_with_fd(String.t()) :: result()
   defp list_with_fd(root) do
-    exclude_args = Enum.flat_map(excludes(), &["--exclude", &1])
-    args = ["--type", "f", "--hidden", "--follow"] ++ exclude_args ++ ["."]
-
-    case System.cmd(fd_executable(), args, cd: root, stderr_to_stdout: true) do
+    case System.cmd(fd_executable(), fd_args(), cd: root, stderr_to_stdout: true) do
       {output, 0} ->
         {:ok, parse_lines(output)}
 
@@ -157,8 +179,22 @@ defmodule Minga.Project.FileFind do
     System.find_executable("fd") || System.find_executable("fdfind")
   end
 
-  @spec git_repo?(String.t()) :: boolean()
-  defp git_repo?(root) do
-    File.dir?(Path.join(root, ".git"))
+  @spec git_strategy_available?(String.t()) :: boolean()
+  defp git_strategy_available?(root) do
+    executable_available?("git") and git_repo_root?(root)
+  end
+
+  # True when `root` is the top of a git repository or worktree, i.e. it has a
+  # `.git` entry. Uses `File.exists?` (not `File.dir?`) because git worktrees
+  # store `.git` as a *file* pointing at the real git dir.
+  #
+  # Deliberately does not walk up the tree (as `git rev-parse` would): the file
+  # picker's root is the project root, and a non-repo directory that merely sits
+  # *inside* a larger repo (e.g. an ignored build/tmp dir) should fall back to
+  # `fd` rather than run `git ls-files`, which would list nothing for an ignored
+  # subtree.
+  @spec git_repo_root?(String.t()) :: boolean()
+  defp git_repo_root?(root) do
+    File.exists?(Path.join(root, ".git"))
   end
 end
