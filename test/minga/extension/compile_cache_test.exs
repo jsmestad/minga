@@ -32,6 +32,54 @@ defmodule Minga.Extension.CompileCacheTest do
 
   defp opts(cache_dir), do: [cache_dir: cache_dir, enabled: true]
 
+  describe "type inference during runtime compilation (issue #2355)" do
+    # A fixture that records, at compile time, whether type inference was on
+    # while it was being compiled.
+    defp write_infer_probe(src_dir) do
+      module = :"Elixir.ExtInferProbe#{:erlang.unique_integer([:positive])}"
+      file = Path.join(src_dir, "infer_probe.ex")
+
+      File.write!(file, """
+      defmodule #{inspect(module)} do
+        @infer_during_compile Code.get_compiler_option(:infer_signatures)
+        def infer_during_compile, do: @infer_during_compile
+      end
+      """)
+
+      {src_dir, [file], module}
+    end
+
+    test "disables type inference while compiling and restores it after (cache path)", %{
+      cache_dir: cache_dir,
+      src_dir: src_dir
+    } do
+      {root, files, module} = write_infer_probe(src_dir)
+      before = Code.get_compiler_option(:infer_signatures)
+
+      assert {:ok, %{modules: modules}} =
+               CompileCache.load_or_compile(root, files, opts(cache_dir))
+
+      assert module in modules
+      # The extension's module graph was NOT type-inferred at compile time, so a
+      # release boot does not re-run the type checker over it (the #2355 spike).
+      assert module.infer_during_compile() == false
+      # The global compiler option is restored, not leaked, after the compile.
+      assert Code.get_compiler_option(:infer_signatures) == before
+    end
+
+    test "disables inference on the in-memory (cache-off) path too", %{src_dir: src_dir} do
+      {root, files, module} = write_infer_probe(src_dir)
+      before = Code.get_compiler_option(:infer_signatures)
+
+      assert {:ok, %{modules: modules}} =
+               CompileCache.load_or_compile(root, files, enabled: false)
+
+      assert module in modules
+      assert module.infer_during_compile() == false
+      assert Code.get_compiler_option(:infer_signatures) == before
+    end
+  end
+
   describe "load_or_compile/3" do
     test "compiles and writes beams on a miss", %{cache_dir: cache_dir, src_dir: src_dir} do
       {root, files, module} = write_extension(src_dir, ":v1")
