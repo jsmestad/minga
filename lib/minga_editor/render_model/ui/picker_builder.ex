@@ -44,7 +44,13 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
           PickerModel.t()
   defp build_open(ctx, picker, source, action_menu, mode_prefix, load_status) do
     has_preview = source != nil and Picker.Source.gui_preview?(source)
-    items = picker.filtered |> Enum.take(@max_items) |> Enum.map(&item_model(picker, &1))
+
+    items =
+      picker.filtered
+      |> Enum.take(@max_items)
+      |> enrich_for_display(source, picker.query)
+      |> Enum.map(&item_model(picker, &1))
+
     preview_lines = if has_preview, do: build_picker_preview(ctx)
 
     %PickerModel{
@@ -62,6 +68,22 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
       load_status: load_status,
       preview_lines: preview_lines
     }
+  end
+
+  # Builds the deferred display fields (icon, color, two-line description, status
+  # annotation) for just the visible window, then recomputes match positions
+  # against the enriched label. Sources that already return fully-built items
+  # (no `enrich/1`) pass through unchanged. This keeps display derivation in the
+  # render model (ruling 4) while filtering stays bounded and lean.
+  @spec enrich_for_display([Picker.Item.t()], module() | nil, String.t()) :: [Picker.Item.t()]
+  defp enrich_for_display(items, source, query) do
+    if source != nil and Picker.Source.enriches?(source) do
+      source
+      |> Picker.Source.enrich(items)
+      |> Enum.map(&%{&1 | match_positions: Picker.match_positions(&1.label, query)})
+    else
+      items
+    end
   end
 
   # Normalize one picker source item into the wire-shaped map the generated

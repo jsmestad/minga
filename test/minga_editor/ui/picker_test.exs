@@ -67,6 +67,42 @@ defmodule MingaEditor.UI.PickerTest do
     end
   end
 
+  describe "bounded result set" do
+    @result_limit 200
+
+    test "filtering a huge candidate set is bounded to the result limit" do
+      items = for i <- 1..5_000, do: %Item{id: i, label: "config_#{i}.ex"}
+      picker = Picker.new(items) |> Picker.filter("config")
+
+      assert Picker.count(picker) == @result_limit
+      assert Picker.total(picker) == 5_000
+      assert Picker.selected_item(picker) != nil
+    end
+
+    test "empty query on a huge set is also bounded" do
+      items = for i <- 1..5_000, do: %Item{id: i, label: "file_#{i}.ex"}
+      picker = Picker.new(items)
+
+      assert Picker.count(picker) == @result_limit
+      assert Picker.total(picker) == 5_000
+    end
+
+    test "small sets are unaffected (full list shown)" do
+      items = for i <- 1..10, do: %Item{id: i, label: "thing_#{i}"}
+      picker = Picker.new(items) |> Picker.filter("thing")
+
+      assert Picker.count(picker) == 10
+    end
+
+    test "match positions are attached to filtered winners only" do
+      items = for i <- 1..300, do: %Item{id: i, label: "config_#{i}.ex"}
+      picker = Picker.new(items) |> Picker.filter("config")
+
+      assert Enum.all?(picker.filtered, &(&1.match_positions != []))
+      assert length(picker.filtered) == @result_limit
+    end
+  end
+
   describe "fuzzy/orderless matching" do
     test "orderless matching — segments match independently" do
       items = [
@@ -320,7 +356,7 @@ defmodule MingaEditor.UI.PickerTest do
     end
 
     test "scrolls to keep selection visible" do
-      items = for i <- 1..20, do: {i, "item #{i}", "desc #{i}"}
+      items = for i <- 1..20, do: %Item{id: i, label: "item #{i}", description: "desc #{i}"}
       picker = Picker.new(items, max_visible: 5)
 
       # Move to item 10
@@ -343,7 +379,7 @@ defmodule MingaEditor.UI.PickerTest do
 
   describe "page_down/1" do
     test "jumps down by max_visible items" do
-      items = for i <- 1..20, do: {i, "item #{i}", "desc #{i}"}
+      items = for i <- 1..20, do: %Item{id: i, label: "item #{i}", description: "desc #{i}"}
       picker = Picker.new(items, max_visible: 5)
       assert picker.selected == 0
 
@@ -355,7 +391,7 @@ defmodule MingaEditor.UI.PickerTest do
     end
 
     test "clamps to last item" do
-      items = for i <- 1..20, do: {i, "item #{i}", "desc #{i}"}
+      items = for i <- 1..20, do: %Item{id: i, label: "item #{i}", description: "desc #{i}"}
       picker = Picker.new(items, max_visible: 5)
 
       # Jump 4 pages — should clamp to 19 (last item)
@@ -377,7 +413,7 @@ defmodule MingaEditor.UI.PickerTest do
 
   describe "page_up/1" do
     test "jumps up by max_visible items" do
-      items = for i <- 1..20, do: {i, "item #{i}", "desc #{i}"}
+      items = for i <- 1..20, do: %Item{id: i, label: "item #{i}", description: "desc #{i}"}
       picker = Picker.new(items, max_visible: 5)
 
       # Start at item 15
@@ -392,7 +428,7 @@ defmodule MingaEditor.UI.PickerTest do
     end
 
     test "clamps to first item" do
-      items = for i <- 1..20, do: {i, "item #{i}", "desc #{i}"}
+      items = for i <- 1..20, do: %Item{id: i, label: "item #{i}", description: "desc #{i}"}
       picker = Picker.new(items, max_visible: 5)
 
       # Start at item 3

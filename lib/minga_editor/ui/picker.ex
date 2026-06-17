@@ -36,6 +36,7 @@ defmodule MingaEditor.UI.Picker do
 
   @enforce_keys [:items, :title]
   defstruct items: [],
+            candidates: [],
             query: "",
             selected: 0,
             filtered: [],
@@ -43,7 +44,20 @@ defmodule MingaEditor.UI.Picker do
             title: "",
             marked: %{}
 
+  alias MingaEditor.UI.Picker.Candidate
   alias MingaEditor.UI.Picker.Item
+  alias MingaEditor.UI.Picker.Scorer
+
+  # Upper bound on how many results filtering retains. Sources with fewer items
+  # are unaffected (the full set fits); large sources (e.g. the file picker with
+  # tens of thousands of paths) are bounded to the best matches so each keystroke
+  # never scores-and-sorts the entire candidate list. Generous so paging past the
+  # visible window still has somewhere to land.
+  #
+  # Consequence: `count/1` (and the picker footer's filtered count) reports how
+  # many results are *shown*, capped here, not the true number of matches in a
+  # huge source. `total/1` still reflects the full candidate count.
+  @result_limit 200
 
   @typedoc "A picker item struct."
   @type item :: Item.t()
@@ -51,6 +65,7 @@ defmodule MingaEditor.UI.Picker do
   @typedoc "Picker state. The `marked` map uses item ids as keys (values are `true`)."
   @type t :: %__MODULE__{
           items: [Item.t()],
+          candidates: [Candidate.t()],
           query: String.t(),
           selected: non_neg_integer(),
           filtered: [Item.t()],
@@ -69,20 +84,21 @@ defmodule MingaEditor.UI.Picker do
     title = Keyword.get(opts, :title, "")
     max_visible = Keyword.get(opts, :max_visible, 10)
 
-    %__MODULE__{
+    refilter(%__MODULE__{
       items: items,
+      candidates: Candidate.from_items(items),
       title: title,
       max_visible: max_visible,
       filtered: items,
       query: "",
       selected: 0
-    }
+    })
   end
 
   @doc "Replaces the item list and refilters against the current query."
   @spec replace_items(t(), [item()]) :: t()
   def replace_items(%__MODULE__{} = picker, items) when is_list(items) do
-    refilter(%{picker | items: items})
+    refilter(%{picker | items: items, candidates: Candidate.from_items(items)})
   end
 
   # ── Query manipulation ──────────────────────────────────────────────────────
@@ -294,42 +310,57 @@ defmodule MingaEditor.UI.Picker do
 
   # ── Private ─────────────────────────────────────────────────────────────────
 
+  # Empty query: no scoring, just present the leading slice of the (already
+  # source-ordered) items, bounded so huge sources don't materialize every item.
   @spec refilter(t()) :: t()
   defp refilter(%__MODULE__{items: items, query: ""} = picker) do
-    # Clear any stale match positions when query is empty
-    cleared = Enum.map(items, &%{&1 | match_positions: []})
-    %{picker | filtered: cleared, selected: clamp_selection(picker.selected, length(items))}
+    filtered = bounded_unscored(items, result_limit(picker))
+    %{picker | filtered: filtered, selected: clamp_selection(picker.selected, length(filtered))}
   end
 
-  defp refilter(%__MODULE__{items: items, query: query} = picker) do
-    segments = split_query(query)
-
-    case segments do
+  defp refilter(%__MODULE__{candidates: candidates, query: query} = picker) do
+    case split_query(query) do
       [] ->
-        cleared = Enum.map(items, &%{&1 | match_positions: []})
-        %{picker | filtered: cleared, selected: clamp_selection(picker.selected, length(items))}
+        filtered = bounded_unscored(picker.items, result_limit(picker))
 
-      _ ->
-        scored = score_and_highlight(items, segments, query)
-        %{picker | filtered: scored, selected: clamp_selection(picker.selected, length(scored))}
+        %{
+          picker
+          | filtered: filtered,
+            selected: clamp_selection(picker.selected, length(filtered))
+        }
+
+      segments ->
+        filtered =
+          candidates
+          |> Scorer.top_k(segments, result_limit(picker))
+          |> Enum.map(&highlight_winner(&1, query))
+
+        %{
+          picker
+          | filtered: filtered,
+            selected: clamp_selection(picker.selected, length(filtered))
+        }
     end
   end
 
-  @spec score_and_highlight([Item.t()], [String.t()], String.t()) :: [Item.t()]
-  defp score_and_highlight(items, segments, query) do
-    items
-    |> Enum.map(&score_item_with_positions(&1, segments, query))
-    |> Enum.filter(fn {_item, score} -> score > 0 end)
-    |> Enum.sort_by(fn {_item, score} -> -score end)
-    |> Enum.map(fn {item, _score} -> item end)
+  # Build a displayable item from a winning candidate, attaching match positions.
+  # Positions are computed only here, for the bounded winners, never for the
+  # whole candidate set.
+  @spec highlight_winner(Candidate.t(), String.t()) :: Item.t()
+  defp highlight_winner(%Candidate{item: %Item{label: label} = item}, query) do
+    %{item | match_positions: match_positions(label, query)}
   end
 
-  @spec score_item_with_positions(Item.t(), [String.t()], String.t()) ::
-          {Item.t(), non_neg_integer()}
-  defp score_item_with_positions(%Item{label: label} = item, segments, query) do
-    score = score_item(item, segments)
-    positions = if score > 0, do: match_positions(label, query), else: []
-    {%{item | match_positions: positions}, score}
+  @spec bounded_unscored([Item.t()], pos_integer()) :: [Item.t()]
+  defp bounded_unscored(items, limit) do
+    items
+    |> Enum.take(limit)
+    |> Enum.map(&%{&1 | match_positions: []})
+  end
+
+  @spec result_limit(t()) :: pos_integer()
+  defp result_limit(%__MODULE__{max_visible: max_visible}) do
+    max(@result_limit, max_visible)
   end
 
   # Split query into lowercase segments on whitespace, dropping empty segments.
@@ -338,92 +369,6 @@ defmodule MingaEditor.UI.Picker do
     query
     |> String.downcase()
     |> String.split(~r/\s+/, trim: true)
-  end
-
-  @spec score_item(Item.t(), [String.t()]) :: non_neg_integer()
-  defp score_item(%Item{label: label} = item, segments) do
-    scoring_label = label |> String.downcase() |> strip_icon_prefix()
-    searchable = searchable_text(item)
-
-    segment_scores =
-      Enum.map(segments, fn seg ->
-        label_score = score_segment(scoring_label, seg)
-        search_score = score_segment(searchable, seg)
-
-        if label_score > 0 do
-          label_score + 200
-        else
-          search_score
-        end
-      end)
-
-    if Enum.any?(segment_scores, &(&1 == 0)) do
-      0
-    else
-      base = Enum.sum(segment_scores)
-      length_bonus = max(0, 50 - String.length(scoring_label))
-      base + length_bonus
-    end
-  end
-
-  @spec searchable_text(Item.t()) :: String.t()
-  defp searchable_text(%Item{} = item) do
-    [item.description, item.annotation, item.search_text]
-    |> Enum.reject(&is_nil/1)
-    |> Enum.join(" ")
-    |> String.downcase()
-  end
-
-  @spec strip_icon_prefix(String.t()) :: String.t()
-  defp strip_icon_prefix(label) do
-    case String.next_grapheme(label) do
-      {g, " " <> rest} when byte_size(g) > 1 -> rest
-      _ -> label
-    end
-  end
-
-  @spec score_segment(String.t(), String.t()) :: non_neg_integer()
-  defp score_segment(text, segment) do
-    case String.starts_with?(text, segment) do
-      true -> 300
-      false -> score_non_prefix_segment(text, segment)
-    end
-  end
-
-  @spec score_non_prefix_segment(String.t(), String.t()) :: non_neg_integer()
-  defp score_non_prefix_segment(text, segment) do
-    case String.contains?(text, segment) do
-      true -> 200
-      false -> score_fuzzy_segment(text, segment)
-    end
-  end
-
-  @spec score_fuzzy_segment(String.t(), String.t()) :: non_neg_integer()
-  defp score_fuzzy_segment(text, segment) do
-    case fuzzy_match?(text, segment) do
-      true -> 100
-      false -> 0
-    end
-  end
-
-  # Check if all characters in `needle` appear in order in `haystack`.
-  @spec fuzzy_match?(String.t(), String.t()) :: boolean()
-  defp fuzzy_match?(haystack, needle) do
-    haystack_graphemes = String.graphemes(haystack)
-    needle_graphemes = String.graphemes(needle)
-    do_fuzzy_match?(haystack_graphemes, needle_graphemes)
-  end
-
-  @spec do_fuzzy_match?([String.t()], [String.t()]) :: boolean()
-  defp do_fuzzy_match?(_haystack, []), do: true
-  defp do_fuzzy_match?([], _needle), do: false
-
-  defp do_fuzzy_match?([h | h_rest], [n | n_rest] = needle) do
-    if h == n do
-      do_fuzzy_match?(h_rest, n_rest)
-    else
-      do_fuzzy_match?(h_rest, needle)
-    end
   end
 
   # Find the 0-based indices of matched characters for a single segment.

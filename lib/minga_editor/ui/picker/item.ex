@@ -26,6 +26,10 @@ defmodule MingaEditor.UI.Picker.Item do
   - `:active` — when true, marks this item as the currently active selection
     (e.g. the current thinking level). The centered picker renderer draws a
     `●` indicator for active items and blank padding for inactive siblings.
+  - `:meta` — opaque source-private map carried alongside the item. Used by
+    sources that defer display enrichment (e.g. `FileSource` stashes the git
+    status here so the bounded winners can be enriched without re-reading state).
+    Never rendered directly.
   """
 
   @enforce_keys [:id, :label]
@@ -38,7 +42,8 @@ defmodule MingaEditor.UI.Picker.Item do
     search_text: "",
     match_positions: [],
     two_line: false,
-    active: false
+    active: false,
+    meta: %{}
   ]
 
   @type t :: %__MODULE__{
@@ -50,6 +55,7 @@ defmodule MingaEditor.UI.Picker.Item do
           search_text: String.t(),
           match_positions: [non_neg_integer()],
           two_line: boolean(),
-          active: boolean()
+          active: boolean(),
+          meta: map()
         }
 end
