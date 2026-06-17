@@ -246,6 +246,10 @@ defmodule Minga.Extension.DevReload do
     if ex_files == [] do
       {:error, :no_source_files}
     else
+      # Unlike CompileCache (which disables type inference for the boot-time
+      # whole-graph compile, issue #2355), dev hot-reload deliberately keeps
+      # inference on: it recompiles a single changed extension, so there is no
+      # large-graph memory spike, and the developer wants the type diagnostics.
       case Kernel.ParallelCompiler.compile(ex_files, return_diagnostics: true) do
         {:ok, _modules, _diag_map} -> :ok
         {:error, errors, _diag_map} -> {:error, errors}

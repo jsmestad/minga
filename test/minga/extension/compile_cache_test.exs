@@ -33,6 +33,13 @@ defmodule Minga.Extension.CompileCacheTest do
   defp opts(cache_dir), do: [cache_dir: cache_dir, enabled: true]
 
   describe "type inference during runtime compilation (issue #2355)" do
+    # NOTE: `:infer_signatures` is global VM compiler state, not process-local.
+    # These tests are safe under `async: true` because CompileCache mutates and
+    # restores it under a `:global.trans` lock (so concurrent compiles here are
+    # serialized) and no other test suite touches `:infer_signatures`. If a
+    # future async test starts reading/writing that option, move this block to a
+    # separate `async: false` module.
+
     # A fixture that records, at compile time, whether type inference was on
     # while it was being compiled.
     defp write_infer_probe(src_dir) do
