@@ -21,34 +21,8 @@ defmodule MingaEditor.Agent.UIState do
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Windows
 
-  # Re-export sub-struct types for backward compat. New code should
-  # reference Panel.paste_block(), View.search_state(), etc. directly.
-  @typedoc deprecated: "Use Panel.paste_block() instead"
-  @typedoc "A collapsed paste block. Deprecated: use Panel.paste_block()."
-  @type paste_block :: Panel.paste_block()
-
   @typedoc "Vim mode for the input field when focused."
   @type input_mode :: :insert | :normal | :visual | :visual_line | :operator_pending
-
-  @typedoc deprecated: "Use View.focus() instead"
-  @typedoc "Which panel has keyboard focus. Deprecated: use View.focus()."
-  @type focus :: View.focus()
-
-  @typedoc deprecated: "Use View.prefix() instead"
-  @typedoc "Active prefix key. Deprecated: use View.prefix()."
-  @type prefix :: View.prefix()
-
-  @typedoc deprecated: "Use View.search_match() instead"
-  @typedoc "A search match. Deprecated: use View.search_match()."
-  @type search_match :: View.search_match()
-
-  @typedoc deprecated: "Use View.search_state() instead"
-  @typedoc "Search state. Deprecated: use View.search_state()."
-  @type search_state :: View.search_state()
-
-  @typedoc deprecated: "Use View.toast() instead"
-  @typedoc "A notification toast. Deprecated: use View.toast()."
-  @type toast :: View.toast()
 
   @typedoc "Thinking level for models that support extended reasoning."
   @type thinking_level :: String.t()
@@ -352,7 +326,8 @@ defmodule MingaEditor.Agent.UIState do
   end
 
   @doc "Returns the line count for a paste block at the given index."
-  @spec paste_block_line_count(t() | [paste_block()], non_neg_integer()) :: non_neg_integer()
+  @spec paste_block_line_count(t() | [Panel.paste_block()], non_neg_integer()) ::
+          non_neg_integer()
   def paste_block_line_count(%__MODULE__{panel: panel}, index) do
     paste_block_line_count(panel.pasted_blocks, index)
   end
@@ -652,18 +627,6 @@ defmodule MingaEditor.Agent.UIState do
     %{state | view: View.reset_split(view)}
   end
 
-  @doc false
-  @doc deprecated: "Use set_prefix/2 and clear_prefix/1 instead"
-  @spec set_pending_g(t(), boolean()) :: t()
-  def set_pending_g(%__MODULE__{} = state, true), do: set_prefix(state, :g)
-  def set_pending_g(%__MODULE__{} = state, false), do: clear_prefix(state)
-
-  @doc false
-  @doc deprecated: "Use view.pending_prefix == :g instead"
-  @spec pending_g(t()) :: boolean()
-  def pending_g(%__MODULE__{view: %View{pending_prefix: :g}}), do: true
-  def pending_g(%__MODULE__{}), do: false
-
   # ── Search (delegate to View) ───────────────────────────────────────────────
 
   @doc "Starts a search, saving the current scroll position."
@@ -929,7 +892,7 @@ defmodule MingaEditor.Agent.UIState do
 
   @spec expanded_block_contains_cursor?(
           [String.t()],
-          paste_block(),
+          Panel.paste_block(),
           non_neg_integer(),
           non_neg_integer()
         ) :: {:ok, non_neg_integer()} | nil
@@ -971,13 +934,13 @@ defmodule MingaEditor.Agent.UIState do
     end
   end
 
-  @spec substitute_placeholders(String.t(), [paste_block()]) :: String.t()
+  @spec substitute_placeholders(String.t(), [Panel.paste_block()]) :: String.t()
   defp substitute_placeholders(content, blocks) do
     String.split(content, "\n")
     |> Enum.map_join("\n", fn line -> substitute_placeholder(line, blocks) end)
   end
 
-  @spec substitute_placeholder(String.t(), [paste_block()]) :: String.t()
+  @spec substitute_placeholder(String.t(), [Panel.paste_block()]) :: String.t()
   defp substitute_placeholder(line, blocks) do
     case parse_placeholder(line) do
       {:ok, index} ->

@@ -151,26 +151,6 @@ defmodule MingaEditor.Agent.UIState.ViewFunctionsTest do
       ui = put_in(UIState.new().view.pending_prefix, :z) |> UIState.clear_prefix()
       assert ui.view.pending_prefix == nil
     end
-
-    test "backward compat: set_pending_g(true) sets prefix to :g" do
-      ui = UIState.new() |> UIState.set_pending_g(true)
-      assert ui.view.pending_prefix == :g
-    end
-
-    test "backward compat: set_pending_g(false) clears prefix" do
-      ui = put_in(UIState.new().view.pending_prefix, :g) |> UIState.set_pending_g(false)
-      assert ui.view.pending_prefix == nil
-    end
-
-    test "backward compat: pending_g/1 returns true when prefix is :g" do
-      ui = UIState.new() |> UIState.set_prefix(:g)
-      assert UIState.pending_g(ui) == true
-    end
-
-    test "backward compat: pending_g/1 returns false for other prefixes" do
-      ui = UIState.new() |> UIState.set_prefix(:z)
-      assert UIState.pending_g(ui) == false
-    end
   end
 
   describe "panel resize" do

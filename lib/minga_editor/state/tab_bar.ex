@@ -14,7 +14,7 @@ defmodule MingaEditor.State.TabBar do
   """
 
   alias Minga.Buffer
-  alias Minga.FileRef
+  alias Minga.Project.FileRef
   alias MingaEditor.FeatureState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Workspace
@@ -682,7 +682,7 @@ defmodule MingaEditor.State.TabBar do
   @spec tab_matches_file_ref?(Tab.t(), FileRef.t()) :: boolean()
   defp tab_matches_file_ref?(%Tab{} = tab, %FileRef{} = file_ref) do
     case tab_file_ref(tab) do
-      %FileRef{} = tab_ref -> FileRef.same?(tab_ref, file_ref)
+      %FileRef{} = tab_ref -> FileRef.equal?(tab_ref, file_ref)
       nil -> false
     end
   end
@@ -698,7 +698,7 @@ defmodule MingaEditor.State.TabBar do
   @spec buffer_file_ref(pid()) :: FileRef.t() | nil
   defp buffer_file_ref(pid) do
     case Buffer.file_path(pid) do
-      path when is_binary(path) -> FileRef.new(path)
+      path when is_binary(path) -> FileRef.from_file_path(path)
       _ -> nil
     end
   catch

@@ -305,7 +305,7 @@ defmodule MingaEditor.Input.Scoped do
     |> Enum.any?(&expanded_block_spans_cursor?(&1, lines, cursor_line))
   end
 
-  @spec expanded_block_spans_cursor?(UIState.paste_block(), [String.t()], non_neg_integer()) ::
+  @spec expanded_block_spans_cursor?(Panel.paste_block(), [String.t()], non_neg_integer()) ::
           boolean()
   defp expanded_block_spans_cursor?(block, lines, cursor_line) do
     text_lines = String.split(block.text, "\n")

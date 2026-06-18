@@ -29,11 +29,9 @@ defmodule MingaEditor.Frontend.Manager do
 
   alias Minga.Telemetry
   alias MingaEditor.Frontend.Protocol
-  alias MingaEditor.Frontend.Selection
 
   @typedoc "Renderer backend."
   @type backend :: :tui | :gui
-  @type tui_impl :: Selection.tui_impl()
 
   @typedoc "Options for starting the port manager."
   @type start_opt ::
@@ -119,10 +117,8 @@ defmodule MingaEditor.Frontend.Manager do
 
     backend = Keyword.get(opts, :backend, :tui)
     port_mode = Keyword.get(opts, :port_mode, Application.get_env(:minga, :port_mode, :spawn))
-    # get_lazy: resolving the default path reads the global MINGA_FRONTEND
-    # selection, which must not happen when an explicit path is supplied
-    # (tests pass explicit paths and run concurrently with SelectionTest's
-    # env mutations).
+
+    # get_lazy avoids MINGA_FRONTEND validation when renderer_path is explicit.
     renderer_path =
       Keyword.get_lazy(opts, :renderer_path, fn -> default_renderer_path(backend) end)
 
@@ -427,10 +423,7 @@ defmodule MingaEditor.Frontend.Manager do
   @spec dev_fallback_path(backend()) :: String.t()
   defp dev_fallback_path(:gui), do: find_xcode_build_product("Minga")
 
-  defp dev_fallback_path(:tui), do: tui_dev_fallback_path(Selection.tui_impl())
-
-  @spec tui_dev_fallback_path(tui_impl()) :: String.t()
-  defp tui_dev_fallback_path(:go),
+  defp dev_fallback_path(:tui),
     do: Path.join([File.cwd!(), "go", "tui", "bin", "minga-renderer-go"])
 
   # When running from a BEAM release embedded inside a .app bundle,
@@ -498,8 +491,21 @@ defmodule MingaEditor.Frontend.Manager do
   end
 
   @spec renderer_binary_name(backend()) :: String.t()
-  defp renderer_binary_name(:tui), do: Selection.renderer_binary_name(Selection.tui_impl())
+  defp renderer_binary_name(:tui) do
+    validate_tui_frontend!()
+    "minga-renderer-go"
+  end
+
   defp renderer_binary_name(:gui), do: "Minga"
+
+  @spec validate_tui_frontend!() :: :ok
+  defp validate_tui_frontend! do
+    case System.get_env("MINGA_FRONTEND") do
+      nil -> :ok
+      "go" -> :ok
+      value -> raise ArgumentError, "MINGA_FRONTEND=#{value} is not valid. Only \"go\" is valid."
+    end
+  end
 
   # Find the Xcode build product in DerivedData.
   # Uses `xcodebuild -showBuildSettings` to get the exact path.

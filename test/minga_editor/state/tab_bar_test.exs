@@ -2,7 +2,7 @@ defmodule MingaEditor.State.TabBarTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
-  alias Minga.FileRef
+  alias Minga.Project.FileRef
   alias MingaEditor.State.Workspace
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
@@ -362,7 +362,7 @@ defmodule MingaEditor.State.TabBarTest do
       {tb, group} = TabBar.add_workspace(tb, "Agent")
       tb = TabBar.move_tab_to_workspace(tb, 2, group.id)
       tb = TabBar.move_tab_to_workspace(tb, 3, group.id)
-      file_ref = FileRef.new(path)
+      file_ref = FileRef.from_file_path(path)
 
       assert TabBar.find_file_tab_in_workspace(tb, 0, file_ref).id == 1
       assert TabBar.find_file_tab_in_workspace(tb, group.id, file_ref).id == 3
