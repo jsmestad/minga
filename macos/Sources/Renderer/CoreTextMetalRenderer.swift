@@ -12,6 +12,7 @@
 /// 5. Gutter separator line
 /// 6. Beam/underline cursor overlay (drawn after text)
 
+import Dispatch
 import Metal
 import QuartzCore
 import AppKit
@@ -276,6 +277,76 @@ final class CoreTextMetalRenderer {
     /// Metal buffer for line GPU instances (one instanced draw call).
     private var instanceBuffer: MTLBuffer?
     private var maxInstanceSlots: Int = 0
+
+    /// Number of in-flight frames for triple-buffered quad uploads.
+    private static let quadBufferFrameCount = 3
+
+    /// Triple-buffered quad instance buffers for bg/overlay/diagnostic passes.
+    ///
+    /// `setVertexBytes` silently truncates above Metal's 4 KB inline limit, so
+    /// multi-window splits plus overlays could exceed it and drop quads without
+    /// any error. These reusable buffers replace that path. One buffer per
+    /// in-flight frame (rotated each frame) avoids CPU/GPU contention: the CPU
+    /// writes the next frame's buffer while the GPU reads the previous one.
+    private var quadBuffers: [MTLBuffer] = []
+
+    /// Capacity (in quads) of each entry in `quadBuffers`. Grows on demand.
+    private var quadBufferCapacity: Int = 0
+
+    /// Index of the quad buffer the current frame writes into (0..<frameCount).
+    private var quadBufferFrameIndex: Int = 0
+
+    /// Running byte offset within the current frame's quad buffer. Multiple
+    /// passes (bg, overlay, diagnostic) append into the same buffer at distinct
+    /// 256-byte-aligned offsets so their data does not clobber each other when
+    /// the command buffer executes on the GPU. Reset to 0 each frame.
+    private var quadBufferWriteOffset: Int = 0
+
+    /// Gates the CPU to at most `quadBufferFrameCount` frames in flight so it
+    /// never overwrites a quad buffer the GPU is still reading.
+    private let quadFrameSemaphore = DispatchSemaphore(value: CoreTextMetalRenderer.quadBufferFrameCount)
+
+    /// Alignment for per-pass offsets into a quad buffer. 256 bytes satisfies
+    /// `setVertexBuffer(offset:)` constant-address-space alignment on all macOS GPUs.
+    private static let quadBufferOffsetAlignment = 256
+
+    /// Ensures each triple-buffered quad buffer can hold at least `quadCount`
+    /// quads plus headroom for per-pass alignment padding. Reallocates all
+    /// buffers when the requested capacity grows, with generous extra slack so
+    /// reallocation is rare. Quad buffers are small (4096 quads ~= 192 KB each,
+    /// trivial GPU memory).
+    ///
+    /// `quadCount` is the live total this frame so far (quads already written,
+    /// derived from `quadBufferWriteOffset`, plus the pass about to be written),
+    /// so the accumulated alignment padding of earlier passes is already baked
+    /// into the request. The extra headroom below only needs to cover this
+    /// pass's own start-offset rounding.
+    private func ensureQuadBufferCapacity(_ quadCount: Int) {
+        let stride = MemoryLayout<QuadGPU>.stride
+        // One alignment unit (rounded up to whole quads) covers this pass's
+        // start rounding; grow in generous steps so churn stays rare.
+        let alignmentSlackQuads = Self.quadBufferOffsetAlignment / stride + 1
+        let needed = max(quadCount + alignmentSlackQuads, 4096)
+        guard quadBuffers.isEmpty || needed > quadBufferCapacity else { return }
+
+        // Round capacity up to the next 1024-quad step to avoid reallocating on
+        // every small growth.
+        let stepped = (needed + 1023) / 1024 * 1024
+        let length = stepped * stride
+        var newBuffers: [MTLBuffer] = []
+        newBuffers.reserveCapacity(CoreTextMetalRenderer.quadBufferFrameCount)
+
+        for _ in 0..<CoreTextMetalRenderer.quadBufferFrameCount {
+            guard let buffer = device.makeBuffer(length: length, options: .storageModeShared) else {
+                os_log(.error, log: rendererLog, "Failed to allocate quad buffers; preserving previous buffer set")
+                return
+            }
+            newBuffers.append(buffer)
+        }
+
+        quadBuffers = newBuffers
+        quadBufferCapacity = stepped
+    }
 
     /// Set up the window content renderer and texture atlas. Called once the FontManager is available.
     func setupRenderers(fontManager: FontManager) {
@@ -646,6 +717,16 @@ final class CoreTextMetalRenderer {
         guard let cmdBuf = commandQueue.makeCommandBuffer(),
               let encoder = cmdBuf.makeRenderCommandEncoder(descriptor: renderDesc) else { return }
 
+        // Triple-buffered quad uploads: wait until a quad buffer is free (at most
+        // `quadBufferFrameCount` frames in flight), then rotate to it and reset
+        // its write cursor. The matching `signal()` runs in the command buffer's
+        // completion handler below. Acquired after the encoder guard so the early
+        // return above never holds the semaphore.
+        quadFrameSemaphore.wait()
+        quadBufferFrameIndex = (quadBufferFrameIndex + 1) % CoreTextMetalRenderer.quadBufferFrameCount
+        quadBufferWriteOffset = 0
+        ensureQuadBufferCapacity(0)
+
         // Keep shader uniforms fixed. Smooth-scroll deltas are baked only into scrollable buffer content and cursor positions above, so fixed chrome such as gutters, split separators, labels, and scroll indicators does not drift during fractional scroll frames.
         var uniforms = CTUniformsGPU(
             viewportSize: SIMD2<Float>(Float(viewportSize.width), Float(viewportSize.height)),
@@ -735,19 +816,7 @@ final class CoreTextMetalRenderer {
 
             if !guideQuads.isEmpty {
                 encoder.setRenderPipelineState(bgPipeline)
-                // setVertexBytes is capped at 4 KB of inline data by Metal.
-                let maxPerBatch = 4096 / MemoryLayout<QuadGPU>.stride
-                var batchStart = 0
-                while batchStart < guideQuads.count {
-                    let batchCount = min(guideQuads.count - batchStart, maxPerBatch)
-                    guideQuads.withUnsafeMutableBufferPointer { ptr in
-                        let base = ptr.baseAddress! + batchStart
-                        encoder.setVertexBytes(base, length: batchCount * MemoryLayout<QuadGPU>.stride, index: 0)
-                    }
-                    encoder.setVertexBytes(&uniforms, length: MemoryLayout<CTUniformsGPU>.size, index: 1)
-                    encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: batchCount)
-                    batchStart += batchCount
-                }
+                drawQuadBatches(guideQuads, encoder: encoder, uniforms: &uniforms)
             }
         }
 
@@ -1017,7 +1086,12 @@ final class CoreTextMetalRenderer {
         encoder.endEncoding()
         cmdBuf.present(drawable)
         let commitTime = CACurrentMediaTime()
+        // Capture the semaphore locally so the completion handler does not retain
+        // self. Signaling here releases the quad buffer this frame used once the
+        // GPU is done reading it, letting a future frame reuse it.
+        let quadFrameSemaphore = self.quadFrameSemaphore
         cmdBuf.addCompletedHandler { completedBuffer in
+            quadFrameSemaphore.signal()
             let completionLatencyMs = (CACurrentMediaTime() - commitTime) * 1000.0
             let gpuStart = completedBuffer.gpuStartTime
             let gpuEnd = completedBuffer.gpuEndTime
@@ -1288,22 +1362,49 @@ final class CoreTextMetalRenderer {
         }
     }
 
-    /// Draws quads in batches that fit Metal's 4 KB inline `setVertexBytes` limit.
+    /// Draws all `quads` in a single instanced draw call backed by the
+    /// current frame's reusable quad buffer.
+    ///
+    /// This replaces the old `setVertexBytes` path, which Metal silently
+    /// truncates above 4 KB of inline data (multi-window splits plus overlays
+    /// can exceed that and drop quads with no error). The quad data is copied
+    /// into the frame's `MTLBuffer` at a 256-byte-aligned offset and bound with
+    /// `setVertexBuffer(_:offset:index:)` at the same index 0 the shader reads.
+    ///
+    /// Callers may invoke this multiple times per frame (bg, semantic overlay,
+    /// diagnostic passes); each call advances `quadBufferWriteOffset` so the
+    /// passes occupy distinct regions of the buffer and do not clobber each
+    /// other when the command buffer executes on the GPU.
     private func drawQuadBatches(_ quads: [QuadGPU], encoder: MTLRenderCommandEncoder, uniforms: inout CTUniformsGPU) {
-        let stride = MemoryLayout<QuadGPU>.stride
-        let maxPerBatch = max(1, 4096 / stride)
-        var batchStart = 0
+        guard !quads.isEmpty else { return }
 
-        while batchStart < quads.count {
-            let batchCount = min(quads.count - batchStart, maxPerBatch)
-            quads.withUnsafeBufferPointer { ptr in
-                let base = ptr.baseAddress! + batchStart
-                encoder.setVertexBytes(base, length: batchCount * stride, index: 0)
-            }
-            encoder.setVertexBytes(&uniforms, length: MemoryLayout<CTUniformsGPU>.size, index: 1)
-            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: batchCount)
-            batchStart += batchCount
+        let stride = MemoryLayout<QuadGPU>.stride
+
+        // Grow buffers if this frame's total quad demand exceeds capacity.
+        // `quadBufferWriteOffset` already accounts for earlier passes this frame.
+        let quadsAlreadyWritten = quadBufferWriteOffset / stride
+        ensureQuadBufferCapacity(quadsAlreadyWritten + quads.count)
+
+        guard quadBufferFrameIndex < quadBuffers.count else { return }
+        let buffer = quadBuffers[quadBufferFrameIndex]
+
+        // Align this pass's start offset for constant-address-space binding.
+        let alignment = Self.quadBufferOffsetAlignment
+        let offset = (quadBufferWriteOffset + alignment - 1) / alignment * alignment
+        let byteCount = quads.count * stride
+
+        // Defensive: never write past the buffer. ensureQuadBufferCapacity sizes
+        // for this, but guard so a sizing miss drops quads instead of corrupting memory.
+        guard offset + byteCount <= buffer.length else { return }
+
+        _ = quads.withUnsafeBytes { src in
+            memcpy(buffer.contents() + offset, src.baseAddress!, byteCount)
         }
+        quadBufferWriteOffset = offset + byteCount
+
+        encoder.setVertexBuffer(buffer, offset: offset, index: 0)
+        encoder.setVertexBytes(&uniforms, length: MemoryLayout<CTUniformsGPU>.size, index: 1)
+        encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: quads.count)
     }
 
     /// Renders a line number for one gutter row.
