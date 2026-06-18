@@ -314,6 +314,140 @@ defmodule Minga.Buffer.ConcealRangeTest do
     end
   end
 
+  describe "multi-line conceal column mapping" do
+    # A conceal spanning lines 4..6 passes through line 5. On line 5 it enters
+    # from above (start above the line) and leaves below (end below the line),
+    # so on line 5 it conceals the whole line: effective bounds {0, line_len}.
+    # Regression for #2297: clicks on such a line used to drift right of the
+    # actual click point, growing with distance from the conceal.
+
+    test "click just past the glyph of a fully-covered line lands at the line end (the bug-fix case)" do
+      # Conceal {4,2}..{6,3} with a replacement glyph passes through line 5,
+      # entering from above and leaving below, so it conceals the whole line.
+      # The replacement glyph is the only thing rendered, sitting at display
+      # column 0. Clicking immediately past it must resolve to the first buffer
+      # column after the concealed range: the line end.
+      #
+      # Before #2297 the reverse transform bounded a to-end-of-line conceal with
+      # its own accumulating output, so the resolved column drifted further right
+      # the further the click was from the conceal. Pin the exact landing here.
+      decs = build_multi_line_decs([{4, 2, 6, 3, "·"}])
+      line = 5
+      line_len = 40
+
+      # The glyph occupies display column 0 (replacement width 1).
+      assert Decorations.display_col_to_buf_col(decs, line, 1, line_len) == line_len
+    end
+
+    test "round-trips on a line a multi-line conceal enters (ends on the line)" do
+      # Conceal starts above (line 3) and ends on line 5 at col 4.
+      decs = build_multi_line_decs([{3, 0, 5, 4, "·"}])
+      line = 5
+      line_len = 30
+
+      # Visible buffer columns are those at/after the conceal end (col 4).
+      for buf_col <- 4..line_len do
+        display_col = Decorations.buf_col_to_display_col(decs, line, buf_col)
+        back = Decorations.display_col_to_buf_col(decs, line, display_col, line_len)
+        assert back == buf_col, "buf #{buf_col} -> disp #{display_col} -> #{back}"
+      end
+    end
+
+    test "click immediately after the glyph of a to-end-of-line conceal lands past the concealed range" do
+      # Conceal {5,3}..{7,1}: starts on line 5 at col 3, continues to line 7.
+      # On line 5 it runs from col 3 to the line end. Columns 0..2 are visible.
+      decs = build_multi_line_decs([{5, 3, 7, 1, "·"}])
+      line = 5
+      line_len = 20
+
+      # Visible columns before the conceal round-trip exactly.
+      for buf_col <- 0..2 do
+        display_col = Decorations.buf_col_to_display_col(decs, line, buf_col)
+        back = Decorations.display_col_to_buf_col(decs, line, display_col, line_len)
+        assert back == buf_col
+      end
+
+      # The replacement glyph sits at display col 3 (buf col 3 unshifted).
+      # Clicking immediately after it lands on the first buffer column after
+      # the concealed range, which on this line is the line end.
+      glyph_display = Decorations.buf_col_to_display_col(decs, line, 3)
+      assert glyph_display == 3
+
+      after_glyph = Decorations.display_col_to_buf_col(decs, line, glyph_display + 1, line_len)
+      assert after_glyph == line_len
+    end
+
+    property "forward and reverse conceal transforms are mutual inverses on visible columns" do
+      check all(
+              line <- integer(1..6),
+              line_len <- integer(8..50),
+              raw <- multi_line_conceals_gen(line, line_len)
+            ) do
+        decs = build_multi_line_decs(raw)
+        merged = Decorations.conceals_for_line(decs, line)
+
+        for buf_col <- 0..line_len,
+            not inside_any_effective_conceal?(buf_col, merged, line, line_len) do
+          display_col = Decorations.buf_col_to_display_col(decs, line, buf_col)
+          back = Decorations.display_col_to_buf_col(decs, line, display_col, line_len)
+
+          assert back == buf_col,
+                 "round-trip failed: buf=#{buf_col} -> disp=#{display_col} -> #{back}, raw=#{inspect(raw)}, line=#{line}, line_len=#{line_len}"
+        end
+      end
+    end
+  end
+
+  defp build_multi_line_decs(specs) do
+    Enum.reduce(specs, Decorations.new(), fn {sl, sc, el, ec, replacement}, decs ->
+      opts = if replacement, do: [replacement: replacement], else: []
+      {_id, decs} = Decorations.add_conceal(decs, {sl, sc}, {el, ec}, opts)
+      decs
+    end)
+  end
+
+  # Generates conceals that may start above, on, or below `line`, and end on or
+  # below `line`, so each conceal exercises the enter/leave-the-line transforms.
+  defp multi_line_conceals_gen(line, line_len) do
+    bind(integer(1..3), fn count ->
+      list_of(single_multi_line_conceal_gen(line, line_len), length: count)
+    end)
+  end
+
+  defp single_multi_line_conceal_gen(line, line_len) do
+    bind(
+      {integer(max(line - 2, 0)..(line + 2)), integer(0..(line_len - 2)),
+       integer(1..max(line_len - 2, 1)), member_of([nil, "·", "→"])},
+      fn {start_line, start_col, width, replacement} ->
+        # End line is at or after the start line; end col only matters when the
+        # conceal ends on a line we map (kept within line_len for realism).
+        end_line = start_line + Enum.random(0..2)
+        end_col = min(start_col + width, line_len)
+        constant({start_line, start_col, end_line, end_col, replacement})
+      end
+    )
+  end
+
+  # A buffer column is "concealed" on `line` if it lands inside the effective
+  # bounds of any merged conceal for that line. Such columns have no distinct
+  # visible display position and are excluded from the inverse property.
+  defp inside_any_effective_conceal?(buf_col, merged, line, line_len) do
+    Enum.any?(merged, fn conceal ->
+      {start_col, end_col} = effective_bounds_for_test(conceal, line, line_len)
+      buf_col >= start_col and buf_col < end_col
+    end)
+  end
+
+  defp effective_bounds_for_test(
+         %ConcealRange{start_pos: {sl, sc}, end_pos: {el, ec}},
+         line,
+         line_len
+       ) do
+    start_col = if sl < line, do: 0, else: sc
+    end_col = if el > line, do: line_len, else: ec
+    {start_col, end_col}
+  end
+
   defp conceal(start_pos, end_pos, opts \\ []) do
     struct!(
       ConcealRange,
