@@ -5,8 +5,8 @@ version = "2.0.0"
 # protocol_version is the integer the BEAM and every frontend compile against and
 # exchange in the `ready` handshake. The BEAM rejects a frontend whose value does
 # not match and shows an explicit `protocol_error` instead of silently desyncing.
-# Bump this whenever the wire contract changes incompatibly (this 2.0.0 bump
-# retired the 9 cell-paradigm render opcodes; see docs/cell-grid-deletion-map.md).
+# Bump this whenever the wire contract changes incompatibly. The 2.0.0 bump
+# retired the 9 cell-paradigm render opcodes; see docs/PROTOCOL.md.
 # protocol_version 3 (#2219 children A/B) adds the frame-transaction vocabulary
 # (begin_frame, commit_frame, request_keyframe) and authoritative layout
 # (surface_placement, gui_surface_layout). batch_end (0x13) was retired: child B
@@ -92,7 +92,7 @@ direction = "frontend_to_beam"
 # here: set_cursor_shape, set_title, set_window_bg, protocol_error, and the
 # protocol_version-3 frame-transaction markers begin_frame/commit_frame (which
 # replaced batch_end as the per-frame boundary in child B).
-# See docs/cell-grid-deletion-map.md.
+# See docs/PROTOCOL.md.
 
 # Reuse policy for freed cell-paradigm values: a retired value may be reassigned
 # once protocol_version has bumped past the version that retired it, the same way

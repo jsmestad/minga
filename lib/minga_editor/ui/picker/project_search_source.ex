@@ -14,7 +14,7 @@ defmodule MingaEditor.UI.Picker.ProjectSearchSource do
 
   alias Minga.Buffer
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.UI.Devicon
+  alias Minga.Language.Devicon
   alias MingaEditor.UI.Picker.Source
 
   @impl true

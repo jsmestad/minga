@@ -14,7 +14,7 @@ defmodule MingaEditor.UI.Picker.RecentFileSource do
 
   alias MingaEditor.State, as: EditorState
   alias Minga.Project
-  alias MingaEditor.UI.Devicon
+  alias Minga.Language.Devicon
   alias MingaEditor.UI.Picker.Source
 
   @impl true

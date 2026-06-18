@@ -1,34 +1,8 @@
 defmodule MingaEditor.Shell do
   @moduledoc """
-  Umbrella behaviour for pluggable presentation shells.
+  Behaviour for pluggable presentation shells.
 
-  A shell owns layout, chrome, input routing, buffer lifecycle, and
-  tab queries. Each responsibility is a focused sub-behaviour:
-
-  - `MingaEditor.Shell.Layout` - `compute_layout/1`
-  - `MingaEditor.Shell.Chrome` - `build_chrome/4`, `async_render?/1`, `render/1`
-  - `MingaEditor.Shell.InputRouter` - `input_handlers/1`,
-    `handle_event/3`, `handle_gui_action/3`
-  - `MingaEditor.Shell.BufferLifecycle` - `on_buffer_added/5`,
-    `on_buffer_switched/2`, `on_buffer_died/3`, `on_agent_event/4`
-  - `MingaEditor.Shell.TabQueries` - `active_tab/1`,
-    `find_tab_by_buffer/2`, `active_tab_kind/1`, `set_tab_session/3`,
-    `active_session/1`
-
-  This umbrella declares only `init/1` (the constructor every shell needs); all other callbacks live on their respective sub-behaviours. Registry-loaded shells currently must implement the full presentation contract above because the editor still dispatches through each surface. Tab-less shells should return safe defaults from the tab query callbacks until the registry grows capability-aware validation.
-
-  ## Implementation
-
-  Implement `init/1` plus the sub-behaviours your shell needs, then
-  set the module as the `:shell` field on `MingaEditor.State`. The
-  Editor GenServer dispatches to the active shell for presentation
-  concerns.
-
-  ## Available shells
-
-  - `MingaEditor.Shell.Traditional` — tab-based editor with file tree,
-    modeline, picker, and agent panel. The default shell.
-  - Bundled or third-party extension shells registered through `MingaEditor.Shell.Registry`.
+  A shell owns layout, chrome, input routing, buffer lifecycle, and tab/session queries. The editor dispatches these presentation concerns to the active shell.
   """
 
   @typedoc "Shell-specific state. Each shell defines its own struct."
@@ -37,19 +11,95 @@ defmodule MingaEditor.Shell do
   @typedoc "Workspace state (the editing context shared by all shells)."
   @type workspace :: MingaEditor.Session.State.t()
 
-  @typedoc "Structured GUI payload returned by a shell and encoded centrally by frontend protocol modules. Unknown tags are treated as unsupported extension payloads and logged by the GUI emitter."
+  @typedoc "Structured GUI payload returned by a shell and encoded centrally by frontend protocol modules."
   @type gui_payload :: {atom(), term()} | nil
 
-  @typedoc """
-  Why a buffer was added — re-exported here from `Shell.BufferLifecycle`
-  so existing call sites that use `MingaEditor.Shell.buffer_add_context/0`
-  keep compiling.
-  """
-  @type buffer_add_context :: MingaEditor.Shell.BufferLifecycle.buffer_add_context()
+  @typedoc "Why a buffer was added."
+  @type buffer_add_context :: :open | :preview
 
-  @doc """
-  Initialize shell state from config. Called once during Editor startup.
-  Returns the shell's initial state.
-  """
+  @doc "Initializes shell state from config."
   @callback init(opts :: keyword()) :: shell_state()
+
+  @doc "Returns a layout struct with named rectangles for each UI region."
+  @callback compute_layout(editor_state :: term()) :: MingaEditor.Layout.t()
+
+  @doc "Returns a chrome struct with draw lists for each UI region."
+  @callback build_chrome(
+              editor_state :: term(),
+              layout :: MingaEditor.Layout.t(),
+              scrolls :: map(),
+              cursor_info :: term()
+            ) :: MingaEditor.RenderPipeline.Chrome.t()
+
+  @doc "Returns shell-specific data that affects chrome dirty tracking."
+  @callback chrome_fingerprint(editor_state :: term()) :: term()
+
+  @doc "Returns true when the shell can render through the asynchronous pipeline path."
+  @callback async_render?(editor_state :: term()) :: boolean()
+
+  @doc "Returns structured GUI payload data for the active shell, or nil."
+  @callback gui_payload(editor_state :: term()) :: gui_payload() | nil
+
+  @doc "Runs the full render pipeline and returns updated editor state."
+  @callback render(editor_state :: term()) :: term()
+
+  @doc "Returns the input handler stack for this shell."
+  @callback input_handlers(editor_state :: term()) :: %{overlay: [module()], surface: [module()]}
+
+  @doc "Handles a shell-specific event."
+  @callback handle_event(shell_state(), workspace(), event :: term()) ::
+              {shell_state(), workspace()}
+
+  @doc "Handles a shell-specific GUI action from the native frontend."
+  @callback handle_gui_action(shell_state(), workspace(), action :: term()) ::
+              {shell_state(), workspace()}
+
+  @doc "Runs after `handle_gui_action/3` has been applied to full editor state."
+  @callback after_gui_action(editor_state :: term(), action :: term()) :: term()
+
+  @doc "A buffer was added to the workspace."
+  @callback on_buffer_added(
+              shell_state(),
+              prev_workspace :: workspace(),
+              workspace(),
+              buffer_pid :: pid(),
+              context :: buffer_add_context()
+            ) :: {shell_state(), workspace(), [MingaEditor.effect()]}
+
+  @doc "The active buffer changed."
+  @callback on_buffer_switched(shell_state(), workspace()) ::
+              {shell_state(), workspace(), [MingaEditor.effect()]}
+
+  @doc "A buffer process died."
+  @callback on_buffer_died(shell_state(), workspace(), dead_pid :: pid()) ::
+              {shell_state(), workspace(), [MingaEditor.effect()]}
+
+  @doc "An agent session emitted a background event."
+  @callback on_agent_event(shell_state(), workspace(), session_pid :: pid(), event :: term()) ::
+              {shell_state(), workspace(), [MingaEditor.effect()]}
+
+  @doc "A managed agent session restarted and the shell should refresh pid references."
+  @callback handle_agent_session_restarted(
+              shell_state(),
+              old_session_pid :: pid(),
+              new_session_pid :: pid(),
+              reason :: term()
+            ) :: {shell_state(), boolean()}
+
+  @doc "Returns the currently active tab, or nil if the shell has no tabs."
+  @callback active_tab(shell_state()) :: MingaEditor.State.Tab.t() | nil
+
+  @doc "Finds the file tab whose snapshotted workspace has `pid` as active buffer."
+  @callback find_tab_by_buffer(shell_state(), pid()) :: MingaEditor.State.Tab.t() | nil
+
+  @doc "Returns the kind of the active tab."
+  @callback active_tab_kind(shell_state()) :: atom()
+
+  @doc "Associates a session pid with a tab."
+  @callback set_tab_session(shell_state(), tab_id :: term(), pid() | nil) :: shell_state()
+
+  @doc "Returns the agent session pid for the user's current view."
+  @callback active_session(shell_state()) :: pid() | nil
+
+  @optional_callbacks after_gui_action: 2
 end

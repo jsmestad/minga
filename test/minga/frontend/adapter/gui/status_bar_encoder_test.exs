@@ -17,7 +17,7 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoderTest do
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
   alias MingaEditor.Session.ChromeState
   alias MingaEditor.Session.ChromeState.WorkspaceSummary
-  alias MingaEditor.UI.Devicon
+  alias Minga.Language.Devicon
 
   @op_gui_status_bar Minga.Protocol.Opcodes.gui_status_bar()
 

@@ -358,16 +358,6 @@ defmodule Minga.Buffer.Process do
   def version(server), do: GenServer.call(server, :version)
 
   @doc """
-  Returns and clears pending edit deltas accumulated since the last legacy consumer read.
-
-  Deprecated: use `consume_edit_deltas/2` with a consumer_id for per-consumer cursors.
-  This legacy version destructively drains the shared pending changes list.
-  """
-  @deprecated "Use consume_edit_deltas/2 with a consumer_id instead"
-  @spec consume_edit_deltas(GenServer.server()) :: [EditDelta.t()]
-  def consume_edit_deltas(server), do: GenServer.call(server, :consume_edit_deltas)
-
-  @doc """
   Returns edit deltas accumulated since the given consumer's last read.
 
   Each consumer is identified by an atom (e.g., `:lsp`, `:highlight`).

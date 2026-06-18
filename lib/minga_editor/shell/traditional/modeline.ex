@@ -10,7 +10,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
   alias Minga.Config.ModelineSegment
   alias Minga.Config.ModelineSegments
   alias Minga.Mode
-  alias MingaEditor.UI.Devicon
+  alias Minga.Language.Devicon
   alias MingaEditor.UI.Theme
 
   @typedoc "A clickable region: column range mapping to a command."

@@ -496,27 +496,6 @@ defmodule Minga.Events do
     :ok
   end
 
-  @doc """
-  Broadcasts `:buffer_changed` to all subscribers.
-
-  Deprecated: use the 2-arity version that accepts a `BufferChangedEvent`
-  struct with delta and source fields. This wrapper exists for backward
-  compatibility during migration.
-  """
-  @deprecated "Buffer.Process now broadcasts :buffer_changed automatically on every edit. No manual broadcast needed."
-  @spec notify_buffer_changed(pid()) :: :ok
-  @spec notify_buffer_changed(pid(), keyword() | registry()) :: :ok
-  def notify_buffer_changed(buf, registry_or_opts \\ default_registry()) when is_pid(buf) do
-    broadcast(
-      :buffer_changed,
-      %BufferChangedEvent{
-        buffer: buf,
-        source: Minga.Buffer.EditSource.unknown()
-      },
-      registry_or_opts
-    )
-  end
-
   # ── Query ───────────────────────────────────────────────────────────────────
 
   @doc """

@@ -6,7 +6,7 @@ defmodule MingaEditor.UI.Picker.RemoteFileSource do
   alias Minga.Distribution.File, as: RemoteFile
   alias Minga.Language
   alias MingaEditor.Commands.RemoteFiles
-  alias MingaEditor.UI.Devicon
+  alias Minga.Language.Devicon
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Item
 
