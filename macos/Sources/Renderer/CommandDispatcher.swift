@@ -335,6 +335,27 @@ final class CommandDispatcher {
         apply(command)
     }
 
+    // MARK: - View-driven FrameState mutations
+
+    /// Applies a view-derived viewport resize. The cell-grid dimensions depend on
+    /// the NSView's pixel size and font metrics, which the BEAM cannot know, so
+    /// the trigger is an AppKit event (font change, window resize, line-spacing
+    /// change) rather than a protocol opcode. Routing it here keeps
+    /// `CommandDispatcher` the single writer to `FrameState`: every mutation has
+    /// one place to add logging, ordering checks, or BEAM coordination. The view
+    /// still sends the `sendResize`/`sendReady` event itself, since that is a
+    /// view-to-BEAM event, not state.
+    func applyViewportResize(newCols: UInt16, newRows: UInt16) {
+        frameState.resize(newCols: newCols, newRows: newRows)
+    }
+
+    /// Clears the dirty flag after the view has consumed the current
+    /// `FrameState` for a render. The view drives the render but does not own the
+    /// state, so it calls this instead of writing `frameState.dirty` directly.
+    func markRendered() {
+        frameState.dirty = false
+    }
+
     /// Apply a single render command to the presented FrameState/GUIState. This
     /// is the single mutation path: called directly for out-of-band commands and
     /// replayed for every staged command at commit. It must NOT handle the frame

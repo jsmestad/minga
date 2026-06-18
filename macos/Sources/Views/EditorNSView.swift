@@ -406,7 +406,7 @@ final class EditorNSView: MTKView {
         if coreTextRenderer.cursorAnimating {
             needsDisplay = true
         }
-        dispatcher.frameState.dirty = false
+        dispatcher.markRendered()
     }
 
     private func currentGridDimensions() -> GridDimensions {
@@ -448,7 +448,7 @@ final class EditorNSView: MTKView {
         let grid = gridDimensions(width: frame.width, height: frame.height, cellWidth: newCellW, cellHeight: newCellH)
 
         if grid.cols != dispatcher.frameState.cols || grid.effectiveRows != dispatcher.frameState.rows {
-            dispatcher.frameState.resize(newCols: grid.cols, newRows: grid.effectiveRows)
+            dispatcher.applyViewportResize(newCols: grid.cols, newRows: grid.effectiveRows)
             encoder.sendResize(cols: grid.cols, rows: grid.rawRows)
         }
 
@@ -532,7 +532,7 @@ final class EditorNSView: MTKView {
         guard frame.width > 0, frame.height > 0 else { return }
 
         let grid = currentGridDimensions()
-        dispatcher.frameState.resize(newCols: grid.cols, newRows: grid.effectiveRows)
+        dispatcher.applyViewportResize(newCols: grid.cols, newRows: grid.effectiveRows)
 
         if readySent {
             encoder.sendResize(cols: grid.cols, rows: grid.rawRows)
@@ -669,12 +669,12 @@ final class EditorNSView: MTKView {
             // First real frame size: send the ready event with actual
             // window dimensions so the BEAM never sees wrong defaults.
             readySent = true
-            dispatcher.frameState.resize(newCols: grid.cols, newRows: grid.effectiveRows)
+            dispatcher.applyViewportResize(newCols: grid.cols, newRows: grid.effectiveRows)
             encoder.sendReady(cols: grid.cols, rows: grid.rawRows)
             os_signpost(.event, log: startupLog, name: "ReadySent", "%{public}dx%{public}d", grid.cols, grid.rawRows)
             PortLogger.info("Window ready: \(grid.cols)x\(grid.rawRows) raw cells, \(grid.effectiveRows) effective rows (\(Int(newSize.width))x\(Int(newSize.height))pt)")
         } else if grid.cols != dispatcher.frameState.cols || grid.effectiveRows != dispatcher.frameState.rows {
-            dispatcher.frameState.resize(newCols: grid.cols, newRows: grid.effectiveRows)
+            dispatcher.applyViewportResize(newCols: grid.cols, newRows: grid.effectiveRows)
             encoder.sendResize(cols: grid.cols, rows: grid.rawRows)
             PortLogger.info("Window resized: \(grid.cols)x\(grid.rawRows) raw cells, \(grid.effectiveRows) effective rows")
         }
@@ -748,7 +748,7 @@ final class EditorNSView: MTKView {
         let grid = currentGridDimensions()
 
         if grid.cols != dispatcher.frameState.cols || grid.effectiveRows != dispatcher.frameState.rows {
-            dispatcher.frameState.resize(newCols: grid.cols, newRows: grid.effectiveRows)
+            dispatcher.applyViewportResize(newCols: grid.cols, newRows: grid.effectiveRows)
             encoder.sendResize(cols: grid.cols, rows: grid.rawRows)
         }
     }

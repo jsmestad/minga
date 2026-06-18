@@ -71,6 +71,48 @@ struct CommandDispatcherRoutingTests {
         #expect(dispatcher.frameState.defaultBg == expected)
     }
 
+    // MARK: - View-driven FrameState mutations
+
+    @Test("applyViewportResize writes grid dimensions and marks dirty")
+    @MainActor func applyViewportResizeUpdatesGrid() {
+        let (dispatcher, _) = makeDispatcher()
+        // Clear the dirty flag set at init so we can assert the resize sets it.
+        dispatcher.markRendered()
+        #expect(dispatcher.frameState.dirty == false)
+
+        // A view-driven resize (e.g. font change) funnels through the dispatcher.
+        dispatcher.applyViewportResize(newCols: 120, newRows: 40)
+
+        #expect(dispatcher.frameState.cols == 120)
+        #expect(dispatcher.frameState.rows == 40)
+        #expect(dispatcher.frameState.dirty == true)
+    }
+
+    @Test("applyViewportResize is a no-op when dimensions are unchanged")
+    @MainActor func applyViewportResizeNoOp() {
+        let (dispatcher, _) = makeDispatcher()
+        // Dispatcher starts at 80x24 (see makeDispatcher).
+        dispatcher.markRendered()
+        #expect(dispatcher.frameState.dirty == false)
+
+        dispatcher.applyViewportResize(newCols: 80, newRows: 24)
+
+        #expect(dispatcher.frameState.cols == 80)
+        #expect(dispatcher.frameState.rows == 24)
+        #expect(dispatcher.frameState.dirty == false)
+    }
+
+    @Test("markRendered clears the dirty flag the view consumed")
+    @MainActor func markRenderedClearsDirty() {
+        let (dispatcher, _) = makeDispatcher()
+        dispatcher.applyViewportResize(newCols: 100, newRows: 30)
+        #expect(dispatcher.frameState.dirty == true)
+
+        dispatcher.markRendered()
+
+        #expect(dispatcher.frameState.dirty == false)
+    }
+
     // MARK: - GUI chrome routing
 
     @Test("guiTabBar updates tabBarState")
