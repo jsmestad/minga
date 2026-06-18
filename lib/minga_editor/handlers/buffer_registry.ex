@@ -7,7 +7,7 @@ defmodule MingaEditor.Handlers.BufferRegistry do
 
   alias Minga.Buffer
   alias Minga.Events
-  alias Minga.FileRef
+  alias Minga.Project.FileRef
 
   alias MingaEditor.AgentLifecycle
   alias MingaEditor.Commands
@@ -72,7 +72,7 @@ defmodule MingaEditor.Handlers.BufferRegistry do
         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
         path
       ) do
-    file_ref = FileRef.new(path)
+    file_ref = FileRef.from_file_path(path)
 
     if active_buffer_matches_file_ref?(state, file_ref) do
       EditorState.active_tab(state)
@@ -164,7 +164,7 @@ defmodule MingaEditor.Handlers.BufferRegistry do
        )
        when is_pid(active) do
     case buffer_file_ref(active) do
-      %FileRef{} = active_ref -> FileRef.same?(active_ref, file_ref)
+      %FileRef{} = active_ref -> FileRef.equal?(active_ref, file_ref)
       nil -> false
     end
   end
@@ -174,7 +174,7 @@ defmodule MingaEditor.Handlers.BufferRegistry do
   @spec buffer_file_ref(pid()) :: FileRef.t() | nil
   defp buffer_file_ref(pid) when is_pid(pid) do
     case Buffer.file_path(pid) do
-      path when is_binary(path) -> FileRef.new(path)
+      path when is_binary(path) -> FileRef.from_file_path(path)
       _ -> nil
     end
   catch

@@ -347,7 +347,7 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
   defp cursor_shape_for_mode(:operator_pending), do: :underline
   defp cursor_shape_for_mode(_), do: :block
 
-  @spec paste_block_line_count([UIState.paste_block()], non_neg_integer()) :: non_neg_integer()
+  @spec paste_block_line_count([Panel.paste_block()], non_neg_integer()) :: non_neg_integer()
   defp paste_block_line_count(blocks, index) do
     case Enum.at(blocks, index) do
       %{text: text} -> text |> String.split("\n") |> length()
