@@ -13,7 +13,7 @@ defmodule MingaEditor.UI.Picker.LanguageSource do
   alias Minga.Buffer
   alias MingaEditor.Commands.BufferManagement
   alias Minga.Language
-  alias MingaEditor.UI.Devicon
+  alias Minga.Language.Devicon
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Item
 

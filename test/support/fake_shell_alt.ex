@@ -2,11 +2,6 @@ defmodule MingaEditor.Test.FakeShellAlt do
   @moduledoc "Alternate test shell used by shell registry lifecycle tests."
 
   @behaviour MingaEditor.Shell
-  @behaviour MingaEditor.Shell.Layout
-  @behaviour MingaEditor.Shell.Chrome
-  @behaviour MingaEditor.Shell.InputRouter
-  @behaviour MingaEditor.Shell.BufferLifecycle
-  @behaviour MingaEditor.Shell.TabQueries
 
   @impl true
   @spec init(keyword()) :: map()

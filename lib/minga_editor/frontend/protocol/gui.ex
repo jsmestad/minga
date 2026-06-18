@@ -131,7 +131,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
   alias Minga.Language
-  alias MingaEditor.UI.Devicon
+  alias Minga.Language.Devicon
   alias MingaEditor.UI.Notification
   alias MingaEditor.UI.NotificationCenter
   alias MingaEditor.UI.Theme
@@ -1872,7 +1872,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     {error_count, warning_count, info_count, hint_count} = full_diagnostic_counts(d)
     macro_byte = encode_macro_recording(d.macro_recording)
     {git_added, git_modified, git_deleted} = git_diff_counts(d)
-    {icon, icon_color} = MingaEditor.UI.Devicon.icon_and_color(d.filetype)
+    {icon, icon_color} = Minga.Language.Devicon.icon_and_color(d.filetype)
     icon_bytes = :erlang.iolist_to_binary([icon])
     icon_r = icon_color >>> 16 &&& 0xFF
     icon_g = icon_color >>> 8 &&& 0xFF

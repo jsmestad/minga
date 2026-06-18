@@ -32,5 +32,5 @@ defmodule MingaEditor.UI do
 
   @doc "Returns the icon character and hex color for a filetype."
   @spec icon_and_color(atom()) :: {String.t(), non_neg_integer()}
-  defdelegate icon_and_color(filetype), to: MingaEditor.UI.Devicon
+  defdelegate icon_and_color(filetype), to: Minga.Language.Devicon
 end

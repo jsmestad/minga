@@ -10,7 +10,7 @@ defmodule MingaEditor.UI.Picker.TodoSearchSource do
   alias Minga.Buffer
   alias Minga.Language
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.UI.Devicon
+  alias Minga.Language.Devicon
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Picker.Source

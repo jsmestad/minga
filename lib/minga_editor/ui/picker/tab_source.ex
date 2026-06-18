@@ -15,7 +15,7 @@ defmodule MingaEditor.UI.Picker.TabSource do
 
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.TabBar
-  alias MingaEditor.UI.Devicon
+  alias Minga.Language.Devicon
 
   @impl true
   @spec title() :: String.t()

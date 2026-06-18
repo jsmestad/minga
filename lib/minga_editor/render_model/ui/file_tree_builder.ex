@@ -15,7 +15,7 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilder do
   alias MingaEditor.FileTree.Rows
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.State.FileTree, as: FileTreeState
-  alias MingaEditor.UI.Devicon
+  alias Minga.Language.Devicon
   alias MingaEditor.UI.Theme
 
   @folder_icon "\u{F024B}"

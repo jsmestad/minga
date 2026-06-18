@@ -12,7 +12,7 @@ defmodule MingaGitPorcelain.UI.Picker.GitChangedSource do
   alias Minga.Git
   alias Minga.Language
   alias Minga.Log
-  alias MingaEditor.UI.Devicon
+  alias Minga.Language.Devicon
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Picker.Source
