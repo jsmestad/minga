@@ -278,6 +278,10 @@ defmodule Minga.Editing.TextObject do
         case {start_pos, end_pos} do
           {nil, _} -> nil
           {_, nil} -> nil
+          # An empty pair (e.g. `()`) advances the start past the retreated end,
+          # producing an inverted range. There is no inner content, so report no
+          # range; `ci(` still enters insert via the mode transition.
+          {s, e} when s > e -> nil
           {s, e} -> {s, e}
         end
     end
@@ -1512,15 +1516,23 @@ defmodule Minga.Editing.TextObject do
     text = Readable.line_at(buffer, line) || ""
     next_byte = Unicode.next_grapheme_byte_offset(text, col)
 
-    if next_byte > col and next_byte < byte_size(text) do
-      {line, next_byte}
-    else
-      next_line = line + 1
+    cond do
+      next_byte > col and next_byte < byte_size(text) ->
+        {line, next_byte}
 
-      case Readable.line_at(buffer, next_line) do
-        nil -> nil
-        _ -> {next_line, 0}
-      end
+      # Advanced past the last grapheme on the line. When a following line
+      # exists, the end-of-line column is the newline position, so return it
+      # rather than skipping to the next line. This keeps the trailing newline
+      # inside inner ranges when the open delimiter sits at end of line.
+      next_byte > col and next_byte == byte_size(text) and
+          Readable.line_at(buffer, line + 1) != nil ->
+        {line, byte_size(text)}
+
+      true ->
+        case Readable.line_at(buffer, line + 1) do
+          nil -> nil
+          _ -> {line + 1, 0}
+        end
     end
   end
 
