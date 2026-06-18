@@ -190,12 +190,10 @@ defmodule Minga.MixProject do
     ]
   end
 
-  defp elixirc_paths(:test),
-    do: [@generated_elixir_path, "lib", "extensions/board/lib", "test/support", "test/perf"]
+  defp elixirc_paths(:test), do: [@generated_elixir_path, "lib", "test/support", "test/perf"]
 
   defp elixirc_paths(_), do: [@generated_elixir_path, "lib"]
 
-  defp test_paths(:test), do: ["test", "extensions/board/test"]
   defp test_paths(_), do: ["test"]
 
   def cli do
@@ -232,7 +230,8 @@ defmodule Minga.MixProject do
   defp deps do
     [
       # TODO: revert to {:burrito, "~> 1.6"} once Zig 0.16.0 support is merged upstream
-      {:burrito, github: "jsmestad/burrito", branch: "zig-0.16.0"},
+      # Pinned to the lazy-load fix commit (burrito#1); revert to branch: "zig-0.16.0" once that PR merges.
+      {:burrito, github: "jsmestad/burrito", ref: "d03c88ca93f24e746c0159a19f5690f3cb4c99b0"},
       {:file_system, "~> 1.0"},
       {:stream_data, "~> 1.0", only: [:test, :dev]},
       {:propcheck, "~> 1.5", only: :test},
@@ -361,7 +360,6 @@ defmodule Minga.MixProject do
         "test --warnings-as-errors --stale --max-failures 5 --exclude heavy --exclude conformance"
       ],
       "test.heavy": ["test --warnings-as-errors --only heavy --exclude conformance"],
-      "test.board_frontends": [&test_board_frontends/1],
       conformance: [
         "run --no-start -e 'Mix.Tasks.Test.run([\"--warnings-as-errors\", \"--include\", \"conformance\", \"test/conformance/\"])'"
       ],
@@ -369,25 +367,5 @@ defmodule Minga.MixProject do
       # fails. Mix aliases stop on first failure, which skips dialyzer.
       "lint.fix": ["format", "credo --strict"]
     ]
-  end
-
-  defp test_board_frontends(_args) do
-    run_frontend_test!("Board Go frontend", "cd extensions/board/frontend/go && go test ./...")
-
-    run_frontend_test!(
-      "Board Rust frontend",
-      "cd extensions/board/frontend/rust/tui && cargo test --locked"
-    )
-
-    run_frontend_test!("Board Zig frontend", "cd extensions/board/frontend/zig && zig build test")
-  end
-
-  defp run_frontend_test!(label, command) do
-    Mix.shell().info("Running #{label}: #{command}")
-
-    case Mix.shell().cmd(command) do
-      0 -> :ok
-      status -> Mix.raise("#{label} failed with exit status #{status}")
-    end
   end
 end

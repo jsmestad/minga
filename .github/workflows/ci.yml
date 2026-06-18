@@ -345,50 +345,6 @@ jobs:
       - name: Boot Go frontend and verify first frame
         run: python3 scripts/go_tui_boot_smoke.py
 
-  test-board-frontends:
-    name: Test (Board Frontends)
-    runs-on: ubuntu-latest
-    env:
-      MIX_ENV: test
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: erlef/setup-beam@v1
-        with:
-          version-file: .tool-versions
-          version-type: strict
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: extensions/board/frontend/go/go.mod
-          cache-dependency-path: extensions/board/frontend/go/go.mod
-
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: 0.16.0
-
-      - name: Cache deps
-        uses: actions/cache@v4
-        with:
-          path: |
-            deps
-            _build
-          key: board-frontend-deps-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock') }}
-          restore-keys: board-frontend-deps-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-
-
-      - name: Cache Cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            extensions/board/frontend/rust/tui/target
-          key: board-frontend-cargo-${{ runner.os }}-${{ hashFiles('extensions/board/frontend/rust/tui/Cargo.lock') }}
-          restore-keys: board-frontend-cargo-${{ runner.os }}-
-
-      - run: mix deps.get
-      - run: mix test.board_frontends
-
   swift:
     name: Swift (macOS GUI)
     runs-on: macos-15
@@ -477,7 +433,20 @@ jobs:
 
       - run: mix deps.get
 
+      # Cache the compiled harness binary so it only rebuilds when its Swift
+      # sources (or the protocol generator that feeds the generated Swift) change.
+      # The binary lands in _build/test/lib/minga/priv, which the deps cache above
+      # also covers, but that key is not source-aware; this source-keyed cache lets
+      # the build step skip swiftc on a hit.
+      - name: Cache Swift test harness
+        id: harness-cache
+        uses: actions/cache@v4
+        with:
+          path: _build/test/lib/minga/priv/minga-test-harness
+          key: swift-harness-${{ runner.os }}-${{ hashFiles('macos/Sources/Protocol/**/*.swift', 'macos/Sources/Renderer/WindowContent.swift', 'macos/TestHarness/main.swift', 'mix/protocol_generator.ex') }}
+
       - name: Build Swift test harness
+        if: steps.harness-cache.outputs.cache-hit != 'true'
         run: mix swift.harness
 
       - name: Run BEAM-to-Swift protocol integration tests

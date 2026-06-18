@@ -360,7 +360,7 @@ defmodule MingaEditor.State do
     state
     |> update_workspace(&SessionState.drop_feature_state_source(&1, source))
     |> drop_tab_context_feature_state_source(source)
-    |> drop_board_feature_state_source(source)
+    |> drop_shell_feature_state_source(source)
   end
 
   @doc "Drops extension-owned feature state from live and snapshotted workspaces."
@@ -369,7 +369,7 @@ defmodule MingaEditor.State do
     state
     |> update_workspace(&SessionState.drop_extension_feature_state_sources/1)
     |> drop_tab_context_extension_feature_state_sources()
-    |> drop_board_extension_feature_state_sources()
+    |> drop_shell_extension_feature_state_sources()
   end
 
   @doc "Sets the active workspace viewport."
@@ -1285,15 +1285,15 @@ defmodule MingaEditor.State do
 
   defp drop_tab_context_extension_feature_state_sources(%__MODULE__{} = state), do: state
 
-  @spec drop_board_feature_state_source(t(), FeatureState.source()) :: t()
-  defp drop_board_feature_state_source(%__MODULE__{} = state, source) do
+  @spec drop_shell_feature_state_source(t(), FeatureState.source()) :: t()
+  defp drop_shell_feature_state_source(%__MODULE__{} = state, source) do
     state
     |> update_active_shell_feature_state(:drop_feature_state_source, [source])
     |> update_stashed_shell_feature_state(:drop_feature_state_source, [source])
   end
 
-  @spec drop_board_extension_feature_state_sources(t()) :: t()
-  defp drop_board_extension_feature_state_sources(%__MODULE__{} = state) do
+  @spec drop_shell_extension_feature_state_sources(t()) :: t()
+  defp drop_shell_extension_feature_state_sources(%__MODULE__{} = state) do
     state
     |> update_active_shell_feature_state(:drop_extension_feature_state_sources, [])
     |> update_stashed_shell_feature_state(:drop_extension_feature_state_sources, [])
