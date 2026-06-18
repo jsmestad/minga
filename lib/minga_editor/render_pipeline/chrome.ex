@@ -14,6 +14,7 @@ defmodule MingaEditor.RenderPipeline.Chrome do
   alias MingaEditor.MinibufferData
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.StatusBar.Data, as: StatusBarData
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
 
   # ── Result struct ──────────────────────────────────────────────────────────
 
@@ -27,7 +28,7 @@ defmodule MingaEditor.RenderPipeline.Chrome do
           status_bar_data: StatusBarData.t() | nil,
           minibuffer_data: MinibufferData.t() | nil,
           modeline_click_regions: [MingaEditor.Shell.Traditional.Modeline.click_region()],
-          tab_bar_click_regions: [MingaEditor.Shell.Traditional.TabBarRenderer.click_region()],
+          tab_bar_click_regions: [TraditionalState.tab_bar_click_region()],
           overlays: [DisplayList.Overlay.t()]
         }
 

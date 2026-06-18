@@ -15,7 +15,6 @@ defmodule Minga.Services.Independent do
       ├── Minga.CommandOutput.Registry    Registry(:unique)
       ├── Minga.Eval.TaskSupervisor      Task.Supervisor for eval/async work
       ├── Minga.Command.Registry         Named command lookup
-      ├── Minga.Editing.Fold.Registry            Fold state
       ├── Minga.Diagnostics              ETS-backed diagnostics store
       ├── Minga.Session.EventRecorder            Persistent editor event log (SQLite via exqlite)
       ├── MingaAgent.EventLog                    Persistent agent session event log
@@ -40,7 +39,6 @@ defmodule Minga.Services.Independent do
       {Registry, keys: :unique, name: Minga.CommandOutput.Registry},
       {Task.Supervisor, name: Minga.Eval.TaskSupervisor},
       Minga.Command.Registry,
-      Minga.Editing.Fold.Registry,
       Minga.Distribution.ConnectionManager,
       Minga.Diagnostics,
       Minga.Session.EventRecorder,

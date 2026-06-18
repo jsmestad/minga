@@ -22,7 +22,6 @@ defmodule Minga.Services.Supervisor do
       │   ├── Minga.CommandOutput.Registry    Registry(:unique)
       │   ├── Minga.Eval.TaskSupervisor      Task.Supervisor for eval/async work
       │   ├── Minga.Command.Registry         Named command lookup
-      │   ├── Minga.Editing.Fold.Registry            Fold state
       │   └── Minga.Diagnostics              ETS-backed diagnostics store
       ├── Minga.Extension.Registry           Extension metadata (Agent)
       ├── MingaEditor.Extension.Sidebar      Source-owned editor sidebar registry
