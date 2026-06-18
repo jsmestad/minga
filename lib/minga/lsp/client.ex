@@ -755,7 +755,26 @@ defmodule Minga.LSP.Client do
     state
   end
 
+  defp handle_server_notification("window/showMessage", params, state) do
+    type = Map.get(params, "type", 4)
+    message = Map.get(params, "message", "")
+    {severity, level} = show_message_severity(type)
+    text = "[LSP/#{severity}] #{state.server_config.name}: #{message}"
+
+    Minga.Events.broadcast(:log_message, %Minga.Events.LogMessageEvent{text: text, level: level})
+
+    state
+  end
+
   defp handle_server_notification(_method, _params, state), do: state
+
+  # Maps an LSP MessageType (1=Error, 2=Warning, 3=Info, 4=Log) to a
+  # human-readable severity label and a `LogMessageEvent` level.
+  @spec show_message_severity(integer()) :: {String.t(), Minga.Events.LogMessageEvent.level()}
+  defp show_message_severity(1), do: {"error", :error}
+  defp show_message_severity(2), do: {"warning", :warning}
+  defp show_message_severity(3), do: {"info", :info}
+  defp show_message_severity(_), do: {"log", :info}
 
   @spec handle_server_request(String.t(), JsonRpc.id(), map(), State.t()) :: State.t()
   defp handle_server_request("window/workDoneProgress/create", id, _params, state) do
@@ -793,6 +812,22 @@ defmodule Minga.LSP.Client do
     results = Enum.map(configuration_items(params), &configuration_item(settings, &1))
 
     send_response(state, id, results)
+    state
+  end
+
+  defp handle_server_request("window/showMessageRequest", id, params, state) do
+    # Shrunk scope: surface the message to the user via the log pipeline and
+    # respond with `null` (no action selected) so the server does not hang
+    # waiting on a choice. A minibuffer picker over `actions` is a follow-up
+    # (see ticket #1270, step 3-7).
+    type = Map.get(params, "type", 4)
+    message = Map.get(params, "message", "")
+    {severity, level} = show_message_severity(type)
+    text = "[LSP/#{severity}] #{state.server_config.name}: #{message}"
+
+    Minga.Events.broadcast(:log_message, %Minga.Events.LogMessageEvent{text: text, level: level})
+
+    send_response(state, id, nil)
     state
   end
 
