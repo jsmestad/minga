@@ -209,21 +209,28 @@ defmodule Minga.Editing.TextObjectTest do
     end
 
     test "handles empty parens" do
-      b = buf("()")
-      result = TextObject.inner_parens(b, {0, 0}, "(", ")")
-      # inner content is empty — start is after open, end is before close
-      assert nil == result
+      assert nil == TextObject.inner_parens(buf("()"), {0, 1}, "(", ")")
+      assert nil == TextObject.inner_parens(buf("ab()"), {0, 3}, "(", ")")
+    end
+
+    test "includes the newline after an open delimiter at end of line" do
+      b = buf("foo(\nbar\n)")
+      assert {{0, 4}, {1, 2}} = TextObject.inner_parens(b, {1, 1}, "(", ")")
+    end
+
+    test "reports no inner range for an empty pair whose open delimiter is at EOL" do
+      assert nil == TextObject.inner_parens(buf("x(\n)"), {0, 2}, "(", ")")
+    end
+
+    test "leaves a plain single-line pair unchanged" do
+      assert {{0, 1}, {0, 1}} = TextObject.inner_parens(buf("(x)"), {0, 1}, "(", ")")
+      assert {{0, 3}, {0, 4}} = TextObject.inner_parens(buf("ab(cd)"), {0, 4}, "(", ")")
     end
 
     test "works across multiple lines" do
       b = buf("foo(\n  bar\n)")
-      # Line 0: "foo(" — `(` is at {0,3}
-      # Line 1: "  bar" — 5 chars (indices 0-4)
-      # Line 2: ")"     — `)` is at {2,0}
-      # inner start: advance from {0,3} → {1,0} (start of next line)
-      # inner end: retreat from {2,0} → {1,4} (last char of "  bar")
       result = TextObject.inner_parens(b, {1, 2}, "(", ")")
-      assert {{1, 0}, {1, 4}} = result
+      assert {{0, 4}, {1, 4}} = result
     end
 
     test "ignores escaped delimiters" do
