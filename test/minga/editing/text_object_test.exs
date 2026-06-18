@@ -210,25 +210,16 @@ defmodule Minga.Editing.TextObjectTest do
     end
 
     test "handles empty parens" do
-      # Cursor between the delimiters: there is no inner content, so the range
-      # is nil rather than an inverted range. `ci(` still enters insert via the
-      # mode transition, matching vim's `ci(` on an empty pair.
       assert nil == TextObject.inner_parens(buf("()"), {0, 1}, "(", ")")
       assert nil == TextObject.inner_parens(buf("ab()"), {0, 3}, "(", ")")
     end
 
     test "includes the newline after an open delimiter at end of line" do
-      # `foo(` ends with the open paren, so the inner range starts at the
-      # newline ({0,4}) instead of skipping to the next line. Deleting this
-      # range removes the trailing newline after `(`, matching vim's `di(`,
-      # which leaves `foo(\n)`.
       b = buf("foo(\nbar\n)")
       assert {{0, 4}, {1, 2}} = TextObject.inner_parens(b, {1, 1}, "(", ")")
     end
 
     test "reports no inner range for an empty pair whose open delimiter is at EOL" do
-      # `x(` then a line with just `)`. There is no inner content between the
-      # delimiters, so the range is nil and `di(` leaves the buffer untouched.
       assert nil == TextObject.inner_parens(buf("x(\n)"), {0, 2}, "(", ")")
     end
 
@@ -239,11 +230,6 @@ defmodule Minga.Editing.TextObjectTest do
 
     test "works across multiple lines" do
       b = buf("foo(\n  bar\n)")
-      # Line 0: "foo(" — `(` is at {0,3} and is the last char on its line
-      # Line 1: "  bar" — 5 chars (indices 0-4)
-      # Line 2: ")"     — `)` is at {2,0}
-      # inner start: advance from {0,3} → {0,4} (the newline after the open `(`)
-      # inner end: retreat from {2,0} → {1,4} (last char of "  bar")
       result = TextObject.inner_parens(b, {1, 2}, "(", ")")
       assert {{0, 4}, {1, 4}} = result
     end

@@ -1515,24 +1515,15 @@ defmodule Minga.Editing.TextObject do
   defp advance_position(buffer, {line, col}) do
     text = Readable.line_at(buffer, line) || ""
     next_byte = Unicode.next_grapheme_byte_offset(text, col)
+    next_line = Readable.line_at(buffer, line + 1)
 
-    cond do
-      next_byte > col and next_byte < byte_size(text) ->
-        {line, next_byte}
-
-      # Advanced past the last grapheme on the line. When a following line
-      # exists, the end-of-line column is the newline position, so return it
-      # rather than skipping to the next line. This keeps the trailing newline
-      # inside inner ranges when the open delimiter sits at end of line.
-      next_byte > col and next_byte == byte_size(text) and
-          Readable.line_at(buffer, line + 1) != nil ->
-        {line, byte_size(text)}
-
-      true ->
-        case Readable.line_at(buffer, line + 1) do
-          nil -> nil
-          _ -> {line + 1, 0}
-        end
+    if next_byte > col and (next_byte < byte_size(text) or next_line != nil) do
+      {line, next_byte}
+    else
+      case next_line do
+        nil -> nil
+        _ -> {line + 1, 0}
+      end
     end
   end
 
