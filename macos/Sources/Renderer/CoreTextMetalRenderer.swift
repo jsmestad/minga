@@ -332,11 +332,20 @@ final class CoreTextMetalRenderer {
         // Round capacity up to the next 1024-quad step to avoid reallocating on
         // every small growth.
         let stepped = (needed + 1023) / 1024 * 1024
-        quadBufferCapacity = stepped
         let length = stepped * stride
-        quadBuffers = (0..<CoreTextMetalRenderer.quadBufferFrameCount).compactMap { _ in
-            device.makeBuffer(length: length, options: .storageModeShared)
+        var newBuffers: [MTLBuffer] = []
+        newBuffers.reserveCapacity(CoreTextMetalRenderer.quadBufferFrameCount)
+
+        for _ in 0..<CoreTextMetalRenderer.quadBufferFrameCount {
+            guard let buffer = device.makeBuffer(length: length, options: .storageModeShared) else {
+                os_log(.error, log: rendererLog, "Failed to allocate quad buffers; preserving previous buffer set")
+                return
+            }
+            newBuffers.append(buffer)
         }
+
+        quadBuffers = newBuffers
+        quadBufferCapacity = stepped
     }
 
     /// Set up the window content renderer and texture atlas. Called once the FontManager is available.
