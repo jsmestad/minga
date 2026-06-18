@@ -11,8 +11,8 @@
 #                  BottomPanelEmpty, SettingsView, ToolManagerView,
 #                  ObservatoryView, AgentChatView,
 #                  AgentChatStreaming, AgentChatApproval, AgentChatError,
-#                  AgentChatCompletion, AgentChatSummary, BoardView,
-#                  ChangeSummaryView, DispatchSheetView,
+#                  AgentChatCompletion, AgentChatSummary,
+#                  ChangeSummaryView,
 #                  PickerOverlay, MinibufferView, WhichKeyOverlay, SearchToolbar,
 #                  HoverPopupOverlay, SignatureHelpOverlay, DiagnosticsEditorView,
 #                  TabBarOverflow

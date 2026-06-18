@@ -345,50 +345,6 @@ jobs:
       - name: Boot Go frontend and verify first frame
         run: python3 scripts/go_tui_boot_smoke.py
 
-  test-board-frontends:
-    name: Test (Board Frontends)
-    runs-on: ubuntu-latest
-    env:
-      MIX_ENV: test
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: erlef/setup-beam@v1
-        with:
-          version-file: .tool-versions
-          version-type: strict
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: extensions/board/frontend/go/go.mod
-          cache-dependency-path: extensions/board/frontend/go/go.mod
-
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: 0.16.0
-
-      - name: Cache deps
-        uses: actions/cache@v4
-        with:
-          path: |
-            deps
-            _build
-          key: board-frontend-deps-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock') }}
-          restore-keys: board-frontend-deps-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-
-
-      - name: Cache Cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            extensions/board/frontend/rust/tui/target
-          key: board-frontend-cargo-${{ runner.os }}-${{ hashFiles('extensions/board/frontend/rust/tui/Cargo.lock') }}
-          restore-keys: board-frontend-cargo-${{ runner.os }}-
-
-      - run: mix deps.get
-      - run: mix test.board_frontends
-
   swift:
     name: Swift (macOS GUI)
     runs-on: macos-15

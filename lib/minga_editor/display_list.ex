@@ -21,7 +21,7 @@ defmodule MingaEditor.DisplayList do
       draw list type used to compute popup geometry for `box/3`.
     * `RenderPipeline.Chrome` / `ComposeHelpers` — the `Overlay` carrier, whose
       `cursor` field still resolves the picker cursor in Compose.
-    * The Board and Git Porcelain extension shell renderers.
+    * The Git Porcelain extension shell renderer.
 
   ## Types
 

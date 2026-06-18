@@ -15,7 +15,6 @@ defmodule Minga.Credo.NoDirectModalOverlayWriteCheck do
       allowed_files: [
         "lib/minga_editor/state/modal_overlay.ex",
         "lib/minga_editor/shell/traditional/state.ex",
-        "lib/minga_editor/shell/board/state.ex",
         "test/support/"
       ]
     ],

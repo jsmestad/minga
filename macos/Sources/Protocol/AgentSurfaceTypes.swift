@@ -1,6 +1,6 @@
 /// Generic agent surface data types decoded from the BEAM protocol.
 ///
-/// These are core protocol/view model types, not Board-specific types. Agent context chrome and change summaries remain shared macOS UI surfaces even when the Board experiment is extension-owned.
+/// These are core protocol/view model types used by shared agent context chrome and change summaries.
 
 /// Agent status badge, decoded from protocol status bytes.
 enum CardStatus: UInt8, Equatable, Sendable {

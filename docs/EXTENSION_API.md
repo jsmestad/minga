@@ -87,20 +87,20 @@ By default, every extension loads eagerly at boot: compile, init, start child pr
 The `load_policy` macro lets an extension declare when it should load. Minga registers lightweight stub commands and keybindings at boot without calling `init/1` or starting the child process. The first time a stub is triggered, the extension loads fully and the real handler takes over, all transparently within the same command dispatch.
 
 ```elixir
-defmodule MingaBoard do
+defmodule MingaTasks do
   use Minga.Extension
 
-  # Load only when the user invokes :toggle_board
-  load_policy {:on_command, [:toggle_board]}
+  # Load only when the user invokes :open_tasks
+  load_policy {:on_command, [:open_tasks]}
 
-  command :toggle_board, "Toggle The Board view",
+  command :open_tasks, "Open task list",
     requires_buffer: false,
-    execute: {MingaBoard.Commands, :toggle}
+    execute: {MingaTasks.Commands, :open}
 
-  keybind :normal, "SPC t b", :toggle_board, "Toggle The Board"
+  keybind :normal, "SPC t t", :open_tasks, "Open tasks"
 
   @impl true
-  def name, do: :minga_board
+  def name, do: :minga_tasks
   # ...
 end
 ```
