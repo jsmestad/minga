@@ -2052,6 +2052,10 @@ defmodule Minga.Buffer.Process do
     |> push_undo_force_full(new_buf, undo_source)
     |> mark_dirty()
     |> clear_edits(source)
+    # Reset decorations so search highlights, diagnostics, and agent
+    # decorations don't stay anchored to text that no longer exists, matching
+    # replace_generated_content and accept_saved_content.
+    |> Map.put(:decorations, Decorations.new())
   end
 
   defp apply_operation(state, {:full, new_buf}, source, {:full, undo_source, :clear}) do

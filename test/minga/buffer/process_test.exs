@@ -945,6 +945,21 @@ defmodule Minga.Buffer.ProcessTest do
       BufferProcess.replace_content(pid, "goodbye")
       assert :reset_required = BufferProcess.consume_edit_deltas(pid, :test)
     end
+
+    test "replace_content clears stale decorations" do
+      {:ok, pid} = BufferProcess.start_link(content: "hello")
+
+      BufferProcess.add_block_decoration(pid, 0,
+        placement: :below,
+        render: fn _width -> [{"note", []}] end
+      )
+
+      assert BufferProcess.render_snapshot(pid, 0, 10).decorations.block_decorations != []
+
+      BufferProcess.replace_content(pid, "goodbye")
+
+      assert BufferProcess.render_snapshot(pid, 0, 10).decorations.block_decorations == []
+    end
   end
 
   # ── Per-consumer consume_edit_deltas ──────────────────────────────────────────────
