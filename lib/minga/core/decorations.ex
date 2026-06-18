@@ -967,7 +967,7 @@ defmodule Minga.Core.Decorations do
           {non_neg_integer(), non_neg_integer()}
   defp effective_bounds(%ConcealRange{start_pos: {sl, sc}, end_pos: {el, ec}}, line, line_len) do
     start_col = if sl < line, do: 0, else: sc
-    end_col = if el > line, do: line_end_col(line_len), else: ec
+    end_col = if el > line or ec == @conceal_eol_col, do: line_end_col(line_len), else: ec
     {start_col, end_col}
   end
 

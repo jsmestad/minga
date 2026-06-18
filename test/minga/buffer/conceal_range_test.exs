@@ -417,11 +417,11 @@ defmodule Minga.Buffer.ConcealRangeTest do
   defp single_multi_line_conceal_gen(line, line_len) do
     bind(
       {integer(max(line - 2, 0)..(line + 2)), integer(0..(line_len - 2)),
-       integer(1..max(line_len - 2, 1)), member_of([nil, "·", "→"])},
-      fn {start_line, start_col, width, replacement} ->
+       integer(1..max(line_len - 2, 1)), integer(0..2), member_of([nil, "·", "→"])},
+      fn {start_line, start_col, width, line_delta, replacement} ->
         # End line is at or after the start line; end col only matters when the
         # conceal ends on a line we map (kept within line_len for realism).
-        end_line = start_line + Enum.random(0..2)
+        end_line = start_line + line_delta
         end_col = min(start_col + width, line_len)
         constant({start_line, start_col, end_line, end_col, replacement})
       end
@@ -444,7 +444,7 @@ defmodule Minga.Buffer.ConcealRangeTest do
          line_len
        ) do
     start_col = if sl < line, do: 0, else: sc
-    end_col = if el > line, do: line_len, else: ec
+    end_col = if el > line or ec == 1_000_000, do: line_len, else: ec
     {start_col, end_col}
   end
 
