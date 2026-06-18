@@ -190,12 +190,10 @@ defmodule Minga.MixProject do
     ]
   end
 
-  defp elixirc_paths(:test),
-    do: [@generated_elixir_path, "lib", "extensions/board/lib", "test/support", "test/perf"]
+  defp elixirc_paths(:test), do: [@generated_elixir_path, "lib", "test/support", "test/perf"]
 
   defp elixirc_paths(_), do: [@generated_elixir_path, "lib"]
 
-  defp test_paths(:test), do: ["test", "extensions/board/test"]
   defp test_paths(_), do: ["test"]
 
   def cli do
@@ -362,7 +360,6 @@ defmodule Minga.MixProject do
         "test --warnings-as-errors --stale --max-failures 5 --exclude heavy --exclude conformance"
       ],
       "test.heavy": ["test --warnings-as-errors --only heavy --exclude conformance"],
-      "test.board_frontends": [&test_board_frontends/1],
       conformance: [
         "run --no-start -e 'Mix.Tasks.Test.run([\"--warnings-as-errors\", \"--include\", \"conformance\", \"test/conformance/\"])'"
       ],
@@ -370,25 +367,5 @@ defmodule Minga.MixProject do
       # fails. Mix aliases stop on first failure, which skips dialyzer.
       "lint.fix": ["format", "credo --strict"]
     ]
-  end
-
-  defp test_board_frontends(_args) do
-    run_frontend_test!("Board Go frontend", "cd extensions/board/frontend/go && go test ./...")
-
-    run_frontend_test!(
-      "Board Rust frontend",
-      "cd extensions/board/frontend/rust/tui && cargo test --locked"
-    )
-
-    run_frontend_test!("Board Zig frontend", "cd extensions/board/frontend/zig && zig build test")
-  end
-
-  defp run_frontend_test!(label, command) do
-    Mix.shell().info("Running #{label}: #{command}")
-
-    case Mix.shell().cmd(command) do
-      0 -> :ok
-      status -> Mix.raise("#{label} failed with exit status #{status}")
-    end
   end
 end

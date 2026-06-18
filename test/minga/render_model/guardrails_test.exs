@@ -125,8 +125,8 @@ defmodule Minga.RenderModel.GuardrailsTest do
       defmodule MingaEditor.RenderModel.UI.GuardrailFixture do
         import MingaEditor.Frontend.Protocol.GUI
 
-        @payload %MingaEditor.Frontend.Protocol.GUI.BoardPayload{}
-        @spec render(MingaEditor.Frontend.Protocol.GUI.BoardPayload.t()) :: term()
+        @payload %MingaEditor.Frontend.Protocol.GUI.ExamplePayload{}
+        @spec render(MingaEditor.Frontend.Protocol.GUI.ExamplePayload.t()) :: term()
         def render(theme), do: theme
       end
       """)

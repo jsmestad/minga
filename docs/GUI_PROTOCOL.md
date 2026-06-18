@@ -68,7 +68,7 @@ The BEAM-side encoder must use a documented length-prefixed envelope for all new
 
 ### 0xA3 — gui_extension_runtime
 
-Frontend extensions receive opaque runtime messages through a generic envelope. The shared protocol identifies the extension and channel; the payload bytes are owned by that extension's frontend adapter and must not require shared protocol structs or generated Board-specific frontend paths.
+Frontend extensions receive opaque runtime messages through a generic envelope. The shared protocol identifies the extension and channel; the payload bytes are owned by that extension's frontend adapter and must not require shared protocol structs or generated extension-specific frontend paths.
 
 ```
 opcode(1) + payload_len(4) + payload(payload_len)
@@ -77,9 +77,9 @@ Payload:
   extension_id_len(2) + extension_id(extension_id_len) + channel_len(2) + channel(channel_len) + extension_payload
 ```
 
-`extension_id` is the stable bundled or installed extension id, for example `minga_board`. `channel` is an extension-owned routing key, for example `board`. `extension_payload` is intentionally opaque to shared frontend code; a frontend that has a registered runtime decoder for the extension may decode it, and a frontend without one should ignore the message without crashing.
+`extension_id` is the stable bundled or installed extension id, for example `minga_tasks`. `channel` is an extension-owned routing key, for example `tasks`. `extension_payload` is intentionally opaque to shared frontend code; a frontend that has a registered runtime decoder for the extension may decode it, and a frontend without one should ignore the message without crashing.
 
-This envelope is for extension-owned runtime state such as bundled Board chrome. New shared chrome should still use a normal Semantic UI opcode instead of hiding shared product contracts inside extension payloads.
+This envelope is for extension-owned runtime state. New shared chrome should still use a normal Semantic UI opcode instead of hiding shared product contracts inside extension payloads.
 
 ### 0x9F — gui_sidebars
 

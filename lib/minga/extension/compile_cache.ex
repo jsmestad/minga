@@ -361,9 +361,9 @@ defmodule Minga.Extension.CompileCache do
   # - `infer_signatures: false`: skip the set-theoretic type inference pass.
   #   Extensions are already type-checked when the release/test suite is built;
   #   re-running inference on the full extension module graph at boot (issue
-  #   #2355) wastes large amounts of memory and surfaces type diagnostics (e.g.
-  #   around `MingaBoard.Shell.State.new/0`) for code that is not changing here.
-  #   Runtime compilation is a bounded "make the beams" step, not a re-validation.
+  #   #2355) wastes large amounts of memory and surfaces type diagnostics for
+  #   code that is not changing here. Runtime compilation is a bounded "make the
+  #   beams" step, not a re-validation.
   @spec compile_ignoring_module_conflicts((-> term())) :: term()
   defp compile_ignoring_module_conflicts(fun) do
     :global.trans({__MODULE__, :compiler_options}, fn ->
