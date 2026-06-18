@@ -2,7 +2,6 @@ defmodule Minga.Editing.TextObjectTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Document
-  alias Minga.Editing.NavigableContent.BufferSnapshot
   alias Minga.Editing.TextObject
 
   # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -239,9 +238,8 @@ defmodule Minga.Editing.TextObjectTest do
       assert {{0, 3}, {0, 10}} = TextObject.inner_parens(b, {0, 10}, "(", ")")
     end
 
-    test "preserves nesting depth across lines for generic readable content" do
-      snapshot = BufferSnapshot.new(buf("(a (b\nc) d)"))
-      assert {{0, 1}, {1, 3}} = TextObject.inner_parens(snapshot, {1, 3}, "(", ")")
+    test "preserves nesting depth across lines" do
+      assert {{0, 1}, {1, 3}} = TextObject.inner_parens(buf("(a (b\nc) d)"), {1, 3}, "(", ")")
     end
   end
 

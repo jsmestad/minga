@@ -41,6 +41,7 @@ defmodule MingaEditor.Mouse do
   alias MingaEditor.Mouse.Target.Buffer, as: BufferTarget
   alias MingaEditor.Renderer.Gutter
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Mouse, as: MouseState
   alias MingaEditor.State.Windows
@@ -1681,7 +1682,7 @@ defmodule MingaEditor.Mouse do
   end
 
   @spec find_tab_bar_region(
-          [MingaEditor.Shell.Traditional.TabBarRenderer.click_region()],
+          [TraditionalState.tab_bar_click_region()],
           non_neg_integer(),
           non_neg_integer()
         ) :: {:command, tab_command()} | :not_tab_bar
@@ -1694,7 +1695,7 @@ defmodule MingaEditor.Mouse do
   end
 
   @spec tab_bar_region_hit?(
-          MingaEditor.Shell.Traditional.TabBarRenderer.click_region(),
+          TraditionalState.tab_bar_click_region(),
           non_neg_integer(),
           non_neg_integer()
         ) :: boolean()

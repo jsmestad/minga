@@ -31,6 +31,13 @@ defmodule MingaEditor.Shell.Traditional.State do
   @type git_toast :: ProtocolGUI.git_toast() | nil
   @type git_status_panel :: GitStatusPanel.t()
   @type git_status_tui_state :: struct()
+  @type tab_bar_command ::
+          atom() | {:workspace_goto, non_neg_integer()} | {:tab_goto_id, pos_integer()}
+  @type tab_bar_click_region ::
+          {col_start :: non_neg_integer(), col_end :: non_neg_integer(),
+           command :: tab_bar_command()}
+          | {row :: non_neg_integer(), col_start :: non_neg_integer(),
+             col_end :: non_neg_integer(), command :: tab_bar_command()}
 
   @git_status_tui_state_module :"Elixir.MingaGitPorcelain.Shell.Traditional.GitStatus.TuiState"
 
@@ -55,7 +62,7 @@ defmodule MingaEditor.Shell.Traditional.State do
           inline_asks: InlineAsk.store(),
           inline_edits: InlineEdit.store(),
           modeline_click_regions: [MingaEditor.Shell.Traditional.Modeline.click_region()],
-          tab_bar_click_regions: [MingaEditor.Shell.Traditional.TabBarRenderer.click_region()],
+          tab_bar_click_regions: [tab_bar_click_region()],
           warning_popup_timer: reference() | nil,
           signature_help: MingaEditor.SignatureHelp.t() | nil,
           tool_declined: MapSet.t(),

@@ -11,22 +11,16 @@ defmodule MingaEditor.Window.Content do
   Window content references are stored in the window tree, serialized for
   tab save/restore, and pattern-matched in the render pipeline. A simple
   tagged tuple (`{:buffer, pid}`, `{:agent, session_ref}`) is easier to
-  serialize, pattern-match, and debug than a protocol struct. The
-  NavigableContent protocol handles the behavioral polymorphism; this
-  module handles the identity/reference polymorphism.
+  serialize, pattern-match, and debug than a protocol struct. This module handles only identity/reference polymorphism.
 
   ## Content types
 
-  | Tag | Reference | NavigableContent? | Editable? |
-  |-----|-----------|-------------------|-----------|
-  | `:buffer` | `pid()` (Buffer.Process) | Yes (via BufferSnapshot) | Yes |
-  | `:agent_chat` | `pid()` (Agent.Session) | Yes | No |
-  | `:agent_prompt` | `pid()` (Buffer.Process) | Yes (via BufferSnapshot) | Yes |
-  | `:terminal` | `pid()` (future, #122) | Yes (future) | No |
-  | `:browser` | `reference()` (future, #305) | Yes (future) | No |
+  | Tag | Reference | Editable? |
+  |-----|-----------|-----------|
+  | `:buffer` | `pid()` (Buffer.Process) | Yes |
+  | `:agent_chat` | `pid()` (Agent.Session) | No |
 
-  Only `:buffer` is implemented today. Other tags are documented here to
-  show the design direction and will be added as their features land.
+  Only these tags are implemented today. Add future content types when they ship.
   """
 
   @typedoc """
