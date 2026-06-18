@@ -502,6 +502,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             },
             Task { @MainActor [weak self] in
+                for await notification in NSWorkspace.shared.notificationCenter.notifications(named: NSWorkspace.willUnmountNotification) {
+                    guard let self else { return }
+                    guard let volumePath = Self.unmountVolumePath(from: notification) else {
+                        PortLogger.info("Volume will unmount with no resolvable path; ignoring")
+                        continue
+                    }
+                    PortLogger.info("Volume will unmount: \(volumePath)")
+                    self.encoder?.sendSystemWillUnmount(volumePath: volumePath)
+                }
+            },
+            Task { @MainActor [weak self] in
                 for await _ in NSWorkspace.shared.notificationCenter.notifications(named: NSWorkspace.screensDidSleepNotification) {
                     guard let self else { return }
                     PortLogger.info("Screens did sleep; pausing Metal rendering")
@@ -538,6 +549,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ]
 
         sendCurrentPowerThermalState(reason: "Initial power state")
+    }
+
+    /// Resolves the mount path of a volume from a willUnmount/didUnmount notification.
+    ///
+    /// Modern AppKit delivers the mounted volume URL under `volumeURLUserInfoKey`;
+    /// older releases used the `"NSDevicePath"` string. We accept either so the BEAM
+    /// always receives a filesystem path it can prefix-match against open buffers.
+    private static func unmountVolumePath(from notification: Notification) -> String? {
+        if let url = notification.userInfo?[NSWorkspace.volumeURLUserInfoKey] as? URL {
+            return url.path
+        }
+        if let path = notification.userInfo?["NSDevicePath"] as? String {
+            return path
+        }
+        return nil
     }
 
     /// Applies the current power/thermal policy locally and notifies the BEAM.

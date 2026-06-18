@@ -200,4 +200,5 @@ const (
 	GUIActionSidebarAction        byte = 0x57
 	GUIActionExtensionAction      byte = 0x58
 	GUIActionFloatPopupDismiss    byte = 0x59
+	GUIActionSystemWillUnmount    byte = 0x5A
 )

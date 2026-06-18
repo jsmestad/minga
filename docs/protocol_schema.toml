@@ -1051,6 +1051,12 @@ value = 0x58
 name = "float_popup_dismiss"
 value = 0x59
 
+# A volume (external/network drive) is about to unmount. Payload carries the
+# mount path as string16 so the BEAM can protect buffers living under it.
+[[gui_actions]]
+name = "system_will_unmount"
+value = 0x5A
+
 # ── Enum vocabularies ─────────────────────────────────────────────────────
 #
 # An [[enums]] entry names a closed set of wire byte values with a stable

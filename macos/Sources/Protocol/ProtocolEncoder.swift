@@ -58,6 +58,7 @@ protocol InputEncoder: AnyObject, Sendable {
     func sendNewTab()
     func sendSystemWillSleep()
     func sendSystemDidWake()
+    func sendSystemWillUnmount(volumePath: String)
     func sendPowerThermalState(lowPowerMode: Bool, thermalState: UInt8)
 
     // Bottom panel actions
@@ -681,6 +682,16 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         var buf = Data(count: 2)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_SYSTEM_DID_WAKE
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: system_will_unmount.
+    /// Layout: opcode(1) + action_type(1) + path_len(2) + path(path_len).
+    func sendSystemWillUnmount(volumePath: String) {
+        var buf = Data()
+        buf.append(OP_GUI_ACTION)
+        buf.append(GUI_ACTION_SYSTEM_WILL_UNMOUNT)
+        appendString16(&buf, volumePath)
         writeFrame(buf)
     }
 

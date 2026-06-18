@@ -110,6 +110,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   | 0x58       | extension_action        |
   | 0x34       | system_will_sleep       |
   | 0x35       | system_did_wake         |
+  | 0x5A       | system_will_unmount     |
 
   """
 
@@ -214,6 +215,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_file_tree_move Opcodes.gui_action_file_tree_move()
   @gui_action_system_will_sleep Opcodes.gui_action_system_will_sleep()
   @gui_action_system_did_wake Opcodes.gui_action_system_did_wake()
+  @gui_action_system_will_unmount Opcodes.gui_action_system_will_unmount()
   @gui_action_power_thermal_state Opcodes.gui_action_power_thermal_state()
   @gui_action_cmd_copy Opcodes.gui_action_cmd_copy()
   @gui_action_cmd_cut Opcodes.gui_action_cmd_cut()
@@ -377,6 +379,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | :hover_open_action
           | :system_will_sleep
           | :system_did_wake
+          | {:system_will_unmount, volume_path :: String.t()}
           | {:power_thermal_state, low_power? :: boolean(), thermal_state()}
           | :cmd_copy
           | :cmd_cut
@@ -2464,6 +2467,12 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   def decode_gui_action(@gui_action_system_did_wake, <<>>),
     do: {:ok, :system_did_wake}
+
+  def decode_gui_action(
+        @gui_action_system_will_unmount,
+        <<path_len::16, path::binary-size(path_len)>>
+      ),
+      do: {:ok, {:system_will_unmount, path}}
 
   def decode_gui_action(@gui_action_power_thermal_state, <<low_power::8, thermal_state::8>>) do
     with {:ok, low_power?} <- decode_bool_byte(low_power) do

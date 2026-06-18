@@ -356,6 +356,10 @@ defmodule Minga.Buffer do
   @spec read_only?(t()) :: boolean()
   defdelegate read_only?(server), to: BufferProcess
 
+  @doc "Sets the read-only flag at runtime (e.g. when the backing volume unmounts)."
+  @spec set_read_only(t(), boolean()) :: :ok
+  defdelegate set_read_only(server, read_only?), to: BufferProcess
+
   @spec storage(t()) :: Minga.Buffer.State.storage()
   defdelegate storage(server), to: BufferProcess
 
