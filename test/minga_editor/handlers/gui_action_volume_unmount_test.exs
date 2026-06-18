@@ -2,12 +2,13 @@ defmodule MingaEditor.Handlers.GuiActionVolumeUnmountTest do
   @moduledoc """
   Tests for handling `NSWorkspace.willUnmountNotification` forwarded from the GUI.
 
-  Uses the global `Minga.Buffer.Registry`, so it cannot run async. Each test
-  scopes its buffers under a unique tmp dir, so a concurrent suite's buffers are
-  never matched by the volume-prefix filter.
+  Uses the global `Minga.Buffer.Registry`, but async is safe because
+  `buffers_under_prefix/1` filters by the full tmp_dir path, which is
+  unique per test. The global Registry scan cannot match buffers from
+  concurrent tests.
   """
 
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Minga.Buffer
   alias Minga.Buffer.Process, as: BufferProcess
