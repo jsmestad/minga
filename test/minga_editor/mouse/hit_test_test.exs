@@ -35,6 +35,37 @@ defmodule MingaEditor.Mouse.HitTestTest do
       assert target.viewport == EditorState.active_window_struct(state).viewport
     end
 
+    test "resolves clicks just after a merged multi-line conceal replacement to the line end" do
+      content =
+        Enum.join(
+          [String.duplicate("a", 20), String.duplicate("b", 20), String.duplicate("c", 20)],
+          "\n"
+        )
+
+      {state, buffer} = start_mouse_state(content)
+
+      :ok =
+        BufferProcess.batch_decorations(buffer, fn decorations ->
+          {_id, decorations} =
+            Decorations.add_conceal(decorations, {0, 8}, {2, 6}, replacement: "·")
+
+          {_id, decorations} =
+            Decorations.add_conceal(decorations, {1, 3}, {1, 12}, replacement: "x")
+
+          decorations
+        end)
+
+      %{content: {row, col, _width, _height}} = active_window_layout(state)
+      gutter_width = HitTest.buffer_gutter_width(buffer, BufferProcess.line_count(buffer))
+      [line_text] = BufferProcess.lines(buffer, 1, 1)
+      line_end = Minga.Core.Unicode.last_grapheme_byte_offset(line_text)
+
+      assert {:buffer, %BufferTarget{} = target} =
+               HitTest.resolve_buffer(state, row + 1, col + gutter_width + 1)
+
+      assert BufferTarget.position(target) == {1, line_end}
+    end
+
     test "resolves split-window targets without stealing active-window context" do
       {state, _buffer} = start_mouse_state("zero\none\ntwo")
       state = Movement.execute(state, :split_vertical)

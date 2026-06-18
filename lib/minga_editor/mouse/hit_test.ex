@@ -393,8 +393,17 @@ defmodule MingaEditor.Mouse.HitTest do
   end
 
   defp adjust_col_for_virtual_text(buffer, line, display_col) do
-    Decorations.display_col_to_buf_col(Buffer.decorations(buffer), line, display_col)
+    line_len = line_length(buffer, line)
+    Decorations.display_col_to_buf_col(Buffer.decorations(buffer), line, display_col, line_len)
   catch
     :exit, _ -> display_col
+  end
+
+  @spec line_length(pid(), non_neg_integer()) :: non_neg_integer() | :infinity
+  defp line_length(buffer, line) do
+    case Buffer.lines(buffer, line, 1) do
+      [text] -> byte_size(text)
+      _ -> :infinity
+    end
   end
 end
