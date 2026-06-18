@@ -732,49 +732,16 @@ defmodule Minga.LSP.Client do
   end
 
   defp handle_server_notification("window/logMessage", params, state) do
-    level = Map.get(params, "type", 4)
-    message = Map.get(params, "message", "")
-
-    log_level =
-      case level do
-        1 -> :error
-        2 -> :warning
-        3 -> :info
-        _ -> :debug
-      end
-
-    msg = "LSP [#{state.server_config.name}]: #{message}"
-
-    case log_level do
-      :error -> Minga.Log.error(:lsp, msg)
-      :warning -> Minga.Log.warning(:lsp, msg)
-      :info -> Minga.Log.info(:lsp, msg)
-      :debug -> Minga.Log.debug(:lsp, msg)
-    end
-
+    surface_lsp_message(params, state)
     state
   end
 
   defp handle_server_notification("window/showMessage", params, state) do
-    type = Map.get(params, "type", 4)
-    message = Map.get(params, "message", "")
-    {severity, level} = show_message_severity(type)
-    text = "[LSP/#{severity}] #{state.server_config.name}: #{message}"
-
-    Minga.Events.broadcast(:log_message, %Minga.Events.LogMessageEvent{text: text, level: level})
-
+    surface_lsp_message(params, state)
     state
   end
 
   defp handle_server_notification(_method, _params, state), do: state
-
-  # Maps an LSP MessageType (1=Error, 2=Warning, 3=Info, 4=Log) to a
-  # human-readable severity label and a `LogMessageEvent` level.
-  @spec show_message_severity(integer()) :: {String.t(), Minga.Events.LogMessageEvent.level()}
-  defp show_message_severity(1), do: {"error", :error}
-  defp show_message_severity(2), do: {"warning", :warning}
-  defp show_message_severity(3), do: {"info", :info}
-  defp show_message_severity(_), do: {"log", :info}
 
   @spec handle_server_request(String.t(), JsonRpc.id(), map(), State.t()) :: State.t()
   defp handle_server_request("window/workDoneProgress/create", id, _params, state) do
@@ -820,13 +787,7 @@ defmodule Minga.LSP.Client do
     # respond with `null` (no action selected) so the server does not hang
     # waiting on a choice. A minibuffer picker over `actions` is a follow-up
     # (see ticket #1270, step 3-7).
-    type = Map.get(params, "type", 4)
-    message = Map.get(params, "message", "")
-    {severity, level} = show_message_severity(type)
-    text = "[LSP/#{severity}] #{state.server_config.name}: #{message}"
-
-    Minga.Events.broadcast(:log_message, %Minga.Events.LogMessageEvent{text: text, level: level})
-
+    surface_lsp_message(params, state)
     send_response(state, id, nil)
     state
   end
@@ -847,6 +808,23 @@ defmodule Minga.LSP.Client do
   end
 
   defp configuration_item(settings, _item), do: settings
+
+  @spec surface_lsp_message(map(), State.t()) :: :ok
+  defp surface_lsp_message(params, state) do
+    type = Map.get(params, "type", 4)
+    message = Map.get(params, "message", "")
+    {severity, level} = lsp_message_severity(type)
+    text = "[LSP/#{severity}] #{state.server_config.name}: #{message}"
+
+    Minga.Log.info(:lsp, text)
+    Minga.Events.broadcast(:log_message, %Minga.Events.LogMessageEvent{text: text, level: level})
+  end
+
+  @spec lsp_message_severity(integer()) :: {String.t(), Minga.Events.LogMessageEvent.level()}
+  defp lsp_message_severity(1), do: {"error", :error}
+  defp lsp_message_severity(2), do: {"warning", :warning}
+  defp lsp_message_severity(3), do: {"info", :info}
+  defp lsp_message_severity(_), do: {"log", :info}
 
   @spec configuration_section(map(), String.t()) :: term()
   defp configuration_section(settings, section) do
