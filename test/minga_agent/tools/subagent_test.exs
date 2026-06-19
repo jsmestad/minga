@@ -113,6 +113,64 @@ defmodule MingaAgent.Tools.SubagentTest do
     end
   end
 
+  defmodule WorktreeProvider do
+    @behaviour MingaAgent.Provider
+
+    use GenServer
+
+    @impl MingaAgent.Provider
+    def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
+
+    @impl MingaAgent.Provider
+    def send_prompt(pid, text), do: GenServer.call(pid, {:prompt, text})
+
+    @impl MingaAgent.Provider
+    def abort(_pid), do: :ok
+
+    @impl MingaAgent.Provider
+    def new_session(_pid), do: :ok
+
+    @impl MingaAgent.Provider
+    def seed_messages(_pid, _messages), do: :ok
+
+    @impl MingaAgent.Provider
+    def get_state(_pid), do: {:ok, %{model: nil, is_streaming: false, token_usage: nil}}
+
+    @impl GenServer
+    def init(opts),
+      do:
+        {:ok,
+         %{
+           subscriber: Keyword.fetch!(opts, :subscriber),
+           project_root: Keyword.fetch!(opts, :project_root)
+         }}
+
+    @impl GenServer
+    def handle_call({:prompt, "write"}, _from, state) do
+      File.write!(Path.join(state.project_root, "child.txt"), "from child\n")
+      finish(state, "wrote file")
+    end
+
+    def handle_call({:prompt, "write-error"}, _from, state) do
+      File.write!(Path.join(state.project_root, "child.txt"), "from child\n")
+      send(state.subscriber, {:agent_provider_event, %Event.AgentStart{}})
+      send(state.subscriber, {:agent_provider_event, %Event.Error{message: "failed after write"}})
+      {:reply, :ok, state}
+    end
+
+    def handle_call({:prompt, _text}, _from, state) do
+      finish(state, "no changes")
+    end
+
+    @spec finish(map(), String.t()) :: {:reply, :ok, map()}
+    defp finish(state, text) do
+      send(state.subscriber, {:agent_provider_event, %Event.AgentStart{}})
+      send(state.subscriber, {:agent_provider_event, %Event.TextDelta{delta: text}})
+      send(state.subscriber, {:agent_provider_event, %Event.AgentEnd{usage: nil}})
+      {:reply, :ok, state}
+    end
+  end
+
   defmodule RecordingProvider do
     @behaviour MingaAgent.Provider
 
@@ -569,6 +627,72 @@ defmodule MingaAgent.Tools.SubagentTest do
     assert {:ok, "foreground done"} = Task.await(task)
   end
 
+  test "worktree-isolated subagent preserves a changed worktree", %{tmp_dir: dir} do
+    root = init_git_repo!(dir)
+
+    assert {:ok, result} =
+             Subagent.execute("write",
+               isolation: "worktree",
+               project_root: root,
+               provider: WorktreeProvider,
+               provider_opts: [project_root: root]
+             )
+
+    assert result =~ "wrote file"
+    assert [_, worktree_path] = Regex.run(~r/Worktree: (.+)/, result)
+    assert [_, branch] = Regex.run(~r/Branch: (.+)/, result)
+    assert branch =~ "subagent/"
+    assert File.read!(Path.join(worktree_path, "child.txt")) == "from child\n"
+    refute File.exists?(Path.join(root, "child.txt"))
+    assert File.exists?(worktree_path)
+  end
+
+  test "worktree-isolated subagent removes a clean no-op worktree", %{tmp_dir: dir} do
+    root = init_git_repo!(dir)
+    sibling_before = sibling_worktrees(root)
+
+    assert {:ok, "no changes"} =
+             Subagent.execute("noop",
+               isolation: "worktree",
+               project_root: root,
+               provider: WorktreeProvider
+             )
+
+    assert sibling_worktrees(root) == sibling_before
+    assert git_lines(root, ["branch", "--list", "subagent/*"]) == []
+  end
+
+  test "worktree-isolated subagent returns preserved worktree metadata after dirty error", %{
+    tmp_dir: dir
+  } do
+    root = init_git_repo!(dir)
+
+    assert {:error, message} =
+             Subagent.execute("write-error",
+               isolation: "worktree",
+               project_root: root,
+               provider: WorktreeProvider
+             )
+
+    assert message =~ "failed after write"
+    assert [_, worktree_path] = Regex.run(~r/Worktree: (.+)/, message)
+    assert File.read!(Path.join(worktree_path, "child.txt")) == "from child\n"
+  end
+
+  test "worktree-isolated subagent refuses a dirty repository", %{tmp_dir: dir} do
+    root = init_git_repo!(dir)
+    File.write!(Path.join(root, "dirty.txt"), "dirty\n")
+
+    assert {:error, message} =
+             Subagent.execute("noop",
+               isolation: "worktree",
+               project_root: root,
+               provider: WorktreeProvider
+             )
+
+    assert message =~ "requires a clean git tree"
+  end
+
   # ── Context inheritance tests ──────────────────────────────────────────────
 
   describe "execute/2 context inheritance" do
@@ -745,6 +869,42 @@ defmodule MingaAgent.Tools.SubagentTest do
   defp assert_child_started(ref, assertions) do
     assert_receive {^ref, {:provider_started, _provider_pid, opts}}, 1_000
     assertions.(opts)
+    :ok
+  end
+
+  @spec init_git_repo!(String.t()) :: String.t()
+  defp init_git_repo!(dir) do
+    root = Path.join(dir, "repo")
+    File.mkdir_p!(root)
+    git!(root, ["init", "."])
+    git!(root, ["config", "user.email", "justin.smestad@gmail.com"])
+    git!(root, ["config", "user.name", "Justin Smestad"])
+    File.write!(Path.join(root, "README.md"), "root\n")
+    git!(root, ["add", "README.md"])
+    git!(root, ["commit", "-m", "init"])
+    root
+  end
+
+  @spec sibling_worktrees(String.t()) :: [String.t()]
+  defp sibling_worktrees(root) do
+    root
+    |> Path.dirname()
+    |> File.ls!()
+    |> Enum.filter(&String.contains?(&1, "subagent"))
+    |> Enum.sort()
+  end
+
+  @spec git_lines(String.t(), [String.t()]) :: [String.t()]
+  defp git_lines(cwd, args) do
+    case System.cmd("git", args, cd: cwd, stderr_to_stdout: true) do
+      {output, 0} -> String.split(output, "\n", trim: true)
+      {output, _code} -> flunk("git #{Enum.join(args, " ")} failed: #{output}")
+    end
+  end
+
+  @spec git!(String.t(), [String.t()]) :: :ok
+  defp git!(cwd, args) do
+    _ = git_lines(cwd, args)
     :ok
   end
 end
