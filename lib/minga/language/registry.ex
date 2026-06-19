@@ -23,6 +23,83 @@ defmodule Minga.Language.Registry do
   @table :minga_language_registry
   @source_table :minga_language_registry_sources
 
+  # Canonical tree-sitter grammar aliases.
+  #
+  # Maps short or alternate language labels (the kind LLMs and docs put on
+  # fenced code blocks, e.g. ```js or ```c++) to the canonical grammar name we
+  # actually ship. This is the single source of truth for name aliasing across
+  # the Elixir side; the Zig highlighter keeps a parallel table for markdown
+  # injection lookups (chat fences, hover popups, markdown files).
+  #
+  # Only aliases that resolve to a grammar we actually vendor belong here. Keys
+  # are lower-cased; callers should downcase before lookup.
+  @grammar_aliases %{
+    # JavaScript / TypeScript
+    "js" => "javascript",
+    "jsx" => "javascript",
+    "mjs" => "javascript",
+    "cjs" => "javascript",
+    "node" => "javascript",
+    "ts" => "typescript",
+    "mts" => "typescript",
+    "cts" => "typescript",
+    # Shells
+    "sh" => "bash",
+    "shell" => "bash",
+    "zsh" => "bash",
+    "ksh" => "bash",
+    # C / C++
+    "c++" => "cpp",
+    "cxx" => "cpp",
+    "cc" => "cpp",
+    "hpp" => "cpp",
+    "hxx" => "cpp",
+    "h" => "c",
+    # C#
+    "cs" => "c_sharp",
+    "csharp" => "c_sharp",
+    "c#" => "c_sharp",
+    # Ruby
+    "rb" => "ruby",
+    # YAML
+    "yml" => "yaml",
+    # Python
+    "py" => "python",
+    "py3" => "python",
+    "python3" => "python",
+    # Go
+    "golang" => "go",
+    # Rust
+    "rs" => "rust",
+    # Kotlin
+    "kt" => "kotlin",
+    "kts" => "kotlin",
+    # Markdown
+    "md" => "markdown",
+    "mkd" => "markdown",
+    # JSON
+    "jsonc" => "json",
+    "json5" => "json",
+    # Misc
+    "html5" => "html",
+    "htm" => "html",
+    "docker" => "dockerfile",
+    "makefile" => "make",
+    "objective-c" => "objc",
+    "objectivec" => "objc",
+    "el" => "elisp",
+    "emacs-lisp" => "elisp",
+    "ex" => "elixir",
+    "exs" => "elixir",
+    "graphqls" => "graphql",
+    "tf" => "hcl",
+    "terraform" => "hcl",
+    "proto" => "protobuf",
+    "vimscript" => "vim",
+    "vimrc" => "vim",
+    "hs" => "haskell"
+  }
+
   @typedoc "Source that contributed registry entries."
   @type contribution_source :: :builtin | :config | {:extension, atom()}
 
@@ -58,6 +135,36 @@ defmodule Minga.Language.Registry do
   rescue
     ArgumentError -> nil
   end
+
+  @doc """
+  Returns the canonical tree-sitter grammar name for a language label.
+
+  Resolves short or alternate fence labels (e.g. `"js"`, `"c++"`, `"py3"`) to
+  the canonical grammar name we ship (e.g. `"javascript"`, `"cpp"`, `"python"`).
+  Matching is case-insensitive. Labels that are already canonical, or that have
+  no alias, are returned unchanged (lower-cased). This is the single source of
+  truth for grammar-name aliasing on the Elixir side.
+
+  ## Examples
+
+      iex> Minga.Language.Registry.canonical_grammar("js")
+      "javascript"
+
+      iex> Minga.Language.Registry.canonical_grammar("C++")
+      "cpp"
+
+      iex> Minga.Language.Registry.canonical_grammar("elixir")
+      "elixir"
+  """
+  @spec canonical_grammar(String.t()) :: String.t()
+  def canonical_grammar(label) when is_binary(label) do
+    key = String.downcase(label)
+    Map.get(@grammar_aliases, key, key)
+  end
+
+  @doc "Returns the canonical grammar alias map (label => grammar name)."
+  @spec grammar_aliases() :: %{String.t() => String.t()}
+  def grammar_aliases, do: @grammar_aliases
 
   @doc """
   Returns the language definition for a file extension, or `nil`.

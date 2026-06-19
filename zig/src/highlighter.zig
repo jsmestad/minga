@@ -1394,12 +1394,20 @@ pub const Highlighter = struct {
             const cnode = content_node orelse continue;
 
             // Determine language: captured text takes priority, then #set! predicate
-            const lang_name = lang_from_capture orelse
+            const raw_lang_name = lang_from_capture orelse
                 getInjectionLanguagePredicate(inj_query, inj_match.pattern_index) orelse
                 continue;
 
-            // Skip if we don't have this grammar
-            if (self.languages.get(lang_name) == null) continue;
+            // Resolve short/alternate fence labels (e.g. "js", "c++") to the
+            // canonical grammar name before lookup, ASCII-lowercasing first so
+            // mixed-case labels (`JS`, `Bash`, `Rust`) resolve like the Elixir
+            // path does. Skip over-long labels and unknown grammars.
+            var lang_buf: [max_lang_label_len]u8 = undefined;
+            const canonical = canonicalLangNameLower(raw_lang_name, &lang_buf) orelse continue;
+
+            // Use the registered key slice (static, lives past `lang_buf`) so
+            // regions and query-cache keys reference a stable name.
+            const lang_name = self.languages.getKey(canonical) orelse continue;
 
             try regions.append(alloc, .{
                 .start_byte = c.ts_node_start_byte(cnode),
@@ -1642,7 +1650,9 @@ pub const Highlighter = struct {
                 }
             }
             if (!has_content) continue;
-            const lang_name = lang_from_capture orelse getInjectionLanguagePredicate(inj_query, inj_match.pattern_index) orelse continue;
+            const raw_lang_name = lang_from_capture orelse getInjectionLanguagePredicate(inj_query, inj_match.pattern_index) orelse continue;
+            var lang_buf: [max_lang_label_len]u8 = undefined;
+            const lang_name = canonicalLangNameLower(raw_lang_name, &lang_buf) orelse continue;
             if (self.languages.get(lang_name) != null) return true;
         }
         return false;
@@ -2215,6 +2225,115 @@ fn tagNameChild(tag: c.TSNode) ?c.TSNode {
 
 // ── Injection helpers ─────────────────────────────────────────────────────
 
+/// Upper bound on a fence label we are willing to canonicalize. Real grammar
+/// names and aliases are tiny; anything longer is not a language label and is
+/// treated as no-match by the case-insensitive path.
+const max_lang_label_len = 64;
+
+/// Lowercases `raw` (ASCII) into `buf` and canonicalizes the result, mirroring
+/// the Elixir path which `String.downcase`es the fence label before lookup.
+///
+/// Returns the canonical grammar name slice (pointing into `buf` for an
+/// un-aliased label, or a static alias target). Returns null when `raw` is
+/// longer than `buf`, in which case the caller treats it as no-match. `buf`
+/// must outlive the returned slice and be at least `max_lang_label_len`.
+fn canonicalLangNameLower(raw: []const u8, buf: []u8) ?[]const u8 {
+    if (raw.len > buf.len) return null;
+    const lowered = std.ascii.lowerString(buf[0..raw.len], raw);
+    return canonicalLangName(lowered);
+}
+
+/// Maps short or alternate fenced-code-block labels (the kind LLMs and docs
+/// emit, e.g. `js`, `c++`, `py3`) to the canonical grammar name we ship.
+///
+/// This mirrors `Minga.Language.Registry`'s `@grammar_aliases` on the Elixir
+/// side. It is applied to injection language names (markdown fences, chat
+/// replies, hover popups) before any `self.languages.get(...)` lookup so that
+/// aliased fences resolve to a registered grammar and get highlighted.
+///
+/// `name` is expected to already be ASCII-lowercased (see
+/// `canonicalLangNameLower`), so both the alias comparison here and the
+/// caller's `self.languages.get(...)` lookup operate on the lowercased value:
+/// `JS`/`Js`/`js` all resolve to `javascript`, and an un-aliased mixed-case
+/// canonical name like `Rust` still hits the registered lowercase `rust` key.
+///
+/// Returns a canonical grammar name slice. Unknown or already-canonical labels
+/// are returned unchanged.
+fn canonicalLangName(name: []const u8) []const u8 {
+    const Alias = struct { from: []const u8, to: []const u8 };
+    const aliases = [_]Alias{
+        // JavaScript / TypeScript
+        .{ .from = "js", .to = "javascript" },
+        .{ .from = "jsx", .to = "javascript" },
+        .{ .from = "mjs", .to = "javascript" },
+        .{ .from = "cjs", .to = "javascript" },
+        .{ .from = "node", .to = "javascript" },
+        .{ .from = "ts", .to = "typescript" },
+        .{ .from = "mts", .to = "typescript" },
+        .{ .from = "cts", .to = "typescript" },
+        // Shells
+        .{ .from = "sh", .to = "bash" },
+        .{ .from = "shell", .to = "bash" },
+        .{ .from = "zsh", .to = "bash" },
+        .{ .from = "ksh", .to = "bash" },
+        // C / C++
+        .{ .from = "c++", .to = "cpp" },
+        .{ .from = "cxx", .to = "cpp" },
+        .{ .from = "cc", .to = "cpp" },
+        .{ .from = "hpp", .to = "cpp" },
+        .{ .from = "hxx", .to = "cpp" },
+        .{ .from = "h", .to = "c" },
+        // C#
+        .{ .from = "cs", .to = "c_sharp" },
+        .{ .from = "csharp", .to = "c_sharp" },
+        .{ .from = "c#", .to = "c_sharp" },
+        // Ruby
+        .{ .from = "rb", .to = "ruby" },
+        // YAML
+        .{ .from = "yml", .to = "yaml" },
+        // Python
+        .{ .from = "py", .to = "python" },
+        .{ .from = "py3", .to = "python" },
+        .{ .from = "python3", .to = "python" },
+        // Go
+        .{ .from = "golang", .to = "go" },
+        // Rust
+        .{ .from = "rs", .to = "rust" },
+        // Kotlin
+        .{ .from = "kt", .to = "kotlin" },
+        .{ .from = "kts", .to = "kotlin" },
+        // Markdown
+        .{ .from = "md", .to = "markdown" },
+        .{ .from = "mkd", .to = "markdown" },
+        // JSON
+        .{ .from = "jsonc", .to = "json" },
+        .{ .from = "json5", .to = "json" },
+        // Misc
+        .{ .from = "html5", .to = "html" },
+        .{ .from = "htm", .to = "html" },
+        .{ .from = "docker", .to = "dockerfile" },
+        .{ .from = "makefile", .to = "make" },
+        .{ .from = "objective-c", .to = "objc" },
+        .{ .from = "objectivec", .to = "objc" },
+        .{ .from = "el", .to = "elisp" },
+        .{ .from = "emacs-lisp", .to = "elisp" },
+        .{ .from = "ex", .to = "elixir" },
+        .{ .from = "exs", .to = "elixir" },
+        .{ .from = "graphqls", .to = "graphql" },
+        .{ .from = "tf", .to = "hcl" },
+        .{ .from = "terraform", .to = "hcl" },
+        .{ .from = "proto", .to = "protobuf" },
+        .{ .from = "vimscript", .to = "vim" },
+        .{ .from = "vimrc", .to = "vim" },
+        .{ .from = "hs", .to = "haskell" },
+    };
+
+    for (aliases) |alias| {
+        if (std.mem.eql(u8, name, alias.from)) return alias.to;
+    }
+    return name;
+}
+
 /// Reads `#set! injection.language "..."` predicates from a query pattern.
 /// Returns the language name string if found, or null.
 fn getInjectionLanguagePredicate(query: *c.TSQuery, pattern_index: u32) ?[]const u8 {
@@ -2472,6 +2591,57 @@ test "highlighter: init registers all grammars" {
     try std.testing.expect(hl.languages.get("elixir") != null);
     try std.testing.expect(hl.languages.get("zig") != null);
     try std.testing.expect(hl.languages.get("nonexistent") == null);
+}
+
+test "highlighter: canonicalLangName resolves aliases to shipped grammars" {
+    // Aliased fence labels resolve to the canonical grammar name.
+    try std.testing.expectEqualStrings("javascript", canonicalLangName("js"));
+    try std.testing.expectEqualStrings("javascript", canonicalLangName("jsx"));
+    try std.testing.expectEqualStrings("typescript", canonicalLangName("ts"));
+    try std.testing.expectEqualStrings("bash", canonicalLangName("sh"));
+    try std.testing.expectEqualStrings("bash", canonicalLangName("shell"));
+    try std.testing.expectEqualStrings("bash", canonicalLangName("zsh"));
+    try std.testing.expectEqualStrings("cpp", canonicalLangName("c++"));
+    try std.testing.expectEqualStrings("c", canonicalLangName("h"));
+    try std.testing.expectEqualStrings("c_sharp", canonicalLangName("cs"));
+    try std.testing.expectEqualStrings("ruby", canonicalLangName("rb"));
+    try std.testing.expectEqualStrings("yaml", canonicalLangName("yml"));
+    try std.testing.expectEqualStrings("python", canonicalLangName("py3"));
+    try std.testing.expectEqualStrings("go", canonicalLangName("golang"));
+    try std.testing.expectEqualStrings("rust", canonicalLangName("rs"));
+    try std.testing.expectEqualStrings("kotlin", canonicalLangName("kt"));
+
+    // Already-canonical and unknown labels pass through unchanged.
+    try std.testing.expectEqualStrings("elixir", canonicalLangName("elixir"));
+    try std.testing.expectEqualStrings("nonexistent", canonicalLangName("nonexistent"));
+
+    // Case-insensitive resolution via the lowercasing helper: aliases hit
+    // regardless of case, and un-aliased mixed-case canonical names lowercase
+    // to the registered key.
+    var lbuf: [max_lang_label_len]u8 = undefined;
+    try std.testing.expectEqualStrings("javascript", canonicalLangNameLower("JS", &lbuf).?);
+    try std.testing.expectEqualStrings("javascript", canonicalLangNameLower("Js", &lbuf).?);
+    try std.testing.expectEqualStrings("bash", canonicalLangNameLower("Bash", &lbuf).?);
+    try std.testing.expectEqualStrings("cpp", canonicalLangNameLower("C++", &lbuf).?);
+    try std.testing.expectEqualStrings("rust", canonicalLangNameLower("Rust", &lbuf).?);
+    try std.testing.expectEqualStrings("go", canonicalLangNameLower("Go", &lbuf).?);
+    // Labels longer than the buffer are treated as no-match.
+    const too_long = "a" ** (max_lang_label_len + 1);
+    try std.testing.expect(canonicalLangNameLower(too_long, &lbuf) == null);
+
+    // Every alias target must be a grammar we actually register.
+    var hl = try Highlighter.init(std.testing.allocator);
+    defer hl.deinit();
+    const targets = [_][]const u8{
+        "javascript", "typescript", "bash",   "cpp",    "c",
+        "c_sharp",    "ruby",       "yaml",    "python", "go",
+        "rust",       "kotlin",     "markdown", "json",  "html",
+        "dockerfile", "make",       "objc",    "elisp",  "elixir",
+        "graphql",    "hcl",        "protobuf", "vim",   "haskell",
+    };
+    for (targets) |t| {
+        try std.testing.expect(hl.languages.get(t) != null);
+    }
 }
 
 test "highlighter: setLanguage" {
@@ -3007,6 +3177,92 @@ test "highlighter: markdown injection produces spans for fenced code block" {
         }
     }
     try std.testing.expect(has_injection);
+}
+
+test "highlighter: aliased fence labels produce injection spans" {
+    // Regression for grammar-name aliasing: fences labeled with short or
+    // alternate names (js, sh, c++, py3, rb) are what LLMs and docs emit in
+    // chat replies. Each must resolve to a shipped grammar and highlight just
+    // like its canonical label would.
+    const Case = struct { label: []const u8, snippet: []const u8 };
+    const cases = [_]Case{
+        .{ .label = "js", .snippet = "const x = 42;" },
+        .{ .label = "sh", .snippet = "echo hello" },
+        .{ .label = "c++", .snippet = "int x = 42;" },
+        .{ .label = "py3", .snippet = "x = 42" },
+        .{ .label = "rb", .snippet = "x = 42" },
+        .{ .label = "ts", .snippet = "const x: number = 42;" },
+        .{ .label = "yml", .snippet = "key: value" },
+    };
+
+    for (cases) |case| {
+        var hl = try Highlighter.init(std.testing.allocator);
+        defer hl.deinit();
+
+        try std.testing.expect(hl.setLanguage("markdown"));
+
+        var buf: [256]u8 = undefined;
+        const source = try std.fmt.bufPrint(
+            &buf,
+            "# Title\n\n```{s}\n{s}\n```\n",
+            .{ case.label, case.snippet },
+        );
+        try hl.parse(source);
+
+        var result = try hl.highlightWithInjections();
+        defer result.deinit();
+
+        var has_injection = false;
+        for (result.spans) |span| {
+            if (span.layer == 1) {
+                has_injection = true;
+                break;
+            }
+        }
+        try std.testing.expect(has_injection);
+    }
+}
+
+test "highlighter: mixed-case fence labels produce injection spans" {
+    // Regression for case-sensitivity: the Elixir path lowercases the fence
+    // label, so mixed-case labels (`JS`, `Bash`, `C++`) must resolve and
+    // highlight on the zig markdown-injection path too. Covers both aliases
+    // (`JS`->javascript, `Bash`->bash, `C++`->cpp) and an un-aliased canonical
+    // name in mixed case (`Rust`->rust).
+    const Case = struct { label: []const u8, snippet: []const u8 };
+    const cases = [_]Case{
+        .{ .label = "JS", .snippet = "const x = 42;" },
+        .{ .label = "Bash", .snippet = "echo hello" },
+        .{ .label = "C++", .snippet = "int x = 42;" },
+        .{ .label = "Rust", .snippet = "let x = 42;" },
+    };
+
+    for (cases) |case| {
+        var hl = try Highlighter.init(std.testing.allocator);
+        defer hl.deinit();
+
+        try std.testing.expect(hl.setLanguage("markdown"));
+
+        var buf: [256]u8 = undefined;
+        const source = try std.fmt.bufPrint(
+            &buf,
+            "# Title\n\n```{s}\n{s}\n```\n",
+            .{ case.label, case.snippet },
+        );
+        try hl.parse(source);
+
+        var result = try hl.highlightWithInjections();
+        defer result.deinit();
+
+        var has_injection = false;
+        for (result.spans) |span| {
+            if (span.layer == 1) {
+                has_injection = true;
+                break;
+            }
+        }
+        try std.testing.expect(has_injection);
+    }
 }
 
 test "highlighter: injection spans sort before outer spans at same position" {

@@ -117,6 +117,57 @@ defmodule Minga.Parser.ManagerTest do
     end
   end
 
+  describe "highlight_source/3 grammar aliasing" do
+    # Generous timeout: the parser lazily loads each grammar on first use, so a
+    # cold-start request can exceed the 50ms default. These tests verify alias
+    # resolution, not latency.
+    @highlight_timeout 2_000
+
+    test "a short alias label like \"js\" highlights via the real parser" do
+      server = start_parser_manager()
+      source = "const answer = 42;\n"
+
+      # "js" is not a registered grammar name; it must resolve to "javascript".
+      assert {:ok, names, spans} =
+               Manager.highlight_source("js", source, server: server, timeout: @highlight_timeout)
+
+      assert is_list(names)
+      assert spans != []
+    end
+
+    test ~S("sh" and "c++" aliases highlight via the real parser) do
+      server = start_parser_manager()
+
+      assert {:ok, _names, sh_spans} =
+               Manager.highlight_source("sh", "echo hello\n",
+                 server: server,
+                 timeout: @highlight_timeout
+               )
+
+      assert sh_spans != []
+
+      assert {:ok, _names, cpp_spans} =
+               Manager.highlight_source("c++", "int x = 42;\n",
+                 server: server,
+                 timeout: @highlight_timeout
+               )
+
+      assert cpp_spans != []
+    end
+
+    test "canonical labels still highlight" do
+      server = start_parser_manager()
+
+      assert {:ok, _names, spans} =
+               Manager.highlight_source("javascript", "const x = 1;\n",
+                 server: server,
+                 timeout: @highlight_timeout
+               )
+
+      assert spans != []
+    end
+  end
+
   describe "config-document key highlighting" do
     test "captures YAML mapping keys as @property" do
       server = start_parser_manager()
