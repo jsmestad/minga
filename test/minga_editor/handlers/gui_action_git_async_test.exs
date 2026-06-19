@@ -5,6 +5,7 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
   """
   use ExUnit.Case, async: false
 
+  alias MingaEditor.AsyncAction
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Handlers.GuiActionHandler
   alias MingaEditor.RenderPipeline.TestHelpers
@@ -24,6 +25,8 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
     def unstage_all(_root), do: :ok
     @spec discard(String.t(), String.t()) :: :ok
     def discard(_root, _path), do: :ok
+    @spec commit(String.t(), String.t(), keyword()) :: {:ok, String.t()}
+    def commit(_root, _message, _opts), do: {:ok, "abc1234"}
   end
 
   setup do
@@ -60,6 +63,45 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
 
     assert EditorState.status_msg(new_state) == "Discarding lib/bar.ex…"
     assert_receive {:async_action_result, :git_worktree, _token, {:ok, "Discarded lib/bar.ex", _}}
+  end
+
+  test "git commit returns control immediately with a pending status", %{state: state} do
+    new_state = GuiActionHandler.dispatch(state, {:git_commit, "fix the thing"})
+
+    # Pending, NOT the completed "Committed …" — git commit did not run inline.
+    assert EditorState.status_msg(new_state) == "Committing…"
+    assert map_size(new_state.async_actions) == 1
+
+    # The result arrives async (ran in a Task) and carries the commit hash so the
+    # success message can name it; this proves control returned before it applied.
+    assert_receive {:async_action_result, :git_worktree, _token,
+                    {:ok, "Committed abc1234", _git_root}}
+  end
+
+  test "git amend offloads and reports the amended hash", %{state: state} do
+    new_state = GuiActionHandler.dispatch(state, {:git_commit, "reword", true})
+
+    assert EditorState.status_msg(new_state) == "Amending…"
+    assert_receive {:async_action_result, :git_worktree, _token, {:ok, "Amended abc1234", _}}
+  end
+
+  test "a stale git commit result is ignored when a newer action superseded it",
+       %{state: state} do
+    # First commit goes in-flight on the :git_worktree lane.
+    state = GuiActionHandler.dispatch(state, {:git_commit, "first"})
+    stale_token = state.async_actions[:git_worktree].running
+
+    # A second worktree action supersedes it: advancing past the first op (as the
+    # editor does once its result is applied) starts the second under a fresh
+    # token, so the first op's token is no longer current.
+    state = GuiActionHandler.dispatch(state, {:git_discard_file, "lib/bar.ex"})
+    state = AsyncAction.advance(state, :git_worktree)
+    fresh_token = state.async_actions[:git_worktree].running
+
+    refute stale_token == fresh_token
+    # The editor drops a result whose token is not the in-flight one (AC3/AC5).
+    refute AsyncAction.current?(state, :git_worktree, stale_token)
+    assert AsyncAction.current?(state, :git_worktree, fresh_token)
   end
 
   test "applying a current git result posts the success status", %{state: state} do

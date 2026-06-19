@@ -1002,32 +1002,41 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   # ── Git commit helpers ──────────────────────────────────────────────
 
+  # Commit shells out to `git commit`, so it runs off the editor's critical path
+  # on the same serialized :git_worktree lane as stage/discard (#2357). The op
+  # builds its own success message because the commit hash is only known after
+  # the subprocess returns; git-root resolution runs inside the offloaded work.
   @spec commit_from_gui(state(), String.t(), boolean()) :: state()
   defp commit_from_gui(state, message, amend?) do
-    case MingaEditor.resolve_git_root() do
-      nil ->
-        EditorState.set_status(state, "Not in a git repository")
+    git_action(
+      state,
+      commit_pending_msg(amend?),
+      fn git_root -> run_commit(git_root, message, amend?) end,
+      # Unused: the op always returns {:ok, msg} with the hash, never bare :ok.
+      commit_pending_msg(amend?)
+    )
+  end
 
-      git_root ->
-        opts = if amend?, do: [amend: true], else: []
-        result = Minga.Git.commit(git_root, message, opts)
-        MingaEditor.refresh_git_repo(git_root)
-        commit_status(state, result, amend?)
+  # Returns {:ok, msg} so the success status carries the commit hash, or the bare
+  # git reason on failure so apply_git_result/2 renders it through the lane's
+  # uniform "Git error: …" status, matching the other :git_worktree actions.
+  @spec run_commit(String.t(), String.t(), boolean()) :: {:ok, String.t()} | {:error, String.t()}
+  defp run_commit(git_root, message, amend?) do
+    opts = if amend?, do: [amend: true], else: []
+
+    case Minga.Git.commit(git_root, message, opts) do
+      {:ok, hash} -> {:ok, commit_success_msg(hash, amend?)}
+      {:error, reason} -> {:error, reason}
     end
   end
 
-  @spec commit_status(state(), {:ok, String.t()} | {:error, String.t()}, boolean()) :: state()
-  defp commit_status(state, {:ok, hash}, true),
-    do: EditorState.set_status(state, "Amended #{hash}")
+  @spec commit_pending_msg(boolean()) :: String.t()
+  defp commit_pending_msg(true), do: "Amending…"
+  defp commit_pending_msg(false), do: "Committing…"
 
-  defp commit_status(state, {:ok, hash}, false),
-    do: EditorState.set_status(state, "Committed #{hash}")
-
-  defp commit_status(state, {:error, reason}, true),
-    do: EditorState.set_status(state, "Amend failed: #{reason}")
-
-  defp commit_status(state, {:error, reason}, false),
-    do: EditorState.set_status(state, "Commit failed: #{reason}")
+  @spec commit_success_msg(String.t(), boolean()) :: String.t()
+  defp commit_success_msg(hash, true), do: "Amended #{hash}"
+  defp commit_success_msg(hash, false), do: "Committed #{hash}"
 
   # ── Git diff helpers ────────────────────────────────────────────────
 
@@ -1204,8 +1213,12 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   # the repo when the result comes back (only if still the latest git action).
   # Git-root resolution shells out to `git rev-parse`, so it runs inside the
   # offloaded work too, keeping every subprocess call off the input path.
-  @spec git_action(state(), String.t(), (String.t() -> :ok | {:error, String.t()}), String.t()) ::
-          state()
+  @spec git_action(
+          state(),
+          String.t(),
+          (String.t() -> :ok | {:ok, String.t()} | {:error, String.t()}),
+          String.t()
+        ) :: state()
   defp git_action(state, pending_msg, operation, success_msg)
        when is_binary(pending_msg) and is_binary(success_msg) do
     state
@@ -1213,7 +1226,10 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     |> AsyncAction.run(@git_lane, fn -> run_git_op(operation, success_msg) end)
   end
 
-  @spec run_git_op((String.t() -> :ok | {:error, String.t()}), String.t()) :: git_result()
+  @spec run_git_op(
+          (String.t() -> :ok | {:ok, String.t()} | {:error, String.t()}),
+          String.t()
+        ) :: git_result()
   defp run_git_op(operation, success_msg) do
     case MingaEditor.resolve_git_root() do
       nil -> :not_a_repo
@@ -1221,8 +1237,11 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     end
   end
 
-  @spec run_git_op((String.t() -> :ok | {:error, String.t()}), String.t(), String.t()) ::
-          git_result()
+  @spec run_git_op(
+          (String.t() -> :ok | {:ok, String.t()} | {:error, String.t()}),
+          String.t(),
+          String.t()
+        ) :: git_result()
   defp run_git_op(operation, git_root, success_msg) do
     # Span the actual git subprocess (runs in the offloaded Task) so the slow
     # work AC7 cares about is measured, not just the cheap dispatch (#2357).
@@ -1232,7 +1251,10 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
       end)
 
     case result do
+      # `:ok` uses the caller's static success message; `{:ok, msg}` lets the op
+      # supply a message that depends on the git output (e.g. a commit hash).
       :ok -> {:ok, success_msg, git_root}
+      {:ok, dynamic_msg} when is_binary(dynamic_msg) -> {:ok, dynamic_msg, git_root}
       {:error, reason} -> {:error, reason, git_root}
     end
   end
