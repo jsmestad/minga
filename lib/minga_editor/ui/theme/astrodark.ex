@@ -134,7 +134,12 @@ defmodule MingaEditor.UI.Theme.AstroDark do
       "parameter" => [fg: @syn_text],
       "variable.member" => [fg: @syn_text],
       "field" => [fg: @syn_text],
-      "property" => [fg: @syn_text],
+      # Config/document keys (YAML, JSON, TOML, ...) capture as @property. Give
+      # it a visible accent so key-heavy files stay readable, matching how modern
+      # editors highlight keys. Code member access stays muted via @variable.member
+      # / @field above. Without this, @property would equal the editor foreground
+      # and keys would render as plain text.
+      "property" => [fg: @syn_purple],
       "tag.attribute" => [fg: @syn_orange],
       "attribute" => [fg: @syn_orange],
       "string.special.regex" => [fg: @syn_red],
