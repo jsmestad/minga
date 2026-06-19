@@ -91,10 +91,6 @@ defmodule MingaEditor.Agent.SlashCommand do
       description: "Activate a skill: /skill:name, deactivate: /skill:off:name"
     },
     %Command{
-      name: "summarize",
-      description: "Generate a context artifact from this session for future use"
-    },
-    %Command{
       name: "remember",
       description: "Save a learning to persistent memory: /remember <text>"
     },
@@ -364,7 +360,6 @@ defmodule MingaEditor.Agent.SlashCommand do
   defp dispatch(state, "export", "html"), do: do_export(state, :html)
   defp dispatch(state, "export", _args), do: do_export(state, :markdown)
   defp dispatch(state, "skills", _args), do: {:ok, do_skills(state)}
-  defp dispatch(state, "summarize", _args), do: do_summarize(state)
   defp dispatch(state, "remember", args), do: do_remember(state, args)
   defp dispatch(state, "memory", _args), do: {:ok, do_memory(state)}
   defp dispatch(state, "forget", _args), do: do_forget(state)
@@ -1070,30 +1065,6 @@ defmodule MingaEditor.Agent.SlashCommand do
       case Session.deactivate_skill(session, name) do
         :ok ->
           {:ok, emit_system_message(state, "Deactivated skill: #{name}")}
-
-        {:error, reason} ->
-          {:error, reason}
-      end
-    else
-      {:error, "No active agent session"}
-    end
-  end
-
-  @spec do_summarize(state()) :: {:ok, state()} | {:error, String.t()}
-  defp do_summarize(state) do
-    session = AgentAccess.session(state)
-
-    if is_pid(session) do
-      case Session.summarize(session) do
-        {:ok, _summary_text, path} ->
-          root = detect_project_root()
-          relative = Path.relative_to(path, root)
-
-          {:ok,
-           emit_system_message(
-             state,
-             "Context artifact saved to #{relative}\nUse @#{relative} in a new session to carry this context forward."
-           )}
 
         {:error, reason} ->
           {:error, reason}

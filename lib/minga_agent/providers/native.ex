@@ -36,7 +36,6 @@ defmodule MingaAgent.Providers.Native do
   alias Minga.Buffer
   alias MingaAgent.Compaction
   alias MingaAgent.Config, as: AgentConfig
-  alias MingaAgent.ContextArtifact
   alias MingaAgent.CostCalculator
   alias MingaAgent.Event
   alias MingaAgent.Hooks.CommandRunner
@@ -897,21 +896,6 @@ defmodule MingaAgent.Providers.Native do
 
       {:error, _result} ->
         {:reply, {:error, "compaction blocked by hook"}, state}
-    end
-  end
-
-  def handle_call(:summarize, _from, %{streaming: true} = state) do
-    {:reply, {:error, "Cannot summarize while streaming"}, state}
-  end
-
-  def handle_call(:summarize, _from, state) do
-    messages = state.context.messages
-
-    if ContextArtifact.summarizable?(messages) do
-      result = generate_and_save_summary(state, messages)
-      {:reply, result, state}
-    else
-      {:reply, {:error, "Nothing to summarize (session too short)"}, state}
     end
   end
 
@@ -2811,37 +2795,6 @@ defmodule MingaAgent.Providers.Native do
 
   # Wraps the streaming LLM client into a simpler function that returns {:ok, text}.
   # Used by the Compaction module which doesn't need streaming.
-  # Makes a synchronous LLM call (no streaming, no tool calls).
-  # Used for meta-operations like summarization.
-  @spec call_llm_sync(llm_client(), String.t(), [map()], keyword(), AgentConfig.t()) ::
-          {:ok, String.t()} | {:error, term()}
-  @spec generate_and_save_summary(state(), [map()]) ::
-          {:ok, String.t(), String.t()} | {:error, String.t()}
-  defp generate_and_save_summary(state, messages) do
-    summary_messages = messages ++ [Context.user(ContextArtifact.summary_prompt())]
-
-    case call_llm_sync(
-           state.llm_client,
-           state.model,
-           summary_messages,
-           [max_tokens: 4096],
-           state.config
-         ) do
-      {:ok, summary_text} ->
-        case ContextArtifact.save(summary_text, project_root: state.project_root) do
-          {:ok, path} -> {:ok, summary_text, path}
-          {:error, reason} -> {:error, "Summary generated but save failed: #{reason}"}
-        end
-
-      {:error, reason} ->
-        {:error, "Failed to generate summary: #{format_error(reason)}"}
-    end
-  end
-
-  defp call_llm_sync(llm_client, model, messages, opts, config) do
-    ReqLLMAdapter.call_sync(llm_client, model, messages, opts, config)
-  end
-
   @spec summary_client(llm_client(), AgentConfig.t()) :: Compaction.summary_fn()
   defp summary_client(llm_client, config) do
     ReqLLMAdapter.summary_client(llm_client, config)
