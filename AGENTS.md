@@ -896,8 +896,9 @@ The freeze lifts when all three linked epics are closed. Remove this section at 
 Agent tools live in `lib/minga_agent/tools/`. When adding or modifying a tool that reads or writes file content:
 
 1. **File tools route through `MingaAgent.ToolRouter`.** The router checks whether a buffer is open for the target path. If so, it creates a `Buffer.Fork` (lazy, on first write) for in-memory isolation. If a changeset overlay is active, it routes through that instead. Only when neither is available does it fall through to direct filesystem I/O. See [BUFFER-AWARE-AGENTS.md](docs/BUFFER-AWARE-AGENTS.md) for the design rationale.
-2. **Batch edits into a single call** rather than making N separate calls. One call = one undo entry, one version bump.
-3. **Test the tool function** in `test/minga_agent/tools/`.
+2. **Do not reintroduce session edit boundaries.** They were deleted because they were not enforced by the tool router. Use Buffer.Fork, changesets, or worktree isolation for scoped edits unless a real central enforcement path ships.
+3. **Batch edits into a single call** rather than making N separate calls. One call = one undo entry, one version bump.
+4. **Test the tool function** in `test/minga_agent/tools/`.
 
 ### New render command (requires BEAM + frontend changes)
 1. Add the opcode to `docs/protocol_schema.toml`, then run `mix protocol.gen`. Do not hand-edit generated opcode constants.
