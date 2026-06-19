@@ -17,6 +17,7 @@ defmodule Minga.RenderModel.UI.FileTree.Row do
           flags: Flags.t(),
           git_status: git_status() | nil,
           diagnostics: diagnostics(),
+          heat_level: 0..4 | nil,
           depth: non_neg_integer(),
           guides: [boolean()],
           editing: Editing.t() | nil
@@ -34,6 +35,7 @@ defmodule Minga.RenderModel.UI.FileTree.Row do
             flags: %Flags{},
             git_status: nil,
             diagnostics: {0, 0, 0, 0},
+            heat_level: nil,
             depth: 0,
             guides: [],
             editing: nil

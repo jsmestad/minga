@@ -567,6 +567,9 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             let iconColorG = data[pos]; pos += 1
             let iconColorB = data[pos]; pos += 1
 
+            guard pos + 1 <= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
+            let heatLevel = data[pos]; pos += 1
+
             entries.append(Wire.FileTreeEntry(
                 pathHash: pathHash,
                 id: id,
@@ -593,7 +596,8 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                 name: name,
                 relPath: relPath,
                 editingType: editingType,
-                editingText: editingText
+                editingText: editingText,
+                heatLevel: heatLevel
             ))
         }
 

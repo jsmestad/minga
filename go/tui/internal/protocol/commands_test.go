@@ -561,6 +561,7 @@ func TestDecodeFileTreeChromeRows(t *testing.T) {
 	row = append(row, 0xFF)
 	row = append(row, 0, 0)
 	row = append(row, 0x6D, 0x80, 0x86) // icon color (R,G,B) follows editing payload
+	row = append(row, 0xFF)             // heat level (0xFF = none) trails the row
 	body := []byte{2, 1, 3}
 	body = append(body, string16("/repo/lib")...)
 	body = append(body, string16("/repo")...)

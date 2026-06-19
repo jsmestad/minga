@@ -119,9 +119,15 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoder do
       Wire.encode_string8(row.icon),
       <<editing_type::8>>,
       Wire.encode_string16(editing_text),
-      <<icon_r::8, icon_g::8, icon_b::8>>
+      <<icon_r::8, icon_g::8, icon_b::8>>,
+      <<encode_heat_level(row.heat_level)::8>>
     ]
   end
+
+  # Familiarity/heat bucket 0..4, or 0xFF for "no decoration".
+  @spec encode_heat_level(0..4 | nil) :: non_neg_integer()
+  defp encode_heat_level(nil), do: 0xFF
+  defp encode_heat_level(level) when level in 0..4, do: level
 
   @spec clamp_diagnostics(Row.diagnostics()) :: Row.diagnostics()
   defp clamp_diagnostics({errors, warnings, info, hints}) do
