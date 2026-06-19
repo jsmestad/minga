@@ -92,6 +92,8 @@ defmodule MockServer do
   defp handle_message(%{"method" => "initialized"}) do
     if request_configuration?(), do: send_configuration_request()
     if request_unknown?(), do: send_unknown_request()
+    if show_message?(), do: send_show_message()
+    if show_message_request?(), do: send_show_message_request()
     :ok
   end
 
@@ -140,6 +142,13 @@ defmodule MockServer do
     )
   end
 
+  defp handle_message(%{"id" => "show-message-request-901"} = msg) do
+    # Echo the client's response to window/showMessageRequest back as a
+    # diagnostic so tests can assert the client replied (rather than hanging).
+    result = Map.get(msg, "result", :missing)
+    send_test_diagnostic("file:///tmp/show-message-request-test.ex", "SHOWMSG", inspect(result))
+  end
+
   defp handle_message(%{"method" => "shutdown", "id" => id}) do
     send_response(id, nil)
   end
@@ -180,6 +189,21 @@ defmodule MockServer do
     send_request("unknown-900", "mock/unknown", %{})
   end
 
+  defp send_show_message do
+    send_notification("window/showMessage", %{
+      "type" => 1,
+      "message" => "mock show message"
+    })
+  end
+
+  defp send_show_message_request do
+    send_request("show-message-request-901", "window/showMessageRequest", %{
+      "type" => 3,
+      "message" => "apply migration?",
+      "actions" => [%{"title" => "Yes"}, %{"title" => "No"}]
+    })
+  end
+
   defp send_request(id, method, params) do
     msg = %{"jsonrpc" => "2.0", "id" => id, "method" => method, "params" => params}
     write_message(msg)
@@ -200,6 +224,14 @@ defmodule MockServer do
 
   defp stderr_banner? do
     "--stderr-banner" in System.argv()
+  end
+
+  defp show_message? do
+    "--show-message" in System.argv()
+  end
+
+  defp show_message_request? do
+    "--show-message-request" in System.argv()
   end
 
   defp position_encoding do

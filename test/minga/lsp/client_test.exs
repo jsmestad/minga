@@ -20,13 +20,20 @@ defmodule Minga.LSP.ClientTest do
       MockLSPServer.server_config(
         request_configuration: Map.get(context, :request_configuration, false),
         request_unknown: Map.get(context, :request_unknown, false),
+        show_message: Map.get(context, :show_message, false),
+        show_message_request: Map.get(context, :show_message_request, false),
         position_encoding: Map.get(context, :position_encoding, "utf-8"),
         settings: server_settings
       )
 
     if Map.get(context, :request_configuration, false) or
-         Map.get(context, :request_unknown, false) do
+         Map.get(context, :request_unknown, false) or
+         Map.get(context, :show_message_request, false) do
       Minga.Events.subscribe(:diagnostics_updated)
+    end
+
+    if Map.get(context, :show_message, false) do
+      Minga.Events.subscribe(:log_message)
     end
 
     Minga.Events.subscribe(:lsp_status_changed)
@@ -222,6 +229,36 @@ defmodule Minga.LSP.ClientTest do
 
       assert diag.code == "UNKNOWN"
       assert diag.message == "-32601:Method not found: mock/unknown"
+    end
+  end
+
+  describe "window/showMessage" do
+    @tag show_message: true
+    test "routes the message to the :log_message pipeline with severity prefix" do
+      assert_receive {:minga_event, :log_message,
+                      %Minga.Events.LogMessageEvent{text: text, level: :error}},
+                     @event_timeout
+
+      assert text == "[LSP/error] mock_lsp: mock show message"
+    end
+  end
+
+  describe "window/showMessageRequest" do
+    @tag show_message_request: true
+    test "responds with null so the server does not hang", %{diag_server: diag_server} do
+      # The mock server echoes the client's response back as a diagnostic.
+      # If the client did not respond, the mock never emits this and the
+      # assert_receive times out.
+      assert_receive {:minga_event, :diagnostics_updated,
+                      %Minga.Events.DiagnosticsUpdatedEvent{
+                        uri: "file:///tmp/show-message-request-test.ex"
+                      }},
+                     @event_timeout
+
+      [diag] = Diagnostics.for_uri(diag_server, "file:///tmp/show-message-request-test.ex")
+
+      assert diag.code == "SHOWMSG"
+      assert diag.message == "nil"
     end
   end
 
