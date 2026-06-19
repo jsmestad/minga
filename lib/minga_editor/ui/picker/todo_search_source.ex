@@ -3,6 +3,11 @@ defmodule MingaEditor.UI.Picker.TodoSearchSource do
   Picker source for project TODO-style comment markers.
 
   Uses `git grep` in repositories so ignored files stay ignored, and falls back to recursive `grep` outside git repositories.
+
+  The scan is async: the picker opens immediately with a "Searching…" indicator
+  and the project-wide `git grep`/`grep` shell-out runs in a background task off
+  the editor input path, with latest-wins stale-result protection (a reopen or
+  project switch drops an older in-flight result).
   """
 
   @behaviour MingaEditor.UI.Picker.Source
@@ -30,6 +35,10 @@ defmodule MingaEditor.UI.Picker.TodoSearchSource do
   @impl true
   @spec preview?() :: boolean()
   def preview?, do: true
+
+  @impl true
+  @spec async?() :: boolean()
+  def async?, do: true
 
   @impl true
   @spec candidates(Context.t()) :: [Item.t()]
