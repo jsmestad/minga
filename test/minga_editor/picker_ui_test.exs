@@ -102,6 +102,31 @@ defmodule MingaEditor.PickerUITest do
     {state, original_buf, preview_buf}
   end
 
+  # A live-preview source used to prove that rapid typing through the input
+  # path keeps preview/selection working against a large candidate set. Each
+  # preview records the previewed item id into editor state so tests can assert
+  # the applied result still drives on_select/2.
+  defmodule LargePreviewSource do
+    @behaviour MingaEditor.UI.Picker.Source
+
+    alias MingaEditor.UI.Picker.Item
+
+    @impl true
+    def title, do: "Large preview"
+
+    @impl true
+    def candidates(_ctx), do: []
+
+    @impl true
+    def on_select(%Item{id: id}, state), do: Map.put(state, :previewed_id, id)
+
+    @impl true
+    def on_cancel(state), do: state
+
+    @impl true
+    def live_preview?, do: true
+  end
+
   defmodule NoBulkActionsSource do
     @behaviour MingaEditor.UI.Picker.Source
 
@@ -299,6 +324,150 @@ defmodule MingaEditor.PickerUITest do
 
       assert pui.source == source
       assert pui.picker.query == "fix"
+    end
+  end
+
+  describe "rapid typing against a large candidate set" do
+    # Upper bound on results the picker retains per refilter. Mirrors the
+    # @result_limit in MingaEditor.UI.Picker; the filtered list must never
+    # exceed this no matter how many candidates match, so each keystroke does a
+    # fixed amount of result-building work rather than materializing every match.
+    @result_limit 200
+
+    defp large_picker_state(source, item_count) do
+      state = TestHelpers.base_state(content: "initial")
+
+      items = for i <- 1..item_count, do: %Item{id: i, label: "config_module_#{i}.ex"}
+      picker = Picker.new(items, title: source.title(), max_visible: 10)
+
+      picker_state = %PickerState{
+        picker: picker,
+        source: source,
+        restore: state.workspace.buffers.active_index
+      }
+
+      ModalOverlay.open(state, :picker, PickerPayload.new(picker_state))
+    end
+
+    defp type_string(state, string) do
+      string
+      |> String.to_charlist()
+      |> Enum.reduce(state, fn cp, acc -> PickerUI.handle_key(acc, cp, 0) end)
+    end
+
+    test "each keystroke keeps the filtered set bounded to the result limit" do
+      state = large_picker_state(NoBulkActionsSource, 10_000)
+
+      # Type a query character-by-character through the real input path. Every
+      # intermediate query matches all 10k candidates, but the picker must keep
+      # only the bounded top-K so per-keystroke work is fixed, not O(n).
+      final =
+        Enum.reduce(["c", "co", "con", "conf", "config"], state, fn query, _acc ->
+          typed = type_string(state, query)
+          {:picker, %{picker_ui: %{picker: picker}}} = typed.shell_state.modal
+
+          assert picker.query == query
+          assert Picker.count(picker) == @result_limit
+          assert Picker.total(picker) == 10_000
+          typed
+        end)
+
+      {:picker, %{picker_ui: %{picker: picker}}} = final.shell_state.modal
+      assert Picker.count(picker) == @result_limit
+    end
+
+    test "filtered result for a huge set matches the bounded prefix of the full match order" do
+      # The input path against 10k candidates must yield exactly the bounded
+      # top-K, identical to filtering directly. This guards against the input
+      # path quietly diverging from Picker.refilter (e.g. an unbounded code path
+      # sneaking back in).
+      typed = type_string(large_picker_state(NoBulkActionsSource, 10_000), "config")
+      {:picker, %{picker_ui: %{picker: picker}}} = typed.shell_state.modal
+
+      reference =
+        for(i <- 1..10_000, do: %Item{id: i, label: "config_module_#{i}.ex"})
+        |> Picker.new()
+        |> Picker.filter("config")
+
+      assert Enum.map(picker.filtered, & &1.id) == Enum.map(reference.filtered, & &1.id)
+    end
+
+    test "input path stays bounded regardless of candidate-set size" do
+      # The work per keystroke is bounded by the result limit, not the candidate
+      # count: a 50k set produces the same number of retained results as a 1k
+      # set for an all-matching query, so typing cost does not scale with size.
+      small = type_string(large_picker_state(NoBulkActionsSource, 1_000), "config")
+      large = type_string(large_picker_state(NoBulkActionsSource, 50_000), "config")
+
+      {:picker, %{picker_ui: %{picker: small_picker}}} = small.shell_state.modal
+      {:picker, %{picker_ui: %{picker: large_picker}}} = large.shell_state.modal
+
+      assert Picker.count(small_picker) == @result_limit
+      assert Picker.count(large_picker) == @result_limit
+    end
+
+    test "rapid typing through the input path returns promptly for a large set" do
+      # Coarse catastrophe guard, not a tight latency SLA (that would be flaky on
+      # a shared runner). A full per-keystroke scan-and-sort plus per-candidate
+      # match-position computation over 20k candidates would blow well past this
+      # ceiling; bounded top-K stays far under it. Measures the whole 6-keystroke
+      # input path, then asserts a generous per-keystroke ceiling.
+      state = large_picker_state(NoBulkActionsSource, 20_000)
+      keystrokes = String.to_charlist("config")
+
+      {micros, final} =
+        :timer.tc(fn ->
+          Enum.reduce(keystrokes, state, fn cp, acc -> PickerUI.handle_key(acc, cp, 0) end)
+        end)
+
+      {:picker, %{picker_ui: %{picker: picker}}} = final.shell_state.modal
+      assert picker.query == "config"
+      assert Picker.count(picker) == @result_limit
+
+      per_keystroke_ms = micros / length(keystrokes) / 1_000
+
+      assert per_keystroke_ms < 250,
+             "per-keystroke input path took #{Float.round(per_keystroke_ms, 2)}ms against 20k candidates; expected bounded top-K to stay well under the 250ms catastrophe ceiling"
+    end
+
+    test "live preview still runs on_select for the applied result while typing a large set" do
+      state = large_picker_state(LargePreviewSource, 10_000)
+
+      typed = type_string(state, "config_module_1.ex")
+      {:picker, %{picker_ui: %{picker: picker}}} = typed.shell_state.modal
+
+      # Selection landed on a real match and preview applied on_select for it.
+      assert Picker.selected_item(picker) != nil
+      assert Map.get(typed, :previewed_id) == Picker.selected_id(picker)
+    end
+
+    test "mode switching is preserved when the first keystroke is a prefix in a large set" do
+      # Behavior preservation: typing the command prefix `>` as the first char in
+      # a switchable source still swaps sources even with a huge candidate list,
+      # rather than being swallowed into a query refilter.
+      state = large_file_picker_state(50_000)
+
+      switched = PickerUI.handle_key(state, ?>, 0)
+      {:picker, %{picker_ui: pui}} = switched.shell_state.modal
+
+      assert pui.source == MingaEditor.UI.Picker.CommandSource
+      assert pui.original_source == MingaEditor.UI.Picker.FileSource
+      assert pui.mode_prefix == ">"
+    end
+
+    defp large_file_picker_state(item_count) do
+      state = TestHelpers.base_state(content: "initial")
+
+      items = for i <- 1..item_count, do: %Item{id: "file_#{i}.ex", label: "file_#{i}.ex"}
+      picker = Picker.new(items, title: "Files", max_visible: 10)
+
+      picker_state = %PickerState{
+        picker: picker,
+        source: MingaEditor.UI.Picker.FileSource,
+        restore: state.workspace.buffers.active_index
+      }
+
+      ModalOverlay.open(state, :picker, PickerPayload.new(picker_state))
     end
   end
 end
