@@ -30,6 +30,7 @@ defmodule MingaAgent.ProjectView.Backend do
   @callback list_directory(ProjectView.t(), String.t()) ::
               {:ok, [directory_entry()]} | {:error, term()}
   @callback working_dir(ProjectView.t()) :: String.t() | {:error, term()}
+  @callback prepare_working_dir(ProjectView.t()) :: {:ok, String.t()} | {:error, term()}
   @callback command_env(ProjectView.t()) :: [{String.t(), String.t()}] | {:error, term()}
   @callback diff(ProjectView.t()) :: {:ok, [map()]} | {:error, term()}
   @callback promote(ProjectView.t(), term()) :: :ok | {:conflict, map()} | {:error, term()}
