@@ -57,6 +57,20 @@ defmodule Minga.Project.FileTreeTest do
     end
 
     @tag :tmp_dir
+    test "ignores directories from the configured file_find_excludes list", %{tmp_dir: tmp_dir} do
+      # "vendor" is in :file_find_excludes but was never in the old hardcoded
+      # @default_ignore, so this proves the tree reads the shared config.
+      assert "vendor" in Minga.Config.get(:file_find_excludes)
+      mkdir(Path.join(tmp_dir, "vendor"))
+      mkdir(Path.join(tmp_dir, "src"))
+
+      names = tmp_dir |> FileTree.new() |> names()
+
+      assert "src" in names
+      refute "vendor" in names
+    end
+
+    @tag :tmp_dir
     test "only expanded directories expose children and child depth", %{tmp_dir: tmp_dir} do
       mkdir(Path.join(tmp_dir, "lib"))
       touch(Path.join([tmp_dir, "lib", "app.ex"]))

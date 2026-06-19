@@ -51,8 +51,6 @@ defmodule Minga.Project.FileTree do
             entries: nil,
             filter: nil
 
-  @default_ignore ~w(.git _build deps node_modules .elixir_ls)
-
   # ── Construction ──────────────────────────────────────────────────────────
 
   @doc "Creates a new file tree rooted at the given directory path."
@@ -430,7 +428,7 @@ defmodule Minga.Project.FileTree do
   defp active_filter?(%__MODULE__{}), do: false
 
   @spec ignored?(String.t()) :: boolean()
-  defp ignored?(name), do: name in @default_ignore
+  defp ignored?(name), do: name in Minga.Config.get(:file_find_excludes)
 
   @spec maybe_filter_hidden([String.t()], boolean()) :: [String.t()]
   defp maybe_filter_hidden(names, true), do: names
