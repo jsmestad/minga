@@ -18,7 +18,6 @@ const query_dir = "queries/";
 pub const QueryType = enum {
     highlights,
     injections,
-    locals,
     folds,
     indents,
     textobjects,
@@ -118,7 +117,6 @@ fn queryLookup(comptime name: []const u8, comptime qtype: QueryType) ?[]const u8
     if (comptime std.mem.eql(u8, name, "ecma")) return switch (qtype) {
         .highlights => @embedFile(query_dir ++ "ecma/highlights.scm"),
         .injections => @embedFile(query_dir ++ "ecma/injections.scm"),
-        .locals => @embedFile(query_dir ++ "ecma/locals.scm"),
         .folds => @embedFile(query_dir ++ "ecma/folds.scm"),
         .indents => @embedFile(query_dir ++ "ecma/indents.scm"),
         .textobjects => @embedFile(query_dir ++ "ecma/textobjects.scm"),
@@ -138,7 +136,6 @@ fn queryLookup(comptime name: []const u8, comptime qtype: QueryType) ?[]const u8
     if (comptime std.mem.eql(u8, name, "php_only")) return switch (qtype) {
         .highlights => @embedFile(query_dir ++ "php_only/highlights.scm"),
         .injections => @embedFile(query_dir ++ "php_only/injections.scm"),
-        .locals => @embedFile(query_dir ++ "php_only/locals.scm"),
         .folds => @embedFile(query_dir ++ "php_only/folds.scm"),
         else => null,
     };
@@ -171,7 +168,6 @@ fn queryLookup(comptime name: []const u8, comptime qtype: QueryType) ?[]const u8
         .indents => @embedFile(query_dir ++ "cpp/indents.scm"),
         .textobjects => @embedFile(query_dir ++ "cpp/textobjects.scm"),
         .tags => @embedFile(query_dir ++ "cpp/tags.scm"),
-        else => null,
     };
     if (comptime std.mem.eql(u8, name, "css")) return switch (qtype) {
         .highlights => @embedFile(query_dir ++ "css/highlights.scm"),
@@ -207,7 +203,6 @@ fn queryLookup(comptime name: []const u8, comptime qtype: QueryType) ?[]const u8
         .indents => @embedFile(query_dir ++ "elixir/indents.scm"),
         .textobjects => @embedFile(query_dir ++ "elixir/textobjects.scm"),
         .tags => @embedFile(query_dir ++ "elixir/tags.scm"),
-        else => null,
     };
     if (comptime std.mem.eql(u8, name, "erlang")) return switch (qtype) {
         .highlights => @embedFile(query_dir ++ "erlang/highlights.scm"),
@@ -224,7 +219,6 @@ fn queryLookup(comptime name: []const u8, comptime qtype: QueryType) ?[]const u8
     if (comptime std.mem.eql(u8, name, "gleam")) return switch (qtype) {
         .highlights => @embedFile(query_dir ++ "gleam/highlights.scm"),
         .injections => @embedFile(query_dir ++ "gleam/injections.scm"),
-        .locals => @embedFile(query_dir ++ "gleam/locals.scm"),
         .folds => @embedFile(query_dir ++ "gleam/folds.scm"),
         .tags => @embedFile(query_dir ++ "gleam/tags.scm"),
         else => null,
@@ -274,7 +268,6 @@ fn queryLookup(comptime name: []const u8, comptime qtype: QueryType) ?[]const u8
     if (comptime std.mem.eql(u8, name, "javascript")) return switch (qtype) {
         .highlights => @embedFile(query_dir ++ "javascript/highlights.scm"),
         .injections => @embedFile(query_dir ++ "javascript/injections.scm"),
-        .locals => @embedFile(query_dir ++ "javascript/locals.scm"),
         .folds => @embedFile(query_dir ++ "javascript/folds.scm"),
         .indents => @embedFile(query_dir ++ "javascript/indents.scm"),
         .textobjects => @embedFile(query_dir ++ "javascript/textobjects.scm"),
@@ -296,7 +289,6 @@ fn queryLookup(comptime name: []const u8, comptime qtype: QueryType) ?[]const u8
     if (comptime std.mem.eql(u8, name, "lua")) return switch (qtype) {
         .highlights => @embedFile(query_dir ++ "lua/highlights.scm"),
         .injections => @embedFile(query_dir ++ "lua/injections.scm"),
-        .locals => @embedFile(query_dir ++ "lua/locals.scm"),
         .folds => @embedFile(query_dir ++ "lua/folds.scm"),
         .indents => @embedFile(query_dir ++ "lua/indents.scm"),
         .textobjects => @embedFile(query_dir ++ "lua/textobjects.scm"),
@@ -369,7 +361,6 @@ fn queryLookup(comptime name: []const u8, comptime qtype: QueryType) ?[]const u8
     };
     if (comptime std.mem.eql(u8, name, "ruby")) return switch (qtype) {
         .highlights => @embedFile(query_dir ++ "ruby/highlights.scm"),
-        .locals => @embedFile(query_dir ++ "ruby/locals.scm"),
         .folds => @embedFile(query_dir ++ "ruby/folds.scm"),
         .indents => @embedFile(query_dir ++ "ruby/indents.scm"),
         .textobjects => @embedFile(query_dir ++ "ruby/textobjects.scm"),
@@ -383,7 +374,6 @@ fn queryLookup(comptime name: []const u8, comptime qtype: QueryType) ?[]const u8
         .indents => @embedFile(query_dir ++ "rust/indents.scm"),
         .textobjects => @embedFile(query_dir ++ "rust/textobjects.scm"),
         .tags => @embedFile(query_dir ++ "rust/tags.scm"),
-        else => null,
     };
     if (comptime std.mem.eql(u8, name, "scala")) return switch (qtype) {
         .highlights => @embedFile(query_dir ++ "scala/highlights.scm"),
@@ -420,7 +410,6 @@ fn queryLookup(comptime name: []const u8, comptime qtype: QueryType) ?[]const u8
     };
     if (comptime std.mem.eql(u8, name, "tsx")) return switch (qtype) {
         .highlights => @embedFile(query_dir ++ "tsx/highlights.scm"),
-        .locals => @embedFile(query_dir ++ "tsx/locals.scm"),
         .folds => @embedFile(query_dir ++ "tsx/folds.scm"),
         .textobjects => @embedFile(query_dir ++ "tsx/textobjects.scm"),
         .tags => @embedFile(query_dir ++ "tsx/tags.scm"),
@@ -428,7 +417,6 @@ fn queryLookup(comptime name: []const u8, comptime qtype: QueryType) ?[]const u8
     };
     if (comptime std.mem.eql(u8, name, "typescript")) return switch (qtype) {
         .highlights => @embedFile(query_dir ++ "typescript/highlights.scm"),
-        .locals => @embedFile(query_dir ++ "typescript/locals.scm"),
         .folds => @embedFile(query_dir ++ "typescript/folds.scm"),
         .indents => @embedFile(query_dir ++ "typescript/indents.scm"),
         .textobjects => @embedFile(query_dir ++ "typescript/textobjects.scm"),

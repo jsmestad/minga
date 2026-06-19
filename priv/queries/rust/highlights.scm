@@ -2,7 +2,7 @@
 
 (type_identifier) @type
 (primitive_type) @type.builtin
-(field_identifier) @property
+(field_identifier) @variable.member
 
 ; Identifier conventions
 

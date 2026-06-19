@@ -56,7 +56,7 @@
 (macro_call_expr name: (var) @constant)
 (macro_call_expr name: (var) @keyword.directive args: (_) )
 (macro_call_expr name: (atom) @keyword.directive)
-(record_field_name name: (atom) @property)
+(record_field_name name: (atom) @variable.member)
 (record_name name: (atom) @type)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -93,7 +93,7 @@
 ;; record
 (record_decl name: (atom) @type)
 (record_decl name: (macro_call_expr name: (var) @constant))
-(record_field name: (atom) @property)
+(record_field name: (atom) @variable.member)
 
 ;; type alias
 

@@ -1,6 +1,6 @@
 ; CREDITS @stumash (stuart.mashaal@gmail.com)
 
-(field_expression field: (identifier) @property)
+(field_expression field: (identifier) @variable.member)
 (field_expression value: (identifier) @type
  (#match? @type "^[A-Z]"))
 

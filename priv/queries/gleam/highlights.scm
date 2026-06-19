@@ -106,7 +106,8 @@
 (string) @string
 
 ; Bit Strings
-(bit_array_segment) @string.special
+; This vendored grammar names the node `bit_string_segment`, not `bit_array_segment`
+(bit_string_segment) @string.special
 
 ; Numbers
 (integer) @number

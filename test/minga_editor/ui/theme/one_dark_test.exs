@@ -52,7 +52,11 @@ defmodule MingaEditor.UI.Theme.OneDarkTest do
     assert theme.syntax["variable"] == [fg: p.hue_5]
     assert theme.syntax["variable.parameter"] == [fg: p.mono_1]
     assert theme.syntax["parameter"] == [fg: p.mono_1]
-    assert theme.syntax["property"] == [fg: p.mono_1]
+    # Config/document keys (@property) get a visible accent distinct from the
+    # editor foreground (mono_1); code member access (@field/@variable.member)
+    # stays muted.
+    assert theme.syntax["property"] == [fg: p.hue_3]
+    refute theme.syntax["property"] == [fg: p.mono_1]
     assert theme.syntax["field"] == [fg: p.mono_1]
     assert theme.syntax["string.regex"] == [fg: p.hue_1]
     assert theme.syntax["string.special.regex"] == [fg: p.hue_1]

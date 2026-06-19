@@ -172,6 +172,31 @@ pub fn build(b: *std.Build) void {
     const run_parser_tests = b.addRunArtifact(parser_tests);
     test_step.dependOn(&run_parser_tests.step);
 
+    // ── Query/grammar compile guard ──────────────────────────────────────
+    // Dedicated, explicitly-named step that compiles every shipped tree-sitter
+    // query against its vendored grammar and fails on the first that does not
+    // compile. This catches "silent drift": a grammar bump that renames or
+    // removes a node makes `ts_query_new` return null at runtime, which only
+    // logs a warning and yields no highlights. `zig build query-check` (and
+    // CI) turn that into a hard failure. The same test also runs under
+    // `zig build test`; this step lets CI surface it by name.
+    const query_check_step = b.step("query-check", "Compile every shipped query against its grammar");
+    const query_check_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/parser_main.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+        .filters = &.{"query guard:"},
+    });
+    query_check_tests.root_module.addIncludePath(b.path("vendor/tree-sitter/include"));
+    query_check_tests.root_module.link_libc = true;
+    query_check_tests.root_module.addCSourceFile(.{ .file = b.path("src/regex_sizeof.c"), .flags = &.{"-std=c11"} });
+    query_check_tests.root_module.linkLibrary(ts_lib);
+    for (grammar_libs) |gl| query_check_tests.root_module.linkLibrary(gl);
+    const run_query_check = b.addRunArtifact(query_check_tests);
+    query_check_step.dependOn(&run_query_check.step);
+
     const hook_runner_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/hook_runner_main.zig"),

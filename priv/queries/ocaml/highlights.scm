@@ -83,7 +83,11 @@
 ; Properties
 ;-----------
 
-[(label_name) (field_name) (instance_variable_name)] @property
+; Record fields and instance variables are code member access, so they use
+; @variable.member (matching nvim-treesitter). Labels are argument labels and
+; stay on @label.
+[(field_name) (instance_variable_name)] @variable.member
+(label_name) @label
 
 ; Functions
 ;----------

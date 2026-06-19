@@ -31,6 +31,9 @@
   (reserved_directive)
 ] @keyword.directive
 
+; Mapping keys use the standard `@property` capture, the same convention
+; nvim-treesitter uses for config/document keys. Themes give `@property` a
+; visible accent so key-heavy YAML files stay readable.
 (block_mapping_pair
   key: (flow_node
     [

@@ -168,6 +168,45 @@ defmodule Minga.Parser.ManagerTest do
     end
   end
 
+  describe "config-document key highlighting" do
+    test "captures YAML mapping keys as @property" do
+      server = start_parser_manager()
+      buffer_id = 42
+      # A mapping key, a quoted value, and a comment.
+      content = "name: \"minga\" # editor\n"
+
+      :ok = Manager.subscribe(server)
+      setup_buffer(server, buffer_id, "yaml", content)
+
+      captures = receive_captures(server, buffer_id, content)
+
+      # The mapping key resolves to the standard @property capture, matching
+      # nvim-treesitter's convention for config/document keys.
+      assert {"property", "name"} in captures
+      refute Enum.any?(captures, &match?({"property.yaml", _}, &1))
+
+      # And the quoted value still resolves through the string face.
+      assert {"string", "\"minga\""} in captures
+    end
+
+    test "captures Rust struct field access as @variable.member, not @property" do
+      server = start_parser_manager()
+      buffer_id = 43
+      # `cfg.name` is code field access; it should not collide with config keys.
+      content = "fn f(cfg: Config) { let _ = cfg.name; }\n"
+
+      :ok = Manager.subscribe(server)
+      setup_buffer(server, buffer_id, "rust", content)
+
+      captures = receive_captures(server, buffer_id, content)
+
+      # Code field access uses @variable.member (matches nvim-treesitter), so it
+      # stays distinct from config-document keys that now own @property.
+      assert {"variable.member", "name"} in captures
+      refute {"property", "name"} in captures
+    end
+  end
+
   @spec replacement_delta(String.t(), String.t(), String.t()) ::
           Minga.Parser.Protocol.edit_delta()
   defp replacement_delta(content, old_text, new_text) do
@@ -189,6 +228,21 @@ defmodule Minga.Parser.ManagerTest do
       new_end_position: new_end_position,
       inserted_text: new_text
     }
+  end
+
+  # Waits for the highlight broadcast for `buffer_id` and returns a list of
+  # `{capture_name, captured_text}` tuples for the parsed `content`.
+  defp receive_captures(_server, buffer_id, content) do
+    assert_receive {:minga_highlight, {:highlight_names, ^buffer_id, names}}, 2_000
+    assert_receive {:minga_highlight, {:highlight_spans, ^buffer_id, _version, spans}}, 2_000
+
+    names = List.to_tuple(names)
+
+    Enum.map(spans, fn span ->
+      name = elem(names, span.capture_id)
+      text = binary_part(content, span.start_byte, span.end_byte - span.start_byte)
+      {name, text}
+    end)
   end
 
   defp setup_buffer(server, buffer_id, content) do

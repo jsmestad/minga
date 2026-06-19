@@ -3428,3 +3428,76 @@ test "highlighter: collectSymbols honors tags query predicates" {
     try std.testing.expectEqual(@as(usize, 1), symbols.len);
     try std.testing.expectEqualStrings("Real", symbols[0].name);
 }
+
+// ── Query/grammar compile guard ────────────────────────────────────────────
+//
+// CI guard: every shipped query must compile against its vendored grammar.
+//
+// tree-sitter's `ts_query_new` returns null (not an error code we surface) when
+// a query references a node type that does not exist in the grammar. In the
+// running editor this only logs a warning and yields no highlights for that
+// language. A grammar bump that renames or removes a node therefore ships
+// "silently broken" highlighting that no other test catches.
+//
+// This test compiles every `(grammar, query_type)` pair in `builtin_grammars`
+// against the actual linked grammar and fails if any pair does not compile,
+// printing the language, query type, byte offset, and tree-sitter error type.
+// It runs as part of `zig build test`.
+
+test "query guard: every shipped query compiles against its grammar" {
+    const QueryKind = struct {
+        label: []const u8,
+        source: ?[]const u8,
+    };
+
+    var failures: usize = 0;
+
+    inline for (builtin_grammars) |entry| {
+        if (entry.func()) |lang| {
+            const kinds = [_]QueryKind{
+                .{ .label = "highlights", .source = entry.query },
+                .{ .label = "injections", .source = entry.injection_query },
+                .{ .label = "folds", .source = entry.fold_query },
+                .{ .label = "indents", .source = entry.indent_query },
+                .{ .label = "textobjects", .source = entry.textobject_query },
+                .{ .label = "tags", .source = entry.tags_query },
+            };
+
+            for (kinds) |kind| {
+                if (kind.source) |source| {
+                    var err_off: u32 = 0;
+                    var err_type: c.TSQueryError = c.TSQueryErrorNone;
+                    const compiled = c.ts_query_new(
+                        lang,
+                        source.ptr,
+                        @intCast(source.len),
+                        &err_off,
+                        &err_type,
+                    );
+
+                    if (compiled) |q| {
+                        c.ts_query_delete(q);
+                    } else {
+                        failures += 1;
+                        std.debug.print(
+                            "QUERY GUARD FAIL: {s}/{s} did not compile (offset {d}, ts_query_error {d}). " ++
+                                "Likely a renamed/removed grammar node; fix the query or quarantine it explicitly.\n",
+                            .{ entry.name, kind.label, err_off, err_type },
+                        );
+                    }
+                }
+            }
+        } else {
+            failures += 1;
+            std.debug.print(
+                "QUERY GUARD: grammar '{s}' returned a null TSLanguage (link/ABI problem)\n",
+                .{entry.name},
+            );
+        }
+    }
+
+    if (failures != 0) {
+        std.debug.print("QUERY GUARD: {d} query/grammar compile failure(s)\n", .{failures});
+    }
+    try std.testing.expectEqual(@as(usize, 0), failures);
+}
