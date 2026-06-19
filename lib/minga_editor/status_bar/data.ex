@@ -25,6 +25,7 @@ defmodule MingaEditor.StatusBar.Data do
   alias Minga.Git.MergeConflict
   alias Minga.LSP.SyncServer
   alias MingaEditor.Shell.Traditional.Modeline
+  alias MingaAgent.StatusCommand
   alias MingaEditor.UI.Theme
   alias MingaEditor.Session.ChromeState
 
@@ -72,6 +73,7 @@ defmodule MingaEditor.StatusBar.Data do
           macro_recording: {true, String.t()} | false,
           agent_status: AgentState.status(),
           active_tool_name: String.t() | nil,
+          agent_status_command: String.t() | nil,
           agent_theme_colors: Theme.Agent.t() | nil,
           background_subagent_count: non_neg_integer(),
           active_background_subagent_label: String.t() | nil,
@@ -94,6 +96,7 @@ defmodule MingaEditor.StatusBar.Data do
           macro_recording: {true, String.t()} | false,
           agent_status: AgentState.status(),
           active_tool_name: String.t() | nil,
+          agent_status_command: String.t() | nil,
           agent_theme_colors: Theme.Agent.t() | nil,
           # Background buffer context (same fields as buffer_data)
           cursor_line: non_neg_integer(),
@@ -208,6 +211,7 @@ defmodule MingaEditor.StatusBar.Data do
       macro_recording: Minga.Editing.macro_recording_status(state),
       agent_status: agent.runtime.status,
       active_tool_name: agent.runtime.active_tool_name,
+      agent_status_command: agent_status_command_content(state, agent),
       agent_theme_colors: if(agent.runtime.status, do: Theme.agent_theme(state.theme), else: nil),
       background_subagent_count: background.count,
       active_background_subagent_label: background.label,
@@ -351,6 +355,7 @@ defmodule MingaEditor.StatusBar.Data do
       macro_recording: Minga.Editing.macro_recording_status(state),
       agent_status: agent.runtime.status,
       active_tool_name: agent.runtime.active_tool_name,
+      agent_status_command: agent_status_command_content(state, agent),
       agent_theme_colors: Theme.agent_theme(state.theme),
       # Background buffer context
       cursor_line: line,
@@ -379,6 +384,56 @@ defmodule MingaEditor.StatusBar.Data do
       merge_conflict_count: merge_conflict_count(buf)
     }
   end
+
+  @spec agent_status_command_content(EditorState.t() | map(), AgentState.t()) :: String.t() | nil
+  defp agent_status_command_content(state, agent) do
+    StatusCommand.content(agent_status_command_context(state, agent))
+  end
+
+  @spec agent_status_command_context(EditorState.t() | map(), AgentState.t()) ::
+          StatusCommand.context()
+  defp agent_status_command_context(state, agent) do
+    session = AgentAccess.session(state)
+    {session_id, session_model, workdir} = session_context(session)
+    panel = AgentAccess.panel(state)
+
+    %{
+      session_id: session_id,
+      model: model_name(panel.model_name, session_model),
+      status: agent.runtime.status,
+      workdir: workdir || File.cwd!()
+    }
+  end
+
+  @spec session_context(pid() | nil) :: {String.t() | nil, String.t() | nil, String.t() | nil}
+  defp session_context(session) when is_pid(session) do
+    case safe_session_metadata(session) do
+      %MingaAgent.SessionMetadata{} = metadata ->
+        {metadata.id, metadata.model_name, metadata.workdir}
+
+      _other ->
+        {nil, nil, nil}
+    end
+  end
+
+  defp session_context(_session), do: {nil, nil, nil}
+
+  @spec safe_session_metadata(pid()) :: term()
+  defp safe_session_metadata(session) do
+    GenServer.call(session, :metadata)
+  catch
+    :exit, _ -> nil
+  end
+
+  @spec model_name(String.t(), String.t() | nil) :: String.t()
+  defp model_name(panel_model, _session_model) when is_binary(panel_model) and panel_model != "",
+    do: panel_model
+
+  defp model_name(_panel_model, session_model)
+       when is_binary(session_model) and session_model != "",
+       do: session_model
+
+  defp model_name(_panel_model, _session_model), do: Minga.Config.get(:agent_model)
 
   @spec attach_modeline_segments(map(), Theme.t(), ModelineSegments.table()) ::
           buffer_data() | agent_data()
@@ -524,6 +579,7 @@ defmodule MingaEditor.StatusBar.Data do
       macro_recording: d.macro_recording,
       agent_status: d.agent_status,
       active_tool_name: Map.get(d, :active_tool_name),
+      agent_status_command: Map.get(d, :agent_status_command),
       agent_theme_colors: d.agent_theme_colors,
       lsp_status: d.lsp_status,
       parser_status: d.parser_status,
