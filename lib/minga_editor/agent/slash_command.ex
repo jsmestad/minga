@@ -41,9 +41,7 @@ defmodule MingaEditor.Agent.SlashCommand do
 
   @commands [
     %Command{name: "clear", description: "Start a fresh session"},
-    %Command{name: "new", description: "Start a fresh session (alias for /clear)"},
     %Command{name: "stop", description: "Abort the current agent operation"},
-    %Command{name: "abort", description: "Abort the current agent operation (alias for /stop)"},
     %Command{
       name: "thinking",
       description: "Set thinking level: /thinking [off|low|medium|high]"
@@ -95,11 +93,9 @@ defmodule MingaEditor.Agent.SlashCommand do
       description: "Generate a context artifact from this session for future use"
     },
     %Command{
-      name: "remember",
-      description: "Save a learning to persistent memory: /remember <text>"
+      name: "memory",
+      description: "Show or update memory: /memory, /memory add <text>, /memory clear"
     },
-    %Command{name: "memory", description: "Show the current memory file contents"},
-    %Command{name: "forget", description: "Clear the persistent memory file"},
     %Command{name: "branch", description: "Branch at a turn: /branch <turn_number>"},
     %Command{name: "branches", description: "List all conversation branches"},
     %Command{name: "switch", description: "Switch to a branch: /switch <branch_number>"},
@@ -339,15 +335,12 @@ defmodule MingaEditor.Agent.SlashCommand do
 
   @spec dispatch(state(), String.t(), String.t()) :: {:ok, state()} | {:error, String.t()}
   defp dispatch(state, "clear", _args), do: {:ok, do_clear(state)}
-  defp dispatch(state, "new", _args), do: {:ok, do_clear(state)}
   defp dispatch(state, "stop", _args), do: {:ok, do_stop(state)}
-  defp dispatch(state, "abort", _args), do: {:ok, do_stop(state)}
   defp dispatch(state, "thinking", args), do: {:ok, do_thinking(state, args)}
   defp dispatch(state, "model", args), do: do_model(state, args)
   defp dispatch(state, "trust", args), do: do_trust(state, args)
   defp dispatch(state, "mcp", _args), do: {:ok, do_mcp(state)}
   defp dispatch(state, "help", _args), do: {:ok, do_help(state)}
-  defp dispatch(state, "?", _args), do: {:ok, do_help(state)}
   defp dispatch(state, "plan", _args), do: do_plan(state)
   defp dispatch(state, "exec", _args), do: do_exec(state)
   defp dispatch(state, "skill:plan", _args), do: do_plan(state)
@@ -365,9 +358,7 @@ defmodule MingaEditor.Agent.SlashCommand do
   defp dispatch(state, "export", _args), do: do_export(state, :markdown)
   defp dispatch(state, "skills", _args), do: {:ok, do_skills(state)}
   defp dispatch(state, "summarize", _args), do: do_summarize(state)
-  defp dispatch(state, "remember", args), do: do_remember(state, args)
-  defp dispatch(state, "memory", _args), do: {:ok, do_memory(state)}
-  defp dispatch(state, "forget", _args), do: do_forget(state)
+  defp dispatch(state, "memory", args), do: do_memory(state, args)
   defp dispatch(state, "branch", args), do: do_branch(state, args)
   defp dispatch(state, "branches", _args), do: do_branches(state)
   defp dispatch(state, "switch", args), do: do_switch_branch(state, args)
@@ -1187,31 +1178,33 @@ defmodule MingaEditor.Agent.SlashCommand do
     end
   end
 
-  @spec do_remember(state(), String.t()) :: {:ok, state()} | {:error, String.t()}
-  defp do_remember(_state, ""), do: {:error, "Usage: /remember <text to remember>"}
+  @spec do_memory(state(), String.t()) :: {:ok, state()} | {:error, String.t()}
+  defp do_memory(state, ""), do: {:ok, emit_system_message(state, Memory.summary())}
 
-  defp do_remember(state, text) do
+  defp do_memory(state, args) do
+    args
+    |> String.trim()
+    |> String.split(" ", parts: 2)
+    |> do_memory_parts(state)
+  end
+
+  @spec do_memory_parts([String.t()], state()) :: {:ok, state()} | {:error, String.t()}
+  defp do_memory_parts(["add", text], state) when text != "" do
     case Memory.append(text) do
-      :ok ->
-        {:ok, emit_system_message(state, "Saved to memory: #{String.trim(text)}")}
-
-      {:error, reason} ->
-        {:error, "Failed to save memory: #{inspect(reason)}"}
+      :ok -> {:ok, emit_system_message(state, "Saved to memory: #{String.trim(text)}")}
+      {:error, reason} -> {:error, "Failed to save memory: #{inspect(reason)}"}
     end
   end
 
-  @spec do_memory(state()) :: state()
-  defp do_memory(state) do
-    emit_system_message(state, Memory.summary())
-  end
-
-  @spec do_forget(state()) :: {:ok, state()} | {:error, String.t()}
-  defp do_forget(state) do
+  defp do_memory_parts(["clear"], state) do
     case Memory.clear() do
       :ok -> {:ok, emit_system_message(state, "Memory cleared.")}
       {:error, reason} -> {:error, "Failed to clear memory: #{inspect(reason)}"}
     end
   end
+
+  defp do_memory_parts(_parts, _state),
+    do: {:error, "Usage: /memory, /memory add <text>, /memory clear"}
 
   @spec do_branch(state(), String.t()) :: {:ok, state()} | {:error, String.t()}
   defp do_branch(_state, ""), do: {:error, "Usage: /branch <turn_number>"}
