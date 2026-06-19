@@ -622,13 +622,14 @@ final class EditorNSView: MTKView {
     func claimFirstResponder() {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            self.reclaimFirstResponderIfNeeded()
+            self.reclaimFirstResponderIfNeeded(respectingTextInput: true)
         }
     }
 
     /// Reclaims first responder immediately when pointer interaction returns to the editor.
-    private func reclaimFirstResponderIfNeeded() {
+    func reclaimFirstResponderIfNeeded(respectingTextInput: Bool = false) {
         guard let window else { return }
+        if respectingTextInput, window.firstResponder is NSText { return }
         if window.firstResponder !== self {
             window.makeFirstResponder(self)
         }

@@ -39,6 +39,25 @@ struct MouseInputTests {
     }
 
     @MainActor
+    private func makeWindowedView(spy: SpyEncoder) -> (view: EditorNSView, window: NSWindow, textField: NSTextField)? {
+        guard let view = makeView(spy: spy) else { return nil }
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: view.frame.width, height: view.frame.height),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        let container = NSView(frame: view.frame)
+        let textField = NSTextField(frame: NSRect(x: 16, y: 16, width: 160, height: 24))
+        container.addSubview(view)
+        container.addSubview(textField)
+        window.contentView = container
+        window.makeKeyAndOrderFront(nil)
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+        return (view, window, textField)
+    }
+
+    @MainActor
     private func installPaneGeometryDivider(view: EditorNSView, dividerCol: UInt16) {
         let geometry = GUIPaneGeometry(
             windowId: 1,
@@ -86,18 +105,36 @@ struct MouseInputTests {
 
     // MARK: - Left click
 
-    @Test("mouseDown sends left button press with cell coordinates")
+    @Test("claimFirstResponder respects active text input")
+    @MainActor func claimFirstResponderRespectsActiveTextInput() throws {
+        let spy = SpyEncoder()
+        guard let (view, window, textField) = makeWindowedView(spy: spy) else { return }
+
+        #expect(window.makeFirstResponder(textField))
+        #expect(window.firstResponder is NSText)
+
+        view.reclaimFirstResponderIfNeeded(respectingTextInput: true)
+
+        #expect(window.firstResponder is NSText)
+        #expect(spy.mouseEventCalls.isEmpty)
+    }
+
+    @Test("mouseDown sends left button press and reclaims first responder")
     @MainActor func leftMouseDown() throws {
         let spy = SpyEncoder()
-        guard let view = makeView(spy: spy) else { return }
+        guard let (view, window, textField) = makeWindowedView(spy: spy) else { return }
         let cw = view.cellWidth
         let ch = view.cellHeight
+
+        #expect(window.makeFirstResponder(textField))
+        #expect(window.firstResponder is NSText)
 
         // Click at pixel (cw * 10, ch * 5) = cell (row=5, col=10)
         guard let event = mouseEvent(type: .leftMouseDown,
                                      location: NSPoint(x: cw * 10, y: ch * 5)) else { return }
         view.mouseDown(with: event)
 
+        #expect(window.firstResponder === view)
         #expect(spy.mouseEventCalls.count == 1)
         let call = spy.mouseEventCalls[0]
         #expect(call.button == MOUSE_BUTTON_LEFT)
