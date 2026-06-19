@@ -77,6 +77,14 @@ defmodule MingaEditor.UI.Theme.CaptureCoverageTest do
   )
 
   describe "every query capture resolves to a visible face" do
+    test "the enumerator finds the full distinct capture set" do
+      # The captured set is computed from a per-line parse, so an unbalanced
+      # `"` inside a comment can't pair across newlines and swallow captures.
+      # Lock the count so a future parse regression that silently drops a
+      # capture (and lets it escape the coverage guard) fails loudly here.
+      assert length(all_query_captures()) == 113
+    end
+
     test "astrodark styles all captures except its documented plain set" do
       reg = Registry.from_theme(Theme.get!(:astrodark))
       default_fg = Theme.get!(:astrodark).editor.fg
@@ -233,25 +241,33 @@ defmodule MingaEditor.UI.Theme.CaptureCoverageTest do
   defp captures_in_file(path) do
     path
     |> File.read!()
-    # Strings before comments: literal string tokens like `";"` contain a `;`,
-    # so stripping comments first would truncate the line mid-string and
-    # desync quote pairing for the rest of the file.
-    |> strip_strings()
-    |> strip_comments()
+    |> String.split("\n")
+    |> Enum.map_join("\n", &strip_line/1)
     |> then(&Regex.scan(~r/@[A-Za-z][A-Za-z0-9_.]*/, &1))
     |> Enum.map(fn [match] -> String.trim_leading(match, "@") end)
   end
 
-  defp strip_comments(text) do
-    text
-    |> String.split("\n")
-    |> Enum.map_join("\n", &Regex.replace(~r/;.*$/, &1, ""))
+  # Parse a single line: strip strings, then comments. Both run per line so an
+  # unbalanced `"` inside a `;` comment can't pair across newlines and swallow
+  # the text between them, which would let a unique capture escape the guard.
+  #
+  # Strings before comments: a literal string token like `";"` contains a `;`,
+  # so stripping comments first would truncate the line mid-string and drop a
+  # real capture that follows on the same line.
+  defp strip_line(line) do
+    line
+    |> strip_strings()
+    |> strip_comments()
+  end
+
+  defp strip_comments(line) do
+    Regex.replace(~r/;.*$/, line, "")
   end
 
   # Remove double-quoted string literals, honoring backslash escapes so a
   # literal like `"\\"` (a single escaped backslash) is consumed as one string
-  # rather than desyncing the quote pairing for the rest of the file.
-  defp strip_strings(text) do
-    Regex.replace(~r/"(?:[^"\\]|\\.)*"/, text, "")
+  # rather than desyncing the quote pairing for the rest of the line.
+  defp strip_strings(line) do
+    Regex.replace(~r/"(?:[^"\\]|\\.)*"/, line, "")
   end
 end
