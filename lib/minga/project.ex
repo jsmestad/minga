@@ -29,6 +29,7 @@ defmodule Minga.Project do
 
   alias Minga.Command
   alias Minga.Config
+  alias Minga.Git.Repo.Profile
   alias Minga.Project.Detector
 
   defstruct current_root: nil,
@@ -433,7 +434,9 @@ defmodule Minga.Project do
   @spec do_detect_and_set(t(), String.t()) :: t()
   defp do_detect_and_set(state, file_path) do
     case Detector.detect(file_path) do
-      {:ok, root, type} ->
+      {:ok, detected_root, type} ->
+        root = sparse_cone_root(detected_root, type)
+
         if root == state.current_root do
           state
         else
@@ -447,6 +450,14 @@ defmodule Minga.Project do
         state
     end
   end
+
+  # When detection falls back to the git root (no nearer marker, so `type` is
+  # `:git`) and the repo is a single-cone sparse checkout, root the project at
+  # the cone directory instead of git-root. Non-`:git` matches and non-sparse or
+  # multi-cone repos are returned unchanged.
+  @spec sparse_cone_root(String.t(), Detector.project_type()) :: String.t()
+  defp sparse_cone_root(root, :git), do: Profile.single_cone_dir(root) || root
+  defp sparse_cone_root(root, _type), do: root
 
   @spec do_record_file(t(), String.t()) :: t()
   defp do_record_file(%{current_root: nil} = state, _file_path), do: state

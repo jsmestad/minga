@@ -70,6 +70,41 @@ defmodule Minga.ProjectTest do
       assert Project.root(name) == project
     end
 
+    test "roots a single-cone sparse checkout at the cone, not git-root", %{tmp_dir: tmp} do
+      project = Path.join(tmp, "sparse_repo")
+      cone = Path.join(project, "apps/web")
+      File.mkdir_p!(cone)
+      File.write!(Path.join(cone, "main.ex"), "")
+
+      sparse_file = Path.join([project, ".git", "info", "sparse-checkout"])
+      File.mkdir_p!(Path.dirname(sparse_file))
+      File.write!(sparse_file, "/*\n!/*/\n/apps/web/\n")
+
+      {_pid, name} = start_project!()
+      # A file in the cone with no nearer marker would otherwise resolve to git-root.
+      Project.detect_and_set(name, Path.join(cone, "main.ex"))
+      flush(name)
+
+      assert Project.root(name) == cone
+    end
+
+    test "keeps git-root for a multi-cone sparse checkout", %{tmp_dir: tmp} do
+      project = Path.join(tmp, "multi_cone")
+      web = Path.join(project, "apps/web")
+      File.mkdir_p!(web)
+      File.write!(Path.join(web, "main.ex"), "")
+
+      sparse_file = Path.join([project, ".git", "info", "sparse-checkout"])
+      File.mkdir_p!(Path.dirname(sparse_file))
+      File.write!(sparse_file, "/*\n!/*/\n/apps/web/\n/apps/api/\n")
+
+      {_pid, name} = start_project!()
+      Project.detect_and_set(name, Path.join(web, "main.ex"))
+      flush(name)
+
+      assert Project.root(name) == project
+    end
+
     test "detects mix project root", %{tmp_dir: tmp} do
       project = Path.join(tmp, "mix_app")
       lib = Path.join(project, "lib")
