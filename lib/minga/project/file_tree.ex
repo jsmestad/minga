@@ -38,7 +38,8 @@ defmodule Minga.Project.FileTree do
           width: pos_integer(),
           git_status: GitStatus.status_map(),
           entries: [entry()] | nil,
-          filter: String.t() | nil
+          filter: String.t() | nil,
+          cached_files: [String.t()] | nil
         }
 
   @enforce_keys [:root]
@@ -49,7 +50,8 @@ defmodule Minga.Project.FileTree do
             width: 30,
             git_status: %{},
             entries: nil,
-            filter: nil
+            filter: nil,
+            cached_files: nil
 
   # ── Construction ──────────────────────────────────────────────────────────
 
@@ -234,6 +236,14 @@ defmodule Minga.Project.FileTree do
   def ensure_entries(%__MODULE__{entries: entries} = tree) when is_list(entries), do: tree
 
   def ensure_entries(%__MODULE__{} = tree) do
+    case cache_filter_entries(tree) do
+      entries when is_list(entries) -> %{tree | entries: entries}
+      :no_cache -> walk_entries(tree)
+    end
+  end
+
+  @spec walk_entries(t()) :: t()
+  defp walk_entries(%__MODULE__{} = tree) do
     # Span only the actual filesystem walk (the memoized path above returns
     # early), so `[:minga, :file_tree, :walk]` records real walk cost — its
     # entry count and duration — for spotting large-repo overages (#2367).
@@ -248,6 +258,93 @@ defmodule Minga.Project.FileTree do
       )
 
     %{tree | entries: entries}
+  end
+
+  @doc """
+  Attaches a cached flat list of project-relative file paths to the tree.
+
+  When set and a filter is active, `ensure_entries/1` builds the flat list of
+  matching entries from this cache in memory instead of walking the filesystem.
+  Pass `nil` to drop the cache and fall back to the filesystem walk.
+  """
+  @spec put_cached_files(t(), [String.t()] | nil) :: t()
+  def put_cached_files(%__MODULE__{} = tree, cached_files)
+      when is_list(cached_files) or is_nil(cached_files) do
+    invalidate_entries(%{tree | cached_files: cached_files})
+  end
+
+  # Builds flat filtered entries from the cached relative-path list. Returns
+  # `:no_cache` when there is no cache or no active filter, so the caller falls
+  # back to the filesystem walk (lazy, non-filtered browsing keeps walking).
+  @spec cache_filter_entries(t()) :: [entry()] | :no_cache
+  defp cache_filter_entries(%__MODULE__{cached_files: nil}), do: :no_cache
+
+  defp cache_filter_entries(%__MODULE__{cached_files: files} = tree) when is_list(files) do
+    if active_filter?(tree), do: build_cache_entries(files, tree), else: :no_cache
+  end
+
+  @spec build_cache_entries([String.t()], t()) :: [entry()]
+  defp build_cache_entries(files, %__MODULE__{filter: filter, root: root} = tree) do
+    needle = String.downcase(filter)
+
+    matches =
+      files
+      |> Enum.filter(&cache_path_matches?(&1, needle))
+      |> maybe_filter_hidden_paths(tree.show_hidden)
+      |> Enum.sort()
+
+    last_idx = length(matches) - 1
+
+    matches
+    |> Enum.with_index()
+    |> Enum.map(fn {rel_path, idx} -> cache_entry(rel_path, root, idx == last_idx) end)
+  end
+
+  @spec cache_path_matches?(String.t(), String.t()) :: boolean()
+  defp cache_path_matches?(rel_path, needle) do
+    rel_path |> String.downcase() |> String.contains?(needle)
+  end
+
+  @spec maybe_filter_hidden_paths([String.t()], boolean()) :: [String.t()]
+  defp maybe_filter_hidden_paths(paths, true), do: paths
+
+  defp maybe_filter_hidden_paths(paths, false) do
+    Enum.reject(paths, fn rel_path ->
+      rel_path |> Path.split() |> Enum.any?(&String.starts_with?(&1, "."))
+    end)
+  end
+
+  # Filtered cache matches are presented flat (depth 0, no tree guides): the
+  # filtered tree is a flat match list, not a nested expanded view (#2377).
+  @spec cache_entry(String.t(), String.t(), boolean()) :: entry()
+  defp cache_entry(rel_path, root, is_last) do
+    %{
+      path: Path.join(root, rel_path),
+      name: Path.basename(rel_path),
+      dir?: false,
+      depth: 0,
+      last_child?: is_last,
+      guides: []
+    }
+  end
+
+  @doc """
+  Computes the filtered visible entries by walking the filesystem.
+
+  Used by the async no-cache filter fallback (#2377 AC4): it runs the same walk
+  `ensure_entries/1` would, but returns just the entry list so the walk can run
+  off-process and the result be applied (or dropped if stale) later.
+  """
+  @spec filtered_walk_entries(t()) :: [entry()]
+  def filtered_walk_entries(%__MODULE__{} = tree) do
+    tree.root |> walk(0, tree, []) |> filter_entries(tree)
+  end
+
+  @doc "Replaces the cached visible entries with a precomputed list (clamps the cursor)."
+  @spec put_entries(t(), [entry()]) :: t()
+  def put_entries(%__MODULE__{} = tree, entries) when is_list(entries) do
+    max_idx = max(length(entries) - 1, 0)
+    %{tree | entries: entries, cursor: min(tree.cursor, max_idx)}
   end
 
   @doc "Refreshes the tree by rescanning the filesystem (clamps cursor)."

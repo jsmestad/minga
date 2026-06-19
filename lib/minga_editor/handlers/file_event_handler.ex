@@ -68,6 +68,11 @@ defmodule MingaEditor.Handlers.FileEventHandler do
     handle_file_changed(state, path)
   end
 
+  def handle(state, {:file_tree_filter_walk, root, filter, entries})
+      when is_binary(root) and is_binary(filter) and is_list(entries) do
+    handle_filter_walk_result(state, root, filter, entries)
+  end
+
   def handle(state, :file_tree_refresh_timer) do
     state = FileTreeFreshness.flush_refresh(state)
     {state, [{:render, 16}]}
@@ -217,5 +222,16 @@ defmodule MingaEditor.Handlers.FileEventHandler do
   defp handle_project_rebuilt(state, root) do
     state = FileTreeFreshness.update_project_root(state, root)
     {state, [{:render, 16}]}
+  end
+
+  @spec handle_filter_walk_result(EditorState.t(), String.t(), String.t(), [
+          Minga.Project.FileTree.entry()
+        ]) :: {EditorState.t(), [file_effect()]}
+  defp handle_filter_walk_result(state, root, filter, entries) do
+    file_tree =
+      EditorState.file_tree_state(state)
+      |> MingaEditor.State.FileTree.apply_filter_walk(root, filter, entries)
+
+    {EditorState.set_file_tree(state, file_tree), [{:render, 16}]}
   end
 end
