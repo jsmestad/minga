@@ -238,8 +238,23 @@ defmodule MingaEditor.Commands.FileTree do
   @doc "Starts inline file tree filtering."
   @spec filter(state()) :: state()
   def filter(state) do
-    update_file_tree(state, &FileTreeState.start_filtering/1)
+    file_tree = FileTreeState.start_filtering(file_tree_state(state))
+    maybe_spawn_filter_walk(file_tree)
+    update_file_tree(state, fn _ -> file_tree end)
   end
+
+  # Spawns the async no-cache filesystem walk when re-entering filtering carries
+  # a pre-existing filter on a root the project cache does not cover (#2377 AC4).
+  @spec maybe_spawn_filter_walk(FileTreeState.t()) :: :ok
+  defp maybe_spawn_filter_walk(%FileTreeState{tree: %FileTree{} = tree} = file_tree) do
+    if FileTreeState.needs_filter_walk?(file_tree) do
+      MingaEditor.FileTree.FilterWalk.start(tree, self())
+    end
+
+    :ok
+  end
+
+  defp maybe_spawn_filter_walk(%FileTreeState{}), do: :ok
 
   @doc "Toggles the file tree help overlay."
   @spec toggle_help(state()) :: state()

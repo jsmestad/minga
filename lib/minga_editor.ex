@@ -496,6 +496,11 @@ defmodule MingaEditor do
     {:noreply, EffectHandler.apply_effects(new_state, effects)}
   end
 
+  def handle_info({:file_tree_filter_walk, _root, _filter, _entries} = msg, state) do
+    {new_state, effects} = FileEventHandler.handle(state, msg)
+    {:noreply, EffectHandler.apply_effects(new_state, effects)}
+  end
+
   def handle_info(
         {:minga_input, {:mouse_event, row, col, button, mods, event_type, click_count}},
         state
