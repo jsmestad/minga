@@ -621,10 +621,17 @@ final class EditorNSView: MTKView {
     /// reassign first responder to its own focus system.
     func claimFirstResponder() {
         DispatchQueue.main.async { [weak self] in
-            guard let self, let window = self.window else { return }
-            if window.firstResponder !== self {
-                window.makeFirstResponder(self)
-            }
+            guard let self else { return }
+            self.reclaimFirstResponderIfNeeded(respectingTextInput: true)
+        }
+    }
+
+    /// Reclaims first responder immediately when pointer interaction returns to the editor.
+    func reclaimFirstResponderIfNeeded(respectingTextInput: Bool = false) {
+        guard let window else { return }
+        if respectingTextInput, window.firstResponder is NSText { return }
+        if window.firstResponder !== self {
+            window.makeFirstResponder(self)
         }
     }
 
@@ -1096,6 +1103,8 @@ final class EditorNSView: MTKView {
     // MARK: - Mouse
 
     override func mouseDown(with event: NSEvent) {
+        reclaimFirstResponderIfNeeded()
+
         // Scroll indicator track: intercept clicks on the right edge.
         let point = convert(event.locationInWindow, from: nil)
         if shouldCaptureScrollTrackClick(point) {
@@ -1147,6 +1156,7 @@ final class EditorNSView: MTKView {
     }
 
     override func rightMouseDown(with event: NSEvent) {
+        reclaimFirstResponderIfNeeded()
         resetCursorBlink()
         let (row, col) = cellPosition(from: event)
         let cc = UInt8(clamping: event.clickCount)
@@ -1219,6 +1229,7 @@ final class EditorNSView: MTKView {
     }
 
     override func otherMouseDown(with event: NSEvent) {
+        reclaimFirstResponderIfNeeded()
         let (row, col) = cellPosition(from: event)
         encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_MIDDLE,
                                modifiers: modifierBits(from: event.modifierFlags),

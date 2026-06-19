@@ -18,6 +18,8 @@ struct ObservatoryView: View {
             treeList
         }
         .background(theme.treeBg)
+        .focusable(false)
+        .focusEffectDisabled()
         .onAppear(perform: reconcileLocalState)
         .onChange(of: state.nodes) { _, _ in reconcileLocalState() }
     }
@@ -62,6 +64,8 @@ struct ObservatoryView: View {
                 rowMainContent(node)
             }
             .buttonStyle(.plain)
+            .focusable(false)
+            .focusEffectDisabled()
             .frame(maxWidth: .infinity, alignment: .leading)
 
             Button {
@@ -74,6 +78,8 @@ struct ObservatoryView: View {
                     .frame(width: 16)
             }
             .buttonStyle(.plain)
+            .focusable(false)
+            .focusEffectDisabled()
         }
         // 12pt per depth level (down from 14) keeps deep nodes from starving
         // the name column; the right-side memory/sparkline cluster is tightened
