@@ -37,6 +37,7 @@ defmodule Minga.Parser.Manager do
 
   alias Minga.Language.Grammar
   alias Minga.Language.Highlight.Span
+  alias Minga.Language.Registry, as: LanguageRegistry
   alias Minga.Parser.Protocol
   alias Minga.Parser.StructuralNavResult
 
@@ -367,10 +368,14 @@ defmodule Minga.Parser.Manager do
       when is_binary(language) and is_binary(source) and is_list(opts) do
     server = Keyword.get(opts, :server, __MODULE__)
 
+    # Resolve short/alternate fence labels (e.g. "js", "c++", "py3") to the
+    # canonical grammar name we ship before reading the query or parsing.
+    grammar = LanguageRegistry.canonical_grammar(language)
+
     timeout =
       normalize_highlight_timeout(Keyword.get(opts, :timeout, @default_highlight_timeout_ms))
 
-    GenServer.call(server, {:highlight_source, language, source, timeout}, timeout + 100)
+    GenServer.call(server, {:highlight_source, grammar, source, timeout}, timeout + 100)
   catch
     :exit, {:timeout, _call} ->
       :timeout
