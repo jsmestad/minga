@@ -99,6 +99,7 @@ defmodule Minga.Config.Options do
           | :agent_mention_max_file_size
           | :agent_notify_debounce
           | :agent_diagnostic_feedback
+          | :agent_react_to_lsp_errors_on_save
           | :agent_flush_before_shell
           | :confirm_quit
           | :line_spacing
@@ -336,6 +337,8 @@ defmodule Minga.Config.Options do
      "Milliseconds used to debounce repeated agent notifications."},
     {:agent_diagnostic_feedback, :boolean, true,
      "Whether diagnostics are fed back into agent context."},
+    {:agent_react_to_lsp_errors_on_save, :boolean, false,
+     "Whether the agent posts a chat suggestion when saving introduces a new LSP error."},
     {:agent_flush_before_shell, :boolean, true,
      "Whether pending agent output flushes before shell tools run."},
     {:confirm_quit, :boolean, true,
