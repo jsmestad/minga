@@ -106,24 +106,49 @@ defmodule Minga.Extension.AI do
 
   @spec run_stream(function(), String.t(), [message()], keyword(), pid(), reference()) :: :ok
   defp run_stream(client, model, messages, stream_opts, reply_to, ref) do
-    case request(client, model, messages, stream_opts) do
-      {:ok, stream_response} ->
-        case consume_stream(stream_response, reply_to, ref) do
-          {:ok, full} ->
-            case String.trim(full) do
-              "" -> send(reply_to, {:minga_ai, ref, {:error, :empty_response}})
-              text -> send(reply_to, {:minga_ai, ref, {:done, text}})
-            end
-
-          {:error, reason} ->
-            send(reply_to, {:minga_ai, ref, {:error, reason}})
-        end
-
-      {:error, reason} ->
-        send(reply_to, {:minga_ai, ref, {:error, reason}})
-    end
+    client
+    |> request(model, messages, stream_opts)
+    |> deliver_stream_result(reply_to, ref)
 
     :ok
+  end
+
+  @spec deliver_stream_result(
+          {:ok, ReqLLM.StreamResponse.t()} | {:error, error()},
+          pid(),
+          reference()
+        ) :: :ok
+  defp deliver_stream_result({:ok, stream_response}, reply_to, ref) do
+    stream_response
+    |> consume_stream(reply_to, ref)
+    |> deliver_consumed_stream(reply_to, ref)
+  end
+
+  defp deliver_stream_result({:error, reason}, reply_to, ref) do
+    send(reply_to, {:minga_ai, ref, {:error, reason}})
+    :ok
+  end
+
+  @spec deliver_consumed_stream({:ok, String.t()} | {:error, error()}, pid(), reference()) :: :ok
+  defp deliver_consumed_stream({:ok, full}, reply_to, ref) do
+    full
+    |> stream_done_event()
+    |> then(&send(reply_to, {:minga_ai, ref, &1}))
+
+    :ok
+  end
+
+  defp deliver_consumed_stream({:error, reason}, reply_to, ref) do
+    send(reply_to, {:minga_ai, ref, {:error, reason}})
+    :ok
+  end
+
+  @spec stream_done_event(String.t()) :: {:done, String.t()} | {:error, :empty_response}
+  defp stream_done_event(full) do
+    case String.trim(full) do
+      "" -> {:error, :empty_response}
+      text -> {:done, text}
+    end
   end
 
   @spec consume_stream(ReqLLM.StreamResponse.t(), pid(), reference()) ::
@@ -146,7 +171,7 @@ defmodule Minga.Extension.AI do
 
   @spec collect_text(ReqLLM.StreamResponse.t()) :: {:ok, String.t()} | {:error, error()}
   defp collect_text(stream_response) do
-    case String.trim(ReqLLM.StreamResponse.text(stream_response) || "") do
+    case stream_response |> ReqLLM.StreamResponse.text() |> String.trim() do
       "" -> {:error, :empty_response}
       text -> {:ok, text}
     end
