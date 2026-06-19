@@ -52,6 +52,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
           optional(:parser_status) => parser_status(),
           optional(:git_branch) => String.t() | nil,
           optional(:git_diff_summary) => git_diff_summary(),
+          optional(:git_degraded) => boolean(),
           optional(:diagnostic_counts) =>
             {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()} | nil,
           optional(:indent_type) => :spaces | :tabs,
@@ -105,6 +106,10 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
 
   # Nerd Font branch icon (U+E0A0)
   @branch_icon "\uE0A0"
+
+  # Warning icon for a degraded git status (results trimmed, e.g. status timeout)
+  @git_degraded_icon "\u{F071}"
+  @git_degraded_fg 0xECBE7B
 
   # Nerd Font diagnostic icons
   @diag_error_icon "\u{F057}"
@@ -568,6 +573,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
   defp build_git_segments(data, bar_bg, theme) do
     branch = Map.get(data, :git_branch)
     summary = Map.get(data, :git_diff_summary)
+    degraded? = Map.get(data, :git_degraded, false)
 
     case branch do
       nil ->
@@ -577,12 +583,19 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
         []
 
       name ->
-        [
-          {" #{@branch_icon} #{name}", theme.modeline.info_fg, bar_bg, [], nil}
-          | build_diff_stat_segments(summary, bar_bg, theme.git)
-        ]
+        [{" #{@branch_icon} #{name}", theme.modeline.info_fg, bar_bg, [], nil}] ++
+          build_diff_stat_segments(summary, bar_bg, theme.git) ++
+          build_git_degraded_segments(degraded?, bar_bg)
     end
   end
+
+  # Visible indicator that the cached git status is degraded (e.g. it timed out
+  # on a huge full checkout, so untracked or other changes may be missing).
+  @spec build_git_degraded_segments(boolean(), non_neg_integer()) :: [render_segment()]
+  defp build_git_degraded_segments(true, bar_bg),
+    do: [{" #{@git_degraded_icon}", @git_degraded_fg, bar_bg, [bold: true], nil}]
+
+  defp build_git_degraded_segments(false, _bar_bg), do: []
 
   @spec build_diff_stat_segments(git_diff_summary(), non_neg_integer(), Theme.Git.t()) :: [
           render_segment()
