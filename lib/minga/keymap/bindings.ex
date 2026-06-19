@@ -7,6 +7,18 @@ defmodule Minga.Keymap.Bindings do
   Nodes may simultaneously be a prefix and a command (e.g. `g` could be a
   command and also prefix for `gg`).
 
+  ## Prefix/command overlap and dispatch order
+
+  A single node can carry both a command and child sequences. When that
+  overlap exists, **the short binding wins at dispatch time**: live dispatch
+  fires the command as soon as the prefix key is pressed, so the longer
+  sequences underneath it become unreachable. There is no ambiguity timeout.
+
+  Because this is an easy config foot-gun (binding `g` silently kills `gg`,
+  `gd`, …), `bind/4` emits a `Logger.warning/1` whenever a new binding
+  shadows, or is shadowed by, existing sequences. The trie still stores both
+  bindings; the warning just makes the dead sequences visible at bind time.
+
   ## Key representation
 
   A key is a `{codepoint, modifiers}` tuple where `codepoint` is the Unicode
@@ -91,8 +103,14 @@ defmodule Minga.Keymap.Bindings do
       :not_found
   """
   @spec bind(node_t(), [key()], atom() | tuple(), String.t()) :: node_t()
-  def bind(%Node{children: children} = root, [key | rest], command, description)
+  def bind(%Node{} = root, [_ | _] = keys, command, description)
       when (is_atom(command) or is_tuple(command)) and is_binary(description) do
+    warn_on_overlap(root, keys, command)
+    do_bind(root, keys, command, description)
+  end
+
+  @spec do_bind(node_t(), [key()], atom() | tuple(), String.t()) :: node_t()
+  defp do_bind(%Node{children: children} = root, [key | rest], command, description) do
     child = Map.get(children, key, new())
 
     updated_child =
@@ -101,11 +119,82 @@ defmodule Minga.Keymap.Bindings do
           %{child | command: command, description: description}
 
         _ ->
-          bind(child, rest, command, description)
+          do_bind(child, rest, command, description)
       end
 
     %{root | children: Map.put(children, key, updated_child)}
   end
+
+  # Detects the prefix/command overlap foot-gun and warns once at bind time.
+  # Two shapes matter:
+  #   * short-then-long: the new binding lands on a node that already has
+  #     children, so its longer sequences become unreachable.
+  #   * long-then-short: the new (longer) sequence passes through an existing
+  #     command-bearing node, which already shadows it.
+  # The trie still records both bindings; "short binding wins" at dispatch.
+  @spec warn_on_overlap(node_t(), [key()], atom() | tuple()) :: :ok
+  defp warn_on_overlap(root, keys, command) do
+    case overlap(root, keys) do
+      {:shadows_longer, existing} ->
+        Minga.Log.warning(
+          :config,
+          "Keymap: binding #{inspect(command)} to #{format_keys(keys)} shadows " <>
+            "longer sequence(s) under that prefix (e.g. #{format_keys(existing)}); " <>
+            "the longer sequence(s) will be unreachable because the short binding wins."
+        )
+
+      {:shadowed_by_shorter, existing_keys, existing_command} ->
+        Minga.Log.warning(
+          :config,
+          "Keymap: binding #{inspect(command)} to #{format_keys(keys)} is shadowed by " <>
+            "existing command #{inspect(existing_command)} on prefix #{format_keys(existing_keys)}; " <>
+            "the longer sequence will be unreachable because the short binding wins."
+        )
+
+      :none ->
+        :ok
+    end
+  end
+
+  # Walks the new key path against the current trie. Returns the first overlap
+  # found, or :none. `acc` is the path consumed so far (reversed).
+  @spec overlap(node_t(), [key()], [key()]) ::
+          {:shadows_longer, [key()]}
+          | {:shadowed_by_shorter, [key()], atom() | tuple()}
+          | :none
+  defp overlap(node, keys, acc \\ [])
+
+  # Last key of the new binding: it shadows anything already nested below it.
+  defp overlap(node, [key], acc) do
+    case Map.fetch(node.children, key) do
+      {:ok, %Node{children: children}} when map_size(children) > 0 ->
+        {:shadows_longer, Enum.reverse([first_child_key(children), key | acc])}
+
+      _ ->
+        :none
+    end
+  end
+
+  # Intermediate key: if an existing command sits on this node, the longer
+  # new sequence is shadowed by it.
+  defp overlap(node, [key | rest], acc) do
+    case Map.fetch(node.children, key) do
+      {:ok, %Node{command: nil} = child} ->
+        overlap(child, rest, [key | acc])
+
+      {:ok, %Node{command: command}} ->
+        {:shadowed_by_shorter, Enum.reverse([key | acc]), command}
+
+      :error ->
+        :none
+    end
+  end
+
+  @spec first_child_key(%{key() => node_t()}) :: key()
+  defp first_child_key(children), do: children |> Map.keys() |> hd()
+
+  @spec format_keys([key()]) :: String.t()
+  defp format_keys(keys), do: keys |> Enum.map_join(" ", &format_key/1)
 
   @doc """
   Looks up a single key in the trie.
@@ -249,10 +338,13 @@ defmodule Minga.Keymap.Bindings do
   end
 
   def lookup_sequence(node, [key | rest]) do
-    case lookup(node, key) do
-      {:prefix, child} -> lookup_sequence(child, rest)
-      {:command, _} -> :not_found
-      :not_found -> :not_found
+    # Fetch the child node directly rather than via lookup/2, which collapses a
+    # node that has both a command and children into {:command, _}. A
+    # command-bearing intermediate node can still be a prefix for longer
+    # sequences, so keep walking through it.
+    case Map.fetch(node.children, key) do
+      {:ok, child} -> lookup_sequence(child, rest)
+      :error -> :not_found
     end
   end
 
