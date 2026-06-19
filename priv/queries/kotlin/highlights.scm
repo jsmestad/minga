@@ -177,7 +177,8 @@
 ] @number
 
 [
-  (null_literal)
+  ; `null` is an anonymous keyword in this grammar, not a `null_literal` node
+  "null"
   ; should be highlighted the same as booleans
   (boolean_literal)
 ] @boolean
@@ -347,7 +348,7 @@
   "as"
   "as?"
   ".."
-  "..<"
+  ; `..<` (rangeUntil) is not a token in this vendored grammar
   "->"
 ] @operator
 

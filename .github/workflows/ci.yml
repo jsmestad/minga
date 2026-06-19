@@ -285,6 +285,9 @@ jobs:
       - name: Run Zig tests
         run: cd zig && zig build test
 
+      - name: Check tree-sitter queries compile against grammars
+        run: cd zig && zig build query-check
+
   test-go-tui:
     name: Test (Go TUI)
     runs-on: ubuntu-latest
