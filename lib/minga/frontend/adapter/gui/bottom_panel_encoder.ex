@@ -22,7 +22,7 @@ defmodule Minga.Frontend.Adapter.GUI.BottomPanelEncoder do
   #   visible: opcode + visible=1(1) + active_tab_index(1) + height_percent(1)
   #            + filter(1) + tab_count(1) + tab_defs... + content
   #   tab_def: tab_type(1) + name_len(1) + name
-  #   content: entry_count(2) + entries...
+  #   content: stream_instance(4) + entry_count(2) + entries...
   #   entry: id(4) + level(1) + subsystem(1) + ts_secs(4)
   #          + path_len(2) + path + text_len(2) + text
   #   hidden: opcode + visible=0(1)
@@ -41,11 +41,11 @@ defmodule Minga.Frontend.Adapter.GUI.BottomPanelEncoder do
       <<@op_gui_bottom_panel, 1, model.active_tab_index::8, model.height_percent::8,
         model.filter_byte::8, length(model.tabs)::8, tab_defs::binary>>
 
-    header <> encode_messages(model.messages)
+    header <> encode_messages(model.stream_instance, model.messages)
   end
 
-  @spec encode_messages([BottomPanel.MessageEntry.t()]) :: binary()
-  defp encode_messages(entries) do
+  @spec encode_messages(non_neg_integer(), [BottomPanel.MessageEntry.t()]) :: binary()
+  defp encode_messages(stream_instance, entries) do
     entry_data =
       for entry <- entries, into: <<>> do
         path_bytes = entry.file_path || ""
@@ -55,6 +55,6 @@ defmodule Minga.Frontend.Adapter.GUI.BottomPanelEncoder do
           entry.text::binary>>
       end
 
-    <<length(entries)::16, entry_data::binary>>
+    <<stream_instance::32, length(entries)::16, entry_data::binary>>
   end
 end

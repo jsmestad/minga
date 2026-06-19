@@ -10,6 +10,7 @@ defmodule Minga.RenderModel.UI.BottomPanelTest do
 
       refute panel.visible?
       assert panel.tabs == []
+      assert panel.stream_instance == 0
       assert panel.messages == []
     end
 
@@ -19,6 +20,7 @@ defmodule Minga.RenderModel.UI.BottomPanelTest do
         active_tab_index: 0,
         height_percent: 30,
         filter_byte: 1,
+        stream_instance: 12,
         tabs: [{0x01, "Messages"}],
         messages: [
           %MessageEntry{id: 1, level_byte: 1, subsystem_byte: 0, ts_secs: 10, text: "hi"}
@@ -26,6 +28,7 @@ defmodule Minga.RenderModel.UI.BottomPanelTest do
       }
 
       assert [{0x01, "Messages"}] = panel.tabs
+      assert panel.stream_instance == 12
       assert [%MessageEntry{id: 1, text: "hi"}] = panel.messages
     end
   end

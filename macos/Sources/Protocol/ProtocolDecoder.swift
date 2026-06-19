@@ -1495,15 +1495,16 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             pos += nameLen
             tabs.append(Wire.BottomPanelTab(tabType: tabType, name: name))
         }
-        // Content payload: entry_count(2) + entries...
+        // Messages content payload: stream_instance(4) + entry_count(2) + entries...
         var entries: [Wire.MessageEntry] = []
-        guard data.count >= pos + 2 else {
+        guard data.count >= pos + 6 else {
             return (.guiBottomPanel(visible: true, activeTabIndex: activeTabIndex,
                                      heightPercent: heightPercent, filterPreset: filterPreset,
                                      tabs: tabs, entries: []), pos - offset)
         }
-        let entryCount = Int(readU16(data, pos))
-        pos += 2
+        let streamInstance = readU32(data, pos)
+        let entryCount = Int(readU16(data, pos + 4))
+        pos += 6
         for _ in 0..<entryCount {
             // id(4) + level(1) + subsystem(1) + timestamp_secs(4) + path_len(2)
             guard data.count >= pos + 12 else { break }
@@ -1523,7 +1524,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             guard data.count >= pos + textLen else { break }
             let text = String(data: data[pos..<(pos + textLen)], encoding: .utf8) ?? ""
             pos += textLen
-            entries.append(Wire.MessageEntry(id: entryId, level: level, subsystem: subsystem,
+            entries.append(Wire.MessageEntry(streamInstance: streamInstance, id: entryId, level: level, subsystem: subsystem,
                                             timestampSecs: tsSecs, filePath: filePath, text: text))
         }
         return (.guiBottomPanel(visible: true, activeTabIndex: activeTabIndex,

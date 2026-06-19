@@ -3,6 +3,16 @@ defmodule MingaEditor.UI.Panel.MessageStoreTest do
 
   alias MingaEditor.UI.Panel.MessageStore
 
+  describe "new/0" do
+    test "assigns a producer stream instance for restart-safe frontend identity" do
+      first = MessageStore.new()
+      second = MessageStore.new()
+
+      assert first.stream_instance > 0
+      assert second.stream_instance > first.stream_instance
+    end
+  end
+
   describe "append/4" do
     test "adds an entry with auto-incrementing id" do
       store =

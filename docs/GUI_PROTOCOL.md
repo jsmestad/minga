@@ -574,7 +574,7 @@ Filter preset values:
   0x00 = none (user controls filters), 0x01 = warnings (preset to warnings+errors)
 
 Messages content_payload (when active tab is messages):
-  entry_count(2) + entries...
+  stream_instance(4) + entry_count(2) + entries...
 
 Per entry:
   id(4) + level(1) + subsystem(1) + timestamp_secs(4) + path_len(2) + path(path_len) + text_len(2) + text(text_len)
@@ -582,7 +582,7 @@ Per entry:
 Level bytes: 0=debug, 1=info, 2=warning, 3=error
 Subsystem bytes: 0=editor, 1=lsp, 2=parser, 3=git, 4=render, 5=agent, 6=zig, 7=gui
 
-Entries are sent incrementally: the BEAM tracks the last sent ID and only sends new entries each frame. On first connection (or reconnect), all entries are sent.
+Entries are sent incrementally: the BEAM tracks the last sent ID and only sends new entries each frame. `stream_instance` is a producer-assigned u32 that changes when the Messages producer is recreated, and frontends compose row identity from `(stream_instance, id)`. On first connection (or reconnect), all entries are sent.
 
 When hidden:
   opcode(1) + 0(1)

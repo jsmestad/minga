@@ -14,7 +14,8 @@ version = "2.0.0"
 # bracket every frame. See docs/PROTOCOL.md.
 # protocol_version 4 adds the gui_file_tree row heat_level byte for extension-owned
 # familiarity tinting. This changes the hand-decoded file-tree row payload.
-protocol_version = 4
+# protocol_version 5 adds producer-assigned stream_instance to the Messages stream.
+protocol_version = 5
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -464,6 +465,7 @@ value = 0x7B
 direction = "beam_to_frontend"
 framing = "sectioned"
 
+# Custom payload includes the Messages stream header stream_instance:u32 before entry_count when visible.
 [[opcodes]]
 category = "gui_chrome"
 name = "gui_bottom_panel"

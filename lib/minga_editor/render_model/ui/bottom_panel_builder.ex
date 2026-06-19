@@ -44,11 +44,18 @@ defmodule MingaEditor.RenderModel.UI.BottomPanelBuilder do
       active_tab_index: active_index,
       height_percent: panel.height_percent,
       filter_byte: EditorPanel.filter_byte(panel.filter),
+      stream_instance: message_stream_instance(store),
       tabs: tabs
     }
 
     resolve_content(panel.active_tab, base, store)
   end
+
+  @spec message_stream_instance(term()) :: non_neg_integer()
+  defp message_stream_instance(%MessageStore{stream_instance: stream_instance}),
+    do: stream_instance
+
+  defp message_stream_instance(_store), do: 0
 
   @spec resolve_content(atom(), BottomPanel.t(), term()) :: {BottomPanel.t(), term()}
   defp resolve_content(:messages, base, store) do

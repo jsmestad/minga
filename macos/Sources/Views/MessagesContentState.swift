@@ -7,16 +7,9 @@ import SwiftUI
 
 /// A rendered message entry for display in the Messages tab.
 ///
-/// SwiftUI identity is `id`, a `(streamGeneration, seq)` composite, NOT the raw
-/// backend sequence number (`seq`). The BEAM `MessageStore` restarts its
-/// sequence at 1 whenever the backend restarts (or resends), so using `seq`
-/// alone as `ForEach`/scroll identity produced duplicate IDs across restarts
-/// (issue #2353). `MessagesContentState` bumps the generation when it sees a
-/// sequence go backwards, keeping every row's identity unique.
+/// SwiftUI identity is `id`, a `(streamInstance, seq)` composite carried by the wire contract, NOT the raw backend sequence number (`seq`).
 struct MessageEntry: Identifiable, Equatable {
-    /// Restart-safe composite identity: `(UInt64(generation) << 32) | seq`.
-    /// Static fixtures (previews/tests) may pass a small raw sequence directly;
-    /// that is just generation 0, where the composite equals the sequence.
+    /// Restart-safe composite identity: `(UInt64(streamInstance) << 32) | seq`.
     let id: UInt64
     let level: UInt8
     let subsystem: UInt8
@@ -25,14 +18,11 @@ struct MessageEntry: Identifiable, Equatable {
     let text: String
 
     /// Raw backend sequence number for this entry (the low 32 bits of `id`).
-    /// Resets to 1 on a backend restart; the generation in the high bits keeps
-    /// `id` unique even when `seq` repeats.
     var seq: UInt32 { UInt32(id & 0xFFFF_FFFF) }
 
-    /// Builds the restart-safe composite identity from a stream generation and
-    /// a backend sequence number.
-    static func makeID(generation: UInt32, seq: UInt32) -> UInt64 {
-        (UInt64(generation) << 32) | UInt64(seq)
+    /// Builds the restart-safe composite identity from a producer stream instance and a backend sequence number.
+    static func makeID(streamInstance: UInt32, seq: UInt32) -> UInt64 {
+        (UInt64(streamInstance) << 32) | UInt64(seq)
     }
 
     /// Compact timestamp as HH:MM:SS.
@@ -213,34 +203,11 @@ final class MessagesContentState {
     /// Maximum entries to keep (matches BEAM-side cap).
     private let maxEntries = 1000
 
-    /// Current stream generation. Bumped whenever an incoming backend sequence
-    /// number is not greater than the last one seen, which happens when the BEAM
-    /// backend restarts (sequence resets to 1) or resends earlier IDs.
-    private var streamGeneration: UInt32 = 0
-    /// The last backend sequence number appended, or nil before any entry.
-    private var lastSeq: UInt32?
-    /// Composite IDs currently present, for defensive dedupe (issue #2353).
-    private var presentIDs: Set<UInt64> = []
-
     /// Append new entries from the protocol decoder.
-    ///
-    /// Each entry is given a restart-safe composite identity. When a backend
-    /// sequence number does not advance (`raw.id <= lastSeq`), the stream
-    /// generation is bumped so the repeated/reset sequence lands in a fresh
-    /// namespace and never collides with an already-displayed row.
     func appendEntries(_ rawEntries: [Wire.MessageEntry]) {
         for raw in rawEntries {
-            if let last = lastSeq, raw.id <= last {
-                streamGeneration &+= 1
-            }
-            lastSeq = raw.id
-
-            let id = MessageEntry.makeID(generation: streamGeneration, seq: raw.id)
-            // Defensive dedupe: never emit a duplicate SwiftUI identity.
-            if presentIDs.contains(id) { continue }
-
             let entry = MessageEntry(
-                id: id,
+                id: MessageEntry.makeID(streamInstance: raw.streamInstance, seq: raw.id),
                 level: raw.level,
                 subsystem: raw.subsystem,
                 timestampSecs: raw.timestampSecs,
@@ -248,13 +215,9 @@ final class MessagesContentState {
                 text: raw.text
             )
             entries.append(entry)
-            presentIDs.insert(id)
         }
-        // Trim to max, keeping the dedupe set in sync with the retained window.
         if entries.count > maxEntries {
-            let overflow = entries.count - maxEntries
-            for dropped in entries.prefix(overflow) { presentIDs.remove(dropped.id) }
-            entries.removeFirst(overflow)
+            entries.removeFirst(entries.count - maxEntries)
         }
         // Signal new entries for auto-scroll or "jump to latest"
         if !isAutoScrolling {

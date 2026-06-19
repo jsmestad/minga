@@ -802,6 +802,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       # Tab: type=0 (messages), name="Messages"
       tab = <<0::8, 8::8, "Messages"::binary>>
 
+      # Content: stream_instance(4) + entry_count(2) + entries...
       # Entry: id(4) + level(1) + subsystem(1) + timestamp(4) + path_len(2) + path + text_len(2) + text
       path = "lib/editor.ex"
       text = "File opened"
@@ -811,7 +812,7 @@ defmodule Minga.Integration.GUIProtocolTest do
           text::binary>>
 
       cmd =
-        <<0x7C, 1::8, 0::8, 30::8, 0::8, 1::8, tab::binary, 1::16, entry::binary>>
+        <<0x7C, 1::8, 0::8, 30::8, 0::8, 1::8, tab::binary, 7::32, 1::16, entry::binary>>
 
       Port.command(port, cmd)
 

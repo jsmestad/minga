@@ -542,6 +542,7 @@ enum Wire {
 
     /// A structured log entry from the Messages tab content.
     struct MessageEntry: Sendable {
+        let streamInstance: UInt32
         let id: UInt32
         let level: UInt8
         let subsystem: UInt8

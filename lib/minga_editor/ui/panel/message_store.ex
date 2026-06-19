@@ -22,12 +22,20 @@ defmodule MingaEditor.UI.Panel.MessageStore do
   @type t :: %__MODULE__{
           entries: [Entry.t()],
           next_id: pos_integer(),
-          last_sent_id: non_neg_integer()
+          last_sent_id: non_neg_integer(),
+          stream_instance: pos_integer()
         }
 
   defstruct entries: [],
             next_id: 1,
-            last_sent_id: 0
+            last_sent_id: 0,
+            stream_instance: 1
+
+  @doc "Creates a message stream with a producer-assigned restart instance."
+  @spec new() :: t()
+  def new do
+    %__MODULE__{stream_instance: System.unique_integer([:monotonic, :positive])}
+  end
 
   @doc "Append a structured log entry. Trims to #{@max_entries} entries."
   @spec append(t(), String.t(), level(), subsystem()) :: t()
