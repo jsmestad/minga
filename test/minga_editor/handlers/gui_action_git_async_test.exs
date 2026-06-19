@@ -15,93 +15,160 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
   # assert dispatch/apply behavior, not real git side effects.
   defmodule FakeGit do
     @moduledoc false
+
     @spec root_for(String.t()) :: {:ok, String.t()}
     def root_for(root), do: {:ok, root}
+
     @spec stage(String.t(), String.t()) :: :ok
     def stage(_root, _path), do: :ok
+
     @spec unstage(String.t(), String.t()) :: :ok
     def unstage(_root, _path), do: :ok
+
     @spec unstage_all(String.t()) :: :ok
     def unstage_all(_root), do: :ok
+
     @spec discard(String.t(), String.t()) :: :ok
     def discard(_root, _path), do: :ok
-    @spec commit(String.t(), String.t(), keyword()) :: {:ok, String.t()}
-    def commit(_root, _message, _opts), do: {:ok, "abc1234"}
+
+    @spec commit(String.t(), String.t(), keyword()) :: {:ok, String.t()} | {:error, String.t()}
+    def commit(root, message, opts) do
+      send(test_pid(), {:fake_git_commit, root, message, opts})
+
+      case {message, opts} do
+        {"fail commit", []} -> {:error, "boom commit"}
+        {"fail amend", [amend: true]} -> {:error, "boom amend"}
+        _ -> {:ok, "abc1234"}
+      end
+    end
+
+    @spec test_pid() :: pid()
+    defp test_pid do
+      Application.fetch_env!(:minga, :git_test_pid)
+    end
   end
 
   setup do
-    previous = Application.get_env(:minga, :git_module)
+    previous_git_module = Application.get_env(:minga, :git_module)
+    previous_test_pid = Application.get_env(:minga, :git_test_pid)
+
     Application.put_env(:minga, :git_module, FakeGit)
+    Application.put_env(:minga, :git_test_pid, self())
 
     table = Module.concat(__MODULE__, "Sidebar#{System.unique_integer([:positive])}")
     start_supervised!({Sidebar, name: table, notify: false})
 
     on_exit(fn ->
-      case previous do
-        nil -> Application.delete_env(:minga, :git_module)
-        mod -> Application.put_env(:minga, :git_module, mod)
-      end
+      restore_env(:git_module, previous_git_module)
+      restore_env(:git_test_pid, previous_test_pid)
     end)
 
     %{state: TestHelpers.base_state(sidebar_registry: table)}
   end
 
-  test "git stage shows a pending status and offloads the work", %{state: state} do
-    new_state = GuiActionHandler.dispatch(state, {:git_stage_file, "lib/foo.ex"})
-
-    # Pending, NOT the completed "Staged ..." — the command did not run inline.
-    assert EditorState.status_msg(new_state) == "Staging lib/foo.ex…"
-    assert map_size(new_state.async_actions) == 1
-
-    # The result arrives as an async message (ran in a Task), tagged for the lane.
-    assert_receive {:async_action_result, :git_worktree, _token,
-                    {:ok, "Staged lib/foo.ex", _git_root}}
-  end
-
-  test "git discard offloads too", %{state: state} do
-    new_state = GuiActionHandler.dispatch(state, {:git_discard_file, "lib/bar.ex"})
-
-    assert EditorState.status_msg(new_state) == "Discarding lib/bar.ex…"
-    assert_receive {:async_action_result, :git_worktree, _token, {:ok, "Discarded lib/bar.ex", _}}
-  end
-
-  test "git commit returns control immediately with a pending status", %{state: state} do
+  test "git commit forwards message, keeps amend off, and applies the async result", %{
+    state: state
+  } do
     new_state = GuiActionHandler.dispatch(state, {:git_commit, "fix the thing"})
 
-    # Pending, NOT the completed "Committed …" — git commit did not run inline.
     assert EditorState.status_msg(new_state) == "Committing…"
     assert map_size(new_state.async_actions) == 1
+    assert_receive {:fake_git_commit, _root, "fix the thing", []}
 
-    # The result arrives async (ran in a Task) and carries the commit hash so the
-    # success message can name it; this proves control returned before it applied.
-    assert_receive {:async_action_result, :git_worktree, _token,
-                    {:ok, "Committed abc1234", _git_root}}
+    assert_receive {:async_action_result, :git_worktree, token,
+                    {:ok, "Committed abc1234", git_root}}
+
+    applied_state =
+      apply_async_result(
+        new_state,
+        {:async_action_result, :git_worktree, token, {:ok, "Committed abc1234", git_root}}
+      )
+
+    assert EditorState.status_msg(applied_state) == "Committed abc1234"
+    assert applied_state.async_actions == %{}
   end
 
-  test "git amend offloads and reports the amended hash", %{state: state} do
+  test "git amend forwards amend: true and applies the async result", %{state: state} do
     new_state = GuiActionHandler.dispatch(state, {:git_commit, "reword", true})
 
     assert EditorState.status_msg(new_state) == "Amending…"
-    assert_receive {:async_action_result, :git_worktree, _token, {:ok, "Amended abc1234", _}}
+    assert_receive {:fake_git_commit, _root, "reword", [amend: true]}
+
+    assert_receive {:async_action_result, :git_worktree, token,
+                    {:ok, "Amended abc1234", git_root}}
+
+    applied_state =
+      apply_async_result(
+        new_state,
+        {:async_action_result, :git_worktree, token, {:ok, "Amended abc1234", git_root}}
+      )
+
+    assert EditorState.status_msg(applied_state) == "Amended abc1234"
+    assert applied_state.async_actions == %{}
   end
 
-  test "a stale git commit result is ignored when a newer action superseded it",
-       %{state: state} do
-    # First commit goes in-flight on the :git_worktree lane.
-    state = GuiActionHandler.dispatch(state, {:git_commit, "first"})
-    stale_token = state.async_actions[:git_worktree].running
+  test "git commit failure preserves the legacy failure status", %{state: state} do
+    new_state = GuiActionHandler.dispatch(state, {:git_commit, "fail commit"})
 
-    # A second worktree action supersedes it: advancing past the first op (as the
-    # editor does once its result is applied) starts the second under a fresh
-    # token, so the first op's token is no longer current.
+    assert EditorState.status_msg(new_state) == "Committing…"
+    assert_receive {:fake_git_commit, _root, "fail commit", []}
+
+    assert_receive {:async_action_result, :git_worktree, token,
+                    {:error, "boom commit", git_root, "Commit failed: boom commit"}}
+
+    applied_state =
+      apply_async_result(
+        new_state,
+        {:async_action_result, :git_worktree, token,
+         {:error, "boom commit", git_root, "Commit failed: boom commit"}}
+      )
+
+    assert EditorState.status_msg(applied_state) == "Commit failed: boom commit"
+    assert applied_state.async_actions == %{}
+  end
+
+  test "git amend failure preserves the legacy failure status", %{state: state} do
+    new_state = GuiActionHandler.dispatch(state, {:git_commit, "fail amend", true})
+
+    assert EditorState.status_msg(new_state) == "Amending…"
+    assert_receive {:fake_git_commit, _root, "fail amend", [amend: true]}
+
+    assert_receive {:async_action_result, :git_worktree, token,
+                    {:error, "boom amend", git_root, "Amend failed: boom amend"}}
+
+    applied_state =
+      apply_async_result(
+        new_state,
+        {:async_action_result, :git_worktree, token,
+         {:error, "boom amend", git_root, "Amend failed: boom amend"}}
+      )
+
+    assert EditorState.status_msg(applied_state) == "Amend failed: boom amend"
+    assert applied_state.async_actions == %{}
+  end
+
+  test "a stale git commit result is ignored by the editor handler", %{state: state} do
+    state = GuiActionHandler.dispatch(state, {:git_commit, "first"})
+    assert_receive {:fake_git_commit, _root, "first", []}
+
+    assert_receive {:async_action_result, :git_worktree, stale_token,
+                    {:ok, "Committed abc1234", stale_git_root}}
+
     state = GuiActionHandler.dispatch(state, {:git_discard_file, "lib/bar.ex"})
     state = AsyncAction.advance(state, :git_worktree)
-    fresh_token = state.async_actions[:git_worktree].running
+    current_status = EditorState.status_msg(state)
+    current_async_actions = state.async_actions
 
-    refute stale_token == fresh_token
-    # The editor drops a result whose token is not the in-flight one (AC3/AC5).
-    refute AsyncAction.current?(state, :git_worktree, stale_token)
-    assert AsyncAction.current?(state, :git_worktree, fresh_token)
+    stale_state =
+      apply_async_result(
+        state,
+        {:async_action_result, :git_worktree, stale_token,
+         {:ok, "Committed abc1234", stale_git_root}}
+      )
+
+    assert stale_state == state
+    assert EditorState.status_msg(stale_state) == current_status
+    assert stale_state.async_actions == current_async_actions
   end
 
   test "applying a current git result posts the success status", %{state: state} do
@@ -139,5 +206,15 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
     # Only the in-flight stage has reported; the discard waits for advance.
     assert_receive {:async_action_result, :git_worktree, _t, {:ok, "Staged a.ex", _}}
     refute_received {:async_action_result, :git_worktree, _t2, {:ok, "Discarded b.ex", _}}
+  end
+
+  @spec restore_env(atom(), term() | nil) :: :ok
+  defp restore_env(key, nil), do: Application.delete_env(:minga, key)
+  defp restore_env(key, value), do: Application.put_env(:minga, key, value)
+
+  @spec apply_async_result(EditorState.t(), tuple()) :: EditorState.t()
+  defp apply_async_result(state, async_message) do
+    {:noreply, applied_state} = MingaEditor.handle_info(async_message, state)
+    applied_state
   end
 end
