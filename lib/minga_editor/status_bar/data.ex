@@ -23,6 +23,7 @@ defmodule MingaEditor.StatusBar.Data do
   alias Minga.Config.Options
   alias Minga.Git
   alias Minga.Git.MergeConflict
+  alias Minga.Git.Repo, as: GitRepo
   alias Minga.LSP.SyncServer
   alias MingaEditor.Shell.Traditional.Modeline
   alias MingaEditor.UI.Theme
@@ -59,6 +60,7 @@ defmodule MingaEditor.StatusBar.Data do
           dirty: boolean(),
           git_branch: String.t() | nil,
           git_diff_summary: git_diff_summary(),
+          git_degraded: boolean(),
           diagnostic_counts:
             {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()} | nil,
           diagnostic_hint: String.t() | nil,
@@ -104,6 +106,7 @@ defmodule MingaEditor.StatusBar.Data do
           dirty: boolean(),
           git_branch: String.t() | nil,
           git_diff_summary: git_diff_summary(),
+          git_degraded: boolean(),
           diagnostic_counts:
             {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()} | nil,
           diagnostic_hint: String.t() | nil,
@@ -169,6 +172,7 @@ defmodule MingaEditor.StatusBar.Data do
     file_path = if buf, do: buffer_file_path(buf), else: nil
 
     {git_branch, git_diff_summary} = git_modeline_data(buf)
+    git_degraded = git_degraded?(file_path)
     diagnostic_counts = diagnostic_modeline_data_from_path(file_path)
 
     # Fetch diagnostic hint for the current cursor line (shown in status bar
@@ -196,6 +200,7 @@ defmodule MingaEditor.StatusBar.Data do
       dirty: dirty,
       git_branch: git_branch,
       git_diff_summary: git_diff_summary,
+      git_degraded: git_degraded,
       diagnostic_counts: diagnostic_counts,
       diagnostic_hint: diagnostic_hint,
       indent_type: indent_type,
@@ -332,6 +337,7 @@ defmodule MingaEditor.StatusBar.Data do
     file_path = if buf, do: buffer_file_path(buf), else: nil
 
     {git_branch, git_diff_summary} = git_modeline_data(buf)
+    git_degraded = git_degraded?(file_path)
     diagnostic_counts = diagnostic_modeline_data_from_path(file_path)
     diagnostic_hint = cursor_line_diagnostic_hint_from_path(file_path, line)
     mode = Minga.Editing.mode(state)
@@ -361,6 +367,7 @@ defmodule MingaEditor.StatusBar.Data do
       dirty: dirty,
       git_branch: git_branch,
       git_diff_summary: git_diff_summary,
+      git_degraded: git_degraded,
       diagnostic_counts: diagnostic_counts,
       diagnostic_hint: diagnostic_hint,
       indent_type: indent_type,
@@ -407,6 +414,23 @@ defmodule MingaEditor.StatusBar.Data do
         catch
           :exit, _ -> {nil, nil}
         end
+    end
+  end
+
+  @doc """
+  Returns true when the tracked repo's cached status is degraded for `path`.
+
+  Reads the repo's cache-only snapshot (no git shell-out). Degraded means the
+  last `git status` was trimmed (e.g. timed out on a huge full checkout), so the
+  modeline shows a visible indicator rather than implying the status is complete.
+  """
+  @spec git_degraded?(String.t() | nil) :: boolean()
+  def git_degraded?(nil), do: false
+
+  def git_degraded?(path) when is_binary(path) do
+    case GitRepo.cached_status_for_path(path) do
+      {:ok, %{degraded?: degraded?}} -> degraded?
+      :not_tracked -> false
     end
   end
 
@@ -529,6 +553,7 @@ defmodule MingaEditor.StatusBar.Data do
       parser_status: d.parser_status,
       git_branch: d.git_branch,
       git_diff_summary: d.git_diff_summary,
+      git_degraded: Map.get(d, :git_degraded, false),
       diagnostic_counts: d.diagnostic_counts,
       indent_type: d.indent_type,
       indent_size: d.indent_size,
