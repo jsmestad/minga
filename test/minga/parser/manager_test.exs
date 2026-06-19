@@ -135,7 +135,7 @@ defmodule Minga.Parser.ManagerTest do
       assert spans != []
     end
 
-    test "\"sh\" and \"c++\" aliases highlight via the real parser" do
+    test ~S("sh" and "c++" aliases highlight via the real parser) do
       server = start_parser_manager()
 
       assert {:ok, _names, sh_spans} =
