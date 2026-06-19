@@ -466,6 +466,8 @@ defmodule MingaEditor.UI.Theme.Builder do
       "string.special.regex" => [fg: p.syntax.constants],
       "string.escape" => [fg: p.syntax.operators],
       "string.regex" => [fg: p.syntax.constants],
+      # Modern tree-sitter capture name for "string.regex"; alias the same color.
+      "string.regexp" => [fg: p.syntax.constants],
       "character" => [fg: p.syntax.builtin],
       "comment" => [fg: p.syntax.comments, italic: true],
       "comment.doc" => [fg: p.syntax.comments, italic: true],
@@ -483,6 +485,11 @@ defmodule MingaEditor.UI.Theme.Builder do
       "method.call" => [fg: p.syntax.methods],
       "type" => [fg: p.syntax.type],
       "type.builtin" => [fg: p.syntax.type, bold: true],
+      # const/final and friends are storage modifiers, not types: color them
+      # like keywords so they stop inheriting the `type` color.
+      "type.qualifier" => [fg: p.syntax.keywords, bold: true],
+      # Scala/SQL storage modifiers (private, lazy, etc.); treat as keywords.
+      "storageclass" => [fg: p.syntax.keywords, bold: true],
       "variable" => [fg: p.syntax.variables],
       "variable.builtin" => [fg: p.semantic.error],
       "variable.parameter" => [fg: p.syntax.variables],
@@ -510,6 +517,10 @@ defmodule MingaEditor.UI.Theme.Builder do
       "tag.attribute" => [fg: p.syntax.type],
       "tag.error" => [fg: p.semantic.error, bold: true],
       "preproc" => [fg: p.syntax.operators, bold: true],
+      # Base markup face: parent for markup.* and the target for prose/POD
+      # blocks captured as bare `@markup`. Body prose renders at the editor
+      # foreground (intentionally plain, like normal text).
+      "markup" => [fg: p.base.fg],
       "markup.heading" => [fg: p.semantic.error, bold: true],
       "markup.heading.1" => [fg: p.semantic.error, bold: true],
       "markup.heading.2" => [fg: p.syntax.constants, bold: true],
@@ -521,6 +532,7 @@ defmodule MingaEditor.UI.Theme.Builder do
       "markup.strong" => [fg: p.syntax.constants, bold: true],
       "markup.italic" => [fg: p.syntax.variables, italic: true],
       "markup.strikethrough" => [fg: p.base.muted, strikethrough: true],
+      "markup.underline" => [fg: p.semantic.link, underline: true],
       "markup.raw" => [fg: p.syntax.strings],
       "markup.raw.block" => [fg: p.syntax.strings],
       "markup.raw.inline" => [fg: p.syntax.strings],
@@ -541,7 +553,48 @@ defmodule MingaEditor.UI.Theme.Builder do
       "embedded" => [fg: p.syntax.variables],
       "constructor" => [fg: p.semantic.info, bold: true],
       "error" => [fg: p.semantic.error, bold: true],
-      "warning" => [fg: p.semantic.warning, bold: true]
+      "warning" => [fg: p.semantic.warning, bold: true],
+      # Added/removed lines in diff and patch buffers. The base `diff` face
+      # exists so the dotted children chain back to the theme `default`.
+      "diff" => [fg: p.base.fg],
+      "diff.plus" => [fg: p.semantic.success],
+      "diff.minus" => [fg: p.semantic.error]
+    }
+    |> Map.merge(lsp_semantic(p))
+  end
+
+  # LSP semantic-token faces.
+  #
+  # `Minga.LSP.SemanticTokens` emits capture names like `@lsp.type.variable`
+  # and `@lsp.mod.deprecated`. Because of the leading `@`, dotted-name
+  # inheritance (`Face.infer_parent/1`) never reaches a styled tree-sitter
+  # ancestor, so these must carry concrete colors. Each type maps to the SAME
+  # palette color its tree-sitter equivalent uses, and modifiers carry only a
+  # decorative attribute (composed on top of the type's color at render time).
+  @spec lsp_semantic(Palette.t()) :: Theme.syntax()
+  defp lsp_semantic(%Palette{} = p) do
+    %{
+      # Base namespace faces so `@lsp.type.*` / `@lsp.mod.*` chain back to the
+      # theme `default` face. Without these, `Face.infer_parent/1` walks to the
+      # undefined `@lsp.type` / `@lsp` prefixes and falls through to the module
+      # default (wrong bg), instead of the theme-colored default.
+      "@lsp" => [],
+      "@lsp.type" => [],
+      "@lsp.mod" => [],
+      "@lsp.type.namespace" => [fg: p.syntax.type],
+      "@lsp.type.type" => [fg: p.syntax.type],
+      "@lsp.type.variable" => [fg: p.syntax.variables],
+      "@lsp.type.parameter" => [fg: p.syntax.variables],
+      "@lsp.type.property" => [fg: p.syntax.builtin],
+      "@lsp.type.function" => [fg: p.syntax.functions],
+      "@lsp.type.method" => [fg: p.syntax.methods],
+      "@lsp.type.keyword" => [fg: p.syntax.keywords, bold: true],
+      "@lsp.type.comment" => [fg: p.syntax.comments, italic: true],
+      "@lsp.type.string" => [fg: p.syntax.strings],
+      "@lsp.type.number" => [fg: p.syntax.numbers],
+      "@lsp.type.operator" => [fg: p.syntax.operators],
+      "@lsp.mod.deprecated" => [fg: p.base.fg, strikethrough: true],
+      "@lsp.mod.readonly" => [fg: p.syntax.constants]
     }
   end
 
