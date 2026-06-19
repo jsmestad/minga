@@ -136,6 +136,7 @@ type WindowContent struct {
 	Highlights     []DocumentHighlight
 	Annotations    []LineAnnotation
 	Geometry       PaneGeometry
+	Scroll         ScrollPresentation
 	Rows           []WindowRow
 	SelectionSet   bool
 	SearchSet      bool
@@ -143,6 +144,7 @@ type WindowContent struct {
 	HighlightsSet  bool
 	AnnotationsSet bool
 	GeometrySet    bool
+	ScrollSet      bool
 }
 
 type Cursorline struct {
@@ -279,14 +281,29 @@ func decodeWindowContent(payload []byte) (Command, error) {
 			decodePaneGeometry(section, &window)
 		case 0x09:
 			decodeCursorline(section, &window)
+		case 0x0A:
+			decodeScrollPresentation(section, &window)
 		}
 	}
+
+	validateScrollPresentation(&window)
 
 	kind := CommandWindowContent
 	if opcode != generated.OPGuiWindowContent {
 		kind = CommandWindowDelta
 	}
 	return Command{Kind: kind, Size: offset, Window: window}, nil
+}
+
+func validateScrollPresentation(window *WindowContent) {
+	if !window.ScrollSet {
+		return
+	}
+	if window.Scroll.WindowID == window.ID && window.Scroll.ContentEpoch == window.ContentEpoch {
+		return
+	}
+	window.Scroll = ScrollPresentation{}
+	window.ScrollSet = false
 }
 
 // overlayDeltaCursorlineFlag marks a trailing cursorline section in an overlay

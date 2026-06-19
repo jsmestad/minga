@@ -26,6 +26,7 @@ struct WindowContentBuilder {
     var documentHighlights: [(startRow: UInt16, startCol: UInt16, endRow: UInt16, endCol: UInt16, kind: UInt8)] = []
     var paneGeometryPayload: Data?
     var cursorline: (row: UInt16, r: UInt8, g: UInt8, b: UInt8)?
+    var scrollPresentationPayload: Data?
 
     struct RowBuilder {
         var rowType: UInt8 = 0  // normal
@@ -138,6 +139,9 @@ struct WindowContentBuilder {
             payload.append(contentsOf: [cursorline.r, cursorline.g, cursorline.b])
             sections.append(buildSection(0x09, payload))
         }
+        if let scrollPresentationPayload {
+            sections.append(buildSection(0x0A, scrollPresentationPayload))
+        }
 
         var data = Data()
         data.append(OP_GUI_WINDOW_CONTENT)
@@ -145,6 +149,22 @@ struct WindowContentBuilder {
         for section in sections {
             data.append(contentsOf: section)
         }
+        return data
+    }
+
+    static func sampleScrollPresentationPayload(windowId: UInt16 = 7) -> Data {
+        var data = Data()
+        appendU16(&data, windowId)
+        data.append(0x01)
+        appendU32(&data, 5)
+        appendU16(&data, 2)
+        appendU16(&data, 1)
+        appendU32(&data, 5)
+        appendU32(&data, 15)
+        appendU32(&data, 4)
+        appendU32(&data, 18)
+        appendU32(&data, 42)
+        appendU32(&data, 99)
         return data
     }
 
@@ -464,6 +484,45 @@ struct WindowContentDecoderTests {
         #expect(geometry.gutterMetrics.lineNumberWidth == 2)
         #expect(geometry.gutterMetrics.signColWidth == 3)
         #expect(geometry.hitRegions.map(\.kind) == [.text, .foldControl])
+    }
+
+    @Test("Decode scroll presentation metadata")
+    func decodeScrollPresentation() throws {
+        var builder = WindowContentBuilder(windowId: 7)
+        builder.contentEpoch = 42
+        builder.scrollPresentationPayload = WindowContentBuilder.sampleScrollPresentationPayload(windowId: 7)
+
+        let (cmd, _) = try decodeCommand(data: builder.build(), offset: 0)
+        guard case .guiWindowContent(let content) = cmd else {
+            Issue.record("Expected .guiWindowContent"); return
+        }
+
+        guard let presentation = content.scrollPresentation else {
+            Issue.record("Expected scroll presentation"); return
+        }
+
+        #expect(presentation.windowId == 7)
+        #expect(presentation.resetRequired == true)
+        #expect(presentation.anchorTop == 5)
+        #expect(presentation.anchorLeft == 2)
+        #expect(presentation.anchorVisualRowOffset == 1)
+        #expect(presentation.visibleStartLine == 5)
+        #expect(presentation.visibleEndLine == 15)
+        #expect(presentation.overscanStartLine == 4)
+        #expect(presentation.overscanEndLine == 18)
+        #expect(presentation.contentEpoch == 42)
+        #expect(presentation.layoutGeneration == 99)
+    }
+
+    @Test("Reject scroll presentation identity mismatch")
+    func rejectScrollPresentationIdentityMismatch() throws {
+        var builder = WindowContentBuilder(windowId: 7)
+        builder.contentEpoch = 42
+        builder.scrollPresentationPayload = WindowContentBuilder.sampleScrollPresentationPayload(windowId: 8)
+
+        #expect(throws: ProtocolDecodeError.self) {
+            _ = try decodeCommand(data: builder.build(), offset: 0)
+        }
     }
 
     @Test("Decode pane-local cursorline")

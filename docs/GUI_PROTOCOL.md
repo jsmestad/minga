@@ -708,6 +708,7 @@ A full 0x80 message is sent for the first frame, epoch changes, full refreshes, 
 | 0x07 | LineAnnotations | annotation_count + annotations |
 | 0x08 | PaneGeometry | window-scoped pane geometry, viewport summary, gutter metrics, and hit regions |
 | 0x09 | Cursorline | window-local cursorline row and background color |
+| 0x0A | ScrollPresentation | metadata for safe client-local presentation scrolling and reconciliation |
 
 ```
 opcode(1) + section_count(1) + sections...
@@ -771,6 +772,14 @@ Line annotations section:
 Cursorline section:
   local_row(2) + r(1) + g(1) + b(1)
 
+ScrollPresentation section:
+  window_id(2) + flags(1) + anchor_top(4) + anchor_left(2) + anchor_visual_row_offset(2)
+  + visible_start_line(4) + visible_end_line(4) + overscan_start_line(4) + overscan_end_line(4)
+  + content_epoch(4) + layout_generation(4)
+
+ScrollPresentation flags:
+  bit 0: reset_required. The client must discard any local presentation offset, velocity, and reconciliation target before using this frame as a new anchor.
+
 Pane geometry section:
   window_id(2)
   total_rect(8) + content_rect(8) + text_rect(8) + gutter_rect(8) + clip_rect(8)
@@ -780,6 +789,12 @@ Pane geometry section:
 
 Rects are cell-space tuples encoded as row(2), col(2), width(2), height(2). Hit region kinds are 1=text, 2=gutter, 3=fold_control, 4=modeline, 5=divider, 6=status_bar. Swift converts these rects to pixels, but pane ownership and input targets come from the BEAM-authored geometry.
 ```
+
+The `ScrollPresentation` section is the shared contract for local scroll feel. The BEAM commits an anchor (`anchor_top`, `anchor_left`, `anchor_visual_row_offset`) and identifies the row/content/layout basis for that anchor with the frame transaction, `content_epoch`, row IDs/content hashes, and `layout_generation`. The frontend may keep ephemeral presentation state (local offset, velocity or momentum, overscan consumption, and reconciliation target) derived from this section, but that state is not editor state and may be discarded at any time. `visible_end_line` and `overscan_end_line` are exclusive bounds, so the visible and overscan line ranges are half-open: `start_line <= line < end_line`. Local presentation scroll is safe only inside `clip_rect` and only while the needed rows are already committed or retained inside `overscan_start_line..overscan_end_line`; when the range is only the visible range, the client must not expose blank space by extrapolating beyond cached rows.
+
+Pointer input during local scroll must be normalized through the current presentation transform before it is sent to the BEAM. If a frontend cannot normalize locally, it must carry enough frame and presentation-offset information in the input path before enabling local scroll. The BEAM continues to interpret input against its committed viewport and hit regions, so there is no undefined middle state for click, drag, wheel, or hover.
+
+The scroll compositor state machine is: start with the last clean committed frame as the anchor, apply local presentation offsets only while the clip and overscan contract can cover the motion, send scroll intent to the BEAM, reconcile toward the next committed anchor when a valid frame arrives, and reset immediately on `reset_required`, keyframe/base-frame mismatch, resize, file switch, edit/content epoch change, font or line-spacing change, wrapping/fold change, layout generation change, or any retained-row miss. Small drift may be smoothed by the frontend; structural invalidation must snap predictably to the committed BEAM frame.
 
 The frontend renders selection and search matches as Metal quads behind text (not baked into line textures). This enables zero re-rasterization when the selection changes. Diagnostic underlines are rendered as quads after text.
 

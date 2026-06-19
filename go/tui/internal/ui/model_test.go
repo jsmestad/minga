@@ -621,6 +621,57 @@ func TestApplyWindowDeltaInvalidatesHashMismatchedRetainedRowRef(t *testing.T) {
 	}
 }
 
+func TestApplyWindowDeltaClearsStaleScrollPresentation(t *testing.T) {
+	model := New(80, 24, nil)
+	model.putWindow(protocol.WindowContent{
+		ID:           7,
+		ContentEpoch: 9,
+		ScrollSet:    true,
+		Scroll: protocol.ScrollPresentation{
+			WindowID:         7,
+			AnchorTop:        10,
+			VisibleStartLine: 10,
+			VisibleEndLine:   20,
+			ContentEpoch:     9,
+		},
+	})
+
+	model.applyWindowDelta(protocol.WindowContent{ID: 7, ContentEpoch: 9})
+
+	window := model.windows[7]
+	if window.ScrollSet || window.Scroll != (protocol.ScrollPresentation{}) {
+		t.Fatalf("delta without scroll metadata should clear stale presentation metadata: %+v", window.Scroll)
+	}
+
+	model.putWindow(protocol.WindowContent{
+		ID:           7,
+		ContentEpoch: 9,
+		ScrollSet:    true,
+		Scroll: protocol.ScrollPresentation{
+			WindowID:         7,
+			AnchorTop:        10,
+			VisibleStartLine: 10,
+			VisibleEndLine:   20,
+			ContentEpoch:     9,
+		},
+	})
+
+	model.applyWindowDelta(protocol.WindowContent{
+		ID:           7,
+		ContentEpoch: 9,
+		ScrollSet:    true,
+		Scroll: protocol.ScrollPresentation{
+			WindowID:     99,
+			ContentEpoch: 9,
+		},
+	})
+
+	window = model.windows[7]
+	if window.ScrollSet || window.Scroll != (protocol.ScrollPresentation{}) {
+		t.Fatalf("delta with mismatched scroll metadata should clear stale presentation metadata: %+v", window.Scroll)
+	}
+}
+
 func TestCursorShapeSequenceTracksProtocolShape(t *testing.T) {
 	model := New(80, 24, nil)
 	model.cursorShape = 1
