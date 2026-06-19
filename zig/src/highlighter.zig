@@ -1399,12 +1399,15 @@ pub const Highlighter = struct {
                 continue;
 
             // Resolve short/alternate fence labels (e.g. "js", "c++") to the
-            // canonical grammar name before lookup. Threads through regions and
-            // query-cache keys so aliased fences highlight like canonical ones.
-            const lang_name = canonicalLangName(raw_lang_name);
+            // canonical grammar name before lookup, ASCII-lowercasing first so
+            // mixed-case labels (`JS`, `Bash`, `Rust`) resolve like the Elixir
+            // path does. Skip over-long labels and unknown grammars.
+            var lang_buf: [max_lang_label_len]u8 = undefined;
+            const canonical = canonicalLangNameLower(raw_lang_name, &lang_buf) orelse continue;
 
-            // Skip if we don't have this grammar
-            if (self.languages.get(lang_name) == null) continue;
+            // Use the registered key slice (static, lives past `lang_buf`) so
+            // regions and query-cache keys reference a stable name.
+            const lang_name = self.languages.getKey(canonical) orelse continue;
 
             try regions.append(alloc, .{
                 .start_byte = c.ts_node_start_byte(cnode),
@@ -1648,7 +1651,8 @@ pub const Highlighter = struct {
             }
             if (!has_content) continue;
             const raw_lang_name = lang_from_capture orelse getInjectionLanguagePredicate(inj_query, inj_match.pattern_index) orelse continue;
-            const lang_name = canonicalLangName(raw_lang_name);
+            var lang_buf: [max_lang_label_len]u8 = undefined;
+            const lang_name = canonicalLangNameLower(raw_lang_name, &lang_buf) orelse continue;
             if (self.languages.get(lang_name) != null) return true;
         }
         return false;
@@ -2221,6 +2225,24 @@ fn tagNameChild(tag: c.TSNode) ?c.TSNode {
 
 // ── Injection helpers ─────────────────────────────────────────────────────
 
+/// Upper bound on a fence label we are willing to canonicalize. Real grammar
+/// names and aliases are tiny; anything longer is not a language label and is
+/// treated as no-match by the case-insensitive path.
+const max_lang_label_len = 64;
+
+/// Lowercases `raw` (ASCII) into `buf` and canonicalizes the result, mirroring
+/// the Elixir path which `String.downcase`es the fence label before lookup.
+///
+/// Returns the canonical grammar name slice (pointing into `buf` for an
+/// un-aliased label, or a static alias target). Returns null when `raw` is
+/// longer than `buf`, in which case the caller treats it as no-match. `buf`
+/// must outlive the returned slice and be at least `max_lang_label_len`.
+fn canonicalLangNameLower(raw: []const u8, buf: []u8) ?[]const u8 {
+    if (raw.len > buf.len) return null;
+    const lowered = std.ascii.lowerString(buf[0..raw.len], raw);
+    return canonicalLangName(lowered);
+}
+
 /// Maps short or alternate fenced-code-block labels (the kind LLMs and docs
 /// emit, e.g. `js`, `c++`, `py3`) to the canonical grammar name we ship.
 ///
@@ -2229,10 +2251,14 @@ fn tagNameChild(tag: c.TSNode) ?c.TSNode {
 /// replies, hover popups) before any `self.languages.get(...)` lookup so that
 /// aliased fences resolve to a registered grammar and get highlighted.
 ///
+/// `name` is expected to already be ASCII-lowercased (see
+/// `canonicalLangNameLower`), so both the alias comparison here and the
+/// caller's `self.languages.get(...)` lookup operate on the lowercased value:
+/// `JS`/`Js`/`js` all resolve to `javascript`, and an un-aliased mixed-case
+/// canonical name like `Rust` still hits the registered lowercase `rust` key.
+///
 /// Returns a canonical grammar name slice. Unknown or already-canonical labels
-/// are returned unchanged. Matching is case-sensitive on purpose: tree-sitter
-/// fence info strings are conventionally lower-case, and the canonical grammar
-/// names we register are lower-case too.
+/// are returned unchanged.
 fn canonicalLangName(name: []const u8) []const u8 {
     const Alias = struct { from: []const u8, to: []const u8 };
     const aliases = [_]Alias{
@@ -2588,6 +2614,20 @@ test "highlighter: canonicalLangName resolves aliases to shipped grammars" {
     // Already-canonical and unknown labels pass through unchanged.
     try std.testing.expectEqualStrings("elixir", canonicalLangName("elixir"));
     try std.testing.expectEqualStrings("nonexistent", canonicalLangName("nonexistent"));
+
+    // Case-insensitive resolution via the lowercasing helper: aliases hit
+    // regardless of case, and un-aliased mixed-case canonical names lowercase
+    // to the registered key.
+    var lbuf: [max_lang_label_len]u8 = undefined;
+    try std.testing.expectEqualStrings("javascript", canonicalLangNameLower("JS", &lbuf).?);
+    try std.testing.expectEqualStrings("javascript", canonicalLangNameLower("Js", &lbuf).?);
+    try std.testing.expectEqualStrings("bash", canonicalLangNameLower("Bash", &lbuf).?);
+    try std.testing.expectEqualStrings("cpp", canonicalLangNameLower("C++", &lbuf).?);
+    try std.testing.expectEqualStrings("rust", canonicalLangNameLower("Rust", &lbuf).?);
+    try std.testing.expectEqualStrings("go", canonicalLangNameLower("Go", &lbuf).?);
+    // Labels longer than the buffer are treated as no-match.
+    const too_long = "a" ** (max_lang_label_len + 1);
+    try std.testing.expect(canonicalLangNameLower(too_long, &lbuf) == null);
 
     // Every alias target must be a grammar we actually register.
     var hl = try Highlighter.init(std.testing.allocator);
@@ -3153,6 +3193,48 @@ test "highlighter: aliased fence labels produce injection spans" {
         .{ .label = "rb", .snippet = "x = 42" },
         .{ .label = "ts", .snippet = "const x: number = 42;" },
         .{ .label = "yml", .snippet = "key: value" },
+    };
+
+    for (cases) |case| {
+        var hl = try Highlighter.init(std.testing.allocator);
+        defer hl.deinit();
+
+        try std.testing.expect(hl.setLanguage("markdown"));
+
+        var buf: [256]u8 = undefined;
+        const source = try std.fmt.bufPrint(
+            &buf,
+            "# Title\n\n```{s}\n{s}\n```\n",
+            .{ case.label, case.snippet },
+        );
+        try hl.parse(source);
+
+        var result = try hl.highlightWithInjections();
+        defer result.deinit();
+
+        var has_injection = false;
+        for (result.spans) |span| {
+            if (span.layer == 1) {
+                has_injection = true;
+                break;
+            }
+        }
+        try std.testing.expect(has_injection);
+    }
+}
+
+test "highlighter: mixed-case fence labels produce injection spans" {
+    // Regression for case-sensitivity: the Elixir path lowercases the fence
+    // label, so mixed-case labels (`JS`, `Bash`, `C++`) must resolve and
+    // highlight on the zig markdown-injection path too. Covers both aliases
+    // (`JS`->javascript, `Bash`->bash, `C++`->cpp) and an un-aliased canonical
+    // name in mixed case (`Rust`->rust).
+    const Case = struct { label: []const u8, snippet: []const u8 };
+    const cases = [_]Case{
+        .{ .label = "JS", .snippet = "const x = 42;" },
+        .{ .label = "Bash", .snippet = "echo hello" },
+        .{ .label = "C++", .snippet = "int x = 42;" },
+        .{ .label = "Rust", .snippet = "let x = 42;" },
     };
 
     for (cases) |case| {
