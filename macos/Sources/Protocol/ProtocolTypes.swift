@@ -220,6 +220,8 @@ enum Wire {
         let editingType: UInt8
         /// Pre-filled text for the editing field.
         let editingText: String
+        /// Extension-contributed familiarity/heat bucket 0...4, or 255 for none.
+        let heatLevel: UInt8 = 255
     }
 
     // MARK: - Completion

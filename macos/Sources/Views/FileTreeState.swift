@@ -39,6 +39,8 @@ struct FileTreeEntry: Identifiable {
     let editingType: UInt8
     /// Pre-filled text for the editing field. Only meaningful when isEditing is true.
     let editingText: String
+    /// Extension-contributed familiarity/heat bucket 0...4, or 255 for none.
+    let heatLevel: UInt8 = 255
 
     func withSelection(isSelected: Bool, isFocused: Bool) -> FileTreeEntry {
         FileTreeEntry(
@@ -66,8 +68,25 @@ struct FileTreeEntry: Identifiable {
             relPath: relPath,
             path: path,
             editingType: editingType,
-            editingText: editingText
+            editingText: editingText,
+            heatLevel: heatLevel
         )
+    }
+
+    /// Familiarity tint for the row background, or nil when the row carries no
+    /// heat decoration. Warmer (more familiar) reads as a faint amber; cooler
+    /// (unfamiliar) as a faint blue. Levels: 0 coldest ... 4 warmest.
+    var heatTint: Color? {
+        let cool = Color(red: 0.36, green: 0.54, blue: 0.92)
+        let warm = Color(red: 0.95, green: 0.70, blue: 0.30)
+        switch heatLevel {
+        case 0: return cool.opacity(0.22)
+        case 1: return cool.opacity(0.12)
+        case 2: return nil
+        case 3: return warm.opacity(0.12)
+        case 4: return warm.opacity(0.22)
+        default: return nil
+        }
     }
 }
 
@@ -204,7 +223,8 @@ final class FileTreeState {
                 relPath: entry.relPath,
                 path: entry.path,
                 editingType: entry.editingType,
-                editingText: entry.editingText
+                editingText: entry.editingText,
+                heatLevel: entry.heatLevel
             )
         }
         // Track which entry is being edited for quick lookup

@@ -88,4 +88,23 @@ defmodule MingaEditor.Extension.EditorAPI do
   def set_status(state, message) when is_binary(message) do
     EditorState.set_status(state, message)
   end
+
+  @doc """
+  Returns the absolute path of the file in the active buffer, or `nil` when
+  the active buffer has no file (scratch buffer, no buffer, or a dead pid).
+  """
+  @spec active_path(state()) :: String.t() | nil
+  def active_path(state) do
+    case state.workspace.buffers.active do
+      pid when is_pid(pid) -> safe_file_path(pid)
+      _ -> nil
+    end
+  end
+
+  @spec safe_file_path(pid()) :: String.t() | nil
+  defp safe_file_path(pid) do
+    Buffer.file_path(pid)
+  catch
+    :exit, _ -> nil
+  end
 end

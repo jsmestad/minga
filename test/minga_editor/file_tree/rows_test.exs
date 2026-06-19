@@ -160,6 +160,39 @@ defmodule MingaEditor.FileTree.RowsTest do
       assert RowDiagnostics.total_count(lib.diagnostics) == 0
     end
 
+    test "attaches heat levels to file rows", %{tmp_dir: tmp_dir} do
+      tree = flat_tree(tmp_dir)
+      file_path = Path.join(tmp_dir, "alpha.ex")
+
+      [row | _] = Rows.from_tree(tree, heat_levels: %{file_path => 3})
+
+      assert row.heat_level == 3
+    end
+
+    test "rolls heat up to ancestor directories as the descendant max", %{tmp_dir: tmp_dir} do
+      File.mkdir_p!(Path.join(tmp_dir, "lib"))
+      cold_path = Path.join([tmp_dir, "lib", "a.ex"])
+      warm_path = Path.join([tmp_dir, "lib", "b.ex"])
+      File.write!(cold_path, "")
+      File.write!(warm_path, "")
+
+      tree = FileTree.new(tmp_dir)
+      rows = Rows.from_tree(tree, heat_levels: %{cold_path => 1, warm_path => 4})
+
+      lib = Enum.find(rows, &(&1.name == "lib"))
+
+      assert lib.directory? == true
+      assert lib.heat_level == 4
+    end
+
+    test "leaves heat_level nil when no decoration is present", %{tmp_dir: tmp_dir} do
+      tree = flat_tree(tmp_dir)
+
+      [row | _] = Rows.from_tree(tree)
+
+      assert row.heat_level == nil
+    end
+
     test "attaches inline editing metadata only to the edited index", %{tmp_dir: tmp_dir} do
       tree = flat_tree(tmp_dir)
       editing = %{index: 1, text: "renamed.ex", type: :rename, original_name: "beta.ex"}
