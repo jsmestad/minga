@@ -5,8 +5,8 @@ defmodule MingaKnowledgeGraph.Tracker do
   Subscribes to buffer open/change/save events, accumulates per-file
   activity (open and edit counts, recency), and pushes a 0..4 heat level
   per path to `Minga.Extension.Badge` so the file tree tints by
-  familiarity. When you open a file you are unfamiliar with, it kicks off a
-  streaming briefing into a float panel.
+  familiarity. Briefings are explicit: the user invokes the knowledge briefing
+  command, and the tracker streams the result into a float panel.
 
   State persists across sessions via `Minga.Extension.Storage`; on first
   run it seeds from recent git history so the tree is not all-cold.
@@ -26,8 +26,6 @@ defmodule MingaKnowledgeGraph.Tracker do
   @extension_name :minga_knowledge_graph
   @storage_file "graph.json"
   @persist_debounce_ms 5_000
-  # A prior familiarity below this triggers a briefing on open (level < 2).
-  @briefing_threshold 0.30
   @briefing_max_tokens 700
   @seed_since "6 months ago"
 
@@ -37,7 +35,8 @@ defmodule MingaKnowledgeGraph.Tracker do
           levels: %{String.t() => 0..4},
           briefed: MapSet.t(String.t()),
           briefings: %{reference() => {String.t(), String.t()}},
-          persist_timer: reference() | nil
+          persist_timer: reference() | nil,
+          ai_client: function() | nil
         }
 
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -79,7 +78,8 @@ defmodule MingaKnowledgeGraph.Tracker do
         levels: %{},
         briefed: MapSet.new(),
         briefings: %{},
-        persist_timer: nil
+        persist_timer: nil,
+        ai_client: Keyword.get(opts, :ai_client)
       }
       |> refresh_all_levels(now)
 
@@ -142,17 +142,7 @@ defmodule MingaKnowledgeGraph.Tracker do
 
   @spec on_open(state(), String.t()) :: state()
   defp on_open(state, path) do
-    now = now()
-    prior = Map.get(state.graph, path)
-    prior_score = if prior, do: Score.score(prior, now), else: 0.0
-
-    state = on_activity(state, path, :open, now)
-
-    if prior_score < @briefing_threshold and not MapSet.member?(state.briefed, path) do
-      start_briefing(state, path)
-    else
-      state
-    end
+    on_activity(state, path, :open, now())
   end
 
   @spec on_activity(state(), String.t(), :open | :edit | :touch, integer() | nil) :: state()
@@ -206,9 +196,9 @@ defmodule MingaKnowledgeGraph.Tracker do
         Briefing.render(path, {:generating})
 
         {:ok, ref} =
-          AI.stream(Briefing.messages(path, content),
-            reply_to: self(),
-            max_tokens: @briefing_max_tokens
+          AI.stream(
+            Briefing.messages(path, content),
+            [reply_to: self(), max_tokens: @briefing_max_tokens] ++ ai_client_opt(state)
           )
 
         %{
@@ -221,6 +211,10 @@ defmodule MingaKnowledgeGraph.Tracker do
         state
     end
   end
+
+  @spec ai_client_opt(state()) :: keyword()
+  defp ai_client_opt(%{ai_client: nil}), do: []
+  defp ai_client_opt(%{ai_client: client}), do: [client: client]
 
   @spec handle_ai_event(state(), reference(), AI.event()) :: state()
   defp handle_ai_event(state, ref, event) do

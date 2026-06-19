@@ -116,5 +116,14 @@ defmodule Minga.Extension.BadgeTest do
 
       assert Badge.file_levels_map()[Path.expand("/tmp/shared.ex")] == 3
     end
+
+    test "invalid levels are treated as absent before the render path" do
+      :ok = Badge.set_file(:test_ext, "/tmp/invalid.ex", level: 9)
+      :ok = Badge.set_file(:other_ext, "/tmp/string.ex", level: "warm")
+
+      assert %{level: nil} = Badge.badges_for_path("/tmp/invalid.ex") |> hd()
+      refute Map.has_key?(Badge.file_levels_map(), Path.expand("/tmp/invalid.ex"))
+      refute Map.has_key?(Badge.file_levels_map(), Path.expand("/tmp/string.ex"))
+    end
   end
 end

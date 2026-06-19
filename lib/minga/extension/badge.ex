@@ -70,7 +70,7 @@ defmodule Minga.Extension.Badge do
       color: Keyword.get(opts, :color, 0x51AFEF),
       text: Keyword.get(opts, :text, ""),
       animation: Keyword.get(opts, :animation, :static),
-      level: Keyword.get(opts, :level)
+      level: normalize_level(Keyword.get(opts, :level))
     }
 
     :ets.insert(file_table, {{extension_name, abs_path}, entry})
@@ -177,11 +177,16 @@ defmodule Minga.Extension.Badge do
 
   @spec accumulate_level({term(), file_badge()}, %{String.t() => level()}) ::
           %{String.t() => level()}
-  defp accumulate_level({_key, %{path: path, level: level}}, acc) when is_integer(level) do
+  defp accumulate_level({_key, %{path: path, level: level}}, acc) when level in 0..4 do
     Map.update(acc, path, level, &max(&1, level))
   end
 
   defp accumulate_level({_key, _entry}, acc), do: acc
+
+  @spec normalize_level(term()) :: level() | nil
+  defp normalize_level(nil), do: nil
+  defp normalize_level(level) when level in 0..4, do: level
+  defp normalize_level(_level), do: nil
 
   @spec all_tab_badges() :: [tab_badge()]
   @spec all_tab_badges(table()) :: [tab_badge()]

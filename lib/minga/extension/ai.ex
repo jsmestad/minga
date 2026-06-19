@@ -108,17 +108,15 @@ defmodule Minga.Extension.AI do
   defp run_stream(client, model, messages, stream_opts, reply_to, ref) do
     case request(client, model, messages, stream_opts) do
       {:ok, stream_response} ->
-        full =
-          stream_response
-          |> ReqLLM.StreamResponse.tokens()
-          |> Enum.reduce("", fn delta, acc ->
-            send(reply_to, {:minga_ai, ref, {:chunk, delta}})
-            acc <> delta
-          end)
+        case consume_stream(stream_response, reply_to, ref) do
+          {:ok, full} ->
+            case String.trim(full) do
+              "" -> send(reply_to, {:minga_ai, ref, {:error, :empty_response}})
+              text -> send(reply_to, {:minga_ai, ref, {:done, text}})
+            end
 
-        case String.trim(full) do
-          "" -> send(reply_to, {:minga_ai, ref, {:error, :empty_response}})
-          text -> send(reply_to, {:minga_ai, ref, {:done, text}})
+          {:error, reason} ->
+            send(reply_to, {:minga_ai, ref, {:error, reason}})
         end
 
       {:error, reason} ->
@@ -126,6 +124,24 @@ defmodule Minga.Extension.AI do
     end
 
     :ok
+  end
+
+  @spec consume_stream(ReqLLM.StreamResponse.t(), pid(), reference()) ::
+          {:ok, String.t()} | {:error, error()}
+  defp consume_stream(stream_response, reply_to, ref) do
+    full =
+      stream_response
+      |> ReqLLM.StreamResponse.tokens()
+      |> Enum.reduce("", fn delta, acc ->
+        send(reply_to, {:minga_ai, ref, {:chunk, delta}})
+        acc <> delta
+      end)
+
+    {:ok, full}
+  rescue
+    e -> {:error, {:provider_error, Exception.message(e)}}
+  catch
+    kind, reason -> {:error, {:provider_error, {kind, reason}}}
   end
 
   @spec collect_text(ReqLLM.StreamResponse.t()) :: {:ok, String.t()} | {:error, error()}

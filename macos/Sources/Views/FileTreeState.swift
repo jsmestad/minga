@@ -40,7 +40,36 @@ struct FileTreeEntry: Identifiable {
     /// Pre-filled text for the editing field. Only meaningful when isEditing is true.
     let editingText: String
     /// Extension-contributed familiarity/heat bucket 0...4, or 255 for none.
-    let heatLevel: UInt8 = 255
+    let heatLevel: UInt8
+
+    init(id: String, pathHash: UInt32, index: Int, isDir: Bool, isExpanded: Bool, isSelected: Bool, isFocused: Bool, isActive: Bool, isDirty: Bool, isEditing: Bool, isLastChild: Bool, depth: Int, gitStatus: UInt8, diagnosticErrorCount: UInt16, diagnosticWarningCount: UInt16, diagnosticInfoCount: UInt16, diagnosticHintCount: UInt16, guides: [Bool], icon: String, iconColor: Color, name: String, relPath: String, path: String, editingType: UInt8, editingText: String, heatLevel: UInt8 = 255) {
+        self.id = id
+        self.pathHash = pathHash
+        self.index = index
+        self.isDir = isDir
+        self.isExpanded = isExpanded
+        self.isSelected = isSelected
+        self.isFocused = isFocused
+        self.isActive = isActive
+        self.isDirty = isDirty
+        self.isEditing = isEditing
+        self.isLastChild = isLastChild
+        self.depth = depth
+        self.gitStatus = gitStatus
+        self.diagnosticErrorCount = diagnosticErrorCount
+        self.diagnosticWarningCount = diagnosticWarningCount
+        self.diagnosticInfoCount = diagnosticInfoCount
+        self.diagnosticHintCount = diagnosticHintCount
+        self.guides = guides
+        self.icon = icon
+        self.iconColor = iconColor
+        self.name = name
+        self.relPath = relPath
+        self.path = path
+        self.editingType = editingType
+        self.editingText = editingText
+        self.heatLevel = heatLevel
+    }
 
     func withSelection(isSelected: Bool, isFocused: Bool) -> FileTreeEntry {
         FileTreeEntry(

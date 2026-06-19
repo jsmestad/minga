@@ -1,5 +1,8 @@
 defmodule Minga.Extension.StorageTest do
-  use ExUnit.Case, async: true
+  # Mutates Application env (:extension_data_dir), which is process-global.
+  use ExUnit.Case, async: false
+
+  import Bitwise, only: [band: 2]
 
   alias Minga.Extension.Storage
 
@@ -40,6 +43,31 @@ defmodule Minga.Extension.StorageTest do
   test "path traversal is rejected" do
     assert {:error, :invalid_path} = Storage.write(@ext, "../escape.txt", "x")
     assert {:error, :invalid_path} = Storage.read(@ext, "../../etc/passwd")
+  end
+
+  test "absolute paths are rejected", %{base: base} do
+    outside = Path.join(base, "outside.txt")
+
+    assert {:error, :invalid_path} = Storage.write(@ext, outside, "x")
+    refute File.exists?(outside)
+  end
+
+  test "extension names cannot escape the storage root" do
+    assert {:error, :invalid_path} = Storage.write(:"../../escape", "graph.json", "x")
+    assert {:error, :invalid_path} = Storage.read(:"bad/name", "graph.json")
+    assert_raise ArgumentError, fn -> Storage.data_dir(:"bad\\name") end
+  end
+
+  test "data dirs and files are private where chmod is supported", %{base: base} do
+    assert :ok = Storage.write(@ext, "graph.json", "payload")
+
+    data_dir = Path.join([base, Atom.to_string(@ext), "data"])
+    file = Path.join(data_dir, "graph.json")
+
+    assert {:ok, %{mode: dir_mode}} = File.stat(data_dir)
+    assert {:ok, %{mode: file_mode}} = File.stat(file)
+    assert band(dir_mode, 0o077) == 0
+    assert band(file_mode, 0o077) == 0
   end
 
   test "reading a missing file returns posix error" do

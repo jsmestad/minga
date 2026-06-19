@@ -1254,7 +1254,8 @@ struct GUIFileTreeDecoderTests {
             name: "editor.ex",
             icon: "",
             editingType: 0xFF,
-            editingText: ""
+            editingText: "",
+            heatLevel: 4
         )
 
         var data = Data()
@@ -1301,6 +1302,8 @@ struct GUIFileTreeDecoderTests {
         #expect(entries[0].iconColorR == 0x6D)
         #expect(entries[0].iconColorG == 0x80)
         #expect(entries[0].iconColorB == 0x86)
+        #expect(entries[0].heatLevel == 0xFF)
+        #expect(entries[1].heatLevel == 4)
     }
 
     @Test("Decode lightweight gui_file_tree_selection")
@@ -1475,7 +1478,8 @@ struct GUIFileTreeDecoderTests {
         iconColorG: UInt8 = 0x80,
         iconColorB: UInt8 = 0x86,
         editingType: UInt8,
-        editingText: String
+        editingText: String,
+        heatLevel: UInt8 = 0xFF
     ) {
         appendU32(&data, hash)
         appendU16(&data, flags)
@@ -1497,6 +1501,7 @@ struct GUIFileTreeDecoderTests {
         data.append(iconColorR)
         data.append(iconColorG)
         data.append(iconColorB)
+        data.append(heatLevel)
     }
 }
 

@@ -18,8 +18,7 @@ defmodule MingaKnowledgeGraph.Briefing do
 
   @system_prompt """
   You are a senior engineer giving a colleague a 90-second briefing on a file
-  they have not worked in before. They already know Elixir and OTP, so do not
-  explain language basics. In under 180 words, explain: what this file is
+  they have not worked in before. Assume they already understand the project's primary language and programming basics, so do not explain general language concepts. In under 180 words, explain: what this file is
   responsible for, the key data flow through it, and the one or two things to
   watch out for when changing it. Be concrete and specific to this file. No
   preamble, no restating the file name.
@@ -60,6 +59,26 @@ defmodule MingaKnowledgeGraph.Briefing do
   defp truncate(content) when byte_size(content) <= @max_content_chars, do: content
 
   defp truncate(content) do
-    binary_slice(content, 0, @max_content_chars) <> "\n\n[file truncated]"
+    safe_prefix(content, @max_content_chars) <> "\n\n[file truncated]"
+  end
+
+  @spec safe_prefix(String.t(), pos_integer()) :: String.t()
+  defp safe_prefix(content, max_bytes) do
+    content
+    |> binary_part(0, max_bytes)
+    |> trim_to_valid_utf8()
+  end
+
+  @spec trim_to_valid_utf8(binary()) :: String.t()
+  defp trim_to_valid_utf8(prefix) when byte_size(prefix) == 0, do: ""
+
+  defp trim_to_valid_utf8(prefix) do
+    if String.valid?(prefix) do
+      prefix
+    else
+      prefix
+      |> binary_part(0, byte_size(prefix) - 1)
+      |> trim_to_valid_utf8()
+    end
   end
 end

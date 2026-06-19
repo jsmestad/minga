@@ -221,7 +221,37 @@ enum Wire {
         /// Pre-filled text for the editing field.
         let editingText: String
         /// Extension-contributed familiarity/heat bucket 0...4, or 255 for none.
-        let heatLevel: UInt8 = 255
+        let heatLevel: UInt8
+
+        init(pathHash: UInt32, id: String, path: String, isDir: Bool, isExpanded: Bool, isSelected: Bool, isFocused: Bool, isActive: Bool, isDirty: Bool, isEditing: Bool, isLastChild: Bool, depth: UInt8, gitStatus: UInt8, diagnosticErrorCount: UInt16, diagnosticWarningCount: UInt16, diagnosticInfoCount: UInt16, diagnosticHintCount: UInt16, guides: [Bool], icon: String, iconColorR: UInt8, iconColorG: UInt8, iconColorB: UInt8, name: String, relPath: String, editingType: UInt8, editingText: String, heatLevel: UInt8 = 255) {
+            self.pathHash = pathHash
+            self.id = id
+            self.path = path
+            self.isDir = isDir
+            self.isExpanded = isExpanded
+            self.isSelected = isSelected
+            self.isFocused = isFocused
+            self.isActive = isActive
+            self.isDirty = isDirty
+            self.isEditing = isEditing
+            self.isLastChild = isLastChild
+            self.depth = depth
+            self.gitStatus = gitStatus
+            self.diagnosticErrorCount = diagnosticErrorCount
+            self.diagnosticWarningCount = diagnosticWarningCount
+            self.diagnosticInfoCount = diagnosticInfoCount
+            self.diagnosticHintCount = diagnosticHintCount
+            self.guides = guides
+            self.icon = icon
+            self.iconColorR = iconColorR
+            self.iconColorG = iconColorG
+            self.iconColorB = iconColorB
+            self.name = name
+            self.relPath = relPath
+            self.editingType = editingType
+            self.editingText = editingText
+            self.heatLevel = heatLevel
+        }
     }
 
     // MARK: - Completion

@@ -2,9 +2,11 @@ defmodule MingaKnowledgeGraph.TrackerTest do
   # Drives the real Badge/Storage registries (global ETS), so not async.
   use ExUnit.Case, async: false
 
+  alias Minga.Buffer
   alias Minga.Events.BufferChangedEvent
   alias Minga.Events.BufferEvent
   alias Minga.Extension.Badge
+  alias Minga.Extension.Panel
   alias MingaKnowledgeGraph.Tracker
 
   @ext :minga_knowledge_graph
@@ -15,6 +17,7 @@ defmodule MingaKnowledgeGraph.TrackerTest do
 
     on_exit(fn ->
       Badge.remove_all(@ext)
+      if :ets.whereis(Panel) != :undefined, do: Panel.remove_all(@ext)
       Application.delete_env(:minga, :extension_data_dir)
       File.rm_rf(base)
     end)
@@ -29,9 +32,10 @@ defmodule MingaKnowledgeGraph.TrackerTest do
   end
 
   # `seed: false` skips the git cold-start so tests don't shell out.
-  defp start_tracker(id) do
+  defp start_tracker(id, opts \\ []) do
     name = :"kg_tracker_#{id}"
-    start_supervised!(%{id: id, start: {Tracker, :start_link, [[name: name, seed: false]]}})
+    start_opts = Keyword.merge([name: name, seed: false], opts)
+    start_supervised!(%{id: id, start: {Tracker, :start_link, [start_opts]}})
     name
   end
 
@@ -66,6 +70,22 @@ defmodule MingaKnowledgeGraph.TrackerTest do
     assert summary =~ "opened 1"
   end
 
+  test "user-sourced changes count as edits and update heat" do
+    server = start_tracker(:user_edit)
+    path = real_file_path("edit")
+    buffer = start_supervised!({Buffer, file_path: path})
+    open(server, path)
+
+    deliver(
+      server,
+      {:minga_event, :buffer_changed,
+       %BufferChangedEvent{source: :user, buffer: buffer, delta: nil, version: 1}}
+    )
+
+    assert Tracker.familiarity(server, path) =~ "edited 1"
+    assert Map.has_key?(Badge.file_levels_map(), path)
+  end
+
   test "agent-sourced changes do not count as edits" do
     server = start_tracker(:agent)
     path = ghost_path()
@@ -85,6 +105,43 @@ defmodule MingaKnowledgeGraph.TrackerTest do
     assert Tracker.familiarity(server, ghost_path()) =~ "unfamiliar"
   end
 
+  test "opening a real unfamiliar file records familiarity without auto-briefing" do
+    test_pid = self()
+
+    client = fn _model, messages, _opts ->
+      send(test_pid, {:ai_called, messages})
+      {:error, :unexpected_auto_briefing}
+    end
+
+    server = start_tracker(:no_auto_briefing, ai_client: client)
+    path = real_file_path("no-auto")
+
+    open(server, path)
+
+    assert Tracker.familiarity(server, path) =~ "opened 1"
+    refute_receive {:ai_called, _messages}, 100
+    assert Panel.visible() |> Enum.filter(&(&1.extension == @ext)) == []
+  end
+
+  test "explicit briefing request starts the AI path without a network call" do
+    test_pid = self()
+
+    client = fn _model, messages, _opts ->
+      send(test_pid, {:ai_called, messages})
+      {:error, :stubbed}
+    end
+
+    server = start_tracker(:explicit_briefing, ai_client: client)
+    path = real_file_path("explicit")
+
+    Tracker.request_briefing(server, path)
+
+    assert_receive {:ai_called, messages}, 2_000
+    assert [%{role: "system"}, %{role: "user", content: content}] = messages
+    assert content =~ path
+    assert content =~ "defmodule Explicit"
+  end
+
   test "the graph persists across a tracker restart" do
     path = ghost_path()
 
@@ -96,5 +153,14 @@ defmodule MingaKnowledgeGraph.TrackerTest do
 
     server2 = start_tracker(:persist_b)
     assert Tracker.familiarity(server2, path) =~ "opened 2"
+  end
+
+  defp real_file_path(label) do
+    dir = Path.join(System.tmp_dir!(), "kg_tracker_file_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    module = label |> String.replace("-", "_") |> Macro.camelize()
+    path = Path.join(dir, "#{label}.ex")
+    File.write!(path, "defmodule #{module} do\n  def run, do: :ok\nend\n")
+    path
   end
 end

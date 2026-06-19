@@ -4,8 +4,8 @@ defmodule MingaKnowledgeGraph do
 
   Watches which files you open and edit and builds a familiarity map that
   persists across sessions. The file tree tints by familiarity (warm =
-  well-known, cool = unfamiliar), and opening an unfamiliar file pops a
-  short, personalized briefing on what that file does.
+  well-known, cool = unfamiliar), and the explicit briefing command opens a
+  short, personalized summary of what the current file does.
 
   Keybindings (under a dedicated `SPC k` "knowledge" leader):
 
