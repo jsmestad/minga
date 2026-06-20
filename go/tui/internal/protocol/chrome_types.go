@@ -332,12 +332,13 @@ type NotificationAction struct {
 }
 
 type BottomPanel struct {
-	Visible       bool
-	ActiveTab     byte
-	HeightPercent byte
-	Filter        byte
-	Tabs          []PanelTab
-	Messages      []PanelMessage
+	Visible        bool
+	ActiveTab      byte
+	HeightPercent  byte
+	Filter         byte
+	StreamInstance uint32
+	Tabs           []PanelTab
+	Messages       []PanelMessage
 }
 
 type PanelTab struct {

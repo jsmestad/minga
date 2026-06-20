@@ -1885,6 +1885,7 @@ func TestBottomPanelChromeUpdateClampsAndResetsScrollback(t *testing.T) {
 		model.bottomPanelScrollback = 6
 
 		shrunk := panel
+		shrunk.StreamInstance++
 		shrunk.Messages = shrunk.Messages[:4]
 		updated, _ := model.Update(port.PacketMsg{Commands: frame(protocol.Command{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiBottomPanel, Bottom: shrunk}})})
 		got := updated.(Model)
@@ -1909,13 +1910,59 @@ func TestBottomPanelChromeUpdateClampsAndResetsScrollback(t *testing.T) {
 	})
 }
 
+func TestBottomPanelMessageDeltasAppendWithinStream(t *testing.T) {
+	model, panel := bottomPanelTestModel(2, nil)
+
+	delta := panel
+	delta.Messages = []protocol.PanelMessage{{ID: 2, Level: 1, Text: "msg-1"}, {ID: 3, Level: 1, Text: "msg-2"}}
+	updated, _ := model.Update(port.PacketMsg{Commands: frame(protocol.Command{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiBottomPanel, Bottom: delta}})})
+	got := updated.(Model).chrome[generated.OPGuiBottomPanel].Bottom.Messages
+
+	if len(got) != 3 || got[0].ID != 1 || got[1].ID != 2 || got[2].ID != 3 {
+		t.Fatalf("bottom panel should append same-stream deltas without duplicates, got %+v", got)
+	}
+}
+
+func TestBottomPanelMessageStreamChangeReplacesMessages(t *testing.T) {
+	model, panel := bottomPanelTestModel(2, nil)
+
+	next := panel
+	next.StreamInstance++
+	next.Messages = []protocol.PanelMessage{{ID: 1, Level: 1, Text: "fresh"}}
+	updated, _ := model.Update(port.PacketMsg{Commands: frame(protocol.Command{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiBottomPanel, Bottom: next}})})
+	got := updated.(Model).chrome[generated.OPGuiBottomPanel].Bottom.Messages
+
+	if len(got) != 1 || got[0].Text != "fresh" {
+		t.Fatalf("bottom panel should replace messages on stream change, got %+v", got)
+	}
+}
+
+func TestBottomPanelHideReopenKeepsSameStreamMessages(t *testing.T) {
+	model, panel := bottomPanelTestModel(2, nil)
+
+	hidden := panel
+	hidden.Visible = false
+	hidden.Messages = nil
+	updated, _ := model.Update(port.PacketMsg{Commands: frame(protocol.Command{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiBottomPanel, Bottom: hidden}})})
+	hiddenModel := updated.(Model)
+
+	reopened := panel
+	reopened.Messages = nil
+	updated, _ = hiddenModel.Update(port.PacketMsg{Commands: frame(protocol.Command{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiBottomPanel, Bottom: reopened}})})
+	got := updated.(Model).chrome[generated.OPGuiBottomPanel].Bottom.Messages
+
+	if len(got) != 2 || got[0].ID != 1 || got[1].ID != 2 {
+		t.Fatalf("bottom panel should keep cached same-stream messages across hide/reopen, got %+v", got)
+	}
+}
+
 func bottomPanelTestModel(messageCount int, out chan<- []byte) (Model, protocol.BottomPanel) {
 	model := New(80, 12, out)
 	messages := make([]protocol.PanelMessage, 0, messageCount)
 	for i := 0; i < messageCount; i++ {
 		messages = append(messages, protocol.PanelMessage{ID: uint32(i + 1), Level: 1, Text: fmt.Sprintf("msg-%d", i)})
 	}
-	panel := protocol.BottomPanel{Visible: true, ActiveTab: 0, Tabs: []protocol.PanelTab{{Type: 0x01, Name: "Messages"}}, Messages: messages}
+	panel := protocol.BottomPanel{Visible: true, ActiveTab: 0, Tabs: []protocol.PanelTab{{Type: 0x01, Name: "Messages"}}, StreamInstance: 42, Messages: messages}
 	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiBottomPanel: {Opcode: generated.OPGuiBottomPanel, Bottom: panel}}
 	// The bottom panel is registry-placed now (#2281): it renders and hit-tests by
 	// its BEAM placement rect (bottom band, full width). Place it where

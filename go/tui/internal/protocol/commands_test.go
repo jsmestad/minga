@@ -1039,15 +1039,29 @@ func TestDecodePanelAndSidebarChrome(t *testing.T) {
 
 	bottom := []byte{generated.OPGuiBottomPanel, 1, 0, 30, 0, 1, 2}
 	bottom = append(bottom, string8("Messages")...)
-	bottom = append(bottom, 0, 1, 0, 0, 0, 5, 1, 2, 0, 0, 0, 9)
+	bottom = append(bottom, 0, 0, 0, 7, 0, 1, 0, 0, 0, 5, 1, 2, 0, 0, 0, 9)
 	bottom = append(bottom, string16("lib/main.ex")...)
 	bottom = append(bottom, string16("warning")...)
 	command, err = DecodeCommand(bottom)
 	if err != nil {
 		t.Fatalf("DecodeCommand bottom panel returned error: %v", err)
 	}
-	if !command.Chrome.Bottom.Visible || len(command.Chrome.Bottom.Tabs) != 1 || len(command.Chrome.Bottom.Messages) != 1 {
+	if !command.Chrome.Bottom.Visible || command.Chrome.Bottom.StreamInstance != 7 || len(command.Chrome.Bottom.Tabs) != 1 || len(command.Chrome.Bottom.Messages) != 1 {
 		t.Fatalf("bottom panel decoded incorrectly: %+v", command.Chrome.Bottom)
+	}
+
+	firstBottom := bottomPanelPacket(7, 1, "first")
+	firstCommand, err := DecodeCommand(firstBottom)
+	if err != nil {
+		t.Fatalf("DecodeCommand first bottom panel returned error: %v", err)
+	}
+	secondBottom := bottomPanelPacket(8, 1, "second")
+	secondCommand, err := DecodeCommand(secondBottom)
+	if err != nil {
+		t.Fatalf("DecodeCommand second bottom panel returned error: %v", err)
+	}
+	if firstCommand.Chrome.Bottom.StreamInstance == secondCommand.Chrome.Bottom.StreamInstance || firstCommand.Chrome.Bottom.Messages[0].ID != secondCommand.Chrome.Bottom.Messages[0].ID {
+		t.Fatalf("bottom panel stream identity not preserved: first=%+v second=%+v", firstCommand.Chrome.Bottom, secondCommand.Chrome.Bottom)
 	}
 
 	sidebarEntry := string16("files")
@@ -1240,6 +1254,19 @@ func u32Bytes(value uint32) []byte {
 func section(id byte, payload []byte) []byte {
 	out := []byte{id, byte(len(payload) >> 8), byte(len(payload))}
 	return append(out, payload...)
+}
+
+func bottomPanelPacket(streamInstance uint32, id uint32, text string) []byte {
+	bottom := []byte{generated.OPGuiBottomPanel, 1, 0, 30, 0, 1, 2}
+	bottom = append(bottom, string8("Messages")...)
+	bottom = append(bottom, u32Bytes(streamInstance)...)
+	bottom = append(bottom, 0, 1)
+	bottom = append(bottom, u32Bytes(id)...)
+	bottom = append(bottom, 1, 0)
+	bottom = append(bottom, u32Bytes(9)...)
+	bottom = append(bottom, string16("lib/main.ex")...)
+	bottom = append(bottom, string16(text)...)
+	return bottom
 }
 
 func string16(value string) []byte {

@@ -64,6 +64,7 @@ defmodule MingaEditor.RenderModel.UI.BottomPanelBuilderTest do
       panel = %EditorPanel{visible: true, active_tab: :messages, tabs: [:messages]}
       {model, out_store} = BottomPanelBuilder.build(ctx(panel, store))
 
+      assert model.stream_instance == store.stream_instance
       assert length(model.messages) == 2
       assert out_store.last_sent_id == 2
 
@@ -88,6 +89,19 @@ defmodule MingaEditor.RenderModel.UI.BottomPanelBuilderTest do
       assert length(model2.messages) == 1
       assert hd(model2.messages).text == "Second"
       assert store4.last_sent_id == 2
+    end
+
+    test "fresh producers can reuse ids without reusing stream identity" do
+      first_store = MessageStore.new() |> MessageStore.append("First", :info, :editor)
+      second_store = MessageStore.new() |> MessageStore.append("Second", :info, :editor)
+      panel = %EditorPanel{visible: true, active_tab: :messages, tabs: [:messages]}
+
+      {first_model, _first_store} = BottomPanelBuilder.build(ctx(panel, first_store))
+      {second_model, _second_store} = BottomPanelBuilder.build(ctx(panel, second_store))
+
+      assert hd(first_model.messages).id == 1
+      assert hd(second_model.messages).id == 1
+      assert first_model.stream_instance != second_model.stream_instance
     end
   end
 end

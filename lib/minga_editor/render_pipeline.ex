@@ -188,8 +188,16 @@ defmodule MingaEditor.RenderPipeline do
     Telemetry.span([:minga, :render, :stage], %{stage: :emit}, fn ->
       input = %{input | font_registry: FontRegistry.current_process_registry(input.font_registry)}
       ctx = MingaEditor.Frontend.Emit.Context.from_editor_state(input)
-      {updated_caches, updated_font_registry} = Emit.emit(frame, ctx, chrome, input.caches)
-      %{input | caches: updated_caches, font_registry: updated_font_registry}
+
+      {updated_caches, updated_font_registry, updated_message_store} =
+        Emit.emit(frame, ctx, chrome, input.caches)
+
+      %{
+        input
+        | caches: updated_caches,
+          font_registry: updated_font_registry,
+          message_store: updated_message_store
+      }
     end)
   end
 

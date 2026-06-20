@@ -1672,6 +1672,7 @@ struct GUIBottomPanelDecoderTests {
         appendString8(&data, "Messages")
 
         // Entries
+        appendU32(&data, 7) // streamInstance
         appendU16(&data, 1) // entryCount
 
         // Entry 1
@@ -1696,6 +1697,7 @@ struct GUIBottomPanelDecoderTests {
         #expect(tabs.count == 1)
         #expect(tabs[0].name == "Messages")
         #expect(entries.count == 1)
+        #expect(entries[0].streamInstance == 7)
         #expect(entries[0].id == 42)
         #expect(entries[0].level == 1)
         #expect(entries[0].subsystem == 0)

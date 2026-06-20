@@ -185,6 +185,7 @@ defmodule MingaEditor.StartupTest do
       assert active in state.workspace.buffers.list
       # No modal overlay is pushed on an empty launch.
       assert state.shell_state.modal == :none
+      assert state.message_store.stream_instance > 0
     end
 
     test "uses supplied options server for automatic startup view" do

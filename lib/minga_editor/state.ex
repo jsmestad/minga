@@ -656,6 +656,7 @@ defmodule MingaEditor.State do
         layout: render_output.layout,
         focus_tree: render_output.focus_tree,
         caches: render_output.caches,
+        message_store: render_output.message_store,
         # Clear keyframe_pending? only when the frame that just emitted actually
         # carried the keyframe. A render that started before the request (or one
         # that the request didn't force) must not swallow the still-pending flag (#2219).
@@ -683,6 +684,12 @@ defmodule MingaEditor.State do
   """
   @spec apply_renderer_writeback(t(), map()) :: t()
   def apply_renderer_writeback(%__MODULE__{} = state, %{caches: caches, layout: layout} = wb) do
+    state = %{
+      state
+      | message_store:
+          merge_renderer_message_store(state.message_store, Map.get(wb, :message_store))
+    }
+
     if renderer_writeback_shell_current?(state, wb) do
       # Clear keyframe_pending? only when this writeback's frame actually carried
       # the keyframe. An in-flight delta render that started before the request
@@ -708,6 +715,13 @@ defmodule MingaEditor.State do
   # Keeps keyframe_pending? set until an async frame that actually honored the
   # request writes back. The flag lives on the writeback's `keyframe?` field, stamped
   # from the emitted caches in Renderer.Server.writeback_from_output/2 (#2219).
+  @spec merge_renderer_message_store(MessageStore.t(), MessageStore.t() | nil) :: MessageStore.t()
+  defp merge_renderer_message_store(%MessageStore{} = current, %MessageStore{} = emitted) do
+    MessageStore.merge_sent_cursor(current, emitted)
+  end
+
+  defp merge_renderer_message_store(%MessageStore{} = current, _emitted), do: current
+
   @spec clear_keyframe_pending_from_writeback?(t(), map()) :: boolean()
   defp clear_keyframe_pending_from_writeback?(%__MODULE__{keyframe_pending?: false}, _wb),
     do: false
@@ -1746,7 +1760,11 @@ defmodule MingaEditor.State do
     state
     |> update_workspace(&SessionState.mark_frontend_reset_pending/1)
     |> then(fn state ->
-      %{state | caches: MingaEditor.Renderer.Caches.reset_frontend_state(state.caches)}
+      %{
+        state
+        | caches: MingaEditor.Renderer.Caches.reset_frontend_state(state.caches),
+          message_store: MessageStore.reset_sent_cursor(state.message_store)
+      }
     end)
   end
 
