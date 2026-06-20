@@ -186,6 +186,16 @@ Extension segments are removed automatically when the owning extension stops or 
 
 Each segment has a priority. When the window is too narrow, Minga drops the lowest-priority visible segment first, then recalculates the line. Built-in priorities keep mode, filename, position, filetype, and diagnostics longer than parser, percent, and background-agent details. Custom segments default to priority `50`; pass `priority:` to make them more or less important.
 
+## Agent reactive diagnostics
+
+Minga can post a quiet agent-chat suggestion when saving a file introduces a new LSP error. This is off by default so the editor never talks over you unless you ask it to.
+
+```elixir
+set :agent_react_to_lsp_errors_on_save, true
+```
+
+When enabled, the agent chat gets the file, position, and diagnostic message. The suggestion stays in chat, so you can ask the agent to apply a fix, open chat to discuss it, or ignore the message to dismiss it.
+
 ## Agent tool approval
 
 When the AI agent wants to run a destructive tool (writing a file, editing a file, or running a shell command), Minga pauses and shows a confirmation prompt:

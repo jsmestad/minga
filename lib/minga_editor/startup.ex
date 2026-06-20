@@ -28,6 +28,7 @@ defmodule MingaEditor.Startup do
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace.Persistence, as: WorkspacePersistence
   alias MingaEditor.State.Windows
+  alias MingaEditor.UI.Panel.MessageStore
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.Window
@@ -163,6 +164,7 @@ defmodule MingaEditor.Startup do
       shell: shell_entry.module,
       shell_identity: ShellIdentity.new(shell_entry),
       shell_state: init_shell_state(shell_entry.module, opts),
+      message_store: MessageStore.new(),
       session: EditorSessionState.new(Keyword.take(opts, [:swap_dir, :session_dir]))
     }
 

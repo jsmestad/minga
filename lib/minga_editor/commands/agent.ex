@@ -885,29 +885,6 @@ defmodule MingaEditor.Commands.Agent do
     EditorState.set_status(state, "Thinking: #{level}")
   end
 
-  @doc "Generates a context artifact from the current session."
-  @spec summarize(state()) :: state()
-  def summarize(state) do
-    session = AgentAccess.session(state)
-
-    if session == nil do
-      EditorState.set_status(state, "No agent session")
-    else
-      case Session.summarize(session) do
-        {:ok, _summary, path} ->
-          root = project_root()
-          relative = Path.relative_to(path, root)
-          EditorState.set_status(state, "Context artifact saved to #{relative}")
-
-        {:error, reason} when is_binary(reason) ->
-          EditorState.set_status(state, reason)
-
-        {:error, reason} ->
-          EditorState.set_status(state, "Error: #{inspect(reason)}")
-      end
-    end
-  end
-
   @doc "Cycles to the next model in the configured rotation."
   @spec cycle_model(state()) :: state()
   def cycle_model(state) do
@@ -1747,7 +1724,6 @@ defmodule MingaEditor.Commands.Agent do
     {:agent_stop_session, "Stop AI agent session", :stop_current_session},
     {:agent_new_session, "New agent workspace", :start_session_picker},
     {:agent_cycle_model, "Cycle AI agent model", :cycle_model},
-    {:agent_summarize, "Summarize session to context artifact", :summarize},
     {:agent_cycle_thinking, "Cycle AI thinking level", :cycle_thinking_level},
     {:agent_thinking_off, "Set AI thinking level to off", :set_thinking_off},
     {:agent_thinking_low, "Set AI thinking level to low", :set_thinking_low},

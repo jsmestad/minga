@@ -2,9 +2,19 @@ defmodule Minga.Project.ProjectSearch do
   @moduledoc """
   Searches across project files using `ripgrep` or `grep`.
 
-  Shells out to the fastest available tool and parses structured output
-  into a flat list of match results. All functions are pure — no process
-  state is mutated.
+  Shells out to the fastest available tool and parses its output, line by line,
+  into a flat list of match results.
+
+  The subprocess is driven through an Erlang `Port` in `{:line, _}` mode so output
+  is collected and parsed incrementally. The result cap is enforced *while*
+  collecting: once #{10_000} matches have been gathered the port is closed, which
+  terminates the still-running scan instead of letting it walk the whole tree and
+  buffer megabytes of output we would only throw away. This keeps memory and time
+  bounded on large repositories, where `rg`/`grep` can otherwise emit far more than
+  the cap.
+
+  This is line collection, not a streaming JSON Port protocol; structured streaming
+  of `rg --json` results into the picker as they arrive is a separate follow-up.
 
   ## Tool preference
 
@@ -13,6 +23,11 @@ defmodule Minga.Project.ProjectSearch do
   """
 
   @max_results 10_000
+
+  # Upper bound on subprocess wall-clock time. A pathological scan that never
+  # reaches the cap (e.g. a huge tree with few matches) still returns rather than
+  # blocking the background task forever.
+  @search_timeout_ms 30_000
 
   @typedoc "A single search match across the project."
   @type match :: %{
@@ -50,17 +65,22 @@ defmodule Minga.Project.ProjectSearch do
     end
   end
 
+  @doc "Returns the in-process result cap applied while collecting matches."
+  @spec max_results() :: pos_integer()
+  def max_results, do: @max_results
+
   @doc """
   Detects which search strategy to use.
   """
   @spec detect_strategy() :: strategy()
   def detect_strategy do
-    cond do
-      System.find_executable("rg") != nil -> :rg
-      System.find_executable("grep") != nil -> :grep
-      true -> :none
-    end
+    detect_strategy(System.find_executable("rg"), System.find_executable("grep"))
   end
+
+  @spec detect_strategy(String.t() | nil, String.t() | nil) :: strategy()
+  defp detect_strategy(rg, _grep) when is_binary(rg), do: :rg
+  defp detect_strategy(_rg, grep) when is_binary(grep), do: :grep
+  defp detect_strategy(_rg, _grep), do: :none
 
   @doc """
   Parses a single ripgrep JSON line into a match map.
@@ -136,21 +156,15 @@ defmodule Minga.Project.ProjectSearch do
     end
   end
 
+  @typedoc "Line-parser used to turn a single tool output line into a match or skip."
+  @type parser :: (String.t() -> {:ok, match()} | :skip)
+
   # ── Ripgrep ──────────────────────────────────────────────────────────────
 
   @spec search_with_rg(String.t(), String.t()) :: result()
   defp search_with_rg(query, root) do
     args = ["--json", "--line-number", "--column", "--", query, "."]
-
-    case System.cmd("rg", args, cd: root, stderr_to_stdout: true) do
-      {output, code} when code in [0, 1] ->
-        collect_matches(output, &parse_rg_json_line/1)
-
-      {_output, code} ->
-        {:error, "ripgrep exited with code #{code}"}
-    end
-  rescue
-    e -> {:error, "ripgrep failed: #{Exception.message(e)}"}
+    run_capped("rg", args, root, &parse_rg_json_line/1, "ripgrep")
   end
 
   # ── Grep fallback ────────────────────────────────────────────────────────
@@ -158,40 +172,92 @@ defmodule Minga.Project.ProjectSearch do
   @spec search_with_grep(String.t(), String.t()) :: result()
   defp search_with_grep(query, root) do
     args = ["-rn", "-I", "--", query, "."]
+    run_capped("grep", args, root, &parse_grep_line/1, "grep")
+  end
 
-    case System.cmd("grep", args, cd: root, stderr_to_stdout: true) do
-      {output, code} when code in [0, 1] ->
-        collect_matches(output, &parse_grep_line/1)
+  # ── Capped, incremental subprocess collection ──────────────────────────────
 
-      {_output, code} ->
-        {:error, "grep exited with code #{code}"}
+  # Spawns the tool through a Port in line mode and parses output as it arrives,
+  # accumulating matches until the cap is hit. Reaching the cap closes the port,
+  # which terminates the still-running scan — the cap is enforced *while*
+  # collecting, not after the full output has been buffered.
+  @spec run_capped(String.t(), [String.t()], String.t(), parser(), String.t()) :: result()
+  defp run_capped(tool, args, root, parser, label) do
+    case System.find_executable(tool) do
+      nil ->
+        {:error, "#{label} not found"}
+
+      executable ->
+        open_and_collect(executable, args, root, parser, label)
     end
   rescue
-    e -> {:error, "grep failed: #{Exception.message(e)}"}
+    e -> {:error, "#{label} failed: #{Exception.message(e)}"}
   end
 
-  # ── Helpers ──────────────────────────────────────────────────────────────
+  @spec open_and_collect(String.t(), [String.t()], String.t(), parser(), String.t()) :: result()
+  defp open_and_collect(executable, args, root, parser, label) do
+    port =
+      Port.open({:spawn_executable, executable}, [
+        :binary,
+        :exit_status,
+        :hide,
+        {:args, args},
+        {:cd, root},
+        {:line, 65_536}
+      ])
 
-  @spec collect_matches(String.t(), (String.t() -> {:ok, match()} | :skip)) :: result()
-  defp collect_matches(output, parser) do
-    lines = String.split(output, "\n", trim: true)
-    {matches, truncated?} = collect_lines(lines, parser, [], false)
-    {:ok, Enum.reverse(matches), truncated?}
+    collect(port, parser, [], 0, "", label)
   end
 
-  @spec collect_lines([String.t()], (String.t() -> {:ok, match()} | :skip), [match()], boolean()) ::
-          {[match()], boolean()}
-  defp collect_lines([], _parser, acc, truncated?), do: {acc, truncated?}
-
-  defp collect_lines(_lines, _parser, acc, _truncated?) when length(acc) >= @max_results do
-    {acc, true}
+  # Drains the port. `acc` holds matches newest-first, `count` tracks how many we
+  # have, and `partial` buffers the tail of an over-long line that the port split
+  # across `:line` fragments. On the cap, close the port and stop.
+  @spec collect(port(), parser(), [match()], non_neg_integer(), String.t(), String.t()) ::
+          result()
+  defp collect(port, _parser, acc, count, _partial, _label) when count >= @max_results do
+    close_port(port)
+    {:ok, Enum.reverse(acc), true}
   end
 
-  defp collect_lines([line | rest], parser, acc, _truncated?) do
-    case parser.(line) do
-      {:ok, match} -> collect_lines(rest, parser, [match | acc], false)
-      :skip -> collect_lines(rest, parser, acc, false)
+  defp collect(port, parser, acc, count, partial, label) do
+    receive do
+      {^port, {:data, {:eol, chunk}}} ->
+        {acc, count} = accumulate(parser, partial <> chunk, acc, count)
+        collect(port, parser, acc, count, "", label)
+
+      {^port, {:data, {:noeol, chunk}}} ->
+        collect(port, parser, acc, count, partial <> chunk, label)
+
+      {^port, {:exit_status, status}} when status in [0, 1] ->
+        {acc, _count} = accumulate(parser, partial, acc, count)
+        {:ok, Enum.reverse(acc), false}
+
+      {^port, {:exit_status, status}} ->
+        {:error, "#{label} exited with code #{status}"}
+    after
+      @search_timeout_ms ->
+        close_port(port)
+        {:error, "#{label} timed out"}
     end
+  end
+
+  @spec accumulate(parser(), String.t(), [match()], non_neg_integer()) ::
+          {[match()], non_neg_integer()}
+  defp accumulate(_parser, "", acc, count), do: {acc, count}
+
+  defp accumulate(parser, line, acc, count) do
+    case parser.(line) do
+      {:ok, match} -> {[match | acc], count + 1}
+      :skip -> {acc, count}
+    end
+  end
+
+  @spec close_port(port()) :: :ok
+  defp close_port(port) do
+    Port.close(port)
+    :ok
+  rescue
+    ArgumentError -> :ok
   end
 
   @spec normalize_path(String.t()) :: String.t()

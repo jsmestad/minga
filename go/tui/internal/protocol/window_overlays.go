@@ -46,6 +46,22 @@ type LineAnnotation struct {
 // Rect is a type alias for the generated rect structure.
 type Rect = generated.Rect
 
+// ScrollPresentation carries BEAM-authored metadata for client-local presentation scrolling.
+// VisibleEndLine and OverscanEndLine are exclusive bounds: start <= line < end.
+type ScrollPresentation struct {
+	WindowID              uint16
+	ResetRequired         bool
+	AnchorTop             uint32
+	AnchorLeft            uint16
+	AnchorVisualRowOffset uint16
+	VisibleStartLine      uint32
+	VisibleEndLine        uint32
+	OverscanStartLine     uint32
+	OverscanEndLine       uint32
+	ContentEpoch          uint32
+	LayoutGeneration      uint32
+}
+
 type PaneGeometry struct {
 	WindowID        uint16
 	TotalRect       Rect
@@ -134,6 +150,27 @@ func decodeLineAnnotations(section []byte, window *WindowContent) {
 		annotations = append(annotations, LineAnnotation{Row: ga.Row, Kind: ga.Kind, FG: ga.FG, BG: ga.BG, Text: ga.Text})
 	}
 	window.Annotations = annotations
+}
+
+func decodeScrollPresentation(section []byte, window *WindowContent) {
+	gen, _, err := generated.DecodeGuiWindowContentScrollPresentation(section, 0, len(section))
+	if err != nil {
+		return
+	}
+	window.Scroll = ScrollPresentation{
+		WindowID:              gen.WindowID,
+		ResetRequired:         gen.Flags&0x01 != 0,
+		AnchorTop:             gen.AnchorTop,
+		AnchorLeft:            gen.AnchorLeft,
+		AnchorVisualRowOffset: gen.AnchorVisualRowOffset,
+		VisibleStartLine:      gen.VisibleStartLine,
+		VisibleEndLine:        gen.VisibleEndLine,
+		OverscanStartLine:     gen.OverscanStartLine,
+		OverscanEndLine:       gen.OverscanEndLine,
+		ContentEpoch:          gen.ContentEpoch,
+		LayoutGeneration:      gen.LayoutGeneration,
+	}
+	window.ScrollSet = true
 }
 
 func decodePaneGeometry(section []byte, window *WindowContent) {

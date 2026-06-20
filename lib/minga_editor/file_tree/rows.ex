@@ -24,6 +24,7 @@ defmodule MingaEditor.FileTree.Rows do
           dirty_paths: MapSet.t(String.t()),
           git_status: GitStatus.status_map(),
           diagnostics: %{String.t() => Diagnostics.t() | Diagnostics.counts() | map() | keyword()},
+          heat_levels: %{String.t() => 0..4},
           diagnostics_server: GenServer.server(),
           editing: FileTreeState.editing() | nil
         ]
@@ -79,11 +80,17 @@ defmodule MingaEditor.FileTree.Rows do
       end)
       |> propagated_diagnostics(tree.root)
 
+    heat_levels =
+      opts
+      |> Keyword.get(:heat_levels, %{})
+      |> propagated_levels(tree.root)
+
     %{
       active_path: opts |> Keyword.get(:active_path) |> expand_optional_path(),
       dirty_paths: Keyword.get(opts, :dirty_paths, MapSet.new()),
       editing: Keyword.get(opts, :editing),
       diagnostics: diagnostics,
+      heat_levels: heat_levels,
       focused: Keyword.get(opts, :focused, false),
       git_status: git_status,
       selected_index: Keyword.get(opts, :selected_index, tree.cursor)
@@ -106,6 +113,7 @@ defmodule MingaEditor.FileTree.Rows do
       dirty?: dirty?(entry, path, opts.dirty_paths),
       git_status: Map.get(opts.git_status, path),
       diagnostics: Map.get(opts.diagnostics, path, Diagnostics.empty()),
+      heat_level: Map.get(opts.heat_levels, path),
       depth: entry.depth,
       guides: entry.guides,
       last_child?: entry.last_child?,
@@ -149,6 +157,36 @@ defmodule MingaEditor.FileTree.Rows do
       expanded_path = Path.expand(path)
       put_propagated_diagnostics(acc, expanded_path, expanded_root, diagnostics)
     end)
+  end
+
+  # Roll heat levels up to ancestor directories, taking the max so a folder is
+  # as warm as its warmest descendant. Reuses the diagnostic ancestor walk.
+  @spec propagated_levels(%{String.t() => 0..4}, String.t()) :: %{String.t() => 0..4}
+  defp propagated_levels(levels, root) when is_map(levels) do
+    expanded_root = Path.expand(root)
+
+    Enum.reduce(levels, %{}, fn {path, level}, acc ->
+      put_propagated_level(acc, Path.expand(path), expanded_root, level)
+    end)
+  end
+
+  @spec put_propagated_level(%{String.t() => 0..4}, String.t(), String.t(), 0..4) ::
+          %{String.t() => 0..4}
+  defp put_propagated_level(acc, path, root, level) do
+    if path_under_root?(path, root) do
+      path
+      |> diagnostic_ancestor_dirs(root)
+      |> Enum.reduce(put_level(acc, path, level), fn dir, inner_acc ->
+        put_level(inner_acc, dir, level)
+      end)
+    else
+      acc
+    end
+  end
+
+  @spec put_level(%{String.t() => 0..4}, String.t(), 0..4) :: %{String.t() => 0..4}
+  defp put_level(acc, path, level) do
+    Map.update(acc, path, level, &max(&1, level))
   end
 
   @spec put_propagated_diagnostics(

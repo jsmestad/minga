@@ -1688,6 +1688,78 @@ func DecodeGuiWindowContentCursorline(data []byte, offset int, windowEnd int) (G
 	}, pos, nil
 }
 
+func DecodeGuiWindowContentScrollPresentation(data []byte, offset int, windowEnd int) (GuiWindowContentScrollPresentation, int, error) {
+	pos := offset
+	if err := decodeRequireWindow(windowEnd, pos+2, "window_id"); err != nil {
+		return GuiWindowContentScrollPresentation{}, offset, err
+	}
+	windowID := decodeU16(data, pos)
+	pos += 2
+	if err := decodeRequireWindow(windowEnd, pos+1, "flags"); err != nil {
+		return GuiWindowContentScrollPresentation{}, offset, err
+	}
+	flags := data[pos]
+	pos++
+	if err := decodeRequireWindow(windowEnd, pos+4, "anchor_top"); err != nil {
+		return GuiWindowContentScrollPresentation{}, offset, err
+	}
+	anchorTop := decodeU32(data, pos)
+	pos += 4
+	if err := decodeRequireWindow(windowEnd, pos+2, "anchor_left"); err != nil {
+		return GuiWindowContentScrollPresentation{}, offset, err
+	}
+	anchorLeft := decodeU16(data, pos)
+	pos += 2
+	if err := decodeRequireWindow(windowEnd, pos+2, "anchor_visual_row_offset"); err != nil {
+		return GuiWindowContentScrollPresentation{}, offset, err
+	}
+	anchorVisualRowOffset := decodeU16(data, pos)
+	pos += 2
+	if err := decodeRequireWindow(windowEnd, pos+4, "visible_start_line"); err != nil {
+		return GuiWindowContentScrollPresentation{}, offset, err
+	}
+	visibleStartLine := decodeU32(data, pos)
+	pos += 4
+	if err := decodeRequireWindow(windowEnd, pos+4, "visible_end_line"); err != nil {
+		return GuiWindowContentScrollPresentation{}, offset, err
+	}
+	visibleEndLine := decodeU32(data, pos)
+	pos += 4
+	if err := decodeRequireWindow(windowEnd, pos+4, "overscan_start_line"); err != nil {
+		return GuiWindowContentScrollPresentation{}, offset, err
+	}
+	overscanStartLine := decodeU32(data, pos)
+	pos += 4
+	if err := decodeRequireWindow(windowEnd, pos+4, "overscan_end_line"); err != nil {
+		return GuiWindowContentScrollPresentation{}, offset, err
+	}
+	overscanEndLine := decodeU32(data, pos)
+	pos += 4
+	if err := decodeRequireWindow(windowEnd, pos+4, "content_epoch"); err != nil {
+		return GuiWindowContentScrollPresentation{}, offset, err
+	}
+	contentEpoch := decodeU32(data, pos)
+	pos += 4
+	if err := decodeRequireWindow(windowEnd, pos+4, "layout_generation"); err != nil {
+		return GuiWindowContentScrollPresentation{}, offset, err
+	}
+	layoutGeneration := decodeU32(data, pos)
+	pos += 4
+	return GuiWindowContentScrollPresentation{
+		WindowID:              windowID,
+		Flags:                 flags,
+		AnchorTop:             anchorTop,
+		AnchorLeft:            anchorLeft,
+		AnchorVisualRowOffset: anchorVisualRowOffset,
+		VisibleStartLine:      visibleStartLine,
+		VisibleEndLine:        visibleEndLine,
+		OverscanStartLine:     overscanStartLine,
+		OverscanEndLine:       overscanEndLine,
+		ContentEpoch:          contentEpoch,
+		LayoutGeneration:      layoutGeneration,
+	}, pos, nil
+}
+
 // Section decoders for gui_window_rows_delta
 
 func DecodeGuiWindowRowsDeltaHeader(data []byte, offset int, windowEnd int) (GuiWindowRowsDeltaHeader, int, error) {

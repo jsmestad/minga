@@ -10,8 +10,11 @@ defmodule Minga.Extension.Manifest do
   @typedoc "Declared runtime/UI capabilities in declaration order. Duplicate entries are preserved."
   @type capabilities :: [Extension.capability_spec()]
 
+  @typedoc "Semantic agent UI declaration metadata consumed by the editor-layer registry."
+  @type agent_ui_metadata :: map() | keyword()
+
   @typedoc "How the extension source code is obtained."
-  @type source_type :: :path | :git | :hex
+  @type source_type :: :path | :git | :hex | :module
 
   @enforce_keys [:name, :version, :source]
   defstruct [
@@ -23,10 +26,12 @@ defmodule Minga.Extension.Manifest do
     keybindings: [],
     modeline_segments: [],
     capabilities: [],
+    load_policy: :eager,
     hooks: [],
     skills: [],
     mcp_servers: [],
-    slash_commands: []
+    slash_commands: [],
+    agent_ui_metadata: []
   ]
 
   @type t :: %__MODULE__{
@@ -38,10 +43,12 @@ defmodule Minga.Extension.Manifest do
           keybindings: [Extension.keybind_spec()],
           modeline_segments: [Extension.modeline_segment_spec()],
           capabilities: capabilities(),
+          load_policy: Extension.load_policy(),
           hooks: [{atom(), keyword()}],
           skills: [String.t()],
-          mcp_servers: [{atom(), keyword()}],
-          slash_commands: [{atom(), String.t(), keyword()}]
+          mcp_servers: [{atom() | String.t(), keyword()}],
+          slash_commands: [{atom() | String.t(), String.t(), keyword()}],
+          agent_ui_metadata: [agent_ui_metadata()]
         }
 
   @doc """
@@ -52,7 +59,8 @@ defmodule Minga.Extension.Manifest do
   and turns them into load errors during startup.
   """
   @spec from_module(module(), source_type()) :: t()
-  def from_module(module, source) when is_atom(module) and source in [:path, :git, :hex] do
+  def from_module(module, source)
+      when is_atom(module) and source in [:path, :git, :hex, :module] do
     %__MODULE__{
       name: module.name(),
       description: safe_description(module),
@@ -62,10 +70,12 @@ defmodule Minga.Extension.Manifest do
       keybindings: safe_schema(module, :__keybind_schema__),
       modeline_segments: safe_schema(module, :__modeline_segment_schema__),
       capabilities: safe_capabilities(module),
+      load_policy: safe_load_policy(module),
       hooks: safe_schema(module, :__hook_schema__),
       skills: safe_schema(module, :__skill_schema__),
       mcp_servers: safe_schema(module, :__mcp_server_schema__),
-      slash_commands: safe_schema(module, :__slash_command_schema__)
+      slash_commands: safe_schema(module, :__slash_command_schema__),
+      agent_ui_metadata: safe_schema(module, :__agent_ui_schema__)
     }
   end
 
@@ -84,5 +94,12 @@ defmodule Minga.Extension.Manifest do
     if function_exported?(module, :__capability_schema__, 0),
       do: module.__capability_schema__(),
       else: []
+  end
+
+  @spec safe_load_policy(module()) :: Extension.load_policy()
+  defp safe_load_policy(module) do
+    if function_exported?(module, :__load_policy__, 0),
+      do: module.__load_policy__(),
+      else: :eager
   end
 end

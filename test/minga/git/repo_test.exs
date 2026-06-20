@@ -435,6 +435,73 @@ defmodule Minga.Git.RepoTest do
     end
   end
 
+  describe "degraded status" do
+    test "flags degraded and keeps cached entries when status times out on a full checkout", %{
+      tmp_dir: dir
+    } do
+      events_registry = start_events_registry()
+      GitStub.set_root(dir, dir)
+      entry = %StatusEntry{path: "lib/foo.ex", status: :modified, staged: false}
+      GitStub.set_status(dir, [entry])
+      on_exit(fn -> GitStub.clear(dir) end)
+
+      repo = start_repo(dir, events_registry: events_registry)
+      Repo.await_refresh(repo)
+
+      # Healthy to start.
+      assert {false, nil} = Repo.degraded(repo)
+      assert [^entry] = Repo.status(repo)
+
+      # A subsequent status times out; the repo (full checkout, untracked :normal)
+      # must surface this visibly instead of dropping the cached entries.
+      GitStub.set_status_error(dir, "git status failed: git command timed out after 4000ms")
+      Repo.refresh(repo)
+      Repo.await_refresh(repo)
+
+      assert {true, :status_timeout} = Repo.degraded(repo)
+      assert [^entry] = Repo.status(repo)
+      assert Repo.summary(repo).degraded?
+
+      assert {:ok, %StatusSnapshot{degraded?: true, degraded_reason: :status_timeout}} =
+               Repo.cached_status_for_path(Path.join(dir, "lib/foo.ex"))
+    end
+
+    test "clears the degraded flag once status succeeds again", %{tmp_dir: dir} do
+      events_registry = start_events_registry()
+      GitStub.set_root(dir, dir)
+      on_exit(fn -> GitStub.clear(dir) end)
+
+      repo = start_repo(dir, events_registry: events_registry)
+      Repo.await_refresh(repo)
+
+      GitStub.set_status_error(dir, "git status failed: git command timed out after 4000ms")
+      Repo.refresh(repo)
+      Repo.await_refresh(repo)
+      assert {true, :status_timeout} = Repo.degraded(repo)
+
+      GitStub.set_status(dir, [%StatusEntry{path: "a.ex", status: :modified, staged: false}])
+      Repo.refresh(repo)
+      Repo.await_refresh(repo)
+
+      assert {false, nil} = Repo.degraded(repo)
+    end
+
+    test "a non-timeout status error does not flag degraded", %{tmp_dir: dir} do
+      events_registry = start_events_registry()
+      GitStub.set_root(dir, dir)
+      on_exit(fn -> GitStub.clear(dir) end)
+
+      repo = start_repo(dir, events_registry: events_registry)
+      Repo.await_refresh(repo)
+
+      GitStub.set_status_error(dir, "git status failed: fatal: not a git repository")
+      Repo.refresh(repo)
+      Repo.await_refresh(repo)
+
+      assert {false, nil} = Repo.degraded(repo)
+    end
+  end
+
   @spec start_events_registry() :: atom()
   defp start_events_registry do
     name = :"repo_events_#{System.unique_integer([:positive, :monotonic])}"

@@ -192,6 +192,16 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
         for unexpected <- excludes, do: refute(String.contains?(text, unexpected))
       end
     end
+
+    test "renders a degraded warning indicator when git status is degraded" do
+      degraded_icon = "\u{F071}"
+
+      degraded = segments_text(Map.merge(@base_data, %{git_branch: "main", git_degraded: true}))
+      assert String.contains?(degraded, degraded_icon)
+
+      healthy = segments_text(Map.merge(@base_data, %{git_branch: "main", git_degraded: false}))
+      refute String.contains?(healthy, degraded_icon)
+    end
   end
 
   describe "configurable segments" do
