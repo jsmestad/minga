@@ -1454,6 +1454,25 @@ id = 0x09
 name = "cursorline"
 fields = [{ name = "row", type = "u16" }, { name = "bg", type = "rgb" }]
 
+# Scroll presentation line ranges are half-open: start is inclusive and end is exclusive.
+[[sections]]
+opcode = "gui_window_content"
+id = 0x0A
+name = "scroll_presentation"
+fields = [
+  { name = "window_id", type = "u16" },
+  { name = "flags", type = "u8" },
+  { name = "anchor_top", type = "u32" },
+  { name = "anchor_left", type = "u16" },
+  { name = "anchor_visual_row_offset", type = "u16" },
+  { name = "visible_start_line", type = "u32" },
+  { name = "visible_end_line", type = "u32" },
+  { name = "overscan_start_line", type = "u32" },
+  { name = "overscan_end_line", type = "u32" },
+  { name = "content_epoch", type = "u32" },
+  { name = "layout_generation", type = "u32" },
+]
+
 # gui_status_bar (0x76) sections
 
 [[sections]]

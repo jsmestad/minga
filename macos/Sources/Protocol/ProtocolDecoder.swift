@@ -1569,7 +1569,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             case 0x02: // Rows: row_count(2) + rows...
                 wcRows = try decodeWindowContentRows(data: data, start: wcSStart, end: wcSStart + wcSLen)
 
-            case 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09:
+            case 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A:
                 _ = try decodeOverlaySection(id: wcSId, data: data, start: wcSStart, length: wcSLen, end: wcSStart + wcSLen, into: &wcOverlays)
 
             default: break
@@ -1577,6 +1577,8 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
 
             wcPos = wcSStart + wcSLen
         }
+
+        let scrollPresentation = try validatedScrollPresentation(wcOverlays.scrollPresentation, windowId: wcWindowId, contentEpoch: wcContentEpoch)
 
         let content = GUIWindowContent(
             windowId: wcWindowId,
@@ -1594,7 +1596,8 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             documentHighlights: wcOverlays.documentHighlights,
             lineAnnotations: wcOverlays.lineAnnotations,
             paneGeometry: wcOverlays.paneGeometry,
-            cursorline: wcOverlays.cursorline
+            cursorline: wcOverlays.cursorline,
+            scrollPresentation: scrollPresentation
         )
         return (.guiWindowContent(data: content), wcPos - offset)
 
@@ -2810,7 +2813,7 @@ private func decodeStatusBarSegments(data: Data, pos: inout Int, count: Int, end
 
 // MARK: - Shared overlay section decoding
 
-/// Accumulator for overlay sections 0x03-0x09 shared by OP_GUI_WINDOW_CONTENT
+/// Accumulator for overlay sections 0x03-0x0A shared by OP_GUI_WINDOW_CONTENT
 /// and the window-rows-delta decoder.
 private struct DecodedOverlaySections {
     var selection: GUISelectionOverlay? = nil
@@ -2820,9 +2823,10 @@ private struct DecodedOverlaySections {
     var lineAnnotations: [GUILineAnnotation] = []
     var paneGeometry: GUIPaneGeometry? = nil
     var cursorline: GUICursorline? = nil
+    var scrollPresentation: GUIScrollPresentation? = nil
 }
 
-/// Decodes a single overlay section (IDs 0x03-0x09) into `sections`.
+/// Decodes a single overlay section (IDs 0x03-0x0A) into `sections`.
 /// Returns true if the section ID was handled, false otherwise.
 private func decodeOverlaySection(id: UInt8, data: Data, start: Int, length: Int, end: Int, into sections: inout DecodedOverlaySections) throws -> Bool {
     switch id {
@@ -2914,6 +2918,10 @@ private func decodeOverlaySection(id: UInt8, data: Data, start: Int, length: Int
         sections.cursorline = GUICursorline(row: readU16(data, start), bg: readU24(data, start + 2))
         return true
 
+    case 0x0A: // ScrollPresentation
+        sections.scrollPresentation = try decodeScrollPresentation(data: data, start: start, end: end)
+        return true
+
     default:
         return false
     }
@@ -2962,7 +2970,7 @@ private func decodeWindowRowsDelta(data: Data, offset: Int) throws -> (GUIWindow
             sawRows = true
             rows = try decodeWindowDeltaRows(data: data, start: sectionStart, end: sectionEnd)
 
-        case 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09:
+        case 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A:
             _ = try decodeOverlaySection(id: sectionId, data: data, start: sectionStart, length: sectionLen, end: sectionEnd, into: &overlays)
 
         default:
@@ -2973,6 +2981,7 @@ private func decodeWindowRowsDelta(data: Data, offset: Int) throws -> (GUIWindow
     }
 
     guard sawHeader, sawRows else { throw ProtocolDecodeError.malformed }
+    let scrollPresentation = try validatedScrollPresentation(overlays.scrollPresentation, windowId: windowId, contentEpoch: contentEpoch)
 
     let delta = GUIWindowRowsDelta(
         windowId: windowId,
@@ -2989,7 +2998,8 @@ private func decodeWindowRowsDelta(data: Data, offset: Int) throws -> (GUIWindow
         documentHighlights: overlays.documentHighlights,
         lineAnnotations: overlays.lineAnnotations,
         paneGeometry: overlays.paneGeometry,
-        cursorline: overlays.cursorline
+        cursorline: overlays.cursorline,
+        scrollPresentation: scrollPresentation
     )
 
     return (delta, pos - offset)
@@ -3345,6 +3355,32 @@ private func decodeChatMessageCandidates(data: Data, start: Int, end: Int) throw
     default:
         throw ProtocolDecodeError.malformed
     }
+}
+
+private func validatedScrollPresentation(_ presentation: GUIScrollPresentation?, windowId: UInt16, contentEpoch: UInt32) throws -> GUIScrollPresentation? {
+    guard let presentation else { return nil }
+    guard presentation.matches(windowId: windowId, contentEpoch: contentEpoch) else {
+        throw ProtocolDecodeError.malformed
+    }
+    return presentation
+}
+
+private func decodeScrollPresentation(data: Data, start: Int, end: Int) throws -> GUIScrollPresentation {
+    guard start + 35 <= end else { throw ProtocolDecodeError.malformed }
+
+    return GUIScrollPresentation(
+        windowId: readU16(data, start),
+        resetRequired: data[start + 2] & 0x01 != 0,
+        anchorTop: readU32(data, start + 3),
+        anchorLeft: readU16(data, start + 7),
+        anchorVisualRowOffset: readU16(data, start + 9),
+        visibleStartLine: readU32(data, start + 11),
+        visibleEndLine: readU32(data, start + 15),
+        overscanStartLine: readU32(data, start + 19),
+        overscanEndLine: readU32(data, start + 23),
+        contentEpoch: readU32(data, start + 27),
+        layoutGeneration: readU32(data, start + 31)
+    )
 }
 
 private func decodePaneGeometry(data: Data, start: Int, end: Int) throws -> GUIPaneGeometry {

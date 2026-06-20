@@ -175,6 +175,9 @@ func GoldenDecode(name string, payload []byte) (any, int, error) {
 	case "GuiWindowContentRows":
 		v, n, err := DecodeGuiWindowContentRows(payload, 0, len(payload))
 		return v, n, err
+	case "GuiWindowContentScrollPresentation":
+		v, n, err := DecodeGuiWindowContentScrollPresentation(payload, 0, len(payload))
+		return v, n, err
 	case "GuiWindowContentSearchMatches":
 		v, n, err := DecodeGuiWindowContentSearchMatches(payload, 0, len(payload))
 		return v, n, err

@@ -256,6 +256,20 @@ type GuiWindowContentCursorline struct {
 	BG  uint32
 }
 
+type GuiWindowContentScrollPresentation struct {
+	WindowID              uint16
+	Flags                 uint8
+	AnchorTop             uint32
+	AnchorLeft            uint16
+	AnchorVisualRowOffset uint16
+	VisibleStartLine      uint32
+	VisibleEndLine        uint32
+	OverscanStartLine     uint32
+	OverscanEndLine       uint32
+	ContentEpoch          uint32
+	LayoutGeneration      uint32
+}
+
 type GuiStatusBarIdentity struct {
 	ContentKind uint8
 	Mode        uint8

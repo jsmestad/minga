@@ -221,9 +221,18 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
     assert hd(decoded.annotations).text == "hint"
   end
 
-  test "encodes content epoch and pane geometry" do
+  test "encodes content epoch, pane geometry, and derived scroll presentation metadata" do
+    row = %Row{
+      row_id: Row.stable_id(:normal, 7),
+      row_type: :normal,
+      buf_line: 7,
+      text: "hello",
+      spans: [],
+      content_hash: 123
+    }
+
     decoded =
-      window(content_epoch: 42, geometry: geometry_model())
+      window(content_epoch: 42, geometry: geometry_model(), rows: [row])
       |> WindowEncoder.encode_window_content()
       |> GUIWindowDecoder.decode()
 
@@ -234,6 +243,22 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
     assert decoded.geometry.viewport.top == 5
     assert decoded.geometry.viewport.cols == 33
     assert decoded.geometry.gutter_metrics == %{line_number_width: 2, sign_col_width: 3}
+
+    assert decoded.scroll_presentation == %{
+             window_id: 1,
+             reset_required: true,
+             anchor_top: 5,
+             anchor_left: 2,
+             anchor_visual_row_offset: 0,
+             visible_start_line: 7,
+             visible_end_line: 8,
+             overscan_start_line: 7,
+             overscan_end_line: 8,
+             content_epoch: 42,
+             layout_generation: decoded.scroll_presentation.layout_generation
+           }
+
+    assert is_integer(decoded.scroll_presentation.layout_generation)
 
     assert Enum.map(decoded.geometry.hit_regions, & &1.kind) == [
              :text,

@@ -617,7 +617,19 @@ func (m *Model) applyWindowDelta(delta protocol.WindowContent) {
 		window.Geometry = delta.Geometry
 		window.GeometrySet = true
 	}
-	if len(delta.Rows) > 0 {
+	if delta.Rows == nil {
+		if delta.ScrollSet && delta.Scroll.WindowID == window.ID && delta.Scroll.ContentEpoch == window.ContentEpoch {
+			window.Scroll = delta.Scroll
+			window.ScrollSet = true
+		}
+	} else if delta.ScrollSet && delta.Scroll.WindowID == window.ID && delta.Scroll.ContentEpoch == window.ContentEpoch {
+		window.Scroll = delta.Scroll
+		window.ScrollSet = true
+	} else {
+		window.Scroll = protocol.ScrollPresentation{}
+		window.ScrollSet = false
+	}
+	if delta.Rows != nil {
 		rows, err := resolveWindowRows(window.Rows, delta.Rows)
 		if err != nil {
 			m.removeWindow(delta.ID)

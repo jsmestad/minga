@@ -199,7 +199,7 @@ commit_frame         (triggers the actual present; carries frame_seq + the laten
 
 The BEAM sends the entire frame as a single batched message. The frontend processes commands in order and only presents on `commit_frame`. Cursor position and shape are embedded per window inside `gui_window_content`, not carried by standalone cell opcodes.
 
-Between frames, the frontend must not modify the screen. The BEAM drives all visual updates.
+Between frames, the frontend must not mutate committed editor state or present new semantic content. The only exception is ephemeral presentation scroll driven by `gui_window_content` section 0x0A (`ScrollPresentation`): a frontend may transform already committed or retained rows inside the BEAM-provided clip rect and overscan bounds while waiting for the next committed frame. The BEAM still owns the committed viewport, cursor, selection, layout, row identity, and hit-test state.
 
 ---
 
