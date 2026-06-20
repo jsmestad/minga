@@ -117,14 +117,14 @@ defmodule Minga.Git.Repo.Profile do
   def degrades_visibly?(%__MODULE__{}), do: false
 
   @doc """
-  Returns the absolute path of the sole sparse-checkout cone directory, or `nil`.
+  Returns the absolute path of the sole sparse-checkout leaf cone directory, or `nil`.
 
   In cone mode the sparse-checkout file lists each included directory as a
   `/dir/` line, alongside the `/*` and `!/*/` preamble that keeps root files and
-  excludes everything else. When exactly one directory is listed, the checkout
-  is effectively rooted at that directory, so project-root resolution can use it
-  instead of the git root. Multiple cones, an empty cone, or a non-cone pattern
-  file return `nil` so callers keep git-root / nearest-marker behavior.
+  excludes everything else. Parent scaffolding lines such as `!/apps/*/` are
+  ignored, so a nested checkout like `apps/web` resolves to the leaf cone only.
+  Any non-empty line outside those cone forms makes the file non-cone, so
+  callers keep git-root / nearest-marker behavior.
   """
   @spec single_cone_dir(String.t()) :: String.t() | nil
   def single_cone_dir(git_root) when is_binary(git_root) do
@@ -140,25 +140,66 @@ defmodule Minga.Git.Repo.Profile do
 
     case File.read(path) do
       {:ok, content} ->
-        content
-        |> String.split("\n", trim: true)
-        |> Enum.map(&String.trim/1)
-        |> Enum.filter(&cone_dir_line?/1)
-        |> Enum.map(&String.trim(&1, "/"))
-        |> Enum.reject(&(&1 == ""))
+        lines = content |> String.split("\n", trim: true) |> Enum.map(&String.trim/1)
+
+        if cone_mode_file?(lines) do
+          scaffold_dirs = lines |> Enum.flat_map(&cone_scaffold_dir/1) |> MapSet.new()
+
+          lines
+          |> Enum.flat_map(&cone_dir/1)
+          |> Enum.reject(&MapSet.member?(scaffold_dirs, &1))
+        else
+          []
+        end
 
       {:error, _reason} ->
         []
     end
   end
 
-  # Cone-mode directory entries look like `/path/`. Skip the `/*` root-files
-  # preamble and any `!`-negated exclusion line.
-  @spec cone_dir_line?(String.t()) :: boolean()
-  defp cone_dir_line?("/*"), do: false
-  defp cone_dir_line?("!" <> _), do: false
-  defp cone_dir_line?("/" <> _ = line), do: String.ends_with?(line, "/")
-  defp cone_dir_line?(_), do: false
+  @spec cone_mode_file?([String.t()]) :: boolean()
+  defp cone_mode_file?(lines) do
+    "/*" in lines and "!/*/" in lines and Enum.all?(lines, &cone_line?/1)
+  end
+
+  @spec cone_line?(String.t()) :: boolean()
+  defp cone_line?("/*"), do: true
+  defp cone_line?("!/*/"), do: true
+
+  defp cone_line?("!/" <> rest) do
+    path = String.trim_trailing(rest, "/*/")
+    String.ends_with?(rest, "/*/") and path != "" and not String.contains?(path, ["*", "?", "["])
+  end
+
+  defp cone_line?("/" <> rest) do
+    String.ends_with?(rest, "/") and rest != "" and not String.contains?(rest, ["*", "?", "["])
+  end
+
+  defp cone_line?(_), do: false
+
+  # Cone-mode directory entries look like `/path/`.
+  @spec cone_dir(String.t()) :: [String.t()]
+  defp cone_dir("/*"), do: []
+  defp cone_dir("!/*/"), do: []
+  defp cone_dir("!/" <> _), do: []
+
+  defp cone_dir("/" <> _ = line) do
+    if String.ends_with?(line, "/"), do: [String.trim(line, "/")], else: []
+  end
+
+  defp cone_dir(_), do: []
+
+  # Nested cone scaffolding lines look like `!/apps/*/`.
+  @spec cone_scaffold_dir(String.t()) :: [String.t()]
+  defp cone_scaffold_dir("!/" <> rest) do
+    case String.trim_trailing(rest, "/*/") do
+      ^rest -> []
+      "" -> []
+      dir -> [String.trim_leading(dir, "/")]
+    end
+  end
+
+  defp cone_scaffold_dir(_), do: []
 
   @spec sparse_checkout?(String.t()) :: boolean()
   defp sparse_checkout?(git_root) do

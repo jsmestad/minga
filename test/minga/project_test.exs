@@ -26,6 +26,13 @@ defmodule Minga.ProjectTest do
   # prior casts have been handled.
   defp flush(name), do: :sys.get_state(name)
 
+  @spec write_sparse_checkout(String.t(), String.t()) :: :ok
+  defp write_sparse_checkout(dir, content) do
+    sparse_file = Path.join([dir, ".git", "info", "sparse-checkout"])
+    File.mkdir_p!(Path.dirname(sparse_file))
+    File.write!(sparse_file, content)
+  end
+
   # Waits for the async rebuild Task to complete.
   # Subscribes to :project_rebuilt and uses assert_receive if the
   # GenServer is still rebuilding. Pins root to avoid consuming
@@ -76,9 +83,7 @@ defmodule Minga.ProjectTest do
       File.mkdir_p!(cone)
       File.write!(Path.join(cone, "main.ex"), "")
 
-      sparse_file = Path.join([project, ".git", "info", "sparse-checkout"])
-      File.mkdir_p!(Path.dirname(sparse_file))
-      File.write!(sparse_file, "/*\n!/*/\n/apps/web/\n")
+      write_sparse_checkout(project, "/*\n!/*/\n/apps/\n!/apps/*/\n/apps/web/\n")
 
       {_pid, name} = start_project!()
       # A file in the cone with no nearer marker would otherwise resolve to git-root.
@@ -88,15 +93,32 @@ defmodule Minga.ProjectTest do
       assert Project.root(name) == cone
     end
 
+    test "keeps nearer markers ahead of sparse-cone fallback", %{tmp_dir: tmp} do
+      project = Path.join(tmp, "nearer_marker")
+      sparse_root = Path.join(project, "apps")
+      cone = Path.join(project, "apps/web")
+      lib = Path.join(cone, "lib")
+      File.mkdir_p!(lib)
+      File.write!(Path.join(cone, "mix.exs"), "")
+      File.write!(Path.join(lib, "main.ex"), "")
+
+      write_sparse_checkout(project, "/*\n!/*/\n/apps/\n")
+
+      {_pid, name} = start_project!()
+      Project.detect_and_set(name, Path.join(lib, "main.ex"))
+      flush(name)
+
+      assert Project.root(name) == cone
+      assert sparse_root != cone
+    end
+
     test "keeps git-root for a multi-cone sparse checkout", %{tmp_dir: tmp} do
       project = Path.join(tmp, "multi_cone")
       web = Path.join(project, "apps/web")
       File.mkdir_p!(web)
       File.write!(Path.join(web, "main.ex"), "")
 
-      sparse_file = Path.join([project, ".git", "info", "sparse-checkout"])
-      File.mkdir_p!(Path.dirname(sparse_file))
-      File.write!(sparse_file, "/*\n!/*/\n/apps/web/\n/apps/api/\n")
+      write_sparse_checkout(project, "/*\n!/*/\n/apps/\n!/apps/*/\n/apps/web/\n/apps/api/\n")
 
       {_pid, name} = start_project!()
       Project.detect_and_set(name, Path.join(web, "main.ex"))
