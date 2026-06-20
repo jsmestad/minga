@@ -242,6 +242,56 @@ defmodule MingaEditor.UI.Picker.FileSourceTest do
     assert hot_index < cold_index
   end
 
+  test "reads the project file cache for the active root without re-discovering on disk",
+       %{tmp_dir: tmp_dir} do
+    project = Path.join(tmp_dir, "cache_active_root_#{:erlang.unique_integer([:positive])}")
+    File.mkdir_p!(project)
+    File.write!(Path.join(project, "mix.exs"), "")
+    File.write!(Path.join(project, "cached.ex"), "cached")
+
+    Minga.Events.subscribe(:project_rebuilt)
+    Minga.Project.switch(project)
+    await_project_rebuild(project)
+
+    # Create a new file AFTER the cache was built. A fresh discovery would list
+    # it; reading the cache must not, proving the picker uses Minga.Project.files/0.
+    File.write!(Path.join(project, "added_after_cache.ex"), "late")
+
+    ctx =
+      start_editor("cached", file_path: Path.join(project, "cached.ex"), project_root: project)
+
+    ids = ctx |> editor_state() |> FileSource.candidates() |> Enum.map(& &1.id)
+
+    assert "cached.ex" in ids
+    refute "added_after_cache.ex" in ids
+  end
+
+  test "falls back to direct discovery for a root that is not the active project",
+       %{tmp_dir: tmp_dir} do
+    active = Path.join(tmp_dir, "fallback_active_#{:erlang.unique_integer([:positive])}")
+    other = Path.join(tmp_dir, "fallback_other_#{:erlang.unique_integer([:positive])}")
+    File.mkdir_p!(active)
+    File.mkdir_p!(other)
+    File.write!(Path.join(active, "mix.exs"), "")
+    File.write!(Path.join(other, "outside.txt"), "outside")
+
+    Minga.Events.subscribe(:project_rebuilt)
+    Minga.Project.switch(active)
+    await_project_rebuild(active)
+
+    ctx = start_editor("active", file_path: Path.join(active, "mix.exs"), project_root: active)
+
+    picker_context =
+      ctx
+      |> editor_state()
+      |> Context.from_editor_state(%{project_root: other})
+
+    ids = FileSource.candidates(picker_context) |> Enum.map(& &1.id)
+
+    # The non-active root is discovered directly on disk, not from the cache.
+    assert "outside.txt" in ids
+  end
+
   test "explicit picker project root overrides stale file tree root", %{tmp_dir: tmp_dir} do
     stale_root = Path.join(tmp_dir, "stale_file_source_root")
     selected_root = Path.join(tmp_dir, "selected_file_source_root")
