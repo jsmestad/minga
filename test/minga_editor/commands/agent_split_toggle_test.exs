@@ -3,6 +3,7 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
 
   alias MingaEditor.Agent.BufferSync
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.View.Preview
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.Commands.Agent, as: AgentCommands
@@ -320,6 +321,47 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
       new_state = AgentCommands.open_session(state, "sess-1")
 
       assert AgentAccess.panel(new_state).provenance_jump == nil
+    end
+  end
+
+  describe "scope_provenance_return/1" do
+    alias MingaEditor.Agent.ProvenanceJump
+
+    test "returns to the editor and clears the jump" do
+      session = fake_session()
+      state = base_state(active: true, session: session)
+
+      jump =
+        ProvenanceJump.request(1, {"/tmp/no_such_file.ex", 5}) |> ProvenanceJump.mark_landed()
+
+      state = AgentAccess.update_panel(state, &Panel.set_provenance_jump(&1, jump))
+      assert EditorState.active_tab_kind(state) == :agent
+
+      new_state = AgentCommands.scope_provenance_return(state)
+
+      assert EditorState.active_tab_kind(new_state) == :file
+      assert AgentAccess.panel(new_state).provenance_jump == nil
+    end
+
+    test "is a no-op with a status message when there is no active jump" do
+      state = base_state(active: true)
+      assert AgentAccess.panel(state).provenance_jump == nil
+
+      new_state = AgentCommands.scope_provenance_return(state)
+
+      assert %EditorState{} = new_state
+      assert EditorState.active_tab_kind(new_state) == :agent
+    end
+  end
+
+  describe "agent scope binding" do
+    alias Minga.Keymap.Bindings
+    alias Minga.Keymap.Scope.Agent, as: AgentScope
+
+    test "g b returns to the provenance source" do
+      trie = AgentScope.keymap(:normal, %{})
+      {:prefix, g_node} = Bindings.lookup(trie, {?g, 0})
+      assert {:command, :agent_provenance_return} = Bindings.lookup(g_node, {?b, 0})
     end
   end
 

@@ -1390,6 +1390,70 @@ defmodule MingaEditor.Commands.Agent do
   @spec scope_close(state()) :: state()
   def scope_close(state), do: return_to_editor(state)
 
+  @doc """
+  Returns to the source line a provenance jump came from.
+
+  Closes the loop for "jump from code into the agent": leaves the agent view,
+  reopens the origin file, and places the cursor on the line the user pressed
+  `SPC g w` on. No-op with a status message when there is no active jump.
+  """
+  @spec scope_provenance_return(state()) :: state()
+  def scope_provenance_return(state) do
+    case AgentAccess.panel(state).provenance_jump do
+      %ProvenanceJump{origin: {path, line}} ->
+        state
+        |> AgentAccess.update_panel(&Panel.clear_provenance_jump/1)
+        |> return_to_editor()
+        |> return_to_origin(path, line)
+
+      _ ->
+        EditorState.set_status(state, "No source line to return to")
+    end
+  end
+
+  # After return_to_editor we are on the origin's file tab; place the cursor on
+  # the origin line, reopening the file if it was closed in the meantime.
+  @spec return_to_origin(state(), String.t(), non_neg_integer()) :: state()
+  defp return_to_origin(state, path, line) do
+    active = state.workspace.buffers.active
+
+    if is_pid(active) and safe_file_path(active) == path do
+      safe_move_to(active, {line, 0})
+      state
+    else
+      open_origin_buffer(state, path, line)
+    end
+  end
+
+  @spec open_origin_buffer(state(), String.t(), non_neg_integer()) :: state()
+  defp open_origin_buffer(state, path, line) do
+    case Enum.find_index(state.workspace.buffers.list, &(safe_file_path(&1) == path)) do
+      nil ->
+        case Commands.start_buffer(path, EditorState.options_server(state)) do
+          {:ok, pid} ->
+            state = Commands.add_buffer(state, pid)
+            safe_move_to(pid, {line, 0})
+            state
+
+          {:error, _reason} ->
+            EditorState.set_status(state, "Could not reopen #{Path.basename(path)}")
+        end
+
+      idx ->
+        state = EditorState.switch_buffer(state, idx)
+        safe_move_to(state.workspace.buffers.active, {line, 0})
+        state
+    end
+  end
+
+  @spec safe_move_to(pid(), {non_neg_integer(), non_neg_integer()}) :: :ok
+  defp safe_move_to(buf, pos) do
+    Buffer.move_to(buf, pos)
+    :ok
+  catch
+    :exit, _ -> :ok
+  end
+
   @doc "Dismisses active overlays or returns to the editor (ESC behavior)."
   @spec scope_dismiss_or_noop(state()) :: state()
   def scope_dismiss_or_noop(state), do: dismiss_agent_transient_or_return(state)
@@ -1883,6 +1947,7 @@ defmodule MingaEditor.Commands.Agent do
     {:agent_session_switcher, "Agent session switcher", :scope_session_switcher},
     {:agent_toggle_help, "Toggle agent help", :scope_toggle_help},
     {:agent_close, "Return to editor", :scope_close},
+    {:agent_provenance_return, "Return to provenance source line", :scope_provenance_return},
     {:agent_dismiss_or_noop, "Dismiss agent or no-op", :scope_dismiss_or_noop},
     {:agent_accept_hunk, "Accept agent hunk", :scope_accept_hunk},
     {:agent_reject_hunk, "Reject agent hunk", :scope_reject_hunk},
