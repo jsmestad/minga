@@ -4,8 +4,8 @@ defmodule MingaAdversarial.Findings do
 
   The model is asked for a strict JSON array of `{"line", "concern"}`, but
   models wander: they wrap output in prose or ```json fences. This parser is
-  deliberately tolerant — it extracts the outermost JSON array and drops
-  anything malformed — and never raises. A bad reply yields `[]`, which is
+  deliberately tolerant (it extracts the outermost JSON array and drops
+  anything malformed) and never raises. A bad reply yields `[]`, which is
   treated as "no findings" (and clears stale ones).
 
   Line numbers arrive 1-based and are converted to the 0-based lines the
@@ -34,7 +34,7 @@ defmodule MingaAdversarial.Findings do
   # a ```json fence doesn't defeat the decode.
   @spec extract_array(String.t()) :: String.t() | nil
   defp extract_array(text) do
-    # Byte offsets from :binary.match — slice by bytes, not graphemes.
+    # Byte offsets from :binary.match, so slice by bytes, not graphemes.
     with start when start != nil <- index_of(text, "["),
          stop when stop != nil and stop >= start <- last_index_of(text, "]") do
       binary_part(text, start, stop - start + 1)

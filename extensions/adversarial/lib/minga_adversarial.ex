@@ -3,23 +3,23 @@ defmodule MingaAdversarial do
   An adversarial pair programmer that challenges the assumptions in your code.
 
   On demand (or, depending on the skepticism dial, on save) it sends the
-  current file to the model with an adversarial prompt — "what does this code
-  assume that could break?" — and surfaces the answers as advisory gutter
+  current file to the model with an adversarial prompt ("what does this code
+  assume that could break?") and surfaces the answers as advisory gutter
   findings (amber `?`) you can read on hover and step through with the normal
   diagnostic navigation. Findings clear themselves as you edit.
 
   The **skepticism dial** (`:skepticism` option) controls how eager it is:
 
-    * `:off`      — disabled; the analyze command is a no-op.
-    * `:manual`   — only the `adversarial-analyze` command runs it (default).
-    * `:on_save`  — also analyzes on save.
-    * `:paranoid` — analyzes on save with a maximally skeptical prompt.
+    * `:off`: disabled; the analyze command is a no-op.
+    * `:manual`: only the `adversarial-analyze` command runs it (default).
+    * `:on_save`: also analyzes on save.
+    * `:paranoid`: analyzes on save with a maximally skeptical prompt.
 
   Default is `:manual`, so there is zero background model spend until you ask.
 
   Keybindings (under the `SPC a` "+ai" leader):
 
-    * `SPC a A` — challenge assumptions in the current file now
+    * `SPC a A`: challenge assumptions in the current file now
 
   Also `M-x adversarial-analyze`, `M-x adversarial-clear`, and
   `M-x adversarial-cycle-skepticism`.

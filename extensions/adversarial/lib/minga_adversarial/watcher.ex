@@ -130,7 +130,9 @@ defmodule MingaAdversarial.Watcher do
 
   def handle_info({:minga_event, :buffer_closed, %BufferClosedEvent{path: path}}, state)
       when is_binary(path) do
-    {:noreply, clear_path(state, path)}
+    # bump so an in-flight reply that lands after close is dropped, not
+    # republished onto a buffer that is no longer open.
+    {:noreply, clear_path(bump(state, path), path)}
   end
 
   # Model reply, tagged with the path+generation it was requested for.

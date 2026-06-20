@@ -57,8 +57,16 @@ defmodule MingaAdversarial.Prompt do
   @spec number_lines(String.t()) :: String.t()
   defp number_lines(content) do
     content
-    |> String.split("\n")
+    |> split_lines()
     |> Enum.with_index(1)
     |> Enum.map_join("\n", fn {line, n} -> "#{n}: #{line}" end)
+  end
+
+  # Split into lines without the trailing empty element a final newline
+  # produces, so we don't number a line past the end of the file.
+  @spec split_lines(String.t()) :: [String.t()]
+  defp split_lines(content) do
+    lines = String.split(content, "\n")
+    if String.ends_with?(content, "\n"), do: Enum.drop(lines, -1), else: lines
   end
 end

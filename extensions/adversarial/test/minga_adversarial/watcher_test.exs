@@ -126,6 +126,27 @@ defmodule MingaAdversarial.WatcherTest do
     assert Diagnostics.for_uri(uri) == []
   end
 
+  test "closing a buffer drops an in-flight reply instead of republishing", %{
+    path: path,
+    uri: uri
+  } do
+    server =
+      start_watcher(:close_stale,
+        skepticism: :manual,
+        dispatch: fn _thunk -> :ok end
+      )
+
+    # analyze starts generation 1; the buffer closes before the reply lands.
+    Watcher.analyze(server, path)
+    send(server, {:minga_event, :buffer_closed, %BufferClosedEvent{buffer: self(), path: path}})
+    flush(server)
+
+    # The late gen-1 reply must be dropped, not published onto the closed buffer.
+    send(server, {:ai_result, path, 1, {:ok, one_finding()}})
+    flush(server)
+    assert Diagnostics.for_uri(uri) == []
+  end
+
   test "cycle_skepticism advances through the dial", _ctx do
     server = start_watcher(:cycle, skepticism: :manual)
 
