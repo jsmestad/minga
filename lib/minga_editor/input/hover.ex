@@ -64,6 +64,19 @@ defmodule MingaEditor.Input.Hover do
     {:handled, execute_open_action(state, action)}
   end
 
+  # When focused, o toggles an expandable popup (e.g. full vs truncated thinking).
+  def handle_key(
+        %{shell_state: %{hover_popup: %HoverPopup{focused: true} = popup}} = state,
+        ?o,
+        0
+      ) do
+    if HoverPopup.expandable?(popup) do
+      {:handled, EditorState.set_hover_popup(state, HoverPopup.toggle_expand(popup))}
+    else
+      {:passthrough, EditorState.dismiss_hover_popup(state)}
+    end
+  end
+
   # When focused, q or Escape dismisses
   def handle_key(%{shell_state: %{hover_popup: %HoverPopup{focused: true}}} = state, ?q, 0) do
     {:handled, EditorState.dismiss_hover_popup(state)}

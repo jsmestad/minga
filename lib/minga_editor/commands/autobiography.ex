@@ -45,8 +45,7 @@ defmodule MingaEditor.Commands.Autobiography do
           EditorState.set_status(state, "No agent history for this line")
 
         {:ok, %Entry{} = entry} ->
-          action = {:open_session, entry.session_id, entry.tool_call_id}
-          show_popup(state, why_markdown(entry, path), action)
+          show_why_popup(state, entry, path)
 
         {:error, _reason} ->
           EditorState.set_status(state, "Could not read agent history")
@@ -71,6 +70,16 @@ defmodule MingaEditor.Commands.Autobiography do
 
   # ── Helpers ──────────────────────────────────────────────────────────────
 
+  @spec show_why_popup(EditorState.t(), Entry.t(), String.t()) :: EditorState.t()
+  defp show_why_popup(state, %Entry{} = entry, path) do
+    action = {:open_session, entry.session_id, entry.tool_call_id}
+
+    popup_opts =
+      if expandable_entry?(entry), do: [expanded: why_expanded_markdown(entry, path)], else: []
+
+    show_popup(state, why_markdown(entry, path), action, popup_opts)
+  end
+
   @spec with_path(EditorState.t(), (Buffer.t(), String.t() -> EditorState.t())) :: EditorState.t()
   defp with_path(state, fun) do
     buf = state.workspace.buffers.active
@@ -81,12 +90,14 @@ defmodule MingaEditor.Commands.Autobiography do
     end
   end
 
-  @spec show_popup(EditorState.t(), String.t(), HoverPopup.open_action() | nil) :: EditorState.t()
-  defp show_popup(state, markdown, open_action \\ nil) do
+  @spec show_popup(EditorState.t(), String.t(), HoverPopup.open_action() | nil, keyword()) ::
+          EditorState.t()
+  defp show_popup(state, markdown, open_action \\ nil, popup_opts \\ []) do
     vp = state.terminal_viewport
+    opts = Keyword.put(popup_opts, :theme, state.theme)
 
     markdown
-    |> HoverPopup.new(div(vp.rows, 2), div(vp.cols, 4), theme: state.theme)
+    |> HoverPopup.new(div(vp.rows, 2), div(vp.cols, 4), opts)
     |> HoverPopup.focus()
     |> maybe_open_action(open_action)
     |> then(&EditorState.set_hover_popup(state, &1))
@@ -99,15 +110,48 @@ defmodule MingaEditor.Commands.Autobiography do
   @doc false
   @spec why_markdown(Entry.t(), String.t()) :: String.t()
   def why_markdown(%Entry{} = entry, path) do
+    why_markdown(entry, path, @why_excerpt, why_hint(entry, :collapsed))
+  end
+
+  @doc false
+  @spec why_expanded_markdown(Entry.t(), String.t()) :: String.t()
+  def why_expanded_markdown(%Entry{} = entry, path) do
+    why_markdown(entry, path, :full, why_hint(entry, :expanded))
+  end
+
+  @spec why_markdown(Entry.t(), String.t(), pos_integer() | :full, String.t()) :: String.t()
+  defp why_markdown(%Entry{} = entry, path, excerpt, hint) do
     [
       "## Why is this line like this?",
       "`#{Path.basename(path)}` · #{format_time(entry.occurred_at)} · session #{short(entry.session_id)}",
       request_block(entry.user_request),
-      thinking_block(entry.thinking, @why_excerpt),
-      said_block(entry.assistant_text, @why_excerpt),
-      "_Enter: open the agent at this turn_"
+      thinking_block(entry.thinking, excerpt),
+      said_block(entry.assistant_text, excerpt),
+      hint
     ]
     |> compact_join()
+  end
+
+  # The popup is expandable only when something is actually truncated, so `o`
+  # never opens a view identical to the collapsed one.
+  @spec expandable_entry?(Entry.t()) :: boolean()
+  defp expandable_entry?(%Entry{thinking: thinking, assistant_text: assistant}) do
+    over_excerpt?(thinking) or over_excerpt?(assistant)
+  end
+
+  @spec over_excerpt?(String.t() | nil) :: boolean()
+  defp over_excerpt?(nil), do: false
+  defp over_excerpt?(text), do: String.length(one_line(text)) > @why_excerpt
+
+  @spec why_hint(Entry.t(), :collapsed | :expanded) :: String.t()
+  defp why_hint(%Entry{} = entry, phase) do
+    base = "Enter: open the agent at this turn"
+
+    cond do
+      not expandable_entry?(entry) -> "_#{base}_"
+      phase == :collapsed -> "_#{base} · o: expand_"
+      phase == :expanded -> "_#{base} · o: collapse_"
+    end
   end
 
   @doc false
@@ -138,11 +182,11 @@ defmodule MingaEditor.Commands.Autobiography do
   defp request_block(nil), do: nil
   defp request_block(text), do: "**You asked:** #{one_line(text)}"
 
-  @spec thinking_block(String.t() | nil, pos_integer()) :: String.t() | nil
+  @spec thinking_block(String.t() | nil, pos_integer() | :full) :: String.t() | nil
   defp thinking_block(nil, _max), do: nil
   defp thinking_block(text, max), do: "**Thinking:** #{truncate(one_line(text), max)}"
 
-  @spec said_block(String.t() | nil, pos_integer()) :: String.t() | nil
+  @spec said_block(String.t() | nil, pos_integer() | :full) :: String.t() | nil
   defp said_block(nil, _max), do: nil
   defp said_block(text, max), do: "**Agent:** #{truncate(one_line(text), max)}"
 
@@ -164,8 +208,10 @@ defmodule MingaEditor.Commands.Autobiography do
   @spec one_line(String.t()) :: String.t()
   defp one_line(text), do: text |> String.replace(~r/\s+/, " ") |> String.trim()
 
-  @spec truncate(String.t(), pos_integer()) :: String.t()
-  defp truncate(text, max) do
+  @spec truncate(String.t(), pos_integer() | :full) :: String.t()
+  defp truncate(text, :full), do: text
+
+  defp truncate(text, max) when is_integer(max) do
     if String.length(text) > max, do: String.slice(text, 0, max) <> "…", else: text
   end
 

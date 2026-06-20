@@ -57,9 +57,27 @@ defmodule MingaEditor.Commands.AutobiographyCommandTest do
       refute md =~ "You asked"
     end
 
-    test "truncates very long thinking" do
+    test "truncates very long thinking and offers the expand hint" do
       md = Autobiography.why_markdown(entry(thinking: String.duplicate("x", 1000)), "/p/a.ex")
       assert md =~ "…"
+      assert md =~ "o: expand"
+    end
+
+    test "short content shows no expand hint" do
+      md = Autobiography.why_markdown(entry(thinking: "short"), "/p/a.ex")
+      refute md =~ "o: expand"
+      assert md =~ "_Enter: open the agent at this turn_"
+    end
+  end
+
+  describe "why_expanded_markdown/2" do
+    test "shows the full thinking untruncated and a collapse hint" do
+      long = String.duplicate("z", 1000)
+      md = Autobiography.why_expanded_markdown(entry(thinking: long), "/p/a.ex")
+
+      assert md =~ long
+      refute md =~ "…"
+      assert md =~ "o: collapse"
     end
   end
 
