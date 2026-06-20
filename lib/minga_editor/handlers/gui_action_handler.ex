@@ -1280,12 +1280,12 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   @spec apply_git_result(state(), git_result() | {:error, String.t()} | term()) :: state()
   def apply_git_result(state, {:ok, success_msg, git_root}) do
     MingaEditor.refresh_git_repo(git_root)
-    EditorState.set_status(state, success_msg)
+    maybe_set_git_status(state, success_msg)
   end
 
   def apply_git_result(state, {:error, _reason, git_root, failure_msg}) do
     MingaEditor.refresh_git_repo(git_root)
-    EditorState.set_status(state, failure_msg)
+    maybe_surface_git_failure(state, failure_msg)
   end
 
   def apply_git_result(state, {:error, reason, git_root}) do
@@ -1293,11 +1293,11 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     # mutated the index already (its own result was dropped as stale), so the
     # repo state can have changed even though this latest op failed.
     MingaEditor.refresh_git_repo(git_root)
-    EditorState.set_status(state, "Git error: #{reason}")
+    maybe_surface_git_failure(state, "Git error: #{reason}")
   end
 
   def apply_git_result(state, :not_a_repo) do
-    EditorState.set_status(state, "Not in a git repository")
+    maybe_surface_git_failure(state, "Not in a git repository")
   end
 
   # The git work raised/exited/threw before producing a git_result(), so
@@ -1307,14 +1307,38 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   # handle_info, defeating AsyncAction's "a failing action can never crash the
   # editor" guarantee.
   def apply_git_result(state, {:error, reason}) when is_binary(reason) do
-    EditorState.set_status(state, "Git error: #{reason}")
+    maybe_surface_git_failure(state, "Git error: #{reason}")
   end
 
   # Defensive total fallback: any unexpected result shape degrades to a status
   # message instead of crashing the editor.
   def apply_git_result(state, other) do
     Minga.Log.warning(:editor, "[git] unexpected async git result: #{inspect(other)}")
-    EditorState.set_status(state, "Git action failed")
+    maybe_set_git_status(state, "Git action failed")
+  end
+
+  @spec maybe_set_git_status(state(), String.t()) :: state()
+  defp maybe_set_git_status(state, status) do
+    if git_worktree_action_queued?(state) do
+      state
+    else
+      EditorState.set_status(state, status)
+    end
+  end
+
+  @spec maybe_surface_git_failure(state(), String.t()) :: state()
+  defp maybe_surface_git_failure(state, status) do
+    if git_worktree_action_queued?(state) do
+      Minga.Log.error(:editor, status)
+      state
+    else
+      EditorState.set_status(state, status)
+    end
+  end
+
+  @spec git_worktree_action_queued?(state()) :: boolean()
+  defp git_worktree_action_queued?(state) do
+    match?(%{queue: [_ | _]}, EditorState.get_async_lane(state, @git_lane))
   end
 
   # ── Completion helpers ─────────────────────────────────────────────

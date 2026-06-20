@@ -3,8 +3,10 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
   GitOps GUI actions return control to the editor immediately and apply their
   result asynchronously, so a slow `git` command never blocks the input path.
   """
+  # async: false because this module mutates the global :minga Application env to swap git backends and coordinate blocking fake git work.
   use ExUnit.Case, async: false
 
+  alias Minga.Events
   alias MingaEditor.AsyncAction
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Handlers.GuiActionHandler
@@ -16,11 +18,23 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
   defmodule FakeGit do
     @moduledoc false
 
-    @spec root_for(String.t()) :: {:ok, String.t()}
-    def root_for(root), do: {:ok, root}
+    @spec root_for(String.t()) :: {:ok, String.t()} | :not_git
+    def root_for(root) do
+      case Application.get_env(:minga, :git_root_for_result) do
+        :not_git -> :not_git
+        _ -> {:ok, root}
+      end
+    end
 
-    @spec stage(String.t(), String.t()) :: :ok
-    def stage(_root, _path), do: :ok
+    @spec stage(String.t(), String.t()) :: :ok | {:error, String.t()}
+    def stage(_root, _path) do
+      maybe_block(:stage)
+
+      case Application.get_env(:minga, :git_stage_result) do
+        {:error, reason} -> {:error, reason}
+        _ -> :ok
+      end
+    end
 
     @spec unstage(String.t(), String.t()) :: :ok
     def unstage(_root, _path), do: :ok
@@ -39,6 +53,21 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
         {"fail commit", []} -> {:error, "boom commit"}
         {"fail amend", [amend: true]} -> {:error, "boom amend"}
         _ -> {:ok, "abc1234"}
+      end
+    end
+
+    @spec maybe_block(atom()) :: :ok
+    defp maybe_block(op) do
+      case Application.get_env(:minga, :git_stage_block) do
+        {^op, pid} ->
+          send(pid, {:fake_git_stage_blocked, op, self()})
+
+          receive do
+            {:continue_fake_git_stage, ^op} -> :ok
+          end
+
+        _ ->
+          :ok
       end
     end
 
@@ -171,6 +200,97 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
     assert stale_state.async_actions == current_async_actions
   end
 
+  test "queued git failure is logged while a commit keeps its pending status", %{state: state} do
+    Events.subscribe(:log_message)
+    Application.put_env(:minga, :git_stage_block, {:stage, self()})
+    Application.put_env(:minga, :git_stage_result, {:error, "boom stage"})
+
+    try do
+      state = GuiActionHandler.dispatch(state, {:git_stage_file, "a.ex"})
+      state = GuiActionHandler.dispatch(state, {:git_commit, "keep pending"})
+
+      assert EditorState.status_msg(state) == "Committing…"
+      assert_receive {:fake_git_stage_blocked, :stage, stage_pid}
+      assert length(state.async_actions[:git_worktree].queue) == 1
+
+      send(stage_pid, {:continue_fake_git_stage, :stage})
+
+      assert_receive {:async_action_result, :git_worktree, stage_token,
+                      {:error, "boom stage", git_root}}
+
+      {:noreply, state} =
+        MingaEditor.handle_info(
+          {:async_action_result, :git_worktree, stage_token, {:error, "boom stage", git_root}},
+          state
+        )
+
+      assert EditorState.status_msg(state) == "Committing…"
+
+      assert_receive {:minga_event, :log_message,
+                      %Minga.Events.LogMessageEvent{text: text, level: :error}}
+
+      assert text =~ "boom stage"
+
+      assert_receive {:async_action_result, :git_worktree, queued_token,
+                      {:ok, "Committed abc1234", ^git_root}}
+
+      {:noreply, state} =
+        MingaEditor.handle_info(
+          {:async_action_result, :git_worktree, queued_token,
+           {:ok, "Committed abc1234", git_root}},
+          state
+        )
+
+      assert EditorState.status_msg(state) == "Committed abc1234"
+      assert state.async_actions == %{}
+    after
+      Events.unsubscribe(:log_message)
+      restore_env(:git_stage_block, nil)
+      restore_env(:git_stage_result, nil)
+    end
+  end
+
+  test "git commit surfaces not a repo asynchronously", %{state: state} do
+    Application.put_env(:minga, :git_root_for_result, :not_git)
+
+    try do
+      state = GuiActionHandler.dispatch(state, {:git_commit, "msg"})
+
+      assert EditorState.status_msg(state) == "Committing…"
+      assert_receive {:async_action_result, :git_worktree, token, :not_a_repo}
+
+      {:noreply, state} =
+        MingaEditor.handle_info(
+          {:async_action_result, :git_worktree, token, :not_a_repo},
+          state
+        )
+
+      assert EditorState.status_msg(state) == "Not in a git repository"
+      assert state.async_actions == %{}
+    after
+      restore_env(:git_root_for_result, nil)
+    end
+  end
+
+  test "queued commit and amend keep their pending status when a prior git action finishes",
+       %{state: state} do
+    state =
+      run_queued_git_status_regression(
+        state,
+        {:git_commit, "keep pending"},
+        "Committing…",
+        "Committed abc1234"
+      )
+
+    _state =
+      run_queued_git_status_regression(
+        state,
+        {:git_commit, "keep pending", true},
+        "Amending…",
+        "Amended abc1234"
+      )
+  end
+
   test "applying a current git result posts the success status", %{state: state} do
     applied = GuiActionHandler.apply_git_result(state, {:ok, "Staged lib/foo.ex", "/tmp/repo"})
     assert EditorState.status_msg(applied) == "Staged lib/foo.ex"
@@ -206,6 +326,53 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
     # Only the in-flight stage has reported; the discard waits for advance.
     assert_receive {:async_action_result, :git_worktree, _t, {:ok, "Staged a.ex", _}}
     refute_received {:async_action_result, :git_worktree, _t2, {:ok, "Discarded b.ex", _}}
+  end
+
+  @spec run_queued_git_status_regression(
+          EditorState.t(),
+          tuple(),
+          String.t(),
+          String.t()
+        ) :: EditorState.t()
+  defp run_queued_git_status_regression(state, queued_action, pending_status, complete_status) do
+    Application.put_env(:minga, :git_stage_block, {:stage, self()})
+
+    try do
+      state = GuiActionHandler.dispatch(state, {:git_stage_file, "a.ex"})
+      state = GuiActionHandler.dispatch(state, queued_action)
+
+      assert EditorState.status_msg(state) == pending_status
+      assert_receive {:fake_git_stage_blocked, :stage, stage_pid}
+      assert length(state.async_actions[:git_worktree].queue) == 1
+
+      send(stage_pid, {:continue_fake_git_stage, :stage})
+
+      assert_receive {:async_action_result, :git_worktree, stage_token,
+                      {:ok, "Staged a.ex", git_root}}
+
+      {:noreply, state} =
+        MingaEditor.handle_info(
+          {:async_action_result, :git_worktree, stage_token, {:ok, "Staged a.ex", git_root}},
+          state
+        )
+
+      assert EditorState.status_msg(state) == pending_status
+
+      assert_receive {:async_action_result, :git_worktree, queued_token,
+                      {:ok, ^complete_status, ^git_root}}
+
+      {:noreply, state} =
+        MingaEditor.handle_info(
+          {:async_action_result, :git_worktree, queued_token, {:ok, complete_status, git_root}},
+          state
+        )
+
+      assert EditorState.status_msg(state) == complete_status
+      assert state.async_actions == %{}
+      state
+    after
+      Application.delete_env(:minga, :git_stage_block)
+    end
   end
 
   @spec restore_env(atom(), term() | nil) :: :ok
