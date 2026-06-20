@@ -292,6 +292,35 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
 
       assert %EditorState{} = new_state
     end
+
+    test "with a tool_call_id, arms a provenance jump to the turn's opening message" do
+      messages = [
+        {:user, "add auth"},
+        {:thinking, "use middleware", false},
+        {:tool_call, MingaAgent.ToolCall.new("tc_auth", "apply_diff")}
+      ]
+
+      {:ok, session} = StubServer.start_link(notify: self(), messages: messages)
+      state = base_state(session: session)
+
+      new_state = AgentCommands.open_session(state, "sess-42", "tc_auth")
+
+      jump = AgentAccess.panel(new_state).provenance_jump
+      assert jump != nil
+      # default ids zip with index+1, so the :user message is id 1.
+      assert jump.target_message_id == 1
+      refute jump.landed?
+      assert_receive {:stub_loaded_session, "sess-42"}
+    end
+
+    test "without a tool_call_id, arms no jump (plain resume)" do
+      {:ok, session} = StubServer.start_link(notify: self(), messages: [{:user, "hi"}])
+      state = base_state(session: session)
+
+      new_state = AgentCommands.open_session(state, "sess-1")
+
+      assert AgentAccess.panel(new_state).provenance_jump == nil
+    end
   end
 
   describe "round-trip toggle" do

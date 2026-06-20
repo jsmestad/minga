@@ -17,6 +17,7 @@ defmodule MingaEditor.Commands.Agent do
   alias MingaAgent.Message
   alias MingaAgent.Session
   alias MingaAgent.SessionStore
+  alias MingaEditor.Agent.ProvenanceJump
   alias MingaEditor.Agent.SlashCommand
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
@@ -90,11 +91,17 @@ defmodule MingaEditor.Commands.Agent do
   Opens the agent panel (creating it if needed) and resumes the persisted
   session `session_id` into it, then activates the agent view.
 
+  With a `tool_call_id`, arms a provenance jump so the chat lands on the turn
+  that produced that edit (the turn's opening user message) instead of the
+  bottom of the conversation, and remembers the source file+line for the
+  return trip. Without one, behaves like a plain resume (lands at the bottom).
+
   Unlike `toggle_agent_split/1` this never closes an open panel; it is the
   entry point for "jump from code into the agent session that wrote it".
   """
-  @spec open_session(state(), String.t()) :: state()
-  def open_session(state, session_id) when is_binary(session_id) do
+  @spec open_session(state(), String.t(), String.t() | nil) :: state()
+  def open_session(state, session_id, tool_call_id \\ nil) when is_binary(session_id) do
+    origin = capture_origin(state)
     state = ensure_agent_state(state)
     return_target = build_return_target(state)
 
@@ -108,6 +115,7 @@ defmodule MingaEditor.Commands.Agent do
 
           session_pid ->
             load_persisted_session(session_pid, session_id)
+            state = arm_provenance_jump(state, session_pid, tool_call_id, origin)
             activate_agent_view(state, return_target)
         end
 
@@ -122,6 +130,55 @@ defmodule MingaEditor.Commands.Agent do
     :ok
   catch
     :exit, _ -> :ok
+  end
+
+  # Source file + cursor line the user jumped from, for the return trip.
+  @spec capture_origin(state()) :: ProvenanceJump.origin() | nil
+  defp capture_origin(%{workspace: %{buffers: %{active: buf}}}) when is_pid(buf) do
+    with path when is_binary(path) <- safe_file_path(buf),
+         {line, _col} <- safe_cursor(buf) do
+      {path, line}
+    else
+      _ -> nil
+    end
+  end
+
+  defp capture_origin(_state), do: nil
+
+  @spec arm_provenance_jump(state(), pid(), String.t() | nil, ProvenanceJump.origin() | nil) ::
+          state()
+  defp arm_provenance_jump(state, _session_pid, nil, _origin), do: state
+
+  defp arm_provenance_jump(state, session_pid, tool_call_id, origin) do
+    with pairs when is_list(pairs) <- safe_messages_with_ids(session_pid),
+         target_id when is_integer(target_id) <-
+           AgentBufferSync.turn_anchor_id(pairs, tool_call_id) do
+      jump = ProvenanceJump.request(target_id, origin)
+      AgentAccess.update_panel(state, &Panel.set_provenance_jump(&1, jump))
+    else
+      _ -> state
+    end
+  end
+
+  @spec safe_file_path(pid()) :: String.t() | nil
+  defp safe_file_path(buf) do
+    Buffer.file_path(buf)
+  catch
+    :exit, _ -> nil
+  end
+
+  @spec safe_cursor(pid()) :: {non_neg_integer(), non_neg_integer()} | nil
+  defp safe_cursor(buf) do
+    Buffer.cursor(buf)
+  catch
+    :exit, _ -> nil
+  end
+
+  @spec safe_messages_with_ids(pid()) :: [{pos_integer(), term()}] | nil
+  defp safe_messages_with_ids(session_pid) do
+    Session.messages_with_ids(session_pid)
+  catch
+    :exit, _ -> nil
   end
 
   @spec ensure_agent_state(state()) :: state()
@@ -406,6 +463,9 @@ defmodule MingaEditor.Commands.Agent do
   end
 
   defp submit_prompt(state, panel, false, _session) do
+    # Sending a new prompt ends any provenance jump: the user is driving the
+    # conversation again, so streaming should resume its bottom-pinned scroll.
+    state = AgentAccess.update_panel(state, &Panel.clear_provenance_jump/1)
     text = UIState.prompt_text(panel)
     submit_prompt_text(state, text, SlashCommand.slash_command?(text))
   end

@@ -49,7 +49,7 @@ defmodule MingaEditor.Commands.AutobiographyCommandTest do
       assert md =~ "add auth handling"
       assert md =~ "use middleware"
       assert md =~ "Added an auth middleware."
-      assert md =~ "_Enter: open this session_"
+      assert md =~ "_Enter: open the agent at this turn_"
     end
 
     test "omits the request line when there is no recorded request" do

@@ -12,6 +12,7 @@ defmodule MingaEditor.AgentLifecycle do
 
   alias MingaEditor.Agent.BufferSync, as: AgentBufferSync
   alias MingaEditor.Agent.MarkdownHighlight
+  alias MingaEditor.Agent.ProvenanceJump
   alias MingaAgent.Session, as: AgentSession
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.View.Preview
@@ -122,16 +123,24 @@ defmodule MingaEditor.AgentLifecycle do
   defp sync_buffer_content(state, buffer, messages) do
     agent = AgentAccess.agent(state)
     panel = AgentAccess.panel(state)
+    jump = panel.provenance_jump
 
     sync_opts =
       if agent.pending_approval, do: [pending_approval: agent.pending_approval], else: []
 
+    sync_opts = add_session_display_opts(sync_opts, AgentAccess.session(state))
+
+    # A pending provenance jump may need an older, paged-out turn revealed so it
+    # can be landed on. Otherwise keep the panel's current display window.
+    display_start = jump_display_start(jump, panel.display_start_index, sync_opts[:message_ids])
+
     sync_opts =
-      if panel.display_start_index > 0,
-        do: Keyword.put(sync_opts, :display_start_index, panel.display_start_index),
+      if display_start > 0,
+        do: Keyword.put(sync_opts, :display_start_index, display_start),
         else: sync_opts
 
-    sync_opts = add_session_display_opts(sync_opts, AgentAccess.session(state))
+    cursor_target = if jump, do: ProvenanceJump.cursor_target(jump), else: {:bottom}
+    sync_opts = Keyword.put(sync_opts, :cursor_target, cursor_target)
 
     {line_index, display_messages, display_message_pairs} =
       AgentBufferSync.sync(buffer, messages, sync_opts)
@@ -153,7 +162,9 @@ defmodule MingaEditor.AgentLifecycle do
     )
 
     # Cache the line index and styled messages in the UI state so
-    # callers can read them without recomputing.
+    # callers can read them without recomputing. Persist the (possibly lowered)
+    # display window and mark the jump landed so later re-syncs hold position
+    # instead of re-pinning to the bottom.
     state =
       AgentAccess.update_panel(state, fn p ->
         %{
@@ -161,7 +172,9 @@ defmodule MingaEditor.AgentLifecycle do
           | cached_line_index: line_index,
             cached_display_messages: display_messages,
             cached_display_message_pairs: display_message_pairs,
-            cached_styled_messages: styled
+            cached_styled_messages: styled,
+            display_start_index: display_start,
+            provenance_jump: advance_jump(jump)
         }
       end)
 
@@ -169,6 +182,30 @@ defmodule MingaEditor.AgentLifecycle do
     # replace_generated_content clears edit deltas, so we do a full reparse.
     HighlightSync.request_reparse_buffer(state, buffer)
   end
+
+  # The display window needed to render the jump target. Reveals a paged-out
+  # target turn; otherwise keeps the panel's current window.
+  @spec jump_display_start(
+          ProvenanceJump.t() | nil,
+          non_neg_integer(),
+          [{pos_integer(), term()}] | nil
+        ) ::
+          non_neg_integer()
+  defp jump_display_start(nil, current, _pairs), do: current
+  defp jump_display_start(%ProvenanceJump{landed?: true}, current, _pairs), do: current
+
+  defp jump_display_start(%ProvenanceJump{target_message_id: id}, current, pairs) do
+    case pairs && Enum.find_index(pairs, fn {mid, _msg} -> mid == id end) do
+      nil -> current
+      target_index -> min(current, target_index)
+    end
+  end
+
+  # After the first sync that lands the jump, mark it landed so subsequent
+  # syncs hold the cursor (`:keep`) rather than re-landing or re-pinning.
+  @spec advance_jump(ProvenanceJump.t() | nil) :: ProvenanceJump.t() | nil
+  defp advance_jump(nil), do: nil
+  defp advance_jump(%ProvenanceJump{} = jump), do: ProvenanceJump.mark_landed(jump)
 
   @doc """
   Updates the active agent tab's label to the first user prompt (truncated).

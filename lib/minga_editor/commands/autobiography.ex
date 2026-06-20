@@ -45,7 +45,8 @@ defmodule MingaEditor.Commands.Autobiography do
           EditorState.set_status(state, "No agent history for this line")
 
         {:ok, %Entry{} = entry} ->
-          show_popup(state, why_markdown(entry, path), {:open_session, entry.session_id})
+          action = {:open_session, entry.session_id, entry.tool_call_id}
+          show_popup(state, why_markdown(entry, path), action)
 
         {:error, _reason} ->
           EditorState.set_status(state, "Could not read agent history")
@@ -104,7 +105,7 @@ defmodule MingaEditor.Commands.Autobiography do
       request_block(entry.user_request),
       thinking_block(entry.thinking, @why_excerpt),
       said_block(entry.assistant_text, @why_excerpt),
-      "_Enter: open this session_"
+      "_Enter: open the agent at this turn_"
     ]
     |> compact_join()
   end

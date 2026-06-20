@@ -220,15 +220,19 @@ defmodule MingaEditor.HoverPopupTest do
   end
 
   describe "with_open_action/2 and open_action_name/1" do
-    test "accepts an open_session action and exposes it" do
+    test "accepts an open_session action (with and without a tool_call_id) and exposes it" do
       popup =
         "x"
         |> HoverPopup.new(1, 1)
-        |> HoverPopup.with_open_action({:open_session, "sess-123"})
+        |> HoverPopup.with_open_action({:open_session, "sess-123", "tc1"})
 
-      assert popup.open_action == {:open_session, "sess-123"}
+      assert popup.open_action == {:open_session, "sess-123", "tc1"}
       assert HoverPopup.open_action?(popup)
-      assert HoverPopup.open_action_name({:open_session, "sess-123"}) == "open_session"
+      assert HoverPopup.open_action_name({:open_session, "sess-123", "tc1"}) == "open_session"
+
+      # tool_call_id is optional (plain resume).
+      no_tc = HoverPopup.with_open_action(HoverPopup.new("x", 1, 1), {:open_session, "s", nil})
+      assert no_tc.open_action == {:open_session, "s", nil}
     end
 
     test "still accepts goto_location and atom actions" do
