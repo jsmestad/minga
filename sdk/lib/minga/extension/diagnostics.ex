@@ -3,7 +3,7 @@ defmodule Minga.Extension.Diagnostics do
   Sanctioned diagnostics surface for extensions.
 
   Publish line-level findings (linters, analyzers, advisory agents) through
-  Minga's diagnostics pipeline — gutter signs, hover, navigation, picker —
+  Minga's diagnostics pipeline (gutter signs, hover, navigation, picker)
   without importing core internals. Findings are namespaced under the
   extension's own source and clamped to `:hint` severity; they render as a
   distinct amber `?` sign so users don't confuse advice with compiler output.

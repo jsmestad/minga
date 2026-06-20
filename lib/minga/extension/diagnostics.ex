@@ -3,8 +3,8 @@ defmodule Minga.Extension.Diagnostics do
   Sanctioned diagnostics surface for extensions.
 
   Lets an extension publish line-level findings (linters, analyzers,
-  advisory agents) through the core diagnostics pipeline — gutter signs,
-  hover, navigation, and the picker — without importing core internals.
+  advisory agents) through the core diagnostics pipeline (gutter signs,
+  hover, navigation, and the picker) without importing core internals.
 
   Findings are namespaced under the extension's own source (`:"ext:<name>"`),
   so an extension can never publish under or clear another producer's
