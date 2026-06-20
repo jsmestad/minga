@@ -19,6 +19,7 @@ defmodule MingaEditor.UI.Panel.MessageStoreTest do
         %MessageStore{}
         |> MessageStore.append("Hello world")
 
+      assert store.stream_instance > 0
       assert length(store.entries) == 1
       [entry] = store.entries
       assert entry.id == 1
@@ -100,6 +101,30 @@ defmodule MingaEditor.UI.Panel.MessageStoreTest do
     test "updates last_sent_id" do
       store = MessageStore.mark_sent(%MessageStore{}, 42)
       assert store.last_sent_id == 42
+    end
+  end
+
+  describe "consumer cursor helpers" do
+    test "reset_sent_cursor keeps entries and rewinds the consumer cursor" do
+      store = %MessageStore{} |> MessageStore.append("A") |> MessageStore.mark_sent(1)
+
+      reset = MessageStore.reset_sent_cursor(store)
+
+      assert reset.last_sent_id == 0
+      assert reset.stream_instance == store.stream_instance
+      assert Enum.map(reset.entries, & &1.text) == ["A"]
+    end
+
+    test "merge_sent_cursor never rewinds or crosses streams" do
+      current = %MessageStore{} |> MessageStore.append("A") |> MessageStore.mark_sent(2)
+      stale = MessageStore.mark_sent(current, 1)
+      other_stream = %MessageStore{} |> MessageStore.append("B") |> MessageStore.mark_sent(10)
+
+      assert MessageStore.merge_sent_cursor(current, stale).last_sent_id == 2
+      assert MessageStore.merge_sent_cursor(current, other_stream).last_sent_id == 2
+
+      assert Enum.map(MessageStore.merge_sent_cursor(current, other_stream).entries, & &1.text) ==
+               ["A"]
     end
   end
 

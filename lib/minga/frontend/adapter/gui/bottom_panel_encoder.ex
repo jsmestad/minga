@@ -44,8 +44,8 @@ defmodule Minga.Frontend.Adapter.GUI.BottomPanelEncoder do
     header <> encode_messages(model.stream_instance, model.messages)
   end
 
-  @spec encode_messages(non_neg_integer(), [BottomPanel.MessageEntry.t()]) :: binary()
-  defp encode_messages(stream_instance, entries) do
+  @spec encode_messages(BottomPanel.stream_instance(), [BottomPanel.MessageEntry.t()]) :: binary()
+  defp encode_messages(stream_instance, entries) when stream_instance in 1..0xFFFF_FFFF do
     entry_data =
       for entry <- entries, into: <<>> do
         path_bytes = entry.file_path || ""

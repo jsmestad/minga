@@ -207,7 +207,7 @@ Between frames, the frontend must not mutate committed editor state or present n
 
 ## Frame Transactions
 
-> Status: protocol_version 3 defines the transaction vocabulary (#2219 child A) and the BEAM now brackets every emitted frame with `begin_frame`/`commit_frame` (#2219 child B). Both frontends decode the markers and gate frames and latency on `commit_frame` exactly as they did `batch_end`; they ignore `base_frame_seq` for now. Children C/D move the frontends onto real staging/commit (paint nothing until the matching `commit_frame`, resync on truncation). This section is the authoritative spec those children build against.
+> Status: protocol_version 4 keeps the transaction vocabulary introduced in protocol_version 3 (#2219 child A) and the BEAM now brackets every emitted frame with `begin_frame`/`commit_frame` (#2219 child B). Both frontends decode the markers and gate frames and latency on `commit_frame` exactly as they did `batch_end`; they ignore `base_frame_seq` for now. Children C/D move the frontends onto real staging/commit (paint nothing until the matching `commit_frame`, resync on truncation). This section is the authoritative spec those children build against.
 
 A frame transaction makes a frame atomic: the BEAM brackets a frame's semantic commands between `begin_frame` and `commit_frame`, and a frontend paints nothing until it sees the matching `commit_frame`. This replaces the single `batch_end` terminator with an explicit open/close pair so a truncated or out-of-order stream can never paint a partial frame.
 

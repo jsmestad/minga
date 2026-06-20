@@ -529,6 +529,9 @@ func (m *Model) applyMutation(command protocol.Command) {
 	case protocol.CommandExtensionRuntime:
 		m.applyExtensionRuntime(command.ExtensionRuntime)
 	case protocol.CommandChrome:
+		if command.Chrome.Opcode == generated.OPGuiBottomPanel {
+			command.Chrome.Bottom = m.mergedBottomPanel(command.Chrome.Bottom)
+		}
 		m.chrome[command.Chrome.Opcode] = command.Chrome
 		switch command.Chrome.Opcode {
 		case generated.OPGuiTheme:
@@ -551,6 +554,37 @@ func (m *Model) applyMutation(command protocol.Command) {
 			m.surfacePlacements = command.Chrome.Placements
 		}
 	}
+}
+
+func (m *Model) mergedBottomPanel(next protocol.BottomPanel) protocol.BottomPanel {
+	currentPayload, ok := m.chrome[generated.OPGuiBottomPanel]
+	if !next.Visible {
+		if ok {
+			next.StreamInstance = currentPayload.Bottom.StreamInstance
+			next.Messages = currentPayload.Bottom.Messages
+		}
+		return next
+	}
+
+	if !ok || currentPayload.Bottom.StreamInstance != next.StreamInstance {
+		return next
+	}
+
+	seen := make(map[uint32]struct{}, len(currentPayload.Bottom.Messages)+len(next.Messages))
+	messages := make([]protocol.PanelMessage, 0, len(currentPayload.Bottom.Messages)+len(next.Messages))
+	for _, msg := range currentPayload.Bottom.Messages {
+		seen[msg.ID] = struct{}{}
+		messages = append(messages, msg)
+	}
+	for _, msg := range next.Messages {
+		if _, ok := seen[msg.ID]; ok {
+			continue
+		}
+		seen[msg.ID] = struct{}{}
+		messages = append(messages, msg)
+	}
+	next.Messages = messages
+	return next
 }
 
 // applyExtensionRuntime stores the latest gui_extension_runtime (0xA3) envelope

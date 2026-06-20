@@ -19,27 +19,41 @@ defmodule MingaEditor.UI.Panel.MessageStore do
   @type subsystem ::
           :editor | :lsp | :parser | :git | :render | :agent | :zig | :gui
 
+  @type stream_instance :: 1..0xFFFF_FFFF
+
   @type t :: %__MODULE__{
           entries: [Entry.t()],
           next_id: pos_integer(),
           last_sent_id: non_neg_integer(),
-          stream_instance: pos_integer()
+          stream_instance: 0 | stream_instance()
         }
 
   defstruct entries: [],
             next_id: 1,
             last_sent_id: 0,
-            stream_instance: 1
+            stream_instance: 0
 
   @doc "Creates a message stream with a producer-assigned restart instance."
   @spec new() :: t()
   def new do
-    %__MODULE__{stream_instance: System.unique_integer([:monotonic, :positive])}
+    %__MODULE__{stream_instance: next_stream_instance()}
+  end
+
+  @doc "Ensures a raw struct has a producer-assigned restart instance."
+  @spec ensure_stream_instance(t()) :: t()
+  def ensure_stream_instance(%__MODULE__{stream_instance: instance} = store)
+      when instance in 1..0xFFFF_FFFF do
+    store
+  end
+
+  def ensure_stream_instance(%__MODULE__{} = store) do
+    %{store | stream_instance: next_stream_instance()}
   end
 
   @doc "Append a structured log entry. Trims to #{@max_entries} entries."
   @spec append(t(), String.t(), level(), subsystem()) :: t()
   def append(%__MODULE__{} = store, text, level \\ :info, subsystem \\ :editor) do
+    store = ensure_stream_instance(store)
     file_path = extract_file_path(text)
 
     entry = %Entry{
@@ -72,6 +86,23 @@ defmodule MingaEditor.UI.Panel.MessageStore do
   def mark_sent(%__MODULE__{} = store, id) do
     %{store | last_sent_id: id}
   end
+
+  @doc "Resets the consumer send cursor after frontend state is lost."
+  @spec reset_sent_cursor(t()) :: t()
+  def reset_sent_cursor(%__MODULE__{} = store), do: %{store | last_sent_id: 0}
+
+  @doc "Merges the producer's sent cursor without replacing newer entries."
+  @spec merge_sent_cursor(t(), t()) :: t()
+  def merge_sent_cursor(
+        %__MODULE__{stream_instance: instance} = current,
+        %__MODULE__{
+          stream_instance: instance
+        } = emitted
+      ) do
+    %{current | last_sent_id: max(current.last_sent_id, emitted.last_sent_id)}
+  end
+
+  def merge_sent_cursor(%__MODULE__{} = current, %__MODULE__{}), do: current
 
   @doc "Parse level and subsystem from a log message text prefix."
   @spec parse_prefix(String.t()) :: {level(), subsystem(), String.t()}
@@ -144,4 +175,14 @@ defmodule MingaEditor.UI.Panel.MessageStore do
   def subsystem_byte(:agent), do: 5
   def subsystem_byte(:zig), do: 6
   def subsystem_byte(:gui), do: 7
+
+  @spec next_stream_instance() :: stream_instance()
+  defp next_stream_instance do
+    normalize_stream_instance(System.unique_integer([:monotonic, :positive]))
+  end
+
+  @spec normalize_stream_instance(pos_integer()) :: stream_instance()
+  defp normalize_stream_instance(instance) do
+    rem(instance - 1, 0xFFFF_FFFF) + 1
+  end
 end

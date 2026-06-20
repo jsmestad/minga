@@ -31,7 +31,8 @@ defmodule MingaEditor.RenderModel.UI.BottomPanelBuilder do
     {%BottomPanel{visible?: false}, store}
   end
 
-  defp build_panel(%{visible: true} = panel, store) do
+  defp build_panel(%{visible: true} = panel, %MessageStore{} = store) do
+    store = MessageStore.ensure_stream_instance(store)
     active_index = Enum.find_index(panel.tabs, &(&1 == panel.active_tab)) || 0
 
     tabs =
@@ -51,11 +52,9 @@ defmodule MingaEditor.RenderModel.UI.BottomPanelBuilder do
     resolve_content(panel.active_tab, base, store)
   end
 
-  @spec message_stream_instance(term()) :: non_neg_integer()
+  @spec message_stream_instance(MessageStore.t()) :: MessageStore.stream_instance()
   defp message_stream_instance(%MessageStore{stream_instance: stream_instance}),
     do: stream_instance
-
-  defp message_stream_instance(_store), do: 0
 
   @spec resolve_content(atom(), BottomPanel.t(), term()) :: {BottomPanel.t(), term()}
   defp resolve_content(:messages, base, store) do

@@ -17,12 +17,15 @@ defmodule Minga.RenderModel.UI.BottomPanel do
   @typedoc "A tab definition: its wire type byte and display name."
   @type tab :: {type_byte :: non_neg_integer(), name :: String.t()}
 
+  @typedoc "Producer-assigned Messages stream identity. Hidden panels keep 0 because they do not encode content."
+  @type stream_instance :: 1..0xFFFF_FFFF
+
   @type t :: %__MODULE__{
           visible?: boolean(),
           active_tab_index: non_neg_integer(),
           height_percent: non_neg_integer(),
           filter_byte: non_neg_integer(),
-          stream_instance: non_neg_integer(),
+          stream_instance: 0 | stream_instance(),
           tabs: [tab()],
           messages: [MessageEntry.t()]
         }

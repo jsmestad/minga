@@ -25,6 +25,7 @@ defmodule Minga.Frontend.Adapter.GUI.BottomPanelEncoderTest do
         height_percent: 30,
         filter_byte: 0,
         tabs: [{0x01, "Messages"}],
+        stream_instance: 99,
         messages: []
       }
 
@@ -35,7 +36,7 @@ defmodule Minga.Frontend.Adapter.GUI.BottomPanelEncoderTest do
       assert height == 30
       assert filter == 0
       assert tab_count == 1
-      assert <<0x01, 8::8, "Messages", 0::32, 0::16>> = rest
+      assert <<0x01, 8::8, "Messages", 99::32, 0::16>> = rest
     end
 
     test "encodes multiple tab defs and a non-zero filter" do
@@ -45,12 +46,13 @@ defmodule Minga.Frontend.Adapter.GUI.BottomPanelEncoderTest do
         height_percent: 45,
         filter_byte: 1,
         tabs: [{0x01, "Messages"}, {0x02, "Diagnostics"}, {0x03, "Terminal"}],
+        stream_instance: 99,
         messages: []
       }
 
       assert <<@op_gui_bottom_panel, 1, 1::8, 45::8, 1::8, 3::8, 0x01, l1::8,
                _n1::binary-size(l1), 0x02, l2::8, _n2::binary-size(l2), 0x03, l3::8,
-               _n3::binary-size(l3), 0::32, 0::16>> = encode(model)
+               _n3::binary-size(l3), 99::32, 0::16>> = encode(model)
     end
 
     test "encodes message entries" do
@@ -94,6 +96,7 @@ defmodule Minga.Frontend.Adapter.GUI.BottomPanelEncoderTest do
       model = %BottomPanel{
         visible?: true,
         tabs: [{0x01, "Messages"}],
+        stream_instance: 99,
         messages: [%MessageEntry{id: 1, level_byte: 0, subsystem_byte: 0, ts_secs: 0, text: "t"}]
       }
 
@@ -107,7 +110,12 @@ defmodule Minga.Frontend.Adapter.GUI.BottomPanelEncoderTest do
 
   describe "encode/2 cache skipping" do
     test "returns nil on the second call with an unchanged model" do
-      model = %BottomPanel{visible?: true, tabs: [{0x01, "Messages"}], messages: []}
+      model = %BottomPanel{
+        visible?: true,
+        tabs: [{0x01, "Messages"}],
+        stream_instance: 99,
+        messages: []
+      }
 
       {cmd1, caches} = BottomPanelEncoder.encode(model, Caches.new())
       assert cmd1 != nil
@@ -119,7 +127,13 @@ defmodule Minga.Frontend.Adapter.GUI.BottomPanelEncoderTest do
     test "re-encodes when the model changes" do
       {_cmd, caches} = BottomPanelEncoder.encode(%BottomPanel{}, Caches.new())
 
-      changed = %BottomPanel{visible?: true, tabs: [{0x01, "Messages"}], messages: []}
+      changed = %BottomPanel{
+        visible?: true,
+        tabs: [{0x01, "Messages"}],
+        stream_instance: 99,
+        messages: []
+      }
+
       {cmd2, _caches} = BottomPanelEncoder.encode(changed, caches)
       assert cmd2 != nil
     end
