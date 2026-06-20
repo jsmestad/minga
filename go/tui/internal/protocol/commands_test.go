@@ -284,6 +284,46 @@ func TestDecodeWindowRowsAndViewportDeltasIncludeRowRefs(t *testing.T) {
 	}
 }
 
+func TestDecodeWindowSectionedDeltaRequiresHeaderAndRows(t *testing.T) {
+	header := []byte{0, 7, 0x12, 0x34, 0x56, 0x78, 0xAA, 0, 9, 0, 11, 2, 0, 13}
+	rowsPayload := []byte{0, 0}
+
+	tests := []struct {
+		name   string
+		opcode byte
+		packet []byte
+	}{
+		{
+			name:   "rows delta missing header",
+			opcode: generated.OPGuiWindowRowsDelta,
+			packet: append([]byte{generated.OPGuiWindowRowsDelta, 1}, append([]byte{0x02, 0, byte(len(rowsPayload))}, rowsPayload...)...),
+		},
+		{
+			name:   "rows delta missing rows",
+			opcode: generated.OPGuiWindowRowsDelta,
+			packet: append([]byte{generated.OPGuiWindowRowsDelta, 1}, append([]byte{0x01, 0, byte(len(header))}, header...)...),
+		},
+		{
+			name:   "viewport delta missing header",
+			opcode: generated.OPGuiWindowViewportDelta,
+			packet: append([]byte{generated.OPGuiWindowViewportDelta, 1}, append([]byte{0x02, 0, byte(len(rowsPayload))}, rowsPayload...)...),
+		},
+		{
+			name:   "viewport delta missing rows",
+			opcode: generated.OPGuiWindowViewportDelta,
+			packet: append([]byte{generated.OPGuiWindowViewportDelta, 1}, append([]byte{0x01, 0, byte(len(header))}, header...)...),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := DecodeCommand(tt.packet); err == nil {
+				t.Fatalf("DecodeCommand(%s) unexpectedly succeeded", tt.name)
+			}
+		})
+	}
+}
+
 func TestDecodeSkipsFontCommandsWithoutDroppingFollowingCommands(t *testing.T) {
 	registerFont := []byte{generated.OPRegisterFont, 1, 0, 4, 'F', 'i', 'r', 'a'}
 	commitFrame := []byte{generated.OPCommitFrame, 0, 0, 0, 0, 0, 0, 0, 0}

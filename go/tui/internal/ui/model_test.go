@@ -621,7 +621,7 @@ func TestApplyWindowDeltaInvalidatesHashMismatchedRetainedRowRef(t *testing.T) {
 	}
 }
 
-func TestApplyWindowDeltaClearsStaleScrollPresentation(t *testing.T) {
+func TestApplyWindowDeltaPreservesOverlayScrollPresentation(t *testing.T) {
 	model := New(80, 24, nil)
 	model.putWindow(protocol.WindowContent{
 		ID:           7,
@@ -630,19 +630,65 @@ func TestApplyWindowDeltaClearsStaleScrollPresentation(t *testing.T) {
 		Scroll: protocol.ScrollPresentation{
 			WindowID:         7,
 			AnchorTop:        10,
+			AnchorLeft:       2,
 			VisibleStartLine: 10,
 			VisibleEndLine:   20,
 			ContentEpoch:     9,
+			LayoutGeneration: 11,
 		},
 	})
 
-	model.applyWindowDelta(protocol.WindowContent{ID: 7, ContentEpoch: 9})
+	model.applyWindowDelta(protocol.WindowContent{
+		ID:            7,
+		ContentEpoch:  9,
+		CursorVisible: true,
+		CursorRow:     3,
+		CursorCol:     4,
+		CursorShape:   2,
+		Cursorline:    protocol.Cursorline{Visible: true, Row: 3, BG: 0x112233},
+	})
 
 	window := model.windows[7]
+	if !window.ScrollSet {
+		t.Fatal("overlay delta should preserve existing scroll presentation metadata")
+	}
+	if window.Scroll != (protocol.ScrollPresentation{WindowID: 7, AnchorTop: 10, AnchorLeft: 2, VisibleStartLine: 10, VisibleEndLine: 20, ContentEpoch: 9, LayoutGeneration: 11}) {
+		t.Fatalf("overlay delta should not alter scroll presentation: %+v", window.Scroll)
+	}
+}
+
+func TestApplyWindowDeltaClearsStaleScrollPresentationFromSectionedDelta(t *testing.T) {
+	model := New(80, 24, nil)
+	baseline := protocol.ScrollPresentation{WindowID: 7, AnchorTop: 10, AnchorLeft: 2, VisibleStartLine: 10, VisibleEndLine: 20, ContentEpoch: 9, LayoutGeneration: 11}
+	model.putWindow(protocol.WindowContent{ID: 7, ContentEpoch: 9, ScrollSet: true, Scroll: baseline})
+
+	model.applyWindowDelta(protocol.WindowContent{ID: 7, ContentEpoch: 9, Rows: []protocol.WindowRow{}})
+
+	window := model.windows[7]
+	if len(window.Rows) != 0 {
+		t.Fatalf("empty sectioned delta should clear existing rows, got %+v", window.Rows)
+	}
 	if window.ScrollSet || window.Scroll != (protocol.ScrollPresentation{}) {
-		t.Fatalf("delta without scroll metadata should clear stale presentation metadata: %+v", window.Scroll)
+		t.Fatalf("sectioned delta without scroll metadata should clear stale presentation metadata: %+v", window.Scroll)
 	}
 
+	model.putWindow(protocol.WindowContent{ID: 7, ContentEpoch: 9, ScrollSet: true, Scroll: baseline})
+	model.applyWindowDelta(protocol.WindowContent{
+		ID:           7,
+		ContentEpoch: 9,
+		Rows:         []protocol.WindowRow{},
+		ScrollSet:    true,
+		Scroll:       protocol.ScrollPresentation{WindowID: 99, ContentEpoch: 9},
+	})
+
+	window = model.windows[7]
+	if window.ScrollSet || window.Scroll != (protocol.ScrollPresentation{}) {
+		t.Fatalf("sectioned delta with mismatched scroll metadata should clear stale presentation metadata: %+v", window.Scroll)
+	}
+}
+
+func TestApplyWindowDeltaAppliesMatchingScrollPresentation(t *testing.T) {
+	model := New(80, 24, nil)
 	model.putWindow(protocol.WindowContent{
 		ID:           7,
 		ContentEpoch: 9,
@@ -650,25 +696,24 @@ func TestApplyWindowDeltaClearsStaleScrollPresentation(t *testing.T) {
 		Scroll: protocol.ScrollPresentation{
 			WindowID:         7,
 			AnchorTop:        10,
+			AnchorLeft:       2,
 			VisibleStartLine: 10,
 			VisibleEndLine:   20,
 			ContentEpoch:     9,
+			LayoutGeneration: 11,
 		},
+		Rows: []protocol.WindowRow{{Text: "old"}},
 	})
 
-	model.applyWindowDelta(protocol.WindowContent{
-		ID:           7,
-		ContentEpoch: 9,
-		ScrollSet:    true,
-		Scroll: protocol.ScrollPresentation{
-			WindowID:     99,
-			ContentEpoch: 9,
-		},
-	})
+	next := protocol.ScrollPresentation{WindowID: 7, AnchorTop: 12, AnchorLeft: 3, VisibleStartLine: 12, VisibleEndLine: 22, ContentEpoch: 9, LayoutGeneration: 12}
+	model.applyWindowDelta(protocol.WindowContent{ID: 7, ContentEpoch: 9, Rows: []protocol.WindowRow{{Text: "new"}}, ScrollSet: true, Scroll: next})
 
-	window = model.windows[7]
-	if window.ScrollSet || window.Scroll != (protocol.ScrollPresentation{}) {
-		t.Fatalf("delta with mismatched scroll metadata should clear stale presentation metadata: %+v", window.Scroll)
+	window := model.windows[7]
+	if !window.ScrollSet || window.Scroll != next {
+		t.Fatalf("sectioned delta should replace scroll presentation metadata: %+v", window.Scroll)
+	}
+	if len(window.Rows) != 1 || window.Rows[0].Text != "new" {
+		t.Fatalf("sectioned delta should still update rows: %+v", window.Rows)
 	}
 }
 
