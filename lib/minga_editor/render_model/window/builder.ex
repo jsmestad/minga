@@ -1774,6 +1774,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       :warning -> :diag_warning
       :info -> :diag_info
       :hint -> :diag_hint
+      :diag_advisory -> :diag_advisory
       nil -> resolve_git_sign(buf_line, git_signs)
     end
   end

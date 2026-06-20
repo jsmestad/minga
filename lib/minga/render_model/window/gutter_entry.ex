@@ -15,6 +15,7 @@ defmodule Minga.RenderModel.Window.GutterEntry do
           | :diag_warning
           | :diag_info
           | :diag_hint
+          | :diag_advisory
           | :annotation
 
   @enforce_keys [:buf_line, :display_type, :sign_type]

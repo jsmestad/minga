@@ -168,6 +168,30 @@ defmodule Minga.DiagnosticsTest do
     end
   end
 
+  describe "gutter_signs_by_line/2" do
+    test "marks extension-only lines as :diag_advisory", %{server: s} do
+      ext = make_diag(line: 3, severity: :hint, source: "ext:adversarial")
+      Diagnostics.publish(s, :"ext:adversarial", @uri, [ext])
+
+      assert Diagnostics.gutter_signs_by_line(s, @uri)[3] == :diag_advisory
+    end
+
+    test "uses real severity for non-extension lines", %{server: s} do
+      Diagnostics.publish(s, :server_a, @uri, [make_diag(line: 1, severity: :warning)])
+
+      assert Diagnostics.gutter_signs_by_line(s, @uri)[1] == :warning
+    end
+
+    test "real diagnostics win over advisory on the same line", %{server: s} do
+      real = make_diag(line: 2, severity: :error, source: "expert")
+      ext = make_diag(line: 2, severity: :hint, source: "ext:adversarial")
+      Diagnostics.publish(s, :expert, @uri, [real])
+      Diagnostics.publish(s, :"ext:adversarial", @uri, [ext])
+
+      assert Diagnostics.gutter_signs_by_line(s, @uri)[2] == :error
+    end
+  end
+
   describe "count_tuples_by_uri_prefix/2" do
     test "returns counts for diagnostics under a URI prefix", %{server: s} do
       project_file = "file:///tmp/project/lib/a.ex"

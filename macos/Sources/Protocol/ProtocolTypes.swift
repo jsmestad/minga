@@ -484,6 +484,7 @@ enum Wire {
         case diagHint = 7
         case annotation = 8
         case gitRemoved = 9
+        case diagAdvisory = 10
     }
 
     /// A single gutter entry for one visible line.
