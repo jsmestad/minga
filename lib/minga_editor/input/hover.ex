@@ -92,6 +92,10 @@ defmodule MingaEditor.Input.Hover do
     LspActions.open_location(state, uri, line, col)
   end
 
+  defp execute_open_action(state, {:open_session, session_id}) do
+    Commands.Agent.open_session(state, session_id)
+  end
+
   defp execute_open_action(state, action) when is_atom(action) do
     case Commands.execute(state, action) do
       {new_state, _action} -> new_state

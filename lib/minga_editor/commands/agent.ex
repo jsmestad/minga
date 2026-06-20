@@ -86,6 +86,44 @@ defmodule MingaEditor.Commands.Agent do
     end
   end
 
+  @doc """
+  Opens the agent panel (creating it if needed) and resumes the persisted
+  session `session_id` into it, then activates the agent view.
+
+  Unlike `toggle_agent_split/1` this never closes an open panel; it is the
+  entry point for "jump from code into the agent session that wrote it".
+  """
+  @spec open_session(state(), String.t()) :: state()
+  def open_session(state, session_id) when is_binary(session_id) do
+    state = ensure_agent_state(state)
+    return_target = build_return_target(state)
+
+    case find_agent_tab(state) do
+      %Tab{id: agent_id} ->
+        state = state |> EditorState.switch_tab(agent_id) |> maybe_start_session()
+
+        case AgentAccess.session(state) do
+          nil ->
+            EditorState.set_status(state, "No agent session available")
+
+          session_pid ->
+            load_persisted_session(session_pid, session_id)
+            activate_agent_view(state, return_target)
+        end
+
+      nil ->
+        EditorState.set_status(state, "Could not open agent")
+    end
+  end
+
+  @spec load_persisted_session(pid(), String.t()) :: :ok
+  defp load_persisted_session(session_pid, session_id) do
+    Session.load_session(session_pid, session_id)
+    :ok
+  catch
+    :exit, _ -> :ok
+  end
+
   @spec ensure_agent_state(state()) :: state()
   defp ensure_agent_state(state) do
     agent = AgentAccess.agent(state)

@@ -31,7 +31,10 @@ defmodule MingaEditor.HoverPopup do
             open_action: nil
 
   @typedoc "Action available from a focused hover popup."
-  @type open_action :: atom() | {:goto_location, String.t(), non_neg_integer(), non_neg_integer()}
+  @type open_action ::
+          atom()
+          | {:goto_location, String.t(), non_neg_integer(), non_neg_integer()}
+          | {:open_session, String.t()}
 
   @typedoc "A hover popup state."
   @type t :: %__MODULE__{
@@ -84,6 +87,11 @@ defmodule MingaEditor.HoverPopup do
     %{popup | open_action: action}
   end
 
+  def with_open_action(%__MODULE__{} = popup, {:open_session, session_id} = action)
+      when is_binary(session_id) do
+    %{popup | open_action: action}
+  end
+
   @doc "Returns true when the popup exposes an Open action."
   @spec open_action?(t()) :: boolean()
   def open_action?(%__MODULE__{open_action: nil}), do: false
@@ -94,6 +102,7 @@ defmodule MingaEditor.HoverPopup do
   def open_action_name(nil), do: ""
   def open_action_name(action) when is_atom(action), do: Atom.to_string(action)
   def open_action_name({:goto_location, _uri, _line, _col}), do: "goto_location"
+  def open_action_name({:open_session, _session_id}), do: "open_session"
 
   @doc "Scroll content down (later lines visible)."
   @spec scroll_down(t()) :: t()
