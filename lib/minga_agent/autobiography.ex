@@ -18,6 +18,15 @@ defmodule MingaAgent.Autobiography do
     list of edit-turns.
 
   Both return `Entry` structs. Lines/files the agent never wrote return `nil` / `[]`.
+
+  ## Known limitations (v1)
+
+  Provenance is keyed on the file path recorded at edit time, matched exactly.
+  If a file is renamed or moved after the agent edited it, lookups miss and the
+  file reads as "no history" even though the edits exist under the old path.
+  Bridging renames would require consulting `git` (blame/log `--follow`); that
+  is deliberately out of scope for v1. Coverage is also bounded by the event
+  log's retention window.
   """
 
   alias MingaAgent.EventLog
@@ -112,16 +121,13 @@ defmodule MingaAgent.Autobiography do
   defp candidates(db, path, opts) do
     limit = Keyword.get(opts, :limit, @candidate_limit)
 
+    # ponytail: exact path match only. A basename/suffix fallback would match a
+    # same-named file in another directory and surface the WRONG file's history,
+    # which is worse than none. If abs/rel path forms ever diverge in practice,
+    # normalize both against the project root here, not by guessing on basename.
     case Store.file_edits_for_path(db, path, limit) do
-      {:ok, [_ | _] = edits} ->
-        edits
-
-      _ ->
-        # Fall back to basename suffix when absolute/relative path forms disagree.
-        case Store.file_edits_for_path_suffix(db, "/" <> Path.basename(path), limit) do
-          {:ok, edits} -> edits
-          {:error, _} -> []
-        end
+      {:ok, edits} -> edits
+      {:error, _} -> []
     end
   end
 

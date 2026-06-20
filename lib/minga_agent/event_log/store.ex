@@ -121,30 +121,6 @@ defmodule MingaAgent.EventLog.Store do
     query_events(db, sql, [path, limit])
   end
 
-  @doc """
-  Like `file_edits_for_path/3` but matches any stored path ending in `suffix`.
-
-  Fallback for when the editor's absolute path and the agent's stored path
-  disagree (e.g. project-relative storage). `%` and `_` in `suffix` are escaped.
-  """
-  @spec file_edits_for_path_suffix(db(), String.t(), pos_integer()) ::
-          {:ok, [EventRecord.t()]} | {:error, term()}
-  def file_edits_for_path_suffix(db, suffix, limit \\ 200)
-      when is_binary(suffix) and is_integer(limit) and limit > 0 do
-    escaped = suffix |> String.replace("\\", "\\\\") |> String.replace(["%", "_"], &("\\" <> &1))
-
-    sql = """
-    SELECT id, session_id, event_type, payload, wall_clock, monotonic_ts
-    FROM events
-    WHERE event_type = 'file_edit_proposed'
-      AND json_extract(payload, '$.path') LIKE ?1 ESCAPE '\\'
-    ORDER BY id DESC
-    LIMIT ?2
-    """
-
-    query_events(db, sql, ["%" <> escaped, limit])
-  end
-
   @doc "Returns the total number of agent events."
   @spec count(db()) :: {:ok, non_neg_integer()} | {:error, term()}
   def count(db) do

@@ -95,8 +95,9 @@ defmodule MingaEditor.Commands.Autobiography do
   defp maybe_open_action(popup, nil), do: popup
   defp maybe_open_action(popup, action), do: HoverPopup.with_open_action(popup, action)
 
+  @doc false
   @spec why_markdown(Entry.t(), String.t()) :: String.t()
-  defp why_markdown(%Entry{} = entry, path) do
+  def why_markdown(%Entry{} = entry, path) do
     [
       "## Why is this line like this?",
       "`#{Path.basename(path)}` · #{format_time(entry.occurred_at)} · session #{short(entry.session_id)}",
@@ -108,8 +109,9 @@ defmodule MingaEditor.Commands.Autobiography do
     |> compact_join()
   end
 
+  @doc false
   @spec autobiography_markdown([Entry.t()], String.t()) :: String.t()
-  defp autobiography_markdown(entries, path) do
+  def autobiography_markdown(entries, path) do
     shown = Enum.take(entries, @max_timeline_entries)
 
     header = [

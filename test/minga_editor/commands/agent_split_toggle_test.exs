@@ -269,6 +269,31 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
     Process.demonitor(ref, [:flush])
   end
 
+  describe "open_session/2" do
+    test "opens the agent view and resumes the requested session" do
+      {:ok, session} = StubServer.start_link(notify: self())
+      state = base_state(session: session)
+      assert EditorState.active_tab_kind(state) == :file
+
+      new_state = AgentCommands.open_session(state, "sess-42")
+
+      assert EditorState.active_tab_kind(new_state) == :agent
+      assert_receive {:stub_loaded_session, "sess-42"}
+    end
+
+    test "does not crash when the session pid is dead" do
+      # Unlinked so killing it does not propagate to the test process.
+      dead = spawn(fn -> :ok end)
+      ref = Process.monitor(dead)
+      assert_receive {:DOWN, ^ref, :process, ^dead, _}
+
+      state = base_state(session: dead)
+      new_state = AgentCommands.open_session(state, "sess-1")
+
+      assert %EditorState{} = new_state
+    end
+  end
+
   describe "round-trip toggle" do
     test "toggle cycle returns to file tab" do
       state = base_state()

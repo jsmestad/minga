@@ -86,11 +86,12 @@ defmodule MingaAgent.AutobiographyTest do
     assert Enum.map(entries, & &1.tool_call_id) == ["t3", "t2", "t1"]
   end
 
-  test "falls back to basename match when the exact path differs", %{db: db} do
-    # Agent stored a project-relative path; caller asks with an absolute one.
-    edit(db, "s1", "lib/router.ex", after: "def handle, do: :ok")
+  test "does not attribute a same-named file in another directory (no false positive)", %{db: db} do
+    # A different file shares the basename and even the exact line text.
+    edit(db, "s1", "/other/dir/router.ex", after: "def handle, do: :ok")
 
-    assert {:ok, %Entry{path: "lib/router.ex"}} =
-             Autobiography.for_line("/home/me/proj/lib/router.ex", "def handle", db: db)
+    # Exact-path lookup must not borrow the other file's history.
+    assert {:ok, nil} = Autobiography.for_line("/proj/lib/router.ex", "def handle", db: db)
+    assert {:ok, []} = Autobiography.for_file("/proj/lib/router.ex", db: db)
   end
 end
