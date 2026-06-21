@@ -17,6 +17,7 @@ defmodule Minga.Extension.DiagnosticsTest do
 
     assert [diag] = Diagnostics.for_uri(uri)
     assert diag.severity == :hint
+    assert diag.advisory == true
     assert diag.message == "assumes list non-empty"
     assert diag.source == "ext:#{ext}"
     assert diag.range.start_line == 4
