@@ -46,6 +46,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
           :macro_recording => {true, String.t()} | false,
           optional(:agent_status) => MingaEditor.State.Agent.status(),
           optional(:active_tool_name) => String.t() | nil,
+          optional(:agent_status_command) => String.t() | nil,
           optional(:agent_theme_colors) => MingaEditor.UI.Theme.Agent.t() | nil,
           optional(:mode_override) => String.t() | nil,
           optional(:lsp_status) => lsp_status(),
@@ -615,33 +616,41 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
 
   @spec build_agent_segments(modeline_data(), non_neg_integer()) :: [render_segment()]
   defp build_agent_segments(data, bar_bg) do
+    status_command = Map.get(data, :agent_status_command)
     status = Map.get(data, :agent_status)
     colors = Map.get(data, :agent_theme_colors)
     active_tool_name = Map.get(data, :active_tool_name)
 
-    case {status, colors} do
-      {nil, _colors} ->
+    case {status_command, status, colors} do
+      {custom, _status, c} when is_binary(custom) and custom != "" ->
+        [{" #{custom} ", agent_status_fg(c), bar_bg, [], nil}]
+
+      {_custom, nil, _colors} ->
         []
 
-      {:idle, c} ->
+      {_custom, :idle, c} ->
         [{" ◯ Idle ", c.status_idle, bar_bg, [], nil}]
 
-      {:plan, c} ->
+      {_custom, :plan, c} ->
         [{" PLAN ", c.status_thinking, bar_bg, [bold: true], nil}]
 
-      {:thinking, c} ->
+      {_custom, :thinking, c} ->
         [{" ⟳ Thinking ", c.status_thinking, bar_bg, [bold: true], nil}]
 
-      {:tool_executing, c} ->
+      {_custom, :tool_executing, c} ->
         [{agent_tool_label(active_tool_name), c.status_tool, bar_bg, [bold: true], nil}]
 
-      {:error, c} ->
+      {_custom, :error, c} ->
         [{" ✗ Error ", c.status_error, bar_bg, [bold: true], nil}]
 
       _other ->
         []
     end
   end
+
+  @spec agent_status_fg(Theme.Agent.t() | nil) :: non_neg_integer()
+  defp agent_status_fg(%{status_idle: color}), do: color
+  defp agent_status_fg(_colors), do: 0xFFFFFF
 
   @spec agent_tool_label(String.t() | nil) :: String.t()
   defp agent_tool_label(name) when is_binary(name) and name != "", do: " ⚡ Running #{name} "

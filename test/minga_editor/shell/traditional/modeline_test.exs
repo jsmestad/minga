@@ -126,6 +126,23 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
       assert :filetype_menu in segment_targets(@base_data)
     end
 
+    test "agent status command replaces built-in agent label" do
+      theme = MingaEditor.UI.Theme.get!(:doom_one)
+      agent_colors = MingaEditor.UI.Theme.agent_theme(theme)
+
+      data =
+        Map.merge(@base_data, %{
+          agent_status: :thinking,
+          agent_status_command: "sonnet | thinking",
+          agent_theme_colors: agent_colors
+        })
+
+      text = segments_text(data, theme)
+
+      assert String.contains?(text, "sonnet | thinking")
+      refute String.contains?(text, "Thinking")
+    end
+
     test "agent status indicators show text labels" do
       theme = MingaEditor.UI.Theme.get!(:doom_one)
       agent_colors = MingaEditor.UI.Theme.agent_theme(theme)
