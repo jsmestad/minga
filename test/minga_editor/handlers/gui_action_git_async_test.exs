@@ -147,8 +147,7 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
     stale_state =
       apply_async_result(
         state,
-        {:async_action_result, :git_worktree, stale_token,
-         {:ok, "Committed stub000", git_root}}
+        {:async_action_result, :git_worktree, stale_token, {:ok, "Committed stub000", git_root}}
       )
 
     assert stale_state == state
@@ -195,8 +194,7 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
 
     {:noreply, state} =
       MingaEditor.handle_info(
-        {:async_action_result, :git_worktree, queued_token,
-         {:ok, "Committed stub000", git_root}},
+        {:async_action_result, :git_worktree, queued_token, {:ok, "Committed stub000", git_root}},
         state
       )
 
@@ -288,7 +286,14 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
           String.t(),
           String.t()
         ) :: EditorState.t()
-  defp run_queued_git_status_regression(state, git_root, opts, queued_action, pending_status, complete_status) do
+  defp run_queued_git_status_regression(
+         state,
+         git_root,
+         opts,
+         queued_action,
+         pending_status,
+         complete_status
+       ) do
     Stub.set_stage_blocker(git_root, self())
 
     state = GuiActionHandler.dispatch(state, {:git_stage_file, "a.ex"}, opts)
