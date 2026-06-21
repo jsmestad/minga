@@ -96,6 +96,11 @@ defmodule MingaEditor.State do
 
   @enforce_keys [:port_manager, :workspace]
   defstruct backend: :headless,
+            # Collab session id this editor belongs to. The default/singleton
+            # editor uses MingaEditor.Collab.Names.default_session_id(); each
+            # attached client gets its own id. Used to resolve the session's
+            # renderer/frontend triad by name.
+            session_id: nil,
             port_manager: nil,
             renderer: nil,
             agent_ingest: nil,
@@ -121,6 +126,14 @@ defmodule MingaEditor.State do
             async_actions: %{},
             lsp: %LSPState{},
             parser_status: :available,
+            # The Parser.Manager server this editor subscribes to for highlight
+            # events, plus the monitor ref watching it. The parser is a
+            # node-shared one_for_one sibling (#2424), so a parser crash does NOT
+            # cascade into this editor. We monitor it instead and re-subscribe on
+            # its :DOWN; otherwise highlighting silently dies after a parser
+            # restart (init starts with an empty subscriber list).
+            parser_manager: nil,
+            parser_monitor: nil,
             focus_stack: [],
             capabilities: %Capabilities{},
             layout: nil,
@@ -169,6 +182,7 @@ defmodule MingaEditor.State do
 
   @type t :: %__MODULE__{
           backend: backend(),
+          session_id: String.t() | nil,
           port_manager: GenServer.server() | nil,
           renderer: pid() | nil,
           agent_ingest: pid() | nil,
@@ -191,6 +205,8 @@ defmodule MingaEditor.State do
           async_actions: %{optional(atom()) => async_lane()},
           lsp: LSPState.t(),
           parser_status: MingaEditor.Shell.Traditional.Modeline.parser_status(),
+          parser_manager: GenServer.server() | nil,
+          parser_monitor: reference() | nil,
           focus_stack: [module()],
           capabilities: Capabilities.t(),
           layout: MingaEditor.Layout.t() | nil,

@@ -68,7 +68,14 @@ defmodule MingaAgent.RemoteAPI do
          :ok <- authorize(session_id, token),
          {:ok, pid} <- SessionManager.get_session(session_id),
          :ok <- Session.subscribe(pid, subscriber_pid, role: role) do
-      attach_after_subscribe(pid, session_id, token, subscriber_pid, last_seen_event_id)
+      attach_after_subscribe(
+        pid,
+        session_id,
+        token,
+        subscriber_pid,
+        last_seen_event_id,
+        editor_session_id(session_id, subscriber_pid)
+      )
     end
   end
 
@@ -198,9 +205,23 @@ defmodule MingaAgent.RemoteAPI do
     end
   end
 
-  @spec attach_after_subscribe(pid(), String.t(), String.t(), pid(), non_neg_integer()) ::
+  @spec attach_after_subscribe(
+          pid(),
+          String.t(),
+          String.t(),
+          pid(),
+          non_neg_integer(),
+          String.t() | nil
+        ) ::
           {:ok, attach_result()} | {:error, term()}
-  defp attach_after_subscribe(pid, session_id, token, subscriber_pid, last_seen_event_id) do
+  defp attach_after_subscribe(
+         pid,
+         session_id,
+         token,
+         subscriber_pid,
+         last_seen_event_id,
+         editor_session_id
+       ) do
     case event_catchup(session_id, last_seen_event_id) do
       {:ok, events, latest_event_id} ->
         info = session_info(session_id, pid, token)
@@ -208,6 +229,7 @@ defmodule MingaAgent.RemoteAPI do
 
         {:ok,
          AttachResult.new(info, role, Session.messages(pid), Session.editor_snapshot(pid),
+           editor_session_id: editor_session_id,
            events: events,
            latest_event_id: latest_event_id
          )}
@@ -216,6 +238,42 @@ defmodule MingaAgent.RemoteAPI do
         Session.unsubscribe(pid, subscriber_pid)
         error
     end
+  end
+
+  @doc """
+  The per-client server-side editor session id for `{agent_session_id, client_pid}`.
+
+  Two clients on one host attach to the same agent `session_id` as different
+  subscriber processes; each must drive its own server-side editor (collab MVP,
+  #2424). This id is deterministic so the same client resolves the same editor
+  across the attach/detach pair, and distinct between distinct clients. It is a
+  pure function (no editor dependency) so the broker can mint it without reaching
+  up into the editor orchestration layer; starting/stopping the triad is the
+  caller's job via `MingaEditor.Collab.SessionManager`.
+
+  The client component is the pid's textual identity (`<X.Y.Z>` → `X.Y.Z`), not
+  `:erlang.phash2/1`. `phash2` hashes into a bounded range and so can collide
+  across distinct pids, which would make two clients share one editor through the
+  idempotent `start_session` branch. The pid's `{X, Y, Z}` triple is unique among
+  live pids for the node's lifetime, which is exactly the scope an attach/detach
+  pair lives in, so this is collision-free *and* still a pure recompute (detach
+  derives the same id from `client_pid` without any persisted lookup table).
+  """
+  @spec editor_session_id(String.t(), pid()) :: String.t()
+  def editor_session_id(agent_session_id, client_pid)
+      when is_binary(agent_session_id) and is_pid(client_pid) do
+    "#{agent_session_id}::#{client_pid_component(client_pid)}"
+  end
+
+  # The pid's textual identity with the surrounding "#PID<...>" stripped, so the
+  # id stays a clean "agent_session::X.Y.Z" without angle brackets.
+  @spec client_pid_component(pid()) :: String.t()
+  defp client_pid_component(client_pid) do
+    client_pid
+    |> :erlang.pid_to_list()
+    |> List.to_string()
+    |> String.trim_leading("<")
+    |> String.trim_trailing(">")
   end
 
   @spec authorize_driver(String.t(), String.t(), pid()) ::

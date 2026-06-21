@@ -21,10 +21,10 @@ defmodule MingaEditor.Watchdog do
   ## Supervision placement
 
   The Watchdog is an independent leaf child of `Runtime.Supervisor`
-  (`one_for_one`), placed before `MingaEditor.Supervisor` so it's ready to
+  (`one_for_one`), placed before the session triad supervisors so it's ready to
   receive signals from the moment the Editor boots. Under `one_for_one`,
   a Watchdog crash restarts only itself without affecting FileWatcher
-  or MingaEditor.Supervisor.
+  or the collab session supervisors.
   """
 
   use GenServer

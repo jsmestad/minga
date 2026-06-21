@@ -26,6 +26,9 @@ defmodule MingaAgent.RemoteAPI.AttachResult do
     :messages,
     :snapshot,
     :metadata,
+    # The per-client server-side editor session id (collab MVP, #2424). nil when
+    # the attach did not start a server-side editor triad.
+    :editor_session_id,
     events: [],
     latest_event_id: 0
   ]
@@ -38,6 +41,7 @@ defmodule MingaAgent.RemoteAPI.AttachResult do
           messages: [MingaAgent.Message.t()],
           snapshot: Session.editor_snapshot(),
           metadata: SessionMetadata.t(),
+          editor_session_id: String.t() | nil,
           events: [MingaAgent.EventLog.EventRecord.t()],
           latest_event_id: non_neg_integer()
         }
@@ -60,6 +64,7 @@ defmodule MingaAgent.RemoteAPI.AttachResult do
       messages: messages,
       snapshot: snapshot,
       metadata: info.metadata,
+      editor_session_id: Keyword.get(opts, :editor_session_id),
       events: Keyword.get(opts, :events, []),
       latest_event_id: Keyword.get(opts, :latest_event_id, 0)
     }

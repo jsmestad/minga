@@ -48,6 +48,7 @@ defmodule MingaEditor.Startup do
   @spec build_initial_state(keyword()) :: EditorState.t()
   def build_initial_state(opts) do
     backend = Keyword.get(opts, :backend, :headless)
+    session_id = Keyword.get(opts, :session_id, MingaEditor.Collab.Names.default_session_id())
     port_manager = Keyword.get(opts, :port_manager, MingaEditor.Frontend.Manager)
     keymap_server = Keyword.get(opts, :keymap_server, Minga.Keymap.default_server())
     events_registry = Keyword.get(opts, :events_registry, Minga.Events.default_registry())
@@ -65,8 +66,16 @@ defmodule MingaEditor.Startup do
     height = Keyword.get(opts, :height, 24)
     buffer = Keyword.get(opts, :buffer)
 
+    parser_manager = Keyword.get(opts, :parser_manager)
+
     subscribe_port(port_manager)
-    subscribe_to_parser(Keyword.get(opts, :parser_manager))
+    # Subscribe to the parser AND monitor it. The parser is a node-shared
+    # sibling, not a supervised ancestor of this editor (#2424), so its crash
+    # does not restart us. We watch its pid and re-subscribe on :DOWN (see
+    # MingaEditor.handle_info({:DOWN, ...})); the returned monitor ref is stored
+    # on state so that handler can recognize the parser's death.
+    parser_monitor = subscribe_to_parser(parser_manager)
+
     FileWatcherHelpers.maybe_watch_buffer(buffer)
 
     log_safe_mode_startup()
@@ -151,6 +160,7 @@ defmodule MingaEditor.Startup do
 
     state = %EditorState{
       backend: backend,
+      session_id: session_id,
       workspace: workspace,
       port_manager: port_manager,
       keymap_server: keymap_server,
@@ -163,7 +173,9 @@ defmodule MingaEditor.Startup do
       shell: shell_entry.module,
       shell_identity: ShellIdentity.new(shell_entry),
       shell_state: init_shell_state(shell_entry.module, opts),
-      session: EditorSessionState.new(Keyword.take(opts, [:swap_dir, :session_dir]))
+      session: EditorSessionState.new(Keyword.take(opts, [:swap_dir, :session_dir])),
+      parser_manager: parser_manager,
+      parser_monitor: parser_monitor
     }
 
     state =
@@ -285,6 +297,21 @@ defmodule MingaEditor.Startup do
     TabBar.restore_workspaces(tab_bar, WorkspacePersistence.scan(project_root), project_root)
   end
 
+  # Per-session-table naming convention (collab MVP, #2424).
+  #
+  # Today every session (default and attached clients) registers its sidebar /
+  # semantic-ui contributions under the *default* node table
+  # (`MingaEditor.Extension.Sidebar.default_table/0`), so the per-session notify
+  # targets that `MingaEditor.Collab.Cleanup` erases on detach do not exist yet
+  # and cleanup is a deliberate no-op.
+  #
+  # When per-session tables land, a non-default session must register here under
+  # the table named `:"collab_session_#{session_id}"`. That name is the agreed
+  # convention and is owned by `MingaEditor.Collab.Cleanup.session_table_name/1`,
+  # whose `clear_notify_targets/1` erases the matching persistent_term notify
+  # keys on detach. Keep these two sites in sync: the producer (this function)
+  # and the consumer (`Cleanup`) must use the same table name, or notify targets
+  # will leak across sessions.
   @spec register_sidebar_contributions(
           MingaEditor.State.FileTree.t(),
           MingaEditor.Extension.Sidebar.table()
@@ -407,19 +434,49 @@ defmodule MingaEditor.Startup do
   end
 
   @doc """
-  Subscribes to the parser manager for highlight events.
+  Subscribes to the parser manager for highlight events and monitors it.
+
+  The parser (`Minga.Parser.Manager`) is a node-shared `one_for_one` sibling of
+  the editor, not a supervised ancestor (#2424). A parser crash therefore does
+  *not* restart the editor, and the restarted parser's `init` starts with an
+  empty subscriber list, so without re-subscribing the editor would silently
+  stop receiving highlight events.
+
+  This resolves the parser to a live pid, subscribes the calling process, and
+  `Process.monitor`s the parser so the caller gets a `:DOWN` it can react to by
+  calling `resubscribe_to_parser/1`. Returns the monitor ref, or `nil` when the
+  parser is not currently running (e.g. headless tests) so there is nothing to
+  monitor; the caller re-resolves on the next attempt.
   """
-  @spec subscribe_to_parser(GenServer.server() | nil) :: :ok
-  def subscribe_to_parser(nil) do
-    Minga.Parser.Manager.subscribe()
+  @spec subscribe_to_parser(GenServer.server() | nil) :: reference() | nil
+  def subscribe_to_parser(parser_manager) do
+    server = parser_manager || Minga.Parser.Manager
+
+    case GenServer.whereis(server) do
+      pid when is_pid(pid) ->
+        Minga.Parser.Manager.subscribe(pid)
+        Process.monitor(pid)
+
+      _ ->
+        nil
+    end
   catch
-    :exit, _ -> :ok
+    :exit, _ ->
+      Minga.Log.warning(:editor, "Could not subscribe to parser manager")
+      nil
   end
 
-  def subscribe_to_parser(parser_manager) do
-    Minga.Parser.Manager.subscribe(parser_manager)
-  catch
-    :exit, _ -> Minga.Log.warning(:editor, "Could not subscribe to parser manager")
+  @doc """
+  Re-resolves the (possibly restarted) parser, re-subscribes, and re-monitors.
+
+  Called from `MingaEditor.handle_info/2` when the monitored parser dies. Robust
+  to the parser not being back up yet: if it cannot resolve a live pid it returns
+  `nil`, and the editor schedules a retry. Mirrors `subscribe_to_parser/1` so the
+  resolution rule (explicit server or the bare module name) stays in one place.
+  """
+  @spec resubscribe_to_parser(GenServer.server() | nil) :: reference() | nil
+  def resubscribe_to_parser(parser_manager) do
+    subscribe_to_parser(parser_manager)
   end
 
   @doc """

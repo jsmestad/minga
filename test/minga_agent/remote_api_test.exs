@@ -156,6 +156,47 @@ defmodule MingaAgent.RemoteAPITest do
     assert {:error, :not_found} = SessionManager.get_session(session_id)
   end
 
+  describe "editor_session_id/2 (collab MVP #2424)" do
+    test "is a deterministic pure recompute for the same client" do
+      client = idle_process()
+      on_exit(fn -> Process.exit(client, :kill) end)
+
+      id1 = RemoteAPI.editor_session_id("agent-sess", client)
+      id2 = RemoteAPI.editor_session_id("agent-sess", client)
+
+      assert id1 == id2
+      assert String.starts_with?(id1, "agent-sess::")
+    end
+
+    test "is distinct across distinct client pids (no hash collision)" do
+      # phash2 hashes into a bounded range and could collide; the pid identity
+      # is unique among live pids, so distinct clients always get distinct ids.
+      # Generate many concurrent live pids and assert no two share an id.
+      clients =
+        for _ <- 1..2_000 do
+          spawn(fn ->
+            receive do
+              :stop -> :ok
+            end
+          end)
+        end
+
+      on_exit(fn -> Enum.each(clients, &Process.exit(&1, :kill)) end)
+
+      ids = Enum.map(clients, &RemoteAPI.editor_session_id("agent-sess", &1))
+
+      assert length(Enum.uniq(ids)) == length(ids)
+    end
+
+    test "scopes the id under the agent session so the same client differs per session" do
+      client = idle_process()
+      on_exit(fn -> Process.exit(client, :kill) end)
+
+      refute RemoteAPI.editor_session_id("sess-a", client) ==
+               RemoteAPI.editor_session_id("sess-b", client)
+    end
+  end
+
   @spec wait_for_events(String.t(), non_neg_integer(), pos_integer(), non_neg_integer()) :: [
           MingaAgent.EventLog.EventRecord.t()
         ]

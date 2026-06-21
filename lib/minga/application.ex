@@ -22,6 +22,7 @@ defmodule Minga.Application do
       │   └── Minga.Language.Filetype.Registry
       ├── Minga.Buffer.Registry (Registry, :unique)
       ├── Minga.Buffer.Supervisor (DynamicSupervisor, one_for_one)
+      ├── MingaEditor.Collab.Registry (Registry, :unique)   (per-session triad naming)
       ├── Minga.Log.MessagesBuffer           (singleton *Messages* buffer owner)
       ├── Minga.Services.Supervisor (rest_for_one)
       │   ├── Minga.Services.Independent (one_for_one)
@@ -42,15 +43,25 @@ defmodule Minga.Application do
       │   ├── Minga.LSP.SyncServer
       │   └── Minga.Project
       ├── MingaAgent.Supervisor (DynamicSupervisor, one_for_one)
-      ├── Minga.Runtime.Supervisor (one_for_one, conditional)
-      │   ├── MingaEditor.Watchdog          (independent leaf)
-      │   ├── Minga.FileWatcher              (independent leaf)
-      │   └── MingaEditor.Supervisor (rest_for_one)
-      │       ├── Minga.Parser.Manager
+      ├── Minga.Runtime.Supervisor (one_for_one, interactive only)
+      │   ├── Minga.Parser.Manager                          (node-shared parser Port)
+      │   ├── MingaEditor.Watchdog                          (independent leaf)
+      │   ├── Minga.FileWatcher                             (independent leaf)
+      │   ├── MingaEditor.Collab.SessionManager (DynamicSupervisor)  (per-session triads)
+      │   └── MingaEditor.Collab.SessionSupervisor (rest_for_one)    (default session)
       │       ├── MingaEditor.Frontend.Manager
       │       ├── MingaEditor.Renderer.Server
       │       └── MingaEditor
+      ├── Minga.Runtime.HeadlessSupervisor (one_for_one, headless daemon only)
+      │   ├── Minga.Parser.Manager                          (node-shared parser Port)
+      │   └── MingaEditor.Collab.SessionManager (DynamicSupervisor)  (attached client triads)
       └── Minga.SystemObserver               (always-on process observer)
+
+  Exactly one of `Minga.Runtime.Supervisor` (interactive) or
+  `Minga.Runtime.HeadlessSupervisor` (headless daemon) is started, and only when
+  the corresponding mode is active. The headless variant hosts per-client editor
+  sessions on attach but runs no default interactive triad, watchdog, or file
+  watcher.
 
   In standalone (Burrito) mode, automatically processes CLI arguments
   after the supervision tree is up.
@@ -105,6 +116,10 @@ defmodule Minga.Application do
         Minga.Foundation.Supervisor,
         {Registry, keys: :unique, name: Minga.Buffer.Registry},
         {DynamicSupervisor, name: Minga.Buffer.Supervisor, strategy: :one_for_one},
+        # Node-shared registry for per-session editor triads (collab MVP). Keyed
+        # by {session_id, role}; the default session also registers under bare
+        # module names. Lives in base children so it survives editor restarts.
+        {Registry, keys: :unique, name: MingaEditor.Collab.Registry},
         Minga.Log.MessagesBuffer
       ] ++
         if minimal? do
@@ -114,17 +129,26 @@ defmodule Minga.Application do
         end
 
     editor_children =
-      if start_editor?() do
-        backend = Application.get_env(:minga, :backend, :tui)
+      cond do
+        start_editor?() ->
+          backend = Application.get_env(:minga, :backend, :tui)
 
-        [
-          # Runtime.Supervisor wraps Watchdog, FileWatcher, and Editor.Supervisor
-          # under one_for_one so leaf processes restart independently. A FileWatcher
-          # crash restarts only FileWatcher, not the renderer.
-          {Minga.Runtime.Supervisor, [backend: backend]}
-        ]
-      else
-        []
+          [
+            # Runtime.Supervisor wraps Watchdog, FileWatcher, and Editor.Supervisor
+            # under one_for_one so leaf processes restart independently. A FileWatcher
+            # crash restarts only FileWatcher, not the renderer.
+            {Minga.Runtime.Supervisor, [backend: backend]}
+          ]
+
+        host_sessions?() ->
+          # A headless daemon does not run the interactive editor, but it must
+          # still host per-client editor sessions on attach (collab MVP, #2424).
+          # Start just the session-hosting DynamicSupervisor and the node-shared
+          # parser it depends on, not the default interactive triad.
+          [Minga.Runtime.HeadlessSupervisor]
+
+        true ->
+          []
       end
 
     # SystemObserver is last: it monitors all other supervisors and needs
@@ -214,6 +238,18 @@ defmodule Minga.Application do
     Application.get_env(:minga, :start_editor, false) or
       (Burrito.Util.running_standalone?() and not standalone_headless?() and
          not standalone_terminal_command?())
+  end
+
+  # The headless daemon does not run the interactive editor, but it must host
+  # attached client editor sessions (collab MVP, #2424). When this is true we
+  # start Minga.Runtime.HeadlessSupervisor (parser + Collab.SessionManager) so
+  # MingaEditor.Collab.attach/4 can stand up a per-client triad. Not started in
+  # minimal mode (GIT_EDITOR), which has no agent runtime to attach to.
+  @spec host_sessions?() :: boolean()
+  defp host_sessions? do
+    Application.get_env(:minga, :host_sessions, false) or
+      (Burrito.Util.running_standalone?() and standalone_headless?() and
+         not standalone_minimal?())
   end
 
   @spec minimal_mode?() :: boolean()

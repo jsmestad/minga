@@ -5,9 +5,10 @@ defmodule MingaEditor.Renderer.Server do
 
   ## Lifecycle
 
-  Started by `MingaEditor.Supervisor` for all non-headless backends.
-  The headless backend renders synchronously in-process for test
-  determinism; this server is not in the supervision tree in that case.
+  Started by `MingaEditor.Collab.SessionSupervisor` (one per collab session)
+  for all non-headless backends. The headless backend renders synchronously
+  in-process for test determinism; this server is not in the supervision tree
+  in that case.
 
   ## Snapshot mechanics
 
@@ -79,7 +80,7 @@ defmodule MingaEditor.Renderer.Server do
         }
 
   @typedoc "Editor process reference used for renderer writebacks."
-  @type editor_ref :: pid() | atom() | nil
+  @type editor_ref :: GenServer.server() | nil
 
   @typedoc "Renderer server state."
   @type t :: %__MODULE__{
@@ -222,12 +223,15 @@ defmodule MingaEditor.Renderer.Server do
     :ok
   end
 
-  defp send_writeback(editor_name, output, seq) when is_atom(editor_name) do
-    case Process.whereis(editor_name) do
+  # Atom names and `{:via, Registry, key}` tuples (per-session editors) both
+  # resolve through GenServer.whereis, so a renderer can be wired to its
+  # session's editor by name and still recover the live pid each frame.
+  defp send_writeback(editor_ref, output, seq) do
+    case GenServer.whereis(editor_ref) do
       nil ->
         Minga.Log.warning(
           :render,
-          "Renderer frame #{seq}: editor #{inspect(editor_name)} not registered, writeback dropped"
+          "Renderer frame #{seq}: editor #{inspect(editor_ref)} not registered, writeback dropped"
         )
 
         :ok

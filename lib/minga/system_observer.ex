@@ -55,7 +55,10 @@ defmodule Minga.SystemObserver do
     MingaAgent.Supervisor,
     # Conditional (Runtime may not be started in test/headless mode)
     Minga.Runtime.Supervisor,
-    MingaEditor.Supervisor
+    # DynamicSupervisor for additional collab client sessions (#2424).
+    MingaEditor.Collab.SessionManager,
+    # The default session triad registers under the bare module name.
+    MingaEditor.Collab.SessionSupervisor
   ]
 
   # ── Types ─────────────────────────────────────────────────────────────────

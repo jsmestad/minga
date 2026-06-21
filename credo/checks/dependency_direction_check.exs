@@ -131,9 +131,19 @@ defmodule Minga.Credo.DependencyDirectionCheck do
     "Minga.Command.Registry" => ["MingaEditor.Commands"],
     # Runtime supervisors assemble the editor process tree at the OTP boundary.
     "Minga.Runtime.Supervisor" => [
-      "MingaEditor.Supervisor",
       "MingaEditor.Watchdog",
-      "MingaEditor.Frontend.Manager"
+      "MingaEditor.Frontend.Manager",
+      # Per-session editor triads (collab MVP, #2424). Assembled at the OTP
+      # boundary; the supervisor only wires the process tree, not editor logic.
+      "MingaEditor.Collab.SessionManager",
+      "MingaEditor.Collab.SessionSupervisor",
+      "MingaEditor.Collab.Names"
+    ],
+    # Headless daemon session-hosting supervisor (collab MVP, #2424). Wires the
+    # node-shared parser + per-session DynamicSupervisor at the OTP boundary so a
+    # daemon can host attached client editor sessions without the interactive triad.
+    "Minga.Runtime.HeadlessSupervisor" => [
+      "MingaEditor.Collab.SessionManager"
     ],
     # Services.Supervisor starts extension contribution registries and built-in extension surfaces.
     "Minga.Services.Supervisor" => [
@@ -142,7 +152,10 @@ defmodule Minga.Credo.DependencyDirectionCheck do
       "MingaEditor.Agent.SemanticUI.Registry"
     ],
     # SystemObserver displays the editor supervisor tree as process topology data.
-    "Minga.SystemObserver" => ["MingaEditor.Supervisor"],
+    "Minga.SystemObserver" => [
+      "MingaEditor.Collab.SessionManager",
+      "MingaEditor.Collab.SessionSupervisor"
+    ],
     # Built-in theme packs register concrete presentation theme modules as data.
     "Minga.Extensions.ThemePacks.AstroNvim" => ["MingaEditor.UI.Theme"],
     "Minga.Extensions.ThemePacks.Catppuccin" => ["MingaEditor.UI.Theme"],
@@ -154,8 +167,9 @@ defmodule Minga.Credo.DependencyDirectionCheck do
     "Minga.Mode" => ["Minga.Tool.Recipe.Registry"],
     # Editing facade preserves existing macro-recorder helpers until that UI state moves behind a lower-level query.
     "Minga.Editing" => ["MingaEditor.MacroRecorder"],
-    # Application supervisor starts shell registry at the OTP boundary.
-    "Minga.Application" => ["MingaEditor.Shell.Registry"],
+    # Application supervisor starts shell registry and the per-session editor
+    # naming registry (collab MVP, #2424) at the OTP boundary.
+    "Minga.Application" => ["MingaEditor.Shell.Registry", "MingaEditor.Collab.Registry"],
     # Session persistence currently references the editor state snapshot type.
     "Minga.Session" => ["MingaEditor.State"],
     # Diagnostics decoration maps severities to presentation gutter faces.

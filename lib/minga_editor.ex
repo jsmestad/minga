@@ -182,7 +182,7 @@ defmodule MingaEditor do
 
     state = Startup.build_initial_state(opts)
 
-    renderer_pid = renderer_pid_for_backend(state.backend)
+    renderer_pid = renderer_pid_for_backend(state.backend, state.session_id)
 
     if state.backend != :headless and is_nil(renderer_pid) do
       Minga.Log.warning(:editor, "Renderer.Server not found at init; rendering synchronously")
@@ -275,9 +275,13 @@ defmodule MingaEditor do
     :ok
   end
 
-  @spec renderer_pid_for_backend(EditorState.backend()) :: pid() | nil
-  defp renderer_pid_for_backend(:headless), do: nil
-  defp renderer_pid_for_backend(_backend), do: GenServer.whereis(MingaEditor.Renderer.Server)
+  @spec renderer_pid_for_backend(EditorState.backend(), String.t() | nil) :: pid() | nil
+  defp renderer_pid_for_backend(:headless, _session_id), do: nil
+
+  defp renderer_pid_for_backend(_backend, session_id) do
+    session_id = session_id || MingaEditor.Collab.Names.default_session_id()
+    MingaEditor.Collab.Names.whereis(session_id, :renderer)
+  end
 
   @impl true
   @spec handle_call(term(), GenServer.from(), state()) :: {:reply, term(), state()}
@@ -732,7 +736,7 @@ defmodule MingaEditor do
     {:noreply, Renderer.render_or_async(state)}
   end
 
-  # Process died. Check buffer monitors and git remote tasks.
+  # Process died. Check buffer monitors, the parser, and git remote tasks.
   # Agent session deaths are handled via :agent_session_stopped events from SessionManager.
   def handle_info({:DOWN, ref, :process, pid, reason}, state) do
     case classify_down(state, ref, pid, reason) do
@@ -741,12 +745,26 @@ defmodule MingaEditor do
         state = EditorState.remove_dead_buffer(state, pid)
         {:noreply, Renderer.render_or_async(state)}
 
+      :parser ->
+        # The node-shared Parser.Manager died. It is not our supervised
+        # ancestor (#2424), so OTP won't restart us; the restarted parser boots
+        # with an empty subscriber list. Re-subscribe so highlighting survives,
+        # retrying with backoff until the parser is back up.
+        Minga.Log.info(:editor, "Parser.Manager died, re-subscribing for highlights")
+        {:noreply, resubscribe_parser(%{state | parser_monitor: nil})}
+
       {:git_remote_task, updated_state} ->
         {:noreply, Renderer.render_or_async(updated_state)}
 
       :unknown ->
         {:noreply, state}
     end
+  end
+
+  # Retry timer for parser re-subscription: the parser was not back up on the
+  # previous attempt, so try again with backoff.
+  def handle_info({:resubscribe_parser, attempt}, state) do
+    {:noreply, resubscribe_parser(state, attempt)}
   end
 
   @toast_duration_ms 3_000
@@ -982,16 +1000,71 @@ defmodule MingaEditor do
   # ── :DOWN classifier ────────────────────────────────────────────────────────
 
   @spec classify_down(EditorState.t(), reference(), pid(), term()) ::
-          :buffer | {:git_remote_task, EditorState.t()} | :unknown
+          :buffer | :parser | {:git_remote_task, EditorState.t()} | :unknown
   defp classify_down(state, ref, pid, reason) do
-    if Map.has_key?(state.buffer_monitors, pid) do
-      :buffer
-    else
-      case handle_git_remote_task_down(state, ref, reason) do
-        :not_matched -> :unknown
-        updated_state -> {:git_remote_task, updated_state}
-      end
+    cond do
+      Map.has_key?(state.buffer_monitors, pid) ->
+        :buffer
+
+      ref == state.parser_monitor ->
+        :parser
+
+      true ->
+        case handle_git_remote_task_down(state, ref, reason) do
+          :not_matched -> :unknown
+          updated_state -> {:git_remote_task, updated_state}
+        end
     end
+  end
+
+  # ── Parser re-subscription (#2424) ──────────────────────────────────────────
+  #
+  # The parser is a node-shared sibling, not a supervised ancestor, so its crash
+  # never restarts us. We re-resolve the restarted parser, re-subscribe, and
+  # re-monitor. If the parser isn't back up yet, retry with capped backoff so a
+  # slow restart doesn't permanently kill highlighting.
+
+  @parser_resubscribe_max_attempts 10
+  @parser_resubscribe_base_delay_ms 50
+  @parser_resubscribe_max_delay_ms 1_000
+
+  @spec resubscribe_parser(state(), non_neg_integer()) :: state()
+  defp resubscribe_parser(state, attempt \\ 0) do
+    case Startup.resubscribe_to_parser(state.parser_manager) do
+      ref when is_reference(ref) ->
+        %{state | parser_monitor: ref}
+
+      nil ->
+        schedule_parser_resubscribe(state, attempt)
+    end
+  end
+
+  @spec schedule_parser_resubscribe(state(), non_neg_integer()) :: state()
+  defp schedule_parser_resubscribe(state, attempt)
+       when attempt >= @parser_resubscribe_max_attempts do
+    Minga.Log.warning(
+      :editor,
+      "Parser.Manager did not come back after #{attempt} attempts; highlights disabled"
+    )
+
+    state
+  end
+
+  # A one-shot, self-terminating retry (stops as soon as it re-subscribes) is
+  # safe in headless too: unlike the periodic eviction timer, it does not emit a
+  # steady cadence of messages, so it won't pollute the editor mailbox in tests.
+  defp schedule_parser_resubscribe(state, attempt) do
+    delay = parser_resubscribe_delay(attempt)
+    Process.send_after(self(), {:resubscribe_parser, attempt + 1}, delay)
+    state
+  end
+
+  @spec parser_resubscribe_delay(non_neg_integer()) :: pos_integer()
+  defp parser_resubscribe_delay(attempt) do
+    min(
+      @parser_resubscribe_base_delay_ms * Bitwise.bsl(1, attempt),
+      @parser_resubscribe_max_delay_ms
+    )
   end
 
   @spec open_git_commit_prompt(EditorState.t(), keyword()) :: EditorState.t()
