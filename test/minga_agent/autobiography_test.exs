@@ -94,4 +94,47 @@ defmodule MingaAgent.AutobiographyTest do
     assert {:ok, nil} = Autobiography.for_line("/proj/lib/router.ex", "def handle", db: db)
     assert {:ok, []} = Autobiography.for_file("/proj/lib/router.ex", db: db)
   end
+
+  test "attributes a common line (`end`) to the turn that introduced it, not the latest", %{
+    db: db
+  } do
+    # First turn introduces the `end` (closing a def it added).
+    edit(db, "s1", "/p/a.ex",
+      before: "x = 1",
+      after: "def f do\n  :ok\nend",
+      tool_call_id: "introduces"
+    )
+
+    # A later turn touches the file but the `end` line is unchanged (present before and after).
+    edit(db, "s1", "/p/a.ex",
+      before: "def f do\n  :ok\nend",
+      after: "def f do\n  :ok2\nend",
+      tool_call_id: "later"
+    )
+
+    # Substring matching would pick "later" (most recent containing "end");
+    # whole-line introduced-matching correctly picks the turn that added the line.
+    assert {:ok, %Entry{tool_call_id: "introduces"}} =
+             Autobiography.for_line("/p/a.ex", "end", db: db)
+  end
+
+  test "a missing database reads as no history, not an error" do
+    # No :db injected and a dir with no event DB → genuine absence.
+    assert {:ok, nil} =
+             Autobiography.for_line("/p/a.ex", "x", db_dir: "/tmp/minga-no-such-dir-xyz")
+
+    assert {:ok, []} = Autobiography.for_file("/p/a.ex", db_dir: "/tmp/minga-no-such-dir-xyz")
+  end
+
+  test "a real read error propagates instead of looking like no history" do
+    # A closed connection forces reads to fail: this must surface as {:error, _},
+    # never as {:ok, nil}/{:ok, []} (which would falsely claim the agent never
+    # touched the line). Uses its own connection so the shared db's on_exit
+    # close doesn't double-close.
+    {:ok, closed} = Store.open_memory()
+    Store.close(closed)
+
+    assert {:error, _} = Autobiography.for_line("/p/a.ex", "x", db: closed)
+    assert {:error, _} = Autobiography.for_file("/p/a.ex", db: closed)
+  end
 end

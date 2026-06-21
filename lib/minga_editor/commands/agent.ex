@@ -156,7 +156,10 @@ defmodule MingaEditor.Commands.Agent do
       jump = ProvenanceJump.request(target_id, origin)
       AgentAccess.update_panel(state, &Panel.set_provenance_jump(&1, jump))
     else
-      _ -> state
+      # Dead session (nil pairs) or tool call not in the transcript (nil anchor):
+      # skip the jump and open at the bottom. A non-nil unexpected shape should
+      # surface as a WithClauseError rather than silently degrade.
+      nil -> state
     end
   end
 
