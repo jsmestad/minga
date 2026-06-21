@@ -35,6 +35,9 @@ defmodule MingaAgent.ReactiveDiagnostics do
           config_server: Options.server(),
           session_manager: GenServer.server(),
           post_fun: (String.t(), GenServer.server() -> :ok),
+          now_fun: (-> integer()),
+          save_window_ms: non_neg_integer(),
+          rate_limit_ms: non_neg_integer(),
           pending: %{String.t() => pending_save()},
           last_notified: %{String.t() => notification()}
         }
@@ -71,6 +74,9 @@ defmodule MingaAgent.ReactiveDiagnostics do
        config_server: Keyword.get(opts, :config_server, Options.default_server()),
        session_manager: Keyword.get(opts, :session_manager, SessionManager),
        post_fun: Keyword.get(opts, :post_fun, &post_to_latest_session/2),
+       now_fun: Keyword.get(opts, :now_fun, &monotonic_now_ms/0),
+       save_window_ms: Keyword.get(opts, :save_window_ms, @save_window_ms),
+       rate_limit_ms: Keyword.get(opts, :rate_limit_ms, @rate_limit_ms),
        pending: %{},
        last_notified: %{}
      }}
@@ -88,7 +94,11 @@ defmodule MingaAgent.ReactiveDiagnostics do
       baseline = current_error_fingerprints(state, uri)
 
       pending =
-        Map.put(state.pending, uri, %{path: path, baseline: baseline, saved_at_ms: now_ms()})
+        Map.put(state.pending, uri, %{
+          path: path,
+          baseline: baseline,
+          saved_at_ms: state.now_fun.()
+        })
 
       {:noreply, %{state | pending: pending}}
     else
@@ -137,20 +147,47 @@ defmodule MingaAgent.ReactiveDiagnostics do
 
   @spec maybe_post_suggestion(state(), String.t(), String.t(), fingerprint()) :: state()
   defp maybe_post_suggestion(state, uri, path, fingerprint) do
-    now = now_ms()
+    now = state.now_fun.()
+    notification = Map.get(state.last_notified, uri)
+    maybe_post_suggestion(state, uri, path, fingerprint, notification, now, state.rate_limit_ms)
+  end
 
-    case Map.get(state.last_notified, uri) do
-      %{fingerprint: ^fingerprint} ->
-        state
+  @spec maybe_post_suggestion(
+          state(),
+          String.t(),
+          String.t(),
+          fingerprint(),
+          notification() | nil,
+          integer(),
+          non_neg_integer()
+        ) :: state()
+  defp maybe_post_suggestion(
+         state,
+         _uri,
+         _path,
+         fingerprint,
+         %{fingerprint: fingerprint},
+         _now,
+         _rate_limit_ms
+       ),
+       do: state
 
-      %{at_ms: at_ms} when now - at_ms < @rate_limit_ms ->
-        state
+  defp maybe_post_suggestion(
+         state,
+         _uri,
+         _path,
+         _fingerprint,
+         %{at_ms: at_ms},
+         now,
+         rate_limit_ms
+       )
+       when now - at_ms < rate_limit_ms,
+       do: state
 
-      _notification ->
-        post_suggestion(state, path, fingerprint)
-        last_notified = Map.put(state.last_notified, uri, %{fingerprint: fingerprint, at_ms: now})
-        %{state | last_notified: last_notified}
-    end
+  defp maybe_post_suggestion(state, uri, path, fingerprint, _notification, now, _rate_limit_ms) do
+    post_suggestion(state, path, fingerprint)
+    last_notified = Map.put(state.last_notified, uri, %{fingerprint: fingerprint, at_ms: now})
+    %{state | last_notified: last_notified}
   end
 
   @spec post_suggestion(state(), String.t(), fingerprint()) :: :ok
@@ -190,11 +227,11 @@ defmodule MingaAgent.ReactiveDiagnostics do
 
   @spec prune_pending(state()) :: state()
   defp prune_pending(state) do
-    now = now_ms()
+    now = state.now_fun.()
 
     pending =
       Map.reject(state.pending, fn {_uri, %{saved_at_ms: saved_at_ms}} ->
-        now - saved_at_ms > @save_window_ms
+        now - saved_at_ms > state.save_window_ms
       end)
 
     %{state | pending: pending}
@@ -224,6 +261,6 @@ defmodule MingaAgent.ReactiveDiagnostics do
   defp post_to_session({_id, pid, _metadata}, text),
     do: Session.add_system_message(pid, text, :info)
 
-  @spec now_ms() :: integer()
-  defp now_ms, do: System.monotonic_time(:millisecond)
+  @spec monotonic_now_ms() :: integer()
+  defp monotonic_now_ms, do: System.monotonic_time(:millisecond)
 end

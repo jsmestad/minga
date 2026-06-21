@@ -18,6 +18,8 @@ defmodule MingaAgent.ReactiveDiagnosticsTest do
     start_supervised!({Options, name: options})
 
     parent = self()
+    clock = start_supervised!({Agent, fn -> 1_000 end})
+    now_fun = fn -> Agent.get(clock, & &1) end
 
     watcher =
       start_supervised!(
@@ -28,6 +30,9 @@ defmodule MingaAgent.ReactiveDiagnosticsTest do
            diagnostics_server: diagnostics,
            config_server: options,
            session_manager: self(),
+           now_fun: now_fun,
+           save_window_ms: 5_000,
+           rate_limit_ms: 10_000,
            post_fun: fn text, _manager ->
              send(parent, {:suggestion, text})
              :ok
@@ -35,7 +40,15 @@ defmodule MingaAgent.ReactiveDiagnosticsTest do
          ]}
       )
 
-    %{registry: registry, diagnostics: diagnostics, options: options, watcher: watcher}
+    sync(watcher)
+
+    %{
+      registry: registry,
+      diagnostics: diagnostics,
+      options: options,
+      watcher: watcher,
+      clock: clock
+    }
   end
 
   test "posts a chat suggestion for a new error after save", ctx do
@@ -44,9 +57,11 @@ defmodule MingaAgent.ReactiveDiagnosticsTest do
     uri = SyncServer.path_to_uri(path)
 
     save(ctx.registry, path)
+    sync(ctx.watcher)
     publish(ctx.diagnostics, ctx.registry, uri, [diag("boom", 2, 4)])
+    sync(ctx.watcher)
 
-    assert_receive {:suggestion, text}, 200
+    assert_received {:suggestion, text}
     assert String.contains?(text, "reactive_new.ex:3:5")
     assert String.contains?(text, "boom")
     assert String.contains?(text, "apply a fix")
@@ -61,10 +76,13 @@ defmodule MingaAgent.ReactiveDiagnosticsTest do
     existing = diag("already broken", 0, 0)
 
     publish(ctx.diagnostics, ctx.registry, uri, [existing])
+    sync(ctx.watcher)
     save(ctx.registry, path)
+    sync(ctx.watcher)
     publish(ctx.diagnostics, ctx.registry, uri, [existing])
+    sync(ctx.watcher)
 
-    refute_receive {:suggestion, _text}, 100
+    refute_received {:suggestion, _text}
   end
 
   test "dedupes the same diagnostic on rapid saves", ctx do
@@ -74,14 +92,18 @@ defmodule MingaAgent.ReactiveDiagnosticsTest do
     diagnostic = diag("same", 1, 0)
 
     save(ctx.registry, path)
+    sync(ctx.watcher)
     publish(ctx.diagnostics, ctx.registry, uri, [diagnostic])
-    assert_receive {:suggestion, _text}, 200
+    sync(ctx.watcher)
+    assert_received {:suggestion, _text}
 
     Diagnostics.clear(ctx.diagnostics, :elixir_ls, uri)
     save(ctx.registry, path)
+    sync(ctx.watcher)
     publish(ctx.diagnostics, ctx.registry, uri, [diagnostic])
+    sync(ctx.watcher)
 
-    refute_receive {:suggestion, _text}, 100
+    refute_received {:suggestion, _text}
   end
 
   test "rate-limits different diagnostics from rapid saves", ctx do
@@ -90,14 +112,18 @@ defmodule MingaAgent.ReactiveDiagnosticsTest do
     uri = SyncServer.path_to_uri(path)
 
     save(ctx.registry, path)
+    sync(ctx.watcher)
     publish(ctx.diagnostics, ctx.registry, uri, [diag("first", 1, 0)])
-    assert_receive {:suggestion, _text}, 200
+    sync(ctx.watcher)
+    assert_received {:suggestion, _text}
 
     Diagnostics.clear(ctx.diagnostics, :elixir_ls, uri)
     save(ctx.registry, path)
+    sync(ctx.watcher)
     publish(ctx.diagnostics, ctx.registry, uri, [diag("second", 2, 0)])
+    sync(ctx.watcher)
 
-    refute_receive {:suggestion, _text}, 100
+    refute_received {:suggestion, _text}
   end
 
   test "does nothing until explicitly enabled", ctx do
@@ -105,12 +131,19 @@ defmodule MingaAgent.ReactiveDiagnosticsTest do
     uri = SyncServer.path_to_uri(path)
 
     save(ctx.registry, path)
+    sync(ctx.watcher)
     publish(ctx.diagnostics, ctx.registry, uri, [diag("disabled", 0, 0)])
+    sync(ctx.watcher)
 
-    refute_receive {:suggestion, _text}, 100
+    refute_received {:suggestion, _text}
   end
 
   defp enable(options), do: Options.set(options, :agent_react_to_lsp_errors_on_save, true)
+
+  defp sync(watcher) do
+    :sys.get_state(watcher)
+    :ok
+  end
 
   defp save(registry, path) do
     Events.broadcast(:buffer_saved, %Events.BufferEvent{buffer: self(), path: path}, registry)
