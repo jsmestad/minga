@@ -55,6 +55,27 @@ defmodule MingaAdversarial.WatcherTest do
              Diagnostics.for_uri(uri)
   end
 
+  test "analyze uses provided live content instead of the file on disk", %{path: path} do
+    File.write!(path, "on_disk_only\n")
+    test_pid = self()
+
+    server =
+      start_watcher(:live_content,
+        skepticism: :manual,
+        ai_fun: fn messages, _max ->
+          send(test_pid, {:msgs, messages})
+          {:error, :stub}
+        end
+      )
+
+    assert :ok = Watcher.analyze(server, path, "live_buffer_text\n")
+
+    assert_receive {:msgs, messages}, 2_000
+    user = Enum.find(messages, &(&1.role == "user")).content
+    assert user =~ "live_buffer_text"
+    refute user =~ "on_disk_only"
+  end
+
   test "dial off makes analyze a no-op", %{path: path, uri: uri} do
     server =
       start_watcher(:off,
