@@ -5,12 +5,16 @@ defmodule Minga.Diagnostics.Diagnostic do
   Source-agnostic: LSP servers, external linters, compilers, and test runners
   all produce the same struct. The `source` field identifies the producer
   (e.g., `"expert"`, `"mix_compile"`).
+
+  `advisory: true` marks a low-trust finding (e.g. an LLM/extension hint).
+  Advisory diagnostics render with a distinct gutter sign and never outrank
+  a real diagnostic on the same line.
   """
 
   alias Minga.Core.PositionEncoding
 
   @enforce_keys [:range, :severity, :message]
-  defstruct [:range, :severity, :message, :source, :code, encoding: :utf8]
+  defstruct [:range, :severity, :message, :source, :code, encoding: :utf8, advisory: false]
 
   @typedoc "Severity level, ordered from most to least severe."
   @type severity :: :error | :warning | :info | :hint
@@ -35,7 +39,8 @@ defmodule Minga.Diagnostics.Diagnostic do
           message: String.t(),
           source: String.t() | nil,
           code: String.t() | integer() | nil,
-          encoding: encoding()
+          encoding: encoding(),
+          advisory: boolean()
         }
 
   @severity_rank %{error: 0, warning: 1, info: 2, hint: 3}
