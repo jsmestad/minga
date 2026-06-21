@@ -21,19 +21,20 @@ defmodule MingaEditor.Frontend.Emit do
   Converts the frame to semantic protocol command binaries and sends them to the frontend port.
 
   Also sends title and window background color when they change
-  (side-channel writes). Returns updated caches and the renderer-owned font
-  registry for write-back to the Renderer process.
+  (side-channel writes). Returns updated caches, the renderer-owned font
+  registry, and the message store for write-back to the Editor process.
   """
   @spec emit(ComposedFrame.t(), ctx(), Chrome.t() | nil, Caches.t()) ::
-          {Caches.t(), FontRegistry.t()}
+          {Caches.t(), FontRegistry.t(), MingaEditor.UI.Panel.MessageStore.t()}
   def emit(frame, ctx, chrome \\ nil, caches \\ %Caches{}) do
     FontRegistry.with_process_registry(ctx.font_registry, fn ->
-      caches = emit_semantic(frame, ctx, chrome, caches)
-      {caches, FontRegistry.current_process_registry(ctx.font_registry)}
+      {caches, ctx} = emit_semantic(frame, ctx, chrome, caches)
+      {caches, FontRegistry.current_process_registry(ctx.font_registry), ctx.message_store}
     end)
   end
 
-  @spec emit_semantic(ComposedFrame.t(), ctx(), Chrome.t() | nil, Caches.t()) :: Caches.t()
+  @spec emit_semantic(ComposedFrame.t(), ctx(), Chrome.t() | nil, Caches.t()) ::
+          {Caches.t(), ctx()}
   defp emit_semantic(frame, ctx, chrome, caches) do
     {render_model, ctx} =
       Telemetry.span([:minga, :render, :ui_model_build], %{}, fn ->
@@ -108,7 +109,7 @@ defmodule MingaEditor.Frontend.Emit do
         MingaEditor.Frontend.send_render_commands(ctx.port_manager, commands)
         caches = send_title(render_model, caches)
         caches = send_window_bg(render_model, caches)
-        caches
+        {caches, ctx}
       end
     )
   end

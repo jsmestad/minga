@@ -29,6 +29,19 @@ defmodule MingaEditor.StatusBar.DataTest do
     refute Map.has_key?(buffer_data, :modeline_segments)
   end
 
+  test "with_modeline_segments preserves agent status command output" do
+    state = state_with_tab_bar(TabBar.new(Tab.new_file(1, "main.ex")))
+    state = AgentAccess.update_agent(state, &AgentState.set_status(&1, :thinking))
+    {:buffer, data} = Data.from_state(state)
+    data = Map.put(data, :agent_status_command, "sonnet | thinking")
+
+    assert {:buffer, buffer_data} = Data.with_modeline_segments({:buffer, data}, state.theme)
+    text = modeline_text(buffer_data.modeline_segments)
+
+    assert String.contains?(text, "sonnet | thinking")
+    refute String.contains?(text, "Thinking")
+  end
+
   test "with_modeline_segments attaches GUI modeline segments from supplied registry" do
     table = :"status_bar_data_modeline_segments_#{System.unique_integer([:positive])}"
     start_supervised!({ModelineSegments, name: table})
@@ -259,6 +272,10 @@ defmodule MingaEditor.StatusBar.DataTest do
 
     :ets.insert(table, {buffer, git_pid})
     on_exit(fn -> :ets.delete(table, buffer) end)
+  end
+
+  defp modeline_text(%{left: left, right: right}) do
+    Enum.map_join(left ++ right, fn {_name, text, _fg, _bg, _opts, _target} -> text end)
   end
 
   defp handle(session_id, task) do

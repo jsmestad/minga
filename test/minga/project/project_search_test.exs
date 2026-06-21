@@ -136,5 +136,26 @@ defmodule Minga.Project.ProjectSearchTest do
           :ok
       end
     end
+
+    test "caps results in-process and reports truncation when matches exceed the cap" do
+      dir = Path.join(System.tmp_dir!(), "minga-search-cap-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(dir)
+      on_exit(fn -> File.rm_rf(dir) end)
+
+      over_cap = ProjectSearch.max_results() + 50
+      lines = Enum.map_join(1..over_cap, "\n", fn _ -> "NEEDLE here" end)
+      File.write!(Path.join(dir, "haystack.txt"), lines <> "\n")
+
+      case ProjectSearch.search("NEEDLE", dir) do
+        {:ok, matches, truncated?} ->
+          # The cap is enforced while collecting: we never accumulate more than
+          # the cap regardless of how many lines the subprocess could emit.
+          assert truncated?
+          assert length(matches) == ProjectSearch.max_results()
+
+        {:error, _} ->
+          :ok
+      end
+    end
   end
 end

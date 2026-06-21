@@ -94,6 +94,7 @@ defmodule Minga.Keymap.Scope.Agent do
     |> Bindings.bind(~k(g a), :agent_apply_code_block, "Apply code block to file")
     |> Bindings.bind(~k(g p), :agent_pin_message, "Pin/unpin message")
     |> Bindings.bind(~k(g d), :goto_definition, "Go to definition")
+    |> Bindings.bind(~k(g b), :agent_provenance_return, "Back to source line")
     # z-prefix: domain fold/collapse commands
     |> Bindings.bind(~k(z a), :agent_toggle_collapse, "Toggle collapse at cursor")
     |> Bindings.bind(~k(z A), :agent_toggle_all_collapse, "Toggle all collapses")
@@ -213,7 +214,8 @@ defmodule Minga.Keymap.Scope.Agent do
        [
          {"]m / [m", "Next / prev message"},
          {"]c / [c", "Next / prev code block"},
-         {"]t / [t", "Next / prev tool call"}
+         {"]t / [t", "Next / prev tool call"},
+         {"gb", "Back to source line (after SPC g w)"}
        ]},
       {"Copy",
        [

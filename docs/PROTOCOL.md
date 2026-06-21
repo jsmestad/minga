@@ -6,6 +6,8 @@ The BEAM editor core and rendering frontends communicate over a binary protocol 
 
 Frontend identity is opaque to Minga product behavior. The BEAM may adapt to declared capabilities such as terminal grid versus desktop window, text measurement, color depth, image support, float support, and Semantic UI support, but it must not special-case Swift, Go, GTK, or another implementation name for product features.
 
+Stream identity is producer-assigned and carried on the wire, never inferred by the consumer.
+
 ## Transport
 
 The frontend runs as a child process of the BEAM. Communication uses stdin (BEAM → Frontend) and stdout (Frontend → BEAM).
@@ -25,7 +27,7 @@ The frontend runs as a child process of the BEAM. Communication uses stdin (BEAM
 
 **Text encoding:** All text fields (titles, language names, query source, semantic content) are UTF-8 encoded.
 
-**Protocol version:** The schema carries a `protocol_version` integer (currently 3). The BEAM and every frontend compile against it and exchange it in the `ready` handshake. The BEAM rejects a frontend whose version does not match and sends an explicit `protocol_error` instead of streaming frames the frontend cannot decode. See "Protocol Version Negotiation" below.
+**Protocol version:** The schema carries a `protocol_version` integer (currently 5). The BEAM and every frontend compile against it and exchange it in the `ready` handshake. The BEAM rejects a frontend whose version does not match and sends an explicit `protocol_error` instead of streaming frames the frontend cannot decode. See "Protocol Version Negotiation" below.
 
 ---
 
@@ -199,13 +201,13 @@ commit_frame         (triggers the actual present; carries frame_seq + the laten
 
 The BEAM sends the entire frame as a single batched message. The frontend processes commands in order and only presents on `commit_frame`. Cursor position and shape are embedded per window inside `gui_window_content`, not carried by standalone cell opcodes.
 
-Between frames, the frontend must not modify the screen. The BEAM drives all visual updates.
+Between frames, the frontend must not mutate committed editor state or present new semantic content. The only exception is ephemeral presentation scroll driven by `gui_window_content` section 0x0A (`ScrollPresentation`): a frontend may transform already committed or retained rows inside the BEAM-provided clip rect and overscan bounds while waiting for the next committed frame. The BEAM still owns the committed viewport, cursor, selection, layout, row identity, and hit-test state.
 
 ---
 
 ## Frame Transactions
 
-> Status: protocol_version 3 defines the transaction vocabulary (#2219 child A) and the BEAM now brackets every emitted frame with `begin_frame`/`commit_frame` (#2219 child B). Both frontends decode the markers and gate frames and latency on `commit_frame` exactly as they did `batch_end`; they ignore `base_frame_seq` for now. Children C/D move the frontends onto real staging/commit (paint nothing until the matching `commit_frame`, resync on truncation). This section is the authoritative spec those children build against.
+> Status: protocol_version 4 keeps the transaction vocabulary introduced in protocol_version 3 (#2219 child A) and the BEAM now brackets every emitted frame with `begin_frame`/`commit_frame` (#2219 child B). Both frontends decode the markers and gate frames and latency on `commit_frame` exactly as they did `batch_end`; they ignore `base_frame_seq` for now. Children C/D move the frontends onto real staging/commit (paint nothing until the matching `commit_frame`, resync on truncation). This section is the authoritative spec those children build against.
 
 A frame transaction makes a frame atomic: the BEAM brackets a frame's semantic commands between `begin_frame` and `commit_frame`, and a frontend paints nothing until it sees the matching `commit_frame`. This replaces the single `batch_end` terminator with an explicit open/close pair so a truncated or out-of-order stream can never paint a partial frame.
 
@@ -754,7 +756,7 @@ Total size: 4 + msg_len bytes.
 
 ## Protocol Version Negotiation
 
-The schema (`docs/protocol_schema.toml`) carries a `protocol_version` integer (currently 3). `mix protocol.gen` emits it as a constant on every side: `Minga.Protocol.Opcodes.protocol_version()` (Elixir), `generated.ProtocolVersion` (Go), `PROTOCOL_VERSION` (Swift), `PROTOCOL_VERSION` (Zig parser). Bump it whenever the wire contract changes incompatibly; protocol_version 2 retired the 9 cell-paradigm render opcodes, and protocol_version 3 (#2219) added the frame-transaction vocabulary (`begin_frame`, `commit_frame`, `request_keyframe`) and authoritative layout (`surface_placement`, `gui_surface_layout`). A frontend built against protocol_version 2 handshakes as 2, mismatches the BEAM's 3, and receives the `protocol_error` blocking surface instead of a desynced stream.
+The schema (`docs/protocol_schema.toml`) carries a `protocol_version` integer (currently 5). `mix protocol.gen` emits it as a constant on every side: `Minga.Protocol.Opcodes.protocol_version()` (Elixir), `generated.ProtocolVersion` (Go), `PROTOCOL_VERSION` (Swift), `PROTOCOL_VERSION` (Zig parser). Bump it whenever the wire contract changes incompatibly; protocol_version 2 retired the 9 cell-paradigm render opcodes, protocol_version 3 (#2219) added the frame-transaction vocabulary (`begin_frame`, `commit_frame`, `request_keyframe`) and authoritative layout (`surface_placement`, `gui_surface_layout`), protocol_version 4 added the `gui_file_tree` row `heat_level` byte, and protocol_version 5 added producer-assigned `stream_instance` identity to the Messages stream. A frontend built against an older protocol handshakes with its old version and receives the `protocol_error` blocking surface instead of a desynced stream.
 
 **Handshake.** A frontend appends its compiled-in `protocol_version` as a u16 tail on the extended `ready` event (after `caps_data`). A frontend that omits the tail (short ready, or extended ready without the tail) is treated as protocol_version 0.
 

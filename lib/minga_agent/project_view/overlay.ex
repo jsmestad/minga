@@ -244,28 +244,25 @@ defmodule MingaAgent.ProjectView.Overlay do
   @spec list_directory(ProjectView.t(), String.t()) ::
           {:ok, [ProjectView.Backend.directory_entry()]} | {:error, term()}
   def list_directory(%ProjectView{} = view, relative_path) do
-    case working_dir(view) do
-      {:error, _} = error ->
-        error
-
-      dir ->
-        case File.ls(Path.join(dir, relative_path)) do
-          {:ok, entries} ->
-            {:ok,
-             entries
-             |> reject_tombstones()
-             |> Enum.map(&directory_entry(Path.join(dir, relative_path), &1))}
-
-          {:error, reason} ->
-            {:error, reason}
-        end
-    end
+    safe_changeset_call(fn -> Changeset.list_directory(changeset(view), relative_path) end)
   end
 
   @impl true
   @spec working_dir(ProjectView.t()) :: String.t() | {:error, term()}
   def working_dir(%ProjectView{} = view),
     do: safe_changeset_call(fn -> Changeset.overlay_path(changeset(view)) end)
+
+  @impl true
+  @spec prepare_working_dir(ProjectView.t()) :: {:ok, String.t()} | {:error, term()}
+  def prepare_working_dir(%ProjectView{} = view) do
+    with {:ok, _stats} <-
+           safe_changeset_call(fn ->
+             GenServer.call(changeset(view), :materialize_for_command, :infinity)
+           end),
+         :ok <- materialize_open_fork_drafts(view) do
+      {:ok, Changeset.overlay_path(changeset(view))}
+    end
+  end
 
   @impl true
   @spec command_env(ProjectView.t()) :: [{String.t(), String.t()}] | {:error, term()}
@@ -405,6 +402,48 @@ defmodule MingaAgent.ProjectView.Overlay do
     end
   end
 
+  @spec materialize_open_fork_drafts(ProjectView.t()) :: :ok | {:error, term()}
+  defp materialize_open_fork_drafts(%ProjectView{} = view) do
+    case fork_store(view) do
+      nil ->
+        :ok
+
+      fork_store ->
+        with :ok <- fork_store_available(fork_store) do
+          fork_store
+          |> BufferForkStore.all()
+          |> Enum.reduce_while(:ok, fn {path, fork_pid}, :ok ->
+            with {:ok, relative_path} <- fork_relative_path(view, path),
+                 :ok <-
+                   safe_changeset_call(fn ->
+                     Changeset.materialize_command_file(
+                       changeset(view),
+                       relative_path,
+                       Minga.Buffer.Fork.content(fork_pid)
+                     )
+                   end) do
+              {:cont, :ok}
+            else
+              {:error, _} = error -> {:halt, error}
+            end
+          end)
+        end
+    end
+  end
+
+  @spec fork_relative_path(ProjectView.t(), String.t()) ::
+          {:ok, String.t()} | {:error, term()}
+  defp fork_relative_path(%ProjectView{} = view, path) do
+    root = Path.expand(view.project_root)
+    target = Path.expand(path)
+
+    if String.starts_with?(target, root <> "/") do
+      ProjectView.normalize_relative_path(Path.relative_to(target, root))
+    else
+      {:error, :path_traversal}
+    end
+  end
+
   @spec fork_store_available(pid()) :: :ok | {:error, {:fork_unavailable, term()}}
   defp fork_store_available(fork_store) do
     try do
@@ -433,19 +472,6 @@ defmodule MingaAgent.ProjectView.Overlay do
   @spec fork_store(ProjectView.t()) :: pid() | nil
   defp fork_store(%ProjectView{ref: %{fork_store: fork_store}}), do: fork_store
 
-  @spec reject_tombstones([String.t()]) :: [String.t()]
-  defp reject_tombstones(entries) do
-    entries
-    |> Enum.reject(&String.ends_with?(&1, ".__changeset_deleted__"))
-    |> Enum.sort()
-  end
-
-  @spec directory_entry(String.t(), String.t()) :: ProjectView.Backend.directory_entry()
-  defp directory_entry(dir, name) do
-    type = if File.dir?(Path.join(dir, name)), do: :directory, else: :file
-    %{name: name, type: type}
-  end
-
   @spec fork_diff(ProjectView.t()) :: {:ok, [map()]} | {:error, term()}
   defp fork_diff(%ProjectView{} = view) do
     case fork_store(view) do
@@ -465,6 +491,33 @@ defmodule MingaAgent.ProjectView.Overlay do
     :exit, reason -> {:error, {:fork_diff_failed, reason}}
   end
 
+  @spec materialize_merged_forks_for_merge(ProjectView.t(), [String.t()]) ::
+          :ok | {:error, term()}
+  defp materialize_merged_forks_for_merge(%ProjectView{} = view, paths) do
+    Enum.reduce_while(paths, :ok, fn path, :ok ->
+      with {:ok, relative_path} <- fork_relative_path(view, path),
+           {:ok, content} <- current_project_content(path),
+           :ok <-
+             safe_changeset_call(fn ->
+               Changeset.write_file(changeset(view), relative_path, content)
+             end) do
+        {:cont, :ok}
+      else
+        {:error, _} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  @spec current_project_content(String.t()) :: {:ok, binary()} | {:error, term()}
+  defp current_project_content(path) do
+    case Minga.Buffer.pid_for_path(path) do
+      {:ok, buf_pid} -> safe_buffer_content(buf_pid)
+      :not_found -> File.read(path)
+    end
+  rescue
+    error -> {:error, error}
+  end
+
   @spec promote_forks(ProjectView.t()) :: :ok | {:conflict, map()} | {:error, term()}
   defp promote_forks(%ProjectView{} = view) do
     case fork_store(view) do
@@ -472,9 +525,17 @@ defmodule MingaAgent.ProjectView.Overlay do
         :ok
 
       store ->
-        store
-        |> BufferForkStore.merge_all_keep_failed()
-        |> fork_merge_result()
+        case fork_store_available(store) do
+          :ok ->
+            results = BufferForkStore.merge_all_keep_failed(store)
+
+            with :ok <- fork_merge_result(results) do
+              materialize_merged_forks_for_merge(view, successful_fork_paths(results))
+            end
+
+          {:error, reason} ->
+            {:error, {:fork_promote_failed, reason}}
+        end
     end
   catch
     :exit, reason -> {:error, {:fork_promote_failed, reason}}
@@ -485,6 +546,15 @@ defmodule MingaAgent.ProjectView.Overlay do
   defp fork_merge_result(results) do
     failures = Enum.reject(results, &match?({_path, :ok}, &1))
     if failures == [], do: :ok, else: {:conflict, %{conflicts: failures, results: results}}
+  end
+
+  @spec successful_fork_paths([{String.t(), :ok | {:conflict, term()} | {:error, term()}}]) ::
+          [String.t()]
+  defp successful_fork_paths(results) do
+    Enum.flat_map(results, fn
+      {path, :ok} -> [path]
+      {_path, _result} -> []
+    end)
   end
 
   @spec discard_fork(ProjectView.t(), String.t()) :: :ok | {:error, term()}

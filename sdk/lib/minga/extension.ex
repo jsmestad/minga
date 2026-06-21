@@ -159,6 +159,14 @@ defmodule Minga.Extension do
   @typedoc "A declared runtime or UI capability: `{family, value}`."
   @type capability_spec :: {atom(), term()}
 
+  @typedoc "When an extension should be loaded."
+  @type load_policy ::
+          :eager
+          | :deferred
+          | {:on_command, [atom()]}
+          | {:on_filetype, [atom()]}
+          | {:on_key, [{bindable_mode(), String.t()}]}
+
   @doc """
   Builds a public manifest for a loaded extension module.
 
@@ -167,7 +175,7 @@ defmodule Minga.Extension do
   if you want those failures converted into load errors instead of propagating.
   """
   @spec manifest(module(), Minga.Extension.Manifest.source_type()) :: Minga.Extension.Manifest.t()
-  def manifest(module, source) when is_atom(module) and source in [:path, :git, :hex] do
+  def manifest(module, source) when is_atom(module) and source in [:path, :git, :hex, :module] do
     Minga.Extension.Manifest.from_module(module, source)
   end
 
@@ -324,6 +332,15 @@ defmodule Minga.Extension do
   end
 
   @doc """
+  Declares when this extension should load.
+  """
+  defmacro load_policy(policy) do
+    quote do
+      @__extension_load_policy__ unquote(policy)
+    end
+  end
+
+  @doc """
   Declares a keybinding this extension provides.
 
   Accumulated at compile time and exposed via `__keybind_schema__/0`.
@@ -356,6 +373,7 @@ defmodule Minga.Extension do
     keybinds = Module.get_attribute(env.module, :__extension_keybinds__) || []
     modeline_segments = Module.get_attribute(env.module, :__extension_modeline_segments__) || []
     capabilities = Module.get_attribute(env.module, :__extension_capabilities__) || []
+    load_policy = Module.get_attribute(env.module, :__extension_load_policy__) || :eager
     # Accumulated attributes are in reverse order; restore declaration order
     options = Enum.reverse(options)
     commands = Enum.reverse(commands)
@@ -383,6 +401,10 @@ defmodule Minga.Extension do
       @doc false
       @spec __capability_schema__() :: [Minga.Extension.capability_spec()]
       def __capability_schema__, do: unquote(Macro.escape(capabilities))
+
+      @doc false
+      @spec __load_policy__() :: Minga.Extension.load_policy()
+      def __load_policy__, do: unquote(Macro.escape(load_policy))
     end
   end
 end

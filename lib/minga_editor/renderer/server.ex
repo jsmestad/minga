@@ -57,6 +57,7 @@ defmodule MingaEditor.Renderer.Server do
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.Renderer.Caches
   alias MingaEditor.UI.FontRegistry
+  alias MingaEditor.UI.Panel.MessageStore
 
   @typedoc "Render pipeline output after a frame has run."
   @type render_output :: Input.t()
@@ -73,6 +74,7 @@ defmodule MingaEditor.Renderer.Server do
           required(:shell_identity) => MingaEditor.Shell.Identity.t() | nil,
           required(:shell_state) => term(),
           required(:windows) => term(),
+          required(:message_store) => MingaEditor.UI.Panel.MessageStore.t(),
           required(:frame_seq) => non_neg_integer(),
           required(:keyframe?) => boolean(),
           required(:render_sent_at) => integer()
@@ -89,6 +91,7 @@ defmodule MingaEditor.Renderer.Server do
           in_flight: {Input.t(), non_neg_integer(), integer()} | nil,
           font_registry: FontRegistry.t(),
           caches: Caches.t(),
+          message_store: MessageStore.t() | nil,
           pipeline: pipeline()
         }
 
@@ -98,6 +101,7 @@ defmodule MingaEditor.Renderer.Server do
             in_flight: nil,
             font_registry: FontRegistry.new(),
             caches: Caches.new(),
+            message_store: nil,
             pipeline: &RenderPipeline.run/1
 
   # ── API ────────────────────────────────────────────────────────────────────
@@ -158,14 +162,14 @@ defmodule MingaEditor.Renderer.Server do
       })
     end
 
-    snap = use_latest_caches(snap, state.caches)
+    snap = use_latest_renderer_state(snap, state.caches, state.message_store)
     {:noreply, %{state | pending: {snap, seq, pushed_at}}}
   end
 
   def handle_cast({:render, snap, seq, pushed_at}, %__MODULE__{rendering?: false} = state) do
     Telemetry.hop_latency(:cast_snapshot, pushed_at)
     send(self(), :do_render)
-    snap = use_latest_caches(snap, state.caches)
+    snap = use_latest_renderer_state(snap, state.caches, state.message_store)
     {:noreply, %{state | rendering?: true, in_flight: {snap, seq, pushed_at}}}
   end
 
@@ -192,9 +196,15 @@ defmodule MingaEditor.Renderer.Server do
       %{frame_seq: seq}
     )
 
-    state = %{state | font_registry: output.font_registry, caches: output.caches}
+    state = %{
+      state
+      | font_registry: output.font_registry,
+        caches: output.caches,
+        message_store: output.message_store
+    }
+
     send_writeback(state.editor_pid, output, seq)
-    advance_pending(state, output.caches)
+    advance_pending(state, output.caches, output.message_store)
   rescue
     e ->
       trace = Exception.format_stacktrace(__STACKTRACE__) |> String.slice(0, 500)
@@ -204,7 +214,7 @@ defmodule MingaEditor.Renderer.Server do
         "Renderer frame #{seq} dropped: #{Exception.message(e)}\n#{trace}"
       )
 
-      advance_pending(state, state.caches)
+      advance_pending(state, state.caches, state.message_store)
   end
 
   def handle_info(_other, state), do: {:noreply, state}
@@ -247,6 +257,7 @@ defmodule MingaEditor.Renderer.Server do
       shell_identity: output.shell_identity,
       shell_state: output.shell_state,
       windows: output.workspace.windows,
+      message_store: output.message_store,
       frame_seq: seq,
       # Whether the frame this render emitted carried the keyframe. The Editor clears
       # keyframe_pending? only on a writeback that actually honored the request, so an
@@ -258,17 +269,24 @@ defmodule MingaEditor.Renderer.Server do
     }
   end
 
-  @spec advance_pending(t(), Caches.t()) :: {:noreply, t()}
-  defp advance_pending(state, latest_caches) do
+  @spec advance_pending(t(), Caches.t(), MessageStore.t() | nil) :: {:noreply, t()}
+  defp advance_pending(state, latest_caches, latest_message_store) do
     case state.pending do
       nil ->
         {:noreply, %{state | rendering?: false, in_flight: nil}}
 
       {next_snap, next_seq, next_pushed_at} ->
         send(self(), :do_render)
-        next_snap = use_latest_caches(next_snap, latest_caches)
+        next_snap = use_latest_renderer_state(next_snap, latest_caches, latest_message_store)
         {:noreply, %{state | in_flight: {next_snap, next_seq, next_pushed_at}, pending: nil}}
     end
+  end
+
+  @spec use_latest_renderer_state(Input.t(), Caches.t(), MessageStore.t() | nil) :: Input.t()
+  defp use_latest_renderer_state(%Input{} = snap, %Caches{} = latest_caches, latest_message_store) do
+    snap
+    |> use_latest_caches(latest_caches)
+    |> use_latest_message_store(latest_message_store)
   end
 
   @spec use_latest_caches(Input.t(), Caches.t()) :: Input.t()
@@ -290,6 +308,16 @@ defmodule MingaEditor.Renderer.Server do
 
   defp use_latest_caches(%Input{} = snap, %Caches{} = latest_caches) do
     %{snap | caches: latest_caches}
+  end
+
+  @spec use_latest_message_store(Input.t(), MessageStore.t() | nil) :: Input.t()
+  defp use_latest_message_store(%Input{} = snap, nil), do: snap
+
+  defp use_latest_message_store(
+         %Input{message_store: %MessageStore{} = store} = snap,
+         %MessageStore{} = latest
+       ) do
+    %{snap | message_store: MessageStore.merge_sent_cursor(store, latest)}
   end
 
   @spec monotonic_now() :: integer()

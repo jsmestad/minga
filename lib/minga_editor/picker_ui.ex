@@ -113,11 +113,14 @@ defmodule MingaEditor.PickerUI do
       load_status: :loading
     }
 
+    {picker_state, revision} = PickerState.begin_fetch(picker_state)
+
     new_state = ModalOverlay.open(new_state, :picker, PickerPayload.new(picker_state))
 
     send(
       self(),
-      {:picker_fetch_candidates, source_module, Context.from_editor_state(state, context)}
+      {:picker_fetch_candidates, source_module, revision,
+       Context.from_editor_state(state, context)}
     )
 
     new_state

@@ -141,7 +141,11 @@ defmodule MingaEditor.UI.Theme do
       :info_fg,
       :hint_fg,
       :fold_fg,
-      :separator_fg
+      :separator_fg,
+      # Advisory (extension-sourced) diagnostic sign color. Optional override:
+      # when nil, the renderer derives it from this theme's own warning/error
+      # colors so the amber suits each theme instead of a baked constant.
+      :advisory_fg
     ]
 
     @type t :: %__MODULE__{
@@ -152,7 +156,8 @@ defmodule MingaEditor.UI.Theme do
             info_fg: MingaEditor.UI.Theme.color(),
             hint_fg: MingaEditor.UI.Theme.color(),
             fold_fg: MingaEditor.UI.Theme.color(),
-            separator_fg: MingaEditor.UI.Theme.color() | nil
+            separator_fg: MingaEditor.UI.Theme.color() | nil,
+            advisory_fg: MingaEditor.UI.Theme.color() | nil
           }
   end
 

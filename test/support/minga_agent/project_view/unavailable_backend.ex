@@ -36,6 +36,10 @@ defmodule MingaAgent.ProjectView.UnavailableBackend do
   def working_dir(%ProjectView{}), do: {:error, :working_dir_failed}
 
   @impl true
+  @spec prepare_working_dir(ProjectView.t()) :: {:ok, String.t()} | {:error, term()}
+  def prepare_working_dir(%ProjectView{}), do: {:error, :working_dir_failed}
+
+  @impl true
   @spec command_env(ProjectView.t()) :: [{String.t(), String.t()}] | {:error, term()}
   def command_env(%ProjectView{}), do: {:error, :command_env_failed}
 

@@ -49,22 +49,28 @@ defmodule MingaAgent.Changeset.ServerTest do
       assert {:error, :path_traversal} =
                GenServer.call(server, {:write_file, "../escape.txt", "pwned"})
 
+      assert {:error, :invalid_path} =
+               GenServer.call(
+                 server,
+                 {:write_file, "nested/ghost.__changeset_deleted__/file.txt", "pwned"}
+               )
+
       refute File.exists?(escaped)
     end
 
-    test "failed overlay writes do not create undo history", %{project: project} do
+    test "dependency writes materialize in the overlay without touching project deps", %{
+      project: project
+    } do
       dep_file = Path.join(project, "deps/some_dep/lib/real.ex")
       File.mkdir_p!(Path.dirname(dep_file))
       File.write!(dep_file, "original_dep")
       server = start_server(project)
 
-      assert {:error, :symlink_traversal} =
-               GenServer.call(server, {:write_file, "deps/some_dep/lib/real.ex", "mutated"})
-
-      assert {:error, :nothing_to_undo} =
-               GenServer.call(server, {:undo, "deps/some_dep/lib/real.ex"})
+      assert :ok = GenServer.call(server, {:write_file, "deps/some_dep/lib/real.ex", "mutated"})
+      overlay = GenServer.call(server, :overlay_path)
 
       assert File.read!(dep_file) == "original_dep"
+      assert File.read!(Path.join(overlay, "deps/some_dep/lib/real.ex")) == "mutated"
     end
   end
 
@@ -206,6 +212,13 @@ defmodule MingaAgent.Changeset.ServerTest do
       File.write!(escaped, "outside")
 
       assert {:error, :path_traversal} = GenServer.call(server, {:delete_file, "../escape.txt"})
+
+      assert {:error, :invalid_path} =
+               GenServer.call(
+                 server,
+                 {:delete_file, "nested/ghost.__changeset_deleted__/file.txt"}
+               )
+
       assert File.exists?(escaped)
       File.rm!(escaped)
     end
@@ -275,6 +288,36 @@ defmodule MingaAgent.Changeset.ServerTest do
       server = start_server(project)
 
       assert {:error, :path_traversal} = GenServer.call(server, {:undo, "../escape.txt"})
+    end
+  end
+
+  describe "list_directory" do
+    test "merges lazy project files with overlay writes and tombstones", %{project: project} do
+      server = start_server(project)
+
+      assert :ok = GenServer.call(server, {:write_file, "lib/new.ex", "new"})
+      assert :ok = GenServer.call(server, {:delete_file, "lib/foo.ex"})
+
+      assert {:ok, entries} = GenServer.call(server, {:list_directory, "lib"})
+      assert %{name: "new.ex", type: :file} in entries
+      refute Enum.any?(entries, &(&1.name == "foo.ex"))
+    end
+  end
+
+  describe "materialize_for_command" do
+    test "copies lazy project files without overwriting changes", %{project: project} do
+      File.mkdir_p!(Path.join(project, "_build/dev"))
+      File.write!(Path.join(project, "_build/dev/compiled.beam"), "beam")
+      server = start_server(project)
+
+      assert :ok = GenServer.call(server, {:write_file, "hello.txt", "changed"})
+      assert {:ok, stats} = GenServer.call(server, :materialize_for_command)
+      overlay = GenServer.call(server, :overlay_path)
+
+      assert stats.copied_files >= 1
+      assert File.read!(Path.join(overlay, "hello.txt")) == "changed"
+      assert File.exists?(Path.join(overlay, "lib/foo.ex"))
+      refute File.exists?(Path.join(overlay, "_build"))
     end
   end
 

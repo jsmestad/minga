@@ -164,7 +164,10 @@ defmodule MingaEditor.FileTree.Freshness do
 
     case file_tree.tree do
       %FileTree{root: ^expanded_root} ->
-        set_file_tree(state, FileTreeState.set_project_root(file_tree, expanded_root))
+        file_tree
+        |> FileTreeState.set_project_root(expanded_root)
+        |> refilter_active_tree()
+        |> then(&set_file_tree(state, &1))
 
       %FileTree{} = old_tree ->
         unwatch_expanded_dirs(old_tree)
@@ -189,6 +192,17 @@ defmodule MingaEditor.FileTree.Freshness do
         set_file_tree(state, FileTreeState.set_project_root(file_tree, expanded_root))
     end
   end
+
+  # Re-applies the active filter so an open filtered tree picks up the freshly
+  # rebuilt project cache (#2377 AC3). No-op when no filter is active, so normal
+  # expanded browsing keeps its lazy-walked entries untouched.
+  @spec refilter_active_tree(FileTreeState.t()) :: FileTreeState.t()
+  defp refilter_active_tree(%FileTreeState{tree: %FileTree{filter: filter}} = file_tree)
+       when is_binary(filter) and filter != "" do
+    FileTreeState.update_filter(file_tree, filter)
+  end
+
+  defp refilter_active_tree(%FileTreeState{} = file_tree), do: file_tree
 
   @doc "Registers expanded tree directories with the external file watcher when it is running."
   @spec watch_expanded_dirs(FileTree.t()) :: :ok

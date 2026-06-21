@@ -99,7 +99,7 @@ defmodule MingaEditor.Frontend.Emit.KeyframeSideChannelTest do
         force_keyframe?: Keyword.get(opts, :force_keyframe?, false)
     }
 
-    {new_caches, _font_registry} = Emit.emit(frame, ctx, nil, caches)
+    {new_caches, _font_registry, _message_store} = Emit.emit(frame, ctx, nil, caches)
     # The frame's render commands go to port_manager (self()); drain that cast so the
     # side-channel assertions only see set_title/set_window_bg.
     assert_receive {:"$gen_cast", {:send_commands, _commands}}

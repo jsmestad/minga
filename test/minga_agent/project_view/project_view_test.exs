@@ -105,6 +105,113 @@ defmodule MingaAgent.ProjectViewTest do
   end
 
   describe "overlay backend contract" do
+    test "creates lazily and reads original project content without copying", %{tmp_dir: dir} do
+      seed_project(dir)
+      {:ok, view} = ProjectView.overlay(dir)
+      overlay_dir = ProjectView.working_dir(view)
+
+      refute File.exists?(Path.join(overlay_dir, "lib/a.txt"))
+      assert {:ok, "one\n"} = ProjectView.read_file(view, "lib/a.txt")
+      refute File.exists?(Path.join(overlay_dir, "lib/a.txt"))
+
+      assert :ok = ProjectView.write_file(view, "lib/a.txt", "draft\n")
+      assert File.read!(Path.join(overlay_dir, "lib/a.txt")) == "draft\n"
+      assert File.read!(Path.join(dir, "lib/a.txt")) == "one\n"
+    end
+
+    test "prepare_working_dir materializes the lazy project for tool execution", %{tmp_dir: dir} do
+      seed_project(dir)
+      {:ok, view} = ProjectView.overlay(dir)
+      overlay_dir = ProjectView.working_dir(view)
+
+      refute File.exists?(Path.join(overlay_dir, "README.md"))
+      assert {:ok, ^overlay_dir} = ProjectView.prepare_working_dir(view)
+      assert File.read!(Path.join(overlay_dir, "README.md")) == "readme\n"
+    end
+
+    test "prepare_working_dir keeps promote working for open-buffer new files", %{tmp_dir: dir} do
+      seed_project(dir)
+      path = Path.join(dir, "lib/new.txt")
+
+      {:ok, _parent} =
+        start_supervised({Minga.Buffer.Process, content: "draft\n", file_path: path})
+
+      {:ok, view} = ProjectView.overlay(dir)
+      assert :ok = ProjectView.write_file(view, "lib/new.txt", "draft\n")
+      overlay_dir = ProjectView.working_dir(view)
+
+      assert {:ok, ^overlay_dir} = ProjectView.prepare_working_dir(view)
+      assert File.read!(Path.join(overlay_dir, "lib/new.txt")) == "draft\n"
+      refute File.exists?(Path.join(dir, "lib/new.txt"))
+
+      assert {:ok, diff} = ProjectView.diff(view)
+      assert Enum.count(diff, &(&1.path == "lib/new.txt")) == 1
+
+      assert :ok = ProjectView.promote(view, :project_root)
+      assert File.read!(path) == "draft\n"
+    end
+
+    test "prepare_working_dir keeps promote working for edited open-buffer files", %{
+      tmp_dir: dir
+    } do
+      seed_project(dir)
+      path = Path.join(dir, "lib/a.txt")
+
+      {:ok, _parent} =
+        start_supervised({Minga.Buffer.Process, content: File.read!(path), file_path: path})
+
+      {:ok, view} = ProjectView.overlay(dir)
+      assert :ok = ProjectView.edit_file(view, "lib/a.txt", "one", "draft")
+      overlay_dir = ProjectView.working_dir(view)
+
+      assert {:ok, ^overlay_dir} = ProjectView.prepare_working_dir(view)
+      assert File.read!(Path.join(overlay_dir, "lib/a.txt")) == "draft\n"
+      assert File.read!(path) == "one\n"
+
+      assert {:ok, diff} = ProjectView.diff(view)
+      assert Enum.count(diff, &(&1.path == "lib/a.txt")) == 1
+
+      assert :ok = ProjectView.promote(view, :project_root)
+      assert File.read!(path) == "draft\n"
+    end
+
+    test "promote after prepare keeps saved parent buffer edits", %{tmp_dir: dir} do
+      seed_project(dir)
+      path = Path.join(dir, "lib/merge.txt")
+      File.write!(path, "one\ntwo\n")
+
+      {:ok, parent} =
+        start_supervised({Minga.Buffer.Process, content: File.read!(path), file_path: path})
+
+      {:ok, view} = ProjectView.overlay(dir)
+      assert :ok = ProjectView.edit_file(view, "lib/merge.txt", "one", "ONE")
+      assert :ok = Minga.Buffer.replace_content(parent, "one\nTWO\n", :user)
+      File.write!(path, "one\nTWO\n")
+
+      assert {:ok, _overlay_dir} = ProjectView.prepare_working_dir(view)
+      assert :ok = ProjectView.promote(view, :project_root)
+      assert File.read!(path) == "ONE\nTWO\n"
+    end
+
+    test "prepare_working_dir rejects fork drafts through overlay symlinks", %{tmp_dir: dir} do
+      seed_project(dir)
+      path = Path.join(dir, "scratch/new.txt")
+
+      {:ok, _parent} =
+        start_supervised({Minga.Buffer.Process, content: "draft\n", file_path: path})
+
+      {:ok, view} = ProjectView.overlay(dir)
+      assert :ok = ProjectView.write_file(view, "scratch/new.txt", "draft\n")
+
+      overlay_dir = ProjectView.working_dir(view)
+      outside = Path.join(dir, "outside")
+      File.mkdir_p!(outside)
+      File.ln_s!(outside, Path.join(overlay_dir, "scratch"))
+
+      assert {:error, :symlink_traversal} = ProjectView.prepare_working_dir(view)
+      refute File.exists?(Path.join(outside, "new.txt"))
+    end
+
     test "read/write/edit/delete/list/diff/promote/discard stay isolated until promote", %{
       tmp_dir: dir
     } do
@@ -388,6 +495,22 @@ defmodule MingaAgent.ProjectViewTest do
       assert {:error, :path_traversal} = ProjectView.read_file(view, "../outside")
       assert {:error, :invalid_path} = ProjectView.read_file(view, "")
       assert {:ok, _entries} = ProjectView.list_directory(view, ".")
+    end
+
+    test "rejects tombstone-suffix paths for writes and deletes", %{tmp_dir: dir} do
+      seed_project(dir)
+
+      for create_view <- [&ProjectView.direct/1, &ProjectView.overlay/1] do
+        {:ok, view} = create_view.(dir)
+
+        for path <- ["ghost.__changeset_deleted__", "nested/ghost.__changeset_deleted__/file.txt"] do
+          assert {:error, :invalid_path} = ProjectView.write_file(view, path, "x")
+          assert {:error, :invalid_path} = ProjectView.delete_file(view, path)
+          assert {:error, :invalid_path} = ProjectView.discard_file(view, path)
+        end
+
+        assert :ok = ProjectView.close(view)
+      end
     end
   end
 
