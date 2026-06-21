@@ -82,6 +82,12 @@ var minimalBodyOverrides = map[byte][]byte{
 	// for two zero-length strings. Minimal: opcode + payload_len(4)=4 + four zero
 	// bytes (two empty string16) = 9 bytes.
 	generated.OPGuiExtensionRuntime: {generated.OPGuiExtensionRuntime, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00},
+	// gui_window_viewport_delta/gui_window_rows_delta are sectioned custom opcodes.
+	// Their decoder requires both header and rows sections so malformed sectioned
+	// deltas cannot masquerade as overlay-only deltas in the UI model. Minimal:
+	// opcode + section_count(2) + header section(14-byte payload) + empty rows section.
+	generated.OPGuiWindowViewportDelta: {generated.OPGuiWindowViewportDelta, 0x02, 0x01, 0x00, 0x0E, 0x00, 0x08, 0x12, 0x34, 0x56, 0x78, 0x01, 0x00, 0x00, 0x02, 0x00, 0x02, 0x00, 0x00, 0x02, 0x00, 0x02, 0x00, 0x00},
+	generated.OPGuiWindowRowsDelta:     {generated.OPGuiWindowRowsDelta, 0x02, 0x01, 0x00, 0x0E, 0x00, 0x07, 0x12, 0x34, 0x56, 0x78, 0x00, 0x00, 0x00, 0x02, 0x00, 0x02, 0x00, 0x00, 0x02, 0x00, 0x02, 0x00, 0x00},
 }
 
 func TestFramingContractEveryFramedOpcode(t *testing.T) {

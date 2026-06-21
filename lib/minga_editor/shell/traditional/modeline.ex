@@ -46,12 +46,14 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
           :macro_recording => {true, String.t()} | false,
           optional(:agent_status) => MingaEditor.State.Agent.status(),
           optional(:active_tool_name) => String.t() | nil,
+          optional(:agent_status_command) => String.t() | nil,
           optional(:agent_theme_colors) => MingaEditor.UI.Theme.Agent.t() | nil,
           optional(:mode_override) => String.t() | nil,
           optional(:lsp_status) => lsp_status(),
           optional(:parser_status) => parser_status(),
           optional(:git_branch) => String.t() | nil,
           optional(:git_diff_summary) => git_diff_summary(),
+          optional(:git_degraded) => boolean(),
           optional(:diagnostic_counts) =>
             {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()} | nil,
           optional(:indent_type) => :spaces | :tabs,
@@ -105,6 +107,10 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
 
   # Nerd Font branch icon (U+E0A0)
   @branch_icon "\uE0A0"
+
+  # Warning icon for a degraded git status (results trimmed, e.g. status timeout)
+  @git_degraded_icon "\u{F071}"
+  @git_degraded_fg 0xECBE7B
 
   # Nerd Font diagnostic icons
   @diag_error_icon "\u{F057}"
@@ -568,6 +574,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
   defp build_git_segments(data, bar_bg, theme) do
     branch = Map.get(data, :git_branch)
     summary = Map.get(data, :git_diff_summary)
+    degraded? = Map.get(data, :git_degraded, false)
 
     case branch do
       nil ->
@@ -577,12 +584,19 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
         []
 
       name ->
-        [
-          {" #{@branch_icon} #{name}", theme.modeline.info_fg, bar_bg, [], nil}
-          | build_diff_stat_segments(summary, bar_bg, theme.git)
-        ]
+        [{" #{@branch_icon} #{name}", theme.modeline.info_fg, bar_bg, [], nil}] ++
+          build_diff_stat_segments(summary, bar_bg, theme.git) ++
+          build_git_degraded_segments(degraded?, bar_bg)
     end
   end
+
+  # Visible indicator that the cached git status is degraded (e.g. it timed out
+  # on a huge full checkout, so untracked or other changes may be missing).
+  @spec build_git_degraded_segments(boolean(), non_neg_integer()) :: [render_segment()]
+  defp build_git_degraded_segments(true, bar_bg),
+    do: [{" #{@git_degraded_icon}", @git_degraded_fg, bar_bg, [bold: true], nil}]
+
+  defp build_git_degraded_segments(false, _bar_bg), do: []
 
   @spec build_diff_stat_segments(git_diff_summary(), non_neg_integer(), Theme.Git.t()) :: [
           render_segment()
@@ -602,33 +616,41 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
 
   @spec build_agent_segments(modeline_data(), non_neg_integer()) :: [render_segment()]
   defp build_agent_segments(data, bar_bg) do
+    status_command = Map.get(data, :agent_status_command)
     status = Map.get(data, :agent_status)
     colors = Map.get(data, :agent_theme_colors)
     active_tool_name = Map.get(data, :active_tool_name)
 
-    case {status, colors} do
-      {nil, _colors} ->
+    case {status_command, status, colors} do
+      {custom, _status, c} when is_binary(custom) and custom != "" ->
+        [{" #{custom} ", agent_status_fg(c), bar_bg, [], nil}]
+
+      {_custom, nil, _colors} ->
         []
 
-      {:idle, c} ->
+      {_custom, :idle, c} ->
         [{" ◯ Idle ", c.status_idle, bar_bg, [], nil}]
 
-      {:plan, c} ->
+      {_custom, :plan, c} ->
         [{" PLAN ", c.status_thinking, bar_bg, [bold: true], nil}]
 
-      {:thinking, c} ->
+      {_custom, :thinking, c} ->
         [{" ⟳ Thinking ", c.status_thinking, bar_bg, [bold: true], nil}]
 
-      {:tool_executing, c} ->
+      {_custom, :tool_executing, c} ->
         [{agent_tool_label(active_tool_name), c.status_tool, bar_bg, [bold: true], nil}]
 
-      {:error, c} ->
+      {_custom, :error, c} ->
         [{" ✗ Error ", c.status_error, bar_bg, [bold: true], nil}]
 
       _other ->
         []
     end
   end
+
+  @spec agent_status_fg(Theme.Agent.t() | nil) :: non_neg_integer()
+  defp agent_status_fg(%{status_idle: color}), do: color
+  defp agent_status_fg(_colors), do: 0xFFFFFF
 
   @spec agent_tool_label(String.t() | nil) :: String.t()
   defp agent_tool_label(name) when is_binary(name) and name != "", do: " ⚡ Running #{name} "

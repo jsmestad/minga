@@ -90,4 +90,40 @@ defmodule Minga.Extension.BadgeTest do
       assert Badge.all_file_badges() == []
     end
   end
+
+  describe "level decorations and file_levels_map/0" do
+    test "set_file stores a semantic level" do
+      :ok = Badge.set_file(:test_ext, "/tmp/known.ex", level: 4)
+
+      assert %{level: 4} = Badge.badges_for_path("/tmp/known.ex") |> hd()
+    end
+
+    test "file_levels_map keys absolute paths to their level" do
+      :ok = Badge.set_file(:test_ext, "/tmp/known.ex", level: 4)
+
+      assert Badge.file_levels_map()[Path.expand("/tmp/known.ex")] == 4
+    end
+
+    test "file_levels_map omits entries without a level" do
+      :ok = Badge.set_file(:test_ext, "/tmp/plain.ex", color: 0xFF0000)
+
+      refute Map.has_key?(Badge.file_levels_map(), Path.expand("/tmp/plain.ex"))
+    end
+
+    test "multiple extensions on one path compose by taking the max level" do
+      :ok = Badge.set_file(:test_ext, "/tmp/shared.ex", level: 1)
+      :ok = Badge.set_file(:other_ext, "/tmp/shared.ex", level: 3)
+
+      assert Badge.file_levels_map()[Path.expand("/tmp/shared.ex")] == 3
+    end
+
+    test "invalid levels are treated as absent before the render path" do
+      :ok = Badge.set_file(:test_ext, "/tmp/invalid.ex", level: 9)
+      :ok = Badge.set_file(:other_ext, "/tmp/string.ex", level: "warm")
+
+      assert %{level: nil} = Badge.badges_for_path("/tmp/invalid.ex") |> hd()
+      refute Map.has_key?(Badge.file_levels_map(), Path.expand("/tmp/invalid.ex"))
+      refute Map.has_key?(Badge.file_levels_map(), Path.expand("/tmp/string.ex"))
+    end
+  end
 end

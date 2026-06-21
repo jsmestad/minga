@@ -75,6 +75,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   alias Minga.RenderModel.Window.IndentGuides
   alias Minga.RenderModel.Window.PaneGeometry
   alias Minga.RenderModel.Window.Row
+  alias Minga.RenderModel.Window.ScrollPresentation
   alias Minga.RenderModel.Window.SearchMatch
   alias Minga.RenderModel.Window.Selection
   alias Minga.RenderModel.Window.Span
@@ -98,6 +99,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   @section_wc_annotations 0x07
   @section_wc_geometry 0x08
   @section_wc_cursorline 0x09
+  @section_wc_scroll_presentation 0x0A
 
   @section_gutter_window 0x01
   @section_gutter_config 0x02
@@ -203,7 +205,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
 
     sections =
       [header_section, rows_section | overlay.sections] ++
-        overlay.geometry ++ overlay.cursorline
+        overlay.geometry ++ overlay.cursorline ++ overlay.scroll_presentation
 
     binary = IO.iodata_to_binary([<<@op_gui_window_content, length(sections)::8>> | sections])
 
@@ -216,7 +218,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
       annotation_bytes: byte_size(overlay.annotations),
       metadata_bytes:
         2 + byte_size(header_section) + IO.iodata_length(overlay.geometry) +
-          IO.iodata_length(overlay.cursorline)
+          IO.iodata_length(overlay.cursorline) + IO.iodata_length(overlay.scroll_presentation)
     }
 
     {binary, metrics}
@@ -248,7 +250,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
     overlay = overlay_sections(sw)
 
     [header_section, rows_section | overlay.sections] ++
-      overlay.geometry ++ overlay.cursorline
+      overlay.geometry ++ overlay.cursorline ++ overlay.scroll_presentation
   end
 
   @spec encode_delta_row_entries([Row.t()], map()) :: {iodata(), boolean()}
@@ -293,6 +295,9 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
     geometry = geometry_sections(encode_geometry(sw.geometry))
     cursorline = cursorline_sections(encode_cursorline_section(sw.cursorline, sw.rect))
 
+    scroll_presentation =
+      scroll_presentation_sections(encode_scroll_presentation(ScrollPresentation.from_window(sw)))
+
     %{
       sections: [selection, search, diagnostics, highlights, annotations],
       selection: selection,
@@ -301,7 +306,8 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
       highlights: highlights,
       annotations: annotations,
       geometry: geometry,
-      cursorline: cursorline
+      cursorline: cursorline,
+      scroll_presentation: scroll_presentation
     }
   end
 
@@ -323,6 +329,12 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   defp cursorline_sections(nil), do: []
   defp cursorline_sections(payload), do: [encode_section(@section_wc_cursorline, payload)]
 
+  @spec scroll_presentation_sections(binary() | nil) :: [binary()]
+  defp scroll_presentation_sections(nil), do: []
+
+  defp scroll_presentation_sections(payload),
+    do: [encode_section(@section_wc_scroll_presentation, payload)]
+
   @spec encode_geometry(PaneGeometry.t() | nil) :: binary() | nil
   defp encode_geometry(nil), do: nil
 
@@ -343,6 +355,19 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
         length(geometry.hit_regions)::8>>,
       hit_regions
     ])
+  end
+
+  @spec encode_scroll_presentation(ScrollPresentation.t() | nil) :: binary() | nil
+  defp encode_scroll_presentation(nil), do: nil
+
+  defp encode_scroll_presentation(%ScrollPresentation{} = presentation) do
+    flags = if presentation.reset_required, do: 0x01, else: 0x00
+
+    <<presentation.window_id::16, flags::8, presentation.anchor_top::32,
+      presentation.anchor_left::16, presentation.anchor_visual_row_offset::16,
+      presentation.visible_start_line::32, presentation.visible_end_line::32,
+      presentation.overscan_start_line::32, presentation.overscan_end_line::32,
+      presentation.content_epoch::32, presentation.layout_generation::32>>
   end
 
   @spec encode_rect(PaneGeometry.rect()) :: binary()

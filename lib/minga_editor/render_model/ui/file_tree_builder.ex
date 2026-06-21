@@ -61,6 +61,7 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilder do
         focused: file_tree_focused?(file_tree),
         git_status: tree.git_status,
         diagnostics: diagnostics,
+        heat_levels: file_tree_heat_levels(),
         selected_index: tree.cursor
       )
       |> Enum.map(&row_model(&1, ctx.theme))
@@ -109,6 +110,7 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilder do
       },
       git_status: row.git_status,
       diagnostics: FileTreeDiagnostics.to_tuple(row.diagnostics),
+      heat_level: row.heat_level,
       depth: row.depth,
       guides: row.guides,
       editing: editing_model(row.editing)
@@ -149,6 +151,17 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilder do
     end)
   rescue
     ArgumentError -> %{}
+  catch
+    :exit, _ -> %{}
+  end
+
+  # Extension-contributed familiarity/heat levels by absolute file path. A
+  # single bulk read; directory roll-up happens in `Rows.from_tree`.
+  @spec file_tree_heat_levels() :: %{String.t() => 0..4}
+  defp file_tree_heat_levels do
+    Minga.Extension.Badge.file_levels_map()
+  rescue
+    _ -> %{}
   catch
     :exit, _ -> %{}
   end

@@ -6,6 +6,7 @@ defmodule MingaEditor.RenderPipeline.InputTest do
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
+  alias MingaEditor.UI.Panel.MessageStore
 
   setup do
     state = TestHelpers.base_state()
@@ -92,6 +93,23 @@ defmodule MingaEditor.RenderPipeline.InputTest do
     end
   end
 
+  describe "EditorState.reset_frontend_render_state/1" do
+    test "resets frontend caches and message send cursor", %{state: state} do
+      message_store =
+        state.message_store
+        |> MessageStore.append("first", :info, :editor)
+        |> MessageStore.mark_sent(1)
+
+      state = %{state | message_store: message_store}
+
+      result = EditorState.reset_frontend_render_state(state)
+
+      assert result.message_store.last_sent_id == 0
+      assert result.message_store.stream_instance == message_store.stream_instance
+      assert Enum.map(result.message_store.entries, & &1.text) == ["first"]
+    end
+  end
+
   describe "EditorState.apply_render_output/2" do
     test "writes back mutated windows", %{state: state} do
       input = Input.from_editor_state(state)
@@ -131,6 +149,22 @@ defmodule MingaEditor.RenderPipeline.InputTest do
       result = EditorState.apply_render_output(state, mutated_input)
 
       assert result.layout == layout
+    end
+
+    test "writes back message store cursor advances", %{state: state} do
+      input = Input.from_editor_state(state)
+
+      message_store =
+        state.message_store
+        |> MessageStore.append("first", :info, :editor)
+        |> MessageStore.append("second", :info, :editor)
+        |> MessageStore.mark_sent(2)
+
+      result = EditorState.apply_render_output(state, %{input | message_store: message_store})
+
+      assert result.message_store.last_sent_id == 2
+      assert result.message_store.stream_instance == message_store.stream_instance
+      assert Enum.map(result.message_store.entries, & &1.text) == ["first", "second"]
     end
   end
 
@@ -194,7 +228,38 @@ defmodule MingaEditor.RenderPipeline.InputTest do
       assert result.shell_state.tab_bar_click_regions == [{:tab, 2}]
     end
 
-    test "drops renderer writeback without shell identity", %{state: state} do
+    test "merges renderer message-store writeback", %{state: state} do
+      current_store =
+        state.message_store
+        |> MessageStore.append("first", :info, :editor)
+        |> MessageStore.append("second", :info, :editor)
+
+      state = %{state | message_store: current_store}
+      input = Input.from_editor_state(state)
+      emitted_store = MessageStore.mark_sent(current_store, 1)
+
+      writeback = %{
+        caches: input.caches,
+        layout: :rendered_layout,
+        windows: state.workspace.windows,
+        shell_id: :traditional,
+        shell_identity: input.shell_identity,
+        shell_state: state.shell_state,
+        message_store: emitted_store
+      }
+
+      result = EditorState.apply_renderer_writeback(state, writeback)
+
+      assert result.message_store.last_sent_id == 1
+      assert result.message_store.stream_instance == current_store.stream_instance
+      assert Enum.map(result.message_store.entries, & &1.text) == ["first", "second"]
+    end
+
+    test "drops renderer writeback without shell identity but keeps message cursor", %{
+      state: state
+    } do
+      current_store = MessageStore.append(state.message_store, "first", :info, :editor)
+      state = %{state | message_store: current_store}
       input = Input.from_editor_state(state)
 
       writeback = %{
@@ -203,7 +268,8 @@ defmodule MingaEditor.RenderPipeline.InputTest do
         focus_tree: :rendered_focus_tree,
         windows: state.workspace.windows,
         shell_id: :traditional,
-        shell_state: %{state.shell_state | modeline_click_regions: [{:old, 1}]}
+        shell_state: %{state.shell_state | modeline_click_regions: [{:old, 1}]},
+        message_store: MessageStore.mark_sent(current_store, 1)
       }
 
       result = EditorState.apply_renderer_writeback(state, writeback)
@@ -211,6 +277,7 @@ defmodule MingaEditor.RenderPipeline.InputTest do
       assert result.layout == nil
       assert result.focus_tree == nil
       assert result.shell_state.modeline_click_regions == []
+      assert result.message_store.last_sent_id == 1
     end
 
     test "drops stale renderer writeback after shell changes", %{state: state} do

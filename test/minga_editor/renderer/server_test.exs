@@ -11,6 +11,7 @@ defmodule MingaEditor.Renderer.ServerTest do
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.Renderer.Caches
   alias MingaEditor.Renderer.Server, as: RendererServer
+  alias MingaEditor.UI.Panel.MessageStore
   alias MingaEditor.Viewport
 
   # Async renderer writeback can lag a bit under CI load, keep this local to the renderer assertions.
@@ -78,6 +79,25 @@ defmodule MingaEditor.Renderer.ServerTest do
                    @async_render_timeout
 
     refute renderer_busy?(renderer)
+  end
+
+  test "pending snapshots inherit the latest emitted message cursor before rendering" do
+    parent = self()
+    renderer = start_renderer(parent, pipeline: message_cursor_probe_pipeline(parent))
+
+    first_store = MessageStore.new() |> MessageStore.append("first")
+    pending_store = first_store |> MessageStore.append("second")
+    in_flight = %{stub_snapshot() | message_store: first_store}
+    pending = %{stub_snapshot() | message_store: pending_store}
+
+    :sys.replace_state(renderer, fn state ->
+      %{state | rendering?: true, in_flight: {in_flight, 1, 0}, pending: {pending, 2, 0}}
+    end)
+
+    send(renderer, :do_render)
+
+    assert_receive {:pipeline_message_cursor, 1, 0}, @async_render_timeout
+    assert_receive {:pipeline_message_cursor, 2, 1}, @async_render_timeout
   end
 
   test "pending snapshots inherit the latest emitted caches before rendering" do
@@ -210,6 +230,18 @@ defmodule MingaEditor.Renderer.ServerTest do
     end
   end
 
+  defp message_cursor_probe_pipeline(parent) do
+    fn input ->
+      send(parent, {:pipeline_message_cursor, input.frame_seq, input.message_store.last_sent_id})
+
+      %{
+        input
+        | caches: %{input.caches | last_emitted_frame_seq: input.frame_seq},
+          message_store: MessageStore.mark_sent(input.message_store, input.frame_seq)
+      }
+    end
+  end
+
   defp attach_coalesce_handler do
     handler_id = {__MODULE__, :coalesced, make_ref()}
 
@@ -248,7 +280,8 @@ defmodule MingaEditor.Renderer.ServerTest do
       workspace: %{
         windows: %MingaEditor.State.Windows{},
         viewport: Viewport.new(24, 80)
-      }
+      },
+      message_store: MessageStore.new()
     }
   end
 

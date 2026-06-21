@@ -133,11 +133,12 @@ func decodeBottomPanel(payload []byte) (BottomPanel, string, int) {
 		}
 		panel.Tabs = append(panel.Tabs, tab)
 	}
-	if len(payload) < offset+2 {
+	if len(payload) < offset+6 {
 		return panel, bottomPanelSummary(panel), offset
 	}
-	msgCount := int(u16(payload, offset))
-	offset += 2
+	panel.StreamInstance = u32(payload, offset)
+	msgCount := int(u16(payload, offset+4))
+	offset += 6
 	panel.Messages = make([]PanelMessage, 0, msgCount)
 	for i := 0; i < msgCount && len(payload) >= offset+14; i++ {
 		msg := PanelMessage{ID: u32(payload, offset), Level: payload[offset+4], Subsystem: payload[offset+5], Timestamp: u32(payload, offset+6)}

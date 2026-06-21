@@ -582,7 +582,7 @@ struct CommandDispatcherRoutingTests {
     @MainActor func guiBottomPanelVisible() {
         let (dispatcher, gui) = makeDispatcher()
         let tabs = [Wire.BottomPanelTab(tabType: 0, name: "Messages")]
-        let entries = [Wire.MessageEntry(id: 1, level: 1, subsystem: 0,
+        let entries = [Wire.MessageEntry(streamInstance: 1, id: 1, level: 1, subsystem: 0,
                                        timestampSecs: 3600, filePath: "", text: "test")]
         dispatcher.applyForTesting(.guiBottomPanel(visible: true, activeTabIndex: 0,
                                              heightPercent: 30, filterPreset: 0,

@@ -14,6 +14,7 @@ defmodule MingaEditor.Input.FileTreeHandler do
 
   alias Minga.Buffer
   alias MingaEditor.Commands
+  alias MingaEditor.FileTree.FilterWalk
   alias MingaEditor.FocusTree
   alias MingaEditor.FocusTree.Node, as: FocusNode
   alias MingaEditor.State, as: EditorState
@@ -387,13 +388,13 @@ defmodule MingaEditor.Input.FileTreeHandler do
       set_file_tree(state, FileTreeState.clear_filter(file_tree_state(state)))
     else
       new_text = String.slice(text, 0, max(String.length(text) - 1, 0))
-      set_file_tree(state, FileTreeState.update_filter(file_tree_state(state), new_text))
+      apply_filter_update(state, new_text)
     end
   end
 
   defp handle_filter_key(state, cp, mods) when printable_text_key?(cp, mods) do
     new_text = current_filter_text(state) <> <<cp::utf8>>
-    set_file_tree(state, FileTreeState.update_filter(file_tree_state(state), new_text))
+    apply_filter_update(state, new_text)
   end
 
   defp handle_filter_key(state, _cp, _mods), do: state
@@ -405,6 +406,29 @@ defmodule MingaEditor.Input.FileTreeHandler do
       _ -> ""
     end
   end
+
+  # Updates the active filter, then kicks off the async no-cache filesystem walk
+  # when the tree root is not covered by the project cache (#2377 AC4). The
+  # active project root filters in memory inside update_filter/2, so the walk is
+  # only spawned for other roots. The walk result arrives as a
+  # {:file_tree_filter_walk, ...} message handled by the editor.
+  @spec apply_filter_update(EditorState.t(), String.t()) :: EditorState.t()
+  defp apply_filter_update(state, filter_text) do
+    file_tree = FileTreeState.update_filter(file_tree_state(state), filter_text)
+    maybe_spawn_filter_walk(file_tree)
+    set_file_tree(state, file_tree)
+  end
+
+  @spec maybe_spawn_filter_walk(FileTreeState.t()) :: :ok
+  defp maybe_spawn_filter_walk(%FileTreeState{tree: %FileTree{} = tree} = file_tree) do
+    if FileTreeState.needs_filter_walk?(file_tree) do
+      FilterWalk.start(tree, self())
+    end
+
+    :ok
+  end
+
+  defp maybe_spawn_filter_walk(%FileTreeState{}), do: :ok
 
   # ── Shared helpers ──────────────────────────────────────────────────────
 

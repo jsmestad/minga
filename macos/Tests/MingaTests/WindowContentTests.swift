@@ -26,6 +26,7 @@ struct WindowContentBuilder {
     var documentHighlights: [(startRow: UInt16, startCol: UInt16, endRow: UInt16, endCol: UInt16, kind: UInt8)] = []
     var paneGeometryPayload: Data?
     var cursorline: (row: UInt16, r: UInt8, g: UInt8, b: UInt8)?
+    var scrollPresentationPayload: Data?
 
     struct RowBuilder {
         var rowType: UInt8 = 0  // normal
@@ -138,6 +139,9 @@ struct WindowContentBuilder {
             payload.append(contentsOf: [cursorline.r, cursorline.g, cursorline.b])
             sections.append(buildSection(0x09, payload))
         }
+        if let scrollPresentationPayload {
+            sections.append(buildSection(0x0A, scrollPresentationPayload))
+        }
 
         var data = Data()
         data.append(OP_GUI_WINDOW_CONTENT)
@@ -145,6 +149,22 @@ struct WindowContentBuilder {
         for section in sections {
             data.append(contentsOf: section)
         }
+        return data
+    }
+
+    static func sampleScrollPresentationPayload(windowId: UInt16 = 7) -> Data {
+        var data = Data()
+        appendU16(&data, windowId)
+        data.append(0x01)
+        appendU32(&data, 5)
+        appendU16(&data, 2)
+        appendU16(&data, 1)
+        appendU32(&data, 5)
+        appendU32(&data, 15)
+        appendU32(&data, 4)
+        appendU32(&data, 18)
+        appendU32(&data, 42)
+        appendU32(&data, 99)
         return data
     }
 
@@ -231,7 +251,7 @@ struct WindowContentBuilder {
 @Suite("GUI Window Content Decoder")
 struct WindowContentDecoderTests {
 
-    private func buildRowsDelta(opcode: UInt8, includeHeader: Bool = true, includeRows: Bool = true) -> Data {
+    private func buildRowsDelta(opcode: UInt8, includeHeader: Bool = true, includeRows: Bool = true, scrollPresentationPayload: Data? = nil) -> Data {
         var sections: [Data] = []
 
         if includeHeader {
@@ -262,6 +282,10 @@ struct WindowContentDecoderTests {
             rows.append(text)
             deltaAppendU16(&rows, 0)
             sections.append(deltaSection(0x02, rows))
+        }
+
+        if let scrollPresentationPayload {
+            sections.append(deltaSection(0x0A, scrollPresentationPayload))
         }
 
         var data = Data()
@@ -464,6 +488,45 @@ struct WindowContentDecoderTests {
         #expect(geometry.gutterMetrics.lineNumberWidth == 2)
         #expect(geometry.gutterMetrics.signColWidth == 3)
         #expect(geometry.hitRegions.map(\.kind) == [.text, .foldControl])
+    }
+
+    @Test("Decode scroll presentation metadata")
+    func decodeScrollPresentation() throws {
+        var builder = WindowContentBuilder(windowId: 7)
+        builder.contentEpoch = 42
+        builder.scrollPresentationPayload = WindowContentBuilder.sampleScrollPresentationPayload(windowId: 7)
+
+        let (cmd, _) = try decodeCommand(data: builder.build(), offset: 0)
+        guard case .guiWindowContent(let content) = cmd else {
+            Issue.record("Expected .guiWindowContent"); return
+        }
+
+        guard let presentation = content.scrollPresentation else {
+            Issue.record("Expected scroll presentation"); return
+        }
+
+        #expect(presentation.windowId == 7)
+        #expect(presentation.resetRequired == true)
+        #expect(presentation.anchorTop == 5)
+        #expect(presentation.anchorLeft == 2)
+        #expect(presentation.anchorVisualRowOffset == 1)
+        #expect(presentation.visibleStartLine == 5)
+        #expect(presentation.visibleEndLine == 15)
+        #expect(presentation.overscanStartLine == 4)
+        #expect(presentation.overscanEndLine == 18)
+        #expect(presentation.contentEpoch == 42)
+        #expect(presentation.layoutGeneration == 99)
+    }
+
+    @Test("Reject scroll presentation identity mismatch")
+    func rejectScrollPresentationIdentityMismatch() throws {
+        var builder = WindowContentBuilder(windowId: 7)
+        builder.contentEpoch = 42
+        builder.scrollPresentationPayload = WindowContentBuilder.sampleScrollPresentationPayload(windowId: 8)
+
+        #expect(throws: ProtocolDecodeError.self) {
+            _ = try decodeCommand(data: builder.build(), offset: 0)
+        }
     }
 
     @Test("Decode pane-local cursorline")
@@ -746,6 +809,32 @@ struct WindowContentDecoderTests {
         #expect(delta.rows.count == 2)
     }
 
+    @Test("Decode rows delta with scroll presentation metadata")
+    func decodeRowsDeltaScrollPresentation() throws {
+        let data = buildRowsDelta(opcode: OP_GUI_WINDOW_ROWS_DELTA, scrollPresentationPayload: WindowContentBuilder.sampleScrollPresentationPayload(windowId: 7))
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+
+        #expect(size == data.count)
+        guard case .guiWindowRowsDelta(let delta) = cmd else {
+            Issue.record("Expected .guiWindowRowsDelta"); return
+        }
+
+        guard let presentation = delta.scrollPresentation else {
+            Issue.record("Expected scroll presentation on rows delta"); return
+        }
+
+        #expect(presentation.windowId == 7)
+        #expect(presentation.contentEpoch == 42)
+        #expect(presentation.layoutGeneration == 99)
+    }
+
+    @Test("Rows delta rejects mismatched scroll presentation identity")
+    func rowsDeltaRejectsMismatchedScrollPresentationIdentity() throws {
+        #expect(throws: ProtocolDecodeError.self) {
+            _ = try decodeCommand(data: buildRowsDelta(opcode: OP_GUI_WINDOW_ROWS_DELTA, scrollPresentationPayload: WindowContentBuilder.sampleScrollPresentationPayload(windowId: 8)), offset: 0)
+        }
+    }
+
     @Test("Rows delta decoder rejects missing required sections")
     func decodeRowsDeltaMissingRequiredSections() throws {
         #expect(throws: ProtocolDecodeError.self) {
@@ -755,6 +844,41 @@ struct WindowContentDecoderTests {
         #expect(throws: ProtocolDecodeError.self) {
             _ = try decodeCommand(data: buildRowsDelta(opcode: OP_GUI_WINDOW_ROWS_DELTA, includeRows: false), offset: 0)
         }
+    }
+
+    @Test("Rows delta clears stale scroll presentation when payload is absent")
+    func rowsDeltaClearsStaleScrollPresentation() throws {
+        let retained = GUIVisualRow(rowType: .normal, rowId: 1, bufLine: 0, contentHash: 11, text: "old", spans: [])
+        let replacement = GUIVisualRow(rowType: .normal, rowId: 2, bufLine: 1, contentHash: 22, text: "new", spans: [])
+        let baseline = GUIScrollPresentation(windowId: 7, resetRequired: true, anchorTop: 10, anchorLeft: 2, anchorVisualRowOffset: 0, visibleStartLine: 10, visibleEndLine: 20, overscanStartLine: 9, overscanEndLine: 21, contentEpoch: 42, layoutGeneration: 11)
+
+        let content = GUIWindowContent(windowId: 7, fullRefresh: true, contentEpoch: 42, cursorRow: 0, cursorCol: 0, cursorShape: .block, rows: [retained], selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: [], scrollPresentation: baseline)
+        let delta = GUIWindowRowsDelta(windowId: 7, contentEpoch: 42, cursorVisible: true, cursorRow: 1, cursorCol: 2, cursorShape: .beam, scrollLeft: 3, rows: [.reference(rowId: 1, contentHash: 11), .full(replacement)], selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: [], lineAnnotations: [], paneGeometry: nil, cursorline: nil)
+
+        guard let updated = content.applyingRowsDelta(delta) else {
+            Issue.record("Expected rows delta to apply")
+            return
+        }
+        #expect(updated.rows.map { $0.text } == ["old", "new"])
+        #expect(updated.scrollPresentation == nil)
+    }
+
+    @Test("Rows delta replaces scroll presentation when identity matches")
+    func rowsDeltaReplacesMatchingScrollPresentation() throws {
+        let retained = GUIVisualRow(rowType: .normal, rowId: 1, bufLine: 0, contentHash: 11, text: "old", spans: [])
+        let replacement = GUIVisualRow(rowType: .normal, rowId: 2, bufLine: 1, contentHash: 22, text: "new", spans: [])
+        let baseline = GUIScrollPresentation(windowId: 7, resetRequired: true, anchorTop: 10, anchorLeft: 2, anchorVisualRowOffset: 0, visibleStartLine: 10, visibleEndLine: 20, overscanStartLine: 9, overscanEndLine: 21, contentEpoch: 42, layoutGeneration: 11)
+        let next = GUIScrollPresentation(windowId: 7, resetRequired: false, anchorTop: 12, anchorLeft: 3, anchorVisualRowOffset: 1, visibleStartLine: 12, visibleEndLine: 22, overscanStartLine: 11, overscanEndLine: 23, contentEpoch: 42, layoutGeneration: 12)
+
+        let content = GUIWindowContent(windowId: 7, fullRefresh: true, contentEpoch: 42, cursorRow: 0, cursorCol: 0, cursorShape: .block, rows: [retained], selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: [], scrollPresentation: baseline)
+        let delta = GUIWindowRowsDelta(windowId: 7, contentEpoch: 42, cursorVisible: true, cursorRow: 1, cursorCol: 2, cursorShape: .beam, scrollLeft: 3, rows: [.reference(rowId: 1, contentHash: 11), .full(replacement)], selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: [], lineAnnotations: [], paneGeometry: nil, cursorline: nil, scrollPresentation: next)
+
+        guard let updated = content.applyingRowsDelta(delta) else {
+            Issue.record("Expected rows delta to apply")
+            return
+        }
+        #expect(updated.rows.map { $0.text } == ["old", "new"])
+        #expect(updated.scrollPresentation == next)
     }
 
     @Test("Rows delta resolves retained refs and full replacement rows")

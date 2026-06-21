@@ -17,6 +17,8 @@ defmodule MingaAgent.Changeset.Server do
   alias Minga.Core.Overlay
   alias MingaAgent.Changeset.MergedEvent
 
+  @tombstone_suffix ".__changeset_deleted__"
+
   @typedoc "Internal server state."
   @type state :: %{
           project_root: String.t(),
@@ -142,6 +144,24 @@ defmodule MingaAgent.Changeset.Server do
 
   def handle_call(:command_env, _from, state) do
     {:reply, Overlay.command_env(state.overlay), state}
+  end
+
+  def handle_call(:materialize_for_command, _from, state) do
+    {:reply, Overlay.materialize_project(state.overlay), state}
+  end
+
+  def handle_call({:materialize_command_file, relative_path, content}, _from, state) do
+    case normalize_path(state, relative_path) do
+      {:ok, path} -> {:reply, Overlay.materialize_file(state.overlay, path, content), state}
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:list_directory, relative_path}, _from, state) do
+    case normalize_path_allow_root(state, relative_path) do
+      {:ok, path} -> {:reply, Overlay.list_directory(state.overlay, path), state}
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
   end
 
   def handle_call(:modified_files, _from, state) do
@@ -680,14 +700,7 @@ defmodule MingaAgent.Changeset.Server do
   end
 
   @spec relink_file(Overlay.t(), String.t(), String.t()) :: :ok | {:error, term()}
-  defp relink_file(%Overlay{link_mode: :hardlink}, source, target) do
-    case File.ln(source, target) do
-      :ok -> :ok
-      {:error, _} -> File.cp(source, target)
-    end
-  end
-
-  defp relink_file(%Overlay{link_mode: :copy}, source, target) do
+  defp relink_file(%Overlay{}, source, target) do
     File.cp(source, target)
   end
 
@@ -751,10 +764,23 @@ defmodule MingaAgent.Changeset.Server do
   @spec normalize_path(state(), String.t()) ::
           {:ok, String.t()} | {:error, :invalid_path | :path_traversal}
   defp normalize_path(state, path) do
-    root = Path.expand(state.project_root)
-    target = Path.join(root, path) |> Path.expand()
+    with :ok <- reject_tombstone_suffix(path) do
+      root = Path.expand(state.project_root)
+      target = Path.expand(path, root)
 
-    normalize_target(root, target)
+      normalize_target(root, target)
+    end
+  end
+
+  @spec normalize_path_allow_root(state(), String.t()) ::
+          {:ok, String.t()} | {:error, :path_traversal | :invalid_path}
+  defp normalize_path_allow_root(state, path) do
+    with :ok <- reject_tombstone_suffix(path) do
+      root = Path.expand(state.project_root)
+      target = Path.expand(path, root)
+
+      normalize_target_allow_root(root, target)
+    end
   end
 
   @spec normalize_target(String.t(), String.t()) ::
@@ -767,6 +793,28 @@ defmodule MingaAgent.Changeset.Server do
     else
       {:error, :path_traversal}
     end
+  end
+
+  @spec normalize_target_allow_root(String.t(), String.t()) ::
+          {:ok, String.t()} | {:error, :path_traversal | :invalid_path}
+  defp normalize_target_allow_root(root, root), do: {:ok, "."}
+
+  defp normalize_target_allow_root(root, target) do
+    if String.starts_with?(target, root <> "/") do
+      {:ok, Path.relative_to(target, root)}
+    else
+      {:error, :path_traversal}
+    end
+  end
+
+  @spec reject_tombstone_suffix(String.t()) :: :ok | {:error, :invalid_path}
+  defp reject_tombstone_suffix(path) do
+    if tombstone_component?(Path.split(path)), do: {:error, :invalid_path}, else: :ok
+  end
+
+  @spec tombstone_component?([String.t()]) :: boolean()
+  defp tombstone_component?(components) do
+    Enum.any?(components, &String.ends_with?(&1, @tombstone_suffix))
   end
 
   @spec broadcast_merged(state()) :: :ok

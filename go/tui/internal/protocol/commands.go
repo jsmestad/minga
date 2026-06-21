@@ -136,6 +136,7 @@ type WindowContent struct {
 	Highlights     []DocumentHighlight
 	Annotations    []LineAnnotation
 	Geometry       PaneGeometry
+	Scroll         ScrollPresentation
 	Rows           []WindowRow
 	SelectionSet   bool
 	SearchSet      bool
@@ -143,6 +144,7 @@ type WindowContent struct {
 	HighlightsSet  bool
 	AnnotationsSet bool
 	GeometrySet    bool
+	ScrollSet      bool
 }
 
 type Cursorline struct {
@@ -244,6 +246,11 @@ func decodeWindowContent(payload []byte) (Command, error) {
 
 	opcode := payload[0]
 	sectionCount := int(payload[1])
+	requiresSections := opcode == generated.OPGuiWindowRowsDelta || opcode == generated.OPGuiWindowViewportDelta
+	needHeader := requiresSections
+	needRows := requiresSections
+	sawHeader := false
+	sawRows := false
 	offset := 2
 	window := WindowContent{}
 
@@ -262,9 +269,15 @@ func decodeWindowContent(payload []byte) (Command, error) {
 
 		switch sectionID {
 		case 0x01:
-			decodeWindowHeader(opcode, section, &window)
+			sawHeader = true
+			if !decodeWindowHeader(opcode, section, &window) && needHeader {
+				return Command{}, fmt.Errorf("malformed semantic window header")
+			}
 		case 0x02:
-			decodeRows(section, &window, opcode != generated.OPGuiWindowContent)
+			sawRows = true
+			if !decodeRows(section, &window, opcode != generated.OPGuiWindowContent) && needRows {
+				return Command{}, fmt.Errorf("malformed semantic window rows")
+			}
 		case 0x03:
 			decodeSelection(section, &window)
 		case 0x04:
@@ -279,14 +292,36 @@ func decodeWindowContent(payload []byte) (Command, error) {
 			decodePaneGeometry(section, &window)
 		case 0x09:
 			decodeCursorline(section, &window)
+		case 0x0A:
+			decodeScrollPresentation(section, &window)
 		}
 	}
+
+	if needHeader && !sawHeader {
+		return Command{}, fmt.Errorf("missing required semantic window header")
+	}
+	if needRows && !sawRows {
+		return Command{}, fmt.Errorf("missing required semantic window rows")
+	}
+
+	validateScrollPresentation(&window)
 
 	kind := CommandWindowContent
 	if opcode != generated.OPGuiWindowContent {
 		kind = CommandWindowDelta
 	}
 	return Command{Kind: kind, Size: offset, Window: window}, nil
+}
+
+func validateScrollPresentation(window *WindowContent) {
+	if !window.ScrollSet {
+		return
+	}
+	if window.Scroll.WindowID == window.ID && window.Scroll.ContentEpoch == window.ContentEpoch {
+		return
+	}
+	window.Scroll = ScrollPresentation{}
+	window.ScrollSet = false
 }
 
 // overlayDeltaCursorlineFlag marks a trailing cursorline section in an overlay
@@ -324,11 +359,11 @@ func decodeOverlayDelta(payload []byte) (Command, error) {
 	return Command{Kind: CommandWindowDelta, Size: size, Window: window}, nil
 }
 
-func decodeWindowHeader(opcode byte, section []byte, window *WindowContent) {
+func decodeWindowHeader(opcode byte, section []byte, window *WindowContent) bool {
 	if opcode == generated.OPGuiWindowContent {
 		hdr, _, err := generated.DecodeGuiWindowContentHeader(section, 0, len(section))
 		if err != nil {
-			return
+			return false
 		}
 		window.ID = hdr.WindowID
 		window.CursorRow = hdr.CursorRow
@@ -338,12 +373,12 @@ func decodeWindowHeader(opcode byte, section []byte, window *WindowContent) {
 		window.ScrollLeft = hdr.ScrollLeft
 		window.ScrollLeftSet = true
 		window.ContentEpoch = hdr.ContentEpoch
-		return
+		return true
 	}
 
 	// Delta header has a different wire layout from the full header.
 	if len(section) < 14 {
-		return
+		return false
 	}
 	window.ID = u16(section, 0)
 	window.ContentEpoch = u32(section, 2)
@@ -353,6 +388,7 @@ func decodeWindowHeader(opcode byte, section []byte, window *WindowContent) {
 	window.CursorShape = section[11]
 	window.ScrollLeft = u16(section, 12)
 	window.ScrollLeftSet = true
+	return true
 }
 
 func decodeCursorline(section []byte, window *WindowContent) {
@@ -363,9 +399,9 @@ func decodeCursorline(section []byte, window *WindowContent) {
 	window.Cursorline = Cursorline{Visible: true, Row: cl.Row, BG: cl.BG}
 }
 
-func decodeRows(section []byte, window *WindowContent, delta bool) {
+func decodeRows(section []byte, window *WindowContent, delta bool) bool {
 	if len(section) < 2 {
-		return
+		return false
 	}
 
 	count := int(u16(section, 0))
@@ -388,13 +424,14 @@ func decodeRows(section []byte, window *WindowContent, delta bool) {
 
 		row, next, ok := decodeRow(section, offset)
 		if !ok {
-			break
+			return false
 		}
 		rows = append(rows, row)
 		offset = next
 	}
 
 	window.Rows = rows
+	return true
 }
 
 func decodeRow(section []byte, offset int) (WindowRow, int, bool) {
