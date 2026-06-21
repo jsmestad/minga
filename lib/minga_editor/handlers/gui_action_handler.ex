@@ -64,9 +64,16 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   Returns the updated editor state. Unrecognized actions are logged and
   the state is returned unchanged.
   """
-  @spec dispatch(state(), Protocol.GUI.gui_action()) :: state()
-  def dispatch(state, action) do
-    dispatch_action(state, action)
+  @spec dispatch(state(), Protocol.GUI.gui_action(), keyword()) :: state()
+  def dispatch(state, action, opts \\ []) do
+    if fun = opts[:resolve_git_root] do
+      Process.put(:__gui_action_resolve_git_root__, fun)
+    end
+
+    result = dispatch_action(state, action)
+
+    Process.delete(:__gui_action_resolve_git_root__)
+    result
   end
 
   # ── Internal dispatch clauses ────────────────────────────────────────
@@ -1232,12 +1239,13 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   @spec git_action(state(), String.t(), git_operation(), String.t()) :: state()
   defp git_action(state, pending_msg, operation, success_msg)
        when is_binary(pending_msg) and is_binary(success_msg) do
-    git_root_override = Map.get(state, :git_root_override)
+    resolve_root =
+      Process.get(:__gui_action_resolve_git_root__, &MingaEditor.resolve_git_root/0)
 
     state
     |> EditorState.set_status(pending_msg)
     |> AsyncAction.run(@git_lane, fn ->
-      case git_root_override || MingaEditor.resolve_git_root() do
+      case resolve_root.() do
         nil -> :not_a_repo
         git_root -> run_git_op(operation, git_root, success_msg)
       end

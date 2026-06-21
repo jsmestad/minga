@@ -23,18 +23,18 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
 
     on_exit(fn -> Stub.clear(git_root) end)
 
-    state =
-      TestHelpers.base_state(sidebar_registry: table)
-      |> Map.put(:git_root_override, git_root)
+    state = TestHelpers.base_state(sidebar_registry: table)
+    dispatch_opts = [resolve_git_root: fn -> git_root end]
 
-    %{state: state, git_root: git_root}
+    %{state: state, git_root: git_root, dispatch_opts: dispatch_opts}
   end
 
   test "git commit forwards message, keeps amend off, and applies the async result", %{
     state: state,
-    git_root: git_root
+    git_root: git_root,
+    dispatch_opts: opts
   } do
-    new_state = GuiActionHandler.dispatch(state, {:git_commit, "fix the thing"})
+    new_state = GuiActionHandler.dispatch(state, {:git_commit, "fix the thing"}, opts)
 
     assert EditorState.status_msg(new_state) == "Committing…"
     assert map_size(new_state.async_actions) == 1
@@ -55,9 +55,10 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
 
   test "git amend forwards amend: true and applies the async result", %{
     state: state,
-    git_root: git_root
+    git_root: git_root,
+    dispatch_opts: opts
   } do
-    new_state = GuiActionHandler.dispatch(state, {:git_commit, "reword", true})
+    new_state = GuiActionHandler.dispatch(state, {:git_commit, "reword", true}, opts)
 
     assert EditorState.status_msg(new_state) == "Amending…"
     assert_receive {:stub_git_commit, ^git_root, "reword", [amend: true]}
@@ -77,11 +78,12 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
 
   test "git commit failure preserves the legacy failure status", %{
     state: state,
-    git_root: git_root
+    git_root: git_root,
+    dispatch_opts: opts
   } do
     Stub.set_commit_result(git_root, {:error, "boom commit"})
 
-    new_state = GuiActionHandler.dispatch(state, {:git_commit, "fail commit"})
+    new_state = GuiActionHandler.dispatch(state, {:git_commit, "fail commit"}, opts)
 
     assert EditorState.status_msg(new_state) == "Committing…"
     assert_receive {:stub_git_commit, ^git_root, "fail commit", []}
@@ -102,11 +104,12 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
 
   test "git amend failure preserves the legacy failure status", %{
     state: state,
-    git_root: git_root
+    git_root: git_root,
+    dispatch_opts: opts
   } do
     Stub.set_commit_result(git_root, {:error, "boom amend"})
 
-    new_state = GuiActionHandler.dispatch(state, {:git_commit, "fail amend", true})
+    new_state = GuiActionHandler.dispatch(state, {:git_commit, "fail amend", true}, opts)
 
     assert EditorState.status_msg(new_state) == "Amending…"
     assert_receive {:stub_git_commit, ^git_root, "fail amend", [amend: true]}
@@ -127,15 +130,16 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
 
   test "a stale git commit result is ignored by the editor handler", %{
     state: state,
-    git_root: git_root
+    git_root: git_root,
+    dispatch_opts: opts
   } do
-    state = GuiActionHandler.dispatch(state, {:git_commit, "first"})
+    state = GuiActionHandler.dispatch(state, {:git_commit, "first"}, opts)
     assert_receive {:stub_git_commit, ^git_root, "first", []}
 
     assert_receive {:async_action_result, :git_worktree, stale_token,
                     {:ok, "Committed stub000", ^git_root}}
 
-    state = GuiActionHandler.dispatch(state, {:git_discard_file, "lib/bar.ex"})
+    state = GuiActionHandler.dispatch(state, {:git_discard_file, "lib/bar.ex"}, opts)
     state = AsyncAction.advance(state, :git_worktree)
     current_status = EditorState.status_msg(state)
     current_async_actions = state.async_actions
@@ -154,14 +158,15 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
 
   test "queued git failure is logged while a commit keeps its pending status", %{
     state: state,
-    git_root: git_root
+    git_root: git_root,
+    dispatch_opts: opts
   } do
     Events.subscribe(:log_message)
     Stub.set_stage_blocker(git_root, self())
     Stub.set_stage_result(git_root, {:error, "boom stage"})
 
-    state = GuiActionHandler.dispatch(state, {:git_stage_file, "a.ex"})
-    state = GuiActionHandler.dispatch(state, {:git_commit, "keep pending"})
+    state = GuiActionHandler.dispatch(state, {:git_stage_file, "a.ex"}, opts)
+    state = GuiActionHandler.dispatch(state, {:git_commit, "keep pending"}, opts)
 
     assert EditorState.status_msg(state) == "Committing…"
     assert_receive {:stub_stage_blocked, stage_pid}
@@ -202,9 +207,9 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
   end
 
   test "git commit surfaces not a repo asynchronously", %{state: state} do
-    state = Map.put(state, :git_root_override, nil)
+    no_repo_opts = [resolve_git_root: fn -> nil end]
 
-    state = GuiActionHandler.dispatch(state, {:git_commit, "msg"})
+    state = GuiActionHandler.dispatch(state, {:git_commit, "msg"}, no_repo_opts)
 
     assert EditorState.status_msg(state) == "Committing…"
     assert_receive {:async_action_result, :git_worktree, token, :not_a_repo}
@@ -220,11 +225,12 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
   end
 
   test "queued commit and amend keep their pending status when a prior git action finishes",
-       %{state: state, git_root: git_root} do
+       %{state: state, git_root: git_root, dispatch_opts: opts} do
     state =
       run_queued_git_status_regression(
         state,
         git_root,
+        opts,
         {:git_commit, "keep pending"},
         "Committing…",
         "Committed stub000"
@@ -234,6 +240,7 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
       run_queued_git_status_regression(
         state,
         git_root,
+        opts,
         {:git_commit, "keep pending", true},
         "Amending…",
         "Amended stub000"
@@ -261,9 +268,9 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
   end
 
   test "rapid git actions serialize: the second is queued, not run concurrently",
-       %{state: state, git_root: git_root} do
-    state = GuiActionHandler.dispatch(state, {:git_stage_file, "a.ex"})
-    state = GuiActionHandler.dispatch(state, {:git_discard_file, "b.ex"})
+       %{state: state, git_root: git_root, dispatch_opts: opts} do
+    state = GuiActionHandler.dispatch(state, {:git_stage_file, "a.ex"}, opts)
+    state = GuiActionHandler.dispatch(state, {:git_discard_file, "b.ex"}, opts)
 
     lane = state.async_actions[:git_worktree]
     assert is_reference(lane.running)
@@ -276,15 +283,16 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
   @spec run_queued_git_status_regression(
           EditorState.t(),
           String.t(),
+          keyword(),
           tuple(),
           String.t(),
           String.t()
         ) :: EditorState.t()
-  defp run_queued_git_status_regression(state, git_root, queued_action, pending_status, complete_status) do
+  defp run_queued_git_status_regression(state, git_root, opts, queued_action, pending_status, complete_status) do
     Stub.set_stage_blocker(git_root, self())
 
-    state = GuiActionHandler.dispatch(state, {:git_stage_file, "a.ex"})
-    state = GuiActionHandler.dispatch(state, queued_action)
+    state = GuiActionHandler.dispatch(state, {:git_stage_file, "a.ex"}, opts)
+    state = GuiActionHandler.dispatch(state, queued_action, opts)
 
     assert EditorState.status_msg(state) == pending_status
     assert_receive {:stub_stage_blocked, stage_pid}

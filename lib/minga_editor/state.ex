@@ -152,8 +152,7 @@ defmodule MingaEditor.State do
             # semantic model (#2119). Rebuilt only when a settings option changes
             # (see MingaEditor.refresh_gui_config_state/1), so the render pipeline
             # reads it for free each frame. nil until the first GUI frontend attaches.
-            gui_config_state: nil,
-            git_root_override: nil
+            gui_config_state: nil
 
   @type backend :: :tui | :gui | :native_gui | :headless
 
