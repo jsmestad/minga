@@ -97,6 +97,45 @@ defmodule Minga.Git.Repo.ProfileTest do
     assert profile.timeout_ms == 123
   end
 
+  describe "single_cone_dir/1" do
+    test "returns the leaf cone for a nested single-cone sparse checkout", %{tmp_dir: dir} do
+      write_sparse_checkout(dir, "/*\n!/*/\n/apps/\n!/apps/*/\n/apps/web/\n")
+
+      assert Profile.single_cone_dir(dir) == Path.join(dir, "apps/web")
+    end
+
+    test "returns nil for a multi-leaf cone", %{tmp_dir: dir} do
+      write_sparse_checkout(dir, "/*\n!/*/\n/apps/\n!/apps/*/\n/apps/web/\n/apps/api/\n")
+
+      assert Profile.single_cone_dir(dir) == nil
+    end
+
+    test "returns nil for a non-cone sparse pattern file with cone-like preamble", %{tmp_dir: dir} do
+      write_sparse_checkout(dir, "/*\n!/*/\n/apps/\n/apps/web/**/*.ex\n")
+
+      assert Profile.single_cone_dir(dir) == nil
+    end
+
+    test "returns nil when there is no sparse-checkout file", %{tmp_dir: dir} do
+      File.mkdir_p!(Path.join(dir, ".git"))
+
+      assert Profile.single_cone_dir(dir) == nil
+    end
+
+    test "returns nil for a cone with only the preamble (no directories)", %{tmp_dir: dir} do
+      write_sparse_checkout(dir, "/*\n!/*/\n")
+
+      assert Profile.single_cone_dir(dir) == nil
+    end
+  end
+
+  @spec write_sparse_checkout(String.t(), String.t()) :: :ok
+  defp write_sparse_checkout(dir, content) do
+    sparse_file = Path.join([dir, ".git", "info", "sparse-checkout"])
+    File.mkdir_p!(Path.dirname(sparse_file))
+    File.write!(sparse_file, content)
+  end
+
   @spec restore_overrides(term()) :: :ok
   defp restore_overrides(nil), do: Application.delete_env(:minga, :git_repo_overrides)
   defp restore_overrides(value), do: Application.put_env(:minga, :git_repo_overrides, value)
