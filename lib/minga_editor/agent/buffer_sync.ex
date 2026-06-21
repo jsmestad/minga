@@ -84,6 +84,20 @@ defmodule MingaEditor.Agent.BufferSync do
     agent_theme = Keyword.get(opts, :agent_theme, default_agent_theme())
     last_line = max(length(text_lines) - 1, 0)
 
+    # Where to leave the cursor after the content swap. The live-streaming path
+    # passes nothing and keeps pinning to the bottom (auto-scroll). Provenance
+    # jumps pass `{:message_id, id}` to land on a specific turn. `:keep` holds
+    # the current cursor (used after a jump has landed so re-syncs don't yank
+    # the reader back to the bottom).
+    cursor =
+      resolve_cursor_target(
+        Keyword.get(opts, :cursor_target, {:bottom}),
+        pid,
+        display_message_pairs,
+        line_offsets,
+        last_line
+      )
+
     try do
       Buffer.replace_content_with_decorations(
         pid,
@@ -97,7 +111,7 @@ defmodule MingaEditor.Agent.BufferSync do
             opts
           )
         end,
-        cursor: {last_line, 0}
+        cursor: cursor
       )
     rescue
       e ->
@@ -133,6 +147,95 @@ defmodule MingaEditor.Agent.BufferSync do
 
     text = parts |> Enum.reverse() |> Enum.join("\n\n")
     {text, Enum.reverse(offsets)}
+  end
+
+  @doc """
+  Resolves the message a provenance jump should land on for a given tool call.
+
+  A reviewer asking "why is this line like this?" wants to read the turn
+  top-down, so we land on the message that *opened* the turn the edit belongs
+  to: the nearest preceding `:user` message. If the turn was agent-initiated
+  (no user prompt before the edit), we land on the nearest preceding
+  `:thinking` block instead. Failing both, we land on the tool call itself.
+
+  Takes `[{message_id, message}]` (from `Session.messages_with_ids/1`) and the
+  `tool_call_id` of the edit. Returns the stable id to target, or `nil` when
+  the tool call is not in the list.
+  """
+  @spec turn_anchor_id([{pos_integer(), term()}], String.t()) :: pos_integer() | nil
+  def turn_anchor_id(messages_with_ids, tool_call_id) do
+    case Enum.find_index(messages_with_ids, &tool_call_match?(&1, tool_call_id)) do
+      nil ->
+        nil
+
+      tc_index ->
+        before = Enum.take(messages_with_ids, tc_index)
+
+        anchor_id(before, :user) || anchor_id(before, :thinking) ||
+          elem(Enum.at(messages_with_ids, tc_index), 0)
+    end
+  end
+
+  @spec tool_call_match?({pos_integer(), term()}, String.t()) :: boolean()
+  defp tool_call_match?({_id, {:tool_call, %{id: tcid}}}, tool_call_id), do: tcid == tool_call_id
+  defp tool_call_match?(_pair, _tool_call_id), do: false
+
+  # Most recent message of `kind` in the given prefix, or nil.
+  @spec anchor_id([{pos_integer(), term()}], :user | :thinking) :: pos_integer() | nil
+  defp anchor_id(pairs, kind) do
+    pairs
+    |> Enum.reverse()
+    |> Enum.find_value(fn {id, msg} -> if message_kind(msg) == kind, do: id end)
+  end
+
+  @spec message_kind(term()) :: atom()
+  defp message_kind({kind, _}), do: kind
+  defp message_kind({kind, _, _}), do: kind
+  defp message_kind(_), do: :unknown
+
+  @typedoc "Where to leave the buffer cursor after a sync."
+  @type cursor_target :: {:bottom} | :keep | {:message_id, pos_integer()}
+
+  @doc false
+  @spec resolve_cursor_target(
+          cursor_target(),
+          pid(),
+          [{pos_integer(), term()}],
+          [ChatDecorations.line_offset()],
+          non_neg_integer()
+        ) :: {non_neg_integer(), non_neg_integer()}
+  def resolve_cursor_target(
+        {:message_id, id},
+        _pid,
+        display_message_pairs,
+        line_offsets,
+        last_line
+      ) do
+    with display_idx when is_integer(display_idx) <-
+           Enum.find_index(display_message_pairs, fn {mid, _msg} -> mid == id end),
+         {_idx, start_line, _count} <- List.keyfind(line_offsets, display_idx, 0) do
+      {start_line, 0}
+    else
+      # Target not in the rendered window (paged out, or not displayed). The
+      # caller is responsible for un-hiding it before sync; fall back to bottom.
+      _ -> {last_line, 0}
+    end
+  end
+
+  def resolve_cursor_target(:keep, pid, _pairs, _offsets, last_line) do
+    case safe_cursor(pid) do
+      {line, col} -> {line, col}
+      _ -> {last_line, 0}
+    end
+  end
+
+  def resolve_cursor_target(_bottom, _pid, _pairs, _offsets, last_line), do: {last_line, 0}
+
+  @spec safe_cursor(pid()) :: {non_neg_integer(), non_neg_integer()} | nil
+  defp safe_cursor(pid) do
+    Buffer.cursor(pid)
+  catch
+    :exit, _ -> nil
   end
 
   # Buffer text is content only. Visual headers (▎ You, ▎ Agent, ┌─ ✓ bash)

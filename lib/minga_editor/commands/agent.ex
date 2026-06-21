@@ -17,6 +17,7 @@ defmodule MingaEditor.Commands.Agent do
   alias MingaAgent.Message
   alias MingaAgent.Session
   alias MingaAgent.SessionStore
+  alias MingaEditor.Agent.ProvenanceJump
   alias MingaEditor.Agent.SlashCommand
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
@@ -84,6 +85,100 @@ defmodule MingaEditor.Commands.Agent do
             state
         end
     end
+  end
+
+  @doc """
+  Opens the agent panel (creating it if needed) and resumes the persisted
+  session `session_id` into it, then activates the agent view.
+
+  With a `tool_call_id`, arms a provenance jump so the chat lands on the turn
+  that produced that edit (the turn's opening user message) instead of the
+  bottom of the conversation, and remembers the source file+line for the
+  return trip. Without one, behaves like a plain resume (lands at the bottom).
+
+  Unlike `toggle_agent_split/1` this never closes an open panel; it is the
+  entry point for "jump from code into the agent session that wrote it".
+  """
+  @spec open_session(state(), String.t(), String.t() | nil) :: state()
+  def open_session(state, session_id, tool_call_id \\ nil) when is_binary(session_id) do
+    origin = capture_origin(state)
+    state = ensure_agent_state(state)
+    return_target = build_return_target(state)
+
+    case find_agent_tab(state) do
+      %Tab{id: agent_id} ->
+        state = state |> EditorState.switch_tab(agent_id) |> maybe_start_session()
+
+        case AgentAccess.session(state) do
+          nil ->
+            EditorState.set_status(state, "No agent session available")
+
+          session_pid ->
+            load_persisted_session(session_pid, session_id)
+            state = arm_provenance_jump(state, session_pid, tool_call_id, origin)
+            activate_agent_view(state, return_target)
+        end
+
+      nil ->
+        EditorState.set_status(state, "Could not open agent")
+    end
+  end
+
+  @spec load_persisted_session(pid(), String.t()) :: :ok
+  defp load_persisted_session(session_pid, session_id) do
+    Session.load_session(session_pid, session_id)
+    :ok
+  catch
+    :exit, _ -> :ok
+  end
+
+  # Source file + cursor line the user jumped from, for the return trip.
+  @spec capture_origin(state()) :: ProvenanceJump.origin() | nil
+  defp capture_origin(%{workspace: %{buffers: %{active: buf}}}) when is_pid(buf) do
+    with path when is_binary(path) <- safe_file_path(buf),
+         {line, _col} <- safe_cursor(buf) do
+      {path, line}
+    else
+      _ -> nil
+    end
+  end
+
+  defp capture_origin(_state), do: nil
+
+  @spec arm_provenance_jump(state(), pid(), String.t() | nil, ProvenanceJump.origin() | nil) ::
+          state()
+  defp arm_provenance_jump(state, _session_pid, nil, _origin), do: state
+
+  defp arm_provenance_jump(state, session_pid, tool_call_id, origin) do
+    with pairs when is_list(pairs) <- safe_messages_with_ids(session_pid),
+         target_id when is_integer(target_id) <-
+           AgentBufferSync.turn_anchor_id(pairs, tool_call_id) do
+      jump = ProvenanceJump.request(target_id, origin)
+      AgentAccess.update_panel(state, &Panel.set_provenance_jump(&1, jump))
+    else
+      _ -> state
+    end
+  end
+
+  @spec safe_file_path(pid()) :: String.t() | nil
+  defp safe_file_path(buf) do
+    Buffer.file_path(buf)
+  catch
+    :exit, _ -> nil
+  end
+
+  @spec safe_cursor(pid()) :: {non_neg_integer(), non_neg_integer()} | nil
+  defp safe_cursor(buf) do
+    Buffer.cursor(buf)
+  catch
+    :exit, _ -> nil
+  end
+
+  @spec safe_messages_with_ids(pid()) :: [{pos_integer(), term()}] | nil
+  defp safe_messages_with_ids(session_pid) do
+    Session.messages_with_ids(session_pid)
+  catch
+    :exit, _ -> nil
   end
 
   @spec ensure_agent_state(state()) :: state()
@@ -368,6 +463,9 @@ defmodule MingaEditor.Commands.Agent do
   end
 
   defp submit_prompt(state, panel, false, _session) do
+    # Sending a new prompt ends any provenance jump: the user is driving the
+    # conversation again, so streaming should resume its bottom-pinned scroll.
+    state = AgentAccess.update_panel(state, &Panel.clear_provenance_jump/1)
     text = UIState.prompt_text(panel)
     submit_prompt_text(state, text, SlashCommand.slash_command?(text))
   end
@@ -1292,6 +1390,70 @@ defmodule MingaEditor.Commands.Agent do
   @spec scope_close(state()) :: state()
   def scope_close(state), do: return_to_editor(state)
 
+  @doc """
+  Returns to the source line a provenance jump came from.
+
+  Closes the loop for "jump from code into the agent": leaves the agent view,
+  reopens the origin file, and places the cursor on the line the user pressed
+  `SPC g w` on. No-op with a status message when there is no active jump.
+  """
+  @spec scope_provenance_return(state()) :: state()
+  def scope_provenance_return(state) do
+    case AgentAccess.panel(state).provenance_jump do
+      %ProvenanceJump{origin: {path, line}} ->
+        state
+        |> AgentAccess.update_panel(&Panel.clear_provenance_jump/1)
+        |> return_to_editor()
+        |> return_to_origin(path, line)
+
+      _ ->
+        EditorState.set_status(state, "No source line to return to")
+    end
+  end
+
+  # After return_to_editor we are on the origin's file tab; place the cursor on
+  # the origin line, reopening the file if it was closed in the meantime.
+  @spec return_to_origin(state(), String.t(), non_neg_integer()) :: state()
+  defp return_to_origin(state, path, line) do
+    active = state.workspace.buffers.active
+
+    if is_pid(active) and safe_file_path(active) == path do
+      safe_move_to(active, {line, 0})
+      state
+    else
+      open_origin_buffer(state, path, line)
+    end
+  end
+
+  @spec open_origin_buffer(state(), String.t(), non_neg_integer()) :: state()
+  defp open_origin_buffer(state, path, line) do
+    case Enum.find_index(state.workspace.buffers.list, &(safe_file_path(&1) == path)) do
+      nil ->
+        case Commands.start_buffer(path, EditorState.options_server(state)) do
+          {:ok, pid} ->
+            state = Commands.add_buffer(state, pid)
+            safe_move_to(pid, {line, 0})
+            state
+
+          {:error, _reason} ->
+            EditorState.set_status(state, "Could not reopen #{Path.basename(path)}")
+        end
+
+      idx ->
+        state = EditorState.switch_buffer(state, idx)
+        safe_move_to(state.workspace.buffers.active, {line, 0})
+        state
+    end
+  end
+
+  @spec safe_move_to(pid(), {non_neg_integer(), non_neg_integer()}) :: :ok
+  defp safe_move_to(buf, pos) do
+    Buffer.move_to(buf, pos)
+    :ok
+  catch
+    :exit, _ -> :ok
+  end
+
   @doc "Dismisses active overlays or returns to the editor (ESC behavior)."
   @spec scope_dismiss_or_noop(state()) :: state()
   def scope_dismiss_or_noop(state), do: dismiss_agent_transient_or_return(state)
@@ -1785,6 +1947,7 @@ defmodule MingaEditor.Commands.Agent do
     {:agent_session_switcher, "Agent session switcher", :scope_session_switcher},
     {:agent_toggle_help, "Toggle agent help", :scope_toggle_help},
     {:agent_close, "Return to editor", :scope_close},
+    {:agent_provenance_return, "Return to provenance source line", :scope_provenance_return},
     {:agent_dismiss_or_noop, "Dismiss agent or no-op", :scope_dismiss_or_noop},
     {:agent_accept_hunk, "Accept agent hunk", :scope_accept_hunk},
     {:agent_reject_hunk, "Reject agent hunk", :scope_reject_hunk},

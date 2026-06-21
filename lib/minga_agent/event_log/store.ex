@@ -100,6 +100,27 @@ defmodule MingaAgent.EventLog.Store do
     end
   end
 
+  @doc """
+  Returns `:file_edit_proposed` events whose payload `path` exactly matches, most recent first.
+
+  Used by code-provenance reads to find every agent edit that touched a file,
+  across all sessions. Bounded by `limit` (newest events win).
+  """
+  @spec file_edits_for_path(db(), String.t(), pos_integer()) ::
+          {:ok, [EventRecord.t()]} | {:error, term()}
+  def file_edits_for_path(db, path, limit \\ 200)
+      when is_binary(path) and is_integer(limit) and limit > 0 do
+    sql = """
+    SELECT id, session_id, event_type, payload, wall_clock, monotonic_ts
+    FROM events
+    WHERE event_type = 'file_edit_proposed' AND json_extract(payload, '$.path') = ?1
+    ORDER BY id DESC
+    LIMIT ?2
+    """
+
+    query_events(db, sql, [path, limit])
+  end
+
   @doc "Returns the total number of agent events."
   @spec count(db()) :: {:ok, non_neg_integer()} | {:error, term()}
   def count(db) do

@@ -28,10 +28,18 @@ defmodule MingaEditor.HoverPopup do
             anchor_col: 0,
             scroll_offset: 0,
             focused: false,
-            open_action: nil
+            open_action: nil,
+            # The not-currently-shown variant for an expandable popup (e.g. the
+            # full thinking behind a truncated provenance preview). `nil` when
+            # the popup is not expandable; swapped with `content_lines` on toggle.
+            alt_content_lines: nil,
+            expanded?: false
 
   @typedoc "Action available from a focused hover popup."
-  @type open_action :: atom() | {:goto_location, String.t(), non_neg_integer(), non_neg_integer()}
+  @type open_action ::
+          atom()
+          | {:goto_location, String.t(), non_neg_integer(), non_neg_integer()}
+          | {:open_session, String.t(), String.t() | nil}
 
   @typedoc "A hover popup state."
   @type t :: %__MODULE__{
@@ -40,7 +48,9 @@ defmodule MingaEditor.HoverPopup do
           anchor_col: non_neg_integer(),
           scroll_offset: non_neg_integer(),
           focused: boolean(),
-          open_action: open_action() | nil
+          open_action: open_action() | nil,
+          alt_content_lines: [Markdown.parsed_line()] | nil,
+          expanded?: boolean()
         }
 
   @max_width 60
@@ -52,20 +62,52 @@ defmodule MingaEditor.HoverPopup do
 
   Parses the markdown content and anchors the popup at the given
   cursor position.
+
+  Pass `:expanded` with an alternate (fuller) markdown to make the popup
+  expandable: it shows `markdown_text` initially and toggles to the expanded
+  version via `toggle_expand/1` (e.g. a truncated thinking preview that opens
+  to the full reasoning).
   """
   @spec new(String.t(), non_neg_integer(), non_neg_integer(), keyword()) :: t()
   def new(markdown_text, cursor_row, cursor_col, opts \\ []) do
     theme = Keyword.get(opts, :theme, Theme.get!(Theme.default()))
 
-    content_lines =
-      markdown_text
-      |> Markdown.parse()
-      |> SyntaxHighlight.enhance(theme, opts)
+    parse = fn md -> md |> Markdown.parse() |> SyntaxHighlight.enhance(theme, opts) end
+
+    alt_content_lines =
+      case Keyword.get(opts, :expanded) do
+        nil -> nil
+        expanded_md -> parse.(expanded_md)
+      end
 
     %__MODULE__{
-      content_lines: content_lines,
+      content_lines: parse.(markdown_text),
       anchor_row: cursor_row,
-      anchor_col: cursor_col
+      anchor_col: cursor_col,
+      alt_content_lines: alt_content_lines
+    }
+  end
+
+  @doc "Returns true when the popup can toggle to an expanded view."
+  @spec expandable?(t()) :: boolean()
+  def expandable?(%__MODULE__{alt_content_lines: nil}), do: false
+  def expandable?(%__MODULE__{alt_content_lines: _}), do: true
+
+  @doc """
+  Toggles between the collapsed and expanded content, resetting scroll.
+
+  No-op for a non-expandable popup.
+  """
+  @spec toggle_expand(t()) :: t()
+  def toggle_expand(%__MODULE__{alt_content_lines: nil} = popup), do: popup
+
+  def toggle_expand(%__MODULE__{content_lines: shown, alt_content_lines: alt} = popup) do
+    %{
+      popup
+      | content_lines: alt,
+        alt_content_lines: shown,
+        expanded?: not popup.expanded?,
+        scroll_offset: 0
     }
   end
 
@@ -84,6 +126,11 @@ defmodule MingaEditor.HoverPopup do
     %{popup | open_action: action}
   end
 
+  def with_open_action(%__MODULE__{} = popup, {:open_session, session_id, tool_call_id} = action)
+      when is_binary(session_id) and (is_binary(tool_call_id) or is_nil(tool_call_id)) do
+    %{popup | open_action: action}
+  end
+
   @doc "Returns true when the popup exposes an Open action."
   @spec open_action?(t()) :: boolean()
   def open_action?(%__MODULE__{open_action: nil}), do: false
@@ -94,6 +141,7 @@ defmodule MingaEditor.HoverPopup do
   def open_action_name(nil), do: ""
   def open_action_name(action) when is_atom(action), do: Atom.to_string(action)
   def open_action_name({:goto_location, _uri, _line, _col}), do: "goto_location"
+  def open_action_name({:open_session, _session_id, _tool_call_id}), do: "open_session"
 
   @doc "Scroll content down (later lines visible)."
   @spec scroll_down(t()) :: t()

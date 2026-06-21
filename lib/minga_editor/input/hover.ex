@@ -64,6 +64,19 @@ defmodule MingaEditor.Input.Hover do
     {:handled, execute_open_action(state, action)}
   end
 
+  # When focused, o toggles an expandable popup (e.g. full vs truncated thinking).
+  def handle_key(
+        %{shell_state: %{hover_popup: %HoverPopup{focused: true} = popup}} = state,
+        ?o,
+        0
+      ) do
+    if HoverPopup.expandable?(popup) do
+      {:handled, EditorState.set_hover_popup(state, HoverPopup.toggle_expand(popup))}
+    else
+      {:passthrough, EditorState.dismiss_hover_popup(state)}
+    end
+  end
+
   # When focused, q or Escape dismisses
   def handle_key(%{shell_state: %{hover_popup: %HoverPopup{focused: true}}} = state, ?q, 0) do
     {:handled, EditorState.dismiss_hover_popup(state)}
@@ -90,6 +103,10 @@ defmodule MingaEditor.Input.Hover do
   @spec execute_open_action(state(), HoverPopup.open_action()) :: state()
   defp execute_open_action(state, {:goto_location, uri, line, col}) do
     LspActions.open_location(state, uri, line, col)
+  end
+
+  defp execute_open_action(state, {:open_session, session_id, tool_call_id}) do
+    Commands.Agent.open_session(state, session_id, tool_call_id)
   end
 
   defp execute_open_action(state, action) when is_atom(action) do
