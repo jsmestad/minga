@@ -622,6 +622,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   defp encode_sign_type(:diag_hint), do: 7
   defp encode_sign_type(:annotation), do: 8
   defp encode_sign_type(:git_removed), do: 9
+  defp encode_sign_type(:diag_advisory), do: 10
 
   # ── Cursorline ─────────────────────────────────────────────────────────
 

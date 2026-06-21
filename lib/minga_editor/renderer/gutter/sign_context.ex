@@ -18,7 +18,7 @@ defmodule MingaEditor.Renderer.Gutter.SignContext do
 
   @typedoc "Per-window gutter sign rendering context."
   @type t :: %__MODULE__{
-          diagnostic_signs: %{non_neg_integer() => Diagnostic.severity()},
+          diagnostic_signs: %{non_neg_integer() => Diagnostic.severity() | :diag_advisory},
           git_signs: %{non_neg_integer() => atom()},
           colors: MingaEditor.UI.Theme.Gutter.t(),
           git_colors: MingaEditor.UI.Theme.Git.t(),
