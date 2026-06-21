@@ -1245,7 +1245,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   @spec apply_git_result(state(), git_result() | {:error, String.t()} | term()) :: state()
   def apply_git_result(state, {:ok, success_msg, git_root}) do
     MingaEditor.refresh_git_repo(git_root)
-    EditorState.set_status(state, success_msg)
+    set_git_status_unless_queued(state, success_msg)
   end
 
   def apply_git_result(state, {:error, reason, git_root}) do
@@ -1253,11 +1253,11 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     # mutated the index already (its own result was dropped as stale), so the
     # repo state can have changed even though this latest op failed.
     MingaEditor.refresh_git_repo(git_root)
-    EditorState.set_status(state, "Git error: #{reason}")
+    set_git_status_unless_queued(state, "Git error: #{reason}")
   end
 
   def apply_git_result(state, :not_a_repo) do
-    EditorState.set_status(state, "Not in a git repository")
+    set_git_status_unless_queued(state, "Not in a git repository")
   end
 
   # The git work raised/exited/threw before producing a git_result(), so
@@ -1267,14 +1267,24 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   # handle_info, defeating AsyncAction's "a failing action can never crash the
   # editor" guarantee.
   def apply_git_result(state, {:error, reason}) when is_binary(reason) do
-    EditorState.set_status(state, "Git error: #{reason}")
+    set_git_status_unless_queued(state, "Git error: #{reason}")
   end
 
   # Defensive total fallback: any unexpected result shape degrades to a status
   # message instead of crashing the editor.
   def apply_git_result(state, other) do
     Minga.Log.warning(:editor, "[git] unexpected async git result: #{inspect(other)}")
-    EditorState.set_status(state, "Git action failed")
+    set_git_status_unless_queued(state, "Git action failed")
+  end
+
+  @spec set_git_status_unless_queued(state(), String.t()) :: state()
+  defp set_git_status_unless_queued(state, status) do
+    if git_worktree_action_queued?(state), do: state, else: EditorState.set_status(state, status)
+  end
+
+  @spec git_worktree_action_queued?(state()) :: boolean()
+  defp git_worktree_action_queued?(state) do
+    match?(%{queue: [_ | _]}, EditorState.get_async_lane(state, @git_lane))
   end
 
   # ── Completion helpers ─────────────────────────────────────────────

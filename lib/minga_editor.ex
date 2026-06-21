@@ -875,9 +875,12 @@ defmodule MingaEditor do
   # out-of-band messages) is dropped without advancing.
   def handle_info({:async_action_result, lane, token, result}, state) do
     if MingaEditor.AsyncAction.current?(state, lane, token) do
+      queued_status = queued_async_status(state, lane)
+
       new_state =
         state
         |> apply_async_result(lane, result)
+        |> restore_queued_async_status(queued_status)
         |> MingaEditor.AsyncAction.advance(lane)
 
       {:noreply, Renderer.render_or_async(new_state)}
@@ -902,6 +905,21 @@ defmodule MingaEditor do
     Minga.Log.warning(:editor, "[async_action] no apply handler for lane #{inspect(lane)}")
     state
   end
+
+  @spec queued_async_status(state(), atom()) :: String.t() | nil
+  defp queued_async_status(state, lane) do
+    if async_action_queued?(state, lane), do: EditorState.status_msg(state), else: nil
+  end
+
+  @spec async_action_queued?(state(), atom()) :: boolean()
+  defp async_action_queued?(state, lane) do
+    match?(%{queue: [_ | _]}, EditorState.get_async_lane(state, lane))
+  end
+
+  @spec restore_queued_async_status(state(), String.t() | nil) :: state()
+  defp restore_queued_async_status(state, nil), do: state
+
+  defp restore_queued_async_status(state, status), do: EditorState.set_status(state, status)
 
   # Identifies the GUI action for the dispatch telemetry span (issue #2357 AC7),
   # so slow synchronous actions can be found by their tag without logging paths.
