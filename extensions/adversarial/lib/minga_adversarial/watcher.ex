@@ -55,10 +55,15 @@ defmodule MingaAdversarial.Watcher do
     GenServer.start_link(__MODULE__, opts, name: name)
   end
 
-  @doc "Analyzes `path` now. Returns `:off` when the dial is off, else `:ok`."
-  @spec analyze(GenServer.server(), String.t()) :: :ok | :off
-  def analyze(server \\ __MODULE__, path) do
-    GenServer.call(server, {:analyze, path})
+  @doc """
+  Analyzes `path` now. Returns `:off` when the dial is off, else `:ok`.
+
+  Pass `content` to analyze in-memory buffer text (including unsaved edits);
+  when `nil`, the file on disk is read instead.
+  """
+  @spec analyze(GenServer.server(), String.t(), String.t() | nil) :: :ok | :off
+  def analyze(server \\ __MODULE__, path, content \\ nil) do
+    GenServer.call(server, {:analyze, path, content})
   end
 
   @doc "Clears this extension's findings for `path`."
@@ -92,10 +97,10 @@ defmodule MingaAdversarial.Watcher do
   end
 
   @impl true
-  def handle_call({:analyze, path}, _from, state) do
+  def handle_call({:analyze, path, content}, _from, state) do
     case skepticism(state) do
       :off -> {:reply, :off, state}
-      skep -> {:reply, :ok, request(state, path, skep)}
+      skep -> {:reply, :ok, request(state, path, content, skep)}
     end
   end
 
@@ -113,7 +118,8 @@ defmodule MingaAdversarial.Watcher do
   def handle_info({:minga_event, :buffer_saved, %BufferEvent{path: path}}, state)
       when is_binary(path) do
     case skepticism(state) do
-      skep when skep in [:on_save, :paranoid] -> {:noreply, request(state, path, skep)}
+      # On save the buffer matches disk, so read from disk (content: nil).
+      skep when skep in [:on_save, :paranoid] -> {:noreply, request(state, path, nil, skep)}
       _ -> {:noreply, state}
     end
   end
@@ -154,9 +160,9 @@ defmodule MingaAdversarial.Watcher do
 
   # ── Analysis ─────────────────────────────────────────────────────────────
 
-  @spec request(state(), String.t(), skepticism()) :: state()
-  defp request(state, path, skep) do
-    with {:ok, content} <- File.read(path),
+  @spec request(state(), String.t(), String.t() | nil, skepticism()) :: state()
+  defp request(state, path, given_content, skep) do
+    with {:ok, content} <- read_source(given_content, path),
          true <- byte_size(content) <= @max_bytes do
       state = bump(state, path)
       gen = Map.fetch!(state.generation, path)
@@ -173,6 +179,11 @@ defmodule MingaAdversarial.Watcher do
       _ -> state
     end
   end
+
+  # Prefer caller-provided (live buffer) content; fall back to disk.
+  @spec read_source(String.t() | nil, String.t()) :: {:ok, String.t()} | {:error, term()}
+  defp read_source(content, _path) when is_binary(content), do: {:ok, content}
+  defp read_source(_nil, path), do: File.read(path)
 
   @spec deliver(state(), String.t(), {:ok, String.t()} | {:error, term()}) :: state()
   defp deliver(state, path, {:ok, text}) do
