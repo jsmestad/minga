@@ -1,11 +1,14 @@
 defmodule Minga.Extension.Badge do
   @moduledoc """
-  ETS-backed registry for extension-owned badges on file tree entries and tabs.
+  ETS-backed registry for extension-owned decorations on file tree entries
+  and tabs.
 
-  Extensions register small visual indicators (colored dots, short text)
-  on file tree entries by path and on tabs by buffer PID. The emit
-  pipeline reads this registry when building file tree and tab bar
-  protocol data.
+  Extensions decorate file tree entries by path with either a small badge
+  (colored dot, short text) or a semantic `level` (a 0..4 familiarity/heat
+  bucket the frontend maps to a theme tint), and tabs by buffer PID. The
+  emit pipeline reads this registry when building file tree and tab bar
+  protocol data. Multiple extensions decorating the same path compose by
+  taking the maximum level.
   """
 
   use GenServer
@@ -18,13 +21,17 @@ defmodule Minga.Extension.Badge do
   @typedoc "Animation hint for badges."
   @type animation :: :static | :pulse
 
-  @typedoc "A file tree badge entry."
+  @typedoc "Semantic decoration level (familiarity/heat bucket); frontend maps to a theme tint."
+  @type level :: 0..4
+
+  @typedoc "A file tree decoration entry (badge and/or semantic level)."
   @type file_badge :: %{
           extension: atom(),
           path: String.t(),
           color: non_neg_integer(),
           text: String.t(),
-          animation: animation()
+          animation: animation(),
+          level: level() | nil
         }
 
   @typedoc "A tab badge entry."
@@ -62,7 +69,8 @@ defmodule Minga.Extension.Badge do
       path: abs_path,
       color: Keyword.get(opts, :color, 0x51AFEF),
       text: Keyword.get(opts, :text, ""),
-      animation: Keyword.get(opts, :animation, :static)
+      animation: Keyword.get(opts, :animation, :static),
+      level: normalize_level(Keyword.get(opts, :level))
     }
 
     :ets.insert(file_table, {{extension_name, abs_path}, entry})
@@ -146,6 +154,39 @@ defmodule Minga.Extension.Badge do
       []
     end
   end
+
+  @doc """
+  Returns a `%{abs_path => level}` map of all file decorations that carry a
+  semantic level, taking the maximum level when several extensions decorate
+  the same path.
+
+  Single bulk read, intended for the file-tree render path, which must not
+  scan the table per row.
+  """
+  @spec file_levels_map() :: %{String.t() => level()}
+  @spec file_levels_map(table()) :: %{String.t() => level()}
+  def file_levels_map, do: file_levels_map(@file_table)
+
+  def file_levels_map(file_table) do
+    if table_ready?(file_table) do
+      :ets.foldl(&accumulate_level/2, %{}, file_table)
+    else
+      %{}
+    end
+  end
+
+  @spec accumulate_level({term(), file_badge()}, %{String.t() => level()}) ::
+          %{String.t() => level()}
+  defp accumulate_level({_key, %{path: path, level: level}}, acc) when level in 0..4 do
+    Map.update(acc, path, level, &max(&1, level))
+  end
+
+  defp accumulate_level({_key, _entry}, acc), do: acc
+
+  @spec normalize_level(term()) :: level() | nil
+  defp normalize_level(nil), do: nil
+  defp normalize_level(level) when level in 0..4, do: level
+  defp normalize_level(_level), do: nil
 
   @spec all_tab_badges() :: [tab_badge()]
   @spec all_tab_badges(table()) :: [tab_badge()]

@@ -7,7 +7,8 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   to `dispatch/4`.
   """
 
-  alias Minga.Distribution.Events, as: DistributionEvents
+  alias Minga.Distribution.Events.NodeConnectedEvent
+  alias Minga.Distribution.Events.NodeDisconnectedEvent
   alias Minga.Events
   alias Minga.Mode.ExtensionConfirmState
   alias MingaEditor.Agent.BufferSync, as: AgentBufferSync
@@ -192,7 +193,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   def dispatch(
         state,
         :node_connected,
-        %DistributionEvents.NodeConnectedEvent{} = event,
+        %NodeConnectedEvent{} = event,
         _msg
       ) do
     handle_node_connected(state, event)
@@ -201,7 +202,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   def dispatch(
         state,
         :node_disconnected,
-        %DistributionEvents.NodeDisconnectedEvent{} = event,
+        %NodeDisconnectedEvent{} = event,
         _msg
       ) do
     handle_node_disconnected(state, event)
@@ -398,8 +399,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
 
   # ── Remote / distribution helpers ────────────────────────────────────────────
 
-  @spec handle_node_connected(EditorState.t(), DistributionEvents.NodeConnectedEvent.t()) ::
-          EditorState.t()
+  @spec handle_node_connected(EditorState.t(), NodeConnectedEvent.t()) :: EditorState.t()
   defp handle_node_connected(state, %{server_name: server_name, node: remote_node}) do
     sessions = discover_remote_sessions(remote_node, server_name)
 
@@ -416,10 +416,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
     EditorState.set_status(state, status)
   end
 
-  @spec handle_node_disconnected(
-          EditorState.t(),
-          DistributionEvents.NodeDisconnectedEvent.t()
-        ) :: EditorState.t()
+  @spec handle_node_disconnected(EditorState.t(), NodeDisconnectedEvent.t()) :: EditorState.t()
   defp handle_node_disconnected(state, %{server_name: server_name}) do
     state =
       EditorState.update_remote(state, &Remote.put_server_status(&1, server_name, :disconnected))

@@ -261,7 +261,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.encoder = enc
         appState.encoder = enc
         appState.gui.settingsState.encoder = enc
-        registerBundledRuntimeExtension0(into: appState.gui.frontendExtensions, encoder: enc, theme: appState.gui.themeColors)
 
         // Enable port-based logging so messages appear in *Messages*.
         PortLogger.setup(encoder: enc)
@@ -601,7 +600,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.encoder = enc
         appState.encoder = enc
         appState.gui.settingsState.encoder = enc
-        registerBundledRuntimeExtension0(into: appState.gui.frontendExtensions, encoder: enc, theme: appState.gui.themeColors)
         PortLogger.setup(encoder: enc)
 
         // Capture for the background-thread disconnect callback.

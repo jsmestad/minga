@@ -46,6 +46,13 @@ defmodule Minga.Project.FileRef do
     end
   end
 
+  @doc "Builds a path-backed file ref for an arbitrary filesystem path."
+  @spec from_file_path(String.t()) :: t()
+  def from_file_path(path) when is_binary(path) do
+    {:ok, ref} = from_path("/", Path.expand(path))
+    ref
+  end
+
   @doc "Builds a buffer-backed logical file ref for an unsaved or special buffer."
   @spec from_buffer(pid()) :: t()
   def from_buffer(buffer_pid) when is_pid(buffer_pid) do
@@ -89,6 +96,8 @@ defmodule Minga.Project.FileRef do
   end
 
   @spec inside_root?(String.t(), String.t()) :: boolean()
+  defp inside_root?(_path, "/"), do: true
+
   defp inside_root?(path, root) do
     path == root or String.starts_with?(path, root <> "/")
   end

@@ -407,6 +407,39 @@ defmodule Minga.HighlightTest do
 
       assert dotted.fg != nil
     end
+
+    test "renders config-document keys (@property) distinctly from plain text and strings" do
+      theme = MingaEditor.UI.Theme.get!(:astrodark)
+
+      # Render `key: "value"` the way the YAML query captures it:
+      #   `key`     -> @property
+      #   `"value"` -> @string
+      line = ~s(key: "value")
+      key_span = %{start_byte: 0, end_byte: 3, capture_id: 0}
+      value_span = %{start_byte: 5, end_byte: 12, capture_id: 1}
+
+      hl =
+        Highlight.from_theme(theme)
+        |> Highlight.put_names(["property", "string"])
+        |> Highlight.put_spans(1, [key_span, value_span])
+
+      [{"key", key_face}, {": ", _gap}, {~s("value"), value_face}] =
+        Highlight.styles_for_line(hl, line, 0)
+
+      registry = hl.face_registry
+      default_fg = MingaEditor.UI.Face.Registry.style_for(registry, "default").fg
+      string_fg = MingaEditor.UI.Face.Registry.style_for(registry, "string").fg
+
+      # The key is visibly distinct from plain editor foreground (the bug):
+      # in astrodark, @property is a real accent, not the muted editor fg.
+      assert key_face.fg != nil
+      assert key_face.fg != default_fg
+
+      # Quoted values still resolve through the string face, and remain
+      # visibly distinct from keys.
+      assert value_face.fg == string_fg
+      assert value_face.fg != key_face.fg
+    end
   end
 
   describe "retheme/2" do

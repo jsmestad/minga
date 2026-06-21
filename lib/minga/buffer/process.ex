@@ -36,8 +36,6 @@ defmodule Minga.Buffer.Process do
   alias Minga.Config
   alias Minga.Core.Decorations
   alias Minga.Core.Unicode
-  alias Minga.Editing.NavigableContent.BufferSnapshot
-  alias Minga.Editing.Scroll
   alias Minga.Events
   alias Minga.Language
 
@@ -358,16 +356,6 @@ defmodule Minga.Buffer.Process do
   @doc "Returns the buffer's mutation version counter (increments on every content change)."
   @spec version(GenServer.server()) :: non_neg_integer()
   def version(server), do: GenServer.call(server, :version)
-
-  @doc """
-  Returns and clears pending edit deltas accumulated since the last legacy consumer read.
-
-  Deprecated: use `consume_edit_deltas/2` with a consumer_id for per-consumer cursors.
-  This legacy version destructively drains the shared pending changes list.
-  """
-  @deprecated "Use consume_edit_deltas/2 with a consumer_id instead"
-  @spec consume_edit_deltas(GenServer.server()) :: [EditDelta.t()]
-  def consume_edit_deltas(server), do: GenServer.call(server, :consume_edit_deltas)
 
   @doc """
   Returns edit deltas accumulated since the given consumer's last read.
@@ -708,33 +696,6 @@ defmodule Minga.Buffer.Process do
   @spec commit_snapshot(GenServer.server(), Document.t()) :: :ok
   def commit_snapshot(server, %Document{} = new_buf) do
     GenServer.call(server, {:commit_snapshot, new_buf})
-  end
-
-  @doc """
-  Takes a snapshot wrapped in a `BufferSnapshot` struct for use with the
-  `NavigableContent` protocol. Includes the given scroll state so that
-  scroll operations can be composed with cursor and content changes.
-
-  After operating on the snapshot through `NavigableContent`, apply the
-  result back with `commit_navigable_snapshot/2`.
-  """
-  @spec navigable_snapshot(GenServer.server(), Scroll.t()) :: BufferSnapshot.t()
-  def navigable_snapshot(server, %Scroll{} = scroll) do
-    doc = snapshot(server)
-    BufferSnapshot.new(doc, scroll)
-  end
-
-  @doc """
-  Applies a `BufferSnapshot` back to the server, updating the document
-  and returning the updated scroll state.
-
-  Only writes the document back if content or cursor changed. Returns
-  the scroll state from the snapshot for the caller to store.
-  """
-  @spec commit_navigable_snapshot(GenServer.server(), BufferSnapshot.t()) :: Scroll.t()
-  def commit_navigable_snapshot(server, %BufferSnapshot{document: new_doc, scroll: scroll}) do
-    commit_snapshot(server, new_doc)
-    scroll
   end
 
   # ── Decoration API ──
@@ -2062,6 +2023,10 @@ defmodule Minga.Buffer.Process do
     |> push_undo_force_full(new_buf, undo_source)
     |> mark_dirty()
     |> clear_edits(source)
+    # Reset decorations so search highlights, diagnostics, and agent
+    # decorations don't stay anchored to text that no longer exists, matching
+    # replace_generated_content and accept_saved_content.
+    |> Map.put(:decorations, Decorations.new())
   end
 
   defp apply_operation(state, {:full, new_buf}, source, {:full, undo_source, :clear}) do

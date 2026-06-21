@@ -27,11 +27,6 @@ defmodule MingaEditor.Shell.Traditional do
   """
 
   @behaviour MingaEditor.Shell
-  @behaviour MingaEditor.Shell.Layout
-  @behaviour MingaEditor.Shell.Chrome
-  @behaviour MingaEditor.Shell.InputRouter
-  @behaviour MingaEditor.Shell.BufferLifecycle
-  @behaviour MingaEditor.Shell.TabQueries
 
   alias MingaEditor.Agent.BufferSync, as: AgentBufferSync
   alias MingaEditor.Agent.UIState
@@ -193,7 +188,7 @@ defmodule MingaEditor.Shell.Traditional do
 
   @impl true
   @spec render(term()) :: term()
-  defdelegate render(editor_state), to: MingaEditor.Shell.Traditional.Renderer
+  def render(editor_state), do: MingaEditor.Renderer.render_buffer(editor_state)
 
   @impl true
   @spec input_handlers(term()) :: %{overlay: [module()], surface: [module()]}

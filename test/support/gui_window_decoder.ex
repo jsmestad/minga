@@ -29,7 +29,8 @@ defmodule Minga.Test.GUIWindowDecoder do
       document_highlights: [],
       annotations: [],
       geometry: nil,
-      cursorline: nil
+      cursorline: nil,
+      scroll_presentation: nil
     }
 
     {result, <<>>} = decode_sections(rest, section_count, result)
@@ -103,10 +104,37 @@ defmodule Minga.Test.GUIWindowDecoder do
     %{result | cursorline: %{row: row, bg_rgb: r <<< 16 ||| g <<< 8 ||| b}}
   end
 
+  defp decode_section(0x0A, payload, result) do
+    {scroll_presentation, <<>>} = decode_scroll_presentation(payload)
+    %{result | scroll_presentation: scroll_presentation}
+  end
+
   defp decode_section(_unknown, _payload, result), do: result
 
   defp decode_content_epoch(<<content_epoch::32, _rest::binary>>), do: content_epoch
   defp decode_content_epoch(_rest), do: 0
+
+  defp decode_scroll_presentation(
+         <<window_id::16, flags::8, anchor_top::32, anchor_left::16, anchor_visual_row_offset::16,
+           visible_start_line::32, visible_end_line::32, overscan_start_line::32,
+           overscan_end_line::32, content_epoch::32, layout_generation::32, rest::binary>>
+       ) do
+    scroll_presentation = %{
+      window_id: window_id,
+      reset_required: (flags &&& 0x01) == 0x01,
+      anchor_top: anchor_top,
+      anchor_left: anchor_left,
+      anchor_visual_row_offset: anchor_visual_row_offset,
+      visible_start_line: visible_start_line,
+      visible_end_line: visible_end_line,
+      overscan_start_line: overscan_start_line,
+      overscan_end_line: overscan_end_line,
+      content_epoch: content_epoch,
+      layout_generation: layout_generation
+    }
+
+    {scroll_presentation, rest}
+  end
 
   defp decode_geometry(
          <<window_id::16, total::binary-size(8), content::binary-size(8), text::binary-size(8),

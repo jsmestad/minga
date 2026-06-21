@@ -496,6 +496,11 @@ defmodule MingaEditor do
     {:noreply, EffectHandler.apply_effects(new_state, effects)}
   end
 
+  def handle_info({:file_tree_filter_walk, _root, _filter, _entries} = msg, state) do
+    {new_state, effects} = FileEventHandler.handle(state, msg)
+    {:noreply, EffectHandler.apply_effects(new_state, effects)}
+  end
+
   def handle_info(
         {:minga_input, {:mouse_event, row, col, button, mods, event_type, click_count}},
         state
@@ -822,13 +827,13 @@ defmodule MingaEditor do
   # When a picker source is async, PickerUI.open/3 opens the picker immediately
   # with a loading indicator, then sends this message to spawn the background fetch.
 
-  def handle_info({:picker_fetch_candidates, source_module, ctx}, state) do
+  def handle_info({:picker_fetch_candidates, source_module, revision, ctx}, state) do
     editor = self()
 
-    Task.start(fn ->
+    Task.Supervisor.start_child(Minga.Eval.TaskSupervisor, fn ->
       result =
         try do
-          {:ok, source_module.candidates(ctx)}
+          MingaEditor.UI.Picker.Source.fetch(source_module, ctx)
         rescue
           e -> {:error, Exception.message(e)}
         catch
@@ -836,17 +841,27 @@ defmodule MingaEditor do
           :throw, value -> {:error, "Source failed: #{inspect(value)}"}
         end
 
-      send(editor, {:picker_candidates_result, source_module, result})
+      send(editor, {:picker_candidates_result, source_module, revision, result})
     end)
 
     {:noreply, state}
   end
 
-  def handle_info({:picker_candidates_result, source_module, result}, state) do
+  # Latest-wins stale-result guard: a candidate fetch is applied only when the
+  # live picker is still the same source *and* the result carries the picker's
+  # current fetch revision. A newer search, project switch, reopen, or close
+  # mints a new revision (or drops the picker), so older in-flight fetches land
+  # here as stale and are discarded. This is intentionally NOT the AsyncAction
+  # lane token, which serializes FIFO; here the newest fetch wins.
+  def handle_info({:picker_candidates_result, source_module, revision, result}, state) do
     case state.shell_state.modal do
-      {:picker, %{picker_ui: %{source: ^source_module}} = payload} ->
-        new_state = handle_picker_candidates(state, payload, result)
-        {:noreply, Renderer.render_or_async(new_state)}
+      {:picker, %{picker_ui: %{source: ^source_module} = picker_ui} = payload} ->
+        if MingaEditor.State.Picker.current_fetch?(picker_ui, revision) do
+          new_state = handle_picker_candidates(state, payload, result)
+          {:noreply, Renderer.render_or_async(new_state)}
+        else
+          {:noreply, state}
+        end
 
       _ ->
         {:noreply, state}
@@ -860,9 +875,12 @@ defmodule MingaEditor do
   # out-of-band messages) is dropped without advancing.
   def handle_info({:async_action_result, lane, token, result}, state) do
     if MingaEditor.AsyncAction.current?(state, lane, token) do
+      queued_status = queued_async_status(state, lane)
+
       new_state =
         state
         |> apply_async_result(lane, result)
+        |> restore_queued_async_status(queued_status)
         |> MingaEditor.AsyncAction.advance(lane)
 
       {:noreply, Renderer.render_or_async(new_state)}
@@ -887,6 +905,21 @@ defmodule MingaEditor do
     Minga.Log.warning(:editor, "[async_action] no apply handler for lane #{inspect(lane)}")
     state
   end
+
+  @spec queued_async_status(state(), atom()) :: String.t() | nil
+  defp queued_async_status(state, lane) do
+    if async_action_queued?(state, lane), do: EditorState.status_msg(state), else: nil
+  end
+
+  @spec async_action_queued?(state(), atom()) :: boolean()
+  defp async_action_queued?(state, lane) do
+    match?(%{queue: [_ | _]}, EditorState.get_async_lane(state, lane))
+  end
+
+  @spec restore_queued_async_status(state(), String.t() | nil) :: state()
+  defp restore_queued_async_status(state, nil), do: state
+
+  defp restore_queued_async_status(state, status), do: EditorState.set_status(state, status)
 
   # Identifies the GUI action for the dispatch telemetry span (issue #2357 AC7),
   # so slow synchronous actions can be found by their tag without logging paths.
@@ -915,18 +948,16 @@ defmodule MingaEditor do
   @spec handle_picker_candidates(
           state(),
           PickerPayload.t(),
-          {:ok, [term()]} | {:error, String.t()}
+          {:ok, [term()], MingaEditor.UI.Picker.Source.fetch_meta()} | {:error, String.t()}
         ) :: state()
-  defp handle_picker_candidates(state, payload, {:ok, items}) do
+  defp handle_picker_candidates(state, payload, {:ok, items, meta}) do
     picker_state = payload.picker_ui
     picker = MingaEditor.UI.Picker.replace_items(picker_state.picker, items)
     new_picker_state = %{picker_state | picker: picker, load_status: :ready}
 
-    ModalOverlay.transition(
-      state,
-      :picker,
-      PickerPayload.put_picker_ui(payload, new_picker_state)
-    )
+    state
+    |> ModalOverlay.transition(:picker, PickerPayload.put_picker_ui(payload, new_picker_state))
+    |> apply_fetch_status(meta)
   end
 
   defp handle_picker_candidates(state, payload, {:error, reason}) do
@@ -939,6 +970,13 @@ defmodule MingaEditor do
       PickerPayload.put_picker_ui(payload, new_picker_state)
     )
   end
+
+  @spec apply_fetch_status(state(), MingaEditor.UI.Picker.Source.fetch_meta()) :: state()
+  defp apply_fetch_status(state, %{status: status}) when is_binary(status) do
+    EditorState.set_status(state, status)
+  end
+
+  defp apply_fetch_status(state, _meta), do: state
 
   @spec current_observatory_token?(state(), reference()) :: boolean()
   defp current_observatory_token?(

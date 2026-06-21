@@ -8,7 +8,8 @@ defmodule Mix.Tasks.Compile.MingaBundledExtensions do
   def run(_args) do
     Mix.Project.ensure_structure()
     copy_extension("git_porcelain")
-    copy_extension("board")
+    copy_extension("knowledge_graph")
+    copy_extension("adversarial")
     {:ok, []}
   end
 

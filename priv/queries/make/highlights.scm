@@ -165,7 +165,7 @@
     "eval"
     "file"
     "value"
-    "let"
+    ; `let` is not a recognized keyword token in this vendored make grammar
   ] @function.builtin)
 
 "\\" @punctuation.special

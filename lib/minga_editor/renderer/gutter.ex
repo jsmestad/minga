@@ -87,7 +87,7 @@ defmodule MingaEditor.Renderer.Gutter do
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer(),
-          Diagnostic.severity() | nil,
+          Diagnostic.severity() | :diag_advisory | nil,
           atom() | nil,
           colors(),
           git_colors(),
@@ -217,11 +217,28 @@ defmodule MingaEditor.Renderer.Gutter do
     end
   end
 
-  @spec sign_for_severity(Diagnostic.severity(), colors()) :: {String.t(), non_neg_integer()}
+  @spec sign_for_severity(Diagnostic.severity() | :diag_advisory, colors()) ::
+          {String.t(), non_neg_integer()}
   defp sign_for_severity(:error, colors), do: {"E ", colors.error_fg}
   defp sign_for_severity(:warning, colors), do: {"W ", colors.warning_fg}
   defp sign_for_severity(:info, colors), do: {"I ", colors.info_fg}
   defp sign_for_severity(:hint, colors), do: {"H ", colors.hint_fg}
+  defp sign_for_severity(:diag_advisory, colors), do: {"? ", advisory_fg(colors)}
+
+  # Advisory amber. Uses the theme's explicit override when set, otherwise
+  # derives it as the midpoint of warning (yellow) and error (red), which
+  # lands on an amber that suits whatever palette the theme uses.
+  @spec advisory_fg(colors()) :: non_neg_integer()
+  defp advisory_fg(%{advisory_fg: fg}) when is_integer(fg), do: fg
+  defp advisory_fg(%{warning_fg: w, error_fg: e}), do: blend_rgb(w, e)
+
+  @spec blend_rgb(non_neg_integer(), non_neg_integer()) :: non_neg_integer()
+  defp blend_rgb(a, b) do
+    <<ar, ag, ab>> = <<a::24>>
+    <<br, bg, bb>> = <<b::24>>
+    <<blended::24>> = <<div(ar + br, 2), div(ag + bg, 2), div(ab + bb, 2)>>
+    blended
+  end
 
   @spec number_and_color(non_neg_integer(), non_neg_integer(), line_number_style(), colors()) ::
           {non_neg_integer(), non_neg_integer()}

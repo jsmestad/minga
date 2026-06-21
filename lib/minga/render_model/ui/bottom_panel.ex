@@ -3,7 +3,7 @@ defmodule Minga.RenderModel.UI.BottomPanel do
   Semantic bottom panel model.
 
   Describes the bottom panel as domain data: visibility, the active tab index,
-  height, filter, the tab definitions (pre-resolved type byte + name), and the
+  height, filter, the message stream instance, the tab definitions (pre-resolved type byte + name), and the
   resolved message entries to send this frame. The GUI adapter
   (`Minga.Frontend.Adapter.GUI.BottomPanelEncoder`) owns the wire encoding.
 
@@ -17,11 +17,15 @@ defmodule Minga.RenderModel.UI.BottomPanel do
   @typedoc "A tab definition: its wire type byte and display name."
   @type tab :: {type_byte :: non_neg_integer(), name :: String.t()}
 
+  @typedoc "Producer-assigned Messages stream identity. Hidden panels keep 0 because they do not encode content."
+  @type stream_instance :: 1..0xFFFF_FFFF
+
   @type t :: %__MODULE__{
           visible?: boolean(),
           active_tab_index: non_neg_integer(),
           height_percent: non_neg_integer(),
           filter_byte: non_neg_integer(),
+          stream_instance: 0 | stream_instance(),
           tabs: [tab()],
           messages: [MessageEntry.t()]
         }
@@ -30,6 +34,7 @@ defmodule Minga.RenderModel.UI.BottomPanel do
             active_tab_index: 0,
             height_percent: 0,
             filter_byte: 0,
+            stream_instance: 0,
             tabs: [],
             messages: []
 

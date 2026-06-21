@@ -171,7 +171,7 @@ The test: if cutting the corner means the next team building on this code has to
 
 ## Code Organization
 
-Minga's code is organized by **dependency direction** and **state ownership**, not by domain-driven design bounded contexts. The goal is a stable core that doesn't change when we experiment with different UX patterns (traditional editor, Board, future shells). These rules are designed to be mechanically verifiable: you can check them by looking at imports and struct updates without understanding architectural philosophy.
+Minga's code is organized by **dependency direction** and **state ownership**, not by domain-driven design bounded contexts. The goal is a stable core that doesn't change when we experiment with different UX patterns (traditional editor, future shells). These rules are designed to be mechanically verifiable: you can check them by looking at imports and struct updates without understanding architectural philosophy.
 
 ### Rule 1: Dependencies flow one way
 
@@ -281,7 +281,7 @@ MingaAgent also has internal Agent Level 0/1/2 rules from epic #2075. Agent Leve
 | Directory | Entry point | What lives here |
 |-----------|------------|------------------|
 | (root) | `MingaEditor` | Editor GenServer, commands, rendering, layout, viewport, windows |
-| `shell/` | `MingaEditor.Shell` | Shell behaviour + implementations (Traditional, Board) |
+| `shell/` | `MingaEditor.Shell` | Shell behaviour + implementation (Traditional) |
 | `input/` | `MingaEditor.Input` | Input handler behaviour, focus stack, all handler modules |
 | `frontend/` | `MingaEditor.Frontend` | Frontend communication, protocol encoding, capabilities |
 | `ui/` | `MingaEditor.UI` | Themes, faces, highlighting, picker, prompts, which-key |
@@ -293,9 +293,8 @@ MingaAgent also has internal Agent Level 0/1/2 rules from epic #2075. Agent Leve
 The `Minga.Shell` behaviour is the plug-in point for different UX models. Each shell owns its own layout, chrome, input routing, and rendering. The workspace (core editing state) is shared; the shell decides how to present it.
 
 - `Minga.Shell.Traditional` — tab-based editor with file tree, modeline, picker, agent panel
-- `Minga.Shell.Board` — agent supervisor card view with zoom-in editing
 
-Shells should be as independent as possible. The ideal: a new shell can be built by implementing the Shell behaviour and using only Layer 0 + Layer 1 modules, without importing anything from another shell's implementation. We're not there yet (both shells currently depend on Editor internals), but that's the direction.
+Shells should be as independent as possible. The ideal: a new shell can be built by implementing the Shell behaviour and using only Layer 0 + Layer 1 modules, without importing anything from another shell's implementation.
 
 ## Coding Standards
 
@@ -897,8 +896,9 @@ The freeze lifts when all three linked epics are closed. Remove this section at 
 Agent tools live in `lib/minga_agent/tools/`. When adding or modifying a tool that reads or writes file content:
 
 1. **File tools route through `MingaAgent.ToolRouter`.** The router checks whether a buffer is open for the target path. If so, it creates a `Buffer.Fork` (lazy, on first write) for in-memory isolation. If a changeset overlay is active, it routes through that instead. Only when neither is available does it fall through to direct filesystem I/O. See [BUFFER-AWARE-AGENTS.md](docs/BUFFER-AWARE-AGENTS.md) for the design rationale.
-2. **Batch edits into a single call** rather than making N separate calls. One call = one undo entry, one version bump.
-3. **Test the tool function** in `test/minga_agent/tools/`.
+2. **Do not reintroduce context artifact writing without a reader.** The old writer was deleted because it saved `.minga/context/session-summary-*` files that no code loaded. Add an explicit picker or loader before adding any new writer.
+3. **Batch edits into a single call** rather than making N separate calls. One call = one undo entry, one version bump.
+4. **Test the tool function** in `test/minga_agent/tools/`.
 
 ### New render command (requires BEAM + frontend changes)
 1. Add the opcode to `docs/protocol_schema.toml`, then run `mix protocol.gen`. Do not hand-edit generated opcode constants.

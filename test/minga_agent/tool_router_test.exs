@@ -218,10 +218,64 @@ defmodule MingaAgent.ToolRouterTest do
     end
   end
 
+  describe "changeset-only routing" do
+    test "filesystem_path_result returns overlay-relative paths for isolated file state", %{
+      path: path
+    } do
+      project_root = Path.dirname(Path.dirname(path))
+
+      {:ok, changeset} =
+        start_supervised({MingaAgent.Changeset.Server, project_root: project_root})
+
+      ctx = ToolRouter.context(nil, nil, changeset)
+      overlay_dir = MingaAgent.Changeset.overlay_path(changeset)
+
+      assert :ok = ToolRouter.write_file(ctx, path, "draft\n")
+      assert {:ok, root_resolved} = ToolRouter.filesystem_path_result(ctx, ".")
+      assert root_resolved == overlay_dir
+      assert {:ok, resolved} = ToolRouter.filesystem_path_result(ctx, path)
+      assert resolved == Path.join(overlay_dir, "lib/foo.ex")
+      assert File.read!(resolved) == "draft\n"
+
+      assert :ok = ToolRouter.delete_file(ctx, path)
+      assert {:ok, deleted_resolved} = ToolRouter.filesystem_path_result(ctx, path)
+      assert deleted_resolved == Path.join(overlay_dir, "lib/foo.ex")
+      refute File.exists?(deleted_resolved)
+    end
+
+    test "list_directory sees changeset writes and tombstones", %{path: path} do
+      project_root = Path.dirname(Path.dirname(path))
+
+      {:ok, changeset} =
+        start_supervised({MingaAgent.Changeset.Server, project_root: project_root})
+
+      ctx = ToolRouter.context(nil, nil, changeset)
+
+      assert :ok = ToolRouter.write_file(ctx, Path.join(project_root, "lib/new.txt"), "new\n")
+      assert :ok = ToolRouter.delete_file(ctx, path)
+
+      assert {:ok, entries} = ToolRouter.list_directory(ctx, Path.join(project_root, "lib"))
+      assert %{name: "new.txt", type: :file} in entries
+      refute Enum.any?(entries, &(&1.name == "foo.ex"))
+    end
+  end
+
   describe "working_dir/1" do
     test "returns nil with no changeset" do
       ctx = ToolRouter.context(nil, nil)
       assert nil == ToolRouter.working_dir(ctx)
+    end
+
+    test "materializes project views before returning a tool working directory", %{path: path} do
+      project_root = Path.dirname(Path.dirname(path))
+      File.write!(Path.join(project_root, "README.md"), "readme\n")
+      {:ok, view} = ProjectView.overlay(project_root)
+      ctx = ToolRouter.context(view, nil, nil)
+      overlay_dir = ProjectView.working_dir(view)
+
+      refute File.exists?(Path.join(overlay_dir, "README.md"))
+      assert {:ok, ^overlay_dir} = ToolRouter.working_dir_result(ctx)
+      assert File.read!(Path.join(overlay_dir, "README.md")) == "readme\n"
     end
   end
 

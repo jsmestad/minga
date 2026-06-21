@@ -87,4 +87,31 @@ defmodule MingaEditor.Input.HoverTest do
       assert new_state.shell_state.hover_popup == nil
     end
   end
+
+  describe "handle_key/3 o (expand) on focused hover" do
+    @key_o ?o
+
+    defp state_with_expandable_hover do
+      popup =
+        "collapsed"
+        |> HoverPopup.new(10, 20, expanded: "the full expanded text")
+        |> HoverPopup.focus()
+
+      MingaEditor.State.set_hover_popup(base_state(), popup)
+    end
+
+    test "o toggles an expandable popup without dismissing it" do
+      state = state_with_expandable_hover()
+      assert {:handled, new_state} = Hover.handle_key(state, @key_o, @none)
+      popup = new_state.shell_state.hover_popup
+      assert popup != nil
+      assert popup.expanded?
+    end
+
+    test "o dismisses a non-expandable popup (no special behavior)" do
+      state = state_with_hover(focused: true)
+      assert {:passthrough, new_state} = Hover.handle_key(state, @key_o, @none)
+      assert new_state.shell_state.hover_popup == nil
+    end
+  end
 end

@@ -87,38 +87,6 @@ defmodule Minga.Config.LoaderTest do
   end
 
   describe "loading valid config" do
-    test "registers bundled Board as a lazy extension without starting it" do
-      {_dir, cleanup} = make_config_dir("use Minga.Config\n")
-      previous_load_extensions = Application.get_env(:minga, :load_extensions)
-      previous_load_board = Application.get_env(:minga, :load_board_extension)
-      previous_source_fallback = Application.get_env(:minga, :allow_source_extension_fallback)
-
-      Application.put_env(:minga, :load_extensions, true)
-      Application.put_env(:minga, :load_board_extension, true)
-      Application.put_env(:minga, :allow_source_extension_fallback, true)
-      ensure_extension_runtime()
-
-      on_exit(fn ->
-        ExtSupervisor.stop_all()
-        ExtRegistry.reset()
-        restore_application_env(:load_extensions, previous_load_extensions)
-        restore_application_env(:load_board_extension, previous_load_board)
-        restore_application_env(:allow_source_extension_fallback, previous_source_fallback)
-        cleanup.()
-      end)
-
-      name = :"loader_board_lazy_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name)
-
-      assert Loader.load_error(pid) == nil
-      assert {:ok, entry} = ExtRegistry.get(:minga_board)
-      assert entry.status == :stub
-      assert entry.pid == nil
-      assert entry.load_policy in [nil, {:on_command, [:toggle_board]}]
-      assert {:ok, command} = CommandRegistry.lookup(CommandRegistry, :toggle_board)
-      assert command.description == "Toggle The Board view"
-    end
-
     test "applies set options from config file" do
       {_dir, cleanup} =
         make_config_dir("""
@@ -1170,13 +1138,10 @@ defmodule Minga.Config.LoaderTest do
       on_exit(cleanup)
 
       previous_load_extensions = Application.get_env(:minga, :load_extensions)
-      previous_load_board = Application.get_env(:minga, :load_board_extension)
       Application.put_env(:minga, :load_extensions, true)
-      Application.put_env(:minga, :load_board_extension, false)
 
       on_exit(fn ->
         restore_application_env(:load_extensions, previous_load_extensions)
-        restore_application_env(:load_board_extension, previous_load_board)
       end)
 
       ensure_extension_runtime()
@@ -1739,17 +1704,14 @@ defmodule Minga.Config.LoaderTest do
     test "skips bundled extension registration and startup" do
       {_minga_dir, cleanup} = make_config_dir("use Minga.Config\n")
       previous_load_extensions = Application.get_env(:minga, :load_extensions)
-      previous_load_board = Application.get_env(:minga, :load_board_extension)
 
       Application.put_env(:minga, :load_extensions, true)
-      Application.put_env(:minga, :load_board_extension, true)
       Minga.SafeMode.put(true)
       ensure_extension_runtime()
 
       on_exit(fn ->
         Minga.SafeMode.put(false)
         restore_application_env(:load_extensions, previous_load_extensions)
-        restore_application_env(:load_board_extension, previous_load_board)
         cleanup.()
       end)
 

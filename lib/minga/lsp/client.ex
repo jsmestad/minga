@@ -732,26 +732,12 @@ defmodule Minga.LSP.Client do
   end
 
   defp handle_server_notification("window/logMessage", params, state) do
-    level = Map.get(params, "type", 4)
-    message = Map.get(params, "message", "")
+    surface_lsp_message(params, state)
+    state
+  end
 
-    log_level =
-      case level do
-        1 -> :error
-        2 -> :warning
-        3 -> :info
-        _ -> :debug
-      end
-
-    msg = "LSP [#{state.server_config.name}]: #{message}"
-
-    case log_level do
-      :error -> Minga.Log.error(:lsp, msg)
-      :warning -> Minga.Log.warning(:lsp, msg)
-      :info -> Minga.Log.info(:lsp, msg)
-      :debug -> Minga.Log.debug(:lsp, msg)
-    end
-
+  defp handle_server_notification("window/showMessage", params, state) do
+    surface_lsp_message(params, state)
     state
   end
 
@@ -796,6 +782,16 @@ defmodule Minga.LSP.Client do
     state
   end
 
+  defp handle_server_request("window/showMessageRequest", id, params, state) do
+    # Shrunk scope: surface the message to the user via the log pipeline and
+    # respond with `null` (no action selected) so the server does not hang
+    # waiting on a choice. A minibuffer picker over `actions` is a follow-up
+    # (see ticket #1270, step 3-7).
+    surface_lsp_message(params, state)
+    send_response(state, id, nil)
+    state
+  end
+
   defp handle_server_request(method, id, _params, state) do
     Minga.Log.debug(:lsp, "Unhandled server request: #{method} (id=#{id})")
     send_error_response(state, id, -32_601, "Method not found: #{method}")
@@ -812,6 +808,23 @@ defmodule Minga.LSP.Client do
   end
 
   defp configuration_item(settings, _item), do: settings
+
+  @spec surface_lsp_message(map(), State.t()) :: :ok
+  defp surface_lsp_message(params, state) do
+    type = Map.get(params, "type", 4)
+    message = Map.get(params, "message", "")
+    {severity, level} = lsp_message_severity(type)
+    text = "[LSP/#{severity}] #{state.server_config.name}: #{message}"
+
+    Minga.Log.info(:lsp, text)
+    Minga.Events.broadcast(:log_message, %Minga.Events.LogMessageEvent{text: text, level: level})
+  end
+
+  @spec lsp_message_severity(integer()) :: {String.t(), Minga.Events.LogMessageEvent.level()}
+  defp lsp_message_severity(1), do: {"error", :error}
+  defp lsp_message_severity(2), do: {"warning", :warning}
+  defp lsp_message_severity(3), do: {"info", :info}
+  defp lsp_message_severity(_), do: {"log", :info}
 
   @spec configuration_section(map(), String.t()) :: term()
   defp configuration_section(settings, section) do

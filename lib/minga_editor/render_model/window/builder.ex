@@ -265,6 +265,8 @@ defmodule MingaEditor.RenderModel.Window.Builder do
         wrapped_coordinates?
       )
 
+    geometry = build_geometry(state, scroll, content_kind)
+
     render_window = %RenderWindow{
       window_id: win_id,
       content_kind: content_kind,
@@ -283,7 +285,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       gutter: build_gutter(scroll, ctx, content_kind, visual_entries),
       cursorline: build_cursorline(content_row, display_cursor_row, is_active, ctx),
       indent_guides: build_indent_guides(scroll, ctx, content_kind),
-      geometry: build_geometry(state, scroll, content_kind),
+      geometry: geometry,
       content_epoch: scroll.content_epoch,
       full_refresh: scroll.full_refresh
     }
@@ -1774,6 +1776,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       :warning -> :diag_warning
       :info -> :diag_info
       :hint -> :diag_hint
+      :diag_advisory -> :diag_advisory
       nil -> resolve_git_sign(buf_line, git_signs)
     end
   end

@@ -1055,14 +1055,14 @@ enum PreviewRegistry {
     private static func populateMessages(_ state: MessagesContentState) {
         let baseTime: UInt32 = 43200  // 12:00:00
         state.appendEntries([
-            Wire.MessageEntry(id: 1, level: 1, subsystem: 0, timestampSecs: baseTime, filePath: "lib/minga/editor.ex", text: "Buffer opened: editor.ex (1250 lines)"),
-            Wire.MessageEntry(id: 2, level: 0, subsystem: 1, timestampSecs: baseTime + 1, filePath: "", text: "ElixirLS initialized in 340ms"),
-            Wire.MessageEntry(id: 3, level: 2, subsystem: 2, timestampSecs: baseTime + 3, filePath: "lib/minga/buffer/document.ex", text: "Tree-sitter parse timeout (>50ms) on large file"),
-            Wire.MessageEntry(id: 4, level: 1, subsystem: 3, timestampSecs: baseTime + 5, filePath: "", text: "Branch switched: feat/preview-host (2 ahead)"),
-            Wire.MessageEntry(id: 5, level: 3, subsystem: 4, timestampSecs: baseTime + 8, filePath: "", text: "Metal shader compilation failed: fragment_main"),
-            Wire.MessageEntry(id: 6, level: 1, subsystem: 5, timestampSecs: baseTime + 12, filePath: "", text: "Agent session started (claude-sonnet-4, medium thinking)"),
-            Wire.MessageEntry(id: 7, level: 0, subsystem: 6, timestampSecs: baseTime + 14, filePath: "", text: "TUI grid resized to 112x36"),
-            Wire.MessageEntry(id: 8, level: 2, subsystem: 7, timestampSecs: baseTime + 18, filePath: "", text: "SwiftUI layout cycle detected in NotificationCard"),
+            Wire.MessageEntry(streamInstance: 1, id: 1, level: 1, subsystem: 0, timestampSecs: baseTime, filePath: "lib/minga/editor.ex", text: "Buffer opened: editor.ex (1250 lines)"),
+            Wire.MessageEntry(streamInstance: 1, id: 2, level: 0, subsystem: 1, timestampSecs: baseTime + 1, filePath: "", text: "ElixirLS initialized in 340ms"),
+            Wire.MessageEntry(streamInstance: 1, id: 3, level: 2, subsystem: 2, timestampSecs: baseTime + 3, filePath: "lib/minga/buffer/document.ex", text: "Tree-sitter parse timeout (>50ms) on large file"),
+            Wire.MessageEntry(streamInstance: 1, id: 4, level: 1, subsystem: 3, timestampSecs: baseTime + 5, filePath: "", text: "Branch switched: feat/preview-host (2 ahead)"),
+            Wire.MessageEntry(streamInstance: 1, id: 5, level: 3, subsystem: 4, timestampSecs: baseTime + 8, filePath: "", text: "Metal shader compilation failed: fragment_main"),
+            Wire.MessageEntry(streamInstance: 1, id: 6, level: 1, subsystem: 5, timestampSecs: baseTime + 12, filePath: "", text: "Agent session started (claude-sonnet-4, medium thinking)"),
+            Wire.MessageEntry(streamInstance: 1, id: 7, level: 0, subsystem: 6, timestampSecs: baseTime + 14, filePath: "", text: "TUI grid resized to 112x36"),
+            Wire.MessageEntry(streamInstance: 1, id: 8, level: 2, subsystem: 7, timestampSecs: baseTime + 18, filePath: "", text: "SwiftUI layout cycle detected in NotificationCard"),
         ])
     }
 

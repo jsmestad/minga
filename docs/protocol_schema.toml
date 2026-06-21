@@ -5,14 +5,17 @@ version = "2.0.0"
 # protocol_version is the integer the BEAM and every frontend compile against and
 # exchange in the `ready` handshake. The BEAM rejects a frontend whose value does
 # not match and shows an explicit `protocol_error` instead of silently desyncing.
-# Bump this whenever the wire contract changes incompatibly (this 2.0.0 bump
-# retired the 9 cell-paradigm render opcodes; see docs/cell-grid-deletion-map.md).
+# Bump this whenever the wire contract changes incompatibly. The 2.0.0 bump
+# retired the 9 cell-paradigm render opcodes; see docs/PROTOCOL.md.
 # protocol_version 3 (#2219 children A/B) adds the frame-transaction vocabulary
 # (begin_frame, commit_frame, request_keyframe) and authoritative layout
 # (surface_placement, gui_surface_layout). batch_end (0x13) was retired: child B
 # moved its input-correlation u32 onto commit_frame and made the begin/commit pair
 # bracket every frame. See docs/PROTOCOL.md.
-protocol_version = 3
+# protocol_version 4 adds the gui_file_tree row heat_level byte for extension-owned
+# familiarity tinting. This changes the hand-decoded file-tree row payload.
+# protocol_version 5 adds producer-assigned stream_instance to the Messages stream.
+protocol_version = 5
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -92,7 +95,7 @@ direction = "frontend_to_beam"
 # here: set_cursor_shape, set_title, set_window_bg, protocol_error, and the
 # protocol_version-3 frame-transaction markers begin_frame/commit_frame (which
 # replaced batch_end as the per-frame boundary in child B).
-# See docs/cell-grid-deletion-map.md.
+# See docs/PROTOCOL.md.
 
 # Reuse policy for freed cell-paradigm values: a retired value may be reassigned
 # once protocol_version has bumped past the version that retired it, the same way
@@ -462,6 +465,7 @@ value = 0x7B
 direction = "beam_to_frontend"
 framing = "sectioned"
 
+# Custom payload includes the Messages stream header stream_instance:u32 before entry_count when visible.
 [[opcodes]]
 category = "gui_chrome"
 name = "gui_bottom_panel"
@@ -1458,6 +1462,25 @@ id = 0x09
 name = "cursorline"
 fields = [{ name = "row", type = "u16" }, { name = "bg", type = "rgb" }]
 
+# Scroll presentation line ranges are half-open: start is inclusive and end is exclusive.
+[[sections]]
+opcode = "gui_window_content"
+id = 0x0A
+name = "scroll_presentation"
+fields = [
+  { name = "window_id", type = "u16" },
+  { name = "flags", type = "u8" },
+  { name = "anchor_top", type = "u32" },
+  { name = "anchor_left", type = "u16" },
+  { name = "anchor_visual_row_offset", type = "u16" },
+  { name = "visible_start_line", type = "u32" },
+  { name = "visible_end_line", type = "u32" },
+  { name = "overscan_start_line", type = "u32" },
+  { name = "overscan_end_line", type = "u32" },
+  { name = "content_epoch", type = "u32" },
+  { name = "layout_generation", type = "u32" },
+]
+
 # gui_status_bar (0x76) sections
 
 [[sections]]
@@ -1946,7 +1969,7 @@ fields = [{ name = "panel_count", type = "u8" }]
 [[command_fields]]
 opcode = "gui_file_tree"
 # Full 0x93 payload details live in docs/GUI_PROTOCOL.md because the row list is variable-length and currently hand-decoded by frontends.
-# Payload v2 row tail order is icon(string8), editing_type(u8), editing_text(string16), icon_color(rgb).
+# Payload v2 row tail order is icon(string8), editing_type(u8), editing_text(string16), icon_color(rgb), heat_level(u8). heat_level is 0..4 or 0xFF for none.
 fields = [
   { name = "visible", type = "u8" },
   { name = "flags", type = "u8" },

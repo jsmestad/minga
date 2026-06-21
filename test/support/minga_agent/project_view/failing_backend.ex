@@ -32,6 +32,10 @@ defmodule MingaAgent.Test.ProjectView.FailingBackend do
   def working_dir(%ProjectView{project_root: project_root}), do: project_root
 
   @impl true
+  @spec prepare_working_dir(ProjectView.t()) :: {:ok, String.t()}
+  def prepare_working_dir(%ProjectView{project_root: project_root}), do: {:ok, project_root}
+
+  @impl true
   @spec command_env(ProjectView.t()) :: [{String.t(), String.t()}]
   def command_env(%ProjectView{}), do: []
 

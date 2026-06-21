@@ -8,11 +8,12 @@ defmodule MingaEditor.UI.Picker.FileSource do
 
   @behaviour MingaEditor.UI.Picker.Source
 
+  alias MingaEditor.FileTree.ProjectCache
   alias MingaEditor.State, as: EditorState
   alias Minga.Git
   alias Minga.Language
   alias Minga.Log
-  alias MingaEditor.UI.Devicon
+  alias Minga.Language.Devicon
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Picker.Source
@@ -34,7 +35,7 @@ defmodule MingaEditor.UI.Picker.FileSource do
   def candidates(ctx) do
     root = project_root(ctx)
 
-    case Minga.Project.list_files(root) do
+    case resolve_paths(root) do
       {:ok, paths} ->
         frecency_map = build_frecency_map()
         git_status_map = build_git_status_map(root)
@@ -48,6 +49,27 @@ defmodule MingaEditor.UI.Picker.FileSource do
         log_error(msg)
     end
   end
+
+  # Reads the project's background-rebuilt file cache when `root` is the active
+  # project root, so opening the picker never shells out for a known project
+  # (#2377 AC1). A populated mid-rebuild cache returns the stale list instantly,
+  # which is fine for a picker. When the active cache is still empty (e.g. the
+  # project was just switched and the first rebuild has not finished), the picker
+  # falls back to a one-shot `list_files/1` so it never opens empty. Roots that
+  # are not the active project always use the direct discovery.
+  @spec resolve_paths(String.t()) :: {:ok, [String.t()]} | {:error, String.t()}
+  defp resolve_paths(root) do
+    if ProjectCache.active_root?(root) do
+      resolve_active_paths(root, ProjectCache.files())
+    else
+      Minga.Project.list_files(root)
+    end
+  end
+
+  @spec resolve_active_paths(String.t(), [String.t()]) ::
+          {:ok, [String.t()]} | {:error, String.t()}
+  defp resolve_active_paths(root, []), do: Minga.Project.list_files(root)
+  defp resolve_active_paths(_root, paths), do: {:ok, paths}
 
   # Lean candidate: just enough to match (filename label, full-path search text)
   # and to enrich later (git status stashed in `meta`). Icon, color, two-line

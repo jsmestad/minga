@@ -173,6 +173,27 @@ struct GUIViewportSummary: Sendable, Equatable {
     let totalVisualRows: UInt32
 }
 
+/// Metadata for client-local presentation scrolling.
+///
+/// The visible and overscan line ranges are half-open: start is inclusive and end is exclusive.
+struct GUIScrollPresentation: Sendable, Equatable {
+    let windowId: UInt16
+    let resetRequired: Bool
+    let anchorTop: UInt32
+    let anchorLeft: UInt16
+    let anchorVisualRowOffset: UInt16
+    let visibleStartLine: UInt32
+    let visibleEndLine: UInt32
+    let overscanStartLine: UInt32
+    let overscanEndLine: UInt32
+    let contentEpoch: UInt32
+    let layoutGeneration: UInt32
+
+    func matches(windowId: UInt16, contentEpoch: UInt32) -> Bool {
+        self.windowId == windowId && self.contentEpoch == contentEpoch
+    }
+}
+
 struct GUIGutterMetrics: Sendable, Equatable {
     let lineNumberWidth: UInt16
     let signColWidth: UInt16
@@ -229,6 +250,32 @@ struct GUIWindowRowsDelta: Sendable, Equatable {
     let lineAnnotations: [GUILineAnnotation]
     let paneGeometry: GUIPaneGeometry?
     let cursorline: GUICursorline?
+    let scrollPresentation: GUIScrollPresentation?
+
+    init(windowId: UInt16, contentEpoch: UInt32, cursorVisible: Bool, cursorRow: UInt16,
+         cursorCol: UInt16, cursorShape: CursorShape, scrollLeft: UInt16,
+         rows: [GUIWindowRowDeltaEntry], selection: GUISelectionOverlay?,
+         searchMatches: [GUISearchMatch], diagnosticUnderlines: [GUIDiagnosticUnderline],
+         documentHighlights: [GUIDocumentHighlight], lineAnnotations: [GUILineAnnotation],
+         paneGeometry: GUIPaneGeometry?, cursorline: GUICursorline?,
+         scrollPresentation: GUIScrollPresentation? = nil) {
+        self.windowId = windowId
+        self.contentEpoch = contentEpoch
+        self.cursorVisible = cursorVisible
+        self.cursorRow = cursorRow
+        self.cursorCol = cursorCol
+        self.cursorShape = cursorShape
+        self.scrollLeft = scrollLeft
+        self.rows = rows
+        self.selection = selection
+        self.searchMatches = searchMatches
+        self.diagnosticUnderlines = diagnosticUnderlines
+        self.documentHighlights = documentHighlights
+        self.lineAnnotations = lineAnnotations
+        self.paneGeometry = paneGeometry
+        self.cursorline = cursorline
+        self.scrollPresentation = scrollPresentation
+    }
 }
 
 struct GUIPaneGeometry: Sendable, Equatable {
@@ -282,6 +329,7 @@ final class GUIWindowContent: Sendable {
     let lineAnnotations: [GUILineAnnotation]
     let paneGeometry: GUIPaneGeometry?
     let cursorline: GUICursorline?
+    let scrollPresentation: GUIScrollPresentation?
 
     /// Pre-built index mapping retained-row keys to their visual rows.
     /// Used by `applyingRowsDelta` to resolve reference entries without
@@ -298,6 +346,7 @@ final class GUIWindowContent: Sendable {
          lineAnnotations: [GUILineAnnotation] = [],
          paneGeometry: GUIPaneGeometry? = nil,
          cursorline: GUICursorline? = nil,
+         scrollPresentation: GUIScrollPresentation? = nil,
          retainedRowIndex existingIndex: [GUIRetainedRowKey: GUIVisualRow]? = nil) {
         self.windowId = windowId
         self.fullRefresh = fullRefresh
@@ -315,6 +364,7 @@ final class GUIWindowContent: Sendable {
         self.lineAnnotations = lineAnnotations
         self.paneGeometry = paneGeometry
         self.cursorline = cursorline
+        self.scrollPresentation = scrollPresentation
 
         if let existingIndex {
             self.retainedRowIndex = existingIndex
@@ -350,6 +400,7 @@ final class GUIWindowContent: Sendable {
             lineAnnotations: lineAnnotations,
             paneGeometry: paneGeometry,
             cursorline: delta.cursorline,
+            scrollPresentation: scrollPresentation,
             retainedRowIndex: retainedRowIndex
         )
     }
@@ -373,6 +424,8 @@ final class GUIWindowContent: Sendable {
             }
         }
 
+        let nextScrollPresentation = delta.scrollPresentation?.matches(windowId: windowId, contentEpoch: contentEpoch) == true ? delta.scrollPresentation : nil
+
         return GUIWindowContent(
             windowId: windowId,
             fullRefresh: false,
@@ -389,7 +442,8 @@ final class GUIWindowContent: Sendable {
             documentHighlights: delta.documentHighlights,
             lineAnnotations: delta.lineAnnotations,
             paneGeometry: delta.paneGeometry,
-            cursorline: delta.cursorline
+            cursorline: delta.cursorline,
+            scrollPresentation: nextScrollPresentation
         )
     }
 }

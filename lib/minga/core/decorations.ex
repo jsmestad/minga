@@ -854,23 +854,39 @@ defmodule Minga.Core.Decorations do
   This is the inverse of `buf_col_to_display_col/3`. Used by mouse click
   position mapping to find the correct buffer column when clicking on a
   display column that may be offset by virtual text.
+
+  `line_len` is the buffer column length of the line. It is required to
+  invert conceals that continue past this line (their replacement glyph
+  stands in for everything from the conceal start to the line end), so a
+  click on or after that glyph resolves to the first buffer column after
+  the concealed range. Callers that cannot cheaply supply the length may
+  pass `:infinity`; the reverse transform then resolves such clicks to a
+  column past the line end, which downstream clamping pins to the line end.
   """
-  @spec display_col_to_buf_col(t(), non_neg_integer(), non_neg_integer()) :: non_neg_integer()
+  @spec display_col_to_buf_col(
+          t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer() | :infinity
+        ) :: non_neg_integer()
+  def display_col_to_buf_col(decs, line, display_col, line_len \\ :infinity)
+
   def display_col_to_buf_col(
         %__MODULE__{virtual_texts: [], conceal_ranges: []},
         _line,
-        display_col
+        display_col,
+        _line_len
       ),
       do: display_col
 
-  def display_col_to_buf_col(%__MODULE__{} = decs, line, display_col) do
+  def display_col_to_buf_col(%__MODULE__{} = decs, line, display_col, line_len) do
     inline_vts = inline_virtual_texts_for_line(decs, line)
     buf_col = subtract_virtual_widths(inline_vts, display_col)
 
     # Reverse the conceal offset: a display col maps to a higher buf col
     # because concealed characters don't appear on screen.
     conceals = conceals_for_line(decs, line)
-    apply_conceal_offset_to_buf(conceals, line, buf_col)
+    apply_conceal_offset_to_buf(conceals, line, buf_col, line_len)
   end
 
   @spec add_virtual_widths([VirtualText.t()], non_neg_integer()) :: non_neg_integer()
@@ -934,6 +950,30 @@ defmodule Minga.Core.Decorations do
 
   # ── Conceal column offset helpers ──────────────────────────────────────────
 
+  # Sentinel column for a conceal that continues past the line when the caller
+  # did not supply a real line length. It is far past any real column, so the
+  # reverse transform resolves clicks on such a conceal to a column past the
+  # line end; downstream clamping then pins them to the actual line end.
+  @conceal_eol_col 1_000_000
+
+  # Resolves a conceal's effective `{start_col, end_col}` on `line`.
+  #
+  # A conceal that starts above this line begins at column 0. A conceal that
+  # ends below this line runs to the line end, which is `line_len` (or the
+  # sentinel above when the length is unknown). Both the forward and reverse
+  # transforms must use the SAME bounds, otherwise the mappings stop being
+  # inverses of each other and click positions drift past multi-line conceals.
+  @spec effective_bounds(ConcealRange.t(), non_neg_integer(), non_neg_integer() | :infinity) ::
+          {non_neg_integer(), non_neg_integer()}
+  defp effective_bounds(%ConcealRange{start_pos: {sl, sc}, end_pos: {el, ec}}, line, line_len) do
+    start_col = if sl < line, do: 0, else: sc
+    end_col = if el > line or ec == @conceal_eol_col, do: line_end_col(line_len), else: ec
+    {start_col, end_col}
+  end
+
+  defp line_end_col(:infinity), do: @conceal_eol_col
+  defp line_end_col(line_len) when is_integer(line_len), do: line_len
+
   # Adjusts a display column by subtracting the width of concealed ranges
   # that fall before the given buffer column. Each conceal range reduces
   # display width by (concealed_width - replacement_width).
@@ -947,10 +987,7 @@ defmodule Minga.Core.Decorations do
 
   defp apply_conceal_offset_to_display(conceals, line, buf_col, display_col) do
     Enum.reduce(conceals, display_col, fn conceal, acc ->
-      {_sl, sc} = conceal.start_pos
-      {el, ec} = conceal.end_pos
-      conceal_start = if elem(conceal.start_pos, 0) < line, do: 0, else: sc
-      conceal_end = if el > line, do: buf_col, else: ec
+      {conceal_start, conceal_end} = effective_bounds(conceal, line, :infinity)
 
       if conceal_start < buf_col do
         # How much of this conceal is before our buf_col?
@@ -967,21 +1004,28 @@ defmodule Minga.Core.Decorations do
   # Inverse of apply_conceal_offset_to_display: given a buf_col that was
   # derived from a display_col (after removing VT offsets), add back the
   # concealed widths to find the true buffer column.
-  @spec apply_conceal_offset_to_buf([ConcealRange.t()], non_neg_integer(), non_neg_integer()) ::
-          non_neg_integer()
-  defp apply_conceal_offset_to_buf([], _line, buf_col), do: buf_col
+  @spec apply_conceal_offset_to_buf(
+          [ConcealRange.t()],
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer() | :infinity
+        ) :: non_neg_integer()
+  defp apply_conceal_offset_to_buf([], _line, buf_col, _line_len), do: buf_col
 
-  defp apply_conceal_offset_to_buf(conceals, line, buf_col) do
+  defp apply_conceal_offset_to_buf(conceals, line, buf_col, line_len) do
     # Walk through conceals in order. Each conceal at or before the current
     # position shifts the buffer column forward by the concealed width
     # minus the replacement width. We use <= because a display_col that
     # lands where a conceal starts means the first visible character after
     # the conceal.
+    #
+    # The bounds come from the same `effective_bounds/3` helper the forward
+    # transform uses. The reverse must use a FIXED end (the conceal's true
+    # end on this line), not the accumulating result, so that feeding a
+    # display column back through this transform reproduces the buffer column
+    # the forward transform started from.
     Enum.reduce(conceals, buf_col, fn conceal, acc ->
-      {_sl, sc} = conceal.start_pos
-      {el, ec} = conceal.end_pos
-      conceal_start = if elem(conceal.start_pos, 0) < line, do: 0, else: sc
-      conceal_end = if el > line, do: acc, else: ec
+      {conceal_start, conceal_end} = effective_bounds(conceal, line, line_len)
 
       if conceal_start <= acc do
         concealed_width = max(conceal_end - conceal_start, 0)

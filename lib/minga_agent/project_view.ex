@@ -45,7 +45,8 @@ defmodule MingaAgent.ProjectView do
   @spec write_file(t(), String.t(), binary()) :: :ok | {:error, term()}
   def write_file(%__MODULE__{} = view, relative_path, content)
       when is_binary(relative_path) and is_binary(content) do
-    with {:ok, path} <- normalize_relative_path(relative_path) do
+    with {:ok, path} <- normalize_relative_path(relative_path),
+         :ok <- reject_tombstone_suffix(path) do
       view.backend.write_file(view, path, content)
     end
   end
@@ -54,7 +55,8 @@ defmodule MingaAgent.ProjectView do
   @spec edit_file(t(), String.t(), String.t(), String.t()) :: :ok | {:error, term()}
   def edit_file(%__MODULE__{} = view, relative_path, old_text, new_text)
       when is_binary(relative_path) and is_binary(old_text) and is_binary(new_text) do
-    with {:ok, path} <- normalize_relative_path(relative_path) do
+    with {:ok, path} <- normalize_relative_path(relative_path),
+         :ok <- reject_tombstone_suffix(path) do
       view.backend.edit_file(view, path, old_text, new_text)
     end
   end
@@ -62,7 +64,8 @@ defmodule MingaAgent.ProjectView do
   @doc "Deletes a file from the view."
   @spec delete_file(t(), String.t()) :: :ok | {:error, term()}
   def delete_file(%__MODULE__{} = view, relative_path) when is_binary(relative_path) do
-    with {:ok, path} <- normalize_relative_path(relative_path) do
+    with {:ok, path} <- normalize_relative_path(relative_path),
+         :ok <- reject_tombstone_suffix(path) do
       view.backend.delete_file(view, path)
     end
   end
@@ -80,6 +83,10 @@ defmodule MingaAgent.ProjectView do
   @spec working_dir(t()) :: String.t() | {:error, term()}
   def working_dir(%__MODULE__{} = view), do: view.backend.working_dir(view)
 
+  @doc "Prepares and returns a working directory suitable for shell/search tools."
+  @spec prepare_working_dir(t()) :: {:ok, String.t()} | {:error, term()}
+  def prepare_working_dir(%__MODULE__{} = view), do: view.backend.prepare_working_dir(view)
+
   @doc "Returns environment variables shell commands should use for this view."
   @spec command_env(t()) :: [{String.t(), String.t()}] | {:error, term()}
   def command_env(%__MODULE__{} = view), do: view.backend.command_env(view)
@@ -95,7 +102,8 @@ defmodule MingaAgent.ProjectView do
   @doc "Discards one file from view-local state."
   @spec discard_file(t(), String.t()) :: :ok | {:error, term()}
   def discard_file(%__MODULE__{} = view, relative_path) when is_binary(relative_path) do
-    with {:ok, path} <- normalize_relative_path(relative_path) do
+    with {:ok, path} <- normalize_relative_path(relative_path),
+         :ok <- reject_tombstone_suffix(path) do
       view.backend.discard_file(view, path)
     end
   end
@@ -155,8 +163,21 @@ defmodule MingaAgent.ProjectView do
     if String.starts_with?(path, "/") or Enum.member?(components, "..") do
       {:error, :path_traversal}
     else
-      relative_path_from_components(components, allow_root?)
+      reject_tombstone_components(components, allow_root?)
     end
+  end
+
+  @spec reject_tombstone_suffix(String.t()) :: :ok | {:error, :invalid_path}
+  defp reject_tombstone_suffix(path) do
+    if tombstone_component?(Path.split(path)), do: {:error, :invalid_path}, else: :ok
+  end
+
+  @spec reject_tombstone_components([String.t()], boolean()) ::
+          {:ok, String.t()} | {:error, :invalid_path}
+  defp reject_tombstone_components(components, allow_root?) do
+    if tombstone_component?(components),
+      do: {:error, :invalid_path},
+      else: relative_path_from_components(components, allow_root?)
   end
 
   @spec relative_path_from_components([String.t()], boolean()) ::
@@ -164,6 +185,11 @@ defmodule MingaAgent.ProjectView do
   defp relative_path_from_components([], true), do: {:ok, ""}
   defp relative_path_from_components([], false), do: {:error, :invalid_path}
   defp relative_path_from_components(components, _allow_root?), do: {:ok, Path.join(components)}
+
+  @spec tombstone_component?([String.t()]) :: boolean()
+  defp tombstone_component?(components) do
+    Enum.any?(components, &String.ends_with?(&1, ".__changeset_deleted__"))
+  end
 
   @spec unique_id() :: String.t()
   defp unique_id do

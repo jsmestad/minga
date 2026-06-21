@@ -12,7 +12,6 @@ defmodule MingaEditor.Commands.BufferManagement do
   alias MingaAgent.Session
   alias MingaAgent.ProjectView
   alias Minga.Buffer
-  alias Minga.FileRef
   alias Minga.Project.FileRef, as: ProjectFileRef
   alias Minga.Buffer.Document
   alias Minga.Config
@@ -709,7 +708,7 @@ defmodule MingaEditor.Commands.BufferManagement do
          %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
          file_path
        ) do
-    file_ref = FileRef.new(file_path)
+    file_ref = ProjectFileRef.from_file_path(file_path)
     workspace_id = TabBar.active_workspace_id(tb)
 
     case existing_file_tab_in_workspace(state, tb, workspace_id, file_ref) do
@@ -722,7 +721,7 @@ defmodule MingaEditor.Commands.BufferManagement do
     start_file_buffer(state, file_path)
   end
 
-  @spec existing_file_tab_in_workspace(state(), TabBar.t(), non_neg_integer(), FileRef.t()) ::
+  @spec existing_file_tab_in_workspace(state(), TabBar.t(), non_neg_integer(), ProjectFileRef.t()) ::
           Tab.t() | nil
   defp existing_file_tab_in_workspace(state, tb, workspace_id, file_ref) do
     if active_buffer_matches_file_ref?(state, file_ref) do
@@ -732,14 +731,14 @@ defmodule MingaEditor.Commands.BufferManagement do
     end
   end
 
-  @spec active_buffer_matches_file_ref?(state(), FileRef.t()) :: boolean()
+  @spec active_buffer_matches_file_ref?(state(), ProjectFileRef.t()) :: boolean()
   defp active_buffer_matches_file_ref?(
          %{workspace: %{buffers: %{active: active}}},
-         %FileRef{} = file_ref
+         %ProjectFileRef{} = file_ref
        )
        when is_pid(active) do
     case buffer_file_ref(active) do
-      %FileRef{} = active_ref -> FileRef.same?(active_ref, file_ref)
+      %ProjectFileRef{} = active_ref -> ProjectFileRef.equal?(active_ref, file_ref)
       nil -> false
     end
   end
@@ -868,10 +867,10 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   defp tab_context_active_buffer(_tab), do: nil
 
-  @spec buffer_file_ref(pid()) :: FileRef.t() | nil
+  @spec buffer_file_ref(pid()) :: ProjectFileRef.t() | nil
   defp buffer_file_ref(pid) when is_pid(pid) do
     case Buffer.file_path(pid) do
-      path when is_binary(path) -> FileRef.new(path)
+      path when is_binary(path) -> ProjectFileRef.from_file_path(path)
       _ -> nil
     end
   catch

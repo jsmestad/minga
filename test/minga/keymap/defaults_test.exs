@@ -234,7 +234,6 @@ defmodule Minga.Keymap.DefaultsTest do
       trie = Defaults.leader_trie()
       {:prefix, a_node} = Bindings.lookup(trie, {?a, 0})
       assert {:command, :inline_edit} = Bindings.lookup(a_node, {?e, 0})
-      assert {:command, :agent_summarize} = Bindings.lookup(a_node, {?z, 0})
     end
 
     test "leader bindings do not define duplicate key sequences" do

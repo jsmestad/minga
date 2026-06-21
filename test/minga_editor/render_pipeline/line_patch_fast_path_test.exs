@@ -5,7 +5,7 @@ defmodule MingaEditor.RenderPipeline.LinePatchFastPathTest do
   Drives the real render pipeline through `run_pipeline/1` and asserts against
   the `[:minga, :render, :pipeline]` telemetry stop metadata (`path` and
   `rows_rasterized`). The first frame seeds the retained-row cache; subsequent
-  frames exercise reuse. Targets come from docs/RETAINED_GUI_RENDERING_SPEC.md.
+  frames exercise reuse.
   """
 
   # async: false — these tests attach a global `:telemetry` handler to the

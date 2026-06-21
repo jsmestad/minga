@@ -406,7 +406,7 @@ final class EditorNSView: MTKView {
         if coreTextRenderer.cursorAnimating {
             needsDisplay = true
         }
-        dispatcher.frameState.dirty = false
+        dispatcher.markRendered()
     }
 
     private func currentGridDimensions() -> GridDimensions {
@@ -448,7 +448,7 @@ final class EditorNSView: MTKView {
         let grid = gridDimensions(width: frame.width, height: frame.height, cellWidth: newCellW, cellHeight: newCellH)
 
         if grid.cols != dispatcher.frameState.cols || grid.effectiveRows != dispatcher.frameState.rows {
-            dispatcher.frameState.resize(newCols: grid.cols, newRows: grid.effectiveRows)
+            dispatcher.applyViewportResize(newCols: grid.cols, newRows: grid.effectiveRows)
             encoder.sendResize(cols: grid.cols, rows: grid.rawRows)
         }
 
@@ -532,7 +532,7 @@ final class EditorNSView: MTKView {
         guard frame.width > 0, frame.height > 0 else { return }
 
         let grid = currentGridDimensions()
-        dispatcher.frameState.resize(newCols: grid.cols, newRows: grid.effectiveRows)
+        dispatcher.applyViewportResize(newCols: grid.cols, newRows: grid.effectiveRows)
 
         if readySent {
             encoder.sendResize(cols: grid.cols, rows: grid.rawRows)
@@ -621,10 +621,17 @@ final class EditorNSView: MTKView {
     /// reassign first responder to its own focus system.
     func claimFirstResponder() {
         DispatchQueue.main.async { [weak self] in
-            guard let self, let window = self.window else { return }
-            if window.firstResponder !== self {
-                window.makeFirstResponder(self)
-            }
+            guard let self else { return }
+            self.reclaimFirstResponderIfNeeded(respectingTextInput: true)
+        }
+    }
+
+    /// Reclaims first responder immediately when pointer interaction returns to the editor.
+    func reclaimFirstResponderIfNeeded(respectingTextInput: Bool = false) {
+        guard let window else { return }
+        if respectingTextInput, window.firstResponder is NSText { return }
+        if window.firstResponder !== self {
+            window.makeFirstResponder(self)
         }
     }
 
@@ -669,12 +676,12 @@ final class EditorNSView: MTKView {
             // First real frame size: send the ready event with actual
             // window dimensions so the BEAM never sees wrong defaults.
             readySent = true
-            dispatcher.frameState.resize(newCols: grid.cols, newRows: grid.effectiveRows)
+            dispatcher.applyViewportResize(newCols: grid.cols, newRows: grid.effectiveRows)
             encoder.sendReady(cols: grid.cols, rows: grid.rawRows)
             os_signpost(.event, log: startupLog, name: "ReadySent", "%{public}dx%{public}d", grid.cols, grid.rawRows)
             PortLogger.info("Window ready: \(grid.cols)x\(grid.rawRows) raw cells, \(grid.effectiveRows) effective rows (\(Int(newSize.width))x\(Int(newSize.height))pt)")
         } else if grid.cols != dispatcher.frameState.cols || grid.effectiveRows != dispatcher.frameState.rows {
-            dispatcher.frameState.resize(newCols: grid.cols, newRows: grid.effectiveRows)
+            dispatcher.applyViewportResize(newCols: grid.cols, newRows: grid.effectiveRows)
             encoder.sendResize(cols: grid.cols, rows: grid.rawRows)
             PortLogger.info("Window resized: \(grid.cols)x\(grid.rawRows) raw cells, \(grid.effectiveRows) effective rows")
         }
@@ -748,7 +755,7 @@ final class EditorNSView: MTKView {
         let grid = currentGridDimensions()
 
         if grid.cols != dispatcher.frameState.cols || grid.effectiveRows != dispatcher.frameState.rows {
-            dispatcher.frameState.resize(newCols: grid.cols, newRows: grid.effectiveRows)
+            dispatcher.applyViewportResize(newCols: grid.cols, newRows: grid.effectiveRows)
             encoder.sendResize(cols: grid.cols, rows: grid.rawRows)
         }
     }
@@ -1096,6 +1103,8 @@ final class EditorNSView: MTKView {
     // MARK: - Mouse
 
     override func mouseDown(with event: NSEvent) {
+        reclaimFirstResponderIfNeeded()
+
         // Scroll indicator track: intercept clicks on the right edge.
         let point = convert(event.locationInWindow, from: nil)
         if shouldCaptureScrollTrackClick(point) {
@@ -1147,6 +1156,7 @@ final class EditorNSView: MTKView {
     }
 
     override func rightMouseDown(with event: NSEvent) {
+        reclaimFirstResponderIfNeeded()
         resetCursorBlink()
         let (row, col) = cellPosition(from: event)
         let cc = UInt8(clamping: event.clickCount)
@@ -1219,6 +1229,7 @@ final class EditorNSView: MTKView {
     }
 
     override func otherMouseDown(with event: NSEvent) {
+        reclaimFirstResponderIfNeeded()
         let (row, col) = cellPosition(from: event)
         encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_MIDDLE,
                                modifiers: modifierBits(from: event.modifierFlags),

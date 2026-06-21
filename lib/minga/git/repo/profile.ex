@@ -20,19 +20,101 @@ defmodule Minga.Git.Repo.Profile do
             untracked_mode: :normal,
             timeout_ms: 2_000
 
+  # Size proxy: `.git/index` file size.
+  #
+  # The index file holds one entry per tracked path (roughly a few dozen bytes
+  # each: mode, sha, flags, and the path string). Its size therefore scales with
+  # the tracked-file count, which is the cost driver for `git status`. Reading a
+  # single `File.stat` is O(1) and adds no filesystem walk at startup, so it is a
+  # cheap stand-in for "how big is this working tree" without enumerating it.
+  #
+  # Thresholds are heuristic, picked from observed index sizes (~80-100 bytes per
+  # entry): ~10 MB ≈ 100k+ tracked files (huge), ~2 MB ≈ 20k+ (large). They are
+  # intentionally conservative and only affect the bounded `timeout_ms`, never
+  # whether untracked files are hidden.
+  @huge_index_bytes 10 * 1024 * 1024
+  @large_index_bytes 2 * 1024 * 1024
+
+  # Bounded timeouts per size class. Larger repos get a longer (still bounded)
+  # budget so a normal status has a chance to finish before degrading.
+  @huge_timeout_ms 4_000
+  @large_timeout_ms 3_000
+  @default_timeout_ms 2_000
+
   @doc "Builds the ambient git policy for `git_root`."
   @spec detect(String.t()) :: t()
   def detect(git_root) when is_binary(git_root) do
     sparse? = sparse_checkout?(git_root)
 
-    %__MODULE__{
-      sparse?: sparse?,
-      size_class: if(sparse?, do: :large, else: :unknown),
-      untracked_mode: if(sparse?, do: :no, else: :normal),
-      timeout_ms: 2_000
-    }
+    sparse?
+    |> base_profile(git_root)
     |> apply_override(git_root)
   end
+
+  # Sparse checkouts keep the conservative `:no` untracked mode (AC 3): the
+  # checkout deliberately omits paths, so enumerating untracked files is both
+  # expensive and misleading.
+  @spec base_profile(boolean(), String.t()) :: t()
+  defp base_profile(true, _git_root) do
+    %__MODULE__{
+      sparse?: true,
+      size_class: :large,
+      untracked_mode: :no,
+      timeout_ms: @default_timeout_ms
+    }
+  end
+
+  # Non-sparse (full) checkouts classify by index size and ALWAYS keep
+  # `untracked_mode: :normal` (AC 2). A huge repo must never silently fall back
+  # to `:no`, which would hide untracked files; instead it degrades visibly when
+  # the bounded timeout trims results.
+  defp base_profile(false, git_root) do
+    size_class = classify_size(git_root)
+
+    %__MODULE__{
+      sparse?: false,
+      size_class: size_class,
+      untracked_mode: :normal,
+      timeout_ms: timeout_for_size(size_class)
+    }
+  end
+
+  @spec classify_size(String.t()) :: size_class()
+  defp classify_size(git_root) do
+    case index_size(git_root) do
+      bytes when bytes >= @huge_index_bytes -> :huge
+      bytes when bytes >= @large_index_bytes -> :large
+      _bytes -> :unknown
+    end
+  end
+
+  # Returns the `.git/index` size in bytes, or 0 when it cannot be read (no
+  # index yet, permissions, or a worktree without one). 0 classifies as
+  # `:unknown`, the safe default.
+  @spec index_size(String.t()) :: non_neg_integer()
+  defp index_size(git_root) do
+    case git_root |> git_dir() |> Path.join("index") |> File.stat() do
+      {:ok, %File.Stat{size: size}} -> size
+      {:error, _reason} -> 0
+    end
+  end
+
+  @spec timeout_for_size(size_class()) :: pos_integer()
+  defp timeout_for_size(:huge), do: @huge_timeout_ms
+  defp timeout_for_size(:large), do: @large_timeout_ms
+  defp timeout_for_size(_size_class), do: @default_timeout_ms
+
+  @doc """
+  Returns true when this profile still enumerates untracked files (`:normal`).
+
+  A status timeout on such a profile means results were trimmed while untracked
+  files were in scope, so the omission must be surfaced as degraded (AC 2/5).
+  Sparse / `:no` profiles deliberately omit untracked files, so a timeout there
+  is not a visibility regression worth flagging.
+  """
+  @spec degrades_visibly?(t()) :: boolean()
+  def degrades_visibly?(%__MODULE__{untracked_mode: :normal}), do: true
+  def degrades_visibly?(%__MODULE__{}), do: false
 
   @spec sparse_checkout?(String.t()) :: boolean()
   defp sparse_checkout?(git_root) do

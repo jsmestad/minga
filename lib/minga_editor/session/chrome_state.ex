@@ -15,7 +15,7 @@ defmodule MingaEditor.Session.ChromeState do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
-  alias MingaEditor.UI.Devicon
+  alias Minga.Language.Devicon
   alias MingaEditor.Session.ChromeState.TabSummary
   alias MingaEditor.Session.ChromeState.WorkspaceSummary
 

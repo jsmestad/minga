@@ -38,6 +38,7 @@ defmodule Minga.Command.Registry do
     MingaEditor.Commands.Folding,
     MingaEditor.Commands.Diagnostics,
     MingaEditor.Commands.EditTimeline,
+    MingaEditor.Commands.Autobiography,
     MingaEditor.Commands.Lsp,
     MingaEditor.Commands.Project,
     MingaEditor.Commands.Agent,

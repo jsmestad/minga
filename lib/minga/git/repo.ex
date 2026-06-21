@@ -48,6 +48,8 @@ defmodule Minga.Git.Repo do
     refresh_pending?: false,
     awaiting_refresh: [],
     profile: nil,
+    degraded?: false,
+    degraded_reason: nil,
     events_registry: Minga.Events.default_registry()
   ]
 
@@ -67,8 +69,19 @@ defmodule Minga.Git.Repo do
           refresh_pending?: boolean(),
           awaiting_refresh: [GenServer.from()],
           profile: Profile.t() | nil,
+          degraded?: boolean(),
+          degraded_reason: degraded_reason() | nil,
           events_registry: Minga.Events.registry()
         }
+
+  @typedoc """
+  Why the cached status is degraded.
+
+  `:status_timeout` means `git status` exceeded the profile's bounded timeout on
+  a full checkout, so the entry list may be missing untracked (and other)
+  changes. The UI surfaces this so the omission is visible, never silent.
+  """
+  @type degraded_reason :: :status_timeout
 
   @typedoc "Options for starting a Git.Repo process."
   @type start_opt ::
@@ -86,7 +99,9 @@ defmodule Minga.Git.Repo do
           untracked_count: non_neg_integer(),
           conflict_count: non_neg_integer(),
           last_commit_message: String.t(),
-          stash_count: non_neg_integer()
+          stash_count: non_neg_integer(),
+          degraded?: boolean(),
+          degraded_reason: degraded_reason() | nil
         }
 
   @typedoc "Cached status entries plus the path they are relative to."
@@ -191,6 +206,18 @@ defmodule Minga.Git.Repo do
     GenServer.call(server, :summary)
   end
 
+  @doc """
+  Returns whether the cached status is degraded and why.
+
+  `{true, reason}` means the last `git status` was trimmed (e.g. timed out on a
+  full checkout) so untracked or other changes may be missing. `{false, nil}`
+  means the cache is complete.
+  """
+  @spec degraded(GenServer.server()) :: {boolean(), degraded_reason() | nil}
+  def degraded(server) do
+    GenServer.call(server, :degraded)
+  end
+
   @doc "Forces a status refresh. Used after staging/committing operations."
   @spec refresh(GenServer.server()) :: :ok
   def refresh(server) do
@@ -235,7 +262,16 @@ defmodule Minga.Git.Repo do
   end
 
   def handle_call(:status_snapshot, _from, state) do
-    {:reply, StatusSnapshot.new(state.git_root, entry_base_path(state), state.entries), state}
+    snapshot =
+      StatusSnapshot.new(
+        state.git_root,
+        entry_base_path(state),
+        state.entries,
+        state.degraded?,
+        state.degraded_reason
+      )
+
+    {:reply, snapshot, state}
   end
 
   def handle_call(:branch, _from, state) do
@@ -245,6 +281,10 @@ defmodule Minga.Git.Repo do
   def handle_call(:summary, _from, state) do
     summary = build_summary(state)
     {:reply, summary, state}
+  end
+
+  def handle_call(:degraded, _from, state) do
+    {:reply, {state.degraded?, state.degraded_reason}, state}
   end
 
   def handle_call(
@@ -371,9 +411,15 @@ defmodule Minga.Git.Repo do
   @typep refresh_task :: %{pid: pid(), ref: reference()}
   @typep fetch_result(value) :: {:ok, value} | :error
 
+  @typep status_result :: %{
+           entries: fetch_result([StatusEntry.t()]),
+           degraded?: boolean(),
+           degraded_reason: degraded_reason() | nil
+         }
+
   @typep refresh_result :: %{
            profile: Profile.t(),
-           entries: fetch_result([StatusEntry.t()]),
+           status: status_result(),
            branch: fetch_result(String.t() | nil),
            ahead_behind: fetch_result({non_neg_integer(), non_neg_integer()}),
            last_commit_message: fetch_result(String.t()),
@@ -425,7 +471,7 @@ defmodule Minga.Git.Repo do
 
     %{
       profile: profile,
-      entries: fetch_status(git_root, project_root, profile),
+      status: fetch_status(git_root, project_root, profile),
       branch: fetch_branch(git_root),
       ahead_behind: fetch_ahead_behind(git_root),
       last_commit_message: fetch_last_commit_message(git_root),
@@ -458,8 +504,12 @@ defmodule Minga.Git.Repo do
     old_behind = state.behind
     old_last_commit_message = state.last_commit_message
     old_stash_count = state.stash_count
+    old_degraded? = state.degraded?
 
-    entries = fetched_or_current(result.entries, old_entries)
+    # On a degraded (timed-out) status we keep the previously cached entries
+    # rather than dropping them, so the file list stays visible while the
+    # degraded flag tells the user it may be incomplete.
+    entries = fetched_or_current(result.status.entries, old_entries)
     branch = fetched_or_current(result.branch, old_branch)
     {ahead, behind} = fetched_or_current(result.ahead_behind, {old_ahead, old_behind})
     last_commit_message = fetched_or_current(result.last_commit_message, old_last_commit_message)
@@ -473,13 +523,16 @@ defmodule Minga.Git.Repo do
         behind: behind,
         last_commit_message: last_commit_message,
         stash_count: stash_count,
-        profile: result.profile
+        profile: result.profile,
+        degraded?: result.status.degraded?,
+        degraded_reason: result.status.degraded_reason
     }
 
     changed =
       entries != old_entries or branch != old_branch or
         ahead != old_ahead or behind != old_behind or
-        last_commit_message != old_last_commit_message or stash_count != old_stash_count
+        last_commit_message != old_last_commit_message or stash_count != old_stash_count or
+        state.degraded? != old_degraded?
 
     if changed do
       Minga.Events.broadcast(
@@ -492,7 +545,9 @@ defmodule Minga.Git.Repo do
           behind: state.behind,
           entry_base_path: entry_base_path(state),
           last_commit_message: state.last_commit_message,
-          stash_count: state.stash_count
+          stash_count: state.stash_count,
+          degraded?: state.degraded?,
+          degraded_reason: state.degraded_reason
         },
         state.events_registry
       )
@@ -521,20 +576,42 @@ defmodule Minga.Git.Repo do
   defp fetched_or_current({:ok, value}, _current), do: value
   defp fetched_or_current(:error, current), do: current
 
-  @spec fetch_status(String.t(), String.t() | nil, Profile.t()) :: fetch_result([StatusEntry.t()])
+  @spec fetch_status(String.t(), String.t() | nil, Profile.t()) :: status_result()
   defp fetch_status(git_root, project_root, %Profile{} = profile) do
     case Git.status(git_root,
            untracked_mode: profile.untracked_mode,
            timeout_ms: profile.timeout_ms
          ) do
       {:ok, entries} ->
-        {:ok, maybe_relativize_paths(entries, git_root, project_root)}
+        # A clean run clears any prior degraded flag.
+        %{
+          entries: {:ok, maybe_relativize_paths(entries, git_root, project_root)},
+          degraded?: false,
+          degraded_reason: nil
+        }
 
       {:error, reason} ->
-        Minga.Log.warning(:editor, "[Git.Repo] status failed: #{reason}")
-        :error
+        status_error_result(reason, profile)
     end
   end
+
+  # A status timeout on a full checkout (untracked_mode: :normal) means results
+  # were trimmed while untracked files were in scope. We keep the previously
+  # cached entries (handled in apply_refresh_result) and flag the cache degraded
+  # so the UI shows it, rather than silently dropping untracked visibility.
+  @spec status_error_result(String.t(), Profile.t()) :: status_result()
+  defp status_error_result(reason, profile) do
+    if status_timed_out?(reason) and Profile.degrades_visibly?(profile) do
+      Minga.Log.warning(:editor, "[Git.Repo] status degraded (timeout): #{reason}")
+      %{entries: :error, degraded?: true, degraded_reason: :status_timeout}
+    else
+      Minga.Log.warning(:editor, "[Git.Repo] status failed: #{reason}")
+      %{entries: :error, degraded?: false, degraded_reason: nil}
+    end
+  end
+
+  @spec status_timed_out?(String.t()) :: boolean()
+  defp status_timed_out?(reason), do: String.contains?(reason, "timed out")
 
   @spec fetch_branch(String.t()) :: fetch_result(String.t() | nil)
   defp fetch_branch(git_root) do
@@ -614,7 +691,9 @@ defmodule Minga.Git.Repo do
       untracked_count: counts.untracked,
       conflict_count: counts.conflict,
       last_commit_message: state.last_commit_message,
-      stash_count: state.stash_count
+      stash_count: state.stash_count,
+      degraded?: state.degraded?,
+      degraded_reason: state.degraded_reason
     }
   end
 

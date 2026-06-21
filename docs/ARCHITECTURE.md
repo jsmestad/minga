@@ -375,7 +375,7 @@ Because the model carries character offsets, not pixel positions, the same model
 
 #### What survives of the DisplayList
 
-`MingaEditor.DisplayList` still exists, but it is no longer "what's on screen". The cell-grid window carriers (`Frame`, `WindowFrame`) were removed in #2241, and the per-surface chrome painters (completion menu, hover/signature popups, modeline, tab bar, float popups) were deleted in #2311, because the semantic frontends render those surfaces natively. What remains is a small set of `draw/4` + `Overlay` primitives for a shrinking set of renderers that still produce raw draw tuples or popup geometry: the styled-run gutter (`Renderer.Gutter`, line numbers and git signs), extension block decorations (`Core.Decorations.BlockDecoration`), the popup-geometry `:content` draw list used to size floating windows, the `Overlay` carrier whose `cursor` field still resolves the picker cursor in Compose, and the Board and Git Porcelain extension shell renderers. It is a leftover for extension and gutter draw paths, not the pipeline's spine.
+`MingaEditor.DisplayList` still exists, but it is no longer "what's on screen". The cell-grid window carriers (`Frame`, `WindowFrame`) were removed in #2241, and the per-surface chrome painters (completion menu, hover/signature popups, modeline, tab bar, float popups) were deleted in #2311, because the semantic frontends render those surfaces natively. What remains is a small set of `draw/4` + `Overlay` primitives for a shrinking set of renderers that still produce raw draw tuples or popup geometry: the styled-run gutter (`Renderer.Gutter`, line numbers and git signs), extension block decorations (`Core.Decorations.BlockDecoration`), the popup-geometry `:content` draw list used to size floating windows, the `Overlay` carrier whose `cursor` field still resolves the picker cursor in Compose, and the Git Porcelain extension shell renderer. It is a leftover for extension and gutter draw paths, not the pipeline's spine.
 
 ---
 
@@ -774,7 +774,7 @@ This isn't just organization for readability. A credo check (`Minga.Credo.Depend
 
 **Layer 1 (`lib/minga_agent/`)** contains the AI agent runtime: session management, tool registry and execution, the API gateway, and changeset/overlay support. Agent code depends on Layer 0 (it reads buffers, uses events, calls into the config system) but never imports from MingaEditor.
 
-**Layer 2 (`lib/minga_editor/`)** contains the editor UI: the Editor GenServer, rendering pipeline, the Traditional shell, input handling, themes, and all presentation logic. Experimental shells such as Board live behind extension ownership, not as core presentation surfaces. This layer consumes everything from Layers 0 and 1.
+**Layer 2 (`lib/minga_editor/`)** contains the editor UI: the Editor GenServer, rendering pipeline, the Traditional shell, input handling, themes, and all presentation logic. This layer consumes everything from Layers 0 and 1.
 
 The practical benefit: `Minga.Runtime.start/1` boots Layers 0 and 1 without any frontend. Agent sessions run, tools execute, buffers exist, all without a single pixel rendered. External clients connect through the API gateway and interact with a fully functional runtime.
 

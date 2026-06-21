@@ -17,7 +17,6 @@ defmodule MingaEditor.Commands.Search do
   alias Minga.Mode
   alias Minga.Mode.CommandState
   alias Minga.Mode.SearchState
-  alias Minga.Project.ProjectSearch
 
   @type state :: EditorState.t()
 
@@ -209,24 +208,12 @@ defmodule MingaEditor.Commands.Search do
         :confirm_project_search
       )
       when is_binary(query) and query != "" do
-    root = project_root()
-
-    case ProjectSearch.search(query, root) do
-      {:ok, [], _truncated?} ->
-        EditorState.set_status(state, "No results for: #{query}")
-
-      {:ok, matches, truncated?} ->
-        msg = if truncated?, do: "Results truncated to 10,000", else: nil
-
-        state =
-          EditorState.update_search(state, &SearchData.set_project_results(&1, matches))
-
-        state = PickerUI.open(state, MingaEditor.UI.Picker.ProjectSearchSource)
-        if msg, do: EditorState.set_status(state, msg), else: state
-
-      {:error, msg} ->
-        EditorState.set_status(state, msg)
-    end
+    # Stash the query, then open the picker asynchronously. The actual `rg`/`grep`
+    # scan runs off the editor input path inside ProjectSearchSource.async_fetch/1,
+    # so confirming a search never blocks the editor on a large repository.
+    state
+    |> EditorState.update_search(&SearchData.set_project_query(&1, query))
+    |> PickerUI.open(MingaEditor.UI.Picker.ProjectSearchSource)
   end
 
   def execute(state, :confirm_project_search) do

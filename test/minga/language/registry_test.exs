@@ -44,6 +44,53 @@ defmodule Minga.Language.RegistryTest do
     end
   end
 
+  describe "canonical_grammar/1" do
+    test "resolves short aliases to the canonical grammar name" do
+      assert Registry.canonical_grammar("js") == "javascript"
+      assert Registry.canonical_grammar("jsx") == "javascript"
+      assert Registry.canonical_grammar("ts") == "typescript"
+      assert Registry.canonical_grammar("sh") == "bash"
+      assert Registry.canonical_grammar("shell") == "bash"
+      assert Registry.canonical_grammar("zsh") == "bash"
+      assert Registry.canonical_grammar("c++") == "cpp"
+      assert Registry.canonical_grammar("cc") == "cpp"
+      assert Registry.canonical_grammar("h") == "c"
+      assert Registry.canonical_grammar("cs") == "c_sharp"
+      assert Registry.canonical_grammar("rb") == "ruby"
+      assert Registry.canonical_grammar("yml") == "yaml"
+      assert Registry.canonical_grammar("py3") == "python"
+      assert Registry.canonical_grammar("golang") == "go"
+      assert Registry.canonical_grammar("rs") == "rust"
+      assert Registry.canonical_grammar("kt") == "kotlin"
+      assert Registry.canonical_grammar("md") == "markdown"
+      assert Registry.canonical_grammar("jsonc") == "json"
+    end
+
+    test "is case-insensitive" do
+      assert Registry.canonical_grammar("JS") == "javascript"
+      assert Registry.canonical_grammar("C++") == "cpp"
+    end
+
+    test "passes through canonical names and unknown labels unchanged" do
+      assert Registry.canonical_grammar("elixir") == "elixir"
+      assert Registry.canonical_grammar("javascript") == "javascript"
+      assert Registry.canonical_grammar("totally-unknown") == "totally-unknown"
+    end
+
+    test "every alias target is a grammar we actually ship" do
+      shipped =
+        Registry.all()
+        |> Enum.map(& &1.grammar)
+        |> Enum.reject(&is_nil/1)
+        |> MapSet.new()
+
+      for {alias_name, target} <- Registry.grammar_aliases() do
+        assert MapSet.member?(shipped, target),
+               "alias #{inspect(alias_name)} -> #{inspect(target)} is not a shipped grammar"
+      end
+    end
+  end
+
   describe "for_extension/1" do
     test "looks up language by extension" do
       lang = Registry.for_extension("ex")

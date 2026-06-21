@@ -15,8 +15,7 @@ defmodule Minga.Editing do
   """
 
   # ── Cursor motions ─────────────────────────────────────────────────────
-  # Each motion takes a readable (Document or BufferSnapshot) and a
-  # cursor position, returns the new position.
+  # Each motion takes readable text and a cursor position, then returns the new position.
 
   defdelegate line_start(readable, pos), to: Minga.Editing.Motion
   defdelegate line_end(readable, pos), to: Minga.Editing.Motion

@@ -159,7 +159,9 @@ defmodule Minga.Events do
       :behind,
       entry_base_path: nil,
       last_commit_message: "",
-      stash_count: 0
+      stash_count: 0,
+      degraded?: false,
+      degraded_reason: nil
     ]
 
     @type t :: %__MODULE__{
@@ -170,7 +172,9 @@ defmodule Minga.Events do
             behind: non_neg_integer(),
             entry_base_path: String.t() | nil,
             last_commit_message: String.t(),
-            stash_count: non_neg_integer()
+            stash_count: non_neg_integer(),
+            degraded?: boolean(),
+            degraded_reason: Minga.Git.Repo.degraded_reason() | nil
           }
   end
 
@@ -494,27 +498,6 @@ defmodule Minga.Events do
     registry = registry_from_arg(registry_or_opts)
     if registry_process?(registry), do: dispatch(registry, topic, payload)
     :ok
-  end
-
-  @doc """
-  Broadcasts `:buffer_changed` to all subscribers.
-
-  Deprecated: use the 2-arity version that accepts a `BufferChangedEvent`
-  struct with delta and source fields. This wrapper exists for backward
-  compatibility during migration.
-  """
-  @deprecated "Buffer.Process now broadcasts :buffer_changed automatically on every edit. No manual broadcast needed."
-  @spec notify_buffer_changed(pid()) :: :ok
-  @spec notify_buffer_changed(pid(), keyword() | registry()) :: :ok
-  def notify_buffer_changed(buf, registry_or_opts \\ default_registry()) when is_pid(buf) do
-    broadcast(
-      :buffer_changed,
-      %BufferChangedEvent{
-        buffer: buf,
-        source: Minga.Buffer.EditSource.unknown()
-      },
-      registry_or_opts
-    )
   end
 
   # ── Query ───────────────────────────────────────────────────────────────────

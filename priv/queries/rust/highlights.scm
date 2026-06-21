@@ -2,13 +2,13 @@
 
 (type_identifier) @type
 (primitive_type) @type.builtin
-(field_identifier) @property
+(field_identifier) @variable.member
 
 ; Identifier conventions
 
 ; Assume all-caps names are constants
 ((identifier) @constant
- (#match? @constant "^[A-Z][A-Z\\d_]+$'"))
+ (#match? @constant "^[A-Z][A-Z0-9_]+$"))
 
 ; Assume uppercase names are enum constructors
 ((identifier) @constructor

@@ -15,39 +15,45 @@ defmodule Minga.Core.OverlayTest do
   end
 
   describe "create/1" do
-    test "mirrors project with hardlinks", %{project: project} do
+    test "creates an empty lazy overlay", %{project: project} do
       {:ok, overlay} = Overlay.create(project)
 
-      assert File.exists?(Path.join(overlay.overlay_dir, "hello.txt"))
-      assert File.read!(Path.join(overlay.overlay_dir, "hello.txt")) == "original"
-      assert File.exists?(Path.join(overlay.overlay_dir, "lib/foo.ex"))
+      assert File.dir?(overlay.overlay_dir)
+      refute File.exists?(Path.join(overlay.overlay_dir, "hello.txt"))
+      refute File.exists?(Path.join(overlay.overlay_dir, "lib/foo.ex"))
 
       Overlay.cleanup(overlay)
     end
 
-    test "skips _build and .git directories", %{project: project} do
-      File.mkdir_p!(Path.join(project, "_build/dev"))
-      File.write!(Path.join(project, "_build/dev/compiled.beam"), "beam")
-      File.mkdir_p!(Path.join(project, ".git/objects"))
-      File.write!(Path.join(project, ".git/HEAD"), "ref: refs/heads/main")
+    test "does not copy generated and cache directories", %{project: project} do
+      for dir <- [
+            "_build/dev",
+            ".git/objects",
+            ".elixir_ls",
+            ".expert",
+            ".zig-cache",
+            "zig/.zig-cache",
+            "node_modules/pkg",
+            ".hex/cache"
+          ] do
+        File.mkdir_p!(Path.join(project, dir))
+        File.write!(Path.join([project, dir, "cache.bin"]), "cache")
+      end
 
       {:ok, overlay} = Overlay.create(project)
 
-      refute File.exists?(Path.join(overlay.overlay_dir, "_build"))
-      refute File.exists?(Path.join(overlay.overlay_dir, ".git"))
-
-      Overlay.cleanup(overlay)
-    end
-
-    test "symlinks deps directory", %{project: project} do
-      File.mkdir_p!(Path.join(project, "deps/some_dep"))
-      File.write!(Path.join(project, "deps/some_dep/mix.exs"), "dep")
-
-      {:ok, overlay} = Overlay.create(project)
-
-      deps_path = Path.join(overlay.overlay_dir, "deps")
-      assert {:ok, %{type: :symlink}} = File.lstat(deps_path)
-      assert File.read!(Path.join(deps_path, "some_dep/mix.exs")) == "dep"
+      for dir <- [
+            "_build",
+            ".git",
+            ".elixir_ls",
+            ".expert",
+            ".zig-cache",
+            "zig",
+            "node_modules",
+            ".hex"
+          ] do
+        refute File.exists?(Path.join(overlay.overlay_dir, dir))
+      end
 
       Overlay.cleanup(overlay)
     end
@@ -59,14 +65,109 @@ defmodule Minga.Core.OverlayTest do
     end
   end
 
+  describe "materialize_project/1" do
+    test "copies source files only when command execution needs a writable view", %{
+      project: project
+    } do
+      {:ok, overlay} = Overlay.create(project)
+
+      assert {:ok, %{copied_files: copied_files, copied_bytes: copied_bytes}} =
+               Overlay.materialize_project(overlay)
+
+      assert copied_files >= 2
+      assert copied_bytes > 0
+      assert File.read!(Path.join(overlay.overlay_dir, "hello.txt")) == "original"
+      assert File.exists?(Path.join(overlay.overlay_dir, "lib/foo.ex"))
+
+      Overlay.cleanup(overlay)
+    end
+
+    test "skips cache directories during command materialization", %{project: project} do
+      File.mkdir_p!(Path.join(project, "_build/dev"))
+      File.write!(Path.join(project, "_build/dev/compiled.beam"), "beam")
+      File.mkdir_p!(Path.join(project, ".expert"))
+      File.write!(Path.join(project, ".expert/index"), "index")
+      File.mkdir_p!(Path.join(project, "zig/.zig-cache"))
+      File.write!(Path.join(project, "zig/.zig-cache/cache.bin"), "cache")
+      File.mkdir_p!(Path.join(project, "deps/some_dep/lib"))
+      File.write!(Path.join(project, "deps/some_dep/lib/real.ex"), "dep")
+
+      {:ok, overlay} = Overlay.create(project)
+      assert {:ok, _stats} = Overlay.materialize_project(overlay)
+
+      refute File.exists?(Path.join(overlay.overlay_dir, "_build"))
+      refute File.exists?(Path.join(overlay.overlay_dir, ".expert"))
+      assert File.dir?(Path.join(overlay.overlay_dir, "zig"))
+      refute File.exists?(Path.join(overlay.overlay_dir, "zig/.zig-cache"))
+      refute File.exists?(Path.join(overlay.overlay_dir, "deps"))
+
+      Overlay.cleanup(overlay)
+    end
+
+    test "keeps materialized edits and tombstones over project files", %{project: project} do
+      {:ok, overlay} = Overlay.create(project)
+
+      :ok = Overlay.materialize_file(overlay, "hello.txt", "changed")
+      :ok = Overlay.delete_file(overlay, "lib/foo.ex")
+      assert {:ok, _stats} = Overlay.materialize_project(overlay)
+
+      assert File.read!(Path.join(overlay.overlay_dir, "hello.txt")) == "changed"
+      refute File.exists?(Path.join(overlay.overlay_dir, "lib/foo.ex"))
+      assert File.read!(Path.join(project, "hello.txt")) == "original"
+
+      Overlay.cleanup(overlay)
+    end
+
+    test "rejects overlay directory symlinks before materializing", %{project: project} do
+      outside =
+        Path.join(System.tmp_dir!(), "overlay-outside-#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(outside)
+      {:ok, overlay} = Overlay.create(project)
+      File.ln_s!(outside, Path.join(overlay.overlay_dir, "lib"))
+
+      assert {:error, :symlink_traversal} = Overlay.materialize_project(overlay)
+      refute File.exists?(Path.join(outside, "foo.ex"))
+
+      Overlay.cleanup(overlay)
+      File.rm_rf!(outside)
+    end
+
+    test "rejects overlay file symlinks before materializing", %{project: project} do
+      outside =
+        Path.join(System.tmp_dir!(), "overlay-outside-#{System.unique_integer([:positive])}.txt")
+
+      {:ok, overlay} = Overlay.create(project)
+      File.ln_s!(outside, Path.join(overlay.overlay_dir, "hello.txt"))
+
+      assert {:error, :symlink_traversal} = Overlay.materialize_project(overlay)
+      refute File.exists?(outside)
+
+      Overlay.cleanup(overlay)
+    end
+
+    test "rejects overlay file symlinks to existing targets", %{project: project} do
+      outside =
+        Path.join(System.tmp_dir!(), "overlay-outside-#{System.unique_integer([:positive])}.txt")
+
+      File.write!(outside, "outside")
+      {:ok, overlay} = Overlay.create(project)
+      File.ln_s!(outside, Path.join(overlay.overlay_dir, "hello.txt"))
+
+      assert {:error, :symlink_traversal} = Overlay.materialize_project(overlay)
+      assert File.read!(outside) == "outside"
+
+      Overlay.cleanup(overlay)
+      File.rm!(outside)
+    end
+  end
+
   describe "materialize_file/3" do
-    test "replaces hardlink with new content", %{project: project} do
+    test "writes new content without touching the project root", %{project: project} do
       {:ok, overlay} = Overlay.create(project)
 
       :ok = Overlay.materialize_file(overlay, "hello.txt", "modified")
       assert File.read!(Path.join(overlay.overlay_dir, "hello.txt")) == "modified"
-
-      # Original is untouched
       assert File.read!(Path.join(project, "hello.txt")) == "original"
 
       Overlay.cleanup(overlay)
@@ -104,28 +205,47 @@ defmodule Minga.Core.OverlayTest do
       Overlay.cleanup(overlay)
     end
 
-    test "rejects writes through symlinked directories", %{project: project} do
+    test "rejects tombstone-suffix paths", %{project: project} do
+      {:ok, overlay} = Overlay.create(project)
+
+      assert {:error, :invalid_path} =
+               Overlay.materialize_file(overlay, "ghost.__changeset_deleted__", "updated")
+
+      assert {:error, :invalid_path} =
+               Overlay.materialize_file(
+                 overlay,
+                 "nested/ghost.__changeset_deleted__/file.txt",
+                 "updated"
+               )
+
+      assert {:error, :invalid_path} =
+               Overlay.delete_file(overlay, "nested/ghost.__changeset_deleted__/file.txt")
+
+      Overlay.cleanup(overlay)
+    end
+
+    test "materializes dependency paths instead of writing through to deps", %{project: project} do
       dep_file = Path.join(project, "deps/some_dep/lib/real.ex")
       File.mkdir_p!(Path.dirname(dep_file))
       File.write!(dep_file, "original_dep")
       {:ok, overlay} = Overlay.create(project)
 
-      assert {:error, :symlink_traversal} =
-               Overlay.materialize_file(overlay, "deps/some_dep/lib/real.ex", "mutated")
-
+      assert :ok = Overlay.materialize_file(overlay, "deps/some_dep/lib/real.ex", "mutated")
       assert File.read!(dep_file) == "original_dep"
+      assert File.read!(Path.join(overlay.overlay_dir, "deps/some_dep/lib/real.ex")) == "mutated"
 
       Overlay.cleanup(overlay)
     end
   end
 
   describe "delete_file/2" do
-    test "removes file and writes tombstone marker", %{project: project} do
+    test "writes tombstone for a lazy project-root file", %{project: project} do
       {:ok, overlay} = Overlay.create(project)
 
       :ok = Overlay.delete_file(overlay, "hello.txt")
       refute File.exists?(Path.join(overlay.overlay_dir, "hello.txt"))
       assert Overlay.deleted?(overlay, "hello.txt")
+      assert File.exists?(Path.join(project, "hello.txt"))
 
       Overlay.cleanup(overlay)
     end
@@ -133,9 +253,7 @@ defmodule Minga.Core.OverlayTest do
     test "deleted? raises for traversal that escapes the overlay", %{project: project} do
       {:ok, overlay} = Overlay.create(project)
 
-      assert_raise ArgumentError, fn ->
-        Overlay.deleted?(overlay, "../hello.txt")
-      end
+      assert_raise ArgumentError, fn -> Overlay.deleted?(overlay, "../hello.txt") end
 
       Overlay.cleanup(overlay)
     end
@@ -156,23 +274,20 @@ defmodule Minga.Core.OverlayTest do
       Overlay.cleanup(overlay)
     end
 
-    test "rejects deletion through symlinked directories", %{project: project} do
-      dep_file = Path.join(project, "deps/some_dep/lib/real.ex")
-      File.mkdir_p!(Path.dirname(dep_file))
-      File.write!(dep_file, "original_dep")
+    test "rejects tombstone-suffix paths", %{project: project} do
       {:ok, overlay} = Overlay.create(project)
 
-      assert {:error, :symlink_traversal} =
-               Overlay.delete_file(overlay, "deps/some_dep/lib/real.ex")
+      assert {:error, :invalid_path} = Overlay.delete_file(overlay, "ghost.__changeset_deleted__")
 
-      assert File.exists?(dep_file)
+      assert {:error, :invalid_path} =
+               Overlay.delete_file(overlay, "nested/ghost.__changeset_deleted__/file.txt")
 
       Overlay.cleanup(overlay)
     end
   end
 
   describe "modified?/2" do
-    test "returns false for unmodified files", %{project: project} do
+    test "returns false for unmaterialized project files", %{project: project} do
       {:ok, overlay} = Overlay.create(project)
 
       refute Overlay.modified?(overlay, "hello.txt")
@@ -198,12 +313,34 @@ defmodule Minga.Core.OverlayTest do
       Overlay.cleanup(overlay)
     end
 
+    test "returns true for deleted files", %{project: project} do
+      {:ok, overlay} = Overlay.create(project)
+
+      :ok = Overlay.delete_file(overlay, "hello.txt")
+      assert Overlay.modified?(overlay, "hello.txt")
+
+      Overlay.cleanup(overlay)
+    end
+
     test "raises for traversal that escapes the overlay", %{project: project} do
       {:ok, overlay} = Overlay.create(project)
 
-      assert_raise ArgumentError, fn ->
-        Overlay.modified?(overlay, "../hello.txt")
-      end
+      assert_raise ArgumentError, fn -> Overlay.modified?(overlay, "../hello.txt") end
+
+      Overlay.cleanup(overlay)
+    end
+  end
+
+  describe "list_directory/2" do
+    test "merges project files, overlay files, and tombstones", %{project: project} do
+      {:ok, overlay} = Overlay.create(project)
+
+      :ok = Overlay.materialize_file(overlay, "lib/new.ex", "new")
+      :ok = Overlay.delete_file(overlay, "lib/foo.ex")
+
+      assert {:ok, entries} = Overlay.list_directory(overlay, "lib")
+      assert %{name: "new.ex", type: :file} in entries
+      refute Enum.any?(entries, &(&1.name == "foo.ex"))
 
       Overlay.cleanup(overlay)
     end
@@ -229,17 +366,6 @@ defmodule Minga.Core.OverlayTest do
       assert File.dir?(overlay.overlay_dir)
 
       Overlay.cleanup(overlay)
-      refute File.dir?(overlay.overlay_dir)
-    end
-
-    test "handles symlinked deps without following into project", %{project: project} do
-      File.mkdir_p!(Path.join(project, "deps/some_dep"))
-
-      {:ok, overlay} = Overlay.create(project)
-      Overlay.cleanup(overlay)
-
-      # Project deps still exist
-      assert File.dir?(Path.join(project, "deps/some_dep"))
       refute File.dir?(overlay.overlay_dir)
     end
   end

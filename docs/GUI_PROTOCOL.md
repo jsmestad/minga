@@ -68,7 +68,7 @@ The BEAM-side encoder must use a documented length-prefixed envelope for all new
 
 ### 0xA3 — gui_extension_runtime
 
-Frontend extensions receive opaque runtime messages through a generic envelope. The shared protocol identifies the extension and channel; the payload bytes are owned by that extension's frontend adapter and must not require shared protocol structs or generated Board-specific frontend paths.
+Frontend extensions receive opaque runtime messages through a generic envelope. The shared protocol identifies the extension and channel; the payload bytes are owned by that extension's frontend adapter and must not require shared protocol structs or generated extension-specific frontend paths.
 
 ```
 opcode(1) + payload_len(4) + payload(payload_len)
@@ -77,9 +77,9 @@ Payload:
   extension_id_len(2) + extension_id(extension_id_len) + channel_len(2) + channel(channel_len) + extension_payload
 ```
 
-`extension_id` is the stable bundled or installed extension id, for example `minga_board`. `channel` is an extension-owned routing key, for example `board`. `extension_payload` is intentionally opaque to shared frontend code; a frontend that has a registered runtime decoder for the extension may decode it, and a frontend without one should ignore the message without crashing.
+`extension_id` is the stable bundled or installed extension id, for example `minga_tasks`. `channel` is an extension-owned routing key, for example `tasks`. `extension_payload` is intentionally opaque to shared frontend code; a frontend that has a registered runtime decoder for the extension may decode it, and a frontend without one should ignore the message without crashing.
 
-This envelope is for extension-owned runtime state such as bundled Board chrome. New shared chrome should still use a normal Semantic UI opcode instead of hiding shared product contracts inside extension payloads.
+This envelope is for extension-owned runtime state. New shared chrome should still use a normal Semantic UI opcode instead of hiding shared product contracts inside extension payloads.
 
 ### 0x9F — gui_sidebars
 
@@ -141,7 +141,9 @@ Payload v2:
 Payload v1, kept for decoder compatibility, omitted `tree_state` and `error_reason`. Frontends should derive v1 state from `visible` and `empty`, but all new BEAM payloads use v2.
 
 Per row:
-  path_hash(4) + row_flags(2) + depth(1) + git_status(1) + diagnostic_error_count(2) + diagnostic_warning_count(2) + diagnostic_info_count(2) + diagnostic_hint_count(2) + guide_count(1) + guides(guide_count) + id_len(2) + id(id_len) + path_len(2) + path(path_len) + rel_path_len(2) + rel_path(rel_path_len) + name_len(2) + name(name_len) + icon_len(1) + icon(icon_len) + editing_type(1) + editing_text_len(2) + editing_text(editing_text_len) + icon_color(3)
+  path_hash(4) + row_flags(2) + depth(1) + git_status(1) + diagnostic_error_count(2) + diagnostic_warning_count(2) + diagnostic_info_count(2) + diagnostic_hint_count(2) + guide_count(1) + guides(guide_count) + id_len(2) + id(id_len) + path_len(2) + path(path_len) + rel_path_len(2) + rel_path(rel_path_len) + name_len(2) + name(name_len) + icon_len(1) + icon(icon_len) + editing_type(1) + editing_text_len(2) + editing_text(editing_text_len) + icon_color(3) + heat_level(1)
+
+`heat_level` is an extension-contributed familiarity or heat bucket. Values `0..4` represent cold to warm, and `0xFF` means no heat decoration.
 
 Tree flag bits:
   bit 0: visible
@@ -572,7 +574,7 @@ Filter preset values:
   0x00 = none (user controls filters), 0x01 = warnings (preset to warnings+errors)
 
 Messages content_payload (when active tab is messages):
-  entry_count(2) + entries...
+  stream_instance(4) + entry_count(2) + entries...
 
 Per entry:
   id(4) + level(1) + subsystem(1) + timestamp_secs(4) + path_len(2) + path(path_len) + text_len(2) + text(text_len)
@@ -580,7 +582,7 @@ Per entry:
 Level bytes: 0=debug, 1=info, 2=warning, 3=error
 Subsystem bytes: 0=editor, 1=lsp, 2=parser, 3=git, 4=render, 5=agent, 6=zig, 7=gui
 
-Entries are sent incrementally: the BEAM tracks the last sent ID and only sends new entries each frame. On first connection (or reconnect), all entries are sent.
+Entries are sent incrementally: the BEAM tracks the last sent ID and only sends new entries each frame. `stream_instance` is a producer-assigned u32 that changes when the Messages producer is recreated, and frontends compose row identity from `(stream_instance, id)`. On first connection (or reconnect), all entries are sent.
 
 When hidden:
   opcode(1) + 0(1)
@@ -706,6 +708,7 @@ A full 0x80 message is sent for the first frame, epoch changes, full refreshes, 
 | 0x07 | LineAnnotations | annotation_count + annotations |
 | 0x08 | PaneGeometry | window-scoped pane geometry, viewport summary, gutter metrics, and hit regions |
 | 0x09 | Cursorline | window-local cursorline row and background color |
+| 0x0A | ScrollPresentation | metadata for safe client-local presentation scrolling and reconciliation |
 
 ```
 opcode(1) + section_count(1) + sections...
@@ -769,6 +772,14 @@ Line annotations section:
 Cursorline section:
   local_row(2) + r(1) + g(1) + b(1)
 
+ScrollPresentation section:
+  window_id(2) + flags(1) + anchor_top(4) + anchor_left(2) + anchor_visual_row_offset(2)
+  + visible_start_line(4) + visible_end_line(4) + overscan_start_line(4) + overscan_end_line(4)
+  + content_epoch(4) + layout_generation(4)
+
+ScrollPresentation flags:
+  bit 0: reset_required. The client must discard any local presentation offset, velocity, and reconciliation target before using this frame as a new anchor.
+
 Pane geometry section:
   window_id(2)
   total_rect(8) + content_rect(8) + text_rect(8) + gutter_rect(8) + clip_rect(8)
@@ -778,6 +789,12 @@ Pane geometry section:
 
 Rects are cell-space tuples encoded as row(2), col(2), width(2), height(2). Hit region kinds are 1=text, 2=gutter, 3=fold_control, 4=modeline, 5=divider, 6=status_bar. Swift converts these rects to pixels, but pane ownership and input targets come from the BEAM-authored geometry.
 ```
+
+The `ScrollPresentation` section is the shared contract for local scroll feel. The BEAM commits an anchor (`anchor_top`, `anchor_left`, `anchor_visual_row_offset`) and identifies the row/content/layout basis for that anchor with the frame transaction, `content_epoch`, row IDs/content hashes, and `layout_generation`. The frontend may keep ephemeral presentation state (local offset, velocity or momentum, overscan consumption, and reconciliation target) derived from this section, but that state is not editor state and may be discarded at any time. `visible_end_line` and `overscan_end_line` are exclusive bounds, so the visible and overscan line ranges are half-open: `start_line <= line < end_line`. Local presentation scroll is safe only inside `clip_rect` and only while the needed rows are already committed or retained inside `overscan_start_line..overscan_end_line`; when the range is only the visible range, the client must not expose blank space by extrapolating beyond cached rows.
+
+Pointer input during local scroll must be normalized through the current presentation transform before it is sent to the BEAM. If a frontend cannot normalize locally, it must carry enough frame and presentation-offset information in the input path before enabling local scroll. The BEAM continues to interpret input against its committed viewport and hit regions, so there is no undefined middle state for click, drag, wheel, or hover.
+
+The scroll compositor state machine is: start with the last clean committed frame as the anchor, apply local presentation offsets only while the clip and overscan contract can cover the motion, send scroll intent to the BEAM, reconcile toward the next committed anchor when a valid frame arrives, and reset immediately on `reset_required`, keyframe/base-frame mismatch, resize, file switch, edit/content epoch change, font or line-spacing change, wrapping/fold change, layout generation change, or any retained-row miss. Small drift may be smoothed by the frontend; structural invalidation must snap predictably to the committed BEAM frame.
 
 The frontend renders selection and search matches as Metal quads behind text (not baked into line textures). This enables zero re-rasterization when the selection changes. Diagnostic underlines are rendered as quads after text.
 

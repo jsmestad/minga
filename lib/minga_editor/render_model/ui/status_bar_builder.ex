@@ -15,7 +15,7 @@ defmodule MingaEditor.RenderModel.UI.StatusBarBuilder do
   alias MingaEditor.Session.ChromeState
   alias MingaEditor.Session.ChromeState.WorkspaceSummary
   alias MingaEditor.StatusBar.Data, as: StatusBarData
-  alias MingaEditor.UI.Devicon
+  alias Minga.Language.Devicon
 
   @spec build(StatusBarData.t(), term(), term()) :: StatusBar.t()
   def build(status_bar_data, theme, ctx) do

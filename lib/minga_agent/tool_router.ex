@@ -167,14 +167,21 @@ defmodule MingaAgent.ToolRouter do
     end)
   end
 
+  def list_directory(%Context{changeset: cs}, path) when cs != nil and is_pid(cs) do
+    with :ok <- changeset_available(cs),
+         {:ok, relative_path} <- normalize_changeset_path(cs, path, true) do
+      Changeset.list_directory(cs, relative_path)
+    end
+  end
+
   def list_directory(%Context{}, _path), do: :passthrough
 
   @doc "Returns the filesystem path corresponding to `path` in the routed view."
   @spec filesystem_path(context(), String.t()) :: String.t()
   def filesystem_path(%Context{project_view: %ProjectView{} = view}, path) do
-    case ProjectView.working_dir(view) do
+    case ProjectView.prepare_working_dir(view) do
+      {:ok, cwd} -> Path.expand(project_view_relative_path(view, path), cwd)
       {:error, _reason} -> path
-      cwd -> Path.join(cwd, project_view_relative_path(view, path))
     end
   end
 
@@ -183,15 +190,18 @@ defmodule MingaAgent.ToolRouter do
   @doc "Returns the working directory for shell commands."
   @spec working_dir(context()) :: String.t() | nil
   def working_dir(%Context{project_view: %ProjectView{} = view}) do
-    case ProjectView.working_dir(view) do
+    case ProjectView.prepare_working_dir(view) do
+      {:ok, cwd} -> cwd
       {:error, _reason} -> nil
-      cwd -> cwd
     end
   end
 
   def working_dir(%Context{changeset: cs}) when cs != nil and is_pid(cs) do
     try do
-      Changeset.overlay_path(cs)
+      case Changeset.prepare_working_dir(cs) do
+        {:ok, cwd} -> cwd
+        {:error, _reason} -> nil
+      end
     catch
       :exit, _ -> nil
     end
@@ -213,11 +223,21 @@ defmodule MingaAgent.ToolRouter do
   @doc "Returns the filesystem path for search tools, or a tagged error if ProjectView is unavailable."
   @spec filesystem_path_result(context(), String.t()) :: {:ok, String.t()} | {:error, term()}
   def filesystem_path_result(%Context{project_view: %ProjectView{} = view}, path) do
-    case project_view_result(fn -> ProjectView.working_dir(view) end) do
-      {:ok, cwd} -> {:ok, Path.join(cwd, project_view_relative_path(view, path))}
-      cwd when is_binary(cwd) -> {:ok, Path.join(cwd, project_view_relative_path(view, path))}
+    case project_view_result(fn -> ProjectView.prepare_working_dir(view) end) do
+      {:ok, cwd} -> {:ok, Path.expand(project_view_relative_path(view, path), cwd)}
       {:error, {:project_view_unavailable, _}} = error -> error
       {:error, reason} -> {:error, {:project_view_unavailable, {:working_dir_failed, reason}}}
+    end
+  end
+
+  def filesystem_path_result(%Context{changeset: cs}, path) when cs != nil and is_pid(cs) do
+    try do
+      with {:ok, cwd} <- Changeset.prepare_working_dir(cs),
+           {:ok, relative_path} <- normalize_changeset_path(cs, path, true) do
+        {:ok, Path.expand(relative_path, cwd)}
+      end
+    catch
+      :exit, reason -> {:error, {:changeset_unavailable, reason}}
     end
   end
 
@@ -226,9 +246,8 @@ defmodule MingaAgent.ToolRouter do
   @doc "Returns the working directory for shell commands, or a tagged error if ProjectView is unavailable."
   @spec working_dir_result(context()) :: {:ok, String.t() | nil} | {:error, term()}
   def working_dir_result(%Context{project_view: %ProjectView{} = view}) do
-    case project_view_result(fn -> ProjectView.working_dir(view) end) do
+    case project_view_result(fn -> ProjectView.prepare_working_dir(view) end) do
       {:ok, cwd} -> {:ok, cwd}
-      cwd when is_binary(cwd) -> {:ok, cwd}
       {:error, {:project_view_unavailable, _}} = error -> error
       {:error, reason} -> {:error, {:project_view_unavailable, {:working_dir_failed, reason}}}
     end
@@ -236,7 +255,7 @@ defmodule MingaAgent.ToolRouter do
 
   def working_dir_result(%Context{changeset: cs}) when cs != nil and is_pid(cs) do
     try do
-      {:ok, Changeset.overlay_path(cs)}
+      Changeset.prepare_working_dir(cs)
     catch
       :exit, reason -> {:error, {:changeset_unavailable, reason}}
     end
@@ -442,13 +461,32 @@ defmodule MingaAgent.ToolRouter do
     |> String.trim_leading("./")
   end
 
+  @spec normalize_changeset_path(pid(), String.t(), boolean()) ::
+          {:ok, String.t()} | {:error, :invalid_path | :path_traversal}
+  defp normalize_changeset_path(cs, path, allow_root?) do
+    root = Changeset.project_root(cs)
+    target = Path.expand(path, root)
+    normalize_changeset_target(root, target, allow_root?)
+  end
+
+  @spec normalize_changeset_target(String.t(), String.t(), boolean()) ::
+          {:ok, String.t()} | {:error, :invalid_path | :path_traversal}
+  defp normalize_changeset_target(root, root, true), do: {:ok, "."}
+  defp normalize_changeset_target(root, root, false), do: {:error, :invalid_path}
+
+  defp normalize_changeset_target(root, target, _allow_root?) do
+    if String.starts_with?(target, root <> "/") do
+      {:ok, Path.relative_to(target, root)}
+    else
+      {:error, :path_traversal}
+    end
+  end
+
   @spec normalize_path(pid(), String.t()) :: String.t()
   defp normalize_path(cs, path) do
-    root = Changeset.project_root(cs)
-
-    path
-    |> Path.relative_to(root)
-    |> String.trim_leading("/")
-    |> String.trim_leading("./")
+    case normalize_changeset_path(cs, path, false) do
+      {:ok, relative_path} -> relative_path
+      {:error, _reason} -> Path.relative_to(path, Changeset.project_root(cs))
+    end
   end
 end

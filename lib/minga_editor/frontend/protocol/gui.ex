@@ -132,7 +132,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
   alias Minga.Language
-  alias MingaEditor.UI.Devicon
+  alias Minga.Language.Devicon
   alias MingaEditor.UI.Notification
   alias MingaEditor.UI.NotificationCenter
   alias MingaEditor.UI.Theme
@@ -1590,10 +1590,11 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   Per row:
 
-      stable_hash(4) + row_flags(2) + depth(1) + git_status(1) + diagnostics(8) + guide_count(1) + guides + id + path + rel_path + name + icon + editing_type(1) + editing_text + icon_color(3)
+      stable_hash(4) + row_flags(2) + depth(1) + git_status(1) + diagnostics(8) + guide_count(1) + guides + id + path + rel_path + name + icon + editing_type(1) + editing_text + icon_color(3) + heat_level(1)
 
   String fields use uint16 byte lengths except icon, which uses a uint8 byte length.
-  `icon_color` is three bytes (R, G, B), following the editing payload.
+  `icon_color` is three bytes (R, G, B), following the editing payload. `heat_level`
+  is one trailing byte: an extension familiarity/heat bucket 0..4, or 0xFF for none.
   """
   @type file_tree_status :: FileTreeState.tree_status()
 
@@ -1663,9 +1664,15 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
       encode_string8(icon),
       <<editing_type::8>>,
       encode_string16(editing_text),
-      <<icon_r::8, icon_g::8, icon_b::8>>
+      <<icon_r::8, icon_g::8, icon_b::8>>,
+      <<encode_file_tree_heat_level(row.heat_level)::8>>
     ]
   end
+
+  # Familiarity/heat bucket 0..4, or 0xFF for "no decoration".
+  @spec encode_file_tree_heat_level(0..4 | nil) :: non_neg_integer()
+  defp encode_file_tree_heat_level(nil), do: 0xFF
+  defp encode_file_tree_heat_level(level) when level in 0..4, do: level
 
   @spec clamp_file_tree_diagnostics(FileTreeDiagnostics.counts()) :: FileTreeDiagnostics.counts()
   defp clamp_file_tree_diagnostics({errors, warnings, info, hints}) do
@@ -1875,7 +1882,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     {error_count, warning_count, info_count, hint_count} = full_diagnostic_counts(d)
     macro_byte = encode_macro_recording(d.macro_recording)
     {git_added, git_modified, git_deleted} = git_diff_counts(d)
-    {icon, icon_color} = MingaEditor.UI.Devicon.icon_and_color(d.filetype)
+    {icon, icon_color} = Minga.Language.Devicon.icon_and_color(d.filetype)
     icon_bytes = :erlang.iolist_to_binary([icon])
     icon_r = icon_color >>> 16 &&& 0xFF
     icon_g = icon_color >>> 8 &&& 0xFF

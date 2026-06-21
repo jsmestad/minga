@@ -363,7 +363,7 @@ defmodule Minga.Extension do
   ## Examples
 
       load_policy :deferred
-      load_policy {:on_command, [:toggle_board]}
+      load_policy {:on_command, [:open_tasks]}
   """
   defmacro load_policy(policy) do
     quote do

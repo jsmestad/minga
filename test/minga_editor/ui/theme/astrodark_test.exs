@@ -63,9 +63,31 @@ defmodule MingaEditor.UI.Theme.AstroDarkTest do
     assert theme.syntax["comment"] == [fg: p.syn_comment, italic: true]
     assert theme.syntax["operator"] == [fg: p.syn_text]
     assert theme.syntax["variable.parameter"] == [fg: p.syn_text]
-    assert theme.syntax["property"] == [fg: p.syn_text]
+    assert theme.syntax["property"] == [fg: p.syn_purple]
     assert theme.syntax["field"] == [fg: p.syn_text]
     assert theme.syntax["string.regex"] == [fg: p.syn_red]
+  end
+
+  test "gives config-document keys (@property) a visible accent distinct from editor fg" do
+    theme = Theme.get!(:astrodark)
+    p = @palette
+
+    # Config/document keys (YAML, JSON, TOML, ...) capture as @property and get a
+    # visible accent so key-heavy files stay readable, matching nvim-treesitter.
+    assert theme.syntax["property"] == [fg: p.syn_purple]
+
+    # The accent must differ from the editor's default foreground (@syn_text);
+    # otherwise keys would render as plain text (the bug we fixed).
+    refute theme.syntax["property"] == [fg: p.syn_text]
+    assert p.syn_purple != p.syn_text
+
+    # Code member access stays muted on the editor foreground, so we did not
+    # broaden scope to recoloring struct/field access in code.
+    assert theme.syntax["variable.member"] == [fg: p.syn_text]
+    assert theme.syntax["field"] == [fg: p.syn_text]
+
+    # The legacy YAML-specific capture no longer exists.
+    refute Map.has_key?(theme.syntax, "property.yaml")
   end
 
   describe "icon_color/2" do

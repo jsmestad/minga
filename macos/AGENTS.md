@@ -170,6 +170,8 @@ Each SwiftUI chrome element follows the **State + View** pattern:
 
 This is the "dumb renderer" principle in practice: the view never decides what to show. It renders what the State says. The State never decides what data to hold. It stores what the BEAM sent.
 
+`FrameState` (the renderer's per-frame grid metadata) follows the same rule: **`CommandDispatcher` is the single writer; views only read.** Most `FrameState` fields come straight from protocol opcodes. The one carve-out is the cell-grid dimensions (`cols`/`rows`): they are genuinely view-derived because they depend on the NSView's pixel size and font metrics, which the BEAM cannot know. Even so, the view does not write them directly. View-originated updates funnel through `CommandDispatcher.applyViewportResize(newCols:newRows:)`, and the dirty flag is cleared by `CommandDispatcher.markRendered()` after the view consumes a frame. With one writer, every `FrameState` mutation has one place to add logging, ordering checks, or BEAM coordination, regardless of whether the trigger is a protocol opcode or an AppKit event. The view still sends the `sendReady`/`sendResize` event itself, since that is a view-to-BEAM event, not a state write.
+
 ### GUIState is the container, not a god object
 
 `GUIState` holds all sub-states as `let` properties (not a flat bag of fields). Each sub-state is independently observable. Adding a new chrome element means adding one State class, one View, and one `let` property on `GUIState`. No existing code changes.

@@ -397,7 +397,7 @@ Interactive sidebars use the same ownership rule. An extension registers stable 
 
 Cleanup is best-effort across every family. If command cleanup fails, keymaps, scopes, input handlers, language data, themes, tool recipes, modeline segments, sidebars, and feature-owned UI state still get their cleanup pass. Minga reports the cleanup failures instead of hiding them, because stale extension state is worse than a noisy reload.
 
-This ownership layer is the gate for large built-in feature extraction. Language packs, theme packs, tool recipe packs, Dired, FileTree, Git UI, Board, and Agent pieces should move out of core only after they can register through these source-owned paths. Without ownership, reloads leave stale commands or catalog entries behind.
+This ownership layer is the gate for large built-in feature extraction. Language packs, theme packs, tool recipe packs, Dired, FileTree, Git UI, and Agent pieces should move out of core only after they can register through these source-owned paths. Without ownership, reloads leave stale commands or catalog entries behind.
 
 ### The imperative path (for runtime-dynamic contributions)
 

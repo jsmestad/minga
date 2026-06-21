@@ -110,6 +110,17 @@ set :modeline_left_segments, [:mode, :filename, :position, :git]
 set :modeline_right_segments, [:diagnostics, :lsp, :filetype]
 ```
 
+### Agent status command
+
+Set `:agent_status_command` to replace the built-in `:agent` segment text with stdout from a shell command. Minga reruns it every `:agent_status_interval_ms` milliseconds, default `5000`; values below `1000` are treated as `1000`. Failed commands or empty output fall back to the built-in agent status and log one `*Messages*` entry.
+
+```elixir
+set :agent_status_command, ~s(echo "$MINGA_MODEL | $MINGA_STATUS")
+set :agent_status_interval_ms, 5_000
+```
+
+Available environment variables: `MINGA_SESSION_ID`, `MINGA_MODEL`, `MINGA_STATUS`, and `MINGA_WORKDIR`.
+
 ### Separator style
 
 `:modeline_separator` controls the glyph inserted between adjacent color zones.
@@ -185,6 +196,16 @@ Extension segments are removed automatically when the owning extension stops or 
 ### Responsive truncation
 
 Each segment has a priority. When the window is too narrow, Minga drops the lowest-priority visible segment first, then recalculates the line. Built-in priorities keep mode, filename, position, filetype, and diagnostics longer than parser, percent, and background-agent details. Custom segments default to priority `50`; pass `priority:` to make them more or less important.
+
+## Agent reactive diagnostics
+
+Minga can post a quiet agent-chat suggestion when saving a file introduces a new LSP error. This is off by default so the editor never talks over you unless you ask it to.
+
+```elixir
+set :agent_react_to_lsp_errors_on_save, true
+```
+
+When enabled, the agent chat gets the file, position, and diagnostic message. The suggestion stays in chat, so you can ask the agent to apply a fix, open chat to discuss it, or ignore the message to dismiss it.
 
 ## Agent tool approval
 

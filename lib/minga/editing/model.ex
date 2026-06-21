@@ -16,18 +16,11 @@ defmodule Minga.Editing.Model do
   The behaviour formalizes the contract so vim and CUA are peers, not
   special cases.
 
-  ## How it connects to NavigableContent
+  ## How it connects to commands
 
   The editing model produces command atoms (`:move_down`, `:delete_line`,
-  `{:insert_char, "x"}`). The command executor interprets these against
-  a `NavigableContent` implementation. The editing model doesn't know
-  what content type it's operating on; the NavigableContent adapter
-  handles the translation.
-
-  ```
-  Key → EditingModel.process_key → command atoms
-  Command atoms → Commands.execute → NavigableContent operations
-  ```
+  `{:insert_char, "x"}`). The command executor interprets those against
+  the active editor content.
 
   ## State ownership
 

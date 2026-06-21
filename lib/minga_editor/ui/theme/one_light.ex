@@ -126,7 +126,11 @@ defmodule MingaEditor.UI.Theme.OneLight do
       "parameter" => [fg: @mono_1],
       "variable.member" => [fg: @mono_1],
       "field" => [fg: @mono_1],
-      "property" => [fg: @mono_1],
+      # Config/document keys (YAML, JSON, TOML, ...) capture as @property. Give
+      # it a visible accent so key-heavy files stay readable. Code member access
+      # stays muted via @variable.member / @field above. Without this, @property
+      # would equal the editor foreground and keys would render as plain text.
+      "property" => [fg: @hue_3],
       "attribute" => [fg: @hue_6],
       "tag.attribute" => [fg: @hue_6],
       "escape" => [fg: @hue_1],

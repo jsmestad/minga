@@ -278,6 +278,10 @@ defmodule Minga.Editing.TextObject do
         case {start_pos, end_pos} do
           {nil, _} -> nil
           {_, nil} -> nil
+          # An empty pair (e.g. `()`) advances the start past the retreated end,
+          # producing an inverted range. There is no inner content, so report no
+          # range; `ci(` still enters insert via the mode transition.
+          {s, e} when s > e -> nil
           {s, e} -> {s, e}
         end
     end
@@ -1511,15 +1515,14 @@ defmodule Minga.Editing.TextObject do
   defp advance_position(buffer, {line, col}) do
     text = Readable.line_at(buffer, line) || ""
     next_byte = Unicode.next_grapheme_byte_offset(text, col)
+    next_line = Readable.line_at(buffer, line + 1)
 
-    if next_byte > col and next_byte < byte_size(text) do
+    if next_byte > col and (next_byte < byte_size(text) or next_line != nil) do
       {line, next_byte}
     else
-      next_line = line + 1
-
-      case Readable.line_at(buffer, next_line) do
+      case next_line do
         nil -> nil
-        _ -> {next_line, 0}
+        _ -> {line + 1, 0}
       end
     end
   end

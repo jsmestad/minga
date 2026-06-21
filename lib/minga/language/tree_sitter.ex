@@ -388,7 +388,6 @@ defmodule Minga.Language.TreeSitter do
       case query_type do
         :highlights -> "highlights.scm"
         :injections -> "injections.scm"
-        :locals -> "locals.scm"
         :folds -> "folds.scm"
       end
 
