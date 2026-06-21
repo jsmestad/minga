@@ -1635,24 +1635,13 @@ defmodule Minga.Extension.LifecycleContractTest do
         def init(_config), do: {:ok, %{}}
 
         @impl true
-        def child_spec(config) do
+        def child_spec(_config) do
           %{
             id: __MODULE__,
-            start: {__MODULE__, :start_link, [Keyword.fetch!(config, :parent_gate)]},
+            start: {Agent, :start_link, [fn -> :restart_start_race end]},
             restart: :permanent,
             type: :worker
           }
-        end
-
-        @spec start_link(pid()) :: {:ok, pid()} | {:error, term()}
-        def start_link(parent_gate) do
-          send(parent_gate, {:restart_child_start_blocked, self()})
-
-          receive do
-            :release_restart_child_start -> Agent.start_link(fn -> :restart_start_race end)
-          after
-            5_000 -> {:error, :restart_child_start_timeout}
-          end
         end
 
         @spec noop(map()) :: map()
@@ -1666,8 +1655,23 @@ defmodule Minga.Extension.LifecycleContractTest do
       :code.delete(Minga.TestExtensions.RestartStartRace)
     end)
 
-    :ok = ExtRegistry.register(ctx.registry, :restart_start_race, path, parent_gate: parent_pid)
+    :ok = ExtRegistry.register(ctx.registry, :restart_start_race, path, [])
     {:ok, entry} = ExtRegistry.get(ctx.registry, :restart_start_race)
+    lookup_gate = start_supervised!({Agent, fn -> false end})
+
+    before_restart_lookup = fn ->
+      if Agent.get_and_update(lookup_gate, fn seen? -> {seen?, true} end) do
+        :ok
+      else
+        send(parent_pid, {:restart_lookup_blocked, self()})
+
+        receive do
+          :release_restart_lookup -> :ok
+        after
+          5_000 -> raise "restart lookup test hook timed out"
+        end
+      end
+    end
 
     start_task =
       Task.async(fn ->
@@ -1677,12 +1681,11 @@ defmodule Minga.Extension.LifecycleContractTest do
           :restart_start_race,
           entry,
           command_registry: ctx.command_registry,
-          keymap: ctx.keymap
+          keymap: ctx.keymap,
+          test_hooks: %{before_restart_lookup: before_restart_lookup}
         )
       end)
 
-    assert_receive {:restart_child_start_blocked, start_supervisor_pid}, 1_000
-    send(start_supervisor_pid, :release_restart_child_start)
     assert {:ok, pid_a} = Task.await(start_task)
 
     assert_receive {:telemetry, [:minga, :extension, :lifecycle, :crash_restart_count],
@@ -1691,7 +1694,7 @@ defmodule Minga.Extension.LifecycleContractTest do
     pid_a_ref = Process.monitor(pid_a)
     Process.exit(pid_a, :kill)
     assert_receive {:DOWN, ^pid_a_ref, :process, ^pid_a, _reason}, 1_000
-    assert_receive {:restart_child_start_blocked, restart_supervisor_pid}, 1_000
+    assert_receive {:restart_lookup_blocked, restart_monitor_pid}, 1_000
 
     {:ok, stale_running_entry} = ExtRegistry.get(ctx.registry, :restart_start_race)
     assert stale_running_entry.status == :running
@@ -1701,7 +1704,7 @@ defmodule Minga.Extension.LifecycleContractTest do
                     %{count: 1}, %{extension: :restart_start_race, phase: :crash_restart_count}},
                    150
 
-    send(restart_supervisor_pid, :release_restart_child_start)
+    send(restart_monitor_pid, :release_restart_lookup)
 
     pid_b = wait_for_child_pid(ctx.supervisor, Minga.TestExtensions.RestartStartRace, pid_a)
 
@@ -1748,28 +1751,13 @@ defmodule Minga.Extension.LifecycleContractTest do
         def init(_config), do: {:ok, %{}}
 
         @impl true
-        def child_spec(config) do
+        def child_spec(_config) do
           %{
             id: __MODULE__,
-            start: {__MODULE__, :start_link, [Keyword.fetch!(config, :parent_gate)]},
+            start: {Agent, :start_link, [fn -> :restart_missing_replacement end]},
             restart: :permanent,
             type: :worker
           }
-        end
-
-        @spec start_link(pid()) :: {:ok, pid()} | {:error, term()}
-        def start_link(parent_gate) do
-          send(parent_gate, {:restart_missing_replacement_blocked, self()})
-
-          receive do
-            :release_restart_missing_replacement ->
-              Agent.start_link(fn -> :restart_missing_replacement end)
-
-            :fail_restart_missing_replacement ->
-              {:error, :restart_missing_replacement_failed}
-          after
-            5_000 -> {:error, :restart_missing_replacement_timeout}
-          end
         end
       end
       """)
@@ -1780,12 +1768,24 @@ defmodule Minga.Extension.LifecycleContractTest do
       :code.delete(Minga.TestExtensions.RestartMissingReplacement)
     end)
 
-    :ok =
-      ExtRegistry.register(ctx.registry, :restart_missing_replacement, path,
-        parent_gate: parent_pid
-      )
+    :ok = ExtRegistry.register(ctx.registry, :restart_missing_replacement, path, [])
 
     {:ok, entry} = ExtRegistry.get(ctx.registry, :restart_missing_replacement)
+    lookup_gate = start_supervised!({Agent, fn -> false end})
+
+    before_restart_lookup = fn ->
+      if Agent.get_and_update(lookup_gate, fn seen? -> {seen?, true} end) do
+        :ok
+      else
+        send(parent_pid, {:restart_missing_replacement_lookup_blocked, self()})
+
+        receive do
+          :release_restart_lookup -> :ok
+        after
+          5_000 -> raise "restart lookup test hook timed out"
+        end
+      end
+    end
 
     start_task =
       Task.async(fn ->
@@ -1795,18 +1795,17 @@ defmodule Minga.Extension.LifecycleContractTest do
           :restart_missing_replacement,
           entry,
           command_registry: ctx.command_registry,
-          keymap: ctx.keymap
+          keymap: ctx.keymap,
+          test_hooks: %{before_restart_lookup: before_restart_lookup}
         )
       end)
 
-    assert_receive {:restart_missing_replacement_blocked, start_supervisor_pid}, 1_000
-    send(start_supervisor_pid, :release_restart_missing_replacement)
     assert {:ok, pid} = Task.await(start_task)
 
     pid_ref = Process.monitor(pid)
     Process.exit(pid, :kill)
     assert_receive {:DOWN, ^pid_ref, :process, ^pid, _reason}, 1_000
-    assert_receive {:restart_missing_replacement_blocked, _replacement_supervisor_pid}, 1_000
+    assert_receive {:restart_missing_replacement_lookup_blocked, restart_monitor_pid}, 1_000
     previous_trap_exit = Process.flag(:trap_exit, true)
     Process.exit(Process.whereis(ctx.supervisor), :kill)
     assert_receive {:EXIT, _supervisor_pid, :killed}, 1_000
@@ -1820,6 +1819,8 @@ defmodule Minga.Extension.LifecycleContractTest do
                     %{count: 1},
                     %{extension: :restart_missing_replacement, phase: :crash_restart_count}},
                    150
+
+    send(restart_monitor_pid, :release_restart_lookup)
 
     crashed_entry =
       wait_for_entry_status(ctx.registry, :restart_missing_replacement, :crashed, 20)

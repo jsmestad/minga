@@ -1267,6 +1267,8 @@ defmodule Minga.Extension.Supervisor do
           non_neg_integer()
         ) :: :ok
   defp wait_for_active_monitor_child(monitor, excluded_pid, reason, count, attempts) do
+    run_test_hook(monitor.opts, :before_restart_lookup)
+
     case extension_child_pid(monitor.supervisor, monitor.module, excluded_pid) do
       {:ok, pid} ->
         handle_restarted_child(monitor, pid, count)

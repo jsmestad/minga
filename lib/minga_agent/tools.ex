@@ -873,6 +873,12 @@ defmodule MingaAgent.Tools do
             "type" => "boolean",
             "description" =>
               "When true, return immediately with a stable child session handle instead of waiting for the final response. Defaults to false."
+          },
+          "isolation" => %{
+            "type" => "string",
+            "enum" => ["worktree"],
+            "description" =>
+              "When set to worktree, run the foreground child in a fresh git worktree and preserve it only if the child changes it."
           }
         },
         "required" => ["task"]
@@ -883,6 +889,7 @@ defmodule MingaAgent.Tools do
           model: args["model"],
           provider: args["provider"],
           background: args["background"] == true,
+          isolation: args["isolation"],
           parent_session: parent_session
         )
       end
