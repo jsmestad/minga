@@ -3,8 +3,9 @@ defmodule MingaEditor.State.Search do
   Groups search-related fields from EditorState.
 
   Tracks the last search pattern and direction (for `n`/`N` repeat),
-  cached project-wide search results for the picker, and the GUI search
-  toolbar state (active, flags, replace mode).
+  the pending project-wide search query (read off the editor path by the
+  project search picker source), and the GUI search toolbar state (active,
+  flags, replace mode).
   """
 
   @typedoc "GUI search toolbar state. Non-nil means the toolbar is active."
@@ -18,13 +19,13 @@ defmodule MingaEditor.State.Search do
   @type t :: %__MODULE__{
           last_pattern: String.t() | nil,
           last_direction: Minga.Editing.Search.direction(),
-          project_results: [Minga.Project.ProjectSearch.match()],
+          project_query: String.t() | nil,
           gui_search: gui_search() | nil
         }
 
   defstruct last_pattern: nil,
             last_direction: :forward,
-            project_results: [],
+            project_query: nil,
             gui_search: nil
 
   @doc "Records the last search pattern and direction."
@@ -45,10 +46,10 @@ defmodule MingaEditor.State.Search do
     %{s | last_direction: direction}
   end
 
-  @doc "Replaces the cached project search results."
-  @spec set_project_results(t(), [Minga.Project.ProjectSearch.match()]) :: t()
-  def set_project_results(%__MODULE__{} = s, results) when is_list(results) do
-    %{s | project_results: results}
+  @doc "Stores the pending project-wide search query for the async picker source."
+  @spec set_project_query(t(), String.t()) :: t()
+  def set_project_query(%__MODULE__{} = s, query) when is_binary(query) do
+    %{s | project_query: query}
   end
 
   @doc "Activates the GUI search toolbar with the given flags."

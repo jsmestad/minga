@@ -87,6 +87,8 @@ defmodule Minga.Config.Options do
           | :agent_system_prompt
           | :agent_append_system_prompt
           | :agent_diff_size_threshold
+          | :agent_status_command
+          | :agent_status_interval_ms
           | :agent_max_turns
           | :agent_max_cost
           | :agent_api_base_url
@@ -99,6 +101,7 @@ defmodule Minga.Config.Options do
           | :agent_mention_max_file_size
           | :agent_notify_debounce
           | :agent_diagnostic_feedback
+          | :agent_react_to_lsp_errors_on_save
           | :agent_flush_before_shell
           | :confirm_quit
           | :line_spacing
@@ -316,6 +319,10 @@ defmodule Minga.Config.Options do
      "Additional text appended to the default agent system prompt."},
     {:agent_diff_size_threshold, :pos_integer, 1_048_576,
      "Maximum diff size shown inline before truncation or summarization."},
+    {:agent_status_command, :string_or_nil, nil,
+     "Shell command whose stdout replaces the built-in agent modeline status."},
+    {:agent_status_interval_ms, :pos_integer, 5_000,
+     "Milliseconds between agent status command runs. Values below 1000 are treated as 1000."},
     {:agent_max_turns, :pos_integer, 100, "Maximum number of turns allowed in an agent session."},
     {:agent_max_cost, :float_or_nil, nil, "Optional cost ceiling for an agent session."},
     {:agent_api_base_url, :string, "", "Base URL override for agent API requests."},
@@ -336,6 +343,8 @@ defmodule Minga.Config.Options do
      "Milliseconds used to debounce repeated agent notifications."},
     {:agent_diagnostic_feedback, :boolean, true,
      "Whether diagnostics are fed back into agent context."},
+    {:agent_react_to_lsp_errors_on_save, :boolean, false,
+     "Whether the agent posts a chat suggestion when saving introduces a new LSP error."},
     {:agent_flush_before_shell, :boolean, true,
      "Whether pending agent output flushes before shell tools run."},
     {:confirm_quit, :boolean, true,

@@ -621,6 +621,102 @@ func TestApplyWindowDeltaInvalidatesHashMismatchedRetainedRowRef(t *testing.T) {
 	}
 }
 
+func TestApplyWindowDeltaPreservesOverlayScrollPresentation(t *testing.T) {
+	model := New(80, 24, nil)
+	model.putWindow(protocol.WindowContent{
+		ID:           7,
+		ContentEpoch: 9,
+		ScrollSet:    true,
+		Scroll: protocol.ScrollPresentation{
+			WindowID:         7,
+			AnchorTop:        10,
+			AnchorLeft:       2,
+			VisibleStartLine: 10,
+			VisibleEndLine:   20,
+			ContentEpoch:     9,
+			LayoutGeneration: 11,
+		},
+	})
+
+	model.applyWindowDelta(protocol.WindowContent{
+		ID:            7,
+		ContentEpoch:  9,
+		CursorVisible: true,
+		CursorRow:     3,
+		CursorCol:     4,
+		CursorShape:   2,
+		Cursorline:    protocol.Cursorline{Visible: true, Row: 3, BG: 0x112233},
+	})
+
+	window := model.windows[7]
+	if !window.ScrollSet {
+		t.Fatal("overlay delta should preserve existing scroll presentation metadata")
+	}
+	if window.Scroll != (protocol.ScrollPresentation{WindowID: 7, AnchorTop: 10, AnchorLeft: 2, VisibleStartLine: 10, VisibleEndLine: 20, ContentEpoch: 9, LayoutGeneration: 11}) {
+		t.Fatalf("overlay delta should not alter scroll presentation: %+v", window.Scroll)
+	}
+}
+
+func TestApplyWindowDeltaClearsStaleScrollPresentationFromSectionedDelta(t *testing.T) {
+	model := New(80, 24, nil)
+	baseline := protocol.ScrollPresentation{WindowID: 7, AnchorTop: 10, AnchorLeft: 2, VisibleStartLine: 10, VisibleEndLine: 20, ContentEpoch: 9, LayoutGeneration: 11}
+	model.putWindow(protocol.WindowContent{ID: 7, ContentEpoch: 9, ScrollSet: true, Scroll: baseline})
+
+	model.applyWindowDelta(protocol.WindowContent{ID: 7, ContentEpoch: 9, Rows: []protocol.WindowRow{}})
+
+	window := model.windows[7]
+	if len(window.Rows) != 0 {
+		t.Fatalf("empty sectioned delta should clear existing rows, got %+v", window.Rows)
+	}
+	if window.ScrollSet || window.Scroll != (protocol.ScrollPresentation{}) {
+		t.Fatalf("sectioned delta without scroll metadata should clear stale presentation metadata: %+v", window.Scroll)
+	}
+
+	model.putWindow(protocol.WindowContent{ID: 7, ContentEpoch: 9, ScrollSet: true, Scroll: baseline})
+	model.applyWindowDelta(protocol.WindowContent{
+		ID:           7,
+		ContentEpoch: 9,
+		Rows:         []protocol.WindowRow{},
+		ScrollSet:    true,
+		Scroll:       protocol.ScrollPresentation{WindowID: 99, ContentEpoch: 9},
+	})
+
+	window = model.windows[7]
+	if window.ScrollSet || window.Scroll != (protocol.ScrollPresentation{}) {
+		t.Fatalf("sectioned delta with mismatched scroll metadata should clear stale presentation metadata: %+v", window.Scroll)
+	}
+}
+
+func TestApplyWindowDeltaAppliesMatchingScrollPresentation(t *testing.T) {
+	model := New(80, 24, nil)
+	model.putWindow(protocol.WindowContent{
+		ID:           7,
+		ContentEpoch: 9,
+		ScrollSet:    true,
+		Scroll: protocol.ScrollPresentation{
+			WindowID:         7,
+			AnchorTop:        10,
+			AnchorLeft:       2,
+			VisibleStartLine: 10,
+			VisibleEndLine:   20,
+			ContentEpoch:     9,
+			LayoutGeneration: 11,
+		},
+		Rows: []protocol.WindowRow{{Text: "old"}},
+	})
+
+	next := protocol.ScrollPresentation{WindowID: 7, AnchorTop: 12, AnchorLeft: 3, VisibleStartLine: 12, VisibleEndLine: 22, ContentEpoch: 9, LayoutGeneration: 12}
+	model.applyWindowDelta(protocol.WindowContent{ID: 7, ContentEpoch: 9, Rows: []protocol.WindowRow{{Text: "new"}}, ScrollSet: true, Scroll: next})
+
+	window := model.windows[7]
+	if !window.ScrollSet || window.Scroll != next {
+		t.Fatalf("sectioned delta should replace scroll presentation metadata: %+v", window.Scroll)
+	}
+	if len(window.Rows) != 1 || window.Rows[0].Text != "new" {
+		t.Fatalf("sectioned delta should still update rows: %+v", window.Rows)
+	}
+}
+
 func TestCursorShapeSequenceTracksProtocolShape(t *testing.T) {
 	model := New(80, 24, nil)
 	model.cursorShape = 1
@@ -1789,6 +1885,7 @@ func TestBottomPanelChromeUpdateClampsAndResetsScrollback(t *testing.T) {
 		model.bottomPanelScrollback = 6
 
 		shrunk := panel
+		shrunk.StreamInstance++
 		shrunk.Messages = shrunk.Messages[:4]
 		updated, _ := model.Update(port.PacketMsg{Commands: frame(protocol.Command{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiBottomPanel, Bottom: shrunk}})})
 		got := updated.(Model)
@@ -1813,13 +1910,59 @@ func TestBottomPanelChromeUpdateClampsAndResetsScrollback(t *testing.T) {
 	})
 }
 
+func TestBottomPanelMessageDeltasAppendWithinStream(t *testing.T) {
+	model, panel := bottomPanelTestModel(2, nil)
+
+	delta := panel
+	delta.Messages = []protocol.PanelMessage{{ID: 2, Level: 1, Text: "msg-1"}, {ID: 3, Level: 1, Text: "msg-2"}}
+	updated, _ := model.Update(port.PacketMsg{Commands: frame(protocol.Command{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiBottomPanel, Bottom: delta}})})
+	got := updated.(Model).chrome[generated.OPGuiBottomPanel].Bottom.Messages
+
+	if len(got) != 3 || got[0].ID != 1 || got[1].ID != 2 || got[2].ID != 3 {
+		t.Fatalf("bottom panel should append same-stream deltas without duplicates, got %+v", got)
+	}
+}
+
+func TestBottomPanelMessageStreamChangeReplacesMessages(t *testing.T) {
+	model, panel := bottomPanelTestModel(2, nil)
+
+	next := panel
+	next.StreamInstance++
+	next.Messages = []protocol.PanelMessage{{ID: 1, Level: 1, Text: "fresh"}}
+	updated, _ := model.Update(port.PacketMsg{Commands: frame(protocol.Command{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiBottomPanel, Bottom: next}})})
+	got := updated.(Model).chrome[generated.OPGuiBottomPanel].Bottom.Messages
+
+	if len(got) != 1 || got[0].Text != "fresh" {
+		t.Fatalf("bottom panel should replace messages on stream change, got %+v", got)
+	}
+}
+
+func TestBottomPanelHideReopenKeepsSameStreamMessages(t *testing.T) {
+	model, panel := bottomPanelTestModel(2, nil)
+
+	hidden := panel
+	hidden.Visible = false
+	hidden.Messages = nil
+	updated, _ := model.Update(port.PacketMsg{Commands: frame(protocol.Command{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiBottomPanel, Bottom: hidden}})})
+	hiddenModel := updated.(Model)
+
+	reopened := panel
+	reopened.Messages = nil
+	updated, _ = hiddenModel.Update(port.PacketMsg{Commands: frame(protocol.Command{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiBottomPanel, Bottom: reopened}})})
+	got := updated.(Model).chrome[generated.OPGuiBottomPanel].Bottom.Messages
+
+	if len(got) != 2 || got[0].ID != 1 || got[1].ID != 2 {
+		t.Fatalf("bottom panel should keep cached same-stream messages across hide/reopen, got %+v", got)
+	}
+}
+
 func bottomPanelTestModel(messageCount int, out chan<- []byte) (Model, protocol.BottomPanel) {
 	model := New(80, 12, out)
 	messages := make([]protocol.PanelMessage, 0, messageCount)
 	for i := 0; i < messageCount; i++ {
 		messages = append(messages, protocol.PanelMessage{ID: uint32(i + 1), Level: 1, Text: fmt.Sprintf("msg-%d", i)})
 	}
-	panel := protocol.BottomPanel{Visible: true, ActiveTab: 0, Tabs: []protocol.PanelTab{{Type: 0x01, Name: "Messages"}}, Messages: messages}
+	panel := protocol.BottomPanel{Visible: true, ActiveTab: 0, Tabs: []protocol.PanelTab{{Type: 0x01, Name: "Messages"}}, StreamInstance: 42, Messages: messages}
 	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiBottomPanel: {Opcode: generated.OPGuiBottomPanel, Bottom: panel}}
 	// The bottom panel is registry-placed now (#2281): it renders and hit-tests by
 	// its BEAM placement rect (bottom band, full width). Place it where

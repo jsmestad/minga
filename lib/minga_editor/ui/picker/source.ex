@@ -139,6 +139,24 @@ defmodule MingaEditor.UI.Picker.Source do
   """
   @callback async?() :: boolean()
 
+  @typedoc """
+  Extra info an async source can report alongside its candidates, surfaced by the
+  editor once results land (e.g. a "results truncated" status line). Sources that
+  don't need it omit `async_fetch/1` and the editor uses an empty map.
+  """
+  @type fetch_meta :: %{optional(:status) => String.t()}
+
+  @doc """
+  Async candidate fetch with optional reporting metadata.
+
+  Runs off the editor input path inside the picker's background task. Sources that
+  need to report a status (e.g. project search reporting that results were capped)
+  implement this and return `{:ok, items, meta}`; everything else falls back to
+  `candidates/1` via `fetch/2`. Errors are returned as `{:error, message}`.
+  """
+  @callback async_fetch(Context.t()) ::
+              {:ok, [Picker.item()], fetch_meta()} | {:error, String.t()}
+
   @doc """
   Enriches a bounded list of items for display.
 
@@ -167,6 +185,7 @@ defmodule MingaEditor.UI.Picker.Source do
     layout: 0,
     keep_open_on_select?: 0,
     async?: 0,
+    async_fetch: 1,
     enrich: 1
   ]
 
@@ -324,6 +343,23 @@ defmodule MingaEditor.UI.Picker.Source do
       module.async?()
     else
       false
+    end
+  end
+
+  @doc """
+  Runs an async source's candidate fetch, returning `{:ok, items, meta}`.
+
+  Prefers the source's own `async_fetch/1` (so it can report status metadata such
+  as truncation); otherwise falls back to `candidates/1` with empty metadata. Used
+  by the editor's background fetch task, off the input path.
+  """
+  @spec fetch(module(), Context.t()) ::
+          {:ok, [Picker.item()], fetch_meta()} | {:error, String.t()}
+  def fetch(module, context) do
+    if exported?(module, :async_fetch, 1) do
+      module.async_fetch(context)
+    else
+      {:ok, module.candidates(context), %{}}
     end
   end
 

@@ -31,7 +31,7 @@ defmodule MingaEditor.Commands.FileTreeDropTest do
       tmp_dir: dir,
       events_registry: events_registry
     } do
-      target_dir = Path.join(dir, "target")
+      target_dir = Path.join(dir, "dropzone")
       File.mkdir_p!(target_dir)
       {external_root, external_file} = external_file_fixture(dir, "external.txt")
       on_exit(fn -> File.rm_rf(external_root) end)
@@ -67,7 +67,7 @@ defmodule MingaEditor.Commands.FileTreeDropTest do
       events_registry: events_registry
     } do
       source_file = Path.join(dir, "source.txt")
-      target_dir = Path.join(dir, "target")
+      target_dir = Path.join(dir, "dropzone")
       File.write!(source_file, "source")
       File.mkdir_p!(target_dir)
 
@@ -84,7 +84,7 @@ defmodule MingaEditor.Commands.FileTreeDropTest do
       tmp_dir: dir,
       events_registry: events_registry
     } do
-      target_dir = Path.join(dir, "target")
+      target_dir = Path.join(dir, "dropzone")
       symlink_path = Path.join(dir, "linked.txt")
       {external_root, external_file} = external_file_fixture(dir, "linked-target.txt")
       on_exit(fn -> File.rm_rf(external_root) end)
@@ -127,7 +127,7 @@ defmodule MingaEditor.Commands.FileTreeDropTest do
       tmp_dir: dir,
       events_registry: events_registry
     } do
-      target_dir = Path.join(dir, "target")
+      target_dir = Path.join(dir, "dropzone")
       File.mkdir_p!(target_dir)
       {external_root, external_file} = external_file_fixture(dir, "stale.txt")
       on_exit(fn -> File.rm_rf(external_root) end)
@@ -149,7 +149,7 @@ defmodule MingaEditor.Commands.FileTreeDropTest do
       events_registry: events_registry
     } do
       source_file = Path.join(dir, "source.txt")
-      target_dir = Path.join(dir, "target")
+      target_dir = Path.join(dir, "dropzone")
       existing_dest = Path.join(target_dir, "source.txt")
       File.write!(source_file, "source")
       File.mkdir_p!(target_dir)
@@ -169,7 +169,7 @@ defmodule MingaEditor.Commands.FileTreeDropTest do
       events_registry: events_registry
     } do
       source_file = Path.join(dir, "source.txt")
-      target_dir = Path.join(dir, "target")
+      target_dir = Path.join(dir, "dropzone")
       dangling_dest = Path.join(target_dir, "source.txt")
       File.write!(source_file, "source")
       File.mkdir_p!(target_dir)
@@ -189,7 +189,7 @@ defmodule MingaEditor.Commands.FileTreeDropTest do
       tmp_dir: dir,
       events_registry: events_registry
     } do
-      target_dir = Path.join(dir, "target")
+      target_dir = Path.join(dir, "dropzone")
       dangling_dest = Path.join(target_dir, "external.txt")
       File.mkdir_p!(target_dir)
       File.ln_s!("missing.txt", dangling_dest)
@@ -210,7 +210,7 @@ defmodule MingaEditor.Commands.FileTreeDropTest do
       events_registry: events_registry
     } do
       source_dir = Path.join(dir, "source")
-      target_dir = Path.join(dir, "target")
+      target_dir = Path.join(dir, "dropzone")
       active_file = Path.join(source_dir, "main.ex")
       moved_file = Path.join([target_dir, "source", "main.ex"])
       File.mkdir_p!(source_dir)

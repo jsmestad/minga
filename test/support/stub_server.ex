@@ -59,6 +59,15 @@ defmodule Minga.Test.StubServer do
     {:reply, snapshot, state}
   end
 
+  def handle_call({:load_session, session_id}, _from, state) do
+    case Map.get(state, :notify) do
+      pid when is_pid(pid) -> send(pid, {:stub_loaded_session, session_id})
+      _ -> :ok
+    end
+
+    {:reply, :ok, Map.put(state, :loaded_session, session_id)}
+  end
+
   def handle_call(_msg, _from, state), do: {:reply, :ok, state}
 
   @spec toggle_pinned_id(MapSet.t(pos_integer()), pos_integer()) :: MapSet.t(pos_integer())

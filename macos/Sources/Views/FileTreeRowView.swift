@@ -34,6 +34,7 @@ struct FileTreeRowView: View {
             .frame(height: rowHeight)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(rowBackground)
+            .background(heatTintBackground)
             .overlay(alignment: .leading) {
                 activeFileAccent
             }
@@ -218,6 +219,13 @@ struct FileTreeRowView: View {
         } else if effectiveHovered {
             rowFill(theme.treeFg.opacity(0.06))
                 .animation(.easeInOut(duration: animDuration), value: effectiveHovered)
+        }
+    }
+
+    @ViewBuilder
+    private var heatTintBackground: some View {
+        if let tint = entry.heatTint {
+            rowFill(tint)
         }
     }
 

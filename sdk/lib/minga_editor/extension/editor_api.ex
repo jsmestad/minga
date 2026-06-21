@@ -22,4 +22,7 @@ defmodule MingaEditor.Extension.EditorAPI do
 
   @spec set_status(state(), String.t()) :: state()
   def set_status(_state, _message), do: raise("minga_sdk is compile-time only")
+
+  @spec active_path(state()) :: String.t() | nil
+  def active_path(_state), do: raise("minga_sdk is compile-time only")
 end

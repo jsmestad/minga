@@ -39,7 +39,8 @@ defmodule MingaEditor.Agent.UIState.Panel do
           cached_display_message_pairs: [{pos_integer(), term()}],
           cached_styled_messages: [MingaEditor.Agent.MarkdownHighlight.styled_lines()] | nil,
           message_version: non_neg_integer(),
-          credentials_configured: boolean()
+          credentials_configured: boolean(),
+          provenance_jump: MingaEditor.Agent.ProvenanceJump.t() | nil
         }
 
   defstruct visible: false,
@@ -62,7 +63,8 @@ defmodule MingaEditor.Agent.UIState.Panel do
             message_version: 0,
             # Assume configured until the session reports otherwise, so the
             # common (authed) case never flashes a "not configured" indicator.
-            credentials_configured: true
+            credentials_configured: true,
+            provenance_jump: nil
 
   @doc "Creates a new panel state with defaults."
   @spec new() :: t()
@@ -127,4 +129,14 @@ defmodule MingaEditor.Agent.UIState.Panel do
   def bump_message_version(%__MODULE__{message_version: v} = panel) do
     %{panel | message_version: v + 1}
   end
+
+  @doc "Arms a pending provenance jump (Enter from a code-provenance popup)."
+  @spec set_provenance_jump(t(), MingaEditor.Agent.ProvenanceJump.t() | nil) :: t()
+  def set_provenance_jump(%__MODULE__{} = panel, jump) do
+    %{panel | provenance_jump: jump}
+  end
+
+  @doc "Clears any pending provenance jump (e.g. when the user sends a new prompt)."
+  @spec clear_provenance_jump(t()) :: t()
+  def clear_provenance_jump(%__MODULE__{} = panel), do: %{panel | provenance_jump: nil}
 end

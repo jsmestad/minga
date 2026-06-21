@@ -92,7 +92,7 @@ defmodule MingaEditor.Renderer.Context do
           nav_flash_bg: MingaEditor.UI.Theme.color() | nil,
           editor_bg: MingaEditor.UI.Theme.color(),
           has_sign_column: boolean(),
-          diagnostic_signs: %{non_neg_integer() => Diagnostic.severity()},
+          diagnostic_signs: %{non_neg_integer() => Diagnostic.severity() | :diag_advisory},
           git_signs: %{non_neg_integer() => Minga.Core.Diff.hunk_type()},
           decorations: Decorations.t(),
           git_colors: MingaEditor.UI.Theme.Git.t(),

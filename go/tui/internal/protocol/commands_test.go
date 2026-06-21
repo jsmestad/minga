@@ -151,6 +151,75 @@ func TestDecodeWindowContentRows(t *testing.T) {
 	}
 }
 
+func TestDecodeWindowContentScrollPresentation(t *testing.T) {
+	headerPayload := []byte{0, 7, 0x02, 0, 3, 0, 4, 1, 0, 2, 0, 0, 0, 42}
+	rowsPayload := []byte{0, 0}
+	scrollPayload := []byte{0, 7, 0x01}
+	scrollPayload = append(scrollPayload, u32Bytes(5)...)
+	scrollPayload = append(scrollPayload, 0, 2)
+	scrollPayload = append(scrollPayload, 0, 1)
+	scrollPayload = append(scrollPayload, u32Bytes(5)...)
+	scrollPayload = append(scrollPayload, u32Bytes(15)...)
+	scrollPayload = append(scrollPayload, u32Bytes(4)...)
+	scrollPayload = append(scrollPayload, u32Bytes(18)...)
+	scrollPayload = append(scrollPayload, u32Bytes(42)...)
+	scrollPayload = append(scrollPayload, u32Bytes(99)...)
+
+	packet := []byte{generated.OPGuiWindowContent, 3}
+	packet = append(packet, section(0x01, headerPayload)...)
+	packet = append(packet, section(0x02, rowsPayload)...)
+	packet = append(packet, section(0x0A, scrollPayload)...)
+
+	command, err := DecodeCommand(packet)
+	if err != nil {
+		t.Fatalf("DecodeCommand returned error: %v", err)
+	}
+	if command.Kind != CommandWindowContent {
+		t.Fatalf("kind = %v, want window content", command.Kind)
+	}
+	if !command.Window.ScrollSet {
+		t.Fatalf("scroll presentation should be marked present: %+v", command.Window)
+	}
+	scroll := command.Window.Scroll
+	if scroll.WindowID != 7 || !scroll.ResetRequired || scroll.AnchorTop != 5 || scroll.AnchorLeft != 2 || scroll.AnchorVisualRowOffset != 1 {
+		t.Fatalf("scroll anchor decoded incorrectly: %+v", scroll)
+	}
+	if scroll.VisibleStartLine != 5 || scroll.VisibleEndLine != 15 || scroll.OverscanStartLine != 4 || scroll.OverscanEndLine != 18 {
+		t.Fatalf("scroll ranges decoded incorrectly: %+v", scroll)
+	}
+	if scroll.ContentEpoch != 42 || scroll.LayoutGeneration != 99 {
+		t.Fatalf("scroll identity decoded incorrectly: %+v", scroll)
+	}
+}
+
+func TestDecodeWindowContentDropsMismatchedScrollPresentation(t *testing.T) {
+	headerPayload := []byte{0, 7, 0x02, 0, 3, 0, 4, 1, 0, 2, 0, 0, 0, 42}
+	rowsPayload := []byte{0, 0}
+	scrollPayload := []byte{0, 8, 0x01}
+	scrollPayload = append(scrollPayload, u32Bytes(5)...)
+	scrollPayload = append(scrollPayload, 0, 2)
+	scrollPayload = append(scrollPayload, 0, 1)
+	scrollPayload = append(scrollPayload, u32Bytes(5)...)
+	scrollPayload = append(scrollPayload, u32Bytes(15)...)
+	scrollPayload = append(scrollPayload, u32Bytes(4)...)
+	scrollPayload = append(scrollPayload, u32Bytes(18)...)
+	scrollPayload = append(scrollPayload, u32Bytes(42)...)
+	scrollPayload = append(scrollPayload, u32Bytes(99)...)
+
+	packet := []byte{generated.OPGuiWindowContent, 3}
+	packet = append(packet, section(0x01, headerPayload)...)
+	packet = append(packet, section(0x02, rowsPayload)...)
+	packet = append(packet, section(0x0A, scrollPayload)...)
+
+	command, err := DecodeCommand(packet)
+	if err != nil {
+		t.Fatalf("DecodeCommand returned error: %v", err)
+	}
+	if command.Window.ScrollSet {
+		t.Fatalf("mismatched scroll presentation should be dropped: %+v", command.Window.Scroll)
+	}
+}
+
 func TestDecodeWindowRowsAndViewportDeltasIncludeRowRefs(t *testing.T) {
 	ref := []byte{
 		0,
@@ -210,6 +279,46 @@ func TestDecodeWindowRowsAndViewportDeltasIncludeRowRefs(t *testing.T) {
 			}
 			if second.Kind != CommandCommitFrame {
 				t.Fatalf("second kind = %v, want commit frame", second.Kind)
+			}
+		})
+	}
+}
+
+func TestDecodeWindowSectionedDeltaRequiresHeaderAndRows(t *testing.T) {
+	header := []byte{0, 7, 0x12, 0x34, 0x56, 0x78, 0xAA, 0, 9, 0, 11, 2, 0, 13}
+	rowsPayload := []byte{0, 0}
+
+	tests := []struct {
+		name   string
+		opcode byte
+		packet []byte
+	}{
+		{
+			name:   "rows delta missing header",
+			opcode: generated.OPGuiWindowRowsDelta,
+			packet: append([]byte{generated.OPGuiWindowRowsDelta, 1}, append([]byte{0x02, 0, byte(len(rowsPayload))}, rowsPayload...)...),
+		},
+		{
+			name:   "rows delta missing rows",
+			opcode: generated.OPGuiWindowRowsDelta,
+			packet: append([]byte{generated.OPGuiWindowRowsDelta, 1}, append([]byte{0x01, 0, byte(len(header))}, header...)...),
+		},
+		{
+			name:   "viewport delta missing header",
+			opcode: generated.OPGuiWindowViewportDelta,
+			packet: append([]byte{generated.OPGuiWindowViewportDelta, 1}, append([]byte{0x02, 0, byte(len(rowsPayload))}, rowsPayload...)...),
+		},
+		{
+			name:   "viewport delta missing rows",
+			opcode: generated.OPGuiWindowViewportDelta,
+			packet: append([]byte{generated.OPGuiWindowViewportDelta, 1}, append([]byte{0x01, 0, byte(len(header))}, header...)...),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := DecodeCommand(tt.packet); err == nil {
+				t.Fatalf("DecodeCommand(%s) unexpectedly succeeded", tt.name)
 			}
 		})
 	}
@@ -561,6 +670,7 @@ func TestDecodeFileTreeChromeRows(t *testing.T) {
 	row = append(row, 0xFF)
 	row = append(row, 0, 0)
 	row = append(row, 0x6D, 0x80, 0x86) // icon color (R,G,B) follows editing payload
+	row = append(row, 0xFF)             // heat level (0xFF = none) trails the row
 	body := []byte{2, 1, 3}
 	body = append(body, string16("/repo/lib")...)
 	body = append(body, string16("/repo")...)
@@ -929,15 +1039,29 @@ func TestDecodePanelAndSidebarChrome(t *testing.T) {
 
 	bottom := []byte{generated.OPGuiBottomPanel, 1, 0, 30, 0, 1, 2}
 	bottom = append(bottom, string8("Messages")...)
-	bottom = append(bottom, 0, 1, 0, 0, 0, 5, 1, 2, 0, 0, 0, 9)
+	bottom = append(bottom, 0, 0, 0, 7, 0, 1, 0, 0, 0, 5, 1, 2, 0, 0, 0, 9)
 	bottom = append(bottom, string16("lib/main.ex")...)
 	bottom = append(bottom, string16("warning")...)
 	command, err = DecodeCommand(bottom)
 	if err != nil {
 		t.Fatalf("DecodeCommand bottom panel returned error: %v", err)
 	}
-	if !command.Chrome.Bottom.Visible || len(command.Chrome.Bottom.Tabs) != 1 || len(command.Chrome.Bottom.Messages) != 1 {
+	if !command.Chrome.Bottom.Visible || command.Chrome.Bottom.StreamInstance != 7 || len(command.Chrome.Bottom.Tabs) != 1 || len(command.Chrome.Bottom.Messages) != 1 {
 		t.Fatalf("bottom panel decoded incorrectly: %+v", command.Chrome.Bottom)
+	}
+
+	firstBottom := bottomPanelPacket(7, 1, "first")
+	firstCommand, err := DecodeCommand(firstBottom)
+	if err != nil {
+		t.Fatalf("DecodeCommand first bottom panel returned error: %v", err)
+	}
+	secondBottom := bottomPanelPacket(8, 1, "second")
+	secondCommand, err := DecodeCommand(secondBottom)
+	if err != nil {
+		t.Fatalf("DecodeCommand second bottom panel returned error: %v", err)
+	}
+	if firstCommand.Chrome.Bottom.StreamInstance == secondCommand.Chrome.Bottom.StreamInstance || firstCommand.Chrome.Bottom.Messages[0].ID != secondCommand.Chrome.Bottom.Messages[0].ID {
+		t.Fatalf("bottom panel stream identity not preserved: first=%+v second=%+v", firstCommand.Chrome.Bottom, secondCommand.Chrome.Bottom)
 	}
 
 	sidebarEntry := string16("files")
@@ -1130,6 +1254,19 @@ func u32Bytes(value uint32) []byte {
 func section(id byte, payload []byte) []byte {
 	out := []byte{id, byte(len(payload) >> 8), byte(len(payload))}
 	return append(out, payload...)
+}
+
+func bottomPanelPacket(streamInstance uint32, id uint32, text string) []byte {
+	bottom := []byte{generated.OPGuiBottomPanel, 1, 0, 30, 0, 1, 2}
+	bottom = append(bottom, string8("Messages")...)
+	bottom = append(bottom, u32Bytes(streamInstance)...)
+	bottom = append(bottom, 0, 1)
+	bottom = append(bottom, u32Bytes(id)...)
+	bottom = append(bottom, 1, 0)
+	bottom = append(bottom, u32Bytes(9)...)
+	bottom = append(bottom, string16("lib/main.ex")...)
+	bottom = append(bottom, string16(text)...)
+	return bottom
 }
 
 func string16(value string) []byte {

@@ -2,6 +2,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
   # Uses XDG_CONFIG_HOME to verify /resume opens persisted sessions through the public slash command path.
   use ExUnit.Case, async: false
 
+  alias MingaAgent.Memory
   alias MingaAgent.Session
   alias MingaAgent.SessionStore
   alias MingaAgent.TurnUsage
@@ -131,7 +132,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
              end)
     end
 
-    test "includes core commands" do
+    test "includes canonical core commands only" do
       names = SlashCommand.commands() |> Enum.map(& &1.name)
       assert "clear" in names
       assert "help" in names
@@ -142,6 +143,11 @@ defmodule MingaEditor.Agent.SlashCommandTest do
       assert "plan" in names
       assert "exec" in names
       assert "resume" in names
+      assert "memory" in names
+      refute "new" in names
+      refute "abort" in names
+      refute "remember" in names
+      refute "forget" in names
     end
   end
 
@@ -265,16 +271,14 @@ defmodule MingaEditor.Agent.SlashCommandTest do
       {:ok, _state} = SlashCommand.execute(mock_state(), "/stop")
     end
 
-    test "/abort is an alias for /stop" do
-      {:ok, _state} = SlashCommand.execute(mock_state(), "/abort")
-    end
-
     test "/clear without session starts a new session" do
       {:ok, _state} = SlashCommand.execute(mock_state(), "/clear")
     end
 
-    test "/new is an alias for /clear" do
-      {:ok, _state} = SlashCommand.execute(mock_state(), "/new")
+    test "removed aliases return unknown command errors" do
+      assert {:error, "Unknown command: /abort"} = SlashCommand.execute(mock_state(), "/abort")
+      assert {:error, "Unknown command: /new"} = SlashCommand.execute(mock_state(), "/new")
+      assert {:error, "Unknown command: /?"} = SlashCommand.execute(mock_state(), "/?")
     end
 
     test "/thinking without args cycles level (no session = status msg)" do
@@ -296,11 +300,6 @@ defmodule MingaEditor.Agent.SlashCommandTest do
     test "/model with name sets model (triggers restart)" do
       {:ok, state} = SlashCommand.execute(mock_state(), "/model gpt-4o")
       assert AgentAccess.panel(state).model_name == "gpt-4o"
-    end
-
-    test "/? is an alias for /help" do
-      {:ok, state} = SlashCommand.execute(mock_state(), "/?")
-      assert state.shell_state.status_msg == "Commands listed in chat"
     end
 
     test "command parsing is case-insensitive" do
@@ -430,6 +429,37 @@ defmodule MingaEditor.Agent.SlashCommandTest do
     test "/trust usage errors clearly" do
       assert {:error, "Usage: /trust list|revoke <tool-name>|clear"} =
                SlashCommand.execute(mock_state(session: start_session()), "/trust revoke")
+    end
+
+    test "/memory add and clear replace /remember and /forget", %{tmp_dir: dir} do
+      with_xdg_config(dir, fn ->
+        {:ok, state} = SlashCommand.execute(mock_state(), "/memory add prefer small diffs")
+        assert state.shell_state.status_msg == "Saved to memory: prefer small diffs"
+        assert Memory.read(dir) =~ "prefer small diffs"
+
+        {:ok, state} = SlashCommand.execute(mock_state(), "/memory clear")
+        assert state.shell_state.status_msg == "Memory cleared."
+        assert Memory.read(dir) == nil
+      end)
+    end
+
+    test "/memory shows memory usage", %{tmp_dir: dir} do
+      with_xdg_config(dir, fn ->
+        {:ok, state} = SlashCommand.execute(mock_state(), "/memory")
+        assert state.shell_state.status_msg =~ "No memory file found"
+      end)
+    end
+
+    test "/memory rejects unknown subcommands" do
+      assert {:error, "Usage: /memory, /memory add <text>, /memory clear"} =
+               SlashCommand.execute(mock_state(), "/memory forget")
+    end
+
+    test "/remember and /forget are deleted" do
+      assert {:error, "Unknown command: /remember"} =
+               SlashCommand.execute(mock_state(), "/remember something")
+
+      assert {:error, "Unknown command: /forget"} = SlashCommand.execute(mock_state(), "/forget")
     end
 
     test "/plan without an active session returns a clear error" do

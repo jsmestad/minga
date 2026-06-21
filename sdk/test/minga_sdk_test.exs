@@ -44,13 +44,23 @@ defmodule MingaSdkTest do
       assert is_atom(Minga.Extension.AgentAPI)
     end
 
+    test "Diagnostics types are accessible" do
+      assert is_atom(Minga.Extension.Diagnostics)
+    end
+
     test "EditorAPI types are accessible" do
       assert is_atom(MingaEditor.Extension.EditorAPI)
     end
 
     test "Events types are accessible" do
       assert is_atom(Minga.Events)
-      assert %Minga.Events.BufferChangedEvent{buffer: self(), source: :user, delta: nil, version: nil}
+
+      assert %Minga.Events.BufferChangedEvent{
+        buffer: self(),
+        source: :user,
+        delta: nil,
+        version: nil
+      }
     end
 
     test "Buffer types are accessible" do

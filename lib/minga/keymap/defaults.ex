@@ -149,7 +149,6 @@ defmodule Minga.Keymap.Defaults do
     {~k(a r), :workspace_pending_reviews, "Pending reviews"},
     {~k(a o), :remote_find_file, "Open remote file"},
     {~k(a T), :agent_pick_thinking, "Pick thinking level"},
-    {~k(a z), :agent_summarize, "Summarize session to artifact"},
     {~k(a q), :agent_dequeue, "Dequeue queued messages to editor"},
     {~k(a f), :agent_queue_follow_up, "Queue current input as follow-up"},
     {~k(a u), :undo_agent_session, "Undo all agent edits"},
@@ -186,7 +185,11 @@ defmodule Minga.Keymap.Defaults do
     {~k(t l), :cycle_line_numbers, "Toggle line numbers"},
     {~k(t p), :toggle_bottom_panel, "Toggle bottom panel"},
     {~k(t i), :toggle_invisible, "Toggle invisible chars"},
-    {~k(t w), :toggle_wrap, "Toggle word wrap"}
+    {~k(t w), :toggle_wrap, "Toggle word wrap"},
+
+    # ── Code provenance ─────────────────────────────────────────────────────────
+    {~k(g w), :code_why, "Why is this line like this?"},
+    {~k(g a), :code_autobiography, "Code autobiography"}
   ]
 
   # Group prefix descriptions shown in which-key at the SPC level.

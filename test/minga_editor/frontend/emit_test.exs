@@ -236,7 +236,7 @@ defmodule MingaEditor.Frontend.EmitTest do
       {_id, registry, true} = FontRegistry.get_or_register(FontRegistry.new(), "Fira Code")
       ctx = %{Context.from_editor_state(base_state()) | font_registry: registry}
 
-      {_caches, font_registry} = Emit.emit(frame, ctx, nil, %Caches{})
+      {_caches, font_registry, _message_store} = Emit.emit(frame, ctx, nil, %Caches{})
       assert_receive {:"$gen_cast", {:send_commands, commands}}
 
       assert FontRegistry.pending_registrations(font_registry) == []
@@ -255,7 +255,7 @@ defmodule MingaEditor.Frontend.EmitTest do
       _layout = Layout.put(state)
       ctx = Context.from_editor_state(state)
 
-      {caches, _font_registry} = Emit.emit(frame, ctx, nil, %Caches{})
+      {caches, _font_registry, _message_store} = Emit.emit(frame, ctx, nil, %Caches{})
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
       assert is_map(caches.emit_prev_viewport_tops)
@@ -273,14 +273,14 @@ defmodule MingaEditor.Frontend.EmitTest do
       ctx = Context.from_editor_state(state)
       caches0 = %Caches{}
 
-      {caches1, _font_registry} = Emit.emit(frame, ctx, nil, caches0)
+      {caches1, _font_registry, _message_store} = Emit.emit(frame, ctx, nil, caches0)
       # Flush first commands + title
       assert_receive {:"$gen_cast", {:send_commands, _commands}}
 
       assert is_binary(caches1.last_title)
 
       # Emit again with same ctx; title should not be re-sent (cache hit)
-      {caches2, _font_registry} = Emit.emit(frame, ctx, nil, caches1)
+      {caches2, _font_registry, _message_store} = Emit.emit(frame, ctx, nil, caches1)
       assert_receive {:"$gen_cast", {:send_commands, _commands2}}
 
       assert caches2.last_title == caches1.last_title
@@ -295,13 +295,13 @@ defmodule MingaEditor.Frontend.EmitTest do
       ctx = Context.from_editor_state(state)
       caches0 = %Caches{}
 
-      {caches1, _font_registry} = Emit.emit(frame, ctx, nil, caches0)
+      {caches1, _font_registry, _message_store} = Emit.emit(frame, ctx, nil, caches0)
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
       assert caches1.last_window_bg == state.theme.editor.bg
 
       # Emit again, should not re-send
-      {caches2, _font_registry} = Emit.emit(frame, ctx, nil, caches1)
+      {caches2, _font_registry, _message_store} = Emit.emit(frame, ctx, nil, caches1)
       assert_receive {:"$gen_cast", {:send_commands, _}}
       assert caches2.last_window_bg == caches1.last_window_bg
     end
@@ -346,7 +346,7 @@ defmodule MingaEditor.Frontend.EmitTest do
         force_keyframe?: Keyword.get(opts, :force_keyframe?, false)
     }
 
-    {new_caches, _font_registry} = Emit.emit(frame, ctx, nil, caches)
+    {new_caches, _font_registry, _message_store} = Emit.emit(frame, ctx, nil, caches)
     assert_receive {:"$gen_cast", {:send_commands, commands}}
     {commands, new_caches}
   end

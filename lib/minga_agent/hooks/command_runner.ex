@@ -5,15 +5,24 @@ defmodule MingaAgent.Hooks.CommandRunner do
   The helper runs `/bin/sh -c` in a dedicated POSIX process group, feeds the hook payload on stdin, discards stdout, captures bounded stderr, and enforces each hook's timeout. This module owns payload encoding and maps the helper's structured JSON result into `MingaAgent.Hooks.Result`.
   """
 
+  alias MingaAgent.Hooks.CommandRunner.HelperBackend
+  alias MingaAgent.Hooks.CommandRunner.PortHelperBackend
   alias MingaAgent.Hooks.Hook
   alias MingaAgent.Hooks.PreToolUsePayload
   alias MingaAgent.Hooks.Result
 
   @helper_name "minga-hook-runner"
   @guard_timeout_ms 1_000
+  @helper_stdout_limit 1_048_576
 
   @typedoc "Options used by tests to inject helper behavior."
-  @type run_opts :: [helper_path: String.t()]
+  @type run_opts :: [
+          helper_path: String.t(),
+          helper_backend: module(),
+          helper_backend_opts: keyword(),
+          clock: (-> integer()),
+          guard_timeout_ms: non_neg_integer()
+        ]
 
   @doc "Runs a shell hook with any JSON-encodable payload map."
   @spec run(Hook.t(), map()) :: Result.t()
@@ -26,7 +35,7 @@ defmodule MingaAgent.Hooks.CommandRunner do
   def run(%Hook{} = hook, payload_map, opts) when is_map(payload_map) and is_list(opts) do
     with {:ok, payload_json} <- encode_map(payload_map),
          {:ok, helper_path} <- helper_path(opts) do
-      run_helper(hook, helper_path, payload_json)
+      run_helper(hook, helper_path, payload_json, opts)
     else
       {:error, reason} -> payload_preparation_veto(hook, reason)
     end
@@ -101,107 +110,157 @@ defmodule MingaAgent.Hooks.CommandRunner do
     end
   end
 
-  @spec run_helper(Hook.t(), String.t(), String.t()) :: Result.t()
-  defp run_helper(%Hook{} = hook, helper_path, payload_json) do
-    port =
-      Port.open({:spawn_executable, helper_path}, [
-        :binary,
-        :exit_status,
-        args: [
-          Integer.to_string(hook.timeout_ms),
-          Integer.to_string(byte_size(payload_json)),
-          hook.command
-        ]
-      ])
+  @spec run_helper(Hook.t(), String.t(), String.t(), run_opts()) :: Result.t()
+  defp run_helper(%Hook{} = hook, helper_path, payload_json, opts) do
+    backend = helper_backend(opts)
+    backend_opts = Keyword.get(opts, :helper_backend_opts, [])
+    clock = Keyword.get(opts, :clock, &monotonic_now_ms/0)
+    guard_timeout_ms = Keyword.get(opts, :guard_timeout_ms, @guard_timeout_ms)
+    args = helper_args(hook, payload_json)
 
-    os_pid = port_os_pid(port)
-    send_payload_to_helper(port, payload_json)
-    guard_deadline_ms = System.monotonic_time(:millisecond) + hook.timeout_ms + @guard_timeout_ms
-    collect_helper_result(port, hook, "", guard_deadline_ms, os_pid)
+    case backend.start(helper_path, args, payload_json, backend_opts) do
+      {:ok, handle} ->
+        guard_deadline_ms = clock.() + hook.timeout_ms + guard_timeout_ms
+
+        collect_helper_result(
+          backend,
+          handle,
+          hook,
+          "",
+          guard_deadline_ms,
+          clock,
+          guard_timeout_ms
+        )
+
+      {:error, reason} ->
+        helper_start_error(hook, reason)
+    end
   rescue
-    e ->
-      Result.veto(
-        hook,
-        "failed to start hook runner: #{Exception.message(e)}",
-        {:failed_to_start, e}
-      )
+    e -> helper_start_error(hook, e)
   catch
-    kind, reason ->
-      Result.veto(
-        hook,
-        "failed to start hook runner: #{inspect(kind)} #{inspect(reason)}",
-        {:failed_to_start, {kind, reason}}
-      )
+    kind, reason -> helper_start_error(hook, {kind, reason})
   end
 
-  @spec send_payload_to_helper(port(), String.t()) :: :ok
-  defp send_payload_to_helper(port, payload_json) do
-    Port.command(port, payload_json)
-    :ok
-  rescue
-    ArgumentError -> :ok
-  catch
-    :exit, _reason -> :ok
+  @spec helper_backend(run_opts()) :: module()
+  defp helper_backend(opts) do
+    Keyword.get(opts, :helper_backend, PortHelperBackend)
   end
 
-  @spec collect_helper_result(port(), Hook.t(), String.t(), integer(), pos_integer() | nil) ::
-          Result.t()
-  defp collect_helper_result(port, hook, stdout, guard_deadline_ms, os_pid) do
-    remaining_ms = guard_deadline_ms - System.monotonic_time(:millisecond)
+  @spec helper_args(Hook.t(), String.t()) :: [String.t()]
+  defp helper_args(hook, payload_json) do
+    [
+      Integer.to_string(hook.timeout_ms),
+      Integer.to_string(byte_size(payload_json)),
+      hook.command
+    ]
+  end
+
+  @spec helper_start_error(Hook.t(), term()) :: Result.t()
+  defp helper_start_error(hook, %_{} = exception) do
+    Result.veto(
+      hook,
+      "failed to start hook runner: #{Exception.message(exception)}",
+      {:failed_to_start, exception}
+    )
+  end
+
+  defp helper_start_error(hook, {kind, reason}) when is_atom(kind) do
+    Result.veto(
+      hook,
+      "failed to start hook runner: #{inspect(kind)} #{inspect(reason)}",
+      {:failed_to_start, {kind, reason}}
+    )
+  end
+
+  defp helper_start_error(hook, reason) do
+    Result.veto(
+      hook,
+      "failed to start hook runner: #{inspect(reason)}",
+      {:failed_to_start, reason}
+    )
+  end
+
+  @spec collect_helper_result(
+          module(),
+          HelperBackend.handle(),
+          Hook.t(),
+          String.t(),
+          integer(),
+          (-> integer()),
+          non_neg_integer()
+        ) :: Result.t()
+  defp collect_helper_result(
+         backend,
+         handle,
+         hook,
+         stdout,
+         guard_deadline_ms,
+         clock,
+         guard_timeout_ms
+       ) do
+    remaining_ms = guard_deadline_ms - clock.()
 
     if remaining_ms <= 0 do
-      helper_timeout(port, hook, os_pid)
+      helper_timeout(backend, handle, hook, guard_timeout_ms)
     else
-      receive do
-        {^port, {:data, data}} ->
-          collect_helper_result(port, hook, stdout <> data, guard_deadline_ms, os_pid)
+      case backend.next_event(handle, remaining_ms) do
+        {:data, data, next_handle} ->
+          next_stdout = append_helper_stdout(stdout, data)
 
-        {^port, {:exit_status, 0}} ->
+          collect_helper_result(
+            backend,
+            next_handle,
+            hook,
+            next_stdout,
+            guard_deadline_ms,
+            clock,
+            guard_timeout_ms
+          )
+
+        {:exit_status, 0, _next_handle} ->
           decode_helper_result(hook, stdout)
 
-        {^port, {:exit_status, status}} ->
+        {:exit_status, status, _next_handle} ->
           Result.veto(
             hook,
             "hook runner exited with status #{status}",
             {:failed_to_start, {:helper_exit, status}}
           )
-      after
-        remaining_ms -> helper_timeout(port, hook, os_pid)
+
+        :timeout ->
+          helper_timeout(backend, handle, hook, guard_timeout_ms)
       end
     end
   end
 
-  @spec helper_timeout(port(), Hook.t(), pos_integer() | nil) :: Result.t()
-  defp helper_timeout(port, hook, os_pid) do
-    kill_helper_process(os_pid)
-    close_port(port)
+  @spec append_helper_stdout(String.t(), binary()) :: String.t()
+  defp append_helper_stdout(stdout, _data) when byte_size(stdout) >= @helper_stdout_limit,
+    do: stdout
+
+  defp append_helper_stdout(stdout, data) do
+    remaining = @helper_stdout_limit - byte_size(stdout)
+
+    if byte_size(data) <= remaining do
+      stdout <> data
+    else
+      stdout <> binary_part(data, 0, remaining)
+    end
+  end
+
+  @spec helper_timeout(module(), HelperBackend.handle(), Hook.t(), non_neg_integer()) ::
+          Result.t()
+  defp helper_timeout(backend, handle, hook, guard_timeout_ms) do
+    backend.stop(handle)
 
     Result.veto(
       hook,
-      "hook runner timed out after #{hook.timeout_ms + @guard_timeout_ms}ms",
+      "hook runner timed out after #{hook.timeout_ms + guard_timeout_ms}ms",
       {:failed_to_start, :helper_timeout}
     )
   end
 
-  @spec port_os_pid(port()) :: pos_integer() | nil
-  defp port_os_pid(port) do
-    case Port.info(port, :os_pid) do
-      {:os_pid, pid} when is_integer(pid) and pid > 0 -> pid
-      _other -> nil
-    end
-  end
-
-  @spec kill_helper_process(pos_integer() | nil) :: :ok
-  defp kill_helper_process(nil), do: :ok
-
-  defp kill_helper_process(pid) do
-    pid_arg = Integer.to_string(pid)
-    System.cmd("kill", ["-TERM", pid_arg], stderr_to_stdout: true)
-    System.cmd("kill", ["-KILL", pid_arg], stderr_to_stdout: true)
-    :ok
-  rescue
-    _ -> :ok
-  end
+  @spec monotonic_now_ms() :: integer()
+  defp monotonic_now_ms, do: System.monotonic_time(:millisecond)
 
   @spec decode_helper_result(Hook.t(), String.t()) :: Result.t()
   defp decode_helper_result(hook, stdout) do
@@ -249,15 +308,5 @@ defmodule MingaAgent.Hooks.CommandRunner do
       "malformed hook runner result",
       {:failed_to_start, :malformed_helper_result}
     )
-  end
-
-  @spec close_port(port()) :: :ok
-  defp close_port(port) do
-    Port.close(port)
-    :ok
-  rescue
-    ArgumentError -> :ok
-  catch
-    :exit, _ -> :ok
   end
 end

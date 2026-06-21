@@ -8,6 +8,8 @@ defmodule MingaEditor.State.FileTree do
   """
 
   alias Minga.Project.FileTree
+  alias MingaEditor.FileTree.FilterWalk
+  alias MingaEditor.FileTree.ProjectCache
   alias MingaEditor.State.FileTree.ClipboardMark
 
   @typedoc """
@@ -243,10 +245,12 @@ defmodule MingaEditor.State.FileTree do
   @spec start_filtering(t()) :: t()
   def start_filtering(%__MODULE__{tree: %FileTree{} = tree} = ft) do
     filter = tree.filter || ""
+    {tree, status} = filtered_tree(tree, filter)
 
     %{
       ft
-      | tree: FileTree.set_filter(tree, filter),
+      | tree: tree,
+        tree_status: status,
         filtering: true,
         editing: nil,
         help_visible: false
@@ -255,14 +259,99 @@ defmodule MingaEditor.State.FileTree do
 
   def start_filtering(%__MODULE__{} = ft), do: ft
 
-  @doc "Updates the active file tree filter."
+  @doc """
+  Updates the active file tree filter.
+
+  When the tree root matches the active project root, the matching entries are
+  filtered in memory from the project's cached file list (`Minga.Project.files/0`)
+  rather than walking the filesystem. Roots not covered by the active cache fall
+  back to the filesystem walk.
+
+  While the active project's cache is still rebuilding (empty list), the tree
+  reports a `:loading` pending state instead of silently re-shelling out.
+  """
   @spec update_filter(t(), String.t()) :: t()
   def update_filter(%__MODULE__{tree: %FileTree{} = tree} = ft, filter) when is_binary(filter) do
-    tree = FileTree.set_filter(tree, filter)
-    %{ft | tree: tree, tree_status: classify_tree(tree)}
+    {tree, status} = filtered_tree(tree, filter)
+    %{ft | tree: tree, tree_status: status}
   end
 
   def update_filter(%__MODULE__{} = ft, _filter), do: ft
+
+  @doc """
+  Returns true when filtering the tree requires the async no-cache filesystem
+  walk (#2377 AC4): a filter is active and the tree root is not the active
+  project root, so in-memory cache filtering does not cover it.
+  """
+  @spec needs_filter_walk?(t()) :: boolean()
+  def needs_filter_walk?(%__MODULE__{tree: %FileTree{filter: filter, root: root}})
+      when is_binary(filter) and filter != "" do
+    not ProjectCache.active_root?(root)
+  end
+
+  def needs_filter_walk?(%__MODULE__{}), do: false
+
+  @doc """
+  Applies an async no-cache filter walk result, dropping it if stale.
+
+  The result is keyed by the `(root, filter)` it was computed for; if the user
+  has since changed the filter or re-rooted the tree it is discarded so a slow
+  walk never clobbers newer state (#2377 AC4 stale-result dropping).
+  """
+  @spec apply_filter_walk(t(), String.t(), String.t(), [FileTree.entry()]) :: t()
+  def apply_filter_walk(%__MODULE__{tree: %FileTree{} = tree} = ft, root, filter, entries) do
+    if FilterWalk.fresh?(tree, root, filter) do
+      tree = FileTree.put_entries(tree, entries)
+      %{ft | tree: tree, tree_status: classify_entries(entries)}
+    else
+      ft
+    end
+  end
+
+  def apply_filter_walk(%__MODULE__{} = ft, _root, _filter, _entries), do: ft
+
+  # Resolves the filtered tree plus its presentation status. An empty filter is
+  # the full unfiltered tree (always classified from the walk). With an active
+  # filter, the active project root filters in memory from the cache; a
+  # rebuilding (empty) cache reports `:loading`; other roots defer to an async
+  # filesystem walk (`:loading` until the walk result arrives).
+  @spec filtered_tree(FileTree.t(), String.t()) :: {FileTree.t(), tree_status()}
+  defp filtered_tree(%FileTree{} = tree, "") do
+    tree = tree |> FileTree.put_cached_files(nil) |> FileTree.set_filter("")
+    {tree, classify_tree(tree)}
+  end
+
+  defp filtered_tree(%FileTree{root: root} = tree, filter) do
+    if ProjectCache.active_root?(root) do
+      filtered_from_cache(tree, filter, ProjectCache.files())
+    else
+      # No-cache root: clear the cache and mark loading; the editor spawns an
+      # async walk (see needs_filter_walk?/1) and applies the result later.
+      tree = tree |> FileTree.put_cached_files(nil) |> FileTree.set_filter(filter)
+      {tree, :loading}
+    end
+  end
+
+  @spec filtered_from_cache(FileTree.t(), String.t(), [String.t()]) ::
+          {FileTree.t(), tree_status()}
+  defp filtered_from_cache(tree, filter, []) do
+    # Active root but the cache is empty: a rebuild is in progress (or the
+    # project has no files). Show a pending state rather than re-shelling out.
+    tree = tree |> FileTree.put_cached_files([]) |> FileTree.set_filter(filter)
+    {tree, cache_pending_status(tree)}
+  end
+
+  defp filtered_from_cache(tree, filter, files) do
+    tree = tree |> FileTree.put_cached_files(files) |> FileTree.set_filter(filter)
+    {tree, classify_entries(FileTree.visible_entries(tree))}
+  end
+
+  @spec cache_pending_status(FileTree.t()) :: tree_status()
+  defp cache_pending_status(tree) do
+    if ProjectCache.rebuilding?(),
+      do: :loading,
+      else: classify_entries(FileTree.visible_entries(tree))
+  end
 
   @doc "Accepts the current filter and leaves the narrowed tree visible."
   @spec accept_filter(t()) :: t()
@@ -271,7 +360,8 @@ defmodule MingaEditor.State.FileTree do
   @doc "Clears the active filter and exits filtering mode."
   @spec clear_filter(t()) :: t()
   def clear_filter(%__MODULE__{tree: %FileTree{} = tree} = ft) do
-    tree = FileTree.clear_filter(tree)
+    # Drop the cache so non-filtered browsing resumes lazy filesystem walking.
+    tree = tree |> FileTree.put_cached_files(nil) |> FileTree.clear_filter()
     %{ft | tree: tree, filtering: false, tree_status: classify_tree(tree)}
   end
 
