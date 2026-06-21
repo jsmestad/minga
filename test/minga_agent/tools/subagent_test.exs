@@ -693,6 +693,20 @@ defmodule MingaAgent.Tools.SubagentTest do
     assert message =~ "requires a clean git tree"
   end
 
+  test "worktree isolation rejects background subagents", %{tmp_dir: dir} do
+    root = init_git_repo!(dir)
+
+    assert {:error, message} =
+             Subagent.execute("noop",
+               isolation: "worktree",
+               background: true,
+               project_root: root,
+               provider: WorktreeProvider
+             )
+
+    assert message =~ "only supported for foreground"
+  end
+
   # ── Context inheritance tests ──────────────────────────────────────────────
 
   describe "execute/2 context inheritance" do
