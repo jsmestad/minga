@@ -144,6 +144,34 @@ defmodule Minga.Git.Stub do
     end
   end
 
+  @doc "Sets the result for `commit/3` on `git_root`. Default is `{:ok, \"stub000\"}`."
+  @spec set_commit_result(String.t(), {:ok, String.t()} | {:error, String.t()}) :: :ok
+  def set_commit_result(git_root, result) do
+    :ets.insert(@table, {{:commit_result, Path.expand(git_root)}, result})
+    :ok
+  end
+
+  @doc "Sets a PID to notify when `commit/3` is called on `git_root`."
+  @spec set_commit_notify(String.t(), pid()) :: :ok
+  def set_commit_notify(git_root, pid) when is_pid(pid) do
+    :ets.insert(@table, {{:commit_notify, Path.expand(git_root)}, pid})
+    :ok
+  end
+
+  @doc "Sets a PID to notify when `stage/2` is called on `git_root`. The stub blocks until the caller sends `:unblock_stub_stage` to the Task pid."
+  @spec set_stage_blocker(String.t(), pid()) :: :ok
+  def set_stage_blocker(git_root, notify_pid) when is_pid(notify_pid) do
+    :ets.insert(@table, {{:stage_blocker, Path.expand(git_root)}, notify_pid})
+    :ok
+  end
+
+  @doc "Sets the result for `stage/2` on `git_root`. Default is `:ok`."
+  @spec set_stage_result(String.t(), :ok | {:error, String.t()}) :: :ok
+  def set_stage_result(git_root, result) do
+    :ets.insert(@table, {{:stage_result, Path.expand(git_root)}, result})
+    :ok
+  end
+
   @doc "Removes all stub entries for a given root path."
   @spec clear(String.t()) :: :ok
   def clear(git_root) do
@@ -165,6 +193,10 @@ defmodule Minga.Git.Stub do
     :ets.match_delete(@table, {{:stash_state, expanded}, :_})
     :ets.match_delete(@table, {{:ahead_behind, expanded}, :_})
     :ets.match_delete(@table, {{:last_commit_message, expanded}, :_})
+    :ets.match_delete(@table, {{:commit_result, expanded}, :_})
+    :ets.match_delete(@table, {{:commit_notify, expanded}, :_})
+    :ets.match_delete(@table, {{:stage_blocker, expanded}, :_})
+    :ets.match_delete(@table, {{:stage_result, expanded}, :_})
     :ok
   end
 
@@ -250,24 +282,52 @@ defmodule Minga.Git.Stub do
   end
 
   @impl true
-  @spec stage(String.t(), String.t() | [String.t()]) :: :ok
+  @spec stage(String.t(), String.t() | [String.t()]) :: :ok | {:error, String.t()}
   def stage(git_root, paths) do
     expanded = Path.expand(git_root)
-    new_paths = List.wrap(paths)
 
-    existing =
-      case :ets.lookup(@table, {:staged_paths, expanded}) do
-        [{_, staged}] -> staged
-        [] -> []
-      end
+    case :ets.lookup(@table, {:stage_blocker, expanded}) do
+      [{_, notify_pid}] ->
+        send(notify_pid, {:stub_stage_blocked, self()})
+        receive do: (:unblock_stub_stage -> :ok)
 
-    :ets.insert(@table, {{:staged_paths, expanded}, Enum.reverse(new_paths) ++ existing})
-    :ok
+      [] ->
+        :ok
+    end
+
+    case :ets.lookup(@table, {:stage_result, expanded}) do
+      [{_, {:error, _} = err}] ->
+        err
+
+      _ ->
+        new_paths = List.wrap(paths)
+
+        existing =
+          case :ets.lookup(@table, {:staged_paths, expanded}) do
+            [{_, staged}] -> staged
+            [] -> []
+          end
+
+        :ets.insert(@table, {{:staged_paths, expanded}, Enum.reverse(new_paths) ++ existing})
+        :ok
+    end
   end
 
   @impl true
-  @spec commit(String.t(), String.t(), keyword()) :: {:ok, String.t()}
-  def commit(_git_root, _message, _opts \\ []), do: {:ok, "stub000"}
+  @spec commit(String.t(), String.t(), keyword()) :: {:ok, String.t()} | {:error, String.t()}
+  def commit(git_root, message, opts \\ []) do
+    expanded = Path.expand(git_root)
+
+    case :ets.lookup(@table, {:commit_notify, expanded}) do
+      [{_, pid}] -> send(pid, {:stub_git_commit, git_root, message, opts})
+      [] -> :ok
+    end
+
+    case :ets.lookup(@table, {:commit_result, expanded}) do
+      [{_, result}] -> result
+      [] -> {:ok, "stub000"}
+    end
+  end
 
   @impl true
   @spec last_commit_message(String.t()) :: {:ok, String.t()}

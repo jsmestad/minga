@@ -1232,17 +1232,16 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   @spec git_action(state(), String.t(), git_operation(), String.t()) :: state()
   defp git_action(state, pending_msg, operation, success_msg)
        when is_binary(pending_msg) and is_binary(success_msg) do
+    git_root_override = Map.get(state, :git_root_override)
+
     state
     |> EditorState.set_status(pending_msg)
-    |> AsyncAction.run(@git_lane, fn -> run_git_op(operation, success_msg) end)
-  end
-
-  @spec run_git_op(git_operation(), String.t()) :: git_result()
-  defp run_git_op(operation, success_msg) do
-    case MingaEditor.resolve_git_root() do
-      nil -> :not_a_repo
-      git_root -> run_git_op(operation, git_root, success_msg)
-    end
+    |> AsyncAction.run(@git_lane, fn ->
+      case git_root_override || MingaEditor.resolve_git_root() do
+        nil -> :not_a_repo
+        git_root -> run_git_op(operation, git_root, success_msg)
+      end
+    end)
   end
 
   @spec run_git_op(git_operation(), String.t(), String.t()) :: git_result()
