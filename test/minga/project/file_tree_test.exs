@@ -438,13 +438,14 @@ defmodule Minga.Project.FileTreeTest do
 
       ref = make_ref()
       parent = self()
+      root = Path.expand(tmp_dir)
       handler_id = {__MODULE__, ref}
 
       :telemetry.attach(
         handler_id,
         [:minga, :file_tree, :walk, :stop],
         fn _event, measurements, metadata, _ ->
-          send(parent, {ref, measurements, metadata})
+          if metadata.root == root, do: send(parent, {ref, measurements, metadata})
         end,
         nil
       )
