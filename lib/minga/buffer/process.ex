@@ -483,6 +483,12 @@ defmodule Minga.Buffer.Process do
     GenServer.call(server, :read_only?)
   end
 
+  @doc "Sets the read-only flag at runtime (e.g. when the backing volume unmounts)."
+  @spec set_read_only(GenServer.server(), boolean()) :: :ok
+  def set_read_only(server, read_only?) do
+    GenServer.call(server, {:set_read_only, read_only?})
+  end
+
   @doc "Returns the buffer storage backend."
   @spec storage(GenServer.server()) :: BufState.storage()
   def storage(server) do
@@ -1363,6 +1369,10 @@ defmodule Minga.Buffer.Process do
 
   def handle_call(:read_only?, _from, state) do
     {:reply, state.read_only, state}
+  end
+
+  def handle_call({:set_read_only, read_only?}, _from, state) do
+    {:reply, :ok, %{state | read_only: read_only?}}
   end
 
   def handle_call(:storage, _from, state) do
