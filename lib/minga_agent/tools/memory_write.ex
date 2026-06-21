@@ -4,7 +4,7 @@ defmodule MingaAgent.Tools.MemoryWrite do
 
   The agent can call this tool to record useful information across sessions,
   such as user preferences, project conventions, or recurring patterns.
-  Also available to users via the `/remember` slash command.
+  Also available to users via `/memory add <text>`.
   """
 
   alias MingaAgent.Memory

@@ -102,7 +102,7 @@ defmodule MingaAgent.Memory do
     case read(config_dir) do
       nil ->
         "No memory file found at #{path(config_dir)}\n" <>
-          "Use /remember <text> to start building your memory."
+          "Use /memory add <text> to start building your memory."
 
       content ->
         lines = String.split(content, "\n", trim: true)
