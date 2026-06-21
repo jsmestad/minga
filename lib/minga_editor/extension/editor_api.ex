@@ -101,6 +101,19 @@ defmodule MingaEditor.Extension.EditorAPI do
     end
   end
 
+  @doc """
+  Returns the pid of the active buffer, or `nil` when there is no live
+  active buffer. Use with `Minga.Buffer.content/1` to read the buffer's
+  in-memory text (including unsaved edits) rather than the file on disk.
+  """
+  @spec active_buffer(state()) :: pid() | nil
+  def active_buffer(state) do
+    case state.workspace.buffers.active do
+      pid when is_pid(pid) -> if Process.alive?(pid), do: pid, else: nil
+      _ -> nil
+    end
+  end
+
   @spec safe_file_path(pid()) :: String.t() | nil
   defp safe_file_path(pid) do
     Buffer.file_path(pid)
