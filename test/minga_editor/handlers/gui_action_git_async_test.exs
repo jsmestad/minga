@@ -3,7 +3,8 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
   GitOps GUI actions return control to the editor immediately and apply their
   result asynchronously, so a slow `git` command never blocks the input path.
   """
-  # async: false because this module mutates the global :minga Application env to swap git backends and coordinate blocking fake git work.
+  # async: false because this module mutates the global :minga Application env
+  # to swap git backends and coordinate blocking fake git work.
   use ExUnit.Case, async: false
 
   alias Minga.Events
