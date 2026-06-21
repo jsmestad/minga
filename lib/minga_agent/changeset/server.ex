@@ -222,15 +222,33 @@ defmodule MingaAgent.Changeset.Server do
   end
 
   def handle_call(:merge, _from, state) do
-    case do_merge(state) do
-      :ok ->
+    plans = plan_merge(state)
+
+    # Apply every clean per-file plan, even on a partial conflict. Files that
+    # merged cleanly are written and pruned so a later retry skips them.
+    :ok = apply_plans(plans)
+
+    case conflict_details(plans) do
+      nil ->
         Overlay.cleanup(state.overlay)
         broadcast_merged(state)
         {:stop, :normal, :ok, state}
 
-      {:conflict, details} ->
+      details ->
         state = prune_successful_merge_results(state, details.results)
         {:reply, {:conflict, details}, state}
+    end
+  rescue
+    e ->
+      {:reply, {:error, Exception.message(e)}, state}
+  end
+
+  def handle_call(:preflight_merge, _from, state) do
+    plans = plan_merge(state)
+
+    case conflict_details(plans) do
+      nil -> {:reply, {:ok, results_from_plans(plans)}, state}
+      details -> {:reply, {:conflict, details}, state}
     end
   rescue
     e ->
@@ -251,27 +269,63 @@ defmodule MingaAgent.Changeset.Server do
 
   # ── Merge logic ─────────────────────────────────────────────────────────────
 
-  @spec do_merge(state()) :: :ok | {:conflict, map()} | {:error, term()}
-  defp do_merge(state) do
-    modification_results =
+  # A per-file merge plan pairs the decision result tuple with the disk action
+  # that `:merge` performs to realize it. `:preflight_merge` keeps the results
+  # and discards the actions, so planning is fully write-free and reusable.
+  @typep merge_action :: {:write, String.t(), binary()} | {:rm, String.t()} | :noop
+  @typep merge_plan :: {result :: tuple(), merge_action()}
+
+  # Plans the full merge without touching disk. Returns one plan per file; the
+  # caller decides whether to apply the write actions (`:merge`) or discard them
+  # (`:preflight_merge`). Planning is fully write-free so both paths can share it.
+  @spec plan_merge(state()) :: [merge_plan()]
+  defp plan_merge(state) do
+    modification_plans =
       Enum.map(state.modifications, fn {path, changeset_content} ->
-        merge_one_file(state, path, changeset_content)
+        plan_one_file(state, path, changeset_content)
       end)
 
-    deletion_results =
+    deletion_plans =
       Enum.map(state.deletions, fn path ->
-        merge_one_deletion(state, path)
+        plan_one_deletion(state, path)
       end)
 
-    all_results = modification_results ++ deletion_results
+    modification_plans ++ deletion_plans
+  end
+
+  # Builds the conflict report (matching `merge/1`'s shape) from a plan list, or
+  # `nil` when every file would merge cleanly.
+  @spec conflict_details([merge_plan()]) :: map() | nil
+  defp conflict_details(plans) do
+    all_results = results_from_plans(plans)
     conflicts = Enum.filter(all_results, &match?({:conflict, _, _}, &1))
 
     if conflicts == [] do
-      :ok
+      nil
     else
-      {:conflict, %{conflicts: conflicts, results: all_results}}
+      %{conflicts: conflicts, results: all_results}
     end
   end
+
+  @spec results_from_plans([merge_plan()]) :: [tuple()]
+  defp results_from_plans(plans), do: Enum.map(plans, fn {result, _action} -> result end)
+
+  # Performs the disk writes for the clean plans. Only reached from `:merge`.
+  # Conflict plans carry a `:noop` action, so partial merges write only the
+  # files that merged cleanly and leave conflicting files on disk untouched.
+  @spec apply_plans([merge_plan()]) :: :ok
+  defp apply_plans(plans) do
+    Enum.each(plans, fn {_result, action} -> apply_merge_action(action) end)
+  end
+
+  @spec apply_merge_action(merge_action()) :: :ok
+  defp apply_merge_action({:write, real_path, content}) do
+    File.mkdir_p!(Path.dirname(real_path))
+    File.write!(real_path, content)
+  end
+
+  defp apply_merge_action({:rm, real_path}), do: File.rm!(real_path)
+  defp apply_merge_action(:noop), do: :ok
 
   @spec prune_successful_merge_results(state(), [tuple()]) :: state()
   defp prune_successful_merge_results(state, results) do
@@ -291,8 +345,8 @@ defmodule MingaAgent.Changeset.Server do
 
   defp prune_successful_merge_result(_result, state), do: state
 
-  @spec merge_one_file(state(), String.t(), binary()) :: tuple()
-  defp merge_one_file(state, path, changeset_content) do
+  @spec plan_one_file(state(), String.t(), binary()) :: merge_plan()
+  defp plan_one_file(state, path, changeset_content) do
     real_path = Path.join(state.project_root, path)
     original = Map.get(state.originals, path)
 
@@ -302,61 +356,56 @@ defmodule MingaAgent.Changeset.Server do
         {:error, :enoent} -> nil
       end
 
-    merge_strategy(real_path, path, original, current_real, changeset_content)
+    plan_strategy(real_path, path, original, current_real, changeset_content)
   end
 
   # New file: didn't exist when changeset was created
-  @spec merge_strategy(String.t(), String.t(), binary() | nil, binary() | nil, binary()) ::
-          tuple()
-  defp merge_strategy(real_path, path, nil = _original, nil = _current_real, changeset_content) do
-    File.mkdir_p!(Path.dirname(real_path))
-    File.write!(real_path, changeset_content)
-    {:ok, path, :created}
+  @spec plan_strategy(String.t(), String.t(), binary() | nil, binary() | nil, binary()) ::
+          merge_plan()
+  defp plan_strategy(real_path, path, nil = _original, nil = _current_real, changeset_content) do
+    {{:ok, path, :created}, {:write, real_path, changeset_content}}
   end
 
   # New file but someone else also created it
-  defp merge_strategy(_real_path, path, nil = _original, _current_real, _changeset_content) do
-    {:conflict, path, :both_created}
+  defp plan_strategy(_real_path, path, nil = _original, _current_real, _changeset_content) do
+    {{:conflict, path, :both_created}, :noop}
   end
 
   # Real file unchanged since changeset was created: apply directly
-  defp merge_strategy(real_path, path, original, current_real, changeset_content)
+  defp plan_strategy(real_path, path, original, current_real, changeset_content)
        when current_real == original do
-    File.write!(real_path, changeset_content)
-    {:ok, path, :applied}
+    {{:ok, path, :applied}, {:write, real_path, changeset_content}}
   end
 
   # Real file was also modified: three-way merge
-  defp merge_strategy(real_path, path, original, current_real, changeset_content) do
+  defp plan_strategy(real_path, path, original, current_real, changeset_content) do
     ancestor_lines = String.split(original, "\n", trim: false)
     ours_lines = String.split(changeset_content, "\n", trim: false)
     theirs_lines = String.split(current_real, "\n", trim: false)
 
     case Minga.Core.Diff.merge3(ancestor_lines, ours_lines, theirs_lines) do
       {:ok, merged_lines} ->
-        File.write!(real_path, Enum.join(merged_lines, "\n"))
-        {:ok, path, :merged_three_way}
+        {{:ok, path, :merged_three_way}, {:write, real_path, Enum.join(merged_lines, "\n")}}
 
       {:conflict, _hunks} ->
-        {:conflict, path, :concurrent_edit}
+        {{:conflict, path, :concurrent_edit}, :noop}
     end
   end
 
-  @spec merge_one_deletion(state(), String.t()) :: tuple()
-  defp merge_one_deletion(state, path) do
+  @spec plan_one_deletion(state(), String.t()) :: merge_plan()
+  defp plan_one_deletion(state, path) do
     real_path = Path.join(state.project_root, path)
     original = Map.get(state.originals, path)
 
     case File.read(real_path) do
       {:ok, content} when content == original ->
-        File.rm!(real_path)
-        {:ok, path, :deleted}
+        {{:ok, path, :deleted}, {:rm, real_path}}
 
       {:ok, _changed} ->
-        {:conflict, path, :modified_before_delete}
+        {{:conflict, path, :modified_before_delete}, :noop}
 
       {:error, :enoent} ->
-        {:ok, path, :already_deleted}
+        {{:ok, path, :already_deleted}, :noop}
     end
   end
 

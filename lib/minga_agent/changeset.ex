@@ -94,13 +94,19 @@ defmodule MingaAgent.Changeset do
   end
 
   @doc """
-  Validates the merge plan back to the real project without applying it.
+  Previews the merge back to the real project without applying it.
 
-  This performs the same path validation and conflict planning as `merge/1`
-  but does not write, delete, or clean up anything. It is useful when a caller
-  needs to know whether a merge would succeed before mutating other state.
+  This runs the same path resolution and three-way merge planning as `merge/1`
+  but writes, deletes, and cleans up nothing on disk, and never stops the
+  GenServer. Use it when a caller needs to know whether a merge would succeed
+  before mutating other state.
+
+  Returns `{:ok, results}` when every file would merge cleanly, or
+  `{:conflict, details}` (same shape as `merge/1`) listing what could not be
+  auto-merged. In both cases `results` is the list of per-file decision tuples
+  (`{:ok, path, kind}` / `{:conflict, path, reason}`) the merge would produce.
   """
-  @spec preflight_merge(changeset()) :: {:ok, [map()]} | {:error, term()}
+  @spec preflight_merge(changeset()) :: {:ok, [tuple()]} | {:conflict, map()} | {:error, term()}
   def preflight_merge(cs) do
     GenServer.call(cs, :preflight_merge)
   end
