@@ -137,12 +137,12 @@ defmodule Minga.Diagnostics do
 
   @doc """
   Returns the gutter sign per line for a URI: a severity for normal
-  producers, or `:diag_advisory` for lines whose only diagnostics come from
-  an extension (source prefixed `"ext:"`).
+  producers, or `:diag_advisory` for lines whose only diagnostics are
+  advisory (`Diagnostic.advisory: true`, e.g. extension/LLM hints).
 
-  Lines that carry any non-extension diagnostic use that producer's most
-  severe sign, so compiler/LSP signs always win over extension advice on
-  the same line. Used by the gutter renderer to pick the sign icon.
+  Lines that carry any non-advisory diagnostic use that producer's most
+  severe sign, so compiler/LSP signs always win over advice on the same
+  line. Used by the gutter renderer to pick the sign icon.
   """
   @spec gutter_signs_by_line(GenServer.server(), uri()) :: %{
           non_neg_integer() => Diagnostic.severity() | :diag_advisory
@@ -164,10 +164,7 @@ defmodule Minga.Diagnostics do
   end
 
   @spec advisory?(Diagnostic.t()) :: boolean()
-  defp advisory?(%Diagnostic{source: source}) when is_binary(source),
-    do: String.starts_with?(source, "ext:")
-
-  defp advisory?(_diag), do: false
+  defp advisory?(%Diagnostic{advisory: advisory}), do: advisory == true
 
   @doc """
   Returns the next diagnostic after `current_line` for a URI, or `nil`.

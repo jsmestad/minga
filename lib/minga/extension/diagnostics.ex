@@ -9,8 +9,8 @@ defmodule Minga.Extension.Diagnostics do
   Findings are namespaced under the extension's own source (`:"ext:<name>"`),
   so an extension can never publish under or clear another producer's
   diagnostics (LSP, compiler). Severity is clamped to `:hint`: advice must
-  never outrank a compiler error in the gutter. Because the source carries
-  the `ext:` prefix, these render as a distinct, themeable advisory sign
+  never outrank a compiler error in the gutter. Findings are flagged
+  `advisory: true`, so they render as a distinct, themeable advisory sign
   (`:diag_advisory`) rather than a normal hint.
 
   `uri` accepts either a `file://` URI or an absolute path.
@@ -60,7 +60,8 @@ defmodule Minga.Extension.Diagnostics do
       severity: :hint,
       message: concern,
       source: "ext:#{extension_name}",
-      encoding: :utf8
+      encoding: :utf8,
+      advisory: true
     }
   end
 
