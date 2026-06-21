@@ -465,6 +465,11 @@ defmodule Minga.Project.FileTreeTest do
     test "does not span when entries are already memoized", %{tmp_dir: tmp_dir} do
       touch(Path.join(tmp_dir, "a.txt"))
 
+      # Memoize before attaching the handler so this test observes only the
+      # already-populated path. The preceding telemetry test covers the real
+      # walk event; this one should fail only if the memoized path emits.
+      walked = tmp_dir |> FileTree.new() |> FileTree.ensure_entries()
+
       ref = make_ref()
       parent = self()
       handler_id = {__MODULE__, ref}
@@ -484,11 +489,6 @@ defmodule Minga.Project.FileTreeTest do
       )
 
       on_exit(fn -> :telemetry.detach(handler_id) end)
-
-      # First call walks (and memoizes entries); a second ensure_entries on the
-      # already-populated tree must not walk again.
-      walked = tmp_dir |> FileTree.new() |> FileTree.ensure_entries()
-      assert_receive {^ref, :walked}
 
       FileTree.ensure_entries(walked)
       refute_receive {^ref, :walked}
