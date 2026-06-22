@@ -103,6 +103,7 @@ defmodule MingaEditor.State do
             options_server: @default_options_server,
             events_registry: @default_events_registry,
             sidebar_registry: MingaEditor.Extension.Sidebar.default_table(),
+            agent_semantic_ui_registry: MingaEditor.Agent.SemanticUI.Registry.default_table(),
             workspace: nil,
             terminal_viewport: Viewport.new(24, 80),
             editing_model: :vim,
@@ -176,6 +177,7 @@ defmodule MingaEditor.State do
           options_server: options_server(),
           events_registry: events_registry(),
           sidebar_registry: MingaEditor.Extension.Sidebar.table(),
+          agent_semantic_ui_registry: MingaEditor.Agent.SemanticUI.Registry.table(),
           workspace: SessionState.t(),
           terminal_viewport: Viewport.t(),
           editing_model: :vim | :cua,
@@ -227,6 +229,12 @@ defmodule MingaEditor.State do
   @doc "Returns the active sidebar registry table for this state."
   @spec sidebar_registry(t() | map()) :: MingaEditor.Extension.Sidebar.table()
   def sidebar_registry(state), do: MingaEditor.Extension.Sidebar.table_for(state)
+
+  @doc "Stores the semantic agent UI registry table for this editor state."
+  @spec put_agent_semantic_ui_registry(t(), MingaEditor.Agent.SemanticUI.Registry.table()) :: t()
+  def put_agent_semantic_ui_registry(%__MODULE__{} = state, table) when is_atom(table) do
+    %{state | agent_semantic_ui_registry: table}
+  end
 
   @spec set_renderer(t(), pid() | nil) :: t()
   def set_renderer(%__MODULE__{} = state, pid) when is_pid(pid) or is_nil(pid),

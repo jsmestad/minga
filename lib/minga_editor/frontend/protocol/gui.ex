@@ -401,6 +401,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | {:search_replace_all, replacement :: String.t()}
           | :search_dismiss
           | {:sidebar_action, sidebar_id :: String.t(), kind :: String.t(), action :: String.t()}
+          | {:extension_panel_action, ext_name :: String.t(), action_name :: String.t(),
+             context :: map()}
           | {:extension_action, extension_id :: String.t(), action :: String.t(),
              payload :: binary()}
           | :float_popup_dismiss
@@ -2550,9 +2552,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           action_name::binary-size(action_len), context_rest::binary>>
       ) do
     context = decode_panel_action_context(context_rest)
-    {:ok, {:extension_panel_action, ext_name, String.to_existing_atom(action_name), context}}
-  rescue
-    ArgumentError -> :error
+    {:ok, {:extension_panel_action, ext_name, action_name, context}}
   end
 
   def decode_gui_action(

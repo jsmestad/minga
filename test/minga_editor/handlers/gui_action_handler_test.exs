@@ -8,7 +8,10 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
   import ExUnit.CaptureLog
 
   alias Minga.Events
+  alias Minga.RenderModel.UI.ExtensionPanel.Content.Text
+  alias MingaEditor.Agent.SemanticUI.Registry, as: SemanticUIRegistry
   alias MingaEditor.Commands
+  alias MingaEditor.Editing
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.FileTree.Feature, as: FileTreeFeature
   alias MingaEditor.Frontend.Capabilities
@@ -26,8 +29,10 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
 
   setup do
     table = Module.concat(__MODULE__, "Sidebar#{System.unique_integer([:positive])}")
+    semantic_table = Module.concat(__MODULE__, "SemanticUI#{System.unique_integer([:positive])}")
     start_supervised!({Sidebar, name: table, notify: false})
-    %{sidebar_registry: table}
+    start_supervised!({SemanticUIRegistry, name: semantic_table, notify: false})
+    %{sidebar_registry: table, semantic_registry: semantic_table}
   end
 
   test "tab context actions target the requested tab without selecting it", %{
@@ -151,6 +156,35 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
 
     assert activated.workspace.keymap_scope == state.workspace.keymap_scope
     assert EditorState.sidebar_active_id(activated) == nil
+  end
+
+  test "extension panel actions route semantic registry entries before legacy extensions", %{
+    sidebar_registry: table,
+    semantic_registry: semantic_table
+  } do
+    :ok =
+      SemanticUIRegistry.register(semantic_table, {:bundle, :gui_action_test}, %{
+        id: "gui-action-test",
+        surface: :dashboard_section,
+        payload: [%Text{text: "GUI action test"}],
+        actions: [
+          %{
+            id: "choose_register",
+            label: "Choose register",
+            editor_action: {:select_register, "g"}
+          }
+        ]
+      })
+
+    state = base_state(table, agent_semantic_ui_registry: semantic_table)
+
+    new_state =
+      GuiActionHandler.dispatch(
+        state,
+        {:extension_panel_action, "bundle:gui_action_test", "choose_register", %{source: :mouse}}
+      )
+
+    assert Editing.active_register(new_state) == "g"
   end
 
   test "extension panel actions report unavailable extensions", %{sidebar_registry: table} do
@@ -357,7 +391,12 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
 
   defp base_state(sidebar_registry, opts \\ []) do
     opts = Keyword.put(opts, :sidebar_registry, sidebar_registry)
-    TestHelpers.base_state(opts)
+    state = TestHelpers.base_state(opts)
+
+    case Keyword.fetch(opts, :agent_semantic_ui_registry) do
+      {:ok, registry} -> EditorState.put_agent_semantic_ui_registry(state, registry)
+      :error -> state
+    end
   end
 
   defp clear_window_reset_pending(state) do
