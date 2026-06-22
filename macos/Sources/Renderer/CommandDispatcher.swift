@@ -26,6 +26,7 @@
 
 import Foundation
 import AppKit
+import os
 
 /// Dispatches render commands to FrameState (metadata) and GUIState (chrome).
 @MainActor
@@ -260,6 +261,7 @@ final class CommandDispatcher {
         // Resolve the keystroke-to-present latency sample for the echoed input
         // correlation sequence (ticket #2215). The frame is fully promoted here
         // and about to be presented by the Metal renderer.
+        os_signpost(.event, log: renderLog, name: "CommitFrame", "frame=%{public}u input=%{public}u", frameSeq, inputSeq)
         latency.resolve(seq: inputSeq)
         if let firstRender = onFirstRender {
             firstRender()

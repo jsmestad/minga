@@ -96,12 +96,20 @@ defmodule MingaEditor.Commands.AgentSession do
   @spec start_agent_session(state()) :: state()
   @spec start_agent_session(state(), keyword()) :: state()
   def start_agent_session(state, opts \\ []) do
+    Minga.Telemetry.span([:minga, :agent, :start_agent_session], %{}, fn ->
+      do_start_agent_session(state, opts)
+    end)
+  end
+
+  @spec do_start_agent_session(state(), keyword()) :: state()
+  defp do_start_agent_session(state, opts) do
     panel = AgentAccess.panel(state)
     {project_view, created_project_view?} = session_project_view(state)
 
     session_opts = [
       thinking_level: panel.thinking_level,
       session_start_hook_enabled?: Keyword.get(opts, :session_start_hook_enabled?, true),
+      recover_interrupted_work?: Keyword.get(opts, :recover_interrupted_work?, true),
       provider_opts: [
         provider: panel.provider_name,
         model: panel.model_name,
@@ -350,7 +358,12 @@ defmodule MingaEditor.Commands.AgentSession do
 
   @spec start_and_subscribe(state(), keyword()) :: {:ok, pid()} | {:error, term()}
   defp start_and_subscribe(state, opts) do
-    case MingaAgent.SessionManager.start_session(opts) do
+    start_result =
+      Minga.Telemetry.span([:minga, :agent, :session_manager_start], %{}, fn ->
+        MingaAgent.SessionManager.start_session(opts)
+      end)
+
+    case start_result do
       {:ok, _session_id, pid} ->
         try do
           subscribe_active_session(state, pid)
@@ -853,14 +866,23 @@ defmodule MingaEditor.Commands.AgentSession do
   @spec project_view_from_root(state()) :: {ProjectView.t() | nil, boolean()}
   defp project_view_from_root(state) do
     case EditorState.file_tree_state(state).project_root do
-      root when is_binary(root) ->
-        case ProjectView.overlay(root) do
-          {:ok, project_view} -> {project_view, true}
-          {:error, _reason} -> {nil, false}
-        end
+      root when is_binary(root) -> measured_project_view_overlay(root)
+      _ -> {nil, false}
+    end
+  end
 
-      _ ->
-        {nil, false}
+  @spec measured_project_view_overlay(String.t()) :: {ProjectView.t() | nil, boolean()}
+  defp measured_project_view_overlay(root) do
+    Minga.Telemetry.span([:minga, :agent, :project_view_overlay], %{root: root}, fn ->
+      project_view_overlay(root)
+    end)
+  end
+
+  @spec project_view_overlay(String.t()) :: {ProjectView.t() | nil, boolean()}
+  defp project_view_overlay(root) do
+    case ProjectView.overlay(root) do
+      {:ok, project_view} -> {project_view, true}
+      {:error, _reason} -> {nil, false}
     end
   end
 

@@ -21,17 +21,29 @@ defmodule MingaAgent.SessionManagerTest do
   end
 
   describe "start_session/2" do
-    test "starts a session and returns a human-readable ID", %{manager: manager} do
+    test "starts a session and returns a human-readable unique ID", %{manager: manager} do
       assert {:ok, session_id, pid} = SessionManager.start_session(manager, [])
-      assert session_id == "session-1"
+      assert String.match?(session_id, ~r/^session-1-[0-9a-f]{8}$/)
       assert is_pid(pid)
       assert Process.alive?(pid)
     end
 
-    test "increments session IDs", %{manager: manager} do
-      {:ok, "session-1", _pid1} = SessionManager.start_session(manager, [])
-      {:ok, "session-2", _pid2} = SessionManager.start_session(manager, [])
-      {:ok, "session-3", _pid3} = SessionManager.start_session(manager, [])
+    test "increments the human-readable session ID prefix while keeping IDs unique", %{
+      manager: manager
+    } do
+      {:ok, session_id1, _pid1} = SessionManager.start_session(manager, [])
+      {:ok, session_id2, _pid2} = SessionManager.start_session(manager, [])
+      {:ok, session_id3, _pid3} = SessionManager.start_session(manager, [])
+
+      assert String.match?(session_id1, ~r/^session-1-[0-9a-f]{8}$/)
+      assert String.match?(session_id2, ~r/^session-2-[0-9a-f]{8}$/)
+      assert String.match?(session_id3, ~r/^session-3-[0-9a-f]{8}$/)
+
+      assert Enum.uniq([session_id1, session_id2, session_id3]) == [
+               session_id1,
+               session_id2,
+               session_id3
+             ]
     end
 
     test "honors a supplied stable session id", %{manager: manager} do

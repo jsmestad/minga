@@ -482,7 +482,7 @@ defmodule MingaAgent.SessionManager do
           | {:existing, String.t(), pid(), state()}
           | {:error, term()}
   defp start_managed_session(state, opts) do
-    session_id = Keyword.get(opts, :session_id, "session-#{state.next_id}")
+    {session_id, opts} = session_id_for_start(state, opts)
 
     case Map.fetch(state.sessions, session_id) do
       {:ok, %{monitor_ref: ref, pid: pid}} when is_reference(ref) ->
@@ -524,6 +524,28 @@ defmodule MingaAgent.SessionManager do
       {:error, reason} ->
         {:error, reason}
     end
+  end
+
+  @spec session_id_for_start(state(), keyword()) :: {String.t(), keyword()}
+  defp session_id_for_start(state, opts) do
+    case Keyword.fetch(opts, :session_id) do
+      {:ok, session_id} when is_binary(session_id) ->
+        {session_id, opts}
+
+      :error ->
+        session_id = generated_session_id(state.next_id)
+
+        {session_id,
+         opts
+         |> Keyword.put(:session_id, session_id)
+         |> Keyword.put_new(:recover_interrupted_work?, false)}
+    end
+  end
+
+  @spec generated_session_id(pos_integer()) :: String.t()
+  defp generated_session_id(index) do
+    suffix = :crypto.strong_rand_bytes(4) |> Base.encode16(case: :lower)
+    "session-#{index}-#{suffix}"
   end
 
   @spec next_id_after_start(state(), String.t()) :: pos_integer()

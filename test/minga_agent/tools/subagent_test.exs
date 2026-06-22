@@ -504,14 +504,16 @@ defmodule MingaAgent.Tools.SubagentTest do
       end)
 
     assert {:ok, result} = Task.await(task)
-    assert result =~ "Handle: session-1"
+    assert result =~ ~r/Handle: session-1-[0-9a-f]{8}/
 
     assert_receive {:minga_event, :background_subagent_started,
-                    %Handle{session_id: "session-1", task: "long task"}},
+                    %Handle{session_id: session_id, task: "long task"}},
                    1_000
 
+    assert String.match?(session_id, ~r/^session-1-[0-9a-f]{8}$/)
+
     [handle] = SessionManager.list_background_subagents(manager, nil)
-    assert %Handle{session_id: "session-1", pid: child_pid} = handle
+    assert %Handle{session_id: ^session_id, pid: child_pid} = handle
     assert Session.status(child_pid) in [:idle, :thinking]
 
     assert_receive {:provider_prompt, provider_pid, "long task"}, 1_000
@@ -605,7 +607,8 @@ defmodule MingaAgent.Tools.SubagentTest do
     assert_receive {:provider_prompt, provider_pid, "notify"}, 1_000
     :ok = GatedProvider.proceed(provider_pid)
     assert_receive {:agent_event, _pid, {:status_changed, :idle}}, 1_000
-    assert_receive {:notified, :complete, "Sub-agent session-1 finished"}, 1_000
+    assert_receive {:notified, :complete, message}, 1_000
+    assert String.match?(message, ~r/^Sub-agent session-1-[0-9a-f]{8} finished$/)
     refute_receive {:notified, :complete, _}, 50
   end
 

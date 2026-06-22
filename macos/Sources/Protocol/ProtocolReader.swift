@@ -5,6 +5,7 @@
 /// (the BEAM batches an entire render frame into one message).
 
 import Foundation
+import os
 import Synchronization
 
 /// Reads framed protocol messages from an input file handle and dispatches them.
@@ -90,6 +91,7 @@ final class ProtocolReader: @unchecked Sendable {
                 remaining -= chunk.count
             }
 
+            os_signpost(.event, log: protocolLog, name: "ProtocolPayloadReceived", "bytes=%{public}d", payload.count)
             handler(payload)
         }
     }

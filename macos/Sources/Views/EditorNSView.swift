@@ -407,6 +407,7 @@ final class EditorNSView: MTKView {
             needsDisplay = true
         }
         dispatcher.markRendered()
+        os_signpost(.event, log: renderLog, name: "DrawComplete")
     }
 
     private func currentGridDimensions() -> GridDimensions {

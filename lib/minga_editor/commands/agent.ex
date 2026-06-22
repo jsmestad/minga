@@ -435,14 +435,12 @@ defmodule MingaEditor.Commands.Agent do
     end)
   end
 
-  @doc "Starts a local session, or opens a server picker when remotes are connected."
+  @doc "Opens the explicit local/remote session picker."
   @spec start_session_picker(state()) :: state()
   def start_session_picker(state) do
-    if connected_remote_servers?() do
+    Minga.Telemetry.span([:minga, :agent, :start_session_picker], %{}, fn ->
       PickerUI.open(state, MingaEditor.UI.Picker.RemoteServerSource)
-    else
-      new_agent_session(state)
-    end
+    end)
   end
 
   @doc "Connects to an existing remote session from the session picker."
@@ -591,12 +589,6 @@ defmodule MingaEditor.Commands.Agent do
     else
       resolve_mentions(text, model: model)
     end
-  end
-
-  @spec connected_remote_servers?() :: boolean()
-  defp connected_remote_servers? do
-    Minga.Distribution.ConnectionManager.connected_nodes()
-    |> Enum.any?(fn {_name, _node, status} -> status == :connected end)
   end
 
   @spec remote_session?(state()) :: boolean()
@@ -789,7 +781,7 @@ defmodule MingaEditor.Commands.Agent do
     |> create_active_agent_tab()
     |> reset_agent_state_for_new_session()
     |> AgentLifecycle.setup_agent_highlight()
-    |> AgentSession.start_agent_session()
+    |> AgentSession.start_agent_session(recover_interrupted_work?: false)
   end
 
   @spec reset_agent_state_for_new_session(state()) :: state()
@@ -1887,7 +1879,8 @@ defmodule MingaEditor.Commands.Agent do
     {:cycle_agent_tabs, "Cycle agent tabs (opens split if none)", :cycle_agent_tabs},
     {:agent_abort, "Abort current AI agent turn", :abort_agent},
     {:agent_stop_session, "Stop AI agent session", :stop_current_session},
-    {:agent_new_session, "New agent workspace", :start_session_picker},
+    {:agent_new_session, "New local agent workspace", :new_agent_session},
+    {:agent_start_session_picker, "Pick agent session location", :start_session_picker},
     {:agent_cycle_model, "Cycle AI agent model", :cycle_model},
     {:agent_cycle_thinking, "Cycle AI thinking level", :cycle_thinking_level},
     {:agent_thinking_off, "Set AI thinking level to off", :set_thinking_off},

@@ -106,6 +106,7 @@ defmodule Minga.Command.RegistryTest do
           :cycle_agent_tabs,
           :agent_abort,
           :agent_new_session,
+          :agent_start_session_picker,
           :agent_pick_model,
           :agent_pick_thinking,
           :agent_cycle_model,
