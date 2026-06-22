@@ -76,6 +76,90 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilderTest do
       assert row.icon_color == 0x519ABA
     end
 
+    test "disables local navigation while filtering" do
+      tree = %ProjectFileTree{
+        root: "/project",
+        width: 32,
+        cursor: 0,
+        expanded: MapSet.new(["/project"]),
+        git_status: %{},
+        entries: [
+          %{
+            path: "/project/main.rs",
+            name: "main.rs",
+            dir?: false,
+            depth: 1,
+            last_child?: true,
+            guides: []
+          }
+        ]
+      }
+
+      file_tree = %FileTreeState{tree: tree, focused: true, filtering: true, tree_status: :ready}
+      model = FileTreeBuilder.build(build_minimal_context(file_tree: file_tree))
+
+      assert model.status == :ready
+      refute model.local_navigation?
+    end
+
+    test "disables local navigation while help is visible" do
+      tree = %ProjectFileTree{
+        root: "/project",
+        width: 32,
+        cursor: 0,
+        expanded: MapSet.new(["/project"]),
+        git_status: %{},
+        entries: [
+          %{
+            path: "/project/main.rs",
+            name: "main.rs",
+            dir?: false,
+            depth: 1,
+            last_child?: true,
+            guides: []
+          }
+        ]
+      }
+
+      file_tree = %FileTreeState{
+        tree: tree,
+        focused: true,
+        help_visible: true,
+        tree_status: :ready
+      }
+
+      model = FileTreeBuilder.build(build_minimal_context(file_tree: file_tree))
+
+      assert model.status == :ready
+      refute model.local_navigation?
+    end
+
+    test "disables local navigation when file tree is not focused" do
+      tree = %ProjectFileTree{
+        root: "/project",
+        width: 32,
+        cursor: 0,
+        expanded: MapSet.new(["/project"]),
+        git_status: %{},
+        entries: [
+          %{
+            path: "/project/main.rs",
+            name: "main.rs",
+            dir?: false,
+            depth: 1,
+            last_child?: true,
+            guides: []
+          }
+        ]
+      }
+
+      file_tree = %FileTreeState{tree: tree, focused: false, tree_status: :ready}
+      model = FileTreeBuilder.build(build_minimal_context(file_tree: file_tree))
+
+      assert model.status == :ready
+      refute model.local_navigation?
+    end
+
     test "resolves per-filetype icon colors from the active theme" do
       path = "/project/main.rs"
 

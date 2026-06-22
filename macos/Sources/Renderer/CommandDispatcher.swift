@@ -28,6 +28,13 @@ import Foundation
 import AppKit
 import os
 
+private enum FileTreeNavigationCodepoints {
+    static let downKey: UInt32 = 106
+    static let upKey: UInt32 = 107
+    static let downArrow: UInt32 = 57353
+    static let upArrow: UInt32 = 57352
+}
+
 /// Dispatches render commands to FrameState (metadata) and GUIState (chrome).
 @MainActor
 final class CommandDispatcher {
@@ -365,9 +372,9 @@ final class CommandDispatcher {
         guard modifiers == 0 else { return false }
 
         switch codepoint {
-        case 106, 57353: // j, Down arrow
+        case FileTreeNavigationCodepoints.downKey, FileTreeNavigationCodepoints.downArrow:
             return guiState.fileTreeState.previewNavigation(delta: 1)
-        case 107, 57352: // k, Up arrow
+        case FileTreeNavigationCodepoints.upKey, FileTreeNavigationCodepoints.upArrow:
             return guiState.fileTreeState.previewNavigation(delta: -1)
         default:
             return false

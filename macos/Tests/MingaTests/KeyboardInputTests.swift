@@ -13,6 +13,21 @@ import Testing
 import Foundation
 import AppKit
 
+private enum FileTreeNavigationTestConstants {
+    static let visibleFlag: UInt8 = 0x01
+    static let focusedFlag: UInt8 = 0x02
+    static let localNavigationFlag: UInt8 = 0x20
+    static let readyState: UInt8 = 3
+    static let keyCodeK: UInt16 = 40
+    static let keyCodeDownArrow: UInt16 = 125
+    static let keyCodeUpArrow: UInt16 = 126
+    static let kittyLeftCodepoint: UInt32 = 57350
+    static let kittyRightCodepoint: UInt32 = 57351
+    static let kittyUpCodepoint: UInt32 = 57352
+    static let kittyDownCodepoint: UInt32 = 57353
+    static let characterKCodepoint: UInt32 = 0x6B
+}
+
 @Suite("EditorNSView Keyboard Input")
 struct KeyboardInputTests {
 
@@ -103,10 +118,10 @@ struct KeyboardInputTests {
         guard let view = makeView(spy: spy) else { return }
 
         let arrows: [(keyCode: UInt16, expected: UInt32)] = [
-            (123, 57350), // Left
-            (124, 57351), // Right
-            (126, 57352), // Up
-            (125, 57353), // Down
+            (123, FileTreeNavigationTestConstants.kittyLeftCodepoint),
+            (124, FileTreeNavigationTestConstants.kittyRightCodepoint),
+            (FileTreeNavigationTestConstants.keyCodeUpArrow, FileTreeNavigationTestConstants.kittyUpCodepoint),
+            (FileTreeNavigationTestConstants.keyCodeDownArrow, FileTreeNavigationTestConstants.kittyDownCodepoint),
         ]
 
         for (keyCode, _) in arrows {
@@ -115,9 +130,9 @@ struct KeyboardInputTests {
         }
 
         #expect(spy.keyPressCalls.count == 4)
-        for (i, (_, expected)) in arrows.enumerated() {
-            #expect(spy.keyPressCalls[i].codepoint == expected,
-                    "Arrow key at index \(i) should be \(expected)")
+        for (index, (_, expected)) in arrows.enumerated() {
+            #expect(spy.keyPressCalls[index].codepoint == expected,
+                    "Arrow key at index \(index) should be \(expected)")
         }
     }
 
@@ -129,16 +144,92 @@ struct KeyboardInputTests {
             keyboardFileTreeEntry(pathHash: 1, isSelected: true, isFocused: true, id: "/project/a", path: "/project/a", name: "a", relPath: "a"),
             keyboardFileTreeEntry(pathHash: 2, isFocused: true, id: "/project/b", path: "/project/b", name: "b", relPath: "b")
         ]
-        view.dispatcher.applyForTesting(.guiFileTree(version: 2, treeFlags: 0x23, treeState: 3, selectedId: "/project/a", treeWidth: 30,
-                                                rootPath: "/project", errorReason: "", entries: entries))
+        view.dispatcher.applyForTesting(
+            .guiFileTree(
+                version: 2,
+                treeFlags: FileTreeNavigationTestConstants.visibleFlag |
+                    FileTreeNavigationTestConstants.focusedFlag |
+                    FileTreeNavigationTestConstants.localNavigationFlag,
+                treeState: FileTreeNavigationTestConstants.readyState,
+                selectedId: "/project/a",
+                treeWidth: 30,
+                rootPath: "/project",
+                errorReason: "",
+                entries: entries
+            )
+        )
 
-        guard let event = keyEvent(keyCode: 125) else { return }
+        guard let event = keyEvent(keyCode: FileTreeNavigationTestConstants.keyCodeDownArrow) else { return }
         view.keyDown(with: event)
 
         #expect(view.dispatcher.guiState.fileTreeState.selectedId == "/project/b")
         #expect(view.dispatcher.guiState.fileTreeState.selectedIndex == 1)
         #expect(spy.keyPressCalls.count == 1)
-        #expect(spy.keyPressCalls[0].codepoint == 57353)
+        #expect(spy.keyPressCalls[0].codepoint == FileTreeNavigationTestConstants.kittyDownCodepoint)
+    }
+
+    @Test("k previews eligible file tree selection and still sends key")
+    @MainActor func kKeyPreviewsFileTreeSelection() throws {
+        let spy = SpyEncoder()
+        guard let view = makeView(spy: spy) else { return }
+        let entries = [
+            keyboardFileTreeEntry(pathHash: 1, isSelected: true, isFocused: true, id: "/project/a", path: "/project/a", name: "a", relPath: "a"),
+            keyboardFileTreeEntry(pathHash: 2, isFocused: true, id: "/project/b", path: "/project/b", name: "b", relPath: "b")
+        ]
+        view.dispatcher.applyForTesting(
+            .guiFileTree(
+                version: 2,
+                treeFlags: FileTreeNavigationTestConstants.visibleFlag |
+                    FileTreeNavigationTestConstants.focusedFlag |
+                    FileTreeNavigationTestConstants.localNavigationFlag,
+                treeState: FileTreeNavigationTestConstants.readyState,
+                selectedId: "/project/a",
+                treeWidth: 30,
+                rootPath: "/project",
+                errorReason: "",
+                entries: entries
+            )
+        )
+
+        guard let event = keyEvent(keyCode: FileTreeNavigationTestConstants.keyCodeK, characters: "k", charactersIgnoringModifiers: "k") else { return }
+        view.keyDown(with: event)
+
+        #expect(view.dispatcher.guiState.fileTreeState.selectedId == "/project/b")
+        #expect(view.dispatcher.guiState.fileTreeState.selectedIndex == 1)
+        #expect(spy.keyPressCalls.count == 1)
+        #expect(spy.keyPressCalls[0].codepoint == FileTreeNavigationTestConstants.characterKCodepoint)
+    }
+
+    @Test("Up arrow previews eligible file tree selection and still sends key")
+    @MainActor func upArrowPreviewsFileTreeSelection() throws {
+        let spy = SpyEncoder()
+        guard let view = makeView(spy: spy) else { return }
+        let entries = [
+            keyboardFileTreeEntry(pathHash: 1, isSelected: false, isFocused: true, id: "/project/a", path: "/project/a", name: "a", relPath: "a"),
+            keyboardFileTreeEntry(pathHash: 2, isSelected: true, isFocused: true, id: "/project/b", path: "/project/b", name: "b", relPath: "b")
+        ]
+        view.dispatcher.applyForTesting(
+            .guiFileTree(
+                version: 2,
+                treeFlags: FileTreeNavigationTestConstants.visibleFlag |
+                    FileTreeNavigationTestConstants.focusedFlag |
+                    FileTreeNavigationTestConstants.localNavigationFlag,
+                treeState: FileTreeNavigationTestConstants.readyState,
+                selectedId: "/project/b",
+                treeWidth: 30,
+                rootPath: "/project",
+                errorReason: "",
+                entries: entries
+            )
+        )
+
+        guard let event = keyEvent(keyCode: FileTreeNavigationTestConstants.keyCodeUpArrow) else { return }
+        view.keyDown(with: event)
+
+        #expect(view.dispatcher.guiState.fileTreeState.selectedId == "/project/a")
+        #expect(view.dispatcher.guiState.fileTreeState.selectedIndex == 0)
+        #expect(spy.keyPressCalls.count == 1)
+        #expect(spy.keyPressCalls[0].codepoint == FileTreeNavigationTestConstants.kittyUpCodepoint)
     }
 
     @Test("Home/End/PageUp/PageDown send correct codepoints")
@@ -159,8 +250,8 @@ struct KeyboardInputTests {
         }
 
         #expect(spy.keyPressCalls.count == 4)
-        for (i, (_, expected)) in keys.enumerated() {
-            #expect(spy.keyPressCalls[i].codepoint == expected)
+        for (index, (_, expected)) in keys.enumerated() {
+            #expect(spy.keyPressCalls[index].codepoint == expected)
         }
     }
 
@@ -300,8 +391,8 @@ struct KeyboardInputTests {
         }
 
         #expect(spy.keyPressCalls.count == 4)
-        for (i, (_, expected)) in fkeys.enumerated() {
-            #expect(spy.keyPressCalls[i].codepoint == expected)
+        for (index, (_, expected)) in fkeys.enumerated() {
+            #expect(spy.keyPressCalls[index].codepoint == expected)
         }
     }
 }
