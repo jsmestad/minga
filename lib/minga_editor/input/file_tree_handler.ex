@@ -167,7 +167,7 @@ defmodule MingaEditor.Input.FileTreeHandler do
           MingaEditor.Input.Handler.result()
   defp handle_non_leader_file_tree_key(state, cp, mods) do
     if Input.key_sequence_pending?(state) do
-      {:handled, delegate_to_mode_fsm_with_tree_buffer(state, cp, mods)}
+      {:handled, legacy_delegate_navigation_to_fake_tree_buffer(state, cp, mods)}
     else
       key = {cp, mods}
 
@@ -187,7 +187,7 @@ defmodule MingaEditor.Input.FileTreeHandler do
           {:handled, state}
 
         :not_found ->
-          {:handled, delegate_to_mode_fsm_with_tree_buffer(state, cp, mods)}
+          {:handled, legacy_delegate_navigation_to_fake_tree_buffer(state, cp, mods)}
       end
     end
   end
@@ -207,13 +207,15 @@ defmodule MingaEditor.Input.FileTreeHandler do
     end
   end
 
-  @spec delegate_to_mode_fsm_with_tree_buffer(
+  # Legacy BEAM-round-tripped navigation path.
+  # This exists for compatibility with Vim motions that have not moved to the semantic frontend-local interaction contract yet. Semantic frontends should own zero-latency local file-tree selection over the last committed row model and send BEAM actions only when the user commits an intent such as open, toggle, rename, delete, or drop. See docs/ARCHITECTURE.md and docs/GUI_PROTOCOL.md.
+  @spec legacy_delegate_navigation_to_fake_tree_buffer(
           EditorState.t(),
           non_neg_integer(),
           non_neg_integer()
         ) ::
           EditorState.t()
-  defp delegate_to_mode_fsm_with_tree_buffer(state, cp, mods) do
+  defp legacy_delegate_navigation_to_fake_tree_buffer(state, cp, mods) do
     case file_tree_state(state).buffer do
       buf when is_pid(buf) ->
         real_active = state.workspace.buffers.active
