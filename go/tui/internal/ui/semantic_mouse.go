@@ -95,6 +95,88 @@ func (m Model) localMouse(msg tea.MouseMsg) (Model, bool) {
 	return m, true
 }
 
+func (m Model) applyPresentationScroll(msg tea.MouseMsg) Model {
+	mouse := msg.Mouse()
+	if !isWheelButton(mouse.Button) {
+		return m
+	}
+	windowID, ok := m.presentationScrollWindowAt(mouse.X, mouse.Y)
+	if !ok {
+		return m
+	}
+	window := m.windows[windowID]
+	if !window.ScrollSet || window.Scroll.ResetRequired {
+		return m
+	}
+	scroll := m.presentationScroll[windowID]
+	if scroll.contentEpoch != window.Scroll.ContentEpoch || scroll.layoutGeneration != window.Scroll.LayoutGeneration || scroll.anchorTop != window.Scroll.AnchorTop || scroll.anchorLeft != window.Scroll.AnchorLeft {
+		scroll = presentationScroll{anchorTop: window.Scroll.AnchorTop, anchorLeft: window.Scroll.AnchorLeft, contentEpoch: window.Scroll.ContentEpoch, layoutGeneration: window.Scroll.LayoutGeneration}
+	}
+	before, after := presentationPayloadOverscanBounds(window, presentationVisibleRows(window))
+	switch mouse.Button {
+	case tea.MouseWheelDown:
+		if mouse.Mod.Contains(tea.ModShift) {
+			scroll.colOffset = min(scroll.colOffset+1, maxPresentationColOffset(window))
+		} else {
+			scroll.rowOffset = min(scroll.rowOffset+1, after)
+		}
+	case tea.MouseWheelUp:
+		if mouse.Mod.Contains(tea.ModShift) {
+			scroll.colOffset = max(scroll.colOffset-1, minPresentationColOffset(window))
+		} else {
+			scroll.rowOffset = max(scroll.rowOffset-1, -before)
+		}
+	case tea.MouseWheelRight:
+		scroll.colOffset = min(scroll.colOffset+1, maxPresentationColOffset(window))
+	case tea.MouseWheelLeft:
+		scroll.colOffset = max(scroll.colOffset-1, minPresentationColOffset(window))
+	}
+	if scroll.rowOffset == 0 && scroll.colOffset == 0 {
+		delete(m.presentationScroll, windowID)
+	} else {
+		m.presentationScroll[windowID] = scroll
+	}
+	return m
+}
+
+func maxPresentationColOffset(window protocol.WindowContent) int {
+	return maxPresentationLeft(window) - int(window.ScrollLeft)
+}
+
+func minPresentationColOffset(window protocol.WindowContent) int {
+	return -int(window.ScrollLeft)
+}
+
+func maxPresentationLeft(window protocol.WindowContent) int {
+	textWidth := int(window.Geometry.TextRect.Width)
+	if textWidth <= 0 {
+		textWidth = int(window.Geometry.ContentRect.Width)
+	}
+	textWidth = max(textWidth, 1)
+	maxRowWidth := 0
+	for _, row := range window.Rows {
+		maxRowWidth = max(maxRowWidth, displayWidth(row.Text))
+	}
+	return max(maxRowWidth-textWidth, 0)
+}
+
+func (m Model) presentationScrollWindowAt(x int, y int) (uint16, bool) {
+	return m.presentationScrollWindowAtBody(x-m.leftChromeWidth(), y-m.renderedHeaderHeight)
+}
+
+func (m Model) presentationScrollWindowAtBody(x int, y int) (uint16, bool) {
+	for _, id := range m.windowOrder {
+		placement, ok := m.semanticWindowPlacement(m.windows[id])
+		if !ok {
+			continue
+		}
+		if y >= placement.row && y < placement.row+placement.height && x >= placement.col && x < placement.col+placement.width {
+			return id, true
+		}
+	}
+	return 0, false
+}
+
 func (m Model) mouseInBottomPanel(y int) bool {
 	// The bottom panel is composited at its BEAM placement rect now (#2281), not
 	// footer-appended, so its on-screen band comes from the placement, not from a

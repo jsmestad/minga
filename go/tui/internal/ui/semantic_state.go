@@ -125,7 +125,7 @@ func guideColumnVisible(guides protocol.IndentGuides, col int) bool {
 }
 
 func guideEnabledOnRow(guides protocol.IndentGuides, rowIndex int, col int) bool {
-	if len(guides.IndentLevels) == 0 || rowIndex >= len(guides.IndentLevels) || guides.TabWidth == 0 {
+	if len(guides.IndentLevels) == 0 || rowIndex < 0 || rowIndex >= len(guides.IndentLevels) || guides.TabWidth == 0 {
 		return true
 	}
 	return col/int(guides.TabWidth) <= int(guides.IndentLevels[rowIndex])

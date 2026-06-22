@@ -218,6 +218,10 @@ func mouseRow(packet []byte) int16 {
 	return int16(uint16(packet[1])<<8 | uint16(packet[2]))
 }
 
+func mouseCol(packet []byte) int16 {
+	return int16(uint16(packet[3])<<8 | uint16(packet[4]))
+}
+
 // tabBarModel builds a model whose header renders headerRows rows above the
 // editor body and refreshes the cached offset exactly as Update does after
 // applyCommands (ticket #2256). The header is always at least one row (a tab bar
@@ -375,6 +379,58 @@ func TestMousePacketTranslatesDragSequence(t *testing.T) {
 // wheel over the header is still forwarded (clamped at row 0) rather than
 // suppressed, since the BEAM treats a wheel as a viewport scroll with no buffer
 // hit-test (ticket #2256).
+func TestMousePacketNormalizesPresentationScrollOffset(t *testing.T) {
+	model := New(20, 6, nil)
+	model.putWindow(protocol.WindowContent{
+		ID:           7,
+		ContentEpoch: 9,
+		GeometrySet:  true,
+		Geometry:     protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 0, Col: 0, Width: 10, Height: 3}},
+		ScrollSet:    true,
+		Scroll: protocol.ScrollPresentation{
+			WindowID: 7, ContentEpoch: 9, AnchorTop: 10, AnchorLeft: 2, LayoutGeneration: 5,
+		},
+	})
+	model.presentationScroll[7] = presentationScroll{anchorTop: 10, anchorLeft: 2, contentEpoch: 9, layoutGeneration: 5, rowOffset: 1, colOffset: 2}
+
+	packet, ok := model.mousePacket(tea.MouseClickMsg(tea.Mouse{X: 3, Y: model.renderedHeaderHeight, Button: tea.MouseLeft}))
+	if !ok {
+		t.Fatal("click should encode a mouse packet")
+	}
+	if got := mouseRow(packet); got != 1 {
+		t.Fatalf("presentation-normalized row = %d, want 1", got)
+	}
+	if got := mouseCol(packet); got != 5 {
+		t.Fatalf("presentation-normalized col = %d, want 5", got)
+	}
+}
+
+func TestMousePacketClampsPresentationScrollOffsetInsideWindow(t *testing.T) {
+	model := New(20, 6, nil)
+	model.putWindow(protocol.WindowContent{
+		ID:           7,
+		ContentEpoch: 9,
+		GeometrySet:  true,
+		Geometry:     protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 0, Col: 0, Width: 10, Height: 3}},
+		ScrollSet:    true,
+		Scroll: protocol.ScrollPresentation{
+			WindowID: 7, ContentEpoch: 9, AnchorTop: 10, AnchorLeft: 2, LayoutGeneration: 5,
+		},
+	})
+	model.presentationScroll[7] = presentationScroll{anchorTop: 10, anchorLeft: 2, contentEpoch: 9, layoutGeneration: 5, rowOffset: 1, colOffset: 2}
+
+	packet, ok := model.mousePacket(tea.MouseClickMsg(tea.Mouse{X: 9, Y: model.renderedHeaderHeight + 2, Button: tea.MouseLeft}))
+	if !ok {
+		t.Fatal("click should encode a mouse packet")
+	}
+	if got := mouseRow(packet); got != 2 {
+		t.Fatalf("presentation-normalized row should stay inside window, got %d", got)
+	}
+	if got := mouseCol(packet); got != 9 {
+		t.Fatalf("presentation-normalized col should stay inside window, got %d", got)
+	}
+}
+
 func TestMousePacketTranslatesWheelOverBody(t *testing.T) {
 	model := tabBarModel(1)
 

@@ -196,6 +196,7 @@ func (m Model) mousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	if row < 0 {
 		row = 0
 	}
+	row, col := m.normalizePresentationMouse(row, mouse.X)
 	button := byte(3)
 	eventType := byte(0)
 	switch mouse.Button {
@@ -238,7 +239,35 @@ func (m Model) mousePacket(msg tea.MouseMsg) ([]byte, bool) {
 			eventType = protocol.MouseDrag
 		}
 	}
-	return protocol.EncodeMouseEvent(int16(row), int16(mouse.X), button, keyModToProtocol(mouse.Mod), eventType, 1), true
+	return protocol.EncodeMouseEvent(int16(row), int16(col), button, keyModToProtocol(mouse.Mod), eventType, 1), true
+}
+
+func (m Model) normalizePresentationMouse(row int, col int) (int, int) {
+	leftChrome := m.leftChromeWidth()
+	bodyCol := col - leftChrome
+	windowID, ok := m.presentationScrollWindowAtBody(bodyCol, row)
+	if !ok {
+		return row, col
+	}
+	window := m.windows[windowID]
+	placement, ok := m.semanticWindowPlacement(window)
+	if !ok {
+		return row, col
+	}
+	scroll, ok := m.presentationScroll[windowID]
+	if !ok || scroll.contentEpoch != window.Scroll.ContentEpoch || scroll.layoutGeneration != window.Scroll.LayoutGeneration || scroll.anchorTop != window.Scroll.AnchorTop || scroll.anchorLeft != window.Scroll.AnchorLeft {
+		return row, col
+	}
+	normalizedRow := clampInt(row+scroll.rowOffset, placement.row, placement.row+placement.height-1)
+	normalizedBodyCol := clampInt(bodyCol+scroll.colOffset, placement.col, placement.col+placement.width-1)
+	return normalizedRow, normalizedBodyCol + leftChrome
+}
+
+func clampInt(value int, low int, high int) int {
+	if high < low {
+		return low
+	}
+	return min(max(value, low), high)
 }
 
 // isWheelButton reports whether a Bubble Tea mouse button is a scroll-wheel

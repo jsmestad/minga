@@ -7,7 +7,18 @@
 
 import Testing
 import SwiftUI
+import AppKit
 import ViewInspector
+
+private func currentModifierBitsForTest() -> UInt8 {
+    var mods: UInt8 = 0
+    let flags = NSEvent.modifierFlags
+    if flags.contains(.shift) { mods |= 0x01 }
+    if flags.contains(.control) { mods |= 0x02 }
+    if flags.contains(.option) { mods |= 0x04 }
+    if flags.contains(.command) { mods |= 0x08 }
+    return mods
+}
 
 // MARK: - ActivityBar
 
@@ -380,11 +391,12 @@ struct FileTreeViewTests {
         let spy = SpyEncoder()
 
         let sut = FileTreeView(fileTreeState: state, theme: ThemeColors(), encoder: spy)
+        let expectedModifiers = currentModifierBitsForTest()
         let handled = sut.handleDrop(urls: [URL(fileURLWithPath: "/tmp/from.txt")], onto: entry)
 
         #expect(handled)
         #expect(spy.guiActions == [
-            .fileTreeDrop(sourcePaths: ["/tmp/from.txt"], targetIndex: 4, targetId: "lib/file.ex", targetPathHash: 0xABCD, targetPath: "/project/lib/file.ex", targetIsDir: false, modifiers: 0)
+            .fileTreeDrop(sourcePaths: ["/tmp/from.txt"], targetIndex: 4, targetId: "lib/file.ex", targetPathHash: 0xABCD, targetPath: "/project/lib/file.ex", targetIsDir: false, modifiers: expectedModifiers)
         ])
     }
 

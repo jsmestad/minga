@@ -377,16 +377,21 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
         {first_line, nil}
       end
 
-    # Fetch buffer data: need to cover all visible buffer lines
-    {fetch_first, fetch_count} =
+    # Fetch one stable row above/below simple mappings so clients can presentation-scroll without inventing rows.
+    {fetch_first, fetch_count, visible_row_start_index} =
       case visible_line_map do
         nil ->
-          fetch_rows = if wrap_on, do: visible_rows + div(visible_rows, 2), else: visible_rows
-          {first_line, fetch_rows}
+          {overscan_before, fetch_first} = scroll_overscan_before(first_line, wrap_on)
+
+          overscan_after =
+            scroll_overscan_after(first_line, visible_rows, line_count_approx, wrap_on)
+
+          fetch_rows = scroll_fetch_rows(visible_rows, overscan_before, overscan_after, wrap_on)
+          {fetch_first, fetch_rows, overscan_before}
 
         entries ->
           {buf_first, buf_last} = buffer_range_from_entries(entries)
-          {buf_first, buf_last - buf_first + 1}
+          {buf_first, buf_last - buf_first + 1, 0}
       end
 
     snapshot = Buffer.render_snapshot(window.buffer, fetch_first, fetch_count)
@@ -397,7 +402,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
         wrap_on: wrap_on,
         is_active: is_active,
         viewport: viewport,
-        first_line: first_line,
+        first_line: fetch_first,
         lines: lines,
         snapshot: snapshot,
         buf: window.buffer,
@@ -465,9 +470,32 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
       width_oracle: width_oracle,
       git_signs: ContentHelpers.signs_for_window(state, window),
       visible_line_map: visible_line_map,
-      total_visual_rows: total_visual_rows
+      total_visual_rows: total_visual_rows,
+      visible_row_start_index: visible_row_start_index
     }
   end
+
+  @spec scroll_overscan_before(non_neg_integer(), boolean()) ::
+          {non_neg_integer(), non_neg_integer()}
+  defp scroll_overscan_before(first_line, true), do: {0, first_line}
+  defp scroll_overscan_before(0, false), do: {0, 0}
+  defp scroll_overscan_before(first_line, false), do: {1, first_line - 1}
+
+  @spec scroll_overscan_after(non_neg_integer(), pos_integer(), non_neg_integer(), boolean()) ::
+          non_neg_integer()
+  defp scroll_overscan_after(_first_line, _visible_rows, _line_count, true), do: 0
+
+  defp scroll_overscan_after(first_line, visible_rows, line_count, false) do
+    if first_line + visible_rows < line_count, do: 1, else: 0
+  end
+
+  @spec scroll_fetch_rows(pos_integer(), non_neg_integer(), non_neg_integer(), boolean()) ::
+          pos_integer()
+  defp scroll_fetch_rows(visible_rows, _before, _after, true),
+    do: visible_rows + div(visible_rows, 2)
+
+  defp scroll_fetch_rows(visible_rows, before_count, after_count, false),
+    do: visible_rows + before_count + after_count
 
   @spec total_visual_rows_for_frontend(
           state(),

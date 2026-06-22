@@ -345,10 +345,25 @@ struct MouseInputTests {
             windowId: 7, contentRow: 0, contentCol: 20, contentHeight: 24,
             isActive: false, contentWidth: 80, cursorLine: 42, lineNumberStyle: .hybrid,
             lineNumberWidth: 4, signColWidth: 3,
-            entries: [Wire.GutterEntry(bufLine: 42, displayType: .foldStart, signType: .none, foldEndLine: 50)]
+            entries: [
+                Wire.GutterEntry(bufLine: 41, displayType: .normal, signType: .none),
+                Wire.GutterEntry(bufLine: 42, displayType: .foldStart, signType: .none, foldEndLine: 50)
+            ]
         )
         view.dispatcher.applyForTesting(.guiGutter(data: activeGutter))
         view.dispatcher.applyForTesting(.guiGutter(data: inactiveGutter))
+        view.guiState?.windowContents[7] = GUIWindowContent(
+            windowId: 7, fullRefresh: true,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block,
+            rows: [], selection: nil,
+            searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: [],
+            scrollPresentation: GUIScrollPresentation(
+                windowId: 7, resetRequired: false, anchorTop: 42, anchorLeft: 0, anchorVisualRowOffset: 0,
+                visibleStartLine: 42, visibleEndLine: 43, overscanStartLine: 41, overscanEndLine: 43,
+                contentEpoch: 1, layoutGeneration: 1
+            )
+        )
 
         guard let event = mouseEvent(type: .leftMouseDown,
                                      location: NSPoint(x: cw * 22.2, y: ch * 0.5)) else { return }
@@ -356,6 +371,77 @@ struct MouseInputTests {
 
         #expect(spy.guiActions == [.foldToggleAtLine(windowId: 7, bufferLine: 42)])
         #expect(spy.mouseEventCalls.isEmpty)
+    }
+
+    @Test("fold chevron hit testing uses payload-local overscan for wrapped rows")
+    @MainActor func foldChevronHitTestingUsesPayloadLocalOverscanForWrappedRows() throws {
+        let spy = SpyEncoder()
+        guard let view = makeView(spy: spy) else { return }
+        let cw = view.cellWidth
+        let ch = view.cellHeight
+
+        let gutter = Wire.WindowGutter(
+            windowId: 7, contentRow: 0, contentCol: 0, contentHeight: 2,
+            isActive: true, contentWidth: 20, cursorLine: 10, lineNumberStyle: .hybrid,
+            lineNumberWidth: 4, signColWidth: 3,
+            entries: [
+                Wire.GutterEntry(bufLine: 10, displayType: .foldStart, signType: .none, foldEndLine: 12),
+                Wire.GutterEntry(bufLine: 11, displayType: .foldStart, signType: .none, foldEndLine: 13)
+            ]
+        )
+        let geometry = GUIPaneGeometry(
+            windowId: 7,
+            totalRect: GUICellRect(row: 0, col: 0, width: 20, height: 2),
+            contentRect: GUICellRect(row: 0, col: 0, width: 20, height: 2),
+            textRect: GUICellRect(row: 0, col: 7, width: 13, height: 2),
+            gutterRect: GUICellRect(row: 0, col: 0, width: 7, height: 2),
+            clipRect: GUICellRect(row: 0, col: 0, width: 20, height: 2),
+            viewport: GUIViewportSummary(top: 10, left: 0, rows: 2, cols: 20, totalLines: 20, visualRowOffset: 1, totalVisualRows: 5),
+            gutterMetrics: GUIGutterMetrics(lineNumberWidth: 4, signColWidth: 3),
+            hitRegions: []
+        )
+
+        view.dispatcher.applyForTesting(.guiGutter(data: gutter))
+        view.guiState?.windowContents[7] = GUIWindowContent(
+            windowId: 7, fullRefresh: true,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block,
+            rows: [
+                GUIVisualRow(rowType: .normal, rowId: 1, bufLine: 10, contentHash: 1, text: "first", spans: []),
+                GUIVisualRow(rowType: .normal, rowId: 2, bufLine: 10, contentHash: 2, text: "second", spans: []),
+                GUIVisualRow(rowType: .normal, rowId: 3, bufLine: 11, contentHash: 3, text: "third", spans: [])
+            ],
+            selection: nil, searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: [], paneGeometry: geometry,
+            scrollPresentation: GUIScrollPresentation(
+                windowId: 7, resetRequired: false, anchorTop: 10, anchorLeft: 0, anchorVisualRowOffset: 1,
+                visibleStartLine: 10, visibleEndLine: 12, overscanStartLine: 10, overscanEndLine: 12,
+                contentEpoch: 1, layoutGeneration: 1
+            )
+        )
+
+        guard let event = mouseEvent(type: .leftMouseDown,
+                                     location: NSPoint(x: cw * 6.2, y: ch * 0.5)) else { return }
+        view.mouseDown(with: event)
+
+        #expect(spy.guiActions == [.foldToggleAtLine(windowId: 7, bufferLine: 10)])
+        #expect(spy.mouseEventCalls.isEmpty)
+    }
+
+    @Test("presentation scroll normalization shifts fold hit testing vertically only")
+    @MainActor func presentationScrollNormalizationShiftsFoldHitTestingVerticallyOnly() {
+        let normalized = EditorNSView.presentationNormalizedGutterPoint(
+            NSPoint(x: 18.0, y: 3.0),
+            scrollTargetWindowId: 7,
+            targetGutterRect: GUICellRect(row: 0, col: 2, width: 6, height: 4),
+            scrollPixelOffset: CGPoint(x: 0, y: 8.0),
+            scrollElasticOffsetY: 0,
+            cellWidth: 8.0,
+            cellHeight: 8.0
+        )
+
+        #expect(normalized.x == 18.0)
+        #expect(Int(normalized.y / 8.0) == 1)
+        #expect(normalized.y > 3.0)
     }
 
     @Test("mouseDown ignores stale gutter data from a previous frame")
@@ -384,11 +470,11 @@ struct MouseInputTests {
 
     @Test("smooth scroll target resets when pointer leaves target pane")
     func smoothScrollTargetResetsWhenPointerLeavesTargetPane() {
-        #expect(EditorNSView.shouldResetSmoothScrollTarget(currentTargetWindowId: 1, pointerWindowId: 2, pixelOffset: 4) == true)
-        #expect(EditorNSView.shouldResetSmoothScrollTarget(currentTargetWindowId: 1, pointerWindowId: nil, pixelOffset: 4) == true)
-        #expect(EditorNSView.shouldResetSmoothScrollTarget(currentTargetWindowId: 1, pointerWindowId: 1, pixelOffset: 4) == false)
-        #expect(EditorNSView.shouldResetSmoothScrollTarget(currentTargetWindowId: 1, pointerWindowId: 2, pixelOffset: 0) == false)
-        #expect(EditorNSView.shouldResetSmoothScrollTarget(currentTargetWindowId: nil, pointerWindowId: 2, pixelOffset: 4) == false)
+        #expect(EditorNSView.shouldResetSmoothScrollTarget(currentTargetWindowId: 1, pointerWindowId: 2, hasPixelOffset: true) == true)
+        #expect(EditorNSView.shouldResetSmoothScrollTarget(currentTargetWindowId: 1, pointerWindowId: nil, hasPixelOffset: true) == true)
+        #expect(EditorNSView.shouldResetSmoothScrollTarget(currentTargetWindowId: 1, pointerWindowId: 1, hasPixelOffset: true) == false)
+        #expect(EditorNSView.shouldResetSmoothScrollTarget(currentTargetWindowId: 1, pointerWindowId: 2, hasPixelOffset: false) == false)
+        #expect(EditorNSView.shouldResetSmoothScrollTarget(currentTargetWindowId: nil, pointerWindowId: 2, hasPixelOffset: true) == false)
     }
 
     @Test("smooth scroll routing keeps the gesture target cell after the pointer moves")
@@ -400,6 +486,227 @@ struct MouseInputTests {
         let fallbackTarget = EditorNSView.smoothScrollEventCellPosition(targetCell: nil, row: 5, col: 40)
         #expect(fallbackTarget.row == 5)
         #expect(fallbackTarget.col == 40)
+    }
+
+    @Test("presentation scroll offset suppresses negative horizontal normalization when scrollLeft is zero")
+    func presentationScrollOffsetSuppressesNegativeHorizontalNormalization() {
+        let suppressed = EditorNSView.presentationScrollOffset(scrollLeft: 0, scrollOffset: CGPoint(x: -8, y: 3))
+        #expect(suppressed.x == 0)
+        #expect(suppressed.y == 3)
+
+        let preserved = EditorNSView.presentationScrollOffset(scrollLeft: 2, scrollOffset: CGPoint(x: -8, y: 3))
+        #expect(preserved.x == -8)
+        #expect(preserved.y == 3)
+    }
+
+    @Test("elastic-only presentation offsets still count as active for pointer normalization")
+    func elasticOnlyPresentationOffsetCountsAsActive() {
+        #expect(EditorNSView.hasActivePresentationOffset(scrollPixelOffset: .zero, scrollElasticOffsetY: 4) == true)
+        #expect(EditorNSView.hasActivePresentationOffset(scrollPixelOffset: CGPoint(x: 3, y: 0), scrollElasticOffsetY: 0) == true)
+        #expect(EditorNSView.hasActivePresentationOffset(scrollPixelOffset: .zero, scrollElasticOffsetY: 0) == false)
+    }
+
+    @Test("presentation-normalized points stay inside the target pane")
+    func presentationNormalizedPointClampsToTargetPane() {
+        let rect = GUICellRect(row: 2, col: 4, width: 10, height: 3)
+        let point = EditorNSView.clampPresentationPoint(NSPoint(x: 200, y: 200), to: rect, cellWidth: 10, cellHeight: 20)
+        #expect(point.x < 140)
+        #expect(point.x >= 40)
+        #expect(point.y < 100)
+        #expect(point.y >= 40)
+    }
+
+    @Test("top boundary smooth scroll becomes bounded elastic while content stays clamped")
+    func topBoundarySmoothScrollBecomesBoundedElastic() {
+        let presentation = GUIScrollPresentation(
+            windowId: 1,
+            resetRequired: false,
+            anchorTop: 10,
+            anchorLeft: 0,
+            anchorVisualRowOffset: 0,
+            visibleStartLine: 10,
+            visibleEndLine: 20,
+            overscanStartLine: 10,
+            overscanEndLine: 21,
+            contentEpoch: 1,
+            layoutGeneration: 1
+        )
+
+        let translation = EditorNSView.presentationScrollTranslation(
+            scrollPresentation: presentation,
+            scrollOffset: CGPoint(x: 4, y: 8),
+            scrollDeltaY: 120,
+            currentElasticOffsetY: 0,
+            cellHeight: 20,
+            payloadOverscanBefore: 0,
+            payloadOverscanAfter: 1,
+            boundaryBefore: 0,
+            boundaryAfter: 1
+        )
+
+        #expect(translation.scrollOffset.x == 4)
+        #expect(translation.scrollOffset.y == 0)
+        #expect(translation.elasticOffsetY < 0)
+        #expect(abs(translation.elasticOffsetY) <= 15)
+    }
+
+    @Test("bottom boundary smooth scroll becomes bounded elastic while content stays clamped")
+    func bottomBoundarySmoothScrollBecomesBoundedElastic() {
+        let presentation = GUIScrollPresentation(
+            windowId: 1,
+            resetRequired: false,
+            anchorTop: 10,
+            anchorLeft: 0,
+            anchorVisualRowOffset: 0,
+            visibleStartLine: 10,
+            visibleEndLine: 20,
+            overscanStartLine: 9,
+            overscanEndLine: 20,
+            contentEpoch: 1,
+            layoutGeneration: 1
+        )
+
+        let translation = EditorNSView.presentationScrollTranslation(
+            scrollPresentation: presentation,
+            scrollOffset: CGPoint(x: 4, y: 8),
+            scrollDeltaY: -120,
+            currentElasticOffsetY: 0,
+            cellHeight: 20,
+            payloadOverscanBefore: 1,
+            payloadOverscanAfter: 0,
+            boundaryBefore: 1,
+            boundaryAfter: 0
+        )
+
+        #expect(translation.scrollOffset.x == 4)
+        #expect(translation.scrollOffset.y == 0)
+        #expect(translation.elasticOffsetY > 0)
+        #expect(abs(translation.elasticOffsetY) <= 15)
+    }
+
+    @Test("middle smooth scroll keeps normal content offset")
+    func middleSmoothScrollKeepsNormalContentOffset() {
+        let presentation = GUIScrollPresentation(
+            windowId: 1,
+            resetRequired: false,
+            anchorTop: 10,
+            anchorLeft: 0,
+            anchorVisualRowOffset: 0,
+            visibleStartLine: 10,
+            visibleEndLine: 20,
+            overscanStartLine: 9,
+            overscanEndLine: 21,
+            contentEpoch: 1,
+            layoutGeneration: 1
+        )
+
+        let translation = EditorNSView.presentationScrollTranslation(
+            scrollPresentation: presentation,
+            scrollOffset: CGPoint(x: 4, y: 8),
+            scrollDeltaY: 12,
+            currentElasticOffsetY: 3,
+            cellHeight: 20,
+            payloadOverscanBefore: 1,
+            payloadOverscanAfter: 1,
+            boundaryBefore: 1,
+            boundaryAfter: 1
+        )
+
+        #expect(translation.scrollOffset.x == 4)
+        #expect(translation.scrollOffset.y == 8)
+        #expect(translation.elasticOffsetY == 0)
+    }
+
+    @Test("smooth scroll clamps when document has rows but payload cannot render them")
+    func smoothScrollClampsWhenPayloadCannotRenderDocumentRows() {
+        let presentation = GUIScrollPresentation(
+            windowId: 1,
+            resetRequired: false,
+            anchorTop: 10,
+            anchorLeft: 0,
+            anchorVisualRowOffset: 5,
+            visibleStartLine: 10,
+            visibleEndLine: 20,
+            overscanStartLine: 10,
+            overscanEndLine: 20,
+            contentEpoch: 1,
+            layoutGeneration: 1
+        )
+
+        let translation = EditorNSView.presentationScrollTranslation(
+            scrollPresentation: presentation,
+            scrollOffset: CGPoint(x: 4, y: 8),
+            scrollDeltaY: 12,
+            currentElasticOffsetY: 3,
+            cellHeight: 20,
+            payloadOverscanBefore: 0,
+            payloadOverscanAfter: 0,
+            boundaryBefore: 5,
+            boundaryAfter: 7
+        )
+
+        #expect(translation.scrollOffset.x == 4)
+        #expect(translation.scrollOffset.y == 0)
+        #expect(translation.elasticOffsetY == 0)
+    }
+
+    @Test("mid-document wrapped scroll with no payload rows before does not bounce at top")
+    func midDocumentWrappedScrollWithoutPayloadBeforeDoesNotBounceAtTop() {
+        let geometry = GUIPaneGeometry(
+            windowId: 1,
+            totalRect: GUICellRect(row: 0, col: 0, width: 10, height: 5),
+            contentRect: GUICellRect(row: 0, col: 0, width: 10, height: 5),
+            textRect: GUICellRect(row: 0, col: 0, width: 10, height: 2),
+            gutterRect: GUICellRect(row: 0, col: 0, width: 2, height: 5),
+            clipRect: GUICellRect(row: 0, col: 0, width: 10, height: 5),
+            viewport: GUIViewportSummary(top: 20, left: 0, rows: 2, cols: 10, totalLines: 100, visualRowOffset: 0, totalVisualRows: 300),
+            gutterMetrics: GUIGutterMetrics(lineNumberWidth: 1, signColWidth: 1),
+            hitRegions: []
+        )
+        let presentation = GUIScrollPresentation(
+            windowId: 1,
+            resetRequired: false,
+            anchorTop: 20,
+            anchorLeft: 0,
+            anchorVisualRowOffset: 0,
+            visibleStartLine: 20,
+            visibleEndLine: 22,
+            overscanStartLine: 20,
+            overscanEndLine: 22,
+            contentEpoch: 1,
+            layoutGeneration: 1
+        )
+        let content = GUIWindowContent(
+            windowId: 1, fullRefresh: true, contentEpoch: 1, cursorVisible: true, cursorRow: 0, cursorCol: 0, cursorShape: .block,
+            scrollLeft: 0,
+            rows: [
+                GUIVisualRow(rowType: .normal, rowId: 1, bufLine: 20, contentHash: 1, text: "visible", spans: []),
+                GUIVisualRow(rowType: .normal, rowId: 2, bufLine: 21, contentHash: 2, text: "visible", spans: [])
+            ],
+            selection: nil, searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: [], lineAnnotations: [], paneGeometry: geometry, cursorline: nil,
+            scrollPresentation: presentation
+        )
+
+        let payload = EditorNSView.presentationScrollPayloadOverscanBounds(for: content, scrollPresentation: presentation)
+        let boundary = EditorNSView.presentationScrollBoundaryAvailability(for: content, scrollPresentation: presentation)
+        let translation = EditorNSView.presentationScrollTranslation(
+            scrollPresentation: presentation,
+            scrollOffset: CGPoint(x: 4, y: 8),
+            scrollDeltaY: 120,
+            currentElasticOffsetY: 0,
+            cellHeight: 20,
+            payloadOverscanBefore: payload.before,
+            payloadOverscanAfter: payload.after,
+            boundaryBefore: boundary.before,
+            boundaryAfter: boundary.after
+        )
+
+        #expect(payload.before == 0)
+        #expect(boundary.before == 1)
+        #expect(translation.scrollOffset.x == 4)
+        #expect(translation.scrollOffset.y == 0)
+        #expect(translation.elasticOffsetY == 0)
     }
 
     @Test("mouseMoved sends motion event")

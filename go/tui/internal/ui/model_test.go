@@ -1193,9 +1193,235 @@ func TestApplyWindowDeltaAppliesScrollLeftSetAndCropsRendering(t *testing.T) {
 	if window.ScrollLeft != 2 {
 		t.Fatalf("scroll left should update from matching-epoch delta, got %d", window.ScrollLeft)
 	}
-	rendered := ansi.Strip(model.renderSemanticContentRow(window, 0, 4))
+	rendered := ansi.Strip(model.renderSemanticContentRow(window, 0, 0, 4))
 	if !strings.HasPrefix(rendered, "cdef") {
 		t.Fatalf("cropped rendering should start at the updated scroll offset, got %q", rendered)
+	}
+}
+
+func stripRenderedLines(lines []string) []string {
+	stripped := make([]string, len(lines))
+	for i, line := range lines {
+		stripped[i] = ansi.Strip(line)
+	}
+	return stripped
+}
+
+func TestPresentationScrollUsesOverscanRowsImmediately(t *testing.T) {
+	model := New(20, 6, nil)
+	model.putWindow(protocol.WindowContent{
+		ID:           7,
+		ContentEpoch: 9,
+		Rows: []protocol.WindowRow{
+			{ID: 1, ContentHash: 1, Text: "above"},
+			{ID: 2, ContentHash: 2, Text: "top"},
+			{ID: 3, ContentHash: 3, Text: "bottom"},
+			{ID: 4, ContentHash: 4, Text: "below"},
+		},
+		GeometrySet: true,
+		Geometry:    protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 0, Col: 0, Width: 10, Height: 2}},
+		ScrollSet:   true,
+		Scroll: protocol.ScrollPresentation{
+			WindowID: 7, ContentEpoch: 9, AnchorTop: 10, VisibleStartLine: 10, VisibleEndLine: 12, OverscanStartLine: 9, OverscanEndLine: 13,
+		},
+	})
+
+	initial := strings.Join(stripRenderedLines(model.renderWindowRows(model.windows[7])), "|")
+	if !strings.Contains(initial, "top") || !strings.Contains(initial, "bottom") || strings.Contains(initial, "below") {
+		t.Fatalf("initial render should use committed visible rows, got %q", initial)
+	}
+
+	model = model.applyPresentationScroll(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: 1, Y: model.renderedHeaderHeight}))
+	scrolled := strings.Join(stripRenderedLines(model.renderWindowRows(model.windows[7])), "|")
+	if !strings.Contains(scrolled, "bottom") || !strings.Contains(scrolled, "below") || strings.Contains(scrolled, "top") {
+		t.Fatalf("local presentation scroll should shift into overscan rows immediately, got %q", scrolled)
+	}
+}
+
+func TestPresentationScrollUsesMatchingOverscanGutterRows(t *testing.T) {
+	model := New(20, 6, nil)
+	model.gutters = map[uint16]protocol.Gutter{
+		7: {
+			WindowID:        7,
+			ContentHeight:   2,
+			CursorLine:      10,
+			LineNumberStyle: 3,
+			LineNumberWidth: 0,
+			SignColWidth:    2,
+			Entries: []protocol.GutterEntry{
+				{BufferLine: 9, SignType: 8, SignText: "A"},
+				{BufferLine: 10, SignType: 8, SignText: "B"},
+				{BufferLine: 11, SignType: 8, SignText: "C"},
+				{BufferLine: 12, SignType: 8, SignText: "D"},
+			},
+		},
+	}
+	model.putWindow(protocol.WindowContent{
+		ID:           7,
+		ContentEpoch: 9,
+		Rows: []protocol.WindowRow{
+			{ID: 1, ContentHash: 1, BufferLine: 9, Text: "above"},
+			{ID: 2, ContentHash: 2, BufferLine: 10, Text: "top"},
+			{ID: 3, ContentHash: 3, BufferLine: 11, Text: "bottom"},
+			{ID: 4, ContentHash: 4, BufferLine: 12, Text: "below"},
+		},
+		GeometrySet: true,
+		Geometry:    protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 0, Col: 0, Width: 10, Height: 2}},
+		ScrollSet:   true,
+		Scroll: protocol.ScrollPresentation{
+			WindowID: 7, ContentEpoch: 9, AnchorTop: 10, VisibleStartLine: 10, VisibleEndLine: 12, OverscanStartLine: 9, OverscanEndLine: 13,
+		},
+	})
+
+	initial := strings.Join(stripRenderedLines(model.renderWindowRows(model.windows[7])), "|")
+	if !strings.Contains(initial, "B  top") || strings.Contains(initial, "A  top") {
+		t.Fatalf("visible content should use the matching presentation gutter row, got %q", initial)
+	}
+
+	model = model.applyPresentationScroll(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: 1, Y: model.renderedHeaderHeight}))
+	scrolled := strings.Join(stripRenderedLines(model.renderWindowRows(model.windows[7])), "|")
+	if !strings.Contains(scrolled, "C  bottom") || !strings.Contains(scrolled, "D  below") {
+		t.Fatalf("locally shifted content should keep matching gutter rows, got %q", scrolled)
+	}
+}
+
+func TestPresentationScrollUsesPayloadLocalRowsForWrappedContent(t *testing.T) {
+	model := New(20, 6, nil)
+	model.putWindow(protocol.WindowContent{
+		ID:           7,
+		ContentEpoch: 9,
+		Rows: []protocol.WindowRow{
+			{ID: 1, ContentHash: 1, Text: "above"},
+			{ID: 2, ContentHash: 2, Text: "top"},
+			{ID: 3, ContentHash: 3, Text: "middle"},
+			{ID: 4, ContentHash: 4, Text: "bottom"},
+			{ID: 5, ContentHash: 5, Text: "below"},
+		},
+		GeometrySet: true,
+		Geometry: protocol.PaneGeometry{
+			ContentRect:     protocol.Rect{Row: 0, Col: 0, Width: 10, Height: 2},
+			ViewportRows:    2,
+			VisualRowOffset: 1,
+			TotalVisualRows: 5,
+		},
+		ScrollSet: true,
+		Scroll: protocol.ScrollPresentation{
+			WindowID: 7, ContentEpoch: 9, AnchorTop: 10, VisibleStartLine: 10, VisibleEndLine: 12, OverscanStartLine: 10, OverscanEndLine: 12,
+		},
+	})
+
+	initial := strings.Join(stripRenderedLines(model.renderWindowRows(model.windows[7])), "|")
+	if !strings.Contains(initial, "above") || !strings.Contains(initial, "top") || strings.Contains(initial, "middle") {
+		t.Fatalf("wrapped payload should not skip its first row just because document visual offset is non-zero, got %q", initial)
+	}
+
+	model = model.applyPresentationScroll(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: 1, Y: model.renderedHeaderHeight}))
+	model = model.applyPresentationScroll(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: 1, Y: model.renderedHeaderHeight}))
+	model = model.applyPresentationScroll(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: 1, Y: model.renderedHeaderHeight}))
+
+	scroll := model.presentationScroll[7]
+	if scroll.rowOffset != 3 {
+		t.Fatalf("wrapped presentation scroll should allow payload-local appended rows before clamping, got %d", scroll.rowOffset)
+	}
+
+	rendered := strings.Join(stripRenderedLines(model.renderWindowRows(model.windows[7])), "|")
+	if !strings.Contains(rendered, "bottom") || !strings.Contains(rendered, "below") || strings.Contains(rendered, "top") {
+		t.Fatalf("wrapped presentation scroll should render the actual payload rows, got %q", rendered)
+	}
+}
+
+func TestPresentationScrollShiftWheelMovesHorizontally(t *testing.T) {
+	model := New(20, 6, nil)
+	model.putWindow(protocol.WindowContent{
+		ID:           7,
+		ContentEpoch: 9,
+		Rows:         []protocol.WindowRow{{ID: 1, ContentHash: 1, Text: "abcdef"}},
+		GeometrySet:  true,
+		Geometry:     protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 0, Col: 0, Width: 4, Height: 1}},
+		ScrollSet:    true,
+		Scroll:       protocol.ScrollPresentation{WindowID: 7, ContentEpoch: 9, AnchorTop: 10, AnchorLeft: 0, LayoutGeneration: 5},
+	})
+
+	model = model.applyPresentationScroll(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, Mod: tea.ModShift, X: 1, Y: model.renderedHeaderHeight}))
+	scroll := model.presentationScroll[7]
+	if scroll.rowOffset != 0 || scroll.colOffset != 1 {
+		t.Fatalf("shift wheel-down should move presentation horizontally, got row=%d col=%d", scroll.rowOffset, scroll.colOffset)
+	}
+
+	model = model.applyPresentationScroll(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelUp, Mod: tea.ModShift, X: 1, Y: model.renderedHeaderHeight}))
+	if _, ok := model.presentationScroll[7]; ok {
+		t.Fatalf("shift wheel-up should cancel the horizontal offset and clear presentation scroll")
+	}
+}
+
+func TestPresentationScrollHorizontalOffsetInvalidatesCachedRows(t *testing.T) {
+	model := New(20, 6, nil)
+	model.putWindow(protocol.WindowContent{
+		ID:           7,
+		ContentEpoch: 9,
+		Rows:         []protocol.WindowRow{{ID: 1, ContentHash: 1, Text: "abcdef"}},
+		GeometrySet:  true,
+		Geometry:     protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 0, Col: 0, Width: 10, Height: 1}},
+		ScrollSet:    true,
+		Scroll:       protocol.ScrollPresentation{WindowID: 7, ContentEpoch: 9, AnchorTop: 10, AnchorLeft: 2, LayoutGeneration: 5},
+	})
+
+	initial := strings.Join(stripRenderedLines(model.renderWindowRows(model.windows[7])), "|")
+	if !strings.Contains(initial, "abcdef") {
+		t.Fatalf("initial render should show the unshifted cached row, got %q", initial)
+	}
+
+	model.presentationScroll[7] = presentationScroll{anchorTop: 10, anchorLeft: 2, contentEpoch: 9, layoutGeneration: 5, colOffset: 2}
+	scrolled := strings.Join(stripRenderedLines(model.renderWindowRows(model.windows[7])), "|")
+	if !strings.Contains(scrolled, "cdef") || strings.Contains(scrolled, "abcdef") {
+		t.Fatalf("horizontal presentation scroll should invalidate cached rows and shift content, got %q", scrolled)
+	}
+}
+
+func TestPresentationScrollHorizontalWheelRightClampsAtContentEdge(t *testing.T) {
+	model := New(20, 6, nil)
+	model.putWindow(protocol.WindowContent{
+		ID:           7,
+		ContentEpoch: 9,
+		Rows:         []protocol.WindowRow{{ID: 1, ContentHash: 1, Text: "abcdef"}},
+		GeometrySet:  true,
+		Geometry:     protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 0, Col: 0, Width: 4, Height: 1}},
+		ScrollSet:    true,
+		Scroll:       protocol.ScrollPresentation{WindowID: 7, ContentEpoch: 9, AnchorTop: 10, AnchorLeft: 0, LayoutGeneration: 5},
+	})
+
+	for range 10 {
+		model = model.applyPresentationScroll(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelRight, X: 1, Y: model.renderedHeaderHeight}))
+	}
+
+	scroll := model.presentationScroll[7]
+	if scroll.colOffset != 2 {
+		t.Fatalf("horizontal presentation scroll should clamp at right edge, got col offset %d", scroll.colOffset)
+	}
+	rendered := strings.Join(stripRenderedLines(model.renderWindowRows(model.windows[7])), "|")
+	if !strings.Contains(rendered, "cdef") || strings.TrimSpace(rendered) == "" {
+		t.Fatalf("repeated wheel-right should not blank content past the edge, got %q", rendered)
+	}
+}
+
+func TestPresentationScrollHorizontalWheelRightUsesTextRectWidth(t *testing.T) {
+	model := New(20, 6, nil)
+	model.putWindow(protocol.WindowContent{
+		ID:           7,
+		ContentEpoch: 9,
+		Rows:         []protocol.WindowRow{{ID: 1, ContentHash: 1, Text: "abcdef"}},
+		GeometrySet:  true,
+		Geometry:     protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 0, Col: 0, Width: 7, Height: 1}, TextRect: protocol.Rect{Row: 0, Col: 3, Width: 4, Height: 1}},
+		ScrollSet:    true,
+		Scroll:       protocol.ScrollPresentation{WindowID: 7, ContentEpoch: 9, AnchorTop: 10, AnchorLeft: 0, LayoutGeneration: 5},
+	})
+
+	for range 10 {
+		model = model.applyPresentationScroll(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelRight, X: 3, Y: model.renderedHeaderHeight}))
+	}
+
+	if got := model.presentationScroll[7].colOffset; got != 2 {
+		t.Fatalf("horizontal presentation scroll should clamp against text rect width, got col offset %d", got)
 	}
 }
 
@@ -1394,7 +1620,7 @@ func TestSemanticRowsRespectScrollLeftAndIndentGuides(t *testing.T) {
 	model.indentGuides[7] = protocol.IndentGuides{WindowID: 7, TabWidth: 2, GuideCols: []uint16{2}}
 	window := protocol.WindowContent{ID: 7, ScrollLeft: 2, Rows: []protocol.WindowRow{{Text: "    x"}}}
 
-	rendered := ansi.Strip(model.renderSemanticContentRow(window, 0, 8))
+	rendered := ansi.Strip(model.renderSemanticContentRow(window, 0, 0, 8))
 	if !strings.HasPrefix(rendered, "│ ") || !strings.Contains(rendered, "x") {
 		t.Fatalf("scroll-left rendering should keep display-column guides aligned with AstroVim-style guide glyphs: %q", rendered)
 	}

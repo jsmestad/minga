@@ -221,6 +221,7 @@ final class EditorNSView: MTKView {
     /// Cleans up window-bound observers and monitors.
     private func cleanupWindowResources() {
         cleanupBlinkResources()
+        resetSmoothScrollState()
         scrollerStyleTask?.cancel()
         scrollerStyleTask = nil
         scrollFadeWorkItem?.cancel()
@@ -335,9 +336,13 @@ final class EditorNSView: MTKView {
 
     // MARK: - Rendering
 
-    /// Sub-cell-height vertical pixel offset for smooth trackpad scrolling.
-    /// Positive = content shifted up (scrolled down). Always in [0, cellHeight).
-    private var scrollPixelOffset: CGFloat = 0
+    /// Sub-cell vertical/horizontal pixel offset for smooth trackpad scrolling.
+    /// Positive = content shifted up/left. Each component stays within one cell.
+    private var scrollPixelOffset = CGPoint(x: 0, y: 0)
+
+    /// Client-only boundary elasticity applied when the target pane is already
+    /// at the top or bottom of the committed overscan range.
+    private var scrollElasticOffsetY: CGFloat = 0
 
     /// Window receiving the current fractional smooth-scroll offset.
     /// Nil means the event location did not resolve to a scrollable editor window, so fractional offset is disabled instead of shifting every pane.
@@ -383,6 +388,8 @@ final class EditorNSView: MTKView {
             flashScrollIndicator()
         }
 
+        clearSmoothScrollStateIfTargetWindowMissing()
+
         let validGutterHoverWindowId = gutterHoverWindowId.flatMap { windowId in
             dispatcher.currentFrameWindowIds.contains(windowId) ? windowId : nil
         }
@@ -398,7 +405,7 @@ final class EditorNSView: MTKView {
                                 gutterHoverRow: validGutterHoverRow,
                                 drawable: drawable, viewportSize: drawableSize,
                                 contentScale: scale,
-                                scrollOffset: SIMD2<Float>(0, Float(scrollPixelOffset)),
+                                scrollOffset: SIMD2<Float>(Float(scrollPixelOffset.x), Float(scrollPixelOffset.y + scrollElasticOffsetY)),
                                 scrollTargetWindowId: scrollTargetWindowId)
         if coreTextRenderer.cursorAnimationGeneration != cursorAnimationGeneration {
             resetCursorBlink()
@@ -1283,6 +1290,7 @@ final class EditorNSView: MTKView {
             setDividerCursorState(.none)
         }
         clearGutterHover()
+        resetSmoothScrollState()
         super.mouseExited(with: event)
     }
 
@@ -1369,6 +1377,10 @@ final class EditorNSView: MTKView {
     }
 
     override func scrollWheel(with event: NSEvent) {
+        if event.hasPreciseScrollingDeltas && event.phase == .began {
+            finishSmoothScrollGesture()
+        }
+
         let (row, col) = cellPosition(from: event)
         let mods = modifierBits(from: event.modifierFlags)
 
@@ -1387,6 +1399,7 @@ final class EditorNSView: MTKView {
     private func handleTrackpadScroll(event: NSEvent, row: Int16, col: Int16, mods: UInt8) {
         if event.phase == .began {
             scrollAccumulator.reset()
+            scrollElasticOffsetY = 0
             scrollTargetWindowId = nil
             scrollTargetCellPosition = nil
         }
@@ -1400,14 +1413,38 @@ final class EditorNSView: MTKView {
         for e in vEvents {
             sendScrollEvent(e, row: targetCell.row, col: targetCell.col, mods: mods)
         }
-        scrollPixelOffset = scrollTargetWindowId == nil ? 0 : scrollAccumulator.pixelOffsetY
-
         // Horizontal: discrete column events
         let hEvents = scrollAccumulator.accumulateHorizontal(
             deltaX: event.scrollingDeltaX, cellWidth: cellWidth)
         for e in hEvents {
             sendScrollEvent(e, row: targetCell.row, col: targetCell.col, mods: mods)
         }
+        let targetWindowContent = scrollTargetWindowId.flatMap { guiState?.windowContents[$0] }
+        let targetScrollPresentation = targetWindowContent?.scrollPresentation
+        let payloadOverscan = Self.presentationScrollPayloadOverscanBounds(
+            for: targetWindowContent,
+            scrollPresentation: targetScrollPresentation
+        )
+        let boundaryAvailability = Self.presentationScrollBoundaryAvailability(
+            for: targetWindowContent,
+            scrollPresentation: targetScrollPresentation
+        )
+        let translation = Self.presentationScrollTranslation(
+            scrollPresentation: targetScrollPresentation,
+            scrollOffset: CGPoint(x: scrollAccumulator.pixelOffsetX, y: scrollAccumulator.pixelOffsetY),
+            scrollDeltaY: event.scrollingDeltaY,
+            currentElasticOffsetY: scrollElasticOffsetY,
+            cellHeight: effectiveCellHeight,
+            payloadOverscanBefore: payloadOverscan.before,
+            payloadOverscanAfter: payloadOverscan.after,
+            boundaryBefore: boundaryAvailability.before,
+            boundaryAfter: boundaryAvailability.after
+        )
+        if translation.scrollOffset.y == 0, translation.elasticOffsetY != 0 {
+            scrollAccumulator.snapVertical()
+        }
+        scrollPixelOffset = scrollTargetWindowId == nil ? CGPoint(x: 0, y: 0) : translation.scrollOffset
+        scrollElasticOffsetY = scrollTargetWindowId == nil ? 0 : translation.elasticOffsetY
 
         // Snap to zero when gesture/momentum ends
         if (event.phase == .ended || event.phase == .cancelled) && event.momentumPhase == [] {
@@ -1424,7 +1461,8 @@ final class EditorNSView: MTKView {
 
     private func finishSmoothScrollGesture() {
         scrollAccumulator.reset()
-        scrollPixelOffset = 0
+        scrollPixelOffset = CGPoint(x: 0, y: 0)
+        scrollElasticOffsetY = 0
         scrollTargetWindowId = nil
         scrollTargetCellPosition = nil
     }
@@ -1436,6 +1474,23 @@ final class EditorNSView: MTKView {
 
         if scrollTargetWindowId != nil && scrollTargetCellPosition == nil {
             scrollTargetCellPosition = (row, col)
+        }
+    }
+
+    func resetSmoothScrollState() {
+        scrollAccumulator.reset()
+        scrollPixelOffset = .zero
+        scrollElasticOffsetY = 0
+        scrollTargetWindowId = nil
+        scrollTargetCellPosition = nil
+        needsDisplay = true
+    }
+
+    private func clearSmoothScrollStateIfTargetWindowMissing() {
+        guard let targetWindowId = scrollTargetWindowId else { return }
+        guard dispatcher.currentFrameWindowIds.contains(targetWindowId), guiState?.windowContents[targetWindowId] != nil else {
+            resetSmoothScrollState()
+            return
         }
     }
 
@@ -1462,7 +1517,7 @@ final class EditorNSView: MTKView {
         guard Self.shouldResetSmoothScrollTarget(
             currentTargetWindowId: scrollTargetWindowId,
             pointerWindowId: pointerWindowId,
-            pixelOffset: scrollPixelOffset
+            hasPixelOffset: Self.hasActivePresentationOffset(scrollPixelOffset: scrollPixelOffset, scrollElasticOffsetY: scrollElasticOffsetY)
         ) else { return }
 
         resetSmoothScrollOffsetPreservingTarget()
@@ -1471,13 +1526,132 @@ final class EditorNSView: MTKView {
 
     private func resetSmoothScrollOffsetPreservingTarget() {
         scrollAccumulator.reset()
-        scrollPixelOffset = 0
+        scrollPixelOffset = CGPoint(x: 0, y: 0)
+        scrollElasticOffsetY = 0
     }
 
-    nonisolated static func shouldResetSmoothScrollTarget(currentTargetWindowId: UInt16?, pointerWindowId: UInt16?, pixelOffset: CGFloat) -> Bool {
-        guard pixelOffset != 0 else { return false }
+    nonisolated static func shouldResetSmoothScrollTarget(currentTargetWindowId: UInt16?, pointerWindowId: UInt16?, hasPixelOffset: Bool) -> Bool {
+        guard hasPixelOffset else { return false }
         guard let currentTargetWindowId else { return false }
         return pointerWindowId != currentTargetWindowId
+    }
+
+    nonisolated static func presentationNormalizedGutterPoint(
+        _ point: NSPoint,
+        scrollTargetWindowId: UInt16?,
+        targetGutterRect: GUICellRect?,
+        scrollPixelOffset: CGPoint,
+        scrollElasticOffsetY: CGFloat,
+        cellWidth: CGFloat,
+        cellHeight: CGFloat
+    ) -> NSPoint {
+        guard scrollTargetWindowId != nil, let targetGutterRect else { return point }
+        guard cellWidth > 0, cellHeight > 0 else { return point }
+
+        let rawCol = Int(point.x / cellWidth)
+        let rawRow = Int(point.y / cellHeight)
+        let startRow = Int(targetGutterRect.row)
+        let endRow = startRow + Int(targetGutterRect.height)
+        let startCol = Int(targetGutterRect.col)
+        let endCol = startCol + Int(targetGutterRect.width)
+        guard rawRow >= startRow && rawRow < endRow && rawCol >= startCol && rawCol < endCol else { return point }
+
+        let offsetY = scrollPixelOffset.y + scrollElasticOffsetY
+        guard offsetY != 0 else { return point }
+
+        let minY = CGFloat(startRow) * cellHeight
+        let maxY = CGFloat(endRow) * cellHeight - 0.001
+        let normalizedY = min(max(point.y + offsetY, minY), maxY)
+        return NSPoint(x: point.x, y: normalizedY)
+    }
+
+    nonisolated static func presentationScrollTranslation(
+        scrollPresentation: GUIScrollPresentation?,
+        scrollOffset: CGPoint,
+        scrollDeltaY: CGFloat,
+        currentElasticOffsetY: CGFloat,
+        cellHeight: CGFloat,
+        payloadOverscanBefore: Int,
+        payloadOverscanAfter: Int,
+        boundaryBefore: Int,
+        boundaryAfter: Int
+    ) -> (scrollOffset: CGPoint, elasticOffsetY: CGFloat) {
+        guard scrollPresentation != nil else { return (scrollOffset, 0) }
+        guard cellHeight > 0 else { return (scrollOffset, 0) }
+        guard scrollDeltaY != 0 else { return (scrollOffset, currentElasticOffsetY) }
+
+        let pullingTowardBefore = scrollDeltaY > 0
+        let pullingTowardAfter = scrollDeltaY < 0
+        let hasRenderablePayload =
+            (pullingTowardBefore && payloadOverscanBefore > 0) ||
+            (pullingTowardAfter && payloadOverscanAfter > 0)
+        if hasRenderablePayload {
+            return (scrollOffset, 0)
+        }
+
+        let pullingPastTop = pullingTowardBefore && boundaryBefore == 0
+        let pullingPastBottom = pullingTowardAfter && boundaryAfter == 0
+        guard pullingPastTop || pullingPastBottom else {
+            return (CGPoint(x: scrollOffset.x, y: 0), 0)
+        }
+
+        let maxElastic = max(cellHeight * 0.75, 1)
+        let dampedPull = -scrollDeltaY * 0.35
+        let elasticOffsetY = min(max(currentElasticOffsetY + dampedPull, -maxElastic), maxElastic)
+        return (CGPoint(x: scrollOffset.x, y: 0), elasticOffsetY)
+    }
+
+    nonisolated static func presentationScrollBoundaryAvailability(
+        for windowContent: GUIWindowContent?,
+        scrollPresentation: GUIScrollPresentation?
+    ) -> (before: Int, after: Int) {
+        guard let scrollPresentation else { return (0, 0) }
+
+        let payload = presentationScrollPayloadOverscanBounds(for: windowContent, scrollPresentation: scrollPresentation)
+        let hasContentBefore = scrollPresentation.anchorTop > 0 || scrollPresentation.anchorVisualRowOffset > 0 || payload.before > 0
+        let hasContentAfter: Bool
+        if let totalLines = windowContent?.paneGeometry?.viewport.totalLines, totalLines > 0 {
+            hasContentAfter = scrollPresentation.visibleEndLine < totalLines || payload.after > 0
+        } else {
+            hasContentAfter = payload.after > 0
+        }
+
+        return (hasContentBefore ? 1 : 0, hasContentAfter ? 1 : 0)
+    }
+
+    nonisolated static func presentationScrollPayloadOverscanBounds(
+        for windowContent: GUIWindowContent?,
+        scrollPresentation: GUIScrollPresentation?
+    ) -> (before: Int, after: Int) {
+        guard let scrollPresentation else { return (0, 0) }
+        let before = windowContent.map { CoreTextMetalRenderer.presentationPayloadOverscanBeforeRows(rows: $0.rows, scrollPresentation: scrollPresentation) } ?? CoreTextMetalRenderer.scrollOverscanBefore(scrollPresentation)
+        if let windowContent {
+            let visibleRows = presentationPayloadVisibleRows(for: windowContent)
+            if visibleRows > 0 {
+                return (before, max(windowContent.rows.count - visibleRows - before, 0))
+            }
+        }
+        let after = max(0, Int(scrollPresentation.overscanEndLine) - Int(scrollPresentation.visibleEndLine))
+        return (before, after)
+    }
+
+    nonisolated static func presentationPayloadVisibleRows(for windowContent: GUIWindowContent) -> Int {
+        if let geometry = windowContent.paneGeometry {
+            let textRows = Int(geometry.textRect.height)
+            if textRows > 0 { return textRows }
+            let viewportRows = Int(geometry.viewport.rows)
+            if viewportRows > 0 { return viewportRows }
+            let contentRows = Int(geometry.contentRect.height)
+            if contentRows > 0 { return contentRows }
+        }
+        return 0
+    }
+
+    nonisolated static func presentationScrollOverscanBounds(
+        for windowContent: GUIWindowContent?,
+        scrollPresentation: GUIScrollPresentation?
+    ) -> (before: Int, after: Int) {
+        presentationScrollBoundaryAvailability(for: windowContent, scrollPresentation: scrollPresentation)
     }
 
     nonisolated static func smoothScrollTargetWindowId(row: Int16, col: Int16, windowGutters: [UInt16: Wire.WindowGutter]) -> UInt16? {
@@ -1736,16 +1910,32 @@ final class EditorNSView: MTKView {
     }
 
     private func foldChevronEntry(at point: NSPoint) -> (gutter: Wire.WindowGutter, entry: Wire.GutterEntry)? {
+        let point = Self.presentationNormalizedGutterPoint(
+            point,
+            scrollTargetWindowId: scrollTargetWindowId,
+            targetGutterRect: scrollTargetWindowId.flatMap { guiState?.windowContents[$0]?.paneGeometry?.gutterRect },
+            scrollPixelOffset: scrollPixelOffset,
+            scrollElasticOffsetY: scrollElasticOffsetY,
+            cellWidth: cellWidth,
+            cellHeight: effectiveCellHeight
+        )
         guard let (gutter, rowIndex) = gutterHit(at: point) else { return nil }
         guard Int(gutter.signColWidth) >= 3 else { return nil }
-        guard rowIndex >= 0 && rowIndex < gutter.entries.count else { return nil }
+
+        let content = guiState?.windowContents[gutter.windowId]
+        let presentationBeforeRows = Self.presentationScrollPayloadOverscanBounds(
+            for: content,
+            scrollPresentation: content?.scrollPresentation
+        ).before
+        let presentationRowIndex = rowIndex + presentationBeforeRows
+        guard presentationRowIndex >= 0 && presentationRowIndex < gutter.entries.count else { return nil }
 
         let gutterX = CGFloat(gutter.contentCol) * cellWidth + CoreTextMetalRenderer.gutterLeftMarginPt
         let foldColumnOffset = CGFloat(Int(gutter.signColWidth) - 1)
         let foldStartX = gutterX + foldColumnOffset * cellWidth
         guard point.x >= foldStartX && point.x < foldStartX + cellWidth else { return nil }
 
-        let entry = gutter.entries[rowIndex]
+        let entry = gutter.entries[presentationRowIndex]
         switch entry.displayType {
         case .foldOpen, .foldStart:
             return (gutter, entry)
@@ -1755,6 +1945,15 @@ final class EditorNSView: MTKView {
     }
 
     private func updateGutterHover(at point: NSPoint) {
+        let point = Self.presentationNormalizedGutterPoint(
+            point,
+            scrollTargetWindowId: scrollTargetWindowId,
+            targetGutterRect: scrollTargetWindowId.flatMap { guiState?.windowContents[$0]?.paneGeometry?.gutterRect },
+            scrollPixelOffset: scrollPixelOffset,
+            scrollElasticOffsetY: scrollElasticOffsetY,
+            cellWidth: cellWidth,
+            cellHeight: effectiveCellHeight
+        )
         let next: (Bool, UInt16?, UInt16?)
         if let (gutter, rowIndex) = gutterHit(at: point), rowIndex >= 0 && rowIndex < gutter.entries.count {
             next = (true, gutter.windowId, gutter.contentRow + UInt16(rowIndex))
@@ -1803,10 +2002,44 @@ final class EditorNSView: MTKView {
     }
 
     private func cellPosition(from event: NSEvent) -> (row: Int16, col: Int16) {
-        let point = convert(event.locationInWindow, from: nil)
+        clearSmoothScrollStateIfTargetWindowMissing()
+        let rawPoint = convert(event.locationInWindow, from: nil)
+        let point = presentationNormalizedPoint(rawPoint)
         let row = Int16(point.y / effectiveCellHeight)
         let col = cellColumn(at: point, row: row)
         return (row, col)
+    }
+
+    private func presentationNormalizedPoint(_ point: NSPoint) -> NSPoint {
+        guard Self.hasActivePresentationOffset(scrollPixelOffset: scrollPixelOffset, scrollElasticOffsetY: scrollElasticOffsetY) else { return point }
+        let rawRow = Int16(point.y / effectiveCellHeight)
+        let rawCol = max(0, Int16(point.x / cellWidth))
+        guard smoothScrollTargetWindowId(row: rawRow, col: rawCol) == scrollTargetWindowId else { return point }
+        let scrollLeft = scrollTargetWindowId.flatMap { guiState?.windowContents[$0]?.scrollLeft } ?? 0
+        let presentationOffset = CGPoint(x: scrollPixelOffset.x, y: scrollPixelOffset.y + scrollElasticOffsetY)
+        let offset = Self.presentationScrollOffset(scrollLeft: scrollLeft, scrollOffset: presentationOffset)
+        let normalized = NSPoint(x: point.x + offset.x, y: point.y + offset.y)
+        guard let targetWindowId = scrollTargetWindowId,
+              let rect = guiState?.windowContents[targetWindowId]?.paneGeometry?.contentRect else { return normalized }
+        return Self.clampPresentationPoint(normalized, to: rect, cellWidth: cellWidth, cellHeight: effectiveCellHeight)
+    }
+
+    nonisolated static func hasActivePresentationOffset(scrollPixelOffset: CGPoint, scrollElasticOffsetY: CGFloat) -> Bool {
+        scrollPixelOffset.x != 0 || scrollPixelOffset.y != 0 || scrollElasticOffsetY != 0
+    }
+
+    nonisolated static func presentationScrollOffset(scrollLeft: UInt16, scrollOffset: CGPoint) -> CGPoint {
+        let x = scrollLeft == 0 && scrollOffset.x < 0 ? 0 : scrollOffset.x
+        return CGPoint(x: x, y: scrollOffset.y)
+    }
+
+    nonisolated static func clampPresentationPoint(_ point: NSPoint, to rect: GUICellRect, cellWidth: CGFloat, cellHeight: CGFloat) -> NSPoint {
+        guard rect.width > 0, rect.height > 0, cellWidth > 0, cellHeight > 0 else { return point }
+        let minX = CGFloat(rect.col) * cellWidth
+        let maxX = CGFloat(Int(rect.col) + Int(rect.width)) * cellWidth - 0.001
+        let minY = CGFloat(rect.row) * cellHeight
+        let maxY = CGFloat(Int(rect.row) + Int(rect.height)) * cellHeight - 0.001
+        return NSPoint(x: min(max(point.x, minX), maxX), y: min(max(point.y, minY), maxY))
     }
 
     private func rawCellPosition(at point: NSPoint) -> (row: Int16, col: Int16) {

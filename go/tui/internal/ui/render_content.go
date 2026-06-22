@@ -213,9 +213,13 @@ func (m Model) renderWindowRows(window protocol.WindowContent) []string {
 	// instead of accumulating an entry per (row_id, hash, index) ever seen, which
 	// would grow without bound under vertical scroll.
 	builder := m.lineCache.beginWindowRender(window.ID, context)
+	sourceStart := m.presentationSourceStart(window, height)
+	overscanBefore := presentationPayloadOverscanBefore(window)
 	lines := make([]string, 0, height)
 	for rowIndex := 0; rowIndex < height; rowIndex++ {
-		key, cacheable := lineCacheKeyFor(window, rowIndex)
+		sourceRowIndex := rowIndex + sourceStart
+		contentRowIndex := sourceRowIndex - overscanBefore
+		key, cacheable := lineCacheKeyFor(window, sourceRowIndex)
 		if cacheable {
 			if cached, ok := builder.lookup(key); ok {
 				m.lineCache.hits++
@@ -227,11 +231,11 @@ func (m Model) renderWindowRows(window protocol.WindowContent) []string {
 		contentWidth := width
 		gutterText := ""
 		if hasGutter {
-			gutterText = m.renderGutterEntry(gutter, rowIndex)
+			gutterText = m.renderGutterEntry(gutter, sourceRowIndex)
 			contentWidth = max(width-lipgloss.Width(gutterText), 1)
 		}
 
-		content := m.renderSemanticContentRow(window, rowIndex, contentWidth)
+		content := m.renderSemanticContentRow(window, sourceRowIndex, contentRowIndex, contentWidth)
 		line := lipgloss.JoinHorizontal(lipgloss.Top, gutterText, content)
 		if cacheable {
 			m.lineCache.misses++
@@ -248,6 +252,72 @@ func (m Model) renderWindowRows(window protocol.WindowContent) []string {
 // content_hash both set) are cached; tilde fill rows past the content and rows
 // without an identity (e.g. synthesized in tests) always recompose so the cache
 // never keys on a degenerate identity.
+func (m Model) presentationSourceStart(window protocol.WindowContent, height int) int {
+	if !window.ScrollSet {
+		return 0
+	}
+	before, _ := presentationPayloadOverscanBounds(window, height)
+	maxStart := max(len(window.Rows)-height, 0)
+	start := min(before, maxStart)
+	if scroll, ok := m.presentationScroll[window.ID]; ok && scroll.contentEpoch == window.Scroll.ContentEpoch && scroll.layoutGeneration == window.Scroll.LayoutGeneration && scroll.anchorTop == window.Scroll.AnchorTop && scroll.anchorLeft == window.Scroll.AnchorLeft {
+		start += scroll.rowOffset
+	}
+	return min(max(start, 0), maxStart)
+}
+
+func scrollOverscanBefore(scroll protocol.ScrollPresentation) int {
+	if scroll.VisibleStartLine <= scroll.OverscanStartLine {
+		return 0
+	}
+	return int(scroll.VisibleStartLine - scroll.OverscanStartLine)
+}
+
+func scrollOverscanAfter(scroll protocol.ScrollPresentation) int {
+	if scroll.OverscanEndLine <= scroll.VisibleEndLine {
+		return 0
+	}
+	return int(scroll.OverscanEndLine - scroll.VisibleEndLine)
+}
+
+func presentationPayloadOverscanBounds(window protocol.WindowContent, visibleRows int) (before int, after int) {
+	before = presentationPayloadOverscanBefore(window)
+	if visibleRows > 0 {
+		return before, max(len(window.Rows)-visibleRows-before, 0)
+	}
+	return before, scrollOverscanAfter(window.Scroll)
+}
+
+func presentationPayloadOverscanBefore(window protocol.WindowContent) int {
+	if !window.ScrollSet {
+		return 0
+	}
+	return scrollOverscanBefore(window.Scroll)
+}
+
+func presentationVisibleRows(window protocol.WindowContent) int {
+	if window.GeometrySet {
+		if window.Geometry.ViewportRows > 0 {
+			return int(window.Geometry.ViewportRows)
+		}
+		if window.Geometry.TextRect.Height > 0 {
+			return int(window.Geometry.TextRect.Height)
+		}
+		if window.Geometry.ContentRect.Height > 0 {
+			return int(window.Geometry.ContentRect.Height)
+		}
+	}
+	return 0
+}
+
+func (m Model) presentationScrollEffectiveLeft(window protocol.WindowContent) int {
+	scrollLeft := int(window.ScrollLeft)
+	scroll, ok := m.presentationScroll[window.ID]
+	if !ok || scroll.contentEpoch != window.Scroll.ContentEpoch || scroll.layoutGeneration != window.Scroll.LayoutGeneration || scroll.anchorTop != window.Scroll.AnchorTop || scroll.anchorLeft != window.Scroll.AnchorLeft {
+		return scrollLeft
+	}
+	return max(scrollLeft+scroll.colOffset, 0)
+}
+
 func lineCacheKeyFor(window protocol.WindowContent, rowIndex int) (lineCacheKey, bool) {
 	if rowIndex >= len(window.Rows) {
 		return lineCacheKey{}, false
@@ -259,12 +329,12 @@ func lineCacheKeyFor(window protocol.WindowContent, rowIndex int) (lineCacheKey,
 	return lineCacheKey{rowID: row.ID, hash: row.ContentHash, rowIndex: rowIndex}, true
 }
 
-func (m Model) renderSemanticContentRow(window protocol.WindowContent, rowIndex int, width int) string {
-	cursorline := window.Cursorline.Visible && rowIndex == int(window.Cursorline.Row)
-	if rowIndex >= len(window.Rows) {
+func (m Model) renderSemanticContentRow(window protocol.WindowContent, sourceRowIndex int, contentRowIndex int, width int) string {
+	cursorline := window.Cursorline.Visible && contentRowIndex == int(window.Cursorline.Row)
+	if sourceRowIndex < 0 || sourceRowIndex >= len(window.Rows) {
 		return m.renderTildeRow(width, cursorline, window.Cursorline.BG)
 	}
-	return m.renderRow(window, window.Rows[rowIndex], rowIndex, width, cursorline, window.Cursorline.BG)
+	return m.renderRow(window, window.Rows[sourceRowIndex], contentRowIndex, width, cursorline, window.Cursorline.BG)
 }
 
 func (m Model) renderTildeRow(width int, cursorline bool, cursorlineBG uint32) string {
@@ -283,6 +353,7 @@ func (m Model) renderRow(window protocol.WindowContent, row protocol.WindowRow, 
 
 	var builder strings.Builder
 	scrollLeft := int(window.ScrollLeft)
+	scrollLeft = m.presentationScrollEffectiveLeft(window)
 	col := 0
 	for graphemes := uniseg.NewGraphemes(row.Text); graphemes.Next(); {
 		text := graphemes.Str()
@@ -614,7 +685,7 @@ func (m Model) renderGutterEntry(gutter protocol.Gutter, rowIndex int) string {
 		return ""
 	}
 	style := lipgloss.NewStyle().Foreground(m.palette().GutterText()).Background(m.editorBackground()).Width(width)
-	if rowIndex >= len(gutter.Entries) {
+	if rowIndex < 0 || rowIndex >= len(gutter.Entries) {
 		return style.Render(strings.Repeat(" ", width))
 	}
 	entry := gutter.Entries[rowIndex]

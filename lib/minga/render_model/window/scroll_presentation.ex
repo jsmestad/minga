@@ -55,8 +55,11 @@ defmodule Minga.RenderModel.Window.ScrollPresentation do
   def from_window(%Window{geometry: nil}), do: nil
 
   def from_window(%Window{geometry: %PaneGeometry{} = geometry} = window) do
-    {visible_start_line, visible_end_line} =
-      visible_line_range(window.rows, geometry.viewport.top)
+    {overscan_start_line, overscan_end_line} =
+      line_range(window.rows, geometry.viewport.top)
+
+    visible_start_line = max(geometry.viewport.top, overscan_start_line)
+    visible_end_line = min(visible_start_line + geometry.viewport.rows, overscan_end_line)
 
     %__MODULE__{
       window_id: window.window_id,
@@ -66,17 +69,17 @@ defmodule Minga.RenderModel.Window.ScrollPresentation do
       anchor_visual_row_offset: geometry.viewport.visual_row_offset,
       visible_start_line: visible_start_line,
       visible_end_line: visible_end_line,
-      overscan_start_line: visible_start_line,
-      overscan_end_line: visible_end_line,
+      overscan_start_line: overscan_start_line,
+      overscan_end_line: overscan_end_line,
       content_epoch: window.content_epoch,
       layout_generation: layout_generation(geometry)
     }
   end
 
-  @spec visible_line_range([Row.t()], non_neg_integer()) :: {non_neg_integer(), non_neg_integer()}
-  defp visible_line_range([], fallback_line), do: {fallback_line, fallback_line}
+  @spec line_range([Row.t()], non_neg_integer()) :: {non_neg_integer(), non_neg_integer()}
+  defp line_range([], fallback_line), do: {fallback_line, fallback_line}
 
-  defp visible_line_range(rows, _fallback_line) do
+  defp line_range(rows, _fallback_line) do
     {first, last} =
       Enum.reduce(rows, {nil, nil}, fn %Row{buf_line: line}, {min_line, max_line} ->
         {min_line(min_line, line), max_line(max_line, line)}

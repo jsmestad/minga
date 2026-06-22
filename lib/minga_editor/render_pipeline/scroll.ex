@@ -69,6 +69,7 @@ defmodule MingaEditor.RenderPipeline.Scroll do
       git_signs: %{},
       visible_line_map: nil,
       total_visual_rows: nil,
+      visible_row_start_index: 0,
       content_epoch: 0,
       full_refresh: true
     ]
@@ -97,6 +98,7 @@ defmodule MingaEditor.RenderPipeline.Scroll do
             visible_line_map:
               [VisibleLines.line_entry()] | [MingaEditor.DisplayMap.entry()] | nil,
             total_visual_rows: non_neg_integer() | nil,
+            visible_row_start_index: non_neg_integer(),
             content_epoch: non_neg_integer(),
             full_refresh: boolean()
           }

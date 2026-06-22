@@ -21,6 +21,7 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
   alias MingaEditor.UI.Highlight
   alias Minga.RenderModel.Window
   alias Minga.RenderModel.Window.Row
+  alias Minga.RenderModel.Window.ScrollPresentation
 
   import MingaEditor.RenderPipeline.TestHelpers
 
@@ -400,6 +401,42 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       assert wf.window_model.geometry.viewport.total_visual_rows == 20
     end
 
+    test "wrapped presentation payload keeps document visual offset separate from payload overscan" do
+      state =
+        gui_state(rows: 3, cols: 20, content: "abcdefghijABCDEFGHIJklmnopqrstKLMNOPQRST\ntail")
+
+      buffer = state.workspace.buffers.active
+      assert {:ok, true} = BufferProcess.set_option(buffer, :wrap, true)
+      assert {:ok, false} = BufferProcess.set_option(buffer, :linebreak, false)
+      :ok = BufferProcess.move_to(buffer, {0, 16})
+
+      win_id = state.workspace.windows.active
+      window = Map.fetch!(state.workspace.windows.map, win_id)
+      viewport = Viewport.put_top_visual(window.viewport, 0, 1, 3)
+      window = EditorWindow.set_viewport(window, viewport)
+
+      windows =
+        Windows.set_map(
+          state.workspace.windows,
+          Map.put(state.workspace.windows.map, win_id, window)
+        )
+
+      state = %{state | workspace: %{state.workspace | windows: windows}}
+
+      {[wf], _cursor, _state} = build_content(state)
+      model = wf.window_model
+      presentation = ScrollPresentation.from_window(model)
+
+      assert Enum.map(model.rows, & &1.text) == ["EFGHIJklmnopqr", "stKLMNOPQRST", "tail"]
+      assert Enum.map(model.rows, & &1.visual_index) == [1, 2, 0]
+      assert model.geometry.viewport.visual_row_offset == 1
+      assert presentation.anchor_visual_row_offset == 1
+      assert presentation.visible_start_line == 0
+      assert presentation.overscan_start_line == 0
+      assert presentation.visible_end_line == 2
+      assert presentation.overscan_end_line == 2
+    end
+
     test "cursor line reveals conceals while other model rows stay concealed" do
       state = gui_state(content: "**bold**\n**italic**")
       buffer = state.workspace.buffers.active
@@ -470,6 +507,50 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       assert model.selection.start_row == 2
       assert model.selection.end_row == 2
       assert model.selection.end_col == 7
+    end
+
+    test "scrolled simple window keeps overscan rows and matching scroll presentation metadata" do
+      state =
+        gui_state(rows: 5, cols: 20, content: "def foo do\n  if x do\n    :ok\n  end\nend\n:tail")
+
+      buffer = state.workspace.buffers.active
+      :ok = BufferProcess.move_to(buffer, {2, 4})
+
+      win_id = state.workspace.windows.active
+      window = Map.fetch!(state.workspace.windows.map, win_id)
+      window = EditorWindow.set_viewport(window, Viewport.put_top(window.viewport, 1))
+
+      windows =
+        Windows.set_map(
+          state.workspace.windows,
+          Map.put(state.workspace.windows.map, win_id, window)
+        )
+
+      state = %{state | workspace: %{state.workspace | windows: windows}}
+
+      {[wf], _cursor, _state} = build_content(state)
+      model = wf.window_model
+      presentation = ScrollPresentation.from_window(model)
+
+      assert Enum.map(model.rows, & &1.text) == [
+               "def foo do",
+               "  if x do",
+               "    :ok",
+               "  end",
+               "end",
+               ":tail"
+             ]
+
+      assert model.indent_guides.line_indent_levels == [1, 2, 1, 0]
+      assert presentation != nil
+      assert presentation.window_id == model.window_id
+      assert presentation.visible_start_line == 1
+      assert presentation.visible_end_line == 5
+      assert presentation.overscan_start_line == 0
+      assert presentation.overscan_end_line == 6
+      assert presentation.content_epoch == model.content_epoch
+      assert presentation.reset_required == model.full_refresh
+      assert is_integer(presentation.layout_generation)
     end
 
     test "includes gutter and indent guide models built from current-frame data" do

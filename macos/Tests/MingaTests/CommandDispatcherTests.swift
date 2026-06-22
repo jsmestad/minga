@@ -26,8 +26,8 @@ struct CommandDispatcherRoutingTests {
 
     // MARK: - Basic commands
 
-    @Test("commitFrame preserves retained windows (no cell-grid clear/prune path)")
-    @MainActor func commitFramePreservesRetainedWindows() {
+    @Test("empty keyframe prunes retained windows and stale gutter globals")
+    @MainActor func emptyKeyframePrunesRetainedWindowState() {
         let (dispatcher, gui) = makeDispatcher()
         gui.windowContents[1] = GUIWindowContent(
             windowId: 1, fullRefresh: false,
@@ -36,13 +36,79 @@ struct CommandDispatcherRoutingTests {
             searchMatches: [], diagnosticUnderlines: [],
             documentHighlights: []
         )
+        dispatcher.applyForTesting(.guiGutter(data: Wire.WindowGutter(
+            windowId: 1, contentRow: 0, contentCol: 5, contentHeight: 24,
+            isActive: true, contentWidth: 80, cursorLine: 9, lineNumberStyle: .hybrid,
+            lineNumberWidth: 4, signColWidth: 3,
+            entries: [Wire.GutterEntry(bufLine: 9, displayType: .normal, signType: .none, foldEndLine: 0xFFFF_FFFF, signFg: 0, signText: "")]
+        )))
+        dispatcher.applyForTesting(.guiIndentGuides(data: IndentGuideData(
+            windowId: 1, tabWidth: 4, activeGuideCol: 0xFFFF,
+            guideCols: [2], lineIndentLevels: [1]
+        )))
+        #expect(dispatcher.currentFrameWindowIds == [1])
+        #expect(dispatcher.frameState.gutterCol == 7)
+        #expect(dispatcher.frameState.viewportTopLine == 9)
 
-        // A keyframe transaction (base 0) opened then committed.
         dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
 
+        #expect(gui.windowContents.isEmpty)
+        #expect(dispatcher.frameState.windowGutters.isEmpty)
+        #expect(dispatcher.frameState.windowIndentGuides.isEmpty)
+        #expect(dispatcher.currentFrameWindowIds.isEmpty)
+        #expect(dispatcher.frameState.gutterCol == 0)
+        #expect(dispatcher.frameState.viewportTopLine == 0xFFFF_FFFF)
+    }
+
+    @Test("keyframe commit prunes stale window content, gutters, and indent guides")
+    @MainActor func keyframeCommitPrunesStaleWindowState() {
+        let (dispatcher, gui) = makeDispatcher()
+        gui.windowContents[2] = GUIWindowContent(
+            windowId: 2, fullRefresh: false,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block,
+            rows: [], selection: nil,
+            searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: []
+        )
+        dispatcher.applyForTesting(.guiGutter(data: Wire.WindowGutter(
+            windowId: 2, contentRow: 0, contentCol: 5, contentHeight: 24,
+            isActive: false, contentWidth: 80, cursorLine: 0, lineNumberStyle: .hybrid,
+            lineNumberWidth: 4, signColWidth: 3, entries: []
+        )))
+        dispatcher.applyForTesting(.guiIndentGuides(data: IndentGuideData(
+            windowId: 2, tabWidth: 4, activeGuideCol: 0xFFFF,
+            guideCols: [], lineIndentLevels: []
+        )))
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 3, baseFrameSeq: 0))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: GUIWindowContent(
+            windowId: 1, fullRefresh: false,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block,
+            rows: [], selection: nil,
+            searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: []
+        )))
+        dispatcher.dispatch(.guiGutter(data: Wire.WindowGutter(
+            windowId: 1, contentRow: 0, contentCol: 5, contentHeight: 24,
+            isActive: true, contentWidth: 80, cursorLine: 0, lineNumberStyle: .hybrid,
+            lineNumberWidth: 4, signColWidth: 3, entries: []
+        )))
+        dispatcher.dispatch(.guiIndentGuides(data: IndentGuideData(
+            windowId: 1, tabWidth: 4, activeGuideCol: 0xFFFF,
+            guideCols: [], lineIndentLevels: []
+        )))
+        dispatcher.dispatch(.commitFrame(frameSeq: 3, seq: 0))
+
         #expect(gui.windowContents[1] != nil)
+        #expect(gui.windowContents[2] == nil)
+        #expect(dispatcher.frameState.windowGutters[1] != nil)
+        #expect(dispatcher.frameState.windowGutters[2] == nil)
+        #expect(dispatcher.frameState.windowIndentGuides[1] != nil)
+        #expect(dispatcher.frameState.windowIndentGuides[2] == nil)
+        #expect(dispatcher.currentFrameWindowIds == [1])
     }
 
     @Test("setCursorShape updates frameState cursor shape")
@@ -679,6 +745,72 @@ struct CommandDispatcherRoutingTests {
 
         #expect(gui.windowContents[7] != nil)
         #expect(gui.windowContents[7]?.cursorRow == 5)
+    }
+
+    @Test("reset-required scroll presentation clears local smooth-scroll state once per promoted frame")
+    @MainActor func resetRequiredScrollPresentationClearsLocalStateOnce() {
+        let (dispatcher, gui) = makeDispatcher()
+        var resetCount = 0
+        dispatcher.onScrollPresentationReset = { resetCount += 1 }
+
+        let resetPresentation = GUIScrollPresentation(
+            windowId: 7,
+            resetRequired: true,
+            anchorTop: 5,
+            anchorLeft: 2,
+            anchorVisualRowOffset: 0,
+            visibleStartLine: 5,
+            visibleEndLine: 8,
+            overscanStartLine: 4,
+            overscanEndLine: 9,
+            contentEpoch: 42,
+            layoutGeneration: 77
+        )
+
+        dispatcher.applyForTesting(.guiWindowContent(data: GUIWindowContent(
+            windowId: 7, fullRefresh: true, contentEpoch: 42,
+            cursorRow: 5, cursorCol: 10, cursorShape: .beam,
+            rows: [], selection: nil,
+            searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: [],
+            scrollPresentation: resetPresentation
+        )))
+        #expect(resetCount == 1)
+
+        dispatcher.applyForTesting(.guiWindowOverlayDelta(data: GUIWindowOverlayDelta(
+            windowId: 7, contentEpoch: 42,
+            cursorVisible: true, cursorRow: 5, cursorCol: 10,
+            cursorShape: .beam, cursorline: nil
+        )))
+        #expect(resetCount == 1)
+
+        gui.windowContents[7] = GUIWindowContent(
+            windowId: 7, fullRefresh: false, contentEpoch: 42,
+            cursorRow: 5, cursorCol: 10, cursorShape: .beam,
+            rows: [], selection: nil,
+            searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: []
+        )
+
+        dispatcher.applyForTesting(.guiWindowRowsDelta(data: GUIWindowRowsDelta(
+            windowId: 7,
+            contentEpoch: 42,
+            cursorVisible: true,
+            cursorRow: 5,
+            cursorCol: 10,
+            cursorShape: .beam,
+            scrollLeft: 0,
+            rows: [],
+            selection: nil,
+            searchMatches: [],
+            diagnosticUnderlines: [],
+            documentHighlights: [],
+            lineAnnotations: [],
+            paneGeometry: nil,
+            cursorline: nil,
+            scrollPresentation: resetPresentation
+        )))
+        #expect(resetCount == 2)
     }
 
     @Test("guiWindowOverlayDelta updates matching retained content")

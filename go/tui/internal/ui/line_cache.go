@@ -215,6 +215,7 @@ func (m Model) windowContextFingerprint(window protocol.WindowContent, width int
 
 	// Per-window scroll and cursorline.
 	writeUint(uint64(window.ScrollLeft))
+	writeUint(uint64(m.presentationScrollEffectiveLeft(window)))
 	writeBool(window.Cursorline.Visible)
 	writeUint(uint64(window.Cursorline.Row))
 	writeUint(uint64(window.Cursorline.BG))

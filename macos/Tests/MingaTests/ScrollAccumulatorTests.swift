@@ -107,7 +107,7 @@ struct ScrollAccumulatorVerticalTests {
 
         acc.reset()
         #expect(acc.pixelOffsetY == 0)
-        #expect(acc.accumulatorX == 0)
+        #expect(acc.pixelOffsetX == 0)
     }
 }
 
@@ -119,7 +119,7 @@ struct ScrollAccumulatorHorizontalTests {
         var acc = ScrollAccumulator()
         let events = acc.accumulateHorizontal(deltaX: 5, cellWidth: 10)
         #expect(events.isEmpty)
-        #expect(acc.accumulatorX == 5)
+        #expect(acc.pixelOffsetX == 5)
     }
 
     @Test("positive delta crossing cellWidth produces scrollLeft")
@@ -127,7 +127,7 @@ struct ScrollAccumulatorHorizontalTests {
         var acc = ScrollAccumulator()
         let events = acc.accumulateHorizontal(deltaX: 15, cellWidth: 10)
         #expect(events == [.scrollLeft])
-        #expect(acc.accumulatorX == 5)
+        #expect(acc.pixelOffsetX == 5)
     }
 
     @Test("negative delta crossing cellWidth produces scrollRight")
@@ -135,7 +135,7 @@ struct ScrollAccumulatorHorizontalTests {
         var acc = ScrollAccumulator()
         let events = acc.accumulateHorizontal(deltaX: -15, cellWidth: 10)
         #expect(events == [.scrollRight])
-        #expect(acc.accumulatorX == -5)
+        #expect(acc.pixelOffsetX == -5)
     }
 
     @Test("large delta produces multiple events")
@@ -143,7 +143,7 @@ struct ScrollAccumulatorHorizontalTests {
         var acc = ScrollAccumulator()
         let events = acc.accumulateHorizontal(deltaX: -35, cellWidth: 10)
         #expect(events == [.scrollRight, .scrollRight, .scrollRight])
-        #expect(acc.accumulatorX == -5)
+        #expect(acc.pixelOffsetX == -5)
     }
 
     @Test("zero cellWidth returns no events")
