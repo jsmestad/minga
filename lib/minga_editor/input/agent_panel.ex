@@ -1,9 +1,8 @@
 defmodule MingaEditor.Input.AgentPanel do
   @moduledoc """
-  Input handler for the agent side panel (editor scope, panel visible).
+  Input handler for the agent prompt and side-panel navigation.
 
-  When the agent panel is visible in editor scope, this handler
-  intercepts keys for the panel's input field and navigation mode.
+  When the agent prompt is focused, this handler owns prompt editing in both editor scope and full agent workspaces. When the side panel is visible in editor scope but the prompt is not focused, it owns panel navigation.
 
   In insert mode, it handles prompt editing (Enter, Backspace, Ctrl
   combos, arrow keys, @-mention triggers). In normal/visual/
@@ -34,25 +33,25 @@ defmodule MingaEditor.Input.AgentPanel do
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
 
-  # Editor scope with agent side panel visible + input focused
-  def handle_key(%{workspace: %{keymap_scope: :editor}} = state, cp, mods) do
-    panel = AgentAccess.panel(state)
+  def handle_key(state, cp, mods) do
+    state |> AgentAccess.panel() |> route_panel_key(state, cp, mods)
+  end
 
-    if panel.visible and panel.input_focused do
-      {:handled, handle_panel_input(state, cp, mods)}
+  @spec route_panel_key(UIState.Panel.t(), EditorState.t(), non_neg_integer(), non_neg_integer()) ::
+          MingaEditor.Input.Handler.result()
+  defp route_panel_key(%{visible: true, input_focused: true}, state, cp, mods) do
+    {:handled, handle_panel_input(state, cp, mods)}
+  end
+
+  defp route_panel_key(%{visible: true}, %{workspace: %{keymap_scope: :editor}} = state, cp, mods) do
+    if is_pid(AgentAccess.agent(state).buffer) do
+      handle_panel_nav(state, cp, mods)
     else
-      agent = AgentAccess.agent(state)
-
-      if panel.visible and is_pid(agent.buffer) do
-        handle_panel_nav(state, cp, mods)
-      else
-        {:passthrough, state}
-      end
+      {:passthrough, state}
     end
   end
 
-  # Not our concern
-  def handle_key(state, _cp, _mods), do: {:passthrough, state}
+  defp route_panel_key(_panel, state, _cp, _mods), do: {:passthrough, state}
 
   # ── Panel input mode ────────────────────────────────────────────────────
 

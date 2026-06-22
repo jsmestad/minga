@@ -121,6 +121,7 @@ defmodule Minga.Frontend.Adapter.GUI.WorkspacesEncoder do
 
   @spec encode_tab_kind(VisibleTab.kind()) :: non_neg_integer()
   defp encode_tab_kind(:file), do: 0
+  defp encode_tab_kind(:agent), do: 1
 
   @spec encode_visible_tab_flags(VisibleTab.t()) :: non_neg_integer()
   defp encode_visible_tab_flags(%VisibleTab{} = tab) do

@@ -49,8 +49,8 @@ defmodule MingaEditor.Agent.UIState.Panel do
             prompt_history: [],
             history_index: -1,
             spinner_frame: 0,
-            provider_name: AgentConfig.extract_provider_prefix(AgentConfig.default_model()),
-            model_name: AgentConfig.default_model(),
+            provider_name: "",
+            model_name: "unknown",
             thinking_level: "medium",
             input_focused: false,
             display_start_index: 0,
@@ -61,19 +61,37 @@ defmodule MingaEditor.Agent.UIState.Panel do
             cached_display_message_pairs: [],
             cached_styled_messages: nil,
             message_version: 0,
-            # Assume configured until the session reports otherwise, so the
-            # common (authed) case never flashes a "not configured" indicator.
-            credentials_configured: true,
+            credentials_configured: false,
             provenance_jump: nil
 
-  @doc "Creates a new panel state with defaults."
+  @doc "Creates a new panel state with truthful model defaults."
   @spec new() :: t()
-  def new, do: %__MODULE__{}
+  def new do
+    model = AgentConfig.default_model()
+
+    %__MODULE__{
+      provider_name: AgentConfig.extract_provider_prefix(model),
+      model_name: model,
+      credentials_configured: false
+    }
+  end
 
   @doc "Sets whether any provider credential is configured (drives the model indicator)."
   @spec set_credentials_configured(t(), boolean()) :: t()
   def set_credentials_configured(%__MODULE__{} = panel, configured?) do
     %{panel | credentials_configured: configured?}
+  end
+
+  @doc "Sets the displayed provider name."
+  @spec set_provider_name(t(), String.t()) :: t()
+  def set_provider_name(%__MODULE__{} = panel, provider) when is_binary(provider) do
+    %{panel | provider_name: provider}
+  end
+
+  @doc "Sets the active model name."
+  @spec set_model_name(t(), String.t()) :: t()
+  def set_model_name(%__MODULE__{} = panel, model) when is_binary(model) do
+    %{panel | model_name: model}
   end
 
   @doc "Clears the active file mention completion."

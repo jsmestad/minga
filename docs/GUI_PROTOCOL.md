@@ -966,9 +966,9 @@ Per visible tab:
   + path_len(2) + path(path_len) + tint_color_rgb(4)
 ```
 
-`version` is currently 2. Version 2 adds `tint_color_rgb` to each visible tab entry and bit 5 for pinned tabs. `mode`: 0 = editor, 1 = agent, 2 = file_tree, 3 = other. Workspace `kind`: 0 = manual, 1 = agent. Visible tab `kind`: 0 = file. `status`: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error, 4 = plan. Workspace flags: bit 0 = attention, bit 1 = closeable. Visible tab flags: bit 0 = dirty, bit 1 = attention, bit 2 = draft, bit 3 = draft_elsewhere, bit 4 = conflict, bit 5 = pinned. `tint_color_rgb` is `0` for no tint, otherwise `0xRRGGBB`.
+`version` is currently 2. Version 2 adds `tint_color_rgb` to each visible tab entry and bit 5 for pinned tabs. `mode`: 0 = editor, 1 = agent, 2 = file_tree, 3 = other. Workspace `kind`: 0 = manual, 1 = agent. Visible tab `kind`: 0 = file, 1 = agent. `status`: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error, 4 = plan. Workspace flags: bit 0 = attention, bit 1 = closeable. Visible tab flags: bit 0 = dirty, bit 1 = attention, bit 2 = draft, bit 3 = draft_elsewhere, bit 4 = conflict, bit 5 = pinned. `tint_color_rgb` is `0` for no tint, otherwise `0xRRGGBB`.
 
-The workspace list includes the manual project workspace and all agent workspaces. The visible tab list includes only file tabs for the active workspace. Agent view remains a workspace zoom surface, so it is not encoded as a normal file tab.
+The workspace list includes the manual project workspace and all agent workspaces. The visible tab list includes the active workspace's agent tab first when present, followed by its file tabs. Agent view remains a workspace zoom surface, so it is not encoded as a normal file tab.
 
 ### 0x99 — gui_notifications
 

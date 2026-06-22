@@ -46,6 +46,10 @@ defmodule MingaEditor.Commands.Agent do
   @typedoc "Internal editor state."
   @type state :: EditorState.t()
 
+  @type prompt_readiness ::
+          :no_model | :credentials_missing | :starting | {:startup_failed, String.t()} | :ready
+  @type prompt_submit_status :: :ready | {:blocked, String.t()}
+
   @doc "Legacy alias for `toggle_agent_split/1`."
   @spec toggle_agentic_view(state()) :: state()
   def toggle_agentic_view(state), do: toggle_agent_split(state)
@@ -459,14 +463,17 @@ defmodule MingaEditor.Commands.Agent do
   @spec submit_prompt(state(), Panel.t(), boolean(), pid() | nil) :: state()
   defp submit_prompt(state, _panel, true, _session), do: state
 
-  defp submit_prompt(state, _panel, false, nil) do
-    EditorState.set_status(state, "No agent session, try closing and reopening the panel")
+  defp submit_prompt(state, panel, false, nil) do
+    case prompt_readiness(state, panel, nil) do
+      :no_model ->
+        EditorState.set_status(state, no_model_status())
+
+      _readiness ->
+        EditorState.set_status(state, "No agent session, try closing and reopening the panel")
+    end
   end
 
   defp submit_prompt(state, panel, false, _session) do
-    # Sending a new prompt ends any provenance jump: the user is driving the
-    # conversation again, so streaming should resume its bottom-pinned scroll.
-    state = AgentAccess.update_panel(state, &Panel.clear_provenance_jump/1)
     text = UIState.prompt_text(panel)
     submit_prompt_text(state, text, SlashCommand.slash_command?(text))
   end
@@ -508,21 +515,32 @@ defmodule MingaEditor.Commands.Agent do
     if remote_session_disconnected?(state) do
       EditorState.set_status(state, "Session disconnected. Your prompt will be preserved.")
     else
-      model = AgentAccess.panel(state).model_name
+      panel = AgentAccess.panel(state)
 
-      case resolve_prompt_for_session(state, text, model) do
-        {:ok, resolved} ->
+      case prompt_submit_status(state, panel) do
+        :ready ->
           state
-          |> clear_input_after_submit()
-          |> deliver_prompt(resolved)
+          |> AgentAccess.update_panel(&Panel.clear_provenance_jump/1)
+          |> resolve_and_deliver_prompt(text, panel.model_name)
 
-        {:error, msg} ->
+        {:blocked, msg} ->
           EditorState.set_status(state, msg)
       end
     end
   catch
     :exit, _ ->
       EditorState.set_status(state, "Agent session unavailable. Your prompt was preserved.")
+  end
+
+  @spec resolve_and_deliver_prompt(state(), String.t(), String.t()) :: state()
+  defp resolve_and_deliver_prompt(state, text, model) do
+    case resolve_prompt_for_session(state, text, model) do
+      {:ok, resolved} ->
+        deliver_prompt(state, resolved)
+
+      {:error, msg} ->
+        EditorState.set_status(state, msg)
+    end
   end
 
   # Clears the input and resets diff baselines after a prompt is submitted.
@@ -540,16 +558,18 @@ defmodule MingaEditor.Commands.Agent do
   defp deliver_prompt(state, resolved) do
     case AgentSession.send_prompt_pid(AgentAccess.session(state), resolved) do
       :ok ->
-        state
+        clear_input_after_submit(state)
 
       {:queued, :steering} ->
-        update_agent_ui(
-          state,
-          &UIState.push_toast(&1, "⏳ Queued (steer). Ctrl-C to cancel.", :info)
-        )
+        state
+        |> clear_input_after_submit()
+        |> update_agent_ui(&UIState.push_toast(&1, "⏳ Queued (steer). Ctrl-C to cancel.", :info))
 
       {:error, :provider_not_ready} ->
-        EditorState.set_status(state, "Agent provider still starting, try again in a moment")
+        EditorState.set_status(state, provider_starting_status())
+
+      {:error, :credentials_not_configured} ->
+        EditorState.set_status(state, credentials_missing_status())
 
       {:error, msg} when is_binary(msg) ->
         EditorState.set_status(state, msg)
@@ -564,22 +584,123 @@ defmodule MingaEditor.Commands.Agent do
     if remote_session_disconnected?(state) do
       EditorState.set_status(state, "Session disconnected. Your prompt will be preserved.")
     else
-      model = AgentAccess.panel(state).model_name
+      panel = AgentAccess.panel(state)
 
-      case resolve_prompt_for_session(state, text, model) do
-        {:ok, resolved} ->
-          state
-          |> update_agent_ui(&UIState.clear_input_and_scroll/1)
-          |> deliver_follow_up(resolved)
-
-        {:error, msg} ->
-          EditorState.set_status(state, msg)
+      case prompt_submit_status(state, panel) do
+        :ready -> resolve_and_deliver_follow_up(state, text, panel.model_name)
+        {:blocked, msg} -> EditorState.set_status(state, msg)
       end
     end
   catch
     :exit, _ ->
       EditorState.set_status(state, "Agent session unavailable. Your prompt was preserved.")
   end
+
+  @spec resolve_and_deliver_follow_up(state(), String.t(), String.t()) :: state()
+  defp resolve_and_deliver_follow_up(state, text, model) do
+    case resolve_prompt_for_session(state, text, model) do
+      {:ok, resolved} ->
+        deliver_follow_up(state, resolved)
+
+      {:error, msg} ->
+        EditorState.set_status(state, msg)
+    end
+  end
+
+  @spec prompt_submit_status(state(), Panel.t()) :: prompt_submit_status()
+  defp prompt_submit_status(state, panel) do
+    if remote_session?(state) do
+      :ready
+    else
+      state
+      |> prompt_readiness(panel, AgentAccess.session(state))
+      |> prompt_readiness_submit_status()
+    end
+  end
+
+  @spec prompt_readiness(state(), Panel.t(), pid() | nil) :: prompt_readiness()
+  defp prompt_readiness(state, %Panel{} = panel, session) do
+    case model_configured?(panel.model_name) do
+      true -> prompt_readiness_with_model(state, panel, session)
+      false -> :no_model
+    end
+  end
+
+  @spec prompt_readiness_with_model(state(), Panel.t(), pid() | nil) :: prompt_readiness()
+  defp prompt_readiness_with_model(state, %Panel{}, session) when is_pid(session) do
+    prompt_readiness_with_credentials(state, session)
+  end
+
+  defp prompt_readiness_with_model(_state, %Panel{credentials_configured: false}, nil),
+    do: :credentials_missing
+
+  defp prompt_readiness_with_model(state, %Panel{credentials_configured: true}, nil) do
+    prompt_readiness_with_credentials(state, nil)
+  end
+
+  @spec prompt_readiness_with_credentials(state(), pid() | nil) :: prompt_readiness()
+  defp prompt_readiness_with_credentials(_state, nil), do: :ready
+
+  defp prompt_readiness_with_credentials(_state, session) when is_pid(session) do
+    case Session.get_provider(session) do
+      provider when is_pid(provider) -> :ready
+      _provider -> providerless_prompt_readiness(session)
+    end
+  end
+
+  @spec providerless_prompt_readiness(pid()) :: prompt_readiness()
+  defp providerless_prompt_readiness(session) do
+    case Session.editor_snapshot(session) do
+      %{credentials_configured: false} -> :credentials_missing
+      %{error: error} when is_binary(error) and error != "" -> {:startup_failed, error}
+      _snapshot -> :starting
+    end
+  end
+
+  @spec model_configured?(String.t()) :: boolean()
+  defp model_configured?(model) when model in ["", "unknown"], do: false
+  defp model_configured?(model), do: model != AgentConfig.unconfigured_model()
+
+  @spec prompt_readiness_submit_status(prompt_readiness()) :: prompt_submit_status()
+  defp prompt_readiness_submit_status(:ready), do: :ready
+  defp prompt_readiness_submit_status(:no_model), do: {:blocked, no_model_status()}
+
+  defp prompt_readiness_submit_status(:credentials_missing),
+    do: {:blocked, credentials_missing_status()}
+
+  defp prompt_readiness_submit_status(:starting), do: {:blocked, provider_starting_status()}
+
+  defp prompt_readiness_submit_status({:startup_failed, error}) do
+    {:blocked, provider_startup_failed_status(error)}
+  end
+
+  @spec no_model_status() :: String.t()
+  defp no_model_status do
+    "No model configured. Your prompt was preserved. Run /auth, /login, or pick a configured model."
+  end
+
+  @spec credentials_missing_status() :: String.t()
+  defp credentials_missing_status do
+    "No provider credentials are configured for this model. Your prompt was preserved. Run /auth or /login to set one up."
+  end
+
+  @spec provider_starting_status() :: String.t()
+  defp provider_starting_status do
+    "Agent provider still starting. Your prompt was preserved."
+  end
+
+  @spec provider_startup_failed_status(String.t()) :: String.t()
+  defp provider_startup_failed_status(error) do
+    message = provider_startup_failed_message(error)
+    "#{message}. Your prompt was preserved."
+  end
+
+  @spec provider_startup_failed_message(String.t()) :: String.t()
+  defp provider_startup_failed_message("Failed to start agent: " <> _rest = message),
+    do: String.trim_trailing(message, ".")
+
+  defp provider_startup_failed_message(error),
+    do: "Failed to start agent: #{String.trim_trailing(error, ".")}"
 
   @spec resolve_prompt_for_session(state(), String.t(), String.t()) ::
           {:ok, String.t() | [ReqLLM.Message.ContentPart.t()]} | {:error, String.t()}
@@ -619,16 +740,20 @@ defmodule MingaEditor.Commands.Agent do
   defp deliver_follow_up(state, resolved) do
     case Session.queue_follow_up(AgentAccess.session(state), resolved) do
       :ok ->
-        state
+        update_agent_ui(state, &UIState.clear_input_and_scroll/1)
 
       {:queued, :follow_up} ->
-        update_agent_ui(
-          state,
+        state
+        |> update_agent_ui(&UIState.clear_input_and_scroll/1)
+        |> update_agent_ui(
           &UIState.push_toast(&1, "⏳ Queued (follow-up). Ctrl-C to cancel.", :info)
         )
 
       {:error, :provider_not_ready} ->
-        EditorState.set_status(state, "Agent provider still starting, try again in a moment")
+        EditorState.set_status(state, provider_starting_status())
+
+      {:error, :credentials_not_configured} ->
+        EditorState.set_status(state, credentials_missing_status())
 
       {:error, msg} when is_binary(msg) ->
         EditorState.set_status(state, msg)
@@ -792,11 +917,7 @@ defmodule MingaEditor.Commands.Agent do
     state
     |> AgentAccess.update_agent(fn _a -> %AgentState{buffer: agent_buf} end)
     |> AgentAccess.update_agent_ui(fn _a ->
-      ui = UIState.new()
-
-      ui
-      |> UIState.set_model_name(old_panel.model_name)
-      |> UIState.set_provider_name(old_panel.provider_name)
+      UIState.new()
       |> UIState.set_thinking_level(old_panel.thinking_level)
     end)
   end
@@ -1026,12 +1147,23 @@ defmodule MingaEditor.Commands.Agent do
   def set_model(state, model) do
     state = apply_model_and_provider(state, model)
 
-    if AgentAccess.session(state) do
-      Session.set_model(AgentAccess.session(state), model)
-      Session.add_system_message(AgentAccess.session(state), "Model: #{model}")
-    end
+    case AgentAccess.session(state) do
+      nil ->
+        EditorState.set_status(state, "Model: #{model}")
 
-    EditorState.set_status(state, "Model: #{model}")
+      session ->
+        case Session.set_model(session, model) do
+          :ok ->
+            Session.add_system_message(session, "Model: #{model}")
+            EditorState.set_status(state, "Model: #{model}")
+
+          {:error, reason} when is_binary(reason) ->
+            EditorState.set_status(state, reason)
+
+          {:error, reason} ->
+            EditorState.set_status(state, "Error: #{inspect(reason)}")
+        end
+    end
   end
 
   # ── Scope commands (keymap scope dispatch) ──────────────────────────────────

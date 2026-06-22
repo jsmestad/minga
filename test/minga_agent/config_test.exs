@@ -9,7 +9,10 @@ defmodule MingaAgent.ConfigTest do
     test "returns a Config struct with all fields populated" do
       config = Config.resolve()
       assert %Config{} = config
-      assert is_binary(config.model)
+
+      assert provider_qualified_model?(config.model) or
+               config.model == Config.unconfigured_model()
+
       assert is_integer(config.max_tokens)
       assert is_integer(config.max_turns)
       assert is_integer(config.max_retries)
@@ -20,9 +23,11 @@ defmodule MingaAgent.ConfigTest do
       assert is_list(config.notify_on)
     end
 
-    test "model defaults to Sonnet when Options has nil" do
+    test "model defaults to a credential-backed model or the unconfigured sentinel" do
       config = Config.resolve()
-      assert config.model =~ "claude"
+
+      assert provider_qualified_model?(config.model) or
+               config.model == Config.unconfigured_model()
     end
 
     test "struct defaults match Options defaults" do
@@ -73,8 +78,25 @@ defmodule MingaAgent.ConfigTest do
   end
 
   describe "default_model/0" do
-    test "returns the Sonnet model string" do
-      assert Config.default_model() =~ "anthropic:claude"
+    test "returns a usable model or the unconfigured sentinel" do
+      model = Config.default_model()
+      assert is_binary(model)
+      refute model == ""
+    end
+  end
+
+  describe "model spec parsing" do
+    test "supports provider:model and model@provider forms" do
+      assert Config.split_model_spec("anthropic:claude-sonnet-4") ==
+               {"claude-sonnet-4", "anthropic"}
+
+      assert Config.split_model_spec("claude-sonnet-4@anthropic") ==
+               {"claude-sonnet-4", "anthropic"}
+
+      assert Config.strip_provider_prefix("claude-sonnet-4@anthropic") ==
+               "claude-sonnet-4"
+
+      assert Config.extract_provider_prefix("claude-sonnet-4@anthropic") == "anthropic"
     end
   end
 
@@ -90,5 +112,9 @@ defmodule MingaAgent.ConfigTest do
       assert hook.command == "echo policy >&2"
       assert hook.timeout_ms == 30_000
     end
+  end
+
+  defp provider_qualified_model?(model) when is_binary(model) do
+    String.contains?(model, ":") or String.contains?(model, "@")
   end
 end

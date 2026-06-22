@@ -136,7 +136,7 @@ defmodule MingaEditor.Input.CUATUIIntegrationTest do
 
       assert AgentAccess.input_focused?(state)
       assert UIState.input_text(AgentAccess.panel(state)) == "hello agent"
-      assert EditorState.status_msg(state) =~ "No agent session"
+      assert EditorState.status_msg(state) =~ "No model configured"
     end
   end
 

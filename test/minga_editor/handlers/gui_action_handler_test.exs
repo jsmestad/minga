@@ -20,6 +20,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
   alias MingaEditor.State.ResourcePressure
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
+  alias MingaEditor.State.Workspace
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
   alias MingaEditor.UI.Popup.Active, as: PopupActive
   alias Minga.Popup.Rule
@@ -57,6 +58,25 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
 
     assert unpinned_tab_bar.active_id == 1
     refute TabBar.get(unpinned_tab_bar, 3).pinned?
+  end
+
+  test "execute_command switches workspaces by exact workspace id", %{sidebar_registry: table} do
+    manual_tab = Tab.new_file(1, "main.ex")
+    agent_tab = Tab.new_agent(2, "Agent") |> Tab.set_group(7)
+
+    tab_bar = %TabBar{
+      tabs: [manual_tab, agent_tab],
+      active_id: 1,
+      next_id: 3,
+      workspaces: [Workspace.new_manual(nil), Workspace.new_agent(7, "Agent")]
+    }
+
+    state = base_state(table) |> EditorState.set_tab_bar(tab_bar)
+
+    switched = GuiActionHandler.dispatch(state, {:execute_command, "workspace_goto_id:7"})
+
+    assert EditorState.tab_bar(switched).active_id == 2
+    assert TabBar.active_workspace_id(EditorState.tab_bar(switched)) == 7
   end
 
   test "activating visible sidebars updates focus and keyboard scope", %{sidebar_registry: table} do

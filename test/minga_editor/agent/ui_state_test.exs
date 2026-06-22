@@ -20,7 +20,7 @@ defmodule MingaEditor.Agent.UIStateTest do
   end
 
   describe "new/0 and basic state" do
-    test "starts hidden, unfocused, empty, and configured with the default model" do
+    test "starts hidden, unfocused, empty, and uses the credential-aware default model" do
       ui = UIState.new()
 
       refute ui.panel.visible
@@ -33,7 +33,7 @@ defmodule MingaEditor.Agent.UIStateTest do
       assert UIState.input_line_count(ui) == 1
       assert UIState.input_empty?(ui)
       assert ui.panel.model_name == AgentConfig.default_model()
-      assert String.contains?(ui.panel.model_name, ":")
+      assert ui.panel.credentials_configured == false
     end
 
     test "toggle flips panel visibility" do

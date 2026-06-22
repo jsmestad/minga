@@ -53,7 +53,11 @@ defmodule MingaAgent.SessionProviderRegistryTest do
     ProviderRegistry.unregister_source(NativeProviderPack.source())
 
     assert {:error, {%ArgumentError{message: message}, _stack}} =
-             Session.start_link(provider_opts: [], persist?: false)
+             Session.start_link(
+               model_name: "anthropic:test",
+               provider_opts: [provider: "anthropic", model: "anthropic:test"],
+               persist?: false
+             )
 
     assert message =~ ~s(agent provider "native" is not available: :not_found)
   end

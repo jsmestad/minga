@@ -63,6 +63,74 @@ defmodule Minga.Frontend.Adapter.GUI.WorkspacesEncoderTest do
       assert cmd == ProtocolGUI.encode_gui_workspaces(chrome_state)
     end
 
+    test "matches legacy ChromeState wire format for agent visible tabs" do
+      chrome_state =
+        %{
+          chrome_state()
+          | active_workspace_id: 2,
+            active_tab_id: 7,
+            background_count: 0,
+            attention_count: 0,
+            draft_count: 0,
+            conflict_count: 0,
+            mode: :agent,
+            workspaces: [
+              WorkspaceSummary.new(
+                id: 2,
+                kind: :agent,
+                label: "Agent",
+                icon: "robot",
+                color: 0x123456,
+                status: :thinking,
+                attention?: true,
+                tab_count: 1,
+                draft_count: 0,
+                conflict_count: 0,
+                running_background_count: 0,
+                closeable?: true
+              )
+            ],
+            visible_tabs: [
+              TabSummary.new(
+                id: 7,
+                workspace_id: 2,
+                kind: :agent,
+                label: "Agent",
+                icon: "cpu"
+              )
+            ]
+        }
+
+      model = %Workspaces{
+        visible?: true,
+        active_workspace_id: 2,
+        mode: :agent,
+        workspaces: [
+          %Workspace{
+            id: 2,
+            kind: :agent,
+            label: "Agent",
+            icon: "robot",
+            color: 0x123456,
+            status: :thinking,
+            attention?: true,
+            tab_count: 1,
+            draft_count: 0,
+            conflict_count: 0,
+            running_background_count: 0,
+            closeable?: true
+          }
+        ],
+        visible_tabs: [
+          %VisibleTab{id: 7, workspace_id: 2, kind: :agent, label: "Agent", icon: "cpu"}
+        ]
+      }
+
+      {cmd, _caches} = WorkspacesEncoder.encode(model, Caches.new())
+
+      assert cmd == ProtocolGUI.encode_gui_workspaces(chrome_state)
+    end
+
     test "encodes workspace and visible tab summaries" do
       model = %Workspaces{
         visible?: true,
@@ -80,6 +148,22 @@ defmodule Minga.Frontend.Adapter.GUI.WorkspacesEncoderTest do
 
       assert <<@op_gui_workspaces, len::16, payload::binary-size(len)>> = cmd
       assert <<2::8, 0::16, 0::8, 0::8, 1::8, _rest::binary>> = payload
+    end
+
+    test "encodes agent visible tab kind" do
+      model = %Workspaces{
+        visible?: true,
+        active_workspace_id: 2,
+        mode: :agent,
+        visible_tabs: [
+          %VisibleTab{id: 9, workspace_id: 2, kind: :agent, label: "Agent", icon: "cpu", path: ""}
+        ]
+      }
+
+      {cmd, _caches} = WorkspacesEncoder.encode(model, Caches.new())
+
+      assert <<@op_gui_workspaces, len::16, payload::binary-size(len)>> = cmd
+      assert <<2::8, 2::16, 1::8, 0::8, 0::8, 1::16, 9::32, 2::16, 1::8, _rest::binary>> = payload
     end
 
     test "returns nil on second call with same semantic data" do

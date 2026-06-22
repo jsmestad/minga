@@ -485,7 +485,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   end
 
   def encode_gui_tab_bar(%TabBar{} = tb, active_win_buffer) do
-    visible_tabs = TabBar.visible_file_tabs(tb)
+    visible_tabs = TabBar.visible_workspace_tabs(tb)
 
     active_index =
       case Enum.find_index(visible_tabs, &(&1.id == tb.active_id)) do
@@ -735,6 +735,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   @spec encode_tab_kind(TabSummary.kind()) :: non_neg_integer()
   defp encode_tab_kind(:file), do: 0
+  defp encode_tab_kind(:agent), do: 1
 
   @spec encode_visible_tab_flags(TabSummary.t()) :: non_neg_integer()
   defp encode_visible_tab_flags(%TabSummary{} = tab) do

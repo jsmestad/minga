@@ -12,10 +12,12 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
   use ExUnit.Case, async: true
 
+  alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.Session
   alias Minga.Editing.Scroll
   alias MingaEditor.Agent.BufferSync
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.Agent.UIState.Panel
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Project.FileRef
   alias MingaEditor.Commands.Agent, as: AgentCommands
@@ -154,6 +156,84 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
     }
   end
 
+  defmodule PromptRejectingProvider do
+    @behaviour MingaAgent.Provider
+
+    use GenServer
+
+    @impl MingaAgent.Provider
+    def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
+
+    @impl MingaAgent.Provider
+    def send_prompt(pid, _text), do: GenServer.call(pid, :send_prompt)
+
+    @impl MingaAgent.Provider
+    def abort(pid), do: GenServer.cast(pid, :abort)
+
+    @impl MingaAgent.Provider
+    def new_session(pid), do: GenServer.cast(pid, :new_session)
+
+    @impl MingaAgent.Provider
+    def seed_messages(_pid, _messages), do: :ok
+
+    @impl MingaAgent.Provider
+    def get_state(_pid) do
+      {:ok,
+       %{
+         model: %{id: "test-model", name: "Test Model", provider: "test"},
+         is_streaming: false,
+         token_usage: nil
+       }}
+    end
+
+    @impl GenServer
+    def init(opts) do
+      {:ok, %{send_prompt_result: Keyword.fetch!(opts, :send_prompt_result)}}
+    end
+
+    @impl GenServer
+    def handle_call(:send_prompt, _from, state), do: {:reply, state.send_prompt_result, state}
+
+    @impl GenServer
+    def handle_cast(:abort, state), do: {:noreply, state}
+
+    @impl GenServer
+    def handle_cast(:new_session, state), do: {:noreply, state}
+  end
+
+  defmodule ReadinessSession do
+    use GenServer
+
+    @spec start_link(keyword()) :: GenServer.on_start()
+    def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
+
+    @impl GenServer
+    def init(opts), do: {:ok, Map.new(opts)}
+
+    @impl GenServer
+    def handle_call(:get_provider, _from, state), do: {:reply, Map.get(state, :provider), state}
+
+    def handle_call(:editor_snapshot, _from, state) do
+      snapshot = %{
+        status: Map.get(state, :status, :idle),
+        pending_approval: nil,
+        error: Map.get(state, :error),
+        active_tool_name: nil,
+        credentials_configured: Map.get(state, :credentials_configured, true)
+      }
+
+      {:reply, snapshot, state}
+    end
+
+    def handle_call({:send_prompt, content}, _from, state) do
+      if notify = Map.get(state, :notify) do
+        send(notify, {:readiness_session_prompt, content})
+      end
+
+      {:reply, Map.get(state, :send_prompt_result, :ok), state}
+    end
+  end
+
   # ── submit_prompt ────────────────────────────────────────────────────────
 
   describe "submit_prompt/1" do
@@ -173,19 +253,209 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       assert UIState.prompt_text(AgentAccess.panel(new_state)) == ""
     end
 
-    test "sets error status when no session exists" do
-      state = base_state(session: nil)
-
+    test "blocks submit and preserves draft when no model is configured" do
       state =
-        AgentAccess.update_agent_ui(state, fn ui ->
+        base_state(session: nil)
+        |> AgentAccess.update_agent_ui(fn ui ->
           ui = UIState.ensure_prompt_buffer(ui)
           BufferProcess.replace_content(ui.panel.prompt_buffer, "hello agent")
           ui
+        end)
+        |> AgentAccess.update_panel(fn panel ->
+          panel
+          |> Panel.set_credentials_configured(false)
+          |> Panel.set_model_name(AgentConfig.unconfigured_model())
+          |> Panel.set_provider_name("")
+        end)
+
+      new_state = AgentCommands.submit_prompt(state)
+
+      assert new_state.shell_state.status_msg =~ "No model configured"
+      assert UIState.prompt_text(AgentAccess.panel(new_state)) == "hello agent"
+    end
+
+    test "sets error status when model is configured but no session exists" do
+      state = base_state(session: nil)
+
+      state =
+        state
+        |> AgentAccess.update_agent_ui(fn ui ->
+          ui = UIState.ensure_prompt_buffer(ui)
+          BufferProcess.replace_content(ui.panel.prompt_buffer, "hello agent")
+          ui
+        end)
+        |> AgentAccess.update_panel(fn panel ->
+          panel
+          |> Panel.set_credentials_configured(true)
+          |> Panel.set_model_name("openai:gpt-5")
+          |> Panel.set_provider_name("openai")
         end)
 
       new_state = AgentCommands.submit_prompt(state)
 
       assert new_state.shell_state.status_msg =~ "No agent session"
+      assert UIState.prompt_text(AgentAccess.panel(new_state)) == "hello agent"
+    end
+
+    test "blocks submit as credentials missing when the local session reports credentials are not configured" do
+      {:ok, session} = ReadinessSession.start_link(provider: nil, credentials_configured: false)
+
+      state =
+        base_state(session: session)
+        |> AgentAccess.update_agent_ui(fn ui ->
+          ui = UIState.ensure_prompt_buffer(ui)
+          BufferProcess.replace_content(ui.panel.prompt_buffer, "draft prompt")
+          ui
+        end)
+        |> AgentAccess.update_panel(fn panel ->
+          panel
+          |> Panel.set_credentials_configured(true)
+          |> Panel.set_model_name("anthropic:claude-sonnet-4-20250514")
+          |> Panel.set_provider_name("anthropic")
+        end)
+
+      new_state = AgentCommands.submit_prompt(state)
+
+      assert new_state.shell_state.status_msg =~
+               "No provider credentials are configured for this model"
+
+      assert UIState.prompt_text(AgentAccess.panel(new_state)) == "draft prompt"
+    end
+
+    test "blocks submit as starting when credentials exist but no provider is attached yet" do
+      {:ok, session} = ReadinessSession.start_link(provider: nil)
+
+      state =
+        base_state(session: session)
+        |> AgentAccess.update_agent_ui(fn ui ->
+          ui = UIState.ensure_prompt_buffer(ui)
+          BufferProcess.replace_content(ui.panel.prompt_buffer, "draft prompt")
+          ui
+        end)
+        |> AgentAccess.update_panel(fn panel ->
+          panel
+          |> Panel.set_credentials_configured(true)
+          |> Panel.set_model_name("anthropic:claude-sonnet-4-20250514")
+          |> Panel.set_provider_name("anthropic")
+        end)
+
+      new_state = AgentCommands.submit_prompt(state)
+
+      assert new_state.shell_state.status_msg =~ "Agent provider still starting"
+      assert UIState.prompt_text(AgentAccess.panel(new_state)) == "draft prompt"
+    end
+
+    test "blocks submit with concrete startup failure when provider startup failed" do
+      {:ok, session} = ReadinessSession.start_link(provider: nil, error: "boom")
+
+      state =
+        base_state(session: session)
+        |> AgentAccess.update_agent_ui(fn ui ->
+          ui = UIState.ensure_prompt_buffer(ui)
+          BufferProcess.replace_content(ui.panel.prompt_buffer, "draft prompt")
+          ui
+        end)
+        |> AgentAccess.update_panel(fn panel ->
+          panel
+          |> Panel.set_credentials_configured(true)
+          |> Panel.set_model_name("anthropic:claude-sonnet-4-20250514")
+          |> Panel.set_provider_name("anthropic")
+        end)
+
+      new_state = AgentCommands.submit_prompt(state)
+
+      assert new_state.shell_state.status_msg ==
+               "Failed to start agent: boom. Your prompt was preserved."
+
+      assert UIState.prompt_text(AgentAccess.panel(new_state)) == "draft prompt"
+    end
+
+    test "ready provider still sends and clears a normal prompt" do
+      {:ok, session} = ReadinessSession.start_link(provider: self(), notify: self())
+
+      state =
+        base_state(session: session)
+        |> AgentAccess.update_agent_ui(fn ui ->
+          ui = UIState.ensure_prompt_buffer(ui)
+          BufferProcess.replace_content(ui.panel.prompt_buffer, "ready prompt")
+          ui
+        end)
+        |> AgentAccess.update_panel(fn panel ->
+          panel
+          |> Panel.set_credentials_configured(true)
+          |> Panel.set_model_name("anthropic:claude-sonnet-4-20250514")
+          |> Panel.set_provider_name("anthropic")
+        end)
+
+      new_state = AgentCommands.submit_prompt(state)
+
+      assert_receive {:readiness_session_prompt, "ready prompt"}
+      assert UIState.prompt_text(AgentAccess.panel(new_state)) == ""
+    end
+
+    test "ready local provider sends even when panel credentials cache is stale" do
+      {:ok, session} =
+        ReadinessSession.start_link(
+          provider: self(),
+          notify: self(),
+          credentials_configured: true
+        )
+
+      state =
+        base_state(session: session)
+        |> AgentAccess.update_agent_ui(fn ui ->
+          ui = UIState.ensure_prompt_buffer(ui)
+          BufferProcess.replace_content(ui.panel.prompt_buffer, "stale panel prompt")
+          ui
+        end)
+        |> AgentAccess.update_panel(fn panel ->
+          panel
+          |> Panel.set_credentials_configured(false)
+          |> Panel.set_model_name("anthropic:claude-sonnet-4-20250514")
+          |> Panel.set_provider_name("anthropic")
+        end)
+
+      new_state = AgentCommands.submit_prompt(state)
+
+      assert_receive {:readiness_session_prompt, "stale panel prompt"}
+      assert is_nil(new_state.shell_state.status_msg)
+      assert UIState.prompt_text(AgentAccess.panel(new_state)) == ""
+    end
+
+    test "preserves the prompt when an attached session rejects locally" do
+      for {error, expected_message} <- [
+            {:provider_not_ready, "Agent provider still starting"},
+            {:credentials_not_configured, "No provider credentials are configured"}
+          ] do
+        {:ok, session} =
+          Session.start_link(
+            provider: PromptRejectingProvider,
+            provider_opts: [send_prompt_result: {:error, error}, model: "anthropic:test"],
+            persist?: false
+          )
+
+        on_exit(fn -> Process.exit(session, :kill) end)
+        :sys.get_state(session)
+
+        state =
+          base_state(session: session)
+          |> AgentAccess.update_panel(fn panel ->
+            panel
+            |> Panel.set_credentials_configured(true)
+            |> Panel.set_model_name("anthropic:test")
+            |> Panel.set_provider_name("test")
+          end)
+          |> AgentAccess.update_agent_ui(fn ui ->
+            ui = UIState.ensure_prompt_buffer(ui)
+            BufferProcess.replace_content(ui.panel.prompt_buffer, "draft prompt")
+            ui
+          end)
+
+        new_state = AgentCommands.submit_prompt(state)
+
+        assert new_state.shell_state.status_msg =~ expected_message
+        assert UIState.prompt_text(AgentAccess.panel(new_state)) == "draft prompt"
+      end
     end
   end
 
@@ -515,8 +785,50 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       assert is_pid(active_workspace.session)
       assert EditorState.active_tab_kind(new_state) == :agent
       assert new_state.workspace.buffers.active == AgentAccess.agent(new_state).buffer
-      assert TabBar.get_workspace(tab_bar, 0) == source_workspace
+      manual_workspace = TabBar.get_workspace(tab_bar, 0)
+      assert manual_workspace.files == source_workspace.files
+      assert manual_workspace.active_file == source_workspace.active_file
+      assert manual_workspace.session == source_workspace.session
       assert TabBar.active(tab_bar).session == active_workspace.session
+    end
+
+    test "switching back to the source file tab restores file content" do
+      state = source_workspace_state()
+      file_tab_id = state.shell_state.tab_bar.active_id
+
+      new_state = AgentCommands.new_agent_session(state)
+      switched = EditorState.switch_tab(new_state, file_tab_id)
+      active_window = switched.workspace.windows.map[switched.workspace.windows.active]
+
+      assert EditorState.active_tab_kind(switched) == :file
+      assert active_window.content == {:buffer, switched.workspace.buffers.active}
+      refute MingaEditor.Window.Content.agent_chat?(active_window.content)
+    end
+
+    test "switching to a file tab inside an agent workspace restores file content" do
+      state = source_workspace_state()
+      file_tab_id = state.shell_state.tab_bar.active_id
+      file_tab = TabBar.get(state.shell_state.tab_bar, file_tab_id)
+
+      new_state = AgentCommands.new_agent_session(state)
+      agent_workspace_id = TabBar.active_workspace_id(new_state.shell_state.tab_bar)
+
+      tab_bar =
+        new_state.shell_state.tab_bar
+        |> TabBar.move_tab_to_workspace(file_tab_id, agent_workspace_id)
+        |> TabBar.update_context(file_tab_id, file_tab.context)
+
+      switched =
+        new_state
+        |> EditorState.set_tab_bar(tab_bar)
+        |> EditorState.switch_tab(file_tab_id)
+
+      active_window = switched.workspace.windows.map[switched.workspace.windows.active]
+
+      assert TabBar.active_workspace_id(switched.shell_state.tab_bar) == agent_workspace_id
+      assert EditorState.active_tab_kind(switched) == :file
+      assert active_window.content == {:buffer, switched.workspace.buffers.active}
+      refute MingaEditor.Window.Content.agent_chat?(active_window.content)
     end
 
     test "creating from an existing agent workspace preserves the source tab context" do
@@ -549,7 +861,10 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       assert tab_bar.active_id == source_active_id
       assert TabBar.active_workspace_id(tab_bar) == 0
-      assert TabBar.get_workspace(tab_bar, 0) == source_workspace
+      manual_workspace = TabBar.get_workspace(tab_bar, 0)
+      assert manual_workspace.files == source_workspace.files
+      assert manual_workspace.active_file == source_workspace.active_file
+      assert manual_workspace.session == source_workspace.session
       assert [%{files: [], active_file: nil, session: session}] = agent_workspaces
       assert is_pid(session)
     end

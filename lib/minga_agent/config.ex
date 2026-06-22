@@ -21,12 +21,12 @@ defmodule MingaAgent.Config do
   alias MingaAgent.Hooks.Hook
   alias MingaAgent.Hooks.Registry, as: HookRegistry
 
-  @default_model "anthropic:claude-sonnet-4"
+  @unconfigured_model "unknown"
 
   defstruct [
     # Provider & model
     provider: :auto,
-    model: @default_model,
+    model: @unconfigured_model,
     models: [],
 
     # Generation
@@ -138,7 +138,7 @@ defmodule MingaAgent.Config do
   def resolve do
     %__MODULE__{
       provider: get(:agent_provider, :auto),
-      model: get(:agent_model, nil) || @default_model,
+      model: resolve_model(),
       models: get(:agent_models, []),
       max_tokens: get(:agent_max_tokens, 16_384),
       prompt_cache: get(:agent_prompt_cache, true),
@@ -174,9 +174,13 @@ defmodule MingaAgent.Config do
     }
   end
 
-  @doc "Returns the default model string (with provider prefix)."
+  @doc "Returns the model used for new sessions when the user has not explicitly configured one."
   @spec default_model() :: String.t()
-  def default_model, do: @default_model
+  def default_model, do: resolve_model()
+
+  @doc "Returns the internal sentinel used when no configured provider has an available model."
+  @spec unconfigured_model() :: String.t()
+  def unconfigured_model, do: @unconfigured_model
 
   @doc "Returns a config with agent hooks disabled."
   @spec without_hooks(t()) :: t()
@@ -212,15 +216,22 @@ defmodule MingaAgent.Config do
   def normalize_hooks(_raw_hooks), do: raise(ArgumentError, ":agent_hooks must be a list")
 
   @doc """
-  Returns the configured model, falling back to the default.
+  Returns the configured model, then the first available credential-backed model.
 
-  Safe to call before Config is running (catches exits).
+  Safe to call before Config is running (catches exits). If no provider has credentials, returns the internal `"unknown"` sentinel rather than pretending a specific vendor model is ready.
   """
   @spec resolve_model() :: String.t()
   def resolve_model do
+    configured_model() || first_available_model() || @unconfigured_model
+  end
+
+  @doc "Returns the explicitly configured model, or nil when the user has not chosen one."
+  @spec configured_model() :: String.t() | nil
+  def configured_model do
     case get(:agent_model, nil) do
-      nil -> @default_model
-      model -> to_string(model)
+      model when is_binary(model) and model != "" -> model
+      model when model != nil -> to_string(model)
+      _other -> nil
     end
   end
 
@@ -235,45 +246,70 @@ defmodule MingaAgent.Config do
   end
 
   @doc """
-  Strips the "provider:" prefix from a model spec string.
+  Splits a model spec into `{model, provider}` regardless of whether the user wrote `provider:model` or `model@provider`.
 
-  Returns the bare model name. If there's no prefix, returns the string unchanged.
+  Returns `{bare_model, nil}` when no provider is encoded in the string.
 
   ## Examples
 
-      iex> MingaAgent.Config.strip_provider_prefix("anthropic:claude-sonnet-4")
-      "claude-sonnet-4"
+      iex> MingaAgent.Config.split_model_spec("anthropic:claude-sonnet-4")
+      {"claude-sonnet-4", "anthropic"}
 
-      iex> MingaAgent.Config.strip_provider_prefix("claude-sonnet-4")
-      "claude-sonnet-4"
+      iex> MingaAgent.Config.split_model_spec("claude-sonnet-4@anthropic")
+      {"claude-sonnet-4", "anthropic"}
+
+      iex> MingaAgent.Config.split_model_spec("claude-sonnet-4")
+      {"claude-sonnet-4", nil}
+  """
+  @spec split_model_spec(String.t()) :: {String.t(), String.t() | nil}
+  def split_model_spec(model) when is_binary(model) do
+    case String.split(model, "@", parts: 2) do
+      [name, provider] when name != "" and provider != "" ->
+        {name, String.downcase(provider)}
+
+      _ ->
+        case String.split(model, ":", parts: 2) do
+          [provider, name] when provider != "" and name != "" -> {name, String.downcase(provider)}
+          [name] -> {name, nil}
+          _ -> {model, nil}
+        end
+    end
+  end
+
+  @doc """
+  Strips the provider encoding from a model spec string.
+
+  Returns the bare model name. If there's no provider encoding, returns the string unchanged.
   """
   @spec strip_provider_prefix(String.t()) :: String.t()
   def strip_provider_prefix(model) when is_binary(model) do
-    case String.split(model, ":", parts: 2) do
-      [_provider, name] -> name
-      [name] -> name
-    end
+    {name, _provider} = split_model_spec(model)
+    name
   end
 
   @doc """
   Extracts the provider prefix from a model spec string.
 
   Returns the provider name, or `""` if no prefix is present.
-
-  ## Examples
-
-      iex> MingaAgent.Config.extract_provider_prefix("openai_codex:gpt-5.3-codex-spark")
-      "openai_codex"
-
-      iex> MingaAgent.Config.extract_provider_prefix("claude-sonnet-4")
-      ""
   """
   @spec extract_provider_prefix(String.t()) :: String.t()
   def extract_provider_prefix(model) when is_binary(model) do
-    case String.split(model, ":", parts: 2) do
-      [provider, _name] -> provider
-      [_name] -> ""
+    case split_model_spec(model) do
+      {_name, provider} when is_binary(provider) -> provider
+      _ -> ""
     end
+  end
+
+  @spec first_available_model() :: String.t() | nil
+  defp first_available_model do
+    case MingaAgent.ModelCatalog.available_models("") do
+      [%{"id" => model} | _rest] when is_binary(model) and model != "" -> model
+      _other -> nil
+    end
+  rescue
+    _ -> nil
+  catch
+    :exit, _ -> nil
   end
 
   @spec non_empty_env(String.t()) :: String.t() | nil

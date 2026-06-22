@@ -108,6 +108,8 @@ defmodule MingaEditor.Commands.AgentSession do
 
     session_opts = [
       thinking_level: panel.thinking_level,
+      model_name: panel.model_name,
+      provider_name: panel.provider_name,
       session_start_hook_enabled?: Keyword.get(opts, :session_start_hook_enabled?, true),
       recover_interrupted_work?: Keyword.get(opts, :recover_interrupted_work?, true),
       provider_opts: [
