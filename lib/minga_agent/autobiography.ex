@@ -80,21 +80,9 @@ defmodule MingaAgent.Autobiography do
   def for_line(path, needle, opts \\ []) when is_binary(path) and is_binary(needle) do
     trimmed = String.trim(needle)
 
-    with_db(opts, fn db ->
-      case candidates(db, path, opts) do
-        [] ->
-          {:ok, nil}
-
-        candidates when trimmed == "" ->
-          # Blank line carries no signal: attribute it to the most recent turn.
-          {:ok, candidates |> hd() |> build_entry(db)}
-
-        candidates ->
-          match =
-            Enum.find(candidates, &introduced?(&1, trimmed)) ||
-              Enum.find(candidates, &contains_after?(&1, trimmed))
-
-          {:ok, match && build_entry(match, db)}
+    with_db(opts, nil, fn db ->
+      with {:ok, cands} <- candidates(db, path, opts) do
+        {:ok, match_line(cands, trimmed) |> maybe_build_entry(db)}
       end
     end)
   end
@@ -104,20 +92,21 @@ defmodule MingaAgent.Autobiography do
   """
   @spec for_file(String.t(), [opt()]) :: {:ok, [Entry.t()]} | {:error, term()}
   def for_file(path, opts \\ []) when is_binary(path) do
-    with_db(opts, fn db ->
-      entries =
-        db
-        |> candidates(path, opts)
-        |> Enum.uniq_by(&{&1.session_id, payload(&1, "tool_call_id")})
-        |> Enum.map(&build_entry(&1, db))
+    with_db(opts, [], fn db ->
+      with {:ok, cands} <- candidates(db, path, opts) do
+        entries =
+          cands
+          |> Enum.uniq_by(&{&1.session_id, payload(&1, "tool_call_id")})
+          |> Enum.map(&build_entry(&1, db))
 
-      {:ok, entries}
+        {:ok, entries}
+      end
     end)
   end
 
   # ── Internals ──────────────────────────────────────────────────────────────
 
-  @spec candidates(Store.db(), String.t(), [opt()]) :: [EventRecord.t()]
+  @spec candidates(Store.db(), String.t(), [opt()]) :: {:ok, [EventRecord.t()]} | {:error, term()}
   defp candidates(db, path, opts) do
     limit = Keyword.get(opts, :limit, @candidate_limit)
 
@@ -125,10 +114,38 @@ defmodule MingaAgent.Autobiography do
     # same-named file in another directory and surface the WRONG file's history,
     # which is worse than none. If abs/rel path forms ever diverge in practice,
     # normalize both against the project root here, not by guessing on basename.
-    case Store.file_edits_for_path(db, path, limit) do
-      {:ok, edits} -> edits
-      {:error, _} -> []
-    end
+    Store.file_edits_for_path(db, path, limit)
+  end
+
+  @spec maybe_build_entry(EventRecord.t() | nil, Store.db()) :: Entry.t() | nil
+  defp maybe_build_entry(nil, _db), do: nil
+  defp maybe_build_entry(%EventRecord{} = edit, db), do: build_entry(edit, db)
+
+  # Find the edit that best explains `needle`, the cursor's (trimmed) line.
+  # Whole-line matches first (precise for short/common lines like `end`/`}`),
+  # falling back to substring only when no edit contains the line verbatim.
+  @spec match_line([EventRecord.t()], String.t()) :: EventRecord.t() | nil
+  defp match_line([], _needle), do: nil
+  # Blank line carries no signal: attribute it to the most recent turn.
+  defp match_line([latest | _], ""), do: latest
+
+  defp match_line(cands, needle) do
+    Enum.find(cands, &introduced_line?(&1, needle)) ||
+      Enum.find(cands, &has_line?(&1, "after_content", needle)) ||
+      Enum.find(cands, &introduced?(&1, needle)) ||
+      Enum.find(cands, &contains_after?(&1, needle))
+  end
+
+  @spec introduced_line?(EventRecord.t(), String.t()) :: boolean()
+  defp introduced_line?(edit, needle) do
+    has_line?(edit, "after_content", needle) and not has_line?(edit, "before_content", needle)
+  end
+
+  @spec has_line?(EventRecord.t(), String.t(), String.t()) :: boolean()
+  defp has_line?(edit, key, needle) do
+    (payload(edit, key) || "")
+    |> String.split("\n")
+    |> Enum.any?(&(String.trim(&1) == needle))
   end
 
   @spec introduced?(EventRecord.t(), String.t()) :: boolean()
@@ -170,8 +187,18 @@ defmodule MingaAgent.Autobiography do
 
     events =
       case Store.events_after(db, session_id, cursor, @context_window + 1) do
-        {:ok, evs} -> Enum.filter(evs, &(&1.id <= edit_id))
-        {:error, _} -> []
+        {:ok, evs} ->
+          Enum.filter(evs, &(&1.id <= edit_id))
+
+        {:error, reason} ->
+          # The edit was found but its turn context could not be read; surface a
+          # breadcrumb so blank reasoning isn't mistaken for "the agent said nothing".
+          Minga.Log.warning(
+            :agent,
+            "[autobiography] turn context read failed: #{inspect(reason)}"
+          )
+
+          []
       end
 
     turn = turn_slice(events)
@@ -220,9 +247,13 @@ defmodule MingaAgent.Autobiography do
   defp blank_to_nil(nil), do: nil
   defp blank_to_nil(text), do: if(String.trim(text) == "", do: nil, else: text)
 
-  @spec with_db([opt()], (Store.db() -> result)) :: result | {:error, term()}
+  # `empty` is the "no history" result for this query shape (nil for a line,
+  # [] for a file). A missing database is genuine absence (no agent has run),
+  # so it returns `{:ok, empty}`; any other open/read error propagates so the
+  # caller can distinguish "no history" from "could not read history".
+  @spec with_db([opt()], term(), (Store.db() -> result)) :: result | {:error, term()}
         when result: {:ok, term()}
-  defp with_db(opts, fun) do
+  defp with_db(opts, empty, fun) do
     case Keyword.fetch(opts, :db) do
       {:ok, db} ->
         fun.(db)
@@ -230,6 +261,7 @@ defmodule MingaAgent.Autobiography do
       :error ->
         case EventLog.open_read_connection(opts) do
           {:ok, db} -> try_close(db, fun)
+          {:error, :database_not_found} -> {:ok, empty}
           {:error, reason} -> {:error, reason}
         end
     end
