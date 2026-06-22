@@ -51,7 +51,7 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoder do
 
     payload =
       IO.iodata_to_binary([
-        <<2::8, file_tree_flags(model.status, model.focused?)::8,
+        <<2::8, file_tree_flags(model.status, model.focused?, model.local_navigation?)::8,
           encode_file_tree_status(model.status)::8>>,
         Wire.encode_string16(model.selected_id),
         Wire.encode_string16(root),
@@ -86,7 +86,10 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoder do
   @spec ready_structural_fingerprint(FileTree.t()) :: non_neg_integer()
   defp ready_structural_fingerprint(%FileTree{} = model) do
     rows = Enum.map(model.rows, &structural_row/1)
-    :erlang.phash2({model.root_path, model.tree_width, model.status, rows})
+
+    :erlang.phash2(
+      {model.root_path, model.tree_width, model.status, model.local_navigation?, rows}
+    )
   end
 
   @spec selection_fingerprint(FileTree.t()) :: non_neg_integer()
@@ -138,12 +141,13 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoder do
   @spec file_tree_selection_flags(boolean()) :: non_neg_integer()
   defp file_tree_selection_flags(focused?), do: Wire.maybe_flag(0, focused?, 0)
 
-  @spec file_tree_flags(FileTree.status(), boolean()) :: non_neg_integer()
-  defp file_tree_flags(status, focused?) do
+  @spec file_tree_flags(FileTree.status(), boolean(), boolean()) :: non_neg_integer()
+  defp file_tree_flags(status, focused?, local_navigation?) do
     0
     |> Wire.maybe_flag(visible_status?(status), 0)
     |> Wire.maybe_flag(focused?, 1)
     |> Wire.maybe_flag(status == :empty, 4)
+    |> Wire.maybe_flag(local_navigation?, 5)
   end
 
   @spec visible_status?(FileTree.status()) :: boolean()

@@ -57,6 +57,7 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilderTest do
       model = FileTreeBuilder.build(ctx)
 
       assert %FileTreeModel{status: :ready, focused?: true, tree_width: 32} = model
+      refute model.local_navigation?
       assert model.selected_id == path
 
       assert [row] = model.rows
@@ -96,6 +97,8 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilderTest do
 
       doom = FileTreeBuilder.build(build_minimal_context(file_tree: file_tree, theme: :doom_one))
 
+      assert astrodark.local_navigation?
+      assert doom.local_navigation?
       assert [%{icon_color: astrodark_color}] = astrodark.rows
       assert [%{icon_color: doom_color}] = doom.rows
 

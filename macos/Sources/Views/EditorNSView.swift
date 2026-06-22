@@ -1581,6 +1581,7 @@ final class EditorNSView: MTKView {
     /// dispatcher recorder.
     private func sendKeyPress(codepoint: UInt32, modifiers: UInt8) {
         updateOptimisticTextInputMode(codepoint: codepoint, modifiers: modifiers)
+        dispatcher.previewFileTreeNavigation(codepoint: codepoint, modifiers: modifiers)
         recoveryManager?.onKeySent()
         let seq = dispatcher.latency.stamp()
         encoder.sendKeyPress(codepoint: codepoint, modifiers: modifiers, seq: seq)

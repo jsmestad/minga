@@ -121,6 +121,26 @@ struct KeyboardInputTests {
         }
     }
 
+    @Test("Down arrow previews eligible file tree selection and still sends key")
+    @MainActor func downArrowPreviewsFileTreeSelection() throws {
+        let spy = SpyEncoder()
+        guard let view = makeView(spy: spy) else { return }
+        let entries = [
+            keyboardFileTreeEntry(pathHash: 1, isSelected: true, isFocused: true, id: "/project/a", path: "/project/a", name: "a", relPath: "a"),
+            keyboardFileTreeEntry(pathHash: 2, isFocused: true, id: "/project/b", path: "/project/b", name: "b", relPath: "b")
+        ]
+        view.dispatcher.applyForTesting(.guiFileTree(version: 2, treeFlags: 0x23, treeState: 3, selectedId: "/project/a", treeWidth: 30,
+                                                rootPath: "/project", errorReason: "", entries: entries))
+
+        guard let event = keyEvent(keyCode: 125) else { return }
+        view.keyDown(with: event)
+
+        #expect(view.dispatcher.guiState.fileTreeState.selectedId == "/project/b")
+        #expect(view.dispatcher.guiState.fileTreeState.selectedIndex == 1)
+        #expect(spy.keyPressCalls.count == 1)
+        #expect(spy.keyPressCalls[0].codepoint == 57353)
+    }
+
     @Test("Home/End/PageUp/PageDown send correct codepoints")
     @MainActor func navigationKeys() throws {
         let spy = SpyEncoder()
@@ -284,4 +304,43 @@ struct KeyboardInputTests {
             #expect(spy.keyPressCalls[i].codepoint == expected)
         }
     }
+}
+
+private func keyboardFileTreeEntry(
+    pathHash: UInt32,
+    isSelected: Bool = false,
+    isFocused: Bool = false,
+    id: String,
+    path: String,
+    name: String,
+    relPath: String
+) -> Wire.FileTreeEntry {
+    Wire.FileTreeEntry(
+        pathHash: pathHash,
+        id: id,
+        path: path,
+        isDir: false,
+        isExpanded: false,
+        isSelected: isSelected,
+        isFocused: isFocused,
+        isActive: false,
+        isDirty: false,
+        isEditing: false,
+        isLastChild: false,
+        depth: 0,
+        gitStatus: 0,
+        diagnosticErrorCount: 0,
+        diagnosticWarningCount: 0,
+        diagnosticInfoCount: 0,
+        diagnosticHintCount: 0,
+        guides: [],
+        icon: "",
+        iconColorR: 0x6D,
+        iconColorG: 0x80,
+        iconColorB: 0x86,
+        name: name,
+        relPath: relPath,
+        editingType: 0xFF,
+        editingText: ""
+    )
 }
