@@ -3173,15 +3173,11 @@ defmodule MingaAgent.Providers.Native do
 
   defdelegate strip_provider_prefix(model), to: MingaAgent.Config
 
-  @spec emit_error_and_end(pid(), String.t() | Event.Error.t()) :: :ok
+  @spec emit_error_and_end(pid(), Event.Error.t()) :: :ok
   defp emit_error_and_end(provider_pid, %Event.Error{} = event) do
     send(provider_pid, {:agent_event, event})
     send(provider_pid, {:agent_event, %Event.AgentEnd{usage: nil}})
     :ok
-  end
-
-  defp emit_error_and_end(provider_pid, message) do
-    emit_error_and_end(provider_pid, %Event.Error{message: message})
   end
 
   # Reports an error that occurred inside the agent loop: logs a redacted
@@ -3231,13 +3227,6 @@ defmodule MingaAgent.Providers.Native do
   end
 
   defp error_event_message(:invalid_model, message, _provider), do: message
-  defp error_event_message(:tool_error, message, _provider), do: message
-
-  defp error_event_message(:internal_error, _message, _provider) do
-    "The model provider returned an unexpected error. Open Messages for details, or pick another configured model with /model."
-  end
-
-  defp error_event_message(:unknown, message, _provider), do: message
 
   @spec classify_error_reason(term()) :: Event.Error.kind()
   defp classify_error_reason(:invalid_format), do: :invalid_model
@@ -3301,8 +3290,6 @@ defmodule MingaAgent.Providers.Native do
       _other -> nil
     end
   end
-
-  defp provider_slug_from_model(_model), do: nil
 
   @spec normalize_usage(map() | nil, String.t()) :: Event.token_usage() | nil
   defp normalize_usage(nil, _model), do: nil

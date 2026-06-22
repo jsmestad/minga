@@ -98,7 +98,7 @@ defmodule MingaAgent.Event do
   @typedoc "An error occurred in the agent, with structured kind/provider metadata."
   @type error :: %__MODULE__.Error{
           message: String.t(),
-          kind: Error.kind(),
+          kind: __MODULE__.Error.kind(),
           provider: String.t() | nil
         }
 
