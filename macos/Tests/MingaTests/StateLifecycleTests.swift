@@ -321,6 +321,22 @@ struct TabBarStateLifecycleTests {
         #expect(state.tabs[1].hasAttention == true)
     }
 
+    @Test("updateWorkspaces() marks canonical agent tabs")
+    @MainActor func updateWorkspacesMarksCanonicalAgentTabs() {
+        let state = TabBarState()
+        state.updateWorkspaces(activeWorkspaceId: 1, mode: 1, flags: 0, entries: [
+            Wire.WorkspaceEntry(id: 1, kind: 1, status: 0, flags: 0, colorR: 0x11, colorG: 0x22, colorB: 0x33,
+                                tabCount: 2, draftCount: 0, conflictCount: 0, runningBackgroundCount: 0, label: "Agent", icon: "cpu")
+        ], visibleTabs: [
+            Wire.WorkspaceTabEntry(id: 7, workspaceId: 1, kind: 1, flags: 0, pathHash: 0, tintColorRGB: 0, icon: "cpu", label: "Agent", path: ""),
+            Wire.WorkspaceTabEntry(id: 8, workspaceId: 1, kind: 0, flags: 0, pathHash: 0, tintColorRGB: 0, icon: "󰈙", label: "agent.ex", path: "/tmp/agent.ex")
+        ])
+
+        #expect(state.workspaceTabs.count == 2)
+        #expect(state.workspaceTabs[0].isAgent == true)
+        #expect(state.workspaceTabs[1].isAgent == false)
+    }
+
     @Test("hide() clears all tab state")
     @MainActor func hideClearsAll() {
         let state = TabBarState()

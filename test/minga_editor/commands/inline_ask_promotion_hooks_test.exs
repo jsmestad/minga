@@ -6,6 +6,7 @@ defmodule MingaEditor.Commands.InlineAskPromotionHooksTest do
   alias MingaAgent.Hooks.RecordingHook
   alias MingaAgent.Session
   alias MingaAgent.SessionManager
+  alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Commands.InlineAsk, as: InlineAskCommand
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.AgentAccess
@@ -43,7 +44,14 @@ defmodule MingaEditor.Commands.InlineAskPromotionHooksTest do
     File.write!(path, "hello")
     ctx = start_editor("hello", file_path: path, project_root: dir)
 
-    state = InlineAskCommand.open(editor_state(ctx))
+    state =
+      editor_state(ctx)
+      |> AgentAccess.update_panel(fn panel ->
+        panel
+        |> Panel.set_provider_name("anthropic")
+        |> Panel.set_model_name("anthropic:test")
+      end)
+      |> InlineAskCommand.open()
 
     ask =
       state

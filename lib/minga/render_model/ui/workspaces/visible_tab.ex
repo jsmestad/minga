@@ -1,7 +1,7 @@
 defmodule Minga.RenderModel.UI.Workspaces.VisibleTab do
   @moduledoc false
 
-  @type kind :: :file
+  @type kind :: :file | :agent
   @type draft_state :: :none | :draft | :draft_elsewhere | :conflict
 
   @type t :: %__MODULE__{

@@ -161,15 +161,15 @@ defmodule MingaEditor.State.EventRoutingTest do
   describe "Agent.Events.handle/2 — credentials status" do
     test "credentials_status updates the panel flag and re-renders" do
       %{state: state} = make_state()
-      assert AgentAccess.panel(state).credentials_configured == true
+      assert AgentAccess.panel(state).credentials_configured == false
 
-      {new_state, effects} = AgentEvents.handle(state, {:credentials_status, false})
+      {new_state, effects} = AgentEvents.handle(state, {:credentials_status, true})
 
-      assert AgentAccess.panel(new_state).credentials_configured == false
+      assert AgentAccess.panel(new_state).credentials_configured == true
       assert :render in effects
 
-      {restored, _effects} = AgentEvents.handle(new_state, {:credentials_status, true})
-      assert AgentAccess.panel(restored).credentials_configured == true
+      {restored, _effects} = AgentEvents.handle(new_state, {:credentials_status, false})
+      assert AgentAccess.panel(restored).credentials_configured == false
     end
   end
 

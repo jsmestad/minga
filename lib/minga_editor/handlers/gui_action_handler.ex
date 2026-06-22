@@ -506,6 +506,23 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     end
   end
 
+  defp dispatch_action(state, {:execute_command, "workspace_goto_id:" <> workspace_id}) do
+    case Integer.parse(workspace_id) do
+      {id, ""} when id >= 0 ->
+        state
+        |> Commands.execute({:workspace_goto, id})
+        |> normalize_command_result()
+
+      _other ->
+        Minga.Log.warning(
+          :editor,
+          "[execute_command] invalid workspace id command: workspace_goto_id:#{workspace_id}"
+        )
+
+        state
+    end
+  end
+
   defp dispatch_action(state, {:execute_command, name_str}) do
     command = String.to_existing_atom(name_str)
 

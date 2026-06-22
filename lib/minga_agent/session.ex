@@ -66,6 +66,9 @@ defmodule MingaAgent.Session do
   @typedoc "Context inherited by child subagent sessions."
   @type subagent_context :: SubagentContext.t()
 
+  @typedoc "Callback that reports whether credentials are currently configured."
+  @type credentials_configured_fn :: (-> boolean())
+
   @typedoc "Active tool call tracked while the provider is executing tools."
   @type active_tool_call :: {tool_call_id :: String.t(), name :: String.t()}
 
@@ -84,6 +87,7 @@ defmodule MingaAgent.Session do
           provider_source: Minga.Extension.ContributionCleanup.contribution_source(),
           provider_lease: CodeLease.t() | nil,
           provider_opts: keyword(),
+          credentials_configured_fn: credentials_configured_fn(),
           status: status(),
           messages: [Message.t()],
           message_ids: [pos_integer()],
@@ -236,7 +240,8 @@ defmodule MingaAgent.Session do
           status: status(),
           pending_approval: map() | nil,
           error: String.t() | nil,
-          active_tool_name: String.t() | nil
+          active_tool_name: String.t() | nil,
+          credentials_configured: boolean()
         }
 
   @doc "Returns a snapshot of session state for the editor to rebuild AgentState."
@@ -635,28 +640,47 @@ defmodule MingaAgent.Session do
 
   @spec do_init(keyword()) :: {:ok, state()}
   defp do_init(opts) do
-    provider_resolution = resolve_provider(opts)
-    provider_module = provider_resolution.module
-
-    provider_lease =
-      acquire_provider_lease!(provider_resolution.source, provider_module, provider_resolution.id)
-
     provider_opts =
       Keyword.merge(
         [subscriber: self()],
         Keyword.get(opts, :provider_opts, [])
       )
 
+    credentials_configured_fn =
+      Keyword.get(opts, :credentials_configured_fn, &Credentials.any_configured?/0)
+
     initial_thinking_level = Keyword.get(opts, :thinking_level)
     timestamp = Calendar.strftime(DateTime.utc_now(), "%H:%M:%S UTC")
 
     session_id = Keyword.get(opts, :session_id, generate_session_id())
-    model_name = Keyword.get(opts, :model_name, "unknown")
+    model_name = session_model_name(opts, provider_opts)
+    resolved_provider_resolution = resolve_provider(opts)
 
-    provider_name =
-      provider_opts
-      |> Keyword.get(:provider, "unknown")
-      |> to_string()
+    credentials_configured? =
+      session_credentials_configured?(
+        resolved_provider_resolution.module,
+        provider_opts,
+        credentials_configured_fn
+      )
+
+    provider_resolution =
+      if credentials_configured?,
+        do: resolved_provider_resolution,
+        else: unconfigured_provider_resolution()
+
+    provider_module = provider_resolution.module
+
+    {provider_name, provider_opts} =
+      session_provider_configuration(provider_module, model_name, provider_opts)
+
+    provider_lease =
+      if credentials_configured? do
+        acquire_provider_lease!(
+          provider_resolution.source,
+          provider_module,
+          provider_resolution.id
+        )
+      end
 
     now = DateTime.utc_now()
 
@@ -671,6 +695,7 @@ defmodule MingaAgent.Session do
       provider_source: provider_resolution.source,
       provider_lease: provider_lease,
       provider_opts: provider_opts,
+      credentials_configured_fn: credentials_configured_fn,
       status: :idle,
       messages: [
         Message.system(initial_system_message(timestamp, Keyword.get(opts, :startup_notice)))
@@ -711,7 +736,7 @@ defmodule MingaAgent.Session do
       touched_files: %{},
       boundaries: %{},
       pinned_ids: MapSet.new(),
-      credentials_configured: true
+      credentials_configured: credentials_configured?
     }
 
     maybe_mark_interrupted_work(state, Keyword.get(opts, :recover_interrupted_work?, true))
@@ -727,8 +752,11 @@ defmodule MingaAgent.Session do
       state.event_log_server
     )
 
-    # Start provider asynchronously so init doesn't block
-    send(self(), :start_provider)
+    # Start provider asynchronously so init doesn't block. An unconfigured local
+    # session is still useful for draft preservation, but must not boot a provider.
+    if credentials_configured? do
+      send(self(), :start_provider)
+    end
 
     {:ok, schedule_idle_gc(state, state.idle_gc_timeout_ms > 0, nil, state.idle_gc_timeout_ms)}
   end
@@ -1027,7 +1055,8 @@ defmodule MingaAgent.Session do
       status: state.status,
       pending_approval: public_pending_approval(state.pending_approval),
       error: state.error_message,
-      active_tool_name: state.active_tool_name
+      active_tool_name: state.active_tool_name,
+      credentials_configured: state.credentials_configured
     }
 
     {:reply, snapshot, state}
@@ -1089,6 +1118,7 @@ defmodule MingaAgent.Session do
       true ->
         Process.monitor(pid)
         state = state |> cancel_idle_gc_timer() |> put_subscriber(pid, role)
+        send(pid, {:agent_event, self(), {:credentials_status, state.credentials_configured}})
         {:reply, :ok, state}
 
       false ->
@@ -1211,13 +1241,24 @@ defmodule MingaAgent.Session do
     {:reply, result, state}
   end
 
-  def handle_call({:set_model, _model}, _from, %{provider: nil} = state) do
-    {:reply, {:error, :provider_not_ready}, state}
-  end
-
   def handle_call({:set_model, model}, _from, state) do
-    result = dispatch_optional(state.provider_module, :set_model, [state.provider, model])
-    state = %{state | model_name: model}
+    {state, refresh_result} =
+      state
+      |> update_model_configuration(model)
+      |> refresh_credentials_state_result()
+
+    result =
+      case {state.provider, refresh_result} do
+        {nil, {:error, reason}} ->
+          {:error, reason}
+
+        {nil, :ok} ->
+          :ok
+
+        {provider, _refresh_result} ->
+          dispatch_optional(state.provider_module, :set_model, [provider, model])
+      end
+
     {:reply, result, state}
   end
 
@@ -1305,25 +1346,7 @@ defmodule MingaAgent.Session do
 
   @impl GenServer
   def handle_info(:start_provider, state) do
-    case start_provider(state) do
-      {:ok, pid, lease} ->
-        Process.monitor(pid)
-        state = %{state | provider: pid, provider_lease: lease}
-        state = seed_provider_messages(state, state.messages)
-        state = apply_pending_thinking_level(state)
-        state = refresh_credentials_state(state)
-        state = maybe_show_auth_onboarding(state)
-        dispatch_session_start(state)
-        {:noreply, state}
-
-      {:error, reason} ->
-        Minga.Log.error(:agent, "[Agent.Session] failed to start provider: #{inspect(reason)}")
-        release_provider_lease(state.provider_lease)
-        state = %{state | provider_lease: nil, error_message: format_error(reason)}
-        state = set_error_status(state)
-        broadcast(state, {:error, state.error_message})
-        {:noreply, state}
-    end
+    {:noreply, refresh_credentials_state(state)}
   end
 
   def handle_info({:agent_provider_event, event}, state) do
@@ -1452,8 +1475,18 @@ defmodule MingaAgent.Session do
 
   @spec handle_send_prompt(String.t() | [ReqLLM.Message.ContentPart.t()], state()) ::
           {:reply, :ok | {:queued, :steering} | {:error, term()}, state()}
-  defp handle_send_prompt(_text, %{provider: nil} = state) do
-    {:reply, {:error, :provider_not_ready}, state}
+  defp handle_send_prompt(_content, %{credentials_configured: false} = state) do
+    # No usable provider yet. Refuse locally so callers can preserve the draft instead of clearing it.
+    {:reply, {:error, :credentials_not_configured}, state}
+  end
+
+  defp handle_send_prompt(content, %{provider: nil} = state) do
+    state = refresh_credentials_state(state)
+
+    case state.provider do
+      nil -> {:reply, {:error, :provider_not_ready}, state}
+      _ -> handle_send_prompt(content, state)
+    end
   end
 
   defp handle_send_prompt(content, %{status: status} = state)
@@ -1463,23 +1496,6 @@ defmodule MingaAgent.Session do
     state = %{state | steering_queue: state.steering_queue ++ [content]}
     broadcast(state, {:prompt_queued, content, :steering})
     {:reply, {:queued, :steering}, state}
-  end
-
-  defp handle_send_prompt(content, %{credentials_configured: false} = state) do
-    # No usable provider yet. Show the user's message followed by a gentle
-    # setup nudge instead of attempting a call that would fail with a raw
-    # provider error. Reply :ok so the input clears like a normal submit.
-    {user_msg, _send_content} = build_user_message(content)
-
-    state = append_msg(state, user_msg)
-    record_user_message(state, user_msg)
-
-    state =
-      state
-      |> append_system_message(auth_required_message(), :info)
-      |> notify_messages_changed()
-
-    {:reply, :ok, state}
   end
 
   defp handle_send_prompt(content, state) do
@@ -2687,6 +2703,13 @@ defmodule MingaAgent.Session do
   end
 
   @spec provider_name(map(), state()) :: String.t()
+  defp provider_name(_provider_state, %{
+         provider_module: MingaAgent.Providers.Native,
+         provider_name: provider_name
+       })
+       when provider_name not in ["", "unknown"],
+       do: provider_name
+
   defp provider_name(%{model: %{provider: provider}}, _state) when is_binary(provider),
     do: provider
 
@@ -2733,17 +2756,148 @@ defmodule MingaAgent.Session do
   # runs in the session process, off the render path.
   @spec refresh_credentials_state(state()) :: state()
   defp refresh_credentials_state(state) do
+    {state, _result} = refresh_credentials_state_result(state)
+    state
+  end
+
+  @spec refresh_credentials_state_result(state()) :: {state(), :ok | {:error, term()}}
+  defp refresh_credentials_state_result(state) do
     # Only the native provider resolves its own credentials from the
     # environment. Custom providers, and any caller that injects its own
     # `:llm_client` (tests, embedded transports), manage their own auth, so
     # treat them as always ready.
     configured? =
-      state.provider_module != MingaAgent.Providers.Native or
-        Keyword.has_key?(state.provider_opts, :llm_client) or
-        Credentials.any_configured?()
+      session_credentials_configured?(
+        state.provider_module,
+        state.provider_opts,
+        state.credentials_configured_fn
+      )
 
     state = %{state | credentials_configured: configured?}
+    {state, result} = maybe_start_provider_result(state)
     broadcast(state, {:credentials_status, configured?})
+    {state, result}
+  end
+
+  @spec update_model_configuration(state(), String.t()) :: state()
+  defp update_model_configuration(state, model) do
+    {provider_name, provider_opts} =
+      session_provider_configuration(state.provider_module, model, state.provider_opts)
+
+    %{
+      state
+      | model_name: model,
+        provider_name: provider_name,
+        provider_opts: provider_opts,
+        error_message: nil
+    }
+  end
+
+  @spec session_provider_configuration(module(), String.t(), keyword()) :: {String.t(), keyword()}
+  defp session_provider_configuration(provider_module, model, provider_opts) do
+    provider = session_model_provider(provider_module, model)
+
+    provider_opts =
+      provider_opts
+      |> Keyword.put(:model, model)
+      |> maybe_put_provider(provider)
+
+    {session_provider_name(provider, provider_opts), provider_opts}
+  end
+
+  @spec session_model_provider(module(), String.t()) :: String.t() | nil
+  defp session_model_provider(MingaAgent.Providers.Native, model) do
+    case AgentConfig.extract_provider_prefix(model) do
+      "" -> nil
+      provider -> String.downcase(provider)
+    end
+  end
+
+  defp session_model_provider(_provider_module, _model), do: nil
+
+  @spec session_provider_name(String.t() | nil, keyword()) :: String.t()
+  defp session_provider_name(provider, _provider_opts) when is_binary(provider), do: provider
+
+  defp session_provider_name(_provider, provider_opts) do
+    provider_opts
+    |> Keyword.get(:provider, "unknown")
+    |> to_string()
+  end
+
+  @spec maybe_put_provider(keyword(), String.t() | nil) :: keyword()
+  defp maybe_put_provider(provider_opts, nil), do: provider_opts
+  defp maybe_put_provider(provider_opts, ""), do: provider_opts
+
+  defp maybe_put_provider(provider_opts, provider) when is_binary(provider) do
+    Keyword.put(provider_opts, :provider, provider)
+  end
+
+  @spec session_model_name(keyword(), keyword()) :: String.t()
+  defp session_model_name(opts, provider_opts) do
+    unconfigured_model = AgentConfig.unconfigured_model()
+
+    case Keyword.get(opts, :model_name) do
+      model when is_binary(model) and model != "" and model != unconfigured_model ->
+        model
+
+      _ ->
+        provider_model_name(provider_opts, unconfigured_model) || unconfigured_model
+    end
+  end
+
+  @spec provider_model_name(keyword(), String.t()) :: String.t() | nil
+  defp provider_model_name(provider_opts, unconfigured_model) do
+    case Keyword.get(provider_opts, :model) do
+      model when is_binary(model) and model != "" and model != unconfigured_model ->
+        model
+
+      _ ->
+        nil
+    end
+  end
+
+  @spec maybe_start_provider_result(state()) :: {state(), :ok | {:error, term()}}
+  defp maybe_start_provider_result(%{provider: nil, credentials_configured: true} = state) do
+    if provider_startable?(state.provider_module, state.provider_opts, state.model_name) do
+      case start_provider(state) do
+        {:ok, pid, lease} ->
+          {attach_provider(state, pid, lease), :ok}
+
+        {:error, reason} ->
+          state = report_provider_start_error(state, reason)
+          {state, {:error, state.error_message}}
+      end
+    else
+      {state, :ok}
+    end
+  end
+
+  defp maybe_start_provider_result(state), do: {state, :ok}
+
+  @spec attach_provider(state(), pid(), CodeLease.t() | nil) :: state()
+  defp attach_provider(state, pid, lease) do
+    Process.monitor(pid)
+    state = clear_provider_start_error(%{state | provider: pid, provider_lease: lease})
+    state = seed_provider_messages(state, state.messages)
+    state = apply_pending_thinking_level(state)
+    state = maybe_show_auth_onboarding(state)
+    dispatch_session_start(state)
+    state
+  end
+
+  @spec clear_provider_start_error(state()) :: state()
+  defp clear_provider_start_error(%{status: :error} = state),
+    do: %{state | status: :idle, error_message: nil}
+
+  defp clear_provider_start_error(state), do: %{state | error_message: nil}
+
+  @spec report_provider_start_error(state(), term()) :: state()
+  defp report_provider_start_error(state, reason) do
+    Minga.Log.error(:agent, "[Agent.Session] failed to start provider: #{inspect(reason)}")
+    release_provider_lease(state.provider_lease)
+    state = %{state | provider_lease: nil, error_message: format_error(reason)}
+    state = set_error_status(state)
+    broadcast(state, {:error, state.error_message})
     state
   end
 
@@ -2783,22 +2937,6 @@ defmodule MingaAgent.Session do
 
     Ollama is detected automatically if it's running locally.
     Run /auth to see status for all providers.\
-    """
-  end
-
-  # Shown when the user submits a prompt before any provider is configured.
-  @spec auth_required_message() :: String.t()
-  defp auth_required_message do
-    """
-    No provider is configured yet, so there's nothing to send your message to.
-
-    Set one up to get started:
-
-      /auth anthropic <key>     add an API key (most common)
-      /login                    ChatGPT subscription (OpenAI only)
-      /login --manual           ChatGPT subscription on a headless server
-
-    Run /auth to see all providers and options.\
     """
   end
 
@@ -2901,6 +3039,33 @@ defmodule MingaAgent.Session do
   # Determines which provider module to use. If an explicit `:provider` option is
   # passed (common in tests and from existing code), use that as a config-owned provider. Otherwise, delegate
   # to the ProviderResolver which checks config and the provider registry.
+  @spec session_credentials_configured?(module(), keyword(), credentials_configured_fn()) ::
+          boolean()
+  defp session_credentials_configured?(provider_module, provider_opts, credentials_configured_fn) do
+    provider_module != MingaAgent.Providers.Native or
+      Keyword.has_key?(provider_opts, :llm_client) or
+      credentials_configured_fn.()
+  end
+
+  @spec provider_startable?(module(), keyword(), String.t()) :: boolean()
+  defp provider_startable?(provider_module, provider_opts, model_name) do
+    provider_module != MingaAgent.Providers.Native or
+      Keyword.has_key?(provider_opts, :llm_client) or
+      model_name != AgentConfig.unconfigured_model()
+  end
+
+  @spec unconfigured_provider_resolution() :: ProviderResolver.resolved()
+  defp unconfigured_provider_resolution do
+    %ProviderResolver.Resolved{
+      id: "unconfigured",
+      source: :config,
+      module: MingaAgent.Providers.Native,
+      name: "unconfigured",
+      display_name: "Unconfigured",
+      spec: nil
+    }
+  end
+
   @spec resolve_provider(keyword()) :: ProviderResolver.resolved()
   defp resolve_provider(opts) do
     case Keyword.fetch(opts, :provider) do

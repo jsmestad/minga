@@ -72,7 +72,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     %AgentChat{
       visible?: true,
       status: ctx.shell_state.agent.runtime.status || :idle,
-      model_name: panel.model_name,
+      model_name: display_model_name(panel.model_name),
       thinking_level: panel.thinking_level,
       prompt: prompt_text,
       prompt_line_count: UIState.input_line_count(panel),
@@ -87,6 +87,10 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
       messages: gui_messages
     }
   end
+
+  @spec display_model_name(String.t()) :: String.t()
+  defp display_model_name(model) when model in ["", "unknown"], do: "No model configured"
+  defp display_model_name(model), do: model
 
   @spec log_agent_chat_message_stats([{pos_integer(), term()}]) :: :ok
   defp log_agent_chat_message_stats(messages) do

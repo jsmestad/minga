@@ -828,13 +828,14 @@ struct TabBarViewViewTests {
         let spy = SpyEncoder()
         let state = TabBarState()
         state.update(activeIndex: 0, entries: [
-            wireTab(id: 1),
-            wireTab(id: 2),
-            wireTab(id: 3, groupId: 1),
-            wireTab(id: 4, isPinned: true),
+            wireTab(id: 1, isPinned: true, label: "pinned-1.ex"),
+            wireTab(id: 2, isPinned: true, label: "pinned-2.ex"),
+            wireTab(id: 3, label: "plain-1.ex"),
+            wireTab(id: 4, label: "plain-2.ex"),
+            wireTab(id: 5, groupId: 1, label: "other-group.ex"),
         ])
         let sut = TabBarView(tabBarState: state, theme: ThemeColors(), encoder: spy)
-        let target = tab(id: 2)
+        let target = tab(id: 3, label: "plain-1.ex")
 
         #expect(TabDragPayload.contentType.identifier == "com.minga.tab-id")
         #expect(TabDragPayload.contentType != UTType.plainText)
@@ -842,17 +843,38 @@ struct TabBarViewViewTests {
         if let reorder = sut.tabDropReorder(droppedTabs: [], target: target, visibleIndex: 1) {
             Issue.record("Expected empty payload to be rejected, got \(reorder)")
         }
-        if let reorder = sut.tabDropReorder(droppedTabs: [TabDragPayload(id: 3)], target: target, visibleIndex: 1) {
+        if let reorder = sut.tabDropReorder(droppedTabs: [TabDragPayload(id: 5)], target: target, visibleIndex: 1) {
             Issue.record("Expected cross-workspace payload to be rejected, got \(reorder)")
         }
-        if let reorder = sut.tabDropReorder(droppedTabs: [TabDragPayload(id: 4)], target: target, visibleIndex: 1) {
+        if let reorder = sut.tabDropReorder(droppedTabs: [TabDragPayload(id: 1)], target: target, visibleIndex: 1) {
             Issue.record("Expected pinned-bucket mismatch to be rejected, got \(reorder)")
         }
 
-        let accepted = sut.handleTabDrop(droppedTabs: [TabDragPayload(id: 1)], target: target, visibleIndex: 1)
+        let dropTarget = tab(id: 4, label: "plain-2.ex")
+        #expect(sut.visibleFileTabIndex(for: dropTarget) == 3)
+        #expect(sut.tabDropReorder(droppedTabs: [TabDragPayload(id: 3)], target: dropTarget, visibleIndex: 3)?.newIndex == 3)
+
+        let accepted = sut.handleTabDrop(droppedTabs: [TabDragPayload(id: 3)], target: dropTarget, visibleIndex: 3)
 
         #expect(accepted)
-        #expect(spy.guiActions == [.tabReorder(id: 1, newIndex: 1)])
+        #expect(spy.guiActions == [.tabReorder(id: 3, newIndex: 3)])
+    }
+
+    @Test("Canonical drag reorder ignores the leading agent tab")
+    @MainActor func canonicalDragReorderIgnoresLeadingAgentTab() throws {
+        let state = TabBarState()
+        state.update(activeIndex: 0, entries: [
+            Wire.TabEntry(id: 1, groupId: 0, isActive: true, isDirty: false, isAgent: true, hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "cpu", label: "Agent"),
+            wireTab(id: 2, label: "file-a.ex"),
+            wireTab(id: 3, label: "file-b.ex")
+        ])
+
+        let sut = TabBarView(tabBarState: state, theme: ThemeColors(), encoder: nil)
+
+        #expect(sut.movableFileTabIndex(for: tab(id: 2, label: "file-a.ex")) == 0)
+        #expect(sut.movableFileTabIndex(for: tab(id: 3, label: "file-b.ex")) == 1)
+        #expect(sut.movableFileTabIndex(for: TabEntry(id: 1, groupId: 0, isActive: true, isDirty: false, isAgent: true, hasAttention: false, agentStatus: 0, isPinned: false, tintColor: nil, icon: "cpu", label: "Agent")) == nil)
+        #expect(sut.tabDropReorder(droppedTabs: [TabDragPayload(id: 2)], target: tab(id: 3, label: "file-b.ex"), visibleIndex: 2)?.newIndex == 1)
     }
 
     @Test("Tab bar uses canonical active-workspace visible tabs")
@@ -880,6 +902,38 @@ struct TabBarViewViewTests {
         #expect(!strings.contains("legacy-agent-chat"))
         #expect(!strings.contains("background.ex"))
         #expect(!strings.contains("Research"))
+    }
+
+    @Test("Canonical workspace tabs render agent entries with the agent icon")
+    @MainActor func canonicalWorkspaceTabsRenderAgentEntriesWithAgentIcon() throws {
+        let fileState = TabBarState()
+        fileState.updateWorkspaces(activeWorkspaceId: 1, mode: 1, flags: 0, entries: [
+            Wire.WorkspaceEntry(id: 1, kind: 1, status: 0, flags: 0, colorR: 0x11, colorG: 0x22, colorB: 0x33,
+                                tabCount: 1, draftCount: 0, conflictCount: 0, runningBackgroundCount: 0, label: "Active", icon: "cpu")
+        ], visibleTabs: [
+            Wire.WorkspaceTabEntry(id: 42, workspaceId: 1, kind: 0, flags: 0, pathHash: 0, tintColorRGB: 0, icon: "󰈙", label: "active.ex", path: "/tmp/active.ex")
+        ])
+
+        let agentState = TabBarState()
+        agentState.updateWorkspaces(activeWorkspaceId: 1, mode: 1, flags: 0, entries: [
+            Wire.WorkspaceEntry(id: 1, kind: 1, status: 0, flags: 0, colorR: 0x11, colorG: 0x22, colorB: 0x33,
+                                tabCount: 1, draftCount: 0, conflictCount: 0, runningBackgroundCount: 0, label: "Active", icon: "cpu")
+        ], visibleTabs: [
+            Wire.WorkspaceTabEntry(id: 42, workspaceId: 1, kind: 1, flags: 0, pathHash: 0, tintColorRGB: 0, icon: "cpu", label: "Agent", path: "")
+        ])
+
+        let fileImages = try TabBarView(tabBarState: fileState, theme: ThemeColors(), encoder: nil)
+            .inspect()
+            .find(ViewType.ScrollView.self)
+            .findAll(ViewType.Image.self)
+            .count
+        let agentImages = try TabBarView(tabBarState: agentState, theme: ThemeColors(), encoder: nil)
+            .inspect()
+            .find(ViewType.ScrollView.self)
+            .findAll(ViewType.Image.self)
+            .count
+
+        #expect(agentImages == fileImages + 1)
     }
 }
 
@@ -943,8 +997,8 @@ struct WorkspaceHeaderViewTests {
         let manualWorkspace = try #require(state.workspaces.first { $0.isManual })
         let reviewWorkspace = try #require(state.workspaces.first { $0.label == "Review" })
 
-        #expect(state.switchCommand(for: manualWorkspace) == "manual_workspace")
-        #expect(state.switchCommand(for: reviewWorkspace) == "workspace_goto_2")
+        #expect(state.switchCommand(for: manualWorkspace) == "workspace_goto_id:0")
+        #expect(state.switchCommand(for: reviewWorkspace) == "workspace_goto_id:2")
     }
 }
 

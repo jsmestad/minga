@@ -12,6 +12,7 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
   alias Minga.SystemObserver.TreeNode
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
+  alias MingaEditor.State.Workspace
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
   alias MingaEditor.Session.ChromeState
   alias MingaEditor.Session.ChromeState.TabSummary
@@ -129,17 +130,26 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       assert Bitwise.band(flags, 0x01) == 0
     end
 
-    test "agent tabs and file tabs from other workspaces are omitted" do
+    test "agent workspace shows its agent tab and file tabs while omitting other workspaces" do
       tab1 = %Tab{id: 1, kind: :file, label: "a.ex", group_id: 0}
       tab2 = %Tab{id: 2, kind: :agent, label: "Agent", group_id: 7}
       tab3 = %Tab{id: 3, kind: :file, label: "b.ex", group_id: 7}
-      tb = %TabBar{tabs: [tab1, tab2, tab3], active_id: 2, next_id: 4}
 
-      <<0x71, active_index::8, 1::8, rest::binary>> = ProtocolGUI.encode_gui_tab_bar(tb)
-      <<_flags::8, id::32, _rest::binary>> = rest
+      tb = %TabBar{
+        tabs: [tab1, tab2, tab3],
+        active_id: 2,
+        next_id: 4,
+        workspaces: [Workspace.new_manual(nil), Workspace.new_agent(7, "Agent")]
+      }
 
-      assert active_index == 255
-      assert id == 3
+      <<0x71, active_index::8, 2::8, rest::binary>> = ProtocolGUI.encode_gui_tab_bar(tb)
+      {agent_flags, agent_id, rest} = decode_tab_header(rest)
+      {_file_flags, file_id, _rest} = decode_tab_header(rest)
+
+      assert active_index == 0
+      assert Bitwise.band(agent_flags, 0x04) == 0x04
+      assert agent_id == 2
+      assert file_id == 3
     end
   end
 
@@ -242,6 +252,38 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       assert label == "agent.ex"
       assert path == "/tmp/agent.ex"
       assert tint == 0
+    end
+
+    test "encodes visible agent tabs with agent kind byte" do
+      tab =
+        TabSummary.new(
+          id: 43,
+          workspace_id: 1,
+          kind: :agent,
+          label: "Agent",
+          icon: "cpu"
+        )
+
+      chrome_state =
+        chrome_state(
+          active_workspace_id: 1,
+          mode: :agent,
+          visible_tabs: [tab]
+        )
+
+      <<0x98, payload_len::16, payload::binary-size(payload_len)>> =
+        ProtocolGUI.encode_gui_workspaces(chrome_state)
+
+      <<2::8, 1::16, 1::8, _flags::8, 0::8, 1::16, 43::32, 1::16, 1::8, _tab_flags::16,
+        _path_hash::32, icon_len::8, icon::binary-size(icon_len), label_len::16,
+        label::binary-size(label_len), path_len::16, path::binary-size(path_len), tint::32>> =
+        payload
+
+      assert icon == "cpu"
+      assert label == "Agent"
+      assert path == ""
+      assert tint == 0
+      assert payload_len > 0
     end
 
     test "encodes pinned visible tabs with tint color metadata" do
@@ -1156,6 +1198,13 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
          acc
        ) do
     parse_observatory_sections(rest, [{id, section} | acc])
+  end
+
+  defp decode_tab_header(
+         <<flags::8, id::32, _workspace::16, icon_len::8, _icon::binary-size(icon_len),
+           label_len::16, _label::binary-size(label_len), _tint::32, rest::binary>>
+       ) do
+    {flags, id, rest}
   end
 
   defp sections_by_id(sections, id) do

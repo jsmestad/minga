@@ -473,19 +473,22 @@ defmodule MingaEditor.State.TabBarTest do
   end
 
   describe "workspace membership and switching" do
-    test "moves tabs to workspaces, lists members, and switches to the workspace's first tab" do
+    test "moves tabs to workspaces, lists members, and switches to the workspace's first visible tab" do
       tb = TabBar.new(file_tab(1, "a.ex"))
+      {tb, file_tab_two} = TabBar.add(tb, :file, "workspace.ex")
       {tb, _} = TabBar.add(tb, :agent, "Agent")
       {tb, group} = TabBar.add_workspace(tb, "Agent")
-      tb = TabBar.move_tab_to_workspace(tb, 2, group.id)
+      tb = TabBar.move_tab_to_workspace(tb, file_tab_two.id, group.id)
+      tb = TabBar.move_tab_to_workspace(tb, 3, group.id)
       tb = TabBar.switch_to(tb, 1)
 
-      assert TabBar.tabs_in_workspace(tb, group.id) |> Enum.map(& &1.id) == [2]
+      assert TabBar.tabs_in_workspace(tb, group.id) |> Enum.map(& &1.id) == [2, 3]
+      assert TabBar.visible_workspace_tabs(tb, group.id) |> Enum.map(& &1.id) == [3, 2]
       assert TabBar.tabs_in_workspace(tb, 0) |> Enum.map(& &1.id) == [1]
 
       tb = TabBar.switch_to_workspace(tb, group.id)
       assert TabBar.active_workspace_id(tb) == group.id
-      assert tb.active_id == 2
+      assert tb.active_id == 3
       assert TabBar.switch_to_workspace(tb, 999) == tb
     end
   end

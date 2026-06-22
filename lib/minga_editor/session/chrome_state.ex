@@ -243,7 +243,7 @@ defmodule MingaEditor.Session.ChromeState do
     workspace = TabBar.get_workspace(tb, active_workspace_id)
 
     tb
-    |> TabBar.visible_file_tabs(active_workspace_id)
+    |> TabBar.visible_workspace_tabs(active_workspace_id)
     |> Enum.map(&tab_summary(state, &1, active_workspace_id, workspace))
   end
 
@@ -320,7 +320,7 @@ defmodule MingaEditor.Session.ChromeState do
   defp buffer_dirty?(_pid), do: false
 
   @spec tab_tint_color(Tab.t(), Workspace.t() | nil) :: non_neg_integer()
-  defp tab_tint_color(%Tab{kind: :file}, %Workspace{kind: :agent, color: color})
+  defp tab_tint_color(%Tab{}, %Workspace{kind: :agent, color: color})
        when is_integer(color) and color > 0,
        do: color
 

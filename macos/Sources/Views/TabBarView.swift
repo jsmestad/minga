@@ -163,7 +163,7 @@ struct TabBarView: View {
                     groupId: tab.workspaceId,
                     isActive: index == Int(tabBarState.activeIndex),
                     isDirty: tab.isDirty,
-                    isAgent: false,
+                    isAgent: tab.isAgent,
                     hasAttention: tab.hasAttention,
                     agentStatus: 0,
                     isPinned: tab.isPinned,
@@ -191,13 +191,13 @@ struct TabBarView: View {
     }
 
     func canMoveTabLeft(_ tab: TabEntry) -> Bool {
-        guard let index = movableTabIndex(tab) else { return false }
+        guard let index = movableFileTabIndex(for: tab) else { return false }
         return index > 0
     }
 
     func canMoveTabRight(_ tab: TabEntry) -> Bool {
-        guard let index = movableTabIndex(tab) else { return false }
-        return index < movableTabs(for: tab).count - 1
+        guard let index = movableFileTabIndex(for: tab) else { return false }
+        return index < movableFileTabs(for: tab).count - 1
     }
 
     func tabContextMenuMoveItems(for tab: TabEntry) -> [TabContextMenuMoveItem] {
@@ -215,7 +215,7 @@ struct TabBarView: View {
         return true
     }
 
-    func tabDropReorder(droppedTabs: [TabDragPayload], target tab: TabEntry, visibleIndex: Int) -> (id: UInt32, newIndex: UInt16)? {
+    func tabDropReorder(droppedTabs: [TabDragPayload], target tab: TabEntry, visibleIndex _: Int) -> (id: UInt32, newIndex: UInt16)? {
         guard let draggedId = droppedTabs.first?.id,
               draggedId != tab.id else {
             return nil
@@ -225,16 +225,33 @@ struct TabBarView: View {
               draggedTab.isPinned == tab.isPinned else {
             return nil
         }
-        return (draggedId, UInt16(visibleIndex))
+        guard let newIndex = visibleFileTabIndex(for: tab) else {
+            return nil
+        }
+        return (draggedId, UInt16(newIndex))
     }
 
-    private func movableTabIndex(_ tab: TabEntry) -> Int? {
-        movableTabs(for: tab).firstIndex { $0.id == tab.id }
+    func movableFileTabIndex(for tab: TabEntry) -> Int? {
+        movableFileTabs(for: tab).firstIndex { $0.id == tab.id }
+    }
+
+    func visibleFileTabIndex(for tab: TabEntry) -> Int? {
+        visibleFileTabs(for: tab).firstIndex { $0.id == tab.id }
     }
 
     private func movableTabs(for tab: TabEntry) -> [TabEntry] {
         displayTabs.filter { candidate in
             candidate.groupId == tab.groupId && candidate.isPinned == tab.isPinned
+        }
+    }
+
+    private func movableFileTabs(for tab: TabEntry) -> [TabEntry] {
+        movableTabs(for: tab).filter { !$0.isAgent }
+    }
+
+    private func visibleFileTabs(for tab: TabEntry) -> [TabEntry] {
+        displayTabs.filter { candidate in
+            candidate.groupId == tab.groupId && !candidate.isAgent
         }
     }
 
@@ -344,16 +361,7 @@ struct TabBarView: View {
 
     @MainActor
     private func workspaceGotoCommand(for workspace: WorkspaceEntry) -> String {
-        if workspace.kind == 0 {
-            return "manual_workspace"
-        }
-
-        let agentWorkspaces = tabBarState.workspaces.filter { $0.kind == 1 }
-        guard let idx = agentWorkspaces.firstIndex(where: { $0.id == workspace.id }), idx < 9 else {
-            return "workspace_next_agent"
-        }
-
-        return "workspace_goto_\(idx + 1)"
+        "workspace_goto_id:\(workspace.id)"
     }
 
     // MARK: - Workspace indicator

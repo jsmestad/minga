@@ -170,10 +170,7 @@ defmodule MingaEditor.State.AgentAccess do
 
     tab_bar =
       case TabBar.active_workspace(tab_bar) do
-        %Workspace{kind: :agent, id: workspace_id} ->
-          TabBar.update_workspace(tab_bar, workspace_id, &Workspace.set_agent_ui(&1, next_ui))
-
-        %Workspace{session: session, id: workspace_id} when is_pid(session) ->
+        %Workspace{id: workspace_id} ->
           TabBar.update_workspace(tab_bar, workspace_id, &Workspace.set_agent_ui(&1, next_ui))
 
         _workspace ->

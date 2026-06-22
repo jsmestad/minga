@@ -42,9 +42,9 @@ defmodule MingaEditor.Agent.UIState do
   # Minimum number of lines for a paste to be collapsed.
   @paste_collapse_threshold 3
 
-  @doc "Creates a new UIState with default sub-structs."
+  @doc "Creates a new UIState with credential-aware panel defaults."
   @spec new() :: t()
-  def new, do: %__MODULE__{}
+  def new, do: %__MODULE__{panel: Panel.new()}
 
   # ── Prompt buffer lifecycle ─────────────────────────────────────────────
 
@@ -471,13 +471,13 @@ defmodule MingaEditor.Agent.UIState do
   @doc "Sets the model name."
   @spec set_model_name(t(), String.t()) :: t()
   def set_model_name(%__MODULE__{panel: panel} = state, model) do
-    %{state | panel: %{panel | model_name: model}}
+    %{state | panel: Panel.set_model_name(panel, model)}
   end
 
   @doc "Sets the provider name."
   @spec set_provider_name(t(), String.t()) :: t()
   def set_provider_name(%__MODULE__{panel: panel} = state, provider) do
-    %{state | panel: %{panel | provider_name: provider}}
+    %{state | panel: Panel.set_provider_name(panel, provider)}
   end
 
   @doc "Sets the scroll offset to an absolute value. Unpins from bottom."

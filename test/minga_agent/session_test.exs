@@ -357,10 +357,19 @@ defmodule MingaAgent.SessionTest do
   end
 
   defp start_subscribed_session(provider \\ MockProvider, provider_opts \\ []) do
+    provider_opts = native_provider_opts(provider, provider_opts)
     {:ok, session} = Session.start_link(provider: provider, provider_opts: provider_opts)
     Session.subscribe(session)
     session
   end
+
+  defp native_provider_opts(Native, provider_opts) do
+    provider_opts
+    |> Keyword.put_new(:provider, "anthropic")
+    |> Keyword.put_new(:model, "anthropic:test")
+  end
+
+  defp native_provider_opts(_provider, provider_opts), do: provider_opts
 
   defp agent_config(fields) do
     struct!(MingaAgent.Config, fields)
@@ -1043,6 +1052,8 @@ defmodule MingaAgent.SessionTest do
 
   describe "subscribe/unsubscribe" do
     test "stops receiving events after unsubscribe", %{session: session} do
+      assert_receive {:agent_event, ^session, {:credentials_status, true}}
+
       :ok = Session.unsubscribe(session)
 
       :ok = Session.send_prompt(session, "Test")

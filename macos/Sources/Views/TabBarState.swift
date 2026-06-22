@@ -47,6 +47,7 @@ struct WorkspaceTabEntry: Identifiable {
     let label: String
     let path: String
 
+    var isAgent: Bool { kind == 1 }
     var isDirty: Bool { flags & 0x0001 != 0 }
     var hasAttention: Bool { flags & 0x0002 != 0 }
     var isPinned: Bool { flags & 0x0020 != 0 }

@@ -139,13 +139,7 @@ final class WorkspaceState {
     }
 
     func switchCommand(for workspace: WorkspaceSummaryEntry) -> String {
-        if workspace.isManual { return "manual_workspace" }
-
-        let agentWorkspaces = workspaces.filter { $0.isAgent }
-        guard let idx = agentWorkspaces.firstIndex(where: { $0.id == workspace.id }), idx < 9 else {
-            return "workspace_next_agent"
-        }
-        return "workspace_goto_\(idx + 1)"
+        "workspace_goto_id:\(workspace.id)"
     }
 
     func hide() {

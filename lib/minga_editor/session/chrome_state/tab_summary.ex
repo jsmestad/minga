@@ -1,6 +1,6 @@
 defmodule MingaEditor.Session.ChromeState.TabSummary do
   @moduledoc """
-  User-facing summary for one file tab in workspace chrome.
+  User-facing summary for one visible content tab in workspace chrome.
 
   Tab summaries preserve workspace identity separately from path labels so the same logical path can appear in multiple workspaces without becoming ambiguous in chrome.
   """
@@ -9,7 +9,7 @@ defmodule MingaEditor.Session.ChromeState.TabSummary do
 
   @type draft_state :: :none | :draft | :draft_elsewhere | :conflict
 
-  @type kind :: :file
+  @type kind :: Tab.kind()
 
   @type t :: %__MODULE__{
           id: Tab.id(),
@@ -45,14 +45,10 @@ defmodule MingaEditor.Session.ChromeState.TabSummary do
   def new(attrs) when is_list(attrs) do
     kind = Keyword.fetch!(attrs, :kind)
 
-    if kind != :file do
-      raise ArgumentError, "TabSummary only supports file tabs, got #{inspect(kind)}"
-    end
-
     %__MODULE__{
       id: Keyword.fetch!(attrs, :id),
       workspace_id: Keyword.fetch!(attrs, :workspace_id),
-      kind: :file,
+      kind: kind,
       label: Keyword.fetch!(attrs, :label),
       path: Keyword.get(attrs, :path),
       icon: Keyword.fetch!(attrs, :icon),

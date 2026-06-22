@@ -550,6 +550,25 @@ defmodule MingaEditor.State.TabBar do
     end
   end
 
+  @doc "Returns visible content tabs for the active workspace."
+  @spec visible_workspace_tabs(t()) :: [Tab.t()]
+  def visible_workspace_tabs(%__MODULE__{} = tb) do
+    visible_workspace_tabs(tb, active_workspace_id(tb))
+  end
+
+  @doc "Returns visible content tabs for the given workspace id. Agent workspaces show their agent tab first, followed by file tabs."
+  @spec visible_workspace_tabs(t(), non_neg_integer()) :: [Tab.t()]
+  def visible_workspace_tabs(%__MODULE__{} = tb, workspace_id)
+      when is_integer(workspace_id) and workspace_id >= 0 do
+    case get_workspace(tb, workspace_id) do
+      %Workspace{kind: :agent} ->
+        visible_agent_tabs(tb, workspace_id) ++ visible_file_tabs(tb, workspace_id)
+
+      _workspace ->
+        visible_file_tabs(tb, workspace_id)
+    end
+  end
+
   @doc "Returns visible file tabs for the active workspace."
   @spec visible_file_tabs(t()) :: [Tab.t()]
   def visible_file_tabs(%__MODULE__{} = tb) do
@@ -564,6 +583,15 @@ defmodule MingaEditor.State.TabBar do
     |> Enum.filter(&visible_file_tab?(&1, workspace_id))
     |> pinned_first()
   end
+
+  @spec visible_agent_tabs(t(), non_neg_integer()) :: [Tab.t()]
+  defp visible_agent_tabs(%__MODULE__{tabs: tabs}, workspace_id) do
+    Enum.filter(tabs, &visible_agent_tab?(&1, workspace_id))
+  end
+
+  @spec visible_agent_tab?(Tab.t(), non_neg_integer()) :: boolean()
+  defp visible_agent_tab?(%Tab{kind: :agent, group_id: workspace_id}, workspace_id), do: true
+  defp visible_agent_tab?(%Tab{}, _workspace_id), do: false
 
   @doc "Finds the file tab in a workspace that represents the given file reference."
   @spec find_file_tab_in_workspace(t(), non_neg_integer(), FileRef.t()) :: Tab.t() | nil
@@ -793,14 +821,14 @@ defmodule MingaEditor.State.TabBar do
   end
 
   @doc """
-  Switches to the given workspace by activating its first tab.
+  Switches to the given workspace by activating its first visible tab.
 
-  Returns unchanged if the workspace doesn't exist or has no tabs.
+  Returns unchanged if the workspace doesn't exist or has no visible tabs.
   """
   @spec switch_to_workspace(t(), non_neg_integer()) :: t()
   def switch_to_workspace(%__MODULE__{} = tb, workspace_id) do
     if Enum.any?(tb.workspaces, &(&1.id == workspace_id)) do
-      switch_to_first_tab_in(tb, workspace_id)
+      switch_to_first_visible_tab_in(tb, workspace_id)
     else
       tb
     end
@@ -837,7 +865,7 @@ defmodule MingaEditor.State.TabBar do
         idx -> Enum.at(workspaces, rem(idx + 1, length(workspaces)))
       end
 
-    switch_to_first_tab_in(tb, next.id)
+    switch_to_first_visible_tab_in(tb, next.id)
   end
 
   defp switch_to_cycled_agent_workspace(tb, workspaces, :prev) do
@@ -846,14 +874,14 @@ defmodule MingaEditor.State.TabBar do
     len = length(workspaces)
     prev_idx = if idx == 0, do: len - 1, else: idx - 1
     prev = Enum.at(workspaces, prev_idx)
-    switch_to_first_tab_in(tb, prev.id)
+    switch_to_first_visible_tab_in(tb, prev.id)
   end
 
-  # Switches active_id to the first tab in the given workspace.
-  # Returns unchanged if the workspace has no tabs.
-  @spec switch_to_first_tab_in(t(), non_neg_integer()) :: t()
-  defp switch_to_first_tab_in(tb, workspace_id) do
-    case tabs_in_workspace(tb, workspace_id) do
+  # Switches active_id to the first visible tab in the given workspace.
+  # Returns unchanged if the workspace has no visible tabs.
+  @spec switch_to_first_visible_tab_in(t(), non_neg_integer()) :: t()
+  defp switch_to_first_visible_tab_in(tb, workspace_id) do
+    case visible_workspace_tabs(tb, workspace_id) do
       [first | _] -> %{tb | active_id: first.id}
       [] -> tb
     end

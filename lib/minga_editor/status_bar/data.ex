@@ -433,14 +433,15 @@ defmodule MingaEditor.StatusBar.Data do
   end
 
   @spec model_name(String.t(), String.t() | nil) :: String.t()
-  defp model_name(panel_model, _session_model) when is_binary(panel_model) and panel_model != "",
-    do: panel_model
+  defp model_name(panel_model, _session_model)
+       when is_binary(panel_model) and panel_model not in ["", "unknown"],
+       do: panel_model
 
   defp model_name(_panel_model, session_model)
-       when is_binary(session_model) and session_model != "",
+       when is_binary(session_model) and session_model not in ["", "unknown"],
        do: session_model
 
-  defp model_name(_panel_model, _session_model), do: Minga.Config.get(:agent_model)
+  defp model_name(_panel_model, _session_model), do: "No model configured"
 
   @spec attach_modeline_segments(map(), Theme.t(), ModelineSegments.table()) ::
           buffer_data() | agent_data()
