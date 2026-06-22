@@ -19,6 +19,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   alias Minga.LSP.Supervisor, as: LspSupervisor
   alias Minga.LSP.SyncServer, as: LspSyncServer
 
+  alias MingaEditor.Agent.SemanticUI.Registry, as: SemanticUIRegistry
   alias MingaEditor.AsyncAction
   alias MingaEditor.BottomPanel
   alias MingaEditor.Commands
@@ -1815,13 +1816,24 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   defp find_float_popup_window_id(_state), do: nil
 
-  @spec route_panel_action_to_extension(state(), String.t(), atom(), map()) :: state()
+  @spec route_panel_action_to_extension(state(), String.t(), atom() | String.t(), map()) ::
+          state()
   defp route_panel_action_to_extension(state, ext_name, action_name, context) do
+    case SemanticUIRegistry.dispatch_panel_action(state, ext_name, action_name, context) do
+      {:ok, state} -> state
+      :error -> route_legacy_panel_action_to_extension(state, ext_name, action_name, context)
+    end
+  end
+
+  @spec route_legacy_panel_action_to_extension(state(), String.t(), atom() | String.t(), map()) ::
+          state()
+  defp route_legacy_panel_action_to_extension(state, ext_name, action_name, context) do
     ext_atom = String.to_existing_atom(ext_name)
+    action_atom = legacy_panel_action_name(action_name)
 
     case Minga.Extension.Registry.get(Minga.Extension.Registry, ext_atom) do
       {:ok, %{pid: pid}} when is_pid(pid) ->
-        send(pid, {:panel_action, action_name, context})
+        send(pid, {:panel_action, action_atom, context})
         state
 
       _ ->
@@ -1831,7 +1843,13 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     ArgumentError -> extension_panel_action_unavailable(state, ext_name, action_name)
   end
 
-  @spec extension_panel_action_unavailable(state(), String.t(), atom()) :: state()
+  @spec legacy_panel_action_name(atom() | String.t()) :: atom()
+  defp legacy_panel_action_name(action_name) when is_atom(action_name), do: action_name
+
+  defp legacy_panel_action_name(action_name) when is_binary(action_name),
+    do: String.to_existing_atom(action_name)
+
+  @spec extension_panel_action_unavailable(state(), String.t(), atom() | String.t()) :: state()
   defp extension_panel_action_unavailable(state, ext_name, action_name) do
     Minga.Log.warning(
       :editor,

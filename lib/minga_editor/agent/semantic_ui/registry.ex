@@ -200,6 +200,25 @@ defmodule MingaEditor.Agent.SemanticUI.Registry do
     end
   end
 
+  @doc "Dispatches a semantic extension-panel action by frontend source label."
+  @spec dispatch_panel_action(EditorState.t(), String.t(), atom() | String.t(), map()) ::
+          {:ok, EditorState.t()} | :error
+  @spec dispatch_panel_action(table(), EditorState.t(), String.t(), atom() | String.t(), map()) ::
+          {:ok, EditorState.t()} | :error
+  def dispatch_panel_action(state, ext_name, action_name, context \\ %{}) do
+    dispatch_panel_action(table_for(state), state, ext_name, action_name, context)
+  end
+
+  def dispatch_panel_action(table, state, ext_name, action_name, context)
+      when is_binary(ext_name) do
+    action_id = semantic_action_id(action_name)
+
+    case panel_action_entry(table, ext_name, action_id) do
+      %Entry{id: entry_id} -> {:ok, dispatch_action(table, state, entry_id, action_id, context)}
+      nil -> :error
+    end
+  end
+
   @impl true
   @spec init(keyword()) :: {:ok, state()}
   def init(opts) do
@@ -215,6 +234,7 @@ defmodule MingaEditor.Agent.SemanticUI.Registry do
         unregister_source(table, source)
       end)
 
+      seed_bundled_sources(table)
       seed_from_running_extensions(table)
     end
 
@@ -255,6 +275,20 @@ defmodule MingaEditor.Agent.SemanticUI.Registry do
   end
 
   def handle_info(_msg, table), do: {:noreply, table}
+
+  @spec seed_bundled_sources(table()) :: :ok
+  defp seed_bundled_sources(table) do
+    source = MingaEditor.Agent.SemanticUI.BundledStatusNote.source()
+
+    case do_register_many(
+           table,
+           source,
+           MingaEditor.Agent.SemanticUI.BundledStatusNote.entries()
+         ) do
+      :ok -> :ok
+      {:error, reason} -> log_manifest_entry_error(source, reason)
+    end
+  end
 
   @spec seed_from_running_extensions(table()) :: :ok
   defp seed_from_running_extensions(table) do
@@ -438,6 +472,40 @@ defmodule MingaEditor.Agent.SemanticUI.Registry do
       nil -> :error
     end
   end
+
+  @spec panel_action_entry(table(), String.t(), String.t()) :: Entry.t() | nil
+  defp panel_action_entry(table, ext_name, action_id) do
+    table
+    |> all()
+    |> Enum.find(&semantic_panel_action_entry?(&1, ext_name, action_id))
+  end
+
+  @spec semantic_panel_action_entry?(Entry.t(), String.t(), String.t()) :: boolean()
+  defp semantic_panel_action_entry?(
+         %Entry{surface: surface, actions: actions} = entry,
+         ext_name,
+         action_id
+       )
+       when surface in [:dashboard_section, :panel] do
+    semantic_panel_source?(entry, ext_name) and Enum.any?(actions, &(&1.id == action_id))
+  end
+
+  defp semantic_panel_action_entry?(%Entry{}, _ext_name, _action_id), do: false
+
+  @spec semantic_panel_source?(Entry.t(), String.t()) :: boolean()
+  defp semantic_panel_source?(
+         %Entry{source: source, payload: %ExtensionPanel.Panel{extension: extension}},
+         ext_name
+       ) do
+    extension == ext_name or source_label(source) == ext_name
+  end
+
+  defp semantic_panel_source?(%Entry{source: source}, ext_name),
+    do: source_label(source) == ext_name
+
+  @spec semantic_action_id(atom() | String.t()) :: String.t()
+  defp semantic_action_id(action_name) when is_atom(action_name), do: Atom.to_string(action_name)
+  defp semantic_action_id(action_name) when is_binary(action_name), do: action_name
 
   @spec dispatch_editor_action(EditorState.t(), map(), Action.editor_action()) :: EditorState.t()
   defp dispatch_editor_action(state, _context, nil), do: state

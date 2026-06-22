@@ -49,7 +49,8 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
              {101, :assistant, "old pinned"},
              {_, :system, "── pinned ──"},
              {_, :system, "── 2 earlier messages hidden ──"},
-             {103, :assistant, "visible"}
+             {103, :assistant, "visible"},
+             {_, :system, "Agent UI registry online"}
            ] = summaries
 
     refute {:user, "hidden"} in Enum.map(summaries, fn {_id, type, text} -> {type, text} end)
