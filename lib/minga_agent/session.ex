@@ -628,6 +628,13 @@ defmodule MingaAgent.Session do
   @dialyzer {:no_opaque, init: 1}
   @spec init(keyword()) :: {:ok, state()}
   def init(opts) do
+    Minga.Telemetry.span([:minga, :agent, :session_init], %{}, fn ->
+      do_init(opts)
+    end)
+  end
+
+  @spec do_init(keyword()) :: {:ok, state()}
+  defp do_init(opts) do
     provider_resolution = resolve_provider(opts)
     provider_module = provider_resolution.module
 
@@ -707,7 +714,7 @@ defmodule MingaAgent.Session do
       credentials_configured: true
     }
 
-    mark_interrupted_work(state)
+    maybe_mark_interrupted_work(state, Keyword.get(opts, :recover_interrupted_work?, true))
 
     EventLog.record(
       state.session_id,
@@ -2184,6 +2191,19 @@ defmodule MingaAgent.Session do
     Enum.each(state.subscribers, fn pid ->
       send(pid, {:agent_event, session_pid, event})
     end)
+  end
+
+  @spec maybe_mark_interrupted_work(state(), boolean()) :: :ok
+  defp maybe_mark_interrupted_work(_state, false), do: :ok
+
+  defp maybe_mark_interrupted_work(state, true) do
+    Minga.Telemetry.span(
+      [:minga, :agent, :mark_interrupted_work],
+      %{session_id: state.session_id},
+      fn ->
+        mark_interrupted_work(state)
+      end
+    )
   end
 
   @spec mark_interrupted_work(state()) :: :ok

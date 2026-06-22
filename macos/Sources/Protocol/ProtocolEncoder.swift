@@ -7,6 +7,7 @@
 
 import Darwin
 import Foundation
+import os
 
 /// Protocol for sending input events to the BEAM. The real implementation
 /// writes to stdout; tests can use a spy conformance to verify calls.
@@ -323,6 +324,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         writeU32(&buf, 1, codepoint)
         buf[5] = modifiers
         writeU32(&buf, 6, seq)
+        os_signpost(.event, log: inputLog, name: "InputSent", "seq=%{public}u codepoint=%{public}u modifiers=%{public}u", seq, codepoint, modifiers)
         writeFrame(buf)
     }
 

@@ -23,7 +23,9 @@ defmodule MingaEditor.UI.Picker.RemoteServerSource do
     local = %Item{id: :local, label: "Local", description: "Start on this machine"}
 
     remote =
-      ConnectionManager.connected_nodes()
+      Minga.Telemetry.span([:minga, :agent, :connected_remote_servers], %{}, fn ->
+        ConnectionManager.connected_nodes()
+      end)
       |> Enum.filter(fn {_name, _node, status} -> status == :connected end)
       |> Enum.map(fn {name, node, _status} ->
         %Item{id: {:remote, name}, label: name, description: Atom.to_string(node)}

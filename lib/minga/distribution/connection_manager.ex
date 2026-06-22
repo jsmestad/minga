@@ -13,6 +13,7 @@ defmodule Minga.Distribution.ConnectionManager do
 
   @type public_connection_status :: :connected | :disconnected
   @type connected_node :: {String.t(), node(), public_connection_status()}
+  @type connect_result :: boolean() | :ignored | {:error, term()}
   @type connect_fun :: (node() -> boolean() | :ignored)
   @type monitor_fun :: (node(), boolean() -> term())
   @type set_cookie_fun :: (node(), atom() -> term())
@@ -144,6 +145,10 @@ defmodule Minga.Distribution.ConnectionManager do
     {:noreply, connect_to_server(state, server_name)}
   end
 
+  def handle_info({:connect_result, server_name, node, result}, state) do
+    {:noreply, handle_connect_result(state, server_name, node, result)}
+  end
+
   def handle_info({:nodedown, node}, state) do
     {:noreply, handle_node_down(state, node, :nodedown)}
   end
@@ -247,27 +252,64 @@ defmodule Minga.Distribution.ConnectionManager do
   defp connect_to_server(%{servers: servers} = state, server_name) do
     case Map.fetch(servers, server_name) do
       {:ok, %{status: :connected}} -> state
-      {:ok, server} -> attempt_connect(state, server_name, mark_connecting(server))
+      {:ok, %{status: :connecting}} -> state
+      {:ok, server} -> start_connect_task(state, server_name, mark_connecting(server))
       :error -> state
     end
   end
 
-  @spec attempt_connect(state(), String.t(), server_state()) :: state()
-  defp attempt_connect(state, server_name, server) do
-    state = put_server(state, server_name, server)
-    state.set_cookie_fun.(server.node, server.cookie)
+  @spec start_connect_task(state(), String.t(), server_state()) :: state()
+  defp start_connect_task(state, server_name, server) do
+    manager = self()
+    connect_fun = state.connect_fun
+    set_cookie_fun = state.set_cookie_fun
+    node = server.node
+    cookie = server.cookie
 
-    case state.connect_fun.(server.node) do
-      true -> mark_connected(state, server_name, server)
-      false -> schedule_retry(state, server_name, server)
-      :ignored -> schedule_retry(state, server_name, server)
-    end
+    Task.start(fn ->
+      send(
+        manager,
+        {:connect_result, server_name, node,
+         run_connect(set_cookie_fun, connect_fun, node, cookie)}
+      )
+    end)
+
+    put_server(state, server_name, server)
+  end
+
+  @spec run_connect(set_cookie_fun(), connect_fun(), node(), atom()) :: connect_result()
+  defp run_connect(set_cookie_fun, connect_fun, node, cookie) do
+    set_cookie_fun.(node, cookie)
+    connect_fun.(node)
+  rescue
+    error -> {:error, error}
+  catch
+    :exit, reason -> {:error, {:exit, reason}}
+    :throw, value -> {:error, {:throw, value}}
   end
 
   @spec mark_connecting(server_state()) :: server_state()
   defp mark_connecting(server) do
     %{server | status: :connecting, retry_timer: nil}
   end
+
+  @spec handle_connect_result(state(), String.t(), node(), connect_result()) :: state()
+  defp handle_connect_result(%{servers: servers} = state, server_name, node, result) do
+    case Map.fetch(servers, server_name) do
+      {:ok, %{node: ^node, status: :connecting} = server} ->
+        finish_connect_attempt(state, server_name, server, result)
+
+      _ ->
+        state
+    end
+  end
+
+  @spec finish_connect_attempt(state(), String.t(), server_state(), connect_result()) :: state()
+  defp finish_connect_attempt(state, server_name, server, true),
+    do: mark_connected(state, server_name, server)
+
+  defp finish_connect_attempt(state, server_name, server, _result),
+    do: schedule_retry(state, server_name, server)
 
   @spec mark_connected(state(), String.t(), server_state()) :: state()
   defp mark_connected(state, server_name, server) do
@@ -345,6 +387,9 @@ defmodule Minga.Distribution.ConnectionManager do
         state
 
       {:ok, %{status: :disconnected} = server} ->
+        schedule_retry(state, server_name, server)
+
+      {:ok, %{status: :connecting} = server} ->
         schedule_retry(state, server_name, server)
 
       {:ok, server} ->

@@ -53,10 +53,10 @@ defmodule Minga.Distribution.ConnectionManagerTest do
     {:ok, pid} = start_connection_manager(servers, registry)
 
     send(pid, :connect_all)
-    :sys.get_state(pid)
 
     assert_receive {:minga_event, :node_connected,
-                    %NodeConnectedEvent{server_name: "local", node: connected_node}}
+                    %NodeConnectedEvent{server_name: "local", node: connected_node}},
+                   1_000
 
     assert connected_node == node
   end
@@ -72,8 +72,7 @@ defmodule Minga.Distribution.ConnectionManagerTest do
     {:ok, pid} = start_connection_manager(servers, registry)
 
     send(pid, :connect_all)
-    :sys.get_state(pid)
-    assert_receive {:minga_event, :node_connected, %NodeConnectedEvent{}}
+    assert_receive {:minga_event, :node_connected, %NodeConnectedEvent{}}, 1_000
 
     send(pid, {:nodedown, node, :test_down})
     :sys.get_state(pid)
@@ -95,6 +94,36 @@ defmodule Minga.Distribution.ConnectionManagerTest do
 
     assert retry_timer(pid, "local") == first_timer
     refute_receive {:minga_event, :node_disconnected, %NodeDisconnectedEvent{}}, 50
+  end
+
+  test "status reads do not wait for an in-flight connect attempt" do
+    test_pid = self()
+    node = :"slow@127.0.0.1"
+    servers = [%{name: "slow", node: node, cookie: :abcdefghijklmnopqrstuvwxyz123456}]
+
+    {:ok, pid} =
+      start_supervised(
+        {ConnectionManager,
+         name: nil,
+         servers: servers,
+         connect_on_init: false,
+         connect_fun: fn _node ->
+           send(test_pid, {:connect_started, self()})
+
+           receive do
+             :finish_connect -> false
+           after
+             5_000 -> false
+           end
+         end,
+         monitor_fun: fn _node, _flag -> true end,
+         set_cookie_fun: fn _node, _cookie -> true end}
+      )
+
+    send(pid, :connect_all)
+    assert_receive {:connect_started, connect_pid}, 1_000
+    assert GenServer.call(pid, :connected_nodes) == [{"slow", node, :disconnected}]
+    send(connect_pid, :finish_connect)
   end
 
   @spec start_connection_manager([Config.server_entry()], Minga.Events.registry()) :: {:ok, pid()}
