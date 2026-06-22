@@ -128,7 +128,7 @@ When `visible == 0`, the frontend should hide the Observatory and clear selected
 
 ### 0x93 — gui_file_tree
 
-The native file tree receives the same semantic row model that the TUI renderer uses. The BEAM remains the source of truth for row identity, depth, selected/focused state, expansion state, git status, diagnostics, guide columns, icons, labels, and inline editing state. Swift should render this state directly and send user actions back through the existing file-tree action opcodes.
+The native file tree receives the same semantic row model that the TUI renderer uses. The BEAM remains the source of truth for row identity, depth, expansion state, git status, diagnostics, guide columns, icons, labels, focus context, inline editing state, and committed file actions. Semantic frontends are not dumb terminals: they may own zero-latency local interaction state, such as transient row selection while the user navigates the already committed row model. On activation, toggle, rename, delete, drag/drop, or another committed intent, the frontend sends a semantic action with stable row identity and the BEAM validates it against the current model.
 
 Legacy note: early GUI prototypes used the low 0x70 chrome range and inferred hidden state from an empty entry list. New frontends must ignore that sentinel behavior. `0x93` v2 is the canonical file-tree protocol, and `tree_state` is the only source of truth for hidden, loading, empty, ready, and error states.
 
@@ -182,7 +182,7 @@ When `tree_state == 4`, `error_reason` contains a short user-displayable reason.
 
 ### 0x94 — gui_file_tree_selection
 
-Selection and focus changes are common while navigating large trees. The BEAM sends this small update when the row model itself has not changed, so the native sidebar can update selection without receiving or decoding the full tree payload again.
+Selection and focus changes can still originate from the BEAM, for example after focus restoration, reveal-active-file, stale-row resync, or compatibility paths that still route navigation through the editor. The BEAM sends this small update when the row model itself has not changed, so the native sidebar can update selection without receiving or decoding the full tree payload again. This opcode is not a requirement that every transient navigation step round-trip through the BEAM.
 
 ```
 opcode(1) + payload_len(2) + payload(payload_len)

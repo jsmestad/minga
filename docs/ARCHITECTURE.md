@@ -391,6 +391,10 @@ A frame is atomic on the wire. The Emit stage brackets every frame's semantic an
 
 **The ephemeral-layer carve-out.** The transaction model says the BEAM owns structure, not pixels. A documented client-local ephemeral layer states what a frontend may render *between* commits without a round-trip: cursor blink, spinners, smooth scroll, local scrollback. The line is hit-testing: anything the BEAM hit-tests against (any placed surface) must come through a frame transaction, because input correctness depends on the BEAM and the frontend agreeing on geometry. Purely visual, non-interactive motion may live in the frontend. This is an accepted, bounded impurity, not a general escape hatch.
 
+**Frontend-local interaction state.** Semantic frontends are not dumb terminals. The BEAM owns the authoritative semantic model, durable editor state, placement, stacking, containment, and validation of committed actions. Frontends own zero-latency local interaction state when it can be resolved from the last committed semantic model and has no durable effect until activation. This is not about event frequency. It is about whether the interaction should feel instant without waiting for a BEAM render transaction.
+
+File tree is the canonical example. The BEAM sends stable row IDs, paths, labels, icons, expansion state, git state, diagnostics, focus context, and inline editing state. The frontend may own transient row selection while the user navigates the already committed row model. On activation, toggle, rename, delete, drag/drop, or another committed intent, the frontend sends a semantic action with stable row identity. The BEAM validates the action against its current model and may resync if the row is stale.
+
 ---
 
 ## Surface Placement Authority
@@ -407,7 +411,7 @@ This is the design of record (recorded on epic #2330) for all surface input:
 
 > **Clients resolve clicks on content they render and send semantic intents (`gui_actions`); the BEAM owns placement, stacking, and containment for registry-placed surfaces.**
 
-A frontend hit-tests its own rendered content and emits an intent ("completion item 3 selected", "notification N dismissed"), exactly the contract SwiftUI already uses (native hit-test → `gui_action`). One pipeline, one way of doing things, on every client. The BEAM does not re-derive what a click means on rendered content. It owns structure: which rect a surface occupies, which surface wins when rects overlap (stacking depends on editor state only the BEAM has), and containment, so a click that misses every interactive element of a placed surface is swallowed (`MingaEditor.Input.OverlaySink`) instead of falling through to the buffer underneath.
+A frontend hit-tests its own rendered content and emits an intent ("completion item 3 selected", "notification N dismissed"), exactly the contract SwiftUI already uses (native hit-test to `gui_action`). One pipeline, one way of doing things, on every client. The BEAM does not re-derive what a click means on rendered content. It owns structure: which rect a surface occupies, which surface wins when rects overlap (stacking depends on editor state only the BEAM has), and containment, so a click that misses every interactive element of a placed surface is swallowed (`MingaEditor.Input.OverlaySink`) instead of falling through to the buffer underneath.
 
 Worked examples. Completion menu, notifications (dismiss and action), observatory rows, edit-timeline entries, and the float popup are all client-resolved on both frontends: the Go TUI tracks click zones (`completion:item:`, `notification:action:`, `observatory:node:`, `timeline:entry:`) and emits the matching `gui_action`, mirroring SwiftUI's native hit-testing. **The picker is the one documented exception:** it predates this rule and stays BEAM-resolved as shipped, to be aligned only if it ever needs rework.
 
