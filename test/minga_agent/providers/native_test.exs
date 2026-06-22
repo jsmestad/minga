@@ -1,6 +1,8 @@
 defmodule MingaAgent.Providers.NativeTest do
   use ExUnit.Case, async: true
 
+  import ExUnit.CaptureLog
+
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.ProjectView
@@ -1293,7 +1295,10 @@ defmodule MingaAgent.Providers.NativeTest do
 
       error = Enum.find(events, &match?(%Event.Error{}, &1))
       assert error != nil
-      assert error.message =~ "API rate limited"
+      assert %Event.Error{kind: :rate_limited, provider: "anthropic"} = error
+
+      assert error.message ==
+               "The model provider is rate limiting requests. Wait a moment, then try again."
 
       agent_end = Enum.find(events, &match?(%Event.AgentEnd{}, &1))
       assert agent_end != nil
@@ -1309,8 +1314,12 @@ defmodule MingaAgent.Providers.NativeTest do
 
       assert :ok = Native.send_prompt(pid, "Hello")
 
-      assert_receive {:agent_provider_event, %Event.Error{message: msg}}, 1_000
-      assert msg =~ "boom once"
+      assert_receive {:agent_provider_event, %Event.Error{message: msg, kind: :provider_error}},
+                     1_000
+
+      assert msg ==
+               "The model provider returned an unexpected error. Open Messages for details, or pick another configured model with /model."
+
       assert_receive {:agent_provider_event, %Event.AgentEnd{}}, 1_000
 
       refute_receive {:agent_provider_event, %Event.Error{}}, 200
@@ -1940,6 +1949,103 @@ defmodule MingaAgent.Providers.NativeTest do
   end
 
   # ── Model format validation ──────────────────────────────────────────────────
+
+  describe "provider error formatting" do
+    test "missing API key provider build errors are human-readable and log raw detail", %{
+      tmp_dir: tmp_dir
+    } do
+      reason =
+        {:http_streaming_failed,
+         {:provider_build_failed,
+          %{reason: "Failed to build Anthropic stream request: api_key=sk-testsecret123"}}}
+
+      {:ok, pid} =
+        start_provider(
+          model: "anthropic:claude-sonnet-4-20250514",
+          llm_client: fake_error_client(reason),
+          tmp_dir: tmp_dir,
+          max_retries: 0
+        )
+
+      log =
+        capture_log(fn ->
+          Native.send_prompt(pid, "hello")
+          events = collect_events(2_000)
+
+          error = Enum.find(events, &match?(%Event.Error{}, &1))
+
+          assert %Event.Error{message: message, kind: :auth_failed, provider: "anthropic"} =
+                   error
+
+          assert message ==
+                   "Couldn't authenticate with Anthropic. Run /auth anthropic <key> or pick another configured model with /model."
+
+          refute message =~ "ReqLLM"
+          refute message =~ "Splode"
+          refute message =~ "bread_crumbs"
+        end)
+
+      assert log =~ "agent loop detail:"
+      assert log =~ "[REDACTED]"
+      refute log =~ "sk-testsecret123"
+    end
+
+    test "openai codex auth failures suggest /login instead of /auth openai_codex", %{
+      tmp_dir: tmp_dir
+    } do
+      {:ok, pid} =
+        start_provider(
+          model: "openai_codex:gpt-5.5",
+          llm_client: fake_error_client("Unauthorized"),
+          tmp_dir: tmp_dir,
+          max_retries: 0
+        )
+
+      Native.send_prompt(pid, "hello")
+      events = collect_events(2_000)
+
+      error = Enum.find(events, &match?(%Event.Error{}, &1))
+
+      assert %Event.Error{message: message, kind: :auth_failed, provider: "openai_codex"} =
+               error
+
+      assert message =~ "/login"
+      refute message =~ "/auth openai_codex"
+    end
+
+    test "string-only provider errors classify auth, rate limit, and network failures", %{
+      tmp_dir: tmp_dir
+    } do
+      cases = [
+        {"Unauthorized", :auth_failed},
+        {"invalid_api_key", :auth_failed},
+        {"401", :auth_failed},
+        {"403", :auth_failed},
+        {"API rate limited", :rate_limited},
+        {"rate limit", :rate_limited},
+        {"429", :rate_limited},
+        {"timeout", :unreachable},
+        {"nxdomain", :unreachable},
+        {"econnrefused", :unreachable}
+      ]
+
+      Enum.each(cases, fn {reason, kind} ->
+        {:ok, pid} =
+          start_provider(
+            model: "anthropic:claude-sonnet-4-20250514",
+            llm_client: fake_error_client(reason),
+            tmp_dir: tmp_dir,
+            max_retries: 0
+          )
+
+        Native.send_prompt(pid, "hello")
+        events = collect_events(2_000)
+
+        error = Enum.find(events, &match?(%Event.Error{}, &1))
+        assert %Event.Error{kind: ^kind} = error
+      end)
+    end
+  end
 
   describe "model format validation" do
     test "bare model name without provider prefix returns :invalid_format error", %{

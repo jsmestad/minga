@@ -1721,16 +1721,24 @@ defmodule MingaAgent.Session do
     state
   end
 
-  defp handle_provider_event(%Event.Error{message: message}, state) do
+  defp handle_provider_event(%Event.Error{} = event, state) do
     # Show one human-readable line in the transcript. The raw error is already
     # logged to the Messages panel by the provider, so we don't repeat it here.
-    friendly = humanize_error(message)
+    friendly = humanize_error(event, state)
     notify(state, :error, friendly)
     state = set_error_status(state)
     state = %{state | error_message: friendly}
-    state = append_system_message(state, friendly, :error)
+    state = append_error_message_once(state, friendly)
     broadcast(state, {:error, friendly})
     state
+  end
+
+  @spec append_error_message_once(state(), String.t()) :: state()
+  defp append_error_message_once(%{messages: messages} = state, message) do
+    case List.last(messages) do
+      {:system, ^message, :error} -> state
+      _other -> append_system_message(state, message, :error)
+    end
   end
 
   @spec request_tool_approval(Event.ToolApproval.t(), state()) :: state()
@@ -2940,35 +2948,70 @@ defmodule MingaAgent.Session do
     """
   end
 
-  # Turns a raw provider error (the ugly ReqLLM struct dump) into one human
-  # line for the transcript. The full detail is still logged to the Messages
-  # panel by the provider. Already human-readable messages (MCP notices, hook
-  # vetoes, turn/cost limits) are passed through unchanged.
-  @spec humanize_error(String.t()) :: String.t()
-  defp humanize_error(message) when is_binary(message) do
-    humanize_error_kind(classify_error(message), message)
+  # Turns provider errors into one human line for the transcript. New provider
+  # paths pass structured `Event.Error.kind` and `provider` fields, so the
+  # session does not infer meaning from text. The string classifier below is
+  # only a compatibility fallback for external providers or old persisted events
+  # that still send `kind: :unknown`.
+  @spec humanize_error(Event.Error.t(), state()) :: String.t()
+  defp humanize_error(%Event.Error{kind: :unknown, message: message, provider: provider}, state) do
+    humanize_legacy_error(message, provider || provider_slug(state))
   end
 
-  defp humanize_error(message), do: humanize_error(inspect(message))
+  defp humanize_error(%Event.Error{kind: kind, message: message, provider: provider}, state) do
+    humanize_error_kind(kind, message, provider || provider_slug(state))
+  end
 
-  @type error_kind ::
-          :rejected_key | :rate_limited | :auth_failed | :unreachable | :raw_dump | :passthrough
+  @spec humanize_error_kind(Event.Error.kind(), String.t(), String.t()) :: String.t()
+  defp humanize_error_kind(:auth_failed, _message, provider),
+    do: "Couldn't authenticate with #{provider_label(provider)}. #{auth_hint(provider)}"
 
-  @spec classify_error(String.t()) :: error_kind()
-  defp classify_error(message) do
-    classify_error_checks([
-      {:rejected_key,
-       String.match?(message, ~r/\b401\b/) or
-         String.contains?(message, ["unauthorized", "Unauthorized", "invalid_api_key"])},
+  defp humanize_error_kind(:rate_limited, _message, _provider),
+    do: "The model provider is rate limiting requests. Wait a moment, then try again."
+
+  defp humanize_error_kind(:unreachable, _message, _provider),
+    do: "Couldn't reach the model provider. Check your network connection, then try again."
+
+  defp humanize_error_kind(:invalid_model, message, _provider), do: message
+
+  defp humanize_error_kind(:provider_error, _message, _provider) do
+    "The model provider returned an unexpected error. Open Messages for details, or pick another configured model with /model."
+  end
+
+  defp humanize_error_kind(:tool_error, message, _provider), do: message
+
+  defp humanize_error_kind(:internal_error, _message, _provider) do
+    "The model provider returned an unexpected error. Open Messages for details, or pick another configured model with /model."
+  end
+
+  @type legacy_error_kind ::
+          :auth_failed | :rate_limited | :unreachable | :raw_dump | :passthrough
+
+  @spec humanize_legacy_error(String.t(), String.t()) :: String.t()
+  defp humanize_legacy_error(message, provider) when is_binary(message) do
+    humanize_legacy_error_kind(classify_legacy_error(message), message, provider)
+  end
+
+  defp humanize_legacy_error(message, provider),
+    do: humanize_legacy_error(inspect(message), provider)
+
+  @spec classify_legacy_error(String.t()) :: legacy_error_kind()
+  defp classify_legacy_error(message) do
+    classify_legacy_error_checks([
+      {:auth_failed,
+       String.match?(message, ~r/\b(401|403)\b/) or
+         String.contains?(message, [
+           "unauthorized",
+           "Unauthorized",
+           "invalid_api_key",
+           "api_key",
+           "API_KEY",
+           "provider_build_failed",
+           "Failed to build",
+           "Couldn't authenticate"
+         ])},
       {:rate_limited,
        String.match?(message, ~r/\b429\b/) or String.contains?(message, "rate limit")},
-      {:auth_failed,
-       String.contains?(message, [
-         "api_key",
-         "API_KEY",
-         "provider_build_failed",
-         "Failed to build"
-       ])},
       {:unreachable,
        String.contains?(message, [
          "http_streaming_failed",
@@ -2980,30 +3023,66 @@ defmodule MingaAgent.Session do
     ])
   end
 
-  @spec classify_error_checks([{error_kind(), boolean()}]) :: error_kind()
-  defp classify_error_checks([{kind, true} | _rest]), do: kind
-  defp classify_error_checks([{_kind, false} | rest]), do: classify_error_checks(rest)
-  defp classify_error_checks([]), do: :passthrough
+  @spec classify_legacy_error_checks([{legacy_error_kind(), boolean()}]) :: legacy_error_kind()
+  defp classify_legacy_error_checks([{kind, true} | _rest]), do: kind
 
-  @spec humanize_error_kind(error_kind(), String.t()) :: String.t()
-  defp humanize_error_kind(:rejected_key, _message),
+  defp classify_legacy_error_checks([{_kind, false} | rest]),
+    do: classify_legacy_error_checks(rest)
+
+  defp classify_legacy_error_checks([]), do: :passthrough
+
+  @spec humanize_legacy_error_kind(legacy_error_kind(), String.t(), String.t()) :: String.t()
+  defp humanize_legacy_error_kind(:auth_failed, _message, provider),
+    do: "Couldn't authenticate with #{provider_label(provider)}. #{auth_hint(provider)}"
+
+  defp humanize_legacy_error_kind(:rate_limited, _message, _provider),
+    do: "The model provider is rate limiting requests. Wait a moment, then try again."
+
+  defp humanize_legacy_error_kind(:unreachable, _message, _provider),
+    do: "Couldn't reach the model provider. Check your network connection, then try again."
+
+  defp humanize_legacy_error_kind(:raw_dump, _message, _provider),
     do:
-      "The provider rejected your API key. Update it with /auth <provider> <key>, then try again."
+      "The model provider returned an unexpected error. Open Messages for details, or pick another configured model with /model."
 
-  defp humanize_error_kind(:rate_limited, _message),
-    do: "Rate limited by the provider. Wait a moment and try again."
+  defp humanize_legacy_error_kind(:passthrough, message, _provider), do: message
 
-  defp humanize_error_kind(:auth_failed, _message),
-    do:
-      "Couldn't authenticate with the model provider. Check your API key with /auth, then try again."
+  @spec provider_slug(state()) :: String.t()
+  defp provider_slug(%{provider_name: provider_name})
+       when is_binary(provider_name) and provider_name != "" do
+    provider_name
+  end
 
-  defp humanize_error_kind(:unreachable, _message),
-    do: "Couldn't reach the model provider. Check your network connection and try again."
+  defp provider_slug(%{model_name: model_name}) when is_binary(model_name) do
+    case String.split(model_name, ":", parts: 2) do
+      [provider | _rest] when provider != "" -> provider
+      _other -> "provider"
+    end
+  end
 
-  defp humanize_error_kind(:raw_dump, _message),
-    do: "Something went wrong talking to the model provider. Open the Messages panel for details."
+  defp provider_slug(_state), do: "provider"
 
-  defp humanize_error_kind(:passthrough, message), do: message
+  @spec provider_label(String.t()) :: String.t()
+  defp provider_label("provider"), do: "the model provider"
+  defp provider_label("openai_codex"), do: "OpenAI Codex"
+
+  defp provider_label(provider) do
+    provider
+    |> String.replace("_", " ")
+    |> String.split(" ", trim: true)
+    |> Enum.map_join(" ", &String.capitalize/1)
+  end
+
+  @spec auth_hint(String.t()) :: String.t()
+  defp auth_hint("openai_codex") do
+    "Sign in with /login for Codex models, or pick another configured model with /model."
+  end
+
+  defp auth_hint("provider"),
+    do: "Run /auth to check credentials, or pick another configured model with /model."
+
+  defp auth_hint(provider),
+    do: "Run /auth #{provider} <key> or pick another configured model with /model."
 
   # Detects an inspected Elixir struct/exception leaking into the message, so
   # we never show a raw `%ReqLLM.Error{...}`-style dump in the transcript.

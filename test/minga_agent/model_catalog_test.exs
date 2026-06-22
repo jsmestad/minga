@@ -29,6 +29,67 @@ defmodule MingaAgent.ModelCatalogTest do
       end
     end
 
+    test "model IDs are unique after catalog alias normalization" do
+      ids = ModelCatalog.available_models() |> Enum.map(& &1["id"])
+
+      assert ids == Enum.uniq(ids)
+    end
+
+    test "canonical codex aliases dedupe, filter, and sort deterministically" do
+      current_model = "openai_codex:openai/gpt-5.1-codex-max"
+      configured_providers = MapSet.new([:openai])
+
+      models = [
+        codex_model("gpt-5.3-codex", "GPT-5.3 Codex"),
+        codex_model("openai/gpt-5.3-codex", "OpenAI: GPT-5.3 Codex"),
+        codex_model("gpt-5.3-codex-xhigh", "GPT-5.3 Codex XHigh"),
+        codex_model("gpt-5.2-codex", "GPT-5.2 Codex"),
+        codex_model("gpt-5.1-codex-max", "GPT-5.1 Codex Max"),
+        codex_model("openai-gpt-5.1-codex-max", "OpenAI: GPT-5.1 Codex Max"),
+        codex_model("gpt-5.1-codex", "GPT-5.1 Codex"),
+        codex_model("codex-mini", "Codex Mini")
+      ]
+
+      normalized =
+        ModelCatalog.available_models_from(models, current_model, configured_providers, true)
+
+      assert Enum.map(normalized, & &1["id"]) == [
+               "openai_codex:gpt-5.1-codex-max",
+               "openai_codex:gpt-5.3-codex",
+               "openai_codex:gpt-5.2-codex",
+               "openai_codex:gpt-5.1-codex",
+               "openai_codex:codex-mini"
+             ]
+
+      assert Enum.all?(normalized, &(&1["provider"] == "openai_codex"))
+      refute Enum.any?(normalized, &String.contains?(&1["id"], "xhigh"))
+      assert hd(normalized)["current"]
+    end
+
+    test "codex models stay hidden without oauth even when openai is configured" do
+      models = [
+        codex_model("gpt-5.3-codex", "GPT-5.3 Codex"),
+        codex_model("gpt-5.1-codex-max", "GPT-5.1 Codex Max")
+      ]
+
+      normalized =
+        ModelCatalog.available_models_from(models, "", MapSet.new([:openai]), false)
+
+      assert normalized == []
+    end
+
+    test "current model sorts first when present" do
+      models = ModelCatalog.available_models()
+
+      if models != [] do
+        current_id = List.last(models)["id"]
+        [current | _rest] = ModelCatalog.available_models(current_id)
+
+        assert current["id"] == current_id
+        assert current["current"]
+      end
+    end
+
     test "excludes deprecated and retired models" do
       models = ModelCatalog.available_models()
 
@@ -77,5 +138,18 @@ defmodule MingaAgent.ModelCatalogTest do
         assert provider in ["anthropic", "openai", "google"]
       end
     end
+  end
+
+  defp codex_model(id, name) do
+    %{
+      id: id,
+      name: name,
+      provider: :openai,
+      deprecated: false,
+      retired: false,
+      modalities: %{output: [:text]},
+      limits: %{context: 400_000},
+      cost: %{input: 1.75, output: 14}
+    }
   end
 end

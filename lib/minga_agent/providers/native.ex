@@ -1563,7 +1563,7 @@ defmodule MingaAgent.Providers.Native do
   defp do_agent_loop(lctx, context) do
     case ReqLLMAdapter.validate_model(lctx.model) do
       :ok -> do_agent_loop_validated(lctx, context)
-      {:error, message, reason} -> reported_error(lctx.provider_pid, message, reason)
+      {:error, message, reason} -> reported_error(lctx.provider_pid, message, reason, lctx.model)
     end
   end
 
@@ -1611,16 +1611,16 @@ defmodule MingaAgent.Providers.Native do
         process_and_continue(lctx, context, stream_response)
 
       {:error, reason} ->
-        reported_error(lctx.provider_pid, format_error(reason), reason)
+        reported_error(lctx.provider_pid, format_error(reason), reason, lctx.model)
     end
   rescue
     e ->
-      reported_error(lctx.provider_pid, Exception.message(e), e)
+      reported_error(lctx.provider_pid, Exception.message(e), e, lctx.model)
   catch
     # HTTP client or session process may die mid-stream. Targeted catch
     # per AGENTS.md rule 4.
     :exit, reason ->
-      reported_error(lctx.provider_pid, inspect(reason), reason)
+      reported_error(lctx.provider_pid, inspect(reason), reason, lctx.model)
   end
 
   # Processes a stream response and decides whether to continue (tool calls) or finish.
@@ -1685,7 +1685,7 @@ defmodule MingaAgent.Providers.Native do
 
       {:error, :stream_interrupted}
     else
-      reported_error(lctx.provider_pid, format_error(reason), reason)
+      reported_error(lctx.provider_pid, format_error(reason), reason, lctx.model)
     end
   end
 
@@ -3173,23 +3173,122 @@ defmodule MingaAgent.Providers.Native do
 
   defdelegate strip_provider_prefix(model), to: MingaAgent.Config
 
-  @spec emit_error_and_end(pid(), String.t()) :: :ok
-  defp emit_error_and_end(provider_pid, message) do
-    send(provider_pid, {:agent_event, %Event.Error{message: message}})
+  @spec emit_error_and_end(pid(), Event.Error.t()) :: :ok
+  defp emit_error_and_end(provider_pid, %Event.Error{} = event) do
+    send(provider_pid, {:agent_event, event})
     send(provider_pid, {:agent_event, %Event.AgentEnd{usage: nil}})
     :ok
   end
 
-  # Reports an error that occurred inside the agent loop: logs the raw detail
-  # for the Messages panel, emits Error + AgentEnd to the UI, and returns a
-  # `{:reported, reason}` sentinel. The Task-completion handler matches that
-  # sentinel and skips re-emitting, so a single failure surfaces exactly once
-  # in the transcript instead of twice.
-  @spec reported_error(pid(), String.t(), term()) :: {:error, {:reported, term()}}
-  defp reported_error(provider_pid, message, reason) do
-    Minga.Log.error(:agent, "[Agent.Native] agent loop error: #{message}")
-    emit_error_and_end(provider_pid, message)
+  # Reports an error that occurred inside the agent loop: logs a redacted
+  # diagnostic detail for Messages/logs, emits a friendly Error + AgentEnd to
+  # the UI, and returns a `{:reported, reason}` sentinel. The Task-completion
+  # handler matches that sentinel and skips re-emitting, so a single failure
+  # surfaces exactly once in the transcript instead of twice.
+  @spec reported_error(pid(), String.t(), term(), String.t()) :: {:error, {:reported, term()}}
+  defp reported_error(provider_pid, message, reason, model) do
+    event = error_event(message, reason, model)
+    detail = Redaction.format_error(reason)
+
+    Minga.Log.error(:agent, "[Agent.Native] agent loop detail: #{detail}")
+    Minga.Log.error(:agent, "[Agent.Native] agent loop error: #{event.message}")
+    emit_error_and_end(provider_pid, event)
     {:error, {:reported, reason}}
+  end
+
+  @spec error_event(String.t(), term(), String.t()) :: Event.Error.t()
+  defp error_event(message, reason, model) do
+    kind = classify_error_reason(reason)
+    provider = provider_slug_from_model(model)
+
+    %Event.Error{
+      message: error_event_message(kind, message, provider),
+      kind: kind,
+      provider: provider
+    }
+  end
+
+  @spec error_event_message(Event.Error.kind(), String.t(), String.t() | nil) :: String.t()
+  defp error_event_message(:auth_failed, _message, provider) do
+    provider = provider || "provider"
+    "Couldn't authenticate with #{provider_label(provider)}. #{auth_hint_for_provider(provider)}"
+  end
+
+  defp error_event_message(:rate_limited, _message, _provider) do
+    "The model provider is rate limiting requests. Wait a moment, then try again."
+  end
+
+  defp error_event_message(:unreachable, _message, _provider) do
+    "Couldn't reach the model provider. Check your network connection, then try again."
+  end
+
+  defp error_event_message(:provider_error, _message, _provider) do
+    "The model provider returned an unexpected error. Open Messages for details, or pick another configured model with /model."
+  end
+
+  defp error_event_message(:invalid_model, message, _provider), do: message
+
+  @spec classify_error_reason(term()) :: Event.Error.kind()
+  defp classify_error_reason(:invalid_format), do: :invalid_model
+  defp classify_error_reason({:http_streaming_failed, reason}), do: classify_error_reason(reason)
+  defp classify_error_reason({:provider_build_failed, _reason}), do: :auth_failed
+  defp classify_error_reason({:exit, reason}), do: classify_error_reason(reason)
+  defp classify_error_reason({:throw, reason}), do: classify_error_reason(reason)
+  defp classify_error_reason(%{status: status}) when status in [401, 403], do: :auth_failed
+  defp classify_error_reason(%{status: 429}), do: :rate_limited
+  defp classify_error_reason(%{"status" => status}) when status in [401, 403], do: :auth_failed
+  defp classify_error_reason(%{"status" => 429}), do: :rate_limited
+  defp classify_error_reason(%{reason: reason}), do: classify_error_reason(reason)
+  defp classify_error_reason(%{"reason" => reason}), do: classify_error_reason(reason)
+
+  defp classify_error_reason(reason) when reason in [:timeout, :nxdomain, :econnrefused],
+    do: :unreachable
+
+  defp classify_error_reason(reason) when is_binary(reason),
+    do: classify_legacy_error_message(reason)
+
+  defp classify_error_reason(_reason), do: :provider_error
+
+  # Last-resort compatibility for third-party clients that only return a string.
+  # Internal provider/session contracts use `Event.Error.kind` instead.
+  @spec classify_legacy_error_message(String.t()) :: Event.Error.kind()
+  defp classify_legacy_error_message(message) do
+    normalized = String.downcase(message)
+
+    classify_legacy_error_checks([
+      {:auth_failed,
+       String.match?(normalized, ~r/\b(401|403)\b/) or
+         String.contains?(normalized, [
+           "unauthorized",
+           "invalid_api_key",
+           "api key",
+           "api_key",
+           "provider_build_failed",
+           "failed to build",
+           "couldn't authenticate"
+         ])},
+      {:rate_limited,
+       String.match?(normalized, ~r/\b429\b/) or
+         String.contains?(normalized, ["api rate limited", "rate limited", "rate limit"])},
+      {:unreachable,
+       String.contains?(normalized, ["timeout", "timed out", "nxdomain", "econnrefused"])}
+    ])
+  end
+
+  @spec classify_legacy_error_checks([{Event.Error.kind(), boolean()}]) :: Event.Error.kind()
+  defp classify_legacy_error_checks([{kind, true} | _rest]), do: kind
+
+  defp classify_legacy_error_checks([{_kind, false} | rest]),
+    do: classify_legacy_error_checks(rest)
+
+  defp classify_legacy_error_checks([]), do: :provider_error
+
+  @spec provider_slug_from_model(String.t()) :: String.t() | nil
+  defp provider_slug_from_model(model) when is_binary(model) do
+    case String.split(model, ":", parts: 2) do
+      [provider, _model_id] when provider != "" -> provider
+      _other -> nil
+    end
   end
 
   @spec normalize_usage(map() | nil, String.t()) :: Event.token_usage() | nil
@@ -3228,16 +3327,108 @@ defmodule MingaAgent.Providers.Native do
   defp format_tool_result(result), do: inspect(result)
 
   @spec format_error(term()) :: String.t()
-  defp format_error(reason) when is_binary(reason), do: Redaction.format_error(reason)
-  defp format_error(%{message: msg}) when is_binary(msg), do: Redaction.format_error(msg)
-  defp format_error(%{"message" => msg}) when is_binary(msg), do: Redaction.format_error(msg)
+  defp format_error({:http_streaming_failed, reason}), do: format_error(reason)
+  defp format_error({:provider_build_failed, reason}), do: format_error(reason)
+  defp format_error({:exit, reason}), do: format_error(reason)
+  defp format_error({:throw, reason}), do: format_error(reason)
+  defp format_error(reason) when is_binary(reason), do: humanize_provider_error(reason)
+  defp format_error(%{reason: reason}) when is_binary(reason), do: humanize_provider_error(reason)
+
+  defp format_error(%{"reason" => reason}) when is_binary(reason),
+    do: humanize_provider_error(reason)
+
+  defp format_error(%{message: msg}) when is_binary(msg), do: humanize_provider_error(msg)
+  defp format_error(%{"message" => msg}) when is_binary(msg), do: humanize_provider_error(msg)
 
   defp format_error(:invalid_format) do
     ~s|Invalid model format. Expected "provider:model" (e.g., "anthropic:claude-sonnet-4"), | <>
       "got a bare model name without a provider prefix."
   end
 
-  defp format_error(reason), do: Redaction.format_error(reason)
+  defp format_error(reason), do: reason |> Redaction.format_error() |> humanize_provider_error()
+
+  @spec humanize_provider_error(String.t()) :: String.t()
+  defp humanize_provider_error(message) when is_binary(message) do
+    message
+    |> Redaction.format_error()
+    |> humanize_redacted_provider_error()
+  end
+
+  @spec humanize_redacted_provider_error(String.t()) :: String.t()
+  defp humanize_redacted_provider_error(message) do
+    humanize_redacted_provider_error(
+      message,
+      missing_api_key?(message),
+      raw_provider_dump?(message)
+    )
+  end
+
+  @spec humanize_redacted_provider_error(String.t(), boolean(), boolean()) :: String.t()
+  defp humanize_redacted_provider_error(message, true, _raw_dump?) do
+    provider = provider_name_from_error(message)
+    provider_label = provider_label(provider)
+    auth_hint = auth_hint_for_provider(provider)
+    "Couldn't authenticate with #{provider_label}. #{auth_hint}"
+  end
+
+  defp humanize_redacted_provider_error(_message, false, true) do
+    "Something went wrong talking to the model provider. Check the Messages panel for details."
+  end
+
+  defp humanize_redacted_provider_error(message, false, false), do: message
+
+  @spec missing_api_key?(String.t()) :: boolean()
+  defp missing_api_key?(message) do
+    String.contains?(message, ["api_key", "API_KEY", "API key", "provider_build_failed"])
+  end
+
+  @spec raw_provider_dump?(String.t()) :: boolean()
+  defp raw_provider_dump?(message) do
+    String.contains?(message, ["%ReqLLM.", "Splode", "bread_crumbs", "stacktrace:"])
+  end
+
+  @spec provider_name_from_error(String.t()) :: String.t()
+  defp provider_name_from_error(message) do
+    provider_name_from_error(
+      String.contains?(message, ["Anthropic", "ANTHROPIC", "anthropic"]),
+      String.contains?(message, ["OpenAI", "OPENAI", "openai"]),
+      String.contains?(message, ["Google", "GOOGLE", "google"])
+    )
+  end
+
+  @spec provider_name_from_error(boolean(), boolean(), boolean()) :: String.t()
+  defp provider_name_from_error(true, _openai?, _google?), do: "anthropic"
+  defp provider_name_from_error(false, true, _google?), do: "openai"
+  defp provider_name_from_error(false, false, true), do: "google"
+  defp provider_name_from_error(false, false, false), do: "provider"
+
+  @spec provider_label(String.t()) :: String.t()
+  defp provider_label("anthropic"), do: "Anthropic"
+  defp provider_label("openai"), do: "OpenAI"
+  defp provider_label("openai_codex"), do: "OpenAI Codex"
+  defp provider_label("google"), do: "Google"
+  defp provider_label(_provider), do: "the model provider"
+
+  @spec auth_hint_for_provider(String.t()) :: String.t()
+  defp auth_hint_for_provider("openai_codex") do
+    "Sign in with /login for Codex models, or pick another configured model with /model."
+  end
+
+  defp auth_hint_for_provider("openai") do
+    "Run /auth openai <key>, sign in with /login for Codex models, or pick another configured model with /model."
+  end
+
+  defp auth_hint_for_provider("anthropic") do
+    "Run /auth anthropic <key> or pick another configured model with /model."
+  end
+
+  defp auth_hint_for_provider("google") do
+    "Run /auth google <key> or pick another configured model with /model."
+  end
+
+  defp auth_hint_for_provider(_provider) do
+    "Run /auth to add an API key, sign in with /login, or pick another configured model with /model."
+  end
 
   @spec notify(pid(), Event.t()) :: Event.t()
   defp notify(subscriber, event) do

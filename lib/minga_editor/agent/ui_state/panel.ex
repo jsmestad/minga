@@ -76,9 +76,26 @@ defmodule MingaEditor.Agent.UIState.Panel do
     }
   end
 
+  @doc "Refreshes stale unqualified model names to the current credential-aware default."
+  @spec ensure_configured_model(t()) :: t()
+  def ensure_configured_model(%__MODULE__{} = panel) do
+    default_model = AgentConfig.default_model()
+
+    if stale_unqualified_model?(panel.model_name, default_model) do
+      %{
+        panel
+        | provider_name: AgentConfig.extract_provider_prefix(default_model),
+          model_name: default_model
+      }
+    else
+      panel
+    end
+  end
+
   @doc "Sets whether any provider credential is configured (drives the model indicator)."
   @spec set_credentials_configured(t(), boolean()) :: t()
   def set_credentials_configured(%__MODULE__{} = panel, configured?) do
+    panel = ensure_configured_model(panel)
     %{panel | credentials_configured: configured?}
   end
 
@@ -92,6 +109,18 @@ defmodule MingaEditor.Agent.UIState.Panel do
   @spec set_model_name(t(), String.t()) :: t()
   def set_model_name(%__MODULE__{} = panel, model) when is_binary(model) do
     %{panel | model_name: model}
+  end
+
+  @spec stale_unqualified_model?(String.t(), String.t()) :: boolean()
+  defp stale_unqualified_model?(model, default_model)
+       when model in ["", "unknown"] and default_model not in ["", "unknown"] do
+    true
+  end
+
+  defp stale_unqualified_model?(model, default_model) do
+    AgentConfig.extract_provider_prefix(model) == "" and
+      AgentConfig.extract_provider_prefix(default_model) != "" and
+      model != default_model
   end
 
   @doc "Clears the active file mention completion."
