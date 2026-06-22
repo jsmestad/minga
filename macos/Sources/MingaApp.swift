@@ -298,6 +298,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Create the editor view.
         let nsView = EditorNSView(encoder: enc, fontFace: face, dispatcher: disp,
                                    coreTextRenderer: ctRenderer, fontManager: fm)
+        disp.onScrollPresentationReset = { [weak nsView] in
+            nsView?.resetSmoothScrollState()
+        }
         nsView.guiState = appState.gui
         nsView.statusBarState = appState.gui.statusBarState
         appState.gui.settingsState.encoder = enc

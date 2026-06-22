@@ -162,15 +162,38 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     # Build visual rows from the same data the draw path uses. Unchanged rows
     # are reused from the retained-row cache (no recompose) when their cheap
     # input fingerprint matches; only composed rows count as rasterized (#2287).
+    all_visual_entries =
+      build_visual_entries(
+        lines,
+        first_line,
+        visible_line_map,
+        wrap_on,
+        ctx,
+        snapshot,
+        retain_ctx
+      )
+
+    visible_row_start_index = scroll.visible_row_start_index + viewport.visual_row_offset
+    payload_overscan_before = max(scroll.visible_row_start_index - viewport.visual_row_offset, 0)
+
     visual_entries =
-      lines
-      |> build_visual_entries(first_line, visible_line_map, wrap_on, ctx, snapshot, retain_ctx)
-      |> trim_visual_entries(viewport.visual_row_offset, visible_row_count)
+      trim_visual_entries(all_visual_entries, visible_row_start_index, visible_row_count)
 
-    {new_retained, rasterized} = retained_stats(visual_entries, retain_ctx)
-    new_retained_wrap = retained_wrap_lines(visual_entries, wrap_on and visible_line_map == nil)
+    presentation_entries =
+      presentation_visual_entries(
+        all_visual_entries,
+        visible_row_start_index,
+        visible_row_count,
+        payload_overscan_before
+      )
 
-    visual_rows = Enum.map(visual_entries, & &1.row)
+    {new_retained, rasterized} = retained_stats(presentation_entries, retain_ctx)
+
+    new_retained_wrap =
+      retained_wrap_lines(presentation_entries, wrap_on and visible_line_map == nil)
+
+    presentation_rows = Enum.map(presentation_entries, & &1.row)
+    committed_rows = Enum.map(visual_entries, & &1.row)
     wrapped_coordinates? = wrap_on and visible_line_map == nil
 
     # Cursor in display coordinates
@@ -197,7 +220,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
         display_cursor_row,
         display_cursor_col,
         cursor_shape,
-        visual_rows
+        committed_rows
       )
 
     # Hide the editor cursor when the minibuffer has focus (command, search,
@@ -271,7 +294,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       window_id: win_id,
       content_kind: content_kind,
       rect: rect,
-      rows: visual_rows,
+      rows: presentation_rows,
       cursor_row: display_cursor_row,
       cursor_col: display_cursor_col,
       cursor_shape: cursor_shape,
@@ -282,7 +305,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       diagnostic_ranges: diagnostic_ranges,
       document_highlights: doc_highlights,
       annotations: annotations,
-      gutter: build_gutter(scroll, ctx, content_kind, visual_entries),
+      gutter: build_gutter(scroll, ctx, content_kind, presentation_entries),
       cursorline: build_cursorline(content_row, display_cursor_row, is_active, ctx),
       indent_guides: build_indent_guides(scroll, ctx, content_kind),
       geometry: geometry,
@@ -349,6 +372,20 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       {^input_hash, %Row{} = cached} -> {cached, input_hash, true}
       _ -> {compose_fun.(), input_hash, false}
     end
+  end
+
+  @spec presentation_visual_entries(
+          [visual_row_entry()],
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: [visual_row_entry()]
+  defp presentation_visual_entries(entries, visible_start, visible_count, overscan_before) do
+    before_count = min(visible_start, overscan_before)
+    start = visible_start - before_count
+    count = visible_count + before_count + 1
+
+    trim_visual_entries(entries, start, count)
   end
 
   @spec retained_stats([visual_row_entry()], retain_ctx()) ::
@@ -1813,7 +1850,11 @@ defmodule MingaEditor.RenderModel.Window.Builder do
 
   defp build_indent_guides(%WindowScroll{} = scroll, %Context{} = ctx, :buffer) do
     if indent_guides_enabled?() do
-      lines = Enum.take(scroll.lines, Viewport.content_rows(scroll.viewport))
+      lines =
+        scroll.lines
+        |> Enum.drop(scroll.visible_row_start_index)
+        |> Enum.take(Viewport.content_rows(scroll.viewport))
+
       {guides, levels} = IndentGuide.compute_with_levels(lines, ctx.tab_width, ctx.cursor_col)
       indent_guides_from_guides(scroll.win_id, ctx.tab_width, guides, levels)
     else

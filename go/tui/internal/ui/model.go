@@ -111,7 +111,17 @@ type Model struct {
 	// overlayLines() precedence chain; the rects equal what BEAM mouse
 	// hit-testing uses. Surfaces not yet promoted into the BEAM surface registry
 	// keep a reduced hand-ordered chain (transitional split, see overlayLines).
-	surfacePlacements []generated.SurfacePlacement
+	surfacePlacements  []generated.SurfacePlacement
+	presentationScroll map[uint16]presentationScroll
+}
+
+type presentationScroll struct {
+	anchorTop        uint32
+	anchorLeft       uint16
+	contentEpoch     uint32
+	layoutGeneration uint32
+	rowOffset        int
+	colOffset        int
 }
 
 // frameStaging is the open frame transaction buffer (#2219). It lives only
@@ -146,8 +156,9 @@ func New(width, height uint16, out chan<- []byte) Model {
 		latency:           latency.New(),
 		// MINGA_LATENCY_HUD=1 shows the latency overlay at boot; it is also
 		// toggled at runtime with ctrl+alt+l (ticket #2215).
-		hudVisible: latencyHUDEnvEnabled(),
-		lineCache:  newLineCache(),
+		hudVisible:         latencyHUDEnvEnabled(),
+		lineCache:          newLineCache(),
+		presentationScroll: map[uint16]presentationScroll{},
 	}
 	// Seed the header-offset cache so the first mouse event before any
 	// frame/resize still translates against the rendered fallback header.
@@ -211,6 +222,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if updated, ok := m.localMouse(msg); ok {
 			m = updated
 		} else {
+			m = m.applyPresentationScroll(msg)
 			updated, dragPacket, handled := m.handleChromeDrag(msg)
 			m = updated
 			switch {
@@ -609,6 +621,7 @@ func (m *Model) putWindow(window protocol.WindowContent) {
 		m.windowOrder = append(m.windowOrder, window.ID)
 		sort.Slice(m.windowOrder, func(i, j int) bool { return m.windowOrder[i] < m.windowOrder[j] })
 	}
+	m.reconcilePresentationScroll(window)
 	m.windows[window.ID] = window
 	m.refreshCursorFromWindows()
 }
@@ -671,8 +684,23 @@ func (m *Model) applyWindowDelta(delta protocol.WindowContent) {
 		}
 		window.Rows = rows
 	}
+	m.reconcilePresentationScroll(window)
 	m.windows[delta.ID] = window
 	m.refreshCursorFromWindows()
+}
+
+func (m *Model) reconcilePresentationScroll(window protocol.WindowContent) {
+	if !window.ScrollSet || window.Scroll.ResetRequired {
+		delete(m.presentationScroll, window.ID)
+		return
+	}
+	scroll, ok := m.presentationScroll[window.ID]
+	if !ok {
+		return
+	}
+	if scroll.contentEpoch != window.Scroll.ContentEpoch || scroll.layoutGeneration != window.Scroll.LayoutGeneration || scroll.anchorTop != window.Scroll.AnchorTop || scroll.anchorLeft != window.Scroll.AnchorLeft {
+		delete(m.presentationScroll, window.ID)
+	}
 }
 
 func (m *Model) refreshCursorFromWindows() {
@@ -712,6 +740,7 @@ func resolveWindowRows(previous []protocol.WindowRow, delta []protocol.WindowRow
 
 func (m *Model) removeWindow(id uint16) {
 	delete(m.windows, id)
+	delete(m.presentationScroll, id)
 	m.lineCache.dropWindow(id)
 	for index, windowID := range m.windowOrder {
 		if windowID == id {

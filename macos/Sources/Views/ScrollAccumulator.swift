@@ -14,9 +14,9 @@ struct ScrollAccumulator {
     /// shift content by a sub-line amount.
     var pixelOffsetY: CGFloat = 0
 
-    /// Accumulated horizontal pixel delta. Emits discrete column events
-    /// when it crosses cellWidth boundaries.
-    var accumulatorX: CGFloat = 0
+    /// Fractional horizontal pixel offset within the current left column.
+    /// Positive = content shifted left, negative = content shifted right.
+    var pixelOffsetX: CGFloat = 0
 
     /// Scroll direction emitted to the BEAM.
     enum Event: Equatable {
@@ -29,7 +29,7 @@ struct ScrollAccumulator {
     /// Reset both accumulators (call at the start of a new gesture).
     mutating func reset() {
         pixelOffsetY = 0
-        accumulatorX = 0
+        pixelOffsetX = 0
     }
 
     /// Accumulate a vertical pixel delta from a trackpad event.
@@ -64,17 +64,17 @@ struct ScrollAccumulator {
     mutating func accumulateHorizontal(deltaX: CGFloat, cellWidth: CGFloat) -> [Event] {
         guard cellWidth > 0 else { return [] }
 
-        accumulatorX += deltaX
+        pixelOffsetX += deltaX
 
         var events: [Event] = []
 
-        while accumulatorX >= cellWidth {
+        while pixelOffsetX >= cellWidth {
             events.append(.scrollLeft)
-            accumulatorX -= cellWidth
+            pixelOffsetX -= cellWidth
         }
-        while accumulatorX <= -cellWidth {
+        while pixelOffsetX <= -cellWidth {
             events.append(.scrollRight)
-            accumulatorX += cellWidth
+            pixelOffsetX += cellWidth
         }
 
         return events

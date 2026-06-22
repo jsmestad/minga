@@ -269,6 +269,37 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
            ]
   end
 
+  test "encodes distinct visible and overscan bounds for simple windows" do
+    rows = [
+      %Row{
+        row_id: Row.stable_id(:normal, 6),
+        row_type: :normal,
+        buf_line: 4,
+        text: "above",
+        spans: [],
+        content_hash: 111
+      },
+      %Row{
+        row_id: Row.stable_id(:normal, 7),
+        row_type: :normal,
+        buf_line: 5,
+        text: "visible",
+        spans: [],
+        content_hash: 222
+      }
+    ]
+
+    decoded =
+      window(content_epoch: 42, geometry: geometry_model(), rows: rows)
+      |> WindowEncoder.encode_window_content()
+      |> GUIWindowDecoder.decode()
+
+    assert decoded.scroll_presentation.visible_start_line == 5
+    assert decoded.scroll_presentation.visible_end_line == 6
+    assert decoded.scroll_presentation.overscan_start_line == 4
+    assert decoded.scroll_presentation.overscan_end_line == 6
+  end
+
   test "encodes every selection type" do
     for type <- [:char, :line, :block] do
       decoded =

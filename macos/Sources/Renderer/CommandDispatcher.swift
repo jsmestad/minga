@@ -74,6 +74,10 @@ final class CommandDispatcher {
     /// Called when line_spacing changes, so EditorNSView can trigger a resize.
     var onLineSpacingChanged: ((Float) -> Void)?
 
+    /// Called when a reset-required scroll presentation is promoted into GUI state.
+    /// The editor view uses this to discard local smooth-scroll state once per frame.
+    var onScrollPresentationReset: (() -> Void)?
+
     /// Called when the BEAM changes the GUI cursor animation preference.
     var onCursorAnimationChanged: ((Bool) -> Void)?
 
@@ -250,6 +254,10 @@ final class CommandDispatcher {
             apply(staged)
         }
 
+        if openBaseFrameSeq == 0 {
+            pruneAuthoritativeFrameState(liveWindowIds: liveWindowIds(from: stagedCommands))
+        }
+
         // Record the clean commit and clear the transaction.
         lastCommittedFrameSeq = frameSeq
         hasCommitted = true
@@ -283,6 +291,51 @@ final class CommandDispatcher {
         }
 
         return (found, [])
+    }
+
+    private func pruneAuthoritativeFrameState(liveWindowIds: Set<UInt16>) {
+        guiState.windowContents = Dictionary(uniqueKeysWithValues: guiState.windowContents.filter { liveWindowIds.contains($0.key) })
+        frameState.windowGutters = Dictionary(uniqueKeysWithValues: frameState.windowGutters.filter { liveWindowIds.contains($0.key) })
+        frameState.windowIndentGuides = Dictionary(uniqueKeysWithValues: frameState.windowIndentGuides.filter { liveWindowIds.contains($0.key) })
+        currentFrameWindowIds = liveWindowIds
+        refreshDerivedGutterStateAfterPrune()
+    }
+
+    private func refreshDerivedGutterStateAfterPrune() {
+        guard let activeGutter = frameState.windowGutters.values.filter(\.isActive).sorted(by: { $0.windowId < $1.windowId }).first else {
+            frameState.gutterCol = 0
+            frameState.viewportTopLine = 0xFFFF_FFFF
+            return
+        }
+
+        frameState.gutterCol = UInt16(activeGutter.lineNumberWidth) + UInt16(activeGutter.signColWidth)
+        frameState.viewportTopLine = activeGutter.entries.first?.bufLine ?? 0xFFFF_FFFF
+    }
+
+    private func liveWindowIds(from commands: [RenderCommand]) -> Set<UInt16> {
+        var ids = Set<UInt16>()
+        ids.reserveCapacity(commands.count)
+
+        for command in commands {
+            switch command {
+            case .guiWindowContent(let data):
+                ids.insert(data.windowId)
+            case .guiWindowOverlayDelta(let data):
+                ids.insert(data.windowId)
+            case .guiWindowViewportDelta(let data):
+                ids.insert(data.windowId)
+            case .guiWindowRowsDelta(let data):
+                ids.insert(data.windowId)
+            case .guiGutter(let data):
+                ids.insert(data.windowId)
+            case .guiIndentGuides(let data):
+                ids.insert(data.windowId)
+            default:
+                continue
+            }
+        }
+
+        return ids
     }
 
     private static func missingThemeSlots(in slots: [(UInt8, UInt8, UInt8, UInt8)]) -> [UInt8] {
@@ -563,6 +616,9 @@ final class CommandDispatcher {
         case .guiWindowContent(let data):
             guiState.windowContents[data.windowId] = data
             currentFrameWindowIds.insert(data.windowId)
+            if data.scrollPresentation?.resetRequired == true {
+                onScrollPresentationReset?()
+            }
             // BEAM controls cursor visibility per window. When the minibuffer
             // or other overlay has focus, cursor_visible is false.
             frameState.cursorVisible = data.cursorVisible
@@ -584,6 +640,9 @@ final class CommandDispatcher {
             }
             guiState.windowContents[delta.windowId] = updated
             currentFrameWindowIds.insert(delta.windowId)
+            if updated.scrollPresentation?.resetRequired == true {
+                onScrollPresentationReset?()
+            }
             frameState.cursorVisible = delta.cursorVisible
             frameState.dirty = true
 

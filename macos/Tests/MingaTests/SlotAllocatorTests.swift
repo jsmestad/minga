@@ -212,6 +212,21 @@ struct SlotAllocatorCapacityTests {
             Issue.record("Expected win1 to be evicted by window invalidation"); return
         }
     }
+
+    @Test("gutter atlas keys stay distinct across presentation rows")
+    func gutterAtlasKeysStayDistinctAcrossPresentationRows() {
+        let windowId: UInt16 = 7
+        let lineNumberKey0 = AtlasKey.gutterLineNumber(windowId: windowId, row: 0)
+        let lineNumberKey1 = AtlasKey.gutterLineNumber(windowId: windowId, row: 1)
+        let diagnosticKey0 = AtlasKey.diagnosticSign(windowId: windowId, row: 0)
+        let diagnosticKey1 = AtlasKey.diagnosticSign(windowId: windowId, row: 1)
+        let annotationKey0 = AtlasKey.annotationIcon(windowId: windowId, row: 0)
+        let annotationKey1 = AtlasKey.annotationIcon(windowId: windowId, row: 1)
+
+        #expect(lineNumberKey0 != lineNumberKey1)
+        #expect(diagnosticKey0 != diagnosticKey1)
+        #expect(annotationKey0 != annotationKey1)
+    }
 }
 
 @Suite("SlotAllocator — UV Computation")
