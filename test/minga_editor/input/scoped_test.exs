@@ -8,7 +8,6 @@ defmodule MingaEditor.Input.ScopedTest do
   alias MingaEditor.Agent.View.Preview
   alias Minga.Buffer.Process, as: BufferProcess
 
-  alias MingaEditor.Commands.Agent, as: AgentCommands
   alias MingaEditor.State, as: EditorState
   alias MingaAgent.RuntimeState
   alias MingaEditor.State.Agent, as: AgentState
@@ -17,6 +16,7 @@ defmodule MingaEditor.Input.ScopedTest do
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
+  alias MingaEditor.State.Workspace
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.Input.AgentPanel
@@ -25,6 +25,7 @@ defmodule MingaEditor.Input.ScopedTest do
   alias Minga.Mode
   alias Minga.Project.FileTree
   alias Minga.Project.FileTree.BufferSync
+  alias Minga.Test.StubServer
 
   defp base_state(opts) do
     opts = Keyword.put_new_lazy(opts, :sidebar_registry, fn -> private_sidebar_registry() end)
@@ -77,9 +78,46 @@ defmodule MingaEditor.Input.ScopedTest do
   defp activated_agent_state do
     state = base_state(keymap_scope: :editor, agentic_active: false)
     file_buffer = state.workspace.buffers.active
-    state = AgentCommands.toggle_agentic_view(state)
-    session = AgentAccess.session(state)
-    agent_buffer = AgentAccess.agent(state).buffer
+    {:ok, session} = StubServer.start_link()
+    {:ok, agent_buffer} = BufferProcess.start_link(content: "")
+
+    return_target =
+      UIState.return_target(
+        1,
+        file_buffer,
+        state.workspace.windows,
+        EditorState.file_tree_state(state),
+        :editor,
+        false
+      )
+
+    agent_ui =
+      UIState.activate(
+        state.workspace.agent_ui,
+        state.workspace.windows,
+        EditorState.file_tree_state(state),
+        return_target
+      )
+
+    {tab_bar, agent_tab} = TabBar.add(state.shell_state.tab_bar, :agent, "Agent")
+    {tab_bar, workspace} = TabBar.add_workspace(tab_bar, "Agent", session)
+    workspace = Workspace.set_agent_ui(workspace, agent_ui)
+
+    tab_bar =
+      tab_bar
+      |> TabBar.update_workspace(workspace.id, fn _ -> workspace end)
+      |> TabBar.update_tab(agent_tab.id, fn tab ->
+        tab |> Tab.set_session(session) |> Tab.set_group(workspace.id)
+      end)
+
+    shell_state = %{
+      state.shell_state
+      | agent: %{state.shell_state.agent | buffer: agent_buffer},
+        tab_bar: tab_bar
+    }
+
+    workspace_state = %{state.workspace | agent_ui: agent_ui, keymap_scope: :agent}
+    state = %{state | shell_state: shell_state, workspace: workspace_state}
 
     {state, session, file_buffer, agent_buffer}
   end

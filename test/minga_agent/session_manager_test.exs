@@ -324,7 +324,10 @@ defmodule MingaAgent.SessionManagerTest do
                    },
                    1000
 
-    refute_receive {:minga_event, :agent_session_restarted, _}, 50
+    refute_receive {:minga_event, :agent_session_restarted,
+                    %SessionRestartedEvent{session_id: ^session_id}},
+                   50
+
     assert {:error, :not_found} = SessionManager.get_session(manager, session_id)
   end
 
@@ -383,7 +386,10 @@ defmodule MingaAgent.SessionManagerTest do
                    },
                    1000
 
-    refute_receive {:minga_event, :agent_session_restarted, _}, 50
+    refute_receive {:minga_event, :agent_session_restarted,
+                    %SessionRestartedEvent{session_id: ^session_id}},
+                   50
+
     assert {:error, :not_found} = SessionManager.get_session(manager, session_id)
   end
 

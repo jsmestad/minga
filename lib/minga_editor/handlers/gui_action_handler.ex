@@ -64,10 +64,28 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   Returns the updated editor state. Unrecognized actions are logged and
   the state is returned unchanged.
   """
-  @spec dispatch(state(), Protocol.GUI.gui_action()) :: state()
-  def dispatch(state, action) do
-    dispatch_action(state, action)
+  @git_root_resolver_key :__gui_action_resolve_git_root__
+
+  @spec dispatch(state(), Protocol.GUI.gui_action(), keyword()) :: state()
+  def dispatch(state, action, opts \\ []) do
+    previous_resolver = Process.get(@git_root_resolver_key, :__unset__)
+
+    if fun = opts[:resolve_git_root] do
+      Process.put(@git_root_resolver_key, fun)
+    end
+
+    try do
+      dispatch_action(state, action)
+    after
+      restore_git_root_resolver(previous_resolver)
+    end
   end
+
+  @spec restore_git_root_resolver(:__unset__ | function()) :: function() | nil
+  defp restore_git_root_resolver(:__unset__), do: Process.delete(@git_root_resolver_key)
+
+  defp restore_git_root_resolver(previous_resolver),
+    do: Process.put(@git_root_resolver_key, previous_resolver)
 
   # ── Internal dispatch clauses ────────────────────────────────────────
 
@@ -1236,17 +1254,16 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   @spec git_action(state(), String.t(), git_operation(), String.t()) :: state()
   defp git_action(state, pending_msg, operation, success_msg)
        when is_binary(pending_msg) and is_binary(success_msg) do
+    resolve_root = Process.get(@git_root_resolver_key, &MingaEditor.resolve_git_root/0)
+
     state
     |> EditorState.set_status(pending_msg)
-    |> AsyncAction.run(@git_lane, fn -> run_git_op(operation, success_msg) end)
-  end
-
-  @spec run_git_op(git_operation(), String.t()) :: git_result()
-  defp run_git_op(operation, success_msg) do
-    case MingaEditor.resolve_git_root() do
-      nil -> :not_a_repo
-      git_root -> run_git_op(operation, git_root, success_msg)
-    end
+    |> AsyncAction.run(@git_lane, fn ->
+      case resolve_root.() do
+        nil -> :not_a_repo
+        git_root -> run_git_op(operation, git_root, success_msg)
+      end
+    end)
   end
 
   @spec run_git_op(git_operation(), String.t(), String.t()) :: git_result()
