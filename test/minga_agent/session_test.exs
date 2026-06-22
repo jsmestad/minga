@@ -2162,34 +2162,61 @@ defmodule MingaAgent.SessionTest do
   end
 
   describe "provider error presentation" do
-    test "raw provider errors are humanized in the transcript", %{tmp_dir: dir} do
-      # A custom llm_client counts as "configured", so the prompt reaches the
-      # provider, fails, and the session must show one human line instead of
-      # the raw error string.
-      client = fn _model, _messages, _opts ->
-        {:error, "provider_build_failed: missing api_key option"}
-      end
+    test "openai codex auth failures suggest /login instead of /auth openai_codex" do
+      session = start_subscribed_session()
 
-      session =
-        start_subscribed_session(Native,
-          project_root: dir,
-          llm_client: client,
-          max_retries: 0,
-          config: agent_config(tool_approval: :none)
-        )
-
-      assert :ok = Session.send_prompt(session, "hey")
-
-      assert_receive {:agent_event, ^session, {:error, message}}, @event_timeout
-      refute message =~ "provider_build_failed"
-
-      assert message ==
-               "Couldn't authenticate with Anthropic. Run /auth anthropic <key> or pick another configured model with /model."
+      send_provider_event(
+        session,
+        %Event.Error{
+          kind: :auth_failed,
+          provider: "openai_codex",
+          message: "missing oauth"
+        }
+      )
 
       assert Enum.any?(Session.messages(session), fn
-               {:system, text, :error} -> text == message
-               _ -> false
+               {:system, text, :error} ->
+                 text =~ "/login" and not String.contains?(text, "/auth openai_codex")
+
+               _ ->
+                 false
              end)
+    end
+
+    test "structured provider errors render friendly transcript copy" do
+      cases = [
+        {%Event.Error{kind: :rate_limited, provider: "anthropic", message: "rate limited"},
+         "The model provider is rate limiting requests. Wait a moment, then try again."},
+        {%Event.Error{kind: :unreachable, provider: "anthropic", message: "nxdomain"},
+         "Couldn't reach the model provider. Check your network connection, then try again."},
+        {%Event.Error{kind: :provider_error, provider: "anthropic", message: "boom"},
+         "The model provider returned an unexpected error. Open Messages for details, or pick another configured model with /model."}
+      ]
+
+      for {event, expected} <- cases do
+        session = start_subscribed_session()
+        send_provider_event(session, event)
+
+        assert Enum.any?(Session.messages(session), fn
+                 {:system, text, :error} -> text == expected
+                 _ -> false
+               end)
+      end
+    end
+
+    test "repeated structured provider errors append one transcript row" do
+      session = start_subscribed_session()
+      event = %Event.Error{kind: :rate_limited, provider: "anthropic", message: "rate limited"}
+
+      send_provider_event(session, event)
+      send_provider_event(session, event)
+
+      expected = "The model provider is rate limiting requests. Wait a moment, then try again."
+
+      assert Enum.count(Session.messages(session), fn
+               {:system, text, :error} -> text == expected
+               _ -> false
+             end) == 1
     end
   end
 end

@@ -33,7 +33,15 @@ defmodule MingaAgent.ModelCatalog do
     configured_providers = configured_provider_atoms()
     oauth = Credentials.oauth_configured?()
 
-    LLMDB.models()
+    available_models_from(LLMDB.models(), current_model, configured_providers, oauth)
+  end
+
+  @doc false
+  @spec available_models_from([map()], String.t(), MapSet.t(atom()), boolean()) :: [model_entry()]
+  def available_models_from(models, current_model, configured_providers, oauth) do
+    current_model = canonical_current_model_id(current_model, oauth)
+
+    models
     |> Enum.filter(&include_model?(&1, configured_providers, oauth))
     |> Enum.map(&format_model(&1, current_model, oauth))
     |> dedupe_models()
@@ -75,7 +83,8 @@ defmodule MingaAgent.ModelCatalog do
       not model.retired and
       has_text_output?(model) and
       has_reasonable_context?(model) and
-      not excluded_by_name?(model.id)
+      not excluded_by_name?(model.id) and
+      not excluded_codex_reasoning_alias?(model)
   end
 
   defp provider_available?(model, configured_providers, oauth) do
@@ -106,6 +115,28 @@ defmodule MingaAgent.ModelCatalog do
   defp excluded_by_name?(id) do
     id_lower = String.downcase(id)
     Enum.any?(@excluded_patterns, &String.contains?(id_lower, &1))
+  end
+
+  @spec excluded_codex_reasoning_alias?(map()) :: boolean()
+  defp excluded_codex_reasoning_alias?(%{id: id} = model) do
+    codex_model?(model) and String.contains?(String.downcase(id), "xhigh")
+  end
+
+  @spec canonical_current_model_id(String.t(), boolean()) :: String.t()
+  defp canonical_current_model_id(current_model, oauth) do
+    case String.split(current_model, ":", parts: 2) do
+      ["openai_codex", id] when oauth -> "openai_codex:#{canonicalize_codex_alias_id(id)}"
+      [provider, id] -> "#{provider}:#{canonicalize_codex_alias_id(id)}"
+      _ -> current_model
+    end
+  end
+
+  @spec canonicalize_codex_alias_id(String.t()) :: String.t()
+  defp canonicalize_codex_alias_id(id) do
+    id
+    |> String.replace_prefix("openai/", "")
+    |> String.replace_prefix("openai-", "")
+    |> normalize_codex_version_alias()
   end
 
   @spec format_model(map(), String.t(), boolean()) :: model_entry()

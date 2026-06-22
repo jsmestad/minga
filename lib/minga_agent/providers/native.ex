@@ -3184,14 +3184,17 @@ defmodule MingaAgent.Providers.Native do
     emit_error_and_end(provider_pid, %Event.Error{message: message})
   end
 
-  # Reports an error that occurred inside the agent loop: logs the raw detail
-  # for the Messages panel, emits Error + AgentEnd to the UI, and returns a
-  # `{:reported, reason}` sentinel. The Task-completion handler matches that
-  # sentinel and skips re-emitting, so a single failure surfaces exactly once
-  # in the transcript instead of twice.
+  # Reports an error that occurred inside the agent loop: logs a redacted
+  # diagnostic detail for Messages/logs, emits a friendly Error + AgentEnd to
+  # the UI, and returns a `{:reported, reason}` sentinel. The Task-completion
+  # handler matches that sentinel and skips re-emitting, so a single failure
+  # surfaces exactly once in the transcript instead of twice.
   @spec reported_error(pid(), String.t(), term(), String.t()) :: {:error, {:reported, term()}}
   defp reported_error(provider_pid, message, reason, model) do
     event = error_event(message, reason, model)
+    detail = Redaction.format_error(reason)
+
+    Minga.Log.error(:agent, "[Agent.Native] agent loop detail: #{detail}")
     Minga.Log.error(:agent, "[Agent.Native] agent loop error: #{event.message}")
     emit_error_and_end(provider_pid, event)
     {:error, {:reported, reason}}
@@ -3223,10 +3226,17 @@ defmodule MingaAgent.Providers.Native do
     "Couldn't reach the model provider. Check your network connection, then try again."
   end
 
-  defp error_event_message(:provider_error, message, _provider), do: message
+  defp error_event_message(:provider_error, _message, _provider) do
+    "The model provider returned an unexpected error. Open Messages for details, or pick another configured model with /model."
+  end
+
   defp error_event_message(:invalid_model, message, _provider), do: message
   defp error_event_message(:tool_error, message, _provider), do: message
-  defp error_event_message(:internal_error, message, _provider), do: message
+
+  defp error_event_message(:internal_error, _message, _provider) do
+    "The model provider returned an unexpected error. Open Messages for details, or pick another configured model with /model."
+  end
+
   defp error_event_message(:unknown, message, _provider), do: message
 
   @spec classify_error_reason(term()) :: Event.Error.kind()
@@ -3254,23 +3264,25 @@ defmodule MingaAgent.Providers.Native do
   # Internal provider/session contracts use `Event.Error.kind` instead.
   @spec classify_legacy_error_message(String.t()) :: Event.Error.kind()
   defp classify_legacy_error_message(message) do
+    normalized = String.downcase(message)
+
     classify_legacy_error_checks([
-      {:auth_failed, String.match?(message, ~r/\b(401|403)\b/)},
-      {:rate_limited, String.match?(message, ~r/\b429\b/)},
       {:auth_failed,
-       String.contains?(message, [
-         "provider_build_failed",
-         "api_key",
-         "API_KEY",
-         "Couldn't authenticate"
-       ])},
+       String.match?(normalized, ~r/\b(401|403)\b/) or
+         String.contains?(normalized, [
+           "unauthorized",
+           "invalid_api_key",
+           "api key",
+           "api_key",
+           "provider_build_failed",
+           "failed to build",
+           "couldn't authenticate"
+         ])},
+      {:rate_limited,
+       String.match?(normalized, ~r/\b429\b/) or
+         String.contains?(normalized, ["api rate limited", "rate limited", "rate limit"])},
       {:unreachable,
-       String.contains?(message, [
-         "http_streaming_failed",
-         "econnrefused",
-         "nxdomain",
-         "timed out"
-       ])}
+       String.contains?(normalized, ["timeout", "timed out", "nxdomain", "econnrefused"])}
     ])
   end
 
@@ -3406,10 +3418,15 @@ defmodule MingaAgent.Providers.Native do
   @spec provider_label(String.t()) :: String.t()
   defp provider_label("anthropic"), do: "Anthropic"
   defp provider_label("openai"), do: "OpenAI"
+  defp provider_label("openai_codex"), do: "OpenAI Codex"
   defp provider_label("google"), do: "Google"
   defp provider_label(_provider), do: "the model provider"
 
   @spec auth_hint_for_provider(String.t()) :: String.t()
+  defp auth_hint_for_provider("openai_codex") do
+    "Sign in with /login for Codex models, or pick another configured model with /model."
+  end
+
   defp auth_hint_for_provider("openai") do
     "Run /auth openai <key>, sign in with /login for Codex models, or pick another configured model with /model."
   end

@@ -95,8 +95,12 @@ defmodule MingaAgent.Event do
           limit: pos_integer()
         }
 
-  @typedoc "An error occurred in the agent."
-  @type error :: %__MODULE__.Error{message: String.t()}
+  @typedoc "An error occurred in the agent, with structured kind/provider metadata."
+  @type error :: %__MODULE__.Error{
+          message: String.t(),
+          kind: Error.kind(),
+          provider: String.t() | nil
+        }
 
   defmodule AgentStart do
     @moduledoc false

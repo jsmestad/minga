@@ -2974,16 +2974,15 @@ defmodule MingaAgent.Session do
 
   defp humanize_error_kind(:invalid_model, message, _provider), do: message
 
-  defp humanize_error_kind(:provider_error, message, _provider) do
-    if raw_struct_dump?(message) do
-      "The model provider returned an unexpected error. Open Messages for details, or pick another configured model with /model."
-    else
-      message
-    end
+  defp humanize_error_kind(:provider_error, _message, _provider) do
+    "The model provider returned an unexpected error. Open Messages for details, or pick another configured model with /model."
   end
 
   defp humanize_error_kind(:tool_error, message, _provider), do: message
-  defp humanize_error_kind(:internal_error, message, _provider), do: message
+
+  defp humanize_error_kind(:internal_error, _message, _provider) do
+    "The model provider returned an unexpected error. Open Messages for details, or pick another configured model with /model."
+  end
 
   @type legacy_error_kind ::
           :auth_failed | :rate_limited | :unreachable | :raw_dump | :passthrough
@@ -3065,6 +3064,7 @@ defmodule MingaAgent.Session do
 
   @spec provider_label(String.t()) :: String.t()
   defp provider_label("provider"), do: "the model provider"
+  defp provider_label("openai_codex"), do: "OpenAI Codex"
 
   defp provider_label(provider) do
     provider
@@ -3074,6 +3074,10 @@ defmodule MingaAgent.Session do
   end
 
   @spec auth_hint(String.t()) :: String.t()
+  defp auth_hint("openai_codex") do
+    "Sign in with /login for Codex models, or pick another configured model with /model."
+  end
+
   defp auth_hint("provider"),
     do: "Run /auth to check credentials, or pick another configured model with /model."
 
