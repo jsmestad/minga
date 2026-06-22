@@ -1941,6 +1941,40 @@ defmodule MingaAgent.Providers.NativeTest do
 
   # ── Model format validation ──────────────────────────────────────────────────
 
+  describe "provider error formatting" do
+    test "missing API key provider build errors are human-readable", %{tmp_dir: tmp_dir} do
+      reason =
+        {:http_streaming_failed,
+         {:provider_build_failed,
+          %{
+            reason: """
+            Failed to build Anthropic stream request: %ReqLLM.Error.Invalid.Parameter{parameter: ":api_key option, config :req_llm, anthropic_api_key, or ANTHROPIC_API_KEY env var (.env via dotenv)", bread_crumbs: [], stacktrace: #Splode.Stacktrace<>, class: :invalid}
+            """
+          }}}
+
+      {:ok, pid} =
+        start_provider(
+          model: "anthropic:claude-sonnet-4-20250514",
+          llm_client: fake_error_client(reason),
+          tmp_dir: tmp_dir,
+          max_retries: 0
+        )
+
+      Native.send_prompt(pid, "hello")
+      events = collect_events(2_000)
+
+      error = Enum.find(events, &match?(%Event.Error{}, &1))
+      assert %Event.Error{message: message, kind: :auth_failed, provider: "anthropic"} = error
+
+      assert message ==
+               "Couldn't authenticate with Anthropic. Run /auth anthropic <key> or pick another configured model with /model."
+
+      refute message =~ "ReqLLM"
+      refute message =~ "Splode"
+      refute message =~ "bread_crumbs"
+    end
+  end
+
   describe "model format validation" do
     test "bare model name without provider prefix returns :invalid_format error", %{
       tmp_dir: tmp_dir

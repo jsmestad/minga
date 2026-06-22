@@ -29,6 +29,24 @@ defmodule MingaAgent.ModelCatalogTest do
       end
     end
 
+    test "model IDs are unique after catalog alias normalization" do
+      ids = ModelCatalog.available_models() |> Enum.map(& &1["id"])
+
+      assert ids == Enum.uniq(ids)
+    end
+
+    test "current model sorts first when present" do
+      models = ModelCatalog.available_models()
+
+      if models != [] do
+        current_id = List.last(models)["id"]
+        [current | _rest] = ModelCatalog.available_models(current_id)
+
+        assert current["id"] == current_id
+        assert current["current"]
+      end
+    end
+
     test "excludes deprecated and retired models" do
       models = ModelCatalog.available_models()
 

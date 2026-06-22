@@ -98,7 +98,17 @@ struct WorkspaceHeaderView: View {
     }
 
     private var workspaceSwitcher: some View {
-        Menu {
+        Button {
+            encoder?.sendExecuteCommand(name: "workspace_next")
+        } label: {
+            Image(systemName: "rectangle.grid.1x2")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(theme.tabInactiveFg)
+                .frame(width: 24, height: rowHeight)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
             ForEach(workspaceState.workspaces) { workspace in
                 Button {
                     encoder?.sendExecuteCommand(name: workspaceState.switchCommand(for: workspace))
@@ -107,17 +117,10 @@ struct WorkspaceHeaderView: View {
                 }
                 .accessibilityIdentifier("workspace-row-\(workspace.id)")
             }
-        } label: {
-            Image(systemName: "rectangle.grid.1x2")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(theme.tabInactiveFg)
-                .frame(width: 24, height: rowHeight)
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
         .accessibilityIdentifier("workspace-switcher")
-        .accessibilityLabel("Workspace switcher")
-        .help("Switch workspace")
+        .accessibilityLabel("Switch to next workspace")
+        .help("Switch to next workspace")
     }
 
     private func agentStatusButton(_ workspace: WorkspaceSummaryEntry) -> some View {

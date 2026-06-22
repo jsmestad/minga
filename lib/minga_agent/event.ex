@@ -217,8 +217,24 @@ defmodule MingaAgent.Event do
 
   defmodule Error do
     @moduledoc false
+
+    @type kind ::
+            :auth_failed
+            | :rate_limited
+            | :unreachable
+            | :invalid_model
+            | :provider_error
+            | :tool_error
+            | :internal_error
+            | :unknown
+
     @enforce_keys [:message]
-    defstruct [:message]
-    @type t :: %__MODULE__{message: String.t()}
+    defstruct [:message, kind: :unknown, provider: nil]
+
+    @type t :: %__MODULE__{
+            message: String.t(),
+            kind: kind(),
+            provider: String.t() | nil
+          }
   end
 end

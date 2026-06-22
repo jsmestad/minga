@@ -7,6 +7,7 @@ defmodule MingaEditor.StatusBar.DataTest do
   alias Minga.Config.ModelineSegments
   alias Minga.Config.Options
   alias Minga.Mode.VisualState
+  alias MingaAgent.SessionMetadata
   alias MingaAgent.Subagent.Handle
   alias MingaEditor.StatusBar.Data
   alias MingaEditor.State, as: EditorState
@@ -16,10 +17,37 @@ defmodule MingaEditor.StatusBar.DataTest do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
+  alias MingaEditor.State.Workspace, as: WorkspaceModel
   alias MingaEditor.Viewport
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
   alias MingaEditor.Session.State, as: SessionState
+
+  defmodule MetadataSession do
+    use GenServer
+
+    @spec start_link(keyword()) :: GenServer.on_start()
+    def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
+
+    @impl GenServer
+    def init(opts), do: {:ok, Map.new(opts)}
+
+    @impl GenServer
+    def handle_call(:metadata, _from, state) do
+      now = DateTime.utc_now()
+
+      metadata = %SessionMetadata{
+        id: "test-session",
+        model_name: "openai_codex:gpt-5-codex",
+        created_at: now,
+        last_message_at: now,
+        message_count: Map.fetch!(state, :message_count),
+        turn_count: Map.fetch!(state, :turn_count)
+      }
+
+      {:reply, metadata, state}
+    end
+  end
 
   test "from_state leaves GUI modeline segments detached by default" do
     state = state_with_tab_bar(TabBar.new(Tab.new_file(1, "main.ex")))
@@ -96,6 +124,27 @@ defmodule MingaEditor.StatusBar.DataTest do
 
     assert data.background_subagent_count == 1
     assert data.active_background_subagent_label == "session-2: tests"
+  end
+
+  test "agent status message count uses user turns instead of raw transcript entries" do
+    {:ok, session} = MetadataSession.start_link(message_count: 4, turn_count: 1)
+    agent_buffer = start_buffer("", :markdown)
+
+    tb = TabBar.new(Tab.new_file(1, "main.ex"))
+    {tb, agent_tab} = TabBar.add(tb, :agent, "Agent")
+
+    tb =
+      tb
+      |> TabBar.switch_to(agent_tab.id)
+      |> TabBar.update_tab(agent_tab.id, &Tab.set_session(&1, session))
+
+    workspace_id = TabBar.active_workspace_id(tb)
+    tb = TabBar.update_workspace(tb, workspace_id, &WorkspaceModel.set_session(&1, session))
+
+    state = state_with_agent_window(agent_buffer, tb)
+
+    assert {:agent, data} = Data.from_state(state)
+    assert data.message_count == 1
   end
 
   test "threads active_tool_name from state into modeline data and clears it on status changes" do
@@ -215,6 +264,23 @@ defmodule MingaEditor.StatusBar.DataTest do
     %EditorState{
       port_manager: self(),
       workspace: %SessionState{viewport: Viewport.new(24, 80)},
+      shell_state: %MingaEditor.Shell.Traditional.State{tab_bar: tab_bar}
+    }
+  end
+
+  defp state_with_agent_window(agent_buffer, tab_bar) do
+    %EditorState{
+      port_manager: self(),
+      workspace: %SessionState{
+        viewport: Viewport.new(24, 80),
+        buffers: %Buffers{list: [agent_buffer], active_index: 0, active: agent_buffer},
+        windows: %Windows{
+          tree: WindowTree.new(1),
+          map: %{1 => Window.new_agent_chat(1, agent_buffer, 24, 80)},
+          active: 1,
+          next_id: 2
+        }
+      },
       shell_state: %MingaEditor.Shell.Traditional.State{tab_bar: tab_bar}
     }
   end

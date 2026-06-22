@@ -1000,6 +1000,20 @@ struct WorkspaceHeaderViewTests {
         #expect(state.switchCommand(for: manualWorkspace) == "workspace_goto_id:0")
         #expect(state.switchCommand(for: reviewWorkspace) == "workspace_goto_id:2")
     }
+
+    @Test("Switcher click advances to the next workspace")
+    @MainActor func switcherClickAdvancesWorkspace() throws {
+        let spy = SpyEncoder()
+        let sut = WorkspaceHeaderView(workspaceState: populatedState(), theme: ThemeColors(), encoder: spy)
+        let buttons = try sut.inspect().findAll(ViewType.Button.self)
+        let button = try #require(buttons.first(where: {
+            (try? $0.accessibilityLabel().string()) == "Switch to next workspace"
+        }))
+
+        try button.tap()
+
+        #expect(spy.guiActions.contains(.executeCommand(name: "workspace_next")))
+    }
 }
 
 // MARK: - AgentChatView

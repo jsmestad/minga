@@ -10,6 +10,7 @@ defmodule MingaEditor.Commands.AgentSession do
   alias MingaAgent.ProjectView
   alias MingaAgent.Session
   alias Minga.Buffer
+  alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.AgentLifecycle
   alias MingaEditor.Remote.EventReplay
   alias MingaEditor.Remote.SessionClient
@@ -103,7 +104,8 @@ defmodule MingaEditor.Commands.AgentSession do
 
   @spec do_start_agent_session(state(), keyword()) :: state()
   defp do_start_agent_session(state, opts) do
-    panel = AgentAccess.panel(state)
+    panel = AgentAccess.panel(state) |> Panel.ensure_configured_model()
+    state = AgentAccess.update_panel(state, fn _panel -> panel end)
     {project_view, created_project_view?} = session_project_view(state)
 
     session_opts = [

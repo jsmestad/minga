@@ -11,7 +11,6 @@ defmodule MingaEditor.StatusBar.Data do
   - `{:agent, t:agent_data()}` — an agent chat window
   """
 
-  alias MingaAgent.Session
   alias Minga.Buffer
   alias Minga.Diagnostics
   alias Minga.Config.ModelineSegments
@@ -318,16 +317,7 @@ defmodule MingaEditor.StatusBar.Data do
     panel = AgentAccess.panel(state)
     session = AgentAccess.session(state)
 
-    message_count =
-      if session do
-        try do
-          length(Session.messages(session))
-        catch
-          :exit, _ -> 0
-        end
-      else
-        0
-      end
+    message_count = agent_message_count(session)
 
     model_name = if panel.model_name != "", do: panel.model_name, else: "Agent"
 
@@ -391,6 +381,19 @@ defmodule MingaEditor.StatusBar.Data do
       merge_conflict_count: merge_conflict_count(buf)
     }
   end
+
+  @spec agent_message_count(pid() | nil) :: non_neg_integer()
+  defp agent_message_count(session) when is_pid(session) do
+    case safe_session_metadata(session) do
+      %MingaAgent.SessionMetadata{turn_count: count} when is_integer(count) and count >= 0 ->
+        count
+
+      _other ->
+        0
+    end
+  end
+
+  defp agent_message_count(_session), do: 0
 
   @spec agent_status_command_content(EditorState.t() | map(), AgentState.t()) :: String.t() | nil
   defp agent_status_command_content(state, agent) do

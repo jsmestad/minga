@@ -1614,6 +1614,19 @@ defmodule MingaAgent.SessionTest do
       assert Session.list_tool_trust(session) == %{}
     end
 
+    test "duplicate provider errors are not appended twice" do
+      session = start_subscribed_session()
+
+      send_provider_event(session, %Event.Error{message: "boom"})
+      send_provider_event(session, %Event.Error{message: "boom"})
+
+      errors =
+        Session.messages(session)
+        |> Enum.filter(&match?({:system, "boom", :error}, &1))
+
+      assert length(errors) == 1
+    end
+
     test "revoke_tool_trust removes one or all entries" do
       session = start_subscribed_session()
       assert :ok = Session.set_tool_trust(session, "shell", :session)
@@ -2169,7 +2182,9 @@ defmodule MingaAgent.SessionTest do
 
       assert_receive {:agent_event, ^session, {:error, message}}, @event_timeout
       refute message =~ "provider_build_failed"
-      assert message =~ "API key"
+
+      assert message ==
+               "Couldn't authenticate with Anthropic. Run /auth anthropic <key> or pick another configured model with /model."
 
       assert Enum.any?(Session.messages(session), fn
                {:system, text, :error} -> text == message
