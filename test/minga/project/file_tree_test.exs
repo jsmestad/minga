@@ -378,12 +378,15 @@ defmodule Minga.Project.FileTreeTest do
       ref = make_ref()
       parent = self()
       handler_id = {__MODULE__, ref}
+      expected_root = Path.expand(tmp_dir)
 
       :telemetry.attach(
         handler_id,
         [:minga, :file_tree, :walk, :stop],
         fn _event, measurements, metadata, _ ->
-          send(parent, {ref, measurements, metadata})
+          if metadata.root == expected_root do
+            send(parent, {ref, measurements, metadata})
+          end
         end,
         nil
       )
@@ -403,23 +406,26 @@ defmodule Minga.Project.FileTreeTest do
     test "does not span when entries are already memoized", %{tmp_dir: tmp_dir} do
       touch(Path.join(tmp_dir, "a.txt"))
 
+      # Memoize before attaching telemetry so this observes only the already-populated path.
+      walked = tmp_dir |> FileTree.new() |> FileTree.ensure_entries()
+
       ref = make_ref()
       parent = self()
       handler_id = {__MODULE__, ref}
+      expected_root = Path.expand(tmp_dir)
 
       :telemetry.attach(
         handler_id,
         [:minga, :file_tree, :walk, :stop],
-        fn _event, _m, _meta, _ -> send(parent, {ref, :walked}) end,
+        fn _event, _m, metadata, _ ->
+          if metadata.root == expected_root do
+            send(parent, {ref, :walked})
+          end
+        end,
         nil
       )
 
       on_exit(fn -> :telemetry.detach(handler_id) end)
-
-      # First call walks (and memoizes entries); a second ensure_entries on the
-      # already-populated tree must not walk again.
-      walked = tmp_dir |> FileTree.new() |> FileTree.ensure_entries()
-      assert_receive {^ref, :walked}
 
       FileTree.ensure_entries(walked)
       refute_receive {^ref, :walked}

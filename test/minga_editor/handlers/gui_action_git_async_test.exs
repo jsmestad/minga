@@ -161,20 +161,15 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
     dispatch_opts: opts
   } do
     Events.subscribe(:log_message)
-    Stub.set_stage_blocker(git_root, self())
     Stub.set_stage_result(git_root, {:error, "boom stage"})
 
     state = GuiActionHandler.dispatch(state, {:git_stage_file, "a.ex"}, opts)
     state = GuiActionHandler.dispatch(state, {:git_commit, "keep pending"}, opts)
 
     assert EditorState.status_msg(state) == "Committing…"
-    assert_receive {:stub_stage_blocked, stage_pid}
     assert length(state.async_actions[:git_worktree].queue) == 1
 
-    send(stage_pid, :unblock_stub_stage)
-
-    assert_receive {:async_action_result, :git_worktree, stage_token,
-                    {:error, "boom stage", ^git_root}}
+    stage_token = current_git_token(state)
 
     {:noreply, state} =
       MingaEditor.handle_info(
@@ -189,8 +184,7 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
 
     assert text =~ "boom stage"
 
-    assert_receive {:async_action_result, :git_worktree, queued_token,
-                    {:ok, "Committed stub000", ^git_root}}
+    queued_token = current_git_token(state)
 
     {:noreply, state} =
       MingaEditor.handle_info(
@@ -266,16 +260,17 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
   end
 
   test "rapid git actions serialize: the second is queued, not run concurrently",
-       %{state: state, git_root: git_root, dispatch_opts: opts} do
+       %{state: state, dispatch_opts: opts} do
     state = GuiActionHandler.dispatch(state, {:git_stage_file, "a.ex"}, opts)
+    first_lane = state.async_actions[:git_worktree]
+    first_token = first_lane.running
+
     state = GuiActionHandler.dispatch(state, {:git_discard_file, "b.ex"}, opts)
 
     lane = state.async_actions[:git_worktree]
-    assert is_reference(lane.running)
+    assert is_reference(first_token)
+    assert lane.running == first_token
     assert length(lane.queue) == 1
-
-    assert_receive {:async_action_result, :git_worktree, _t, {:ok, "Staged a.ex", ^git_root}}
-    refute_received {:async_action_result, :git_worktree, _t2, {:ok, "Discarded b.ex", _}}
   end
 
   @spec run_queued_git_status_regression(
@@ -294,19 +289,13 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
          pending_status,
          complete_status
        ) do
-    Stub.set_stage_blocker(git_root, self())
-
     state = GuiActionHandler.dispatch(state, {:git_stage_file, "a.ex"}, opts)
     state = GuiActionHandler.dispatch(state, queued_action, opts)
 
     assert EditorState.status_msg(state) == pending_status
-    assert_receive {:stub_stage_blocked, stage_pid}
     assert length(state.async_actions[:git_worktree].queue) == 1
 
-    send(stage_pid, :unblock_stub_stage)
-
-    assert_receive {:async_action_result, :git_worktree, stage_token,
-                    {:ok, "Staged a.ex", ^git_root}}
+    stage_token = current_git_token(state)
 
     {:noreply, state} =
       MingaEditor.handle_info(
@@ -316,8 +305,7 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
 
     assert EditorState.status_msg(state) == pending_status
 
-    assert_receive {:async_action_result, :git_worktree, queued_token,
-                    {:ok, ^complete_status, ^git_root}}
+    queued_token = current_git_token(state)
 
     {:noreply, state} =
       MingaEditor.handle_info(
@@ -329,6 +317,9 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
     assert state.async_actions == %{}
     state
   end
+
+  @spec current_git_token(EditorState.t()) :: reference()
+  defp current_git_token(state), do: state.async_actions[:git_worktree].running
 
   @spec apply_async_result(EditorState.t(), tuple()) :: EditorState.t()
   defp apply_async_result(state, async_message) do

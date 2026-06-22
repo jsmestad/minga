@@ -64,17 +64,28 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   Returns the updated editor state. Unrecognized actions are logged and
   the state is returned unchanged.
   """
+  @git_root_resolver_key :__gui_action_resolve_git_root__
+
   @spec dispatch(state(), Protocol.GUI.gui_action(), keyword()) :: state()
   def dispatch(state, action, opts \\ []) do
+    previous_resolver = Process.get(@git_root_resolver_key, :__unset__)
+
     if fun = opts[:resolve_git_root] do
-      Process.put(:__gui_action_resolve_git_root__, fun)
+      Process.put(@git_root_resolver_key, fun)
     end
 
-    result = dispatch_action(state, action)
-
-    Process.delete(:__gui_action_resolve_git_root__)
-    result
+    try do
+      dispatch_action(state, action)
+    after
+      restore_git_root_resolver(previous_resolver)
+    end
   end
+
+  @spec restore_git_root_resolver(:__unset__ | function()) :: function() | nil
+  defp restore_git_root_resolver(:__unset__), do: Process.delete(@git_root_resolver_key)
+
+  defp restore_git_root_resolver(previous_resolver),
+    do: Process.put(@git_root_resolver_key, previous_resolver)
 
   # ── Internal dispatch clauses ────────────────────────────────────────
 
@@ -1239,8 +1250,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   @spec git_action(state(), String.t(), git_operation(), String.t()) :: state()
   defp git_action(state, pending_msg, operation, success_msg)
        when is_binary(pending_msg) and is_binary(success_msg) do
-    resolve_root =
-      Process.get(:__gui_action_resolve_git_root__, &MingaEditor.resolve_git_root/0)
+    resolve_root = Process.get(@git_root_resolver_key, &MingaEditor.resolve_git_root/0)
 
     state
     |> EditorState.set_status(pending_msg)
