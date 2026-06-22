@@ -100,15 +100,15 @@ defmodule MingaEditor.Input.ScopedTest do
       )
 
     {tab_bar, agent_tab} = TabBar.add(state.shell_state.tab_bar, :agent, "Agent")
-    workspace = Workspace.new_agent(1, "Agent", session) |> Workspace.set_agent_ui(agent_ui)
-    agent_tab = agent_tab |> Tab.set_session(session) |> Tab.set_group(workspace.id)
+    {tab_bar, workspace} = TabBar.add_workspace(tab_bar, "Agent", session)
+    workspace = Workspace.set_agent_ui(workspace, agent_ui)
 
-    tab_bar = %{
+    tab_bar =
       tab_bar
-      | tabs: replace_tab(tab_bar.tabs, agent_tab),
-        workspaces: tab_bar.workspaces ++ [workspace],
-        next_workspace_id: workspace.id + 1
-    }
+      |> TabBar.update_workspace(workspace.id, fn _ -> workspace end)
+      |> TabBar.update_tab(agent_tab.id, fn tab ->
+        tab |> Tab.set_session(session) |> Tab.set_group(workspace.id)
+      end)
 
     shell_state = %{
       state.shell_state
@@ -120,14 +120,6 @@ defmodule MingaEditor.Input.ScopedTest do
     state = %{state | shell_state: shell_state, workspace: workspace_state}
 
     {state, session, file_buffer, agent_buffer}
-  end
-
-  @spec replace_tab([Tab.t()], Tab.t()) :: [Tab.t()]
-  defp replace_tab(tabs, replacement) do
-    Enum.map(tabs, fn
-      %Tab{id: id} when id == replacement.id -> replacement
-      tab -> tab
-    end)
   end
 
   defp focus_prompt(state, text) do
