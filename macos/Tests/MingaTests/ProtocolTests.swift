@@ -735,6 +735,7 @@ final class SpyEncoder: InputEncoder, Sendable {
         case newTab
         case systemWillSleep
         case systemDidWake
+        case systemWillUnmount(volumePath: String)
         case cmdCopy
         case cmdCut
         case panelSwitchTab(index: UInt8)
@@ -837,6 +838,7 @@ final class SpyEncoder: InputEncoder, Sendable {
     func sendNewTab() { state.withLock { $0.guiActions.append(.newTab) } }
     func sendSystemWillSleep() { state.withLock { $0.guiActions.append(.systemWillSleep) } }
     func sendSystemDidWake() { state.withLock { $0.guiActions.append(.systemDidWake) } }
+    func sendSystemWillUnmount(volumePath: String) { state.withLock { $0.guiActions.append(.systemWillUnmount(volumePath: volumePath)) } }
     func sendCmdCopy() { state.withLock { $0.guiActions.append(.cmdCopy) } }
     func sendCmdCut() { state.withLock { $0.guiActions.append(.cmdCut) } }
     func sendPanelSwitchTab(index: UInt8) { state.withLock { $0.guiActions.append(.panelSwitchTab(index: index)) } }

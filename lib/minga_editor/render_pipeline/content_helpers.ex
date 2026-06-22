@@ -428,7 +428,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
   def diagnostic_signs_for_path(nil), do: %{}
 
   def diagnostic_signs_for_path(path) when is_binary(path) do
-    Diagnostics.severity_by_line(SyncServer.path_to_uri(path))
+    Diagnostics.gutter_signs_by_line(SyncServer.path_to_uri(path))
   end
 
   # ── Visual selection ───────────────────────────────────────────────────────

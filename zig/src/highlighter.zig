@@ -2633,11 +2633,11 @@ test "highlighter: canonicalLangName resolves aliases to shipped grammars" {
     var hl = try Highlighter.init(std.testing.allocator);
     defer hl.deinit();
     const targets = [_][]const u8{
-        "javascript", "typescript", "bash",   "cpp",    "c",
-        "c_sharp",    "ruby",       "yaml",    "python", "go",
-        "rust",       "kotlin",     "markdown", "json",  "html",
-        "dockerfile", "make",       "objc",    "elisp",  "elixir",
-        "graphql",    "hcl",        "protobuf", "vim",   "haskell",
+        "javascript", "typescript", "bash",     "cpp",    "c",
+        "c_sharp",    "ruby",       "yaml",     "python", "go",
+        "rust",       "kotlin",     "markdown", "json",   "html",
+        "dockerfile", "make",       "objc",     "elisp",  "elixir",
+        "graphql",    "hcl",        "protobuf", "vim",    "haskell",
     };
     for (targets) |t| {
         try std.testing.expect(hl.languages.get(t) != null);

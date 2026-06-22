@@ -57,6 +57,20 @@ defmodule Minga.Project.FileTreeTest do
     end
 
     @tag :tmp_dir
+    test "ignores directories from the configured file_find_excludes list", %{tmp_dir: tmp_dir} do
+      # "vendor" is in :file_find_excludes but was never in the old hardcoded
+      # @default_ignore, so this proves the tree reads the shared config.
+      assert "vendor" in Minga.Config.get(:file_find_excludes)
+      mkdir(Path.join(tmp_dir, "vendor"))
+      mkdir(Path.join(tmp_dir, "src"))
+
+      names = tmp_dir |> FileTree.new() |> names()
+
+      assert "src" in names
+      refute "vendor" in names
+    end
+
+    @tag :tmp_dir
     test "only expanded directories expose children and child depth", %{tmp_dir: tmp_dir} do
       mkdir(Path.join(tmp_dir, "lib"))
       touch(Path.join([tmp_dir, "lib", "app.ex"]))
@@ -307,6 +321,53 @@ defmodule Minga.Project.FileTreeTest do
       assert names(tree) == ["alpha.txt", "beta.txt"]
     end
 
+    test "filters the cached path list in memory without walking the filesystem" do
+      # No tmp_dir / no files on disk: a walk would return []. The matches come
+      # entirely from the injected cache, proving in-memory filtering (#2377 AC2).
+      tree =
+        "/nonexistent_project_root"
+        |> FileTree.new()
+        |> FileTree.put_cached_files(["lib/target.ex", "lib/other.ex", "README.md"])
+        |> FileTree.set_filter("target")
+
+      assert names(tree) == ["target.ex"]
+      assert paths(tree) == ["/nonexistent_project_root/lib/target.ex"]
+    end
+
+    test "cache filtering presents matches flat at depth 0" do
+      tree =
+        "/root"
+        |> FileTree.new()
+        |> FileTree.put_cached_files(["a/b/c/deep.ex"])
+        |> FileTree.set_filter("deep")
+
+      assert [%{depth: 0, dir?: false, guides: []}] = FileTree.visible_entries(tree)
+    end
+
+    test "an empty cache yields no matches and does not walk the filesystem" do
+      tree =
+        "/nonexistent_project_root"
+        |> FileTree.new()
+        |> FileTree.put_cached_files([])
+        |> FileTree.set_filter("anything")
+
+      assert FileTree.visible_entries(tree) == []
+    end
+
+    @tag :tmp_dir
+    test "clearing the cache restores the filesystem walk for filtering", %{tmp_dir: tmp_dir} do
+      touch(Path.join(tmp_dir, "walked.ex"))
+
+      tree =
+        tmp_dir
+        |> FileTree.new()
+        |> FileTree.put_cached_files(["cached_only.ex"])
+        |> FileTree.put_cached_files(nil)
+        |> FileTree.set_filter("walked")
+
+      assert names(tree) == ["walked.ex"]
+    end
+
     @tag :tmp_dir
     test "reroot preserves display settings and opens the new root", %{tmp_dir: tmp_dir} do
       next_root = Path.join(tmp_dir, "child")
@@ -377,16 +438,14 @@ defmodule Minga.Project.FileTreeTest do
 
       ref = make_ref()
       parent = self()
+      root = Path.expand(tmp_dir)
       handler_id = {__MODULE__, ref}
-      expected_root = Path.expand(tmp_dir)
 
       :telemetry.attach(
         handler_id,
         [:minga, :file_tree, :walk, :stop],
         fn _event, measurements, metadata, _ ->
-          if metadata.root == expected_root do
-            send(parent, {ref, measurements, metadata})
-          end
+          if metadata.root == root, do: send(parent, {ref, measurements, metadata})
         end,
         nil
       )
@@ -406,21 +465,25 @@ defmodule Minga.Project.FileTreeTest do
     test "does not span when entries are already memoized", %{tmp_dir: tmp_dir} do
       touch(Path.join(tmp_dir, "a.txt"))
 
-      # Memoize before attaching telemetry so this observes only the already-populated path.
+      # Memoize before attaching the handler so this test observes only the
+      # already-populated path. The preceding telemetry test covers the real
+      # walk event; this one should fail only if the memoized path emits.
       walked = tmp_dir |> FileTree.new() |> FileTree.ensure_entries()
 
       ref = make_ref()
       parent = self()
       handler_id = {__MODULE__, ref}
+
+      # Filter on this test's root so a concurrent (async) walk in another test
+      # never trips the refute_receive below; telemetry handlers are global.
       expected_root = Path.expand(tmp_dir)
 
       :telemetry.attach(
         handler_id,
         [:minga, :file_tree, :walk, :stop],
-        fn _event, _m, metadata, _ ->
-          if metadata.root == expected_root do
-            send(parent, {ref, :walked})
-          end
+        fn
+          _event, _m, %{root: ^expected_root}, _ -> send(parent, {ref, :walked})
+          _event, _m, _meta, _ -> :ok
         end,
         nil
       )

@@ -80,6 +80,13 @@ defmodule MingaAgent.ProjectView.RecordingBackend do
   end
 
   @impl true
+  @spec prepare_working_dir(ProjectView.t()) :: {:ok, String.t()}
+  def prepare_working_dir(%ProjectView{} = view) do
+    record(view, :prepare_working_dir)
+    {:ok, view.ref.working_dir}
+  end
+
+  @impl true
   @spec command_env(ProjectView.t()) :: [{String.t(), String.t()}]
   def command_env(%ProjectView{} = view) do
     record(view, :command_env)

@@ -13,6 +13,14 @@ defmodule MingaEditor.State.Picker do
   @typedoc "Async loading status for sources that fetch candidates in the background."
   @type load_status :: :ready | :loading | {:error, String.t()}
 
+  @typedoc """
+  Latest-wins guard for async candidate fetches. Each `open_async` mints a fresh
+  reference; a result whose revision doesn't match the live picker's is stale and
+  dropped. Unlike the AsyncAction lane token (FIFO serial), this drops *older*
+  in-flight fetches when a newer search, project switch, or reopen supersedes them.
+  """
+  @type fetch_revision :: reference() | nil
+
   @type t :: %__MODULE__{
           picker: MingaEditor.UI.Picker.t() | nil,
           source: module() | nil,
@@ -23,7 +31,8 @@ defmodule MingaEditor.State.Picker do
           layout: MingaEditor.UI.Picker.Source.layout(),
           original_source: module() | nil,
           mode_prefix: String.t(),
-          load_status: load_status()
+          load_status: load_status(),
+          fetch_revision: fetch_revision()
         }
 
   defstruct picker: nil,
@@ -35,7 +44,8 @@ defmodule MingaEditor.State.Picker do
             layout: :bottom,
             original_source: nil,
             mode_prefix: "",
-            load_status: :ready
+            load_status: :ready,
+            fetch_revision: nil
 
   @doc "Returns true if a picker is currently open."
   @spec open?(t()) :: boolean()
@@ -53,4 +63,22 @@ defmodule MingaEditor.State.Picker do
   def update_picker(%__MODULE__{} = ps, picker) do
     %{ps | picker: picker}
   end
+
+  @doc """
+  Mints a fresh fetch revision and marks the picker as loading.
+
+  Call this when starting an async candidate fetch. The returned `{ps, revision}`
+  tuple lets the caller tag the off-path fetch with `revision` so a stale result
+  (one whose revision no longer matches the live picker) can be dropped.
+  """
+  @spec begin_fetch(t()) :: {t(), reference()}
+  def begin_fetch(%__MODULE__{} = ps) do
+    revision = make_ref()
+    {%{ps | fetch_revision: revision, load_status: :loading}, revision}
+  end
+
+  @doc "Returns whether `revision` is the picker's current (live) fetch revision."
+  @spec current_fetch?(t(), fetch_revision()) :: boolean()
+  def current_fetch?(%__MODULE__{fetch_revision: revision}, revision), do: true
+  def current_fetch?(%__MODULE__{}, _revision), do: false
 end

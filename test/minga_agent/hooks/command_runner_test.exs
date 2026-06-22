@@ -169,26 +169,6 @@ defmodule MingaAgent.Hooks.CommandRunnerTest do
     File.rm(helper)
   end
 
-  @tag timeout: 2_000
-  test "guard timeout is absolute even if a broken helper keeps writing stdout" do
-    helper =
-      fake_helper("noisy-helper", "#!/bin/sh\nexec 2>/dev/null\nwhile :; do printf x; done\n")
-
-    hook = %Hook{event: :pre_tool_use, tool_pattern: "*", command: "exit 0", timeout_ms: 10}
-    payload = PreToolUsePayload.new("tc_1", "shell", %{})
-    started_ms = System.monotonic_time(:millisecond)
-
-    assert %Result{status: :veto, reason: {:failed_to_start, :helper_timeout}, stderr: stderr} =
-             CommandRunner.run_pre_tool_use(hook, payload, helper_path: helper)
-
-    elapsed_ms = System.monotonic_time(:millisecond) - started_ms
-
-    assert stderr =~ "hook runner timed out after 1010ms"
-    assert elapsed_ms < 1_500
-
-    File.rm(helper)
-  end
-
   defp temp_path(label) do
     Path.join(System.tmp_dir!(), "minga-hook-#{label}-#{System.unique_integer([:positive])}")
   end

@@ -468,7 +468,7 @@ struct BottomPanelStateLifecycleTests {
     @MainActor func hideKeepsMessages() {
         let state = BottomPanelState()
         state.messagesState.appendEntries([
-            Wire.MessageEntry(id: 1, level: 1, subsystem: 0,
+            Wire.MessageEntry(streamInstance: 1, id: 1, level: 1, subsystem: 0,
                            timestampSecs: 0, filePath: "", text: "test")
         ])
         state.hide()
@@ -488,7 +488,7 @@ struct MessagesContentStateLifecycleTests {
 
         // Add 5 entries
         let entries = (0..<5).map {
-            Wire.MessageEntry(id: UInt32($0), level: 1, subsystem: 0,
+            Wire.MessageEntry(streamInstance: 1, id: UInt32($0), level: 1, subsystem: 0,
                            timestampSecs: UInt32($0), filePath: "", text: "msg \($0)")
         }
         state.appendEntries(entries)
@@ -499,11 +499,11 @@ struct MessagesContentStateLifecycleTests {
     @MainActor func filteringWorks() {
         let state = MessagesContentState()
         state.appendEntries([
-            Wire.MessageEntry(id: 0, level: 0, subsystem: 0, timestampSecs: 0,
+            Wire.MessageEntry(streamInstance: 1, id: 0, level: 0, subsystem: 0, timestampSecs: 0,
                            filePath: "", text: "debug msg"),
-            Wire.MessageEntry(id: 1, level: 1, subsystem: 0, timestampSecs: 0,
+            Wire.MessageEntry(streamInstance: 1, id: 1, level: 1, subsystem: 0, timestampSecs: 0,
                            filePath: "", text: "info msg"),
-            Wire.MessageEntry(id: 2, level: 3, subsystem: 1, timestampSecs: 0,
+            Wire.MessageEntry(streamInstance: 1, id: 2, level: 3, subsystem: 1, timestampSecs: 0,
                            filePath: "", text: "error in LSP"),
         ])
 
@@ -520,9 +520,9 @@ struct MessagesContentStateLifecycleTests {
     @MainActor func searchFilters() {
         let state = MessagesContentState()
         state.appendEntries([
-            Wire.MessageEntry(id: 0, level: 1, subsystem: 0, timestampSecs: 0,
+            Wire.MessageEntry(streamInstance: 1, id: 0, level: 1, subsystem: 0, timestampSecs: 0,
                            filePath: "", text: "File opened: editor.ex"),
-            Wire.MessageEntry(id: 1, level: 1, subsystem: 0, timestampSecs: 0,
+            Wire.MessageEntry(streamInstance: 1, id: 1, level: 1, subsystem: 0, timestampSecs: 0,
                            filePath: "", text: "File saved: buffer.ex"),
         ])
 
@@ -571,7 +571,7 @@ struct MessagesContentStateLifecycleTests {
 
         // New entries while scrolled up show "new entries" indicator
         state.appendEntries([
-            Wire.MessageEntry(id: 0, level: 1, subsystem: 0, timestampSecs: 0,
+            Wire.MessageEntry(streamInstance: 1, id: 0, level: 1, subsystem: 0, timestampSecs: 0,
                            filePath: "", text: "new")
         ])
         #expect(state.hasNewEntries == true)
@@ -602,7 +602,7 @@ struct MessagesContentStateLifecycleTests {
         #expect(state.isAutoScrolling == true)
 
         state.appendEntries([
-            Wire.MessageEntry(id: 0, level: 1, subsystem: 0, timestampSecs: 0,
+            Wire.MessageEntry(streamInstance: 1, id: 0, level: 1, subsystem: 0, timestampSecs: 0,
                            filePath: "", text: "tailing")
         ])
         // At the bottom, new entries follow the tail rather than raising the
@@ -615,7 +615,7 @@ struct MessagesContentStateLifecycleTests {
         let state = MessagesContentState()
         state.scrolledUp()
         state.appendEntries([
-            Wire.MessageEntry(id: 0, level: 1, subsystem: 0, timestampSecs: 0,
+            Wire.MessageEntry(streamInstance: 1, id: 0, level: 1, subsystem: 0, timestampSecs: 0,
                            filePath: "", text: "new")
         ])
         #expect(state.hasNewEntries == true)

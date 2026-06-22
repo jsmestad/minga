@@ -159,7 +159,9 @@ defmodule Minga.Events do
       :behind,
       entry_base_path: nil,
       last_commit_message: "",
-      stash_count: 0
+      stash_count: 0,
+      degraded?: false,
+      degraded_reason: nil
     ]
 
     @type t :: %__MODULE__{
@@ -170,7 +172,9 @@ defmodule Minga.Events do
             behind: non_neg_integer(),
             entry_base_path: String.t() | nil,
             last_commit_message: String.t(),
-            stash_count: non_neg_integer()
+            stash_count: non_neg_integer(),
+            degraded?: boolean(),
+            degraded_reason: Minga.Git.Repo.degraded_reason() | nil
           }
   end
 

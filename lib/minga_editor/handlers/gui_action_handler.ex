@@ -109,6 +109,10 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     |> Renderer.render_or_async()
   end
 
+  defp dispatch_action(state, {:system_will_unmount, volume_path}) do
+    handle_volume_will_unmount(state, volume_path)
+  end
+
   defp dispatch_action(state, {:power_thermal_state, low_power?, thermal_state}) do
     Minga.Log.info(
       :editor,
@@ -1606,6 +1610,80 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   defp tab_buffer_list(_tab), do: []
+
+  # ── Volume unmount helpers ─────────────────────────────────────────
+
+  # A volume is about to unmount. Protect any open buffers living under that
+  # mount point: best-effort save dirty buffers so unsaved work is not lost,
+  # then mark every affected buffer read-only so later edits and writes to the
+  # now-stale path are rejected instead of failing silently.
+  @spec handle_volume_will_unmount(state(), String.t()) :: state()
+  defp handle_volume_will_unmount(state, volume_path) do
+    prefix = normalize_volume_prefix(volume_path)
+
+    case buffers_under_prefix(prefix) do
+      [] ->
+        Minga.Log.info(:editor, "Volume will unmount (#{volume_path}); no open buffers affected")
+        state
+
+      pids ->
+        saved = save_and_disconnect_buffers(pids)
+
+        Minga.Log.info(
+          :editor,
+          "Volume will unmount (#{volume_path}); disconnected #{length(pids)} buffer(s), saved #{saved}"
+        )
+
+        EditorState.set_status(
+          state,
+          "Volume unmounted: saved #{saved} and disconnected #{length(pids)} buffer(s) under #{volume_path}"
+        )
+    end
+  end
+
+  # Mount paths arrive without a trailing slash (e.g. "/Volumes/USB"). Append one
+  # so prefix matching does not treat "/Volumes/USB2" as living under "/Volumes/USB".
+  @spec normalize_volume_prefix(String.t()) :: String.t()
+  defp normalize_volume_prefix(volume_path) do
+    expanded = Path.expand(volume_path)
+    if String.ends_with?(expanded, "/"), do: expanded, else: expanded <> "/"
+  end
+
+  # All live, file-backed buffer pids whose absolute path lives under the prefix.
+  @spec buffers_under_prefix(String.t()) :: [pid()]
+  defp buffers_under_prefix(prefix) do
+    Minga.Buffer.Registry
+    |> Registry.select([{{:_, :"$1", :_}, [], [:"$1"]}])
+    |> Enum.filter(&buffer_under_prefix?(&1, prefix))
+  end
+
+  @spec buffer_under_prefix?(pid(), String.t()) :: boolean()
+  defp buffer_under_prefix?(pid, prefix) do
+    Process.alive?(pid) and
+      Buffer.buffer_type(pid) == :file and
+      case Buffer.file_path(pid) do
+        path when is_binary(path) -> String.starts_with?(path, prefix)
+        _ -> false
+      end
+  catch
+    :exit, _ -> false
+  end
+
+  # Best-effort save each dirty buffer, then mark every buffer read-only so the
+  # stale path can no longer be written. Returns the count of buffers saved.
+  @spec save_and_disconnect_buffers([pid()]) :: non_neg_integer()
+  defp save_and_disconnect_buffers(pids) do
+    Enum.reduce(pids, 0, fn pid, saved -> save_and_disconnect_buffer(pid, saved) end)
+  end
+
+  @spec save_and_disconnect_buffer(pid(), non_neg_integer()) :: non_neg_integer()
+  defp save_and_disconnect_buffer(pid, saved) do
+    saved = if Buffer.dirty?(pid) and Buffer.save(pid) == :ok, do: saved + 1, else: saved
+    Buffer.set_read_only(pid, true)
+    saved
+  catch
+    :exit, _ -> saved
+  end
 
   # ── Git repo helpers ───────────────────────────────────────────────
 

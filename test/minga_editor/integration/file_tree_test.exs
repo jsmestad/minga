@@ -88,6 +88,71 @@ defmodule Minga.Integration.FileTreeTest do
     end
   end
 
+  describe "filtering reads the project cache (#2377)" do
+    test "filtering the active project root matches descendants from the cache", %{tmp_dir: dir} do
+      ctx = start_project_editor(dir)
+
+      Minga.Events.subscribe(:project_rebuilt)
+      Minga.Project.switch(dir)
+      await_project_rebuild(dir)
+
+      ctx = open_file_tree(ctx)
+
+      # `/` enters filtering, then type a needle that only matches a nested file.
+      send_keys_sync(ctx, "/gamma")
+
+      assert file_tree_contains?(ctx, "gamma.txt"),
+             "filtering should surface the nested match from the cache without expanding"
+
+      refute file_tree_contains?(ctx, "alpha.txt"),
+             "non-matching entries should be filtered out"
+    end
+
+    test "an open filtered tree refreshes when the project cache rebuilds", %{tmp_dir: dir} do
+      %{file: file, project_root: root} = setup_fixture(%{tmp_dir: dir})
+
+      # Share the default event registry with the global Minga.Project so the
+      # editor receives its :project_rebuilt broadcasts.
+      registry = Minga.Events.default_registry()
+
+      ctx =
+        start_editor("alpha content",
+          file_path: file,
+          project_root: root,
+          events_registry: registry
+        )
+
+      Minga.Events.subscribe(:project_rebuilt, registry)
+      Minga.Project.switch(dir)
+      await_project_rebuild(dir)
+
+      ctx = open_file_tree(ctx)
+      send_keys_sync(ctx, "/delta")
+
+      refute file_tree_contains?(ctx, "delta.txt")
+
+      # Add a matching file and rebuild the cache; the open filtered tree should
+      # pick it up on the :project_rebuilt event.
+      File.write!(Path.join(dir, "delta.txt"), "delta content")
+      Minga.Project.invalidate()
+      await_project_rebuild(dir)
+      _ = editor_state(ctx)
+
+      assert file_tree_contains?(ctx, "delta.txt"),
+             "the filtered tree should re-filter the rebuilt cache on :project_rebuilt"
+    end
+  end
+
+  defp await_project_rebuild(root) do
+    if Minga.Project.rebuilding?() do
+      assert_receive {:minga_event, :project_rebuilt,
+                      %Minga.Events.ProjectRebuiltEvent{root: ^root}},
+                     5_000
+    end
+
+    _ = :sys.get_state(Minga.Project)
+  end
+
   defp file_tree_contains?(ctx, name) do
     ctx
     |> editor_state()

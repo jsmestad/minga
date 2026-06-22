@@ -218,6 +218,7 @@ pub const GUI_ACTION_SEARCH_DISMISS = opcodes.GUI_ACTION_SEARCH_DISMISS;
 pub const GUI_ACTION_SIDEBAR_ACTION = opcodes.GUI_ACTION_SIDEBAR_ACTION;
 pub const GUI_ACTION_EXTENSION_ACTION = opcodes.GUI_ACTION_EXTENSION_ACTION;
 pub const GUI_ACTION_FLOAT_POPUP_DISMISS = opcodes.GUI_ACTION_FLOAT_POPUP_DISMISS;
+pub const GUI_ACTION_SYSTEM_WILL_UNMOUNT = opcodes.GUI_ACTION_SYSTEM_WILL_UNMOUNT;
 // END GENERATED OPCODE EXPORTS.
 
 // Log levels
@@ -1504,9 +1505,9 @@ fn guiBottomPanelSize(payload: []const u8) usize {
         if (!readString8Size(payload, &offset)) return payload.len;
     }
 
-    if (payload.len < offset + 2) return payload.len;
-    const entry_count = std.mem.readInt(u16, payload[offset..][0..2], .big);
-    offset += 2;
+    if (payload.len < offset + 6) return payload.len;
+    const entry_count = std.mem.readInt(u16, payload[offset + 4 ..][0..2], .big);
+    offset += 6;
 
     var entry_index: u16 = 0;
     while (entry_index < entry_count) : (entry_index += 1) {
@@ -2763,6 +2764,8 @@ test "commandSize: gui_bottom_panel packet" {
         'T',                 'e',
         's',                 't',
         's',                 0,
+        0,                   0,
+        7,                   0,
         1,                   0,
         0,                   0,
         7,                   3,

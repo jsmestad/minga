@@ -24,7 +24,8 @@ defmodule Minga.DiagnosticsTest do
       severity: Keyword.get(opts, :severity, :error),
       message: Keyword.get(opts, :message, "test error"),
       source: Keyword.get(opts, :source, "test_server"),
-      code: Keyword.get(opts, :code, nil)
+      code: Keyword.get(opts, :code, nil),
+      advisory: Keyword.get(opts, :advisory, false)
     }
   end
 
@@ -165,6 +166,30 @@ defmodule Minga.DiagnosticsTest do
 
     test "returns empty map for unknown URI", %{server: s} do
       assert Diagnostics.severity_by_line(s, "file:///nope") == %{}
+    end
+  end
+
+  describe "gutter_signs_by_line/2" do
+    test "marks advisory-only lines as :diag_advisory", %{server: s} do
+      ext = make_diag(line: 3, severity: :hint, advisory: true)
+      Diagnostics.publish(s, :"ext:adversarial", @uri, [ext])
+
+      assert Diagnostics.gutter_signs_by_line(s, @uri)[3] == :diag_advisory
+    end
+
+    test "uses real severity for non-advisory lines", %{server: s} do
+      Diagnostics.publish(s, :server_a, @uri, [make_diag(line: 1, severity: :warning)])
+
+      assert Diagnostics.gutter_signs_by_line(s, @uri)[1] == :warning
+    end
+
+    test "real diagnostics win over advisory on the same line", %{server: s} do
+      real = make_diag(line: 2, severity: :error, source: "expert")
+      ext = make_diag(line: 2, severity: :hint, advisory: true)
+      Diagnostics.publish(s, :expert, @uri, [real])
+      Diagnostics.publish(s, :"ext:adversarial", @uri, [ext])
+
+      assert Diagnostics.gutter_signs_by_line(s, @uri)[2] == :error
     end
   end
 

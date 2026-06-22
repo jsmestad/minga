@@ -126,6 +126,23 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
       assert :filetype_menu in segment_targets(@base_data)
     end
 
+    test "agent status command replaces built-in agent label" do
+      theme = MingaEditor.UI.Theme.get!(:doom_one)
+      agent_colors = MingaEditor.UI.Theme.agent_theme(theme)
+
+      data =
+        Map.merge(@base_data, %{
+          agent_status: :thinking,
+          agent_status_command: "sonnet | thinking",
+          agent_theme_colors: agent_colors
+        })
+
+      text = segments_text(data, theme)
+
+      assert String.contains?(text, "sonnet | thinking")
+      refute String.contains?(text, "Thinking")
+    end
+
     test "agent status indicators show text labels" do
       theme = MingaEditor.UI.Theme.get!(:doom_one)
       agent_colors = MingaEditor.UI.Theme.agent_theme(theme)
@@ -191,6 +208,16 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
         for expected <- includes, do: assert(String.contains?(text, expected))
         for unexpected <- excludes, do: refute(String.contains?(text, unexpected))
       end
+    end
+
+    test "renders a degraded warning indicator when git status is degraded" do
+      degraded_icon = "\u{F071}"
+
+      degraded = segments_text(Map.merge(@base_data, %{git_branch: "main", git_degraded: true}))
+      assert String.contains?(degraded, degraded_icon)
+
+      healthy = segments_text(Map.merge(@base_data, %{git_branch: "main", git_degraded: false}))
+      refute String.contains?(healthy, degraded_icon)
     end
   end
 

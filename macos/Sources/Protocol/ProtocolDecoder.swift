@@ -567,6 +567,9 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             let iconColorG = data[pos]; pos += 1
             let iconColorB = data[pos]; pos += 1
 
+            guard pos + 1 <= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
+            let heatLevel = data[pos]; pos += 1
+
             entries.append(Wire.FileTreeEntry(
                 pathHash: pathHash,
                 id: id,
@@ -593,7 +596,8 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                 name: name,
                 relPath: relPath,
                 editingType: editingType,
-                editingText: editingText
+                editingText: editingText,
+                heatLevel: heatLevel
             ))
         }
 
@@ -1491,15 +1495,16 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             pos += nameLen
             tabs.append(Wire.BottomPanelTab(tabType: tabType, name: name))
         }
-        // Content payload: entry_count(2) + entries...
+        // Messages content payload: stream_instance(4) + entry_count(2) + entries...
         var entries: [Wire.MessageEntry] = []
-        guard data.count >= pos + 2 else {
+        guard data.count >= pos + 6 else {
             return (.guiBottomPanel(visible: true, activeTabIndex: activeTabIndex,
                                      heightPercent: heightPercent, filterPreset: filterPreset,
                                      tabs: tabs, entries: []), pos - offset)
         }
-        let entryCount = Int(readU16(data, pos))
-        pos += 2
+        let streamInstance = readU32(data, pos)
+        let entryCount = Int(readU16(data, pos + 4))
+        pos += 6
         for _ in 0..<entryCount {
             // id(4) + level(1) + subsystem(1) + timestamp_secs(4) + path_len(2)
             guard data.count >= pos + 12 else { break }
@@ -1519,7 +1524,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             guard data.count >= pos + textLen else { break }
             let text = String(data: data[pos..<(pos + textLen)], encoding: .utf8) ?? ""
             pos += textLen
-            entries.append(Wire.MessageEntry(id: entryId, level: level, subsystem: subsystem,
+            entries.append(Wire.MessageEntry(streamInstance: streamInstance, id: entryId, level: level, subsystem: subsystem,
                                             timestampSecs: tsSecs, filePath: filePath, text: text))
         }
         return (.guiBottomPanel(visible: true, activeTabIndex: activeTabIndex,
@@ -1565,7 +1570,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             case 0x02: // Rows: row_count(2) + rows...
                 wcRows = try decodeWindowContentRows(data: data, start: wcSStart, end: wcSStart + wcSLen)
 
-            case 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09:
+            case 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A:
                 _ = try decodeOverlaySection(id: wcSId, data: data, start: wcSStart, length: wcSLen, end: wcSStart + wcSLen, into: &wcOverlays)
 
             default: break
@@ -1573,6 +1578,8 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
 
             wcPos = wcSStart + wcSLen
         }
+
+        let scrollPresentation = try validatedScrollPresentation(wcOverlays.scrollPresentation, windowId: wcWindowId, contentEpoch: wcContentEpoch)
 
         let content = GUIWindowContent(
             windowId: wcWindowId,
@@ -1590,7 +1597,8 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             documentHighlights: wcOverlays.documentHighlights,
             lineAnnotations: wcOverlays.lineAnnotations,
             paneGeometry: wcOverlays.paneGeometry,
-            cursorline: wcOverlays.cursorline
+            cursorline: wcOverlays.cursorline,
+            scrollPresentation: scrollPresentation
         )
         return (.guiWindowContent(data: content), wcPos - offset)
 
@@ -2806,7 +2814,7 @@ private func decodeStatusBarSegments(data: Data, pos: inout Int, count: Int, end
 
 // MARK: - Shared overlay section decoding
 
-/// Accumulator for overlay sections 0x03-0x09 shared by OP_GUI_WINDOW_CONTENT
+/// Accumulator for overlay sections 0x03-0x0A shared by OP_GUI_WINDOW_CONTENT
 /// and the window-rows-delta decoder.
 private struct DecodedOverlaySections {
     var selection: GUISelectionOverlay? = nil
@@ -2816,9 +2824,10 @@ private struct DecodedOverlaySections {
     var lineAnnotations: [GUILineAnnotation] = []
     var paneGeometry: GUIPaneGeometry? = nil
     var cursorline: GUICursorline? = nil
+    var scrollPresentation: GUIScrollPresentation? = nil
 }
 
-/// Decodes a single overlay section (IDs 0x03-0x09) into `sections`.
+/// Decodes a single overlay section (IDs 0x03-0x0A) into `sections`.
 /// Returns true if the section ID was handled, false otherwise.
 private func decodeOverlaySection(id: UInt8, data: Data, start: Int, length: Int, end: Int, into sections: inout DecodedOverlaySections) throws -> Bool {
     switch id {
@@ -2910,6 +2919,10 @@ private func decodeOverlaySection(id: UInt8, data: Data, start: Int, length: Int
         sections.cursorline = GUICursorline(row: readU16(data, start), bg: readU24(data, start + 2))
         return true
 
+    case 0x0A: // ScrollPresentation
+        sections.scrollPresentation = try decodeScrollPresentation(data: data, start: start, end: end)
+        return true
+
     default:
         return false
     }
@@ -2958,7 +2971,7 @@ private func decodeWindowRowsDelta(data: Data, offset: Int) throws -> (GUIWindow
             sawRows = true
             rows = try decodeWindowDeltaRows(data: data, start: sectionStart, end: sectionEnd)
 
-        case 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09:
+        case 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A:
             _ = try decodeOverlaySection(id: sectionId, data: data, start: sectionStart, length: sectionLen, end: sectionEnd, into: &overlays)
 
         default:
@@ -2969,6 +2982,7 @@ private func decodeWindowRowsDelta(data: Data, offset: Int) throws -> (GUIWindow
     }
 
     guard sawHeader, sawRows else { throw ProtocolDecodeError.malformed }
+    let scrollPresentation = try validatedScrollPresentation(overlays.scrollPresentation, windowId: windowId, contentEpoch: contentEpoch)
 
     let delta = GUIWindowRowsDelta(
         windowId: windowId,
@@ -2985,7 +2999,8 @@ private func decodeWindowRowsDelta(data: Data, offset: Int) throws -> (GUIWindow
         documentHighlights: overlays.documentHighlights,
         lineAnnotations: overlays.lineAnnotations,
         paneGeometry: overlays.paneGeometry,
-        cursorline: overlays.cursorline
+        cursorline: overlays.cursorline,
+        scrollPresentation: scrollPresentation
     )
 
     return (delta, pos - offset)
@@ -3341,6 +3356,32 @@ private func decodeChatMessageCandidates(data: Data, start: Int, end: Int) throw
     default:
         throw ProtocolDecodeError.malformed
     }
+}
+
+private func validatedScrollPresentation(_ presentation: GUIScrollPresentation?, windowId: UInt16, contentEpoch: UInt32) throws -> GUIScrollPresentation? {
+    guard let presentation else { return nil }
+    guard presentation.matches(windowId: windowId, contentEpoch: contentEpoch) else {
+        throw ProtocolDecodeError.malformed
+    }
+    return presentation
+}
+
+private func decodeScrollPresentation(data: Data, start: Int, end: Int) throws -> GUIScrollPresentation {
+    guard start + 35 <= end else { throw ProtocolDecodeError.malformed }
+
+    return GUIScrollPresentation(
+        windowId: readU16(data, start),
+        resetRequired: data[start + 2] & 0x01 != 0,
+        anchorTop: readU32(data, start + 3),
+        anchorLeft: readU16(data, start + 7),
+        anchorVisualRowOffset: readU16(data, start + 9),
+        visibleStartLine: readU32(data, start + 11),
+        visibleEndLine: readU32(data, start + 15),
+        overscanStartLine: readU32(data, start + 19),
+        overscanEndLine: readU32(data, start + 23),
+        contentEpoch: readU32(data, start + 27),
+        layoutGeneration: readU32(data, start + 31)
+    )
 }
 
 private func decodePaneGeometry(data: Data, start: Int, end: Int) throws -> GUIPaneGeometry {

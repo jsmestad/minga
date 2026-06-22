@@ -377,6 +377,20 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
     end
   end
 
+  describe "decode_gui_action for system_will_unmount" do
+    test "decodes the unmounting volume path from a string16 payload" do
+      path = "/Volumes/USB"
+      payload = <<byte_size(path)::16, path::binary>>
+
+      assert {:ok, {:system_will_unmount, ^path}} =
+               ProtocolGUI.decode_gui_action(0x5A, payload)
+    end
+
+    test "rejects a payload whose declared length does not match" do
+      assert :error == ProtocolGUI.decode_gui_action(0x5A, <<99::16, "short"::binary>>)
+    end
+  end
+
   describe "decode_gui_action for sidebar actions" do
     test "decodes semantic sidebar action payload" do
       id = "git_status"

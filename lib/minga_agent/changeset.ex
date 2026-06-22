@@ -133,15 +133,26 @@ defmodule MingaAgent.Changeset do
   @doc """
   Runs a shell command in the overlay directory.
 
-  Sets `MIX_BUILD_PATH` to an isolated build directory so compilation
-  doesn't contaminate the real project's `_build`.
+  Materializes a writable project view first and sets `MIX_BUILD_PATH` to an isolated build directory so compilation doesn't contaminate the real project's `_build`.
   """
   @spec run(changeset(), String.t(), keyword()) :: {String.t(), non_neg_integer()}
   def run(cs, command, opts \\ []) when is_binary(command) do
-    overlay = overlay_path(cs)
-    env = GenServer.call(cs, :command_env)
     timeout = Keyword.get(opts, :timeout, 30_000)
 
+    case materialize_for_command(cs) do
+      {:ok, _stats} ->
+        run_materialized(cs, command, timeout)
+
+      {:error, reason} ->
+        {"[changeset: failed to materialize command view: #{inspect(reason)}]", 1}
+    end
+  end
+
+  @spec run_materialized(changeset(), String.t(), non_neg_integer()) ::
+          {String.t(), non_neg_integer()}
+  defp run_materialized(cs, command, timeout) do
+    overlay = overlay_path(cs)
+    env = GenServer.call(cs, :command_env)
     env_charlist = Enum.map(env, fn {k, v} -> {String.to_charlist(k), String.to_charlist(v)} end)
 
     port =
@@ -166,6 +177,21 @@ defmodule MingaAgent.Changeset do
     GenServer.call(cs, :overlay_path)
   end
 
+  @doc "Materializes and returns the overlay directory path for shell/search tools."
+  @spec prepare_working_dir(changeset()) :: {:ok, String.t()} | {:error, term()}
+  def prepare_working_dir(cs) do
+    with {:ok, _stats} <- materialize_for_command(cs) do
+      {:ok, overlay_path(cs)}
+    end
+  end
+
+  @doc false
+  @spec materialize_command_file(changeset(), String.t(), binary()) :: :ok | {:error, term()}
+  def materialize_command_file(cs, relative_path, content)
+      when is_binary(relative_path) and is_binary(content) do
+    GenServer.call(cs, {:materialize_command_file, relative_path, content})
+  end
+
   @doc "Returns the project root this changeset was created against."
   @spec project_root(changeset()) :: String.t()
   def project_root(cs) do
@@ -176,6 +202,13 @@ defmodule MingaAgent.Changeset do
   @spec command_env(changeset()) :: [{String.t(), String.t()}]
   def command_env(cs) do
     GenServer.call(cs, :command_env)
+  end
+
+  @doc "Lists a directory in the changeset's logical project view."
+  @spec list_directory(changeset(), String.t()) ::
+          {:ok, [%{name: String.t(), type: :directory | :file}]} | {:error, term()}
+  def list_directory(cs, relative_path) when is_binary(relative_path) do
+    GenServer.call(cs, {:list_directory, relative_path})
   end
 
   @doc "Returns modified and deleted file lists."
@@ -211,6 +244,13 @@ defmodule MingaAgent.Changeset do
   end
 
   # ── Private ─────────────────────────────────────────────────────────────────
+
+  @spec materialize_for_command(changeset()) :: {:ok, term()} | {:error, term()}
+  defp materialize_for_command(cs) do
+    GenServer.call(cs, :materialize_for_command, :infinity)
+  catch
+    :exit, reason -> {:error, reason}
+  end
 
   @spec collect_port_output(port(), [binary()], non_neg_integer()) ::
           {String.t(), non_neg_integer()}

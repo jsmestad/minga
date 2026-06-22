@@ -271,12 +271,15 @@ func decodeFileTreeRows(body []byte, offset int, count int) []FileTreeRow {
 		}
 		offset++
 		_, offset, ok = readString16(body, offset)
-		if !ok || len(body) < offset+3 {
+		if !ok || len(body) < offset+4 {
 			break
 		}
 		// Per-row icon color (R,G,B) follows the editing payload and is applied by the UI renderer.
 		row.IconColor = uint32(body[offset])<<16 | uint32(body[offset+1])<<8 | uint32(body[offset+2])
 		offset += 3
+		// Trailing heat-level byte (extension familiarity tint). Consumed for
+		// framing; TUI heat rendering is deferred, so the value is not stored.
+		offset++
 		rows = append(rows, row)
 	}
 	return rows

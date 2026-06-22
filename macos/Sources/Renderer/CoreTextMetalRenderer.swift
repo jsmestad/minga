@@ -1226,7 +1226,7 @@ final class CoreTextMetalRenderer {
             quad.alpha = 1.0
             bgQuads.append(quad)
 
-        case .gitRemoved, .diagError, .diagWarning, .diagInfo, .diagHint:
+        case .gitRemoved, .diagError, .diagWarning, .diagInfo, .diagHint, .diagAdvisory:
             let (text, fg) = gutterTextSignAndColor(entry.signType, frameState: frameState)
             let cacheKey = AtlasKey.diagnosticSign(windowId: windowId, row: screenRow)
             let contentHash = gutterContentHash(text: text, fg: fg)
@@ -1482,9 +1482,22 @@ final class CoreTextMetalRenderer {
         case .diagWarning: return colorFromU24(frameState.gutterColors.warningFg, default: .zero)
         case .diagInfo: return colorFromU24(frameState.gutterColors.infoFg, default: .zero)
         case .diagHint: return colorFromU24(frameState.gutterColors.hintFg, default: .zero)
+        // Advisory amber, derived from this theme's warning + error colors
+        // (mirrors the TUI renderer) so it suits every palette without a
+        // dedicated wire color slot.
+        case .diagAdvisory:
+            return colorFromU24(blendU24(frameState.gutterColors.warningFg, frameState.gutterColors.errorFg), default: .zero)
         case .annotation: return .zero  // Annotation color is per-entry, not from theme
         case .none: return .zero
         }
+    }
+
+    /// Midpoint blend of two 24-bit RGB colors. Matches the BEAM TUI renderer's
+    /// `blend_rgb/2` so advisory amber looks identical across clients.
+    private func blendU24(_ a: UInt32, _ b: UInt32) -> UInt32 {
+        let ar = (a >> 16) & 0xFF, ag = (a >> 8) & 0xFF, ab = a & 0xFF
+        let br = (b >> 16) & 0xFF, bg = (b >> 8) & 0xFF, bb = b & 0xFF
+        return (((ar + br) / 2) << 16) | (((ag + bg) / 2) << 8) | ((ab + bb) / 2)
     }
 
     /// Returns the sign character and fg color (as U24) for a text-rendered gutter sign.
@@ -1495,6 +1508,8 @@ final class CoreTextMetalRenderer {
         case .diagWarning: return ("W", frameState.gutterColors.warningFg)
         case .diagInfo: return ("I", frameState.gutterColors.infoFg)
         case .diagHint: return ("H", frameState.gutterColors.hintFg)
+        case .diagAdvisory:
+            return ("?", blendU24(frameState.gutterColors.warningFg, frameState.gutterColors.errorFg))
         default: return ("", 0)
         }
     }
@@ -1553,7 +1568,7 @@ final class CoreTextMetalRenderer {
 
     private nonisolated static func signTextureDemand(_ signType: Wire.GutterSignType) -> Int {
         switch signType {
-        case .gitRemoved, .diagError, .diagWarning, .diagInfo, .diagHint, .annotation:
+        case .gitRemoved, .diagError, .diagWarning, .diagInfo, .diagHint, .diagAdvisory, .annotation:
             return 1
         case .gitAdded, .gitModified, .gitDeleted, .none:
             return 0
