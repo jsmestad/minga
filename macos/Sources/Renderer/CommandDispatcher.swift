@@ -28,6 +28,13 @@ import Foundation
 import AppKit
 import os
 
+private enum FileTreeNavigationCodepoints {
+    static let downKey: UInt32 = 106
+    static let upKey: UInt32 = 107
+    static let downArrow: UInt32 = 57353
+    static let upArrow: UInt32 = 57352
+}
+
 /// Dispatches render commands to FrameState (metadata) and GUIState (chrome).
 @MainActor
 final class CommandDispatcher {
@@ -358,6 +365,22 @@ final class CommandDispatcher {
         frameState.dirty = false
     }
 
+    /// Applies a zero-latency local file-tree navigation preview when the BEAM marks the current tree model as eligible.
+    /// The key still goes to the BEAM; this only moves the transient selection highlight until the next authoritative file-tree payload reconciles it.
+    @discardableResult
+    func previewFileTreeNavigation(codepoint: UInt32, modifiers: UInt8) -> Bool {
+        guard modifiers == 0 else { return false }
+
+        switch codepoint {
+        case FileTreeNavigationCodepoints.downKey, FileTreeNavigationCodepoints.downArrow:
+            return guiState.fileTreeState.previewNavigation(delta: 1)
+        case FileTreeNavigationCodepoints.upKey, FileTreeNavigationCodepoints.upArrow:
+            return guiState.fileTreeState.previewNavigation(delta: -1)
+        default:
+            return false
+        }
+    }
+
     /// Apply a single render command to the presented FrameState/GUIState. This
     /// is the single mutation path: called directly for out-of-band commands and
     /// replayed for every staged command at commit. It must NOT handle the frame
@@ -475,7 +498,7 @@ final class CommandDispatcher {
             let visible = treeState != FileTreeVisibilityState.hidden.rawValue
             let focused = treeFlags & 0x02 != 0
             if visible {
-                guiState.fileTreeState.update(version: version, selectedId: selectedId, focused: focused, treeWidth: treeWidth, rootPath: rootPath, rawEntries: entries, treeState: treeState, errorReason: errorReason)
+                guiState.fileTreeState.update(version: version, treeFlags: treeFlags, selectedId: selectedId, focused: focused, treeWidth: treeWidth, rootPath: rootPath, rawEntries: entries, treeState: treeState, errorReason: errorReason)
             } else {
                 guiState.fileTreeState.hide(rootPath: rootPath)
             }

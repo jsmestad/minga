@@ -57,6 +57,7 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilderTest do
       model = FileTreeBuilder.build(ctx)
 
       assert %FileTreeModel{status: :ready, focused?: true, tree_width: 32} = model
+      refute model.local_navigation?
       assert model.selected_id == path
 
       assert [row] = model.rows
@@ -73,6 +74,90 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilderTest do
       assert row.editing.text == "renamed"
       # Folder rows resolve to the theme's :directory icon color (doom_one uses the default).
       assert row.icon_color == 0x519ABA
+    end
+
+    test "disables local navigation while filtering" do
+      tree = %ProjectFileTree{
+        root: "/project",
+        width: 32,
+        cursor: 0,
+        expanded: MapSet.new(["/project"]),
+        git_status: %{},
+        entries: [
+          %{
+            path: "/project/main.rs",
+            name: "main.rs",
+            dir?: false,
+            depth: 1,
+            last_child?: true,
+            guides: []
+          }
+        ]
+      }
+
+      file_tree = %FileTreeState{tree: tree, focused: true, filtering: true, tree_status: :ready}
+      model = FileTreeBuilder.build(build_minimal_context(file_tree: file_tree))
+
+      assert model.status == :ready
+      refute model.local_navigation?
+    end
+
+    test "disables local navigation while help is visible" do
+      tree = %ProjectFileTree{
+        root: "/project",
+        width: 32,
+        cursor: 0,
+        expanded: MapSet.new(["/project"]),
+        git_status: %{},
+        entries: [
+          %{
+            path: "/project/main.rs",
+            name: "main.rs",
+            dir?: false,
+            depth: 1,
+            last_child?: true,
+            guides: []
+          }
+        ]
+      }
+
+      file_tree = %FileTreeState{
+        tree: tree,
+        focused: true,
+        help_visible: true,
+        tree_status: :ready
+      }
+
+      model = FileTreeBuilder.build(build_minimal_context(file_tree: file_tree))
+
+      assert model.status == :ready
+      refute model.local_navigation?
+    end
+
+    test "disables local navigation when file tree is not focused" do
+      tree = %ProjectFileTree{
+        root: "/project",
+        width: 32,
+        cursor: 0,
+        expanded: MapSet.new(["/project"]),
+        git_status: %{},
+        entries: [
+          %{
+            path: "/project/main.rs",
+            name: "main.rs",
+            dir?: false,
+            depth: 1,
+            last_child?: true,
+            guides: []
+          }
+        ]
+      }
+
+      file_tree = %FileTreeState{tree: tree, focused: false, tree_status: :ready}
+      model = FileTreeBuilder.build(build_minimal_context(file_tree: file_tree))
+
+      assert model.status == :ready
+      refute model.local_navigation?
     end
 
     test "resolves per-filetype icon colors from the active theme" do
@@ -96,6 +181,8 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilderTest do
 
       doom = FileTreeBuilder.build(build_minimal_context(file_tree: file_tree, theme: :doom_one))
 
+      assert astrodark.local_navigation?
+      assert doom.local_navigation?
       assert [%{icon_color: astrodark_color}] = astrodark.rows
       assert [%{icon_color: doom_color}] = doom.rows
 

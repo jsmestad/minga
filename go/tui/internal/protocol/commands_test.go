@@ -650,6 +650,13 @@ func TestDecodePickerPreviewChromeDoesNotSwallowFollowingCommands(t *testing.T) 
 	}
 }
 
+const (
+	fileTreeVisibleFlag         byte = 0x01
+	fileTreeFocusedFlag         byte = 0x02
+	fileTreeLocalNavigationFlag byte = 0x20
+	fileTreeReadyStatus         byte = 3
+)
+
 func TestDecodeFileTreeChromeRows(t *testing.T) {
 	row := []byte{
 		0, 0, 0, 1,
@@ -671,7 +678,7 @@ func TestDecodeFileTreeChromeRows(t *testing.T) {
 	row = append(row, 0, 0)
 	row = append(row, 0x6D, 0x80, 0x86) // icon color (R,G,B) follows editing payload
 	row = append(row, 0xFF)             // heat level (0xFF = none) trails the row
-	body := []byte{2, 1, 3}
+	body := []byte{2, fileTreeVisibleFlag | fileTreeFocusedFlag | fileTreeLocalNavigationFlag, fileTreeReadyStatus}
 	body = append(body, string16("/repo/lib")...)
 	body = append(body, string16("/repo")...)
 	body = append(body, 0, 30, 0, 1)
@@ -684,7 +691,7 @@ func TestDecodeFileTreeChromeRows(t *testing.T) {
 		t.Fatalf("DecodeCommand returned error: %v", err)
 	}
 	tree := command.Chrome.Tree
-	if !tree.Visible || tree.Status != 3 || tree.Root != "/repo" || len(tree.Rows) != 1 {
+	if !tree.Visible || !tree.Focused || tree.Flags&fileTreeLocalNavigationFlag == 0 || tree.Status != fileTreeReadyStatus || tree.Root != "/repo" || len(tree.Rows) != 1 {
 		t.Fatalf("file tree decoded incorrectly: %+v", tree)
 	}
 	if got := tree.Rows[0]; !got.Directory || !got.Selected || got.Name != "lib" || got.Depth != 1 || got.IconColor != 0x6D8086 {

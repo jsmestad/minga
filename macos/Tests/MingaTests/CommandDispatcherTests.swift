@@ -210,6 +210,44 @@ struct CommandDispatcherRoutingTests {
         #expect(gui.fileTreeState.entries[0].isFocused == false)
     }
 
+    @Test("file tree local navigation preview moves selection when eligible")
+    @MainActor func fileTreeLocalNavigationPreviewMovesSelectionWhenEligible() {
+        let (dispatcher, gui) = makeDispatcher()
+        let entries = [
+            wireFileTreeEntry(pathHash: 1, isSelected: true, isFocused: true, id: "/project/a", path: "/project/a", name: "a", relPath: "a"),
+            wireFileTreeEntry(pathHash: 2, isFocused: true, id: "/project/b", path: "/project/b", name: "b", relPath: "b")
+        ]
+        dispatcher.applyForTesting(.guiFileTree(version: 2, treeFlags: 0x23, treeState: 3, selectedId: "/project/a", treeWidth: 30,
+                                          rootPath: "/project", errorReason: "", entries: entries))
+
+        let moved = dispatcher.previewFileTreeNavigation(codepoint: 106, modifiers: 0)
+
+        #expect(moved == true)
+        #expect(gui.fileTreeState.selectedId == "/project/b")
+        #expect(gui.fileTreeState.selectedIndex == 1)
+        #expect(gui.fileTreeState.entries[0].isSelected == false)
+        #expect(gui.fileTreeState.entries[1].isSelected == true)
+    }
+
+    @Test("file tree local navigation preview is disabled without BEAM eligibility flag")
+    @MainActor func fileTreeLocalNavigationPreviewRequiresEligibilityFlag() {
+        let (dispatcher, gui) = makeDispatcher()
+        let entries = [
+            wireFileTreeEntry(pathHash: 1, isSelected: true, isFocused: true, id: "/project/a", path: "/project/a", name: "a", relPath: "a"),
+            wireFileTreeEntry(pathHash: 2, isFocused: true, id: "/project/b", path: "/project/b", name: "b", relPath: "b")
+        ]
+        dispatcher.applyForTesting(.guiFileTree(version: 2, treeFlags: 0x03, treeState: 3, selectedId: "/project/a", treeWidth: 30,
+                                          rootPath: "/project", errorReason: "", entries: entries))
+
+        let moved = dispatcher.previewFileTreeNavigation(codepoint: 106, modifiers: 0)
+
+        #expect(moved == false)
+        #expect(gui.fileTreeState.selectedId == "/project/a")
+        #expect(gui.fileTreeState.selectedIndex == 0)
+        #expect(gui.fileTreeState.entries[0].isSelected == true)
+        #expect(gui.fileTreeState.entries[1].isSelected == false)
+    }
+
     @Test("guiFileTree hides when explicit tree state is hidden")
     @MainActor func guiFileTreeHidesOnHiddenState() {
         let (dispatcher, gui) = makeDispatcher()

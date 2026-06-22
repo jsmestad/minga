@@ -200,7 +200,7 @@ func decodeFileTree(payload []byte) (FileTree, string, int) {
 
 	flags := body[1]
 	status := body[2]
-	tree := FileTree{Visible: flags&0x01 != 0, Focused: flags&0x02 != 0, Status: status}
+	tree := FileTree{Visible: flags&0x01 != 0, Focused: flags&0x02 != 0, Flags: flags, Status: status}
 	offset := 3
 	selected, next, ok := readString16(body, offset)
 	if !ok {

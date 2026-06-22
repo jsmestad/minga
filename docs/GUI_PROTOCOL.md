@@ -149,6 +149,7 @@ Tree flag bits:
   bit 0: visible
   bit 1: focused
   bit 4: empty
+  bit 5: frontend-local navigation eligible
 
 Tree state values:
   0 = hidden
@@ -179,6 +180,8 @@ When `tree_state == 0`, the frontend should hide the file tree. Hidden payloads 
 `row_count == 0` only means the payload contains no entry rows. It does not imply hidden. Use `tree_state` to distinguish hidden (`0`), loading (`1`), visible-empty (`2`), and error (`4`) states. The `empty` flag bit is retained for compatibility and is set only for `tree_state == 2`.
 
 When `tree_state == 4`, `error_reason` contains a short user-displayable reason. For all other states, `error_reason` is an empty string.
+
+When tree flag bit 5 is set, a semantic frontend may apply zero-latency local row navigation over the last committed row model while still forwarding the key to the BEAM. The next `gui_file_tree` or `gui_file_tree_selection` payload remains authoritative and reconciles any local prediction. The BEAM clears this bit for modes where row navigation is not safe to predict, such as inline editing, filtering, or help.
 
 ### 0x94 — gui_file_tree_selection
 

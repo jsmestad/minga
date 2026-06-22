@@ -2,6 +2,10 @@
 
 import SwiftUI
 
+private enum FileTreeProtocolConstants {
+    static let localNavigationFlag: UInt8 = 0x20
+}
+
 /// A single file tree entry for SwiftUI rendering.
 struct FileTreeEntry: Identifiable {
     /// Visual states are layered in the same priority order as the BEAM TUI renderer: inline editing, drop target, selected row, active file, dirty buffer, git status, then directory emphasis.
@@ -42,7 +46,34 @@ struct FileTreeEntry: Identifiable {
     /// Extension-contributed familiarity/heat bucket 0...4, or 255 for none.
     let heatLevel: UInt8
 
-    init(id: String, pathHash: UInt32, index: Int, isDir: Bool, isExpanded: Bool, isSelected: Bool, isFocused: Bool, isActive: Bool, isDirty: Bool, isEditing: Bool, isLastChild: Bool, depth: Int, gitStatus: UInt8, diagnosticErrorCount: UInt16, diagnosticWarningCount: UInt16, diagnosticInfoCount: UInt16, diagnosticHintCount: UInt16, guides: [Bool], icon: String, iconColor: Color, name: String, relPath: String, path: String, editingType: UInt8, editingText: String, heatLevel: UInt8 = 255) {
+    init(
+        id: String,
+        pathHash: UInt32,
+        index: Int,
+        isDir: Bool,
+        isExpanded: Bool,
+        isSelected: Bool,
+        isFocused: Bool,
+        isActive: Bool,
+        isDirty: Bool,
+        isEditing: Bool,
+        isLastChild: Bool,
+        depth: Int,
+        gitStatus: UInt8,
+        diagnosticErrorCount: UInt16,
+        diagnosticWarningCount: UInt16,
+        diagnosticInfoCount: UInt16,
+        diagnosticHintCount: UInt16,
+        guides: [Bool],
+        icon: String,
+        iconColor: Color,
+        name: String,
+        relPath: String,
+        path: String,
+        editingType: UInt8,
+        editingText: String,
+        heatLevel: UInt8 = 255
+    ) {
         self.id = id
         self.pathHash = pathHash
         self.index = index
@@ -197,6 +228,7 @@ final class FileTreeState {
     var treeWidth: Int = 30
     var visible: Bool = false
     var focused: Bool = false
+    var localNavigationEnabled: Bool = false
     var treeState: FileTreeVisibilityState = .hidden
     var errorReason: String = ""
     /// Project root path sent by the BEAM (e.g., "/Users/foo/myproject").
@@ -211,7 +243,17 @@ final class FileTreeState {
     /// function is called, the tree data has genuinely changed and the
     /// array rebuild is necessary (git status, file renames, expand/collapse
     /// can change entry content without changing count or selection).
-    func update(version: UInt8, selectedId: String, focused: Bool, treeWidth: UInt16, rootPath: String, rawEntries: [Wire.FileTreeEntry], treeState: UInt8 = FileTreeVisibilityState.ready.rawValue, errorReason: String = "") {
+    func update(
+        version: UInt8,
+        treeFlags: UInt8 = 0,
+        selectedId: String,
+        focused: Bool,
+        treeWidth: UInt16,
+        rootPath: String,
+        rawEntries: [Wire.FileTreeEntry],
+        treeState: UInt8 = FileTreeVisibilityState.ready.rawValue,
+        errorReason: String = ""
+    ) {
         let decodedState = FileTreeVisibilityState(rawValue: treeState) ?? .ready
         self.version = version
         self.selectedId = selectedId
@@ -220,6 +262,7 @@ final class FileTreeState {
         self.projectRoot = rootPath
         self.visible = decodedState != .hidden
         self.focused = focused
+        self.localNavigationEnabled = treeFlags & FileTreeProtocolConstants.localNavigationFlag != 0
         self.treeState = decodedState
         self.errorReason = errorReason
         self.entries = rawEntries.enumerated().map { index, entry in
@@ -270,12 +313,48 @@ final class FileTreeState {
             return
         }
 
+        applySelection(selectedIndex: selectedIndex, focused: focused)
+    }
+
+    /// Applies a frontend-local row navigation preview over the last committed tree model.
+    /// The BEAM remains authoritative: the next gui_file_tree or gui_file_tree_selection payload reconciles this optimistic selection.
+    @discardableResult
+    func previewNavigation(delta: Int) -> Bool {
+        guard visible, focused, localNavigationEnabled, treeState == .ready, editingIndex == nil, !entries.isEmpty else {
+            return false
+        }
+
+        let nextIndex = min(max(selectedIndex + delta, 0), entries.count - 1)
+        guard nextIndex != selectedIndex else { return false }
+
+        applySelection(selectedIndex: nextIndex, focused: focused)
+        return true
+    }
+
+    private func applySelection(selectedIndex: Int, focused: Bool) {
+        guard entries.indices.contains(selectedIndex) else { return }
+
+        let previousIndex = self.selectedIndex
+        let selectedId = entries[selectedIndex].id
+        let focusChanged = self.focused != focused
+        var nextEntries = entries
+
+        if focusChanged {
+            nextEntries = nextEntries.map { entry in
+                entry.withSelection(isSelected: entry.id == selectedId, isFocused: focused)
+            }
+        } else {
+            if nextEntries.indices.contains(previousIndex), previousIndex != selectedIndex {
+                nextEntries[previousIndex] = nextEntries[previousIndex].withSelection(isSelected: false, isFocused: focused)
+            }
+
+            nextEntries[selectedIndex] = nextEntries[selectedIndex].withSelection(isSelected: true, isFocused: focused)
+        }
+
         self.selectedId = selectedId
         self.selectedIndex = selectedIndex
         self.focused = focused
-        self.entries = entries.map { entry in
-            entry.withSelection(isSelected: entry.id == selectedId, isFocused: focused)
-        }
+        self.entries = nextEntries
     }
 
     /// Computes the full absolute path for an entry.
@@ -294,6 +373,7 @@ final class FileTreeState {
     func hide(rootPath: String = "") {
         visible = false
         focused = false
+        localNavigationEnabled = false
         treeState = .hidden
         errorReason = ""
         entries = []

@@ -146,6 +146,7 @@ type PreviewSegment struct {
 type FileTree struct {
 	Visible  bool
 	Focused  bool
+	Flags    byte
 	Status   byte
 	Selected string
 	Root     string

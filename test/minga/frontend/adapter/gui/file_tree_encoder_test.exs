@@ -126,6 +126,26 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoderTest do
       assert selected_id == "/project/b.ex"
     end
 
+    test "encodes local navigation eligibility in tree flags" do
+      model = %{ready_tree("/project/a.ex") | local_navigation?: true}
+
+      {cmd, _caches} = FileTreeEncoder.encode(model, Caches.new())
+
+      assert <<@op_gui_file_tree, len::32, payload::binary-size(len)>> = cmd
+      assert <<2::8, tree_flags::8, _tree_state::8, _rest::binary>> = payload
+      assert Bitwise.band(tree_flags, 0x20) != 0
+    end
+
+    test "sends full tree when local navigation eligibility changes" do
+      model1 = ready_tree("/project/a.ex")
+      model2 = %{model1 | local_navigation?: true}
+
+      {_, caches} = FileTreeEncoder.encode(model1, Caches.new())
+      {cmd2, _caches} = FileTreeEncoder.encode(model2, caches)
+
+      assert <<@op_gui_file_tree, _len::32, _payload::binary>> = cmd2
+    end
+
     test "sends full tree when row structure changes" do
       model1 = ready_tree("/project/a.ex")
       model2 = %{ready_tree("/project/a.ex") | rows: [row("/project/a.ex"), row("/project/c.ex")]}

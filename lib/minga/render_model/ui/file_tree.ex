@@ -14,6 +14,7 @@ defmodule Minga.RenderModel.UI.FileTree do
           tree_width: non_neg_integer(),
           status: status(),
           focused?: boolean(),
+          local_navigation?: boolean(),
           selected_id: String.t(),
           rows: [Row.t()]
         }
@@ -22,6 +23,7 @@ defmodule Minga.RenderModel.UI.FileTree do
             tree_width: 0,
             status: :hidden,
             focused?: false,
+            local_navigation?: false,
             selected_id: "",
             rows: []
 end

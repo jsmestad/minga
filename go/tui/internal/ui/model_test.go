@@ -1229,6 +1229,62 @@ func TestFileTreeSelectionUpdatesExistingTree(t *testing.T) {
 	}
 }
 
+func TestFileTreeLocalNavigationPreviewMovesSelectionWhenEligible(t *testing.T) {
+	t.Run("j advances locally while still forwarding to BEAM", func(t *testing.T) {
+		out := make(chan []byte, 1)
+		model := New(30, 6, out)
+		model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: protocol.FileTree{Visible: true, Focused: true, Flags: fileTreeVisibleFlag | fileTreeFocusedFlag | fileTreeLocalNavigationFlag, Status: fileTreeReadyStatus, Selected: "a", Rows: []protocol.FileTreeRow{{ID: "a", Name: "a", Selected: true, Focused: true}, {ID: "b", Name: "b"}}}}}
+
+		updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: fileTreeLocalNavigationDownKey, Text: string(fileTreeLocalNavigationDownKey)}))
+		model = updated.(Model)
+
+		tree := model.chrome[generated.OPGuiFileTree].Tree
+		if tree.Selected != "b" || !tree.Rows[1].Selected || tree.Rows[0].Selected {
+			t.Fatalf("eligible j press should preview the next file-tree row: %+v", tree)
+		}
+		packets := drainOutboundPackets(out)
+		if len(packets) != 1 || packets[0][0] != generated.OPKeyPress || codepoint(packets[0]) != fileTreeLocalNavigationDownKey || packets[0][5] != 0 {
+			t.Fatalf("eligible j press should still forward the key packet: %#v", packets)
+		}
+	})
+
+	t.Run("up arrow retreats locally while still forwarding to BEAM", func(t *testing.T) {
+		out := make(chan []byte, 1)
+		model := New(30, 6, out)
+		model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: protocol.FileTree{Visible: true, Focused: true, Flags: fileTreeVisibleFlag | fileTreeFocusedFlag | fileTreeLocalNavigationFlag, Status: fileTreeReadyStatus, Selected: "b", Rows: []protocol.FileTreeRow{{ID: "a", Name: "a"}, {ID: "b", Name: "b", Selected: true, Focused: true}}}}}
+
+		updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyUp}))
+		model = updated.(Model)
+
+		tree := model.chrome[generated.OPGuiFileTree].Tree
+		if tree.Selected != "a" || !tree.Rows[0].Selected || tree.Rows[1].Selected {
+			t.Fatalf("eligible up-arrow press should preview the previous file-tree row: %+v", tree)
+		}
+		packets := drainOutboundPackets(out)
+		if len(packets) != 1 || packets[0][0] != generated.OPKeyPress || codepoint(packets[0]) != arrowUp || packets[0][5] != 0 {
+			t.Fatalf("eligible up-arrow press should still forward the key packet: %#v", packets)
+		}
+	})
+}
+
+func TestFileTreeLocalNavigationPreviewRequiresEligibilityFlag(t *testing.T) {
+	out := make(chan []byte, 1)
+	model := New(30, 6, out)
+	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: protocol.FileTree{Visible: true, Focused: true, Flags: fileTreeVisibleFlag | fileTreeFocusedFlag, Status: fileTreeReadyStatus, Selected: "a", Rows: []protocol.FileTreeRow{{ID: "a", Name: "a", Selected: true, Focused: true}, {ID: "b", Name: "b"}}}}}
+
+	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: fileTreeLocalNavigationDownKey, Text: string(fileTreeLocalNavigationDownKey)}))
+	model = updated.(Model)
+
+	tree := model.chrome[generated.OPGuiFileTree].Tree
+	if tree.Selected != "a" || !tree.Rows[0].Selected || tree.Rows[1].Selected {
+		t.Fatalf("file tree should not preview locally when the local-navigation flag is clear: %+v", tree)
+	}
+	packets := drainOutboundPackets(out)
+	if len(packets) != 1 || packets[0][0] != generated.OPKeyPress || codepoint(packets[0]) != fileTreeLocalNavigationDownKey || packets[0][5] != 0 {
+		t.Fatalf("non-eligible j press should still forward the key packet: %#v", packets)
+	}
+}
+
 func TestApplyCommandsStoresSemanticGuttersByWindow(t *testing.T) {
 	model := New(30, 6, nil)
 	_ = model.applyCommands(frame(

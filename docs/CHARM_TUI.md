@@ -36,7 +36,7 @@ The Charm renderer targets the Semantic UI path, not the legacy cell-grid path. 
 - semantic editor rows and spans
 - tab bar and workspace chrome
 - status bar and minibuffer
-- file tree
+- file tree, including BEAM-gated zero-latency local selection preview for unmodified j/k and Up/Down
 - picker, picker preview, completion, and which-key overlays
 
 It renders roughly 9 of the shared-chrome components today. Decoding and rendering the remaining components is tracked in #2100, and overall cross-frontend coverage is tracked in the Semantic UI inventory (#2113).
