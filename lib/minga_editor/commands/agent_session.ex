@@ -104,22 +104,22 @@ defmodule MingaEditor.Commands.AgentSession do
 
   @spec do_start_agent_session(state(), keyword()) :: state()
   defp do_start_agent_session(state, opts) do
-    panel = AgentAccess.panel(state) |> Panel.ensure_configured_model()
+    panel =
+      AgentAccess.panel(state) |> Panel.ensure_configured_model(EditorState.options_server(state))
+
     state = AgentAccess.update_panel(state, fn _panel -> panel end)
     {project_view, created_project_view?} = session_project_view(state)
 
-    session_opts = [
-      thinking_level: panel.thinking_level,
-      model_name: panel.model_name,
-      provider_name: panel.provider_name,
-      session_start_hook_enabled?: Keyword.get(opts, :session_start_hook_enabled?, true),
-      recover_interrupted_work?: Keyword.get(opts, :recover_interrupted_work?, true),
-      provider_opts: [
-        provider: panel.provider_name,
-        model: panel.model_name,
-        project_view: project_view
+    session_opts =
+      [
+        thinking_level: panel.thinking_level,
+        model_name: panel.model_name,
+        provider_name: panel.provider_name,
+        session_start_hook_enabled?: Keyword.get(opts, :session_start_hook_enabled?, true),
+        recover_interrupted_work?: Keyword.get(opts, :recover_interrupted_work?, true),
+        provider_opts: provider_opts(state, panel, project_view)
       ]
-    ]
+      |> maybe_put_provider_module(state.agent_provider_module)
 
     case start_and_subscribe(state, session_opts) do
       {:ok, pid} ->
@@ -740,14 +740,36 @@ defmodule MingaEditor.Commands.AgentSession do
 
   defp ensure_agent_workspace(state, _session_pid, _project_view), do: state
 
+  @spec provider_opts(state(), Panel.t(), ProjectView.t() | nil) :: keyword()
+  defp provider_opts(state, panel, project_view) do
+    Keyword.merge(state.agent_provider_opts,
+      provider: panel.provider_name,
+      model: panel.model_name,
+      project_view: project_view
+    )
+  end
+
+  @spec maybe_put_provider_module(keyword(), module() | nil) :: keyword()
+  defp maybe_put_provider_module(opts, provider_module)
+       when is_atom(provider_module) and not is_nil(provider_module),
+       do: Keyword.put(opts, :provider, provider_module)
+
+  defp maybe_put_provider_module(opts, _provider_module), do: opts
+
   @spec bind_session_to_agent_workspace(state(), TabBar.t(), pid()) :: state()
   defp bind_session_to_agent_workspace(state, %TabBar{} = tb, session_pid) do
     case reusable_agent_workspace(tb, session_pid) do
       %Workspace{id: workspace_id} ->
+        agent_ui = AgentAccess.agent_ui(state)
+
         tb =
           tb
           |> bind_session_to_workspace_agent_tab(workspace_id, session_pid)
-          |> TabBar.update_workspace(workspace_id, &Workspace.set_session(&1, session_pid))
+          |> TabBar.update_workspace(workspace_id, fn workspace ->
+            workspace
+            |> Workspace.set_session(session_pid)
+            |> Workspace.set_agent_ui(agent_ui)
+          end)
 
         sync_state_to_workspace(state, tb, workspace_id)
 
@@ -801,20 +823,25 @@ defmodule MingaEditor.Commands.AgentSession do
   @spec create_agent_workspace(state(), TabBar.t(), pid()) :: state()
   defp create_agent_workspace(state, %TabBar{} = tb, session_pid) do
     {tb, ws} = TabBar.add_workspace(tb, "Agent", session_pid)
+    agent_ui = AgentAccess.agent_ui(state)
 
     tb =
-      case TabBar.find_by_session(tb, session_pid) || TabBar.find_sessionless_agent(tb) do
-        %Tab{id: tab_id} = tab ->
-          tb
-          |> TabBar.move_tab_to_workspace(tab_id, ws.id)
-          |> TabBar.update_context(
-            tab_id,
-            TabContext.put_fields(tab.context, keymap_scope: :agent)
-          )
+      tb
+      |> TabBar.update_workspace(ws.id, &Workspace.set_agent_ui(&1, agent_ui))
+      |> then(fn tb ->
+        case TabBar.find_by_session(tb, session_pid) || TabBar.find_sessionless_agent(tb) do
+          %Tab{id: tab_id} = tab ->
+            tb
+            |> TabBar.move_tab_to_workspace(tab_id, ws.id)
+            |> TabBar.update_context(
+              tab_id,
+              TabContext.put_fields(tab.context, keymap_scope: :agent)
+            )
 
-        nil ->
-          tb
-      end
+          nil ->
+            tb
+        end
+      end)
 
     sync_state_to_workspace(state, tb, ws.id)
   end

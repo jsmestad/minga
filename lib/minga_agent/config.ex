@@ -178,6 +178,10 @@ defmodule MingaAgent.Config do
   @spec default_model() :: String.t()
   def default_model, do: resolve_model()
 
+  @doc "Returns the model used for new sessions from a specific options server."
+  @spec default_model(Minga.Config.Options.server()) :: String.t()
+  def default_model(options_server), do: resolve_model(options_server)
+
   @doc "Returns the internal sentinel used when no configured provider has an available model."
   @spec unconfigured_model() :: String.t()
   def unconfigured_model, do: @unconfigured_model
@@ -225,10 +229,30 @@ defmodule MingaAgent.Config do
     configured_model() || first_available_model() || @unconfigured_model
   end
 
+  @doc """
+  Returns the configured model from a specific options server, then the first available credential-backed model.
+
+  This keeps per-editor tests and embedded editors from depending on the global options server.
+  """
+  @spec resolve_model(Minga.Config.Options.server()) :: String.t()
+  def resolve_model(options_server) do
+    configured_model(options_server) || first_available_model() || @unconfigured_model
+  end
+
   @doc "Returns the explicitly configured model, or nil when the user has not chosen one."
   @spec configured_model() :: String.t() | nil
   def configured_model do
     case get(:agent_model, nil) do
+      model when is_binary(model) and model != "" -> model
+      model when model != nil -> to_string(model)
+      _other -> nil
+    end
+  end
+
+  @doc "Returns the explicitly configured model from a specific options server, or nil when unset."
+  @spec configured_model(Minga.Config.Options.server()) :: String.t() | nil
+  def configured_model(options_server) do
+    case get(options_server, :agent_model, nil) do
       model when is_binary(model) and model != "" -> model
       model when model != nil -> to_string(model)
       _other -> nil
@@ -325,6 +349,15 @@ defmodule MingaAgent.Config do
   @spec get(atom(), term()) :: term()
   defp get(key, default) do
     Minga.Config.get(key)
+  rescue
+    ArgumentError -> default
+  catch
+    :exit, _ -> default
+  end
+
+  @spec get(Minga.Config.Options.server(), atom(), term()) :: term()
+  defp get(options_server, key, default) do
+    Minga.Config.Options.get(options_server, key)
   rescue
     ArgumentError -> default
   catch
