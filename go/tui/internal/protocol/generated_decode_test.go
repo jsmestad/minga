@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"encoding/binary"
 	"reflect"
 	"testing"
 
@@ -17,6 +18,41 @@ import (
 // mix protocol.gen, which rewrites the generated/ directory, can never clobber
 // it. Keep the fixtures in sync with the encoder assertions in
 // protocol_schema_validation_test.exs.
+
+func appendWireU16(data []byte, value uint16) []byte {
+	var buf [2]byte
+	binary.BigEndian.PutUint16(buf[:], value)
+	return append(data, buf[:]...)
+}
+
+func appendWireU32(data []byte, value uint32) []byte {
+	var buf [4]byte
+	binary.BigEndian.PutUint32(buf[:], value)
+	return append(data, buf[:]...)
+}
+
+func appendWireU64(data []byte, value uint64) []byte {
+	var buf [8]byte
+	binary.BigEndian.PutUint64(buf[:], value)
+	return append(data, buf[:]...)
+}
+
+func appendWireString8(data []byte, text string) []byte {
+	bytes := []byte(text)
+	if len(bytes) > 0xFF {
+		bytes = bytes[:0xFF]
+	}
+	return append(append(data, byte(len(bytes))), bytes...)
+}
+
+func appendWireString16(data []byte, text string) []byte {
+	bytes := []byte(text)
+	if len(bytes) > 0xFFFF {
+		bytes = bytes[:0xFFFF]
+	}
+	data = appendWireU16(data, uint16(len(bytes)))
+	return append(data, bytes...)
+}
 
 func TestDecodeGuiCompletionFieldsWithItems(t *testing.T) {
 	// header(7) + items(1: kind 'foo' 'bar') + documentation string16 "doc".
@@ -69,6 +105,72 @@ func TestDecodeHiddenCompletionSkipsTail(t *testing.T) {
 	f, consumed, err := generated.DecodeGuiCompletionFields([]byte{0}, 0, 1)
 	if err != nil || consumed != 1 || f.Visible != 0 || len(f.Items) != 0 {
 		t.Fatalf("hidden completion: f=%+v consumed=%d err=%v", f, consumed, err)
+	}
+}
+
+func TestDecodeGuiAgentContextFieldsWithTodos(t *testing.T) {
+	body := append([]byte{}, 1)
+	body = appendWireString16(body, "Review diff")
+	body = appendWireU64(body, 1_705_314_000)
+	body = append(body, 3, 1)
+	body = appendWireString16(body, "Running shell")
+	body = appendWireU16(body, 2)
+	body = appendWireU16(body, 1)
+	body = appendWireString16(body, "Review: approve or reject changes")
+	body = append(body, 1)
+	body = append(body, 1)
+	body = appendWireString16(body, "Inspect files")
+
+	payload := appendWireU16(nil, uint16(len(body)))
+	payload = append(payload, body...)
+
+	fields, consumed, err := generated.DecodeGuiAgentContextFields(payload, 0, len(payload))
+	if err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if consumed != len(payload) {
+		t.Fatalf("consumed %d, want %d", consumed, len(payload))
+	}
+	if fields.PayloadLen != uint16(len(body)) || fields.Visible != 1 || fields.Task != "Review diff" || fields.DispatchTimestamp != 1_705_314_000 || fields.Status != 3 || fields.CanApprove != 1 {
+		t.Fatalf("agent context header mismatch: %+v", fields)
+	}
+	if fields.ActiveAction != "Running shell" || fields.ToolCount != 2 || fields.FileCount != 1 || fields.ReviewHint != "Review: approve or reject changes" {
+		t.Fatalf("agent context progress mismatch: %+v", fields)
+	}
+	if len(fields.Todos) != 1 || fields.Todos[0].Status != 1 || fields.Todos[0].Description != "Inspect files" {
+		t.Fatalf("agent context todos mismatch: %+v", fields.Todos)
+	}
+}
+
+func TestDecodeGuiEditTimelineFieldsWithFiles(t *testing.T) {
+	payload := []byte{1}
+	payload = appendWireU16(payload, 0xFFFF)
+	payload = append(payload, 1)
+	payload = append(payload, 0)
+	payload = appendWireString8(payload, "write_file")
+	payload = appendWireU32(payload, 12)
+	payload = append(payload, 1)
+	payload = appendWireString16(payload, "lib/a.ex")
+	payload = append(payload, 2)
+	payload = appendWireU32(payload, 10)
+	payload = appendWireU32(payload, 3)
+	payload = append(payload, 1)
+
+	fields, consumed, err := generated.DecodeGuiEditTimelineFields(payload, 0, len(payload))
+	if err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if consumed != len(payload) {
+		t.Fatalf("consumed %d, want %d", consumed, len(payload))
+	}
+	if fields.Visible != 1 || fields.ViewingIndex != 0xFFFF || len(fields.Entries) != 1 || len(fields.Files) != 1 {
+		t.Fatalf("edit timeline shape mismatch: %+v", fields)
+	}
+	if fields.Entries[0].Index != 0 || fields.Entries[0].ToolName != "write_file" || fields.Entries[0].TimestampDelta != 12 {
+		t.Fatalf("edit timeline entry mismatch: %+v", fields.Entries[0])
+	}
+	if fields.Files[0].Path != "lib/a.ex" || fields.Files[0].EntryCount != 2 || fields.Files[0].LinesAdded != 10 || fields.Files[0].LinesRemoved != 3 || fields.Files[0].ReviewStatus != 1 {
+		t.Fatalf("edit timeline files mismatch: %+v", fields.Files[0])
 	}
 }
 

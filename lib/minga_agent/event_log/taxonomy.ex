@@ -15,6 +15,7 @@ defmodule MingaAgent.EventLog.Taxonomy do
     :tool_call_finished,
     :tool_call_interrupted,
     :file_edit_proposed,
+    :todo_plan_updated,
     :approval_requested,
     :approval_resolved,
     :approval_interrupted,

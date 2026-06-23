@@ -5,6 +5,7 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
   alias MingaAgent.EventLog
   alias MingaAgent.EventLog.Store
   alias MingaAgent.Session
+  alias MingaAgent.TodoItem
 
   @moduletag :tmp_dir
 
@@ -113,6 +114,57 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
     def handle_cast(:new_session, state), do: {:noreply, state}
   end
 
+  defmodule TodoProvider do
+    @behaviour MingaAgent.Provider
+
+    use GenServer
+
+    @impl MingaAgent.Provider
+    def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
+
+    @impl MingaAgent.Provider
+    def send_prompt(pid, text), do: GenServer.cast(pid, {:prompt, text})
+
+    @impl MingaAgent.Provider
+    def abort(pid), do: GenServer.cast(pid, :abort)
+
+    @impl MingaAgent.Provider
+    def new_session(pid), do: GenServer.cast(pid, :new_session)
+
+    @impl MingaAgent.Provider
+    def seed_messages(_pid, _messages), do: :ok
+
+    @impl MingaAgent.Provider
+    def get_state(_pid), do: {:ok, %{model: "test", is_streaming: false, token_usage: nil}}
+
+    @impl true
+    def init(opts) do
+      {:ok, %{subscriber: Keyword.fetch!(opts, :subscriber)}}
+    end
+
+    @impl true
+    def handle_cast({:prompt, text}, state) do
+      send(state.subscriber, {:agent_provider_event, %Event.AgentStart{}})
+      send(state.subscriber, {:agent_provider_event, %Event.TextDelta{delta: text}})
+
+      send(
+        state.subscriber,
+        {:agent_provider_event,
+         %Event.TodoPlan{
+           todos: [
+             %TodoItem{id: "1", description: "Inspect files", status: :in_progress}
+           ]
+         }}
+      )
+
+      send(state.subscriber, {:agent_provider_event, %Event.AgentEnd{}})
+      {:noreply, state}
+    end
+
+    def handle_cast(:abort, state), do: {:noreply, state}
+    def handle_cast(:new_session, state), do: {:noreply, state}
+  end
+
   test "session broadcasts are durably recorded for replay", %{tmp_dir: tmp_dir} do
     log_name = unique_name("session-log")
 
@@ -156,6 +208,41 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
 
     tool_end = Enum.find(events, &(&1.event_type == :tool_call_finished))
     assert tool_end.payload["tool_call_id"] == "tool-1"
+    :ok = Store.close(db)
+  end
+
+  test "todo plans are recorded as JSON-safe payloads for replay", %{tmp_dir: tmp_dir} do
+    log_name = unique_name("todo-log")
+
+    log_pid =
+      start_supervised!(
+        {EventLog, name: log_name, db_dir: tmp_dir, retention_sweep?: false, health_check: :none}
+      )
+
+    session =
+      start_supervised!(
+        {Session,
+         session_id: "todo-session",
+         provider: TodoProvider,
+         event_log_server: log_name,
+         persist?: false,
+         hooks_enabled?: false}
+      )
+
+    :sys.get_state(session)
+    assert :ok = Session.send_prompt(session, "plan this")
+    :sys.get_state(session)
+    :sys.get_state(log_pid)
+
+    {:ok, db} = EventLog.open_read_connection(db_dir: tmp_dir)
+    events = wait_for_event(db, "todo-session", :todo_plan_updated, session, log_pid)
+    todo_event = Enum.find(events, &(&1.event_type == :todo_plan_updated))
+
+    assert todo_event.payload["todos"] == [
+             %{"id" => "1", "description" => "Inspect files", "status" => "in_progress"}
+           ]
+
+    assert JSON.decode!(JSON.encode!(todo_event.payload)) == todo_event.payload
     :ok = Store.close(db)
   end
 

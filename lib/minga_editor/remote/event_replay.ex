@@ -70,6 +70,10 @@ defmodule MingaEditor.Remote.EventReplay do
 
   def to_agent_event(%EventRecord{event_type: :message_changed}), do: :messages_changed
 
+  def to_agent_event(%EventRecord{event_type: :todo_plan_updated, payload: payload}) do
+    {:todo_plan_updated, todo_items_from_payload(payload_value(payload, "todos"))}
+  end
+
   def to_agent_event(%EventRecord{event_type: :error, payload: payload}),
     do: {:error, string_payload(payload, "message")}
 
@@ -150,6 +154,45 @@ defmodule MingaEditor.Remote.EventReplay do
     case payload_value(payload, key) do
       value when is_map(value) -> value
       _ -> %{}
+    end
+  end
+
+  @spec todo_items_from_payload(term()) :: [MingaAgent.TodoItem.t()]
+  defp todo_items_from_payload(items) when is_list(items) do
+    Enum.flat_map(items, fn
+      %{} = item ->
+        case todo_item_from_payload(item) do
+          nil -> []
+          todo -> [todo]
+        end
+
+      _ ->
+        []
+    end)
+  end
+
+  defp todo_items_from_payload(_items), do: []
+
+  @spec todo_item_from_payload(map()) :: MingaAgent.TodoItem.t() | nil
+  defp todo_item_from_payload(item) do
+    id = string_payload(item, "id")
+    description = string_payload(item, "description")
+
+    if id != "" and description != "" do
+      %MingaAgent.TodoItem{
+        id: id,
+        description: description,
+        status: todo_status_payload(item)
+      }
+    end
+  end
+
+  @spec todo_status_payload(map()) :: MingaAgent.TodoItem.status()
+  defp todo_status_payload(item) do
+    case string_payload(item, "status") do
+      "in_progress" -> :in_progress
+      "done" -> :done
+      _ -> :pending
     end
   end
 

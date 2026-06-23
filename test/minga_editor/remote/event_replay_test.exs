@@ -1,9 +1,15 @@
 defmodule MingaEditor.Remote.EventReplayTest do
   use ExUnit.Case, async: true
 
+  alias MingaEditor.Agent.Events, as: AgentEvents
   alias MingaEditor.Remote.EventReplay
+  alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.AgentAccess
+  alias MingaEditor.Session.State, as: WorkspaceState
+  alias MingaEditor.Viewport
   alias MingaAgent.EventLog.EventRecord
   alias MingaAgent.ToolApproval.Preview
+  alias MingaAgent.TodoItem
 
   test "converts durable remote events into live agent events" do
     assert EventReplay.to_agent_event(record(:assistant_delta, %{"delta" => "hello"})) ==
@@ -81,6 +87,36 @@ defmodule MingaEditor.Remote.EventReplayTest do
            ) == {:prompt_queued, "next", :follow_up}
 
     assert EventReplay.to_agent_event(record(:message_changed, %{})) == :messages_changed
+
+    assert EventReplay.to_agent_event(
+             record(:todo_plan_updated, %{
+               "todos" => [
+                 %{"id" => "1", "description" => "Inspect files", "status" => "done"}
+               ]
+             })
+           ) ==
+             {:todo_plan_updated,
+              [%TodoItem{id: "1", description: "Inspect files", status: :done}]}
+  end
+
+  test "replays durable todo plans into editor activity on catch-up" do
+    state = %EditorState{
+      port_manager: self(),
+      workspace: %WorkspaceState{viewport: Viewport.new(24, 80)}
+    }
+
+    updated =
+      AgentEvents.replay_catchup(state, [
+        record(:todo_plan_updated, %{
+          "todos" => [
+            %{"id" => "1", "description" => "Inspect files", "status" => "in_progress"}
+          ]
+        })
+      ])
+
+    assert AgentAccess.view(updated).activity.todos == [
+             %TodoItem{id: "1", description: "Inspect files", status: :in_progress}
+           ]
   end
 
   test "ignores durable events that have no foreground UI equivalent" do

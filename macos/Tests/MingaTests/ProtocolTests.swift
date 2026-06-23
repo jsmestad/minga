@@ -41,6 +41,28 @@ private func appendConfigStateString16(_ data: inout Data, _ text: String) {
     data.append(contentsOf: bytes)
 }
 
+private func appendWireU16(_ data: inout Data, _ value: UInt16) {
+    appendConfigStateU16(&data, value)
+}
+
+private func appendWireU32(_ data: inout Data, _ value: UInt32) {
+    appendConfigStateU32(&data, value)
+}
+
+private func appendWireU64(_ data: inout Data, _ value: UInt64) {
+    appendConfigStateU64(&data, value)
+}
+
+private func appendWireString8(_ data: inout Data, _ text: String) {
+    let bytes = Array(text.utf8.prefix(Int(UInt8.max)))
+    data.append(UInt8(bytes.count))
+    data.append(contentsOf: bytes)
+}
+
+private func appendWireString16(_ data: inout Data, _ text: String) {
+    appendConfigStateString16(&data, text)
+}
+
 private func appendConfigStateValue(_ data: inout Data, _ value: SettingValue) {
     switch value {
     case .bool(let enabled):
@@ -95,6 +117,114 @@ struct ProtocolDecoderTests {
         }
         #expect(frameSeq == 7)
         #expect(baseFrameSeq == 3)
+    }
+
+    @Test("Decode framed gui_agent_context payload")
+    func decodeFramedGuiAgentContext() throws {
+        let dispatchTimestamp = Date(timeIntervalSince1970: 1_705_314_000)
+        var body = Data([1])
+        appendWireString16(&body, "Review diff")
+        appendWireU64(&body, UInt64(dispatchTimestamp.timeIntervalSince1970))
+        body.append(3)
+        body.append(1)
+        appendWireString16(&body, "Running shell")
+        appendWireU16(&body, 2)
+        appendWireU16(&body, 1)
+        appendWireString16(&body, "Review: approve or reject changes")
+        body.append(1)
+        body.append(1)
+        appendWireString16(&body, "Inspect files")
+
+        var payload = Data()
+        appendWireU16(&payload, UInt16(body.count))
+        payload.append(body)
+
+        var data = Data([OP_GUI_AGENT_CONTEXT])
+        data.append(payload)
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+        guard case .guiAgentContext(let visible, let task, let decodedTimestamp, let status, let canApprove, let progress, let todos) = cmd else {
+            Issue.record("Expected .guiAgentContext, got \(String(describing: cmd))")
+            return
+        }
+
+        #expect(visible)
+        #expect(task == "Review diff")
+        #expect(decodedTimestamp == dispatchTimestamp)
+        #expect(status == .needsYou)
+        #expect(canApprove)
+        #expect(progress.activeAction == "Running shell")
+        #expect(progress.toolCount == 2)
+        #expect(progress.fileCount == 1)
+        #expect(progress.reviewHint == "Review: approve or reject changes")
+        #expect(todos.count == 1)
+        #expect(todos[0].status == 1)
+        #expect(todos[0].description == "Inspect files")
+    }
+
+    @Test("Decode legacy gui_agent_context payload")
+    func decodeLegacyGuiAgentContext() throws {
+        let dispatchTimestamp = Date(timeIntervalSince1970: 1_705_314_100)
+        var data = Data([OP_GUI_AGENT_CONTEXT, 1])
+        appendWireString16(&data, "Legacy diff")
+        appendWireU64(&data, UInt64(dispatchTimestamp.timeIntervalSince1970))
+        data.append(4)
+        data.append(1)
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+        guard case .guiAgentContext(let visible, let task, let decodedTimestamp, let status, let canApprove, _, let todos) = cmd else {
+            Issue.record("Expected .guiAgentContext, got \(String(describing: cmd))")
+            return
+        }
+
+        #expect(visible)
+        #expect(task == "Legacy diff")
+        #expect(decodedTimestamp == dispatchTimestamp)
+        #expect(status == .done)
+        #expect(canApprove)
+        #expect(todos.isEmpty)
+    }
+
+    @Test("Decode gui_edit_timeline file summaries")
+    func decodeGuiEditTimelineFiles() throws {
+        var payload = Data([1])
+        appendWireU16(&payload, 0xFFFF)
+        payload.append(1)
+        payload.append(0)
+        appendWireString8(&payload, "write_file")
+        appendWireU32(&payload, 12)
+        payload.append(1)
+        appendWireString16(&payload, "lib/a.ex")
+        payload.append(2)
+        appendWireU32(&payload, 10)
+        appendWireU32(&payload, 3)
+        payload.append(1)
+
+        var data = Data([OP_GUI_EDIT_TIMELINE])
+        appendWireU16(&data, UInt16(payload.count))
+        data.append(payload)
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+        guard case .guiEditTimeline(let visible, let viewingIndex, let entries, let files) = cmd else {
+            Issue.record("Expected .guiEditTimeline, got \(String(describing: cmd))")
+            return
+        }
+
+        #expect(visible)
+        #expect(viewingIndex == 0xFFFF)
+        #expect(entries.count == 1)
+        #expect(entries[0].index == 0)
+        #expect(entries[0].toolName == "write_file")
+        #expect(entries[0].timestampDelta == 12)
+        #expect(files.count == 1)
+        #expect(files[0].path == "lib/a.ex")
+        #expect(files[0].entryCount == 2)
+        #expect(files[0].linesAdded == 10)
+        #expect(files[0].linesRemoved == 3)
+        #expect(files[0].reviewStatus == 1)
     }
 
     @Test("Skip known sized command without renderer handler")

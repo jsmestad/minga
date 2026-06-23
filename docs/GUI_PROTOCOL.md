@@ -49,7 +49,7 @@ opcode(1) + payload_length(2, big-endian) + payload(payload_length)
 
 This allows old frontends to skip unknown opcodes without crashing. When a frontend encounters an unrecognized opcode >= 0x90, it reads the 2-byte length, advances past the payload, and continues decoding the rest of the batch.
 
-Opcodes below 0x90 do NOT include a length prefix and retain their existing positional wire format. If a frontend encounters an unknown opcode below 0x90, it cannot determine the message size and must abort decoding. Known 0x90+ opcodes may document a wider envelope when the payload can exceed 64KB, as `gui_file_tree` does.
+Opcodes below 0x90 generally do NOT include a length prefix and retain their existing positional wire format. The explicit exception is `0x88 gui_agent_context`, which occupies a legacy opcode slot but now carries a 16-bit length-prefixed payload for compatibility with its expanded activity fields. If a frontend encounters an unknown opcode below 0x90, it cannot determine the message size and must abort decoding. Known 0x90+ opcodes may document a wider envelope when the payload can exceed 64KB, as `gui_file_tree` does.
 
 The BEAM-side encoder must use a documented length-prefixed envelope for all new opcodes (0x90+). Currently defined 0x90+ opcodes:
 
@@ -63,6 +63,7 @@ The BEAM-side encoder must use a documented length-prefixed envelope for all new
 | 0x95 | gui_cursor_animation | Cursor movement animation preference for GUI renderers. |
 | 0x96 | gui_hover_action | Optional action metadata for the hover popup |
 | 0x9A | gui_observatory | BEAM Observatory process tree and metrics for native sidebars. Uses a 32-bit payload length because large supervision trees can exceed 64KB. |
+| 0x9B | gui_edit_timeline | Agent edit timeline overlay with per-file summaries appended after the per-entry list. Uses a 16-bit payload length. |
 | 0x9F | gui_sidebars | Semantic sidebar host metadata. Uses a 32-bit payload length so future sidebar lists can grow without changing the envelope. |
 | 0xA3 | gui_extension_runtime | Generic frontend-extension runtime envelope. Uses a 32-bit payload length so extension-owned payloads can grow without changing the shared envelope. |
 
@@ -962,6 +963,29 @@ Toast when toast_present == 1:
 
 When the git status panel is closed, the BEAM sends `repo_state = not_a_repo`, no entries, and an empty `entry_base_path` as the hide signal. A non-git project opened in the Source Control tab also uses `repo_state = not_a_repo`, but includes the project root so the frontend can show the native "Not a git repository" empty state instead of hiding the panel. The frontend should still copy `syncing` and `toast` so remote operation feedback remains accurate while the panel is hidden.
 
+### 0x88 — gui_agent_context
+
+Agent activity chrome for the native agent context bar. The BEAM owns the visible task, elapsed timestamp, approval state, progress summary, and the current todo plan snapshot.
+
+```
+opcode(1) + payload_len(2) + payload(payload_len)
+
+Payload:
+  visible(1) + task_len(2) + task(task_len) + dispatch_timestamp(8) + status(1) + can_approve(1)
+  + active_action_len(2) + active_action(active_action_len)
+  + tool_count(2) + file_count(2)
+  + review_hint_len(2) + review_hint(review_hint_len)
+  + todo_count(1) + todos...
+
+Per todo:
+  status(1) + description_len(2) + description(description_len)
+```
+
+`status`: 0 = idle, 1 = working, 2 = iterating, 3 = needs_you, 4 = done, 5 = errored.
+`can_approve` means the agent is waiting on the user to approve or reject the current work. Frontends should treat it as the source of truth for the review affordance, and render the needs-you state when it is set.
+`dispatch_timestamp` is Unix seconds. `review_hint` is the short review copy shown next to the progress summary.
+`todo_count` is the number of visible todo items in the snapshot. The todo list is the editor's live projection of the provider plan, not a separate provider-only state. A hidden context may omit the progress and todo tail after `can_approve`; frontends must treat missing tail fields as empty progress and no todos for legacy compatibility.
+
 ### 0x98 — gui_workspaces
 
 Canonical workspace state for native frontends. This is the source of truth for workspace headers, active-workspace file tabs, badges, and workspace view mode. The old agent-group payload is gone; frontends should not infer workspace state from tab order or legacy agent-only lists.
@@ -1010,6 +1034,26 @@ Per action:
 `version` is currently 1. `level`: 0 = info, 1 = warning, 2 = error, 3 = success, 4 = progress. Flags: bit 0 = dismissable. `created_at` and `updated_at` are Unix seconds. `auto_dismiss_ms` uses `0xFFFFFFFF` for no auto-dismiss. Errors and progress notifications should normally use no auto-dismiss. Informational and success notifications may auto-dismiss after a short delay.
 
 TUI frontends do not render this opcode. The BEAM should also log important notifications to `*Messages*` so terminal users get the same information.
+
+### 0x9B — gui_edit_timeline
+
+Edit timeline overlay data for native frontends. The BEAM sends the active entry list and the aggregate changed-file summaries in one payload so the frontend can switch between per-entry scrubbing and per-file review without guessing from local state.
+
+```
+opcode(1) + payload_len(2) + payload(payload_len)
+
+Payload:
+  visible(1) + viewing_index(2) + entry_count(1) + entries... + file_count(1) + files...
+
+Per entry:
+  index(1) + tool_name_len(1) + tool_name(tool_name_len) + timestamp_delta(4)
+
+Per file:
+  path_len(2) + path(path_len) + entry_count(1) + lines_added(4) + lines_removed(4) + review_status(1)
+```
+
+`viewing_index` is `0xFFFF` when the timeline is live at the latest state. When `file_count` is greater than zero, frontends should show the aggregate changed-file view and use the per-file rows for navigation and review status.
+`review_status`: 0 = pending, 1 = reviewing.
 
 ## GUI Action Input Opcode (Frontend → BEAM)
 
