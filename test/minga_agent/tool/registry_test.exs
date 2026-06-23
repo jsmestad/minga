@@ -15,8 +15,6 @@ defmodule MingaAgent.Tool.RegistryTest do
       read_concurrency: true
     ])
 
-    on_exit(fn -> Minga.Test.ETS.cleanup_table(table) end)
-
     {:ok, table: table}
   end
 

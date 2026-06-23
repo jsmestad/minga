@@ -75,7 +75,7 @@ defmodule Minga.Chaos.EditorFuzzerTest do
     clipboard_table = :ets.new(:chaos_clipboard, [:public, :set])
 
     Mox.stub(Minga.Clipboard.Mock, :write, fn text ->
-      Minga.Test.ETS.put(clipboard_table, {:value, text})
+      :ets.insert(clipboard_table, {:value, text})
       :ok
     end)
 
@@ -416,7 +416,9 @@ defmodule Minga.Chaos.EditorFuzzerTest do
   end
 
   defp delete_table(table) do
-    Minga.Test.ETS.delete_table(table)
+    :ets.delete(table)
+  catch
+    :error, :badarg -> true
   end
 
   # Drain any {:EXIT, pid, reason} messages left in the mailbox from

@@ -15,8 +15,6 @@ defmodule Minga.Config.AdviceTest do
       read_concurrency: true
     ])
 
-    on_exit(fn -> Minga.Test.ETS.cleanup_table(table) end)
-
     %{table: table}
   end
 

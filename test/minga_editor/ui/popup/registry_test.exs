@@ -4,16 +4,9 @@ defmodule MingaEditor.UI.Popup.RegistryTest do
   alias Minga.Popup.Registry
   alias Minga.Popup.Rule
 
-  defp delete_table_if_present(table) do
-    Minga.Test.ETS.cleanup_table(table)
-  end
-
   setup do
-    # Each test gets its own ETS table via a unique atom name.
-    # No cross-test interference, safe for async: true.
     table = :"popup_reg_#{:erlang.unique_integer([:positive])}"
     Registry.init(table)
-    on_exit(fn -> delete_table_if_present(table) end)
     %{table: table}
   end
 
@@ -165,7 +158,6 @@ defmodule MingaEditor.UI.Popup.RegistryTest do
       table = :"popup_reg_idempotent_#{:erlang.unique_integer([:positive])}"
       Registry.init(table)
       Registry.init(table)
-      on_exit(fn -> delete_table_if_present(table) end)
 
       # Table should exist and be usable
       assert :none = Registry.match("anything", table)

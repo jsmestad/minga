@@ -65,8 +65,6 @@ defmodule MingaEditor.UI.Popup.LifecycleTest do
     }
 
     on_exit(fn ->
-      Minga.Test.ETS.cleanup_table(table)
-
       for pid <- [main_buf, popup_buf] do
         Process.exit(pid, :kill)
       end

@@ -20,8 +20,6 @@ defmodule MingaAgent.Tool.ExecutorTest do
       read_concurrency: true
     ])
 
-    on_exit(fn -> Minga.Test.ETS.cleanup_table(table) end)
-
     {:ok, table: table}
   end
 

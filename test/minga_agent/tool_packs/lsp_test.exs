@@ -14,10 +14,7 @@ defmodule MingaAgent.ToolPacks.LSPTest do
     table = :"lsp_pack_test_#{System.unique_integer([:positive])}"
     :ets.new(table, [:named_table, :set, :public, read_concurrency: true])
 
-    on_exit(fn ->
-      Minga.Test.ETS.cleanup_table(table)
-      LSP.register()
-    end)
+    on_exit(fn -> LSP.register() end)
 
     %{table: table}
   end
@@ -130,7 +127,7 @@ defmodule MingaAgent.ToolPacks.LSPTest do
 
   test "registration failure rolls back partially registered LSP specs", %{table: table} do
     existing_definition = conflicting_definition_spec()
-    Minga.Test.ETS.put(table, {"definition", existing_definition})
+    :ets.insert(table, {"definition", existing_definition})
 
     assert {:error, {:duplicate_tool_name, "definition", :config, {:bundle, :lsp_tools}}} =
              LSP.register(table)
@@ -142,7 +139,7 @@ defmodule MingaAgent.ToolPacks.LSPTest do
 
   test "startup failure reports the LSP pack registration reason", %{table: table} do
     existing_definition = conflicting_definition_spec()
-    Minga.Test.ETS.put(table, {"definition", existing_definition})
+    :ets.insert(table, {"definition", existing_definition})
 
     name = :"#{table}_failing_lsp_pack"
 
