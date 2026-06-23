@@ -578,9 +578,10 @@ enum Wire {
         let bold: Bool
         let italic: Bool
         let underline: Bool
+        let code: Bool
         let linkURL: String?
 
-        init(text: String, fgR: UInt8, fgG: UInt8, fgB: UInt8, bgR: UInt8, bgG: UInt8, bgB: UInt8, bold: Bool, italic: Bool, underline: Bool, linkURL: String? = nil) {
+        init(text: String, fgR: UInt8, fgG: UInt8, fgB: UInt8, bgR: UInt8, bgG: UInt8, bgB: UInt8, bold: Bool, italic: Bool, underline: Bool, code: Bool = false, linkURL: String? = nil) {
             self.text = text
             self.fgR = fgR
             self.fgG = fgG
@@ -591,6 +592,7 @@ enum Wire {
             self.bold = bold
             self.italic = italic
             self.underline = underline
+            self.code = code
             self.linkURL = linkURL
         }
     }

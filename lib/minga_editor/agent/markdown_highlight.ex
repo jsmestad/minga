@@ -33,6 +33,7 @@ defmodule MingaEditor.Agent.MarkdownHighlight do
   @flag_italic 0x02
   @flag_underline 0x04
   @flag_link 0x08
+  @flag_code 0x10
 
   @doc """
   Converts assistant message text to styled runs for the GUI.
@@ -57,8 +58,10 @@ defmodule MingaEditor.Agent.MarkdownHighlight do
         end)
       end)
 
-    # Overlay tree-sitter highlights on code block content lines
-    if has_spans?(highlight) do
+    # Overlay tree-sitter highlights on code block content lines. While a
+    # streamed fence is still open, keep the block plain monospaced so syntax
+    # colors do not churn token-by-token.
+    if has_spans?(highlight) and not open_fence?(text) do
       overlay_code_blocks(base_lines, parsed, text, highlight, theme_syntax, buffer_byte_offset)
     else
       base_lines
@@ -183,7 +186,8 @@ defmodule MingaEditor.Agent.MarkdownHighlight do
     flags =
       if(face.bold, do: @flag_bold, else: 0) +
         if(face.italic, do: @flag_italic, else: 0) +
-        if face.underline, do: @flag_underline, else: 0
+        if(face.underline, do: @flag_underline, else: 0) +
+        @flag_code
 
     {text, fg, bg, flags}
   end
@@ -209,13 +213,16 @@ defmodule MingaEditor.Agent.MarkdownHighlight do
   defp md_style_to_colors(:bold_italic, theme),
     do: {default_fg(theme), 0, @flag_bold + @flag_italic}
 
-  defp md_style_to_colors(:code, theme), do: {code_fg(theme), code_bg(theme), 0}
+  defp md_style_to_colors(:code, theme), do: {code_fg(theme), code_bg(theme), @flag_code}
 
   defp md_style_to_colors({:link, _url}, theme),
     do: {link_fg(theme), 0, @flag_underline + @flag_link}
 
   defp md_style_to_colors(:code_block, theme), do: {code_fg(theme), 0, 0}
-  defp md_style_to_colors({:code_content, _lang}, theme), do: {code_fg(theme), code_bg(theme), 0}
+
+  defp md_style_to_colors({:code_content, _lang}, theme),
+    do: {code_fg(theme), code_bg(theme), @flag_code}
+
   defp md_style_to_colors(:header1, theme), do: {header_fg(theme), 0, @flag_bold}
   defp md_style_to_colors(:header2, theme), do: {header_fg(theme), 0, @flag_bold}
   defp md_style_to_colors(:header3, theme), do: {header_fg(theme), 0, @flag_bold}
@@ -258,4 +265,13 @@ defmodule MingaEditor.Agent.MarkdownHighlight do
   defp has_spans?(%Highlight{spans: spans}) when is_tuple(spans), do: tuple_size(spans) > 0
   defp has_spans?(%Highlight{spans: spans}) when is_list(spans), do: spans != []
   defp has_spans?(_), do: false
+
+  @spec open_fence?(String.t()) :: boolean()
+  defp open_fence?(text) do
+    text
+    |> String.split("\n")
+    |> Enum.count(&String.starts_with?(String.trim_leading(&1), "```"))
+    |> rem(2)
+    |> Kernel.==(1)
+  end
 end

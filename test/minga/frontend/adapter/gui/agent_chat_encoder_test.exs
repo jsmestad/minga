@@ -324,7 +324,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoderTest do
 
     test "styled_assistant message with styled runs" do
       styled = [
-        [{"def ", 0xFF0000, 0, 0x01}, {"hello", 0xBBC2CF, 0, 0}],
+        [{"def ", 0xFF0000, 0, 0x11}, {"hello", 0xBBC2CF, 0, 0}],
         [{"  :world", 0x98BE65, 0, 0}]
       ]
 
@@ -336,7 +336,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoderTest do
 
       assert t1 == "def "
       assert fg1 == 0xFF0000
-      assert flags1 == 0x01
+      assert flags1 == 0x11
     end
 
     test "styled_tool_call message with sub-opcode 0x08" do

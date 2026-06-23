@@ -24,6 +24,7 @@ defmodule MingaEditor.AgentLifecycle do
   alias MingaEditor.LayoutPreset
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.AgentAccess
+  alias MingaEditor.UI.Highlight
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   @type state :: EditorState.t()
@@ -143,7 +144,15 @@ defmodule MingaEditor.AgentLifecycle do
     result = Transcript.display(messages, sync_opts)
 
     # Compute styled runs for GUI rendering against the displayed transcript.
-    styled = compute_styled_messages(state, result.display_messages)
+    # Reuse unchanged entries so streaming deltas restyle only the message that
+    # actually changed instead of reprocessing the whole visible transcript.
+    styled =
+      compute_styled_messages(
+        state,
+        result.display_messages,
+        panel.cached_display_messages,
+        panel.cached_styled_messages || []
+      )
 
     styled_assistant_count =
       Enum.count(styled, fn
@@ -356,7 +365,15 @@ defmodule MingaEditor.AgentLifecycle do
 
     with true <- is_pid(session),
          messages when messages != [] <- displayed_messages_for_styling(state, session) do
-      styled = compute_styled_messages(state, messages)
+      panel = AgentAccess.panel(state)
+
+      styled =
+        compute_styled_messages(
+          state,
+          messages,
+          panel.cached_display_messages,
+          panel.cached_styled_messages || []
+        )
 
       AgentAccess.update_panel(state, fn p ->
         Panel.cache_styled_messages(p, styled)
@@ -383,10 +400,12 @@ defmodule MingaEditor.AgentLifecycle do
 
   # Computes styled runs for each message. Assistant messages and tool call results
   # get markdown styling; other message types pass through as nil.
-  @spec compute_styled_messages(state(), [term()]) :: [
+  @spec compute_styled_messages(state(), [term()], [term()], [
+          MarkdownHighlight.styled_lines() | nil
+        ]) :: [
           MarkdownHighlight.styled_lines() | nil
         ]
-  defp compute_styled_messages(state, messages) do
+  defp compute_styled_messages(state, messages, previous_messages, previous_styled) do
     highlight = nil
     theme_syntax = state.theme.syntax
 
@@ -396,21 +415,55 @@ defmodule MingaEditor.AgentLifecycle do
 
     messages
     |> Enum.with_index()
-    |> Enum.map(fn
-      {{:assistant, text}, idx} ->
-        byte_offset = Map.get(byte_offset_map, idx, 0)
-        MarkdownHighlight.stylize(text, highlight, theme_syntax, byte_offset)
+    |> Enum.map(fn {message, idx} ->
+      case cached_styled_message(message, idx, previous_messages, previous_styled) do
+        {:ok, styled} ->
+          styled
 
-      {{:tool_call, %MingaAgent.ToolCall{result: result}}, idx}
-      when is_binary(result) and result != "" ->
-        byte_offset = Map.get(byte_offset_map, idx, 0)
-        # Tool call results use the same markdown/tree-sitter styling pipeline
-        text = String.slice(result, 0, @max_styled_result_chars)
-        MarkdownHighlight.stylize(text, highlight, theme_syntax, byte_offset)
-
-      _ ->
-        nil
+        :miss ->
+          style_message(message, idx, highlight, theme_syntax, byte_offset_map)
+      end
     end)
+  end
+
+  @spec cached_styled_message(term(), non_neg_integer(), [term()], [
+          MarkdownHighlight.styled_lines() | nil
+        ]) :: {:ok, MarkdownHighlight.styled_lines() | nil} | :miss
+  defp cached_styled_message(message, idx, previous_messages, previous_styled)
+       when idx < length(previous_styled) do
+    case {Enum.at(previous_messages, idx), Enum.at(previous_styled, idx)} do
+      {^message, styled} -> {:ok, styled}
+      _ -> :miss
+    end
+  end
+
+  defp cached_styled_message(_message, _idx, _previous_messages, _previous_styled) do
+    :miss
+  end
+
+  @spec style_message(term(), non_neg_integer(), Highlight.t() | nil, map(), %{
+          non_neg_integer() => non_neg_integer()
+        }) :: MarkdownHighlight.styled_lines() | nil
+  defp style_message({:assistant, text}, idx, highlight, theme_syntax, byte_offset_map) do
+    byte_offset = Map.get(byte_offset_map, idx, 0)
+    MarkdownHighlight.stylize(text, highlight, theme_syntax, byte_offset)
+  end
+
+  defp style_message(
+         {:tool_call, %MingaAgent.ToolCall{result: result}},
+         idx,
+         highlight,
+         theme_syntax,
+         byte_offset_map
+       )
+       when is_binary(result) and result != "" do
+    byte_offset = Map.get(byte_offset_map, idx, 0)
+    text = String.slice(result, 0, @max_styled_result_chars)
+    MarkdownHighlight.stylize(text, highlight, theme_syntax, byte_offset)
+  end
+
+  defp style_message(_message, _idx, _highlight, _theme_syntax, _byte_offset_map) do
+    nil
   end
 
   # Computes the byte offset of each message's start line within the full buffer text.

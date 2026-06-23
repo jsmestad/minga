@@ -1192,6 +1192,31 @@ func TestDecodeAgentTimelineChrome(t *testing.T) {
 	}
 }
 
+func TestDecodeAgentChatStyledRunPreservesCodeFlag(t *testing.T) {
+	messageBody := append(u32Bytes(42), 0x07)
+	messageBody = append(messageBody, 0, 1) // one line
+	messageBody = append(messageBody, 0, 1) // one run
+	messageBody = append(messageBody, string16("  def hello")...)
+	messageBody = append(messageBody, 0x98, 0xBE, 0x65, 0x21, 0x24, 0x2B, 0x10)
+	messages := []byte{0xFF, 1, 0, 1, byte(len(messageBody) >> 24), byte(len(messageBody) >> 16), byte(len(messageBody) >> 8), byte(len(messageBody))}
+	messages = append(messages, messageBody...)
+	chat := []byte{generated.OPGuiAgentChat, 2}
+	chat = append(chat, section(0x01, []byte{1, 0})...)
+	chat = append(chat, section(0x06, messages)...)
+
+	command, err := DecodeCommand(chat)
+	if err != nil {
+		t.Fatalf("DecodeCommand chat returned error: %v", err)
+	}
+	if len(command.Chrome.AgentChat.Messages) != 1 {
+		t.Fatalf("decoded %d messages, want 1", len(command.Chrome.AgentChat.Messages))
+	}
+	run := command.Chrome.AgentChat.Messages[0].StyledLines[0][0]
+	if !run.Code() || run.Flags != 0x10 {
+		t.Fatalf("styled run flags = 0x%02X, want code flag", run.Flags)
+	}
+}
+
 func TestDecodeAgentChatPreservesStructuredMessageDetails(t *testing.T) {
 	tool := append(u32Bytes(7), 0x04, 1, 0, 0)
 	tool = append(tool, u32Bytes(42)...)

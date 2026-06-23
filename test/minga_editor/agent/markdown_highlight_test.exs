@@ -75,9 +75,10 @@ defmodule MingaEditor.Agent.MarkdownHighlightTest do
       line = hd(result)
       code_run = Enum.find(line, fn {t, _fg, _bg, _flags} -> t == "GenServer" end)
       assert code_run != nil
-      {_, fg, bg, _} = code_run
+      {_, fg, bg, flags} = code_run
       assert fg == 0x98BE65
       assert bg == 0x21242B
+      assert Bitwise.band(flags, 0x10) != 0
     end
 
     test "link text strips markdown and carries url metadata" do
@@ -110,6 +111,8 @@ defmodule MingaEditor.Agent.MarkdownHighlightTest do
 
       # Three lines: header, code content, footer
       assert length(result) == 3
+      [{_text, _fg, _bg, flags}] = Enum.at(result, 1)
+      assert Bitwise.band(flags, 0x10) != 0
     end
   end
 
@@ -143,6 +146,7 @@ defmodule MingaEditor.Agent.MarkdownHighlightTest do
       assert fg == 0xFF0000
       assert bg != 0
       assert Bitwise.band(flags, 0x01) != 0
+      assert Bitwise.band(flags, 0x10) != 0
     end
 
     test "code block content at nonzero byte offset uses correct spans" do
@@ -183,6 +187,25 @@ defmodule MingaEditor.Agent.MarkdownHighlightTest do
       assert header_text == "My Header"
       assert fg == 0x51AFEF
       assert Bitwise.band(flags, 0x01) != 0
+    end
+
+    test "open fenced block skips tree-sitter overlay while preserving code flag" do
+      text = "```elixir\ndef hello"
+
+      highlight =
+        make_highlight(
+          spans: {%{start_byte: 10, end_byte: 13, capture_id: 0}},
+          capture_names: ["keyword"],
+          theme: %{"keyword" => [fg: 0xFF0000, bold: true]}
+        )
+
+      result = MarkdownHighlight.stylize(text, highlight, @theme_syntax, 0)
+
+      [{code_text, fg, _bg, flags}] = Enum.at(result, 1)
+      assert code_text == "def hello"
+      assert fg == 0x98BE65
+      assert Bitwise.band(flags, 0x10) != 0
+      refute Bitwise.band(flags, 0x01) != 0
     end
 
     test "falls back when highlight has no spans" do

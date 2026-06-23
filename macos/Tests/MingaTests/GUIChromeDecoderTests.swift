@@ -2263,7 +2263,7 @@ struct GUIAgentChatDecoderTests {
         // Line 1: 2 runs
         appendU16(&msgs, 2)
         appendString16(&msgs, "def ")
-        appendRGB(&msgs, 0x51, 0xAF, 0xEF); appendRGB(&msgs, 0x28, 0x2C, 0x34); msgs.append(0x01) // bold
+        appendRGB(&msgs, 0x51, 0xAF, 0xEF); appendRGB(&msgs, 0x28, 0x2C, 0x34); msgs.append(0x11) // bold + code
         appendString16(&msgs, "hello")
         appendRGB(&msgs, 0x98, 0xBE, 0x65); appendRGB(&msgs, 0x28, 0x2C, 0x34); msgs.append(0x02) // italic
         // Line 2: 1 run
@@ -2281,8 +2281,10 @@ struct GUIAgentChatDecoderTests {
         #expect(lines.count == 2)
         #expect(lines[0][0].text == "def ")
         #expect(lines[0][0].bold == true)
+        #expect(lines[0][0].code == true)
         #expect(lines[0][1].text == "hello")
         #expect(lines[0][1].italic == true)
+        #expect(lines[0][1].code == false)
         #expect(lines[1][0].text == "  :ok")
         #expect(lines[1][0].underline == true)
     }

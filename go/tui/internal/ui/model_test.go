@@ -988,6 +988,42 @@ func TestAgentChatPanelRendersStructuredTranscript(t *testing.T) {
 	}
 }
 
+func TestAgentChatAssistantStyledLinesPreserveCodeIndentationAndOverflow(t *testing.T) {
+	model := New(80, 24, nil)
+	styledLines := []protocol.AgentStyledLine{
+		{{Text: "Here is code", FG: 0xBBC2CF}},
+		{{Text: "  def hello do", FG: 0x98BE65, BG: 0x21242B, Flags: 0x10}},
+		{{Text: "    :world", FG: 0x98BE65, BG: 0x21242B, Flags: 0x10}},
+	}
+	for i := 0; i < 12; i++ {
+		styledLines = append(styledLines, protocol.AgentStyledLine{{Text: fmt.Sprintf("line %02d", i), FG: 0xBBC2CF}})
+	}
+	msg := protocol.AgentChatMessage{Kind: agentKindStyled, StyledLines: styledLines}
+
+	view := ansi.Strip(strings.Join(model.renderAgentAssistantMessage(msg, 80), "\n"))
+	if !strings.Contains(view, "│   def hello do") || !strings.Contains(view, "│     :world") {
+		t.Fatalf("styled assistant should preserve code indentation: %q", view)
+	}
+	if !strings.Contains(view, "… +3 lines · ⏎ expand") {
+		t.Fatalf("styled assistant should show overflow affordance: %q", view)
+	}
+}
+
+func TestAgentChatAssistantStyledCodeLineShowsLongLineIndicator(t *testing.T) {
+	model := New(36, 16, nil)
+	msg := protocol.AgentChatMessage{
+		Kind: agentKindStyled,
+		StyledLines: []protocol.AgentStyledLine{
+			{{Text: "  " + strings.Repeat("x", 80), FG: 0x98BE65, BG: 0x21242B, Flags: 0x10}},
+		},
+	}
+
+	view := ansi.Strip(strings.Join(model.renderAgentAssistantMessage(msg, 36), "\n"))
+	if !strings.Contains(view, "›") {
+		t.Fatalf("long styled code line should show truncation indicator: %q", view)
+	}
+}
+
 func TestAgentChatThinkingRendersMultipleLinesWhenExpanded(t *testing.T) {
 	model := New(80, 24, nil)
 	msg := protocol.AgentChatMessage{

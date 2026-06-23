@@ -3281,6 +3281,7 @@ private func decodeChatMessageCandidates(data: Data, start: Int, end: Int) throw
                     bold: (flags & 0x01) != 0,
                     italic: (flags & 0x02) != 0,
                     underline: (flags & 0x04) != 0,
+                    code: (flags & 0x10) != 0,
                     linkURL: linkURL
                 ))
                 rPos = nextRunPos
@@ -3335,6 +3336,7 @@ private func decodeChatMessageCandidates(data: Data, start: Int, end: Int) throw
                     bold: (flags & 0x01) != 0,
                     italic: (flags & 0x02) != 0,
                     underline: (flags & 0x04) != 0,
+                    code: (flags & 0x10) != 0,
                     linkURL: linkURL
                 ))
                 stcPos = nextRunPos

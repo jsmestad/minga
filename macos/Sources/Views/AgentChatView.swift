@@ -16,6 +16,18 @@ private struct ScrollViewHeightKey: PreferenceKey {
     }
 }
 
+private enum AssistantLineGroup: Identifiable {
+    case prose(id: Int, lines: [[Wire.StyledTextRun]])
+    case code(id: Int, label: String?, lines: [[Wire.StyledTextRun]])
+
+    var id: Int {
+        switch self {
+        case .prose(let id, _), .code(let id, _, _):
+            return id
+        }
+    }
+}
+
 struct AgentChatView: View {
     let state: AgentChatState
     let theme: ThemeColors
@@ -404,9 +416,18 @@ struct AgentChatView: View {
     @ViewBuilder
     private func styledAssistantBlock(_ lines: [[Wire.StyledTextRun]]) -> some View {
         HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                ForEach(Array(lines.enumerated()), id: \.offset) { _, runs in
-                    styledLineView(runs, baseFontSize: 13, monospaced: false)
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(groupAssistantLines(lines)) { group in
+                    switch group {
+                    case .prose(_, let proseLines):
+                        VStack(alignment: .leading, spacing: 2) {
+                            ForEach(Array(proseLines.enumerated()), id: \.offset) { _, runs in
+                                styledLineView(runs, baseFontSize: 13, monospaced: false)
+                            }
+                        }
+                    case .code(_, let label, let codeLines):
+                        codeBlockView(label: label, lines: codeLines)
+                    }
                 }
             }
             Spacer(minLength: 40)
@@ -436,14 +457,15 @@ struct AgentChatView: View {
                     blue: Double(run.bgB) / 255.0
                 )
             }
-            let design: Font.Design = monospaced ? .monospaced : .default
+            let runMonospaced = monospaced || run.code
+            let design: Font.Design = runMonospaced ? .monospaced : .default
             if run.bold && run.italic {
                 attr.font = .system(size: baseFontSize, weight: .bold, design: design).italic()
             } else if run.bold {
                 attr.font = .system(size: baseFontSize, weight: .bold, design: design)
             } else if run.italic {
                 attr.font = .system(size: baseFontSize, design: design).italic()
-            } else if monospaced {
+            } else if runMonospaced {
                 attr.font = .system(size: baseFontSize, design: .monospaced)
             }
             if run.underline {
@@ -479,9 +501,100 @@ struct AgentChatView: View {
 
     private func shouldScrollHorizontally(_ runs: [Wire.StyledTextRun]) -> Bool {
         let textRuns = runs.filter { !$0.text.isEmpty }
-        return !textRuns.isEmpty && textRuns.allSatisfy { run in
-            run.bgR != 0 || run.bgG != 0 || run.bgB != 0
+        return !textRuns.isEmpty && textRuns.allSatisfy(\.code)
+    }
+
+    @ViewBuilder
+    private func codeBlockView(label: String?, lines: [[Wire.StyledTextRun]]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let label, !label.isEmpty {
+                HStack {
+                    Spacer()
+                    Text(label)
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundStyle(theme.agentTextFg.opacity(0.45))
+                        .padding(.bottom, 4)
+                }
+            }
+
+            ScrollView(.horizontal) {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(Array(lines.enumerated()), id: \.offset) { _, runs in
+                        styledLineView(runs, baseFontSize: 12, monospaced: true)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
         }
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(theme.agentCodeBg)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(theme.agentToolBorder.opacity(0.25), lineWidth: 1)
+        )
+    }
+
+    private func groupAssistantLines(_ lines: [[Wire.StyledTextRun]]) -> [AssistantLineGroup] {
+        var groups: [AssistantLineGroup] = []
+        var prose: [[Wire.StyledTextRun]] = []
+        var index = 0
+        var groupId = 0
+
+        func flushProse() {
+            guard !prose.isEmpty else { return }
+            groups.append(.prose(id: groupId, lines: prose))
+            groupId += 1
+            prose.removeAll(keepingCapacity: true)
+        }
+
+        while index < lines.count {
+            let line = lines[index]
+            if lineIsCodeBlockContent(line) {
+                let label = codeBlockLabel(from: prose.last)
+                if label != nil {
+                    _ = prose.popLast()
+                }
+                flushProse()
+
+                var codeLines: [[Wire.StyledTextRun]] = []
+                while index < lines.count && lineIsCodeBlockContent(lines[index]) {
+                    codeLines.append(lines[index])
+                    index += 1
+                }
+                if index < lines.count && lineLooksLikeCodeFooter(lines[index]) {
+                    index += 1
+                }
+                groups.append(.code(id: groupId, label: label, lines: codeLines))
+                groupId += 1
+            } else {
+                prose.append(line)
+                index += 1
+            }
+        }
+
+        flushProse()
+        return groups
+    }
+
+    private func lineIsCodeBlockContent(_ runs: [Wire.StyledTextRun]) -> Bool {
+        let textRuns = runs.filter { !$0.text.isEmpty }
+        return !textRuns.isEmpty && textRuns.allSatisfy(\.code)
+    }
+
+    private func codeBlockLabel(from runs: [Wire.StyledTextRun]?) -> String? {
+        guard let runs else { return nil }
+        let text = runs.map(\.text).joined().trimmingCharacters(in: .whitespaces)
+        guard text.hasPrefix("┌─") else { return nil }
+        let withoutPrefix = text.dropFirst(2).trimmingCharacters(in: .whitespaces)
+        let label = withoutPrefix.trimmingCharacters(in: CharacterSet(charactersIn: "─ "))
+        return label.isEmpty ? nil : label
+    }
+
+    private func lineLooksLikeCodeFooter(_ runs: [Wire.StyledTextRun]) -> Bool {
+        runs.map(\.text).joined().trimmingCharacters(in: .whitespaces).hasPrefix("└")
     }
 
     private func safeLinkURL(_ value: String?) -> URL? {

@@ -459,6 +459,22 @@ type AgentStyledRun struct {
 	URL   string
 }
 
+func (run AgentStyledRun) Bold() bool {
+	return run.Flags&0x01 != 0
+}
+
+func (run AgentStyledRun) Italic() bool {
+	return run.Flags&0x02 != 0
+}
+
+func (run AgentStyledRun) Underline() bool {
+	return run.Flags&0x04 != 0
+}
+
+func (run AgentStyledRun) Code() bool {
+	return run.Flags&0x10 != 0
+}
+
 type AgentUsage struct {
 	Input      uint32
 	Output     uint32
