@@ -9,7 +9,9 @@ defmodule MingaAgent.Providers.NativeTest do
   alias MingaAgent.Event
   alias MingaAgent.ProjectView.RecordingBackend
   alias MingaAgent.Providers.Native
+  alias MingaAgent.ToolCall
   alias MingaAgent.Tools
+  alias ReqLLM.Context
   alias ReqLLM.StreamResponse.MetadataHandle
 
   @moduletag :tmp_dir
@@ -134,6 +136,10 @@ defmodule MingaAgent.Providers.NativeTest do
     Enum.map_join(message.content, "", & &1.text)
   end
 
+  defp text_content(message) do
+    Enum.map_join(message.content, "", &(&1.text || ""))
+  end
+
   defp collect_spawned_processes(parent, count) do
     collect_spawned_processes(parent, count, [])
   end
@@ -189,6 +195,67 @@ defmodule MingaAgent.Providers.NativeTest do
       assert {:ok, %{"level" => "medium"}} = Native.cycle_thinking_level(pid)
       assert {:ok, %{"level" => "high"}} = Native.cycle_thinking_level(pid)
       assert {:ok, %{"level" => "off"}} = Native.cycle_thinking_level(pid)
+    end
+
+    test "seed_messages rehydrates tool calls, tool results, and thinking entries", %{
+      tmp_dir: dir
+    } do
+      {:ok, pid} = start_provider(tmp_dir: dir)
+
+      tool_call =
+        "tc_read"
+        |> ToolCall.new("read_file", %{"path" => "lib/a.ex"})
+        |> ToolCall.complete("file contents")
+
+      messages = [
+        {:user, "Inspect lib/a.ex"},
+        {:assistant, "I'll read it."},
+        {:thinking, "Need to inspect the file first.", true},
+        {:tool_call, tool_call},
+        {:assistant, "The file contains file contents."}
+      ]
+
+      assert :ok = Native.seed_messages(pid, messages)
+
+      %{context: context} = :sys.get_state(pid)
+      assert %Context{} = Context.validate!(context)
+
+      [
+        system_message,
+        user_message,
+        assistant_message,
+        thinking_message,
+        tool_call_message,
+        tool_result_message,
+        final_message
+      ] = context.messages
+
+      assert system_message.role == :system
+      assert user_message.role == :user
+      assert text_content(user_message) == "Inspect lib/a.ex"
+      assert assistant_message.role == :assistant
+      assert text_content(assistant_message) == "I'll read it."
+
+      assert thinking_message.role == :assistant
+
+      assert [%{type: :thinking, text: "Need to inspect the file first."}] =
+               thinking_message.content
+
+      assert tool_call_message.role == :assistant
+      assert text_content(tool_call_message) == ""
+      assert [reqllm_tool_call] = tool_call_message.tool_calls
+      assert reqllm_tool_call.id == "tc_read"
+      assert reqllm_tool_call.function.name == "read_file"
+      assert JSON.decode!(reqllm_tool_call.function.arguments) == %{"path" => "lib/a.ex"}
+
+      assert tool_result_message.role == :tool
+      assert tool_result_message.name == "read_file"
+      assert tool_result_message.tool_call_id == "tc_read"
+      assert text_content(tool_result_message) == "file contents"
+      assert tool_result_message.metadata == %{}
+
+      assert final_message.role == :assistant
+      assert text_content(final_message) == "The file contains file contents."
     end
 
     test "rebuilds built-in tool closures after fork store down so stale pids stop leaking", %{
