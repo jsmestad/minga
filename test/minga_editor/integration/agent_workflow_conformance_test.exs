@@ -125,7 +125,7 @@ defmodule MingaEditor.Integration.AgentWorkflowConformanceTest do
     assert %AgentChat{visible?: true, status: :error} = model
   end
 
-  test "tool approval can be denied through public agent input", %{
+  test "pressing Esc denies a visible tool approval through public agent input", %{
     tmp_dir: dir,
     options_server: options_server
   } do
@@ -159,7 +159,7 @@ defmodule MingaEditor.Integration.AgentWorkflowConformanceTest do
       "expected destructive tool approval to become visible"
     )
 
-    Workflow.deny_tool(ctx)
+    send_key_sync(ctx, 27)
 
     assert_receive {:tool_approval_response, "tc_deny", :reject}, @event_timeout
 

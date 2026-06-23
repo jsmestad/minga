@@ -1922,7 +1922,6 @@ defmodule MingaAgent.Session do
       :sha256
       |> :crypto.hash(:erlang.term_to_binary(args))
       |> Base.encode16(case: :lower)
-      |> String.slice(0, 12)
 
     "#{name}:#{hash}"
   end

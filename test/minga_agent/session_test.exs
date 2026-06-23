@@ -1503,7 +1503,26 @@ defmodule MingaAgent.SessionTest do
       assert_receive {:agent_event, _, {:approval_pending, _}}, @event_timeout
       assert :ok = Session.respond_to_approval(session, :approve_session)
       assert_receive {:tool_approval_response, "tc_mcp", :approve}, @event_timeout
-      refute Map.has_key?(Session.list_tool_trust(session), "mcp_files__delete")
+
+      trust = Session.list_tool_trust(session)
+      assert [key] = Map.keys(trust)
+      assert key =~ ~r/^mcp_files__delete:[0-9a-f]{64}$/
+      assert trust[key] == :session
+
+      send_provider_event(session, %Event.ToolApproval{
+        tool_call_id: "tc_mcp_same",
+        name: "mcp_files__delete",
+        args: %{"path" => "tmp/a.txt"},
+        reply_to: self()
+      })
+
+      assert_receive {:tool_approval_response, "tc_mcp_same", :approve}, @event_timeout
+
+      assert_receive {:agent_event, _,
+                      {:tool_auto_approved, "tc_mcp_same", "mcp_files__delete", :session}},
+                     @event_timeout
+
+      refute_received {:agent_event, _, {:approval_pending, _}}
 
       send_provider_event(session, %Event.ToolApproval{
         tool_call_id: "tc_mcp_other",
