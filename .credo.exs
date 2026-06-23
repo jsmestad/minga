@@ -33,6 +33,14 @@
           {Minga.Credo.NoRawWorkspaceSnapshotCheck, []},
           {Minga.Credo.CommandRegistrationCheck, []},
 
+          # ── Editor responsiveness (epic #2445) ─────────────────────────────
+          {Minga.Credo.NoBlockingEditorCallCheck, []},
+          {Minga.Credo.NoDelegateInEditorCheck, [exit_status: 0]},
+
+          # ── Test isolation ────────────────────────────────────────────────
+          {Minga.Credo.NoEventBusBroadcastInTestCheck, []},
+          {Minga.Credo.NoGlobalStateInTestCheck, [exit_status: 0]},
+
           # ── Readability ────────────────────────────────────────────────────
           {Credo.Check.Readability.AliasOrder, false},
           {Credo.Check.Readability.FunctionNames, []},
