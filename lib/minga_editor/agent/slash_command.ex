@@ -113,6 +113,24 @@ defmodule MingaEditor.Agent.SlashCommand do
     Enum.filter(commands(), fn cmd -> String.starts_with?(cmd.name, clean) end)
   end
 
+  @doc "Returns true when raw slash input names a registered or skill command."
+  @spec known_command?(String.t()) :: boolean()
+  def known_command?("/" <> rest) do
+    {cmd, _args} = parse_command(rest)
+    known_command_name?(cmd)
+  end
+
+  def known_command?(_text), do: false
+
+  @doc "Builds the user-facing message for an unknown slash command."
+  @spec unknown_command_message(String.t()) :: String.t()
+  def unknown_command_message("/" <> rest) do
+    {cmd, _args} = parse_command(rest)
+    unknown_command_message_for_name(cmd, suggestion_for_command(cmd))
+  end
+
+  def unknown_command_message(_text), do: "Not a slash command"
+
   @doc "Returns completion candidates for the current slash input, without the leading slash."
   @spec completion_candidates(state(), String.t()) :: [completion_candidate()]
   def completion_candidates(state, input) when is_binary(input) do
@@ -164,6 +182,60 @@ defmodule MingaEditor.Agent.SlashCommand do
     |> available_model_entries()
     |> filter_model_entries(prefix)
     |> Enum.map(&model_completion_candidate/1)
+  end
+
+  @spec known_command_name?(String.t()) :: boolean()
+  defp known_command_name?(cmd) do
+    command_name?(cmd) or skill_command?(cmd)
+  end
+
+  @spec command_name?(String.t()) :: boolean()
+  defp command_name?(cmd) do
+    Enum.any?(commands(), &(&1.name == cmd))
+  end
+
+  @spec skill_command?(String.t()) :: boolean()
+  defp skill_command?(cmd) do
+    parse_skill_command(cmd) != :not_skill
+  end
+
+  @spec unknown_command_message_for_name(String.t(), String.t() | nil) :: String.t()
+  defp unknown_command_message_for_name(cmd, nil), do: "Unknown command: /#{cmd}"
+
+  defp unknown_command_message_for_name(cmd, suggestion) do
+    "Unknown command: /#{cmd}. Did you mean /#{suggestion}?"
+  end
+
+  @spec suggestion_for_command(String.t()) :: String.t() | nil
+  defp suggestion_for_command(cmd) do
+    case completions(cmd) do
+      [%Command{name: name} | _] -> name
+      [] -> fuzzy_suggestion_for_command(cmd)
+    end
+  end
+
+  @spec fuzzy_suggestion_for_command(String.t()) :: String.t() | nil
+  defp fuzzy_suggestion_for_command(cmd) do
+    matches =
+      commands()
+      |> Enum.map(& &1.name)
+      |> Enum.map(&{command_distance(cmd, &1), &1})
+      |> Enum.filter(fn {distance, _name} -> distance <= 2 end)
+      |> Enum.sort_by(fn {distance, name} -> {distance, String.length(name), name} end)
+
+    case matches do
+      [{_distance, name} | _] -> name
+      [] -> nil
+    end
+  end
+
+  @spec command_distance(String.t(), String.t()) :: non_neg_integer()
+  defp command_distance(left, right) do
+    String.myers_difference(left, right)
+    |> Enum.reduce(0, fn
+      {:eq, _text}, acc -> acc
+      {_op, text}, acc -> acc + String.length(text)
+    end)
   end
 
   @spec available_model_entries(state()) :: [map()]
@@ -1248,7 +1320,8 @@ defmodule MingaEditor.Agent.SlashCommand do
     emit_system_message(state, summary)
   end
 
-  defdelegate detect_project_root, to: Minga.Project, as: :resolve_root
+  @spec detect_project_root() :: String.t()
+  defp detect_project_root, do: Minga.Project.resolve_root()
 
   @spec emit_system_message(state(), String.t()) :: state()
   defp emit_system_message(state, message) do
@@ -1290,7 +1363,9 @@ defmodule MingaEditor.Agent.SlashCommand do
     trimmed_args = String.trim(args)
     cmd_args = if trimmed_args == "", do: [], else: [trimmed_args]
 
-    case System.cmd(command_path, cmd_args, stderr_to_stdout: true) do
+    task = Task.async(fn -> System.cmd(command_path, cmd_args, stderr_to_stdout: true) end)
+
+    case Task.await(task, :infinity) do
       {output, 0} ->
         {:ok, emit_system_message(state, String.trim(output))}
 
@@ -1299,6 +1374,8 @@ defmodule MingaEditor.Agent.SlashCommand do
     end
   rescue
     e -> {:error, "Command /#{cmd.name} error: #{Exception.message(e)}"}
+  catch
+    :exit, reason -> {:error, "Command /#{cmd.name} exited: #{inspect(reason)}"}
   end
 
   # ── Helpers ─────────────────────────────────────────────────────────────────

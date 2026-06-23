@@ -33,6 +33,7 @@ defmodule MingaEditor.Input.Scoped do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.Input.AgentPanel
+  alias MingaEditor.Commands.AgentSubStates
   alias Minga.Keymap
 
   alias Minga.Keymap.Scope
@@ -268,6 +269,15 @@ defmodule MingaEditor.Input.Scoped do
           {:handled, EditorState.t()}
   defp handle_agent_self_insert(state, ?@, _mods) do
     {:handled, AgentCommands.scope_trigger_mention(state)}
+  end
+
+  defp handle_agent_self_insert(state, ?/, _mods) do
+    if AgentSubStates.slash_command_token_at_cursor?(state) do
+      {:handled, AgentCommands.scope_trigger_slash_completion(state)}
+    else
+      state = Commands.execute(state, {:agent_self_insert, "/"})
+      {:handled, AgentCommands.scope_trigger_slash_completion(state)}
+    end
   end
 
   defp handle_agent_self_insert(state, cp, _mods) do

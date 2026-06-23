@@ -45,7 +45,7 @@ defmodule MingaAgent.FileMention do
   alias MingaAgent.ModelLimits
   alias ReqLLM.Message.ContentPart
 
-  @max_candidates 10
+  @max_candidates 50
   @max_file_size 256 * 1024
   @max_image_size 5 * 1024 * 1024
 
@@ -382,18 +382,64 @@ defmodule MingaAgent.FileMention do
     lower = String.downcase(prefix)
 
     files
-    |> Enum.filter(fn path ->
-      String.contains?(String.downcase(path), lower)
-    end)
-    |> Enum.sort_by(fn path ->
-      # Prefer prefix matches over substring matches
-      lower_path = String.downcase(path)
-
-      cond do
-        String.starts_with?(lower_path, lower) -> {0, path}
-        String.starts_with?(Path.basename(String.downcase(path)), lower) -> {1, path}
-        true -> {2, path}
-      end
-    end)
+    |> Enum.flat_map(&candidate_rank(&1, lower))
+    |> Enum.sort_by(fn {rank, path} -> {rank, path} end)
+    |> Enum.map(fn {_rank, path} -> path end)
   end
+
+  @spec candidate_rank(String.t(), String.t()) :: [{non_neg_integer(), String.t()}]
+  defp candidate_rank(path, lower_prefix) do
+    lower_path = String.downcase(path)
+    basename = Path.basename(lower_path)
+
+    case path_rank(lower_path, basename, lower_prefix) do
+      nil -> []
+      rank -> [{rank, path}]
+    end
+  end
+
+  @spec path_rank(String.t(), String.t(), String.t()) :: non_neg_integer() | nil
+  defp path_rank(lower_path, _basename, lower_prefix)
+       when lower_path == lower_prefix,
+       do: 0
+
+  defp path_rank(_lower_path, basename, lower_prefix)
+       when basename == lower_prefix,
+       do: 1
+
+  defp path_rank(lower_path, _basename, lower_prefix) do
+    path_rank_by_match(lower_path, lower_prefix)
+  end
+
+  @spec path_rank_by_match(String.t(), String.t()) :: non_neg_integer() | nil
+  defp path_rank_by_match(lower_path, lower_prefix) do
+    basename = Path.basename(lower_path)
+
+    case {String.starts_with?(lower_path, lower_prefix),
+          String.starts_with?(basename, lower_prefix), String.contains?(lower_path, lower_prefix),
+          subsequence?(lower_prefix, lower_path)} do
+      {true, _, _, _} -> 2
+      {_, true, _, _} -> 3
+      {_, _, true, _} -> 4
+      {_, _, _, true} -> 5
+      _ -> nil
+    end
+  end
+
+  @spec subsequence?(String.t(), String.t()) :: boolean()
+  defp subsequence?("", _text), do: true
+  defp subsequence?(_needle, ""), do: false
+
+  defp subsequence?(needle, text) do
+    needle
+    |> String.graphemes()
+    |> do_subsequence?(String.graphemes(text))
+  end
+
+  @spec do_subsequence?([String.t()], [String.t()]) :: boolean()
+  defp do_subsequence?([], _text), do: true
+  defp do_subsequence?(_needle, []), do: false
+
+  defp do_subsequence?([char | needle], [char | text]), do: do_subsequence?(needle, text)
+  defp do_subsequence?(needle, [_char | text]), do: do_subsequence?(needle, text)
 end

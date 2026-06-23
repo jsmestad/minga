@@ -432,8 +432,12 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec submit_prompt_text(state(), String.t(), boolean()) :: state()
   defp submit_prompt_text(state, text, true) do
-    state = clear_submitted_slash_input(state, text)
-    execute_slash_command(state, text)
+    if SlashCommand.known_command?(text) do
+      state = clear_submitted_slash_input(state, text)
+      execute_slash_command(state, text)
+    else
+      report_unknown_slash_command(state, text)
+    end
   end
 
   defp submit_prompt_text(state, text, false) do
@@ -460,6 +464,17 @@ defmodule MingaEditor.Commands.Agent do
       {:ok, state} -> state
       {:error, msg} -> EditorState.set_status(state, msg)
     end
+  end
+
+  @spec report_unknown_slash_command(state(), String.t()) :: state()
+  defp report_unknown_slash_command(state, text) do
+    message = SlashCommand.unknown_command_message(text)
+
+    if AgentAccess.session(state) do
+      Session.add_system_message(AgentAccess.session(state), message, :error)
+    end
+
+    EditorState.set_status(state, message)
   end
 
   @spec send_prompt_to_llm(state(), String.t()) :: state()

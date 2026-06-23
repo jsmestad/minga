@@ -180,8 +180,8 @@ defmodule Minga.Keymap.Scope.Agent do
       groups: @input_normal_groups,
       then: fn trie ->
         trie
-        # No Escape binding: in normal mode, Escape is a no-op (vim semantics).
-        # Use `q` or Ctrl+Q to leave the input field.
+        # A second Escape leaves input-normal and returns focus to chat navigation.
+        |> Bindings.bind(~k(ESC), :agent_unfocus_input, "Back to chat nav")
         |> Bindings.bind(~k(q), :agent_unfocus_input, "Back to chat nav")
       end
     )
