@@ -372,7 +372,7 @@ defmodule MingaEditor.Agent.Events do
 
   defp apply_batched_delta(_delta, state), do: state
 
-  # The agent transcript only needs re-syncing when the batch carries assistant text or thinking; tool updates render into the preview only.
+  # Only assistant text/thinking batches resync the transcript; tool updates render the preview only.
   @spec transcript_affecting_batch?([term()]) :: boolean()
   defp transcript_affecting_batch?(batch) do
     Enum.any?(batch, fn
