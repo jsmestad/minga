@@ -2013,6 +2013,39 @@ defmodule MingaAgent.Providers.NativeTest do
       refute message =~ "/auth openai_codex"
     end
 
+    test "openai codex chatgpt account model incompatibility is actionable invalid_model", %{
+      tmp_dir: tmp_dir
+    } do
+      reason = %{
+        reason: "HTTP 400",
+        status: 400,
+        response_body: %{
+          "detail" =>
+            "The 'gpt-5.3-codex' model is not supported when using Codex with a ChatGPT account."
+        }
+      }
+
+      {:ok, pid} =
+        start_provider(
+          model: "openai_codex:gpt-5.3-codex",
+          llm_client: fake_error_client(reason),
+          tmp_dir: tmp_dir,
+          max_retries: 0
+        )
+
+      Native.send_prompt(pid, "hello")
+      events = collect_events(2_000)
+
+      error = Enum.find(events, &match?(%Event.Error{}, &1))
+
+      assert %Event.Error{message: message, kind: :invalid_model, provider: "openai_codex"} =
+               error
+
+      assert message =~ "gpt-5.3-codex-spark"
+      assert message =~ "/model"
+      refute message =~ "unexpected error"
+    end
+
     test "string-only provider errors classify auth, rate limit, and network failures", %{
       tmp_dir: tmp_dir
     } do
