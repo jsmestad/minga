@@ -9,14 +9,16 @@ defmodule Minga.RenderModel.UI.EditTimeline do
   """
 
   alias __MODULE__.Entry
+  alias __MODULE__.FileEntry
 
   @type t :: %__MODULE__{
           visible?: boolean(),
           viewing_index: non_neg_integer() | nil,
-          entries: [Entry.t()]
+          entries: [Entry.t()],
+          files: [FileEntry.t()]
         }
 
-  defstruct visible?: false, viewing_index: nil, entries: []
+  defstruct visible?: false, viewing_index: nil, entries: [], files: []
 
   defmodule Entry do
     @moduledoc "One edit-timeline entry: its index, the tool that made the edit, and a delta from the first entry's timestamp."

@@ -145,11 +145,18 @@ defmodule MingaEditor.Layout.FooterOverlays do
 
   @spec content_height_edit_timeline(map()) :: non_neg_integer()
   defp content_height_edit_timeline(state) do
-    with timeline when timeline != nil <- edit_timeline_state(state),
-         path when is_binary(path) <- active_buffer_path(state) do
-      1 + length(MingaEditor.Agent.EditTimeline.entries_for(timeline, path))
-    else
-      _ -> 1
+    case edit_timeline_state(state) do
+      nil ->
+        1
+
+      timeline ->
+        file_summaries = MingaEditor.Agent.EditTimeline.file_summaries(timeline)
+
+        if file_summaries != [] do
+          1 + length(file_summaries)
+        else
+          active_entries_count(state, timeline)
+        end
     end
   end
 
@@ -215,10 +222,31 @@ defmodule MingaEditor.Layout.FooterOverlays do
   # Mirrors MingaEditor.RenderModel.UI.EditTimelineBuilder.
   @spec edit_timeline_visible?(map()) :: boolean()
   defp edit_timeline_visible?(state) do
-    with timeline when timeline != nil <- edit_timeline_state(state),
-         path when is_binary(path) <- active_buffer_path(state) do
-      MingaEditor.Agent.EditTimeline.has_entries?(timeline, path)
-    else
+    case edit_timeline_state(state) do
+      nil ->
+        false
+
+      timeline ->
+        MingaEditor.Agent.EditTimeline.file_summaries(timeline) != [] or
+          active_timeline_entries?(state, timeline)
+    end
+  end
+
+  @spec active_entries_count(map(), term()) :: non_neg_integer()
+  defp active_entries_count(state, timeline) do
+    case active_buffer_path(state) do
+      path when is_binary(path) ->
+        1 + length(MingaEditor.Agent.EditTimeline.entries_for(timeline, path))
+
+      _ ->
+        1
+    end
+  end
+
+  @spec active_timeline_entries?(map(), term()) :: boolean()
+  defp active_timeline_entries?(state, timeline) do
+    case active_buffer_path(state) do
+      path when is_binary(path) -> MingaEditor.Agent.EditTimeline.has_entries?(timeline, path)
       _ -> false
     end
   end

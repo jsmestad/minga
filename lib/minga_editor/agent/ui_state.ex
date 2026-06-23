@@ -16,6 +16,8 @@ defmodule MingaEditor.Agent.UIState do
 
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.UIState.View
+  alias MingaEditor.Agent.Activity
+  alias MingaEditor.Agent.EditTimeline
   alias MingaEditor.Agent.View.Preview
   alias Minga.Buffer
   alias MingaEditor.State.FileTree, as: FileTreeState
@@ -127,6 +129,18 @@ defmodule MingaEditor.Agent.UIState do
   @spec clear_mention_completion(t()) :: t()
   def clear_mention_completion(%__MODULE__{panel: panel} = state) do
     %{state | panel: Panel.clear_mention_completion(panel)}
+  end
+
+  @doc "Updates the turn activity projection."
+  @spec update_activity(t(), (Activity.t() -> Activity.t())) :: t()
+  def update_activity(%__MODULE__{view: view} = state, fun) when is_function(fun, 1) do
+    %{state | view: View.update_activity(view, fun)}
+  end
+
+  @doc "Updates the edit timeline projection."
+  @spec update_edit_timeline(t(), (EditTimeline.t() -> EditTimeline.t())) :: t()
+  def update_edit_timeline(%__MODULE__{view: view} = state, fun) when is_function(fun, 1) do
+    %{state | view: View.update_edit_timeline(view, fun)}
   end
 
   @doc "Advances the spinner animation frame."

@@ -1324,6 +1324,31 @@ fields = [
 ]
 
 [[structures]]
+name = "agent_todo"
+fields = [
+  { name = "status", type = "u8" },
+  { name = "description", type = "string16" },
+]
+
+[[structures]]
+name = "edit_timeline_entry"
+fields = [
+  { name = "index", type = "u8" },
+  { name = "tool_name", type = "string8" },
+  { name = "timestamp_delta", type = "u32" },
+]
+
+[[structures]]
+name = "edit_timeline_file"
+fields = [
+  { name = "path", type = "string16" },
+  { name = "entry_count", type = "u8" },
+  { name = "lines_added", type = "u32" },
+  { name = "lines_removed", type = "u32" },
+  { name = "review_status", type = "u8" },
+]
+
+[[structures]]
 name = "git_status_entry"
 fields = [
   { name = "path_hash", type = "u32" },
@@ -1907,7 +1932,19 @@ fields = [
 
 [[command_fields]]
 opcode = "gui_agent_context"
-fields = [{ name = "visible", type = "u8" }]
+fields = [
+  { name = "payload_len", type = "u16" },
+  { name = "visible", type = "u8" },
+  { name = "task", type = "string16" },
+  { name = "dispatch_timestamp", type = "u64" },
+  { name = "status", type = "u8" },
+  { name = "can_approve", type = "u8" },
+  { name = "active_action", type = "string16" },
+  { name = "tool_count", type = "u16" },
+  { name = "file_count", type = "u16" },
+  { name = "review_hint", type = "string16" },
+  { name = "todos", type = "counted_array", count_type = "u8", element = "agent_todo" },
+]
 
 [[command_fields]]
 opcode = "gui_gutter_sep"
@@ -1931,7 +1968,8 @@ opcode = "gui_edit_timeline"
 fields = [
   { name = "visible", type = "u8" },
   { name = "viewing_index", type = "u16" },
-  { name = "entry_count", type = "u8" },
+  { name = "entries", type = "counted_array", count_type = "u8", element = "edit_timeline_entry" },
+  { name = "files", type = "counted_array", count_type = "u8", element = "edit_timeline_file" },
 ]
 
 [[command_fields]]

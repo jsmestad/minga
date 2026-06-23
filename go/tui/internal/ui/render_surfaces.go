@@ -267,10 +267,30 @@ func (m Model) renderFloat(float protocol.FloatPopup) []string {
 
 func (m Model) renderAgentContext(context protocol.AgentContext) []string {
 	items := []componentItem{{title: statusName(context.Status), description: context.Task}}
+	if context.Progress.ToolCount > 0 || context.Progress.FileCount > 0 || context.Progress.ActiveAction != "" {
+		items = append(items, componentItem{
+			title:       "progress",
+			description: fmt.Sprintf("%d tools / %d files / %s", context.Progress.ToolCount, context.Progress.FileCount, context.Progress.ActiveAction),
+		})
+	}
+	for _, todo := range context.Todos {
+		items = append(items, componentItem{title: todoStatusName(todo.Status), description: todo.Description})
+	}
 	if context.CanApprove {
-		items = append(items, componentItem{title: "approval", description: "approve or request changes"})
+		items = append(items, componentItem{title: "review", description: context.Progress.ReviewHint})
 	}
 	return takeLines(m.charmList("Agent context", items, 0, m.maxOverlayHeight(), true), m.maxOverlayHeight())
+}
+
+func todoStatusName(status byte) string {
+	switch status {
+	case 1:
+		return "doing"
+	case 2:
+		return "done"
+	default:
+		return "todo"
+	}
 }
 
 func (m Model) renderToolManager(tools protocol.ToolManager) []string {
@@ -481,6 +501,9 @@ func (m Model) renderObservatory(obs protocol.Observatory) []string {
 func (m Model) renderEditTimeline(timeline protocol.EditTimeline) []string {
 	height := m.maxOverlayHeight()
 	theme := m.palette()
+	if len(timeline.Files) > 0 {
+		return takeLines(m.renderEditTimelineFiles(timeline, theme), height)
+	}
 	idxWidth := 4
 	ageWidth := 8
 	toolWidth := max(m.width-idxWidth-ageWidth, 18)
@@ -501,6 +524,28 @@ func (m Model) renderEditTimeline(timeline protocol.EditTimeline) []string {
 		lines = append(lines, m.zones.Mark(zoneIDTimelineEntry(entry.Index), row))
 	}
 	return takeLines(lines, height)
+}
+
+func (m Model) renderEditTimelineFiles(timeline protocol.EditTimeline, theme palette) []string {
+	pathWidth := max(m.width-18, 16)
+	countWidth := 6
+	diffWidth := 12
+	header := tableHeaderRow(theme, m.width, []tableCell{
+		{text: "File", width: pathWidth},
+		{text: "Edits", width: countWidth},
+		{text: "Diff", width: diffWidth},
+	})
+	lines := []string{header}
+	for _, file := range timeline.Files {
+		selected := file.ReviewStatus == 1
+		row := tableDataRow(theme, m.width, selected, []tableCell{
+			{text: file.Path, width: pathWidth},
+			{text: fmt.Sprintf("%d", file.EntryCount), width: countWidth},
+			{text: fmt.Sprintf("+%d/-%d", file.LinesAdded, file.LinesRemoved), width: diffWidth},
+		})
+		lines = append(lines, row)
+	}
+	return lines
 }
 
 // tableCell is one column's content and total column width (including the

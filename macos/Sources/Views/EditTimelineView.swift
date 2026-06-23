@@ -6,7 +6,40 @@ struct EditTimelineView: View {
     let encoder: InputEncoder?
 
     var body: some View {
-        if state.visible && !state.entries.isEmpty {
+        if state.visible && !state.files.isEmpty {
+            HStack(spacing: 8) {
+                ForEach(state.files) { file in
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(file.reviewStatus == 1 ? themeColors.accent : themeColors.editorFg.opacity(0.35))
+                            .frame(width: 6, height: 6)
+
+                        Text(file.name)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(themeColors.editorFg)
+                            .lineLimit(1)
+
+                        Text("\(file.entryCount)")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(themeColors.editorFg.opacity(0.65))
+
+                        Text("+\(file.linesAdded)/-\(file.linesRemoved)")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(themeColors.editorFg.opacity(0.65))
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(themeColors.editorFg.opacity(0.08))
+                    .cornerRadius(4)
+                    .help(file.path)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 24)
+            .background(themeColors.editorBg.opacity(0.95))
+        } else if state.visible && !state.entries.isEmpty {
             HStack(spacing: 0) {
                 GeometryReader { geometry in
                     let count = state.entries.count

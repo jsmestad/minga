@@ -413,6 +413,20 @@ type AgentContext struct {
 	Timestamp  uint64
 	Status     byte
 	CanApprove bool
+	Progress   AgentProgress
+	Todos      []AgentTodo
+}
+
+type AgentProgress struct {
+	ActiveAction string
+	ToolCount    uint16
+	FileCount    uint16
+	ReviewHint   string
+}
+
+type AgentTodo struct {
+	Status      byte
+	Description string
 }
 
 type AgentChat struct {
@@ -471,12 +485,21 @@ type EditTimeline struct {
 	Visible      bool
 	ViewingIndex uint16
 	Entries      []TimelineEntry
+	Files        []TimelineFile
 }
 
 type TimelineEntry struct {
 	Index          byte
 	ToolName       string
 	TimestampDelta uint32
+}
+
+type TimelineFile struct {
+	Path         string
+	EntryCount   byte
+	LinesAdded   uint32
+	LinesRemoved uint32
+	ReviewStatus byte
 }
 
 type GutterSeparator struct {

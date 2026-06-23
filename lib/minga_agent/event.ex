@@ -23,6 +23,7 @@ defmodule MingaAgent.Event do
           | tool_approval()
           | tool_file_changed()
           | system_message()
+          | todo_plan()
           | context_usage()
           | turn_limit_reached()
           | error()
@@ -82,6 +83,9 @@ defmodule MingaAgent.Event do
           message: String.t(),
           level: MingaAgent.Message.system_level()
         }
+
+  @typedoc "The agent's current todo plan."
+  @type todo_plan :: MingaAgent.Event.TodoPlan.t()
 
   @typedoc "Pre-send estimated context usage."
   @type context_usage :: %__MODULE__.ContextUsage{

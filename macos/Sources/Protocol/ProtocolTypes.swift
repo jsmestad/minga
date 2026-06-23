@@ -625,12 +625,36 @@ enum Wire {
 
     // MARK: - Edit timeline
 
+    struct AgentProgress: Sendable, Equatable {
+        let activeAction: String
+        let toolCount: UInt16
+        let fileCount: UInt16
+        let reviewHint: String
+    }
+
+    struct AgentTodo: Sendable, Identifiable, Equatable {
+        let status: UInt8
+        let description: String
+
+        var id: String { "\(status):\(description)" }
+    }
+
     struct TimelineEntry: Sendable, Identifiable {
         let index: UInt8
         let toolName: String
         let timestampDelta: UInt32
 
         var id: Int { Int(index) }
+    }
+
+    struct TimelineFile: Sendable, Identifiable, Equatable {
+        let path: String
+        let entryCount: UInt8
+        let linesAdded: UInt32
+        let linesRemoved: UInt32
+        let reviewStatus: UInt8
+
+        var id: String { path }
     }
 
     // MARK: - Extension overlays

@@ -90,8 +90,7 @@ defmodule MingaEditor.Agent.EditTimelineTest do
         |> EditTimeline.record_edit("lib/foo.ex", "tc2", "edit_file", "v1", "v2")
         |> EditTimeline.record_edit("lib/foo.ex", "tc3", "edit_file", "v2", "v3")
 
-      # Start viewing at index 0
-      timeline = %{timeline | viewing: %{"lib/foo.ex" => 0}}
+      timeline = EditTimeline.set_viewing(timeline, "lib/foo.ex", 0)
 
       {timeline, :moved} = EditTimeline.navigate_next(timeline, "lib/foo.ex")
       assert EditTimeline.viewing_index(timeline, "lib/foo.ex") == 1
@@ -127,7 +126,7 @@ defmodule MingaEditor.Agent.EditTimelineTest do
         |> EditTimeline.record_edit("lib/foo.ex", "tc1", "edit_file", "v0", "v1")
         |> EditTimeline.record_edit("lib/foo.ex", "tc2", "edit_file", "v1", "v2")
 
-      timeline = %{timeline | viewing: %{"lib/foo.ex" => 1}}
+      timeline = EditTimeline.set_viewing(timeline, "lib/foo.ex", 1)
       {timeline, :moved} = EditTimeline.navigate_prev(timeline, "lib/foo.ex")
       assert EditTimeline.viewing_index(timeline, "lib/foo.ex") == 0
     end
@@ -137,7 +136,7 @@ defmodule MingaEditor.Agent.EditTimelineTest do
         EditTimeline.new()
         |> EditTimeline.record_edit("lib/foo.ex", "tc1", "edit_file", "v0", "v1")
 
-      timeline = %{timeline | viewing: %{"lib/foo.ex" => 0}}
+      timeline = EditTimeline.set_viewing(timeline, "lib/foo.ex", 0)
       {_timeline, :at_baseline} = EditTimeline.navigate_prev(timeline, "lib/foo.ex")
     end
 
@@ -153,7 +152,7 @@ defmodule MingaEditor.Agent.EditTimelineTest do
         EditTimeline.new()
         |> EditTimeline.record_edit("lib/foo.ex", "tc1", "edit_file", "v0", "v1")
 
-      timeline = %{timeline | viewing: %{"lib/foo.ex" => 0}}
+      timeline = EditTimeline.set_viewing(timeline, "lib/foo.ex", 0)
       timeline = EditTimeline.go_live(timeline, "lib/foo.ex")
       assert EditTimeline.viewing_index(timeline, "lib/foo.ex") == nil
     end
@@ -170,6 +169,33 @@ defmodule MingaEditor.Agent.EditTimelineTest do
         |> EditTimeline.record_edit("lib/foo.ex", "tc1", "edit_file", "v0", "v1")
 
       assert EditTimeline.has_entries?(timeline, "lib/foo.ex")
+    end
+  end
+
+  describe "file_summaries/1" do
+    test "summarizes every touched file with diff counts and review status" do
+      timeline =
+        EditTimeline.new()
+        |> EditTimeline.record_edit("lib/b.ex", "tc1", "edit_file", "one\n", "one\ntwo\n")
+        |> EditTimeline.record_edit("lib/a.ex", "tc2", "edit_file", "old\n", "new\n")
+        |> EditTimeline.set_viewing("lib/a.ex", 0)
+
+      assert [
+               %{
+                 path: "lib/a.ex",
+                 entry_count: 1,
+                 lines_added: 1,
+                 lines_removed: 1,
+                 review_status: :reviewing
+               },
+               %{
+                 path: "lib/b.ex",
+                 entry_count: 1,
+                 lines_added: 1,
+                 lines_removed: 0,
+                 review_status: :pending
+               }
+             ] = EditTimeline.file_summaries(timeline)
     end
   end
 

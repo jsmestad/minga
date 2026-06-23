@@ -26,8 +26,30 @@ struct AgentContextBar: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
 
-                // Status badge (inline)
                 statusBadge
+
+                if !state.progress.activeAction.isEmpty {
+                    Text(state.progress.activeAction)
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.breadcrumbFg.opacity(0.75))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+
+                if state.progress.toolCount > 0 || state.progress.fileCount > 0 {
+                    Text("\(state.progress.toolCount) tools / \(state.progress.fileCount) files")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(theme.breadcrumbFg.opacity(0.6))
+                        .lineLimit(1)
+                }
+
+                if let activeTodo = state.todos.first(where: { $0.status == 1 }) ?? state.todos.first {
+                    Text(todoLabel(activeTodo))
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.breadcrumbFg.opacity(0.7))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
 
                 Spacer()
 
@@ -97,7 +119,7 @@ struct AgentContextBar: View {
             )
 
             reviewButton(
-                label: "Request Changes",
+                label: "Reject Changes",
                 systemIcon: "exclamationmark.triangle.fill",
                 color: Color(red: 1.0, green: 0.75, blue: 0.2),
                 action: {
@@ -153,6 +175,17 @@ struct AgentContextBar: View {
             elapsedDisplay = "\(seconds / 60)m"
         } else {
             elapsedDisplay = "\(seconds / 3600)h \((seconds % 3600) / 60)m"
+        }
+    }
+
+    private func todoLabel(_ todo: Wire.AgentTodo) -> String {
+        switch todo.status {
+        case 1:
+            return "Now: \(todo.description)"
+        case 2:
+            return "Done: \(todo.description)"
+        default:
+            return "Next: \(todo.description)"
         }
     }
 }
