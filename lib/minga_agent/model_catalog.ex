@@ -277,6 +277,7 @@ defmodule MingaAgent.ModelCatalog do
     {
       current_rank(model),
       Map.get(@provider_sort_order, provider, 99),
+      oauth_account_compatibility_rank(provider, id),
       model_family_rank(id),
       model_version_key(id),
       model_variant_rank(id),
@@ -287,6 +288,35 @@ defmodule MingaAgent.ModelCatalog do
   @spec current_rank(model_entry()) :: integer()
   defp current_rank(%{"current" => true}), do: 0
   defp current_rank(_model), do: 1
+
+  @spec oauth_account_compatibility_rank(String.t(), String.t()) :: integer()
+  defp oauth_account_compatibility_rank("openai_codex", id) do
+    codex_oauth_default_rank(bare_model_id(id))
+  end
+
+  defp oauth_account_compatibility_rank(_provider, _id), do: 0
+
+  @spec codex_oauth_default_rank(String.t()) :: integer()
+  defp codex_oauth_default_rank(id) do
+    normalized = String.downcase(id)
+
+    codex_oauth_default_rank(
+      normalized,
+      String.contains?(normalized, "-spark")
+    )
+  end
+
+  @spec codex_oauth_default_rank(String.t(), boolean()) :: integer()
+  defp codex_oauth_default_rank(_id, true), do: 0
+  defp codex_oauth_default_rank(_id, false), do: 1
+
+  @spec bare_model_id(String.t()) :: String.t()
+  defp bare_model_id(id) do
+    case String.split(id, ":", parts: 2) do
+      [_provider, model_id] -> model_id
+      _other -> id
+    end
+  end
 
   @spec model_family_rank(String.t()) :: integer()
   defp model_family_rank(id) do

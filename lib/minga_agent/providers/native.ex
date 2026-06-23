@@ -3202,31 +3202,40 @@ defmodule MingaAgent.Providers.Native do
     provider = provider_slug_from_model(model)
 
     %Event.Error{
-      message: error_event_message(kind, message, provider),
+      message: error_event_message(kind, message, provider, reason, model),
       kind: kind,
       provider: provider
     }
   end
 
-  @spec error_event_message(Event.Error.kind(), String.t(), String.t() | nil) :: String.t()
-  defp error_event_message(:auth_failed, _message, provider) do
+  @spec error_event_message(Event.Error.kind(), String.t(), String.t() | nil, term(), String.t()) ::
+          String.t()
+  defp error_event_message(:auth_failed, _message, provider, _reason, _model) do
     provider = provider || "provider"
     "Couldn't authenticate with #{provider_label(provider)}. #{auth_hint_for_provider(provider)}"
   end
 
-  defp error_event_message(:rate_limited, _message, _provider) do
+  defp error_event_message(:rate_limited, _message, _provider, _reason, _model) do
     "The model provider is rate limiting requests. Wait a moment, then try again."
   end
 
-  defp error_event_message(:unreachable, _message, _provider) do
+  defp error_event_message(:unreachable, _message, _provider, _reason, _model) do
     "Couldn't reach the model provider. Check your network connection, then try again."
   end
 
-  defp error_event_message(:provider_error, _message, _provider) do
+  defp error_event_message(:provider_error, _message, _provider, _reason, _model) do
     "The model provider returned an unexpected error. Open Messages for details, or pick another configured model with /model."
   end
 
-  defp error_event_message(:invalid_model, message, _provider), do: message
+  defp error_event_message(:invalid_model, message, "openai_codex", reason, model) do
+    if codex_chatgpt_model_incompatible?(reason) do
+      "This model isn't available for your ChatGPT account. Pick #{codex_chatgpt_fallback_model(model)} with /model, then retry."
+    else
+      message
+    end
+  end
+
+  defp error_event_message(:invalid_model, message, _provider, _reason, _model), do: message
 
   @spec classify_error_reason(term()) :: Event.Error.kind()
   defp classify_error_reason(:invalid_format), do: :invalid_model
@@ -3234,12 +3243,8 @@ defmodule MingaAgent.Providers.Native do
   defp classify_error_reason({:provider_build_failed, _reason}), do: :auth_failed
   defp classify_error_reason({:exit, reason}), do: classify_error_reason(reason)
   defp classify_error_reason({:throw, reason}), do: classify_error_reason(reason)
-  defp classify_error_reason(%{status: status}) when status in [401, 403], do: :auth_failed
-  defp classify_error_reason(%{status: 429}), do: :rate_limited
-  defp classify_error_reason(%{"status" => status}) when status in [401, 403], do: :auth_failed
-  defp classify_error_reason(%{"status" => 429}), do: :rate_limited
-  defp classify_error_reason(%{reason: reason}), do: classify_error_reason(reason)
-  defp classify_error_reason(%{"reason" => reason}), do: classify_error_reason(reason)
+
+  defp classify_error_reason(reason) when is_map(reason), do: classify_map_error_reason(reason)
 
   defp classify_error_reason(reason) when reason in [:timeout, :nxdomain, :econnrefused],
     do: :unreachable
@@ -3248,6 +3253,73 @@ defmodule MingaAgent.Providers.Native do
     do: classify_legacy_error_message(reason)
 
   defp classify_error_reason(_reason), do: :provider_error
+
+  @spec classify_map_error_reason(map()) :: Event.Error.kind()
+  defp classify_map_error_reason(reason) do
+    classify_map_error_reason(reason, codex_chatgpt_model_incompatible?(reason))
+  end
+
+  @spec classify_map_error_reason(map(), boolean()) :: Event.Error.kind()
+  defp classify_map_error_reason(_reason, true), do: :invalid_model
+
+  defp classify_map_error_reason(%{status: status}, false) when status in [401, 403],
+    do: :auth_failed
+
+  defp classify_map_error_reason(%{status: 429}, false), do: :rate_limited
+
+  defp classify_map_error_reason(%{"status" => status}, false) when status in [401, 403],
+    do: :auth_failed
+
+  defp classify_map_error_reason(%{"status" => 429}, false), do: :rate_limited
+  defp classify_map_error_reason(%{reason: reason}, false), do: classify_error_reason(reason)
+  defp classify_map_error_reason(%{"reason" => reason}, false), do: classify_error_reason(reason)
+  defp classify_map_error_reason(_reason, false), do: :provider_error
+
+  @spec codex_chatgpt_model_incompatible?(term()) :: boolean()
+  defp codex_chatgpt_model_incompatible?(%{response_body: response_body}) do
+    codex_chatgpt_model_incompatible?(response_body)
+  end
+
+  defp codex_chatgpt_model_incompatible?(%{"response_body" => response_body}) do
+    codex_chatgpt_model_incompatible?(response_body)
+  end
+
+  defp codex_chatgpt_model_incompatible?(%{detail: detail}) when is_binary(detail) do
+    codex_chatgpt_model_incompatible?(detail)
+  end
+
+  defp codex_chatgpt_model_incompatible?(%{"detail" => detail}) when is_binary(detail) do
+    codex_chatgpt_model_incompatible?(detail)
+  end
+
+  defp codex_chatgpt_model_incompatible?(message) when is_binary(message) do
+    normalized = String.downcase(message)
+
+    String.contains?(normalized, "model is not supported") and
+      String.contains?(normalized, "chatgpt account")
+  end
+
+  defp codex_chatgpt_model_incompatible?(_reason), do: false
+
+  @spec codex_chatgpt_fallback_model(String.t()) :: String.t()
+  defp codex_chatgpt_fallback_model(model) do
+    case String.split(model, ":", parts: 2) do
+      [provider, model_id] when provider != "" and model_id != "" ->
+        "#{provider}:#{codex_chatgpt_fallback_model_id(model_id)}"
+
+      _other ->
+        "openai_codex:#{codex_chatgpt_fallback_model_id(model)}"
+    end
+  end
+
+  @spec codex_chatgpt_fallback_model_id(String.t()) :: String.t()
+  defp codex_chatgpt_fallback_model_id(model_id) do
+    if String.ends_with?(model_id, "-spark") do
+      model_id
+    else
+      model_id <> "-spark"
+    end
+  end
 
   # Last-resort compatibility for third-party clients that only return a string.
   # Internal provider/session contracts use `Event.Error.kind` instead.

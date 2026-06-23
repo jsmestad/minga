@@ -78,6 +78,21 @@ defmodule MingaAgent.ModelCatalogTest do
       assert normalized == []
     end
 
+    test "chatgpt oauth codex spark sorts before known incompatible base codex" do
+      models = [
+        codex_model("gpt-5.3-codex", "GPT-5.3 Codex"),
+        codex_model("gpt-5.3-codex-spark", "GPT-5.3 Codex Spark")
+      ]
+
+      normalized =
+        ModelCatalog.available_models_from(models, "", MapSet.new(), true)
+
+      assert Enum.map(normalized, & &1["id"]) == [
+               "openai_codex:gpt-5.3-codex-spark",
+               "openai_codex:gpt-5.3-codex"
+             ]
+    end
+
     test "current model sorts first when present" do
       models = ModelCatalog.available_models()
 
