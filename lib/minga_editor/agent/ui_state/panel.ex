@@ -13,6 +13,7 @@ defmodule MingaEditor.Agent.UIState.Panel do
   """
 
   alias MingaAgent.Config, as: AgentConfig
+  alias MingaEditor.Agent.Transcript
   alias Minga.Buffer
   alias Minga.Editing.Scroll
 
@@ -42,6 +43,8 @@ defmodule MingaEditor.Agent.UIState.Panel do
           credentials_configured: boolean(),
           provenance_jump: MingaEditor.Agent.ProvenanceJump.t() | nil
         }
+
+  @type styled_cache :: [MingaEditor.Agent.MarkdownHighlight.styled_lines()] | nil
 
   defstruct visible: false,
             scroll: %Scroll{},
@@ -125,6 +128,45 @@ defmodule MingaEditor.Agent.UIState.Panel do
   @spec set_model_name(t(), String.t()) :: t()
   def set_model_name(%__MODULE__{} = panel, model) when is_binary(model) do
     %{panel | model_name: model}
+  end
+
+  @doc "Replaces cached transcript projection data after a transcript sync."
+  @spec cache_transcript_display(t(), Transcript.display_result(), styled_cache(), keyword()) ::
+          t()
+  def cache_transcript_display(%__MODULE__{} = panel, display, styled_messages, opts \\ []) do
+    %{
+      panel
+      | cached_line_index: display.line_index,
+        cached_display_messages: display.display_messages,
+        cached_display_message_pairs: display.display_message_pairs,
+        cached_styled_messages: styled_messages,
+        display_start_index: Keyword.get(opts, :display_start_index, panel.display_start_index),
+        provenance_jump: Keyword.get(opts, :provenance_jump, panel.provenance_jump)
+    }
+  end
+
+  @doc "Clears cached transcript projection data when there is no displayable transcript."
+  @spec clear_transcript_cache(t()) :: t()
+  def clear_transcript_cache(%__MODULE__{} = panel) do
+    %{
+      panel
+      | cached_line_index: [],
+        cached_display_messages: [],
+        cached_display_message_pairs: [],
+        cached_styled_messages: nil,
+        display_start_index: 0,
+        provenance_jump: nil
+    }
+  end
+
+  @doc "Stores semantic scroll state for the agent transcript panel."
+  @spec set_scroll(t(), Scroll.t()) :: t()
+  def set_scroll(%__MODULE__{} = panel, %Scroll{} = scroll), do: %{panel | scroll: scroll}
+
+  @doc "Replaces cached styled transcript runs without changing the display window."
+  @spec cache_styled_messages(t(), styled_cache()) :: t()
+  def cache_styled_messages(%__MODULE__{} = panel, styled_messages) do
+    %{panel | cached_styled_messages: styled_messages}
   end
 
   @spec stale_unqualified_model?(String.t(), String.t()) :: boolean()

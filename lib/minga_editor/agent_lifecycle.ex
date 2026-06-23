@@ -13,6 +13,7 @@ defmodule MingaEditor.AgentLifecycle do
   alias MingaEditor.Agent.MarkdownHighlight
   alias MingaEditor.Agent.ProvenanceJump
   alias MingaEditor.Agent.Transcript
+  alias MingaEditor.Agent.UIState.Panel
   alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.Session, as: AgentSession
   alias MingaEditor.Agent.UIState
@@ -160,15 +161,10 @@ defmodule MingaEditor.AgentLifecycle do
     # display window and mark the jump landed so later re-syncs hold position
     # instead of re-pinning to the bottom.
     AgentAccess.update_panel(state, fn p ->
-      %{
-        p
-        | cached_line_index: result.line_index,
-          cached_display_messages: result.display_messages,
-          cached_display_message_pairs: result.display_message_pairs,
-          cached_styled_messages: styled,
-          display_start_index: display_start,
-          provenance_jump: advance_jump(jump)
-      }
+      Panel.cache_transcript_display(p, result, styled,
+        display_start_index: display_start,
+        provenance_jump: advance_jump(jump)
+      )
     end)
   end
 
@@ -181,17 +177,7 @@ defmodule MingaEditor.AgentLifecycle do
 
   @spec clear_transcript_cache(state()) :: state()
   defp clear_transcript_cache(state) do
-    AgentAccess.update_panel(state, fn panel ->
-      %{
-        panel
-        | cached_line_index: [],
-          cached_display_messages: [],
-          cached_display_message_pairs: [],
-          cached_styled_messages: nil,
-          display_start_index: 0,
-          provenance_jump: nil
-      }
-    end)
+    AgentAccess.update_panel(state, &Panel.clear_transcript_cache/1)
   end
 
   @spec first_run_empty_state(state(), [term()]) :: Transcript.empty_state()
@@ -373,7 +359,7 @@ defmodule MingaEditor.AgentLifecycle do
       styled = compute_styled_messages(state, messages)
 
       AgentAccess.update_panel(state, fn p ->
-        %{p | cached_styled_messages: styled}
+        Panel.cache_styled_messages(p, styled)
       end)
     else
       _ -> state
