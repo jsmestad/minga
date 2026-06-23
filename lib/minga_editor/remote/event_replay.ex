@@ -91,17 +91,7 @@ defmodule MingaEditor.Remote.EventReplay do
     case {payload_value(preview, "kind"), payload_value(preview, "summary"),
           payload_value(preview, "lines")} do
       {kind, summary, lines} when is_binary(summary) and is_list(lines) ->
-        case preview_kind(kind) do
-          nil ->
-            nil
-
-          preview_kind ->
-            if Enum.all?(lines, &is_binary/1) do
-              Preview.new(preview_kind, summary, lines)
-            else
-              nil
-            end
-        end
+        build_approval_preview(preview_kind(kind), summary, lines)
 
       _ ->
         nil
@@ -109,6 +99,17 @@ defmodule MingaEditor.Remote.EventReplay do
   end
 
   defp approval_preview(_preview), do: nil
+
+  @spec build_approval_preview(Preview.kind() | nil, String.t(), [term()]) :: Preview.t() | nil
+  defp build_approval_preview(nil, _summary, _lines), do: nil
+
+  defp build_approval_preview(preview_kind, summary, lines) do
+    if Enum.all?(lines, &is_binary/1) do
+      Preview.new(preview_kind, summary, lines)
+    else
+      nil
+    end
+  end
 
   @spec preview_kind(term()) :: Preview.kind() | nil
   defp preview_kind(kind) when is_atom(kind) and kind in [:diff, :command, :target, :args],

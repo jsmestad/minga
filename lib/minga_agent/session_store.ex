@@ -351,7 +351,7 @@ defmodule MingaAgent.SessionStore do
   @spec deserialize_tool_preview(map() | nil) :: Preview.t() | nil
   defp deserialize_tool_preview(%{"kind" => kind, "summary" => summary, "lines" => lines})
        when is_binary(summary) and is_list(lines) do
-    with preview_kind when not is_nil(preview_kind) <- deserialize_preview_kind(kind),
+    with {:ok, preview_kind} <- deserialize_preview_kind(kind),
          true <- Enum.all?(lines, &is_binary/1) do
       Preview.new(preview_kind, summary, lines)
     else
@@ -361,16 +361,16 @@ defmodule MingaAgent.SessionStore do
 
   defp deserialize_tool_preview(_preview), do: nil
 
-  @spec deserialize_preview_kind(term()) :: Preview.kind() | nil
-  defp deserialize_preview_kind("diff"), do: :diff
-  defp deserialize_preview_kind(:diff), do: :diff
-  defp deserialize_preview_kind("command"), do: :command
-  defp deserialize_preview_kind(:command), do: :command
-  defp deserialize_preview_kind("target"), do: :target
-  defp deserialize_preview_kind(:target), do: :target
-  defp deserialize_preview_kind("args"), do: :args
-  defp deserialize_preview_kind(:args), do: :args
-  defp deserialize_preview_kind(_kind), do: nil
+  @spec deserialize_preview_kind(term()) :: {:ok, Preview.kind()} | :error
+  defp deserialize_preview_kind("diff"), do: {:ok, :diff}
+  defp deserialize_preview_kind(:diff), do: {:ok, :diff}
+  defp deserialize_preview_kind("command"), do: {:ok, :command}
+  defp deserialize_preview_kind(:command), do: {:ok, :command}
+  defp deserialize_preview_kind("target"), do: {:ok, :target}
+  defp deserialize_preview_kind(:target), do: {:ok, :target}
+  defp deserialize_preview_kind("args"), do: {:ok, :args}
+  defp deserialize_preview_kind(:args), do: {:ok, :args}
+  defp deserialize_preview_kind(_kind), do: :error
 
   @spec serialize_auto_approved_scope(MingaAgent.ToolCall.auto_approved_scope() | nil) ::
           String.t() | nil
