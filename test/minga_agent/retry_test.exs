@@ -108,7 +108,8 @@ defmodule MingaAgent.RetryTest do
     end
 
     test "calls on_retry callback before each retry" do
-      callback_log = :ets.new(:retry_log, [:ordered_set, :public])
+      callback_log =
+        :ets.new(:"retry_log_#{:erlang.unique_integer([:positive])}", [:ordered_set, :public])
 
       Retry.with_retry(
         fn -> {:error, %{status: 500}} end,
@@ -125,10 +126,7 @@ defmodule MingaAgent.RetryTest do
       [{1, delay1, reason1}, {2, delay2, reason2}] = entries
       assert reason1 == "HTTP 500"
       assert reason2 == "HTTP 500"
-      # Exponential backoff: second delay should be roughly 2x the first
       assert delay2 > delay1
-
-      :ets.delete(callback_log)
     end
 
     test "zero max_retries means no retries" do

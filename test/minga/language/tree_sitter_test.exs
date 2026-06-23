@@ -107,8 +107,7 @@ defmodule Minga.Language.TreeSitterTest do
       HLGrammar.register_language(:elixir, "elixir_custom")
       assert {:ok, "elixir_custom"} = HLGrammar.language_for_filetype(:elixir)
 
-      # Clean up: restore original
-      :ets.delete(:minga_grammar_registry, :elixir)
+      HLGrammar.unregister_language(:elixir)
       assert {:ok, "elixir"} = HLGrammar.language_for_filetype(:elixir)
     end
 

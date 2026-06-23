@@ -4,8 +4,7 @@ defmodule MingaEditor.RenderPipeline.InvalidationTest do
   introduced as the foundation for the dirty-tracking work in #1431.
   """
 
-  # async: false — `sanity_mode?/0` test mutates `MINGA_RENDER_SANITY` env var
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias MingaEditor.RenderPipeline.Invalidation
   alias MingaEditor.RenderPipeline.WindowDirty
@@ -26,17 +25,10 @@ defmodule MingaEditor.RenderPipeline.InvalidationTest do
       assert MapSet.size(inv.chrome_regions) == 0
     end
 
-    test "sanity_mode?/0 reads the MINGA_RENDER_SANITY env var" do
-      System.delete_env("MINGA_RENDER_SANITY")
-      refute Invalidation.sanity_mode?()
-
-      System.put_env("MINGA_RENDER_SANITY", "1")
-      assert Invalidation.sanity_mode?()
-
-      System.put_env("MINGA_RENDER_SANITY", "0")
-      refute Invalidation.sanity_mode?()
-
-      System.delete_env("MINGA_RENDER_SANITY")
+    test "sanity_mode?/1 returns true only for the value \"1\"" do
+      refute Invalidation.sanity_mode?(nil)
+      assert Invalidation.sanity_mode?("1")
+      refute Invalidation.sanity_mode?("0")
     end
   end
 

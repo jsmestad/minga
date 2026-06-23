@@ -108,6 +108,7 @@ defmodule MingaAgent.OAuth.FlowTest do
 
   describe "registration" do
     test "only one flow can register at a time" do
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Process.register(self(), :minga_oauth_flow)
 
       task =

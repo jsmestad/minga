@@ -173,10 +173,10 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
   def openai_codex_model?(model), do: provider_from_model(model) == "openai_codex"
 
   @doc "Sets the provider API key env var when credentials are file-backed."
-  @spec ensure_api_key_in_env(String.t()) :: :ok
-  def ensure_api_key_in_env(model) do
+  @spec ensure_api_key_in_env(String.t(), keyword()) :: :ok
+  def ensure_api_key_in_env(model, opts \\ []) do
     case parse_provider(model) do
-      {:ok, provider} -> ensure_provider_api_key_in_env(provider)
+      {:ok, provider} -> ensure_provider_api_key_in_env(provider, opts)
       :error -> :ok
     end
   end
@@ -285,20 +285,28 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
     end
   end
 
-  @spec ensure_provider_api_key_in_env(String.t()) :: :ok
-  defp ensure_provider_api_key_in_env(provider) do
-    case Credentials.resolve(provider) do
-      {:ok, key, :file} -> put_file_backed_key_in_env(provider, key)
+  @spec ensure_provider_api_key_in_env(String.t(), keyword()) :: :ok
+  defp ensure_provider_api_key_in_env(provider, opts) do
+    case Credentials.resolve(provider, opts) do
+      {:ok, key, :file} -> put_file_backed_key_in_env(provider, key, opts)
       {:ok, _key, :env} -> :ok
       :error -> warn_missing_credentials(provider)
     end
   end
 
-  @spec put_file_backed_key_in_env(String.t(), String.t()) :: :ok
-  defp put_file_backed_key_in_env(provider, key) do
+  @spec put_file_backed_key_in_env(String.t(), String.t(), keyword()) :: :ok
+  defp put_file_backed_key_in_env(provider, key, opts) do
     case Credentials.env_var_for(provider) do
-      nil -> :ok
-      var_name -> System.put_env(var_name, key)
+      nil ->
+        :ok
+
+      var_name ->
+        case Keyword.get(opts, :on_env_set) do
+          fun when is_function(fun, 2) -> fun.(var_name, key)
+          nil -> System.put_env(var_name, key)
+        end
+
+        :ok
     end
   end
 

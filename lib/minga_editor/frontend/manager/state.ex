@@ -22,7 +22,8 @@ defmodule MingaEditor.Frontend.Manager.State do
             port_mode: :spawn,
             ready: false,
             terminal_size: nil,
-            capabilities: %Capabilities{}
+            capabilities: %Capabilities{},
+            tty_path: :detect
 
   @type t :: %__MODULE__{
           port: port() | nil,
@@ -31,6 +32,7 @@ defmodule MingaEditor.Frontend.Manager.State do
           port_mode: port_mode(),
           ready: boolean(),
           terminal_size: {width :: pos_integer(), height :: pos_integer()} | nil,
-          capabilities: Capabilities.t()
+          capabilities: Capabilities.t(),
+          tty_path: String.t() | nil | :detect
         }
 end

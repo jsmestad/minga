@@ -288,8 +288,7 @@ defmodule MingaEditor.StartupTest do
       ShellRegistry.reset_for_test()
       ShellRegistry.seed_builtin()
       options_server = start_supervised!({Options, name: nil})
-      %{table: table} = :sys.get_state(options_server)
-      :ets.insert(table, {:default_shell, :missing_shell})
+      Options.set_unchecked(options_server, :default_shell, :missing_shell)
       Process.put(:minga_config_options, options_server)
 
       {state, log} =

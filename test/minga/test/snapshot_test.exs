@@ -175,16 +175,17 @@ defmodule Minga.Test.SnapshotTest do
     end
   end
 
-  describe "update_mode?/0" do
-    test "returns false when env var is not set" do
-      System.delete_env("UPDATE_SNAPSHOTS")
-      refute Snapshot.update_mode?()
+  describe "update_mode?/1" do
+    test "returns false when override is nil" do
+      refute Snapshot.update_mode?(nil)
     end
 
-    test "returns true when env var is set" do
-      System.put_env("UPDATE_SNAPSHOTS", "1")
-      assert Snapshot.update_mode?()
-      System.delete_env("UPDATE_SNAPSHOTS")
+    test "returns true when override is a non-nil string" do
+      assert Snapshot.update_mode?("1")
+    end
+
+    test "defaults to checking the env var" do
+      assert is_boolean(Snapshot.update_mode?())
     end
   end
 

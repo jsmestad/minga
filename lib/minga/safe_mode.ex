@@ -16,9 +16,9 @@ defmodule Minga.SafeMode do
   end
 
   @doc "Returns true when startup env or argv requested safe mode."
-  @spec startup_safe_mode?() :: boolean()
-  def startup_safe_mode? do
-    startup_env_safe?() or startup_argv_safe?()
+  @spec startup_safe_mode?(keyword()) :: boolean()
+  def startup_safe_mode?(opts \\ []) do
+    startup_env_safe?(opts) or startup_argv_safe?()
   end
 
   @doc "Stores the safe mode startup flag."
@@ -33,9 +33,11 @@ defmodule Minga.SafeMode do
     :ok
   end
 
-  @spec startup_env_safe?() :: boolean()
-  defp startup_env_safe? do
-    case System.get_env("MINGA_SAFE_MODE") do
+  @spec startup_env_safe?(keyword()) :: boolean()
+  defp startup_env_safe?(opts) do
+    value = Keyword.get(opts, :env_value, System.get_env("MINGA_SAFE_MODE"))
+
+    case value do
       "1" -> true
       "true" -> true
       _ -> false

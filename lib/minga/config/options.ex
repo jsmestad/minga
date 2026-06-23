@@ -731,6 +731,13 @@ defmodule Minga.Config.Options do
     end
   end
 
+  @doc "Sets an option without validation. For test setup of intentionally invalid configurations."
+  @spec set_unchecked(server(), option_name(), term()) :: :ok
+  def set_unchecked(server \\ @default_server, name, value) when is_atom(name) do
+    :ets.insert(table_name(server), {name, value})
+    :ok
+  end
+
   @doc "Marks an option as explicitly set by the GUI settings overlay."
   @spec mark_explicit(server(), option_name()) :: :ok
   def mark_explicit(server \\ @default_server, name) when is_atom(name) do

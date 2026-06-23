@@ -6,10 +6,15 @@ defmodule MingaAgent.OAuth.CallbackHandlerTest do
 
   alias MingaAgent.OAuth.CallbackHandler
 
+  setup do
+    # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+    Process.register(self(), :minga_oauth_flow)
+    on_exit(fn -> safe_unregister(:minga_oauth_flow) end)
+    :ok
+  end
+
   describe "GET /auth/callback" do
     test "sends code and state to registered flow process" do
-      Process.register(self(), :minga_oauth_flow)
-
       conn =
         conn(:get, "/auth/callback?code=test_code&state=test_state")
         |> CallbackHandler.call(CallbackHandler.init([]))
@@ -17,13 +22,9 @@ defmodule MingaAgent.OAuth.CallbackHandlerTest do
       assert conn.status == 200
       assert conn.resp_body =~ "Received"
       assert_receive {:oauth_callback, "test_code", "test_state"}, 1000
-    after
-      safe_unregister(:minga_oauth_flow)
     end
 
     test "sends error message when code is missing and returns 400" do
-      Process.register(self(), :minga_oauth_flow)
-
       conn =
         conn(:get, "/auth/callback?state=test_state")
         |> CallbackHandler.call(CallbackHandler.init([]))
@@ -31,13 +32,9 @@ defmodule MingaAgent.OAuth.CallbackHandlerTest do
       assert conn.status == 400
       assert conn.resp_body =~ "Missing authorization code"
       assert_receive {:oauth_callback_error, :missing_code}, 1000
-    after
-      safe_unregister(:minga_oauth_flow)
     end
 
     test "sends provider error details when OpenAI redirects with an error" do
-      Process.register(self(), :minga_oauth_flow)
-
       conn =
         conn(:get, "/auth/callback?error=access_denied&error_description=Nope")
         |> CallbackHandler.call(CallbackHandler.init([]))
@@ -46,11 +43,11 @@ defmodule MingaAgent.OAuth.CallbackHandlerTest do
       assert conn.resp_body =~ "access_denied"
       assert conn.resp_body =~ "Nope"
       assert_receive {:oauth_callback_error, {:provider_error, "access_denied: Nope"}}, 1000
-    after
-      safe_unregister(:minga_oauth_flow)
     end
 
     test "does not crash when no flow process is registered" do
+      safe_unregister(:minga_oauth_flow)
+
       conn =
         conn(:get, "/auth/callback?code=orphan&state=orphan")
         |> CallbackHandler.call(CallbackHandler.init([]))
@@ -59,36 +56,30 @@ defmodule MingaAgent.OAuth.CallbackHandlerTest do
     end
 
     test "handles missing state gracefully" do
-      Process.register(self(), :minga_oauth_flow)
-
       conn =
         conn(:get, "/auth/callback?code=the_code")
         |> CallbackHandler.call(CallbackHandler.init([]))
 
       assert conn.status == 200
       assert_receive {:oauth_callback, "the_code", nil}, 1000
-    after
-      safe_unregister(:minga_oauth_flow)
     end
   end
 
   describe "GET /callback" do
     test "keeps the previous callback path as a compatibility alias" do
-      Process.register(self(), :minga_oauth_flow)
-
       conn =
         conn(:get, "/callback?code=legacy_code&state=legacy_state")
         |> CallbackHandler.call(CallbackHandler.init([]))
 
       assert conn.status == 200
       assert_receive {:oauth_callback, "legacy_code", "legacy_state"}, 1000
-    after
-      safe_unregister(:minga_oauth_flow)
     end
   end
 
   describe "unmatched routes" do
     test "returns 404 for unknown paths" do
+      safe_unregister(:minga_oauth_flow)
+
       conn =
         conn(:get, "/unknown")
         |> CallbackHandler.call(CallbackHandler.init([]))
@@ -99,8 +90,6 @@ defmodule MingaAgent.OAuth.CallbackHandlerTest do
 
   describe "Bandit integration" do
     test "serves callback over HTTP" do
-      Process.register(self(), :minga_oauth_flow)
-
       {:ok, pid} =
         Bandit.start_link(
           plug: CallbackHandler,
@@ -119,8 +108,6 @@ defmodule MingaAgent.OAuth.CallbackHandlerTest do
       assert_receive {:oauth_callback, "http_code", "http_state"}, 1000
 
       Supervisor.stop(pid, :normal)
-    after
-      safe_unregister(:minga_oauth_flow)
     end
   end
 

@@ -1,6 +1,5 @@
 defmodule MingaAgent.Providers.Native.ReqLLMAdapterCredentialsTest do
-  # Not async: these tests mutate process-global System env vars (XDG_CONFIG_HOME and provider API-key vars).
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   import ExUnit.CaptureLog
 
@@ -10,14 +9,7 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterCredentialsTest do
   @provider_env_vars ~w(ANTHROPIC_API_KEY OPENAI_API_KEY GOOGLE_API_KEY OPENROUTER_API_KEY GROQ_API_KEY MISTRAL_API_KEY DEEPSEEK_API_KEY)
 
   setup do
-    saved_env =
-      for var <- @provider_env_vars, into: %{} do
-        {var, System.get_env(var)}
-      end
-
-    previous_xdg = System.get_env("XDG_CONFIG_HOME")
-
-    for var <- @provider_env_vars, do: System.delete_env(var)
+    nil_env = for var <- @provider_env_vars, into: %{}, do: {var, nil}
 
     config_home =
       Path.join(
@@ -25,60 +17,82 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterCredentialsTest do
         "minga_req_llm_adapter_creds_#{System.unique_integer([:positive])}"
       )
 
-    System.put_env("XDG_CONFIG_HOME", config_home)
+    env_sets = :ets.new(:env_sets, [:set, :public])
+
+    opts = [
+      config_dir: config_home,
+      env: nil_env,
+      on_env_set: fn var, val -> :ets.insert(env_sets, {var, val}) end
+    ]
 
     on_exit(fn ->
-      for {var, value} <- saved_env do
-        restore_env(var, value)
-      end
-
-      restore_env("XDG_CONFIG_HOME", previous_xdg)
       File.rm_rf!(config_home)
     end)
 
-    %{config_home: config_home}
+    %{config_home: config_home, opts: opts, env_sets: env_sets}
   end
 
-  test "file-backed credentials populate the provider env var", %{config_home: config_home} do
+  defp env_set(env_sets, var_name) do
+    case :ets.lookup(env_sets, var_name) do
+      [{^var_name, val}] -> val
+      [] -> nil
+    end
+  end
+
+  test "file-backed credentials populate the provider env var", %{
+    config_home: config_home,
+    opts: opts,
+    env_sets: env_sets
+  } do
     write_credentials(config_home, %{"anthropic" => "file-key"})
 
-    assert :ok = ReqLLMAdapter.ensure_api_key_in_env("anthropic:claude")
-    assert System.get_env("ANTHROPIC_API_KEY") == "file-key"
+    assert :ok = ReqLLMAdapter.ensure_api_key_in_env("anthropic:claude", opts)
+    assert env_set(env_sets, "ANTHROPIC_API_KEY") == "file-key"
   end
 
   test "file-backed non-anthropic provider keys populate the matching env var", %{
-    config_home: config_home
+    config_home: config_home,
+    opts: opts,
+    env_sets: env_sets
   } do
     write_credentials(config_home, %{"groq" => "groq-file-key"})
 
-    assert :ok = ReqLLMAdapter.ensure_api_key_in_env("groq:llama-3.3")
-    assert System.get_env("GROQ_API_KEY") == "groq-file-key"
-    assert System.get_env("ANTHROPIC_API_KEY") == nil
-    assert System.get_env("OPENAI_API_KEY") == nil
+    assert :ok = ReqLLMAdapter.ensure_api_key_in_env("groq:llama-3.3", opts)
+    assert env_set(env_sets, "GROQ_API_KEY") == "groq-file-key"
+    assert env_set(env_sets, "ANTHROPIC_API_KEY") == nil
+    assert env_set(env_sets, "OPENAI_API_KEY") == nil
   end
 
-  test "file-backed provider keys flow through the credential accessor at call time" do
+  test "file-backed provider keys flow through the credential accessor at call time", %{
+    config_home: _config_home,
+    opts: opts,
+    env_sets: env_sets
+  } do
     secret = "sk-ant-fake-bundled-provider"
-    assert :ok = Credentials.store("anthropic", secret)
-    refute System.get_env("ANTHROPIC_API_KEY") == secret
+    assert :ok = Credentials.store("anthropic", secret, opts)
+    refute env_set(env_sets, "ANTHROPIC_API_KEY") == secret
 
-    assert :ok = ReqLLMAdapter.ensure_api_key_in_env("anthropic:claude-sonnet-4")
+    assert :ok = ReqLLMAdapter.ensure_api_key_in_env("anthropic:claude-sonnet-4", opts)
 
-    assert System.get_env("ANTHROPIC_API_KEY") == secret
+    assert env_set(env_sets, "ANTHROPIC_API_KEY") == secret
   end
 
-  test "env-backed credentials keep the existing provider env var", %{config_home: config_home} do
-    System.put_env("ANTHROPIC_API_KEY", "env-key")
+  test "env-backed credentials keep the existing provider env var", %{
+    config_home: config_home,
+    opts: opts,
+    env_sets: env_sets
+  } do
+    env_opts = Keyword.update!(opts, :env, &Map.put(&1, "ANTHROPIC_API_KEY", "env-key"))
     write_credentials(config_home, %{"anthropic" => "file-key"})
 
-    assert :ok = ReqLLMAdapter.ensure_api_key_in_env("claude@anthropic")
-    assert System.get_env("ANTHROPIC_API_KEY") == "env-key"
+    assert :ok = ReqLLMAdapter.ensure_api_key_in_env("claude@anthropic", env_opts)
+    assert env_set(env_sets, "ANTHROPIC_API_KEY") == nil
   end
 
-  test "missing credentials surface actionable auth guidance" do
+  test "missing credentials surface actionable auth guidance", %{opts: opts} do
     log =
       capture_log(fn ->
-        assert :ok = ReqLLMAdapter.ensure_api_key_in_env("anthropic:claude")
+        assert :ok = ReqLLMAdapter.ensure_api_key_in_env("anthropic:claude", opts)
       end)
 
     assert log =~ "No API key found for anthropic"
@@ -86,14 +100,16 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterCredentialsTest do
     assert log =~ "ANTHROPIC_API_KEY"
   end
 
-  test "invalid model strings do not fall back to anthropic credential lookup" do
+  test "invalid model strings do not fall back to anthropic credential lookup", %{
+    env_sets: env_sets
+  } do
     log =
       capture_log(fn ->
         assert :ok = ReqLLMAdapter.ensure_api_key_in_env("claude")
       end)
 
     assert log == ""
-    assert System.get_env("ANTHROPIC_API_KEY") == nil
+    assert env_set(env_sets, "ANTHROPIC_API_KEY") == nil
   end
 
   defp write_credentials(config_home, credentials) do
@@ -101,7 +117,4 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterCredentialsTest do
     File.mkdir_p!(dir)
     File.write!(Path.join(dir, "credentials.json"), :json.format(credentials))
   end
-
-  defp restore_env(key, nil), do: System.delete_env(key)
-  defp restore_env(key, value), do: System.put_env(key, value)
 end

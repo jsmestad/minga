@@ -8,6 +8,7 @@ defmodule MingaEditor.UI.Highlight.Grammar do
 
   defdelegate init_registry(), to: Minga.Language.Grammar
   defdelegate register_language(filetype, language), to: Minga.Language.Grammar
+  defdelegate unregister_language(filetype), to: Minga.Language.Grammar
   defdelegate language_for_filetype(filetype), to: Minga.Language.Grammar
   defdelegate query_path(language), to: Minga.Language.Grammar
 

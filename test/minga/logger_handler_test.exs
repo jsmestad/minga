@@ -16,7 +16,7 @@ defmodule Minga.LoggerHandlerTest do
       start_supervised!(Minga.Events.child_spec(name: Minga.EventBus))
     end
 
-    :ets.delete_all_objects(@buffer_table)
+    LoggerHandler.clear_buffer()
     :ok
   end
 
@@ -83,7 +83,7 @@ defmodule Minga.LoggerHandlerTest do
 
   describe "flush_buffer/0" do
     test "returns and clears entries that the LoggerHandler queued before any subscribers" do
-      :ets.insert(@buffer_table, {System.monotonic_time(:nanosecond), "test-flush", :info})
+      LoggerHandler.buffer_entry("test-flush", :info)
       assert :ets.info(@buffer_table, :size) >= 1
 
       entries = LoggerHandler.flush_buffer()

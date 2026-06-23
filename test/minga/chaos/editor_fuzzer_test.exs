@@ -418,7 +418,7 @@ defmodule Minga.Chaos.EditorFuzzerTest do
   defp delete_table(table) do
     :ets.delete(table)
   catch
-    :error, :badarg -> :ok
+    :error, :badarg -> true
   end
 
   # Drain any {:EXIT, pid, reason} messages left in the mailbox from

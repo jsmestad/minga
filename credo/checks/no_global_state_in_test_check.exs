@@ -2,10 +2,14 @@ defmodule Minga.Credo.NoGlobalStateInTestCheck do
   @moduledoc """
   Flags global-state mutations inside test modules.
 
-  Tests that mutate Application env, system env, ETS tables, persistent terms,
+  Tests that mutate Application env, system env, persistent terms,
   or the process registry create ordering-dependent failures and prevent safe
   parallelism. Isolate the state instead: inject it as a parameter, use
   `start_supervised!` with a unique name, or use a test-local ETS table.
+
+  ETS mutations are flagged only when the first argument is a literal atom
+  (a named global table). Variable references are assumed to be test-local
+  tables created with `:ets.new` and a unique name per test.
   """
 
   use Credo.Check,
@@ -28,14 +32,12 @@ defmodule Minga.Credo.NoGlobalStateInTestCheck do
     {[:System], :delete_env, "System.delete_env"},
     {[:persistent_term], :put, ":persistent_term.put"},
     {[:persistent_term], :erase, ":persistent_term.erase"},
-    {[:ets], :insert, ":ets.insert"},
-    {[:ets], :delete, ":ets.delete"},
-    {[:ets], :delete_object, ":ets.delete_object"},
-    {[:ets], :delete_all_objects, ":ets.delete_all_objects"},
     {[:Process], :register, "Process.register"},
     {[:EventBus], :broadcast, "EventBus.broadcast"},
     {[:Minga, :EventBus], :broadcast, "Minga.EventBus.broadcast"}
   ]
+
+  @ets_mutation_funcs ~w(insert delete delete_object delete_all_objects)a
 
   @impl Credo.Check
   def run(%SourceFile{} = source_file, params) do
@@ -50,7 +52,30 @@ defmodule Minga.Credo.NoGlobalStateInTestCheck do
     end
   end
 
-  # Erlang module calls: :ets.insert(...), :persistent_term.put(...)
+  # ETS mutations on a named table (literal atom): :ets.insert(:my_table, ...)
+  # Flagged because named tables are global singletons.
+  defp find_global_state_calls(
+         {{:., _, [:ets, func]}, meta, [first_arg | _rest]} = ast,
+         issues,
+         issue_meta
+       )
+       when func in @ets_mutation_funcs and is_atom(first_arg) do
+    trigger = ":ets.#{func}"
+    {ast, [make_issue(issue_meta, trigger, meta[:line]) | issues]}
+  end
+
+  # ETS mutations on a variable reference: :ets.insert(table, ...)
+  # Allowed because the table is assumed test-local (created per-test).
+  defp find_global_state_calls(
+         {{:., _, [:ets, func]}, _meta, _args} = ast,
+         issues,
+         _issue_meta
+       )
+       when func in @ets_mutation_funcs do
+    {ast, issues}
+  end
+
+  # Erlang module calls: :persistent_term.put(...)
   defp find_global_state_calls(
          {{:., _, [mod_atom, func]}, meta, _args} = ast,
          issues,

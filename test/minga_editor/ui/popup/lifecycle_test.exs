@@ -65,8 +65,6 @@ defmodule MingaEditor.UI.Popup.LifecycleTest do
     }
 
     on_exit(fn ->
-      if :ets.whereis(table) != :undefined, do: :ets.delete(table)
-
       for pid <- [main_buf, popup_buf] do
         Process.exit(pid, :kill)
       end

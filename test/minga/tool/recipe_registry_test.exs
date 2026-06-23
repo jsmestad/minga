@@ -202,6 +202,7 @@ defmodule Minga.Tool.Recipe.RegistryTest do
         assert catch_exit(Registry.unregister_source(:config))
       after
         if Process.whereis(Registry) == nil do
+          # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
           assert true = Process.register(pid, Registry)
         end
       end

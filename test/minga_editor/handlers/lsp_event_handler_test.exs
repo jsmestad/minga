@@ -219,11 +219,13 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
   end
 
   defp register_lsp_client(buffer, client) do
-    :ets.insert(Minga.LSP.SyncServer.Registry, {buffer, [client]})
+    Minga.LSP.SyncServer.put_clients(buffer, [client])
 
     on_exit(fn ->
-      if :ets.whereis(Minga.LSP.SyncServer.Registry) != :undefined do
-        :ets.delete(Minga.LSP.SyncServer.Registry, buffer)
+      try do
+        Minga.LSP.SyncServer.remove_buffer(buffer)
+      rescue
+        ArgumentError -> :ok
       end
     end)
   end

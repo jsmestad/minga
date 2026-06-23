@@ -14,10 +14,7 @@ defmodule MingaAgent.ToolPacks.LSPTest do
     table = :"lsp_pack_test_#{System.unique_integer([:positive])}"
     :ets.new(table, [:named_table, :set, :public, read_concurrency: true])
 
-    on_exit(fn ->
-      if :ets.whereis(table) != :undefined, do: :ets.delete(table)
-      LSP.register()
-    end)
+    on_exit(fn -> LSP.register() end)
 
     %{table: table}
   end

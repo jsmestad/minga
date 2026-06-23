@@ -20,10 +20,6 @@ defmodule MingaAgent.Tool.ExecutorTest do
       read_concurrency: true
     ])
 
-    on_exit(fn ->
-      if :ets.whereis(table) != :undefined, do: :ets.delete(table)
-    end)
-
     {:ok, table: table}
   end
 

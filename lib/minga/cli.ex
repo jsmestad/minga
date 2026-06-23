@@ -688,6 +688,7 @@ defmodule Minga.CLI do
   @doc false
   @spec distribution_cookie(flags()) :: {:ok, String.t() | nil} | {:error, String.t()}
   def distribution_cookie(%{cookie_file: path}) when is_binary(path), do: read_cookie_file(path)
+  def distribution_cookie(%{cookie: cookie}) when is_binary(cookie), do: {:ok, cookie}
   def distribution_cookie(_flags), do: {:ok, System.get_env("MINGA_COOKIE")}
 
   @spec set_cookie_if_present(String.t() | nil) :: :ok | {:error, String.t()}
@@ -744,6 +745,8 @@ defmodule Minga.CLI do
   @doc false
   @spec gateway_port(flags()) :: {:ok, pos_integer()} | {:error, String.t()}
   def gateway_port(%{gateway_port: port}) when is_integer(port), do: {:ok, port}
+
+  def gateway_port(%{gateway_port_env: value}) when is_binary(value), do: env_gateway_port(value)
 
   def gateway_port(_flags) do
     case System.get_env("MINGA_GATEWAY_PORT") do

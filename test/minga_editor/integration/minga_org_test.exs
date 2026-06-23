@@ -82,10 +82,10 @@ defmodule Minga.Integration.MingaOrgTest do
     extension_dir
   end
 
-  defp restore_org_language([]), do: :ets.delete(:minga_grammar_registry, :org)
+  defp restore_org_language([]), do: HLGrammar.unregister_language(:org)
 
   defp restore_org_language([{:org, language}]),
-    do: :ets.insert(:minga_grammar_registry, {:org, language})
+    do: HLGrammar.register_language(:org, language)
 
   defp shared_lib_ext do
     case :os.type() do

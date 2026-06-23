@@ -11,10 +11,6 @@ defmodule MingaAgent.ToolPacks.ReadOnlyTest do
     table = :"read_only_pack_test_#{System.unique_integer([:positive])}"
     :ets.new(table, [:named_table, :set, :public, read_concurrency: true])
 
-    on_exit(fn ->
-      if :ets.whereis(table) != :undefined, do: :ets.delete(table)
-    end)
-
     %{table: table}
   end
 
