@@ -1,30 +1,36 @@
 const std = @import("std");
 
-const generated_protocol_files = [_][]const u8{
-    "src/generated/protocol_opcodes.zig",
-    "src/generated/protocol_schema_test.zig",
-    "src/generated/protocol_command_size.zig",
+const GeneratedArtifact = struct {
+    path: []const u8,
+    generator: []const u8,
 };
 
-fn ensureGeneratedProtocolArtifacts(b: *std.Build) void {
-    var missing: [generated_protocol_files.len][]const u8 = undefined;
+const generated_zig_artifacts = [_]GeneratedArtifact{
+    .{ .path = "src/generated/protocol_opcodes.zig", .generator = "mix protocol.gen" },
+    .{ .path = "src/generated/protocol_schema_test.zig", .generator = "mix protocol.gen" },
+    .{ .path = "src/generated/protocol_command_size.zig", .generator = "mix protocol.gen" },
+    .{ .path = "src/generated/language_aliases.zig", .generator = "mix language_aliases.gen" },
+};
+
+fn ensureGeneratedZigArtifacts(b: *std.Build) void {
+    var missing: [generated_zig_artifacts.len]GeneratedArtifact = undefined;
     var missing_count: usize = 0;
 
-    for (generated_protocol_files) |path| {
-        if (b.build_root.handle.access(b.graph.io, path, .{})) |_| {} else |err| switch (err) {
+    for (generated_zig_artifacts) |artifact| {
+        if (b.build_root.handle.access(b.graph.io, artifact.path, .{})) |_| {} else |err| switch (err) {
             error.FileNotFound => {
-                missing[missing_count] = path;
+                missing[missing_count] = artifact;
                 missing_count += 1;
             },
-            else => std.debug.panic("failed to check for generated Zig protocol artifacts at {s}: {s}", .{ path, @errorName(err) }),
+            else => std.debug.panic("failed to check for generated Zig build artifacts at {s}: {s}", .{ artifact.path, @errorName(err) }),
         }
     }
 
     if (missing_count == 0) return;
 
-    std.debug.print("error: missing generated Zig protocol artifacts.\nRun `mix protocol.gen` from the repository root, then rerun `zig build` in `zig/`.\nMissing files:\n", .{});
-    for (missing[0..missing_count]) |path| {
-        std.debug.print("  - {s}\n", .{path});
+    std.debug.print("error: missing generated Zig build artifacts.\nRun the listed generator(s) from the repository root, then rerun `zig build` in `zig/`.\nMissing files:\n", .{});
+    for (missing[0..missing_count]) |artifact| {
+        std.debug.print("  - {s} (run `{s}`)\n", .{ artifact.path, artifact.generator });
     }
     std.process.exit(1);
 }
@@ -33,7 +39,7 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    ensureGeneratedProtocolArtifacts(b);
+    ensureGeneratedZigArtifacts(b);
 
     // ── Tree-sitter static library ────────────────────────────────────────
     // Always optimize vendored C code — query compilation is 100x slower

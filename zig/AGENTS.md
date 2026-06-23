@@ -71,7 +71,7 @@ Opcode constants are generated from `docs/protocol_schema.toml`.
 
 When adding or changing opcodes, edit the schema and regenerate instead of hand-editing the generated files.
 
-Direct `cd zig && zig build test` expects `zig/src/generated/protocol_opcodes.zig` and `zig/src/generated/protocol_schema_test.zig` to already exist. Run `mix protocol.gen` first, which also refreshes the generated public opcode export block in `zig/src/protocol.zig`, or use `mix zig.lint` / `mix compile`, which generate them for you.
+Direct `cd zig && zig build test` expects `zig/src/generated/protocol_opcodes.zig`, `zig/src/generated/protocol_schema_test.zig`, and `zig/src/generated/language_aliases.zig` to already exist. Run `mix protocol.gen` and `mix language_aliases.gen` first, or use `mix zig.lint` / `mix compile`, which generate them for you.
 
 The parser process handles the parse/highlight commands and parser responses it knows about from the schema. GUI chrome, semantic, and render opcodes are schema-defined and target the frontends; the parser's `protocol.zig` decodes them as no-ops so a shared schema stays consistent. If a new frontend-only opcode can appear on the parser stream, add an explicit decoder skip or no-op handler for it.
 

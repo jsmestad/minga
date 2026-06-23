@@ -280,6 +280,7 @@ jobs:
           restore-keys: zig-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-
 
       - run: mix deps.get
+      - run: mix language_aliases.gen
       - run: mix protocol.gen
 
       - name: Run Zig tests
