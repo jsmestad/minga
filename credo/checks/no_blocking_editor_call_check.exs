@@ -36,6 +36,20 @@ defmodule Minga.Credo.NoBlockingEditorCallCheck do
     {[:Task], :async}
   ]
 
+  # Known blocking-call sites awaiting D2 migration (#2450).
+  # Remove entries as each site is migrated to AsyncAction/Task.
+  @known_sites [
+    {"lib/minga_editor/commands/formatting.ex", 72},
+    {"lib/minga_editor/commands/buffer_management.ex", 2198},
+    {"lib/minga_editor/ui/picker/workspace_symbol_source.ex", 46},
+    {"lib/minga_editor/ui/picker/code_action_source.ex", 118},
+    {"lib/minga_editor/agent/slash_command.ex", 1283},
+    {"lib/minga_editor/ui/picker/todo_search_source.ex", 99},
+    {"lib/minga_editor/ui/picker/todo_search_source.ex", 119},
+    {"lib/minga_editor/frontend/manager.ex", 308},
+    {"lib/minga_editor/frontend/manager.ex", 520}
+  ]
+
   @impl Credo.Check
   def run(%SourceFile{} = source_file, params) do
     if skip_file?(source_file) do
@@ -43,19 +57,22 @@ defmodule Minga.Credo.NoBlockingEditorCallCheck do
     else
       issue_meta = IssueMeta.for(source_file, params)
       ast = SourceFile.ast(source_file)
-      find_blocking_calls(ast, issue_meta, false)
+
+      ast
+      |> find_blocking_calls(issue_meta, false)
+      |> Enum.reject(&known_site?(source_file, &1))
     end
   end
 
   defp find_blocking_calls(ast, issue_meta, exempt?) do
     case ast do
       # Pipe into an exempt wrapper: state |> AsyncAction.run(lane, fn -> ... end)
-      {:|>, _meta, [_lhs, {{:., _, [{:__aliases__, _, mod_parts}, func]}, _, args}]}
+      {:|>, meta, [_lhs, {{:., _, [{:__aliases__, _, mod_parts}, func]}, _, args}]}
       when is_list(args) ->
         if exempt_wrapper?(mod_parts, func) do
           exempt_args_issues(args, issue_meta)
         else
-          issues_for_node(mod_parts, func, _meta, issue_meta, exempt?) ++
+          issues_for_node(mod_parts, func, meta, issue_meta, exempt?) ++
             children_issues(args, issue_meta, exempt?)
         end
 
@@ -121,6 +138,20 @@ defmodule Minga.Credo.NoBlockingEditorCallCheck do
     Enum.any?(@exempt_wrappers, fn {expected_parts, expected_func} ->
       func == expected_func && mod_parts == expected_parts
     end)
+  end
+
+  defp known_site?(%SourceFile{} = source_file, issue) do
+    rel_path = source_file.filename |> Path.expand() |> project_relative_path()
+    Enum.any?(@known_sites, fn {path, line} -> rel_path == path and issue.line_no == line end)
+  end
+
+  defp project_relative_path(abs_path) do
+    project_root = File.cwd!()
+
+    case Path.relative_to(abs_path, project_root) do
+      ^abs_path -> abs_path
+      rel -> rel
+    end
   end
 
   defp skip_file?(%SourceFile{} = source_file) do
