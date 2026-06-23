@@ -48,6 +48,23 @@ defmodule MingaEditor.Agent.MarkdownHighlight do
 
   @type highlighter :: (String.t(), String.t(), keyword() -> highlighter_result())
 
+  @typep render_context :: %{
+           text: String.t(),
+           highlight: Highlight.t() | nil,
+           theme_syntax: map(),
+           message_id: non_neg_integer(),
+           buffer_byte_offset: non_neg_integer(),
+           highlighter: highlighter()
+         }
+
+  @typep code_context :: %{
+           highlight: Highlight.t() | nil,
+           theme_syntax: map(),
+           text: String.t(),
+           buffer_byte_offset: non_neg_integer(),
+           highlighter: highlighter()
+         }
+
   @doc """
   Converts assistant message text to semantic markdown blocks for GUI code-card rendering.
 
@@ -72,118 +89,57 @@ defmodule MingaEditor.Agent.MarkdownHighlight do
       when is_binary(text) and is_list(opts) do
     highlighter = Keyword.get(opts, :highlighter, &ParserManager.highlight_source/3)
 
-    text
-    |> Markdown.parse_blocks()
-    |> Enum.with_index()
-    |> render_blocks(
-      text,
-      highlight,
-      theme_syntax,
-      message_id,
-      buffer_byte_offset,
-      highlighter,
-      0,
-      []
-    )
+    context = %{
+      text: text,
+      highlight: highlight,
+      theme_syntax: theme_syntax,
+      message_id: message_id,
+      buffer_byte_offset: buffer_byte_offset,
+      highlighter: highlighter
+    }
+
+    text |> Markdown.parse_blocks() |> Enum.with_index() |> render_parsed_blocks(context, 0, [])
   end
 
-  @spec render_blocks(
+  @spec render_parsed_blocks(
           [{Markdown.block(), non_neg_integer()}],
-          String.t(),
-          Highlight.t() | nil,
-          map(),
-          non_neg_integer(),
-          non_neg_integer(),
-          highlighter(),
+          render_context(),
           non_neg_integer(),
           [MarkdownBlock.t()]
         ) :: [MarkdownBlock.t()]
-  defp render_blocks(
-         [],
-         _text,
-         _highlight,
-         _theme_syntax,
-         _message_id,
-         _buffer_byte_offset,
-         _highlighter,
-         _code_index,
-         acc
-       ) do
+  defp render_parsed_blocks([], _context, _code_index, acc) do
     Enum.reverse(acc)
   end
 
-  defp render_blocks(
-         [{block, index} | rest],
-         text,
-         highlight,
-         theme_syntax,
-         message_id,
-         buffer_byte_offset,
-         highlighter,
-         code_index,
-         acc
-       ) do
-    id = block_id(message_id, index)
+  defp render_parsed_blocks([{block, index} | rest], context, code_index, acc) do
+    id = block_id(context.message_id, index)
 
     {rendered, next_code_index} =
       render_block(
         block,
         id,
-        text,
-        highlight,
-        theme_syntax,
-        buffer_byte_offset,
-        highlighter,
+        context,
         code_index
       )
 
-    render_blocks(
-      rest,
-      text,
-      highlight,
-      theme_syntax,
-      message_id,
-      buffer_byte_offset,
-      highlighter,
-      next_code_index,
-      [rendered | acc]
-    )
+    render_parsed_blocks(rest, context, next_code_index, [rendered | acc])
   end
 
   @spec render_block(
           Markdown.block(),
           non_neg_integer(),
-          String.t(),
-          Highlight.t() | nil,
-          map(),
-          non_neg_integer(),
-          highlighter(),
+          render_context(),
           non_neg_integer()
         ) :: {MarkdownBlock.t(), non_neg_integer()}
-  defp render_block(
-         %{kind: :paragraph, lines: lines},
-         id,
-         _text,
-         _highlight,
-         theme_syntax,
-         _offset,
-         _highlighter,
-         code_index
-       ) do
+  defp render_block(%{kind: :paragraph, lines: lines}, id, context, code_index) do
+    theme_syntax = context.theme_syntax
+
     {MarkdownBlock.paragraph(id, Enum.map(lines, &inline_line_to_runs(&1, theme_syntax))),
      code_index}
   end
 
-  defp render_block(
-         %{kind: :heading, level: level, text: heading},
-         id,
-         _text,
-         _highlight,
-         theme_syntax,
-         _offset,
-         _highlighter,
-         code_index
-       ) do
+  defp render_block(%{kind: :heading, level: level, text: heading}, id, context, code_index) do
+    theme_syntax = context.theme_syntax
     line = [{heading, header_fg(theme_syntax), 0, @flag_bold}]
     {MarkdownBlock.heading(id, level, [line]), code_index}
   end
@@ -191,28 +147,18 @@ defmodule MingaEditor.Agent.MarkdownHighlight do
   defp render_block(
          %{kind: :list_item, indent: indent, ordered: ordered?, ordinal: ordinal, text: text},
          id,
-         _text,
-         _highlight,
-         theme_syntax,
-         _offset,
-         _highlighter,
+         context,
          code_index
        ) do
+    theme_syntax = context.theme_syntax
     prefix = if ordered?, do: "#{ordinal}. ", else: "• "
     lines = [inline_line_to_runs(String.duplicate("  ", indent) <> prefix <> text, theme_syntax)]
     {MarkdownBlock.list_item(id, indent, ordered?, ordinal, lines), code_index}
   end
 
-  defp render_block(
-         %{kind: :blockquote, lines: lines},
-         id,
-         _text,
-         _highlight,
-         theme_syntax,
-         _offset,
-         _highlighter,
-         code_index
-       ) do
+  defp render_block(%{kind: :blockquote, lines: lines}, id, context, code_index) do
+    theme_syntax = context.theme_syntax
+
     rendered =
       Enum.map(lines, fn line ->
         [
@@ -224,42 +170,21 @@ defmodule MingaEditor.Agent.MarkdownHighlight do
     {MarkdownBlock.blockquote(id, rendered), code_index}
   end
 
-  defp render_block(
-         %{kind: :rule},
-         id,
-         _text,
-         _highlight,
-         _theme_syntax,
-         _offset,
-         _highlighter,
-         code_index
-       ) do
+  defp render_block(%{kind: :rule}, id, _context, code_index) do
     {MarkdownBlock.rule(id), code_index}
   end
 
-  defp render_block(
-         %{kind: :spacer, height: height},
-         id,
-         _text,
-         _highlight,
-         _theme_syntax,
-         _offset,
-         _highlighter,
-         code_index
-       ) do
+  defp render_block(%{kind: :spacer, height: height}, id, _context, code_index) do
     {MarkdownBlock.spacer(id, height), code_index}
   end
 
   defp render_block(
          %{kind: :code_block, language: language, lines: lines, complete?: complete?},
          id,
-         text,
-         highlight,
-         theme_syntax,
-         buffer_byte_offset,
-         highlighter,
+         context,
          code_index
        ) do
+    text = context.text
     target_path = Markdown.infer_target_path(text, code_index)
     label = code_label(language)
 
@@ -267,13 +192,15 @@ defmodule MingaEditor.Agent.MarkdownHighlight do
       code_lines_to_runs(
         lines,
         complete?,
-        highlight,
-        theme_syntax,
-        text,
-        buffer_byte_offset,
+        %{
+          highlight: context.highlight,
+          theme_syntax: context.theme_syntax,
+          text: text,
+          buffer_byte_offset: context.buffer_byte_offset,
+          highlighter: context.highlighter
+        },
         code_index,
-        language,
-        highlighter
+        language
       )
 
     {MarkdownBlock.code_block(id, language, label, target_path, complete?, rendered_lines),
@@ -290,47 +217,31 @@ defmodule MingaEditor.Agent.MarkdownHighlight do
   @spec code_lines_to_runs(
           [String.t()],
           boolean(),
-          Highlight.t() | nil,
-          map(),
-          String.t(),
+          code_context(),
           non_neg_integer(),
-          non_neg_integer(),
-          String.t(),
-          highlighter()
+          String.t()
         ) :: [styled_line()]
-  defp code_lines_to_runs(
-         lines,
-         false,
-         _highlight,
-         theme_syntax,
-         _text,
-         _buffer_byte_offset,
-         _code_index,
-         _language,
-         _highlighter
-       ) do
-    plain_code_lines_to_runs(lines, theme_syntax)
+  defp code_lines_to_runs(lines, false, context, _code_index, _language) do
+    plain_code_lines_to_runs(lines, context.theme_syntax)
   end
 
-  defp code_lines_to_runs(
-         lines,
-         true,
-         highlight,
-         theme_syntax,
-         text,
-         buffer_byte_offset,
-         code_index,
-         language,
-         highlighter
-       ) do
-    case code_highlight_source(highlight, lines, language, theme_syntax, highlighter) do
+  defp code_lines_to_runs(lines, true, context, code_index, language) do
+    theme_syntax = context.theme_syntax
+
+    case code_highlight_source(
+           context.highlight,
+           lines,
+           language,
+           theme_syntax,
+           context.highlighter
+         ) do
       {:full_message, full_highlight} ->
         highlighted_code_lines_to_runs(
           lines,
           full_highlight,
           theme_syntax,
-          text,
-          buffer_byte_offset,
+          context.text,
+          context.buffer_byte_offset,
           code_index
         )
 

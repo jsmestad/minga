@@ -370,19 +370,27 @@ func chatMessageToJSON(_ msg: Wire.ChatMessage) -> [String: Any] {
     case .assistant(let text):
         result["kind"] = "assistant"; result["text"] = text
     case .styledAssistant(let lines):
-        let linesJSON: [[Any]] = lines.map { runs in
-            runs.map { run -> [String: Any] in
-                return [
-                    "text": run.text,
-                    "fg": [Int(run.fgR), Int(run.fgG), Int(run.fgB)],
-                    "bg": [Int(run.bgR), Int(run.bgG), Int(run.bgB)],
-                    "bold": run.bold,
-                    "italic": run.italic,
-                    "underline": run.underline
-                ]
-            }
+        result["kind"] = "styled_assistant"; result["lines"] = styledLinesToJSON(lines)
+    case .assistantMarkdown(let blocks):
+        result["kind"] = "assistant_markdown"
+        result["blocks"] = blocks.map { block -> [String: Any] in
+            return [
+                "id": Int(block.id),
+                "kind": Int(block.kind.rawValue),
+                "flags": Int(block.flags),
+                "lines": styledLinesToJSON(block.lines),
+                "level": Int(block.level),
+                "indent": Int(block.indent),
+                "ordered": block.ordered,
+                "ordinal": Int(block.ordinal),
+                "height": Int(block.height),
+                "language": block.language,
+                "label": block.label,
+                "target_path": block.targetPath,
+                "capability_flags": Int(block.capabilityFlags),
+                "is_complete": block.isComplete
+            ]
         }
-        result["kind"] = "styled_assistant"; result["lines"] = linesJSON
     case .thinking(let text, let collapsed):
         result["kind"] = "thinking"; result["text"] = text; result["collapsed"] = collapsed
     case .toolCall(let name, let summary, let status, let isError, let collapsed, let autoApprovedScope, let durationMs, let resultStr, let previewKind, let previewLines):
@@ -392,18 +400,7 @@ func chatMessageToJSON(_ msg: Wire.ChatMessage) -> [String: Any] {
         result["duration_ms"] = Int(durationMs); result["result"] = resultStr
         result["preview_kind"] = Int(previewKind); result["preview_lines"] = previewLines
     case .styledToolCall(let name, let summary, let status, let isError, let collapsed, let autoApprovedScope, let durationMs, let resultLines, let previewKind, let previewLines):
-        let linesJSON: [[Any]] = resultLines.map { runs in
-            runs.map { run -> [String: Any] in
-                return [
-                    "text": run.text,
-                    "fg": [Int(run.fgR), Int(run.fgG), Int(run.fgB)],
-                    "bg": [Int(run.bgR), Int(run.bgG), Int(run.bgB)],
-                    "bold": run.bold,
-                    "italic": run.italic,
-                    "underline": run.underline
-                ]
-            }
-        }
+        let linesJSON = styledLinesToJSON(resultLines)
         result["kind"] = "styled_tool_call"; result["name"] = name; result["summary"] = summary
         result["status"] = Int(status); result["is_error"] = isError; result["collapsed"] = collapsed
         result["auto_approved_scope"] = Int(autoApprovedScope)
@@ -424,6 +421,21 @@ func chatMessageToJSON(_ msg: Wire.ChatMessage) -> [String: Any] {
         result["cost_micros"] = Int(costMicros)
     }
     return result
+}
+
+func styledLinesToJSON(_ lines: [[Wire.StyledTextRun]]) -> [[Any]] {
+    return lines.map { runs in
+        runs.map { run -> [String: Any] in
+            return [
+                "text": run.text,
+                "fg": [Int(run.fgR), Int(run.fgG), Int(run.fgB)],
+                "bg": [Int(run.bgR), Int(run.bgG), Int(run.bgB)],
+                "bold": run.bold,
+                "italic": run.italic,
+                "underline": run.underline
+            ]
+        }
+    }
 }
 
 // MARK: - Main loop

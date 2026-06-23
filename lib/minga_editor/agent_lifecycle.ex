@@ -28,6 +28,11 @@ defmodule MingaEditor.AgentLifecycle do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   @type state :: EditorState.t()
+  @typep style_context :: %{
+           highlight: Highlight.t() | nil,
+           theme_syntax: map(),
+           byte_offset_map: %{non_neg_integer() => non_neg_integer()}
+         }
 
   # Maximum characters of tool call result to send for styled rendering.
   # Matches the truncation in Transcript.message_to_markdown/1.
@@ -452,15 +457,19 @@ defmodule MingaEditor.AgentLifecycle do
     full_lines = String.split(full_text, "\n")
     byte_offset_map = message_byte_offsets(line_offsets, full_lines)
 
+    style_context = %{
+      highlight: highlight,
+      theme_syntax: theme_syntax,
+      byte_offset_map: byte_offset_map
+    }
+
     compute_styled_messages(
       messages,
       message_ids,
       previous_messages,
       previous_styled || [],
       0,
-      highlight,
-      theme_syntax,
-      byte_offset_map,
+      style_context,
       []
     )
   end
@@ -471,9 +480,7 @@ defmodule MingaEditor.AgentLifecycle do
           [term()],
           Panel.styled_cache(),
           non_neg_integer(),
-          Highlight.t() | nil,
-          map(),
-          %{non_neg_integer() => non_neg_integer()},
+          style_context(),
           [Panel.rendered_message() | nil]
         ) :: [Panel.rendered_message() | nil]
   defp compute_styled_messages(
@@ -482,9 +489,7 @@ defmodule MingaEditor.AgentLifecycle do
          _previous_messages,
          _previous_styled,
          _idx,
-         _highlight,
-         _theme_syntax,
-         _byte_offset_map,
+         _style_context,
          acc
        ) do
     Enum.reverse(acc)
@@ -496,9 +501,7 @@ defmodule MingaEditor.AgentLifecycle do
          previous_messages,
          previous_styled,
          idx,
-         highlight,
-         theme_syntax,
-         byte_offset_map,
+         style_context,
          acc
        ) do
     {next_previous_messages, next_previous_styled, cached} =
@@ -512,7 +515,7 @@ defmodule MingaEditor.AgentLifecycle do
           cached_styled
 
         :miss ->
-          style_message(message, idx, message_id, highlight, theme_syntax, byte_offset_map)
+          style_message(message, idx, message_id, style_context)
       end
 
     compute_styled_messages(
@@ -521,9 +524,7 @@ defmodule MingaEditor.AgentLifecycle do
       next_previous_messages,
       next_previous_styled,
       idx + 1,
-      highlight,
-      theme_syntax,
-      byte_offset_map,
+      style_context,
       [styled | acc]
     )
   end
@@ -559,23 +560,32 @@ defmodule MingaEditor.AgentLifecycle do
   defp next_message_id([id | rest], _idx), do: {id, rest}
   defp next_message_id([], idx), do: {idx + 1, []}
 
-  @spec style_message(term(), non_neg_integer(), pos_integer(), Highlight.t() | nil, map(), %{
-          non_neg_integer() => non_neg_integer()
-        }) :: Panel.rendered_message() | nil
+  @spec style_message(term(), non_neg_integer(), pos_integer(), style_context()) ::
+          Panel.rendered_message() | nil
   defp style_message(
          {:assistant, text},
          idx,
          message_id,
-         highlight,
-         theme_syntax,
-         byte_offset_map
+         style_context
        ) do
-    byte_offset = Map.get(byte_offset_map, idx, 0)
+    byte_offset = Map.get(style_context.byte_offset_map, idx, 0)
 
     %{
-      styled_lines: MarkdownHighlight.stylize(text, highlight, theme_syntax, byte_offset),
+      styled_lines:
+        MarkdownHighlight.stylize(
+          text,
+          style_context.highlight,
+          style_context.theme_syntax,
+          byte_offset
+        ),
       markdown_blocks:
-        MarkdownHighlight.render_blocks(text, highlight, theme_syntax, message_id, byte_offset)
+        MarkdownHighlight.render_blocks(
+          text,
+          style_context.highlight,
+          style_context.theme_syntax,
+          message_id,
+          byte_offset
+        )
     }
   end
 
@@ -583,21 +593,25 @@ defmodule MingaEditor.AgentLifecycle do
          {:tool_call, %MingaAgent.ToolCall{result: result}},
          idx,
          _message_id,
-         highlight,
-         theme_syntax,
-         byte_offset_map
+         style_context
        )
        when is_binary(result) and result != "" do
-    byte_offset = Map.get(byte_offset_map, idx, 0)
+    byte_offset = Map.get(style_context.byte_offset_map, idx, 0)
     text = String.slice(result, 0, @max_styled_result_chars)
 
     %{
-      styled_lines: MarkdownHighlight.stylize(text, highlight, theme_syntax, byte_offset),
+      styled_lines:
+        MarkdownHighlight.stylize(
+          text,
+          style_context.highlight,
+          style_context.theme_syntax,
+          byte_offset
+        ),
       markdown_blocks: nil
     }
   end
 
-  defp style_message(_message, _idx, _message_id, _highlight, _theme_syntax, _byte_offset_map) do
+  defp style_message(_message, _idx, _message_id, _style_context) do
     nil
   end
 
