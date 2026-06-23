@@ -86,10 +86,70 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
            ]
   end
 
+  test "build/1 sends connect-provider empty state for first-run no-credential sessions" do
+    session = fake_session_pid()
+
+    panel =
+      synced_panel([{:system, "Session started", :info}],
+        empty_state: :credentials_missing
+      )
+
+    model =
+      context(session, panel)
+      |> AgentChatBuilder.build()
+
+    assert [{_, :system, text}, {_, :system, "Agent UI registry online"}] =
+             Enum.map(model.messages, &message_summary/1)
+
+    assert text =~ "Connect a provider"
+    assert text =~ "/auth anthropic <key>"
+    assert text =~ "/login"
+    refute text =~ "Session started"
+  end
+
+  test "build/1 sends pick-model empty state for first-run sessions without a model" do
+    session = fake_session_pid()
+    panel = synced_panel([{:system, "Session started", :info}], empty_state: :no_model)
+
+    model =
+      context(session, panel)
+      |> AgentChatBuilder.build()
+
+    assert [{_, :system, text}, {_, :system, "Agent UI registry online"}] =
+             Enum.map(model.messages, &message_summary/1)
+
+    assert text =~ "Pick a model"
+    assert text =~ "/model"
+    assert text =~ "SPC a m"
+    refute text =~ "Session started"
+  end
+
+  test "build/1 keeps normal first-run display for ready sessions" do
+    session = fake_session_pid()
+    panel = synced_panel([{:system, "Session started", :info}])
+
+    model =
+      context(session, panel)
+      |> AgentChatBuilder.build()
+
+    assert [{_, :system, "Session started"}, {_, :system, "Agent UI registry online"}] =
+             Enum.map(model.messages, &message_summary/1)
+  end
+
   defp message_summary({id, {:assistant, text}}), do: {id, :assistant, text}
   defp message_summary({id, {:system, text, _level}}), do: {id, :system, text}
   defp message_summary({id, {:user, text}}), do: {id, :user, text}
   defp message_summary({id, {kind, _, _}}), do: {id, kind, nil}
+
+  defp synced_panel(messages, opts \\ []) do
+    %{display_messages: display_messages, display_message_pairs: display_pairs} =
+      Transcript.display(messages, opts)
+
+    %Panel{
+      cached_display_messages: display_messages,
+      cached_display_message_pairs: display_pairs
+    }
+  end
 
   defp context(session, panel) do
     tab = Tab.new_agent(1, "Agent") |> Tab.set_session(session)
