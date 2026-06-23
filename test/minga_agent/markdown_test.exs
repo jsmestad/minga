@@ -341,4 +341,42 @@ defmodule MingaAgent.MarkdownTest do
       assert Markdown.extract_code_blocks(md) == []
     end
   end
+
+  describe "parse_blocks/1" do
+    test "parses paragraphs and headings without markdown markers" do
+      assert [
+               %{kind: :heading, level: 1, text: "Title"},
+               %{kind: :paragraph, lines: ["Hello `code`"]}
+             ] = Markdown.parse_blocks("# Title\nHello `code`")
+    end
+
+    test "parses complete fenced code blocks without decorative rails" do
+      blocks = Markdown.parse_blocks("Use this:\n```elixir\ndef hello do\n  :world\nend\n```")
+
+      assert [%{kind: :paragraph}, %{kind: :code_block} = code] = blocks
+      assert code.language == "elixir"
+      assert code.complete? == true
+      assert code.lines == ["def hello do", "  :world", "end"]
+      refute Enum.any?(code.lines, &String.contains?(&1, "┌"))
+      refute Enum.any?(code.lines, &String.contains?(&1, "└"))
+    end
+
+    test "keeps blank lines inside fenced code blocks" do
+      assert [%{kind: :code_block, lines: ["one", "", "two"]}] =
+               Markdown.parse_blocks("```\none\n\ntwo\n```")
+    end
+
+    test "preserves nested list indentation" do
+      assert [
+               %{kind: :list_item, indent: 0, text: "Top"},
+               %{kind: :list_item, indent: 1, text: "Middle"},
+               %{kind: :list_item, indent: 2, text: "Deep"}
+             ] = Markdown.parse_blocks("- Top\n  - Middle\n    - Deep")
+    end
+
+    test "marks unclosed fenced code blocks incomplete for streaming" do
+      assert [%{kind: :code_block, complete?: false, lines: ["IO.puts(:hi)"]}] =
+               Markdown.parse_blocks("```elixir\nIO.puts(:hi)")
+    end
+  end
 end

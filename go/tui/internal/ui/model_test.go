@@ -988,6 +988,51 @@ func TestAgentChatPanelRendersStructuredTranscript(t *testing.T) {
 	}
 }
 
+func TestAgentChatAssistantMarkdownCodeCardPreservesBlankLinesAndTruncates(t *testing.T) {
+	model := New(40, 16, nil)
+	msg := markdownCodeCardMessage()
+
+	view := ansi.Strip(strings.Join(model.renderAgentAssistantMessage(msg, 40), "\n"))
+	if !strings.Contains(view, "Elixir") {
+		t.Fatalf("markdown code card should render label: %q", view)
+	}
+	if !strings.Contains(view, "›") {
+		t.Fatalf("markdown code card should mark truncated code lines: %q", view)
+	}
+	if !strings.Contains(view, "│ │ ") {
+		t.Fatalf("markdown code card should preserve blank code rows: %q", view)
+	}
+}
+
+func TestAgentChatRenderMessageRoutesAssistantMarkdownCodeCards(t *testing.T) {
+	model := New(40, 16, nil)
+	msg := markdownCodeCardMessage()
+
+	view := ansi.Strip(strings.Join(model.renderAgentMessage(msg, 40), "\n"))
+	if !strings.Contains(view, "Elixir") || !strings.Contains(view, "╭─") {
+		t.Fatalf("renderAgentMessage should route assistant_markdown to code-card renderer: %q", view)
+	}
+}
+
+func markdownCodeCardMessage() protocol.AgentChatMessage {
+	return protocol.AgentChatMessage{
+		Kind: agentKindAssistantMarkdown,
+		MarkdownBlocks: []protocol.AgentMarkdownBlock{
+			{
+				ID:       1,
+				Kind:     0x07,
+				Flags:    0x01,
+				Language: "elixir",
+				Label:    "Elixir",
+				Lines: []protocol.AgentStyledLine{
+					{{Text: "", FG: 0x98BE65, BG: 0x21242B, Flags: 0x10}},
+					{{Text: "  " + strings.Repeat("x", 80), FG: 0x98BE65, BG: 0x21242B, Flags: 0x10}},
+				},
+			},
+		},
+	}
+}
+
 func TestAgentChatAssistantStyledLinesPreserveCodeIndentationAndOverflow(t *testing.T) {
 	model := New(80, 24, nil)
 	styledLines := []protocol.AgentStyledLine{
@@ -1021,6 +1066,36 @@ func TestAgentChatAssistantStyledCodeLineShowsLongLineIndicator(t *testing.T) {
 	view := ansi.Strip(strings.Join(model.renderAgentAssistantMessage(msg, 36), "\n"))
 	if !strings.Contains(view, "›") {
 		t.Fatalf("long styled code line should show truncation indicator: %q", view)
+	}
+}
+
+func TestAgentChatAssistantStyledCodeLineShowsIndicatorAcrossSplitRuns(t *testing.T) {
+	model := New(36, 16, nil)
+	msg := protocol.AgentChatMessage{
+		Kind: agentKindStyled,
+		StyledLines: []protocol.AgentStyledLine{
+			{{Text: "  " + strings.Repeat("x", 30), FG: 0x98BE65, BG: 0x21242B, Flags: 0x10}, {Text: "yy", FG: 0x98BE65, BG: 0x21242B, Flags: 0x10}},
+		},
+	}
+
+	view := ansi.Strip(strings.Join(model.renderAgentAssistantMessage(msg, 36), "\n"))
+	if !strings.Contains(view, "›") {
+		t.Fatalf("split-run styled code line should show truncation indicator: %q", view)
+	}
+}
+
+func TestAgentChatAssistantMixedProseAndInlineCodeOmitsCodeIndicator(t *testing.T) {
+	model := New(36, 16, nil)
+	msg := protocol.AgentChatMessage{
+		Kind: agentKindStyled,
+		StyledLines: []protocol.AgentStyledLine{
+			{{Text: "This line mentions ", FG: 0xBBC2CF}, {Text: "code()", FG: 0x98BE65, BG: 0x21242B, Flags: 0x10}, {Text: " and then keeps going with prose that should truncate", FG: 0xBBC2CF}},
+		},
+	}
+
+	view := ansi.Strip(strings.Join(model.renderAgentAssistantMessage(msg, 36), "\n"))
+	if strings.Contains(view, "›") {
+		t.Fatalf("mixed prose and inline code should not show code truncation indicator: %q", view)
 	}
 }
 

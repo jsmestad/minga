@@ -10,15 +10,16 @@ import (
 )
 
 const (
-	agentKindUser         byte = 0x01
-	agentKindAssistant    byte = 0x02
-	agentKindThinking     byte = 0x03
-	agentKindTool         byte = 0x04
-	agentKindSystem       byte = 0x05
-	agentKindUsage        byte = 0x06
-	agentKindStyled       byte = 0x07
-	agentKindStyledTool   byte = 0x08
-	agentKindApprovalTool byte = 0x09
+	agentKindUser              byte = 0x01
+	agentKindAssistant         byte = 0x02
+	agentKindThinking          byte = 0x03
+	agentKindTool              byte = 0x04
+	agentKindSystem            byte = 0x05
+	agentKindUsage             byte = 0x06
+	agentKindStyled            byte = 0x07
+	agentKindStyledTool        byte = 0x08
+	agentKindApprovalTool      byte = 0x09
+	agentKindAssistantMarkdown byte = 0x0A
 )
 
 const (
@@ -459,7 +460,7 @@ func (m Model) renderAgentMessage(msg protocol.AgentChatMessage, width int) []st
 	switch msg.Kind {
 	case agentKindUser:
 		return m.renderAgentUserMessage(msg, width)
-	case agentKindAssistant, agentKindStyled:
+	case agentKindAssistant, agentKindStyled, agentKindAssistantMarkdown:
 		return m.renderAgentAssistantMessage(msg, width)
 	case agentKindThinking:
 		return m.renderAgentThinkingMessage(msg, width)
@@ -516,6 +517,11 @@ func (m Model) renderAgentAssistantMessage(msg protocol.AgentChatMessage, width 
 	header := lipgloss.NewStyle().Bold(true).Foreground(p.Text()).Background(m.editorBackground()).Render("  ◇ Minga")
 	out := []string{lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(fitStyled(header, width))}
 
+	if len(msg.MarkdownBlocks) > 0 {
+		out = append(out, m.renderAgentAssistantMarkdownBlocks(msg.MarkdownBlocks, width)...)
+		return out
+	}
+
 	if len(msg.StyledLines) > 0 {
 		out = append(out, m.renderAgentAssistantStyledLines(msg.StyledLines, width)...)
 		return out
@@ -532,6 +538,66 @@ func (m Model) renderAgentAssistantMessage(msg protocol.AgentChatMessage, width 
 		out = append(out, lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(fitStyled(line, width)))
 	}
 	return out
+}
+
+func (m Model) renderAgentAssistantMarkdownBlocks(blocks []protocol.AgentMarkdownBlock, width int) []string {
+	if len(blocks) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(blocks)*2)
+	for _, block := range blocks {
+		out = append(out, m.renderAgentMarkdownBlock(block, width)...)
+	}
+	return out
+}
+
+func (m Model) renderAgentMarkdownBlock(block protocol.AgentMarkdownBlock, width int) []string {
+	switch block.Kind {
+	case 0x01, 0x02, 0x03, 0x04:
+		return m.renderAgentAssistantStyledLines(block.Lines, width)
+	case 0x05:
+		p := m.palette()
+		surface := m.editorBackground()
+		rule := lipgloss.NewStyle().Foreground(p.Muted()).Background(surface).Render("  ─" + strings.Repeat("─", max(width-4, 1)))
+		return []string{lipgloss.NewStyle().Background(surface).Width(width).Render(fitStyled(rule, width))}
+	case 0x06:
+		return []string{lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render("")}
+	case 0x07:
+		return m.renderAgentCodeCard(block, width)
+	default:
+		return nil
+	}
+}
+
+func (m Model) renderAgentCodeCard(block protocol.AgentMarkdownBlock, width int) []string {
+	p := m.palette()
+	surface := m.editorBackground()
+	rail := lipgloss.NewStyle().Foreground(p.Muted()).Background(surface).Render("  │ ")
+	bodyWidth := max(width-lipgloss.Width(rail)-2, 8)
+	label := nonEmpty(block.Label, "Code")
+	if block.TargetPath != "" {
+		label += " · " + block.TargetPath
+	}
+	if !block.Complete() {
+		label += " · streaming"
+	}
+	header := rail + lipgloss.NewStyle().Foreground(p.Muted()).Background(surface).Bold(true).Render("╭─ "+label)
+	out := []string{lipgloss.NewStyle().Background(surface).Width(width).Render(fitStyled(header, width))}
+	for _, line := range block.Lines {
+		body := m.renderAgentCodeCardLine(line, bodyWidth)
+		out = append(out, lipgloss.NewStyle().Background(surface).Width(width).Render(fitStyled(rail+"│ "+body, width)))
+	}
+	footer := rail + lipgloss.NewStyle().Foreground(p.Muted()).Background(surface).Render("╰"+strings.Repeat("─", max(min(bodyWidth, width-6), 1)))
+	out = append(out, lipgloss.NewStyle().Background(surface).Width(width).Render(fitStyled(footer, width)))
+	return out
+}
+
+func (m Model) renderAgentCodeCardLine(line protocol.AgentStyledLine, width int) string {
+	if len(line) == 0 {
+		return strings.Repeat(" ", width)
+	}
+	rendered := m.renderAgentStyledLine(line, width)
+	return fitStyled(rendered, width)
 }
 
 func (m Model) renderAgentAssistantStyledLines(lines []protocol.AgentStyledLine, width int) []string {
@@ -559,20 +625,34 @@ func (m Model) renderAgentStyledLine(line protocol.AgentStyledLine, width int) s
 	if len(line) == 0 {
 		return strings.Repeat(" ", width)
 	}
-	isCode := agentStyledLineIsCode(line)
+	isCode := agentStyledLineIsAllCode(line)
 	remaining := width
+	truncated := false
 	var rendered strings.Builder
 	for index, run := range line {
+		if remaining <= 0 {
+			truncated = true
+			break
+		}
 		text := run.Text
-		if isCode && index == len(line)-1 && displayWidth(text) > remaining {
-			text = truncateCodeText(text, remaining)
+		if displayWidth(text) > remaining {
+			truncated = true
+			text = fit(text, remaining)
 		}
 		part := agentStyledRunStyle(run, m.editorBackground()).Render(text)
 		rendered.WriteString(part)
 		remaining -= lipgloss.Width(part)
-		if remaining <= 0 {
+		if remaining <= 0 && index < len(line)-1 {
+			truncated = true
 			break
 		}
+	}
+	if isCode && truncated {
+		marker := lipgloss.NewStyle().Foreground(m.palette().Muted()).Background(m.editorBackground()).Render("›")
+		if width <= 1 {
+			return marker
+		}
+		return fitStyled(rendered.String(), width-1) + marker
 	}
 	return fitStyled(rendered.String(), width)
 }
@@ -597,26 +677,18 @@ func agentStyledRunStyle(run protocol.AgentStyledRun, background color.Color) li
 	return style
 }
 
-func agentStyledLineIsCode(line protocol.AgentStyledLine) bool {
+func agentStyledLineIsAllCode(line protocol.AgentStyledLine) bool {
+	hasCodeRun := false
 	for _, run := range line {
-		if run.Code() {
-			return true
+		if run.Text == "" {
+			continue
+		}
+		hasCodeRun = true
+		if !run.Code() {
+			return false
 		}
 	}
-	return false
-}
-
-func truncateCodeText(text string, width int) string {
-	if width <= 0 {
-		return ""
-	}
-	if displayWidth(text) <= width {
-		return text
-	}
-	if width == 1 {
-		return "›"
-	}
-	return fit(text, width-1) + "›"
+	return hasCodeRun
 }
 
 func (m Model) renderAgentThinkingMessage(msg protocol.AgentChatMessage, width int) []string {

@@ -1217,6 +1217,47 @@ func TestDecodeAgentChatStyledRunPreservesCodeFlag(t *testing.T) {
 	}
 }
 
+func TestDecodeAgentChatAssistantMarkdownCodeBlock(t *testing.T) {
+	messageBody := append(u32Bytes(77), 0x0A)
+	messageBody = append(messageBody, 0, 1) // one block
+	messageBody = append(messageBody, u32Bytes(123)...)
+	messageBody = append(messageBody, 0x07, 0x01) // code block, complete
+	messageBody = append(messageBody, string16("elixir")...)
+	messageBody = append(messageBody, string16("Elixir")...)
+	messageBody = append(messageBody, string16("lib/demo.ex")...)
+	messageBody = append(messageBody, 0x01) // copy capability
+	messageBody = append(messageBody, 0, 2) // two lines
+	messageBody = append(messageBody, 0, 1) // line one, one run
+	messageBody = append(messageBody, string16("")...)
+	messageBody = append(messageBody, 0x98, 0xBE, 0x65, 0x21, 0x24, 0x2B, 0x10)
+	messageBody = append(messageBody, 0, 1) // line two, one run
+	messageBody = append(messageBody, string16("IO.puts(:hi)")...)
+	messageBody = append(messageBody, 0x98, 0xBE, 0x65, 0x21, 0x24, 0x2B, 0x10)
+
+	chat := []byte{generated.OPGuiAgentChat, 2}
+	chat = append(chat, section(0x01, []byte{1, 0})...)
+	chat = append(chat, section(0x06, agentMessages(messageBody))...)
+
+	command, err := DecodeCommand(chat)
+	if err != nil {
+		t.Fatalf("DecodeCommand chat returned error: %v", err)
+	}
+	if len(command.Chrome.AgentChat.Messages) != 1 {
+		t.Fatalf("decoded %d messages, want 1", len(command.Chrome.AgentChat.Messages))
+	}
+	msg := command.Chrome.AgentChat.Messages[0]
+	if msg.Kind != 0x0A || len(msg.MarkdownBlocks) != 1 {
+		t.Fatalf("markdown message decoded incorrectly: %+v", msg)
+	}
+	block := msg.MarkdownBlocks[0]
+	if block.Kind != 0x07 || !block.Complete() || block.Language != "elixir" || block.Label != "Elixir" || block.TargetPath != "lib/demo.ex" {
+		t.Fatalf("code block decoded incorrectly: %+v", block)
+	}
+	if len(block.Lines) != 2 || block.Lines[0][0].Text != "" || !block.Lines[1][0].Code() {
+		t.Fatalf("code block lines decoded incorrectly: %+v", block.Lines)
+	}
+}
+
 func TestDecodeAgentChatPreservesStructuredMessageDetails(t *testing.T) {
 	tool := append(u32Bytes(7), 0x04, 1, 0, 0)
 	tool = append(tool, u32Bytes(42)...)

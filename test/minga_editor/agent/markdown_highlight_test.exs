@@ -1,6 +1,7 @@
 defmodule MingaEditor.Agent.MarkdownHighlightTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Language.Highlight.Span
   alias MingaEditor.Agent.MarkdownHighlight
 
   alias MingaEditor.UI.Highlight
@@ -219,6 +220,104 @@ defmodule MingaEditor.Agent.MarkdownHighlightTest do
       line = hd(result)
       bold_run = Enum.find(line, fn {t, _fg, _bg, _flags} -> t == "bold" end)
       assert bold_run != nil
+    end
+  end
+
+  describe "render_blocks/5" do
+    test "inline code remains a run flag inside a paragraph block" do
+      [block] = MarkdownHighlight.render_blocks("Use `GenServer` here", nil, @theme_syntax, 42)
+
+      assert block.kind == :paragraph
+      assert [[{"Use ", _, 0, 0}, {"GenServer", _, _, flags}, {" here", _, 0, 0}]] = block.lines
+      assert Bitwise.band(flags, 0x10) != 0
+    end
+
+    test "fenced code becomes an explicit complete code block" do
+      [_paragraph, code] =
+        MarkdownHighlight.render_blocks(
+          "In `lib/demo.ex`:\n```elixir\ndef hello\n```",
+          nil,
+          @theme_syntax,
+          42
+        )
+
+      assert code.kind == :code_block
+      assert code.language == "elixir"
+      assert code.label == "Elixir"
+      assert code.target_path == "lib/demo.ex"
+      assert code.flags == 0x01
+      assert [[{"def hello", _, _, flags}]] = code.lines
+      assert Bitwise.band(flags, 0x10) != 0
+    end
+
+    test "unclosed fenced code block is semantic streaming code" do
+      [code] = MarkdownHighlight.render_blocks("```python\nprint('hi')", nil, @theme_syntax, 99)
+
+      assert code.kind == :code_block
+      assert code.language == "python"
+      assert code.label == "Python"
+      assert code.flags == 0
+      assert [[{"print('hi')", _, _, flags}]] = code.lines
+      assert Bitwise.band(flags, 0x10) != 0
+    end
+
+    test "complete fenced code block keeps tree-sitter styling in semantic code card" do
+      text = "```elixir\ndef hello\n```"
+
+      highlight =
+        make_highlight(
+          spans: {%{start_byte: 10, end_byte: 13, capture_id: 0}},
+          capture_names: ["keyword"],
+          theme: %{"keyword" => [fg: 0xFF0000, bold: true]}
+        )
+
+      [code] = MarkdownHighlight.render_blocks(text, highlight, @theme_syntax, 99)
+
+      keyword_run =
+        code.lines |> hd() |> Enum.find(fn {text, _fg, _bg, _flags} -> text == "def" end)
+
+      assert {"def", 0xFF0000, _, flags} = keyword_run
+      assert Bitwise.band(flags, 0x01) != 0
+      assert Bitwise.band(flags, 0x10) != 0
+    end
+
+    test "complete semantic code card requests snippet highlighting when no full-message highlight exists" do
+      test_pid = self()
+      text = "```elixir\ndef hello\n```"
+
+      highlighter = fn language, source, opts ->
+        send(test_pid, {:highlight_requested, language, source, opts})
+        {:ok, ["keyword"], [Span.new(0, 3, 0)]}
+      end
+
+      [code] =
+        MarkdownHighlight.render_blocks(text, nil, @theme_syntax, 99, 0, highlighter: highlighter)
+
+      assert_received {:highlight_requested, "elixir", "def hello", opts}
+      assert opts[:timeout]
+
+      keyword_run =
+        code.lines |> hd() |> Enum.find(fn {text, _fg, _bg, _flags} -> text == "def" end)
+
+      assert {"def", 0x51AFEF, _, flags} = keyword_run
+      assert Bitwise.band(flags, 0x10) != 0
+    end
+
+    test "incomplete semantic code card stays plain monospaced while streaming" do
+      text = "```elixir\ndef hello"
+
+      highlight =
+        make_highlight(
+          spans: {%{start_byte: 10, end_byte: 13, capture_id: 0}},
+          capture_names: ["keyword"],
+          theme: %{"keyword" => [fg: 0xFF0000, bold: true]}
+        )
+
+      [code] = MarkdownHighlight.render_blocks(text, highlight, @theme_syntax, 99)
+
+      assert [[{"def hello", 0x98BE65, _, flags}]] = code.lines
+      assert Bitwise.band(flags, 0x10) != 0
+      refute Bitwise.band(flags, 0x01) != 0
     end
   end
 end

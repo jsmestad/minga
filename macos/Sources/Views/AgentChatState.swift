@@ -8,6 +8,8 @@ enum ChatMessageEntry: Identifiable {
     case assistant(id: Int, text: String)
     /// Assistant message with pre-styled text runs from the BEAM (tree-sitter or markdown parser).
     case styledAssistant(id: Int, lines: [[Wire.StyledTextRun]])
+    /// Assistant message with BEAM-authored semantic markdown blocks.
+    case assistantMarkdown(id: Int, blocks: [Wire.AgentMarkdownBlock])
     case thinking(id: Int, text: String, collapsed: Bool)
     case toolCall(id: Int, name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, autoApprovedScope: UInt8, durationMs: UInt32, result: String, previewKind: UInt8, previewLines: [String])
     case styledToolCall(id: Int, name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, autoApprovedScope: UInt8, durationMs: UInt32, resultLines: [[Wire.StyledTextRun]], previewKind: UInt8, previewLines: [String])
@@ -18,6 +20,7 @@ enum ChatMessageEntry: Identifiable {
     var id: Int {
         switch self {
         case .user(let id, _), .assistant(let id, _), .styledAssistant(let id, _),
+             .assistantMarkdown(let id, _),
              .thinking(let id, _, _),
              .toolCall(let id, _, _, _, _, _, _, _, _, _, _),
              .styledToolCall(let id, _, _, _, _, _, _, _, _, _, _),
@@ -133,6 +136,8 @@ final class AgentChatState {
                 return .assistant(id: id, text: text)
             case .styledAssistant(let lines):
                 return .styledAssistant(id: id, lines: lines)
+            case .assistantMarkdown(let blocks):
+                return .assistantMarkdown(id: id, blocks: blocks)
             case .thinking(let text, let collapsed):
                 return .thinking(id: id, text: text, collapsed: collapsed)
             case .toolCall(let name, let summary, let st, let isError, let collapsed, let autoApprovedScope, let duration, let result, let previewKind, let previewLines):

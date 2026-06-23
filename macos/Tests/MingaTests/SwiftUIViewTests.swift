@@ -1139,6 +1139,59 @@ struct AgentChatViewTests {
         #expect(strings.contains("auto-approved · turn"))
     }
 
+    @Test("Styled assistant keeps decorative rails literal")
+    @MainActor func styledAssistantKeepsRailsLiteral() throws {
+        func run(_ text: String, code: Bool = false) -> Wire.StyledTextRun {
+            Wire.StyledTextRun(text: text, fgR: 0xBB, fgG: 0xC2, fgB: 0xCF, bgR: 0, bgG: 0, bgB: 0, bold: false, italic: false, underline: false, code: code)
+        }
+
+        let state = chatState(messages: [
+            .styledAssistant(id: 1, lines: [[run("┌─ python")], [run("  print(\"hi\")", code: true)], [run("└")]])
+        ])
+
+        let sut = AgentChatView(state: state, theme: ThemeColors(), isInsertMode: false, encoder: nil)
+        let body = try sut.inspect()
+        let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+
+        #expect(strings.contains("┌─ python"))
+        #expect(strings.contains("└"))
+        #expect(!strings.contains("python"))
+    }
+
+    @Test("Assistant markdown renders semantic code card")
+    @MainActor func assistantMarkdownRendersCodeCard() throws {
+        func run(_ text: String, code: Bool = false) -> Wire.StyledTextRun {
+            Wire.StyledTextRun(text: text, fgR: 0x98, fgG: 0xBE, fgB: 0x65, bgR: 0x21, bgG: 0x24, bgB: 0x2B, bold: false, italic: false, underline: false, code: code)
+        }
+
+        let block = Wire.AgentMarkdownBlock(
+            id: 7,
+            kind: .codeBlock,
+            flags: 0,
+            lines: [[run("", code: true)], [run("print(\"hi\")", code: true)]],
+            level: 0,
+            indent: 0,
+            ordered: false,
+            ordinal: 0,
+            height: 1,
+            language: "swift",
+            label: "Swift",
+            targetPath: "macos/App.swift",
+            capabilityFlags: 1
+        )
+
+        let state = chatState(messages: [.assistantMarkdown(id: 1, blocks: [block])])
+        let sut = AgentChatView(state: state, theme: ThemeColors(), isInsertMode: false, encoder: nil)
+        let body = try sut.inspect()
+        let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+
+        #expect(strings.contains("Swift"))
+        #expect(strings.contains("macos/App.swift"))
+        #expect(strings.contains("streaming"))
+        #expect(strings.contains("print(\"hi\")"))
+        #expect(try body.findAll(ViewType.ScrollView.self).count == 2)
+    }
+
     @Test("User message renders as bubble")
     @MainActor func userMessage() throws {
         let state = AgentChatState()

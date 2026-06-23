@@ -3160,6 +3160,119 @@ private func decodeLegacyChatMessages(data: Data, start: Int, end: Int, remainin
     throw ProtocolDecodeError.malformed
 }
 
+private func decodeAgentStyledLines(data: Data, start: Int, end: Int) throws -> ([[Wire.StyledTextRun]], Int) {
+    guard end >= start + 2 else { throw ProtocolDecodeError.malformed }
+    let lineCount = Int(readU16(data, start))
+    var lines: [[Wire.StyledTextRun]] = []
+    lines.reserveCapacity(lineCount)
+    var pos = start + 2
+    for _ in 0..<lineCount {
+        guard end >= pos + 2 else { throw ProtocolDecodeError.malformed }
+        let runCount = Int(readU16(data, pos))
+        var runs: [Wire.StyledTextRun] = []
+        runs.reserveCapacity(runCount)
+        pos += 2
+        for _ in 0..<runCount {
+            guard end >= pos + 9 else { throw ProtocolDecodeError.malformed }
+            let textLen = Int(readU16(data, pos))
+            guard end >= pos + 2 + textLen + 7 else { throw ProtocolDecodeError.malformed }
+            let runText = String(data: data[(pos + 2)..<(pos + 2 + textLen)], encoding: .utf8) ?? ""
+            let fgOff = pos + 2 + textLen
+            let flags = data[fgOff + 6]
+            var nextRunPos = fgOff + 7
+            var linkURL: String? = nil
+            if (flags & 0x08) != 0 {
+                guard end >= nextRunPos + 2 else { throw ProtocolDecodeError.malformed }
+                let urlLen = Int(readU16(data, nextRunPos))
+                guard end >= nextRunPos + 2 + urlLen else { throw ProtocolDecodeError.malformed }
+                guard let decodedLinkURL = String(data: data[(nextRunPos + 2)..<(nextRunPos + 2 + urlLen)], encoding: .utf8) else { throw ProtocolDecodeError.malformed }
+                linkURL = decodedLinkURL
+                nextRunPos += 2 + urlLen
+            }
+            runs.append(Wire.StyledTextRun(
+                text: runText,
+                fgR: data[fgOff], fgG: data[fgOff + 1], fgB: data[fgOff + 2],
+                bgR: data[fgOff + 3], bgG: data[fgOff + 4], bgB: data[fgOff + 5],
+                bold: (flags & 0x01) != 0,
+                italic: (flags & 0x02) != 0,
+                underline: (flags & 0x04) != 0,
+                code: (flags & 0x10) != 0,
+                linkURL: linkURL
+            ))
+            pos = nextRunPos
+        }
+        lines.append(runs)
+    }
+    return (lines, pos)
+}
+
+private func decodeAgentMarkdownBlocks(data: Data, start: Int, end: Int) throws -> ([Wire.AgentMarkdownBlock], Int) {
+    guard end >= start + 2 else { throw ProtocolDecodeError.malformed }
+    let blockCount = Int(readU16(data, start))
+    var blocks: [Wire.AgentMarkdownBlock] = []
+    blocks.reserveCapacity(blockCount)
+    var pos = start + 2
+    for _ in 0..<blockCount {
+        guard end >= pos + 6 else { throw ProtocolDecodeError.malformed }
+        let blockID = readU32(data, pos)
+        let rawKind = data[pos + 4]
+        let flags = data[pos + 5]
+        guard let kind = Wire.AgentMarkdownBlockKind(rawValue: rawKind) else { throw ProtocolDecodeError.malformed }
+        pos += 6
+        var lines: [[Wire.StyledTextRun]] = []
+        var level: UInt8 = 0
+        var indent: UInt8 = 0
+        var ordered = false
+        var ordinal: UInt32 = 0
+        var height: UInt8 = 1
+        var language = ""
+        var label = ""
+        var targetPath = ""
+        var capabilityFlags: UInt8 = 0
+
+        switch kind {
+        case .paragraph, .blockquote:
+            (lines, pos) = try decodeAgentStyledLines(data: data, start: pos, end: end)
+        case .heading:
+            guard end >= pos + 1 else { throw ProtocolDecodeError.malformed }
+            level = data[pos]
+            (lines, pos) = try decodeAgentStyledLines(data: data, start: pos + 1, end: end)
+        case .listItem:
+            guard end >= pos + 6 else { throw ProtocolDecodeError.malformed }
+            indent = data[pos]
+            ordered = data[pos + 1] != 0
+            ordinal = readU32(data, pos + 2)
+            (lines, pos) = try decodeAgentStyledLines(data: data, start: pos + 6, end: end)
+        case .rule:
+            break
+        case .spacer:
+            guard end >= pos + 1 else { throw ProtocolDecodeError.malformed }
+            height = data[pos]
+            pos += 1
+        case .codeBlock:
+            language = try readRequiredString16(data: data, pos: &pos, end: end)
+            label = try readRequiredString16(data: data, pos: &pos, end: end)
+            targetPath = try readRequiredString16(data: data, pos: &pos, end: end)
+            guard end >= pos + 1 else { throw ProtocolDecodeError.malformed }
+            capabilityFlags = data[pos]
+            pos += 1
+            (lines, pos) = try decodeAgentStyledLines(data: data, start: pos, end: end)
+        }
+
+        blocks.append(Wire.AgentMarkdownBlock(id: blockID, kind: kind, flags: flags, lines: lines, level: level, indent: indent, ordered: ordered, ordinal: ordinal, height: height, language: language, label: label, targetPath: targetPath, capabilityFlags: capabilityFlags))
+    }
+    return (blocks, pos)
+}
+
+private func readRequiredString16(data: Data, pos: inout Int, end: Int) throws -> String {
+    guard end >= pos + 2 else { throw ProtocolDecodeError.malformed }
+    let length = Int(readU16(data, pos))
+    guard end >= pos + 2 + length else { throw ProtocolDecodeError.malformed }
+    let value = String(data: data[(pos + 2)..<(pos + 2 + length)], encoding: .utf8) ?? ""
+    pos += 2 + length
+    return value
+}
+
 private func decodeChatMessageCandidates(data: Data, start: Int, end: Int) throws -> [DecodedChatMessageCandidate] {
     guard start + 5 <= end else { throw ProtocolDecodeError.malformed }
 
@@ -3360,6 +3473,10 @@ private func decodeChatMessageCandidates(data: Data, start: Int, end: Int) throw
         let stcMessageWithoutAuto = Wire.ChatMessage(beamId: beamId, content: .styledToolCall(name: stcName, summary: stcSummary, status: stcStatus, isError: stcIsError, collapsed: stcCollapsed, autoApprovedScope: 0, durationMs: stcDuration, resultLines: stcLines, previewKind: 0, previewLines: []))
         stcCandidates.append(DecodedChatMessageCandidate(message: stcMessageWithoutAuto, nextOffset: stcBaseOffset))
         return stcCandidates
+
+    case 0x0A: // assistant_markdown
+        let (blocks, next) = try decodeAgentMarkdownBlocks(data: data, start: pos + 1, end: end)
+        return [DecodedChatMessageCandidate(message: Wire.ChatMessage(beamId: beamId, content: .assistantMarkdown(blocks: blocks)), nextOffset: next)]
 
     case 0x09: // approval_tool_call
         guard end >= pos + 8 else { throw ProtocolDecodeError.malformed }

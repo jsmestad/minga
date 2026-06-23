@@ -14,7 +14,9 @@ defmodule MingaEditor.Agent.MarkdownHighlight do
   blocks only when highlight spans are available.
   """
 
+  alias Minga.Parser.Manager, as: ParserManager
   alias MingaAgent.Markdown
+  alias Minga.RenderModel.UI.AgentChat.MarkdownBlock
   alias MingaEditor.UI.Highlight
 
   @typedoc "A single styled text run: {text, fg_rgb, bg_rgb, flags} or {text, fg_rgb, bg_rgb, flags, url}."
@@ -34,6 +36,485 @@ defmodule MingaEditor.Agent.MarkdownHighlight do
   @flag_underline 0x04
   @flag_link 0x08
   @flag_code 0x10
+  @snippet_highlight_timeout_ms 50
+
+  @type highlighter_result ::
+          {:ok, [String.t()], [Minga.Language.Highlight.Span.t()]}
+          | :unsupported
+          | :timeout
+          | :unavailable
+          | {:error, term()}
+          | nil
+
+  @type highlighter :: (String.t(), String.t(), keyword() -> highlighter_result())
+
+  @doc """
+  Converts assistant message text to semantic markdown blocks for GUI code-card rendering.
+
+  Inline code remains a styled-run flag inside paragraph/list/heading runs. Fenced code becomes an explicit `MarkdownBlock` code block; frontends should render cards from this block kind, not from `0x10`.
+  """
+  @spec render_blocks(
+          String.t(),
+          Highlight.t() | nil,
+          map(),
+          non_neg_integer(),
+          non_neg_integer(),
+          keyword()
+        ) :: [MarkdownBlock.t()]
+  def render_blocks(
+        text,
+        highlight,
+        theme_syntax,
+        message_id,
+        buffer_byte_offset \\ 0,
+        opts \\ []
+      )
+      when is_binary(text) and is_list(opts) do
+    highlighter = Keyword.get(opts, :highlighter, &ParserManager.highlight_source/3)
+
+    text
+    |> Markdown.parse_blocks()
+    |> Enum.with_index()
+    |> render_blocks(
+      text,
+      highlight,
+      theme_syntax,
+      message_id,
+      buffer_byte_offset,
+      highlighter,
+      0,
+      []
+    )
+  end
+
+  @spec render_blocks(
+          [{Markdown.block(), non_neg_integer()}],
+          String.t(),
+          Highlight.t() | nil,
+          map(),
+          non_neg_integer(),
+          non_neg_integer(),
+          highlighter(),
+          non_neg_integer(),
+          [MarkdownBlock.t()]
+        ) :: [MarkdownBlock.t()]
+  defp render_blocks(
+         [],
+         _text,
+         _highlight,
+         _theme_syntax,
+         _message_id,
+         _buffer_byte_offset,
+         _highlighter,
+         _code_index,
+         acc
+       ) do
+    Enum.reverse(acc)
+  end
+
+  defp render_blocks(
+         [{block, index} | rest],
+         text,
+         highlight,
+         theme_syntax,
+         message_id,
+         buffer_byte_offset,
+         highlighter,
+         code_index,
+         acc
+       ) do
+    id = block_id(message_id, index)
+
+    {rendered, next_code_index} =
+      render_block(
+        block,
+        id,
+        text,
+        highlight,
+        theme_syntax,
+        buffer_byte_offset,
+        highlighter,
+        code_index
+      )
+
+    render_blocks(
+      rest,
+      text,
+      highlight,
+      theme_syntax,
+      message_id,
+      buffer_byte_offset,
+      highlighter,
+      next_code_index,
+      [rendered | acc]
+    )
+  end
+
+  @spec render_block(
+          Markdown.block(),
+          non_neg_integer(),
+          String.t(),
+          Highlight.t() | nil,
+          map(),
+          non_neg_integer(),
+          highlighter(),
+          non_neg_integer()
+        ) :: {MarkdownBlock.t(), non_neg_integer()}
+  defp render_block(
+         %{kind: :paragraph, lines: lines},
+         id,
+         _text,
+         _highlight,
+         theme_syntax,
+         _offset,
+         _highlighter,
+         code_index
+       ) do
+    {MarkdownBlock.paragraph(id, Enum.map(lines, &inline_line_to_runs(&1, theme_syntax))),
+     code_index}
+  end
+
+  defp render_block(
+         %{kind: :heading, level: level, text: heading},
+         id,
+         _text,
+         _highlight,
+         theme_syntax,
+         _offset,
+         _highlighter,
+         code_index
+       ) do
+    line = [{heading, header_fg(theme_syntax), 0, @flag_bold}]
+    {MarkdownBlock.heading(id, level, [line]), code_index}
+  end
+
+  defp render_block(
+         %{kind: :list_item, indent: indent, ordered: ordered?, ordinal: ordinal, text: text},
+         id,
+         _text,
+         _highlight,
+         theme_syntax,
+         _offset,
+         _highlighter,
+         code_index
+       ) do
+    prefix = if ordered?, do: "#{ordinal}. ", else: "• "
+    lines = [inline_line_to_runs(String.duplicate("  ", indent) <> prefix <> text, theme_syntax)]
+    {MarkdownBlock.list_item(id, indent, ordered?, ordinal, lines), code_index}
+  end
+
+  defp render_block(
+         %{kind: :blockquote, lines: lines},
+         id,
+         _text,
+         _highlight,
+         theme_syntax,
+         _offset,
+         _highlighter,
+         code_index
+       ) do
+    rendered =
+      Enum.map(lines, fn line ->
+        [
+          {"│ ", comment_fg(theme_syntax), 0, @flag_italic}
+          | inline_line_to_runs(line, theme_syntax)
+        ]
+      end)
+
+    {MarkdownBlock.blockquote(id, rendered), code_index}
+  end
+
+  defp render_block(
+         %{kind: :rule},
+         id,
+         _text,
+         _highlight,
+         _theme_syntax,
+         _offset,
+         _highlighter,
+         code_index
+       ) do
+    {MarkdownBlock.rule(id), code_index}
+  end
+
+  defp render_block(
+         %{kind: :spacer, height: height},
+         id,
+         _text,
+         _highlight,
+         _theme_syntax,
+         _offset,
+         _highlighter,
+         code_index
+       ) do
+    {MarkdownBlock.spacer(id, height), code_index}
+  end
+
+  defp render_block(
+         %{kind: :code_block, language: language, lines: lines, complete?: complete?},
+         id,
+         text,
+         highlight,
+         theme_syntax,
+         buffer_byte_offset,
+         highlighter,
+         code_index
+       ) do
+    target_path = Markdown.infer_target_path(text, code_index)
+    label = code_label(language)
+
+    rendered_lines =
+      code_lines_to_runs(
+        lines,
+        complete?,
+        highlight,
+        theme_syntax,
+        text,
+        buffer_byte_offset,
+        code_index,
+        language,
+        highlighter
+      )
+
+    {MarkdownBlock.code_block(id, language, label, target_path, complete?, rendered_lines),
+     code_index + 1}
+  end
+
+  @spec inline_line_to_runs(String.t(), map()) :: styled_line()
+  defp inline_line_to_runs(line, theme_syntax) do
+    line
+    |> Markdown.parse_inline()
+    |> Enum.map(fn {segment, style} -> style_to_run(segment, style, theme_syntax) end)
+  end
+
+  @spec code_lines_to_runs(
+          [String.t()],
+          boolean(),
+          Highlight.t() | nil,
+          map(),
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          String.t(),
+          highlighter()
+        ) :: [styled_line()]
+  defp code_lines_to_runs(
+         lines,
+         false,
+         _highlight,
+         theme_syntax,
+         _text,
+         _buffer_byte_offset,
+         _code_index,
+         _language,
+         _highlighter
+       ) do
+    plain_code_lines_to_runs(lines, theme_syntax)
+  end
+
+  defp code_lines_to_runs(
+         lines,
+         true,
+         highlight,
+         theme_syntax,
+         text,
+         buffer_byte_offset,
+         code_index,
+         language,
+         highlighter
+       ) do
+    case code_highlight_source(highlight, lines, language, theme_syntax, highlighter) do
+      {:full_message, full_highlight} ->
+        highlighted_code_lines_to_runs(
+          lines,
+          full_highlight,
+          theme_syntax,
+          text,
+          buffer_byte_offset,
+          code_index
+        )
+
+      {:snippet, snippet_highlight} ->
+        highlighted_snippet_lines_to_runs(lines, snippet_highlight, theme_syntax)
+
+      :none ->
+        plain_code_lines_to_runs(lines, theme_syntax)
+    end
+  end
+
+  @spec plain_code_lines_to_runs([String.t()], map()) :: [styled_line()]
+  defp plain_code_lines_to_runs(lines, theme_syntax) do
+    Enum.map(lines, fn line ->
+      [{line, code_fg(theme_syntax), code_bg(theme_syntax), @flag_code}]
+    end)
+  end
+
+  @spec code_highlight_source(Highlight.t() | nil, [String.t()], String.t(), map(), highlighter()) ::
+          {:full_message, Highlight.t()} | {:snippet, Highlight.t()} | :none
+  defp code_highlight_source(
+         %Highlight{} = highlight,
+         _lines,
+         _language,
+         _theme_syntax,
+         _highlighter
+       ) do
+    if has_spans?(highlight), do: {:full_message, highlight}, else: :none
+  end
+
+  defp code_highlight_source(_highlight, lines, language, theme_syntax, highlighter) do
+    case snippet_highlight(lines, language, theme_syntax, highlighter) do
+      %Highlight{} = snippet -> {:snippet, snippet}
+      nil -> :none
+    end
+  end
+
+  @spec snippet_highlight([String.t()], String.t(), map(), highlighter()) :: Highlight.t() | nil
+  defp snippet_highlight(_lines, "", _theme_syntax, _highlighter), do: nil
+
+  defp snippet_highlight(lines, language, theme_syntax, highlighter) do
+    source = Enum.join(lines, "\n")
+
+    case highlighter.(language, source, timeout: @snippet_highlight_timeout_ms) do
+      {:ok, names, spans} when is_list(names) and is_list(spans) ->
+        theme_syntax
+        |> Highlight.new()
+        |> Highlight.put_names(names)
+        |> Highlight.put_spans(1, spans)
+
+      _result ->
+        nil
+    end
+  rescue
+    _error -> nil
+  catch
+    :exit, _reason -> nil
+    _kind, _reason -> nil
+  end
+
+  @spec highlighted_snippet_lines_to_runs([String.t()], Highlight.t(), map()) :: [styled_line()]
+  defp highlighted_snippet_lines_to_runs(lines, highlight, theme_syntax) do
+    lines
+    |> Enum.reduce({[], 0}, fn line, {acc, byte_offset} ->
+      segments = Highlight.styles_for_line(highlight, line, byte_offset)
+      next_byte_offset = byte_offset + byte_size(line) + 1
+      {[highlighted_segments_to_runs(segments, line, theme_syntax) | acc], next_byte_offset}
+    end)
+    |> elem(0)
+    |> Enum.reverse()
+  end
+
+  @spec highlighted_segments_to_runs([Highlight.styled_segment()], String.t(), map()) ::
+          styled_line()
+  defp highlighted_segments_to_runs(segments, original_line, theme_syntax) do
+    case segments do
+      [{^original_line, %Minga.Core.Face{fg: nil}}] ->
+        [{original_line, code_fg(theme_syntax), code_bg(theme_syntax), @flag_code}]
+
+      _ ->
+        Enum.map(segments, &segment_to_run(&1, code_bg(theme_syntax)))
+    end
+  end
+
+  @spec highlighted_code_lines_to_runs(
+          [String.t()],
+          Highlight.t(),
+          map(),
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: [styled_line()]
+  defp highlighted_code_lines_to_runs(
+         lines,
+         highlight,
+         theme_syntax,
+         text,
+         buffer_byte_offset,
+         code_index
+       ) do
+    original_lines = String.split(text, "\n")
+    line_byte_offsets = compute_line_byte_offsets(original_lines)
+    start_idx = code_content_start_line(original_lines, code_index)
+
+    lines
+    |> Enum.with_index()
+    |> Enum.map(fn {line, relative_idx} ->
+      line_idx = start_idx + relative_idx
+      original_line = Enum.at(original_lines, line_idx, line)
+      line_start_byte = buffer_byte_offset + Map.get(line_byte_offsets, line_idx, 0)
+      segments = Highlight.styles_for_line(highlight, original_line, line_start_byte)
+
+      highlighted_segments_to_runs(segments, original_line, theme_syntax)
+    end)
+  end
+
+  @spec code_content_start_line([String.t()], non_neg_integer()) :: non_neg_integer()
+  defp code_content_start_line(lines, target_code_index) do
+    lines
+    |> Enum.with_index()
+    |> Enum.reduce_while({false, 0}, fn {line, idx}, {inside_code?, code_index} ->
+      if fence_line?(line) do
+        code_content_start_line_step(inside_code?, code_index, target_code_index, idx)
+      else
+        {:cont, {inside_code?, code_index}}
+      end
+    end)
+    |> case do
+      {:found, line_idx} -> line_idx
+      {_inside_code?, _code_index} -> 0
+    end
+  end
+
+  @spec code_content_start_line_step(
+          boolean(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) ::
+          {:halt, {:found, non_neg_integer()}} | {:cont, {boolean(), non_neg_integer()}}
+  defp code_content_start_line_step(false, code_index, target_code_index, idx)
+       when code_index == target_code_index do
+    {:halt, {:found, idx + 1}}
+  end
+
+  defp code_content_start_line_step(false, code_index, _target_code_index, _idx) do
+    {:cont, {true, code_index}}
+  end
+
+  defp code_content_start_line_step(true, code_index, _target_code_index, _idx) do
+    {:cont, {false, code_index + 1}}
+  end
+
+  @spec code_label(String.t()) :: String.t()
+  defp code_label(""), do: "Code"
+  defp code_label("elixir"), do: "Elixir"
+  defp code_label("ex"), do: "Elixir"
+  defp code_label("python"), do: "Python"
+  defp code_label("py"), do: "Python"
+  defp code_label("swift"), do: "Swift"
+  defp code_label("go"), do: "Go"
+  defp code_label("rust"), do: "Rust"
+  defp code_label("sh"), do: "Shell"
+  defp code_label("bash"), do: "Shell"
+  defp code_label("zsh"), do: "Shell"
+  defp code_label("javascript"), do: "JavaScript"
+  defp code_label("js"), do: "JavaScript"
+  defp code_label("typescript"), do: "TypeScript"
+  defp code_label("ts"), do: "TypeScript"
+
+  defp code_label(language) do
+    language
+    |> String.split(~r/[\s,]/, parts: 2)
+    |> hd()
+    |> String.trim()
+    |> case do
+      "" -> "Code"
+      value -> String.capitalize(value)
+    end
+  end
+
+  @spec block_id(non_neg_integer(), non_neg_integer()) :: non_neg_integer()
+  defp block_id(message_id, block_index),
+    do: :erlang.phash2({message_id, block_index}, 4_294_967_296)
 
   @doc """
   Converts assistant message text to styled runs for the GUI.
@@ -265,6 +746,9 @@ defmodule MingaEditor.Agent.MarkdownHighlight do
   defp has_spans?(%Highlight{spans: spans}) when is_tuple(spans), do: tuple_size(spans) > 0
   defp has_spans?(%Highlight{spans: spans}) when is_list(spans), do: spans != []
   defp has_spans?(_), do: false
+
+  @spec fence_line?(String.t()) :: boolean()
+  defp fence_line?(line), do: String.starts_with?(String.trim_leading(line), "```")
 
   @spec open_fence?(String.t()) :: boolean()
   defp open_fence?(text) do

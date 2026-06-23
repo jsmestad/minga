@@ -188,6 +188,12 @@ func decodeAgentMessage(body []byte) (AgentChatMessage, bool) {
 		msg = decodeToolCallMessage(msg, body, offset, true)
 	case 0x09:
 		msg = decodeApprovalMessage(msg, body, offset)
+	case 0x0A:
+		blocks, next, ok := decodeMarkdownBlocks(body, offset)
+		msg.MarkdownBlocks = blocks
+		msg.Text = plainMarkdownBlocks(blocks)
+		_ = next
+		return msg, ok
 	}
 	return msg, true
 }
@@ -352,6 +358,106 @@ func decodeStyledLines(body []byte, offset int) ([]AgentStyledLine, int, bool) {
 		lines = append(lines, line)
 	}
 	return lines, offset, true
+}
+
+func decodeMarkdownBlocks(body []byte, offset int) ([]AgentMarkdownBlock, int, bool) {
+	if len(body) < offset+2 {
+		return nil, offset, false
+	}
+	count := int(u16(body, offset))
+	offset += 2
+	blocks := make([]AgentMarkdownBlock, 0, count)
+	for i := 0; i < count; i++ {
+		if len(body) < offset+6 {
+			return blocks, offset, false
+		}
+		block := AgentMarkdownBlock{ID: u32(body, offset), Kind: body[offset+4], Flags: body[offset+5], Height: 1}
+		offset += 6
+		switch block.Kind {
+		case 0x01, 0x04:
+			lines, next, ok := decodeStyledLines(body, offset)
+			if !ok {
+				return blocks, offset, false
+			}
+			block.Lines = lines
+			offset = next
+		case 0x02:
+			if len(body) < offset+1 {
+				return blocks, offset, false
+			}
+			block.Level = body[offset]
+			lines, next, ok := decodeStyledLines(body, offset+1)
+			if !ok {
+				return blocks, offset, false
+			}
+			block.Lines = lines
+			offset = next
+		case 0x03:
+			if len(body) < offset+6 {
+				return blocks, offset, false
+			}
+			block.Indent = body[offset]
+			block.Ordered = body[offset+1] != 0
+			block.Ordinal = u32(body, offset+2)
+			lines, next, ok := decodeStyledLines(body, offset+6)
+			if !ok {
+				return blocks, offset, false
+			}
+			block.Lines = lines
+			offset = next
+		case 0x05:
+		case 0x06:
+			if len(body) < offset+1 {
+				return blocks, offset, false
+			}
+			block.Height = body[offset]
+			offset++
+		case 0x07:
+			var ok bool
+			block.Language, offset, ok = readString16(body, offset)
+			if !ok {
+				return blocks, offset, false
+			}
+			block.Label, offset, ok = readString16(body, offset)
+			if !ok {
+				return blocks, offset, false
+			}
+			block.TargetPath, offset, ok = readString16(body, offset)
+			if !ok || len(body) < offset+1 {
+				return blocks, offset, false
+			}
+			block.CapabilityFlags = body[offset]
+			offset++
+			lines, next, ok := decodeStyledLines(body, offset)
+			if !ok {
+				return blocks, offset, false
+			}
+			block.Lines = lines
+			offset = next
+		default:
+			return blocks, offset, false
+		}
+		blocks = append(blocks, block)
+	}
+	return blocks, offset, true
+}
+
+func plainMarkdownBlocks(blocks []AgentMarkdownBlock) string {
+	parts := make([]string, 0, len(blocks))
+	for _, block := range blocks {
+		switch block.Kind {
+		case 0x05:
+			parts = append(parts, "---")
+		case 0x06:
+			parts = append(parts, "")
+		default:
+			text := plainStyledLines(block.Lines)
+			if text != "" {
+				parts = append(parts, text)
+			}
+		}
+	}
+	return strings.Join(parts, "\n")
 }
 
 func plainStyledLines(lines []AgentStyledLine) string {

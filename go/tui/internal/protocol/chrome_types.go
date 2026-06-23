@@ -444,9 +444,31 @@ type AgentChatMessage struct {
 	DurationMS        uint32
 	AutoApprovedScope byte
 	StyledLines       []AgentStyledLine
+	MarkdownBlocks    []AgentMarkdownBlock
 	Usage             AgentUsage
 	PreviewKind       byte
 	PreviewLines      []string
+}
+
+// AgentMarkdownBlock is a BEAM-authored semantic markdown block. Renderers must not infer block/card structure from styled-run flags.
+type AgentMarkdownBlock struct {
+	ID              uint32
+	Kind            byte
+	Flags           byte
+	Lines           []AgentStyledLine
+	Level           byte
+	Indent          byte
+	Ordered         bool
+	Ordinal         uint32
+	Height          byte
+	Language        string
+	Label           string
+	TargetPath      string
+	CapabilityFlags byte
+}
+
+func (block AgentMarkdownBlock) Complete() bool {
+	return block.Flags&0x01 != 0
 }
 
 type AgentStyledLine []AgentStyledRun

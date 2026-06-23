@@ -7,6 +7,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoderTest do
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.RenderModel.UI.AgentChat
   alias Minga.RenderModel.UI.AgentChat.ApprovalView
+  alias Minga.RenderModel.UI.AgentChat.MarkdownBlock
   alias Minga.RenderModel.UI.AgentChat.PromptCompletion
   alias Minga.RenderModel.UI.AgentChat.ToolCallView
   alias Minga.RenderModel.UI.AgentChat.Usage
@@ -337,6 +338,41 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoderTest do
       assert t1 == "def "
       assert fg1 == 0xFF0000
       assert flags1 == 0x11
+    end
+
+    test "assistant_markdown message encodes semantic code block payload" do
+      blocks = [
+        MarkdownBlock.paragraph(10, [
+          [{"Use ", 0xBBC2CF, 0, 0}, {"code", 0x98BE65, 0x21242B, 0x10}]
+        ]),
+        MarkdownBlock.code_block(11, "elixir", "Elixir", "lib/demo.ex", true, [
+          [{"", 0x98BE65, 0x21242B, 0x10}],
+          [{"def hello", 0x98BE65, 0x21242B, 0x10}]
+        ])
+      ]
+
+      binary = encode(%AgentChat{visible?: true, messages: [{7, {:assistant_markdown, blocks}}]})
+      assert [m1] = messages!(binary)
+
+      <<7::32, 0x0A::8, 2::16, 10::32, 0x01::8, 0::8, 1::16, 2::16, use_len::16,
+        use::binary-size(use_len), _use_fg::24, _use_bg::24, 0::8, code_len::16,
+        code::binary-size(code_len), _code_fg::24, _code_bg::24, code_flags::8, 11::32, 0x07::8,
+        0x01::8, lang_len::16, lang::binary-size(lang_len), label_len::16,
+        label::binary-size(label_len), path_len::16, path::binary-size(path_len), 0x01::8, 2::16,
+        1::16, empty_len::16, empty::binary-size(empty_len), _empty_fg::24, _empty_bg::24,
+        empty_flags::8, 1::16, line_len::16, line::binary-size(line_len), _line_fg::24,
+        _line_bg::24, line_flags::8>> = m1
+
+      assert use == "Use "
+      assert code == "code"
+      assert code_flags == 0x10
+      assert lang == "elixir"
+      assert label == "Elixir"
+      assert path == "lib/demo.ex"
+      assert empty == ""
+      assert empty_flags == 0x10
+      assert line == "def hello"
+      assert line_flags == 0x10
     end
 
     test "styled_tool_call message with sub-opcode 0x08" do
