@@ -2345,6 +2345,9 @@ defmodule MingaAgent.Providers.Native do
 
       {:tool_approval_response, _tool_call_id, :reject} ->
         {"Tool rejected by user", true, mode, false}
+
+      {:tool_approval_response, _tool_call_id, {:reject, message}} ->
+        {message, true, mode, false}
     after
       config.approval_timeout_ms ->
         {"Tool approval timed out", true, mode, false}

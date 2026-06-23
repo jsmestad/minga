@@ -10,6 +10,7 @@ defmodule MingaAgent.Tools.SubagentTest do
   alias MingaAgent.SessionManager
   alias MingaAgent.Subagent.Handle
   alias MingaAgent.Tools.Subagent
+  alias ReqLLM.StreamResponse.MetadataHandle
 
   @moduletag :tmp_dir
 
@@ -612,6 +613,49 @@ defmodule MingaAgent.Tools.SubagentTest do
     refute_receive {:notified, :complete, _}, 50
   end
 
+  test "background native subagent rejects destructive tools immediately without an approval driver",
+       %{
+         manager: manager,
+         tmp_dir: dir
+       } do
+    started_at = System.monotonic_time(:millisecond)
+
+    assert {:ok, _result} =
+             Subagent.execute("write through native tool",
+               background: true,
+               session_manager: manager,
+               project_root: dir,
+               provider: MingaAgent.Providers.Native,
+               model: "anthropic:claude-sonnet-4-20250514",
+               provider_opts: [
+                 llm_client: native_write_client("child.txt", "from native\n", "write rejected"),
+                 skip_api_key_env: true
+               ]
+             )
+
+    [handle] = SessionManager.list_background_subagents(manager, nil)
+    Session.subscribe(handle.pid)
+
+    assert_receive {:agent_event, _pid,
+                    {:approval_rejected, "tc_write_file", "write_file", message}},
+                   1_000
+
+    elapsed_ms = System.monotonic_time(:millisecond) - started_at
+    assert elapsed_ms < 2_000
+    assert message =~ "no interactive approval driver"
+    assert_eventually_idle(handle.pid)
+    refute File.exists?(Path.join(dir, "child.txt"))
+
+    assert {:tool_call, tool_call} =
+             Enum.find(
+               Session.messages(handle.pid),
+               &match?({:tool_call, %{id: "tc_write_file"}}, &1)
+             )
+
+    assert tool_call.status == :error
+    assert tool_call.result == message
+  end
+
   # ── Foreground subagent tests ──────────────────────────────────────────────
 
   test "foreground subagent still blocks and returns final text" do
@@ -648,6 +692,27 @@ defmodule MingaAgent.Tools.SubagentTest do
     assert File.read!(Path.join(worktree_path, "child.txt")) == "from child\n"
     refute File.exists?(Path.join(root, "child.txt"))
     assert File.exists?(worktree_path)
+  end
+
+  test "worktree-isolated native subagent auto-approves destructive tools", %{tmp_dir: dir} do
+    root = init_git_repo!(dir)
+
+    assert {:ok, result} =
+             Subagent.execute("write through native tool",
+               isolation: "worktree",
+               project_root: root,
+               provider: MingaAgent.Providers.Native,
+               model: "anthropic:claude-sonnet-4-20250514",
+               provider_opts: [
+                 llm_client: native_write_client("child.txt", "from native\n", "native wrote"),
+                 skip_api_key_env: true
+               ]
+             )
+
+    assert result =~ "native wrote"
+    assert [_, worktree_path] = Regex.run(~r/Worktree: (.+)/, result)
+    assert File.read!(Path.join(worktree_path, "child.txt")) == "from native\n"
+    refute File.exists?(Path.join(root, "child.txt"))
   end
 
   test "worktree-isolated subagent removes a clean no-op worktree", %{tmp_dir: dir} do
@@ -696,18 +761,46 @@ defmodule MingaAgent.Tools.SubagentTest do
     assert message =~ "requires a clean git tree"
   end
 
-  test "worktree isolation rejects background subagents", %{tmp_dir: dir} do
+  test "worktree-isolated background native subagent auto-approves destructive tools", %{
+    manager: manager,
+    tmp_dir: dir
+  } do
     root = init_git_repo!(dir)
 
-    assert {:error, message} =
-             Subagent.execute("noop",
+    assert {:ok, result} =
+             Subagent.execute("write through native tool",
                isolation: "worktree",
                background: true,
+               session_manager: manager,
                project_root: root,
-               provider: WorktreeProvider
+               provider: MingaAgent.Providers.Native,
+               model: "anthropic:claude-sonnet-4-20250514",
+               provider_opts: [
+                 llm_client:
+                   native_write_client(
+                     "background-child.txt",
+                     "from background native\n",
+                     "background native wrote"
+                   ),
+                 skip_api_key_env: true
+               ]
              )
 
-    assert message =~ "only supported for foreground"
+    assert result =~ "Background subagent started"
+    assert [_, worktree_path] = Regex.run(~r/Worktree: (.+)/, result)
+    [handle] = SessionManager.list_background_subagents(manager, nil)
+    Session.subscribe(handle.pid)
+
+    assert_receive {:agent_event, _pid,
+                    {:tool_auto_approved, "tc_write_file", "write_file", :session}},
+                   1_000
+
+    assert_eventually_idle(handle.pid)
+
+    assert File.read!(Path.join(worktree_path, "background-child.txt")) ==
+             "from background native\n"
+
+    refute File.exists?(Path.join(root, "background-child.txt"))
   end
 
   # ── Context inheritance tests ──────────────────────────────────────────────
@@ -887,6 +980,51 @@ defmodule MingaAgent.Tools.SubagentTest do
     assert_receive {^ref, {:provider_started, _provider_pid, opts}}, 1_000
     assertions.(opts)
     :ok
+  end
+
+  @spec native_write_client(String.t(), String.t(), String.t()) :: function()
+  defp native_write_client(path, content, final_text) do
+    call_count = :counters.new(1, [:atomics])
+
+    fn _model, _messages, _opts ->
+      count = :counters.get(call_count, 1)
+      :counters.add(call_count, 1, 1)
+
+      chunks =
+        if count == 0 do
+          [
+            ReqLLM.StreamChunk.tool_call(
+              "write_file",
+              %{"path" => path, "content" => content},
+              %{id: "tc_write_file", index: 0}
+            ),
+            ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+          ]
+        else
+          [ReqLLM.StreamChunk.text(final_text), ReqLLM.StreamChunk.meta(%{finish_reason: :stop})]
+        end
+
+      build_stream_response(chunks)
+    end
+  end
+
+  @spec build_stream_response([ReqLLM.StreamChunk.t()]) ::
+          {:ok, ReqLLM.StreamResponse.t()}
+  defp build_stream_response(chunks) do
+    {:ok, handle} =
+      MetadataHandle.start_link(fn ->
+        %{usage: %{}, finish_reason: :stop}
+      end)
+
+    stream_response = %ReqLLM.StreamResponse{
+      stream: chunks,
+      metadata_handle: handle,
+      cancel: fn -> :ok end,
+      model: elem(ReqLLM.model("anthropic:claude-sonnet-4-20250514"), 1),
+      context: ReqLLM.Context.new()
+    }
+
+    {:ok, stream_response}
   end
 
   @spec init_git_repo!(String.t()) :: String.t()

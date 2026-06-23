@@ -42,6 +42,7 @@ defmodule MingaAgent.Tools.Subagent do
   @subagent_timeout_ms 300_000
   @provider_ready_retry_ms 10
   @provider_ready_max_attempts 100
+  @approval_unavailable_message "Subagent tool approval is unavailable because this child session has no interactive approval driver. Run the subagent with worktree isolation or route approvals through the parent session."
 
   @doc """
   Runs a sub-agent task.
@@ -60,9 +61,29 @@ defmodule MingaAgent.Tools.Subagent do
   @spec start_background(String.t(), opts()) :: {:ok, String.t()} | {:error, String.t()}
   defp start_background(task, opts) do
     if worktree_isolation?(opts) do
-      {:error, "Worktree isolation is only supported for foreground subagents"}
+      start_worktree_background(task, opts)
     else
       do_start_background(task, opts)
+    end
+  end
+
+  @spec start_worktree_background(String.t(), opts()) :: {:ok, String.t()} | {:error, String.t()}
+  defp start_worktree_background(task, opts) do
+    project_root =
+      Keyword.get(opts, :project_root) || parent_context(opts).project_root ||
+        detect_project_root()
+
+    case create_worktree(project_root) do
+      {:ok, worktree} ->
+        worktree_opts = Keyword.put(opts, :project_root, worktree.path)
+
+        case do_start_background(task, worktree_opts) do
+          {:ok, result} -> {:ok, result <> worktree_metadata(worktree)}
+          {:error, reason} -> finish_worktree_error(worktree, reason)
+        end
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -278,7 +299,7 @@ defmodule MingaAgent.Tools.Subagent do
   @spec finish_worktree_result(worktree(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
   defp finish_worktree_result(worktree, result) do
     if worktree_changed?(worktree) do
-      {:ok, result <> "\n\nWorktree: #{worktree.path}\nBranch: #{worktree.branch}"}
+      {:ok, result <> worktree_metadata(worktree)}
     else
       cleanup_worktree_if_clean(worktree)
       {:ok, result}
@@ -288,11 +309,16 @@ defmodule MingaAgent.Tools.Subagent do
   @spec finish_worktree_error(worktree(), String.t()) :: {:error, String.t()}
   defp finish_worktree_error(worktree, reason) do
     if worktree_changed?(worktree) do
-      {:error, reason <> "\n\nWorktree: #{worktree.path}\nBranch: #{worktree.branch}"}
+      {:error, reason <> worktree_metadata(worktree)}
     else
       cleanup_worktree_if_clean(worktree)
       {:error, reason}
     end
+  end
+
+  @spec worktree_metadata(worktree()) :: String.t()
+  defp worktree_metadata(worktree) do
+    "\n\nWorktree: #{worktree.path}\nBranch: #{worktree.branch}"
   end
 
   @spec worktree_changed?(worktree()) :: boolean()
@@ -382,6 +408,7 @@ defmodule MingaAgent.Tools.Subagent do
           ]
           |> maybe_put_thinking_level(thinking_level)
           |> maybe_put_notifier(opts)
+          |> put_tool_approval_policy(opts)
 
         {:ok, session_opts}
 
@@ -395,6 +422,15 @@ defmodule MingaAgent.Tools.Subagent do
     case Keyword.fetch(opts, :notifier) do
       {:ok, notifier} -> Keyword.put(session_opts, :notifier, notifier)
       :error -> session_opts
+    end
+  end
+
+  @spec put_tool_approval_policy(keyword(), opts()) :: keyword()
+  defp put_tool_approval_policy(session_opts, opts) do
+    if worktree_isolation?(opts) do
+      Keyword.put(session_opts, :tool_approval_policy, {:auto_approve, :session})
+    else
+      Keyword.put(session_opts, :tool_approval_policy, {:reject, @approval_unavailable_message})
     end
   end
 
