@@ -190,8 +190,6 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     {Enum.take(pairs, count), take_styled_cache(styled_cache, count)}
   end
 
-  defp visible_message_slice(_panel, pairs, styled_cache), do: {pairs, styled_cache}
-
   @spec take_styled_cache([term()] | nil, non_neg_integer()) :: [term()] | nil
   defp take_styled_cache(nil, _count), do: nil
 

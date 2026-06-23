@@ -1626,7 +1626,7 @@ defmodule MingaEditor.State do
     ws = state.workspace
 
     state =
-      if ws.agent_ui != nil and ws.agent_ui.panel.prompt_buffer == pid do
+      if ws.agent_ui.panel.prompt_buffer == pid do
         AgentAccess.update_panel(state, fn p -> %{p | prompt_buffer: nil} end)
       else
         state

@@ -722,7 +722,8 @@ defmodule MingaEditor.Commands.Agent do
     FileMention.resolve_prompt(text, root, opts)
   end
 
-  defdelegate project_root, to: Minga.Project, as: :resolve_root
+  @spec project_root() :: String.t()
+  defp project_root, do: Minga.Project.resolve_root()
 
   @doc "Clears the chat display without affecting conversation history."
   @spec clear_chat_display(state()) :: state()
@@ -1425,13 +1426,13 @@ defmodule MingaEditor.Commands.Agent do
   # ── Search ─────────────────────────────────────────────────────────────────
 
   @spec scope_start_search(state()) :: state()
-  defdelegate scope_start_search(state), to: AgentSubStates, as: :start_search
+  def scope_start_search(state), do: AgentSubStates.start_search(state)
 
   @spec scope_next_search_match(state()) :: state()
-  defdelegate scope_next_search_match(state), to: AgentSubStates, as: :next_match
+  def scope_next_search_match(state), do: AgentSubStates.next_match(state)
 
   @spec scope_prev_search_match(state()) :: state()
-  defdelegate scope_prev_search_match(state), to: AgentSubStates, as: :prev_match
+  def scope_prev_search_match(state), do: AgentSubStates.prev_match(state)
 
   # ── Session ────────────────────────────────────────────────────────────────
 
@@ -1682,54 +1683,52 @@ defmodule MingaEditor.Commands.Agent do
   # Search input handling delegated to AgentSubStates.
 
   @spec handle_search_key(state(), non_neg_integer()) :: state()
-  defdelegate handle_search_key(state, cp), to: AgentSubStates
+  def handle_search_key(state, cp), do: AgentSubStates.handle_search_key(state, cp)
 
   # Mention completion handling delegated to AgentSubStates.
 
   @spec handle_mention_key(state(), non_neg_integer(), non_neg_integer()) :: state()
-  defdelegate handle_mention_key(state, cp, mods), to: AgentSubStates
+  def handle_mention_key(state, cp, mods), do: AgentSubStates.handle_mention_key(state, cp, mods)
 
   # ── Diff review commands ───────────────────────────────────────────────────
 
   @spec scope_accept_hunk(state()) :: state()
-  defdelegate scope_accept_hunk(state), to: AgentSubStates, as: :accept_hunk
+  def scope_accept_hunk(state), do: AgentSubStates.accept_hunk(state)
 
   @spec scope_reject_hunk(state()) :: state()
-  defdelegate scope_reject_hunk(state), to: AgentSubStates, as: :reject_hunk
+  def scope_reject_hunk(state), do: AgentSubStates.reject_hunk(state)
 
   @spec scope_accept_all_hunks(state()) :: state()
-  defdelegate scope_accept_all_hunks(state), to: AgentSubStates, as: :accept_all_hunks
+  def scope_accept_all_hunks(state), do: AgentSubStates.accept_all_hunks(state)
 
   @spec scope_reject_all_hunks(state()) :: state()
-  defdelegate scope_reject_all_hunks(state), to: AgentSubStates, as: :reject_all_hunks
+  def scope_reject_all_hunks(state), do: AgentSubStates.reject_all_hunks(state)
 
   # ── Tool approval commands ─────────────────────────────────────────────────
 
   @spec scope_approve_tool(state()) :: state()
-  defdelegate scope_approve_tool(state), to: AgentSubStates, as: :approve_tool
+  def scope_approve_tool(state), do: AgentSubStates.approve_tool(state)
 
   @spec scope_trust_tool_session(state()) :: state()
-  defdelegate scope_trust_tool_session(state), to: AgentSubStates, as: :trust_tool_session
+  def scope_trust_tool_session(state), do: AgentSubStates.trust_tool_session(state)
 
   @spec scope_trust_tool_turn(state()) :: state()
-  defdelegate scope_trust_tool_turn(state), to: AgentSubStates, as: :trust_tool_turn
+  def scope_trust_tool_turn(state), do: AgentSubStates.trust_tool_turn(state)
 
   @spec scope_deny_tool(state()) :: state()
-  defdelegate scope_deny_tool(state), to: AgentSubStates, as: :deny_tool
+  def scope_deny_tool(state), do: AgentSubStates.deny_tool(state)
 
   # ── @-mention trigger ─────────────────────────────────────────────────────
 
   @spec scope_trigger_mention(state()) :: state()
-  defdelegate scope_trigger_mention(state), to: AgentSubStates, as: :trigger_mention
+  def scope_trigger_mention(state), do: AgentSubStates.trigger_mention(state)
 
   @spec scope_trigger_slash_completion(state()) :: state()
-  defdelegate scope_trigger_slash_completion(state),
-    to: AgentSubStates,
-    as: :trigger_slash_completion
+  def scope_trigger_slash_completion(state), do: AgentSubStates.trigger_slash_completion(state)
 
-  # ── Delegated to AgentSession ──────────────────────────────────────────────
-
-  defdelegate open_code_block(state, language, content), to: AgentSession
+  @spec open_code_block(state(), String.t(), String.t()) :: state()
+  def open_code_block(state, language, content),
+    do: AgentSession.open_code_block(state, language, content)
 
   # ── Private helpers ─────────────────────────────────────────────────────────
 

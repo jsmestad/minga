@@ -247,8 +247,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
           agent: %AgentState{
             runtime: %RuntimeState{status: :idle},
             error: nil,
-            spinner_timer: nil,
-            buffer: nil
+            spinner_timer: nil
           }
         }
       }

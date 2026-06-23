@@ -11,6 +11,7 @@ defmodule MingaEditor.Agent.IngestWiringTest do
 
   use Minga.Test.EditorCase, async: true
 
+  alias MingaAgent.Session
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Tab
@@ -18,16 +19,35 @@ defmodule MingaEditor.Agent.IngestWiringTest do
 
   @moduletag :tmp_dir
 
-  defp fake_session do
-    pid =
-      spawn(fn ->
-        receive do
-          :stop -> :ok
-        end
-      end)
+  defmodule QuietProvider do
+    @moduledoc false
+    @behaviour MingaAgent.Provider
+    use GenServer
 
-    on_exit(fn -> if Process.alive?(pid), do: send(pid, :stop) end)
-    pid
+    @impl MingaAgent.Provider
+    def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
+
+    @impl MingaAgent.Provider
+    def send_prompt(_pid, _text), do: :ok
+
+    @impl MingaAgent.Provider
+    def abort(_pid), do: :ok
+
+    @impl MingaAgent.Provider
+    def new_session(_pid), do: :ok
+
+    @impl MingaAgent.Provider
+    def seed_messages(_pid, _messages), do: :ok
+
+    @impl MingaAgent.Provider
+    def get_state(_pid), do: {:ok, %{model: nil, is_streaming: false, token_usage: nil}}
+
+    @impl GenServer
+    def init(_opts), do: {:ok, %{}}
+  end
+
+  defp fake_session do
+    start_supervised!({Session, provider: QuietProvider, provider_opts: []})
   end
 
   test "the editor boots an ingest process", %{tmp_dir: dir} do
