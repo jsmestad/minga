@@ -1449,7 +1449,7 @@ defmodule MingaAgent.Session do
 
   defp handle_approval_response(_approval_id, decision, state) do
     %{tool_call_id: tool_call_id, reply_to: reply_to} = approval = state.pending_approval
-    state = maybe_set_trust_for_decision(state, approval.name, decision)
+    state = maybe_set_trust_for_decision(state, approval, decision)
 
     # Send the execution decision directly to the blocked Task process.
     send(reply_to, {:tool_approval_response, tool_call_id, execution_decision(decision)})
@@ -1661,7 +1661,7 @@ defmodule MingaAgent.Session do
   end
 
   defp handle_provider_event(%Event.ToolApproval{} = event, state) do
-    case Map.get(state.trust_levels, event.name) do
+    case trusted_scope_for_approval(state.trust_levels, event) do
       nil ->
         request_tool_approval(event, state)
 
@@ -1870,18 +1870,61 @@ defmodule MingaAgent.Session do
     append_msg(state, msg)
   end
 
-  @spec maybe_set_trust_for_decision(state(), String.t(), approval_decision()) :: state()
-  defp maybe_set_trust_for_decision(state, name, :approve_session),
-    do: put_tool_trust(state, name, :session)
+  @spec maybe_set_trust_for_decision(state(), MingaAgent.ToolApproval.t(), approval_decision()) ::
+          state()
+  defp maybe_set_trust_for_decision(state, approval, :approve_session),
+    do: put_tool_trust(state, approval_trust_key(approval), :session)
 
-  defp maybe_set_trust_for_decision(state, name, :approve_turn),
-    do: put_tool_trust(state, name, :turn)
+  defp maybe_set_trust_for_decision(state, approval, :approve_turn),
+    do: put_tool_trust(state, approval_trust_key(approval), :turn)
 
-  defp maybe_set_trust_for_decision(state, _name, _decision), do: state
+  defp maybe_set_trust_for_decision(state, _approval, _decision), do: state
 
   @spec put_tool_trust(state(), String.t(), trust_scope()) :: state()
   defp put_tool_trust(state, name, scope) when is_binary(name) and scope in [:session, :turn] do
     %{state | trust_levels: Map.put(state.trust_levels, name, scope)}
+  end
+
+  @spec trusted_scope_for_approval(%{String.t() => trust_scope()}, Event.ToolApproval.t()) ::
+          trust_scope() | nil
+  defp trusted_scope_for_approval(trust_levels, %Event.ToolApproval{} = event) do
+    Map.get(trust_levels, trust_key(event.name, event.args)) || Map.get(trust_levels, event.name)
+  end
+
+  @spec approval_trust_key(MingaAgent.ToolApproval.t()) :: String.t()
+  defp approval_trust_key(%MingaAgent.ToolApproval{name: name, args: args}) do
+    trust_key(name, args)
+  end
+
+  @spec trust_key(String.t(), map()) :: String.t()
+  defp trust_key("shell", args) when is_map(args), do: shell_trust_key(args)
+
+  defp trust_key("call_mcp_tool", args) when is_map(args),
+    do: hashed_trust_key("call_mcp_tool", args)
+
+  defp trust_key("list_mcp_tools", args) when is_map(args),
+    do: hashed_trust_key("list_mcp_tools", args)
+
+  defp trust_key("mcp_" <> _rest = name, args) when is_map(args), do: hashed_trust_key(name, args)
+  defp trust_key(name, _args), do: name
+
+  @spec shell_trust_key(map()) :: String.t()
+  defp shell_trust_key(args) do
+    case Map.get(args, "command") || Map.get(args, :command) do
+      command when is_binary(command) -> "shell:#{command}"
+      _other -> hashed_trust_key("shell", args)
+    end
+  end
+
+  @spec hashed_trust_key(String.t(), map()) :: String.t()
+  defp hashed_trust_key(name, args) do
+    hash =
+      :sha256
+      |> :crypto.hash(:erlang.term_to_binary(args))
+      |> Base.encode16(case: :lower)
+      |> String.slice(0, 12)
+
+    "#{name}:#{hash}"
   end
 
   @spec execution_decision(approval_decision()) :: :approve | :reject

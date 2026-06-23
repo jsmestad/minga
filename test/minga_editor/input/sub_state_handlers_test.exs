@@ -151,6 +151,11 @@ defmodule MingaEditor.Input.SubStateHandlersTest do
       {:handled, _} = ToolApproval.handle_key(state, ?n, 0)
     end
 
+    test "handles Esc as denial when approval is pending", %{approval: approval} do
+      state = base_state(keymap_scope: :agent, agentic_active: true, pending_approval: approval)
+      {:handled, _} = ToolApproval.handle_key(state, 27, 0)
+    end
+
     test "handles a as session trust when approval is pending", %{approval: approval} do
       state = base_state(keymap_scope: :agent, agentic_active: true, pending_approval: approval)
       {:handled, _} = ToolApproval.handle_key(state, ?a, 0)
@@ -161,10 +166,9 @@ defmodule MingaEditor.Input.SubStateHandlersTest do
       {:handled, _} = ToolApproval.handle_key(state, ?t, 0)
     end
 
-    test "swallows unrelated keys when approval is pending", %{approval: approval} do
+    test "passes unrelated keys through when approval is pending", %{approval: approval} do
       state = base_state(keymap_scope: :agent, agentic_active: true, pending_approval: approval)
-      {:handled, new_state} = ToolApproval.handle_key(state, ?x, 0)
-      # Key is swallowed, approval still pending
+      {:passthrough, new_state} = ToolApproval.handle_key(state, ?x, 0)
       assert AgentAccess.agent(new_state).pending_approval != nil
     end
 

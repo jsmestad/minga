@@ -1451,13 +1451,70 @@ defmodule MingaAgent.SessionTest do
       send_approval(session)
       assert :ok = Session.respond_to_approval(session, :approve_session)
       assert_receive {:tool_approval_response, "tc1", :approve}, @event_timeout
-      assert Session.list_tool_trust(session) == %{"shell" => :session}
+      assert Session.list_tool_trust(session) == %{"shell:rm -rf /" => :session}
 
       session = start_subscribed_session()
       send_approval(session)
       assert :ok = Session.respond_to_approval(session, :approve_turn)
       assert_receive {:tool_approval_response, "tc1", :approve}, @event_timeout
-      assert Session.list_tool_trust(session) == %{"shell" => :turn}
+      assert Session.list_tool_trust(session) == %{"shell:rm -rf /" => :turn}
+    end
+
+    test "approval session trust for shell is scoped to the approved command" do
+      session = start_subscribed_session()
+      send_approval(session)
+      assert :ok = Session.respond_to_approval(session, :approve_session)
+      assert_receive {:tool_approval_response, "tc1", :approve}, @event_timeout
+
+      send_provider_event(session, %Event.ToolApproval{
+        tool_call_id: "tc_same",
+        name: "shell",
+        args: %{"command" => "rm -rf /"},
+        reply_to: self()
+      })
+
+      assert_receive {:tool_approval_response, "tc_same", :approve}, @event_timeout
+
+      assert_receive {:agent_event, _, {:tool_auto_approved, "tc_same", "shell", :session}},
+                     @event_timeout
+
+      send_provider_event(session, %Event.ToolApproval{
+        tool_call_id: "tc_other",
+        name: "shell",
+        args: %{"command" => "pwd"},
+        reply_to: self()
+      })
+
+      assert_receive {:agent_event, _, {:approval_pending, pending}}, @event_timeout
+      assert pending.tool_call_id == "tc_other"
+      refute_received {:tool_approval_response, "tc_other", :approve}
+    end
+
+    test "approval session trust for MCP tools is scoped to the approved arguments" do
+      session = start_subscribed_session()
+
+      send_provider_event(session, %Event.ToolApproval{
+        tool_call_id: "tc_mcp",
+        name: "mcp_files__delete",
+        args: %{"path" => "tmp/a.txt"},
+        reply_to: self()
+      })
+
+      assert_receive {:agent_event, _, {:approval_pending, _}}, @event_timeout
+      assert :ok = Session.respond_to_approval(session, :approve_session)
+      assert_receive {:tool_approval_response, "tc_mcp", :approve}, @event_timeout
+      refute Map.has_key?(Session.list_tool_trust(session), "mcp_files__delete")
+
+      send_provider_event(session, %Event.ToolApproval{
+        tool_call_id: "tc_mcp_other",
+        name: "mcp_files__delete",
+        args: %{"path" => "tmp/b.txt"},
+        reply_to: self()
+      })
+
+      assert_receive {:agent_event, _, {:approval_pending, pending}}, @event_timeout
+      assert pending.tool_call_id == "tc_mcp_other"
+      refute_received {:tool_approval_response, "tc_mcp_other", :approve}
     end
 
     test "bare approve sets no tool trust" do

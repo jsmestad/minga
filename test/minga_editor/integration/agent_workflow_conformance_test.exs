@@ -194,13 +194,13 @@ defmodule MingaEditor.Integration.AgentWorkflowConformanceTest do
        %Event.ToolStart{
          tool_call_id: "tc_second",
          name: "shell",
-         args: %{"command" => "mix format --check-formatted"}
+         args: %{"command" => "mix test"}
        }},
       {:event,
        %Event.ToolApproval{
          tool_call_id: "tc_second",
          name: "shell",
-         args: %{"command" => "mix format --check-formatted"},
+         args: %{"command" => "mix test"},
          reply_to: self()
        }},
       {:event, %Event.AgentEnd{usage: nil}}
