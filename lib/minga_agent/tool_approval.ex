@@ -167,7 +167,7 @@ defmodule MingaAgent.ToolApproval do
     |> Enum.filter(&diff_change_line?/1)
     |> Enum.take(20)
     |> case do
-      [] -> [edit_summary("apply_diff", args)]
+      [] -> [apply_diff_summary(args)]
       lines -> lines
     end
   end
@@ -201,20 +201,8 @@ defmodule MingaAgent.ToolApproval do
   defp diff_change_line?("-" <> _rest), do: true
   defp diff_change_line?(_line), do: false
 
-  @spec edit_summary(String.t(), map()) :: String.t()
-  defp edit_summary("edit_file", args) do
-    old_text = stringify_value(Map.get(args, "old_text") || Map.get(args, "find") || "")
-    new_text = stringify_value(Map.get(args, "new_text") || Map.get(args, "replace") || "")
-    "replace #{inspect(truncate(old_text, 40))} with #{inspect(truncate(new_text, 40))}"
-  end
-
-  defp edit_summary("multi_edit_file", args) do
-    edits = Map.get(args, "edits", [])
-    count = if is_list(edits), do: length(edits), else: 0
-    "#{count} edit(s)"
-  end
-
-  defp edit_summary("apply_diff", args) do
+  @spec apply_diff_summary(map()) :: String.t()
+  defp apply_diff_summary(args) do
     diff = stringify_value(Map.get(args, "diff", ""))
     hunk_count = diff |> String.split("\n") |> Enum.count(&String.starts_with?(&1, "@@"))
     "#{hunk_count} diff hunk(s)"
