@@ -1024,6 +1024,65 @@ func TestAgentChatThinkingCollapsedRemainsSingleLine(t *testing.T) {
 	}
 }
 
+func TestAgentChatToolExpandedRendersMultipleResultLines(t *testing.T) {
+	model := New(96, 24, nil)
+	msg := protocol.AgentChatMessage{
+		Kind:      agentKindTool,
+		Name:      "grep",
+		Summary:   "TODO in lib",
+		Status:    1,
+		Collapsed: false,
+		Result:    "first match\nsecond match\nthird match",
+	}
+
+	view := ansi.Strip(strings.Join(model.renderAgentToolMessage(msg, 96), "\n"))
+	for _, want := range []string{"Tool", "TODO in lib", "first match", "second match", "third match"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("expanded tool result missing %q in %q", want, view)
+		}
+	}
+}
+
+func TestAgentChatToolCollapsedShowsExpansionHint(t *testing.T) {
+	model := New(96, 24, nil)
+	msg := protocol.AgentChatMessage{
+		Kind:      agentKindTool,
+		Name:      "read_file",
+		Summary:   "lib/app.ex",
+		Status:    1,
+		Collapsed: true,
+		Result:    "line one\nline two",
+	}
+
+	view := ansi.Strip(strings.Join(model.renderAgentToolMessage(msg, 96), "\n"))
+	if !strings.Contains(view, "result collapsed") || !strings.Contains(view, "Ctrl+Alt+X") {
+		t.Fatalf("collapsed tool should show expansion hint: %q", view)
+	}
+	if strings.Contains(view, "line two") {
+		t.Fatalf("collapsed tool should not dump result lines: %q", view)
+	}
+}
+
+func TestAgentChatToolRendersInlineDiffPreview(t *testing.T) {
+	model := New(96, 24, nil)
+	msg := protocol.AgentChatMessage{
+		Kind:         agentKindTool,
+		Name:         "edit_file",
+		Summary:      "lib/app.ex",
+		Status:       1,
+		Collapsed:    true,
+		PreviewKind:  1,
+		PreviewLines: []string{"file: lib/app.ex", "-old", "+new"},
+	}
+
+	view := ansi.Strip(strings.Join(model.renderAgentToolMessage(msg, 96), "\n"))
+	for _, want := range []string{"diff:", "file: lib/app.ex", "-old", "+new"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("tool preview missing %q in %q", want, view)
+		}
+	}
+}
+
 func TestAgentChatShortcutTogglesLatestThinkingBlock(t *testing.T) {
 	out := make(chan []byte, 1)
 	model := New(80, 24, out)
@@ -1040,6 +1099,25 @@ func TestAgentChatShortcutTogglesLatestThinkingBlock(t *testing.T) {
 	_, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: 'z', Mod: tea.ModCtrl | tea.ModAlt}))
 	if got, want := <-out, protocol.EncodeGUIAgentToolToggle(3); !bytes.Equal(got, want) {
 		t.Fatalf("ctrl+alt+z packet = %v, want %v", got, want)
+	}
+}
+
+func TestAgentChatShortcutTogglesLatestToolBlock(t *testing.T) {
+	out := make(chan []byte, 1)
+	model := New(80, 24, out)
+	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiAgentChat: {AgentChat: protocol.AgentChat{
+		Visible: true,
+		Messages: []protocol.AgentChatMessage{
+			{Kind: agentKindUser, Text: "fix this"},
+			{Kind: agentKindTool, Name: "read_file", Collapsed: true},
+			{Kind: agentKindAssistant, Text: "ok"},
+			{Kind: agentKindStyledTool, Name: "grep", Collapsed: false},
+		},
+	}}}
+
+	_, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: 'x', Mod: tea.ModCtrl | tea.ModAlt}))
+	if got, want := <-out, protocol.EncodeGUIAgentToolToggle(3); !bytes.Equal(got, want) {
+		t.Fatalf("ctrl+alt+x packet = %v, want %v", got, want)
 	}
 }
 

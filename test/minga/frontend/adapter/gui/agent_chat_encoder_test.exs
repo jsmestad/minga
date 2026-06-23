@@ -276,12 +276,42 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoderTest do
 
       <<1::32, 0x04::8, 0::8, 0::8, 1::8, 0::32, name_len::16, name::binary-size(name_len),
         summary_len::16, summary::binary-size(summary_len), result_len::32,
-        result::binary-size(result_len), auto_approved::8>> = m1
+        result::binary-size(result_len), auto_approved::8, preview_kind::8, preview_count::16>> =
+        m1
 
       assert name == "write_file"
       assert summary == "lib/x.ex"
       assert result == "file contents"
       assert auto_approved == 1
+      assert preview_kind == 0
+      assert preview_count == 0
+    end
+
+    test "tool_call message carries preview lines after auto-approved scope" do
+      tc = %ToolCallView{
+        name: "edit_file",
+        summary: "lib/x.ex",
+        status: :complete,
+        collapsed: true,
+        preview_kind: :diff,
+        preview_lines: ["file: lib/x.ex", "-old", "+new"]
+      }
+
+      binary = encode(%AgentChat{visible?: true, messages: [{1, {:tool_call, tc}}]})
+      assert [m1] = messages!(binary)
+
+      <<1::32, 0x04::8, _status::8, _error::8, _collapsed::8, _duration::32, name_len::16,
+        _name::binary-size(name_len), summary_len::16, _summary::binary-size(summary_len),
+        result_len::32, _result::binary-size(result_len), auto_approved::8, kind::8,
+        line_count::16, l1_len::16, l1::binary-size(l1_len), l2_len::16, l2::binary-size(l2_len),
+        l3_len::16, l3::binary-size(l3_len)>> = m1
+
+      assert auto_approved == 0
+      assert kind == 1
+      assert line_count == 3
+      assert l1 == "file: lib/x.ex"
+      assert l2 == "-old"
+      assert l3 == "+new"
     end
 
     test "tool_call status byte mapping" do
@@ -330,7 +360,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoderTest do
       <<1::32, 0x08::8, status::8, error::8, collapsed::8, duration::32, name_len::16,
         name::binary-size(name_len), summary_len::16, _summary::binary-size(summary_len),
         line_count::16, run_count::16, text_len::16, text::binary-size(text_len), fg::24, bg::24,
-        flags::8, auto_approved::8>> = m1
+        flags::8, auto_approved::8, preview_kind::8, preview_count::16>> = m1
 
       assert status == 1
       assert error == 0
@@ -344,6 +374,8 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoderTest do
       assert bg == 0x000000
       assert flags == 0x01
       assert auto_approved == 0
+      assert preview_kind == 0
+      assert preview_count == 0
     end
 
     test "approval_tool_call message with explicit preview" do

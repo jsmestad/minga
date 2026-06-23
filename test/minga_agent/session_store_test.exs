@@ -98,6 +98,7 @@ defmodule MingaAgent.SessionStoreTest do
       assert tc.duration_ms == 42
       assert tc.status == :complete
       assert tc.auto_approved_scope == :session
+      assert tc.preview == nil
     end
 
     test "loads corrupted message atoms defensively", %{tmp_dir: dir} do
@@ -121,6 +122,55 @@ defmodule MingaAgent.SessionStoreTest do
       assert {:ok, loaded} = SessionStore.load("bad-atoms", dir)
       assert {:system, "bad level", :info} in loaded.messages
       assert {:tool_call, %{status: :complete}} = List.last(loaded.messages)
+    end
+
+    test "rejects malformed preview payloads defensively", %{tmp_dir: dir} do
+      sessions_dir = SessionStore.sessions_dir(dir)
+      File.mkdir_p!(sessions_dir)
+
+      base_payload = %{
+        "id" => "bad-preview",
+        "timestamp" => "2026-01-01T00:00:00Z",
+        "model_name" => "test-model",
+        "messages" => [
+          %{
+            "type" => "tool_call",
+            "id" => "tc",
+            "name" => "shell",
+            "args" => %{"command" => "mix test"},
+            "status" => "complete",
+            "result" => "ok",
+            "is_error" => false,
+            "collapsed" => true,
+            "auto_approved_scope" => "session",
+            "duration_ms" => 10,
+            "preview" => %{"kind" => "shell", "summary" => "mix test", "lines" => ["$ mix test"]}
+          }
+        ],
+        "usage" => %{}
+      }
+
+      File.write!(Path.join(sessions_dir, "bad-preview-kind.json"), JSON.encode!(base_payload))
+
+      {:ok, loaded_kind} = SessionStore.load("bad-preview-kind", dir)
+      [{:tool_call, tool_call_kind}] = loaded_kind.messages
+      assert tool_call_kind.preview == nil
+
+      bad_lines_payload =
+        put_in(base_payload, ["messages", Access.at(0), "preview"], %{
+          "kind" => "diff",
+          "summary" => "lib/foo.ex",
+          "lines" => ["-old", 123]
+        })
+
+      File.write!(
+        Path.join(sessions_dir, "bad-preview-lines.json"),
+        JSON.encode!(bad_lines_payload)
+      )
+
+      {:ok, loaded_lines} = SessionStore.load("bad-preview-lines", dir)
+      [{:tool_call, tool_call_lines}] = loaded_lines.messages
+      assert tool_call_lines.preview == nil
     end
 
     test "preserves thinking messages" do

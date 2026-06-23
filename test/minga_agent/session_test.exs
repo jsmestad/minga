@@ -1388,6 +1388,53 @@ defmodule MingaAgent.SessionTest do
                        _tool_name}},
                      200
     end
+
+    test "captures file diff preview on the matching tool call", %{session: session} do
+      send(
+        session,
+        {:agent_provider_event,
+         %Event.ToolStart{
+           tool_call_id: "tc1",
+           name: "write_file",
+           args: %{"path" => "lib/foo.ex", "content" => "new content"}
+         }}
+      )
+
+      send(
+        session,
+        {:agent_provider_event,
+         %Event.ToolEnd{tool_call_id: "tc1", name: "write_file", result: "wrote file"}}
+      )
+
+      send(
+        session,
+        {:agent_provider_event,
+         %Event.ToolFileChanged{
+           tool_call_id: "tc1",
+           path: "lib/foo.ex",
+           before_content: "old content",
+           after_content: "new content"
+         }}
+      )
+
+      assert_receive {:agent_event, _,
+                      {:file_changed, "lib/foo.ex", "old content", "new content", "tc1",
+                       _tool_name}},
+                     200
+
+      tool_call =
+        Session.messages(session)
+        |> Enum.find_value(fn
+          {:tool_call, tool_call} -> tool_call
+          _ -> nil
+        end)
+
+      assert tool_call.preview.kind == :diff
+      assert tool_call.preview.summary == "lib/foo.ex"
+      assert "file: lib/foo.ex" in tool_call.preview.lines
+      assert "-old content" in tool_call.preview.lines
+      assert "+new content" in tool_call.preview.lines
+    end
   end
 
   describe "tool approval" do

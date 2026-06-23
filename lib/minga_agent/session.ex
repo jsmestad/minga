@@ -44,6 +44,7 @@ defmodule MingaAgent.Session do
   alias MingaAgent.SessionStore
   alias MingaAgent.EditBoundary
   alias MingaAgent.SubagentContext
+  alias MingaAgent.ToolApproval
   alias MingaAgent.ToolCall
   alias MingaAgent.TurnUsage
 
@@ -1658,7 +1659,8 @@ defmodule MingaAgent.Session do
     )
 
     state = record_file_touch(state, event.path, event.before_content, event.after_content)
-    state
+    state = record_tool_file_preview(state, event)
+    notify_messages_changed(state)
   end
 
   defp handle_provider_event(%Event.SystemMessage{} = event, state) do
@@ -2004,6 +2006,19 @@ defmodule MingaAgent.Session do
       {:tool_call, %ToolCall{id: ^tool_call_id} = tc} -> {:tool_call, updater.(tc)}
       other -> other
     end)
+  end
+
+  @spec record_tool_file_preview(state(), Event.ToolFileChanged.t()) :: state()
+  defp record_tool_file_preview(state, %Event.ToolFileChanged{} = event) do
+    preview =
+      ToolApproval.build_file_diff_preview(event.path, event.before_content, event.after_content)
+
+    messages =
+      update_tool_call(state.messages, event.tool_call_id, fn tc ->
+        ToolCall.set_preview(tc, preview)
+      end)
+
+    %{state | messages: messages}
   end
 
   # ── Status management ──────────────────────────────────────────────────────

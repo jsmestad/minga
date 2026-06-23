@@ -237,7 +237,9 @@ func decodeToolCallMessage(msg AgentChatMessage, body []byte, offset int, styled
 		}
 		if len(body) > next {
 			msg.AutoApprovedScope = body[next]
+			next++
 		}
+		msg = decodeToolPreview(msg, body, next)
 		return msg
 	}
 
@@ -252,6 +254,27 @@ func decodeToolCallMessage(msg AgentChatMessage, body []byte, offset int, styled
 	}
 	if len(body) > next {
 		msg.AutoApprovedScope = body[next]
+		next++
+	}
+	msg = decodeToolPreview(msg, body, next)
+	return msg
+}
+
+func decodeToolPreview(msg AgentChatMessage, body []byte, offset int) AgentChatMessage {
+	if len(body) < offset+3 {
+		return msg
+	}
+	msg.PreviewKind = body[offset]
+	lineCount := int(u16(body, offset+1))
+	offset += 3
+	msg.PreviewLines = make([]string, 0, lineCount)
+	for i := 0; i < lineCount; i++ {
+		line, next, ok := readString16(body, offset)
+		if !ok {
+			break
+		}
+		msg.PreviewLines = append(msg.PreviewLines, line)
+		offset = next
 	}
 	return msg
 }

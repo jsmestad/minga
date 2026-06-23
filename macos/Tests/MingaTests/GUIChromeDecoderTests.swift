@@ -2083,12 +2083,16 @@ struct GUIAgentChatDecoderTests {
         appendU32(&msgs, UInt32(result.utf8.count))
         msgs.append(contentsOf: result.utf8)
         msgs.append(2) // autoApprovedScope at end
+        msgs.append(1) // previewKind diff
+        appendU16(&msgs, 2)
+        appendString16(&msgs, "-old")
+        appendString16(&msgs, "+new")
 
         let data = buildChatData(status: 2, model: "claude", messages: buildMessagesPayload(count: 1, msgs))
         let (cmd, _) = try decodeCommand(data: data, offset: 0)
         guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else { Issue.record("Expected .guiAgentChat"); return }
         guard messages.count == 1 else { Issue.record("Expected 1 message"); return }
-        guard case .toolCall(let name, _, let tcStatus, let isError, let collapsed, let autoApprovedScope, let duration, let tcResult) = messages[0].content else { Issue.record("Expected .toolCall"); return }
+        guard case .toolCall(let name, _, let tcStatus, let isError, let collapsed, let autoApprovedScope, let duration, let tcResult, let previewKind, let previewLines) = messages[0].content else { Issue.record("Expected .toolCall"); return }
         #expect(name == "read_file")
         #expect(tcStatus == 1)
         #expect(isError == false)
@@ -2096,6 +2100,8 @@ struct GUIAgentChatDecoderTests {
         #expect(autoApprovedScope == 2)
         #expect(duration == 1234)
         #expect(tcResult == "file contents here")
+        #expect(previewKind == 1)
+        #expect(previewLines == ["-old", "+new"])
     }
 
     @Test("Decode gui_agent_chat framed tool_call with auto_approved followed by another message")
@@ -2124,7 +2130,7 @@ struct GUIAgentChatDecoderTests {
 
         guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else { Issue.record("Expected .guiAgentChat"); return }
         guard messages.count == 2 else { Issue.record("Expected 2 messages"); return }
-        guard case .toolCall(let name, _, _, _, _, let autoApprovedScope, _, let tcResult) = messages[0].content else { Issue.record("Expected .toolCall"); return }
+        guard case .toolCall(let name, _, _, _, _, let autoApprovedScope, _, let tcResult, _, _) = messages[0].content else { Issue.record("Expected .toolCall"); return }
         guard case .user(let laterText) = messages[1].content else { Issue.record("Expected trailing user message"); return }
 
         #expect(name == "read_file")
@@ -2159,7 +2165,7 @@ struct GUIAgentChatDecoderTests {
 
         guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else { Issue.record("Expected .guiAgentChat"); return }
         guard messages.count == 2 else { Issue.record("Expected 2 messages"); return }
-        guard case .toolCall(let name, _, _, _, _, let autoApprovedScope, _, let tcResult) = messages[0].content else { Issue.record("Expected .toolCall"); return }
+        guard case .toolCall(let name, _, _, _, _, let autoApprovedScope, _, let tcResult, _, _) = messages[0].content else { Issue.record("Expected .toolCall"); return }
         guard case .user(let laterText) = messages[1].content else { Issue.record("Expected trailing user message"); return }
 
         #expect(name == "read_file")
@@ -2312,7 +2318,7 @@ struct GUIAgentChatDecoderTests {
 
         guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else { Issue.record("Expected .guiAgentChat"); return }
         guard messages.count == 2 else { Issue.record("Expected 2 messages"); return }
-        guard case .styledToolCall(let name, _, _, _, _, let autoApprovedScope, _, let resultLines) = messages[0].content else { Issue.record("Expected .styledToolCall"); return }
+        guard case .styledToolCall(let name, _, _, _, _, let autoApprovedScope, _, let resultLines, _, _) = messages[0].content else { Issue.record("Expected .styledToolCall"); return }
         guard case .assistant(let laterText) = messages[1].content else { Issue.record("Expected trailing assistant message"); return }
 
         #expect(name == "shell")
@@ -2351,7 +2357,7 @@ struct GUIAgentChatDecoderTests {
 
         guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else { Issue.record("Expected .guiAgentChat"); return }
         guard messages.count == 2 else { Issue.record("Expected 2 messages"); return }
-        guard case .styledToolCall(let name, _, _, _, _, let autoApprovedScope, _, let resultLines) = messages[0].content else { Issue.record("Expected .styledToolCall"); return }
+        guard case .styledToolCall(let name, _, _, _, _, let autoApprovedScope, _, let resultLines, _, _) = messages[0].content else { Issue.record("Expected .styledToolCall"); return }
         guard case .assistant(let laterText) = messages[1].content else { Issue.record("Expected trailing assistant message"); return }
 
         #expect(name == "shell")

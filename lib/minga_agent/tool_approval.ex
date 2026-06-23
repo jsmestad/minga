@@ -8,6 +8,7 @@ defmodule MingaAgent.ToolApproval do
   handling, chat decorations, and GUI protocol encoding.
   """
 
+  alias Minga.RenderModel.UI.AgentChat.ToolArgSummary
   alias MingaAgent.ToolApproval.Preview
   alias MingaAgent.ToolRouter
 
@@ -65,6 +66,23 @@ defmodule MingaAgent.ToolApproval do
     do_build_preview(name, stringify_keys(args))
   end
 
+  @doc "Builds an IO-free structured preview for completed transcript tool-call cards."
+  @spec build_transcript_preview(String.t(), map()) :: preview()
+  def build_transcript_preview(name, args) when is_binary(name) and is_map(args) do
+    do_build_transcript_preview(name, stringify_keys(args))
+  end
+
+  @doc "Builds an IO-free diff preview from explicit before/after file content."
+  @spec build_file_diff_preview(String.t(), String.t(), String.t()) :: preview()
+  def build_file_diff_preview(path, before_content, after_content)
+      when is_binary(path) and is_binary(before_content) and is_binary(after_content) do
+    Preview.new(
+      :diff,
+      path,
+      preview_lines(["file: #{path}" | diff_preview_lines(before_content, after_content)])
+    )
+  end
+
   @spec do_build_preview(String.t(), map()) :: preview()
   defp do_build_preview("shell", %{"command" => command} = args) do
     command = stringify_value(command)
@@ -83,11 +101,17 @@ defmodule MingaAgent.ToolApproval do
     Preview.new(:diff, path, preview_lines(["file: #{path}" | lines]))
   end
 
+  defp do_build_preview(name, args)
+       when name in ["read_file", "grep", "find", "list_directory"] do
+    read_only_preview(name, args)
+  end
+
   defp do_build_preview(name, %{"path" => path} = args)
        when name in ["edit_file", "multi_edit_file", "apply_diff"] do
     path = stringify_value(path)
+    lines = edit_diff_preview_lines(name, args)
 
-    Preview.new(:target, path, preview_lines(["file: #{path}", edit_summary(name, args)]))
+    Preview.new(:diff, path, preview_lines(["file: #{path}" | lines]))
   end
 
   defp do_build_preview(name, %{"paths" => paths})
@@ -111,6 +135,35 @@ defmodule MingaAgent.ToolApproval do
     summary = inspect(args, limit: 20, printable_limit: 120)
     Preview.new(:args, summary, [summary])
   end
+
+  @spec do_build_transcript_preview(String.t(), map()) :: preview()
+  defp do_build_transcript_preview("write_file", %{"path" => path}) do
+    path = stringify_value(path)
+    Preview.new(:target, path, [])
+  end
+
+  defp do_build_transcript_preview(name, args)
+       when name in ["read_file", "grep", "find", "list_directory"] do
+    read_only_preview(name, args)
+  end
+
+  defp do_build_transcript_preview(name, args) do
+    name
+    |> do_build_preview(args)
+    |> transcript_safe_preview()
+  end
+
+  @spec read_only_preview(String.t(), map()) :: preview()
+  defp read_only_preview(name, args) do
+    summary = name |> ToolArgSummary.summarize(args) |> stringify_value()
+    Preview.new(:args, summary, [])
+  end
+
+  @spec transcript_safe_preview(preview()) :: preview()
+  defp transcript_safe_preview(%Preview{kind: :args, summary: summary}),
+    do: Preview.new(:args, summary, [])
+
+  defp transcript_safe_preview(%Preview{} = preview), do: preview
 
   @spec read_existing(String.t()) :: String.t()
   defp read_existing(path) do
@@ -140,20 +193,68 @@ defmodule MingaAgent.ToolApproval do
   defp diff_op_preview_lines({:ins, lines}), do: Enum.map(lines, &("+" <> &1))
   defp diff_op_preview_lines({:del, lines}), do: Enum.map(lines, &("-" <> &1))
 
-  @spec edit_summary(String.t(), map()) :: String.t()
-  defp edit_summary("edit_file", args) do
+  @spec edit_diff_preview_lines(String.t(), map()) :: [String.t()]
+  defp edit_diff_preview_lines("edit_file", args) do
     old_text = stringify_value(Map.get(args, "old_text") || Map.get(args, "find") || "")
     new_text = stringify_value(Map.get(args, "new_text") || Map.get(args, "replace") || "")
-    "replace #{inspect(truncate(old_text, 40))} with #{inspect(truncate(new_text, 40))}"
+    diff_preview_lines(old_text, new_text)
   end
 
-  defp edit_summary("multi_edit_file", args) do
-    edits = Map.get(args, "edits", [])
-    count = if is_list(edits), do: length(edits), else: 0
-    "#{count} edit(s)"
+  defp edit_diff_preview_lines("multi_edit_file", args) do
+    args
+    |> Map.get("edits", [])
+    |> multi_edit_diff_preview_lines()
+    |> case do
+      [] -> ["No textual changes detected"]
+      lines -> Enum.take(lines, 20)
+    end
   end
 
-  defp edit_summary("apply_diff", args) do
+  defp edit_diff_preview_lines("apply_diff", args) do
+    args
+    |> Map.get("diff", "")
+    |> stringify_value()
+    |> String.split("\n")
+    |> Enum.reject(&diff_metadata_line?/1)
+    |> Enum.filter(&diff_change_line?/1)
+    |> Enum.take(20)
+    |> case do
+      [] -> [apply_diff_summary(args)]
+      lines -> lines
+    end
+  end
+
+  @spec multi_edit_diff_preview_lines(term()) :: [String.t()]
+  defp multi_edit_diff_preview_lines(edits) when is_list(edits) do
+    edits
+    |> Enum.flat_map(&multi_edit_entry_diff_preview_lines/1)
+    |> Enum.reject(&(&1 == "No textual changes detected"))
+  end
+
+  defp multi_edit_diff_preview_lines(_edits), do: []
+
+  @spec multi_edit_entry_diff_preview_lines(term()) :: [String.t()]
+  defp multi_edit_entry_diff_preview_lines(edit) when is_map(edit) do
+    edit = stringify_keys(edit)
+    old_text = stringify_value(Map.get(edit, "old_text") || Map.get(edit, "find") || "")
+    new_text = stringify_value(Map.get(edit, "new_text") || Map.get(edit, "replace") || "")
+    diff_preview_lines(old_text, new_text)
+  end
+
+  defp multi_edit_entry_diff_preview_lines(_edit), do: []
+
+  @spec diff_metadata_line?(String.t()) :: boolean()
+  defp diff_metadata_line?("+++" <> _rest), do: true
+  defp diff_metadata_line?("---" <> _rest), do: true
+  defp diff_metadata_line?(_line), do: false
+
+  @spec diff_change_line?(String.t()) :: boolean()
+  defp diff_change_line?("+" <> _rest), do: true
+  defp diff_change_line?("-" <> _rest), do: true
+  defp diff_change_line?(_line), do: false
+
+  @spec apply_diff_summary(map()) :: String.t()
+  defp apply_diff_summary(args) do
     diff = stringify_value(Map.get(args, "diff", ""))
     hunk_count = diff |> String.split("\n") |> Enum.count(&String.starts_with?(&1, "@@"))
     "#{hunk_count} diff hunk(s)"

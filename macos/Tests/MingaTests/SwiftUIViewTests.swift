@@ -1127,8 +1127,8 @@ struct AgentChatViewTests {
     @Test("Auto-approved tool calls show the subtle scope pill")
     @MainActor func autoApprovedIndicatorRenders() throws {
         let state = chatState(messages: [
-            .toolCall(id: 1, name: "shell", summary: "git diff --cached", status: 1, isError: false, collapsed: true, autoApprovedScope: 1, durationMs: 500, result: ""),
-            .toolCall(id: 2, name: "shell", summary: "git status --short", status: 1, isError: false, collapsed: true, autoApprovedScope: 2, durationMs: 250, result: "")
+            .toolCall(id: 1, name: "shell", summary: "git diff --cached", status: 1, isError: false, collapsed: true, autoApprovedScope: 1, durationMs: 500, result: "", previewKind: 0, previewLines: []),
+            .toolCall(id: 2, name: "shell", summary: "git status --short", status: 1, isError: false, collapsed: true, autoApprovedScope: 2, durationMs: 250, result: "", previewKind: 0, previewLines: [])
         ])
 
         let sut = AgentChatView(state: state, theme: ThemeColors(), isInsertMode: false, encoder: nil)

@@ -3,6 +3,8 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
 
   alias MingaEditor.Agent.Transcript
   alias MingaEditor.Agent.UIState
+  alias MingaAgent.ToolApproval
+  alias MingaAgent.ToolCall
   alias Minga.Editing.Scroll
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Frontend.Emit.Context
@@ -24,18 +26,13 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
     visible_message = {:assistant, "visible"}
     message_ids = [{101, old_message}, {102, hidden_message}, {103, visible_message}]
 
-    %{display_messages: display_messages, display_message_pairs: display_pairs} =
-      Transcript.display([old_message, hidden_message, visible_message],
+    panel =
+      synced_panel([old_message, hidden_message, visible_message],
         display_start_index: 2,
         message_ids: message_ids,
-        pinned_ids: MapSet.new([101])
+        pinned_ids: MapSet.new([101]),
+        styled_messages: [nil, nil, nil, nil]
       )
-
-    panel = %Panel{
-      cached_display_messages: display_messages,
-      cached_display_message_pairs: display_pairs,
-      cached_styled_messages: [nil, nil, nil, nil]
-    }
 
     model =
       context(session, panel)
@@ -59,22 +56,16 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
   test "build/1 emits only messages through the manual semantic scroll viewport" do
     session = fake_session_pid()
 
-    panel = %Panel{
-      scroll: Scroll.new(2) |> Scroll.update_metrics(5, 1),
-      cached_line_index: [
-        {0, :text},
-        {0, :empty},
-        {1, :text},
-        {1, :empty},
-        {2, :text}
-      ],
-      cached_display_message_pairs: [
-        {1, {:assistant, "first"}},
-        {2, {:assistant, "second"}},
-        {3, {:assistant, "third"}}
-      ],
-      cached_styled_messages: [nil, nil, nil]
-    }
+    panel =
+      synced_panel(
+        [
+          {:assistant, "first"},
+          {:assistant, "second"},
+          {:assistant, "third"}
+        ],
+        scroll: Scroll.new(2) |> Scroll.update_metrics(5, 1),
+        styled_messages: [nil, nil, nil]
+      )
 
     model =
       context(session, panel)
@@ -136,20 +127,121 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
              Enum.map(model.messages, &message_summary/1)
   end
 
+  test "build/1 resolves tool calls with clean summaries and inline diff previews" do
+    session = fake_session_pid()
+
+    tool_call =
+      ToolCall.new("tc-1", "edit_file", %{
+        "path" => "lib/app.ex",
+        "old_text" => "old",
+        "new_text" => "new"
+      })
+
+    panel = synced_panel([{:tool_call, tool_call}], styled_messages: [nil])
+
+    model =
+      context(session, panel)
+      |> AgentChatBuilder.build()
+
+    assert {1, {:tool_call, view}} = List.first(model.messages)
+    assert view.name == "edit_file"
+    assert view.summary == "lib/app.ex"
+    assert view.preview_kind == :diff
+    assert "file: lib/app.ex" in view.preview_lines
+    assert "-old" in view.preview_lines
+    assert "+new" in view.preview_lines
+  end
+
+  test "build/1 omits raw inspected preview lines for completed read-only tool calls" do
+    session = fake_session_pid()
+
+    read_only_calls = [
+      {"read_file", %{"path" => "lib/app.ex"}, "lib/app.ex"},
+      {"grep", %{"pattern" => "defmodule", "path" => "lib"}, "defmodule in lib"},
+      {"find", %{"name" => "*.ex", "path" => "lib"}, "*.ex in lib"},
+      {"list_directory", %{"path" => "lib"}, "lib"}
+    ]
+
+    panel =
+      read_only_calls
+      |> Enum.map(fn {name, args, _summary} ->
+        {:tool_call, ToolCall.new("tc-#{name}", name, args) |> ToolCall.complete("ok")}
+      end)
+      |> synced_panel(styled_messages: List.duplicate(nil, length(read_only_calls)))
+
+    model =
+      context(session, panel)
+      |> AgentChatBuilder.build()
+
+    views = for {_id, {:tool_call, view}} <- model.messages, do: view
+
+    assert Enum.map(views, & &1.summary) ==
+             Enum.map(read_only_calls, fn {_name, _args, summary} -> summary end)
+
+    assert Enum.all?(views, &(&1.preview_lines == []))
+  end
+
+  test "build/1 uses captured write_file previews instead of recomputing current disk state" do
+    session = fake_session_pid()
+    path = "/tmp/minga-agent-chat-write-preview.txt"
+
+    tool_call =
+      ToolCall.new("tc-write", "write_file", %{"path" => path, "content" => "new\n"})
+      |> ToolCall.set_preview(ToolApproval.build_file_diff_preview(path, "old\n", "new\n"))
+      |> ToolCall.complete("wrote file")
+
+    panel = synced_panel([{:tool_call, tool_call}], styled_messages: [nil])
+
+    model =
+      context(session, panel)
+      |> AgentChatBuilder.build()
+
+    assert {1, {:tool_call, view}} = List.first(model.messages)
+    assert view.name == "write_file"
+    assert view.summary == path
+    assert view.preview_kind == :diff
+    assert "file: #{path}" in view.preview_lines
+    assert "-old" in view.preview_lines
+    assert "+new" in view.preview_lines
+  end
+
+  test "build/1 does not invent write_file transcript previews from current disk state" do
+    session = fake_session_pid()
+    path = "/tmp/minga-agent-chat-write-preview.txt"
+
+    tool_call =
+      ToolCall.new("tc-write", "write_file", %{"path" => path, "content" => "new\n"})
+      |> ToolCall.complete("wrote file")
+
+    panel = synced_panel([{:tool_call, tool_call}], styled_messages: [nil])
+
+    model =
+      context(session, panel)
+      |> AgentChatBuilder.build()
+
+    assert {1, {:tool_call, view}} = List.first(model.messages)
+    assert view.name == "write_file"
+    assert view.summary == path
+    assert view.preview_kind == :target
+    assert view.preview_lines == []
+  end
+
   defp message_summary({id, {:assistant, text}}), do: {id, :assistant, text}
   defp message_summary({id, {:system, text, _level}}), do: {id, :system, text}
   defp message_summary({id, {:user, text}}), do: {id, :user, text}
   defp message_summary({id, {kind, _, _}}), do: {id, kind, nil}
 
   defp synced_panel(messages, opts \\ []) do
-    %{display_messages: display_messages, display_message_pairs: display_pairs} =
-      Transcript.display(messages, opts)
+    {panel_opts, transcript_opts} = Keyword.split(opts, [:scroll, :styled_messages])
+    display = Transcript.display(messages, transcript_opts)
 
-    %Panel{
-      cached_display_messages: display_messages,
-      cached_display_message_pairs: display_pairs
-    }
+    Panel.new()
+    |> Panel.cache_transcript_display(display, Keyword.get(panel_opts, :styled_messages))
+    |> maybe_set_panel_scroll(Keyword.get(panel_opts, :scroll))
   end
+
+  defp maybe_set_panel_scroll(panel, nil), do: panel
+  defp maybe_set_panel_scroll(panel, scroll), do: Panel.set_scroll(panel, scroll)
 
   defp context(session, panel) do
     tab = Tab.new_agent(1, "Agent") |> Tab.set_session(session)

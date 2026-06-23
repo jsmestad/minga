@@ -3,6 +3,7 @@ defmodule MingaEditor.Remote.EventReplayTest do
 
   alias MingaEditor.Remote.EventReplay
   alias MingaAgent.EventLog.EventRecord
+  alias MingaAgent.ToolApproval.Preview
 
   test "converts durable remote events into live agent events" do
     assert EventReplay.to_agent_event(record(:assistant_delta, %{"delta" => "hello"})) ==
@@ -24,7 +25,11 @@ defmodule MingaEditor.Remote.EventReplayTest do
                "tool_call_id" => "tc1",
                "name" => "shell",
                "args" => %{"command" => "mix test"},
-               "preview" => %{"kind" => "shell"}
+               "preview" => %{
+                 "kind" => "command",
+                 "summary" => "mix test",
+                 "lines" => ["$ mix test", "cwd: /tmp"]
+               }
              })
            ) ==
              {:approval_pending,
@@ -32,8 +37,42 @@ defmodule MingaEditor.Remote.EventReplayTest do
                 tool_call_id: "tc1",
                 name: "shell",
                 args: %{"command" => "mix test"},
-                preview: %{"kind" => "shell"}
+                preview: %Preview{
+                  kind: :command,
+                  summary: "mix test",
+                  lines: ["$ mix test", "cwd: /tmp"]
+                }
               }}
+
+    assert {:approval_pending, approval} =
+             EventReplay.to_agent_event(
+               record(:approval_requested, %{
+                 "tool_call_id" => "tc2",
+                 "name" => "shell",
+                 "args" => %{"command" => "mix test"},
+                 "preview" => %{"kind" => "nope", "summary" => "bad", "lines" => ["x"]}
+               })
+             )
+
+    assert approval.tool_call_id == "tc2"
+    assert approval.name == "shell"
+    assert approval.args == %{"command" => "mix test"}
+    refute Map.has_key?(approval, :preview)
+
+    assert {:approval_pending, approval} =
+             EventReplay.to_agent_event(
+               record(:approval_requested, %{
+                 "tool_call_id" => "tc3",
+                 "name" => "shell",
+                 "args" => %{"command" => "mix test"},
+                 "preview" => %{"kind" => "shell"}
+               })
+             )
+
+    assert approval.tool_call_id == "tc3"
+    assert approval.name == "shell"
+    assert approval.args == %{"command" => "mix test"}
+    refute Map.has_key?(approval, :preview)
 
     assert EventReplay.to_agent_event(record(:waiting_for_input, %{})) == {:status_changed, :idle}
 

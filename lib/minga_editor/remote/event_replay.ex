@@ -5,6 +5,7 @@ defmodule MingaEditor.Remote.EventReplay do
   alias MingaEditor.Handlers.EffectHandler
   alias MingaEditor.State, as: EditorState
   alias MingaAgent.EventLog.EventRecord
+  alias MingaAgent.ToolApproval.Preview
 
   @type event :: term()
 
@@ -43,13 +44,16 @@ defmodule MingaEditor.Remote.EventReplay do
   end
 
   def to_agent_event(%EventRecord{event_type: :approval_requested, payload: payload}) do
-    {:approval_pending,
-     %{
-       tool_call_id: string_payload(payload, "tool_call_id"),
-       name: string_payload(payload, "name"),
-       args: map_payload(payload, "args"),
-       preview: payload_value(payload, "preview")
-     }}
+    approval = %{
+      tool_call_id: string_payload(payload, "tool_call_id"),
+      name: string_payload(payload, "name"),
+      args: map_payload(payload, "args")
+    }
+
+    case approval_preview(payload_value(payload, "preview")) do
+      nil -> {:approval_pending, approval}
+      preview -> {:approval_pending, Map.put(approval, :preview, preview)}
+    end
   end
 
   def to_agent_event(%EventRecord{event_type: :approval_resolved, payload: payload}),
@@ -79,6 +83,49 @@ defmodule MingaEditor.Remote.EventReplay do
   end
 
   def to_agent_event(%EventRecord{}), do: nil
+
+  @spec approval_preview(term()) :: Preview.t() | nil
+  defp approval_preview(%Preview{} = preview), do: preview
+
+  defp approval_preview(%{} = preview) do
+    case {payload_value(preview, "kind"), payload_value(preview, "summary"),
+          payload_value(preview, "lines")} do
+      {kind, summary, lines} when is_binary(summary) and is_list(lines) ->
+        build_approval_preview(preview_kind(kind), summary, lines)
+
+      _ ->
+        nil
+    end
+  end
+
+  defp approval_preview(_preview), do: nil
+
+  @spec build_approval_preview(Preview.kind() | nil, String.t(), [term()]) :: Preview.t() | nil
+  defp build_approval_preview(nil, _summary, _lines), do: nil
+
+  defp build_approval_preview(preview_kind, summary, lines) do
+    if Enum.all?(lines, &is_binary/1) do
+      Preview.new(preview_kind, summary, lines)
+    else
+      nil
+    end
+  end
+
+  @spec preview_kind(term()) :: Preview.kind() | nil
+  defp preview_kind(kind) when is_atom(kind) and kind in [:diff, :command, :target, :args],
+    do: kind
+
+  defp preview_kind(kind) when is_binary(kind) do
+    case kind do
+      "diff" -> :diff
+      "command" -> :command
+      "target" -> :target
+      "args" -> :args
+      _ -> nil
+    end
+  end
+
+  defp preview_kind(_kind), do: nil
 
   @spec payload_value(map(), String.t()) :: term()
   defp payload_value(payload, key) when is_map(payload) do
