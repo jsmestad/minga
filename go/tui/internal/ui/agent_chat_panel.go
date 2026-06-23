@@ -21,6 +21,11 @@ const (
 	agentKindApprovalTool byte = 0x09
 )
 
+const (
+	agentThinkingCollapsedLines = 1
+	agentThinkingExpandedLines  = 5
+)
+
 func (m Model) renderAgentChatPanel(chat protocol.AgentChat) []string {
 	return m.renderAgentChatPanelWithLimit(chat, max(m.width, 1), m.agentPanelHeight())
 }
@@ -540,11 +545,19 @@ func (m Model) renderAgentThinkingMessage(msg protocol.AgentChatMessage, width i
 	bodyStyle := lipgloss.NewStyle().Foreground(p.Muted()).Background(m.editorBackground())
 	header := "  " + markerStyle.Render(marker) + labelStyle.Render(" Thinking "+state)
 	lines := []string{lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(fitStyled(header, width))}
-	for _, bodyLine := range compactTextLines(text, max(width-8, 8), 1) {
+	bodyLines := agentThinkingBodyLines(msg.Collapsed)
+	for _, bodyLine := range compactTextLines(text, max(width-8, 8), bodyLines) {
 		line := bodyStyle.Render("    " + firstCompactLine(bodyLine, max(width-6, 8)))
 		lines = append(lines, lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(fitStyled(line, width)))
 	}
 	return lines
+}
+
+func agentThinkingBodyLines(collapsed bool) int {
+	if collapsed {
+		return agentThinkingCollapsedLines
+	}
+	return agentThinkingExpandedLines
 }
 
 func (m Model) renderAgentToolMessage(msg protocol.AgentChatMessage, width int) []string {

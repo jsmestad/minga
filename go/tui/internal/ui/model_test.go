@@ -988,6 +988,61 @@ func TestAgentChatPanelRendersStructuredTranscript(t *testing.T) {
 	}
 }
 
+func TestAgentChatThinkingRendersMultipleLinesWhenExpanded(t *testing.T) {
+	model := New(80, 24, nil)
+	msg := protocol.AgentChatMessage{
+		Kind:      agentKindThinking,
+		Text:      "first line\nsecond line\nthird line\nfourth line\nfifth line\nsixth line",
+		Collapsed: false,
+	}
+
+	view := ansi.Strip(strings.Join(model.renderAgentThinkingMessage(msg, 80), "\n"))
+	for _, want := range []string{"Thinking expanded", "first line", "second line", "third line", "fourth line", "fifth line"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("expanded thinking missing %q in %q", want, view)
+		}
+	}
+	if strings.Contains(view, "sixth line") {
+		t.Fatalf("expanded thinking should cap body at five lines: %q", view)
+	}
+}
+
+func TestAgentChatThinkingCollapsedRemainsSingleLine(t *testing.T) {
+	model := New(80, 24, nil)
+	msg := protocol.AgentChatMessage{
+		Kind:      agentKindThinking,
+		Text:      "first line\nsecond line",
+		Collapsed: true,
+	}
+
+	view := ansi.Strip(strings.Join(model.renderAgentThinkingMessage(msg, 80), "\n"))
+	if !strings.Contains(view, "Thinking collapsed") || !strings.Contains(view, "first line") {
+		t.Fatalf("collapsed thinking should show header and first body line: %q", view)
+	}
+	if strings.Contains(view, "second line") {
+		t.Fatalf("collapsed thinking should only show one body line: %q", view)
+	}
+}
+
+func TestAgentChatShortcutTogglesLatestThinkingBlock(t *testing.T) {
+	out := make(chan []byte, 1)
+	model := New(80, 24, out)
+	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiAgentChat: {AgentChat: protocol.AgentChat{
+		Visible: true,
+		Messages: []protocol.AgentChatMessage{
+			{Kind: agentKindUser, Text: "fix this"},
+			{Kind: agentKindThinking, Text: "first", Collapsed: true},
+			{Kind: agentKindAssistant, Text: "ok"},
+			{Kind: agentKindThinking, Text: "second", Collapsed: false},
+		},
+	}}}
+
+	_, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: 'z', Mod: tea.ModCtrl | tea.ModAlt}))
+	if got, want := <-out, protocol.EncodeGUIAgentToolToggle(3); !bytes.Equal(got, want) {
+		t.Fatalf("ctrl+alt+z packet = %v, want %v", got, want)
+	}
+}
+
 func TestAgentAnimationCueChangesAcrossFrames(t *testing.T) {
 	model := New(80, 24, nil)
 	model.agentAnimationFrame = 0
