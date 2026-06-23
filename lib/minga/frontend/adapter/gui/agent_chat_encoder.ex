@@ -17,6 +17,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
   alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.UI.AgentChat
   alias Minga.RenderModel.UI.AgentChat.ApprovalView
+  alias Minga.RenderModel.UI.AgentChat.MarkdownBlock
   alias Minga.RenderModel.UI.AgentChat.PromptCompletion
   alias Minga.RenderModel.UI.AgentChat.ToolCallView
   alias Minga.RenderModel.UI.AgentChat.Usage
@@ -317,16 +318,30 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
     {:styled_tool_call, tc, strip_styled_lines_links(styled_lines)}
   end
 
+  defp strip_chat_message_links({:assistant_markdown, blocks}) do
+    {:assistant_markdown, strip_markdown_block_links(blocks)}
+  end
+
   defp strip_chat_message_links(msg), do: msg
 
   @spec strip_styled_lines_links([AgentChat.styled_line()]) :: [AgentChat.styled_line()]
   defp strip_styled_lines_links(styled_lines) do
-    Enum.map(styled_lines, fn runs -> Enum.map(runs, &strip_styled_run_link/1) end)
+    Enum.map(styled_lines, &strip_styled_line_links/1)
   end
+
+  @spec strip_styled_line_links(AgentChat.styled_line()) :: AgentChat.styled_line()
+  defp strip_styled_line_links(runs), do: Enum.map(runs, &strip_styled_run_link/1)
 
   @spec strip_styled_run_link(AgentChat.styled_run()) :: AgentChat.styled_run()
   defp strip_styled_run_link({text, fg, bg, flags, _url}), do: {text, fg, bg, flags &&& 0xF3}
   defp strip_styled_run_link(run), do: run
+
+  @spec strip_markdown_block_links([MarkdownBlock.t()]) :: [MarkdownBlock.t()]
+  defp strip_markdown_block_links(blocks) do
+    Enum.map(blocks, fn %MarkdownBlock{} = block ->
+      MarkdownBlock.map_lines(block, &strip_styled_line_links/1)
+    end)
+  end
 
   # Unwrap {id, message} tuple: prefix with the stable uint32 ID, then encode the message.
   @spec encode_chat_message(AgentChat.message()) :: binary()
@@ -366,6 +381,16 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
       end)
 
     IO.iodata_to_binary([<<0x07::8, length(styled_lines)::16>> | line_binaries])
+  end
+
+  # Assistant markdown message: opcode 0x0A, block_count::16, then semantic blocks.
+  defp encode_chat_message_body({:assistant_markdown, blocks}) do
+    bounded_blocks = bound_markdown_blocks(blocks)
+
+    IO.iodata_to_binary([
+      <<0x0A::8, length(bounded_blocks)::16>>,
+      Enum.map(bounded_blocks, &encode_markdown_block/1)
+    ])
   end
 
   defp encode_chat_message_body({:thinking, text, collapsed}) do
@@ -483,6 +508,77 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
   defp auto_approved_scope_byte(:session), do: 1
   defp auto_approved_scope_byte(:turn), do: 2
   defp auto_approved_scope_byte(nil), do: 0
+
+  @spec bound_markdown_blocks([MarkdownBlock.t()]) :: [MarkdownBlock.t()]
+  defp bound_markdown_blocks(blocks) do
+    Enum.map(blocks, fn %MarkdownBlock{} = block ->
+      MarkdownBlock.map_lines(block, &bound_styled_line/1, 500)
+    end)
+  end
+
+  @spec bound_styled_line(AgentChat.styled_line()) :: AgentChat.styled_line()
+  defp bound_styled_line(runs), do: Enum.map(runs, &bound_styled_run/1)
+
+  @spec bound_styled_run(AgentChat.styled_run()) :: AgentChat.styled_run()
+  defp bound_styled_run({text, fg, bg, flags, url}),
+    do: {utf8_prefix_bytes(text, 2_000), fg, bg, flags, url}
+
+  defp bound_styled_run({text, fg, bg, flags}),
+    do: {utf8_prefix_bytes(text, 2_000), fg, bg, flags}
+
+  @spec encode_markdown_block(MarkdownBlock.t()) :: binary()
+  defp encode_markdown_block(%MarkdownBlock{kind: :paragraph} = block),
+    do: encode_block_header(block, 0x01) <> encode_styled_lines(block.lines)
+
+  defp encode_markdown_block(%MarkdownBlock{kind: :heading} = block),
+    do:
+      encode_block_header(block, 0x02) <>
+        <<min(block.level, 255)::8>> <> encode_styled_lines(block.lines)
+
+  defp encode_markdown_block(%MarkdownBlock{kind: :list_item} = block) do
+    ordered = if block.ordered, do: 1, else: 0
+
+    encode_block_header(block, 0x03) <>
+      <<min(block.indent, 255)::8, ordered::8, block.ordinal::32>> <>
+      encode_styled_lines(block.lines)
+  end
+
+  defp encode_markdown_block(%MarkdownBlock{kind: :blockquote} = block),
+    do: encode_block_header(block, 0x04) <> encode_styled_lines(block.lines)
+
+  defp encode_markdown_block(%MarkdownBlock{kind: :rule} = block),
+    do: encode_block_header(block, 0x05)
+
+  defp encode_markdown_block(%MarkdownBlock{kind: :spacer} = block),
+    do: encode_block_header(block, 0x06) <> <<min(block.height, 255)::8>>
+
+  defp encode_markdown_block(%MarkdownBlock{kind: :code_block} = block) do
+    language = utf8_prefix_bytes(block.language || "", @max_u16)
+    label = utf8_prefix_bytes(block.label || "", @max_u16)
+    target_path = utf8_prefix_bytes(block.target_path || "", @max_u16)
+
+    IO.iodata_to_binary([
+      encode_block_header(block, 0x07),
+      <<byte_size(language)::16, language::binary, byte_size(label)::16, label::binary,
+        byte_size(target_path)::16, target_path::binary, block.capability_flags::8>>,
+      encode_styled_lines(block.lines)
+    ])
+  end
+
+  @spec encode_block_header(MarkdownBlock.t(), non_neg_integer()) :: binary()
+  defp encode_block_header(%MarkdownBlock{} = block, kind),
+    do: <<block.id::32, kind::8, block.flags::8>>
+
+  @spec encode_styled_lines([AgentChat.styled_line()]) :: binary()
+  defp encode_styled_lines(styled_lines) do
+    line_binaries =
+      Enum.map(styled_lines, fn runs ->
+        run_binaries = Enum.map(runs, &encode_styled_run/1)
+        [<<length(runs)::16>> | run_binaries]
+      end)
+
+    IO.iodata_to_binary([<<length(styled_lines)::16>> | line_binaries])
+  end
 
   @spec encode_styled_run(AgentChat.styled_run()) :: binary()
   defp encode_styled_run({text, fg, bg, flags, url}) do

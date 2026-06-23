@@ -578,9 +578,10 @@ enum Wire {
         let bold: Bool
         let italic: Bool
         let underline: Bool
+        let code: Bool
         let linkURL: String?
 
-        init(text: String, fgR: UInt8, fgG: UInt8, fgB: UInt8, bgR: UInt8, bgG: UInt8, bgB: UInt8, bold: Bool, italic: Bool, underline: Bool, linkURL: String? = nil) {
+        init(text: String, fgR: UInt8, fgG: UInt8, fgB: UInt8, bgR: UInt8, bgG: UInt8, bgB: UInt8, bold: Bool, italic: Bool, underline: Bool, code: Bool = false, linkURL: String? = nil) {
             self.text = text
             self.fgR = fgR
             self.fgG = fgG
@@ -591,6 +592,7 @@ enum Wire {
             self.bold = bold
             self.italic = italic
             self.underline = underline
+            self.code = code
             self.linkURL = linkURL
         }
     }
@@ -599,6 +601,36 @@ enum Wire {
     struct HelpGroup: Sendable {
         let title: String
         let bindings: [(key: String, description: String)]
+    }
+
+    /// Semantic markdown block kind from gui_agent_chat assistant_markdown messages.
+    enum AgentMarkdownBlockKind: UInt8, Sendable {
+        case paragraph = 0x01
+        case heading = 0x02
+        case listItem = 0x03
+        case blockquote = 0x04
+        case rule = 0x05
+        case spacer = 0x06
+        case codeBlock = 0x07
+    }
+
+    /// BEAM-authored semantic markdown block. Frontends render this structure directly and never infer block semantics from styled-run flags.
+    struct AgentMarkdownBlock: Sendable, Identifiable {
+        let id: UInt32
+        let kind: AgentMarkdownBlockKind
+        let flags: UInt8
+        let lines: [[StyledTextRun]]
+        let level: UInt8
+        let indent: UInt8
+        let ordered: Bool
+        let ordinal: UInt32
+        let height: UInt8
+        let language: String
+        let label: String
+        let targetPath: String
+        let capabilityFlags: UInt8
+
+        var isComplete: Bool { flags & 0x01 != 0 }
     }
 
     /// A chat message from gui_agent_chat, with a stable BEAM-assigned ID.
@@ -614,6 +646,8 @@ enum Wire {
         case assistant(text: String)
         /// Assistant message with pre-styled text runs from tree-sitter.
         case styledAssistant(lines: [[StyledTextRun]])
+        /// Assistant message with BEAM-authored semantic markdown blocks.
+        case assistantMarkdown(blocks: [AgentMarkdownBlock])
         case thinking(text: String, collapsed: Bool)
         case toolCall(name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, autoApprovedScope: UInt8, durationMs: UInt32, result: String, previewKind: UInt8, previewLines: [String])
         /// Tool call with pre-styled result runs from tree-sitter.

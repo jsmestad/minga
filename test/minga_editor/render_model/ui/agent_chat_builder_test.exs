@@ -8,6 +8,8 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
   alias Minga.Editing.Scroll
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Frontend.Emit.Context
+  alias Minga.RenderModel.UI.AgentChat.MarkdownBlock
+  alias MingaEditor.UI.Theme
   alias MingaEditor.RenderModel.UI.AgentChatBuilder
   alias MingaEditor.Shell.Traditional
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
@@ -51,6 +53,48 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
            ] = summaries
 
     refute {:user, "hidden"} in Enum.map(summaries, fn {_id, type, text} -> {type, text} end)
+  end
+
+  test "build/1 emits semantic assistant markdown blocks when cache has them" do
+    session = fake_session_pid()
+
+    blocks = [
+      MarkdownBlock.code_block(123, "elixir", "Elixir", nil, true, [
+        [{"IO.puts(:hi)", 0x98BE65, 0x21242B, 0x10}]
+      ])
+    ]
+
+    panel =
+      synced_panel([{:assistant, "```elixir\nIO.puts(:hi)\n```"}],
+        styled_messages: [
+          %{styled_lines: [[{"fallback", 0xBBC2CF, 0, 0}]], markdown_blocks: blocks}
+        ],
+        styled_fingerprint: Panel.styled_cache_fingerprint(Theme.Fallback.theme().syntax)
+      )
+
+    model =
+      context(session, panel, theme: Theme.Fallback.theme())
+      |> AgentChatBuilder.build()
+
+    assert [{1, {:assistant_markdown, ^blocks}} | _] = model.messages
+  end
+
+  test "build/1 ignores stale styled cache when theme syntax changes" do
+    session = fake_session_pid()
+    old_theme = Theme.Fallback.theme()
+    new_theme = %{old_theme | syntax: Map.put(old_theme.syntax, "variable", fg: 0x12_34_56)}
+
+    panel =
+      synced_panel([{:assistant, "cached answer"}],
+        styled_messages: [[{"cached answer", 0x98BE65, 0, 0}]],
+        styled_fingerprint: Panel.styled_cache_fingerprint(old_theme.syntax)
+      )
+
+    model =
+      context(session, panel, theme: new_theme)
+      |> AgentChatBuilder.build()
+
+    assert {1, {:assistant, "cached answer"}} = hd(model.messages)
   end
 
   test "build/1 emits only messages through the manual semantic scroll viewport" do
@@ -232,18 +276,22 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
   defp message_summary({id, {kind, _, _}}), do: {id, kind, nil}
 
   defp synced_panel(messages, opts \\ []) do
-    {panel_opts, transcript_opts} = Keyword.split(opts, [:scroll, :styled_messages])
+    {panel_opts, transcript_opts} =
+      Keyword.split(opts, [:scroll, :styled_messages, :styled_fingerprint])
+
     display = Transcript.display(messages, transcript_opts)
 
     Panel.new()
-    |> Panel.cache_transcript_display(display, Keyword.get(panel_opts, :styled_messages))
+    |> Panel.cache_transcript_display(display, Keyword.get(panel_opts, :styled_messages),
+      styled_fingerprint: Keyword.get(panel_opts, :styled_fingerprint)
+    )
     |> maybe_set_panel_scroll(Keyword.get(panel_opts, :scroll))
   end
 
   defp maybe_set_panel_scroll(panel, nil), do: panel
   defp maybe_set_panel_scroll(panel, scroll), do: Panel.set_scroll(panel, scroll)
 
-  defp context(session, panel) do
+  defp context(session, panel, opts \\ []) do
     tab = Tab.new_agent(1, "Agent") |> Tab.set_session(session)
     {tab_bar, workspace} = TabBar.add_workspace(TabBar.new(tab), "Agent", session)
     tab_bar = TabBar.move_tab_to_workspace(tab_bar, tab.id, workspace.id)
@@ -252,7 +300,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
     %Context{
       port_manager: self(),
       capabilities: nil,
-      theme: nil,
+      theme: Keyword.get(opts, :theme),
       font_registry: nil,
       windows: %Windows{map: %{1 => window}, active: 1},
       layout: nil,

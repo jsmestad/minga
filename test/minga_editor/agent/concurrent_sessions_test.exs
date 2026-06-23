@@ -10,6 +10,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
   use ExUnit.Case, async: true
 
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.AgentLifecycle
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
@@ -280,6 +281,93 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       assert panel.cached_styled_messages == nil
       assert panel.display_start_index == 0
       assert panel.provenance_jump == nil
+    end
+
+    test "update_styled_cache reuses unchanged displayed message styles" do
+      message = {:assistant, "unchanged answer"}
+      cached = [[{"cached styled answer", 0x98BE65, 0x21242B, 0x10}]]
+
+      {:ok, session} = StubServer.start_link(messages: [message])
+
+      state =
+        [Tab.new_agent(1, "Agent") |> Tab.set_session(session)]
+        |> base_state(1)
+
+      fingerprint = Panel.styled_cache_fingerprint(state.theme.syntax)
+
+      state =
+        state
+        |> AgentAccess.update_panel(fn panel ->
+          %{
+            panel
+            | cached_display_messages: [message],
+              cached_styled_messages: cached,
+              cached_styled_fingerprint: fingerprint
+          }
+        end)
+
+      updated = AgentLifecycle.update_styled_cache(state)
+
+      assert AgentAccess.panel(updated).cached_styled_messages == cached
+    end
+
+    test "update_styled_cache invalidates stale styles when the theme syntax changes" do
+      message = {:assistant, "plain answer"}
+      cached = [[{"plain answer", 0xBBC2CF, 0, 0}]]
+
+      {:ok, session} = StubServer.start_link(messages: [message])
+
+      state =
+        [Tab.new_agent(1, "Agent") |> Tab.set_session(session)]
+        |> base_state(1)
+
+      old_theme = state.theme
+      new_theme = %{old_theme | syntax: Map.put(old_theme.syntax, "variable", fg: 0x123456)}
+      fingerprint = Panel.styled_cache_fingerprint(old_theme.syntax)
+
+      state =
+        state
+        |> Map.put(:theme, new_theme)
+        |> AgentAccess.update_panel(fn panel ->
+          %{
+            panel
+            | cached_display_messages: [message],
+              cached_styled_messages: cached,
+              cached_styled_fingerprint: fingerprint
+          }
+        end)
+
+      updated = AgentLifecycle.update_styled_cache(state)
+
+      assert [%{styled_lines: [[{"plain answer", fg, 0, 0}]], markdown_blocks: [block]}] =
+               AgentAccess.panel(updated).cached_styled_messages
+
+      assert fg == 0x123456
+      assert [[{"plain answer", ^fg, 0, 0}]] = block.lines
+    end
+
+    test "update_styled_cache restyles unchanged displayed messages when style cache is missing" do
+      message = {:assistant, "unchanged answer"}
+
+      {:ok, session} = StubServer.start_link(messages: [message])
+
+      state =
+        [Tab.new_agent(1, "Agent") |> Tab.set_session(session)]
+        |> base_state(1)
+        |> AgentAccess.update_panel(fn panel ->
+          %{
+            panel
+            | cached_display_messages: [message],
+              cached_styled_messages: nil
+          }
+        end)
+
+      updated = AgentLifecycle.update_styled_cache(state)
+
+      assert [%{styled_lines: [[{"unchanged answer", _fg, 0, 0}]], markdown_blocks: [block]}] =
+               AgentAccess.panel(updated).cached_styled_messages
+
+      assert block.kind == :paragraph
     end
 
     test "switch_tab rebuilds a background agent tab's semantic transcript cache" do

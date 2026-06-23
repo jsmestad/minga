@@ -63,6 +63,265 @@ defmodule MingaAgent.Markdown do
   @typedoc "Extracted code block with language and content."
   @type code_block :: %{language: String.t(), content: String.t()}
 
+  @typedoc "Semantic markdown block used by agent chat renderers before styling."
+  @type block ::
+          %{
+            kind: :paragraph,
+            lines: [String.t()]
+          }
+          | %{
+              kind: :heading,
+              level: 1..3,
+              text: String.t()
+            }
+          | %{
+              kind: :list_item,
+              indent: non_neg_integer(),
+              ordered: boolean(),
+              ordinal: non_neg_integer(),
+              text: String.t()
+            }
+          | %{
+              kind: :blockquote,
+              lines: [String.t()]
+            }
+          | %{kind: :rule}
+          | %{kind: :spacer, height: pos_integer()}
+          | %{
+              kind: :code_block,
+              language: String.t(),
+              lines: [String.t()],
+              complete?: boolean(),
+              target_path: String.t() | nil
+            }
+
+  @doc """
+  Parses markdown into semantic blocks without decorative rendering glyphs.
+
+  This parser intentionally keeps the same small markdown surface as `parse/1`,
+  but returns structure that frontends can render directly. Fenced code blocks
+  preserve blank lines and indentation, and an unclosed fence is returned as an
+  incomplete code block for streaming output.
+  """
+  @spec parse_blocks(String.t()) :: [block()]
+  def parse_blocks(text) when is_binary(text) do
+    text
+    |> String.split("\n")
+    |> parse_block_lines([], [], nil, 0)
+    |> finish_paragraph()
+    |> Enum.reverse()
+  end
+
+  @spec parse_block_lines([String.t()], [block()], [String.t()], map() | nil, non_neg_integer()) ::
+          [block()]
+  defp parse_block_lines([], acc, paragraph, nil, _code_index) do
+    finish_paragraph(acc, paragraph)
+  end
+
+  defp parse_block_lines(
+         [],
+         acc,
+         paragraph,
+         %{language: language, lines: lines, target_path: target_path},
+         _code_index
+       ) do
+    acc
+    |> finish_paragraph(paragraph)
+    |> prepend_code_block(language, lines, false, target_path)
+  end
+
+  defp parse_block_lines(
+         [line | rest],
+         acc,
+         paragraph,
+         %{language: language, lines: lines, target_path: target_path} = code,
+         code_index
+       ) do
+    if fence_line?(line) do
+      acc
+      |> finish_paragraph(paragraph)
+      |> prepend_code_block(language, lines, true, target_path)
+      |> then(&parse_block_lines(rest, &1, [], nil, code_index + 1))
+    else
+      parse_block_lines(rest, acc, paragraph, %{code | lines: [line | lines]}, code_index)
+    end
+  end
+
+  defp parse_block_lines([line | rest], acc, paragraph, nil, code_index) do
+    trimmed = String.trim(line)
+
+    case block_line_kind(line, trimmed) do
+      {:code_fence, language} ->
+        acc
+        |> finish_paragraph(paragraph)
+        |> then(
+          &parse_block_lines(
+            rest,
+            &1,
+            [],
+            %{language: language, lines: [], target_path: nil},
+            code_index
+          )
+        )
+
+      :spacer ->
+        acc
+        |> finish_paragraph(paragraph)
+        |> prepend_spacer()
+        |> then(&parse_block_lines(rest, &1, [], nil, code_index))
+
+      :rule ->
+        acc
+        |> finish_paragraph(paragraph)
+        |> then(&parse_block_lines(rest, [%{kind: :rule} | &1], [], nil, code_index))
+
+      {:heading, level, text} ->
+        acc
+        |> finish_paragraph(paragraph)
+        |> then(
+          &parse_block_lines(
+            rest,
+            [%{kind: :heading, level: level, text: text} | &1],
+            [],
+            nil,
+            code_index
+          )
+        )
+
+      {:blockquote, text} ->
+        acc
+        |> finish_paragraph(paragraph)
+        |> then(
+          &parse_block_lines(
+            rest,
+            [%{kind: :blockquote, lines: [text]} | &1],
+            [],
+            nil,
+            code_index
+          )
+        )
+
+      {:list_item, indent, ordered?, ordinal, text} ->
+        acc
+        |> finish_paragraph(paragraph)
+        |> then(
+          &parse_block_lines(
+            rest,
+            [
+              %{kind: :list_item, indent: indent, ordered: ordered?, ordinal: ordinal, text: text}
+              | &1
+            ],
+            [],
+            nil,
+            code_index
+          )
+        )
+
+      :paragraph ->
+        parse_block_lines(rest, acc, [line | paragraph], nil, code_index)
+    end
+  end
+
+  @spec finish_paragraph([block()], [String.t()]) :: [block()]
+  defp finish_paragraph(acc, []), do: acc
+
+  defp finish_paragraph(acc, paragraph),
+    do: [%{kind: :paragraph, lines: Enum.reverse(paragraph)} | acc]
+
+  @spec finish_paragraph([block()]) :: [block()]
+  defp finish_paragraph(acc), do: acc
+
+  @spec prepend_code_block([block()], String.t(), [String.t()], boolean(), String.t() | nil) :: [
+          block()
+        ]
+  defp prepend_code_block(acc, language, lines, complete?, target_path) do
+    [
+      %{
+        kind: :code_block,
+        language: language,
+        lines: Enum.reverse(lines),
+        complete?: complete?,
+        target_path: target_path
+      }
+      | acc
+    ]
+  end
+
+  @spec prepend_spacer([block()]) :: [block()]
+  defp prepend_spacer([%{kind: :spacer, height: height} = spacer | rest]),
+    do: [%{spacer | height: min(height + 1, 255)} | rest]
+
+  defp prepend_spacer(acc), do: [%{kind: :spacer, height: 1} | acc]
+
+  @spec block_line_kind(String.t(), String.t()) ::
+          :paragraph
+          | :rule
+          | :spacer
+          | {:code_fence, String.t()}
+          | {:heading, 1..3, String.t()}
+          | {:blockquote, String.t()}
+          | {:list_item, non_neg_integer(), boolean(), non_neg_integer(), String.t()}
+  defp block_line_kind(_line, ""), do: :spacer
+
+  defp block_line_kind(line, _trimmed) when is_binary(line) do
+    classify_block_line(fence_line?(line), line, String.trim(line))
+  end
+
+  @spec classify_block_line(boolean(), String.t(), String.t()) ::
+          :paragraph
+          | :rule
+          | {:code_fence, String.t()}
+          | {:heading, 1..3, String.t()}
+          | {:blockquote, String.t()}
+          | {:list_item, non_neg_integer(), boolean(), non_neg_integer(), String.t()}
+  defp classify_block_line(true, line, _trimmed), do: {:code_fence, fence_language(line)}
+  defp classify_block_line(false, _line, trimmed) when trimmed in ["---", "***", "___"], do: :rule
+
+  defp classify_block_line(false, line, trimmed) do
+    classify_non_fence_line(String.match?(trimmed, ~r/^[-*_]{3,}$/), line, trimmed)
+  end
+
+  @spec classify_non_fence_line(boolean(), String.t(), String.t()) ::
+          :paragraph
+          | :rule
+          | {:heading, 1..3, String.t()}
+          | {:blockquote, String.t()}
+          | {:list_item, non_neg_integer(), boolean(), non_neg_integer(), String.t()}
+  defp classify_non_fence_line(true, _line, _trimmed), do: :rule
+  defp classify_non_fence_line(false, _line, "###" <> text), do: {:heading, 3, String.trim(text)}
+  defp classify_non_fence_line(false, _line, "##" <> text), do: {:heading, 2, String.trim(text)}
+  defp classify_non_fence_line(false, _line, "#" <> text), do: {:heading, 1, String.trim(text)}
+
+  defp classify_non_fence_line(false, _line, ">" <> text),
+    do: {:blockquote, String.trim_leading(text)}
+
+  defp classify_non_fence_line(false, line, "- " <> text),
+    do: {:list_item, div(indent_width(line), 2), false, 0, text}
+
+  defp classify_non_fence_line(false, line, "* " <> text),
+    do: {:list_item, div(indent_width(line), 2), false, 0, text}
+
+  defp classify_non_fence_line(false, line, trimmed) do
+    case Regex.run(~r/^(\d+)\.\s+(.*)$/, trimmed) do
+      [_, ordinal, text] ->
+        {:list_item, div(indent_width(line), 2), true, String.to_integer(ordinal), text}
+
+      _ ->
+        :paragraph
+    end
+  end
+
+  @spec fence_line?(String.t()) :: boolean()
+  defp fence_line?(line), do: String.starts_with?(String.trim_leading(line), "```")
+
+  @spec fence_language(String.t()) :: String.t()
+  defp fence_language(line) do
+    line
+    |> String.trim_leading()
+    |> String.replace_prefix("```", "")
+    |> String.trim()
+  end
+
   @doc """
   Extracts fenced code blocks from markdown text.
 

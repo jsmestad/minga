@@ -27,7 +27,7 @@ defmodule MingaEditor.Frontend.Emit.Context do
   @type t :: %__MODULE__{
           port_manager: pid(),
           capabilities: Capabilities.t(),
-          theme: Theme.t(),
+          theme: Theme.t() | nil,
           font_registry: FontRegistry.t(),
           windows: Windows.t(),
           layout: Layout.t(),

@@ -482,7 +482,7 @@ defmodule MingaEditor.Integration.AgentWorkflowConformanceTest do
   defp follow_up_turn_rendered?(%AgentChat{} = model) do
     model.visible? and model.status == :idle and
       Enum.any?(model.messages, &match?({_, {:user, "do this next"}}, &1)) and
-      Enum.any?(model.messages, &match?({_, {:styled_assistant, _}}, &1))
+      assistant_rendered?(model.messages)
   end
 
   defp provider_crash_rendered?(%AgentChat{} = model) do
@@ -498,7 +498,14 @@ defmodule MingaEditor.Integration.AgentWorkflowConformanceTest do
   end
 
   defp assistant_rendered?(messages) do
-    Enum.any?(messages, &match?({_, {:styled_assistant, _}}, &1))
+    Enum.any?(
+      messages,
+      fn
+        {_, {:styled_assistant, _}} -> true
+        {_, {:assistant_markdown, _}} -> true
+        _message -> false
+      end
+    )
   end
 
   defp tool_rendered?(messages) do

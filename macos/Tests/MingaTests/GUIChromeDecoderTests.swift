@@ -2263,7 +2263,7 @@ struct GUIAgentChatDecoderTests {
         // Line 1: 2 runs
         appendU16(&msgs, 2)
         appendString16(&msgs, "def ")
-        appendRGB(&msgs, 0x51, 0xAF, 0xEF); appendRGB(&msgs, 0x28, 0x2C, 0x34); msgs.append(0x01) // bold
+        appendRGB(&msgs, 0x51, 0xAF, 0xEF); appendRGB(&msgs, 0x28, 0x2C, 0x34); msgs.append(0x11) // bold + code
         appendString16(&msgs, "hello")
         appendRGB(&msgs, 0x98, 0xBE, 0x65); appendRGB(&msgs, 0x28, 0x2C, 0x34); msgs.append(0x02) // italic
         // Line 2: 1 run
@@ -2281,10 +2281,51 @@ struct GUIAgentChatDecoderTests {
         #expect(lines.count == 2)
         #expect(lines[0][0].text == "def ")
         #expect(lines[0][0].bold == true)
+        #expect(lines[0][0].code == true)
         #expect(lines[0][1].text == "hello")
         #expect(lines[0][1].italic == true)
+        #expect(lines[0][1].code == false)
         #expect(lines[1][0].text == "  :ok")
         #expect(lines[1][0].underline == true)
+    }
+
+    @Test("Decode gui_agent_chat with assistant_markdown code block")
+    func decodeAssistantMarkdownCodeBlock() throws {
+        var msgs = Data()
+        appendU32(&msgs, 42)
+        msgs.append(0x0A)
+        appendU16(&msgs, 1)
+        appendU32(&msgs, 77)
+        msgs.append(0x07)
+        msgs.append(0x01)
+        appendString16(&msgs, "swift")
+        appendString16(&msgs, "Swift")
+        appendString16(&msgs, "macos/App.swift")
+        msgs.append(0x01)
+        appendU16(&msgs, 2)
+        appendU16(&msgs, 1)
+        appendString16(&msgs, "")
+        appendRGB(&msgs, 0x98, 0xBE, 0x65); appendRGB(&msgs, 0x21, 0x24, 0x2B); msgs.append(0x10)
+        appendU16(&msgs, 1)
+        appendString16(&msgs, "print(\"hi\")")
+        appendRGB(&msgs, 0x98, 0xBE, 0x65); appendRGB(&msgs, 0x21, 0x24, 0x2B); msgs.append(0x10)
+
+        let data = buildChatData(model: "claude", messages: buildMessagesPayload(count: 1, msgs))
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+
+        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else { Issue.record("Expected .guiAgentChat"); return }
+        guard messages.count == 1 else { Issue.record("Expected 1 message"); return }
+        guard case .assistantMarkdown(let blocks) = messages[0].content else { Issue.record("Expected .assistantMarkdown"); return }
+        #expect(blocks.count == 1)
+        #expect(blocks[0].kind == .codeBlock)
+        #expect(blocks[0].isComplete == true)
+        #expect(blocks[0].language == "swift")
+        #expect(blocks[0].label == "Swift")
+        #expect(blocks[0].targetPath == "macos/App.swift")
+        #expect(blocks[0].lines.count == 2)
+        #expect(blocks[0].lines[0][0].text == "")
+        #expect(blocks[0].lines[1][0].code == true)
     }
 
     @Test("Decode gui_agent_chat framed styled_tool_call with auto_approved followed by another message")

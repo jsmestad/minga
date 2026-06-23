@@ -474,13 +474,26 @@ Typed payloads:
   0x07 (styled_assistant): type(1) + line_count(2), per line: run_count(2), per run: text_len(2) + text + fg(3) + bg(3) + flags(1), and if flags bit 0x08 is set: url_len(2) + url. Link URLs are limited to http, https, and mailto.
   0x08 (styled_tool_call): type(1) + status(1) + error(1) + collapsed(1) + duration_ms(4) + name_len(2) + name + summary_len(2) + summary + line_count(2), per line: run_count(2), per run: text_len(2) + text + fg(3) + bg(3) + flags(1), and if flags bit 0x08 is set: url_len(2) + url, auto_approved(1) + optional tool_preview_payload. The summary uses a UTF-8-safe preview budget so the styled payload and appended auto-approval/preview bytes still fit. Link URLs are limited to http, https, and mailto.
   0x09 (approval_tool_call): type(1) + status(1) + name_len(2) + name + summary_len(2) + summary + tool_call_id_len(2) + tool_call_id + preview_kind(1) + preview_line_count(2), per line: line_len(2) + line
+  0x0A (assistant_markdown): type(1) + block_count(2) + blocks...
 ```
+
+Markdown block payloads are BEAM-authored semantic structure. Frontends must render these blocks directly and must not infer code cards from styled-run flags, decorative rails, or all-code lines. Each block starts with `block_id(4) + kind(1) + flags(1)` and then a kind-specific payload:
+
+- `0x01 paragraph`: `line_count(2) + styled_lines`
+- `0x02 heading`: `level(1) + line_count(2) + styled_lines`
+- `0x03 list_item`: `indent(1) + ordered(1) + ordinal(4) + line_count(2) + styled_lines`
+- `0x04 blockquote`: `line_count(2) + styled_lines`
+- `0x05 rule`: no payload
+- `0x06 spacer`: `height(1)`
+- `0x07 code_block`: `language_len(2) + language + label_len(2) + label + target_path_len(2) + target_path + capability_flags(1) + line_count(2) + styled_lines`
+
+For code blocks, block flag `0x01` means complete; absence means streaming or incomplete. Capability flags are `0x01=copy`, `0x02=open`, and `0x04=apply`; frontends should only expose actions they actually implement. `block_id` is stable for a message and block index so streaming updates preserve identity.
 
 `auto_approved`: 0=not auto-approved, 1=session trust, 2=turn trust. The frame length makes appended fields deterministic and lets decoders distinguish current payloads from legacy unframed messages.
 
 `tool_preview_payload` is appended to current `tool_call` and `styled_tool_call` messages after `auto_approved`: `preview_kind(1) + preview_line_count(2) + lines...`, with each line encoded as `line_len(2) + line`. Legacy framed tool messages may omit this payload. Preview kinds match approval previews: 0=args, 1=diff, 2=command, 3=target. Tool-call previews are inline context only; `approval_tool_call` keeps the same preview payload fields as part of its required approval card shape.
 
-Styled run flags: 0x01=bold, 0x02=italic, 0x04=underline, 0x08=link URL present.
+Styled run flags: 0x01=bold, 0x02=italic, 0x04=underline, 0x08=link URL present, 0x10=code run (monospaced, preserve whitespace). The 0x10 bit is a run-level hint only and must not be used to infer fenced block boundaries, code-card containers, or language labels.
 
 ### 0x79 — gui_gutter_separator
 

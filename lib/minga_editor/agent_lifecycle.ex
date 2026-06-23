@@ -24,9 +24,15 @@ defmodule MingaEditor.AgentLifecycle do
   alias MingaEditor.LayoutPreset
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.AgentAccess
+  alias MingaEditor.UI.Highlight
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   @type state :: EditorState.t()
+  @typep style_context :: %{
+           highlight: Highlight.t() | nil,
+           theme_syntax: map(),
+           byte_offset_map: %{non_neg_integer() => non_neg_integer()}
+         }
 
   # Maximum characters of tool call result to send for styled rendering.
   # Matches the truncation in Transcript.message_to_markdown/1.
@@ -143,7 +149,27 @@ defmodule MingaEditor.AgentLifecycle do
     result = Transcript.display(messages, sync_opts)
 
     # Compute styled runs for GUI rendering against the displayed transcript.
-    styled = compute_styled_messages(state, result.display_messages)
+    # Reuse unchanged entries only when the style context still matches the
+    # cached fingerprint; theme changes must force a restyle.
+    styled_fingerprint = Panel.styled_cache_fingerprint(state.theme.syntax)
+
+    {previous_messages, previous_styled} =
+      if panel.cached_styled_fingerprint == styled_fingerprint do
+        {panel.cached_display_messages, panel.cached_styled_messages || []}
+      else
+        {[], []}
+      end
+
+    message_ids = Enum.map(result.display_message_pairs, fn {id, _message} -> id end)
+
+    styled =
+      compute_styled_messages(
+        state,
+        result.display_messages,
+        message_ids,
+        previous_messages,
+        previous_styled
+      )
 
     styled_assistant_count =
       Enum.count(styled, fn
@@ -163,7 +189,8 @@ defmodule MingaEditor.AgentLifecycle do
     AgentAccess.update_panel(state, fn p ->
       Panel.cache_transcript_display(p, result, styled,
         display_start_index: display_start,
-        provenance_jump: advance_jump(jump)
+        provenance_jump: advance_jump(jump),
+        styled_fingerprint: styled_fingerprint
       )
     end)
   end
@@ -356,10 +383,29 @@ defmodule MingaEditor.AgentLifecycle do
 
     with true <- is_pid(session),
          messages when messages != [] <- displayed_messages_for_styling(state, session) do
-      styled = compute_styled_messages(state, messages)
+      panel = AgentAccess.panel(state)
+      styled_fingerprint = Panel.styled_cache_fingerprint(state.theme.syntax)
+
+      {previous_messages, previous_styled} =
+        if panel.cached_styled_fingerprint == styled_fingerprint do
+          {panel.cached_display_messages, panel.cached_styled_messages || []}
+        else
+          {[], []}
+        end
+
+      message_ids = displayed_message_ids_for_styling(state, session)
+
+      styled =
+        compute_styled_messages(
+          state,
+          messages,
+          message_ids,
+          previous_messages,
+          previous_styled
+        )
 
       AgentAccess.update_panel(state, fn p ->
-        Panel.cache_styled_messages(p, styled)
+        Panel.cache_styled_messages(p, styled, styled_fingerprint)
       end)
     else
       _ -> state
@@ -381,12 +427,29 @@ defmodule MingaEditor.AgentLifecycle do
     end
   end
 
+  @spec displayed_message_ids_for_styling(state(), pid()) :: [pos_integer()]
+  defp displayed_message_ids_for_styling(state, session) do
+    panel = AgentAccess.panel(state)
+
+    case panel.cached_display_message_pairs do
+      [] -> session |> AgentSession.messages_with_ids() |> Enum.map(fn {id, _message} -> id end)
+      pairs -> Enum.map(pairs, fn {id, _message} -> id end)
+    end
+  catch
+    :exit, _ -> []
+  end
+
   # Computes styled runs for each message. Assistant messages and tool call results
   # get markdown styling; other message types pass through as nil.
-  @spec compute_styled_messages(state(), [term()]) :: [
-          MarkdownHighlight.styled_lines() | nil
-        ]
-  defp compute_styled_messages(state, messages) do
+  @spec compute_styled_messages(
+          state(),
+          [term()],
+          [pos_integer()],
+          [term()],
+          Panel.styled_cache()
+        ) ::
+          Panel.styled_cache()
+  defp compute_styled_messages(state, messages, message_ids, previous_messages, previous_styled) do
     highlight = nil
     theme_syntax = state.theme.syntax
 
@@ -394,23 +457,162 @@ defmodule MingaEditor.AgentLifecycle do
     full_lines = String.split(full_text, "\n")
     byte_offset_map = message_byte_offsets(line_offsets, full_lines)
 
-    messages
-    |> Enum.with_index()
-    |> Enum.map(fn
-      {{:assistant, text}, idx} ->
-        byte_offset = Map.get(byte_offset_map, idx, 0)
-        MarkdownHighlight.stylize(text, highlight, theme_syntax, byte_offset)
+    style_context = %{
+      highlight: highlight,
+      theme_syntax: theme_syntax,
+      byte_offset_map: byte_offset_map
+    }
 
-      {{:tool_call, %MingaAgent.ToolCall{result: result}}, idx}
-      when is_binary(result) and result != "" ->
-        byte_offset = Map.get(byte_offset_map, idx, 0)
-        # Tool call results use the same markdown/tree-sitter styling pipeline
-        text = String.slice(result, 0, @max_styled_result_chars)
-        MarkdownHighlight.stylize(text, highlight, theme_syntax, byte_offset)
+    compute_styled_messages(
+      messages,
+      message_ids,
+      previous_messages,
+      previous_styled || [],
+      0,
+      style_context,
+      []
+    )
+  end
 
-      _ ->
-        nil
-    end)
+  @spec compute_styled_messages(
+          [term()],
+          [pos_integer()],
+          [term()],
+          Panel.styled_cache(),
+          non_neg_integer(),
+          style_context(),
+          [Panel.rendered_message() | nil]
+        ) :: [Panel.rendered_message() | nil]
+  defp compute_styled_messages(
+         [],
+         _message_ids,
+         _previous_messages,
+         _previous_styled,
+         _idx,
+         _style_context,
+         acc
+       ) do
+    Enum.reverse(acc)
+  end
+
+  defp compute_styled_messages(
+         [message | messages],
+         message_ids,
+         previous_messages,
+         previous_styled,
+         idx,
+         style_context,
+         acc
+       ) do
+    {next_previous_messages, next_previous_styled, cached} =
+      cached_styled_message(message, previous_messages, previous_styled)
+
+    {message_id, next_message_ids} = next_message_id(message_ids, idx)
+
+    styled =
+      case cached do
+        {:ok, cached_styled} ->
+          cached_styled
+
+        :miss ->
+          style_message(message, idx, message_id, style_context)
+      end
+
+    compute_styled_messages(
+      messages,
+      next_message_ids,
+      next_previous_messages,
+      next_previous_styled,
+      idx + 1,
+      style_context,
+      [styled | acc]
+    )
+  end
+
+  @spec cached_styled_message(term(), [term()], Panel.styled_cache()) ::
+          {[term()], Panel.styled_cache(), {:ok, Panel.rendered_message() | nil} | :miss}
+  defp cached_styled_message(message, [previous_message | previous_messages], [
+         styled | previous_styled
+       ])
+       when message == previous_message do
+    {previous_messages, previous_styled, {:ok, styled}}
+  end
+
+  defp cached_styled_message(_message, [_previous_message | previous_messages], [
+         _styled | previous_styled
+       ]) do
+    {previous_messages, previous_styled, :miss}
+  end
+
+  defp cached_styled_message(_message, [_previous_message | previous_messages], []) do
+    {previous_messages, [], :miss}
+  end
+
+  defp cached_styled_message(_message, [], [_styled | previous_styled]) do
+    {[], previous_styled, :miss}
+  end
+
+  defp cached_styled_message(_message, [], []) do
+    {[], [], :miss}
+  end
+
+  @spec next_message_id([pos_integer()], non_neg_integer()) :: {pos_integer(), [pos_integer()]}
+  defp next_message_id([id | rest], _idx), do: {id, rest}
+  defp next_message_id([], idx), do: {idx + 1, []}
+
+  @spec style_message(term(), non_neg_integer(), pos_integer(), style_context()) ::
+          Panel.rendered_message() | nil
+  defp style_message(
+         {:assistant, text},
+         idx,
+         message_id,
+         style_context
+       ) do
+    byte_offset = Map.get(style_context.byte_offset_map, idx, 0)
+
+    %{
+      styled_lines:
+        MarkdownHighlight.stylize(
+          text,
+          style_context.highlight,
+          style_context.theme_syntax,
+          byte_offset
+        ),
+      markdown_blocks:
+        MarkdownHighlight.render_blocks(
+          text,
+          style_context.highlight,
+          style_context.theme_syntax,
+          message_id,
+          byte_offset
+        )
+    }
+  end
+
+  defp style_message(
+         {:tool_call, %MingaAgent.ToolCall{result: result}},
+         idx,
+         _message_id,
+         style_context
+       )
+       when is_binary(result) and result != "" do
+    byte_offset = Map.get(style_context.byte_offset_map, idx, 0)
+    text = String.slice(result, 0, @max_styled_result_chars)
+
+    %{
+      styled_lines:
+        MarkdownHighlight.stylize(
+          text,
+          style_context.highlight,
+          style_context.theme_syntax,
+          byte_offset
+        ),
+      markdown_blocks: nil
+    }
+  end
+
+  defp style_message(_message, _idx, _message_id, _style_context) do
+    nil
   end
 
   # Computes the byte offset of each message's start line within the full buffer text.

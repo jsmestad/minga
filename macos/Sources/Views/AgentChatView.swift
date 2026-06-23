@@ -345,6 +345,8 @@ struct AgentChatView: View {
             assistantBlock(text)
         case .styledAssistant(_, let lines):
             styledAssistantBlock(lines)
+        case .assistantMarkdown(_, let blocks):
+            assistantMarkdownBlock(blocks)
         case .thinking(_, let text, let collapsed):
             thinkingBlock(text, collapsed: collapsed)
         case .toolCall(_, let name, let summary, let status, let isError, let collapsed, let autoApprovedScope, let duration, let result, let previewKind, let previewLines):
@@ -413,6 +415,96 @@ struct AgentChatView: View {
         }
     }
 
+    @ViewBuilder
+    private func assistantMarkdownBlock(_ blocks: [Wire.AgentMarkdownBlock]) -> some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(blocks) { block in
+                    markdownBlockView(block)
+                }
+            }
+            Spacer(minLength: 40)
+        }
+    }
+
+    @ViewBuilder
+    private func markdownBlockView(_ block: Wire.AgentMarkdownBlock) -> some View {
+        switch block.kind {
+        case .paragraph:
+            markdownLines(block.lines, baseFontSize: 13, monospaced: false)
+        case .heading:
+            markdownLines(block.lines, baseFontSize: block.level == 1 ? 15 : 14, monospaced: false)
+        case .listItem:
+            markdownLines(block.lines, baseFontSize: 13, monospaced: false)
+                .padding(.leading, CGFloat(block.indent) * 12)
+        case .blockquote:
+            markdownLines(block.lines, baseFontSize: 13, monospaced: false)
+                .padding(.leading, 8)
+                .overlay(alignment: .leading) {
+                    Rectangle().fill(theme.agentToolBorder.opacity(0.35)).frame(width: 2)
+                }
+        case .rule:
+            Rectangle().fill(theme.agentToolBorder.opacity(0.25)).frame(height: 1)
+        case .spacer:
+            Spacer().frame(height: CGFloat(max(block.height, 1)) * 6)
+        case .codeBlock:
+            agentCodeCard(block)
+        }
+    }
+
+    @ViewBuilder
+    private func markdownLines(_ lines: [[Wire.StyledTextRun]], baseFontSize: CGFloat, monospaced: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(Array(lines.enumerated()), id: \.offset) { _, runs in
+                styledLineView(runs, baseFontSize: baseFontSize, monospaced: monospaced)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func agentCodeCard(_ block: Wire.AgentMarkdownBlock) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Text(block.label.isEmpty ? "Code" : block.label)
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(theme.agentTextFg.opacity(0.55))
+                if !block.targetPath.isEmpty {
+                    Text(block.targetPath)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(theme.agentTextFg.opacity(0.38))
+                }
+                if !block.isComplete {
+                    Text("streaming")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(theme.agentTextFg.opacity(0.38))
+                }
+                Spacer(minLength: 0)
+            }
+
+            ScrollView(.horizontal) {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(Array(block.lines.enumerated()), id: \.offset) { _, runs in
+                        styledLineView(runs, baseFontSize: 12, monospaced: true, allowHorizontalScroll: false)
+                            .fixedSize(horizontal: true, vertical: false)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 8).fill(theme.agentCodeBg))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(theme.agentCodeBorder.opacity(0.35), lineWidth: 1))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(codeBlockAccessibilityLabel(block))
+        .accessibilityHint("Horizontally scrolls code content.")
+    }
+
+    private func codeBlockAccessibilityLabel(_ block: Wire.AgentMarkdownBlock) -> String {
+        let language = block.label.isEmpty ? "Code" : block.label
+        let state = block.isComplete ? "complete" : "streaming"
+        return "Code block, \(language), \(block.lines.count) lines, \(state)"
+    }
+
     private func buildAttributedString(_ runs: [Wire.StyledTextRun], baseFontSize: CGFloat = 13, monospaced: Bool = false) -> AttributedString {
         var result = AttributedString()
         for run in runs {
@@ -436,14 +528,15 @@ struct AgentChatView: View {
                     blue: Double(run.bgB) / 255.0
                 )
             }
-            let design: Font.Design = monospaced ? .monospaced : .default
+            let runMonospaced = monospaced || run.code
+            let design: Font.Design = runMonospaced ? .monospaced : .default
             if run.bold && run.italic {
                 attr.font = .system(size: baseFontSize, weight: .bold, design: design).italic()
             } else if run.bold {
                 attr.font = .system(size: baseFontSize, weight: .bold, design: design)
             } else if run.italic {
                 attr.font = .system(size: baseFontSize, design: design).italic()
-            } else if monospaced {
+            } else if runMonospaced {
                 attr.font = .system(size: baseFontSize, design: .monospaced)
             }
             if run.underline {
@@ -458,12 +551,12 @@ struct AgentChatView: View {
     }
 
     @ViewBuilder
-    private func styledLineView(_ runs: [Wire.StyledTextRun], baseFontSize: CGFloat, monospaced: Bool) -> some View {
+    private func styledLineView(_ runs: [Wire.StyledTextRun], baseFontSize: CGFloat, monospaced: Bool, allowHorizontalScroll: Bool = true) -> some View {
         if runs.isEmpty || (runs.count == 1 && runs[0].text.isEmpty) {
             Text(" ")
                 .font(.system(size: baseFontSize, design: monospaced ? .monospaced : .default))
                 .foregroundStyle(.clear)
-        } else if shouldScrollHorizontally(runs) {
+        } else if allowHorizontalScroll && shouldScrollHorizontally(runs) {
             ScrollView(.horizontal) {
                 Text(buildAttributedString(runs, baseFontSize: baseFontSize, monospaced: monospaced))
                     .font(.system(size: baseFontSize, design: monospaced ? .monospaced : .default))
@@ -479,9 +572,7 @@ struct AgentChatView: View {
 
     private func shouldScrollHorizontally(_ runs: [Wire.StyledTextRun]) -> Bool {
         let textRuns = runs.filter { !$0.text.isEmpty }
-        return !textRuns.isEmpty && textRuns.allSatisfy { run in
-            run.bgR != 0 || run.bgG != 0 || run.bgB != 0
-        }
+        return !textRuns.isEmpty && textRuns.allSatisfy(\.code)
     }
 
     private func safeLinkURL(_ value: String?) -> URL? {

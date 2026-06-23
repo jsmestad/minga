@@ -25,6 +25,7 @@ defmodule Minga.RenderModel.UI.AgentChat do
     * `{:user, text}` / `{:user, text, attachments}`
     * `{:assistant, text}`
     * `{:styled_assistant, styled_lines}`
+    * `{:assistant_markdown, markdown_blocks}`
     * `{:thinking, text, collapsed?}`
     * `{:tool_call, %AgentChat.ToolCallView{}}`
     * `{:styled_tool_call, %AgentChat.ToolCallView{}, styled_lines}`
@@ -37,6 +38,7 @@ defmodule Minga.RenderModel.UI.AgentChat do
   """
 
   alias __MODULE__.ApprovalView
+  alias __MODULE__.MarkdownBlock
   alias __MODULE__.PromptCompletion
   alias __MODULE__.ToolCallView
   alias __MODULE__.Usage
@@ -55,6 +57,7 @@ defmodule Minga.RenderModel.UI.AgentChat do
           | {:user, String.t(), term()}
           | {:assistant, String.t()}
           | {:styled_assistant, [styled_line()]}
+          | {:assistant_markdown, [MarkdownBlock.t()]}
           | {:thinking, String.t(), boolean()}
           | {:tool_call, ToolCallView.t()}
           | {:styled_tool_call, ToolCallView.t(), [styled_line()]}

@@ -38,13 +38,19 @@ defmodule MingaEditor.Agent.UIState.Panel do
           cached_line_index: [{non_neg_integer(), MingaEditor.Agent.Transcript.line_type()}],
           cached_display_messages: [term()],
           cached_display_message_pairs: [{pos_integer(), term()}],
-          cached_styled_messages: [MingaEditor.Agent.MarkdownHighlight.styled_lines()] | nil,
+          cached_styled_messages: styled_cache(),
+          cached_styled_fingerprint: non_neg_integer() | nil,
           message_version: non_neg_integer(),
           credentials_configured: boolean(),
           provenance_jump: MingaEditor.Agent.ProvenanceJump.t() | nil
         }
 
-  @type styled_cache :: [MingaEditor.Agent.MarkdownHighlight.styled_lines()] | nil
+  @type rendered_message :: %{
+          styled_lines: MingaEditor.Agent.MarkdownHighlight.styled_lines() | nil,
+          markdown_blocks: [Minga.RenderModel.UI.AgentChat.MarkdownBlock.t()] | nil
+        }
+
+  @type styled_cache :: [rendered_message() | nil] | nil
 
   defstruct visible: false,
             scroll: %Scroll{},
@@ -63,6 +69,7 @@ defmodule MingaEditor.Agent.UIState.Panel do
             cached_display_messages: [],
             cached_display_message_pairs: [],
             cached_styled_messages: nil,
+            cached_styled_fingerprint: nil,
             message_version: 0,
             credentials_configured: false,
             provenance_jump: nil
@@ -140,6 +147,8 @@ defmodule MingaEditor.Agent.UIState.Panel do
         cached_display_messages: display.display_messages,
         cached_display_message_pairs: display.display_message_pairs,
         cached_styled_messages: styled_messages,
+        cached_styled_fingerprint:
+          Keyword.get(opts, :styled_fingerprint, panel.cached_styled_fingerprint),
         display_start_index: Keyword.get(opts, :display_start_index, panel.display_start_index),
         provenance_jump: Keyword.get(opts, :provenance_jump, panel.provenance_jump)
     }
@@ -154,6 +163,7 @@ defmodule MingaEditor.Agent.UIState.Panel do
         cached_display_messages: [],
         cached_display_message_pairs: [],
         cached_styled_messages: nil,
+        cached_styled_fingerprint: nil,
         display_start_index: 0,
         provenance_jump: nil
     }
@@ -164,10 +174,20 @@ defmodule MingaEditor.Agent.UIState.Panel do
   def set_scroll(%__MODULE__{} = panel, %Scroll{} = scroll), do: %{panel | scroll: scroll}
 
   @doc "Replaces cached styled transcript runs without changing the display window."
-  @spec cache_styled_messages(t(), styled_cache()) :: t()
-  def cache_styled_messages(%__MODULE__{} = panel, styled_messages) do
-    %{panel | cached_styled_messages: styled_messages}
+  @spec cache_styled_messages(t(), styled_cache(), non_neg_integer() | nil) :: t()
+  def cache_styled_messages(%__MODULE__{} = panel, styled_messages, styled_fingerprint) do
+    %{
+      panel
+      | cached_styled_messages: styled_messages,
+        cached_styled_fingerprint: styled_fingerprint
+    }
   end
+
+  @spec styled_cache_fingerprint(map() | nil) :: non_neg_integer()
+  def styled_cache_fingerprint(nil), do: 0
+
+  def styled_cache_fingerprint(theme_syntax) when is_map(theme_syntax),
+    do: :erlang.phash2(theme_syntax)
 
   @spec stale_unqualified_model?(String.t(), String.t()) :: boolean()
   defp stale_unqualified_model?(model, default_model)

@@ -7,7 +7,9 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   alias MingaAgent.TurnUsage
   alias MingaEditor.Agent.SemanticUI.Registry, as: SemanticUIRegistry
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.View.PromptRenderWindow
+  alias MingaEditor.UI.Theme
   alias Minga.Buffer
   alias Minga.Editing.Scroll
   alias Minga.RenderModel.UI.AgentChat
@@ -51,7 +53,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     inner_width = max(ctx.viewport.cols - 10, 20)
     visible_rows = PromptRenderWindow.visible_rows(panel, inner_width)
 
-    {messages_with_ids, styled_cache} = displayed_messages_for_model(panel, session)
+    {messages_with_ids, styled_cache} = displayed_messages_for_model(panel, session, ctx.theme)
     pending_approval = ctx.shell_state.agent.pending_approval
 
     gui_messages =
@@ -97,6 +99,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     {styled, plain} =
       Enum.reduce(messages, {0, 0}, fn
         {_, {:styled_assistant, _}}, {s, p} -> {s + 1, p}
+        {_, {:assistant_markdown, _}}, {s, p} -> {s + 1, p}
         {_, {:styled_tool_call, _, _}}, {s, p} -> {s + 1, p}
         {_, {:assistant, _}}, {s, p} -> {s, p + 1}
         _, acc -> acc
@@ -140,12 +143,26 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     :exit, _ -> ""
   end
 
-  @spec displayed_messages_for_model(MingaEditor.Agent.UIState.Panel.t(), pid()) ::
+  @spec displayed_messages_for_model(MingaEditor.Agent.UIState.Panel.t(), pid(), Theme.t() | nil) ::
           {[{pos_integer(), term()}], [term()] | nil}
-  defp displayed_messages_for_model(panel, session) do
+  defp displayed_messages_for_model(panel, session, theme) do
     pairs = displayed_message_pairs(panel, session)
-    visible_message_slice(panel, pairs, panel.cached_styled_messages)
+
+    styled_cache =
+      if panel.cached_styled_fingerprint == styled_cache_fingerprint(theme) do
+        panel.cached_styled_messages
+      else
+        nil
+      end
+
+    visible_message_slice(panel, pairs, styled_cache)
   end
+
+  @spec styled_cache_fingerprint(Theme.t() | nil) :: non_neg_integer()
+  defp styled_cache_fingerprint(nil), do: 0
+
+  defp styled_cache_fingerprint(%Theme{syntax: syntax}),
+    do: Panel.styled_cache_fingerprint(syntax)
 
   @spec displayed_message_pairs(MingaEditor.Agent.UIState.Panel.t(), pid()) :: [
           {pos_integer(), term()}
@@ -235,16 +252,34 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   defp maybe_style_message({{id, {:assistant, _text} = msg}, nil}, _pending_approval),
     do: {id, msg}
 
-  defp maybe_style_message({{id, {:assistant, _text}}, styled_lines}, _pending_approval),
-    do: {id, {:styled_assistant, styled_lines}}
+  defp maybe_style_message(
+         {{id, {:assistant, _text}}, %{markdown_blocks: blocks}},
+         _pending_approval
+       )
+       when is_list(blocks) and blocks != [] do
+    {id, {:assistant_markdown, blocks}}
+  end
 
-  defp maybe_style_message({{id, {:tool_call, tc} = msg}, styled_lines}, pending_approval) do
+  defp maybe_style_message(
+         {{id, {:assistant, _text}}, %{styled_lines: styled_lines}},
+         _pending_approval
+       )
+       when is_list(styled_lines) do
+    {id, {:styled_assistant, styled_lines}}
+  end
+
+  defp maybe_style_message({{id, {:assistant, _text}}, styled_lines}, _pending_approval)
+       when is_list(styled_lines) do
+    {id, {:styled_assistant, styled_lines}}
+  end
+
+  defp maybe_style_message({{id, {:tool_call, tc} = msg}, cache_entry}, pending_approval) do
     case maybe_inline_approval({id, msg}, pending_approval) do
       {^id, {:approval_tool_call, _tc, _approval}} = approval_message ->
         approval_message
 
-      {^id, {:tool_call, _tc}} when is_list(styled_lines) ->
-        {id, {:styled_tool_call, tc, styled_lines}}
+      {^id, {:tool_call, _tc}} ->
+        maybe_styled_tool_call(id, tc, cache_entry, msg)
 
       unchanged ->
         unchanged
@@ -252,6 +287,19 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   end
 
   defp maybe_style_message({{id, msg}, _cache_entry}, _pending_approval), do: {id, msg}
+
+  @spec maybe_styled_tool_call(pos_integer(), ToolCall.t(), term(), term()) ::
+          {pos_integer(), term()}
+  defp maybe_styled_tool_call(id, tc, %{styled_lines: styled_lines}, _fallback)
+       when is_list(styled_lines) do
+    {id, {:styled_tool_call, tc, styled_lines}}
+  end
+
+  defp maybe_styled_tool_call(id, tc, styled_lines, _fallback) when is_list(styled_lines) do
+    {id, {:styled_tool_call, tc, styled_lines}}
+  end
+
+  defp maybe_styled_tool_call(id, _tc, _cache_entry, fallback), do: {id, fallback}
 
   @spec maybe_inline_approval({pos_integer(), term()}, map() | nil) :: {pos_integer(), term()}
   defp maybe_inline_approval({id, {:tool_call, tc}}, %{tool_call_id: tool_call_id} = approval)
@@ -280,6 +328,8 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
 
   defp to_core_body({:styled_tool_call, %ToolCall{} = tc, styled_lines}),
     do: {:styled_tool_call, tool_call_view(tc), styled_lines}
+
+  defp to_core_body({:assistant_markdown, blocks}), do: {:assistant_markdown, blocks}
 
   defp to_core_body({:approval_tool_call, %ToolCall{} = tc, approval}),
     do: {:approval_tool_call, approval_view(tc, approval)}
