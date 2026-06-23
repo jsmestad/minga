@@ -11,6 +11,8 @@ defmodule MingaEditor.Agent.Transcript do
   @typedoc "Line type for transcript-line-to-message mapping."
   @type line_type :: :text | :code | :tool | :thinking | :usage | :system | :empty
 
+  @type empty_state :: :credentials_missing | :no_model | nil
+
   @type display_result :: %{
           line_index: [{non_neg_integer(), line_type()}],
           display_messages: [term()],
@@ -21,6 +23,7 @@ defmodule MingaEditor.Agent.Transcript do
 
   @pinned_separator_id 4_000_000_001
   @hidden_separator_id 4_000_000_002
+  @empty_state_index 4_000_000_010
 
   @doc "Builds displayed semantic transcript metadata from raw session messages."
   @spec display([term()], keyword()) :: display_result()
@@ -28,6 +31,8 @@ defmodule MingaEditor.Agent.Transcript do
     display_start = Keyword.get(opts, :display_start_index, 0)
     pinned_ids = Keyword.get(opts, :pinned_ids, MapSet.new())
     message_id_pairs = Keyword.get(opts, :message_ids, [])
+    empty_state = Keyword.get(opts, :empty_state)
+
     hidden_count = min(display_start, length(messages))
 
     visible_entries =
@@ -37,6 +42,16 @@ defmodule MingaEditor.Agent.Transcript do
       |> Enum.map(fn {msg, idx} -> {idx, msg} end)
 
     pinned_entries = extract_pinned_message_entries(message_id_pairs, pinned_ids, hidden_count)
+
+    {visible_entries, pinned_entries, hidden_count, message_id_pairs} =
+      maybe_use_empty_state(
+        messages,
+        empty_state,
+        visible_entries,
+        pinned_entries,
+        hidden_count,
+        message_id_pairs
+      )
 
     {markdown, line_offsets, display_messages, display_message_pairs} =
       build_display_text(visible_entries, pinned_entries, hidden_count, message_id_pairs)
@@ -221,6 +236,80 @@ defmodule MingaEditor.Agent.Transcript do
     |> Enum.map(fn {{_id, msg}, idx} -> {idx, msg} end)
   end
 
+  @spec maybe_use_empty_state(
+          [term()],
+          empty_state(),
+          [{non_neg_integer(), term()}],
+          [{non_neg_integer(), term()}],
+          non_neg_integer(),
+          [{pos_integer(), term()}]
+        ) ::
+          {[{non_neg_integer(), term()}], [{non_neg_integer(), term()}], non_neg_integer(),
+           [{pos_integer(), term()}]}
+  defp maybe_use_empty_state(
+         messages,
+         empty_state,
+         visible_entries,
+         pinned_entries,
+         hidden_count,
+         message_id_pairs
+       )
+       when empty_state in [:credentials_missing, :no_model] do
+    if first_run_transcript?(messages) do
+      {[{@empty_state_index, empty_state_message(empty_state)}], [], 0, []}
+    else
+      {visible_entries, pinned_entries, hidden_count, message_id_pairs}
+    end
+  end
+
+  defp maybe_use_empty_state(
+         _messages,
+         _empty_state,
+         visible_entries,
+         pinned_entries,
+         hidden_count,
+         message_id_pairs
+       ) do
+    {visible_entries, pinned_entries, hidden_count, message_id_pairs}
+  end
+
+  @doc false
+  @spec first_run_transcript?([term()]) :: boolean()
+  def first_run_transcript?(messages) do
+    not Enum.any?(messages, &user_facing_turn_message?/1)
+  end
+
+  @spec user_facing_turn_message?(term()) :: boolean()
+  defp user_facing_turn_message?({kind, _}) when kind in [:user, :assistant, :tool_call, :usage],
+    do: true
+
+  defp user_facing_turn_message?({kind, _, _}) when kind in [:user, :thinking], do: true
+  defp user_facing_turn_message?(_message), do: false
+
+  @spec empty_state_message(:credentials_missing | :no_model) :: {:system, String.t(), :info}
+  defp empty_state_message(:credentials_missing) do
+    {:system,
+     """
+     Connect a provider
+
+     Add an API key with /auth <provider> <key>, or run /login to sign in with a ChatGPT subscription.
+
+     Examples:
+       /auth anthropic <key>
+       /auth openai <key>
+       /auth google <key>
+     """, :info}
+  end
+
+  defp empty_state_message(:no_model) do
+    {:system,
+     """
+     Pick a model
+
+     Use the model picker button, /model, or SPC a m to choose a configured model before starting a chat.
+     """, :info}
+  end
+
   @spec build_display_text(
           [{non_neg_integer(), term()}],
           [{non_neg_integer(), term()}],
@@ -273,6 +362,8 @@ defmodule MingaEditor.Agent.Transcript do
 
   defp display_message_id(_idx, {:system, "── " <> _rest, :info}, _id_by_index),
     do: @hidden_separator_id
+
+  defp display_message_id(@empty_state_index, _msg, _id_by_index), do: @empty_state_index
 
   defp display_message_id(idx, _msg, id_by_index), do: Map.get(id_by_index, idx, idx + 1)
 

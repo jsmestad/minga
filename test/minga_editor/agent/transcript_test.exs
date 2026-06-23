@@ -170,6 +170,25 @@ defmodule MingaEditor.Agent.TranscriptTest do
                {103, ^visible_message}
              ] = display_pairs
     end
+
+    test "empty state replaces startup-only transcript for display without mutating messages" do
+      startup = {:system, "Session started", :info}
+      result = Transcript.display([startup], empty_state: :credentials_missing)
+
+      assert [{_id, {:system, text, :info}}] = result.display_message_pairs
+      assert result.display_messages == [{:system, text, :info}]
+      assert text =~ "Connect a provider"
+      refute text =~ "Session started"
+    end
+
+    test "empty state does not replace transcripts with user turns" do
+      startup = {:system, "Session started", :info}
+      user = {:user, "hello"}
+      result = Transcript.display([startup, user], empty_state: :credentials_missing)
+
+      assert result.display_messages == [startup, user]
+      assert [{_id1, ^startup}, {_id2, ^user}] = result.display_message_pairs
+    end
   end
 
   describe "messages_to_markdown_with_offsets/1" do

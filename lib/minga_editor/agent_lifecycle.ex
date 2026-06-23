@@ -13,6 +13,7 @@ defmodule MingaEditor.AgentLifecycle do
   alias MingaEditor.Agent.MarkdownHighlight
   alias MingaEditor.Agent.ProvenanceJump
   alias MingaEditor.Agent.Transcript
+  alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.Session, as: AgentSession
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.View.Preview
@@ -99,6 +100,8 @@ defmodule MingaEditor.AgentLifecycle do
 
   @doc "Caches semantic transcript metadata for an explicit message list."
   @spec cache_messages(state(), [term()]) :: state()
+  def cache_messages(state, []), do: clear_transcript_cache(state)
+
   def cache_messages(state, messages) when is_list(messages) do
     cache_transcript(state, messages)
   end
@@ -112,24 +115,20 @@ defmodule MingaEditor.AgentLifecycle do
 
   @spec cache_transcript(state(), [term()]) :: state()
   defp cache_transcript(state, []) do
-    AgentAccess.update_panel(state, fn panel ->
-      %{
-        panel
-        | cached_line_index: [],
-          cached_display_messages: [],
-          cached_display_message_pairs: [],
-          cached_styled_messages: nil,
-          display_start_index: 0,
-          provenance_jump: nil
-      }
-    end)
+    cache_empty_transcript(state, first_run_empty_state(state, []))
   end
 
   defp cache_transcript(state, messages) do
+    cache_display_transcript(state, messages, first_run_empty_state(state, messages))
+  end
+
+  @spec cache_display_transcript(state(), [term()], Transcript.empty_state()) :: state()
+  defp cache_display_transcript(state, messages, empty_state) do
     panel = AgentAccess.panel(state)
     jump = panel.provenance_jump
 
     sync_opts = add_session_display_opts([], AgentAccess.session(state))
+    sync_opts = maybe_put_empty_state(sync_opts, empty_state)
 
     # A pending provenance jump may need an older, paged-out turn revealed so it
     # can be landed on. Otherwise keep the panel's current display window.
@@ -172,6 +171,69 @@ defmodule MingaEditor.AgentLifecycle do
       }
     end)
   end
+
+  @spec cache_empty_transcript(state(), Transcript.empty_state()) :: state()
+  defp cache_empty_transcript(state, nil), do: clear_transcript_cache(state)
+
+  defp cache_empty_transcript(state, empty_state) do
+    cache_display_transcript(state, [], empty_state)
+  end
+
+  @spec clear_transcript_cache(state()) :: state()
+  defp clear_transcript_cache(state) do
+    AgentAccess.update_panel(state, fn panel ->
+      %{
+        panel
+        | cached_line_index: [],
+          cached_display_messages: [],
+          cached_display_message_pairs: [],
+          cached_styled_messages: nil,
+          display_start_index: 0,
+          provenance_jump: nil
+      }
+    end)
+  end
+
+  @spec first_run_empty_state(state(), [term()]) :: Transcript.empty_state()
+  defp first_run_empty_state(state, messages) do
+    if Transcript.first_run_transcript?(messages) do
+      panel = AgentAccess.panel(state)
+      empty_state_for_panel(panel, AgentAccess.session(state))
+    end
+  end
+
+  @spec empty_state_for_panel(MingaEditor.Agent.UIState.Panel.t(), pid() | nil) ::
+          Transcript.empty_state()
+  defp empty_state_for_panel(panel, session) do
+    empty_state_for_status(
+      configured_model?(panel.model_name),
+      credentials_configured?(panel, session)
+    )
+  end
+
+  @spec empty_state_for_status(boolean(), boolean()) :: Transcript.empty_state()
+  defp empty_state_for_status(false, _credentials_configured), do: :no_model
+  defp empty_state_for_status(true, false), do: :credentials_missing
+  defp empty_state_for_status(true, true), do: nil
+
+  @spec maybe_put_empty_state(keyword(), Transcript.empty_state()) :: keyword()
+  defp maybe_put_empty_state(opts, nil), do: opts
+  defp maybe_put_empty_state(opts, empty_state), do: Keyword.put(opts, :empty_state, empty_state)
+
+  @spec configured_model?(String.t()) :: boolean()
+  defp configured_model?(model) when model in ["", "unknown"], do: false
+  defp configured_model?(model), do: model != AgentConfig.unconfigured_model()
+
+  @spec credentials_configured?(MingaEditor.Agent.UIState.Panel.t(), pid() | nil) :: boolean()
+  defp credentials_configured?(_panel, session) when is_pid(session) do
+    session
+    |> AgentSession.editor_snapshot()
+    |> Map.get(:credentials_configured, false)
+  catch
+    :exit, _ -> false
+  end
+
+  defp credentials_configured?(panel, _session), do: panel.credentials_configured
 
   # The display window needed to render the jump target. Reveals a paged-out
   # target turn; otherwise keeps the panel's current window.
