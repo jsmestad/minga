@@ -172,6 +172,10 @@ defmodule MingaEditor.Agent.SlashCommandTest do
       assert SlashCommand.unknown_command_message("/modle") ==
                "Unknown command: /modle. Did you mean /model?"
     end
+
+    test "returns a plain unknown command message when there is no close match" do
+      assert SlashCommand.unknown_command_message("/zzzz") == "Unknown command: /zzzz"
+    end
   end
 
   describe "completion_candidates/2" do

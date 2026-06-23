@@ -403,14 +403,20 @@ defmodule MingaEditor.Commands.AgentSubStates do
           {String.t(), non_neg_integer(), non_neg_integer()} | nil
   defp slash_command_token_at_cursor(state) do
     panel = AgentAccess.panel(state)
-    {line, col} = UIState.input_cursor(panel)
-    current_line = Enum.at(UIState.input_lines(panel), line, "")
-    before_cursor = String.slice(current_line, 0, col)
 
-    if leading_slash_token?(before_cursor) do
-      {String.trim_leading(before_cursor, "/"), line, 0}
-    else
-      nil
+    case UIState.input_cursor(panel) do
+      {0, col} ->
+        current_line = Enum.at(UIState.input_lines(panel), 0, "")
+        before_cursor = String.slice(current_line, 0, col)
+
+        if leading_slash_token?(before_cursor) do
+          {String.trim_leading(before_cursor, "/"), 0, 0}
+        else
+          nil
+        end
+
+      {_line, _col} ->
+        nil
     end
   end
 
