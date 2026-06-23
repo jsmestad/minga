@@ -192,6 +192,38 @@ defmodule MingaAgent.MarkdownTest do
       assert length(result) == 2
     end
 
+    test "parses indented code blocks outside lists" do
+      text = "    def hello\n    :world"
+      result = Markdown.parse(text)
+
+      assert [
+               {[{"def hello", {:code_content, ""}}], :code},
+               {[{":world", {:code_content, ""}}], :code}
+             ] = result
+    end
+
+    test "keeps four-space bullet continuations as prose" do
+      text = "- item\n    wrapped continuation\n    second continuation"
+      result = Markdown.parse(text)
+
+      assert [
+               {[{"  • item", :plain}], :list_item},
+               {[{"    wrapped continuation", :plain}], :text},
+               {[{"    second continuation", :plain}], :text}
+             ] = result
+    end
+
+    test "blank line ends list continuation before indented code" do
+      text = "- item\n\n    code"
+      result = Markdown.parse(text)
+
+      assert [
+               {[{"  • item", :plain}], :list_item},
+               {[{"", :plain}], :empty},
+               {[{"code", {:code_content, ""}}], :code}
+             ] = result
+    end
+
     test "parses multiple paragraphs" do
       text = "First line\n\nSecond line"
       result = Markdown.parse(text)

@@ -13,6 +13,7 @@ defmodule MingaAgent.Markdown do
   - `` `inline code` ``
   - `[link text](https://example.com)`
   - Fenced code blocks (``` with optional language tag)
+  - Indented code blocks (4 spaces, outside list continuations)
   - `# Headers` (levels 1-3)
   - `- list items` and `* list items`
   - `> blockquotes`
@@ -473,16 +474,42 @@ defmodule MingaAgent.Markdown do
     parse_lines(rest, [{[{"", :plain}], :empty} | acc], nil)
   end
 
-  # Horizontal rule
-  defp parse_lines([line | rest], acc, nil) when line in ["---", "***", "___"] do
-    parse_lines(rest, [{[{"─────────────────────", :rule}], :rule} | acc], nil)
-  end
-
-  # Also match longer horizontal rules
   defp parse_lines([line | rest], acc, nil) do
-    parsed = parse_non_code_line(line, String.trim(line))
+    parsed = parse_indented_or_non_code_line(indented_code_line?(line, acc), line)
     parse_lines(rest, [parsed | acc], nil)
   end
+
+  @spec parse_indented_or_non_code_line(boolean(), String.t()) :: parsed_line()
+  defp parse_indented_or_non_code_line(true, line) do
+    {[{String.slice(line, 4..-1//1), {:code_content, ""}}], :code}
+  end
+
+  defp parse_indented_or_non_code_line(false, line) do
+    parse_non_code_line(line, String.trim(line))
+  end
+
+  @spec indented_code_line?(String.t(), [parsed_line()]) :: boolean()
+  defp indented_code_line?(line, acc) do
+    trimmed = String.trim(line)
+
+    trimmed != "" and indent_width(line) >= 4 and not markdown_list_line?(trimmed) and
+      not in_list_continuation?(acc)
+  end
+
+  @spec markdown_list_line?(String.t()) :: boolean()
+  defp markdown_list_line?("- " <> _), do: true
+  defp markdown_list_line?("* " <> _), do: true
+  defp markdown_list_line?(trimmed), do: Regex.match?(~r/^\d+\.\s/, trimmed)
+
+  @spec in_list_continuation?([parsed_line()]) :: boolean()
+  defp in_list_continuation?([{_segments, :list_item} | _rest]), do: true
+  defp in_list_continuation?([{_segments, :empty} | _rest]), do: false
+
+  defp in_list_continuation?([{[{text, _style} | _rest_segments], :text} | rest]) do
+    indent_width(text) >= 2 and in_list_continuation?(rest)
+  end
+
+  defp in_list_continuation?(_acc), do: false
 
   @spec parse_non_code_line(String.t(), String.t()) :: parsed_line()
   defp parse_non_code_line(_line, "###" <> _ = trimmed), do: parse_header_line(trimmed, :header3)
