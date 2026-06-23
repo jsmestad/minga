@@ -13,6 +13,7 @@ defmodule MingaAgent.ToolApproval.Preview do
           lines: [String.t()]
         }
 
+  @derive JSON.Encoder
   @enforce_keys [:kind, :summary, :lines]
   defstruct [:kind, :summary, :lines]
 

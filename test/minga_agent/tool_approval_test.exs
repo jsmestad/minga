@@ -2,6 +2,7 @@ defmodule MingaAgent.ToolApprovalTest do
   use ExUnit.Case, async: true
 
   alias MingaAgent.ToolApproval
+  alias MingaAgent.ToolApproval.Preview
 
   describe "build_preview/2" do
     test "builds command preview for shell tools" do
@@ -10,6 +11,16 @@ defmodule MingaAgent.ToolApprovalTest do
       assert preview.kind == :command
       assert preview.summary == "rm -rf tmp/build"
       assert "$ rm -rf tmp/build" in preview.lines
+    end
+
+    test "encodes approval previews as JSON" do
+      preview = Preview.new(:diff, "lib/app.ex", ["file: lib/app.ex", "-old", "+new"])
+
+      assert JSON.decode!(JSON.encode!(preview)) == %{
+               "kind" => "diff",
+               "summary" => "lib/app.ex",
+               "lines" => ["file: lib/app.ex", "-old", "+new"]
+             }
     end
 
     test "builds clean empty previews for read-only tools" do
