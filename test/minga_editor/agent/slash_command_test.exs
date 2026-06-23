@@ -1,5 +1,5 @@
 defmodule MingaEditor.Agent.SlashCommandTest do
-  # Uses XDG_CONFIG_HOME to verify /resume opens persisted sessions through the public slash command path.
+  # async: false because completion_candidates tests mutate Minga.Config.set_option(:agent_models).
   use ExUnit.Case, async: false
 
   alias MingaAgent.Memory
@@ -73,20 +73,6 @@ defmodule MingaEditor.Agent.SlashCommandTest do
 
   defp start_session do
     start_supervised!({Session, provider: NoopProvider, provider_opts: []})
-  end
-
-  defp with_config_home(dir, fun) do
-    previous = Process.put(:minga_config_home, dir)
-
-    try do
-      fun.()
-    after
-      if previous do
-        Process.put(:minga_config_home, previous)
-      else
-        Process.delete(:minga_config_home)
-      end
-    end
   end
 
   describe "slash_command?/1" do
@@ -312,28 +298,26 @@ defmodule MingaEditor.Agent.SlashCommandTest do
     end
 
     test "/resume opens the persisted agent session picker", %{tmp_dir: dir} do
-      with_config_home(dir, fn ->
-        SessionStore.save(
-          %{
-            id: "resume-target",
-            timestamp: "2026-01-01T00:00:00Z",
-            last_message_at: "2026-01-01T00:00:00Z",
-            title: "Resume target",
-            model_name: "test-model",
-            provider_name: "native",
-            messages: [{:user, "Resume target"}],
-            usage: %TurnUsage{}
-          },
-          dir
-        )
+      SessionStore.save(
+        %{
+          id: "resume-target",
+          timestamp: "2026-01-01T00:00:00Z",
+          last_message_at: "2026-01-01T00:00:00Z",
+          title: "Resume target",
+          model_name: "test-model",
+          provider_name: "native",
+          messages: [{:user, "Resume target"}],
+          usage: %TurnUsage{}
+        },
+        dir
+      )
 
-        session = start_session()
-        {:ok, state} = SlashCommand.execute(mock_state(session: session), "/resume")
+      session = start_session()
+      {:ok, state} = SlashCommand.execute(mock_state(session: session), "/resume", dir)
 
-        assert {:picker, %{picker_ui: picker_ui}} = state.shell_state.modal
-        assert picker_ui.source == MingaEditor.UI.Picker.AgentSessionSource
-        assert picker_ui.context == %{persisted_only: true}
-      end)
+      assert {:picker, %{picker_ui: picker_ui}} = state.shell_state.modal
+      assert picker_ui.source == MingaEditor.UI.Picker.AgentSessionSource
+      assert picker_ui.context.persisted_only == true
     end
 
     test "/sessions opens the same agent session picker" do
@@ -431,22 +415,18 @@ defmodule MingaEditor.Agent.SlashCommandTest do
     end
 
     test "/memory add and clear replace /remember and /forget", %{tmp_dir: dir} do
-      with_config_home(dir, fn ->
-        {:ok, state} = SlashCommand.execute(mock_state(), "/memory add prefer small diffs")
-        assert state.shell_state.status_msg == "Saved to memory: prefer small diffs"
-        assert Memory.read(dir) =~ "prefer small diffs"
+      {:ok, state} = SlashCommand.execute(mock_state(), "/memory add prefer small diffs", dir)
+      assert state.shell_state.status_msg == "Saved to memory: prefer small diffs"
+      assert Memory.read(dir) =~ "prefer small diffs"
 
-        {:ok, state} = SlashCommand.execute(mock_state(), "/memory clear")
-        assert state.shell_state.status_msg == "Memory cleared."
-        assert Memory.read(dir) == nil
-      end)
+      {:ok, state} = SlashCommand.execute(mock_state(), "/memory clear", dir)
+      assert state.shell_state.status_msg == "Memory cleared."
+      assert Memory.read(dir) == nil
     end
 
     test "/memory shows memory usage", %{tmp_dir: dir} do
-      with_config_home(dir, fn ->
-        {:ok, state} = SlashCommand.execute(mock_state(), "/memory")
-        assert state.shell_state.status_msg =~ "No memory file found"
-      end)
+      {:ok, state} = SlashCommand.execute(mock_state(), "/memory", dir)
+      assert state.shell_state.status_msg =~ "No memory file found"
     end
 
     test "/memory rejects unknown subcommands" do

@@ -94,10 +94,14 @@ defmodule Minga.Config.Loader do
 
     Agent.start_link(
       fn ->
-        if config_home, do: Process.put(:minga_config_home, config_home)
-
         state =
-          load_all(keymap_server, options_server, Minga.SafeMode.active?(), cleanup_callbacks)
+          load_all(
+            keymap_server,
+            options_server,
+            Minga.SafeMode.active?(),
+            cleanup_callbacks,
+            config_home
+          )
 
         if config_home, do: Map.put(state, :config_home, config_home), else: state
       end,
@@ -263,14 +267,7 @@ defmodule Minga.Config.Loader do
 
       # Re-run the full load sequence (includes starting extensions).
       # Reload deliberately ignores startup safe mode so fixed config can be loaded without restarting.
-      if config_home, do: Process.put(:minga_config_home, config_home)
-
-      new_state =
-        try do
-          load_all(keymap_server, options_server, false, cleanup_callbacks)
-        after
-          if config_home, do: Process.delete(:minga_config_home)
-        end
+      new_state = load_all(keymap_server, options_server, false, cleanup_callbacks, config_home)
 
       Agent.update(server, fn _ -> new_state end)
 
@@ -305,9 +302,10 @@ defmodule Minga.Config.Loader do
           keymap_server(),
           options_server(),
           boolean(),
-          %{atom() => ContributionCleanup.cleanup_fun()} | nil
+          %{atom() => ContributionCleanup.cleanup_fun()} | nil,
+          String.t() | nil
         ) :: state()
-  defp load_all(keymap_server, options_server, safe_mode?, cleanup_callbacks)
+  defp load_all(keymap_server, options_server, safe_mode?, cleanup_callbacks, config_home)
        when is_boolean(safe_mode?) do
     previous_keymap_server = Process.put(:minga_config_keymap, keymap_server)
     previous_options_server = Process.put(:minga_config_options, options_server)
@@ -317,7 +315,7 @@ defmodule Minga.Config.Loader do
       config_cleanup_error =
         cleanup_source_owned_config_contributions(keymap_server, cleanup_callbacks)
 
-      config_path = resolve_config_path()
+      config_path = resolve_config_path(config_home)
       config_dir = Path.dirname(config_path)
 
       # 0. Register default popup rules (before user config so overrides work)
@@ -372,7 +370,7 @@ defmodule Minga.Config.Loader do
         # 8. Register bundled extensions, then discover plugins, then start extensions only after all
         # config sources have had a chance to declare them.
         register_bundled_extensions()
-        plugin_error = discover_and_register_plugins()
+        plugin_error = discover_and_register_plugins(config_home)
 
         start_all_error =
           if Process.whereis(Minga.Extension.Supervisor) != nil &&
@@ -489,9 +487,9 @@ defmodule Minga.Config.Loader do
 
   # ── Plugin Discovery ──────────────────────────────────────────────────────────
 
-  @spec discover_and_register_plugins() :: String.t() | nil
-  defp discover_and_register_plugins do
-    user_dir = user_plugins_dir()
+  @spec discover_and_register_plugins(String.t() | nil) :: String.t() | nil
+  defp discover_and_register_plugins(config_home) do
+    user_dir = user_plugins_dir(config_home)
     project_dir = project_plugins_dir()
 
     user_errors = register_plugins_from_dir(user_dir)
@@ -500,9 +498,9 @@ defmodule Minga.Config.Loader do
     merge_error_messages(user_errors ++ project_errors)
   end
 
-  @spec user_plugins_dir() :: String.t()
-  defp user_plugins_dir do
-    Path.join([config_base_dir(), "minga", "plugins"])
+  @spec user_plugins_dir(String.t() | nil) :: String.t()
+  defp user_plugins_dir(config_home) do
+    Path.join([config_base_dir(config_home), "minga", "plugins"])
   end
 
   @spec project_plugins_dir() :: String.t()
@@ -775,11 +773,11 @@ defmodule Minga.Config.Loader do
       {:error, msg}
   end
 
-  @spec resolve_config_path() :: String.t()
-  defp resolve_config_path do
+  @spec resolve_config_path(String.t() | nil) :: String.t()
+  defp resolve_config_path(config_home) do
     case cli_config_file() do
       path when is_binary(path) -> path
-      nil -> default_config_path()
+      nil -> default_config_path(config_home)
     end
   end
 
@@ -792,21 +790,21 @@ defmodule Minga.Config.Loader do
     end
   end
 
-  @spec default_gui_settings_path() :: String.t()
-  defp default_gui_settings_path do
-    default_config_path()
+  @spec default_gui_settings_path(String.t() | nil) :: String.t()
+  defp default_gui_settings_path(config_home \\ nil) do
+    default_config_path(config_home)
     |> Path.dirname()
     |> Path.join("gui_settings.exs")
   end
 
-  @spec default_config_path() :: String.t()
-  defp default_config_path do
-    Path.join([config_base_dir(), "minga", "config.exs"])
+  @spec default_config_path(String.t() | nil) :: String.t()
+  defp default_config_path(config_home) do
+    Path.join([config_base_dir(config_home), "minga", "config.exs"])
   end
 
-  @spec config_base_dir() :: String.t()
-  defp config_base_dir do
-    case Process.get(:minga_config_home) do
+  @spec config_base_dir(String.t() | nil) :: String.t()
+  defp config_base_dir(config_home) do
+    case config_home do
       dir when is_binary(dir) ->
         dir
 

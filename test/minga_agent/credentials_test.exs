@@ -5,123 +5,107 @@ defmodule MingaAgent.CredentialsTest do
 
   @test_dir "test/tmp/credentials_test"
 
-  setup do
-    Process.put(:minga_env_overrides, %{
-      "ANTHROPIC_API_KEY" => nil,
-      "OPENAI_API_KEY" => nil,
-      "GOOGLE_API_KEY" => nil,
-      "OPENROUTER_API_KEY" => nil,
-      "GROQ_API_KEY" => nil,
-      "MISTRAL_API_KEY" => nil,
-      "DEEPSEEK_API_KEY" => nil
-    })
+  @nil_env %{
+    "ANTHROPIC_API_KEY" => nil,
+    "OPENAI_API_KEY" => nil,
+    "GOOGLE_API_KEY" => nil,
+    "OPENROUTER_API_KEY" => nil,
+    "GROQ_API_KEY" => nil,
+    "MISTRAL_API_KEY" => nil,
+    "DEEPSEEK_API_KEY" => nil
+  }
 
+  setup do
     dir = Path.join(@test_dir, "#{System.unique_integer([:positive])}")
     File.mkdir_p!(dir)
     parent_dir = Path.join(dir, "config")
     File.mkdir_p!(Path.join(parent_dir, "minga"))
-    Process.put(:minga_config_home, parent_dir)
 
     on_exit(fn ->
-      Process.delete(:minga_env_overrides)
-      Process.delete(:minga_config_home)
       File.rm_rf!(dir)
     end)
+
+    opts = [config_dir: parent_dir, env: @nil_env]
 
     %{
       dir: dir,
       config_dir: parent_dir,
-      creds_path: Path.join([parent_dir, "minga", "credentials.json"])
+      creds_path: Path.join([parent_dir, "minga", "credentials.json"]),
+      opts: opts
     }
   end
 
-  describe "store/2 and resolve/1" do
-    test "stores and resolves a key from file", %{creds_path: creds_path} do
-      assert :ok = Credentials.store("anthropic", "sk-ant-test-123")
-      assert {:ok, "sk-ant-test-123", :file} = Credentials.resolve("anthropic")
+  describe "store/3 and resolve/2" do
+    test "stores and resolves a key from file", %{creds_path: creds_path, opts: opts} do
+      assert :ok = Credentials.store("anthropic", "sk-ant-test-123", opts)
+      assert {:ok, "sk-ant-test-123", :file} = Credentials.resolve("anthropic", opts)
 
       {:ok, stat} = File.stat(creds_path)
       assert stat.access == :read_write
     end
 
-    test "env var takes precedence over file" do
-      Process.put(:minga_env_overrides, %{
-        "ANTHROPIC_API_KEY" => "env-key-123",
-        "OPENAI_API_KEY" => nil,
-        "GOOGLE_API_KEY" => nil,
-        "OPENROUTER_API_KEY" => nil,
-        "GROQ_API_KEY" => nil,
-        "MISTRAL_API_KEY" => nil,
-        "DEEPSEEK_API_KEY" => nil
-      })
+    test "env var takes precedence over file", %{opts: opts} do
+      env_opts = Keyword.put(opts, :env, Map.put(@nil_env, "ANTHROPIC_API_KEY", "env-key-123"))
 
-      :ok = Credentials.store("anthropic", "file-key-456")
-      assert {:ok, "env-key-123", :env} = Credentials.resolve("anthropic")
+      :ok = Credentials.store("anthropic", "file-key-456", opts)
+      assert {:ok, "env-key-123", :env} = Credentials.resolve("anthropic", env_opts)
     end
 
-    test "returns :error when no key is configured" do
-      assert :error = Credentials.resolve("anthropic")
+    test "returns :error when no key is configured", %{opts: opts} do
+      assert :error = Credentials.resolve("anthropic", opts)
     end
 
-    test "stores keys for multiple providers" do
-      :ok = Credentials.store("anthropic", "ant-key")
-      :ok = Credentials.store("openai", "oai-key")
+    test "stores keys for multiple providers", %{opts: opts} do
+      :ok = Credentials.store("anthropic", "ant-key", opts)
+      :ok = Credentials.store("openai", "oai-key", opts)
 
-      assert {:ok, "ant-key", :file} = Credentials.resolve("anthropic")
-      assert {:ok, "oai-key", :file} = Credentials.resolve("openai")
+      assert {:ok, "ant-key", :file} = Credentials.resolve("anthropic", opts)
+      assert {:ok, "oai-key", :file} = Credentials.resolve("openai", opts)
     end
 
-    test "overwrites existing key on re-store" do
-      :ok = Credentials.store("anthropic", "old-key")
-      :ok = Credentials.store("anthropic", "new-key")
+    test "overwrites existing key on re-store", %{opts: opts} do
+      :ok = Credentials.store("anthropic", "old-key", opts)
+      :ok = Credentials.store("anthropic", "new-key", opts)
 
-      assert {:ok, "new-key", :file} = Credentials.resolve("anthropic")
+      assert {:ok, "new-key", :file} = Credentials.resolve("anthropic", opts)
     end
   end
 
-  describe "revoke/1" do
-    test "removes a stored key" do
-      :ok = Credentials.store("anthropic", "sk-ant-test")
-      assert {:ok, _, :file} = Credentials.resolve("anthropic")
+  describe "revoke/2" do
+    test "removes a stored key", %{opts: opts} do
+      :ok = Credentials.store("anthropic", "sk-ant-test", opts)
+      assert {:ok, _, :file} = Credentials.resolve("anthropic", opts)
 
-      :ok = Credentials.revoke("anthropic")
-      assert :error = Credentials.resolve("anthropic")
+      :ok = Credentials.revoke("anthropic", opts)
+      assert :error = Credentials.resolve("anthropic", opts)
     end
 
-    test "revoke is a no-op when no file exists" do
-      assert :ok = Credentials.revoke("anthropic")
+    test "revoke is a no-op when no file exists", %{opts: opts} do
+      assert :ok = Credentials.revoke("anthropic", opts)
     end
 
-    test "revoke preserves other providers" do
-      :ok = Credentials.store("anthropic", "ant-key")
-      :ok = Credentials.store("openai", "oai-key")
+    test "revoke preserves other providers", %{opts: opts} do
+      :ok = Credentials.store("anthropic", "ant-key", opts)
+      :ok = Credentials.store("openai", "oai-key", opts)
 
-      :ok = Credentials.revoke("anthropic")
-      assert :error = Credentials.resolve("anthropic")
-      assert {:ok, "oai-key", :file} = Credentials.resolve("openai")
+      :ok = Credentials.revoke("anthropic", opts)
+      assert :error = Credentials.resolve("anthropic", opts)
+      assert {:ok, "oai-key", :file} = Credentials.resolve("openai", opts)
     end
   end
 
-  describe "status/0" do
-    test "reports unconfigured when nothing is set" do
-      statuses = Credentials.status()
+  describe "status/1" do
+    test "reports unconfigured when nothing is set", %{opts: opts} do
+      statuses = Credentials.status(opts)
       assert length(statuses) == 9
     end
 
-    test "reports configured with correct source" do
-      :ok = Credentials.store("anthropic", "ant-key")
+    test "reports configured with correct source", %{opts: opts} do
+      :ok = Credentials.store("anthropic", "ant-key", opts)
 
-      Process.put(:minga_env_overrides, %{
-        "ANTHROPIC_API_KEY" => nil,
-        "OPENAI_API_KEY" => "oai-env-key",
-        "GOOGLE_API_KEY" => nil,
-        "OPENROUTER_API_KEY" => nil,
-        "GROQ_API_KEY" => nil,
-        "MISTRAL_API_KEY" => nil,
-        "DEEPSEEK_API_KEY" => nil
-      })
+      env_opts = Keyword.put(opts, :env, Map.put(@nil_env, "OPENAI_API_KEY", "oai-env-key"))
 
-      statuses = Credentials.status()
+      statuses = Credentials.status(env_opts)
       ant = Enum.find(statuses, &(&1.provider == "anthropic"))
       oai = Enum.find(statuses, &(&1.provider == "openai"))
       ggl = Enum.find(statuses, &(&1.provider == "google"))
@@ -135,13 +119,13 @@ defmodule MingaAgent.CredentialsTest do
   end
 
   describe "any_configured?/0" do
-    test "returns false when nothing is configured" do
-      refute Credentials.any_configured?()
+    test "returns false when nothing is configured", %{opts: opts} do
+      refute Credentials.any_configured?(opts)
     end
 
-    test "returns true when at least one key exists" do
-      :ok = Credentials.store("anthropic", "some-key")
-      assert Credentials.any_configured?()
+    test "returns true when at least one key exists", %{opts: opts} do
+      :ok = Credentials.store("anthropic", "some-key", opts)
+      assert Credentials.any_configured?(opts)
     end
   end
 

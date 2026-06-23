@@ -79,11 +79,11 @@ defmodule MingaAgent.Credentials do
   Returns `{:ok, key, source}` if found, or `:error` if no key is
   configured anywhere.
   """
-  @spec resolve(provider()) :: {:ok, String.t(), key_source()} | :error
-  def resolve(provider) when is_binary(provider) do
-    case resolve_from_env(provider) do
+  @spec resolve(provider(), keyword()) :: {:ok, String.t(), key_source()} | :error
+  def resolve(provider, opts \\ []) when is_binary(provider) do
+    case resolve_from_env(provider, opts) do
       {:ok, key} -> {:ok, key, :env}
-      :error -> resolve_from_file(provider)
+      :error -> resolve_from_file(provider, opts)
     end
   end
 
@@ -93,9 +93,9 @@ defmodule MingaAgent.Credentials do
   Creates the config directory and file if they don't exist. Sets
   file permissions to 0600 (owner read/write only).
   """
-  @spec store(provider(), String.t()) :: :ok | {:error, term()}
-  def store(provider, key) when is_binary(provider) and is_binary(key) do
-    path = credentials_path()
+  @spec store(provider(), String.t(), keyword()) :: :ok | {:error, term()}
+  def store(provider, key, opts \\ []) when is_binary(provider) and is_binary(key) do
+    path = credentials_path(opts)
     dir = Path.dirname(path)
 
     with :ok <- ensure_directory(dir),
@@ -113,9 +113,9 @@ defmodule MingaAgent.Credentials do
   Only removes from the credentials file. Environment variables are
   unaffected (and will still be used if set).
   """
-  @spec revoke(provider()) :: :ok | {:error, term()}
-  def revoke(provider) when is_binary(provider) do
-    revoke_api_key(provider)
+  @spec revoke(provider(), keyword()) :: :ok | {:error, term()}
+  def revoke(provider, opts \\ []) when is_binary(provider) do
+    revoke_api_key(provider, opts)
     |> merge_revoke_result(revoke_oauth_entry(provider))
   end
 
@@ -125,11 +125,11 @@ defmodule MingaAgent.Credentials do
   Each entry shows whether a key is configured and where it was found
   (`:env`, `:file`, `:oauth`, `:local`, or `nil`). Keys themselves are never exposed.
   """
-  @spec status() :: [provider_status()]
-  def status do
+  @spec status(keyword()) :: [provider_status()]
+  def status(opts \\ []) do
     standard =
       Enum.map(@known_providers, fn provider ->
-        case resolve(provider) do
+        case resolve(provider, opts) do
           {:ok, _key, source} ->
             %ProviderStatus{provider: provider, configured: true, source: source}
 
@@ -159,9 +159,9 @@ defmodule MingaAgent.Credentials do
   @doc """
   Returns true if any provider has a configured API key.
   """
-  @spec any_configured?() :: boolean()
-  def any_configured? do
-    Enum.any?(@known_providers, fn p -> resolve(p) != :error end) or
+  @spec any_configured?(keyword()) :: boolean()
+  def any_configured?(opts \\ []) do
+    Enum.any?(@known_providers, fn p -> resolve(p, opts) != :error end) or
       oauth_configured?() or
       ollama_available?()
   end
@@ -260,9 +260,9 @@ defmodule MingaAgent.Credentials do
 
   # ── Private ─────────────────────────────────────────────────────────────────
 
-  @spec revoke_api_key(provider()) :: :ok | {:error, term()}
-  defp revoke_api_key(provider) do
-    path = credentials_path()
+  @spec revoke_api_key(provider(), keyword()) :: :ok | {:error, term()}
+  defp revoke_api_key(provider, opts) do
+    path = credentials_path(opts)
 
     case read_credentials_file(path) do
       {:ok, existing} ->
@@ -306,18 +306,19 @@ defmodule MingaAgent.Credentials do
   defp merge_revoke_result({:error, _} = err, _), do: err
   defp merge_revoke_result(_, {:error, _} = err), do: err
 
-  @spec resolve_from_env(provider()) :: {:ok, String.t()} | :error
-  defp resolve_from_env(provider) do
+  @spec resolve_from_env(provider(), keyword()) :: {:ok, String.t()} | :error
+  defp resolve_from_env(provider, opts) do
     case Map.get(@env_vars, String.downcase(provider)) do
       nil ->
         :error
 
       var_name ->
+        env = Keyword.get(opts, :env, %{})
+
         value =
-          case Process.get(:minga_env_overrides) do
-            %{^var_name => val} -> val
-            _ -> System.get_env(var_name)
-          end
+          if Map.has_key?(env, var_name),
+            do: env[var_name],
+            else: System.get_env(var_name)
 
         case value do
           nil -> :error
@@ -327,9 +328,9 @@ defmodule MingaAgent.Credentials do
     end
   end
 
-  @spec resolve_from_file(provider()) :: {:ok, String.t(), :file} | :error
-  defp resolve_from_file(provider) do
-    path = credentials_path()
+  @spec resolve_from_file(provider(), keyword()) :: {:ok, String.t(), :file} | :error
+  defp resolve_from_file(provider, opts) do
+    path = credentials_path(opts)
 
     case read_credentials_file(path) do
       {:ok, creds} ->
@@ -362,10 +363,10 @@ defmodule MingaAgent.Credentials do
     end
   end
 
-  @spec credentials_path() :: String.t()
-  defp credentials_path do
+  @spec credentials_path(keyword()) :: String.t()
+  defp credentials_path(opts) do
     config_dir =
-      Process.get(:minga_config_home) ||
+      Keyword.get(opts, :config_dir) ||
         System.get_env("XDG_CONFIG_HOME") ||
         Path.join(System.user_home!(), ".config")
 

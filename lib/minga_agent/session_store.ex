@@ -48,7 +48,6 @@ defmodule MingaAgent.SessionStore do
   def sessions_dir(config_dir \\ nil) do
     config_dir =
       config_dir ||
-        Process.get(:minga_config_home) ||
         System.get_env("XDG_CONFIG_HOME") ||
         Path.join(System.user_home!(), ".config")
 

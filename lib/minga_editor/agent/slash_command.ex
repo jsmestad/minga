@@ -133,13 +133,15 @@ defmodule MingaEditor.Agent.SlashCommand do
   Returns `{:ok, state}` if the command was recognized and executed,
   or `{:error, message}` if the command is unknown.
   """
-  @spec execute(state(), String.t()) :: {:ok, state()} | {:error, String.t()}
-  def execute(state, "/" <> rest) do
+  @spec execute(state(), String.t(), String.t() | nil) :: {:ok, state()} | {:error, String.t()}
+  def execute(state, text, config_dir \\ nil)
+
+  def execute(state, "/" <> rest, config_dir) do
     {cmd_name, args} = parse_command(rest)
-    dispatch(state, cmd_name, args)
+    dispatch(state, cmd_name, args, config_dir)
   end
 
-  def execute(_state, _text), do: {:error, "Not a slash command"}
+  def execute(_state, _text, _config_dir), do: {:error, "Not a slash command"}
 
   @spec command_completion_candidate(command()) :: completion_candidate()
   defp command_completion_candidate(%Command{name: name, description: description}) do
@@ -329,38 +331,42 @@ defmodule MingaEditor.Agent.SlashCommand do
 
   # ── Command dispatch ────────────────────────────────────────────────────────
 
-  @spec dispatch(state(), String.t(), String.t()) :: {:ok, state()} | {:error, String.t()}
-  defp dispatch(state, "clear", _args), do: {:ok, do_clear(state)}
-  defp dispatch(state, "stop", _args), do: {:ok, do_stop(state)}
-  defp dispatch(state, "thinking", args), do: {:ok, do_thinking(state, args)}
-  defp dispatch(state, "model", args), do: do_model(state, args)
-  defp dispatch(state, "trust", args), do: do_trust(state, args)
-  defp dispatch(state, "mcp", _args), do: {:ok, do_mcp(state)}
-  defp dispatch(state, "help", _args), do: {:ok, do_help(state)}
-  defp dispatch(state, "plan", _args), do: do_plan(state)
-  defp dispatch(state, "exec", _args), do: do_exec(state)
-  defp dispatch(state, "skill:plan", _args), do: do_plan(state)
-  defp dispatch(state, "skill:off:plan", _args), do: do_exec(state)
-  defp dispatch(state, "resume", _args), do: {:ok, do_resume(state)}
-  defp dispatch(state, "sessions", _args), do: {:ok, do_sessions(state)}
-  defp dispatch(state, "auth", args), do: {:ok, do_auth(state, args)}
-  defp dispatch(state, "instructions", _args), do: {:ok, do_instructions(state)}
-  defp dispatch(state, "system-prompt", _args), do: {:ok, do_system_prompt(state)}
-  defp dispatch(state, "budget", args), do: do_budget(state, args)
-  defp dispatch(state, "compact", _args), do: do_compact(state)
-  defp dispatch(state, "clear-chat", _args), do: {:ok, AgentCommands.clear_chat_display(state)}
-  defp dispatch(state, "continue", _args), do: do_continue(state)
-  defp dispatch(state, "export", "html"), do: do_export(state, :html)
-  defp dispatch(state, "export", _args), do: do_export(state, :markdown)
-  defp dispatch(state, "skills", _args), do: {:ok, do_skills(state)}
-  defp dispatch(state, "memory", args), do: do_memory(state, args)
-  defp dispatch(state, "branch", args), do: do_branch(state, args)
-  defp dispatch(state, "branches", _args), do: do_branches(state)
-  defp dispatch(state, "switch", args), do: do_switch_branch(state, args)
-  defp dispatch(state, "login", args), do: {:ok, do_login(state, args)}
+  @spec dispatch(state(), String.t(), String.t(), String.t() | nil) ::
+          {:ok, state()} | {:error, String.t()}
+  defp dispatch(state, "clear", _args, _config_dir), do: {:ok, do_clear(state)}
+  defp dispatch(state, "stop", _args, _config_dir), do: {:ok, do_stop(state)}
+  defp dispatch(state, "thinking", args, _config_dir), do: {:ok, do_thinking(state, args)}
+  defp dispatch(state, "model", args, _config_dir), do: do_model(state, args)
+  defp dispatch(state, "trust", args, _config_dir), do: do_trust(state, args)
+  defp dispatch(state, "mcp", _args, _config_dir), do: {:ok, do_mcp(state)}
+  defp dispatch(state, "help", _args, _config_dir), do: {:ok, do_help(state)}
+  defp dispatch(state, "plan", _args, _config_dir), do: do_plan(state)
+  defp dispatch(state, "exec", _args, _config_dir), do: do_exec(state)
+  defp dispatch(state, "skill:plan", _args, _config_dir), do: do_plan(state)
+  defp dispatch(state, "skill:off:plan", _args, _config_dir), do: do_exec(state)
+  defp dispatch(state, "resume", _args, config_dir), do: {:ok, do_resume(state, config_dir)}
+  defp dispatch(state, "sessions", _args, _config_dir), do: {:ok, do_sessions(state)}
+  defp dispatch(state, "auth", args, _config_dir), do: {:ok, do_auth(state, args)}
+  defp dispatch(state, "instructions", _args, _config_dir), do: {:ok, do_instructions(state)}
+  defp dispatch(state, "system-prompt", _args, _config_dir), do: {:ok, do_system_prompt(state)}
+  defp dispatch(state, "budget", args, _config_dir), do: do_budget(state, args)
+  defp dispatch(state, "compact", _args, _config_dir), do: do_compact(state)
+
+  defp dispatch(state, "clear-chat", _args, _config_dir),
+    do: {:ok, AgentCommands.clear_chat_display(state)}
+
+  defp dispatch(state, "continue", _args, _config_dir), do: do_continue(state)
+  defp dispatch(state, "export", "html", _config_dir), do: do_export(state, :html)
+  defp dispatch(state, "export", _args, _config_dir), do: do_export(state, :markdown)
+  defp dispatch(state, "skills", _args, _config_dir), do: {:ok, do_skills(state)}
+  defp dispatch(state, "memory", args, config_dir), do: do_memory(state, args, config_dir)
+  defp dispatch(state, "branch", args, _config_dir), do: do_branch(state, args)
+  defp dispatch(state, "branches", _args, _config_dir), do: do_branches(state)
+  defp dispatch(state, "switch", args, _config_dir), do: do_switch_branch(state, args)
+  defp dispatch(state, "login", args, _config_dir), do: {:ok, do_login(state, args)}
 
   # /skill:name activates, /skill:off:name deactivates, otherwise check dynamic commands
-  defp dispatch(state, cmd, args) when is_binary(cmd) do
+  defp dispatch(state, cmd, args, _config_dir) when is_binary(cmd) do
     case parse_skill_command(cmd) do
       {:activate, name} -> do_activate_skill(state, name)
       {:deactivate, name} -> do_deactivate_skill(state, name)
@@ -611,9 +617,11 @@ defmodule MingaEditor.Agent.SlashCommand do
     end
   end
 
-  @spec do_resume(state()) :: state()
-  defp do_resume(state) do
-    PickerUI.open(state, MingaEditor.UI.Picker.AgentSessionSource, %{persisted_only: true})
+  @spec do_resume(state(), String.t() | nil) :: state()
+  defp do_resume(state, config_dir) do
+    context = %{persisted_only: true}
+    context = if config_dir, do: Map.put(context, :session_store_dir, config_dir), else: context
+    PickerUI.open(state, MingaEditor.UI.Picker.AgentSessionSource, context)
   end
 
   @spec do_sessions(state()) :: state()
@@ -1149,32 +1157,34 @@ defmodule MingaEditor.Agent.SlashCommand do
     end
   end
 
-  @spec do_memory(state(), String.t()) :: {:ok, state()} | {:error, String.t()}
-  defp do_memory(state, ""), do: {:ok, emit_system_message(state, Memory.summary())}
+  @spec do_memory(state(), String.t(), String.t() | nil) :: {:ok, state()} | {:error, String.t()}
+  defp do_memory(state, "", config_dir),
+    do: {:ok, emit_system_message(state, Memory.summary(config_dir))}
 
-  defp do_memory(state, args) do
+  defp do_memory(state, args, config_dir) do
     args
     |> String.trim()
     |> String.split(" ", parts: 2)
-    |> do_memory_parts(state)
+    |> do_memory_parts(state, config_dir)
   end
 
-  @spec do_memory_parts([String.t()], state()) :: {:ok, state()} | {:error, String.t()}
-  defp do_memory_parts(["add", text], state) when text != "" do
-    case Memory.append(text) do
+  @spec do_memory_parts([String.t()], state(), String.t() | nil) ::
+          {:ok, state()} | {:error, String.t()}
+  defp do_memory_parts(["add", text], state, config_dir) when text != "" do
+    case Memory.append(text, config_dir) do
       :ok -> {:ok, emit_system_message(state, "Saved to memory: #{String.trim(text)}")}
       {:error, reason} -> {:error, "Failed to save memory: #{inspect(reason)}"}
     end
   end
 
-  defp do_memory_parts(["clear"], state) do
-    case Memory.clear() do
+  defp do_memory_parts(["clear"], state, config_dir) do
+    case Memory.clear(config_dir) do
       :ok -> {:ok, emit_system_message(state, "Memory cleared.")}
       {:error, reason} -> {:error, "Failed to clear memory: #{inspect(reason)}"}
     end
   end
 
-  defp do_memory_parts(_parts, _state),
+  defp do_memory_parts(_parts, _state, _config_dir),
     do: {:error, "Usage: /memory, /memory add <text>, /memory clear"}
 
   @spec do_branch(state(), String.t()) :: {:ok, state()} | {:error, String.t()}
