@@ -16,8 +16,11 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
 
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
+  alias MingaAgent.FileMention
   alias MingaEditor.Agent.ViewContext
+  alias MingaEditor.Agent.SlashCommand
   alias Minga.RenderModel.Window, as: RenderWindow
+  alias Minga.RenderModel.Window.DiagnosticRange
   alias Minga.RenderModel.Window.Gutter
   alias Minga.RenderModel.Window.GutterMetrics
   alias Minga.RenderModel.Window.HitRegion
@@ -32,6 +35,16 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
 
   @typedoc "Agent view context."
   @type ctx :: ViewContext.t()
+  @type token_status :: :valid | :invalid
+  @type token_range :: %{
+          start_col: non_neg_integer(),
+          end_col: non_neg_integer(),
+          status: token_status()
+        }
+  @type token_context :: %{
+          project_files: MapSet.t(String.t()),
+          project_root: String.t()
+        }
 
   @doc "Reserved window_id for the agent prompt RenderWindow."
   @spec prompt_window_id() :: pos_integer()
@@ -100,15 +113,35 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
 
     # Build wrapped visual lines
     wrapped = InputWrap.wrap_lines(lines, inner_width)
+    token_context = token_context(opts)
 
-    visual_rows =
+    {visual_rows, diagnostic_ranges} =
       wrapped
       |> Enum.drop(scroll)
       |> Enum.take(visible_count)
-      |> Enum.map(fn {logical_idx, vl} ->
+      |> Enum.with_index()
+      |> Enum.map_reduce([], fn {{logical_idx, vl}, display_row}, acc ->
         line_text = Enum.at(lines, logical_idx)
-        build_visual_row(vl, line_text, logical_idx, panel, at, inner_width)
+
+        {row, ranges} =
+          build_visual_row(
+            vl,
+            line_text,
+            logical_idx,
+            display_row,
+            panel,
+            at,
+            inner_width,
+            token_context
+          )
+
+        {row, [ranges | acc]}
       end)
+
+    diagnostic_ranges =
+      diagnostic_ranges
+      |> Enum.reverse()
+      |> List.flatten()
 
     # Cursor position relative to the visible window
     display_cursor_row = cursor_visual - scroll
@@ -133,7 +166,7 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
       cursor_visible: panel.input_focused,
       selection: selection,
       search_matches: [],
-      diagnostic_ranges: [],
+      diagnostic_ranges: diagnostic_ranges,
       document_highlights: [],
       annotations: [],
       gutter: prompt_gutter(prompt_id, rect, panel.input_focused),
@@ -227,16 +260,18 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
           InputWrap.visual_line(),
           String.t(),
           non_neg_integer(),
+          non_neg_integer(),
           Panel.t(),
           Theme.Agent.t(),
-          pos_integer()
-        ) :: Row.t()
-  defp build_visual_row(vl, line_text, logical_idx, panel, at, inner_width) do
-    {display_text, fg_color, bg_color} =
+          pos_integer(),
+          token_context()
+        ) :: {Row.t(), [DiagnosticRange.t()]}
+  defp build_visual_row(vl, line_text, logical_idx, display_row, panel, at, inner_width, ctx) do
+    {display_text, fg_color, bg_color, style_tokens?} =
       if UIState.paste_placeholder?(line_text) and vl.col_offset == 0 do
         case UIState.paste_block_index(line_text) do
           nil ->
-            {vl.text, rgb_to_int(at.text_fg), rgb_to_int(at.input_bg)}
+            {vl.text, rgb_to_int(at.text_fg), rgb_to_int(at.input_bg), true}
 
           block_index ->
             line_count = paste_block_line_count(panel.pasted_blocks, block_index)
@@ -245,33 +280,31 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
             # Paste pills use a distinct background for visual separation.
             # Blend the input_bg with a subtle highlight to create a pill effect.
             pill_bg = paste_pill_bg(at.input_bg)
-            {text, rgb_to_int(at.hint_fg), pill_bg}
+            {text, rgb_to_int(at.hint_fg), pill_bg, false}
         end
       else
-        {vl.text, rgb_to_int(at.text_fg), rgb_to_int(at.input_bg)}
+        {vl.text, rgb_to_int(at.text_fg), rgb_to_int(at.input_bg), true}
       end
 
-    # Build a single span covering the entire text with the appropriate color
     text_width = String.length(display_text)
+    row_start = vl.col_offset
+    row_end = row_start + text_width
+    accent_color = rgb_to_int(at.input_border)
 
-    spans =
-      if text_width > 0 do
-        [
-          %Span{
-            start_col: 0,
-            end_col: text_width,
-            fg: fg_color,
-            bg: bg_color,
-            attrs: 0,
-            font_weight: 0,
-            font_id: 0
-          }
-        ]
+    token_ranges =
+      if style_tokens? do
+        token_ranges(line_text, logical_idx, ctx)
       else
         []
       end
 
-    %Row{
+    valid_ranges = clipped_token_ranges(token_ranges, :valid, row_start, row_end)
+    invalid_ranges = clipped_token_ranges(token_ranges, :invalid, row_start, row_end)
+
+    spans = styled_spans(text_width, fg_color, bg_color, accent_color, valid_ranges)
+    diagnostic_ranges = diagnostic_ranges(display_row, invalid_ranges)
+
+    row = %Row{
       row_id: Row.stable_id(:normal, logical_idx, vl.col_offset),
       row_type: :normal,
       buf_line: logical_idx,
@@ -280,7 +313,213 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
       spans: spans,
       content_hash: Row.compute_hash(display_text, spans)
     }
+
+    {row, diagnostic_ranges}
   end
+
+  @spec token_context(keyword()) :: token_context()
+  defp token_context(opts) do
+    project_root = Keyword.get_lazy(opts, :project_root, &safe_project_root/0)
+
+    project_files =
+      opts
+      |> Keyword.get_lazy(:project_files, &safe_project_files/0)
+      |> Enum.map(&normalize_project_file/1)
+      |> MapSet.new()
+
+    %{project_root: project_root, project_files: project_files}
+  end
+
+  @spec token_ranges(String.t(), non_neg_integer(), token_context()) :: [token_range()]
+  defp token_ranges(line_text, logical_idx, ctx) do
+    slash_token_ranges(line_text, logical_idx) ++ mention_token_ranges(line_text, ctx)
+  end
+
+  @spec slash_token_ranges(String.t(), non_neg_integer()) :: [token_range()]
+  defp slash_token_ranges("/" <> _ = line_text, 0) do
+    token_length = leading_token_length(line_text)
+    token = String.slice(line_text, 0, token_length)
+    [%{start_col: 0, end_col: token_length, status: slash_token_status(token)}]
+  end
+
+  defp slash_token_ranges(_line_text, _logical_idx), do: []
+
+  @spec slash_token_status(String.t()) :: token_status()
+  defp slash_token_status(token) do
+    if SlashCommand.known_command?(token) or SlashCommand.completions(token) != [] do
+      :valid
+    else
+      :invalid
+    end
+  end
+
+  @spec leading_token_length(String.t()) :: non_neg_integer()
+  defp leading_token_length(text) do
+    text
+    |> String.graphemes()
+    |> Enum.take_while(&(&1 not in [" ", "\t", "\n"]))
+    |> length()
+  end
+
+  @spec mention_token_ranges(String.t(), token_context()) :: [token_range()]
+  defp mention_token_ranges(line_text, ctx) do
+    line_text
+    |> FileMention.extract_mentions()
+    |> Enum.map(fn %{path: path, start: start_col, stop: end_col} ->
+      %{
+        start_col: start_col,
+        end_col: end_col,
+        status: mention_token_status(path, ctx)
+      }
+    end)
+  end
+
+  @spec mention_token_status(String.t(), token_context()) :: token_status()
+  defp mention_token_status(path, ctx) do
+    if known_project_file?(path, ctx) or existing_project_file?(path, ctx.project_root) do
+      :valid
+    else
+      :invalid
+    end
+  end
+
+  @spec known_project_file?(String.t(), token_context()) :: boolean()
+  defp known_project_file?(path, %{project_files: project_files}) do
+    MapSet.member?(project_files, normalize_project_file(path))
+  end
+
+  @spec existing_project_file?(String.t(), String.t()) :: boolean()
+  defp existing_project_file?(path, project_root) do
+    path
+    |> Path.expand(project_root)
+    |> File.regular?()
+  rescue
+    _ -> false
+  end
+
+  @spec clipped_token_ranges(
+          [token_range()],
+          token_status(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) ::
+          [token_range()]
+  defp clipped_token_ranges(token_ranges, status, row_start, row_end) do
+    token_ranges
+    |> Enum.filter(&(&1.status == status))
+    |> Enum.flat_map(&clip_token_range(&1, row_start, row_end))
+  end
+
+  @spec clip_token_range(token_range(), non_neg_integer(), non_neg_integer()) :: [token_range()]
+  defp clip_token_range(range, row_start, row_end) do
+    start_col = max(range.start_col, row_start)
+    end_col = min(range.end_col, row_end)
+
+    if end_col > start_col do
+      [%{range | start_col: start_col - row_start, end_col: end_col - row_start}]
+    else
+      []
+    end
+  end
+
+  @spec styled_spans(
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          [token_range()]
+        ) :: [Span.t()]
+  defp styled_spans(0, _fg_color, _bg_color, _accent_color, _valid_ranges), do: []
+
+  defp styled_spans(text_width, fg_color, bg_color, accent_color, valid_ranges) do
+    valid_ranges
+    |> Enum.sort_by(& &1.start_col)
+    |> build_styled_spans(0, text_width, fg_color, bg_color, accent_color, [])
+  end
+
+  @spec build_styled_spans(
+          [token_range()],
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          [Span.t()]
+        ) :: [Span.t()]
+  defp build_styled_spans([], cursor, text_width, fg_color, bg_color, _accent_color, acc) do
+    acc = maybe_add_span(acc, cursor, text_width, fg_color, bg_color)
+    Enum.reverse(acc)
+  end
+
+  defp build_styled_spans(
+         [%{start_col: start_col, end_col: end_col} | rest],
+         cursor,
+         text_width,
+         fg_color,
+         bg_color,
+         accent_color,
+         acc
+       ) do
+    acc = maybe_add_span(acc, cursor, start_col, fg_color, bg_color)
+    acc = maybe_add_span(acc, start_col, end_col, accent_color, bg_color)
+    build_styled_spans(rest, end_col, text_width, fg_color, bg_color, accent_color, acc)
+  end
+
+  @spec maybe_add_span(
+          [Span.t()],
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) ::
+          [Span.t()]
+  defp maybe_add_span(acc, start_col, end_col, fg_color, bg_color) when end_col > start_col do
+    [
+      %Span{
+        start_col: start_col,
+        end_col: end_col,
+        fg: fg_color,
+        bg: bg_color,
+        attrs: 0,
+        font_weight: 0,
+        font_id: 0
+      }
+      | acc
+    ]
+  end
+
+  defp maybe_add_span(acc, _start_col, _end_col, _fg_color, _bg_color), do: acc
+
+  @spec diagnostic_ranges(non_neg_integer(), [token_range()]) :: [DiagnosticRange.t()]
+  defp diagnostic_ranges(display_row, invalid_ranges) do
+    Enum.map(invalid_ranges, fn %{start_col: start_col, end_col: end_col} ->
+      %DiagnosticRange{
+        start_row: display_row,
+        start_col: start_col,
+        end_row: display_row,
+        end_col: end_col,
+        severity: :error
+      }
+    end)
+  end
+
+  @spec safe_project_files() :: [String.t()]
+  defp safe_project_files do
+    Minga.Project.files()
+  catch
+    :exit, _ -> []
+  end
+
+  @spec safe_project_root() :: String.t()
+  defp safe_project_root do
+    Minga.Project.resolve_root()
+  catch
+    :exit, _ -> File.cwd!()
+  end
+
+  @spec normalize_project_file(String.t()) :: String.t()
+  defp normalize_project_file("./" <> path), do: normalize_project_file(path)
+  defp normalize_project_file(path), do: path
 
   @spec build_selection(
           atom(),

@@ -136,6 +136,67 @@ defmodule MingaEditor.Agent.View.PromptRenderWindowTest do
       assert Enum.map(model.rows, & &1.text) == ["before", "󰆏 [pasted 3 lines]", "after"]
       assert hd(Enum.at(model.rows, 1).spans).bg != hd(hd(model.rows).spans).bg
     end
+
+    test "tints valid slash commands and file mentions" do
+      ctx = prompt_ctx("/help @lib/minga.ex", input_focused: true)
+      model = PromptRenderWindow.build(ctx, 40, {0, 0, 40, 1}, project_files: ["lib/minga.ex"])
+
+      [row] = model.rows
+      accent = Theme.agent_theme(ctx.theme).input_border
+
+      assert row.text == "/help @lib/minga.ex"
+      assert model.diagnostic_ranges == []
+      assert Enum.any?(row.spans, &match?(%{start_col: 0, end_col: 5, fg: ^accent}, &1))
+      assert Enum.any?(row.spans, &match?(%{start_col: 6, end_col: 19, fg: ^accent}, &1))
+    end
+
+    test "aligns mention styling after non-ascii text" do
+      ctx = prompt_ctx("é @lib/minga.ex", input_focused: true)
+      model = PromptRenderWindow.build(ctx, 40, {0, 0, 40, 1}, project_files: ["lib/minga.ex"])
+
+      [row] = model.rows
+      accent = Theme.agent_theme(ctx.theme).input_border
+
+      assert Enum.any?(row.spans, &match?(%{start_col: 2, end_col: 15, fg: ^accent}, &1))
+    end
+
+    test "marks unknown slash commands and unresolved mentions with diagnostic ranges" do
+      ctx = prompt_ctx("/helpx @missing.ex", input_focused: true)
+
+      model =
+        PromptRenderWindow.build(ctx, 40, {0, 0, 40, 1},
+          project_files: ["lib/minga.ex"],
+          project_root: System.tmp_dir!()
+        )
+
+      assert Enum.map(model.diagnostic_ranges, fn range ->
+               {range.start_row, range.start_col, range.end_row, range.end_col, range.severity}
+             end) == [
+               {0, 0, 0, 6, :error},
+               {0, 7, 0, 18, :error}
+             ]
+    end
+
+    test "keeps cursor and selection coordinates with multi-span rows" do
+      ctx =
+        prompt_ctx("ask @lib/minga.ex now",
+          input_focused: true,
+          cursor: {0, 17},
+          mode: :visual,
+          mode_state: %{visual_start: {0, 4}}
+        )
+
+      model = PromptRenderWindow.build(ctx, 40, {0, 0, 40, 1}, project_files: ["lib/minga.ex"])
+      [row] = model.rows
+
+      assert length(row.spans) > 1
+      assert model.cursor_row == 0
+      assert model.cursor_col == 17
+      assert model.selection.start_row == 0
+      assert model.selection.start_col == 4
+      assert model.selection.end_row == 0
+      assert model.selection.end_col == 17
+    end
   end
 
   defp prompt_ctx(text, opts) do

@@ -86,11 +86,26 @@ defmodule MingaAgent.FileMention do
   def extract_mentions(text) do
     # Match @ at start of string or after whitespace, followed by non-whitespace
     Regex.scan(~r/(?:^|(?<=\s))@(\S+)/, text, return: :index)
-    |> Enum.map(fn [{start, len}, {_path_start, path_len}] ->
-      # The full match includes the @, but path is the capture group
-      path = String.slice(text, start + 1, path_len)
-      %{path: path, start: start, stop: start + len}
+    |> Enum.map(fn [{_match_start, _match_len}, {path_start, path_len}] ->
+      mention_start = path_start - 1
+      mention_stop = path_start + path_len
+      path = binary_part(text, path_start, path_len)
+
+      %{
+        path: path,
+        start: byte_offset_to_col(text, mention_start),
+        stop: byte_offset_to_col(text, mention_stop)
+      }
     end)
+  end
+
+  @spec byte_offset_to_col(String.t(), non_neg_integer()) :: non_neg_integer()
+  defp byte_offset_to_col(_text, 0), do: 0
+
+  defp byte_offset_to_col(text, byte_offset) do
+    text
+    |> binary_part(0, byte_offset)
+    |> String.length()
   end
 
   @doc """
