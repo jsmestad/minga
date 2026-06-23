@@ -227,6 +227,35 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       assert AgentAccess.agent(rebuilt).runtime.active_tool_name == nil
     end
 
+    test "sync_transcript preserves cached transcript when the session dies before cleanup" do
+      pid = spawn(fn -> :ok end)
+      ref = Process.monitor(pid)
+      assert_receive {:DOWN, ^ref, :process, ^pid, _reason}
+
+      stale_message = {:assistant, "keep visible until cleanup"}
+
+      state =
+        [Tab.new_agent(1, "Agent") |> Tab.set_session(pid)]
+        |> base_state(1)
+        |> AgentAccess.update_panel(fn panel ->
+          %{
+            panel
+            | cached_line_index: [{0, :text}],
+              cached_display_messages: [stale_message],
+              cached_display_message_pairs: [{7, stale_message}],
+              cached_styled_messages: [nil]
+          }
+        end)
+
+      preserved = AgentLifecycle.sync_transcript(state)
+      panel = AgentAccess.panel(preserved)
+
+      assert panel.cached_line_index == [{0, :text}]
+      assert panel.cached_display_messages == [stale_message]
+      assert panel.cached_display_message_pairs == [{7, stale_message}]
+      assert panel.cached_styled_messages == [nil]
+    end
+
     test "cache_messages clears stale semantic transcript cache when the session has no messages" do
       stale_state =
         base_state([Tab.new_agent(1, "Agent")], 1)

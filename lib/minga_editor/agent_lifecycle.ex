@@ -88,14 +88,10 @@ defmodule MingaEditor.AgentLifecycle do
     session = AgentAccess.session(state)
 
     if is_pid(session) do
-      messages =
-        try do
-          AgentSession.messages(session)
-        catch
-          :exit, _ -> []
-        end
-
-      cache_transcript(state, messages)
+      case safe_session_messages(session) do
+        {:ok, messages} -> cache_transcript(state, messages)
+        :dead_session -> state
+      end
     else
       state
     end
@@ -105,6 +101,13 @@ defmodule MingaEditor.AgentLifecycle do
   @spec cache_messages(state(), [term()]) :: state()
   def cache_messages(state, messages) when is_list(messages) do
     cache_transcript(state, messages)
+  end
+
+  @spec safe_session_messages(pid()) :: {:ok, [term()]} | :dead_session
+  defp safe_session_messages(session) do
+    {:ok, AgentSession.messages(session)}
+  catch
+    :exit, _ -> :dead_session
   end
 
   @spec cache_transcript(state(), [term()]) :: state()
