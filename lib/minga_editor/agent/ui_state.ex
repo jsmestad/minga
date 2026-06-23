@@ -389,25 +389,25 @@ defmodule MingaEditor.Agent.UIState do
 
   # ── Scrolling (delegates to Minga.Editing.Scroll) ────────────────────────────────
 
-  @doc "Scrolls the content up. Delegates to `Minga.Editing.Minga.Editing.scroll_up/2`."
+  @doc "Scrolls the content up. Delegates to `Minga.Editing.scroll_up/2`."
   @spec scroll_up(t(), non_neg_integer()) :: t()
   def scroll_up(%__MODULE__{panel: panel} = state, amount) do
     %{state | panel: %{panel | scroll: Minga.Editing.scroll_up(panel.scroll, amount)}}
   end
 
-  @doc "Scrolls the content down. Delegates to `Minga.Editing.Minga.Editing.scroll_down/2`."
+  @doc "Scrolls the content down. Delegates to `Minga.Editing.scroll_down/2`."
   @spec scroll_down(t(), non_neg_integer()) :: t()
   def scroll_down(%__MODULE__{panel: panel} = state, amount) do
     %{state | panel: %{panel | scroll: Minga.Editing.scroll_down(panel.scroll, amount)}}
   end
 
-  @doc "Pins chat to bottom. Delegates to `Minga.Editing.Minga.Editing.pin_to_bottom/1`."
+  @doc "Pins chat to bottom. Delegates to `Minga.Editing.pin_to_bottom/1`."
   @spec scroll_to_bottom(t()) :: t()
   def scroll_to_bottom(%__MODULE__{panel: panel} = state) do
     %{state | panel: %{panel | scroll: Minga.Editing.pin_to_bottom(panel.scroll)}}
   end
 
-  @doc "Scrolls to top. Delegates to `Minga.Editing.Minga.Editing.scroll_to_top/1`."
+  @doc "Scrolls to top. Delegates to `Minga.Editing.scroll_to_top/1`."
   @spec scroll_to_top(t()) :: t()
   def scroll_to_top(%__MODULE__{panel: panel} = state) do
     %{state | panel: %{panel | scroll: Minga.Editing.scroll_to_top(panel.scroll)}}
@@ -417,7 +417,7 @@ defmodule MingaEditor.Agent.UIState do
   @spec maybe_auto_scroll(t()) :: t()
   def maybe_auto_scroll(%__MODULE__{} = state), do: state
 
-  @doc "Re-engages auto-scroll. Delegates to `Minga.Editing.Minga.Editing.pin_to_bottom/1`."
+  @doc "Re-engages auto-scroll. Delegates to `Minga.Editing.pin_to_bottom/1`."
   @spec engage_auto_scroll(t()) :: t()
   def engage_auto_scroll(%__MODULE__{panel: panel} = state) do
     %{state | panel: %{panel | scroll: Minga.Editing.pin_to_bottom(panel.scroll)}}

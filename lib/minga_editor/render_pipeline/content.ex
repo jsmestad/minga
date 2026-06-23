@@ -319,10 +319,14 @@ defmodule MingaEditor.RenderPipeline.Content do
     new_cursor = if ci != nil, do: ci, else: cursor
     {[content | frames], new_cursor, st}
   catch
-    # Buffer process died between the :DOWN message and this render.
-    # Skip this window; the :DOWN handler will clean up state next cycle.
+    # Prompt or session process died between state sync and this render.
+    # Skip this window; the next lifecycle event will clean up state.
     :exit, _ ->
-      Minga.Log.debug(:render, "[content] skipped agent window #{win_id}: buffer process dead")
+      Minga.Log.debug(
+        :render,
+        "[content] skipped agent window #{win_id}: agent process unavailable"
+      )
+
       {frames, cursor, st}
   end
 
@@ -337,7 +341,7 @@ defmodule MingaEditor.RenderPipeline.Content do
           Window.id(),
           Layout.window_layout()
         ) :: {WindowContent.t(), Cursor.t() | nil, state()}
-  defp render_agent_chat_window(state, _window, _win_id, win_layout) do
+  defp render_agent_chat_window(state, window, win_id, win_layout) do
     # Build ViewContext once for the prompt geometry and the semantic prompt model.
     ctx = ViewContext.from_editor_state(state)
 
@@ -355,6 +359,7 @@ defmodule MingaEditor.RenderPipeline.Content do
     prompt_row = row_off + chat_height + input_v_gap
     prompt_rect = {prompt_row, col_off, chat_width, prompt_height}
     full_rect = {row_off, col_off, chat_width, height}
+    state = update_agent_window_viewport(state, window, win_id, chat_height, chat_width)
 
     # When help is visible the chat buffer is suppressed. The help overlay
     # and prompt both reach the live (semantic) frontends through the
@@ -409,6 +414,28 @@ defmodule MingaEditor.RenderPipeline.Content do
     state = update_agent_scroll_metrics(state, total_lines, chat_height)
 
     {WindowContent.new(nil, prompt_models, cursor), cursor, state}
+  end
+
+  @spec update_agent_window_viewport(
+          state(),
+          Window.t(),
+          Window.id(),
+          pos_integer(),
+          pos_integer()
+        ) ::
+          state()
+  defp update_agent_window_viewport(
+         state,
+         %Window{viewport: viewport} = window,
+         win_id,
+         rows,
+         cols
+       ) do
+    ws = state.workspace
+    updated_viewport = %{viewport | rows: rows, cols: cols, reserved: 0}
+    updated_window = Window.set_viewport(window, updated_viewport)
+    windows = %{ws.windows | map: Map.put(ws.windows.map, win_id, updated_window)}
+    %{state | workspace: %{ws | windows: windows}}
   end
 
   @spec update_agent_scroll_metrics(state(), non_neg_integer(), pos_integer()) :: state()

@@ -133,10 +133,20 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
       state = %{state | workspace: %{state.workspace | windows: windows, agent_ui: agent_ui}}
       layout = Layout.put(state) |> Layout.get()
 
-      {[content], _cursor, _state} =
+      {[content], _cursor, state} =
         Content.build_agent_chat_content(state, layout, %{})
 
       [prompt_model] = content.models
+      updated_window = Map.fetch!(state.workspace.windows.map, win_id)
+
+      {content_row, _content_col, _content_width, _content_height} =
+        layout.window_layouts[win_id].content
+
+      {prompt_row, _prompt_col, prompt_width, _prompt_height} = prompt_model.rect
+
+      assert updated_window.viewport.rows == prompt_row - content_row - 1
+      assert updated_window.viewport.cols == prompt_width
+      assert updated_window.viewport.reserved == 0
 
       default_prompt =
         PromptRenderWindow.build(

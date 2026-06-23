@@ -108,17 +108,25 @@ defmodule MingaEditor.AgentLifecycle do
   end
 
   @spec cache_transcript(state(), [term()]) :: state()
-  defp cache_transcript(state, []), do: state
+  defp cache_transcript(state, []) do
+    AgentAccess.update_panel(state, fn panel ->
+      %{
+        panel
+        | cached_line_index: [],
+          cached_display_messages: [],
+          cached_display_message_pairs: [],
+          cached_styled_messages: nil,
+          display_start_index: 0,
+          provenance_jump: nil
+      }
+    end)
+  end
 
   defp cache_transcript(state, messages) do
-    agent = AgentAccess.agent(state)
     panel = AgentAccess.panel(state)
     jump = panel.provenance_jump
 
-    sync_opts =
-      if agent.pending_approval, do: [pending_approval: agent.pending_approval], else: []
-
-    sync_opts = add_session_display_opts(sync_opts, AgentAccess.session(state))
+    sync_opts = add_session_display_opts([], AgentAccess.session(state))
 
     # A pending provenance jump may need an older, paged-out turn revealed so it
     # can be landed on. Otherwise keep the panel's current display window.

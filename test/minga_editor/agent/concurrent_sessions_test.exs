@@ -10,6 +10,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
   use ExUnit.Case, async: true
 
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.AgentLifecycle
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
@@ -224,6 +225,32 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       rebuilt = EditorState.rebuild_agent_from_session(state, tab)
 
       assert AgentAccess.agent(rebuilt).runtime.active_tool_name == nil
+    end
+
+    test "cache_messages clears stale semantic transcript cache when the session has no messages" do
+      stale_state =
+        base_state([Tab.new_agent(1, "Agent")], 1)
+        |> AgentAccess.update_panel(fn panel ->
+          %{
+            panel
+            | cached_line_index: [{0, :text}],
+              cached_display_messages: [{:assistant, "stale answer"}],
+              cached_display_message_pairs: [{7, {:assistant, "stale answer"}}],
+              cached_styled_messages: [[[{"stale", 0, 0, 0}]]],
+              display_start_index: 3,
+              provenance_jump: MingaEditor.Agent.ProvenanceJump.request(7)
+          }
+        end)
+
+      cleared = AgentLifecycle.cache_messages(stale_state, [])
+      panel = AgentAccess.panel(cleared)
+
+      assert panel.cached_line_index == []
+      assert panel.cached_display_messages == []
+      assert panel.cached_display_message_pairs == []
+      assert panel.cached_styled_messages == nil
+      assert panel.display_start_index == 0
+      assert panel.provenance_jump == nil
     end
 
     test "switch_tab rebuilds a background agent tab's semantic transcript cache" do

@@ -194,7 +194,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
 
   @spec encode_chat_messages([AgentChat.message()]) :: binary()
   defp encode_chat_messages(messages) do
-    messages = messages |> Enum.take(@chat_message_limit) |> Enum.map(&bound_chat_message_text/1)
+    messages = messages |> recent_chat_messages() |> Enum.map(&bound_chat_message_text/1)
     payload = encode_chat_messages_payload(messages)
 
     if byte_size(payload) <= @max_u16 do
@@ -211,6 +211,14 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
         |> encode_chat_messages_payload()
       end
     end
+  end
+
+  @spec recent_chat_messages([AgentChat.message()]) :: [AgentChat.message()]
+  defp recent_chat_messages(messages) do
+    messages
+    |> Enum.reverse()
+    |> Enum.take(@chat_message_limit)
+    |> Enum.reverse()
   end
 
   @spec bound_chat_message_text(AgentChat.message()) :: AgentChat.message()

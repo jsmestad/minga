@@ -9,7 +9,7 @@ defmodule MingaEditor.Agent.ProvenanceJump do
 
   * `target_message_id` — the stable chat message id to land on (the turn's
     opening user message, resolved once at request time so layout shifts during
-    the multi-sync load can't move it; see `BufferSync.turn_anchor_id/2`).
+    the multi-sync load can't move it; see `Transcript.turn_anchor_id/2`).
   * `landed?` — false until the first sync after load performs the jump. While
     false, syncs land on the target; once true, syncs leave the cursor where it
     is so re-syncs don't yank the reader back to the bottom.

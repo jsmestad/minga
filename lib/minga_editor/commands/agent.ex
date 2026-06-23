@@ -1923,7 +1923,7 @@ defmodule MingaEditor.Commands.Agent do
 
   # Returns the cached line index from the panel state if available,
   # otherwise recomputes from messages. The cache is populated by
-  # sync_buffer in AgentLifecycle on every message update.
+  # AgentLifecycle.sync_transcript/1 on every message update.
   @spec cached_or_compute_line_index(Panel.t(), [Message.t()]) ::
           [{non_neg_integer(), Transcript.line_type()}]
   defp cached_or_compute_line_index(panel, messages) do
