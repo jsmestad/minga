@@ -75,6 +75,10 @@ defmodule MingaAgent.Session do
   @typedoc "Remote attachment role."
   @type attachment_role :: :driver | :viewer
 
+  @typedoc "How a session handles tool approvals when no interactive driver should answer them."
+  @type tool_approval_policy ::
+          :interactive | {:auto_approve, trust_scope()} | {:reject, String.t()}
+
   @typedoc "Internal session state."
   @type state :: %{
           session_id: String.t(),
@@ -95,6 +99,7 @@ defmodule MingaAgent.Session do
           subscribers: MapSet.t(pid()),
           subscriber_roles: %{pid() => attachment_role()},
           driver: pid() | nil,
+          tool_approval_policy: tool_approval_policy(),
           idle_gc_timeout_ms: non_neg_integer(),
           idle_gc_timer: {timer_ref :: reference(), token :: reference()} | nil,
           idle_gc_token_fn: (-> reference()),
@@ -705,6 +710,7 @@ defmodule MingaAgent.Session do
       subscribers: MapSet.new(),
       subscriber_roles: %{},
       driver: nil,
+      tool_approval_policy: Keyword.get(opts, :tool_approval_policy, :interactive),
       idle_gc_timeout_ms: Keyword.get_lazy(opts, :idle_gc_timeout_ms, &idle_gc_timeout_ms/0),
       idle_gc_timer: nil,
       idle_gc_token_fn: Keyword.get(opts, :idle_gc_token_fn, &make_ref/0),
@@ -1743,6 +1749,17 @@ defmodule MingaAgent.Session do
   end
 
   @spec request_tool_approval(Event.ToolApproval.t(), state()) :: state()
+  defp request_tool_approval(event, %{tool_approval_policy: {:auto_approve, scope}} = state) do
+    auto_approve_tool(event, state, scope)
+  end
+
+  defp request_tool_approval(event, %{tool_approval_policy: {:reject, message}} = state) do
+    send(event.reply_to, {:tool_approval_response, event.tool_call_id, {:reject, message}})
+
+    broadcast(state, {:approval_rejected, event.tool_call_id, event.name, message})
+    state
+  end
+
   defp request_tool_approval(event, state) do
     notify(state, :approval, "Approval needed: #{event.name}")
 
