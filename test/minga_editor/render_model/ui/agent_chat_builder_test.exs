@@ -3,6 +3,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
 
   alias MingaEditor.Agent.Transcript
   alias MingaEditor.Agent.UIState
+  alias Minga.Editing.Scroll
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.RenderModel.UI.AgentChatBuilder
@@ -53,6 +54,36 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
            ] = summaries
 
     refute {:user, "hidden"} in Enum.map(summaries, fn {_id, type, text} -> {type, text} end)
+  end
+
+  test "build/1 emits only messages through the manual semantic scroll viewport" do
+    session = fake_session_pid()
+
+    panel = %Panel{
+      scroll: Scroll.new(2) |> Scroll.update_metrics(5, 1),
+      cached_line_index: [
+        {0, :text},
+        {0, :empty},
+        {1, :text},
+        {1, :empty},
+        {2, :text}
+      ],
+      cached_display_message_pairs: [
+        {1, {:assistant, "first"}},
+        {2, {:assistant, "second"}},
+        {3, {:assistant, "third"}}
+      ],
+      cached_styled_messages: [nil, nil, nil]
+    }
+
+    model =
+      context(session, panel)
+      |> AgentChatBuilder.build()
+
+    assert Enum.map(model.messages, &message_summary/1) == [
+             {1, :assistant, "first"},
+             {2, :assistant, "second"}
+           ]
   end
 
   defp message_summary({id, {:assistant, text}}), do: {id, :assistant, text}
