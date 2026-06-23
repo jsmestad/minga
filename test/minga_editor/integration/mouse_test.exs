@@ -97,8 +97,10 @@ defmodule Minga.Integration.MouseTest do
       send_mouse(ctx, 5, 10, :wheel_down)
 
       state = editor_state(ctx)
-      assert {_win_id, window} = EditorState.find_agent_chat_window(state)
-      refute window.pinned, "agent chat window should be unpinned after scrolling"
+      assert EditorState.find_agent_chat_window(state)
+
+      refute state.workspace.agent_ui.panel.scroll.pinned,
+             "agent chat scroll should be unpinned after scrolling"
     end
   end
 

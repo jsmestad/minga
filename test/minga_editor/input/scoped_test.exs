@@ -9,7 +9,6 @@ defmodule MingaEditor.Input.ScopedTest do
   alias Minga.Buffer.Process, as: BufferProcess
 
   alias MingaEditor.State, as: EditorState
-  alias MingaAgent.RuntimeState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Buffers
@@ -32,10 +31,7 @@ defmodule MingaEditor.Input.ScopedTest do
     {:ok, buf} = BufferProcess.start_link(content: "hello world")
     {:ok, prompt_buf} = BufferProcess.start_link(content: "")
 
-    agent = %AgentState{
-      runtime: %RuntimeState{status: :idle},
-      buffer: Keyword.get(opts, :agent_buffer, nil)
-    }
+    agent = %AgentState{}
 
     agentic = %UIState{
       panel: %UIState.Panel{
@@ -79,7 +75,6 @@ defmodule MingaEditor.Input.ScopedTest do
     state = base_state(keymap_scope: :editor, agentic_active: false)
     file_buffer = state.workspace.buffers.active
     {:ok, session} = StubServer.start_link()
-    {:ok, agent_buffer} = BufferProcess.start_link(content: "")
 
     return_target =
       UIState.return_target(
@@ -112,14 +107,13 @@ defmodule MingaEditor.Input.ScopedTest do
 
     shell_state = %{
       state.shell_state
-      | agent: %{state.shell_state.agent | buffer: agent_buffer},
-        tab_bar: tab_bar
+      | tab_bar: tab_bar
     }
 
     workspace_state = %{state.workspace | agent_ui: agent_ui, keymap_scope: :agent}
     state = %{state | shell_state: shell_state, workspace: workspace_state}
 
-    {state, session, file_buffer, agent_buffer}
+    {state, session, file_buffer}
   end
 
   defp focus_prompt(state, text) do
@@ -149,16 +143,13 @@ defmodule MingaEditor.Input.ScopedTest do
 
   describe "editor scope — agent side panel nav" do
     setup do
-      {:ok, agent_buf} = BufferProcess.start_link(content: "line1\nline2\nline3\nline4")
-
       state =
         base_state(
           keymap_scope: :editor,
-          panel_visible: true,
-          agent_buffer: agent_buf
+          panel_visible: true
         )
 
-      {:ok, state: state, agent_buf: agent_buf}
+      {:ok, state: state}
     end
 
     test "q and ESC toggle the agent split", %{state: state} do
@@ -173,34 +164,24 @@ defmodule MingaEditor.Input.ScopedTest do
       assert AgentAccess.input_focused?(new_state) == true
     end
 
-    test "j delegates to mode FSM with agent buffer", %{state: state, agent_buf: agent_buf} do
-      # j should delegate to mode FSM, moving cursor in agent buffer
-      {:handled, _new_state} = walk_surface_handlers(state, ?j, 0)
-      {line, _col} = BufferProcess.cursor(agent_buf)
-      assert line >= 1
+    test "j scrolls the semantic transcript", %{state: state} do
+      {:handled, new_state} = walk_surface_handlers(state, ?j, 0)
+      assert AgentAccess.panel(new_state).scroll.offset == 1
     end
 
     test "passthrough when panel not visible" do
       state = base_state(keymap_scope: :editor, panel_visible: false)
       assert {:passthrough, _} = AgentPanel.handle_key(state, ?j, 0)
     end
-
-    test "passthrough when no agent buffer" do
-      state = base_state(keymap_scope: :editor, panel_visible: true, agent_buffer: nil)
-      assert {:passthrough, _} = AgentPanel.handle_key(state, ?j, 0)
-    end
   end
 
   describe "editor scope — agent side panel input" do
     setup do
-      {:ok, agent_buf} = BufferProcess.start_link(content: "chat content")
-
       state =
         base_state(
           keymap_scope: :editor,
           panel_visible: true,
-          input_focused: true,
-          agent_buffer: agent_buf
+          input_focused: true
         )
 
       {:ok, state: state}
@@ -242,8 +223,8 @@ defmodule MingaEditor.Input.ScopedTest do
 
   describe "agent scope — normal mode" do
     setup do
-      {state, session, file_buffer, agent_buffer} = activated_agent_state()
-      {:ok, state: state, session: session, file_buffer: file_buffer, agent_buffer: agent_buffer}
+      {state, session, file_buffer} = activated_agent_state()
+      {:ok, state: state, session: session, file_buffer: file_buffer}
     end
 
     test "navigation keys pass through Scoped and are handled by AgentNav", %{state: state} do
@@ -296,8 +277,7 @@ defmodule MingaEditor.Input.ScopedTest do
 
     test "return without file tabs does not create an untitled fallback", %{
       state: state,
-      file_buffer: file_buffer,
-      agent_buffer: agent_buffer
+      file_buffer: file_buffer
     } do
       {:ok, tb} = TabBar.remove(state.shell_state.tab_bar, 1)
       state = put_in(state.shell_state.tab_bar, tb)
@@ -307,7 +287,6 @@ defmodule MingaEditor.Input.ScopedTest do
       assert TabBar.filter_by_kind(new_state.shell_state.tab_bar, :file) == []
       assert new_state.workspace.buffers.active == file_buffer
       assert hd(new_state.workspace.buffers.list) == file_buffer
-      refute new_state.workspace.buffers.active == agent_buffer
       assert new_state.shell_state.status_msg == "No file tabs in this workspace"
     end
 
@@ -738,14 +717,11 @@ defmodule MingaEditor.Input.ScopedTest do
 
   describe "editor scope — panel mention completion" do
     setup do
-      {:ok, agent_buf} = BufferProcess.start_link(content: "chat")
-
       state =
         base_state(
           keymap_scope: :editor,
           panel_visible: true,
-          input_focused: true,
-          agent_buffer: agent_buf
+          input_focused: true
         )
 
       completion = %{

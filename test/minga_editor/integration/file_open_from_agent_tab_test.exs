@@ -9,7 +9,6 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor
-  alias MingaEditor.Agent.BufferSync, as: AgentBufferSync
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
@@ -39,8 +38,6 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
     start_supervised!({MingaEditor.Extension.Sidebar, name: sidebar_registry, notify: false})
 
     {:ok, port} = HeadlessPort.start_link(width: width, height: height)
-    agent_buf = AgentBufferSync.start_buffer()
-    assert is_pid(agent_buf), "Failed to start agent buffer"
 
     {:ok, file_buf} =
       BufferProcess.start_link(
@@ -65,7 +62,7 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
 
     :sys.replace_state(editor, fn state ->
       win_id = state.workspace.windows.active
-      agent_window = Window.new_agent_chat(win_id, agent_buf, height, width)
+      agent_window = Window.new_agent_chat(win_id, height, width)
 
       windows = %{
         state.workspace.windows
@@ -83,7 +80,6 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
 
       agent_state =
         state.shell_state.agent
-        |> Map.put(:buffer, agent_buf)
         |> Map.put(:session, fake_session)
 
       ss = state.shell_state
@@ -108,7 +104,6 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
     %{
       editor: editor,
       buffer: file_buf,
-      agent_buffer: agent_buf,
       port: port,
       width: width,
       height: height

@@ -38,7 +38,7 @@ defmodule MingaEditor.Handlers.EffectHandler do
   * `{:log_message, msg}` — log to *Messages* buffer
   * `{:log_warning, msg}` — log to both *Messages* and *Warnings* (warning level)
   * `{:log, subsystem, level, msg}` — log via Minga.Log
-  * `:sync_agent_buffer` — sync agent buffer with session output
+  * `:sync_agent_transcript` — sync semantic agent transcript with session output
   * `{:update_tab_label, label}` — update active tab label
   * `{:monitor, pid}` — monitor a buffer process
   * `{:stop_spinner}` — cancel outgoing agent spinner timer
@@ -76,7 +76,7 @@ defmodule MingaEditor.Handlers.EffectHandler do
           | {:log_message, String.t()}
           | {:log_warning, String.t()}
           | {:log, atom(), atom(), String.t()}
-          | :sync_agent_buffer
+          | :sync_agent_transcript
           | {:update_tab_label, String.t()}
           | {:monitor, pid()}
           | :stop_spinner
@@ -160,7 +160,7 @@ defmodule MingaEditor.Handlers.EffectHandler do
     MingaEditor.maybe_schedule_warning_popup(state)
   end
 
-  defp apply_effect(state, :sync_agent_buffer), do: AgentLifecycle.sync_buffer(state)
+  defp apply_effect(state, :sync_agent_transcript), do: AgentLifecycle.sync_transcript(state)
 
   defp apply_effect(state, {:update_tab_label, _label}),
     do: AgentLifecycle.maybe_update_tab_label(state)
@@ -184,7 +184,7 @@ defmodule MingaEditor.Handlers.EffectHandler do
   defp apply_effect(state, {:rebuild_agent_session, %MingaEditor.State.Tab{kind: :agent} = tab}) do
     state
     |> EditorState.rebuild_agent_from_session(tab)
-    |> AgentLifecycle.sync_buffer()
+    |> AgentLifecycle.sync_transcript()
   end
 
   defp apply_effect(state, {:rebuild_agent_session, tab}),

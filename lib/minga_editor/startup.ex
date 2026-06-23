@@ -10,7 +10,6 @@ defmodule MingaEditor.Startup do
   # when flowing through bare-map pattern matches in accessor functions.
   @dialyzer {:no_opaque, build_initial_state: 1}
 
-  alias MingaEditor.Agent.BufferSync, as: AgentBufferSync
   alias MingaEditor.Agent.UIState
   alias Minga.Buffer
   alias Minga.Log
@@ -21,7 +20,6 @@ defmodule MingaEditor.Startup do
   alias MingaEditor.Shell.Identity, as: ShellIdentity
   alias MingaEditor.Sidebar.BuiltinSurfaces
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Session, as: EditorSessionState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
@@ -173,11 +171,10 @@ defmodule MingaEditor.Startup do
     state =
       EditorState.set_tab_bar(state, initial_tab_bar(active_buf, keymap_scope, project_root))
 
-    # Store the agent buffer reference if one was created.
     state =
       case agent_state_update do
-        {:agent_buffer, pid} ->
-          AgentAccess.update_agent(state, fn a -> %{a | buffer: pid} end)
+        :semantic_agent_window ->
+          state
 
         :noop ->
           state
@@ -204,15 +201,15 @@ defmodule MingaEditor.Startup do
   @doc """
   Creates the initial window based on the startup mode.
 
-  In agent mode: starts the `*Agent*` buffer and creates an agent chat
-  window. In editor mode: creates a regular buffer window for the
+  In agent mode: creates a semantic agent chat window. In editor mode:
+  creates a regular buffer window for the
   file buffer (or a blank buffer if no file was specified).
 
   Returns `{window | nil, agent_state_update}` where the update is
-  either `{:agent_buffer, pid}` or `:noop`.
+  either `:semantic_agent_window` or `:noop`.
   """
   @spec build_initial_window(atom(), Window.id(), pid() | nil, pos_integer(), pos_integer()) ::
-          {Window.t() | nil, {:agent_buffer, pid()} | :noop}
+          {Window.t() | nil, :semantic_agent_window | :noop}
   @spec build_initial_window(
           atom(),
           Window.id(),
@@ -220,7 +217,7 @@ defmodule MingaEditor.Startup do
           pos_integer(),
           pos_integer(),
           Minga.Config.Options.server()
-        ) :: {Window.t() | nil, {:agent_buffer, pid()} | :noop}
+        ) :: {Window.t() | nil, :semantic_agent_window | :noop}
   def build_initial_window(scope, win_id, active_buf, rows, cols) do
     build_initial_window(
       scope,
@@ -232,15 +229,8 @@ defmodule MingaEditor.Startup do
     )
   end
 
-  def build_initial_window(:agent, win_id, _active_buf, rows, cols, options_server) do
-    agent_buf = AgentBufferSync.start_buffer(options_server)
-
-    if is_pid(agent_buf) do
-      window = Window.new_agent_chat(win_id, agent_buf, rows, cols)
-      {window, {:agent_buffer, agent_buf}}
-    else
-      {nil, :noop}
-    end
+  def build_initial_window(:agent, win_id, _active_buf, rows, cols, _options_server) do
+    {Window.new_agent_chat(win_id, rows, cols), :semantic_agent_window}
   end
 
   def build_initial_window(_scope, win_id, active_buf, rows, cols, _options_server) do

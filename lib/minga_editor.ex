@@ -252,12 +252,7 @@ defmodule MingaEditor do
       Process.send_after(self(), :evict_parser_trees, HighlightSync.eviction_check_interval_ms())
     end
 
-    # Set up tree-sitter markdown highlighting for the agent buffer
-    # so it's ready before the first sync. Idempotent: also called from
-    # create_agent_buffer and ensure_agent_session, so whichever path
-    # creates the buffer first wins and subsequent calls are no-ops
-    # (ensure_buffer_id_for returns the existing ID, and set_language +
-    # parse_buffer are idempotent on the Zig side).
+    # Legacy no-op retained for callers from the former transcript-buffer path.
     state = AgentLifecycle.setup_agent_highlight(state)
 
     {:ok, state}
@@ -711,7 +706,7 @@ defmodule MingaEditor do
 
   # Coalesced agent stream batch from MingaEditor.Agent.Ingest (#2289). One
   # batch replaces N per-delta messages: applied once (one bump_message_version,
-  # one :sync_agent_buffer, one render) instead of once per delta, so streaming
+  # one :sync_agent_transcript, one render) instead of once per delta, so streaming
   # load no longer floods the Editor mailbox ahead of queued keystrokes.
   def handle_info({:agent_stream_batch, session_pid, batch}, state) do
     route_agent_stream_batch(state, session_pid, batch)

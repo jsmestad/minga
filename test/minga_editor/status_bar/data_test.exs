@@ -128,7 +128,6 @@ defmodule MingaEditor.StatusBar.DataTest do
 
   test "agent status message count uses user turns instead of raw transcript entries" do
     {:ok, session} = MetadataSession.start_link(message_count: 4, turn_count: 1)
-    agent_buffer = start_buffer("", :markdown)
 
     tb = TabBar.new(Tab.new_file(1, "main.ex"))
     {tb, agent_tab} = TabBar.add(tb, :agent, "Agent")
@@ -141,7 +140,7 @@ defmodule MingaEditor.StatusBar.DataTest do
     workspace_id = TabBar.active_workspace_id(tb)
     tb = TabBar.update_workspace(tb, workspace_id, &WorkspaceModel.set_session(&1, session))
 
-    state = state_with_agent_window(agent_buffer, tb)
+    state = state_with_agent_window(tb)
 
     assert {:agent, data} = Data.from_state(state)
     assert data.message_count == 1
@@ -268,15 +267,15 @@ defmodule MingaEditor.StatusBar.DataTest do
     }
   end
 
-  defp state_with_agent_window(agent_buffer, tab_bar) do
+  defp state_with_agent_window(tab_bar) do
     %EditorState{
       port_manager: self(),
       workspace: %SessionState{
         viewport: Viewport.new(24, 80),
-        buffers: %Buffers{list: [agent_buffer], active_index: 0, active: agent_buffer},
+        buffers: %Buffers{list: [], active_index: 0, active: nil},
         windows: %Windows{
           tree: WindowTree.new(1),
-          map: %{1 => Window.new_agent_chat(1, agent_buffer, 24, 80)},
+          map: %{1 => Window.new_agent_chat(1, 24, 80)},
           active: 1,
           next_id: 2
         }

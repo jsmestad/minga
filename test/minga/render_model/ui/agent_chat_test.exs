@@ -2,7 +2,6 @@ defmodule Minga.RenderModel.UI.AgentChatTest do
   use ExUnit.Case, async: true
 
   alias Minga.RenderModel.UI.AgentChat
-  alias Minga.RenderModel.UI.AgentChat.PendingApproval
   alias Minga.RenderModel.UI.AgentChat.PromptCompletion
 
   describe "%AgentChat{}" do
@@ -17,7 +16,6 @@ defmodule Minga.RenderModel.UI.AgentChatTest do
       assert model.prompt_line_count == 1
       assert model.prompt_visible_rows == 1
       assert model.prompt_completion == nil
-      assert model.pending_approval == nil
       refute model.help_visible?
       assert model.help_groups == []
       assert model.messages == []
@@ -60,14 +58,6 @@ defmodule Minga.RenderModel.UI.AgentChatTest do
 
       model = %AgentChat{visible?: true, prompt_completion: completion}
       assert model.prompt_completion.type == :slash
-    end
-
-    test "holds a pending approval banner with enforced keys" do
-      approval = %PendingApproval{name: "shell", args: %{"command" => "ls"}}
-      model = %AgentChat{visible?: true, pending_approval: approval}
-      assert model.pending_approval.name == "shell"
-
-      assert_raise ArgumentError, fn -> struct!(PendingApproval, %{}) end
     end
 
     test "holds help groups" do

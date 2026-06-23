@@ -9,9 +9,11 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.View.PromptRenderWindow
   alias Minga.Buffer
+  alias Minga.Editing.Scroll
   alias Minga.RenderModel.UI.AgentChat
   alias Minga.RenderModel.UI.AgentChat.ApprovalView
   alias Minga.RenderModel.UI.AgentChat.PromptCompletion
+  alias Minga.RenderModel.UI.AgentChat.ToolArgSummary
   alias Minga.RenderModel.UI.AgentChat.ToolCallView
   alias Minga.RenderModel.UI.AgentChat.Usage
   alias MingaEditor.Frontend.Emit.Context
@@ -24,7 +26,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     session = active_session(ctx)
 
     if is_agent_chat && session do
-      build_visible(ctx)
+      build_visible(ctx, session)
     else
       %AgentChat{visible?: false}
     end
@@ -39,24 +41,23 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     :exit, _ -> nil
   end
 
-  @spec build_visible(Context.t()) :: AgentChat.t()
-  defp build_visible(ctx) do
+  @spec build_visible(Context.t(), pid()) :: AgentChat.t()
+  defp build_visible(ctx, session) do
     panel = ctx.agent_ui.panel
     view = ctx.agent_ui.view
-    session = active_session(ctx)
 
     prompt_text = safe_prompt_content(panel.prompt_buffer)
     {cursor_line, cursor_col} = UIState.input_cursor(panel)
     inner_width = max(ctx.viewport.cols - 10, 20)
     visible_rows = PromptRenderWindow.visible_rows(panel, inner_width)
 
-    messages_with_ids = displayed_message_pairs(panel, session)
+    {messages_with_ids, styled_cache} = displayed_messages_for_model(panel, session)
     pending_approval = ctx.shell_state.agent.pending_approval
 
     gui_messages =
       messages_with_ids
-      |> build_gui_messages(panel.cached_styled_messages, pending_approval)
-      |> append_transcript_enrichments(SemanticUIRegistry.default_table())
+      |> build_gui_messages(styled_cache, pending_approval)
+      |> maybe_append_transcript_enrichments(panel, SemanticUIRegistry.default_table())
 
     help_visible = view.help_visible
 
@@ -81,7 +82,6 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
       prompt_vim_mode: ctx.editing.mode,
       prompt_visible_rows: visible_rows,
       prompt_completion: build_prompt_completion(panel),
-      pending_approval: nil,
       help_visible?: help_visible,
       help_groups: help_groups,
       messages: gui_messages
@@ -140,6 +140,13 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     :exit, _ -> ""
   end
 
+  @spec displayed_messages_for_model(MingaEditor.Agent.UIState.Panel.t(), pid()) ::
+          {[{pos_integer(), term()}], [term()] | nil}
+  defp displayed_messages_for_model(panel, session) do
+    pairs = displayed_message_pairs(panel, session)
+    visible_message_slice(panel, pairs, panel.cached_styled_messages)
+  end
+
   @spec displayed_message_pairs(MingaEditor.Agent.UIState.Panel.t(), pid()) :: [
           {pos_integer(), term()}
         ]
@@ -153,10 +160,55 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     :exit, _ -> []
   end
 
-  @spec append_transcript_enrichments([{pos_integer(), term()}], SemanticUIRegistry.table()) :: [
-          {pos_integer(), term()}
-        ]
-  defp append_transcript_enrichments(messages, agent_ui_registry) do
+  @spec visible_message_slice(
+          MingaEditor.Agent.UIState.Panel.t(),
+          [{pos_integer(), term()}],
+          [term()] | nil
+        ) ::
+          {[{pos_integer(), term()}], [term()] | nil}
+  defp visible_message_slice(%{scroll: %Scroll{pinned: true}}, pairs, styled_cache),
+    do: {pairs, styled_cache}
+
+  defp visible_message_slice(%{cached_line_index: []}, pairs, styled_cache),
+    do: {pairs, styled_cache}
+
+  defp visible_message_slice(
+         %{cached_line_index: line_index, scroll: %Scroll{} = scroll},
+         pairs,
+         styled_cache
+       ) do
+    total_lines = length(line_index)
+    visible_height = scroll.metrics.visible_height
+    offset = Scroll.resolve(scroll, total_lines, visible_height)
+    target_line = min(offset + visible_height - 1, total_lines - 1)
+
+    {target_message_index, _line_type} =
+      Enum.at(line_index, target_line, {length(pairs) - 1, :text})
+
+    count = min(target_message_index + 1, length(pairs))
+
+    {Enum.take(pairs, count), take_styled_cache(styled_cache, count)}
+  end
+
+  @spec take_styled_cache([term()] | nil, non_neg_integer()) :: [term()] | nil
+  defp take_styled_cache(nil, _count), do: nil
+
+  defp take_styled_cache(styled_cache, count) when is_list(styled_cache),
+    do: Enum.take(styled_cache, count)
+
+  @spec maybe_append_transcript_enrichments(
+          [{pos_integer(), term()}],
+          MingaEditor.Agent.UIState.Panel.t(),
+          SemanticUIRegistry.table()
+        ) :: [{pos_integer(), term()}]
+  defp maybe_append_transcript_enrichments(
+         messages,
+         %{scroll: %Scroll{pinned: false}},
+         _agent_ui_registry
+       ),
+       do: messages
+
+  defp maybe_append_transcript_enrichments(messages, _panel, agent_ui_registry) do
     messages ++ SemanticUIRegistry.transcript_enrichments(agent_ui_registry)
   end
 
@@ -276,33 +328,10 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
 
   @spec tool_call_summary(ToolCall.t()) :: String.t()
   defp tool_call_summary(%ToolCall{name: name, args: args}) when is_map(args),
-    do: summarize_tool_args(name, args)
+    do: ToolArgSummary.summarize(name, args)
 
   defp tool_call_summary(%ToolCall{name: name} = tc) do
     args = Map.get(tc, :args) || %{}
-    summarize_tool_args(name, args)
+    ToolArgSummary.summarize(name, args)
   end
-
-  @spec summarize_tool_args(String.t(), map()) :: String.t()
-  defp summarize_tool_args("shell", %{"command" => cmd}), do: cmd
-  defp summarize_tool_args("shell", %{command: cmd}), do: cmd
-  defp summarize_tool_args("write_file", %{"path" => path}), do: path
-  defp summarize_tool_args("write_file", %{path: path}), do: path
-  defp summarize_tool_args("edit_file", %{"path" => path}), do: path
-  defp summarize_tool_args("edit_file", %{path: path}), do: path
-  defp summarize_tool_args("multi_edit_file", %{"path" => path}), do: path
-  defp summarize_tool_args("multi_edit_file", %{path: path}), do: path
-  defp summarize_tool_args("apply_diff", %{"path" => path}), do: path
-  defp summarize_tool_args("apply_diff", %{path: path}), do: path
-
-  defp summarize_tool_args("git_stage", %{"paths" => paths}) when is_list(paths),
-    do: Enum.join(paths, ", ")
-
-  defp summarize_tool_args("git_stage", %{paths: paths}) when is_list(paths),
-    do: Enum.join(paths, ", ")
-
-  defp summarize_tool_args("git_commit", %{"message" => msg}), do: msg
-  defp summarize_tool_args("git_commit", %{message: msg}), do: msg
-  defp summarize_tool_args(_name, args) when map_size(args) == 0, do: ""
-  defp summarize_tool_args(_name, args), do: inspect(args, limit: 80)
 end

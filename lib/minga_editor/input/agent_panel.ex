@@ -9,9 +9,8 @@ defmodule MingaEditor.Input.AgentPanel do
   operator-pending mode, it routes keys through the standard Mode FSM
   by temporarily swapping the active buffer to the prompt buffer.
 
-  Navigation mode (panel visible but input not focused) delegates to
-  the mode FSM with the agent chat buffer for vim navigation of chat
-  content.
+  Navigation mode (panel visible but input not focused) delegates common
+  transcript movement keys to semantic chat scroll state.
   """
 
   @behaviour MingaEditor.Input.Handler
@@ -25,7 +24,6 @@ defmodule MingaEditor.Input.AgentPanel do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.AgentAccess
-  alias MingaEditor.Input
   alias MingaEditor.Input.AgentNav
   alias Minga.Keymap
 
@@ -44,11 +42,7 @@ defmodule MingaEditor.Input.AgentPanel do
   end
 
   defp route_panel_key(%{visible: true}, %{workspace: %{keymap_scope: :editor}} = state, cp, mods) do
-    if is_pid(AgentAccess.agent(state).buffer) do
-      handle_panel_nav(state, cp, mods)
-    else
-      {:passthrough, state}
-    end
+    handle_panel_nav(state, cp, mods)
   end
 
   defp route_panel_key(_panel, state, _cp, _mods), do: {:passthrough, state}
@@ -155,13 +149,9 @@ defmodule MingaEditor.Input.AgentPanel do
   end
 
   defp handle_panel_nav_dispatch(state, cp, mods) do
-    if Input.key_sequence_pending?(state) do
-      {:handled, delegate_to_mode_fsm(state, cp, mods)}
-    else
-      case panel_nav_key(state, cp, mods) do
-        {:panel, new_state} -> {:handled, new_state}
-        :delegate -> {:handled, delegate_to_mode_fsm(state, cp, mods)}
-      end
+    case panel_nav_key(state, cp, mods) do
+      {:panel, new_state} -> {:handled, new_state}
+      :delegate -> AgentNav.handle_chat_nav(state, cp, mods)
     end
   end
 
@@ -212,7 +202,8 @@ defmodule MingaEditor.Input.AgentPanel do
         state = MingaEditor.do_handle_key(state, cp, mods)
 
         # Only restore if a command didn't legitimately change buffers.active.
-        # Same guard as AgentNav.delegate_to_mode_fsm/4.
+        # Same guard as chat navigation: only restore if the command did not
+        # legitimately change buffers.active.
         if state.workspace.buffers.active == prompt_pid do
           set_active_buffer_override(state, real_active)
         else
@@ -237,21 +228,6 @@ defmodule MingaEditor.Input.AgentPanel do
         {:prefix, _node} -> state
         :not_found -> state
       end
-    end
-  end
-
-  # Delegates to the shared AgentNav dispatch, which swaps the active
-  # buffer to the agent buffer, runs through Mode FSM, blocks mode
-  # transitions, syncs cursor to scroll, and restores the original buffer.
-  @spec delegate_to_mode_fsm(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
-          EditorState.t()
-  defp delegate_to_mode_fsm(state, cp, mods) do
-    buf = AgentAccess.agent(state).buffer
-
-    if is_pid(buf) do
-      AgentNav.delegate_to_mode_fsm(state, buf, cp, mods)
-    else
-      state
     end
   end
 end

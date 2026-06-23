@@ -203,7 +203,7 @@ defmodule MingaEditor.FeatureStateTest do
       shell_state: shell_state
     }
 
-    context = EditorState.build_agent_tab_defaults(state, %MingaEditor.State.Windows{}, nil)
+    context = EditorState.build_agent_tab_defaults(state, %MingaEditor.State.Windows{})
 
     restored = SessionState.restore_tab_context(live_workspace, context)
 

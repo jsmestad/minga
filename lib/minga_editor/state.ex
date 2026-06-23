@@ -25,7 +25,6 @@ defmodule MingaEditor.State do
   """
 
   alias MingaAgent.Session, as: AgentSession
-  alias MingaEditor.Agent.BufferSync, as: AgentBufferSync
   alias MingaEditor.Agent.UIState
   alias MingaEditor.FeatureState
   alias Minga.Buffer
@@ -1624,17 +1623,10 @@ defmodule MingaEditor.State do
       | buffer_monitors: monitors
     }
 
-    state =
-      if state.shell_state.agent.buffer == pid do
-        AgentAccess.update_agent(state, fn a -> %{a | buffer: nil} end)
-      else
-        state
-      end
-
     ws = state.workspace
 
     state =
-      if ws.agent_ui != nil and ws.agent_ui.panel.prompt_buffer == pid do
+      if ws.agent_ui.panel.prompt_buffer == pid do
         AgentAccess.update_panel(state, fn p -> %{p | prompt_buffer: nil} end)
       else
         state
@@ -1858,7 +1850,7 @@ defmodule MingaEditor.State do
         state
 
       {win_id, window} ->
-        total_lines = Buffer.line_count(window.buffer)
+        total_lines = length(state.workspace.agent_ui.panel.cached_line_index)
         updated = Window.scroll_viewport(window, delta, total_lines)
         update_window(state, win_id, fn _ -> updated end)
     end
@@ -2198,9 +2190,6 @@ defmodule MingaEditor.State do
     set_bottom_panel(state, BottomPanel.blur(bottom_panel(state)))
   end
 
-  def focus_window(%__MODULE__{workspace: %{buffers: %{active: nil}}} = state, _target_id),
-    do: state
-
   def focus_window(
         %__MODULE__{
           workspace: %{windows: %{map: windows, active: old_id} = ws, buffers: buffers} = wspace
@@ -2209,12 +2198,9 @@ defmodule MingaEditor.State do
       ) do
     case {Map.fetch(windows, old_id), Map.fetch(windows, target_id)} do
       {{:ok, old_win}, {:ok, target_win}} ->
-        # Save current cursor to outgoing window
-        current_cursor = Buffer.cursor(buffers.active)
-        windows = Map.put(windows, old_id, %{old_win | cursor: current_cursor})
+        windows = Map.put(windows, old_id, save_window_cursor(old_win, buffers.active))
 
-        # Restore target window's cursor into its buffer
-        Buffer.move_to(target_win.buffer, target_win.cursor)
+        restore_window_cursor(target_win)
 
         # Derive keymap_scope from the target window's content type.
         # Agent chat windows use :agent scope; buffer windows use the
@@ -2239,6 +2225,22 @@ defmodule MingaEditor.State do
   catch
     :exit, _ -> state
   end
+
+  @spec save_window_cursor(Window.t(), pid() | nil) :: Window.t()
+  defp save_window_cursor(%Window{content: {:buffer, _pid}} = window, active_buffer)
+       when is_pid(active_buffer) do
+    %{window | cursor: Buffer.cursor(active_buffer)}
+  end
+
+  defp save_window_cursor(%Window{} = window, _active_buffer), do: window
+
+  @spec restore_window_cursor(Window.t()) :: :ok
+  defp restore_window_cursor(%Window{content: {:buffer, pid}, cursor: cursor}) when is_pid(pid) do
+    Buffer.move_to(pid, cursor)
+    :ok
+  end
+
+  defp restore_window_cursor(%Window{}), do: :ok
 
   @doc """
   Derives the keymap scope from a window's content type.
@@ -2372,11 +2374,10 @@ defmodule MingaEditor.State do
 
   @spec build_empty_agent_tab_defaults(t()) :: Tab.context()
   defp build_empty_agent_tab_defaults(state) do
-    agent_buf = AgentBufferSync.start_buffer(normalize_options_server(state.options_server))
     rows = max(state.terminal_viewport.rows, 1)
     cols = max(state.terminal_viewport.cols, 1)
-    windows = build_agent_chat_windows(agent_buf, rows, cols)
-    build_agent_tab_defaults(state, windows, agent_buf)
+    windows = build_agent_chat_windows(rows, cols)
+    build_agent_tab_defaults(state, windows)
   end
 
   @spec build_file_tab_defaults(t()) :: Tab.context()
@@ -2428,16 +2429,15 @@ defmodule MingaEditor.State do
   Builds a complete per-tab context for an agent tab.
 
   Used by agent tab creation paths to ensure all `@per_tab_fields` are
-  populated. Accepts a pre-built `Windows` struct for the agent chat
-  window and the agent buffer pid.
+  populated. Accepts a pre-built `Windows` struct for the agent chat window.
   """
-  @spec build_agent_tab_defaults(t(), Windows.t(), pid() | nil) :: Tab.context()
-  def build_agent_tab_defaults(state, windows, agent_buf) do
+  @spec build_agent_tab_defaults(t(), Windows.t()) :: Tab.context()
+  def build_agent_tab_defaults(state, windows) do
     TabContext.from_workspace_map(%{
       keymap_scope: :agent,
       buffers: %Buffers{
-        active: agent_buf,
-        list: if(agent_buf, do: [agent_buf], else: []),
+        active: nil,
+        list: [],
         active_index: 0
       },
       windows: windows,
@@ -2456,23 +2456,21 @@ defmodule MingaEditor.State do
   @doc """
   Builds a fresh agent-shaped workspace context for shell-owned agent surfaces.
 
-  Returns a `Tab.context()` carrying a single agent-chat window sized to the current viewport, with the agent keymap scope. The caller restores it via `restore_tab_context/2` and then activates the relevant shell-owned session pid against the window content.
-
-  Falls back to an empty `Windows` map when no agent buffer is available; the caller's activation step then becomes a no-op.
+  Returns a `Tab.context()` carrying a single semantic agent-chat window sized to the current viewport, with the agent keymap scope. The caller restores it via `restore_tab_context/2` and then activates the relevant shell-owned session pid against the window content.
   """
   @spec build_agent_workspace_context(t(), pid() | nil) :: Tab.context()
-  def build_agent_workspace_context(%__MODULE__{} = state, agent_buf) do
+  def build_agent_workspace_context(%__MODULE__{} = state, _session_pid) do
     rows = max(state.workspace.viewport.rows, 1)
     cols = max(state.workspace.viewport.cols, 1)
 
-    windows = build_agent_chat_windows(agent_buf, rows, cols)
-    build_agent_tab_defaults(state, windows, agent_buf)
+    windows = build_agent_chat_windows(rows, cols)
+    build_agent_tab_defaults(state, windows)
   end
 
-  @spec build_agent_chat_windows(pid() | nil, pos_integer(), pos_integer()) :: Windows.t()
-  defp build_agent_chat_windows(agent_buf, rows, cols) when is_pid(agent_buf) do
+  @spec build_agent_chat_windows(pos_integer(), pos_integer()) :: Windows.t()
+  defp build_agent_chat_windows(rows, cols) do
     win_id = 1
-    agent_window = Window.new_agent_chat(win_id, agent_buf, rows, cols)
+    agent_window = Window.new_agent_chat(win_id, rows, cols)
 
     %Windows{
       tree: WindowTree.new(win_id),
@@ -2481,8 +2479,6 @@ defmodule MingaEditor.State do
       next_id: win_id + 1
     }
   end
-
-  defp build_agent_chat_windows(_agent_buf, _rows, _cols), do: %Windows{}
 
   @spec file_tree_with_current_root(t()) :: FileTreeState.t()
   defp file_tree_with_current_root(%__MODULE__{} = state) do
@@ -2702,8 +2698,6 @@ defmodule MingaEditor.State do
   @spec rebuild_agent_from_session(t(), Tab.t()) :: t()
   def rebuild_agent_from_session(state, %Tab{kind: :agent, session: session_pid})
       when is_pid(session_pid) do
-    state = bind_agent_buffer_from_active_window(state)
-
     case agent_snapshot(session_pid) do
       nil ->
         AgentAccess.update_agent(state, &AgentState.clear_active_tool_name/1)
@@ -2722,17 +2716,6 @@ defmodule MingaEditor.State do
   end
 
   def rebuild_agent_from_session(state, _tab), do: state
-
-  @spec bind_agent_buffer_from_active_window(t()) :: t()
-  defp bind_agent_buffer_from_active_window(state) do
-    case find_agent_chat_window(state) do
-      {_win_id, %Window{content: {:agent_chat, _}, buffer: buffer}} when is_pid(buffer) ->
-        AgentAccess.update_agent(state, &AgentState.set_buffer(&1, buffer))
-
-      _ ->
-        state
-    end
-  end
 
   @spec agent_snapshot(pid()) :: map() | nil
   defp agent_snapshot(session_pid) do
@@ -2811,62 +2794,20 @@ defmodule MingaEditor.State do
   defp apply_buffer_effect(state, {:rebuild_agent_session, %Tab{kind: :agent} = tab}) do
     state
     |> rebuild_agent_from_session(tab)
-    |> sync_active_agent_buffer()
+    |> sync_active_agent_transcript()
   end
 
   defp apply_buffer_effect(state, {:rebuild_agent_session, tab}),
     do: rebuild_agent_from_session(state, tab)
 
-  @spec sync_active_agent_buffer(t()) :: t()
-  defp sync_active_agent_buffer(state) do
-    agent = AgentAccess.agent(state)
+  @spec sync_active_agent_transcript(t()) :: t()
+  defp sync_active_agent_transcript(state) do
     session = AgentAccess.session(state)
 
-    if is_pid(agent.buffer) and is_pid(session) do
-      sync_agent_buffer_from_session(state, agent.buffer, session, agent.pending_approval)
+    if is_pid(session) do
+      MingaEditor.AgentLifecycle.sync_transcript(state)
     else
       state
     end
-  end
-
-  @spec sync_agent_buffer_from_session(t(), pid(), pid(), term()) :: t()
-  defp sync_agent_buffer_from_session(state, buffer, session, pending_approval) do
-    messages = safe_session_messages(session)
-
-    case messages do
-      [] ->
-        state
-
-      _ ->
-        sync_opts = if pending_approval, do: [pending_approval: pending_approval], else: []
-        sync_opts = put_session_message_ids(sync_opts, session)
-
-        {line_index, display_messages, display_message_pairs} =
-          AgentBufferSync.sync(buffer, messages, sync_opts)
-
-        AgentAccess.update_panel(
-          state,
-          &%{
-            &1
-            | cached_line_index: line_index,
-              cached_display_messages: display_messages,
-              cached_display_message_pairs: display_message_pairs
-          }
-        )
-    end
-  end
-
-  @spec safe_session_messages(pid()) :: [term()]
-  defp safe_session_messages(session) do
-    AgentSession.messages(session)
-  catch
-    :exit, _ -> []
-  end
-
-  @spec put_session_message_ids(keyword(), pid()) :: keyword()
-  defp put_session_message_ids(opts, session) do
-    Keyword.put(opts, :message_ids, AgentSession.messages_with_ids(session))
-  catch
-    :exit, _ -> opts
   end
 end

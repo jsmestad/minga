@@ -20,12 +20,9 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
   alias MingaEditor.FoldMap.VisibleLines
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Layout
-  alias MingaEditor.Agent.View.PromptRenderer
-  alias MingaEditor.Agent.ViewContext
   alias MingaEditor.BufferDecorations
   alias MingaEditor.Renderer.Gutter
   alias MingaEditor.Renderer.SearchHighlight
-  alias MingaEditor.RenderPipeline.AgentChatPrefetch
   alias MingaEditor.RenderPipeline.ContentHelpers
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.Scroll.WindowScroll
@@ -58,159 +55,12 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
   end
 
   @doc """
-  Prefetches agent chat buffer data before the `:agent_content` stage runs.
-
-  Prompt and sidebar chrome remain pure render work. The chat buffer snapshot, cursor, options, and version are captured here so the content stage does not call `Minga.Buffer`.
+  Agent chat is semantic-only and has no buffer snapshot to prefetch.
   """
-  @spec prefetch_agent_chat_windows(state(), Layout.t()) :: %{
-          Window.id() => AgentChatPrefetch.t()
-        }
-  def prefetch_agent_chat_windows(input, layout) do
-    ctx = ViewContext.from_editor_state(input)
-
-    layout.window_layouts
-    |> Enum.reduce(%{}, fn {win_id, win_layout}, acc ->
-      window = Map.get(input.workspace.windows.map, win_id)
-      maybe_prefetch_agent_chat_window(input, ctx, window, win_id, win_layout, acc)
-    end)
-  end
+  @spec prefetch_agent_chat_windows(state(), Layout.t()) :: %{}
+  def prefetch_agent_chat_windows(_input, _layout), do: %{}
 
   # ── Private ──────────────────────────────────────────────────────────────
-
-  @spec maybe_prefetch_agent_chat_window(
-          state(),
-          ViewContext.t(),
-          Window.t() | nil,
-          Window.id(),
-          Layout.window_layout(),
-          %{Window.id() => AgentChatPrefetch.t()}
-        ) :: %{Window.id() => AgentChatPrefetch.t()}
-  defp maybe_prefetch_agent_chat_window(
-         state,
-         ctx,
-         %Window{content: {:agent_chat, _}} = window,
-         win_id,
-         win_layout,
-         acc
-       ) do
-    if state.workspace.agent_ui.view.help_visible do
-      acc
-    else
-      case safe_agent_chat_prefetch(state, ctx, window, win_id, win_layout) do
-        {:ok, prefetch} -> Map.put(acc, win_id, prefetch)
-        :skip -> acc
-      end
-    end
-  end
-
-  defp maybe_prefetch_agent_chat_window(_state, _ctx, _window, _win_id, _win_layout, acc), do: acc
-
-  @spec safe_agent_chat_prefetch(
-          state(),
-          ViewContext.t(),
-          Window.t(),
-          Window.id(),
-          Layout.window_layout()
-        ) ::
-          {:ok, AgentChatPrefetch.t()} | :skip
-  defp safe_agent_chat_prefetch(state, ctx, window, win_id, win_layout) do
-    {:ok, agent_chat_prefetch(state, ctx, window, win_id, win_layout)}
-  catch
-    :exit, _ ->
-      Minga.Log.debug(:render, "[prefetch] skipped agent window #{win_id}: buffer process dead")
-      :skip
-  end
-
-  @spec agent_chat_prefetch(
-          state(),
-          ViewContext.t(),
-          Window.t(),
-          Window.id(),
-          Layout.window_layout()
-        ) ::
-          AgentChatPrefetch.t()
-  defp agent_chat_prefetch(state, ctx, window, win_id, win_layout) do
-    win_layout = Layout.add_sidebar(win_layout)
-    {_row_off, _col_off, chat_width, height} = win_layout.content
-    prompt_height = PromptRenderer.prompt_height(ctx, chat_width)
-    input_v_gap = 1
-    chat_height = max(height - prompt_height - input_v_gap, 1)
-    buf = window.buffer
-    metadata = Buffer.render_snapshot(buf, 0, 1)
-    is_active = agent_window_active?(state, window)
-    {cursor_line, cursor_byte_col} = agent_window_cursor(window, metadata, is_active)
-
-    viewport =
-      agent_chat_viewport(
-        window,
-        chat_height,
-        chat_width,
-        cursor_line,
-        metadata.line_count,
-        metadata.options
-      )
-
-    window = Window.set_viewport(window, viewport)
-    visible_rows = Viewport.content_rows(viewport)
-    {first_line, _} = Viewport.visible_range(viewport)
-    fetch_rows = visible_rows + div(visible_rows, 2)
-    snapshot = Buffer.render_snapshot(buf, first_line, fetch_rows)
-    cursor_line_text = cursor_line_text(snapshot.lines, cursor_line, first_line)
-    cursor_col = Unicode.display_col(cursor_line_text, cursor_byte_col)
-    line_number_style = Map.get(snapshot.options, :line_numbers, :absolute)
-
-    number_w =
-      if line_number_style == :none, do: 0, else: Viewport.gutter_width(snapshot.line_count)
-
-    gutter_w = Gutter.total_width(number_w)
-    content_w = max(chat_width - gutter_w, 1)
-
-    %AgentChatPrefetch{
-      win_id: win_id,
-      window: window,
-      viewport: viewport,
-      cursor_line: cursor_line,
-      cursor_byte_col: cursor_byte_col,
-      cursor_col: cursor_col,
-      first_line: first_line,
-      snapshot: snapshot,
-      line_number_style: line_number_style,
-      gutter_w: gutter_w,
-      content_w: content_w,
-      buf_version: snapshot.version
-    }
-  end
-
-  @spec agent_chat_viewport(
-          Window.t(),
-          pos_integer(),
-          pos_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          %{atom() => term()}
-        ) :: Viewport.t()
-  defp agent_chat_viewport(window, chat_height, chat_width, cursor_line, line_count, options) do
-    %Viewport{} = win_vp = window.viewport
-    viewport = %{win_vp | rows: chat_height, cols: chat_width, reserved: 0}
-
-    if window.pinned do
-      visible = Viewport.content_rows(viewport)
-      Viewport.put_top(viewport, max(line_count - visible, 0))
-    else
-      Viewport.scroll_to_cursor(viewport, {cursor_line, 0}, Map.get(options, :scroll_margin, 5))
-    end
-  end
-
-  @spec agent_window_active?(state(), Window.t()) :: boolean()
-  defp agent_window_active?(state, window) do
-    window.buffer == state.workspace.buffers.active or
-      Map.get(state.workspace.windows.map, state.workspace.windows.active) == window
-  end
-
-  @spec agent_window_cursor(Window.t(), Minga.Buffer.RenderSnapshot.t(), boolean()) ::
-          {non_neg_integer(), non_neg_integer()}
-  defp agent_window_cursor(_window, snapshot, true), do: snapshot.cursor
-  defp agent_window_cursor(window, _snapshot, false), do: window.cursor
 
   # Scrolls a single window and detects invalidation. Guards against buffer
   # death in the race window between the process dying and the :DOWN message

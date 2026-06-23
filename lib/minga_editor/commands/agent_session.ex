@@ -6,7 +6,6 @@ defmodule MingaEditor.Commands.AgentSession do
   from agent sessions. Extracted from `Commands.Agent` to reduce module size.
   """
 
-  alias MingaEditor.Agent.BufferSync, as: AgentBufferSync
   alias MingaAgent.ProjectView
   alias MingaAgent.Session
   alias Minga.Buffer
@@ -123,16 +122,6 @@ defmodule MingaEditor.Commands.AgentSession do
 
     case start_and_subscribe(state, session_opts) do
       {:ok, pid} ->
-        state =
-          if AgentAccess.agent(state).buffer == nil do
-            buf = AgentBufferSync.start_buffer(EditorState.options_server(state))
-            state = AgentAccess.update_agent(state, &AgentState.set_buffer(&1, buf))
-            state = EditorState.monitor_buffer(state, buf)
-            AgentLifecycle.setup_agent_highlight(state)
-          else
-            state
-          end
-
         # Create the workspace first so set_tab_session/3 does not project the session onto the manual workspace.
         state
         |> ensure_agent_workspace(pid, project_view)
@@ -168,15 +157,14 @@ defmodule MingaEditor.Commands.AgentSession do
              is_binary(token) and is_integer(last_seen_event_id) and last_seen_event_id >= 0 do
     case remote_attach(remote_pid, session_id, token, last_seen_event_id) do
       {:ok, messages, snapshot, events, latest_event_id} ->
-        {state, tab_id, buffer} = create_remote_agent_tab(state, server_name)
-        AgentBufferSync.sync(buffer, messages)
+        {state, tab_id} = create_remote_agent_tab(state, server_name)
 
         state =
           state
           |> set_remote_tab(tab_id, server_name, session_id, remote_pid)
-          |> AgentAccess.update_agent(&AgentState.set_buffer(&1, buffer))
           |> rebuild_agent_from_tab(tab_id)
           |> ensure_agent_workspace(remote_pid, nil)
+          |> AgentLifecycle.cache_messages(messages)
           |> set_remote_workspace(
             server_name,
             session_id,
@@ -445,14 +433,12 @@ defmodule MingaEditor.Commands.AgentSession do
     end
   end
 
-  @spec create_remote_agent_tab(state(), String.t()) :: {state(), Tab.id(), pid()}
+  @spec create_remote_agent_tab(state(), String.t()) :: {state(), Tab.id()}
   defp create_remote_agent_tab(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, _server_name) do
-    state = ensure_agent_buffer(state)
-    buffer = AgentAccess.agent(state).buffer
     rows = max(state.terminal_viewport.rows, 1)
     cols = max(state.terminal_viewport.cols, 1)
     win_id = 1
-    agent_window = Window.new_agent_chat(win_id, buffer, rows, cols)
+    agent_window = Window.new_agent_chat(win_id, rows, cols)
 
     windows = %Windows{
       tree: WindowTree.new(win_id),
@@ -461,37 +447,15 @@ defmodule MingaEditor.Commands.AgentSession do
       next_id: win_id + 1
     }
 
-    context = EditorState.build_agent_tab_defaults(state, windows, buffer)
+    context = EditorState.build_agent_tab_defaults(state, windows)
     {tb, tab} = TabBar.add(tb, :agent, "Agent")
     tb = TabBar.update_context(tb, tab.id, context)
     state = EditorState.set_tab_bar(state, tb)
-    {state, tab.id, buffer}
+    {state, tab.id}
   end
 
   defp create_remote_agent_tab(state, _server_name) do
-    state = ensure_agent_buffer(state)
-    {state, 0, AgentAccess.agent(state).buffer}
-  end
-
-  @spec ensure_agent_buffer(state()) :: state()
-  defp ensure_agent_buffer(state) do
-    case AgentAccess.agent(state).buffer do
-      pid when is_pid(pid) -> state
-      _ -> create_agent_buffer(state)
-    end
-  end
-
-  @spec create_agent_buffer(state()) :: state()
-  defp create_agent_buffer(state) do
-    case AgentBufferSync.start_buffer(EditorState.options_server(state)) do
-      pid when is_pid(pid) ->
-        state = AgentAccess.update_agent(state, &AgentState.set_buffer(&1, pid))
-        state = EditorState.monitor_buffer(state, pid)
-        AgentLifecycle.setup_agent_highlight(state)
-
-      _ ->
-        state
-    end
+    {state, 0}
   end
 
   @spec set_remote_tab(state(), Tab.id(), String.t(), String.t(), pid()) :: state()

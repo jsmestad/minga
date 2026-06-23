@@ -100,9 +100,8 @@ defmodule MingaEditor.TitleTest do
 
   describe "format/2 with EditorState (content-aware)" do
     test "agent chat window shows Agent in title" do
-      {:ok, agent_buf} = BufferProcess.start_link(content: "")
       {:ok, file_buf} = BufferProcess.start_link(content: "code")
-      agent_window = Window.new_agent_chat(1, agent_buf, 24, 80)
+      agent_window = Window.new_agent_chat(1, 24, 80)
 
       state = %EditorState{
         port_manager: self(),
@@ -246,9 +245,8 @@ defmodule MingaEditor.TitleTest do
     end
 
     test "agent chat window shows Agent" do
-      {:ok, agent_buf} = BufferProcess.start_link(content: "")
       {:ok, file_buf} = BufferProcess.start_link(content: "code")
-      agent_window = Window.new_agent_chat(1, agent_buf, 24, 80)
+      agent_window = Window.new_agent_chat(1, 24, 80)
 
       state = %EditorState{
         port_manager: self(),

@@ -11,7 +11,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   alias Minga.Distribution.Events.NodeDisconnectedEvent
   alias Minga.Events
   alias Minga.Mode.ExtensionConfirmState
-  alias MingaEditor.Agent.BufferSync, as: AgentBufferSync
+  alias MingaEditor.AgentLifecycle
   alias MingaEditor.Commands
   alias MingaEditor.Frontend.Protocol
   alias MingaEditor.Handlers.EffectHandler
@@ -532,12 +532,8 @@ defmodule MingaEditor.Handlers.EventDispatcher do
     state = EditorState.set_tab_bar(state, tb)
 
     if active_workspace?(tb, workspace_id) do
-      case AgentAccess.agent(state).buffer do
-        pid when is_pid(pid) -> AgentBufferSync.sync(pid, messages)
-        _ -> :ok
-      end
-
       state
+      |> AgentLifecycle.cache_messages(messages)
       |> AgentAccess.update_agent(&AgentState.set_error(&1, "Remote session ended"))
       |> EditorState.set_status("Remote session ended")
     else
@@ -691,14 +687,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
 
   @spec sync_reconnected_buffer(EditorState.t(), [term()]) :: EditorState.t()
   defp sync_reconnected_buffer(state, messages) do
-    case AgentAccess.agent(state).buffer do
-      pid when is_pid(pid) ->
-        AgentBufferSync.sync(pid, messages)
-        state
-
-      _other ->
-        state
-    end
+    AgentLifecycle.cache_messages(state, messages)
   end
 
   @spec apply_reconnected_snapshot(EditorState.t(), MingaAgent.Session.editor_snapshot()) ::

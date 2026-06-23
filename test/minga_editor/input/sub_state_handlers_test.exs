@@ -8,7 +8,6 @@ defmodule MingaEditor.Input.SubStateHandlersTest do
   correct keys and passes through otherwise.
 
   AgentSearch was removed in the agent input handler cleanup (#631).
-  Standard vim `/` search now works on the `*Agent*` buffer directly.
   """
 
   use ExUnit.Case, async: true
@@ -76,8 +75,7 @@ defmodule MingaEditor.Input.SubStateHandlersTest do
     }
   end
 
-  # AgentSearch was removed in #631. Standard vim `/` search works
-  # on the `*Agent*` buffer directly.
+  # AgentSearch was removed in #631.
 
   # ══════════════════════════════════════════════════════════════════════════
   # MentionCompletion

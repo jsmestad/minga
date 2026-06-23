@@ -1,11 +1,9 @@
 defmodule MingaEditor.Commands.AgentSplitTest do
   use ExUnit.Case, async: true
 
-  alias MingaEditor.Agent.BufferSync, as: AgentBufferSync
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.Commands.Agent, as: AgentCommands
   alias MingaEditor.State, as: EditorState
-  alias MingaAgent.RuntimeState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
@@ -19,15 +17,11 @@ defmodule MingaEditor.Commands.AgentSplitTest do
   defp make_state do
     {:ok, buf} = BufferProcess.start_link(content: "hello world")
     {:ok, _prompt_buf} = BufferProcess.start_link(content: "")
-    agent_buf = AgentBufferSync.start_buffer()
     {:ok, fake_session} = StubServer.start_link()
 
     window = Window.new(1, buf, 24, 80)
 
-    agent = %AgentState{
-      buffer: agent_buf,
-      runtime: %RuntimeState{status: :idle}
-    }
+    agent = %AgentState{}
 
     # File tab with context
     file_tab = Tab.new_file(1, "[no file]")
@@ -49,7 +43,7 @@ defmodule MingaEditor.Commands.AgentSplitTest do
     # shell's active_session callback when this tab is active.
     agent_tab = Tab.new_agent(2, "Agent") |> Tab.set_session(fake_session)
 
-    agent_win = Window.new_agent_chat(1, agent_buf, 24, 80)
+    agent_win = Window.new_agent_chat(1, 24, 80)
 
     agent_context = %{
       keymap_scope: :agent,

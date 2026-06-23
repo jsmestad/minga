@@ -15,7 +15,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
   alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.Session
   alias Minga.Editing.Scroll
-  alias MingaEditor.Agent.BufferSync
+  alias MingaEditor.Agent.Transcript
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
   alias Minga.Buffer.Process, as: BufferProcess
@@ -59,9 +59,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
         pid
       end
 
-    agent = %AgentState{
-      buffer: Keyword.get(opts, :agent_buffer, nil)
-    }
+    agent = %AgentState{}
 
     agentic = %UIState{
       panel: %UIState.Panel{
@@ -131,26 +129,25 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
   end
 
   defp active_agent_workspace_state do
-    {:ok, agent_buf} = BufferProcess.start_link(content: "old chat")
-    state = base_state(agent_buffer: agent_buf)
-    windows = agent_windows(agent_buf)
+    state = base_state()
+    windows = agent_windows()
 
     state
     |> EditorState.set_buffers(%Buffers{
-      active: agent_buf,
-      list: [agent_buf],
+      active: nil,
+      list: [],
       active_index: 0
     })
     |> EditorState.set_windows(windows)
     |> EditorState.set_agent_ui(UIState.new())
   end
 
-  defp agent_windows(agent_buf) when is_pid(agent_buf) do
+  defp agent_windows do
     win_id = 1
 
     %Windows{
       tree: WindowTree.new(win_id),
-      map: %{win_id => Window.new_agent_chat(win_id, agent_buf, 24, 80)},
+      map: %{win_id => Window.new_agent_chat(win_id, 24, 80)},
       active: win_id,
       next_id: win_id + 1
     }
@@ -511,17 +508,19 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
           pinned_ids: MapSet.new([101])
         )
 
-      agent_buffer = BufferSync.start_buffer()
-
-      {line_index, display_messages, display_pairs} =
-        BufferSync.sync(agent_buffer, messages,
+      %{
+        line_index: line_index,
+        display_messages: display_messages,
+        display_message_pairs: display_pairs
+      } =
+        Transcript.display(messages,
           display_start_index: 2,
           message_ids: message_ids,
           pinned_ids: MapSet.new([101])
         )
 
       state =
-        base_state(session: session, agent_buffer: agent_buffer)
+        base_state(session: session)
         |> AgentAccess.update_agent_ui(fn ui ->
           panel = %{
             ui.panel
@@ -761,14 +760,14 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       assert AgentAccess.agent(new_state).error == nil
     end
 
-    test "creates a fresh agent buffer for the new workspace" do
-      {:ok, agent_buf} = BufferProcess.start_link(content: "old chat")
-      state = base_state(agent_buffer: agent_buf)
+    test "creates a fresh semantic agent workspace for the new session" do
+      state = base_state()
 
       new_state = AgentCommands.new_agent_session(state)
 
-      assert is_pid(AgentAccess.agent(new_state).buffer)
-      assert AgentAccess.agent(new_state).buffer != agent_buf
+      {_win_id, agent_window} = EditorState.find_agent_chat_window(new_state)
+      assert agent_window.content == {:agent_chat, :semantic}
+      assert new_state.workspace.buffers.active == nil
     end
 
     test "creates an active agent workspace with no file context" do
@@ -784,7 +783,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       assert active_workspace.active_file == nil
       assert is_pid(active_workspace.session)
       assert EditorState.active_tab_kind(new_state) == :agent
-      assert new_state.workspace.buffers.active == AgentAccess.agent(new_state).buffer
+      assert new_state.workspace.buffers.active == nil
       manual_workspace = TabBar.get_workspace(tab_bar, 0)
       assert manual_workspace.files == source_workspace.files
       assert manual_workspace.active_file == source_workspace.active_file
@@ -834,7 +833,6 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
     test "creating from an existing agent workspace preserves the source tab context" do
       state = active_agent_workspace_state()
       old_tab = TabBar.active(state.shell_state.tab_bar)
-      old_buffer = AgentAccess.agent(state).buffer
       old_session = old_tab.session
 
       new_state = AgentCommands.new_agent_session(state)
@@ -843,11 +841,12 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       old_context = TabContext.to_workspace_map(updated_old_tab.context)
       new_session = TabBar.active(tab_bar).session
 
-      assert old_context.buffers.active == old_buffer
+      assert old_context.buffers.active == nil
       assert old_session != nil
       assert new_session != old_session
-      assert AgentAccess.agent(new_state).buffer != old_buffer
-      assert new_state.workspace.buffers.active == AgentAccess.agent(new_state).buffer
+      assert new_state.workspace.buffers.active == nil
+      {_win_id, agent_window} = EditorState.find_agent_chat_window(new_state)
+      assert agent_window.content == {:agent_chat, :semantic}
     end
 
     test "background agent session creation does not switch active workspace" do

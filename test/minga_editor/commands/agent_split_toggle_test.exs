@@ -1,14 +1,12 @@
 defmodule MingaEditor.Commands.AgentSplitToggleTest do
   use ExUnit.Case, async: true
 
-  alias MingaEditor.Agent.BufferSync
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.View.Preview
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.Commands.Agent, as: AgentCommands
   alias MingaEditor.State, as: EditorState
-  alias MingaAgent.RuntimeState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Buffers
@@ -30,15 +28,12 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
   defp base_state(opts \\ []) do
     {:ok, buf} = BufferProcess.start_link(content: "hello\nworld")
     {:ok, prompt_buf} = BufferProcess.start_link(content: "")
-    agent_buf = BufferSync.start_buffer()
 
     session_pid = Keyword.get(opts, :session, fake_session())
 
     agent = %AgentState{
-      runtime: %RuntimeState{status: :idle},
       error: nil,
-      spinner_timer: nil,
-      buffer: agent_buf
+      spinner_timer: nil
     }
 
     active = Keyword.get(opts, :active, false)
@@ -82,7 +77,7 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
     }
 
     if active do
-      agent_win = Window.new_agent_chat(1, agent_buf, 24, 80)
+      agent_win = Window.new_agent_chat(1, 24, 80)
 
       agent_ctx = %{
         keymap_scope: :agent,
@@ -116,7 +111,7 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
       EditorState.switch_tab(state, at.id)
     else
       # Create background agent tab with agent context
-      agent_win = Window.new_agent_chat(1, agent_buf, 24, 80)
+      agent_win = Window.new_agent_chat(1, 24, 80)
 
       agent_ctx = %{
         keymap_scope: :agent,

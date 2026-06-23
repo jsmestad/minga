@@ -17,7 +17,6 @@ defmodule MingaEditor.Handlers.HighlightHandler do
   alias MingaEditor.HighlightSync
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Highlighting
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.Window
   alias Minga.Editing.Fold.Range, as: FoldRange
 
@@ -243,16 +242,6 @@ defmodule MingaEditor.Handlers.HighlightHandler do
     # Build effects for prettify symbols and render
     effects = [{:prettify_symbols, pid}, :render]
 
-    # Check if we need to update agent styled cache
-    agent_buf = AgentAccess.agent(new_state).buffer
-
-    effects =
-      if pid == agent_buf do
-        effects ++ [{:update_agent_styled_cache}]
-      else
-        effects
-      end
-
     {new_state, effects}
   end
 
@@ -268,16 +257,6 @@ defmodule MingaEditor.Handlers.HighlightHandler do
         [:render]
       else
         []
-      end
-
-    # Check agent buffer styled cache
-    agent_buf = AgentAccess.agent(state_with_hl).buffer
-
-    effects =
-      if pid == agent_buf do
-        effects ++ [{:update_agent_styled_cache}]
-      else
-        effects
       end
 
     {state_with_hl, effects}
@@ -445,9 +424,8 @@ defmodule MingaEditor.Handlers.HighlightHandler do
 
   @spec parser_eviction_protected_pids(EditorState.t()) :: [pid()]
   defp parser_eviction_protected_pids(state) do
-    agent_buf = state |> AgentAccess.agent() |> Map.get(:buffer)
-
-    [agent_buf | visible_window_buffers(state)]
+    state
+    |> visible_window_buffers()
     |> Enum.filter(&is_pid/1)
     |> Enum.uniq()
   end

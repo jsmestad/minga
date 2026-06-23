@@ -551,7 +551,8 @@ defmodule MingaEditor.StartupTest do
       assert restored.workspace.agent_ui.view.active
       assert restored_tab.context.keymap_scope == :agent
       assert Content.agent_chat?(active_window.content)
-      assert is_pid(restored.workspace.buffers.active)
+      assert restored.workspace.buffers.active == nil
+      assert restored.workspace.buffers.list == []
     after
       Application.delete_env(:minga, :cli_startup_project_root)
     end
@@ -613,14 +614,13 @@ defmodule MingaEditor.StartupTest do
 
   describe "build_initial_window/5" do
     test "agent startup creates an agent chat window and editor startup creates a buffer window" do
-      {agent_window, {:agent_buffer, agent_buf}} =
+      {agent_window, :semantic_agent_window} =
         Startup.build_initial_window(:agent, 1, self(), 24, 80)
 
       assert %Window{} = agent_window
       assert Content.agent_chat?(agent_window.content)
       refute Content.buffer?(agent_window.content)
-      assert is_pid(agent_buf)
-      assert Process.alive?(agent_buf)
+      assert agent_window.buffer == nil
 
       {:ok, buf} = BufferProcess.start_link(content: "hello")
       {editor_window, :noop} = Startup.build_initial_window(:editor, 1, buf, 24, 80)
@@ -639,7 +639,7 @@ defmodule MingaEditor.StartupTest do
     test "initial windows match LayoutPreset agent-chat detection" do
       {:ok, buf} = BufferProcess.start_link(content: "scratch")
 
-      {agent_window, {:agent_buffer, _agent_buf}} =
+      {agent_window, :semantic_agent_window} =
         Startup.build_initial_window(:agent, 1, buf, 24, 80)
 
       {editor_window, :noop} = Startup.build_initial_window(:editor, 1, buf, 24, 80)

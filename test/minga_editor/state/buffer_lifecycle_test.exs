@@ -39,10 +39,9 @@ defmodule MingaEditor.State.BufferLifecycleTest do
     {EditorState.set_tab_bar(state, tb), buf}
   end
 
-  @spec state_with_agent_tab() :: {EditorState.t(), pid()}
+  @spec state_with_agent_tab() :: EditorState.t()
   defp state_with_agent_tab do
-    agent_buf = start_buffer("")
-    agent_window = Window.new_agent_chat(1, agent_buf, 24, 80)
+    agent_window = Window.new_agent_chat(1, 24, 80)
 
     state = %EditorState{
       port_manager: self(),
@@ -50,7 +49,7 @@ defmodule MingaEditor.State.BufferLifecycleTest do
         viewport: Viewport.new(24, 80),
         editing: VimState.new(),
         keymap_scope: :agent,
-        buffers: %Buffers{active: agent_buf, list: [agent_buf], active_index: 0},
+        buffers: %Buffers{active: nil, list: [], active_index: 0},
         windows: %Windows{
           tree: WindowTree.new(1),
           map: %{1 => agent_window},
@@ -64,7 +63,7 @@ defmodule MingaEditor.State.BufferLifecycleTest do
       TabBar.new(Tab.new_agent(1, "Agent"))
       |> TabBar.update_context(1, EditorState.snapshot_tab_context(state))
 
-    {EditorState.set_tab_bar(state, tb), agent_buf}
+    EditorState.set_tab_bar(state, tb)
   end
 
   @spec start_buffer(String.t()) :: pid()
@@ -118,7 +117,7 @@ defmodule MingaEditor.State.BufferLifecycleTest do
     end
 
     test "opening from an agent tab snapshots agent state, creates a file tab, switches scope, and stops the spinner" do
-      {state, agent_buf} = state_with_agent_tab()
+      state = state_with_agent_tab()
       file_buf = start_buffer("file content")
 
       {new_state, effects} = EditorState.add_buffer_pure(state, file_buf, context: :open)
@@ -131,7 +130,7 @@ defmodule MingaEditor.State.BufferLifecycleTest do
       assert :stop_spinner in effects
       assert TabBar.count(tb) == 2
       assert agent_tab.kind == :agent
-      assert %Buffers{active: ^agent_buf} = agent_tab.context.buffers
+      assert %Buffers{active: nil, list: []} = agent_tab.context.buffers
       assert agent_tab.context.keymap_scope == :agent
       assert file_tab.kind == :file
       assert %Buffers{active: ^file_buf} = file_tab.context.buffers
@@ -184,15 +183,14 @@ defmodule MingaEditor.State.BufferLifecycleTest do
     end
 
     test "agent chat windows without tab bars keep their content when a file buffer is added" do
-      agent_buf = start_buffer("")
-      agent_window = Window.new_agent_chat(1, agent_buf, 24, 80)
+      agent_window = Window.new_agent_chat(1, 24, 80)
 
       state = %EditorState{
         port_manager: self(),
         workspace: %SessionState{
           viewport: Viewport.new(24, 80),
           editing: VimState.new(),
-          buffers: %Buffers{active: agent_buf, list: [agent_buf], active_index: 0},
+          buffers: %Buffers{active: nil, list: [], active_index: 0},
           windows: %Windows{
             tree: WindowTree.new(1),
             map: %{1 => agent_window},
@@ -210,7 +208,7 @@ defmodule MingaEditor.State.BufferLifecycleTest do
       assert new_state.workspace.buffers.active == file_buf
       assert {:monitor, file_buf} in effects
       assert Content.agent_chat?(window.content)
-      assert window.buffer == agent_buf
+      assert window.buffer == nil
     end
   end
 

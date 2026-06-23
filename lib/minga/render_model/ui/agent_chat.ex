@@ -5,7 +5,7 @@ defmodule Minga.RenderModel.UI.AgentChat do
   Describes the agent conversation view: visibility, runtime status, the active
   model name and thinking level, the prompt buffer plus its cell-grid metadata
   (cursor, vim mode, line counts), an optional prompt completion popup, an
-  optional pending approval banner, an optional help overlay, and the list of
+  optional help overlay, and the list of
   conversation messages with their stable BEAM-assigned IDs.
 
   This is pure data with domain fields and **core types only**. It does not
@@ -37,7 +37,6 @@ defmodule Minga.RenderModel.UI.AgentChat do
   """
 
   alias __MODULE__.ApprovalView
-  alias __MODULE__.PendingApproval
   alias __MODULE__.PromptCompletion
   alias __MODULE__.ToolCallView
   alias __MODULE__.Usage
@@ -78,7 +77,6 @@ defmodule Minga.RenderModel.UI.AgentChat do
           prompt_vim_mode: atom() | nil,
           prompt_visible_rows: non_neg_integer(),
           prompt_completion: PromptCompletion.t() | nil,
-          pending_approval: PendingApproval.t() | nil,
           help_visible?: boolean(),
           help_groups: [{String.t(), [{String.t(), String.t()}]}],
           messages: [message()]
@@ -95,7 +93,6 @@ defmodule Minga.RenderModel.UI.AgentChat do
             prompt_vim_mode: nil,
             prompt_visible_rows: 1,
             prompt_completion: nil,
-            pending_approval: nil,
             help_visible?: false,
             help_groups: [],
             messages: []
@@ -122,21 +119,6 @@ defmodule Minga.RenderModel.UI.AgentChat do
               selected: 0,
               anchor_line: 0,
               anchor_col: 0
-  end
-
-  defmodule PendingApproval do
-    @moduledoc """
-    Pending approval banner shown above the prompt for a tool call awaiting the
-    user's decision.
-    """
-
-    @type t :: %__MODULE__{
-            name: String.t(),
-            args: map()
-          }
-
-    @enforce_keys [:name, :args]
-    defstruct [:name, :args]
   end
 
   defmodule ToolCallView do

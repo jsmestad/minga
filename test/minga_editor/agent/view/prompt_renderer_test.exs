@@ -31,8 +31,7 @@ defmodule MingaEditor.Agent.View.PromptRendererTest do
     agent = %AgentState{
       runtime: %RuntimeState{status: :idle},
       error: nil,
-      spinner_timer: nil,
-      buffer: nil
+      spinner_timer: nil
     }
 
     agentic = %UIState{

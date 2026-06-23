@@ -254,8 +254,7 @@ defmodule MingaEditor.Input.Scoped do
              band(mods, @alt) == 0 do
           handle_agent_self_insert(state, cp, mods)
         else
-          # Not handled by scope. Pass through so AgentNav can route
-          # the key through the Mode FSM against the agent buffer.
+          # Not handled by scope. Pass through so AgentNav can route semantic transcript navigation.
           {:passthrough, state}
         end
     end

@@ -28,7 +28,6 @@ defmodule MingaEditor.Shell.Traditional do
 
   @behaviour MingaEditor.Shell
 
-  alias MingaEditor.Agent.BufferSync, as: AgentBufferSync
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Commands.AgentSession
   alias Minga.Buffer
@@ -547,7 +546,6 @@ defmodule MingaEditor.Shell.Traditional do
 
   @spec background_agent_context(SessionState.t()) :: Tab.context()
   defp background_agent_context(workspace) do
-    agent_buf = AgentBufferSync.start_buffer()
     rows = max(workspace.viewport.rows, 1)
     cols = max(workspace.viewport.cols, 1)
 
@@ -556,22 +554,15 @@ defmodule MingaEditor.Shell.Traditional do
     |> TabContext.put_fields(%{
       keymap_scope: :agent,
       agent_ui: UIState.new(),
-      buffers: background_agent_buffers(agent_buf),
-      windows: background_agent_windows(agent_buf, rows, cols)
+      buffers: %Buffers{active: nil, list: [], active_index: 0},
+      windows: background_agent_windows(rows, cols)
     })
   end
 
-  @spec background_agent_buffers(pid() | nil) :: Buffers.t()
-  defp background_agent_buffers(agent_buf) when is_pid(agent_buf) do
-    %Buffers{active: agent_buf, list: [agent_buf], active_index: 0}
-  end
-
-  defp background_agent_buffers(_agent_buf), do: %Buffers{}
-
-  @spec background_agent_windows(pid() | nil, pos_integer(), pos_integer()) :: Windows.t()
-  defp background_agent_windows(agent_buf, rows, cols) when is_pid(agent_buf) do
+  @spec background_agent_windows(pos_integer(), pos_integer()) :: Windows.t()
+  defp background_agent_windows(rows, cols) do
     win_id = 1
-    agent_window = Window.new_agent_chat(win_id, agent_buf, rows, cols)
+    agent_window = Window.new_agent_chat(win_id, rows, cols)
 
     %Windows{
       tree: WindowTree.new(win_id),
@@ -580,8 +571,6 @@ defmodule MingaEditor.Shell.Traditional do
       next_id: win_id + 1
     }
   end
-
-  defp background_agent_windows(_agent_buf, _rows, _cols), do: %Windows{}
 
   @spec find_tab_for_buffer(TabBar.t(), SessionState.t(), pid()) :: Tab.t() | nil
   defp find_tab_for_buffer(%TabBar{} = tb, %SessionState{} = workspace, pid) when is_pid(pid) do

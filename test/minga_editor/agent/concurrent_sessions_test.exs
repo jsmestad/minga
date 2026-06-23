@@ -9,9 +9,8 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
 
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer
-  alias MingaEditor.Agent.BufferSync, as: AgentBufferSync
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.AgentLifecycle
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
@@ -68,15 +67,15 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
     end)
   end
 
-  defp agent_tab_context(agent_buf) do
+  defp agent_tab_context do
     rows = 24
     cols = 80
     win_id = 1
-    agent_window = Window.new_agent_chat(win_id, agent_buf, rows, cols)
+    agent_window = Window.new_agent_chat(win_id, rows, cols)
 
     %{
       keymap_scope: :agent,
-      buffers: %Buffers{active: agent_buf, list: [agent_buf], active_index: 0},
+      buffers: %Buffers{active: nil, list: [], active_index: 0},
       windows: %Windows{
         tree: WindowTree.new(win_id),
         map: %{win_id => agent_window},
@@ -228,7 +227,62 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       assert AgentAccess.agent(rebuilt).runtime.active_tool_name == nil
     end
 
-    test "switch_tab binds and syncs a background agent tab's chat buffer" do
+    test "sync_transcript preserves cached transcript when the session dies before cleanup" do
+      pid = spawn(fn -> :ok end)
+      ref = Process.monitor(pid)
+      assert_receive {:DOWN, ^ref, :process, ^pid, _reason}
+
+      stale_message = {:assistant, "keep visible until cleanup"}
+
+      state =
+        [Tab.new_agent(1, "Agent") |> Tab.set_session(pid)]
+        |> base_state(1)
+        |> AgentAccess.update_panel(fn panel ->
+          %{
+            panel
+            | cached_line_index: [{0, :text}],
+              cached_display_messages: [stale_message],
+              cached_display_message_pairs: [{7, stale_message}],
+              cached_styled_messages: [nil]
+          }
+        end)
+
+      preserved = AgentLifecycle.sync_transcript(state)
+      panel = AgentAccess.panel(preserved)
+
+      assert panel.cached_line_index == [{0, :text}]
+      assert panel.cached_display_messages == [stale_message]
+      assert panel.cached_display_message_pairs == [{7, stale_message}]
+      assert panel.cached_styled_messages == [nil]
+    end
+
+    test "cache_messages clears stale semantic transcript cache when the session has no messages" do
+      stale_state =
+        base_state([Tab.new_agent(1, "Agent")], 1)
+        |> AgentAccess.update_panel(fn panel ->
+          %{
+            panel
+            | cached_line_index: [{0, :text}],
+              cached_display_messages: [{:assistant, "stale answer"}],
+              cached_display_message_pairs: [{7, {:assistant, "stale answer"}}],
+              cached_styled_messages: [[[{"stale", 0, 0, 0}]]],
+              display_start_index: 3,
+              provenance_jump: MingaEditor.Agent.ProvenanceJump.request(7)
+          }
+        end)
+
+      cleared = AgentLifecycle.cache_messages(stale_state, [])
+      panel = AgentAccess.panel(cleared)
+
+      assert panel.cached_line_index == []
+      assert panel.cached_display_messages == []
+      assert panel.cached_display_message_pairs == []
+      assert panel.cached_styled_messages == nil
+      assert panel.display_start_index == 0
+      assert panel.provenance_jump == nil
+    end
+
+    test "switch_tab rebuilds a background agent tab's semantic transcript cache" do
       {:ok, background_session} =
         StubServer.start_link(
           messages: [
@@ -237,20 +291,19 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
           ]
         )
 
-      stale_agent_buf = AgentBufferSync.start_buffer()
-      background_agent_buf = AgentBufferSync.start_buffer()
-
       tabs = [
         Tab.new_file(1, "main.ex"),
         Tab.new_agent(2, "Background")
         |> Tab.set_session(background_session)
-        |> Tab.set_context(agent_tab_context(background_agent_buf))
+        |> Tab.set_context(agent_tab_context())
       ]
 
       state =
         tabs
         |> base_state(1)
-        |> AgentAccess.update_agent(&AgentState.set_buffer(&1, stale_agent_buf))
+        |> AgentAccess.update_panel(fn panel ->
+          %{panel | cached_display_messages: [{:assistant, "stale answer"}]}
+        end)
 
       switched = EditorState.switch_tab(state, 2)
 
@@ -258,15 +311,12 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
         Map.fetch!(switched.workspace.windows.map, switched.workspace.windows.active)
 
       assert AgentAccess.session(switched) == background_session
-      assert {:agent_chat, ^background_agent_buf} = active_window.content
-      assert AgentAccess.agent(switched).buffer == background_agent_buf
+      assert {:agent_chat, :semantic} = active_window.content
 
-      background_content = Buffer.content(background_agent_buf)
-      stale_content = Buffer.content(stale_agent_buf)
-
-      assert background_content =~ "inspect background session"
-      assert background_content =~ "unique background answer"
-      refute stale_content =~ "unique background answer"
+      assert AgentAccess.panel(switched).cached_display_messages == [
+               {:user, "inspect background session"},
+               {:assistant, "unique background answer"}
+             ]
     end
   end
 end

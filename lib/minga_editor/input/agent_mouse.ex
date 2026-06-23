@@ -11,10 +11,7 @@ defmodule MingaEditor.Input.AgentMouse do
   * **Side panel interactions**: scroll and click handling for the bottom
     panel, which uses UIState.scroll (not the standard viewport).
 
-  Chat content scroll and clicks in the split pane pass through to
-  `MingaEditor.Mouse` (via `ModeFSM`) after unpinning the window so the
-  viewport follows the cursor. Chat content clicks unfocus the prompt
-  input and passthrough for standard buffer mouse handling.
+  Chat content scroll in the split pane updates semantic transcript scroll state. Chat content clicks focus the agent pane, unfocus the prompt input, and pass through for the rest of the input stack.
 
   Events outside agent regions pass through to the next handler in the
   surface stack.
@@ -141,7 +138,7 @@ defmodule MingaEditor.Input.AgentMouse do
           {:handled | :passthrough, EditorState.t()}
 
   # Scroll: check column to differentiate chat vs preview pane.
-  # Chat scroll unpins and passes through to Editor.Mouse.
+  # Chat scroll updates semantic transcript state.
   # Preview scroll is handled here (unique, no standard handler).
   defp dispatch_window(state, layout, win_id, _row, col, %{
          button: button,
@@ -153,9 +150,8 @@ defmodule MingaEditor.Input.AgentMouse do
     chat_width = max(div(cw * view.chat_width_pct, 100), 20)
 
     if col < cc + chat_width do
-      # Chat area scroll: unpin and passthrough to Editor.Mouse
-      state = unpin_agent_chat_window(state, win_id)
-      {:passthrough, state}
+      delta = if button == :wheel_down, do: scroll_lines(), else: -scroll_lines()
+      {:handled, scroll_chat(state, delta, win_id)}
     else
       # Preview area scroll: handled here (unique)
       delta = if button == :wheel_down, do: scroll_lines(), else: -scroll_lines()
@@ -257,6 +253,21 @@ defmodule MingaEditor.Input.AgentMouse do
   @spec unpin_agent_chat_window(EditorState.t(), pos_integer()) :: EditorState.t()
   defp unpin_agent_chat_window(state, win_id) do
     EditorState.update_window(state, win_id, &Window.set_pinned(&1, false))
+  end
+
+  @spec scroll_chat(EditorState.t(), pos_integer() | neg_integer(), pos_integer()) ::
+          EditorState.t()
+  defp scroll_chat(state, delta, win_id) do
+    state =
+      if delta > 0 do
+        AgentAccess.update_agent_ui(state, &UIState.scroll_down(&1, delta))
+      else
+        AgentAccess.update_agent_ui(state, &UIState.scroll_up(&1, abs(delta)))
+      end
+
+    state
+    |> unpin_agent_chat_window(win_id)
+    |> EditorState.scroll_agent_chat_window(delta)
   end
 
   # Side panel chat scroll: updates UIState.scroll (used by the panel

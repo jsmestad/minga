@@ -26,11 +26,10 @@ defmodule MingaEditor.Window.ContentTest do
     end
   end
 
-  describe "Content.agent_chat/1" do
-    test "creates an agent chat content reference" do
-      pid = self()
-      content = Content.agent_chat(pid)
-      assert content == {:agent_chat, pid}
+  describe "Content.agent_chat/0" do
+    test "creates a semantic agent chat content reference" do
+      content = Content.agent_chat()
+      assert content == {:agent_chat, :semantic}
     end
   end
 
@@ -40,27 +39,26 @@ defmodule MingaEditor.Window.ContentTest do
       assert Content.pid({:buffer, pid}) == pid
     end
 
-    test "returns pid for agent chat content" do
-      pid = self()
-      assert Content.pid({:agent_chat, pid}) == pid
+    test "returns nil for semantic agent chat content" do
+      assert Content.pid({:agent_chat, :semantic}) == nil
     end
   end
 
   describe "Content.buffer_pid/1 with agent_chat" do
     test "returns nil for agent chat content" do
-      assert Content.buffer_pid({:agent_chat, self()}) == nil
+      assert Content.buffer_pid({:agent_chat, :semantic}) == nil
     end
   end
 
   describe "Content.buffer?/1 with agent_chat" do
     test "returns false for agent chat content" do
-      assert Content.buffer?({:agent_chat, self()}) == false
+      assert Content.buffer?({:agent_chat, :semantic}) == false
     end
   end
 
   describe "Content.agent_chat?/1" do
     test "returns true for agent chat content" do
-      assert Content.agent_chat?({:agent_chat, self()}) == true
+      assert Content.agent_chat?({:agent_chat, :semantic}) == true
     end
 
     test "returns false for buffer content" do
@@ -74,7 +72,7 @@ defmodule MingaEditor.Window.ContentTest do
     end
 
     test "agent chat is not editable" do
-      assert Content.editable?({:agent_chat, self()}) == false
+      assert Content.editable?({:agent_chat, :semantic}) == false
     end
   end
 
@@ -94,11 +92,10 @@ defmodule MingaEditor.Window.ContentTest do
       assert window.cursor == {5, 10}
     end
 
-    test "new_agent_chat/4 sets agent chat content" do
-      pid = self()
-      window = Window.new_agent_chat(1, pid, 24, 80)
-      assert window.content == {:agent_chat, pid}
-      assert window.buffer == pid
+    test "new_agent_chat/3 sets semantic agent chat content without a buffer" do
+      window = Window.new_agent_chat(1, 24, 80)
+      assert window.content == {:agent_chat, :semantic}
+      assert window.buffer == nil
       assert Content.agent_chat?(window.content)
       refute Content.buffer?(window.content)
     end

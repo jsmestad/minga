@@ -1,8 +1,9 @@
 defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
   use ExUnit.Case, async: true
 
-  alias MingaEditor.Agent.BufferSync
+  alias MingaEditor.Agent.Transcript
   alias MingaEditor.Agent.UIState
+  alias Minga.Editing.Scroll
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.RenderModel.UI.AgentChatBuilder
@@ -22,10 +23,9 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
     hidden_message = {:user, "hidden"}
     visible_message = {:assistant, "visible"}
     message_ids = [{101, old_message}, {102, hidden_message}, {103, visible_message}]
-    buffer = BufferSync.start_buffer()
 
-    {_line_index, display_messages, display_pairs} =
-      BufferSync.sync(buffer, [old_message, hidden_message, visible_message],
+    %{display_messages: display_messages, display_message_pairs: display_pairs} =
+      Transcript.display([old_message, hidden_message, visible_message],
         display_start_index: 2,
         message_ids: message_ids,
         pinned_ids: MapSet.new([101])
@@ -38,7 +38,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
     }
 
     model =
-      context(buffer, session, panel)
+      context(session, panel)
       |> AgentChatBuilder.build()
 
     assert model.visible?
@@ -56,16 +56,46 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
     refute {:user, "hidden"} in Enum.map(summaries, fn {_id, type, text} -> {type, text} end)
   end
 
+  test "build/1 emits only messages through the manual semantic scroll viewport" do
+    session = fake_session_pid()
+
+    panel = %Panel{
+      scroll: Scroll.new(2) |> Scroll.update_metrics(5, 1),
+      cached_line_index: [
+        {0, :text},
+        {0, :empty},
+        {1, :text},
+        {1, :empty},
+        {2, :text}
+      ],
+      cached_display_message_pairs: [
+        {1, {:assistant, "first"}},
+        {2, {:assistant, "second"}},
+        {3, {:assistant, "third"}}
+      ],
+      cached_styled_messages: [nil, nil, nil]
+    }
+
+    model =
+      context(session, panel)
+      |> AgentChatBuilder.build()
+
+    assert Enum.map(model.messages, &message_summary/1) == [
+             {1, :assistant, "first"},
+             {2, :assistant, "second"}
+           ]
+  end
+
   defp message_summary({id, {:assistant, text}}), do: {id, :assistant, text}
   defp message_summary({id, {:system, text, _level}}), do: {id, :system, text}
   defp message_summary({id, {:user, text}}), do: {id, :user, text}
   defp message_summary({id, {kind, _, _}}), do: {id, kind, nil}
 
-  defp context(buffer, session, panel) do
+  defp context(session, panel) do
     tab = Tab.new_agent(1, "Agent") |> Tab.set_session(session)
     {tab_bar, workspace} = TabBar.add_workspace(TabBar.new(tab), "Agent", session)
     tab_bar = TabBar.move_tab_to_workspace(tab_bar, tab.id, workspace.id)
-    window = Window.new_agent_chat(1, buffer, 24, 80)
+    window = Window.new_agent_chat(1, 24, 80)
 
     %Context{
       port_manager: self(),

@@ -28,17 +28,11 @@ defmodule MingaEditor.LayoutPresetTest do
     }
   end
 
-  defp agent_buffer do
-    {:ok, buf} = BufferProcess.start_link(content: "## Agent\n\nHello")
-    buf
-  end
-
   describe "apply/3 :agent_right" do
     test "creates a vertical split with agent chat window" do
       state = make_state()
-      buf = agent_buffer()
 
-      new_state = LayoutPreset.apply(state, :agent_right, buf)
+      new_state = LayoutPreset.apply(state, :agent_right, nil)
 
       # Window tree should be a vertical split
       assert {:split, :vertical, {:leaf, 1}, {:leaf, 2}, _} = new_state.workspace.windows.tree
@@ -46,7 +40,7 @@ defmodule MingaEditor.LayoutPresetTest do
       # New window should have agent_chat content
       agent_win = new_state.workspace.windows.map[2]
       assert Content.agent_chat?(agent_win.content)
-      assert agent_win.buffer == buf
+      assert agent_win.buffer == nil
 
       # Original window unchanged
       assert Content.buffer?(new_state.workspace.windows.map[1].content)
@@ -57,10 +51,9 @@ defmodule MingaEditor.LayoutPresetTest do
 
     test "is a no-op if agent chat window already exists" do
       state = make_state()
-      buf = agent_buffer()
 
-      state = LayoutPreset.apply(state, :agent_right, buf)
-      state2 = LayoutPreset.apply(state, :agent_right, buf)
+      state = LayoutPreset.apply(state, :agent_right, nil)
+      state2 = LayoutPreset.apply(state, :agent_right, nil)
 
       assert state == state2
     end
@@ -69,9 +62,8 @@ defmodule MingaEditor.LayoutPresetTest do
   describe "apply/3 :agent_bottom" do
     test "creates a horizontal split with agent chat window" do
       state = make_state()
-      buf = agent_buffer()
 
-      new_state = LayoutPreset.apply(state, :agent_bottom, buf)
+      new_state = LayoutPreset.apply(state, :agent_bottom, nil)
 
       assert {:split, :horizontal, {:leaf, 1}, {:leaf, 2}, _} = new_state.workspace.windows.tree
       assert Content.agent_chat?(new_state.workspace.windows.map[2].content)
@@ -81,12 +73,11 @@ defmodule MingaEditor.LayoutPresetTest do
   describe "apply/3 :default" do
     test "removes agent chat window" do
       state = make_state()
-      buf = agent_buffer()
 
-      state = LayoutPreset.apply(state, :agent_right, buf)
+      state = LayoutPreset.apply(state, :agent_right, nil)
       assert LayoutPreset.has_agent_chat?(state)
 
-      state = LayoutPreset.apply(state, :default, buf)
+      state = LayoutPreset.apply(state, :default, nil)
       refute LayoutPreset.has_agent_chat?(state)
 
       # Back to single window
@@ -105,15 +96,14 @@ defmodule MingaEditor.LayoutPresetTest do
     test "switches active window away from agent before removing" do
       state = make_state()
       file_buffer = state.workspace.buffers.active
-      buf = agent_buffer()
 
       state =
         state
-        |> LayoutPreset.apply(:agent_right, buf)
+        |> LayoutPreset.apply(:agent_right, nil)
         |> EditorState.focus_window(2)
 
       assert state.workspace.windows.active == 2
-      assert state.workspace.buffers.active == buf
+      assert state.workspace.buffers.active == nil
       assert state.workspace.keymap_scope == :agent
 
       state = LayoutPreset.restore_default(state)
@@ -133,7 +123,7 @@ defmodule MingaEditor.LayoutPresetTest do
 
     test "returns true after applying agent preset" do
       state = make_state()
-      state = LayoutPreset.apply(state, :agent_right, agent_buffer())
+      state = LayoutPreset.apply(state, :agent_right, nil)
       assert LayoutPreset.has_agent_chat?(state)
     end
   end

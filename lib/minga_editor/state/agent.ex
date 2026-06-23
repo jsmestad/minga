@@ -1,7 +1,6 @@
 defmodule MingaEditor.State.Agent do
   @moduledoc """
-  Agent rendering cache: status, error, pending approval, spinner timer,
-  and the agent buffer pid.
+  Agent rendering cache: status, error, pending approval, and spinner timer.
 
   This struct is **not** the source of truth for the active agent session.
   The session pid lives on the active `Tab` (Traditional shell) or the
@@ -40,14 +39,12 @@ defmodule MingaEditor.State.Agent do
           runtime: RuntimeState.t(),
           error: String.t() | nil,
           spinner_timer: {:ok, :timer.tref()} | nil,
-          buffer: pid() | nil,
           pending_approval: approval() | nil
         }
 
   defstruct runtime: %RuntimeState{},
             error: nil,
             spinner_timer: nil,
-            buffer: nil,
             pending_approval: nil
 
   # ── Status ──────────────────────────────────────────────────────────────────
@@ -124,14 +121,6 @@ defmodule MingaEditor.State.Agent do
         error: nil,
         pending_approval: nil
     }
-  end
-
-  # ── Buffer ──────────────────────────────────────────────────────────────────
-
-  @doc "Sets the agent buffer pid."
-  @spec set_buffer(t(), pid()) :: t()
-  def set_buffer(%__MODULE__{} = agent, pid) when is_pid(pid) do
-    %{agent | buffer: pid}
   end
 
   # ── Tool approval ──────────────────────────────────────────────────────────

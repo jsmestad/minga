@@ -45,11 +45,10 @@ defmodule MingaEditor.State.ShellCallbacksTest do
     EditorState.set_tab_bar(state, tb)
   end
 
-  @spec state_with_agent_chat() :: {EditorState.t(), pid()}
+  @spec state_with_agent_chat() :: EditorState.t()
   defp state_with_agent_chat do
-    {:ok, agent_buf} = BufferProcess.start_link(content: "")
     win_id = 1
-    agent_window = Window.new_agent_chat(win_id, agent_buf, 24, 80)
+    agent_window = Window.new_agent_chat(win_id, 24, 80)
 
     state = %EditorState{
       port_manager: self(),
@@ -57,7 +56,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
         viewport: Viewport.new(24, 80),
         editing: VimState.new(),
         keymap_scope: :agent,
-        buffers: %Buffers{active: agent_buf, list: [agent_buf], active_index: 0},
+        buffers: %Buffers{active: nil, list: [], active_index: 0},
         windows: %Windows{
           tree: WindowTree.new(win_id),
           map: %{win_id => agent_window},
@@ -67,14 +66,13 @@ defmodule MingaEditor.State.ShellCallbacksTest do
       }
     }
 
-    {state, agent_buf}
+    state
   end
 
-  @spec state_with_agent_tab() :: {EditorState.t(), pid()}
+  @spec state_with_agent_tab() :: EditorState.t()
   defp state_with_agent_tab do
-    {:ok, agent_buf} = BufferProcess.start_link(content: "")
     win_id = 1
-    agent_window = Window.new_agent_chat(win_id, agent_buf, 24, 80)
+    agent_window = Window.new_agent_chat(win_id, 24, 80)
 
     state = %EditorState{
       port_manager: self(),
@@ -82,7 +80,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
         viewport: Viewport.new(24, 80),
         editing: VimState.new(),
         keymap_scope: :agent,
-        buffers: %Buffers{active: agent_buf, list: [agent_buf], active_index: 0},
+        buffers: %Buffers{active: nil, list: [], active_index: 0},
         windows: %Windows{
           tree: WindowTree.new(win_id),
           map: %{win_id => agent_window},
@@ -98,7 +96,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
     tb = TabBar.update_context(tb, 1, context)
     state = EditorState.set_tab_bar(state, tb)
 
-    {state, agent_buf}
+    state
   end
 
   # ── on_buffer_switched via switch_buffer/2 ───────────────────────────────────
@@ -119,14 +117,15 @@ defmodule MingaEditor.State.ShellCallbacksTest do
     end
 
     test "Traditional: agent tab context.buffers.active tracks workspace after switch" do
-      {state, agent_buf} = state_with_agent_tab()
-      buf2 = start_buffer("second agent buffer")
+      state = state_with_agent_tab()
+      buf1 = start_buffer("first agent workspace buffer")
+      buf2 = start_buffer("second agent workspace buffer")
 
       # Manually add buf2 to the buffer list without triggering tab creation
       # (EditorState.add_buffer from an agent tab would create a new file tab)
       state =
         EditorState.update_buffers(state, fn buffers ->
-          %{buffers | list: [agent_buf, buf2]}
+          %{buffers | active: buf1, list: [buf1, buf2], active_index: 0}
         end)
 
       new_state = EditorState.switch_buffer(state, 1)
@@ -202,7 +201,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
     end
 
     test "tab-less extension shell: switch_buffer preserves agent_chat window content" do
-      {state, agent_buf} = state_with_agent_chat()
+      state = state_with_agent_chat()
       file_buf = start_buffer("file content")
 
       # Add file buffer (the tab-less shell's on_buffer_added doesn't overwrite agent_chat)
@@ -213,9 +212,9 @@ defmodule MingaEditor.State.ShellCallbacksTest do
       window = Map.fetch!(state.workspace.windows.map, win_id)
       assert Content.agent_chat?(window.content)
 
-      # Switch to agent_buf (index 0)
+      # Switch to the only file buffer. The agent window content stays semantic.
       new_state = EditorState.switch_buffer(state, 0)
-      assert new_state.workspace.buffers.active == agent_buf
+      assert new_state.workspace.buffers.active == file_buf
 
       # Window content should still be agent_chat
       window = Map.fetch!(new_state.workspace.windows.map, win_id)
@@ -247,12 +246,11 @@ defmodule MingaEditor.State.ShellCallbacksTest do
     end
 
     test "tab-less extension shell: preserves agent_chat window content on buffer death" do
-      {state, agent_buf} = state_with_agent_chat()
+      state = state_with_agent_chat()
       file_buf = start_buffer("file content")
 
-      # Add and monitor both buffers
+      # Add and monitor the file buffer
       state = EditorState.add_buffer(state, file_buf)
-      state = EditorState.monitor_buffer(state, agent_buf)
       state = EditorState.monitor_buffer(state, file_buf)
 
       # Verify agent_chat window

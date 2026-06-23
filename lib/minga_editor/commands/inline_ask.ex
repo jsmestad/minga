@@ -9,12 +9,10 @@ defmodule MingaEditor.Commands.InlineAsk do
   alias Minga.Command
   alias Minga.Mode.VisualState
   alias Minga.Project.FileRef
-  alias MingaEditor.Agent.BufferSync, as: AgentBufferSync
   alias MingaEditor.AgentLifecycle
   alias MingaEditor.Commands.AgentSession
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.AgentAccess
-  alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.InlineAsk
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
@@ -90,12 +88,10 @@ defmodule MingaEditor.Commands.InlineAsk do
 
   @spec create_agent_tab(state()) :: state()
   defp create_agent_tab(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
-    state = ensure_agent_buffer(state)
-    agent_buf = AgentAccess.agent(state).buffer
     win_id = 1
     rows = max(state.terminal_viewport.rows, 1)
     cols = max(state.terminal_viewport.cols, 1)
-    agent_window = Window.new_agent_chat(win_id, agent_buf, rows, cols)
+    agent_window = Window.new_agent_chat(win_id, rows, cols)
 
     windows = %Windows{
       tree: WindowTree.new(win_id),
@@ -104,7 +100,7 @@ defmodule MingaEditor.Commands.InlineAsk do
       next_id: win_id + 1
     }
 
-    context = EditorState.build_agent_tab_defaults(state, windows, agent_buf)
+    context = EditorState.build_agent_tab_defaults(state, windows)
     {tb, tab} = TabBar.insert(tb, :agent, "Inline Ask")
     tb = TabBar.update_context(tb, tab.id, context)
 
@@ -115,43 +111,13 @@ defmodule MingaEditor.Commands.InlineAsk do
 
   defp create_agent_tab(state), do: state
 
-  @spec ensure_agent_buffer(state()) :: state()
-  defp ensure_agent_buffer(state) do
-    case AgentAccess.agent(state).buffer do
-      pid when is_pid(pid) -> state
-      _ -> create_agent_buffer(state)
-    end
-  end
-
-  @spec create_agent_buffer(state()) :: state()
-  defp create_agent_buffer(state) do
-    case AgentBufferSync.start_buffer(EditorState.options_server(state)) do
-      pid when is_pid(pid) ->
-        state = AgentAccess.update_agent(state, &AgentState.set_buffer(&1, pid))
-        state = EditorState.monitor_buffer(state, pid)
-        AgentLifecycle.setup_agent_highlight(state)
-
-      _ ->
-        state
-    end
-  end
-
   @spec seed_agent_session(state(), InlineAsk.t()) :: state()
   defp seed_agent_session(state, %InlineAsk{} = ask) do
     case AgentAccess.session(state) do
       session_pid when is_pid(session_pid) ->
         messages = [{:user, ask.prompt}, {:assistant, ask.response}]
         MingaAgent.Session.seed_messages(session_pid, messages)
-
-        case AgentAccess.agent(state).buffer do
-          buffer_pid when is_pid(buffer_pid) ->
-            AgentBufferSync.sync(buffer_pid, MingaAgent.Session.messages(session_pid))
-
-          _ ->
-            :ok
-        end
-
-        state
+        AgentLifecycle.cache_messages(state, MingaAgent.Session.messages(session_pid))
 
       _ ->
         state
