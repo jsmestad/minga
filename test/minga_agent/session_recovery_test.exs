@@ -54,6 +54,96 @@ defmodule MingaAgent.SessionRecoveryTest do
     def get_state(_pid), do: {:ok, %{model: nil}}
   end
 
+  defmodule FlakyStartProvider do
+    @behaviour MingaAgent.Provider
+
+    use GenServer
+
+    @impl MingaAgent.Provider
+    def start_link(opts) do
+      test_pid = Keyword.fetch!(opts, :test_pid)
+      tracker = Keyword.fetch!(opts, :tracker)
+
+      attempt =
+        Agent.get_and_update(tracker, fn state ->
+          attempt = Map.get(state, :attempts, 0) + 1
+          failures_remaining = Map.get(state, :failures_remaining, 0)
+
+          next_failures =
+            if failures_remaining == :always, do: :always, else: max(failures_remaining - 1, 0)
+
+          next_state = %{state | attempts: attempt, failures_remaining: next_failures}
+          {{attempt, failures_remaining}, next_state}
+        end)
+
+      send(test_pid, {:flaky_start_attempt, elem(attempt, 0)})
+
+      case attempt do
+        {_attempt, :always} ->
+          {:error, {:spawn_failed, "boom"}}
+
+        {_attempt, failures_remaining} when failures_remaining > 0 ->
+          {:error, {:spawn_failed, "boom"}}
+
+        _attempt ->
+          GenServer.start_link(__MODULE__, opts)
+      end
+    end
+
+    @impl MingaAgent.Provider
+    def send_prompt(_pid, _text), do: :ok
+
+    @impl MingaAgent.Provider
+    def abort(_pid), do: :ok
+
+    @impl MingaAgent.Provider
+    def new_session(_pid), do: :ok
+
+    @impl MingaAgent.Provider
+    def seed_messages(_pid, _messages), do: :ok
+
+    @impl MingaAgent.Provider
+    def get_state(_pid), do: {:ok, %{model: nil}}
+
+    @impl GenServer
+    def init(opts) do
+      test_pid = Keyword.fetch!(opts, :test_pid)
+      send(test_pid, {:flaky_provider_started, self()})
+      {:ok, %{test_pid: test_pid}}
+    end
+  end
+
+  defmodule CrashableProvider do
+    @behaviour MingaAgent.Provider
+
+    use GenServer
+
+    @impl MingaAgent.Provider
+    def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
+
+    @impl MingaAgent.Provider
+    def send_prompt(_pid, _text), do: :ok
+
+    @impl MingaAgent.Provider
+    def abort(_pid), do: :ok
+
+    @impl MingaAgent.Provider
+    def new_session(_pid), do: :ok
+
+    @impl MingaAgent.Provider
+    def seed_messages(_pid, _messages), do: :ok
+
+    @impl MingaAgent.Provider
+    def get_state(_pid), do: {:ok, %{model: nil}}
+
+    @impl GenServer
+    def init(opts) do
+      test_pid = Keyword.fetch!(opts, :test_pid)
+      send(test_pid, {:crashable_provider_started, self()})
+      {:ok, %{test_pid: test_pid}}
+    end
+  end
+
   test "refresh_credentials/1 starts a provider only after credentials flip true and model is concrete" do
     {session, checker} =
       start_session(
@@ -114,10 +204,93 @@ defmodule MingaAgent.SessionRecoveryTest do
 
     Agent.update(checker, fn _ -> true end)
 
-    assert {:error, "Failed to start agent: boom"} =
-             Session.set_model(session, "anthropic:claude-sonnet-4-20250514")
+    assert {:error, message} = Session.set_model(session, "anthropic:claude-sonnet-4-20250514")
+    assert message =~ "Failed to start agent: boom"
+    assert message =~ "Press Ctrl-C to retry now"
 
     assert Session.get_provider(session) == nil
+  end
+
+  test "provider start failures retry with backoff and recover" do
+    {:ok, tracker} = Agent.start_link(fn -> %{attempts: 0, failures_remaining: 1} end)
+
+    {:ok, session} =
+      Session.start_link(
+        provider: FlakyStartProvider,
+        provider_opts: [test_pid: self(), tracker: tracker],
+        provider_restart_backoff_base_ms: 1,
+        provider_restart_backoff_max_ms: 1,
+        provider_restart_max_attempts: 3
+      )
+
+    on_exit(fn ->
+      Process.exit(session, :kill)
+      Process.exit(tracker, :kill)
+    end)
+
+    assert_receive {:flaky_start_attempt, 1}, 1_000
+    assert_receive {:flaky_start_attempt, 2}, 1_000
+    assert_receive {:flaky_provider_started, provider}, 1_000
+    assert Session.get_provider(session) == provider
+    assert Session.status(session) == :idle
+  end
+
+  test "repeated provider crashes back off and stop after the configured cap" do
+    {:ok, session} =
+      Session.start_link(
+        provider: CrashableProvider,
+        provider_opts: [test_pid: self()],
+        provider_restart_backoff_base_ms: 1,
+        provider_restart_backoff_max_ms: 1,
+        provider_restart_max_attempts: 2
+      )
+
+    on_exit(fn -> Process.exit(session, :kill) end)
+
+    assert :ok = Session.subscribe(session)
+
+    assert_receive {:crashable_provider_started, provider1}, 1_000
+    Process.exit(provider1, :kill)
+    assert_receive {:crashable_provider_started, provider2}, 1_000
+    Process.exit(provider2, :kill)
+    assert_receive {:crashable_provider_started, provider3}, 1_000
+    Process.exit(provider3, :kill)
+
+    assert_snapshot_error(session, "Automatic restart stopped")
+
+    refute_receive {:crashable_provider_started, _provider4}, 50
+  end
+
+  test "restart_provider/1 recovers manually after automatic start retries are exhausted" do
+    {:ok, tracker} = Agent.start_link(fn -> %{attempts: 0, failures_remaining: :always} end)
+
+    {:ok, session} =
+      Session.start_link(
+        provider: FlakyStartProvider,
+        provider_opts: [test_pid: self(), tracker: tracker],
+        provider_restart_backoff_base_ms: 1,
+        provider_restart_backoff_max_ms: 1,
+        provider_restart_max_attempts: 1
+      )
+
+    on_exit(fn ->
+      Process.exit(session, :kill)
+      Process.exit(tracker, :kill)
+    end)
+
+    assert :ok = Session.subscribe(session)
+    assert_receive {:flaky_start_attempt, 1}, 1_000
+    assert_receive {:flaky_start_attempt, 2}, 1_000
+
+    assert_snapshot_error(session, "Automatic restart stopped")
+
+    Agent.update(tracker, &%{&1 | failures_remaining: 0})
+
+    assert :ok = Session.restart_provider(session)
+    assert_receive {:flaky_start_attempt, 3}, 1_000
+    assert_receive {:flaky_provider_started, provider}, 1_000
+    assert Session.get_provider(session) == provider
+    assert Session.status(session) == :idle
   end
 
   test "custom providers still start when the top-level model name is unknown" do
@@ -190,5 +363,23 @@ defmodule MingaAgent.SessionRecoveryTest do
 
     assert is_pid(Session.get_provider(session))
     assert Session.metadata(session).model_name == "anthropic:claude-sonnet-4-20250514"
+  end
+
+  defp assert_snapshot_error(session, expected_text, attempts \\ 20)
+
+  defp assert_snapshot_error(session, expected_text, attempts) when attempts > 0 do
+    snapshot = Session.editor_snapshot(session)
+
+    if is_binary(snapshot.error) and String.contains?(snapshot.error, expected_text) do
+      :ok
+    else
+      assert_receive {:agent_event, ^session, _event}, 1_000
+      assert_snapshot_error(session, expected_text, attempts - 1)
+    end
+  end
+
+  defp assert_snapshot_error(session, expected_text, 0) do
+    snapshot = Session.editor_snapshot(session)
+    assert is_binary(snapshot.error) and String.contains?(snapshot.error, expected_text)
   end
 end

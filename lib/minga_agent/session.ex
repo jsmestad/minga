@@ -79,6 +79,23 @@ defmodule MingaAgent.Session do
   @type tool_approval_policy ::
           :interactive | {:auto_approve, trust_scope()} | {:reject, String.t()}
 
+  @typedoc "Provider restart backoff policy."
+  @type provider_restart_policy :: %{
+          base_delay_ms: pos_integer(),
+          max_attempts: pos_integer(),
+          max_delay_ms: pos_integer(),
+          window_ms: non_neg_integer()
+        }
+
+  @typedoc "Provider restart backoff runtime state."
+  @type provider_restart_state :: %{
+          attempts: non_neg_integer(),
+          window_started_at_ms: integer() | nil,
+          timer_ref: reference() | nil,
+          timer_token: reference() | nil,
+          last_reason: term()
+        }
+
   @typedoc "Internal session state."
   @type state :: %{
           session_id: String.t(),
@@ -91,6 +108,8 @@ defmodule MingaAgent.Session do
           provider_source: Minga.Extension.ContributionCleanup.contribution_source(),
           provider_lease: CodeLease.t() | nil,
           provider_opts: keyword(),
+          provider_restart_policy: provider_restart_policy(),
+          provider_restart: provider_restart_state(),
           credentials_configured_fn: credentials_configured_fn(),
           status: status(),
           messages: [Message.t()],
@@ -132,6 +151,11 @@ defmodule MingaAgent.Session do
           pinned_ids: MapSet.t(pos_integer()),
           credentials_configured: boolean()
         }
+
+  @provider_restart_default_base_delay_ms 2_000
+  @provider_restart_default_max_delay_ms 30_000
+  @provider_restart_default_max_attempts 5
+  @provider_restart_default_window_ms 60_000
 
   # ── Public API ──────────────────────────────────────────────────────────────
 
@@ -175,6 +199,12 @@ defmodule MingaAgent.Session do
   @spec new_session(GenServer.server()) :: :ok | {:error, term()}
   def new_session(session) do
     GenServer.call(session, :new_session)
+  end
+
+  @doc "Retries provider startup immediately, resetting any exhausted restart backoff."
+  @spec restart_provider(GenServer.server()) :: :ok | {:error, term()}
+  def restart_provider(session) do
+    GenServer.call(session, :restart_provider)
   end
 
   @doc "Seeds a session transcript without sending a prompt."
@@ -700,6 +730,8 @@ defmodule MingaAgent.Session do
       provider_source: provider_resolution.source,
       provider_lease: provider_lease,
       provider_opts: provider_opts,
+      provider_restart_policy: provider_restart_policy(opts),
+      provider_restart: initial_provider_restart_state(),
       credentials_configured_fn: credentials_configured_fn,
       status: :idle,
       messages: [
@@ -1105,6 +1137,29 @@ defmodule MingaAgent.Session do
     {:reply, :ok, put_tool_trust(state, name, scope)}
   end
 
+  def handle_call(:restart_provider, _from, state) do
+    state =
+      state
+      |> cancel_provider_restart_timer()
+      |> reset_provider_restart()
+
+    {state, result} = refresh_credentials_state_result(state)
+
+    case {state.provider, result} do
+      {provider, :ok} when is_pid(provider) ->
+        {:reply, :ok, state}
+
+      {_provider, :ok} when state.credentials_configured == false ->
+        {:reply, {:error, :credentials_not_configured}, state}
+
+      {_provider, :ok} ->
+        {:reply, {:error, :provider_not_ready}, state}
+
+      {_provider, {:error, reason}} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
   def handle_call({:revoke_tool_trust, :all}, _from, state) do
     {:reply, :ok, %{state | trust_levels: %{}}}
   end
@@ -1355,6 +1410,15 @@ defmodule MingaAgent.Session do
     {:noreply, refresh_credentials_state(state)}
   end
 
+  def handle_info({:start_provider, token}, %{provider_restart: %{timer_token: token}} = state) do
+    state = put_provider_restart_timer(state, nil, nil)
+    {:noreply, refresh_credentials_state(state)}
+  end
+
+  def handle_info({:start_provider, _token}, state) do
+    {:noreply, state}
+  end
+
   def handle_info({:agent_provider_event, event}, state) do
     state = handle_provider_event(event, state)
     {:noreply, state}
@@ -1364,19 +1428,18 @@ defmodule MingaAgent.Session do
     Minga.Log.warning(:agent, "[Agent.Session] provider process died: #{inspect(reason)}")
     release_provider_lease(state.provider_lease)
 
-    state = %{
+    state =
       state
-      | provider: nil,
+      |> Map.merge(%{
+        provider: nil,
         provider_lease: nil,
         error_message: "Agent provider crashed",
         turn_active?: false
-    }
+      })
+      |> set_error_status()
+      |> maybe_schedule_provider_restart(reason)
 
-    state = set_error_status(state)
     broadcast(state, {:error, state.error_message})
-
-    # Try to restart the provider after a brief delay
-    Process.send_after(self(), :start_provider, 2000)
     {:noreply, state}
   end
 
@@ -2891,6 +2954,8 @@ defmodule MingaAgent.Session do
 
         {:error, reason} ->
           state = report_provider_start_error(state, reason)
+          state = maybe_schedule_provider_restart(state, reason)
+          broadcast(state, {:error, state.error_message})
           {state, {:error, state.error_message}}
       end
     else
@@ -2904,7 +2969,13 @@ defmodule MingaAgent.Session do
   defp attach_provider(state, pid, lease) do
     Process.unlink(pid)
     Process.monitor(pid)
-    state = clear_provider_start_error(%{state | provider: pid, provider_lease: lease})
+
+    state =
+      state
+      |> cancel_provider_restart_timer()
+      |> Map.merge(%{provider: pid, provider_lease: lease})
+      |> clear_provider_start_error()
+
     state = seed_provider_messages(state, state.messages)
     state = apply_pending_thinking_level(state)
     state = maybe_show_auth_onboarding(state)
@@ -2924,9 +2995,156 @@ defmodule MingaAgent.Session do
     release_provider_lease(state.provider_lease)
     state = %{state | provider_lease: nil, error_message: format_error(reason)}
     state = set_error_status(state)
-    broadcast(state, {:error, state.error_message})
     state
   end
+
+  @spec provider_restart_policy(keyword()) :: provider_restart_policy()
+  defp provider_restart_policy(opts) do
+    %{
+      base_delay_ms:
+        Keyword.get(
+          opts,
+          :provider_restart_backoff_base_ms,
+          @provider_restart_default_base_delay_ms
+        ),
+      max_attempts:
+        Keyword.get(opts, :provider_restart_max_attempts, @provider_restart_default_max_attempts),
+      max_delay_ms:
+        Keyword.get(
+          opts,
+          :provider_restart_backoff_max_ms,
+          @provider_restart_default_max_delay_ms
+        ),
+      window_ms:
+        Keyword.get(opts, :provider_restart_window_ms, @provider_restart_default_window_ms)
+    }
+  end
+
+  @spec initial_provider_restart_state() :: provider_restart_state()
+  defp initial_provider_restart_state do
+    %{
+      attempts: 0,
+      window_started_at_ms: nil,
+      timer_ref: nil,
+      timer_token: nil,
+      last_reason: nil
+    }
+  end
+
+  @spec reset_provider_restart(state()) :: state()
+  defp reset_provider_restart(state) do
+    %{state | provider_restart: initial_provider_restart_state()}
+  end
+
+  @spec maybe_schedule_provider_restart(state(), term()) :: state()
+  defp maybe_schedule_provider_restart(state, reason) do
+    case next_provider_restart(state.provider_restart, state.provider_restart_policy, reason) do
+      {:ok, restart, delay_ms} ->
+        token = make_ref()
+        timer_ref = Process.send_after(self(), {:start_provider, token}, delay_ms)
+
+        state
+        |> cancel_provider_restart_timer()
+        |> put_provider_restart(%{restart | timer_ref: timer_ref, timer_token: token})
+        |> put_provider_retrying_error(delay_ms)
+
+      :exhausted ->
+        state
+        |> cancel_provider_restart_timer()
+        |> put_provider_restart(%{state.provider_restart | last_reason: reason})
+        |> put_provider_restart_exhausted_error()
+    end
+  end
+
+  @spec next_provider_restart(provider_restart_state(), provider_restart_policy(), term()) ::
+          {:ok, provider_restart_state(), pos_integer()} | :exhausted
+  defp next_provider_restart(restart, policy, reason) do
+    now_ms = System.monotonic_time(:millisecond)
+
+    {attempts, window_started_at_ms} =
+      case restart do
+        %{window_started_at_ms: window_started_at_ms, attempts: attempts}
+        when is_integer(window_started_at_ms) and
+               now_ms - window_started_at_ms <= policy.window_ms ->
+          {attempts + 1, window_started_at_ms}
+
+        _other ->
+          {1, now_ms}
+      end
+
+    if attempts > policy.max_attempts do
+      :exhausted
+    else
+      next_restart = %{
+        restart
+        | attempts: attempts,
+          window_started_at_ms: window_started_at_ms,
+          timer_ref: nil,
+          timer_token: nil,
+          last_reason: reason
+      }
+
+      {:ok, next_restart, provider_restart_delay_ms(policy, attempts)}
+    end
+  end
+
+  @spec provider_restart_delay_ms(provider_restart_policy(), pos_integer()) :: pos_integer()
+  defp provider_restart_delay_ms(
+         %{base_delay_ms: base_delay_ms, max_delay_ms: max_delay_ms},
+         attempts
+       ) do
+    exponential = base_delay_ms * round(:math.pow(2, attempts - 1))
+    min(exponential, max_delay_ms)
+  end
+
+  @spec cancel_provider_restart_timer(state()) :: state()
+  defp cancel_provider_restart_timer(%{provider_restart: %{timer_ref: timer_ref}} = state)
+       when is_reference(timer_ref) do
+    Process.cancel_timer(timer_ref)
+    put_provider_restart_timer(state, nil, nil)
+  end
+
+  defp cancel_provider_restart_timer(state), do: state
+
+  @spec put_provider_restart(state(), provider_restart_state()) :: state()
+  defp put_provider_restart(state, restart), do: %{state | provider_restart: restart}
+
+  @spec put_provider_restart_timer(state(), reference() | nil, reference() | nil) :: state()
+  defp put_provider_restart_timer(state, timer_ref, timer_token) do
+    restart = %{state.provider_restart | timer_ref: timer_ref, timer_token: timer_token}
+    put_provider_restart(state, restart)
+  end
+
+  @spec put_provider_retrying_error(state(), pos_integer()) :: state()
+  defp put_provider_retrying_error(state, delay_ms) do
+    seconds = Float.round(delay_ms / 1000, 1)
+    attempts = state.provider_restart.attempts
+    max_attempts = state.provider_restart_policy.max_attempts
+    cause = provider_restart_cause(state)
+
+    message =
+      "#{cause}. Retrying in #{seconds}s (attempt #{attempts}/#{max_attempts}). Press Ctrl-C to retry now, or run /clear to reset."
+
+    %{state | error_message: message}
+  end
+
+  @spec put_provider_restart_exhausted_error(state()) :: state()
+  defp put_provider_restart_exhausted_error(state) do
+    cause = provider_restart_cause(state)
+
+    message =
+      "#{cause}. Automatic restart stopped. Press Ctrl-C to retry now, or run /clear to reset."
+
+    %{state | error_message: message}
+  end
+
+  @spec provider_restart_cause(state()) :: String.t()
+  defp provider_restart_cause(%{error_message: message})
+       when is_binary(message) and message != "" do
+    String.trim_trailing(message, ".")
+  end
+
+  defp provider_restart_cause(_state), do: "Agent provider unavailable"
 
   # Shows an onboarding message when no credentials are configured and the
   # native provider is active. Only fires once per session. Relies on the
