@@ -95,6 +95,54 @@ final class BEAMProcessManager {
         return beamArgs
     }
 
+    /// Returns the working directory the embedded BEAM should start in.
+    ///
+    /// Finder, Spotlight, and Dock launches commonly inherit `/` as their cwd.
+    /// That is a poor default project root, so bundle launches fall back to HOME
+    /// when the inherited cwd is a launch-services placeholder rather than a user directory.
+    static func defaultWorkingDirectoryURL(
+        currentDirectoryPath: String = FileManager.default.currentDirectoryPath,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        bundleURL: URL? = Bundle.main.bundleURL,
+        fileExists: @escaping (String) -> Bool = { path in
+            var isDirectory: ObjCBool = false
+            return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
+        }
+    ) -> URL {
+        let currentURL = URL(fileURLWithPath: currentDirectoryPath).standardizedFileURL
+
+        guard shouldUseHomeWorkingDirectory(currentDirectoryPath: currentDirectoryPath, environment: environment, bundleURL: bundleURL),
+              let homePath = environment["HOME"],
+              !homePath.isEmpty,
+              fileExists(homePath)
+        else {
+            return currentURL
+        }
+
+        return URL(fileURLWithPath: homePath).standardizedFileURL
+    }
+
+    private static func shouldUseHomeWorkingDirectory(
+        currentDirectoryPath: String,
+        environment: [String: String],
+        bundleURL: URL?
+    ) -> Bool {
+        guard environment["TERM"] == nil || environment["TERM"]?.isEmpty == true else {
+            return false
+        }
+
+        let currentPath = URL(fileURLWithPath: currentDirectoryPath).standardizedFileURL.path
+
+        if currentPath == "/" || currentPath == "/Applications" || currentPath == "/System/Applications" {
+            return true
+        }
+
+        guard let bundleURL else { return false }
+
+        let bundlePath = bundleURL.standardizedFileURL.path
+        return currentPath == bundlePath || currentPath.hasPrefix(bundlePath + "/")
+    }
+
     /// Spawns the BEAM release as a child process with piped stdin/stdout.
     func start() {
         guard let execURL = Self.beamExecutableURL() else {
@@ -122,6 +170,10 @@ final class BEAMProcessManager {
         // Tell the BEAM to use connected mode (don't spawn a GUI).
         var env = ProcessInfo.processInfo.environment
         env["MINGA_PORT_MODE"] = "connected"
+
+        let workingDirectoryURL = Self.defaultWorkingDirectoryURL(environment: env)
+        proc.currentDirectoryURL = workingDirectoryURL
+        env["PWD"] = workingDirectoryURL.path
 
         if launchArguments.contains("--safe") || launchArguments.contains("-Q") {
             env["MINGA_SAFE_MODE"] = "1"
