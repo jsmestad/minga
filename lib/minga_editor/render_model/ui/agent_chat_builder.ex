@@ -12,6 +12,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   alias Minga.RenderModel.UI.AgentChat
   alias Minga.RenderModel.UI.AgentChat.ApprovalView
   alias Minga.RenderModel.UI.AgentChat.PromptCompletion
+  alias Minga.RenderModel.UI.AgentChat.ToolArgSummary
   alias Minga.RenderModel.UI.AgentChat.ToolCallView
   alias Minga.RenderModel.UI.AgentChat.Usage
   alias MingaEditor.Frontend.Emit.Context
@@ -81,7 +82,6 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
       prompt_vim_mode: ctx.editing.mode,
       prompt_visible_rows: visible_rows,
       prompt_completion: build_prompt_completion(panel),
-      pending_approval: nil,
       help_visible?: help_visible,
       help_groups: help_groups,
       messages: gui_messages
@@ -276,33 +276,10 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
 
   @spec tool_call_summary(ToolCall.t()) :: String.t()
   defp tool_call_summary(%ToolCall{name: name, args: args}) when is_map(args),
-    do: summarize_tool_args(name, args)
+    do: ToolArgSummary.summarize(name, args)
 
   defp tool_call_summary(%ToolCall{name: name} = tc) do
     args = Map.get(tc, :args) || %{}
-    summarize_tool_args(name, args)
+    ToolArgSummary.summarize(name, args)
   end
-
-  @spec summarize_tool_args(String.t(), map()) :: String.t()
-  defp summarize_tool_args("shell", %{"command" => cmd}), do: cmd
-  defp summarize_tool_args("shell", %{command: cmd}), do: cmd
-  defp summarize_tool_args("write_file", %{"path" => path}), do: path
-  defp summarize_tool_args("write_file", %{path: path}), do: path
-  defp summarize_tool_args("edit_file", %{"path" => path}), do: path
-  defp summarize_tool_args("edit_file", %{path: path}), do: path
-  defp summarize_tool_args("multi_edit_file", %{"path" => path}), do: path
-  defp summarize_tool_args("multi_edit_file", %{path: path}), do: path
-  defp summarize_tool_args("apply_diff", %{"path" => path}), do: path
-  defp summarize_tool_args("apply_diff", %{path: path}), do: path
-
-  defp summarize_tool_args("git_stage", %{"paths" => paths}) when is_list(paths),
-    do: Enum.join(paths, ", ")
-
-  defp summarize_tool_args("git_stage", %{paths: paths}) when is_list(paths),
-    do: Enum.join(paths, ", ")
-
-  defp summarize_tool_args("git_commit", %{"message" => msg}), do: msg
-  defp summarize_tool_args("git_commit", %{message: msg}), do: msg
-  defp summarize_tool_args(_name, args) when map_size(args) == 0, do: ""
-  defp summarize_tool_args(_name, args), do: inspect(args, limit: 80)
 end

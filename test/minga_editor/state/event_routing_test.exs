@@ -72,31 +72,31 @@ defmodule MingaEditor.State.EventRoutingTest do
     # Live streaming coalesces deltas through MingaEditor.Agent.Ingest and applies
     # them via handle_batch/2; the single-delta handle/2 clauses remain for the
     # bounded remote event-replay path and delegate to the batch path, so they
-    # now request one coalesced render and one buffer sync.
-    test "text_delta requests a render and a buffer sync" do
+    # now request one coalesced render and one transcript sync.
+    test "text_delta requests a render and a transcript sync" do
       %{state: state} = make_state()
 
       {_new_state, effects} = AgentEvents.handle(state, {:text_delta, "hello"})
 
       assert {:render, 16} in effects
-      assert :sync_agent_buffer in effects
+      assert :sync_agent_transcript in effects
     end
 
-    test "thinking_delta requests a render and a buffer sync" do
+    test "thinking_delta requests a render and a transcript sync" do
       %{state: state} = make_state()
 
       {_new_state, effects} = AgentEvents.handle(state, {:thinking_delta, "hmm"})
 
       assert {:render, 16} in effects
-      assert :sync_agent_buffer in effects
+      assert :sync_agent_transcript in effects
     end
 
-    test "messages_changed triggers buffer sync and tab label update" do
+    test "messages_changed triggers transcript sync and tab label update" do
       %{state: state} = make_state()
 
       {new_state, effects} = AgentEvents.handle(state, :messages_changed)
 
-      assert :sync_agent_buffer in effects
+      assert :sync_agent_transcript in effects
       assert {:update_tab_label, ""} in effects
       # message_version is bumped so the GUI fingerprint cache is invalidated
       assert AgentAccess.panel(new_state).message_version == 1
@@ -116,21 +116,21 @@ defmodule MingaEditor.State.EventRoutingTest do
 
       {new_state, effects} = AgentEvents.handle_batch(state, batch)
 
-      # One buffer sync, one render — not one per delta. AC 2.
-      assert Enum.count(effects, &(&1 == :sync_agent_buffer)) == 1
+      # One transcript sync, one render, not one per delta. AC 2.
+      assert Enum.count(effects, &(&1 == :sync_agent_transcript)) == 1
       assert Enum.count(effects, &match?({:render, _}, &1)) == 1
       # A single coalesced batch bumps the version exactly once.
       assert AgentAccess.panel(new_state).message_version == 1
     end
 
-    test "a tool-update-only batch renders without syncing the transcript buffer" do
+    test "a tool-update-only batch renders without syncing the transcript" do
       %{state: state} = make_state()
 
       batch = [{:tool_update, "id", "search", "partial"}]
 
       {new_state, effects} = AgentEvents.handle_batch(state, batch)
 
-      refute :sync_agent_buffer in effects
+      refute :sync_agent_transcript in effects
       assert {:render, 16} in effects
       # No assistant text, so the transcript version is untouched.
       assert AgentAccess.panel(new_state).message_version == 0
@@ -209,7 +209,7 @@ defmodule MingaEditor.State.EventRoutingTest do
              }
 
       assert :render in effects
-      assert :sync_agent_buffer in effects
+      assert :sync_agent_transcript in effects
     end
 
     test "approval_pending unfocuses the prompt input" do
@@ -226,7 +226,7 @@ defmodule MingaEditor.State.EventRoutingTest do
       refute AgentAccess.input_focused?(new_state)
     end
 
-    test "approval_resolved clears pending approval and syncs buffer" do
+    test "approval_resolved clears pending approval and syncs transcript" do
       %{state: state} = make_state()
 
       state =
@@ -235,7 +235,7 @@ defmodule MingaEditor.State.EventRoutingTest do
       {new_state, effects} = AgentEvents.handle(state, {:approval_resolved, :approved})
 
       assert AgentAccess.agent(new_state).pending_approval == nil
-      assert :sync_agent_buffer in effects
+      assert :sync_agent_transcript in effects
     end
   end
 

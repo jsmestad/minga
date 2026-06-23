@@ -41,10 +41,7 @@ defmodule MingaEditor.Agent.MarkdownHighlight do
   syntax markers). When tree-sitter highlights are available, overlays
   per-language syntax highlighting onto fenced code block content lines.
 
-  `buffer_byte_offset` is the starting byte offset of this message's
-  text within the full `*Agent*` buffer. Required for aligning
-  tree-sitter spans (which reference the full buffer) with per-message
-  line content.
+  `buffer_byte_offset` is the starting byte offset of this message's text within the full transcript markdown used for highlighting. Required for aligning tree-sitter spans with per-message line content.
   """
   @spec stylize(String.t(), Highlight.t() | nil, map(), non_neg_integer()) :: styled_lines()
   def stylize(text, highlight, theme_syntax, buffer_byte_offset \\ 0)

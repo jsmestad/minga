@@ -46,16 +46,11 @@ defmodule MingaEditor.HighlightSync do
   @doc """
   Sets up highlighting for a specific buffer PID that may not be the active buffer.
 
-  Used for persistent buffers like `*Agent*` that live in side panels and need
-  tree-sitter parsing even when they're not the focused buffer. Assigns a
-  buffer_id, sends set_language + parse_buffer to the parser, and initializes
-  the highlight entry.
+  Used for non-active buffers that need tree-sitter parsing even when they're not the focused buffer. Assigns a buffer_id, sends set_language + parse_buffer to the parser, and initializes the highlight entry.
 
   ## Options
 
-    * `:syntax` — custom syntax theme map to use instead of the global theme's
-      syntax. Used by the agent buffer to override delimiter captures with
-      dimmed colors.
+    * `:syntax` — custom syntax theme map to use instead of the global theme's syntax.
   """
   @spec setup_for_buffer_pid(EditorState.t(), pid(), [setup_opt()]) :: EditorState.t()
   def setup_for_buffer_pid(state, buf_pid, opts \\ [])
@@ -75,9 +70,7 @@ defmodule MingaEditor.HighlightSync do
   @doc """
   Requests a full reparse of a specific buffer PID.
 
-  Used after content changes to non-active buffers (e.g., agent buffer sync).
-  Sends a parse_buffer command with the full content since replace_generated_content
-  clears pending edit deltas.
+  Used after content changes to non-active buffers. Sends a parse_buffer command with the full content since replace_generated_content clears pending edit deltas.
   """
   @spec request_reparse_buffer(EditorState.t(), pid()) :: EditorState.t()
   def request_reparse_buffer(%EditorState{} = state, buf_pid) when is_pid(buf_pid) do
@@ -97,7 +90,7 @@ defmodule MingaEditor.HighlightSync do
 
       :error ->
         # Buffer not registered with parser yet; set up from scratch.
-        # Recover any stored syntax override (e.g., agent buffer's dimmed delimiters).
+        # Recover any stored syntax override.
         opts =
           case Map.get(hl.syntax_overrides, buf_pid) do
             nil -> []
@@ -170,8 +163,7 @@ defmodule MingaEditor.HighlightSync do
       setup_commands_fn: setup_fn
     )
 
-    # Use custom syntax theme if provided (e.g., agent buffer with dimmed delimiters),
-    # otherwise use the global editor theme. Store the override so
+    # Use custom syntax theme if provided, otherwise use the global editor theme. Store the override so
     # request_reparse_buffer can recover it if the buffer_id is lost.
     custom_syntax = Keyword.get(opts, :syntax)
 

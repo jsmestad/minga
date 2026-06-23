@@ -6,7 +6,7 @@ defmodule MingaEditor.Commands.AgentSubStates do
   Extracted from `Commands.Agent` to reduce module size.
   """
 
-  alias MingaEditor.Agent.BufferSync, as: AgentBufferSync
+  alias MingaEditor.Agent.Transcript
   alias MingaEditor.Agent.ChatSearch
   alias MingaEditor.Agent.DiffReview
   alias MingaAgent.FileMention
@@ -536,7 +536,7 @@ defmodule MingaEditor.Commands.AgentSubStates do
     session = AgentAccess.session(state)
     messages = if session, do: safe_messages(session), else: []
 
-    case AgentBufferSync.message_start_line(messages, msg_idx) do
+    case Transcript.message_start_line(messages, msg_idx) do
       nil -> state
       line_idx -> update_agent_ui(state, &UIState.set_scroll(&1, line_idx))
     end

@@ -83,14 +83,14 @@ defmodule MingaEditor.Commands.WorkspaceTest do
     }
   end
 
-  defp agent_workspace_state(buffer, mode) do
+  defp agent_workspace_state(mode) do
     %SessionState{
       viewport: Viewport.new(24, 80),
       keymap_scope: :agent,
-      buffers: %Buffers{active: buffer, list: [buffer], active_index: 0},
+      buffers: %Buffers{active: nil, list: [], active_index: 0},
       windows: %Windows{
         tree: WindowTree.new(1),
-        map: %{1 => Window.new_agent_chat(1, buffer, 24, 80)},
+        map: %{1 => Window.new_agent_chat(1, 24, 80)},
         active: 1,
         next_id: 2
       },
@@ -152,21 +152,14 @@ defmodule MingaEditor.Commands.WorkspaceTest do
         )
       )
 
-    agent_buf =
-      start_supervised!(
-        Supervisor.child_spec({BufferProcess, [content: "agent"]},
-          id: {:buffer_process, :agent}
-        )
-      )
-
     manual_saved_ctx =
       manual_saved_buf
       |> manual_workspace_state(:normal)
       |> TabContext.from_workspace()
 
     agent_ctx =
-      agent_buf
-      |> agent_workspace_state(:normal)
+      :normal
+      |> agent_workspace_state()
       |> TabContext.from_workspace()
 
     manual_tab = Tab.new_file(1, "manual.ex") |> Tab.set_context(manual_saved_ctx)
@@ -184,7 +177,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
       shell_state: %TraditionalState{tab_bar: tb}
     }
 
-    {state, manual_live_buf, agent_buf}
+    {state, manual_live_buf}
   end
 
   describe "__commands__/0" do
@@ -250,12 +243,12 @@ defmodule MingaEditor.Commands.WorkspaceTest do
 
   describe "workspace_toggle/1" do
     test "restores the incoming workspace context and snapshots the tab left behind" do
-      {state, manual_live_buf, agent_buf} = make_workspace_switch_state()
+      {state, manual_live_buf} = make_workspace_switch_state()
       result = Workspace.workspace_toggle(state)
 
       assert %EditorState{} = result
       assert result.shell_state.tab_bar.active_id == 2
-      assert result.workspace.buffers.active == agent_buf
+      assert result.workspace.buffers.active == nil
       assert result.workspace.editing.mode == :normal
 
       manual_tab = TabBar.get(result.shell_state.tab_bar, 1)

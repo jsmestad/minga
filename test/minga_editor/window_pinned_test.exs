@@ -12,14 +12,12 @@ defmodule MingaEditor.WindowPinnedTest do
     end
 
     test "agent chat window is pinned by default" do
-      {:ok, buf} = BufferProcess.start_link(content: "hello")
-      win = Window.new_agent_chat(1, buf, 10, 80)
+      win = Window.new_agent_chat(1, 10, 80)
       assert win.pinned == true
     end
 
     test "pinned can be set to false" do
-      {:ok, buf} = BufferProcess.start_link(content: "hello")
-      win = Window.new_agent_chat(1, buf, 10, 80)
+      win = Window.new_agent_chat(1, 10, 80)
       win = %{win | pinned: false}
       assert win.pinned == false
     end
@@ -57,8 +55,7 @@ defmodule MingaEditor.WindowPinnedTest do
     end
 
     test "scroll up unpins" do
-      {:ok, buf} = BufferProcess.start_link(content: "hello")
-      win = Window.new_agent_chat(1, buf, 10, 80)
+      win = Window.new_agent_chat(1, 10, 80)
       assert win.pinned == true
 
       win = Window.scroll_viewport(win, -3, 100)
@@ -79,8 +76,7 @@ defmodule MingaEditor.WindowPinnedTest do
     end
 
     test "delta of 0 preserves current state" do
-      {:ok, buf} = BufferProcess.start_link(content: "hello")
-      win = Window.new_agent_chat(1, buf, 10, 80)
+      win = Window.new_agent_chat(1, 10, 80)
       original_pinned = win.pinned
       original_top = win.viewport.top
 

@@ -7,7 +7,6 @@ defmodule MingaEditor.Input.AgentMouseTest do
   alias MingaEditor.Layout
   alias MingaEditor.LayoutPreset
   alias MingaEditor.State, as: EditorState
-  alias MingaAgent.RuntimeState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Buffers
@@ -35,12 +34,7 @@ defmodule MingaEditor.Input.AgentMouseTest do
     {:ok, buf} = BufferProcess.start_link(content: "hello\nworld\nfoo\nbar\nbaz")
     {:ok, _prompt_buf} = BufferProcess.start_link(content: "")
 
-    agent = %AgentState{
-      runtime: %RuntimeState{status: :idle},
-      error: nil,
-      spinner_timer: nil,
-      buffer: Keyword.get(opts, :agent_buffer, nil)
-    }
+    agent = %AgentState{error: nil, spinner_timer: nil}
 
     agentic = UIState.new()
     tab_bar = TabBar.new(Tab.new_file(1, "[no file]"))
@@ -70,14 +64,29 @@ defmodule MingaEditor.Input.AgentMouseTest do
   end
 
   defp with_agent_split(state, agent_content \\ "") do
-    {:ok, agent_buf} = BufferProcess.start_link(content: agent_content)
+    state
+    |> LayoutPreset.apply(:agent_right, nil)
+    |> seed_agent_transcript(agent_content)
+  end
 
-    state =
-      AgentAccess.update_agent(state, fn agent ->
-        %{agent | buffer: agent_buf}
-      end)
+  defp seed_agent_transcript(state, ""), do: state
 
-    LayoutPreset.apply(state, :agent_right, agent_buf)
+  defp seed_agent_transcript(state, agent_content) do
+    line_index =
+      agent_content
+      |> String.split("\n")
+      |> Enum.with_index()
+      |> Enum.map(fn {_line, idx} -> {idx, :assistant} end)
+
+    total_lines = length(line_index)
+
+    AgentAccess.update_panel(state, fn panel ->
+      %{
+        panel
+        | cached_line_index: line_index,
+          scroll: Minga.Editing.Scroll.update_metrics(panel.scroll, total_lines, 8)
+      }
+    end)
   end
 
   defp with_agent_panel(state) do
@@ -133,19 +142,18 @@ defmodule MingaEditor.Input.AgentMouseTest do
 
   describe "agent chat window scroll" do
     setup do
-      state = base_state() |> with_agent_split()
+      state = base_state() |> with_agent_split(agent_lines(80))
       rect = agent_chat_window_rect(state)
       {:ok, state: state, rect: rect}
     end
 
-    test "scroll down over agent chat window unpins and passes through to MingaEditor.Mouse", %{
+    test "scroll down over agent chat window scrolls semantic transcript and unpins", %{
       state: state,
       rect: rect
     } do
       {row, col, _w, _h} = rect
 
-      # Chat area scroll unpins and passes through to standard Editor.Mouse
-      {:passthrough, new_state} =
+      {:handled, new_state} =
         AgentMouse.handle_mouse(state, row + 2, col + 2, :wheel_down, 0, :press, 1)
 
       # Window should be unpinned so viewport follows cursor
@@ -155,13 +163,13 @@ defmodule MingaEditor.Input.AgentMouseTest do
       end
     end
 
-    test "scroll up over agent chat window unpins and passes through", %{
+    test "scroll up over agent chat window scrolls semantic transcript and unpins", %{
       state: state,
       rect: rect
     } do
       {row, col, _w, _h} = rect
 
-      {:passthrough, new_state} =
+      {:handled, new_state} =
         AgentMouse.handle_mouse(state, row + 2, col + 2, :wheel_up, 0, :press, 1)
 
       # Should not crash and should unpin
@@ -169,8 +177,7 @@ defmodule MingaEditor.Input.AgentMouseTest do
     end
 
     test "focus-tree routing scrolls inactive agent chat window without moving focus" do
-      agent_content = Enum.map_join(1..80, "\n", &"agent line #{&1}")
-      state = base_state() |> with_agent_split(agent_content) |> Layout.put()
+      state = base_state() |> with_agent_split(agent_lines(80)) |> Layout.put()
       active_id = state.workspace.windows.active
 
       {agent_win_id, _agent_window} =
@@ -250,9 +257,7 @@ defmodule MingaEditor.Input.AgentMouseTest do
       rect = agent_chat_window_rect(state)
       {row, col, _w, _h} = rect
 
-      # Chat content click passthroughs (window focus happens via maybe_focus_window
-      # before passthrough). The :passthrough response means ModeFSM will handle
-      # cursor positioning against the *Agent* buffer.
+      # Chat content click passthroughs after focusing the semantic agent pane.
       {:passthrough, new_state} =
         AgentMouse.handle_mouse(state, row + 1, col + 2, :left, 0, :press, 1)
 
@@ -339,7 +344,7 @@ defmodule MingaEditor.Input.AgentMouseTest do
   describe "scope independence" do
     test "scroll works in agent window regardless of keymap_scope" do
       # Start in editor scope, but scroll over the agent window
-      state = base_state(keymap_scope: :editor) |> with_agent_split()
+      state = base_state(keymap_scope: :editor) |> with_agent_split(agent_lines(80))
       rect = agent_chat_window_rect(state)
 
       # Verify we're in editor scope
@@ -347,8 +352,7 @@ defmodule MingaEditor.Input.AgentMouseTest do
 
       {row, col, _w, _h} = rect
 
-      # Chat area scroll unpins and passes through to Editor.Mouse
-      {:passthrough, new_state} =
+      {:handled, new_state} =
         AgentMouse.handle_mouse(state, row + 2, col + 2, :wheel_down, 0, :press, 1)
 
       # Window should be unpinned
@@ -375,5 +379,9 @@ defmodule MingaEditor.Input.AgentMouseTest do
 
       assert new_state.workspace.windows.active == agent_win_id
     end
+  end
+
+  defp agent_lines(count) do
+    Enum.map_join(1..count, "\n", &"agent line #{&1}")
   end
 end

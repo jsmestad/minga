@@ -35,7 +35,7 @@ defmodule MingaEditor.Agent.Events do
           | {:render, pos_integer()}
           | {:log_message, String.t()}
           | {:log_warning, String.t()}
-          | :sync_agent_buffer
+          | :sync_agent_transcript
           | {:update_tab_label, String.t()}
           | {:compact_session, pid()}
 
@@ -96,7 +96,7 @@ defmodule MingaEditor.Agent.Events do
     state = AgentAccess.update_agent_ui(state, &UIState.maybe_auto_scroll/1)
     state = AgentAccess.update_panel(state, &Panel.bump_message_version/1)
     state = maybe_rename_workspace_from_assistant(state)
-    {state, [{:render, 16}, :sync_agent_buffer, {:update_tab_label, ""}]}
+    {state, [{:render, 16}, :sync_agent_transcript, {:update_tab_label, ""}]}
   end
 
   def handle(state, {:tool_started, "shell", args}) do
@@ -236,12 +236,12 @@ defmodule MingaEditor.Agent.Events do
     # approval prompt, not keep typing in the input field.
     state = AgentAccess.update_agent_ui(state, &UIState.set_input_focused(&1, false))
 
-    {state, [:render, :sync_agent_buffer]}
+    {state, [:render, :sync_agent_transcript]}
   end
 
   def handle(state, {:approval_resolved, _decision}) do
     state = AgentAccess.update_agent(state, &AgentState.clear_pending_approval/1)
-    {state, [{:render, 16}, :sync_agent_buffer]}
+    {state, [{:render, 16}, :sync_agent_transcript]}
   end
 
   def handle(state, {:error, message}) do
@@ -313,7 +313,7 @@ defmodule MingaEditor.Agent.Events do
         UIState.push_toast(ui, "Context compacted", :info)
       end)
 
-    {state, [:render, :sync_agent_buffer]}
+    {state, [:render, :sync_agent_transcript]}
   end
 
   def handle(state, {:compact_result, {:error, reason}}) do
@@ -338,7 +338,7 @@ defmodule MingaEditor.Agent.Events do
   `MingaEditor.Agent.Ingest` accumulates `{:text_delta, _}`, `{:thinking_delta, _}`
   and `{:tool_update, _, _, _}` events arriving within a coalescing window and
   forwards them here as a single batch. Applying the batch once means one
-  `bump_message_version`, one `:sync_agent_buffer`, and one render request per
+  `bump_message_version`, one `:sync_agent_transcript`, and one render request per
   window instead of per delta, which keeps the Editor mailbox shallow under
   streaming load. The per-delta state transitions (auto-scroll, shell preview
   updates) are folded in arrival order so the visible result matches the
@@ -351,9 +351,9 @@ defmodule MingaEditor.Agent.Events do
     state = AgentAccess.update_agent_ui(state, &UIState.maybe_auto_scroll/1)
     state = Enum.reduce(batch, state, &apply_batched_delta/2)
 
-    if buffer_affecting_batch?(batch) do
+    if transcript_affecting_batch?(batch) do
       state = AgentAccess.update_panel(state, &Panel.bump_message_version/1)
-      {state, [{:render, 16}, :sync_agent_buffer]}
+      {state, [{:render, 16}, :sync_agent_transcript]}
     else
       {state, [{:render, 16}]}
     end
@@ -372,10 +372,9 @@ defmodule MingaEditor.Agent.Events do
 
   defp apply_batched_delta(_delta, state), do: state
 
-  # The agent transcript buffer only needs re-syncing when the batch carries
-  # assistant text or thinking; tool updates render into the preview only.
-  @spec buffer_affecting_batch?([term()]) :: boolean()
-  defp buffer_affecting_batch?(batch) do
+  # The agent transcript only needs re-syncing when the batch carries assistant text or thinking; tool updates render into the preview only.
+  @spec transcript_affecting_batch?([term()]) :: boolean()
+  defp transcript_affecting_batch?(batch) do
     Enum.any?(batch, fn
       {:text_delta, _} -> true
       {:thinking_delta, _} -> true

@@ -7,7 +7,6 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoderTest do
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.RenderModel.UI.AgentChat
   alias Minga.RenderModel.UI.AgentChat.ApprovalView
-  alias Minga.RenderModel.UI.AgentChat.PendingApproval
   alias Minga.RenderModel.UI.AgentChat.PromptCompletion
   alias Minga.RenderModel.UI.AgentChat.ToolCallView
   alias Minga.RenderModel.UI.AgentChat.Usage
@@ -534,21 +533,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoderTest do
   end
 
   describe "pending approval section" do
-    test "encodes the name and tool summary" do
-      binary =
-        encode(%AgentChat{
-          visible?: true,
-          pending_approval: %PendingApproval{name: "shell", args: %{"command" => "ls -la"}}
-        })
-
-      <<1::8, name_len::16, name::binary-size(name_len), summary_len::16,
-        summary::binary-size(summary_len)>> = section!(binary, 0x04)
-
-      assert name == "shell"
-      assert summary == "ls -la"
-    end
-
-    test "nil pending approval encodes as not visible" do
+    test "always encodes as not visible" do
       assert section!(encode(%AgentChat{visible?: true}), 0x04) == <<0::8>>
     end
   end

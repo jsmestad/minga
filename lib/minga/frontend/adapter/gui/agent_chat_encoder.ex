@@ -17,7 +17,6 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
   alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.UI.AgentChat
   alias Minga.RenderModel.UI.AgentChat.ApprovalView
-  alias Minga.RenderModel.UI.AgentChat.PendingApproval
   alias Minga.RenderModel.UI.AgentChat.PromptCompletion
   alias Minga.RenderModel.UI.AgentChat.ToolCallView
   alias Minga.RenderModel.UI.AgentChat.Usage
@@ -69,7 +68,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
     prompt_visible_rows = model.prompt_visible_rows || 1
 
     completion_bytes = encode_prompt_completion(model.prompt_completion)
-    pending_bytes = encode_pending_approval(model.pending_approval)
+    pending_bytes = <<0::8>>
     help_bytes = encode_help_overlay(model.help_visible?, model.help_groups)
     thinking_bytes = utf8_prefix_bytes(model.thinking_level || "", @max_u16 - 2)
 
@@ -140,17 +139,6 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
 
   defp encode_prompt_completion(_), do: <<0::8>>
 
-  # ── Pending approval ──
-
-  @spec encode_pending_approval(PendingApproval.t() | nil) :: binary()
-  defp encode_pending_approval(nil), do: <<0::8>>
-
-  defp encode_pending_approval(%PendingApproval{name: name, args: args}) do
-    name_b = utf8_prefix_bytes(name, 120)
-    summary_b = utf8_prefix_bytes(summarize_tool_args(name, args), @max_chat_text_bytes)
-    <<1::8, byte_size(name_b)::16, name_b::binary, byte_size(summary_b)::16, summary_b::binary>>
-  end
-
   # ── Help overlay ──
 
   # Wire format: visible(1) [workspace_count(1) [title_len(2) title(utf8)
@@ -181,8 +169,6 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
 
   defp encode_help_overlay(_, _), do: <<0::8>>
 
-  # ── Tool call summaries ──
-
   @spec preview_kind_byte(atom()) :: non_neg_integer()
   defp preview_kind_byte(:diff), do: 1
   defp preview_kind_byte(:command), do: 2
@@ -200,29 +186,6 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
     |> String.slice(0, max_length)
     |> :erlang.iolist_to_binary()
   end
-
-  @spec summarize_tool_args(String.t(), map()) :: String.t()
-  defp summarize_tool_args("shell", %{"command" => cmd}), do: cmd
-  defp summarize_tool_args("shell", %{command: cmd}), do: cmd
-  defp summarize_tool_args("write_file", %{"path" => path}), do: path
-  defp summarize_tool_args("write_file", %{path: path}), do: path
-  defp summarize_tool_args("edit_file", %{"path" => path}), do: path
-  defp summarize_tool_args("edit_file", %{path: path}), do: path
-  defp summarize_tool_args("multi_edit_file", %{"path" => path}), do: path
-  defp summarize_tool_args("multi_edit_file", %{path: path}), do: path
-  defp summarize_tool_args("apply_diff", %{"path" => path}), do: path
-  defp summarize_tool_args("apply_diff", %{path: path}), do: path
-
-  defp summarize_tool_args("git_stage", %{"paths" => paths}) when is_list(paths),
-    do: Enum.join(paths, ", ")
-
-  defp summarize_tool_args("git_stage", %{paths: paths}) when is_list(paths),
-    do: Enum.join(paths, ", ")
-
-  defp summarize_tool_args("git_commit", %{"message" => msg}), do: msg
-  defp summarize_tool_args("git_commit", %{message: msg}), do: msg
-  defp summarize_tool_args(_name, args) when map_size(args) == 0, do: ""
-  defp summarize_tool_args(_name, args), do: inspect(args, limit: 80)
 
   # ── Chat messages ──
 

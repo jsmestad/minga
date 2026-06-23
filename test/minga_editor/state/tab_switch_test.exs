@@ -96,10 +96,9 @@ defmodule MingaEditor.State.TabSwitchTest do
   # Builds a state with a file tab and an agent tab.
   # File tab (tab 1) is active.
   @spec state_with_file_and_agent_tabs() ::
-          {EditorState.t(), Tab.id(), Tab.id(), pid(), pid()}
+          {EditorState.t(), Tab.id(), Tab.id(), pid()}
   defp state_with_file_and_agent_tabs do
     {:ok, file_buf} = BufferProcess.start_link(content: "file content")
-    {:ok, agent_buf} = BufferProcess.start_link(content: "")
 
     win_id = 1
     file_window = Window.new(win_id, file_buf, 24, 80)
@@ -129,13 +128,13 @@ defmodule MingaEditor.State.TabSwitchTest do
     {tb, agent_tab} = TabBar.add(tb, :agent, "Agent")
 
     # Build agent tab context with :agent keymap_scope and agent_chat window
-    agent_window = Window.new_agent_chat(win_id, agent_buf, 24, 80)
+    agent_window = Window.new_agent_chat(win_id, 24, 80)
 
     agent_ws = %SessionState{
       viewport: Viewport.new(24, 80),
       editing: VimState.new(),
       keymap_scope: :agent,
-      buffers: %Buffers{active: agent_buf, list: [agent_buf], active_index: 0},
+      buffers: %Buffers{active: nil, list: [], active_index: 0},
       windows: %Windows{
         tree: WindowTree.new(win_id),
         map: %{win_id => agent_window},
@@ -152,7 +151,7 @@ defmodule MingaEditor.State.TabSwitchTest do
 
     state = EditorState.set_tab_bar(state, tb)
 
-    {state, file_tab.id, agent_tab.id, file_buf, agent_buf}
+    {state, file_tab.id, agent_tab.id, file_buf}
   end
 
   # ── switch_tab_pure/2 ─────────────────────────────────────────────────────────
@@ -206,7 +205,7 @@ defmodule MingaEditor.State.TabSwitchTest do
     end
 
     test "file-to-agent sets keymap_scope to :agent" do
-      {state, file_tab_id, agent_tab_id, _file_buf, _agent_buf} =
+      {state, file_tab_id, agent_tab_id, _file_buf} =
         state_with_file_and_agent_tabs()
 
       # Confirm starting state: file tab active with :editor scope
@@ -230,7 +229,7 @@ defmodule MingaEditor.State.TabSwitchTest do
     end
 
     test "agent-to-file sets keymap_scope to :editor" do
-      {state, file_tab_id, agent_tab_id, _file_buf, _agent_buf} =
+      {state, file_tab_id, agent_tab_id, _file_buf} =
         state_with_file_and_agent_tabs()
 
       # First switch to agent tab to set up the agent-active state
@@ -278,7 +277,7 @@ defmodule MingaEditor.State.TabSwitchTest do
     end
 
     test "effects include spinner lifecycle and agent session rebuild" do
-      {state, _file_tab_id, agent_tab_id, _file_buf, _agent_buf} =
+      {state, _file_tab_id, agent_tab_id, _file_buf} =
         state_with_file_and_agent_tabs()
 
       {_new_state, effects} = EditorState.switch_tab_pure(state, agent_tab_id)

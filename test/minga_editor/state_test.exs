@@ -159,7 +159,7 @@ defmodule MingaEditor.StateTest do
       assert Content.buffer?(active_window(synced).content)
       assert Content.buffer_pid(active_window(synced).content) == buf2
 
-      {agent_state, agent_buf} = state_with_agent_tab()
+      agent_state = state_with_agent_tab()
       file_buf = start_buffer("defmodule Foo, do: :ok")
 
       agent_state =
@@ -169,12 +169,12 @@ defmodule MingaEditor.StateTest do
         )
 
       synced_agent = EditorState.sync_active_window_buffer(agent_state)
-      assert active_window(synced_agent).buffer == agent_buf
+      assert active_window(synced_agent).buffer == nil
       assert Content.agent_chat?(active_window(synced_agent).content)
     end
 
     test "add_buffer from an agent tab creates an editor file tab and buffer content snapshot" do
-      {state, _agent_buf} = state_with_agent_tab()
+      state = state_with_agent_tab()
       file_buf = start_buffer("file content")
       new_state = EditorState.add_buffer(state, file_buf)
       active_tab = TabBar.active(new_state.shell_state.tab_bar)
@@ -439,16 +439,14 @@ defmodule MingaEditor.StateTest do
   end
 
   defp state_with_agent_tab do
-    agent_buf = start_buffer("")
-
     state =
       put_in(new_state().workspace.buffers, %Buffers{
-        list: [agent_buf],
+        list: [],
         active_index: 0,
-        active: agent_buf
+        active: nil
       })
 
-    agent_window = Window.new_agent_chat(1, agent_buf, 24, 80)
+    agent_window = Window.new_agent_chat(1, 24, 80)
 
     state =
       put_in(state.workspace.windows, %Windows{
@@ -460,6 +458,6 @@ defmodule MingaEditor.StateTest do
       |> put_in([Access.key!(:workspace), Access.key!(:keymap_scope)], :agent)
       |> EditorState.set_tab_bar(TabBar.new(Tab.new_agent(1, "Agent")))
 
-    {state, agent_buf}
+    state
   end
 end

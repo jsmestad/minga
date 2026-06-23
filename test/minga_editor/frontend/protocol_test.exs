@@ -62,20 +62,12 @@ defmodule MingaEditor.Frontend.ProtocolTest do
             model_name: Map.get(d, :model, ""),
             thinking_level: Map.get(d, :thinking_level, ""),
             prompt: Map.get(d, :prompt, ""),
-            messages: Map.get(d, :messages, []),
-            pending_approval: agent_chat_pending(Map.get(d, :pending_approval))
+            messages: Map.get(d, :messages, [])
           }
       end
 
     {binary, _caches} = AgentChatEncoder.encode(model, Caches.new())
     binary
-  end
-
-  defp agent_chat_pending(nil), do: nil
-
-  defp agent_chat_pending(%{name: name, args: args}) do
-    alias Minga.RenderModel.UI.AgentChat.PendingApproval
-    %PendingApproval{name: name, args: args}
   end
 
   defp take_string16(<<len::16, value::binary-size(len), rest::binary>>), do: {value, rest}
@@ -1260,7 +1252,7 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       assert byte_size(encoded) > 10
     end
 
-    test "encodes gui_agent_chat with pending approval including tool summary" do
+    test "encodes gui_agent_chat pending section as empty compatibility section" do
       data = %{
         visible: true,
         messages: [{:user, "hello"}],
@@ -1272,10 +1264,10 @@ defmodule MingaEditor.Frontend.ProtocolTest do
 
       encoded = encode_gui_agent_chat(data)
       # Sectioned: opcode + section_count + sections
-      assert <<0x78, 8, _sections::binary>> = encoded
-      # Verify the pending section (0x04) contains the tool name and summary
-      assert :binary.match(encoded, "shell") != :nomatch
-      assert :binary.match(encoded, "ls -la") != :nomatch
+      assert <<0x78, 8, sections::binary>> = encoded
+      assert gui_agent_chat_section!(sections, 0x04) == <<0::8>>
+      assert :binary.match(encoded, "shell") == :nomatch
+      assert :binary.match(encoded, "ls -la") == :nomatch
     end
 
     test "encodes gui_agent_chat without pending approval" do

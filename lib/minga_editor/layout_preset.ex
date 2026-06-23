@@ -17,10 +17,7 @@ defmodule MingaEditor.LayoutPreset do
 
   ## How it works
 
-  `apply/3` takes the current editor state, a preset name, and the agent
-  buffer pid. It modifies the window tree to match the preset topology,
-  preserving the file buffer in the primary pane and placing the agent
-  chat in the secondary pane.
+  `apply/3` takes the current editor state, a preset name, and the current agent session pid. It modifies the window tree to match the preset topology, preserving the file buffer in the primary pane and placing the semantic agent chat in the secondary pane.
 
   `restore_default/1` collapses the tree back to a single window with
   the file buffer, removing the agent chat pane.
@@ -41,16 +38,16 @@ defmodule MingaEditor.LayoutPreset do
   and the agent chat in the secondary pane. If an agent chat window
   already exists, this is a no-op (returns state unchanged).
   """
-  @spec apply(EditorState.t(), preset(), pid()) :: EditorState.t()
-  def apply(state, :agent_right, agent_buffer) do
-    apply_split(state, agent_buffer, :vertical)
+  @spec apply(EditorState.t(), preset(), pid() | nil) :: EditorState.t()
+  def apply(state, :agent_right, _session_pid) do
+    apply_split(state, :vertical)
   end
 
-  def apply(state, :agent_bottom, agent_buffer) do
-    apply_split(state, agent_buffer, :horizontal)
+  def apply(state, :agent_bottom, _session_pid) do
+    apply_split(state, :horizontal)
   end
 
-  def apply(state, :default, _agent_buffer) do
+  def apply(state, :default, _session_pid) do
     restore_default(state)
   end
 
@@ -111,8 +108,8 @@ defmodule MingaEditor.LayoutPreset do
 
   # ── Private ───────────────────────────────────────────────────────────────
 
-  @spec apply_split(EditorState.t(), pid(), :vertical | :horizontal) :: EditorState.t()
-  defp apply_split(state, agent_buffer, direction) do
+  @spec apply_split(EditorState.t(), :vertical | :horizontal) :: EditorState.t()
+  defp apply_split(state, direction) do
     # If an agent chat window already exists, just return
     if has_agent_chat?(state) do
       state
@@ -121,7 +118,7 @@ defmodule MingaEditor.LayoutPreset do
       {next_id, windows} = Windows.allocate_id(state.workspace.windows)
       rows = state.terminal_viewport.rows
       cols = state.terminal_viewport.cols
-      agent_window = Window.new_agent_chat(next_id, agent_buffer, rows, cols)
+      agent_window = Window.new_agent_chat(next_id, rows, cols)
 
       # Split the active window to add the agent pane
       active_id = windows.active

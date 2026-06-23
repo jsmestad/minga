@@ -18,7 +18,7 @@ defmodule MingaEditor.Window.Content do
   | Tag | Reference | Editable? |
   |-----|-----------|-----------|
   | `:buffer` | `pid()` (Buffer.Process) | Yes |
-  | `:agent_chat` | `pid()` (Agent.Session) | No |
+  | `:agent_chat` | `:semantic` | No |
 
   Only these tags are implemented today. Add future content types when they ship.
   """
@@ -31,43 +31,42 @@ defmodule MingaEditor.Window.Content do
   """
   @type t ::
           {:buffer, pid()}
-          | {:agent_chat, pid()}
+          | {:agent_chat, :semantic}
 
   @doc "Creates a buffer content reference."
   @spec buffer(pid()) :: t()
   def buffer(pid) when is_pid(pid), do: {:buffer, pid}
 
-  @doc "Creates an agent chat content reference. The pid is the agent's `*Agent*` Buffer.Process."
-  @spec agent_chat(pid()) :: t()
-  def agent_chat(pid) when is_pid(pid), do: {:agent_chat, pid}
+  @doc "Creates a semantic agent chat content reference."
+  @spec agent_chat() :: t()
+  def agent_chat, do: {:agent_chat, :semantic}
 
   @doc "Returns the buffer pid if this is a buffer content reference, nil otherwise."
   @spec buffer_pid(t()) :: pid() | nil
   def buffer_pid({:buffer, pid}), do: pid
-  def buffer_pid({:agent_chat, _pid}), do: nil
+  def buffer_pid({:agent_chat, :semantic}), do: nil
 
   @doc """
   Returns the underlying pid for any content type.
 
-  For `:buffer`, this is the Buffer.Process pid. For `:agent_chat`, this
-  is the agent's `*Agent*` Buffer.Process pid (used for cursor/scroll).
+  For `:buffer`, this is the Buffer.Process pid. Semantic agent chat panes have no underlying buffer pid.
   """
-  @spec pid(t()) :: pid()
+  @spec pid(t()) :: pid() | nil
   def pid({:buffer, p}), do: p
-  def pid({:agent_chat, p}), do: p
+  def pid({:agent_chat, :semantic}), do: nil
 
   @doc "Returns true if this content reference is a file buffer."
   @spec buffer?(t()) :: boolean()
   def buffer?({:buffer, _pid}), do: true
-  def buffer?({:agent_chat, _pid}), do: false
+  def buffer?({:agent_chat, :semantic}), do: false
 
   @doc "Returns true if this content reference is an agent chat."
   @spec agent_chat?(t()) :: boolean()
-  def agent_chat?({:agent_chat, _pid}), do: true
+  def agent_chat?({:agent_chat, :semantic}), do: true
   def agent_chat?({:buffer, _pid}), do: false
 
   @doc "Returns true if the content is editable (supports insert mode)."
   @spec editable?(t()) :: boolean()
   def editable?({:buffer, _pid}), do: true
-  def editable?({:agent_chat, _pid}), do: false
+  def editable?({:agent_chat, :semantic}), do: false
 end

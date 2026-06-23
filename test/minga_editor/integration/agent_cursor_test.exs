@@ -10,7 +10,6 @@ defmodule Minga.Integration.AgentCursorTest do
 
   use Minga.Test.EditorCase, async: true
 
-  alias MingaEditor.Agent.BufferSync, as: AgentBufferSync
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Config.Options
   alias Minga.Keymap.Active, as: KeymapActive
@@ -38,9 +37,6 @@ defmodule Minga.Integration.AgentCursorTest do
 
     {:ok, port} = HeadlessPort.start_link(width: width, height: height)
 
-    agent_buf = AgentBufferSync.start_buffer(options_server)
-    assert is_pid(agent_buf), "Failed to start agent buffer"
-
     {:ok, file_buf} =
       BufferProcess.start_link(
         content: "",
@@ -67,7 +63,7 @@ defmodule Minga.Integration.AgentCursorTest do
 
     :sys.replace_state(editor, fn state ->
       win_id = state.workspace.windows.active
-      agent_window = Window.new_agent_chat(win_id, agent_buf, height, width)
+      agent_window = Window.new_agent_chat(win_id, height, width)
 
       windows = %{
         state.workspace.windows
@@ -78,7 +74,6 @@ defmodule Minga.Integration.AgentCursorTest do
 
       agent_state =
         state.shell_state.agent
-        |> Map.put(:buffer, agent_buf)
         |> Map.put(:session, fake_session)
 
       ss = state.shell_state
@@ -97,7 +92,6 @@ defmodule Minga.Integration.AgentCursorTest do
     %{
       editor: editor,
       buffer: file_buf,
-      agent_buffer: agent_buf,
       port: port,
       width: width,
       height: height

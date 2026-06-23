@@ -161,5 +161,50 @@ defmodule MingaEditor.RenderModel.UI.ExtensionPanelBuilderTest do
       assert panel.panel_id == "non_list_content"
       assert panel.content == []
     end
+
+    test "includes semantic dashboard sections and panels from the agent UI registry", %{
+      semantic_table: semantic_table
+    } do
+      dashboard = [
+        %Text{text: "Dashboard ready"},
+        %Progress{label: "Queue", percent: 0.5}
+      ]
+
+      semantic_panel = %Panel{
+        extension: "semantic",
+        panel_id: "details",
+        title: "Details",
+        position: :right,
+        size: {:percent, 40},
+        visible?: true,
+        content: [%Text{text: "Panel ready"}]
+      }
+
+      :ok =
+        SemanticUIRegistry.register(semantic_table, {:bundle, :dashboard}, %{
+          id: "queue",
+          surface: :dashboard_section,
+          payload: dashboard
+        })
+
+      :ok =
+        SemanticUIRegistry.register(semantic_table, {:bundle, :panel}, %{
+          id: "details",
+          surface: :panel,
+          payload: semantic_panel
+        })
+
+      model = ExtensionPanelBuilder.build(semantic_table)
+
+      assert Enum.any?(
+               model.panels,
+               &(&1.panel_id == "agent-dashboard-queue" and &1.content == dashboard)
+             )
+
+      assert Enum.any?(
+               model.panels,
+               &(&1.panel_id == "details" and &1.content == [%Text{text: "Panel ready"}])
+             )
+    end
   end
 end

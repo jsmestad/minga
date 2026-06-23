@@ -2,6 +2,7 @@ defmodule MingaEditor.State.AgentTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias MingaAgent.RuntimeState
   alias MingaEditor.State.Agent, as: AgentState
 
   defp new_agent do
@@ -80,10 +81,12 @@ defmodule MingaEditor.State.AgentTest do
       assert agent.runtime.status == :idle
     end
 
-    test "reset_cache preserves buffer pid (rendering stays on the same buffer)" do
-      buf = self()
-      agent = new_agent() |> AgentState.set_buffer(buf) |> AgentState.reset_cache()
-      assert agent.buffer == buf
+    test "reset_cache preserves runtime identity fields" do
+      agent =
+        %{new_agent() | runtime: RuntimeState.set_session_id(%RuntimeState{}, "session-1")}
+        |> AgentState.reset_cache()
+
+      assert agent.runtime.active_session_id == "session-1"
     end
   end
 

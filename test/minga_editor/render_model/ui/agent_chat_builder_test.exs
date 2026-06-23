@@ -1,7 +1,7 @@
 defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
   use ExUnit.Case, async: true
 
-  alias MingaEditor.Agent.BufferSync
+  alias MingaEditor.Agent.Transcript
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Frontend.Emit.Context
@@ -22,10 +22,9 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
     hidden_message = {:user, "hidden"}
     visible_message = {:assistant, "visible"}
     message_ids = [{101, old_message}, {102, hidden_message}, {103, visible_message}]
-    buffer = BufferSync.start_buffer()
 
-    {_line_index, display_messages, display_pairs} =
-      BufferSync.sync(buffer, [old_message, hidden_message, visible_message],
+    %{display_messages: display_messages, display_message_pairs: display_pairs} =
+      Transcript.display([old_message, hidden_message, visible_message],
         display_start_index: 2,
         message_ids: message_ids,
         pinned_ids: MapSet.new([101])
@@ -38,7 +37,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
     }
 
     model =
-      context(buffer, session, panel)
+      context(session, panel)
       |> AgentChatBuilder.build()
 
     assert model.visible?
@@ -61,11 +60,11 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
   defp message_summary({id, {:user, text}}), do: {id, :user, text}
   defp message_summary({id, {kind, _, _}}), do: {id, kind, nil}
 
-  defp context(buffer, session, panel) do
+  defp context(session, panel) do
     tab = Tab.new_agent(1, "Agent") |> Tab.set_session(session)
     {tab_bar, workspace} = TabBar.add_workspace(TabBar.new(tab), "Agent", session)
     tab_bar = TabBar.move_tab_to_workspace(tab_bar, tab.id, workspace.id)
-    window = Window.new_agent_chat(1, buffer, 24, 80)
+    window = Window.new_agent_chat(1, 24, 80)
 
     %Context{
       port_manager: self(),

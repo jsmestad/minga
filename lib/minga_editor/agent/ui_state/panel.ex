@@ -34,7 +34,7 @@ defmodule MingaEditor.Agent.UIState.Panel do
           display_start_index: non_neg_integer(),
           mention_completion: MingaAgent.FileMention.completion() | nil,
           pasted_blocks: [paste_block()],
-          cached_line_index: [{non_neg_integer(), MingaEditor.Agent.BufferSync.line_type()}],
+          cached_line_index: [{non_neg_integer(), MingaEditor.Agent.Transcript.line_type()}],
           cached_display_messages: [term()],
           cached_display_message_pairs: [{pos_integer(), term()}],
           cached_styled_messages: [MingaEditor.Agent.MarkdownHighlight.styled_lines()] | nil,

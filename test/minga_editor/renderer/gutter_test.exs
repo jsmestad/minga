@@ -167,8 +167,7 @@ defmodule MingaEditor.Renderer.GutterTest do
     test "returns empty for :none style with non-zero width" do
       # Regression: gutter must handle :none regardless of allocated width.
       # Previously crashed with FunctionClauseError in number_and_color/4
-      # when a buffer (e.g. *Agent*) set line_numbers: :none but the
-      # render path computed a non-zero gutter width.
+      # when the render path computed a non-zero gutter width.
       assert Gutter.render_number(0, 0, 5, 5, 4, :none, @colors) == []
     end
   end

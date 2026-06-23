@@ -172,7 +172,7 @@ defmodule MingaEditor.Commands.InlineAskTest do
     assert workspace = TabBar.active_workspace(tb)
     assert Enum.any?(workspace.files, &(&1.display_name == "auth.ex"))
 
-    assert %{content: {:agent_chat, _agent_buffer}} =
+    assert %{content: {:agent_chat, :semantic}} =
              state.workspace.windows.map[state.workspace.windows.active]
   end
 

@@ -352,11 +352,11 @@ defmodule MingaEditor.State.TabBarTest do
     test "finds same-path file tabs by workspace and excludes agent tabs" do
       path = "/tmp/minga-tab-bar-same-file.ex"
       manual_buffer = buffer_for_path(path)
-      agent_buffer = buffer_for_path(path)
+      agent_file_buffer = buffer_for_path(path)
 
       manual_tab = tab_with_active_buffer(file_tab(1, "same.ex"), manual_buffer)
       agent_tab = Tab.new_agent(2, "Agent")
-      agent_file_tab = tab_with_active_buffer(file_tab(3, "same.ex"), agent_buffer)
+      agent_file_tab = tab_with_active_buffer(file_tab(3, "same.ex"), agent_file_buffer)
 
       tb = %TabBar{tabs: [manual_tab, agent_tab, agent_file_tab], active_id: 2, next_id: 4}
       {tb, group} = TabBar.add_workspace(tb, "Agent")

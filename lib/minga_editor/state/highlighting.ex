@@ -59,9 +59,7 @@ defmodule MingaEditor.State.Highlighting do
   @doc """
   Rebuilds every buffer's highlight face registry from a new theme.
 
-  Buffers with a stored `syntax_overrides` entry (e.g. the agent buffer's
-  dimmed delimiters) keep their custom, theme-independent palette and are
-  left untouched.
+  Buffers with a stored `syntax_overrides` entry keep their custom, theme-independent palette and are left untouched.
   """
   @spec retheme_all(t(), MingaEditor.UI.Theme.t()) :: t()
   def retheme_all(%__MODULE__{highlights: highlights, syntax_overrides: overrides} = state, theme) do

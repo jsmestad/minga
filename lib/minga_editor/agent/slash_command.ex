@@ -1247,7 +1247,7 @@ defmodule MingaEditor.Agent.SlashCommand do
     end
 
     # Take only the first line for the single-line minibuffer status bar.
-    # The full message is visible in the *Agent* chat buffer via add_system_message.
+    # The full message is visible in the semantic agent transcript via add_system_message.
     first_line = message |> String.split("\n", parts: 2) |> hd() |> String.trim()
     MingaEditor.State.set_status(state, String.slice(first_line, 0, 80))
   end

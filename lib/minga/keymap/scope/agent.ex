@@ -74,10 +74,8 @@ defmodule Minga.Keymap.Scope.Agent do
   defp normal_trie do
     Bindings.new()
     #
-    # Navigation keys (j, k, w, b, e, G, Ctrl-D, Ctrl-U, /, n, N, etc.)
-    # are NOT bound here. They pass through to AgentNav, which routes
-    # them through the Mode FSM against the *Agent* buffer. This gives
-    # chat navigation the full vim grammar for free.
+    # Navigation keys (j, k, G, Ctrl-D, Ctrl-U, etc.) are NOT bound here.
+    # They pass through to AgentNav, which updates semantic transcript scroll state.
     #
     # Only DOMAIN-SPECIFIC commands live in this trie: collapse, copy,
     # focus, session, panel management.
@@ -125,8 +123,7 @@ defmodule Minga.Keymap.Scope.Agent do
     |> Bindings.bind(~k({), :agent_shrink_panel, "Shrink chat panel")
     |> Bindings.bind(~k(=), :agent_reset_panel, "Reset panel split")
     |> Bindings.bind(~k(TAB), :agent_switch_focus, "Switch panel focus")
-    # Search: standard vim `/` search works on the *Agent* buffer.
-    # Keys `/`, `n`, `N` pass through to the Mode FSM.
+    # Search keys are intentionally left unbound here for the input stack.
     # Session
     |> Bindings.bind(~k(s), :agent_session_switcher, "Session switcher")
     # Help

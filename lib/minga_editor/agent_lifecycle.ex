@@ -2,24 +2,23 @@ defmodule MingaEditor.AgentLifecycle do
   @moduledoc """
   Agent session lifecycle helpers for the Editor GenServer.
 
-  Handles agent session startup, auto-context loading, agent buffer
-  synchronization, and tab label updates. These are called by the
+  Handles agent session startup, auto-context loading, semantic transcript
+  caching, and tab label updates. These are called by the
   Editor during init, file open, and surface effect processing.
 
   All functions are pure state transformations (state -> state) that
   the Editor calls at the appropriate lifecycle points.
   """
 
-  alias MingaEditor.Agent.BufferSync, as: AgentBufferSync
   alias MingaEditor.Agent.MarkdownHighlight
   alias MingaEditor.Agent.ProvenanceJump
+  alias MingaEditor.Agent.Transcript
   alias MingaAgent.Session, as: AgentSession
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.View.Preview
   alias Minga.Buffer
   alias Minga.Config
   alias MingaEditor.Commands
-  alias MingaEditor.HighlightSync
   alias MingaEditor.LayoutPreset
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.AgentAccess
@@ -28,7 +27,7 @@ defmodule MingaEditor.AgentLifecycle do
   @type state :: EditorState.t()
 
   # Maximum characters of tool call result to send for styled rendering.
-  # Matches the truncation in AgentBufferSync.message_to_markdown/1.
+  # Matches the truncation in Transcript.message_to_markdown/1.
   @max_styled_result_chars 500
 
   @doc """
@@ -72,36 +71,23 @@ defmodule MingaEditor.AgentLifecycle do
   end
 
   @doc """
-  Registers the agent buffer with the tree-sitter parser for markdown highlighting.
+  Legacy hook retained for callers from the former transcript-buffer path.
 
-  Call once after the agent buffer is created. Sets up the language and
-  triggers an initial parse so highlights are ready when the buffer is viewed.
+  The agent transcript is now semantic-only, so there is no buffer to register here.
   """
   @spec setup_agent_highlight(state()) :: state()
-  def setup_agent_highlight(%EditorState{} = state) do
-    agent = AgentAccess.agent(state)
-
-    if is_pid(agent.buffer) do
-      # Use a custom syntax theme that dims markdown delimiters via
-      # tree-sitter captures instead of regex-based ChatDecorations.
-      agent_syntax = MingaEditor.UI.Theme.agent_syntax(state.theme)
-      HighlightSync.setup_for_buffer_pid(state, agent.buffer, syntax: agent_syntax)
-    else
-      state
-    end
-  end
+  def setup_agent_highlight(%EditorState{} = state), do: state
 
   @doc """
-  Syncs the agent buffer content with the current session messages.
+  Caches the semantic agent transcript metadata for the current session messages.
 
   Called as a surface effect when the agent view receives new messages.
   """
-  @spec sync_buffer(state()) :: state()
-  def sync_buffer(state) do
-    agent = AgentAccess.agent(state)
+  @spec sync_transcript(state()) :: state()
+  def sync_transcript(state) do
     session = AgentAccess.session(state)
 
-    if is_pid(agent.buffer) and is_pid(session) do
+    if is_pid(session) do
       messages =
         try do
           AgentSession.messages(session)
@@ -109,18 +95,22 @@ defmodule MingaEditor.AgentLifecycle do
           :exit, _ -> []
         end
 
-      # Don't clear the buffer when the session is dead and returns no messages.
-      # The buffer should preserve its last-known content.
-      sync_buffer_content(state, agent.buffer, messages)
+      cache_transcript(state, messages)
     else
       state
     end
   end
 
-  @spec sync_buffer_content(state(), pid(), [term()]) :: state()
-  defp sync_buffer_content(state, _buffer, []), do: state
+  @doc "Caches semantic transcript metadata for an explicit message list."
+  @spec cache_messages(state(), [term()]) :: state()
+  def cache_messages(state, messages) when is_list(messages) do
+    cache_transcript(state, messages)
+  end
 
-  defp sync_buffer_content(state, buffer, messages) do
+  @spec cache_transcript(state(), [term()]) :: state()
+  defp cache_transcript(state, []), do: state
+
+  defp cache_transcript(state, messages) do
     agent = AgentAccess.agent(state)
     panel = AgentAccess.panel(state)
     jump = panel.provenance_jump
@@ -139,16 +129,10 @@ defmodule MingaEditor.AgentLifecycle do
         do: Keyword.put(sync_opts, :display_start_index, display_start),
         else: sync_opts
 
-    cursor_target = if jump, do: ProvenanceJump.cursor_target(jump), else: {:bottom}
-    sync_opts = Keyword.put(sync_opts, :cursor_target, cursor_target)
-
-    {line_index, display_messages, display_message_pairs} =
-      AgentBufferSync.sync(buffer, messages, sync_opts)
+    result = Transcript.display(messages, sync_opts)
 
     # Compute styled runs for GUI rendering against the displayed transcript.
-    # The agent buffer also contains this filtered display list, so tree-sitter
-    # offsets line up for both TUI and GUI rendering.
-    styled = compute_styled_messages(state, buffer, display_messages)
+    styled = compute_styled_messages(state, result.display_messages)
 
     styled_assistant_count =
       Enum.count(styled, fn
@@ -165,22 +149,17 @@ defmodule MingaEditor.AgentLifecycle do
     # callers can read them without recomputing. Persist the (possibly lowered)
     # display window and mark the jump landed so later re-syncs hold position
     # instead of re-pinning to the bottom.
-    state =
-      AgentAccess.update_panel(state, fn p ->
-        %{
-          p
-          | cached_line_index: line_index,
-            cached_display_messages: display_messages,
-            cached_display_message_pairs: display_message_pairs,
-            cached_styled_messages: styled,
-            display_start_index: display_start,
-            provenance_jump: advance_jump(jump)
-        }
-      end)
-
-    # Trigger tree-sitter reparse for markdown highlighting.
-    # replace_generated_content clears edit deltas, so we do a full reparse.
-    HighlightSync.request_reparse_buffer(state, buffer)
+    AgentAccess.update_panel(state, fn p ->
+      %{
+        p
+        | cached_line_index: result.line_index,
+          cached_display_messages: result.display_messages,
+          cached_display_message_pairs: result.display_message_pairs,
+          cached_styled_messages: styled,
+          display_start_index: display_start,
+          provenance_jump: advance_jump(jump)
+      }
+    end)
   end
 
   # The display window needed to render the jump target. Reveals a paged-out
@@ -258,7 +237,7 @@ defmodule MingaEditor.AgentLifecycle do
 
   @spec update_tab_from_session(state(), TabBar.t(), Tab.id(), pid()) :: state()
   defp update_tab_from_session(state, tb, active_id, session) do
-    # Session may be dead before :DOWN is processed (same race as sync_buffer).
+    # Session may be dead before :DOWN is processed (same race as sync_transcript).
     # Empty list from catch is safe here: first_user_message([]) returns nil.
     messages =
       try do
@@ -310,18 +289,15 @@ defmodule MingaEditor.AgentLifecycle do
   # ── Styled message caching for GUI ─────────────────────────────────────────
 
   @doc """
-  Re-computes cached styled messages when tree-sitter highlights update
-  for the agent buffer. Called from the Editor's highlight_spans handler
-  when new spans arrive for the `*Agent*` buffer.
+  Re-computes cached styled messages for the semantic transcript.
   """
   @spec update_styled_cache(state()) :: state()
   def update_styled_cache(state) do
-    agent = AgentAccess.agent(state)
     session = AgentAccess.session(state)
 
-    with true <- is_pid(agent.buffer) and is_pid(session),
+    with true <- is_pid(session),
          messages when messages != [] <- displayed_messages_for_styling(state, session) do
-      styled = compute_styled_messages(state, agent.buffer, messages)
+      styled = compute_styled_messages(state, messages)
 
       AgentAccess.update_panel(state, fn p ->
         %{p | cached_styled_messages: styled}
@@ -346,22 +322,16 @@ defmodule MingaEditor.AgentLifecycle do
     end
   end
 
-  # Computes styled runs for each message. Assistant messages and tool call
-  # results get tree-sitter/markdown styling; other message types pass through as nil.
-  #
-  # Computes per-message byte offsets into the full buffer so tree-sitter
-  # highlights (which reference the full buffer) align correctly with
-  # per-message line content.
-  @spec compute_styled_messages(state(), pid(), [term()]) :: [
+  # Computes styled runs for each message. Assistant messages and tool call results
+  # get markdown styling; other message types pass through as nil.
+  @spec compute_styled_messages(state(), [term()]) :: [
           MarkdownHighlight.styled_lines() | nil
         ]
-  defp compute_styled_messages(state, buffer, messages) do
-    highlight = Map.get(state.workspace.highlight.highlights, buffer)
+  defp compute_styled_messages(state, messages) do
+    highlight = nil
     theme_syntax = state.theme.syntax
 
-    # Get the full buffer text and per-message line offsets so we can
-    # compute each message's byte offset within the buffer.
-    {full_text, line_offsets} = AgentBufferSync.messages_to_markdown_with_offsets(messages)
+    {full_text, line_offsets} = Transcript.messages_to_markdown_with_offsets(messages)
     full_lines = String.split(full_text, "\n")
     byte_offset_map = message_byte_offsets(line_offsets, full_lines)
 
@@ -386,7 +356,7 @@ defmodule MingaEditor.AgentLifecycle do
 
   # Computes the byte offset of each message's start line within the full buffer text.
   @spec message_byte_offsets(
-          [MingaEditor.Agent.ChatDecorations.line_offset()],
+          [Transcript.line_offset()],
           [String.t()]
         ) :: %{non_neg_integer() => non_neg_integer()}
   defp message_byte_offsets(line_offsets, full_lines) do

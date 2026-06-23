@@ -3,15 +3,12 @@ defmodule MingaEditor.Input.AgentNav do
   Thin input handler for agent chat navigation.
 
   When the agent chat window is focused and the prompt input is not
-  focused, this handler wraps the Mode FSM call with agent-specific
-  post-processing: unpinning the window so the viewport follows the
-  cursor instead of snapping to the bottom.
+  focused, this handler maps common Vim navigation keys onto the
+  semantic transcript scroll state.
 
   Domain-specific bindings (collapse, copy, focus input, session, etc.)
   are handled by the agent scope trie in `Scoped`, which runs earlier
-  in the handler chain. Standard vim search (`/`, `n`, `N`) passes
-  through to the Mode FSM naturally since the `*Agent*` buffer is a
-  standard buffer.
+  in the handler chain.
 
   ## File viewer navigation
 
@@ -20,9 +17,9 @@ defmodule MingaEditor.Input.AgentNav do
 
   ## Side panel usage
 
-  `AgentPanel` calls `delegate_to_mode_fsm/4` for side panel chat
-  navigation. That function still performs the buffer swap pattern
-  because the side panel's active buffer isn't the agent chat buffer.
+  `AgentPanel` calls `handle_chat_nav/3` for side panel chat navigation,
+  so both full agent workspaces and editor side panels share one
+  semantic navigation path.
   """
 
   @behaviour MingaEditor.Input.Handler
@@ -32,9 +29,7 @@ defmodule MingaEditor.Input.AgentNav do
   import Bitwise
 
   alias MingaEditor.Agent.UIState
-  alias Minga.Buffer
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.Buffers
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.Window
 
@@ -62,16 +57,19 @@ defmodule MingaEditor.Input.AgentNav do
 
   @spec handle_chat_nav(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
-  defp handle_chat_nav(state, cp, mods) do
-    # Process the key through the Mode FSM against the current active
-    # buffer (which is already the agent chat buffer, set by focus_window).
-    state = MingaEditor.do_handle_key(state, cp, mods)
+  def handle_chat_nav(state, cp, mods) do
+    case chat_nav_command(cp, mods) do
+      {:scroll, fun} ->
+        state =
+          state
+          |> AgentAccess.update_agent_ui(fun)
+          |> unpin_agent_chat_window()
 
-    # Unpin the agent chat window so the viewport follows the cursor
-    # instead of snapping to the bottom on the next render frame.
-    state = unpin_agent_chat_window(state)
+        {:handled, state}
 
-    {:handled, state}
+      :passthrough ->
+        {:passthrough, state}
+    end
   end
 
   # ── File viewer navigation ─────────────────────────────────────────────
@@ -104,70 +102,19 @@ defmodule MingaEditor.Input.AgentNav do
   defp viewer_nav_command(?G, 0), do: {:scroll, &UIState.scroll_viewer_to_bottom/1}
   defp viewer_nav_command(_cp, _mods), do: :passthrough
 
-  # ── Side panel delegate ─────────────────────────────────────────────────
+  @spec chat_nav_command(non_neg_integer(), non_neg_integer()) ::
+          {:scroll, (UIState.t() -> UIState.t())} | :passthrough
+  defp chat_nav_command(?j, 0), do: {:scroll, &UIState.scroll_down(&1, 1)}
+  defp chat_nav_command(?k, 0), do: {:scroll, &UIState.scroll_up(&1, 1)}
 
-  @doc """
-  Routes a key through the Mode FSM against the given buffer.
+  defp chat_nav_command(?d, mods) when band(mods, @ctrl) != 0,
+    do: {:scroll, &UIState.scroll_down(&1, 10)}
 
-  Used by `AgentPanel` for side panel chat navigation. The side panel's
-  active buffer is NOT the agent chat buffer, so this function swaps
-  `buffers.active` to the target buffer, runs through Mode FSM, blocks
-  insert mode transitions (chat is read-only), syncs the buffer cursor
-  to the chat scroll offset, and restores the original active buffer.
-  """
-  @spec delegate_to_mode_fsm(
-          EditorState.t(),
-          pid(),
-          non_neg_integer(),
-          non_neg_integer()
-        ) :: EditorState.t()
-  def delegate_to_mode_fsm(state, chat_buffer, cp, mods) do
-    real_active = state.workspace.buffers.active
-    state = set_active_buffer_override(state, chat_buffer)
+  defp chat_nav_command(?u, mods) when band(mods, @ctrl) != 0,
+    do: {:scroll, &UIState.scroll_up(&1, 10)}
 
-    state = MingaEditor.do_handle_key(state, cp, mods)
-
-    # Allow visual mode (for text selection and yank) but block insert mode
-    # (chat content is read-only). Other modes like operator-pending, search,
-    # and command are also allowed since they're needed for full vim grammar.
-    state =
-      if Minga.Editing.inserting?(state) do
-        EditorState.transition_mode(state, :normal)
-      else
-        state
-      end
-
-    # Sync buffer cursor to chat scroll offset so the side panel renderer
-    # shows the region around the cursor. Unpins auto-scroll since the
-    # user is navigating manually.
-    {cursor_line, _col} = Buffer.cursor(chat_buffer)
-    state = sync_scroll_to_cursor(state, cursor_line)
-
-    # Only restore the original active buffer if a command didn't
-    # legitimately change it (e.g., leader commands like :new_buffer).
-    if state.workspace.buffers.active == chat_buffer do
-      set_active_buffer_override(state, real_active)
-    else
-      state
-    end
-  end
-
-  @spec set_active_buffer_override(EditorState.t(), pid() | nil) :: EditorState.t()
-  defp set_active_buffer_override(state, pid) do
-    EditorState.update_buffers(state, &Buffers.set_active_override(&1, pid))
-  end
-
-  # ── Private helpers ─────────────────────────────────────────────────────
-
-  @spec sync_scroll_to_cursor(EditorState.t(), non_neg_integer()) :: EditorState.t()
-  defp sync_scroll_to_cursor(state, cursor_line) do
-    state =
-      AgentAccess.update_panel(state, fn p ->
-        %{p | scroll: %{p.scroll | offset: cursor_line, pinned: false}}
-      end)
-
-    unpin_agent_chat_window(state)
-  end
+  defp chat_nav_command(?G, 0), do: {:scroll, &UIState.scroll_to_bottom/1}
+  defp chat_nav_command(_cp, _mods), do: :passthrough
 
   @spec unpin_agent_chat_window(EditorState.t()) :: EditorState.t()
   defp unpin_agent_chat_window(state) do
