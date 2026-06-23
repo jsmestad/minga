@@ -788,6 +788,26 @@ defmodule MingaEditor.Commands.Agent do
     end
   end
 
+  @doc "Retries the current agent provider after a startup or crash error."
+  @spec restart_agent_provider(state()) :: state()
+  def restart_agent_provider(state) do
+    case AgentAccess.session(state) do
+      nil ->
+        EditorState.set_status(state, "No agent session to restart")
+
+      session ->
+        case Session.restart_provider(session) do
+          :ok ->
+            EditorState.set_status(state, "Agent provider restarted")
+
+          {:error, reason} ->
+            EditorState.set_status(state, "Agent restart failed: #{inspect(reason)}")
+        end
+    end
+  catch
+    :exit, _ -> EditorState.set_status(state, "Agent restart failed")
+  end
+
   @doc """
   Pulls all queued messages back into the prompt input without aborting the agent.
 
@@ -846,10 +866,10 @@ defmodule MingaEditor.Commands.Agent do
   """
   @spec scope_ctrl_c(state()) :: state()
   def scope_ctrl_c(state) do
-    if AgentAccess.agent(state).runtime.status in [:thinking, :tool_executing] do
-      abort_agent(state)
-    else
-      input_to_normal(state)
+    case AgentAccess.agent(state).runtime.status do
+      status when status in [:thinking, :tool_executing] -> abort_agent(state)
+      :error -> restart_agent_provider(state)
+      _status -> input_to_normal(state)
     end
   end
 

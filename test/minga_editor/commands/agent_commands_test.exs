@@ -40,6 +40,22 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
   alias MingaEditor.Input
   alias Minga.Test.StubServer
 
+  defmodule RestartStubSession do
+    use GenServer
+
+    @spec start_link(pid()) :: GenServer.on_start()
+    def start_link(test_pid), do: GenServer.start_link(__MODULE__, test_pid)
+
+    @impl GenServer
+    def init(test_pid), do: {:ok, test_pid}
+
+    @impl GenServer
+    def handle_call(:restart_provider, _from, test_pid) do
+      send(test_pid, :restart_provider_called)
+      {:reply, :ok, test_pid}
+    end
+  end
+
   # ── Helpers ──────────────────────────────────────────────────────────────
 
   defp command!(name) do
@@ -627,6 +643,21 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
     test "no-ops when no session exists" do
       state = base_state(session: nil)
       assert AgentCommands.abort_agent(state) == state
+    end
+  end
+
+  describe "scope_ctrl_c/1" do
+    test "retries the provider when the agent is in error state" do
+      {:ok, session} = RestartStubSession.start_link(self())
+
+      state =
+        base_state(session: session)
+        |> AgentAccess.update_agent(&AgentState.set_error(&1, "provider failed"))
+
+      new_state = AgentCommands.scope_ctrl_c(state)
+
+      assert_receive :restart_provider_called
+      assert new_state.shell_state.status_msg == "Agent provider restarted"
     end
   end
 
