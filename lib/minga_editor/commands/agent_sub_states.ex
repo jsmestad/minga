@@ -10,6 +10,7 @@ defmodule MingaEditor.Commands.AgentSubStates do
   alias MingaEditor.Agent.ChatSearch
   alias MingaEditor.Agent.DiffReview
   alias MingaAgent.FileMention
+  alias MingaAgent.ProjectView
   alias MingaAgent.Session
   alias MingaEditor.Agent.SlashCommand
   alias MingaEditor.Agent.UIState
@@ -21,6 +22,7 @@ defmodule MingaEditor.Commands.AgentSubStates do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
+  alias MingaEditor.State.TabBar
   alias Minga.Git
 
   import Bitwise
@@ -182,7 +184,7 @@ defmodule MingaEditor.Commands.AgentSubStates do
     case AgentAccess.view(state).preview do
       %Preview{content: {:diff, review}} ->
         hunk = DiffReview.current_hunk(review)
-        if hunk, do: revert_hunk_on_disk(review.path, hunk)
+        if hunk, do: revert_hunk(state, review, hunk)
 
         state =
           update_preview(
@@ -224,7 +226,7 @@ defmodule MingaEditor.Commands.AgentSubStates do
           |> Enum.map(fn {hunk, _idx} -> hunk end)
           |> Enum.reverse()
 
-        revert_hunks_on_disk(review.path, unresolved_hunks)
+        revert_hunks(state, review, unresolved_hunks)
 
         state =
           update_preview(state, &Preview.update_diff(&1, fn r -> DiffReview.reject_all(r) end))
@@ -550,6 +552,111 @@ defmodule MingaEditor.Commands.AgentSubStates do
 
       nil ->
         state
+    end
+  end
+
+  @spec revert_hunk(state(), DiffReview.t(), map()) :: :ok | {:error, term()}
+  defp revert_hunk(state, review, hunk) do
+    case active_project_view(state) do
+      %ProjectView{} = project_view -> revert_project_view_hunks(project_view, review, [hunk])
+      nil -> revert_hunk_on_disk(review.path, hunk)
+    end
+  end
+
+  @spec revert_hunks(state(), DiffReview.t(), [map()]) :: :ok | {:error, term()}
+  defp revert_hunks(state, review, hunks) do
+    case active_project_view(state) do
+      %ProjectView{} = project_view -> revert_project_view_hunks(project_view, review, hunks)
+      nil -> revert_hunks_on_disk(review.path, hunks)
+    end
+  end
+
+  @spec active_project_view(state()) :: ProjectView.t() | nil
+  defp active_project_view(%{shell_state: %{tab_bar: %TabBar{} = tab_bar}}) do
+    case TabBar.active_workspace(tab_bar) do
+      %{project_view: %ProjectView{} = project_view} -> project_view
+      _workspace -> nil
+    end
+  end
+
+  defp active_project_view(_state), do: nil
+
+  @spec revert_project_view_hunks(ProjectView.t(), DiffReview.t(), [map()]) ::
+          :ok | {:error, term()}
+  defp revert_project_view_hunks(%ProjectView{} = project_view, %DiffReview{} = review, hunks) do
+    case review_relative_path(project_view, review.path) do
+      {:ok, relative_path} ->
+        revert_project_view_hunks(project_view, relative_path, review, hunks)
+
+      :outside_project ->
+        revert_hunks_on_disk(review.path, hunks)
+
+      {:error, _reason} ->
+        :ok
+    end
+  end
+
+  @spec revert_project_view_hunks(ProjectView.t(), String.t(), DiffReview.t(), [map()]) ::
+          :ok | {:error, term()}
+  defp revert_project_view_hunks(project_view, relative_path, review, hunks) do
+    case project_view_content(project_view, relative_path, review) do
+      {:ok, content} ->
+        write_reverted_project_view_hunks(project_view, relative_path, content, hunks)
+
+      {:error, _reason} ->
+        :ok
+    end
+  end
+
+  @spec write_reverted_project_view_hunks(ProjectView.t(), String.t(), String.t(), [map()]) ::
+          :ok | {:error, term()}
+  defp write_reverted_project_view_hunks(project_view, relative_path, content, hunks) do
+    reverted =
+      hunks
+      |> Enum.reduce(String.split(content, "\n"), fn hunk, lines ->
+        Git.revert_hunk(lines, hunk)
+      end)
+      |> Enum.join("\n")
+
+    write_project_view_content(project_view, relative_path, reverted)
+  end
+
+  @spec project_view_content(ProjectView.t(), String.t(), DiffReview.t()) ::
+          {:ok, String.t()} | {:error, term()}
+  defp project_view_content(project_view, relative_path, review) do
+    case ProjectView.read_file(project_view, relative_path) do
+      {:ok, content} -> {:ok, content}
+      {:error, :deleted} -> {:ok, Enum.join(review.after_lines, "\n")}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  @spec write_project_view_content(ProjectView.t(), String.t(), String.t()) ::
+          :ok | {:error, term()}
+  defp write_project_view_content(project_view, relative_path, content) do
+    ProjectView.write_file(project_view, relative_path, content)
+  end
+
+  @spec review_relative_path(ProjectView.t(), String.t()) ::
+          {:ok, String.t()} | :outside_project | {:error, term()}
+  defp review_relative_path(%ProjectView{project_root: root}, path) do
+    case Path.type(path) do
+      :relative -> ProjectView.normalize_relative_path(path)
+      :absolute -> absolute_review_relative_path(root, path)
+      :volumerelative -> :outside_project
+    end
+  end
+
+  @spec absolute_review_relative_path(String.t(), String.t()) ::
+          {:ok, String.t()} | :outside_project | {:error, term()}
+  defp absolute_review_relative_path(root, path) do
+    expanded_root = Path.expand(root)
+    expanded_path = Path.expand(path)
+
+    if String.starts_with?(expanded_path, expanded_root <> "/") do
+      ProjectView.normalize_relative_path(Path.relative_to(expanded_path, expanded_root))
+    else
+      :outside_project
     end
   end
 
