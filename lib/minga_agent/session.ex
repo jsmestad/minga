@@ -1729,6 +1729,7 @@ defmodule MingaAgent.Session do
     state = set_error_status(state)
     state = %{state | error_message: friendly}
     state = append_error_message_once(state, friendly)
+    state = notify_messages_changed(state)
     broadcast(state, {:error, friendly})
     state
   end
@@ -2884,6 +2885,7 @@ defmodule MingaAgent.Session do
 
   @spec attach_provider(state(), pid(), CodeLease.t() | nil) :: state()
   defp attach_provider(state, pid, lease) do
+    Process.unlink(pid)
     Process.monitor(pid)
     state = clear_provider_start_error(%{state | provider: pid, provider_lease: lease})
     state = seed_provider_messages(state, state.messages)

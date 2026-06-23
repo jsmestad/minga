@@ -248,6 +248,7 @@ defmodule MingaEditor.Agent.Events do
     # The session already surfaced this in the transcript and the provider
     # logged the raw detail to the Messages panel, so we only update status
     # here. Re-logging would double the Messages entry and force-open the panel.
+    state = restore_queued_prompts_after_error(state)
     state = AgentAccess.update_agent(state, &AgentState.set_error(&1, message))
     {state, [:render]}
   end
@@ -409,6 +410,45 @@ defmodule MingaEditor.Agent.Events do
 
   defp apply_active_tool_name_fallback(state, _name) do
     AgentAccess.update_agent(state, &AgentState.clear_active_tool_name/1)
+  end
+
+  @spec restore_queued_prompts_after_error(EditorState.t()) :: EditorState.t()
+  defp restore_queued_prompts_after_error(state) do
+    case AgentAccess.session(state) do
+      session when is_pid(session) ->
+        {steering, follow_up} = safe_recall_queues(session)
+        restore_queued_to_prompt(state, steering ++ follow_up)
+
+      _session ->
+        state
+    end
+  end
+
+  @spec safe_recall_queues(pid()) ::
+          {[String.t() | [ReqLLM.Message.ContentPart.t()]],
+           [String.t() | [ReqLLM.Message.ContentPart.t()]]}
+  defp safe_recall_queues(session) do
+    Session.recall_queues(session)
+  catch
+    :exit, _ -> {[], []}
+  end
+
+  @spec restore_queued_to_prompt(
+          EditorState.t(),
+          [String.t() | [ReqLLM.Message.ContentPart.t()]]
+        ) :: EditorState.t()
+  defp restore_queued_to_prompt(state, []), do: state
+
+  defp restore_queued_to_prompt(state, all_queued) do
+    current_text = UIState.prompt_text(AgentAccess.agent_ui(state))
+    combined = Session.combine_queue_entries_to_text(all_queued)
+
+    restored =
+      if current_text != "",
+        do: combined <> "\n\n" <> current_text,
+        else: combined
+
+    AgentAccess.update_agent_ui(state, &UIState.set_prompt_text(&1, restored))
   end
 
   @spec session_active_tool_name(pid()) :: {:ok, String.t() | nil} | :error

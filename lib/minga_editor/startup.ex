@@ -154,6 +154,8 @@ defmodule MingaEditor.Startup do
       backend: backend,
       workspace: workspace,
       port_manager: port_manager,
+      agent_provider_module: Keyword.get(opts, :agent_provider_module),
+      agent_provider_opts: Keyword.get(opts, :agent_provider_opts, []),
       keymap_server: keymap_server,
       options_server: options_server,
       events_registry: events_registry,

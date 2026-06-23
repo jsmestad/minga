@@ -92,6 +92,22 @@ defmodule MingaEditor.Agent.UIState.Panel do
     end
   end
 
+  @doc "Refreshes stale unqualified model names from a specific options server."
+  @spec ensure_configured_model(t(), Minga.Config.Options.server()) :: t()
+  def ensure_configured_model(%__MODULE__{} = panel, options_server) do
+    default_model = AgentConfig.default_model(options_server)
+
+    if stale_unqualified_model?(panel.model_name, default_model) do
+      %{
+        panel
+        | provider_name: AgentConfig.extract_provider_prefix(default_model),
+          model_name: default_model
+      }
+    else
+      panel
+    end
+  end
+
   @doc "Sets whether any provider credential is configured (drives the model indicator)."
   @spec set_credentials_configured(t(), boolean()) :: t()
   def set_credentials_configured(%__MODULE__{} = panel, configured?) do
