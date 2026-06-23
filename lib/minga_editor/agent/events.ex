@@ -11,6 +11,7 @@ defmodule MingaEditor.Agent.Events do
 
   alias Minga.Distribution.ConnectionManager
   alias Minga.Project.FileRef
+  alias MingaEditor.Agent.Activity
   alias MingaEditor.Agent.DiffReview
   alias MingaEditor.Agent.EditTimeline
   alias MingaEditor.Agent.UIState
@@ -59,6 +60,18 @@ defmodule MingaEditor.Agent.Events do
     state =
       case status do
         s when s in [:thinking, :tool_executing] ->
+          update_activity(state, &Activity.start_turn/1)
+
+        s when s in [:idle, :error, :plan] ->
+          update_activity(state, &Activity.finish_turn/1)
+
+        _ ->
+          state
+      end
+
+    state =
+      case status do
+        s when s in [:thinking, :tool_executing] ->
           AgentAccess.update_agent(state, &AgentState.start_spinner_timer/1)
 
         _ ->
@@ -101,6 +114,7 @@ defmodule MingaEditor.Agent.Events do
 
   def handle(state, {:tool_started, "shell", args}) do
     command = Map.get(args, "command", "")
+    state = update_activity(state, &Activity.start_tool(&1, "shell"))
     state = sync_active_tool_name(state, "shell")
     state = update_preview(state, &Preview.set_shell(&1, command))
     {state, [{:render, 16}]}
@@ -119,6 +133,7 @@ defmodule MingaEditor.Agent.Events do
 
   def handle(state, {:tool_ended, "shell", result, status}) do
     shell_status = if status == :error, do: :error, else: :done
+    state = update_activity(state, &Activity.finish_tool/1)
     state = sync_active_tool_name(state, nil)
     state = update_preview(state, &Preview.finish_shell(&1, result, shell_status))
     {state, [{:render, 16}]}
@@ -126,12 +141,14 @@ defmodule MingaEditor.Agent.Events do
 
   def handle(state, {:tool_started, "read_file", args}) do
     path = Map.get(args, "path", "")
+    state = update_activity(state, &Activity.start_tool(&1, "read_file"))
     state = sync_active_tool_name(state, "read_file")
     state = update_preview(state, &Preview.set_file(&1, path, ""))
     {state, [{:render, 16}]}
   end
 
   def handle(state, {:tool_ended, "read_file", result, _status}) do
+    state = update_activity(state, &Activity.finish_tool/1)
     state = sync_active_tool_name(state, nil)
 
     case AgentAccess.view(state).preview.content do
@@ -147,6 +164,9 @@ defmodule MingaEditor.Agent.Events do
   def handle(state, {:tool_started, "list_directory", args}) do
     path = Map.get(args, "path", ".")
 
+    state =
+      update_activity(state, &Activity.start_tool(&1, "list_directory"))
+
     state = sync_active_tool_name(state, "list_directory")
     state = update_preview(state, &Preview.set_directory(&1, path, []))
     {state, [{:render, 16}]}
@@ -154,6 +174,7 @@ defmodule MingaEditor.Agent.Events do
 
   def handle(state, {:tool_ended, "list_directory", result, _status}) do
     entries = result |> String.split("\n") |> Enum.reject(&(&1 == ""))
+    state = update_activity(state, &Activity.finish_tool/1)
     state = sync_active_tool_name(state, nil)
 
     case AgentAccess.view(state).preview.content do
@@ -167,11 +188,13 @@ defmodule MingaEditor.Agent.Events do
   end
 
   def handle(state, {:tool_started, name, _args}) do
+    state = update_activity(state, &Activity.start_tool(&1, name))
     state = sync_active_tool_name(state, name)
     {state, [{:render, 16}]}
   end
 
   def handle(state, {:tool_ended, _name, _result, _status}) do
+    state = update_activity(state, &Activity.finish_tool/1)
     state = sync_active_tool_name(state, nil)
     {state, [{:render, 16}]}
   end
@@ -183,19 +206,20 @@ defmodule MingaEditor.Agent.Events do
       AgentAccess.update_agent_ui(state, &UIState.record_baseline(&1, path, before_content))
 
     state =
-      AgentAccess.update_view(state, fn view ->
-        %{
-          view
-          | edit_timeline:
-              EditTimeline.record_edit(
-                view.edit_timeline,
-                path,
-                tool_call_id,
-                tool_name,
-                before_content,
-                after_content
-              )
-        }
+      update_activity(state, &Activity.record_file(&1, path))
+
+    state =
+      AgentAccess.update_agent_ui(state, fn ui ->
+        UIState.update_edit_timeline(ui, fn timeline ->
+          EditTimeline.record_edit(
+            timeline,
+            path,
+            tool_call_id,
+            tool_name,
+            before_content,
+            after_content
+          )
+        end)
       end)
 
     # Let the active shell track touched files for any shell-owned agent surface.
@@ -256,6 +280,11 @@ defmodule MingaEditor.Agent.Events do
   def handle(state, {:credentials_status, configured?}) do
     state = AgentAccess.update_panel(state, &Panel.set_credentials_configured(&1, configured?))
     {state, [:render]}
+  end
+
+  def handle(state, {:todo_plan_updated, todos}) do
+    state = update_activity(state, &Activity.set_todos(&1, todos))
+    {state, [{:render, 16}]}
   end
 
   def handle(state, :spinner_tick) do
@@ -360,6 +389,13 @@ defmodule MingaEditor.Agent.Events do
   end
 
   # ── Private ────────────────────────────────────────────────────────────────
+
+  @spec update_activity(EditorState.t(), (Activity.t() -> Activity.t())) :: EditorState.t()
+  defp update_activity(state, fun) when is_function(fun, 1) do
+    AgentAccess.update_agent_ui(state, fn ui ->
+      UIState.update_activity(ui, fun)
+    end)
+  end
 
   # Folds a single delta's preview-side mutation into state. Text and thinking
   # deltas carry no per-delta state beyond the once-applied bump/sync; only

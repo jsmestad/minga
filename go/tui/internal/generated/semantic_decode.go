@@ -663,6 +663,81 @@ func DecodeChangeSummaryEntry(data []byte, offset int, windowEnd int) (ChangeSum
 	}, pos, nil
 }
 
+func DecodeAgentTodo(data []byte, offset int, windowEnd int) (AgentTodo, int, error) {
+	pos := offset
+	if err := decodeRequireWindow(windowEnd, pos+1, "status"); err != nil {
+		return AgentTodo{}, offset, err
+	}
+	status := data[pos]
+	pos++
+	description, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return AgentTodo{}, offset, err
+	}
+	return AgentTodo{
+		Status:      status,
+		Description: description,
+	}, pos, nil
+}
+
+func DecodeEditTimelineEntry(data []byte, offset int, windowEnd int) (EditTimelineEntry, int, error) {
+	pos := offset
+	if err := decodeRequireWindow(windowEnd, pos+1, "index"); err != nil {
+		return EditTimelineEntry{}, offset, err
+	}
+	index := data[pos]
+	pos++
+	toolName, pos, err := decodeString8Window(data, pos, windowEnd)
+	if err != nil {
+		return EditTimelineEntry{}, offset, err
+	}
+	if err := decodeRequireWindow(windowEnd, pos+4, "timestamp_delta"); err != nil {
+		return EditTimelineEntry{}, offset, err
+	}
+	timestampDelta := decodeU32(data, pos)
+	pos += 4
+	return EditTimelineEntry{
+		Index:          index,
+		ToolName:       toolName,
+		TimestampDelta: timestampDelta,
+	}, pos, nil
+}
+
+func DecodeEditTimelineFile(data []byte, offset int, windowEnd int) (EditTimelineFile, int, error) {
+	pos := offset
+	path, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return EditTimelineFile{}, offset, err
+	}
+	if err := decodeRequireWindow(windowEnd, pos+1, "entry_count"); err != nil {
+		return EditTimelineFile{}, offset, err
+	}
+	entryCount := data[pos]
+	pos++
+	if err := decodeRequireWindow(windowEnd, pos+4, "lines_added"); err != nil {
+		return EditTimelineFile{}, offset, err
+	}
+	linesAdded := decodeU32(data, pos)
+	pos += 4
+	if err := decodeRequireWindow(windowEnd, pos+4, "lines_removed"); err != nil {
+		return EditTimelineFile{}, offset, err
+	}
+	linesRemoved := decodeU32(data, pos)
+	pos += 4
+	if err := decodeRequireWindow(windowEnd, pos+1, "review_status"); err != nil {
+		return EditTimelineFile{}, offset, err
+	}
+	reviewStatus := data[pos]
+	pos++
+	return EditTimelineFile{
+		Path:         path,
+		EntryCount:   entryCount,
+		LinesAdded:   linesAdded,
+		LinesRemoved: linesRemoved,
+		ReviewStatus: reviewStatus,
+	}, pos, nil
+}
+
 func DecodeGitStatusEntry(data []byte, offset int, windowEnd int) (GitStatusEntry, int, error) {
 	pos := offset
 	if err := decodeRequireWindow(windowEnd, pos+4, "path_hash"); err != nil {
@@ -2222,13 +2297,79 @@ func DecodeGuiChangeSummaryFields(data []byte, offset int, windowEnd int) (GuiCh
 
 func DecodeGuiAgentContextFields(data []byte, offset int, windowEnd int) (GuiAgentContextFields, int, error) {
 	pos := offset
+	if err := decodeRequireWindow(windowEnd, pos+2, "payload_len"); err != nil {
+		return GuiAgentContextFields{}, offset, err
+	}
+	payloadLen := decodeU16(data, pos)
+	pos += 2
 	if err := decodeRequireWindow(windowEnd, pos+1, "visible"); err != nil {
 		return GuiAgentContextFields{}, offset, err
 	}
 	visible := data[pos]
 	pos++
+	task, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return GuiAgentContextFields{}, offset, err
+	}
+	if err := decodeRequireWindow(windowEnd, pos+8, "dispatch_timestamp"); err != nil {
+		return GuiAgentContextFields{}, offset, err
+	}
+	dispatchTimestamp := decodeU64(data, pos)
+	pos += 8
+	if err := decodeRequireWindow(windowEnd, pos+1, "status"); err != nil {
+		return GuiAgentContextFields{}, offset, err
+	}
+	status := data[pos]
+	pos++
+	if err := decodeRequireWindow(windowEnd, pos+1, "can_approve"); err != nil {
+		return GuiAgentContextFields{}, offset, err
+	}
+	canApprove := data[pos]
+	pos++
+	activeAction, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return GuiAgentContextFields{}, offset, err
+	}
+	if err := decodeRequireWindow(windowEnd, pos+2, "tool_count"); err != nil {
+		return GuiAgentContextFields{}, offset, err
+	}
+	toolCount := decodeU16(data, pos)
+	pos += 2
+	if err := decodeRequireWindow(windowEnd, pos+2, "file_count"); err != nil {
+		return GuiAgentContextFields{}, offset, err
+	}
+	fileCount := decodeU16(data, pos)
+	pos += 2
+	reviewHint, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return GuiAgentContextFields{}, offset, err
+	}
+	if err := decodeRequireWindow(windowEnd, pos+1, "todos count"); err != nil {
+		return GuiAgentContextFields{}, offset, err
+	}
+	todosCount := int(data[pos])
+	pos += 1
+	todos := make([]AgentTodo, 0, min(todosCount, len(data)-pos))
+	for i := 0; i < todosCount; i++ {
+		item, nextPos, err := DecodeAgentTodo(data, pos, windowEnd)
+		if err != nil {
+			return GuiAgentContextFields{}, offset, err
+		}
+		pos = nextPos
+		todos = append(todos, item)
+	}
 	return GuiAgentContextFields{
-		Visible: visible,
+		PayloadLen:        payloadLen,
+		Visible:           visible,
+		Task:              task,
+		DispatchTimestamp: dispatchTimestamp,
+		Status:            status,
+		CanApprove:        canApprove,
+		ActiveAction:      activeAction,
+		ToolCount:         toolCount,
+		FileCount:         fileCount,
+		ReviewHint:        reviewHint,
+		Todos:             todos,
 	}, pos, nil
 }
 
@@ -2318,15 +2459,39 @@ func DecodeGuiEditTimelineFields(data []byte, offset int, windowEnd int) (GuiEdi
 	}
 	viewingIndex := decodeU16(data, pos)
 	pos += 2
-	if err := decodeRequireWindow(windowEnd, pos+1, "entry_count"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+1, "entries count"); err != nil {
 		return GuiEditTimelineFields{}, offset, err
 	}
-	entryCount := data[pos]
-	pos++
+	entriesCount := int(data[pos])
+	pos += 1
+	entries := make([]EditTimelineEntry, 0, min(entriesCount, len(data)-pos))
+	for i := 0; i < entriesCount; i++ {
+		item, nextPos, err := DecodeEditTimelineEntry(data, pos, windowEnd)
+		if err != nil {
+			return GuiEditTimelineFields{}, offset, err
+		}
+		pos = nextPos
+		entries = append(entries, item)
+	}
+	if err := decodeRequireWindow(windowEnd, pos+1, "files count"); err != nil {
+		return GuiEditTimelineFields{}, offset, err
+	}
+	filesCount := int(data[pos])
+	pos += 1
+	files := make([]EditTimelineFile, 0, min(filesCount, len(data)-pos))
+	for i := 0; i < filesCount; i++ {
+		item, nextPos, err := DecodeEditTimelineFile(data, pos, windowEnd)
+		if err != nil {
+			return GuiEditTimelineFields{}, offset, err
+		}
+		pos = nextPos
+		files = append(files, item)
+	}
 	return GuiEditTimelineFields{
 		Visible:      visible,
 		ViewingIndex: viewingIndex,
-		EntryCount:   entryCount,
+		Entries:      entries,
+		Files:        files,
 	}, pos, nil
 }
 

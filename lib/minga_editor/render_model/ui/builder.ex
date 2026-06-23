@@ -61,7 +61,7 @@ defmodule MingaEditor.RenderModel.UI.Builder do
       notifications: NotificationsBuilder.build(ctx.notifications),
       search_state: SearchStateBuilder.build(ctx.search, active_buf),
       git_status: build_git_status(ctx),
-      agent_context: AgentContextBuilder.build(gui_payload),
+      agent_context: AgentContextBuilder.build(ctx),
       status_bar: build_status_bar(sb_data, ctx),
       observatory: ObservatoryBuilder.build(ctx.shell_state),
       tab_bar: TabBarBuilder.build(ctx),

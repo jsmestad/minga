@@ -1731,6 +1731,11 @@ defmodule MingaAgent.Session do
     notify_messages_changed(state)
   end
 
+  defp handle_provider_event(%Event.TodoPlan{todos: todos}, state) do
+    broadcast(state, {:todo_plan_updated, todos})
+    state
+  end
+
   defp handle_provider_event(%Event.ToolApproval{} = event, state) do
     case trusted_scope_for_approval(state.trust_levels, event) do
       nil ->

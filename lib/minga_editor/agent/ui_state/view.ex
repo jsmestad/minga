@@ -12,6 +12,7 @@ defmodule MingaEditor.Agent.UIState.View do
   """
 
   alias MingaEditor.Agent.EditTimeline
+  alias MingaEditor.Agent.Activity
   alias MingaEditor.Agent.UIState.ReturnTarget
   alias MingaEditor.Agent.View.Preview
   alias Minga.Config
@@ -60,6 +61,7 @@ defmodule MingaEditor.Agent.UIState.View do
           toast_queue: term(),
           diff_baselines: %{String.t() => String.t()},
           edit_timeline: EditTimeline.t(),
+          activity: Activity.t(),
           context_estimate: non_neg_integer(),
           compact_warned: boolean(),
           compact_triggered: boolean(),
@@ -89,11 +91,24 @@ defmodule MingaEditor.Agent.UIState.View do
             compact_pending_fill_pct: nil,
             compaction_in_progress: false,
             diff_baselines: %{},
-            edit_timeline: EditTimeline.new()
+            edit_timeline: EditTimeline.new(),
+            activity: Activity.new()
 
   @doc "Creates a new view state with defaults."
   @spec new() :: t()
   def new, do: %__MODULE__{}
+
+  @doc "Updates the turn activity projection."
+  @spec update_activity(t(), (Activity.t() -> Activity.t())) :: t()
+  def update_activity(%__MODULE__{} = view, fun) when is_function(fun, 1) do
+    %{view | activity: fun.(view.activity)}
+  end
+
+  @doc "Updates the edit timeline projection."
+  @spec update_edit_timeline(t(), (EditTimeline.t() -> EditTimeline.t())) :: t()
+  def update_edit_timeline(%__MODULE__{} = view, fun) when is_function(fun, 1) do
+    %{view | edit_timeline: fun.(view.edit_timeline)}
+  end
 
   # ── Layout ──────────────────────────────────────────────────────────────────
 

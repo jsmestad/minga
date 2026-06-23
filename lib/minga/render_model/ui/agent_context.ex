@@ -1,6 +1,9 @@
 defmodule Minga.RenderModel.UI.AgentContext do
   @moduledoc false
 
+  alias __MODULE__.Progress
+  alias __MODULE__.Todo
+
   @type status :: :idle | :working | :iterating | :needs_you | :done | :errored
 
   @type t :: %__MODULE__{
@@ -8,7 +11,9 @@ defmodule Minga.RenderModel.UI.AgentContext do
           task: String.t(),
           dispatch_timestamp: DateTime.t() | nil,
           status: status(),
-          can_approve: boolean()
+          can_approve: boolean(),
+          todos: [Todo.t()],
+          progress: Progress.t()
         }
 
   @enforce_keys [:visible]
@@ -16,5 +21,7 @@ defmodule Minga.RenderModel.UI.AgentContext do
             task: "",
             dispatch_timestamp: nil,
             status: :idle,
-            can_approve: false
+            can_approve: false,
+            todos: [],
+            progress: %Progress{}
 end

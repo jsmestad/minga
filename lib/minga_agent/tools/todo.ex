@@ -8,6 +8,7 @@ defmodule MingaAgent.Tools.Todo do
   """
 
   alias MingaAgent.InternalState
+  alias MingaAgent.Event.TodoPlan
 
   @doc """
   Writes (replaces) the task list. Each item should have a description
@@ -25,6 +26,7 @@ defmodule MingaAgent.Tools.Todo do
       )
 
     {:ok, internal_state} = GenServer.call(provider_pid, :get_internal_state)
+    send(provider_pid, {:agent_event, %TodoPlan{todos: internal_state.todos}})
     {:ok, "Task list updated.\n\n" <> InternalState.read_todos(internal_state)}
   end
 

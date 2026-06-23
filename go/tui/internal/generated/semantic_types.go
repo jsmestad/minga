@@ -189,6 +189,25 @@ type ChangeSummaryEntry struct {
 	LinesRemoved uint32
 }
 
+type AgentTodo struct {
+	Status      uint8
+	Description string
+}
+
+type EditTimelineEntry struct {
+	Index          uint8
+	ToolName       string
+	TimestampDelta uint32
+}
+
+type EditTimelineFile struct {
+	Path         string
+	EntryCount   uint8
+	LinesAdded   uint32
+	LinesRemoved uint32
+	ReviewStatus uint8
+}
+
 type GitStatusEntry struct {
 	PathHash uint32
 	Section  uint8
@@ -493,7 +512,17 @@ type GuiChangeSummaryFields struct {
 }
 
 type GuiAgentContextFields struct {
-	Visible uint8
+	PayloadLen        uint16
+	Visible           uint8
+	Task              string
+	DispatchTimestamp uint64
+	Status            uint8
+	CanApprove        uint8
+	ActiveAction      string
+	ToolCount         uint16
+	FileCount         uint16
+	ReviewHint        string
+	Todos             []AgentTodo
 }
 
 type GuiGutterSepFields struct {
@@ -516,7 +545,8 @@ type GuiSearchStateFields struct {
 type GuiEditTimelineFields struct {
 	Visible      uint8
 	ViewingIndex uint16
-	EntryCount   uint8
+	Entries      []EditTimelineEntry
+	Files        []EditTimelineFile
 }
 
 type GuiWorkspacesFields struct {

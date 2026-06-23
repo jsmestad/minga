@@ -228,11 +228,11 @@ enum RenderCommand: Sendable {
     case guiSplitSeparators(borderColor: UInt32, verticals: [Wire.VerticalSeparator], horizontals: [Wire.HorizontalSeparator])
     case guiGitStatus(repoState: UInt8, syncing: Bool, ahead: UInt16, behind: UInt16, branchName: String, entries: [Wire.GitStatusEntry], toast: (message: String, level: UInt8, action: UInt8)?, entryBasePath: String, lastCommitMessage: String, stashCount: UInt16)
     case guiWorkspaces(version: UInt8, activeWorkspaceId: UInt16, mode: UInt8, flags: UInt8, workspaces: [Wire.WorkspaceEntry], visibleTabs: [Wire.WorkspaceTabEntry])
-    case guiAgentContext(visible: Bool, task: String, dispatchTimestamp: Date, status: CardStatus, canApprove: Bool)
+    case guiAgentContext(visible: Bool, task: String, dispatchTimestamp: Date, status: CardStatus, canApprove: Bool, progress: Wire.AgentProgress, todos: [Wire.AgentTodo])
     case guiChangeSummary(visible: Bool, entries: [ChangeSummaryEntry], selectedIndex: Int)
     case guiConfigState(Wire.ConfigState)
     case guiNotifications([Wire.EditorNotification])
-    case guiEditTimeline(visible: Bool, viewingIndex: UInt16, entries: [Wire.TimelineEntry])
+    case guiEditTimeline(visible: Bool, viewingIndex: UInt16, entries: [Wire.TimelineEntry], files: [Wire.TimelineFile])
     case guiExtensionOverlay([Wire.ExtensionOverlayEntry])
     case guiExtensionPanel([Wire.ExtensionPanelEntry])
     case guiExtensionRuntime(FrontendExtensionRuntimeMessage)
@@ -2193,21 +2193,82 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                 payloadEnd - offset)
 
     case OP_GUI_AGENT_CONTEXT:
-        // visible(1) + task_len(2) + task + dispatch_timestamp(8) + status(1) + can_approve(1)
-        guard data.count >= rest + 3 else { throw ProtocolDecodeError.malformed }
-        let contextVisible = data[rest] != 0
-        let taskLen = Int(readU16(data, rest + 1))
-        guard data.count >= rest + 3 + taskLen + 10 else { throw ProtocolDecodeError.malformed }
-        let taskData = data[(rest + 3)..<(rest + 3 + taskLen)]
+        var payloadStart = rest
+        var payloadEnd: Int? = nil
+        var framedSize: Int? = nil
+
+        if data.count >= rest + 2 {
+            let payloadLen = Int(readU16(data, rest))
+            let end = rest + 2 + payloadLen
+            if payloadLen >= 12 && data.count >= end {
+                payloadStart = rest + 2
+                payloadEnd = end
+                framedSize = 1 + 2 + payloadLen
+            }
+        }
+
+        // Payload: visible(1) + task_len(2) + task + dispatch_timestamp(8) + status(1) + can_approve(1)
+        guard data.count >= payloadStart + 3 else { throw ProtocolDecodeError.malformed }
+        let contextVisible = data[payloadStart] != 0
+        let taskLen = Int(readU16(data, payloadStart + 1))
+        guard data.count >= payloadStart + 3 + taskLen + 10 else { throw ProtocolDecodeError.malformed }
+        let taskData = data[(payloadStart + 3)..<(payloadStart + 3 + taskLen)]
         let task = String(data: taskData, encoding: .utf8) ?? ""
-        let timestampPos = rest + 3 + taskLen
+        let timestampPos = payloadStart + 3 + taskLen
         let timestampSeconds = readU64(data, timestampPos)
         let dispatchTimestamp = Date(timeIntervalSince1970: TimeInterval(timestampSeconds))
         let statusRaw = data[timestampPos + 8]
         let canApprove = data[timestampPos + 9] != 0
+        var progress = Wire.AgentProgress(activeAction: "", toolCount: 0, fileCount: 0, reviewHint: "")
+        var todos: [Wire.AgentTodo] = []
+        var contextPos = timestampPos + 10
+
+        if let payloadEnd {
+            if contextPos + 2 <= payloadEnd {
+                let actionLen = Int(readU16(data, contextPos))
+                if contextPos + 2 + actionLen + 4 <= payloadEnd {
+                    let actionStart = contextPos + 2
+                    let activeAction = String(data: data[actionStart..<(actionStart + actionLen)], encoding: .utf8) ?? ""
+                    contextPos = actionStart + actionLen
+                    let toolCount = readU16(data, contextPos)
+                    let fileCount = readU16(data, contextPos + 2)
+                    contextPos += 4
+
+                    if contextPos + 2 <= payloadEnd {
+                        let hintLen = Int(readU16(data, contextPos))
+                        if contextPos + 2 + hintLen <= payloadEnd {
+                            let hintStart = contextPos + 2
+                            let reviewHint = String(data: data[hintStart..<(hintStart + hintLen)], encoding: .utf8) ?? ""
+                            contextPos = hintStart + hintLen
+                            progress = Wire.AgentProgress(activeAction: activeAction, toolCount: toolCount, fileCount: fileCount, reviewHint: reviewHint)
+                        }
+                    }
+                }
+            }
+
+            if contextPos < payloadEnd {
+                let todoCount = Int(data[contextPos])
+                contextPos += 1
+                todos.reserveCapacity(todoCount)
+
+                for _ in 0..<todoCount {
+                    guard contextPos + 3 <= payloadEnd else { break }
+                    let status = data[contextPos]
+                    let descriptionLen = Int(readU16(data, contextPos + 1))
+                    guard contextPos + 3 + descriptionLen <= payloadEnd else { break }
+                    let descriptionStart = contextPos + 3
+                    let description = String(data: data[descriptionStart..<(descriptionStart + descriptionLen)], encoding: .utf8) ?? ""
+                    todos.append(Wire.AgentTodo(status: status, description: description))
+                    contextPos = descriptionStart + descriptionLen
+                }
+            }
+        }
+
+        let consumed = framedSize ?? (timestampPos + 10 - offset)
         return (.guiAgentContext(visible: contextVisible, task: task, dispatchTimestamp: dispatchTimestamp,
-                                 status: CardStatus(rawValue: statusRaw) ?? .idle, canApprove: canApprove),
-                timestampPos + 10 - offset)
+                                 status: CardStatus(rawValue: statusRaw) ?? .idle, canApprove: canApprove,
+                                 progress: progress, todos: todos),
+                consumed)
     case OP_GUI_CHANGE_SUMMARY:
         // visible(1) + selected_index(2) + entry_count(2)
         guard data.count >= rest + 5 else { throw ProtocolDecodeError.malformed }
@@ -2321,7 +2382,28 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             ePos += 4
             entries.append(Wire.TimelineEntry(index: idx, toolName: toolName, timestampDelta: tsDelta))
         }
-        return (.guiEditTimeline(visible: visible, viewingIndex: viewingIndex, entries: entries), 1 + 2 + payloadLen)
+        var files: [Wire.TimelineFile] = []
+        if ePos < pStart + payloadLen {
+            let fileCount = Int(data[ePos])
+            ePos += 1
+            files.reserveCapacity(fileCount)
+
+            for _ in 0..<fileCount {
+                guard ePos + 2 <= pStart + payloadLen else { break }
+                let pathLen = Int(readU16(data, ePos))
+                guard ePos + 2 + pathLen + 10 <= pStart + payloadLen else { break }
+                let pathStart = ePos + 2
+                let path = String(data: data[pathStart..<(pathStart + pathLen)], encoding: .utf8) ?? ""
+                ePos = pathStart + pathLen
+                let entryCount = data[ePos]
+                let linesAdded = readU32(data, ePos + 1)
+                let linesRemoved = readU32(data, ePos + 5)
+                let reviewStatus = data[ePos + 9]
+                ePos += 10
+                files.append(Wire.TimelineFile(path: path, entryCount: entryCount, linesAdded: linesAdded, linesRemoved: linesRemoved, reviewStatus: reviewStatus))
+            }
+        }
+        return (.guiEditTimeline(visible: visible, viewingIndex: viewingIndex, entries: entries, files: files), 1 + 2 + payloadLen)
 
     case OP_GUI_EXTENSION_OVERLAY:
         guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }

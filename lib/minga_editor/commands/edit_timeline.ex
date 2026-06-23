@@ -8,14 +8,18 @@ defmodule MingaEditor.Commands.EditTimeline do
 
   use MingaEditor.Commands.Provider
 
+  alias Minga.Buffer
   alias MingaEditor.Agent.EditTimeline
+  alias MingaEditor.Agent.UIState
+  alias MingaEditor.Handlers.BufferRegistry
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.AgentAccess
-  alias Minga.Buffer
 
   @command_specs [
     {:timeline_next_edit, "Next agent edit", true},
     {:timeline_prev_edit, "Previous agent edit", true},
+    {:timeline_next_file, "Next agent-changed file", true},
+    {:timeline_prev_file, "Previous agent-changed file", true},
     {:timeline_toggle, "Toggle edit timeline visibility", false},
     {:timeline_go_live, "Return to current file state", true}
   ]
@@ -67,6 +71,9 @@ defmodule MingaEditor.Commands.EditTimeline do
     end)
   end
 
+  def execute(state, :timeline_next_file), do: navigate_file(state, 1)
+  def execute(state, :timeline_prev_file), do: navigate_file(state, -1)
+
   def execute(state, :timeline_toggle) do
     EditorState.set_status(state, "Edit timeline toggled")
   end
@@ -99,9 +106,50 @@ defmodule MingaEditor.Commands.EditTimeline do
     end
   end
 
+  @spec navigate_file(EditorState.t(), 1 | -1) :: EditorState.t()
+  defp navigate_file(state, direction) do
+    timeline = AgentAccess.view(state).edit_timeline
+    paths = timeline |> EditTimeline.file_summaries() |> Enum.map(& &1.path)
+
+    case paths do
+      [] ->
+        EditorState.set_status(state, "No agent-changed files")
+
+      _ ->
+        current_path = active_path(state)
+        target_path = next_path(paths, current_path, direction)
+
+        state
+        |> BufferRegistry.open_file_by_path(target_path)
+        |> EditorState.set_status("Agent change file: #{target_path}")
+    end
+  end
+
+  @spec active_path(EditorState.t()) :: String.t() | nil
+  defp active_path(%{workspace: %{buffers: %{active: buf}}}) when is_pid(buf) do
+    Buffer.file_path(buf)
+  catch
+    :exit, _ -> nil
+  end
+
+  defp active_path(_state), do: nil
+
+  @spec next_path([String.t()], String.t() | nil, 1 | -1) :: String.t()
+  defp next_path(paths, nil, 1), do: hd(paths)
+  defp next_path(paths, nil, -1), do: List.last(paths)
+
+  defp next_path(paths, current_path, direction) do
+    count = length(paths)
+
+    case Enum.find_index(paths, &(&1 == current_path)) do
+      nil -> next_path(paths, nil, direction)
+      index -> Enum.at(paths, rem(index + direction + count, count))
+    end
+  end
+
   defp set_timeline(state, timeline) do
-    AgentAccess.update_view(state, fn view ->
-      %{view | edit_timeline: timeline}
+    AgentAccess.update_agent_ui(state, fn ui ->
+      UIState.update_edit_timeline(ui, fn _ -> timeline end)
     end)
   end
 

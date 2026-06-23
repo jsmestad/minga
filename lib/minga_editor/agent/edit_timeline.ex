@@ -12,6 +12,7 @@ defmodule MingaEditor.Agent.EditTimeline do
   """
 
   alias MingaEditor.Agent.DiffSnapshot
+  alias Minga.Git
 
   defmodule Entry do
     @moduledoc false
@@ -32,6 +33,16 @@ defmodule MingaEditor.Agent.EditTimeline do
           entries: %{String.t() => [Entry.t()]},
           baselines: %{String.t() => DiffSnapshot.t()},
           viewing: %{String.t() => non_neg_integer() | nil}
+        }
+
+  @type review_status :: :pending | :reviewing
+
+  @type file_summary :: %{
+          path: String.t(),
+          entry_count: pos_integer(),
+          lines_added: non_neg_integer(),
+          lines_removed: non_neg_integer(),
+          review_status: review_status()
         }
 
   defstruct entries: %{},
@@ -161,6 +172,14 @@ defmodule MingaEditor.Agent.EditTimeline do
     entries |> Map.get(path, []) |> length()
   end
 
+  @spec file_summaries(t()) :: [file_summary()]
+  def file_summaries(%__MODULE__{entries: entries} = timeline) do
+    entries
+    |> non_empty_file_entries()
+    |> file_summaries_for_entries(timeline)
+    |> Enum.sort_by(& &1.path)
+  end
+
   @spec cleanup(t()) :: :ok
   def cleanup(%__MODULE__{entries: entries, baselines: baselines}) do
     Enum.each(entries, fn {_path, path_entries} ->
@@ -181,6 +200,69 @@ defmodule MingaEditor.Agent.EditTimeline do
       timeline
     else
       %{timeline | baselines: Map.put(baselines, path, DiffSnapshot.from_content(before_content))}
+    end
+  end
+
+  @spec non_empty_file_entries(%{String.t() => [Entry.t()]}) :: [{String.t(), [Entry.t()]}]
+  defp non_empty_file_entries(entries) do
+    Enum.reject(entries, fn {_path, path_entries} -> path_entries == [] end)
+  end
+
+  @spec file_summaries_for_entries([{String.t(), [Entry.t()]}], t()) :: [file_summary()]
+  defp file_summaries_for_entries([_single_file], _timeline), do: []
+
+  defp file_summaries_for_entries(file_entries, timeline) do
+    Enum.flat_map(file_entries, &file_summary(timeline, &1))
+  end
+
+  @spec file_summary(t(), {String.t(), [Entry.t()]}) :: [file_summary()]
+  defp file_summary(_timeline, {_path, []}), do: []
+
+  defp file_summary(%__MODULE__{} = timeline, {path, entries}) do
+    latest = List.last(entries)
+    {added, removed} = diff_counts(baseline_for(timeline, path), latest.snapshot)
+
+    [
+      %{
+        path: path,
+        entry_count: length(entries),
+        lines_added: added,
+        lines_removed: removed,
+        review_status: review_status(timeline, path)
+      }
+    ]
+  end
+
+  @spec diff_counts(DiffSnapshot.t() | nil, DiffSnapshot.t()) ::
+          {non_neg_integer(), non_neg_integer()}
+  defp diff_counts(nil, _latest), do: {0, 0}
+
+  defp diff_counts(baseline, latest) do
+    baseline
+    |> DiffSnapshot.lines()
+    |> Git.diff_lines(DiffSnapshot.lines(latest))
+    |> Enum.reduce({0, 0}, &add_hunk_counts/2)
+  end
+
+  @spec add_hunk_counts(Minga.Core.Diff.hunk(), {non_neg_integer(), non_neg_integer()}) ::
+          {non_neg_integer(), non_neg_integer()}
+  defp add_hunk_counts(%{type: :added, count: count}, {added, removed}) do
+    {added + count, removed}
+  end
+
+  defp add_hunk_counts(%{type: :deleted, old_count: old_count}, {added, removed}) do
+    {added, removed + old_count}
+  end
+
+  defp add_hunk_counts(%{type: :modified, count: count, old_count: old_count}, {added, removed}) do
+    {added + count, removed + old_count}
+  end
+
+  @spec review_status(t(), String.t()) :: review_status()
+  defp review_status(%__MODULE__{} = timeline, path) do
+    case viewing_index(timeline, path) do
+      nil -> :pending
+      _index -> :reviewing
     end
   end
 

@@ -488,8 +488,8 @@ final class CommandDispatcher {
         case .guiNotifications(let notifications):
             guiState.notificationCenterState.update(rawNotifications: notifications)
 
-        case .guiEditTimeline(let visible, let viewingIndex, let entries):
-            guiState.editTimelineState.update(visible: visible, viewingIndex: viewingIndex, wireEntries: entries)
+        case .guiEditTimeline(let visible, let viewingIndex, let entries, let files):
+            guiState.editTimelineState.update(visible: visible, viewingIndex: viewingIndex, wireEntries: entries, wireFiles: files)
 
         case .guiTheme(let slots):
             guiState.themeColors.applySlots(slots)
@@ -515,9 +515,9 @@ final class CommandDispatcher {
             guiState.tabBarState.updateWorkspaces(activeWorkspaceId: activeWorkspaceId, mode: mode, flags: flags, entries: workspaces, visibleTabs: visibleTabs)
 
 
-        case .guiAgentContext(let visible, let task, let dispatchTimestamp, let status, let canApprove):
+        case .guiAgentContext(let visible, let task, let dispatchTimestamp, let status, let canApprove, let progress, let todos):
             guiState.agentContextBarState.update(visible: visible, task: task, dispatchTimestamp: dispatchTimestamp,
-                                                  status: status, canApprove: canApprove)
+                                                  status: status, canApprove: canApprove, progress: progress, todos: todos)
         case .guiChangeSummary(let visible, let entries, let selectedIndex):
             guiState.changeSummaryState.update(visible: visible, entries: entries, selectedIndex: selectedIndex)
 

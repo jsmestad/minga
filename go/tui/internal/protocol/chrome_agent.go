@@ -7,20 +7,89 @@ import (
 )
 
 func decodeAgentContext(payload []byte) (AgentContext, string, int) {
-	if len(payload) < 12 {
+	if len(payload) >= 3 {
+		payloadLen := int(u16(payload, 1))
+		end := 3 + payloadLen
+		if payloadLen >= 12 && len(payload) >= end {
+			ctx, task, ok := decodeAgentContextBody(payload[3:end])
+			if ok {
+				return ctx, task, end
+			}
+		}
+	}
+	if len(payload) < 13 {
 		return AgentContext{}, "", len(payload)
 	}
-	ctx := AgentContext{Visible: payload[1] != 0}
-	task, offset, ok := readString16(payload, 2)
-	if !ok || len(payload) < offset+10 {
+	ctx, task, ok := decodeAgentContextBody(payload[1:])
+	if !ok {
 		return ctx, "", len(payload)
 	}
+	return ctx, task, 1 + agentContextLegacySize(payload[1:])
+}
+
+func decodeAgentContextBody(body []byte) (AgentContext, string, bool) {
+	if len(body) < 12 {
+		return AgentContext{}, "", false
+	}
+	ctx := AgentContext{Visible: body[0] != 0}
+	task, offset, ok := readString16(body, 1)
+	if !ok || len(body) < offset+10 {
+		return ctx, "", false
+	}
 	ctx.Task = task
-	ctx.Timestamp = binary.BigEndian.Uint64(payload[offset : offset+8])
-	ctx.Status = payload[offset+8]
-	ctx.CanApprove = payload[offset+9] != 0
+	ctx.Timestamp = binary.BigEndian.Uint64(body[offset : offset+8])
+	ctx.Status = body[offset+8]
+	ctx.CanApprove = body[offset+9] != 0
 	offset += 10
-	return ctx, task, offset
+	ctx, offset = decodeAgentContextProgress(ctx, body, offset)
+	ctx, offset = decodeAgentContextTodos(ctx, body, offset)
+	return ctx, task, true
+}
+
+func agentContextLegacySize(body []byte) int {
+	if len(body) < 3 {
+		return len(body)
+	}
+	taskLen := int(u16(body, 1))
+	size := 3 + taskLen + 10
+	return min(size, len(body))
+}
+
+func decodeAgentContextProgress(ctx AgentContext, payload []byte, offset int) (AgentContext, int) {
+	action, next, ok := readString16(payload, offset)
+	if !ok || len(payload) < next+4 {
+		return ctx, offset
+	}
+	ctx.Progress.ActiveAction = action
+	ctx.Progress.ToolCount = u16(payload, next)
+	ctx.Progress.FileCount = u16(payload, next+2)
+	next += 4
+	reviewHint, next, ok := readString16(payload, next)
+	if !ok {
+		return ctx, offset
+	}
+	ctx.Progress.ReviewHint = reviewHint
+	return ctx, next
+}
+
+func decodeAgentContextTodos(ctx AgentContext, payload []byte, offset int) (AgentContext, int) {
+	if len(payload) < offset+1 {
+		return ctx, offset
+	}
+	count := int(payload[offset])
+	offset++
+	ctx.Todos = make([]AgentTodo, 0, count)
+	for i := 0; i < count && len(payload) > offset; i++ {
+		todo := AgentTodo{Status: payload[offset]}
+		offset++
+		var ok bool
+		todo.Description, offset, ok = readString16(payload, offset)
+		if !ok {
+			break
+		}
+		ctx.Todos = append(ctx.Todos, todo)
+	}
+	return ctx, offset
 }
 
 func decodeAgentChat(payload []byte) (AgentChat, string, int) {
@@ -497,5 +566,30 @@ func decodeEditTimeline(payload []byte) (EditTimeline, string, int) {
 		offset += 4
 		timeline.Entries = append(timeline.Entries, entry)
 	}
+	timeline, offset = decodeTimelineFiles(timeline, body, offset)
 	return timeline, fmt.Sprintf("%d edits", len(timeline.Entries)), size
+}
+
+func decodeTimelineFiles(timeline EditTimeline, body []byte, offset int) (EditTimeline, int) {
+	if len(body) < offset+1 {
+		return timeline, offset
+	}
+	count := int(body[offset])
+	offset++
+	timeline.Files = make([]TimelineFile, 0, count)
+	for i := 0; i < count && len(body) >= offset+12; i++ {
+		file := TimelineFile{}
+		var ok bool
+		file.Path, offset, ok = readString16(body, offset)
+		if !ok || len(body) < offset+10 {
+			break
+		}
+		file.EntryCount = body[offset]
+		file.LinesAdded = u32(body, offset+1)
+		file.LinesRemoved = u32(body, offset+5)
+		file.ReviewStatus = body[offset+9]
+		offset += 10
+		timeline.Files = append(timeline.Files, file)
+	}
+	return timeline, offset
 }
