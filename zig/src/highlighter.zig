@@ -5,6 +5,7 @@ pub const c = @cImport({
 });
 const predicates_mod = @import("predicates.zig");
 const query_loader = @import("query_loader.zig");
+const language_aliases = @import("generated/language_aliases.zig");
 
 /// A highlight span: byte range + capture index.
 /// `pattern_index` is used for priority sorting (higher = more specific)
@@ -2260,75 +2261,7 @@ fn canonicalLangNameLower(raw: []const u8, buf: []u8) ?[]const u8 {
 /// Returns a canonical grammar name slice. Unknown or already-canonical labels
 /// are returned unchanged.
 fn canonicalLangName(name: []const u8) []const u8 {
-    const Alias = struct { from: []const u8, to: []const u8 };
-    const aliases = [_]Alias{
-        // JavaScript / TypeScript
-        .{ .from = "js", .to = "javascript" },
-        .{ .from = "jsx", .to = "javascript" },
-        .{ .from = "mjs", .to = "javascript" },
-        .{ .from = "cjs", .to = "javascript" },
-        .{ .from = "node", .to = "javascript" },
-        .{ .from = "ts", .to = "typescript" },
-        .{ .from = "mts", .to = "typescript" },
-        .{ .from = "cts", .to = "typescript" },
-        // Shells
-        .{ .from = "sh", .to = "bash" },
-        .{ .from = "shell", .to = "bash" },
-        .{ .from = "zsh", .to = "bash" },
-        .{ .from = "ksh", .to = "bash" },
-        // C / C++
-        .{ .from = "c++", .to = "cpp" },
-        .{ .from = "cxx", .to = "cpp" },
-        .{ .from = "cc", .to = "cpp" },
-        .{ .from = "hpp", .to = "cpp" },
-        .{ .from = "hxx", .to = "cpp" },
-        .{ .from = "h", .to = "c" },
-        // C#
-        .{ .from = "cs", .to = "c_sharp" },
-        .{ .from = "csharp", .to = "c_sharp" },
-        .{ .from = "c#", .to = "c_sharp" },
-        // Ruby
-        .{ .from = "rb", .to = "ruby" },
-        // YAML
-        .{ .from = "yml", .to = "yaml" },
-        // Python
-        .{ .from = "py", .to = "python" },
-        .{ .from = "py3", .to = "python" },
-        .{ .from = "python3", .to = "python" },
-        // Go
-        .{ .from = "golang", .to = "go" },
-        // Rust
-        .{ .from = "rs", .to = "rust" },
-        // Kotlin
-        .{ .from = "kt", .to = "kotlin" },
-        .{ .from = "kts", .to = "kotlin" },
-        // Markdown
-        .{ .from = "md", .to = "markdown" },
-        .{ .from = "mkd", .to = "markdown" },
-        // JSON
-        .{ .from = "jsonc", .to = "json" },
-        .{ .from = "json5", .to = "json" },
-        // Misc
-        .{ .from = "html5", .to = "html" },
-        .{ .from = "htm", .to = "html" },
-        .{ .from = "docker", .to = "dockerfile" },
-        .{ .from = "makefile", .to = "make" },
-        .{ .from = "objective-c", .to = "objc" },
-        .{ .from = "objectivec", .to = "objc" },
-        .{ .from = "el", .to = "elisp" },
-        .{ .from = "emacs-lisp", .to = "elisp" },
-        .{ .from = "ex", .to = "elixir" },
-        .{ .from = "exs", .to = "elixir" },
-        .{ .from = "graphqls", .to = "graphql" },
-        .{ .from = "tf", .to = "hcl" },
-        .{ .from = "terraform", .to = "hcl" },
-        .{ .from = "proto", .to = "protobuf" },
-        .{ .from = "vimscript", .to = "vim" },
-        .{ .from = "vimrc", .to = "vim" },
-        .{ .from = "hs", .to = "haskell" },
-    };
-
-    for (aliases) |alias| {
+    for (language_aliases.aliases) |alias| {
         if (std.mem.eql(u8, name, alias.from)) return alias.to;
     }
     return name;
@@ -2632,14 +2565,7 @@ test "highlighter: canonicalLangName resolves aliases to shipped grammars" {
     // Every alias target must be a grammar we actually register.
     var hl = try Highlighter.init(std.testing.allocator);
     defer hl.deinit();
-    const targets = [_][]const u8{
-        "javascript", "typescript", "bash",     "cpp",    "c",
-        "c_sharp",    "ruby",       "yaml",     "python", "go",
-        "rust",       "kotlin",     "markdown", "json",   "html",
-        "dockerfile", "make",       "objc",     "elisp",  "elixir",
-        "graphql",    "hcl",        "protobuf", "vim",    "haskell",
-    };
-    for (targets) |t| {
+    for (language_aliases.targets) |t| {
         try std.testing.expect(hl.languages.get(t) != null);
     }
 }

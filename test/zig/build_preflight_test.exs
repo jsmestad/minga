@@ -20,10 +20,12 @@ defmodule Minga.ZigBuildPreflightTest do
       {output, code} = System.cmd(zig_bin, ["build", "test"], cd: dir, stderr_to_stdout: true)
 
       assert code == 1
-      assert output =~ "missing generated Zig protocol artifacts"
-      assert output =~ "Run `mix protocol.gen`"
+      assert output =~ "missing generated Zig build artifacts"
+      assert output =~ "run `mix protocol.gen`"
+      assert output =~ "run `mix language_aliases.gen`"
       assert output =~ "src/generated/protocol_opcodes.zig"
       assert output =~ "src/generated/protocol_schema_test.zig"
+      assert output =~ "src/generated/language_aliases.zig"
     end)
   end
 
