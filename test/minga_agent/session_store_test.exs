@@ -91,6 +91,10 @@ defmodule MingaAgent.SessionStoreTest do
       tool_calls = Enum.filter(loaded.messages, &match?({:tool_call, _}, &1))
       assert [{:tool_call, tc}] = tool_calls
       assert tc.name == "read_file"
+      assert tc.args == %{"path" => "lib/foo.ex"}
+      assert tc.result == "defmodule Foo do\nend"
+      assert tc.is_error == false
+      assert tc.collapsed == true
       assert tc.duration_ms == 42
       assert tc.status == :complete
       assert tc.auto_approved_scope == :session

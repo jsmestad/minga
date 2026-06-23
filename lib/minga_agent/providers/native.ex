@@ -66,12 +66,14 @@ defmodule MingaAgent.Providers.Native do
   alias MingaAgent.Tool.PlanMode
   alias MingaAgent.Tool.Registry, as: ToolRegistry
   alias MingaAgent.Tool.Spec, as: ToolSpec
+  alias MingaAgent.ToolCall
   alias MingaAgent.Tools
   alias MingaAgent.Tools.Notebook
   alias MingaAgent.Tools.Shell
   alias MingaAgent.Tools.Todo
   alias Minga.Config
   alias ReqLLM.Context
+  alias ReqLLM.Message.ContentPart
 
   # Thinking levels and cycle order (not config-driven; mode-specific constants).
 
@@ -2923,7 +2925,45 @@ defmodule MingaAgent.Providers.Native do
   defp append_seed_message({:assistant, text}, context) when is_binary(text),
     do: Context.append(context, Context.assistant(text))
 
+  defp append_seed_message({:thinking, text, _collapsed}, context) when is_binary(text) do
+    if String.trim(text) == "" do
+      context
+    else
+      Context.append(context, Context.assistant([ContentPart.thinking(text)]))
+    end
+  end
+
+  defp append_seed_message({:tool_call, %ToolCall{} = tool_call}, context) do
+    reqllm_tool_call =
+      ReqLLMAdapter.assistant_tool_call(tool_call.id, tool_call.name, tool_call.args)
+
+    context
+    |> Context.append(Context.assistant("", tool_calls: [reqllm_tool_call]))
+    |> Context.append(seed_tool_result_message(tool_call))
+  end
+
   defp append_seed_message(_message, context), do: context
+
+  @spec seed_tool_result_message(ToolCall.t()) :: ReqLLM.Message.t()
+  defp seed_tool_result_message(%ToolCall{} = tool_call) do
+    tool_result_message(%{
+      tool_call: tool_call,
+      result_text: seed_tool_result_text(tool_call),
+      is_error: seed_tool_result_error?(tool_call)
+    })
+  end
+
+  @spec seed_tool_result_text(ToolCall.t()) :: String.t()
+  defp seed_tool_result_text(%ToolCall{status: :running, result: ""}) do
+    "Tool call was still running when provider history was rebuilt."
+  end
+
+  defp seed_tool_result_text(%ToolCall{result: result}) when is_binary(result), do: result
+
+  @spec seed_tool_result_error?(ToolCall.t()) :: boolean()
+  defp seed_tool_result_error?(%ToolCall{is_error: true}), do: true
+  defp seed_tool_result_error?(%ToolCall{status: :complete}), do: false
+  defp seed_tool_result_error?(%ToolCall{}), do: true
 
   @spec system_prompt_from_context(Context.t()) :: String.t() | nil
   defp system_prompt_from_context(%Context{
