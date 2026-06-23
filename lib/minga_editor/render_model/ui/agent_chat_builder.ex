@@ -290,6 +290,8 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
 
   @spec tool_call_view(ToolCall.t()) :: ToolCallView.t()
   defp tool_call_view(%ToolCall{} = tc) do
+    preview = ToolApproval.build_preview(tc.name, tc.args)
+
     %ToolCallView{
       name: tc.name,
       summary: tool_call_summary(tc),
@@ -298,7 +300,9 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
       is_error: tc.is_error,
       collapsed: tc.collapsed,
       duration_ms: tc.duration_ms,
-      auto_approved_scope: tc.auto_approved_scope
+      auto_approved_scope: tc.auto_approved_scope,
+      preview_kind: Map.get(preview, :kind, :args),
+      preview_lines: Map.get(preview, :lines, [])
     }
   end
 

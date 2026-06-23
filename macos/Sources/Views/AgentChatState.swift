@@ -9,8 +9,8 @@ enum ChatMessageEntry: Identifiable {
     /// Assistant message with pre-styled text runs from the BEAM (tree-sitter or markdown parser).
     case styledAssistant(id: Int, lines: [[Wire.StyledTextRun]])
     case thinking(id: Int, text: String, collapsed: Bool)
-    case toolCall(id: Int, name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, autoApprovedScope: UInt8, durationMs: UInt32, result: String)
-    case styledToolCall(id: Int, name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, autoApprovedScope: UInt8, durationMs: UInt32, resultLines: [[Wire.StyledTextRun]])
+    case toolCall(id: Int, name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, autoApprovedScope: UInt8, durationMs: UInt32, result: String, previewKind: UInt8, previewLines: [String])
+    case styledToolCall(id: Int, name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, autoApprovedScope: UInt8, durationMs: UInt32, resultLines: [[Wire.StyledTextRun]], previewKind: UInt8, previewLines: [String])
     case approvalToolCall(id: Int, name: String, summary: String, toolCallId: String, previewKind: UInt8, previewLines: [String])
     case system(id: Int, text: String, isError: Bool)
     case usage(id: Int, input: UInt32, output: UInt32, cacheRead: UInt32, cacheWrite: UInt32, costMicros: UInt32)
@@ -19,8 +19,8 @@ enum ChatMessageEntry: Identifiable {
         switch self {
         case .user(let id, _), .assistant(let id, _), .styledAssistant(let id, _),
              .thinking(let id, _, _),
-             .toolCall(let id, _, _, _, _, _, _, _, _),
-             .styledToolCall(let id, _, _, _, _, _, _, _, _),
+             .toolCall(let id, _, _, _, _, _, _, _, _, _, _),
+             .styledToolCall(let id, _, _, _, _, _, _, _, _, _, _),
              .approvalToolCall(let id, _, _, _, _, _),
              .system(let id, _, _),
              .usage(let id, _, _, _, _, _):
@@ -135,10 +135,10 @@ final class AgentChatState {
                 return .styledAssistant(id: id, lines: lines)
             case .thinking(let text, let collapsed):
                 return .thinking(id: id, text: text, collapsed: collapsed)
-            case .toolCall(let name, let summary, let st, let isError, let collapsed, let autoApprovedScope, let duration, let result):
-                return .toolCall(id: id, name: name, summary: summary, status: st, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: result)
-            case .styledToolCall(let name, let summary, let st, let isError, let collapsed, let autoApprovedScope, let duration, let resultLines):
-                return .styledToolCall(id: id, name: name, summary: summary, status: st, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, resultLines: resultLines)
+            case .toolCall(let name, let summary, let st, let isError, let collapsed, let autoApprovedScope, let duration, let result, let previewKind, let previewLines):
+                return .toolCall(id: id, name: name, summary: summary, status: st, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: result, previewKind: previewKind, previewLines: previewLines)
+            case .styledToolCall(let name, let summary, let st, let isError, let collapsed, let autoApprovedScope, let duration, let resultLines, let previewKind, let previewLines):
+                return .styledToolCall(id: id, name: name, summary: summary, status: st, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, resultLines: resultLines, previewKind: previewKind, previewLines: previewLines)
             case .approvalToolCall(let name, let summary, let toolCallId, let previewKind, let previewLines):
                 return .approvalToolCall(id: id, name: name, summary: summary, toolCallId: toolCallId, previewKind: previewKind, previewLines: previewLines)
             case .system(let text, let isError):

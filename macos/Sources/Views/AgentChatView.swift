@@ -347,10 +347,10 @@ struct AgentChatView: View {
             styledAssistantBlock(lines)
         case .thinking(_, let text, let collapsed):
             thinkingBlock(text, collapsed: collapsed)
-        case .toolCall(_, let name, let summary, let status, let isError, let collapsed, let autoApprovedScope, let duration, let result):
-            toolCallCard(messageIndex: index, name: name, summary: summary, status: status, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: result, resultLines: nil)
-        case .styledToolCall(_, let name, let summary, let status, let isError, let collapsed, let autoApprovedScope, let duration, let resultLines):
-            toolCallCard(messageIndex: index, name: name, summary: summary, status: status, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: nil, resultLines: resultLines)
+        case .toolCall(_, let name, let summary, let status, let isError, let collapsed, let autoApprovedScope, let duration, let result, let previewKind, let previewLines):
+            toolCallCard(messageIndex: index, name: name, summary: summary, status: status, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: result, resultLines: nil, previewKind: previewKind, previewLines: previewLines)
+        case .styledToolCall(_, let name, let summary, let status, let isError, let collapsed, let autoApprovedScope, let duration, let resultLines, let previewKind, let previewLines):
+            toolCallCard(messageIndex: index, name: name, summary: summary, status: status, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: nil, resultLines: resultLines, previewKind: previewKind, previewLines: previewLines)
         case .approvalToolCall(_, let name, let summary, let toolCallId, let previewKind, let previewLines):
             approvalToolCallCard(name: name, summary: summary, toolCallId: toolCallId, previewKind: previewKind, previewLines: previewLines)
         case .system(_, let text, let isError):
@@ -522,8 +522,9 @@ struct AgentChatView: View {
     }
 
     @ViewBuilder
-    private func toolCallCard(messageIndex: Int, name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, autoApprovedScope: UInt8, durationMs: UInt32, result: String?, resultLines: [[Wire.StyledTextRun]]?) -> some View {
+    private func toolCallCard(messageIndex: Int, name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, autoApprovedScope: UInt8, durationMs: UInt32, result: String?, resultLines: [[Wire.StyledTextRun]]?, previewKind _: UInt8, previewLines: [String]) -> some View {
         let hasResult = result?.isEmpty == false || resultLines?.isEmpty == false
+        let visiblePreviewLines = Array(previewLines.prefix(8))
 
         VStack(alignment: .leading, spacing: 0) {
             // Header (clickable to toggle collapse)
@@ -577,6 +578,16 @@ struct AgentChatView: View {
                 if hasResult, messageIndex <= Int(UInt16.max) {
                     encoder?.sendAgentToolToggle(index: UInt16(messageIndex))
                 }
+            }
+
+            if !visiblePreviewLines.isEmpty {
+                Rectangle()
+                    .fill(theme.agentToolBorder.opacity(0.2))
+                    .frame(height: 1)
+
+                approvalPreviewLines(visiblePreviewLines)
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 8)
             }
 
             // Result (collapsed by default, supports styled or plain text)
@@ -735,9 +746,18 @@ struct AgentChatView: View {
     private func approvalPreviewLine(_ line: String) -> some View {
         Text(line)
             .font(.system(size: 10, design: .monospaced))
-            .foregroundStyle(theme.agentTextFg.opacity(0.65))
-            .lineLimit(1)
+            .foregroundStyle(approvalPreviewLineColor(line))
             .truncationMode(.tail)
+    }
+
+    private func approvalPreviewLineColor(_ line: String) -> Color {
+        if line.hasPrefix("+") {
+            return Color.green.opacity(0.75)
+        }
+        if line.hasPrefix("-") {
+            return Color.red.opacity(0.75)
+        }
+        return theme.agentTextFg.opacity(0.65)
     }
 
     private func approvalButtons(toolCallId _: String) -> some View {

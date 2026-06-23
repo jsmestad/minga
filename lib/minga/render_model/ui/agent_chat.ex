@@ -138,6 +138,9 @@ defmodule Minga.RenderModel.UI.AgentChat do
     @typedoc "Resolved scope that auto-approved this tool call."
     @type auto_approved_scope :: :session | :turn | nil
 
+    @typedoc "Resolved preview kind for inline tool-call previews."
+    @type preview_kind :: :diff | :command | :target | :args
+
     @type t :: %__MODULE__{
             name: String.t(),
             summary: String.t(),
@@ -146,7 +149,9 @@ defmodule Minga.RenderModel.UI.AgentChat do
             is_error: boolean(),
             collapsed: boolean(),
             duration_ms: non_neg_integer() | nil,
-            auto_approved_scope: auto_approved_scope()
+            auto_approved_scope: auto_approved_scope(),
+            preview_kind: preview_kind(),
+            preview_lines: [String.t()]
           }
 
     defstruct name: "",
@@ -156,7 +161,9 @@ defmodule Minga.RenderModel.UI.AgentChat do
               is_error: false,
               collapsed: true,
               duration_ms: nil,
-              auto_approved_scope: nil
+              auto_approved_scope: nil,
+              preview_kind: :args,
+              preview_lines: []
   end
 
   defmodule ApprovalView do

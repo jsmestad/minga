@@ -803,6 +803,13 @@ func (m Model) handleAgentChatShortcut(msg tea.KeyPressMsg) bool {
 		return false
 	}
 	switch key.Code {
+	case 'x', 'X':
+		index, ok := latestToolMessageIndex(chat.Messages)
+		if !ok {
+			return false
+		}
+		m.send(protocol.EncodeGUIAgentToolToggle(index))
+		return true
 	case 'z', 'Z':
 		index, ok := latestThinkingMessageIndex(chat.Messages)
 		if !ok {
@@ -813,6 +820,15 @@ func (m Model) handleAgentChatShortcut(msg tea.KeyPressMsg) bool {
 	default:
 		return false
 	}
+}
+
+func latestToolMessageIndex(messages []protocol.AgentChatMessage) (uint16, bool) {
+	for index := len(messages) - 1; index >= 0; index-- {
+		if (messages[index].Kind == agentKindTool || messages[index].Kind == agentKindStyledTool) && index <= 0xFFFF {
+			return uint16(index), true
+		}
+	}
+	return 0, false
 }
 
 func latestThinkingMessageIndex(messages []protocol.AgentChatMessage) (uint16, bool) {

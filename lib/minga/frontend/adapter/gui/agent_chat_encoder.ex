@@ -187,6 +187,23 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
     |> :erlang.iolist_to_binary()
   end
 
+  @spec encode_preview_payload(ToolCallView.preview_kind(), [String.t()]) :: binary()
+  defp encode_preview_payload(kind, lines) when is_list(lines) do
+    line_binaries =
+      lines
+      |> Enum.take(20)
+      |> Enum.map(fn line ->
+        bytes = preview_text_bytes(line, 1_000)
+        <<byte_size(bytes)::16, bytes::binary>>
+      end)
+
+    IO.iodata_to_binary([
+      <<preview_kind_byte(kind)::8, length(line_binaries)::16>> | line_binaries
+    ])
+  end
+
+  defp encode_preview_payload(kind, _lines), do: <<preview_kind_byte(kind)::8, 0::16>>
+
   # ── Chat messages ──
 
   @typedoc "A chat message that may carry pre-computed styled runs."
@@ -368,10 +385,12 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
     collapsed_byte = if tc.collapsed, do: 1, else: 0
     auto_approved_byte = auto_approved_scope_byte(tc.auto_approved_scope)
 
+    preview_bytes = encode_preview_payload(tc.preview_kind, tc.preview_lines)
+
     <<0x04::8, status_byte::8, error_byte::8, collapsed_byte::8, duration::32,
       byte_size(name_bytes)::16, name_bytes::binary, byte_size(summary_bytes)::16,
       summary_bytes::binary, byte_size(result_bytes)::32, result_bytes::binary,
-      auto_approved_byte::8>>
+      auto_approved_byte::8, preview_bytes::binary>>
   end
 
   # Approval tool call: inline approval card attached to the tool message.
@@ -405,7 +424,8 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
   #   0x08, status::8, error::8, collapsed::8, duration::32, name_len::16, name,
   #   summary_len::16, summary, line_count::16, then per line: run_count::16,
   #   then per run: text_len::16, text, fg::24, bg::24, flags::8,
-  #   and when flags bit 0x08 is set: url_len::16, url. auto_approved::8 is appended after the styled line payload.
+  #   and when flags bit 0x08 is set: url_len::16, url.
+  #   auto_approved::8 and preview payload are appended after the styled line payload.
   defp encode_chat_message_body({:styled_tool_call, %ToolCallView{} = tc, styled_lines}) do
     name_bytes = :erlang.iolist_to_binary([tc.name])
     summary_bytes = utf8_prefix_bytes(tc.summary || "", @max_chat_text_bytes)
@@ -422,12 +442,15 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
         [<<length(runs)::16>> | run_binaries]
       end)
 
+    preview_bytes = encode_preview_payload(tc.preview_kind, tc.preview_lines)
+
     IO.iodata_to_binary([
       <<0x08::8, status_byte::8, error_byte::8, collapsed_byte::8, duration::32,
         byte_size(name_bytes)::16, name_bytes::binary, byte_size(summary_bytes)::16,
         summary_bytes::binary, length(styled_lines)::16>>,
       line_binaries,
-      <<auto_approved_byte::8>>
+      <<auto_approved_byte::8>>,
+      preview_bytes
     ])
   end
 

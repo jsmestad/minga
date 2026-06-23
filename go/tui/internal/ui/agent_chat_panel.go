@@ -24,6 +24,7 @@ const (
 const (
 	agentThinkingCollapsedLines = 1
 	agentThinkingExpandedLines  = 5
+	agentToolExpandedLines      = 10
 )
 
 func (m Model) renderAgentChatPanel(chat protocol.AgentChat) []string {
@@ -583,10 +584,17 @@ func (m Model) renderAgentToolMessage(msg protocol.AgentChatMessage, width int) 
 		lipgloss.NewStyle().Background(surface).Width(width).Render(fitStyled(header, width)),
 		lipgloss.NewStyle().Background(surface).Width(width).Render(fitStyled(body, width)),
 	}
+
+	if len(msg.PreviewLines) > 0 {
+		lines = append(lines, m.renderAgentToolPreviewLines(msg.PreviewKind, msg.PreviewLines, width)...)
+	}
+
 	if msg.IsError && msg.Result != "" {
-		lines = append(lines, m.renderAgentToolBody("ERROR", msg.Result, width))
-	} else if !msg.Collapsed && msg.Result != "" && len(lines) < 4 {
-		lines = append(lines, m.renderAgentToolBody(presentation.ResultLabel, msg.Result, width))
+		lines = append(lines, m.renderAgentToolTextLines("ERROR", msg.Result, width, agentToolExpandedLines)...)
+	} else if hasAgentToolResult(msg) && msg.Collapsed {
+		lines = append(lines, m.renderAgentToolCollapsedHint(width))
+	} else if !msg.Collapsed {
+		lines = append(lines, m.renderAgentToolResultLines(presentation.ResultLabel, msg, width)...)
 	}
 	return lines
 }
@@ -648,13 +656,124 @@ func agentToolMeta(msg protocol.AgentChatMessage) string {
 	return strings.Join(parts, " · ")
 }
 
-func (m Model) renderAgentToolBody(label string, text string, width int) string {
+func hasAgentToolResult(msg protocol.AgentChatMessage) bool {
+	return strings.TrimSpace(msg.Result) != "" || len(msg.StyledLines) > 0
+}
+
+func (m Model) renderAgentToolCollapsedHint(width int) string {
 	p := m.palette()
-	labelStyle := lipgloss.NewStyle().Bold(true).Foreground(p.Warning()).Background(m.editorBackground())
-	bodyStyle := lipgloss.NewStyle().Foreground(p.Muted()).Background(m.editorBackground())
-	body := firstCompactLine(text, max(width-lipgloss.Width(label)-9, 8))
-	line := "  │  " + labelStyle.Render(label+":") + bodyStyle.Render(" "+body)
+	bodyStyle := lipgloss.NewStyle().Foreground(p.Muted()).Background(m.editorBackground()).Italic(true)
+	line := "  │  " + bodyStyle.Render("result collapsed, Ctrl+Alt+X expands latest tool")
 	return lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(fitStyled(line, width))
+}
+
+func (m Model) renderAgentToolPreviewLines(kind byte, lines []string, width int) []string {
+	label := approvalPreviewKindName(kind)
+	return m.renderAgentToolPlainLines(label, lines, width, min(len(lines), 8))
+}
+
+func (m Model) renderAgentToolResultLines(label string, msg protocol.AgentChatMessage, width int) []string {
+	if len(msg.StyledLines) > 0 {
+		return m.renderAgentToolStyledLines(label, msg.StyledLines, width, agentToolExpandedLines)
+	}
+	return m.renderAgentToolTextLines(label, msg.Result, width, agentToolExpandedLines)
+}
+
+func (m Model) renderAgentToolTextLines(label string, text string, width int, limit int) []string {
+	return m.renderAgentToolPlainLines(label, agentToolTextLines(text), width, limit)
+}
+
+func agentToolTextLines(text string) []string {
+	text = strings.TrimRight(text, "\n")
+	if text == "" {
+		return nil
+	}
+	return strings.Split(text, "\n")
+}
+
+func (m Model) renderAgentToolPlainLines(label string, rawLines []string, width int, limit int) []string {
+	if len(rawLines) == 0 || limit <= 0 {
+		return nil
+	}
+	p := m.palette()
+	out := make([]string, 0, min(len(rawLines), limit)+1)
+	for index, raw := range rawLines[:min(len(rawLines), limit)] {
+		out = append(out, m.renderAgentToolLine(label, raw, index == 0, width, agentToolLineColor(raw, p)))
+	}
+	if len(rawLines) > limit {
+		remaining := fmt.Sprintf("… +%d lines", len(rawLines)-limit)
+		out = append(out, m.renderAgentToolLine(label, remaining, false, width, p.Muted()))
+	}
+	return out
+}
+
+func (m Model) renderAgentToolStyledLines(label string, styledLines []protocol.AgentStyledLine, width int, limit int) []string {
+	if len(styledLines) == 0 || limit <= 0 {
+		return nil
+	}
+	p := m.palette()
+	out := make([]string, 0, min(len(styledLines), limit)+1)
+	for index, runs := range styledLines[:min(len(styledLines), limit)] {
+		out = append(out, m.renderAgentToolStyledLine(label, runs, index == 0, width))
+	}
+	if len(styledLines) > limit {
+		remaining := fmt.Sprintf("… +%d lines", len(styledLines)-limit)
+		out = append(out, m.renderAgentToolLine(label, remaining, false, width, p.Muted()))
+	}
+	return out
+}
+
+func (m Model) renderAgentToolStyledLine(label string, runs protocol.AgentStyledLine, showLabel bool, width int) string {
+	p := m.palette()
+	labelText := strings.Repeat(" ", len(label))
+	if showLabel {
+		labelText = label
+	}
+	labelStyle := lipgloss.NewStyle().Bold(true).Foreground(p.Warning()).Background(m.editorBackground())
+	body := renderAgentStyledRuns(runs, p.Muted(), m.editorBackground())
+	line := "  │  " + labelStyle.Render(labelText+":") + " " + body
+	return lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(fitStyled(line, width))
+}
+
+func renderAgentStyledRuns(runs protocol.AgentStyledLine, fallback color.Color, background color.Color) string {
+	parts := make([]string, 0, len(runs))
+	for _, run := range runs {
+		style := lipgloss.NewStyle().Foreground(fallback).Background(background)
+		if run.FG != 0 {
+			style = style.Foreground(lipgloss.Color(fmt.Sprintf("#%06X", run.FG)))
+		}
+		if run.Flags&0x01 != 0 {
+			style = style.Bold(true)
+		}
+		if run.Flags&0x02 != 0 {
+			style = style.Italic(true)
+		}
+		parts = append(parts, style.Render(run.Text))
+	}
+	return strings.Join(parts, "")
+}
+
+func (m Model) renderAgentToolLine(label string, text string, showLabel bool, width int, textColor color.Color) string {
+	p := m.palette()
+	labelText := strings.Repeat(" ", len(label))
+	if showLabel {
+		labelText = label
+	}
+	labelStyle := lipgloss.NewStyle().Bold(true).Foreground(p.Warning()).Background(m.editorBackground())
+	bodyStyle := lipgloss.NewStyle().Foreground(textColor).Background(m.editorBackground())
+	body := fit(strings.TrimRight(text, "\r"), max(width-lipgloss.Width(label)-9, 8))
+	line := "  │  " + labelStyle.Render(labelText+":") + bodyStyle.Render(" "+body)
+	return lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(fitStyled(line, width))
+}
+
+func agentToolLineColor(line string, p palette) color.Color {
+	if strings.HasPrefix(line, "+") {
+		return p.Diagnostic(3)
+	}
+	if strings.HasPrefix(line, "-") {
+		return p.Diagnostic(0)
+	}
+	return p.Muted()
 }
 
 func (m Model) renderAgentApprovalMessage(msg protocol.AgentChatMessage, width int) []string {

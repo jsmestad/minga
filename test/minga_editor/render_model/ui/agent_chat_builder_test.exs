@@ -3,6 +3,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
 
   alias MingaEditor.Agent.Transcript
   alias MingaEditor.Agent.UIState
+  alias MingaAgent.ToolCall
   alias Minga.Editing.Scroll
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Frontend.Emit.Context
@@ -134,6 +135,34 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
 
     assert [{_, :system, "Session started"}, {_, :system, "Agent UI registry online"}] =
              Enum.map(model.messages, &message_summary/1)
+  end
+
+  test "build/1 resolves tool calls with clean summaries and inline diff previews" do
+    session = fake_session_pid()
+
+    tool_call =
+      ToolCall.new("tc-1", "edit_file", %{
+        "path" => "lib/app.ex",
+        "old_text" => "old",
+        "new_text" => "new"
+      })
+
+    panel = %Panel{
+      cached_display_message_pairs: [{1, {:tool_call, tool_call}}],
+      cached_styled_messages: [nil]
+    }
+
+    model =
+      context(session, panel)
+      |> AgentChatBuilder.build()
+
+    assert {1, {:tool_call, view}} = List.first(model.messages)
+    assert view.name == "edit_file"
+    assert view.summary == "lib/app.ex"
+    assert view.preview_kind == :diff
+    assert "file: lib/app.ex" in view.preview_lines
+    assert "-old" in view.preview_lines
+    assert "+new" in view.preview_lines
   end
 
   defp message_summary({id, {:assistant, text}}), do: {id, :assistant, text}

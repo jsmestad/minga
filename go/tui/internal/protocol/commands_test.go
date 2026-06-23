@@ -1199,6 +1199,9 @@ func TestDecodeAgentChatPreservesStructuredMessageDetails(t *testing.T) {
 	tool = append(tool, string16("lib/app.ex")...)
 	tool = append(tool, u32Bytes(2)...)
 	tool = append(tool, 'o', 'k', 1)
+	tool = append(tool, 1, 0, 2)
+	tool = append(tool, string16("-old")...)
+	tool = append(tool, string16("+new")...)
 
 	approval := append(u32Bytes(8), 0x09, 0)
 	approval = append(approval, string16("edit_file")...)
@@ -1232,7 +1235,7 @@ func TestDecodeAgentChatPreservesStructuredMessageDetails(t *testing.T) {
 	if len(messages) != 3 {
 		t.Fatalf("message count = %d, want 3: %+v", len(messages), messages)
 	}
-	if got := messages[0]; got.Name != "read_file" || got.Summary != "lib/app.ex" || got.Result != "ok" || got.DurationMS != 42 || got.AutoApprovedScope != 1 {
+	if got := messages[0]; got.Name != "read_file" || got.Summary != "lib/app.ex" || got.Result != "ok" || got.DurationMS != 42 || got.AutoApprovedScope != 1 || got.PreviewKind != 1 || len(got.PreviewLines) != 2 || got.PreviewLines[0] != "-old" || got.PreviewLines[1] != "+new" {
 		t.Fatalf("tool message decoded incorrectly: %+v", got)
 	}
 	if got := messages[1]; got.Name != "edit_file" || got.PreviewKind != 1 || len(got.PreviewLines) != 1 || got.PreviewLines[0] != "+hello" {

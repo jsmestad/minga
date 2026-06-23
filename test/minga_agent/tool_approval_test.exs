@@ -52,7 +52,7 @@ defmodule MingaAgent.ToolApprovalTest do
       assert Enum.all?(preview.lines, &(String.length(&1) <= 300))
     end
 
-    test "builds target preview for edit_file tools" do
+    test "builds diff preview for edit_file tools" do
       preview =
         ToolApproval.build_preview("edit_file", %{
           "path" => "lib/a.ex",
@@ -60,34 +60,42 @@ defmodule MingaAgent.ToolApprovalTest do
           "new_text" => "new"
         })
 
-      assert preview.kind == :target
+      assert preview.kind == :diff
       assert preview.summary == "lib/a.ex"
       assert "file: lib/a.ex" in preview.lines
-      assert ~s(replace "old" with "new") in preview.lines
+      assert "-old" in preview.lines
+      assert "+new" in preview.lines
     end
 
-    test "builds edit-count preview for multi_edit_file tools" do
+    test "builds diff preview for multi_edit_file tools" do
       preview =
         ToolApproval.build_preview("multi_edit_file", %{
           "path" => "lib/a.ex",
-          "edits" => [%{}, %{}]
+          "edits" => [
+            %{"old_text" => "old", "new_text" => "new"},
+            %{"find" => "before", "replace" => "after"}
+          ]
         })
 
-      assert preview.kind == :target
+      assert preview.kind == :diff
       assert preview.summary == "lib/a.ex"
-      assert "2 edit(s)" in preview.lines
+      assert "-old" in preview.lines
+      assert "+new" in preview.lines
+      assert "-before" in preview.lines
+      assert "+after" in preview.lines
     end
 
-    test "builds hunk-count preview for apply_diff tools" do
+    test "builds diff preview for apply_diff tools" do
       preview =
         ToolApproval.build_preview("apply_diff", %{
           "path" => "lib/a.ex",
           "diff" => "@@ -1,1 +1,1 @@\n-old\n+new\n"
         })
 
-      assert preview.kind == :target
+      assert preview.kind == :diff
       assert preview.summary == "lib/a.ex"
-      assert "1 diff hunk(s)" in preview.lines
+      assert "-old" in preview.lines
+      assert "+new" in preview.lines
     end
 
     test "builds target preview for git_stage tools" do
