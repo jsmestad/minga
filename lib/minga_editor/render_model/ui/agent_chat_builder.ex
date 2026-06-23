@@ -26,7 +26,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     session = active_session(ctx)
 
     if is_agent_chat && session do
-      build_visible(ctx)
+      build_visible(ctx, session)
     else
       %AgentChat{visible?: false}
     end
@@ -41,11 +41,10 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     :exit, _ -> nil
   end
 
-  @spec build_visible(Context.t()) :: AgentChat.t()
-  defp build_visible(ctx) do
+  @spec build_visible(Context.t(), pid()) :: AgentChat.t()
+  defp build_visible(ctx, session) do
     panel = ctx.agent_ui.panel
     view = ctx.agent_ui.view
-    session = active_session(ctx)
 
     prompt_text = safe_prompt_content(panel.prompt_buffer)
     {cursor_line, cursor_col} = UIState.input_cursor(panel)
