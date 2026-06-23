@@ -160,6 +160,24 @@ defmodule MingaEditor.Agent.SlashCommandTest do
     end
   end
 
+  describe "known_command?/1 and unknown_command_message/1" do
+    test "recognizes built-in and skill commands" do
+      assert SlashCommand.known_command?("/model")
+      assert SlashCommand.known_command?("/skill:plan")
+      assert SlashCommand.known_command?("/skill:off:plan")
+      refute SlashCommand.known_command?("/modle")
+    end
+
+    test "suggests close slash command names" do
+      assert SlashCommand.unknown_command_message("/modle") ==
+               "Unknown command: /modle. Did you mean /model?"
+    end
+
+    test "returns a plain unknown command message when there is no close match" do
+      assert SlashCommand.unknown_command_message("/zzzz") == "Unknown command: /zzzz"
+    end
+  end
+
   describe "completion_candidates/2" do
     test "returns slash command candidates before an argument" do
       labels = SlashCommand.completion_candidates(mock_state(), "mo") |> Enum.map(& &1.label)

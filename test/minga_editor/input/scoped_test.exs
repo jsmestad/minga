@@ -713,6 +713,42 @@ defmodule MingaEditor.Input.ScopedTest do
       assert Minga.Buffer.content(AgentAccess.panel(state).prompt_buffer) == "/model "
       assert AgentAccess.panel(state).mention_completion == nil
     end
+
+    test "re-summons slash completion after the first command character" do
+      state = base_state(keymap_scope: :editor, panel_visible: true, input_focused: true)
+
+      {:handled, state} = walk_surface_handlers(state, ?/, 0)
+      {:handled, state} = walk_surface_handlers(state, ?m, 0)
+      {:handled, state} = walk_surface_handlers(state, ?o, 0)
+      {:handled, state} = walk_surface_handlers(state, 27, 0)
+      assert AgentAccess.panel(state).mention_completion == nil
+
+      {:handled, state} = walk_surface_handlers(state, ?/, 0)
+      comp = AgentAccess.panel(state).mention_completion
+
+      assert Minga.Buffer.content(AgentAccess.panel(state).prompt_buffer) == "/mo"
+      assert comp.prefix == "mo"
+      assert comp.slash_candidates == [{"model", "Set the model: /model <name>"}]
+    end
+  end
+
+  describe "agent scope — slash command completion sub-state" do
+    test "re-summons slash completion inside a partially typed command token" do
+      state = base_state(keymap_scope: :agent, agentic_active: true, input_focused: true)
+
+      {:handled, state} = walk_surface_handlers(state, ?/, 0)
+      {:handled, state} = walk_surface_handlers(state, ?m, 0)
+      {:handled, state} = walk_surface_handlers(state, ?o, 0)
+      {:handled, state} = walk_surface_handlers(state, 27, 0)
+      assert AgentAccess.panel(state).mention_completion == nil
+
+      {:handled, state} = walk_surface_handlers(state, ?/, 0)
+      comp = AgentAccess.panel(state).mention_completion
+
+      assert Minga.Buffer.content(AgentAccess.panel(state).prompt_buffer) == "/mo"
+      assert comp.prefix == "mo"
+      assert comp.slash_candidates == [{"model", "Set the model: /model <name>"}]
+    end
   end
 
   describe "editor scope — panel mention completion" do

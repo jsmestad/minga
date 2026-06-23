@@ -250,6 +250,22 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       assert UIState.prompt_text(AgentAccess.panel(new_state)) == ""
     end
 
+    test "unknown slash command preserves draft and reports the error in chat" do
+      {:ok, session} = StubServer.start_link(notify: self())
+
+      state =
+        base_state(session: session)
+        |> AgentCommands.input_paste("/modle")
+
+      new_state = AgentCommands.submit_prompt(state)
+
+      assert UIState.prompt_text(AgentAccess.panel(new_state)) == "/modle"
+      assert new_state.shell_state.status_msg == "Unknown command: /modle. Did you mean /model?"
+
+      assert_receive {:stub_system_message, "Unknown command: /modle. Did you mean /model?",
+                      :error}
+    end
+
     test "blocks submit and preserves draft when no model is configured" do
       state =
         base_state(session: nil)
@@ -388,6 +404,26 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       assert_receive {:readiness_session_prompt, "ready prompt"}
       assert UIState.prompt_text(AgentAccess.panel(new_state)) == ""
+    end
+
+    test "unresolved file mention preserves the prompt and does not send" do
+      {:ok, session} = ReadinessSession.start_link(provider: self(), notify: self())
+
+      state =
+        base_state(session: session)
+        |> AgentCommands.input_paste("@missing.ex explain")
+        |> AgentAccess.update_panel(fn panel ->
+          panel
+          |> Panel.set_credentials_configured(true)
+          |> Panel.set_model_name("anthropic:claude-sonnet-4-20250514")
+          |> Panel.set_provider_name("anthropic")
+        end)
+
+      new_state = AgentCommands.submit_prompt(state)
+
+      assert new_state.shell_state.status_msg =~ "Cannot resolve file mentions"
+      assert UIState.prompt_text(AgentAccess.panel(new_state)) == "@missing.ex explain"
+      refute_receive {:readiness_session_prompt, _prompt}
     end
 
     test "ready local provider sends even when panel credentials cache is stale" do

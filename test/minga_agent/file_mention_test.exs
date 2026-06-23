@@ -209,10 +209,10 @@ defmodule MingaAgent.FileMentionTest do
       assert comp.anchor_col == 5
     end
 
-    test "limits initial candidates to 10" do
-      files = Enum.map(1..20, &"file_#{&1}.ex")
+    test "limits initial candidates to 50" do
+      files = Enum.map(1..60, &"file_#{&1}.ex")
       comp = FileMention.new_completion(files, 0, 0)
-      assert length(comp.candidates) == 10
+      assert length(comp.candidates) == 50
     end
   end
 
@@ -233,6 +233,36 @@ defmodule MingaAgent.FileMentionTest do
 
       comp = FileMention.update_prefix(comp, "mymod")
       assert "lib/MyModule.ex" in comp.candidates
+    end
+
+    test "subsequence filtering finds abbreviated deep paths" do
+      files = [
+        "lib/minga_editor/commands/agent.ex",
+        "lib/minga_editor/input/scoped.ex",
+        "test/support/stub_server.ex"
+      ]
+
+      comp = FileMention.new_completion(files, 0, 0)
+
+      comp = FileMention.update_prefix(comp, "mecag")
+      assert comp.candidates == ["lib/minga_editor/commands/agent.ex"]
+    end
+
+    test "ranking prefers path and basename prefixes before fuzzy matches" do
+      files = [
+        "test/minga_editor/agent_test.exs",
+        "lib/minga_editor/agent.ex",
+        "lib/some/mega_file.ex"
+      ]
+
+      comp = FileMention.new_completion(files, 0, 0)
+
+      comp = FileMention.update_prefix(comp, "agent")
+
+      assert Enum.take(comp.candidates, 2) == [
+               "lib/minga_editor/agent.ex",
+               "test/minga_editor/agent_test.exs"
+             ]
     end
 
     test "clamps selected index when candidates shrink" do

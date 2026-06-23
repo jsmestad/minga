@@ -68,8 +68,9 @@ defmodule Minga.Keymap.Scope.AgentScopeSharedGroupsTest do
       assert {:command, :agent_unfocus_and_quit} = Bindings.lookup(trie, {?q, @ctrl})
     end
 
-    test "scope-specific q binding", %{trie: trie} do
+    test "scope-specific q and Escape bindings", %{trie: trie} do
       assert {:command, :agent_unfocus_input} = Bindings.lookup(trie, {?q, 0})
+      assert {:command, :agent_unfocus_input} = Bindings.lookup(trie, {27, 0})
     end
   end
 

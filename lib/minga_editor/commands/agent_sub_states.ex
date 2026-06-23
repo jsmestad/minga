@@ -151,11 +151,21 @@ defmodule MingaEditor.Commands.AgentSubStates do
     end
   end
 
-  @doc "Triggers /slash command completion when / is typed at position (0, 0)."
+  @doc "Returns true when the prompt cursor is inside the leading slash command token."
+  @spec slash_command_token_at_cursor?(state()) :: boolean()
+  def slash_command_token_at_cursor?(state), do: slash_command_token_at_cursor(state) != nil
+
+  @doc "Triggers /slash command completion from the current slash command token."
   @spec trigger_slash_completion(state()) :: state()
   def trigger_slash_completion(state) do
-    slash_completion_state(state, "")
-    |> update_slash_completion(state)
+    case slash_command_token_at_cursor(state) do
+      {prefix, anchor_line, anchor_col} ->
+        slash_completion_state(state, prefix, anchor_line, anchor_col)
+        |> update_slash_completion(state)
+
+      nil ->
+        update_slash_completion(nil, state)
+    end
   end
 
   # ── Diff review commands ───────────────────────────────────────────────────
@@ -334,7 +344,7 @@ defmodule MingaEditor.Commands.AgentSubStates do
     state = AgentCommands.input_backspace(state)
     new_input = trim_last_grapheme(comp.prefix)
 
-    slash_completion_state(state, new_input)
+    slash_completion_state(state, new_input, comp.anchor_line, comp.anchor_col)
     |> update_slash_completion(state)
   end
 
@@ -343,7 +353,7 @@ defmodule MingaEditor.Commands.AgentSubStates do
     state = AgentCommands.input_char(state, char)
     new_input = comp.prefix <> char
 
-    slash_completion_state(state, new_input)
+    slash_completion_state(state, new_input, comp.anchor_line, comp.anchor_col)
     |> update_slash_completion(state)
   end
 
@@ -357,8 +367,9 @@ defmodule MingaEditor.Commands.AgentSubStates do
     |> Enum.join()
   end
 
-  @spec slash_completion_state(state(), String.t()) :: map() | nil
-  defp slash_completion_state(state, input) do
+  @spec slash_completion_state(state(), String.t(), non_neg_integer(), non_neg_integer()) ::
+          map() | nil
+  defp slash_completion_state(state, input, anchor_line, anchor_col) do
     candidates = SlashCommand.completion_candidates(state, input)
 
     if candidates == [] do
@@ -371,8 +382,8 @@ defmodule MingaEditor.Commands.AgentSubStates do
         all_files: [],
         candidates: labels,
         selected: 0,
-        anchor_line: 0,
-        anchor_col: 0,
+        anchor_line: anchor_line,
+        anchor_col: anchor_col,
         slash_candidates: Enum.map(candidates, &{&1.label, &1.description}),
         slash_insertions: Map.new(candidates, &{&1.label, &1.insert})
       }
@@ -387,6 +398,36 @@ defmodule MingaEditor.Commands.AgentSubStates do
   defp update_slash_completion(comp, state) do
     update_panel(state, fn p -> %{p | mention_completion: comp} end)
   end
+
+  @spec slash_command_token_at_cursor(state()) ::
+          {String.t(), non_neg_integer(), non_neg_integer()} | nil
+  defp slash_command_token_at_cursor(state) do
+    panel = AgentAccess.panel(state)
+
+    case UIState.input_cursor(panel) do
+      {0, col} ->
+        current_line = Enum.at(UIState.input_lines(panel), 0, "")
+        before_cursor = String.slice(current_line, 0, col)
+
+        if leading_slash_token?(before_cursor) do
+          {String.trim_leading(before_cursor, "/"), 0, 0}
+        else
+          nil
+        end
+
+      {_line, _col} ->
+        nil
+    end
+  end
+
+  @spec leading_slash_token?(String.t()) :: boolean()
+  defp leading_slash_token?("/"), do: true
+
+  defp leading_slash_token?("/" <> rest) do
+    not String.contains?(rest, [" ", "\t", "\n"])
+  end
+
+  defp leading_slash_token?(_text), do: false
 
   @spec accept_slash_completion(state(), map()) :: state()
   defp accept_slash_completion(state, comp) do
@@ -494,6 +535,21 @@ defmodule MingaEditor.Commands.AgentSubStates do
 
   @spec list_project_files() :: [String.t()]
   defp list_project_files do
+    case cached_project_files() do
+      [] -> list_project_files_from_disk()
+      files -> files
+    end
+  end
+
+  @spec cached_project_files() :: [String.t()]
+  defp cached_project_files do
+    Minga.Project.files()
+  catch
+    :exit, _ -> []
+  end
+
+  @spec list_project_files_from_disk() :: [String.t()]
+  defp list_project_files_from_disk do
     root =
       try do
         case Minga.Project.root() do

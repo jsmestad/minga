@@ -87,6 +87,15 @@ defmodule Minga.Test.StubServer do
   end
 
   @impl GenServer
+  def handle_cast({:add_system_message, text, level}, state) do
+    case Map.get(state, :notify) do
+      pid when is_pid(pid) -> send(pid, {:stub_system_message, text, level})
+      _ -> :ok
+    end
+
+    {:noreply, state}
+  end
+
   def handle_cast(_msg, state), do: {:noreply, state}
 
   @impl GenServer
