@@ -175,7 +175,8 @@ defmodule MingaEditor.Agent.EditTimeline do
   @spec file_summaries(t()) :: [file_summary()]
   def file_summaries(%__MODULE__{entries: entries} = timeline) do
     entries
-    |> Enum.flat_map(&file_summary(timeline, &1))
+    |> non_empty_file_entries()
+    |> file_summaries_for_entries(timeline)
     |> Enum.sort_by(& &1.path)
   end
 
@@ -200,6 +201,18 @@ defmodule MingaEditor.Agent.EditTimeline do
     else
       %{timeline | baselines: Map.put(baselines, path, DiffSnapshot.from_content(before_content))}
     end
+  end
+
+  @spec non_empty_file_entries(%{String.t() => [Entry.t()]}) :: [{String.t(), [Entry.t()]}]
+  defp non_empty_file_entries(entries) do
+    Enum.reject(entries, fn {_path, path_entries} -> path_entries == [] end)
+  end
+
+  @spec file_summaries_for_entries([{String.t(), [Entry.t()]}], t()) :: [file_summary()]
+  defp file_summaries_for_entries([_single_file], _timeline), do: []
+
+  defp file_summaries_for_entries(file_entries, timeline) do
+    Enum.flat_map(file_entries, &file_summary(timeline, &1))
   end
 
   @spec file_summary(t(), {String.t(), [Entry.t()]}) :: [file_summary()]

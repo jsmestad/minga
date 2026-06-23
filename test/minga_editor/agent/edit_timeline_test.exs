@@ -173,6 +173,14 @@ defmodule MingaEditor.Agent.EditTimelineTest do
   end
 
   describe "file_summaries/1" do
+    test "keeps single-file turns on the per-entry timeline" do
+      timeline =
+        EditTimeline.new()
+        |> EditTimeline.record_edit("lib/a.ex", "tc1", "edit_file", "old\n", "new\n")
+
+      assert [] = EditTimeline.file_summaries(timeline)
+    end
+
     test "summarizes every touched file with diff counts and review status" do
       timeline =
         EditTimeline.new()

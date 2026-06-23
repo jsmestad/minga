@@ -117,6 +117,8 @@ defmodule MingaEditor.State.AgentAccess do
     %{state | agent_ui: fun.(a)}
   end
 
+  def update_agent_ui(state, _fun), do: state
+
   @doc "Updates just the panel sub-struct via a transform function."
   @spec update_panel(EditorState.t() | map(), (Panel.t() -> Panel.t())) ::
           EditorState.t() | map()
@@ -180,6 +182,22 @@ defmodule MingaEditor.State.AgentAccess do
     state
     |> set_tab_bar(tab_bar)
     |> set_workspace(set_live_agent_ui(workspace, next_ui))
+  end
+
+  defp update_workspace_agent_ui(%{shell_state: %{tab_bar: %TabBar{} = tab_bar}} = state, fun) do
+    current_ui = active_workspace_agent_ui(state) || UIState.new()
+    next_ui = fun.(current_ui)
+
+    tab_bar =
+      case TabBar.active_workspace(tab_bar) do
+        %Workspace{id: workspace_id} ->
+          TabBar.update_workspace(tab_bar, workspace_id, &Workspace.set_agent_ui(&1, next_ui))
+
+        _workspace ->
+          tab_bar
+      end
+
+    set_tab_bar(state, tab_bar)
   end
 
   defp update_workspace_agent_ui(%{workspace: %{agent_ui: agent_ui} = workspace} = state, fun) do
