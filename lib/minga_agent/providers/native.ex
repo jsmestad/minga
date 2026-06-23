@@ -623,29 +623,28 @@ defmodule MingaAgent.Providers.Native do
   end
 
   def handle_call({:send_prompt, content}, _from, state) do
-    # Append user message to context.
-    # content is either a string or a list of ContentPart (for multi-modal).
-    context = Context.append(state.context, Context.user(content))
-
-    state = %{
-      state
-      | context: context,
-        streaming: true,
-        interrupted: false,
-        last_user_prompt: content
-    }
-
-    # Notify subscriber that agent is starting
-    notify(state.subscriber, %Event.AgentStart{})
-
-    # Check cost budget before starting
     if over_budget?(state) do
       notify(state.subscriber, %Event.Error{
         message: cost_limit_message(state.session_cost, state.max_cost)
       })
 
-      {:reply, {:error, :cost_limit_reached}, %{state | context: context}}
+      {:reply, {:error, :cost_limit_reached}, clear_stuck_streaming(state)}
     else
+      # Append user message to context.
+      # content is either a string or a list of ContentPart (for multi-modal).
+      context = Context.append(state.context, Context.user(content))
+
+      state = %{
+        state
+        | context: context,
+          streaming: true,
+          interrupted: false,
+          last_user_prompt: content
+      }
+
+      # Notify subscriber that agent is starting
+      notify(state.subscriber, %Event.AgentStart{})
+
       # Spawn the agent turn loop in a linked task
       lctx = %LoopCtx{
         provider_pid: self(),
@@ -680,7 +679,7 @@ defmodule MingaAgent.Providers.Native do
 
   def handle_call(:abort, _from, %{task: nil} = state) do
     stop_registered_tool_workers(state.tool_workers)
-    {:reply, :ok, %{state | tool_workers: %{}}}
+    {:reply, :ok, %{state | streaming: false, tool_workers: %{}}}
   end
 
   def handle_call(:abort, _from, state) do
@@ -990,12 +989,14 @@ defmodule MingaAgent.Providers.Native do
 
   def handle_call({:set_max_cost, amount}, _from, state) when is_number(amount) and amount > 0 do
     Minga.Log.info(:agent, "[Agent.Native] cost budget set to $#{Float.round(amount + 0.0, 2)}")
-    {:reply, :ok, %{state | max_cost: amount + 0.0}}
+    state = %{state | max_cost: amount + 0.0}
+    {:reply, :ok, clear_stuck_streaming(state)}
   end
 
   def handle_call({:set_max_cost, nil}, _from, state) do
     Minga.Log.info(:agent, "[Agent.Native] cost budget disabled")
-    {:reply, :ok, %{state | max_cost: nil}}
+    state = %{state | max_cost: nil}
+    {:reply, :ok, clear_stuck_streaming(state)}
   end
 
   @impl GenServer
@@ -3112,6 +3113,17 @@ defmodule MingaAgent.Providers.Native do
        when is_number(max_cost) do
     session_cost >= max_cost
   end
+
+  @spec clear_stuck_streaming(state()) :: state()
+  defp clear_stuck_streaming(%{streaming: true, task: nil} = state) do
+    if over_budget?(state) do
+      state
+    else
+      %{state | streaming: false, tool_workers: %{}}
+    end
+  end
+
+  defp clear_stuck_streaming(state), do: state
 
   @spec cost_limit_message(float(), float() | nil) :: String.t()
   defp cost_limit_message(session_cost, max_cost) do

@@ -1886,6 +1886,55 @@ defmodule MingaAgent.Providers.NativeTest do
       assert budget.session_cost == 0.0
     end
 
+    test "preflight cost limit does not wedge streaming and recovers after budget increase", %{
+      tmp_dir: dir
+    } do
+      call_count = :counters.new(1, [:atomics])
+
+      client = fn _model, _messages, _opts ->
+        count = :counters.get(call_count, 1)
+        :counters.add(call_count, 1, 1)
+
+        if count == 0 do
+          build_stream_response(
+            [
+              ReqLLM.StreamChunk.text("Initial"),
+              ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
+            ],
+            %{total_cost: 2.0}
+          )
+        else
+          build_stream_response([
+            ReqLLM.StreamChunk.text("Recovered"),
+            ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
+          ])
+        end
+      end
+
+      {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, max_cost: 1.0)
+
+      assert :ok = Native.send_prompt(pid, "initial prompt")
+      initial_events = collect_events(1_000)
+      assert Enum.any?(initial_events, &match?(%Event.TextDelta{delta: "Initial"}, &1))
+      assert Enum.any?(initial_events, &match?(%Event.AgentEnd{}, &1))
+      assert {:ok, %{session_cost: 2.0}} = GenServer.call(pid, :get_budget)
+
+      assert {:error, :cost_limit_reached} = Native.send_prompt(pid, "blocked by budget")
+
+      assert_receive {:agent_provider_event, %Event.Error{message: message}}, 1_000
+      assert message =~ "Session cost limit reached"
+      refute_received {:agent_provider_event, %Event.AgentStart{}}
+      assert {:ok, %{is_streaming: false}} = Native.get_state(pid)
+
+      assert :ok = GenServer.call(pid, {:set_max_cost, 3.0})
+      assert :ok = Native.send_prompt(pid, "after budget increase")
+
+      events = collect_events(1_000)
+      assert Enum.any?(events, &match?(%Event.TextDelta{delta: "Recovered"}, &1))
+      assert Enum.any?(events, &match?(%Event.AgentEnd{}, &1))
+      assert {:ok, %{is_streaming: false}} = Native.get_state(pid)
+    end
+
     test "agent stops when cost budget is exceeded during tool loop", %{tmp_dir: dir} do
       File.write!(Path.join(dir, "test.txt"), "hello")
 
