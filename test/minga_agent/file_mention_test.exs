@@ -41,6 +41,11 @@ defmodule MingaAgent.FileMentionTest do
       mentions = FileMention.extract_mentions("@lib/foo.ex rest")
       assert [%{start: 0, stop: 11}] = mentions
     end
+
+    test "records character positions after non-ascii text" do
+      mentions = FileMention.extract_mentions("é @lib/foo.ex rest")
+      assert [%{path: "lib/foo.ex", start: 2, stop: 13}] = mentions
+    end
   end
 
   # ── Resolution ──────────────────────────────────────────────────────────────
