@@ -15,7 +15,10 @@ defmodule MingaEditor.Input.CUATUIIntegrationTest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Registers
+  alias MingaEditor.State.TabBar
   alias MingaEditor.State.WhichKey
+  alias MingaEditor.State.Workspace, as: WorkspaceModel
+  alias MingaEditor.UI.Picker.ThinkingLevelSource
 
   @ctrl 0x02
   @enter 13
@@ -154,6 +157,20 @@ defmodule MingaEditor.Input.CUATUIIntegrationTest do
       assert state.shell_state.space_leader_pending == false
       assert buffer_content(ctx) == ""
     end
+
+    test "SPC a T opens the thinking-level picker" do
+      ctx = start_editor("", editing_model: :cua, backend: :tui)
+      install_agent_session(ctx, "low")
+
+      send_key_sync(ctx, @space)
+      send_key_sync(ctx, ?a)
+      send_key_sync(ctx, ?T)
+
+      assert {:picker, %{picker_ui: picker_ui}} = editor_state(ctx).shell_state.modal
+      assert picker_ui.source == ThinkingLevelSource
+      assert picker_ui.context == %{current_level: "low"}
+      assert buffer_content(ctx) == ""
+    end
   end
 
   describe "CUA TUI startup defaults" do
@@ -178,6 +195,22 @@ defmodule MingaEditor.Input.CUATUIIntegrationTest do
         |> UIState.set_input_focused(true)
         |> UIState.set_prompt_text(text)
       end)
+    end)
+
+    :sys.get_state(ctx.editor)
+  end
+
+  defp install_agent_session(ctx, thinking_level) do
+    :sys.replace_state(ctx.editor, fn state ->
+      state
+      |> EditorState.set_tab_bar(
+        TabBar.update_workspace(
+          state.shell_state.tab_bar,
+          0,
+          &WorkspaceModel.set_session(&1, self())
+        )
+      )
+      |> AgentAccess.update_agent_ui(&UIState.set_thinking_level(&1, thinking_level))
     end)
 
     :sys.get_state(ctx.editor)

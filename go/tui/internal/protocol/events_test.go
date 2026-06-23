@@ -57,6 +57,14 @@ func TestEncodeGUIExecuteCommand(t *testing.T) {
 	}
 }
 
+func TestEncodeGUIAgentToolToggle(t *testing.T) {
+	got := EncodeGUIAgentToolToggle(0x0102)
+	want := []byte{generated.OPGuiAction, generated.GUIActionAgentToolToggle, 0x01, 0x02}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("agent tool toggle packet = %v, want %v", got, want)
+	}
+}
+
 func TestEncodeGUIBreadcrumbClick(t *testing.T) {
 	got := EncodeGUIBreadcrumbClick(3)
 	want := []byte{generated.OPGuiAction, generated.GUIActionBreadcrumbClick, 3}

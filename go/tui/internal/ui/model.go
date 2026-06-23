@@ -210,6 +210,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.toggleHUD(msg) {
 			break
 		}
+		if m.handleAgentChatShortcut(msg) {
+			break
+		}
 		// Stamp the latency correlation sequence (ticket #2215) before
 		// encoding so the resulting frame's commit_frame resolves the sample.
 		seq := m.latency.Stamp()
@@ -788,4 +791,35 @@ func (m *Model) toggleHUD(msg tea.KeyPressMsg) bool {
 		return true
 	}
 	return false
+}
+
+func (m Model) handleAgentChatShortcut(msg tea.KeyPressMsg) bool {
+	chat, ok := m.agentChat()
+	if !ok || !chat.Visible {
+		return false
+	}
+	key := msg.Key()
+	if !key.Mod.Contains(tea.ModCtrl) || !key.Mod.Contains(tea.ModAlt) {
+		return false
+	}
+	switch key.Code {
+	case 'z', 'Z':
+		index, ok := latestThinkingMessageIndex(chat.Messages)
+		if !ok {
+			return false
+		}
+		m.send(protocol.EncodeGUIAgentToolToggle(index))
+		return true
+	default:
+		return false
+	}
+}
+
+func latestThinkingMessageIndex(messages []protocol.AgentChatMessage) (uint16, bool) {
+	for index := len(messages) - 1; index >= 0; index-- {
+		if messages[index].Kind == agentKindThinking && index <= 0xFFFF {
+			return uint16(index), true
+		}
+	}
+	return 0, false
 }

@@ -168,6 +168,10 @@ func EncodeGUIExecuteCommand(command string) []byte {
 	return append(out, payload...)
 }
 
+func EncodeGUIAgentToolToggle(index uint16) []byte {
+	return []byte{generated.OPGuiAction, generated.GUIActionAgentToolToggle, byte(index >> 8), byte(index)}
+}
+
 // EncodeGUIBreadcrumbClick encodes a breadcrumb_click action. Wire format:
 // <gui_action, 0x06, segment_index:u8>. The GUI sends the clicked segment's
 // zero-based index (BreadcrumbBar.swift:51).
