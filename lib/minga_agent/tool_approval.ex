@@ -8,6 +8,7 @@ defmodule MingaAgent.ToolApproval do
   handling, chat decorations, and GUI protocol encoding.
   """
 
+  alias Minga.RenderModel.UI.AgentChat.ToolArgSummary
   alias MingaAgent.ToolApproval.Preview
   alias MingaAgent.ToolRouter
 
@@ -65,6 +66,23 @@ defmodule MingaAgent.ToolApproval do
     do_build_preview(name, stringify_keys(args))
   end
 
+  @doc "Builds an IO-free structured preview for completed transcript tool-call cards."
+  @spec build_transcript_preview(String.t(), map()) :: preview()
+  def build_transcript_preview(name, args) when is_binary(name) and is_map(args) do
+    do_build_transcript_preview(name, stringify_keys(args))
+  end
+
+  @doc "Builds an IO-free diff preview from explicit before/after file content."
+  @spec build_file_diff_preview(String.t(), String.t(), String.t()) :: preview()
+  def build_file_diff_preview(path, before_content, after_content)
+      when is_binary(path) and is_binary(before_content) and is_binary(after_content) do
+    Preview.new(
+      :diff,
+      path,
+      preview_lines(["file: #{path}" | diff_preview_lines(before_content, after_content)])
+    )
+  end
+
   @spec do_build_preview(String.t(), map()) :: preview()
   defp do_build_preview("shell", %{"command" => command} = args) do
     command = stringify_value(command)
@@ -81,6 +99,11 @@ defmodule MingaAgent.ToolApproval do
     lines = diff_preview_lines(before, content)
 
     Preview.new(:diff, path, preview_lines(["file: #{path}" | lines]))
+  end
+
+  defp do_build_preview(name, args)
+       when name in ["read_file", "grep", "find", "list_directory"] do
+    read_only_preview(name, args)
   end
 
   defp do_build_preview(name, %{"path" => path} = args)
@@ -112,6 +135,35 @@ defmodule MingaAgent.ToolApproval do
     summary = inspect(args, limit: 20, printable_limit: 120)
     Preview.new(:args, summary, [summary])
   end
+
+  @spec do_build_transcript_preview(String.t(), map()) :: preview()
+  defp do_build_transcript_preview("write_file", %{"path" => path}) do
+    path = stringify_value(path)
+    Preview.new(:target, path, [])
+  end
+
+  defp do_build_transcript_preview(name, args)
+       when name in ["read_file", "grep", "find", "list_directory"] do
+    read_only_preview(name, args)
+  end
+
+  defp do_build_transcript_preview(name, args) do
+    name
+    |> do_build_preview(args)
+    |> transcript_safe_preview()
+  end
+
+  @spec read_only_preview(String.t(), map()) :: preview()
+  defp read_only_preview(name, args) do
+    summary = name |> ToolArgSummary.summarize(args) |> stringify_value()
+    Preview.new(:args, summary, [])
+  end
+
+  @spec transcript_safe_preview(preview()) :: preview()
+  defp transcript_safe_preview(%Preview{kind: :args, summary: summary}),
+    do: Preview.new(:args, summary, [])
+
+  defp transcript_safe_preview(%Preview{} = preview), do: preview
 
   @spec read_existing(String.t()) :: String.t()
   defp read_existing(path) do

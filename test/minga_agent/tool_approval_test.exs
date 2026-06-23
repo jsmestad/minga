@@ -12,6 +12,23 @@ defmodule MingaAgent.ToolApprovalTest do
       assert "$ rm -rf tmp/build" in preview.lines
     end
 
+    test "builds clean empty previews for read-only tools" do
+      previews = [
+        {"read_file", %{"path" => "lib/app.ex"}, "lib/app.ex"},
+        {"grep", %{"pattern" => "defmodule", "path" => "lib"}, "defmodule in lib"},
+        {"find", %{"name" => "*.ex", "path" => "lib"}, "*.ex in lib"},
+        {"list_directory", %{"path" => "lib"}, "lib"}
+      ]
+
+      for {name, args, summary} <- previews do
+        preview = ToolApproval.build_preview(name, args)
+
+        assert preview.kind == :args
+        assert preview.summary == summary
+        assert preview.lines == []
+      end
+    end
+
     test "builds diff preview for write_file tools" do
       path =
         Path.join(

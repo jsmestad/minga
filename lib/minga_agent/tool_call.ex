@@ -11,6 +11,8 @@ defmodule MingaAgent.ToolCall do
   marks a failure, `abort/1` handles user cancellation mid-execution.
   """
 
+  alias MingaAgent.ToolApproval.Preview
+
   @typedoc "Tool call execution status."
   @type status :: :running | :complete | :error
 
@@ -27,6 +29,7 @@ defmodule MingaAgent.ToolCall do
           is_error: boolean(),
           collapsed: boolean(),
           auto_approved_scope: auto_approved_scope() | nil,
+          preview: Preview.t() | nil,
           started_at: integer() | nil,
           duration_ms: non_neg_integer() | nil
         }
@@ -40,6 +43,7 @@ defmodule MingaAgent.ToolCall do
             is_error: false,
             collapsed: true,
             auto_approved_scope: nil,
+            preview: nil,
             started_at: nil,
             duration_ms: nil
 
@@ -103,6 +107,12 @@ defmodule MingaAgent.ToolCall do
   @spec set_auto_approved_scope(t(), auto_approved_scope() | nil) :: t()
   def set_auto_approved_scope(%__MODULE__{} = tc, scope) when scope in [:session, :turn, nil] do
     %{tc | auto_approved_scope: scope}
+  end
+
+  @doc "Records the transcript preview captured while the tool executed."
+  @spec set_preview(t(), Preview.t()) :: t()
+  def set_preview(%__MODULE__{} = tc, %Preview{} = preview) do
+    %{tc | preview: preview}
   end
 
   @doc "Returns true if the tool call has finished (complete or error)."

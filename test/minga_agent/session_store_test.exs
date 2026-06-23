@@ -3,6 +3,7 @@ defmodule MingaAgent.SessionStoreTest do
 
   alias MingaAgent.Branch
   alias MingaAgent.SessionStore
+  alias MingaAgent.ToolApproval.Preview
   alias MingaAgent.ToolCall
   alias MingaAgent.TurnUsage
 
@@ -30,6 +31,7 @@ defmodule MingaAgent.SessionStoreTest do
            is_error: false,
            collapsed: true,
            auto_approved_scope: :session,
+           preview: Preview.new(:diff, "lib/foo.ex", ["file: lib/foo.ex", "-old", "+new"]),
            started_at: nil,
            duration_ms: 42
          }},
@@ -98,6 +100,9 @@ defmodule MingaAgent.SessionStoreTest do
       assert tc.duration_ms == 42
       assert tc.status == :complete
       assert tc.auto_approved_scope == :session
+      assert tc.preview.kind == :diff
+      assert tc.preview.summary == "lib/foo.ex"
+      assert tc.preview.lines == ["file: lib/foo.ex", "-old", "+new"]
     end
 
     test "loads corrupted message atoms defensively", %{tmp_dir: dir} do

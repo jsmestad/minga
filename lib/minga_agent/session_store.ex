@@ -225,7 +225,8 @@ defmodule MingaAgent.SessionStore do
       "is_error" => tc.is_error,
       "collapsed" => tc.collapsed,
       "auto_approved_scope" => serialize_auto_approved_scope(tc.auto_approved_scope),
-      "duration_ms" => tc.duration_ms
+      "duration_ms" => tc.duration_ms,
+      "preview" => serialize_tool_preview(tc.preview)
     }
   end
 
@@ -307,6 +308,7 @@ defmodule MingaAgent.SessionStore do
        is_error: raw["is_error"] || false,
        collapsed: raw["collapsed"] || true,
        auto_approved_scope: deserialize_auto_approved_scope(raw["auto_approved_scope"]),
+       preview: deserialize_tool_preview(raw["preview"]),
        started_at: nil,
        duration_ms: raw["duration_ms"]
      }}
@@ -332,6 +334,31 @@ defmodule MingaAgent.SessionStore do
       size_kb: attachment["size_kb"] || attachment[:size_kb] || 0
     }
   end
+
+  @spec serialize_tool_preview(MingaAgent.ToolApproval.Preview.t() | nil) :: map() | nil
+  defp serialize_tool_preview(nil), do: nil
+
+  defp serialize_tool_preview(%MingaAgent.ToolApproval.Preview{} = preview) do
+    %{
+      "kind" => Atom.to_string(preview.kind),
+      "summary" => preview.summary,
+      "lines" => preview.lines
+    }
+  end
+
+  @spec deserialize_tool_preview(map() | nil) :: MingaAgent.ToolApproval.Preview.t() | nil
+  defp deserialize_tool_preview(%{"kind" => kind, "summary" => summary, "lines" => lines})
+       when is_binary(summary) and is_list(lines) do
+    MingaAgent.ToolApproval.Preview.new(deserialize_preview_kind(kind), summary, lines)
+  end
+
+  defp deserialize_tool_preview(_preview), do: nil
+
+  @spec deserialize_preview_kind(String.t() | nil) :: MingaAgent.ToolApproval.Preview.kind()
+  defp deserialize_preview_kind("diff"), do: :diff
+  defp deserialize_preview_kind("command"), do: :command
+  defp deserialize_preview_kind("target"), do: :target
+  defp deserialize_preview_kind(_kind), do: :args
 
   @spec serialize_auto_approved_scope(MingaAgent.ToolCall.auto_approved_scope() | nil) ::
           String.t() | nil

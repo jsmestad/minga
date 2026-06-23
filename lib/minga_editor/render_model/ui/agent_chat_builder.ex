@@ -290,7 +290,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
 
   @spec tool_call_view(ToolCall.t()) :: ToolCallView.t()
   defp tool_call_view(%ToolCall{} = tc) do
-    preview = ToolApproval.build_preview(tc.name, tc.args)
+    preview = tc.preview || ToolApproval.build_transcript_preview(tc.name, tc.args)
 
     %ToolCallView{
       name: tc.name,

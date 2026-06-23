@@ -3,6 +3,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
 
   alias MingaEditor.Agent.Transcript
   alias MingaEditor.Agent.UIState
+  alias MingaAgent.ToolApproval
   alias MingaAgent.ToolCall
   alias Minga.Editing.Scroll
   alias MingaEditor.Agent.UIState.Panel
@@ -163,6 +164,91 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
     assert "file: lib/app.ex" in view.preview_lines
     assert "-old" in view.preview_lines
     assert "+new" in view.preview_lines
+  end
+
+  test "build/1 omits raw inspected preview lines for completed read-only tool calls" do
+    session = fake_session_pid()
+
+    read_only_calls = [
+      {"read_file", %{"path" => "lib/app.ex"}, "lib/app.ex"},
+      {"grep", %{"pattern" => "defmodule", "path" => "lib"}, "defmodule in lib"},
+      {"find", %{"name" => "*.ex", "path" => "lib"}, "*.ex in lib"},
+      {"list_directory", %{"path" => "lib"}, "lib"}
+    ]
+
+    display_pairs =
+      read_only_calls
+      |> Enum.with_index(1)
+      |> Enum.map(fn {{name, args, _summary}, id} ->
+        {id, {:tool_call, ToolCall.new("tc-#{id}", name, args) |> ToolCall.complete("ok")}}
+      end)
+
+    panel = %Panel{
+      cached_display_message_pairs: display_pairs,
+      cached_styled_messages: List.duplicate(nil, length(display_pairs))
+    }
+
+    model =
+      context(session, panel)
+      |> AgentChatBuilder.build()
+
+    views = for {_id, {:tool_call, view}} <- model.messages, do: view
+
+    assert Enum.map(views, & &1.summary) ==
+             Enum.map(read_only_calls, fn {_name, _args, summary} -> summary end)
+
+    assert Enum.all?(views, &(&1.preview_lines == []))
+  end
+
+  test "build/1 uses captured write_file previews instead of recomputing current disk state" do
+    session = fake_session_pid()
+    path = "/tmp/minga-agent-chat-write-preview.txt"
+
+    tool_call =
+      ToolCall.new("tc-write", "write_file", %{"path" => path, "content" => "new\n"})
+      |> ToolCall.set_preview(ToolApproval.build_file_diff_preview(path, "old\n", "new\n"))
+      |> ToolCall.complete("wrote file")
+
+    panel = %Panel{
+      cached_display_message_pairs: [{1, {:tool_call, tool_call}}],
+      cached_styled_messages: [nil]
+    }
+
+    model =
+      context(session, panel)
+      |> AgentChatBuilder.build()
+
+    assert {1, {:tool_call, view}} = List.first(model.messages)
+    assert view.name == "write_file"
+    assert view.summary == path
+    assert view.preview_kind == :diff
+    assert "file: #{path}" in view.preview_lines
+    assert "-old" in view.preview_lines
+    assert "+new" in view.preview_lines
+  end
+
+  test "build/1 does not invent write_file transcript previews from current disk state" do
+    session = fake_session_pid()
+    path = "/tmp/minga-agent-chat-write-preview.txt"
+
+    tool_call =
+      ToolCall.new("tc-write", "write_file", %{"path" => path, "content" => "new\n"})
+      |> ToolCall.complete("wrote file")
+
+    panel = %Panel{
+      cached_display_message_pairs: [{1, {:tool_call, tool_call}}],
+      cached_styled_messages: [nil]
+    }
+
+    model =
+      context(session, panel)
+      |> AgentChatBuilder.build()
+
+    assert {1, {:tool_call, view}} = List.first(model.messages)
+    assert view.name == "write_file"
+    assert view.summary == path
+    assert view.preview_kind == :target
+    assert view.preview_lines == []
   end
 
   defp message_summary({id, {:assistant, text}}), do: {id, :assistant, text}
