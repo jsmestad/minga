@@ -590,9 +590,9 @@ defmodule MingaEditor.Input.ScopedTest do
       end
     end
 
-    test "unrelated key is swallowed during approval", %{state: state} do
+    test "unrelated key passes through approval routing", %{state: state} do
       {:handled, new_state} = walk_surface_handlers(state, ?x, 0)
-      # The key is swallowed, pending_approval stays
+      # The approval handler passes it through, and downstream routing still handles the key.
       assert AgentAccess.agent(new_state).pending_approval != nil
     end
 

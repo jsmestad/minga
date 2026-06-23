@@ -4,7 +4,8 @@ defmodule MingaEditor.Input.ToolApproval do
 
   Active when `agent.pending_approval` is non-nil and the panel
   input is not focused. Handles y or Enter (approve), a (trust this tool for the session),
-  t (trust this tool for the current turn), n (deny), and swallows all other keys.
+  t (trust this tool for the current turn), n or Esc (deny), and lets unrelated keys continue
+  through normal editor routing.
   """
 
   @behaviour MingaEditor.Input.Handler
@@ -22,18 +23,24 @@ defmodule MingaEditor.Input.ToolApproval do
     agent = AgentAccess.agent(state)
 
     if is_map(agent.pending_approval) and not AgentAccess.input_focused?(state) do
-      {:handled, dispatch_approval(state, cp)}
+      dispatch_approval(state, cp)
     else
       {:passthrough, state}
     end
   end
 
-  @spec dispatch_approval(EditorState.t(), non_neg_integer()) :: EditorState.t()
-  defp dispatch_approval(state, ?y), do: Commands.execute(state, :agent_approve_tool)
-  defp dispatch_approval(state, 13), do: Commands.execute(state, :agent_approve_tool)
-  defp dispatch_approval(state, ?a), do: Commands.execute(state, :agent_trust_tool_session)
-  defp dispatch_approval(state, ?t), do: Commands.execute(state, :agent_trust_tool_turn)
-  defp dispatch_approval(state, ?n), do: Commands.execute(state, :agent_deny_tool)
-  defp dispatch_approval(state, 27), do: Commands.execute(state, :agent_dismiss_or_noop)
-  defp dispatch_approval(state, _cp), do: state
+  @spec dispatch_approval(EditorState.t(), non_neg_integer()) ::
+          MingaEditor.Input.Handler.result()
+  defp dispatch_approval(state, ?y), do: {:handled, Commands.execute(state, :agent_approve_tool)}
+  defp dispatch_approval(state, 13), do: {:handled, Commands.execute(state, :agent_approve_tool)}
+
+  defp dispatch_approval(state, ?a),
+    do: {:handled, Commands.execute(state, :agent_trust_tool_session)}
+
+  defp dispatch_approval(state, ?t),
+    do: {:handled, Commands.execute(state, :agent_trust_tool_turn)}
+
+  defp dispatch_approval(state, ?n), do: {:handled, Commands.execute(state, :agent_deny_tool)}
+  defp dispatch_approval(state, 27), do: {:handled, Commands.execute(state, :agent_deny_tool)}
+  defp dispatch_approval(state, _cp), do: {:passthrough, state}
 end
