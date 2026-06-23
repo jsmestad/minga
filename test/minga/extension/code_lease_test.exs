@@ -81,7 +81,16 @@ defmodule Minga.Extension.CodeLeaseTest do
   test "registered command callback holds a lease while executing", ctx do
     ext_ctx = start_extension_context()
     callback_name = :"leased_command_callback_#{System.unique_integer([:positive])}"
+    # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
     Process.register(self(), callback_name)
+
+    on_exit(fn ->
+      try do
+        Process.unregister(callback_name)
+      rescue
+        ArgumentError -> :ok
+      end
+    end)
 
     {path, cleanup} =
       make_extension("LeasedCommand", """

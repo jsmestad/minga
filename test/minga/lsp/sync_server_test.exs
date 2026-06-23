@@ -33,7 +33,7 @@ defmodule Minga.LSP.SyncServerTest do
       path = Path.join(dir, "resync.txt")
       buf = start_buffer(content: "hello", file_path: path)
       client = start_client()
-      :ets.insert(SyncServer.Registry, {buf, [client]})
+      SyncServer.put_clients(buf, [client])
 
       SyncServer.resync_buffers([buf])
       sync_server()
@@ -77,7 +77,7 @@ defmodule Minga.LSP.SyncServerTest do
       path = Path.join(dir, "cleanup.txt")
       buf = start_buffer(content: "hello", file_path: path)
       client = start_client()
-      :ets.insert(SyncServer.Registry, {buf, [client]})
+      SyncServer.put_clients(buf, [client])
       assert SyncServer.clients_for_buffer(buf) == [client]
 
       Events.broadcast(:buffer_closed, %Events.BufferClosedEvent{buffer: buf, path: path})
@@ -93,7 +93,7 @@ defmodule Minga.LSP.SyncServerTest do
       File.write!(path, "hello")
       buf = start_buffer(file_path: path)
       client = start_client(:full)
-      :ets.insert(SyncServer.Registry, {buf, [client]})
+      SyncServer.put_clients(buf, [client])
 
       Events.broadcast(:buffer_changed, changed_event(buf, nil))
 
@@ -108,7 +108,7 @@ defmodule Minga.LSP.SyncServerTest do
       client = start_client(:incremental)
       first = EditDelta.insertion(0, {0, 0}, "x", {0, 1})
       second = EditDelta.insertion(1, {0, 1}, "y", {0, 2})
-      :ets.insert(SyncServer.Registry, {buf, [client]})
+      SyncServer.put_clients(buf, [client])
 
       Events.broadcast(:buffer_changed, changed_event(buf, first))
       Events.broadcast(:buffer_changed, changed_event(buf, second))
@@ -124,7 +124,7 @@ defmodule Minga.LSP.SyncServerTest do
       buf = start_buffer(file_path: path)
       client = start_client(:incremental)
       delta = EditDelta.insertion(0, {0, 0}, "x", {0, 1})
-      :ets.insert(SyncServer.Registry, {buf, [client]})
+      SyncServer.put_clients(buf, [client])
 
       Events.broadcast(:buffer_changed, changed_event(buf, delta))
       Events.broadcast(:buffer_changed, changed_event(buf, nil, EditSource.unknown()))
@@ -150,7 +150,7 @@ defmodule Minga.LSP.SyncServerTest do
       buf = start_buffer(file_path: path)
       doomed = start_client()
       survivor = start_client()
-      :ets.insert(SyncServer.Registry, {buf, [doomed, survivor]})
+      SyncServer.put_clients(buf, [doomed, survivor])
       monitor_client_in_sync_server(buf, doomed)
 
       ref = Process.monitor(doomed)
@@ -220,7 +220,7 @@ defmodule Minga.LSP.SyncServerTest do
   end
 
   defp reset_sync_server do
-    :ets.delete_all_objects(SyncServer.Registry)
+    SyncServer.clear_registry()
 
     :sys.replace_state(SyncServer, fn state ->
       Enum.each(Map.values(state.debounce_timers), &Process.cancel_timer/1)

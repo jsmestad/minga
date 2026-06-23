@@ -90,10 +90,16 @@ defmodule Minga.Config.Loader do
       |> Options.validate_server!()
 
     cleanup_callbacks = Keyword.get(opts, :cleanup_callbacks)
+    config_home = Keyword.get(opts, :config_home)
 
     Agent.start_link(
       fn ->
-        load_all(keymap_server, options_server, Minga.SafeMode.active?(), cleanup_callbacks)
+        if config_home, do: Process.put(:minga_config_home, config_home)
+
+        state =
+          load_all(keymap_server, options_server, Minga.SafeMode.active?(), cleanup_callbacks)
+
+        if config_home, do: Map.put(state, :config_home, config_home), else: state
       end,
       name: name
     )
@@ -244,6 +250,8 @@ defmodule Minga.Config.Loader do
             }
         end)
 
+      config_home = Agent.get(server, &Map.get(&1, :config_home))
+
       maybe_reset_options(options_server)
       Hooks.reset()
       Advice.reset()
@@ -255,7 +263,15 @@ defmodule Minga.Config.Loader do
 
       # Re-run the full load sequence (includes starting extensions).
       # Reload deliberately ignores startup safe mode so fixed config can be loaded without restarting.
-      new_state = load_all(keymap_server, options_server, false, cleanup_callbacks)
+      if config_home, do: Process.put(:minga_config_home, config_home)
+
+      new_state =
+        try do
+          load_all(keymap_server, options_server, false, cleanup_callbacks)
+        after
+          if config_home, do: Process.delete(:minga_config_home)
+        end
+
       Agent.update(server, fn _ -> new_state end)
 
       # Return error if any stage had problems
@@ -486,14 +502,7 @@ defmodule Minga.Config.Loader do
 
   @spec user_plugins_dir() :: String.t()
   defp user_plugins_dir do
-    base =
-      case System.get_env("XDG_CONFIG_HOME") do
-        nil -> Path.expand("~/.config")
-        "" -> Path.expand("~/.config")
-        dir -> dir
-      end
-
-    Path.join([base, "minga", "plugins"])
+    Path.join([config_base_dir(), "minga", "plugins"])
   end
 
   @spec project_plugins_dir() :: String.t()
@@ -792,14 +801,22 @@ defmodule Minga.Config.Loader do
 
   @spec default_config_path() :: String.t()
   defp default_config_path do
-    base =
-      case System.get_env("XDG_CONFIG_HOME") do
-        nil -> Path.expand("~/.config")
-        "" -> Path.expand("~/.config")
-        dir -> dir
-      end
+    Path.join([config_base_dir(), "minga", "config.exs"])
+  end
 
-    Path.join([base, "minga", "config.exs"])
+  @spec config_base_dir() :: String.t()
+  defp config_base_dir do
+    case Process.get(:minga_config_home) do
+      dir when is_binary(dir) ->
+        dir
+
+      _ ->
+        case System.get_env("XDG_CONFIG_HOME") do
+          nil -> Path.expand("~/.config")
+          "" -> Path.expand("~/.config")
+          dir -> dir
+        end
+    end
   end
 
   @spec load_project_mcp_json() :: String.t() | nil

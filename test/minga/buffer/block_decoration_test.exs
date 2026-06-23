@@ -388,7 +388,7 @@ defmodule Minga.Buffer.BlockDecorationTest do
 
   describe "render callback invocation" do
     test "callback receives available width" do
-      :persistent_term.put(:test_block_width, nil)
+      test_pid = self()
 
       decs = Decorations.new()
 
@@ -396,17 +396,14 @@ defmodule Minga.Buffer.BlockDecorationTest do
         Decorations.add_block_decoration(decs, 0,
           placement: :above,
           render: fn w ->
-            :persistent_term.put(:test_block_width, w)
+            send(test_pid, {:test_block_width, w})
             [{"header", Minga.Core.Face.new()}]
           end
         )
 
-      # Invoke the render callback directly to verify it receives width
       block = hd(decs.block_decorations)
       block.render.(80)
-      assert :persistent_term.get(:test_block_width) == 80
-    after
-      :persistent_term.erase(:test_block_width)
+      assert_receive {:test_block_width, 80}
     end
   end
 

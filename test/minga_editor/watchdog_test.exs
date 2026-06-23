@@ -13,6 +13,8 @@ defmodule MingaEditor.WatchdogTest do
 
   describe "SIGUSR1 handling" do
     test "kills the editor process on SIGUSR1" do
+      editor_name = :"test_editor_for_watchdog_#{System.unique_integer([:positive])}"
+
       editor =
         spawn(fn ->
           receive do
@@ -20,10 +22,14 @@ defmodule MingaEditor.WatchdogTest do
           end
         end)
 
-      Process.register(editor, :test_editor_for_watchdog)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      Process.register(editor, editor_name)
 
       {:ok, watchdog} =
-        Watchdog.start_link(name: :test_watchdog_kill, editor_name: :test_editor_for_watchdog)
+        Watchdog.start_link(
+          name: :"test_watchdog_kill_#{System.unique_integer([:positive])}",
+          editor_name: editor_name
+        )
 
       ref = Process.monitor(editor)
 

@@ -46,8 +46,8 @@ defmodule Minga.Credo.NoBlockingEditorCallCheck do
     {"lib/minga_editor/agent/slash_command.ex", 1283},
     {"lib/minga_editor/ui/picker/todo_search_source.ex", 99},
     {"lib/minga_editor/ui/picker/todo_search_source.ex", 119},
-    {"lib/minga_editor/frontend/manager.ex", 308},
-    {"lib/minga_editor/frontend/manager.ex", 520}
+    {"lib/minga_editor/frontend/manager.ex", 313},
+    {"lib/minga_editor/frontend/manager.ex", 525}
   ]
 
   @impl Credo.Check

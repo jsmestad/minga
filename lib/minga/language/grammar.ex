@@ -41,6 +41,15 @@ defmodule Minga.Language.Grammar do
     :ok
   end
 
+  @doc "Removes a dynamic filetype-to-grammar mapping."
+  @spec unregister_language(atom()) :: :ok
+  def unregister_language(filetype) when is_atom(filetype) do
+    :ets.delete(:minga_grammar_registry, filetype)
+    :ok
+  rescue
+    ArgumentError -> :ok
+  end
+
   @doc """
   Returns the tree-sitter language name for a filetype atom.
 

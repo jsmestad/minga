@@ -75,17 +75,16 @@ defmodule MingaEditor.Agent.SlashCommandTest do
     start_supervised!({Session, provider: NoopProvider, provider_opts: []})
   end
 
-  defp with_xdg_config(dir, fun) do
-    previous = System.get_env("XDG_CONFIG_HOME")
-    System.put_env("XDG_CONFIG_HOME", dir)
+  defp with_config_home(dir, fun) do
+    previous = Process.put(:minga_config_home, dir)
 
     try do
       fun.()
     after
       if previous do
-        System.put_env("XDG_CONFIG_HOME", previous)
+        Process.put(:minga_config_home, previous)
       else
-        System.delete_env("XDG_CONFIG_HOME")
+        Process.delete(:minga_config_home)
       end
     end
   end
@@ -313,7 +312,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
     end
 
     test "/resume opens the persisted agent session picker", %{tmp_dir: dir} do
-      with_xdg_config(dir, fn ->
+      with_config_home(dir, fn ->
         SessionStore.save(
           %{
             id: "resume-target",
@@ -432,7 +431,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
     end
 
     test "/memory add and clear replace /remember and /forget", %{tmp_dir: dir} do
-      with_xdg_config(dir, fn ->
+      with_config_home(dir, fn ->
         {:ok, state} = SlashCommand.execute(mock_state(), "/memory add prefer small diffs")
         assert state.shell_state.status_msg == "Saved to memory: prefer small diffs"
         assert Memory.read(dir) =~ "prefer small diffs"
@@ -444,7 +443,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
     end
 
     test "/memory shows memory usage", %{tmp_dir: dir} do
-      with_xdg_config(dir, fn ->
+      with_config_home(dir, fn ->
         {:ok, state} = SlashCommand.execute(mock_state(), "/memory")
         assert state.shell_state.status_msg =~ "No memory file found"
       end)

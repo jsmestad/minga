@@ -29,7 +29,10 @@ defmodule MingaAgent.Memory do
   @spec path(String.t() | nil) :: String.t()
   def path(config_dir \\ nil) do
     base =
-      config_dir || System.get_env("XDG_CONFIG_HOME") || Path.join(System.user_home!(), ".config")
+      config_dir ||
+        Process.get(:minga_config_home) ||
+        System.get_env("XDG_CONFIG_HOME") ||
+        Path.join(System.user_home!(), ".config")
 
     Path.join([base, "minga", @memory_filename])
   end

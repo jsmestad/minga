@@ -977,7 +977,16 @@ defmodule Minga.Extension.LifecycleContractTest do
 
   test "concurrent double start with the same stale stopped entry is idempotent", ctx do
     gate_name = :"concurrent_double_start_gate_#{System.unique_integer([:positive])}"
+    # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
     true = Process.register(self(), gate_name)
+
+    on_exit(fn ->
+      try do
+        Process.unregister(gate_name)
+      rescue
+        ArgumentError -> :ok
+      end
+    end)
 
     {path, cleanup} =
       make_extension("ConcurrentDoubleStart", """

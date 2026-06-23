@@ -87,14 +87,8 @@ defmodule Minga.Git.BufferTest do
   end
 
   defp register_tracked_buffer(buffer, git_pid) do
-    table = Minga.Git.Tracker.Registry
-
-    if :ets.whereis(table) == :undefined do
-      :ets.new(table, [:named_table, :public, :set, read_concurrency: true])
-    end
-
-    :ets.insert(table, {buffer, git_pid})
-    on_exit(fn -> :ets.delete(table, buffer) end)
+    Minga.Git.Tracker.put_mapping(buffer, git_pid)
+    on_exit(fn -> Minga.Git.Tracker.remove_mapping(buffer) end)
   end
 
   defp conflict_content do

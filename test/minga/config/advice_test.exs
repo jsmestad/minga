@@ -15,9 +15,7 @@ defmodule Minga.Config.AdviceTest do
       read_concurrency: true
     ])
 
-    on_exit(fn ->
-      if :ets.whereis(table) != :undefined, do: :ets.delete(table)
-    end)
+    on_exit(fn -> Minga.Test.ETS.cleanup_table(table) end)
 
     %{table: table}
   end

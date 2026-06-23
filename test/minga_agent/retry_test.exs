@@ -115,7 +115,7 @@ defmodule MingaAgent.RetryTest do
         max_retries: 2,
         base_delay_ms: 1,
         on_retry: fn attempt, delay_ms, reason ->
-          :ets.insert(callback_log, {attempt, delay_ms, reason})
+          Minga.Test.ETS.put(callback_log, {attempt, delay_ms, reason})
         end
       )
 
@@ -125,10 +125,9 @@ defmodule MingaAgent.RetryTest do
       [{1, delay1, reason1}, {2, delay2, reason2}] = entries
       assert reason1 == "HTTP 500"
       assert reason2 == "HTTP 500"
-      # Exponential backoff: second delay should be roughly 2x the first
       assert delay2 > delay1
 
-      :ets.delete(callback_log)
+      Minga.Test.ETS.delete_table(callback_log)
     end
 
     test "zero max_retries means no retries" do

@@ -23,18 +23,10 @@ defmodule MingaEditor.Frontend.ManagerTest do
         Path.join(System.tmp_dir!(), "minga-renderer-go-#{System.unique_integer([:positive])}")
 
       File.write!(renderer_path, "")
-      previous_tty = System.get_env("MINGA_TTY")
-      System.put_env("MINGA_TTY", "/dev/tty")
       parent = self()
 
       on_exit(fn ->
         File.rm(renderer_path)
-
-        if previous_tty == nil do
-          System.delete_env("MINGA_TTY")
-        else
-          System.put_env("MINGA_TTY", previous_tty)
-        end
       end)
 
       capturing_opener = fn spec, opts ->
@@ -43,7 +35,11 @@ defmodule MingaEditor.Frontend.ManagerTest do
       end
 
       start_supervised!(
-        {Manager, name: name, renderer_path: renderer_path, port_opener: capturing_opener},
+        {Manager,
+         name: name,
+         renderer_path: renderer_path,
+         port_opener: capturing_opener,
+         tty_path: "/dev/tty"},
         id: name
       )
 

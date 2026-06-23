@@ -164,6 +164,21 @@ defmodule Minga.LoggerHandler do
     end
   end
 
+  @doc "Removes all entries from the log buffer table."
+  @spec clear_buffer() :: :ok
+  def clear_buffer do
+    :ets.delete_all_objects(@buffer_table)
+    :ok
+  end
+
+  @doc "Inserts a pre-formatted entry into the log buffer table."
+  @spec buffer_entry(String.t(), atom()) :: :ok
+  def buffer_entry(text, level) when is_binary(text) and is_atom(level) do
+    key = System.monotonic_time(:nanosecond)
+    :ets.insert(@buffer_table, {key, text, level})
+    :ok
+  end
+
   # ── :logger handler callbacks (OTP 21+) ────────────────────────────────────
 
   @doc false

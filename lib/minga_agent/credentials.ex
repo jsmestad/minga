@@ -313,7 +313,13 @@ defmodule MingaAgent.Credentials do
         :error
 
       var_name ->
-        case System.get_env(var_name) do
+        value =
+          case Process.get(:minga_env_overrides) do
+            %{^var_name => val} -> val
+            _ -> System.get_env(var_name)
+          end
+
+        case value do
           nil -> :error
           "" -> :error
           key -> {:ok, key}
@@ -358,7 +364,11 @@ defmodule MingaAgent.Credentials do
 
   @spec credentials_path() :: String.t()
   defp credentials_path do
-    config_dir = System.get_env("XDG_CONFIG_HOME") || Path.join(System.user_home!(), ".config")
+    config_dir =
+      Process.get(:minga_config_home) ||
+        System.get_env("XDG_CONFIG_HOME") ||
+        Path.join(System.user_home!(), ".config")
+
     Path.join([config_dir, "minga", @credentials_filename])
   end
 end

@@ -1,10 +1,8 @@
 defmodule MingaEditor.UI.Picker.CommandSourceFrecencyTest do
   @moduledoc "Tests command palette frecency ordering, persistence, and selection recording."
 
-  # Mutates process-global XDG_CONFIG_HOME and the global Minga.Project singleton.
+  # Mutates the global Minga.Project singleton command frecency state.
   use ExUnit.Case, async: false
-
-  @moduletag :tmp_dir
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Project
@@ -23,18 +21,14 @@ defmodule MingaEditor.UI.Picker.CommandSourceFrecencyTest do
   alias MingaEditor.VimState
   alias MingaEditor.Session.State, as: SessionState
 
-  setup %{tmp_dir: tmp_dir} do
-    previous_config_home = System.get_env("XDG_CONFIG_HOME")
-    config_home = Path.join(tmp_dir, "config")
-    File.mkdir_p!(Path.join(config_home, "minga"))
-    System.put_env("XDG_CONFIG_HOME", config_home)
-
+  setup do
     previous_command_frecency = Project.command_frecency()
     reset_global_command_frecency()
+    File.rm(command_frecency_path())
 
     on_exit(fn ->
-      restore_xdg_config_home(previous_config_home)
       restore_global_command_frecency(previous_command_frecency)
+      File.rm(command_frecency_path())
     end)
 
     :ok
@@ -180,11 +174,9 @@ defmodule MingaEditor.UI.Picker.CommandSourceFrecencyTest do
   end
 
   defp command_frecency_path do
-    Path.join([System.fetch_env!("XDG_CONFIG_HOME"), "minga", "command-frecency"])
+    config_dir = System.get_env("XDG_CONFIG_HOME") || Path.expand("~/.config")
+    Path.join([config_dir, "minga", "command-frecency"])
   end
-
-  defp restore_xdg_config_home(nil), do: System.delete_env("XDG_CONFIG_HOME")
-  defp restore_xdg_config_home(value), do: System.put_env("XDG_CONFIG_HOME", value)
 
   defp save_buffer do
     path =

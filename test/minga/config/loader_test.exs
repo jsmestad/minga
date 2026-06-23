@@ -88,7 +88,7 @@ defmodule Minga.Config.LoaderTest do
 
   describe "loading valid config" do
     test "applies set options from config file" do
-      {_dir, cleanup} =
+      {_dir, config_home, cleanup} =
         make_config_dir("""
         use Minga.Config
 
@@ -99,7 +99,7 @@ defmodule Minga.Config.LoaderTest do
       on_exit(cleanup)
 
       name = :"loader_valid_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name)
+      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
 
       assert Loader.load_error(pid) == nil
       assert Options.get(test_options_server(), :tab_width) == 4
@@ -107,7 +107,7 @@ defmodule Minga.Config.LoaderTest do
     end
 
     test "loads the built-in MCP extension and mcp_server DSL" do
-      {_dir, cleanup} =
+      {_dir, config_home, cleanup} =
         make_config_dir("""
         use Minga.Config
 
@@ -118,7 +118,7 @@ defmodule Minga.Config.LoaderTest do
       on_exit(cleanup)
 
       name = :"loader_mcp_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name)
+      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
 
       assert Loader.load_error(pid) == nil
       assert {:ok, entry} = ExtRegistry.get(:minga_mcp)
@@ -132,7 +132,7 @@ defmodule Minga.Config.LoaderTest do
   end
 
   test "starts extensions declared in project and after config after all config sources load" do
-    {minga_dir, cleanup} =
+    {minga_dir, config_home, cleanup} =
       make_config_dir("""
       use Minga.Config
 
@@ -232,7 +232,7 @@ defmodule Minga.Config.LoaderTest do
     end)
 
     name = :"loader_project_after_ext_#{System.unique_integer([:positive])}"
-    {:ok, pid} = Loader.start_link(name: name)
+    {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
 
     assert Loader.load_error(pid) == nil
     assert {:ok, project_entry} = ExtRegistry.get(:project_config_ext)
@@ -245,7 +245,7 @@ defmodule Minga.Config.LoaderTest do
 
   describe "loading LSP settings" do
     test "deep-merges user lsp_settings with server defaults" do
-      {_dir, cleanup} =
+      {_dir, config_home, cleanup} =
         make_config_dir("""
         use Minga.Config
 
@@ -256,7 +256,7 @@ defmodule Minga.Config.LoaderTest do
       on_exit(cleanup)
 
       name = :"loader_lsp_settings_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name)
+      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
 
       server_config = %ServerConfig{
         name: :mock_lsp,
@@ -285,7 +285,7 @@ defmodule Minga.Config.LoaderTest do
     end
 
     test "supports exact LSP section keys with punctuation" do
-      {_dir, cleanup} =
+      {_dir, config_home, cleanup} =
         make_config_dir("""
         use Minga.Config
 
@@ -297,7 +297,7 @@ defmodule Minga.Config.LoaderTest do
       on_exit(cleanup)
 
       name = :"loader_lsp_section_keys_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name)
+      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
 
       server_config = %ServerConfig{
         name: :rust_analyzer,
@@ -319,7 +319,7 @@ defmodule Minga.Config.LoaderTest do
     end
 
     test "preserves empty list setting values" do
-      {_dir, cleanup} =
+      {_dir, config_home, cleanup} =
         make_config_dir("""
         use Minga.Config
 
@@ -329,7 +329,7 @@ defmodule Minga.Config.LoaderTest do
       on_exit(cleanup)
 
       name = :"loader_lsp_empty_list_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name)
+      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
 
       server_config = %ServerConfig{name: :mock_lsp, command: "mock-lsp"}
 
@@ -359,11 +359,11 @@ defmodule Minga.Config.LoaderTest do
       ]
 
       for {label, config, expected_fragments} <- cases do
-        {_dir, cleanup} = make_config_dir(config)
+        {_dir, config_home, cleanup} = make_config_dir(config)
 
         try do
           name = :"loader_#{label}_#{System.unique_integer([:positive])}"
-          {:ok, pid} = Loader.start_link(name: name)
+          {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
 
           error = Loader.load_error(pid)
           assert is_binary(error)
@@ -380,17 +380,14 @@ defmodule Minga.Config.LoaderTest do
       empty_dir =
         Path.join(System.tmp_dir!(), "minga_empty_#{System.unique_integer([:positive])}")
 
-      previous_xdg_config_home = System.get_env("XDG_CONFIG_HOME")
       File.mkdir_p!(empty_dir)
-      System.put_env("XDG_CONFIG_HOME", empty_dir)
 
       on_exit(fn ->
-        restore_xdg_config_home(previous_xdg_config_home)
         File.rm_rf!(empty_dir)
       end)
 
       name = :"loader_missing_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name)
+      {:ok, pid} = Loader.start_link(name: name, config_home: empty_dir)
 
       assert Loader.load_error(pid) == nil
     end
@@ -398,7 +395,7 @@ defmodule Minga.Config.LoaderTest do
 
   describe "user module compilation" do
     test "compiles valid modules from the modules directory" do
-      {minga_dir, cleanup} = make_config_dir("")
+      {minga_dir, config_home, cleanup} = make_config_dir("")
       modules_dir = Path.join(minga_dir, "modules")
       File.mkdir_p!(modules_dir)
 
@@ -415,7 +412,7 @@ defmodule Minga.Config.LoaderTest do
       end)
 
       name = :"loader_modules_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name)
+      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
 
       assert Minga.UserModules.Greeter in Loader.loaded_modules(pid)
       assert apply(Minga.UserModules.Greeter, :hello, []) == "world"
@@ -423,7 +420,7 @@ defmodule Minga.Config.LoaderTest do
     end
 
     test "a compile error in one module does not prevent others from loading" do
-      {minga_dir, cleanup} = make_config_dir("")
+      {minga_dir, config_home, cleanup} = make_config_dir("")
       modules_dir = Path.join(minga_dir, "modules")
       File.mkdir_p!(modules_dir)
 
@@ -448,7 +445,7 @@ defmodule Minga.Config.LoaderTest do
       end)
 
       name = :"loader_mixed_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name)
+      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
 
       assert Minga.UserModules.Good in Loader.loaded_modules(pid)
       assert apply(Minga.UserModules.Good, :ok?, []) == true
@@ -457,11 +454,11 @@ defmodule Minga.Config.LoaderTest do
     end
 
     test "no error when modules directory does not exist" do
-      {_dir, cleanup} = make_config_dir("")
+      {_dir, config_home, cleanup} = make_config_dir("")
       on_exit(cleanup)
 
       name = :"loader_no_modules_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name)
+      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
 
       assert Loader.loaded_modules(pid) == []
       assert Loader.modules_errors(pid) == []
@@ -470,7 +467,7 @@ defmodule Minga.Config.LoaderTest do
 
   describe "project-local config" do
     test ".minga.exs in cwd overrides global settings" do
-      {_dir, cleanup} =
+      {_dir, config_home, cleanup} =
         make_config_dir("""
         use Minga.Config
         set :tab_width, 2
@@ -497,14 +494,14 @@ defmodule Minga.Config.LoaderTest do
       end)
 
       name = :"loader_project_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name)
+      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
 
       assert Loader.project_config_error(pid) == nil
       assert Options.get(test_options_server(), :tab_width) == 8
     end
 
     test "loads project-local .minga/mcp.json" do
-      {_dir, cleanup} = make_config_dir("use Minga.Config\n")
+      {_dir, config_home, cleanup} = make_config_dir("use Minga.Config\n")
 
       project_dir =
         Path.join(System.tmp_dir!(), "minga_mcp_json_#{System.unique_integer([:positive])}")
@@ -526,7 +523,7 @@ defmodule Minga.Config.LoaderTest do
       end)
 
       name = :"loader_project_mcp_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name)
+      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
 
       assert Loader.load_error(pid) == nil
       assert [server] = Options.get(test_options_server(), :agent_mcp_servers)
@@ -535,7 +532,7 @@ defmodule Minga.Config.LoaderTest do
     end
 
     test "reports a clear error when mcpServers contains a non-map value" do
-      {_dir, cleanup} = make_config_dir("use Minga.Config\n")
+      {_dir, config_home, cleanup} = make_config_dir("use Minga.Config\n")
 
       project_dir =
         Path.join(System.tmp_dir!(), "minga_mcp_json_bad_#{System.unique_integer([:positive])}")
@@ -557,14 +554,14 @@ defmodule Minga.Config.LoaderTest do
       end)
 
       name = :"loader_project_mcp_bad_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name)
+      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
 
       assert Loader.load_error(pid) =~ ".minga/mcp.json mcpServers.github must be a map, got: 42"
       assert Options.get(test_options_server(), :agent_mcp_servers) == []
     end
 
     test "no error when .minga.exs does not exist" do
-      {_dir, cleanup} = make_config_dir("")
+      {_dir, config_home, cleanup} = make_config_dir("")
 
       # Use a temp dir with no .minga.exs
       project_dir =
@@ -581,7 +578,7 @@ defmodule Minga.Config.LoaderTest do
       end)
 
       name = :"loader_noproj_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name)
+      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
 
       assert Loader.project_config_error(pid) == nil
     end
@@ -589,7 +586,7 @@ defmodule Minga.Config.LoaderTest do
 
   describe "gui_settings.exs" do
     test "overrides project config before after.exs" do
-      {minga_dir, cleanup} =
+      {minga_dir, config_home, cleanup} =
         make_config_dir("""
         use Minga.Config
         set :tab_width, 2
@@ -620,14 +617,14 @@ defmodule Minga.Config.LoaderTest do
       end)
 
       name = :"loader_gui_settings_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name)
+      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
 
       assert Loader.gui_settings_error(pid) == nil
       assert Options.get(test_options_server(), :tab_width) == 8
     end
 
     test "after.exs still overrides gui_settings.exs" do
-      {minga_dir, cleanup} =
+      {minga_dir, config_home, cleanup} =
         make_config_dir("""
         use Minga.Config
         set :tab_width, 2
@@ -663,7 +660,7 @@ defmodule Minga.Config.LoaderTest do
       end)
 
       name = :"loader_gui_after_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name)
+      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
 
       assert Loader.gui_settings_error(pid) == nil
       assert Loader.after_error(pid) == nil
@@ -671,7 +668,7 @@ defmodule Minga.Config.LoaderTest do
     end
 
     test "reload picks up gui_settings.exs changes with the same precedence" do
-      {minga_dir, cleanup} =
+      {minga_dir, config_home, cleanup} =
         make_config_dir("""
         use Minga.Config
         set :tab_width, 2
@@ -690,7 +687,7 @@ defmodule Minga.Config.LoaderTest do
       on_exit(cleanup)
 
       name = :"loader_gui_reload_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name)
+      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
       assert Options.get(test_options_server(), :tab_width) == 4
       assert Options.get(test_options_server(), :line_numbers) == :absolute
 
@@ -706,7 +703,7 @@ defmodule Minga.Config.LoaderTest do
     end
 
     test "marks gui_settings.exs values as explicit so GUI defaults preserve them" do
-      {minga_dir, cleanup} =
+      {minga_dir, config_home, cleanup} =
         make_config_dir("""
         use Minga.Config
         set :tab_width, 2
@@ -720,7 +717,7 @@ defmodule Minga.Config.LoaderTest do
       on_exit(cleanup)
 
       name = :"loader_gui_explicit_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name)
+      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
 
       assert Loader.gui_settings_error(pid) == nil
       assert Options.get(test_options_server(), :line_numbers) == :hybrid
@@ -732,7 +729,7 @@ defmodule Minga.Config.LoaderTest do
     end
 
     test "gui_settings.exs default-valued selections override config.exs values" do
-      {minga_dir, cleanup} =
+      {minga_dir, config_home, cleanup} =
         make_config_dir("""
         use Minga.Config
         set :line_spacing, 1.2
@@ -748,7 +745,7 @@ defmodule Minga.Config.LoaderTest do
       on_exit(cleanup)
 
       name = :"loader_gui_default_values_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name)
+      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
 
       assert Loader.gui_settings_error(pid) == nil
       assert Options.get(test_options_server(), :line_spacing) == 1.0
@@ -762,7 +759,7 @@ defmodule Minga.Config.LoaderTest do
     end
 
     test "non-GUI config sources do not mark options explicit" do
-      {_minga_dir, cleanup} =
+      {_minga_dir, config_home, cleanup} =
         make_config_dir("""
         use Minga.Config
         set :tab_width, 2
@@ -791,7 +788,7 @@ defmodule Minga.Config.LoaderTest do
       end)
 
       name = :"loader_non_gui_explicit_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name)
+      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
 
       assert Loader.gui_settings_error(pid) == nil
       refute Options.explicitly_set?(test_options_server(), :line_numbers)
@@ -800,7 +797,7 @@ defmodule Minga.Config.LoaderTest do
 
   describe "after.exs" do
     test "after.exs runs after config and can use user modules" do
-      {minga_dir, cleanup} = make_config_dir("")
+      {minga_dir, config_home, cleanup} = make_config_dir("")
       modules_dir = Path.join(minga_dir, "modules")
       File.mkdir_p!(modules_dir)
 
@@ -822,7 +819,7 @@ defmodule Minga.Config.LoaderTest do
       end)
 
       name = :"loader_after_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name)
+      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
 
       assert Loader.after_error(pid) == nil
       assert Options.get(test_options_server(), :tab_width) == 6
@@ -831,7 +828,7 @@ defmodule Minga.Config.LoaderTest do
 
   describe "reload/1" do
     test "loads modeline_segment declarations from config" do
-      {_dir, cleanup} =
+      {_dir, config_home, cleanup} =
         make_config_dir("""
         use Minga.Config
 
@@ -843,14 +840,14 @@ defmodule Minga.Config.LoaderTest do
       on_exit(cleanup)
 
       name = :"loader_modeline_segment_#{System.unique_integer([:positive])}"
-      {:ok, _pid} = Loader.start_link(name: name)
+      {:ok, _pid} = Loader.start_link(name: name, config_home: config_home)
 
       assert %{side: :left, priority: 42, source: :config} =
                ModelineSegments.lookup(:loader_words)
     end
 
     test "reload replaces stale config modeline segments" do
-      {minga_dir, cleanup} =
+      {minga_dir, config_home, cleanup} =
         make_config_dir("""
         use Minga.Config
 
@@ -862,7 +859,7 @@ defmodule Minga.Config.LoaderTest do
       on_exit(cleanup)
 
       name = :"loader_reload_modeline_segment_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name)
+      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
       assert ModelineSegments.lookup(:loader_stale_segment) != nil
 
       File.write!(Path.join(minga_dir, "config.exs"), """
@@ -885,7 +882,7 @@ defmodule Minga.Config.LoaderTest do
         callbacks: %{themes: &Theme.unregister_source/1}
       )
 
-      {minga_dir, cleanup} =
+      {minga_dir, config_home, cleanup} =
         make_config_dir("""
         use Minga.Config
 
@@ -931,7 +928,7 @@ defmodule Minga.Config.LoaderTest do
       end)
 
       name = :"loader_reload_registry_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name)
+      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
 
       {:ok, keys} = Minga.Keymap.KeyParser.parse("C-j")
 
@@ -1015,7 +1012,7 @@ defmodule Minga.Config.LoaderTest do
     end
 
     test "reload surfaces config cleanup failures in the loader error state" do
-      {_dir, cleanup} =
+      {_dir, config_home, cleanup} =
         make_config_dir("""
         use Minga.Config
         set :tab_width, 2
@@ -1031,7 +1028,7 @@ defmodule Minga.Config.LoaderTest do
       }
 
       name = :"loader_reload_cleanup_failure_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name)
+      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
       assert Loader.load_error(pid) == nil
       Agent.update(pid, &Map.put(&1, :cleanup_callbacks, cleanup_callbacks))
 
@@ -1042,7 +1039,7 @@ defmodule Minga.Config.LoaderTest do
     end
 
     test "reload surfaces stop_all failures instead of silently proceeding" do
-      {_dir, cleanup} =
+      {_dir, config_home, cleanup} =
         make_config_dir("""
         use Minga.Config
         set :tab_width, 2
@@ -1058,7 +1055,7 @@ defmodule Minga.Config.LoaderTest do
       end)
 
       name = :"loader_reload_stop_all_failure_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name)
+      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
       assert Loader.load_error(pid) == nil
       assert Options.get(test_options_server(), :tab_width) == 2
 
@@ -1129,7 +1126,7 @@ defmodule Minga.Config.LoaderTest do
     end
 
     test "reload surfaces start_all failures with cleanup details" do
-      {minga_dir, cleanup} =
+      {minga_dir, config_home, cleanup} =
         make_config_dir("""
         use Minga.Config
         set :tab_width, 2
@@ -1195,7 +1192,14 @@ defmodule Minga.Config.LoaderTest do
       }
 
       name = :"loader_reload_start_all_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name, cleanup_callbacks: cleanup_callbacks)
+
+      {:ok, pid} =
+        Loader.start_link(
+          name: name,
+          cleanup_callbacks: cleanup_callbacks,
+          config_home: config_home
+        )
+
       assert Loader.load_error(pid) == nil
 
       File.write!(
@@ -1216,7 +1220,7 @@ defmodule Minga.Config.LoaderTest do
     end
 
     test "reload picks up changed config values" do
-      {minga_dir, cleanup} =
+      {minga_dir, config_home, cleanup} =
         make_config_dir("""
         use Minga.Config
         set :tab_width, 3
@@ -1225,7 +1229,7 @@ defmodule Minga.Config.LoaderTest do
       on_exit(cleanup)
 
       name = :"loader_reload_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name)
+      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
       assert Options.get(test_options_server(), :tab_width) == 3
 
       # Change the config file
@@ -1239,7 +1243,7 @@ defmodule Minga.Config.LoaderTest do
     end
 
     test "reload purges old user modules" do
-      {minga_dir, cleanup} = make_config_dir("")
+      {minga_dir, config_home, cleanup} = make_config_dir("")
       modules_dir = Path.join(minga_dir, "modules")
       File.mkdir_p!(modules_dir)
 
@@ -1256,7 +1260,7 @@ defmodule Minga.Config.LoaderTest do
       end)
 
       name = :"loader_reload_mod_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name)
+      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
       assert apply(Minga.UserModules.Reloadable, :version, []) == 1
 
       # Update the module
@@ -1271,7 +1275,7 @@ defmodule Minga.Config.LoaderTest do
     end
 
     test "reload clears stale user commands" do
-      {minga_dir, cleanup} =
+      {minga_dir, config_home, cleanup} =
         make_config_dir("""
         use Minga.Config
         command :my_custom, "Custom command" do
@@ -1282,7 +1286,7 @@ defmodule Minga.Config.LoaderTest do
       on_exit(cleanup)
 
       name = :"loader_reload_cmd_#{System.unique_integer([:positive])}"
-      {:ok, _pid} = Loader.start_link(name: name)
+      {:ok, _pid} = Loader.start_link(name: name, config_home: config_home)
       assert {:ok, _} = CommandRegistry.lookup(CommandRegistry, :my_custom)
 
       # Remove the command from config
@@ -1296,7 +1300,7 @@ defmodule Minga.Config.LoaderTest do
     end
 
     test "reload returns error tuple when config has errors" do
-      {minga_dir, cleanup} =
+      {minga_dir, config_home, cleanup} =
         make_config_dir("""
         use Minga.Config
         set :tab_width, 2
@@ -1305,7 +1309,7 @@ defmodule Minga.Config.LoaderTest do
       on_exit(cleanup)
 
       name = :"loader_reload_err_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name)
+      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
 
       # Break the config
       File.write!(Path.join(minga_dir, "config.exs"), """
@@ -1322,13 +1326,13 @@ defmodule Minga.Config.LoaderTest do
       # The bridge mutations happen inside the Agent process running load_all,
       # not in the calling process. Verify nothing leaks back: the test's own
       # pdict value (set by setup) must be unchanged after Loader runs.
-      {_dir, cleanup} = make_config_dir("")
+      {_dir, config_home, cleanup} = make_config_dir("")
       on_exit(cleanup)
 
       caller_before = Process.get(:minga_config_options)
 
       name = :"loader_pdict_isolation_#{System.unique_integer([:positive])}"
-      {:ok, _pid} = Loader.start_link(name: name)
+      {:ok, _pid} = Loader.start_link(name: name, config_home: config_home)
 
       assert Process.get(:minga_config_options) == caller_before
     end
@@ -1339,7 +1343,7 @@ defmodule Minga.Config.LoaderTest do
       # the raise path and confirms (a) the loader still starts cleanly and
       # (b) the error is captured rather than crashing the Agent. If the bridge
       # had leaked, subsequent Loader.load_error/1 calls would fail.
-      {_dir, cleanup} =
+      {_dir, config_home, cleanup} =
         make_config_dir("""
         use Minga.Config
         raise "intentional config-eval failure"
@@ -1350,7 +1354,7 @@ defmodule Minga.Config.LoaderTest do
       caller_before = Process.get(:minga_config_options)
 
       name = :"loader_raise_pdict_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name)
+      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
 
       assert is_binary(Loader.load_error(pid))
       assert Process.get(:minga_config_options) == caller_before
@@ -1365,7 +1369,7 @@ defmodule Minga.Config.LoaderTest do
       original_level = Logger.level()
       Logger.configure(level: :info)
 
-      {_dir, cleanup} =
+      {_dir, config_home, cleanup} =
         make_config_dir("""
         use Minga.Config
         set :log_level, :error
@@ -1377,7 +1381,7 @@ defmodule Minga.Config.LoaderTest do
       end)
 
       name = :"loader_log_level_raise_#{System.unique_integer([:positive])}"
-      {:ok, _pid} = Loader.start_link(name: name)
+      {:ok, _pid} = Loader.start_link(name: name, config_home: config_home)
 
       assert Logger.level() == :error
     end
@@ -1386,7 +1390,7 @@ defmodule Minga.Config.LoaderTest do
       original_level = Logger.level()
       Logger.configure(level: :error)
 
-      {_dir, cleanup} =
+      {_dir, config_home, cleanup} =
         make_config_dir("""
         use Minga.Config
         set :log_level, :debug
@@ -1398,7 +1402,7 @@ defmodule Minga.Config.LoaderTest do
       end)
 
       name = :"loader_log_level_keep_#{System.unique_integer([:positive])}"
-      {:ok, _pid} = Loader.start_link(name: name)
+      {:ok, _pid} = Loader.start_link(name: name, config_home: config_home)
 
       # :debug is not :gt :error, so Logger.configure must not have been
       # called: the existing :error level wins.
@@ -1409,13 +1413,17 @@ defmodule Minga.Config.LoaderTest do
       # Pointing the loader at a registered name with no backing ETS table
       # would otherwise crash apply_log_level/1 on :ets.lookup. The narrow
       # rescue keeps loader startup unaffected; everything else still runs.
-      {_dir, cleanup} = make_config_dir("")
+      {_dir, config_home, cleanup} = make_config_dir("")
       on_exit(cleanup)
 
       name = :"loader_log_level_rescue_#{System.unique_integer([:positive])}"
 
       assert {:ok, _pid} =
-               Loader.start_link(name: name, options_server: :nonexistent_options_server)
+               Loader.start_link(
+                 name: name,
+                 options_server: :nonexistent_options_server,
+                 config_home: config_home
+               )
     end
   end
 
@@ -1435,7 +1443,7 @@ defmodule Minga.Config.LoaderTest do
 
       # Also set up a standard XDG config with a different value so we can
       # confirm the custom one wins
-      {_dir, cleanup} =
+      {_dir, config_home, cleanup} =
         make_config_dir("""
         use Minga.Config
         set :tab_width, 2
@@ -1455,7 +1463,7 @@ defmodule Minga.Config.LoaderTest do
       end)
 
       name = :"loader_custom_cfg_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name)
+      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
 
       # The custom config should have been loaded (tab_width = 42)
       assert Options.get(test_options_server(), :tab_width) == 42
@@ -1474,22 +1482,18 @@ defmodule Minga.Config.LoaderTest do
         config_file: custom_path
       })
 
-      # Set up XDG so the loader doesn't try to read a real config
       empty_dir =
         Path.join(System.tmp_dir!(), "minga_empty_#{System.unique_integer([:positive])}")
 
-      previous_xdg_config_home = System.get_env("XDG_CONFIG_HOME")
       File.mkdir_p!(empty_dir)
-      System.put_env("XDG_CONFIG_HOME", empty_dir)
 
       on_exit(fn ->
         Application.delete_env(:minga, :cli_startup_flags)
-        restore_xdg_config_home(previous_xdg_config_home)
         File.rm_rf!(empty_dir)
       end)
 
       name = :"loader_missing_custom_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name)
+      {:ok, pid} = Loader.start_link(name: name, config_home: empty_dir)
 
       # User explicitly requested a file that doesn't exist: warn them
       assert Loader.load_error(pid) =~ "Custom config not found"
@@ -1510,7 +1514,7 @@ defmodule Minga.Config.LoaderTest do
       set :tab_width, 7
       """)
 
-      {_dir, cleanup} = make_config_dir("")
+      {_dir, config_home, cleanup} = make_config_dir("")
 
       Application.put_env(:minga, :cli_startup_flags, %{
         view_mode: :auto,
@@ -1525,7 +1529,7 @@ defmodule Minga.Config.LoaderTest do
       end)
 
       name = :"loader_noexs_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name)
+      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
 
       # The file was loaded (tab_width changed), but a warning is shown
       assert Options.get(test_options_server(), :tab_width) == 7
@@ -1546,7 +1550,7 @@ defmodule Minga.Config.LoaderTest do
       """)
 
       # Set up XDG (even though it won't be used for global config)
-      {_dir, cleanup} = make_config_dir("")
+      {_dir, config_home, cleanup} = make_config_dir("")
 
       # Create .minga.exs in a temp project dir
       project_dir =
@@ -1577,7 +1581,7 @@ defmodule Minga.Config.LoaderTest do
       end)
 
       name = :"loader_custom_proj_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name)
+      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
 
       # Project-local config overrides the custom global config (last writer wins)
       assert Options.get(test_options_server(), :tab_width) == 99
@@ -1587,7 +1591,7 @@ defmodule Minga.Config.LoaderTest do
     test "without --config flag, loader uses the default XDG path" do
       Application.delete_env(:minga, :cli_startup_flags)
 
-      {_dir, cleanup} =
+      {_dir, config_home, cleanup} =
         make_config_dir("""
         use Minga.Config
         set :tab_width, 5
@@ -1599,7 +1603,7 @@ defmodule Minga.Config.LoaderTest do
       end)
 
       name = :"loader_no_flag_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name)
+      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
 
       assert Options.get(test_options_server(), :tab_width) == 5
       # config_path should be the standard XDG path
@@ -1618,7 +1622,7 @@ defmodule Minga.Config.LoaderTest do
       set :tab_width, 11
       """)
 
-      {_dir, cleanup} = make_config_dir("")
+      {_dir, config_home, cleanup} = make_config_dir("")
 
       Application.put_env(:minga, :cli_startup_flags, %{
         view_mode: :auto,
@@ -1633,7 +1637,7 @@ defmodule Minga.Config.LoaderTest do
       end)
 
       name = :"loader_reload_custom_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name)
+      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
       assert Options.get(test_options_server(), :tab_width) == 11
 
       # Change the custom config
@@ -1651,7 +1655,7 @@ defmodule Minga.Config.LoaderTest do
 
   describe "safe mode" do
     test "skips user modules and all config eval stages" do
-      {minga_dir, cleanup} =
+      {minga_dir, config_home, cleanup} =
         make_config_dir("""
         use Minga.Config
         set :tab_width, 42
@@ -1690,7 +1694,7 @@ defmodule Minga.Config.LoaderTest do
       end)
 
       name = :"loader_safe_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name)
+      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
 
       assert Options.get(test_options_server(), :tab_width) == 2
       assert Loader.loaded_modules(pid) == []
@@ -1702,7 +1706,7 @@ defmodule Minga.Config.LoaderTest do
     end
 
     test "skips bundled extension registration and startup" do
-      {_minga_dir, cleanup} = make_config_dir("use Minga.Config\n")
+      {_minga_dir, config_home, cleanup} = make_config_dir("use Minga.Config\n")
       previous_load_extensions = Application.get_env(:minga, :load_extensions)
 
       Application.put_env(:minga, :load_extensions, true)
@@ -1716,13 +1720,13 @@ defmodule Minga.Config.LoaderTest do
       end)
 
       name = :"loader_safe_extensions_#{System.unique_integer([:positive])}"
-      {:ok, _pid} = Loader.start_link(name: name)
+      {:ok, _pid} = Loader.start_link(name: name, config_home: config_home)
 
       assert ExtRegistry.all() == []
     end
 
     test "reload loads user config even when startup safe mode remains active" do
-      {_minga_dir, cleanup} =
+      {_minga_dir, config_home, cleanup} =
         make_config_dir("""
         use Minga.Config
         set :tab_width, 46
@@ -1736,7 +1740,7 @@ defmodule Minga.Config.LoaderTest do
       end)
 
       name = :"loader_safe_reload_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name)
+      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
       assert Options.get(test_options_server(), :tab_width) == 2
 
       assert :ok = Loader.reload(pid)
@@ -1755,35 +1759,20 @@ defmodule Minga.Config.LoaderTest do
   end
 
   # Creates a temporary directory structure that mimics XDG_CONFIG_HOME with
-  # a minga/config.exs file. Returns `{minga_dir, cleanup_fn}`.
-  @spec make_config_dir(String.t()) :: {String.t(), (-> :ok)}
+  # a minga/config.exs file. Returns `{minga_dir, config_home, cleanup_fn}`.
+  # Pass `config_home` as `config_home:` to `Loader.start_link/1`.
+  @spec make_config_dir(String.t()) :: {String.t(), String.t(), (-> :ok)}
   defp make_config_dir(config_content) do
     base = Path.join(System.tmp_dir!(), "minga_cfg_#{System.unique_integer([:positive])}")
     minga_dir = Path.join(base, "minga")
     File.mkdir_p!(minga_dir)
     File.write!(Path.join(minga_dir, "config.exs"), config_content)
-    previous_xdg_config_home = System.get_env("XDG_CONFIG_HOME")
-    System.put_env("XDG_CONFIG_HOME", base)
 
-    # The per-test Options server started in setup is auto-cleaned by
-    # start_supervised!, so no explicit reset is needed here.
     cleanup = fn ->
-      restore_xdg_config_home(previous_xdg_config_home)
       File.rm_rf!(base)
     end
 
-    {minga_dir, cleanup}
-  end
-
-  @spec restore_xdg_config_home(String.t() | nil) :: :ok
-  defp restore_xdg_config_home(nil) do
-    System.delete_env("XDG_CONFIG_HOME")
-    :ok
-  end
-
-  defp restore_xdg_config_home(path) when is_binary(path) do
-    System.put_env("XDG_CONFIG_HOME", path)
-    :ok
+    {minga_dir, base, cleanup}
   end
 
   @spec restore_application_env(atom(), term()) :: :ok

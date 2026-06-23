@@ -34,7 +34,7 @@ defmodule MingaEditor.SystemWakeTest do
 
     stale_client = spawn(fn -> receive do: (_ -> :ok) end)
     on_exit(fn -> Process.exit(stale_client, :kill) end)
-    :ets.insert(SyncServer.Registry, {inactive_buffer, [stale_client]})
+    SyncServer.put_clients(inactive_buffer, [stale_client])
 
     :sys.replace_state(editor, fn state ->
       active_tab =

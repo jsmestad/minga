@@ -27,6 +27,7 @@ defmodule MingaEditor.Frontend.Emit.KeyframeSideChannelTest do
   import MingaEditor.RenderPipeline.TestHelpers
 
   setup do
+    # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
     Process.register(self(), MingaEditor.Frontend.Manager)
     on_exit(fn -> safe_unregister(MingaEditor.Frontend.Manager) end)
     :ok

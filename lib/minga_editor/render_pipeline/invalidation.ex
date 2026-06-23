@@ -78,8 +78,8 @@ defmodule MingaEditor.RenderPipeline.Invalidation do
   divergence. The flag exists today so the env-var contract is
   documented; the comparison itself is wired in the Phase 1 follow-up.
   """
-  @spec sanity_mode?() :: boolean()
-  def sanity_mode? do
-    System.get_env("MINGA_RENDER_SANITY") == "1"
-  end
+  @spec sanity_mode?(String.t() | nil | :check_env) :: boolean()
+  def sanity_mode?(override \\ :check_env)
+  def sanity_mode?(:check_env), do: System.get_env("MINGA_RENDER_SANITY") == "1"
+  def sanity_mode?(value), do: value == "1"
 end

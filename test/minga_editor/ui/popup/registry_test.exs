@@ -5,9 +5,7 @@ defmodule MingaEditor.UI.Popup.RegistryTest do
   alias Minga.Popup.Rule
 
   defp delete_table_if_present(table) do
-    if :ets.whereis(table) != :undefined, do: :ets.delete(table)
-  rescue
-    ArgumentError -> :ok
+    Minga.Test.ETS.cleanup_table(table)
   end
 
   setup do

@@ -1,49 +1,30 @@
 defmodule MingaAgent.CredentialsTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias MingaAgent.Credentials
 
   @test_dir "test/tmp/credentials_test"
 
-  @provider_env_vars ~w(ANTHROPIC_API_KEY OPENAI_API_KEY GOOGLE_API_KEY OPENROUTER_API_KEY GROQ_API_KEY MISTRAL_API_KEY DEEPSEEK_API_KEY)
-
   setup do
-    # Clear all provider env vars so host machine state never leaks into tests
-    saved_env =
-      for var <- @provider_env_vars, into: %{} do
-        {var, System.get_env(var)}
-      end
+    Process.put(:minga_env_overrides, %{
+      "ANTHROPIC_API_KEY" => nil,
+      "OPENAI_API_KEY" => nil,
+      "GOOGLE_API_KEY" => nil,
+      "OPENROUTER_API_KEY" => nil,
+      "GROQ_API_KEY" => nil,
+      "MISTRAL_API_KEY" => nil,
+      "DEEPSEEK_API_KEY" => nil
+    })
 
-    for var <- @provider_env_vars, do: System.delete_env(var)
-
-    # Capture the existing XDG_CONFIG_HOME so we restore it afterward. test_helper.exs
-    # sets a hermetic temp config home for the whole suite; deleting it here would
-    # expose the developer's real ~/.config/minga (including any openai-codex OAuth
-    # token) to every test that runs after this file, which leaks live codex models
-    # into ModelCatalog-backed assertions elsewhere (e.g. slash_command_test).
-    previous_xdg_config_home = System.get_env("XDG_CONFIG_HOME")
-
-    # Use a unique temp dir per test to avoid interference
     dir = Path.join(@test_dir, "#{System.unique_integer([:positive])}")
     File.mkdir_p!(dir)
-    # Override XDG_CONFIG_HOME so credentials_path() points to our temp dir
-    # We need to set the parent of "minga/" since credentials_path joins "minga"
     parent_dir = Path.join(dir, "config")
     File.mkdir_p!(Path.join(parent_dir, "minga"))
-    System.put_env("XDG_CONFIG_HOME", parent_dir)
+    Process.put(:minga_config_home, parent_dir)
 
     on_exit(fn ->
-      # Restore original env vars
-      for {var, val} <- saved_env do
-        if val, do: System.put_env(var, val), else: System.delete_env(var)
-      end
-
-      if previous_xdg_config_home do
-        System.put_env("XDG_CONFIG_HOME", previous_xdg_config_home)
-      else
-        System.delete_env("XDG_CONFIG_HOME")
-      end
-
+      Process.delete(:minga_env_overrides)
+      Process.delete(:minga_config_home)
       File.rm_rf!(dir)
     end)
 
@@ -59,15 +40,20 @@ defmodule MingaAgent.CredentialsTest do
       assert :ok = Credentials.store("anthropic", "sk-ant-test-123")
       assert {:ok, "sk-ant-test-123", :file} = Credentials.resolve("anthropic")
 
-      # Verify file permissions
       {:ok, stat} = File.stat(creds_path)
       assert stat.access == :read_write
     end
 
     test "env var takes precedence over file" do
-      System.put_env("ANTHROPIC_API_KEY", "env-key-123")
-
-      on_exit(fn -> System.delete_env("ANTHROPIC_API_KEY") end)
+      Process.put(:minga_env_overrides, %{
+        "ANTHROPIC_API_KEY" => "env-key-123",
+        "OPENAI_API_KEY" => nil,
+        "GOOGLE_API_KEY" => nil,
+        "OPENROUTER_API_KEY" => nil,
+        "GROQ_API_KEY" => nil,
+        "MISTRAL_API_KEY" => nil,
+        "DEEPSEEK_API_KEY" => nil
+      })
 
       :ok = Credentials.store("anthropic", "file-key-456")
       assert {:ok, "env-key-123", :env} = Credentials.resolve("anthropic")
@@ -119,15 +105,21 @@ defmodule MingaAgent.CredentialsTest do
   describe "status/0" do
     test "reports unconfigured when nothing is set" do
       statuses = Credentials.status()
-      # 7 key-based providers + 1 openai_codex (OAuth) + 1 Ollama (auto-detected)
       assert length(statuses) == 9
     end
 
     test "reports configured with correct source" do
       :ok = Credentials.store("anthropic", "ant-key")
-      System.put_env("OPENAI_API_KEY", "oai-env-key")
 
-      on_exit(fn -> System.delete_env("OPENAI_API_KEY") end)
+      Process.put(:minga_env_overrides, %{
+        "ANTHROPIC_API_KEY" => nil,
+        "OPENAI_API_KEY" => "oai-env-key",
+        "GOOGLE_API_KEY" => nil,
+        "OPENROUTER_API_KEY" => nil,
+        "GROQ_API_KEY" => nil,
+        "MISTRAL_API_KEY" => nil,
+        "DEEPSEEK_API_KEY" => nil
+      })
 
       statuses = Credentials.status()
       ant = Enum.find(statuses, &(&1.provider == "anthropic"))

@@ -249,10 +249,11 @@ defmodule Minga.Test.Snapshot do
   # ── Update mode ────────────────────────────────────────────────────────────
 
   @doc "Returns true when `UPDATE_SNAPSHOTS` env var is set."
-  @spec update_mode?() :: boolean()
-  def update_mode? do
-    System.get_env("UPDATE_SNAPSHOTS") != nil
-  end
+  @spec update_mode?(String.t() | nil | :check_env) :: boolean()
+  def update_mode?(override \\ :check_env)
+  def update_mode?(:check_env), do: System.get_env("UPDATE_SNAPSHOTS") != nil
+  def update_mode?(nil), do: false
+  def update_mode?(value) when is_binary(value), do: true
 
   # ── File I/O ───────────────────────────────────────────────────────────────
 

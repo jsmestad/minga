@@ -297,8 +297,18 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
   @spec put_file_backed_key_in_env(String.t(), String.t()) :: :ok
   defp put_file_backed_key_in_env(provider, key) do
     case Credentials.env_var_for(provider) do
-      nil -> :ok
-      var_name -> System.put_env(var_name, key)
+      nil ->
+        :ok
+
+      var_name ->
+        case Process.get(:minga_env_overrides) do
+          %{} = overrides ->
+            Process.put(:minga_env_overrides, Map.put(overrides, var_name, key))
+            :ok
+
+          _ ->
+            System.put_env(var_name, key)
+        end
     end
   end
 

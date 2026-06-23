@@ -78,6 +78,28 @@ defmodule Minga.LSP.SyncServer do
     ArgumentError -> []
   end
 
+  @doc "The ETS table name used for buffer-to-client registration."
+  @spec registry_table() :: atom()
+  def registry_table, do: @registry_table
+
+  @doc "Inserts a buffer-to-clients mapping into the sync registry."
+  @spec put_clients(pid(), [pid()]) :: true
+  def put_clients(buffer_pid, clients) when is_pid(buffer_pid) and is_list(clients) do
+    :ets.insert(@registry_table, {buffer_pid, clients})
+  end
+
+  @doc "Removes a buffer entry from the sync registry."
+  @spec remove_buffer(pid()) :: true
+  def remove_buffer(buffer_pid) when is_pid(buffer_pid) do
+    :ets.delete(@registry_table, buffer_pid)
+  end
+
+  @doc "Removes all entries from the sync registry."
+  @spec clear_registry() :: true
+  def clear_registry do
+    :ets.delete_all_objects(@registry_table)
+  end
+
   @doc """
   Reattaches open buffers to their language servers after client restart.
 

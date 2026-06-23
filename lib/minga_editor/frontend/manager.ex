@@ -40,6 +40,7 @@ defmodule MingaEditor.Frontend.Manager do
           | {:backend, backend()}
           | {:port_mode, MingaEditor.Frontend.Manager.State.port_mode()}
           | {:port_opener, (term(), [term()] -> port())}
+          | {:tty_path, String.t() | nil}
 
   alias MingaEditor.Frontend.Manager.State, as: PortState
 
@@ -123,7 +124,8 @@ defmodule MingaEditor.Frontend.Manager do
       Keyword.get_lazy(opts, :renderer_path, fn -> default_renderer_path(backend) end)
 
     port_opener = Keyword.get(opts, :port_opener, &Port.open/2)
-    state = %PortState{renderer_path: renderer_path, port_mode: port_mode}
+    tty_path = Keyword.get(opts, :tty_path, :detect)
+    state = %PortState{renderer_path: renderer_path, port_mode: port_mode, tty_path: tty_path}
     {:ok, start_port(state, port_opener)}
   end
 
@@ -269,7 +271,7 @@ defmodule MingaEditor.Frontend.Manager do
   defp start_port(state, port_opener) do
     # Spawn mode: we're the parent. Launch the GUI binary as a child process.
     if File.exists?(state.renderer_path) do
-      env = tty_env()
+      env = tty_env(state.tty_path)
 
       port =
         port_opener.(
@@ -293,8 +295,8 @@ defmodule MingaEditor.Frontend.Manager do
   #   1. MINGA_TTY env var (set by bin/minga shell wrapper or user)
   #   2. `ps -o tty=` on the BEAM process (reads from kernel, not stdin)
   #   3. Empty (the renderer falls back to /dev/tty — may fail)
-  @spec tty_env() :: [{charlist(), charlist()}]
-  defp tty_env do
+  @spec tty_env(String.t() | nil | :detect) :: [{charlist(), charlist()}]
+  defp tty_env(:detect) do
     tty_path = System.get_env("MINGA_TTY") || detect_tty()
 
     case tty_path do
@@ -302,6 +304,9 @@ defmodule MingaEditor.Frontend.Manager do
       path -> [{~c"MINGA_TTY", String.to_charlist(path)}]
     end
   end
+
+  defp tty_env(nil), do: []
+  defp tty_env(path) when is_binary(path), do: [{~c"MINGA_TTY", String.to_charlist(path)}]
 
   @spec detect_tty() :: String.t() | nil
   defp detect_tty do

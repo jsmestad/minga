@@ -62,6 +62,23 @@ defmodule Minga.Git.Tracker do
     ArgumentError -> false
   end
 
+  @doc "Registers a buffer-to-git-buffer mapping directly in the registry."
+  @spec put_mapping(pid(), pid(), atom()) :: true
+  def put_mapping(buffer_pid, git_pid, registry_table \\ @registry_table)
+      when is_pid(buffer_pid) and is_pid(git_pid) do
+    if :ets.whereis(registry_table) == :undefined do
+      :ets.new(registry_table, [:named_table, :public, :set, read_concurrency: true])
+    end
+
+    :ets.insert(registry_table, {buffer_pid, git_pid})
+  end
+
+  @doc "Removes a buffer mapping from the registry."
+  @spec remove_mapping(pid(), atom()) :: true
+  def remove_mapping(buffer_pid, registry_table \\ @registry_table) when is_pid(buffer_pid) do
+    :ets.delete(registry_table, buffer_pid)
+  end
+
   # ── GenServer callbacks ────────────────────────────────────────────────
 
   @typep tracker_state :: %{
