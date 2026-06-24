@@ -11,7 +11,7 @@ defmodule MingaAgent.Tools.Find do
   alias MingaAgent.Tools.OutputLimit
   alias MingaAgent.Tools.PathIgnore
 
-  @max_results 200
+  @max_results 1_000
   @max_output_bytes OutputLimit.default_max_bytes()
 
   @doc """

@@ -48,7 +48,7 @@ defmodule MingaAgent.Tools.ReadFileTest do
       File.write!(path, content)
 
       assert {:ok, result} = ReadFile.execute(path)
-      assert result =~ "[truncated at 256KB]"
+      assert result =~ "[truncated at 51KB]"
       assert byte_size(result) < 300_000
     end
 
@@ -169,7 +169,7 @@ defmodule MingaAgent.Tools.ReadFileTest do
       :ok = Buffer.Process.replace_content(pid, large_content)
 
       assert {:ok, result} = ReadFile.execute(path)
-      assert result =~ "[truncated at 256KB]"
+      assert result =~ "[truncated at 51KB]"
     end
 
     test "works with expanded paths", %{tmp_dir: dir} do

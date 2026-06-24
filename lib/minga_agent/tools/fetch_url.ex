@@ -8,7 +8,7 @@ defmodule MingaAgent.Tools.FetchUrl do
   import Bitwise
 
   @default_timeout_ms 10_000
-  @default_max_bytes 100_000
+  @default_max_bytes 51_200
   @hard_timeout_ms 30_000
   @hard_max_bytes @default_max_bytes
   @allowed_schemes ~w(http https)
