@@ -16,7 +16,7 @@ defmodule MingaAgent.Tools.ReadFile do
 
   alias Minga.Buffer
 
-  @max_bytes 256_000
+  @max_bytes 51_200
 
   @typedoc "Options for partial file reads."
   @type read_opts :: [offset: pos_integer() | nil, limit: pos_integer() | nil]
