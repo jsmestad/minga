@@ -121,6 +121,44 @@ defmodule MingaAgent.Tools.GrepTest do
       refute output =~ "_build"
     end
 
+    test "does not walk nested non-git ignored roots", %{dir: dir} do
+      ignored_root = Path.join([dir, "node_modules", "pkg"])
+      File.mkdir_p!(ignored_root)
+      File.write!(Path.join(ignored_root, "leaked.txt"), "expensive_token")
+
+      assert {:ok, "No matches found."} = Grep.execute("expensive_token", ignored_root)
+    end
+
+    test "passes dash-prefixed rg patterns after an option terminator", %{dir: dir} do
+      rg = """
+      #!/bin/sh
+      case "$*" in
+        *" -- --needle ."*) printf -- 'visible.txt:1:--needle\n' ;;
+        *) echo "bad args: $*" >&2; exit 2 ;;
+      esac
+      """
+
+      with_fake_path(%{"rg" => rg}, fn ->
+        assert {:ok, output} = Grep.execute("--needle", dir)
+        assert output =~ "visible.txt:1:--needle"
+      end)
+    end
+
+    test "passes dash-prefixed grep fallback patterns after an option terminator", %{dir: dir} do
+      grep = """
+      #!/bin/sh
+      case "$*" in
+        *" -- --needle ."*) printf -- './visible.txt:1:--needle\n' ;;
+        *) echo "bad args: $*" >&2; exit 2 ;;
+      esac
+      """
+
+      with_fake_path(%{"grep" => grep}, fn ->
+        assert {:ok, output} = Grep.execute("--needle", dir)
+        assert output =~ "visible.txt:1:--needle"
+      end)
+    end
+
     test "suppresses secret env files while keeping visible matches", %{dir: dir} do
       File.write!(Path.join(dir, "visible_secret.txt"), "shared_secret_token")
       File.write!(Path.join(dir, ".env.local"), "shared_secret_token")

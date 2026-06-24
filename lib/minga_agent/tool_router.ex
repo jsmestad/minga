@@ -27,6 +27,7 @@ defmodule MingaAgent.ToolRouter do
   alias MingaAgent.Changeset
   alias MingaAgent.ProjectView
   alias MingaAgent.ToolRouter.Context
+  alias MingaAgent.ToolRouter.SearchContext
 
   @typedoc "Fork store reference (nil when fork routing is disabled)."
   @type fork_store :: pid() | nil
@@ -36,6 +37,9 @@ defmodule MingaAgent.ToolRouter do
 
   @typedoc "Routing context passed by tool callbacks."
   @type context :: Context.t()
+
+  @typedoc "Trusted execution and filtering context for search tools."
+  @type search_context :: SearchContext.t()
 
   @doc """
   Builds a routing context from the fork store and changeset pids.
@@ -242,6 +246,39 @@ defmodule MingaAgent.ToolRouter do
   end
 
   def filesystem_path_result(%Context{}, path), do: {:ok, path}
+
+  @doc "Returns the trusted execution and logical filtering context for search tools."
+  @spec search_context(context(), String.t()) :: {:ok, search_context()} | {:error, term()}
+  def search_context(%Context{project_view: %ProjectView{} = view}, path) do
+    case project_view_result(fn -> ProjectView.prepare_working_dir(view) end) do
+      {:ok, cwd} ->
+        {:ok,
+         %SearchContext{
+           exec_path: Path.expand(project_view_relative_path(view, path), cwd),
+           filter_root: path
+         }}
+
+      {:error, {:project_view_unavailable, _}} = error ->
+        error
+
+      {:error, reason} ->
+        {:error, {:project_view_unavailable, {:working_dir_failed, reason}}}
+    end
+  end
+
+  def search_context(%Context{changeset: cs}, path) when cs != nil and is_pid(cs) do
+    try do
+      with {:ok, cwd} <- Changeset.prepare_working_dir(cs),
+           {:ok, relative_path} <- normalize_changeset_path(cs, path, true) do
+        {:ok, %SearchContext{exec_path: Path.expand(relative_path, cwd), filter_root: path}}
+      end
+    catch
+      :exit, reason -> {:error, {:changeset_unavailable, reason}}
+    end
+  end
+
+  def search_context(%Context{}, path),
+    do: {:ok, %SearchContext{exec_path: path, filter_root: path}}
 
   @doc "Returns the working directory for shell commands, or a tagged error if ProjectView is unavailable."
   @spec working_dir_result(context()) :: {:ok, String.t() | nil} | {:error, term()}

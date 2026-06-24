@@ -53,8 +53,7 @@ defmodule MingaAgent.Tools.DirectoryListing do
 
   @spec ignored_root?(String.t()) :: boolean()
   defp ignored_root?(path) do
-    PathIgnore.ignored_name?(Path.basename(Path.expand(path))) or
-      PathIgnore.ignored_directory?(path)
+    PathIgnore.ignored_path?(path)
   end
 
   @spec filesystem_entry(String.t(), String.t()) :: entry()

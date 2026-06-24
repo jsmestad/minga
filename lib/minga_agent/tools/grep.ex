@@ -34,8 +34,10 @@ defmodule MingaAgent.Tools.Grep do
           {:ok, String.t()} | {:error, String.t()}
   def execute(pattern, path, opts \\ %{}, exec_opts \\ [])
       when is_binary(pattern) and is_binary(path) do
+    filter_root = Keyword.get(exec_opts, :filter_root, path)
+
     if File.dir?(path) do
-      if ignored_search_root?(path),
+      if ignored_search_root?(filter_root),
         do: {:ok, "No matches found."},
         else: do_execute(pattern, path, public_opts(opts), exec_opts)
     else
@@ -45,8 +47,7 @@ defmodule MingaAgent.Tools.Grep do
 
   @spec ignored_search_root?(String.t()) :: boolean()
   defp ignored_search_root?(path) do
-    PathIgnore.ignored_name?(Path.basename(Path.expand(path))) or
-      PathIgnore.ignored_directory?(path)
+    PathIgnore.ignored_path?(path)
   end
 
   @spec public_opts(map()) :: map()
@@ -118,7 +119,7 @@ defmodule MingaAgent.Tools.Grep do
 
     args = if glob, do: args ++ ["--glob", glob], else: args
     args = args ++ rg_ignore_args()
-    args = args ++ ["--max-count", Integer.to_string(@max_matches), pattern, "."]
+    args = args ++ ["--max-count", Integer.to_string(@max_matches), "--", pattern, "."]
     {rg, args}
   end
 
@@ -131,7 +132,7 @@ defmodule MingaAgent.Tools.Grep do
     args = if context_lines > 0, do: args ++ ["-C", Integer.to_string(context_lines)], else: args
     args = if glob, do: args ++ ["--include", glob], else: args
     args = args ++ grep_ignore_args()
-    args = args ++ [pattern, "."]
+    args = args ++ ["--", pattern, "."]
     {grep, args}
   end
 

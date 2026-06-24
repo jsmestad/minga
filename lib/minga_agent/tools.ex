@@ -730,13 +730,15 @@ defmodule MingaAgent.Tools do
       callback: fn args ->
         path = resolve_and_validate_path!(root, args["path"] || ".")
 
-        case ToolRouter.filesystem_path_result(router_ctx, path) do
-          {:ok, search_path} ->
+        case ToolRouter.search_context(router_ctx, path) do
+          {:ok, search} ->
             public_args = Map.take(args, ["type", "max_depth"])
 
             routed_result(
               router_ctx,
-              Find.execute(args["pattern"], search_path, public_args, filter_root: path)
+              Find.execute(args["pattern"], search.exec_path, public_args,
+                filter_root: search.filter_root
+              )
             )
 
           {:error, reason} ->
@@ -786,13 +788,15 @@ defmodule MingaAgent.Tools do
       callback: fn args ->
         path = resolve_and_validate_path!(root, args["path"] || ".")
 
-        case ToolRouter.filesystem_path_result(router_ctx, path) do
-          {:ok, search_path} ->
+        case ToolRouter.search_context(router_ctx, path) do
+          {:ok, search} ->
             public_args = Map.take(args, ["glob", "case_sensitive", "context_lines"])
 
             routed_result(
               router_ctx,
-              Grep.execute(args["pattern"], search_path, public_args, filter_root: path)
+              Grep.execute(args["pattern"], search.exec_path, public_args,
+                filter_root: search.filter_root
+              )
             )
 
           {:error, reason} ->

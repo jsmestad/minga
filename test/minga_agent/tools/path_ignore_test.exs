@@ -15,6 +15,20 @@ defmodule MingaAgent.Tools.PathIgnoreTest do
     end
   end
 
+  describe "ignored_path?/1" do
+    test "treats any ignored path segment as ignored" do
+      dir =
+        Path.join(System.tmp_dir!(), "minga-path-ignore-#{:erlang.unique_integer([:positive])}")
+
+      File.mkdir_p!(Path.join(dir, "lib"))
+      on_exit(fn -> File.rm_rf!(dir) end)
+
+      assert PathIgnore.ignored_path?(Path.join([dir, "node_modules", "pkg"]))
+      assert PathIgnore.ignored_path?(Path.join([dir, "lib", ".env.local"]))
+      refute PathIgnore.ignored_path?(Path.join([dir, "lib", "visible.ex"]))
+    end
+  end
+
   describe "filter_paths/2" do
     test "drops gitignored paths and secret env files while keeping visible results", %{
       tmp_dir: dir

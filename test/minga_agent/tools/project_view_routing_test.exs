@@ -147,7 +147,10 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
     assert File.read!(ambiguous_path) == "hello world hello world"
   end
 
-  test "discovery and shell tools use ProjectView working dir and env", %{tools: tools} do
+  test "discovery and shell tools use ProjectView working dir and env", %{
+    tools: tools,
+    working_dir: working_dir
+  } do
     assert {:ok, list_result} = call_tool(tools, "list_directory", %{"path" => "lib"})
     assert list_result =~ "overlay_only.txt"
     assert list_result =~ "ProjectView workspace 42"
@@ -177,13 +180,26 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
     assert find_result =~ "ProjectView workspace 42"
 
     assert {:ok, broad_find_result} =
-             call_tool(tools, "find", %{"pattern" => "*", "path" => ".", "type" => "file"})
+             call_tool(tools, "find", %{
+               "pattern" => "*",
+               "path" => ".",
+               "type" => "file",
+               "_filter_root" => working_dir,
+               "_max_output_bytes" => 1_000_000,
+               "_timeout_ms" => 1_000_000
+             })
 
     assert broad_find_result =~ "visible_secret.txt"
     refute broad_find_result =~ ".env.local"
     refute broad_find_result =~ ".npmrc"
     refute broad_find_result =~ "node_modules"
     refute broad_find_result =~ "ignored_dir"
+
+    assert {:ok, ignored_find_result} =
+             call_tool(tools, "find", %{"pattern" => "*", "path" => "ignored_dir"})
+
+    assert ignored_find_result =~ "No matches found."
+    refute ignored_find_result =~ "leaked.txt"
 
     assert {:ok, grep_result} =
              call_tool(tools, "grep", %{"pattern" => "needle", "path" => "lib"})
@@ -192,13 +208,28 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
     assert grep_result =~ "ProjectView workspace 42"
 
     assert {:ok, broad_grep_result} =
-             call_tool(tools, "grep", %{"pattern" => "shared_secret_token", "path" => "."})
+             call_tool(tools, "grep", %{
+               "pattern" => "shared_secret_token",
+               "path" => ".",
+               "_filter_root" => working_dir,
+               "_max_output_bytes" => 1_000_000,
+               "_timeout_ms" => 1_000_000
+             })
 
     assert broad_grep_result =~ "visible_secret.txt"
     refute broad_grep_result =~ ".env.local"
     refute broad_grep_result =~ ".npmrc"
     refute broad_grep_result =~ "node_modules"
     refute broad_grep_result =~ "ignored_dir"
+
+    assert {:ok, ignored_grep_result} =
+             call_tool(tools, "grep", %{
+               "pattern" => "shared_secret_token",
+               "path" => "ignored_dir"
+             })
+
+    assert ignored_grep_result =~ "No matches found."
+    refute ignored_grep_result =~ "leaked.txt"
 
     assert {:ok, shell_result} =
              call_tool(tools, "shell", %{
@@ -330,6 +361,15 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
     {:ok, changeset} = start_supervised({Changeset.Server, project_root: root})
     tools = Tools.all(project_root: root, changeset: changeset)
 
+    assert {:ok, write_result} =
+             call_tool(tools, "write_file", %{
+               "path" => "overlay_added.txt",
+               "content" => "shared_secret_token\n"
+             })
+
+    assert write_result =~ "via changeset"
+    refute File.exists?(Path.join(root, "overlay_added.txt"))
+
     assert {:ok, result} = call_tool(tools, "list_directory", %{"path" => "."})
     assert result =~ "visible.txt"
     refute result =~ ".env.local"
@@ -343,6 +383,7 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
 
     assert {:ok, find_result} = call_tool(tools, "find", %{"pattern" => "*", "path" => "."})
     assert find_result =~ "visible_secret.txt"
+    assert find_result =~ "overlay_added.txt"
     refute find_result =~ ".env.local"
     refute find_result =~ ".npmrc"
     refute find_result =~ "ignored_dir"
@@ -352,6 +393,7 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
              call_tool(tools, "grep", %{"pattern" => "shared_secret_token", "path" => "."})
 
     assert grep_result =~ "visible_secret.txt"
+    assert grep_result =~ "overlay_added.txt"
     refute grep_result =~ ".env.local"
     refute grep_result =~ ".npmrc"
     refute grep_result =~ "ignored_dir"

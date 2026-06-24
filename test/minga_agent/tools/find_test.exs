@@ -92,6 +92,29 @@ defmodule MingaAgent.Tools.FindTest do
       refute output =~ "_build"
     end
 
+    test "does not walk nested non-git ignored roots", %{dir: dir} do
+      ignored_root = Path.join([dir, "node_modules", "pkg"])
+      File.mkdir_p!(ignored_root)
+      File.write!(Path.join(ignored_root, "leaked.ex"), "defmodule Leaked")
+
+      assert {:ok, "No matches found."} = Find.execute("*.ex", ignored_root, %{"type" => "any"})
+    end
+
+    test "passes dash-prefixed fd patterns after an option terminator", %{dir: dir} do
+      fd = """
+      #!/bin/sh
+      case "$*" in
+        *" -- --literal.txt ."*) printf -- '--literal.txt\n' ;;
+        *) echo "bad args: $*" >&2; exit 2 ;;
+      esac
+      """
+
+      with_fake_path(%{"fd" => fd}, fn ->
+        assert {:ok, output} = Find.execute("--literal.txt", dir)
+        assert output =~ "--literal.txt"
+      end)
+    end
+
     test "suppresses secret env files while keeping visible matches", %{dir: dir} do
       File.write!(Path.join(dir, ".env.local"), "secret")
       File.write!(Path.join(dir, ".npmrc"), "secret")

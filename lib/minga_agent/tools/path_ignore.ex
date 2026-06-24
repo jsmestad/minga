@@ -48,6 +48,14 @@ defmodule MingaAgent.Tools.PathIgnore do
     |> Enum.uniq()
   end
 
+  @doc "Returns true when a path is hidden by static ignored segments or project rules."
+  @spec ignored_path?(String.t()) :: boolean()
+  def ignored_path?(path) when is_binary(path) do
+    path = Path.expand(path)
+
+    ignored_static_path?(path) or ignored_directory?(path)
+  end
+
   @doc "Returns true when a directory itself is ignored by project rules."
   @spec ignored_directory?(String.t()) :: boolean()
   def ignored_directory?(dir) when is_binary(dir) do
@@ -151,14 +159,37 @@ defmodule MingaAgent.Tools.PathIgnore do
   end
 
   @spec git_root(String.t()) :: {:ok, String.t()} | :error
-  defp git_root(dir) do
-    case System.cmd("git", ["-C", dir, "rev-parse", "--show-toplevel"], stderr_to_stdout: true) do
-      {root, 0} -> {:ok, Path.expand(String.trim(root))}
-      {_output, _code} -> :error
+  defp git_root(path) do
+    case nearest_existing_dir(path) do
+      nil ->
+        :error
+
+      dir ->
+        case System.cmd("git", ["-C", dir, "rev-parse", "--show-toplevel"],
+               stderr_to_stdout: true
+             ) do
+          {root, 0} -> {:ok, Path.expand(String.trim(root))}
+          {_output, _code} -> :error
+        end
     end
   rescue
     ErlangError -> :error
   end
+
+  @spec nearest_existing_dir(String.t()) :: String.t() | nil
+  defp nearest_existing_dir(path) do
+    path = Path.expand(path)
+
+    if File.dir?(path) do
+      path
+    else
+      nearest_existing_parent(path, Path.dirname(path))
+    end
+  end
+
+  @spec nearest_existing_parent(String.t(), String.t()) :: String.t() | nil
+  defp nearest_existing_parent(path, path), do: nil
+  defp nearest_existing_parent(_path, parent), do: nearest_existing_dir(parent)
 
   @spec git_ignored_path?(String.t(), String.t()) :: boolean()
   defp git_ignored_path?(root, dir) do
@@ -225,6 +256,14 @@ defmodule MingaAgent.Tools.PathIgnore do
     Path.join(root, path)
     |> Path.expand()
     |> Path.relative_to(repo_root)
+  end
+
+  @spec ignored_static_path?(String.t()) :: boolean()
+  defp ignored_static_path?(path) do
+    case git_root(path) do
+      {:ok, root} -> path |> Path.relative_to(root) |> ignored_path_name?()
+      :error -> path |> Path.relative_to(System.tmp_dir!()) |> ignored_path_name?()
+    end
   end
 
   @spec ignored_path_name?(String.t() | nil) :: boolean()

@@ -33,8 +33,10 @@ defmodule MingaAgent.Tools.Find do
           {:ok, String.t()} | {:error, String.t()}
   def execute(pattern, path, opts \\ %{}, exec_opts \\ [])
       when is_binary(pattern) and is_binary(path) do
+    filter_root = Keyword.get(exec_opts, :filter_root, path)
+
     if File.dir?(path) do
-      if ignored_search_root?(path),
+      if ignored_search_root?(filter_root),
         do: {:ok, "No matches found."},
         else: do_execute(pattern, path, public_opts(opts), exec_opts)
     else
@@ -44,8 +46,7 @@ defmodule MingaAgent.Tools.Find do
 
   @spec ignored_search_root?(String.t()) :: boolean()
   defp ignored_search_root?(path) do
-    PathIgnore.ignored_name?(Path.basename(Path.expand(path))) or
-      PathIgnore.ignored_directory?(path)
+    PathIgnore.ignored_path?(path)
   end
 
   @spec public_opts(map()) :: map()
@@ -112,7 +113,7 @@ defmodule MingaAgent.Tools.Find do
         _ -> args
       end
 
-    args = args ++ ["--max-results", Integer.to_string(@max_results + 1), pattern, "."]
+    args = args ++ ["--max-results", Integer.to_string(@max_results + 1), "--", pattern, "."]
     {fd, args}
   end
 
