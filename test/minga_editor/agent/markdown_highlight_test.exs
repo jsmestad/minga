@@ -303,6 +303,29 @@ defmodule MingaEditor.Agent.MarkdownHighlightTest do
       assert Bitwise.band(flags, 0x10) != 0
     end
 
+    test "indented code becomes a complete semantic code card" do
+      [code] =
+        MarkdownHighlight.render_blocks("    def hello\n    :world", nil, @theme_syntax, 99)
+
+      assert code.kind == :code_block
+      assert code.language == ""
+      assert code.label == "Code"
+      assert code.flags == 0x01
+      assert [[{"def hello", _, _, flags}], [{":world", _, _, _}]] = code.lines
+      assert Bitwise.band(flags, 0x10) != 0
+    end
+
+    test "indented code preserves blank lines in the semantic code card" do
+      [code] = MarkdownHighlight.render_blocks("    one\n\n    two", nil, @theme_syntax, 99)
+
+      assert code.kind == :code_block
+      assert code.language == ""
+      assert code.label == "Code"
+      assert code.flags == 0x01
+      assert [[{"one", _, _, flags}], [{"", _, _, _}], [{"two", _, _, _}]] = code.lines
+      assert Bitwise.band(flags, 0x10) != 0
+    end
+
     test "incomplete semantic code card stays plain monospaced while streaming" do
       text = "```elixir\ndef hello"
 
@@ -315,9 +338,28 @@ defmodule MingaEditor.Agent.MarkdownHighlightTest do
 
       [code] = MarkdownHighlight.render_blocks(text, highlight, @theme_syntax, 99)
 
+      assert code.flags == 0
       assert [[{"def hello", 0x98BE65, _, flags}]] = code.lines
       assert Bitwise.band(flags, 0x10) != 0
       refute Bitwise.band(flags, 0x01) != 0
+    end
+
+    test "incomplete semantic code card does not request completed-block highlighting" do
+      test_pid = self()
+
+      highlighter = fn language, source, opts ->
+        send(test_pid, {:unexpected_highlight, language, source, opts})
+        {:ok, ["keyword"], [Span.new(0, 3, 0)]}
+      end
+
+      [code] =
+        MarkdownHighlight.render_blocks("```elixir\ndef hello", nil, @theme_syntax, 99, 0,
+          highlighter: highlighter
+        )
+
+      assert code.kind == :code_block
+      assert code.flags == 0
+      refute_received {:unexpected_highlight, _language, _source, _opts}
     end
   end
 end

@@ -42,9 +42,31 @@ defmodule MingaAgent.FileMentionTest do
       assert [%{start: 0, stop: 11}] = mentions
     end
 
-    test "records character positions after non-ascii text" do
-      mentions = FileMention.extract_mentions("é @lib/foo.ex rest")
-      assert [%{path: "lib/foo.ex", start: 2, stop: 13}] = mentions
+    test "records grapheme-column positions after a zwj emoji" do
+      mentions = FileMention.extract_mentions("👩‍💻 @lib/foo.ex rest")
+
+      assert [mention] = mentions
+      assert mention.path == "lib/foo.ex"
+      assert mention.start == 2
+      assert mention.stop == 13
+      assert mention.start_col == 2
+      assert mention.end_col == 13
+      assert FileMention.mention_start_col(mention) == 2
+      assert FileMention.mention_end_col(mention) == 13
+    end
+
+    test "mention column helpers prefer explicit mention fields" do
+      mention = %{path: "lib/foo.ex", start: 99, stop: 199, start_col: 2, end_col: 13}
+
+      assert FileMention.mention_start_col(mention) == 2
+      assert FileMention.mention_end_col(mention) == 13
+    end
+
+    test "mention column helpers support legacy mention maps" do
+      mention = %{path: "lib/foo.ex", start: 2, stop: 13}
+
+      assert FileMention.mention_start_col(mention) == 2
+      assert FileMention.mention_end_col(mention) == 13
     end
   end
 

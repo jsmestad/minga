@@ -32,6 +32,20 @@ defmodule MingaEditor.Remote.EventReplay do
   def to_agent_event(%EventRecord{event_type: :thinking_delta, payload: payload}),
     do: {:thinking_delta, string_payload(payload, "delta")}
 
+  def to_agent_event(%EventRecord{event_type: :tool_call_started, payload: payload}) do
+    {:tool_started, string_payload(payload, "tool_call_id"), string_payload(payload, "name"),
+     map_payload(payload, "args")}
+  end
+
+  def to_agent_event(%EventRecord{event_type: :tool_call_finished, payload: payload}) do
+    {:tool_ended, string_payload(payload, "tool_call_id"), string_payload(payload, "name"),
+     string_payload(payload, "result"), tool_status(payload)}
+  end
+
+  def to_agent_event(%EventRecord{event_type: :tool_call_interrupted, payload: payload}) do
+    {:tool_interrupted, string_payload(payload, "tool_call_id")}
+  end
+
   def to_agent_event(%EventRecord{event_type: :tool_call_updated, payload: payload}) do
     {:tool_update, string_payload(payload, "tool_call_id"), string_payload(payload, "name"),
      string_payload(payload, "partial_result")}
@@ -136,6 +150,14 @@ defmodule MingaEditor.Remote.EventReplay do
     case Map.fetch(payload, key) do
       {:ok, value} -> value
       :error -> Map.get(payload, String.to_atom(key))
+    end
+  end
+
+  @spec tool_status(map()) :: :done | :error
+  defp tool_status(payload) do
+    case string_payload(payload, "status") do
+      "done" -> :done
+      _ -> :error
     end
   end
 

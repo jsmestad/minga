@@ -406,6 +406,40 @@ defmodule MingaAgent.MarkdownTest do
              ] = Markdown.parse_blocks("- Top\n  - Middle\n    - Deep")
     end
 
+    test "parses standalone indented code blocks in semantic blocks" do
+      assert [%{kind: :code_block, language: "", complete?: true, lines: ["def hello", ":world"]}] =
+               Markdown.parse_blocks("    def hello\n    :world")
+    end
+
+    test "preserves internal blank lines inside standalone indented code blocks" do
+      assert [%{kind: :code_block, lines: ["one", "", "two"]}] =
+               Markdown.parse_blocks("    one\n\n    two")
+    end
+
+    test "keeps four-space list continuations as semantic prose" do
+      assert [
+               %{kind: :list_item, text: "item"},
+               %{kind: :paragraph, lines: ["    wrapped continuation", "    second continuation"]}
+             ] =
+               Markdown.parse_blocks("- item\n    wrapped continuation\n    second continuation")
+    end
+
+    test "blank line ends semantic list continuation before indented code" do
+      assert [
+               %{kind: :list_item, text: "item"},
+               %{kind: :spacer},
+               %{kind: :code_block, lines: ["code"]}
+             ] = Markdown.parse_blocks("- item\n\n    code")
+    end
+
+    test "unindented paragraph after list does not keep later indented code in the list" do
+      assert [
+               %{kind: :list_item, text: "item"},
+               %{kind: :paragraph, lines: ["outside list"]},
+               %{kind: :code_block, lines: ["code"]}
+             ] = Markdown.parse_blocks("- item\noutside list\n    code")
+    end
+
     test "marks unclosed fenced code blocks incomplete for streaming" do
       assert [%{kind: :code_block, complete?: false, lines: ["IO.puts(:hi)"]}] =
                Markdown.parse_blocks("```elixir\nIO.puts(:hi)")

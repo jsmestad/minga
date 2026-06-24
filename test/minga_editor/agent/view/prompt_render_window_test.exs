@@ -150,8 +150,8 @@ defmodule MingaEditor.Agent.View.PromptRenderWindowTest do
       assert Enum.any?(row.spans, &match?(%{start_col: 6, end_col: 19, fg: ^accent}, &1))
     end
 
-    test "aligns mention styling after non-ascii text" do
-      ctx = prompt_ctx("é @lib/minga.ex", input_focused: true)
+    test "aligns mention styling after a zwj emoji grapheme" do
+      ctx = prompt_ctx("👩‍💻 @lib/minga.ex", input_focused: true)
       model = PromptRenderWindow.build(ctx, 40, {0, 0, 40, 1}, project_files: ["lib/minga.ex"])
 
       [row] = model.rows

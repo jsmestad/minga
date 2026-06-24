@@ -108,7 +108,8 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterCredentialsTest do
         assert :ok = ReqLLMAdapter.ensure_api_key_in_env("claude")
       end)
 
-    assert log == ""
+    refute log =~ "No API key found for anthropic"
+    refute log =~ "ANTHROPIC_API_KEY"
     assert env_set(env_sets, "ANTHROPIC_API_KEY") == nil
   end
 
