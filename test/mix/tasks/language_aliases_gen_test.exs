@@ -67,6 +67,44 @@ defmodule Mix.Tasks.LanguageAliases.GenTest do
     end)
   end
 
+  test "rejects aliases that target unknown canonical languages" do
+    with_fixture_dir(fn dir ->
+      write_source!(dir, [%{"from" => "jsx", "to" => "javascrpt"}])
+
+      File.cd!(dir, fn ->
+        assert_raise Mix.Error, ~r/targets unknown canonical grammar "javascrpt"/, fn ->
+          Mix.Tasks.LanguageAliases.Gen.run([])
+        end
+      end)
+    end)
+  end
+
+  test "rejects aliases that target nested non-language names from fixture sources" do
+    with_fixture_dir(fn dir ->
+      write_source!(dir, [%{"from" => "tsls", "to" => "typescript_language_server"}])
+
+      File.cd!(dir, fn ->
+        assert_raise Mix.Error,
+                     ~r/targets unknown canonical grammar "typescript_language_server"/,
+                     fn ->
+                       Mix.Tasks.LanguageAliases.Gen.run([])
+                     end
+      end)
+    end)
+  end
+
+  test "rejects language names that differ from canonical grammar targets" do
+    with_fixture_dir(fn dir ->
+      write_source!(dir, [%{"from" => "objc", "to" => "objective_c"}])
+
+      File.cd!(dir, fn ->
+        assert_raise Mix.Error, ~r/targets unknown canonical grammar "objective_c"/, fn ->
+          Mix.Tasks.LanguageAliases.Gen.run([])
+        end
+      end)
+    end)
+  end
+
   @spec with_fixture_dir((Path.t() -> any())) :: any()
   defp with_fixture_dir(fun) do
     dir =
@@ -80,6 +118,10 @@ defmodule Mix.Tasks.LanguageAliases.GenTest do
       %{"from" => "c++", "to" => "cpp"}
     ])
 
+    write_language_source!(dir)
+    write_cpp_language_source!(dir)
+    write_objective_c_language_source!(dir)
+
     try do
       fun.(dir)
     after
@@ -92,5 +134,73 @@ defmodule Mix.Tasks.LanguageAliases.GenTest do
     path = Path.join(dir, @source_path)
     File.mkdir_p!(Path.dirname(path))
     File.write!(path, JSON.encode!(%{"aliases" => aliases}))
+  end
+
+  @spec write_language_source!(Path.t()) :: :ok
+  defp write_language_source!(dir) do
+    path = Path.join(dir, "lib/minga/language/javascript.ex")
+    File.mkdir_p!(Path.dirname(path))
+
+    File.write!(
+      path,
+      """
+      defmodule Minga.Language.JavaScript do
+        def definition do
+          %Minga.Language{
+            name: :javascript,
+            label: "JavaScript",
+            comment_token: "//",
+            grammar: "javascript",
+            language_servers: [
+              %{name: :clangd},
+              %{name: :typescript_language_server}
+            ]
+          }
+        end
+      end
+      """
+    )
+  end
+
+  @spec write_cpp_language_source!(Path.t()) :: :ok
+  defp write_cpp_language_source!(dir) do
+    path = Path.join(dir, "lib/minga/language/cpp.ex")
+    File.mkdir_p!(Path.dirname(path))
+
+    File.write!(
+      path,
+      """
+      defmodule Minga.Language.Cpp do
+        def definition do
+          %Minga.Language{
+            name: :cpp,
+            label: "C++",
+            grammar: "cpp"
+          }
+        end
+      end
+      """
+    )
+  end
+
+  @spec write_objective_c_language_source!(Path.t()) :: :ok
+  defp write_objective_c_language_source!(dir) do
+    path = Path.join(dir, "lib/minga/language/objective_c.ex")
+    File.mkdir_p!(Path.dirname(path))
+
+    File.write!(
+      path,
+      """
+      defmodule Minga.Language.ObjectiveC do
+        def definition do
+          %Minga.Language{
+            name: :objective_c,
+            label: "Objective-C",
+            grammar: "objc"
+          }
+        end
+      end
+      """
+    )
   end
 end

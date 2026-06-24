@@ -976,61 +976,18 @@ defmodule Minga.Extension.LifecycleContractTest do
   end
 
   test "concurrent double start with the same stale stopped entry is idempotent", ctx do
-    gate_name = :"concurrent_double_start_gate_#{System.unique_integer([:positive])}"
-    # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
-    true = Process.register(self(), gate_name)
-
-    on_exit(fn ->
-      try do
-        Process.unregister(gate_name)
-      rescue
-        ArgumentError -> :ok
-      end
-    end)
-
-    {path, cleanup} =
-      make_extension("ConcurrentDoubleStart", """
-      defmodule Minga.TestExtensions.ConcurrentDoubleStart do
-        use Minga.Extension
-
-        command :concurrent_double_start_cmd, "Concurrent double start command",
-          execute: {__MODULE__, :noop}
-
-        @impl true
-        def name, do: :concurrent_double_start
-
-        @impl true
-        def description, do: "Concurrent double start"
-
-        @impl true
-        def version, do: "1.0.0"
-
-        @impl true
-        def init(_config) do
-          send(Process.whereis(#{inspect(gate_name)}), {:concurrent_double_start_init_entered, self()})
-
-          receive do
-            :release_concurrent_double_start_init -> {:ok, %{}}
-          after
-            5_000 -> {:error, :concurrent_double_start_timeout}
-          end
-        end
-
-        @spec noop(map()) :: map()
-        def noop(state), do: state
-      end
-      """)
-
-    on_exit(fn ->
-      cleanup.()
-      :code.purge(Minga.TestExtensions.ConcurrentDoubleStart)
-      :code.delete(Minga.TestExtensions.ConcurrentDoubleStart)
-    end)
-
     opts = [command_registry: ctx.command_registry, keymap: ctx.keymap]
 
-    :ok = ExtRegistry.register(ctx.registry, :concurrent_double_start, path, [])
+    :ok =
+      ExtRegistry.register_module(
+        ctx.registry,
+        :concurrent_double_start,
+        Minga.TestExtensions.ConcurrentDoubleStart,
+        test_pid: self()
+      )
+
     {:ok, stale_stopped_entry} = ExtRegistry.get(ctx.registry, :concurrent_double_start)
+    parent_pid = self()
 
     task_a =
       Task.async(fn ->
@@ -1047,7 +1004,7 @@ defmodule Minga.Extension.LifecycleContractTest do
 
     task_b =
       Task.async(fn ->
-        send(Process.whereis(gate_name), {:concurrent_double_start_caller_ready, self()})
+        send(parent_pid, {:concurrent_double_start_caller_ready, self()})
 
         ExtSupervisor.start_extension(
           ctx.supervisor,

@@ -151,7 +151,7 @@ defmodule MingaAgent.Markdown do
   defp parse_block_lines([line | rest], acc, paragraph, nil, code_index) do
     trimmed = String.trim(line)
 
-    case block_line_kind(line, trimmed) do
+    case block_line_kind(line, trimmed, acc, paragraph) do
       {:code_fence, language} ->
         acc
         |> finish_paragraph(paragraph)
@@ -218,6 +218,14 @@ defmodule MingaAgent.Markdown do
           )
         )
 
+      {:indented_code, code_line} ->
+        {code_lines, rest} = collect_indented_code_lines(rest, [code_line])
+
+        acc
+        |> finish_paragraph(paragraph)
+        |> prepend_code_block("", code_lines, true, nil)
+        |> then(&parse_block_lines(rest, &1, [], nil, code_index + 1))
+
       :paragraph ->
         parse_block_lines(rest, acc, [line | paragraph], nil, code_index)
     end
@@ -254,19 +262,103 @@ defmodule MingaAgent.Markdown do
 
   defp prepend_spacer(acc), do: [%{kind: :spacer, height: 1} | acc]
 
-  @spec block_line_kind(String.t(), String.t()) ::
+  @spec block_line_kind(String.t(), String.t(), [block()], [String.t()]) ::
           :paragraph
           | :rule
           | :spacer
+          | {:indented_code, String.t()}
           | {:code_fence, String.t()}
           | {:heading, 1..3, String.t()}
           | {:blockquote, String.t()}
           | {:list_item, non_neg_integer(), boolean(), non_neg_integer(), String.t()}
-  defp block_line_kind(_line, ""), do: :spacer
+  defp block_line_kind(_line, "", _acc, _paragraph), do: :spacer
 
-  defp block_line_kind(line, _trimmed) when is_binary(line) do
-    classify_block_line(fence_line?(line), line, String.trim(line))
+  defp block_line_kind(line, _trimmed, acc, paragraph) when is_binary(line) do
+    if semantic_indented_code_line?(line, acc, paragraph) do
+      {:indented_code, String.slice(line, 4..-1//1)}
+    else
+      classify_block_line(fence_line?(line), line, String.trim(line))
+    end
   end
+
+  @spec collect_indented_code_lines([String.t()], [String.t()]) :: {[String.t()], [String.t()]}
+  defp collect_indented_code_lines([], lines), do: {lines, []}
+
+  defp collect_indented_code_lines([line | rest] = remaining, lines) do
+    collect_indented_code_lines(
+      line_indented_code_state(line, rest),
+      line,
+      rest,
+      remaining,
+      lines
+    )
+  end
+
+  @spec collect_indented_code_lines(
+          :continuing_blank | :indented_code | :stop,
+          String.t(),
+          [String.t()],
+          [String.t()],
+          [String.t()]
+        ) :: {[String.t()], [String.t()]}
+  defp collect_indented_code_lines(:continuing_blank, line, rest, _remaining, lines) do
+    collect_indented_code_lines(rest, [line | lines])
+  end
+
+  defp collect_indented_code_lines(:indented_code, line, rest, _remaining, lines) do
+    collect_indented_code_lines(rest, [String.slice(line, 4..-1//1) | lines])
+  end
+
+  defp collect_indented_code_lines(:stop, _line, _rest, remaining, lines), do: {lines, remaining}
+
+  @spec line_indented_code_state(String.t(), [String.t()]) ::
+          :continuing_blank | :indented_code | :stop
+  defp line_indented_code_state(line, rest) do
+    line_indented_code_state(String.trim(line), line, rest)
+  end
+
+  @spec line_indented_code_state(String.t(), String.t(), [String.t()]) ::
+          :continuing_blank | :indented_code | :stop
+  defp line_indented_code_state("", _line, rest) do
+    if blank_line_continues_code_block?(rest), do: :continuing_blank, else: :stop
+  end
+
+  defp line_indented_code_state(trimmed, line, _rest) do
+    if indent_width(line) >= 4 and not markdown_list_line?(trimmed),
+      do: :indented_code,
+      else: :stop
+  end
+
+  @spec blank_line_continues_code_block?([String.t()]) :: boolean()
+  defp blank_line_continues_code_block?([]), do: false
+
+  defp blank_line_continues_code_block?([line | rest]),
+    do: blank_line_continues_code_block?(String.trim(line), line, rest)
+
+  @spec blank_line_continues_code_block?(String.t(), String.t(), [String.t()]) :: boolean()
+  defp blank_line_continues_code_block?("", _line, rest),
+    do: blank_line_continues_code_block?(rest)
+
+  defp blank_line_continues_code_block?(trimmed, line, _rest) do
+    indent_width(line) >= 4 and not markdown_list_line?(trimmed)
+  end
+
+  @spec semantic_indented_code_line?(String.t(), [block()], [String.t()]) :: boolean()
+  defp semantic_indented_code_line?(line, acc, paragraph) do
+    trimmed = String.trim(line)
+
+    trimmed != "" and indent_width(line) >= 4 and not markdown_list_line?(trimmed) and
+      not semantic_list_continuation?(acc, paragraph)
+  end
+
+  @spec semantic_list_continuation?([block()], [String.t()]) :: boolean()
+  defp semantic_list_continuation?([%{kind: :list_item} | _rest], []), do: true
+
+  defp semantic_list_continuation?([%{kind: :list_item} | _rest], paragraph) do
+    Enum.all?(paragraph, &(indent_width(&1) >= 2))
+  end
+
+  defp semantic_list_continuation?(_acc, _paragraph), do: false
 
   @spec classify_block_line(boolean(), String.t(), String.t()) ::
           :paragraph

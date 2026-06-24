@@ -16,6 +16,26 @@ defmodule MingaEditor.Remote.EventReplayTest do
              {:text_delta, "hello"}
 
     assert EventReplay.to_agent_event(
+             record(:tool_call_started, %{
+               "tool_call_id" => "tc1",
+               "name" => "read_file",
+               "args" => %{"path" => "lib/a.ex"}
+             })
+           ) == {:tool_started, "tc1", "read_file", %{"path" => "lib/a.ex"}}
+
+    assert EventReplay.to_agent_event(
+             record(:tool_call_finished, %{
+               "tool_call_id" => "tc1",
+               "name" => "read_file",
+               "result" => "ok",
+               "status" => "done"
+             })
+           ) == {:tool_ended, "tc1", "read_file", "ok", :done}
+
+    assert EventReplay.to_agent_event(record(:tool_call_interrupted, %{"tool_call_id" => "tc2"})) ==
+             {:tool_interrupted, "tc2"}
+
+    assert EventReplay.to_agent_event(
              record(:file_edit_proposed, %{
                "path" => "lib/a.ex",
                "before_content" => "old",
@@ -117,6 +137,53 @@ defmodule MingaEditor.Remote.EventReplayTest do
     assert AgentAccess.view(updated).activity.todos == [
              %TodoItem{id: "1", description: "Inspect files", status: :in_progress}
            ]
+  end
+
+  test "replays durable shell tool lifecycle records into editor activity on catch-up" do
+    state = %EditorState{
+      port_manager: self(),
+      workspace: %WorkspaceState{viewport: Viewport.new(24, 80)}
+    }
+
+    updated =
+      AgentEvents.replay_catchup(state, [
+        record(:tool_call_started, %{
+          "tool_call_id" => "tc1",
+          "name" => "shell",
+          "args" => %{"command" => "mix test"}
+        }),
+        record(:tool_call_finished, %{
+          "tool_call_id" => "tc1",
+          "name" => "shell",
+          "result" => "ok",
+          "status" => "done"
+        })
+      ])
+
+    assert AgentAccess.view(updated).activity.active_action == "Thinking"
+    assert AgentAccess.agent(updated).runtime.active_tool_name == nil
+    assert AgentAccess.view(updated).preview.content == {:shell, "mix test", "ok", :done}
+  end
+
+  test "replays durable tool interruptions into editor activity on catch-up" do
+    state = %EditorState{
+      port_manager: self(),
+      workspace: %WorkspaceState{viewport: Viewport.new(24, 80)}
+    }
+
+    updated =
+      AgentEvents.replay_catchup(state, [
+        record(:tool_call_started, %{
+          "tool_call_id" => "tc2",
+          "name" => "shell",
+          "args" => %{"command" => "mix test"}
+        }),
+        record(:tool_call_interrupted, %{"tool_call_id" => "tc2"})
+      ])
+
+    assert AgentAccess.view(updated).activity.active_action == "Thinking"
+    assert AgentAccess.agent(updated).runtime.active_tool_name == nil
+    assert AgentAccess.view(updated).preview.content == :empty
   end
 
   test "ignores durable events that have no foreground UI equivalent" do

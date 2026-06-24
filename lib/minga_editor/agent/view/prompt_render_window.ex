@@ -365,7 +365,7 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
   defp mention_token_ranges(line_text, ctx) do
     line_text
     |> FileMention.extract_mentions()
-    |> Enum.map(fn %{path: path, start: start_col, stop: end_col} ->
+    |> Enum.map(fn %{path: path, start_col: start_col, end_col: end_col} ->
       %{
         start_col: start_col,
         end_col: end_col,

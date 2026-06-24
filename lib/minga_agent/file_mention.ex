@@ -24,11 +24,13 @@ defmodule MingaAgent.FileMention do
   message listing the missing files.
   """
 
-  @typedoc "A single extracted mention: the file path and its character range in the text."
+  @typedoc "A single extracted mention: the file path and its grapheme-column range in the text."
   @type mention :: %{
-          path: String.t(),
-          start: non_neg_integer(),
-          stop: non_neg_integer()
+          required(:path) => String.t(),
+          required(:start_col) => non_neg_integer(),
+          required(:end_col) => non_neg_integer(),
+          optional(:start) => non_neg_integer(),
+          optional(:stop) => non_neg_integer()
         }
 
   @typedoc "Completion state for the @-mention popup."
@@ -64,16 +66,20 @@ defmodule MingaAgent.FileMention do
   @doc """
   Extracts `@path` mentions from prompt text.
 
-  Returns a list of mention maps with the file path and its character
-  position range (for potential highlighting or removal).
+  Returns a list of mention maps with the file path and its grapheme-column
+  range. `start_col` and `end_col` are the explicit fields; `start` and `stop`
+  are retained as compatibility aliases for existing callers.
 
   ## Examples
 
       iex> MingaAgent.FileMention.extract_mentions("@lib/foo.ex what does this do?")
-      [%{path: "lib/foo.ex", start: 0, stop: 14}]
+      [%{path: "lib/foo.ex", start_col: 0, end_col: 11, start: 0, stop: 11}]
 
       iex> MingaAgent.FileMention.extract_mentions("look at @a.ex and @b.ex")
-      [%{path: "a.ex", start: 8, stop: 14}, %{path: "b.ex", start: 19, stop: 24}]
+      [
+        %{path: "a.ex", start_col: 8, end_col: 13, start: 8, stop: 13},
+        %{path: "b.ex", start_col: 18, end_col: 23, start: 18, stop: 23}
+      ]
 
       iex> MingaAgent.FileMention.extract_mentions("no mentions here")
       []
@@ -91,13 +97,28 @@ defmodule MingaAgent.FileMention do
       mention_stop = path_start + path_len
       path = binary_part(text, path_start, path_len)
 
+      start_col = byte_offset_to_col(text, mention_start)
+      end_col = byte_offset_to_col(text, mention_stop)
+
       %{
         path: path,
-        start: byte_offset_to_col(text, mention_start),
-        stop: byte_offset_to_col(text, mention_stop)
+        start: start_col,
+        stop: end_col,
+        start_col: start_col,
+        end_col: end_col
       }
     end)
   end
+
+  @doc "Returns the grapheme-column start for a mention, supporting legacy and explicit keys."
+  @spec mention_start_col(mention()) :: non_neg_integer()
+  def mention_start_col(%{start_col: start_col}), do: start_col
+  def mention_start_col(%{start: start}), do: start
+
+  @doc "Returns the grapheme-column end for a mention, supporting legacy and explicit keys."
+  @spec mention_end_col(mention()) :: non_neg_integer()
+  def mention_end_col(%{end_col: end_col}), do: end_col
+  def mention_end_col(%{stop: stop}), do: stop
 
   @spec byte_offset_to_col(String.t(), non_neg_integer()) :: non_neg_integer()
   defp byte_offset_to_col(_text, 0), do: 0
@@ -324,11 +345,11 @@ defmodule MingaAgent.FileMention do
   defp remove_mentions(text, mentions) do
     # Remove mentions in reverse order so positions stay valid
     mentions
-    |> Enum.sort_by(& &1.start, :desc)
-    |> Enum.reduce(text, fn %{start: s, stop: e}, acc ->
-      before = String.slice(acc, 0, s)
+    |> Enum.sort_by(&mention_start_col/1, :desc)
+    |> Enum.reduce(text, fn mention, acc ->
+      before = String.slice(acc, 0, mention_start_col(mention))
       # Skip any trailing space after the mention
-      after_mention = String.slice(acc, e, String.length(acc))
+      after_mention = String.slice(acc, mention_end_col(mention), String.length(acc))
       after_trimmed = String.trim_leading(after_mention, " ")
       before <> after_trimmed
     end)

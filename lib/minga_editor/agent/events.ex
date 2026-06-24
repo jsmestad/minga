@@ -112,6 +112,9 @@ defmodule MingaEditor.Agent.Events do
     {state, [{:render, 16}, :sync_agent_transcript, {:update_tab_label, ""}]}
   end
 
+  def handle(state, {:tool_started, _tool_call_id, name, args}),
+    do: handle(state, {:tool_started, name, args})
+
   def handle(state, {:tool_started, "shell", args}) do
     command = Map.get(args, "command", "")
     state = update_activity(state, &Activity.start_tool(&1, "shell"))
@@ -129,6 +132,16 @@ defmodule MingaEditor.Agent.Events do
   def handle(state, {:tool_update, _id, _name, _partial}) do
     state = AgentAccess.update_agent_ui(state, &UIState.maybe_auto_scroll/1)
     {state, [{:render, 50}]}
+  end
+
+  def handle(state, {:tool_ended, _tool_call_id, name, result, status}),
+    do: handle(state, {:tool_ended, name, result, status})
+
+  def handle(state, {:tool_interrupted, _tool_call_id}) do
+    state = update_activity(state, &Activity.finish_tool/1)
+    state = sync_active_tool_name(state, nil)
+    state = update_preview(state, &Preview.clear/1)
+    {state, [{:render, 16}]}
   end
 
   def handle(state, {:tool_ended, "shell", result, status}) do
@@ -1068,6 +1081,20 @@ defmodule MingaEditor.Agent.Events do
     {:todo_plan_updated, todo_items_from_payload(Map.get(payload, "todos", []))}
   end
 
+  defp event_record_to_editor_event(%{event_type: :tool_call_started, payload: payload}) do
+    {:tool_started, payload_string(payload, "tool_call_id"), payload_string(payload, "name"),
+     payload_map(payload, "args")}
+  end
+
+  defp event_record_to_editor_event(%{event_type: :tool_call_finished, payload: payload}) do
+    {:tool_ended, payload_string(payload, "tool_call_id"), payload_string(payload, "name"),
+     payload_string(payload, "result"), payload_status(payload)}
+  end
+
+  defp event_record_to_editor_event(%{event_type: :tool_call_interrupted, payload: payload}) do
+    {:tool_interrupted, payload_string(payload, "tool_call_id")}
+  end
+
   defp event_record_to_editor_event(_event), do: nil
 
   @spec todo_items_from_payload(term()) :: [MingaAgent.TodoItem.t()]
@@ -1109,6 +1136,14 @@ defmodule MingaEditor.Agent.Events do
     end
   end
 
+  @spec payload_map(map(), String.t()) :: map()
+  defp payload_map(payload, key) do
+    case Map.get(payload, key) || Map.get(payload, String.to_atom(key)) do
+      value when is_map(value) -> value
+      _ -> %{}
+    end
+  end
+
   @spec payload_string(map(), String.t()) :: String.t()
   defp payload_string(payload, key) do
     case Map.get(payload, key) || Map.get(payload, String.to_atom(key)) do
@@ -1116,6 +1151,14 @@ defmodule MingaEditor.Agent.Events do
       value when is_binary(value) -> value
       value when is_atom(value) -> Atom.to_string(value)
       value -> to_string(value)
+    end
+  end
+
+  @spec payload_status(map()) :: :done | :error
+  defp payload_status(payload) do
+    case payload_string(payload, "status") do
+      "done" -> :done
+      _ -> :error
     end
   end
 end
