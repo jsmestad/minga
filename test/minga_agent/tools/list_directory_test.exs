@@ -91,14 +91,14 @@ defmodule MingaAgent.Tools.ListDirectoryTest do
     end
 
     test "caps large directory listings", %{tmp_dir: dir} do
-      for index <- 1..205 do
+      for index <- 1..505 do
         File.write!(Path.join(dir, "file_#{index}.txt"), "")
       end
 
       assert {:ok, listing} = ListDirectory.execute(dir)
       lines = String.split(listing, "\n")
 
-      assert length(lines) == 201
+      assert length(lines) == 501
       assert List.last(lines) == "... (truncated, 5 more entries)"
     end
 

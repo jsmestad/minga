@@ -3,7 +3,7 @@ defmodule MingaAgent.Tools.OutputLimit do
   UTF-8-safe output truncation for model-facing agent tool results.
   """
 
-  @default_max_bytes 64_000
+  @default_max_bytes 51_200
   @default_timeout_ms 10_000
 
   @type command_status :: non_neg_integer() | :timeout

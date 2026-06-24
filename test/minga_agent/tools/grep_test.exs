@@ -175,9 +175,9 @@ defmodule MingaAgent.Tools.GrepTest do
       File.write!(Path.join(dir, "huge.txt"), Enum.join(lines, "\n") <> "\n")
 
       assert {:ok, output} = Grep.execute("needle", dir)
-      assert byte_size(output) < 65_000
+      assert byte_size(output) < 52_200
       assert String.valid?(output)
-      assert output =~ "truncated at 64KB"
+      assert output =~ "truncated at 51KB"
     end
 
     test "does not walk a directly requested ignored search root", %{dir: dir} do

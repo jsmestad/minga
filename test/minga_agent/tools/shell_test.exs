@@ -121,10 +121,10 @@ defmodule MingaAgent.Tools.ShellTest do
                )
 
       combined = collect_shell_chunks() |> IO.iodata_to_binary()
-      marker = "\n\n[stream truncated at 64KB]\n"
+      marker = "\n\n[stream truncated at 51KB]\n"
 
       assert String.ends_with?(combined, marker)
-      assert byte_size(String.replace_suffix(combined, marker, "")) == 64_000
+      assert byte_size(String.replace_suffix(combined, marker, "")) == 51_200
       assert length(:binary.matches(combined, marker)) == 1
     end
 
@@ -145,7 +145,7 @@ defmodule MingaAgent.Tools.ShellTest do
 
       assert String.valid?(combined)
       assert combined =~ "€"
-      assert combined =~ "[stream truncated at 64KB]"
+      assert combined =~ "[stream truncated at 51KB]"
       assert is_binary(JSON.encode!(%{output: combined}))
     end
 
@@ -160,14 +160,14 @@ defmodule MingaAgent.Tools.ShellTest do
       end
 
       command =
-        "elixir -e 'IO.write(String.duplicate(\"x\", 63999)); IO.binwrite(:stdio, <<226>>); Process.sleep(50); IO.binwrite(:stdio, <<130, 172>>)'"
+        "elixir -e 'IO.write(String.duplicate(\"x\", 51199)); IO.binwrite(:stdio, <<226>>); Process.sleep(50); IO.binwrite(:stdio, <<130, 172>>)'"
 
       assert {:ok, _output} = Shell.execute(command, dir, 5, on_output: on_output)
 
       combined = collect_shell_chunks() |> IO.iodata_to_binary()
 
       assert String.valid?(combined)
-      assert combined =~ "[stream truncated at 64KB]"
+      assert combined =~ "[stream truncated at 51KB]"
       assert is_binary(JSON.encode!(%{output: combined}))
     end
 
@@ -197,9 +197,9 @@ defmodule MingaAgent.Tools.ShellTest do
       assert {:ok, output} =
                Shell.execute("elixir -e 'IO.write(String.duplicate(\"x\", 70000))'", dir, 5)
 
-      marker = "\n\n[truncated at 64KB]"
+      marker = "\n\n[truncated at 51KB]"
       assert String.ends_with?(output, marker)
-      assert byte_size(String.replace_suffix(output, marker, "")) == 64_000
+      assert byte_size(String.replace_suffix(output, marker, "")) == 51_200
     end
 
     test "preserves valid UTF-8 when truncating multibyte output", %{tmp_dir: dir} do
@@ -208,7 +208,7 @@ defmodule MingaAgent.Tools.ShellTest do
 
       assert String.valid?(output)
       assert output =~ "€"
-      assert output =~ "[truncated at 64KB]"
+      assert output =~ "[truncated at 51KB]"
       assert is_binary(JSON.encode!(%{output: output}))
     end
 
@@ -216,12 +216,12 @@ defmodule MingaAgent.Tools.ShellTest do
       tmp_dir: dir
     } do
       command =
-        "elixir -e 'IO.write(String.duplicate(\"x\", 63999)); IO.binwrite(:stdio, <<226>>); Process.sleep(50); IO.binwrite(:stdio, <<130, 172>>)'"
+        "elixir -e 'IO.write(String.duplicate(\"x\", 51199)); IO.binwrite(:stdio, <<226>>); Process.sleep(50); IO.binwrite(:stdio, <<130, 172>>)'"
 
       assert {:ok, output} = Shell.execute(command, dir, 5)
 
       assert String.valid?(output)
-      assert output =~ "[truncated at 64KB]"
+      assert output =~ "[truncated at 51KB]"
       assert is_binary(JSON.encode!(%{output: output}))
     end
 

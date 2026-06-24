@@ -42,7 +42,7 @@ defmodule MingaAgent.Tools.FetchUrlTest do
     assert opts[:max_retries] == 0
     assert opts[:decode_body] == false
     assert opts[:redirect] == false
-    assert opts[:max_fetch_bytes] == 100_001
+    assert opts[:max_fetch_bytes] == 51_201
     assert opts[:connect_options][:hostname] == "docs.example"
     assert opts[:connect_options][:timeout] == 10_000
     assert {"host", "docs.example:8443"} in opts[:headers]
@@ -137,10 +137,10 @@ defmodule MingaAgent.Tools.FetchUrlTest do
            ) == {:error, "timeout_ms must be at most 30000"}
 
     assert FetchUrl.execute(
-             %{"url" => "https://example.test", "max_bytes" => 100_001},
+             %{"url" => "https://example.test", "max_bytes" => 51_201},
              fetcher,
              resolver
-           ) == {:error, "max_bytes must be at most 100000"}
+           ) == {:error, "max_bytes must be at most 51200"}
   end
 
   test "rejects DNS-resolved private hosts before fetching" do

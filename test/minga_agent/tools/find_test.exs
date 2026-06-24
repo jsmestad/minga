@@ -148,13 +148,13 @@ defmodule MingaAgent.Tools.FindTest do
     end
 
     test "marks truncated results when more matches exist than the model result cap", %{dir: dir} do
-      for index <- 1..205 do
+      for index <- 1..1_005 do
         File.write!(Path.join(dir, "many_#{index}.txt"), "many")
       end
 
       assert {:ok, output} = Find.execute("many_*.txt", dir)
       lines = String.split(output, "\n", trim: true)
-      assert length(Enum.reject(lines, &String.starts_with?(&1, "... (truncated"))) == 200
+      assert length(Enum.reject(lines, &String.starts_with?(&1, "... (truncated"))) == 1_000
       assert List.last(lines) == "... (truncated, refine the pattern or path for fewer results)"
     end
 
@@ -168,9 +168,9 @@ defmodule MingaAgent.Tools.FindTest do
       end
 
       assert {:ok, output} = Find.execute("long_*.txt", dir, %{"max_depth" => 5})
-      assert byte_size(output) < 65_000
+      assert byte_size(output) < 52_200
       assert String.valid?(output)
-      assert output =~ "truncated at 64KB"
+      assert output =~ "truncated at 51KB"
     end
 
     test "drops a truncated final line before ignore filtering", %{dir: dir} do

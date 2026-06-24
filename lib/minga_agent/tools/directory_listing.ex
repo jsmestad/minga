@@ -5,7 +5,7 @@ defmodule MingaAgent.Tools.DirectoryListing do
 
   alias MingaAgent.Tools.PathIgnore
 
-  @max_entries 200
+  @max_entries 500
 
   @type entry :: %{name: String.t(), type: :directory | :file}
 
