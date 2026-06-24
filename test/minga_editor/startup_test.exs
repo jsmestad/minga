@@ -191,6 +191,7 @@ defmodule MingaEditor.StartupTest do
     test "uses supplied options server for automatic startup view" do
       options_server = start_supervised!({Options, name: nil})
       {:ok, :agent} = Options.set(options_server, :startup_view, :agent)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.put_env(:minga, :cli_startup_flags, %{view_mode: :auto, no_context: false})
 
       state =
@@ -207,12 +208,14 @@ defmodule MingaEditor.StartupTest do
       assert state.workspace.keymap_scope == :agent
       assert state.workspace.agent_ui.view.active
     after
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_flags)
     end
 
     test "explicit view_mode overrides configured startup view" do
       options_server = start_supervised!({Options, name: nil})
       {:ok, :agent} = Options.set(options_server, :startup_view, :agent)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.put_env(:minga, :cli_startup_flags, %{view_mode: :auto, no_context: false})
 
       state =
@@ -230,6 +233,7 @@ defmodule MingaEditor.StartupTest do
       assert state.workspace.keymap_scope == :editor
       refute state.workspace.agent_ui.view.active
     after
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_flags)
     end
 
@@ -437,6 +441,7 @@ defmodule MingaEditor.StartupTest do
       dir = tmp_dir("startup-project-root")
       workspace = Workspace.new_agent(2, "Persisted Agent", nil, dir)
       assert :ok = Persistence.write(workspace, dir)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.put_env(:minga, :cli_startup_project_root, dir)
 
       state =
@@ -456,6 +461,7 @@ defmodule MingaEditor.StartupTest do
       assert %Workspace{label: "Persisted Agent"} = TabBar.get_workspace(tab_bar, 2)
       assert tab_bar |> TabBar.switch_to_workspace(2) |> TabBar.active_workspace_id() == 2
     after
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_project_root)
     end
 
@@ -469,6 +475,7 @@ defmodule MingaEditor.StartupTest do
       File.write!(file, "defmodule Example do\nend\n")
       workspace = Workspace.new_agent(2, "Argv Agent", nil, dir)
       assert :ok = Persistence.write(workspace, dir)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_project_root)
       System.argv([file])
 
@@ -488,6 +495,7 @@ defmodule MingaEditor.StartupTest do
       assert EditorState.file_tree_state(state).project_root == dir
       assert %Workspace{label: "Argv Agent"} = TabBar.get_workspace(tab_bar, 2)
     after
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_project_root)
     end
 
@@ -498,6 +506,7 @@ defmodule MingaEditor.StartupTest do
       invalid_root = Path.join(dir, "missing")
       workspace = Workspace.new_agent(2, "Hidden Agent", nil, dir)
       assert :ok = Persistence.write(workspace, dir)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.put_env(:minga, :cli_startup_project_root, invalid_root)
       System.argv([])
 
@@ -517,6 +526,7 @@ defmodule MingaEditor.StartupTest do
       assert EditorState.file_tree_state(state).project_root == invalid_root
       refute TabBar.get_workspace(tab_bar, 2)
     after
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_project_root)
     end
 
@@ -524,6 +534,7 @@ defmodule MingaEditor.StartupTest do
       dir = tmp_dir("startup-restored-agent-tab")
       workspace = Workspace.new_agent(2, "Persisted Agent", nil, dir)
       assert :ok = Persistence.write(workspace, dir)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.put_env(:minga, :cli_startup_project_root, dir)
 
       state =
@@ -553,6 +564,7 @@ defmodule MingaEditor.StartupTest do
       assert restored.workspace.buffers.active == nil
       assert restored.workspace.buffers.list == []
     after
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_project_root)
     end
 
@@ -571,6 +583,7 @@ defmodule MingaEditor.StartupTest do
 
       {:ok, workspace} = Workspace.transition_review(workspace, :agent_completed, [file_ref])
       assert :ok = Persistence.write(workspace, dir)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.put_env(:minga, :cli_startup_project_root, dir)
 
       state =
@@ -607,6 +620,7 @@ defmodule MingaEditor.StartupTest do
       assert rebound_workspace.review.state == :needs_review
       assert rebound_workspace.review.changed_files == [file_ref]
     after
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_project_root)
     end
   end
@@ -672,6 +686,7 @@ defmodule MingaEditor.StartupTest do
   defp stop_session(_pid), do: :ok
 
   defp assert_startup_scope(backend, view_mode, expected_scope, expected_active?) do
+    # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
     Application.put_env(:minga, :cli_startup_flags, %{view_mode: view_mode, no_context: false})
 
     {scope, agentic} = Startup.startup_view_state(backend)
@@ -679,6 +694,7 @@ defmodule MingaEditor.StartupTest do
     assert scope == expected_scope
     assert agentic.view.active == expected_active?
   after
+    # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
     Application.delete_env(:minga, :cli_startup_flags)
   end
 

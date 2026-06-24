@@ -313,7 +313,7 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
 
           refute String.contains?(left_text, "MOVED")
           assert String.contains?(right_text, "MOVED")
-          assert right_text |> String.split("MOVED") |> length() == 2
+          assert right_text |> String.split("MOVED") |> Enum.count() == 2
         end)
       after
         ModelineSegments.unregister(segment_name)

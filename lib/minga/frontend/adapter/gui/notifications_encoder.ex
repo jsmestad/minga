@@ -67,7 +67,7 @@ defmodule Minga.Frontend.Adapter.GUI.NotificationsEncoder do
       encode_notification_string16(notification.title, @max_notification_title_bytes),
       encode_notification_string16(notification.body, @max_notification_body_bytes),
       encode_notification_string16(notification.source, @max_notification_source_bytes),
-      <<length(actions)::8>>,
+      <<Enum.count(actions)::8>>,
       Enum.map(actions, &encode_notification_action/1)
     ])
   end

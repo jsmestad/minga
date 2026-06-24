@@ -49,6 +49,7 @@ defmodule MingaAgent.SessionProviderRegistryTest do
   end
 
   test "default native sessions fail through the registry when the bundled provider is removed" do
+    # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
     Application.delete_env(:minga, :test_provider_module)
     ProviderRegistry.unregister_source(NativeProviderPack.source())
 
@@ -104,8 +105,10 @@ defmodule MingaAgent.SessionProviderRegistryTest do
   end
 
   defp restore_test_provider_module(nil),
+    # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
     do: Application.delete_env(:minga, :test_provider_module)
 
   defp restore_test_provider_module(module),
+    # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
     do: Application.put_env(:minga, :test_provider_module, module)
 end

@@ -74,7 +74,7 @@ defmodule MingaAgent.Instructions do
           "  #{project_root}/.minga/AGENTS.md"
 
       found ->
-        header = "Loaded #{length(found)} instruction file(s):\n"
+        header = "Loaded #{Enum.count(found)} instruction file(s):\n"
 
         lines =
           Enum.map_join(found, "\n", fn %Instruction{label: label, path: path, content: content} ->

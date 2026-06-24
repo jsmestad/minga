@@ -167,7 +167,7 @@ defmodule MingaEditor.Frontend.GUIMinibufferProtocolTest do
       result = ProtocolGUI.encode_gui_minibuffer(data)
 
       # After header + candidate_count(2) + total_candidates(2), score byte
-      # total_candidates defaults to length(candidates) = 1
+      # total_candidates defaults to Enum.count(candidates) = 1
       <<@op_gui_minibuffer, 1, 0, 0::16, 1, ":", 0::16, "", 0::16, "", 0::16, 1::16, _total::16,
         score, _rest::binary>> = result
 

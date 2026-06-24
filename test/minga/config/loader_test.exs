@@ -126,8 +126,9 @@ defmodule Minga.Config.LoaderTest do
       assert entry.module == Minga.Extensions.MCP
 
       assert [server] = Options.get(test_options_server(), :agent_mcp_servers)
-      assert (Map.get(server, :name) || Map.get(server, "name")) == "github"
-      assert (Map.get(server, :command) || Map.get(server, "command")) == "npx"
+      server = Map.new(server, fn {key, value} -> {to_string(key), value} end)
+      assert Map.get(server, "name") == "github"
+      assert Map.get(server, "command") == "npx"
     end
   end
 
@@ -142,11 +143,14 @@ defmodule Minga.Config.LoaderTest do
     on_exit(cleanup)
 
     previous_load_extensions = Application.get_env(:minga, :load_extensions)
+    # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
     Application.put_env(:minga, :load_extensions, true)
 
     on_exit(fn ->
       case previous_load_extensions do
+        # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
         nil -> Application.delete_env(:minga, :load_extensions)
+        # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
         value -> Application.put_env(:minga, :load_extensions, value)
       end
     end)
@@ -449,7 +453,7 @@ defmodule Minga.Config.LoaderTest do
 
       assert Minga.UserModules.Good in Loader.loaded_modules(pid)
       assert apply(Minga.UserModules.Good, :ok?, []) == true
-      assert length(Loader.modules_errors(pid)) == 1
+      assert Enum.count(Loader.modules_errors(pid)) == 1
       assert hd(Loader.modules_errors(pid)) =~ "aaa_bad.ex"
     end
 
@@ -527,8 +531,9 @@ defmodule Minga.Config.LoaderTest do
 
       assert Loader.load_error(pid) == nil
       assert [server] = Options.get(test_options_server(), :agent_mcp_servers)
-      assert (Map.get(server, :name) || Map.get(server, "name")) == "github"
-      assert (Map.get(server, :command) || Map.get(server, "command")) == "npx"
+      server = Map.new(server, fn {key, value} -> {to_string(key), value} end)
+      assert Map.get(server, "name") == "github"
+      assert Map.get(server, "command") == "npx"
     end
 
     test "reports a clear error when mcpServers contains a non-map value" do
@@ -1135,6 +1140,7 @@ defmodule Minga.Config.LoaderTest do
       on_exit(cleanup)
 
       previous_load_extensions = Application.get_env(:minga, :load_extensions)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.put_env(:minga, :load_extensions, true)
 
       on_exit(fn ->
@@ -1263,7 +1269,6 @@ defmodule Minga.Config.LoaderTest do
       {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
       assert apply(Minga.UserModules.Reloadable, :version, []) == 1
 
-      # Update the module
       File.write!(Path.join(modules_dir, "reloadable.ex"), """
       defmodule Minga.UserModules.Reloadable do
         def version, do: 2
@@ -1289,7 +1294,6 @@ defmodule Minga.Config.LoaderTest do
       {:ok, _pid} = Loader.start_link(name: name, config_home: config_home)
       assert {:ok, _} = CommandRegistry.lookup(CommandRegistry, :my_custom)
 
-      # Remove the command from config
       File.write!(Path.join(minga_dir, "config.exs"), """
       use Minga.Config
       set :tab_width, 2
@@ -1429,7 +1433,6 @@ defmodule Minga.Config.LoaderTest do
 
   describe "--config CLI flag" do
     test "loader uses the custom config path when config_file flag is set" do
-      # Create a custom config in a non-standard location
       custom_dir =
         Path.join(System.tmp_dir!(), "minga_custom_#{System.unique_integer([:positive])}")
 
@@ -1449,7 +1452,7 @@ defmodule Minga.Config.LoaderTest do
         set :tab_width, 2
         """)
 
-      # Set the CLI flag
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.put_env(:minga, :cli_startup_flags, %{
         view_mode: :auto,
         no_context: false,
@@ -1457,6 +1460,7 @@ defmodule Minga.Config.LoaderTest do
       })
 
       on_exit(fn ->
+        # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
         Application.delete_env(:minga, :cli_startup_flags)
         cleanup.()
         File.rm_rf!(custom_dir)
@@ -1476,6 +1480,7 @@ defmodule Minga.Config.LoaderTest do
     test "nonexistent --config path warns in status bar but does not crash" do
       custom_path = "/tmp/minga_nonexistent_#{System.unique_integer([:positive])}.exs"
 
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.put_env(:minga, :cli_startup_flags, %{
         view_mode: :auto,
         no_context: false,
@@ -1488,6 +1493,7 @@ defmodule Minga.Config.LoaderTest do
       File.mkdir_p!(empty_dir)
 
       on_exit(fn ->
+        # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
         Application.delete_env(:minga, :cli_startup_flags)
         File.rm_rf!(empty_dir)
       end)
@@ -1516,6 +1522,7 @@ defmodule Minga.Config.LoaderTest do
 
       {_dir, config_home, cleanup} = make_config_dir("")
 
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.put_env(:minga, :cli_startup_flags, %{
         view_mode: :auto,
         no_context: false,
@@ -1523,6 +1530,7 @@ defmodule Minga.Config.LoaderTest do
       })
 
       on_exit(fn ->
+        # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
         Application.delete_env(:minga, :cli_startup_flags)
         cleanup.()
         File.rm_rf!(custom_dir)
@@ -1566,6 +1574,7 @@ defmodule Minga.Config.LoaderTest do
       original_cwd = File.cwd!()
       File.cd!(project_dir)
 
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.put_env(:minga, :cli_startup_flags, %{
         view_mode: :auto,
         no_context: false,
@@ -1574,6 +1583,7 @@ defmodule Minga.Config.LoaderTest do
 
       on_exit(fn ->
         File.cd!(original_cwd)
+        # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
         Application.delete_env(:minga, :cli_startup_flags)
         cleanup.()
         File.rm_rf!(custom_dir)
@@ -1589,6 +1599,7 @@ defmodule Minga.Config.LoaderTest do
     end
 
     test "without --config flag, loader uses the default XDG path" do
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_flags)
 
       {_dir, config_home, cleanup} =
@@ -1598,6 +1609,7 @@ defmodule Minga.Config.LoaderTest do
         """)
 
       on_exit(fn ->
+        # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
         Application.delete_env(:minga, :cli_startup_flags)
         cleanup.()
       end)
@@ -1624,6 +1636,7 @@ defmodule Minga.Config.LoaderTest do
 
       {_dir, config_home, cleanup} = make_config_dir("")
 
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.put_env(:minga, :cli_startup_flags, %{
         view_mode: :auto,
         no_context: false,
@@ -1631,6 +1644,7 @@ defmodule Minga.Config.LoaderTest do
       })
 
       on_exit(fn ->
+        # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
         Application.delete_env(:minga, :cli_startup_flags)
         cleanup.()
         File.rm_rf!(custom_dir)
@@ -1709,6 +1723,7 @@ defmodule Minga.Config.LoaderTest do
       {_minga_dir, config_home, cleanup} = make_config_dir("use Minga.Config\n")
       previous_load_extensions = Application.get_env(:minga, :load_extensions)
 
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.put_env(:minga, :load_extensions, true)
       Minga.SafeMode.put(true)
       ensure_extension_runtime()
@@ -1776,7 +1791,9 @@ defmodule Minga.Config.LoaderTest do
   end
 
   @spec restore_application_env(atom(), term()) :: :ok
+  # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
   defp restore_application_env(key, nil), do: Application.delete_env(:minga, key)
+  # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
   defp restore_application_env(key, value), do: Application.put_env(:minga, key, value)
 
   @spec ensure_extension_runtime() :: :ok

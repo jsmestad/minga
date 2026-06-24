@@ -442,7 +442,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
       |> Slots.to_color_pairs()
       |> Enum.reject(fn {_slot, color} -> is_nil(color) end)
 
-    count = length(pairs)
+    count = Enum.count(pairs)
 
     entries =
       Enum.map(pairs, fn {slot, rgb} ->
@@ -481,7 +481,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
     IO.iodata_to_binary([
       @op_gui_tab_bar,
-      <<active_index::8, length(chrome_state.visible_tabs)::8>>
+      <<active_index::8, Enum.count(chrome_state.visible_tabs)::8>>
       | entries
     ])
   end
@@ -502,7 +502,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
     IO.iodata_to_binary([
       @op_gui_tab_bar,
-      <<active_index::8, length(visible_tabs)::8>>
+      <<active_index::8, Enum.count(visible_tabs)::8>>
       | entries
     ])
   end
@@ -649,9 +649,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
     IO.iodata_to_binary([
       <<2::8, chrome_state.active_workspace_id::16, encode_workspace_mode(chrome_state.mode)::8,
-        encode_workspace_flags(chrome_state)::8, length(workspace_entries)::8>>,
+        encode_workspace_flags(chrome_state)::8, Enum.count(workspace_entries)::8>>,
       workspace_entries,
-      <<length(visible_tab_entries)::16>>,
+      <<Enum.count(visible_tab_entries)::16>>,
       visible_tab_entries
     ])
   end
@@ -805,7 +805,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           entry.opacity::8, byte_size(content)::16, content::binary>>
       end)
 
-    payload = IO.iodata_to_binary([<<length(entries)::8>> | overlay_binaries])
+    payload = IO.iodata_to_binary([<<Enum.count(entries)::8>> | overlay_binaries])
     <<@op_gui_extension_overlay, byte_size(payload)::16, payload::binary>>
   end
 
@@ -855,10 +855,10 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
         <<byte_size(ext)::8, ext::binary, byte_size(pid)::8, pid::binary, byte_size(title)::8,
           title::binary, pos::8, size_type::8, size_val::8, if(panel.visible, do: 1, else: 0)::8,
-          length(panel.content)::8, blocks::binary>>
+          Enum.count(panel.content)::8, blocks::binary>>
       end)
 
-    payload = IO.iodata_to_binary([<<length(panels)::8>> | panel_binaries])
+    payload = IO.iodata_to_binary([<<Enum.count(panels)::8>> | panel_binaries])
     <<@op_gui_extension_panel, byte_size(payload)::16, payload::binary>>
   end
 
@@ -902,7 +902,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
         end)
       )
 
-    <<1::8, length(runs)::8, run_data::binary>>
+    <<1::8, Enum.count(runs)::8, run_data::binary>>
   end
 
   defp encode_content_block({:table, %{columns: cols, rows: rows} = table}) do
@@ -923,7 +923,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
         end)
       )
 
-    <<2::8, length(cols)::8, length(rows)::16, selected::16, col_data::binary, row_data::binary>>
+    <<2::8, Enum.count(cols)::8, Enum.count(rows)::16, selected::16, col_data::binary,
+      row_data::binary>>
   end
 
   defp encode_content_block({:key_value, pairs}) do
@@ -936,7 +937,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
         end)
       )
 
-    <<3::8, length(pairs)::8, pair_data::binary>>
+    <<3::8, Enum.count(pairs)::8, pair_data::binary>>
   end
 
   defp encode_content_block({:separator}) do
@@ -957,7 +958,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   @spec encode_tree_nodes([map()]) :: binary()
   defp encode_tree_nodes(nodes) do
-    count = length(nodes)
+    count = Enum.count(nodes)
 
     node_binaries =
       IO.iodata_to_binary(
@@ -967,7 +968,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           expanded = if Map.get(node, :expanded, false), do: 1, else: 0
           child_data = encode_tree_nodes(children)
 
-          <<byte_size(label)::16, label::binary, expanded::8, length(children)::8,
+          <<byte_size(label)::16, label::binary, expanded::8, Enum.count(children)::8,
             child_data::binary>>
         end)
       )
@@ -1079,7 +1080,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     active = active_id || ""
 
     payload =
-      IO.iodata_to_binary([<<1::8, length(entries)::16>>, encode_string16(active), entries])
+      IO.iodata_to_binary([<<1::8, Enum.count(entries)::16>>, encode_string16(active), entries])
 
     <<@op_gui_sidebars, byte_size(payload)::32, payload::binary>>
   end
@@ -1121,7 +1122,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
       Enum.map(nodes, &encode_observatory_sparkline(&1, Map.get(data, :samples, [])))
 
     sections = [
-      encode_section(0x01, <<1::8, length(nodes)::16>>),
+      encode_section(0x01, <<1::8, Enum.count(nodes)::16>>),
       encode_chunked_sections(0x02, node_entries),
       encode_chunked_sections(0x03, sparkline_entries)
     ]
@@ -1213,7 +1214,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
     sample_bytes = Enum.map(values, &encode_float16/1)
 
-    <<byte_size(pid_bytes)::8, pid_bytes::binary, length(values)::8,
+    <<byte_size(pid_bytes)::8, pid_bytes::binary, Enum.count(values)::8,
       IO.iodata_to_binary(sample_bytes)::binary>>
   end
 
@@ -1309,11 +1310,11 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
     payload =
       IO.iodata_to_binary([
-        <<length(option_entries)::16>>,
+        <<Enum.count(option_entries)::16>>,
         option_entries,
-        <<length(preview_entries)::16>>,
+        <<Enum.count(preview_entries)::16>>,
         preview_entries,
-        <<length(binding_entries)::16>>,
+        <<Enum.count(binding_entries)::16>>,
         binding_entries
       ])
 
@@ -1539,7 +1540,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   defp trie_keybinding_entries(%Bindings.Node{} = node, mode, prefix) do
     node.children
     |> Enum.flat_map(fn {key, child} ->
-      sequence = prefix ++ [key]
+      sequence = Enum.concat(prefix, [key])
       child_entries = trie_keybinding_entries(child, mode, sequence)
 
       case child.command do
@@ -1614,7 +1615,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
         <<2::8, file_tree_flags(status, focused?)::8, encode_file_tree_status(status)::8>>,
         encode_string16(selected_id),
         encode_string16(root),
-        <<tree_width::16, length(rows)::16>>,
+        <<tree_width::16, Enum.count(rows)::16>>,
         encode_string16(error_reason),
         Enum.map(rows, &encode_file_tree_row(&1, root))
       ])
@@ -1658,7 +1659,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     [
       <<:erlang.phash2(row.id, 0xFFFFFFFF)::32, file_tree_row_flags(row)::16, row.depth::8,
         encode_git_status(row.git_status)::8, diagnostic_errors::16, diagnostic_warnings::16,
-        diagnostic_info::16, diagnostic_hints::16, length(row.guides)::8>>,
+        diagnostic_info::16, diagnostic_hints::16, Enum.count(row.guides)::8>>,
       guides,
       encode_string16(row.id),
       encode_string16(row.path),
@@ -1789,8 +1790,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     prefix_bytes = prefix_keys |> Enum.join(" ") |> :erlang.iolist_to_binary()
 
     page_size = 20
-    page_count = max(div(length(bindings) + page_size - 1, page_size), 1)
-    page_bindings = bindings |> Enum.drop(page * page_size) |> Enum.take(page_size)
+    page_count = max(div(Enum.count(bindings) + page_size - 1, page_size), 1)
+    page_bindings = Enum.slice(bindings, page * page_size, page_size)
 
     entries =
       Enum.map(page_bindings, fn b ->
@@ -1806,7 +1807,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     IO.iodata_to_binary([
       @op_gui_which_key,
       <<1::8, byte_size(prefix_bytes)::16, prefix_bytes::binary, page::8, page_count::8,
-        length(page_bindings)::16>>
+        Enum.count(page_bindings)::16>>
       | entries
     ])
   end
@@ -1860,12 +1861,12 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @spec encode_gui_status_bar(MingaEditor.StatusBar.Data.t(), ChromeState.t() | nil) :: binary()
   def encode_gui_status_bar({:buffer, d}, chrome_state) do
     sections = encode_status_bar_sections(d, 0, chrome_state)
-    IO.iodata_to_binary([<<@op_gui_status_bar, length(sections)::8>> | sections])
+    IO.iodata_to_binary([<<@op_gui_status_bar, Enum.count(sections)::8>> | sections])
   end
 
   def encode_gui_status_bar({:agent, d}, chrome_state) do
     sections = encode_status_bar_sections(d, 1, chrome_state)
-    IO.iodata_to_binary([<<@op_gui_status_bar, length(sections)::8>> | sections])
+    IO.iodata_to_binary([<<@op_gui_status_bar, Enum.count(sections)::8>> | sections])
   end
 
   @spec encode_status_bar_sections(map(), 0 | 1, ChromeState.t() | nil) :: [binary()]
@@ -1933,7 +1934,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     sections = sections ++ modeline_segment_sections(Map.get(d, :modeline_segments))
 
     sections =
-      sections ++ [encode_section(@section_selection, <<selection_mode::8, selection_size::32>>)]
+      Enum.concat(sections, [
+        encode_section(@section_selection, <<selection_mode::8, selection_size::32>>)
+      ])
 
     sections = sections ++ workspace_status_bar_sections(chrome_state)
 
@@ -1942,25 +1945,23 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
       model_name = :erlang.iolist_to_binary([d.model_name || "Agent"])
       session_status_byte = encode_agent_session_status(d.session_status)
 
-      sections ++
-        [
-          encode_section(
-            @section_agent,
-            <<byte_size(model_name)::8, model_name::binary, d.message_count::32,
-              session_status_byte::8, agent_byte::8, background_count::16,
-              byte_size(background_label)::16, background_label::binary,
-              byte_size(active_tool_name)::8, active_tool_name::binary>>
-          )
-        ]
+      Enum.concat(sections, [
+        encode_section(
+          @section_agent,
+          <<byte_size(model_name)::8, model_name::binary, d.message_count::32,
+            session_status_byte::8, agent_byte::8, background_count::16,
+            byte_size(background_label)::16, background_label::binary,
+            byte_size(active_tool_name)::8, active_tool_name::binary>>
+        )
+      ])
     else
-      sections ++
-        [
-          encode_section(
-            @section_agent,
-            <<agent_byte::8, background_count::16, byte_size(background_label)::16,
-              background_label::binary, byte_size(active_tool_name)::8, active_tool_name::binary>>
-          )
-        ]
+      Enum.concat(sections, [
+        encode_section(
+          @section_agent,
+          <<agent_byte::8, background_count::16, byte_size(background_label)::16,
+            background_label::binary, byte_size(active_tool_name)::8, active_tool_name::binary>>
+        )
+      ])
     end
   end
 
@@ -2013,7 +2014,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @spec capped_modeline_segments([tuple()], [tuple()]) :: {[tuple()], [tuple()]}
   defp capped_modeline_segments(left, right) do
     left = Enum.take(left, @max_modeline_segments)
-    right = Enum.take(right, max(0, @max_modeline_segments - length(left)))
+    right = Enum.take(right, max(0, @max_modeline_segments - Enum.count(left)))
     {left, right}
   end
 
@@ -2814,7 +2815,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
         tools: tools
       }) do
     filter_byte = encode_tool_filter(filter)
-    tool_count = length(tools)
+    tool_count = Enum.count(tools)
 
     tool_data =
       Enum.map(tools, fn tool ->
@@ -2844,10 +2845,11 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           end)
 
         <<name_len::8, name_str::binary, label_len::8, tool.label::binary, desc_len::16,
-          tool.description::binary, category::8, status::8, method::8, length(tool.languages)::8>> <>
+          tool.description::binary, category::8, status::8, method::8,
+          Enum.count(tool.languages)::8>> <>
           IO.iodata_to_binary(lang_data) <>
           <<version_len::8, version::binary, homepage_len::16, homepage::binary,
-            length(tool.provides)::8>> <>
+            Enum.count(tool.provides)::8>> <>
           IO.iodata_to_binary(provides_data) <>
           <<error_reason_len::16, error_reason::binary>>
       end)
@@ -2915,7 +2917,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           candidates: candidates
         } = data
       ) do
-    total_candidates = Map.get(data, :total_candidates, length(candidates))
+    total_candidates = Map.get(data, :total_candidates, Enum.count(candidates))
     prompt_bytes = :erlang.iolist_to_binary([prompt])
     input_bytes = :erlang.iolist_to_binary([input])
     context_bytes = :erlang.iolist_to_binary([context])
@@ -2939,7 +2941,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
         [
           <<min(score, 255)::8, byte_size(label_bytes)::16, label_bytes::binary,
             byte_size(desc_bytes)::16, desc_bytes::binary, byte_size(annotation_bytes)::16,
-            annotation_bytes::binary, length(match_positions)::8>>
+            annotation_bytes::binary, Enum.count(match_positions)::8>>
           | pos_binary
         ]
       end)
@@ -2948,7 +2950,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
       <<@op_gui_minibuffer, 1::8, mode::8, cursor_pos::16, byte_size(prompt_bytes)::8,
         prompt_bytes::binary, byte_size(input_bytes)::16, input_bytes::binary,
         byte_size(context_bytes)::16, context_bytes::binary, selected_index::16,
-        length(candidates)::16, total_candidates::16>>
+        Enum.count(candidates)::16, total_candidates::16>>
       | candidate_data
     ])
   end
@@ -2992,13 +2994,13 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
         segment_data = Enum.map(segments, &encode_markdown_segment/1)
 
-        [<<line_type_byte::8, length(segments)::16>> | segment_data]
+        [<<line_type_byte::8, Enum.count(segments)::16>> | segment_data]
       end)
 
     hover =
       IO.iodata_to_binary([
         <<@op_gui_hover_popup, 1::8, popup.anchor_row::16, popup.anchor_col::16, focused_byte::8,
-          popup.scroll_offset::16, length(popup.content_lines)::16>>
+          popup.scroll_offset::16, Enum.count(popup.content_lines)::16>>
         | line_data
       ])
 
@@ -3061,14 +3063,14 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
         [
           <<byte_size(label_bytes)::16, label_bytes::binary, byte_size(doc_bytes)::16,
-            doc_bytes::binary, length(sig.parameters)::8>>
+            doc_bytes::binary, Enum.count(sig.parameters)::8>>
           | param_data
         ]
       end)
 
     IO.iodata_to_binary([
       <<@op_gui_signature_help, 1::8, sh.anchor_row::16, sh.anchor_col::16,
-        sh.active_signature::8, sh.active_parameter::8, length(sh.signatures)::8>>
+        sh.active_signature::8, sh.active_parameter::8, Enum.count(sh.signatures)::8>>
       | sig_data
     ])
   end
@@ -3112,7 +3114,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
     IO.iodata_to_binary([
       <<@op_gui_float_popup, 1::8, w::16, h::16, byte_size(title_bytes)::16, title_bytes::binary,
-        length(lines)::16>>
+        Enum.count(lines)::16>>
       | line_data
     ])
   end
@@ -3173,7 +3175,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
       encode_notification_string16(notification.title, @max_notification_title_bytes),
       encode_notification_string16(notification.body || "", @max_notification_body_bytes),
       encode_notification_string16(notification.source || "", @max_notification_source_bytes),
-      <<length(actions)::8>>,
+      <<Enum.count(actions)::8>>,
       Enum.map(actions, &encode_notification_action/1)
     ])
   end

@@ -135,7 +135,7 @@ defmodule MingaEditor.Commands.DiredTest do
 
       refute state.workspace.dired.confirming?
       files = File.ls!(dir)
-      assert length(files) < 2
+      assert Enum.count(files) < 2
       assert state.shell_state.status_msg =~ "Applied"
     end
 

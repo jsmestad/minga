@@ -18,6 +18,7 @@ defmodule MingaEditor.Commands.InlineAskPromotionHooksTest do
     previous_hooks = Options.get(:agent_hooks)
     previous_provider = Application.get_env(:minga, :test_provider_module)
     RecordingHook.set_recipient(self())
+    # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
     Application.put_env(:minga, :test_provider_module, Minga.Test.StubProvider)
 
     hooks = [
@@ -77,8 +78,10 @@ defmodule MingaEditor.Commands.InlineAskPromotionHooksTest do
     state |> EditorState.inline_asks() |> InlineAsk.active(buffer)
   end
 
+  # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
   defp restore_provider(nil), do: Application.delete_env(:minga, :test_provider_module)
 
   defp restore_provider(provider),
+    # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
     do: Application.put_env(:minga, :test_provider_module, provider)
 end

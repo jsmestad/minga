@@ -67,7 +67,7 @@ defmodule MingaEditor.AsyncAction do
       _running ->
         EditorState.put_async_lane(state, lane, %{
           lane_state
-          | queue: lane_state.queue ++ [work_fun]
+          | queue: Enum.concat(lane_state.queue, [work_fun])
         })
     end
   end

@@ -342,7 +342,7 @@ defmodule Minga.Git.RepoTest do
       Repo.await_refresh(repo)
 
       entries = Repo.status(repo)
-      assert length(entries) == 1
+      assert Enum.count(entries) == 1
       assert hd(entries).path == "lib/foo.ex"
     end
 

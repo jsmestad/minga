@@ -115,7 +115,7 @@ defmodule MingaAgent.Tools.LspCodeActions do
   @spec format_actions(String.t(), non_neg_integer(), [map()]) :: String.t()
   defp format_actions(path, line, actions) do
     header =
-      "#{length(actions)} code action#{if length(actions) == 1, do: "", else: "s"} at #{Path.basename(path)}:#{line + 1}:"
+      "#{Enum.count(actions)} code action#{if Enum.count(actions) == 1, do: "", else: "s"} at #{Path.basename(path)}:#{line + 1}:"
 
     details =
       actions
@@ -235,7 +235,7 @@ defmodule MingaAgent.Tools.LspCodeActions do
   defp apply_file_edits(file_edits) do
     Enum.reduce(file_edits, {0, 0, []}, fn {path, edits}, {fc, ec, errs} ->
       case apply_edits_to_file(path, edits) do
-        :ok -> {fc + 1, ec + length(edits), errs}
+        :ok -> {fc + 1, ec + Enum.count(edits), errs}
         {:error, reason} -> {fc, ec, ["  #{Path.basename(path)}: #{reason}" | errs]}
       end
     end)

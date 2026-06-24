@@ -42,7 +42,7 @@ defmodule Minga.LSP.SemanticTokensTest do
       ]
 
       tokens = SemanticTokens.decode(data, @token_types, @token_modifiers)
-      assert length(tokens) == 3
+      assert Enum.count(tokens) == 3
 
       [t1, t2, t3] = tokens
       assert {t1.line, t1.start_char} == {0, 5}
@@ -154,7 +154,7 @@ defmodule Minga.LSP.SemanticTokensTest do
         )
 
       # Single composite span, not separate type + modifier spans
-      assert length(spans) == 1
+      assert Enum.count(spans) == 1
       [span] = spans
       assert span.capture_id == 0
       assert span.layer == 2

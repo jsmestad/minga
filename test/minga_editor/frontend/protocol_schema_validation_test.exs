@@ -118,14 +118,12 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
       window = minimal_render_window(rows: [row])
       binary = WindowEncoder.encode_window_content(window)
 
-      # Parse the sectioned binary to extract the rows section.
       <<0x80, section_count::8, sections_binary::binary>> = binary
       rows_payload = extract_section_payload(sections_binary, section_count, 0x02)
 
       # The rows section starts with row_count(u16), then the row data.
       <<1::16, row_binary::binary>> = rows_payload
 
-      # Extract the span from the row binary.
       text = "hello"
       text_len = byte_size(text)
       prefix_size = 1 + 8 + 4 + 4 + 4 + text_len + 2
@@ -260,8 +258,7 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
     test "all schema-declared sections exist in encoder output", %{sections: sections} do
       schema_section_ids =
         sections["gui_window_content"]
-        |> Enum.map(fn s -> {s["id"], s["name"]} end)
-        |> Enum.into(%{})
+        |> Map.new(fn s -> {s["id"], s["name"]} end)
 
       window = full_render_window()
       binary = WindowEncoder.encode_window_content(window)
@@ -338,8 +335,7 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
     test "all schema-declared sections exist in encoder output", %{sections: sections} do
       schema_section_ids =
         sections["gui_status_bar"]
-        |> Enum.map(fn s -> {s["id"], s["name"]} end)
-        |> Enum.into(%{})
+        |> Map.new(fn s -> {s["id"], s["name"]} end)
 
       model = full_status_bar_model()
       binary = StatusBarEncoder.encode_command(model)
@@ -372,8 +368,7 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
     test "all schema-declared sections exist in encoder output", %{sections: sections} do
       schema_section_ids =
         sections["gui_gutter"]
-        |> Enum.map(fn s -> {s["id"], s["name"]} end)
-        |> Enum.into(%{})
+        |> Map.new(fn s -> {s["id"], s["name"]} end)
 
       gutter = %Gutter{
         window_id: 1,

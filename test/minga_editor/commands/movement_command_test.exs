@@ -238,7 +238,7 @@ defmodule MingaEditor.Commands.MovementCommandTest do
           tab_width: 2
         )
 
-      BufferProcess.move_to(buffer, {0, List.last(hd(wrap_map)).byte_offset})
+      BufferProcess.move_to(buffer, {0, Enum.at(hd(wrap_map), -1).byte_offset})
 
       state = Movement.execute(state, :scroll_cursor_top)
       win = EditorState.active_window_struct(state)
@@ -269,11 +269,11 @@ defmodule MingaEditor.Commands.MovementCommandTest do
 
       total_visual_rows = WrapMap.visual_row_count([penultimate_entry, last_entry])
       visible = Viewport.content_rows(Viewport.new(5, 24, 0))
-      cursor_visual_row = length(penultimate_entry) - 1
+      cursor_visual_row = Enum.count(penultimate_entry) - 1
 
       assert total_visual_rows > visible
 
-      BufferProcess.move_to(buffer, {0, List.last(penultimate_entry).byte_offset})
+      BufferProcess.move_to(buffer, {0, Enum.at(penultimate_entry, -1).byte_offset})
 
       state = Movement.execute(state, :scroll_cursor_top)
       win = EditorState.active_window_struct(state)

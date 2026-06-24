@@ -382,7 +382,7 @@ defmodule MingaAgent.FileMention do
   def update_prefix(completion, new_prefix) do
     filtered = filter_files(completion.all_files, new_prefix)
     candidates = Enum.take(filtered, @max_candidates)
-    selected = min(completion.selected, max(length(candidates) - 1, 0))
+    selected = min(completion.selected, max(Enum.count(candidates) - 1, 0))
 
     %{completion | prefix: new_prefix, candidates: candidates, selected: selected}
   end
@@ -392,7 +392,7 @@ defmodule MingaAgent.FileMention do
   def select_next(%{candidates: []} = c), do: c
 
   def select_next(%{candidates: candidates, selected: sel} = c) do
-    %{c | selected: rem(sel + 1, length(candidates))}
+    %{c | selected: rem(sel + 1, Enum.count(candidates))}
   end
 
   @doc "Moves selection up (wraps around)."
@@ -400,7 +400,7 @@ defmodule MingaAgent.FileMention do
   def select_prev(%{candidates: []} = c), do: c
 
   def select_prev(%{candidates: candidates, selected: sel} = c) do
-    total = length(candidates)
+    total = Enum.count(candidates)
     %{c | selected: rem(sel - 1 + total, total)}
   end
 

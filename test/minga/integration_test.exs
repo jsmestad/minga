@@ -44,7 +44,7 @@ defmodule Minga.IntegrationTest do
       send_key_sync(ctx, ?p)
 
       lines = buffer_content(ctx) |> String.split("\n")
-      assert length(lines) >= 3
+      assert Enum.count(lines) >= 3
     end
 
     test "P pastes register text before cursor" do
@@ -91,7 +91,6 @@ defmodule Minga.IntegrationTest do
       assert String.contains?(buffer_content(ctx), "INSERTED")
       assert_row_contains(ctx, 2, "INSERTED")
 
-      # Delete the line
       send_key_sync(ctx, ?d)
       send_key_sync(ctx, ?d)
       refute String.contains?(buffer_content(ctx), "INSERTED")

@@ -17,6 +17,7 @@ defmodule Minga.Extension.Hex do
 
   alias Minga.Extension.Entry
   alias Minga.Extension.Registry, as: ExtRegistry
+  alias Minga.Log
 
   @typedoc "A Mix dep tuple ready for Mix.install/2."
   @type mix_dep :: {atom(), String.t()} | {atom(), String.t(), keyword()}
@@ -90,19 +91,19 @@ defmodule Minga.Extension.Hex do
 
   @spec do_install([mix_dep()], keyword()) :: :ok | {:error, String.t()}
   defp do_install(deps, opts \\ []) do
-    Minga.Log.info(:config, "Installing #{length(deps)} hex extension(s)...")
+    Log.info(:config, "Installing #{Enum.count(deps)} hex extension(s)...")
 
     Mix.install(deps, opts)
     :ok
   rescue
     e in [Mix.Error] ->
       msg = "Mix.install failed: #{Exception.message(e)}"
-      Minga.Log.warning(:config, msg)
+      Log.warning(:config, msg)
       {:error, msg}
 
     e ->
       msg = "Hex extension install error: #{Exception.message(e)}"
-      Minga.Log.warning(:config, msg)
+      Log.warning(:config, msg)
       {:error, msg}
   end
 

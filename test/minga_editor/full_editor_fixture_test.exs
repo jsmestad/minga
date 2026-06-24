@@ -27,7 +27,7 @@ defmodule MingaEditor.FullEditorFixtureTest do
     # The replay order is curated: the frame is a transaction (#2219) that opens
     # with begin_frame and closes with commit_frame.
     assert List.first(opcodes) == Opcodes.begin_frame()
-    assert List.last(opcodes) == Opcodes.commit_frame()
+    assert Enum.at(opcodes, -1) == Opcodes.commit_frame()
 
     # A real full-editor frame carries the buffer window content plus the
     # surrounding chrome. The previous 46-byte stub failed exactly here.

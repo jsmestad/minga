@@ -416,16 +416,19 @@ defmodule Minga.CLITest do
 
   describe "startup_flags/0" do
     test "returns default flags when no CLI flags were set" do
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_flags)
       assert %{view_mode: :auto, no_context: false, config_file: nil} = CLI.startup_flags()
     end
 
     test "merges sparse stored flags with defaults" do
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.put_env(:minga, :cli_startup_flags, %{config_file: "/tmp/custom.exs"})
 
       assert %{view_mode: :auto, no_context: false, config_file: "/tmp/custom.exs"} =
                CLI.startup_flags()
     after
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_flags)
     end
   end
@@ -434,19 +437,25 @@ defmodule Minga.CLITest do
     test "no arguments returns :ok without crashing" do
       assert :ok = CLI.main([])
     after
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_flags)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_project_root)
     end
 
     test "file argument returns :ok even when editor isn't running" do
       assert :ok = CLI.main(["nonexistent_file.txt"])
     after
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_flags)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_project_root)
     end
 
     test "directory argument stores agentic startup mode and startup project root" do
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_flags)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_project_root)
       root = System.tmp_dir!()
 
@@ -454,25 +463,33 @@ defmodule Minga.CLITest do
       assert %{view_mode: :agentic, no_context: false, config_file: nil} = CLI.startup_flags()
       assert CLI.startup_project_root() == Path.expand(root)
     after
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_flags)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_project_root)
     end
 
     test "main stores startup flags in application env" do
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_flags)
       CLI.main(["--editor", "some_file.ex"])
       assert %{view_mode: :editor, no_context: false, config_file: nil} = CLI.startup_flags()
     after
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_flags)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_project_root)
     end
 
     test "main stores config_file flag from --config" do
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_flags)
       CLI.main(["--config", "/tmp/test_config.exs"])
       assert %{view_mode: :auto, config_file: "/tmp/test_config.exs"} = CLI.startup_flags()
     after
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_flags)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_project_root)
     end
 
@@ -480,6 +497,7 @@ defmodule Minga.CLITest do
       path =
         Path.join(System.tmp_dir!(), "minga_cli_debug_#{System.unique_integer([:positive])}.log")
 
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_flags)
 
       CLI.main(["--debug-log", path])
@@ -491,7 +509,9 @@ defmodule Minga.CLITest do
         assert :ok = Minga.DebugLog.stop(pid)
       end
 
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_flags)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :debug_log_path)
     end
   end

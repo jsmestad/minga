@@ -218,7 +218,6 @@ defmodule MingaEditor.UI.Popup.LifecycleTest do
       PopupRegistry.register(Rule.new("*Warnings*"), t)
       {:ok, with_popup} = Lifecycle.open_popup(state, "*Warnings*", popup_buf, registry: t)
 
-      # Set a layout cache
       with_popup = %{with_popup | layout: Layout.compute(with_popup)}
       assert %Layout{} = with_popup.layout
 

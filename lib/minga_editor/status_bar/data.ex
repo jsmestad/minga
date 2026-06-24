@@ -211,7 +211,7 @@ defmodule MingaEditor.StatusBar.Data do
       lsp_status: state.lsp.status,
       parser_status: state.parser_status,
       buf_index: state.workspace.buffers.active_index + 1,
-      buf_count: length(state.workspace.buffers.list),
+      buf_count: Enum.count(state.workspace.buffers.list),
       macro_recording: Minga.Editing.macro_recording_status(state),
       agent_status: agent.runtime.status,
       active_tool_name: agent.runtime.active_tool_name,
@@ -371,7 +371,7 @@ defmodule MingaEditor.StatusBar.Data do
       lsp_status: state.lsp.status,
       parser_status: state.parser_status,
       buf_index: state.workspace.buffers.active_index + 1,
-      buf_count: length(state.workspace.buffers.list),
+      buf_count: Enum.count(state.workspace.buffers.list),
       background_subagent_count: background.count,
       active_background_subagent_label: background.label,
       status_msg: Map.get(state.shell_state, :status_msg),
@@ -498,7 +498,7 @@ defmodule MingaEditor.StatusBar.Data do
 
   defp merge_conflict_count(buf) when is_pid(buf) do
     case Git.tracking_pid(buf) do
-      nil -> buf |> Buffer.content() |> MergeConflict.parse() |> length()
+      nil -> buf |> Buffer.content() |> MergeConflict.parse() |> Enum.count()
       git_pid -> Git.conflict_count(git_pid)
     end
   catch
@@ -658,7 +658,7 @@ defmodule MingaEditor.StatusBar.Data do
     selected = active || List.first(running) || List.first(tabs)
 
     %{
-      count: length(running),
+      count: Enum.count(running),
       label: background_subagent_label(selected)
     }
   end

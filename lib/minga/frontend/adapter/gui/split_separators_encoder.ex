@@ -36,9 +36,9 @@ defmodule Minga.Frontend.Adapter.GUI.SplitSeparatorsEncoder do
     IO.iodata_to_binary([
       <<@op_gui_split_separators, red(model.border_color_rgb)::8,
         green(model.border_color_rgb)::8, blue(model.border_color_rgb)::8,
-        length(model.verticals)::8>>,
+        Enum.count(model.verticals)::8>>,
       verticals,
-      <<length(model.horizontals)::8>>,
+      <<Enum.count(model.horizontals)::8>>,
       horizontals
     ])
   end

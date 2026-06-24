@@ -133,15 +133,13 @@ defmodule MingaEditor.ChangeTracking do
   end
 
   defp do_update_normal_to_normal(rec, commands, key) do
-    case Enum.any?(commands, &editing_command?/1) do
-      true ->
-        rec
-        |> ChangeRecorder.start_recording()
-        |> ChangeRecorder.record_key(key)
-        |> ChangeRecorder.stop_recording()
-
-      false ->
-        ChangeRecorder.clear_pending(rec)
+    if Enum.any?(commands, &editing_command?/1) do
+      rec
+      |> ChangeRecorder.start_recording()
+      |> ChangeRecorder.record_key(key)
+      |> ChangeRecorder.stop_recording()
+    else
+      ChangeRecorder.clear_pending(rec)
     end
   end
 

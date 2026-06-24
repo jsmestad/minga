@@ -244,7 +244,7 @@ defmodule MingaEditor.FileTree.RowsTest do
 
       rows = Rows.from_entries(indexed_entries, tree, selected_index: tree.cursor)
 
-      assert length(rows) == 10
+      assert Enum.count(rows) == 10
 
       assert Enum.map(rows, & &1.name) ==
                Enum.map(indexed_entries, fn {entry, _index} -> entry.name end)
@@ -322,7 +322,7 @@ defmodule MingaEditor.FileTree.RowsTest do
       file_tree = FileTreeState.open(%FileTreeState{}, tree, nil)
 
       assert is_list(file_tree.tree.entries)
-      assert length(file_tree.tree.entries) == 2
+      assert Enum.count(file_tree.tree.entries) == 2
 
       replaced_tree = FileTree.toggle_hidden(file_tree.tree)
       replaced = FileTreeState.replace_tree(file_tree, replaced_tree)

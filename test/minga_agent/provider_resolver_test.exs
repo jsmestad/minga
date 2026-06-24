@@ -88,6 +88,7 @@ defmodule MingaAgent.ProviderResolverTest do
     test "falls back to real resolution when no override is set" do
       # Temporarily clear the override to test the real resolution path
       override = Application.get_env(:minga, :test_provider_module)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :test_provider_module)
 
       try do
@@ -98,6 +99,7 @@ defmodule MingaAgent.ProviderResolverTest do
         assert result.name == "native (auto)"
       after
         # Restore the override for other tests
+        # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
         if override, do: Application.put_env(:minga, :test_provider_module, override)
       end
     end

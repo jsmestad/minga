@@ -183,7 +183,7 @@ defmodule MingaAgent.Tools.Find do
           "\n\n... (truncated at #{div(@max_output_bytes, 1000)}KB, refine the pattern or path for fewer results)",
         else: ""
 
-    if length(lines) > @max_results do
+    if Enum.count(lines) > @max_results do
       truncated = Enum.take(lines, @max_results) |> Enum.join("\n")
       truncated <> "\n\n... (truncated, refine the pattern or path for fewer results)" <> marker
     else

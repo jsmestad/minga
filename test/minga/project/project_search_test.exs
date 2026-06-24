@@ -151,7 +151,7 @@ defmodule Minga.Project.ProjectSearchTest do
           # The cap is enforced while collecting: we never accumulate more than
           # the cap regardless of how many lines the subprocess could emit.
           assert truncated?
-          assert length(matches) == ProjectSearch.max_results()
+          assert Enum.count(matches) == ProjectSearch.max_results()
 
         {:error, _} ->
           :ok

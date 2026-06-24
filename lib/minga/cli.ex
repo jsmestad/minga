@@ -18,6 +18,7 @@ defmodule Minga.CLI do
   alias Burrito.Util.Args
   alias Minga.Distribution.Cookie
   alias Minga.Remote.ControlEndpoint
+  alias Minga.Remote.CLI
 
   @typedoc "Parsed CLI result."
   @type parsed ::
@@ -84,7 +85,7 @@ defmodule Minga.CLI do
 
         with :ok <- maybe_start_debug_log(flags),
              :ok <- maybe_start_remote_distribution(flags),
-             {:ok, _result} <- Minga.Remote.CLI.attach(url) do
+             {:ok, _result} <- CLI.attach(url) do
           launch(flags, nil)
           finish_remote_attach()
         else
@@ -94,7 +95,7 @@ defmodule Minga.CLI do
       {:sessions, url, flags} ->
         with :ok <- maybe_start_debug_log(flags),
              :ok <- maybe_start_terminal_distribution(flags),
-             :ok <- Minga.Remote.CLI.sessions(url) do
+             :ok <- CLI.sessions(url) do
           System.stop(0)
         else
           {:error, message} -> abort_startup(message)
@@ -103,7 +104,7 @@ defmodule Minga.CLI do
       {:detach, flags} ->
         with :ok <- maybe_start_debug_log(flags),
              :ok <- maybe_start_terminal_distribution(flags),
-             :ok <- Minga.Remote.CLI.detach() do
+             :ok <- CLI.detach() do
           System.stop(0)
         else
           {:error, message} -> abort_startup(message)
@@ -112,7 +113,7 @@ defmodule Minga.CLI do
       {:kill_session, url, flags} ->
         with :ok <- maybe_start_debug_log(flags),
              :ok <- maybe_start_terminal_distribution(flags),
-             :ok <- Minga.Remote.CLI.kill_session(url) do
+             :ok <- CLI.kill_session(url) do
           System.stop(0)
         else
           {:error, message} -> abort_startup(message)
@@ -244,7 +245,6 @@ defmodule Minga.CLI do
     argv_startup_project_root(&Args.argv/0)
   end
 
-  @doc false
   @spec argv_startup_project_root((-> [String.t()])) :: String.t() | nil
   def argv_startup_project_root(fetch_argv) when is_function(fetch_argv, 0) do
     fetch_argv.()
@@ -274,7 +274,6 @@ defmodule Minga.CLI do
       nil
   end
 
-  @doc false
   @spec cwd_startup_project_root(String.t()) :: String.t() | nil
   def cwd_startup_project_root(cwd) when is_binary(cwd) do
     cwd
@@ -685,7 +684,6 @@ defmodule Minga.CLI do
   defp format_hostname(name, true), do: name |> List.to_string() |> String.split(".") |> hd()
   defp format_hostname(name, false), do: List.to_string(name)
 
-  @doc false
   @spec distribution_cookie(flags()) :: {:ok, String.t() | nil} | {:error, String.t()}
   def distribution_cookie(%{cookie_file: path}) when is_binary(path), do: read_cookie_file(path)
   def distribution_cookie(%{cookie: cookie}) when is_binary(cookie), do: {:ok, cookie}
@@ -742,7 +740,6 @@ defmodule Minga.CLI do
     )
   end
 
-  @doc false
   @spec gateway_port(flags()) :: {:ok, pos_integer()} | {:error, String.t()}
   def gateway_port(%{gateway_port: port}) when is_integer(port), do: {:ok, port}
 
@@ -826,7 +823,7 @@ defmodule Minga.CLI do
 
   @spec finish_remote_attach() :: :ok | no_return()
   defp finish_remote_attach do
-    case Minga.Remote.CLI.connect_pending_editor_attach() do
+    case CLI.connect_pending_editor_attach() do
       :ok -> :ok
       :none -> :ok
       {:error, message} -> abort_startup(message)

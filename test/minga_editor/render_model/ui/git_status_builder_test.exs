@@ -50,7 +50,7 @@ defmodule MingaEditor.RenderModel.UI.GitStatusBuilderTest do
       assert model.branch == "main"
       assert model.ahead == 2
       assert model.behind == 1
-      assert length(model.entries) == 2
+      assert Enum.count(model.entries) == 2
       assert model.entry_base_path == "/home/user/project"
       assert model.last_commit_message == "fix: thing"
       assert model.stash_count == 3

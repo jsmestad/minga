@@ -442,7 +442,6 @@ defmodule MingaEditor.Agent.MarkdownHighlight do
     # Always parse with regex for clean structure rendering
     parsed = Markdown.parse(text)
 
-    # Build the base styled lines from the regex parser
     base_lines =
       Enum.map(parsed, fn {segments, _line_type} ->
         Enum.map(segments, fn {seg_text, style_atom} ->

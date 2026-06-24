@@ -49,7 +49,7 @@ defmodule MingaAgent.Tools.LspDiagnostics do
     counts = count_by_severity(diagnostics)
     summary = format_counts(counts)
     rel = relative_path(path)
-    header = "#{rel}: #{length(diagnostics)} diagnostics (#{summary})"
+    header = "#{rel}: #{Enum.count(diagnostics)} diagnostics (#{summary})"
 
     details =
       Enum.map(diagnostics, fn diag ->

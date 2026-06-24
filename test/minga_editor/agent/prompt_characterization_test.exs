@@ -144,7 +144,7 @@ defmodule MingaEditor.Agent.PromptCharacterizationTest do
     test "long paste creates collapsed block" do
       panel = new_panel()
       panel = UIState.insert_paste(panel, "line1\nline2\nline3")
-      assert length(panel.panel.pasted_blocks) == 1
+      assert Enum.count(panel.panel.pasted_blocks) == 1
       assert hd(panel.panel.pasted_blocks).text == "line1\nline2\nline3"
       # prompt_text substitutes placeholder
       assert UIState.prompt_text(panel) == "line1\nline2\nline3"

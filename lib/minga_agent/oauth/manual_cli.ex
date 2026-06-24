@@ -25,8 +25,6 @@ defmodule MingaAgent.OAuth.ManualCLI do
          {:ok, :openai} <- complete_fun.(ref, pasted) do
       output_fun.("ChatGPT subscription connected. Tokens were written to the server oauth.json.")
       :ok
-    else
-      {:error, reason} -> {:error, reason}
     end
   end
 

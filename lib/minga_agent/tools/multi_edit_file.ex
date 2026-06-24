@@ -63,7 +63,7 @@ defmodule MingaAgent.Tools.MultiEditFile do
 
   @spec format_buffer_results(String.t(), [Minga.Buffer.replace_result()]) :: String.t()
   defp format_buffer_results(path, results) do
-    total = length(results)
+    total = Enum.count(results)
     succeeded = Enum.count(results, &match?({:ok, _}, &1))
     failed = total - succeeded
 
@@ -135,7 +135,7 @@ defmodule MingaAgent.Tools.MultiEditFile do
   end
 
   defp apply_single_edit(content, old_text, new_text) do
-    case length(:binary.matches(content, old_text)) do
+    case Enum.count(:binary.matches(content, old_text)) do
       0 -> {:error, "old_text not found"}
       1 -> {:ok, String.replace(content, old_text, new_text, global: false)}
       n -> {:error, "old_text found #{n} times (ambiguous)"}
@@ -151,7 +151,7 @@ defmodule MingaAgent.Tools.MultiEditFile do
   defp write_and_report(path, original_content, final_content, results) do
     succeeded = Enum.count(results, &match?({:ok, _}, &1))
     failed = Enum.count(results, &match?({:error, _}, &1))
-    total = length(results)
+    total = Enum.count(results)
 
     # Only write if something changed
     if final_content != original_content do

@@ -461,8 +461,8 @@ defmodule Minga.Diagnostics do
   defp find_prev(sorted_diags, current_line) do
     case sorted_diags
          |> Enum.filter(fn d -> d.range.start_line < current_line end)
-         |> List.last() do
-      nil -> List.last(sorted_diags)
+         |> Enum.at(-1) do
+      nil -> Enum.at(sorted_diags, -1)
       diag -> diag
     end
   end

@@ -35,7 +35,7 @@ defmodule Minga.Editing.Motion.VisualLine do
     display_col = Unicode.display_col(line_text, col)
     {vrow_idx, vrow_col} = display_col_to_visual(wrap_entry, display_col)
 
-    if vrow_idx < length(wrap_entry) - 1 do
+    if vrow_idx < Enum.count(wrap_entry) - 1 do
       # Move to the next visual row within the same logical line
       next_vrow = Enum.at(wrap_entry, vrow_idx + 1)
       target_col = min(vrow_col, max(visual_display_width(next_vrow) - 1, 0))
@@ -90,7 +90,7 @@ defmodule Minga.Editing.Motion.VisualLine do
         prev_line = line - 1
         prev_text = Document.line_at(doc, prev_line)
         prev_entry = wrap_entry(prev_text, content_width, opts)
-        last_vrow = List.last(prev_entry)
+        last_vrow = Enum.at(prev_entry, -1)
         target_col = min(vrow_col, max(visual_display_width(last_vrow) - 1, 0))
         byte_col = byte_col_in_vrow(last_vrow, target_col)
         {prev_line, last_vrow.byte_offset + byte_col}
@@ -162,7 +162,7 @@ defmodule Minga.Editing.Motion.VisualLine do
     |> Enum.reduce_while({0, display_col}, fn {vrow, idx}, {_found_idx, remaining_col} ->
       vrow_width = source_display_width(vrow)
 
-      if remaining_col < vrow_width or idx == length(wrap_entry) - 1 do
+      if remaining_col < vrow_width or idx == Enum.count(wrap_entry) - 1 do
         {:halt, {idx, remaining_col + indent_width(vrow)}}
       else
         {:cont, {idx + 1, remaining_col - vrow_width}}

@@ -20,7 +20,7 @@ defmodule MingaEditor.UI.Panel.MessageStoreTest do
         |> MessageStore.append("Hello world")
 
       assert store.stream_instance > 0
-      assert length(store.entries) == 1
+      assert Enum.count(store.entries) == 1
       [entry] = store.entries
       assert entry.id == 1
       assert entry.level == :info
@@ -36,7 +36,7 @@ defmodule MingaEditor.UI.Panel.MessageStoreTest do
         |> MessageStore.append("Second")
         |> MessageStore.append("Third")
 
-      assert length(store.entries) == 3
+      assert Enum.count(store.entries) == 3
       assert Enum.map(store.entries, & &1.id) == [1, 2, 3]
       assert Enum.map(store.entries, & &1.text) == ["First", "Second", "Third"]
     end
@@ -47,10 +47,10 @@ defmodule MingaEditor.UI.Panel.MessageStoreTest do
           MessageStore.append(acc, "Entry #{i}")
         end)
 
-      assert length(store.entries) == 1000
+      assert Enum.count(store.entries) == 1000
       # Oldest entries trimmed
       assert hd(store.entries).id == 6
-      assert List.last(store.entries).id == 1005
+      assert Enum.at(store.entries, -1).id == 1005
     end
 
     test "preserves level and subsystem" do
@@ -76,7 +76,7 @@ defmodule MingaEditor.UI.Panel.MessageStoreTest do
         |> MessageStore.append("C")
 
       result = MessageStore.entries_since(store, 1)
-      assert length(result) == 2
+      assert Enum.count(result) == 2
       assert Enum.map(result, & &1.text) == ["B", "C"]
     end
 
@@ -87,7 +87,7 @@ defmodule MingaEditor.UI.Panel.MessageStoreTest do
         |> MessageStore.append("B")
 
       result = MessageStore.entries_since(store, 0)
-      assert length(result) == 2
+      assert Enum.count(result) == 2
     end
 
     test "returns empty list when since_id is current" do

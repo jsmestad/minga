@@ -18,7 +18,7 @@ defmodule Minga.Core.DiffTest do
       current = ["a", "b", "c", "d"]
 
       hunks = Diff.diff_lines(base, current)
-      assert length(hunks) == 1
+      assert Enum.count(hunks) == 1
       [hunk] = hunks
       assert hunk.type == :added
       assert hunk.start_line == 2
@@ -30,7 +30,7 @@ defmodule Minga.Core.DiffTest do
       current = ["a"]
 
       hunks = Diff.diff_lines(base, current)
-      assert length(hunks) == 1
+      assert Enum.count(hunks) == 1
       [hunk] = hunks
       assert hunk.type == :deleted
       assert hunk.start_line == 1
@@ -43,7 +43,7 @@ defmodule Minga.Core.DiffTest do
       current = ["a", "x", "c"]
 
       hunks = Diff.diff_lines(base, current)
-      assert length(hunks) == 1
+      assert Enum.count(hunks) == 1
       [hunk] = hunks
       assert hunk.type == :modified
       assert hunk.start_line == 1
@@ -56,7 +56,7 @@ defmodule Minga.Core.DiffTest do
       current = ["a", "x", "c", "f", "g", "e"]
 
       hunks = Diff.diff_lines(base, current)
-      assert length(hunks) == 2
+      assert Enum.count(hunks) == 2
 
       [first, second] = hunks
       assert first.type == :modified
@@ -68,7 +68,7 @@ defmodule Minga.Core.DiffTest do
 
     test "empty base means all lines are added" do
       hunks = Diff.diff_lines([], ["a", "b"])
-      assert length(hunks) == 1
+      assert Enum.count(hunks) == 1
       [hunk] = hunks
       assert hunk.type == :added
       assert hunk.count == 2
@@ -76,7 +76,7 @@ defmodule Minga.Core.DiffTest do
 
     test "empty current means all lines are deleted" do
       hunks = Diff.diff_lines(["a", "b"], [])
-      assert length(hunks) == 1
+      assert Enum.count(hunks) == 1
       [hunk] = hunks
       assert hunk.type == :deleted
       assert hunk.old_lines == ["a", "b"]
@@ -321,8 +321,8 @@ defmodule Minga.Core.DiffTest do
     test "handles multiple changed regions" do
       # "aXbYc" -> "aAbBc": two modifications
       {del_ranges, ins_ranges} = Diff.word_diff_ranges("aXbYc", "aAbBc")
-      assert length(del_ranges) == 2
-      assert length(ins_ranges) == 2
+      assert Enum.count(del_ranges) == 2
+      assert Enum.count(ins_ranges) == 2
     end
 
     test "returns full-line ranges for long lines" do

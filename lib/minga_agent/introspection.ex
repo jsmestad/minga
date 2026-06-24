@@ -50,8 +50,8 @@ defmodule MingaAgent.Introspection do
 
     %{
       version: app_version(),
-      tool_count: length(tools),
-      session_count: length(sessions),
+      tool_count: Enum.count(tools),
+      session_count: Enum.count(sessions),
       tool_categories: categories,
       features: enabled_features()
     }

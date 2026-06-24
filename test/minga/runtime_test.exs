@@ -30,7 +30,6 @@ defmodule Minga.RuntimeTest do
 
       tool_names = Enum.map(tools, & &1.name)
 
-      # Verify a representative set of built-in tools
       assert "read_file" in tool_names
       assert "list_directory" in tool_names
       assert "grep" in tool_names

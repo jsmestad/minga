@@ -61,7 +61,7 @@ defmodule MingaEditor.UI.Picker.OverhaulTest do
         |> Picker.toggle_mark()
 
       items = Picker.marked_items(picker)
-      assert length(items) == 2
+      assert Enum.count(items) == 2
       ids = Enum.map(items, & &1.id)
       assert :a in ids
       assert :c in ids
@@ -89,7 +89,7 @@ defmodule MingaEditor.UI.Picker.OverhaulTest do
     test "marked_items returns selected item when nothing is marked" do
       picker = Picker.new(@items, title: "Test")
       items = Picker.marked_items(picker)
-      assert length(items) == 1
+      assert Enum.count(items) == 1
       assert hd(items).id == :a
     end
 

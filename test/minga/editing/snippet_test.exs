@@ -21,7 +21,7 @@ defmodule Minga.Editing.SnippetTest do
     test "multiple tabstops in text" do
       {:ok, snippet} = Snippet.parse("fn ${1:name}(${2:args})")
       assert snippet.text == "fn name(args)"
-      assert length(snippet.tabstops) == 2
+      assert Enum.count(snippet.tabstops) == 2
       [first, second] = snippet.tabstops
       assert first.index == 1
       assert first.placeholder == "name"

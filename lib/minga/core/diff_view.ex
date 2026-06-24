@@ -93,7 +93,7 @@ defmodule Minga.Core.DiffView do
           add_context_with_folding(lines_acc, meta_acc, hunk_acc, ctx_lines, start_orig)
 
         {:hunk, hunk_lines_list}, {lines_acc, meta_acc, hunk_acc} ->
-          display_line_idx = length(lines_acc)
+          display_line_idx = Enum.count(lines_acc)
           add_hunk_lines(lines_acc, meta_acc, hunk_acc, hunk_lines_list, display_line_idx)
       end)
 
@@ -155,7 +155,7 @@ defmodule Minga.Core.DiffView do
           )
 
         {:hunk, hunk}, {lines_acc, meta_acc, hunk_acc} ->
-          display_line_idx = length(lines_acc)
+          display_line_idx = Enum.count(lines_acc)
 
           add_hunk_side_by_side(
             lines_acc,
@@ -196,7 +196,7 @@ defmodule Minga.Core.DiffView do
          pane_width
        ) do
     side_lines = build_hunk_side_by_side(hunk, current_lines)
-    hunk_acc = [display_line_idx + length(side_lines) - 1 | hunk_acc]
+    hunk_acc = [display_line_idx + Enum.count(side_lines) - 1 | hunk_acc]
     {hunk_text, hunk_meta} = encode_side_by_side_lines(side_lines, pane_width)
     {lines_acc ++ hunk_text, meta_acc ++ hunk_meta, hunk_acc}
   end
@@ -210,7 +210,7 @@ defmodule Minga.Core.DiffView do
           pos_integer()
         ) :: {[String.t()], [line_meta()], [non_neg_integer()]}
   defp add_context_side_by_side(lines, meta, hunks, ctx_lines, start_orig, pane_width) do
-    count = length(ctx_lines)
+    count = Enum.count(ctx_lines)
 
     if count > @fold_threshold do
       add_folded_context_side_by_side(lines, meta, hunks, ctx_lines, start_orig, pane_width)
@@ -230,7 +230,7 @@ defmodule Minga.Core.DiffView do
           pos_integer()
         ) :: {[String.t()], [line_meta()], [non_neg_integer()]}
   defp add_folded_context_side_by_side(lines, meta, hunks, ctx_lines, start_orig, pane_width) do
-    count = length(ctx_lines)
+    count = Enum.count(ctx_lines)
     head = Enum.take(ctx_lines, @context_lines)
     tail = Enum.take(ctx_lines, -@context_lines)
     fold_count = count - @context_lines * 2
@@ -453,7 +453,7 @@ defmodule Minga.Core.DiffView do
         ) ::
           {[String.t()], [line_meta()], [non_neg_integer()]}
   defp add_hunk_lines(lines_acc, meta_acc, hunk_acc, hunk_lines_list, display_line_idx) do
-    hunk_acc = [display_line_idx + length(hunk_lines_list) - 1 | hunk_acc]
+    hunk_acc = [display_line_idx + Enum.count(hunk_lines_list) - 1 | hunk_acc]
 
     {hunk_text, hunk_meta} =
       Enum.map_reduce(hunk_lines_list, [], fn {text, type, orig_line, word_changes}, meta_acc ->
@@ -515,9 +515,9 @@ defmodule Minga.Core.DiffView do
 
     regions = Enum.reverse(regions_reversed)
 
-    if last_end < length(current_lines) do
-      ctx = Enum.slice(current_lines, last_end..(length(current_lines) - 1))
-      regions ++ [{:context, ctx, last_end}]
+    if last_end < Enum.count(current_lines) do
+      ctx = Enum.slice(current_lines, last_end..(Enum.count(current_lines) - 1))
+      Enum.concat(regions, [{:context, ctx, last_end}])
     else
       regions
     end
@@ -565,7 +565,7 @@ defmodule Minga.Core.DiffView do
 
   @spec pair_modified_lines([String.t()], [String.t()]) :: [modified_line_pair()]
   defp pair_modified_lines(old_lines, new_lines) do
-    pair_modified_lines(old_lines, new_lines, length(old_lines), length(new_lines))
+    pair_modified_lines(old_lines, new_lines, Enum.count(old_lines), Enum.count(new_lines))
   end
 
   @spec pair_modified_lines([String.t()], [String.t()], non_neg_integer(), non_neg_integer()) :: [
@@ -684,7 +684,7 @@ defmodule Minga.Core.DiffView do
         ) ::
           {[String.t()], [line_meta()], [non_neg_integer()]}
   defp add_context_with_folding(lines, meta, hunks, ctx_lines, start_orig) do
-    count = length(ctx_lines)
+    count = Enum.count(ctx_lines)
 
     if count > @fold_threshold do
       # Show first @context_lines, fold, show last @context_lines

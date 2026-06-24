@@ -25,9 +25,11 @@ defmodule MingaAgent.Tools.GrepTest do
     if sleep, do: File.ln_s!(sleep, Path.join(bin_dir, "sleep"))
 
     try do
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       System.put_env("PATH", bin_dir)
       fun.()
     after
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       System.put_env("PATH", old_path)
       File.rm_rf!(bin_dir)
     end

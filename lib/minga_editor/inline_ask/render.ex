@@ -59,8 +59,7 @@ defmodule MingaEditor.InlineAsk.Render do
     response
     |> String.split("\n")
     |> Enum.flat_map(&wrap_line(&1, content_width))
-    |> Enum.drop(scroll)
-    |> Enum.take(8)
+    |> Enum.slice(scroll, 8)
     |> Enum.map(&{&1, :body})
   end
 

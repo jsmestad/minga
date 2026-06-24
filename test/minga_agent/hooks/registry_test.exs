@@ -38,7 +38,7 @@ defmodule MingaAgent.Hooks.RegistryTest do
     config = AgentConfig.resolve()
     matching = Enum.filter(config.agent_hooks, &(&1.command == "hooks/start.sh"))
 
-    assert length(matching) == 1
+    assert Enum.count(matching) == 1
   end
 
   defp ensure_registry_started do

@@ -61,7 +61,7 @@ defmodule MingaEditor.RenderModel.UI.BottomPanelBuilder do
     new_entries = MessageStore.entries_since(store, store.last_sent_id)
     messages = Enum.map(new_entries, &to_message_entry/1)
 
-    last_id = if new_entries == [], do: store.last_sent_id, else: List.last(new_entries).id
+    last_id = if new_entries == [], do: store.last_sent_id, else: Enum.at(new_entries, -1).id
 
     {%{base | messages: messages}, MessageStore.mark_sent(store, last_id)}
   end

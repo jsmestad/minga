@@ -146,7 +146,7 @@ defmodule MingaEditor.HoverPopup do
   @doc "Scroll content down (later lines visible)."
   @spec scroll_down(t()) :: t()
   def scroll_down(%__MODULE__{} = popup) do
-    max_offset = max(length(popup.content_lines) - 3, 0)
+    max_offset = max(Enum.count(popup.content_lines) - 3, 0)
     %{popup | scroll_offset: min(popup.scroll_offset + 3, max_offset)}
   end
 
@@ -192,7 +192,7 @@ defmodule MingaEditor.HoverPopup do
     total_height = height + 2
 
     # Scrollbar indicator in footer
-    total_lines = length(popup.content_lines)
+    total_lines = Enum.count(popup.content_lines)
 
     footer =
       if total_lines > height do

@@ -195,7 +195,7 @@ defmodule MingaEditor.PickerUITest do
       new_state = PickerUI.handle_key(state, 13, 0)
 
       assert new_state.shell_state.modal == :none
-      assert length(new_state.workspace.buffers.list) == 1
+      assert Enum.count(new_state.workspace.buffers.list) == 1
       assert Minga.Buffer.content(new_state.workspace.buffers.active) == "alpha"
     end
   end
@@ -424,7 +424,7 @@ defmodule MingaEditor.PickerUITest do
       assert picker.query == "config"
       assert Picker.count(picker) == @result_limit
 
-      per_keystroke_ms = micros / length(keystrokes) / 1_000
+      per_keystroke_ms = micros / Enum.count(keystrokes) / 1_000
 
       assert per_keystroke_ms < 250,
              "per-keystroke input path took #{Float.round(per_keystroke_ms, 2)}ms against 20k candidates; expected bounded top-K to stay well under the 250ms catastrophe ceiling"

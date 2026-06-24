@@ -32,7 +32,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceSource do
       label = "#{icon} #{ws.label}"
       active_marker = if ws.id == TabBar.active_workspace_id(tb), do: " \u{2022}", else: ""
       tabs = TabBar.tabs_in_workspace(tb, ws.id)
-      tab_count = length(tabs)
+      tab_count = Enum.count(tabs)
       status = agent_status_text(ws)
 
       # Show file names inline for context
@@ -42,7 +42,10 @@ defmodule MingaEditor.UI.Picker.WorkspaceSource do
         |> Enum.map_join(", ", & &1.label)
 
       desc_parts = ["#{tab_count} tab#{if tab_count == 1, do: "", else: "s"}#{status}"]
-      desc_parts = if file_names != "", do: desc_parts ++ [file_names], else: desc_parts
+
+      desc_parts =
+        if file_names != "", do: Enum.concat(desc_parts, [file_names]), else: desc_parts
+
       desc = Enum.join(desc_parts, " \u{2022} ")
 
       %Item{

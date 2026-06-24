@@ -182,7 +182,7 @@ defmodule Minga.Config.OptionsTest do
 
       specs = Options.option_specs()
       assert is_list(specs)
-      assert length(specs) == length(names)
+      assert Enum.count(specs) == Enum.count(names)
 
       for {name, _type, default, description} <- specs do
         assert is_atom(name)

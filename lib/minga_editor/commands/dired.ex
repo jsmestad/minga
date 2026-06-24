@@ -318,7 +318,11 @@ defmodule MingaEditor.Commands.Dired do
 
     {first_op, first_reason} = hd(errors)
     hint = "#{format_op_name(first_op)}: #{inspect(first_reason)}"
-    EditorState.set_status(state, "Applied #{successes}, #{length(errors)} error(s) — #{hint}")
+
+    EditorState.set_status(
+      state,
+      "Applied #{successes}, #{Enum.count(errors)} error(s) — #{hint}"
+    )
   end
 
   @spec format_error({Dired.operation(), term()}) :: String.t()

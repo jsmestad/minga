@@ -70,7 +70,7 @@ defmodule Minga.Extension.CodeLeaseTest do
                )
     end
 
-    assert length(CodeLease.active_leases(module: module, server: ctx.code_lease)) == 5
+    assert Enum.count(CodeLease.active_leases(module: module, server: ctx.code_lease)) == 5
 
     ref = Process.monitor(owner)
     Process.exit(owner, :kill)
@@ -275,18 +275,19 @@ defmodule Minga.Extension.CodeLeaseTest do
         ) ::
           :ok
   defp assert_eventually_lease_count(module, code_lease, expected, attempts_left) do
-    case CodeLease.active_leases(module: module, server: code_lease) do
-      leases when length(leases) == expected ->
-        :ok
+    leases = CodeLease.active_leases(module: module, server: code_lease)
 
-      _leases when attempts_left > 0 ->
+    if Enum.count(leases) == expected do
+      :ok
+    else
+      if attempts_left > 0 do
         receive do
         after
           10 -> assert_eventually_lease_count(module, code_lease, expected, attempts_left - 1)
         end
-
-      leases ->
+      else
         flunk("expected #{expected} lease(s), got #{inspect(leases)}")
+      end
     end
   end
 

@@ -54,7 +54,7 @@ defmodule MingaEditor.CompletionUI do
 
   defp menu_geometry(items, opts) do
     item_capacity = max(min(@max_rows, opts.viewport_rows - 2), 1)
-    item_count = min(length(items), item_capacity)
+    item_count = min(Enum.count(items), item_capacity)
     visible_items = Enum.take(items, item_count)
     label_widths = Enum.map(visible_items, fn item -> String.length(item.label) + 4 end)
     desired_width = label_widths |> Enum.max() |> max(@min_width) |> min(@max_width)

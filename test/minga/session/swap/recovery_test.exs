@@ -39,7 +39,7 @@ defmodule Minga.Session.Swap.RecoveryTest do
       swap_path = write_swap_file(tmp_dir, original, "modified content")
 
       results = Recovery.scan(scan_opts(tmp_dir))
-      assert length(results) == 1
+      assert Enum.count(results) == 1
       assert hd(results).path == original
       assert hd(results).swap_path == swap_path
     end
@@ -93,7 +93,7 @@ defmodule Minga.Session.Swap.RecoveryTest do
       end
 
       results = Recovery.scan(scan_opts(tmp_dir))
-      assert length(results) == 3
+      assert Enum.count(results) == 3
     end
   end
 

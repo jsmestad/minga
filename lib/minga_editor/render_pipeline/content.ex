@@ -253,7 +253,7 @@ defmodule MingaEditor.RenderPipeline.Content do
        }) do
     line_idx = cursor_line - first_line
 
-    if line_idx >= 0 and line_idx < length(lines) do
+    if line_idx >= 0 and line_idx < Enum.count(lines) do
       wrap_map = wrap_map_for_cursor(lines, line_idx, content_w, options, oracle)
 
       cursor_entry =
@@ -303,7 +303,7 @@ defmodule MingaEditor.RenderPipeline.Content do
     wrap_entry
     |> Enum.with_index()
     |> Enum.filter(fn {row, _idx} -> row.byte_offset <= cursor_byte_col end)
-    |> List.last({%{byte_offset: 0}, 0})
+    |> Enum.at(-1, {%{byte_offset: 0}, 0})
     |> elem(1)
   end
 
@@ -366,19 +366,17 @@ defmodule MingaEditor.RenderPipeline.Content do
     # AgentChat semantic model, so this branch emits no window models.
     help_visible = state.workspace.agent_ui.view.help_visible
 
-    case help_visible do
-      true ->
-        {WindowContent.new(nil, [], nil), nil, state}
-
-      false ->
-        render_semantic_agent_chat_window(
-          state,
-          ctx,
-          chat_width,
-          chat_height,
-          prompt_rect,
-          full_rect
-        )
+    if help_visible do
+      {WindowContent.new(nil, [], nil), nil, state}
+    else
+      render_semantic_agent_chat_window(
+        state,
+        ctx,
+        chat_width,
+        chat_height,
+        prompt_rect,
+        full_rect
+      )
     end
   end
 
@@ -410,7 +408,7 @@ defmodule MingaEditor.RenderPipeline.Content do
       end
 
     cursor = prompt_cursor(ctx, full_rect)
-    total_lines = length(state.workspace.agent_ui.panel.cached_line_index)
+    total_lines = Enum.count(state.workspace.agent_ui.panel.cached_line_index)
     state = update_agent_scroll_metrics(state, total_lines, chat_height)
 
     {WindowContent.new(nil, prompt_models, cursor), cursor, state}
@@ -465,7 +463,7 @@ defmodule MingaEditor.RenderPipeline.Content do
   defp cursor_text_from_snapshot(lines, cursor_line, first_line) do
     idx = cursor_line - first_line
 
-    if idx >= 0 and idx < length(lines) do
+    if idx >= 0 and idx < Enum.count(lines) do
       Enum.at(lines, idx, "")
     else
       ""

@@ -284,7 +284,7 @@ defmodule MingaEditor.Agent.UIState do
     # Strip NUL bytes from paste to prevent fake placeholder injection
     clean_text = String.replace(text, "\0", "")
     lines = String.split(clean_text, "\n")
-    line_count = length(lines)
+    line_count = Enum.count(lines)
 
     if line_count < @paste_collapse_threshold do
       Buffer.insert_text(pid, clean_text)
@@ -348,7 +348,7 @@ defmodule MingaEditor.Agent.UIState do
 
   def paste_block_line_count(blocks, index) when is_list(blocks) do
     case Enum.at(blocks, index) do
-      %{text: text} -> text |> String.split("\n") |> length()
+      %{text: text} -> text |> String.split("\n") |> Enum.count()
       nil -> 0
     end
   end
@@ -372,7 +372,7 @@ defmodule MingaEditor.Agent.UIState do
   def history_prev(%__MODULE__{panel: %Panel{prompt_history: []}} = state), do: state
 
   def history_prev(%__MODULE__{panel: panel} = state) when is_pid(panel.prompt_buffer) do
-    new_idx = min(panel.history_index + 1, length(panel.prompt_history) - 1)
+    new_idx = min(panel.history_index + 1, Enum.count(panel.prompt_history) - 1)
     text = Enum.at(panel.prompt_history, new_idx)
     Buffer.replace_content(panel.prompt_buffer, text)
     %{state | panel: %{panel | history_index: new_idx}}
@@ -757,7 +757,7 @@ defmodule MingaEditor.Agent.UIState do
     {cursor_line, cursor_col} = Buffer.cursor(pid)
     lines = input_lines(state)
 
-    block_index = length(panel.pasted_blocks)
+    block_index = Enum.count(panel.pasted_blocks)
     new_block = %{text: text, expanded: false}
     placeholder = @paste_placeholder_prefix <> Integer.to_string(block_index)
 
@@ -768,7 +768,7 @@ defmodule MingaEditor.Agent.UIState do
     new_content = Enum.join(new_lines, "\n")
 
     placeholder_line_idx = Enum.find_index(new_lines, &(&1 == placeholder))
-    new_cursor_line = min(placeholder_line_idx + 1, length(new_lines) - 1)
+    new_cursor_line = min(placeholder_line_idx + 1, Enum.count(new_lines) - 1)
 
     new_cursor_col =
       if new_cursor_line > placeholder_line_idx, do: 0, else: String.length(placeholder)
@@ -776,7 +776,12 @@ defmodule MingaEditor.Agent.UIState do
     Buffer.replace_content(pid, new_content)
     Buffer.move_to(pid, {new_cursor_line, new_cursor_col})
 
-    new_panel = %{panel | pasted_blocks: panel.pasted_blocks ++ [new_block], history_index: -1}
+    new_panel = %{
+      panel
+      | pasted_blocks: Enum.concat(panel.pasted_blocks, [new_block]),
+        history_index: -1
+    }
+
     %{state | panel: new_panel}
   end
 
@@ -827,7 +832,7 @@ defmodule MingaEditor.Agent.UIState do
           Enum.drop(lines, placeholder_line_idx + 1)
 
       new_blocks = List.update_at(panel.pasted_blocks, block_index, &%{&1 | expanded: true})
-      expansion = length(text_lines) - 1
+      expansion = Enum.count(text_lines) - 1
 
       new_cursor_line =
         if cursor_line > placeholder_line_idx, do: cursor_line + expansion, else: cursor_line
@@ -848,7 +853,7 @@ defmodule MingaEditor.Agent.UIState do
     lines = input_lines(state)
     block = Enum.at(panel.pasted_blocks, block_index)
     text_lines = String.split(block.text, "\n")
-    text_line_count = length(text_lines)
+    text_line_count = Enum.count(text_lines)
 
     start_idx = find_expanded_block_start(lines, text_lines)
 
@@ -915,15 +920,15 @@ defmodule MingaEditor.Agent.UIState do
     start_idx = find_expanded_block_start(lines, text_lines)
 
     if start_idx do
-      end_idx = start_idx + length(text_lines) - 1
+      end_idx = start_idx + Enum.count(text_lines) - 1
       if cursor_line >= start_idx and cursor_line <= end_idx, do: {:ok, index}
     end
   end
 
   @spec find_expanded_block_start([String.t()], [String.t()]) :: non_neg_integer() | nil
   defp find_expanded_block_start(input_lines_list, text_lines) do
-    text_len = length(text_lines)
-    max_start = length(input_lines_list) - text_len
+    text_len = Enum.count(text_lines)
+    max_start = Enum.count(input_lines_list) - text_len
 
     if max_start < 0 do
       nil

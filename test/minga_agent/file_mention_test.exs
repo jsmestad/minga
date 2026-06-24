@@ -119,7 +119,7 @@ defmodule MingaAgent.FileMentionTest do
       {:ok, result} = FileMention.resolve_prompt("@x.ex explain", dir)
       # The body should just say "explain", not "@x.ex explain"
       lines = String.split(result, "\n")
-      last_line = List.last(lines)
+      last_line = Enum.at(lines, -1)
       assert last_line == "explain"
     end
 
@@ -164,7 +164,7 @@ defmodule MingaAgent.FileMentionTest do
       {:ok, parts} = FileMention.resolve_prompt("@screenshot.png what is this?", dir)
 
       assert is_list(parts)
-      assert length(parts) == 2
+      assert Enum.count(parts) == 2
 
       [text_part, image_part] = parts
       assert text_part.type == :text
@@ -185,8 +185,8 @@ defmodule MingaAgent.FileMentionTest do
       text_parts = Enum.filter(parts, &(&1.type == :text))
       image_parts = Enum.filter(parts, &(&1.type == :image))
 
-      assert length(text_parts) == 1
-      assert length(image_parts) == 1
+      assert Enum.count(text_parts) == 1
+      assert Enum.count(image_parts) == 1
 
       assert hd(text_parts).text =~ "defmodule Foo"
       assert hd(text_parts).text =~ "compare"
@@ -239,7 +239,7 @@ defmodule MingaAgent.FileMentionTest do
     test "limits initial candidates to 50" do
       files = Enum.map(1..60, &"file_#{&1}.ex")
       comp = FileMention.new_completion(files, 0, 0)
-      assert length(comp.candidates) == 50
+      assert Enum.count(comp.candidates) == 50
     end
   end
 

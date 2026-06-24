@@ -85,7 +85,7 @@ defmodule Minga.Extensions.RecipePacks do
       state
     else
       case register_pack(pack) do
-        :ok -> %{state | loaded: state.loaded ++ [name]}
+        :ok -> %{state | loaded: Enum.concat(state.loaded, [name])}
         {:error, reason} -> record_failed_pack(state, name, reason)
       end
     end
@@ -94,7 +94,7 @@ defmodule Minga.Extensions.RecipePacks do
   @spec record_failed_pack(state(), atom(), term()) :: state()
   defp record_failed_pack(state, name, reason) do
     Minga.Log.warning(:config, "Recipe pack #{name} failed to load: #{inspect(reason)}")
-    %{state | failed: state.failed ++ [{name, reason}]}
+    %{state | failed: Enum.concat(state.failed, [{name, reason}])}
   end
 
   @spec disabled_pack_names() :: [atom()]

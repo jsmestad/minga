@@ -23,7 +23,7 @@ defmodule MingaEditor.Agent.ChatSearchTest do
     test "finds multiple matches in one message" do
       messages = [{:user, "hello hello hello"}]
       matches = ChatSearch.find_matches(messages, "hello")
-      assert length(matches) == 3
+      assert Enum.count(matches) == 3
     end
 
     test "finds matches across multiple messages" do
@@ -34,20 +34,20 @@ defmodule MingaEditor.Agent.ChatSearchTest do
       ]
 
       matches = ChatSearch.find_matches(messages, "message")
-      assert length(matches) == 3
+      assert Enum.count(matches) == 3
       assert [{0, _, _}, {1, _, _}, {2, _, _}] = matches
     end
 
     test "case-insensitive by default" do
       messages = [{:user, "Hello HELLO hello"}]
       matches = ChatSearch.find_matches(messages, "hello")
-      assert length(matches) == 3
+      assert Enum.count(matches) == 3
     end
 
     test "case-sensitive with \\C suffix" do
       messages = [{:user, "Hello HELLO hello"}]
       matches = ChatSearch.find_matches(messages, "Hello\\C")
-      assert length(matches) == 1
+      assert Enum.count(matches) == 1
       assert [{0, 0, 5}] = matches
     end
 

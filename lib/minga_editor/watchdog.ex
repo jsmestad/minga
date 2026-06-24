@@ -28,6 +28,7 @@ defmodule MingaEditor.Watchdog do
   """
 
   use GenServer
+  alias Minga.Log
 
   @typedoc "Options for starting the watchdog."
   @type start_opt :: {:name, GenServer.name()} | {:editor_name, GenServer.name()}
@@ -56,7 +57,7 @@ defmodule MingaEditor.Watchdog do
     # to the calling process: {:signal, :sigusr1}
     :os.set_signal(:sigusr1, :handle)
 
-    Minga.Log.info(:editor, "Watchdog started, listening for SIGUSR1")
+    Log.info(:editor, "Watchdog started, listening for SIGUSR1")
 
     {:ok, %{editor_name: editor_name}}
   end
@@ -64,15 +65,15 @@ defmodule MingaEditor.Watchdog do
   @impl true
   @spec handle_info(term(), state()) :: {:noreply, state()}
   def handle_info({:signal, :sigusr1}, state) do
-    Minga.Log.warning(:editor, "Watchdog received SIGUSR1, killing Editor for recovery")
+    Log.warning(:editor, "Watchdog received SIGUSR1, killing Editor for recovery")
 
     case Process.whereis(state.editor_name) do
       nil ->
-        Minga.Log.warning(:editor, "Watchdog: Editor process not found, nothing to kill")
+        Log.warning(:editor, "Watchdog: Editor process not found, nothing to kill")
 
       pid ->
         Process.exit(pid, :kill)
-        Minga.Log.info(:editor, "Watchdog: Editor process #{inspect(pid)} killed")
+        Log.info(:editor, "Watchdog: Editor process #{inspect(pid)} killed")
     end
 
     {:noreply, state}

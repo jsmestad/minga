@@ -144,7 +144,6 @@ defmodule MingaEditor.SemanticTokenSync do
       end)
       |> Enum.uniq()
 
-    # Build a map of existing names (capture_names is a tuple)
     existing_list = Tuple.to_list(hl.capture_names)
     existing_map = existing_list |> Enum.with_index() |> Map.new()
 
@@ -154,8 +153,8 @@ defmodule MingaEditor.SemanticTokenSync do
         if Map.has_key?(map, name) do
           {names, map}
         else
-          idx = length(names)
-          {names ++ [name], Map.put(map, name, idx)}
+          idx = Enum.count(names)
+          {Enum.concat(names, [name]), Map.put(map, name, idx)}
         end
       end)
 

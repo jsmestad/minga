@@ -89,7 +89,7 @@ defmodule Minga.Core.IndentGuideTest do
       {guides, levels} = IndentGuide.compute_with_levels(lines, @tw, 2)
 
       assert guides == IndentGuide.compute(lines, @tw, 2)
-      assert length(levels) == length(lines)
+      assert Enum.count(levels) == Enum.count(lines)
     end
 
     test "empty input returns empty guides and empty levels" do
@@ -173,7 +173,7 @@ defmodule Minga.Core.IndentGuideTest do
 
       guides = IndentGuide.compute(lines, @tw, 10)
 
-      assert length(guides) == 5
+      assert Enum.count(guides) == 5
       assert Enum.map(guides, & &1.col) == [2, 4, 6, 8, 10]
       assert Enum.count(guides, & &1.active) == 1
     end
@@ -225,7 +225,7 @@ defmodule Minga.Core.IndentGuideTest do
               tw <- member_of([2, 4, 8])
             ) do
         levels = IndentGuide.effective_indent_levels(lines, tw)
-        assert length(levels) == length(lines)
+        assert Enum.count(levels) == Enum.count(lines)
       end
     end
   end

@@ -189,7 +189,7 @@ defmodule MingaEditor.Agent.View.PromptRenderWindowTest do
       model = PromptRenderWindow.build(ctx, 40, {0, 0, 40, 1}, project_files: ["lib/minga.ex"])
       [row] = model.rows
 
-      assert length(row.spans) > 1
+      assert Enum.count(row.spans) > 1
       assert model.cursor_row == 0
       assert model.cursor_col == 17
       assert model.selection.start_row == 0
@@ -229,7 +229,6 @@ defmodule MingaEditor.Agent.View.PromptRenderWindowTest do
 
   describe "visible_rows/2 with paste placeholders" do
     test "paste placeholder counts as one visual row" do
-      # Insert a paste placeholder token into the buffer
       {:ok, buf} = Buffer.start_link(content: "before\n\0PASTE:0\nafter")
 
       panel = %UIState.Panel{

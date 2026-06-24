@@ -152,7 +152,7 @@ defmodule MingaEditor.Handlers.FileEventHandler do
 
     effects =
       if state.backend != :headless do
-        effects ++ [{:save_session_deferred}]
+        Enum.concat(effects, [{:save_session_deferred}])
       else
         effects
       end

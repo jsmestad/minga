@@ -252,7 +252,7 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
 
     test "removes agent tab from tab bar" do
       state = base_state(active: true)
-      assert length(TabBar.filter_by_kind(MingaEditor.State.tab_bar(state), :agent)) == 1
+      assert Enum.count(TabBar.filter_by_kind(MingaEditor.State.tab_bar(state), :agent)) == 1
 
       new_state = BufferManagement.execute(state, :kill_buffer)
       assert TabBar.filter_by_kind(new_state.shell_state.tab_bar, :agent) == []

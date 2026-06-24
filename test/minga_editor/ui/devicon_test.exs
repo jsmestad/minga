@@ -87,7 +87,7 @@ defmodule Minga.DeviconTest do
       # Group by icon
       groups = Enum.group_by(icons, fn {_, icon} -> icon end, fn {ft, _} -> ft end)
 
-      for {icon, fts} <- groups, length(fts) > 1 do
+      for {icon, fts} <- groups, Enum.count(fts) > 1 do
         # Allow related filetypes to share icons
         related_sets = [
           MapSet.new([:javascript_react, :typescript_react]),

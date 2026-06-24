@@ -74,7 +74,7 @@ defmodule Minga.Buffer.ChangeLogTest do
         end)
 
       assert {{:ok, changes}, log} = ChangeLog.take_unseen_changes(log, :lsp)
-      assert length(changes) == 1100
+      assert Enum.count(changes) == 1100
       assert ChangeLog.retained_count(log) == 1000
 
       assert {:reset_required, _log} = ChangeLog.take_unseen_changes(log, :late_reader)

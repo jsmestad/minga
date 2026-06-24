@@ -22,7 +22,10 @@ defmodule MingaEditor.Shell.Traditional.Layout do
     Layout.GUI.compute(state)
   end
 
-  defdelegate get(state), to: Layout
-  defdelegate put(state), to: Layout
-  defdelegate invalidate(state), to: Layout
+  @spec get(term()) :: term()
+  def get(state), do: Layout.get(state)
+  @spec put(term()) :: term()
+  def put(state), do: Layout.put(state)
+  @spec invalidate(term()) :: term()
+  def invalidate(state), do: Layout.invalidate(state)
 end

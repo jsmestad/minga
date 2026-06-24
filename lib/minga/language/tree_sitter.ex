@@ -25,6 +25,7 @@ defmodule Minga.Language.TreeSitter do
 
   alias Minga.Parser.Manager, as: ParserManager
   alias Minga.Language.Grammar, as: HLGrammar
+  alias Minga.Log
 
   @doc """
   Returns the grammar cache directory path.
@@ -82,7 +83,7 @@ defmodule Minga.Language.TreeSitter do
          :ok <- load_into_parser(name, lib_path),
          :ok <- send_queries(name, opts),
          :ok <- register_filetype_mappings(name, filetype_atom, opts) do
-      Minga.Log.info(:editor, "Grammar #{name} registered successfully")
+      Log.info(:editor, "Grammar #{name} registered successfully")
       :ok
     end
   end
@@ -200,16 +201,16 @@ defmodule Minga.Language.TreeSitter do
 
       args = build_compiler_args(lib_path, sources, source_dir, include_dir)
 
-      Minga.Log.info(:editor, "Compiling grammar #{name}: #{cc} #{Enum.join(args, " ")}")
+      Log.info(:editor, "Compiling grammar #{name}: #{cc} #{Enum.join(args, " ")}")
 
       case System.cmd(cc, args, stderr_to_stdout: true) do
         {_output, 0} ->
-          Minga.Log.info(:editor, "Grammar #{name} compiled to #{lib_path}")
+          Log.info(:editor, "Grammar #{name} compiled to #{lib_path}")
           {:ok, lib_path}
 
         {output, exit_code} ->
           msg = "Grammar #{name} compilation failed (exit #{exit_code}): #{String.trim(output)}"
-          Minga.Log.warning(:editor, msg)
+          Log.warning(:editor, msg)
           {:error, msg}
       end
     end
@@ -284,7 +285,6 @@ defmodule Minga.Language.TreeSitter do
 
   @spec send_queries(String.t(), keyword()) :: :ok
   defp send_queries(name, opts) do
-    # Set the language first so queries are associated with it.
     # Dynamic grammar loading uses buffer_id 0 (global/default).
     ParserManager.set_language(0, name)
 
@@ -307,7 +307,7 @@ defmodule Minga.Language.TreeSitter do
             send_fn.(resolved)
 
           {:error, reason} ->
-            Minga.Log.warning(
+            Log.warning(
               :editor,
               "Could not read #{query_type} for #{name}: #{inspect(reason)}"
             )
@@ -327,7 +327,7 @@ defmodule Minga.Language.TreeSitter do
 
   @spec resolve_query_inherits(String.t(), atom(), non_neg_integer()) :: String.t()
   defp resolve_query_inherits(query, _query_type, depth) when depth > @max_inherit_depth do
-    Minga.Log.warning(:editor, "Query inheritance depth exceeded #{@max_inherit_depth} levels")
+    Log.warning(:editor, "Query inheritance depth exceeded #{@max_inherit_depth} levels")
     query
   end
 
@@ -353,7 +353,7 @@ defmodule Minga.Language.TreeSitter do
         resolve_query_inherits(parent_query, query_type, depth + 1)
 
       :error ->
-        Minga.Log.warning(:editor, "Could not find parent query '#{parent}' for inheritance")
+        Log.warning(:editor, "Could not find parent query '#{parent}' for inheritance")
         ""
     end
   end

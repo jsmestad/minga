@@ -23,18 +23,16 @@ defmodule MingaEditor.Input.Picker do
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
   def handle_key(state, codepoint, modifiers) do
-    case ModalOverlay.match(state.shell_state.modal, :picker) do
-      true ->
-        new_state =
-          case PickerUI.handle_key(state, codepoint, modifiers) do
-            {s, {:execute_command, cmd}} -> MingaEditor.dispatch_command(s, cmd)
-            s -> s
-          end
+    if ModalOverlay.match(state.shell_state.modal, :picker) do
+      new_state =
+        case PickerUI.handle_key(state, codepoint, modifiers) do
+          {s, {:execute_command, cmd}} -> MingaEditor.dispatch_command(s, cmd)
+          s -> s
+        end
 
-        {:handled, new_state}
-
-      false ->
-        {:passthrough, state}
+      {:handled, new_state}
+    else
+      {:passthrough, state}
     end
   end
 
@@ -216,7 +214,7 @@ defmodule MingaEditor.Input.Picker do
   @spec bottom_click_index(EditorState.t(), PickerData.t(), integer()) :: non_neg_integer() | nil
   defp bottom_click_index(state, picker, row) do
     {visible, _} = PickerData.visible_items(picker, bottom_item_capacity(state))
-    item_count = length(visible)
+    item_count = Enum.count(visible)
     prompt_row = state.terminal_viewport.rows - 1
     first_item_row = prompt_row - item_count
     clicked_idx = row - first_item_row

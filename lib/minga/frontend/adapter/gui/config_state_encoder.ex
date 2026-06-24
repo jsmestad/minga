@@ -39,11 +39,11 @@ defmodule Minga.Frontend.Adapter.GUI.ConfigStateEncoder do
 
     payload =
       IO.iodata_to_binary([
-        <<length(option_entries)::16>>,
+        <<Enum.count(option_entries)::16>>,
         option_entries,
-        <<length(preview_entries)::16>>,
+        <<Enum.count(preview_entries)::16>>,
         preview_entries,
-        <<length(binding_entries)::16>>,
+        <<Enum.count(binding_entries)::16>>,
         binding_entries
       ])
 

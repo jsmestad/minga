@@ -817,8 +817,6 @@ defmodule MingaEditor.Mouse do
         EditorState.set_windows(state, windows)
 
       {:ok, resize_windows_to_layout(state)}
-    else
-      :error -> :error
     end
   end
 

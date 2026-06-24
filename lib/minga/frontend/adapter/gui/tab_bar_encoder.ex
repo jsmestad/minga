@@ -28,7 +28,11 @@ defmodule Minga.Frontend.Adapter.GUI.TabBarEncoder do
   def encode_command(%TabBar{} = model) do
     active_index = active_index(model)
     entries = Enum.map(model.tabs, &encode_tab_entry(&1, model.active_tab_id))
-    IO.iodata_to_binary([@op_gui_tab_bar, <<active_index::8, length(model.tabs)::8>> | entries])
+
+    IO.iodata_to_binary([
+      @op_gui_tab_bar,
+      <<active_index::8, Enum.count(model.tabs)::8>> | entries
+    ])
   end
 
   @spec fingerprint(TabBar.t()) :: integer()

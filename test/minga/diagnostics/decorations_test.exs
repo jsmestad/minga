@@ -52,10 +52,9 @@ defmodule Minga.Diagnostics.DecorationsTest do
       # Apply decorations
       DiagDecorations.apply(pid, uri, @gutter_colors, ctx.diag_name)
 
-      # Verify the decoration was created
       decs = BufferProcess.decorations(pid)
       ranges = Decorations.highlights_for_line(decs, 0)
-      assert length(ranges) == 1
+      assert Enum.count(ranges) == 1
 
       [range] = ranges
       assert range.style.underline == true
@@ -76,7 +75,7 @@ defmodule Minga.Diagnostics.DecorationsTest do
 
       decs = BufferProcess.decorations(pid)
       ranges = Decorations.highlights_for_line(decs, 0)
-      assert length(ranges) == 2
+      assert Enum.count(ranges) == 2
     end
 
     test "UTF-16 diagnostics convert to byte-accurate decoration columns", ctx do
@@ -141,7 +140,7 @@ defmodule Minga.Diagnostics.DecorationsTest do
       ])
 
       DiagDecorations.apply(pid, uri, @gutter_colors, ctx.diag_name)
-      assert length(Decorations.highlights_for_line(BufferProcess.decorations(pid), 0)) == 1
+      assert Enum.count(Decorations.highlights_for_line(BufferProcess.decorations(pid), 0)) == 1
 
       DiagDecorations.clear(pid)
       assert Decorations.highlights_for_line(BufferProcess.decorations(pid), 0) == []
@@ -157,7 +156,7 @@ defmodule Minga.Diagnostics.DecorationsTest do
       ])
 
       DiagDecorations.apply(pid, uri, @gutter_colors, ctx.diag_name)
-      assert length(Decorations.highlights_for_line(BufferProcess.decorations(pid), 0)) == 1
+      assert Enum.count(Decorations.highlights_for_line(BufferProcess.decorations(pid), 0)) == 1
 
       # Second apply: different diagnostic
       Diagnostics.publish(ctx.diag_name, :test, uri, [
@@ -168,7 +167,7 @@ defmodule Minga.Diagnostics.DecorationsTest do
 
       # Old error should be gone, new warning should exist
       decs = BufferProcess.decorations(pid)
-      assert Decorations.highlights_for_line(decs, 0) |> length() == 1
+      assert Decorations.highlights_for_line(decs, 0) |> Enum.count() == 1
 
       [range] = Decorations.highlights_for_line(decs, 0)
       assert range.start == {0, 6}
@@ -203,7 +202,6 @@ defmodule Minga.Diagnostics.DecorationsTest do
       {:ok, pid} = BufferProcess.start_link(content: "hello world")
       uri = "file:///test/groups.ex"
 
-      # Add a search highlight
       BufferProcess.batch_decorations(pid, fn decs ->
         {_id, decs} =
           Decorations.add_highlight(decs, {0, 0}, {0, 5},
@@ -224,7 +222,7 @@ defmodule Minga.Diagnostics.DecorationsTest do
       decs = BufferProcess.decorations(pid)
       ranges = Decorations.highlights_for_line(decs, 0)
       # Both search and diagnostic ranges should exist
-      assert length(ranges) == 2
+      assert Enum.count(ranges) == 2
       groups = Enum.map(ranges, & &1.group) |> Enum.sort()
       assert groups == [:diagnostics, :search]
     end

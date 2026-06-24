@@ -128,7 +128,7 @@ defmodule MingaEditor.MinibufferData do
   def from_state(%{workspace: %{editing: %{mode: :command, mode_state: ms}}} = state) do
     input = ms.input
     {candidates, total} = command_candidates(state, input)
-    selected = clamp_index(ms.candidate_index, length(candidates))
+    selected = clamp_index(ms.candidate_index, Enum.count(candidates))
 
     %__MODULE__{
       visible: true,
@@ -187,7 +187,7 @@ defmodule MingaEditor.MinibufferData do
 
   def from_state(%{workspace: %{editing: %{mode: :substitute_confirm, mode_state: ms}}}) do
     current = ms.current + 1
-    total = length(ms.matches)
+    total = Enum.count(ms.matches)
 
     %__MODULE__{
       visible: true,
@@ -324,7 +324,7 @@ defmodule MingaEditor.MinibufferData do
       |> Enum.filter(fn {_cmd, _name, score} -> score > 0 end)
       |> Enum.sort_by(fn {_cmd, _name, score} -> score end, :desc)
 
-    total = length(matched)
+    total = Enum.count(matched)
 
     candidates =
       matched
@@ -371,7 +371,7 @@ defmodule MingaEditor.MinibufferData do
     keybind_map = build_keybind_map()
 
     all = Command.all_commands()
-    total = length(all)
+    total = Enum.count(all)
 
     popular_cmds =
       Enum.filter(all, fn cmd -> cmd.name in popular end)
@@ -381,7 +381,7 @@ defmodule MingaEditor.MinibufferData do
       all
       |> Enum.reject(fn cmd -> cmd.name in popular end)
       |> Enum.sort_by(fn cmd -> to_string(cmd.name) end)
-      |> Enum.take(@max_candidates - length(popular_cmds))
+      |> Enum.take(@max_candidates - Enum.count(popular_cmds))
 
     candidates =
       (popular_cmds ++ remaining)

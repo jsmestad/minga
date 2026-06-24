@@ -5,8 +5,8 @@ defmodule Minga.HighlightTest do
   alias MingaEditor.UI.Highlight
 
   defp assert_segments(result, expected) do
-    assert length(result) == length(expected),
-           "expected #{length(expected)} segments, got #{length(result)}: #{inspect(Enum.map(result, fn {text, _face} -> text end))}"
+    assert Enum.count(result) == Enum.count(expected),
+           "expected #{Enum.count(expected)} segments, got #{Enum.count(result)}: #{inspect(Enum.map(result, fn {text, _face} -> text end))}"
 
     Enum.zip(result, expected)
     |> Enum.each(fn {{actual_text, actual_face}, {expected_text, expected_attrs}} ->

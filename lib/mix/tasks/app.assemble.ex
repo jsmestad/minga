@@ -57,22 +57,16 @@ defmodule Mix.Tasks.App.Assemble do
   def run(args) do
     no_build = "--no-build" in args
 
-    # Step 1: Build the BEAM release (unless --no-build)
     release_path = build_beam_release(no_build)
 
-    # Step 2: Build the Xcode project (unless --no-build)
     app_bundle_path = build_xcode_project(no_build)
 
-    # Step 3: Embed the BEAM release into the app bundle
     embed_release(app_bundle_path, release_path)
 
-    # Step 4: Strip TUI-only binaries from the embedded release
     strip_tui_binaries(app_bundle_path)
 
-    # Step 5: Ad-hoc codesign the complete bundle
     codesign_bundle(app_bundle_path)
 
-    # Step 6: Report bundle size
     report_size(app_bundle_path)
 
     Mix.shell().info("""

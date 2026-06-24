@@ -55,7 +55,7 @@ defmodule MingaAgent.Tools.LspReferences do
   @spec format_references([{String.t(), non_neg_integer(), non_neg_integer(), String.t()}]) ::
           String.t()
   defp format_references(items) do
-    count = length(items)
+    count = Enum.count(items)
     header = "#{count} reference#{if count == 1, do: "", else: "s"} found:"
 
     details =

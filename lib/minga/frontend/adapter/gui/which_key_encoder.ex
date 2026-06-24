@@ -41,7 +41,7 @@ defmodule Minga.Frontend.Adapter.GUI.WhichKeyEncoder do
     IO.iodata_to_binary([
       @op_gui_which_key,
       <<1::8, byte_size(prefix_bytes)::16, prefix_bytes::binary, model.page::8,
-        model.page_count::8, length(model.bindings)::16>>
+        model.page_count::8, Enum.count(model.bindings)::16>>
       | entries
     ])
   end

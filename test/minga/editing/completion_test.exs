@@ -231,7 +231,7 @@ defmodule Minga.Editing.CompletionTest do
     test "returns all items when fewer than max_visible" do
       comp = Completion.new(@sample_items, {0, 0})
       {visible, selected_offset} = Completion.visible_items(comp)
-      assert length(visible) == 4
+      assert Enum.count(visible) == 4
       assert selected_offset == 0
     end
 
@@ -258,7 +258,7 @@ defmodule Minga.Editing.CompletionTest do
       }
 
       items = Completion.parse_response(response)
-      assert length(items) == 2
+      assert Enum.count(items) == 2
       assert hd(items).label == "foo"
       assert hd(items).kind == :function
       assert hd(items).insert_text == "foo()"
@@ -270,7 +270,7 @@ defmodule Minga.Editing.CompletionTest do
       ]
 
       items = Completion.parse_response(response)
-      assert length(items) == 1
+      assert Enum.count(items) == 1
       assert hd(items).label == "baz"
       assert hd(items).kind == :module
     end

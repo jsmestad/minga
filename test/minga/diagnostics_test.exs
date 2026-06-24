@@ -40,7 +40,7 @@ defmodule Minga.DiagnosticsTest do
       assert :ok = Diagnostics.publish(s, :server_a, @uri, [d1, d2])
       result = Diagnostics.for_uri(s, @uri)
 
-      assert length(result) == 2
+      assert Enum.count(result) == 2
       assert Enum.at(result, 0).message == "error on line 0"
       assert Enum.at(result, 1).message == "error on line 5"
     end
@@ -53,7 +53,7 @@ defmodule Minga.DiagnosticsTest do
       Diagnostics.publish(s, :server_a, @uri, [d2])
 
       result = Diagnostics.for_uri(s, @uri)
-      assert length(result) == 1
+      assert Enum.count(result) == 1
       assert hd(result).message == "new error"
     end
 
@@ -65,7 +65,7 @@ defmodule Minga.DiagnosticsTest do
       Diagnostics.publish(s, :server_b, @uri, [d2])
 
       result = Diagnostics.for_uri(s, @uri)
-      assert length(result) == 2
+      assert Enum.count(result) == 2
       assert Enum.at(result, 0).message == "from A"
       assert Enum.at(result, 1).message == "from B"
     end
@@ -92,7 +92,7 @@ defmodule Minga.DiagnosticsTest do
       Diagnostics.publish(s, :server_a, @uri, [d1])
       Diagnostics.publish(s, :server_a, @uri2, [d2])
 
-      assert length(Diagnostics.for_uri(s, @uri)) == 1
+      assert Enum.count(Diagnostics.for_uri(s, @uri)) == 1
       assert hd(Diagnostics.for_uri(s, @uri)).message == "file1 error"
       assert hd(Diagnostics.for_uri(s, @uri2)).message == "file2 error"
     end
@@ -101,7 +101,7 @@ defmodule Minga.DiagnosticsTest do
   describe "clear/3" do
     test "clears diagnostics for a source+uri pair", %{server: s} do
       Diagnostics.publish(s, :server_a, @uri, [make_diag()])
-      assert length(Diagnostics.for_uri(s, @uri)) == 1
+      assert Enum.count(Diagnostics.for_uri(s, @uri)) == 1
 
       Diagnostics.clear(s, :server_a, @uri)
       assert Diagnostics.for_uri(s, @uri) == []
@@ -114,7 +114,7 @@ defmodule Minga.DiagnosticsTest do
       Diagnostics.clear(s, :server_a, @uri)
 
       result = Diagnostics.for_uri(s, @uri)
-      assert length(result) == 1
+      assert Enum.count(result) == 1
       assert hd(result).message == "B"
     end
 
@@ -319,7 +319,7 @@ defmodule Minga.DiagnosticsTest do
       Diagnostics.publish(s, :server_a, @uri, [d1, d2, d3])
 
       result = Diagnostics.on_line(s, @uri, 3)
-      assert length(result) == 2
+      assert Enum.count(result) == 2
       messages = Enum.map(result, & &1.message)
       assert "on line 3" in messages
       assert "also on line 3" in messages
@@ -335,7 +335,7 @@ defmodule Minga.DiagnosticsTest do
       Diagnostics.publish(s, :server_b, @uri, [make_diag(line: 1, message: "B")])
 
       result = Diagnostics.on_line(s, @uri, 1)
-      assert length(result) == 2
+      assert Enum.count(result) == 2
     end
   end
 
@@ -402,7 +402,7 @@ defmodule Minga.DiagnosticsTest do
   describe "publishing empty diagnostics" do
     test "publishing empty list clears diagnostics for source+uri", %{server: s} do
       Diagnostics.publish(s, :server_a, @uri, [make_diag()])
-      assert length(Diagnostics.for_uri(s, @uri)) == 1
+      assert Enum.count(Diagnostics.for_uri(s, @uri)) == 1
 
       Diagnostics.publish(s, :server_a, @uri, [])
       assert Diagnostics.for_uri(s, @uri) == []

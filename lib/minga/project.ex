@@ -885,7 +885,7 @@ defmodule Minga.Project do
           command_frecency_map()
   defp update_command_frecency(events, command_name, timestamp) do
     Map.update(events, command_name, [timestamp], fn timestamps ->
-      (timestamps ++ [timestamp]) |> Enum.take(@command_frecency_events_limit)
+      Enum.concat(timestamps, [timestamp]) |> Enum.take(@command_frecency_events_limit)
     end)
   end
 

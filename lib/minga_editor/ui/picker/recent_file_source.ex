@@ -80,5 +80,6 @@ defmodule MingaEditor.UI.Picker.RecentFileSource do
 
   # ── Private ─────────────────────────────────────────────────────────────────
 
-  defdelegate project_root, to: Minga.Project, as: :resolve_root
+  @spec project_root() :: term()
+  def project_root, do: Minga.Project.resolve_root()
 end

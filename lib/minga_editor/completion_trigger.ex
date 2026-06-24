@@ -298,7 +298,7 @@ defmodule MingaEditor.CompletionTrigger do
         |> String.graphemes()
         |> Enum.reverse()
         |> Enum.take_while(&identifier_char?/1)
-        |> length()
+        |> Enum.count()
     end
   end
 

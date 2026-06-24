@@ -442,8 +442,6 @@ defmodule MingaAgent.Changeset.Server do
         :ok -> {:ok, put_in(state.modifications[path], new_content)}
         {:error, reason} -> {:error, reason}
       end
-    else
-      {:error, reason} -> {:error, reason}
     end
   end
 

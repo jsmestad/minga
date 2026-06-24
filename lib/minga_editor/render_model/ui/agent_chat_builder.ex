@@ -233,18 +233,20 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
           {pos_integer(), term()}
         ]
   defp build_gui_messages(messages_with_ids, nil, pending_approval) do
-    messages_with_ids
-    |> Enum.map(&maybe_inline_approval(&1, pending_approval))
-    |> Enum.map(&to_core_message/1)
+    Enum.map(messages_with_ids, fn message ->
+      message |> maybe_inline_approval(pending_approval) |> to_core_message()
+    end)
   end
 
   defp build_gui_messages(messages_with_ids, styled_cache, pending_approval)
        when is_list(styled_cache) do
     padded = pad_cache(styled_cache, length(messages_with_ids))
 
-    Enum.zip(messages_with_ids, padded)
-    |> Enum.map(&maybe_style_message(&1, pending_approval))
-    |> Enum.map(&to_core_message/1)
+    messages_with_ids
+    |> Enum.zip(padded)
+    |> Enum.map(fn message ->
+      message |> maybe_style_message(pending_approval) |> to_core_message()
+    end)
   end
 
   @spec maybe_style_message({{pos_integer(), term()}, term()}, map() | nil) ::
@@ -310,8 +312,13 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   defp maybe_inline_approval({id, msg}, _pending_approval), do: {id, msg}
 
   @spec pad_cache([term()], non_neg_integer()) :: [term()]
-  defp pad_cache(cache, target_len) when length(cache) >= target_len, do: cache
-  defp pad_cache(cache, target_len), do: cache ++ List.duplicate(nil, target_len - length(cache))
+  defp pad_cache(cache, target_len) do
+    if Enum.count(cache) >= target_len do
+      cache
+    else
+      cache ++ List.duplicate(nil, target_len - Enum.count(cache))
+    end
+  end
 
   # ── Agent-struct → core-view conversion ──
   #
@@ -321,7 +328,6 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
 
   @spec to_core_message({pos_integer(), term()}) :: {pos_integer(), term()}
   defp to_core_message({id, body}), do: {id, to_core_body(body)}
-  defp to_core_message(body), do: to_core_body(body)
 
   @spec to_core_body(term()) :: term()
   defp to_core_body({:tool_call, %ToolCall{} = tc}), do: {:tool_call, tool_call_view(tc)}

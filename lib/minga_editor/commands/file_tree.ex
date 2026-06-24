@@ -18,6 +18,7 @@ defmodule MingaEditor.Commands.FileTree do
   alias Minga.Project.FileTree.BufferSync
   alias MingaEditor.FileTree.DropIntent
   alias MingaEditor.FileTree.Freshness, as: FileTreeFreshness
+  alias Minga.Log
 
   @typedoc "Internal editor state."
   @type state :: EditorState.t()
@@ -27,9 +28,10 @@ defmodule MingaEditor.Commands.FileTree do
   def handle_sidebar_action(state, "toggle", _context), do: toggle(state)
 
   def handle_sidebar_action(state, "activate", _context) do
-    case file_tree_state(state) |> FileTreeState.status() |> FileTreeState.visible_status?() do
-      true -> focus_visible_tree(state)
-      false -> toggle(state)
+    if file_tree_state(state) |> FileTreeState.status() |> FileTreeState.visible_status?() do
+      focus_visible_tree(state)
+    else
+      toggle(state)
     end
   end
 
@@ -92,9 +94,10 @@ defmodule MingaEditor.Commands.FileTree do
 
   @spec project_browse(state()) :: state()
   def project_browse(state) do
-    case file_tree_state(state) |> FileTreeState.status() |> FileTreeState.visible_status?() do
-      true -> focus_visible_tree(state)
-      false -> open(state)
+    if file_tree_state(state) |> FileTreeState.status() |> FileTreeState.visible_status?() do
+      focus_visible_tree(state)
+    else
+      open(state)
     end
   end
 
@@ -369,7 +372,7 @@ defmodule MingaEditor.Commands.FileTree do
         BufferRegistry.do_file_tree_open(state, pid, full_path, file_tree_state(state).tree)
 
       {:error, reason} ->
-        Minga.Log.warning(:editor, "[file-tree] Failed to open #{full_path}: #{inspect(reason)}")
+        Log.warning(:editor, "[file-tree] Failed to open #{full_path}: #{inspect(reason)}")
 
         state
     end
@@ -382,11 +385,11 @@ defmodule MingaEditor.Commands.FileTree do
 
     case File.mkdir_p(full_path) do
       :ok ->
-        Minga.Log.info(:editor, "[file-tree] Created folder: #{editing.text}")
+        Log.info(:editor, "[file-tree] Created folder: #{editing.text}")
         clear_editing_and_refresh(state)
 
       {:error, reason} ->
-        Minga.Log.warning(:editor, "[file-tree] Failed to create folder: #{inspect(reason)}")
+        Log.warning(:editor, "[file-tree] Failed to create folder: #{inspect(reason)}")
 
         cancel_editing(state)
     end
@@ -454,18 +457,18 @@ defmodule MingaEditor.Commands.FileTree do
         refresh(state)
 
       {:error, reason, _} ->
-        Minga.Log.warning(:editor, "[file-tree] Duplicate failed: #{inspect(reason)}")
+        Log.warning(:editor, "[file-tree] Duplicate failed: #{inspect(reason)}")
         state
 
       {:error, reason} ->
-        Minga.Log.warning(:editor, "[file-tree] Duplicate failed: #{inspect(reason)}")
+        Log.warning(:editor, "[file-tree] Duplicate failed: #{inspect(reason)}")
         state
     end
   end
 
   @spec log_duplicate_success(map(), String.t()) :: :ok
   defp log_duplicate_success(entry, dest) do
-    Minga.Log.info(:editor, "[file-tree] Duplicated: #{entry.name} → #{Path.basename(dest)}")
+    Log.info(:editor, "[file-tree] Duplicated: #{entry.name} → #{Path.basename(dest)}")
   end
 
   @doc """
@@ -515,7 +518,7 @@ defmodule MingaEditor.Commands.FileTree do
   def drop(state, %DropIntent{} = intent) do
     case file_tree_state(state).tree do
       nil ->
-        Minga.Log.warning(:editor, "[file-tree] Drop rejected: file tree is unavailable")
+        Log.warning(:editor, "[file-tree] Drop rejected: file tree is unavailable")
         state
 
       tree ->
@@ -673,7 +676,7 @@ defmodule MingaEditor.Commands.FileTree do
   @spec marked_move_succeeded(state(), FileTreeState.clipboard_mark(), String.t()) :: state()
   defp marked_move_succeeded(state, mark, destination) do
     state = sync_moved_buffer_path(state, mark.path, destination, "Move")
-    Minga.Log.info(:editor, "[file-tree] Moved: #{mark.name} → #{Path.dirname(destination)}")
+    Log.info(:editor, "[file-tree] Moved: #{mark.name} → #{Path.dirname(destination)}")
 
     state
     |> refresh()
@@ -682,7 +685,7 @@ defmodule MingaEditor.Commands.FileTree do
 
   @spec marked_move_failed(state(), String.t(), String.t(), term()) :: state()
   defp marked_move_failed(state, source, destination, reason) do
-    Minga.Log.warning(
+    Log.warning(
       :editor,
       "[file-tree] Move failed: #{source} → #{destination}: #{inspect(reason)}"
     )
@@ -750,7 +753,7 @@ defmodule MingaEditor.Commands.FileTree do
   end
 
   defp execute_copy_with_destination_check(state, _mark, _destination, {:error, reason}) do
-    Minga.Log.warning(:editor, "[file-tree] Copy failed: #{inspect(reason)}")
+    Log.warning(:editor, "[file-tree] Copy failed: #{inspect(reason)}")
     state
   end
 
@@ -776,7 +779,7 @@ defmodule MingaEditor.Commands.FileTree do
 
   @spec copy_succeeded(state(), FileTreeState.clipboard_mark(), String.t()) :: state()
   defp copy_succeeded(state, mark, destination) do
-    Minga.Log.info(:editor, "[file-tree] Copied: #{mark.name} → #{Path.dirname(destination)}")
+    Log.info(:editor, "[file-tree] Copied: #{mark.name} → #{Path.dirname(destination)}")
     refresh(state)
   end
 
@@ -784,7 +787,7 @@ defmodule MingaEditor.Commands.FileTree do
   defp copy_failed_with_cleanup(state, source, destination, reason, file) do
     cleanup_result = cleanup_partial_copy(destination)
 
-    Minga.Log.warning(
+    Log.warning(
       :editor,
       "[file-tree] Copy failed: #{source} → #{destination} at #{file}: #{inspect(reason)}. #{cleanup_result}"
     )
@@ -794,7 +797,7 @@ defmodule MingaEditor.Commands.FileTree do
 
   @spec copy_failed(state(), String.t(), String.t(), term()) :: state()
   defp copy_failed(state, source, destination, reason) do
-    Minga.Log.warning(
+    Log.warning(
       :editor,
       "[file-tree] Copy failed: #{source} → #{destination}: #{inspect(reason)}"
     )
@@ -1047,7 +1050,7 @@ defmodule MingaEditor.Commands.FileTree do
   defp apply_internal_drop_source(state, source_path, target_dir, entries) do
     case Enum.find(entries, &same_expanded_path?(&1.path, source_path)) do
       nil ->
-        Minga.Log.warning(:editor, "[file-tree] Drop rejected: stale source #{source_path}")
+        Log.warning(:editor, "[file-tree] Drop rejected: stale source #{source_path}")
         {:unchanged, state}
 
       source ->
@@ -1067,7 +1070,7 @@ defmodule MingaEditor.Commands.FileTree do
         :ok ->
           state = sync_moved_buffer_path(state, source.path, new_path, "Move")
 
-          Minga.Log.info(
+          Log.info(
             :editor,
             "[file-tree] Moved: #{source.name} → #{Path.dirname(new_path)}"
           )
@@ -1075,7 +1078,7 @@ defmodule MingaEditor.Commands.FileTree do
           {:changed, state}
 
         {:error, reason} ->
-          Minga.Log.warning(
+          Log.warning(
             :editor,
             "[file-tree] Move failed: #{source.path} → #{new_path}: #{inspect(reason)}"
           )
@@ -1091,7 +1094,7 @@ defmodule MingaEditor.Commands.FileTree do
     dest_path = Path.join(target_dir, Path.basename(source_path))
 
     if path_entry_exists?(dest_path) do
-      Minga.Log.warning(
+      Log.warning(
         :editor,
         "[file-tree] Drop copy skipped, destination exists: #{dest_path}"
       )
@@ -1112,7 +1115,7 @@ defmodule MingaEditor.Commands.FileTree do
 
     case result do
       :ok ->
-        Minga.Log.info(
+        Log.info(
           :editor,
           "[file-tree] Copied: #{Path.basename(source_path)} → #{Path.dirname(dest_path)}"
         )
@@ -1120,7 +1123,7 @@ defmodule MingaEditor.Commands.FileTree do
         {:changed, state}
 
       {:ok, _files} ->
-        Minga.Log.info(
+        Log.info(
           :editor,
           "[file-tree] Copied: #{Path.basename(source_path)} → #{Path.dirname(dest_path)}"
         )
@@ -1130,7 +1133,7 @@ defmodule MingaEditor.Commands.FileTree do
       {:error, reason, file} ->
         cleanup_result = cleanup_partial_copy(dest_path)
 
-        Minga.Log.warning(
+        Log.warning(
           :editor,
           "[file-tree] Drop copy failed: #{source_path} → #{dest_path} at #{file}: #{inspect(reason)}. #{cleanup_result}"
         )
@@ -1138,7 +1141,7 @@ defmodule MingaEditor.Commands.FileTree do
         {:changed, state}
 
       {:error, reason} ->
-        Minga.Log.warning(
+        Log.warning(
           :editor,
           "[file-tree] Drop copy failed: #{source_path} → #{dest_path}: #{inspect(reason)}"
         )
@@ -1160,7 +1163,7 @@ defmodule MingaEditor.Commands.FileTree do
   defp log_stale_drop_target(entries, %DropIntent{} = intent) do
     current = Enum.at(entries, intent.target_index)
 
-    Minga.Log.warning(
+    Log.warning(
       :editor,
       "[file-tree] Drop rejected: stale target index=#{intent.target_index} target=#{intent.target_path} id=#{intent.target_id} hash=#{intent.target_path_hash}; current=#{drop_target_debug(current)}"
     )
@@ -1249,7 +1252,7 @@ defmodule MingaEditor.Commands.FileTree do
       :ok ->
         state = sync_moved_buffer_path(state, old_path, new_path, "Rename")
 
-        Minga.Log.info(
+        Log.info(
           :editor,
           "[file-tree] Renamed: #{Path.basename(old_path)} \u2192 #{new_name}"
         )
@@ -1257,7 +1260,7 @@ defmodule MingaEditor.Commands.FileTree do
         clear_editing_and_refresh(state)
 
       {:error, reason} ->
-        Minga.Log.warning(
+        Log.warning(
           :editor,
           "[file-tree] Rename failed: #{old_path} → #{new_path}: #{inspect(reason)}"
         )
@@ -1291,7 +1294,7 @@ defmodule MingaEditor.Commands.FileTree do
     {state, errors} = update_buffer_path(state, old_path, new_path)
 
     if errors != [] do
-      Minga.Log.warning(
+      Log.warning(
         :editor,
         "[file-tree] #{action} completed on disk, but open buffer path update failed: #{old_path} → #{new_path}: #{inspect(errors)}"
       )
@@ -1409,12 +1412,12 @@ defmodule MingaEditor.Commands.FileTree do
       :ok ->
         state = sync_moved_buffer_path(state, old_path, new_path, "Move")
 
-        Minga.Log.info(:editor, "[file-tree] Moved: #{name} → #{Path.dirname(new_path)}")
+        Log.info(:editor, "[file-tree] Moved: #{name} → #{Path.dirname(new_path)}")
 
         refresh(state)
 
       {:error, reason} ->
-        Minga.Log.warning(
+        Log.warning(
           :editor,
           "[file-tree] Move failed: #{old_path} → #{new_path}: #{inspect(reason)}"
         )

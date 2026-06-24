@@ -111,7 +111,7 @@ defmodule MingaAgent.Memory do
         estimated_tokens = div(String.length(content), 4)
 
         "Memory file: #{path(config_dir)}\n" <>
-          "  Entries: #{length(lines)}\n" <>
+          "  Entries: #{Enum.count(lines)}\n" <>
           "  Estimated tokens: #{estimated_tokens}/#{@max_tokens}\n\n" <>
           content
     end

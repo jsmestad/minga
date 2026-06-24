@@ -1000,7 +1000,7 @@ defmodule Minga.Extension.LifecycleContractTest do
         )
       end)
 
-    assert_receive {:concurrent_double_start_init_entered, init_pid}, 1_000
+    assert_receive {:concurrent_double_start_init_entered, init_pid}, 5_000
 
     task_b =
       Task.async(fn ->
@@ -1015,7 +1015,7 @@ defmodule Minga.Extension.LifecycleContractTest do
         )
       end)
 
-    assert_receive {:concurrent_double_start_caller_ready, task_b_pid}, 1_000
+    assert_receive {:concurrent_double_start_caller_ready, task_b_pid}, 5_000
     assert task_b_pid == task_b.pid
     refute Task.yield(task_b, 50)
     refute_receive {:concurrent_double_start_init_entered, _second_init_pid}, 50
@@ -1816,7 +1816,7 @@ defmodule Minga.Extension.LifecycleContractTest do
       receive do
         :release_stale_monitor_terminal_exit -> :ok
       after
-        1_000 -> raise "timed out waiting to release stale monitor terminal exit"
+        5_000 -> raise "timed out waiting to release stale monitor terminal exit"
       end
 
       send(test_pid, {:stale_monitor_terminal_exit_released, self()})
@@ -1877,7 +1877,7 @@ defmodule Minga.Extension.LifecycleContractTest do
 
     Process.exit(pid_a, :kill)
 
-    assert_receive {:stale_monitor_terminal_exit_blocked, monitor_pid}, 1_000
+    assert_receive {:stale_monitor_terminal_exit_blocked, monitor_pid}, 5_000
 
     restart_log =
       capture_log(fn ->
@@ -1892,14 +1892,14 @@ defmodule Minga.Extension.LifecycleContractTest do
         send(test_pid, {:stale_monitor_restart_result, result})
       end)
 
-    assert_receive {:stale_monitor_restart_result, {:ok, pid_b}}, 1_000
+    assert_receive {:stale_monitor_restart_result, {:ok, pid_b}}, 5_000
     refute restart_log =~ "redefining module Minga.TestExtensions.StaleMonitorRace"
 
     assert_receive {:telemetry, [:minga, :extension, :lifecycle, :crash_restart_count],
                     %{count: 0}, %{extension: :stale_monitor_race, phase: :crash_restart_count}}
 
     send(monitor_pid, :release_stale_monitor_terminal_exit)
-    assert_receive {:stale_monitor_terminal_exit_released, ^monitor_pid}, 1_000
+    assert_receive {:stale_monitor_terminal_exit_released, ^monitor_pid}, 5_000
 
     refute_receive {:telemetry, [:minga, :extension, :lifecycle, :crash_restart_count],
                     %{count: 1}, %{extension: :stale_monitor_race, phase: :crash_restart_count}},

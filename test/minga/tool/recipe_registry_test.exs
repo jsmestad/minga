@@ -70,7 +70,7 @@ defmodule Minga.Tool.Recipe.RegistryTest do
   describe "all/0" do
     test "returns all bundled recipes" do
       recipes = Registry.all()
-      assert length(recipes) >= 13
+      assert Enum.count(recipes) >= 13
       names = Enum.map(recipes, & &1.name)
       assert :pyright in names
       assert :gopls in names
@@ -81,13 +81,13 @@ defmodule Minga.Tool.Recipe.RegistryTest do
   describe "by_category/1" do
     test "filters to LSP servers" do
       servers = Registry.by_category(:lsp_server)
-      assert length(servers) >= 7
+      assert Enum.count(servers) >= 7
       assert Enum.all?(servers, fn r -> r.category == :lsp_server end)
     end
 
     test "filters to formatters" do
       formatters = Registry.by_category(:formatter)
-      assert length(formatters) >= 2
+      assert Enum.count(formatters) >= 2
       names = Enum.map(formatters, & &1.name)
       assert :prettier in names
       assert :black in names

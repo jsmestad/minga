@@ -624,7 +624,7 @@ defmodule MingaEditor.UI.Theme do
 
   @doc "Removes every theme contributed by a source while keeping the core fallback available."
   @spec unregister_source(contribution_source()) :: :ok
-  defdelegate unregister_source(source), to: Minga.Config.ThemeRegistry
+  def unregister_source(source), do: Minga.Config.ThemeRegistry.unregister_source(source)
 
   @doc "Returns the map of registered themes."
   @spec user_themes() :: %{atom() => MingaEditor.UI.Theme.Loader.loaded_theme()}

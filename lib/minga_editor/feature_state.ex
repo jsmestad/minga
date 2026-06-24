@@ -120,14 +120,12 @@ defmodule MingaEditor.FeatureState do
   @doc "Registers the source-cleanup callback used by extension unload/reload."
   @spec ensure_cleanup_registered() :: :ok
   def ensure_cleanup_registered do
-    case :persistent_term.get(@cleanup_registered_key, false) do
-      true ->
-        :ok
-
-      false ->
-        ContributionCleanup.register(:feature_state, &__MODULE__.unregister_source/1)
-        :persistent_term.put(@cleanup_registered_key, true)
-        :ok
+    if :persistent_term.get(@cleanup_registered_key, false) do
+      :ok
+    else
+      ContributionCleanup.register(:feature_state, &__MODULE__.unregister_source/1)
+      :persistent_term.put(@cleanup_registered_key, true)
+      :ok
     end
   end
 

@@ -35,6 +35,7 @@ defmodule Minga.LSP.Client do
   alias Minga.LSP.JsonRpc
   alias Minga.LSP.PositionEncoding
   alias Minga.LSP.SemanticTokens
+  alias Minga.Log
 
   @request_timeout 30_000
 
@@ -322,7 +323,7 @@ defmodule Minga.LSP.Client do
 
       :error ->
         msg = "#{server_config.name}: #{server_config.command} not found on PATH"
-        Minga.Log.warning(:lsp, msg)
+        Log.warning(:lsp, msg)
 
         Minga.Events.broadcast(:log_message, %Minga.Events.LogMessageEvent{
           text: msg,
@@ -527,7 +528,7 @@ defmodule Minga.LSP.Client do
   # Unexpected exit: server died on its own.
   def handle_info({port, {:exit_status, code}}, %{port: port} = state) do
     msg = "LSP server #{state.server_config.name} exited with code #{code}"
-    Minga.Log.warning(:lsp, msg)
+    Log.warning(:lsp, msg)
 
     Minga.Events.broadcast(:log_message, %Minga.Events.LogMessageEvent{text: msg, level: :warning})
 
@@ -543,7 +544,7 @@ defmodule Minga.LSP.Client do
   # Unexpected port crash.
   def handle_info({:EXIT, port, reason}, %{port: port} = state) do
     msg = "LSP server #{state.server_config.name} crashed: #{inspect(reason)}"
-    Minga.Log.warning(:lsp, msg)
+    Log.warning(:lsp, msg)
 
     Minga.Events.broadcast(:log_message, %Minga.Events.LogMessageEvent{text: msg, level: :warning})
 
@@ -557,7 +558,7 @@ defmodule Minga.LSP.Client do
         {:noreply, state}
 
       {%{from: from, method: method}, pending} ->
-        Minga.Log.warning(:lsp, "LSP request #{method} (id=#{id}) timed out")
+        Log.warning(:lsp, "LSP request #{method} (id=#{id}) timed out")
         reply_to_caller(from, {:error, :timeout})
         {:noreply, %{state | pending: pending}}
     end
@@ -614,7 +615,7 @@ defmodule Minga.LSP.Client do
   defp handle_response(id, result, state) do
     case Map.pop(state.pending, id) do
       {nil, _pending} ->
-        Minga.Log.warning(:lsp, "Received response for unknown request id=#{id}")
+        Log.warning(:lsp, "Received response for unknown request id=#{id}")
         state
 
       {%{method: method, from: from, timer: timer}, pending} ->
@@ -622,10 +623,10 @@ defmodule Minga.LSP.Client do
 
         case result do
           {:ok, _} ->
-            Minga.Log.debug(:lsp, "← #{method} (id: #{id}, ok)")
+            Log.debug(:lsp, "← #{method} (id: #{id}, ok)")
 
           {:error, err} ->
-            Minga.Log.debug(:lsp, "← #{method} (id: #{id}, error: #{inspect(err)})")
+            Log.debug(:lsp, "← #{method} (id: #{id}, error: #{inspect(err)})")
         end
 
         state = %{state | pending: pending}
@@ -650,7 +651,7 @@ defmodule Minga.LSP.Client do
 
     send_notification(state, "initialized", %{})
 
-    Minga.Log.info(
+    Log.info(
       :lsp,
       "LSP server #{state.server_config.name} initialized (encoding: #{encoding})"
     )
@@ -658,9 +659,9 @@ defmodule Minga.LSP.Client do
     legend =
       case SemanticTokens.extract_legend(capabilities) do
         {types, mods} ->
-          Minga.Log.info(
+          Log.info(
             :lsp,
-            "LSP #{state.server_config.name} supports semantic tokens (#{length(types)} types, #{length(mods)} modifiers)"
+            "LSP #{state.server_config.name} supports semantic tokens (#{Enum.count(types)} types, #{Enum.count(mods)} modifiers)"
           )
 
           {types, mods}
@@ -684,7 +685,7 @@ defmodule Minga.LSP.Client do
 
   defp handle_method_response("initialize", {:error, error}, _from, state) do
     msg = "LSP #{state.server_config.name} initialization failed: #{inspect(error)}"
-    Minga.Log.error(:lsp, msg)
+    Log.error(:lsp, msg)
     Minga.Events.broadcast(:log_message, %Minga.Events.LogMessageEvent{text: msg, level: :error})
     state
   end
@@ -716,8 +717,8 @@ defmodule Minga.LSP.Client do
 
   @spec handle_server_notification(String.t(), map(), State.t()) :: State.t()
   defp handle_server_notification("textDocument/publishDiagnostics" = method, params, state) do
-    diag_count = params |> Map.get("diagnostics", []) |> length()
-    Minga.Log.debug(:lsp, "← #{method} (#{diag_count} items)")
+    diag_count = params |> Map.get("diagnostics", []) |> Enum.count()
+    Log.debug(:lsp, "← #{method} (#{diag_count} items)")
     uri = Map.get(params, "uri", "")
     raw_diags = Map.get(params, "diagnostics", [])
 
@@ -755,7 +756,7 @@ defmodule Minga.LSP.Client do
     new_watchers = extract_file_watchers(registrations)
 
     if new_watchers != [] do
-      Minga.Log.debug(:lsp, "Registered #{length(new_watchers)} file watcher(s)")
+      Log.debug(:lsp, "Registered #{Enum.count(new_watchers)} file watcher(s)")
     end
 
     %{state | file_watchers: state.file_watchers ++ new_watchers}
@@ -793,7 +794,7 @@ defmodule Minga.LSP.Client do
   end
 
   defp handle_server_request(method, id, _params, state) do
-    Minga.Log.debug(:lsp, "Unhandled server request: #{method} (id=#{id})")
+    Log.debug(:lsp, "Unhandled server request: #{method} (id=#{id})")
     send_error_response(state, id, -32_601, "Method not found: #{method}")
     state
   end
@@ -816,7 +817,7 @@ defmodule Minga.LSP.Client do
     {severity, level} = lsp_message_severity(type)
     text = "[LSP/#{severity}] #{state.server_config.name}: #{message}"
 
-    Minga.Log.info(:lsp, text)
+    Log.info(:lsp, text)
     Minga.Events.broadcast(:log_message, %Minga.Events.LogMessageEvent{text: text, level: level})
   end
 
@@ -880,7 +881,7 @@ defmodule Minga.LSP.Client do
         [%{id: registration_id, pattern: compiled, kind: kind}]
 
       {:error, _} ->
-        Minga.Log.warning(:lsp, "Invalid glob pattern in file watcher: #{inspect(pattern)}")
+        Log.warning(:lsp, "Invalid glob pattern in file watcher: #{inspect(pattern)}")
         []
     end
   end
@@ -1051,7 +1052,7 @@ defmodule Minga.LSP.Client do
   @spec send_request(State.t(), String.t(), map()) :: {integer(), State.t()}
   defp send_request(state, method, params) do
     id = state.next_id
-    Minga.Log.debug(:lsp, "→ #{method} (id: #{id})")
+    Log.debug(:lsp, "→ #{method} (id: #{id})")
     msg = JsonRpc.encode_request(id, method, params)
     port_send(state.port, msg)
     {id, %{state | next_id: id + 1}}
@@ -1059,7 +1060,7 @@ defmodule Minga.LSP.Client do
 
   @spec send_notification(State.t(), String.t(), map()) :: :ok
   defp send_notification(state, method, params) do
-    Minga.Log.debug(:lsp, "→ #{method} (notification)")
+    Log.debug(:lsp, "→ #{method} (notification)")
     msg = JsonRpc.encode_notification(method, params)
     port_send(state.port, msg)
   end

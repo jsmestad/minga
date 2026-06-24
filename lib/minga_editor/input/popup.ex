@@ -97,7 +97,6 @@ defmodule MingaEditor.Input.Popup do
 
   @spec matches_quit_key?(String.t(), non_neg_integer()) :: boolean()
   defp matches_quit_key?(quit_key, codepoint) when is_binary(quit_key) do
-    # Convert the quit key string to a codepoint for comparison.
     # Supports single-character keys like "q", "x", etc.
     case quit_key do
       <<char::utf8>> -> char == codepoint

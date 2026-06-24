@@ -54,7 +54,7 @@ defmodule MingaEditor.Handlers.ToolHandler do
     # Schedule status clear after 5 seconds (skip in headless)
     effects =
       if state.backend != :headless do
-        effects ++ [{:send_after, :clear_tool_status, 5_000}]
+        Enum.concat(effects, [{:send_after, :clear_tool_status, 5_000}])
       else
         effects
       end
@@ -119,7 +119,7 @@ defmodule MingaEditor.Handlers.ToolHandler do
 
     new_state =
       if recipe && not EditorState.skip_tool_prompt?(state, recipe.name) do
-        queue = state.shell_state.tool_prompt_queue ++ [recipe.name]
+        queue = Enum.concat(state.shell_state.tool_prompt_queue, [recipe.name])
 
         state_with_queue =
           EditorState.update_shell_state(state, &%{&1 | tool_prompt_queue: queue})

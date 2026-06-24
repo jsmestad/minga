@@ -344,7 +344,7 @@ defmodule MingaAgent.Changeset.ServerTest do
       GenServer.call(server, {:write_file, "lib/brand_new.ex", "new file"})
 
       summary = GenServer.call(server, :summary)
-      assert length(summary) == 2
+      assert Enum.count(summary) == 2
 
       hello_entry = Enum.find(summary, &(&1.path == "hello.txt"))
       assert hello_entry.kind == :modified

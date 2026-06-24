@@ -20,30 +20,39 @@ defmodule Minga.Remote.BootstrapTest do
     old_attempts = Application.get_env(:minga, :remote_node_connect_attempts)
     old_interval = Application.get_env(:minga, :remote_node_connect_retry_interval_ms)
 
+    # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
     Application.put_env(:minga, :remote_skip_ssh_bootstrap, true)
 
     on_exit(fn ->
       if old_skip == nil do
+        # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
         Application.delete_env(:minga, :remote_skip_ssh_bootstrap)
       else
+        # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
         Application.put_env(:minga, :remote_skip_ssh_bootstrap, old_skip)
       end
 
       if old_node == nil do
+        # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
         Application.delete_env(:minga, :remote_node_name)
       else
+        # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
         Application.put_env(:minga, :remote_node_name, old_node)
       end
 
       if old_attempts == nil do
+        # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
         Application.delete_env(:minga, :remote_node_connect_attempts)
       else
+        # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
         Application.put_env(:minga, :remote_node_connect_attempts, old_attempts)
       end
 
       if old_interval == nil do
+        # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
         Application.delete_env(:minga, :remote_node_connect_retry_interval_ms)
       else
+        # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
         Application.put_env(:minga, :remote_node_connect_retry_interval_ms, old_interval)
       end
     end)
@@ -52,17 +61,22 @@ defmodule Minga.Remote.BootstrapTest do
   end
 
   test "connect_remote_node rejects invalid and overlong distributed node names" do
+    # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
     Application.put_env(:minga, :remote_node_name, "bad node name")
     assert {:error, :invalid_node_name} = Bootstrap.connect_remote_node(url())
 
+    # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
     Application.put_env(:minga, :remote_node_name, String.duplicate("a", 256))
     assert {:error, :invalid_node_name} = Bootstrap.connect_remote_node(url())
   end
 
   test "connect_remote_node reports failure after bounded retries" do
     node = :"missing_minga_bootstrap_#{System.unique_integer([:positive])}@127.0.0.1"
+    # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
     Application.put_env(:minga, :remote_node_name, Atom.to_string(node))
+    # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
     Application.put_env(:minga, :remote_node_connect_attempts, 1)
+    # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
     Application.put_env(:minga, :remote_node_connect_retry_interval_ms, 0)
 
     assert {:error, {:node_connect_failed, ^node}} = Bootstrap.connect_remote_node(url())
@@ -71,6 +85,7 @@ defmodule Minga.Remote.BootstrapTest do
   test "attach unwraps broker start result and returns session metadata" do
     peer = start_peer()
     on_exit(fn -> stop_peer(peer) end)
+    # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
     Application.put_env(:minga, :remote_node_name, Atom.to_string(peer.node))
 
     assert {:ok, result} = Bootstrap.attach(url())
@@ -85,6 +100,7 @@ defmodule Minga.Remote.BootstrapTest do
     peer = start_peer()
     on_exit(fn -> stop_peer(peer) end)
 
+    # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
     Application.put_env(:minga, :remote_node_name, Atom.to_string(peer.node))
 
     assert {:error, :not_found} = Bootstrap.kill_session(url())
@@ -93,6 +109,7 @@ defmodule Minga.Remote.BootstrapTest do
   test "kill_session stops the existing workdir session without creating a new one" do
     peer = start_peer()
     on_exit(fn -> stop_peer(peer) end)
+    # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
     Application.put_env(:minga, :remote_node_name, Atom.to_string(peer.node))
 
     workdir =

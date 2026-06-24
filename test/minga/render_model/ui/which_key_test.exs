@@ -29,7 +29,7 @@ defmodule Minga.RenderModel.UI.WhichKeyTest do
       assert wk.prefix == "SPC"
       assert wk.page == 1
       assert wk.page_count == 3
-      assert length(wk.bindings) == 1
+      assert Enum.count(wk.bindings) == 1
     end
   end
 end

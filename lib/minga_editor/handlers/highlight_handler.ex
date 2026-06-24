@@ -302,7 +302,7 @@ defmodule MingaEditor.Handlers.HighlightHandler do
 
     effects = [
       {:log, :editor, :debug,
-       "Fold ranges received: buffer=#{inspect(pid)}, count=#{length(ranges)}"}
+       "Fold ranges received: buffer=#{inspect(pid)}, count=#{Enum.count(ranges)}"}
     ]
 
     {new_state, effects}

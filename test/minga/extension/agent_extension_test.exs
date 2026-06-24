@@ -286,11 +286,11 @@ defmodule Minga.Extension.AgentExtensionTest do
     end
 
     test "all five schemas are populated" do
-      assert length(FullAgentExtension.__option_schema__()) == 1
-      assert length(FullAgentExtension.__hook_schema__()) == 1
-      assert length(FullAgentExtension.__skill_schema__()) == 1
-      assert length(FullAgentExtension.__mcp_server_schema__()) == 1
-      assert length(FullAgentExtension.__slash_command_schema__()) == 1
+      assert Enum.count(FullAgentExtension.__option_schema__()) == 1
+      assert Enum.count(FullAgentExtension.__hook_schema__()) == 1
+      assert Enum.count(FullAgentExtension.__skill_schema__()) == 1
+      assert Enum.count(FullAgentExtension.__mcp_server_schema__()) == 1
+      assert Enum.count(FullAgentExtension.__slash_command_schema__()) == 1
     end
   end
 
@@ -315,7 +315,7 @@ defmodule Minga.Extension.AgentExtensionTest do
     end
 
     test "hooks are populated while other schemas are empty" do
-      assert length(HooksOnlyExtension.__hook_schema__()) == 2
+      assert Enum.count(HooksOnlyExtension.__hook_schema__()) == 2
       assert HooksOnlyExtension.__option_schema__() == []
       assert HooksOnlyExtension.__skill_schema__() == []
       assert HooksOnlyExtension.__mcp_server_schema__() == []
@@ -344,7 +344,7 @@ defmodule Minga.Extension.AgentExtensionTest do
     end
 
     test "skills are populated while other schemas are empty" do
-      assert length(SkillsOnlyExtension.__skill_schema__()) == 2
+      assert Enum.count(SkillsOnlyExtension.__skill_schema__()) == 2
       assert SkillsOnlyExtension.__option_schema__() == []
       assert SkillsOnlyExtension.__hook_schema__() == []
       assert SkillsOnlyExtension.__mcp_server_schema__() == []
@@ -395,16 +395,16 @@ defmodule Minga.Extension.AgentExtensionTest do
     end
 
     test "editor module has editor schemas but not agent schemas" do
-      assert length(EditorSurface.__command_schema__()) == 1
-      assert length(EditorSurface.__keybind_schema__()) == 1
+      assert Enum.count(EditorSurface.__command_schema__()) == 1
+      assert Enum.count(EditorSurface.__keybind_schema__()) == 1
       assert EditorSurface.__option_schema__() == []
       assert EditorSurface.__modeline_segment_schema__() == []
       assert EditorSurface.__capability_schema__() == []
     end
 
     test "agent module has agent schemas but not editor schemas" do
-      assert length(AgentSurface.__hook_schema__()) == 1
-      assert length(AgentSurface.__skill_schema__()) == 1
+      assert Enum.count(AgentSurface.__hook_schema__()) == 1
+      assert Enum.count(AgentSurface.__skill_schema__()) == 1
       assert AgentSurface.__option_schema__() == []
       assert AgentSurface.__mcp_server_schema__() == []
       assert AgentSurface.__slash_command_schema__() == []

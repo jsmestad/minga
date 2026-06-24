@@ -39,7 +39,7 @@ defmodule Minga.Frontend.Adapter.GUI.BottomPanelEncoder do
 
     header =
       <<@op_gui_bottom_panel, 1, model.active_tab_index::8, model.height_percent::8,
-        model.filter_byte::8, length(model.tabs)::8, tab_defs::binary>>
+        model.filter_byte::8, Enum.count(model.tabs)::8, tab_defs::binary>>
 
     header <> encode_messages(model.stream_instance, model.messages)
   end
@@ -55,6 +55,6 @@ defmodule Minga.Frontend.Adapter.GUI.BottomPanelEncoder do
           entry.text::binary>>
       end
 
-    <<stream_instance::32, length(entries)::16, entry_data::binary>>
+    <<stream_instance::32, Enum.count(entries)::16, entry_data::binary>>
   end
 end

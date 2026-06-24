@@ -121,7 +121,7 @@ defmodule MingaAgent.SessionStoreTest do
 
       assert {:ok, loaded} = SessionStore.load("bad-atoms", dir)
       assert {:system, "bad level", :info} in loaded.messages
-      assert {:tool_call, %{status: :complete}} = List.last(loaded.messages)
+      assert {:tool_call, %{status: :complete}} = Enum.at(loaded.messages, -1)
     end
 
     test "rejects malformed preview payloads defensively", %{tmp_dir: dir} do

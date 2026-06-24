@@ -381,7 +381,7 @@ defmodule MingaEditor.FoldMap do
       if Enum.any?(acc, &contained_in?(fold, &1)) do
         acc
       else
-        acc ++ [fold]
+        Enum.concat(acc, [fold])
       end
     end)
   end

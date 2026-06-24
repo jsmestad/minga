@@ -37,6 +37,7 @@ defmodule Minga.Config.Loader do
   alias Minga.Extension.Supervisor, as: ExtSupervisor
   alias Minga.Keymap
   alias Minga.Popup.Registry, as: PopupRegistry
+  alias Minga.Log
 
   @type keymap_server :: Keymap.server()
   @type options_server :: Options.server()
@@ -243,7 +244,7 @@ defmodule Minga.Config.Loader do
           # Unreachable in single-version processes; logged so a real schema
           # mismatch doesn't degrade silently.
           _ ->
-            Minga.Log.warning(
+            Log.warning(
               :config,
               "loader state missing :keymap_server/:options_server; using defaults"
             )
@@ -458,9 +459,10 @@ defmodule Minga.Config.Loader do
   defp bundled_extension_path(name) do
     priv_path = Application.app_dir(:minga, Path.join(["priv", "extensions", name, "lib"]))
 
-    case File.dir?(priv_path) do
-      true -> priv_path
-      false -> bundled_extension_fallback_path(name, priv_path)
+    if File.dir?(priv_path) do
+      priv_path
+    else
+      bundled_extension_fallback_path(name, priv_path)
     end
   end
 
@@ -471,7 +473,7 @@ defmodule Minga.Config.Loader do
     if source_extension_fallback_allowed?() and File.dir?(source_path) do
       source_path
     else
-      Minga.Log.warning(
+      Log.warning(
         :config,
         "Bundled extension #{name} is missing at #{priv_path}; source-tree fallback is disabled"
       )
@@ -574,7 +576,7 @@ defmodule Minga.Config.Loader do
     if options_server_alive?(server) do
       Options.reset(server)
     else
-      Minga.Log.warning(
+      Log.warning(
         :config,
         "Loader.reload: options_server #{inspect(server)} not alive, skipping reset"
       )
@@ -596,7 +598,7 @@ defmodule Minga.Config.Loader do
 
       {:error, failures} ->
         msg = "Extension start_all failed: #{format_start_failures(failures)}"
-        Minga.Log.warning(:config, msg)
+        Log.warning(:config, msg)
         msg
     end
   end
@@ -614,7 +616,7 @@ defmodule Minga.Config.Loader do
 
       {:error, failures} ->
         msg = "Extension stop_all failed: #{format_stop_failures(failures)}"
-        Minga.Log.warning(:config, msg)
+        Log.warning(:config, msg)
         msg
     end
   end
@@ -632,7 +634,7 @@ defmodule Minga.Config.Loader do
 
       {:error, failures} ->
         msg = "Config reload cleanup for :config failed: #{format_cleanup_failures(failures)}"
-        Minga.Log.warning(:config, msg)
+        Log.warning(:config, msg)
         msg
     end
   end
@@ -725,7 +727,7 @@ defmodule Minga.Config.Loader do
 
       {:error, reason} ->
         msg = "Could not read modules directory #{modules_dir}: #{inspect(reason)}"
-        Minga.Log.warning(:config, msg)
+        Log.warning(:config, msg)
         {[], [msg]}
     end
   end
@@ -759,17 +761,17 @@ defmodule Minga.Config.Loader do
   rescue
     e in [SyntaxError, TokenMissingError, CompileError] ->
       msg = "Module compile error in #{path}: #{Exception.message(e)}"
-      Minga.Log.warning(:config, msg)
+      Log.warning(:config, msg)
       {:error, msg}
 
     e ->
       msg = "Module error in #{path}: #{Exception.message(e)}"
-      Minga.Log.warning(:config, msg)
+      Log.warning(:config, msg)
       {:error, msg}
   catch
     kind, reason ->
       msg = "Module error in #{path}: #{inspect(kind)} #{inspect(reason)}"
-      Minga.Log.warning(:config, msg)
+      Log.warning(:config, msg)
       {:error, msg}
   end
 
@@ -935,17 +937,17 @@ defmodule Minga.Config.Loader do
   rescue
     e in [SyntaxError, TokenMissingError, CompileError] ->
       msg = "Config syntax error in #{path}: #{Exception.message(e)}"
-      Minga.Log.warning(:config, msg)
+      Log.warning(:config, msg)
       msg
 
     e ->
       msg = "Config error in #{path}: #{Exception.message(e)}"
-      Minga.Log.warning(:config, msg)
+      Log.warning(:config, msg)
       msg
   catch
     kind, reason ->
       msg = "Config error in #{path}: #{inspect(kind)} #{inspect(reason)}"
-      Minga.Log.warning(:config, msg)
+      Log.warning(:config, msg)
       msg
   end
 end

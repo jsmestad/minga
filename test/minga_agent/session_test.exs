@@ -45,7 +45,6 @@ defmodule MingaAgent.SessionTest do
     @impl MingaAgent.Provider
     def get_state(_pid), do: {:ok, %{model: nil, is_streaming: false, token_usage: nil}}
 
-    @doc false
     @spec proceed(GenServer.server()) :: :ok
     def proceed(pid), do: GenServer.cast(pid, :proceed)
 
@@ -105,11 +104,9 @@ defmodule MingaAgent.SessionTest do
     @impl MingaAgent.Provider
     def get_state(_pid), do: {:ok, %{model: nil, is_streaming: false, token_usage: nil}}
 
-    @doc false
     @spec release_start(GenServer.server()) :: :ok
     def release_start(pid), do: GenServer.call(pid, :release_start)
 
-    @doc false
     @spec release_end(GenServer.server()) :: :ok
     def release_end(pid), do: GenServer.call(pid, :release_end)
 
@@ -1004,7 +1001,7 @@ defmodule MingaAgent.SessionTest do
     test "clears messages, resets status, and resets usage", %{session: session} do
       :ok = Session.send_prompt(session, "First")
       await_turn_complete()
-      assert length(Session.messages(session)) > 1
+      assert Enum.count(Session.messages(session)) > 1
 
       :ok = Session.new_session(session)
 
@@ -1024,7 +1021,7 @@ defmodule MingaAgent.SessionTest do
       await_turn_complete()
 
       messages_before = Session.messages(session)
-      assert length(messages_before) >= 3
+      assert Enum.count(messages_before) >= 3
 
       assert :ok = Session.set_model(session, "openai:gpt-4o")
 
@@ -1223,10 +1220,8 @@ defmodule MingaAgent.SessionTest do
     end
 
     test "load_session replaces messages", %{session: session} do
-      # Save the current session
       _id = Session.session_id(session)
 
-      # Create a fake saved session
       SessionStore.save(%{
         id: "loaded-session",
         timestamp: DateTime.to_iso8601(DateTime.utc_now()),
@@ -1747,7 +1742,7 @@ defmodule MingaAgent.SessionTest do
         Session.messages(session)
         |> Enum.filter(&match?({:system, "boom", :error}, &1))
 
-      assert length(errors) == 1
+      assert Enum.count(errors) == 1
     end
 
     test "revoke_tool_trust removes one or all entries" do
@@ -2079,7 +2074,7 @@ defmodule MingaAgent.SessionTest do
 
       pairs_after_delta = Session.messages_with_ids(slow_session)
       assert Enum.map(pairs_after_delta, &elem(&1, 0)) == [1, 2, 3]
-      assert {3, {:assistant, text}} = List.last(pairs_after_delta)
+      assert {3, {:assistant, text}} = Enum.at(pairs_after_delta, -1)
       assert String.contains?(text, "world")
 
       finish_slow_turn(slow_session)
@@ -2096,13 +2091,13 @@ defmodule MingaAgent.SessionTest do
 
       pairs_thinking = Session.messages_with_ids(session)
       assert Enum.map(pairs_thinking, &elem(&1, 0)) == [1, 2]
-      assert {2, {:thinking, "hmm ok", _collapsed}} = List.last(pairs_thinking)
+      assert {2, {:thinking, "hmm ok", _collapsed}} = Enum.at(pairs_thinking, -1)
 
       send(session, {:agent_provider_event, %Event.TextDelta{delta: "answer"}})
       pairs_with_assistant = Session.messages_with_ids(session)
 
       assert Enum.map(pairs_with_assistant, &elem(&1, 0)) == [1, 2, 3]
-      assert {3, {:assistant, "answer"}} = List.last(pairs_with_assistant)
+      assert {3, {:assistant, "answer"}} = Enum.at(pairs_with_assistant, -1)
       assert length(pairs_with_assistant) == length(Session.messages(session))
     end
 
@@ -2113,7 +2108,7 @@ defmodule MingaAgent.SessionTest do
       )
 
       pairs_start = Session.messages_with_ids(session)
-      {tool_id, {:tool_call, tc_start}} = List.last(pairs_start)
+      {tool_id, {:tool_call, tc_start}} = Enum.at(pairs_start, -1)
       assert tc_start.status == :running
 
       send(
@@ -2123,7 +2118,7 @@ defmodule MingaAgent.SessionTest do
       )
 
       pairs_update = Session.messages_with_ids(session)
-      assert {^tool_id, {:tool_call, %{result: "output"}}} = List.last(pairs_update)
+      assert {^tool_id, {:tool_call, %{result: "output"}}} = Enum.at(pairs_update, -1)
 
       send(
         session,
@@ -2131,7 +2126,7 @@ defmodule MingaAgent.SessionTest do
       )
 
       pairs_end = Session.messages_with_ids(session)
-      assert {^tool_id, {:tool_call, %{status: :complete}}} = List.last(pairs_end)
+      assert {^tool_id, {:tool_call, %{status: :complete}}} = Enum.at(pairs_end, -1)
       assert length(pairs_end) == length(Session.messages(session))
     end
 
@@ -2190,7 +2185,7 @@ defmodule MingaAgent.SessionTest do
       ids_after = Enum.map(pairs_after, &elem(&1, 0))
 
       assert length(ids_after) == length(pairs_before) + 1
-      assert List.last(ids_after) > max_id_before
+      assert Enum.at(ids_after, -1) > max_id_before
       assert length(pairs_after) == length(Session.messages(session))
     end
   end

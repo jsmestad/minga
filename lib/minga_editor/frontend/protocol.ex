@@ -305,7 +305,7 @@ defmodule MingaEditor.Frontend.Protocol do
   """
   @spec encode_set_font_fallback([String.t()]) :: binary()
   def encode_set_font_fallback(families) when is_list(families) do
-    count = length(families)
+    count = Enum.count(families)
 
     entries =
       Enum.map(families, fn name ->
@@ -336,22 +336,60 @@ defmodule MingaEditor.Frontend.Protocol do
 
   @type edit_delta :: Minga.Parser.Protocol.edit_delta()
 
-  defdelegate encode_edit_buffer(buffer_id, version, edits), to: Minga.Parser.Protocol
-  defdelegate encode_set_language(buffer_id, name), to: Minga.Parser.Protocol
-  defdelegate encode_parse_buffer(buffer_id, version, source), to: Minga.Parser.Protocol
-  defdelegate encode_set_highlight_query(buffer_id, query), to: Minga.Parser.Protocol
-  defdelegate encode_set_injection_query(buffer_id, query), to: Minga.Parser.Protocol
-  defdelegate encode_set_fold_query(buffer_id, query), to: Minga.Parser.Protocol
-  defdelegate encode_set_indent_query(buffer_id, query), to: Minga.Parser.Protocol
-  defdelegate encode_request_indent(buffer_id, request_id, line), to: Minga.Parser.Protocol
-  defdelegate encode_set_textobject_query(buffer_id, query), to: Minga.Parser.Protocol
-  defdelegate encode_set_tags_query(buffer_id, query), to: Minga.Parser.Protocol
+  @spec encode_edit_buffer(term(), term(), term()) :: term()
+  def encode_edit_buffer(buffer_id, version, edits),
+    do: Minga.Parser.Protocol.encode_edit_buffer(buffer_id, version, edits)
 
-  defdelegate encode_request_textobject(buffer_id, request_id, row, col, capture_name),
-    to: Minga.Parser.Protocol
+  @spec encode_set_language(term(), term()) :: term()
+  def encode_set_language(buffer_id, name),
+    do: Minga.Parser.Protocol.encode_set_language(buffer_id, name)
 
-  defdelegate encode_request_match_item(buffer_id, request_id, row, col),
-    to: Minga.Parser.Protocol
+  @spec encode_parse_buffer(term(), term(), term()) :: term()
+  def encode_parse_buffer(buffer_id, version, source),
+    do: Minga.Parser.Protocol.encode_parse_buffer(buffer_id, version, source)
+
+  @spec encode_set_highlight_query(term(), term()) :: term()
+  def encode_set_highlight_query(buffer_id, query),
+    do: Minga.Parser.Protocol.encode_set_highlight_query(buffer_id, query)
+
+  @spec encode_set_injection_query(term(), term()) :: term()
+  def encode_set_injection_query(buffer_id, query),
+    do: Minga.Parser.Protocol.encode_set_injection_query(buffer_id, query)
+
+  @spec encode_set_fold_query(term(), term()) :: term()
+  def encode_set_fold_query(buffer_id, query),
+    do: Minga.Parser.Protocol.encode_set_fold_query(buffer_id, query)
+
+  @spec encode_set_indent_query(term(), term()) :: term()
+  def encode_set_indent_query(buffer_id, query),
+    do: Minga.Parser.Protocol.encode_set_indent_query(buffer_id, query)
+
+  @spec encode_request_indent(term(), term(), term()) :: term()
+  def encode_request_indent(buffer_id, request_id, line),
+    do: Minga.Parser.Protocol.encode_request_indent(buffer_id, request_id, line)
+
+  @spec encode_set_textobject_query(term(), term()) :: term()
+  def encode_set_textobject_query(buffer_id, query),
+    do: Minga.Parser.Protocol.encode_set_textobject_query(buffer_id, query)
+
+  @spec encode_set_tags_query(term(), term()) :: term()
+  def encode_set_tags_query(buffer_id, query),
+    do: Minga.Parser.Protocol.encode_set_tags_query(buffer_id, query)
+
+  @spec encode_request_textobject(term(), term(), term(), term(), term()) :: term()
+  def encode_request_textobject(buffer_id, request_id, row, col, capture_name),
+    do:
+      Minga.Parser.Protocol.encode_request_textobject(
+        buffer_id,
+        request_id,
+        row,
+        col,
+        capture_name
+      )
+
+  @spec encode_request_match_item(term(), term(), term(), term()) :: term()
+  def encode_request_match_item(buffer_id, request_id, row, col),
+    do: Minga.Parser.Protocol.encode_request_match_item(buffer_id, request_id, row, col)
 
   @spec encode_request_structural_nav(
           non_neg_integer(),
@@ -360,15 +398,19 @@ defmodule MingaEditor.Frontend.Protocol do
           non_neg_integer(),
           0..3
         ) :: binary()
-  defdelegate encode_request_structural_nav(buffer_id, request_id, row, col, action),
-    to: Minga.Parser.Protocol
+  def encode_request_structural_nav(buffer_id, request_id, row, col, action),
+    do:
+      Minga.Parser.Protocol.encode_request_structural_nav(buffer_id, request_id, row, col, action)
 
-  defdelegate encode_load_grammar(name, path), to: Minga.Parser.Protocol
+  @spec encode_load_grammar(term(), term()) :: term()
+  def encode_load_grammar(name, path), do: Minga.Parser.Protocol.encode_load_grammar(name, path)
 
-  defdelegate encode_query_language_at(buffer_id, request_id, byte_offset),
-    to: Minga.Parser.Protocol
+  @spec encode_query_language_at(term(), term(), term()) :: term()
+  def encode_query_language_at(buffer_id, request_id, byte_offset),
+    do: Minga.Parser.Protocol.encode_query_language_at(buffer_id, request_id, byte_offset)
 
-  defdelegate encode_close_buffer(buffer_id), to: Minga.Parser.Protocol
+  @spec encode_close_buffer(term()) :: term()
+  def encode_close_buffer(buffer_id), do: Minga.Parser.Protocol.encode_close_buffer(buffer_id)
 
   # ── Decoding (Zig → BEAM) ──
 

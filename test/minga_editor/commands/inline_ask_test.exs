@@ -37,7 +37,7 @@ defmodule MingaEditor.Commands.InlineAskTest do
     state = InlineAskCommand.open(state)
 
     original_content = Buffer.content(buffer)
-    original_workspace_count = length(state.shell_state.tab_bar.workspaces)
+    original_workspace_count = Enum.count(state.shell_state.tab_bar.workspaces)
 
     assert {:handled, state} = InlineAskInput.handle_key(state, ?w, 0)
     assert {:handled, state} = InlineAskInput.handle_key(state, ?h, 0)
@@ -49,7 +49,7 @@ defmodule MingaEditor.Commands.InlineAskTest do
     assert {:handled, state} = InlineAskInput.handle_key(state, 27, 0)
     assert active_ask(state, buffer) == nil
     assert Buffer.content(buffer) == original_content
-    assert length(state.shell_state.tab_bar.workspaces) == original_workspace_count
+    assert Enum.count(state.shell_state.tab_bar.workspaces) == original_workspace_count
   end
 
   test "prompt send failure marks ask failed and clears session", %{tmp_dir: root} do

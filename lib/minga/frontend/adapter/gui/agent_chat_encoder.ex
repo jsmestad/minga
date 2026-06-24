@@ -94,7 +94,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
       encode_section(@section_chat_messages, messages_payload)
     ]
 
-    IO.iodata_to_binary([<<@op_gui_agent_chat, length(sections)::8>> | sections])
+    IO.iodata_to_binary([<<@op_gui_agent_chat, Enum.count(sections)::8>> | sections])
   end
 
   @spec encode_section(non_neg_integer(), binary()) :: binary()
@@ -115,7 +115,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
     type_byte = if comp.type == :slash, do: 1, else: 0
     anchor_line = comp.anchor_line || 0
     anchor_col = comp.anchor_col || 0
-    candidate_count = min(length(candidates), 255)
+    candidate_count = min(Enum.count(candidates), 255)
 
     candidate_bins =
       candidates
@@ -160,12 +160,12 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
           end)
 
         IO.iodata_to_binary([
-          <<byte_size(title_b)::16, title_b::binary, length(bindings)::8>>
+          <<byte_size(title_b)::16, title_b::binary, Enum.count(bindings)::8>>
           | binding_binaries
         ])
       end)
 
-    IO.iodata_to_binary([<<1::8, length(groups)::8>> | group_binaries])
+    IO.iodata_to_binary([<<1::8, Enum.count(groups)::8>> | group_binaries])
   end
 
   defp encode_help_overlay(_, _), do: <<0::8>>
@@ -199,7 +199,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
       end)
 
     IO.iodata_to_binary([
-      <<preview_kind_byte(kind)::8, length(line_binaries)::16>> | line_binaries
+      <<preview_kind_byte(kind)::8, Enum.count(line_binaries)::16>> | line_binaries
     ])
   end
 
@@ -303,7 +303,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
         <<byte_size(msg)::32, msg::binary>>
       end)
 
-    IO.iodata_to_binary([<<0xFF::8, 1::8, length(msg_binaries)::16>> | framed_messages])
+    IO.iodata_to_binary([<<0xFF::8, 1::8, Enum.count(msg_binaries)::16>> | framed_messages])
   end
 
   @spec strip_chat_message_links(AgentChat.message()) :: AgentChat.message()
@@ -377,10 +377,10 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
     line_binaries =
       Enum.map(styled_lines, fn runs ->
         run_binaries = Enum.map(runs, &encode_styled_run/1)
-        [<<length(runs)::16>> | run_binaries]
+        [<<Enum.count(runs)::16>> | run_binaries]
       end)
 
-    IO.iodata_to_binary([<<0x07::8, length(styled_lines)::16>> | line_binaries])
+    IO.iodata_to_binary([<<0x07::8, Enum.count(styled_lines)::16>> | line_binaries])
   end
 
   # Assistant markdown message: opcode 0x0A, block_count::16, then semantic blocks.
@@ -388,7 +388,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
     bounded_blocks = bound_markdown_blocks(blocks)
 
     IO.iodata_to_binary([
-      <<0x0A::8, length(bounded_blocks)::16>>,
+      <<0x0A::8, Enum.count(bounded_blocks)::16>>,
       Enum.map(bounded_blocks, &encode_markdown_block/1)
     ])
   end
@@ -440,7 +440,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
 
     <<0x09::8, 0::8, byte_size(name_bytes)::16, name_bytes::binary, byte_size(summary_bytes)::16,
       summary_bytes::binary, byte_size(id_bytes)::16, id_bytes::binary,
-      preview_kind_byte(approval.preview_kind)::8, length(line_binaries)::16,
+      preview_kind_byte(approval.preview_kind)::8, Enum.count(line_binaries)::16,
       preview_bytes::binary>>
   end
 
@@ -464,7 +464,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
     line_binaries =
       Enum.map(styled_lines, fn runs ->
         run_binaries = Enum.map(runs, &encode_styled_run/1)
-        [<<length(runs)::16>> | run_binaries]
+        [<<Enum.count(runs)::16>> | run_binaries]
       end)
 
     preview_bytes = encode_preview_payload(tc.preview_kind, tc.preview_lines)
@@ -472,7 +472,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
     IO.iodata_to_binary([
       <<0x08::8, status_byte::8, error_byte::8, collapsed_byte::8, duration::32,
         byte_size(name_bytes)::16, name_bytes::binary, byte_size(summary_bytes)::16,
-        summary_bytes::binary, length(styled_lines)::16>>,
+        summary_bytes::binary, Enum.count(styled_lines)::16>>,
       line_binaries,
       <<auto_approved_byte::8>>,
       preview_bytes
@@ -574,10 +574,10 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
     line_binaries =
       Enum.map(styled_lines, fn runs ->
         run_binaries = Enum.map(runs, &encode_styled_run/1)
-        [<<length(runs)::16>> | run_binaries]
+        [<<Enum.count(runs)::16>> | run_binaries]
       end)
 
-    IO.iodata_to_binary([<<length(styled_lines)::16>> | line_binaries])
+    IO.iodata_to_binary([<<Enum.count(styled_lines)::16>> | line_binaries])
   end
 
   @spec encode_styled_run(AgentChat.styled_run()) :: binary()

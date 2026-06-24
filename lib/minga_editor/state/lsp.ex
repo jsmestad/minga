@@ -64,7 +64,7 @@ defmodule MingaEditor.State.LSP do
   @doc "Appends a single resolved code lens entry."
   @spec append_code_lens(t(), map()) :: t()
   def append_code_lens(%__MODULE__{} = lsp, entry) when is_map(entry) do
-    %{lsp | code_lenses: lsp.code_lenses ++ [entry]}
+    %{lsp | code_lenses: Enum.concat(lsp.code_lenses, [entry])}
   end
 
   # ── Inlay hints ──────────────────────────────────────────────────────────

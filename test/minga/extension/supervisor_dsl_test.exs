@@ -87,7 +87,6 @@ defmodule Minga.Extension.SupervisorDslTest do
       assert cmd2.name == :dsl_test_cmd2
       assert cmd2.requires_buffer == false
 
-      # Verify the execute function works (calls the MFA)
       assert cmd.execute.(%{}) == %{}
     end
 

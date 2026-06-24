@@ -230,11 +230,7 @@ defmodule MingaEditor.UI.Face.Registry do
   def resolve_all(%__MODULE__{faces: faces} = reg) do
     lookup = fn name -> Map.get(faces, name) end
 
-    resolved =
-      faces
-      |> Enum.reduce(%{}, fn {name, face}, acc ->
-        Map.put(acc, name, Face.resolve(face, lookup))
-      end)
+    resolved = Map.new(faces, fn {name, face} -> {name, Face.resolve(face, lookup)} end)
 
     %{reg | resolved: resolved}
   end

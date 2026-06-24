@@ -514,7 +514,7 @@ defmodule MingaAgent.Markdown do
   defp extract_last_file_path(text) do
     case Regex.scan(@file_path_pattern, text) do
       [] -> nil
-      matches -> matches |> List.last() |> Enum.at(1)
+      matches -> matches |> Enum.at(-1) |> Enum.at(1)
     end
   end
 
@@ -821,6 +821,6 @@ defmodule MingaAgent.Markdown do
     line
     |> String.graphemes()
     |> Enum.take_while(&(&1 == " "))
-    |> length()
+    |> Enum.count()
   end
 end

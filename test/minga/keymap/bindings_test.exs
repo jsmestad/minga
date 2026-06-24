@@ -172,7 +172,7 @@ defmodule Minga.Keymap.BindingsTest do
       keys = Enum.map(kids, fn {k, _} -> k end)
       assert key(?g) in keys
       assert key(?e) in keys
-      assert length(kids) == 2
+      assert Enum.count(kids) == 2
     end
 
     test "label for a terminal binding is the description string" do
@@ -193,7 +193,7 @@ defmodule Minga.Keymap.BindingsTest do
         |> Bindings.bind([key(?l)], :move_right, "Move right")
 
       kids = Bindings.children(trie)
-      assert length(kids) == 4
+      assert Enum.count(kids) == 4
       assert Enum.all?(kids, fn {_k, v} -> is_binary(v) end)
     end
   end

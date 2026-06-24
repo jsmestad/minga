@@ -850,7 +850,7 @@ defmodule MingaEditor.Commands do
   @spec resolve_command_candidate(String.t(), integer()) :: map() | nil
   defp resolve_command_candidate(input, candidate_index) do
     {candidates, _total} = MinibufferData.complete_ex_command(input)
-    idx = MinibufferData.clamp_index(candidate_index, length(candidates))
+    idx = MinibufferData.clamp_index(candidate_index, Enum.count(candidates))
     Enum.at(candidates, idx)
   end
 

@@ -118,7 +118,6 @@ defmodule Minga.Keymap.Scope.BuilderTest do
   end
 
   describe "Builder macro generates behaviour callbacks" do
-    # Define a test scope module using the Builder
     defmodule TestScope do
       use Minga.Keymap.Scope.Builder,
         name: :test_scope,

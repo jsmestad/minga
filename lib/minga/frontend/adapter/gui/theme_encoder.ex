@@ -23,7 +23,7 @@ defmodule Minga.Frontend.Adapter.GUI.ThemeEncoder do
 
   @spec encode_theme_binary([Theme.color_slot()]) :: binary()
   defp encode_theme_binary(color_slots) do
-    count = length(color_slots)
+    count = Enum.count(color_slots)
 
     entries =
       Enum.map(color_slots, fn {slot, rgb} ->

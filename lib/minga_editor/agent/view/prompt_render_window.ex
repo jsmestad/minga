@@ -117,8 +117,7 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
 
     {visual_rows, diagnostic_ranges} =
       wrapped
-      |> Enum.drop(scroll)
-      |> Enum.take(visible_count)
+      |> Enum.slice(scroll, visible_count)
       |> Enum.with_index()
       |> Enum.map_reduce([], fn {{logical_idx, vl}, display_row}, acc ->
         line_text = Enum.at(lines, logical_idx)
@@ -358,7 +357,7 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
     text
     |> String.graphemes()
     |> Enum.take_while(&(&1 not in [" ", "\t", "\n"]))
-    |> length()
+    |> Enum.count()
   end
 
   @spec mention_token_ranges(String.t(), token_context()) :: [token_range()]
@@ -589,7 +588,7 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
   @spec paste_block_line_count([Panel.paste_block()], non_neg_integer()) :: non_neg_integer()
   defp paste_block_line_count(blocks, index) do
     case Enum.at(blocks, index) do
-      %{text: text} -> text |> String.split("\n") |> length()
+      %{text: text} -> text |> String.split("\n") |> Enum.count()
       nil -> 0
     end
   end

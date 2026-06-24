@@ -91,7 +91,6 @@ defmodule MingaEditor.State.SnapshotTest do
 
       state = make_state(buffer: buf_a)
 
-      # Build a context via snapshot round-trip
       state_b = make_state(buffer: buf_b, mode: :insert, keymap_scope: :editor)
       ctx = EditorState.snapshot_tab_context(state_b)
 
@@ -317,10 +316,8 @@ defmodule MingaEditor.State.SnapshotTest do
       tab_a = Tab.new_file(1, "a.ex")
       tb = TabBar.new(tab_a)
 
-      # Add a second tab with a stored context
       {tb, tab_b} = TabBar.add(tb, :file, "b.ex")
 
-      # Build a context via snapshot for tab b
       state_b = make_state(buffer: buf_b, mode: :insert, keymap_scope: :editor)
       tab_b_context = EditorState.snapshot_tab_context(state_b)
 

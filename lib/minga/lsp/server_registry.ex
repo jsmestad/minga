@@ -25,7 +25,7 @@ defmodule Minga.LSP.ServerRegistry do
   ## Examples
 
       iex> configs = Minga.LSP.ServerRegistry.servers_for(:elixir)
-      iex> length(configs)
+      iex> Enum.count(configs)
       1
       iex> hd(configs).name
       :expert

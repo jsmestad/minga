@@ -115,7 +115,7 @@ defmodule MingaAgent.Tools.Git do
     git_root = resolve_git_root(project_root)
 
     case Git.stage(git_root, paths) do
-      :ok -> {:ok, "Staged #{length(paths)} file(s): #{Enum.join(paths, ", ")}"}
+      :ok -> {:ok, "Staged #{Enum.count(paths)} file(s): #{Enum.join(paths, ", ")}"}
       {:error, reason} -> {:error, reason}
     end
   end
@@ -389,7 +389,7 @@ defmodule MingaAgent.Tools.Git do
   defp merge_entries(entries, fork_entries) do
     entries
     |> Enum.concat(fork_entries)
-    |> Enum.reduce(%{}, fn entry, acc -> Map.put(acc, entry.path, entry) end)
+    |> Map.new(fn entry -> {entry.path, entry} end)
     |> Map.values()
     |> Enum.sort_by(& &1.path)
   end

@@ -462,7 +462,7 @@ defmodule MingaAgent.Providers.NativeTest do
       collect_events(500)
 
       assert_received {^messages_ref, 1, "openai:o4-mini", messages}
-      assert length(messages) >= 4
+      assert Enum.count(messages) >= 4
     end
   end
 
@@ -1614,7 +1614,6 @@ defmodule MingaAgent.Providers.NativeTest do
 
   describe "stream recovery" do
     test "preserves partial text when stream drops mid-response", %{tmp_dir: dir} do
-      # Create a stream that emits some text then raises an error
       client = fn _model, _messages, _opts ->
         error_stream =
           Stream.resource(
@@ -2101,7 +2100,6 @@ defmodule MingaAgent.Providers.NativeTest do
     test "agent stops when cost budget is exceeded during tool loop", %{tmp_dir: dir} do
       File.write!(Path.join(dir, "test.txt"), "hello")
 
-      # Create a client where each turn has a significant cost
       client = fn _model, _messages, _opts ->
         chunks = [
           ReqLLM.StreamChunk.tool_call("read_file", %{"path" => "test.txt"}, %{

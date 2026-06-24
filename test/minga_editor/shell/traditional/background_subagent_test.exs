@@ -40,7 +40,7 @@ defmodule MingaEditor.Shell.Traditional.BackgroundSubagentTest do
       Traditional.handle_event(shell_state, workspace, {:background_subagent_started, handle})
 
     assert TabBar.count(shell_state.tab_bar) == 2
-    assert length(Enum.filter(shell_state.tab_bar.tabs, &(&1.session == self()))) == 1
+    assert Enum.count(shell_state.tab_bar.tabs, &(&1.session == self())) == 1
   end
 
   defp background_handle(opts) do

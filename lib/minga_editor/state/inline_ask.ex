@@ -112,25 +112,25 @@ defmodule MingaEditor.State.InlineAsk do
   # MingaEditor.InlineOverlay.Store and MingaEditor.InlineOverlay.Prompt.
 
   @spec active(store(), pid() | nil) :: t() | nil
-  defdelegate active(store, buffer_pid), to: Store
+  def active(store, buffer_pid), do: Store.active(store, buffer_pid)
 
   @spec session?(store(), pid()) :: boolean()
-  defdelegate session?(store, session_pid), to: Store
+  def session?(store, session_pid), do: Store.session?(store, session_pid)
 
   @spec put(store(), t()) :: store()
-  defdelegate put(store, ask), to: Store
+  def put(store, ask), do: Store.put(store, ask)
 
   @spec dismiss(store(), pid() | nil) :: {store(), pid() | nil}
-  defdelegate dismiss(store, buffer_pid), to: Store
+  def dismiss(store, buffer_pid), do: Store.dismiss(store, buffer_pid)
 
   @spec append_input(t(), String.t()) :: t()
-  defdelegate append_input(ask, text), to: Prompt
+  def append_input(ask, text), do: Prompt.append_input(ask, text)
 
   @spec backspace(t()) :: t()
-  defdelegate backspace(ask), to: Prompt
+  def backspace(ask), do: Prompt.backspace(ask)
 
   @spec scroll(t(), integer()) :: t()
-  defdelegate scroll(ask, delta), to: Prompt
+  def scroll(ask, delta), do: Prompt.scroll(ask, delta)
 
   @doc "Marks the ask as thinking."
   @spec thinking(t(), pid()) :: t()

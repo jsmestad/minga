@@ -44,7 +44,7 @@ defmodule MingaEditor.Frontend.EmitTest do
       assert base_frame_seq == 0
       # commit_frame closes the frame, carrying frame_seq + echoed input_seq (ticket
       # #2215). With no key seq in scope the echo is 0; frame_seq matches begin_frame.
-      assert List.last(commands) == <<Opcodes.commit_frame(), frame_seq::32, 0::32>>
+      assert Enum.at(commands, -1) == <<Opcodes.commit_frame(), frame_seq::32, 0::32>>
     end
 
     test "GUI path produces commands (no clear expected for GUI with to_commands)" do
@@ -111,7 +111,7 @@ defmodule MingaEditor.Frontend.EmitTest do
 
       assert [<<op_begin, fs1::32, _base::32>> | _] = commands1
       assert op_begin == Opcodes.begin_frame()
-      assert List.last(commands1) == <<Opcodes.commit_frame(), fs1::32, 0::32>>
+      assert Enum.at(commands1, -1) == <<Opcodes.commit_frame(), fs1::32, 0::32>>
 
       assert [<<_, fs2::32, _::32>> | _] = commands2
       # frame_seq advances per emit even though the snapshot is identical.

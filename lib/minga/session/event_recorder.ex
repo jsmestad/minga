@@ -46,6 +46,8 @@ defmodule Minga.Session.EventRecorder do
   alias Minga.Events
   alias Minga.Session.EventRecorder.EventRecord
   alias Minga.Session.EventRecorder.Store
+  alias Minga.Config
+  alias Minga.Log
 
   @default_db_dir Path.expand("~/.local/share/minga")
   @db_filename "events.db"
@@ -137,17 +139,17 @@ defmodule Minga.Session.EventRecorder do
 
     retention_days =
       Keyword.get_lazy(opts, :retention_days, fn ->
-        Minga.Config.get(:event_retention_days)
+        Config.get(:event_retention_days)
       end)
 
     persist_all =
       Keyword.get_lazy(opts, :persist_all, fn ->
-        Minga.Config.get(:event_persist_all)
+        Config.get(:event_persist_all)
       end)
 
     size_cap_mb =
       Keyword.get_lazy(opts, :size_cap_mb, fn ->
-        Minga.Config.get(:event_size_cap_mb)
+        Config.get(:event_size_cap_mb)
       end)
 
     path = Path.join(db_dir, @db_filename)
@@ -158,7 +160,7 @@ defmodule Minga.Session.EventRecorder do
         sweep_ref = schedule_initial_retention_sweep(opts)
         schedule_health_check(Keyword.get(opts, :health_check, @default_health_check), opts)
 
-        Minga.Log.info(:editor, "[EventRecorder] started, logging to #{path}")
+        Log.info(:editor, "[EventRecorder] started, logging to #{path}")
 
         {:ok,
          %State{
@@ -171,7 +173,7 @@ defmodule Minga.Session.EventRecorder do
          }}
 
       {:error, reason} ->
-        Minga.Log.warning(:editor, "[EventRecorder] failed to open database: #{inspect(reason)}")
+        Log.warning(:editor, "[EventRecorder] failed to open database: #{inspect(reason)}")
         {:stop, reason}
     end
   end
@@ -186,7 +188,7 @@ defmodule Minga.Session.EventRecorder do
           :ok
 
         {:error, reason} ->
-          Minga.Log.warning(
+          Log.warning(
             :editor,
             "[EventRecorder] failed to write event: #{inspect(reason)}"
           )
@@ -226,7 +228,7 @@ defmodule Minga.Session.EventRecorder do
   # fd limit), not corruption. Log and leave the database intact: recreating
   # here on a false positive would delete the user's event history.
   def handle_info({:health_check_result, {:check_failed, reason}}, state) do
-    Minga.Log.warning(
+    Log.warning(
       :editor,
       "[EventRecorder] health check could not open a read connection: " <>
         "#{inspect(reason)} (leaving database intact)"
@@ -236,7 +238,7 @@ defmodule Minga.Session.EventRecorder do
   end
 
   def handle_info({:health_check_result, {:corrupt, messages}}, state) do
-    Minga.Log.warning(
+    Log.warning(
       :editor,
       "[EventRecorder] integrity check failed: #{inspect(messages)}, recreating database"
     )
@@ -258,7 +260,7 @@ defmodule Minga.Session.EventRecorder do
         :ok
 
       {:error, reason} ->
-        Minga.Log.warning(
+        Log.warning(
           :editor,
           "[EventRecorder] VACUUM failed: #{inspect(reason)}"
         )
@@ -292,10 +294,10 @@ defmodule Minga.Session.EventRecorder do
         :ok
 
       {:ok, count} ->
-        Minga.Log.info(:editor, "[EventRecorder] retention sweep deleted #{count} events")
+        Log.info(:editor, "[EventRecorder] retention sweep deleted #{count} events")
 
       {:error, reason} ->
-        Minga.Log.warning(
+        Log.warning(
           :editor,
           "[EventRecorder] retention sweep failed: #{inspect(reason)}"
         )
@@ -326,7 +328,7 @@ defmodule Minga.Session.EventRecorder do
 
         case Store.delete_oldest(state.db, keep) do
           {:ok, deleted} when deleted > 0 ->
-            Minga.Log.info(
+            Log.info(
               :editor,
               "[EventRecorder] size cap pruned #{deleted} events (#{format_mb(total)} -> target #{format_mb(target)})"
             )
@@ -335,14 +337,14 @@ defmodule Minga.Session.EventRecorder do
             :ok
 
           {:error, reason} ->
-            Minga.Log.warning(
+            Log.warning(
               :editor,
               "[EventRecorder] size cap enforcement failed: #{inspect(reason)}"
             )
         end
 
       {:error, reason} ->
-        Minga.Log.warning(
+        Log.warning(
           :editor,
           "[EventRecorder] size cap enforcement failed: #{inspect(reason)}"
         )
@@ -409,7 +411,7 @@ defmodule Minga.Session.EventRecorder do
         # corruption that only surfaces under a full scan is caught later
         # by the async health check, off the startup path.
         if File.exists?(path) do
-          Minga.Log.warning(
+          Log.warning(
             :editor,
             "[EventRecorder] database unreadable: #{inspect(reason)}, recreating"
           )

@@ -9,7 +9,7 @@ defmodule Minga.Config.CompletionTest do
       items = ConfigCompletion.option_name_items()
       valid_names = Options.valid_names()
 
-      assert length(items) == length(valid_names)
+      assert Enum.count(items) == Enum.count(valid_names)
 
       item_names =
         Enum.map(items, fn item ->
@@ -91,7 +91,7 @@ defmodule Minga.Config.CompletionTest do
       labels = Enum.map(items, & &1.label)
       assert "true" in labels
       assert "false" in labels
-      assert length(items) == 2
+      assert Enum.count(items) == 2
     end
 
     test "marks default boolean value" do
@@ -162,7 +162,7 @@ defmodule Minga.Config.CompletionTest do
     test "filetype items are unique" do
       items = ConfigCompletion.filetype_items()
       labels = Enum.map(items, & &1.label)
-      assert length(labels) == length(Enum.uniq(labels))
+      assert Enum.count(labels) == Enum.count(Enum.uniq(labels))
     end
   end
 end

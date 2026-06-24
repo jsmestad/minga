@@ -30,7 +30,7 @@ defmodule Minga.Buffer.VirtualTextTest do
         )
 
       vts = Decorations.inline_virtual_texts_for_line(decs, 3)
-      assert length(vts) == 1
+      assert Enum.count(vts) == 1
       assert hd(vts).placement == :inline
       assert hd(vts).anchor == {3, 10}
     end
@@ -51,8 +51,8 @@ defmodule Minga.Buffer.VirtualTextTest do
         )
 
       {above, below} = Decorations.virtual_lines_for_line(decs, 5)
-      assert length(above) == 1
-      assert length(below) == 1
+      assert Enum.count(above) == 1
+      assert Enum.count(below) == 1
     end
 
     test "increments version" do
@@ -122,8 +122,8 @@ defmodule Minga.Buffer.VirtualTextTest do
           placement: :inline
         )
 
-      assert length(Decorations.virtual_texts_for_line(decs, 3)) == 2
-      assert length(Decorations.virtual_texts_for_line(decs, 5)) == 1
+      assert Enum.count(Decorations.virtual_texts_for_line(decs, 3)) == 2
+      assert Enum.count(Decorations.virtual_texts_for_line(decs, 5)) == 1
       assert Decorations.virtual_texts_for_line(decs, 7) == []
     end
 
@@ -310,7 +310,7 @@ defmodule Minga.Buffer.VirtualTextTest do
 
       decs = Decorations.adjust_for_edit(decs, {3, 0}, {3, 0}, {5, 0})
       vts = Decorations.virtual_texts_for_line(decs, 7)
-      assert length(vts) == 1
+      assert Enum.count(vts) == 1
       assert hd(vts).anchor == {7, 10}
     end
 
@@ -326,7 +326,7 @@ defmodule Minga.Buffer.VirtualTextTest do
       # Insert 5 chars at col 3 on line 5
       decs = Decorations.adjust_for_edit(decs, {5, 3}, {5, 3}, {5, 8})
       vts = Decorations.inline_virtual_texts_for_line(decs, 5)
-      assert length(vts) == 1
+      assert Enum.count(vts) == 1
       assert hd(vts).anchor == {5, 15}
     end
 
@@ -342,7 +342,7 @@ defmodule Minga.Buffer.VirtualTextTest do
       # Delete lines 3-7
       decs = Decorations.adjust_for_edit(decs, {3, 0}, {8, 0}, {3, 0})
       vts = Decorations.virtual_texts_for_line(decs, 3)
-      assert length(vts) == 1
+      assert Enum.count(vts) == 1
       assert hd(vts).anchor == {3, 0}
     end
 
@@ -357,7 +357,7 @@ defmodule Minga.Buffer.VirtualTextTest do
 
       decs = Decorations.adjust_for_edit(decs, {10, 0}, {10, 0}, {11, 0})
       vts = Decorations.virtual_texts_for_line(decs, 5)
-      assert length(vts) == 1
+      assert Enum.count(vts) == 1
       assert hd(vts).anchor == {5, 10}
     end
   end

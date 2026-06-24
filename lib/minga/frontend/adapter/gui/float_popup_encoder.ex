@@ -32,7 +32,7 @@ defmodule Minga.Frontend.Adapter.GUI.FloatPopupEncoder do
 
     IO.iodata_to_binary([
       <<@op_gui_float_popup, 1::8, model.width::16, model.height::16, byte_size(title_bytes)::16,
-        title_bytes::binary, length(model.lines)::16>>
+        title_bytes::binary, Enum.count(model.lines)::16>>
       | line_data
     ])
   end

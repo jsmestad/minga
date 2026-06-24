@@ -12,7 +12,7 @@ defmodule MingaEditor.RenderModel.UI.ThemeBuilderTest do
       assert %Theme{} = model
       assert model.name == :doom_one
       assert is_list(model.color_slots)
-      assert length(model.color_slots) > 20
+      assert Enum.count(model.color_slots) > 20
     end
 
     test "rejects nil color slots" do

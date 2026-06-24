@@ -314,12 +314,12 @@ defmodule Minga.Dired do
     original_set = MapSet.new(original_names)
     current_set = MapSet.new(normalized_current)
 
-    max_len = max(length(original_names), length(normalized_current))
+    max_len = max(Enum.count(original_names), Enum.count(normalized_current))
 
-    original_padded = original_names ++ List.duplicate(nil, max_len - length(original_names))
+    original_padded = original_names ++ List.duplicate(nil, max_len - Enum.count(original_names))
 
     current_padded =
-      normalized_current ++ List.duplicate(nil, max_len - length(normalized_current))
+      normalized_current ++ List.duplicate(nil, max_len - Enum.count(normalized_current))
 
     {renames, remaining_deletes, remaining_creates} =
       original_padded

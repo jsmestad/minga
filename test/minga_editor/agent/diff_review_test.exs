@@ -60,7 +60,7 @@ defmodule MingaEditor.Agent.DiffReviewTest do
 
     test "wraps around to first hunk" do
       review = multi_hunk_review()
-      count = length(review.hunks)
+      count = Enum.count(review.hunks)
 
       review = Enum.reduce(1..count, review, fn _, r -> DiffReview.next_hunk(r) end)
       assert review.current_hunk_index == 0
@@ -87,7 +87,7 @@ defmodule MingaEditor.Agent.DiffReviewTest do
       review = multi_hunk_review()
       review = DiffReview.prev_hunk(review)
       # Should wrap to last hunk
-      assert review.current_hunk_index == length(review.hunks) - 1
+      assert review.current_hunk_index == Enum.count(review.hunks) - 1
     end
   end
 
@@ -122,7 +122,7 @@ defmodule MingaEditor.Agent.DiffReviewTest do
       review = DiffReview.accept_all(review)
       assert DiffReview.resolved?(review)
 
-      for idx <- 0..(length(review.hunks) - 1) do
+      for idx <- 0..(Enum.count(review.hunks) - 1) do
         assert DiffReview.resolution_at(review, idx) == :accepted
       end
     end
@@ -144,7 +144,7 @@ defmodule MingaEditor.Agent.DiffReviewTest do
       review = DiffReview.reject_all(review)
       assert DiffReview.resolved?(review)
 
-      for idx <- 0..(length(review.hunks) - 1) do
+      for idx <- 0..(Enum.count(review.hunks) - 1) do
         assert DiffReview.resolution_at(review, idx) == :rejected
       end
     end
@@ -429,7 +429,7 @@ defmodule MingaEditor.Agent.DiffReviewTest do
       updated = DiffReview.update_after(review, after_v2)
 
       assert updated != nil
-      assert updated.current_hunk_index <= length(updated.hunks) - 1
+      assert updated.current_hunk_index <= Enum.count(updated.hunks) - 1
     end
 
     test "cumulative diff shows all changes from baseline" do

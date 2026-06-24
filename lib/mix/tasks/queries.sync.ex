@@ -202,7 +202,7 @@ defmodule Mix.Tasks.Queries.Sync do
     |> String.reverse()
     |> String.graphemes()
     |> Enum.take_while(&(&1 == ")"))
-    |> length()
+    |> Enum.count()
   end
 
   @spec append_parens_to_previous([String.t()], non_neg_integer()) :: [String.t()]

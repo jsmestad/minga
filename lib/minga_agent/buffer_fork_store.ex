@@ -128,6 +128,7 @@ defmodule MingaAgent.BufferForkStore do
     end
   end
 
+  # credo:disable-for-next-line ExSlop.Check.Warning.GenserverAsKvStore
   def handle_call({:get, path}, _from, state) do
     {:reply, Map.get(state.forks, path), state}
   end
@@ -283,20 +284,14 @@ defmodule MingaAgent.BufferForkStore do
       case Minga.Buffer.pid_for_path(path) do
         {:ok, buf_pid} ->
           try do
-            case Minga.Buffer.replace_content(buf_pid, merged_text, :agent) do
-              :ok -> :ok
-              {:error, reason} -> {:error, reason}
-            end
+            Minga.Buffer.replace_content(buf_pid, merged_text, :agent)
           catch
             :exit, reason -> {:error, {:parent_apply_failed, reason}}
           end
 
         :not_found ->
           # Buffer was closed while fork was active; write to disk
-          case File.write(path, merged_text) do
-            :ok -> :ok
-            {:error, reason} -> {:error, reason}
-          end
+          File.write(path, merged_text)
       end
     catch
       :exit, reason -> {:error, {:parent_lookup_failed, reason}}

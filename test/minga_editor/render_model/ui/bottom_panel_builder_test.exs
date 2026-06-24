@@ -65,7 +65,7 @@ defmodule MingaEditor.RenderModel.UI.BottomPanelBuilderTest do
       {model, out_store} = BottomPanelBuilder.build(ctx(panel, store))
 
       assert model.stream_instance == store.stream_instance
-      assert length(model.messages) == 2
+      assert Enum.count(model.messages) == 2
       assert out_store.last_sent_id == 2
 
       first = hd(model.messages)
@@ -80,13 +80,13 @@ defmodule MingaEditor.RenderModel.UI.BottomPanelBuilderTest do
       panel = %EditorPanel{visible: true, active_tab: :messages, tabs: [:messages]}
 
       {model1, store2} = BottomPanelBuilder.build(ctx(panel, store))
-      assert length(model1.messages) == 1
+      assert Enum.count(model1.messages) == 1
       assert store2.last_sent_id == 1
 
       store3 = MessageStore.append(store2, "Second", :warning, :lsp)
       {model2, store4} = BottomPanelBuilder.build(ctx(panel, store3))
 
-      assert length(model2.messages) == 1
+      assert Enum.count(model2.messages) == 1
       assert hd(model2.messages).text == "Second"
       assert store4.last_sent_id == 2
     end

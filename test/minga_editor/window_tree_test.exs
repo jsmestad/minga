@@ -81,7 +81,7 @@ defmodule MingaEditor.WindowTreeTest do
              ]
 
       layouts = WindowTree.layout(nested_tree(), @screen)
-      assert length(layouts) == 3
+      assert Enum.count(layouts) == 3
       [{1, {_, _, w1, _}}, {2, {r2, _, w2, h2}}, {3, {r3, _, w3, h3}}] = layouts
       assert w1 == 39
       assert w2 == w3

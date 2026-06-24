@@ -113,7 +113,7 @@ defmodule MingaEditor.DisplayMap do
 
       %__MODULE__{
         entries: entries,
-        total_display_lines: length(entries)
+        total_display_lines: Enum.count(entries)
       }
     else
       nil

@@ -137,13 +137,13 @@ defmodule Minga.Perf.KeystrokeLatencyTest do
 
   defp percentiles(samples) do
     sorted = Enum.sort(samples)
-    count = length(sorted)
+    count = Enum.count(sorted)
 
     %{
       count: count,
       p50: percentile(sorted, count, 0.50),
       p90: percentile(sorted, count, 0.90),
-      max: List.last(sorted)
+      max: Enum.at(sorted, -1)
     }
   end
 

@@ -490,7 +490,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     case state.workspace.editing do
       %{mode: :command, mode_state: ms} ->
         {candidates, _total} = MinibufferData.complete_ex_command(ms.input)
-        clamped = MinibufferData.clamp_index(index, length(candidates))
+        clamped = MinibufferData.clamp_index(index, Enum.count(candidates))
 
         case Enum.at(candidates, clamped) do
           nil ->
@@ -634,7 +634,6 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
          {:find_pasteboard_search, text, direction}
        )
        when is_pid(buf) do
-    # Set the search pattern and execute search_next/search_prev
     state =
       EditorState.update_search(state, &SearchData.record(&1, text, :forward))
 
@@ -1581,9 +1580,10 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   defp tab_file_path_from_tab(_state, _tb, %Tab{kind: :agent}), do: nil
 
   defp tab_file_path_from_tab(state, %TabBar{active_id: active_id} = tb, %Tab{id: id}) do
-    case id == active_id do
-      true -> active_buffer_path(state)
-      false -> inactive_tab_path(TabBar.get(tb, id))
+    if id == active_id do
+      active_buffer_path(state)
+    else
+      inactive_tab_path(TabBar.get(tb, id))
     end
   end
 
@@ -1649,12 +1649,12 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
         Minga.Log.info(
           :editor,
-          "Volume will unmount (#{volume_path}); disconnected #{length(pids)} buffer(s), saved #{saved}"
+          "Volume will unmount (#{volume_path}); disconnected #{Enum.count(pids)} buffer(s), saved #{saved}"
         )
 
         EditorState.set_status(
           state,
-          "Volume unmounted: saved #{saved} and disconnected #{length(pids)} buffer(s) under #{volume_path}"
+          "Volume unmounted: saved #{saved} and disconnected #{Enum.count(pids)} buffer(s) under #{volume_path}"
         )
     end
   end

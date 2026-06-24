@@ -20,15 +20,16 @@ defmodule Mix.Tasks.Minga do
   """
 
   use Mix.Task
+  alias Minga.CLI
 
   @impl true
   @spec run([String.t()]) :: :ok
   def run(args) do
     {gui?, remaining_args} = extract_gui_flag(args)
-    headless? = Minga.CLI.headless_args?(remaining_args)
-    terminal_command? = Minga.CLI.terminal_command_args?(remaining_args)
-    minimal? = Minga.CLI.minimal_args?(remaining_args)
-    safe? = Minga.CLI.safe_args?(remaining_args)
+    headless? = CLI.headless_args?(remaining_args)
+    terminal_command? = CLI.terminal_command_args?(remaining_args)
+    minimal? = CLI.minimal_args?(remaining_args)
+    safe? = CLI.safe_args?(remaining_args)
 
     Minga.SafeMode.put(safe?)
 
@@ -46,7 +47,7 @@ defmodule Mix.Tasks.Minga do
 
     install_protocol_stdio_guard(gui?, headless?, terminal_command?, help_args?(args))
     Mix.Task.run("app.start")
-    Minga.CLI.main(remaining_args)
+    CLI.main(remaining_args)
 
     unless help_args?(args) or terminal_command? do
       receive do

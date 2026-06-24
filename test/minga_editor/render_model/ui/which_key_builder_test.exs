@@ -37,7 +37,7 @@ defmodule MingaEditor.RenderModel.UI.WhichKeyBuilderTest do
       assert model.prefix == "SPC"
       assert model.page == 0
       assert model.page_count >= 1
-      assert length(model.bindings) == 2
+      assert Enum.count(model.bindings) == 2
 
       Enum.each(model.bindings, fn b ->
         assert is_binary(b.key)

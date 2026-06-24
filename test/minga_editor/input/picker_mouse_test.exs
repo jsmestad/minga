@@ -166,7 +166,7 @@ defmodule MingaEditor.Input.PickerMouseTest do
       state = centered_picker_state(items, 20)
 
       max_height = max(div(24 * 7, 10), 5)
-      box_h = min(length(items) + 3, max_height)
+      box_h = min(Enum.count(items) + 3, max_height)
       box_row = div(24 - box_h, 2)
       prompt_row = box_row + box_h - 2
 
@@ -191,7 +191,7 @@ defmodule MingaEditor.Input.PickerMouseTest do
         end)
 
       max_height = max(div(24 * 7, 10), 5)
-      box_h = min(length(items) + 3, max_height)
+      box_h = min(Enum.count(items) + 3, max_height)
       box_row = div(24 - box_h, 2)
       last_item_row = box_row + 1 + (box_h - 3) - 1
 

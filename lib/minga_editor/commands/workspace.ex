@@ -301,45 +301,43 @@ defmodule MingaEditor.Commands.Workspace do
   @spec close_project_view_workspace(state(), TabBar.t(), WorkspaceModel.t(), non_neg_integer()) ::
           state()
   defp close_project_view_workspace(state, tb, workspace, workspace_id) do
-    case workspace_session_alive?(workspace) do
-      true ->
-        EditorState.set_status(state, "Stop the agent session before closing this workspace")
+    if workspace_session_alive?(workspace) do
+      EditorState.set_status(state, "Stop the agent session before closing this workspace")
+    else
+      case project_view_changed_files(workspace) do
+        {:ok, []} ->
+          case WorkspaceModel.close_project_view(workspace) do
+            :ok ->
+              remove_workspace_and_sync_agent_ui(state, tb, workspace_id)
 
-      false ->
-        case project_view_changed_files(workspace) do
-          {:ok, []} ->
-            case WorkspaceModel.close_project_view(workspace) do
-              :ok ->
-                remove_workspace_and_sync_agent_ui(state, tb, workspace_id)
+            {:error, reason} ->
+              keep_workspace_open_after_close_failure(
+                state,
+                tb,
+                workspace,
+                workspace.review.changed_files,
+                reason
+              )
+          end
 
-              {:error, reason} ->
-                keep_workspace_open_after_close_failure(
-                  state,
-                  tb,
-                  workspace,
-                  workspace.review.changed_files,
-                  reason
-                )
-            end
+        {:ok, files} ->
+          keep_workspace_open_after_close_failure(
+            state,
+            tb,
+            workspace,
+            files,
+            :project_view_dirty
+          )
 
-          {:ok, files} ->
-            keep_workspace_open_after_close_failure(
-              state,
-              tb,
-              workspace,
-              files,
-              :project_view_dirty
-            )
-
-          {:error, reason} ->
-            keep_workspace_open_after_close_failure(
-              state,
-              tb,
-              workspace,
-              workspace.review.changed_files,
-              reason
-            )
-        end
+        {:error, reason} ->
+          keep_workspace_open_after_close_failure(
+            state,
+            tb,
+            workspace,
+            workspace.review.changed_files,
+            reason
+          )
+      end
     end
   end
 
@@ -367,24 +365,22 @@ defmodule MingaEditor.Commands.Workspace do
 
     case TabBar.get_workspace(tb, workspace_id) do
       %WorkspaceModel{} = workspace ->
-        case workspace_session_alive?(workspace) do
-          true ->
-            EditorState.set_status(state, "Stop the agent session before closing this workspace")
+        if workspace_session_alive?(workspace) do
+          EditorState.set_status(state, "Stop the agent session before closing this workspace")
+        else
+          case WorkspaceModel.close_project_view(workspace) do
+            :ok ->
+              remove_workspace_and_sync_agent_ui(state, tb, workspace_id)
 
-          false ->
-            case WorkspaceModel.close_project_view(workspace) do
-              :ok ->
-                remove_workspace_and_sync_agent_ui(state, tb, workspace_id)
-
-              {:error, reason} ->
-                keep_workspace_open_after_close_failure(
-                  state,
-                  tb,
-                  workspace,
-                  workspace.review.changed_files,
-                  reason
-                )
-            end
+            {:error, reason} ->
+              keep_workspace_open_after_close_failure(
+                state,
+                tb,
+                workspace,
+                workspace.review.changed_files,
+                reason
+              )
+          end
         end
 
       nil ->
@@ -638,7 +634,7 @@ defmodule MingaEditor.Commands.Workspace do
   # Find the last (most recently added) agent workspace id.
   @spec last_agent_id(TabBar.t()) :: non_neg_integer()
   defp last_agent_id(%TabBar{} = tb) do
-    case List.last(agent_workspaces(tb)) do
+    case Enum.at(agent_workspaces(tb), -1) do
       nil -> 0
       ws -> ws.id
     end

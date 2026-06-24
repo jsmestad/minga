@@ -207,7 +207,7 @@ defmodule Minga.Project.AlternateFile do
 
     if String.starts_with?(base, "src/") do
       rel = String.replace_prefix(base, "src/", "")
-      test_candidates ++ ["__tests__/#{rel}.test#{ext}"]
+      Enum.concat(test_candidates, ["__tests__/#{rel}.test#{ext}"])
     else
       test_candidates
     end

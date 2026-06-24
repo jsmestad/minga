@@ -809,7 +809,7 @@ defmodule Minga.Config do
 
     current = Options.get(server, :agent_mcp_servers)
 
-    case Options.set(server, :agent_mcp_servers, current ++ [config]) do
+    case Options.set(server, :agent_mcp_servers, Enum.concat(current, [config])) do
       {:ok, _servers} -> :ok
       {:error, message} -> raise ArgumentError, "mcp_server #{inspect(name)}: #{message}"
     end

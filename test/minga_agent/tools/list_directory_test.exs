@@ -98,8 +98,8 @@ defmodule MingaAgent.Tools.ListDirectoryTest do
       assert {:ok, listing} = ListDirectory.execute(dir)
       lines = String.split(listing, "\n")
 
-      assert length(lines) == 501
-      assert List.last(lines) == "... (truncated, 5 more entries)"
+      assert Enum.count(lines) == 501
+      assert Enum.at(lines, -1) == "... (truncated, 5 more entries)"
     end
 
     test "returns an empty listing for statically ignored directory roots", %{tmp_dir: dir} do

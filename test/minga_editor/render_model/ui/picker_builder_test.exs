@@ -96,7 +96,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
       assert wire_item.icon_color == 0
       assert wire_item.description == ""
       assert wire_item.annotation == ""
-      assert length(wire_item.match_positions) == 255
+      assert Enum.count(wire_item.match_positions) == 255
       assert wire_item.match_positions == Enum.to_list(0..254)
     end
 
@@ -108,7 +108,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
       model = PickerBuilder.build(build_context(modal))
 
       assert [%{match_positions: positions}] = model.items
-      assert length(positions) == 255
+      assert Enum.count(positions) == 255
     end
 
     test "falls back to file preview when source has GUI preview but no preview callback" do

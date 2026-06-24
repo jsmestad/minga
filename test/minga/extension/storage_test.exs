@@ -13,9 +13,11 @@ defmodule Minga.Extension.StorageTest do
     base =
       Path.join(System.tmp_dir!(), "minga_storage_test_#{System.unique_integer([:positive])}")
 
+    # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
     Application.put_env(:minga, :extension_data_dir, base)
 
     on_exit(fn ->
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :extension_data_dir)
       File.rm_rf(base)
     end)

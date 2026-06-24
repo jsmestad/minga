@@ -374,7 +374,7 @@ defmodule MingaEditor.Viewport do
   """
   @spec gutter_width(non_neg_integer()) :: pos_integer()
   def gutter_width(line_count) when is_integer(line_count) and line_count >= 0 do
-    digits = line_count |> max(1) |> Integer.digits() |> length()
+    digits = line_count |> max(1) |> Integer.digits() |> Enum.count()
     max(digits, 2) + 1
   end
 

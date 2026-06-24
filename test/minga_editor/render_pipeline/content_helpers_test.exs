@@ -219,7 +219,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
       {result1, cache1} =
         ContentHelpers.merge_search_decorations(decs_v1, matches, nil, @search_colors, nil)
 
-      assert length(result1.block_decorations) == 1
+      assert Enum.count(result1.block_decorations) == 1
 
       # Frame 2: base decorations updated (new block decoration, higher version)
       decs_v2 = Decorations.new()
@@ -244,7 +244,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
 
       # Regression: previously returned result1's stale decorations (1 block).
       # Must return result built on decs_v2 (2 blocks).
-      assert length(result2.block_decorations) == 2,
+      assert Enum.count(result2.block_decorations) == 2,
              "fresh block decorations must survive search cache invalidation"
     end
 

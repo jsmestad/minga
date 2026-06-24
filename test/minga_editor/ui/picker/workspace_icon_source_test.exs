@@ -37,7 +37,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceIconSourceTest do
     test "returns items for all curated icons" do
       tb = TabBar.new(Tab.new_file(1, "a.ex"))
       items = WorkspaceIconSource.candidates(fake_context(tb))
-      assert length(items) > 40
+      assert Enum.count(items) > 40
       assert Enum.all?(items, &match?(%Item{}, &1))
     end
 

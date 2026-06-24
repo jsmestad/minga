@@ -76,7 +76,7 @@ defmodule MingaAgent.Compaction do
     {system_msgs, conversation} = split_system(messages)
 
     # If the conversation is too short to compact, skip
-    if length(conversation) <= keep_recent do
+    if Enum.count(conversation) <= keep_recent do
       {:ok, context}
     else
       {to_summarize, to_keep} = split_conversation(conversation, keep_recent)
@@ -132,7 +132,7 @@ defmodule MingaAgent.Compaction do
 
   @spec split_conversation([Message.t()], pos_integer()) :: {[Message.t()], [Message.t()]}
   defp split_conversation(conversation, keep_recent) do
-    total = length(conversation)
+    total = Enum.count(conversation)
     split_at = max(0, total - keep_recent)
     Enum.split(conversation, split_at)
   end

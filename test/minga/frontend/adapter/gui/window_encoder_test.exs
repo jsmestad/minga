@@ -362,7 +362,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
 
     assert <<^gutter_opcode, 3::8, 1::8, 11::16, _window::binary-size(11), 2::8, 7::16,
              _config::binary-size(7), 3::8, 12::16, 1::16, 0::32, 5::8, 9::8, 0xFFFFFFFF::32>> =
-             List.last(commands)
+             Enum.at(commands, -1)
   end
 
   test "adapter re-emits per-frame gutter metadata when window content is cached" do

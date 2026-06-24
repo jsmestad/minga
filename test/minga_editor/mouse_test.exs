@@ -594,7 +594,7 @@ defmodule MingaEditor.MouseTest do
 
       state = mouse(state, 0, 6, :left, :press)
 
-      assert length(state.shell_state.tab_bar.tabs) == 1
+      assert Enum.count(state.shell_state.tab_bar.tabs) == 1
     end
 
     test "clicking tab goto switches tabs without closing" do
@@ -745,7 +745,7 @@ defmodule MingaEditor.MouseTest do
     {content_row + buffer_line, content_col + gutter_width + buffer_col}
   end
 
-  defp last_tab_id(state), do: List.last(state.shell_state.tab_bar.tabs).id
+  defp last_tab_id(state), do: Enum.at(state.shell_state.tab_bar.tabs, -1).id
 
   defp set_visual_selection(state, buffer, anchor, cursor, visual_type) do
     BufferProcess.move_to(buffer, cursor)

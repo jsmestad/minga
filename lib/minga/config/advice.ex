@@ -218,14 +218,14 @@ defmodule Minga.Config.Advice do
 
   defp build_core(_execute, overrides, []) do
     # Last override wins (innermost)
-    List.last(overrides)
+    Enum.at(overrides, -1)
   end
 
   defp build_core(execute, overrides, arounds) do
     base =
       case overrides do
         [] -> execute
-        _ -> List.last(overrides)
+        _ -> Enum.at(overrides, -1)
       end
 
     # Arounds nest: first registered is outermost

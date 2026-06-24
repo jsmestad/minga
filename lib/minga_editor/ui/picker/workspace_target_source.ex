@@ -118,10 +118,10 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
 
   @spec target_description(Workspace.t()) :: String.t()
   defp target_description(%Workspace{kind: :manual, files: files}),
-    do: "Project workspace • #{length(files)} file(s)"
+    do: "Project workspace • #{Enum.count(files)} file(s)"
 
   defp target_description(%Workspace{kind: :agent, files: files}),
-    do: "Agent workspace • #{length(files)} file(s)"
+    do: "Agent workspace • #{Enum.count(files)} file(s)"
 
   @spec target_annotation(Workspace.t()) :: String.t()
   defp target_annotation(%Workspace{kind: :manual}), do: "project"

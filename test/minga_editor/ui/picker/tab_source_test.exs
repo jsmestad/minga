@@ -42,7 +42,7 @@ defmodule MingaEditor.UI.Picker.TabSourceTest do
       {tb, _} = TabBar.add(tb, :agent, "Agent")
 
       candidates = TabSource.candidates(fake_context(tb))
-      assert length(candidates) == 3
+      assert Enum.count(candidates) == 3
 
       %Item{id: id1, label: label1} = Enum.find(candidates, fn %Item{id: id} -> id == 1 end)
       assert id1 == 1

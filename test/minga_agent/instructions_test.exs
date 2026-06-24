@@ -10,7 +10,7 @@ defmodule MingaAgent.InstructionsTest do
       File.write!(Path.join(dir, "AGENTS.md"), "Project rules here")
 
       results = Instructions.discover(dir)
-      assert length(results) == 1
+      assert Enum.count(results) == 1
       assert hd(results).label == "Project Instructions"
       assert hd(results).content == "Project rules here"
     end
@@ -20,7 +20,7 @@ defmodule MingaAgent.InstructionsTest do
       File.write!(Path.join([dir, ".minga", "AGENTS.md"]), "Config rules")
 
       results = Instructions.discover(dir)
-      assert length(results) == 1
+      assert Enum.count(results) == 1
       assert hd(results).label == "Project Config Instructions"
     end
 
@@ -30,7 +30,7 @@ defmodule MingaAgent.InstructionsTest do
       File.write!(Path.join([dir, ".minga", "AGENTS.md"]), "Config rules")
 
       results = Instructions.discover(dir)
-      assert length(results) == 2
+      assert Enum.count(results) == 2
       labels = Enum.map(results, & &1.label)
       assert "Project Instructions" in labels
       assert "Project Config Instructions" in labels
@@ -41,7 +41,6 @@ defmodule MingaAgent.InstructionsTest do
     end
 
     test "finds directory-scoped AGENTS.md", %{tmp_dir: dir} do
-      # Create a subdirectory with its own AGENTS.md
       sub = Path.join([dir, "lib", "agent"])
       File.mkdir_p!(sub)
       File.write!(Path.join(sub, "AGENTS.md"), "Agent-specific rules")
@@ -50,7 +49,7 @@ defmodule MingaAgent.InstructionsTest do
       results = Instructions.discover(dir, current_file)
 
       dir_results = Enum.filter(results, &String.starts_with?(&1.label, "Directory"))
-      assert length(dir_results) == 1
+      assert Enum.count(dir_results) == 1
       assert hd(dir_results).content == "Agent-specific rules"
     end
 
@@ -66,7 +65,7 @@ defmodule MingaAgent.InstructionsTest do
       results = Instructions.discover(dir, current_file)
 
       dir_results = Enum.filter(results, &String.starts_with?(&1.label, "Directory"))
-      assert length(dir_results) == 2
+      assert Enum.count(dir_results) == 2
     end
 
     test "skips empty files", %{tmp_dir: dir} do

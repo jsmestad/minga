@@ -23,7 +23,7 @@ defmodule Minga.Extension.AgentAPITest do
       {:ok, _id, _pid} = SessionManager.start_session(manager, [])
 
       summaries = AgentAPI.list_sessions(opts)
-      assert length(summaries) == 1
+      assert Enum.count(summaries) == 1
 
       expected_keys = MapSet.new([:id, :pid, :status, :label, :model, :active_tool, :created_at])
 

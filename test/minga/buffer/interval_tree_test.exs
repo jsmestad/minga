@@ -91,7 +91,7 @@ defmodule Minga.Core.IntervalTreeTest do
       assert IntervalTree.size(tree) == 3
 
       result = IntervalTree.to_list(tree)
-      assert length(result) == 3
+      assert Enum.count(result) == 3
       assert Enum.sort_by(result, & &1.start) == Enum.sort_by(intervals, & &1.start)
     end
 
@@ -274,7 +274,7 @@ defmodule Minga.Core.IntervalTreeTest do
 
       # Query barely overlapping should match
       results = IntervalTree.query(tree, {4, 0}, {6, 0})
-      assert length(results) == 1
+      assert Enum.count(results) == 1
       assert hd(results).value == :target
     end
 
@@ -283,7 +283,7 @@ defmodule Minga.Core.IntervalTreeTest do
       tree = IntervalTree.from_list([inner])
 
       results = IntervalTree.query(tree, {0, 0}, {20, 0})
-      assert length(results) == 1
+      assert Enum.count(results) == 1
       assert hd(results).value == :inner
     end
 
@@ -292,7 +292,7 @@ defmodule Minga.Core.IntervalTreeTest do
       tree = IntervalTree.from_list([outer])
 
       results = IntervalTree.query(tree, {5, 0}, {8, 0})
-      assert length(results) == 1
+      assert Enum.count(results) == 1
       assert hd(results).value == :outer
     end
 
@@ -305,7 +305,7 @@ defmodule Minga.Core.IntervalTreeTest do
 
       # Overlapping
       results = IntervalTree.query(tree, {5, 15}, {5, 20})
-      assert length(results) == 1
+      assert Enum.count(results) == 1
 
       # After the interval on the same line
       assert IntervalTree.query(tree, {5, 30}, {5, 40}) == []
@@ -334,7 +334,7 @@ defmodule Minga.Core.IntervalTreeTest do
       tree = IntervalTree.from_list([interval])
 
       results = IntervalTree.query_lines(tree, 5, 5)
-      assert length(results) == 1
+      assert Enum.count(results) == 1
     end
 
     test "multi-line interval found by any line in its range" do
@@ -343,7 +343,7 @@ defmodule Minga.Core.IntervalTreeTest do
 
       # Query line 7 (middle of the interval)
       results = IntervalTree.query_lines(tree, 7, 7)
-      assert length(results) == 1
+      assert Enum.count(results) == 1
       assert hd(results).value == :spanning
     end
   end
@@ -374,7 +374,7 @@ defmodule Minga.Core.IntervalTreeTest do
       tree = IntervalTree.from_list([interval])
 
       results = IntervalTree.stabbing(tree, {5, 0})
-      assert length(results) == 1
+      assert Enum.count(results) == 1
     end
 
     test "point at interval end is excluded (half-open)" do
@@ -501,7 +501,7 @@ defmodule Minga.Core.IntervalTreeTest do
         remaining_ids = tree |> IntervalTree.to_list() |> Enum.map(& &1.id) |> MapSet.new()
 
         refute target.id in remaining_ids
-        assert IntervalTree.size(tree) == length(intervals) - 1
+        assert IntervalTree.size(tree) == Enum.count(intervals) - 1
       end
     end
 
@@ -540,17 +540,17 @@ defmodule Minga.Core.IntervalTreeTest do
     property "tree size is always correct after inserts and deletes" do
       check all(intervals <- interval_list_gen(30, 50, 20)) do
         tree = IntervalTree.from_list(intervals)
-        assert IntervalTree.size(tree) == length(intervals)
+        assert IntervalTree.size(tree) == Enum.count(intervals)
 
         # Delete half
-        {to_delete, to_keep} = Enum.split(intervals, div(length(intervals), 2))
+        {to_delete, to_keep} = Enum.split(intervals, div(Enum.count(intervals), 2))
 
         tree =
           Enum.reduce(to_delete, tree, fn i, t ->
             IntervalTree.delete(t, i.id)
           end)
 
-        assert IntervalTree.size(tree) == length(to_keep)
+        assert IntervalTree.size(tree) == Enum.count(to_keep)
       end
     end
 
@@ -589,7 +589,7 @@ defmodule Minga.Core.IntervalTreeTest do
       # All intervals where start < {5,6} and end > {5,5}
       # start < {5,6}: intervals with start col 0-5
       # end > {5,5}: intervals with end col > 5, i.e. start col + 10 > 5, all of them
-      assert length(results) == 6
+      assert Enum.count(results) == 6
     end
 
     test "intervals spanning many lines" do
@@ -597,7 +597,7 @@ defmodule Minga.Core.IntervalTreeTest do
       tree = IntervalTree.from_list([interval])
 
       results = IntervalTree.query_lines(tree, 5000, 5001)
-      assert length(results) == 1
+      assert Enum.count(results) == 1
     end
 
     test "unicode-aware column positions" do
@@ -606,7 +606,7 @@ defmodule Minga.Core.IntervalTreeTest do
       tree = IntervalTree.from_list([interval])
 
       results = IntervalTree.query(tree, {0, 8}, {0, 10})
-      assert length(results) == 1
+      assert Enum.count(results) == 1
     end
 
     test "zero-width query (start == end) still finds containing intervals" do
@@ -617,7 +617,7 @@ defmodule Minga.Core.IntervalTreeTest do
       # simplifies to s < p AND e > p, which is a stabbing query.
       # An interval spanning {5,0}-{10,0} contains point {7,0}, so it matches.
       results = IntervalTree.query(tree, {7, 0}, {7, 0})
-      assert length(results) == 1
+      assert Enum.count(results) == 1
       assert hd(results).value == :container
 
       # But a point outside the interval finds nothing

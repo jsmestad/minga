@@ -144,7 +144,7 @@ defmodule Minga.Command.RegistryTest do
       end
 
       # Verify we have at least as many commands as the required set
-      assert length(names) >= length(required_commands)
+      assert Enum.count(names) >= Enum.count(required_commands)
     end
 
     test "looking up :save returns the built-in save command", %{registry: r} do
@@ -244,18 +244,18 @@ defmodule Minga.Command.RegistryTest do
     end
 
     test "count grows when a new command is registered", %{registry: r} do
-      before_count = length(Registry.all(r))
+      before_count = Enum.count(Registry.all(r))
       :ok = Registry.register(r, :extra, "Extra", fn s -> s end)
-      assert length(Registry.all(r)) == before_count + 1
+      assert Enum.count(Registry.all(r)) == before_count + 1
     end
 
     test "count stays the same when an existing same-source command is overwritten", %{
       registry: r
     } do
       :ok = Registry.register(r, :extra, "Extra", fn s -> s end)
-      before_count = length(Registry.all(r))
+      before_count = Enum.count(Registry.all(r))
       :ok = Registry.register(r, :extra, "New extra description", fn s -> s end)
-      assert length(Registry.all(r)) == before_count
+      assert Enum.count(Registry.all(r)) == before_count
     end
   end
 
@@ -281,13 +281,13 @@ defmodule Minga.Command.RegistryTest do
     end
 
     test "count returns to built-in count after reset", %{registry: r} do
-      built_in_count = length(Registry.all(r))
+      built_in_count = Enum.count(Registry.all(r))
       :ok = Registry.register(r, :extra1, "E1", fn s -> s end)
       :ok = Registry.register(r, :extra2, "E2", fn s -> s end)
-      assert length(Registry.all(r)) == built_in_count + 2
+      assert Enum.count(Registry.all(r)) == built_in_count + 2
 
       :ok = Registry.reset(r)
-      assert length(Registry.all(r)) == built_in_count
+      assert Enum.count(Registry.all(r)) == built_in_count
     end
   end
 

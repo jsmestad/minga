@@ -131,8 +131,6 @@ defmodule Minga.Git.MergeConflict do
          end_idx,
          end_marker
        )}
-    else
-      :error -> :error
     end
   end
 
@@ -271,6 +269,6 @@ defmodule Minga.Git.MergeConflict do
   end
 
   @spec previous_or_last(Region.t() | nil, [Region.t()]) :: Region.t() | nil
-  defp previous_or_last(nil, regions), do: List.last(regions)
+  defp previous_or_last(nil, regions), do: Enum.at(regions, -1)
   defp previous_or_last(region, _regions), do: region
 end

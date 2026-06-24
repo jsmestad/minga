@@ -102,7 +102,7 @@ defmodule MingaEditor.UI.Popup.RegistryTest do
       Registry.register(mid, t)
 
       rules = Registry.list(t)
-      assert length(rules) == 3
+      assert Enum.count(rules) == 3
 
       priorities = Enum.map(rules, & &1.priority)
       assert priorities == [10, 5, 0]
@@ -146,7 +146,7 @@ defmodule MingaEditor.UI.Popup.RegistryTest do
     test "removes all rules", %{table: t} do
       Registry.register(Rule.new("*Warnings*"), t)
       Registry.register(Rule.new("*Messages*"), t)
-      assert length(Registry.list(t)) == 2
+      assert Enum.count(Registry.list(t)) == 2
 
       Registry.clear(t)
       assert Registry.list(t) == []

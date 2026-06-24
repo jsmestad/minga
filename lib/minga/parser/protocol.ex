@@ -88,7 +88,7 @@ defmodule Minga.Parser.Protocol do
   def encode_edit_buffer(buffer_id, version, edits)
       when is_integer(buffer_id) and buffer_id >= 0 and
              is_integer(version) and is_list(edits) do
-    header = <<@op_edit_buffer, buffer_id::32, version::32, length(edits)::16>>
+    header = <<@op_edit_buffer, buffer_id::32, version::32, Enum.count(edits)::16>>
 
     edit_data =
       for edit <- edits, into: <<>> do

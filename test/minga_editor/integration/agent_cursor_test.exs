@@ -87,7 +87,7 @@ defmodule Minga.Integration.AgentCursorTest do
 
     ref = HeadlessPort.prepare_await(port)
     send(editor, {:minga_input, {:ready, width, height}})
-    {:ok, _snapshot} = HeadlessPort.collect_frame(ref)
+    {:ok, _snapshot} = HeadlessPort.collect_frame(ref, 15_000)
 
     %{
       editor: editor,

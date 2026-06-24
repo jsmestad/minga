@@ -44,12 +44,13 @@ defmodule MingaAgent.Branch do
         ) :: {:ok, [Message.t()], [t()]} | {:error, String.t()}
   def branch_at(messages, turn_index, branch_name, existing_branches)
       when is_integer(turn_index) and turn_index >= 0 do
-    if turn_index >= length(messages) do
-      {:error, "Turn index #{turn_index} is beyond the conversation length (#{length(messages)})"}
+    if turn_index >= Enum.count(messages) do
+      {:error,
+       "Turn index #{turn_index} is beyond the conversation length (#{Enum.count(messages)})"}
     else
       # Save current messages as a branch
       branch = new(branch_name, messages)
-      branches = existing_branches ++ [branch]
+      branches = Enum.concat(existing_branches, [branch])
 
       # Truncate to the branch point
       truncated = Enum.take(messages, turn_index + 1)
@@ -69,7 +70,7 @@ defmodule MingaAgent.Branch do
     |> Enum.with_index(1)
     |> Enum.map_join("\n", fn {b, idx} ->
       time = Calendar.strftime(b.created_at, "%H:%M:%S UTC")
-      "  #{idx}. #{b.name} (#{length(b.messages)} messages, created #{time})"
+      "  #{idx}. #{b.name} (#{Enum.count(b.messages)} messages, created #{time})"
     end)
   end
 end

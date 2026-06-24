@@ -34,7 +34,7 @@ defmodule MingaAgent.Tools.ApplyDiff do
   def apply_to_content(content, diff) when is_binary(content) and is_binary(diff) do
     with {:ok, hunks} <- parse(diff),
          {:ok, patched_lines} <- apply_hunks(content_lines(content), hunks) do
-      {:ok, %{content: Enum.join(patched_lines, "\n"), hunks: length(hunks)}}
+      {:ok, %{content: Enum.join(patched_lines, "\n"), hunks: Enum.count(hunks)}}
     end
   end
 
@@ -86,8 +86,8 @@ defmodule MingaAgent.Tools.ApplyDiff do
   defp drop_trailing_empty_line([]), do: []
 
   defp drop_trailing_empty_line(lines) do
-    if List.last(lines) == "" do
-      Enum.slice(lines, 0, length(lines) - 1)
+    if Enum.at(lines, -1) == "" do
+      Enum.slice(lines, 0, Enum.count(lines) - 1)
     else
       lines
     end
@@ -302,8 +302,8 @@ defmodule MingaAgent.Tools.ApplyDiff do
 
     case find_hunk_index(lines, old_lines, expected_index) do
       {:ok, index} ->
-        patched = replace_slice(lines, index, length(old_lines), new_lines)
-        {:ok, patched, length(new_lines) - length(old_lines)}
+        patched = replace_slice(lines, index, Enum.count(old_lines), new_lines)
+        {:ok, patched, Enum.count(new_lines) - Enum.count(old_lines)}
 
       :error ->
         {:error,
@@ -355,10 +355,10 @@ defmodule MingaAgent.Tools.ApplyDiff do
   defp max_insert_index([]), do: 0
 
   defp max_insert_index(lines) do
-    if List.last(lines) == "" do
-      length(lines) - 1
+    if Enum.at(lines, -1) == "" do
+      Enum.count(lines) - 1
     else
-      length(lines)
+      Enum.count(lines)
     end
   end
 
@@ -376,8 +376,8 @@ defmodule MingaAgent.Tools.ApplyDiff do
 
   @spec matches_at?([String.t()], [String.t()], non_neg_integer()) :: boolean()
   defp matches_at?(lines, old_lines, index) do
-    index <= length(lines) - length(old_lines) and
-      Enum.slice(lines, index, length(old_lines)) == old_lines
+    index <= Enum.count(lines) - Enum.count(old_lines) and
+      Enum.slice(lines, index, Enum.count(old_lines)) == old_lines
   end
 
   @spec replace_slice([String.t()], non_neg_integer(), non_neg_integer(), [String.t()]) :: [

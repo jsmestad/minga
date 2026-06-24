@@ -28,6 +28,7 @@ defmodule MingaEditor.Agent.SlashCommand do
 
   alias MingaEditor.Agent.SlashCommand.Command
   alias MingaEditor.Agent.SlashCommand.Registry, as: SlashCommandRegistry
+  alias MingaEditor.State
 
   @typedoc "A registered slash command."
   @type command :: Command.t()
@@ -218,8 +219,10 @@ defmodule MingaEditor.Agent.SlashCommand do
   defp fuzzy_suggestion_for_command(cmd) do
     matches =
       commands()
-      |> Enum.map(& &1.name)
-      |> Enum.map(&{command_distance(cmd, &1), &1})
+      |> Enum.map(fn command ->
+        name = command.name
+        {command_distance(cmd, name), name}
+      end)
       |> Enum.filter(fn {distance, _name} -> distance <= 2 end)
       |> Enum.sort_by(fn {distance, name} -> {distance, String.length(name), name} end)
 
@@ -471,13 +474,13 @@ defmodule MingaEditor.Agent.SlashCommand do
         :ok ->
           state = AgentAccess.update_agent_ui(state, &UIState.set_thinking_level(&1, level))
           Session.add_system_message(AgentAccess.session(state), "Thinking: #{level}")
-          MingaEditor.State.set_status(state, "Thinking: #{level}")
+          State.set_status(state, "Thinking: #{level}")
 
         {:error, reason} ->
-          MingaEditor.State.set_status(state, "Error: #{inspect(reason)}")
+          State.set_status(state, "Error: #{inspect(reason)}")
       end
     else
-      MingaEditor.State.set_status(state, "No agent session")
+      State.set_status(state, "No agent session")
     end
   end
 
@@ -658,7 +661,7 @@ defmodule MingaEditor.Agent.SlashCommand do
       Session.add_system_message(AgentAccess.session(state), "Available commands:\n#{help_text}")
     end
 
-    MingaEditor.State.set_status(state, "Commands listed in chat")
+    State.set_status(state, "Commands listed in chat")
   end
 
   @spec do_plan(state()) :: {:ok, state()} | {:error, String.t()}
@@ -669,7 +672,7 @@ defmodule MingaEditor.Agent.SlashCommand do
       state =
         state
         |> AgentAccess.update_agent(&AgentState.set_status(&1, :plan))
-        |> MingaEditor.State.set_status("Plan mode enabled")
+        |> State.set_status("Plan mode enabled")
 
       {:ok, state}
     end
@@ -683,7 +686,7 @@ defmodule MingaEditor.Agent.SlashCommand do
       state =
         state
         |> AgentAccess.update_agent(&AgentState.set_status(&1, :idle))
-        |> MingaEditor.State.set_status("Execution mode enabled")
+        |> State.set_status("Execution mode enabled")
 
       {:ok, state}
     end
@@ -906,7 +909,7 @@ defmodule MingaEditor.Agent.SlashCommand do
 
   @spec start_manual_oauth_flow(state()) :: state()
   defp start_manual_oauth_flow(state) do
-    state = MingaEditor.State.set_status(state, "Starting manual ChatGPT sign-in...")
+    state = State.set_status(state, "Starting manual ChatGPT sign-in...")
     session = AgentAccess.session(state)
     client_pid = self()
 
@@ -925,7 +928,7 @@ defmodule MingaEditor.Agent.SlashCommand do
 
   @spec complete_manual_oauth_flow(state(), String.t(), String.t()) :: state()
   defp complete_manual_oauth_flow(state, ref, pasted) do
-    state = MingaEditor.State.set_status(state, "Completing manual ChatGPT sign-in...")
+    state = State.set_status(state, "Completing manual ChatGPT sign-in...")
     session = AgentAccess.session(state)
     client_pid = self()
 
@@ -1219,7 +1222,7 @@ defmodule MingaEditor.Agent.SlashCommand do
     if is_pid(session) do
       case Session.compact(session) do
         {:ok, info} ->
-          {:ok, MingaEditor.State.set_status(state, info)}
+          {:ok, State.set_status(state, info)}
 
         {:error, reason} ->
           {:error, reason}
@@ -1332,7 +1335,7 @@ defmodule MingaEditor.Agent.SlashCommand do
     # Take only the first line for the single-line minibuffer status bar.
     # The full message is visible in the semantic agent transcript via add_system_message.
     first_line = message |> String.split("\n", parts: 2) |> hd() |> String.trim()
-    MingaEditor.State.set_status(state, String.slice(first_line, 0, 80))
+    State.set_status(state, String.slice(first_line, 0, 80))
   end
 
   # ── Dynamic commands from extensions ────────────────────────────────────────
@@ -1417,7 +1420,7 @@ defmodule MingaEditor.Agent.SlashCommand do
   @spec maybe_add_env_endpoint([String.t()]) :: [String.t()]
   defp maybe_add_env_endpoint(parts) do
     case System.get_env("MINGA_API_BASE_URL") do
-      env when is_binary(env) and env != "" -> parts ++ ["  Endpoint (env): #{env}"]
+      env when is_binary(env) and env != "" -> Enum.concat(parts, ["  Endpoint (env): #{env}"])
       _ -> parts
     end
   end
@@ -1427,7 +1430,7 @@ defmodule MingaEditor.Agent.SlashCommand do
     case Config.get(:agent_api_endpoints) do
       m when is_map(m) and map_size(m) > 0 ->
         lines = Enum.map_join(m, "\n", fn {p, u} -> "    #{p}: #{u}" end)
-        parts ++ ["  Endpoints (per-provider):\n#{lines}"]
+        Enum.concat(parts, ["  Endpoints (per-provider):\n#{lines}"])
 
       _ ->
         parts
@@ -1444,8 +1447,8 @@ defmodule MingaEditor.Agent.SlashCommand do
 
     case {global, parts} do
       {"", _} -> parts
-      {url, []} -> parts ++ ["  Endpoint: #{url}"]
-      {url, _} -> parts ++ ["  Endpoint (global fallback): #{url}"]
+      {url, []} -> Enum.concat(parts, ["  Endpoint: #{url}"])
+      {url, _} -> Enum.concat(parts, ["  Endpoint (global fallback): #{url}"])
     end
   end
 

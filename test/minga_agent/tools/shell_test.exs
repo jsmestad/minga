@@ -125,7 +125,7 @@ defmodule MingaAgent.Tools.ShellTest do
 
       assert String.ends_with?(combined, marker)
       assert byte_size(String.replace_suffix(combined, marker, "")) == 51_200
-      assert length(:binary.matches(combined, marker)) == 1
+      assert [_] = :binary.matches(combined, marker)
     end
 
     test "stream truncation preserves valid UTF-8 at the cap", %{tmp_dir: dir} do

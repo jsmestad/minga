@@ -6,14 +6,14 @@ defmodule Minga.Core.WrapMapTest do
   describe "compute/3 with no wrapping needed" do
     test "short line produces a single visual row" do
       [entry] = WrapMap.compute(["hello"], 40)
-      assert length(entry) == 1
+      assert Enum.count(entry) == 1
       assert WrapMap.display_text(hd(entry)) == "hello"
       assert hd(entry).byte_offset == 0
     end
 
     test "empty line produces a single empty visual row" do
       [entry] = WrapMap.compute([""], 40)
-      assert length(entry) == 1
+      assert Enum.count(entry) == 1
       assert WrapMap.display_text(hd(entry)) == ""
       assert hd(entry).source_text == ""
       assert hd(entry).indent_width == 0
@@ -22,7 +22,7 @@ defmodule Minga.Core.WrapMapTest do
     test "line exactly at width produces a single visual row" do
       line = String.duplicate("a", 40)
       [entry] = WrapMap.compute([line], 40)
-      assert length(entry) == 1
+      assert Enum.count(entry) == 1
       assert WrapMap.display_text(hd(entry)) == line
     end
   end
@@ -31,7 +31,7 @@ defmodule Minga.Core.WrapMapTest do
     test "wraps at the last space before the width limit" do
       # "hello world foo" at width 12 should break after "hello world"
       [entry] = WrapMap.compute(["hello world foo"], 12)
-      assert length(entry) == 2
+      assert Enum.count(entry) == 2
       assert WrapMap.display_text(Enum.at(entry, 0)) == "hello world "
       assert WrapMap.display_text(Enum.at(entry, 1)) == "foo"
     end
@@ -39,7 +39,7 @@ defmodule Minga.Core.WrapMapTest do
     test "wraps long text into multiple visual rows" do
       line = "one two three four five six seven eight"
       [entry] = WrapMap.compute([line], 15)
-      assert length(entry) >= 3
+      assert Enum.count(entry) >= 3
       # Every visual row's text should be <= 15 display columns
       Enum.each(entry, fn row ->
         assert String.length(row.text) <= 15
@@ -49,7 +49,7 @@ defmodule Minga.Core.WrapMapTest do
     test "hard-breaks when no space exists" do
       line = String.duplicate("x", 30)
       [entry] = WrapMap.compute([line], 10)
-      assert length(entry) == 3
+      assert Enum.count(entry) == 3
       assert Enum.at(entry, 0).text == String.duplicate("x", 10)
       assert Enum.at(entry, 1).text == String.duplicate("x", 10)
       assert Enum.at(entry, 2).text == String.duplicate("x", 10)
@@ -120,14 +120,14 @@ defmodule Minga.Core.WrapMapTest do
       line = "    " <> String.duplicate("x", 40)
       [entry] = WrapMap.compute([line], 20, breakindent: true)
       # First row: 20 chars. Continuation: 16 chars each.
-      assert length(entry) >= 3
+      assert Enum.count(entry) >= 3
     end
 
     test "tabs in leading whitespace count using the configured tab width" do
       line = "\t" <> String.duplicate("x", 40)
       [entry] = WrapMap.compute([line], 12, breakindent: true, tab_width: 4)
 
-      assert length(entry) >= 2
+      assert Enum.count(entry) >= 2
       assert Enum.at(entry, 1).indent_width == 4
       assert WrapMap.display_text(Enum.at(entry, 1)) =~ ~r/^ {4}/
     end
@@ -137,7 +137,7 @@ defmodule Minga.Core.WrapMapTest do
       [entry_bi] = WrapMap.compute([line], 20, breakindent: true)
       [entry_no] = WrapMap.compute([line], 20, breakindent: false)
       # Without breakindent, fewer visual rows needed
-      assert length(entry_no) <= length(entry_bi)
+      assert Enum.count(entry_no) <= Enum.count(entry_bi)
     end
   end
 
@@ -160,7 +160,7 @@ defmodule Minga.Core.WrapMapTest do
   describe "multiple lines" do
     test "each line gets its own wrap entry" do
       map = WrapMap.compute(["short", "also short", "tiny"], 40)
-      assert length(map) == 3
+      assert Enum.count(map) == 3
     end
   end
 end

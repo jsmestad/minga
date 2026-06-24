@@ -93,7 +93,7 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoder do
       )
     ]
 
-    IO.iodata_to_binary([<<@op_gui_picker, length(sections)::8>> | sections])
+    IO.iodata_to_binary([<<@op_gui_picker, Enum.count(sections)::8>> | sections])
   end
 
   @spec to_wire_header(Picker.t()) :: map()
@@ -126,13 +126,13 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoder do
 
   defp encode_preview(lines) when is_list(lines) do
     line_binaries = Enum.map(lines, &encode_preview_line/1)
-    IO.iodata_to_binary([@op_gui_picker_preview, <<1::8, length(lines)::16>> | line_binaries])
+    IO.iodata_to_binary([@op_gui_picker_preview, <<1::8, Enum.count(lines)::16>> | line_binaries])
   end
 
   @spec encode_preview_line([Picker.preview_segment()]) :: iodata()
   defp encode_preview_line(segments) do
     seg_bins = Enum.map(segments, &encode_preview_segment/1)
-    [<<length(segments)::8>> | seg_bins]
+    [<<Enum.count(segments)::8>> | seg_bins]
   end
 
   @spec encode_preview_segment(Picker.preview_segment()) :: binary()

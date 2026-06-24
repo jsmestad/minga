@@ -118,7 +118,7 @@ defmodule MingaAgent.SkillsTest do
       all_skills = Skills.discover(dir)
 
       matches = Skills.auto_activate(all_skills, "Let's plan the new feature")
-      assert length(matches) == 1
+      assert Enum.count(matches) == 1
       assert hd(matches).name == "plan"
     end
 
@@ -128,7 +128,7 @@ defmodule MingaAgent.SkillsTest do
 
       all_skills = Skills.discover(dir)
       matches = Skills.auto_activate(all_skills, "let's plan")
-      assert length(matches) == 1
+      assert Enum.count(matches) == 1
     end
 
     test "does not match partial words", %{tmp_dir: dir} do

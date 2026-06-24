@@ -214,27 +214,21 @@ defmodule Minga.Extension.Agent do
     schemas = agent_schemas(env.module)
 
     quote do
-      @doc false
       @spec __option_schema__() :: [Minga.Extension.option_spec()]
       def __option_schema__, do: unquote(Macro.escape(schemas.options))
 
-      @doc false
       @spec __hook_schema__() :: [{atom(), keyword()}]
       def __hook_schema__, do: unquote(Macro.escape(schemas.hooks))
 
-      @doc false
       @spec __skill_schema__() :: [String.t()]
       def __skill_schema__, do: unquote(Macro.escape(schemas.skills))
 
-      @doc false
       @spec __mcp_server_schema__() :: [{atom() | String.t(), keyword()}]
       def __mcp_server_schema__, do: unquote(Macro.escape(schemas.mcp_servers))
 
-      @doc false
       @spec __slash_command_schema__() :: [{atom() | String.t(), String.t(), keyword()}]
       def __slash_command_schema__, do: unquote(Macro.escape(schemas.slash_commands))
 
-      @doc false
       @spec __agent_ui_schema__() :: [map() | keyword()]
       def __agent_ui_schema__, do: unquote(Macro.escape(schemas.agent_ui))
     end

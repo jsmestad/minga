@@ -110,7 +110,7 @@ defmodule MingaAgent.Tools.Grep do
           {String.t(), [String.t()]}
   defp build_rg_command(rg, pattern, glob, case_sensitive, context_lines) do
     args = ["--no-heading", "--line-number", "--color", "never"]
-    args = if case_sensitive, do: args, else: args ++ ["--ignore-case"]
+    args = if case_sensitive, do: args, else: Enum.concat(args, ["--ignore-case"])
 
     args =
       if context_lines > 0,
@@ -128,7 +128,7 @@ defmodule MingaAgent.Tools.Grep do
   defp build_grep_command(pattern, glob, case_sensitive, context_lines) do
     grep = System.find_executable("grep") || "grep"
     args = ["-rn", "-I"]
-    args = if case_sensitive, do: args, else: args ++ ["-i"]
+    args = if case_sensitive, do: args, else: Enum.concat(args, ["-i"])
     args = if context_lines > 0, do: args ++ ["-C", Integer.to_string(context_lines)], else: args
     args = if glob, do: args ++ ["--include", glob], else: args
     args = args ++ grep_ignore_args()
@@ -184,9 +184,9 @@ defmodule MingaAgent.Tools.Grep do
           "\n\n... (truncated at #{div(@max_output_bytes, 1000)}KB, refine the pattern or path for fewer results)",
         else: ""
 
-    if length(lines) > @max_matches do
+    if Enum.count(lines) > @max_matches do
       truncated = Enum.take(lines, @max_matches) |> Enum.join("\n")
-      truncated <> "\n\n... (truncated, #{length(lines) - @max_matches} more lines)" <> marker
+      truncated <> "\n\n... (truncated, #{Enum.count(lines) - @max_matches} more lines)" <> marker
     else
       Enum.join(lines, "\n") <> marker
     end

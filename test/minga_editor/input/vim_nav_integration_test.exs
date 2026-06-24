@@ -66,7 +66,7 @@ defmodule MingaEditor.Input.VimNavIntegrationTest do
     test "G moves cursor to the last entry", %{tmp_dir: tmp_dir} do
       state = make_tree_state(tmp_dir)
       entries = FileTree.visible_entries(ft(state).tree)
-      max_idx = length(entries) - 1
+      max_idx = Enum.count(entries) - 1
 
       {:handled, state} = FileTreeHandler.handle_key(state, ?G, 0)
       assert ft(state).tree.cursor == max_idx
@@ -164,9 +164,9 @@ defmodule MingaEditor.Input.VimNavIntegrationTest do
           end
 
         # Press Tab to expand
-        entries_before = length(FileTree.visible_entries(ft(state).tree))
+        entries_before = Enum.count(FileTree.visible_entries(ft(state).tree))
         {:handled, state} = FileTreeHandler.handle_key(state, 9, 0)
-        entries_after = length(FileTree.visible_entries(ft(state).tree))
+        entries_after = Enum.count(FileTree.visible_entries(ft(state).tree))
 
         # Should have more entries after expanding
         assert entries_after > entries_before
@@ -184,7 +184,7 @@ defmodule MingaEditor.Input.VimNavIntegrationTest do
       entries_with_hidden = FileTree.visible_entries(ft(state).tree)
 
       # Toggling hidden should change the entry count
-      assert length(entries_with_hidden) != length(entries_default)
+      assert Enum.count(entries_with_hidden) != Enum.count(entries_default)
     end
 
     test "q closes the file tree", %{tmp_dir: tmp_dir} do

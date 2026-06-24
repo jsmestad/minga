@@ -83,11 +83,9 @@ defmodule MingaAgent.MCP.StdioTransport do
     end
   end
 
-  @doc false
   @spec port_env(ServerConfig.t()) :: [env_entry()]
   def port_env(%ServerConfig{} = config), do: port_env(config, System.get_env())
 
-  @doc false
   @spec port_env(ServerConfig.t(), %{String.t() => String.t()}) :: [env_entry()]
   def port_env(%ServerConfig{env: env}, inherited_env) when is_map(inherited_env) do
     explicit_env = Map.new(env)

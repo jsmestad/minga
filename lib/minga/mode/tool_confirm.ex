@@ -58,7 +58,7 @@ defmodule Minga.Mode.ToolConfirm do
   defp advance_or_finish(commands, %ToolConfirmState{current: current, pending: pending} = state) do
     next = current + 1
 
-    if next >= length(pending) do
+    if next >= Enum.count(pending) do
       {:execute_then_transition, commands, :normal, state}
     else
       {:execute, commands, %{state | current: next}}

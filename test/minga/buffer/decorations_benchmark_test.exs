@@ -157,7 +157,7 @@ defmodule Minga.Core.DecorationsBenchmarkTest do
 
       # Query a specific range and verify results
       highlights = Decorations.highlights_for_lines(result, 500, 509)
-      assert length(highlights) == 10
+      assert Enum.count(highlights) == 10
     end
 
     test "batch clear-and-replace at 10K produces correct query results" do
@@ -182,7 +182,7 @@ defmodule Minga.Core.DecorationsBenchmarkTest do
 
       # Query a 30-line viewport window in the middle
       highlights = Decorations.highlights_for_lines(result, 5_000, 5_029)
-      assert length(highlights) == 30
+      assert Enum.count(highlights) == 30
     end
 
     test "batch on empty decorations works" do
@@ -223,7 +223,7 @@ defmodule Minga.Core.DecorationsBenchmarkTest do
 
       # Query a 30-line viewport window
       highlights = Decorations.highlights_for_lines(decs, 5_000, 5_029)
-      assert length(highlights) == 30
+      assert Enum.count(highlights) == 30
 
       # Each result should be on the expected line (sort since tree traversal order varies)
       lines = highlights |> Enum.map(fn hl -> elem(hl.start, 0) end) |> Enum.sort()
@@ -241,7 +241,7 @@ defmodule Minga.Core.DecorationsBenchmarkTest do
         end
 
       # Should produce 30 lines of merged results
-      assert length(merged) == 30
+      assert Enum.count(merged) == 30
       # Each merged line should have segments (not be empty)
       assert Enum.all?(merged, fn segments -> segments != [] end)
     end

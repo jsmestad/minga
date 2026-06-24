@@ -530,11 +530,9 @@ defmodule MingaEditor.Commands.BufferManagement do
         :exit, _ -> Path.expand("~/.config/minga/config.exs")
       end
 
-    # Ensure the directory exists
     config_dir = Path.dirname(config_path)
     File.mkdir_p(config_dir)
 
-    # Create the file with a starter template if it doesn't exist
     unless File.exists?(config_path) do
       File.write!(config_path, """
       use Minga.Config
@@ -613,7 +611,6 @@ defmodule MingaEditor.Commands.BufferManagement do
     reload_config(state, fn cleaned_state -> {Config.reload(), cleaned_state} end)
   end
 
-  @doc false
   @spec reload_config(state(), (state() -> {:ok | {:error, String.t()}, state()})) :: state()
   def reload_config(state, reload_fun) when is_function(reload_fun, 1) do
     state =
@@ -1003,7 +1000,6 @@ defmodule MingaEditor.Commands.BufferManagement do
       new_buffers = List.delete_at(buffers, idx)
       had_neighbor_tab? = has_neighbor_tab?(state)
 
-      # Remove the current tab from the tab bar (if present).
       # TabBar.remove handles neighbor selection.
       state = remove_current_tab(state)
 
@@ -1070,13 +1066,13 @@ defmodule MingaEditor.Commands.BufferManagement do
   def handle_agent_session_down(state, session_pid, reason) do
     {state, owned?} = update_active_shell_session_down(state, session_pid, reason)
 
-    case owned? do
-      true -> finish_owned_session_down(state, reason)
-      false -> handle_unowned_session_down(state, session_pid, reason)
+    if owned? do
+      finish_owned_session_down(state, reason)
+    else
+      handle_unowned_session_down(state, session_pid, reason)
     end
   end
 
-  @doc false
   @spec agent_session_restart_owned?(state(), pid()) :: boolean()
   def agent_session_restart_owned?(state, old_pid) when is_pid(old_pid) do
     shell_owned? = shell_state_restart_owned?(state.shell_state, old_pid)
@@ -1184,9 +1180,10 @@ defmodule MingaEditor.Commands.BufferManagement do
   defp handle_unowned_session_down(state, session_pid, reason) do
     {state, owned?} = update_stashed_shell_session_down(state, session_pid, reason)
 
-    case owned? do
-      true -> finish_owned_session_down(state, reason)
-      false -> handle_agent_session_down_for_tabs(state, session_pid, reason)
+    if owned? do
+      finish_owned_session_down(state, reason)
+    else
+      handle_agent_session_down_for_tabs(state, session_pid, reason)
     end
   end
 
@@ -1500,9 +1497,10 @@ defmodule MingaEditor.Commands.BufferManagement do
   defp handle_remote_session_disconnected(state, session_pid) do
     {state, handled?} = update_active_shell_remote_disconnected(state, session_pid)
 
-    case handled? do
-      true -> finish_remote_session_disconnected(state)
-      false -> handle_stashed_remote_session_disconnected(state, session_pid)
+    if handled? do
+      finish_remote_session_disconnected(state)
+    else
+      handle_stashed_remote_session_disconnected(state, session_pid)
     end
   end
 
@@ -1611,7 +1609,6 @@ defmodule MingaEditor.Commands.BufferManagement do
     # Clear session and status on any tab that referenced this session.
     state = clear_session_from_tabs(state, session, tab_status)
 
-    # Remove the agent's group from the tab bar.
     case TabBar.find_workspace_by_session(state.shell_state.tab_bar, session) do
       %{id: workspace_id} ->
         EditorState.set_tab_bar(
@@ -2195,6 +2192,7 @@ defmodule MingaEditor.Commands.BufferManagement do
       "options" => %{"tabSize" => tab_size, "insertSpaces" => insert_spaces}
     }
 
+    # credo:disable-for-next-line Minga.Credo.NoBlockingEditorCallCheck
     case Minga.LSP.Client.request_sync(
            client,
            "textDocument/formatting",
@@ -2295,7 +2293,7 @@ defmodule MingaEditor.Commands.BufferManagement do
         if EditorState.skip_tool_prompt?(state, recipe.name) do
           state
         else
-          queue = state.shell_state.tool_prompt_queue ++ [recipe.name]
+          queue = Enum.concat(state.shell_state.tool_prompt_queue, [recipe.name])
           state = EditorState.update_shell_state(state, &%{&1 | tool_prompt_queue: queue})
           show_tool_prompt_if_normal(state)
         end

@@ -25,7 +25,7 @@ defmodule MingaAgent.MCP.ToolTest do
       |> Tool.from_list(tools)
       |> Enum.map(& &1.safe_name)
 
-    assert length(names) == length(Enum.uniq(names))
+    assert Enum.count(names) == Enum.count(Enum.uniq(names))
     assert Enum.all?(names, &(String.length(&1) <= 64))
     assert Enum.all?(names, &ReqLLM.Tool.valid_name?/1)
   end

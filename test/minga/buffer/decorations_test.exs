@@ -179,9 +179,9 @@ defmodule Minga.Core.DecorationsTest do
     test "returns highlights for single lines including multi-line ranges" do
       decs = add_hls([{{5, 0}, {5, 10}}, {{10, 0}, {10, 10}}, {{20, 0}, {25, 0}}])
 
-      assert length(Decorations.highlights_for_line(decs, 5)) == 1
-      assert length(Decorations.highlights_for_line(decs, 10)) == 1
-      assert length(Decorations.highlights_for_line(decs, 22)) == 1
+      assert Enum.count(Decorations.highlights_for_line(decs, 5)) == 1
+      assert Enum.count(Decorations.highlights_for_line(decs, 10)) == 1
+      assert Enum.count(Decorations.highlights_for_line(decs, 22)) == 1
       assert Decorations.highlights_for_line(decs, 7) == []
     end
   end
@@ -276,7 +276,7 @@ defmodule Minga.Core.DecorationsTest do
           0
         )
 
-      assert length(result) >= 4
+      assert Enum.count(result) >= 4
       assert {"a", first_style} = hd(result)
       refute first_style.bold || false
       assert Enum.any?(result, fn {_text, style} -> style.bold == true end)
@@ -344,7 +344,7 @@ defmodule Minga.Core.DecorationsTest do
       assert unchanged.version == decs.version
 
       {_id, result} = Decorations.add_fold_region(decs, 5, 10, closed: true)
-      assert length(result.fold_regions) == 1
+      assert Enum.count(result.fold_regions) == 1
       assert result.version == decs.version + 1
     end
   end
@@ -404,7 +404,7 @@ defmodule Minga.Core.DecorationsTest do
 
       assert annotation_texts(decs, 5) == ["low", "mid", "high"]
       assert Decorations.annotations_for_line(decs, 10) == []
-      assert length(Decorations.annotations_for_line(decs, 0)) == 1
+      assert Enum.count(Decorations.annotations_for_line(decs, 0)) == 1
 
       cached = Decorations.build_ann_line_cache(decs)
       assert cached.ann_line_cache != nil
@@ -429,7 +429,7 @@ defmodule Minga.Core.DecorationsTest do
 
       assert Decorations.remove_group(decs, :missing)
              |> Decorations.annotations_for_line(15)
-             |> length() == 1
+             |> Enum.count() == 1
     end
   end
 

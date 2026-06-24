@@ -167,13 +167,13 @@ defmodule Minga.Mode do
 
   def display(:substitute_confirm, %Minga.Mode.SubstituteConfirmState{} = s) do
     current = s.current + 1
-    total = length(s.matches)
+    total = Enum.count(s.matches)
     "replace with #{s.replacement}? [y/n/a/q] (#{current} of #{total})"
   end
 
   def display(:extension_confirm, %Minga.Mode.ExtensionConfirmState{} = s) do
     current = s.current + 1
-    total = length(s.updates)
+    total = Enum.count(s.updates)
     update = Enum.at(s.updates, s.current)
     label = format_update_label(update)
     "#{label} [Y/n/d] (#{current} of #{total})"

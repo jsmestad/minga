@@ -124,6 +124,7 @@ defmodule MingaEditor.Commands.AgentSubStatesTest do
 
   defp maybe_restore_project_registration(pid) do
     if Process.whereis(Minga.Project) == nil do
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       true = Process.register(pid, Minga.Project)
     end
   end
@@ -139,6 +140,7 @@ defmodule MingaEditor.Commands.AgentSubStatesTest do
         try do
           fun.()
         after
+          # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
           true = Process.register(pid, Minga.Project)
         end
     end

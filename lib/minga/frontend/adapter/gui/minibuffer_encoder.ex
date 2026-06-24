@@ -34,7 +34,7 @@ defmodule Minga.Frontend.Adapter.GUI.MinibufferEncoder do
       <<@op_gui_minibuffer, 1::8, mode::8, cursor_pos::16, byte_size(prompt_bytes)::8,
         prompt_bytes::binary, byte_size(input_bytes)::16, input_bytes::binary,
         byte_size(context_bytes)::16, context_bytes::binary, model.selected_index::16,
-        length(model.candidates)::16, model.total_candidates::16>>
+        Enum.count(model.candidates)::16, model.total_candidates::16>>
       | candidate_data
     ])
   end
@@ -44,7 +44,7 @@ defmodule Minga.Frontend.Adapter.GUI.MinibufferEncoder do
 
   defp fingerprint(%Minibuffer{} = model) do
     {model.visible?, model.mode, model.cursor_pos, model.prompt, model.input, model.context,
-     model.selected_index, length(model.candidates), model.total_candidates, model.candidates}
+     model.selected_index, Enum.count(model.candidates), model.total_candidates, model.candidates}
   end
 
   @spec encode_mode(Minibuffer.mode()) :: non_neg_integer()
@@ -76,7 +76,7 @@ defmodule Minga.Frontend.Adapter.GUI.MinibufferEncoder do
     [
       <<min(candidate.match_score, 255)::8, byte_size(label_bytes)::16, label_bytes::binary,
         byte_size(desc_bytes)::16, desc_bytes::binary, byte_size(annotation_bytes)::16,
-        annotation_bytes::binary, length(match_positions)::8>>
+        annotation_bytes::binary, Enum.count(match_positions)::8>>
       | pos_binary
     ]
   end

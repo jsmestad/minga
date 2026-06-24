@@ -37,7 +37,7 @@ defmodule Minga.Project.FileFindTest do
       assert "--type" in args
       assert "f" in args
       assert "--hidden" in args
-      assert List.last(args) == "."
+      assert Enum.at(args, -1) == "."
     end
 
     test "passes configured excludes as --exclude pairs" do
@@ -73,7 +73,7 @@ defmodule Minga.Project.FileFindTest do
     test "returns a list of relative file paths", %{tmp_dir: tmp_dir} do
       {:ok, files} = FileFind.list_files(tmp_dir)
       assert is_list(files)
-      assert length(files) >= 3
+      assert Enum.count(files) >= 3
       assert "README.md" in files
       assert "lib/app.ex" in files
       assert "lib/sub/deep.ex" in files

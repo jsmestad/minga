@@ -30,7 +30,7 @@ defmodule Minga.Frontend.Adapter.GUI.SidebarsEncoder do
 
     payload =
       IO.iodata_to_binary([
-        <<1::8, length(entries)::16>>,
+        <<1::8, Enum.count(entries)::16>>,
         Wire.encode_string16(model.active_id || ""),
         entries
       ])

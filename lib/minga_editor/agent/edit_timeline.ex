@@ -64,7 +64,7 @@ defmodule MingaEditor.Agent.EditTimeline do
     timeline = maybe_record_baseline(timeline, path, before_content)
 
     existing = Map.get(timeline.entries, path, [])
-    index = length(existing)
+    index = Enum.count(existing)
 
     entry = %Entry{
       index: index,
@@ -74,7 +74,7 @@ defmodule MingaEditor.Agent.EditTimeline do
       snapshot: DiffSnapshot.from_content(after_content)
     }
 
-    %{timeline | entries: Map.put(timeline.entries, path, existing ++ [entry])}
+    %{timeline | entries: Map.put(timeline.entries, path, Enum.concat(existing, [entry]))}
   end
 
   @spec entries_for(t(), String.t()) :: [Entry.t()]
@@ -118,7 +118,7 @@ defmodule MingaEditor.Agent.EditTimeline do
 
       _ ->
         current = viewing_index(timeline, path)
-        max_index = length(entries) - 1
+        max_index = Enum.count(entries) - 1
 
         case current do
           nil -> {timeline, :at_end}
@@ -141,7 +141,7 @@ defmodule MingaEditor.Agent.EditTimeline do
 
         case current do
           nil ->
-            last_index = length(entries) - 1
+            last_index = Enum.count(entries) - 1
             {set_viewing(timeline, path, last_index), :moved}
 
           0 ->
@@ -169,7 +169,7 @@ defmodule MingaEditor.Agent.EditTimeline do
 
   @spec entry_count(t(), String.t()) :: non_neg_integer()
   def entry_count(%__MODULE__{entries: entries}, path) do
-    entries |> Map.get(path, []) |> length()
+    entries |> Map.get(path, []) |> Enum.count()
   end
 
   @spec file_summaries(t()) :: [file_summary()]
@@ -219,13 +219,13 @@ defmodule MingaEditor.Agent.EditTimeline do
   defp file_summary(_timeline, {_path, []}), do: []
 
   defp file_summary(%__MODULE__{} = timeline, {path, entries}) do
-    latest = List.last(entries)
+    latest = Enum.at(entries, -1)
     {added, removed} = diff_counts(baseline_for(timeline, path), latest.snapshot)
 
     [
       %{
         path: path,
-        entry_count: length(entries),
+        entry_count: Enum.count(entries),
         lines_added: added,
         lines_removed: removed,
         review_status: review_status(timeline, path)

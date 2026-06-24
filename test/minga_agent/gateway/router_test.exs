@@ -11,7 +11,9 @@ defmodule MingaAgent.Gateway.RouterTest do
 
     on_exit(fn ->
       case previous do
+        # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
         nil -> Application.delete_env(:minga, :gateway_auth_token)
+        # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
         token -> Application.put_env(:minga, :gateway_auth_token, token)
       end
     end)
@@ -20,6 +22,7 @@ defmodule MingaAgent.Gateway.RouterTest do
   end
 
   test "websocket route returns 503 when auth token is not configured" do
+    # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
     Application.delete_env(:minga, :gateway_auth_token)
 
     conn = Router.call(conn(:get, "/ws"), [])
@@ -29,6 +32,7 @@ defmodule MingaAgent.Gateway.RouterTest do
   end
 
   test "websocket route returns 503 when auth token is empty" do
+    # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
     Application.put_env(:minga, :gateway_auth_token, "")
 
     conn = Router.call(conn(:get, "/ws"), [])
@@ -38,6 +42,7 @@ defmodule MingaAgent.Gateway.RouterTest do
   end
 
   test "websocket route returns 401 when bearer token is missing" do
+    # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
     Application.put_env(:minga, :gateway_auth_token, "expected-token")
 
     conn = Router.call(conn(:get, "/ws"), [])
@@ -47,6 +52,7 @@ defmodule MingaAgent.Gateway.RouterTest do
   end
 
   test "websocket route returns 401 when bearer token is wrong" do
+    # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
     Application.put_env(:minga, :gateway_auth_token, "expected-token")
 
     conn =

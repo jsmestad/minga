@@ -54,6 +54,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   alias MingaEditor.WindowTree
   alias Minga.LSP.SyncServer
   alias MingaEditor.UI.Highlight
+  alias MingaEditor.UI.FontRegistry
 
   @type state :: EditorState.t() | MingaEditor.RenderPipeline.Input.t()
   @typep visual_row_entry :: %{
@@ -788,7 +789,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
 
   defp drop_visual_entry_offset(entries, offset) do
     case Enum.drop(entries, offset) do
-      [] -> entries |> List.last() |> List.wrap()
+      [] -> entries |> Enum.at(-1) |> List.wrap()
       visible -> visible
     end
   end
@@ -1222,7 +1223,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     fold_span =
       Span.from_face(Minga.Core.Face.new(fg: ctx.gutter_colors.fold_fg), start_col, end_col)
 
-    {composed <> suffix, spans ++ [fold_span]}
+    {composed <> suffix, Enum.concat(spans, [fold_span])}
   end
 
   @spec todo_highlight_ranges(String.t(), non_neg_integer(), Context.t(), non_neg_integer()) :: [
@@ -1344,7 +1345,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   defp visual_entry_for_source_col(entries, cursor_display_col) do
     Enum.find(entries, fn entry ->
       cursor_display_col >= entry.source_start_col and cursor_display_col < entry.source_end_col
-    end) || List.last(entries)
+    end) || Enum.at(entries, -1)
   end
 
   @spec cursor_position_from_visual_entry(visual_row_entry() | nil, non_neg_integer()) ::
@@ -1663,9 +1664,11 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     fold_start_lines = MapSet.new(fold_ranges, & &1.start_line)
     fold_end_by_start = Map.new(fold_ranges, fn range -> {range.start_line, range.end_line} end)
 
-    visual_entries
-    |> Enum.map(&visual_gutter_entry/1)
-    |> Enum.map(&resolve_gutter_entry(&1, fold_start_lines, fold_end_by_start, ctx, line_count))
+    Enum.map(visual_entries, fn entry ->
+      entry
+      |> visual_gutter_entry()
+      |> resolve_gutter_entry(fold_start_lines, fold_end_by_start, ctx, line_count)
+    end)
   end
 
   @spec visual_gutter_entry(visual_row_entry()) :: {non_neg_integer(), term()}
@@ -1852,8 +1855,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     if indent_guides_enabled?() do
       lines =
         scroll.lines
-        |> Enum.drop(scroll.visible_row_start_index)
-        |> Enum.take(Viewport.content_rows(scroll.viewport))
+        |> Enum.slice(scroll.visible_row_start_index, Viewport.content_rows(scroll.viewport))
 
       {guides, levels} = IndentGuide.compute_with_levels(lines, ctx.tab_width, ctx.cursor_col)
       indent_guides_from_guides(scroll.win_id, ctx.tab_width, guides, levels)
@@ -2218,7 +2220,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
 
       entries ->
         start_entry = hd(entries)
-        end_entry = List.last(entries)
+        end_entry = Enum.at(entries, -1)
 
         %Selection{
           type: :line,
@@ -2248,7 +2250,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
 
   @spec endpoint_fallback([visual_row_entry()], :first | :last) :: visual_row_entry()
   defp endpoint_fallback(entries, :first), do: hd(entries)
-  defp endpoint_fallback(entries, :last), do: List.last(entries)
+  defp endpoint_fallback(entries, :last), do: Enum.at(entries, -1)
 
   @spec visual_entries_for_line_range([visual_row_entry()], non_neg_integer(), non_neg_integer()) ::
           [
@@ -2457,15 +2459,15 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   defp font_id_for_face(%Minga.Core.Face{font_family: nil}), do: 0
 
   defp font_id_for_face(%Minga.Core.Face{font_family: family}) when is_binary(family) do
-    case MingaEditor.UI.FontRegistry.process_registry() do
+    case FontRegistry.process_registry() do
       nil ->
         0
 
       registry ->
         {font_id, updated_registry, _new?} =
-          MingaEditor.UI.FontRegistry.get_or_register(registry, family)
+          FontRegistry.get_or_register(registry, family)
 
-        MingaEditor.UI.FontRegistry.put_process_registry(updated_registry)
+        FontRegistry.put_process_registry(updated_registry)
         font_id
     end
   end

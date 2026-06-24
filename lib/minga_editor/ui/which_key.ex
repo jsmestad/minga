@@ -121,7 +121,7 @@ defmodule MingaEditor.UI.WhichKey do
       "j"
   """
   @spec format_key(Bindings.key()) :: String.t()
-  defdelegate format_key(key), to: Bindings
+  def format_key(key), do: Bindings.format_key(key)
 
   # ── Binding display ───────────────────────────────────────────────────────────
 

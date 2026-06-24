@@ -30,7 +30,6 @@ defmodule MingaEditor.RenderModel.UI.BuilderTest do
       assert ui.git_status.repo_state == :not_a_repo
     end
 
-    # Build a minimal emit context with just the required keys.
     # The builder doesn't read any fields yet, so values are stubs.
     defp build_minimal_context do
       %MingaEditor.Frontend.Emit.Context{

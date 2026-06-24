@@ -317,7 +317,7 @@ defmodule MingaEditor.LspActionsTest do
 
       items = CodeActionSource.candidates(picker_context(actions))
 
-      assert length(items) == 2
+      assert Enum.count(items) == 2
       assert Enum.any?(items, fn item -> String.contains?(item.label, "Fix import") end)
       assert Enum.any?(items, fn item -> String.contains?(item.label, "★") end)
       assert CodeActionSource.candidates(%{}) == []

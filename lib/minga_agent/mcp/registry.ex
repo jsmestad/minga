@@ -56,7 +56,7 @@ defmodule MingaAgent.MCP.Registry do
             {registry, tools ++ client_tools, failures, seen}
 
           {:error, message} ->
-            {registry, tools, failures ++ [message], seen}
+            {registry, tools, Enum.concat(failures, [message]), seen}
         end
       end)
 

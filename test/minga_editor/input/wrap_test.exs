@@ -24,14 +24,14 @@ defmodule MingaEditor.Input.WrapTest do
 
     test "breaks at word boundary" do
       result = Wrap.wrap_line("hello world foo", 10)
-      assert length(result) == 2
+      assert Enum.count(result) == 2
       assert Enum.at(result, 0) == %MingaEditor.Input.VisualLine{text: "hello ", col_offset: 0}
       assert Enum.at(result, 1) == %MingaEditor.Input.VisualLine{text: "world foo", col_offset: 6}
     end
 
     test "hard-wraps when no spaces exist" do
       result = Wrap.wrap_line("abcdefghijklmno", 5)
-      assert length(result) == 3
+      assert Enum.count(result) == 3
       assert Enum.at(result, 0) == %MingaEditor.Input.VisualLine{text: "abcde", col_offset: 0}
       assert Enum.at(result, 1) == %MingaEditor.Input.VisualLine{text: "fghij", col_offset: 5}
       assert Enum.at(result, 2) == %MingaEditor.Input.VisualLine{text: "klmno", col_offset: 10}
@@ -40,7 +40,7 @@ defmodule MingaEditor.Input.WrapTest do
     test "URL-like string hard-wraps and preserves all text" do
       url = "https://example.com/very/long/path/to/something"
       result = Wrap.wrap_line(url, 20)
-      assert length(result) >= 2
+      assert Enum.count(result) >= 2
       joined = result |> Enum.map_join(& &1.text)
       assert joined == url
     end
@@ -58,7 +58,7 @@ defmodule MingaEditor.Input.WrapTest do
 
     test "narrow width wraps character by character" do
       result = Wrap.wrap_line("hello", 4)
-      assert length(result) == 2
+      assert Enum.count(result) == 2
       assert Enum.at(result, 0).text == "hell"
       assert Enum.at(result, 1).text == "o"
     end
@@ -78,7 +78,7 @@ defmodule MingaEditor.Input.WrapTest do
     test "trailing space at wrap boundary" do
       # "hello " is exactly 6 chars, fits in width 6
       result = Wrap.wrap_line("hello world", 6)
-      assert length(result) == 2
+      assert Enum.count(result) == 2
       joined = result |> Enum.map_join(& &1.text)
       assert joined == "hello world"
     end
@@ -86,7 +86,7 @@ defmodule MingaEditor.Input.WrapTest do
     test "wraps multiple times for very long line" do
       line = String.duplicate("word ", 20) |> String.trim()
       result = Wrap.wrap_line(line, 15)
-      assert length(result) > 1
+      assert Enum.count(result) > 1
       joined = result |> Enum.map_join(& &1.text)
       assert joined == line
     end
@@ -116,7 +116,7 @@ defmodule MingaEditor.Input.WrapTest do
     test "empty lines included" do
       lines = ["hello", "", "world"]
       result = Wrap.wrap_lines(lines, 20)
-      assert length(result) == 3
+      assert Enum.count(result) == 3
       assert {1, %{text: ""}} = Enum.at(result, 1)
     end
   end
@@ -178,7 +178,7 @@ defmodule MingaEditor.Input.WrapTest do
 
     test "cursor on second line accounts for first line wraps" do
       lines = ["this is a long first line", "second"]
-      first_vl_count = length(Wrap.wrap_line("this is a long first line", 10))
+      first_vl_count = Enum.count(Wrap.wrap_line("this is a long first line", 10))
       {vl, vc} = Wrap.logical_to_visual(lines, 10, {1, 3})
       assert vl == first_vl_count
       assert vc == 3

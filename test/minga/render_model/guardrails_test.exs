@@ -277,7 +277,7 @@ defmodule Minga.RenderModel.GuardrailsTest do
       Enum.reduce(children, {alias_map, found}, fn child_ast, {alias_map_acc, found_acc} ->
         child_segments = alias_segments(child_ast)
         path = base_path ++ child_segments
-        alias_key = [List.last(path)]
+        alias_key = [Enum.at(path, -1)]
 
         {Map.put(alias_map_acc, alias_key, path), found_acc or gui_module_path?(path)}
       end)
@@ -289,7 +289,7 @@ defmodule Minga.RenderModel.GuardrailsTest do
 
     resolve_module_paths(target_ast, aliases)
     |> Enum.reduce({aliases, false}, fn path, {alias_map, found} ->
-      alias_key = alias_name || [List.last(path)]
+      alias_key = alias_name || [Enum.at(path, -1)]
       {Map.put(alias_map, alias_key, path), found or gui_module_path?(path)}
     end)
   end
@@ -303,7 +303,7 @@ defmodule Minga.RenderModel.GuardrailsTest do
   defp resolve_module_segments([:MingaEditor | _] = segments, _aliases), do: segments
 
   defp resolve_module_segments(segments, aliases) do
-    resolve_module_segments(segments, aliases, length(segments))
+    resolve_module_segments(segments, aliases, Enum.count(segments))
   end
 
   defp resolve_module_segments(segments, _aliases, 0), do: segments

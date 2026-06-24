@@ -41,7 +41,7 @@ defmodule Minga.RenderModel.UI.GitStatusTest do
       }
 
       assert gs.branch == "main"
-      assert length(gs.entries) == 1
+      assert Enum.count(gs.entries) == 1
       assert is_map(gs.git_toast)
     end
   end

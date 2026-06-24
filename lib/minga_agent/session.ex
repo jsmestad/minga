@@ -812,9 +812,10 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call({:send_prompt_as, client_pid, content}, _from, state) do
-    case driver_allowed?(state, client_pid) do
-      true -> handle_send_prompt(content, state)
-      false -> {:reply, {:error, :not_driver}, state}
+    if driver_allowed?(state, client_pid) do
+      handle_send_prompt(content, state)
+    else
+      {:reply, {:error, :not_driver}, state}
     end
   end
 
@@ -829,7 +830,7 @@ defmodule MingaAgent.Session do
   def handle_call({:send_follow_up, content}, _from, %{status: status} = state)
       when status in [:thinking, :tool_executing] do
     # Agent is busy: queue as a follow-up that sends automatically once the current run finishes.
-    state = %{state | follow_up_queue: state.follow_up_queue ++ [content]}
+    state = %{state | follow_up_queue: Enum.concat(state.follow_up_queue, [content])}
     broadcast(state, {:prompt_queued, content, :follow_up})
     {:reply, {:queued, :follow_up}, state}
   end
@@ -1112,7 +1113,7 @@ defmodule MingaAgent.Session do
       provider_name: state.provider_name,
       created_at: state.created_at,
       last_message_at: state.last_message_at,
-      message_count: length(state.messages),
+      message_count: Enum.count(state.messages),
       turn_count: count_user_turns(state.messages),
       first_prompt: first_prompt,
       cost: state.total_usage.cost,
@@ -1124,9 +1125,10 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call({:respond_to_approval_as, client_pid, approval_id, decision}, _from, state) do
-    case driver_allowed?(state, client_pid) do
-      true -> handle_approval_response(approval_id, decision, state)
-      false -> {:reply, {:error, :not_driver}, state}
+    if driver_allowed?(state, client_pid) do
+      handle_approval_response(approval_id, decision, state)
+    else
+      {:reply, {:error, :not_driver}, state}
     end
   end
 
@@ -1176,15 +1178,13 @@ defmodule MingaAgent.Session do
   def handle_call({:subscribe, pid, opts}, _from, state) do
     role = Keyword.get(opts, :role, default_subscriber_role(state))
 
-    case valid_subscriber_role?(role) do
-      true ->
-        Process.monitor(pid)
-        state = state |> cancel_idle_gc_timer() |> put_subscriber(pid, role)
-        send(pid, {:agent_event, self(), {:credentials_status, state.credentials_configured}})
-        {:reply, :ok, state}
-
-      false ->
-        {:reply, {:error, :invalid_role}, state}
+    if valid_subscriber_role?(role) do
+      Process.monitor(pid)
+      state = state |> cancel_idle_gc_timer() |> put_subscriber(pid, role)
+      send(pid, {:agent_event, self(), {:credentials_status, state.credentials_configured}})
+      {:reply, :ok, state}
+    else
+      {:reply, {:error, :invalid_role}, state}
     end
   end
 
@@ -1361,11 +1361,11 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call({:branch_at, turn_index}, _from, state) do
-    branch_name = "branch-#{length(state.branches) + 1}"
+    branch_name = "branch-#{Enum.count(state.branches) + 1}"
 
     case Branch.branch_at(state.messages, turn_index, branch_name, state.branches) do
       {:ok, truncated, branches} ->
-        truncated_ids = Enum.take(state.message_ids, length(truncated))
+        truncated_ids = Enum.take(state.message_ids, Enum.count(truncated))
         state = %{state | messages: truncated, message_ids: truncated_ids, branches: branches}
         state = notify_messages_changed(state)
 
@@ -1450,28 +1450,26 @@ defmodule MingaAgent.Session do
   end
 
   def handle_info({:idle_gc_timeout, token}, %{idle_gc_timer: {_timer_ref, token}} = state) do
-    case idle_gc_reclaimable?(state) do
-      true ->
-        Minga.Log.info(
-          :agent,
-          "[Agent.Session] reclaiming idle detached session #{state.session_id}"
-        )
+    if idle_gc_reclaimable?(state) do
+      Minga.Log.info(
+        :agent,
+        "[Agent.Session] reclaiming idle detached session #{state.session_id}"
+      )
 
-        case save_to_disk(state) do
-          :ok ->
-            {:stop, :normal, %{state | idle_gc_timer: nil}}
+      case save_to_disk(state) do
+        :ok ->
+          {:stop, :normal, %{state | idle_gc_timer: nil}}
 
-          {:error, reason} ->
-            Minga.Log.error(
-              :agent,
-              "[Agent.Session] failed to reclaim idle detached session #{state.session_id}: #{inspect(reason)}"
-            )
+        {:error, reason} ->
+          Minga.Log.error(
+            :agent,
+            "[Agent.Session] failed to reclaim idle detached session #{state.session_id}: #{inspect(reason)}"
+          )
 
-            {:noreply, maybe_schedule_idle_gc(%{state | idle_gc_timer: nil})}
-        end
-
-      false ->
-        {:noreply, maybe_schedule_idle_gc(%{state | idle_gc_timer: nil})}
+          {:noreply, maybe_schedule_idle_gc(%{state | idle_gc_timer: nil})}
+      end
+    else
+      {:noreply, maybe_schedule_idle_gc(%{state | idle_gc_timer: nil})}
     end
   end
 
@@ -1563,7 +1561,7 @@ defmodule MingaAgent.Session do
        when status in [:thinking, :tool_executing] do
     # Agent is busy: queue the message as a steering prompt. It will be injected
     # into the agent's context between tool calls.
-    state = %{state | steering_queue: state.steering_queue ++ [content]}
+    state = %{state | steering_queue: Enum.concat(state.steering_queue, [content])}
     broadcast(state, {:prompt_queued, content, :steering})
     {:reply, {:queued, :steering}, state}
   end
@@ -1812,7 +1810,7 @@ defmodule MingaAgent.Session do
 
   @spec append_error_message_once(state(), String.t()) :: state()
   defp append_error_message_once(%{messages: messages} = state, message) do
-    case List.last(messages) do
+    case Enum.at(messages, -1) do
       {:system, ^message, :error} -> state
       _other -> append_system_message(state, message, :error)
     end
@@ -1889,8 +1887,8 @@ defmodule MingaAgent.Session do
 
     %{
       state
-      | messages: state.messages ++ [msg],
-        message_ids: state.message_ids ++ [id],
+      | messages: Enum.concat(state.messages, [msg]),
+        message_ids: Enum.concat(state.message_ids, [id]),
         next_message_id: id + 1
     }
   end
@@ -1900,7 +1898,7 @@ defmodule MingaAgent.Session do
   defp append_msgs(state, []), do: state
 
   defp append_msgs(state, msgs) do
-    count = length(msgs)
+    count = Enum.count(msgs)
     base_id = state.next_message_id
     new_ids = Enum.to_list(base_id..(base_id + count - 1))
 
@@ -1916,7 +1914,7 @@ defmodule MingaAgent.Session do
   defp restore_messages_with_ids(state, data) do
     case Map.get(data, :message_ids) do
       ids when is_list(ids) and ids != [] ->
-        count = length(data.messages)
+        count = Enum.count(data.messages)
 
         %{
           state
@@ -1933,7 +1931,7 @@ defmodule MingaAgent.Session do
   # Replaces all messages and resets IDs (used by new_session, load_session, switch_branch).
   @spec reset_messages(state(), [Message.t()]) :: state()
   defp reset_messages(state, msgs) do
-    count = length(msgs)
+    count = Enum.count(msgs)
     ids = Enum.to_list(1..max(count, 1))
 
     %{
@@ -1997,7 +1995,9 @@ defmodule MingaAgent.Session do
 
   @spec shell_trust_key(map()) :: String.t()
   defp shell_trust_key(args) do
-    case Map.get(args, "command") || Map.get(args, :command) do
+    string_args = Map.new(args, fn {key, value} -> {to_string(key), value} end)
+
+    case Map.get(string_args, "command") do
       command when is_binary(command) -> "shell:#{command}"
       _other -> hashed_trust_key("shell", args)
     end
@@ -2037,9 +2037,10 @@ defmodule MingaAgent.Session do
   @spec append_to_last_assistant([Message.t()], String.t()) ::
           {:updated, [Message.t()]} | {:appended, Message.t()}
   defp append_to_last_assistant(messages, delta) do
-    case List.last(messages) do
+    case Enum.at(messages, -1) do
       {:assistant, text} ->
-        {:updated, List.replace_at(messages, length(messages) - 1, {:assistant, text <> delta})}
+        {:updated,
+         List.replace_at(messages, Enum.count(messages) - 1, {:assistant, text <> delta})}
 
       _ ->
         {:appended, Message.assistant(delta)}
@@ -2057,10 +2058,10 @@ defmodule MingaAgent.Session do
   @spec append_to_last_thinking([Message.t()], String.t()) ::
           {:updated, [Message.t()]} | {:appended, Message.t()}
   defp append_to_last_thinking(messages, delta) do
-    case List.last(messages) do
+    case Enum.at(messages, -1) do
       {:thinking, text, _collapsed} ->
         {:updated,
-         List.replace_at(messages, length(messages) - 1, {:thinking, text <> delta, false})}
+         List.replace_at(messages, Enum.count(messages) - 1, {:thinking, text <> delta, false})}
 
       _ ->
         {:appended, Message.thinking(delta)}
@@ -2150,7 +2151,7 @@ defmodule MingaAgent.Session do
 
   @spec track_active_tool_start(state(), String.t(), String.t()) :: state()
   defp track_active_tool_start(state, tool_call_id, name) do
-    active_tool_calls = state.active_tool_calls ++ [{tool_call_id, name}]
+    active_tool_calls = Enum.concat(state.active_tool_calls, [{tool_call_id, name}])
 
     %{
       state
@@ -2180,7 +2181,7 @@ defmodule MingaAgent.Session do
   defp current_active_tool_name([]), do: nil
 
   defp current_active_tool_name(active_tool_calls) do
-    {_tool_call_id, name} = List.last(active_tool_calls)
+    {_tool_call_id, name} = Enum.at(active_tool_calls, -1)
     name
   end
 
@@ -2416,7 +2417,12 @@ defmodule MingaAgent.Session do
           {:ok, Enum.reverse(acc)}
 
         _ ->
-          all_event_log_events(db, session_id, List.last(events).id, Enum.reverse(events) ++ acc)
+          all_event_log_events(
+            db,
+            session_id,
+            Enum.at(events, -1).id,
+            Enum.reverse(events) ++ acc
+          )
       end
     end
   end
@@ -2767,11 +2773,8 @@ defmodule MingaAgent.Session do
         ) :: :ok | {:error, term()}
   defp validate_source_owned_provider(source, module, provider_id) do
     with {:ok, id} <- validate_provider_id(provider_id),
-         {:ok, entry} <- lookup_provider_registry_entry(id),
-         :ok <- validate_provider_registry_entry(entry.spec, source, module) do
-      :ok
-    else
-      {:error, reason} -> {:error, reason}
+         {:ok, entry} <- lookup_provider_registry_entry(id) do
+      validate_provider_registry_entry(entry.spec, source, module)
     end
   catch
     :exit, reason -> {:error, {:provider_registry_unavailable, provider_id, reason}}
@@ -3436,7 +3439,7 @@ defmodule MingaAgent.Session do
   # if the provider doesn't implement the callback.
   @spec dispatch_optional(module(), atom(), [term()]) :: term()
   defp dispatch_optional(module, function, args) do
-    if function_exported?(module, function, length(args)) do
+    if function_exported?(module, function, Enum.count(args)) do
       apply(module, function, args)
     else
       {:error, :not_supported}

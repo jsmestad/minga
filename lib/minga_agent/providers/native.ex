@@ -74,6 +74,8 @@ defmodule MingaAgent.Providers.Native do
   alias Minga.Config
   alias ReqLLM.Context
   alias ReqLLM.Message.ContentPart
+  alias Minga.Log
+  alias ReqLLM.Tool
 
   # Thinking levels and cycle order (not config-driven; mode-specific constants).
 
@@ -283,7 +285,7 @@ defmodule MingaAgent.Providers.Native do
   end
 
   @doc "Returns the current tool list registered with this provider."
-  @spec tools(GenServer.server()) :: [ReqLLM.Tool.t()]
+  @spec tools(GenServer.server()) :: [Tool.t()]
   def tools(pid) do
     GenServer.call(pid, :tools)
   end
@@ -423,7 +425,7 @@ defmodule MingaAgent.Providers.Native do
 
     Minga.Events.subscribe(:agent_mcp_servers_changed)
     Minga.Events.subscribe(:agent_tools_changed)
-    Minga.Log.info(:agent, "[Agent.Native] started with model=#{model} root=#{project_root}")
+    Log.info(:agent, "[Agent.Native] started with model=#{model} root=#{project_root}")
 
     {:ok, state}
   end
@@ -445,16 +447,16 @@ defmodule MingaAgent.Providers.Native do
     )
   end
 
-  @spec registry_tools(ToolContext.t(), AgentConfig.t(), hook_runner()) :: [ReqLLM.Tool.t()]
+  @spec registry_tools(ToolContext.t(), AgentConfig.t(), hook_runner()) :: [Tool.t()]
   defp registry_tools(%ToolContext{} = tool_context, %AgentConfig{} = config, hook_runner) do
     ToolRegistry.all()
     |> Enum.map(&registry_tool(&1, tool_context, config, hook_runner))
   end
 
   @spec registry_tool(ToolSpec.t(), ToolContext.t(), AgentConfig.t(), hook_runner()) ::
-          ReqLLM.Tool.t()
+          Tool.t()
   defp registry_tool(%ToolSpec{} = spec, %ToolContext{} = tool_context, config, hook_runner) do
-    ReqLLM.Tool.new!(
+    Tool.new!(
       name: spec.name,
       description: spec.description,
       parameter_schema: spec.parameter_schema,
@@ -549,7 +551,7 @@ defmodule MingaAgent.Providers.Native do
       message =
         "MCP source #{format_mcp_source(source)} unloaded; stopped its clients and refreshed MCP tools."
 
-      Minga.Log.info(:agent, "[Agent.Native] #{message}")
+      Log.info(:agent, "[Agent.Native] #{message}")
       notify(state.subscriber, %Event.SystemMessage{message: message, level: :info})
     end
 
@@ -594,7 +596,7 @@ defmodule MingaAgent.Providers.Native do
           cs
 
         {:error, reason} ->
-          Minga.Log.warning(
+          Log.warning(
             :agent,
             "[Agent.Native] changeset creation failed: #{inspect(reason)}"
           )
@@ -604,13 +606,13 @@ defmodule MingaAgent.Providers.Native do
     end
   end
 
-  @spec filter_base_tools_for_read_only([ReqLLM.Tool.t()], boolean()) :: [ReqLLM.Tool.t()]
+  @spec filter_base_tools_for_read_only([Tool.t()], boolean()) :: [Tool.t()]
   defp filter_base_tools_for_read_only(base_tools, true),
     do: Enum.filter(base_tools, &Tools.read_only_name?/1)
 
   defp filter_base_tools_for_read_only(base_tools, false), do: base_tools
 
-  @spec filter_tool_allowlist([ReqLLM.Tool.t()], :all | [String.t()]) :: [ReqLLM.Tool.t()]
+  @spec filter_tool_allowlist([Tool.t()], :all | [String.t()]) :: [Tool.t()]
   defp filter_tool_allowlist(tools, :all) when is_list(tools), do: tools
 
   defp filter_tool_allowlist(tools, allowlist) when is_list(tools) and is_list(allowlist) do
@@ -690,7 +692,7 @@ defmodule MingaAgent.Providers.Native do
     stop_registered_tool_workers(state.tool_workers)
     Task.shutdown(state.task, 150)
     state = %{state | task: nil, streaming: false, tool_workers: %{}}
-    Minga.Log.info(:agent, "[Agent.Native] aborted current operation")
+    Log.info(:agent, "[Agent.Native] aborted current operation")
     {:reply, :ok, state}
   end
 
@@ -746,9 +748,9 @@ defmodule MingaAgent.Providers.Native do
     else
       case Skills.find(name, state.project_root) do
         {:ok, skill} ->
-          active = state.active_skills ++ [skill]
+          active = Enum.concat(state.active_skills, [skill])
           state = rebuild_system_prompt(%{state | active_skills: active})
-          Minga.Log.info(:agent, "[Agent.Native] activated skill: #{name}")
+          Log.info(:agent, "[Agent.Native] activated skill: #{name}")
           {:reply, {:ok, skill}, state}
 
         :not_found ->
@@ -760,11 +762,11 @@ defmodule MingaAgent.Providers.Native do
   def handle_call({:deactivate_skill, name}, _from, state) do
     active = Enum.reject(state.active_skills, &(&1.name == name))
 
-    if length(active) == length(state.active_skills) do
+    if Enum.count(active) == Enum.count(state.active_skills) do
       {:reply, {:error, "Skill '#{name}' is not active"}, state}
     else
       state = rebuild_system_prompt(%{state | active_skills: active})
-      Minga.Log.info(:agent, "[Agent.Native] deactivated skill: #{name}")
+      Log.info(:agent, "[Agent.Native] deactivated skill: #{name}")
       {:reply, :ok, state}
     end
   end
@@ -800,7 +802,7 @@ defmodule MingaAgent.Providers.Native do
         tool_workers: %{}
     }
 
-    Minga.Log.info(:agent, "[Agent.Native] new session started")
+    Log.info(:agent, "[Agent.Native] new session started")
 
     {:reply, :ok, state}
   end
@@ -848,7 +850,7 @@ defmodule MingaAgent.Providers.Native do
 
   def handle_call({:set_thinking_level, level}, _from, state) do
     if valid_thinking_level?(level) do
-      Minga.Log.info(:agent, "[Agent.Native] thinking level set to #{level}")
+      Log.info(:agent, "[Agent.Native] thinking level set to #{level}")
       {:reply, :ok, %{state | thinking_level: level}}
     else
       {:reply,
@@ -859,10 +861,10 @@ defmodule MingaAgent.Providers.Native do
 
   def handle_call(:cycle_thinking_level, _from, state) do
     current_index = Enum.find_index(@thinking_cycle, &(&1 == state.thinking_level)) || 0
-    next_index = rem(current_index + 1, length(@thinking_cycle))
+    next_index = rem(current_index + 1, Enum.count(@thinking_cycle))
     next_level = Enum.at(@thinking_cycle, next_index)
 
-    Minga.Log.info(:agent, "[Agent.Native] thinking level cycled to #{next_level}")
+    Log.info(:agent, "[Agent.Native] thinking level cycled to #{next_level}")
     {:reply, {:ok, %{"level" => next_level}}, %{state | thinking_level: next_level}}
   end
 
@@ -915,7 +917,7 @@ defmodule MingaAgent.Providers.Native do
           thinking_level: thinking_level
       }
 
-      total = length(model_list)
+      total = Enum.count(model_list)
       index = Enum.find_index(model_list, &String.starts_with?(&1, next_model)) || 0
 
       response = %{
@@ -930,7 +932,7 @@ defmodule MingaAgent.Providers.Native do
   end
 
   def handle_call({:set_model, model}, _from, state) do
-    Minga.Log.info(:agent, "[Agent.Native] model set to #{model}")
+    Log.info(:agent, "[Agent.Native] model set to #{model}")
     {:reply, :ok, %{state | model: model}}
   end
 
@@ -988,13 +990,13 @@ defmodule MingaAgent.Providers.Native do
   end
 
   def handle_call({:set_max_cost, amount}, _from, state) when is_number(amount) and amount > 0 do
-    Minga.Log.info(:agent, "[Agent.Native] cost budget set to $#{Float.round(amount + 0.0, 2)}")
+    Log.info(:agent, "[Agent.Native] cost budget set to $#{Float.round(amount + 0.0, 2)}")
     state = %{state | max_cost: amount + 0.0}
     {:reply, :ok, clear_stuck_streaming(state)}
   end
 
   def handle_call({:set_max_cost, nil}, _from, state) do
-    Minga.Log.info(:agent, "[Agent.Native] cost budget disabled")
+    Log.info(:agent, "[Agent.Native] cost budget disabled")
     state = %{state | max_cost: nil}
     {:reply, :ok, clear_stuck_streaming(state)}
   end
@@ -1070,7 +1072,7 @@ defmodule MingaAgent.Providers.Native do
     Process.demonitor(ref, [:flush])
     stop_registered_tool_workers(state.tool_workers)
     formatted = format_error(reason)
-    Minga.Log.error(:agent, "[Agent.Native] agent loop error: #{formatted}")
+    Log.error(:agent, "[Agent.Native] agent loop error: #{formatted}")
     notify(state.subscriber, %Event.Error{message: formatted})
     notify(state.subscriber, %Event.AgentEnd{usage: nil})
     {:noreply, %{state | task: nil, streaming: false, tool_workers: %{}}}
@@ -1079,7 +1081,7 @@ defmodule MingaAgent.Providers.Native do
   def handle_info({:DOWN, ref, :process, _pid, reason}, %{task: %Task{ref: ref}} = state) do
     # Task crashed
     stop_registered_tool_workers(state.tool_workers)
-    Minga.Log.error(:agent, "[Agent.Native] agent task crashed: #{inspect(reason)}")
+    Log.error(:agent, "[Agent.Native] agent task crashed: #{inspect(reason)}")
     notify(state.subscriber, %Event.Error{message: "Agent task crashed: #{inspect(reason)}"})
     notify(state.subscriber, %Event.AgentEnd{usage: nil})
     {:noreply, %{state | task: nil, streaming: false, tool_workers: %{}}}
@@ -1087,7 +1089,7 @@ defmodule MingaAgent.Providers.Native do
 
   def handle_info({:DOWN, _ref, :process, pid, _reason}, %{fork_store: pid} = state)
       when is_pid(pid) do
-    Minga.Log.warning(
+    Log.warning(
       :agent,
       "[Agent.Native] fork store crashed, continuing without fork isolation"
     )
@@ -1097,7 +1099,7 @@ defmodule MingaAgent.Providers.Native do
 
   def handle_info({:DOWN, _ref, :process, pid, _reason}, %{changeset: pid} = state)
       when is_pid(pid) do
-    Minga.Log.warning(
+    Log.warning(
       :agent,
       "[Agent.Native] changeset crashed, continuing without filesystem isolation"
     )
@@ -1111,7 +1113,7 @@ defmodule MingaAgent.Providers.Native do
         message =
           "MCP server #{server_name} stopped: #{format_error(reason)}. Built-in tools remain available."
 
-        Minga.Log.warning(:agent, "[Agent.Native] #{message}")
+        Log.warning(:agent, "[Agent.Native] #{message}")
         notify(state.subscriber, %Event.Error{message: message})
         {:noreply, remove_mcp_server_tools(state, server_name)}
 
@@ -1126,7 +1128,7 @@ defmodule MingaAgent.Providers.Native do
         message =
           "MCP server #{server_name} crashed: #{format_error(reason)}. Built-in tools remain available."
 
-        Minga.Log.warning(:agent, "[Agent.Native] #{message}")
+        Log.warning(:agent, "[Agent.Native] #{message}")
         notify(state.subscriber, %Event.Error{message: message})
         {:noreply, remove_mcp_server_tools(state, server_name)}
 
@@ -1181,7 +1183,7 @@ defmodule MingaAgent.Providers.Native do
   defp mcp_registry_for([]), do: nil
   defp mcp_registry_for(_configs), do: MCPRegistry.new()
 
-  @spec mcp_meta_tools_for([MCPServerConfig.t()], pid()) :: [ReqLLM.Tool.t()]
+  @spec mcp_meta_tools_for([MCPServerConfig.t()], pid()) :: [Tool.t()]
   defp mcp_meta_tools_for([], _provider_pid), do: []
   defp mcp_meta_tools_for(_configs, provider_pid), do: build_mcp_meta_tools(provider_pid)
 
@@ -1230,17 +1232,17 @@ defmodule MingaAgent.Providers.Native do
     ]
   end
 
-  @spec build_mcp_meta_tools(pid()) :: [ReqLLM.Tool.t()]
+  @spec build_mcp_meta_tools(pid()) :: [Tool.t()]
   defp build_mcp_meta_tools(provider_pid) when is_pid(provider_pid) do
     [
-      ReqLLM.Tool.new!(
+      Tool.new!(
         name: "list_mcp_tools",
         description:
           "List available tools from configured MCP servers on demand. Use this when built-in tools do not cover the capability you need. This starts MCP servers lazily and returns server names, tool names, and short descriptions without adding every MCP tool to the system prompt.",
         parameter_schema: %{"type" => "object", "properties" => %{}},
         callback: fn _args -> GenServer.call(provider_pid, :list_mcp_tools, :infinity) end
       ),
-      ReqLLM.Tool.new!(
+      Tool.new!(
         name: "call_mcp_tool",
         description:
           "Call a tool from a configured MCP server by server name and tool name. Use list_mcp_tools first if you do not know the available server and tool names. MCP tool calls use the same approval flow as other destructive tools and default to ask approval.",
@@ -1463,16 +1465,16 @@ defmodule MingaAgent.Providers.Native do
           :ok
 
         {p, {:conflict, _}} ->
-          Minga.Log.warning(:agent, "[Agent.Native] fork merge conflict on #{p}")
+          Log.warning(:agent, "[Agent.Native] fork merge conflict on #{p}")
 
         {p, {:error, r}} ->
-          Minga.Log.warning(:agent, "[Agent.Native] fork merge failed for #{p}: #{inspect(r)}")
+          Log.warning(:agent, "[Agent.Native] fork merge failed for #{p}: #{inspect(r)}")
       end)
 
       if Enum.all?(results, fn {_path, result} -> result == :ok end) do
         MingaAgent.BufferForkStore.stop(fs)
       else
-        Minga.Log.warning(
+        Log.warning(
           :agent,
           "[Agent.Native] preserving failed fork drafts after merge cleanup"
         )
@@ -1504,10 +1506,10 @@ defmodule MingaAgent.Providers.Native do
   defp merge_changeset(cs) do
     case MingaAgent.Changeset.merge(cs) do
       :ok ->
-        Minga.Log.info(:agent, "[Agent.Native] changeset merged successfully")
+        Log.info(:agent, "[Agent.Native] changeset merged successfully")
 
       {:conflict, _details} ->
-        Minga.Log.warning(
+        Log.warning(
           :agent,
           "[Agent.Native] changeset merge found conflicts; discarding legacy changeset"
         )
@@ -1515,7 +1517,7 @@ defmodule MingaAgent.Providers.Native do
         MingaAgent.Changeset.discard(cs)
 
       {:error, merge_reason} ->
-        Minga.Log.warning(
+        Log.warning(
           :agent,
           "[Agent.Native] changeset merge failed: #{inspect(merge_reason)}"
         )
@@ -1774,7 +1776,7 @@ defmodule MingaAgent.Providers.Native do
     end
   end
 
-  @spec execute_tools(loop_ctx(), Context.t(), [ReqLLMAdapter.ToolCall.t()], [ReqLLM.Tool.t()]) ::
+  @spec execute_tools(loop_ctx(), Context.t(), [ReqLLMAdapter.ToolCall.t()], [Tool.t()]) ::
           Context.t()
   defp execute_tools(lctx, context, tool_calls, available_tools) do
     initial_mode = approval_mode(lctx.config)
@@ -1831,7 +1833,7 @@ defmodule MingaAgent.Providers.Native do
   @spec start_concurrent_tool_tasks(
           loop_ctx(),
           [tool_baseline()],
-          [ReqLLM.Tool.t()],
+          [Tool.t()],
           approval_mode()
         ) :: [tool_task()]
   defp start_concurrent_tool_tasks(lctx, baselines, available_tools, approval_mode) do
@@ -1997,7 +1999,7 @@ defmodule MingaAgent.Providers.Native do
           loop_ctx(),
           map(),
           String.t() | nil,
-          [ReqLLM.Tool.t()],
+          [Tool.t()],
           approval_mode()
         ) :: tool_execution_result()
   defp execute_tool_call(lctx, tool_call, before_content, available_tools, approval_mode) do
@@ -2069,7 +2071,7 @@ defmodule MingaAgent.Providers.Native do
           pid(),
           pid() | nil,
           map(),
-          [ReqLLM.Tool.t()],
+          [Tool.t()],
           approval_mode(),
           AgentConfig.t(),
           hook_runner(),
@@ -2150,7 +2152,7 @@ defmodule MingaAgent.Providers.Native do
           pid(),
           pid() | nil,
           map(),
-          [ReqLLM.Tool.t()],
+          [Tool.t()],
           approval_mode(),
           AgentConfig.t(),
           hook_runner(),
@@ -2301,7 +2303,7 @@ defmodule MingaAgent.Providers.Native do
           pid(),
           pid() | nil,
           map(),
-          [ReqLLM.Tool.t()],
+          [Tool.t()],
           approval_mode(),
           AgentConfig.t(),
           hook_runner(),
@@ -2492,11 +2494,7 @@ defmodule MingaAgent.Providers.Native do
 
   @spec read_tool_file_content_from_disk(String.t()) :: {:ok, String.t()} | {:error, term()}
   defp read_tool_file_content_from_disk(path) do
-    case File.read(path) do
-      {:ok, content} -> {:ok, content}
-      {:error, :enoent} -> {:error, :enoent}
-      {:error, reason} -> {:error, reason}
-    end
+    File.read(path)
   end
 
   @spec resolved_tool_path(String.t(), String.t()) :: String.t()
@@ -2506,7 +2504,7 @@ defmodule MingaAgent.Providers.Native do
   # the approval prompt and the approval response.
   @spec run_single_tool(
           map(),
-          [ReqLLM.Tool.t()],
+          [Tool.t()],
           pid(),
           pid() | nil,
           AgentConfig.t(),
@@ -2543,7 +2541,7 @@ defmodule MingaAgent.Providers.Native do
 
   @spec run_single_tool_unchecked(
           map(),
-          [ReqLLM.Tool.t()],
+          [Tool.t()],
           pid(),
           AgentConfig.t(),
           hook_runner(),
@@ -2573,8 +2571,8 @@ defmodule MingaAgent.Providers.Native do
     end
   end
 
-  @spec registry_tool?(ReqLLM.Tool.t()) :: boolean()
-  defp registry_tool?(%ReqLLM.Tool{provider_options: %{minga_registry_tool: true}}), do: true
+  @spec registry_tool?(Tool.t()) :: boolean()
+  defp registry_tool?(%Tool{provider_options: %{minga_registry_tool: true}}), do: true
   defp registry_tool?(_tool), do: false
 
   @spec execute_registry_tool(map(), pid(), AgentConfig.t(), hook_runner(), ToolContext.t()) ::
@@ -2665,23 +2663,23 @@ defmodule MingaAgent.Providers.Native do
 
     HookDispatcher.post_tool_use(config.agent_hooks, PostToolUsePayload.to_map(payload))
   rescue
-    e -> Minga.Log.warning(:agent, "PostToolUse hook dispatch failed: #{Exception.message(e)}")
+    e -> Log.warning(:agent, "PostToolUse hook dispatch failed: #{Exception.message(e)}")
   catch
-    _, reason -> Minga.Log.warning(:agent, "PostToolUse hook dispatch failed: #{inspect(reason)}")
+    _, reason -> Log.warning(:agent, "PostToolUse hook dispatch failed: #{inspect(reason)}")
   end
 
   @spec dispatch_pre_compact(Context.t(), AgentConfig.t()) :: :ok | {:error, HookResult.t()}
   defp dispatch_pre_compact(context, config) do
-    message_count = length(context.messages)
+    message_count = Enum.count(context.messages)
     payload = PreCompactPayload.new(message_count)
     HookDispatcher.pre_compact(config.agent_hooks, PreCompactPayload.to_map(payload))
   rescue
     e ->
-      Minga.Log.warning(:agent, "PreCompact hook dispatch failed: #{Exception.message(e)}")
+      Log.warning(:agent, "PreCompact hook dispatch failed: #{Exception.message(e)}")
       {:error, HookResult.dispatch_error(Exception.message(e))}
   catch
     _, reason ->
-      Minga.Log.warning(:agent, "PreCompact hook dispatch failed: #{inspect(reason)}")
+      Log.warning(:agent, "PreCompact hook dispatch failed: #{inspect(reason)}")
       {:error, HookResult.dispatch_error(inspect(reason))}
   end
 
@@ -2722,14 +2720,14 @@ defmodule MingaAgent.Providers.Native do
     :ok
   end
 
-  @spec execute_found_tool(ReqLLM.Tool.t(), map(), pid() | nil) :: {String.t(), boolean()}
+  @spec execute_found_tool(Tool.t(), map(), pid() | nil) :: {String.t(), boolean()}
   defp execute_found_tool(_tool, %{name: "shell"} = tool_call, provider_pid)
        when is_pid(provider_pid) do
     run_shell_with_streaming(tool_call, provider_pid)
   end
 
   defp execute_found_tool(tool, tool_call, _provider_pid) do
-    case ReqLLM.Tool.execute(tool, tool_call.arguments) do
+    case Tool.execute(tool, tool_call.arguments) do
       {:ok, result} -> {format_tool_result(result), false}
       {:error, reason} -> {format_error(reason), true}
     end
@@ -2834,7 +2832,7 @@ defmodule MingaAgent.Providers.Native do
     %{state | base_tools: base_tools, tools: tools}
   end
 
-  @spec refresh_base_tools(state(), ProjectView.t() | nil) :: [ReqLLM.Tool.t()]
+  @spec refresh_base_tools(state(), ProjectView.t() | nil) :: [Tool.t()]
   defp refresh_base_tools(%{custom_tools?: true, base_tools: base_tools}, _project_view) do
     base_tools
   end
@@ -2862,10 +2860,10 @@ defmodule MingaAgent.Providers.Native do
   # to the provider. This works because tools run in a spawned Task, not in the
   # provider's own process. If the provider ever awaits the task synchronously
   # (blocking its mailbox), these calls will deadlock.
-  @spec build_internal_tools(pid()) :: [ReqLLM.Tool.t()]
+  @spec build_internal_tools(pid()) :: [Tool.t()]
   defp build_internal_tools(provider_pid) do
     [
-      ReqLLM.Tool.new!(
+      Tool.new!(
         name: "todo_write",
         description: """
         Create or update a task checklist for tracking multi-step work.
@@ -2897,13 +2895,13 @@ defmodule MingaAgent.Providers.Native do
         },
         callback: fn args -> Todo.write(provider_pid, args["tasks"] || []) end
       ),
-      ReqLLM.Tool.new!(
+      Tool.new!(
         name: "todo_read",
         description: "Read the current task checklist to see what's done and what remains.",
         parameter_schema: %{"type" => "object", "properties" => %{}},
         callback: fn _args -> Todo.read(provider_pid) end
       ),
-      ReqLLM.Tool.new!(
+      Tool.new!(
         name: "notebook_write",
         description: """
         Write planning notes, intermediate reasoning, or working state to a
@@ -2922,7 +2920,7 @@ defmodule MingaAgent.Providers.Native do
         },
         callback: fn args -> Notebook.write(provider_pid, args["content"] || "") end
       ),
-      ReqLLM.Tool.new!(
+      Tool.new!(
         name: "notebook_read",
         description: "Read the current scratchpad notes.",
         parameter_schema: %{"type" => "object", "properties" => %{}},
@@ -3169,7 +3167,7 @@ defmodule MingaAgent.Providers.Native do
     current_index =
       Enum.find_index(model_list, &String.starts_with?(&1, current_model)) || -1
 
-    next_index = rem(current_index + 1, length(model_list))
+    next_index = rem(current_index + 1, Enum.count(model_list))
     Enum.at(model_list, next_index)
   end
 
@@ -3256,8 +3254,8 @@ defmodule MingaAgent.Providers.Native do
     event = error_event(message, reason, model)
     detail = Redaction.format_error(reason)
 
-    Minga.Log.error(:agent, "[Agent.Native] agent loop detail: #{detail}")
-    Minga.Log.error(:agent, "[Agent.Native] agent loop error: #{event.message}")
+    Log.error(:agent, "[Agent.Native] agent loop detail: #{detail}")
+    Log.error(:agent, "[Agent.Native] agent loop error: #{event.message}")
     emit_error_and_end(provider_pid, event)
     {:error, {:reported, reason}}
   end
@@ -3603,11 +3601,11 @@ defmodule MingaAgent.Providers.Native do
       {saved, warnings} = Minga.Buffer.save_all_dirty()
 
       if saved > 0 do
-        Minga.Log.debug(:agent, "Flushed #{saved} dirty buffer(s) to disk before shell command")
+        Log.debug(:agent, "Flushed #{saved} dirty buffer(s) to disk before shell command")
       end
 
       for warning <- warnings do
-        Minga.Log.warning(:agent, "Pre-shell flush: #{warning}")
+        Log.warning(:agent, "Pre-shell flush: #{warning}")
       end
 
       :ok

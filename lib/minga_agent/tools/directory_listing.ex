@@ -73,7 +73,7 @@ defmodule MingaAgent.Tools.DirectoryListing do
 
     lines =
       if hidden_count > 0,
-        do: lines ++ ["... (truncated, #{hidden_count} more entries)"],
+        do: Enum.concat(lines, ["... (truncated, #{hidden_count} more entries)"]),
         else: lines
 
     Enum.join(lines, "\n")
@@ -89,7 +89,7 @@ defmodule MingaAgent.Tools.DirectoryListing do
   @spec cap_entries([entry()]) :: {[entry()], non_neg_integer()}
   defp cap_entries(entries) do
     visible = Enum.take(entries, @max_entries)
-    {visible, max(length(entries) - length(visible), 0)}
+    {visible, max(Enum.count(entries) - Enum.count(visible), 0)}
   end
 
   @spec format_entry(entry()) :: String.t()

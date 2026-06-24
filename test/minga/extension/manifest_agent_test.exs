@@ -41,11 +41,11 @@ defmodule Minga.Extension.ManifestAgentTest do
       assert manifest.version == "1.2.3"
       assert manifest.source == :path
 
-      assert length(manifest.hooks) == 2
-      assert length(manifest.skills) == 2
-      assert length(manifest.mcp_servers) == 1
-      assert length(manifest.slash_commands) == 2
-      assert length(manifest.agent_ui_metadata) == 1
+      assert Enum.count(manifest.hooks) == 2
+      assert Enum.count(manifest.skills) == 2
+      assert Enum.count(manifest.mcp_servers) == 1
+      assert Enum.count(manifest.slash_commands) == 2
+      assert Enum.count(manifest.agent_ui_metadata) == 1
     end
 
     test "hooks are in declaration order" do
@@ -137,9 +137,9 @@ defmodule Minga.Extension.ManifestAgentTest do
 
       assert manifest.name == :manifest_editor_only
       assert manifest.source == :module
-      assert length(manifest.commands) == 1
-      assert length(manifest.keybindings) == 1
-      assert length(manifest.capabilities) == 1
+      assert Enum.count(manifest.commands) == 1
+      assert Enum.count(manifest.keybindings) == 1
+      assert Enum.count(manifest.capabilities) == 1
     end
 
     test "agent fields are empty for editor-only extension" do
@@ -253,10 +253,10 @@ defmodule Minga.Extension.ManifestAgentTest do
     test "editor manifest has editor fields but no agent fields" do
       manifest = Manifest.from_module(PairedEditorSurface, :path)
 
-      assert length(manifest.commands) == 1
-      assert length(manifest.keybindings) == 1
-      assert length(manifest.modeline_segments) == 1
-      assert length(manifest.capabilities) == 1
+      assert Enum.count(manifest.commands) == 1
+      assert Enum.count(manifest.keybindings) == 1
+      assert Enum.count(manifest.modeline_segments) == 1
+      assert Enum.count(manifest.capabilities) == 1
 
       assert manifest.hooks == []
       assert manifest.skills == []
@@ -268,11 +268,11 @@ defmodule Minga.Extension.ManifestAgentTest do
     test "agent manifest has agent fields but no editor fields" do
       manifest = Manifest.from_module(PairedAgentSurface, :path)
 
-      assert length(manifest.hooks) == 1
-      assert length(manifest.skills) == 1
-      assert length(manifest.mcp_servers) == 1
-      assert length(manifest.slash_commands) == 1
-      assert length(manifest.agent_ui_metadata) == 1
+      assert Enum.count(manifest.hooks) == 1
+      assert Enum.count(manifest.skills) == 1
+      assert Enum.count(manifest.mcp_servers) == 1
+      assert Enum.count(manifest.slash_commands) == 1
+      assert Enum.count(manifest.agent_ui_metadata) == 1
 
       assert manifest.commands == []
       assert manifest.keybindings == []

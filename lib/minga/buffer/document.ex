@@ -238,9 +238,10 @@ defmodule Minga.Buffer.Document do
     newline? = removed == "\n"
 
     {new_line, new_col, new_lc} =
-      case newline? do
-        true -> {line - 1, Lines.last_line_width(new_before), lc - 1}
-        false -> {line, Lines.last_line_width(new_before), lc}
+      if newline? do
+        {line - 1, Lines.last_line_width(new_before), lc - 1}
+      else
+        {line, Lines.last_line_width(new_before), lc}
       end
 
     new_ls =
@@ -423,9 +424,10 @@ defmodule Minga.Buffer.Document do
 
   @spec validate_reconstructed_content(binary()) :: binary()
   defp validate_reconstructed_content(content) do
-    case String.valid?(content) do
-      true -> content
-      false -> raise ArgumentError, "byte range replacement produced invalid UTF-8 content"
+    if String.valid?(content) do
+      content
+    else
+      raise ArgumentError, "byte range replacement produced invalid UTF-8 content"
     end
   end
 

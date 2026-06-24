@@ -39,7 +39,7 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
   @spec encode_command(StatusBar.t()) :: binary()
   def encode_command(%StatusBar{} = model) do
     sections = encode_sections(model)
-    IO.iodata_to_binary([<<@op_gui_status_bar, length(sections)::8>> | sections])
+    IO.iodata_to_binary([<<@op_gui_status_bar, Enum.count(sections)::8>> | sections])
   end
 
   @spec encode_sections(StatusBar.t()) :: [binary()]
@@ -98,16 +98,18 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
       Wire.encode_section(@section_indent, <<indent_type_byte::8, indent_size::8>>)
     ]
 
-    sections = sections ++ modeline_segment_sections(data.modeline_segments)
+    sections = Enum.concat(sections, modeline_segment_sections(data.modeline_segments))
 
     sections =
-      sections ++
-        [Wire.encode_section(@section_selection, <<selection_mode::8, selection_size::32>>)]
+      Enum.concat(sections, [
+        Wire.encode_section(@section_selection, <<selection_mode::8, selection_size::32>>)
+      ])
 
-    sections = sections ++ workspace_sections(workspace)
+    sections = Enum.concat(sections, workspace_sections(workspace))
 
-    sections ++
-      [agent_section(content_kind, data.agent, agent_byte, background_label, active_tool_name)]
+    Enum.concat(sections, [
+      agent_section(content_kind, data.agent, agent_byte, background_label, active_tool_name)
+    ])
   end
 
   @spec content_kind_byte(StatusBar.content_kind()) :: 0 | 1
@@ -176,7 +178,7 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
   @spec capped_modeline_segments([tuple()], [tuple()]) :: {[tuple()], [tuple()]}
   defp capped_modeline_segments(left, right) do
     left = Enum.take(left, @max_modeline_segments)
-    right = Enum.take(right, max(0, @max_modeline_segments - length(left)))
+    right = Enum.take(right, max(0, @max_modeline_segments - Enum.count(left)))
     {left, right}
   end
 

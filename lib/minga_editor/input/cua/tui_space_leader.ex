@@ -44,7 +44,6 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
   # SPC with no modifiers: insert space and start pending timer
   def handle_key(state, @space, 0) do
     if active?(state) and not pending?(state) do
-      # Insert the space immediately (no typing latency)
       buf = state.workspace.buffers.active
 
       if is_pid(buf) do

@@ -2,7 +2,7 @@ defmodule Minga.Extension.AgentAPI do
   @moduledoc """
   Read-only facade for querying agent session state from extensions.
 
-  Extensions use this module instead of importing `MingaAgent.Session`
+  Extensions use this module instead of importing `Session`
   or `MingaAgent.SessionManager` directly. The facade returns plain maps
   with a stable shape, shielding extensions from internal refactors.
 
@@ -20,6 +20,7 @@ defmodule Minga.Extension.AgentAPI do
       Minga.Extension.AgentAPI.subscribe()
       # subscribes calling process to agent lifecycle events
   """
+  alias MingaAgent.Session
 
   @default_manager MingaAgent.SessionManager
 
@@ -94,13 +95,13 @@ defmodule Minga.Extension.AgentAPI do
 
     case MingaAgent.SessionManager.session_id_for_pid(manager, pid) do
       {:ok, id} ->
-        snapshot = MingaAgent.Session.editor_snapshot(pid)
-        usage = MingaAgent.Session.usage(pid)
-        metadata = MingaAgent.Session.metadata(pid)
+        snapshot = Session.editor_snapshot(pid)
+        usage = Session.usage(pid)
+        metadata = Session.metadata(pid)
 
         touched =
           pid
-          |> MingaAgent.Session.touched_files()
+          |> Session.touched_files()
           |> Enum.map(& &1.path)
 
         {:ok,
@@ -198,9 +199,9 @@ defmodule Minga.Extension.AgentAPI do
     }
   end
 
-  @spec safe_editor_snapshot(pid()) :: MingaAgent.Session.editor_snapshot()
+  @spec safe_editor_snapshot(pid()) :: Session.editor_snapshot()
   defp safe_editor_snapshot(pid) do
-    MingaAgent.Session.editor_snapshot(pid)
+    Session.editor_snapshot(pid)
   catch
     :exit, {:noproc, _} ->
       %{status: :error, pending_approval: nil, error: nil, active_tool_name: nil}

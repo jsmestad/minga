@@ -22,7 +22,7 @@ defmodule MingaAgent.InternalStateTest do
       ]
 
       state = InternalState.write_todos(state, items)
-      assert length(state.todos) == 3
+      assert Enum.count(state.todos) == 3
       assert Enum.at(state.todos, 0).status == :done
       assert Enum.at(state.todos, 1).status == :in_progress
       assert Enum.at(state.todos, 2).status == :pending

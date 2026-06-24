@@ -3,7 +3,7 @@ defmodule MingaEditor.Frontend.Emit.Context do
   Focused data contract for the emit pipeline.
 
   Contains exactly what the emit stage needs from the render pipeline input,
-  decoupling it from `MingaEditor.State.t()`. The pipeline builds this context
+  decoupling it from `State.t()`. The pipeline builds this context
   in the Emit stage before calling `Emit.emit/4`.
   """
 
@@ -23,6 +23,7 @@ defmodule MingaEditor.Frontend.Emit.Context do
   alias MingaEditor.UI.FontRegistry
   alias MingaEditor.UI.NotificationCenter
   alias MingaEditor.UI.Theme
+  alias MingaEditor.State
 
   @type t :: %__MODULE__{
           port_manager: pid(),
@@ -110,21 +111,21 @@ defmodule MingaEditor.Frontend.Emit.Context do
       font_registry: Map.get(state, :font_registry, FontRegistry.new()),
       windows: state.workspace.windows,
       layout: MingaEditor.Layout.get(state),
-      shell_id: MingaEditor.State.active_shell_id(state),
-      shell: MingaEditor.State.active_shell_module(state),
+      shell_id: State.active_shell_id(state),
+      shell: State.active_shell_module(state),
       shell_state: state.shell_state,
       tab_bar: Map.get(state.shell_state, :tab_bar),
       buffers: state.workspace.buffers,
       viewport: state.terminal_viewport,
-      file_tree: MingaEditor.State.file_tree_state(state),
+      file_tree: State.file_tree_state(state),
       highlight: state.workspace.highlight,
       agent_ui: state.workspace.agent_ui,
-      completion: MingaEditor.State.ModalOverlay.completion(state),
+      completion: State.ModalOverlay.completion(state),
       keymap_scope: state.workspace.keymap_scope,
       editing: state.workspace.editing,
       message_store: state.message_store,
       notifications: state.notifications,
-      sidebar_registry: MingaEditor.State.sidebar_registry(state),
+      sidebar_registry: State.sidebar_registry(state),
       title: title,
       status_bar_data: MingaEditor.StatusBar.Data.from_state(state),
       git_syncing: Map.get(state, :git_remote_op) != nil,

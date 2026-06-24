@@ -69,7 +69,7 @@ defmodule Minga.Remote.Bootstrap do
       command =
         "systemctl --user start minga-headless.service || launchctl kickstart -k gui/$(id -u)/com.minga.headless"
 
-      args = ssh_args(url) ++ [command]
+      args = Enum.concat(ssh_args(url), [command])
 
       case System.cmd("ssh", args, stderr_to_stdout: true) do
         {_output, 0} -> :ok

@@ -321,7 +321,7 @@ defmodule Minga.Integration.AttachKeyframeTest do
     assert base_frame_seq == 0,
            "attach handshake must produce a keyframe (base_frame_seq 0), got #{base_frame_seq}"
 
-    last = List.last(commands)
+    last = Enum.at(commands, -1)
 
     assert <<@op_commit_frame, commit_seq::32, _input_seq::32>> = last
 

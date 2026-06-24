@@ -38,8 +38,8 @@ defmodule MingaAgent.Tools.LspWorkspaceSymbols do
               |> Enum.take(@max_results)
               |> Enum.map(&LspBridge.workspace_symbol_to_location/1)
 
-            truncated = length(symbols) > @max_results
-            {:ok, format_results(query, items, truncated, length(symbols))}
+            truncated = Enum.count(symbols) > @max_results
+            {:ok, format_results(query, items, truncated, Enum.count(symbols))}
 
           {:error, :timeout} ->
             {:error, "Workspace symbols request timed out"}
@@ -62,9 +62,9 @@ defmodule MingaAgent.Tools.LspWorkspaceSymbols do
   defp format_results(query, items, truncated, total) do
     count_str =
       if truncated do
-        "#{length(items)} of #{total} symbols matching \"#{query}\" (showing first #{@max_results}):"
+        "#{Enum.count(items)} of #{total} symbols matching \"#{query}\" (showing first #{@max_results}):"
       else
-        "#{length(items)} symbol#{if length(items) == 1, do: "", else: "s"} matching \"#{query}\":"
+        "#{Enum.count(items)} symbol#{if Enum.count(items) == 1, do: "", else: "s"} matching \"#{query}\":"
       end
 
     details =

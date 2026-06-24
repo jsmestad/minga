@@ -125,7 +125,7 @@ defmodule MingaAgent.Tools.LspRename do
     Enum.reduce(file_edits, {0, 0, []}, fn {path, edits}, {fc, ec, errs} ->
       case apply_edits_to_file(path, edits) do
         :ok ->
-          {fc + 1, ec + length(edits), errs}
+          {fc + 1, ec + Enum.count(edits), errs}
 
         {:error, reason} ->
           {fc, ec, ["  #{Path.basename(path)}: #{reason}" | errs]}
