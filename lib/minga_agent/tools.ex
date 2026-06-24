@@ -159,7 +159,7 @@ defmodule MingaAgent.Tools do
       shell(root, router_ctx, shell_output_callback),
       subagent(root, parent_session),
       git_status(root),
-      git_diff(root),
+      git_diff(root, router_ctx),
       git_log(root),
       git_stage(root),
       git_commit(root),
@@ -930,8 +930,8 @@ defmodule MingaAgent.Tools do
     )
   end
 
-  @spec git_diff(String.t()) :: Tool.t()
-  defp git_diff(root) do
+  @spec git_diff(String.t(), ToolRouter.context()) :: Tool.t()
+  defp git_diff(root, router_ctx) do
     Tool.new!(
       name: "git_diff",
       description: """
@@ -954,7 +954,7 @@ defmodule MingaAgent.Tools do
         opts = []
         opts = if args["path"], do: [{:path, args["path"]} | opts], else: opts
         opts = if args["staged"], do: [{:staged, args["staged"]} | opts], else: opts
-        GitTools.diff(root, opts)
+        GitTools.diff(root, opts, router_ctx)
       end
     )
   end
