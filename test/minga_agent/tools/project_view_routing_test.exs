@@ -3,6 +3,7 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
   use ExUnit.Case, async: false
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias MingaAgent.BufferForkStore
   alias MingaAgent.Changeset
   alias MingaAgent.ProjectView.RecordingBackend
   alias MingaAgent.ProjectView.UnavailableBackend
@@ -398,6 +399,61 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
     refute grep_result =~ ".npmrc"
     refute grep_result =~ "ignored_dir"
     refute grep_result =~ "node_modules"
+
+    fake_cwd = Path.join(root, "fake-cwd")
+    File.mkdir_p!(fake_cwd)
+    File.write!(Path.join(fake_cwd, "spoof.txt"), "spoofed\n")
+    overlay_dir = Changeset.overlay_path(changeset)
+
+    assert {:ok, shell_result} =
+             call_tool(tools, "shell", %{
+               "command" =>
+                 "printf 'file=%s\nbuild=%s\nevil=%s\nspoof=%s\n' \"$(cat overlay_added.txt 2>/dev/null)\" \"$MIX_BUILD_PATH\" \"${EVIL:-unset}\" \"$(test -f spoof.txt && echo yes || echo no)\"",
+               "_cwd" => fake_cwd,
+               "_env" => %{"EVIL" => "set"}
+             })
+
+    assert shell_result =~ "file=shared_secret_token"
+    assert shell_result =~ "build=#{Path.join(overlay_dir, "_build")}"
+    assert shell_result =~ "evil=unset"
+    assert shell_result =~ "spoof=no"
+  end
+
+  test "combined fork store and changeset search and shell see open-buffer fork drafts", %{
+    root: root
+  } do
+    File.mkdir_p!(Path.join(root, "lib"))
+    target_path = Path.join(root, "lib/forked.txt")
+    File.write!(target_path, "original text\n")
+
+    {:ok, _buffer} =
+      start_supervised({BufferProcess, content: "original text\n", file_path: target_path},
+        id: :combined_overlay_buffer
+      )
+
+    {:ok, store} = start_supervised(BufferForkStore)
+    {:ok, changeset} = start_supervised({Changeset.Server, project_root: root})
+    tools = Tools.all(project_root: root, fork_store: store, changeset: changeset)
+
+    assert {:ok, write_result} =
+             call_tool(tools, "write_file", %{
+               "path" => "lib/forked.txt",
+               "content" => "fork draft token\n"
+             })
+
+    assert write_result =~ "via fork"
+    assert File.read!(target_path) == "original text\n"
+
+    assert {:ok, grep_result} =
+             call_tool(tools, "grep", %{"pattern" => "fork draft token", "path" => "lib"})
+
+    assert grep_result =~ "forked.txt"
+
+    assert {:ok, shell_result} =
+             call_tool(tools, "shell", %{"command" => "cat lib/forked.txt"})
+
+    assert shell_result =~ "fork draft token"
+    assert File.read!(target_path) == "original text\n"
   end
 
   test "dead changeset multi_edit_file returns an unavailable error without mutating the project",

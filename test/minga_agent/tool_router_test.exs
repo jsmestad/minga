@@ -297,6 +297,30 @@ defmodule MingaAgent.ToolRouterTest do
       assert search.exec_path == Path.join(overlay_dir, "lib")
       assert search.filter_root == Path.join(project_root, "lib")
     end
+
+    test "materializes fork drafts into changeset search and command views", %{
+      store: store,
+      path: path
+    } do
+      project_root = Path.dirname(Path.dirname(path))
+
+      {:ok, changeset} =
+        start_supervised({MingaAgent.Changeset.Server, project_root: project_root})
+
+      ctx = ToolRouter.context(store, changeset)
+      original = File.read!(path)
+
+      assert :ok = ToolRouter.write_file(ctx, path, "fork draft needle\n")
+      assert File.read!(path) == original
+      assert {:ok, search} = ToolRouter.search_context(ctx, Path.join(project_root, "lib"))
+      assert File.read!(Path.join(search.exec_path, "foo.ex")) == "fork draft needle\n"
+
+      assert {:ok, resolved} = ToolRouter.filesystem_path_result(ctx, path)
+      assert File.read!(resolved) == "fork draft needle\n"
+
+      assert {:ok, cwd} = ToolRouter.working_dir_result(ctx)
+      assert File.read!(Path.join(cwd, "lib/foo.ex")) == "fork draft needle\n"
+    end
   end
 
   describe "working_dir/1" do
